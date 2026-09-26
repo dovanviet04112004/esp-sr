@@ -50,6 +50,10 @@ static const gen_topic_info_t GEN_TOPIC_INFO[GEN_TOPIC_COUNT] = {
     [GEN_TOPIC_OTA] = {"sr/", "/down/ota", 1, false, false, false},
 };
 
+/** Write the NUL-terminated topic path of id for device_id into out.
+ *  @ctx any | non-blocking | caller owns out, GEN_TOPIC_MAX_LEN + 1 bytes is always enough
+ *  @ret false for an unknown id, an empty or over-long device_id, or a short buffer
+ */
 static inline bool gen_topic_build(gen_topic_id_t id, const char *device_id, char *out, size_t cap)
 {
     if (id >= GEN_TOPIC_COUNT || device_id == NULL || out == NULL) { return false; }
@@ -64,6 +68,10 @@ static inline bool gen_topic_build(gen_topic_id_t id, const char *device_id, cha
     return true;
 }
 
+/** Which topic of device_id a received path is.
+ *  @ctx any | non-blocking | topic need not be NUL-terminated, len is its length
+ *  @ret GEN_TOPIC_NONE when the path belongs to no topic of this device
+ */
 static inline gen_topic_id_t gen_topic_match(const char *topic, size_t len, const char *device_id)
 {
     if (topic == NULL || device_id == NULL) { return GEN_TOPIC_NONE; }
@@ -79,36 +87,57 @@ static inline gen_topic_id_t gen_topic_match(const char *topic, size_t len, cons
     return GEN_TOPIC_NONE;
 }
 
+/** gen_topic_build fixed to GEN_TOPIC_STATUS.
+ *  @ctx any | non-blocking | caller owns out
+ */
 static inline bool gen_topic_status(const char *device_id, char *out, size_t cap)
 {
     return gen_topic_build(GEN_TOPIC_STATUS, device_id, out, cap);
 }
 
+/** gen_topic_build fixed to GEN_TOPIC_HEARTBEAT.
+ *  @ctx any | non-blocking | caller owns out
+ */
 static inline bool gen_topic_heartbeat(const char *device_id, char *out, size_t cap)
 {
     return gen_topic_build(GEN_TOPIC_HEARTBEAT, device_id, out, cap);
 }
 
+/** gen_topic_build fixed to GEN_TOPIC_TELEMETRY.
+ *  @ctx any | non-blocking | caller owns out
+ */
 static inline bool gen_topic_telemetry(const char *device_id, char *out, size_t cap)
 {
     return gen_topic_build(GEN_TOPIC_TELEMETRY, device_id, out, cap);
 }
 
+/** gen_topic_build fixed to GEN_TOPIC_EVENT.
+ *  @ctx any | non-blocking | caller owns out
+ */
 static inline bool gen_topic_event(const char *device_id, char *out, size_t cap)
 {
     return gen_topic_build(GEN_TOPIC_EVENT, device_id, out, cap);
 }
 
+/** gen_topic_build fixed to GEN_TOPIC_CMD.
+ *  @ctx any | non-blocking | caller owns out
+ */
 static inline bool gen_topic_cmd(const char *device_id, char *out, size_t cap)
 {
     return gen_topic_build(GEN_TOPIC_CMD, device_id, out, cap);
 }
 
+/** gen_topic_build fixed to GEN_TOPIC_COMMANDS.
+ *  @ctx any | non-blocking | caller owns out
+ */
 static inline bool gen_topic_commands(const char *device_id, char *out, size_t cap)
 {
     return gen_topic_build(GEN_TOPIC_COMMANDS, device_id, out, cap);
 }
 
+/** gen_topic_build fixed to GEN_TOPIC_OTA.
+ *  @ctx any | non-blocking | caller owns out
+ */
 static inline bool gen_topic_ota(const char *device_id, char *out, size_t cap)
 {
     return gen_topic_build(GEN_TOPIC_OTA, device_id, out, cap);

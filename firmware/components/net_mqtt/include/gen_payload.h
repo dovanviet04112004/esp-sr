@@ -21,6 +21,10 @@ typedef struct {
     bool has_response;
 } command_set_commands_item_t;
 
+/** Fill out from a parsed command_set_commands object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
 static inline bool command_set_commands_item_from_json(const cJSON *root, command_set_commands_item_t *out)
 {
     if (!cJSON_IsObject(root) || out == NULL) { return false; }
@@ -48,6 +52,10 @@ static inline bool command_set_commands_item_from_json(const cJSON *root, comman
     return true;
 }
 
+/** Build the JSON object of one command_set_commands for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
 static inline cJSON *command_set_commands_item_to_json(const command_set_commands_item_t *in)
 {
     if (in == NULL) { return NULL; }
@@ -67,6 +75,10 @@ typedef struct {
     uint8_t commands_count;
 } command_set_t;
 
+/** Fill out from a parsed command_set object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
 static inline bool command_set_from_json(const cJSON *root, command_set_t *out)
 {
     if (!cJSON_IsObject(root) || out == NULL) { return false; }
@@ -93,6 +105,10 @@ static inline bool command_set_from_json(const cJSON *root, command_set_t *out)
     return true;
 }
 
+/** Build the JSON object of one command_set for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
 static inline cJSON *command_set_to_json(const command_set_t *in)
 {
     if (in == NULL) { return NULL; }
@@ -115,6 +131,9 @@ typedef enum {
     DEVICE_CMD_OP_COUNT = 5,
 } device_cmd_op_t;
 
+/** Contract spelling of a value; "" when it is out of range.
+ *  @ctx any | non-blocking | returns a static string
+ */
 static inline const char *device_cmd_op_str(device_cmd_op_t v)
 {
     switch (v) {
@@ -127,6 +146,10 @@ static inline const char *device_cmd_op_str(device_cmd_op_t v)
     }
 }
 
+/** Value of a contract spelling.
+ *  @ctx any | non-blocking
+ *  @ret false for NULL or a spelling the contract does not list
+ */
 static inline bool device_cmd_op_parse(const char *s, device_cmd_op_t *out)
 {
     if (s == NULL || out == NULL) { return false; }
@@ -148,6 +171,10 @@ typedef struct {
     bool has_duration_s;
 } device_cmd_stream_t;
 
+/** Fill out from a parsed device_cmd_stream object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
 static inline bool device_cmd_stream_from_json(const cJSON *root, device_cmd_stream_t *out)
 {
     if (!cJSON_IsObject(root) || out == NULL) { return false; }
@@ -186,6 +213,10 @@ static inline bool device_cmd_stream_from_json(const cJSON *root, device_cmd_str
     return true;
 }
 
+/** Build the JSON object of one device_cmd_stream for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
 static inline cJSON *device_cmd_stream_to_json(const device_cmd_stream_t *in)
 {
     if (in == NULL) { return NULL; }
@@ -218,6 +249,10 @@ typedef struct {
     bool has_text;
 } device_cmd_t;
 
+/** Fill out from a parsed device_cmd object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
 static inline bool device_cmd_from_json(const cJSON *root, device_cmd_t *out)
 {
     if (!cJSON_IsObject(root) || out == NULL) { return false; }
@@ -266,6 +301,10 @@ static inline bool device_cmd_from_json(const cJSON *root, device_cmd_t *out)
     return true;
 }
 
+/** Build the JSON object of one device_cmd for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
 static inline cJSON *device_cmd_to_json(const device_cmd_t *in)
 {
     if (in == NULL) { return NULL; }
@@ -298,6 +337,9 @@ typedef enum {
     EVENT_KIND_COUNT = 4,
 } event_kind_t;
 
+/** Contract spelling of a value; "" when it is out of range.
+ *  @ctx any | non-blocking | returns a static string
+ */
 static inline const char *event_kind_str(event_kind_t v)
 {
     switch (v) {
@@ -309,6 +351,10 @@ static inline const char *event_kind_str(event_kind_t v)
     }
 }
 
+/** Value of a contract spelling.
+ *  @ctx any | non-blocking
+ *  @ret false for NULL or a spelling the contract does not list
+ */
 static inline bool event_kind_parse(const char *s, event_kind_t *out)
 {
     if (s == NULL || out == NULL) { return false; }
@@ -337,6 +383,10 @@ typedef struct {
     bool has_ts;
 } event_t;
 
+/** Fill out from a parsed event object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
 static inline bool event_from_json(const cJSON *root, event_t *out)
 {
     if (!cJSON_IsObject(root) || out == NULL) { return false; }
@@ -409,6 +459,10 @@ static inline bool event_from_json(const cJSON *root, event_t *out)
     return true;
 }
 
+/** Build the JSON object of one event for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
 static inline cJSON *event_to_json(const event_t *in)
 {
     if (in == NULL) { return NULL; }
@@ -467,6 +521,10 @@ typedef struct {
     bool has_ts;
 } heartbeat_t;
 
+/** Fill out from a parsed heartbeat object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
 static inline bool heartbeat_from_json(const cJSON *root, heartbeat_t *out)
 {
     if (!cJSON_IsObject(root) || out == NULL) { return false; }
@@ -605,6 +663,10 @@ static inline bool heartbeat_from_json(const cJSON *root, heartbeat_t *out)
     return true;
 }
 
+/** Build the JSON object of one heartbeat for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
 static inline cJSON *heartbeat_to_json(const heartbeat_t *in)
 {
     if (in == NULL) { return NULL; }
@@ -655,6 +717,9 @@ typedef enum {
     OTA_MANIFEST_KIND_COUNT = 2,
 } ota_manifest_kind_t;
 
+/** Contract spelling of a value; "" when it is out of range.
+ *  @ctx any | non-blocking | returns a static string
+ */
 static inline const char *ota_manifest_kind_str(ota_manifest_kind_t v)
 {
     switch (v) {
@@ -664,6 +729,10 @@ static inline const char *ota_manifest_kind_str(ota_manifest_kind_t v)
     }
 }
 
+/** Value of a contract spelling.
+ *  @ctx any | non-blocking
+ *  @ret false for NULL or a spelling the contract does not list
+ */
 static inline bool ota_manifest_kind_parse(const char *s, ota_manifest_kind_t *out)
 {
     if (s == NULL || out == NULL) { return false; }
@@ -680,6 +749,10 @@ typedef struct {
     uint32_t size_bytes;
 } ota_manifest_t;
 
+/** Fill out from a parsed ota_manifest object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
 static inline bool ota_manifest_from_json(const cJSON *root, ota_manifest_t *out)
 {
     if (!cJSON_IsObject(root) || out == NULL) { return false; }
@@ -718,6 +791,10 @@ static inline bool ota_manifest_from_json(const cJSON *root, ota_manifest_t *out
     return true;
 }
 
+/** Build the JSON object of one ota_manifest for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
 static inline cJSON *ota_manifest_to_json(const ota_manifest_t *in)
 {
     if (in == NULL) { return NULL; }
@@ -736,6 +813,10 @@ typedef struct {
     char text[513];
 } responses_responses_item_t;
 
+/** Fill out from a parsed responses_responses object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
 static inline bool responses_responses_item_from_json(const cJSON *root, responses_responses_item_t *out)
 {
     if (!cJSON_IsObject(root) || out == NULL) { return false; }
@@ -756,6 +837,10 @@ static inline bool responses_responses_item_from_json(const cJSON *root, respons
     return true;
 }
 
+/** Build the JSON object of one responses_responses for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
 static inline cJSON *responses_responses_item_to_json(const responses_responses_item_t *in)
 {
     if (in == NULL) { return NULL; }
@@ -772,6 +857,10 @@ typedef struct {
     uint8_t responses_count;
 } responses_t;
 
+/** Fill out from a parsed responses object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
 static inline bool responses_from_json(const cJSON *root, responses_t *out)
 {
     if (!cJSON_IsObject(root) || out == NULL) { return false; }
@@ -798,6 +887,10 @@ static inline bool responses_from_json(const cJSON *root, responses_t *out)
     return true;
 }
 
+/** Build the JSON object of one responses for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
 static inline cJSON *responses_to_json(const responses_t *in)
 {
     if (in == NULL) { return NULL; }
@@ -817,6 +910,9 @@ typedef enum {
     STATUS_STATE_COUNT = 2,
 } status_state_t;
 
+/** Contract spelling of a value; "" when it is out of range.
+ *  @ctx any | non-blocking | returns a static string
+ */
 static inline const char *status_state_str(status_state_t v)
 {
     switch (v) {
@@ -826,6 +922,10 @@ static inline const char *status_state_str(status_state_t v)
     }
 }
 
+/** Value of a contract spelling.
+ *  @ctx any | non-blocking
+ *  @ret false for NULL or a spelling the contract does not list
+ */
 static inline bool status_state_parse(const char *s, status_state_t *out)
 {
     if (s == NULL || out == NULL) { return false; }
@@ -841,6 +941,10 @@ typedef struct {
     bool has_fw;
 } status_t;
 
+/** Fill out from a parsed status object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
 static inline bool status_from_json(const cJSON *root, status_t *out)
 {
     if (!cJSON_IsObject(root) || out == NULL) { return false; }
@@ -867,6 +971,10 @@ static inline bool status_from_json(const cJSON *root, status_t *out)
     return true;
 }
 
+/** Build the JSON object of one status for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
 static inline cJSON *status_to_json(const status_t *in)
 {
     if (in == NULL) { return NULL; }
@@ -887,6 +995,9 @@ typedef enum {
     TELEMETRY_STATE_COUNT = 3,
 } telemetry_state_t;
 
+/** Contract spelling of a value; "" when it is out of range.
+ *  @ctx any | non-blocking | returns a static string
+ */
 static inline const char *telemetry_state_str(telemetry_state_t v)
 {
     switch (v) {
@@ -897,6 +1008,10 @@ static inline const char *telemetry_state_str(telemetry_state_t v)
     }
 }
 
+/** Value of a contract spelling.
+ *  @ctx any | non-blocking
+ *  @ret false for NULL or a spelling the contract does not list
+ */
 static inline bool telemetry_state_parse(const char *s, telemetry_state_t *out)
 {
     if (s == NULL || out == NULL) { return false; }
@@ -914,6 +1029,10 @@ typedef struct {
     int8_t gain_db;
 } telemetry_samples_item_t;
 
+/** Fill out from a parsed telemetry_samples object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
 static inline bool telemetry_samples_item_from_json(const cJSON *root, telemetry_samples_item_t *out)
 {
     if (!cJSON_IsObject(root) || out == NULL) { return false; }
@@ -956,6 +1075,10 @@ static inline bool telemetry_samples_item_from_json(const cJSON *root, telemetry
     return true;
 }
 
+/** Build the JSON object of one telemetry_samples for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
 static inline cJSON *telemetry_samples_item_to_json(const telemetry_samples_item_t *in)
 {
     if (in == NULL) { return NULL; }
@@ -977,6 +1100,10 @@ typedef struct {
     uint8_t samples_count;
 } telemetry_t;
 
+/** Fill out from a parsed telemetry object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
 static inline bool telemetry_from_json(const cJSON *root, telemetry_t *out)
 {
     if (!cJSON_IsObject(root) || out == NULL) { return false; }
@@ -1014,6 +1141,10 @@ static inline bool telemetry_from_json(const cJSON *root, telemetry_t *out)
     return true;
 }
 
+/** Build the JSON object of one telemetry for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
 static inline cJSON *telemetry_to_json(const telemetry_t *in)
 {
     if (in == NULL) { return NULL; }

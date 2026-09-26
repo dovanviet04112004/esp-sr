@@ -44,6 +44,9 @@ _Static_assert(offsetof(gen_stream_header_t, channels) == 20, "channels offset")
 _Static_assert(offsetof(gen_stream_header_t, format) == 21, "format offset");
 _Static_assert(offsetof(gen_stream_header_t, samples) == 22, "samples offset");
 
+/** Channels a frame carries in this mode; 0 for an unknown mode.
+ *  @ctx any | non-blocking
+ */
 static inline uint8_t gen_stream_mode_channels(gen_stream_mode_t mode)
 {
     switch (mode) {
