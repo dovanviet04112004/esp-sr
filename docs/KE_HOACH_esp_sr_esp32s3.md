@@ -1005,7 +1005,8 @@ firmware/
 │
 ├── main/
 │   ├── CMakeLists.txt  ├── idf_component.yml  ├── Kconfig.projbuild
-│   ├── app_main.c                    # gọi app_boot rồi app_tasks_start
+│   ├── app_main.c                    # gọi app_boot rồi app_tasks_start; in watermark từng task
+│   │                                 #   một lần sau khi chạy ổn (§5.5 luật 11)
 │   ├── app_boot.{c,h}                # ★ chuỗi khởi tạo, không logic; test_apps/soak dựng
 │   │                                 #   đúng chuỗi này, không phải bản chép lại
 │   ├── app_tasks.{c,h}               # ★ bảng task tĩnh §5.2, nơi DUY NHẤT tạo task
