@@ -22,7 +22,7 @@
           "doaDeg": {"type": "integer", "minimum": -1, "maximum": 180},
           "doaConf": {"type": "integer", "minimum": 0, "maximum": 255},
           "vad": {"type": "boolean"},
-          "levelDbfs": {"type": "integer", "minimum": -127, "maximum": 0},
+          "levelDbfs": {"type": "integer", "minimum": -128, "maximum": 0},
           "gainDb": {"type": "integer", "minimum": -40, "maximum": 40}
         }
       }
