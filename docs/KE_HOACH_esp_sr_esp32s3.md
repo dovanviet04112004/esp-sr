@@ -1010,7 +1010,7 @@ firmware/
 │   │                                 #   đúng chuỗi này, không phải bản chép lại
 │   ├── app_tasks.{c,h}               # ★ bảng task tĩnh §5.2, nơi DUY NHẤT tạo task
 │   ├── app_wiring.{c,h}              # ★ nơi DUY NHẤT tạo hàng đợi, đệm, cờ §5.3
-│   └── app_console.{c,h}             # NVS, hiệu chuẩn qua USB; Kconfig tắt ở prod
+│   └── app_console.{c,h}             # NVS, hiệu chuẩn, mở luồng tiếng qua USB; Kconfig tắt ở prod
 │
 ├── components/                       # ── 100% CODE TỰ VIẾT ──
 │   ├── common/        [C]   L0  # header thuần: app_err.h, app_events.h, gen_grid.h, gen_array.h, gen_stream.h
@@ -1709,6 +1709,8 @@ Chỉ để **thu dữ liệu và gỡ lỗi**. Tắt mặc định, không có 
 | Ai nối ai | **board là khách**, nối tới `device/stream_host:stream_port` hoặc địa chỉ trong `SET_STREAM` — board không mở cổng nghe nào |
 | Khung | theo `contracts/stream/frame.yaml`: đầu 24 B (`magic 'SRST'`, `version` u16, `mode` u16, `t_us` u64, `seq` u32, `channels` u8, `format` u8, `samples` u16 — mọi trường nằm đúng biên tự nhiên của nó) rồi PCM `int16` xen kẽ |
 | Nghẽn | `sach_task` ghi `sb_stream` với timeout 0; thiếu chỗ thì bỏ cả khung; `seq` cho `host` biết chỗ hở và ghi nó vào file json đi kèm WAV |
+| Mở, đóng | `SET_STREAM` qua MQTT (E13-T7) mang `mode`, máy nhận và thời lượng; ở `dev`/`bench` thêm lệnh console `stream <mode> [giây]` nhắm `device/stream_host:stream_port`. Tự tắt sau `SVC_REPORT_STREAM_MAX_S` (mặc định 600 s, §7.5) trừ khi được mở lại |
+| Nối lại | `luong_task` giữ khung trong `sb_stream` khi mất kết nối và nối lại mỗi giây; khung không kịp vào `sb_stream` thành chỗ hở `seq` ở `host`, đếm ở `streamDropped` của `heartbeat` |
 
 | `mode` | Kênh | Băng thông |
 |---|---|---|
