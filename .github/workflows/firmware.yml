@@ -46,6 +46,16 @@ jobs:
           { ./build_host/dsp_spec/dsp_spec_host contracts/golden; ./build_host/dsp_afe_host_off contracts/golden; } | tee host_parity.log
           python firmware/test_apps/parity/pytest_parity.py host_parity.log
 
+      - name: lang_vi and ai_engine shells on the host
+        if: steps.guard.outputs.ready == 'true'
+        shell: bash
+        run: |
+          for c in lang_vi ai_engine; do
+            cmake -S firmware/components/$c/test_apps/host -B build_host_$c -DCMAKE_BUILD_TYPE=Release
+            cmake --build build_host_$c -j
+            ./build_host_$c/${c}_host
+          done
+
       - name: Generated C compiles and round-trips against the fetched cJSON
         if: steps.guard.outputs.ready == 'true'
         shell: bash
