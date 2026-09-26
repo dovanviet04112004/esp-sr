@@ -693,7 +693,7 @@ dạng cần. Hai loại số đều ghi, nhưng chỉ loại thứ hai được
 ```
 esp-sr/
 ├── .github/workflows/{contracts.yml, ml.yml, firmware.yml, host.yml}
-│                   ★ CI chạy trên GitHub Actions của bản sao private; kết quả gắn ngược lên Gitea (§4.8)
+│                   ★ CI chạy trên GitHub Actions của bản sao công khai; kết quả gắn ngược lên Gitea (§4.8)
 ├── .gitignore  ├── .gitattributes  ├── .editorconfig  ├── .pre-commit-config.yaml
 ├── ruff.toml                       # cấu hình ruff cho tools/; ml/ và host/ khai trong pyproject.toml riêng
 ├── README.md   ├── Makefile
@@ -727,7 +727,7 @@ esp-sr/
 | `Makefile` | điểm vào duy nhất: `make gen` · `make lint` · `make golden` · `make fw-dev` · `make measure` · `make report` |
 
 **Hai remote, một nguồn.** `origin` là Gitea nội bộ — nơi giữ mã và nơi đọc trạng thái. `github` là bản sao
-**private** chỉ để chạy CI, vì máy phát triển không gánh nổi runner Docker (ổ C: gần đầy, Docker Desktop hỏng
+công khai để chạy CI, vì máy phát triển không gánh nổi runner Docker (ổ C: gần đầy, Docker Desktop hỏng
 đĩa khi thử). GitHub không vào được Gitea trong LAN, nên chiều ngược lại do `make ci-status` ở máy làm:
 đọc kết quả bằng `gh`, gắn trạng thái `github/<workflow>` lên commit trên Gitea. Mật khẩu Gitea không bao
 giờ đi sang GitHub; token Gitea nằm ở `~/.config/esp-sr/gitea_token`, ngoài repo.
@@ -736,7 +736,8 @@ giờ đi sang GitHub; token Gitea nằm ở `~/.config/esp-sr/gitea_token`, ngo
 qua credential helper riêng của repo, còn GitHub qua `gh`. Hook `pre-push` của pre-commit gọi
 `ci_status.py --from-pre-push`: với lượt đẩy sang GitHub, nó tách một tiến trình nền theo dõi lượt chạy
 và gắn trạng thái lên Gitea — vòng xoay khi bắt đầu, xanh hoặc đỏ khi xong — rồi trả lệnh push ngay.
-Push chỉ khi chủ dự án ra lệnh; phần còn lại tự chạy.
+Mỗi task gạch xong trong TASKS là một lần push; phần còn lại tự chạy. Cả hai repo để công khai theo
+quyết định của chủ dự án; không bí mật nào nằm trong lịch sử git.
 
 Ba khối `ml` / `firmware` / `host` **không bao giờ chép định nghĩa của nhau**. Lưới thời gian, hình
 học dàn micro, payload MQTT, khuôn luồng tiếng, bộ lệnh mặc định, vector vàng — tất cả nằm ở
