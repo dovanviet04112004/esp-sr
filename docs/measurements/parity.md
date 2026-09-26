@@ -11,8 +11,7 @@ Chạy: `pytest firmware/test_apps/parity/pytest_parity.py --target esp32s3 --em
 | `mel` — MFCC (13, 20, 24 hệ số) | 3 | 1,5e-5 | 134,8 | ≤ 1e-3, ≥ 110 dB | — | e7de26f+ | 26/09 |
 | `chain` — `pcm` ra của mặt tiền `dsp_afe`, mọi module tắt (int16) | 4 | 1 LSB | 77,9 | ≤ 1 LSB, ≥ 60 dB | lệch một mẫu: 15 090 LSB, −2,9 dB → đỏ | ecaf140 | 26/09 |
 | `chain` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | — | ecaf140 | 26/09 |
-| `hpf` — biquad `esp-dsp`, board B (hợp ngữ S3) | 4 | 1,2e-4 | 68,7 | ≤ 5e-4, ≥ 60 dB | trễ một mẫu: 0,996, −3,1 dB → đỏ | 4f4c9eb | 26/09 |
-| `hpf` — cùng kernel, máy tính (C thuần) | 4 | 0 | — | như trên | như trên | 4f4c9eb | 26/09 |
+| `hpf` — biquad dạng II chuyển vị viết tay (ADR-0004), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | trễ một mẫu: 0,996, −3,1 dB → đỏ | e07ef05 | 26/09 |
 
 ## Bản tham chiếu Python: STFT phân tích rồi tổng hợp (E6-T1)
 
@@ -49,7 +48,7 @@ phán của phiên thật là sai số lớn nhất ≤ 1 LSB.
 
 ## `hpf` (E7-T1)
 
-Trên máy tính, bản C thuần của `dsps_biquad_f32` khớp bản Python từng bit, vì cả hai làm tròn float32 theo cùng thứ tự.
-Trên board, bản hợp ngữ S3 làm tròn khác, và dạng trực tiếp II khuếch đại chênh lệch ấy ở tần số thấp: ca tiếng nói kèm
-một chiều lệch 3,6e-6 (89,1 dB), ca hum 50 Hz −10 dBFS trên một chiều lệch 1,2e-4 (68,7 dB), tức 3,9 LSB. Cỡ này khớp
-sai số của chính dạng II so với float64 (KẾ HOẠCH §3.4, ADR-0003). Chạy lại bằng `make parity-board`.
+Bản C (dạng II chuyển vị viết tay, ADR-0004) và bản Python làm cùng các bước float32 theo cùng thứ tự, hệ số tính cos và
+sin ở double rồi làm tròn một lần: máy tính và board B đều khớp **từng bit** trên cả bốn ca. Kernel `esp-dsp` dạng II mà
+ADR-0003 chọn trước đó lệch tới 1,2e-4 (68,7 dB) trên board ở ca hum 50 Hz −10 dBFS trên một chiều, vì bản hợp ngữ làm
+tròn khác và dạng II khuếch đại chênh lệch ở tần số thấp. Chạy lại bằng `make parity-board`.

@@ -1,6 +1,6 @@
 module,core,static_bytes,hot_bytes,cold_bytes,us_mean,us_peak,in_total,fw,date
-dsp_afe chuỗi (hpf + stft x2 + trộn + istft),1,6244,40368,0,695.8,697.6,1,contract-v1-114-gd05636a,2026-09-26
-dsp_spec stft (2 kênh),1,28,14432,0,286.3,289.7,0,contract-v1-114-gd05636a,2026-09-26
-dsp_spec istft,1,28,8256,0,164.5,168.5,0,contract-v1-114-gd05636a,2026-09-26
-dsp_afe hpf (2 kênh),1,0,64,0,36.9,41.3,0,contract-v1-114-gd05636a,2026-09-26
-dsp_spec log-mel (40 dải),0,0,3680,0,62.8,68.4,1,contract-v1-114-gd05636a,2026-09-26
+dsp_afe chuỗi (hpf + stft x2 + trộn + istft),1,6244,40368,0,695.7,697.6,1,contract-v1-124-ge07ef05,2026-09-26
+dsp_spec stft (2 kênh),1,28,14432,0,286.3,289.7,0,contract-v1-124-ge07ef05,2026-09-26
+dsp_spec istft,1,28,8256,0,164.5,168.5,0,contract-v1-124-ge07ef05,2026-09-26
+dsp_afe hpf (2 kênh),1,0,64,0,36.8,41.0,0,contract-v1-124-ge07ef05,2026-09-26
+dsp_spec log-mel (40 dải),0,0,3680,0,62.8,68.4,1,contract-v1-124-ge07ef05,2026-09-26
