@@ -1719,6 +1719,10 @@ Chỉ để **thu dữ liệu và gỡ lỗi**. Tắt mặc định, không có 
 | 2 | thô `ch0 ch1` | 64 KB/s |
 | 3 | thô `ch0 ch1 ref` | 96 KB/s |
 | 4 | thô `ch0 ch1 ref` + sạch | 128 KB/s |
+| 5 | thô `ch0 ch1` + sạch | 96 KB/s |
+
+`mode` 5 là `mode` 4 cho board không có loa: không có `ref` thì `mode` 4 không mở được, mà so vào với ra
+trên cùng một bước (E5-T11, rồi từng module của E7–E9) cần cả hai trong một khung.
 
 `test_apps/capture` luôn chạy `mode` 3 và không có gì khác trong chuỗi, để bản thu cho dữ liệu huấn
 luyện không phụ thuộc phiên bản `dsp_afe` nào.
