@@ -99,7 +99,7 @@ Board B là board duy nhất có micro (KẾ HOẠCH §2.1). Mọi phép đo thu
 | E4-T4 | `srpipe/scenes/`: dựng cảnh có nhãn bằng `pyroomacoustics` — phòng, RT60, hướng người nói và nhiễu, SNR, dàn micro từ `array.yaml` | một lệnh sinh bộ cảnh chuẩn có manifest và sha256; nhãn hướng khớp hình học | E4-T1, E3-T1 | V5.2 |
 | E4-T5 | `srpipe/metrics/`: SI-SDR, STOI, PESQ (giấy phép bản cài ghi rõ), ERLE, lỗi góc, DET | mỗi thước có một phép kiểm với giá trị biết trước | E4-T1 | — |
 | E4-T6 | Đích `make golden`, `make measure`, `make report` khung | `make report` chạy trên repo rỗng không lỗi, ra bảng trống | E4-T2 | — |
-| E4-T7 | Cây `ml/data/` theo KẾ HOẠCH §4.4.1: `README.md`, `manifests/`, `splits/` trong repo; `paths.yaml` có `manifests`; `srpipe/core/splits.py` + `tests/test_splits.py` | mỗi luật có một ca đối chứng âm làm phép kiểm đỏ; repo chưa có split nào thì vẫn xanh | E4-T2 | — |
+| ~~E4-T7~~ | **Xong 26/09.** Cây `ml/data/` theo KẾ HOẠCH §4.4.1: `README.md`, `manifests/{speech,noise,rir,device}`, `splits/{ns,wake,command,device}` trong repo, `board_b.csv` có sẵn dòng tiêu đề; `paths.yaml` có `manifests` và `cache`; `srpipe/core/splits.py` + `tests/test_splits.py` | 26/26 pytest qua: năm luật §1.3 mỗi luật một ca đối chứng âm đỏ đúng chỗ, dòng thiếu cột bị từ chối; chưa có split nào thì phép kiểm split thật vẫn xanh | E4-T2 | — |
 
 ---
 
