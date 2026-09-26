@@ -1211,7 +1211,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 | Loại | Nằm ở | Chạy bằng |
 |---|---|---|
 | Unit trên board | `components/<c>/test_apps/unit/` | `idf.py build flash` + `pytest_*.py` (pytest-embedded) |
-| Unit trên máy tính | `components/<c>/test_apps/host/` | target `linux` của IDF; nếu `dl_fft` không dựng được trên target ấy thì CMake thường + lớp đệm `esp_err.h` — chốt ở E6-T6 |
+| Unit trên máy tính | `components/<c>/test_apps/host/` | **CMake thường + lớp đệm** `test_apps/host/shim/` (`esp_err.h`, `esp_heap_caps.h`, `esp_log.h`, …), `dl_fft` dựng từ bản C thuần; chạy thêm cả `contracts/golden/` qua bộ so của `test_apps/parity`, phán bằng `pytest_parity.py`; workflow `firmware` chạy mỗi lần push (chốt ở E6-T6). Target `linux` của IDF bị loại: đòi `libbsd-dev` trên máy và kéo cả cổng FreeRTOS vào một component thuần |
 | Parity C ↔ Python | `test_apps/parity/` | đọc `contracts/golden/` trong LittleFS, so theo `tolerance.yaml` |
 | Chi phí | `test_apps/bench_afe`, `bench_kws`, `bench_mem` | in CSV → `tools/budget.py` → `docs/measurements/budget.md` |
 | Chạy dài | `test_apps/soak/` | 30 phút cho Cửa 5, 8 giờ trước khi báo cáo |
