@@ -606,6 +606,16 @@ so từng khung với gói `webrtcvad` gốc (nhóm `dev` của `ml/`).
 QUAN V5.1.3): mức ra trong ±3 dB quanh đích với mức vào từ −50 tới −10 dBFS; không cắt đỉnh; không dao
 động chu kỳ.
 
+| Phần | Cách làm |
+|---|---|
+| Mức lời nói | trung bình công suất của các bước `vad = 1` ở **đầu vào**, một cực hằng thời gian `level_tau_s` 0,5 s; khởi đầu bằng đích nên gain bắt đầu ở 0 dB |
+| Gain chậm | gain đích = √(công suất đích / mức lời nói), kẹp trong `gain_min_db` … `gain_max_db` (−20 … +30 dB, đủ cho vào −50 … −10 dBFS); gain đi về đích tối đa ×10^(3·0,016/20) mỗi bước lên, ×10^(−6·0,016/20) mỗi bước xuống, không vượt đích; áp một số cho cả bước |
+| Chặn đỉnh | tín hiệu sau gain chậm trễ `lookahead_ms` (64 mẫu); gain cần cho mỗi mẫu = trần / \|x\| khi vượt trần −3 dBFS, không thì 1; lấy cực tiểu trượt trên 65 mẫu, hồi phục tuyến tính về 1 trong `release_ms` 50 ms, rồi trung bình hộp 65 mẫu. Mọi mẫu trong cửa sổ trung bình đều ≤ gain cần của mẫu đỉnh, nên mẫu ra không vượt trần |
+| Số học | hằng số tuyến tính (công suất đích, bước lên xuống, giới hạn gain, hệ số làm trơn) tính một lần lúc init bằng double rồi làm tròn; mỗi bước chỉ còn nhân, cộng, chia, `sqrt`, nên C khớp bản soi gương từng bit. `gain_db` báo ra khung là 20·log₁₀ của gain chậm |
+
+Trên tín hiệu dừng gain hội tụ về đúng đích rồi đứng yên (bước cuối dừng tại đích, không vượt), nên không có chu kỳ.
+Mọi số ở `agc:` của `contracts/afe.yaml`.
+
 ### 3.11 Đặc trưng và `wake`
 
 **Đặc trưng** — log-mel 40 dải từ một `rfft` 512 trên tín hiệu ra của `dsp_afe`, cùng lưới §3.1. Chuẩn
@@ -897,8 +907,9 @@ ml/
 │   ├── golden/gold.py                 # ★ khuôn .gold — một khuôn, một chỗ
 │   ├── scenes/                        # ★ dựng cảnh có nhãn bằng pyroomacoustics: phòng, RT60,
 │   │                                  #   hướng người nói và nhiễu, SNR, dàn micro từ array.yaml
-│   │   └── vad.py                     # câu đọc + khoảng nghỉ + nhiễu ở SNR và mức cho trước, nhãn mỗi bước
-│   │                                  #   từ tiếng sạch; chấm vad với ngưỡng năng lượng trần (§3.10)
+│   │   ├── vad.py                     # câu đọc + khoảng nghỉ + nhiễu ở SNR và mức cho trước, nhãn mỗi bước
+│   │   │                              #   từ tiếng sạch; chấm vad với ngưỡng năng lượng trần (§3.10)
+│   │   └── agc.py                     # cùng cảnh ở mức vào −50 … −10 dBFS qua vad rồi agc; mức ra, đỉnh (§3.10)
 │   │
 │   ├── dsp/                           # ── THUẬT TOÁN THUẦN, soi gương firmware 1:1 ──
 │   │   ├── spec/{fft.py, window.py, stft.py, mel.py, pitch.py}        # ★ dsp_spec
