@@ -1,0 +1,10 @@
+# Board limits the Python side checks against (KEHOACH 2.1, 5.6, 6.1, 6.5); measured numbers live in docs/measurements.
+cpu_mhz: 240
+cores: 2
+core1_mean_load_max: 0.50
+core1_peak_frame_max: 0.80
+core0_mean_load_max: 0.70
+internal_ram_available_bytes: 320000
+psram_bytes: 8388608
+model_slot_bytes: 3145728
+command_model_max_bytes: 2936012

@@ -1,0 +1,8 @@
+# Where data and run outputs live (KEHOACH 4.4). Relative paths resolve from ml/.
+# SRPIPE_DATA_ROOT in .env overrides data_root, so a big drive needs no edit here.
+data_root: data
+raw: "{data_root}/raw"
+interim: "{data_root}/interim"
+processed: "{data_root}/processed"
+splits: data/splits
+artifacts: artifacts
