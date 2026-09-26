@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import pprint
 import re
 import sys
 from dataclasses import dataclass
@@ -580,10 +581,21 @@ def py_typed_dict(cls: str, owner: str, node: dict) -> str:
     return "".join(extra) + f"\n\nclass {cls}(TypedDict):\n" + "".join(rows) + "\n"
 
 
+def py_schemas() -> str:
+    rows = [
+        "\n\n# Every schema as parsed JSON, for host/ to validate what boards send (KEHOACH 7.7).",
+        "SCHEMAS: dict[str, dict] = {",
+    ]
+    for name, schema in schemas():
+        literal = pprint.pformat(schema, width=112, sort_dicts=False).replace("\n", "\n    ")
+        rows.append(f"    {name!r}: {literal},")
+    return "\n".join([*rows, "}"]) + "\n"
+
+
 def gen_payload_py() -> str:
     body = "".join(py_typed_dict(pascal(name), name, schema) for name, schema in schemas())
     return banner("contracts/schema/*.schema.json", "#") + (
-        "\nfrom typing import Literal, NotRequired, TypedDict\n" + body.rstrip("\n") + "\n"
+        "\nfrom typing import Literal, NotRequired, TypedDict\n" + body.rstrip("\n") + "\n" + py_schemas()
     )
 
 
