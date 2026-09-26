@@ -73,6 +73,15 @@ capture-radio-off-flash: ## Flash capture that records 60 s with the radio off, 
 	cd firmware/test_apps/capture && idf.py -B build_radio_off -D SDKCONFIG=build_radio_off/sdkconfig \
 	  -D CAPTURE_PROFILE=radio_off -p $(PORT) flash
 
+calib-estimate: ## Estimate balance from frontal white noise sessions: make calib-estimate SESSIONS="<dir> <dir> ..."
+	cd host && uv run --extra score python -m srhost.calib estimate $(SESSIONS)
+
+calib-flash: ## Flash test_apps/calib, the console that stores NVS calib/* (E2-T6)
+	cd firmware/test_apps/calib && idf.py -p $(PORT) flash
+
+calib-write: ## Write a balance file to the board: make calib-write CSV=docs/measurements/calib/<board>_balance.csv
+	cd host && uv run --extra score python -m srhost.calib write ../$(CSV) --port $(PORT)
+
 # broker and host
 broker-up: ## Start the bench MQTT broker (needs deploy/.env and deploy/emqx/users.csv)
 	@test -f deploy/.env || { echo "copy deploy/.env.example to deploy/.env and fill it"; exit 1; }
