@@ -695,7 +695,7 @@ esp-sr/
 ├── .gitea/workflows/{contracts.yml, ml.yml, firmware.yml, host.yml}
 │                   ★ Gitea Actions đọc .gitea/workflows ở gốc repo; cần một act_runner đã đăng ký
 ├── .gitignore  ├── .gitattributes  ├── .editorconfig  ├── .pre-commit-config.yaml
-├── README.md   ├── LICENSE         ├── Makefile
+├── README.md   ├── Makefile
 ├── CLAUDE.md                       ★ quy tắc làm việc — gitignore, chỉ có ở máy local
 ├── .claude/                        ★ gitignore
 │
