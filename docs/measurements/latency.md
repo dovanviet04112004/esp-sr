@@ -7,3 +7,16 @@ trung bình và đỉnh. Số ở `budget.md` là bản rút gọn của các m�
 
 | Phép | Điểm | Kiểu | `dl_fft` µs | `esp-dsp` µs | RAM B |
 |---|---|---|---|---|---|
+
+## 2. Thay `set.json` qua `sys_storage_write_file` (E5-T5)
+
+Một lần thay trọn file 12 288 B: ghi `set.json.tmp`, đóng, đổi tên. Đo bằng `esp_timer` quanh lời gọi, trong
+`sys_storage/test_apps/unit` lúc vừa khởi động (không Wi-Fi, không I2S), board B, flash QIO 80 MHz.
+
+| Bản dựng | Lượt | Kết quả µs |
+|---|---|---|
+| test app `unit`, `-Og`, IDF 6.0.2, `joltwallet/littlefs` 1.22.3, @e755cb3 | 3 lần nạp, mỗi lần 1 mẫu | 157 365 · 157 423 · 166 320 |
+
+Đây là thời gian cả lần thay file, **không phải** một khoảng tắt cache liền mạch; khoảng dài nhất mà
+nhân 1 bị đóng băng là một lần xoá sector trong đó, và số khung mất khi ghi trong lúc nghe là phép kiểm
+riêng của E14-T7 (KẾ HOẠCH §5.5 luật 9).
