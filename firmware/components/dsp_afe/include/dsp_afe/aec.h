@@ -1,5 +1,5 @@
 /** Multidelay block frequency-domain echo canceller, one per microphone (KEHOACH 3.5).
- *  Overlap-save on blocks of GEN_GRID_HOP_SAMPLES with its own FFT; runs ahead of the STFT.
+ *  Overlap-save on blocks of GEN_GRID_HOP_SAMPLES with its own transforms; runs ahead of the STFT.
  */
 #pragma once
 
@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "dsp_spec/fft.h"
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -27,16 +28,17 @@ typedef struct {
 
 typedef struct dsp_afe_aec_s dsp_afe_aec_t;
 
-/** Bytes this configuration needs; all of it is touched every frame (KEHOACH 6.5).
+/** Bytes this configuration needs, excluding the shared FFT; all of it is touched every frame (KEHOACH 6.5).
  *  @ctx any | non-blocking
  */
 size_t dsp_afe_aec_workspace_bytes(const dsp_afe_aec_config_t *cfg);
 
-/** Build the canceller in mem with zero weights.
- *  @ctx task | non-blocking | caller owns mem
+/** Build the canceller in mem with zero weights, running its transforms on the chain's shared fft.
+ *  @ctx task | non-blocking | caller owns mem and fft; fft must be GEN_GRID_FFT_SIZE points
  *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_SIZE
  */
-esp_err_t dsp_afe_aec_init(dsp_afe_aec_t **out, const dsp_afe_aec_config_t *cfg, void *mem, size_t bytes);
+esp_err_t dsp_afe_aec_init(dsp_afe_aec_t **out, const dsp_afe_aec_config_t *cfg, dsp_spec_fft_t *fft,
+                           void *mem, size_t bytes);
 
 /** Cancel one hop: mic[i] and ref are GEN_GRID_HOP_SAMPLES each, mic is overwritten with the error.
  *  residual_power gets GEN_GRID_N_BINS floats for the ns slot; it may be NULL.
