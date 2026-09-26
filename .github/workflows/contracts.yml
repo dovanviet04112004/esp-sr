@@ -4,9 +4,9 @@ name: contracts
 on:
   workflow_dispatch:
   push:
-    paths: ["contracts/**", "tools/**", "firmware/**", ".pre-commit-config.yaml", "ruff.toml", ".gitea/workflows/contracts.yml"]
+    paths: ["contracts/**", "tools/**", "firmware/**", ".pre-commit-config.yaml", "ruff.toml", ".github/workflows/contracts.yml"]
   pull_request:
-    paths: ["contracts/**", "tools/**", "firmware/**", ".pre-commit-config.yaml", "ruff.toml", ".gitea/workflows/contracts.yml"]
+    paths: ["contracts/**", "tools/**", "firmware/**", ".pre-commit-config.yaml", "ruff.toml", ".github/workflows/contracts.yml"]
 
 jobs:
   contracts:

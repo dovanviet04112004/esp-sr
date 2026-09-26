@@ -4,9 +4,9 @@ name: host
 on:
   workflow_dispatch:
   push:
-    paths: ["host/**", "contracts/**", ".gitea/workflows/host.yml"]
+    paths: ["host/**", "contracts/**", ".github/workflows/host.yml"]
   pull_request:
-    paths: ["host/**", "contracts/**", ".gitea/workflows/host.yml"]
+    paths: ["host/**", "contracts/**", ".github/workflows/host.yml"]
 
 jobs:
   host:

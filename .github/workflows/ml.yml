@@ -4,9 +4,9 @@ name: ml
 on:
   workflow_dispatch:
   push:
-    paths: ["ml/**", "contracts/**", ".gitea/workflows/ml.yml"]
+    paths: ["ml/**", "contracts/**", ".github/workflows/ml.yml"]
   pull_request:
-    paths: ["ml/**", "contracts/**", ".gitea/workflows/ml.yml"]
+    paths: ["ml/**", "contracts/**", ".github/workflows/ml.yml"]
 
 jobs:
   ml:
