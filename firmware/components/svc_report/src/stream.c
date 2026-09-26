@@ -11,6 +11,7 @@
 #include "gen_grid.h"
 #include "gen_stream.h"
 #include "net_stream.h"
+#include "net_wifi.h"
 #include "sdkconfig.h"
 #include "svc_report.h"
 
@@ -89,6 +90,7 @@ esp_err_t svc_report_stream_start(uint8_t mode, const char *host, uint16_t port,
     taskEXIT_CRITICAL(&s_stream.lock);
     atomic_store(&s_stream.mode, mode);
     xEventGroupSetBits(s_stream.system, APP_BIT_STREAM_ON);
+    net_wifi_set_low_latency(true);
     ESP_LOGI(TAG, "stream mode %u to %s:%u for %u s", (unsigned)mode, host, (unsigned)port,
              (unsigned)seconds);
     return ESP_OK;
@@ -99,6 +101,7 @@ void svc_report_stream_stop(void)
     if (s_stream.sb == NULL) { return; }
     atomic_store(&s_stream.mode, GEN_STREAM_MODE_OFF);
     xEventGroupClearBits(s_stream.system, APP_BIT_STREAM_ON);
+    net_wifi_set_low_latency(false);
 }
 
 static size_t build_frame(uint8_t mode, uint32_t seq, const int16_t *raw, const int16_t *clean)

@@ -7,5 +7,5 @@ idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS "include"
     REQUIRES common net_stream
-    PRIV_REQUIRES esp_timer
+    PRIV_REQUIRES esp_timer net_wifi
 )
