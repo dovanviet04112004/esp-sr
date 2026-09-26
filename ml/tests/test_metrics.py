@@ -12,6 +12,7 @@ from srpipe.metrics.erle import erle_db, erle_track_db
 from srpipe.metrics.pesq import PESQ_WB_MAX, pesq_wb
 from srpipe.metrics.sisdr import si_sdr_db, si_sdr_improvement_db
 from srpipe.metrics.stoi import stoi_score
+from srpipe.metrics.vad import scores, with_hangover
 
 FS = grid.SAMPLE_RATE_HZ
 
@@ -119,3 +120,22 @@ def test_miss_rate_at_a_false_alarm_budget_takes_the_lowest_allowed_threshold() 
     curve = det_curve([0.9, 0.8, 0.4], [0.85, 0.3], negative_hours=2.0)
     assert miss_rate_at(curve, 0.5) == pytest.approx((0.0, 0.4))
     assert miss_rate_at(curve, 0.0) == pytest.approx((2 / 3, 0.9))
+
+
+def test_vad_scores_count_by_hand() -> None:
+    labels = np.array([1, 1, 1, 1, 0, 0, 0, 0, 0, 0], dtype=bool)
+    decisions = np.array([1, 1, 1, 0, 1, 0, 0, 0, 0, 0], dtype=bool)
+    s = scores(decisions, labels)
+    assert (s.f1, s.miss, s.false_alarm) == pytest.approx((0.75, 0.25, 1 / 6))
+    assert (s.speech_hops, s.silent_hops) == (4, 6)
+
+
+def test_vad_scores_refuse_mismatched_lengths() -> None:
+    with pytest.raises(ValueError):
+        scores(np.zeros(3, dtype=bool), np.zeros(4, dtype=bool))
+
+
+def test_hangover_holds_each_speech_hop_for_the_given_hops() -> None:
+    raw = np.array([0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0], dtype=bool)
+    assert with_hangover(raw, 2).astype(int).tolist() == [0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0]
+    assert np.array_equal(with_hangover(raw, 0), raw)
