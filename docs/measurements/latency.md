@@ -20,3 +20,13 @@ Một lần thay trọn file 12 288 B: ghi `set.json.tmp`, đóng, đổi tên. 
 Đây là thời gian cả lần thay file, **không phải** một khoảng tắt cache liền mạch; khoảng dài nhất mà
 nhân 1 bị đóng băng là một lần xoá sector trong đó, và số khung mất khi ghi trong lúc nghe là phép kiểm
 riêng của E14-T7 (KẾ HOẠCH §5.5 luật 9).
+
+## 3. MQTT: board mất điện tới lúc broker báo `OFFLINE` (E5-T9)
+
+Board B giữ trong reset bằng RTS (không kịp gửi DISCONNECT), `sr-emqx` trên Docker Desktop, keepalive 15 s, một client `srhost` đăng ký `sr/+/up/#`.
+
+| Bản dựng | Lượt | Kết quả |
+|---|---|---|
+| `dev` @ `b38ffb3`, `espressif/mqtt` 1.1.0, EMQX 6.3.1 | 1 | `OFFLINE` sau ~19 s; thả reset thì `ONLINE` sau ~6 s và heartbeat ngay theo |
+
+19 s nằm trong mức 1,5 × keepalive = 22,5 s mà broker chờ trước khi phát di chúc.
