@@ -1,0 +1,77 @@
+# ── Sinh ra từ source (KE HOACH §4.3) ──
+# gen_*.h và */generated/ CÓ commit: contracts.yml sinh lại rồi git diff --exit-code.
+build/
+dist/
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ── Firmware ──
+firmware/build/
+firmware/build_*/
+firmware/**/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/**/sdkconfig
+firmware/**/sdkconfig.old
+firmware/sdkconfig.secrets
+firmware/managed_components/
+firmware/**/managed_components/
+firmware/models/**/*.espdl
+firmware/models/**/*.bin
+
+# ── Artifact nặng ──
+*.espdl
+*.onnx
+*.pth
+*.pt
+*.ckpt
+*.npz
+*.npy
+*.bin
+
+# ── Tiếng người là dữ liệu cá nhân (KE HOACH §1.4) ──
+*.wav
+*.flac
+*.mp3
+*.ogg
+*.opus
+
+# ── ml/artifacts — mọi thứ trừ khung thư mục ──
+/ml/artifacts/**
+!/ml/artifacts/**/
+!/ml/artifacts/**/.gitkeep
+
+# ── ml/data — chỉ giữ README, splits, manifest (KE HOACH §4.4) ──
+/ml/data/**
+!/ml/data/**/
+!/ml/data/**/.gitkeep
+!/ml/data/README.md
+!/ml/data/**/manifest.yaml
+!/ml/data/splits/**
+
+# ── host: phiên thu nằm ngoài repo ──
+/host/sessions/
+
+# ── Bí mật ──
+.env
+.env.*
+!.env.example
+deploy/mosquitto/passwd
+deploy/mosquitto/certs/
+
+# ── Datasheet: chỉ giữ INDEX.md (KE HOACH §2.5) ──
+hardware/datasheets/*.pdf
+
+# ── Cấu hình công cụ AI agent — chỉ ở máy local (KE HOACH §4.3) ──
+.claude/
+CLAUDE.md
+
+# ── Editor ──
+.vscode/
+.idea/
+*.swp
+.DS_Store

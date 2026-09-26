@@ -1,0 +1,12 @@
+* text=auto eol=lf
+
+*.espdl binary
+*.gold binary
+*.bin binary
+*.wav binary
+*.png binary
+*.pdf binary
+
+firmware/components/common/include/gen_*.h linguist-generated
+firmware/components/net_mqtt/include/gen_*.h linguist-generated
+**/generated/** linguist-generated
