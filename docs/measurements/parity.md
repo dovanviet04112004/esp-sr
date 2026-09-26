@@ -1,17 +1,19 @@
 # Parity C ↔ Python
 
 Kết quả `test_apps/parity` trên board, đọc `contracts/golden/`. Ngưỡng lấy từ `tolerance.yaml` của từng khối.
-Chạy: `pytest firmware/test_apps/parity/pytest_parity.py --target esp32s3 --embedded-services esp,idf --port /dev/ttyUSB0 -p no:cacheprovider`.
+App dựng bằng cờ trình biên dịch của `bench`, cũng là của `prod` (`-O2`, KẾ HOẠCH §3.14), hai lần: mọi module tắt với bộ
+vàng `chain`, và profile `modules` với bộ vàng của từng module thật. Chạy: `make parity-board`.
 
 | Khối | Số ca | Sai số tuyệt đối lớn nhất | SNR nhỏ nhất dB | Ngưỡng | Đối chứng âm đỏ | Commit | Ngày |
 |---|---|---|---|---|---|---|---|
-| `stft` — phổ phân tích | 4 | 7,6e-6 | 137,2 | ≤ 1e-4, ≥ 115 dB | — | 8cd377f | 26/09 |
-| `stft` — tổng hợp từ phổ vàng | 4 | 3,0e-7 | 137,4 | ≤ 1e-5, ≥ 115 dB | lệch một mẫu: 0,96, −3,1 dB → đỏ | 8cd377f | 26/09 |
-| `mel` — log-mel, ba cấu hình (40, 80, 24 dải) | 3 | 1,9e-6 | 139,9 | ≤ 1e-4, ≥ 115 dB | lệch một dải: 2,24, 3,0 dB → đỏ | e7de26f+ | 26/09 |
-| `mel` — MFCC (13, 20, 24 hệ số) | 3 | 1,5e-5 | 134,8 | ≤ 1e-3, ≥ 110 dB | — | e7de26f+ | 26/09 |
-| `chain` — `pcm` ra của mặt tiền `dsp_afe`, mọi module tắt (int16) | 4 | 1 LSB | 77,9 | ≤ 1 LSB, ≥ 60 dB | lệch một mẫu: 15 090 LSB, −2,9 dB → đỏ | ecaf140 | 26/09 |
-| `chain` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | — | ecaf140 | 26/09 |
-| `hpf` — biquad dạng II chuyển vị viết tay (ADR-0004), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | trễ một mẫu: 0,996, −3,1 dB → đỏ | e07ef05 | 26/09 |
+| `stft` — phổ phân tích | 4 | 7,6e-6 | 137,2 | ≤ 1e-4, ≥ 115 dB | — | cab1eb3 | 27/09 |
+| `stft` — tổng hợp từ phổ vàng | 4 | 3,0e-7 | 137,5 | ≤ 1e-5, ≥ 115 dB | lệch một mẫu: 0,96, −3,1 dB → đỏ | cab1eb3 | 27/09 |
+| `mel` — log-mel, ba cấu hình (40, 80, 24 dải) | 3 | 1,9e-6 | 140,0 | ≤ 1e-4, ≥ 115 dB | lệch một dải: 2,24, 3,0 dB → đỏ | cab1eb3 | 27/09 |
+| `mel` — MFCC (13, 20, 24 hệ số) | 3 | 1,5e-5 | 134,8 | ≤ 1e-3, ≥ 110 dB | — | cab1eb3 | 27/09 |
+| `chain` — `pcm` ra của mặt tiền `dsp_afe`, mọi module tắt (int16) | 4 | 1 LSB | 77,9 | ≤ 1 LSB, ≥ 60 dB | lệch một mẫu: 15 090 LSB, −2,9 dB → đỏ | cab1eb3 | 27/09 |
+| `chain` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | — | cab1eb3 | 27/09 |
+| `hpf` — biquad dạng II chuyển vị viết tay (ADR-0004), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | trễ một mẫu: 0,996, −3,1 dB → đỏ | cab1eb3 | 27/09 |
+| `balance` — nhân phức viết tay (ADR-0005), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | hệ số liên hợp: 26,0, −3,5 dB → đỏ | cab1eb3 | 27/09 |
 
 ## Bản tham chiếu Python: STFT phân tích rồi tổng hợp (E6-T1)
 
@@ -49,6 +51,14 @@ phán của phiên thật là sai số lớn nhất ≤ 1 LSB.
 ## `hpf` (E7-T1)
 
 Bản C (dạng II chuyển vị viết tay, ADR-0004) và bản Python làm cùng các bước float32 theo cùng thứ tự, hệ số tính cos và
-sin ở double rồi làm tròn một lần: máy tính và board B đều khớp **từng bit** trên cả bốn ca. Kernel `esp-dsp` dạng II mà
+sin ở double rồi làm tròn một lần, và `dsp_afe` dựng không gộp nhân-cộng (ADR-0006): máy tính và board B ở `-O2` đều
+khớp **từng bit** trên cả bốn ca. Bản gộp nhân-cộng lệch tới 2,0e-6 (`latency.md` §6), ngoài ngưỡng. Kernel `esp-dsp` dạng II mà
 ADR-0003 chọn trước đó lệch tới 1,2e-4 (68,7 dB) trên board ở ca hum 50 Hz −10 dBFS trên một chiều, vì bản hợp ngữ làm
 tròn khác và dạng II khuếch đại chênh lệch ở tần số thấp. Chạy lại bằng `make parity-board`.
+
+## `balance` (E7-T2)
+
+Bốn ca, mỗi ca 16 bước phổ `ch1` do bộ phân tích cho: hệ số dáng board B (−11 dB, đường pha −0,1 mẫu và −2,2°) trên ồn
+đều, hệ số đơn vị trên chirp (ra phải bằng vào), hệ số ngẫu nhiên −40 … +20 dB với pha bất kỳ trên phổ gần tràn thang,
+và hệ số dáng board trên phổ gần im lặng. Máy tính và board B ở `-O2` khớp **từng bit** cả bốn ca. Đối chứng âm nhân
+với hệ số liên hợp, lỗi dấu dễ mắc nhất của phép nhân phức: lệch 26,0, −3,5 dB, đỏ. Chạy lại bằng `make parity-board`.
