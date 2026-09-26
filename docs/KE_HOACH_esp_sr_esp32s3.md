@@ -574,6 +574,27 @@ khung nói cuối để không cắt cụt âm cuối. Đọc tín hiệu **chư
 lượng tuyệt đối. Thước (TỔNG QUAN V5.1.4): hơn ngưỡng năng lượng trần bằng F1 mức khung trên tập có
 nhãn, ghi riêng tỉ lệ bỏ sót và báo nhầm.
 
+Module là bản float32 của thuật toán WebRTC (`common_audio/vad`, giấy phép BSD-3, ghi ở
+`firmware/third_party/webrtc_vad/`), chạy mỗi bước 16 ms:
+
+| Phần | Cách làm |
+|---|---|
+| Vào | bước sạch nhân 32 768, vì mô hình WebRTC học trên thang `int16` |
+| Hạ mẫu | 16 → 8 kHz bằng cặp lọc thông tất nửa dải của WebRTC: 128 mẫu mỗi bước, nằm giữa khung 10 ms và 20 ms của nó |
+| Sáu dải | cây lọc thông tất tách đôi: 3–4 k, 2–3 k, 1–2 k, 500–1 k, 250–500 Hz và 80–250 Hz (lọc thông cao 80 Hz ở 500 Hz); 32, 32, 32, 16, 8, 8 mẫu mỗi bước. Trên 4 kHz không dùng, như WebRTC |
+| Đặc trưng | 10·log₁₀ năng lượng dải cộng bù từng dải; log₂ lấy tuyến tính trong mỗi quãng tám như WebRTC |
+| GMM | hai Gauss mỗi dải cho mỗi lớp, bảng khởi đầu của WebRTC; mật độ dùng 2^x tuyến tính từng quãng và bằng 0 khi số mũ vượt 21,49; tỉ số hợp lý mỗi dải là hiệu phần nguyên log₂ của hai tổng, sàn 2⁻²⁷ |
+| Quyết định | một dải vượt ngưỡng riêng, hoặc tổng có trọng số vượt ngưỡng chung; ngưỡng theo `aggressiveness` 0–3 lấy cột 20 ms của WebRTC, cột gần bước 16 ms nhất |
+| Thích nghi | chỉ khi tổng năng lượng các dải > 10; lớp nhiễu học khi không nói, lớp nói học khi nói; trung bình nhiễu kéo về mức tối thiểu trượt (16 giá trị nhỏ nhất của 100 bước gần nhất); hai lớp giữ cách nhau và trong giới hạn, đúng hằng số hiệu dụng của WebRTC |
+| Kéo dài | 240 ms (15 bước) thay cho bộ đếm kéo dài của WebRTC |
+
+Ba phép xấp xỉ (log₂, 2^x, phần nguyên của tỉ số) giữ nguyên vì ngưỡng của WebRTC được chỉnh trên chính chúng; chúng chỉ
+cần `frexp`, `ldexp`, `floor` và phép tính cơ bản, nên C khớp bản soi gương từng bit mà không phụ thuộc `logf`/`expf` của
+từng libm. Các hệ số thích nghi của WebRTC tính theo **khung**, dùng chung cho khung 10–30 ms; module giữ chúng theo **bước**,
+nên là ngoại lệ có chủ ý của luật hằng thời gian tính bằng giây (§3.1). Mọi bảng và hằng số nằm ở `vad:` của
+`contracts/afe.yaml`. Độ trung thành kiểm không cần nhãn: bản soi gương chạy ở khung 20 ms, cộng bộ đếm kéo dài của WebRTC,
+so từng khung với gói `webrtcvad` gốc (nhóm `dev` của `ml/`).
+
 `agc` — hai tầng:
 
 | Tầng | Việc | Chốt |
@@ -1072,6 +1093,7 @@ firmware/
 │   └── svc_dialog/    [C]   L5  # máy trạng thái hội thoại §5.4
 │
 ├── third_party/README.md
+│   └── webrtc_vad/{LICENSE, UPSTREAM.md}   # nguồn của thuật toán và bảng `vad` (§3.10); không vendor mã
 ├── models/                           # ❌ gitignore trừ README.md, models.lock.json, */meta.json
 │   └── {ns,wake,command,synth}/{*.espdl, meta.json}
 ├── test_apps/                        # test TÍCH HỢP toàn hệ; unit test nằm trong component
@@ -1408,7 +1430,7 @@ broker khởi động lại là mất `status` `offline` của máy đang tắt.
 | Bộ lệnh mặc định, câu trả lời | `contracts/commands/`, `contracts/responses/` | nướng vào LittleFS |
 | Ngưỡng khớp golden | `contracts/golden/<khối>/tolerance.yaml` | đọc file |
 | Hệ số hiệu chuẩn từng board | NVS `calib/*` (§6.2) | `sys_storage` — **số đo**, không phải hằng số |
-| Tham số số của module `dsp_afe` (tần số cắt, dải, bước học, hằng thời gian) | `contracts/afe.yaml` | `gen_afe.h` · `srpipe.generated.afe`; bản dựng chỉ chọn module bật bằng Kconfig |
+| Tham số số của module `dsp_afe` (tần số cắt, dải, bước học, hằng thời gian, bảng mô hình `vad`) | `contracts/afe.yaml` | `gen_afe.h` · `srpipe.generated.afe`; bản dựng chỉ chọn module bật bằng Kconfig |
 | Ngưỡng vận hành (`wake`, từ chối lệnh, gain sàn) | NVS `kws/*`, `afe/*`; `afe/*` gieo từ `contracts/afe.yaml`, `kws/*` từ `Kconfig` của `svc_listen` | `SET_CONFIG` qua MQTT |
 | URL broker, máy nhận luồng, credential | NVS `device/*`, giá trị lùi ở `Kconfig` | `sys_storage` |
 | Đường dẫn dữ liệu | `ml/configs/common/paths.yaml` | nạp config |
