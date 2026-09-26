@@ -692,8 +692,8 @@ dạng cần. Hai loại số đều ghi, nhưng chỉ loại thứ hai được
 
 ```
 esp-sr/
-├── .gitea/workflows/{contracts.yml, ml.yml, firmware.yml, host.yml}
-│                   ★ Gitea Actions đọc .gitea/workflows ở gốc repo; cần một act_runner đã đăng ký
+├── .github/workflows/{contracts.yml, ml.yml, firmware.yml, host.yml}
+│                   ★ CI chạy trên GitHub Actions của bản sao private; kết quả gắn ngược lên Gitea (§4.8)
 ├── .gitignore  ├── .gitattributes  ├── .editorconfig  ├── .pre-commit-config.yaml
 ├── ruff.toml                       # cấu hình ruff cho tools/; ml/ và host/ khai trong pyproject.toml riêng
 ├── README.md   ├── Makefile
@@ -725,6 +725,13 @@ esp-sr/
 | `.gitattributes` | `* text=auto eol=lf`, `*.espdl binary`, `*.gold binary`, `*.wav binary`, `*/generated/* linguist-generated` |
 | `.pre-commit-config.yaml` | `check_comments` · `check_layers` · `check_purity` · `ruff` · `clang-format` |
 | `Makefile` | điểm vào duy nhất: `make gen` · `make lint` · `make golden` · `make fw-dev` · `make measure` · `make report` |
+
+**Hai remote, một nguồn.** `origin` là Gitea nội bộ — nơi giữ mã và nơi đọc trạng thái. `github` là bản sao
+**private** chỉ để chạy CI, vì máy phát triển không gánh nổi runner Docker (ổ C: gần đầy, Docker Desktop hỏng
+đĩa khi thử). GitHub không vào được Gitea trong LAN, nên chiều ngược lại do `make ci-status` ở máy làm:
+đọc kết quả bằng `gh`, gắn trạng thái `github/<workflow>` lên commit trên Gitea. Push lên cả hai chỉ khi
+chủ dự án ra lệnh. Mật khẩu Gitea không bao giờ đi sang GitHub; token Gitea của `ci_status.py` nằm ở
+`~/.config/esp-sr/gitea_token`, ngoài repo.
 
 Ba khối `ml` / `firmware` / `host` **không bao giờ chép định nghĩa của nhau**. Lưới thời gian, hình
 học dàn micro, payload MQTT, khuôn luồng tiếng, bộ lệnh mặc định, vector vàng — tất cả nằm ở
@@ -1202,6 +1209,7 @@ Bàn thử dùng `mqtt://` trong mạng LAN; `prod` chỉ nhận `mqtts://` (§7
 | `check_layers.py` | bảng tầng §4.5.4, cấm `espressif/esp-sr` | pre-commit, CI |
 | `check_purity.py` | `common`, `dsp_*`, `lang_*` không include FreeRTOS, driver, log, heap | pre-commit, CI |
 | `budget.py` | gộp CSV của `bench_*` thành bảng RAM và µs theo module (TỔNG QUAN V5.0.10) | `make measure` |
+| `ci_status.py` | đọc kết quả GitHub Actions của một commit bằng `gh`, gắn trạng thái lên đúng commit ấy trên Gitea qua API | `make ci-status` |
 | `tests/` + `__init__.py` | `unittest` cho chính các script trên: hợp đồng hợp lệ, generator tất định và C sinh ra chạy đúng, mỗi luật kiểm có một ca vi phạm cố ý | `make test`, CI |
 
 ### 4.9 Cấm hardcode — mỗi hằng số có đúng một nguồn
