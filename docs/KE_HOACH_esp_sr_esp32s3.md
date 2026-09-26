@@ -51,7 +51,7 @@ Bảng này tồn tại cho tới khi TỔNG QUAN được sửa theo (E1-T9). S
 | 5 | `balance` đứng trước AEC, làm ở miền thời gian | Sau STFT, nhân **một hệ số phức mỗi vạch** | Bù theo dải ở miền tần số là một phép nhân; ở miền thời gian phải dựng bộ lọc cân bằng. Phép bù tuyến tính nên đổi chỗ với AEC không đổi kết quả | §3.4 |
 | 6 | "Bù bằng phần mềm chỉ sửa được biên độ", nhưng module `balance` lại "cân độ nhạy và pha" | Pha **tĩnh** bù được nếu đo ở hướng chính diện trong phòng ít vang; phần trôi theo nhiệt và tuổi thì không. Mốc 10° giữ nguyên làm tiêu chí chọn linh kiện | Hai câu trong TỔNG QUAN mâu thuẫn nhau | §2.3, §3.4 |
 | 7 | Thứ tự `AGC → VAD` | **`VAD → AGC`** | AGC chỉ được thích nghi khi có người nói, nên cần cờ VAD; VAD dựa trên năng lượng dải, nên phải đọc mức chưa bị AGC kéo | §3.10 |
-| 8 | DOA GCC-PHAT, không nói độ phân giải | Dò **lưới góc** trên phổ chéo đã làm trơn, không lấy đỉnh trễ nguyên | Micro cách 6,5 cm ở 16 kHz chỉ có ±3,03 mẫu trễ: lấy đỉnh nguyên chỉ ra 7 góc | §3.6 |
+| 8 | DOA GCC-PHAT, không nói độ phân giải | Dò **lưới góc** trên phổ chéo đã làm trơn, không lấy đỉnh trễ nguyên | Micro của board B cách 4,5 cm ở 16 kHz chỉ có ±2,10 mẫu trễ: lấy đỉnh nguyên chỉ ra 5 góc | §3.6 |
 | 9 | `command` so chuỗi âm vị với danh sách | **Chấm CTC có ràng buộc** từng lệnh bằng thuật toán tiến, kèm **biến thể phương ngữ** | Giải tham lam rồi so chuỗi vứt đi xác suất; tập lệnh đóng cho phép chấm thẳng từng lệnh với giá gần bằng không | §3.12 |
 | 10 | Thanh điệu: ba đường | Bốn đường, thêm **nhãn thanh chen trong cùng chuỗi CTC**; đặc trưng cao độ là biến số phải đo | Một đầu ra, bộ ký hiệu nhỏ, không phải căn hai đầu ra theo thời gian | §3.11, §3.12 |
 | 11 | Từ đánh thức 2–3 âm tiết | **3–4 âm tiết** | Âm tiết tiếng Việt ngắn; cụm hai âm tiết dài chừng nửa giây và trùng lời nói thường ngày nhiều | §3.11 |
@@ -213,11 +213,14 @@ WS. TX dùng chung BCLK và WS nên **cũng phải là khe 32 bit × 2**: `drv_a
 lỗ âm). Nó đi vào `contracts/array.yaml` và từ đó vào `doa`, `gsc`, `bss` và bộ dựng cảnh. Bảng dưới
 cho biết hai đầu của dải 4–6,5 cm trong hướng dẫn của Espressif mua được gì:
 
-| | 4 cm | 6,5 cm |
-|---|---|---|
-| Trễ lớn nhất giữa hai kênh ở 16 kHz | ±1,87 mẫu | ±3,03 mẫu |
-| Tần số bắt đầu gập vòng pha, c / 2d | 4,29 kHz | 2,64 kHz |
-| Tính hướng của chùm cố định dưới 1 kHz | gần như không có | gần như không có, nhưng hơn |
+| | 4 cm | **4,5 cm — board B (E2-T3)** | 6,5 cm |
+|---|---|---|---|
+| Trễ lớn nhất giữa hai kênh ở 16 kHz | ±1,87 mẫu | **±2,10 mẫu** | ±3,03 mẫu |
+| Tần số bắt đầu gập vòng pha, c / 2d | 4,29 kHz | **3,81 kHz** | 2,64 kHz |
+| Tính hướng của chùm cố định dưới 1 kHz | gần như không có | gần như không có | gần như không có, nhưng hơn |
+
+Board B đo bằng thước được khoảng **4,5 cm** giữa tâm hai lỗ âm; E2-T4 kiểm lại bằng tiếng (trễ của tiếng
+vỗ tay ở đầu dàn cho `d = c·τ_max`). Số nằm trong dải, nên dàn giữ nguyên.
 
 Khoảng cách đo ra nằm ngoài 4–6,5 cm thì ghi thành một dòng ở `docs/measurements/mic_array.md` kèm hệ
 quả cho `doa`, và **chỉ gắn lại dàn** nếu Cửa 1 trượt vì nó. Gắn lại thì chọn 6,5 cm: độ phân giải
@@ -360,7 +363,7 @@ OM-LSA nằm ngay trong `dsp_afe`; bản RNNoise nằm ở `ai_engine/src/ns/` v
 | `hpf` | thuần | `dsp_afe` | IIR bậc hai Butterworth, DF2 chuyển vị | 80 Hz | < 20 µs hai kênh | E7-T1 |
 | `balance` | thuần | `dsp_afe` | nhân hệ số phức hiệu chuẩn mỗi vạch cho `ch1` | từ NVS `calib/bal` | < 10 µs | E7-T2 |
 | `aec` | thuần | `dsp_afe` | MDF chồng-lưu, bước học tự chỉnh, khử vọng dư | 8 phân đoạn × 256 = 128 ms đuôi | ~1,3 ms hai micro | E10-T4 |
-| `doa` | thuần | `dsp_afe` | GCC-PHAT trên phổ chéo đã làm trơn, dò lưới 2° | dải 200 Hz – c/2d | ~300 µs khi cập nhật | E8-T1 |
+| `doa` | thuần | `dsp_afe` | GCC-PHAT trên phổ chéo đã làm trơn, dò lưới 2° | dải 200 Hz – c/2d | ~550 µs khi cập nhật | E8-T1 |
 | `gsc` | thuần | `dsp_afe` | chùm trễ và cộng, ma trận chặn, NLMS rò có điều khiển thích nghi | μ 0,05, rò 1e-4 | ~150 µs | E8-T2 |
 | `bss` | thuần | `dsp_afe` | AuxIVA online, cập nhật IP2 kín cho 2×2, chiếu ngược | quên α ứng τ 1 s | ~400 µs | E8-T3 |
 | `ns` sàn | thuần | `dsp_afe` | OM-LSA + IMCRA | gain sàn −12 dB | ~350 µs | E9-T1 |
@@ -430,8 +433,8 @@ Cỡ ~650 µs mỗi micro 🔬. Trạng thái: trọng số 2 micro × 8 × 257 
 
 **GCC-PHAT (Knapp và Carter, 1976) trên phổ chéo đã làm trơn, dò lưới góc thay vì lấy đỉnh trễ.**
 
-Với d = 6,5 cm và fs = 16 kHz, trễ lớn nhất là 3,03 mẫu. Lấy đỉnh của hàm tương quan ở trễ nguyên
-chỉ ra 7 giá trị, tức 7 góc, và ở gần hai đầu dàn một mẫu trễ ứng với hơn 30°. Nên:
+Với d = 4,5 cm của board B và fs = 16 kHz, trễ lớn nhất là 2,10 mẫu. Lấy đỉnh của hàm tương quan ở trễ
+nguyên chỉ ra 5 giá trị, tức 5 góc, và ở gần hai đầu dàn một mẫu trễ ứng với gần 60°. Nên:
 
 ```
 Φ[k]  ← β·Φ[k] + (1−β)·X₀[k]·conj(X₁[k])          làm trơn, τ_β = 0,2 s
@@ -441,12 +444,12 @@ R(θ)  = Σₖ Re{ Φ[k]/|Φ[k]| · exp(j·ωₖ·d·cosθ / c) }   với k tron
 
 | Chốt | Giá trị | Vì sao |
 |---|---|---|
-| Dải dùng | 200 Hz – c/2d (2,64 kHz ở 6,5 cm) | trên tần số gập, vạch nào cũng cho đỉnh ma; dải đầy đủ là biến thể đem so ở E8-T1 |
+| Dải dùng | 200 Hz – c/2d (3,81 kHz ở 4,5 cm) | trên tần số gập, vạch nào cũng cho đỉnh ma; dải đầy đủ là biến thể đem so ở E8-T1 |
 | Pha xoay | tính dồn: `exp(jωₖτ) = exp(jω₁τ)^k`, mỗi vạch một phép nhân phức | bảng cos/sin 91 góc × 257 vạch là 187 KB, không đáng |
 | Khi nào cập nhật | khung trước có `vad = 1`, mỗi hai khung một lần | ngoài lúc nói, đỉnh là hướng của nhiễu |
 | Ra | góc 0–180°, độ tin là tỉ số đỉnh trên trung bình | trước và sau không phân biệt được (§2.3) |
 
-Chi phí ~91 × 60 vạch phép nhân phức mỗi lần cập nhật, cỡ 300 µs 🔬.
+Chi phí ~91 góc × ~115 vạch phép nhân phức mỗi lần cập nhật, cỡ 550 µs 🔬.
 
 **Thước** (TỔNG QUAN V5.2.1): sai số góc trung bình và phần trăm khung trong ±10° trên cảnh dựng có
 nhãn, theo SNR và RT60; ghi riêng vùng gần hai đầu dàn (0–30°, 150–180°) vì ở đó độ phân giải kém
@@ -470,8 +473,8 @@ người nói lọt vào `B` (lái lệch, vang) rồi bộ lọc học cách tr
 **không có người nói** hoặc khi tỉ số công suất `F/B` thấp; rò `λ` và chặn chuẩn `W_max` giới hạn
 thiệt hại khi điều kiện ấy sai.
 
-**Giới hạn vật lý phải ghi trước khi đo.** Ở 6,5 cm, chùm cố định gần như **không có tính hướng dưới
-1 kHz** — bước sóng 34 cm dài gấp năm lần khoảng cách micro. Phần lợi đến từ bộ trừ thích nghi với
+**Giới hạn vật lý phải ghi trước khi đo.** Ở 4,5 cm của board B, chùm cố định gần như **không có tính
+hướng dưới 1 kHz** — bước sóng 34 cm dài gần gấp tám lần khoảng cách micro. Phần lợi đến từ bộ trừ thích nghi với
 **nguồn nhiễu có hướng**; với nhiễu khuếch tán (điều hoà, đám đông) hai micro chỉ mua được cỡ 3 dB 🔬.
 Kỳ vọng cao hơn thế là kỳ vọng sai.
 

@@ -1,8 +1,8 @@
 # Microphone array geometry and channel convention (KEHOACH 2.3).
-# spacing_m is nominal until E2-T3 replaces it with the measured value.
+# spacing_m: about 45 mm between port centres, by ruler on board B (E2-T3, 26/09); E2-T4 checks it by sound.
 version: 1
 n_mics: 2
-spacing_m: 0.065
+spacing_m: 0.045
 speed_of_sound_m_s: 343.0
 channels:
   - name: ch0
