@@ -7,6 +7,7 @@
 #include "dsp_afe.h"
 #include "dsp_afe/balance.h"
 #include "dsp_afe/hpf.h"
+#include "dsp_afe/vad.h"
 #include "dsp_spec/fft.h"
 #include "dsp_spec/mel.h"
 #include "dsp_spec/stft.h"
@@ -183,10 +184,30 @@ static void bench_balance(void)
     report(&row, &t);
 }
 
+static void bench_vad(void)
+{
+    const dsp_afe_vad_config_t cfg = {.aggressiveness = 0, .hangover_ms = GEN_AFE_VAD_HANGOVER_MS};
+    row_t row = {.module = "dsp_afe vad", .core = CORE_SACH, .in_total = false};
+    row.hot_bytes = dsp_afe_vad_workspace_bytes(&cfg);
+    void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
+    const size_t before = heap_free();
+    dsp_afe_vad_t *vad = NULL;
+    ESP_ERROR_CHECK(dsp_afe_vad_init(&vad, &cfg, mem, row.hot_bytes));
+    row.static_bytes = before - heap_free();
+    bool speech = false;
+    timing_t t = {0};
+    for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
+        const uint32_t start = esp_cpu_get_cycle_count();
+        ESP_ERROR_CHECK(dsp_afe_vad_process(vad, s_hop[0], &speech));
+        if (h >= WARMUP_HOPS) { timing_add(&t, start); }
+    }
+    report(&row, &t);
+}
+
 static void bench_chain(void)
 {
     const dsp_afe_config_t cfg = {.input_format = "MM", .spatial = DSP_AFE_SPATIAL_NONE, .calib = &s_calib};
-    row_t row = {.module = "dsp_afe chuỗi (hpf + stft x2 + balance + trộn + istft)",
+    row_t row = {.module = "dsp_afe chuỗi (hpf + stft x2 + balance + trộn + istft + vad)",
                  .core = CORE_SACH,
                  .in_total = true};
     ESP_ERROR_CHECK(dsp_afe_workspace_bytes(&cfg, &row.hot_bytes, &row.cold_bytes));
@@ -240,6 +261,8 @@ static void core1_benches(void *done)
     bench_hpf();
     vTaskDelay(1);
     bench_balance();
+    vTaskDelay(1);
+    bench_vad();
     xTaskNotifyGive((TaskHandle_t)done);
     vTaskDelete(NULL);
 }
