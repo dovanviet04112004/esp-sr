@@ -1,0 +1,10 @@
+name: speech_commands
+source_url: http://download.tensorflow.org/data/speech_commands_v0.02.tar.gz
+downloaded: 2026-09-07            # taken into raw/noise/speech_commands on 2026-09-27 from an earlier download
+license: CC BY 4.0
+sha256: {"speech_commands/ (tree)": ded5bbb6c0c0a8f5cf964f50d7636e17ef9a757a2933e114c4e450b0f652d9cb}
+counts: {minutes: 6.7, files: 6}
+consumed_by: [vad]
+notes: >-
+  Only _background_noise_/ (dishes, bike, miaowing, pink, tap, white; 16 kHz) with the corpus LICENSE and
+  README; the word clips are not taken. Tree sha256 as in vivos.yaml.

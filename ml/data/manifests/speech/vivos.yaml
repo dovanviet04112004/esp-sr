@@ -1,0 +1,11 @@
+name: vivos
+source_url: https://ailab.hcmus.edu.vn/vivos
+downloaded: 2026-09-07            # taken into raw/speech/vivos on 2026-09-27 from an earlier download on this machine
+license: CC BY-NC-SA 4.0
+sha256: {"vivos/ (tree)": 6325ac214890d6a429c29cf63d707e3567ce04b98967548ef0e3e40c627ec6db}
+counts: {hours: 15.67, speakers: 65, utterances: 12420, train_hours: 14.92, test_hours: 0.75, test_speakers: 19}
+consumed_by: [command, vad]
+notes: >-
+  Release 1.00 (2016), 16 kHz 16-bit mono, as extracted. Tree sha256 is the sha256 of
+  `find . -type f | LC_ALL=C sort | xargs -d '\n' sha256sum` run inside vivos/. Non-commercial: the
+  restriction follows any model trained on it (KEHOACH 1.4). vad scores on test/ only.
