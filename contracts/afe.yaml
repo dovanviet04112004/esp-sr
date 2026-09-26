@@ -18,6 +18,61 @@ bss:
   forget_tau_s: 1.0
 vad:
   hangover_ms: 240
+  # WebRTC VAD in float32 (KEHOACH 3.10), its tables as real values; source in firmware/third_party/webrtc_vad.
+  # Bands 80-250, 250-500, 500-1k, 1-2k, 2-3k, 3-4k Hz; Gaussian tables [gaussian][band]; dB of int16-scale energy.
+  bands: 6
+  gaussians: 2
+  noise_weights: [0.265625, 0.484375, 0.5625, 0.515625, 0.4140625, 0.1953125,
+                  0.734375, 0.515625, 0.4375, 0.484375, 0.5859375, 0.8046875]
+  speech_weights: [0.375, 0.640625, 0.3515625, 0.6796875, 0.390625, 0.3671875,
+                   0.625, 0.359375, 0.6484375, 0.3203125, 0.609375, 0.6328125]
+  noise_means_db: [52.640625, 38.21875, 55.1953125, 52.4609375, 52.8984375, 26.3203125,
+                   59.734375, 30.1796875, 61.09375, 56.765625, 39.21875, 34.078125]
+  speech_means_db: [64.890625, 78.7890625, 78.734375, 92.3671875, 92.5234375, 49.2890625,
+                    74.0078125, 74.7734375, 84.9921875, 59.2265625, 63.90625, 58.4609375]
+  noise_stds_db: [2.953125, 8.3125, 3.8515625, 4.546875, 5.375, 4.6328125,
+                  3.703125, 5.4453125, 3.7109375, 5.375, 3.2890625, 3.5546875]
+  speech_stds_db: [4.3359375, 3.9453125, 4.4296875, 4.09375, 4.5703125, 9.6171875,
+                   3.9765625, 6.46875, 3.84375, 12.03125, 8.4296875, 6.640625]
+  spectrum_weights: [6, 8, 10, 12, 14, 16]
+  band_offset_db: [23.0, 23.0, 17.0, 11.0, 11.0, 11.0]
+  # By aggressiveness 0..3, WebRTC's 20 ms column; local in log2 units, global over llr times spectrum weight.
+  local_threshold: [5.25, 8.0, 19.5, 23.5]
+  global_threshold: [48.0, 80.0, 260.0, 1050.0]
+  min_energy: 10.0                    # sum of band energies below which the hop is not modelled
+  likelihood_floor: 7.450580596923828e-09   # 2^-27, the Q27 LSB of WebRTC's likelihood sums
+  posterior_floor: 3.0517578125e-05         # 2^-15, below it the first Gaussian takes the whole posterior
+  exponent_limit: 21.4892578125       # (x-m)^2/2s^2 beyond which a density is 0
+  noise_mean_step: 0.019989013671875
+  speech_mean_step: 0.20001220703125
+  noise_std_step: 0.0009765625
+  speech_std_step: 0.025
+  floor_pull: 0.6015625               # share of the gap to the tracked minimum the noise means move each hop
+  min_std_db: 3.0
+  mean_min_db: [5.0, 6.0]             # per Gaussian, both classes
+  noise_gaussian_max_db: [72.0, 71.0, 70.0, 69.0, 68.0, 67.0,
+                          73.0, 72.0, 71.0, 70.0, 69.0, 68.0]
+  # Band b of the speech model is capped by the cap of band b-1 (100 for band 0) plus 5, as in WebRTC.
+  speech_gaussian_max_db: [105.0, 94.0, 94.0, 95.0, 95.0, 95.0]
+  noise_mean_max_db: [72.0, 71.0, 70.0, 69.0, 68.0, 67.0]
+  speech_mean_max_db: [89.0, 89.0, 90.0, 90.0, 90.0, 90.0]
+  min_separation_db: [17.0, 17.0, 18.0, 18.0, 18.0, 18.0]
+  separation_speech_share: 0.8125
+  separation_noise_share: 0.1875
+  min_track_values: 16
+  min_track_window_hops: 100
+  min_track_median_index: 2
+  min_track_start_db: 100.0
+  min_track_empty_db: 625.0
+  min_smooth_first: 3.0517578125e-05
+  min_smooth_down: 0.20001220703125
+  min_smooth_up: 0.989990234375
+  downsample_allpass: [0.6400146484375, 0.169921875]
+  split_allpass: [0.6400146484375, 0.170013427734375]
+  low_band_hpf_b: [0.40472412109375, -0.8094482421875, 0.40472412109375]
+  low_band_hpf_a: [-0.473388671875, 0.343017578125]
+  db_per_log2: 3.0102999566398120
+  log2_e: 1.4426950408889634
 agc:
   up_db_per_s: 3.0
   down_db_per_s: 6.0
