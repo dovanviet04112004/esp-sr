@@ -29,6 +29,13 @@
 #define CASE_BYTES_MAX (128 * 1024)
 #define PCM_FULL_SCALE 32768.0f
 
+#if CONFIG_DSP_AFE_VAD_ENABLE
+// A real vad may call the test tone speech; its own golden cases judge it.
+static const bool kVadBuilt = true;
+#else
+static const bool kVadBuilt = false;
+#endif
+
 static unsigned s_failures;
 
 static const dsp_afe_config_t kPlain = {
@@ -111,7 +118,7 @@ static void check_round_trip(const dsp_afe_config_t *cfg, const char *what)
         dsp_afe_frame_t out;
         fill_hop(in, n_channels, h, false);
         ok = dsp_afe_feed(afe, in, 1) == ESP_OK && dsp_afe_fetch(afe, &out) == ESP_OK && out.seq == h &&
-             out.doa_deg == -1 && out.vad == 0 && out.gain_db == 0 && out.flags == want_flags;
+             out.doa_deg == -1 && (kVadBuilt || out.vad == 0) && out.gain_db == 0 && out.flags == want_flags;
         for (size_t i = 0; ok && h > 0 && i < GEN_GRID_HOP_SAMPLES; i++) {
             const int err = abs(out.pcm[i] - want[i]);
             worst = err > worst ? err : worst;
@@ -337,7 +344,7 @@ static void check_module_shells(void)
     check(dsp_afe_vad_workspace_bytes(&vad_bad) == 0 &&
               dsp_afe_vad_init(&vad, &vad_cfg, region(bytes), bytes) == ESP_OK &&
               dsp_afe_vad_process(vad, hop, &speech) == ESP_OK && !speech,
-          "vad shell: no hop is speech, aggressiveness 4 refused");
+          "vad: a silent hop is not speech, aggressiveness 4 refused");
 
     const dsp_afe_agc_config_t agc_cfg = {-26.0f, -10.0f, 30.0f, 3.0f, 6.0f, -3.0f, 4.0f};
     dsp_afe_agc_t *agc = NULL;

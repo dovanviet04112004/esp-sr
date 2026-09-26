@@ -1,5 +1,5 @@
-/** Two-class Gaussian mixture on six sub-band log energies, with hangover (KEHOACH 3.10).
- *  Reads the clean signal ahead of agc, since its features are absolute energies.
+/** The WebRTC VAD in float32: a two-class Gaussian mixture on six band levels, then a hangover
+ * (KEHOACH 3.10). Reads the clean signal ahead of agc, since its features are absolute energies.
  */
 #pragma once
 
@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "gen_afe.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +20,11 @@ typedef struct {
 } dsp_afe_vad_config_t;
 
 typedef struct dsp_afe_vad_s dsp_afe_vad_t;
+
+typedef struct {
+    float level_db[GEN_AFE_VAD_BANDS]; // band levels, dB of int16-scale energy
+    bool raw;                          // GMM decision ahead of the hangover
+} dsp_afe_vad_detail_t;
 
 /** Bytes this configuration needs.
  *  @ctx any | non-blocking
@@ -35,6 +41,11 @@ esp_err_t dsp_afe_vad_init(dsp_afe_vad_t **out, const dsp_afe_vad_config_t *cfg,
  *  @ctx any | non-blocking
  */
 esp_err_t dsp_afe_vad_process(dsp_afe_vad_t *st, const float *hop, bool *speech);
+
+/** What the last dsp_afe_vad_process saw: its six band levels and its decision ahead of the hangover.
+ *  @ctx any | non-blocking | same task as dsp_afe_vad_process
+ */
+void dsp_afe_vad_detail(const dsp_afe_vad_t *st, dsp_afe_vad_detail_t *out);
 
 #ifdef __cplusplus
 }
