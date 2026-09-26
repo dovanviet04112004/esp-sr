@@ -1297,6 +1297,13 @@ Desktop publish thì board tới được, như cổng 1883 của broker.
 phiên, đọc từ log boot của board, vì luồng tiếng không mang chúng. Tên kênh của từng `mode` nằm ở
 `contracts/stream/frame.yaml`, không gõ lại ở `host/`.
 
+`mqtt_rx.py` và `live.py` đăng nhập broker bằng tài khoản `srhost` (`SRHOST_MQTT_*` trong `host/.env`), đăng
+ký mọi topic `up` lấy từ code sinh và kiểm từng payload bằng `SCHEMAS`. Payload không phải JSON, sai schema
+hay mang `deviceId` khác với topic **không bị bỏ lặng lẽ**: nó thành một dòng jsonl có lý do và bản gốc, và
+`live.py` đếm nó trên màn hình. File jsonl do người chạy chỉ ra bằng `--jsonl`, mỗi lần chạy nối thêm vào.
+`live.py` chạy thẳng trong WSL: kết nối đi ra tới cổng 1883 của Docker Desktop ở `localhost`, nên không cần
+container như máy nhận luồng.
+
 ### 4.7 `deploy/`
 
 ```
