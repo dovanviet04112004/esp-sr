@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from srpipe.dsp import emit_golden
-from srpipe.dsp.spec import stft
+from srpipe.dsp.spec import mel, stft
 from srpipe.golden.gold import read_gold
 
 
@@ -32,3 +32,17 @@ def test_the_negative_control_is_one_sample_late() -> None:
     right = stft.synthesize_signal(spectra)
     np.testing.assert_array_equal(case["rebuilt"][1:], right[:-1])
     assert np.max(np.abs(case["rebuilt"] - right)) > 0.1
+
+
+def test_committed_mel_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_mel(tmp_path):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
+
+
+def test_the_mel_negative_control_is_one_band_off() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "mel" / "case_neg_000.gold")
+    cfg, _ = emit_golden.MEL_CASES[0]
+    bank = mel.Mel(cfg)
+    right = np.stack([bank.log(b[:, 0] + 1j * b[:, 1]) for b in case["bins"]])
+    np.testing.assert_array_equal(case["log_mel"], np.roll(right, -1, axis=1))
