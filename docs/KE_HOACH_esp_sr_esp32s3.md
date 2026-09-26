@@ -404,7 +404,7 @@ bù ghi thành số, đo lại ở hai nhiệt độ phòng để biết phần 
 
 | Thành phần | Chốt | Vì sao |
 |---|---|---|
-| Khung | chồng-lưu, cửa sổ chữ nhật | phép chập tuyến tính cần chồng-lưu; cửa sổ căn Hann của STFT không cho phép chập tuyến tính, nên AEC có FFT riêng |
+| Khung | chồng-lưu, cửa sổ chữ nhật | phép chập tuyến tính cần chồng-lưu; cửa sổ căn Hann của STFT không cho phép chập tuyến tính, nên AEC có phép biến đổi riêng — chạy trên **cùng** bộ FFT 512 điểm của chuỗi mà `dsp_afe_aec_init` nhận vào, để bảng `dl_fft` chỉ cấp một lần trong `sach_task` (luật 7 §4.5.3) |
 | Ràng buộc gradient | luân phiên: mỗi khối ràng buộc **một** phân đoạn | ràng buộc đủ cả 8 là 16 FFT mỗi khối mỗi micro; luân phiên giữ hội tụ với 2 FFT |
 | Bước học | tự chỉnh theo ước lượng vọng dư (Valin, 2007) | cho phép bỏ bộ dò hai bên cùng nói, thứ hay dò sai nhất |
 | Khử vọng dư | ước phổ vọng dư mỗi vạch, **chuyển cho khe `ns`** cộng vào phổ nhiễu | loa nhỏ mở to méo phi tuyến; bộ lọc tuyến tính dừng ở cỡ 15–25 dB 🔬 |
