@@ -35,6 +35,8 @@
 #define DEVICE_ID_BYTES 33 // deviceId of KEHOACH 6.2: at most 32 characters
 #define PUSH_FOREVER UINT32_MAX
 #define RADIO_OFF_SLACK_MS 5000
+// INMP441 output drifts from about -1400 LSB to 0 in the first 0.5 s after power-up (board B, 26/09).
+#define SETTLE_MS 1000
 
 #if CONFIG_CAPTURE_REF_ENABLE
 #define WITH_REF true
@@ -45,7 +47,8 @@
 static const char *TAG = "capture";
 
 static int16_t s_hop[GEN_GRID_HOP_SAMPLES * (GEN_ARRAY_N_MICS + 1)];
-// app_main sets it while capture_task does not exist yet; from then on only capture_task writes it.
+// app_main sets both while capture_task does not exist yet; from then on only capture_task writes them.
+static uint32_t s_hops_to_skip;
 static uint32_t s_hops_to_push = PUSH_FOREVER;
 static TaskHandle_t s_waiter;
 
@@ -55,7 +58,10 @@ static void capture_task(void *arg)
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
     for (;;) {
         uint32_t seq = 0;
-        if (drv_audio_read_frame(s_hop, &seq, DMA_WAIT_MS) == ESP_OK && s_hops_to_push > 0) {
+        const bool got = drv_audio_read_frame(s_hop, &seq, DMA_WAIT_MS) == ESP_OK;
+        if (got && s_hops_to_skip > 0) {
+            s_hops_to_skip--;
+        } else if (got && s_hops_to_push > 0) {
             svc_report_stream_push(seq, s_hop, NULL);
             if (s_hops_to_push != PUSH_FOREVER && --s_hops_to_push == 0) { xTaskNotifyGive(s_waiter); }
         }
@@ -63,10 +69,15 @@ static void capture_task(void *arg)
     }
 }
 
+static uint32_t hops_in_ms(uint64_t ms)
+{
+    const uint64_t samples = ms * GEN_GRID_SAMPLE_RATE_HZ / 1000;
+    return (uint32_t)((samples + GEN_GRID_HOP_SAMPLES - 1) / GEN_GRID_HOP_SAMPLES);
+}
+
 static uint32_t radio_off_hops(void)
 {
-    const uint64_t samples = (uint64_t)CONFIG_CAPTURE_RADIO_OFF_S * GEN_GRID_SAMPLE_RATE_HZ;
-    return (uint32_t)((samples + GEN_GRID_HOP_SAMPLES - 1) / GEN_GRID_HOP_SAMPLES);
+    return hops_in_ms((uint64_t)CONFIG_CAPTURE_RADIO_OFF_S * 1000);
 }
 
 static size_t stream_buffer_bytes(size_t channels)
@@ -135,6 +146,7 @@ void app_main(void)
         drv_audio_channels() > GEN_ARRAY_N_MICS ? GEN_STREAM_MODE_RAW_REF : GEN_STREAM_MODE_RAW;
     const bool radio_off = CONFIG_CAPTURE_RADIO_OFF_S > 0;
     if (radio_off) {
+        s_hops_to_skip = hops_in_ms(SETTLE_MS);
         s_hops_to_push = radio_off_hops();
         s_waiter = xTaskGetCurrentTaskHandle();
         ESP_ERROR_CHECK(svc_report_stream_start(mode, host, port, CONFIG_CAPTURE_DURATION_S));
@@ -143,7 +155,7 @@ void app_main(void)
     xTaskCreatePinnedToCore(capture_task, "capture_task", CAPTURE_STACK_BYTES, NULL, CAPTURE_PRIORITY, NULL,
                             CAPTURE_CORE);
     if (radio_off) {
-        const uint32_t wait_ms = CONFIG_CAPTURE_RADIO_OFF_S * 1000 + RADIO_OFF_SLACK_MS;
+        const uint32_t wait_ms = CONFIG_CAPTURE_RADIO_OFF_S * 1000 + SETTLE_MS + RADIO_OFF_SLACK_MS;
         if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms)) == 0) {
             ESP_LOGE(TAG, "radio-off recording did not finish in %u ms", (unsigned)wait_ms);
             return;
