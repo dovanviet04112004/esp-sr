@@ -15,7 +15,7 @@ function(add_afe_host name)
     add_executable(${name} main/test_dsp_afe_host.c "${AFE}/src/dsp_afe.c" ${ARGN})
     target_include_directories(${name} PRIVATE shim "${AFE}/include" "${AFE}/priv_include")
     set_target_properties(${name} PROPERTIES C_STANDARD 17 C_EXTENSIONS ON)
-    target_compile_options(${name} PRIVATE -Wall -Wextra -Werror -Wno-sign-compare)
+    target_compile_options(${name} PRIVATE -Wall -Wextra -Werror -Wno-sign-compare -ffp-contract=off)
     target_link_libraries(${name} PRIVATE dsp_spec_host_lib)
 endfunction()
 

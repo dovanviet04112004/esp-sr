@@ -33,3 +33,5 @@ idf_component_register(
     PRIV_INCLUDE_DIRS "priv_include"
     REQUIRES common dsp_spec
 )
+# Every float32 step rounds once, as in the Python mirror, so the C matches it bit for bit (KEHOACH 3.14, ADR-0006).
+target_compile_options(${COMPONENT_LIB} PRIVATE -ffp-contract=off)
