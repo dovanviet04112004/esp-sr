@@ -11,6 +11,7 @@ import argparse
 import json
 import logging
 import select
+import signal
 import socket
 import sys
 import threading
@@ -202,6 +203,14 @@ def _read_exact(conn: socket.socket, n: int, stop: threading.Event, superseded: 
     return bytes(buf)
 
 
+def stop_on_signals() -> threading.Event:
+    """An event that SIGINT and SIGTERM set, so a recording ends between frames, never inside one."""
+    stop = threading.Event()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(sig, lambda *_: stop.set())
+    return stop
+
+
 def summary_json(summary: Summary) -> dict:
     return {**asdict(summary), "duration_s": round(summary.duration_s, 3)}
 
@@ -222,9 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     recorder = Recorder(args.out)
     log.info("listening on %s:%d", cfg.stream_bind, server.port)
     try:
-        server.run(recorder, threading.Event(), args.duration_s)
-    except KeyboardInterrupt:
-        pass
+        server.run(recorder, stop_on_signals(), args.duration_s)
     finally:
         server.close()
         summary = recorder.close()

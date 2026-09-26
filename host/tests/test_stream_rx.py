@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import signal
 import threading
 import wave
 from pathlib import Path
@@ -98,3 +100,15 @@ def test_seq_wraps_without_a_gap(tmp_path: Path) -> None:
             raw[stream.HEADER_BYTES :],
         )
     assert recorder.close().gaps == []
+
+
+def test_a_signal_sets_the_stop_event_instead_of_raising() -> None:
+    saved = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        for sig in saved:
+            stop = stream_rx.stop_on_signals()
+            os.kill(os.getpid(), sig)
+            assert stop.wait(timeout=1.0)
+    finally:
+        for sig, handler in saved.items():
+            signal.signal(sig, handler)

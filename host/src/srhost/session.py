@@ -22,7 +22,7 @@ from pathlib import Path
 
 from srhost.config import ConfigError, RecordConfig, record_config
 from srhost.generated import grid
-from srhost.stream_rx import Recorder, StreamServer
+from srhost.stream_rx import Recorder, StreamServer, stop_on_signals
 
 KINDS = ("wake", "cmd", "neg", "noise", "probe")
 SPEAKER_KINDS = ("wake", "cmd", "neg")
@@ -191,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
         prompt=args.prompt,
     )
     try:
-        out = record(labels, record_config(), args.duration_s)
+        out = record(labels, record_config(), args.duration_s, stop_on_signals())
     except (ConfigError, LabelError, RuntimeError, OSError) as err:
         print(f"session: {err}", file=sys.stderr)
         return 2
