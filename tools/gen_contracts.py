@@ -204,7 +204,8 @@ def gen_stream_h(s: dict) -> str:
         f"_Static_assert(offsetof(gen_stream_header_t, {fl['name']}) == {fl['offset']}, \"{fl['name']} offset\");"
         for fl in s["fields"]
     ]
-    out.append("\nstatic inline uint8_t gen_stream_mode_channels(gen_stream_mode_t mode)\n{\n    switch (mode) {")
+    out.append("\n/** Channels a frame carries in this mode; 0 for an unknown mode.\n *  @ctx any | non-blocking\n */")
+    out.append("static inline uint8_t gen_stream_mode_channels(gen_stream_mode_t mode)\n{\n    switch (mode) {")
     out += [f"    case GEN_STREAM_MODE_{m['name'].upper()}: return {m['channels']};" for m in s["modes"]]
     out.append("    default: return 0;\n    }\n}")
     return "\n".join(out) + "\n"
@@ -263,6 +264,10 @@ def gen_topics_h(t: dict) -> str:
         out.append(f'    [GEN_TOPIC_{x["id"].upper()}] = {{"{x["prefix"]}", "{x["suffix"]}", {flags}}},')
     out.append("};\n")
     out.append(
+        "/** Write the NUL-terminated topic path of id for device_id into out.\n"
+        " *  @ctx any | non-blocking | caller owns out, GEN_TOPIC_MAX_LEN + 1 bytes is always enough\n"
+        " *  @ret false for an unknown id, an empty or over-long device_id, or a short buffer\n"
+        " */\n"
         "static inline bool gen_topic_build(gen_topic_id_t id, const char *device_id, char *out, size_t cap)\n"
         "{\n"
         "    if (id >= GEN_TOPIC_COUNT || device_id == NULL || out == NULL) { return false; }\n"
@@ -278,6 +283,10 @@ def gen_topics_h(t: dict) -> str:
         "}\n"
     )
     out.append(
+        "/** Which topic of device_id a received path is.\n"
+        " *  @ctx any | non-blocking | topic need not be NUL-terminated, len is its length\n"
+        " *  @ret GEN_TOPIC_NONE when the path belongs to no topic of this device\n"
+        " */\n"
         "static inline gen_topic_id_t gen_topic_match(const char *topic, size_t len, const char *device_id)\n"
         "{\n"
         "    if (topic == NULL || device_id == NULL) { return GEN_TOPIC_NONE; }\n"
@@ -296,6 +305,7 @@ def gen_topics_h(t: dict) -> str:
     for x in t["topics"]:
         name = x["id"]
         out.append(
+            f"/** gen_topic_build fixed to GEN_TOPIC_{name.upper()}.\n *  @ctx any | non-blocking | caller owns out\n */\n"
             f"static inline bool gen_topic_{name}(const char *device_id, char *out, size_t cap)\n"
             f"{{\n    return gen_topic_build(GEN_TOPIC_{name.upper()}, device_id, out, cap);\n}}\n"
         )
@@ -361,11 +371,15 @@ class PayloadC:
         base = tname.removesuffix("_t")
         cases = "".join(f'    case {upper}_{v}: return "{v}";\n' for v in values)
         self.out.append(
+            "/** Contract spelling of a value; \"\" when it is out of range.\n"
+            " *  @ctx any | non-blocking | returns a static string\n */\n"
             f"static inline const char *{base}_str({tname} v)\n{{\n    switch (v) {{\n{cases}"
             '    default: return "";\n    }\n}\n'
         )
         checks = "".join(f'    if (strcmp(s, "{v}") == 0) {{ *out = {upper}_{v}; return true; }}\n' for v in values)
         self.out.append(
+            "/** Value of a contract spelling.\n *  @ctx any | non-blocking\n"
+            " *  @ret false for NULL or a spelling the contract does not list\n */\n"
             f"static inline bool {base}_parse(const char *s, {tname} *out)\n{{\n"
             f"    if (s == NULL || out == NULL) {{ return false; }}\n{checks}    return false;\n}}\n"
         )
@@ -431,7 +445,14 @@ class PayloadC:
         return lines
 
     def from_json(self, owner: str, node: dict) -> None:
-        body = [f"static inline bool {owner}_from_json(const cJSON *root, {owner}_t *out)", "{"]
+        body = [
+            f"/** Fill out from a parsed {owner.split('_item')[0]} object, checking type, range, enum and size.",
+            " *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed",
+            " *  @ret false on the first field outside the contract; out is then partly filled",
+            " */",
+            f"static inline bool {owner}_from_json(const cJSON *root, {owner}_t *out)",
+            "{",
+        ]
         body += ["    if (!cJSON_IsObject(root) || out == NULL) { return false; }", "    memset(out, 0, sizeof(*out));"]
         body.append("    const cJSON *item = NULL;")
         for f in fields_of(node):
@@ -481,7 +502,14 @@ class PayloadC:
         raise SystemExit(f"{owner}.{f.json_name}: unsupported type {kind}")
 
     def to_json(self, owner: str, node: dict) -> None:
-        body = [f"static inline cJSON *{owner}_to_json(const {owner}_t *in)", "{"]
+        body = [
+            f"/** Build the JSON object of one {owner.split('_item')[0]} for publishing.",
+            " *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete",
+            " *  @ret NULL when the root object cannot be allocated",
+            " */",
+            f"static inline cJSON *{owner}_to_json(const {owner}_t *in)",
+            "{",
+        ]
         body += ["    if (in == NULL) { return NULL; }", "    cJSON *root = cJSON_CreateObject();"]
         body.append("    if (root == NULL) { return NULL; }")
         for f in fields_of(node):
