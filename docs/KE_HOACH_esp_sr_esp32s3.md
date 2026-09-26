@@ -1763,6 +1763,9 @@ trên cùng một bước (E5-T11, rồi từng module của E7–E9) cần cả
 `test_apps/capture` chạy `mode` 3 — `mode` 2 trên board chưa lắp loa như board B, vì không có `ref` — và
 không có gì khác trong chuỗi, để bản thu cho dữ liệu huấn luyện không phụ thuộc phiên bản `dsp_afe` nào. Nó
 tự mở luồng ngay khi có Wi-Fi, trong `CAPTURE_DURATION_S` (mặc định 31 phút), tới `device/stream_host:stream_port`.
+Với `CAPTURE_RADIO_OFF_S` khác 0 (bộ cấu hình `sdkconfig.radio_off`, nạp bằng `make capture-radio-off-flash`), nó thu
+đúng bấy nhiêu giây vào `sb_stream` ở PSRAM khi radio **chưa bật**, rồi mới vào Wi-Fi và gửi lại phần đã thu: đó là
+phiên nền ồn "Wi-Fi tắt" của E2-T4, cùng khuôn và cùng đường chấm với phiên thường. 60 s `mode 2` chiếm ~3,9 MB PSRAM.
 
 ### 7.5 Bảo mật và riêng tư
 
