@@ -1,0 +1,32 @@
+menu "net_mqtt"
+
+    config NET_MQTT_URI_FALLBACK
+        string "Broker URI when NVS device/mqtt_uri is absent"
+        default ""
+        help
+            Empty means no fallback: net_mqtt waits until device/mqtt_uri is
+            set on the console (KEHOACH 4.9, 6.2).
+
+    config NET_MQTT_REQUIRE_TLS
+        bool "Refuse any broker URI that is not mqtts://"
+        default n
+        help
+            On in prod only (KEHOACH 4.5.8, 7.5).
+
+    config NET_MQTT_KEEPALIVE_S
+        int "MQTT keepalive in seconds"
+        range 5 300
+        default 15
+        help
+            The broker publishes the offline will about 1.5 keepalives after
+            the board goes silent, so this bounds how late a power cut shows.
+
+    config NET_MQTT_JSON_ARENA_BYTES
+        int "Bytes of each of the two JSON arenas in PSRAM"
+        range 2048 65535
+        default 8192
+        help
+            One arena for the esp-mqtt task, one for the task that publishes
+            (FREERTOS.md 14 P1); heartbeat reports the peak.
+
+endmenu
