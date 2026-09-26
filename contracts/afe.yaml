@@ -75,7 +75,12 @@ vad:
   db_per_log2: 3.0102999566398120
   log2_e: 1.4426950408889634
 agc:
+  target_dbfs: -26.0                  # seed of NVS afe/agc_target_dbfs
+  gain_min_db: -20.0                  # inputs of -50 .. -10 dBFS need -16 .. +24 dB
+  gain_max_db: 30.0
+  level_tau_s: 0.5                    # power mean of the speech hops at the input
   up_db_per_s: 3.0
   down_db_per_s: 6.0
   limit_dbfs: -3.0
   lookahead_ms: 4.0
+  release_ms: 50.0                    # limiter gain back to 1, linearly
