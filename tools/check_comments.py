@@ -69,13 +69,18 @@ PROCESS_RE = re.compile(
 BANNER_RE = re.compile(r"^\s*(//|#)\s*[=*\-#~_+─━═]{2,}")
 STAR_BANNER_RE = re.compile(r"/\*{3,}")
 END_OF_RE = re.compile(r"^\s*(//|#)\s*end of\b", re.IGNORECASE)
+# Code is recognised by its shape, not by a leading word: "for the next hop" is prose, "for (" is code.
 CODE_LIKE_RE = re.compile(
     r"^\s*(//|#)\s*"
     r"("
     r".*;\s*$"
     r"|.*\{\s*$"
     r"|\}\s*;?\s*$"
-    r"|(if|for|while|switch|return|import|from|def|class|const|let|var|#include)\b.*"
+    r"|(if|for|while|switch)\s*\("
+    r"|return\b.*;"
+    r"|#\s*include\s*[<\"]"
+    r"|(import|from)\s+[\w.]+(\s+import\b.*)?\s*$"
+    r"|(def|class)\s+\w+\s*[(:]"
     r")"
 )
 GENERATED_FIRST_LINES = {"// GENERATED FILE - DO NOT EDIT.", "# GENERATED FILE - DO NOT EDIT."}
@@ -112,7 +117,20 @@ def is_skipped(path: Path) -> bool:
     return any(part.startswith("build_") for part in parts)
 
 
-def iter_source_files(targets: list[Path]) -> list[Path]:
+def tracked_files() -> set[Path] | None:
+    """Files git tracks or has staged; untracked work in progress must not block an unrelated commit."""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "--cached"], capture_output=True, text=True, check=True
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {(REPO_ROOT / line).resolve() for line in out.splitlines() if line}
+
+
+def iter_source_files(targets: list[Path], only: set[Path] | None = None) -> list[Path]:
     files: list[Path] = []
     for target in targets:
         if target.is_file():
@@ -122,7 +140,7 @@ def iter_source_files(targets: list[Path]) -> list[Path]:
         for path in sorted(target.rglob("*")):
             if path.suffix not in SCANNED_SUFFIXES or not path.is_file():
                 continue
-            if is_skipped(path):
+            if is_skipped(path) or (only is not None and path.resolve() not in only):
                 continue
             files.append(path)
     return files
@@ -413,7 +431,7 @@ def main() -> int:
 
     targets = [p.resolve() for p in args.paths] or [REPO_ROOT]
     problems: list[Problem] = []
-    files = iter_source_files(targets)
+    files = iter_source_files(targets, None if args.paths else tracked_files())
     for path in files:
         problems.extend(check_file(path))
 
