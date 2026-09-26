@@ -45,6 +45,29 @@ def test_malformed_values_are_refused(tmp_path: Path, name: str, value: str) -> 
         config.record_config(env(tmp_path, **{name: value}))
 
 
+def mqtt_env(**changes: str) -> dict[str, str]:
+    base = {
+        "SRHOST_MQTT_HOST": "localhost",
+        "SRHOST_MQTT_PORT": "1883",
+        "SRHOST_MQTT_USER": "srhost",
+        "SRHOST_MQTT_PASS": "secret",
+    }
+    return {k: v for k, v in {**base, **changes}.items() if v is not None}
+
+
+def test_the_broker_settings_hide_the_password() -> None:
+    cfg = config.mqtt_config(mqtt_env())
+    assert (cfg.host, cfg.port, cfg.user, cfg.password) == ("localhost", 1883, "srhost", "secret")
+    assert "secret" not in repr(cfg)
+
+
+def test_broker_variables_are_named_when_missing_or_malformed() -> None:
+    with pytest.raises(config.ConfigError, match="SRHOST_MQTT_PASS"):
+        config.mqtt_config(mqtt_env(SRHOST_MQTT_PASS=None))
+    with pytest.raises(config.ConfigError, match="SRHOST_MQTT_PORT"):
+        config.mqtt_config(mqtt_env(SRHOST_MQTT_PORT="0"))
+
+
 def test_the_example_lists_every_variable_config_reads() -> None:
     example = config.read_dotenv(config.HOST_ROOT / ".env.example")
-    assert set(config.RECORD_VARIABLES) <= set(example)
+    assert set(config.RECORD_VARIABLES) | set(config.MQTT_VARIABLES) <= set(example)
