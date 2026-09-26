@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report \
+.PHONY: help gen check lint test golden measure report ci-status \
         fw-dev fw-bench fw-prod flash monitor broker-up broker-down host-live
 
 PORT ?= /dev/ttyUSB0
@@ -29,6 +29,10 @@ test: ## Host-side tests for tools/, ml/ and host/
 	python3 -m unittest discover -s tools/tests -t .
 	@if [ -f ml/pyproject.toml ]; then cd ml && uv run pytest; fi
 	@if [ -f host/pyproject.toml ]; then cd host && uv run pytest; fi
+
+# ci
+ci-status: ## Copy the GitHub Actions results of HEAD onto the same commit in Gitea
+	python3 tools/ci_status.py --wait
 
 # measurements
 golden: ## Emit golden vectors into contracts/golden/
