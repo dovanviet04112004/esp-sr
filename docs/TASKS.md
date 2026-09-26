@@ -42,7 +42,7 @@ cần firmware.
 | ID | Task | Xong khi | Chặn bởi | V5 |
 |---|---|---|---|---|
 | E1-T1 | Cây thư mục KẾ HOẠCH §4.1. Đã có `.gitignore` (loại `CLAUDE.md`, `.claude/`), `.gitattributes`, `.editorconfig`, `README.md`; còn `LICENSE` và `Makefile` khung | `tree -L 2` khớp §4.1; `make help` in đủ đích | — | — |
-| E1-T2 | Repo trên Gitea, nhánh `main` | push được, `git status` sạch | E1-T1 | — |
+| ~~E1-T2~~ | **Xong 26/09.** Repo private `vanviet/esp-sr` trên Gitea nội bộ, nhánh `main` | push được, `git status` sạch; `.git/config` không mang mật khẩu | E1-T1 | — |
 | E1-T3 | `contracts/`: `grid.yaml`, `array.yaml`, bảy schema, `mqtt_topics.yaml`, `stream/frame.yaml`, `commands/default_vi.json`, `responses/vi.json` bản khung | schema validate được bằng `jsonschema`; bộ lệnh mẫu hợp lệ theo schema | E1-T1 | — |
 | E1-T4 | `tools/gen_contracts.py` sinh mọi file ở bảng KẾ HOẠCH §4.2 | chạy hai lần cho ra file giống hệt từng byte | E1-T3 | — |
 | E1-T5 | `tools/check_comments.py` (lấy từ repo face attendance, đổi đường dẫn), `check_layers.py` (bảng §4.5.4, cấm `espressif/esp-sr`), `check_purity.py` | chạy sạch trên repo rỗng; một file thử vi phạm từng luật làm từng script đỏ | E1-T1 | — |
