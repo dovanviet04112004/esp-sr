@@ -16,11 +16,16 @@
 #include "gen_grid.h"
 #include "sdkconfig.h"
 
+#if DSP_AFE_HOST_GOLDEN
+#include "parity.h"
+#endif
+
 #define HOPS 32
 #define MAX_CHANNELS 3
 #define AMPLITUDE 12000.0
 #define TONE_HZ 440.0
 #define MAX_ERROR_LSB 1
+#define CASE_BYTES_MAX (128 * 1024)
 
 static unsigned s_failures;
 
@@ -325,7 +330,27 @@ static void check_every_path(void)
 }
 #endif
 
-int main(void)
+#if DSP_AFE_HOST_GOLDEN
+static bool read_case(const char *path, void *buf, size_t cap, size_t *len)
+{
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) { return false; }
+    *len = fread(buf, 1, cap, file);
+    const bool whole = feof(file) != 0;
+    fclose(file);
+    return whole;
+}
+
+static void run_golden(const char *root)
+{
+    static uint8_t buf[CASE_BYTES_MAX];
+    const unsigned cases =
+        parity_run_block(root, "chain", parity_chain, read_case, buf, sizeof(buf), &s_failures);
+    printf("PARITY done %u cases\n", cases);
+}
+#endif
+
+int main(int argc, char **argv)
 {
     check_round_trip(&kPlain, "plain chain");
     check_mix_is_the_mean();
@@ -337,6 +362,12 @@ int main(void)
 #if DSP_AFE_HOST_ALL_MODULES
     check_module_shells();
     check_every_path();
+#endif
+#if DSP_AFE_HOST_GOLDEN
+    if (argc > 1) { run_golden(argv[1]); }
+#else
+    (void)argc;
+    (void)argv;
 #endif
     printf("HOST %u failure(s)\n", s_failures);
     return s_failures == 0 ? 0 : 1;

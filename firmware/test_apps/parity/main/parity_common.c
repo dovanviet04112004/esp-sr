@@ -21,6 +21,26 @@ bool parity_tensor(const void *buf, size_t len, const char *name, gold_tensor_t 
     return false;
 }
 
+bool parity_floats(const gold_tensor_t *t, float *out, size_t n)
+{
+    size_t count = t->ndim > 0 ? 1 : 0;
+    for (uint32_t d = 0; d < t->ndim; d++) {
+        count *= t->dims[d];
+    }
+    if (count != n) { return false; }
+    for (size_t i = 0; i < n; i++) {
+        switch (t->dtype) {
+        case GOLD_F32: out[i] = ((const float *)t->data)[i]; break;
+        case GOLD_I8: out[i] = ((const int8_t *)t->data)[i]; break;
+        case GOLD_I32: out[i] = (float)((const int32_t *)t->data)[i]; break;
+        case GOLD_U8: out[i] = ((const uint8_t *)t->data)[i]; break;
+        case GOLD_I16: out[i] = ((const int16_t *)t->data)[i]; break;
+        default: return false;
+        }
+    }
+    return true;
+}
+
 void parity_report(const char *block, const char *case_name, const char *tensor, const float *want,
                    const float *got, size_t n)
 {

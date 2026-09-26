@@ -1,5 +1,5 @@
-# dsp_afe on the host with plain CMake, twice: every module off, as the skeleton app runs it, and every
-# module on; both over dsp_spec_host_lib (KEHOACH 4.5.7).
+# dsp_afe on the host with plain CMake, twice over dsp_spec_host_lib: every module off, as the default build
+# runs it and with the chain golden cases, and every module on (KEHOACH 4.5.7).
 cmake_minimum_required(VERSION 3.16)
 project(dsp_afe_host C)
 
@@ -19,6 +19,9 @@ function(add_afe_host name)
     target_link_libraries(${name} PRIVATE dsp_spec_host_lib)
 endfunction()
 
-add_afe_host(dsp_afe_host_off)
+set(PARITY "${FIRMWARE}/test_apps/parity/main")
+add_afe_host(dsp_afe_host_off "${PARITY}/parity_common.c" "${PARITY}/parity_chain.c")
+target_include_directories(dsp_afe_host_off PRIVATE "${PARITY}")
+target_compile_definitions(dsp_afe_host_off PRIVATE DSP_AFE_HOST_GOLDEN=1)
 add_afe_host(dsp_afe_host_on ${AFE_MODULE_SRCS})
 target_compile_definitions(dsp_afe_host_on PRIVATE DSP_AFE_HOST_ALL_MODULES=1)

@@ -16,6 +16,12 @@ typedef bool (*parity_reader_t)(const char *path, void *buf, size_t cap, size_t 
  */
 bool parity_tensor(const void *buf, size_t len, const char *name, gold_tensor_t *out);
 
+/** Copy the n values of a tensor of any .gold dtype into out as floats.
+ *  @ctx any | non-blocking
+ *  @ret false when the tensor does not hold exactly n values
+ */
+bool parity_floats(const gold_tensor_t *t, float *out, size_t n);
+
 /** Print "PARITY block case tensor max_abs=… snr_db=…" for got against want, n floats each.
  *  @ctx task | blocking on the console
  */
@@ -40,3 +46,9 @@ bool parity_stft(const char *case_name, const void *buf, size_t len);
  *  @ret false when the case lacks a tensor, carries a bad configuration or memory runs out
  */
 bool parity_mel(const char *case_name, const void *buf, size_t len);
+
+/** Run one chain case through a fresh default dsp_afe, resetting where it says; compare every frame field.
+ *  @ctx task | blocking | each case builds a new fft plan, so dl_fft allocates its tables again
+ *  @ret false when the case lacks a tensor, has the wrong shape or the facade refuses it
+ */
+bool parity_chain(const char *case_name, const void *buf, size_t len);

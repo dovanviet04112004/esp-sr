@@ -13,6 +13,7 @@ static const struct {
 } kBlocks[] = {
     {"stft", parity_stft},
     {"mel", parity_mel},
+    {"chain", parity_chain},
 };
 
 static bool read_case(const char *path, void *buf, size_t cap, size_t *len)
