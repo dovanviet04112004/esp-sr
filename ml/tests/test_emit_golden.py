@@ -105,3 +105,22 @@ def test_the_balance_negative_control_takes_the_conjugate_gains() -> None:
     got = case["output"][..., 0] + 1j * case["output"][..., 1]
     np.testing.assert_array_equal(got, balance.apply(bins, np.conj(gains)))
     assert np.max(np.abs(got - balance.apply(bins, gains))) > 1.0
+
+
+def test_committed_vad_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_vad(tmp_path):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
+
+
+def test_the_long_vad_case_outlives_the_minimum_tracker_window() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "vad" / "case_000.gold")
+    assert len(case["raw"]) > emit_golden.afe.VAD_MIN_TRACK_WINDOW_HOPS
+    assert 0 < case["raw"].sum() < len(case["raw"])
+
+
+def test_the_vad_negative_control_has_speech_one_hop_late() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "vad" / "case_neg_000.gold")
+    right = emit_golden.vad_case(case["pcm"].reshape(-1), int(case["config"][0]))["speech"]
+    assert np.array_equal(case["speech"][1:], right[:-1])
+    assert not np.array_equal(case["speech"], right)

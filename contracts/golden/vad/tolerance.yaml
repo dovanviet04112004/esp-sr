@@ -1,0 +1,13 @@
+# C dsp_afe vad against srpipe.dsp.afe.vad (KEHOACH 3.10, E7-T3). Both take the same float32 steps with frexp,
+# ldexp, floor and ceil only, and dsp_afe builds without contraction (ADR-0006): levels match bit for bit, so the
+# limit sits under one ulp of a 64 dB level. Decisions must match exactly; case_neg_* has speech one hop late.
+tensors:
+  features:
+    max_abs: 1.0e-6
+    min_snr_db: 120.0
+  raw:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  speech:
+    max_abs: 0.0
+    min_snr_db: 0.0

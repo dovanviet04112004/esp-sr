@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from srpipe.dsp.afe import balance, chain, hpf
+from srpipe.dsp.afe import balance, chain, hpf, vad
 from srpipe.dsp.spec import mel, stft
 from srpipe.generated import afe, array, grid
 from srpipe.golden.gold import write_gold
@@ -26,6 +26,9 @@ CHAIN_HOPS = 16
 CHAIN_RESET_HOP = 8
 HPF_HOPS = 16
 BALANCE_HOPS = 16
+# One case outlives the 100-hop window of the minimum tracker; the storage partition limits the rest.
+VAD_LONG_HOPS = 160
+VAD_HOPS = 64
 LSB = 1.0 / 32768.0
 MEL_CASES = (
     (mel.MelConfig(n_bands=40, f_min_hz=20.0, f_max_hz=7600.0, log_floor=1e-6), 13),
@@ -271,12 +274,74 @@ def emit_balance(root: Path) -> list[Path]:
     return written
 
 
+def speechlike(rng: np.random.Generator, n: int, peak: float) -> np.ndarray:
+    """A voiced harmonic series with a moving pitch and syllable envelopes: speech enough for a VAD, and no voice."""
+    t = np.arange(n) / grid.SAMPLE_RATE_HZ
+    phase = 2 * np.pi * np.cumsum(120 + 40 * np.sin(2 * np.pi * 0.7 * t) + rng.uniform(0, 80)) / grid.SAMPLE_RATE_HZ
+    voiced = sum(np.sin(k * phase) * np.exp(-k / 8) for k in range(1, 30))
+    syllables = np.clip(np.sin(2 * np.pi * rng.uniform(3, 5) * t + rng.uniform(0, 6)), 0, None) ** 0.7
+    x = voiced * syllables
+    return peak * x / np.abs(x).max()
+
+
+def _vad_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, int]]:
+    """(int16 samples, aggressiveness) per case: speech over white noise, quiet speech over red noise, silence that
+    is never modelled then loud bursts, noise whose level jumps."""
+    long_n, n = VAD_LONG_HOPS * grid.HOP_SAMPLES, VAD_HOPS * grid.HOP_SAMPLES
+    red = np.cumsum(rng.standard_normal(n))
+    red = red - np.convolve(red, np.ones(64) / 64, mode="same")
+    bursts = np.zeros(n)
+    bursts[n // 4 :] = speechlike(rng, n - n // 4, 0.9)
+    jump = rng.standard_normal(n) * np.where(np.arange(n) < n // 2, 0.002, 0.05)
+    cases = [
+        (speechlike(rng, long_n, 0.3) + 0.01 * rng.standard_normal(long_n), 0),
+        (speechlike(rng, n, 0.01) + 0.0005 * red / red.std(), 2),
+        (bursts, 3),
+        (jump, 1),
+    ]
+    pcm_min, pcm_max = np.iinfo(np.int16).min, np.iinfo(np.int16).max
+    return [(np.clip(np.rint(x * 32768.0), pcm_min, pcm_max).astype(np.int16), a) for x, a in cases]
+
+
+def vad_case(pcm: np.ndarray, aggressiveness: int, hangover_ms: int = afe.VAD_HANGOVER_MS) -> dict[str, np.ndarray]:
+    """int16 hops, the configuration, and per hop the six band levels, the raw decision and speech after the
+    hangover; each hop enters as int16 / 32768, exact in float32 on both sides."""
+    hops = pcm.reshape(-1, grid.HOP_SAMPLES)
+    detector = vad.Vad(aggressiveness, hangover_ms)
+    out = [detector.process(h.astype(np.float32) / np.float32(32768.0)) for h in hops]
+    return {
+        "pcm": hops,
+        "config": np.array([aggressiveness, hangover_ms], dtype=np.int32),
+        "features": np.stack([o.features for o in out]).astype(np.float32),
+        "raw": np.array([o.raw for o in out], dtype=np.uint8),
+        "speech": np.array([o.speech for o in out], dtype=np.uint8),
+    }
+
+
+def emit_vad(root: Path) -> list[Path]:
+    """Four cases, then a negative control whose speech flags come one hop late."""
+    rng = np.random.default_rng(SEED + 5)
+    written = []
+    for index, (pcm, aggressiveness) in enumerate(_vad_inputs(rng)):
+        path = root / "vad" / f"case_{index:03d}.gold"
+        write_gold(path, vad_case(pcm, aggressiveness))
+        written.append(path)
+    n = VAD_HOPS * grid.HOP_SAMPLES
+    noisy = speechlike(rng, n, 0.3) + 0.01 * rng.standard_normal(n)
+    negative = vad_case(np.clip(np.rint(noisy * 32768.0), -32768, 32767).astype(np.int16), 0)
+    negative["speech"] = np.concatenate([[0], negative["speech"][:-1]]).astype(np.uint8)
+    path = root / "vad" / "case_neg_000.gold"
+    write_gold(path, negative)
+    written.append(path)
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
     emitted = emit_stft(args.out) + emit_mel(args.out) + emit_chain(args.out) + emit_hpf(args.out)
-    for path in emitted + emit_balance(args.out):
+    for path in emitted + emit_balance(args.out) + emit_vad(args.out):
         print(path.relative_to(args.out) if path.is_relative_to(args.out) else path)
     return 0
 
