@@ -106,14 +106,18 @@ def main() -> int:
     token = read_token()
 
     deadline = time.monotonic() + args.timeout_s
-    runs = latest_runs(github_repo, sha)
-    while args.wait and (not runs or any(r.gitea_state == "pending" for r in runs)) and time.monotonic() < deadline:
-        time.sleep(POLL_S)
+    posted: dict[str, str] = {}
+    while True:
         runs = latest_runs(github_repo, sha)
-
-    for run in runs:
-        post_status(gitea_base, gitea_repo, sha, token, run)
-        print(f"{run.gitea_state:8} github/{run.name}  {run.url}")
+        for run in runs:
+            if posted.get(run.name) != run.gitea_state:
+                post_status(gitea_base, gitea_repo, sha, token, run)
+                posted[run.name] = run.gitea_state
+                print(f"{run.gitea_state:8} github/{run.name}  {run.url}", flush=True)
+        settled = runs and all(r.gitea_state != "pending" for r in runs)
+        if not args.wait or settled or time.monotonic() >= deadline:
+            break
+        time.sleep(POLL_S)
     if not runs:
         print(f"no GitHub Actions run for {sha[:10]} yet")
         return 2
