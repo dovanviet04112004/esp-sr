@@ -719,6 +719,7 @@ esp-sr/
     ├── DU_LIEU.md                       # dữ liệu đã tải, giấy phép, số giờ, sha256
     ├── adr/                             # quyết định có bảng đối chứng
     └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md}
+                      ├ bench/           # CSV thô của bench_*, commit cùng bảng nó sinh ra
                       └ {afe,kws,tts}/   # số 🔬 theo khối
 ```
 
@@ -1216,7 +1217,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 | Unit trên board | `components/<c>/test_apps/unit/` | `idf.py build flash` + `pytest_*.py` (pytest-embedded) |
 | Unit trên máy tính | `components/<c>/test_apps/host/` | **CMake thường + lớp đệm** `test_apps/host/shim/` (`esp_err.h`, `esp_heap_caps.h`, `esp_log.h`, …), `dl_fft` dựng từ bản C thuần; chạy thêm cả `contracts/golden/` qua bộ so của `test_apps/parity`, phán bằng `pytest_parity.py`; workflow `firmware` chạy mỗi lần push (chốt ở E6-T6). Target `linux` của IDF bị loại: đòi `libbsd-dev` trên máy và kéo cả cổng FreeRTOS vào một component thuần |
 | Parity C ↔ Python | `test_apps/parity/` | đọc `contracts/golden/` trong LittleFS, so theo `tolerance.yaml` |
-| Chi phí | `test_apps/bench_afe`, `bench_kws`, `bench_mem` | in CSV → `tools/budget.py` → `docs/measurements/budget.md` |
+| Chi phí | `test_apps/bench_afe`, `bench_kws`, `bench_mem` | in CSV → lưu ở `docs/measurements/bench/` → `tools/budget.py` → `docs/measurements/budget.md` |
 | Chạy dài | `test_apps/soak/` | 30 phút cho Cửa 5, 8 giờ trước khi báo cáo |
 | Thu dữ liệu | `test_apps/capture/` | đẩy thô về `host/` |
 | Hiệu chuẩn | `test_apps/calib/` | ghi NVS `calib/*` |
@@ -1340,7 +1341,7 @@ broker khởi động lại là mất `status` `offline` của máy đang tắt.
 | `check_comments.py` | luật comment CLAUDE.md §2.3, §2.4, §2.6 | pre-commit, CI |
 | `check_layers.py` | bảng tầng §4.5.4, cấm `espressif/esp-sr` | pre-commit, CI |
 | `check_purity.py` | `common`, `dsp_*`, `lang_*` không include FreeRTOS, driver, log, heap | pre-commit, CI |
-| `budget.py` | gộp CSV của `bench_*` thành bảng RAM và µs theo module (TỔNG QUAN V5.0.10) | `make measure` |
+| `budget.py` | gộp CSV của `bench_*` ở `docs/measurements/bench/` thành bảng RAM và µs theo module (TỔNG QUAN V5.0.10); CSV commit cùng bảng nên `make report` dựng lại số chỉ từ repo | `make measure` |
 | `ci_status.py` | đọc kết quả GitHub Actions của một commit bằng `gh`, gắn trạng thái lên đúng commit ấy trên Gitea qua API | `make ci-status` |
 | `tests/` + `__init__.py` | `unittest` cho chính các script trên: hợp đồng hợp lệ, generator tất định và C sinh ra chạy đúng, mỗi luật kiểm có một ca vi phạm cố ý | `make test`, CI |
 
