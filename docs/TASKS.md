@@ -64,7 +64,7 @@ Board B là board duy nhất có micro (KẾ HOẠCH §2.1). Mọi phép đo thu
 |---|---|---|---|---|
 | E2-T1 | Micro là **2 × INMP441** (chủ dự án xác nhận 26/09). Tải datasheet; ghi SNR 61 dBA là giới hạn đã biết (KẾ HOẠCH §0.2 dòng 19) | datasheet và sha256 ở `hardware/datasheets/INDEX.md`; §2.1 khớp | — | V5.0.1 |
 | E2-T2 | Xác nhận bảng chân §2.2 trên board thật; viết `app_config.h` **cùng commit** với §2.2 | micro thu được ở GPIO 19/20/16 với console UART và `ESP_CONSOLE_SECONDARY_NONE` | E5-T3 | — |
-| E2-T3 | Đo khoảng cách hai micro, giữa tâm hai lỗ âm | số ghi vào `contracts/array.yaml` và `mic_array.md` | — | V5.0.1 |
+| ~~E2-T3~~ | **Xong 26/09.** Đo khoảng cách hai micro, giữa tâm hai lỗ âm: **~45 mm** bằng thước (chủ dự án đo), trong dải 4–6,5 cm nên giữ dàn. Trễ lớn nhất ±2,10 mẫu, `c/2d` = 3,81 kHz | số ghi vào `contracts/array.yaml` và `mic_array.md`; E2-T4 kiểm lại bằng trễ vỗ tay ở đầu dàn | — | V5.0.1 |
 | E2-T4 | 🔬 Đo bốn chỉ tiêu của dàn: khoảng cách, chênh độ nhạy, chênh pha, SNR; cộng nền ồn khi Wi-Fi phát và khi tắt | bảng năm dòng ở `mic_array.md`, không dòng nào trống | E2-T3, E5-T12 | V5.0.1 |
 | E2-T5 | 🔬 Chọn `pcm_shift` (24 → 16 bit): tiếng nói to ở 10 cm không cắt đỉnh, nền ồn phòng yên vẫn trên bước lượng tử `int16` | giá trị ghi NVS `calib/pcm_shift` và `mic_array.md` kèm hai phép đo | E5-T4 | — |
 | E2-T6 | Hiệu chuẩn `balance`: loa ngoài chính diện 1 m, ồn trắng 30 s, thu bằng `capture` → hệ số phức mỗi vạch tính bằng `srpipe` → ghi NVS `calib/bal` qua `test_apps/calib`; nếu cần chạy từ console thì thêm lệnh `calib` ở đây. Không cần module C của E7-T2 | chênh biên độ sau bù **dưới 1 dB** toàn băng 50 Hz – 8 kHz; chênh pha sau bù ghi thành số ở hai nhiệt độ phòng | E2-T4, E6-T1 | V5.0.2 |
