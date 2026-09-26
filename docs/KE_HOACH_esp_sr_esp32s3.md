@@ -1374,7 +1374,7 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 | `net_task` | `net_wifi` | 0 | 3 | 4 KB | một lần lúc boot | chờ link **tới khi có**, rồi nối MQTT, mở SNTP; xong thì tự xoá |
 | `mqtt_task` | esp-mqtt | 0 | 5 | 6 KB **ở PSRAM** | esp-mqtt tự tạo | gửi nhận, TLS ở `prod` |
 | `console` | `esp_console` (REPL) | 0 | 2 | 4 KB | `esp_console` tự tạo, **chỉ khi** `APP_CONSOLE` — không có ở `prod` | đọc dòng lệnh trên UART0, ghi NVS qua `sys_storage`; không lưu lịch sử xuống flash |
-| `wifi`, `tcpip`, `esp_timer` | IDF | 0 | 18–23 | — | — | IDF quản lý; ghim nhân 0 bằng Kconfig |
+| `wifi`, `tcpip`, `esp_timer`, `sys_evt` | IDF | 0 | 18–23 | — | — | IDF quản lý; ghim nhân 0 bằng Kconfig, `sys_evt` tự ghim nhân 0; `net_wifi` nối lại trong callback của `sys_evt` và `esp_timer`, không có task riêng |
 | `ipc0`, `ipc1` | IDF | mỗi nhân một | 24 | — | — | IDF quản lý |
 
 **Vì sao `thu` và `sach` là hai task.** `thu_task` chỉ việc rút DMA và gắn số thứ tự, nên nó luôn rút
