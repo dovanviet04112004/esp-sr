@@ -36,11 +36,16 @@ Cộng theo chuỗi, RAM nội, ước 🔬:
 
 | Chuỗi | `sach_task` B | `nhan_task` (đặc trưng: `fft` + bảng + `stft` + `mel` + đệm) B | Cộng B |
 |---|---|---|---|
-| App khung rỗng E5-T11: chỉ STFT → trộn trần → iSTFT | ~38 300 | — | ~38 300 |
+| App khung rỗng E5-T11: chỉ STFT → trộn trần → iSTFT | **47 268 đo** (ước ~38 300) | — | **47 268 đo** |
 | Mốc demo E13-T11: `hpf`, `balance`, `doa`, trộn trần, `ns` sàn, `vad`, `agc` | ~59 100 | ~20 400 | ~79 500 |
 | như trên, `gsc` thay trộn trần | ~62 300 | ~20 400 | ~82 700 |
 | như trên, `bss` thay trộn trần | ~85 900 | ~20 400 | ~106 300 |
 | `"MMR"` + `aec` + `bss` (cần loa, E10) | ~148 700 + đường trễ | ~20 400 | ~169 100 + đường trễ |
+
+Dòng app khung rỗng đã đo trên board B ở E3-T4: heap nội giảm 47 268 B qua `svc_front_init` = ~41 KB `hot` + 6 244 B
+bảng `dl_fft`. Ước thấp vì đệm tạm trong struct mặt tiền (~19,7 KB: PCM float ba kênh, phổ hai micro, hai lối
+ra không gian, công suất, gain, FIFO, bản sao hiệu chuẩn) được cấp cho mọi cấu hình, kể cả phần chỉ `bss` hay
+`"MMR"` dùng. Mọi dòng khác cộng thêm chừng ấy chênh lệch.
 
 So với heap nội đo được sau Wi-Fi + MQTT (§3: còn 139 047 B, thấp nhất 133 431 B), tính trên mức thấp nhất: mốc demo còn dư ~54 KB, `bss`
 còn ~27 KB, còn `aec` + `bss` **không vừa** nếu không dùng đường lùi của KẾ HOẠCH §6.5. Khoản ~50 KB cho
@@ -70,6 +75,8 @@ Số của E5-T6 là **sàn**: thân task chưa có `dsp_afe`, `wake`, MQTT. Ch�
 | sau `drv_audio_init` (DMA 8 × 256 mẫu) — trước sáu task (29 696 B ngăn xếp tĩnh, đã nằm trong .bss) | 258415 | 217076 | 8 346 260 | `dev` @ `cb082c8` | 26/09 |
 | Wi-Fi vào mạng (`net_task`: link up) | 139183 | 98292 | — | `dev` @ `b38ffb3` | 26/09 |
 | MQTT chạy, heartbeat đầu tiên, 5 phút sau boot: còn / thấp nhất | 139047 / 133431 | — | 8 317 652 / 8 317 224 | `dev` @ `b38ffb3` | 26/09 |
+| sau `svc_front_init`: `dsp_afe` mặc định, mọi module tắt | 150139 | 106484 | 8 329 360 | `dev` @ `87b0337` | 26/09 |
+| như trên, Wi-Fi + MQTT chạy, heartbeat ~70 s sau boot: còn / thấp nhất | 93799 / 88075 | — | 8 317 652 / 8 317 232 | `dev` @ `87b0337` | 26/09 |
 
 Đọc từ log `heap_init` của board B qua CH340. Đây là **trần** cho mọi thứ ở KẾ HOẠCH §6.5 cộng lại, trước khi Wi-Fi và lwIP lấy phần của chúng; nó khớp khoảng ước 300–340 KB của §6.5.
 
