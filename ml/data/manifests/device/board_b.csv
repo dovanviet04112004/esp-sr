@@ -1,2 +1,3 @@
 session,board,fw,grid_hash,pcm_shift,kind,spk,consent,room,distance_cm,doa_deg,prompt,start_utc,seq_gaps,duration_s,sha256
 20260926_home_001,board_b,capture@contract-v1-40-g4252400,0x9c914b61,16,probe,,,home,,,"tiếng phòng, thử 30 phút (E5-T12)",2026-09-26T11:02:37+00:00,0,1800.0,c3200792fb8c82f15b354dacb3b6187a0f476096f8fdf17baddd3e4460ee0973
+20260926_home_002,board_b,0.1.0+3d3335d,0x9c914b61,16,probe,,,home,,,"khung rỗng mode 5, 10 phút (E5-T11)",2026-09-26T11:35:28+00:00,0,600.0,b443321ce6da09aa25188c9850e64f968fcf5e056d40894eb3a9e2ebdb2918ce
