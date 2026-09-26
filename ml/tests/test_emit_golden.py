@@ -62,3 +62,24 @@ def test_the_chain_negative_control_is_one_sample_late() -> None:
     got, want = case["pcm"].reshape(-1), right["pcm"].reshape(-1)
     np.testing.assert_array_equal(got[1:], want[:-1])
     assert np.max(np.abs(got.astype(int) - want)) > 1000
+
+
+def test_committed_hpf_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_hpf(tmp_path):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
+
+
+def test_an_hpf_case_filters_at_the_contract_cutoff_and_removes_dc() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "hpf" / "case_001.gold")
+    assert case["cutoff_hz"][0] == emit_golden.afe.HPF_CUTOFF_HZ
+    ten_hum_periods = 10 * emit_golden.grid.SAMPLE_RATE_HZ // 50
+    tail = case["output"][:, -ten_hum_periods:]
+    assert np.all(np.abs(tail.mean(axis=1)) < np.abs(case["input"].mean(axis=1)) / 100)
+
+
+def test_the_hpf_negative_control_is_one_sample_late() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "hpf" / "case_neg_000.gold")
+    right = emit_golden.hpf_case(case["input"])["output"]
+    assert np.array_equal(case["output"][:, 1:], right[:, :-1])
+    assert not np.allclose(case["output"], right, atol=1e-3)

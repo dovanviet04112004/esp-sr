@@ -11,9 +11,9 @@ from pathlib import Path
 
 import numpy as np
 
-from srpipe.dsp.afe import chain
+from srpipe.dsp.afe import chain, hpf
 from srpipe.dsp.spec import mel, stft
-from srpipe.generated import grid
+from srpipe.generated import afe, array, grid
 from srpipe.golden.gold import write_gold
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -24,6 +24,8 @@ SEED = 20260926
 MEL_FRAMES = 8
 CHAIN_HOPS = 16
 CHAIN_RESET_HOP = 8
+HPF_HOPS = 16
+LSB = 1.0 / 32768.0
 MEL_CASES = (
     (mel.MelConfig(n_bands=40, f_min_hz=20.0, f_max_hz=7600.0, log_floor=1e-6), 13),
     (mel.MelConfig(n_bands=80, f_min_hz=0.0, f_max_hz=8000.0, log_floor=1e-10), 20),
@@ -170,11 +172,56 @@ def emit_chain(root: Path) -> list[Path]:
     return written
 
 
+def _hpf_inputs(rng: np.random.Generator) -> list[np.ndarray]:
+    """(N_MICS, samples) per case: speech-like with DC, strong 50 Hz hum with DC, a chirp, near full scale."""
+    n = HPF_HOPS * grid.HOP_SAMPLES
+    t = np.arange(n) / grid.SAMPLE_RATE_HZ
+    voiced = 0.03 * np.sin(2 * np.pi * 150.0 * t) * np.clip(np.sin(2 * np.pi * 4.0 * t), 0, None)
+    hum = 0.3 * np.sin(2 * np.pi * 50.0 * t)
+    chirp = 0.5 * np.sin(2 * np.pi * (20.0 * t + (7900.0 - 20.0) / 2.0 * t**2 / t[-1]))
+    return [
+        np.stack([voiced - 0.5 * LSB, voiced + rng.normal(0, 1e-4, n) - 1.5 * LSB]),
+        np.stack([hum + 0.1, hum - 0.05]),
+        np.stack([chirp, -chirp]),
+        rng.uniform(-0.99, 0.99, (array.N_MICS, n)),
+    ]
+
+
+def hpf_case(signal: np.ndarray, cutoff_hz: float = afe.HPF_CUTOFF_HZ) -> dict[str, np.ndarray]:
+    """Input and output per channel, filtered one hop per call as dsp_afe runs it, and the cutoff used."""
+    signal = signal.astype(np.float32)
+    filt = hpf.Hpf(cutoff_hz, signal.shape[0])
+    out = np.stack(
+        [
+            np.concatenate([filt.process(ch, hop) for hop in np.split(signal[ch], HPF_HOPS)])
+            for ch in range(signal.shape[0])
+        ]
+    )
+    return {"input": signal, "output": out.astype(np.float32), "cutoff_hz": np.array([cutoff_hz], dtype=np.float32)}
+
+
+def emit_hpf(root: Path) -> list[Path]:
+    """Four cases at the contract's cutoff, then a negative control whose output is one sample late."""
+    rng = np.random.default_rng(SEED + 3)
+    written = []
+    for index, signal in enumerate(_hpf_inputs(rng)):
+        path = root / "hpf" / f"case_{index:03d}.gold"
+        write_gold(path, hpf_case(signal))
+        written.append(path)
+    negative = hpf_case(rng.uniform(-0.5, 0.5, (array.N_MICS, HPF_HOPS * grid.HOP_SAMPLES)))
+    negative["output"] = np.roll(negative["output"], 1, axis=1)
+    negative["output"][:, 0] = 0.0
+    path = root / "hpf" / "case_neg_000.gold"
+    write_gold(path, negative)
+    written.append(path)
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
-    for path in emit_stft(args.out) + emit_mel(args.out) + emit_chain(args.out):
+    for path in emit_stft(args.out) + emit_mel(args.out) + emit_chain(args.out) + emit_hpf(args.out):
         print(path.relative_to(args.out) if path.is_relative_to(args.out) else path)
     return 0
 
