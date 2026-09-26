@@ -77,6 +77,8 @@ Số của E5-T6 là **sàn**: thân task chưa có `dsp_afe`, `wake`, MQTT. Ch�
 | MQTT chạy, heartbeat đầu tiên, 5 phút sau boot: còn / thấp nhất | 139047 / 133431 | — | 8 317 652 / 8 317 224 | `dev` @ `b38ffb3` | 26/09 |
 | sau `svc_front_init`: `dsp_afe` mặc định, mọi module tắt | 150139 | 106484 | 8 329 360 | `dev` @ `87b0337` | 26/09 |
 | như trên, Wi-Fi + MQTT chạy, heartbeat ~70 s sau boot: còn / thấp nhất | 93799 / 88075 | — | 8 317 652 / 8 317 232 | `dev` @ `87b0337` | 26/09 |
+| thêm `sb_stream` 64 KB ở PSRAM, luồng `mode 2` đang gửi: còn / thấp nhất | 77471 / 64019 | — | — | `dev` @ `253ddf7` | 26/09 |
+| như trên, máy nhận nghẽn 30 s, board nối lại mỗi giây: thấp nhất | 45895 | — | — | `dev` @ `253ddf7` | 26/09 |
 
 Đọc từ log `heap_init` của board B qua CH340. Đây là **trần** cho mọi thứ ở KẾ HOẠCH §6.5 cộng lại, trước khi Wi-Fi và lwIP lấy phần của chúng; nó khớp khoảng ước 300–340 KB của §6.5.
 
