@@ -196,3 +196,41 @@ class GeneratedCTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AfeTests(unittest.TestCase):
+    """afe.yaml reaches C and Python with the same numbers, and nothing else gets through."""
+
+    def test_c_and_python_carry_every_number_of_the_contract(self) -> None:
+        values = dict(gen_contracts.afe_values())
+        namespace: dict = {}
+        exec(gen_contracts.gen_afe_py(list(values.items())), namespace)
+        probe = (
+            '#include <stdio.h>\n#include "gen_afe.h"\nint main(void)\n{\n'
+            + "".join(f'    printf("{name} %.9g\\n", (double)GEN_AFE_{name});\n' for name in values)
+            + "    return 0;\n}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            src, exe = Path(tmp) / "afe.c", Path(tmp) / "afe"
+            src.write_text(probe)
+            inc = REPO / gen_contracts.AFE_INC
+            subprocess.run(["gcc", "-std=c11", "-Wall", "-Werror", f"-I{inc}", str(src), "-o", str(exe)], check=True)
+            printed = dict(
+                line.split() for line in subprocess.run([str(exe)], capture_output=True, text=True).stdout.splitlines()
+            )
+        for name, value in values.items():
+            self.assertEqual(namespace[name], value)
+            self.assertAlmostEqual(float(printed[name]), float(value), places=6)
+
+    def test_a_negative_number_is_bracketed_for_the_preprocessor(self) -> None:
+        self.assertEqual(gen_contracts.c_number(-3.0), "(-3.0f)")
+        self.assertEqual(gen_contracts.c_number(8), "8")
+
+    def test_a_value_that_is_not_a_number_is_refused(self) -> None:
+        original = gen_contracts.load_yaml
+        gen_contracts.load_yaml = lambda name: {"version": 1, "hpf": {"cutoff_hz": "80"}}
+        try:
+            with self.assertRaisesRegex(ValueError, "hpf.cutoff_hz"):
+                gen_contracts.afe_values()
+        finally:
+            gen_contracts.load_yaml = original

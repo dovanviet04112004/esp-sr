@@ -23,6 +23,7 @@ CONTRACTS = REPO_ROOT / "contracts"
 
 COMMON_INC = "firmware/components/common/include"
 MQTT_INC = "firmware/components/net_mqtt/include"
+AFE_INC = "firmware/components/dsp_afe/include"
 ML_GEN = "ml/src/srpipe/generated"
 HOST_GEN = "host/src/srhost/generated"
 
@@ -161,6 +162,33 @@ def gen_array_py(a: dict) -> str:
         f"MAX_DELAY_SAMPLES = {a['max_delay_samples']:.6f}\n"
         f"ALIAS_HZ = {a['alias_hz']:.3f}\n"
     )
+
+
+def afe_values() -> list[tuple[str, int | float]]:
+    """(MODULE_PARAM, value) for every number of afe.yaml; ints stay ints, the rest become floats."""
+    doc = load_yaml("afe.yaml")
+    values = [("VERSION", doc.pop("version"))]
+    for module, params in doc.items():
+        for name, value in params.items():
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                raise ValueError(f"afe.yaml {module}.{name} must be a number, got {value!r}")
+            values.append((f"{module}_{name}".upper(), value))
+    return values
+
+
+def c_number(value: int | float) -> str:
+    text = str(value) if isinstance(value, int) else f"{float(value)!r}f"
+    return f"({text})" if value < 0 else text
+
+
+def gen_afe_h(values: list[tuple[str, int | float]]) -> str:
+    lines = [banner("contracts/afe.yaml", "//"), "#pragma once\n"]
+    lines += [f"#define GEN_AFE_{name} {c_number(value)}" for name, value in values]
+    return "\n".join(lines) + "\n"
+
+
+def gen_afe_py(values: list[tuple[str, int | float]]) -> str:
+    return banner("contracts/afe.yaml", "#") + "\n" + "".join(f"{name} = {value!r}\n" for name, value in values)
 
 
 def stream_values() -> dict:
@@ -604,6 +632,7 @@ def outputs() -> dict[str, str]:
     a = array_values(g)
     s = stream_values()
     t = topic_values()
+    afe = afe_values()
     init = banner("contracts/", "#")
     return {
         f"{COMMON_INC}/gen_grid.h": gen_grid_h(g),
@@ -611,9 +640,11 @@ def outputs() -> dict[str, str]:
         f"{COMMON_INC}/gen_stream.h": gen_stream_h(s),
         f"{MQTT_INC}/gen_topics.h": gen_topics_h(t),
         f"{MQTT_INC}/gen_payload.h": gen_payload_h(),
+        f"{AFE_INC}/gen_afe.h": gen_afe_h(afe),
         f"{ML_GEN}/__init__.py": init,
         f"{ML_GEN}/grid.py": gen_grid_py(g),
         f"{ML_GEN}/array.py": gen_array_py(a),
+        f"{ML_GEN}/afe.py": gen_afe_py(afe),
         f"{HOST_GEN}/__init__.py": init,
         f"{HOST_GEN}/grid.py": gen_grid_py(g),
         f"{HOST_GEN}/stream.py": gen_stream_py(s),
