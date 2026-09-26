@@ -101,7 +101,7 @@ class PurityTests(unittest.TestCase):
         write(self.root, "drv_audio/src/a.c", '#include "freertos/FreeRTOS.h"\n')
         self.assertEqual(self.details(), [])
 
-    def test_only_the_fft_wrappers_may_name_heap_caps(self) -> None:
+    def test_only_the_fft_wrapper_may_name_heap_caps(self) -> None:
         write(self.root, "dsp_spec/src/fft_dl.c", '#include "esp_heap_caps.h"\n')
         write(self.root, "dsp_spec/src/stft.c", '#include "esp_heap_caps.h"\n')
         details = [
@@ -109,8 +109,8 @@ class PurityTests(unittest.TestCase):
         ]
         self.assertEqual([name for name, _ in details], ["stft.c"])
 
-    def test_the_fft_wrappers_still_may_not_allocate(self) -> None:
-        write(self.root, "dsp_spec/src/fft_dsp.c", "void *p(void) { return malloc(4); }\n")
+    def test_the_fft_wrapper_still_may_not_allocate(self) -> None:
+        write(self.root, "dsp_spec/src/fft_dl.c", "void *p(void) { return malloc(4); }\n")
         self.assertIn("allocates with malloc", " ".join(self.details()))
 
     def test_a_mention_inside_a_comment_is_ignored(self) -> None:

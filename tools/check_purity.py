@@ -27,8 +27,8 @@ FORBIDDEN_INCLUDE_RE = re.compile(
     r"|esp_timer\.h|esp_log\.h|esp_heap_caps\.h|esp_system\.h|esp_partition\.h|nvs.*"
     r")[>\"]"
 )
-# The FFT libraries allocate their own tables at init (KEHOACH 4.5.3 rule 7); only these wrappers may say where.
-FFT_TABLE_WRAPPERS = {"dsp_spec/src/fft_dl.c", "dsp_spec/src/fft_dsp.c"}
+# dl_fft allocates its own tables at init (KEHOACH 4.5.3 rule 7); only its wrapper may say where.
+FFT_TABLE_WRAPPERS = {"dsp_spec/src/fft_dl.c"}
 HEAP_CAPS_INCLUDE_RE = re.compile(r"^\s*#\s*include\s*[<\"]esp_heap_caps\.h[>\"]")
 ALLOCATION_RE = re.compile(r"\b(malloc|calloc|realloc|free|heap_caps_\w+|pvPortMalloc|vPortFree)\s*\(")
 LOG_RE = re.compile(r"\b(ESP_LOG[EWIDV]|ESP_EARLY_LOG[EWIDV]|printf|puts)\s*\(")
