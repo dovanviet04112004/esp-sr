@@ -1,4 +1,4 @@
-"""hpf mirrors the esp-dsp biquad the firmware calls and does what a Butterworth high-pass must (E7-T1)."""
+"""hpf mirrors the transposed biquad of the firmware and does what a Butterworth high-pass must (E7-T1)."""
 
 from __future__ import annotations
 
@@ -75,6 +75,14 @@ def test_float32_error_stays_under_one_lsb_on_speech_with_a_dc_offset() -> None:
     rng = np.random.default_rng(2)
     x = 0.03 * np.sin(2 * np.pi * 150 * t) * np.clip(np.sin(2 * np.pi * 2 * t), 0, None) - 0.5 * LSB
     x = x + 1e-4 * rng.standard_normal(t.size)
+    b, a = exact(80.0)
+    y = Hpf(80.0, 1).process(0, x).astype(np.float64)
+    assert np.abs(y - lfilter(b, a, x)).max() < LSB
+
+
+def test_a_strong_hum_over_dc_stays_within_one_lsb_of_float64() -> None:
+    t = np.arange(2 * FS) / FS
+    x = 10 ** (-10 / 20) * np.sqrt(2) * np.sin(2 * np.pi * 50 * t) + 0.1
     b, a = exact(80.0)
     y = Hpf(80.0, 1).process(0, x).astype(np.float64)
     assert np.abs(y - lfilter(b, a, x)).max() < LSB
