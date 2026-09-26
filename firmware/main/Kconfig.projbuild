@@ -1,0 +1,25 @@
+menu "esp-sr application"
+
+    config APP_CONSOLE
+        bool "Console that writes NVS over UART"
+        default n
+        help
+            On in dev, bench and ci. A shipped build must not carry a console
+            that can rewrite every NVS key (KEHOACH 6.2).
+
+    config APP_SPEAKER_ENABLE
+        bool "Speaker fitted: open I2S TX and run noi_task"
+        default n
+        help
+            Board B has no amplifier until E10. Off means drv_audio opens RX
+            only, noi_task is never created, and replies stay MQTT events
+            (KEHOACH 2.1).
+
+    config SR_PROFILING
+        bool "Per-module timing into the bench CSV"
+        default n
+        help
+            On only in the bench profile, the one profile numbers are
+            reported from (KEHOACH 4.5.8).
+
+endmenu
