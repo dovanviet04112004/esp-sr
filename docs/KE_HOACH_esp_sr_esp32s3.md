@@ -1294,7 +1294,10 @@ theo `contracts/golden/chain/tolerance.yaml`. Đây là phép kiểm dựng lạ
 
 `make session ARGS="…"` chạy `srhost.session` trong một container có cổng luồng publish trên Windows: WSL ở
 chế độ NAT không nhận được kết nối từ LAN (`.wslconfig` ghi vì sao không dùng `mirrored`), còn cổng Docker
-Desktop publish thì board tới được, như cổng 1883 của broker.
+Desktop publish thì board tới được, như cổng 1883 của broker. Trước khi mở máy nhận, `make session` giữ board
+trong bootloader (`esptool --after no-reset`) và chỉ thả nó (`esptool run`) khi máy nhận đã nghe. Nhờ vậy phiên
+của app `capture`, vốn gửi ngay từ lúc boot, bắt đầu ở `seq` 0 của đúng một lần boot, không lẫn khung của lần
+chạy trước.
 
 `session.py` ghi những trường của `session.json` mà `host` thấy được (`grid_hash` từ code sinh, `start_utc`,
 `seq_gaps`, `duration_s`, `sha256`); `fw` (`PROJECT_VER` + commit) và `pcm_shift` là tham số bắt buộc khi mở
