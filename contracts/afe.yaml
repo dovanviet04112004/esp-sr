@@ -19,7 +19,7 @@ bss:
 vad:
   hangover_ms: 240
   # WebRTC VAD in float32 (KEHOACH 3.10), its tables as real values; source in firmware/third_party/webrtc_vad.
-  # Bands 80-250, 250-500, 500-1k, 1-2k, 2-3k, 3-4k Hz; Gaussian tables [gaussian][band]; dB of int16-scale energy.
+  # Bands 0-5: 80-250, 250-500, 500-1k, 1-2k, 3-4k, 2-3k Hz; Gaussian tables [gaussian][band]; dB of int16 energy.
   bands: 6
   gaussians: 2
   noise_weights: [0.265625, 0.484375, 0.5625, 0.515625, 0.4140625, 0.1953125,
@@ -40,9 +40,10 @@ vad:
   local_threshold: [5.25, 8.0, 19.5, 23.5]
   global_threshold: [48.0, 80.0, 260.0, 1050.0]
   min_energy: 10.0                    # sum of band energies below which the hop is not modelled
-  likelihood_floor: 7.450580596923828e-09   # 2^-27, the Q27 LSB of WebRTC's likelihood sums
+  likelihood_floor: 3.725290298461914e-09   # 2^-28: WebRTC counts an empty Q27 sum one octave under its LSB
   posterior_floor: 3.0517578125e-05         # 2^-15, below it the first Gaussian takes the whole posterior
   exponent_limit: 21.4892578125       # (x-m)^2/2s^2 beyond which a density is 0
+  density_steps: 1024.0               # densities are whole multiples of 1/1024, rounded down, as WebRTC's Q10
   noise_mean_step: 0.019989013671875
   speech_mean_step: 0.20001220703125
   noise_std_step: 0.0009765625
