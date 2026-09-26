@@ -33,7 +33,7 @@ ESP32-S3-WROOM-1, 16 MB flash, 8 MB PSRAM, hai micro INMP441 ở GPIO 19/20/16, 
 
 ```bash
 uv tool install pre-commit && pre-commit install        # kiểm mỗi commit, ci_status mỗi lần push
-gh auth login                                           # GitHub: bản sao private chạy CI
+gh auth login                                           # GitHub: bản sao công khai chạy CI
 git remote add github https://github.com/dovanviet04112004/esp-sr.git
 git remote set-url --add --push origin http://192.168.40.80:3000/vanviet/esp-sr.git
 git remote set-url --add --push origin https://github.com/dovanviet04112004/esp-sr.git
