@@ -389,19 +389,23 @@ tính bằng dB; đáp ứng biên độ ở 100 Hz và 200 Hz khớp bản Pyth
 `X₁'[k] = g[k] · X₁[k]`. Biên độ của `g` bù chênh độ nhạy, pha của `g` bù chênh pha **tĩnh**.
 
 Hệ số ước bằng `srpipe.dsp.afe.balance` (E2-T6) từ các phiên ồn trắng **chính diện**: loa trên đường trung trực
-của dàn, cách **20 cm**, sau một đoạn im (`mic_array.md` §0 bước 5), thu bằng `capture`. Ở chính diện trễ thật bằng 0,
+của dàn, sau một đoạn im (`mic_array.md` §0 bước 5), thu bằng `capture`, ở **ít nhất hai chỗ đặt loa** khác nhau
+về phía hay khoảng cách — 20 cm trước hộp, 20 cm sau hộp, 1 m. Loa 20 cm cho độ kết hợp cao dưới 1,6 kHz; loa 1 m
+cho trường gần khuếch tán, kém ở pha nhưng ít hố lược ở mức dải cao. Ở chính diện trễ thật bằng 0,
 nên chênh lệch còn lại giữa hai kênh là của linh kiện **cộng** tiếng dội của phòng; đo trên board B cho thấy phần
 thứ hai không bỏ qua được (`mic_array.md`): cùng một board, đặt loa trước hay sau hộp, chênh **mức** giữ nguyên còn
 **pha** trên 1,6 kHz đổi tới 40°. Vì thế `g` chỉ lấy phần các chỗ đặt loa cùng đồng ý:
 
 | Phần của `g[k]` | Cách ước | Vì sao |
 |---|---|---|
-| Biên độ | `√(S₀₀[k] / S₁₁[k])` trên phổ tự cộng dồn của **mọi** phiên hiệu chuẩn (ít nhất hai chỗ đặt loa), làm trơn theo tần số bằng trung bình trượt 5 vạch trên dB | mức là của linh kiện, không đổi theo chỗ đặt loa |
+| Biên độ | `√(ΣS₀₀ / ΣS₁₁)`, hai tổng lấy trên phổ tự cộng dồn của **mọi** phiên hiệu chuẩn (ít nhất hai chỗ đặt loa) và trên các vạch trong cửa sổ 1/3 octave quanh `k`, tối thiểu 5 vạch | mức là của linh kiện và trơn theo tần số; từng vạch ở dải cao mang hố lược của tiếng phản xạ, đổi theo chỗ đặt loa, nên tỉ số tổng trong 1/3 octave mới lặp lại được |
 | Pha | `−(φ₀ + ω_k·τ)`, với `τ` và `φ₀` khớp từ đường pha của phổ chéo cộng dồn (`mic_pair.linear_phase_fit`, 200 Hz – c/2d) | pha từng vạch ở dải cao là của phòng; trễ nhỏ cộng pha hằng là phần mọi phép đo cùng thấy |
 | Vạch 0 và 256 | phần ảo bằng 0 | hai vạch này của phổ thực là số thực |
 
-Phổ lấy ở đúng lưới của firmware (FFT 512, 257 vạch). **Kiểm chéo trước khi ghi**: ước từ một chỗ đặt loa, áp
-lên phiên của chỗ còn lại; chênh biên độ sau bù phải dưới 1 dB ở mọi dải có độ kết hợp ≥ 0,9. `host/src/srhost/calib.py`
+Phổ lấy ở đúng lưới của firmware (FFT 512, 257 vạch). **Kiểm chéo trước khi ghi**: bỏ ra từng chỗ đặt loa, ước từ
+các chỗ còn lại, áp lên chỗ bị bỏ ra; chênh biên độ sau bù phải dưới 1 dB ở mọi dải có độ kết hợp ≥ 0,9. Dải có độ
+kết hợp thấp hơn không kiểm được bằng cách này: ở đó các chỗ đặt loa tự khác nhau vài dB vì phòng, và gộp thêm
+chỗ đặt loa là cách duy nhất làm hẹp sai số. `host/src/srhost/calib.py`
 ước, in bảng kiểm, lưu hệ số thành `docs/measurements/calib/<board>_balance.csv` (số đo, commit), rồi gửi xuống
 console của `test_apps/calib`; app ấy ghi blob 257 × 2 float vào NVS `calib/bal` kèm `bal_ver`, `bal_at` và đọc lại
 CRC32 để máy tính đối chiếu với bản đã gửi.
