@@ -138,21 +138,30 @@ def best_energy_threshold(results: list[SceneResult], sweep: list[float], hangov
     return float(max(thresholds, key=lambda t: _pooled(results, lambda r, t=t: r.energy_db > t, hangover).f1))
 
 
+def number(value: float, digits: int) -> str:
+    """Decimal comma and a true minus, as the tables of docs/measurements write numbers."""
+    return f"{value:.{digits}f}".replace(".", ",").replace("-", "\u2212")
+
+
 def table(results: list[SceneResult], cfg: dict, hangover: bool = True) -> str:
     """Pooled scores by condition, with dsp_afe's hangover or on the raw decisions; the energy detector gets the
     threshold that serves it best over every scene under the same rule."""
     threshold = best_energy_threshold(results, cfg["energy_thresholds_dbfs"], hangover)
     detectors = [(f"vad GMM, aggressiveness {a}", lambda r, a=a: r.gmm_raw[a]) for a in cfg["aggressiveness"]]
-    detectors.append((f"năng lượng trần, ngưỡng tốt nhất {threshold:.0f} dBFS", lambda r: r.energy_db > threshold))
+    detectors.append(
+        (f"năng lượng trần, ngưỡng tốt nhất {number(threshold, 0)} dBFS", lambda r: r.energy_db > threshold)
+    )
     groups = [("tất cả", results)]
-    groups += [(f"SNR {s:g} dB", [r for r in results if r.scene.snr_db == s]) for s in cfg["snr_db"]]
-    groups += [(f"mức {lv:g} dBFS", [r for r in results if r.scene.level_dbfs == lv]) for lv in cfg["level_dbfs"]]
+    groups += [(f"SNR {number(s, 0)} dB", [r for r in results if r.scene.snr_db == s]) for s in cfg["snr_db"]]
+    groups += [
+        (f"mức {number(lv, 0)} dBFS", [r for r in results if r.scene.level_dbfs == lv]) for lv in cfg["level_dbfs"]
+    ]
     lines = ["| Máy dò | " + " | ".join(g for g, _ in groups) + " |", "|---" * (len(groups) + 1) + "|"]
     for name, decide in detectors:
         cells = []
         for _, rs in groups:
             s = _pooled(rs, decide, hangover)
-            cells.append(f"{s.f1:.3f} ({100 * s.miss:.1f} / {100 * s.false_alarm:.1f})")
+            cells.append(f"{number(s.f1, 3)} ({number(100 * s.miss, 1)} / {number(100 * s.false_alarm, 1)})")
         lines.append(f"| {name} | " + " | ".join(cells) + " |")
     total = _pooled(results, detectors[0][1])
     lines.append("")
