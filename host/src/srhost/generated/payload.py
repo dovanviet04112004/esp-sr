@@ -291,7 +291,7 @@ SCHEMAS: dict[str, dict] = {
                                                                      'maximum': 255},
                                                          'vad': {'type': 'boolean'},
                                                          'levelDbfs': {'type': 'integer',
-                                                                       'minimum': -127,
+                                                                       'minimum': -128,
                                                                        'maximum': 0},
                                                          'gainDb': {'type': 'integer',
                                                                     'minimum': -40,

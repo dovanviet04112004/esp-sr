@@ -1075,7 +1075,7 @@ static inline bool telemetry_samples_item_from_json(const cJSON *root, telemetry
     if (item == NULL) { return false; }
     if (item != NULL) {
         if (!cJSON_IsNumber(item)) { return false; }
-        if (item->valuedouble < -127.0 || item->valuedouble > 0.0) { return false; }
+        if (item->valuedouble < -128.0 || item->valuedouble > 0.0) { return false; }
         out->level_dbfs = (int8_t) item->valuedouble;
     }
     item = cJSON_GetObjectItemCaseSensitive(root, "gainDb");
