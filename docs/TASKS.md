@@ -99,6 +99,7 @@ Board B là board duy nhất có micro (KẾ HOẠCH §2.1). Mọi phép đo thu
 | E4-T4 | `srpipe/scenes/`: dựng cảnh có nhãn bằng `pyroomacoustics` — phòng, RT60, hướng người nói và nhiễu, SNR, dàn micro từ `array.yaml` | một lệnh sinh bộ cảnh chuẩn có manifest và sha256; nhãn hướng khớp hình học | E4-T1, E3-T1 | V5.2 |
 | E4-T5 | `srpipe/metrics/`: SI-SDR, STOI, PESQ (giấy phép bản cài ghi rõ), ERLE, lỗi góc, DET | mỗi thước có một phép kiểm với giá trị biết trước | E4-T1 | — |
 | E4-T6 | Đích `make golden`, `make measure`, `make report` khung | `make report` chạy trên repo rỗng không lỗi, ra bảng trống | E4-T2 | — |
+| E4-T7 | Cây `ml/data/` theo KẾ HOẠCH §4.4.1: `README.md`, `manifests/`, `splits/` trong repo; `paths.yaml` có `manifests`; `srpipe/core/splits.py` + `tests/test_splits.py` | mỗi luật có một ca đối chứng âm làm phép kiểm đỏ; repo chưa có split nào thì vẫn xanh | E4-T2 | — |
 
 ---
 
@@ -238,7 +239,7 @@ Chạy song song từ lúc `net_mqtt` có ở E5.
 |---|---|---|---|---|
 | E13-T1 | Hoàn thiện bảy schema và `mqtt_topics.yaml` theo §7.3; sinh code cho `host/` | `host` và firmware cùng sinh từ một nguồn, `contracts.yml` xanh | E1-T4 | V5.7.4 |
 | E13-T2 | `host/mqtt_rx.py` + `live.py` | xem trực tiếp hướng, cờ tiếng nói, mức, sự kiện; payload sai schema bị ghi lại | E13-T1 | — |
-| E13-T3 | `host/stream_rx.py` + `session.py`: phiên thu có nhãn, mã người nói, mã phiếu | một phiên ra WAV từng kênh + json nhãn + danh sách hở `seq` | E13-T1 | V5.5.6 |
+| E13-T3 | `host/stream_rx.py` + `session.py`: phiên thu có nhãn, mã người nói, mã phiếu | một phiên ra đúng khuôn KẾ HOẠCH §4.4.1 ở `raw/device/board_b/<phiên>/`: WAV từng kênh + `session.json` + `gaps.txt`, và một dòng mới trong `manifests/device/board_b.csv` | E13-T1 | V5.5.6 |
 | E13-T4 | `host/score.py` gọi `srpipe.metrics` | chấm một phiên đã thu ra bảng giống `make report` | E13-T3, E4-T5 | — |
 | E13-T5 | `deploy/`: Mosquitto, ACL theo `deviceId`, `gen_certs.sh` | `docker compose up` rồi board nối được; board này không đọc được topic của board khác | E1-T1 | — |
 | E13-T6 | 🔬 Băng thông ở chế độ thường | **dưới 1 KB/s**, không gửi tiếng (§7.3) | E5-T9, E14-T4 | V5.7.4 |
