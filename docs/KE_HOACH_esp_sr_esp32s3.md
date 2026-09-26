@@ -858,7 +858,7 @@ ml/
 │   │   ├── command/                   # mạng âm học + CTC; postproc/ctc_score.py ★
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
-│   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py}
+│   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py}
 │   ├── compress/quant/ptq_espdl.py    # ESP-PPQ → .espdl + mô phỏng int8 trên máy tính
 │   └── export/{pack_models.py, update_lock.py}
 │
@@ -1292,6 +1292,20 @@ Ba vai của TỔNG QUAN "gửi về máy để xem và chấm": **xem** (`live.
 in mức, một chiều, đỉnh và số mẫu cắt của từng kênh. Với phiên `mode 5`, nó còn chạy `srpipe.dsp.afe.chain`
 trên `ch0 ch1` rồi so với kênh `clean` của board, bỏ hai bước sau lúc mở và sau mỗi chỗ hở `seq`, và phán
 theo `contracts/golden/chain/tolerance.yaml`. Đây là phép kiểm dựng lại của app khung rỗng (E5-T11).
+
+`score.py` cũng là công cụ đo dàn micro của E2-T4, E2-T7 và đầu vào của E2-T6, bằng `srpipe.metrics.mic_pair`.
+Nền ồn từng kênh có trọng số A được tính trên các khung im của mọi phiên. Phiên có nhãn `doa_deg` (một nguồn
+ở góc đã biết) có thêm ba thứ, đều tính trên các khung có nguồn (năng lượng trên nền 10 dB):
+
+| Hình | Cách tính | Dùng cho |
+|---|---|---|
+| Trễ `τ = t₀ − t₁` | GCC-PHAT trên phổ chéo trung bình, băng 200 Hz – 7 kHz, nội suy ×32 | dấu của `τ` so với nhãn (E2-T7); ở đầu dàn (`\|cos θ\| ≥ 0,9`) suy ra khoảng cách `d = c·τ / cos θ` (E2-T4) |
+| Chênh mức `ch1 − ch0` | phổ tự trung bình, 8 dải gấp đôi từ 50 Hz tới 8 kHz | chênh độ nhạy (E2-T4, nguồn chính diện) |
+| Chênh pha `ch1 − ch0` | góc của phổ chéo trung bình mỗi dải, thô và sau khi trừ trễ khớp từ đường pha (pha = φ₀ + ω·τ, bình phương nhỏ nhất có trọng số độ kết hợp, 200 Hz – c/2d) | chênh pha của linh kiện (E2-T4); phần trừ trễ bỏ được lỗi đặt nguồn lệch chính diện, còn GCC-PHAT bị một pha hằng kéo lệch nên không dùng ở đây |
+
+Mỗi dải kèm độ kết hợp; dải có độ kết hợp dưới 0,9 không dùng để kết luận. SNR không đo được khi thiếu nguồn
+chuẩn 94 dB SPL, nên `mic_array.md` ghi nó bằng độ nhạy trên datasheet trừ nền đo được, và nói rõ đó là chặn dưới
+vì nền trong phòng gồm cả tiếng phòng. Quy trình đo từng bước nằm ở đầu `docs/measurements/mic_array.md`.
 
 `make session ARGS="…"` chạy `srhost.session` trong một container có cổng luồng publish trên Windows: WSL ở
 chế độ NAT không nhận được kết nối từ LAN (`.wslconfig` ghi vì sao không dùng `mirrored`), còn cổng Docker
