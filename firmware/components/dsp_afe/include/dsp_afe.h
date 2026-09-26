@@ -40,7 +40,7 @@ typedef struct {
 typedef struct {
     const char *input_format; // "MM", or "MMR" with a reference
     dsp_afe_spatial_t spatial;
-    const dsp_afe_ns_ops_t *ns; // NULL selects the OM-LSA floor
+    const dsp_afe_ns_ops_t *ns; // NULL: OM-LSA floor if built, else no ns
     void *ns_ctx;
     const dsp_afe_calib_t *calib; // NULL skips balance, zero delay
     float ns_floor_db;
@@ -77,7 +77,8 @@ typedef struct dsp_afe_s dsp_afe_t;
 
 /** Split the memory this configuration needs into hot (touched every hop) and cold parts.
  *  @ctx any | non-blocking
- *  @ret ESP_OK | ESP_ERR_INVALID_ARG unknown format | ESP_ERR_NOT_SUPPORTED "MMR" without aec built
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG unknown format or parameter out of range
+ *       | ESP_ERR_NOT_SUPPORTED "MMR" without aec, or a spatial path not built (Kconfig)
  */
 esp_err_t dsp_afe_workspace_bytes(const dsp_afe_config_t *cfg, size_t *hot_bytes, size_t *cold_bytes);
 
