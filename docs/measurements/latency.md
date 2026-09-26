@@ -74,3 +74,22 @@ Desktop, cổng 7700 publish trên Windows như broker. Chặn bằng `docker pa
 Chỗ hở chỉ xuất hiện khi bộ đệm trên đường đi (proxy Windows, TCP của lwIP, 64 KB `sb_stream` ≈ 1 s) đầy; board không
 chậm khung nào ở mọi phép thử. Phép "chặn mạng 5 s" thật ở phía Wi-Fi của board làm cùng lúc với E5-T8 (tắt hotspot).
 RAM nội thấp nhất lúc nối lại liên tục: 45 895 B (`ram.md` §3).
+
+## 5. Biquad của `hpf`: kernel `esp-dsp` so với viết tay (E7-T1, ADR-0003)
+
+`test_apps/bench_afe`, profile `bench`, board B, nhân 1, 2000 bước sau 16 bước làm nóng, hai kênh × 256 mẫu, tại
+`d05636a`; chạy lại bằng `make bench-board` (các dòng `BENCH_ALT`).
+
+| Cách lọc | µs trung bình | µs đỉnh | Sai số float32 so với float64, hum 50 Hz −10 dBFS + một chiều −20 dBFS |
+|---|---|---|---|
+| **`dsps_biquad_f32` của `esp-dsp` (hợp ngữ S3, dạng II) — đang dùng** | **36,9** | 41,3 | 7,7 LSB |
+| `dsps_biquad_sf32` hai kênh xen kẽ, chỉ kernel | 36,6 | 40,8 | 7,7 LSB (cùng dạng II) |
+| `dsps_biquad_sf32` kèm chép xen kẽ vào và ra | 51,7 | 55,9 | như trên |
+| Dạng II chuyển vị viết tay, C | 36,5 | 40,6 | 0,7 LSB |
+
+Mọi cách lọc đều ~17 chu kỳ mỗi mẫu: biquad là đệ quy, mỗi mẫu chờ kết quả của mẫu trước, nên độ trễ của bộ tính
+dấu phẩy động quyết định, không phải số lệnh. Ước "< 20 µs hai kênh" của KẾ HOẠCH §3.3 thấp hơn thực tế gần hai lần;
+37 µs là 0,2% một bước 16 ms.
+
+Độ lệch một chiều sau lọc (bản soi gương float32, khớp C từng bit trên máy tính): một chiều −0,5 LSB của INMP441 về đúng 0
+sau 1 s; một chiều −20 dBFS còn −102,4 dBFS, tức giảm 82 dB.
