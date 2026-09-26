@@ -31,7 +31,7 @@ lint: ## check_comments + check_layers + check_purity + ruff
 test: ## Host-side tests for tools/, ml/ and host/
 	python3 -m unittest discover -s tools/tests -t .
 	@if [ -f ml/pyproject.toml ]; then cd ml && uv run pytest; fi
-	@if [ -f host/pyproject.toml ]; then cd host && uv run pytest; fi
+	@if [ -f host/pyproject.toml ]; then cd host && uv run --extra score pytest; fi
 
 # ci
 ci-status: ## Copy the GitHub Actions results of HEAD onto the same commit in Gitea
