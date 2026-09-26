@@ -128,7 +128,7 @@ cá nhân 2025, hiệu lực 01/01/2026 🔬 kiểm điều khoản áp dụng �
 
 1. **Phiếu đồng ý trước khi thu.** Không có phiếu thì không thu, kể cả thu thử.
 2. **Mã hoá người nói.** Tên thật chỉ nằm trong một bảng ngoài repo; mọi file dùng mã `spk_NNN`.
-3. **Bản thu không vào git** (CLAUDE.md §6). Chỉ `manifest.yaml` và `splits/` vào git.
+3. **Bản thu không vào git** (CLAUDE.md §6). Chỉ `ml/data/manifests/` và `ml/data/splits/` vào git (§4.4.1).
 4. **Xoá được theo yêu cầu.** Mã người nói trỏ được tới mọi file của người đó, nên xoá là một lệnh.
 
 Giấy phép **lan sang mô hình**: model huấn luyện trên VIVOS mang ràng buộc phi thương mại của VIVOS.
@@ -806,11 +806,11 @@ hàm ghi và hàm đọc. `test_apps/parity` nướng cả cây `contracts/golde
 | Source | code, YAML, schema, `SPLIT.md`, file in 3D nguồn | ✅ commit |
 | Sinh từ `contracts/` | `gen_*.h`, `*/generated/*` | ✅ commit — không sửa tay, CI sinh lại rồi diff |
 | Vector vàng | `contracts/golden/**` | ✅ commit — vài trăm KB, mất là mất khả năng tái lập |
-| Split và manifest | `ml/data/splits/**`, `**/manifest.yaml` | ✅ commit |
+| Split và manifest | `ml/data/splits/**`, `ml/data/manifests/**` | ✅ commit |
 | Khoá model | `contracts/models.lock.json`, `firmware/models/*/meta.json` | ✅ commit |
 | Sinh lại được tại chỗ | `sdkconfig`, `managed_components/`, `build*/` | ❌ gitignore |
 | Artifact nặng | checkpoint, `.onnx`, `.espdl`, `models.bin` | ❌ gitignore — lưu ngoài, ghi sha256 vào lock |
-| Dữ liệu thô | kho tiếng tải về | ❌ gitignore — mô tả trong `manifest.yaml` |
+| Dữ liệu thô | kho tiếng tải về | ❌ gitignore — mô tả trong `ml/data/manifests/` |
 | **Bản thu tiếng người** | thu qua board, mẩu câu trả lời | ❌ gitignore — dữ liệu cá nhân (§1.4); lưu ngoài, ghi sha256 |
 | Cấu hình công cụ AI agent | `CLAUDE.md`, `.claude/` | ❌ gitignore — chỉ ở máy local |
 
@@ -832,7 +832,8 @@ ml/
 │   ├── core/                          # ── HẠ TẦNG: không chứa tên khối nào ──
 │   │   ├── config.py                  # pydantic + gộp YAML + ghi đè CLI
 │   │   ├── run_dir.py                 # ★ thư mục run: config.resolved + env + split.lock
-│   │   ├── audio_io.py  ├── seed.py  └── logger.py
+│   │   ├── audio_io.py  ├── seed.py  ├── logger.py
+│   │   └── splits.py                  # ★ đọc split, kiểm luật §1.3 (§4.4.1)
 │   ├── generated/                     # sinh từ contracts/, không sửa tay
 │   ├── golden/gold.py                 # ★ khuôn .gold — một khuôn, một chỗ
 │   ├── scenes/                        # ★ dựng cảnh có nhãn bằng pyroomacoustics: phòng, RT60,
@@ -862,9 +863,10 @@ ml/
 │   ├── 20_train_ns.sh ├── 21_train_wake.sh ├── 22_train_command.sh ├── 23_train_synth.sh
 │   ├── 30_quantize.sh ├── 40_export.sh     ├── 41_emit_golden.sh
 │   ├── 50_pack_and_flash.sh               └── 60_eval_board.sh
-├── data/                              # ❌ gitignore trừ README.md, splits/, **/manifest.yaml
+├── data/{README.md, manifests/, splits/}   # ✅ chỉ siêu dữ liệu; dữ liệu ở SRPIPE_DATA_ROOT (§4.4.1)
 ├── artifacts/                         # ❌ gitignore — mỗi run một thư mục
-└── tests/                             # pytest; mỗi golden có một phép kiểm đối chứng âm
+└── tests/                             # pytest; mỗi golden có một phép kiểm đối chứng âm;
+                                       #   test_splits.py chạy luật §1.3 trên mọi split đã commit
 ```
 
 **`dsp/` và `lang/` là thuật toán thuần, `tasks/` là mô hình học** — đúng đường ranh của firmware
@@ -874,6 +876,93 @@ ml/
 
 Mỗi lần huấn luyện ghi vào `artifacts/<nhánh>/runs/<ngày>_<gitsha>_<cfghash>/` kèm
 `config.resolved.yaml`, `split.lock`, `env.txt`, như repo face attendance.
+
+#### 4.4.1 `ml/data/` — dữ liệu
+
+Hai câu hỏi, hai cách chia:
+
+| Câu hỏi | Trả lời | Vì sao |
+|---|---|---|
+| Nằm ở đâu? | **Siêu dữ liệu** (`README.md`, `manifests/`, `splits/`) ở `ml/data/` trong repo, commit. **Dữ liệu** (`raw/`, `interim/`, `processed/`, `cache/`) ở `SRPIPE_DATA_ROOT`, không bao giờ vào git | kho tiếng hàng trăm GB nằm ổ khác; thứ để dựng lại kết quả thì phải đi theo commit |
+| Chia thế nào? | `raw/` theo **loại vật liệu**; từ `interim/` trở đi theo **nhánh** | một kho tiếng phục vụ nhiều nhánh — Common Voice là dữ liệu học của `command`, âm bản của `wake`, tiếng sạch để trộn của `ns` — nên tải một lần; xử lý và chia tập thì mỗi nhánh một kiểu |
+
+```
+ml/data/                                   # trong repo — chỉ siêu dữ liệu, ✅ commit
+├── README.md                              # cái gì nằm ở đâu, lệnh nào sinh ra
+├── manifests/                             # một file cho một kho, cùng bố cục với raw/
+│   ├── speech/{common_voice_vi, vivos, fpt_open, vlsp}.yaml
+│   ├── noise/{musan, demand, dns}.yaml
+│   ├── rir/openslr28.yaml
+│   └── device/board_b.csv                 # ★ mỗi phiên thu qua board một dòng
+└── splits/                                # mỗi nhánh một thư mục, mỗi phiên bản một thư mục con
+    ├── ns/v1/{train, val, test}.txt + SPLIT.md
+    ├── wake/v1/{train, val, test_pos, test_neg}.txt + SPLIT.md
+    ├── command/v1/{train, val, test}.txt + SPLIT.md
+    ├── synth/                             # chỉ khi E12-T1 chọn mạng
+    └── device/v1/{calib_ns, calib_wake, calib_command, test_device}.txt + SPLIT.md
+
+$SRPIPE_DATA_ROOT/                         # ổ ngoài — ❌ không bao giờ vào git
+├── raw/                                   # CHỈ ĐỌC; theo loại vật liệu
+│   ├── speech/<kho>/  noise/<kho>/  rir/<kho>/   # đúng như lúc tải về
+│   └── device/board_b/<phiên>/            # ★ thu qua board; phiên = <yyyymmdd>_<phòng>_<nnn>
+│       ├── ch0.wav  ch1.wav  [ref.wav]    # 16 kHz int16, đúng như stream_rx ghi
+│       ├── session.json                   # nhãn của phiên, trường ở bảng dưới
+│       └── gaps.txt                       # các đoạn hở seq
+├── interim/                               # sinh lại được từ raw/; từ đây theo nhánh
+│   ├── scenes/<bộ>/                       # cảnh dựng có nhãn (E4-T4) cho doa gsc bss ns
+│   └── {ns, wake, command, synth}/        # đã cắt, lấy mẫu lại, trộn, căn nhãn; TTS ở <nhánh>/synth_*
+├── processed/{ns, wake, command, synth}/  # đặc trưng, shard sẵn sàng nạp
+└── cache/                                 # xoá lúc nào cũng được
+```
+
+**Bản thu qua board vào `raw/`** vì nó là nguồn gốc, như một kho vừa tải về: `host/session.py` ghi thư
+mục phiên và thêm một dòng vào `manifests/device/board_b.csv` (E13-T3). Không script nào của `srpipe`
+ghi vào `raw/`. Tiếng tổng hợp bằng TTS trên máy tính sinh lại được bằng một lệnh, nên nằm ở
+`interim/<nhánh>/synth_*`, không ở `raw/`.
+
+| `kind` của phiên | Là gì | Vào split của |
+|---|---|---|
+| `wake` | người nói đọc từ đánh thức | `wake` |
+| `cmd` | câu lệnh | `command` |
+| `neg` | lời nói thường, âm bản gần âm | `wake` (âm bản), `command` (từ chối) |
+| `noise` | nhiễu phòng, không người nói (TỔNG QUAN V5.3.2) | `ns`, tăng cường |
+| `probe` | thu thử để kiểm đường thu | **không nhánh nào** |
+
+`session.json` mang `session`, `board`, `fw` (`PROJECT_VER` + commit), `grid_hash`, `pcm_shift`, `kind`,
+`spk` (`spk_NNN`, `null` với `noise`), `consent` (mã phiếu, `null` với `noise`), `room`, `distance_cm`,
+`doa_deg`, `prompt` (chữ đã đọc), `start_utc`, `seq_gaps`. `board_b.csv` lặp lại các cột ấy để lọc mà
+không mở từng phiên, thêm `duration_s` và `sha256` của `ch0.wav`. Bảng tên thật ↔ `spk_NNN` và bản quét
+phiếu đồng ý nằm **ngoài repo và ngoài `SRPIPE_DATA_ROOT`** (§1.4, E11-T2).
+
+Manifest của một kho, ví dụ `manifests/speech/vivos.yaml`:
+
+```yaml
+name: vivos
+source_url: https://ailab.hcmus.edu.vn/vivos
+downloaded: 2026-10-01
+license: CC BY-NC-SA 4.0
+sha256: {vivos.tar.gz: 3fedf70d…}
+counts: {hours: 15.7, speakers: 65, utterances: 12420}
+consumed_by: [command]
+notes: phi thương mại — ràng buộc lan sang model (§1.4)
+```
+
+**Một dòng split** là TSV bốn cột `item  spk  room  origin`: `item` là đường dẫn so với `raw/` hoặc
+`interim/`; `spk` là mã người nói của kho hoặc `spk_NNN`, `-` với nhiễu; `room` là phòng thu với bản của
+board, `-` với kho công khai; `origin` là `public` | `board` | `synth` | `scene`. Một file tự đủ để kiểm
+luật mà không mở dữ liệu. `SPLIT.md` ghi luật, seed, lệnh sinh, và một dòng `- <file>: <sha256>` cho mỗi
+file của phiên bản.
+
+`ml/tests/test_splits.py` chạy `srpipe/core/splits.py` trên mọi split đã commit; mỗi luật có một ca đối
+chứng âm cố ý vi phạm:
+
+| Luật §1.3 | Phép kiểm trong một thư mục phiên bản |
+|---|---|
+| tách theo người nói | một `spk` khác `-` chỉ nằm ở một vai — `train`, `val`, `calib`, `test`: phần tên file trước dấu `_` đầu tiên |
+| tiếng tổng hợp không vào tập thử | không dòng `synth` trong file tên bắt đầu `test` |
+| hiệu chuẩn int8 tách khỏi tập thử | `calib_*` và `test*` không chung `item` |
+| tập thử có phòng lạ | nếu `test*` có dòng `board`, ít nhất một `room` của nó không có trong `train*` |
+| dựng lại được | sha256 trong `SPLIT.md` khớp từng file `.txt` |
 
 ### 4.5 `firmware/` — ESP-IDF
 
