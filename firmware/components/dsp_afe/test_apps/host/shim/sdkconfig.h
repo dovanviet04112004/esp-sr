@@ -1,30 +1,16 @@
-/** Kconfig of dsp_afe for the host build: nothing, or every module when DSP_AFE_HOST_ALL_MODULES is set.
- *  @ctx any | compile time; values follow the defaults of dsp_afe/Kconfig
+/** Module switches of dsp_afe for the host build: none, or every module when DSP_AFE_HOST_ALL_MODULES is set.
+ *  @ctx any | compile time; module numbers come from gen_afe.h, not from here
  */
 #pragma once
 
 #if DSP_AFE_HOST_ALL_MODULES
 #define CONFIG_DSP_AFE_HPF_ENABLE 1
-#define CONFIG_DSP_AFE_HPF_CUTOFF_HZ 80
 #define CONFIG_DSP_AFE_AEC_ENABLE 1
-#define CONFIG_DSP_AFE_AEC_PARTITIONS 8
 #define CONFIG_DSP_AFE_BALANCE_ENABLE 1
 #define CONFIG_DSP_AFE_DOA_ENABLE 1
-#define CONFIG_DSP_AFE_DOA_BAND_MIN_HZ 200
-#define CONFIG_DSP_AFE_DOA_BAND_MAX_HZ 0
-#define CONFIG_DSP_AFE_DOA_GRID_STEP_DEG 2
-#define CONFIG_DSP_AFE_DOA_SMOOTH_TAU_MS 200
 #define CONFIG_DSP_AFE_GSC_ENABLE 1
-#define CONFIG_DSP_AFE_GSC_STEP_SIZE_PPM 50000
-#define CONFIG_DSP_AFE_GSC_LEAKAGE_PPM 100
 #define CONFIG_DSP_AFE_BSS_ENABLE 1
-#define CONFIG_DSP_AFE_BSS_FORGET_TAU_MS 1000
 #define CONFIG_DSP_AFE_NS_OMLSA_ENABLE 1
 #define CONFIG_DSP_AFE_VAD_ENABLE 1
-#define CONFIG_DSP_AFE_VAD_HANGOVER_MS 240
 #define CONFIG_DSP_AFE_AGC_ENABLE 1
-#define CONFIG_DSP_AFE_AGC_UP_DB_PER_S 3
-#define CONFIG_DSP_AFE_AGC_DOWN_DB_PER_S 6
-#define CONFIG_DSP_AFE_AGC_LIMIT_DBFS -3
-#define CONFIG_DSP_AFE_AGC_LOOKAHEAD_MS 4
 #endif

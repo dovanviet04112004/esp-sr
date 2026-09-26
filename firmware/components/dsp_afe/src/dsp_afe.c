@@ -13,6 +13,7 @@
 #include "dsp_afe/hpf.h"
 #include "dsp_afe/vad.h"
 #include "dsp_spec/stft.h"
+#include "gen_afe.h"
 #include "gen_array.h"
 #include "sdkconfig.h"
 
@@ -22,9 +23,6 @@
 #define BROADSIDE_DEG ((GEN_ARRAY_DOA_MIN_DEG + GEN_ARRAY_DOA_MAX_DEG) / 2.0f)
 #define ANGLE_UNKNOWN_DEG (-1)
 #define VAD_AGGRESSIVENESS_MAX 3 // dsp_afe_vad_config_t: 0 most lenient .. 3 strictest
-#define DOA_UPDATE_EVERY_HOPS 2  // KEHOACH 3.6
-#define MS_PER_S 1000.0f
-#define PPM_PER_UNIT 1e6f
 
 _Static_assert(N_MICS == 2, "the spatial stage takes exactly two microphones");
 
@@ -157,7 +155,7 @@ static void walk_spec(walker_t *w, dsp_afe_t *afe)
 static void walk_hpf(walker_t *w, dsp_afe_t *afe)
 {
 #if CONFIG_DSP_AFE_HPF_ENABLE
-    const dsp_afe_hpf_config_t cfg = {.cutoff_hz = CONFIG_DSP_AFE_HPF_CUTOFF_HZ, .n_channels = N_MICS};
+    const dsp_afe_hpf_config_t cfg = {.cutoff_hz = GEN_AFE_HPF_CUTOFF_HZ, .n_channels = N_MICS};
     const size_t bytes = dsp_afe_hpf_workspace_bytes(&cfg);
     void *mem = region(w, bytes);
     if (mem != NULL) { fail(w, dsp_afe_hpf_init(&afe->hpf, &cfg, mem, bytes)); }
@@ -173,7 +171,7 @@ static void walk_aec(walker_t *w, const dsp_afe_config_t *cfg, uint8_t n_channel
 #if CONFIG_DSP_AFE_AEC_ENABLE
     const dsp_afe_aec_config_t aec = {
         .n_mics = N_MICS,
-        .n_partitions = CONFIG_DSP_AFE_AEC_PARTITIONS,
+        .n_partitions = GEN_AFE_AEC_PARTITIONS,
         .bulk_delay_samples = cfg->calib != NULL ? cfg->calib->aec_delay_samples : 0,
     };
     const size_t bytes = dsp_afe_aec_workspace_bytes(&aec);
@@ -192,11 +190,10 @@ static void walk_doa(walker_t *w, dsp_afe_t *afe)
     const dsp_afe_doa_config_t cfg = {
         .spacing_m = GEN_ARRAY_SPACING_M,
         .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
-        .band_min_hz = CONFIG_DSP_AFE_DOA_BAND_MIN_HZ,
-        .band_max_hz =
-            CONFIG_DSP_AFE_DOA_BAND_MAX_HZ > 0 ? CONFIG_DSP_AFE_DOA_BAND_MAX_HZ : GEN_ARRAY_ALIAS_HZ,
-        .grid_step_deg = CONFIG_DSP_AFE_DOA_GRID_STEP_DEG,
-        .smooth_tau_s = CONFIG_DSP_AFE_DOA_SMOOTH_TAU_MS / MS_PER_S,
+        .band_min_hz = GEN_AFE_DOA_BAND_MIN_HZ,
+        .band_max_hz = GEN_AFE_DOA_BAND_MAX_HZ > 0.0f ? GEN_AFE_DOA_BAND_MAX_HZ : GEN_ARRAY_ALIAS_HZ,
+        .grid_step_deg = GEN_AFE_DOA_GRID_STEP_DEG,
+        .smooth_tau_s = GEN_AFE_DOA_SMOOTH_TAU_S,
     };
     const size_t bytes = dsp_afe_doa_workspace_bytes(&cfg);
     void *mem = region(w, bytes);
@@ -216,8 +213,8 @@ static void walk_spatial(walker_t *w, dsp_afe_spatial_t spatial, dsp_afe_t *afe)
         const dsp_afe_gsc_config_t cfg = {
             .spacing_m = GEN_ARRAY_SPACING_M,
             .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
-            .step_size = CONFIG_DSP_AFE_GSC_STEP_SIZE_PPM / PPM_PER_UNIT,
-            .leakage = CONFIG_DSP_AFE_GSC_LEAKAGE_PPM / PPM_PER_UNIT,
+            .step_size = GEN_AFE_GSC_STEP_SIZE,
+            .leakage = GEN_AFE_GSC_LEAKAGE,
         };
         const size_t bytes = dsp_afe_gsc_workspace_bytes(&cfg);
         void *mem = region(w, bytes);
@@ -230,7 +227,7 @@ static void walk_spatial(walker_t *w, dsp_afe_spatial_t spatial, dsp_afe_t *afe)
     case DSP_AFE_SPATIAL_BSS: {
 #if CONFIG_DSP_AFE_BSS_ENABLE
         const dsp_afe_bss_config_t cfg = {
-            .forget_tau_s = CONFIG_DSP_AFE_BSS_FORGET_TAU_MS / MS_PER_S,
+            .forget_tau_s = GEN_AFE_BSS_FORGET_TAU_S,
             .spacing_m = GEN_ARRAY_SPACING_M,
             .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
         };
@@ -279,7 +276,7 @@ static void walk_ns(walker_t *w, const dsp_afe_config_t *cfg, dsp_afe_t *afe)
 static dsp_afe_vad_config_t vad_config(const dsp_afe_config_t *cfg)
 {
     return (dsp_afe_vad_config_t){.aggressiveness = cfg->vad_aggressiveness,
-                                  .hangover_ms = CONFIG_DSP_AFE_VAD_HANGOVER_MS};
+                                  .hangover_ms = GEN_AFE_VAD_HANGOVER_MS};
 }
 #endif
 
@@ -306,10 +303,10 @@ static void walk_agc(walker_t *w, const dsp_afe_config_t *cfg, dsp_afe_t *afe)
 #if CONFIG_DSP_AFE_AGC_ENABLE
     const dsp_afe_agc_config_t agc = {
         .target_dbfs = cfg->agc_target_dbfs,
-        .up_db_per_s = CONFIG_DSP_AFE_AGC_UP_DB_PER_S,
-        .down_db_per_s = CONFIG_DSP_AFE_AGC_DOWN_DB_PER_S,
-        .limit_dbfs = CONFIG_DSP_AFE_AGC_LIMIT_DBFS,
-        .lookahead_ms = CONFIG_DSP_AFE_AGC_LOOKAHEAD_MS,
+        .up_db_per_s = GEN_AFE_AGC_UP_DB_PER_S,
+        .down_db_per_s = GEN_AFE_AGC_DOWN_DB_PER_S,
+        .limit_dbfs = GEN_AFE_AGC_LIMIT_DBFS,
+        .lookahead_ms = GEN_AFE_AGC_LOOKAHEAD_MS,
     };
     const size_t bytes = dsp_afe_agc_workspace_bytes(&agc);
     void *mem = region(w, bytes);
@@ -426,7 +423,7 @@ static dsp_spec_cplx_t *run_spatial_stage(dsp_afe_t *afe)
     if (afe->cfg.calib != NULL) { dsp_afe_balance_apply(afe->calib.balance, afe->bins[1]); }
 #endif
 #if CONFIG_DSP_AFE_DOA_ENABLE
-    const bool update = afe->last_vad && afe->seq % DOA_UPDATE_EVERY_HOPS == 0;
+    const bool update = afe->last_vad && afe->seq % GEN_AFE_DOA_UPDATE_EVERY_HOPS == 0;
     dsp_afe_doa_process(afe->doa, x0, x1, update, &afe->doa_result);
 #endif
     switch (afe->cfg.spatial) {
