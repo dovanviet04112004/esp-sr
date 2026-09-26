@@ -33,7 +33,7 @@ Ký hiệu: 🔬 là số ước hoặc số của tài liệu ngoài, **chưa �
 |---|---|
 | Việc | chuỗi tiếng nói đầy đủ trên board hai micro, từ thu tới nói lại, bằng mã đọc được |
 | Ngôn ngữ đích | tiếng Việt cho từ đánh thức, lệnh và tiếng nói ra |
-| Nền | `dl_fft`, `esp-dl` — hai thư viện mã mở của Espressif; `esp-dsp` được đo và loại hai lần: FFT ở ADR-0002, biquad của `hpf` ở ADR-0004. **Không** link bất kỳ `.a` nào của ESP-SR (TỔNG QUAN §1) |
+| Nền | `dl_fft`, `esp-dl` — hai thư viện mã mở của Espressif; `esp-dsp` được đo và loại ba lần: FFT ở ADR-0002, biquad của `hpf` ở ADR-0004, nhân phức của `balance` ở ADR-0005. **Không** link bất kỳ `.a` nào của ESP-SR (TỔNG QUAN §1) |
 | Chip | ESP32-S3, hai nhân Xtensa LX7 240 MHz, flash 16 MB, PSRAM 8 MB octal |
 | Đường về máy tính | MQTT cho trạng thái, số liệu, sự kiện; TCP cho tiếng khi bật tay |
 | XONG khi | mọi khối đạt cửa riêng; chạy đồng thời trong một bản dựng; liền 30 phút **0 khung mất**, heap không trôi; mọi con số dựng lại được bằng **một lệnh** `make` |
@@ -361,8 +361,8 @@ OM-LSA nằm ngay trong `dsp_afe`; bản RNNoise nằm ở `ai_engine/src/ns/` v
 | `fft` `window` `stft` | thuần | `dsp_spec` | FFT thực (`dl_fft`), căn Hann, chồng 50% | §3.1 | **451 µs đo** cả chuỗi | E6-T4 |
 | `mel` | thuần | `dsp_spec` | log-mel, MFCC giữ làm đối chiếu | 40 dải, 20–7 600 Hz | **~180 µs đo** (`rfft` 118 + 40 dải 62) | E6-T5 |
 | `pitch` | thuần | `dsp_spec` | NCCF, ra log F0 + delta + độ hữu thanh | 60–400 Hz | ~300 µs; **chỉ dựng nếu E11-T8 chứng minh có lợi** | E11-T8 |
-| `hpf` | thuần | `dsp_afe` | IIR bậc hai Butterworth, dạng II chuyển vị viết tay (ADR-0004) | 80 Hz | ~37 µs hai kênh | E7-T1 |
-| `balance` | thuần | `dsp_afe` | nhân hệ số phức hiệu chuẩn mỗi vạch cho `ch1` | từ NVS `calib/bal` | < 10 µs | E7-T2 |
+| `hpf` | thuần | `dsp_afe` | IIR bậc hai Butterworth, dạng II chuyển vị viết tay (ADR-0004) | 80 Hz | ~41 µs hai kênh | E7-T1 |
+| `balance` | thuần | `dsp_afe` | nhân hệ số phức hiệu chuẩn mỗi vạch cho `ch1`, vòng viết tay (ADR-0005) | từ NVS `calib/bal` | ~18 µs | E7-T2 |
 | `aec` | thuần | `dsp_afe` | MDF chồng-lưu, bước học tự chỉnh, khử vọng dư | 8 phân đoạn × 256 = 128 ms đuôi | ~1,3 ms hai micro | E10-T4 |
 | `doa` | thuần | `dsp_afe` | GCC-PHAT trên phổ chéo đã làm trơn, dò lưới 2° | dải 200 Hz – c/2d | ~550 µs khi cập nhật | E8-T1 |
 | `gsc` | thuần | `dsp_afe` | chùm trễ và cộng, ma trận chặn, NLMS rò có điều khiển thích nghi | μ 0,05, rò 1e-4 | ~150 µs | E8-T2 |
@@ -390,7 +390,10 @@ nằm sát z = 1. Đứng đầu chuỗi vì lý do của TỔNG QUAN §2.2. Th�
 đáp ứng biên độ ở 100 Hz và 200 Hz khớp bản Python.
 
 **`balance`** — một hệ số phức `g[k]` cho mỗi vạch `k`, nhân vào `ch1` sau STFT:
-`X₁'[k] = g[k] · X₁[k]`. Biên độ của `g` bù chênh độ nhạy, pha của `g` bù chênh pha **tĩnh**.
+`X₁'[k] = g[k] · X₁[k]`. Biên độ của `g` bù chênh độ nhạy, pha của `g` bù chênh pha **tĩnh**. Module là một vòng viết
+tay, bốn phép nhân và hai phép cộng float32 mỗi vạch, đúng thứ tự của `srpipe.dsp.afe.balance.apply` (ADR-0005): không
+thư viện nào có phép nhân phức từng phần tử, và ghép nó từ phép nhân thực của `esp-dsp` chậm gần ba lần. Không có
+`calib` thì module không chạy và `ch1` đi qua nguyên vẹn.
 
 Hệ số ước bằng `srpipe.dsp.afe.balance` (E2-T6) từ các phiên ồn trắng **chính diện**: loa trên đường trung trực
 của dàn, sau một đoạn im (`mic_array.md` §0 bước 5), thu bằng `capture`, ở **ít nhất hai chỗ đặt loa** khác nhau
@@ -686,6 +689,10 @@ thực** như TỔNG QUAN đòi, và độ trễ nghe thấy là thời gian d�
 
 Python viết bằng **float32**, không float64: so float64 với float32 thì sai số của phép so che mất sai
 số của thuật toán. Ngưỡng khớp là dữ liệu của golden, không phải hằng số trong code kiểm (§4.9).
+
+`dsp_afe` dựng với **`-ffp-contract=off`** (ADR-0006): trình biên dịch không gộp `a · b + c` thành một lệnh làm tròn một
+lần, nên mỗi phép float32 làm tròn như numpy và bản C khớp bản soi gương từng bit ở mọi profile, trên mọi máy. Parity
+trên board dựng bằng cờ trình biên dịch của `bench`, cũng là của `prod` (§4.5.8), để kiểm đúng mã chạy thật.
 
 **Mỗi bộ vàng có đối chứng âm** (TỔNG QUAN §5.3 bước 2): một ca cố ý sai một chỗ — đảo dấu một hệ số,
 lệch một mẫu — và phép kiểm phải đỏ ở ca đó. Bộ vàng không bắt được lỗi cố ý là bộ vàng không kiểm gì.
@@ -1243,7 +1250,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 |---|---|---|
 | Unit trên board | `components/<c>/test_apps/unit/` | `idf.py build flash` + `pytest_*.py` (pytest-embedded) |
 | Unit trên máy tính | `components/<c>/test_apps/host/` | **CMake thường + lớp đệm** `test_apps/host/shim/` (`esp_err.h`, `esp_heap_caps.h`, `esp_log.h`, …), `dl_fft` dựng từ bản C thuần; chạy thêm cả `contracts/golden/` qua bộ so của `test_apps/parity`, phán bằng `pytest_parity.py`; workflow `firmware` chạy mỗi lần push (chốt ở E6-T6). Target `linux` của IDF bị loại: đòi `libbsd-dev` trên máy và kéo cả cổng FreeRTOS vào một component thuần |
-| Parity C ↔ Python | `test_apps/parity/` | đọc `contracts/golden/` trong LittleFS, so theo `tolerance.yaml` |
+| Parity C ↔ Python | `test_apps/parity/` | đọc `contracts/golden/` trong LittleFS, so theo `tolerance.yaml`; dựng bằng cờ trình biên dịch của `bench` (§3.14), hai lần: mọi module tắt với bộ vàng `chain`, và profile `modules` với bộ vàng của từng module thật |
 | Chi phí | `test_apps/bench_afe`, `bench_kws`, `bench_mem` | in CSV → lưu ở `docs/measurements/bench/` → `tools/budget.py` → `docs/measurements/budget.md` |
 | Chạy dài | `test_apps/soak/` | 30 phút cho Cửa 5, 8 giờ trước khi báo cáo |
 | Thu dữ liệu | `test_apps/capture/` | đẩy thô về `host/` |
