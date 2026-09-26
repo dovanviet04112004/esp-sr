@@ -1,0 +1,16 @@
+menu "dsp_spec"
+
+    choice DSP_SPEC_FFT_BACKEND
+        prompt "Real FFT backend"
+        default DSP_SPEC_FFT_DL
+        help
+            E6-T3 measures both on the board and keeps one (KEHOACH 3.1, 4.5.1).
+
+        config DSP_SPEC_FFT_DL
+            bool "espressif/dl_fft"
+
+        config DSP_SPEC_FFT_ESP_DSP
+            bool "espressif/esp-dsp"
+    endchoice
+
+endmenu
