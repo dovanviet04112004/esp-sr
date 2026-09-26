@@ -147,7 +147,7 @@ Bốn module không cần mô hình, không cần dữ liệu. Làm trước vì
 
 | ID | Module | Thuật toán (KẾ HOẠCH) | Xong khi | Chặn bởi | V5 |
 |---|---|---|---|---|---|
-| ~~E7-T1~~ | `hpf` | **Xong 26/09.** Biquad Butterworth 80 Hz (`contracts/afe.yaml`), kernel `esp-dsp` `dsps_biquad_f32` (ADR-0003) | độ lệch một chiều sau lọc: −0,5 LSB về 0, −20 dBFS còn −102,4 dBFS (giảm 82 dB); đủ bốn bước: Python soi gương, bộ vàng có đối chứng âm, C khớp từng bit trên máy tính và trong ngưỡng trên board (`make parity-board`), 36,9 µs hai kênh vào `budget.md` | Cửa 0 | V5.1.1 |
+| ~~E7-T1~~ | `hpf` | **Xong 26/09.** Biquad Butterworth 80 Hz (`contracts/afe.yaml`), dạng II chuyển vị viết tay (ADR-0004; kernel `esp-dsp` bị loại vì không nhanh hơn mà kém chính xác 10–20 dB) | độ lệch một chiều sau lọc: −0,5 LSB về 0, −20 dBFS còn −102,4 dBFS (giảm 82 dB); đủ bốn bước: Python soi gương, bộ vàng có đối chứng âm, C khớp từng bit trên máy tính và trên board (`make parity-board`), 36,8 µs hai kênh vào `budget.md` | Cửa 0 | V5.1.1 |
 | E7-T2 | `balance` | hệ số phức mỗi vạch, sau STFT (§3.4) | khớp Python trên bộ vàng; đủ bốn bước | Cửa 0 | V5.1.2 |
 | E7-T3 | `vad` | GMM sáu dải, kéo dài 240 ms, **trước `agc`** (§3.10) | hơn ngưỡng năng lượng trần bằng F1 trên tập có nhãn; đủ bốn bước | Cửa 0 | V5.1.4 |
 | E7-T4 | `agc` | hai tầng, chỉ thích nghi khi `vad = 1` (§3.10) | mức ra ±3 dB quanh đích với vào −50 … −10 dBFS, không cắt đỉnh, không dao động; đủ bốn bước | E7-T3 | V5.1.3 |
