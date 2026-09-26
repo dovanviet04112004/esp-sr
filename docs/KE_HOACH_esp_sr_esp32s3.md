@@ -1001,7 +1001,7 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | L2 | `drv_led` | driver | C | `common`, `bsp_board` |
 | L2 | `sys_storage` | hệ thống | C | `common`, `nvs_flash`, `esp_partition`, `littlefs` |
 | L2 | `sys_time` | hệ thống | C | `common`, `lwip` |
-| L3 | `ai_engine` | mô hình học | C++ | `common`, `dsp_spec`, `sys_storage`, `esp-dl` |
+| L3 | `ai_engine` | mô hình học | C++ | `common`, `dsp_spec`, `dsp_afe` (kiểu của khe `ns`), `sys_storage`, `esp-dl` |
 | L3 | `net_wifi` / `net_mqtt` / `net_stream` / `net_ota` | mạng | C | `common`, `sys_storage`, `esp_wifi` / `mqtt` `cjson` / `lwip` / `esp_https_ota` |
 | L4 | `svc_front` | ghép | C | `common`, `drv_audio`, `dsp_afe`, `ai_engine` |
 | L4 | `svc_listen` | ghép | C | `common`, `dsp_spec`, `lang_vi`, `ai_engine`, `sys_storage` |
