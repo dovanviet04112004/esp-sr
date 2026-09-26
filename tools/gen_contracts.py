@@ -164,14 +164,23 @@ def gen_array_py(a: dict) -> str:
     )
 
 
-def afe_values() -> list[tuple[str, int | float]]:
-    """(MODULE_PARAM, value) for every number of afe.yaml; ints stay ints, the rest become floats."""
+AfeValue = int | float | tuple[int | float, ...]
+
+
+def is_number(value: object) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def afe_values() -> list[tuple[str, AfeValue]]:
+    """(MODULE_PARAM, value) for every number or list of numbers of afe.yaml; a list becomes a tuple."""
     doc = load_yaml("afe.yaml")
-    values = [("VERSION", doc.pop("version"))]
+    values: list[tuple[str, AfeValue]] = [("VERSION", doc.pop("version"))]
     for module, params in doc.items():
         for name, value in params.items():
-            if isinstance(value, bool) or not isinstance(value, int | float):
-                raise ValueError(f"afe.yaml {module}.{name} must be a number, got {value!r}")
+            if isinstance(value, list) and value and all(is_number(v) for v in value):
+                value = tuple(value)
+            elif not is_number(value):
+                raise ValueError(f"afe.yaml {module}.{name} must be a number or a list of numbers, got {value!r}")
             values.append((f"{module}_{name}".upper(), value))
     return values
 
@@ -181,13 +190,18 @@ def c_number(value: int | float) -> str:
     return f"({text})" if value < 0 else text
 
 
-def gen_afe_h(values: list[tuple[str, int | float]]) -> str:
+def c_value(value: AfeValue) -> str:
+    """A number, or a list as an initializer the caller gives a type: static const float t[] = GEN_AFE_X;"""
+    return "{" + ", ".join(c_number(v) for v in value) + "}" if isinstance(value, tuple) else c_number(value)
+
+
+def gen_afe_h(values: list[tuple[str, AfeValue]]) -> str:
     lines = [banner("contracts/afe.yaml", "//"), "#pragma once\n"]
-    lines += [f"#define GEN_AFE_{name} {c_number(value)}" for name, value in values]
+    lines += [f"#define GEN_AFE_{name} {c_value(value)}" for name, value in values]
     return "\n".join(lines) + "\n"
 
 
-def gen_afe_py(values: list[tuple[str, int | float]]) -> str:
+def gen_afe_py(values: list[tuple[str, AfeValue]]) -> str:
     return banner("contracts/afe.yaml", "#") + "\n" + "".join(f"{name} = {value!r}\n" for name, value in values)
 
 
