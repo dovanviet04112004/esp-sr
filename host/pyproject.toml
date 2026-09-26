@@ -8,6 +8,14 @@ dependencies = [
     "paho-mqtt>=2.1",
 ]
 
+[project.optional-dependencies]
+score = [
+    "srpipe",
+]
+
+[tool.uv.sources]
+srpipe = { path = "../ml", editable = true }
+
 [dependency-groups]
 dev = [
     "pytest>=8.2",

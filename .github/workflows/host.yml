@@ -1,12 +1,12 @@
-# Python side of host/: lint and tests (KEHOACH 4.6).
+# Python side of host/: lint and tests; score imports srpipe from ml/ (KEHOACH 4.6).
 name: host
 
 on:
   workflow_dispatch:
   push:
-    paths: ["host/**", "contracts/**", ".github/workflows/host.yml"]
+    paths: ["host/**", "contracts/**", "ml/src/**", "ml/pyproject.toml", ".github/workflows/host.yml"]
   pull_request:
-    paths: ["host/**", "contracts/**", ".github/workflows/host.yml"]
+    paths: ["host/**", "contracts/**", "ml/src/**", "ml/pyproject.toml", ".github/workflows/host.yml"]
 
 jobs:
   host:
@@ -20,6 +20,6 @@ jobs:
         run: |
           if [ ! -f host/pyproject.toml ]; then echo "host/pyproject.toml absent, nothing to test yet"; exit 0; fi
           cd host
-          uv sync --frozen
+          uv sync --frozen --extra score
           uv run ruff check .
           uv run pytest
