@@ -39,7 +39,7 @@ trong phòng gồm cả tiếng phòng nên số ấy là **chặn dưới**.
 |---|---|---|---|---|
 | Khoảng cách hai micro | 4–6,5 cm | **44,4 mm** bằng tiếng; ~45 mm bằng thước | bước 3 và 4 của §0: `τ` trung vị +1,89 và −2,25 mẫu, khoảng cách = nửa hiệu = 2,07 mẫu (`20260926_home_008`, `…_007`) | 26/09 |
 | Chênh độ nhạy | ≤ 3 dB | **+10,8 … +11,6 dB** ở 200–1600 Hz, **+13,7 dB** ở 1,6–6,4 kHz (`ch1` to hơn) — **trượt** | ồn trắng chính diện 20 cm, hai lần (`20260926_home_010`, `…_011`); vỗ tay hai đầu cho cùng mức, kể cả phần nhô +13,6 … +15,7 dB ở 1,6–3,2 kHz: mức là của thiết bị | 26/09 |
-| Chênh pha | ≤ 10° | **−4,2 … −4,7°** ở 200–1600 Hz — đạt; **+24 … +34°** ở 1,6–6,4 kHz, **chưa rõ** của thiết bị hay của cách đặt loa; lệch giờ tĩnh −0,18 mẫu (−11 µs) | ồn trắng chính diện 20 cm, hai lần cùng chỗ cho cùng số; ở 1 m dải cao ra ~0° nhưng độ kết hợp chỉ 0,5–0,6; lệch giờ = nửa tổng hai `τ` trung vị của vỗ tay | 26/09 |
+| Chênh pha | ≤ 10° | **0 … −4,7°** ở 200–1600 Hz — **đạt**; dải 1,6–6,4 kHz đổi theo hướng đặt loa (+34 / +24° loa trước hộp, +12 / −8° loa sau hộp), nên là của phòng, không của linh kiện; lệch giờ tĩnh −0,14 … −0,21 mẫu | ồn trắng 20 cm trước hộp (`20260926_home_011`) và sau hộp (`…_012`); lệch giờ theo vỗ tay (−0,18) và đường pha của hai phiên | 26/09 |
 | SNR `ch0` / `ch1` | ≥ 62 dB (INMP441 ghi 61 dBA) | **≥ 54,4 / ≥ 49,3 dB** (chặn dưới) | −29,0 dBFS (độ nhạy datasheet ở 94 dB SPL) trừ nền A khi Wi-Fi tắt | 26/09 |
 | Nền ồn khi Wi-Fi phát / tắt | — | `ch0` −82,9 / −83,4 dBFS(A); `ch1` −78,1 / −78,3 dBFS(A) | bước 2 và 3 của §0, 60 s mỗi phiên, liền nhau: `20260926_home_004`, `…_005` | 26/09 |
 
@@ -55,7 +55,10 @@ micro vừa cấp điện (một chiều trôi từ −1400 LSB); đừng dùng 
 200 Hz, nên dải 50–200 Hz không đo được bằng nó. Ở 1 m (`20260926_home_009`) độ kết hợp trên 800 Hz chỉ 0,5–0,7: tiếng dội
 của phòng lấn tiếng thẳng. Ở 20 cm, hai lần cùng chỗ (`…_010`, `…_011`), độ kết hợp 200–1600 Hz là 0,97–0,998 và dải
 1,6–6,4 kHz ổn định ở ~0,8 với cùng chênh mức và chênh pha. Hai lần cùng chỗ chỉ chứng tỏ số lặp lại được, không tách được
-thiết bị khỏi cách đặt loa: pha dải cao cần một lần đo ở chỗ khác (phòng ít vang, hay loa khác) trước khi kết luận. Phiên phải
+thiết bị khỏi cách đặt loa; lần thứ ba đặt loa phía sau hộp (`…_012`) tách được: mức giữ nguyên (+10,9 … +12,0 dB, +14,2 dB
+ở 1,6–3,2 kHz), pha dải cao đổi hẳn. Chênh mức là của thiết bị; pha dải cao là của phòng và chỗ đặt loa. Hệ số `balance` ước
+từ một chỗ đặt loa vì thế chỉ tin được phần mức theo vạch và phần pha dạng trễ nhỏ cộng pha hằng mà mọi phép đo cùng đồng ý;
+pha theo từng vạch ở dải cao sẽ học luôn tiếng dội của phòng lúc hiệu chuẩn. Phiên phải
 bắt đầu bằng một đoạn im (`…_010` phát liền từ đầu nên `score` không tách được khung nguồn khỏi khung nền).
 
 **`ch0` nghe nhỏ hơn `ch1` ~10,5 dB ở mọi hướng** (vỗ tay hai đầu, 26/09, board trong hộp). Điều này giải thích phần
