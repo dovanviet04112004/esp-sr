@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "dsp_afe.h"
+#include "dsp_afe/balance.h"
 #include "dsp_afe/hpf.h"
 #include "dsp_spec/fft.h"
 #include "dsp_spec/mel.h"
@@ -49,6 +50,8 @@ typedef struct {
 static float s_hop[GEN_ARRAY_N_MICS][GEN_GRID_HOP_SAMPLES];
 static int16_t s_interleaved[GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS];
 static dsp_spec_cplx_t s_bins[GEN_ARRAY_N_MICS][GEN_GRID_N_BINS];
+static dsp_spec_cplx_t s_work[GEN_GRID_N_BINS];
+static dsp_afe_calib_t s_calib;
 static float s_log_mel[MEL_BANDS];
 static uint32_t s_rng = 0x2545F491u;
 
@@ -67,6 +70,9 @@ static void fill_inputs(void)
             s_hop[m][i] = 0.25f * noise();
             s_interleaved[i * GEN_ARRAY_N_MICS + m] = (int16_t)lrintf(s_hop[m][i] * PCM_FULL_SCALE);
         }
+    }
+    for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
+        s_calib.balance[k] = (dsp_spec_cplx_t){noise(), noise()};
     }
 }
 
@@ -163,11 +169,26 @@ static void bench_hpf(void)
     report(&row, &t);
 }
 
+static void bench_balance(void)
+{
+    row_t row = {.module = "dsp_afe balance", .core = CORE_SACH, .in_total = false};
+    row.hot_bytes = sizeof(s_calib.balance);
+    timing_t t = {0};
+    for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
+        memcpy(s_work, s_bins[1], sizeof(s_work));
+        const uint32_t start = esp_cpu_get_cycle_count();
+        dsp_afe_balance_apply(s_calib.balance, s_work);
+        if (h >= WARMUP_HOPS) { timing_add(&t, start); }
+    }
+    report(&row, &t);
+}
+
 static void bench_chain(void)
 {
-    const dsp_afe_config_t cfg = {.input_format = "MM", .spatial = DSP_AFE_SPATIAL_NONE};
-    row_t row = {
-        .module = "dsp_afe chuỗi (hpf + stft x2 + trộn + istft)", .core = CORE_SACH, .in_total = true};
+    const dsp_afe_config_t cfg = {.input_format = "MM", .spatial = DSP_AFE_SPATIAL_NONE, .calib = &s_calib};
+    row_t row = {.module = "dsp_afe chuỗi (hpf + stft x2 + balance + trộn + istft)",
+                 .core = CORE_SACH,
+                 .in_total = true};
     ESP_ERROR_CHECK(dsp_afe_workspace_bytes(&cfg, &row.hot_bytes, &row.cold_bytes));
     void *hot = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
     void *cold = row.cold_bytes > 0 ? heap_caps_malloc(row.cold_bytes, MALLOC_CAP_SPIRAM) : NULL;
@@ -217,6 +238,8 @@ static void core1_benches(void *done)
     bench_istft();
     vTaskDelay(1);
     bench_hpf();
+    vTaskDelay(1);
+    bench_balance();
     xTaskNotifyGive((TaskHandle_t)done);
     vTaskDelete(NULL);
 }
