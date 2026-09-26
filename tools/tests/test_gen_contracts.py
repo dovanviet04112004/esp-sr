@@ -79,7 +79,9 @@ class DeterminismTests(unittest.TestCase):
         self.assertEqual(gen_contracts.outputs(), gen_contracts.outputs())
 
     def test_committed_output_matches_the_generator(self) -> None:
-        stale = [rel for rel, text in gen_contracts.outputs().items() if (REPO / rel).read_text(encoding="utf-8") != text]
+        stale = [
+            rel for rel, text in gen_contracts.outputs().items() if (REPO / rel).read_text(encoding="utf-8") != text
+        ]
         self.assertEqual(stale, [], "run: python3 tools/gen_contracts.py")
 
     def test_every_output_opens_with_the_three_line_banner(self) -> None:
@@ -120,9 +122,22 @@ class GeneratedCTests(unittest.TestCase):
         cjson = find_cjson()
         cls.exe = tmp / "probe"
         subprocess.run(
-            ["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-O1",
-             f"-I{REPO / gen_contracts.COMMON_INC}", f"-I{REPO / gen_contracts.MQTT_INC}", f"-I{cjson}",
-             str(tmp / "probe.c"), str(cjson / "cJSON.c"), "-lm", "-o", str(cls.exe)],
+            [
+                "gcc",
+                "-std=c11",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-O1",
+                f"-I{REPO / gen_contracts.COMMON_INC}",
+                f"-I{REPO / gen_contracts.MQTT_INC}",
+                f"-I{cjson}",
+                str(tmp / "probe.c"),
+                str(cjson / "cJSON.c"),
+                "-lm",
+                "-o",
+                str(cls.exe),
+            ],
             check=True,
         )
 

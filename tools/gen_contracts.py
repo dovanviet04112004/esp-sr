@@ -83,8 +83,6 @@ def grid_values() -> dict:
     }
 
 
-
-
 def gen_grid_h(g: dict) -> str:
     return banner("contracts/grid.yaml", "//") + (
         "\n#pragma once\n\n"
@@ -96,7 +94,7 @@ def gen_grid_h(g: dict) -> str:
         f"#define GEN_GRID_HOP_US {g['hop_us']}\n"
         f"#define GEN_GRID_FRAMES_PER_S {g['frames_per_s']!r}f\n"
         f"#define GEN_GRID_WINDOW_{g['window'].upper()} 1\n"
-        f"#define GEN_GRID_CANONICAL \"{g['canonical']}\"\n"
+        f'#define GEN_GRID_CANONICAL "{g["canonical"]}"\n'
         f"#define GEN_GRID_HASH 0x{g['grid_hash']:08x}u     // first 4 bytes of sha256(GEN_GRID_CANONICAL)\n"
     )
 
@@ -115,8 +113,6 @@ def gen_grid_py(g: dict) -> str:
         f'GRID_CANONICAL = "{g["canonical"]}"\n'
         f"GRID_HASH = 0x{g['grid_hash']:08x}\n"
     )
-
-
 
 
 def array_values(g: dict) -> dict:
@@ -166,8 +162,6 @@ def gen_array_py(a: dict) -> str:
     )
 
 
-
-
 def stream_values() -> dict:
     f = load_yaml("stream/frame.yaml")
     offset, fields = 0, []
@@ -183,8 +177,13 @@ def stream_values() -> dict:
 
 
 def gen_stream_h(s: dict) -> str:
-    out = [banner("contracts/stream/frame.yaml", "//"), "#pragma once\n", "#include <stddef.h>", "#include <stdint.h>\n"]
-    out.append(f"#define GEN_STREAM_MAGIC 0x{s['magic_u32']:08x}u     // \"{s['magic']}\" little-endian")
+    out = [
+        banner("contracts/stream/frame.yaml", "//"),
+        "#pragma once\n",
+        "#include <stddef.h>",
+        "#include <stdint.h>\n",
+    ]
+    out.append(f'#define GEN_STREAM_MAGIC 0x{s["magic_u32"]:08x}u     // "{s["magic"]}" little-endian')
     out.append(f"#define GEN_STREAM_VERSION {s['version']}")
     out.append(f"#define GEN_STREAM_HEADER_BYTES {s['header_bytes']}\n")
     out.append("typedef enum {")
@@ -196,9 +195,9 @@ def gen_stream_h(s: dict) -> str:
     out.append("typedef struct {")
     out += [f"    {C_FIELD_TYPE[fl['type']]} {fl['name']};" for fl in s["fields"]]
     out.append("} gen_stream_header_t;\n")
-    out.append(f"_Static_assert(sizeof(gen_stream_header_t) == GEN_STREAM_HEADER_BYTES, \"stream header size\");")
+    out.append('_Static_assert(sizeof(gen_stream_header_t) == GEN_STREAM_HEADER_BYTES, "stream header size");')
     out += [
-        f"_Static_assert(offsetof(gen_stream_header_t, {fl['name']}) == {fl['offset']}, \"{fl['name']} offset\");"
+        f'_Static_assert(offsetof(gen_stream_header_t, {fl["name"]}) == {fl["offset"]}, "{fl["name"]} offset");'
         for fl in s["fields"]
     ]
     out.append("\n/** Channels a frame carries in this mode; 0 for an unknown mode.\n *  @ctx any | non-blocking\n */")
@@ -223,8 +222,6 @@ def gen_stream_py(s: dict) -> str:
         f"MODES = {modes!r}\n"
         f"FORMATS = {formats!r}\n"
     )
-
-
 
 
 def topic_values() -> dict:
@@ -256,7 +253,9 @@ def gen_topics_h(t: dict) -> str:
     out += ["    bool up;", "    bool will;", "} gen_topic_info_t;\n"]
     out.append("static const gen_topic_info_t GEN_TOPIC_INFO[GEN_TOPIC_COUNT] = {")
     for x in t["topics"]:
-        flags = f"{x['qos']}, {str(x['retain']).lower()}, {str(x['direction'] == 'up').lower()}, {str(x['will']).lower()}"
+        flags = (
+            f"{x['qos']}, {str(x['retain']).lower()}, {str(x['direction'] == 'up').lower()}, {str(x['will']).lower()}"
+        )
         out.append(f'    [GEN_TOPIC_{x["id"].upper()}] = {{"{x["prefix"]}", "{x["suffix"]}", {flags}}},')
     out.append("};\n")
     out.append(
@@ -336,8 +335,6 @@ def gen_topics_py(t: dict) -> str:
     )
 
 
-
-
 @dataclass
 class Field:
     json_name: str
@@ -366,7 +363,7 @@ class PayloadC:
         base = tname.removesuffix("_t")
         cases = "".join(f'    case {upper}_{v}: return "{v}";\n' for v in values)
         self.out.append(
-            "/** Contract spelling of a value; \"\" when it is out of range.\n"
+            '/** Contract spelling of a value; "" when it is out of range.\n'
             " *  @ctx any | non-blocking | returns a static string\n */\n"
             f"static inline const char *{base}_str({tname} v)\n{{\n    switch (v) {{\n{cases}"
             '    default: return "";\n    }\n}\n'
@@ -424,13 +421,19 @@ class PayloadC:
     def parse_value(self, owner: str, f: Field, src: str, dst: str, indent: str) -> list[str]:
         node, lines = f.node, []
         if "enum" in node:
-            lines.append(f"{indent}if (!cJSON_IsString({src}) || !{owner}_{f.c_name}_parse({src}->valuestring, &{dst})) {{ return false; }}")
+            lines.append(
+                f"{indent}if (!cJSON_IsString({src}) || !{owner}_{f.c_name}_parse({src}->valuestring, &{dst})) {{ return false; }}"
+            )
         elif node["type"] == "string":
-            lines.append(f"{indent}if (!cJSON_IsString({src}) || strlen({src}->valuestring) >= sizeof({dst})) {{ return false; }}")
+            lines.append(
+                f"{indent}if (!cJSON_IsString({src}) || strlen({src}->valuestring) >= sizeof({dst})) {{ return false; }}"
+            )
             lines.append(f"{indent}strcpy({dst}, {src}->valuestring);")
         elif node["type"] == "integer":
             lines.append(f"{indent}if (!cJSON_IsNumber({src})) {{ return false; }}")
-            lines.append(f"{indent}if ({src}->valuedouble < {node['minimum']}.0 || {src}->valuedouble > {node['maximum']}.0) {{ return false; }}")
+            lines.append(
+                f"{indent}if ({src}->valuedouble < {node['minimum']}.0 || {src}->valuedouble > {node['maximum']}.0) {{ return false; }}"
+            )
             lines.append(f"{indent}{dst} = ({c_int_type(node)}) {src}->valuedouble;")
         elif node["type"] == "boolean":
             lines.append(f"{indent}if (!cJSON_IsBool({src})) {{ return false; }}")
@@ -458,7 +461,9 @@ class PayloadC:
             if f.node.get("type") == "array":
                 items = f.node["items"]
                 elem = Field(f.json_name, f.c_name, items, True)
-                body.append(f"        if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > {f.node['maxItems']}) {{ return false; }}")
+                body.append(
+                    f"        if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > {f.node['maxItems']}) {{ return false; }}"
+                )
                 body.append(f"        if (cJSON_GetArraySize(item) < {f.node.get('minItems', 0)}) {{ return false; }}")
                 body.append("        const cJSON *el = NULL;")
                 body.append("        cJSON_ArrayForEach(el, item) {")
@@ -479,8 +484,10 @@ class PayloadC:
 
     def build_value(self, owner: str, f: Field, src: str, parent: str, key: str | None, indent: str) -> list[str]:
         node = f.node
-        add = (lambda kind, val: f"{indent}cJSON_Add{kind}ToObject({parent}, \"{key}\", {val});") if key else (
-            lambda kind, val: f"{indent}cJSON_AddItemToArray({parent}, cJSON_Create{kind}({val}));"
+        add = (
+            (lambda kind, val: f'{indent}cJSON_Add{kind}ToObject({parent}, "{key}", {val});')
+            if key
+            else (lambda kind, val: f"{indent}cJSON_AddItemToArray({parent}, cJSON_Create{kind}({val}));")
         )
         if "enum" in node:
             return [add("String", f"{owner}_{f.c_name}_str({src})")]
@@ -493,7 +500,7 @@ class PayloadC:
             return [add("Bool", src)]
         if kind == "object":
             call = f"{owner}_{f.c_name}_to_json(&{src})"
-            return [f"{indent}cJSON_AddItemToObject({parent}, \"{key}\", {call});"]
+            return [f'{indent}cJSON_AddItemToObject({parent}, "{key}", {call});']
         raise SystemExit(f"{owner}.{f.json_name}: unsupported type {kind}")
 
     def to_json(self, owner: str, node: dict) -> None:
@@ -514,13 +521,17 @@ class PayloadC:
                 indent = "        "
             if f.node.get("type") == "array":
                 items = f.node["items"]
-                body.append(f"{indent}cJSON *{f.c_name}_arr = cJSON_AddArrayToObject(root, \"{f.json_name}\");")
+                body.append(f'{indent}cJSON *{f.c_name}_arr = cJSON_AddArrayToObject(root, "{f.json_name}");')
                 body.append(f"{indent}for (int i = 0; {f.c_name}_arr != NULL && i < in->{f.c_name}_count; i++) {{")
                 if items["type"] == "object":
-                    body.append(f"{indent}    cJSON_AddItemToArray({f.c_name}_arr, {owner}_{f.c_name}_item_to_json(&in->{f.c_name}[i]));")
+                    body.append(
+                        f"{indent}    cJSON_AddItemToArray({f.c_name}_arr, {owner}_{f.c_name}_item_to_json(&in->{f.c_name}[i]));"
+                    )
                 else:
                     elem = Field(f.json_name, f.c_name, items, True)
-                    body += self.build_value(owner, elem, f"in->{f.c_name}[i]", f"{f.c_name}_arr", None, indent + "    ")
+                    body += self.build_value(
+                        owner, elem, f"in->{f.c_name}[i]", f"{f.c_name}_arr", None, indent + "    "
+                    )
                 body.append(f"{indent}}}")
             else:
                 body += self.build_value(owner, f, f"in->{f.c_name}", "root", f.json_name, indent)
@@ -574,8 +585,6 @@ def gen_payload_py() -> str:
     return banner("contracts/schema/*.schema.json", "#") + (
         "\nfrom typing import Literal, NotRequired, TypedDict\n" + body.rstrip("\n") + "\n"
     )
-
-
 
 
 def outputs() -> dict[str, str]:

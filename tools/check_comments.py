@@ -35,9 +35,7 @@ C_HEADER_SUFFIXES = {".h", ".hpp"}
 C_BODY_SUFFIXES = {".c", ".cpp", ".cc"}
 PY_SUFFIXES = {".py"}
 YAML_SUFFIXES = {".yaml", ".yml"}
-SCANNED_SUFFIXES = (
-    C_HEADER_SUFFIXES | C_BODY_SUFFIXES | PY_SUFFIXES | YAML_SUFFIXES
-)
+SCANNED_SUFFIXES = C_HEADER_SUFFIXES | C_BODY_SUFFIXES | PY_SUFFIXES | YAML_SUFFIXES
 
 MAX_CONSECUTIVE_BODY_COMMENTS = 2
 MAX_DOC_COMMENT_LINES = 6
@@ -170,9 +168,7 @@ def check_common(path: Path, comments: list[tuple[int, str]]) -> list[Problem]:
     for lineno, text in comments:
         hit = PROCESS_RE.search(text)
         if hit:
-            problems.append(
-                Problem(path, lineno, "2.4", f"process comment, drop the word {hit.group(1)!r}")
-            )
+            problems.append(Problem(path, lineno, "2.4", f"process comment, drop the word {hit.group(1)!r}"))
         if BANNER_RE.match(text) or STAR_BANNER_RE.search(text):
             problems.append(Problem(path, lineno, "2.6", "banner or ASCII art comment"))
         if END_OF_RE.match(text):
@@ -206,16 +202,13 @@ def check_runs_and_density(
                             path,
                             run_start,
                             "2.3",
-                            f"{run_len} consecutive comment lines, limit is "
-                            f"{MAX_CONSECUTIVE_BODY_COMMENTS}",
+                            f"{run_len} consecutive comment lines, limit is {MAX_CONSECUTIVE_BODY_COMMENTS}",
                         )
                     )
                 run_start = None
                 run_len = 0
         if run_len > MAX_CONSECUTIVE_BODY_COMMENTS:
-            problems.append(
-                Problem(path, run_start, "2.3", f"{run_len} consecutive comment lines")
-            )
+            problems.append(Problem(path, run_start, "2.3", f"{run_len} consecutive comment lines"))
 
         code_lines = [i for i, ln in enumerate(lines, 1) if ln.strip()]
         if density and len(code_lines) >= 20:
@@ -232,9 +225,7 @@ def check_runs_and_density(
     return problems
 
 
-def check_c_like(
-    path: Path, lines: list[str], is_header: bool, allows_doc: bool | None = None
-) -> list[Problem]:
+def check_c_like(path: Path, lines: list[str], is_header: bool, allows_doc: bool | None = None) -> list[Problem]:
     if allows_doc is None:
         allows_doc = is_header
     problems: list[Problem] = []
@@ -260,8 +251,7 @@ def check_c_like(
                             path,
                             block_start,
                             "2.3",
-                            f"doc comment is {block_len} lines, limit is "
-                            f"{MAX_DOC_COMMENT_LINES}",
+                            f"doc comment is {block_len} lines, limit is {MAX_DOC_COMMENT_LINES}",
                         )
                     )
             continue
@@ -298,8 +288,7 @@ def check_c_like(
                         path,
                         lineno,
                         "2.6",
-                        f"trailing comment is {len(text)} chars, limit is "
-                        f"{MAX_TRAILING_COMMENT_CHARS}",
+                        f"trailing comment is {len(text)} chars, limit is {MAX_TRAILING_COMMENT_CHARS}",
                     )
                 )
 
@@ -330,7 +319,12 @@ def check_python(path: Path, lines: list[str]) -> list[Problem]:
         comment_lines.add(lineno)
         if lines[lineno - 1][:col].strip() and len(tok.string) > MAX_TRAILING_COMMENT_CHARS:
             problems.append(
-                Problem(path, lineno, "2.6", f"trailing comment is {len(tok.string)} chars, limit is {MAX_TRAILING_COMMENT_CHARS}")
+                Problem(
+                    path,
+                    lineno,
+                    "2.6",
+                    f"trailing comment is {len(tok.string)} chars, limit is {MAX_TRAILING_COMMENT_CHARS}",
+                )
             )
     problems += check_common(path, comments)
     problems += check_runs_and_density(path, lines, comment_lines, is_header=False)
@@ -391,9 +385,7 @@ def check_yaml(path: Path, lines: list[str]) -> list[Problem]:
         header_end = lineno
     body = {n for n in comment_lines if n > header_end}
     if header_end > MAX_DOC_COMMENT_LINES:
-        problems.append(
-            Problem(path, 1, "2.3", f"header is {header_end} lines, limit is 6")
-        )
+        problems.append(Problem(path, 1, "2.3", f"header is {header_end} lines, limit is 6"))
     problems += check_runs_and_density(path, lines, body, is_header=False, density=False)
     return problems
 

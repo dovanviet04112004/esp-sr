@@ -63,7 +63,9 @@ def check_file(path: Path) -> list[Problem]:
         if FORBIDDEN_INCLUDE_RE.match(line):
             problems.append(Problem(path, lineno, f"pure layer includes a platform header: {line.strip()}"))
         if hit := ALLOCATION_RE.search(line):
-            problems.append(Problem(path, lineno, f"pure layer allocates with {hit.group(1)}(); the caller owns memory"))
+            problems.append(
+                Problem(path, lineno, f"pure layer allocates with {hit.group(1)}(); the caller owns memory")
+            )
         if hit := LOG_RE.search(line):
             problems.append(Problem(path, lineno, f"pure layer logs with {hit.group(1)}(); count into stats instead"))
     return problems

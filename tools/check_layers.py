@@ -131,7 +131,7 @@ def find_cycles(graph: dict[str, set[str]]) -> list[list[str]]:
             if state.get(dep, 0) == 0:
                 walk(dep)
             elif state.get(dep) == 1:
-                cycles.append(stack[stack.index(dep) :] + [dep])
+                cycles.append([*stack[stack.index(dep) :], dep])
         stack.pop()
         state[node] = 2
 
