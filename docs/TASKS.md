@@ -81,7 +81,7 @@ Board B là board duy nhất có micro (KẾ HOẠCH §2.1). Mọi phép đo thu
 
 | ID | Task | Xong khi | Chặn bởi | V5 |
 |---|---|---|---|---|
-| E3-T1 | `contracts/grid.yaml` (§3.1), `array.yaml` (§2.3); ADR-0001 lưới 16 kHz, bước 256, FFT 512 | `gen_grid.h` và `grid.py` sinh ra, có `GEN_GRID_HASH` | E1-T4 | — |
+| ~~E3-T1~~ | **Xong 26/09.** `contracts/grid.yaml` (§3.1) và `array.yaml` (§2.3) từ E1-T3; `gen_grid.h`, `grid.py` từ E1-T4; ADR-0001 so bốn lưới và chốt 16 kHz, bước 256, FFT 512 | `gen_grid.h` và `grid.py` có `GEN_GRID_HASH` = `0x9c914b61`; `docs/adr/0001-luoi-16k-256-512.md` | E1-T4 | — |
 | E3-T2 | Header công khai của `dsp_spec`, `dsp_afe` (`feed`/`fetch`, `"MM"`/`"MMR"`, `dsp_afe_frame_t`, `dsp_afe_ns_ops_t`), `lang_vi`, `ai_engine`, `drv_audio` | Doxygen đủ theo CLAUDE.md §2.7, **mọi hàm có `@ctx`**; `check_comments` sạch | E3-T1 | V5.0.4 |
 | E3-T3 | Luật bộ nhớ: `_workspace_bytes` + vùng `hot`/`cold` cho mọi module thuần | bảng `sizeof` và byte vùng làm việc từng module ở `ram.md` (ước, đánh 🔬) | E3-T2 | V5.0.4 |
 | E3-T4 | Bản giả của mọi hàm trong E3-T2 chạy được trong app khung | E5-T11 dựng và chạy với bản giả, không sửa header | E3-T2, E5-T6 | V5.0.4 |
