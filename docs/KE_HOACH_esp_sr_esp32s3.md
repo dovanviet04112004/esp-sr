@@ -33,7 +33,7 @@ Ký hiệu: 🔬 là số ước hoặc số của tài liệu ngoài, **chưa �
 |---|---|
 | Việc | chuỗi tiếng nói đầy đủ trên board hai micro, từ thu tới nói lại, bằng mã đọc được |
 | Ngôn ngữ đích | tiếng Việt cho từ đánh thức, lệnh và tiếng nói ra |
-| Nền | `esp-dsp`, `dl_fft`, `esp-dl` — ba thư viện mã mở của Espressif. **Không** link bất kỳ `.a` nào của ESP-SR (TỔNG QUAN §1) |
+| Nền | `dl_fft`, `esp-dl` — hai thư viện mã mở của Espressif (`esp-dsp` được đo và loại ở ADR-0002). **Không** link bất kỳ `.a` nào của ESP-SR (TỔNG QUAN §1) |
 | Chip | ESP32-S3, hai nhân Xtensa LX7 240 MHz, flash 16 MB, PSRAM 8 MB octal |
 | Đường về máy tính | MQTT cho trạng thái, số liệu, sự kiện; TCP cho tiếng khi bật tay |
 | XONG khi | mọi khối đạt cửa riêng; chạy đồng thời trong một bản dựng; liền 30 phút **0 khung mất**, heap không trôi; mọi con số dựng lại được bằng **một lệnh** `make` |
@@ -291,7 +291,7 @@ hằng số Python, sinh lại toàn bộ golden, sửa mục này — **trong c
 |---|---|---|
 | Tần số lấy mẫu | 16 000 Hz | băng tiếng nói tới 8 kHz; mọi mô hình huấn luyện ở đây; phát và thu cùng tần số (§2.4) |
 | Mẫu vào `dsp_afe` | `int16`, xen kẽ kênh | dạng `drv_audio` giao, khỏi một lần chép |
-| Khung (bước) | **256 mẫu = 16 ms** | luỹ thừa 2 cho `dl_fft` và `esp-dsp`; khớp đúng khối 256 của AEC MDF (§3.5) |
+| Khung (bước) | **256 mẫu = 16 ms** | luỹ thừa 2 cho `dl_fft`; khớp đúng khối 256 của AEC MDF (§3.5) |
 | Cửa sổ và FFT | **512 mẫu = 32 ms**, căn Hann tuần hoàn cho cả phân tích lẫn tổng hợp | chồng 50%; tích hai cửa sổ là Hann, cộng dồn bằng hằng, nên không xử lý gì thì dựng lại đúng sóng gốc |
 | Số vạch | 257, cách nhau 31,25 Hz | |
 | Nhịp khung | 62,5 khung/s | mọi hằng số làm trơn lấy từ bài báo phải quy đổi theo nhịp này |
@@ -305,10 +305,10 @@ cộng dồn bằng hằng.
 `alpha = exp(−hop / (tau_s · fs))`. Viết thẳng `alpha = 0.98` là gắn chết hành vi vào một nhịp khung:
 đổi lưới thì mọi bộ làm trơn chậm đi hoặc nhanh lên mà không ai thấy.
 
-**Chi phí STFT.** Mỗi khung hai `rfft` 512 và một `irfft` 512. Bảng benchmark của `dl_fft` v0.4.0 cho
-ESP32-S3, float32: `rfft` 512 mất 157 µs, `irfft` 512 mất 196 µs → **~510 µs mỗi khung, ~3,2% một
-nhân** 🔬 (số của hãng; E6-T3 đo lại). Bản `int16` nhanh gấp bảy nhưng SNR chỉ ~58 dB ở 512 điểm —
-không đủ cho AEC và NS, nên không dùng trừ khi số đo đổi kết luận.
+**Chi phí STFT, đo ở E6-T3** (`latency.md` §1, ADR-0002). Mỗi khung hai phân tích và một tổng hợp; với
+`dl_fft` 0.7.0 ở `-O2` trên board B, phân tích một bước mất 143 µs, tổng hợp 165 µs → **451 µs mỗi khung,
+~2,8% một nhân**. Bản `int16` nhanh gấp tám nhưng SNR chỉ ~58 dB ở 512 điểm — không đủ cho AEC và NS,
+nên không dùng.
 
 ### 3.2 Chuỗi đã chốt
 
@@ -354,8 +354,8 @@ OM-LSA nằm ngay trong `dsp_afe`; bản RNNoise nằm ở `ai_engine/src/ns/` v
 
 | Khối | Loại | Chỗ nằm | Thuật toán chốt | Tham số khởi đầu | Chi phí ước mỗi khung 🔬 | Cửa |
 |---|---|---|---|---|---|---|
-| `fft` `window` `stft` | thuần | `dsp_spec` | FFT thực, căn Hann, chồng 50% | §3.1 | ~510 µs cả chuỗi | E6-T4 |
-| `mel` | thuần | `dsp_spec` | log-mel, MFCC giữ làm đối chiếu | 40 dải, 20–7 600 Hz | ~170 µs (một `rfft` + 40 dải) | E6-T5 |
+| `fft` `window` `stft` | thuần | `dsp_spec` | FFT thực (`dl_fft`), căn Hann, chồng 50% | §3.1 | **451 µs đo** cả chuỗi | E6-T4 |
+| `mel` | thuần | `dsp_spec` | log-mel, MFCC giữ làm đối chiếu | 40 dải, 20–7 600 Hz | **~180 µs đo** (`rfft` 118 + 40 dải 62) | E6-T5 |
 | `pitch` | thuần | `dsp_spec` | NCCF, ra log F0 + delta + độ hữu thanh | 60–400 Hz | ~300 µs; **chỉ dựng nếu E11-T8 chứng minh có lợi** | E11-T8 |
 | `hpf` | thuần | `dsp_afe` | IIR bậc hai Butterworth, DF2 chuyển vị | 80 Hz | < 20 µs hai kênh | E7-T1 |
 | `balance` | thuần | `dsp_afe` | nhân hệ số phức hiệu chuẩn mỗi vạch cho `ch1` | từ NVS `calib/bal` | < 10 µs | E7-T2 |
@@ -976,8 +976,7 @@ chứng âm cố ý vi phạm:
 
 | Phụ thuộc | Khai ở | Ghim |
 |---|---|---|
-| `espressif/dl_fft` | `dsp_spec` | `==` bản đo ở E6-T3 |
-| `espressif/esp-dsp` | `dsp_spec` | `==` bản đo ở E6-T3 |
+| `espressif/dl_fft` | `dsp_spec` | `==0.7.0`, bản đo ở E6-T3 (ADR-0002) |
 | `espressif/esp-dl` | `ai_engine` | `==` bản xuất model ở E11-T10 |
 | `espressif/mqtt`, `espressif/cjson` | `net_mqtt` | `^`; IDF v6 đã đưa cả hai ra khỏi lõi, `REQUIRES mqtt` trơ fail ở bước giải phụ thuộc |
 | `joltwallet/littlefs` | `sys_storage` | `^` |
@@ -1082,7 +1081,7 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | 4 | Mọi hàm công khai có doc comment theo khuôn CLAUDE.md §2.7, **bắt buộc `@ctx`** | Người gọi biết được gọi từ đâu, có chặn không, ai giữ bộ nhớ |
 | 5 | Tắt một module là **đổi danh sách nguồn**: `if(CONFIG_DSP_AFE_GSC_ENABLE) list(APPEND srcs src/gsc.c) endif()`. `REQUIRES` **không** đặt trong điều kiện | Bọc lệnh rẽ nhánh vẫn nạp mã và bộ nhớ của khối đã tắt (TỔNG QUAN §4.3). CMake giải phụ thuộc trước khi đọc Kconfig, nên `REQUIRES` có điều kiện không hoạt động |
 | 6 | Không hàm nghiệm thu nào trong `src/` hay header công khai; nghiệm thu nằm ở `test_apps/` của chính component | Để trong thư viện thì nó thành API vĩnh viễn và mỗi lần boot phải trả giá cho thứ chỉ dùng lúc cắm dây |
-| 7 | **Người gọi cấp bộ nhớ.** Mỗi module có `_workspace_bytes(cfg)` và `_init(cfg, mem, bytes)`; bên trong không `malloc`, không `heap_caps_*`. **Ngoại lệ duy nhất:** bảng của thư viện FFT (`dl_fft`, `esp-dsp`) — cả hai tự cấp bảng trong hàm init và không có đường nhận bộ nhớ ngoài; `dsp_spec_fft_init` để thư viện cấp **một lần** lúc khởi tạo, ép RAM nội, `workspace_bytes` chỉ tính phần của `dsp_spec`, và `check_purity.py` miễn đúng hai file bọc `dsp_spec/src/fft_dl.c`, `fft_dsp.c` | Chỗ đặt (RAM nội hay PSRAM) là quyết định của người gọi và đo được; kiểm trên máy tính dùng `malloc` thường. Đây là câu hỏi "ai cấp phát bộ đệm" mà TỔNG QUAN §5.2 đòi chốt trước |
+| 7 | **Người gọi cấp bộ nhớ.** Mỗi module có `_workspace_bytes(cfg)` và `_init(cfg, mem, bytes)`; bên trong không `malloc`, không `heap_caps_*`. **Ngoại lệ duy nhất:** bảng của `dl_fft` — thư viện tự cấp bảng trong hàm init và không có đường nhận bộ nhớ ngoài; `dsp_spec_fft_init` để nó cấp **một lần** lúc khởi tạo, ép RAM nội, `workspace_bytes` chỉ tính phần của `dsp_spec`, và `check_purity.py` miễn đúng file bọc `dsp_spec/src/fft_dl.c` | Chỗ đặt (RAM nội hay PSRAM) là quyết định của người gọi và đo được; kiểm trên máy tính dùng `malloc` thường. Đây là câu hỏi "ai cấp phát bộ đệm" mà TỔNG QUAN §5.2 đòi chốt trước |
 | 8 | Không FreeRTOS, không driver, không `esp_timer`, không log trong đường nóng. `tools/check_purity.py` quét `#include` | Dịch được trên máy tính, và một lời log trong vòng khung là một lần chặn trên khoá log của IDF |
 | 9 | Không trạng thái toàn cục thay đổi được; mỗi thể hiện chỉ một task dùng một lúc; không khoá bên trong | Hai thể hiện chạy song song an toàn; khoá thuộc về tầng dùng, nơi biết ai chạm vào |
 | 10 | Không chặn, không chờ. Lỗi trả `esp_err_t`; sự cố trong đường nóng ghi vào **bộ đếm** trong struct thống kê | Hàm thuần chạy trong hạn chót của khung; bộ đếm đọc được từ `svc_report` mà không tốn gì |
@@ -1096,7 +1095,7 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | L | Component | Bản chất | Ngôn ngữ | `REQUIRES` — chỉ đi xuống |
 |---|---|---|---|---|
 | L0 | `common` | header thuần | C | — |
-| L1 | `dsp_spec` | thuật toán thuần | C | `common`, `dl_fft`, `esp-dsp` |
+| L1 | `dsp_spec` | thuật toán thuần | C | `common`, `dl_fft` |
 | L1 | `lang_vi` | thuật toán thuần | C | `common` |
 | L1 | `bsp_board` | board | C | `common`, `esp_driver_gpio`, `esp_driver_i2s` |
 | L2 | `dsp_afe` | thuật toán thuần | C | `common`, `dsp_spec` |
@@ -1212,7 +1211,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 | Loại | Nằm ở | Chạy bằng |
 |---|---|---|
 | Unit trên board | `components/<c>/test_apps/unit/` | `idf.py build flash` + `pytest_*.py` (pytest-embedded) |
-| Unit trên máy tính | `components/<c>/test_apps/host/` | target `linux` của IDF; nếu `dl_fft` hay `esp-dsp` không dựng được trên target ấy thì CMake thường + lớp đệm `esp_err.h` — chốt ở E6-T6 |
+| Unit trên máy tính | `components/<c>/test_apps/host/` | target `linux` của IDF; nếu `dl_fft` không dựng được trên target ấy thì CMake thường + lớp đệm `esp_err.h` — chốt ở E6-T6 |
 | Parity C ↔ Python | `test_apps/parity/` | đọc `contracts/golden/` trong LittleFS, so theo `tolerance.yaml` |
 | Chi phí | `test_apps/bench_afe`, `bench_kws`, `bench_mem` | in CSV → `tools/budget.py` → `docs/measurements/budget.md` |
 | Chạy dài | `test_apps/soak/` | 30 phút cho Cửa 5, 8 giờ trước khi báo cáo |
