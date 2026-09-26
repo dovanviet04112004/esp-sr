@@ -17,6 +17,16 @@ menu "capture"
             Same meaning as APP_PCM_SHIFT_FALLBACK of main: drv_audio keeps the
             top 32 - shift bits of each INMP441 slot. NVS calib/pcm_shift wins.
 
+    config CAPTURE_RADIO_OFF_S
+        int "Record this many seconds with the radio off, then send them"
+        range 0 60
+        default 0
+        help
+            0 streams live, as E5-T12. Above 0, the app records that many seconds
+            into sb_stream in PSRAM before Wi-Fi is started, then joins and sends
+            them: the "Wi-Fi off" floor of E2-T4 (KEHOACH 7.4). 60 s of mode 2
+            take about 3.9 MB of PSRAM. Set by sdkconfig.radio_off.
+
     config CAPTURE_REF_ENABLE
         bool "MAX98357A fitted: capture the speaker reference too, as mode 3"
         default n
