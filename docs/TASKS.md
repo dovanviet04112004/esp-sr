@@ -44,7 +44,7 @@ không bỏ task nào: E8, E9-T5, E10, E12 vẫn nằm nguyên và làm sau nó.
 
 | ID | Task | Xong khi | Chặn bởi | V5 |
 |---|---|---|---|---|
-| E1-T1 | Cây thư mục KẾ HOẠCH §4.1. Đã có `.gitignore` (loại `CLAUDE.md`, `.claude/`), `.gitattributes`, `.editorconfig`, `README.md`; còn `LICENSE` và `Makefile` khung | `tree -L 2` khớp §4.1; `make help` in đủ đích | — | — |
+| ~~E1-T1~~ | **Xong 26/09.** File gốc theo KẾ HOẠCH §4.1: `.gitignore` (loại `CLAUDE.md`, `.claude/`, mọi file tiếng), `.gitattributes`, `.editorconfig`, `README.md`, `Makefile`. Không có `LICENSE` theo ý chủ dự án. Thư mục khối ra đời cùng task đầu tiên đặt file vào nó, vì git không giữ thư mục rỗng | `make help` in 15 đích; `git status --ignored` thấy `CLAUDE.md` và `.claude/` bị bỏ qua | — | — |
 | ~~E1-T2~~ | **Xong 26/09.** Repo private `vanviet/esp-sr` trên Gitea nội bộ, nhánh `main` | push được, `git status` sạch; `.git/config` không mang mật khẩu | E1-T1 | — |
 | E1-T3 | `contracts/`: `grid.yaml`, `array.yaml`, bảy schema, `mqtt_topics.yaml`, `stream/frame.yaml`, `commands/default_vi.json`, `responses/vi.json` bản khung | schema validate được bằng `jsonschema`; bộ lệnh mẫu hợp lệ theo schema | E1-T1 | — |
 | E1-T4 | `tools/gen_contracts.py` sinh mọi file ở bảng KẾ HOẠCH §4.2 | chạy hai lần cho ra file giống hệt từng byte | E1-T3 | — |
