@@ -14,7 +14,7 @@ extern "C" {
 #endif
 
 typedef struct {
-    uint8_t pcm_shift;    // NVS calib/pcm_shift (KEHOACH 6.2)
+    uint8_t pcm_shift;    // right shift of each 32-bit slot, 8..16 (KEHOACH 6.2)
     bool enable_tx;       // APP_SPEAKER_ENABLE; adds the ref channel
     uint8_t dma_desc_num; // 8 gives 128 ms of slack (KEHOACH 5.5)
 } drv_audio_config_t;
