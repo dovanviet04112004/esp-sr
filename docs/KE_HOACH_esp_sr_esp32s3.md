@@ -387,7 +387,8 @@ Q = 1/√2), lọc bằng `dsps_biquad_f32` — dạng trực tiếp II, có b�
 đúng công thức ấy ở float32. Dạng II kém dạng II chuyển vị ~10–20 dB về sai số làm tròn vì cực nằm sát z = 1; đo so
 với bản float64: tiếng nói −30 dBFS kèm một chiều 0,5 LSB sai tối đa 0,48 LSB (dạng chuyển vị 0,13), hum 50 Hz −10 dBFS
 kèm một chiều −20 dBFS sai 7,7 LSB, tức 70 dB dưới tín hiệu (dạng chuyển vị 0,7 LSB). Cả hai trường hợp dưới SNR
-61 dBA của chính INMP441, nên kernel có sẵn thắng trừ khi đo chi phí cho kết quả khác. Đứng đầu chuỗi vì lý do của
+61 dBA của chính INMP441. Đo trên board, kernel hợp ngữ và vòng viết tay nhanh ngang nhau vì biquad là đệ quy
+(ADR-0003); kernel có sẵn được giữ theo luật dùng thư viện. Đứng đầu chuỗi vì lý do của
 TỔNG QUAN §2.2. Thước: độ lệch một chiều sau lọc so với trước, tính bằng dB; đáp ứng biên độ ở 100 Hz và 200 Hz
 khớp bản Python.
 
