@@ -150,7 +150,9 @@ Cả năm số đi trong `heartbeat` (KẾ HOẠCH §7.3), nên chạy dài khô
 
 ## 14. Phát hiện đang mở
 
-Chưa có.
+| # | Bẫy | Chỗ | Hướng ra | Row |
+|---|---|---|---|---|
+| **P1** | Cấp phát sau boot (6.3) | `*_to_json` sinh từ `contracts/` cấp phát qua cJSON mỗi lần dựng payload; `gui_task` dựng một `telemetry` mỗi giây | `net_mqtt` gọi `cJSON_InitHooks` với bộ cấp phát trên một vùng nhớ xin lúc boot, đặt lại sau mỗi lần gửi; `heartbeat` khai điểm cao nhất của vùng ấy | E5-T9 |
 
 ## 15. Lệnh soát nhanh
 
