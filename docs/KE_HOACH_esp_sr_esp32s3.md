@@ -581,9 +581,9 @@ Module là bản float32 của thuật toán WebRTC (`common_audio/vad`, giấy 
 |---|---|
 | Vào | bước sạch nhân 32 768, vì mô hình WebRTC học trên thang `int16` |
 | Hạ mẫu | 16 → 8 kHz bằng cặp lọc thông tất nửa dải của WebRTC: 128 mẫu mỗi bước, nằm giữa khung 10 ms và 20 ms của nó |
-| Sáu dải | cây lọc thông tất tách đôi: 3–4 k, 2–3 k, 1–2 k, 500–1 k, 250–500 Hz và 80–250 Hz (lọc thông cao 80 Hz ở 500 Hz); 32, 32, 32, 16, 8, 8 mẫu mỗi bước. Trên 4 kHz không dùng, như WebRTC |
+| Sáu dải | cây lọc thông tất tách đôi: 80–250 Hz (lọc thông cao 80 Hz ở 500 Hz), 250–500 Hz, 500–1 k, 1–2 k, 3–4 k, 2–3 k theo chỉ số dải 0–5; 8, 8, 16, 32, 32, 32 mẫu mỗi bước. Nửa 2–4 kHz bị đảo phổ khi hạ mẫu, nên dải 4 của WebRTC là 3–4 kHz và dải 5 là 2–3 kHz, ngược với chú thích trong mã của nó; bảng GMM học trên chính mã ấy nên thứ tự giữ nguyên. Trên 4 kHz không dùng, như WebRTC |
 | Đặc trưng | 10·log₁₀ năng lượng dải cộng bù từng dải; log₂ lấy tuyến tính trong mỗi quãng tám như WebRTC |
-| GMM | hai Gauss mỗi dải cho mỗi lớp, bảng khởi đầu của WebRTC; mật độ dùng 2^x tuyến tính từng quãng và bằng 0 khi số mũ vượt 21,49; tỉ số hợp lý mỗi dải là hiệu phần nguyên log₂ của hai tổng, sàn 2⁻²⁷ |
+| GMM | hai Gauss mỗi dải cho mỗi lớp, bảng khởi đầu của WebRTC; mật độ dùng 2^x tuyến tính từng quãng rồi làm tròn xuống bội của 1/1024 như dạng Q10 của WebRTC, nên bằng 0 từ 2⁻¹⁰, tức khoảng 3,7σ; tỉ số hợp lý mỗi dải là hiệu phần nguyên log₂ của hai tổng, tổng bằng 0 tính là 2⁻²⁸ |
 | Quyết định | một dải vượt ngưỡng riêng, hoặc tổng có trọng số vượt ngưỡng chung; ngưỡng theo `aggressiveness` 0–3 lấy cột 20 ms của WebRTC, cột gần bước 16 ms nhất |
 | Thích nghi | chỉ khi tổng năng lượng các dải > 10; lớp nhiễu học khi không nói, lớp nói học khi nói; trung bình nhiễu kéo về mức tối thiểu trượt (16 giá trị nhỏ nhất của 100 bước gần nhất); hai lớp giữ cách nhau và trong giới hạn, đúng hằng số hiệu dụng của WebRTC |
 | Kéo dài | 240 ms (15 bước) thay cho bộ đếm kéo dài của WebRTC |
