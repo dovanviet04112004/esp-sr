@@ -1108,7 +1108,7 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | L4 | `svc_front` | ghép | C | `common`, `drv_audio`, `dsp_afe`, `ai_engine` |
 | L4 | `svc_listen` | ghép | C | `common`, `dsp_spec`, `lang_vi`, `ai_engine`, `sys_storage` |
 | L4 | `svc_speak` | ghép | C | `common`, `drv_audio`, `lang_vi`, `ai_engine`, `sys_storage` |
-| L4 | `svc_report` | ghép | C | `common`, `net_mqtt`, `net_stream` |
+| L4 | `svc_report` | ghép | C | `common`, `net_mqtt`, `net_stream`, `net_wifi` (radio thức khi luồng tiếng mở, §7.2) |
 | L5 | `svc_dialog` | ghép | C | `common`, `sys_storage` |
 | L6 | `main` | nối dây | C | tất cả |
 
