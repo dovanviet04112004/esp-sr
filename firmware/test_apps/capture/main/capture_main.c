@@ -26,7 +26,7 @@
 #define SENDER_PRIORITY 3
 #define CAPTURE_STACK_BYTES 3072
 #define SENDER_STACK_BYTES 4096
-#define STREAM_BUFFER_BYTES (64 * 1024)
+#define STREAM_BUFFER_BYTES (CONFIG_SVC_REPORT_STREAM_BUFFER_KB * 1024)
 #define DMA_DESC_NUM 8
 #define DMA_WAIT_MS (2 * GEN_GRID_HOP_US / 1000)
 #define LINK_WAIT_MS 1000
@@ -96,6 +96,9 @@ void app_main(void)
     const drv_audio_config_t audio = {
         .pcm_shift = shift, .enable_tx = WITH_REF, .dma_desc_num = DMA_DESC_NUM};
     ESP_ERROR_CHECK(drv_audio_init(&audio));
+    // Drain DMA from boot so it never overflows; pushes are dropped quietly until the stream opens.
+    xTaskCreatePinnedToCore(capture_task, "capture_task", CAPTURE_STACK_BYTES, NULL, CAPTURE_PRIORITY, NULL,
+                            CAPTURE_CORE);
 
     EventGroupHandle_t system = xEventGroupCreate();
     char device_id[DEVICE_ID_BYTES];
@@ -127,8 +130,6 @@ void app_main(void)
              esp_app_get_description()->version, device_id, (unsigned)GEN_GRID_HASH, (unsigned)shift,
              (unsigned)mode, host, (unsigned)port, CONFIG_CAPTURE_DURATION_S);
 
-    xTaskCreatePinnedToCore(capture_task, "capture_task", CAPTURE_STACK_BYTES, NULL, CAPTURE_PRIORITY, NULL,
-                            CAPTURE_CORE);
     xTaskCreatePinnedToCore(sender_task, "sender_task", SENDER_STACK_BYTES, NULL, SENDER_PRIORITY, NULL,
                             SENDER_CORE);
     for (;;) {
