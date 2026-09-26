@@ -149,7 +149,7 @@ def pair_figures(stats: mic_pair.PairStats, doa_deg: int) -> PairFigures:
     """Figures of a source at doa_deg: the sign is judged off broadside, the spacing only near the ends."""
     cos = float(np.cos(np.radians(doa_deg)))
     delay = mic_pair.gcc_phat_delay(stats, MAX_LAG_SAMPLES)
-    fit_tau, fit_phase0 = mic_pair.linear_phase_fit(stats)
+    fit_tau, fit_phase0 = mic_pair.linear_phase_fit(stats, delay.tau_samples)
     return PairFigures(
         doa_deg=doa_deg,
         delay=delay,
