@@ -1,4 +1,4 @@
-"""score rebuilds the board's clean channel with srpipe's chain and flags any sample off by more than the tolerance."""
+"""score checks the board's clean channel against srpipe's chain and measures the microphone pair against a label."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from srpipe.dsp.afe.chain import Chain
+from srpipe.generated import array
 
 from srhost import score
 from srhost.generated import grid
@@ -26,7 +27,9 @@ def board_session(tmp_path: Path) -> tuple[Path, dict[str, np.ndarray]]:
     return tmp_path, {"ch0": mics[:, 0].copy(), "ch1": mics[:, 1].copy(), "clean": clean}
 
 
-def write(session: Path, channels: dict[str, np.ndarray], gap_offsets: tuple[int, ...] = ()) -> Path:
+def write(
+    session: Path, channels: dict[str, np.ndarray], gap_offsets: tuple[int, ...] = (), doa_deg: int | None = None
+) -> Path:
     for name, pcm in channels.items():
         with wave.open(str(session / f"{name}.wav"), "wb") as wav:
             wav.setnchannels(1)
@@ -35,15 +38,24 @@ def write(session: Path, channels: dict[str, np.ndarray], gap_offsets: tuple[int
             wav.writeframes(pcm.astype("<i2").tobytes())
     rows = "".join(f"{offset}\t0\t0\n" for offset in gap_offsets)
     (session / "gaps.txt").write_text("offset_samples\texpected_seq\tgot_seq\n" + rows, encoding="utf-8")
-    meta = {"session": session.name, "kind": "probe", "fw": "0.1.0+test", "pcm_shift": 16, "seq_gaps": len(gap_offsets)}
+    meta = {
+        "session": session.name,
+        "kind": "probe",
+        "fw": "0.1.0+test",
+        "pcm_shift": 16,
+        "seq_gaps": len(gap_offsets),
+        "doa_deg": doa_deg,
+    }
     (session / "session.json").write_text(json.dumps(meta), encoding="utf-8")
     return session
 
 
 def test_a_clean_channel_from_the_same_chain_matches_exactly(tmp_path: Path) -> None:
     session, channels = board_session(tmp_path)
-    _, figures, parity = score.score(write(session, channels))
-    assert [f.name for f in figures] == ["ch0", "ch1", "clean"]
+    result = score.score(write(session, channels))
+    parity = result.parity
+    assert [f.name for f in result.channels] == ["ch0", "ch1", "clean"]
+    assert result.pair is None
     assert (parity.hops_compared, parity.hops_skipped, parity.max_abs_lsb, parity.over_tolerance) == (38, 2, 0, 0)
 
 
@@ -51,14 +63,14 @@ def test_hops_after_a_gap_are_skipped_and_the_rest_still_match(tmp_path: Path) -
     session, channels = board_session(tmp_path)
     lost = slice(10 * HOP, 13 * HOP)
     kept = {name: np.delete(pcm, np.arange(lost.start, lost.stop)) for name, pcm in channels.items()}
-    _, _, parity = score.score(write(session, kept, gap_offsets=(10 * HOP,)))
+    parity = score.score(write(session, kept, gap_offsets=(10 * HOP,))).parity
     assert (parity.hops_compared, parity.hops_skipped, parity.max_abs_lsb) == (33, 4, 0)
 
 
 def test_one_sample_off_by_more_than_the_tolerance_is_caught(tmp_path: Path) -> None:
     session, channels = board_session(tmp_path)
     channels["clean"][20 * HOP + 5] += 5
-    _, _, parity = score.score(write(session, channels))
+    parity = score.score(write(session, channels)).parity
     assert (parity.max_abs_lsb, parity.over_tolerance) == (5, 1)
 
 
@@ -66,13 +78,47 @@ def test_a_session_without_clean_gets_channel_figures_only(tmp_path: Path) -> No
     session, channels = board_session(tmp_path)
     del channels["clean"]
     channels["ch0"][:3] = 32767
-    meta, figures, parity = score.score(write(session, channels))
-    assert parity is None
-    assert figures[0].clipped == 3 and figures[0].peak_lsb == 32767
-    assert "| ch0 |" in score.table(meta, figures, parity)
+    result = score.score(write(session, channels))
+    assert result.parity is None
+    assert result.channels[0].clipped == 3 and result.channels[0].peak_lsb == 32767
+    assert "| ch0 |" in score.table(result)
 
 
 def test_a_directory_without_wav_is_refused(tmp_path: Path) -> None:
     (tmp_path / "session.json").write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="no WAV"):
         score.score(tmp_path)
+
+
+def clap_session(tmp_path: Path, source_deg: float) -> dict[str, np.ndarray]:
+    """Near silence, then claps from a far source at source_deg: ch1 hears them tau samples before ch0."""
+    rng = np.random.default_rng(11)
+    x = 2.0 * rng.standard_normal(3 * grid.SAMPLE_RATE_HZ)
+    for start in range(grid.SAMPLE_RATE_HZ, 2 * grid.SAMPLE_RATE_HZ, 4000):
+        x[start : start + 400] += 3000.0 * rng.standard_normal(400) * np.exp(-np.arange(400) / 80.0)
+    tau = array.SPACING_M * np.cos(np.radians(source_deg)) / array.SPEED_OF_SOUND_M_S * grid.SAMPLE_RATE_HZ
+    spectrum = np.fft.rfft(x)
+    lead = np.fft.irfft(spectrum * np.exp(2j * np.pi * np.fft.rfftfreq(len(x)) * tau), n=len(x))
+    return {"ch0": np.round(x).astype(np.int16), "ch1": np.round(lead).astype(np.int16)}
+
+
+@pytest.mark.parametrize("doa_deg", [0, 180])
+def test_claps_at_either_end_give_the_contract_spacing_and_sign(tmp_path: Path, doa_deg: int) -> None:
+    result = score.score(write(tmp_path, clap_session(tmp_path, doa_deg), doa_deg=doa_deg))
+    pair = result.pair
+    assert pair.sign_matches is True
+    assert pair.spacing_m == pytest.approx(array.SPACING_M, rel=0.03)
+    assert pair.delay.tau_samples == pytest.approx(pair.expected_tau_samples, abs=0.06)
+    assert "sign matches the label" in score.table(result)
+
+
+def test_a_label_on_the_wrong_side_is_reported(tmp_path: Path) -> None:
+    result = score.score(write(tmp_path, clap_session(tmp_path, 180), doa_deg=0))
+    assert result.pair.sign_matches is False
+    assert "OPPOSITE" in score.table(result)
+
+
+def test_broadside_judges_neither_sign_nor_spacing(tmp_path: Path) -> None:
+    pair = score.score(write(tmp_path, clap_session(tmp_path, 90), doa_deg=90)).pair
+    assert (pair.sign_matches, pair.spacing_m) == (None, None)
+    assert all(abs(b.level_diff_db) < 0.1 for b in pair.bands[2:])

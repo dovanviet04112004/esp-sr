@@ -1,8 +1,8 @@
 """Score one recorded session against srpipe and print its table (KEHOACH 4.6, 7.7).
 
-Every session gets level, DC, peak and clipping per channel. A session with ch0, ch1 and clean (stream
-mode 5) also gets the parity of the board's clean channel with srpipe's chain mirror; the hops right
-after the start and after each seq gap depend on audio the host never saw, so they are skipped.
+Every session gets level, DC, peak, clipping and A-weighted floor per channel. With doa_deg labelled, ch0
+and ch1 also get the pair figures of srpipe.metrics.mic_pair (E2-T4, E2-T7). With clean (stream mode 5), the
+board's clean channel is checked against srpipe's chain mirror, skipping hops that overlap unseen audio.
 Run: uv run --extra score python -m srhost.score <session directory>
 """
 
@@ -19,6 +19,8 @@ from pathlib import Path
 import numpy as np
 import yaml
 from srpipe.dsp.afe.chain import Chain
+from srpipe.generated import array
+from srpipe.metrics import mic_pair
 
 from srhost.config import REPO_ROOT
 from srhost.generated import grid
@@ -29,8 +31,15 @@ WARMUP_HOPS = 2
 PCM_FULL_SCALE = 32768.0
 PCM_MIN, PCM_MAX = -32768, 32767
 SAMPLE_BYTES = 2
+BLOCK = 1 << 20
 CHAIN_TOLERANCE = REPO_ROOT / "contracts" / "golden" / "chain" / "tolerance.yaml"
 PARITY_CHANNELS = ("ch0", "ch1", "clean")
+PAIR_CHANNELS = ("ch0", "ch1")
+# Search twice the nominal reach, so a spacing up to double the contract still shows (KEHOACH 2.3).
+MAX_LAG_SAMPLES = 2.0 * array.MAX_DELAY_SAMPLES
+ENDFIRE_COS_MIN = 0.9
+SIGN_COS_MIN = 0.5
+COHERENCE_MIN = 0.9
 
 
 @dataclass(frozen=True)
@@ -40,6 +49,21 @@ class ChannelFigures:
     dc_lsb: float
     peak_lsb: int
     clipped: int
+    floor_a_dbfs: float
+
+
+@dataclass(frozen=True)
+class PairFigures:
+    """ch0 and ch1 against a source at a labelled angle: measured and expected delay, spacing, per-band match."""
+
+    doa_deg: int
+    delay: mic_pair.PairDelay
+    expected_tau_samples: float
+    sign_matches: bool | None
+    spacing_m: float | None
+    fit_tau_samples: float
+    fit_phase0_deg: float
+    bands: list[mic_pair.BandFigures]
 
 
 @dataclass(frozen=True)
@@ -69,13 +93,16 @@ def read_gap_offsets(session: Path) -> list[int]:
     return [int(row.split("\t")[0]) for row in rows if row.strip()]
 
 
-def channel_figures(name: str, pcm: np.ndarray) -> ChannelFigures:
-    x = pcm.astype(np.float64)
-    ac = x - x.mean()
-    power = float(ac @ ac) / max(len(ac), 1)
+def channel_figures(name: str, pcm: np.ndarray, floor_a_dbfs: float) -> ChannelFigures:
+    n = max(len(pcm), 1)
+    mean = float(pcm.sum(dtype=np.int64)) / n
+    blocks = (pcm[i : i + BLOCK].astype(np.int64) for i in range(0, len(pcm), BLOCK))
+    square_sum = float(sum(int(np.dot(block, block)) for block in blocks))
+    power = max(square_sum / n - mean * mean, 0.0)
     rms_dbfs = 10.0 * np.log10(power / PCM_FULL_SCALE**2) if power > 0 else float("-inf")
     clipped = int(np.count_nonzero((pcm == PCM_MIN) | (pcm == PCM_MAX)))
-    return ChannelFigures(name, rms_dbfs, float(x.mean()), int(np.abs(x).max(initial=0)), clipped)
+    peak = max(abs(int(pcm.min(initial=0))), abs(int(pcm.max(initial=0))))
+    return ChannelFigures(name, rms_dbfs, mean, peak, clipped, floor_a_dbfs)
 
 
 def chain_tolerance_lsb() -> float:
@@ -109,28 +136,91 @@ def chain_parity(ch0: np.ndarray, ch1: np.ndarray, clean: np.ndarray, gap_offset
     return ParityFigures(compared, skipped, max_abs, over, tolerance, snr_db)
 
 
-def score(session: Path) -> tuple[dict, list[ChannelFigures], ParityFigures | None]:
+@dataclass(frozen=True)
+class Score:
+    meta: dict
+    channels: list[ChannelFigures]
+    parity: ParityFigures | None
+    pair: PairFigures | None
+
+
+def pair_figures(stats: mic_pair.PairStats, doa_deg: int) -> PairFigures:
+    """Figures of a source at doa_deg: the sign is judged off broadside, the spacing only near the ends."""
+    cos = float(np.cos(np.radians(doa_deg)))
+    delay = mic_pair.gcc_phat_delay(stats, MAX_LAG_SAMPLES)
+    fit_tau, fit_phase0 = mic_pair.linear_phase_fit(stats)
+    return PairFigures(
+        doa_deg=doa_deg,
+        delay=delay,
+        expected_tau_samples=mic_pair.expected_tau_samples(doa_deg),
+        sign_matches=bool(np.sign(delay.tau_samples) == np.sign(cos)) if abs(cos) >= SIGN_COS_MIN else None,
+        spacing_m=mic_pair.spacing_from_tau_m(delay.tau_samples, doa_deg) if abs(cos) >= ENDFIRE_COS_MIN else None,
+        fit_tau_samples=fit_tau,
+        fit_phase0_deg=fit_phase0,
+        bands=mic_pair.pair_bands(stats, fit_tau),
+    )
+
+
+def score(session: Path) -> Score:
     meta = json.loads((session / "session.json").read_text(encoding="utf-8"))
     pcm = {p.stem: read_wav(p) for p in sorted(session.glob("*.wav"))}
     if not pcm:
         raise ValueError(f"{session} holds no WAV")
-    figures = [channel_figures(name, samples) for name, samples in pcm.items()]
+    floors = {}
+    stats = None
+    if all(name in pcm for name in PAIR_CHANNELS):
+        stats = mic_pair.pair_stats(pcm["ch0"], pcm["ch1"])
+        floors = {name: mic_pair.noise_floor_dbfs(stats, i) for i, name in enumerate(PAIR_CHANNELS)}
+    for name in pcm.keys() - floors.keys():
+        floors[name] = mic_pair.noise_floor_dbfs(mic_pair.pair_stats(pcm[name], pcm[name]), 0)
+    channels = [channel_figures(name, samples, floors[name]) for name, samples in pcm.items()]
     parity = None
     if all(name in pcm for name in PARITY_CHANNELS):
         parity = chain_parity(pcm["ch0"], pcm["ch1"], pcm["clean"], read_gap_offsets(session))
-    return meta, figures, parity
+    pair = None
+    if stats is not None and meta.get("doa_deg") is not None:
+        pair = pair_figures(stats, int(meta["doa_deg"]))
+    return Score(meta, channels, parity, pair)
 
 
-def table(meta: dict, figures: list[ChannelFigures], parity: ParityFigures | None) -> str:
+def pair_lines(pair: PairFigures) -> list[str]:
+    verdict = {True: "matches the label", False: "OPPOSITE to the label", None: "not judged near broadside"}
+    spacing = f"{1000 * pair.spacing_m:.1f} mm" if pair.spacing_m is not None else "not judged away from the ends"
+    return [
+        "",
+        f"source at {pair.doa_deg} deg: tau = t0 - t1 = {pair.delay.tau_samples:+.2f} samples"
+        f" ({1e6 * pair.delay.tau_s:+.1f} us, PHAT peak {pair.delay.peak:.2f}, {pair.delay.frames} frames),"
+        f" contract expects {pair.expected_tau_samples:+.2f}; sign {verdict[pair.sign_matches]}; spacing {spacing}",
+        f"phase line 200 Hz - {array.ALIAS_HZ:.0f} Hz: tau {pair.fit_tau_samples:+.2f} samples,"
+        f" constant phase {pair.fit_phase0_deg:+.1f} deg",
+        "",
+        "| Band Hz | ch1 - ch0 dB | Phase deg | Phase after tau deg | Coherence |",
+        "|---|---|---|---|---|",
+        *(
+            f"| {b.low_hz:.0f}-{b.high_hz:.0f} | {b.level_diff_db:+.2f} | {b.phase_diff_deg:+.1f}"
+            f" | {b.phase_after_delay_deg:+.1f} | {b.coherence:.3f}{'' if b.coherence >= COHERENCE_MIN else ' (low)'} |"
+            for b in pair.bands
+        ),
+    ]
+
+
+def table(result: Score) -> str:
+    meta = result.meta
     lines = [
         f"session {meta['session']}  kind {meta['kind']}  fw {meta['fw']}  pcm_shift {meta['pcm_shift']}"
         f"  seq_gaps {meta['seq_gaps']}",
         "",
-        "| Channel | RMS dBFS | DC LSB | Peak LSB | Clipped |",
-        "|---|---|---|---|---|",
-        *(f"| {f.name} | {f.rms_dbfs:.1f} | {f.dc_lsb:.1f} | {f.peak_lsb} | {f.clipped} |" for f in figures),
+        "| Channel | RMS dBFS | DC LSB | Peak LSB | Clipped | Floor dBFS(A) |",
+        "|---|---|---|---|---|---|",
+        *(
+            f"| {f.name} | {f.rms_dbfs:.1f} | {f.dc_lsb:.1f} | {f.peak_lsb} | {f.clipped} | {f.floor_a_dbfs:.1f} |"
+            for f in result.channels
+        ),
     ]
-    if parity is not None:
+    if result.pair is not None:
+        lines += pair_lines(result.pair)
+    if result.parity is not None:
+        parity = result.parity
         lines += [
             "",
             "| Hops compared | Hops skipped | Max error LSB | Samples over tolerance | Tolerance LSB | SNR dB |",
@@ -146,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("session", type=Path, help="a directory under raw/device/<board>/")
     args = parser.parse_args(argv)
     try:
-        print(table(*score(args.session)))
+        print(table(score(args.session)))
     except (OSError, ValueError, KeyError) as err:
         print(f"score: {err}", file=sys.stderr)
         return 2
