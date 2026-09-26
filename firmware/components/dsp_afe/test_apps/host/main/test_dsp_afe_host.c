@@ -282,7 +282,11 @@ static void check_module_shells(void)
 
     memcpy(y1, x1, sizeof(y1));
     dsp_afe_balance_apply(x0, y1);
-    check(memcmp(y1, x1, sizeof(y1)) == 0, "balance shell: leaves ch1 as it is");
+    bool balance_ok = true;
+    for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
+        balance_ok = balance_ok && y1[k].re == 7.0f && y1[k].im == 4.0f;
+    }
+    check(balance_ok, "balance: (1+2j)(3-2j) = 7+4j on every bin");
 
     const dsp_afe_doa_config_t doa_cfg = {
         GEN_ARRAY_SPACING_M, GEN_ARRAY_SPEED_OF_SOUND_M_S, 200.0f, GEN_ARRAY_ALIAS_HZ, 2.0f, 0.2f};
@@ -355,6 +359,33 @@ static void check_every_path(void)
     cfg.input_format = "MMR";
     check_round_trip(&cfg, "MMR with aec and bss through every shell, silent reference flagged");
 }
+
+static void check_balance_in_chain(void)
+{
+    static dsp_afe_calib_t calib;
+    static int16_t in[GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS];
+    for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
+        calib.balance[k] = (dsp_spec_cplx_t){1.0f, 0.0f};
+    }
+    dsp_afe_config_t cfg = kPlain;
+    cfg.calib = &calib;
+    check_round_trip(&cfg, "unit balance gains");
+    for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
+        calib.balance[k] = (dsp_spec_cplx_t){-1.0f, 0.0f};
+    }
+    dsp_afe_t *afe = make(&cfg);
+    bool ok = afe != NULL;
+    int worst = 0;
+    for (size_t h = 0; ok && h < HOPS; h++) {
+        dsp_afe_frame_t out;
+        fill_hop(in, GEN_ARRAY_N_MICS, h, false);
+        ok = dsp_afe_feed(afe, in, 1) == ESP_OK && dsp_afe_fetch(afe, &out) == ESP_OK;
+        for (size_t i = 0; ok && i < GEN_GRID_HOP_SAMPLES; i++) {
+            worst = abs(out.pcm[i]) > worst ? abs(out.pcm[i]) : worst;
+        }
+    }
+    check(ok && worst == 0, "balance gains of -1 on ch1 cancel identical microphones in the plain mix");
+}
 #endif
 
 #if DSP_AFE_HOST_GOLDEN
@@ -394,6 +425,7 @@ int main(int argc, char **argv)
 #if DSP_AFE_HOST_ALL_MODULES
     check_module_shells();
     check_every_path();
+    check_balance_in_chain();
 #endif
 #if DSP_AFE_HOST_GOLDEN
     if (argc > 1) { run_golden(argv[1]); }
