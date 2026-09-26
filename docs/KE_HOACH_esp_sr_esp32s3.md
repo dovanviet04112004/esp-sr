@@ -1272,7 +1272,8 @@ Chung cả bốn (`sdkconfig.defaults.esp32s3`):
 host/
 ├── pyproject.toml  ├── uv.lock  ├── .env.example
 ├── src/srhost/
-│   ├── generated/                 # sinh từ contracts/: payload, topics, stream
+│   ├── generated/                 # sinh từ contracts/: payload (kèm SCHEMAS), topics, stream, grid
+│   ├── config.py                  # ★ chỗ DUY NHẤT đọc biến môi trường của host/, kiểm lúc khởi động
 │   ├── mqtt_rx.py                 # đăng ký topic, kiểm schema, ghi jsonl theo phiên
 │   ├── stream_rx.py               # máy chủ TCP: nhận khung, phát hiện hở seq, ghi WAV từng kênh + json kèm
 │   ├── live.py                    # xem trực tiếp: hướng, cờ tiếng nói, mức, sự kiện
@@ -1283,6 +1284,11 @@ host/
 
 Ba vai của TỔNG QUAN "gửi về máy để xem và chấm": **xem** (`live.py`), **chấm** (`score.py`), **thu**
 (`session.py` + `stream_rx.py`). `score.py` import thước đo từ `ml/`, không viết lại.
+
+`session.py` ghi những trường của `session.json` mà `host` thấy được (`grid_hash` từ code sinh, `start_utc`,
+`seq_gaps`, `duration_s`, `sha256`); `fw` (`PROJECT_VER` + commit) và `pcm_shift` là tham số bắt buộc khi mở
+phiên, đọc từ log boot của board, vì luồng tiếng không mang chúng. Tên kênh của từng `mode` nằm ở
+`contracts/stream/frame.yaml`, không gõ lại ở `host/`.
 
 ### 4.7 `deploy/`
 
