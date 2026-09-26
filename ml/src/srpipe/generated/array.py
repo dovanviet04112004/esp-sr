@@ -1,0 +1,14 @@
+# GENERATED FILE - DO NOT EDIT.
+# Source: contracts/array.yaml
+# Regenerate: python3 tools/gen_contracts.py
+
+VERSION = 1
+N_MICS = 2
+SPACING_M = 0.065
+SPEED_OF_SOUND_M_S = 343.0
+CHANNELS = ('ch0', 'ch1')
+PHASE_REFERENCE_INDEX = 0
+ZERO_DEGREE_INDEX = 1
+DOA_RANGE_DEG = (0, 180)
+MAX_DELAY_SAMPLES = 3.032070
+ALIAS_HZ = 2638.462
