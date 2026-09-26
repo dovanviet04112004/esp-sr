@@ -64,3 +64,10 @@ bool parity_hpf(const char *case_name, const void *buf, size_t len);
  *  @ret false when the case lacks a tensor, has the wrong shape or memory runs out
  */
 bool parity_balance(const char *case_name, const void *buf, size_t len);
+
+/** Run one vad case with the configuration it carries, one int16 hop / 32768 at a time; compare levels and
+ * decisions.
+ *  @ctx task | blocking | builds only with CONFIG_DSP_AFE_VAD_ENABLE, where vad.c is compiled
+ *  @ret false when the case lacks a tensor, has the wrong shape or the module refuses it
+ */
+bool parity_vad(const char *case_name, const void *buf, size_t len);

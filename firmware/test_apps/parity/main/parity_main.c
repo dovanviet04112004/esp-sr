@@ -12,8 +12,7 @@ static const struct {
     const char *block;
     parity_runner_t run;
 } kBlocks[] = {
-    {"stft", parity_stft},
-    {"mel", parity_mel},
+    {"stft", parity_stft},       {"mel", parity_mel},
 // The chain cases are the default build; a build with a real module on gives a different chain.
 #if CONFIG_DSP_AFE_HPF_ENABLE
     {"hpf", parity_hpf},
@@ -22,6 +21,9 @@ static const struct {
 #endif
 #if CONFIG_DSP_AFE_BALANCE_ENABLE
     {"balance", parity_balance},
+#endif
+#if CONFIG_DSP_AFE_VAD_ENABLE
+    {"vad", parity_vad},
 #endif
 };
 
