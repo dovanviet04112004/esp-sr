@@ -1,0 +1,26 @@
+menu "capture"
+
+    config CAPTURE_DURATION_S
+        int "Stream for this many seconds after the link comes up"
+        range 10 3600
+        default 1860
+        help
+            30 minutes plus a minute of margin, so a host session of 1800 s
+            always ends before the board stops sending (E5-T12). Stays at or
+            under SVC_REPORT_STREAM_MAX_S.
+
+    config CAPTURE_PCM_SHIFT_FALLBACK
+        int "Microphone right shift until calib/pcm_shift is measured"
+        range 8 16
+        default 16
+        help
+            Same meaning as APP_PCM_SHIFT_FALLBACK of main: drv_audio keeps the
+            top 32 - shift bits of each INMP441 slot. NVS calib/pcm_shift wins.
+
+    config CAPTURE_REF_ENABLE
+        bool "MAX98357A fitted: capture the speaker reference too, as mode 3"
+        default n
+        help
+            Board B has no speaker, so it captures ch0 ch1 in mode 2 (KEHOACH 7.4).
+
+endmenu
