@@ -6,7 +6,7 @@ Board B, 2 × INMP441 (KẾ HOẠCH §2.1, §2.3). Mốc chấm là của TỔNG
 
 | Chỉ tiêu | Mốc | Đo được | Cách đo | Ngày |
 |---|---|---|---|---|
-| Khoảng cách hai micro | 4–6,5 cm | | thước kẹp, tâm hai lỗ âm | |
+| Khoảng cách hai micro | 4–6,5 cm | ~45 mm (ước, chủ dự án đo) | thước, tâm hai lỗ âm; E2-T4 kiểm bằng trễ vỗ tay ở đầu dàn | 26/09 |
 | Chênh độ nhạy | ≤ 3 dB | | ồn trắng chính diện 1 m | |
 | Chênh pha | ≤ 10° | | ồn trắng chính diện 1 m | |
 | SNR `ch0` / `ch1` | ≥ 62 dB (INMP441 ghi 61 dBA) | | | |
