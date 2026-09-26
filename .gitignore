@@ -45,12 +45,12 @@ firmware/models/**/*.bin
 !/ml/artifacts/**/
 !/ml/artifacts/**/.gitkeep
 
-# ── ml/data — chỉ giữ README, splits, manifest (KE HOACH §4.4) ──
+# ── ml/data — chỉ giữ README, manifests, splits (KE HOACH §4.4.1) ──
 /ml/data/**
 !/ml/data/**/
 !/ml/data/**/.gitkeep
 !/ml/data/README.md
-!/ml/data/**/manifest.yaml
+!/ml/data/manifests/**
 !/ml/data/splits/**
 
 # ── host: phiên thu nằm ngoài repo ──

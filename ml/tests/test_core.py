@@ -32,6 +32,8 @@ def test_data_root_env_moves_every_data_path(tmp_path: Path) -> None:
     assert paths["raw"] == tmp_path / "raw"
     assert paths["processed"] == tmp_path / "processed"
     assert paths["artifacts"] == config.ML_ROOT / "artifacts"
+    assert paths["manifests"] == config.ML_ROOT / "data" / "manifests"
+    assert paths["splits"] == config.ML_ROOT / "data" / "splits"
 
 
 def test_default_data_root_sits_under_ml() -> None:

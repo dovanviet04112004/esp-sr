@@ -1,8 +1,11 @@
-# Where data and run outputs live (KEHOACH 4.4). Relative paths resolve from ml/.
-# SRPIPE_DATA_ROOT in .env overrides data_root, so a big drive needs no edit here.
+# Where data and run outputs live (KEHOACH 4.4.1). Relative paths resolve from ml/.
+# SRPIPE_DATA_ROOT in .env overrides data_root, so a big drive needs no edit here;
+# manifests and splits stay in the repo because they are committed.
 data_root: data
 raw: "{data_root}/raw"
 interim: "{data_root}/interim"
 processed: "{data_root}/processed"
+cache: "{data_root}/cache"
+manifests: data/manifests
 splits: data/splits
 artifacts: artifacts
