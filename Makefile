@@ -69,6 +69,10 @@ monitor: ## Open the serial monitor on the CH340 port
 capture-flash: ## Flash test_apps/capture, the raw-only recorder (E5-T12)
 	cd firmware/test_apps/capture && idf.py -p $(PORT) flash
 
+capture-radio-off-flash: ## Flash capture that records 60 s with the radio off, then sends: the Wi-Fi off floor (E2-T4)
+	cd firmware/test_apps/capture && idf.py -B build_radio_off -D SDKCONFIG=build_radio_off/sdkconfig \
+	  -D CAPTURE_PROFILE=radio_off -p $(PORT) flash
+
 # broker and host
 broker-up: ## Start the bench MQTT broker (needs deploy/.env and deploy/emqx/users.csv)
 	@test -f deploy/.env || { echo "copy deploy/.env.example to deploy/.env and fill it"; exit 1; }
