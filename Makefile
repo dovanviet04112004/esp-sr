@@ -73,6 +73,12 @@ capture-radio-off-flash: ## Flash capture that records 60 s with the radio off, 
 	cd firmware/test_apps/capture && idf.py -B build_radio_off -D SDKCONFIG=build_radio_off/sdkconfig \
 	  -D CAPTURE_PROFILE=radio_off -p $(PORT) flash
 
+parity-board: ## Run every golden case on board B: the default chain build, then the build with the real modules on
+	cd firmware/test_apps/parity && idf.py build
+	cd firmware/test_apps/parity && idf.py -B build_modules -D SDKCONFIG=build_modules/sdkconfig -D PARITY_PROFILE=modules build
+	cd firmware/test_apps/parity && pytest pytest_parity.py --embedded-services esp,idf --target esp32s3 --port $(PORT) --build-dir build -p no:cacheprovider
+	cd firmware/test_apps/parity && pytest pytest_parity.py --embedded-services esp,idf --target esp32s3 --port $(PORT) --build-dir build_modules -p no:cacheprovider
+
 calib-estimate: ## Estimate balance from frontal white noise sessions: make calib-estimate SESSIONS="<dir> <dir> ..."
 	cd host && uv run --extra score python -m srhost.calib estimate $(SESSIONS)
 

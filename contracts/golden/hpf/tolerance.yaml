@@ -1,0 +1,8 @@
+# C dsp_afe hpf, the esp-dsp biquad, against srpipe.dsp.afe.hpf (KEHOACH 3.4, E7-T1, ADR-0003).
+# The host runs the portable C of the kernel and matches bit for bit; board B runs its S3 assembly, whose
+# rounding differs, and direct form II lifts the difference at low frequency: worst 1.2e-4 at 68.7 dB on the
+# 50 Hz hum over DC. Limits keep 4x and 8.7 dB of margin. case_neg_* must fall outside these limits.
+tensors:
+  output:
+    max_abs: 5.0e-4
+    min_snr_db: 60.0

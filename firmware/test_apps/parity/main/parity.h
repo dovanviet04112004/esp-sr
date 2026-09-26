@@ -52,3 +52,9 @@ bool parity_mel(const char *case_name, const void *buf, size_t len);
  *  @ret false when the case lacks a tensor, has the wrong shape or the facade refuses it
  */
 bool parity_chain(const char *case_name, const void *buf, size_t len);
+
+/** Run one hpf case at the cutoff it carries, one hop per call on each channel, as dsp_afe does.
+ *  @ctx task | blocking | builds only with CONFIG_DSP_AFE_HPF_ENABLE, where hpf.c is compiled
+ *  @ret false when the case lacks a tensor, has the wrong shape or the module refuses it
+ */
+bool parity_hpf(const char *case_name, const void *buf, size_t len);

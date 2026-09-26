@@ -2,6 +2,7 @@
 
 #include "esp_heap_caps.h"
 #include "parity.h"
+#include "sdkconfig.h"
 #include "sys_storage.h"
 
 #define GOLDEN_DIR STORAGE_LFS_MOUNT "/golden"
@@ -13,7 +14,12 @@ static const struct {
 } kBlocks[] = {
     {"stft", parity_stft},
     {"mel", parity_mel},
+// The chain cases are the default build; a build with a real module on gives a different chain.
+#if CONFIG_DSP_AFE_HPF_ENABLE
+    {"hpf", parity_hpf},
+#else
     {"chain", parity_chain},
+#endif
 };
 
 static bool read_case(const char *path, void *buf, size_t cap, size_t *len)
@@ -28,6 +34,11 @@ void app_main(void)
         printf("PARITY error setup\n");
         return;
     }
+    printf("PARITY plan");
+    for (size_t i = 0; i < sizeof(kBlocks) / sizeof(kBlocks[0]); i++) {
+        printf(" %s", kBlocks[i].block);
+    }
+    printf("\n");
     unsigned cases = 0;
     for (size_t i = 0; i < sizeof(kBlocks) / sizeof(kBlocks[0]); i++) {
         cases += parity_run_block(GOLDEN_DIR, kBlocks[i].block, kBlocks[i].run, read_case, buf,

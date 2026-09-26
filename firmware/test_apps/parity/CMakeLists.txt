@@ -6,6 +6,10 @@ set(COMPONENTS main dsp_spec dsp_afe sys_storage)
 # One board: test apps take clock, cache, PSRAM and console settings from the firmware's own file.
 set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/../../sdkconfig.defaults.esp32s3"
                        "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults")
+# idf.py -D PARITY_PROFILE=modules adds sdkconfig.modules, which turns on the modules that are real.
+if(DEFINED PARITY_PROFILE)
+    list(APPEND SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.${PARITY_PROFILE}")
+endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(parity)

@@ -16,11 +16,15 @@ import yaml
 GOLDEN = Path(__file__).resolve().parents[3] / "contracts" / "golden"
 LINE = re.compile(r"PARITY (\S+) (\S+) (\S+) max_abs=(\S+) snr_db=(\S+)")
 DONE = re.compile(r"PARITY done (\d+) cases")
+PLAN = re.compile(r"PARITY plan ((?:\S+ ?)+)$")
 NEGATIVE_PREFIX = "case_neg_"
 
 
 def judge(lines: list[str], golden: Path = GOLDEN) -> list[str]:
-    """Every broken expectation: a case outside tolerance, a negative control inside it, a case never run."""
+    """Every broken expectation: a case outside tolerance, a negative control inside it, a case never run.
+
+    A run that prints "PARITY plan <blocks>" answers for those blocks only; without a plan every block counts.
+    """
     passed: dict[tuple[str, str], list[bool]] = {}
     tolerances: dict[str, dict] = {}
     for line in lines:
@@ -34,7 +38,8 @@ def judge(lines: list[str], golden: Path = GOLDEN) -> list[str]:
         within = float(max_abs) <= limit["max_abs"] and float(snr_db) >= limit["min_snr_db"]
         passed.setdefault((block, case), []).append(within)
     problems = [] if any(DONE.search(line) for line in lines) else ["the app never printed PARITY done"]
-    for block_dir in sorted(p for p in golden.iterdir() if p.is_dir()):
+    planned = {block for line in lines if (plan := PLAN.search(line.strip())) for block in plan.group(1).split()}
+    for block_dir in sorted(p for p in golden.iterdir() if p.is_dir() and (not planned or p.name in planned)):
         for gold in sorted(block_dir.glob("*.gold")):
             key = (block_dir.name, gold.stem)
             if key not in passed:
