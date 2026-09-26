@@ -7,6 +7,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "gen_payload.h"
+#include "sdkconfig.h"
 
 #define CLEAN_DEPTH 64 // about one second of hops
 #define DIALOG_DEPTH 8
@@ -14,7 +15,7 @@
 #define CMDSET_DEPTH 1
 #define SPEAK_DEPTH 4
 #define EVENT_UP_DEPTH 16
-#define STREAM_BUFFER_BYTES (64 * 1024) // about 0.5 s of mode 4 (KEHOACH 5.3)
+#define STREAM_BUFFER_BYTES (CONFIG_SVC_REPORT_STREAM_BUFFER_KB * 1024)
 
 static const char *TAG = "app_wiring";
 

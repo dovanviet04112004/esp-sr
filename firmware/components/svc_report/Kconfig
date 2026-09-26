@@ -9,4 +9,14 @@ menu "svc_report"
             Ten minutes unless opened again (KEHOACH 7.5). test_apps/capture
             raises it for its 30-minute sessions.
 
+    config SVC_REPORT_STREAM_BUFFER_KB
+        int "Size of sb_stream in PSRAM (KB)"
+        depends on NET_STREAM_ENABLE
+        range 16 4096
+        default 512
+        help
+            About 5 s of mode 5 and 8 s of mode 2: enough to ride out the
+            stalls of the link to the host measured on board B (KEHOACH 5.3).
+            app_wiring of main and test_apps/capture both create it this size.
+
 endmenu
