@@ -97,3 +97,25 @@ bỏ được việc ấy mà không đổi phép tính. Ước "< 20 µs hai k�
 
 Độ lệch một chiều sau lọc (bản soi gương float32, khớp C từng bit trên máy tính): một chiều −0,5 LSB của INMP441 về đúng 0
 sau 1 s; một chiều −20 dBFS còn −102,4 dBFS, tức giảm 82 dB.
+
+## 6. `balance` và phép gộp nhân-cộng (E7-T2, ADR-0005, ADR-0006)
+
+Bản sao tạm của `bench_afe` có thêm `esp-dsp` (không vào repo), mã `dsp_afe` tại `9b18fec`, profile `bench`, board B,
+nhân 1, 2000 bước sau 16 bước làm nóng; ba lượt, lệch giữa các lượt dưới 0,05 µs. Vạch vào ồn đều ±50, hệ số ±0,5.
+
+| Cách tính `balance`, 257 vạch | µs trung bình | µs đỉnh | Chu kỳ mỗi vạch | So với bản Python |
+|---|---|---|---|---|
+| `esp-dsp`: bốn `dsps_mul_f32` bước 2 vào đệm tạm, rồi `dsps_sub_f32` và `dsps_add_f32` | 52,3 | 56,6 | 48,9 | khớp từng bit |
+| Viết tay, GCC gộp nhân-cộng (`madd.s` / `msub.s`) | 16,2 | 20,6 | 15,1 | lệch tới 1,9e-6, ở 125 trên 514 số |
+| **Viết tay, `-ffp-contract=off` — đang dùng** | 18,4 | 22,7 | 17,1 | khớp từng bit |
+
+`hpf` cùng lần đo, hai kênh × 256 mẫu, ồn đều ±0,125:
+
+| Cách dựng `hpf` | µs trung bình | So với bản không gộp |
+|---|---|---|
+| GCC gộp nhân-cộng | 36,8 | lệch ở 99,7% số mẫu, tối đa 2,0e-6 |
+| **`-ffp-contract=off` — đang dùng** | 40,9 | — |
+
+Lệnh `madd.s` của S3 làm tròn một lần cho cả tích lẫn tổng, nên bản gộp khác bản ghép từ `esp-dsp` (mỗi phép làm tròn
+riêng), còn bản không gộp trùng nó từng bit. GCC chỉ gộp từ `-O2`; ở `-Og` hai bản như nhau, nên parity dựng bằng cờ của
+`bench` mới kiểm được mã chạy thật. Tắt gộp tốn 4,1 µs ở `hpf` và 2,2 µs ở `balance`, tức 0,04% một bước 16 ms.
