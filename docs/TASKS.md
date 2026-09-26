@@ -93,7 +93,7 @@ Board B là board duy nhất có micro (KẾ HOẠCH §2.1). Mọi phép đo thu
 
 | ID | Task | Xong khi | Chặn bởi | V5 |
 |---|---|---|---|---|
-| E4-T1 | `ml/pyproject.toml` + `uv.lock`; `configs/common/{paths,hardware}.yaml`; `.env.example` | `uv sync` sạch trên máy mới | E1-T1 | — |
+| ~~E4-T1~~ | **Xong 26/09.** `ml/pyproject.toml` + `uv.lock` (nền: numpy, scipy, soundfile, pyyaml, pydantic, pyroomacoustics; PyTorch ở nhóm `train`), `configs/common/{paths,hardware}.yaml`, `.env.example` với `SRPIPE_DATA_ROOT`, `ml/data/README.md` | `uv sync` sạch, `import srpipe` và `srpipe.generated.grid` chạy; `ruff` sạch | E1-T1 | — |
 | E4-T2 | `srpipe/core/`: config, `run_dir`, seed, `audio_io` | một run giả tạo đủ `config.resolved.yaml`, `split.lock`, `env.txt` | E4-T1 | — |
 | E4-T3 | `srpipe/golden/gold.py` + đọc `.gold` bằng C trong `test_apps/parity` | ghi Python → đọc C → so, khớp từng byte trên ba dtype | E4-T1, E5-T5 | — |
 | E4-T4 | `srpipe/scenes/`: dựng cảnh có nhãn bằng `pyroomacoustics` — phòng, RT60, hướng người nói và nhiễu, SNR, dàn micro từ `array.yaml` | một lệnh sinh bộ cảnh chuẩn có manifest và sha256; nhãn hướng khớp hình học | E4-T1, E3-T1 | V5.2 |
