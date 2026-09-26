@@ -25,7 +25,7 @@ bootloader bởi chính `make session`; **không mở monitor serial trong lúc 
 **Nhận micro bằng dấu của `τ`, không bằng mức.** Micro nào nghe to hơn khi cào cạnh lỗ còn tuỳ độ nhạy hai kênh: trên
 board B cào lỗ `ch0` vẫn ra `ch1` to hơn 7–8 dB, vì `ch0` nghe nhỏ hơn ~10 dB ở mọi hướng. Đầu nào vỗ tay cho `τ` dương là
 đầu `ch1`; nhãn `--doa-deg` ghi sai phía thì `score` báo `OPPOSITE`, sửa nhãn trong `session.json` và dòng manifest. Board B:
-**lỗ A là `ch0`, lỗ B là `ch1`** (E2-T7). Dừng phiên sớm bằng Ctrl-C (hay `docker kill --signal INT sr-session`) là an toàn:
+**lỗ A là `ch0`, lỗ B là `ch1`** (E2-T7). Ngồi đối diện hai micro thì lỗ A ở **bên trái**, lỗ B bên phải: 0° (phía `ch1`) là tay phải người ngồi đối diện, 180° là tay trái. Dừng phiên sớm bằng Ctrl-C (hay `docker kill --signal INT sr-session`) là an toàn:
 máy nhận dừng ở ranh giới khung.
 
 Chấm: `cd host && uv run --extra score python -m srhost.score $SRPIPE_DATA_ROOT/raw/device/board_b/<phiên>`. Chênh độ
