@@ -1285,6 +1285,10 @@ host/
 Ba vai của TỔNG QUAN "gửi về máy để xem và chấm": **xem** (`live.py`), **chấm** (`score.py`), **thu**
 (`session.py` + `stream_rx.py`). `score.py` import thước đo từ `ml/`, không viết lại.
 
+`make session ARGS="…"` chạy `srhost.session` trong một container có cổng luồng publish trên Windows: WSL ở
+chế độ NAT không nhận được kết nối từ LAN (`.wslconfig` ghi vì sao không dùng `mirrored`), còn cổng Docker
+Desktop publish thì board tới được, như cổng 1883 của broker.
+
 `session.py` ghi những trường của `session.json` mà `host` thấy được (`grid_hash` từ code sinh, `start_utc`,
 `seq_gaps`, `duration_s`, `sha256`); `fw` (`PROJECT_VER` + commit) và `pcm_shift` là tham số bắt buộc khi mở
 phiên, đọc từ log boot của board, vì luồng tiếng không mang chúng. Tên kênh của từng `mode` nằm ở
@@ -1724,8 +1728,9 @@ Chỉ để **thu dữ liệu và gỡ lỗi**. Tắt mặc định, không có 
 `mode` 5 là `mode` 4 cho board không có loa: không có `ref` thì `mode` 4 không mở được, mà so vào với ra
 trên cùng một bước (E5-T11, rồi từng module của E7–E9) cần cả hai trong một khung.
 
-`test_apps/capture` luôn chạy `mode` 3 và không có gì khác trong chuỗi, để bản thu cho dữ liệu huấn
-luyện không phụ thuộc phiên bản `dsp_afe` nào.
+`test_apps/capture` chạy `mode` 3 — `mode` 2 trên board chưa lắp loa như board B, vì không có `ref` — và
+không có gì khác trong chuỗi, để bản thu cho dữ liệu huấn luyện không phụ thuộc phiên bản `dsp_afe` nào. Nó
+tự mở luồng ngay khi có Wi-Fi, trong `CAPTURE_DURATION_S` (mặc định 31 phút), tới `device/stream_host:stream_port`.
 
 ### 7.5 Bảo mật và riêng tư
 
