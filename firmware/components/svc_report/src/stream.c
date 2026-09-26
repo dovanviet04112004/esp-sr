@@ -232,6 +232,6 @@ void svc_report_luong_step(void)
     const size_t len = receive_frame();
     if (len > 0 && net_stream_send(s_stream.in.bytes, len, CONFIG_NET_STREAM_SEND_TIMEOUT_MS) != ESP_OK) {
         ESP_LOGW(TAG, "stream send failed, reconnecting");
-        s_stream.next_connect_us = 0;
+        s_stream.next_connect_us = esp_timer_get_time() + RECONNECT_BACKOFF_US;
     }
 }
