@@ -12,6 +12,7 @@
 #include "dsp_afe/gsc.h"
 #include "dsp_afe/hpf.h"
 #include "dsp_afe/vad.h"
+#include "gen_afe.h"
 #include "gen_array.h"
 #include "gen_grid.h"
 #include "sdkconfig.h"
@@ -26,6 +27,7 @@
 #define TONE_HZ 440.0
 #define MAX_ERROR_LSB 1
 #define CASE_BYTES_MAX (128 * 1024)
+#define PCM_FULL_SCALE 32768.0f
 
 static unsigned s_failures;
 
@@ -74,9 +76,32 @@ static void fill_hop(int16_t *interleaved, uint8_t n_channels, size_t hop, bool 
     }
 }
 
+// The tone as the chain should give it back: through hpf when hpf is built, as it is the only real module.
+static void expected_hop(void *hpf_mem, dsp_afe_hpf_t **hpf, size_t hop, int16_t *out)
+{
+    static float x[GEN_GRID_HOP_SAMPLES];
+    for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
+        x[i] = tone(hop * GEN_GRID_HOP_SAMPLES + i) / PCM_FULL_SCALE;
+    }
+#if CONFIG_DSP_AFE_HPF_ENABLE
+    const dsp_afe_hpf_config_t cfg = {.cutoff_hz = GEN_AFE_HPF_CUTOFF_HZ, .n_channels = 1};
+    if (*hpf == NULL) { dsp_afe_hpf_init(hpf, &cfg, hpf_mem, dsp_afe_hpf_workspace_bytes(&cfg)); }
+    dsp_afe_hpf_process(*hpf, 0, x, GEN_GRID_HOP_SAMPLES);
+#else
+    (void)hpf_mem;
+    (void)hpf;
+#endif
+    for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
+        out[i] = (int16_t)lrintf(x[i] * PCM_FULL_SCALE);
+    }
+}
+
 static void check_round_trip(const dsp_afe_config_t *cfg, const char *what)
 {
     static int16_t in[GEN_GRID_HOP_SAMPLES * MAX_CHANNELS];
+    static int16_t want[GEN_GRID_HOP_SAMPLES];
+    static uint64_t hpf_mem[64];
+    dsp_afe_hpf_t *hpf = NULL;
     const uint8_t n_channels = channels_of(cfg);
     const uint16_t want_flags = n_channels == MAX_CHANNELS ? DSP_AFE_FLAG_NO_REF : 0u;
     dsp_afe_t *afe = make(cfg);
@@ -88,12 +113,14 @@ static void check_round_trip(const dsp_afe_config_t *cfg, const char *what)
         ok = dsp_afe_feed(afe, in, 1) == ESP_OK && dsp_afe_fetch(afe, &out) == ESP_OK && out.seq == h &&
              out.doa_deg == -1 && out.vad == 0 && out.gain_db == 0 && out.flags == want_flags;
         for (size_t i = 0; ok && h > 0 && i < GEN_GRID_HOP_SAMPLES; i++) {
-            const int err = abs(out.pcm[i] - tone((h - 1) * GEN_GRID_HOP_SAMPLES + i));
+            const int err = abs(out.pcm[i] - want[i]);
             worst = err > worst ? err : worst;
         }
+        expected_hop(hpf_mem, &hpf, h, want);
     }
     char line[160];
-    snprintf(line, sizeof(line), "%s: the tone comes back one hop late within %d LSB (worst %d)", what,
+    snprintf(line, sizeof(line),
+             "%s: the tone, through hpf when built, comes back one hop late within %d LSB (worst %d)", what,
              MAX_ERROR_LSB, worst);
     check(ok && worst <= MAX_ERROR_LSB, line);
 }
@@ -236,7 +263,7 @@ static void check_module_shells(void)
               dsp_afe_hpf_init(&hpf, &hpf_cfg, region(bytes), bytes) == ESP_OK &&
               dsp_afe_hpf_process(hpf, 0, hop, GEN_GRID_HOP_SAMPLES) == ESP_OK &&
               dsp_afe_hpf_process(hpf, 2, hop, GEN_GRID_HOP_SAMPLES) == ESP_ERR_INVALID_ARG,
-          "hpf shell: refuses a 5 Hz cutoff and a third channel");
+          "hpf: refuses a 5 Hz cutoff and a third channel");
 
     const size_t fft_bytes = dsp_spec_fft_workspace_bytes(GEN_GRID_FFT_SIZE);
     dsp_spec_fft_t *fft = NULL;
@@ -344,8 +371,13 @@ static bool read_case(const char *path, void *buf, size_t cap, size_t *len)
 static void run_golden(const char *root)
 {
     static uint8_t buf[CASE_BYTES_MAX];
+#if DSP_AFE_HOST_ALL_MODULES
+    const unsigned cases =
+        parity_run_block(root, "hpf", parity_hpf, read_case, buf, sizeof(buf), &s_failures);
+#else
     const unsigned cases =
         parity_run_block(root, "chain", parity_chain, read_case, buf, sizeof(buf), &s_failures);
+#endif
     printf("PARITY done %u cases\n", cases);
 }
 #endif
