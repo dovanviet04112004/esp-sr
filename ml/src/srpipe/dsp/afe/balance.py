@@ -64,8 +64,19 @@ def estimate(sessions: Sequence[mic_pair.PairStats]) -> Balance:
 
 
 def apply(bins_ch1: np.ndarray, gains: np.ndarray) -> np.ndarray:
-    """ch1 spectrum times the gains, bin by bin, in complex64 as the firmware computes it."""
-    return (np.asarray(bins_ch1, dtype=np.complex64) * np.asarray(gains, dtype=np.complex64)).astype(np.complex64)
+    """ch1 spectrum times the gains, bin by bin, over any leading axes of hops.
+
+    Four float32 products and two float32 sums per bin, each rounded once, in the order balance.c takes them;
+    a complex64 product would leave the rounding to whatever SIMD path numpy picks.
+    """
+    x = np.asarray(bins_ch1, dtype=np.complex64)
+    g = np.asarray(gains, dtype=np.complex64)
+    if x.shape[-1] != grid.N_BINS or g.shape != (grid.N_BINS,):
+        raise ValueError(f"bins and gains must end in {grid.N_BINS} bins")
+    out = np.empty(x.shape, dtype=np.complex64)
+    out.real = g.real * x.real - g.imag * x.imag
+    out.imag = g.real * x.imag + g.imag * x.real
+    return out
 
 
 def compensated(stats: mic_pair.PairStats, gains: np.ndarray) -> mic_pair.PairStats:

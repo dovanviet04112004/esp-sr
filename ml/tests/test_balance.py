@@ -71,13 +71,43 @@ def test_an_estimate_from_one_placement_checks_out_on_the_other() -> None:
     assert max(abs(b.level_diff_db) for b in check[1:]) < 0.1
 
 
+def complex_noise(rng: np.random.Generator, shape: tuple[int, ...]) -> np.ndarray:
+    return (rng.standard_normal(shape) + 1j * rng.standard_normal(shape)).astype(np.complex64)
+
+
 def test_apply_multiplies_bin_by_bin_in_complex64() -> None:
     rng = np.random.default_rng(5)
-    bins = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
-    gains = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
+    bins, gains = complex_noise(rng, (grid.N_BINS,)), complex_noise(rng, (grid.N_BINS,))
     out = balance.apply(bins, gains)
     assert out.dtype == np.complex64
-    assert out == pytest.approx(bins * gains, rel=1e-6)
+    assert out == pytest.approx(bins.astype(np.complex128) * gains, rel=1e-6)
+
+
+def test_apply_takes_hops_on_leading_axes() -> None:
+    rng = np.random.default_rng(6)
+    hops, gains = complex_noise(rng, (3, grid.N_BINS)), complex_noise(rng, (grid.N_BINS,))
+    out = balance.apply(hops, gains)
+    assert all(np.array_equal(out[h], balance.apply(hops[h], gains)) for h in range(3))
+
+
+def test_unit_gains_leave_the_bins_bit_exact() -> None:
+    bins = complex_noise(np.random.default_rng(7), (grid.N_BINS,))
+    assert np.array_equal(balance.apply(bins, np.ones(grid.N_BINS, dtype=np.complex64)), bins)
+
+
+def test_real_end_bins_stay_real_under_an_estimated_balance() -> None:
+    x0 = burst(seconds=2.0)
+    gains = balance.estimate([stats(x0, through(x0))]).gains
+    bins = complex_noise(np.random.default_rng(8), (grid.N_BINS,))
+    bins[0], bins[-1] = bins[0].real, bins[-1].real
+    out = balance.apply(bins, gains)
+    assert out[0].imag == 0 and out[-1].imag == 0
+
+
+@pytest.mark.parametrize(("bins_shape", "gains_shape"), [((256,), (257,)), ((257,), (256,)), ((257,), (2, 257))])
+def test_apply_refuses_spectra_off_the_grid(bins_shape: tuple[int, ...], gains_shape: tuple[int, ...]) -> None:
+    with pytest.raises(ValueError, match=str(grid.N_BINS)):
+        balance.apply(np.ones(bins_shape, dtype=np.complex64), np.ones(gains_shape, dtype=np.complex64))
 
 
 def test_spectra_off_the_firmware_grid_are_refused() -> None:
