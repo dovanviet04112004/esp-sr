@@ -746,7 +746,8 @@ contracts/
 │   ├── event.schema.json
 │   ├── device_cmd.schema.json
 │   ├── command_set.schema.json
-│   └── ota_manifest.schema.json
+│   ├── ota_manifest.schema.json
+│   └── responses.schema.json      #   khuôn của responses/vi.json — không phải payload MQTT
 ├── mqtt_topics.yaml               # topic + QoS + retained + chiều + schema
 ├── stream/frame.yaml              # khuôn nhị phân một khung của luồng tiếng TCP (§7.4)
 ├── commands/default_vi.json       # bộ lệnh mặc định, hợp lệ theo command_set.schema.json
@@ -1323,6 +1324,9 @@ nguyên tử và gọi hàm `*FromISR`. Không log, không `malloc`, không floa
 | `LENH` | `thu` + `sach` | `command` mỗi khung, **`wake` dừng** | nghỉ | 11–18 ms mỗi 32 ms, tối đa 3 s |
 | `DAP` | `thu` + `sach`; `aec` tiếp tục học | nghỉ | dựng rồi phát | nói chen khi máy đang nói nằm ngoài phạm vi (§9) |
 
+Trong code và payload, ba trạng thái mang tên tiếng Anh theo CLAUDE.md §3.1: `NGHE` = `LISTEN`,
+`LENH` = `COMMAND`, `DAP` = `REPLY` (`telemetry.schema.json`).
+
 Chính máy trạng thái này là thứ làm tải nhân 0 **không cộng dồn**: `wake`, `command`, `synth` không bao
 giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec` đạt, như một tuỳ chọn ở E14.
 
@@ -1576,7 +1580,7 @@ Chỉ để **thu dữ liệu và gỡ lỗi**. Tắt mặc định, không có 
 | Mục | Chốt |
 |---|---|
 | Ai nối ai | **board là khách**, nối tới `device/stream_host:stream_port` hoặc địa chỉ trong `SET_STREAM` — board không mở cổng nghe nào |
-| Khung | theo `contracts/stream/frame.yaml`: đầu 24 B (`magic 'SRST'`, `version`, `mode`, `seq` u32, `t_us` u64, `channels` u8, `format` u8, `samples` u16) rồi PCM `int16` xen kẽ |
+| Khung | theo `contracts/stream/frame.yaml`: đầu 24 B (`magic 'SRST'`, `version` u16, `mode` u16, `t_us` u64, `seq` u32, `channels` u8, `format` u8, `samples` u16 — mọi trường nằm đúng biên tự nhiên của nó) rồi PCM `int16` xen kẽ |
 | Nghẽn | `sach_task` ghi `sb_stream` với timeout 0; thiếu chỗ thì bỏ cả khung; `seq` cho `host` biết chỗ hở và ghi nó vào file json đi kèm WAV |
 
 | `mode` | Kênh | Băng thông |
