@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from srpipe.dsp.spec import stft
+from srpipe.dsp.spec import mel, stft
 from srpipe.generated import grid
 from srpipe.golden.gold import write_gold
 
@@ -20,6 +20,12 @@ GOLDEN_ROOT = REPO_ROOT / "contracts" / "golden"
 STFT_HOPS = 16
 NEGATIVE_HOPS = 4
 SEED = 20260926
+MEL_FRAMES = 8
+MEL_CASES = (
+    (mel.MelConfig(n_bands=40, f_min_hz=20.0, f_max_hz=7600.0, log_floor=1e-6), 13),
+    (mel.MelConfig(n_bands=80, f_min_hz=0.0, f_max_hz=8000.0, log_floor=1e-10), 20),
+    (mel.MelConfig(n_bands=24, f_min_hz=100.0, f_max_hz=4000.0, log_floor=1e-3), 24),
+)
 
 
 def _signals(rng: np.random.Generator, hops: int) -> dict[str, np.ndarray]:
@@ -60,11 +66,47 @@ def emit_stft(root: Path) -> list[Path]:
     return written
 
 
+def mel_case(cfg: mel.MelConfig, n_ceps: int, signal: np.ndarray) -> dict[str, np.ndarray]:
+    """The configuration as floats, the bins of each frame, and the log-mel and MFCC the reference gives."""
+    spectra = stft.analyze_signal(signal.astype(np.float32))
+    bank = mel.Mel(cfg)
+    log_mel = np.stack([bank.log(s) for s in spectra])
+    return {
+        "config": np.array([cfg.n_bands, cfg.f_min_hz, cfg.f_max_hz, cfg.log_floor, n_ceps], dtype=np.float32),
+        "bins": np.stack([spectra.real, spectra.imag], axis=-1).astype(np.float32),
+        "log_mel": log_mel,
+        "mfcc": np.stack([bank.mfcc(frame, n_ceps) for frame in log_mel]),
+    }
+
+
+def emit_mel(root: Path) -> list[Path]:
+    """Three configurations on noise, two tones and near silence, then a negative control one band off."""
+    rng = np.random.default_rng(SEED + 1)
+    n = MEL_FRAMES * grid.HOP_SAMPLES
+    t = np.arange(n) / grid.SAMPLE_RATE_HZ
+    inputs = (
+        rng.uniform(-0.5, 0.5, n),
+        0.4 * np.sin(2 * np.pi * 300.0 * t) + 0.3 * np.sin(2 * np.pi * 2500.0 * t),
+        rng.uniform(-1e-4, 1e-4, n),
+    )
+    written = []
+    for index, ((cfg, n_ceps), signal) in enumerate(zip(MEL_CASES, inputs, strict=True)):
+        path = root / "mel" / f"case_{index:03d}.gold"
+        write_gold(path, mel_case(cfg, n_ceps, signal))
+        written.append(path)
+    negative = mel_case(*MEL_CASES[0], rng.uniform(-0.5, 0.5, n))
+    negative["log_mel"] = np.roll(negative["log_mel"], -1, axis=1)
+    path = root / "mel" / "case_neg_000.gold"
+    write_gold(path, negative)
+    written.append(path)
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
-    for path in emit_stft(args.out):
+    for path in emit_stft(args.out) + emit_mel(args.out):
         print(path.relative_to(args.out) if path.is_relative_to(args.out) else path)
     return 0
 
