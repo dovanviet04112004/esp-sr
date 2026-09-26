@@ -35,6 +35,9 @@ chặn bằng E3, E5-T11 và bước 4 của mỗi module.
 **Dữ liệu đi sớm.** E11-T1 và E11-T2 bắt đầu ngay sau E1, không đợi Cửa 0: đó là việc dài nhất và không
 cần firmware.
 
+**Đích trước mắt là mốc demo MQTT (E13-T11)** trên board hiện có — hai INMP441, chưa có loa. Mốc này
+không bỏ task nào: E8, E9-T5, E10, E12 vẫn nằm nguyên và làm sau nó.
+
 ---
 
 ## E1 — Nền repo
@@ -59,14 +62,14 @@ Board B là board duy nhất có micro (KẾ HOẠCH §2.1). Mọi phép đo thu
 
 | ID | Task | Xong khi | Chặn bởi | V5 |
 |---|---|---|---|---|
-| E2-T1 | Đọc mã hai micro đang lắp; tra datasheet; nếu SNR dưới 62 dB thì ghi ADR: giữ để phát triển, thay ICS-43434 trước khi lấy số cho Cửa 1–3 | mã, datasheet, SNR ghi ở §2.1 và `hardware/datasheets/INDEX.md` | — | V5.0.1 |
+| E2-T1 | Micro là **2 × INMP441** (chủ dự án xác nhận 26/09). Tải datasheet; ghi SNR 61 dBA là giới hạn đã biết (KẾ HOẠCH §0.2 dòng 19) | datasheet và sha256 ở `hardware/datasheets/INDEX.md`; §2.1 khớp | — | V5.0.1 |
 | E2-T2 | Xác nhận bảng chân §2.2 trên board thật; viết `app_config.h` **cùng commit** với §2.2 | micro thu được ở GPIO 19/20/16 với console UART và `ESP_CONSOLE_SECONDARY_NONE` | E5-T3 | — |
 | E2-T3 | Đo khoảng cách hai micro, giữa tâm hai lỗ âm | số ghi vào `contracts/array.yaml` và `mic_array.md` | — | V5.0.1 |
 | E2-T4 | 🔬 Đo bốn chỉ tiêu của dàn: khoảng cách, chênh độ nhạy, chênh pha, SNR; cộng nền ồn khi Wi-Fi phát và khi tắt | bảng năm dòng ở `mic_array.md`, không dòng nào trống | E2-T3, E5-T12 | V5.0.1 |
 | E2-T5 | 🔬 Chọn `pcm_shift` (24 → 16 bit): tiếng nói to ở 10 cm không cắt đỉnh, nền ồn phòng yên vẫn trên bước lượng tử `int16` | giá trị ghi NVS `calib/pcm_shift` và `mic_array.md` kèm hai phép đo | E5-T4 | — |
 | E2-T6 | Hiệu chuẩn `balance`: loa ngoài chính diện 1 m, ồn trắng 30 s, thu bằng `capture` → hệ số phức mỗi vạch tính bằng `srpipe` → ghi NVS `calib/bal` qua `test_apps/calib`. Không cần module C của E7-T2 | chênh biên độ sau bù **dưới 1 dB** toàn băng 50 Hz – 8 kHz; chênh pha sau bù ghi thành số ở hai nhiệt độ phòng | E2-T4, E6-T1 | V5.0.2 |
 | E2-T7 | Chốt quy ước kênh và dấu (§2.3): micro nào là `ch0`, dấu của trễ, góc 0° ở đâu, `ref` là kênh thứ ba | vỗ tay phía `ch1` cho `τ` dương trên bản thu; §2.3 và `array.yaml` khớp | E2-T3 | V5.0.3 |
-| E2-T8 | Lắp MAX98357A + loa 4 Ω 3 W vào GPIO 17/18 (§2.2), loa trên đường trung trực của dàn | phát được một tông 1 kHz qua `drv_audio` TX | E10-T1 | V5.4.1 |
+| E2-T8 | Lắp MAX98357A + loa 4 Ω 3 W vào GPIO 17/18 (§2.2), loa trên đường trung trực của dàn. **Lắp khi tới E10**; mốc demo không cần | phát được một tông 1 kHz qua `drv_audio` TX với `APP_SPEAKER_ENABLE=y` | E10-T1 | V5.4.1 |
 | E2-T9 | 🔬 Đo trễ khối TX → RX bằng tiếng quét tần | trễ ghi NVS `calib/aec_delay`, đo lại năm lần lệch không quá một mẫu | E2-T8 | V5.4.1 |
 | E2-T10 | Khung `hardware/`: `README.md`, `datasheets/INDEX.md` (tên file ↔ URL ↔ sha256), ảnh board, luật ignore PDF | `git status` sạch sau khi thả PDF vào | E1-T1 | — |
 
@@ -108,7 +111,7 @@ Board B là board duy nhất có micro (KẾ HOẠCH §2.1). Mọi phép đo thu
 | E5-T3 | `bsp_board`: `app_config.h` theo §2.2 + chặn biên dịch khi console USB bật trong lúc BCLK ở GPIO 19 | bật `ESP_CONSOLE_USB_SERIAL_JTAG` thì dịch dừng với thông báo rõ | E5-T1 | — |
 | E5-T4 | `drv_audio` RX: I2S chuẩn, khe 32 bit × 2, 24 → 16 theo `pcm_shift`, đếm khung, callback tràn DMA; DMA 8 × 256 mẫu | 10 s thu hai kênh sống, `seq` liên tục, 0 tràn | E5-T3 | V5.0.9 |
 | E5-T5 | `sys_storage`: NVS §6.2 (chuỗi rỗng là vắng, bộ gieo có số hiệu), LittleFS, mmap ảnh model, `storage_format.h` có `static_assert` | test app: ghi, đọc, xoá từng namespace; mất điện giữa lúc ghi `set.json` không hỏng file | E5-T1 | — |
-| E5-T6 | `main`: `app_boot`, `app_tasks` (bảng tĩnh §5.2, `xTaskCreateStaticPinnedToCore`), `app_wiring` (§5.3), watchdog mọi task | boot in bảng task; `bench_mem` in watermark từng task | E5-T2 | V5.7.3 |
+| E5-T6 | `main`: `app_boot`, `app_tasks` (bảng tĩnh §5.2, `xTaskCreateStaticPinnedToCore`), `app_wiring` (§5.3), watchdog mọi task; `APP_SPEAKER_ENABLE` trong `Kconfig.projbuild`, mặc định n (§2.1) | boot in bảng task; `bench_mem` in watermark từng task; với `APP_SPEAKER_ENABLE=n` không có `noi_task` và TX không mở | E5-T2 | V5.7.3 |
 | E5-T7 | `app_console`: `wifi set`, `nvs get/set/del`, `calib run` | chỉ biên dịch ở `dev`/`bench`; `prod` không có symbol nào của nó | E5-T5 | — |
 | E5-T8 | `net_wifi` + `net_task`: chờ link tới khi có, lùi dần 1 → 30 s | rút router 5 phút rồi cắm lại, máy tự về không khởi động lại | E5-T6 | — |
 | E5-T9 | `net_mqtt`: URI từ NVS lùi về Kconfig, `status` retained + LWT, `heartbeat` tối thiểu | `mosquitto_sub` thấy `online`, rút điện thấy `offline` | E5-T8, E13-T5 | — |
@@ -243,6 +246,7 @@ Chạy song song từ lúc `net_mqtt` có ở E5.
 | E13-T8 | Cấp Wi-Fi bằng SoftAP (`network_provisioning`) — tuỳ chọn | board mới nhận Wi-Fi không cần cáp | E5-T8 | — |
 | E13-T9 | OTA firmware và model A/B có rollback — tuỳ chọn | ảnh hỏng tự quay về; khung mất lúc OTA được khai báo | E5-T5 | — |
 | E13-T10 | Profile `prod`: `mqtts://`, mã hoá NVS, không console, không luồng tiếng | `prod` từ chối URI `mqtt://`; symbol của `net_stream` và `app_console` vắng trong ảnh | E13-T5 | — |
+| E13-T11 | **Mốc demo MQTT** (KẾ HOẠCH §8): trên board hiện có, `APP_SPEAKER_ENABLE=n`, đường không gian trộn trần, `ns` sàn — nói từ đánh thức rồi một lệnh, sự kiện lên server, `host/live.py` hiện ra | 🔬 100 lượt liên tiếp không kẹt trạng thái; mỗi lượt có `event` thức và `event` lệnh đúng thứ tự; độ trễ từ lúc nói xong tới lúc `host` hiện ghi thành số; một phiên ghi lại để chiếu | E7-T4, E9-T1, E11-T14, E13-T2, E13-T5 | V5.7.4 |
 
 ---
 
