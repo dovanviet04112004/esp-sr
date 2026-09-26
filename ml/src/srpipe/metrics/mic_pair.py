@@ -6,6 +6,7 @@ firmware. A full-scale sine, the 0 dBFS of the INMP441 datasheet, sits 3.01 dB l
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -127,6 +128,25 @@ def pair_stats(
         q11 += np.sum(np.abs(f1[off]) ** 2, axis=0)
     freqs = np.fft.rfftfreq(frame_samples, 1.0 / grid.SAMPLE_RATE_HZ)
     return PairStats(s00, s11, s10, q00, q11, int(active.sum()), int(quiet.sum()), freqs)
+
+
+def pooled(parts: Sequence[PairStats]) -> PairStats:
+    """Several recordings on one frame grid summed as if they were one, e.g. two loudspeaker placements."""
+    if not parts:
+        raise ValueError("nothing to pool")
+    grid_freqs = parts[0].freqs_hz
+    if any(p.freqs_hz.shape != grid_freqs.shape for p in parts):
+        raise ValueError("recordings on different frame sizes cannot be pooled")
+    return PairStats(
+        s00=sum(p.s00 for p in parts),
+        s11=sum(p.s11 for p in parts),
+        s10=sum(p.s10 for p in parts),
+        q00=sum(p.q00 for p in parts),
+        q11=sum(p.q11 for p in parts),
+        active_frames=sum(p.active_frames for p in parts),
+        quiet_frames=sum(p.quiet_frames for p in parts),
+        freqs_hz=grid_freqs,
+    )
 
 
 def gcc_phat_delay(stats: PairStats, max_lag_samples: float, band_hz: tuple[float, float] = DELAY_BAND_HZ) -> PairDelay:
