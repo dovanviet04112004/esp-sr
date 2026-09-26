@@ -1,0 +1,23 @@
+menu "net_stream"
+
+    config NET_STREAM_ENABLE
+        bool "TCP audio stream to a host, for data capture and debugging"
+        default n
+        help
+            On in dev, bench and ci, off in prod: a device in a room must not
+            have a path that pushes raw speech out (KEHOACH 4.5.8, 7.5). Off
+            removes net_stream, luong_task and sb_stream from the image.
+
+    config NET_STREAM_CONNECT_TIMEOUT_MS
+        int "Give up a TCP connect after this many ms"
+        depends on NET_STREAM_ENABLE
+        range 200 10000
+        default 2000
+
+    config NET_STREAM_SEND_TIMEOUT_MS
+        int "Give up sending one frame after this many ms and drop the connection"
+        depends on NET_STREAM_ENABLE
+        range 50 5000
+        default 1000
+
+endmenu
