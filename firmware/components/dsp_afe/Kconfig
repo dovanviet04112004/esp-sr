@@ -1,0 +1,144 @@
+menu "dsp_afe"
+
+    config DSP_AFE_HPF_ENABLE
+        bool "hpf: Butterworth high-pass per microphone (KEHOACH 3.4)"
+        default n
+        help
+            Adds src/hpf.c to the build. The file is a neutral shell until E7-T1.
+
+    config DSP_AFE_HPF_CUTOFF_HZ
+        int "hpf cutoff (Hz)"
+        depends on DSP_AFE_HPF_ENABLE
+        range 10 4000
+        default 80
+
+    config DSP_AFE_AEC_ENABLE
+        bool "aec: multidelay echo canceller, needed for the MMR format (KEHOACH 3.5)"
+        default n
+        help
+            Adds src/aec.c to the build. The file is a neutral shell until E10-T4.
+
+    config DSP_AFE_AEC_PARTITIONS
+        int "aec partitions of GEN_GRID_HOP_SAMPLES each"
+        depends on DSP_AFE_AEC_ENABLE
+        range 1 16
+        default 8
+
+    config DSP_AFE_BALANCE_ENABLE
+        bool "balance: calibrated complex gain per bin for ch1 (KEHOACH 3.4)"
+        default n
+        help
+            Adds src/balance.c to the build. The file is a neutral shell until E7-T2.
+
+    config DSP_AFE_DOA_ENABLE
+        bool "doa: GCC-PHAT searched over an angle grid (KEHOACH 3.6)"
+        default n
+        help
+            Adds src/doa.c to the build. The file is a neutral shell until E8-T1.
+
+    config DSP_AFE_DOA_BAND_MIN_HZ
+        int "doa lowest frequency used (Hz)"
+        depends on DSP_AFE_DOA_ENABLE
+        range 0 7999
+        default 200
+
+    config DSP_AFE_DOA_BAND_MAX_HZ
+        int "doa highest frequency used (Hz), 0 for the spatial alias frequency of array.yaml"
+        depends on DSP_AFE_DOA_ENABLE
+        range 0 8000
+        default 0
+
+    config DSP_AFE_DOA_GRID_STEP_DEG
+        int "doa angle grid step (degrees)"
+        depends on DSP_AFE_DOA_ENABLE
+        range 1 30
+        default 2
+
+    config DSP_AFE_DOA_SMOOTH_TAU_MS
+        int "doa cross-spectrum smoothing time constant (ms)"
+        depends on DSP_AFE_DOA_ENABLE
+        range 16 10000
+        default 200
+
+    config DSP_AFE_GSC_ENABLE
+        bool "gsc: two-microphone sidelobe canceller steered by doa (KEHOACH 3.7)"
+        default n
+        help
+            Adds src/gsc.c to the build, for dsp_afe_config_t.spatial = DSP_AFE_SPATIAL_GSC.
+            The file is a neutral shell until E8-T2.
+
+    config DSP_AFE_GSC_STEP_SIZE_PPM
+        int "gsc NLMS step size (parts per million)"
+        depends on DSP_AFE_GSC_ENABLE
+        range 1 1000000
+        default 50000
+
+    config DSP_AFE_GSC_LEAKAGE_PPM
+        int "gsc weight leakage (parts per million)"
+        depends on DSP_AFE_GSC_ENABLE
+        range 0 1000000
+        default 100
+
+    config DSP_AFE_BSS_ENABLE
+        bool "bss: online AuxIVA for two sources (KEHOACH 3.8)"
+        default n
+        help
+            Adds src/bss.c to the build, for dsp_afe_config_t.spatial = DSP_AFE_SPATIAL_BSS.
+            The file is a neutral shell until E8-T3.
+
+    config DSP_AFE_BSS_FORGET_TAU_MS
+        int "bss covariance memory (ms)"
+        depends on DSP_AFE_BSS_ENABLE
+        range 100 10000
+        default 1000
+
+    config DSP_AFE_NS_OMLSA_ENABLE
+        bool "ns_omlsa: OM-LSA plus IMCRA floor of the ns slot (KEHOACH 3.9)"
+        default n
+        help
+            Adds src/ns_omlsa.c to the build; dsp_afe_config_t.ns = NULL then selects it.
+            The file is a neutral shell until E9-T1.
+
+    config DSP_AFE_VAD_ENABLE
+        bool "vad: two-class GMM on six sub-bands (KEHOACH 3.10)"
+        default n
+        help
+            Adds src/vad.c to the build. The file is a neutral shell until E7-T3.
+
+    config DSP_AFE_VAD_HANGOVER_MS
+        int "vad hangover after the last speech hop (ms)"
+        depends on DSP_AFE_VAD_ENABLE
+        range 0 2000
+        default 240
+
+    config DSP_AFE_AGC_ENABLE
+        bool "agc: slow level gain plus look-ahead limiter (KEHOACH 3.10)"
+        default n
+        help
+            Adds src/agc.c to the build. The file is a neutral shell until E7-T4.
+
+    config DSP_AFE_AGC_UP_DB_PER_S
+        int "agc gain rise rate (dB/s)"
+        depends on DSP_AFE_AGC_ENABLE
+        range 1 60
+        default 3
+
+    config DSP_AFE_AGC_DOWN_DB_PER_S
+        int "agc gain fall rate (dB/s)"
+        depends on DSP_AFE_AGC_ENABLE
+        range 1 60
+        default 6
+
+    config DSP_AFE_AGC_LIMIT_DBFS
+        int "agc limiter ceiling (dBFS)"
+        depends on DSP_AFE_AGC_ENABLE
+        range -20 0
+        default -3
+
+    config DSP_AFE_AGC_LOOKAHEAD_MS
+        int "agc limiter look-ahead (ms)"
+        depends on DSP_AFE_AGC_ENABLE
+        range 0 16
+        default 4
+
+endmenu
