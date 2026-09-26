@@ -15,6 +15,7 @@
 #include "gen_topics.h"
 #include "net_mqtt.h"
 #include "sdkconfig.h"
+#include "svc_front.h"
 #include "sys_storage.h"
 
 #define DMA_DESC_NUM 8       // 128 ms of hops outlasts one flash erase (KEHOACH 5.5)
@@ -73,6 +74,9 @@ esp_err_t app_boot(void)
     log_heap("audio");
     load_models();
     log_heap("models");
+    const svc_front_config_t front = {.n_channels = drv_audio_channels()};
+    ESP_RETURN_ON_ERROR(svc_front_init(&front), TAG, "front end");
+    log_heap("front");
 
     char device_id[GEN_TOPIC_DEVICE_ID_MAX + 1];
     ESP_RETURN_ON_ERROR(sys_storage_device_id(device_id, sizeof(device_id)), TAG, "device id");

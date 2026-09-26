@@ -21,6 +21,7 @@
 #include "net_mqtt.h"
 #include "net_wifi.h"
 #include "sdkconfig.h"
+#include "svc_front.h"
 #include "sys_storage.h"
 
 #define CORE_FRAME 1    // hard 16 ms deadline, nothing else runs here (KEHOACH 5.1)
@@ -106,6 +107,22 @@ static void thu_task(void *arg)
     }
 }
 
+static void publish_clean(const app_wiring_t *w, const dsp_afe_frame_t *clean)
+{
+    // Zero timeout: a full q_clean drops the hop, never stalls core 1 (KEHOACH 5.3).
+    const bool queued = xQueueSend(w->clean, clean, 0) == pdTRUE;
+    taskENTER_CRITICAL(w->afe_stats_lock);
+    w->afe_stats->hops++;
+    w->afe_stats->clean_dropped += queued ? 0u : 1u;
+    w->afe_stats->doa_deg = clean->doa_deg;
+    w->afe_stats->doa_conf = clean->doa_conf;
+    w->afe_stats->vad = clean->vad;
+    w->afe_stats->level_dbfs = clean->level_dbfs;
+    w->afe_stats->gain_db = clean->gain_db;
+    w->afe_stats->flags = clean->flags;
+    taskEXIT_CRITICAL(w->afe_stats_lock);
+}
+
 static void sach_task(void *arg)
 {
     const app_wiring_t *w = arg;
@@ -113,8 +130,10 @@ static void sach_task(void *arg)
     for (;;) {
         uint8_t slot = 0;
         if (xQueueReceive(w->frame, &slot, pdMS_TO_TICKS(FRAME_WAIT_MS)) == pdTRUE) {
-            count_in_stats(w, &w->afe_stats->hops);
+            dsp_afe_frame_t clean;
+            const esp_err_t err = svc_front_step(w->pool[slot].pcm, w->pool[slot].seq, &clean);
             return_slot(w, slot);
+            if (err == ESP_OK) { publish_clean(w, &clean); }
         }
         esp_task_wdt_reset();
     }
