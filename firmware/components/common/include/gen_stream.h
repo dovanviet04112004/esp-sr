@@ -17,6 +17,7 @@ typedef enum {
     GEN_STREAM_MODE_RAW = 2,
     GEN_STREAM_MODE_RAW_REF = 3,
     GEN_STREAM_MODE_RAW_REF_CLEAN = 4,
+    GEN_STREAM_MODE_RAW_CLEAN = 5,
 } gen_stream_mode_t;
 
 typedef enum {
@@ -55,6 +56,7 @@ static inline uint8_t gen_stream_mode_channels(gen_stream_mode_t mode)
     case GEN_STREAM_MODE_RAW: return 2;
     case GEN_STREAM_MODE_RAW_REF: return 3;
     case GEN_STREAM_MODE_RAW_REF_CLEAN: return 4;
+    case GEN_STREAM_MODE_RAW_CLEAN: return 3;
     default: return 0;
     }
 }
