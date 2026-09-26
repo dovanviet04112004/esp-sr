@@ -5,8 +5,33 @@ trung bình và đỉnh. Số ở `budget.md` là bản rút gọn của các m�
 
 ## 1. `dl_fft` so với `esp-dsp` (E6-T3)
 
-| Phép | Điểm | Kiểu | `dl_fft` µs | `esp-dsp` µs | RAM B |
-|---|---|---|---|---|---|
+Board B, `dsp_spec/test_apps/unit` dựng `-O2` (`COMPILER_OPTIMIZATION_PERF`, như profile `bench`), IDF 6.0.2, `dl_fft` 0.7.0, `esp-dsp` 1.8.2, @e0ed592. Trung bình 1000 lượt sau một lượt làm nóng, qua lớp bọc của `dsp_spec` (gồm cả bước xếp lại vạch; với `esp-dsp` gồm cả bước tách phổ thực của repo).
+
+| Phép | Điểm | Kiểu | `dl_fft` µs | `esp-dsp` µs |
+|---|---|---|---|---|
+| thuận | 256 | f32 | 56,2 | 70,0 |
+| nghịch | 256 | f32 | 67,2 | 75,9 |
+| thuận | 512 | f32 | **118,2** | 148,9 |
+| nghịch | 512 | f32 | **135,9** | 160,7 |
+| thuận | 1024 | f32 | 259,6 | 315,5 |
+| nghịch | 1024 | f32 | 297,2 | 339,1 |
+| STFT một bước (cửa sổ + thuận) | 512 | f32 | 143,3 | 174,1 |
+| iSTFT một bước (nghịch + chồng cộng) | 512 | f32 | 164,7 | 189,5 |
+| log-mel 40 dải trên phổ có sẵn | — | f32 | 61,6 | 61,6 |
+| thuận, gọi thẳng thư viện | 512 | int16 | 13,6 | 32,9 (FFT phức 256 + đảo bit, chưa tách phổ thực) |
+
+| Độ chính xác, 512 điểm | `dl_fft` | `esp-dsp` |
+|---|---|---|
+| sai số lớn nhất so với DFT `double`, trên đỉnh phổ | 1,2e-7 | 8,1e-7 |
+| sai số lớn nhất của nghịch(thuận) | 1,2e-7 | 9,5e-7 |
+| STFT phân tích rồi tổng hợp, 64 bước ồn trắng | 136,3 dB | 120,1 dB |
+
+| RAM nội, 512 điểm | `dl_fft` | `esp-dsp` |
+|---|---|---|
+| vùng làm việc người gọi cấp | 2 080 B | 4 144 B |
+| bảng thư viện tự cấp ở lần init đầu | 6 244 B | 1 988 B (bảng xoay pha nằm sẵn trong flash) |
+
+Một khung của chuỗi (§3.1: hai phân tích, một tổng hợp) tốn 2 × 143,3 + 164,7 = **451 µs ≈ 2,8% một nhân** với `dl_fft`, so với ~510 µs ước từ số của hãng. Quyết định ở ADR-0002.
 
 ## 2. Thay `set.json` qua `sys_storage_write_file` (E5-T5)
 
