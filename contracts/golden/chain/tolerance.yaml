@@ -1,0 +1,29 @@
+# C dsp_afe, default build with every module off, against srpipe.dsp.afe.chain (KEHOACH 3.14, E3-T4).
+# The mean of two int16 samples with an odd sum lands exactly on .5, where float32 noise of the two FFTs
+# decides the rounding: pcm may differ by 1 LSB. Worst case 77.9 dB on board B, 78.1 on the host. Integer
+# figures must match, level_dbfs within one rounding step. case_neg_* must fall outside these limits.
+tensors:
+  pcm:
+    max_abs: 1.0
+    min_snr_db: 60.0
+  seq:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  doa_deg:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  doa_conf:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  vad:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  level_dbfs:
+    max_abs: 1.0
+    min_snr_db: 0.0
+  gain_db:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  flags:
+    max_abs: 0.0
+    min_snr_db: 0.0
