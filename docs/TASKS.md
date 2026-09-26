@@ -241,7 +241,7 @@ Chạy song song từ lúc `net_mqtt` có ở E5.
 | E13-T2 | `host/mqtt_rx.py` + `live.py` | xem trực tiếp hướng, cờ tiếng nói, mức, sự kiện; payload sai schema bị ghi lại | E13-T1 | — |
 | E13-T3 | `host/stream_rx.py` + `session.py`: phiên thu có nhãn, mã người nói, mã phiếu | một phiên ra đúng khuôn KẾ HOẠCH §4.4.1 ở `raw/device/board_b/<phiên>/`: WAV từng kênh + `session.json` + `gaps.txt`, và một dòng mới trong `manifests/device/board_b.csv` | E13-T1 | V5.5.6 |
 | E13-T4 | `host/score.py` gọi `srpipe.metrics` | chấm một phiên đã thu ra bảng giống `make report` | E13-T3, E4-T5 | — |
-| E13-T5 | `deploy/`: EMQX 6.3.1 trong Docker (KẾ HOẠCH §4.7), ACL theo `deviceId`, `gen_certs.sh` | `docker compose up` rồi board nối được; board này không đọc được topic của board khác | E1-T1 | — |
+| ~~E13-T5~~ | **Xong 26/09.** `deploy/`: `sr-emqx` (EMQX 6.3.1 trong Docker, KẾ HOẠCH §4.7), 1883 ra LAN, dashboard `127.0.0.1:18084`, retained xuống đĩa; mật khẩu từ bảng user nội bộ nạp từ `users.csv` (gitignore); `acl.conf` theo `deviceId` + `srhost`; `gen_certs.sh` cho mqtts ở prod; `make broker-up` đòi đủ `.env` và `users.csv` | 13/13 ca kiểm bằng `paho-mqtt` với danh tính board: sai mật khẩu bị từ chối, board này không đọc `down/` và không ghi `up/` của board kia, `srhost` không giả `up/`; retained còn sau `docker restart`. Board thật nối ở E5-T9 | E1-T1 | — |
 | E13-T6 | 🔬 Băng thông ở chế độ thường | **dưới 1 KB/s**, không gửi tiếng (§7.3) | E5-T9, E14-T4 | V5.7.4 |
 | E13-T7 | Lệnh xuống: `SET_CONFIG`, `SET_STREAM`, `SPEAK`, `CALIBRATE`, `REBOOT` | mỗi lệnh có một phép kiểm từ `host` | E5-T9 | — |
 | E13-T8 | Cấp Wi-Fi bằng SoftAP (`network_provisioning`) — tuỳ chọn | board mới nhận Wi-Fi không cần cáp | E5-T8 | — |
