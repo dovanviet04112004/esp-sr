@@ -1,6 +1,7 @@
 # C dsp_afe hpf, the hand-written transposed biquad, against srpipe.dsp.afe.hpf (KEHOACH 3.4, E7-T1, ADR-0004).
-# Both sides take the same float32 steps in the same order: the host and board B match bit for bit. The limits
-# only leave room for a compiler that fuses a multiply-add. case_neg_* must fall outside these limits.
+# Both sides take the same float32 steps in the same order and dsp_afe builds without contraction (ADR-0006): the
+# host and board B match bit for bit. A build that fuses a multiply-add strays by 2.0e-6 and must fail here, as
+# must case_neg_*.
 tensors:
   output:
     max_abs: 1.0e-6
