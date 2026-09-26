@@ -11,6 +11,8 @@
 #include "esp_console.h"
 #include "esp_log.h"
 #include "esp_wifi_types.h"
+#include "sdkconfig.h"
+#include "svc_report.h"
 #include "sys_storage.h"
 
 #define REPL_STACK_BYTES 4096
@@ -22,6 +24,7 @@
 #define SSID_MAX_BYTES sizeof(((wifi_sta_config_t *)NULL)->ssid)
 #define PASS_MAX_BYTES (sizeof(((wifi_sta_config_t *)NULL)->password) - 1)
 #define PASS_MIN_BYTES 8 // WPA2 passphrase, IEEE 802.11i
+#define STREAM_HOST_BYTES 64
 
 typedef enum {
     TYPE_STR = 0,
@@ -204,6 +207,63 @@ static int nvs_cmd(int argc, char **argv)
     return 1;
 }
 
+#if CONFIG_NET_STREAM_ENABLE
+static struct {
+    struct arg_int *mode;
+    struct arg_int *seconds;
+    struct arg_end *end;
+} s_stream_args;
+
+static int stream_cmd(int argc, char **argv)
+{
+    if (arg_parse(argc, argv, (void **)&s_stream_args) != 0) {
+        arg_print_errors(stdout, s_stream_args.end, argv[0]);
+        return 1;
+    }
+    const int mode = s_stream_args.mode->ival[0];
+    if (mode == 0) {
+        svc_report_stream_stop();
+        printf("stream off\n");
+        return 0;
+    }
+    char host[STREAM_HOST_BYTES];
+    uint16_t port = 0;
+    if (sys_storage_get_str(STORAGE_NS_DEVICE, STORAGE_KEY_STREAM_HOST, host, sizeof(host)) != ESP_OK ||
+        sys_storage_get_u16(STORAGE_NS_DEVICE, STORAGE_KEY_STREAM_PORT, &port) != ESP_OK) {
+        printf("set device/stream_host and device/stream_port (-t u16) first\n");
+        return 1;
+    }
+    const int seconds = s_stream_args.seconds->count > 0 ? s_stream_args.seconds->ival[0] : 0;
+    if (mode < 0 || mode > UINT8_MAX || seconds < 0) {
+        printf("mode is 0..4 and seconds is not negative\n");
+        return 1;
+    }
+    const esp_err_t err = svc_report_stream_start((uint8_t)mode, host, port, (uint32_t)seconds);
+    printf("stream mode %d to %s:%u: %s\n", mode, host, (unsigned)port, esp_err_to_name(err));
+    return err == ESP_OK ? 0 : 1;
+}
+
+static esp_err_t register_stream(void)
+{
+    s_stream_args.mode =
+        arg_int1(NULL, NULL, "<mode>", "0 off, 1 clean, 2 ch0 ch1, 3 with ref, 4 with ref and clean");
+    s_stream_args.seconds = arg_int0(NULL, NULL, "<seconds>", "how long; the maximum when left out");
+    s_stream_args.end = arg_end(2);
+    const esp_console_cmd_t stream = {
+        .command = "stream",
+        .help = "Open or close the audio stream to device/stream_host:stream_port (KEHOACH 7.4)",
+        .func = stream_cmd,
+        .argtable = &s_stream_args,
+    };
+    return esp_console_cmd_register(&stream);
+}
+#else
+static esp_err_t register_stream(void)
+{
+    return ESP_OK;
+}
+#endif
+
 static esp_err_t register_commands(void)
 {
     s_wifi_args.action = arg_str1(NULL, NULL, "set", "the only action");
@@ -230,7 +290,8 @@ static esp_err_t register_commands(void)
         .func = nvs_cmd,
         .argtable = &s_nvs_args,
     };
-    return esp_console_cmd_register(&nvs);
+    ESP_RETURN_ON_ERROR(esp_console_cmd_register(&nvs), TAG, "nvs");
+    return register_stream();
 }
 
 esp_err_t app_console_start(void)
