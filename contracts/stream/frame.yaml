@@ -19,5 +19,6 @@ modes:
   - {id: 2, name: raw, channels: [ch0, ch1]}
   - {id: 3, name: raw_ref, channels: [ch0, ch1, ref]}
   - {id: 4, name: raw_ref_clean, channels: [ch0, ch1, ref, clean]}
+  - {id: 5, name: raw_clean, channels: [ch0, ch1, clean]}
 formats:
   - {id: 0, name: s16le, bytes: 2}
