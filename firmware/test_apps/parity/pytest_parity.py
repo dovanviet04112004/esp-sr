@@ -50,7 +50,7 @@ def judge(lines: list[str], golden: Path = GOLDEN) -> list[str]:
 def test_parity(dut) -> None:
     lines = []
     while not lines or not DONE.search(lines[-1]):
-        lines.append(dut.expect(re.compile(rb"PARITY [^\r\n]+"), timeout=120).group(0).decode())
+        lines.append(dut.expect(re.compile(rb"PARITY [^\r\n]+(?=\r?\n)"), timeout=120).group(0).decode())
     assert judge(lines) == []
 
 
