@@ -6,6 +6,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "jsonschema>=4.23",
     "paho-mqtt>=2.1",
+    "pyserial>=3.5",
 ]
 
 [project.optional-dependencies]
