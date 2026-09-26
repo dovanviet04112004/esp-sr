@@ -18,6 +18,9 @@ ACTIVE_ABOVE_FLOOR_DB = 10.0
 QUIET_WITHIN_FLOOR_DB = 3.0
 DELAY_BAND_HZ = (200.0, 7000.0)
 UPSAMPLE = 32
+FIT_COHERENCE_MIN = 0.5
+FIT_COHERENCE_CAP = 0.999999
+FIT_ROUNDS = 2
 PAIR_BANDS_HZ = ((50, 100), (100, 200), (200, 400), (400, 800), (800, 1600), (1600, 3200), (3200, 6400), (6400, 8000))
 PCM_FULL_SCALE = 32768.0
 CHUNK_FRAMES = 2048
@@ -147,22 +150,28 @@ def gcc_phat_delay(stats: PairStats, max_lag_samples: float, band_hz: tuple[floa
     return PairDelay((lags[best] + offset) / UPSAMPLE, float(values[best]), stats.active_frames)
 
 
-def linear_phase_fit(stats: PairStats, band_hz: tuple[float, float] = (200.0, array.ALIAS_HZ)) -> tuple[float, float]:
+def linear_phase_fit(
+    stats: PairStats, start_tau_samples: float = 0.0, band_hz: tuple[float, float] = (200.0, array.ALIAS_HZ)
+) -> tuple[float, float]:
     """Pure delay and constant phase that best explain the cross-spectrum phase below spatial aliasing.
 
-    Returns (tau_samples, phase0_deg) of phase(f) = phase0 + 2 pi f tau / fs, fitted on unwrapped phase with
-    coherence as weight; it separates where the source stands from the phase of the parts.
+    Returns (tau_samples, phase0_deg) of phase(f) = phase0 + 2 pi f tau / fs. The phase is turned back by
+    start_tau_samples first so the residual never wraps, then fitted on coherent bins with weights 1/variance.
     """
     stats.need_source()
     coherence = stats.coherence()
-    pick = (stats.freqs_hz >= band_hz[0]) & (stats.freqs_hz <= band_hz[1]) & np.isfinite(coherence)
+    pick = (stats.freqs_hz >= band_hz[0]) & (stats.freqs_hz <= band_hz[1]) & (coherence >= FIT_COHERENCE_MIN)
     if pick.sum() < 2:
-        raise ValueError(f"fewer than two bins in {band_hz} Hz")
+        raise ValueError(f"fewer than two bins with coherence >= {FIT_COHERENCE_MIN} in {band_hz} Hz")
     omega = 2.0 * np.pi * stats.freqs_hz[pick] / grid.SAMPLE_RATE_HZ
-    phase = np.unwrap(np.angle(stats.s10[pick]))
-    weight = np.sqrt(coherence[pick])
+    gamma2 = np.minimum(coherence[pick], FIT_COHERENCE_CAP)
+    weight = np.sqrt(gamma2 / (1.0 - gamma2))
     design = np.column_stack([np.ones_like(omega), omega]) * weight[:, None]
-    (phase0, tau), *_ = np.linalg.lstsq(design, phase * weight, rcond=None)
+    tau, phase0 = start_tau_samples, 0.0
+    for _ in range(FIT_ROUNDS):
+        residual = np.angle(stats.s10[pick] * np.exp(-1j * omega * tau))
+        (phase0, step), *_ = np.linalg.lstsq(design, residual * weight, rcond=None)
+        tau += step
     return float(tau), float(np.degrees(phase0))
 
 

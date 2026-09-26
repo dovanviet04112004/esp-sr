@@ -92,3 +92,19 @@ def test_chunking_leaves_every_sum_unchanged() -> None:
     assert (pieces.active_frames, pieces.quiet_frames) == (whole.active_frames, whole.quiet_frames)
     for name in ("s00", "s11", "s10", "q00", "q11"):
         assert np.allclose(getattr(pieces, name), getattr(whole, name), rtol=1e-12, atol=0)
+
+
+def test_the_phase_line_ignores_bins_where_the_channels_do_not_cohere() -> None:
+    x0 = burst(seconds=6.0)
+    x1 = shifted(x0, 1.5, gain=0.5, phase_deg=20.0)
+    rng = np.random.default_rng(5)
+    hiss = np.fft.rfft(rng.standard_normal(len(x1)))
+    hiss[np.fft.rfftfreq(len(x1), 1 / FS) < 1500] = 0
+    hiss = np.fft.irfft(hiss, n=len(x1))
+    hiss[:FS] = hiss[-FS:] = 0.0
+    noisy = x1 + 0.05 * hiss
+    stats = mic_pair.pair_stats(x0, noisy)
+    assert stats.coherence()[stats.freqs_hz > 2000].mean() < 0.6
+    start = mic_pair.gcc_phat_delay(stats, max_lag_samples=4.0).tau_samples
+    tau, phase0 = mic_pair.linear_phase_fit(stats, start)
+    assert (tau, phase0) == pytest.approx((1.5, 20.0), abs=0.1)
