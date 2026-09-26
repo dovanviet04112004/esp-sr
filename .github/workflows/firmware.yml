@@ -50,6 +50,7 @@ jobs:
         if: steps.guard.outputs.ready == 'true'
         shell: bash
         run: |
+          . "$IDF_PATH/export.sh"
           for c in lang_vi ai_engine; do
             cmake -S firmware/components/$c/test_apps/host -B build_host_$c -DCMAKE_BUILD_TYPE=Release
             cmake --build build_host_$c -j
