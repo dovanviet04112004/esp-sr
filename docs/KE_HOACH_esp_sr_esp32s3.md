@@ -62,6 +62,8 @@ Bảng này tồn tại cho tới khi TỔNG QUAN được sửa theo (E1-T9). S
 | 16 | `feed` nhận hai kênh xen kẽ | Hai **hoặc ba** kênh theo chuỗi định dạng `"MM"` / `"MMR"`, chốt ngay trong hợp đồng dù AEC làm sau | Đổi hợp đồng sau khi đã có module là đúng cái bẫy TỔNG QUAN §5.2 cảnh báo | §4.5.5 |
 | 17 | Mỗi component có `CHANGELOG.md` | Không. `idf_component.yml` chỉ để khai phụ thuộc | Lịch sử nằm ở git (CLAUDE.md §8 luật 7). Component nội bộ không phát hành lên registry | §4.5.3 |
 | 18 | Tham chiếu chéo | Sửa: bảng §3 dòng `synth` trỏ `V5.7.1` → **`V5.6.1`**; §3.2 trỏ `V5.6.1` → **`V5.5.2`**; §7 đánh số 6.1–6.3 → **7.1–7.3** | Lỗi đánh số | — |
+| 19 | Mốc micro: SNR ≥ 62 dB | Board dùng **2 × INMP441**, SNR 61 dBA theo datasheet. Chấp nhận, ghi là giới hạn đã biết, **không chặn Cửa 0** | Chủ dự án chốt dùng micro đang lắp; SNR chỉ hạ trần của tầm thu, không phá chuỗi | §2.1 |
+| 20 | Một đường đi thẳng tới app trọn vẹn ở pha C | Thêm **mốc demo MQTT** trước pha C: chuỗi nghe → `wake` → `command` → sự kiện lên server, không cần loa. Không bỏ module nào | Board hiện chưa có loa; demo chứng minh cả đường nghe và đường gửi về máy tính sớm nhất có thể | §8 |
 
 Mã task: TỔNG QUAN dùng `V5.x.y`; `docs/TASKS.md` dùng `E<epic>-T<số>` như mọi repo của chủ dự án, và
 có cột ánh xạ về mã `V5.x.y`.
@@ -147,18 +149,22 @@ Dự án chạy trên **board B** — board duy nhất đã có micro, nên mọ
 | Flash / PSRAM | 16 MB / 8 MB (AP_3v3, octal) |
 | Cầu nạp | CH340 (`1a86:7523`) → `/dev/ttyUSB0`; console là **UART0** |
 | MAC cơ sở | `34:85:18:8f:7a:70` → `deviceId` mặc định `sr-3485188f7a70` (§6.2) |
-| Micro | **2 micro I2S, đã lắp**, chung một dây dữ liệu; mã linh kiện chưa ghi 🔬 |
-| Loa, ampli | **chưa có** — cần cho `aec` (E10), `synth` (E12) và mọi câu trả lời bằng tiếng |
+| Micro | **2 × INMP441, đã lắp**, chung một dây dữ liệu I2S |
+| Loa, ampli | **chưa lắp**. Mốc demo (§8) chỉ gửi kết quả lên server qua MQTT nên chưa cần; cần từ `aec` (E10) và `synth` (E12) |
 | Camera | không |
 
-**Mã micro phải đọc ra trước mọi phép đo** (E2-T1). Nếu là INMP441 thì SNR của nó là 61 dBA, dưới mốc
-62 dB mà hướng dẫn phần cứng của Espressif đặt cho chuỗi này (TỔNG QUAN V5.0). Board vẫn dùng để phát
-triển; nếu phép đo V5.0.1 xác nhận SNR trượt mốc thì thay cặp ICS-43434 (cùng cách đấu, cùng chân chọn
-kênh, SNR 65 dBA) trước khi lấy số cho Cửa 1–3, và ghi ADR.
+**INMP441 dưới mốc SNR 1 dB.** Datasheet ghi SNR 61 dBA, độ nhạy −26 dBFS ở 94 dB SPL, ra 24 bit trong
+khe 32 bit; hướng dẫn phần cứng của Espressif đặt mốc 62 dB cho chuỗi này (TỔNG QUAN V5.0). Chủ dự án
+chốt dùng cặp đang lắp. SNR không sửa được bằng phần mềm, nên đây là **giới hạn đã biết**: E2-T4 đo SNR
+thật của từng micro, E14-T8 đo tầm thu thật. Thay bằng ICS-43434 (cùng cách đấu, cùng chân chọn kênh,
+SNR 65 dBA) chỉ xét lại nếu Cửa 2 hoặc Cửa 3 trượt vì tầm thu.
 
-**Thêm ampli MAX98357A và loa 4 Ω 3 W** vào hai chân trống của §2.2, dùng chung BCLK và WS với micro
-để tham chiếu đồng bộ mẫu (§2.4). Phương án có vòng lặp phần cứng (ESP32-S3-BOX-3 hay Korvo-2, ES7210
-lấy một kênh từ đầu ra DAC) chỉ xét lại nếu E10 chứng minh tham chiếu số không đủ.
+**Thêm ampli MAX98357A và loa 4 Ω 3 W khi tới E10**, vào hai chân dành sẵn ở §2.2, dùng chung BCLK và
+WS với micro để tham chiếu đồng bộ mẫu (§2.4). Chưa lắp thì chuỗi chạy với định dạng `"MM"` và mọi khối
+trừ `aec` và đường phát vẫn làm và đo được. Công tắc là `APP_SPEAKER_ENABLE` trong `Kconfig.projbuild`,
+mặc định **n** cho tới E10: tắt thì `drv_audio` không mở chiều TX, `app_tasks.c` không tạo `noi_task`,
+và `svc_dialog` bỏ bước phát nhưng vẫn gửi sự kiện. Phương án có vòng lặp phần cứng (ESP32-S3-BOX-3 hay Korvo-2,
+ES7210 lấy một kênh từ đầu ra DAC) chỉ xét lại nếu E10 chứng minh tham chiếu số không đủ.
 
 **16 MB flash và 8 MB PSRAM là đủ**: bảng phân vùng §6.1 cần 16 MB, `command` và `synth` cần PSRAM.
 Đổi lại, chân 33–37 bị PSRAM octal chiếm.
@@ -173,8 +179,8 @@ sửa cùng một commit (CLAUDE.md §1.3).
 | I2S0 BCLK (SCK) | **19** | đã lắp | chung cho RX và TX: đây là thứ làm tham chiếu đồng bộ mẫu (§2.4). **Trùng USB D−** |
 | I2S0 WS (LRCL) | **20** | đã lắp | chung cho RX và TX. **Trùng USB D+** |
 | I2S0 DIN (SD) — hai micro chung dây | **16** | đã lắp | micro nối L/R xuống GND ra khe trái, lên VDD ra khe phải; micro nào là `ch0` xác nhận ở E2-T7 |
-| I2S0 DOUT → MAX98357A DIN | 17 | đề xuất 🔬 | chân trống, cạnh GPIO 16 |
-| MAX98357A SD — tắt ampli | 18 | đề xuất 🔬 | kéo xuống là ampli im và bớt dòng tĩnh |
+| I2S0 DOUT → MAX98357A DIN | 17 | dành sẵn, lắp ở E10 🔬 | chân trống, cạnh GPIO 16; không nối gì khác vào |
+| MAX98357A SD — tắt ampli | 18 | dành sẵn, lắp ở E10 🔬 | kéo xuống là ampli im và bớt dòng tĩnh |
 | LED trạng thái và riêng tư | 21 | đề xuất 🔬 | nếu board có sẵn LED thì dùng chân của nó; sáng khi luồng tiếng đang mở (§7.5) |
 | Nút | 0 | có sẵn | nút BOOT, chỉ đọc sau khi đã khởi động |
 | Console | 43 / 44 | có sẵn | UART0 qua CH340 |
@@ -263,8 +269,8 @@ face attendance.
 |---|---|
 | ESP32-S3 | Datasheet, Technical Reference Manual (chương I2S, GDMA, USB-Serial-JTAG, bộ nhớ) |
 | ESP32-S3-WROOM-1 | Datasheet module (bản N16R8) |
-| Micro đang lắp | datasheet theo mã đọc ra ở E2-T1 |
-| ICS-43434 | Datasheet TDK InvenSense — phương án thay |
+| INMP441 | Datasheet TDK InvenSense — micro đang lắp |
+| ICS-43434 | Datasheet TDK InvenSense — phương án thay nếu tầm thu trượt cửa |
 | MAX98357A | Datasheet Analog Devices |
 | CH340 | Datasheet WCH |
 | Dàn micro | Hướng dẫn thiết kế micro cho ESP-SR (Espressif) |
@@ -1635,6 +1641,27 @@ từng module, nên chốt muộn là sửa lại tất cả (TỔNG QUAN §5.2)
 
 **E11-T1 (khảo sát dữ liệu) và E11-T2 (phiếu đồng ý) bắt đầu ngay sau E1**, không đợi Cửa 0: dữ liệu
 là việc dài nhất của cả dự án và không cần một dòng firmware nào.
+
+**Mốc demo MQTT — đích trước mắt, chạy được trên board hiện có, chưa cần loa.** Chuỗi nghe chạy trên
+board, kết quả lên server, máy tính hiện ra theo thời gian thực:
+
+```
+2 × INMP441 → dsp_afe (hpf, balance, trộn trần, ns sàn, vad, agc) → wake → command
+            → up/event qua MQTT → server → host/live.py hiện "đã thức", "lệnh X, điểm Y"
+```
+
+| Cần | Task |
+|---|---|
+| Nền, hợp đồng, app khung | Cửa 0 |
+| Tầng một kênh và dìm nhiễu sàn | E7, E9-T1 |
+| `lang_vi`, `wake`, `command`, `svc_listen` | E11-T4, E11-T9 … E11-T14 |
+| Broker, kênh sự kiện, màn xem | E13-T1, E13-T2, E13-T5, E5-T9 |
+| Kịch bản demo | E13-T11 |
+
+Mốc demo **không bỏ module nào và không hạ cửa nào**. `gsc`/`bss`, `ns` mạng, `aec`, `synth` và
+`svc_speak` vẫn nằm nguyên trong kế hoạch và trong TASKS; demo chỉ chạy trước chúng. Đường không gian
+mặc định là trộn trần cho tới khi E8-T4 chốt; câu trả lời bằng tiếng chưa phát vì chưa có loa, còn
+`svc_dialog` vẫn gửi sự kiện lên MQTT như thường.
 
 | Cửa | Sau | Đòi | Không đạt thì |
 |---|---|---|---|

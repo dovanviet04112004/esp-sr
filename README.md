@@ -11,7 +11,7 @@ nói lại, và gửi số liệu về máy tính để xem và chấm. Viết l
 | Việc cần làm, điều kiện xong | [docs/TASKS.md](docs/TASKS.md) |
 | Luật chia task và kiểm lỗi đồng thời | [docs/FREERTOS.md](docs/FREERTOS.md) |
 
-Trạng thái: đang lập kế hoạch, chưa mở Cửa 0.
+Trạng thái: đang lập kế hoạch, chưa mở Cửa 0. Đích trước mắt: demo gửi kết quả nhận dạng lên server qua MQTT.
 
 ## Khối
 
@@ -26,5 +26,5 @@ Trạng thái: đang lập kế hoạch, chưa mở Cửa 0.
 
 ## Board
 
-ESP32-S3-WROOM-1, 16 MB flash, 8 MB PSRAM, hai micro I2S ở GPIO 19/20/16, nạp qua CH340
+ESP32-S3-WROOM-1, 16 MB flash, 8 MB PSRAM, hai micro INMP441 ở GPIO 19/20/16, chưa có loa; nạp qua CH340
 (`/dev/ttyUSB0`). GPIO 19/20 trùng USB của chip nên console chỉ qua UART — xem KẾ HOẠCH §2.2.
