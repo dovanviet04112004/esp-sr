@@ -2,6 +2,7 @@
 name: ml
 
 on:
+  workflow_dispatch:
   push:
     paths: ["ml/**", "contracts/**", ".gitea/workflows/ml.yml"]
   pull_request:

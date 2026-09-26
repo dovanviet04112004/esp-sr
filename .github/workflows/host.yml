@@ -2,6 +2,7 @@
 name: host
 
 on:
+  workflow_dispatch:
   push:
     paths: ["host/**", "contracts/**", ".gitea/workflows/host.yml"]
   pull_request:

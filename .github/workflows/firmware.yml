@@ -2,6 +2,7 @@
 name: firmware
 
 on:
+  workflow_dispatch:
   push:
     paths: ["firmware/**", "contracts/**", "tools/**", ".gitea/workflows/firmware.yml"]
   pull_request:

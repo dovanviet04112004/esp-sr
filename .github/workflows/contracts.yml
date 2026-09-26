@@ -2,6 +2,7 @@
 name: contracts
 
 on:
+  workflow_dispatch:
   push:
     paths: ["contracts/**", "tools/**", "firmware/**", ".pre-commit-config.yaml", "ruff.toml", ".gitea/workflows/contracts.yml"]
   pull_request:
