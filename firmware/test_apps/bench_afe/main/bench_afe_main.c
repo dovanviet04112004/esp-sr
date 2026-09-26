@@ -9,8 +9,6 @@
 #include "dsp_spec/fft.h"
 #include "dsp_spec/mel.h"
 #include "dsp_spec/stft.h"
-#include "dsps_biquad.h"
-#include "dsps_biquad_gen.h"
 #include "esp_app_desc.h"
 #include "esp_cpu.h"
 #include "esp_heap_caps.h"
@@ -28,8 +26,6 @@
 #define CORE_SACH 1 // sach_task runs dsp_afe (KEHOACH 5.2)
 #define CORE_NHAN 0 // nhan_task computes log-mel (KEHOACH 5.2)
 #define PCM_FULL_SCALE 32768.0f
-#define BIQUAD_COEFS 5
-#define BUTTERWORTH_Q ((float)M_SQRT1_2)
 // The 40-band case of contracts/golden/mel until E11 fixes the recogniser's front end.
 #define MEL_BANDS 40
 #define MEL_F_MIN_HZ 20.0f
@@ -167,71 +163,6 @@ static void bench_hpf(void)
     report(&row, &t);
 }
 
-// The hand-written transposed form ADR-0003 weighs against the esp-dsp kernel; not part of the firmware.
-static void tdf2(const float *coef, float *state, float *x, size_t n)
-{
-    for (size_t i = 0; i < n; i++) {
-        const float y = coef[0] * x[i] + state[0];
-        state[0] = coef[1] * x[i] - coef[3] * y + state[1];
-        state[1] = coef[2] * x[i] - coef[4] * y;
-        x[i] = y;
-    }
-}
-
-static void bench_hpf_transposed(void)
-{
-    float coef[BIQUAD_COEFS];
-    float state[GEN_ARRAY_N_MICS][2] = {{0}};
-    ESP_ERROR_CHECK(
-        dsps_biquad_gen_hpf_f32(coef, GEN_AFE_HPF_CUTOFF_HZ / GEN_GRID_SAMPLE_RATE_HZ, BUTTERWORTH_Q));
-    timing_t t = {0};
-    for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
-        const uint32_t start = esp_cpu_get_cycle_count();
-        for (size_t m = 0; m < GEN_ARRAY_N_MICS; m++) {
-            tdf2(coef, state[m], s_hop[m], GEN_GRID_HOP_SAMPLES);
-        }
-        if (h >= WARMUP_HOPS) { timing_add(&t, start); }
-    }
-    const float per_us = (float)esp_rom_get_cpu_ticks_per_us();
-    printf("BENCH_ALT hpf transposed form II hand-written (2 kênh): mean_us=%.1f peak_us=%.1f\n",
-           (double)(t.sum_cycles / (float)TIMED_HOPS / per_us), (double)(t.peak_cycles / per_us));
-}
-
-// The two-channel esp-dsp kernel runs both chains interleaved; dsp_afe keeps channels apart, so count the
-// copies.
-static void bench_hpf_stereo(void)
-{
-    static float both[GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS];
-    float coef[BIQUAD_COEFS];
-    float state[2 * GEN_ARRAY_N_MICS] = {0};
-    ESP_ERROR_CHECK(
-        dsps_biquad_gen_hpf_f32(coef, GEN_AFE_HPF_CUTOFF_HZ / GEN_GRID_SAMPLE_RATE_HZ, BUTTERWORTH_Q));
-    timing_t kernel = {0};
-    timing_t with_copies = {0};
-    for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
-        const uint32_t start = esp_cpu_get_cycle_count();
-        for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
-            both[2 * i] = s_hop[0][i];
-            both[2 * i + 1] = s_hop[1][i];
-        }
-        const uint32_t kernel_start = esp_cpu_get_cycle_count();
-        dsps_biquad_sf32(both, both, GEN_GRID_HOP_SAMPLES, coef, state);
-        if (h >= WARMUP_HOPS) { timing_add(&kernel, kernel_start); }
-        for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
-            s_hop[0][i] = both[2 * i];
-            s_hop[1][i] = both[2 * i + 1];
-        }
-        if (h >= WARMUP_HOPS) { timing_add(&with_copies, start); }
-    }
-    const float per_us = (float)esp_rom_get_cpu_ticks_per_us();
-    printf("BENCH_ALT hpf esp-dsp dsps_biquad_sf32 kernel only (2 kênh): mean_us=%.1f peak_us=%.1f\n",
-           (double)(kernel.sum_cycles / (float)TIMED_HOPS / per_us), (double)(kernel.peak_cycles / per_us));
-    printf(
-        "BENCH_ALT hpf esp-dsp dsps_biquad_sf32 with interleave copies (2 kênh): mean_us=%.1f peak_us=%.1f\n",
-        (double)(with_copies.sum_cycles / (float)TIMED_HOPS / per_us),
-        (double)(with_copies.peak_cycles / per_us));
-}
-
 static void bench_chain(void)
 {
     const dsp_afe_config_t cfg = {.input_format = "MM", .spatial = DSP_AFE_SPATIAL_NONE};
@@ -286,10 +217,6 @@ static void core1_benches(void *done)
     bench_istft();
     vTaskDelay(1);
     bench_hpf();
-    vTaskDelay(1);
-    bench_hpf_transposed();
-    vTaskDelay(1);
-    bench_hpf_stereo();
     xTaskNotifyGive((TaskHandle_t)done);
     vTaskDelete(NULL);
 }

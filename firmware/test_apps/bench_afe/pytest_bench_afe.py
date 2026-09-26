@@ -1,7 +1,7 @@
 """Run bench_afe on board B and keep its rows as docs/measurements/bench/bench_afe.csv (KEHOACH 4.5.7).
 
-tools/budget.py turns that file into the table of docs/measurements/budget.md; BENCH_ALT lines are comparisons
-for an ADR and are printed, not kept.
+tools/budget.py turns that file into the table of docs/measurements/budget.md; BENCH_ALT lines, when an ADR needs
+a comparison, are printed and not kept.
 """
 
 from __future__ import annotations
