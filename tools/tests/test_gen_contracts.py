@@ -88,6 +88,21 @@ class DeterminismTests(unittest.TestCase):
                 self.assertIn("GENERATED FILE - DO NOT EDIT.", text.splitlines()[0])
                 self.assertIn("Regenerate: python3 tools/gen_contracts.py", text.splitlines()[2])
 
+    def test_every_generated_c_function_has_a_doc_comment_with_ctx(self) -> None:
+        for rel, text in gen_contracts.outputs().items():
+            if not rel.endswith(".h"):
+                continue
+            lines = text.splitlines()
+            for i, line in enumerate(lines):
+                if not line.startswith("static inline"):
+                    continue
+                start = next((k for k in range(i - 1, max(i - 8, -1), -1) if lines[k].startswith("/**")), None)
+                with self.subTest(file=rel, function=line[:60]):
+                    self.assertEqual(lines[i - 1].strip(), "*/")
+                    self.assertIsNotNone(start)
+                    self.assertLessEqual(i - start, 6)
+                    self.assertTrue(any("@ctx" in b for b in lines[start:i]))
+
     def test_unicode_strings_get_four_bytes_per_character(self) -> None:
         self.assertEqual(gen_contracts.string_bytes({"maxLength": 64}), 256)
         self.assertEqual(gen_contracts.string_bytes({"maxLength": 32, "pattern": "^[a-z]+$"}), 32)
