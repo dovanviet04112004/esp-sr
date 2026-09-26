@@ -1,5 +1,5 @@
-# dsp_spec on the host with plain CMake: the component, dl_fft's portable C, and the parity comparators
-# of firmware/test_apps/parity, over shims for the few ESP-IDF headers they include (KEHOACH 4.5.7).
+# dsp_spec_host_lib: dsp_spec plus dl_fft's portable C over shims for a few ESP-IDF headers (KEHOACH 4.5.7);
+# dsp_spec_host runs it and the parity comparators of firmware/test_apps/parity, dsp_afe's host test links it.
 cmake_minimum_required(VERSION 3.16)
 project(dsp_spec_host C)
 
@@ -12,22 +12,25 @@ endif()
 
 set(SPEC "${FIRMWARE}/components/dsp_spec")
 set(PARITY "${FIRMWARE}/test_apps/parity/main")
-add_executable(dsp_spec_host
-    main/test_dsp_spec_host.c
-    "${SPEC}/src/window.c" "${SPEC}/src/stft.c" "${SPEC}/src/mel.c" "${SPEC}/src/fft_dl.c"
-    "${PARITY}/parity_common.c" "${PARITY}/parity_stft.c" "${PARITY}/parity_mel.c"
+set(DL_FFT_SRCS
     "${DL_FFT_DIR}/dl_rfft_f32.c" "${DL_FFT_DIR}/dl_fft_f32.c" "${DL_FFT_DIR}/dl_rfft_s16.c" "${DL_FFT_DIR}/dl_fft_s16.c"
     "${DL_FFT_DIR}/base/dl_fft_base.c" "${DL_FFT_DIR}/base/dl_fft_table.c"
     "${DL_FFT_DIR}/base/dl_fft2r_fc32_ansi.c" "${DL_FFT_DIR}/base/dl_fft4r_fc32_ansi.c"
     "${DL_FFT_DIR}/base/dl_fft2r_sc16_ansi.c" "${DL_FFT_DIR}/base/dl_fft2r_sc16_dif_ansi.c")
-target_include_directories(dsp_spec_host PRIVATE
-    shim "${SPEC}/include" "${SPEC}/priv_include" "${FIRMWARE}/components/common/include" "${PARITY}"
-    "${DL_FFT_DIR}" "${DL_FFT_DIR}/base" "${DL_FFT_DIR}/base/isa")
+
+add_library(dsp_spec_host_lib STATIC
+    "${SPEC}/src/window.c" "${SPEC}/src/stft.c" "${SPEC}/src/mel.c" "${SPEC}/src/fft_dl.c" ${DL_FFT_SRCS})
+target_include_directories(dsp_spec_host_lib
+    PUBLIC "${CMAKE_CURRENT_LIST_DIR}/shim" "${SPEC}/include" "${FIRMWARE}/components/common/include"
+    PRIVATE "${SPEC}/priv_include" "${DL_FFT_DIR}" "${DL_FFT_DIR}/base" "${DL_FFT_DIR}/base/isa")
+set_target_properties(dsp_spec_host_lib PROPERTIES C_STANDARD 17 C_EXTENSIONS ON)
+target_compile_options(dsp_spec_host_lib PRIVATE -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare)
+set_source_files_properties(${DL_FFT_SRCS} PROPERTIES COMPILE_OPTIONS "-Wno-error")
+target_link_libraries(dsp_spec_host_lib PUBLIC m)
+
+add_executable(dsp_spec_host
+    main/test_dsp_spec_host.c "${PARITY}/parity_common.c" "${PARITY}/parity_stft.c" "${PARITY}/parity_mel.c")
+target_include_directories(dsp_spec_host PRIVATE "${PARITY}")
 set_target_properties(dsp_spec_host PROPERTIES C_STANDARD 17 C_EXTENSIONS ON)
 target_compile_options(dsp_spec_host PRIVATE -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare)
-set_source_files_properties("${DL_FFT_DIR}/dl_rfft_f32.c" "${DL_FFT_DIR}/dl_fft_f32.c" "${DL_FFT_DIR}/dl_rfft_s16.c"
-    "${DL_FFT_DIR}/dl_fft_s16.c" "${DL_FFT_DIR}/base/dl_fft_base.c" "${DL_FFT_DIR}/base/dl_fft_table.c"
-    "${DL_FFT_DIR}/base/dl_fft2r_fc32_ansi.c" "${DL_FFT_DIR}/base/dl_fft4r_fc32_ansi.c"
-    "${DL_FFT_DIR}/base/dl_fft2r_sc16_ansi.c" "${DL_FFT_DIR}/base/dl_fft2r_sc16_dif_ansi.c"
-    PROPERTIES COMPILE_OPTIONS "-Wno-error")
-target_link_libraries(dsp_spec_host PRIVATE m)
+target_link_libraries(dsp_spec_host PRIVATE dsp_spec_host_lib)
