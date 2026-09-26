@@ -128,7 +128,7 @@ Board B là board duy nhất có micro (KẾ HOẠCH §2.1). Mọi phép đo thu
 
 | ID | Task | Xong khi | Chặn bởi | V5 |
 |---|---|---|---|---|
-| E6-T1 | Bản Python `srpipe/dsp/spec/`: fft, window, stft, mel | phân tích rồi tổng hợp dựng lại sóng gốc, sai số ghi bằng số | E4-T2 | V5.0.5 |
+| ~~E6-T1~~ | **Xong 26/09.** Bản Python `srpipe/dsp/spec/`: `window` (căn Hann tuần hoàn dạng sin), `fft` (thuận không chia, nghịch 1/n, float32), `stft` (chạy dòng, một bước vào một phổ ra), `mel` (Slaney, tam giác chuẩn hoá diện tích, log tự nhiên có sàn, MFCC DCT-II trực chuẩn) — soi gương bốn header E3-T2 | dựng lại bốn tín hiệu trễ đúng một bước, **138,6–139,2 dB**, sai số lớn nhất 2,4e-7 (`parity.md`); 46/46 pytest | E4-T2 | V5.0.5 |
 | E6-T2 | Component `dsp_spec`: `idf_component.yml` ghim bản, `Kconfig` chọn `dl_fft` hay `esp-dsp`, `README.md`. **Không `CHANGELOG`** (KẾ HOẠCH §0.2) | dựng được trong app khung | E3-T2 | V5.0.5 |
 | E6-T3 | 🔬 Đo `dl_fft` so với `esp-dsp` trên board, float32 và int16, 256 / 512 / 1024 điểm | bảng thời gian và bộ nhớ ở `latency.md`; **chọn một bản, ghi lý do bằng số** trong ADR | E6-T2 | V5.0.6 |
 | E6-T4 | Bộ vàng STFT / iSTFT, có đối chứng âm | khớp Python trong `tolerance.yaml`; ca lệch một mẫu làm phép kiểm đỏ | E6-T1, E6-T2, E4-T3 | V5.0.7 |
