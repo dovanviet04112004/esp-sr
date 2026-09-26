@@ -10,11 +10,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import select
 import socket
 import sys
 import threading
 import wave
 from array import array
+from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -158,14 +160,17 @@ class StreamServer:
                 self._serve(conn, recorder, stop, limit)
             log.info("board disconnected after %d frames", recorder.summary.frames)
 
+    def _superseded(self) -> bool:
+        return bool(select.select([self._sock], [], [], 0)[0])
+
     def _serve(self, conn: socket.socket, recorder: Recorder, stop: threading.Event, limit: int | None) -> None:
         while limit is None or recorder.summary.samples < limit:
-            raw = _read_exact(conn, stream.HEADER_BYTES, stop)
+            raw = _read_exact(conn, stream.HEADER_BYTES, stop, self._superseded)
             if raw is None:
                 return
             try:
                 header = parse_header(raw)
-                pcm = _read_exact(conn, header.payload_bytes, stop)
+                pcm = _read_exact(conn, header.payload_bytes, stop, self._superseded)
                 if pcm is None:
                     return
                 recorder.add(header, pcm)
@@ -174,8 +179,8 @@ class StreamServer:
                 return
 
 
-def _read_exact(conn: socket.socket, n: int, stop: threading.Event) -> bytes | None:
-    """n bytes, or None once the peer closes or stop is set; a partial frame is discarded."""
+def _read_exact(conn: socket.socket, n: int, stop: threading.Event, superseded: Callable[[], bool]) -> bytes | None:
+    """n bytes, or None once the peer closes, stop is set, or it falls silent while a newer connection waits."""
     buf = bytearray(n)
     view = memoryview(buf)
     got = 0
@@ -185,6 +190,9 @@ def _read_exact(conn: socket.socket, n: int, stop: threading.Event) -> bytes | N
         try:
             chunk = conn.recv_into(view[got:])
         except TimeoutError:
+            # A board that lost its link reconnects, and its old socket may never see the FIN.
+            if superseded():
+                return None
             continue
         except OSError:
             return None
