@@ -38,8 +38,8 @@ trong phòng gồm cả tiếng phòng nên số ấy là **chặn dưới**.
 | Chỉ tiêu | Mốc | Đo được | Cách đo | Ngày |
 |---|---|---|---|---|
 | Khoảng cách hai micro | 4–6,5 cm | **44,4 mm** bằng tiếng; ~45 mm bằng thước | bước 3 và 4 của §0: `τ` trung vị +1,89 và −2,25 mẫu, khoảng cách = nửa hiệu = 2,07 mẫu (`20260926_home_008`, `…_007`) | 26/09 |
-| Chênh độ nhạy | ≤ 3 dB | **+10,8 … +11,6 dB** ở 200–1600 Hz, **+13,7 dB** ở 1,6–6,4 kHz (`ch1` to hơn) — **trượt** | ồn trắng chính diện 20 cm (`20260926_home_011`), khớp 50 cm (`…_010`) và vỗ tay hai đầu (+10,5 dB) | 26/09 |
-| Chênh pha | ≤ 10° | **−4,2 … −4,7°** ở 200–1600 Hz — đạt; **+24 … +34°** ở 1,6–6,4 kHz — trượt; lệch giờ tĩnh −0,18 mẫu (−11 µs) | ồn trắng chính diện 20 cm và 50 cm, như nhau ở hai khoảng cách; lệch giờ = nửa tổng hai `τ` trung vị của vỗ tay | 26/09 |
+| Chênh độ nhạy | ≤ 3 dB | **+10,8 … +11,6 dB** ở 200–1600 Hz, **+13,7 dB** ở 1,6–6,4 kHz (`ch1` to hơn) — **trượt** | ồn trắng chính diện 20 cm, hai lần (`20260926_home_010`, `…_011`); vỗ tay hai đầu cho cùng mức, kể cả phần nhô +13,6 … +15,7 dB ở 1,6–3,2 kHz: mức là của thiết bị | 26/09 |
+| Chênh pha | ≤ 10° | **−4,2 … −4,7°** ở 200–1600 Hz — đạt; **+24 … +34°** ở 1,6–6,4 kHz, **chưa rõ** của thiết bị hay của cách đặt loa; lệch giờ tĩnh −0,18 mẫu (−11 µs) | ồn trắng chính diện 20 cm, hai lần cùng chỗ cho cùng số; ở 1 m dải cao ra ~0° nhưng độ kết hợp chỉ 0,5–0,6; lệch giờ = nửa tổng hai `τ` trung vị của vỗ tay | 26/09 |
 | SNR `ch0` / `ch1` | ≥ 62 dB (INMP441 ghi 61 dBA) | **≥ 54,4 / ≥ 49,3 dB** (chặn dưới) | −29,0 dBFS (độ nhạy datasheet ở 94 dB SPL) trừ nền A khi Wi-Fi tắt | 26/09 |
 | Nền ồn khi Wi-Fi phát / tắt | — | `ch0` −82,9 / −83,4 dBFS(A); `ch1` −78,1 / −78,3 dBFS(A) | bước 2 và 3 của §0, 60 s mỗi phiên, liền nhau: `20260926_home_004`, `…_005` | 26/09 |
 
@@ -53,9 +53,10 @@ micro vừa cấp điện (một chiều trôi từ −1400 LSB); đừng dùng 
 
 **Ồn trắng chính diện: gần mới đo được.** Loa điện thoại ở mức tối đa chỉ trên nền 20–30 dB và gần như không phát dưới
 200 Hz, nên dải 50–200 Hz không đo được bằng nó. Ở 1 m (`20260926_home_009`) độ kết hợp trên 800 Hz chỉ 0,5–0,7: tiếng dội
-của phòng lấn tiếng thẳng, và pha ở đó đổi theo chỗ đặt loa. Ở 50 cm và 20 cm (`…_010`, `…_011`) độ kết hợp 200–1600 Hz là
-0,97–0,998 và dải 1,6–6,4 kHz ổn định ở ~0,8 với cùng chênh mức và chênh pha ở cả hai khoảng cách. Phiên phải bắt đầu bằng
-một đoạn im (`…_010` phát liền từ đầu nên `score` không tách được khung nguồn khỏi khung nền).
+của phòng lấn tiếng thẳng. Ở 20 cm, hai lần cùng chỗ (`…_010`, `…_011`), độ kết hợp 200–1600 Hz là 0,97–0,998 và dải
+1,6–6,4 kHz ổn định ở ~0,8 với cùng chênh mức và chênh pha. Hai lần cùng chỗ chỉ chứng tỏ số lặp lại được, không tách được
+thiết bị khỏi cách đặt loa: pha dải cao cần một lần đo ở chỗ khác (phòng ít vang, hay loa khác) trước khi kết luận. Phiên phải
+bắt đầu bằng một đoạn im (`…_010` phát liền từ đầu nên `score` không tách được khung nguồn khỏi khung nền).
 
 **`ch0` nghe nhỏ hơn `ch1` ~10,5 dB ở mọi hướng** (vỗ tay hai đầu, 26/09, board trong hộp). Điều này giải thích phần
 "`ch1` ồn hơn" của các phiên im lặng: dưới 1 kHz tiếng phòng lấn nền điện tử của micro, và `ch0` nhận ít tiếng phòng hơn
