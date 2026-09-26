@@ -1685,7 +1685,7 @@ Topic, QoS, retained và schema khai ở `contracts/mqtt_topics.yaml`; bảng d�
 
 | Payload | Nội dung | Cỡ ước |
 |---|---|---|
-| `heartbeat` | uptime, heap nội và PSRAM còn / thấp nhất, `frames_dropped`, `clean_dropped`, `events_dropped`, điểm cao nhất `q_clean`, tải từng nhân (ở `bench`), RSSI, phiên bản firmware và model | ~400 B |
+| `heartbeat` | uptime, heap nội và PSRAM còn / thấp nhất, `frames_dropped`, `clean_dropped`, `events_dropped`, điểm cao nhất `q_clean`, điểm cao nhất vùng nhớ JSON của `net_mqtt` (`FREERTOS.md` §14 P1), tải từng nhân (ở `bench`), RSSI, phiên bản firmware và model | ~420 B |
 | `telemetry` | 10 × {hướng, độ tin, cờ tiếng nói, mức, gain}, trạng thái hội thoại | ~350 B |
 | `event` | loại, `seq` khung, điểm, lệnh, khoảng cách với lệnh thứ hai, lý do từ chối | ~150 B |
 
