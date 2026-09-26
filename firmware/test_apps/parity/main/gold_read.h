@@ -43,7 +43,7 @@ typedef struct {
  */
 static inline uint32_t gold_u32(const uint8_t *p)
 {
-    return (uint32_t) p[0] | ((uint32_t) p[1] << 8) | ((uint32_t) p[2] << 16) | ((uint32_t) p[3] << 24);
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
 /** Check the header and prepare to walk the tensors.
@@ -52,7 +52,7 @@ static inline uint32_t gold_u32(const uint8_t *p)
  */
 static inline bool gold_open(gold_reader_t *r, const void *buf, size_t len)
 {
-    const uint8_t *p = (const uint8_t *) buf;
+    const uint8_t *p = (const uint8_t *)buf;
     if (len < GOLD_HEADER_BYTES || memcmp(p, "GOLD", 4) != 0 || gold_u32(p + 4) != 1) { return false; }
     r->buf = p;
     r->len = len;
@@ -71,12 +71,14 @@ static inline bool gold_next(gold_reader_t *r, gold_tensor_t *out)
     const uint8_t *p = r->buf + r->offset;
     memcpy(out->name, p, GOLD_NAME_BYTES);
     out->name[GOLD_NAME_BYTES - 1] = '\0';
-    out->dtype = (gold_dtype_t) gold_u32(p + GOLD_NAME_BYTES);
+    out->dtype = (gold_dtype_t)gold_u32(p + GOLD_NAME_BYTES);
     out->ndim = gold_u32(p + GOLD_NAME_BYTES + 4);
-    for (int i = 0; i < GOLD_MAX_DIMS; i++) { out->dims[i] = gold_u32(p + GOLD_NAME_BYTES + 8 + 4 * i); }
+    for (int i = 0; i < GOLD_MAX_DIMS; i++) {
+        out->dims[i] = gold_u32(p + GOLD_NAME_BYTES + 8 + 4 * i);
+    }
     out->nbytes = gold_u32(p + GOLD_NAME_BYTES + 8 + 4 * GOLD_MAX_DIMS);
     const size_t data_at = r->offset + GOLD_RECORD_BYTES;
-    const size_t padded = (out->nbytes + 3u) & ~(size_t) 3u;
+    const size_t padded = (out->nbytes + 3u) & ~(size_t)3u;
     if (out->ndim > GOLD_MAX_DIMS || data_at + padded > r->len) { return false; }
     out->data = r->buf + data_at;
     r->offset = data_at + padded;
