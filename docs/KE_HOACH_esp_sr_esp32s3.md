@@ -57,7 +57,7 @@ Bảng này tồn tại cho tới khi TỔNG QUAN được sửa theo (E1-T9). S
 | 11 | Từ đánh thức 2–3 âm tiết | **3–4 âm tiết** | Âm tiết tiếng Việt ngắn; cụm hai âm tiết dài chừng nửa giây và trùng lời nói thường ngày nhiều | §3.11 |
 | 12 | `ns` mạng ~24% một nhân, ~40 MFLOPS | RNNoise phải **dựng lại dải cho 16 kHz và huấn luyện lại**; ở 62,5 khung/s phần mạng ~11 MFLOP/s 🔬 | Số 40 MFLOPS là của bản 48 kHz, 100 khung/s | §3.9 |
 | 13 | Task `nhan` ở nhân 1 cùng `thu` và `sach` | `nhan` ở **nhân 0** | TỔNG QUAN tự nói "một nhân không đủ", nhưng lại dồn cả ba việc liên tục vào nhân 1; cửa sổ lệnh 11–18 ms mỗi 32 ms đẩy nhân 1 quá 100% | §5.1 |
-| 14 | RAM nội ~97 KB | Ước lại, thiếu bốn khoản: ngăn xếp mạng, trạng thái AEC thật, trọng số bị chạm **mỗi khung** (ns, wake), đệm luồng | Luật "RAM nội chỉ giữ thứ bị chạm mỗi khung" của chính TỔNG QUAN kéo trọng số `ns` và `wake` vào RAM nội | §6.5 |
+| 14 | RAM nội ~97 KB; luật "RAM nội chỉ giữ thứ bị chạm mỗi khung" kéo trọng số `ns` và `wake` vào RAM nội | Ước lại, thiếu ba khoản: ngăn xếp mạng, trạng thái AEC thật, đệm luồng. **Mọi model — trọng số và vùng làm việc — nằm ở PSRAM**, trọng số chép từ flash lên lúc nạp | Cộng cả trọng số `ns` và `wake` vào thì RAM nội vượt phần còn cấp được sau Wi-Fi | §6.5 |
 | 15 | Mốc TTS ngoài chạy 22,05 kHz | Tiếng ra **16 kHz** | I2S song công dùng chung xung nhịp, nên phát và thu cùng một tần số | §2.4, §3.13 |
 | 16 | `feed` nhận hai kênh xen kẽ | Hai **hoặc ba** kênh theo chuỗi định dạng `"MM"` / `"MMR"`, chốt ngay trong hợp đồng dù AEC làm sau | Đổi hợp đồng sau khi đã có module là đúng cái bẫy TỔNG QUAN §5.2 cảnh báo | §4.5.5 |
 | 17 | Mỗi component có `CHANGELOG.md` | Không. `idf_component.yml` chỉ để khai phụ thuộc | Lịch sử nằm ở git (CLAUDE.md §8 luật 7). Component nội bộ không phát hành lên registry | §4.5.3 |
@@ -531,7 +531,7 @@ trần thì giữ trộn trần và ghi đúng như vậy (Cửa 1).
 | Huấn luyện | tiếng Việt sạch trộn nhiễu của §1.2 cộng nhiễu phòng dùng, qua RIR, ở đúng lưới §3.1 |
 | Chạy | `esp-dl` GRU int8; mã suy luận C của RNNoise là phương án lùi |
 | Chi phí | 88 k trọng số × 2 phép tính × 62,5 khung/s ≈ **11 MFLOP/s** cho phần mạng, cỡ 5–10% một nhân float 🔬. TỔNG QUAN ghi ~24% từ con số 40 MFLOPS của bản 48 kHz, 100 khung/s |
-| Chỗ đặt trọng số | ~90 KB, bị chạm **mỗi khung** — RAM nội nếu vừa, không thì PSRAM và đo độ trễ (§6.5) |
+| Chỗ đặt trọng số | ~90 KB, bị chạm **mỗi khung**, nằm ở PSRAM như mọi model (§6.5); E9-T7 đo độ trễ đỉnh một khung |
 
 **Luật chọn** giữ nguyên: bản mạng phải hơn sàn bằng số đo, không hơn thì bỏ (Cửa 1) — với thước
 quyết định của §3.15.
@@ -1587,17 +1587,19 @@ TỔNG QUAN §7 ước ~97 KB và thiếu bốn khoản. Bảng ước lại �
 | `aec`: trọng số 2 × 8 × 257 phức + phổ tham chiếu 8 × 257 phức + đệm | ~55 KB | §3.5 |
 | Ngăn xếp task ứng dụng (§5.2, trừ `mqtt_task`) | ~41 KB | |
 | Wi-Fi + lwIP | 50–90 KB | tuỳ số đệm RX/TX trong sdkconfig |
-| **Cộng — trọng số mạng ở PSRAM (mặc định)** | **~240–280 KB** | |
-| Trọng số `ns` nếu kéo về RAM nội | +90 KB | bị chạm mỗi khung |
-| Trọng số `wake` nếu kéo về RAM nội | +16–50 KB | bị chạm mỗi khung |
-| **Cộng — mọi thứ bị chạm mỗi khung ở RAM nội** | **~350–420 KB** | |
+| **Cộng — không có model nào** | **~240–280 KB** | |
 | RAM nội còn cấp được trên ESP32-S3 sau IDF và Wi-Fi | ~300–340 KB 🔬 | đo ở E5-T11 |
 
-**Trường hợp đủ không vừa.** Luật "RAM nội chỉ giữ thứ bị chạm mỗi khung" của TỔNG QUAN kéo trọng số
-`ns` và `wake` vào RAM nội, và cộng lại thì vượt. Nên mặc định đặt **trọng số mạng ở PSRAM**, rồi đo:
-E9-T7 và E11-T15 đo độ trễ đỉnh một khung của `ns` và `wake` khi trọng số ở PSRAM, **có Wi-Fi đang
-chạy**. Chỉ phần nào vượt nhịp mới kéo về RAM nội. Thứ tự lùi nếu vẫn chật: giảm đệm Wi-Fi, rồi
-`aec` 8 → 6 phân đoạn (96 ms đuôi), rồi `aec` sang số nguyên.
+**Mọi model nằm ở PSRAM — trọng số lẫn vùng làm việc.** `ai_engine_load` mmap slot model qua
+`sys_storage`, kiểm sha256 và `grid_hash`, **chép trọng số từng model lên PSRAM**, rồi nhả mmap: lúc chạy
+không model nào đọc thẳng từ flash, và không model nào chiếm RAM nội. Kéo trọng số `ns` (~90 KB) và `wake`
+(16–50 KB) về RAM nội như luật "chỉ giữ thứ bị chạm mỗi khung" của TỔNG QUAN thì cộng lên ~350–420 KB,
+vượt phần còn cấp được; RAM nội để dành cho đệm DMA, trạng thái khung của `dsp_afe`, ngăn xếp và Wi-Fi.
+PSRAM octal cũng đọc nhanh hơn flash QIO, nên chép lên là lợi hơn chạy thẳng qua mmap.
+
+E9-T7 và E11-T15 đo độ trễ đỉnh một khung của `ns` và `wake` với trọng số ở PSRAM, **có Wi-Fi đang
+chạy**. Vượt nhịp thì thu nhỏ mạng hoặc giảm nhịp chạy, ghi ADR; **không tự kéo model về RAM nội**. Nếu
+RAM nội vẫn chật: giảm đệm Wi-Fi, rồi `aec` 8 → 6 phân đoạn (96 ms đuôi), rồi `aec` sang số nguyên.
 
 Mốc ngoài để so: chuỗi làm sạch của ESP-SR lấy 48,7–91,1 KB RAM nội (TỔNG QUAN §7). Bản ở đây float32
 nên lớn hơn; đó là giá của mã đọc được và khớp Python từng phép tính.
@@ -1608,7 +1610,7 @@ nên lớn hơn; đó là giá của mã đọc được và khớp Python từn
 |---|---|
 | Trọng số và vùng làm việc `command` | ≤ 1,8 MB + ~0,3 MB |
 | Trọng số và vùng làm việc `synth` (nếu mạng) | ≤ 1 MB + ~0,3 MB |
-| Trọng số `ns` + `wake` (mặc định) | ~140 KB |
+| Trọng số và vùng làm việc `ns` + `wake` | ~140 KB + ~50 KB |
 | `q_clean` | ~34 KB |
 | `q_dialog`, `q_cmd`, `q_speak`, `q_event_up` (§5.3) | ~6 KB |
 | `sb_stream` | 64 KB |
