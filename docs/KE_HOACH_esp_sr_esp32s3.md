@@ -729,9 +729,14 @@ esp-sr/
 **Hai remote, một nguồn.** `origin` là Gitea nội bộ — nơi giữ mã và nơi đọc trạng thái. `github` là bản sao
 **private** chỉ để chạy CI, vì máy phát triển không gánh nổi runner Docker (ổ C: gần đầy, Docker Desktop hỏng
 đĩa khi thử). GitHub không vào được Gitea trong LAN, nên chiều ngược lại do `make ci-status` ở máy làm:
-đọc kết quả bằng `gh`, gắn trạng thái `github/<workflow>` lên commit trên Gitea. Push lên cả hai chỉ khi
-chủ dự án ra lệnh. Mật khẩu Gitea không bao giờ đi sang GitHub; token Gitea của `ci_status.py` nằm ở
-`~/.config/esp-sr/gitea_token`, ngoài repo.
+đọc kết quả bằng `gh`, gắn trạng thái `github/<workflow>` lên commit trên Gitea. Mật khẩu Gitea không bao
+giờ đi sang GitHub; token Gitea nằm ở `~/.config/esp-sr/gitea_token`, ngoài repo.
+
+**Một lệnh `git push origin` làm hết.** `origin` có hai địa chỉ push, Gitea và GitHub; git lấy token Gitea
+qua credential helper riêng của repo, còn GitHub qua `gh`. Hook `pre-push` của pre-commit gọi
+`ci_status.py --from-pre-push`: với lượt đẩy sang GitHub, nó tách một tiến trình nền theo dõi lượt chạy
+và gắn trạng thái lên Gitea — vòng xoay khi bắt đầu, xanh hoặc đỏ khi xong — rồi trả lệnh push ngay.
+Push chỉ khi chủ dự án ra lệnh; phần còn lại tự chạy.
 
 Ba khối `ml` / `firmware` / `host` **không bao giờ chép định nghĩa của nhau**. Lưới thời gian, hình
 học dàn micro, payload MQTT, khuôn luồng tiếng, bộ lệnh mặc định, vector vàng — tất cả nằm ở
