@@ -1289,12 +1289,17 @@ Ba vai của TỔNG QUAN "gửi về máy để xem và chấm": **xem** (`live.
 
 ```
 deploy/
-├── docker-compose.yml             # eclipse-mosquitto:2
-├── .env.example
-└── mosquitto/{mosquitto.conf, acl.conf, gen_certs.sh}   # passwd và certs gitignore
+├── docker-compose.yml             # emqx/emqx:6.3.1, container sr-emqx: 1883 ra LAN, dashboard 127.0.0.1:18084
+├── .env.example                   # EMQX_NODE_COOKIE, EMQX_DASHBOARD_PASSWORD — giá trị giả
+└── emqx/{emqx.conf, acl.conf, gen_certs.sh}   # certs gitignore
 ```
 
-Bàn thử dùng `mqtt://` trong mạng LAN; `prod` chỉ nhận `mqtts://` (§7.5).
+**Broker là EMQX chạy trong Docker Desktop** trên máy phát triển, cùng bản và cùng khuôn với repo face
+attendance. Docker Desktop mở cổng trên máy Windows, nên board nối tới **IP LAN của máy** ở cổng 1883, không
+phải tới địa chỉ của WSL. Dashboard chỉ ở loopback, cổng 18084 vì broker của repo face attendance đã giữ
+18083 trên cùng máy. Retained lưu xuống đĩa (`EMQX_RETAINER__BACKEND__STORAGE_TYPE=disc`): để trong RAM thì
+broker khởi động lại là mất `status` `offline` của máy đang tắt. Bàn thử dùng `mqtt://` trong mạng LAN;
+`prod` chỉ nhận `mqtts://` (§7.5).
 
 ### 4.8 `tools/`
 
@@ -1643,7 +1648,7 @@ số mỗi lần chạy thì không. Đo ở E14-T6.
                             │ MQTT 1883 (bàn) / MQTTS 8883 (prod)   TCP, chỉ khi bật tay
                             ▼                                                  ▼
                   ┌──────────────────┐                             ┌──────────────────┐
-                  │ Mosquitto        │ ◄──── down/cmd, commands ── │ host/            │
+                  │ EMQX (Docker)    │ ◄──── down/cmd, commands ── │ host/            │
                   │ deploy/          │ ───── up/* ───────────────► │ live · score ·   │
                   └──────────────────┘                             │ session · stream │
                                                                    └──────────────────┘
