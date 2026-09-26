@@ -1,4 +1,4 @@
-/** Real FFT and inverse on one backend, dl_fft or esp-dsp, picked in Kconfig (KEHOACH 3.1).
+/** Real FFT and inverse on dl_fft, the backend ADR-0002 chose (KEHOACH 3.1).
  *  @ctx any | non-blocking | one instance is used by one task at a time
  */
 #pragma once

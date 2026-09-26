@@ -5,18 +5,12 @@
 
 #include "dl_rfft.h"
 #include "dsp_spec.h"
-#include "dsps_fft2r.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "gen_grid.h"
-#include "sdkconfig.h"
 #include "unity.h"
 
-#if CONFIG_DSP_SPEC_FFT_ESP_DSP
-#define BACKEND "esp-dsp"
-#else
 #define BACKEND "dl_fft"
-#endif
 
 #define MAX_POINTS 2048
 #define HOPS 64
@@ -247,12 +241,11 @@ TEST_CASE("time one hop of analysis, synthesis and log-mel", "[dsp_spec][bench]"
 
 static int16_t s_q15[MAX_POINTS] __attribute__((aligned(16)));
 
-TEST_CASE("time the int16 transforms of both libraries at 512 points", "[dsp_spec][bench]")
+TEST_CASE("time the int16 real transform of dl_fft at 512 points", "[dsp_spec][bench]")
 {
     const int n = GEN_GRID_FFT_SIZE;
     dl_fft_s16_t *plan = dl_rfft_s16_init(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     TEST_ASSERT_NOT_NULL(plan);
-    TEST_ASSERT_EQUAL(ESP_OK, dsps_fft2r_init_sc16(NULL, MAX_POINTS / 2));
     int exponent = 0;
     int64_t t0 = esp_timer_get_time();
     for (int i = 0; i < BENCH_RUNS; i++) {
@@ -261,16 +254,7 @@ TEST_CASE("time the int16 transforms of both libraries at 512 points", "[dsp_spe
         }
         dl_rfft_s16_run(plan, s_q15, 0, &exponent);
     }
-    const double dl = (double)(esp_timer_get_time() - t0) / BENCH_RUNS;
-    t0 = esp_timer_get_time();
-    for (int i = 0; i < BENCH_RUNS; i++) {
-        for (int k = 0; k < n; k++) {
-            s_q15[k] = (int16_t)(noise() * 16384.0f);
-        }
-        dsps_fft2r_sc16(s_q15, n / 2);
-        dsps_bit_rev_sc16_ansi(s_q15, n / 2);
-    }
-    const double dsp = (double)(esp_timer_get_time() - t0) / BENCH_RUNS;
+    const double with_fill = (double)(esp_timer_get_time() - t0) / BENCH_RUNS;
     t0 = esp_timer_get_time();
     for (int i = 0; i < BENCH_RUNS; i++) {
         for (int k = 0; k < n; k++) {
@@ -278,9 +262,7 @@ TEST_CASE("time the int16 transforms of both libraries at 512 points", "[dsp_spe
         }
     }
     const double fill = (double)(esp_timer_get_time() - t0) / BENCH_RUNS;
-    printf("MEASURE int16 512: dl_rfft_s16 %.1f us, esp-dsp complex 256 + bit reversal %.1f us (fill "
-           "excluded)\n",
-           dl - fill, dsp - fill);
+    printf("MEASURE int16 512: dl_rfft_s16 %.1f us (fill excluded)\n", with_fill - fill);
     dl_rfft_s16_deinit(plan);
 }
 
