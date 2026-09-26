@@ -22,6 +22,7 @@
 #include "net_wifi.h"
 #include "sdkconfig.h"
 #include "svc_front.h"
+#include "svc_report.h"
 #include "sys_storage.h"
 
 #define CORE_FRAME 1    // hard 16 ms deadline, nothing else runs here (KEHOACH 5.1)
@@ -34,6 +35,7 @@
 #define NOI_STACK_BYTES 8192
 #define GUI_STACK_BYTES 4096
 #define NET_STACK_BYTES 4096
+#define LUONG_STACK_BYTES 4096
 
 #define THU_PRIORITY 17
 #define SACH_PRIORITY 16
@@ -42,6 +44,7 @@
 #define NOI_PRIORITY 5
 #define GUI_PRIORITY 4
 #define NET_PRIORITY 3
+#define LUONG_PRIORITY 3
 
 #define DMA_WAIT_MS (2 * GEN_GRID_HOP_US / 1000)
 #define FRAME_WAIT_MS 100
@@ -132,6 +135,9 @@ static void sach_task(void *arg)
         if (xQueueReceive(w->frame, &slot, pdMS_TO_TICKS(FRAME_WAIT_MS)) == pdTRUE) {
             dsp_afe_frame_t clean;
             const esp_err_t err = svc_front_step(w->pool[slot].pcm, w->pool[slot].seq, &clean);
+#if CONFIG_NET_STREAM_ENABLE
+            svc_report_stream_push(w->pool[slot].seq, w->pool[slot].pcm, err == ESP_OK ? clean.pcm : NULL);
+#endif
             return_slot(w, slot);
             if (err == ESP_OK) { publish_clean(w, &clean); }
         }
@@ -165,6 +171,18 @@ static void dieu_task(void *arg)
     }
 }
 
+#if CONFIG_NET_STREAM_ENABLE
+static void luong_task(void *arg)
+{
+    (void)arg;
+    ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
+    for (;;) {
+        svc_report_luong_step();
+        esp_task_wdt_reset();
+    }
+}
+#endif
+
 #if CONFIG_APP_SPEAKER_ENABLE
 static void noi_task(void *arg)
 {
@@ -195,6 +213,10 @@ static void fill_heartbeat(const app_afe_stats_t *afe, heartbeat_t *hb)
     hb->dma_overflows = audio.dma_overflows;
     hb->frames_dropped = afe->frames_dropped;
     hb->clean_dropped = afe->clean_dropped;
+#if CONFIG_NET_STREAM_ENABLE
+    hb->stream_dropped = svc_report_stream_dropped();
+    hb->has_stream_dropped = true;
+#endif
     hb->rssi_dbm = wifi.rssi_dbm;
     hb->has_rssi_dbm = wifi.rssi_dbm != 0;
 }
@@ -236,6 +258,9 @@ static StackType_t s_net_stack[NET_STACK_BYTES] __attribute__((aligned(portBYTE_
 #if CONFIG_APP_SPEAKER_ENABLE
 static StackType_t s_noi_stack[NOI_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 #endif
+#if CONFIG_NET_STREAM_ENABLE
+static StackType_t s_luong_stack[LUONG_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
+#endif
 
 static const task_spec_t kTasks[] = {
     {thu_task, "thu_task", s_thu_stack, THU_STACK_BYTES, THU_PRIORITY, CORE_FRAME},
@@ -246,6 +271,9 @@ static const task_spec_t kTasks[] = {
     {noi_task, "noi_task", s_noi_stack, NOI_STACK_BYTES, NOI_PRIORITY, CORE_BUFFERED},
 #endif
     {gui_task, "gui_task", s_gui_stack, GUI_STACK_BYTES, GUI_PRIORITY, CORE_BUFFERED},
+#if CONFIG_NET_STREAM_ENABLE
+    {luong_task, "luong_task", s_luong_stack, LUONG_STACK_BYTES, LUONG_PRIORITY, CORE_BUFFERED},
+#endif
     {net_task, "net_task", s_net_stack, NET_STACK_BYTES, NET_PRIORITY, CORE_BUFFERED},
 };
 

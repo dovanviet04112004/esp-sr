@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/queue.h"
+#include "freertos/stream_buffer.h"
 #include "gen_array.h"
 #include "gen_grid.h"
 #include "sdkconfig.h"
@@ -39,17 +40,18 @@ typedef struct {
 } app_frame_slot_t;
 
 typedef struct {
-    QueueHandle_t frame;        // q_frame: slot index, thu_task -> sach_task
-    QueueHandle_t free_slots;   // q_free: slot index, sach_task -> thu_task
-    app_frame_slot_t *pool;     // APP_FRAME_SLOTS, internal RAM
-    QueueHandle_t clean;        // q_clean: dsp_afe_frame_t, PSRAM
-    QueueHandle_t dialog;       // q_dialog: app_event_t, PSRAM
-    QueueHandle_t cmd;          // q_cmd: device_cmd_t, PSRAM
-    QueueHandle_t cmdset;       // q_cmdset: const command_set_t *
-    QueueHandle_t speak;        // q_speak: app_speak_req_t, PSRAM; NULL without a speaker
-    QueueHandle_t event_up;     // q_event_up: app_event_t, PSRAM
-    EventGroupHandle_t system;  // eg_system: app_system_bit_t
-    app_afe_stats_t *afe_stats; // s_afe_stats, copied under afe_stats_lock only
+    QueueHandle_t frame;         // q_frame: slot index, thu_task -> sach_task
+    QueueHandle_t free_slots;    // q_free: slot index, sach_task -> thu_task
+    app_frame_slot_t *pool;      // APP_FRAME_SLOTS, internal RAM
+    QueueHandle_t clean;         // q_clean: dsp_afe_frame_t, PSRAM
+    QueueHandle_t dialog;        // q_dialog: app_event_t, PSRAM
+    QueueHandle_t cmd;           // q_cmd: device_cmd_t, PSRAM
+    QueueHandle_t cmdset;        // q_cmdset: const command_set_t *
+    QueueHandle_t speak;         // q_speak: app_speak_req_t, PSRAM; NULL without a speaker
+    QueueHandle_t event_up;      // q_event_up: app_event_t, PSRAM
+    StreamBufferHandle_t stream; // sb_stream, PSRAM; NULL without NET_STREAM_ENABLE
+    EventGroupHandle_t system;   // eg_system: app_system_bit_t
+    app_afe_stats_t *afe_stats;  // s_afe_stats, copied under afe_stats_lock only
     portMUX_TYPE *afe_stats_lock;
 } app_wiring_t;
 

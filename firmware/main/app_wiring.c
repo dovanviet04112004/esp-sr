@@ -14,6 +14,7 @@
 #define CMDSET_DEPTH 1
 #define SPEAK_DEPTH 4
 #define EVENT_UP_DEPTH 16
+#define STREAM_BUFFER_BYTES (64 * 1024) // about 0.5 s of mode 4 (KEHOACH 5.3)
 
 static const char *TAG = "app_wiring";
 
@@ -30,6 +31,9 @@ static StaticQueue_t s_frame_q, s_free_q, s_clean_q, s_dialog_q, s_cmd_q, s_cmds
 static StaticQueue_t s_speak_q;
 #endif
 static StaticEventGroup_t s_system_eg;
+#if CONFIG_NET_STREAM_ENABLE
+static StaticStreamBuffer_t s_stream_sb;
+#endif
 static app_afe_stats_t s_afe_stats;
 static portMUX_TYPE s_afe_stats_lock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -60,6 +64,13 @@ esp_err_t app_wiring_init(void)
 #if CONFIG_APP_SPEAKER_ENABLE
     s_wiring.speak = psram_queue(SPEAK_DEPTH, sizeof(app_speak_req_t), &s_speak_q);
     if (s_wiring.speak == NULL) { return ESP_ERR_NO_MEM; }
+#endif
+#if CONFIG_NET_STREAM_ENABLE
+    // A static stream buffer needs one byte more storage than it holds.
+    uint8_t *stream_storage = heap_caps_malloc(STREAM_BUFFER_BYTES + 1, MALLOC_CAP_SPIRAM);
+    if (stream_storage == NULL) { return ESP_ERR_NO_MEM; }
+    s_psram_bytes += STREAM_BUFFER_BYTES + 1;
+    s_wiring.stream = xStreamBufferCreateStatic(STREAM_BUFFER_BYTES, 1, stream_storage, &s_stream_sb);
 #endif
     if (s_wiring.clean == NULL || s_wiring.dialog == NULL || s_wiring.cmd == NULL ||
         s_wiring.event_up == NULL) {
