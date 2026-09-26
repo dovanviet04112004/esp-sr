@@ -10,6 +10,8 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.7",
     "pyroomacoustics>=0.8",
+    "pystoi>=0.4.1",
+    "pesq>=0.0.4",
 ]
 
 [project.optional-dependencies]
