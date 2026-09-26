@@ -1,0 +1,10 @@
+line-length = 120
+target-version = "py312"
+extend-exclude = ["**/generated/**", "**/managed_components/**", "**/build*/**"]
+
+[lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[lint.per-file-ignores]
+"tools/tests/*" = ["N802"]
+"tools/gen_contracts.py" = ["E501"]  # emits whole lines of C; wrapping them hurts more

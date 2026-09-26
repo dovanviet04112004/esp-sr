@@ -1,0 +1,24 @@
+# Close to ESP-IDF's own style; generated gen_*.h are excluded in .pre-commit-config.yaml.
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 110
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: Never
+  AfterStruct: false
+  AfterEnum: false
+  AfterUnion: false
+  BeforeElse: false
+  SplitEmptyFunction: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortBlocksOnASingleLine: Always
+AllowShortCaseLabelsOnASingleLine: true
+IndentCaseLabels: false
+PointerAlignment: Right
+AlignTrailingComments: true
+SortIncludes: Never
+IncludeBlocks: Preserve

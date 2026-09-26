@@ -1,0 +1,59 @@
+# Hooks git runs on every commit; CI runs the same set (KEHOACH 4.1, CLAUDE.md 7).
+repos:
+  - repo: local
+    hooks:
+      - id: check-comments
+        name: check comments (CLAUDE.md 2)
+        entry: python3 tools/check_comments.py
+        language: system
+        pass_filenames: false
+      - id: check-layers
+        name: check component layering (KEHOACH 4.5.4)
+        entry: python3 tools/check_layers.py
+        language: system
+        pass_filenames: false
+      - id: check-purity
+        name: check the pure layer (KEHOACH 4.5.3)
+        entry: python3 tools/check_purity.py
+        language: system
+        pass_filenames: false
+      - id: gen-contracts
+        name: generated code matches contracts (KEHOACH 4.2)
+        entry: python tools/gen_contracts.py
+        language: python
+        additional_dependencies: [pyyaml==6.0.2]
+        pass_filenames: false
+        files: ^(contracts/|tools/gen_contracts\.py)
+      - id: tools-tests
+        name: tests of tools/
+        entry: python -m unittest discover -s tools/tests -t .
+        language: python
+        additional_dependencies: [pyyaml==6.0.2, jsonschema==4.23.0]
+        pass_filenames: false
+        files: ^(contracts/|tools/)
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v18.1.8
+    hooks:
+      - id: clang-format
+        types_or: [c, c++]
+        exclude: (^firmware/(third_party|managed_components)/|/gen_[a-z_]+\.h$)
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: detect-private-key
