@@ -7,6 +7,8 @@ Chạy: `pytest firmware/test_apps/parity/pytest_parity.py --target esp32s3 --em
 |---|---|---|---|---|---|---|---|
 | `stft` — phổ phân tích | 4 | 7,6e-6 | 137,2 | ≤ 1e-4, ≥ 115 dB | — | 8cd377f | 26/09 |
 | `stft` — tổng hợp từ phổ vàng | 4 | 3,0e-7 | 137,4 | ≤ 1e-5, ≥ 115 dB | lệch một mẫu: 0,96, −3,1 dB → đỏ | 8cd377f | 26/09 |
+| `mel` — log-mel, ba cấu hình (40, 80, 24 dải) | 3 | 1,9e-6 | 139,9 | ≤ 1e-4, ≥ 115 dB | lệch một dải: 2,24, 3,0 dB → đỏ | e7de26f+ | 26/09 |
+| `mel` — MFCC (13, 20, 24 hệ số) | 3 | 1,5e-5 | 134,8 | ≤ 1e-3, ≥ 110 dB | — | e7de26f+ | 26/09 |
 
 ## Bản tham chiếu Python: STFT phân tích rồi tổng hợp (E6-T1)
 
