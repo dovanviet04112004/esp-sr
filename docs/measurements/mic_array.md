@@ -20,7 +20,7 @@ bootloader bởi chính `make session`; **không mở monitor serial trong lúc 
 | 2. Nền, Wi-Fi tắt | `make capture-radio-off-flash` | `--fw capture-radio-off@$D --prompt 'nền ồn, Wi-Fi tắt' --duration-s 60` | im lặng 62 s kể từ `board released` (board bỏ 1 s đầu, thu 60 s rồi mới gửi) | như trên, radio tắt |
 | 3. Vỗ tay đầu `ch1` | `make capture-flash` | `--fw capture@$D --doa-deg 0 --distance-cm 50 --prompt 'vỗ tay đầu ch1' --duration-s 180` | đứng trên đường thẳng qua hai lỗ micro, phía `ch1`, tay cách tâm dàn 50 cm, cao ngang dàn, vỗ 10 lần cách nhau 2 s | dấu của `τ` (E2-T7), nửa khoảng cách (E2-T4) |
 | 4. Vỗ tay đầu `ch0` | `make capture-flash` | như bước 3, `--doa-deg 180 --prompt 'vỗ tay đầu ch0'` | như bước 3, phía `ch0` | nửa còn lại: khoảng cách là nửa hiệu hai `τ` trung vị, lệch giờ giữa hai kênh là nửa tổng |
-| 5. Ồn trắng chính diện | `make capture-flash` | `--fw capture@$D --doa-deg 90 --distance-cm 100 --prompt 'ồn trắng chính diện 1 m' --duration-s 45` | điện thoại phát ồn trắng trên đường trung trực, cách 1 m, cao bằng board; bật sau 5 s, tắt sau 30 s; chỉnh âm lượng để `Peak` < 16 000 LSB | chênh độ nhạy, chênh pha (E2-T4); bản thu cho `balance` (E2-T6) |
+| 5. Ồn trắng chính diện | `make capture-flash` | `--fw capture@$D --doa-deg 90 --distance-cm 20 --prompt 'ồn trắng chính diện 20 cm' --duration-s 180` | tắt tiếng, im 10 s, rồi phát ồn trắng 30 s từ loa đặt trên đường trung trực, cách 20 cm, cao bằng board, âm lượng tối đa mà `Peak` < 16 000 LSB; tắt | chênh độ nhạy, chênh pha (E2-T4); bản thu cho `balance` (E2-T6) |
 
 **Nhận micro bằng dấu của `τ`, không bằng mức.** Micro nào nghe to hơn khi cào cạnh lỗ còn tuỳ độ nhạy hai kênh: trên
 board B cào lỗ `ch0` vẫn ra `ch1` to hơn 7–8 dB, vì `ch0` nghe nhỏ hơn ~10 dB ở mọi hướng. Đầu nào vỗ tay cho `τ` dương là
@@ -38,8 +38,8 @@ trong phòng gồm cả tiếng phòng nên số ấy là **chặn dưới**.
 | Chỉ tiêu | Mốc | Đo được | Cách đo | Ngày |
 |---|---|---|---|---|
 | Khoảng cách hai micro | 4–6,5 cm | **44,4 mm** bằng tiếng; ~45 mm bằng thước | bước 3 và 4 của §0: `τ` trung vị +1,89 và −2,25 mẫu, khoảng cách = nửa hiệu = 2,07 mẫu (`20260926_home_008`, `…_007`) | 26/09 |
-| Chênh độ nhạy | ≤ 3 dB | **+10,5 dB** (`ch1` to hơn) theo tiếng vỗ tay hai đầu — **trượt**; ồn trắng chính diện chưa đo | +9,9 dB đầu `ch1`, +11,1 dB đầu `ch0`, trung vị trên từng cú vỗ; ồn trắng chính diện 1 m là cách chấm chính | 26/09 |
-| Chênh pha | ≤ 10° | chưa đo; lệch giờ tĩnh giữa hai kênh −0,18 mẫu (−11 µs) theo vỗ tay | ồn trắng chính diện 1 m; lệch giờ = nửa tổng hai `τ` trung vị | 26/09 |
+| Chênh độ nhạy | ≤ 3 dB | **+10,8 … +11,6 dB** ở 200–1600 Hz, **+13,7 dB** ở 1,6–6,4 kHz (`ch1` to hơn) — **trượt** | ồn trắng chính diện 20 cm (`20260926_home_011`), khớp 50 cm (`…_010`) và vỗ tay hai đầu (+10,5 dB) | 26/09 |
+| Chênh pha | ≤ 10° | **−4,2 … −4,7°** ở 200–1600 Hz — đạt; **+24 … +34°** ở 1,6–6,4 kHz — trượt; lệch giờ tĩnh −0,18 mẫu (−11 µs) | ồn trắng chính diện 20 cm và 50 cm, như nhau ở hai khoảng cách; lệch giờ = nửa tổng hai `τ` trung vị của vỗ tay | 26/09 |
 | SNR `ch0` / `ch1` | ≥ 62 dB (INMP441 ghi 61 dBA) | **≥ 54,4 / ≥ 49,3 dB** (chặn dưới) | −29,0 dBFS (độ nhạy datasheet ở 94 dB SPL) trừ nền A khi Wi-Fi tắt | 26/09 |
 | Nền ồn khi Wi-Fi phát / tắt | — | `ch0` −82,9 / −83,4 dBFS(A); `ch1` −78,1 / −78,3 dBFS(A) | bước 2 và 3 của §0, 60 s mỗi phiên, liền nhau: `20260926_home_004`, `…_005` | 26/09 |
 
@@ -50,6 +50,12 @@ trong phòng gồm cả tiếng phòng nên số ấy là **chặn dưới**.
 **Wi-Fi không làm micro ồn thêm** (26/09, `20260926_home_004` phát, `…_005` tắt, liền nhau, cùng chỗ): nền A đổi không
 quá 0,5 dB khi tắt radio, ở cả hai kênh. Phiên `20260926_home_003` là lần thử đầu của chế độ tắt radio, còn dính 0,5 s
 micro vừa cấp điện (một chiều trôi từ −1400 LSB); đừng dùng mức RMS của nó.
+
+**Ồn trắng chính diện: gần mới đo được.** Loa điện thoại ở mức tối đa chỉ trên nền 20–30 dB và gần như không phát dưới
+200 Hz, nên dải 50–200 Hz không đo được bằng nó. Ở 1 m (`20260926_home_009`) độ kết hợp trên 800 Hz chỉ 0,5–0,7: tiếng dội
+của phòng lấn tiếng thẳng, và pha ở đó đổi theo chỗ đặt loa. Ở 50 cm và 20 cm (`…_010`, `…_011`) độ kết hợp 200–1600 Hz là
+0,97–0,998 và dải 1,6–6,4 kHz ổn định ở ~0,8 với cùng chênh mức và chênh pha ở cả hai khoảng cách. Phiên phải bắt đầu bằng
+một đoạn im (`…_010` phát liền từ đầu nên `score` không tách được khung nguồn khỏi khung nền).
 
 **`ch0` nghe nhỏ hơn `ch1` ~10,5 dB ở mọi hướng** (vỗ tay hai đầu, 26/09, board trong hộp). Điều này giải thích phần
 "`ch1` ồn hơn" của các phiên im lặng: dưới 1 kHz tiếng phòng lấn nền điện tử của micro, và `ch0` nhận ít tiếng phòng hơn
