@@ -388,18 +388,32 @@ tính bằng dB; đáp ứng biên độ ở 100 Hz và 200 Hz khớp bản Pyth
 **`balance`** — một hệ số phức `g[k]` cho mỗi vạch `k`, nhân vào `ch1` sau STFT:
 `X₁'[k] = g[k] · X₁[k]`. Biên độ của `g` bù chênh độ nhạy, pha của `g` bù chênh pha **tĩnh**.
 
-Hệ số đo bằng `test_apps/calib` (E2-T6): loa đặt **chính diện** cách 1 m trong phòng ít vang, phát
-ồn trắng 30 s; ở chính diện trễ thật bằng 0, nên mọi chênh lệch còn lại giữa hai kênh là của linh
-kiện. `g[k] = S₀₀[k] / S₁₀[k]`, tính từ phổ tự và phổ chéo trung bình, làm trơn theo tần số bằng cửa
-sổ 5 vạch. Lưu blob 257 × 2 float vào NVS `calib/bal` kèm số hiệu và ngày đo.
+Hệ số ước bằng `srpipe.dsp.afe.balance` (E2-T6) từ các phiên ồn trắng **chính diện**: loa trên đường trung trực
+của dàn, cách **20 cm**, sau một đoạn im (`mic_array.md` §0 bước 5), thu bằng `capture`. Ở chính diện trễ thật bằng 0,
+nên chênh lệch còn lại giữa hai kênh là của linh kiện **cộng** tiếng dội của phòng; đo trên board B cho thấy phần
+thứ hai không bỏ qua được (`mic_array.md`): cùng một board, đặt loa trước hay sau hộp, chênh **mức** giữ nguyên còn
+**pha** trên 1,6 kHz đổi tới 40°. Vì thế `g` chỉ lấy phần các chỗ đặt loa cùng đồng ý:
+
+| Phần của `g[k]` | Cách ước | Vì sao |
+|---|---|---|
+| Biên độ | `√(S₀₀[k] / S₁₁[k])` trên phổ tự cộng dồn của **mọi** phiên hiệu chuẩn (ít nhất hai chỗ đặt loa), làm trơn theo tần số bằng trung bình trượt 5 vạch trên dB | mức là của linh kiện, không đổi theo chỗ đặt loa |
+| Pha | `−(φ₀ + ω_k·τ)`, với `τ` và `φ₀` khớp từ đường pha của phổ chéo cộng dồn (`mic_pair.linear_phase_fit`, 200 Hz – c/2d) | pha từng vạch ở dải cao là của phòng; trễ nhỏ cộng pha hằng là phần mọi phép đo cùng thấy |
+| Vạch 0 và 256 | phần ảo bằng 0 | hai vạch này của phổ thực là số thực |
+
+Phổ lấy ở đúng lưới của firmware (FFT 512, 257 vạch). **Kiểm chéo trước khi ghi**: ước từ một chỗ đặt loa, áp
+lên phiên của chỗ còn lại; chênh biên độ sau bù phải dưới 1 dB ở mọi dải có độ kết hợp ≥ 0,9. `host/src/srhost/calib.py`
+ước, in bảng kiểm, lưu hệ số thành `docs/measurements/calib/<board>_balance.csv` (số đo, commit), rồi gửi xuống
+console của `test_apps/calib`; app ấy ghi blob 257 × 2 float vào NVS `calib/bal` kèm `bal_ver`, `bal_at` và đọc lại
+CRC32 để máy tính đối chiếu với bản đã gửi.
 
 Vì sao sau STFT: bù theo dải ở miền tần số là **một phép nhân mỗi vạch**; ở miền thời gian phải dựng
 một bộ lọc cân bằng pha tuyến tính. Phép bù tuyến tính và bất biến nên đổi chỗ với AEC (cũng tuyến
 tính, mỗi kênh một bộ) không đổi kết quả; ràng buộc "trước mọi phép không gian" của TỔNG QUAN §2.2
 vẫn giữ vì `balance` đứng ngay trước `doa`.
 
-Thước: chênh biên độ sau bù **dưới 1 dB** toàn băng 50 Hz – 8 kHz (TỔNG QUAN V5.0.2); chênh pha sau
-bù ghi thành số, đo lại ở hai nhiệt độ phòng để biết phần trôi.
+Thước: chênh biên độ sau bù **dưới 1 dB** toàn băng 50 Hz – 8 kHz (TỔNG QUAN V5.0.2) trên phiên không dùng để
+ước; chênh pha sau bù ghi thành số, đo lại ở hai nhiệt độ phòng để biết phần trôi. Loa điện thoại gần như không
+phát dưới 200 Hz; ở đó nguồn là chính tiếng phòng, vốn kết hợp tốt giữa hai micro cách nhau 4,5 cm.
 
 ### 3.5 `aec`
 
@@ -721,6 +735,7 @@ esp-sr/
     ├── adr/                             # quyết định có bảng đối chứng
     └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md}
                       ├ bench/           # CSV thô của bench_*, commit cùng bảng nó sinh ra
+                      ├ calib/           # hệ số hiệu chuẩn từng board (balance), bản đã ghi xuống NVS
                       └ {afe,kws,tts}/   # số 🔬 theo khối
 ```
 
@@ -749,7 +764,7 @@ học dàn micro, payload MQTT, khuôn luồng tiếng, bộ lệnh mặc địn
 `contracts/`, mỗi bên sinh code từ đó.
 
 **Vì sao `host/` tách khỏi `ml/`.** Cùng Python nhưng hai vòng đời: `ml/` kéo PyTorch, ESP-PPQ và chạy
-hàng giờ trên GPU; `host/` chạy cạnh board suốt buổi đo, chỉ cần `paho-mqtt`, `numpy`, `soundfile`.
+hàng giờ trên GPU; `host/` chạy cạnh board suốt buổi đo, chỉ cần `paho-mqtt`, `numpy`, `pyserial`; `srpipe` là phần phụ `score` cho việc chấm và hiệu chuẩn.
 Gộp lại là bắt máy đo cài PyTorch.
 
 ### 4.2 `contracts/`
@@ -1283,7 +1298,8 @@ host/
 │   ├── stream_rx.py               # máy chủ TCP: nhận khung, phát hiện hở seq, ghi WAV từng kênh + json kèm
 │   ├── live.py                    # xem trực tiếp: hướng, cờ tiếng nói, mức, sự kiện
 │   ├── session.py                 # phiên thu có nhãn: danh sách câu nhắc, mã người nói, mã phiếu đồng ý
-│   └── score.py                   # chấm một phiên đã thu theo nhãn, gọi ml/src/srpipe/metrics
+│   ├── score.py                   # chấm một phiên đã thu theo nhãn, gọi ml/src/srpipe/metrics
+│   └── calib.py                   # ước balance từ phiên ồn trắng (srpipe), kiểm chéo, ghi xuống test_apps/calib
 └── tests/
 ```
 
