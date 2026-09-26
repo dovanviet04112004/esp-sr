@@ -60,8 +60,7 @@ firmware/models/**/*.bin
 .env
 .env.*
 !.env.example
-deploy/mosquitto/passwd
-deploy/mosquitto/certs/
+deploy/emqx/certs/
 
 # ── Datasheet: chỉ giữ INDEX.md (KE HOACH §2.5) ──
 hardware/datasheets/*.pdf
