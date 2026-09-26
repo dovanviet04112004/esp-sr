@@ -64,8 +64,10 @@ monitor: ## Open the serial monitor on the CH340 port
 	cd firmware && idf.py -p $(PORT) monitor
 
 # broker and host
-broker-up: ## Start the bench MQTT broker
-	cd deploy && docker compose up -d
+broker-up: ## Start the bench MQTT broker (needs deploy/.env and deploy/emqx/users.csv)
+	@test -f deploy/.env || { echo "copy deploy/.env.example to deploy/.env and fill it"; exit 1; }
+	@test -f deploy/emqx/users.csv || { echo "copy deploy/emqx/users.csv.example to deploy/emqx/users.csv and fill it"; exit 1; }
+	cd deploy && docker compose up -d --wait
 
 broker-down: ## Stop the bench MQTT broker
 	cd deploy && docker compose down

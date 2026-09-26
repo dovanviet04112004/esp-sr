@@ -61,6 +61,7 @@ firmware/models/**/*.bin
 .env.*
 !.env.example
 deploy/emqx/certs/
+deploy/emqx/users.csv
 
 # ── Datasheet: chỉ giữ INDEX.md (KE HOACH §2.5) ──
 hardware/datasheets/*.pdf

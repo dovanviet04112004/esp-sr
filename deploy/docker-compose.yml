@@ -1,0 +1,33 @@
+# The bench MQTT broker (KEHOACH 4.7). Secrets come from .env and emqx/users.csv, both outside git.
+name: esp-sr
+
+services:
+  emqx:
+    image: emqx/emqx:6.3.1
+    container_name: sr-emqx
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      # Loopback only, and 18084 because the face attendance broker holds 18083 on this machine.
+      - "127.0.0.1:18084:18083"
+    environment:
+      EMQX_NODE__NAME: emqx@127.0.0.1
+      EMQX_NODE__COOKIE: ${EMQX_NODE_COOKIE:?set EMQX_NODE_COOKIE in deploy/.env}
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:?set EMQX_DASHBOARD_PASSWORD in deploy/.env}
+      # Held in RAM, retained messages die with the broker, and so does the offline status of a board that is off.
+      EMQX_RETAINER__BACKEND__STORAGE_TYPE: disc
+    volumes:
+      - ./emqx/emqx.conf:/opt/emqx/etc/emqx.conf:ro
+      - ./emqx/acl.conf:/opt/emqx/etc/sr-acl.conf:ro
+      - ./emqx/users.csv:/opt/emqx/etc/sr-users.csv:ro
+      - sr-emqx-data:/opt/emqx/data
+      - sr-emqx-log:/opt/emqx/log
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  sr-emqx-data:
+  sr-emqx-log:
