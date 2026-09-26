@@ -1,0 +1,10 @@
+# C dsp_spec against srpipe.dsp.spec for log-mel and MFCC (KEHOACH 3.14, E6-T5).
+# Both sides are float32; the C side measured at least 139.9 dB on log_mel and 134.8 dB on mfcc,
+# so each floor keeps 20 dB or more of margin. case_neg_* must fall outside these limits.
+tensors:
+  log_mel:
+    max_abs: 1.0e-4
+    min_snr_db: 115.0
+  mfcc:
+    max_abs: 1.0e-3
+    min_snr_db: 110.0

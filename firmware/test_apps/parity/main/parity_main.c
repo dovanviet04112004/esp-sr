@@ -22,6 +22,7 @@ static const struct {
     parity_runner_t run;
 } kBlocks[] = {
     {"stft", parity_stft},
+    {"mel", parity_mel},
 };
 
 bool parity_tensor(const void *buf, size_t len, const char *name, gold_tensor_t *out)

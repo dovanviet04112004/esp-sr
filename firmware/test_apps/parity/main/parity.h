@@ -24,3 +24,9 @@ void parity_report(const char *block, const char *case_name, const char *tensor,
  *  @ret false when the case lacks a tensor or memory runs out
  */
 bool parity_stft(const char *case_name, const void *buf, size_t len);
+
+/** Run one mel case with the configuration it carries: log-mel of its bins, then MFCC of that log-mel.
+ *  @ctx task | blocking
+ *  @ret false when the case lacks a tensor, carries a bad configuration or memory runs out
+ */
+bool parity_mel(const char *case_name, const void *buf, size_t len);
