@@ -237,7 +237,7 @@ Chạy song song từ lúc `net_mqtt` có ở E5.
 
 | ID | Task | Xong khi | Chặn bởi | V5 |
 |---|---|---|---|---|
-| E13-T1 | Hoàn thiện bảy schema và `mqtt_topics.yaml` theo §7.3; sinh code cho `host/` | `host` và firmware cùng sinh từ một nguồn, `contracts.yml` xanh | E1-T4 | V5.7.4 |
+| ~~E13-T1~~ | **Xong 26/09.** Hoàn thiện bảy schema và `mqtt_topics.yaml` theo §7.3; sinh code cho `host/`. Bảy schema đã đủ trường của §7.3; `telemetry.levelDbfs` mở xuống −128 cho khớp `dsp_afe`. `gen_contracts.py` sinh thêm `SCHEMAS` vào `srhost.generated.payload` (§7.7: host đọc schema từ code sinh). Gói `host/`: `pyproject.toml`, `uv.lock`, `jsonschema` | `host` và firmware cùng sinh từ một nguồn; 24/24 pytest của `host`, gồm một heartbeat thật của board B hợp lệ và ba bản bị sửa bị từ chối; `contracts`, `host`, `firmware`, `ml` xanh ở `27a2869` | E1-T4 | V5.7.4 |
 | E13-T2 | `host/mqtt_rx.py` + `live.py` | xem trực tiếp hướng, cờ tiếng nói, mức, sự kiện; payload sai schema bị ghi lại | E13-T1 | — |
 | E13-T3 | `host/stream_rx.py` + `session.py`: phiên thu có nhãn, mã người nói, mã phiếu | một phiên ra đúng khuôn KẾ HOẠCH §4.4.1 ở `raw/device/board_b/<phiên>/`: WAV từng kênh + `session.json` + `gaps.txt`, và một dòng mới trong `manifests/device/board_b.csv` | E13-T1 | V5.5.6 |
 | E13-T4 | `host/score.py` gọi `srpipe.metrics` | chấm một phiên đã thu ra bảng giống `make report` | E13-T3, E4-T5 | — |
