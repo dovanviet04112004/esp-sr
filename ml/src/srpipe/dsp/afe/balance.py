@@ -1,7 +1,7 @@
 """balance of dsp_afe: one complex gain per bin on ch1 after the STFT, and its estimate (KEHOACH 3.4).
 
 apply is the reference the firmware module of E7-T2 must match, in float32. estimate runs on the host from
-frontal white noise sessions: magnitude per bin from pooled auto spectra, phase from the pooled phase line.
+frontal white noise sessions: magnitude from pooled auto spectra over 1/3 octave, phase from the pooled phase line.
 """
 
 from __future__ import annotations
@@ -14,7 +14,8 @@ import numpy as np
 from srpipe.generated import array, grid
 from srpipe.metrics import mic_pair
 
-SMOOTH_BINS = 5
+SMOOTH_MIN_BINS = 5
+SMOOTH_OCTAVE_FRACTION = 3
 # Twice the nominal reach, as host/score searches, so a wrong spacing still shows as a delay.
 MAX_LAG_SAMPLES = 2.0 * array.MAX_DELAY_SAMPLES
 
@@ -29,12 +30,19 @@ class Balance:
     active_frames: int
 
 
-def smooth_db(level_db: np.ndarray, width: int = SMOOTH_BINS) -> np.ndarray:
-    """Moving average over width bins; the ends average over the bins that exist."""
-    kernel = np.ones(width)
-    total = np.convolve(level_db, kernel, mode="same")
-    count = np.convolve(np.ones_like(level_db), kernel, mode="same")
-    return total / count
+def smoothed_ratio(num: np.ndarray, den: np.ndarray) -> np.ndarray:
+    """Per bin, sum(num) / sum(den) over a 1/3-octave window around it, never fewer than SMOOTH_MIN_BINS bins.
+
+    Summing power before dividing keeps a notch of the room in one channel from dominating its window.
+    """
+    k = np.arange(len(num), dtype=np.float64)
+    half_width = k * (2.0 ** (0.5 / SMOOTH_OCTAVE_FRACTION) - 1.0)
+    reach = np.maximum(np.ceil(half_width), SMOOTH_MIN_BINS // 2).astype(int)
+    lo = np.clip(np.arange(len(num)) - reach, 0, len(num) - 1)
+    hi = np.clip(np.arange(len(num)) + reach, 0, len(num) - 1)
+    num_sum = np.concatenate([[0.0], np.cumsum(num)])
+    den_sum = np.concatenate([[0.0], np.cumsum(den)])
+    return (num_sum[hi + 1] - num_sum[lo]) / (den_sum[hi + 1] - den_sum[lo])
 
 
 def estimate(sessions: Sequence[mic_pair.PairStats]) -> Balance:
@@ -45,7 +53,7 @@ def estimate(sessions: Sequence[mic_pair.PairStats]) -> Balance:
     stats.need_source()
     if np.any(stats.s00 <= 0) or np.any(stats.s11 <= 0):
         raise ValueError("a bin carries no energy on one channel")
-    magnitude = 10.0 ** (smooth_db(10.0 * np.log10(stats.s00 / stats.s11)) / 20.0)
+    magnitude = np.sqrt(smoothed_ratio(stats.s00, stats.s11))
     start = mic_pair.gcc_phat_delay(stats, MAX_LAG_SAMPLES).tau_samples
     tau, phase0_deg = mic_pair.linear_phase_fit(stats, start)
     omega = 2.0 * np.pi * np.arange(grid.N_BINS) / grid.FFT_SIZE

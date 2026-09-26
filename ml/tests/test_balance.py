@@ -22,7 +22,7 @@ def burst(seconds: float = 6.0, seed: int = 0) -> np.ndarray:
 
 def response(freqs_hz: np.ndarray) -> np.ndarray:
     """A smooth ch1 over ch0 level, about +11 dB like board B, rising 3 dB towards 3 kHz."""
-    return 3.5 * (1.0 + 0.4 * np.exp(-(((freqs_hz - 3000.0) / 1200.0) ** 2)))
+    return 3.5 * (1.0 + 0.4 * np.exp(-(((freqs_hz - 3000.0) / 2400.0) ** 2)))
 
 
 def through(x: np.ndarray, extra_phase_deg_above_1600: float = 0.0) -> np.ndarray:
@@ -84,3 +84,12 @@ def test_spectra_off_the_firmware_grid_are_refused() -> None:
     x0 = burst(seconds=2.0)
     with pytest.raises(ValueError, match=str(grid.FFT_SIZE)):
         balance.estimate([mic_pair.pair_stats(x0, through(x0), frame_samples=1024)])
+
+
+def test_a_room_notch_in_one_bin_barely_moves_the_smoothed_level() -> None:
+    num = np.ones(grid.N_BINS)
+    den = np.ones(grid.N_BINS)
+    den[150] = 1e-3
+    ratio_db = 10 * np.log10(balance.smoothed_ratio(num, den))
+    assert ratio_db[150] < 0.3
+    assert ratio_db[:100] == pytest.approx(np.zeros(100))
