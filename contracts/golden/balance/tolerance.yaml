@@ -1,0 +1,8 @@
+# C dsp_afe balance against srpipe.dsp.afe.balance.apply (KEHOACH 3.4, E7-T2).
+# Both sides take four float32 products and two sums per bin in the same order. A compiler that fuses a
+# multiply-add would land at 148 dB and 1.5e-5 on a bin of 164; the limits keep that inside. case_neg_* multiplies
+# by the conjugate gains and lands at -3.5 dB, far outside.
+tensors:
+  output:
+    max_abs: 5.0e-5
+    min_snr_db: 130.0

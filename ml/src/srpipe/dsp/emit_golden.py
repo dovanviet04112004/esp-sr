@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from srpipe.dsp.afe import chain, hpf
+from srpipe.dsp.afe import balance, chain, hpf
 from srpipe.dsp.spec import mel, stft
 from srpipe.generated import afe, array, grid
 from srpipe.golden.gold import write_gold
@@ -25,6 +25,7 @@ MEL_FRAMES = 8
 CHAIN_HOPS = 16
 CHAIN_RESET_HOP = 8
 HPF_HOPS = 16
+BALANCE_HOPS = 16
 LSB = 1.0 / 32768.0
 MEL_CASES = (
     (mel.MelConfig(n_bands=40, f_min_hz=20.0, f_max_hz=7600.0, log_floor=1e-6), 13),
@@ -217,11 +218,65 @@ def emit_hpf(root: Path) -> list[Path]:
     return written
 
 
+def board_like_gains() -> np.ndarray:
+    """Gains shaped like an estimate of board B: about -11 dB with a bump near 3 kHz, -0.1 sample and -2.2 degrees."""
+    freqs_hz = np.arange(grid.N_BINS) * grid.SAMPLE_RATE_HZ / grid.FFT_SIZE
+    level = 10 ** (-11.0 / 20.0) * (1.0 + 0.3 * np.exp(-(((freqs_hz - 3000.0) / 2400.0) ** 2)))
+    omega = 2.0 * np.pi * np.arange(grid.N_BINS) / grid.FFT_SIZE
+    phase = -(np.radians(-2.2) + omega * -0.1)
+    phase[0] = phase[-1] = 0.0
+    return (level * np.exp(1j * phase)).astype(np.complex64)
+
+
+def _balance_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray]]:
+    """(ch1 signal, gains) per case: board-like gains on noise, unit gains on a chirp, wide gains near full scale,
+    board-like gains on near silence."""
+    n = BALANCE_HOPS * grid.HOP_SAMPLES
+    t = np.arange(n) / grid.SAMPLE_RATE_HZ
+    chirp = 0.5 * np.sin(2 * np.pi * (20.0 * t + (7900.0 - 20.0) / 2.0 * t**2 / t[-1]))
+    wide = 10 ** rng.uniform(-2.0, 1.0, grid.N_BINS) * np.exp(1j * rng.uniform(-np.pi, np.pi, grid.N_BINS))
+    return [
+        (rng.uniform(-0.5, 0.5, n), board_like_gains()),
+        (chirp, np.ones(grid.N_BINS, dtype=np.complex64)),
+        (rng.uniform(-0.99, 0.99, n), wide.astype(np.complex64)),
+        (rng.uniform(-1e-4, 1e-4, n), board_like_gains()),
+    ]
+
+
+def _pairs(values: np.ndarray) -> np.ndarray:
+    return np.stack([values.real, values.imag], axis=-1).astype(np.float32)
+
+
+def balance_case(signal: np.ndarray, gains: np.ndarray) -> dict[str, np.ndarray]:
+    """ch1 bins of each hop as the analyser gives them, the gains, and the bins after balance, as re, im pairs."""
+    spectra = stft.analyze_signal(signal.astype(np.float32))
+    return {"bins": _pairs(spectra), "gains": _pairs(gains), "output": _pairs(balance.apply(spectra, gains))}
+
+
+def emit_balance(root: Path) -> list[Path]:
+    """Four cases, then a negative control that multiplies by the conjugate of wide random gains."""
+    rng = np.random.default_rng(SEED + 4)
+    written = []
+    for index, (signal, gains) in enumerate(_balance_inputs(rng)):
+        path = root / "balance" / f"case_{index:03d}.gold"
+        write_gold(path, balance_case(signal, gains))
+        written.append(path)
+    gains = np.exp(1j * rng.uniform(-np.pi, np.pi, grid.N_BINS)).astype(np.complex64)
+    negative = balance_case(rng.uniform(-0.5, 0.5, BALANCE_HOPS * grid.HOP_SAMPLES), gains)
+    spectra = negative["bins"][..., 0] + 1j * negative["bins"][..., 1]
+    negative["output"] = _pairs(balance.apply(spectra, np.conj(gains)))
+    path = root / "balance" / "case_neg_000.gold"
+    write_gold(path, negative)
+    written.append(path)
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
-    for path in emit_stft(args.out) + emit_mel(args.out) + emit_chain(args.out) + emit_hpf(args.out):
+    emitted = emit_stft(args.out) + emit_mel(args.out) + emit_chain(args.out) + emit_hpf(args.out)
+    for path in emitted + emit_balance(args.out):
         print(path.relative_to(args.out) if path.is_relative_to(args.out) else path)
     return 0
 

@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from srpipe.dsp import emit_golden
+from srpipe.dsp.afe import balance
 from srpipe.dsp.spec import mel, stft
 from srpipe.golden.gold import read_gold
 
@@ -83,3 +84,24 @@ def test_the_hpf_negative_control_is_one_sample_late() -> None:
     right = emit_golden.hpf_case(case["input"])["output"]
     assert np.array_equal(case["output"][:, 1:], right[:, :-1])
     assert not np.allclose(case["output"], right, atol=1e-3)
+
+
+def test_committed_balance_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_balance(tmp_path):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
+
+
+def test_the_unit_balance_case_leaves_the_bins_unchanged() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "balance" / "case_001.gold")
+    assert np.all(case["gains"] == [1.0, 0.0])
+    np.testing.assert_array_equal(case["output"], case["bins"])
+
+
+def test_the_balance_negative_control_takes_the_conjugate_gains() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "balance" / "case_neg_000.gold")
+    bins = case["bins"][..., 0] + 1j * case["bins"][..., 1]
+    gains = case["gains"][:, 0] + 1j * case["gains"][:, 1]
+    got = case["output"][..., 0] + 1j * case["output"][..., 1]
+    np.testing.assert_array_equal(got, balance.apply(bins, np.conj(gains)))
+    assert np.max(np.abs(got - balance.apply(bins, gains))) > 1.0
