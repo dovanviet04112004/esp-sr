@@ -49,7 +49,8 @@ static struct {
 
 static bool wants_clean(uint8_t mode)
 {
-    return mode == GEN_STREAM_MODE_CLEAN || mode == GEN_STREAM_MODE_RAW_REF_CLEAN;
+    return mode == GEN_STREAM_MODE_CLEAN || mode == GEN_STREAM_MODE_RAW_REF_CLEAN ||
+           mode == GEN_STREAM_MODE_RAW_CLEAN;
 }
 
 static uint8_t raw_needed(uint8_t mode)
