@@ -897,6 +897,8 @@ ml/
 │   ├── golden/gold.py                 # ★ khuôn .gold — một khuôn, một chỗ
 │   ├── scenes/                        # ★ dựng cảnh có nhãn bằng pyroomacoustics: phòng, RT60,
 │   │                                  #   hướng người nói và nhiễu, SNR, dàn micro từ array.yaml
+│   │   └── vad.py                     # câu đọc + khoảng nghỉ + nhiễu ở SNR và mức cho trước, nhãn mỗi bước
+│   │                                  #   từ tiếng sạch; chấm vad với ngưỡng năng lượng trần (§3.10)
 │   │
 │   ├── dsp/                           # ── THUẬT TOÁN THUẦN, soi gương firmware 1:1 ──
 │   │   ├── spec/{fft.py, window.py, stft.py, mel.py, pitch.py}        # ★ dsp_spec
@@ -913,7 +915,7 @@ ml/
 │   │   ├── command/                   # mạng âm học + CTC; postproc/ctc_score.py ★
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
-│   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py}
+│   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py}
 │   ├── compress/quant/ptq_espdl.py    # ESP-PPQ → .espdl + mô phỏng int8 trên máy tính
 │   └── export/{pack_models.py, update_lock.py}
 │
@@ -950,7 +952,7 @@ ml/data/                                   # trong repo — chỉ siêu dữ li�
 ├── README.md                              # cái gì nằm ở đâu, lệnh nào sinh ra
 ├── manifests/                             # một file cho một kho, cùng bố cục với raw/
 │   ├── speech/{common_voice_vi, vivos, fpt_open, vlsp}.yaml
-│   ├── noise/{musan, demand, dns}.yaml
+│   ├── noise/{musan, demand, dns, speech_commands}.yaml
 │   ├── rir/openslr28.yaml
 │   └── device/board_b.csv                 # ★ mỗi phiên thu qua board một dòng
 └── splits/                                # mỗi nhánh một thư mục, mỗi phiên bản một thư mục con
