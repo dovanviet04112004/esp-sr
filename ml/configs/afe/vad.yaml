@@ -1,0 +1,14 @@
+# Scoring of vad on labelled scenes (KEHOACH 3.10, 3.15); module numbers stay in contracts/afe.yaml.
+eval:
+  speech: speech/vivos/test/waves          # under raw/: every utterance of VIVOS test, 19 speakers
+  noise: noise/speech_commands/_background_noise_
+  seed: 20260927
+  speech_s_per_scene: 120.0               # read speech per scene, pauses on top
+  pause_s: [0.5, 2.0]                     # uniform, digital silence before the noise
+  snr_db: [20.0, 10.0, 5.0, 0.0]          # active speech over the whole noise
+  level_dbfs: [-26.0, -40.0]              # active speech, square full scale, ahead of agc
+  aggressiveness: [0, 1, 2, 3]
+  label_below_peak_db: 40.0               # a speech hop is within this of its utterance's loudest hop
+  label_above_floor_db: 10.0              # and this above the utterance's own quiet hops
+  floor_percentile: 10.0
+  energy_thresholds_dbfs: [-80.0, -10.0, 1.0]   # sweep of the bare energy detector: first, last, step

@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session
 
 PORT ?= /dev/ttyUSB0
@@ -46,6 +46,9 @@ ci-status: ## Copy the GitHub Actions results of HEAD onto the same commit in Gi
 # measurements
 golden: ## Emit golden vectors into contracts/golden/
 	cd ml && ./scripts/41_emit_golden.sh
+
+eval-vad: ## Score vad against a bare energy threshold on labelled scenes of VIVOS test (docs/measurements/afe/vad.md)
+	cd ml && uv run python -m srpipe.scenes.vad --workers 16
 
 measure: ## Merge bench CSVs into docs/measurements/budget.md
 	python3 -m tools.budget
