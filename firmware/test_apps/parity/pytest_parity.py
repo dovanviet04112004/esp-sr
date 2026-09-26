@@ -21,11 +21,13 @@ NEGATIVE_PREFIX = "case_neg_"
 
 
 def judge(lines: list[str], golden: Path = GOLDEN) -> list[str]:
-    """Every broken expectation: a case outside tolerance, a negative control inside it, a case never run.
+    """Every broken expectation: a case outside tolerance, a negative control inside it, a case never run, a tensor of
+    tolerance.yaml a case never reported (a line lost on the serial link must not pass for a good one).
 
     A run that prints "PARITY plan <blocks>" answers for those blocks only; without a plan every block counts.
     """
     passed: dict[tuple[str, str], list[bool]] = {}
+    reported: dict[tuple[str, str], set[str]] = {}
     tolerances: dict[str, dict] = {}
     for line in lines:
         match = LINE.search(line)
@@ -37,6 +39,7 @@ def judge(lines: list[str], golden: Path = GOLDEN) -> list[str]:
         limit = tolerances[block]["tensors"][tensor]
         within = float(max_abs) <= limit["max_abs"] and float(snr_db) >= limit["min_snr_db"]
         passed.setdefault((block, case), []).append(within)
+        reported.setdefault((block, case), set()).add(tensor)
     problems = [] if any(DONE.search(line) for line in lines) else ["the app never printed PARITY done"]
     planned = {block for line in lines if (plan := PLAN.search(line.strip())) for block in plan.group(1).split()}
     for block_dir in sorted(p for p in golden.iterdir() if p.is_dir() and (not planned or p.name in planned)):
@@ -44,6 +47,10 @@ def judge(lines: list[str], golden: Path = GOLDEN) -> list[str]:
             key = (block_dir.name, gold.stem)
             if key not in passed:
                 problems.append(f"{key[0]}/{key[1]} never ran")
+                continue
+            expected = set(tolerances[key[0]]["tensors"])
+            if missing := sorted(expected - reported[key]):
+                problems.append(f"{key[0]}/{key[1]} never reported {', '.join(missing)}")
             elif gold.stem.startswith(NEGATIVE_PREFIX) and all(passed[key]):
                 problems.append(f"{key[0]}/{key[1]} is a negative control and passed")
             elif not gold.stem.startswith(NEGATIVE_PREFIX) and not all(passed[key]):
