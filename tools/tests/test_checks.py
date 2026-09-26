@@ -145,6 +145,14 @@ class CommentTests(unittest.TestCase):
         text = "x = 1  # " + "y" * 60 + "\n"
         self.assertIn("trailing comment", " ".join(self.rules("a.py", text)))
 
+    def test_prose_starting_with_a_keyword_is_not_code(self) -> None:
+        text = "uint32_t handle; // for sys_storage_unmap_models\nuint32_t off; // from the partition start\n"
+        self.assertEqual(self.rules("a.h", text), [])
+
+    def test_commented_out_c_and_python_code_fails(self) -> None:
+        self.assertIn("commented-out code", " ".join(self.rules("a.c", "int x;\n// for (int i = 0; i < n; i++)\n")))
+        self.assertIn("commented-out code", " ".join(self.rules("a.py", "x = 1\n# from os import path\n")))
+
     def test_generated_file_needs_the_full_banner(self) -> None:
         text = "# GENERATED FILE - DO NOT EDIT.\n# Source: x\nX = 1\n"
         self.assertIn("third banner line", " ".join(self.rules("g.py", text)))
