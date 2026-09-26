@@ -142,6 +142,7 @@ class Score:
     channels: list[ChannelFigures]
     parity: ParityFigures | None
     pair: PairFigures | None
+    trimmed_samples: int = 0
 
 
 def pair_figures(stats: mic_pair.PairStats, doa_deg: int) -> PairFigures:
@@ -166,6 +167,10 @@ def score(session: Path) -> Score:
     pcm = {p.stem: read_wav(p) for p in sorted(session.glob("*.wav"))}
     if not pcm:
         raise ValueError(f"{session} holds no WAV")
+    # A receiver stopped inside a frame leaves the last frame on some channels only; score the common part.
+    common = min(len(samples) for samples in pcm.values())
+    trimmed = max(len(samples) for samples in pcm.values()) - common
+    pcm = {name: samples[:common] for name, samples in pcm.items()}
     floors = {}
     stats = None
     if all(name in pcm for name in PAIR_CHANNELS):
@@ -180,7 +185,7 @@ def score(session: Path) -> Score:
     pair = None
     if stats is not None and meta.get("doa_deg") is not None:
         pair = pair_figures(stats, int(meta["doa_deg"]))
-    return Score(meta, channels, parity, pair)
+    return Score(meta, channels, parity, pair, trimmed)
 
 
 def pair_lines(pair: PairFigures) -> list[str]:
@@ -209,6 +214,11 @@ def table(result: Score) -> str:
     lines = [
         f"session {meta['session']}  kind {meta['kind']}  fw {meta['fw']}  pcm_shift {meta['pcm_shift']}"
         f"  seq_gaps {meta['seq_gaps']}",
+        *(
+            [f"channels differ in length: the last {result.trimmed_samples} samples of the longer ones are left out"]
+            if result.trimmed_samples
+            else []
+        ),
         "",
         "| Channel | RMS dBFS | DC LSB | Peak LSB | Clipped | Floor dBFS(A) |",
         "|---|---|---|---|---|---|",

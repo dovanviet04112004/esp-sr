@@ -122,3 +122,12 @@ def test_broadside_judges_neither_sign_nor_spacing(tmp_path: Path) -> None:
     pair = score.score(write(tmp_path, clap_session(tmp_path, 90), doa_deg=90)).pair
     assert (pair.sign_matches, pair.spacing_m) == (None, None)
     assert all(abs(b.level_diff_db) < 0.1 for b in pair.bands[2:])
+
+
+def test_channels_of_unequal_length_are_scored_on_their_common_part(tmp_path: Path) -> None:
+    session, channels = board_session(tmp_path)
+    channels["ch1"] = channels["ch1"][:-HOP]
+    result = score.score(write(session, channels))
+    assert result.trimmed_samples == HOP
+    assert result.parity.hops_compared == HOPS - 1 - score.WARMUP_HOPS
+    assert f"last {HOP} samples" in score.table(result)
