@@ -43,9 +43,10 @@ typedef struct {
     uint16_t free_gap_permille; // free unit loop over best
 } ai_engine_command_result_t;
 
-/** Map the model slot, verify sha256 and grid hash, and load every model the image holds.
+/** Map the model slot, verify sha256 and grid hash, copy every model into PSRAM, then unmap (KEHOACH 6.5).
  *  @ctx task | blocking, reads flash for seconds | once at boot; no step may run until it returns
  *  @ret ESP_OK | ESP_ERR_NOT_FOUND no image | ESP_ERR_INVALID_VERSION grid hash differs | ESP_ERR_INVALID_CRC
+ *       | ESP_ERR_NO_MEM PSRAM too small for weights and workspace
  */
 esp_err_t ai_engine_load(uint8_t slot);
 
