@@ -58,3 +58,9 @@ bool parity_chain(const char *case_name, const void *buf, size_t len);
  *  @ret false when the case lacks a tensor, has the wrong shape or the module refuses it
  */
 bool parity_hpf(const char *case_name, const void *buf, size_t len);
+
+/** Run one balance case: every hop of its ch1 bins times its gains, against its output.
+ *  @ctx task | blocking | builds only with CONFIG_DSP_AFE_BALANCE_ENABLE, where balance.c is compiled
+ *  @ret false when the case lacks a tensor, has the wrong shape or memory runs out
+ */
+bool parity_balance(const char *case_name, const void *buf, size_t len);

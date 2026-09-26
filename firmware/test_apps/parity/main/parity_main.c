@@ -20,6 +20,9 @@ static const struct {
 #else
     {"chain", parity_chain},
 #endif
+#if CONFIG_DSP_AFE_BALANCE_ENABLE
+    {"balance", parity_balance},
+#endif
 };
 
 static bool read_case(const char *path, void *buf, size_t cap, size_t *len)

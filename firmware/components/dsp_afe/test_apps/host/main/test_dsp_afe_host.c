@@ -404,7 +404,8 @@ static void run_golden(const char *root)
     static uint8_t buf[CASE_BYTES_MAX];
 #if DSP_AFE_HOST_ALL_MODULES
     const unsigned cases =
-        parity_run_block(root, "hpf", parity_hpf, read_case, buf, sizeof(buf), &s_failures);
+        parity_run_block(root, "hpf", parity_hpf, read_case, buf, sizeof(buf), &s_failures) +
+        parity_run_block(root, "balance", parity_balance, read_case, buf, sizeof(buf), &s_failures);
 #else
     const unsigned cases =
         parity_run_block(root, "chain", parity_chain, read_case, buf, sizeof(buf), &s_failures);
