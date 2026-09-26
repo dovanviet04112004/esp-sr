@@ -219,8 +219,9 @@ cho biết hai đầu của dải 4–6,5 cm trong hướng dẫn của Espressi
 | Tần số bắt đầu gập vòng pha, c / 2d | 4,29 kHz | **3,81 kHz** | 2,64 kHz |
 | Tính hướng của chùm cố định dưới 1 kHz | gần như không có | gần như không có | gần như không có, nhưng hơn |
 
-Board B đo bằng thước được khoảng **4,5 cm** giữa tâm hai lỗ âm; E2-T4 kiểm lại bằng tiếng (trễ của tiếng
-vỗ tay ở đầu dàn cho `d = c·τ_max`). Số nằm trong dải, nên dàn giữ nguyên.
+Board B đo bằng thước được khoảng **4,5 cm** giữa tâm hai lỗ âm, và bằng tiếng **44,4 mm** (E2-T4: vỗ tay ở hai đầu
+dàn, khoảng cách là nửa hiệu hai trễ trung vị, nên lệch giờ tĩnh giữa hai kênh tự triệt). Hai số khớp trong sai số đo,
+`array.yaml` giữ 0,045 m. Số nằm trong dải, nên dàn giữ nguyên.
 
 Khoảng cách đo ra nằm ngoài 4–6,5 cm thì ghi thành một dòng ở `docs/measurements/mic_array.md` kèm hệ
 quả cho `doa`, và **chỉ gắn lại dàn** nếu Cửa 1 trượt vì nó. Gắn lại thì chọn 6,5 cm: độ phân giải
@@ -231,7 +232,7 @@ Bốn chỉ tiêu phải đo và mốc chấm là của TỔNG QUAN V5.0 (khoả
 ≤ 10°, SNR ≥ 62 dB). Chênh pha **tĩnh** bù được bằng `balance` (§3.4); mốc 10° vẫn giữ làm tiêu chí
 chọn cặp micro vì phần pha trôi theo nhiệt độ và tuổi linh kiện thì không bù được.
 
-**Quy ước kênh và dấu** (TỔNG QUAN V5.0.3), đề xuất, E2-T7 xác nhận:
+**Quy ước kênh và dấu** (TỔNG QUAN V5.0.3), đã xác nhận trên board B ở E2-T7 (vỗ tay đầu `ch1` cho `τ` +1,89 mẫu, đầu `ch0` cho −2,25 mẫu):
 
 | Mục | Quy ước |
 |---|---|
