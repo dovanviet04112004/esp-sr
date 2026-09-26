@@ -1,4 +1,3 @@
-#include <dirent.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,10 +11,7 @@
 #define HOPS 64
 #define MEL_BANDS 40
 #define N_CEPS 13
-#define PATH_BYTES 512
-#define GOLD_SUFFIX ".gold"
-
-typedef bool (*parity_runner_t)(const char *case_name, const void *buf, size_t len);
+#define CASE_BYTES_MAX (128 * 1024)
 
 static const struct {
     const char *block;
@@ -145,51 +141,23 @@ static void check_mel(void)
     check(dct_ok, "MFCC is the orthonormal DCT-II");
 }
 
-static void *read_file(const char *path, size_t *len)
+static bool read_case(const char *path, void *buf, size_t cap, size_t *len)
 {
     FILE *file = fopen(path, "rb");
-    if (file == NULL) { return NULL; }
-    fseek(file, 0, SEEK_END);
-    const long size = ftell(file);
-    rewind(file);
-    void *buf = size > 0 ? malloc((size_t)size) : NULL;
-    *len = buf != NULL ? fread(buf, 1, (size_t)size, file) : 0;
+    if (file == NULL) { return false; }
+    *len = fread(buf, 1, cap, file);
+    const bool whole = feof(file) != 0;
     fclose(file);
-    return buf;
+    return whole;
 }
 
 static unsigned run_golden(const char *root)
 {
+    static uint8_t buf[CASE_BYTES_MAX];
     unsigned cases = 0;
     for (size_t b = 0; b < sizeof(kBlocks) / sizeof(kBlocks[0]); b++) {
-        char dir_path[PATH_BYTES];
-        snprintf(dir_path, sizeof(dir_path), "%s/%s", root, kBlocks[b].block);
-        DIR *dir = opendir(dir_path);
-        if (dir == NULL) {
-            printf("PARITY missing %s\n", dir_path);
-            continue;
-        }
-        for (struct dirent *entry = readdir(dir); entry != NULL; entry = readdir(dir)) {
-            const size_t name_len = strlen(entry->d_name);
-            const size_t suffix_len = strlen(GOLD_SUFFIX);
-            if (name_len <= suffix_len || strcmp(entry->d_name + name_len - suffix_len, GOLD_SUFFIX) != 0) {
-                continue;
-            }
-            char path[2 * PATH_BYTES];
-            char case_name[PATH_BYTES];
-            snprintf(path, sizeof(path), "%s/%s", dir_path, entry->d_name);
-            snprintf(case_name, sizeof(case_name), "%.*s", (int)(name_len - suffix_len), entry->d_name);
-            size_t len = 0;
-            void *buf = read_file(path, &len);
-            if (buf == NULL || !kBlocks[b].run(case_name, buf, len)) {
-                printf("PARITY error %s %s\n", kBlocks[b].block, case_name);
-                s_failures++;
-            } else {
-                cases++;
-            }
-            free(buf);
-        }
-        closedir(dir);
+        cases += parity_run_block(root, kBlocks[b].block, kBlocks[b].run, read_case, buf, sizeof(buf),
+                                  &s_failures);
     }
     return cases;
 }

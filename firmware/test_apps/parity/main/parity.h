@@ -8,6 +8,9 @@
 
 #include "gold_read.h"
 
+typedef bool (*parity_runner_t)(const char *case_name, const void *buf, size_t len);
+typedef bool (*parity_reader_t)(const char *path, void *buf, size_t cap, size_t *len);
+
 /** Find the tensor called name in a .gold buffer.
  *  @ctx any | non-blocking | out points into buf
  */
@@ -18,6 +21,13 @@ bool parity_tensor(const void *buf, size_t len, const char *name, gold_tensor_t 
  */
 void parity_report(const char *block, const char *case_name, const char *tensor, const float *want,
                    const float *got, size_t n);
+
+/** Read every root/block/(*.gold) into buf through read and run it; "PARITY error" for a case that fails.
+ *  @ctx task | blocking on the filesystem and the console
+ *  @ret cases run; errors, when not NULL, gets the cases that could not run
+ */
+unsigned parity_run_block(const char *root, const char *block, parity_runner_t run, parity_reader_t read,
+                          void *buf, size_t cap, unsigned *errors);
 
 /** Run one STFT case: analysis against its bins, synthesis of its bins against its rebuilt signal.
  *  @ctx task | blocking

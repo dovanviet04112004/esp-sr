@@ -1,3 +1,4 @@
+#include <dirent.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -5,6 +6,10 @@
 #include "parity.h"
 
 #define SNR_NO_ERROR_DB 999.0
+#define DIR_BYTES 256
+#define NAME_BYTES 256 // struct dirent d_name
+#define PATH_BYTES (DIR_BYTES + 1 + NAME_BYTES)
+#define GOLD_SUFFIX ".gold"
 
 bool parity_tensor(const void *buf, size_t len, const char *name, gold_tensor_t *out)
 {
@@ -28,4 +33,37 @@ void parity_report(const char *block, const char *case_name, const char *tensor,
     }
     const double snr_db = error > 0.0 ? 10.0 * log10(reference / error) : SNR_NO_ERROR_DB;
     printf("PARITY %s %s %s max_abs=%.3e snr_db=%.1f\n", block, case_name, tensor, max_abs, snr_db);
+}
+
+unsigned parity_run_block(const char *root, const char *block, parity_runner_t run, parity_reader_t read,
+                          void *buf, size_t cap, unsigned *errors)
+{
+    char dir_path[DIR_BYTES];
+    snprintf(dir_path, sizeof(dir_path), "%s/%s", root, block);
+    DIR *dir = opendir(dir_path);
+    if (dir == NULL) {
+        printf("PARITY missing %s\n", dir_path);
+        return 0;
+    }
+    unsigned cases = 0;
+    for (struct dirent *entry = readdir(dir); entry != NULL; entry = readdir(dir)) {
+        const size_t name_len = strlen(entry->d_name);
+        const size_t suffix_len = strlen(GOLD_SUFFIX);
+        if (name_len <= suffix_len || strcmp(entry->d_name + name_len - suffix_len, GOLD_SUFFIX) != 0) {
+            continue;
+        }
+        char path[PATH_BYTES];
+        char case_name[NAME_BYTES];
+        snprintf(path, sizeof(path), "%s/%s", dir_path, entry->d_name);
+        snprintf(case_name, sizeof(case_name), "%.*s", (int)(name_len - suffix_len), entry->d_name);
+        size_t len = 0;
+        if (!read(path, buf, cap, &len) || !run(case_name, buf, len)) {
+            printf("PARITY error %s %s\n", block, case_name);
+            if (errors != NULL) { (*errors)++; }
+            continue;
+        }
+        cases++;
+    }
+    closedir(dir);
+    return cases;
 }
