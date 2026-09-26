@@ -9,6 +9,11 @@ SECRETS := $(if $(wildcard firmware/sdkconfig.secrets),;sdkconfig.secrets)
 # make session reads where to listen and where raw/ lives from host/.env, like srhost.config.
 STREAM_PORT = $(shell sed -n 's/^SRHOST_STREAM_PORT=//p' host/.env 2>/dev/null)
 DATA_ROOT = $(shell sed -n 's/^SRPIPE_DATA_ROOT=//p' host/.env 2>/dev/null)
+# idf.py only adds options a generated sdkconfig lacks, so one older than a defaults file it reads is dropped.
+fresh_sdkconfig = if [ -f $(1) ] && [ -n "$$(find $(2) -newer $(1))" ]; then rm $(1); echo "$(1) regenerated"; fi
+BENCH_APP := firmware/test_apps/bench_afe
+PARITY_APP := firmware/test_apps/parity
+PARITY_DEFAULTS := firmware/sdkconfig.defaults.esp32s3 $(PARITY_APP)/sdkconfig.defaults
 
 help:
 	@grep -E '^[a-z0-9-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -74,11 +79,14 @@ capture-radio-off-flash: ## Flash capture that records 60 s with the radio off, 
 	  -D CAPTURE_PROFILE=radio_off -p $(PORT) flash
 
 bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/bench, then rebuild budget.md
+	@$(call fresh_sdkconfig,$(BENCH_APP)/sdkconfig,firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.bench $(BENCH_APP)/sdkconfig.defaults)
 	cd firmware/test_apps/bench_afe && idf.py build
 	cd firmware/test_apps/bench_afe && pytest pytest_bench_afe.py --embedded-services esp,idf --target esp32s3 --port $(PORT) -s -p no:cacheprovider
 	python3 -m tools.budget
 
 parity-board: ## Run every golden case on board B: the default chain build, then the build with the real modules on
+	@$(call fresh_sdkconfig,$(PARITY_APP)/sdkconfig,$(PARITY_DEFAULTS))
+	@$(call fresh_sdkconfig,$(PARITY_APP)/build_modules/sdkconfig,$(PARITY_DEFAULTS) $(PARITY_APP)/sdkconfig.modules)
 	cd firmware/test_apps/parity && idf.py build
 	cd firmware/test_apps/parity && idf.py -B build_modules -D SDKCONFIG=build_modules/sdkconfig -D PARITY_PROFILE=modules build
 	cd firmware/test_apps/parity && pytest pytest_parity.py --embedded-services esp,idf --target esp32s3 --port $(PORT) --build-dir build -p no:cacheprovider
