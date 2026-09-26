@@ -77,3 +77,13 @@ lấy lại được. Sửa lỗ rồi đo lại bước 3–5 của §0 trướ
 
 | Lần | Chênh biên độ sau bù lớn nhất dB | Chênh pha sau bù lớn nhất ° | Nhiệt độ phòng | Ngày |
 |---|---|---|---|---|
+| 1 | **0,47** (50 Hz – 1,6 kHz, bỏ ra từng chỗ đặt loa); 1,6–8 kHz không kiểm được, các chỗ đặt loa tự lệch ±1…3,6 dB | **3,4** (cùng dải) | chưa ghi | 26/09 |
+
+Lần 1 ước từ ba chỗ đặt loa (`20260926_home_009` 1 m trước, `…_011` 20 cm trước, `…_012` 20 cm sau), 12 252 khung:
+đường pha `τ` −0,10 mẫu, `φ₀` −2,2°; mức bù 1/3 octave, `ch1` giảm ~11 dB. Hệ số ở `calib/board_b_balance.csv`, ghi xuống
+NVS `calib/bal` bằng `make calib-flash` rồi `make calib-write`, đọc lại CRC32 `0x20e480d4` khớp bản trên máy tính.
+
+Dải 1,6–8 kHz chưa đạt được mốc "dưới 1 dB toàn băng" một cách kiểm chứng: ở đó độ kết hợp 0,3–0,8 và mức của từng chỗ đặt
+loa tự khác nhau vài dB vì phòng, nên hệ số gộp là trung bình của ba chỗ, sai số cỡ ±2 dB. Hẹp sai số này cần thêm chỗ đặt
+loa, hay một phòng ít vang. Lần 2 đo ở nhiệt độ phòng khác (thu lại bước 5 của §0 ở ba chỗ, `make calib-estimate`, so pha
+sau bù bằng hệ số lần 1) để biết phần trôi theo nhiệt.
