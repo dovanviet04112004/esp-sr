@@ -28,3 +28,19 @@ Trạng thái: đang lập kế hoạch, chưa mở Cửa 0. Đích trước m�
 
 ESP32-S3-WROOM-1, 16 MB flash, 8 MB PSRAM, hai micro INMP441 ở GPIO 19/20/16, chưa có loa; nạp qua CH340
 (`/dev/ttyUSB0`). GPIO 19/20 trùng USB của chip nên console chỉ qua UART — xem KẾ HOẠCH §2.2.
+
+## Cài một lần trên máy phát triển
+
+```bash
+uv tool install pre-commit && pre-commit install        # kiểm mỗi commit, ci_status mỗi lần push
+gh auth login                                           # GitHub: bản sao private chạy CI
+git remote add github https://github.com/dovanviet04112004/esp-sr.git
+git remote set-url --add --push origin http://192.168.40.80:3000/vanviet/esp-sr.git
+git remote set-url --add --push origin https://github.com/dovanviet04112004/esp-sr.git
+git config credential.http://192.168.40.80:3000.helper \
+  '!f() { test "$1" = get && echo username=vanviet && echo "password=$(cat ~/.config/esp-sr/gitea_token)"; }; f'
+```
+
+Token Gitea (quyền `write:repository`) đặt ở `~/.config/esp-sr/gitea_token`, quyền 600. Sau đó
+`git push origin` đẩy lên cả hai nơi, GitHub Actions chạy, và trạng thái hiện trên commit ở Gitea —
+xem KẾ HOẠCH §4.1.
