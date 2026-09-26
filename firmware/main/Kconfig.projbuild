@@ -15,6 +15,15 @@ menu "esp-sr application"
             only, noi_task is never created, and replies stay MQTT events
             (KEHOACH 2.1).
 
+    config APP_PCM_SHIFT_FALLBACK
+        int "Microphone right shift until calib/pcm_shift is measured"
+        range 8 16
+        default 16
+        help
+            drv_audio keeps the top 32 - shift bits of each INMP441 slot.
+            test_apps/calib writes the measured value to NVS calib/pcm_shift,
+            which wins over this one (KEHOACH 6.2).
+
     config SR_PROFILING
         bool "Per-module timing into the bench CSV"
         default n
