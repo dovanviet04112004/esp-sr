@@ -46,3 +46,19 @@ def test_the_mel_negative_control_is_one_band_off() -> None:
     bank = mel.Mel(cfg)
     right = np.stack([bank.log(b[:, 0] + 1j * b[:, 1]) for b in case["bins"]])
     np.testing.assert_array_equal(case["log_mel"], np.roll(right, -1, axis=1))
+
+
+def test_committed_chain_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_chain(tmp_path):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
+
+
+def test_the_chain_negative_control_is_one_sample_late() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "chain" / "case_neg_000.gold")
+    right = emit_golden.chain_case(
+        case["input"][:, 0::2].reshape(-1), case["input"][:, 1::2].reshape(-1), case["reset"]
+    )
+    got, want = case["pcm"].reshape(-1), right["pcm"].reshape(-1)
+    np.testing.assert_array_equal(got[1:], want[:-1])
+    assert np.max(np.abs(got.astype(int) - want)) > 1000
