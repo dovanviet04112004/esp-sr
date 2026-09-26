@@ -12,6 +12,7 @@ __pycache__/
 # ── Firmware ──
 firmware/build/
 firmware/build_*/
+firmware/**/build_*/
 firmware/**/build/
 firmware/sdkconfig
 firmware/sdkconfig.old
