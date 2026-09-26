@@ -3,6 +3,7 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -33,6 +34,13 @@ esp_err_t net_wifi_init(EventGroupHandle_t system, const char *hostname);
  *  @ret ESP_OK | ESP_ERR_NOT_FOUND no wifi/ssid | ESP_ERR_INVALID_STATE init not done | an esp_wifi error
  */
 esp_err_t net_wifi_apply(void);
+
+/** Keep the radio awake (WIFI_PS_NONE) while on, for the audio stream; modem sleep again when off
+ * (KEHOACH 7.2).
+ *  @ctx task | non-blocking
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE init not done | an esp_wifi error
+ */
+esp_err_t net_wifi_set_low_latency(bool on);
 
 /** Link counters and signal level, for heartbeat.
  *  @ctx task | non-blocking

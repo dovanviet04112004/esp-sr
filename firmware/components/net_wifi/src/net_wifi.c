@@ -125,6 +125,12 @@ esp_err_t net_wifi_apply(void)
     return esp_wifi_disconnect();
 }
 
+esp_err_t net_wifi_set_low_latency(bool on)
+{
+    if (!s_ready) { return ESP_ERR_INVALID_STATE; }
+    return esp_wifi_set_ps(on ? WIFI_PS_NONE : WIFI_PS_MIN_MODEM);
+}
+
 void net_wifi_stats(net_wifi_stats_t *out)
 {
     *out = s_stats;
