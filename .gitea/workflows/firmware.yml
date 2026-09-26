@@ -1,0 +1,42 @@
+# Firmware build of the ci profile, plus the C side of the contract tests (KEHOACH 4.5.8).
+name: firmware
+
+on:
+  push:
+    paths: ["firmware/**", "contracts/**", "tools/**", ".gitea/workflows/firmware.yml"]
+  pull_request:
+    paths: ["firmware/**", "contracts/**", "tools/**", ".gitea/workflows/firmware.yml"]
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v6.0.2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Layering and purity
+        run: |
+          python3 tools/check_layers.py
+          python3 tools/check_purity.py
+
+      - name: Skip the build until firmware/ has a project
+        id: guard
+        run: |
+          if [ -f firmware/CMakeLists.txt ]; then echo "ready=true" >> "$GITHUB_OUTPUT"; else echo "ready=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Build the ci profile
+        if: steps.guard.outputs.ready == 'true'
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd firmware
+          idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.ci" build
+          idf.py size
+
+      - name: Generated C compiles and round-trips against the fetched cJSON
+        if: steps.guard.outputs.ready == 'true'
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          pip install pyyaml==6.0.2 jsonschema==4.23.0
+          CJSON_DIR=firmware/managed_components/espressif__cjson/cJSON python -m unittest tools.tests.test_gen_contracts

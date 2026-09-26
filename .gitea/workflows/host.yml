@@ -1,0 +1,24 @@
+# Python side of host/: lint and tests (KEHOACH 4.6).
+name: host
+
+on:
+  push:
+    paths: ["host/**", "contracts/**", ".gitea/workflows/host.yml"]
+  pull_request:
+    paths: ["host/**", "contracts/**", ".gitea/workflows/host.yml"]
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Lint and test
+        run: |
+          if [ ! -f host/pyproject.toml ]; then echo "host/pyproject.toml absent, nothing to test yet"; exit 0; fi
+          cd host
+          uv sync --frozen
+          uv run ruff check .
+          uv run pytest

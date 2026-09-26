@@ -1,0 +1,29 @@
+# Contracts, generated code and the repo checkers (KEHOACH 4.2, 4.8).
+name: contracts
+
+on:
+  push:
+    paths: ["contracts/**", "tools/**", "firmware/**", ".pre-commit-config.yaml", "ruff.toml", ".gitea/workflows/contracts.yml"]
+  pull_request:
+    paths: ["contracts/**", "tools/**", "firmware/**", ".pre-commit-config.yaml", "ruff.toml", ".gitea/workflows/contracts.yml"]
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install tool dependencies
+        run: pip install pyyaml==6.0.2 jsonschema==4.23.0 pre-commit
+
+      - name: Generated code matches contracts
+        run: |
+          python tools/gen_contracts.py
+          git diff --exit-code
+
+      - name: All pre-commit hooks
+        run: pre-commit run --all-files --show-diff-on-failure

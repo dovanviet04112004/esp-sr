@@ -1,0 +1,24 @@
+# Python side of ml/: lint and tests (KEHOACH 4.4).
+name: ml
+
+on:
+  push:
+    paths: ["ml/**", "contracts/**", ".gitea/workflows/ml.yml"]
+  pull_request:
+    paths: ["ml/**", "contracts/**", ".gitea/workflows/ml.yml"]
+
+jobs:
+  ml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Lint and test
+        run: |
+          if [ ! -f ml/pyproject.toml ]; then echo "ml/pyproject.toml absent, nothing to test yet"; exit 0; fi
+          cd ml
+          uv sync --frozen
+          uv run ruff check .
+          uv run pytest
