@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sr/telemetry",
+  "title": "telemetry",
+  "description": "Front-end figures sampled every 100 ms and sent in batches of telemetry_samples.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["deviceId", "seq", "state", "samples"],
+  "properties": {
+    "deviceId": {"type": "string", "pattern": "^[A-Za-z0-9_-]{4,32}$", "maxLength": 32},
+    "seq": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "state": {"enum": ["LISTEN", "COMMAND", "REPLY"]},
+    "samples": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["doaDeg", "doaConf", "vad", "levelDbfs", "gainDb"],
+        "properties": {
+          "doaDeg": {"type": "integer", "minimum": -1, "maximum": 180},
+          "doaConf": {"type": "integer", "minimum": 0, "maximum": 255},
+          "vad": {"type": "boolean"},
+          "levelDbfs": {"type": "integer", "minimum": -127, "maximum": 0},
+          "gainDb": {"type": "integer", "minimum": -40, "maximum": 40}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+# Every MQTT topic the board and host use (KEHOACH 7.3). Paths are built by generated functions,
+# never by format strings at the call site.
+version: 1
+device_id_max: 32
+heartbeat_interval_s: 30
+telemetry_period_ms: 1000
+telemetry_samples: 10
+topics:
+  - {id: status, path: "sr/{deviceId}/up/status", direction: up, qos: 1, retain: true, schema: status}
+  - {id: heartbeat, path: "sr/{deviceId}/up/heartbeat", direction: up, qos: 0, retain: false, schema: heartbeat}
+  - {id: telemetry, path: "sr/{deviceId}/up/telemetry", direction: up, qos: 0, retain: false, schema: telemetry}
+  - {id: event, path: "sr/{deviceId}/up/event", direction: up, qos: 1, retain: false, schema: event}
+  - {id: cmd, path: "sr/{deviceId}/down/cmd", direction: down, qos: 1, retain: false, schema: device_cmd}
+  - {id: commands, path: "sr/{deviceId}/down/commands", direction: down, qos: 1, retain: true, schema: command_set}
+  - {id: ota, path: "sr/{deviceId}/down/ota", direction: down, qos: 1, retain: false, schema: ota_manifest}

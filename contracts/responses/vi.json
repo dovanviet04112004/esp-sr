@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "responses": [
+    {"id": "da_nghe", "text": "dạ"},
+    {"id": "noi_lai", "text": "xin nói lại"},
+    {"id": "da_bat_den", "text": "đã bật đèn"},
+    {"id": "da_tat_den", "text": "đã tắt đèn"},
+    {"id": "da_bat_quat", "text": "đã bật quạt"},
+    {"id": "da_tat_quat", "text": "đã tắt quạt"},
+    {"id": "da_mo_cua", "text": "đã mở cửa"},
+    {"id": "da_dong_cua", "text": "đã đóng cửa"},
+    {"id": "da_tang", "text": "đã tăng âm lượng"},
+    {"id": "da_giam", "text": "đã giảm âm lượng"},
+    {"id": "da_dung", "text": "đã dừng"}
+  ]
+}

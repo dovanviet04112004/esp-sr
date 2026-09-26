@@ -1,0 +1,15 @@
+# Microphone array geometry and channel convention (KEHOACH 2.3).
+# spacing_m is nominal until E2-T3 replaces it with the measured value.
+version: 1
+n_mics: 2
+spacing_m: 0.065
+speed_of_sound_m_s: 343.0
+channels:
+  - name: ch0
+    slot: left
+  - name: ch1
+    slot: right
+phase_reference: ch0
+# tau = t0 - t1; theta = arccos(c * tau / d); 0 deg points at ch1, 90 deg is broadside.
+zero_degree_side: ch1
+doa_range_deg: [0, 180]

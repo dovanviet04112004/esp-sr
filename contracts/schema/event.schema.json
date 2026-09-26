@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sr/event",
+  "title": "event",
+  "description": "Something the listener decided: a wake word, a command, a rejection, or an error code.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["deviceId", "seq", "kind"],
+  "properties": {
+    "deviceId": {"type": "string", "pattern": "^[A-Za-z0-9_-]{4,32}$", "maxLength": 32},
+    "seq": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "kind": {"enum": ["WAKE", "COMMAND", "REJECT", "ERROR"]},
+    "scorePermille": {"type": "integer", "minimum": 0, "maximum": 1000},
+    "marginPermille": {"type": "integer", "minimum": 0, "maximum": 1000},
+    "commandId": {"type": "string", "pattern": "^[a-z0-9_]{1,32}$", "maxLength": 32},
+    "code": {"type": "string", "pattern": "^[A-Z0-9_]{1,32}$", "maxLength": 32},
+    "doaDeg": {"type": "integer", "minimum": -1, "maximum": 180},
+    "ts": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+  },
+  "allOf": [
+    {"if": {"properties": {"kind": {"const": "WAKE"}}}, "then": {"required": ["scorePermille"]}},
+    {"if": {"properties": {"kind": {"const": "COMMAND"}}}, "then": {"required": ["commandId", "scorePermille", "marginPermille"]}},
+    {"if": {"properties": {"kind": {"const": "REJECT"}}}, "then": {"required": ["code"]}},
+    {"if": {"properties": {"kind": {"const": "ERROR"}}}, "then": {"required": ["code"]}}
+  ]
+}
