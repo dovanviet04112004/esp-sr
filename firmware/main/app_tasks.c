@@ -8,14 +8,17 @@
 #include "app_wiring.h"
 #include "drv_audio.h"
 #include "dsp_afe.h"
+#include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "gen_grid.h"
 #include "gen_payload.h"
 #include "gen_topics.h"
+#include "net_mqtt.h"
 #include "net_wifi.h"
 #include "sdkconfig.h"
 #include "sys_storage.h"
@@ -47,6 +50,8 @@
 #define GUI_PERIOD_MS 100
 #define CRED_POLL_MS 2000
 #define LINK_WAIT_MS 1000
+#define HEARTBEAT_TICKS (GEN_TOPIC_HEARTBEAT_INTERVAL_S * 1000 / GUI_PERIOD_MS)
+#define US_PER_S 1000000
 
 typedef struct {
     TaskFunction_t entry;
@@ -154,18 +159,49 @@ static void noi_task(void *arg)
 }
 #endif
 
+static void fill_heartbeat(const app_afe_stats_t *afe, heartbeat_t *hb)
+{
+    drv_audio_stats_t audio;
+    net_wifi_stats_t wifi;
+    drv_audio_stats(&audio);
+    net_wifi_stats(&wifi);
+    memset(hb, 0, sizeof(*hb));
+    strlcpy(hb->fw, esp_app_get_description()->version, sizeof(hb->fw));
+    hb->uptime_s = (uint32_t)(esp_timer_get_time() / US_PER_S);
+    hb->heap_internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    hb->heap_internal_min = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    hb->heap_psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    hb->heap_psram_min = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM);
+    hb->has_heap_psram_free = hb->has_heap_psram_min = true;
+    hb->dma_overflows = audio.dma_overflows;
+    hb->frames_dropped = afe->frames_dropped;
+    hb->clean_dropped = afe->clean_dropped;
+    hb->rssi_dbm = wifi.rssi_dbm;
+    hb->has_rssi_dbm = wifi.rssi_dbm != 0;
+}
+
 static void gui_task(void *arg)
 {
     const app_wiring_t *w = arg;
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
     TickType_t wake = xTaskGetTickCount();
+    uint32_t since_heartbeat = 0;
+    bool was_online = false;
     for (;;) {
         vTaskDelayUntil(&wake, pdMS_TO_TICKS(GUI_PERIOD_MS));
         app_afe_stats_t snapshot;
         taskENTER_CRITICAL(w->afe_stats_lock);
         snapshot = *w->afe_stats;
         taskEXIT_CRITICAL(w->afe_stats_lock);
-        (void)snapshot;
+        const bool online = (xEventGroupGetBits(w->system) & APP_BIT_MQTT_OK) != 0;
+        since_heartbeat++;
+        if (online && (!was_online || since_heartbeat >= HEARTBEAT_TICKS)) {
+            heartbeat_t hb;
+            fill_heartbeat(&snapshot, &hb);
+            net_mqtt_publish_heartbeat(&hb);
+            since_heartbeat = 0;
+        }
+        was_online = online;
         esp_task_wdt_reset();
     }
 }
@@ -241,6 +277,19 @@ static void net_task(void *arg)
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     }
+    const net_mqtt_config_t mqtt = {
+        .device_id = device_id, .fw_version = esp_app_get_description()->version, .system = w->system};
+    told = false;
+    for (err = err == ESP_OK && named ? net_mqtt_start(&mqtt) : ESP_ERR_INVALID_STATE;
+         err == ESP_ERR_NOT_FOUND; err = net_mqtt_start(&mqtt)) {
+        if (!told) {
+            ESP_LOGW(TAG, "no device/mqtt_uri yet: nvs set device mqtt_uri mqtt://<broker>:1883");
+            told = true;
+        }
+        esp_task_wdt_reset();
+        vTaskDelay(pdMS_TO_TICKS(CRED_POLL_MS));
+    }
+    if (err != ESP_OK) { ESP_LOGE(TAG, "mqtt: %s, running without a broker", esp_err_to_name(err)); }
     esp_task_wdt_delete(NULL);
     finish_oneshot();
 }

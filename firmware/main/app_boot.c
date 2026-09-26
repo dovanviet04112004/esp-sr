@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "gen_grid.h"
 #include "gen_topics.h"
+#include "net_mqtt.h"
 #include "sdkconfig.h"
 #include "sys_storage.h"
 
@@ -48,6 +49,7 @@ esp_err_t app_boot(void)
     log_heap("storage");
     ESP_RETURN_ON_ERROR(app_wiring_init(), TAG, "wiring");
     log_heap("wiring");
+    ESP_RETURN_ON_ERROR(net_mqtt_init(), TAG, "json arenas");
     const drv_audio_config_t audio = {
         .pcm_shift = pcm_shift(),
         .enable_tx = SPEAKER_FITTED,
