@@ -42,7 +42,7 @@ golden: ## Emit golden vectors into contracts/golden/
 	cd ml && ./scripts/41_emit_golden.sh
 
 measure: ## Merge bench CSVs into docs/measurements/budget.md
-	python3 tools/budget.py
+	python3 -m tools.budget
 
 report: measure ## Rebuild every number in docs/measurements/ with one command
 	cd ml && ./scripts/60_eval_board.sh
@@ -72,6 +72,11 @@ capture-flash: ## Flash test_apps/capture, the raw-only recorder (E5-T12)
 capture-radio-off-flash: ## Flash capture that records 60 s with the radio off, then sends: the Wi-Fi off floor (E2-T4)
 	cd firmware/test_apps/capture && idf.py -B build_radio_off -D SDKCONFIG=build_radio_off/sdkconfig \
 	  -D CAPTURE_PROFILE=radio_off -p $(PORT) flash
+
+bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/bench, then rebuild budget.md
+	cd firmware/test_apps/bench_afe && idf.py build
+	cd firmware/test_apps/bench_afe && pytest pytest_bench_afe.py --embedded-services esp,idf --target esp32s3 --port $(PORT) -s -p no:cacheprovider
+	python3 -m tools.budget
 
 parity-board: ## Run every golden case on board B: the default chain build, then the build with the real modules on
 	cd firmware/test_apps/parity && idf.py build
