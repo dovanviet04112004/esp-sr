@@ -1,0 +1,12 @@
+menu "svc_report"
+
+    config SVC_REPORT_STREAM_MAX_S
+        int "Close the audio stream by itself after this many seconds"
+        depends on NET_STREAM_ENABLE
+        range 10 7200
+        default 600
+        help
+            Ten minutes unless opened again (KEHOACH 7.5). test_apps/capture
+            raises it for its 30-minute sessions.
+
+endmenu
