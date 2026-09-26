@@ -176,7 +176,7 @@ Dựng cả hai đường rồi chấm, không chọn trước.
 | E9-T4 | RNNoise-16k | dựng lại 18–22 dải trên 257 vạch, huấn luyện ở lưới §3.1 | run có đủ `config.resolved.yaml`, `split.lock`; điểm trên tập thử | E9-T3, E4-T2 | V5.3.3 |
 | E9-T5 | `ai_engine/src/ns/` | lượng tử int8, GRU esp-dl, hậu xử lý dải có golden, cắm qua khe | `model->test()` đạt; **hơn sàn E9-T1 bằng thước của §3.15**, không hơn thì bỏ và giữ sàn; ghi ADR | E9-T4, E9-T2, E11-T9 | V5.3.3 |
 | E9-T6 | bộ lọc cao độ | thử thêm lại bộ lọc cao độ của RNNoise | có lợi bằng số thì giữ, không thì ghi lý do bỏ | E9-T5 | — |
-| E9-T7 | 🔬 đo trên board | trọng số ở PSRAM so với RAM nội, có Wi-Fi chạy | đỉnh một khung có vượt nhịp không; quyết định chỗ đặt ghi vào `ram.md` | E9-T5 | V5.5.9 |
+| E9-T7 | 🔬 đo trên board | trọng số và vùng làm việc ở PSRAM (KẾ HOẠCH §6.5), có Wi-Fi chạy | đỉnh một khung có vượt nhịp không, ghi vào `latency.md`; vượt thì ADR, không kéo về RAM nội | E9-T5 | V5.5.9 |
 
 ---
 
@@ -213,7 +213,7 @@ Không chặn module nào khác: không có `ref` thì chuỗi chạy với `"MM
 | E11-T12 | `command` mạng | mạng âm học dòng + CTC trên đơn vị của E11-T3 | run đầy đủ; tỉ lệ lỗi đơn vị trên tập thử | E11-T1, E11-T8 | V5.5.8 |
 | E11-T13 | `command` giải | chấm CTC có ràng buộc, max trên biến thể, từ chối theo `δ₁` `δ₂` (§3.12) | 🔬 **Cửa 3**: mỗi lệnh ≥ 90%, từ chối đúng ≥ 95%; **thêm một lệnh chưa có trong dữ liệu huấn luyện chỉ bằng một dòng chữ** và đo nó | E11-T12, E11-T4 | V5.5.8 |
 | E11-T14 | `svc_listen` | `nhan_task`, đổi chế độ `NGHE`/`LENH`, `q_cmdset` đổi bảng lệnh giữa hai câu | đổi bộ lệnh qua MQTT trong lúc chạy, không mất khung, lệnh mới dùng được ngay câu sau | E11-T13, E5-T6 | V5.5.8 |
-| E11-T15 | | 🔬 Đo `wake` và `command` trên board, trọng số ở PSRAM, **có Wi-Fi chạy** | đỉnh một khung có vượt nhịp không; quyết định chỗ đặt ghi vào `ram.md` | E11-T11, E11-T13 | V5.5.9 |
+| E11-T15 | | 🔬 Đo `wake` và `command` trên board, trọng số và vùng làm việc ở PSRAM (KẾ HOẠCH §6.5), **có Wi-Fi chạy** | đỉnh một khung có vượt nhịp không, ghi vào `latency.md`; vượt thì ADR, không kéo về RAM nội | E11-T11, E11-T13 | V5.5.9 |
 
 Con số báo nhầm quan trọng hơn con số bắt được: một máy tự bật mỗi mười phút là máy không ai dùng.
 
