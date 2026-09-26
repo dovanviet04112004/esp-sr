@@ -12,11 +12,12 @@ header:
   - {name: format, type: u8}
   - {name: samples, type: u16}
 header_bytes: 24
+# channels lists what each interleaved channel is, in order; host/ names its WAV files after them.
 modes:
-  - {id: 0, name: "off", channels: 0}
-  - {id: 1, name: clean, channels: 1}
-  - {id: 2, name: raw, channels: 2}
-  - {id: 3, name: raw_ref, channels: 3}
-  - {id: 4, name: raw_ref_clean, channels: 4}
+  - {id: 0, name: "off", channels: []}
+  - {id: 1, name: clean, channels: [clean]}
+  - {id: 2, name: raw, channels: [ch0, ch1]}
+  - {id: 3, name: raw_ref, channels: [ch0, ch1, ref]}
+  - {id: 4, name: raw_ref_clean, channels: [ch0, ch1, ref, clean]}
 formats:
   - {id: 0, name: s16le, bytes: 2}

@@ -203,14 +203,14 @@ def gen_stream_h(s: dict) -> str:
     ]
     out.append("\n/** Channels a frame carries in this mode; 0 for an unknown mode.\n *  @ctx any | non-blocking\n */")
     out.append("static inline uint8_t gen_stream_mode_channels(gen_stream_mode_t mode)\n{\n    switch (mode) {")
-    out += [f"    case GEN_STREAM_MODE_{m['name'].upper()}: return {m['channels']};" for m in s["modes"]]
+    out += [f"    case GEN_STREAM_MODE_{m['name'].upper()}: return {len(m['channels'])};" for m in s["modes"]]
     out.append("    default: return 0;\n    }\n}")
     return "\n".join(out) + "\n"
 
 
 def gen_stream_py(s: dict) -> str:
     fmt = "<" + "".join(STRUCT_FORMAT[fl["type"]] for fl in s["fields"])
-    modes = {m["id"]: (m["name"], m["channels"]) for m in s["modes"]}
+    modes = {m["id"]: (m["name"], len(m["channels"]), tuple(m["channels"])) for m in s["modes"]}
     formats = {fm["id"]: (fm["name"], fm["bytes"]) for fm in s["formats"]}
     return banner("contracts/stream/frame.yaml", "#") + (
         "\nimport struct\n\n"
@@ -615,6 +615,7 @@ def outputs() -> dict[str, str]:
         f"{ML_GEN}/grid.py": gen_grid_py(g),
         f"{ML_GEN}/array.py": gen_array_py(a),
         f"{HOST_GEN}/__init__.py": init,
+        f"{HOST_GEN}/grid.py": gen_grid_py(g),
         f"{HOST_GEN}/stream.py": gen_stream_py(s),
         f"{HOST_GEN}/topics.py": gen_topics_py(t),
         f"{HOST_GEN}/payload.py": gen_payload_py(),
