@@ -14,6 +14,7 @@ vàng `chain`, và profile `modules` với bộ vàng của từng module thật
 | `chain` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | — | cab1eb3 | 27/09 |
 | `hpf` — biquad dạng II chuyển vị viết tay (ADR-0004), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | trễ một mẫu: 0,996, −3,1 dB → đỏ | cab1eb3 | 27/09 |
 | `balance` — nhân phức viết tay (ADR-0005), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | hệ số liên hợp: 26,0, −3,5 dB → đỏ | cab1eb3 | 27/09 |
+| `vad` — mức sáu dải, quyết định thô, `speech` sau kéo dài; máy tính và board B | 4 | 0 | — | mức ≤ 1e-6, ≥ 120 dB; quyết định khớp tuyệt đối | `speech` trễ một bước: 1 → đỏ | e2b26f2 | 27/09 |
 
 ## Bản tham chiếu Python: STFT phân tích rồi tổng hợp (E6-T1)
 
@@ -62,3 +63,17 @@ Bốn ca, mỗi ca 16 bước phổ `ch1` do bộ phân tích cho: hệ số dá
 đều, hệ số đơn vị trên chirp (ra phải bằng vào), hệ số ngẫu nhiên −40 … +20 dB với pha bất kỳ trên phổ gần tràn thang,
 và hệ số dáng board trên phổ gần im lặng. Máy tính và board B ở `-O2` khớp **từng bit** cả bốn ca. Đối chứng âm nhân
 với hệ số liên hợp, lỗi dấu dễ mắc nhất của phép nhân phức: lệch 26,0, −3,5 dB, đỏ. Chạy lại bằng `make parity-board`.
+
+## `vad` (E7-T3)
+
+Bốn ca đầu vào `int16` (chia 32 768 ở cả hai phía nên là cùng một số float): tiếng tổng hợp giống lời nói trên ồn trắng
+160 bước, dài hơn cửa sổ 100 bước của bộ dò tối thiểu; tiếng nhỏ trên ồn đỏ ở `aggressiveness` 2; 16 bước im tuyệt đối,
+không được mô hình hoá, rồi các đoạn to ở mức 3; nhiễu nhảy mức 28 dB ở mức 1. Máy tính và board B ở `-O2` khớp **từng
+bit** cả ba tensor của cả bốn ca. Đối chứng âm cho `speech` trễ một bước: đỏ.
+
+Lượt đầu trên board mất một dòng `PARITY` trên đường nối tiếp (còn `PARITY vad +00 snr_db=999.0`), nên `speech` của
+`case_000` không được so mà bộ chấm vẫn cho qua. Bộ chấm giờ đòi mọi tensor khai trong `tolerance.yaml`; lượt chạy lại đủ
+15 dòng và qua.
+
+Bộ vàng chiếm 1 482 752 B trên 1 835 008 B của phân vùng `storage` (81%, tính theo khối 4 KB của LittleFS); các khối
+`aec`, `doa`, `gsc`, `bss`, `ns`, `agc` sẽ không vừa nếu mỗi khối cỡ `vad`.
