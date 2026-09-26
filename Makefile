@@ -82,8 +82,13 @@ host-live: ## Show wake and command events live
 	cd host && uv run python -m srhost.live
 
 # The LAN cannot reach WSL in NAT mode; a port Docker Desktop publishes on Windows it can (KEHOACH 4.6).
+# The board waits in its bootloader until the receiver listens, so a session starts at seq 0 of one boot.
 session: ## Record a labelled session: make session ARGS="--kind probe --room home --fw <ver+sha> --pcm-shift 16"
 	@test -f host/.env || { echo "copy host/.env.example to host/.env and fill it"; exit 1; }
+	@docker rm -f sr-session >/dev/null 2>&1 || true
+	python -m esptool --chip esp32s3 -p $(PORT) --after no-reset chip-id >/dev/null
+	@( for i in $$(seq 60); do docker logs sr-session 2>&1 | grep -q recording && break; sleep 1; done; \
+	   python -m esptool --chip esp32s3 -p $(PORT) run >/dev/null && echo "board released on $(PORT)" ) &
 	docker run --rm $$([ -t 0 ] && echo -it) --name sr-session --user $$(id -u):$$(id -g) --env-file host/.env \
 	  -e PYTHONPATH=/repo/host/src -p $(STREAM_PORT):$(STREAM_PORT) \
 	  -v "$(CURDIR)":/repo -v "$(DATA_ROOT)":"$(DATA_ROOT)" \
