@@ -8,13 +8,17 @@
 #include "app_wiring.h"
 #include "drv_audio.h"
 #include "dsp_afe.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "gen_grid.h"
 #include "gen_payload.h"
+#include "gen_topics.h"
+#include "net_wifi.h"
 #include "sdkconfig.h"
+#include "sys_storage.h"
 
 #define CORE_FRAME 1    // hard 16 ms deadline, nothing else runs here (KEHOACH 5.1)
 #define CORE_BUFFERED 0 // Wi-Fi, lwIP and every task a queue shields
@@ -41,6 +45,8 @@
 #define DIEU_WAIT_MS 100
 #define SPEAK_WAIT_MS 1000
 #define GUI_PERIOD_MS 100
+#define CRED_POLL_MS 2000
+#define LINK_WAIT_MS 1000
 
 typedef struct {
     TaskFunction_t entry;
@@ -210,6 +216,32 @@ static void finish_oneshot(void)
 
 static void net_task(void *arg)
 {
+    const app_wiring_t *w = arg;
+    ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
+    char device_id[GEN_TOPIC_DEVICE_ID_MAX + 1];
+    const bool named = sys_storage_device_id(device_id, sizeof(device_id)) == ESP_OK;
+    esp_err_t err = net_wifi_init(w->system, named ? device_id : NULL);
+    bool told = false;
+    for (err = err == ESP_OK ? net_wifi_apply() : err; err == ESP_ERR_NOT_FOUND; err = net_wifi_apply()) {
+        if (!told) {
+            ESP_LOGW(TAG, "no wifi/ssid yet: type wifi set <ssid> <pass> on the console");
+            told = true;
+        }
+        esp_task_wdt_reset();
+        vTaskDelay(pdMS_TO_TICKS(CRED_POLL_MS));
+    }
+    if (err != ESP_OK) { ESP_LOGE(TAG, "wifi: %s, running without a network", esp_err_to_name(err)); }
+    while (err == ESP_OK &&
+           (xEventGroupWaitBits(w->system, APP_BIT_WIFI_OK, pdFALSE, pdTRUE, pdMS_TO_TICKS(LINK_WAIT_MS)) &
+            APP_BIT_WIFI_OK) == 0) {
+        esp_task_wdt_reset();
+    }
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "link up: internal %u B free, %u B largest block",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    }
+    esp_task_wdt_delete(NULL);
     finish_oneshot();
 }
 
