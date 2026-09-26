@@ -27,6 +27,9 @@ FORBIDDEN_INCLUDE_RE = re.compile(
     r"|esp_timer\.h|esp_log\.h|esp_heap_caps\.h|esp_system\.h|esp_partition\.h|nvs.*"
     r")[>\"]"
 )
+# The FFT libraries allocate their own tables at init (KEHOACH 4.5.3 rule 7); only these wrappers may say where.
+FFT_TABLE_WRAPPERS = {"dsp_spec/src/fft_dl.c", "dsp_spec/src/fft_dsp.c"}
+HEAP_CAPS_INCLUDE_RE = re.compile(r"^\s*#\s*include\s*[<\"]esp_heap_caps\.h[>\"]")
 ALLOCATION_RE = re.compile(r"\b(malloc|calloc|realloc|free|heap_caps_\w+|pvPortMalloc|vPortFree)\s*\(")
 LOG_RE = re.compile(r"\b(ESP_LOG[EWIDV]|ESP_EARLY_LOG[EWIDV]|printf|puts)\s*\(")
 
@@ -56,10 +59,17 @@ def pure_sources(components_dir: Path) -> list[Path]:
     return files
 
 
+def is_fft_table_wrapper(path: Path) -> bool:
+    return "/".join(path.parts[-3:]) in FFT_TABLE_WRAPPERS
+
+
 def check_file(path: Path) -> list[Problem]:
     problems = []
+    wrapper = is_fft_table_wrapper(path)
     for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         line = strip_comments(raw)
+        if wrapper and HEAP_CAPS_INCLUDE_RE.match(line):
+            continue
         if FORBIDDEN_INCLUDE_RE.match(line):
             problems.append(Problem(path, lineno, f"pure layer includes a platform header: {line.strip()}"))
         if hit := ALLOCATION_RE.search(line):
