@@ -18,15 +18,15 @@ typedef struct {
 
 typedef struct dsp_spec_fft_s dsp_spec_fft_t;
 
-/** Bytes the caller must provide for an FFT of n_points, tables and scratch included.
+/** Bytes the caller provides for an FFT of n_points; the backend keeps its own tables (KEHOACH 4.5.3).
  *  @ctx any | non-blocking
  *  @ret 0 when n_points is not a power of two between 64 and 2048
  */
 size_t dsp_spec_fft_workspace_bytes(size_t n_points);
 
-/** Build an FFT of n_points inside mem, which the caller keeps alive and never frees under it.
- *  @ctx task | non-blocking | caller owns mem, at least dsp_spec_fft_workspace_bytes(n_points)
- *  @ret ESP_OK | ESP_ERR_INVALID_ARG bad length or NULL | ESP_ERR_INVALID_SIZE short mem
+/** Build an FFT of n_points inside mem; the backend allocates its tables once here, in internal RAM.
+ *  @ctx task | non-blocking, allocates once | init only; caller owns mem of dsp_spec_fft_workspace_bytes
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_SIZE short mem | ESP_ERR_NO_MEM no room for tables
  */
 esp_err_t dsp_spec_fft_init(dsp_spec_fft_t **out, size_t n_points, void *mem, size_t bytes);
 
