@@ -21,6 +21,7 @@
 #define TMP_SUFFIX ".tmp"
 #define DEVICE_ID_PREFIX "sr-"
 #define MAC_BYTES 6
+#define NVS_LOG_TAG "nvs"
 
 _Static_assert(STORAGE_NVS_NAME_MAX_BYTES == NVS_KEY_NAME_MAX_SIZE, "storage_format.h follows nvs.h");
 _Static_assert(sizeof(esp_partition_mmap_handle_t) == sizeof(uint32_t), "unmap_handle holds an mmap handle");
@@ -163,6 +164,8 @@ esp_err_t sys_storage_init(void)
 {
     if (s_ready) { return ESP_ERR_INVALID_STATE; }
     if (m_storage == NULL) { m_storage = xSemaphoreCreateMutexStatic(&s_lock_mem); }
+    // IDF's nvs prints each string it stores at debug level: a dev log would show wifi/pass and mqtt_pass.
+    esp_log_level_set(NVS_LOG_TAG, ESP_LOG_INFO);
     esp_err_t err = open_nvs();
     if (err == ESP_OK) { err = mount_lfs(); }
     if (err == ESP_OK) { err = count_boot(); }
