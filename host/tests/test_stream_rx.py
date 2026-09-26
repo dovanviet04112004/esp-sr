@@ -13,10 +13,12 @@ from srhost import stream_rx
 from srhost.generated import grid, stream
 
 
-def run_server(tmp_path: Path, board_factory, batches: list[list[bytes]], hops: int) -> stream_rx.Summary:
+def run_server(
+    tmp_path: Path, board_factory, batches: list[list[bytes]], hops: int, hang: bool = False
+) -> stream_rx.Summary:
     server = stream_rx.StreamServer("127.0.0.1", 0)
     recorder = stream_rx.Recorder(tmp_path)
-    board = board_factory(server.port, batches)
+    board = board_factory(server.port, batches, hang)
     stop = threading.Event()
     timer = threading.Timer(10.0, stop.set)
     timer.start()
@@ -47,6 +49,13 @@ def test_a_reconnect_after_a_blip_is_one_recording_with_the_gap_listed(tmp_path:
         assert read_wav(tmp_path / f"{name}.wav") == expected_channel(before + after, c)
     gaps = (tmp_path / "gaps.txt").read_text(encoding="utf-8").splitlines()
     assert gaps == ["offset_samples\texpected_seq\tgot_seq", f"{len(before) * grid.HOP_SAMPLES}\t10\t13"]
+
+
+def test_a_new_connection_supersedes_one_whose_close_never_arrived(tmp_path: Path, board_factory) -> None:
+    batches = [[frame(s) for s in range(0, 4)], [frame(s) for s in range(6, 10)]]
+    summary = run_server(tmp_path, board_factory, batches, hops=8, hang=True)
+    assert summary.frames == 8
+    assert summary.gaps == [stream_rx.Gap(4 * grid.HOP_SAMPLES, 4, 6)]
 
 
 def test_a_bad_frame_drops_the_connection_and_the_board_comes_back(tmp_path: Path, board_factory) -> None:
