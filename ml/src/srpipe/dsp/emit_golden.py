@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
+from srpipe.dsp.afe import chain
 from srpipe.dsp.spec import mel, stft
 from srpipe.generated import grid
 from srpipe.golden.gold import write_gold
@@ -21,6 +22,8 @@ STFT_HOPS = 16
 NEGATIVE_HOPS = 4
 SEED = 20260926
 MEL_FRAMES = 8
+CHAIN_HOPS = 16
+CHAIN_RESET_HOP = 8
 MEL_CASES = (
     (mel.MelConfig(n_bands=40, f_min_hz=20.0, f_max_hz=7600.0, log_floor=1e-6), 13),
     (mel.MelConfig(n_bands=80, f_min_hz=0.0, f_max_hz=8000.0, log_floor=1e-10), 20),
@@ -102,11 +105,76 @@ def emit_mel(root: Path) -> list[Path]:
     return written
 
 
+def _chain_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """(ch0, ch1, reset flags) per case: two tones, clipped noise, a chirp with a reset, near silence."""
+    n = CHAIN_HOPS * grid.HOP_SAMPLES
+    t = np.arange(n) / grid.SAMPLE_RATE_HZ
+    no_reset = np.zeros(CHAIN_HOPS, dtype=np.uint8)
+    with_reset = no_reset.copy()
+    with_reset[CHAIN_RESET_HOP] = 1
+    chirp = 9000.0 * np.sin(2 * np.pi * (50.0 * t + (7900.0 - 50.0) / 2.0 * t**2 / t[-1]))
+    quiet = rng.integers(-3, 4, n)
+    quiet[: n // 2] = 0
+    return [
+        (
+            8000.0 * np.sin(2 * np.pi * 440.0 * t),
+            6000.0 * np.sin(2 * np.pi * 1000.0 * t) + rng.normal(0, 300, n),
+            no_reset,
+        ),
+        (rng.uniform(-40000, 40000, n), rng.uniform(-40000, 40000, n), no_reset),
+        (chirp, chirp, with_reset),
+        (quiet, quiet, no_reset),
+    ]
+
+
+def chain_case(ch0: np.ndarray, ch1: np.ndarray, reset: np.ndarray) -> dict[str, np.ndarray]:
+    """Interleaved int16 input, the hops to reset before, and every field of the frames the chain gives."""
+    pcm_min, pcm_max = np.iinfo(np.int16).min, np.iinfo(np.int16).max
+    mics = np.stack([ch0, ch1], axis=-1)
+    interleaved = np.clip(np.rint(mics), pcm_min, pcm_max).astype(np.int16).reshape(reset.size, -1)
+    ch = chain.Chain("MM")
+    frames = []
+    for hop, flag in zip(interleaved, reset, strict=True):
+        if flag:
+            ch.reset()
+        frames.append(ch.process(hop))
+    return {
+        "input": interleaved,
+        "reset": reset,
+        "pcm": np.stack([f.pcm for f in frames]),
+        "seq": np.array([f.seq for f in frames], dtype=np.int32),
+        "doa_deg": np.array([f.doa_deg for f in frames], dtype=np.int16),
+        "doa_conf": np.array([f.doa_conf for f in frames], dtype=np.uint8),
+        "vad": np.array([f.vad for f in frames], dtype=np.uint8),
+        "level_dbfs": np.array([f.level_dbfs for f in frames], dtype=np.int8),
+        "gain_db": np.array([f.gain_db for f in frames], dtype=np.int8),
+        "flags": np.array([f.flags for f in frames], dtype=np.int32),
+    }
+
+
+def emit_chain(root: Path) -> list[Path]:
+    """Four cases through the default facade chain, then a negative control whose output is one sample late."""
+    rng = np.random.default_rng(SEED + 2)
+    written = []
+    for index, inputs in enumerate(_chain_inputs(rng)):
+        path = root / "chain" / f"case_{index:03d}.gold"
+        write_gold(path, chain_case(*inputs))
+        written.append(path)
+    n = CHAIN_HOPS * grid.HOP_SAMPLES
+    negative = chain_case(rng.normal(0, 4000, n), rng.normal(0, 4000, n), np.zeros(CHAIN_HOPS, dtype=np.uint8))
+    late = np.concatenate([[0], negative["pcm"].reshape(-1)[:-1]]).astype(np.int16)
+    negative["pcm"] = late.reshape(negative["pcm"].shape)
+    path = root / "chain" / "case_neg_000.gold"
+    write_gold(path, negative)
+    written.append(path)
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
-    for path in emit_stft(args.out) + emit_mel(args.out):
+    for path in emit_stft(args.out) + emit_mel(args.out) + emit_chain(args.out):
         print(path.relative_to(args.out) if path.is_relative_to(args.out) else path)
     return 0
 
