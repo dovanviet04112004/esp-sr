@@ -66,6 +66,7 @@ class Heartbeat(TypedDict):
     eventsDropped: int
     streamDropped: NotRequired[int]
     qCleanPeak: NotRequired[int]
+    jsonArenaPeak: NotRequired[int]
     rssiDbm: NotRequired[int]
     coreLoadPct: NotRequired[list[int]]
     ts: NotRequired[int]

@@ -507,6 +507,7 @@ typedef struct {
     uint32_t events_dropped;
     uint32_t stream_dropped;
     uint16_t q_clean_peak;
+    uint16_t json_arena_peak;
     int8_t rssi_dbm;
     uint8_t core_load_pct[2];
     uint8_t core_load_pct_count;
@@ -516,6 +517,7 @@ typedef struct {
     bool has_heap_psram_min;
     bool has_stream_dropped;
     bool has_q_clean_peak;
+    bool has_json_arena_peak;
     bool has_rssi_dbm;
     bool has_core_load_pct;
     bool has_ts;
@@ -630,6 +632,14 @@ static inline bool heartbeat_from_json(const cJSON *root, heartbeat_t *out)
         out->q_clean_peak = (uint16_t) item->valuedouble;
         out->has_q_clean_peak = true;
     }
+    item = cJSON_GetObjectItemCaseSensitive(root, "jsonArenaPeak");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 65535.0) { return false; }
+        out->json_arena_peak = (uint16_t) item->valuedouble;
+        out->has_json_arena_peak = true;
+    }
     item = cJSON_GetObjectItemCaseSensitive(root, "rssiDbm");
     if (item == NULL) { item = NULL; }
     if (item != NULL) {
@@ -695,6 +705,9 @@ static inline cJSON *heartbeat_to_json(const heartbeat_t *in)
     }
     if (in->has_q_clean_peak) {
         cJSON_AddNumberToObject(root, "qCleanPeak", (double) in->q_clean_peak);
+    }
+    if (in->has_json_arena_peak) {
+        cJSON_AddNumberToObject(root, "jsonArenaPeak", (double) in->json_arena_peak);
     }
     if (in->has_rssi_dbm) {
         cJSON_AddNumberToObject(root, "rssiDbm", (double) in->rssi_dbm);
