@@ -1,6 +1,6 @@
 # ADR-0003 — `hpf` lọc bằng biquad có sẵn của `esp-dsp`, dạng trực tiếp II
 
-- **Trạng thái**: Chấp nhận
+- **Trạng thái**: Thay bởi ADR-0004
 - **Ngày**: 2026-09-26
 - **Liên quan**: KẾ HOẠCH §3.3, §3.4, §4.5.1; TASKS E7-T1; ADR-0002; `docs/measurements/latency.md` §5, `budget.md`, `parity.md`
 

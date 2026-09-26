@@ -33,7 +33,7 @@ Ký hiệu: 🔬 là số ước hoặc số của tài liệu ngoài, **chưa �
 |---|---|
 | Việc | chuỗi tiếng nói đầy đủ trên board hai micro, từ thu tới nói lại, bằng mã đọc được |
 | Ngôn ngữ đích | tiếng Việt cho từ đánh thức, lệnh và tiếng nói ra |
-| Nền | `dl_fft`, `esp-dsp`, `esp-dl` — thư viện mã mở của Espressif: FFT bằng `dl_fft` (`esp-dsp` thua ở FFT, ADR-0002), biquad của `hpf` bằng `esp-dsp` (ADR-0003). **Không** link bất kỳ `.a` nào của ESP-SR (TỔNG QUAN §1) |
+| Nền | `dl_fft`, `esp-dl` — hai thư viện mã mở của Espressif; `esp-dsp` được đo và loại hai lần: FFT ở ADR-0002, biquad của `hpf` ở ADR-0004. **Không** link bất kỳ `.a` nào của ESP-SR (TỔNG QUAN §1) |
 | Chip | ESP32-S3, hai nhân Xtensa LX7 240 MHz, flash 16 MB, PSRAM 8 MB octal |
 | Đường về máy tính | MQTT cho trạng thái, số liệu, sự kiện; TCP cho tiếng khi bật tay |
 | XONG khi | mọi khối đạt cửa riêng; chạy đồng thời trong một bản dựng; liền 30 phút **0 khung mất**, heap không trôi; mọi con số dựng lại được bằng **một lệnh** `make` |
@@ -361,7 +361,7 @@ OM-LSA nằm ngay trong `dsp_afe`; bản RNNoise nằm ở `ai_engine/src/ns/` v
 | `fft` `window` `stft` | thuần | `dsp_spec` | FFT thực (`dl_fft`), căn Hann, chồng 50% | §3.1 | **451 µs đo** cả chuỗi | E6-T4 |
 | `mel` | thuần | `dsp_spec` | log-mel, MFCC giữ làm đối chiếu | 40 dải, 20–7 600 Hz | **~180 µs đo** (`rfft` 118 + 40 dải 62) | E6-T5 |
 | `pitch` | thuần | `dsp_spec` | NCCF, ra log F0 + delta + độ hữu thanh | 60–400 Hz | ~300 µs; **chỉ dựng nếu E11-T8 chứng minh có lợi** | E11-T8 |
-| `hpf` | thuần | `dsp_afe` | IIR bậc hai Butterworth, `dsps_biquad_f32` của `esp-dsp` (DF2) | 80 Hz | < 20 µs hai kênh | E7-T1 |
+| `hpf` | thuần | `dsp_afe` | IIR bậc hai Butterworth, dạng II chuyển vị viết tay (ADR-0004) | 80 Hz | ~37 µs hai kênh | E7-T1 |
 | `balance` | thuần | `dsp_afe` | nhân hệ số phức hiệu chuẩn mỗi vạch cho `ch1` | từ NVS `calib/bal` | < 10 µs | E7-T2 |
 | `aec` | thuần | `dsp_afe` | MDF chồng-lưu, bước học tự chỉnh, khử vọng dư | 8 phân đoạn × 256 = 128 ms đuôi | ~1,3 ms hai micro | E10-T4 |
 | `doa` | thuần | `dsp_afe` | GCC-PHAT trên phổ chéo đã làm trơn, dò lưới 2° | dải 200 Hz – c/2d | ~550 µs khi cập nhật | E8-T1 |
@@ -382,15 +382,12 @@ TỔNG QUAN §5.3 thay từng ô bằng số đo, ghi ở `docs/measurements/bud
 ### 3.4 `hpf` và `balance`
 
 **`hpf`** — biquad Butterworth bậc hai, tần số cắt `hpf.cutoff_hz` của `contracts/afe.yaml` (80 Hz), float32, mỗi
-micro một bộ, dùng hai kernel có sẵn của `esp-dsp` (ADR-0003): hệ số từ `dsps_biquad_gen_hpf_f32` (công thức RBJ,
-Q = 1/√2), lọc bằng `dsps_biquad_f32` — dạng trực tiếp II, có bản hợp ngữ cho S3. Bản Python soi gương đúng dạng và
-đúng công thức ấy ở float32. Dạng II kém dạng II chuyển vị ~10–20 dB về sai số làm tròn vì cực nằm sát z = 1; đo so
-với bản float64: tiếng nói −30 dBFS kèm một chiều 0,5 LSB sai tối đa 0,48 LSB (dạng chuyển vị 0,13), hum 50 Hz −10 dBFS
-kèm một chiều −20 dBFS sai 7,7 LSB, tức 70 dB dưới tín hiệu (dạng chuyển vị 0,7 LSB). Cả hai trường hợp dưới SNR
-61 dBA của chính INMP441. Đo trên board, kernel hợp ngữ và vòng viết tay nhanh ngang nhau vì biquad là đệ quy
-(ADR-0003); kernel có sẵn được giữ theo luật dùng thư viện. Đứng đầu chuỗi vì lý do của
-TỔNG QUAN §2.2. Thước: độ lệch một chiều sau lọc so với trước, tính bằng dB; đáp ứng biên độ ở 100 Hz và 200 Hz
-khớp bản Python.
+micro một bộ, **dạng trực tiếp II chuyển vị viết tay**. Hệ số theo công thức RBJ (Q = 1/√2), module tự tính bằng float32
+lúc init; bản Python soi gương đúng công thức và đúng thứ tự phép tính ấy. `esp-dsp` có sẵn biquad nhưng bị loại
+(ADR-0004): kernel ấy là dạng II không chuyển vị, đo trên board **không nhanh hơn** vòng viết tay (biquad là đệ quy, mỗi
+mẫu chờ kết quả mẫu trước nên độ trễ của bộ tính dấu phẩy động quyết định), mà sai số làm tròn lớn hơn 10–20 dB vì cực
+nằm sát z = 1. Đứng đầu chuỗi vì lý do của TỔNG QUAN §2.2. Thước: độ lệch một chiều sau lọc so với trước, tính bằng dB;
+đáp ứng biên độ ở 100 Hz và 200 Hz khớp bản Python.
 
 **`balance`** — một hệ số phức `g[k]` cho mỗi vạch `k`, nhân vào `ch1` sau STFT:
 `X₁'[k] = g[k] · X₁[k]`. Biên độ của `g` bù chênh độ nhạy, pha của `g` bù chênh pha **tĩnh**.
@@ -1011,7 +1008,6 @@ chứng âm cố ý vi phạm:
 | Phụ thuộc | Khai ở | Ghim |
 |---|---|---|
 | `espressif/dl_fft` | `dsp_spec` | `==0.7.0`, bản đo ở E6-T3 (ADR-0002) |
-| `espressif/esp-dsp` | `dsp_afe` | `==1.8.2`, bản đã đo ở E6-T3 và dùng cho biquad của `hpf` (ADR-0003) |
 | `espressif/esp-dl` | `ai_engine` | `==` bản xuất model ở E11-T10 |
 | `espressif/mqtt`, `espressif/cjson` | `net_mqtt` | `^`; IDF v6 đã đưa cả hai ra khỏi lõi, `REQUIRES mqtt` trơ fail ở bước giải phụ thuộc |
 | `joltwallet/littlefs` | `sys_storage` | `^` |
