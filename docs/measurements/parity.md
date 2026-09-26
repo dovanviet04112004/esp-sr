@@ -30,3 +30,17 @@ Chạy: `pytest firmware/test_apps/parity/pytest_parity.py --target esp32s3 --em
 `pcm` lệch tới 1 LSB là bản chất của phép so, không phải lỗi: trung bình hai mẫu int16 có tổng lẻ rơi đúng vào nửa
 LSB, và sai số float32 của hai thư viện FFT (`dl_fft` trên board, numpy ở Python) quyết định làm tròn lên hay xuống.
 Ca có tổng hai kênh luôn chẵn (chirp giống nhau hai kênh, tiếng gần im) khớp tuyệt đối. Trên máy tính: 78,1 dB.
+
+## Dựng lại trên phiên thu thật của board (E5-T11)
+
+App khung rỗng (`main` bản `dev`, mọi module `dsp_afe` tắt), luồng `mode 5` (`ch0 ch1 clean`) 10 phút về
+`srhost.stream_rx`; `srhost.score` chạy `srpipe.dsp.afe.chain` trên `ch0 ch1` rồi so với `clean` của board, bỏ hai
+bước đầu, phán theo `contracts/golden/chain/tolerance.yaml`.
+
+| Phiên | Bản dựng | Bước so | Sai số lớn nhất | Mẫu vượt ngưỡng | Mẫu lệch 1 LSB | SNR dB | Ngày |
+|---|---|---|---|---|---|---|---|
+| `20260926_home_002` | `dev` @ `3d3335d` | 37 498 | 1 LSB | 0 | 21,1 % | 25,1 | 26/09 |
+
+Phòng yên, không nguồn âm: `clean` chỉ khoảng −72 dBFS (RMS ~8 LSB), nên sai số làm tròn 1 LSB của mục trên chiếm phần
+lớn và kéo SNR xuống 25 dB. Ngưỡng SNR 60 dB của bộ vàng áp cho tín hiệu có biên độ của bộ vàng, không áp ở đây; phép
+phán của phiên thật là sai số lớn nhất ≤ 1 LSB.
