@@ -100,8 +100,8 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 | 8.3 | Người gửi nhân 1 chờ người nhận nhân 0 | `thu_task` và `sach_task` gửi với timeout 0 | `grep "xQueueSend.*q_clean"` phải thấy `0` | ⏳ |
 | 8.4 | Pool nhỏ hơn nhịp tiêu thụ | pool `q_frame` 8 ô = 128 ms biên | `heartbeat` khai điểm cao nhất `q_frame` | ⏳ |
 | 8.9 | Hai task cùng giữ một ô pool: người ghi ghi đè ô người đọc đang đọc | một ô chỉ đi qua đúng một vòng `q_free` → `thu_task` → `q_frame` → `sach_task` → `q_free`; `thu_task` chỉ ghi vào ô vừa lấy từ `q_free` | đọc `app_tasks.c`; test đẩy `sach_task` chậm quá 8 khung thì chỉ `frames_dropped` tăng, dữ liệu ô không bao giờ lẫn `seq` | ⏳ |
-| 8.5 | Stream buffer bị ghi nửa khung | `sach_task` kiểm `xStreamBufferSpacesAvailable` trước, không đủ thì bỏ cả khung | đọc code; `host` không bao giờ thấy khung cụt | ⏳ |
-| 8.6 | Stream buffer có hai người ghi | chỉ `sach_task` ghi `sb_stream` | đọc code | ⏳ |
+| 8.5 | Stream buffer bị ghi nửa khung | `sach_task` kiểm `xStreamBufferSpacesAvailable` trước, không đủ thì bỏ cả khung | đọc code; `host` không bao giờ thấy khung cụt | ✅ `svc_report_stream_push` @ `253ddf7`; máy nhận nghẽn 30 s trên board B: không khung cụt nào, mọi khung thiếu đều nằm ở `streamDropped` |
+| 8.6 | Stream buffer có hai người ghi | chỉ `sach_task` ghi `sb_stream` | đọc code | ✅ `xStreamBufferSend` chỉ có ở `svc_report_stream_push`, gọi từ `sach_task` @ `253ddf7` |
 | 8.7 | Hở `seq` không ai xử lý | `nhan_task` thấy hở thì đặt lại trạng thái `wake`; `host` ghi hở vào json | phép kiểm chặn mạng 5 s ở E5-T10 | ⏳ |
 | 8.8 | Callback esp-mqtt làm việc dài | callback chỉ phân tích rồi bỏ vào `q_cmd` / `q_cmdset` | đọc `app_wiring.c` | ⏳ |
 
