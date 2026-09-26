@@ -695,6 +695,7 @@ esp-sr/
 ├── .gitea/workflows/{contracts.yml, ml.yml, firmware.yml, host.yml}
 │                   ★ Gitea Actions đọc .gitea/workflows ở gốc repo; cần một act_runner đã đăng ký
 ├── .gitignore  ├── .gitattributes  ├── .editorconfig  ├── .pre-commit-config.yaml
+├── ruff.toml                       # cấu hình ruff cho tools/; ml/ và host/ khai trong pyproject.toml riêng
 ├── README.md   ├── Makefile
 ├── CLAUDE.md                       ★ quy tắc làm việc — gitignore, chỉ có ở máy local
 ├── .claude/                        ★ gitignore
@@ -706,7 +707,7 @@ esp-sr/
 ├── deploy/        Docker Compose cho broker MQTT — chỉ hạ tầng chạy, không chứa CI
 ├── hardware/      README.md · datasheets/INDEX.md · giá đỡ dàn micro (file in 3D nguồn)
 ├── tools/         script ngang khối: gen_contracts · check_comments · check_layers
-│                   · check_purity · budget
+│                   · check_purity · budget; tests/ kiểm chính các script ấy
 └── docs/
     ├── KE_HOACH_esp_sr_esp32s3.md       # kiến trúc — nguồn sự thật
     ├── tong_quan_version_5.md           # lý do và bậc thang thuật toán
@@ -898,6 +899,7 @@ firmware/
 ├── sdkconfig.secrets                 # ❌ gitignore — mật khẩu broker của bàn thử, nếu có
 ├── partitions.csv                    # §6.1
 ├── dependencies.lock                 # ✅
+├── .clang-format                     # thụt 4, gần kiểu ESP-IDF; file gen_*.h không đi qua nó
 │
 ├── main/
 │   ├── CMakeLists.txt  ├── idf_component.yml  ├── Kconfig.projbuild
@@ -1200,6 +1202,7 @@ Bàn thử dùng `mqtt://` trong mạng LAN; `prod` chỉ nhận `mqtts://` (§7
 | `check_layers.py` | bảng tầng §4.5.4, cấm `espressif/esp-sr` | pre-commit, CI |
 | `check_purity.py` | `common`, `dsp_*`, `lang_*` không include FreeRTOS, driver, log, heap | pre-commit, CI |
 | `budget.py` | gộp CSV của `bench_*` thành bảng RAM và µs theo module (TỔNG QUAN V5.0.10) | `make measure` |
+| `tests/` + `__init__.py` | `unittest` cho chính các script trên: hợp đồng hợp lệ, generator tất định và C sinh ra chạy đúng, mỗi luật kiểm có một ca vi phạm cố ý | `make test`, CI |
 
 ### 4.9 Cấm hardcode — mỗi hằng số có đúng một nguồn
 
