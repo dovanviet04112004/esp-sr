@@ -1,0 +1,50 @@
+/** Two-stage level control: slow speech-level gain, fast look-ahead limiter (KEHOACH 3.10).
+ *  The limiter delays the output by lookahead_ms.
+ */
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+
+#include "esp_err.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct {
+    float target_dbfs; // speech level to reach, -26
+    float gain_min_db;
+    float gain_max_db;
+    float up_db_per_s;   // 3
+    float down_db_per_s; // 6
+    float limit_dbfs;    // -3
+    float lookahead_ms;  // 4
+} dsp_afe_agc_config_t;
+
+typedef struct dsp_afe_agc_s dsp_afe_agc_t;
+
+/** Bytes this configuration needs, the look-ahead line included.
+ *  @ctx any | non-blocking
+ */
+size_t dsp_afe_agc_workspace_bytes(const dsp_afe_agc_config_t *cfg);
+
+/** Build the controller in mem at 0 dB gain.
+ *  @ctx task | non-blocking | caller owns mem
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_SIZE
+ */
+esp_err_t dsp_afe_agc_init(dsp_afe_agc_t **out, const dsp_afe_agc_config_t *cfg, void *mem, size_t bytes);
+
+/** Scale one hop in place; the slow gain moves only when speech is set, and freezes otherwise.
+ *  @ctx any | non-blocking | gain_db gets the gain applied to this hop
+ */
+esp_err_t dsp_afe_agc_process(dsp_afe_agc_t *st, float *hop, bool speech, float *gain_db);
+
+/** Move the target level, as SET_CONFIG afe/agc_target_dbfs asks.
+ *  @ctx any | non-blocking
+ */
+void dsp_afe_agc_set_target(dsp_afe_agc_t *st, float target_dbfs);
+
+#ifdef __cplusplus
+}
+#endif
