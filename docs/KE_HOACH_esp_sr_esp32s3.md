@@ -1391,15 +1391,16 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 
 | Đối tượng | Kiểu | Cỡ | Gửi | Nhận | Đầy thì | Vì sao đặt thế |
 |---|---|---|---|---|---|---|
-| `q_frame` | Queue depth 8, chỉ số ô `uint8_t` + pool 8 khung `int16` ở **RAM nội** | 8 × 1,5 KB | `thu_task` | `sach_task` | `thu_task` **không chờ**: bỏ khung, tăng `frames_dropped` — con số của Cửa 5 | không chép dữ liệu hai lần; pool cấp lúc boot |
+| `q_frame` | Queue depth 8, chỉ số ô `uint8_t` + pool 8 khung `int16` ở **RAM nội** | 8 × 1,5 KB | `thu_task` | `sach_task` | không bao giờ đầy: chỉ ô lấy được từ `q_free` mới được gửi | không chép dữ liệu hai lần; pool cấp lúc boot |
+| `q_free` | Queue depth 8, chỉ số ô `uint8_t`, nạp sẵn cả 8 ô lúc boot | 8 B | `sach_task` trả ô đã xử lý xong | `thu_task` lấy ô trước khi đọc DMA | `thu_task` **không chờ**: hết ô thì bỏ khung, tăng `frames_dropped` — con số của Cửa 5 | một ô chỉ có một chủ tại một lúc; thiếu hàng này thì `thu_task` ghi đè ô `sach_task` đang đọc ngay khi `q_frame` vừa có chỗ |
 | `q_clean` | Queue depth **64** (~1 s), `dsp_afe_frame_t` ~530 B, bộ nhớ ở **PSRAM** | ~34 KB | `sach_task` | `nhan_task` | `sach_task` không chờ: bỏ khung, tăng `clean_dropped`; `nhan_task` thấy hở `seq` thì đặt lại trạng thái `wake` | đây là chỗ "nạp và lấy không cùng nhịp" của TỔNG QUAN §4.3; điểm cao nhất xuất ra `heartbeat` |
 | `s_afe_stats` | `portMUX_TYPE` + một struct (mức, hướng, cờ, gain, bộ đếm) | ~64 B | `sach_task` | `gui_task` | — ghi đè | số liệu là **mức**, không phải chuỗi sự kiện: `gui_task` chỉ cần giá trị mới nhất mỗi 100 ms. Chép dưới spinlock, vài chục byte, không gọi gì bên trong |
 | `sb_stream` | StreamBuffer ở PSRAM, **chỉ tồn tại khi** `NET_STREAM_ENABLE` | 64 KB | `sach_task` | `luong_task` | ghi với timeout 0; không đủ chỗ cho **cả khung** thì bỏ cả khung, đếm; không bao giờ ghi nửa khung | một người ghi, một người đọc — đúng hợp đồng của stream buffer |
-| `q_dialog` | Queue depth 8, `listen_event_t` | 8 × 32 B | `nhan_task` | `dieu_task` | chờ 20 ms rồi bỏ, log **một lần** ở cạnh đầy | `nhan_task` không được đứng chờ lâu: sau lưng nó là 1 s đệm đang đầy dần |
-| `q_cmd` | Queue depth 4, `device_cmd_t` | 4 × ~256 B | task của esp-mqtt | `dieu_task` | bỏ, log | callback esp-mqtt chỉ **phân tích** rồi bỏ vào đây; chờ ở callback là chặn cả đường MQTT |
+| `q_dialog` | Queue depth 8, `app_event_t`, bộ nhớ ở PSRAM | 8 × 80 B | `nhan_task` | `dieu_task` | chờ 20 ms rồi bỏ, log **một lần** ở cạnh đầy | `nhan_task` không được đứng chờ lâu: sau lưng nó là 1 s đệm đang đầy dần |
+| `q_cmd` | Queue depth 4, `device_cmd_t` (sinh từ `contracts/`, chở cả chữ 512 B của `SPEAK`), bộ nhớ ở PSRAM | 4 × ~600 B | task của esp-mqtt | `dieu_task` | bỏ, log | callback esp-mqtt chỉ **phân tích** rồi bỏ vào đây; chờ ở callback là chặn cả đường MQTT |
 | `q_cmdset` | Queue depth 1, con trỏ bộ lệnh đã phân tích (PSRAM) | 4 B | task của esp-mqtt | `nhan_task` | bản mới thay bản chờ | `nhan_task` tự chạy `lang_vi` và đổi bảng lệnh **giữa hai câu**, ở trạng thái `NGHE` |
-| `q_speak` | Queue depth 4, `speak_req_t` | 4 × ~200 B | `dieu_task` | `noi_task` | bỏ, log | |
-| `q_event_up` | Queue depth 16, `app_event_t` | 16 × 64 B | `nhan_task`, `dieu_task` | `gui_task` | bỏ, tăng `events_dropped` | **người phát sự kiện không bao giờ publish**: publish QoS 1 chờ PUBACK, và `nhan_task` đứng chờ mạng là đệm 1 s đầy dần |
+| `q_speak` | Queue depth 4, `app_speak_req_t`, bộ nhớ ở PSRAM | 4 × 546 B | `dieu_task` | `noi_task` | bỏ, log | |
+| `q_event_up` | Queue depth 16, `app_event_t`, bộ nhớ ở PSRAM | 16 × 80 B | `nhan_task`, `dieu_task` | `gui_task` | bỏ, tăng `events_dropped` | **người phát sự kiện không bao giờ publish**: publish QoS 1 chờ PUBACK, và `nhan_task` đứng chờ mạng là đệm 1 s đầy dần |
 | `eg_system` | EventGroup | 4 B | mọi task | mọi task | — | bit `WIFI_OK` `MQTT_OK` `TIME_OK` `MODELS_OK` `STREAM_ON` `SPEAKING` `CALIBRATING` `OTA_RUNNING` |
 | `m_storage` | Mutex, nội bộ `sys_storage` | — | mọi đường ghi NVS và LittleFS | — | chờ có hạn 200 ms | khoá lá, không lấy khoá nào khác bên trong |
 
@@ -1609,6 +1610,7 @@ nên lớn hơn; đó là giá của mã đọc được và khớp Python từn
 | Trọng số và vùng làm việc `synth` (nếu mạng) | ≤ 1 MB + ~0,3 MB |
 | Trọng số `ns` + `wake` (mặc định) | ~140 KB |
 | `q_clean` | ~34 KB |
+| `q_dialog`, `q_cmd`, `q_speak`, `q_event_up` (§5.3) | ~6 KB |
 | `sb_stream` | 64 KB |
 | Đệm dựng câu của `noi_task`: 5 s × 16 kHz × 2 B | 160 KB |
 | Ngăn xếp `mqtt_task`, vùng TLS | ~50 KB |

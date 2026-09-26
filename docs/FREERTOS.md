@@ -99,6 +99,7 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 | 8.2 | Nhận không kiểm kết quả | mọi `xQueueReceive` nằm trong điều kiện | `grep` | ⏳ |
 | 8.3 | Người gửi nhân 1 chờ người nhận nhân 0 | `thu_task` và `sach_task` gửi với timeout 0 | `grep "xQueueSend.*q_clean"` phải thấy `0` | ⏳ |
 | 8.4 | Pool nhỏ hơn nhịp tiêu thụ | pool `q_frame` 8 ô = 128 ms biên | `heartbeat` khai điểm cao nhất `q_frame` | ⏳ |
+| 8.9 | Hai task cùng giữ một ô pool: người ghi ghi đè ô người đọc đang đọc | một ô chỉ đi qua đúng một vòng `q_free` → `thu_task` → `q_frame` → `sach_task` → `q_free`; `thu_task` chỉ ghi vào ô vừa lấy từ `q_free` | đọc `app_tasks.c`; test đẩy `sach_task` chậm quá 8 khung thì chỉ `frames_dropped` tăng, dữ liệu ô không bao giờ lẫn `seq` | ⏳ |
 | 8.5 | Stream buffer bị ghi nửa khung | `sach_task` kiểm `xStreamBufferSpacesAvailable` trước, không đủ thì bỏ cả khung | đọc code; `host` không bao giờ thấy khung cụt | ⏳ |
 | 8.6 | Stream buffer có hai người ghi | chỉ `sach_task` ghi `sb_stream` | đọc code | ⏳ |
 | 8.7 | Hở `seq` không ai xử lý | `nhan_task` thấy hở thì đặt lại trạng thái `wake`; `host` ghi hở vào json | phép kiểm chặn mạng 5 s ở E5-T10 | ⏳ |
