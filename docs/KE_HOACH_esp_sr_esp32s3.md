@@ -1291,13 +1291,18 @@ Ba vai của TỔNG QUAN "gửi về máy để xem và chấm": **xem** (`live.
 deploy/
 ├── docker-compose.yml             # emqx/emqx:6.3.1, container sr-emqx: 1883 ra LAN, dashboard 127.0.0.1:18084
 ├── .env.example                   # EMQX_NODE_COOKIE, EMQX_DASHBOARD_PASSWORD — giá trị giả
-└── emqx/{emqx.conf, acl.conf, gen_certs.sh}   # certs gitignore
+└── emqx/
+    ├── emqx.conf                  # listener 1883, bảng user nội bộ, ACL, retained xuống đĩa
+    ├── acl.conf                   # mỗi deviceId chỉ nhánh của nó; srhost đọc mọi up/, gửi down/
+    ├── users.csv.example          # ✅ tài khoản mẫu, mật khẩu giả
+    ├── users.csv                  # ❌ gitignore — tài khoản thật: mỗi board một dòng, cộng srhost
+    └── gen_certs.sh               # CA + cert broker cho mqtts ở prod; certs/ gitignore
 ```
 
 **Broker là EMQX chạy trong Docker Desktop** trên máy phát triển, cùng bản và cùng khuôn với repo face
 attendance. Docker Desktop mở cổng trên máy Windows, nên board nối tới **IP LAN của máy** ở cổng 1883, không
 phải tới địa chỉ của WSL. Dashboard chỉ ở loopback, cổng 18084 vì broker của repo face attendance đã giữ
-18083 trên cùng máy. Retained lưu xuống đĩa (`EMQX_RETAINER__BACKEND__STORAGE_TYPE=disc`): để trong RAM thì
+18083 trên cùng máy. **Bàn thử cũng đòi mật khẩu**: EMQX xác thực bằng bảng user nội bộ, nạp từ `users.csv` lúc khởi động; board đăng nhập bằng username là `deviceId` và mật khẩu ở NVS `device/mqtt_pass`, host bằng `srhost`. `make broker-up` từ chối chạy khi chưa có `users.csv`. Retained lưu xuống đĩa (`EMQX_RETAINER__BACKEND__STORAGE_TYPE=disc`): để trong RAM thì
 broker khởi động lại là mất `status` `offline` của máy đang tắt. Bàn thử dùng `mqtt://` trong mạng LAN;
 `prod` chỉ nhận `mqtts://` (§7.5).
 
@@ -1715,7 +1720,7 @@ luyện không phụ thuộc phiên bản `dsp_afe` nào.
 
 | Hạng mục | Cách làm |
 |---|---|
-| Board ↔ broker | bàn thử `mqtt://` trong LAN; `prod` chỉ nhận `mqtts://` (`NET_MQTT_REQUIRE_TLS`), cert CA nhúng trong firmware; username là `deviceId` |
+| Board ↔ broker | bàn thử `mqtt://` trong LAN **có mật khẩu** (bảng user nội bộ của EMQX, §4.7); `prod` chỉ nhận `mqtts://` (`NET_MQTT_REQUIRE_TLS`), cert CA nhúng trong firmware; username là `deviceId`, mật khẩu ở NVS `device/mqtt_pass` |
 | Bí mật trên máy | NVS; `prod` mã hoá NVS. `sdkconfig.secrets` gitignore |
 | Tiếng người | **không rời máy** ở chế độ thường; luồng tiếng chỉ mở bằng lệnh có chủ đích, **LED sáng suốt lúc mở**, tự tắt sau 10 phút nếu không gia hạn; `prod` không biên dịch luồng tiếng |
 | Bản thu để huấn luyện | theo §1.4: phiếu đồng ý, mã người nói, lưu ngoài repo, xoá được |
