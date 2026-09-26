@@ -5,10 +5,26 @@
   "description": "Retained online state of a board; the broker publishes the OFFLINE copy as its will.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["deviceId", "state"],
+  "required": [
+    "deviceId",
+    "state"
+  ],
   "properties": {
-    "deviceId": {"type": "string", "pattern": "^[A-Za-z0-9_-]{4,32}$", "maxLength": 32},
-    "state": {"enum": ["ONLINE", "OFFLINE"]},
-    "fw": {"type": "string", "maxLength": 32}
+    "deviceId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{4,32}$",
+      "maxLength": 32
+    },
+    "state": {
+      "enum": [
+        "ONLINE",
+        "OFFLINE"
+      ]
+    },
+    "fw": {
+      "type": "string",
+      "pattern": "^[0-9A-Za-z._+-]{1,32}$",
+      "maxLength": 32
+    }
   }
 }

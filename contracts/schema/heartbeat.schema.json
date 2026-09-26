@@ -5,24 +5,106 @@
   "description": "Health of a board every heartbeat_interval_s: memory, dropped frames, queue peaks.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["deviceId", "fw", "uptimeS", "heapInternalFree", "heapInternalMin", "dmaOverflows", "framesDropped", "cleanDropped", "eventsDropped"],
+  "required": [
+    "deviceId",
+    "fw",
+    "uptimeS",
+    "heapInternalFree",
+    "heapInternalMin",
+    "dmaOverflows",
+    "framesDropped",
+    "cleanDropped",
+    "eventsDropped"
+  ],
   "properties": {
-    "deviceId": {"type": "string", "pattern": "^[A-Za-z0-9_-]{4,32}$", "maxLength": 32},
-    "fw": {"type": "string", "maxLength": 32},
-    "models": {"type": "string", "maxLength": 32},
-    "uptimeS": {"type": "integer", "minimum": 0, "maximum": 4294967295},
-    "heapInternalFree": {"type": "integer", "minimum": 0, "maximum": 4294967295},
-    "heapInternalMin": {"type": "integer", "minimum": 0, "maximum": 4294967295},
-    "heapPsramFree": {"type": "integer", "minimum": 0, "maximum": 4294967295},
-    "heapPsramMin": {"type": "integer", "minimum": 0, "maximum": 4294967295},
-    "dmaOverflows": {"type": "integer", "minimum": 0, "maximum": 4294967295},
-    "framesDropped": {"type": "integer", "minimum": 0, "maximum": 4294967295},
-    "cleanDropped": {"type": "integer", "minimum": 0, "maximum": 4294967295},
-    "eventsDropped": {"type": "integer", "minimum": 0, "maximum": 4294967295},
-    "streamDropped": {"type": "integer", "minimum": 0, "maximum": 4294967295},
-    "qCleanPeak": {"type": "integer", "minimum": 0, "maximum": 65535},
-    "rssiDbm": {"type": "integer", "minimum": -127, "maximum": 0},
-    "coreLoadPct": {"type": "array", "maxItems": 2, "items": {"type": "integer", "minimum": 0, "maximum": 100}},
-    "ts": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+    "deviceId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{4,32}$",
+      "maxLength": 32
+    },
+    "fw": {
+      "type": "string",
+      "pattern": "^[0-9A-Za-z._+-]{1,32}$",
+      "maxLength": 32
+    },
+    "models": {
+      "type": "string",
+      "pattern": "^[0-9A-Za-z._+-]{1,32}$",
+      "maxLength": 32
+    },
+    "uptimeS": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "heapInternalFree": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "heapInternalMin": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "heapPsramFree": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "heapPsramMin": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "dmaOverflows": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "framesDropped": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "cleanDropped": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "eventsDropped": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "streamDropped": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "qCleanPeak": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "rssiDbm": {
+      "type": "integer",
+      "minimum": -127,
+      "maximum": 0
+    },
+    "coreLoadPct": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100
+      }
+    },
+    "ts": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    }
   }
 }

@@ -6,7 +6,7 @@ heartbeat_interval_s: 30
 telemetry_period_ms: 1000
 telemetry_samples: 10
 topics:
-  - {id: status, path: "sr/{deviceId}/up/status", direction: up, qos: 1, retain: true, schema: status}
+  - {id: status, path: "sr/{deviceId}/up/status", direction: up, qos: 1, retain: true, schema: status, will: true}
   - {id: heartbeat, path: "sr/{deviceId}/up/heartbeat", direction: up, qos: 0, retain: false, schema: heartbeat}
   - {id: telemetry, path: "sr/{deviceId}/up/telemetry", direction: up, qos: 0, retain: false, schema: telemetry}
   - {id: event, path: "sr/{deviceId}/up/event", direction: up, qos: 1, retain: false, schema: event}

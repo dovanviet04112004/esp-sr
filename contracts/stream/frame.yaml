@@ -13,7 +13,7 @@ header:
   - {name: samples, type: u16}
 header_bytes: 24
 modes:
-  - {id: 0, name: off, channels: 0}
+  - {id: 0, name: "off", channels: 0}
   - {id: 1, name: clean, channels: 1}
   - {id: 2, name: raw, channels: 2}
   - {id: 3, name: raw_ref, channels: 3}

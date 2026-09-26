@@ -26,6 +26,10 @@ Generator dựng struct C cỡ cố định từ schema, nên mỗi schema phả
 
 - Gốc là `object`, `additionalProperties: false`.
 - Mọi `string` có `maxLength`; mọi `array` có `maxItems`.
+- `maxLength` đếm **ký tự**, C cần **byte**. Chuỗi có `pattern` ASCII được cấp đúng `maxLength` byte;
+  chuỗi không có `pattern` là UTF-8 và được cấp `4 × maxLength` byte — một chữ Việt như "ệ" đã là 3 byte.
+  Chuỗi kỹ thuật (id, phiên bản, host, url) vì thế luôn mang `pattern`.
+- Chuỗi dài hơn bộ đệm bị **từ chối** lúc phân tích, không bị cắt.
 - Mọi `integer` có `minimum` và `maximum` — generator chọn kiểu C nhỏ nhất chứa được.
 - Giá trị liệt kê dùng `enum` các chuỗi IN HOA tiếng Anh.
 - Ràng buộc theo trường hợp viết bằng `allOf` + `if`/`then`; generator bỏ qua chúng, bộ kiểm schema thì không.

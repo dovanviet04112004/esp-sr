@@ -5,12 +5,39 @@
   "description": "Where to fetch a firmware or model image and how to check it.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["kind", "version", "url", "sha256", "sizeBytes"],
+  "required": [
+    "kind",
+    "version",
+    "url",
+    "sha256",
+    "sizeBytes"
+  ],
   "properties": {
-    "kind": {"enum": ["FIRMWARE", "MODELS"]},
-    "version": {"type": "string", "maxLength": 32},
-    "url": {"type": "string", "maxLength": 256},
-    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "maxLength": 64},
-    "sizeBytes": {"type": "integer", "minimum": 1, "maximum": 4294967295}
+    "kind": {
+      "enum": [
+        "FIRMWARE",
+        "MODELS"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9A-Za-z._+-]{1,32}$",
+      "maxLength": 32
+    },
+    "url": {
+      "type": "string",
+      "pattern": "^https?://[!-~]{1,248}$",
+      "maxLength": 256
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "maxLength": 64
+    },
+    "sizeBytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    }
   }
 }
