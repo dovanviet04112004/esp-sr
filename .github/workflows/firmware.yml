@@ -34,6 +34,17 @@ jobs:
           idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.ci" build
           idf.py size
 
+      - name: dsp_spec on the host, and C against Python on every golden case
+        if: steps.guard.outputs.ready == 'true'
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          pip install pytest==8.3.3 pyyaml==6.0.2
+          cmake -S firmware/components/dsp_spec/test_apps/host -B build_host -DCMAKE_BUILD_TYPE=Release
+          cmake --build build_host -j
+          ./build_host/dsp_spec_host contracts/golden | tee host_parity.log
+          python firmware/test_apps/parity/pytest_parity.py host_parity.log
+
       - name: Generated C compiles and round-trips against the fetched cJSON
         if: steps.guard.outputs.ready == 'true'
         shell: bash
