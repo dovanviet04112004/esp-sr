@@ -764,8 +764,9 @@ Mỗi task gạch xong trong TASKS là một lần push; phần còn lại tự 
 quyết định của chủ dự án; không bí mật nào nằm trong lịch sử git.
 
 Ba khối `ml` / `firmware` / `host` **không bao giờ chép định nghĩa của nhau**. Lưới thời gian, hình
-học dàn micro, payload MQTT, khuôn luồng tiếng, bộ lệnh mặc định, vector vàng — tất cả nằm ở
-`contracts/`, mỗi bên sinh code từ đó.
+học dàn micro, tham số số của các module `dsp_afe`, payload MQTT, khuôn luồng tiếng, bộ lệnh mặc định,
+vector vàng — tất cả nằm ở `contracts/`, mỗi bên sinh code từ đó. Đổi bộ micro hay chỉnh một tham số là sửa
+đúng một file YAML rồi `make gen`; C và Python cùng nhận số mới.
 
 **Vì sao `host/` tách khỏi `ml/`.** Cùng Python nhưng hai vòng đời: `ml/` kéo PyTorch, ESP-PPQ và chạy
 hàng giờ trên GPU; `host/` chạy cạnh board suốt buổi đo, chỉ cần `paho-mqtt`, `numpy`, `pyserial`; `srpipe` là phần phụ `score` cho việc chấm và hiệu chuẩn.
@@ -777,6 +778,7 @@ Gộp lại là bắt máy đo cài PyTorch.
 contracts/
 ├── grid.yaml                      # lưới thời gian §3.1
 ├── array.yaml                     # hình học dàn micro, thứ tự kênh, quy ước dấu §2.3
+├── afe.yaml                       # tham số số của từng module dsp_afe (§3.4–§3.10), mặc định cho cả hai đầu
 ├── schema/                        # JSON Schema — viết một lần, sinh ra C và Python
 │   ├── status.schema.json         #   online/offline, kèm LWT
 │   ├── heartbeat.schema.json
@@ -803,6 +805,7 @@ contracts/
 | `grid.yaml` | `firmware/components/common/include/gen_grid.h` | `dsp_spec`, `dsp_afe`, `ai_engine` |
 | `grid.yaml` | `ml/src/srpipe/generated/grid.py` | mọi bản soi gương và mọi nhánh huấn luyện |
 | `array.yaml` | `common/include/gen_array.h`, `ml/src/srpipe/generated/array.py` | `doa`, `gsc`, `bss`, bộ dựng cảnh |
+| `afe.yaml` | `dsp_afe/include/gen_afe.h`, `ml/src/srpipe/generated/afe.py` | `dsp_afe` và bản soi gương của nó |
 | `stream/frame.yaml` | `common/include/gen_stream.h`, `host/src/srhost/generated/stream.py` | `net_stream`, `svc_report`, `host` |
 | `schema/` | `firmware/components/net_mqtt/include/gen_payload.h` | `svc_report`, `svc_dialog`, `main` |
 | `schema/` | `host/src/srhost/generated/payload.py` | `host` |
@@ -849,7 +852,7 @@ ml/
 ├── .env.example                       # ✅ commit — biến và giá trị giả
 ├── configs/
 │   ├── common/{paths.yaml, hardware.yaml}
-│   ├── afe/{hpf.yaml, aec.yaml, doa.yaml, gsc.yaml, bss.yaml, ns_omlsa.yaml, vad.yaml, agc.yaml}
+│   ├── afe/{hpf.yaml, aec.yaml, doa.yaml, gsc.yaml, bss.yaml, ns_omlsa.yaml, vad.yaml, agc.yaml}  # chỉ ghi đè cho thí nghiệm; mặc định là contracts/afe.yaml
 │   └── models/{ns.yaml, wake.yaml, command.yaml, synth.yaml, quant.yaml}
 │
 ├── src/srpipe/
@@ -1080,7 +1083,7 @@ sau vài tuần, và số đo trên nó thôi nói về máy thật.
 components/dsp_afe/
 ├── CMakeLists.txt          # SRCS theo Kconfig; REQUIRES không điều kiện
 ├── idf_component.yml       # chỉ khi component có phụ thuộc registry
-├── Kconfig                 # DSP_AFE_<MODULE>_ENABLE + tham số lúc dịch
+├── Kconfig                 # chỉ công tắc DSP_AFE_<MODULE>_ENABLE; số của module ở contracts/afe.yaml
 ├── include/
 │   ├── dsp_afe.h           # ★ mặt tiền: workspace_bytes / init / feed / fetch
 │   └── dsp_afe/            # header riêng từng module, để kiểm độc lập
@@ -1394,7 +1397,8 @@ broker khởi động lại là mất `status` `offline` của máy đang tắt.
 | Bộ lệnh mặc định, câu trả lời | `contracts/commands/`, `contracts/responses/` | nướng vào LittleFS |
 | Ngưỡng khớp golden | `contracts/golden/<khối>/tolerance.yaml` | đọc file |
 | Hệ số hiệu chuẩn từng board | NVS `calib/*` (§6.2) | `sys_storage` — **số đo**, không phải hằng số |
-| Ngưỡng vận hành (`wake`, từ chối lệnh, gain sàn) | NVS `kws/*`, `afe/*`, gieo từ `Kconfig` | `SET_CONFIG` qua MQTT |
+| Tham số số của module `dsp_afe` (tần số cắt, dải, bước học, hằng thời gian) | `contracts/afe.yaml` | `gen_afe.h` · `srpipe.generated.afe`; bản dựng chỉ chọn module bật bằng Kconfig |
+| Ngưỡng vận hành (`wake`, từ chối lệnh, gain sàn) | NVS `kws/*`, `afe/*`; `afe/*` gieo từ `contracts/afe.yaml`, `kws/*` từ `Kconfig` của `svc_listen` | `SET_CONFIG` qua MQTT |
 | URL broker, máy nhận luồng, credential | NVS `device/*`, giá trị lùi ở `Kconfig` | `sys_storage` |
 | Đường dẫn dữ liệu | `ml/configs/common/paths.yaml` | nạp config |
 | Siêu tham số | `ml/configs/**/*.yaml` | nạp config |
@@ -1599,7 +1603,7 @@ Bảng phân vùng không đi qua OTA được: đổi bảng là nạp lại qu
 | `wifi` | `ssid`, `pass` | str | ghi qua console ở `dev`/`bench`, qua SoftAP ở E13 |
 | `device` | `serial`, `mqtt_uri`, `mqtt_user`, `mqtt_pass`, `stream_host`, `stream_port`, `sntp_host`, `tz` | str / u16 | vắng `serial` thì dựng từ eFuse MAC: `sr-` + 12 hex thường (board B: `sr-3485188f7a70`); `mqtt_uri` mang cả scheme; vắng thì lùi về `Kconfig` của `net_mqtt` |
 | `calib` | `bal` (blob 257 × 2 float), `bal_ver` (u32), `bal_at` (u32 epoch), `aec_delay` (u32, mẫu), `pcm_shift` (u8) | | kết quả của `test_apps/calib`; **đo trên từng board**, không phải hằng số |
-| `afe` | `ns_floor_db` (i8), `agc_target_dbfs` (i8), `vad_mode` (u8) | | gieo từ `Kconfig` của `dsp_afe`, đổi bằng `SET_CONFIG` |
+| `afe` | `ns_floor_db` (i8), `agc_target_dbfs` (i8), `vad_mode` (u8) | | gieo từ `contracts/afe.yaml`, đổi bằng `SET_CONFIG` |
 | `kws` | `wake_th` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16) | | gieo từ `Kconfig` của `svc_listen` |
 | `model` | `active_slot` (u8), `version` (str), `sha256` (blob 32 B) | | chọn `models_0` hay `models_1` |
 | `sys` | `boot_count` (u32), `seed_ver` (u32), `last_ota_result` (u8), `fw_valid` (u8) | | |
