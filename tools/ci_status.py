@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 TOKEN_FILE = Path.home() / ".config" / "esp-sr" / "gitea_token"
+DETACHED_LOG = Path.home() / ".cache" / "esp-sr" / "ci_status.log"
 POLL_S = 20
 FAILED = {"failure", "timed_out", "cancelled", "startup_failure"}
 PASSED = {"success", "neutral", "skipped"}
@@ -93,19 +94,43 @@ def read_token() -> str:
     return token
 
 
+def detach_from_pre_push() -> int:
+    """Called by the pre-push hook: for a push to GitHub, start a detached waiter and return at once."""
+    github_url = git("remote", "get-url", "github")
+    if parse_remote(os.environ.get("PRE_COMMIT_REMOTE_URL", ""))[1] != parse_remote(github_url)[1]:
+        return 0
+    sha = os.environ.get("PRE_COMMIT_TO_REF") or git("rev-parse", "HEAD")
+    DETACHED_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with DETACHED_LOG.open("a") as log:
+        subprocess.Popen(
+            [sys.executable, __file__, "--sha", sha, "--wait"],
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    print(f"ci_status: watching GitHub Actions for {sha[:10]}; log {DETACHED_LOG}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--sha", default="HEAD", help="commit to report; defaults to HEAD")
     parser.add_argument("--wait", action="store_true", help="poll until no run is pending")
     parser.add_argument("--timeout-s", type=int, default=1800)
+    parser.add_argument("--appear-timeout-s", type=int, default=300, help="give up when no run shows up")
+    parser.add_argument("--from-pre-push", action="store_true", help="detach and return; used by the hook")
     args = parser.parse_args()
+    if args.from_pre_push:
+        return detach_from_pre_push()
 
     sha = git("rev-parse", args.sha)
     _, github_repo = parse_remote(git("remote", "get-url", "github"))
     gitea_base, gitea_repo = parse_remote(git("remote", "get-url", "origin"))
     token = read_token()
 
-    deadline = time.monotonic() + args.timeout_s
+    started = time.monotonic()
+    deadline = started + args.timeout_s
     posted: dict[str, str] = {}
     while True:
         runs = latest_runs(github_repo, sha)
@@ -115,7 +140,8 @@ def main() -> int:
                 posted[run.name] = run.gitea_state
                 print(f"{run.gitea_state:8} github/{run.name}  {run.url}", flush=True)
         settled = runs and all(r.gitea_state != "pending" for r in runs)
-        if not args.wait or settled or time.monotonic() >= deadline:
+        never_started = not runs and time.monotonic() - started >= args.appear_timeout_s
+        if not args.wait or settled or never_started or time.monotonic() >= deadline:
             break
         time.sleep(POLL_S)
     if not runs:
