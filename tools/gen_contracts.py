@@ -373,6 +373,7 @@ def gen_lang_vi_h(v: dict) -> str:
         "N_ORDINALS": len(numbers["ordinals"]),
         "N_SYMBOLS": len(v["symbols"]),
         "N_DICTIONARY": len(v["dictionary"]),
+        "DICTIONARY_KEY_MAX_BYTES": max(len(k.encode("utf-8")) for k in v["dictionary"]),
     }
     out = [banner("contracts/lang_vi.yaml", "//"), "#pragma once\n", "#include <stdbool.h>", "#include <stdint.h>\n"]
     out += [f"#define GEN_LANG_VI_{name} {value}" for name, value in counts.items()]
