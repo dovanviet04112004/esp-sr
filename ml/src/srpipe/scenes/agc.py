@@ -23,6 +23,8 @@ from srpipe.scenes import vad as vad_scenes
 
 HOP = grid.HOP_SAMPLES
 FULL_SCALE = np.float32(32767.0 / 32768.0)
+# The measure keeps P.56's own margin; the gate agc uses is a tuning of agc, not of the ruler that scores it.
+P56_MARGIN_DB = 15.9
 
 
 @dataclass(frozen=True)
@@ -35,7 +37,7 @@ class AgcResult:
     gain_spread_db: float
 
 
-def active_level_dbfs(powers: np.ndarray, gate_db: float = afe.AGC_LEVEL_GATE_DB) -> float:
+def active_level_dbfs(powers: np.ndarray, gate_db: float = P56_MARGIN_DB) -> float:
     """Mean power of the hops within gate_db under that mean, found by iteration, like the ITU-T P.56 active level."""
     level = float(np.mean(powers))
     for _ in range(50):
