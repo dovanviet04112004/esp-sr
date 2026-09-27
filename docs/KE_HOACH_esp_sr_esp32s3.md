@@ -727,6 +727,11 @@ thực** như TỔNG QUAN đòi, và độ trễ nghe thấy là thời gian d�
 Python viết bằng **float32**, không float64: so float64 với float32 thì sai số của phép so che mất sai
 số của thuật toán. Ngưỡng khớp là dữ liệu của golden, không phải hằng số trong code kiểm (§4.9).
 
+Bộ vàng sinh ra phải **giống nhau từng byte trên mọi máy**: CI sinh lại và so với bản đã commit. Hai thứ của numpy đổi
+theo CPU nên bản soi gương không dùng: hàm siêu việt float32 (`log10`, `log`, `sin`, …, đi đường SIMD khác trên máy
+AVX-512) và tổng qua BLAS (`@`, `dot`, tự chia tổng). Hàm siêu việt tính ở double rồi làm tròn một lần sang float32, tức
+bản float làm tròn đúng; tổng float32 cộng lần lượt theo đúng thứ tự bản C (`np.cumsum` hay vòng lặp).
+
 `dsp_afe` dựng với **`-ffp-contract=off`** (ADR-0006): trình biên dịch không gộp `a · b + c` thành một lệnh làm tròn một
 lần, nên mỗi phép float32 làm tròn như numpy và bản C khớp bản soi gương từng bit ở mọi profile, trên mọi máy. Parity
 trên board dựng bằng cờ trình biên dịch của `bench`, cũng là của `prod` (§4.5.8), để kiểm đúng mã chạy thật.
