@@ -101,4 +101,4 @@ AGC_DOWN_DB_PER_S = 6.0
 AGC_LIMIT_DBFS = -3.0
 AGC_LOOKAHEAD_MS = 4.0
 AGC_RELEASE_MS = 50.0
-MODULES = ('hpf', 'balance', 'vad', 'agc')
+MODULES = ('hpf', 'balance', 'ns_omlsa', 'vad', 'agc')

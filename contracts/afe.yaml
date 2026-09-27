@@ -2,7 +2,7 @@
 # Units follow the fields of the module headers; module switches stay in the Kconfig of dsp_afe.
 version: 1
 # The modules the product turns on; firmware/sdkconfig.afe and srpipe.generated.afe.MODULES come from it.
-modules: [hpf, balance, vad, agc]
+modules: [hpf, balance, ns_omlsa, vad, agc]
 hpf:
   cutoff_hz: 80.0
 aec:
