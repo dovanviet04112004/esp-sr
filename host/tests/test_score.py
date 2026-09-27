@@ -40,6 +40,7 @@ def write(
     (session / "gaps.txt").write_text("offset_samples\texpected_seq\tgot_seq\n" + rows, encoding="utf-8")
     meta = {
         "session": session.name,
+        "board": "board_without_calib",
         "kind": "probe",
         "fw": "0.1.0+test",
         "pcm_shift": 16,
@@ -82,6 +83,34 @@ def test_a_session_without_clean_gets_channel_figures_only(tmp_path: Path) -> No
     assert result.parity is None
     assert result.channels[0].clipped == 3 and result.channels[0].peak_lsb == 32767
     assert "| ch0 |" in score.table(result)
+
+
+def tone_hops(amplitude: float, hops: int) -> np.ndarray:
+    t = np.arange(hops * HOP) / grid.SAMPLE_RATE_HZ
+    return np.rint(amplitude * np.sin(2 * np.pi * 1000.0 * t)).astype(np.int16)
+
+
+def test_the_level_into_agc_is_the_mean_of_the_microphones_after_the_high_pass() -> None:
+    x = tone_hops(3000.0, HOPS)
+    front = score.front_level(x, x, [], None)
+    want_dbfs = 20 * np.log10(3000.0 / np.sqrt(2) / 32768.0)
+    assert not front.balanced
+    assert abs(front.percentiles_dbfs[1] - want_dbfs) <= 1
+
+
+def test_balance_scales_ch1_before_the_mean() -> None:
+    x = tone_hops(3000.0, HOPS)
+    plain = score.front_level(x, x, [], None)
+    halved = score.front_level(x, x, [], np.full(grid.N_BINS, 0.5, dtype=np.complex64))
+    assert halved.balanced
+    assert abs(plain.percentiles_dbfs[1] - halved.percentiles_dbfs[1] - 20 * np.log10(1 / 0.75)) <= 1
+
+
+def test_a_board_without_a_balance_file_is_scored_without_balance(tmp_path: Path) -> None:
+    session, channels = board_session(tmp_path)
+    result = score.score(write(session, channels))
+    assert result.front is not None and not result.front.balanced
+    assert "level into agc, without balance" in score.table(result)
 
 
 def test_a_directory_without_wav_is_refused(tmp_path: Path) -> None:

@@ -1,8 +1,8 @@
 """Score one recorded session against srpipe and print its table (KEHOACH 4.6, 7.7).
 
-Every session gets level, DC, peak, clipping and A-weighted floor per channel. With doa_deg labelled, ch0 and ch1
-also get the pair figures of srpipe.metrics.mic_pair (E2-T4, E2-T7). With clean (stream mode 5), the board's clean
-channel is checked against srpipe's chain mirror with every module off, skipping hops that overlap unseen audio.
+Every session gets level, DC, peak, clipping and A-weighted floor per channel, and the level the product chain hands
+agc. With doa_deg labelled, ch0 and ch1 also get the pair figures of srpipe.metrics.mic_pair (E2-T4, E2-T7). With
+clean (stream mode 5), it is checked against the chain with every module off, skipping hops that overlap unseen audio.
 Run: uv run --extra score python -m srhost.score <session directory>
 """
 
@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 from srpipe.dsp.afe.chain import Chain, ChainConfig
-from srpipe.generated import array
+from srpipe.generated import afe, array
 from srpipe.metrics import mic_pair
 
 from srhost.config import REPO_ROOT
@@ -41,6 +41,9 @@ ENDFIRE_COS_MIN = 0.9
 SIGN_COS_MIN = 0.5
 # vad and agc carry state across a stream gap, so only a build without modules rebuilds from a session.
 PLAIN = ChainConfig(modules=())
+# agc does not change the level it is handed, so the level is measured without it.
+INTO_AGC_MODULES = tuple(m for m in afe.MODULES if m != "agc")
+LEVEL_PERCENTILES = (10, 50, 90)
 COHERENCE_MIN = 0.9
 
 
@@ -78,6 +81,15 @@ class ParityFigures:
     over_tolerance: int
     tolerance_lsb: float
     snr_db: float
+
+
+@dataclass(frozen=True)
+class FrontLevel:
+    """level_dbfs of the product chain, the level agc is handed, over every hop of ch0 and ch1 (KEHOACH 3.10)."""
+
+    balanced: bool
+    percentiles_dbfs: tuple[int, ...]
+    speech_share: float
 
 
 def read_wav(path: Path) -> np.ndarray:
@@ -138,6 +150,34 @@ def chain_parity(ch0: np.ndarray, ch1: np.ndarray, clean: np.ndarray, gap_offset
     return ParityFigures(compared, skipped, max_abs, over, tolerance, snr_db)
 
 
+def front_level(ch0: np.ndarray, ch1: np.ndarray, gap_offsets: list[int], gains: np.ndarray | None) -> FrontLevel:
+    """Run the product chain up to agc over each stretch between gaps, as the board restarts it, skipping warm-up."""
+    hop = grid.HOP_SAMPLES
+    bounds = [0, *gap_offsets, min(len(ch0), len(ch1))]
+    cfg = ChainConfig(modules=INTO_AGC_MODULES, balance_gains=gains)
+    levels, speech = [], []
+    for start, end in pairwise(bounds):
+        chain = Chain(cfg=cfg)
+        for k, at in enumerate(range(start, end - hop + 1, hop)):
+            frame = chain.process(np.column_stack([ch0[at : at + hop], ch1[at : at + hop]]).reshape(-1))
+            if k >= WARMUP_HOPS:
+                levels.append(frame.level_dbfs)
+                speech.append(frame.vad)
+    if not levels:
+        raise ValueError("no hop of ch0 and ch1 outlasts the warm-up")
+    percentiles = tuple(round(float(np.percentile(levels, q))) for q in LEVEL_PERCENTILES)
+    return FrontLevel(gains is not None, percentiles, float(np.mean(speech)))
+
+
+def board_gains(board: str) -> np.ndarray | None:
+    """The balance file srhost.calib wrote for this board, as calib/bal holds it, or None for a board not calibrated."""
+    # srhost.calib reads its sessions through this module, so it is imported only here.
+    from srhost.calib import CALIB_DIR, read_csv
+
+    path = CALIB_DIR / f"{board}_balance.csv"
+    return read_csv(path) if path.exists() else None
+
+
 @dataclass(frozen=True)
 class Score:
     meta: dict
@@ -145,6 +185,7 @@ class Score:
     parity: ParityFigures | None
     pair: PairFigures | None
     trimmed_samples: int = 0
+    front: FrontLevel | None = None
 
 
 def pair_figures(stats: mic_pair.PairStats, doa_deg: int) -> PairFigures:
@@ -185,9 +226,12 @@ def score(session: Path) -> Score:
     if all(name in pcm for name in PARITY_CHANNELS):
         parity = chain_parity(pcm["ch0"], pcm["ch1"], pcm["clean"], read_gap_offsets(session))
     pair = None
-    if stats is not None and meta.get("doa_deg") is not None:
-        pair = pair_figures(stats, int(meta["doa_deg"]))
-    return Score(meta, channels, parity, pair, trimmed)
+    front = None
+    if stats is not None:
+        front = front_level(pcm["ch0"], pcm["ch1"], read_gap_offsets(session), board_gains(meta["board"]))
+        if meta.get("doa_deg") is not None:
+            pair = pair_figures(stats, int(meta["doa_deg"]))
+    return Score(meta, channels, parity, pair, trimmed, front)
 
 
 def pair_lines(pair: PairFigures) -> list[str]:
@@ -229,6 +273,17 @@ def table(result: Score) -> str:
             for f in result.channels
         ),
     ]
+    if result.front is not None:
+        front = result.front
+        balance = "through the board's balance file" if front.balanced else "without balance: no file for this board"
+        lines += [
+            "",
+            f"level into agc, {balance}",
+            "",
+            f"| {' | '.join(f'p{q} dBFS' for q in LEVEL_PERCENTILES)} | Speech hops (vad) |",
+            f"|{'---|' * (len(LEVEL_PERCENTILES) + 1)}",
+            f"| {' | '.join(str(v) for v in front.percentiles_dbfs)} | {100 * front.speech_share:.1f} % |",
+        ]
     if result.pair is not None:
         lines += pair_lines(result.pair)
     if result.parity is not None:
