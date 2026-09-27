@@ -11,7 +11,7 @@ bootloader bởi chính `make session`; **không mở monitor serial trong lúc 
 
 **Chuẩn bị.** Board nằm phẳng trên bàn, cách tường ít nhất 1 m, không gì che hai lỗ micro; tắt quạt, điều hoà nếu
 được. Máy tính: Docker Desktop chạy, `host/.env` đủ biến, `. ~/esp/esp-idf/export.sh`, rồi `D=$(git describe --always
---tags)`. `--pcm-shift 16` tới khi E2-T5 ghi `calib/pcm_shift`. Ở phiên thường, bản thu bắt đầu khi `make session` in
+--tags)`. `--pcm-shift` là giá trị NVS `calib/pcm_shift` của board (`make calib-shift SHIFT=<n>` với `test_apps/calib` nạp sẵn), 16 khi chưa ghi. Ở phiên thường, bản thu bắt đầu khi `make session` in
 `board connected`: giữ yên 3–5 s đầu để có khung nền, rồi mới tạo tiếng.
 
 | Bước | Nạp | `make session ARGS="--kind probe --room <phòng> --pcm-shift 16 …"` | Người đo làm | Cho ra |
@@ -68,10 +68,30 @@ bắt đầu bằng một đoạn im (`…_010` phát liền từ đầu nên `s
 tới chính con micro. `balance` bù được mức, nhưng micro nghe nhỏ đi 10 dB thì SNR của kênh ấy cũng mất 10 dB, bù số không
 lấy lại được. Sửa lỗ rồi đo lại bước 3–5 của §0 trước khi hiệu chuẩn `balance`.
 
+**Chênh độ nhạy lớn dần theo ngày.** Cùng board B, `ch1 − ch0` trên các khung có nguồn, dải 200–1600 Hz, đo lại
+28/09 bằng `srpipe.metrics.mic_pair` trên bản thu của repo tinyai-signal và của esp-sr:
+
+| Ngày | Bản thu | Nguồn | `ch1 − ch0` |
+|---|---|---|---|
+| 08/08 | tinyai `phien1.wav`, `phien2_nhac.wav` | người nói chính diện, loa nhạc | +4,1 / +4,4 dB (tinyai T04.2 ghi +4,70 dB) |
+| 02/09 | tinyai `tach_2nguoi/*` (board trong vỏ) | hai người ở 1 m, nguồn quét 0,3 m | +8,8 … +9,1 dB |
+| 17/09 | tinyai `loa_0917_cao24/loa40_{e,h}_*` | loa và người ở 40 cm | +10,6 / +10,8 dB |
+| 26/09 | esp-sr `20260926_home_010`, `…_011` | ồn trắng chính diện 20 cm | +10,8 … +11,6 dB |
+
+Linh kiện không trôi 7 dB trong bảy tuần; đường tiếng tới `ch0` bị che dần (lỗ A của vỏ lệch, bụi hay keo trong lỗ),
+hoặc chính micro `ch0` đang hỏng. Soi lỗ A trước buổi thu kế tiếp. Sửa được thì `calib/bal` cũ hết đúng: đo lại bước
+3–5 của §0 rồi `make calib-estimate`.
+
 ## 2. Dịch 24 → 16 bit (E2-T5)
 
 | `pcm_shift` | Mức tiếng nói to ở 10 cm dBFS | Nền ồn phòng yên dBFS | Cắt đỉnh | Chọn |
 |---|---|---|---|---|
+
+**Số sơ bộ từ bản thu cũ** (28/09, repo tinyai-signal, thu ở dịch 13, quy về dịch 16 bằng trừ 18,06 dB). Người đọc giọng
+thường ở 1 m: `ch1` −53 … −56 dBFS, `ch0` −60 … −63 dBFS (trung bình công suất các bước có tiếng); đỉnh ở dịch 13 tới
+4 223 LSB. Vỗ tay ở 40 cm cắt đỉnh ở dịch 13 (136 mẫu). Chưa có tiếng to ở 10 cm, nên chưa chọn được dịch: `loud.tsv` thu
+nó ở dịch 16, mọi phiên khác thu ở dịch 13 (`make calib-shift SHIFT=13`), vì dịch lớn hơn dựng lại đúng từng mẫu bằng
+`floor(x / 2^k)`. Chuỗi sản phẩm trên các bản 1 m ấy ở từng dịch: `afe/agc.md` §4.
 
 ## 3. Hiệu chuẩn `balance` (E2-T6)
 

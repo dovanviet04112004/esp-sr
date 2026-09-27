@@ -60,10 +60,22 @@ từng bước; chuỗi này khớp board tới 1 LSB (`parity.md`). `pcm_shift`
 Nền phòng yên tới `agc` ở −92 dBFS: `ns` dìm đúng 12 dB của nền dừng. Không có `balance` nền còn cao hơn 7 dB, vì `balance`
 hạ `ch1` 11 dB cho khớp `ch0` (`mic_array.md` §1), nên cả chuỗi chạy ở mức của `ch0`, micro nghe nhỏ.
 
-Chưa phiên nào có tiếng người. Ước lượng 🔬: tiếng nói thường ở 1 m khoảng 62 dB SPL, `ch1` theo độ nhạy datasheet (−29,0
-dBFS ở 94 dB SPL, `mic_array.md` §0) ra khoảng −61 dBFS, chuỗi sau `balance` khoảng −72 dBFS, `agc` thêm tối đa 30 dB được
-−42 dBFS, thiếu đích −26 dBFS 16 dB; ở 3 m khoảng −82 dBFS, chỉ trên nền phòng sau `ns` 10 dB. Số thật cần một phép đo tiếng nói trên board: E2-T5
-đo tiếng nói to ở 10 cm để chọn `pcm_shift`, và cùng phiên ấy cho mức vào `agc` của tiếng nói ở các khoảng cách.
+**Tiếng người thật ở 1 m** (28/09). Repo tinyai-signal có bản thu cùng board B trong vỏ: hai người đọc giọng thường ở
+1 m (`data/raw/tach_2nguoi/A_trai_1.wav`, `B_phai_1.wav`, 02/09, 15 s mỗi bản). Các bản ấy thu ở dịch 13: nền 2–6 kHz của
+chúng cao hơn nền của `20260926_home_005` (dịch 16) 17,5–18,5 dB ở cả hai kênh, gần đúng 3 bit. Hạ về dịch lớn hơn bằng
+`floor(x / 2^k)` là đúng từng mẫu như `drv_audio` dịch, nên bảng dưới là chuỗi sản phẩm (có `balance` của board B) chạy
+trên đúng thứ board sẽ thu ở mỗi dịch.
+
+| Dịch | Bước `vad = 1` | Mức vào `agc` p50 / p90 dBFS | Gain `agc` cuối bản | Mức ra p50, nửa sau, bước có tiếng |
+|---|---|---|---|---|
+| 16 | 4 % / 15 % | −66 / −61 và −71 / −65 | 2 / 7 dB | −65 / −64 dBFS |
+| 14 | 56 % / 71 % | −61 / −51 và −61 / −53 | 25 / 30 dB | −42 / −40 dBFS |
+| 13 | 67 % / 75 % | −56 / −45 và −55 / −47 | 21 / 26 dB | −36 / −34 dBFS |
+
+Ở dịch 16 chuỗi **gần như không thấy người nói ở 1 m**: `vad` bật ở 4–15% số bước trong khi người đọc liền 15 s, nên
+`agc` đứng yên gần 0 dB và tiếng ra ở −65 dBFS. Từ dịch 14 trở xuống `vad` bắt được lời và `agc` kéo lên. Bản thu chỉ
+15 s nên `agc` chưa tới trạng thái dừng; mức ra lấy trung vị theo dB của từng bước, thấp hơn trung bình công suất mà
+`agc` bám. Chọn dịch vẫn là E2-T5: nó cần thêm tiếng to ở 10 cm để biết dịch nhỏ nhất không cắt đỉnh (`host/plans/loud.tsv`).
 
 **Mô phỏng board cho cùng kết luận** (27/09, E4-T8, `configs/scenes/device.yaml`, `pcm_shift` 16, `calib/bal` của board B):
 760 câu VIVOS test, người nói 56–74 dB SPL ở 1 m, cách 0,3–4 m (trung vị 1,5 m), 89% phiên có nhiễu ở SNR 0–30 dB. Trên
