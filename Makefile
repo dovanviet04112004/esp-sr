@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns parity-host \
-        fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session
+        fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
 SDKCONFIG_BASE := sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.afe
@@ -9,6 +9,8 @@ SECRETS := $(if $(wildcard firmware/sdkconfig.secrets),;sdkconfig.secrets)
 # make session reads where to listen and where raw/ lives from host/.env, like srhost.config.
 STREAM_PORT = $(shell sed -n 's/^SRHOST_STREAM_PORT=//p' host/.env 2>/dev/null)
 DATA_ROOT = $(shell sed -n 's/^SRPIPE_DATA_ROOT=//p' host/.env 2>/dev/null)
+PCM_SHIFT ?= 16
+PLAN_FW ?= capture@$(shell git describe --always --tags)
 # idf.py only adds options a generated sdkconfig lacks, so one older than its defaults or their list is dropped.
 fresh_sdkconfig = if [ -f $(1) ] && [ -n "$$(find $(2) -newer $(1))" ]; then rm $(1); echo "$(1) regenerated"; fi
 FW_DEFAULTS := firmware/sdkconfig.defaults firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.afe \
@@ -154,3 +156,14 @@ session: ## Record a labelled session: make session ARGS="--kind probe --room ho
 	  -e PYTHONPATH=/repo/host/src -p $(STREAM_PORT):$(STREAM_PORT) \
 	  -v "$(CURDIR)":/repo -v "$(DATA_ROOT)":"$(DATA_ROOT)" \
 	  python:3.12-slim python -m srhost.session $(ARGS)
+
+session-plan: ## Record a script of host/plans in turn: make session-plan PLAN=host/plans/<x>.tsv ROOM=<room> [SPK=spk_001 CONSENT=C001]
+	@test -f "$(PLAN)" && test -n "$(ROOM)" || { echo "usage: make session-plan PLAN=host/plans/<x>.tsv ROOM=<room> [SPK= CONSENT=]"; exit 1; }
+	@if grep -q '{spk}' "$(PLAN)" && [ -z "$(SPK)" -o -z "$(CONSENT)" ]; then echo "$(PLAN) has a speaker: give SPK and CONSENT"; exit 1; fi
+	@n=0; grep -v '^#' "$(PLAN)" | sed -e 's/{spk}/$(SPK)/g' -e 's/{consent}/$(CONSENT)/g' | \
+	while IFS='	' read -r say args; do \
+	  n=$$((n + 1)); printf '\n[%d] %s\n    Enter: record, s: skip, q: stop > ' "$$n" "$$say"; read ans < /dev/tty; \
+	  case "$$ans" in s) continue;; q) break;; esac; \
+	  $(MAKE) --no-print-directory session \
+	    ARGS="--room $(ROOM) --fw $(PLAN_FW) --pcm-shift $(PCM_SHIFT) $$args" < /dev/tty || exit 1; \
+	done
