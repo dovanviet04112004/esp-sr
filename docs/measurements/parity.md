@@ -14,8 +14,8 @@ vàng `chain`, và profile `modules` với bộ vàng của từng module thật
 | `chain` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | — | cab1eb3 | 27/09 |
 | `hpf` — biquad dạng II chuyển vị viết tay (ADR-0004), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | trễ một mẫu: 0,996, −3,1 dB → đỏ | cab1eb3 | 27/09 |
 | `balance` — nhân phức viết tay (ADR-0005), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | hệ số liên hợp: 26,0, −3,5 dB → đỏ | cab1eb3 | 27/09 |
-| `vad` — mức sáu dải, quyết định thô, `speech` sau kéo dài; máy tính và board B | 4 | 0 | — | mức ≤ 1e-6, ≥ 120 dB; quyết định khớp tuyệt đối | `speech` trễ một bước: 1 → đỏ | e2b26f2 | 27/09 |
-| `agc` — mẫu ra (1 trên 8), `gain_db` mỗi bước; máy tính và board B | 3 | 0 (ra), 4,8e-7 dB (`gain_db`, board) | 151,0 (`gain_db`) | ra ≤ 1e-6, ≥ 120 dB; `gain_db` ≤ 1e-5 | bỏ qua cờ nói: 1,5e-3, 19,5 dB → đỏ | a14fae3 | 27/09 |
+| `vad` — mức sáu dải, quyết định thô, `speech` sau kéo dài; máy tính và board B | 4 | 0 | — | mức ≤ 1e-6, ≥ 120 dB; quyết định khớp tuyệt đối | `speech` trễ một bước: 1 → đỏ | 17bdfac | 27/09 |
+| `agc` — mọi mẫu ra, `gain_db` mỗi bước; máy tính và board B | 3 | 0 (ra), 4,8e-7 dB (`gain_db`, board) | 151,0 (`gain_db`) | ra ≤ 1e-6, ≥ 120 dB; `gain_db` ≤ 1e-5 | bỏ qua cờ nói: 1,5e-3, 19,5 dB → đỏ | 17bdfac | 27/09 |
 
 ## Bản tham chiếu Python: STFT phân tích rồi tổng hợp (E6-T1)
 
@@ -67,30 +67,28 @@ với hệ số liên hợp, lỗi dấu dễ mắc nhất của phép nhân ph�
 
 ## `vad` (E7-T3)
 
-Bốn ca đầu vào `int16` (chia 32 768 ở cả hai phía nên là cùng một số float): tiếng tổng hợp giống lời nói trên ồn trắng
-160 bước, dài hơn cửa sổ 100 bước của bộ dò tối thiểu; tiếng nhỏ trên ồn đỏ ở `aggressiveness` 2; 16 bước im tuyệt đối,
-không được mô hình hoá, rồi các đoạn to ở mức 3; nhiễu nhảy mức 28 dB ở mức 1. Máy tính và board B ở `-O2` khớp **từng
+Bốn ca đầu vào `int16` (chia 32 768 ở cả hai phía nên là cùng một số float), mỗi ca 160 bước, dài hơn cửa sổ 100 bước
+của bộ dò tối thiểu: tiếng tổng hợp giống lời nói trên ồn trắng; tiếng nhỏ trên ồn đỏ ở `aggressiveness` 2; 40 bước im
+tuyệt đối, không được mô hình hoá, rồi các đoạn to ở mức 3; nhiễu nhảy mức 28 dB ở mức 1. Máy tính và board B ở `-O2` khớp **từng
 bit** cả ba tensor của cả bốn ca. Đối chứng âm cho `speech` trễ một bước: đỏ.
-
-Lượt đầu trên board mất một dòng `PARITY` trên đường nối tiếp (còn `PARITY vad +00 snr_db=999.0`), nên `speech` của
-`case_000` không được so mà bộ chấm vẫn cho qua. Bộ chấm giờ đòi mọi tensor khai trong `tolerance.yaml`; lượt chạy lại đủ
-15 dòng và qua.
-
-Bộ vàng chiếm 1 482 752 B trên 1 835 008 B của phân vùng `storage` sau `vad` (81%, tính theo khối 4 KB của LittleFS).
 
 ## `agc` (E7-T4)
 
 Ba ca đầu vào `int16` kèm cờ nói mỗi bước: tiếng nhỏ để gain leo 64 bước, đóng băng 32 bước rồi leo tiếp (128 bước); tiếng
 to có sáu cụm tràn thang để bộ chặn đỉnh giữ dưới −3 dBFS trong lúc gain hạ; nhiễu dưới đích −20 dBFS, cờ nói bốn trên
-sáu bước. Chỉ giữ 1 trên 8 mẫu ra vì phân vùng `storage` (TASKS E5-T15). Máy tính và board B khớp **từng bit** mẫu ra của
+sáu bước. Máy tính và board B khớp **từng bit** mọi mẫu ra của
 cả ba ca; `gain_db` là số báo qua `log10f`, khớp từng bit trên máy tính, lệch một bit cuối (4,8e-7 dB) ở một ca trên board
 vì `log10f` của newlib làm tròn khác numpy. Đối chứng âm bỏ qua cờ nói nên gain không nhúc nhích: đỏ.
 
-Bộ vàng giờ chiếm 1 662 976 B, 91% phân vùng `storage`; các khối của E8–E10 không còn chỗ (TASKS E5-T15).
+## Chỗ chứa bộ vàng
 
-## Dòng mất trên đường nối tiếp
+App parity có bảng phân vùng riêng (KẾ HOẠCH §4.3) với `storage` 8 MB. Bộ vàng hiện 1 982 265 B, 2 109 440 B tính theo
+khối 4 KB của LittleFS, 25% phân vùng; mọi ca giữ đủ độ dài và đủ mẫu, ca lớn nhất 196 KB trong bộ đệm đọc 512 KB.
 
-Ngày 27/09, 2 trên khoảng 6 lượt trên board mất dòng: một lượt `modules` nhận 51 trên 53 dòng `PARITY`, một lượt bench
-nhận một dòng `BENCH_CSV` cụt đuôi dính vào dòng sau. Các dòng bench cách nhau vài giây, nên byte rơi ở cầu CH340 sau
-usbipd chứ không ở app; nhật ký kernel có các URB bị huỷ của `vhci_hcd`. Bộ chấm đỏ đúng ở những lượt ấy; ba lượt chạy
-lại liên tiếp đều qua. App parity nghỉ 2 ms sau mỗi dòng, nhưng không đủ để bỏ hẳn: lượt đỏ thì chạy lại.
+## Đường nối tiếp
+
+Cầu CH340 sau usbipd có lúc rơi byte: có lượt mất cả dòng, có lượt một dòng cụt đuôi dính vào dòng sau; nhật ký kernel có
+các URB bị huỷ của `vhci_hcd`. Kết quả vì thế đi qua `test_report` (KẾ HOẠCH §4.5.7): mỗi dòng có số thứ tự và CRC32,
+dòng cuối là `end <n> lines`, máy tính bỏ dòng sai CRC và xin lại dòng thiếu. Lượt parity `modules` tại `9e56e13` gặp đúng
+chuyện ấy: dòng 42 mất đuôi, dòng 43 mất hẳn, dòng 44 mất đầu; bộ gom xin lại `42 43 44`, board in lại cả ba với CRC đúng,
+và lượt qua mà không phải chạy lại. Đổi một chữ số trong một dòng của log, hay xoá một dòng, bộ chấm đều từ chối.
