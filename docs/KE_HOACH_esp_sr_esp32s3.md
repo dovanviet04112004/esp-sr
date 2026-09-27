@@ -1296,7 +1296,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 | Loại | Nằm ở | Chạy bằng |
 |---|---|---|
 | Unit trên board | `components/<c>/test_apps/unit/` | `idf.py build flash` + `pytest_*.py` (pytest-embedded) |
-| Unit trên máy tính | `components/<c>/test_apps/host/` | **CMake thường + lớp đệm** `test_apps/host/shim/` (`esp_err.h`, `esp_heap_caps.h`, `esp_log.h`, …), `dl_fft` dựng từ bản C thuần; chạy thêm cả `contracts/golden/` qua bộ so của `test_apps/parity`, phán bằng `pytest_parity.py`; workflow `firmware` chạy mỗi lần push (chốt ở E6-T6). Target `linux` của IDF bị loại: đòi `libbsd-dev` trên máy và kéo cả cổng FreeRTOS vào một component thuần |
+| Unit trên máy tính | `components/<c>/test_apps/host/` | **CMake thường + lớp đệm** `test_apps/host/shim/` (`esp_err.h`, `esp_heap_caps.h`, `esp_log.h`, …), `dl_fft` dựng từ bản C thuần; chạy thêm cả `contracts/golden/` qua bộ so của `test_apps/parity` ở ba bản dựng (mọi module tắt với `chain`, mọi module bật với bộ vàng từng module, đúng các module của `firmware/sdkconfig.afe` với `chain_modules`), phán bằng `pytest_parity.py`; một lệnh `make parity-host`, workflow `firmware` gọi nó mỗi lần push (chốt ở E6-T6). Target `linux` của IDF bị loại: đòi `libbsd-dev` trên máy và kéo cả cổng FreeRTOS vào một component thuần |
 | Parity C ↔ Python | `test_apps/parity/` | đọc `contracts/golden/` trong LittleFS, so theo `tolerance.yaml`; dựng bằng cờ trình biên dịch của `bench` (§3.14), hai lần: mọi module tắt với bộ vàng `chain`, và profile `modules` (đúng `firmware/sdkconfig.afe`) với bộ vàng của từng module thật và `chain_modules`, chuỗi với các module ấy, hiệu chuẩn `balance` và số gieo `afe/*` |
 | Chi phí | `test_apps/bench_afe`, `bench_kws`, `bench_mem` | in CSV → lưu ở `docs/measurements/bench/` → `tools/budget.py` → `docs/measurements/budget.md` |
 | Chạy dài | `test_apps/soak/` | 30 phút cho Cửa 5, 8 giờ trước khi báo cáo |
@@ -1379,8 +1379,10 @@ Ba vai của TỔNG QUAN "gửi về máy để xem và chấm": **xem** (`live.
 (`session.py` + `stream_rx.py`). `score.py` import thước đo từ `ml/`, không viết lại: `srpipe` là phần phụ
 `score` của `host/` (`uv run --extra score`), nên máy chỉ thu âm không phải cài nó. Với mọi phiên, `score.py`
 in mức, một chiều, đỉnh và số mẫu cắt của từng kênh. Với phiên `mode 5`, nó còn chạy `srpipe.dsp.afe.chain`
-trên `ch0 ch1` rồi so với kênh `clean` của board, bỏ hai bước sau lúc mở và sau mỗi chỗ hở `seq`, và phán
-theo `contracts/golden/chain/tolerance.yaml`. Đây là phép kiểm dựng lại của app khung rỗng (E5-T11).
+với mọi module tắt trên `ch0 ch1` rồi so với kênh `clean` của board, bỏ hai bước sau lúc mở và sau mỗi chỗ hở
+`seq`, và phán theo `contracts/golden/chain/tolerance.yaml`. Đây là phép kiểm dựng lại của app khung rỗng
+(E5-T11). Bản dựng có module (`firmware/sdkconfig.afe`) không so được theo cách này: trạng thái của `vad` và
+`agc` kéo qua chỗ hở, mà máy tính không có phần tiếng đã mất; chuỗi ấy được kiểm bằng bộ vàng `chain_modules`.
 
 `score.py` cũng là công cụ đo dàn micro của E2-T4, E2-T7 và đầu vào của E2-T6, bằng `srpipe.metrics.mic_pair`.
 Nền ồn từng kênh có trọng số A được tính trên các khung im của mọi phiên. Phiên có nhãn `doa_deg` (một nguồn
