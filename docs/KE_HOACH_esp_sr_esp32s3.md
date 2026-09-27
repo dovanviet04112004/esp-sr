@@ -114,13 +114,17 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | Tiếng tổng hợp bằng TTS trên máy tính | **`wake` dương — nguồn chính**, cụm gần âm cho âm bản, tăng lượng `command` | không giới hạn, nhiều giọng | theo giấy phép mô hình TTS dùng 🔬 | **không bao giờ** vào tập thử |
 | Thu qua chính board | tập thử của `wake` và `command`, âm bản gần âm; nhiễu phòng; tập học khi cần tiếng thật | vài người nói, ≥ 2 phòng (E11-T6) | của dự án, có phiếu đồng ý (§1.4) | nguồn **duy nhất** đúng miền thiết bị |
 
-**Đường mô phỏng board** (`srpipe/scenes/device.py`) biến một mẩu tiếng sạch thành đúng thứ bộ nhận dạng thấy trên
-máy:
-1. Đặt người nói và nhiễu vào một phòng `pyroomacoustics`, hoặc chập RIR thật của OpenSLR 28, lên dàn hai micro của
-   `array.yaml`.
-2. Áp chênh lệch giữa hai micro theo hiệu chuẩn của board (§3.4), nền ồn micro và lượng tử `pcm_shift`.
+**Đường mô phỏng board** (`srpipe/scenes/device.py`, cấu hình `configs/scenes/device.yaml`) biến các mẩu tiếng sạch
+của một file split thành đúng thứ bộ nhận dạng thấy trên máy:
+1. Mỗi **phiên** là vài mẩu liên tiếp của file split trong một phòng của **kho phòng** `pyroomacoustics` dựng một lần
+   (hoặc chập RIR thật của OpenSLR 28), lên dàn hai micro của `array.yaml`: nền phòng một mình vài giây, rồi từng câu
+   cách một quãng nghỉ; người nói ở mức dB SPL tại 1 m rút cho phiên, một nguồn nhiễu điểm ở SNR rút cho phiên. Chuỗi
+   chạy liền cả phiên, nên `ns`, `vad`, `agc` đã nghe phòng trước khi câu tới, như trên máy.
+2. Áp độ nhạy micro theo datasheet, chênh lệch giữa hai micro theo hiệu chuẩn của board (`calib/bal`, §3.4), nền ồn
+   micro và lượng tử `pcm_shift` (dịch phải rồi bão hoà, như `drv_audio`).
 3. Chạy `srpipe.dsp.afe.chain` và log-mel của `srpipe.dsp.spec`. Đây là bản soi gương khớp firmware từng bit
-   (§3.14), với đúng danh sách module sản phẩm.
+   (§3.14), với đúng danh sách module sản phẩm. Ra `processed/<nhánh>/<tập>/`: đặc trưng, số của chuỗi (`vad`, mức,
+   gain) và PCM sạch của từng mẩu, cộng manifest sha256.
 
 Phần thuần của đặc trưng lúc học vì thế trùng đặc trưng trên board. Phần còn khác là phòng thật, micro thật và giọng
 thật, và tập thu qua board đo đúng phần ấy. Chuỗi đổi (bật một module, chọn đường không gian) thì sinh lại đặc
@@ -979,6 +983,7 @@ ml/
 │   ├── common/{paths.yaml, hardware.yaml}
 │   ├── afe/{hpf.yaml, aec.yaml, doa.yaml, gsc.yaml, bss.yaml, ns_omlsa.yaml, vad.yaml, agc.yaml}  # chỉ ghi đè cho thí nghiệm; mặc định là contracts/afe.yaml
 │   ├── scenes/standard.yaml           # bộ cảnh có nhãn chuẩn của E4-T4: phòng, RT60, góc, SNR, seed
+│   ├── scenes/device.yaml             # đường mô phỏng board của E4-T8: kho phòng, mức nói, nhiễu, micro, log-mel
 │   └── models/{ns.yaml, wake.yaml, command.yaml, synth.yaml, quant.yaml}
 │
 ├── src/srpipe/
@@ -1071,7 +1076,7 @@ $SRPIPE_DATA_ROOT/                         # ổ ngoài — ❌ không bao giờ
 │       ├── session.json                   # nhãn của phiên, trường ở bảng dưới
 │       └── gaps.txt                       # các đoạn hở seq
 ├── interim/                               # sinh lại được từ raw/; từ đây theo nhánh
-│   ├── scenes/<bộ>/                       # cảnh dựng có nhãn (E4-T4) cho doa gsc bss ns
+│   ├── scenes/<bộ>/                       # cảnh dựng có nhãn (E4-T4) cho doa gsc bss ns; kho phòng của E4-T8
 │   └── {ns, wake, command, synth}/        # đã cắt, lấy mẫu lại, trộn, căn nhãn; TTS ở <nhánh>/synth_*
 ├── processed/{ns, wake, command, synth}/  # đặc trưng, shard sẵn sàng nạp
 └── cache/                                 # xoá lúc nào cũng được
