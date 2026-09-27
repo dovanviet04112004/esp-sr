@@ -10,7 +10,7 @@ Dữ liệu đã tải và đã xử lí — số đo trên đĩa, không phải
 
 | Nguồn | Dùng cho | Giấy phép | Giờ | Người nói | Tải ngày | sha256 bản tải | Trạng thái |
 |---|---|---|---|---|---|---|---|
-| Common Voice tiếng Việt | `command`, âm bản `wake` | CC0 | | | | | chưa tải |
+| Common Voice tiếng Việt, bản 27.0 (Mozilla Data Collective) | `command`, âm bản `wake` | CC0; điều khoản cấm tìm danh tính người nói | 7,95 đã kiểm (22,97 cả kho) | 229 đã kiểm (354 ở `other`) | 27/09 | `dec3d030…` (`manifests/speech/common_voice_vi.yaml`) | ở `raw/speech/common_voice_vi` |
 | VIVOS | `command`; tập thử của `vad` | CC BY-NC-SA 4.0 | 15,67 (thử 0,75) | 65 (thử 19) | 07/09, vào `raw/` 27/09 | cây `6325ac21…` (`manifests/speech/vivos.yaml`) | ở `raw/speech/vivos` |
 | FPT Open Speech Data | `command` | 🔬 chưa kiểm | | | | | chưa tải |
 | MUSAN | `ns`, tăng cường | CC BY 4.0 phần lớn 🔬 | | — | | | chưa tải |

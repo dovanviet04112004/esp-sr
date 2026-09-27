@@ -5,8 +5,10 @@ release: Common Voice Scripted Speech 27.0 - Vietnamese
 downloaded: 2026-09-27
 license: CC0-1.0
 sha256: {common-voice-scripted-speech-27-0-vietna-b785f6a0.tar.gz: dec3d030eaa3dad9eba59336da72a9e6b4c3aa8119b3ba53ab72a59db6c6b88c}
-counts: {}
+counts: {validated_hours: 7.95, validated_clips: 7013, validated_speakers: 229, other_hours: 14.41, other_speakers: 354, clips: 20605, hours: 22.97}
 consumed_by: [command, wake]
 notes: >-
-  Fetched by ml/scripts/10_prepare.sh common_voice_vi, which checks the archive against the sha256 the API
-  returns. The terms add that no one may try to identify the speakers.
+  Fetched by ml/scripts/10_prepare.sh speech/common_voice_vi, checked against the sha256 the API returns;
+  unpacked as cv-corpus-27.0-2026-09-11/vi, MP3 at 48 kHz. Hours from clip_durations.tsv. The official train
+  split holds a single speaker, so our splits go by client_id. The terms add that no one may try to identify
+  the speakers.
