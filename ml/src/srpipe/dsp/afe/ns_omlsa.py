@@ -18,17 +18,30 @@ from srpipe.generated import afe, grid
 f32 = np.float32
 EULER_GAMMA = 0.57721566490153286
 E1_SERIES_TERMS = 40
-EXP_SERIES_TERMS = 30
+EXP_SERIES_TERMS = 40
 COS_SERIES_TERMS = 30
 PI = 3.14159265358979323846
+LN_2 = 0.69314718055994530942
+LN_10 = 2.30258509299404568402
+LOG2_10 = 3.32192809488736234787
 SQRT_HALF = f32(math.sqrt(0.5))
 EXP2_MIN = f32(-126.0)
 # 2 atanh(t) / ln 2 = log2((1 + t) / (1 - t)): odd powers 1 .. 9, |t| <= 0.172 on [sqrt(1/2), sqrt(2)).
-LOG2_COEFFS = tuple(f32(2.0 / (k * math.log(2.0))) for k in (1, 3, 5, 7, 9))
-# 2^f = sum (f ln 2)^k / k! for |f| <= 1/2, degree 7.
-EXP2_COEFFS = tuple(f32(math.log(2.0) ** k / math.factorial(k)) for k in range(8))
-DB_PER_LOG2 = f32(10.0 * math.log10(2.0))
-LOG2_E = f32(1.0 / math.log(2.0))
+LOG2_COEFFS = tuple(f32(2.0 / (k * LN_2)) for k in (1, 3, 5, 7, 9))
+DB_PER_LOG2 = f32(10.0 / LOG2_10)
+LOG2_E = f32(1.0 / LN_2)
+
+
+def _exp2_coeffs(degree: int) -> tuple[np.float32, ...]:
+    """(ln 2)^k / k! for 2^f = sum (f ln 2)^k / k!, |f| <= 1/2, by products only."""
+    coeffs, c = [], 1.0
+    for k in range(degree + 1):
+        coeffs.append(f32(c))
+        c = c * LN_2 / (k + 1)
+    return tuple(coeffs)
+
+
+EXP2_COEFFS = _exp2_coeffs(7)
 
 
 def log2_f32(x: np.ndarray) -> np.ndarray:
@@ -71,7 +84,7 @@ def e1_smooth(v: float) -> float:
 
 
 def exp_series(x: float) -> float:
-    """e^x for |x| < 1 by its series, in double with basic arithmetic only."""
+    """e^x for |x| < 5 by its series, in double with basic arithmetic only."""
     term = 1.0
     total = 1.0
     for k in range(1, EXP_SERIES_TERMS + 1):
@@ -172,8 +185,8 @@ class OmlsaConfig:
 
 
 def smoothing(hop_s: float, tau_s: float) -> np.float32:
-    """exp(-hop / tau) in double, rounded once: the paper's factor at its 8 ms, squared at 16 ms."""
-    return f32(math.exp(-hop_s / float(f32(tau_s))))
+    """exp(-hop / tau) in double, rounded once: the paper's factor at its 8 ms, squared at 16 ms; hop < 5 tau."""
+    return f32(exp_series(-hop_s / float(f32(tau_s))))
 
 
 @dataclass(frozen=True)
@@ -199,7 +212,7 @@ class Omlsa:
         self.subwindow_hops = int(np.rint(cfg.min_subwindow_s / cfg.hop_s))
         if self.subwindow_hops < 2:
             raise ValueError(f"a minimum sub-window of {self.subwindow_hops} hops is too short")
-        self.eta_min = f32(10.0 ** (cfg.eta_min_db / 10.0))
+        self.eta_min = f32(exp_series(float(f32(cfg.eta_min_db)) / 10.0 * LN_10))
         self.floor = f32(cfg.power_floor)
         self.p_min = f32(cfg.p_min)
         self.freq_taps = hann_taps(cfg.freq_smooth_bins)
@@ -218,7 +231,7 @@ class Omlsa:
 
     def set_floor(self, floor_db: float) -> None:
         """G_min in dB, as NVS afe/ns_floor_db sets it; kept as log2 since the gain is formed in the log domain."""
-        self.log2_gain_min = f32(float(f32(floor_db)) / 20.0 * math.log2(10.0))
+        self.log2_gain_min = f32(float(f32(floor_db)) / 20.0 * LOG2_10)
 
     def reset(self) -> None:
         n = self.n_bins
