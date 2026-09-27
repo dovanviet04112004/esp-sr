@@ -19,13 +19,12 @@ typedef struct {
 } dsp_afe_ns_ops_t;
 
 typedef struct {
-    float floor_db;    // lowest gain, negative, e.g. -12
-    float noise_tau_s; // minimum-tracking window of IMCRA
+    float floor_db; // G_min in dB, <= 0, read every hop
 } dsp_afe_ns_omlsa_config_t;
 
-/** The OM-LSA plus IMCRA floor as a slot implementation; its ctx is a dsp_afe_ns_omlsa_config_t.
- *  process: power and echo_power are GEN_GRID_N_BINS floats, echo_power may be NULL;
- *  gain gets GEN_GRID_N_BINS values in 0..1 and speech_prob one value in 0..1.
+/** The OM-LSA plus IMCRA floor as a slot implementation; its ctx is a dsp_afe_ns_omlsa_config_t, the rest of
+ * its constants come from gen_afe.h. process: power and echo_power are GEN_GRID_N_BINS floats, echo_power may
+ * be NULL; gain gets GEN_GRID_N_BINS values in 0..1 and speech_prob one value in 0..1.
  *  @ctx any | non-blocking | returns a static table
  */
 const dsp_afe_ns_ops_t *dsp_afe_ns_omlsa_ops(void);
