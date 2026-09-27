@@ -1,4 +1,5 @@
-"""Check srpipe.dsp.afe.chain, the facade with every module off, against what the plain chain must do."""
+"""Check srpipe.dsp.afe.chain: with every module off against what the plain chain must do, and with the product's
+modules against what each of them must add."""
 
 from __future__ import annotations
 
@@ -6,12 +7,14 @@ import numpy as np
 import pytest
 
 from srpipe.dsp.afe import chain
-from srpipe.generated import array, grid
+from srpipe.dsp.emit_golden import speechlike
+from srpipe.generated import afe, array, grid
 
 HOPS = 32
 AMPLITUDE = 12000.0
 TONE_HZ = 440.0
 MAX_ERROR_LSB = 1
+PLAIN = chain.ChainConfig(modules=())
 
 
 def tone(n_samples: int) -> np.ndarray:
@@ -29,7 +32,7 @@ def run(ch: chain.Chain, hops: np.ndarray) -> list[chain.Frame]:
 
 def test_identical_microphones_come_back_one_hop_late() -> None:
     x = tone(HOPS * grid.HOP_SAMPLES)
-    frames = run(chain.Chain("MM"), interleave(x, x))
+    frames = run(chain.Chain("MM", PLAIN), interleave(x, x))
     out = np.concatenate([f.pcm for f in frames])
     assert np.max(np.abs(out[grid.HOP_SAMPLES :].astype(int) - x[: -grid.HOP_SAMPLES])) <= MAX_ERROR_LSB
     assert [f.seq for f in frames] == list(range(HOPS))
@@ -38,12 +41,12 @@ def test_identical_microphones_come_back_one_hop_late() -> None:
 
 def test_opposite_microphones_cancel_in_the_mean() -> None:
     x = tone(HOPS * grid.HOP_SAMPLES)
-    frames = run(chain.Chain("MM"), interleave(x, -x))
+    frames = run(chain.Chain("MM", PLAIN), interleave(x, -x))
     assert max(int(np.max(np.abs(f.pcm.astype(int)))) for f in frames) <= MAX_ERROR_LSB
 
 
 def test_reset_marks_only_the_next_hop_and_seq_runs_on() -> None:
-    ch = chain.Chain("MM")
+    ch = chain.Chain("MM", PLAIN)
     silence = np.zeros(grid.HOP_SAMPLES * array.N_MICS, dtype=np.int16)
     first = ch.process(silence)
     ch.reset()
@@ -53,7 +56,7 @@ def test_reset_marks_only_the_next_hop_and_seq_runs_on() -> None:
 
 
 def test_full_scale_on_either_microphone_flags_a_clip() -> None:
-    ch = chain.Chain("MM")
+    ch = chain.Chain("MM", PLAIN)
     hop = np.zeros(grid.HOP_SAMPLES * array.N_MICS, dtype=np.int16)
     hop[1] = np.iinfo(np.int16).min
     assert ch.process(hop).flags == chain.FLAG_CLIPPED
@@ -76,3 +79,47 @@ def test_formats_the_default_build_cannot_run_are_refused() -> None:
         chain.Chain("XY")
     with pytest.raises(NotImplementedError):
         chain.Chain("MMR")
+
+
+def test_the_default_modules_are_the_products() -> None:
+    assert chain.Chain().cfg.modules == afe.MODULES
+
+
+def test_a_module_without_a_python_reference_is_refused() -> None:
+    with pytest.raises(NotImplementedError):
+        chain.Chain("MM", chain.ChainConfig(modules=("hpf", "gsc")))
+
+
+def test_balance_gains_of_minus_one_cancel_identical_microphones() -> None:
+    x = tone(HOPS * grid.HOP_SAMPLES)
+    cfg = chain.ChainConfig(modules=("balance",), balance_gains=-np.ones(grid.N_BINS, dtype=np.complex64))
+    frames = run(chain.Chain("MM", cfg), interleave(x, x))
+    assert all(not f.pcm.any() for f in frames)
+
+
+def test_without_calib_balance_leaves_the_mean() -> None:
+    x = tone(HOPS * grid.HOP_SAMPLES)
+    plain = run(chain.Chain("MM", PLAIN), interleave(x, x // 2))
+    uncalibrated = run(chain.Chain("MM", chain.ChainConfig(modules=("balance",))), interleave(x, x // 2))
+    assert all(np.array_equal(a.pcm, b.pcm) for a, b in zip(plain, uncalibrated, strict=True))
+
+
+def test_speech_raises_vad_and_the_agc_gain() -> None:
+    rng = np.random.default_rng(3)
+    x = np.rint(32768 * speechlike(rng, 4 * HOPS * grid.HOP_SAMPLES, 0.01)).astype(np.int16)
+    frames = run(chain.Chain(), interleave(x, x))
+    assert sum(f.vad for f in frames) > len(frames) // 2
+    assert frames[-1].gain_db > frames[0].gain_db == 0
+
+
+def test_reset_starts_every_module_again() -> None:
+    rng = np.random.default_rng(4)
+    x = np.rint(32768 * speechlike(rng, 2 * HOPS * grid.HOP_SAMPLES, 0.01)).astype(np.int16)
+    hops = interleave(x, x)
+    ch = chain.Chain()
+    run(ch, hops[:HOPS])
+    ch.reset()
+    again = run(ch, hops[HOPS:])
+    fresh = run(chain.Chain(), hops[HOPS:])
+    assert all(np.array_equal(a.pcm, b.pcm) for a, b in zip(again, fresh, strict=True))
+    assert [(a.vad, a.gain_db, a.level_dbfs) for a in again] == [(b.vad, b.gain_db, b.level_dbfs) for b in fresh]

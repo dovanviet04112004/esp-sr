@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from srpipe.dsp.afe.chain import Chain
+from srpipe.dsp.afe.chain import Chain, ChainConfig
 from srpipe.generated import array
 
 from srhost import score
@@ -22,7 +22,7 @@ def board_session(tmp_path: Path) -> tuple[Path, dict[str, np.ndarray]]:
     """A mode 5 session whose clean channel comes from one uninterrupted chain, as on the board."""
     rng = np.random.default_rng(7)
     mics = rng.integers(-3000, 3000, size=(HOPS * HOP, 2), dtype=np.int16)
-    chain = Chain()
+    chain = Chain(cfg=ChainConfig(modules=()))
     clean = np.concatenate([chain.process(mics[k * HOP : (k + 1) * HOP].reshape(-1)).pcm for k in range(HOPS)])
     return tmp_path, {"ch0": mics[:, 0].copy(), "ch1": mics[:, 1].copy(), "clean": clean}
 

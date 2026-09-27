@@ -1,8 +1,8 @@
 """Score one recorded session against srpipe and print its table (KEHOACH 4.6, 7.7).
 
-Every session gets level, DC, peak, clipping and A-weighted floor per channel. With doa_deg labelled, ch0
-and ch1 also get the pair figures of srpipe.metrics.mic_pair (E2-T4, E2-T7). With clean (stream mode 5), the
-board's clean channel is checked against srpipe's chain mirror, skipping hops that overlap unseen audio.
+Every session gets level, DC, peak, clipping and A-weighted floor per channel. With doa_deg labelled, ch0 and ch1
+also get the pair figures of srpipe.metrics.mic_pair (E2-T4, E2-T7). With clean (stream mode 5), the board's clean
+channel is checked against srpipe's chain mirror with every module off, skipping hops that overlap unseen audio.
 Run: uv run --extra score python -m srhost.score <session directory>
 """
 
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 import yaml
-from srpipe.dsp.afe.chain import Chain
+from srpipe.dsp.afe.chain import Chain, ChainConfig
 from srpipe.generated import array
 from srpipe.metrics import mic_pair
 
@@ -39,6 +39,8 @@ PAIR_CHANNELS = ("ch0", "ch1")
 MAX_LAG_SAMPLES = 2.0 * array.MAX_DELAY_SAMPLES
 ENDFIRE_COS_MIN = 0.9
 SIGN_COS_MIN = 0.5
+# vad and agc carry state across a stream gap, so only a build without modules rebuilds from a session.
+PLAIN = ChainConfig(modules=())
 COHERENCE_MIN = 0.9
 
 
@@ -118,7 +120,7 @@ def chain_parity(ch0: np.ndarray, ch1: np.ndarray, clean: np.ndarray, gap_offset
     max_abs = 0
     signal_power = error_power = 0.0
     for start, end in pairwise(bounds):
-        chain = Chain()
+        chain = Chain(cfg=PLAIN)
         for k, at in enumerate(range(start, end - hop + 1, hop)):
             mics = np.column_stack([ch0[at : at + hop], ch1[at : at + hop]]).reshape(-1)
             mirror = chain.process(mics).pcm.astype(np.int32)
