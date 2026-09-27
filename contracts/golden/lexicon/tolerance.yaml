@@ -1,0 +1,15 @@
+# C lang_vi_lexicon_entry against srpipe.lang.lexicon (KEHOACH 3.12, E11-T4): the whole lang_vi_pron_t matches
+# exactly. case_neg_* expects the south to keep the ngã of nguyễn.
+tensors:
+  status:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  n_variants:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  n_units:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  units:
+    max_abs: 0.0
+    min_snr_db: 0.0

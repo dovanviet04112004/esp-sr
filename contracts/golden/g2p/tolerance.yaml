@@ -1,0 +1,9 @@
+# C lang_vi_g2p against srpipe.lang.g2p (KEHOACH 3.12, E11-T4): rules match exactly, no tolerance. A case holds
+# every valid syllable of one onset, or labelled phrases; case_neg_* reads the southern d as the northern z.
+tensors:
+  status:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  units:
+    max_abs: 0.0
+    min_snr_db: 0.0

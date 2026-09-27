@@ -1,0 +1,9 @@
+# C lang_vi_normalize against srpipe.lang.normalize (KEHOACH 3.12, E11-T4): the output bytes match exactly.
+# case_neg_* expects 105 read the southern way.
+tensors:
+  status:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  output:
+    max_abs: 0.0
+    min_snr_db: 0.0
