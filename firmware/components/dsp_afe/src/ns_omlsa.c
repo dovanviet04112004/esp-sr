@@ -31,6 +31,9 @@
 #define FLOAT_EXP_BIAS 127
 #define FLOAT_EXP_MAX 0xffu
 #define FLOAT_HALF_EXP 0x3f000000u // exponent field of 0.5
+#define RECIP_MAGIC 0x7EF311C3u
+#define RSQRT_MAGIC 0x5F3759DFu
+#define NEWTON_STEPS 3
 
 static const float kFrameBandHz[2] = GEN_AFE_NS_FRAME_BAND_HZ;
 static const float kLocalMeanHz[2] = GEN_AFE_NS_LOCAL_MEAN_HZ;
@@ -44,6 +47,14 @@ typedef struct {
     size_t first;
     size_t last; // inclusive
 } bin_range_t;
+
+typedef struct {
+    float low_db;
+    float high_db;
+    float low; // the bounds as power ratios
+    float high;
+    float per_db; // 1 / (high_db - low_db)
+} ramp_t;
 
 typedef struct {
     bool started;
@@ -65,6 +76,12 @@ typedef struct {
     float power_floor;
     float p_min;
     float table_per_v;
+    float per_gamma1; // 1 / (gamma1 - 1)
+    float per_frame_bin;
+    float per_mean_bin;
+    ramp_t local_ramp;
+    ramp_t global_ramp;
+    ramp_t frame_ramp;
     float absent_power;  // gamma0 * B_min
     float absent_smooth; // zeta0 * B_min
     float xi_frame;
@@ -197,6 +214,27 @@ static int floor_int(float t)
     return (float)i > t ? i - 1 : i;
 }
 
+// A guess off the bits and Newton steps, as srpipe does, for positive normal floats; a division costs ~60
+// cycles.
+static float recip_f32(float b)
+{
+    float r = float_of(RECIP_MAGIC - bits_of(b));
+    for (int i = 0; i < NEWTON_STEPS; i++) {
+        r = r * (2.0f - b * r);
+    }
+    return r;
+}
+
+static float rsqrt_f32(float v)
+{
+    const float half = 0.5f * v;
+    float r = float_of(RSQRT_MAGIC - (bits_of(v) >> 1));
+    for (int i = 0; i < NEWTON_STEPS; i++) {
+        r = r * (1.5f - half * r * r);
+    }
+    return r;
+}
+
 static float log2_f32(const omlsa_state_t *st, float x)
 {
     int exponent = 0;
@@ -205,7 +243,7 @@ static float log2_f32(const omlsa_state_t *st, float x)
         mantissa = mantissa * 2.0f;
         exponent = exponent - 1;
     }
-    const float t = (mantissa - 1.0f) / (mantissa + 1.0f);
+    const float t = (mantissa - 1.0f) * recip_f32(mantissa + 1.0f);
     const float t2 = t * t;
     const float *c = st->log2_coeffs;
     const float series = t * (c[0] + t2 * (c[1] + t2 * (c[2] + t2 * (c[3] + t2 * c[4]))));
@@ -281,34 +319,55 @@ static float smooth_product_at(const float *a, const float *b, size_t k, const f
     return acc;
 }
 
-static float ordered_mean(const float *x, bin_range_t bins)
+static float ordered_sum(const float *x, bin_range_t bins)
 {
     float acc = 0.0f;
     for (size_t k = bins.first; k <= bins.last; k++) {
         acc += x[k];
     }
-    return acc / (float)(bins.last - bins.first + 1);
+    return acc;
 }
 
-static float ramp(float level_db, const float bounds_db[2], float p_min)
+static ramp_t ramp_of(const float bounds_db[2])
 {
-    if (level_db <= bounds_db[0]) { return p_min; }
-    if (level_db >= bounds_db[1]) { return 1.0f; }
-    return p_min + (level_db - bounds_db[0]) / (bounds_db[1] - bounds_db[0]) * (1.0f - p_min);
+    const double low = bounds_db[0];
+    const double high = bounds_db[1];
+    return (ramp_t){.low_db = bounds_db[0],
+                    .high_db = bounds_db[1],
+                    .low = (float)exp_series(low / 10.0 * LN_10),
+                    .high = (float)exp_series(high / 10.0 * LN_10),
+                    .per_db = (float)(1.0 / (high - low))};
+}
+
+static float ramp_between(const ramp_t *r, float level_db, float p_min)
+{
+    return p_min + (level_db - r->low_db) * r->per_db * (1.0f - p_min);
+}
+
+// p_min at or under the lower bound, 1 at or over the upper, linear in dB between; the log only where it is
+// needed.
+static float ramp_of_ratio(const omlsa_state_t *st, const ramp_t *r, float x)
+{
+    if (x <= r->low) { return st->p_min; }
+    if (x >= r->high) { return 1.0f; }
+    return ramp_between(r, st->db_per_log2 * log2_f32(st, x), st->p_min);
 }
 
 static float presence(const omlsa_state_t *st, float q, float eta, float v)
 {
-    return 1.0f / (1.0f + q / (1.0f - q) * (1.0f + eta) * exp_f32(st, -v));
+    const float absent = 1.0f - q;
+    return absent * recip_f32(absent + q * (1.0f + eta) * exp_f32(st, -v));
 }
 
+// Also gives the Wiener gain eta / (1 + eta), which v and G_H1 share.
 static void prior_snr(const omlsa_state_t *st, float power, float noise, float eta_2term, float *gamma,
-                      float *eta, float *v)
+                      float *eta, float *v, float *wiener)
 {
-    *gamma = power / max_f(noise, st->power_floor);
+    *gamma = power * recip_f32(max_f(noise, st->power_floor));
     const float fresh = st->alpha_eta * eta_2term + (1.0f - st->alpha_eta) * max_f(*gamma - 1.0f, 0.0f);
     *eta = max_f(fresh, st->eta_min);
-    *v = *gamma * *eta / (1.0f + *eta);
+    *wiener = *eta * recip_f32(1.0f + *eta);
+    *v = *gamma * *wiener;
 }
 
 static void reset_state(omlsa_state_t *st)
@@ -350,7 +409,7 @@ static void track_noise(omlsa_state_t *st, const float *power)
     for (size_t k = 0; k < N_BINS; k++) {
         const float weight = smooth_at(st->absent, k, st->freq_taps, FREQ_TAPS);
         const float weighted = smooth_product_at(st->absent, power, k, st->freq_taps, FREQ_TAPS);
-        const float sft = weight != 0.0f ? weighted / weight : st->st[k];
+        const float sft = weight != 0.0f ? weighted * recip_f32(weight) : st->st[k];
         if (warming) {
             st->st[k] = st->s[k];
             st->s_min_t[k] = st->st[k];
@@ -360,16 +419,16 @@ static void track_noise(omlsa_state_t *st, const float *power)
             st->s_min_t[k] = min_f(st->s_min_t[k], st->st[k]);
             st->s_act_t[k] = min_f(st->s_act_t[k], st->st[k]);
         }
-        const float floor_t = max_f(st->s_min_t[k], st->power_floor);
-        const float gamma_min = power[k] / bias / floor_t;
-        const float zeta = st->s[k] / bias / floor_t;
+        const float per_floor = recip_f32(bias * max_f(st->s_min_t[k], st->power_floor));
+        const float gamma_min = power[k] * per_floor;
+        const float zeta = st->s[k] * per_floor;
         const float gamma1 = GEN_AFE_NS_GAMMA1;
         const float zeta0 = GEN_AFE_NS_ZETA0;
         float p_hat = 0.0f;
         if (gamma_min >= gamma1 || zeta >= zeta0) {
             p_hat = 1.0f;
         } else if (gamma_min > 1.0f) {
-            p_hat = presence(st, (gamma1 - gamma_min) / (gamma1 - 1.0f), st->eta[k], st->v[k]);
+            p_hat = presence(st, (gamma1 - gamma_min) * st->per_gamma1, st->eta[k], st->v[k]);
         }
         const float alpha = st->alpha_d + (1.0f - st->alpha_d) * p_hat;
         st->lambda_dav[k] = alpha * st->lambda_dav[k] + (1.0f - alpha) * power[k];
@@ -407,11 +466,11 @@ static void track_noise(omlsa_state_t *st, const float *power)
 static float frame_presence(omlsa_state_t *st)
 {
     const float previous = st->xi_frame;
-    st->xi_frame = ordered_mean(st->xi, st->frame_bins);
+    st->xi_frame = ordered_sum(st->xi, st->frame_bins) * st->per_frame_bin;
     const bool rising = st->xi_frame - previous >= 0.0f;
     const float frame_db = st->xi_frame > 0.0f ? st->db_per_log2 * log2_f32(st, st->xi_frame) : EMPTY_XI_DB;
-    const float low = kXiFrameDb[0];
-    const float high = kXiFrameDb[1];
+    const float low = st->frame_ramp.low_db;
+    const float high = st->frame_ramp.high_db;
     if (frame_db <= low) { return st->p_min; }
     if (rising) {
         st->xi_peak_db = min_f(max_f(frame_db, kXiPeakDb[0]), kXiPeakDb[1]);
@@ -419,7 +478,7 @@ static float frame_presence(omlsa_state_t *st)
     }
     if (frame_db >= st->xi_peak_db + high) { return 1.0f; }
     if (frame_db <= st->xi_peak_db + low) { return st->p_min; }
-    return st->p_min + (frame_db - st->xi_peak_db - low) / (high - low) * (1.0f - st->p_min);
+    return ramp_between(&st->frame_ramp, frame_db - st->xi_peak_db, st->p_min);
 }
 
 // q, the prior probability that speech is absent, is 1 - p_global p_local p_frame; returns p_frame.
@@ -429,15 +488,12 @@ static float absence_prior(omlsa_state_t *st)
         st->xi[k] = st->alpha_xi * st->xi[k] + (1.0f - st->alpha_xi) * st->eta[k];
     }
     for (size_t k = 0; k < N_BINS; k++) {
-        const float local_db =
-            st->db_per_log2 * log2_f32(st, smooth_at(st->xi, k, st->local_taps, LOCAL_TAPS));
-        const float global_db =
-            st->db_per_log2 * log2_f32(st, smooth_at(st->xi, k, st->global_taps, GLOBAL_TAPS));
-        st->p_local[k] = ramp(local_db, kXiLocalDb, st->p_min);
-        st->p_global[k] = ramp(global_db, kXiGlobalDb, st->p_min);
+        st->p_local[k] = ramp_of_ratio(st, &st->local_ramp, smooth_at(st->xi, k, st->local_taps, LOCAL_TAPS));
+        st->p_global[k] =
+            ramp_of_ratio(st, &st->global_ramp, smooth_at(st->xi, k, st->global_taps, GLOBAL_TAPS));
     }
     const float p_frame = frame_presence(st);
-    if (ordered_mean(st->p_local, st->mean_bins) < GEN_AFE_NS_LOCAL_RESET_BELOW) {
+    if (ordered_sum(st->p_local, st->mean_bins) * st->per_mean_bin < GEN_AFE_NS_LOCAL_RESET_BELOW) {
         for (size_t k = st->reset_bins.first; k <= st->reset_bins.last; k++) {
             st->p_local[k] = st->p_min;
         }
@@ -445,17 +501,16 @@ static float absence_prior(omlsa_state_t *st)
     return p_frame;
 }
 
-static float lsa_gain(const omlsa_state_t *st, float eta, float v)
+static float lsa_gain(const omlsa_state_t *st, float wiener, float v)
 {
     if (!(v > 0.0f)) { return 1.0f; }
-    const float wiener = eta / (1.0f + eta);
     if (v > GEN_AFE_NS_LSA_V_MAX) { return wiener; }
     const float position = v * st->table_per_v;
     int index = (int)position;
     index = index < E1_POINTS - 2 ? index : E1_POINTS - 2;
     const float frac = position - (float)index;
     const float smooth_part = st->table[index] + frac * (st->table[index + 1] - st->table[index]);
-    return wiener * (smooth_part / sqrtf(v));
+    return wiener * (smooth_part * rsqrt_f32(v));
 }
 
 static size_t state_bytes(void *ctx)
@@ -480,11 +535,17 @@ static esp_err_t init(void *ctx, void *state, size_t bytes)
     st->power_floor = GEN_AFE_NS_POWER_FLOOR;
     st->p_min = GEN_AFE_NS_P_MIN;
     st->table_per_v = (float)((E1_POINTS - 1) / (double)GEN_AFE_NS_LSA_V_MAX);
+    st->per_gamma1 = (float)(1.0 / ((double)GEN_AFE_NS_GAMMA1 - 1.0));
     st->absent_power = GEN_AFE_NS_GAMMA0 * GEN_AFE_NS_MIN_BIAS;
     st->absent_smooth = GEN_AFE_NS_ZETA0 * GEN_AFE_NS_MIN_BIAS;
     st->frame_bins = bins_of(kFrameBandHz);
     st->mean_bins = bins_of(kLocalMeanHz);
     st->reset_bins = bins_of(kLocalResetHz);
+    st->per_frame_bin = (float)(1.0 / (double)(st->frame_bins.last - st->frame_bins.first + 1));
+    st->per_mean_bin = (float)(1.0 / (double)(st->mean_bins.last - st->mean_bins.first + 1));
+    st->local_ramp = ramp_of(kXiLocalDb);
+    st->global_ramp = ramp_of(kXiGlobalDb);
+    st->frame_ramp = ramp_of(kXiFrameDb);
     st->sqrt_half = (float)sqrt(0.5);
     st->db_per_log2 = (float)(10.0 / LOG2_10);
     st->log2_e = (float)(1.0 / LN_2);
@@ -536,7 +597,8 @@ static esp_err_t process(void *ctx, void *state, const float *power, const float
     for (size_t k = 0; k < N_BINS; k++) {
         const float noise = echo_power != NULL ? st->lambda_d[k] + echo_power[k] : st->lambda_d[k];
         float gamma = 0.0f;
-        prior_snr(st, power[k], noise, st->eta_2term[k], &gamma, &st->eta[k], &st->v[k]);
+        float wiener = 0.0f;
+        prior_snr(st, power[k], noise, st->eta_2term[k], &gamma, &st->eta[k], &st->v[k], &wiener);
     }
     track_noise(st, power);
     const float p_frame = absence_prior(st);
@@ -546,10 +608,11 @@ static esp_err_t process(void *ctx, void *state, const float *power, const float
         float gamma = 0.0f;
         float eta = 0.0f;
         float v = 0.0f;
-        prior_snr(st, power[k], noise, st->eta_2term[k], &gamma, &eta, &v);
+        float wiener = 0.0f;
+        prior_snr(st, power[k], noise, st->eta_2term[k], &gamma, &eta, &v, &wiener);
         const float q = min_f(1.0f - st->p_global[k] * st->p_local[k] * p_frame, GEN_AFE_NS_Q_MAX);
         const float p = q < GEN_AFE_NS_Q_PRESENCE_MAX ? presence(st, q, eta, v) : 0.0f;
-        const float g_h1 = lsa_gain(st, eta, v);
+        const float g_h1 = lsa_gain(st, wiener, v);
         // At p = 0 the product vanishes and the exponent is log2 G_min exactly, so the gain is the floor's.
         const float g = p > 0.0f ? exp2_f32(st, p * log2_f32(st, g_h1) + (1.0f - p) * st->log2_gain_min)
                                  : st->gain_at_floor;
@@ -558,7 +621,7 @@ static esp_err_t process(void *ctx, void *state, const float *power, const float
         st->eta_2term[k] = g_h1 * (g_h1 * gamma);
         if (k >= st->frame_bins.first && k <= st->frame_bins.last) { presence_sum += p; }
     }
-    *speech_prob = presence_sum / (float)(st->frame_bins.last - st->frame_bins.first + 1);
+    *speech_prob = presence_sum * st->per_frame_bin;
     st->hop++;
     return ESP_OK;
 }
