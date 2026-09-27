@@ -3,6 +3,7 @@
 
 #include "drv_audio.h"
 #include "esp_err.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "gen_grid.h"
@@ -13,6 +14,8 @@
 #define DMA_DESC_NUM 8
 #define PCM_SHIFT_TOP16 16
 #define SLOW_BOOT_MS 300 // longer than the 128 ms DMA ring
+#define US_PER_S 1000000LL
+#define HOP_US (GEN_GRID_HOP_SAMPLES * US_PER_S / GEN_GRID_SAMPLE_RATE_HZ)
 
 static int16_t s_hop[GEN_GRID_HOP_SAMPLES * 2];
 
@@ -32,9 +35,16 @@ TEST_CASE("after a slow boot, ten seconds arrive whole, in order, from two live 
 
     double sum[2] = {0}, sum_sq[2] = {0}, diff_sq = 0;
     uint32_t seq = 0;
+    const int64_t start_us = esp_timer_get_time();
     for (uint32_t i = 0; i < HOPS_TEN_SECONDS; i++) {
         TEST_ASSERT_EQUAL(ESP_OK, drv_audio_read_frame(s_hop, &seq, READ_TIMEOUT_MS));
         TEST_ASSERT_EQUAL_UINT32(i, seq);
+        // The ring's hops from the slow boot are gone: the first ones arrive at the hop rate, not in one
+        // burst.
+        if (i == DMA_DESC_NUM) {
+            TEST_ASSERT_GREATER_THAN_INT32((int32_t)((DMA_DESC_NUM - 1) * HOP_US),
+                                           (int32_t)(esp_timer_get_time() - start_us));
+        }
         for (int n = 0; n < GEN_GRID_HOP_SAMPLES; n++) {
             for (int ch = 0; ch < 2; ch++) {
                 const double v = s_hop[2 * n + ch];

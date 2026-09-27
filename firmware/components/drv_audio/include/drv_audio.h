@@ -37,7 +37,8 @@ esp_err_t drv_audio_init(const drv_audio_config_t *cfg);
  */
 uint8_t drv_audio_channels(void);
 
-/** Wait for the next hop and copy it interleaved; seq counts hops from the first read, gaps included.
+/** Wait for the next hop and copy it interleaved; the first call drops the hops queued ahead of it, and seq
+ * counts hops from the one it returns, gaps included.
  *  @ctx thu_task | blocking up to timeout_ms | caller owns out, channels x GEN_GRID_HOP_SAMPLES
  *  @ret ESP_OK | ESP_ERR_TIMEOUT no hop in time, which means the I2S clock stopped
  */

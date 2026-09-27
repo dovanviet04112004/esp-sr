@@ -81,16 +81,19 @@ esp_err_t drv_audio_read_frame(int16_t *interleaved, uint32_t *seq, uint32_t tim
 {
     if (s_rx == NULL || interleaved == NULL || seq == NULL) { return ESP_ERR_INVALID_STATE; }
     size_t got = 0;
+    // The ring filled with no reader yet: drop what it holds, not hand the reader the whole ring in one
+    // burst, and count seq and overflows from the first fresh hop.
+    if (!s_reading) {
+        while (i2s_channel_read(s_rx, s_slots, sizeof(s_slots), &got, 0) == ESP_OK &&
+               got == sizeof(s_slots)) {}
+        s_overflows_seen = s_overflows_before_read = atomic_load(&s_overflows);
+        s_reading = true;
+    }
     esp_err_t err = i2s_channel_read(s_rx, s_slots, sizeof(s_slots), &got, pdMS_TO_TICKS(timeout_ms));
     if (err != ESP_OK) { return err; }
     if (got != sizeof(s_slots)) { return ESP_ERR_INVALID_SIZE; }
 
     const uint32_t overflows = atomic_load(&s_overflows);
-    // Buffers dropped until the first read had no reader to fall behind, so seq and the count start here.
-    if (!s_reading) {
-        s_overflows_seen = s_overflows_before_read = overflows;
-        s_reading = true;
-    }
     const uint32_t lost = overflows - s_overflows_seen;
     s_overflows_seen = overflows;
     *seq = s_next_seq + lost;
