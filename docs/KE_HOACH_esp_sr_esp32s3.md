@@ -64,6 +64,7 @@ Bảng này tồn tại cho tới khi TỔNG QUAN được sửa theo (E1-T9). S
 | 18 | Tham chiếu chéo | Sửa: bảng §3 dòng `synth` trỏ `V5.7.1` → **`V5.6.1`**; §3.2 trỏ `V5.6.1` → **`V5.5.2`**; §7 đánh số 6.1–6.3 → **7.1–7.3** | Lỗi đánh số | — |
 | 19 | Mốc micro: SNR ≥ 62 dB | Board dùng **2 × INMP441**, SNR 61 dBA theo datasheet. Chấp nhận, ghi là giới hạn đã biết, **không chặn Cửa 0** | Chủ dự án chốt dùng micro đang lắp; SNR chỉ hạ trần của tầm thu, không phá chuỗi | §2.1 |
 | 20 | Một đường đi thẳng tới app trọn vẹn ở pha C | Thêm **mốc demo MQTT** trước pha C: chuỗi nghe → `wake` → `command` → sự kiện lên server, không cần loa. Không bỏ module nào | Board hiện chưa có loa; demo chứng minh cả đường nghe và đường gửi về máy tính sớm nhất có thể | §8 |
+| 21 | Thu bổ sung qua chính board, có giọng nam nữ, xa và gần (V5.5.6) | Học **từ kho công khai và TTS**, qua đường mô phỏng board dựng trên bản soi gương của `dsp_afe`; thu qua board vài người, **mặc định làm tập thử**, vào tập học khi cần tiếng thật | Chủ dự án chốt 27/09: không thu được hàng trăm người. Đường mô phỏng cho phần thuần của đặc trưng trùng board từng bit, nên tập thử chỉ còn đo phòng, micro và giọng thật | §1.2, §1.3, §3.11 |
 
 Mã task: TỔNG QUAN dùng `V5.x.y`; `docs/TASKS.md` dùng `E<epic>-T<số>` như mọi repo của chủ dự án, và
 có cột ánh xạ về mã `V5.x.y`.
@@ -90,6 +91,12 @@ ESP-PPQ hay không là việc phải chứng minh ở E11-T10, chưa phải sự
 
 ### 1.2 Dữ liệu
 
+**Học từ kho có sẵn, thu qua board để chấm.** Dự án không thu được tiếng của hàng trăm người qua board, nên dữ
+liệu học đến từ kho công khai và tiếng tổng hợp. Chúng đi qua **đường mô phỏng board** (dưới đây) để mang đúng
+miền thiết bị. Bản thu qua board gồm vài người nói ở ít nhất hai phòng, và mặc định chỉ dùng để chấm và chọn
+model. Khi cần tiếng thật để học (đường lùi của Cửa 2 và 3), bản thu vào tập học theo luật tách người và phòng
+của §1.3, cùng khuôn thư mục và split.
+
 Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha256 nằm ở `docs/DU_LIEU.md` sau E11-T1.
 
 | Nguồn | Dùng cho | Cỡ | Giấy phép | Ghi chú |
@@ -102,9 +109,21 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | DEMAND | `ns` | 15 môi trường, 16 kênh | CC BY-SA 3.0 🔬 | |
 | DNS Challenge (Microsoft) | `ns` | hàng trăm giờ | CC BY 4.0 phần nhiễu 🔬 | |
 | OpenSLR 28 | tăng cường vang | RIR thật và mô phỏng | Apache 2.0 | |
-| Cảnh dựng bằng `pyroomacoustics` | `doa` `gsc` `bss` `ns` | không giới hạn | của dự án | vật liệu **có nhãn** cho mọi khối không gian (§4.4) |
-| Thu qua chính board | `wake` dương, lệnh, tập thử | theo E11-T6 | của dự án, có phiếu đồng ý (§1.4) | nguồn **duy nhất** đúng miền thiết bị |
-| Tiếng tổng hợp bằng TTS trên máy tính | `wake` dương, lệnh | không giới hạn | theo giấy phép mô hình TTS dùng 🔬 | chỉ để tăng lượng, **không bao giờ** vào tập thử |
+| Cảnh dựng bằng `pyroomacoustics` | `doa` `gsc` `bss` `ns`, đường mô phỏng board | không giới hạn | của dự án | vật liệu **có nhãn** cho mọi khối không gian (§4.4) |
+| Tiếng tổng hợp bằng TTS trên máy tính | **`wake` dương — nguồn chính**, cụm gần âm cho âm bản, tăng lượng `command` | không giới hạn, nhiều giọng | theo giấy phép mô hình TTS dùng 🔬 | **không bao giờ** vào tập thử |
+| Thu qua chính board | tập thử của `wake` và `command`, âm bản gần âm; nhiễu phòng; tập học khi cần tiếng thật | vài người nói, ≥ 2 phòng (E11-T6) | của dự án, có phiếu đồng ý (§1.4) | nguồn **duy nhất** đúng miền thiết bị |
+
+**Đường mô phỏng board** (`srpipe/scenes/device.py`) biến một mẩu tiếng sạch thành đúng thứ bộ nhận dạng thấy trên
+máy:
+1. Đặt người nói và nhiễu vào một phòng `pyroomacoustics`, hoặc chập RIR thật của OpenSLR 28, lên dàn hai micro của
+   `array.yaml`.
+2. Áp chênh lệch giữa hai micro theo hiệu chuẩn của board (§3.4), nền ồn micro và lượng tử `pcm_shift`.
+3. Chạy `srpipe.dsp.afe.chain` và log-mel của `srpipe.dsp.spec`. Đây là bản soi gương khớp firmware từng bit
+   (§3.14), với đúng danh sách module sản phẩm.
+
+Phần thuần của đặc trưng lúc học vì thế trùng đặc trưng trên board. Phần còn khác là phòng thật, micro thật và giọng
+thật, và tập thu qua board đo đúng phần ấy. Chuỗi đổi (bật một module, chọn đường không gian) thì sinh lại đặc
+trưng bằng một lệnh.
 
 Nhiễu của chính phòng dùng (TỔNG QUAN V5.3.2) thu bằng `test_apps/capture` (§4.5.7), không thu bằng
 máy khác: đáp ứng của micro là một phần của miền dữ liệu.
@@ -114,9 +133,11 @@ máy khác: đáp ứng của micro là một phần của miền dữ liệu.
 | Luật | Vì sao |
 |---|---|
 | Tách theo **người nói**: một người chỉ nằm ở một tập | Cùng giọng ở cả train lẫn test thổi phồng mọi con số nhận dạng |
-| Bản thu qua board tách theo **phiên** và **phòng**; tập thử có ít nhất một phòng không có trong tập huấn luyện | Vang và nhiễu nền của phòng là thứ mô hình học thuộc được |
-| Âm bản để đo báo nhầm của `wake`: **≥ 24 giờ**, không trùng nguồn huấn luyện | Đo "≤ 1 lần mỗi giờ" trên một giờ âm bản là không đo gì cả |
+| Bản thu qua board tách theo **phiên** và **phòng**; tập thử có ít nhất một phòng không góp gì vào tập học (`train`, `val`, `calib`) | Vang và nhiễu nền của phòng là thứ mô hình học thuộc được |
+| Mỗi con số trên tập thu qua board ghi kèm **số người nói và số phòng** | Tập thử chỉ có vài người; con số không kèm cỡ mẫu trông chắc hơn thực tế |
+| Âm bản để đo báo nhầm của `wake`: **≥ 24 giờ**, không trùng nguồn học — phần kho công khai giữ riêng, qua đường mô phỏng board, cộng nền phòng thu qua board | Đo "≤ 1 lần mỗi giờ" trên một giờ âm bản là không đo gì cả |
 | Tiếng tổng hợp không vào tập thử | Nó đúng miền của TTS, không đúng miền của người thật |
+| Tập hiệu chuẩn int8 lấy từ vật liệu học (mô phỏng board, hoặc bản thu của tập học), không lấy mẩu hay người nói nào của tập thử | Tập thử không góp gì vào model, kể cả dải giá trị của lượng tử |
 | Mỗi split có `SPLIT.md` ghi luật, seed, sha256, commit ở `ml/data/splits/` | Dựng lại được bằng một lệnh |
 | So hai biến thể: cùng split, cùng seed, cùng số epoch | Khác một điều kiện là bảng vô nghĩa |
 | Chọn mô hình bằng số **sau int8** trên **tập thu qua board** | Số FP32 trên tập công khai không nói gì về máy thật |
@@ -653,8 +674,10 @@ thanh**; thắng mới dựng `dsp_spec/pitch`.
 trùng lời nói thường ngày nhiều. Chọn cụm pha **thanh khác nhau** và nguyên âm tương phản, không phải
 từ thông dụng (E11-T5).
 
-**Dữ liệu dương** lấy từ thu qua board (≥ 100 người nói, nam nữ, gần xa) cộng tiếng tổng hợp nhiều
-giọng để tăng lượng; **âm bản** từ các kho lời nói tiếng Việt cộng các cụm gần âm cố ý chọn.
+**Dữ liệu dương** là tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, qua đường
+mô phỏng board (§1.2). **Âm bản** gồm các kho lời nói tiếng Việt, cộng các cụm gần âm cố ý chọn đọc bằng
+TTS. Bản thu qua board để chấm (§1.3). Nếu thiếu Cửa 2 vì giọng tổng hợp khác giọng thật, thêm mẫu
+dương thật của vài người tình nguyện vào tập học, tách người với tập thử.
 
 **Thước** (TỔNG QUAN V5.5.7, Cửa 2): bắt **≥ 95%** ở 1 m phòng yên; báo nhầm **≤ 1 lần mỗi giờ** đo
 trên **≥ 24 giờ** âm bản. Ghi thêm, không làm cửa: bắt được ở 3 m, ở SNR 10 dB và 5 dB.
@@ -936,8 +959,10 @@ ml/
 │   │   ├── vad.py                     # câu đọc + khoảng nghỉ + nhiễu ở SNR và mức cho trước, nhãn mỗi bước
 │   │   │                              #   từ tiếng sạch; chấm vad với ngưỡng năng lượng trần (§3.10)
 │   │   ├── agc.py                     # cùng cảnh ở mức vào −50 … −10 dBFS qua vad rồi agc; mức ra, đỉnh (§3.10)
-│   │   └── ns.py                      # câu đọc + nhiễu ở SNR cho trước; chấm khe ns: nhiễu bị dìm, tiếng nói mất,
-│   │                                  #   bằng đúng gain áp riêng vào từng phần (§3.9)
+│   │   ├── ns.py                      # câu đọc + nhiễu ở SNR cho trước; chấm khe ns: nhiễu bị dìm, tiếng nói mất,
+│   │   │                              #   bằng đúng gain áp riêng vào từng phần (§3.9)
+│   │   └── device.py                  # ★ đường mô phỏng board: phòng hoặc RIR thật → dàn array.yaml → chênh micro
+│   │                                  #   đã hiệu chuẩn, pcm_shift → dsp.afe.chain → log-mel; dữ liệu học (§1.2)
 │   │
 │   ├── dsp/                           # ── THUẬT TOÁN THUẦN, soi gương firmware 1:1 ──
 │   │   ├── spec/{fft.py, window.py, stft.py, mel.py, pitch.py}        # ★ dsp_spec
