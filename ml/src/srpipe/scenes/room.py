@@ -94,7 +94,7 @@ def place(cfg: dict, rng: np.random.Generator, with_interferer: bool) -> Placeme
     raise RuntimeError(f"no placement fits after {cfg['max_tries']} tries")
 
 
-def _room(p: Placement, design_rt60_s: float, signals: list[np.ndarray]) -> pra.ShoeBox:
+def _room(p: Placement, design_rt60_s: float, signals: list[np.ndarray | None]) -> pra.ShoeBox:
     if design_rt60_s > 0:
         absorption, max_order = pra.inverse_sabine(design_rt60_s, p.room_m, c=array.SPEED_OF_SOUND_M_S)
         room = pra.ShoeBox(p.room_m, fs=FS, materials=pra.Material(absorption), max_order=max_order)
@@ -109,12 +109,14 @@ def _room(p: Placement, design_rt60_s: float, signals: list[np.ndarray]) -> pra.
     return room
 
 
-def images(p: Placement, rt60_s: float, signals: list[np.ndarray], cfg: dict) -> tuple[np.ndarray, float | None]:
-    """Each source's image at ch0 and ch1, shaped (sources, 2, samples of the first signal), and the RT60 measured on
-    the talker's RIR at ch0; rt60_s 0 is an anechoic room.
+def fitted_room(
+    p: Placement, rt60_s: float, cfg: dict, signals: list[np.ndarray] | None = None
+) -> tuple[pra.ShoeBox, float | None]:
+    """The room with its RIRs computed, and the RT60 measured on the talker's RIR at ch0; rt60_s 0 is anechoic.
 
     Sabine's formula undershoots what the image method rings for, so the design RT60 is scaled by target over measured
     until the measured one is within rt60_tolerance of the target, at most rt60_fit_rounds rooms."""
+    signals = signals or [None] * (1 if p.interferer_m is None else 2)
     design = rt60_s
     room = _room(p, design, signals)
     measured = pra.experimental.measure_rt60(room.rir[0][0], fs=FS) if rt60_s > 0 else None
@@ -124,6 +126,12 @@ def images(p: Placement, rt60_s: float, signals: list[np.ndarray], cfg: dict) ->
         design *= rt60_s / measured
         room = _room(p, design, signals)
         measured = pra.experimental.measure_rt60(room.rir[0][0], fs=FS)
+    return room, measured
+
+
+def images(p: Placement, rt60_s: float, signals: list[np.ndarray], cfg: dict) -> tuple[np.ndarray, float | None]:
+    """Each source's image at ch0 and ch1, shaped (sources, 2, samples of the first signal), and the measured RT60."""
+    room, measured = fitted_room(p, rt60_s, cfg, signals)
     premix = room.simulate(return_premix=True)[:, :, : len(signals[0])]
     return premix, measured
 
