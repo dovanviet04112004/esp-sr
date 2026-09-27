@@ -21,19 +21,22 @@ def write_version(directory: Path, files: dict[str, list[str]]) -> Path:
 def sound_files() -> dict[str, list[str]]:
     return {
         "train.txt": [
-            "device/board_b/20261001_r1_001\tspk_001\tr1\tboard",
+            "speech/vivos/train/VIVOSSPK01/a.wav\tVIVOSSPK01\t-\tpublic",
             "interim/wake/synth_pos/0001.wav\ttts_a\t-\tsynth",
+            "device/board_b/20261001_r1_001\t-\tr1\tboard",
+            "device/board_b/20261001_r1_002\tspk_001\tr1\tboard",
         ],
         "val.txt": ["speech/vivos/train/VIVOSSPK02/a.wav\tVIVOSSPK02\t-\tpublic"],
         "test_pos.txt": ["device/board_b/20261002_r2_001\tspk_003\tr2\tboard"],
         "test_neg.txt": [
             "device/board_b/20261002_r2_002\tspk_003\tr2\tboard",
             "device/board_b/20261002_r2_003\t-\tr2\tboard",
+            "speech/common_voice_vi/held/0001.mp3\tcv_0009\t-\tpublic",
         ],
-        "calib_wake.txt": ["device/board_b/20261001_r1_004\tspk_002\tr1\tboard"],
+        "calib_wake.txt": ["processed/wake/sim/0001.npy\tVIVOSSPK01\t-\tscene"],
         "calib_ns.txt": [
-            "device/board_b/20261001_r1_005\tspk_002\tr1\tboard",
-            "device/board_b/20261001_r1_006\t-\tr1\tboard",
+            "processed/ns/sim/0001.npy\ttts_a\t-\tscene",
+            "device/board_b/20261001_r1_002\tspk_001\tr1\tboard",
         ],
     }
 
@@ -50,13 +53,18 @@ def test_every_committed_split_keeps_the_rules() -> None:
     assert not any(broken.values()), broken
 
 
-def test_a_sound_version_passes_with_shared_speakers_inside_one_role(tmp_path: Path) -> None:
+def test_a_sound_version_passes_with_calib_speakers_from_train(tmp_path: Path) -> None:
     assert problems_with(tmp_path) == ""
 
 
 def test_a_speaker_in_train_and_test_fails(tmp_path: Path) -> None:
-    rows = [*sound_files()["test_pos.txt"], "device/board_b/20261002_r2_009\tspk_001\tr2\tboard"]
-    assert "speaker spk_001 sits in ['test', 'train']" in problems_with(tmp_path, test_pos=rows)
+    rows = [*sound_files()["test_pos.txt"], "speech/vivos/test/VIVOSSPK01/b.wav\tVIVOSSPK01\t-\tpublic"]
+    assert "speaker VIVOSSPK01 sits in ['test', 'train']" in problems_with(tmp_path, test_pos=rows)
+
+
+def test_a_calib_speaker_in_test_fails(tmp_path: Path) -> None:
+    rows = [*sound_files()["calib_ns.txt"], "processed/ns/sim/0002.npy\tcv_0009\t-\tscene"]
+    assert "speaker cv_0009 sits in ['test', 'train']" in problems_with(tmp_path, calib_ns=rows)
 
 
 def test_synthetic_speech_in_a_test_set_fails(tmp_path: Path) -> None:
@@ -65,13 +73,13 @@ def test_synthetic_speech_in_a_test_set_fails(tmp_path: Path) -> None:
 
 
 def test_an_item_in_calib_and_test_fails(tmp_path: Path) -> None:
-    rows = [*sound_files()["calib_ns.txt"], "device/board_b/20261002_r2_003\t-\tr2\tboard"]
+    rows = [*sound_files()["calib_ns.txt"], "speech/common_voice_vi/held/0001.mp3\t-\t-\tpublic"]
     assert "1 items in both calib and test" in problems_with(tmp_path, calib_ns=rows)
 
 
 def test_a_test_set_without_an_unseen_room_fails(tmp_path: Path) -> None:
-    rows = [*sound_files()["train.txt"], "device/board_b/20261003_r2_001\tspk_004\tr2\tboard"]
-    assert "every board room of the test sets is also in train" in problems_with(tmp_path, train=rows)
+    rows = [*sound_files()["val.txt"], "device/board_b/20261003_r2_004\t-\tr2\tboard"]
+    assert "every board room of the test sets also feeds learning" in problems_with(tmp_path, val=rows)
 
 
 def test_a_file_edited_after_signing_fails(tmp_path: Path) -> None:

@@ -9,6 +9,7 @@ from pathlib import Path
 
 ORIGINS = frozenset({"public", "board", "synth", "scene"})
 ROLES = frozenset({"train", "val", "calib", "test"})
+LEARNING_ROLES = frozenset({"train", "val", "calib"})
 ABSENT = "-"
 CHECKSUM_LINE = re.compile(r"^- (\S+\.txt): ([0-9a-f]{64})\s*$")
 
@@ -60,9 +61,11 @@ def _unknown_roles(files: dict[str, list[Row]]) -> list[str]:
 def _speakers_across_roles(files: dict[str, list[Row]]) -> list[str]:
     roles_of: dict[str, set[str]] = {}
     for name, rows in files.items():
+        # int8 calibration draws from the learning material, so it shares speakers with train.
+        role = "train" if role_of(name) == "calib" else role_of(name)
         for row in rows:
             if row.spk != ABSENT:
-                roles_of.setdefault(row.spk, set()).add(role_of(name))
+                roles_of.setdefault(row.spk, set()).add(role)
     return [f"speaker {spk} sits in {sorted(roles)}" for spk, roles in sorted(roles_of.items()) if len(roles) > 1]
 
 
@@ -82,9 +85,10 @@ def _calib_meets_test(files: dict[str, list[Row]]) -> list[str]:
 
 def _no_unseen_room(files: dict[str, list[Row]]) -> list[str]:
     test_rooms = {row.room for row in _files_in(files, "test") if row.origin == "board"}
-    train_rooms = {row.room for row in _files_in(files, "train") if row.origin == "board"}
-    if test_rooms and test_rooms <= train_rooms:
-        return [f"every board room of the test sets is also in train: {sorted(test_rooms)}"]
+    learning = [row for role in sorted(LEARNING_ROLES) for row in _files_in(files, role)]
+    learning_rooms = {row.room for row in learning if row.origin == "board"}
+    if test_rooms and test_rooms <= learning_rooms:
+        return [f"every board room of the test sets also feeds learning: {sorted(test_rooms)}"]
     return []
 
 
