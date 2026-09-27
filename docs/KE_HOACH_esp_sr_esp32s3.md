@@ -697,6 +697,37 @@ và Nam; `-n` và `-ng` cuối nhập làm một ở miền Nam; hỏi và ngã 
 miền Trung. Một lệnh chỉ có một chuỗi đơn vị là một lệnh chỉ nhận người nói một vùng. Chấm có ràng
 buộc (dưới đây) lấy điểm cao nhất trên các biến thể, nên thêm biến thể gần như không tốn gì.
 
+Mỗi vùng trong mặt nạ cho một cách đọc cả dòng; hai vùng đọc trùng nhau thì gộp, nên một lệnh có tối đa ba
+biến thể. Luật khác nhau giữa ba vùng:
+
+| Chỗ | Bắc (Hà Nội) | Trung (Huế) | Nam (Sài Gòn) |
+|---|---|---|---|
+| đầu `d`, `gi` | z | j | j |
+| đầu `r` | z | ʐ | ʐ |
+| đầu `v` | v | v | j |
+| đầu `s` (`x` luôn là s) | s | ʂ | ʂ |
+| đầu `tr` | c, như `ch` | ʈ | ʈ |
+| `qu`, `h` trước âm đệm | kw, hw | kw, hw | w, w |
+| cuối `-n`, `-t`, trừ sau `i`, `ê` | n, t | ŋ, k | ŋ, k |
+| cuối `-nh`, `-ch` | ɲ, c | ɲ, c | n, t |
+| `i`, `ê` trước `-n -t -nh -ch` | i, e | i, e | ɨ, ə |
+| thanh ngã | ngã | hỏi | hỏi |
+| số: 0 ở hàng chục, 1000 | linh, nghìn | lẻ, ngàn | lẻ, ngàn |
+
+Cột Trung dựa trên mô tả giọng Huế, chưa đối chiếu người nói thật; E11-T13 đo tỉ lệ đúng theo vùng.
+`lang_vi_normalize` đọc số theo giọng Bắc, còn `lang_vi_lexicon_entry` chuẩn hoá lại theo từng vùng.
+
+**Đơn vị ra** là âm đoạn cộng nhãn thanh: 23 phụ âm đầu, âm đệm `w`, 14 âm chính (11 nguyên âm đơn,
+3 nguyên âm đôi) và 6 thanh; âm cuối dùng lại ký hiệu phụ âm và bán âm. Cộng lại là 44 ký hiệu, đặt tên theo
+X-SAMPA và vừa `lang_vi_unit_t` một byte. Mỗi âm tiết ra theo thứ tự đầu, đệm, chính, cuối, thanh: `má` là
+`m a: T5`. Bộ này dùng chung cho đường 1 và đường 4 dưới đây. Bản Python ra thêm cấu trúc từng âm tiết, để
+E11-T3 dựng đường 2 và 3 mà không cần C. Chốt một trong hai đường ấy là đổi hợp đồng đã đóng băng (§4.5.5).
+
+**Âm tiết hợp lệ** là âm tiết mà chính tả tiếng Việt dựng được. Âm đầu ghép với vần theo luật `c/k/q`,
+`g/gh`, `ng/ngh`, `gi` và `qu`; vần tắc (`-p -t -c -ch`) chỉ mang sắc hoặc nặng. Âm tiết không dựng được thì
+`g2p` từ chối, nên từ mượn phải qua từ điển. Mọi bảng nằm ở `contracts/lang_vi.yaml`: âm đầu, vần, luật
+vùng, cách đọc số, từ điển viết tắt và từ mượn. C và Python cùng sinh từ đó (§4.2).
+
 Python ở `ml/src/srpipe/lang/` và C ở `lang_vi` phải cho **đầu ra giống hệt** trên danh sách mọi âm
 tiết hợp lệ cộng bộ thử có nhãn gồm số, từ mượn, tên riêng. Sai số cho phép bằng 0.
 
@@ -867,6 +898,7 @@ contracts/
 ├── grid.yaml                      # lưới thời gian §3.1
 ├── array.yaml                     # hình học dàn micro, thứ tự kênh, quy ước dấu §2.3
 ├── afe.yaml                       # tham số số của từng module dsp_afe (§3.4–§3.10), mặc định cho cả hai đầu
+├── lang_vi.yaml                   # bảng luật của lang_vi: đơn vị, âm đầu, vần, luật vùng, đọc số, từ điển (§3.12)
 ├── schema/                        # JSON Schema — viết một lần, sinh ra C và Python
 │   ├── status.schema.json         #   online/offline, kèm LWT
 │   ├── heartbeat.schema.json
@@ -894,6 +926,7 @@ contracts/
 | `grid.yaml` | `ml/src/srpipe/generated/grid.py` | mọi bản soi gương và mọi nhánh huấn luyện |
 | `array.yaml` | `common/include/gen_array.h`, `ml/src/srpipe/generated/array.py` | `doa`, `gsc`, `bss`, bộ dựng cảnh |
 | `afe.yaml` | `dsp_afe/include/gen_afe.h`, `ml/src/srpipe/generated/afe.py`, `firmware/sdkconfig.afe` | `dsp_afe` và bản soi gương của nó; `sdkconfig.afe` bật đúng các module của `modules:` cho mọi bản dựng sản phẩm, `bench_afe` và profile `modules` của parity, còn `srpipe.dsp.afe.chain` đọc cùng danh sách để dựng bộ vàng `chain_modules` |
+| `lang_vi.yaml` | `lang_vi/priv_include/gen_lang_vi.h`, `ml/src/srpipe/generated/lang_vi.py` | `lang_vi` và bản soi gương `srpipe.lang` |
 | `stream/frame.yaml` | `common/include/gen_stream.h`, `host/src/srhost/generated/stream.py` | `net_stream`, `svc_report`, `host` |
 | `schema/` | `firmware/components/net_mqtt/include/gen_payload.h` | `svc_report`, `svc_dialog`, `main` |
 | `schema/` | `host/src/srhost/generated/payload.py` | `host` |
@@ -1320,7 +1353,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 | Component | Hàm chính | `@ctx` |
 |---|---|---|
 | `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame` | any, không chặn, người gọi giữ bộ nhớ |
-| `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_build` | any, không chặn |
+| `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_entry`, `lang_vi_unit_name` | any, không chặn |
 | `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{begin,step,score}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `step` không chặn |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |
 | `svc_*` | `svc_<x>_init`, `svc_<x>_step` | task, gọi từ đúng task của bảng §5.2 |
