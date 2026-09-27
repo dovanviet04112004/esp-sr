@@ -1,0 +1,11 @@
+# C dsp_afe ns_omlsa against srpipe.dsp.afe.ns_omlsa (KEHOACH 3.9, E9-T1). Both take every float32 step in the same
+# order, their own exp2 and log2 from frexp, ldexp and series, and constants built with basic double arithmetic, and
+# dsp_afe builds without contraction (ADR-0006): gains and speech probability match bit for bit.
+# case_neg_* keeps the paper's 8 ms smoothing unsquared at the 16 ms hop.
+tensors:
+  gain:
+    max_abs: 1.0e-6
+    min_snr_db: 120.0
+  speech_prob:
+    max_abs: 1.0e-6
+    min_snr_db: 120.0
