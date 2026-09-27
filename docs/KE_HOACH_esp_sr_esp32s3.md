@@ -105,6 +105,7 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | VIVOS (AILAB, ĐHQG TP.HCM) | `command` | ~15 giờ, 65 người nói | CC BY-NC-SA 4.0 | **phi thương mại**, ràng buộc lan sang model |
 | FPT Open Speech Data | `command` | ~30 giờ 🔬 | chưa kiểm 🔬 | |
 | VLSP các năm | `command` | lớn | đăng ký, chỉ nghiên cứu 🔬 | |
+| Bud500 (VietAI) | `command` | ~500 giờ, không có mã người nói | CC BY-NC-SA 4.0, chỉ nghiên cứu | người nói ba miền; **phi thương mại**, chỉ vào tập học |
 | MUSAN | `ns`, tăng cường | ~100 giờ nhiễu, nhạc, lời nói | CC BY 4.0 phần lớn 🔬 | |
 | DEMAND | `ns` | 15 môi trường, 16 kênh | CC BY-SA 3.0 🔬 | |
 | DNS Challenge (Microsoft) | `ns` | hàng trăm giờ | CC BY 4.0 phần nhiễu 🔬 | |
@@ -1051,7 +1052,7 @@ Hai câu hỏi, hai cách chia:
 ml/data/                                   # trong repo — chỉ siêu dữ liệu, ✅ commit
 ├── README.md                              # cái gì nằm ở đâu, lệnh nào sinh ra
 ├── manifests/                             # một file cho một kho, cùng bố cục với raw/
-│   ├── speech/{common_voice_vi, vivos, fpt_open, vlsp}.yaml
+│   ├── speech/{common_voice_vi, vivos, fpt_open, vlsp, bud500}.yaml
 │   ├── noise/{musan, demand, dns, speech_commands}.yaml
 │   ├── rir/openslr28.yaml
 │   └── device/board_b.csv                 # ★ mỗi phiên thu qua board một dòng
