@@ -542,14 +542,26 @@ trần thì giữ trộn trần và ghi đúng như vậy (Cửa 1).
 ### 3.9 `ns`
 
 **Sàn — OM-LSA cộng IMCRA (Cohen và Berdugo, 2001; Cohen, 2003)**, thuật toán thuần, nằm ở
-`dsp_afe`. Bắt buộc dựng, như TỔNG QUAN §3.1 đã nói.
+`dsp_afe` (`ns_omlsa.c`) và cắm vào khe `ns` như mọi bản khác. Bắt buộc dựng, như TỔNG QUAN §3.1 đã nói. Bản dựng
+theo `omlsa.m` 2003 của tác giả ở chế độ không dừng `medium`, quyết định toàn băng bật, dìm tông thuần tắt; mã ấy giữ
+bản quyền nên chỉ lấy thuật toán và hằng số, cũng là của hai bài báo, không chép mã. Mọi hằng số nằm ở `ns:` của
+`contracts/afe.yaml`.
 
-- Hằng số trong bài chuẩn cho **bước 128 mẫu ở 16 kHz**. Bước ở đây là 256, nên mọi hệ số làm trơn đổi
-  `α → α²`. Theo luật §3.1 thì cấu hình ghi `tau_s` và code tự quy đổi, không ai phải nhớ việc này.
-- Hàm tích phân mũ `E₁(v)` của gain LSA tra bảng 256 điểm, không tính chuỗi.
-- Gain sàn khởi đầu **−12 dB**, nông hơn con số −20 dB hay dùng cho nghe: tiếng nhạc và méo làm hỏng
-  bộ nhận dạng nhanh hơn nhiễu còn sót. Chốt bằng thước cuối của §3.15.
-- Phổ vọng dư từ `aec` (§3.5) cộng thẳng vào ước lượng phổ nhiễu.
+| Phần | Cách làm |
+|---|---|
+| Vào, ra | công suất 257 vạch của lối ra không gian, phổ vọng dư của `aec` (§3.5) cộng thẳng vào ước lượng nhiễu khi có; ra một gain mỗi vạch và xác suất có tiếng nói của khung |
+| Bước | hằng số trong bài chuẩn cho **bước 128 mẫu ở 16 kHz**; ở đây bước 256, nên mọi hệ số làm trơn đổi `α → α²`. Cấu hình ghi `tau_s` (§3.1) và code tự quy đổi, không ai phải nhớ việc này |
+| IMCRA | làm trơn tần số bằng cửa sổ Hann 3 vạch, làm trơn thời gian τ 76 ms; hai lượt tìm cực tiểu (thô, rồi chỉ trên vạch được coi là vắng tiếng) trên 8 cửa con 8 bước, tức ~1 s như 8 × 15 khung 8 ms của bài; `B_min` 1,66, `ζ₀` 1,67, `γ₀` 4,6, `γ₁` 3; nhiễu làm trơn τ 49 ms, chậm lại theo xác suất có tiếng, nhân bù 1,4685 |
+| Vắng tiếng | xác suất tiên nghiệm từ `ξ` làm trơn τ 22 ms ở ba mức: cục bộ (Hann 3 vạch), toàn cục (Hann 31 vạch), khung (trung bình 50 Hz – 8 kHz); ngưỡng −10 / −5 dB, `P_min` 0,005, `q` tối đa 0,998; mức cục bộ ép về `P_min` ở 500–3500 Hz khi trung bình của nó dưới 0,25 |
+| SNR tiên nghiệm | quyết định hướng, τ 156 ms, sàn −18 dB |
+| Gain | `G = G_H1^p · G_min^(1−p)`, `G_H1` là gain LSA, gain Wiener khi `v > 5`. `G_min` là sàn, khởi đầu **−12 dB** (NVS `afe/ns_floor_db`), nông hơn con số −20 dB hay dùng cho nghe: tiếng nhạc và méo làm hỏng bộ nhận dạng nhanh hơn nhiễu còn sót. Chốt bằng thước cuối của §3.15 |
+| `E₁(v)` | tra bảng 256 điểm trên [0, 5] của phần trơn `E₁(v) + ln v`, dựng lúc khởi tạo bằng chuỗi ở double chỉ với phép tính cơ bản; lúc chạy `exp(E₁/2)` là giá trị bảng chia `√v`, không tính chuỗi |
+| exp, log | của riêng module: `frexp`, `ldexp` và đa thức float32, sai số tương đối dưới 1e-6, nên C khớp bản soi gương từng bit mà không phụ thuộc `expf` / `logf` của từng libm, như `vad` (§3.10) |
+| Chưa làm | dìm tông thuần và sàn gain thích nghi của `omlsa.m` (`tone_flag`); xoá vạch 0–2 và Nyquist như `omlsa.m` là việc của `hpf`. Thêm lại khi đo thấy có lợi |
+
+Độ trung thành: bản soi gương chạy ở đúng khung của bài (Hamming 512, bước 128, hằng số gốc) so với `omlsa.m` gốc trong
+Octave, trên cùng tín hiệu. Thước (TỔNG QUAN V5.3.1): nhiễu bị dìm bao nhiêu dB và tiếng nói mất bao nhiêu dB, đo bằng
+cách áp đúng gain tính trên hỗn hợp vào riêng phần tiếng nói và riêng phần nhiễu.
 
 **Mạng — RNNoise dựng lại cho 16 kHz**, mô hình học, nằm ở `ai_engine/src/ns/`, cắm vào khe `ns`.
 
@@ -923,7 +935,9 @@ ml/
 │   │                                  #   hướng người nói và nhiễu, SNR, dàn micro từ array.yaml
 │   │   ├── vad.py                     # câu đọc + khoảng nghỉ + nhiễu ở SNR và mức cho trước, nhãn mỗi bước
 │   │   │                              #   từ tiếng sạch; chấm vad với ngưỡng năng lượng trần (§3.10)
-│   │   └── agc.py                     # cùng cảnh ở mức vào −50 … −10 dBFS qua vad rồi agc; mức ra, đỉnh (§3.10)
+│   │   ├── agc.py                     # cùng cảnh ở mức vào −50 … −10 dBFS qua vad rồi agc; mức ra, đỉnh (§3.10)
+│   │   └── ns.py                      # câu đọc + nhiễu ở SNR cho trước; chấm khe ns: nhiễu bị dìm, tiếng nói mất,
+│   │                                  #   bằng đúng gain áp riêng vào từng phần (§3.9)
 │   │
 │   ├── dsp/                           # ── THUẬT TOÁN THUẦN, soi gương firmware 1:1 ──
 │   │   ├── spec/{fft.py, window.py, stft.py, mel.py, pitch.py}        # ★ dsp_spec
