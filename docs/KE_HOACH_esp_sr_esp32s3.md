@@ -853,7 +853,7 @@ contracts/
 | `grid.yaml` | `firmware/components/common/include/gen_grid.h` | `dsp_spec`, `dsp_afe`, `ai_engine` |
 | `grid.yaml` | `ml/src/srpipe/generated/grid.py` | mọi bản soi gương và mọi nhánh huấn luyện |
 | `array.yaml` | `common/include/gen_array.h`, `ml/src/srpipe/generated/array.py` | `doa`, `gsc`, `bss`, bộ dựng cảnh |
-| `afe.yaml` | `dsp_afe/include/gen_afe.h`, `ml/src/srpipe/generated/afe.py` | `dsp_afe` và bản soi gương của nó |
+| `afe.yaml` | `dsp_afe/include/gen_afe.h`, `ml/src/srpipe/generated/afe.py`, `firmware/sdkconfig.afe` | `dsp_afe` và bản soi gương của nó; `sdkconfig.afe` bật đúng các module của `modules:` cho mọi bản dựng sản phẩm, `bench_afe` và profile `modules` của parity, còn `srpipe.dsp.afe.chain` đọc cùng danh sách để dựng bộ vàng `chain_modules` |
 | `stream/frame.yaml` | `common/include/gen_stream.h`, `host/src/srhost/generated/stream.py` | `net_stream`, `svc_report`, `host` |
 | `schema/` | `firmware/components/net_mqtt/include/gen_payload.h` | `svc_report`, `svc_dialog`, `main` |
 | `schema/` | `host/src/srhost/generated/payload.py` | `host` |
@@ -1078,6 +1078,7 @@ firmware/
 ├── sdkconfig.defaults                # chung mọi bản dựng
 ├── sdkconfig.defaults.esp32s3        # riêng chip: PSRAM octal, cache, nhân (§4.5.8)
 ├── sdkconfig.{dev,bench,prod,ci}     # bốn profile
+├── sdkconfig.afe                     # sinh từ modules: của contracts/afe.yaml — module dsp_afe sản phẩm bật
 ├── sdkconfig.secrets                 # ❌ gitignore — mật khẩu broker của bàn thử, nếu có
 ├── partitions.csv                    # §6.1
 ├── dependencies.lock                 # ✅
@@ -1296,7 +1297,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 |---|---|---|
 | Unit trên board | `components/<c>/test_apps/unit/` | `idf.py build flash` + `pytest_*.py` (pytest-embedded) |
 | Unit trên máy tính | `components/<c>/test_apps/host/` | **CMake thường + lớp đệm** `test_apps/host/shim/` (`esp_err.h`, `esp_heap_caps.h`, `esp_log.h`, …), `dl_fft` dựng từ bản C thuần; chạy thêm cả `contracts/golden/` qua bộ so của `test_apps/parity`, phán bằng `pytest_parity.py`; workflow `firmware` chạy mỗi lần push (chốt ở E6-T6). Target `linux` của IDF bị loại: đòi `libbsd-dev` trên máy và kéo cả cổng FreeRTOS vào một component thuần |
-| Parity C ↔ Python | `test_apps/parity/` | đọc `contracts/golden/` trong LittleFS, so theo `tolerance.yaml`; dựng bằng cờ trình biên dịch của `bench` (§3.14), hai lần: mọi module tắt với bộ vàng `chain`, và profile `modules` với bộ vàng của từng module thật |
+| Parity C ↔ Python | `test_apps/parity/` | đọc `contracts/golden/` trong LittleFS, so theo `tolerance.yaml`; dựng bằng cờ trình biên dịch của `bench` (§3.14), hai lần: mọi module tắt với bộ vàng `chain`, và profile `modules` (đúng `firmware/sdkconfig.afe`) với bộ vàng của từng module thật và `chain_modules`, chuỗi với các module ấy, hiệu chuẩn `balance` và số gieo `afe/*` |
 | Chi phí | `test_apps/bench_afe`, `bench_kws`, `bench_mem` | in CSV → lưu ở `docs/measurements/bench/` → `tools/budget.py` → `docs/measurements/budget.md` |
 | Chạy dài | `test_apps/soak/` | 30 phút cho Cửa 5, 8 giờ trước khi báo cáo |
 | Thu dữ liệu | `test_apps/capture/` | đẩy thô về `host/` |
@@ -1461,7 +1462,7 @@ broker khởi động lại là mất `status` `offline` của máy đang tắt.
 | Bộ lệnh mặc định, câu trả lời | `contracts/commands/`, `contracts/responses/` | nướng vào LittleFS |
 | Ngưỡng khớp golden | `contracts/golden/<khối>/tolerance.yaml` | đọc file |
 | Hệ số hiệu chuẩn từng board | NVS `calib/*` (§6.2) | `sys_storage` — **số đo**, không phải hằng số |
-| Tham số số của module `dsp_afe` (tần số cắt, dải, bước học, hằng thời gian, bảng mô hình `vad`) | `contracts/afe.yaml` | `gen_afe.h` · `srpipe.generated.afe`; bản dựng chỉ chọn module bật bằng Kconfig |
+| Tham số số của module `dsp_afe` (tần số cắt, dải, bước học, hằng thời gian, bảng mô hình `vad`), và tập module sản phẩm bật (`modules:`) | `contracts/afe.yaml` | `gen_afe.h` · `srpipe.generated.afe`; bản dựng chỉ chọn module bật bằng Kconfig |
 | Ngưỡng vận hành (`wake`, từ chối lệnh, gain sàn) | NVS `kws/*`, `afe/*`; `afe/*` gieo từ `contracts/afe.yaml`, `kws/*` từ `Kconfig` của `svc_listen` | `SET_CONFIG` qua MQTT |
 | URL broker, máy nhận luồng, credential | NVS `device/*`, giá trị lùi ở `Kconfig` | `sys_storage` |
 | Đường dẫn dữ liệu | `ml/configs/common/paths.yaml` | nạp config |
@@ -1679,6 +1680,7 @@ bằng đo: tiếng nói to ở 10 cm không cắt đỉnh, nền ồn phòng y�
 **Chuỗi rỗng tính là vắng mặt**, và **bộ gieo có số hiệu** (`APP_SEED_VER` so với `sys/seed_ver`) —
 hai luật giữ nguyên từ repo face attendance, cùng lý do: khoá rỗng đọc ra `ESP_OK` làm bỏ qua giá trị
 lùi mà không log nào kêu; một phép đo mới đổi `Kconfig` phải đi tới được thiết bị đã boot một lần.
+`APP_SEED_VER` là `version` của `contracts/afe.yaml`: đổi một số gieo `afe/*` thì tăng nó.
 
 ### 6.3 Ảnh model
 
