@@ -1,0 +1,6 @@
+# Scoring of the ns slot on the scenes of configs/afe/vad.yaml (KEHOACH 3.9, 3.15); what is not here comes from there.
+eval:
+  seed: 20260929
+  snr_db: [20.0, 10.0, 5.0, 0.0]
+  level_dbfs: [-26.0]                 # OM-LSA works on power ratios, so one level serves
+  settle_s: 3.0                       # scored after this, IMCRA's minimum search spanning about 1 s
