@@ -183,18 +183,20 @@ static bin_range_t bins_of(const float band_hz[2])
     return (bin_range_t){.first = bin_of(band_hz[0]), .last = bin_of(band_hz[1])};
 }
 
+// A union, not memcpy: GCC for the ESP32-S3 turns a 4-byte memcpy into a call, ~35 cycles each way.
+typedef union {
+    float f;
+    uint32_t u;
+} float_bits_t;
+
 static uint32_t bits_of(float x)
 {
-    uint32_t b = 0;
-    memcpy(&b, &x, sizeof(b));
-    return b;
+    return ((float_bits_t){.f = x}).u;
 }
 
 static float float_of(uint32_t b)
 {
-    float x = 0.0f;
-    memcpy(&x, &b, sizeof(x));
-    return x;
+    return ((float_bits_t){.u = b}).f;
 }
 
 // frexpf of a positive normal number read off its bits, as newlib's frexpf costs a call per bin.
