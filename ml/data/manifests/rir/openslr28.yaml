@@ -4,7 +4,7 @@ release: RIRS_NOISES, room impulse responses real and simulated, point-source an
 downloaded: 2026-09-27
 license: Apache-2.0
 files:
-  - {name: rirs_noises.zip, url: 'https://www.openslr.org/resources/28/rirs_noises.zip'}
+  - {name: rirs_noises.zip, sha256: 3b50cfde915b3984738169b4beb341e9f6b8062ae4c2076146c5db71c2c05dc7, url: 'https://www.openslr.org/resources/28/rirs_noises.zip'}
 consumed_by: [ns, wake, command]
 notes: >-
   The board simulation convolves speech with the real RIRs (KEHOACH 1.2); OpenSLR publishes no checksum, so

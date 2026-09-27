@@ -4,9 +4,11 @@ hf_dataset: linhtran92/viet_bud500
 release: Bud500 (VietAI), about 500 hours from free public audio (podcasts, books, travel, food), 16 kHz
 downloaded: 2026-09-27
 license: CC-BY-NC-SA-4.0, research only; the restriction follows any model trained on it (KEHOACH 1.4)
-counts: {}
+counts: {utterances: 649158, hours: 462.08, train_hours: 451.41, validation_hours: 5.34, test_hours: 5.33}
 consumed_by: [command]
 notes: >-
   Speakers of the north, the centre and the south, which the dialect variants of lang_vi need to hear
   (KEHOACH 3.12). Gated on Hugging Face with automatic approval. Fetched by ml/scripts/10_prepare.sh
-  speech/bud500, each parquet checked against its LFS sha256.
+  speech/bud500, each parquet checked against its LFS sha256. Hours from the data chunk of every row, all WAV 16 kHz
+  mono 16 bit; the card's 500 hours is rounded up. No speaker ids, so it feeds training only, never a test set
+  (KEHOACH 1.3).
