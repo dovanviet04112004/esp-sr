@@ -1,0 +1,29 @@
+# C dsp_afe with the modules of firmware/sdkconfig.afe against srpipe.dsp.afe.chain (KEHOACH 3.14, E7-T5).
+# hpf, balance, vad and agc match bit for bit on their own; the two FFTs differ in float32 noise, which moves
+# a rounding of pcm by 1 LSB and nothing else. Integer figures must match, level_dbfs within one rounding step.
+# case_neg_* must fall outside these limits.
+tensors:
+  pcm:
+    max_abs: 1.0
+    min_snr_db: 60.0
+  seq:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  doa_deg:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  doa_conf:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  vad:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  level_dbfs:
+    max_abs: 1.0
+    min_snr_db: 0.0
+  gain_db:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  flags:
+    max_abs: 0.0
+    min_snr_db: 0.0
