@@ -90,9 +90,13 @@ def tone_hops(amplitude: float, hops: int) -> np.ndarray:
     return np.rint(amplitude * np.sin(2 * np.pi * 1000.0 * t)).astype(np.int16)
 
 
+# The ns floor learns a steady tone as noise, so the arithmetic of the level is checked without it.
+BEFORE_NS = ("hpf", "balance", "vad")
+
+
 def test_the_level_into_agc_is_the_mean_of_the_microphones_after_the_high_pass() -> None:
     x = tone_hops(3000.0, HOPS)
-    front = score.front_level(x, x, [], None)
+    front = score.front_level(x, x, [], None, BEFORE_NS)
     want_dbfs = 20 * np.log10(3000.0 / np.sqrt(2) / 32768.0)
     assert not front.balanced
     assert abs(front.percentiles_dbfs[1] - want_dbfs) <= 1
@@ -100,10 +104,17 @@ def test_the_level_into_agc_is_the_mean_of_the_microphones_after_the_high_pass()
 
 def test_balance_scales_ch1_before_the_mean() -> None:
     x = tone_hops(3000.0, HOPS)
-    plain = score.front_level(x, x, [], None)
-    halved = score.front_level(x, x, [], np.full(grid.N_BINS, 0.5, dtype=np.complex64))
+    plain = score.front_level(x, x, [], None, BEFORE_NS)
+    halved = score.front_level(x, x, [], np.full(grid.N_BINS, 0.5, dtype=np.complex64), BEFORE_NS)
     assert halved.balanced
     assert abs(plain.percentiles_dbfs[1] - halved.percentiles_dbfs[1] - 20 * np.log10(1 / 0.75)) <= 1
+
+
+def test_the_level_into_agc_is_taken_after_the_product_s_ns_floor() -> None:
+    x = tone_hops(3000.0, HOPS)
+    assert "ns_omlsa" in score.INTO_AGC_MODULES and "agc" not in score.INTO_AGC_MODULES
+    before, after = score.front_level(x, x, [], None, BEFORE_NS), score.front_level(x, x, [], None)
+    assert before.percentiles_dbfs[1] - after.percentiles_dbfs[1] > 6
 
 
 def test_a_board_without_a_balance_file_is_scored_without_balance(tmp_path: Path) -> None:

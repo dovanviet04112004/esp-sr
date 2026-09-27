@@ -150,11 +150,17 @@ def chain_parity(ch0: np.ndarray, ch1: np.ndarray, clean: np.ndarray, gap_offset
     return ParityFigures(compared, skipped, max_abs, over, tolerance, snr_db)
 
 
-def front_level(ch0: np.ndarray, ch1: np.ndarray, gap_offsets: list[int], gains: np.ndarray | None) -> FrontLevel:
+def front_level(
+    ch0: np.ndarray,
+    ch1: np.ndarray,
+    gap_offsets: list[int],
+    gains: np.ndarray | None,
+    modules: tuple[str, ...] = INTO_AGC_MODULES,
+) -> FrontLevel:
     """Run the product chain up to agc over each stretch between gaps, as the board restarts it, skipping warm-up."""
     hop = grid.HOP_SAMPLES
     bounds = [0, *gap_offsets, min(len(ch0), len(ch1))]
-    cfg = ChainConfig(modules=INTO_AGC_MODULES, balance_gains=gains)
+    cfg = ChainConfig(modules=modules, balance_gains=gains)
     levels, speech = [], []
     for start, end in pairwise(bounds):
         chain = Chain(cfg=cfg)
