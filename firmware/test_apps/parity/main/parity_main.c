@@ -6,7 +6,7 @@
 #include "sys_storage.h"
 
 #define GOLDEN_DIR STORAGE_LFS_MOUNT "/golden"
-#define CASE_BYTES_MAX (128 * 1024)
+#define CASE_BYTES_MAX (512 * 1024)
 
 static const struct {
     const char *block;

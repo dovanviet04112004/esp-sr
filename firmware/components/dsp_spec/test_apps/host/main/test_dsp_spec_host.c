@@ -11,7 +11,7 @@
 #define HOPS 64
 #define MEL_BANDS 40
 #define N_CEPS 13
-#define CASE_BYTES_MAX (128 * 1024)
+#define CASE_BYTES_MAX (512 * 1024)
 
 static const struct {
     const char *block;
