@@ -22,6 +22,7 @@
 #include "gen_afe.h"
 #include "gen_array.h"
 #include "gen_grid.h"
+#include "lang_vi.h"
 #include "test_report.h"
 
 #define WARMUP_HOPS 16
@@ -40,6 +41,8 @@
 #define MEL_F_MIN_HZ 20.0f
 #define MEL_F_MAX_HZ 7600.0f
 #define MEL_LOG_FLOOR 1e-6f
+// A command with a number and a symbol: normalize, then g2p in each region, as nhan_task does on a new set.
+#define LANG_LINE "t\xc4\x83ng \xc3\xa2m l\xc6\xb0\xe1\xbb\xa3ng l\xc3\xaan 50%"
 
 typedef struct {
     const char *module;
@@ -354,9 +357,33 @@ static void core1_benches(void *done)
     vTaskDelete(NULL);
 }
 
+static void bench_lang(void)
+{
+    row_t row = {.module = "lang_vi lexicon_entry một lệnh ba vùng lúc nạp bộ lệnh", .core = CORE_NHAN};
+    lang_vi_pron_t pron;
+    timing_t t = {0};
+    for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
+        const uint32_t start = esp_cpu_get_cycle_count();
+        ESP_ERROR_CHECK(lang_vi_lexicon_entry(LANG_LINE, LANG_VI_DIALECT_ALL, &pron));
+        hop_done(&t, h, start);
+    }
+    const unsigned stack_used = BENCH_STACK_BYTES - (unsigned)uxTaskGetStackHighWaterMark(NULL);
+    report(&row, &t);
+    test_report_line("alt lang_vi stack used by the bench task %u B, %u variants", stack_used,
+                     pron.n_variants);
+}
+
 static void core0_benches(void *done)
 {
     bench_mel();
+    xTaskNotifyGive((TaskHandle_t)done);
+    vTaskDelete(NULL);
+}
+
+// Its own task, so the stack high-water mark is lang_vi's and the bench's alone.
+static void lang_bench(void *done)
+{
+    bench_lang();
     xTaskNotifyGive((TaskHandle_t)done);
     vTaskDelete(NULL);
 }
@@ -375,6 +402,7 @@ void app_main(void)
     test_report_line("columns module,core,static_bytes,hot_bytes,cold_bytes,us_mean,us_peak,in_total,fw");
     run_on(core1_benches, "bench_core1", CORE_SACH);
     run_on(core0_benches, "bench_core0", CORE_NHAN);
+    run_on(lang_bench, "bench_lang", CORE_NHAN);
     test_report_line("done");
     test_report_serve();
 }
