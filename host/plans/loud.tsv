@@ -1,0 +1,3 @@
+# E2-T5 headroom: loud speech at 10 cm, recorded at calib/pcm_shift 16 so no peak clips; its peak then says the
+# smallest shift that keeps loud near speech whole. Columns as in levels.tsv.
+Ngồi chính diện, miệng cách giữa hai lỗ micro 10 cm. Thấy 'board connected' thì chờ 3 s, đọc TO đoạn này 2 lần: Sáng nay trời mát, tôi mở cửa sổ, bật quạt nhỏ rồi pha một ấm trà. Chiếc loa trên bàn phát bản nhạc nhẹ, còn con mèo nằm ngủ bên cạnh.	--kind probe --spk {spk} --consent {consent} --distance-cm 10 --doa-deg 90 --duration-s 35 --prompt 'đọc to 10 cm: Sáng nay trời mát, tôi mở cửa sổ, bật quạt nhỏ rồi pha một ấm trà. Chiếc loa trên bàn phát bản nhạc nhẹ, còn con mèo nằm ngủ bên cạnh.'
