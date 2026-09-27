@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "dsp_afe.h"
+#include "dsp_afe/agc.h"
 #include "dsp_afe/balance.h"
 #include "dsp_afe/hpf.h"
 #include "dsp_afe/vad.h"
@@ -52,6 +53,7 @@ static float s_hop[GEN_ARRAY_N_MICS][GEN_GRID_HOP_SAMPLES];
 static int16_t s_interleaved[GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS];
 static dsp_spec_cplx_t s_bins[GEN_ARRAY_N_MICS][GEN_GRID_N_BINS];
 static dsp_spec_cplx_t s_work[GEN_GRID_N_BINS];
+static float s_work_pcm[GEN_GRID_HOP_SAMPLES];
 static dsp_afe_calib_t s_calib;
 static float s_log_mel[MEL_BANDS];
 static uint32_t s_rng = 0x2545F491u;
@@ -204,10 +206,43 @@ static void bench_vad(void)
     report(&row, &t);
 }
 
+static void bench_agc(void)
+{
+    const dsp_afe_agc_config_t cfg = {
+        .target_dbfs = GEN_AFE_AGC_TARGET_DBFS,
+        .gain_min_db = GEN_AFE_AGC_GAIN_MIN_DB,
+        .gain_max_db = GEN_AFE_AGC_GAIN_MAX_DB,
+        .up_db_per_s = GEN_AFE_AGC_UP_DB_PER_S,
+        .down_db_per_s = GEN_AFE_AGC_DOWN_DB_PER_S,
+        .limit_dbfs = GEN_AFE_AGC_LIMIT_DBFS,
+        .lookahead_ms = GEN_AFE_AGC_LOOKAHEAD_MS,
+        .level_tau_s = GEN_AFE_AGC_LEVEL_TAU_S,
+        .level_gate_db = GEN_AFE_AGC_LEVEL_GATE_DB,
+        .level_fall_db_per_s = GEN_AFE_AGC_LEVEL_FALL_DB_PER_S,
+        .release_ms = GEN_AFE_AGC_RELEASE_MS,
+    };
+    row_t row = {.module = "dsp_afe agc", .core = CORE_SACH, .in_total = false};
+    row.hot_bytes = dsp_afe_agc_workspace_bytes(&cfg);
+    void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
+    const size_t before = heap_free();
+    dsp_afe_agc_t *agc = NULL;
+    ESP_ERROR_CHECK(dsp_afe_agc_init(&agc, &cfg, mem, row.hot_bytes));
+    row.static_bytes = before - heap_free();
+    float gain_db = 0.0f;
+    timing_t t = {0};
+    for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
+        memcpy(s_work_pcm, s_hop[0], sizeof(s_work_pcm));
+        const uint32_t start = esp_cpu_get_cycle_count();
+        ESP_ERROR_CHECK(dsp_afe_agc_process(agc, s_work_pcm, true, &gain_db));
+        if (h >= WARMUP_HOPS) { timing_add(&t, start); }
+    }
+    report(&row, &t);
+}
+
 static void bench_chain(void)
 {
     const dsp_afe_config_t cfg = {.input_format = "MM", .spatial = DSP_AFE_SPATIAL_NONE, .calib = &s_calib};
-    row_t row = {.module = "dsp_afe chuỗi (hpf + stft x2 + balance + trộn + istft + vad)",
+    row_t row = {.module = "dsp_afe chuỗi (hpf + stft x2 + balance + trộn + istft + vad + agc)",
                  .core = CORE_SACH,
                  .in_total = true};
     ESP_ERROR_CHECK(dsp_afe_workspace_bytes(&cfg, &row.hot_bytes, &row.cold_bytes));
@@ -263,6 +298,8 @@ static void core1_benches(void *done)
     bench_balance();
     vTaskDelay(1);
     bench_vad();
+    vTaskDelay(1);
+    bench_agc();
     xTaskNotifyGive((TaskHandle_t)done);
     vTaskDelete(NULL);
 }
