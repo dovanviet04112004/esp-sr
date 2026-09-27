@@ -26,6 +26,8 @@ class AgcConfig:
     gain_min_db: float = afe.AGC_GAIN_MIN_DB
     gain_max_db: float = afe.AGC_GAIN_MAX_DB
     level_tau_s: float = afe.AGC_LEVEL_TAU_S
+    level_gate_db: float = afe.AGC_LEVEL_GATE_DB
+    level_fall_db_per_s: float = afe.AGC_LEVEL_FALL_DB_PER_S
     up_db_per_s: float = afe.AGC_UP_DB_PER_S
     down_db_per_s: float = afe.AGC_DOWN_DB_PER_S
     limit_dbfs: float = afe.AGC_LIMIT_DBFS
@@ -36,6 +38,11 @@ class AgcConfig:
 def db_to_amplitude(db: float) -> np.float32:
     """10^(db/20) in double, rounded once to float32, as agc.c computes its constants."""
     return f32(10.0 ** (float(f32(db)) / 20.0))
+
+
+def db_to_power(db: float) -> np.float32:
+    """10^(db/10) in double, rounded once to float32."""
+    return f32(10.0 ** (float(f32(db)) / 10.0))
 
 
 def lookahead_samples(lookahead_ms: float) -> int:
@@ -79,7 +86,9 @@ class Agc:
 
     def __init__(self, cfg: AgcConfig | None = None) -> None:
         cfg = cfg or AgcConfig()
-        if not (cfg.target_dbfs <= 0 and cfg.gain_min_db <= cfg.gain_max_db and cfg.level_tau_s > 0):
+        if not (cfg.target_dbfs <= 0 and cfg.gain_min_db <= cfg.gain_max_db and cfg.level_tau_s > 0) or not (
+            cfg.level_gate_db > 0 and cfg.level_fall_db_per_s >= 0
+        ):
             raise ValueError(f"bad agc configuration {cfg}")
         if not (cfg.up_db_per_s > 0 and cfg.down_db_per_s > 0 and cfg.limit_dbfs <= 0 and cfg.release_ms > 0):
             raise ValueError(f"bad agc configuration {cfg}")
@@ -87,13 +96,16 @@ class Agc:
         self.level_keep = f32(math.exp(-hop_s / float(f32(cfg.level_tau_s))))
         self.up = db_to_amplitude(float(f32(cfg.up_db_per_s)) * hop_s)
         self.down = db_to_amplitude(-float(f32(cfg.down_db_per_s)) * hop_s)
+        self.gate = db_to_power(-cfg.level_gate_db)
+        self.fall = db_to_power(-float(f32(cfg.level_fall_db_per_s)) * hop_s)
         self.gain_min = db_to_amplitude(cfg.gain_min_db)
         self.gain_max = db_to_amplitude(cfg.gain_max_db)
         self.ceiling = db_to_amplitude(cfg.limit_dbfs)
         self.lookahead = lookahead_samples(cfg.lookahead_ms)
         self.release_step = f32(1.0 / (float(f32(cfg.release_ms)) * grid.SAMPLE_RATE_HZ / MS_PER_S))
         self.set_target(cfg.target_dbfs)
-        self.speech_power = self.target_power
+        # Start the level at the target less the most gain, so quiet speech passes the gate at once.
+        self.speech_power = self.target_power / (self.gain_max * self.gain_max)
         self.gain = f32(1.0)
         self.delay = deque([f32(0.0)] * self.lookahead, maxlen=max(self.lookahead, 1))
         self.need = _Window(self.lookahead + 1)
@@ -102,7 +114,7 @@ class Agc:
 
     def set_target(self, target_dbfs: float) -> None:
         """Target speech level in dBFS, square full scale; as NVS afe/agc_target_dbfs sets it."""
-        self.target_power = f32(10.0 ** (float(f32(target_dbfs)) / 10.0))
+        self.target_power = db_to_power(target_dbfs)
 
     def _slow_gain(self, hop: np.ndarray, speech: bool) -> None:
         if not speech:
@@ -111,7 +123,10 @@ class Agc:
         for v in hop:
             energy = energy + v * v
         power = energy / f32(len(hop))
-        self.speech_power = self.level_keep * self.speech_power + (f32(1.0) - self.level_keep) * power
+        if power >= self.gate * self.speech_power:
+            self.speech_power = self.level_keep * self.speech_power + (f32(1.0) - self.level_keep) * power
+        else:
+            self.speech_power = self.fall * self.speech_power
         wanted = self.gain_max
         if self.speech_power > f32(0.0):
             wanted = f32(np.sqrt(self.target_power / self.speech_power))

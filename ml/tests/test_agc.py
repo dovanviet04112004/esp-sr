@@ -42,10 +42,12 @@ def test_a_steady_input_settles_on_the_target_and_stays(input_dbfs: float) -> No
 
 
 def test_a_truly_steady_input_leaves_the_gain_still() -> None:
-    x = np.tile(noise_at(-40.0, 1), 1200)
+    x = np.tile(noise_at(-40.0, 1), 3000)
     _, gains = run(agc.Agc(), x)
     assert gains[-1] == pytest.approx(afe.AGC_TARGET_DBFS + 40.0, abs=0.01)
     assert np.ptp(gains[-200:]) < 1e-3
+    steps = np.diff(gains[-1000:])
+    assert np.all(steps <= 0) or np.all(steps >= 0)
 
 
 def test_the_gain_climbs_and_falls_at_the_plan_rates() -> None:
