@@ -49,33 +49,54 @@ static void fill(const dsp_afe_frame_t *frames, size_t hops, field_t field, floa
     }
 }
 
-static bool run_frames(const gold_tensor_t *input, const gold_tensor_t *reset, dsp_afe_frame_t *frames)
+enum { CONFIG_NS_FLOOR_DB, CONFIG_AGC_TARGET_DBFS, CONFIG_VAD_AGGRESSIVENESS, CONFIG_COUNT };
+
+// A case without gains is a board never calibrated: calib stays NULL and the chain runs without balance.
+static bool read_setup(const void *buf, size_t len, dsp_afe_config_t *cfg, dsp_afe_calib_t *calib)
 {
-    static void *s_hot;
-    static size_t s_hot_bytes;
-    const dsp_afe_config_t cfg = {.input_format = "MM", .spatial = DSP_AFE_SPATIAL_NONE};
-    size_t hot = 0;
-    size_t cold = 0;
-    dsp_afe_t *afe = NULL;
-    if (dsp_afe_workspace_bytes(&cfg, &hot, &cold) != ESP_OK || cold != 0) { return false; }
-    if (s_hot == NULL) {
-        s_hot = malloc(hot);
-        s_hot_bytes = hot;
+    gold_tensor_t config, gains;
+    float settings[CONFIG_COUNT];
+    if (!parity_tensor(buf, len, "config", &config) || !parity_floats(&config, settings, CONFIG_COUNT)) {
+        return false;
     }
-    if (s_hot == NULL || dsp_afe_init(&afe, &cfg, s_hot, s_hot_bytes, NULL, 0) != ESP_OK) { return false; }
-    const int16_t *in = input->data;
-    const uint8_t *resets = reset->data;
-    for (size_t h = 0; h < input->dims[0]; h++) {
-        if (resets[h] != 0) { dsp_afe_reset(afe); }
-        if (dsp_afe_feed(afe, in + h * GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS, 1) != ESP_OK ||
-            dsp_afe_fetch(afe, &frames[h]) != ESP_OK) {
-            return false;
-        }
+    *cfg = (dsp_afe_config_t){
+        .input_format = "MM",
+        .spatial = DSP_AFE_SPATIAL_NONE,
+        .ns_floor_db = settings[CONFIG_NS_FLOOR_DB],
+        .agc_target_dbfs = settings[CONFIG_AGC_TARGET_DBFS],
+        .vad_aggressiveness = (uint8_t)settings[CONFIG_VAD_AGGRESSIVENESS],
+    };
+    if (!parity_tensor(buf, len, "gains", &gains)) { return true; }
+    float pairs[2 * GEN_GRID_N_BINS];
+    if (!parity_floats(&gains, pairs, 2 * GEN_GRID_N_BINS)) { return false; }
+    for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
+        calib->balance[k] = (dsp_spec_cplx_t){pairs[2 * k], pairs[2 * k + 1]};
     }
+    cfg->calib = calib;
     return true;
 }
 
-bool parity_chain(const char *case_name, const void *buf, size_t len)
+static bool run_frames(const dsp_afe_config_t *cfg, const gold_tensor_t *input, const gold_tensor_t *reset,
+                       dsp_afe_frame_t *frames)
+{
+    size_t hot = 0;
+    size_t cold = 0;
+    dsp_afe_t *afe = NULL;
+    if (dsp_afe_workspace_bytes(cfg, &hot, &cold) != ESP_OK || cold != 0) { return false; }
+    void *mem = malloc(hot);
+    bool ok = mem != NULL && dsp_afe_init(&afe, cfg, mem, hot, NULL, 0) == ESP_OK;
+    const int16_t *in = input->data;
+    const uint8_t *resets = reset->data;
+    for (size_t h = 0; ok && h < input->dims[0]; h++) {
+        if (resets[h] != 0) { dsp_afe_reset(afe); }
+        ok = dsp_afe_feed(afe, in + h * GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS, 1) == ESP_OK &&
+             dsp_afe_fetch(afe, &frames[h]) == ESP_OK;
+    }
+    free(mem);
+    return ok;
+}
+
+static bool run_chain(const char *block, const char *case_name, const void *buf, size_t len)
 {
     gold_tensor_t input, reset, want[FIELD_COUNT];
     if (!parity_tensor(buf, len, "input", &input) || !parity_tensor(buf, len, "reset", &reset) ||
@@ -86,19 +107,32 @@ bool parity_chain(const char *case_name, const void *buf, size_t len)
     for (size_t f = 0; f < FIELD_COUNT; f++) {
         if (!parity_tensor(buf, len, kFields[f], &want[f])) { return false; }
     }
+    dsp_afe_config_t cfg;
+    dsp_afe_calib_t calib = {0};
+    if (!read_setup(buf, len, &cfg, &calib)) { return false; }
     const size_t hops = input.dims[0];
     dsp_afe_frame_t *frames = heap_caps_malloc(hops * sizeof(dsp_afe_frame_t), MALLOC_CAP_SPIRAM);
     float *got = heap_caps_malloc(hops * GEN_GRID_HOP_SAMPLES * sizeof(float), MALLOC_CAP_SPIRAM);
     float *ref = heap_caps_malloc(hops * GEN_GRID_HOP_SAMPLES * sizeof(float), MALLOC_CAP_SPIRAM);
-    bool ok = frames != NULL && got != NULL && ref != NULL && run_frames(&input, &reset, frames);
+    bool ok = frames != NULL && got != NULL && ref != NULL && run_frames(&cfg, &input, &reset, frames);
     for (size_t f = 0; ok && f < FIELD_COUNT; f++) {
         const size_t n = f == FIELD_PCM ? hops * GEN_GRID_HOP_SAMPLES : hops;
         ok = parity_floats(&want[f], ref, n);
         fill(frames, hops, (field_t)f, got);
-        if (ok) { parity_report("chain", case_name, kFields[f], ref, got, n); }
+        if (ok) { parity_report(block, case_name, kFields[f], ref, got, n); }
     }
     free(frames);
     free(got);
     free(ref);
     return ok;
+}
+
+bool parity_chain(const char *case_name, const void *buf, size_t len)
+{
+    return run_chain("chain", case_name, buf, len);
+}
+
+bool parity_chain_modules(const char *case_name, const void *buf, size_t len)
+{
+    return run_chain("chain_modules", case_name, buf, len);
 }

@@ -17,3 +17,7 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES dsp_spec dsp_afe sys_storage esp_psram test_report
 )
+# The modules profile builds firmware/sdkconfig.afe, whose chain is contracts/golden/chain_modules.
+if(PARITY_PROFILE STREQUAL "modules")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE PARITY_CHAIN_MODULES=1)
+endif()
