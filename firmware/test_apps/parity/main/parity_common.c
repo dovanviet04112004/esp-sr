@@ -5,7 +5,13 @@
 
 #include "parity.h"
 
+#ifdef ESP_PLATFORM
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#endif
+
 #define SNR_NO_ERROR_DB 999.0
+#define LINE_GAP_MS 2 // lets the USB serial bridge drain between lines
 #define DIR_BYTES 256
 #define NAME_BYTES 256 // struct dirent d_name
 #define PATH_BYTES (DIR_BYTES + 1 + NAME_BYTES)
@@ -53,6 +59,11 @@ void parity_report(const char *block, const char *case_name, const char *tensor,
     }
     const double snr_db = error > 0.0 ? 10.0 * log10(reference / error) : SNR_NO_ERROR_DB;
     printf("PARITY %s %s %s max_abs=%.3e snr_db=%.1f\n", block, case_name, tensor, max_abs, snr_db);
+#ifdef ESP_PLATFORM
+    // Bursts of lines lost bytes on the CH340 over usbipd, and a lost line leaves a tensor unjudged.
+    fflush(stdout);
+    vTaskDelay(pdMS_TO_TICKS(LINE_GAP_MS));
+#endif
 }
 
 unsigned parity_run_block(const char *root, const char *block, parity_runner_t run, parity_reader_t read,
