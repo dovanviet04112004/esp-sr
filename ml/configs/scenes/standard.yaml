@@ -1,0 +1,20 @@
+# The standard labelled scene set of E4-T4 (KEHOACH 1.2, 3.6-3.9): shoebox rooms around the board's two microphones
+# of contracts/array.yaml, a talker and maybe an interferer. python -m srpipe.scenes.room writes interim/scenes/<name>/.
+name: standard
+seed: 20260927
+scenes_per_combination: 8         # each rt60 alone, and each rt60 x interferer kind x snr
+duration_s: 8.0
+lead_s: 1.0                       # silence ahead of the talker, for trackers that learn the room first
+gap_s: 0.3                        # between the talker's utterances
+room_m: {x: [3.0, 7.0], y: [3.0, 6.0], z: [2.5, 3.2]}
+rt60_s: [0.2, 0.4, 0.6]           # 0 builds an anechoic room
+wall_margin_m: 0.5
+array_height_m: [0.7, 1.0]        # on a table
+talker: {distance_m: [0.5, 3.0], height_m: [1.1, 1.7]}
+interferer: {kinds: [noise, talker], min_separation_deg: 60.0, distance_m: [1.0, 3.0], height_m: [0.3, 1.8]}
+snr_db: [20.0, 10.0, 5.0, 0.0]    # active talker over the whole interferer, at ch0
+speech_level_dbfs: -30.0          # active talker at ch0
+active_below_peak_db: 40.0        # a hop of the dry talker counts as speech within this of its loudest hop
+speech: speech/vivos/test/waves   # under raw/: one directory per speaker
+noise: noise/demand               # under raw/: channel 1 of each environment
+max_tries: 500                    # placements drawn for a scene before giving up
