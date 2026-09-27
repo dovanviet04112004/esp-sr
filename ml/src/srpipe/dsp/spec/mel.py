@@ -90,11 +90,14 @@ class Mel:
         if bins.shape != (grid.N_BINS,):
             raise ValueError(f"want {grid.N_BINS} bins, got shape {bins.shape}")
         power = bins.real * bins.real + bins.imag * bins.imag
-        energy = self.filters @ power
-        return np.log(energy + np.float32(self.cfg.log_floor)).astype(np.float32)
+        # Summed bin by bin, as mel.c sums; a BLAS product splits the sum its own way on each CPU.
+        energy = np.cumsum(self.filters * power, axis=-1, dtype=np.float32)[:, -1]
+        floored = (energy + np.float32(self.cfg.log_floor)).astype(np.float64)
+        return np.log(floored).astype(np.float32)
 
     def mfcc(self, log_mel: np.ndarray, n_ceps: int) -> np.ndarray:
         """First n_ceps orthonormal DCT-II coefficients of n_bands log energies."""
         if not 1 <= n_ceps <= self.cfg.n_bands:
             raise ValueError(f"n_ceps {n_ceps} outside 1..{self.cfg.n_bands}")
-        return (self._dct[:n_ceps] @ np.asarray(log_mel, dtype=np.float32)).astype(np.float32)
+        terms = self._dct[:n_ceps] * np.asarray(log_mel, dtype=np.float32)
+        return np.cumsum(terms, axis=-1, dtype=np.float32)[:, -1]
