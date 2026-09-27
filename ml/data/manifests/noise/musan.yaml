@@ -1,0 +1,11 @@
+name: musan
+source_url: https://www.openslr.org/17/
+release: MUSAN, music, speech and noise
+downloaded: 2026-09-27
+license: CC-BY-4.0 for most files; the music part lists its own licenses per file
+files:
+  - {name: musan.tar.gz, url: 'https://www.openslr.org/resources/17/musan.tar.gz'}
+consumed_by: [ns, wake, command]
+notes: >-
+  Noise and music for augmentation and ns; OpenSLR publishes no checksum, so the sha256 of the first download
+  is recorded here.

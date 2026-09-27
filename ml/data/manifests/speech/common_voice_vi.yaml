@@ -1,0 +1,12 @@
+name: common_voice_vi
+source_url: https://mozilladatacollective.com/datasets/cmu5vci3w00agnq07hy4nbauv
+mdc_dataset_id: cmu5vci3w00agnq07hy4nbauv   # Mozilla Data Collective; the terms are accepted once on the website
+release: Common Voice Scripted Speech 27.0 - Vietnamese
+downloaded: 2026-09-27
+license: CC0-1.0
+sha256: {common-voice-scripted-speech-27-0-vietna-b785f6a0.tar.gz: dec3d030eaa3dad9eba59336da72a9e6b4c3aa8119b3ba53ab72a59db6c6b88c}
+counts: {}
+consumed_by: [command, wake]
+notes: >-
+  Fetched by ml/scripts/10_prepare.sh common_voice_vi, which checks the archive against the sha256 the API
+  returns. The terms add that no one may try to identify the speakers.
