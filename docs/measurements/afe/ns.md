@@ -70,8 +70,8 @@ lặp theo vạch 1 690 µs, bốn tổng song song cho làm trơn cùng đa th�
 nghiệm 43 k chu kỳ, IMCRA 114 k, xác suất vắng tiếng 102 k, gain 121 k.
 
 Dự trù ~350 µs của KẾ HOẠCH §3.3 thấp gần năm lần: 257 vạch, mỗi vạch cỡ trăm lệnh float, mỗi lệnh 4–6 chu kỳ. Còn một
-đòn bẩy chưa dùng: `fmaf` (một lệnh `madd.s` thay cho nhân rồi cộng) ở mọi chỗ nhân-cộng, cỡ 25–35%, với bản soi gương
-mô phỏng FMA làm tròn đúng để giữ khớp từng bit.
+đòn bẩy chưa dùng: `fmaf` (một lệnh `madd.s` thay cho nhân rồi cộng) ở mọi chỗ nhân-cộng, cỡ 25–35% 🔬, với bản soi gương
+mô phỏng FMA làm tròn đúng để giữ khớp từng bit. Để dành ở E9-T8: chuỗi hiện dùng 16,2% một bước (`budget.md`).
 
 Trên `main` bản `dev` của board B (`c2f97b5`), `ns` trong chuỗi sản phẩm: heartbeat 5 phút có Wi-Fi và MQTT, 0 tràn DMA,
 0 khung bỏ, RAM nội thấp nhất 36,1 KiB (`ram.md` §3).
