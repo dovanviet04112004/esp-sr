@@ -1,6 +1,7 @@
 #include "app_boot.h"
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdbool.h>
 
 #include "ai_engine.h"
@@ -11,16 +12,23 @@
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "gen_afe.h"
 #include "gen_grid.h"
 #include "gen_topics.h"
 #include "net_mqtt.h"
 #include "sdkconfig.h"
 #include "svc_front.h"
+#include "storage_format.h"
 #include "svc_report.h"
 #include "sys_storage.h"
 
 #define DMA_DESC_NUM 8       // 128 ms of hops outlasts one flash erase (KEHOACH 5.5)
 #define MODEL_SLOT_DEFAULT 0 // model/active_slot absent: models_0
+
+#define APP_SEED_VER GEN_AFE_VERSION // raised in afe.yaml when a seed changes (KEHOACH 6.2)
+
+_Static_assert(sizeof(((dsp_afe_calib_t *)0)->balance) == STORAGE_CALIB_BAL_BYTES,
+               "calib/bal is the balance table");
 
 #if CONFIG_APP_SPEAKER_ENABLE
 #define SPEAKER_FITTED true
@@ -44,6 +52,56 @@ static uint8_t pcm_shift(void)
     if (sys_storage_get_u8(STORAGE_NS_CALIB, STORAGE_KEY_PCM_SHIFT, &shift) == ESP_OK) { return shift; }
     ESP_LOGW(TAG, "calib/pcm_shift absent, using %d", CONFIG_APP_PCM_SHIFT_FALLBACK);
     return CONFIG_APP_PCM_SHIFT_FALLBACK;
+}
+
+static void seed_afe(void)
+{
+    const sys_storage_seed_t seeds[] = {
+        {STORAGE_NS_AFE, STORAGE_KEY_NS_FLOOR_DB, SYS_STORAGE_I8, lrintf(GEN_AFE_NS_FLOOR_DB)},
+        {STORAGE_NS_AFE, STORAGE_KEY_AGC_TARGET_DBFS, SYS_STORAGE_I8, lrintf(GEN_AFE_AGC_TARGET_DBFS)},
+        {STORAGE_NS_AFE, STORAGE_KEY_VAD_MODE, SYS_STORAGE_U8, GEN_AFE_VAD_AGGRESSIVENESS},
+    };
+    const esp_err_t err = sys_storage_seed(APP_SEED_VER, seeds, sizeof(seeds) / sizeof(seeds[0]));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "afe seeds not written (%s), falling back to afe.yaml", esp_err_to_name(err));
+    }
+}
+
+static float afe_i8(const char *key, float fallback)
+{
+    int8_t value = 0;
+    return sys_storage_get_i8(STORAGE_NS_AFE, key, &value) == ESP_OK ? (float)value : fallback;
+}
+
+static uint8_t vad_mode(void)
+{
+    uint8_t mode = 0;
+    return sys_storage_get_u8(STORAGE_NS_AFE, STORAGE_KEY_VAD_MODE, &mode) == ESP_OK
+               ? mode
+               : GEN_AFE_VAD_AGGRESSIVENESS;
+}
+
+// Without a balance table of this format the chain runs without balance, which a board never calibrated
+// needs.
+static const dsp_afe_calib_t *load_calib(void)
+{
+    static dsp_afe_calib_t calib;
+    uint32_t version = 0;
+    uint32_t at = 0;
+    if (sys_storage_get_u32(STORAGE_NS_CALIB, STORAGE_KEY_BAL_VER, &version) != ESP_OK ||
+        version != STORAGE_CALIB_BAL_VERSION ||
+        sys_storage_get_blob(STORAGE_NS_CALIB, STORAGE_KEY_BAL, calib.balance, sizeof(calib.balance)) !=
+            ESP_OK) {
+        ESP_LOGW(TAG, "calib/bal absent or of another format, running without balance");
+        return NULL;
+    }
+    if (sys_storage_get_u32(STORAGE_NS_CALIB, STORAGE_KEY_AEC_DELAY, &calib.aec_delay_samples) != ESP_OK) {
+        calib.aec_delay_samples = 0;
+    }
+    (void)sys_storage_get_u32(STORAGE_NS_CALIB, STORAGE_KEY_BAL_AT, &at);
+    ESP_LOGI(TAG, "calib/bal version %" PRIu32 ", written at %" PRIu32 ", aec delay %" PRIu32 " samples",
+             version, at, calib.aec_delay_samples);
+    return &calib;
 }
 
 static void load_models(void)
@@ -75,7 +133,16 @@ esp_err_t app_boot(void)
     log_heap("audio");
     load_models();
     log_heap("models");
-    const svc_front_config_t front = {.n_channels = drv_audio_channels()};
+    seed_afe();
+    const svc_front_config_t front = {
+        .n_channels = drv_audio_channels(),
+        .calib = load_calib(),
+        .ns_floor_db = afe_i8(STORAGE_KEY_NS_FLOOR_DB, GEN_AFE_NS_FLOOR_DB),
+        .agc_target_dbfs = afe_i8(STORAGE_KEY_AGC_TARGET_DBFS, GEN_AFE_AGC_TARGET_DBFS),
+        .vad_aggressiveness = vad_mode(),
+    };
+    ESP_LOGI(TAG, "afe: ns floor %.0f dB, agc target %.0f dBFS, vad mode %u", (double)front.ns_floor_db,
+             (double)front.agc_target_dbfs, (unsigned)front.vad_aggressiveness);
     ESP_RETURN_ON_ERROR(svc_front_init(&front), TAG, "front end");
     log_heap("front");
 #if CONFIG_NET_STREAM_ENABLE
