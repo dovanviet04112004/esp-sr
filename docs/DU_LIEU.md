@@ -28,7 +28,17 @@ Trên máy còn hai kho tải từ trước cho dự án khác, **chưa nhập**
 | Nhánh | Split | Luật | Seed | sha256 `split.lock` | `SPLIT.md` |
 |---|---|---|---|---|---|
 
-## 3. Bản thu qua board
+## 3. Đặc trưng qua đường mô phỏng board
+
+Mỗi tập một dòng: `python -m srpipe.scenes.device build <file split> <tập>` ghi `processed/<tập>/` (KẾ HOẠCH §1.2), cấu
+hình và sha256 ở `manifest.yaml` của tập. Kho phòng `interim/scenes/device/rooms/` (512 phòng, RT60 đo 0,18 / 0,46 / 0,74 s
+ở p5 / p50 / p95) dựng một lần trong ~1,5 phút với 8 tiến trình.
+
+| Tập | File split | Mẩu | Giờ đặc trưng | Dựng | Cỡ trên đĩa | Ngày |
+|---|---|---|---|---|---|---|
+| `command/vivos_test` | VIVOS test, 19 người nói, lập tay để đo chi phí | 760 | 0,876 | 2,9 phút trên 3 tiến trình, ~8 lần thời gian thực mỗi nhân | 36 MB/giờ đặc trưng, 115 MB/giờ PCM sạch | 27/09 |
+
+## 4. Bản thu qua board
 
 Mỗi phiên một dòng. Mã người nói `spk_NNN`; tên thật chỉ nằm trong bảng ngoài repo (KẾ HOẠCH §1.4).
 

@@ -64,3 +64,10 @@ Chưa phiên nào có tiếng người. Ước lượng 🔬: tiếng nói thư�
 dBFS ở 94 dB SPL, `mic_array.md` §0) ra khoảng −61 dBFS, chuỗi sau `balance` khoảng −72 dBFS, `agc` thêm tối đa 30 dB được
 −42 dBFS, thiếu đích −26 dBFS 16 dB; ở 3 m khoảng −82 dBFS, chỉ trên nền phòng sau `ns` 10 dB. Số thật cần một phép đo tiếng nói trên board: E2-T5
 đo tiếng nói to ở 10 cm để chọn `pcm_shift`, và cùng phiên ấy cho mức vào `agc` của tiếng nói ở các khoảng cách.
+
+**Mô phỏng board cho cùng kết luận** (27/09, E4-T8, `configs/scenes/device.yaml`, `pcm_shift` 16, `calib/bal` của board B):
+760 câu VIVOS test, người nói 56–74 dB SPL ở 1 m, cách 0,3–4 m (trung vị 1,5 m), 89% phiên có nhiễu ở SNR 0–30 dB. Trên
+các bước `vad = 1`: mức vào `agc` p5 / p50 / p95 là −89 / −69 / −55 dBFS, gain `agc` trung vị 26 dB và chạm trần 30 dB ở
+p95, mức ra ước (mức vào + gain) −75 / −48 / −27 dBFS. Chuỗi thiếu đích −26 dBFS **22 dB ở trung vị**; đây là số mô phỏng
+🔬, phép đo tiếng nói thật vẫn là E2-T5. Hệ quả cho đặc trưng: 39% giá trị log-mel của các bước có tiếng nằm trong 1 nat
+trên sàn `log_floor` 1e-6, 88% ở dải 40 (E11-T8).
