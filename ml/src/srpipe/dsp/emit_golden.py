@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from srpipe.dsp.afe import balance, chain, hpf, vad
+from srpipe.dsp.afe import agc, balance, chain, hpf, vad
 from srpipe.dsp.spec import mel, stft
 from srpipe.generated import afe, array, grid
 from srpipe.golden.gold import write_gold
@@ -29,6 +29,10 @@ BALANCE_HOPS = 16
 # One case outlives the 100-hop window of the minimum tracker; the storage partition limits the rest.
 VAD_LONG_HOPS = 160
 VAD_HOPS = 64
+AGC_LONG_HOPS = 128
+AGC_HOPS = 48
+# Every eighth output sample is kept: the storage partition cannot hold them all (TASKS E5-T15).
+AGC_OUT_STEP = 8
 LSB = 1.0 / 32768.0
 MEL_CASES = (
     (mel.MelConfig(n_bands=40, f_min_hz=20.0, f_max_hz=7600.0, log_floor=1e-6), 13),
@@ -336,12 +340,71 @@ def emit_vad(root: Path) -> list[Path]:
     return written
 
 
+def _pcm(x: np.ndarray) -> np.ndarray:
+    return np.clip(np.rint(x * 32768.0), -32768, 32767).astype(np.int16)
+
+
+def _agc_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray, float]]:
+    """(int16 samples, speech flag per hop, target dBFS) per case: quiet speech the gain climbs to, then freezes on,
+    then climbs again; loud speech with bursts to full scale the limiter must hold; noise under a -20 dBFS target."""
+    long_n, n = AGC_LONG_HOPS * grid.HOP_SAMPLES, AGC_HOPS * grid.HOP_SAMPLES
+    quiet_flags = np.ones(AGC_LONG_HOPS, dtype=np.uint8)
+    quiet_flags[64:96] = 0
+    loud = speechlike(rng, n, 0.6)
+    for start in rng.integers(0, n - 64, 6):
+        loud[start : start + 32] = rng.uniform(-1.0, 1.0, 32)
+    noise_flags = (np.arange(AGC_HOPS) % 6 < 4).astype(np.uint8)
+    return [
+        (_pcm(speechlike(rng, long_n, 0.01) + 1e-4 * rng.standard_normal(long_n)), quiet_flags, afe.AGC_TARGET_DBFS),
+        (_pcm(loud), np.ones(AGC_HOPS, dtype=np.uint8), afe.AGC_TARGET_DBFS),
+        (_pcm(0.03 * rng.standard_normal(n)), noise_flags, -20.0),
+    ]
+
+
+def agc_case(
+    pcm: np.ndarray, speech: np.ndarray, target_dbfs: float, heed_speech: bool = True
+) -> dict[str, np.ndarray]:
+    """int16 hops, their speech flags and the target; every AGC_OUT_STEP-th output sample and the gain of each hop."""
+    hops = pcm.reshape(-1, grid.HOP_SAMPLES)
+    control = agc.Agc(agc.AgcConfig(target_dbfs=target_dbfs))
+    outs, gains = [], []
+    for hop, flag in zip(hops, speech, strict=True):
+        out, gain_db = control.process(hop.astype(np.float32) / np.float32(32768.0), bool(flag) and heed_speech)
+        outs.append(out[::AGC_OUT_STEP])
+        gains.append(gain_db)
+    return {
+        "pcm": hops,
+        "speech": speech.astype(np.uint8),
+        "config": np.array([target_dbfs], dtype=np.float32),
+        "out": np.stack(outs).astype(np.float32),
+        "gain_db": np.array(gains, dtype=np.float32),
+    }
+
+
+def emit_agc(root: Path) -> list[Path]:
+    """Three cases, then a negative control computed as if every hop were silence, so the gain never moves."""
+    rng = np.random.default_rng(SEED + 6)
+    written = []
+    for index, (pcm, speech, target) in enumerate(_agc_inputs(rng)):
+        path = root / "agc" / f"case_{index:03d}.gold"
+        write_gold(path, agc_case(pcm, speech, target))
+        written.append(path)
+    n = 32 * grid.HOP_SAMPLES
+    negative = agc_case(
+        _pcm(speechlike(rng, n, 0.01)), np.ones(32, dtype=np.uint8), afe.AGC_TARGET_DBFS, heed_speech=False
+    )
+    path = root / "agc" / "case_neg_000.gold"
+    write_gold(path, negative)
+    written.append(path)
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
     emitted = emit_stft(args.out) + emit_mel(args.out) + emit_chain(args.out) + emit_hpf(args.out)
-    for path in emitted + emit_balance(args.out) + emit_vad(args.out):
+    for path in emitted + emit_balance(args.out) + emit_vad(args.out) + emit_agc(args.out):
         print(path.relative_to(args.out) if path.is_relative_to(args.out) else path)
     return 0
 

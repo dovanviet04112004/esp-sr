@@ -124,3 +124,22 @@ def test_the_vad_negative_control_has_speech_one_hop_late() -> None:
     right = emit_golden.vad_case(case["pcm"].reshape(-1), int(case["config"][0]))["speech"]
     assert np.array_equal(case["speech"][1:], right[:-1])
     assert not np.array_equal(case["speech"], right)
+
+
+def test_committed_agc_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_agc(tmp_path):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
+
+
+def test_the_quiet_agc_case_climbs_then_freezes() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "agc" / "case_000.gold")
+    gain, speech = case["gain_db"], case["speech"].astype(bool)
+    assert np.all(np.diff(gain)[speech[1:]] > 0)
+    assert np.all(np.diff(gain)[~speech[1:]] == 0)
+
+
+def test_the_agc_negative_control_never_moves_its_gain() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "agc" / "case_neg_000.gold")
+    right = emit_golden.agc_case(case["pcm"].reshape(-1), case["speech"], float(case["config"][0]))
+    assert np.all(case["gain_db"] == 0.0) and np.any(right["gain_db"] != 0.0)
