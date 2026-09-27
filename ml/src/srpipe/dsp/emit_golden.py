@@ -24,6 +24,7 @@ SEED = 20260926
 MEL_FRAMES = 8
 CHAIN_HOPS = 16
 CHAIN_RESET_HOP = 8
+CHAIN_MODULES_HOPS = 192
 HPF_HOPS = 16
 BALANCE_HOPS = 16
 # Every vad case outlives the 100-hop window of the minimum tracker.
@@ -134,20 +135,25 @@ def _chain_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray
     ]
 
 
-def chain_case(ch0: np.ndarray, ch1: np.ndarray, reset: np.ndarray) -> dict[str, np.ndarray]:
-    """Interleaved int16 input, the hops to reset before, and every field of the frames the chain gives."""
+def chain_case(ch0: np.ndarray, ch1: np.ndarray, reset: np.ndarray, cfg: chain.ChainConfig) -> dict[str, np.ndarray]:
+    """Interleaved int16 input, the hops to reset before, the afe/* settings (ns floor dB, agc target dBFS, vad
+    mode), calib/bal as re, im pairs when the case has one, and every field of the frames the chain gives."""
     pcm_min, pcm_max = np.iinfo(np.int16).min, np.iinfo(np.int16).max
     mics = np.stack([ch0, ch1], axis=-1)
     interleaved = np.clip(np.rint(mics), pcm_min, pcm_max).astype(np.int16).reshape(reset.size, -1)
-    ch = chain.Chain("MM")
+    ch = chain.Chain("MM", cfg)
     frames = []
     for hop, flag in zip(interleaved, reset, strict=True):
         if flag:
             ch.reset()
         frames.append(ch.process(hop))
+    settings = [cfg.ns_floor_db, cfg.agc_target_dbfs, cfg.vad_aggressiveness]
+    calib = {} if cfg.balance_gains is None else {"gains": _pairs(cfg.balance_gains)}
     return {
         "input": interleaved,
         "reset": reset,
+        "config": np.array(settings, dtype=np.float32),
+        **calib,
         "pcm": np.stack([f.pcm for f in frames]),
         "seq": np.array([f.seq for f in frames], dtype=np.int32),
         "doa_deg": np.array([f.doa_deg for f in frames], dtype=np.int16),
@@ -160,18 +166,79 @@ def chain_case(ch0: np.ndarray, ch1: np.ndarray, reset: np.ndarray) -> dict[str,
 
 
 def emit_chain(root: Path) -> list[Path]:
-    """Four cases through the default facade chain, then a negative control whose output is one sample late."""
+    """Four cases through the facade with every module off, then a negative control whose output is one sample
+    late."""
     rng = np.random.default_rng(SEED + 2)
+    plain = chain.ChainConfig(modules=())
     written = []
     for index, inputs in enumerate(_chain_inputs(rng)):
         path = root / "chain" / f"case_{index:03d}.gold"
-        write_gold(path, chain_case(*inputs))
+        write_gold(path, chain_case(*inputs, plain))
         written.append(path)
     n = CHAIN_HOPS * grid.HOP_SAMPLES
-    negative = chain_case(rng.normal(0, 4000, n), rng.normal(0, 4000, n), np.zeros(CHAIN_HOPS, dtype=np.uint8))
+    negative = chain_case(rng.normal(0, 4000, n), rng.normal(0, 4000, n), np.zeros(CHAIN_HOPS, dtype=np.uint8), plain)
     late = np.concatenate([[0], negative["pcm"].reshape(-1)[:-1]]).astype(np.int16)
     negative["pcm"] = late.reshape(negative["pcm"].shape)
     path = root / "chain" / "case_neg_000.gold"
+    write_gold(path, negative)
+    written.append(path)
+    return written
+
+
+def _chain_modules_inputs(
+    rng: np.random.Generator,
+) -> list[tuple[np.ndarray, np.ndarray, np.ndarray, chain.ChainConfig]]:
+    """(ch0, ch1, reset flags, configuration) per case, through the product's modules: quiet speech with pauses on
+    a board whose ch1 is 11 dB down, calibrated; loud speech with bursts to full scale on a board never calibrated;
+    speech on hum and DC, reset halfway; noise alone under a lower target."""
+    n = CHAIN_MODULES_HOPS * grid.HOP_SAMPLES
+    t = np.arange(n) / grid.SAMPLE_RATE_HZ
+    no_reset = np.zeros(CHAIN_MODULES_HOPS, dtype=np.uint8)
+    with_reset = no_reset.copy()
+    with_reset[CHAIN_MODULES_HOPS // 2] = 1
+    ch1_down = 10 ** (-11.0 / 20.0)
+    pauses = np.repeat(np.arange(CHAIN_MODULES_HOPS) % 64 < 40, grid.HOP_SAMPLES)
+    quiet = speechlike(rng, n, 0.01) * pauses
+    floor = 3e-4 * rng.standard_normal((2, n))
+    loud = speechlike(rng, n, 0.7)
+    for start in rng.integers(0, n - 64, 6):
+        loud[start : start + 32] = rng.uniform(-1.5, 1.5, 32)
+    hum = 0.05 * np.sin(2 * np.pi * 50.0 * t) + 0.02
+    voice = speechlike(rng, n, 0.1)
+    board = chain.ChainConfig(balance_gains=board_like_gains())
+    return [
+        (32768 * (quiet + floor[0]), 32768 * (ch1_down * quiet + floor[1]), no_reset, board),
+        (32768 * loud, 32768 * 0.8 * loud, no_reset, chain.ChainConfig(agc_target_dbfs=-20.0, vad_aggressiveness=3)),
+        (
+            32768 * (voice + hum),
+            32768 * (ch1_down * voice + hum),
+            with_reset,
+            chain.ChainConfig(balance_gains=board_like_gains(), vad_aggressiveness=0),
+        ),
+        (
+            32768 * 0.003 * rng.standard_normal(n),
+            32768 * 0.003 * rng.standard_normal(n),
+            no_reset,
+            chain.ChainConfig(balance_gains=board_like_gains(), agc_target_dbfs=-30.0, vad_aggressiveness=1),
+        ),
+    ]
+
+
+def emit_chain_modules(root: Path) -> list[Path]:
+    """Four cases through the facade with the product's modules, then a negative control that carries calib/bal
+    but was computed without it."""
+    rng = np.random.default_rng(SEED + 7)
+    written = []
+    for index, inputs in enumerate(_chain_modules_inputs(rng)):
+        path = root / "chain_modules" / f"case_{index:03d}.gold"
+        write_gold(path, chain_case(*inputs))
+        written.append(path)
+    n = CHAIN_MODULES_HOPS * grid.HOP_SAMPLES
+    voice = 32768 * speechlike(rng, n, 0.05)
+    no_reset = np.zeros(CHAIN_MODULES_HOPS, dtype=np.uint8)
+    negative = chain_case(voice, 10 ** (-11.0 / 20.0) * voice, no_reset, chain.ChainConfig())
+    negative["gains"] = _pairs(board_like_gains())
+    path = root / "chain_modules" / "case_neg_000.gold"
     write_gold(path, negative)
     written.append(path)
     return written
@@ -400,8 +467,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
-    emitted = emit_stft(args.out) + emit_mel(args.out) + emit_chain(args.out) + emit_hpf(args.out)
-    for path in emitted + emit_balance(args.out) + emit_vad(args.out) + emit_agc(args.out):
+    emitted = emit_stft(args.out) + emit_mel(args.out) + emit_chain(args.out) + emit_chain_modules(args.out)
+    for path in emitted + emit_hpf(args.out) + emit_balance(args.out) + emit_vad(args.out) + emit_agc(args.out):
         print(path.relative_to(args.out) if path.is_relative_to(args.out) else path)
     return 0
 

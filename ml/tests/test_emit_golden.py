@@ -7,8 +7,9 @@ from pathlib import Path
 import numpy as np
 
 from srpipe.dsp import emit_golden
-from srpipe.dsp.afe import balance
+from srpipe.dsp.afe import balance, chain
 from srpipe.dsp.spec import mel, stft
+from srpipe.generated import afe, grid
 from srpipe.golden.gold import read_gold
 
 
@@ -58,11 +59,35 @@ def test_committed_chain_cases_match_a_fresh_emit(tmp_path: Path) -> None:
 def test_the_chain_negative_control_is_one_sample_late() -> None:
     case = read_gold(emit_golden.GOLDEN_ROOT / "chain" / "case_neg_000.gold")
     right = emit_golden.chain_case(
-        case["input"][:, 0::2].reshape(-1), case["input"][:, 1::2].reshape(-1), case["reset"]
+        case["input"][:, 0::2].reshape(-1),
+        case["input"][:, 1::2].reshape(-1),
+        case["reset"],
+        chain.ChainConfig(modules=()),
     )
     got, want = case["pcm"].reshape(-1), right["pcm"].reshape(-1)
     np.testing.assert_array_equal(got[1:], want[:-1])
     assert np.max(np.abs(got.astype(int) - want)) > 1000
+
+
+def test_committed_chain_modules_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_chain_modules(tmp_path):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
+
+
+def test_chain_modules_cases_carry_the_products_settings_and_calib() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "chain_modules" / "case_000.gold")
+    np.testing.assert_array_equal(case["config"], [afe.NS_FLOOR_DB, afe.AGC_TARGET_DBFS, afe.VAD_AGGRESSIVENESS])
+    assert case["gains"].shape == (grid.N_BINS, 2)
+    assert "gains" not in read_gold(emit_golden.GOLDEN_ROOT / "chain_modules" / "case_001.gold")
+
+
+def test_the_chain_modules_negative_control_skipped_its_calib() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "chain_modules" / "case_neg_000.gold")
+    gains = case["gains"][:, 0] + 1j * case["gains"][:, 1]
+    ch0, ch1 = case["input"][:, 0::2].reshape(-1), case["input"][:, 1::2].reshape(-1)
+    right = emit_golden.chain_case(ch0, ch1, case["reset"], chain.ChainConfig(balance_gains=gains))
+    assert np.max(np.abs(case["pcm"].astype(int) - right["pcm"])) > 100
 
 
 def test_committed_hpf_cases_match_a_fresh_emit(tmp_path: Path) -> None:
