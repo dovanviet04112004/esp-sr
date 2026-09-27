@@ -1119,6 +1119,8 @@ firmware/
 ├── models/                           # ❌ gitignore trừ README.md, models.lock.json, */meta.json
 │   └── {ns,wake,command,synth}/{*.espdl, meta.json}
 ├── test_apps/                        # test TÍCH HỢP toàn hệ; unit test nằm trong component
+│   ├── components/test_report/       # dòng kết quả có số thứ tự và CRC32, gửi lại khi máy tính xin (§4.5.7)
+│   ├── test_report.py                # phía máy tính của test_report: kiểm CRC, xin lại dòng thiếu
 │   ├── parity/                       # đọc contracts/golden/, so C với Python; partitions.csv riêng, storage 8 MB
 │   ├── bench_afe/  ├── bench_kws/    # µs trung bình và đỉnh mỗi module → CSV
 │   ├── bench_mem/                    # heap đỉnh, watermark ngăn xếp, RAM tĩnh
@@ -1301,6 +1303,13 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 | Hiệu chuẩn | `test_apps/calib/` | ghi NVS `calib/*` |
 
 Case cần người đứng nói gắn tag `[manual]`; vòng tự động bỏ qua, như repo face attendance.
+
+**Kết quả từ board về máy tính đi qua một kênh tự kiểm.** Cầu CH340 sau usbipd có lúc rơi byte (`parity.md`), nên
+`test_apps/components/test_report` in mỗi dòng kết quả thành `<tag> <số thứ tự> <nội dung> crc=<8 hex>`, CRC32 lấy trên
+`<số thứ tự> <nội dung>` như `zlib.crc32`, và giữ mọi dòng. Dòng cuối là `end <n> lines`; sau đó board đọc lệnh
+`resend <số> …` hay `resend end` trên cổng nối tiếp và in lại đúng các dòng ấy. `test_apps/test_report.py` phía máy tính bỏ
+dòng sai CRC, xin lại dòng thiếu tới khi đủ `n` dòng, rồi mới chấm; log của bản dựng máy tính đọc cùng một khuôn. `parity`
+và `bench_afe` dùng kênh này.
 
 #### 4.5.8 Bốn profile build
 
