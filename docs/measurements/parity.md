@@ -21,6 +21,9 @@ lại trong thư mục build, qua `python3 pytest_parity.py --report <file>`.
 | `vad` — mức sáu dải, quyết định thô, `speech` sau kéo dài; máy tính và board B | 4 | 0 | — | mức ≤ 1e-6, ≥ 120 dB; quyết định khớp tuyệt đối | `speech` trễ một bước: 1 → đỏ | a934a6a | 27/09 |
 | `agc` — mọi mẫu ra, `gain_db` mỗi bước; máy tính và board B | 3 | 0 (ra), 4,8e-7 dB (`gain_db`) | 143,2 (`gain_db`) | ra ≤ 1e-6, ≥ 120 dB; `gain_db` ≤ 1e-5 | bỏ qua cờ nói: 1,5e-3, 19,4 dB → đỏ | a934a6a | 27/09 |
 | `ns_omlsa` — gain mỗi vạch và xác suất có tiếng nói mỗi bước; máy tính và board B | 5 | 0 | — | ≤ 1e-6, ≥ 120 dB | hệ số làm trơn không bình phương ở bước 16 ms: 0,75, 13,1 dB → đỏ | 5636ed9 | 27/09 |
+| `g2p` — mã trả về và đơn vị của 16 742 âm tiết hợp lệ và 38 cụm từ, mỗi vùng một lượt; máy tính và board B | 29 | 0 | — | khớp tuyệt đối | `d` giọng Nam đọc z: 1 → đỏ | d259771 | 27/09 |
+| `normalize` — mã trả về và từng byte ra của 64 đầu vào; máy tính và board B | 1 | 0 | — | khớp tuyệt đối | 105 đọc giọng Nam: 120 → đỏ | d259771 | 27/09 |
+| `lexicon` — mã trả về và mọi trường `lang_vi_pron_t` của 27 dòng; máy tính và board B | 1 | 0 | — | khớp tuyệt đối | giọng Nam giữ ngã của nguyễn: 1 → đỏ | d259771 | 27/09 |
 
 ## Bản tham chiếu Python: STFT phân tích rồi tổng hợp (E6-T1)
 
@@ -95,6 +98,15 @@ nghịch đảo căn là của riêng module, hằng số dựng bằng phép t�
 bit** cả gain lẫn xác suất ở cả năm ca. Đối chứng âm giữ hệ số làm trơn của bài ở 8 ms mà không bình phương ở bước 16 ms,
 lỗi dễ mắc nhất khi đem bài sang lưới này: đỏ.
 
+## `lang_vi` (E11-T4)
+
+Ba khối, một cho mỗi hàm. `g2p` có một ca cho mỗi âm đầu (cộng ca không âm đầu), gồm mọi âm tiết mà chính tả tiếng Việt
+dựng được trên âm đầu ấy, mỗi âm tiết đọc theo ba vùng, và một ca cụm từ có nhãn: chính tả không dựng được, dấu rời, UTF-8
+hỏng, cách đọc dài quá `LANG_VI_UNITS_MAX`. `normalize` gồm dấu rời theo cả hai thứ tự, số, ký hiệu, từ điển, tràn số chữ
+và tràn đệm ra. `lexicon` gồm bộ lệnh mặc định và các dòng có nhãn với mọi mặt nạ. Luật là rời rạc nên ngưỡng bằng 0.
+Bản C chép từng bước của `srpipe.lang` trên cùng bảng sinh từ `contracts/lang_vi.yaml`, và khớp ngay lượt đầu, trên máy
+tính và trên board B ở cả hai bản dựng của `make parity-board`.
+
 ## Chuỗi với các module sản phẩm (E7-T5)
 
 `chain_modules`: mặt tiền dựng với đúng các module `firmware/sdkconfig.afe` bật (`hpf`, `balance`, `ns_omlsa`, `vad`, `agc`; `ns` từ E9-T1), mỗi ca
@@ -109,9 +121,9 @@ nhỏ (tín hiệu ra chỉ khoảng −60 dBFS), mọi trường số nguyên k
 
 ## Chỗ chứa bộ vàng
 
-App parity có bảng phân vùng riêng (KẾ HOẠCH §4.3) với `storage` 8 MB. Bộ vàng hiện 6 087 200 B, 6 209 536 B tính theo
-khối 4 KB của LittleFS, 74% phân vùng; mọi ca giữ đủ độ dài và đủ mẫu, ca lớn nhất 483 KB (`ns_omlsa`, 240 bước công suất
-và gain) trong bộ đệm đọc 512 KB.
+App parity có bảng phân vùng riêng (KẾ HOẠCH §4.3) với `storage` 8 MB. Bộ vàng hiện 6 624 992 B, 6 848 512 B tính theo
+khối 4 KB của LittleFS, 82% phân vùng; ba khối của `lang_vi` thêm 538 756 B. Mọi ca giữ đủ độ dài và đủ mẫu, ca lớn nhất
+483 KB (`ns_omlsa`, 240 bước công suất và gain) trong bộ đệm đọc 512 KB.
 
 ## Bộ vàng không phụ thuộc máy
 

@@ -66,6 +66,10 @@ còn ~27 KB, còn `aec` + `bss` **không vừa** nếu không dùng đường l�
 
 Số của E5-T6 là **sàn**: thân task chưa có `dsp_afe`, `wake`, MQTT. Chưa đặt biên; E14-T3 đo lại khi đủ việc.
 
+`lang_vi_lexicon_entry` chạy trong `nhan_task` mỗi lần đổi bộ lệnh (§5.3 `q_cmdset`). Một task riêng của `bench_afe` chỉ
+làm vòng đo quanh hàm ấy dùng hết **2 844 B** ngăn xếp (`d259771`, profile `bench`), trong đó 1 KB là 256 mục chữ đã ghép
+và 256 B là đệm chuẩn hoá; `nhan_task` cấp 8 192 B.
+
 ## 3. Heap sau boot (E5-T11)
 
 | Mốc | Heap nội còn B | Mảnh liền lớn nhất B | PSRAM còn B | Profile | Ngày |
