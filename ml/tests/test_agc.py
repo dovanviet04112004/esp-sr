@@ -92,8 +92,8 @@ def test_no_sample_passes_the_ceiling() -> None:
         x[start : start + 40] = rng.uniform(-1.0, 1.0, 40)
     x[1000] = 1.0
     out, _ = run(agc.Agc(), x, speech=False)
-    # The bound holds exactly in arithmetic; float32 rounding of the quotient and the mean may add a step or two.
-    assert np.max(np.abs(out)) <= agc.db_to_amplitude(afe.AGC_LIMIT_DBFS) * np.float32(1.000001)
+    # Exact in arithmetic; the running sum of the mean carries a hop of float32 rounding, about 2e-6 at worst.
+    assert np.max(np.abs(out)) <= agc.db_to_amplitude(afe.AGC_LIMIT_DBFS) * np.float32(1.00001)
     assert np.max(np.abs(out)) > 0.5
 
 

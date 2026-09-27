@@ -49,35 +49,50 @@ def lookahead_samples(lookahead_ms: float) -> int:
     return int(np.rint(f32(lookahead_ms) * f32(grid.SAMPLE_RATE_HZ) / f32(MS_PER_S)))
 
 
-class _Window:
-    """The last n values with a count of those under 1: a window of ones needs no min and no sum."""
+class _SlidingMin:
+    """Minimum of the last n values, from a deque of (index, value) whose values rise from front to back: O(1) per
+    push on average, and the same minimum as a scan since min rounds nothing."""
+
+    def __init__(self, n: int) -> None:
+        self.n = n
+        self.count = 0
+        self.rising: deque[tuple[int, np.float32]] = deque()
+
+    def push(self, v: np.float32) -> np.float32:
+        while self.rising and self.rising[-1][1] >= v:
+            self.rising.pop()
+        self.rising.append((self.count, v))
+        if self.rising[0][0] <= self.count - self.n:
+            self.rising.popleft()
+        self.count += 1
+        # The window starts full of ones, so until n pushes its minimum is at most 1.
+        return min(self.rising[0][1], f32(1.0)) if self.count < self.n else self.rising[0][1]
+
+
+class _BoxMean:
+    """Mean of the last n values, all ones at first: a running sum, summed afresh from oldest to newest at each hop
+    so rounding cannot build up, and exactly 1 while every value is 1."""
 
     def __init__(self, n: int) -> None:
         self.values = deque([f32(1.0)] * n, maxlen=n)
         self.under_one = 0
+        self.total = f32(n)
 
-    def push(self, v: np.float32) -> None:
-        if self.values[0] < f32(1.0):
+    def resum(self) -> None:
+        total = f32(0.0)
+        for v in self.values:
+            total = total + v
+        self.total = total
+
+    def push(self, v: np.float32) -> np.float32:
+        old = self.values[0]
+        if old < f32(1.0):
             self.under_one -= 1
         self.values.append(v)
         if v < f32(1.0):
             self.under_one += 1
-
-    def minimum(self) -> np.float32:
-        if self.under_one == 0:
-            return f32(1.0)
-        low = self.values[0]
-        for v in self.values:
-            low = min(low, v)
-        return low
-
-    def mean(self) -> np.float32:
-        if self.under_one == 0:
-            return f32(1.0)
-        total = f32(0.0)
-        for v in self.values:
-            total = total + v
-        return total / f32(len(self.values))
+        self.total = (self.total - old) + v
+        return f32(1.0) if self.under_one == 0 else self.total / f32(len(self.values))
 
 
 class Agc:
@@ -108,8 +123,8 @@ class Agc:
         self.speech_power = self.target_power / (self.gain_max * self.gain_max)
         self.gain = f32(1.0)
         self.delay = deque([f32(0.0)] * self.lookahead, maxlen=max(self.lookahead, 1))
-        self.need = _Window(self.lookahead + 1)
-        self.held = _Window(self.lookahead + 1)
+        self.need = _SlidingMin(self.lookahead + 1)
+        self.held = _BoxMean(self.lookahead + 1)
         self.last_held = f32(1.0)
 
     def set_target(self, target_dbfs: float) -> None:
@@ -140,18 +155,19 @@ class Agc:
         """One hop scaled and limited, lagging by the look-ahead, and the slow gain applied to it in dB."""
         x = np.asarray(hop, dtype=np.float32)
         self._slow_gain(x, speech)
+        self.held.resum()
         out = np.empty_like(x)
         for i, v in enumerate(x):
             s = self.gain * v
             magnitude = abs(s)
-            self.need.push(self.ceiling / magnitude if magnitude > self.ceiling else f32(1.0))
-            held = min(self.need.minimum(), self.last_held + self.release_step)
+            lowest = self.need.push(self.ceiling / magnitude if magnitude > self.ceiling else f32(1.0))
+            held = min(lowest, self.last_held + self.release_step)
             self.last_held = held
-            self.held.push(held)
+            mean = self.held.push(held)
             if self.lookahead:
                 delayed = self.delay[0]
                 self.delay.append(s)
             else:
                 delayed = s
-            out[i] = delayed * self.held.mean()
+            out[i] = delayed * mean
         return out, f32(20.0) * np.log10(self.gain)
