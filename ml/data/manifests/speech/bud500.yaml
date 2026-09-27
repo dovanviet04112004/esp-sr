@@ -1,0 +1,12 @@
+name: bud500
+source_url: https://huggingface.co/datasets/linhtran92/viet_bud500
+hf_dataset: linhtran92/viet_bud500
+release: Bud500 (VietAI), about 500 hours from free public audio (podcasts, books, travel, food), 16 kHz
+downloaded: 2026-09-27
+license: CC-BY-NC-SA-4.0, research only; the restriction follows any model trained on it (KEHOACH 1.4)
+counts: {}
+consumed_by: [command]
+notes: >-
+  Speakers of the north, the centre and the south, which the dialect variants of lang_vi need to hear
+  (KEHOACH 3.12). Gated on Hugging Face with automatic approval. Fetched by ml/scripts/10_prepare.sh
+  speech/bud500, each parquet checked against its LFS sha256.
