@@ -132,6 +132,10 @@ calib-flash: ## Flash test_apps/calib, the console that stores NVS calib/* (E2-T
 calib-write: ## Write a balance file to the board: make calib-write CSV=docs/measurements/calib/<board>_balance.csv
 	cd host && uv run --extra score python -m srhost.calib write ../$(CSV) --port $(PORT)
 
+calib-shift: ## Store NVS calib/pcm_shift through test_apps/calib: make calib-shift SHIFT=13 (E2-T5)
+	@test -n "$(SHIFT)" || { echo "usage: make calib-shift SHIFT=<8..16>"; exit 1; }
+	cd host && uv run --extra score python -m srhost.calib shift $(SHIFT) --port $(PORT)
+
 # broker and host
 broker-up: ## Start the bench MQTT broker (needs deploy/.env and deploy/emqx/users.csv)
 	@test -f deploy/.env || { echo "copy deploy/.env.example to deploy/.env and fill it"; exit 1; }

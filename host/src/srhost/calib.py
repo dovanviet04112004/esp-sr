@@ -1,9 +1,9 @@
 """Estimate balance from frontal white noise sessions, check it across placements, write it to a board (KEHOACH 3.4).
 
-estimate pools the sessions with srpipe.dsp.afe.balance, checks each placement against gains estimated from
-the others, and only then saves docs/measurements/calib/<board>_balance.csv. write sends that file to the
-console of firmware/test_apps/calib, which stores NVS calib/bal and reads back a CRC32 compared here.
-Run: uv run --extra score python -m srhost.calib estimate <session> <session>... | write <csv> --port <tty>
+estimate pools the sessions with srpipe.dsp.afe.balance, checks each placement against gains estimated from the others,
+then saves docs/measurements/calib/<board>_balance.csv. write and shift send calib/bal or calib/pcm_shift to the console
+of firmware/test_apps/calib, which stores them in NVS and reads them back, the balance as a CRC32 compared here.
+Run: python -m srhost.calib estimate <session>... | write <csv> --port <tty> | shift <n> --port <tty> (--extra score)
 """
 
 from __future__ import annotations
@@ -190,6 +190,21 @@ def write_main(args: argparse.Namespace) -> int:
     return 0
 
 
+def shift_main(args: argparse.Namespace) -> int:
+    port = serial.Serial(args.port, BAUD, timeout=0.1)
+    try:
+        read_until(port, PROMPT, READY_TIMEOUT_S)
+        reply = command(port, f"shift set {args.shift}")
+    finally:
+        port.close()
+    print(f"board: {reply}")
+    if reply != f"ok shift {args.shift}":
+        print(f"calib: the board holds a different shift than {args.shift}")
+        return 3
+    print(f"calib/pcm_shift written and read back: {args.shift}; label sessions with --pcm-shift {args.shift}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="action", required=True)
@@ -199,9 +214,13 @@ def main(argv: list[str] | None = None) -> int:
     wr = sub.add_parser("write", help="send a balance file to test_apps/calib and verify it")
     wr.add_argument("csv", type=Path)
     wr.add_argument("--port", required=True, help="serial port of the board, e.g. /dev/ttyUSB0")
+    sh = sub.add_parser("shift", help="store calib/pcm_shift on the board through test_apps/calib (E2-T5)")
+    sh.add_argument("shift", type=int, help="right shift of each 32-bit slot, as drv_audio applies it")
+    sh.add_argument("--port", required=True, help="serial port of the board, e.g. /dev/ttyUSB0")
     args = parser.parse_args(argv)
+    actions = {"estimate": estimate_main, "write": write_main, "shift": shift_main}
     try:
-        return estimate_main(args) if args.action == "estimate" else write_main(args)
+        return actions[args.action](args)
     except (ConfigError, OSError, ValueError, RuntimeError, TimeoutError, serial.SerialException) as err:
         print(f"calib: {err}", file=sys.stderr)
         return 2
