@@ -1,10 +1,11 @@
 name: vlsp
 source_url: https://huggingface.co/datasets/doof-ferb/vlsp2020_vinai_100h
 hf_dataset: doof-ferb/vlsp2020_vinai_100h
-release: VLSP 2020 ASR, the 100 hours released by VinAI, as re-packed in parquet on Hugging Face
+release: VinBigData-VLSP2020-100h (about 20 hours read, 80 spontaneous, transcribed by hand at 96%), parquet mirror
 downloaded: 2026-09-27
-license: CC-BY-4.0 as the Hugging Face card states; VLSP itself asks for registration, its terms are still to check
-counts: {}
+license: CC-BY-4.0 as the mirror states, openscience.vn lists CC0; VinBigData's announcement names none, so CC BY 4.0 holds
+counts: {utterances: 56427, hours: 101.38}
 consumed_by: [command]
 notes: >-
-  Fetched by ml/scripts/10_prepare.sh speech/vlsp, each parquet checked against its LFS sha256.
+  Fetched by ml/scripts/10_prepare.sh speech/vlsp, each parquet checked against its LFS sha256. Hours from the
+  decoded audio of every row, WAV at 16 kHz. No speaker ids, so training only, never a test set (KEHOACH 1.3).
