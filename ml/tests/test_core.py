@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import io
 from datetime import date
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
+import soundfile as sf
 import yaml
 
 from srpipe.core import audio_io, config, run_dir, seed
@@ -80,3 +84,24 @@ def test_wav_round_trip_and_rate_check(tmp_path: Path) -> None:
     audio_io.write_wav(path, x, rate_hz=8000)
     with pytest.raises(ValueError):
         audio_io.read_wav(path)
+
+
+def _wav_bytes(x: np.ndarray, rate_hz: int) -> bytes:
+    buffer = io.BytesIO()
+    sf.write(buffer, x, rate_hz, format="WAV", subtype="PCM_16")
+    return buffer.getvalue()
+
+
+def test_items_come_from_files_and_parquet_rows_at_the_grid_rate(tmp_path: Path) -> None:
+    tone = 0.25 * np.sin(2 * np.pi * 440.0 * np.arange(4800) / 48000.0)
+    rows = [{"bytes": _wav_bytes(tone * (k + 1) / 4, 48000), "path": None} for k in range(4)]
+    table = pa.table({"audio": rows, "transcription": ["a", "b", "c", "d"]})
+    pq.write_table(table, tmp_path / "corpus.parquet", row_group_size=3)
+    audio_io.write_wav(tmp_path / "one.wav", np.full((160, 2), 0.5))
+    reader = audio_io.ItemReader(tmp_path)
+    assert reader.read("one.wav").shape == (160,)
+    third, first = reader.read("corpus.parquet#3"), reader.read("corpus.parquet#0")
+    assert third.shape == (1600,)
+    assert abs(np.sqrt(np.mean(third[400:1200] ** 2)) / np.sqrt(np.mean(first[400:1200] ** 2)) - 4.0) < 0.01
+    with pytest.raises(IndexError):
+        reader.read("corpus.parquet#4")
