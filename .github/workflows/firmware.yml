@@ -31,7 +31,7 @@ jobs:
         run: |
           . "$IDF_PATH/export.sh"
           cd firmware
-          idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.ci" build
+          idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.afe;sdkconfig.ci" build
           idf.py size
 
       - name: dsp_spec and dsp_afe on the host, and C against Python on every golden case

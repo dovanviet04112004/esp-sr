@@ -8,9 +8,9 @@ set(COMPONENTS main dsp_spec dsp_afe sys_storage test_report)
 set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/../../sdkconfig.defaults.esp32s3"
                        "${CMAKE_CURRENT_LIST_DIR}/../../sdkconfig.bench"
                        "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults")
-# idf.py -D PARITY_PROFILE=modules adds sdkconfig.modules, which turns on the modules that are real.
-if(DEFINED PARITY_PROFILE)
-    list(APPEND SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.${PARITY_PROFILE}")
+# idf.py -D PARITY_PROFILE=modules turns on the modules the product turns on (firmware/sdkconfig.afe).
+if(PARITY_PROFILE STREQUAL "modules")
+    list(APPEND SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/../../sdkconfig.afe")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
