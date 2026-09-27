@@ -870,7 +870,10 @@ biên dịch.
 mỗi tensor một bản ghi — tên 32 B, `dtype` u32 (0 `f32`, 1 `i8`, 2 `i32`, 3 `u8`, 4 `i16`), `ndim`,
 `dims` 4 × u32, `nbytes`, dữ liệu đệm bội 4 B. `ml/src/srpipe/golden/gold.py` là chỗ **duy nhất** giữ
 hàm ghi và hàm đọc. `test_apps/parity` nướng cả cây `contracts/golden/` vào phân vùng `storage` bằng
-`littlefs_create_partition_image(... FLASH_IN_PROJECT)`.
+`littlefs_create_partition_image(... FLASH_IN_PROJECT)`, theo **bảng phân vùng riêng** của app ấy
+(`test_apps/parity/partitions.csv`): `nvs` đúng chỗ và đúng cỡ như §6.1 để hiệu chuẩn và khoá trên board còn nguyên, app
+ở chỗ `ota_0`, `storage` 8 MB ở chỗ `ota_1` và các khe model. `storage` 1,75 MB của §6.1 đã đầy 91% sau bốn module của
+E7; bộ vàng của E8–E10 cần gấp nhiều lần.
 
 **File sinh ra không sửa tay.** CI chạy lại generator rồi `git diff --exit-code`.
 
@@ -1116,7 +1119,7 @@ firmware/
 ├── models/                           # ❌ gitignore trừ README.md, models.lock.json, */meta.json
 │   └── {ns,wake,command,synth}/{*.espdl, meta.json}
 ├── test_apps/                        # test TÍCH HỢP toàn hệ; unit test nằm trong component
-│   ├── parity/                       # đọc contracts/golden/, so C với Python
+│   ├── parity/                       # đọc contracts/golden/, so C với Python; partitions.csv riêng, storage 8 MB
 │   ├── bench_afe/  ├── bench_kws/    # µs trung bình và đỉnh mỗi module → CSV
 │   ├── bench_mem/                    # heap đỉnh, watermark ngăn xếp, RAM tĩnh
 │   ├── soak/                         # chạy dài, đếm khung mất, theo dõi heap
@@ -1698,7 +1701,7 @@ trả `ESP_ERR_INVALID_VERSION` và không nạp. Không có chốt này, đổi
 |---|---|---|
 | `/lfs/cmd/set.json` | bộ lệnh đang dùng, theo `command_set.schema.json` | `down/commands` tới; ghi `set.json.tmp` rồi đổi tên — chống mất điện |
 | `/lfs/resp/vi.json` | câu trả lời: id → chữ, id → tên mẩu | nướng lúc dựng; đổi qua OTA |
-| `/lfs/golden/**` | vector vàng | chỉ trong ảnh của `test_apps/parity` |
+| `/lfs/golden/**` | vector vàng | chỉ trong ảnh của `test_apps/parity`, phân vùng `storage` 8 MB của bảng riêng app ấy (§4.3) |
 
 **Không ghi log hay hàng đợi offline xuống flash.** Số liệu mất được: mất mạng thì mất số liệu của
 khoảng ấy, và `heartbeat` kế tiếp khai bộ đếm. Ghi theo nhịp vừa mòn flash vừa đóng băng nhân 1
