@@ -64,6 +64,12 @@ def test_level_and_snr_are_the_ones_asked_for(raw_root: Path) -> None:
     assert scene["labels"]["snr_db"] == 5.0
 
 
+def test_the_measured_rt60_is_the_target_within_tolerance(raw_root: Path) -> None:
+    cfg = small(rt60_s=[0.5])
+    labels = room.build_scene(cfg, raw_root, 0)["labels"]
+    assert abs(labels["rt60_measured_s"] / 0.5 - 1.0) <= cfg["rt60_tolerance"]
+
+
 def test_an_interferer_sits_apart_from_the_talker(raw_root: Path) -> None:
     cfg = small(rt60_s=[0.0])
     for index in range(len(room.combinations(cfg))):

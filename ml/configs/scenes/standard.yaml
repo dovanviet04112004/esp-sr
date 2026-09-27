@@ -8,6 +8,8 @@ lead_s: 1.0                       # silence ahead of the talker, for trackers th
 gap_s: 0.3                        # between the talker's utterances
 room_m: {x: [3.0, 7.0], y: [3.0, 6.0], z: [2.5, 3.2]}
 rt60_s: [0.2, 0.4, 0.6]           # 0 builds an anechoic room
+rt60_tolerance: 0.1               # measured RT60 within 10% of the target, refitting the design RT60
+rt60_fit_rounds: 3
 wall_margin_m: 0.5
 array_height_m: [0.7, 1.0]        # on a table
 talker: {distance_m: [0.5, 3.0], height_m: [1.1, 1.7]}

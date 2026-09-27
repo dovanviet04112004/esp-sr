@@ -94,11 +94,9 @@ def place(cfg: dict, rng: np.random.Generator, with_interferer: bool) -> Placeme
     raise RuntimeError(f"no placement fits after {cfg['max_tries']} tries")
 
 
-def images(p: Placement, rt60_s: float, signals: list[np.ndarray]) -> tuple[np.ndarray, float | None]:
-    """Each source's image at ch0 and ch1, shaped (sources, 2, samples of the first signal), and the RT60 measured on
-    the talker's RIR at ch0; rt60_s 0 is an anechoic room."""
-    if rt60_s > 0:
-        absorption, max_order = pra.inverse_sabine(rt60_s, p.room_m, c=array.SPEED_OF_SOUND_M_S)
+def _room(p: Placement, design_rt60_s: float, signals: list[np.ndarray]) -> pra.ShoeBox:
+    if design_rt60_s > 0:
+        absorption, max_order = pra.inverse_sabine(design_rt60_s, p.room_m, c=array.SPEED_OF_SOUND_M_S)
         room = pra.ShoeBox(p.room_m, fs=FS, materials=pra.Material(absorption), max_order=max_order)
     else:
         room = pra.ShoeBox(p.room_m, fs=FS, max_order=0)
@@ -107,8 +105,26 @@ def images(p: Placement, rt60_s: float, signals: list[np.ndarray]) -> tuple[np.n
     for position, signal in zip(sources, signals, strict=True):
         room.add_source(position, signal=signal)
     room.add_microphone_array(p.mics_m)
-    premix = room.simulate(return_premix=True)[:, :, : len(signals[0])]
+    room.compute_rir()
+    return room
+
+
+def images(p: Placement, rt60_s: float, signals: list[np.ndarray], cfg: dict) -> tuple[np.ndarray, float | None]:
+    """Each source's image at ch0 and ch1, shaped (sources, 2, samples of the first signal), and the RT60 measured on
+    the talker's RIR at ch0; rt60_s 0 is an anechoic room.
+
+    Sabine's formula undershoots what the image method rings for, so the design RT60 is scaled by target over measured
+    until the measured one is within rt60_tolerance of the target, at most rt60_fit_rounds rooms."""
+    design = rt60_s
+    room = _room(p, design, signals)
     measured = pra.experimental.measure_rt60(room.rir[0][0], fs=FS) if rt60_s > 0 else None
+    for _ in range(cfg["rt60_fit_rounds"] if rt60_s > 0 else 0):
+        if abs(measured / rt60_s - 1.0) <= cfg["rt60_tolerance"]:
+            break
+        design *= rt60_s / measured
+        room = _room(p, design, signals)
+        measured = pra.experimental.measure_rt60(room.rir[0][0], fs=FS)
+    premix = room.simulate(return_premix=True)[:, :, : len(signals[0])]
     return premix, measured
 
 
@@ -157,7 +173,7 @@ def build_scene(cfg: dict, raw_root: Path, index: int) -> dict:
         noise, source = noise_piece(sorted((raw_root / cfg["noise"]).glob("*/ch01.wav")), rng, n)
         signals.append(noise)
         interferer = {"kind": kind, "source": source}
-    per_source, measured = images(p, rt60_s, signals)
+    per_source, measured = images(p, rt60_s, signals, cfg)
     active = active_hops(talker_dry, cfg["active_below_peak_db"])
     talker_power = np.mean(per_source[0, 0, : len(active) * HOP].reshape(-1, HOP)[active] ** 2)
     per_source *= 10 ** (cfg["speech_level_dbfs"] / 20) / math.sqrt(talker_power)
