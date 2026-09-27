@@ -204,7 +204,7 @@ class AfeTests(unittest.TestCase):
     def test_c_and_python_carry_every_number_of_the_contract(self) -> None:
         values = dict(gen_contracts.afe_values())
         namespace: dict = {}
-        exec(gen_contracts.gen_afe_py(list(values.items())), namespace)
+        exec(gen_contracts.gen_afe_py(list(values.items()), gen_contracts.afe_modules()), namespace)
         lines = []
         for name, value in values.items():
             if isinstance(value, tuple):
@@ -234,6 +234,22 @@ class AfeTests(unittest.TestCase):
     def test_a_negative_number_is_bracketed_for_the_preprocessor(self) -> None:
         self.assertEqual(gen_contracts.c_number(-3.0), "(-3.0f)")
         self.assertEqual(gen_contracts.c_number(8), "8")
+
+    def test_the_module_list_turns_its_switches_on_and_the_rest_off(self) -> None:
+        text = gen_contracts.gen_sdkconfig_afe(["vad"])
+        self.assertIn("CONFIG_DSP_AFE_VAD_ENABLE=y\n", text)
+        self.assertIn("# CONFIG_DSP_AFE_HPF_ENABLE is not set\n", text)
+        self.assertEqual(text.count("CONFIG_DSP_AFE_"), len(gen_contracts.afe_switches()))
+
+    def test_a_module_without_a_switch_is_refused(self) -> None:
+        original = gen_contracts.load_yaml
+        for bad in (["hpf", "sparkle"], ["vad", "vad"], "hpf"):
+            gen_contracts.load_yaml = lambda name, bad=bad: {"version": 1, "modules": bad}
+            try:
+                with self.assertRaisesRegex(ValueError, "modules"):
+                    gen_contracts.afe_modules()
+            finally:
+                gen_contracts.load_yaml = original
 
     def test_a_list_becomes_an_initializer(self) -> None:
         self.assertEqual(gen_contracts.c_value((1.5, -2.0, 3)), "{1.5f, (-2.0f), 3}")

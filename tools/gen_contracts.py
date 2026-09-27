@@ -171,9 +171,38 @@ def is_number(value: object) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
 
+AFE_KCONFIG = "firmware/components/dsp_afe/Kconfig"
+SDKCONFIG_AFE = "firmware/sdkconfig.afe"
+
+
+def afe_switches() -> list[str]:
+    """Module names in the order dsp_afe's Kconfig declares their DSP_AFE_<NAME>_ENABLE switches."""
+    text = (REPO_ROOT / AFE_KCONFIG).read_text(encoding="utf-8")
+    return [m.lower() for m in re.findall(r"^\s*config DSP_AFE_(\w+)_ENABLE\s*$", text, flags=re.MULTILINE)]
+
+
+def afe_modules() -> list[str]:
+    """modules: of afe.yaml, each a switch dsp_afe's Kconfig has."""
+    modules = load_yaml("afe.yaml").get("modules", [])
+    known = afe_switches()
+    if not isinstance(modules, list) or any(m not in known for m in modules) or len(set(modules)) != len(modules):
+        raise ValueError(f"afe.yaml modules must be distinct names out of {known}, got {modules!r}")
+    return modules
+
+
+def gen_sdkconfig_afe(modules: list[str]) -> str:
+    """Every dsp_afe switch, on for the product's modules and explicitly off for the rest."""
+    lines = [
+        f"CONFIG_DSP_AFE_{m.upper()}_ENABLE=y" if m in modules else f"# CONFIG_DSP_AFE_{m.upper()}_ENABLE is not set"
+        for m in afe_switches()
+    ]
+    return banner("contracts/afe.yaml", "#") + "\n".join(lines) + "\n"
+
+
 def afe_values() -> list[tuple[str, AfeValue]]:
     """(MODULE_PARAM, value) for every number or list of numbers of afe.yaml; a list becomes a tuple."""
     doc = load_yaml("afe.yaml")
+    doc.pop("modules", None)
     values: list[tuple[str, AfeValue]] = [("VERSION", doc.pop("version"))]
     for module, params in doc.items():
         for name, value in params.items():
@@ -201,8 +230,9 @@ def gen_afe_h(values: list[tuple[str, AfeValue]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def gen_afe_py(values: list[tuple[str, AfeValue]]) -> str:
-    return banner("contracts/afe.yaml", "#") + "\n" + "".join(f"{name} = {value!r}\n" for name, value in values)
+def gen_afe_py(values: list[tuple[str, AfeValue]], modules: list[str]) -> str:
+    lines = "".join(f"{name} = {value!r}\n" for name, value in values)
+    return banner("contracts/afe.yaml", "#") + "\n" + lines + f"MODULES = {tuple(modules)!r}\n"
 
 
 def stream_values() -> dict:
@@ -647,6 +677,7 @@ def outputs() -> dict[str, str]:
     s = stream_values()
     t = topic_values()
     afe = afe_values()
+    modules = afe_modules()
     init = banner("contracts/", "#")
     return {
         f"{COMMON_INC}/gen_grid.h": gen_grid_h(g),
@@ -655,10 +686,11 @@ def outputs() -> dict[str, str]:
         f"{MQTT_INC}/gen_topics.h": gen_topics_h(t),
         f"{MQTT_INC}/gen_payload.h": gen_payload_h(),
         f"{AFE_INC}/gen_afe.h": gen_afe_h(afe),
+        SDKCONFIG_AFE: gen_sdkconfig_afe(modules),
         f"{ML_GEN}/__init__.py": init,
         f"{ML_GEN}/grid.py": gen_grid_py(g),
         f"{ML_GEN}/array.py": gen_array_py(a),
-        f"{ML_GEN}/afe.py": gen_afe_py(afe),
+        f"{ML_GEN}/afe.py": gen_afe_py(afe, modules),
         f"{HOST_GEN}/__init__.py": init,
         f"{HOST_GEN}/grid.py": gen_grid_py(g),
         f"{HOST_GEN}/stream.py": gen_stream_py(s),

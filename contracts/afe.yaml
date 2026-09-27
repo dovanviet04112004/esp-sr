@@ -1,6 +1,8 @@
 # Numbers of each dsp_afe module, one source for the firmware and its srpipe mirrors (KEHOACH 3.4-3.10, 4.9).
 # Units follow the fields of the module headers; module switches stay in the Kconfig of dsp_afe.
 version: 1
+# The modules the product turns on; firmware/sdkconfig.afe and srpipe.generated.afe.MODULES come from it.
+modules: [hpf, balance, vad, agc]
 hpf:
   cutoff_hz: 80.0
 aec:
@@ -16,6 +18,8 @@ gsc:
   leakage: 0.0001
 bss:
   forget_tau_s: 1.0
+ns:
+  floor_db: -12.0                     # seed of NVS afe/ns_floor_db
 vad:
   hangover_ms: 240
   aggressiveness: 2                   # seed of NVS afe/vad_mode; agc needs it (docs/measurements/afe/agc.md)
