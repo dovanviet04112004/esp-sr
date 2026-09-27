@@ -12,8 +12,6 @@
 
 #define RX_CHANNELS 2
 #define SLOT_WORDS (GEN_GRID_HOP_SAMPLES * RX_CHANNELS)
-#define PCM_SHIFT_MIN 8
-#define PCM_SHIFT_MAX 16
 
 static i2s_chan_handle_t s_rx;
 static uint8_t s_shift;
@@ -34,7 +32,7 @@ static IRAM_ATTR bool on_rx_overflow(i2s_chan_handle_t handle, i2s_event_data_t 
 
 esp_err_t drv_audio_init(const drv_audio_config_t *cfg)
 {
-    if (cfg == NULL || cfg->pcm_shift < PCM_SHIFT_MIN || cfg->pcm_shift > PCM_SHIFT_MAX ||
+    if (cfg == NULL || cfg->pcm_shift < DRV_AUDIO_PCM_SHIFT_MIN || cfg->pcm_shift > DRV_AUDIO_PCM_SHIFT_MAX ||
         cfg->dma_desc_num < 2) {
         return ESP_ERR_INVALID_ARG;
     }

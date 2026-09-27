@@ -13,8 +13,11 @@
 extern "C" {
 #endif
 
+#define DRV_AUDIO_PCM_SHIFT_MIN 8  // keeps all 24 bits of the INMP441, saturating to int16
+#define DRV_AUDIO_PCM_SHIFT_MAX 16 // keeps the top 16 of its 24 bits
+
 typedef struct {
-    uint8_t pcm_shift;    // right shift of each 32-bit slot, 8..16 (KEHOACH 6.2)
+    uint8_t pcm_shift;    // right shift of each 32-bit slot (KEHOACH 6.2)
     bool enable_tx;       // APP_SPEAKER_ENABLE; adds the ref channel
     uint8_t dma_desc_num; // 8 gives 128 ms of slack (KEHOACH 5.5)
 } drv_audio_config_t;
