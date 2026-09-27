@@ -45,6 +45,14 @@ def db_to_power(db: float) -> np.float32:
     return f32(10.0 ** (float(f32(db)) / 10.0))
 
 
+def log10_f32(x: float) -> np.float32:
+    """log10 in double, rounded once to float32: a correctly rounded log10f, the same on every CPU.
+
+    numpy's float32 log10 takes another SIMD path on AVX-512 machines and moves the last bit there.
+    """
+    return f32(math.log10(float(x)))
+
+
 def lookahead_samples(lookahead_ms: float) -> int:
     return int(np.rint(f32(lookahead_ms) * f32(grid.SAMPLE_RATE_HZ) / f32(MS_PER_S)))
 
@@ -170,4 +178,4 @@ class Agc:
             else:
                 delayed = s
             out[i] = delayed * mean
-        return out, f32(20.0) * np.log10(self.gain)
+        return out, f32(20.0) * log10_f32(self.gain)

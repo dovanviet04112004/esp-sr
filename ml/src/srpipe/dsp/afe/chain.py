@@ -59,9 +59,12 @@ class Frame:
 
 def level_dbfs(hop: np.ndarray) -> int:
     """Mean power of a float hop against full scale, rounded, clamped to -128 .. 0 as int8."""
-    energy = np.float32(np.dot(hop, hop))
-    with np.errstate(divide="ignore"):
-        db = np.float32(10.0) * np.log10(energy / np.float32(grid.HOP_SAMPLES))
+    # Summed in order, as dsp_afe.c sums: a BLAS dot splits the sum differently on each CPU.
+    energy = np.add.accumulate(np.square(np.asarray(hop, dtype=np.float32)))[-1]
+    mean = energy / np.float32(grid.HOP_SAMPLES)
+    if not mean > 0:
+        return LEVEL_MIN_DBFS
+    db = np.float32(10.0) * agc.log10_f32(mean)
     if not db > LEVEL_MIN_DBFS:
         return LEVEL_MIN_DBFS
     return 0 if db >= 0.0 else int(np.rint(db))
