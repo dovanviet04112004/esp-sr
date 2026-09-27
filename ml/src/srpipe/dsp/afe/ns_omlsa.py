@@ -19,6 +19,8 @@ f32 = np.float32
 EULER_GAMMA = 0.57721566490153286
 E1_SERIES_TERMS = 40
 EXP_SERIES_TERMS = 30
+COS_SERIES_TERMS = 30
+PI = 3.14159265358979323846
 SQRT_HALF = f32(math.sqrt(0.5))
 EXP2_MIN = f32(-126.0)
 # 2 atanh(t) / ln 2 = log2((1 + t) / (1 - t)): odd powers 1 .. 9, |t| <= 0.172 on [sqrt(1/2), sqrt(2)).
@@ -84,11 +86,24 @@ def e1_table(points: int = afe.NS_E1_POINTS, v_max: float = afe.NS_LSA_V_MAX) ->
     return np.array([exp_series(0.5 * e1_smooth(i * step)) for i in range(points)], dtype=np.float32)
 
 
+def cos_series(x: float) -> float:
+    """cos x for 0 <= x <= 2 pi by its series, in double with basic arithmetic only."""
+    term = 1.0
+    total = 1.0
+    for k in range(1, COS_SERIES_TERMS + 1):
+        term = term * -x * x / ((2 * k - 1) * (2 * k))
+        total = total + term
+    return total
+
+
 def hann_taps(half_width: int) -> np.ndarray:
-    """MATLAB's hanning(2w + 1), without its zero ends, scaled to sum to one."""
+    """MATLAB's hanning(2w + 1), without its zero ends, scaled to sum to one; summed in order, as ns_omlsa.c."""
     n = 2 * half_width + 1
-    taps = [0.5 * (1.0 - math.cos(2.0 * math.pi * k / (n + 1))) for k in range(1, n + 1)]
-    return np.array([t / sum(taps) for t in taps], dtype=np.float32)
+    taps = [0.5 * (1.0 - cos_series(2.0 * PI * k / (n + 1))) for k in range(1, n + 1)]
+    total = 0.0
+    for t in taps:
+        total = total + t
+    return np.array([t / total for t in taps], dtype=np.float32)
 
 
 def smooth(x: np.ndarray, taps: np.ndarray) -> np.ndarray:
