@@ -26,6 +26,7 @@
 
 #define WARMUP_HOPS 16
 #define TIMED_HOPS 2000
+#define YIELD_EVERY_HOPS 100 // well under the 5 s of the task watchdog
 #define BENCH_STACK_BYTES 8192
 #define BENCH_PRIORITY 20
 #define CORE_SACH 1 // sach_task runs dsp_afe (KEHOACH 5.2)
@@ -98,6 +99,13 @@ static void timing_add(timing_t *t, uint32_t start)
     t->peak_cycles = cycles > t->peak_cycles ? cycles : t->peak_cycles;
 }
 
+// Past the warm-up, add this hop's cycles; now and then give the core's idle task a tick, outside the timing.
+static void hop_done(timing_t *t, int hop, uint32_t start)
+{
+    if (hop >= WARMUP_HOPS) { timing_add(t, start); }
+    if (hop % YIELD_EVERY_HOPS == YIELD_EVERY_HOPS - 1) { vTaskDelay(1); }
+}
+
 static void report(const row_t *row, const timing_t *t)
 {
     const float per_us = (float)esp_rom_get_cpu_ticks_per_us();
@@ -135,7 +143,7 @@ static void bench_stft(void)
         for (size_t m = 0; m < GEN_ARRAY_N_MICS; m++) {
             dsp_spec_stft_analyze(st[m], s_hop[m], s_bins[m]);
         }
-        if (h >= WARMUP_HOPS) { timing_add(&t, start); }
+        hop_done(&t, h, start);
     }
     report(&row, &t);
 }
@@ -153,7 +161,7 @@ static void bench_istft(void)
     for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
         const uint32_t start = esp_cpu_get_cycle_count();
         dsp_spec_istft_synthesize(st, s_bins[0], out);
-        if (h >= WARMUP_HOPS) { timing_add(&t, start); }
+        hop_done(&t, h, start);
     }
     report(&row, &t);
 }
@@ -174,7 +182,7 @@ static void bench_hpf(void)
         for (uint8_t m = 0; m < GEN_ARRAY_N_MICS; m++) {
             dsp_afe_hpf_process(hpf, m, s_hop[m], GEN_GRID_HOP_SAMPLES);
         }
-        if (h >= WARMUP_HOPS) { timing_add(&t, start); }
+        hop_done(&t, h, start);
     }
     report(&row, &t);
 }
@@ -188,7 +196,7 @@ static void bench_balance(void)
         memcpy(s_work, s_bins[1], sizeof(s_work));
         const uint32_t start = esp_cpu_get_cycle_count();
         dsp_afe_balance_apply(s_calib.balance, s_work);
-        if (h >= WARMUP_HOPS) { timing_add(&t, start); }
+        hop_done(&t, h, start);
     }
     report(&row, &t);
 }
@@ -208,7 +216,7 @@ static void bench_vad(void)
     for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
         const uint32_t start = esp_cpu_get_cycle_count();
         ESP_ERROR_CHECK(dsp_afe_vad_process(vad, s_hop[0], &speech));
-        if (h >= WARMUP_HOPS) { timing_add(&t, start); }
+        hop_done(&t, h, start);
     }
     report(&row, &t);
 }
@@ -233,7 +241,7 @@ static void bench_ns(void)
         }
         const uint32_t start = esp_cpu_get_cycle_count();
         ESP_ERROR_CHECK(ns->process(&cfg, mem, s_power, NULL, s_gain, &speech_prob));
-        if (h >= WARMUP_HOPS) { timing_add(&t, start); }
+        hop_done(&t, h, start);
     }
     report(&row, &t);
 }
@@ -267,7 +275,7 @@ static void bench_agc(bool limiting)
         memcpy(s_work_pcm, s_hop[0], sizeof(s_work_pcm));
         const uint32_t start = esp_cpu_get_cycle_count();
         ESP_ERROR_CHECK(dsp_afe_agc_process(agc, s_work_pcm, true, &gain_db));
-        if (h >= WARMUP_HOPS) { timing_add(&t, start); }
+        hop_done(&t, h, start);
     }
     report(&row, &t);
 }
@@ -296,7 +304,7 @@ static void bench_chain(void)
         const uint32_t start = esp_cpu_get_cycle_count();
         ESP_ERROR_CHECK(dsp_afe_feed(afe, s_interleaved, 1));
         ESP_ERROR_CHECK(dsp_afe_fetch(afe, &frame));
-        if (h >= WARMUP_HOPS) { timing_add(&t, start); }
+        hop_done(&t, h, start);
     }
     report(&row, &t);
 }
@@ -316,7 +324,7 @@ static void bench_mel(void)
     for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
         const uint32_t start = esp_cpu_get_cycle_count();
         dsp_spec_mel_log(mel, s_bins[0], s_log_mel);
-        if (h >= WARMUP_HOPS) { timing_add(&t, start); }
+        hop_done(&t, h, start);
     }
     report(&row, &t);
 }
