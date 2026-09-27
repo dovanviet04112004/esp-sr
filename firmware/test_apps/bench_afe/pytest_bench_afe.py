@@ -1,29 +1,33 @@
 """Run bench_afe on board B and keep its rows as docs/measurements/bench/bench_afe.csv (KEHOACH 4.5.7).
 
-tools/budget.py turns that file into the table of docs/measurements/budget.md; BENCH_ALT lines, when an ADR needs
-a comparison, are printed and not kept.
+Rows arrive through test_report as "csv ..." lines, CRC-checked and asked for again when lost; tools/budget.py turns
+the file into the table of docs/measurements/budget.md. "alt ..." lines, when an ADR needs a comparison, are printed
+and not kept.
 """
 
 from __future__ import annotations
 
 import csv
-import re
+import sys
 from datetime import date
 from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from test_report import collect
+
 REPO = Path(__file__).resolve().parents[3]
 OUT = REPO / "docs" / "measurements" / "bench" / "bench_afe.csv"
 COLUMNS = ("module", "core", "static_bytes", "hot_bytes", "cold_bytes", "us_mean", "us_peak", "in_total", "fw")
-LINE = re.compile(rb"BENCH(?:_CSV|_ALT| done)[^\r\n]*(?=\r?\n)")
+TAG = "BENCH"
 
 
-def rows_of(lines: list[str]) -> list[dict[str, str]]:
+def rows_of(texts: list[str]) -> list[dict[str, str]]:
     rows = []
-    for line in lines:
-        if line.startswith("BENCH_CSV "):
-            values = next(csv.reader([line.removeprefix("BENCH_CSV ")]))
+    for text in texts:
+        if text.startswith("csv "):
+            values = next(csv.reader([text.removeprefix("csv ")]))
             rows.append({**dict(zip(COLUMNS, values, strict=True)), "date": date.today().isoformat()})
     return rows
 
@@ -38,11 +42,9 @@ def write_rows(rows: list[dict[str, str]], out: Path = OUT) -> None:
 
 @pytest.mark.esp32s3
 def test_bench_afe(dut) -> None:
-    lines: list[str] = []
-    while not lines or lines[-1] != "BENCH done":
-        lines.append(dut.expect(LINE, timeout=120).group(0).decode())
-    for line in lines:
-        print(line)
-    rows = rows_of(lines)
-    assert rows, "the app printed no BENCH_CSV row"
+    texts = collect(dut, TAG)
+    for text in texts:
+        print(text)
+    rows = rows_of(texts)
+    assert rows, "the app reported no csv row"
     write_rows(rows)

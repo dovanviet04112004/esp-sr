@@ -21,6 +21,7 @@
 #include "gen_afe.h"
 #include "gen_array.h"
 #include "gen_grid.h"
+#include "test_report.h"
 
 #define WARMUP_HOPS 16
 #define TIMED_HOPS 2000
@@ -29,6 +30,7 @@
 #define CORE_SACH 1 // sach_task runs dsp_afe (KEHOACH 5.2)
 #define CORE_NHAN 0 // nhan_task computes log-mel (KEHOACH 5.2)
 #define PCM_FULL_SCALE 32768.0f
+#define REPORT_LINES_MAX 64
 // The 40-band case of contracts/golden/mel until E11 fixes the recogniser's front end.
 #define MEL_BANDS 40
 #define MEL_F_MIN_HZ 20.0f
@@ -94,10 +96,10 @@ static void timing_add(timing_t *t, uint32_t start)
 static void report(const row_t *row, const timing_t *t)
 {
     const float per_us = (float)esp_rom_get_cpu_ticks_per_us();
-    printf("BENCH_CSV %s,%d,%u,%u,%u,%.1f,%.1f,%d,%s\n", row->module, row->core, (unsigned)row->static_bytes,
-           (unsigned)row->hot_bytes, (unsigned)row->cold_bytes,
-           (double)(t->sum_cycles / (float)TIMED_HOPS / per_us), (double)(t->peak_cycles / per_us),
-           row->in_total ? 1 : 0, esp_app_get_description()->version);
+    test_report_line("csv %s,%d,%u,%u,%u,%.1f,%.1f,%d,%s", row->module, row->core,
+                     (unsigned)row->static_bytes, (unsigned)row->hot_bytes, (unsigned)row->cold_bytes,
+                     (double)(t->sum_cycles / (float)TIMED_HOPS / per_us), (double)(t->peak_cycles / per_us),
+                     row->in_total ? 1 : 0, esp_app_get_description()->version);
 }
 
 static dsp_spec_fft_t *make_fft(size_t *self_bytes)
@@ -328,8 +330,10 @@ static void run_on(TaskFunction_t fn, const char *name, int core)
 void app_main(void)
 {
     fill_inputs();
-    printf("BENCH columns module,core,static_bytes,hot_bytes,cold_bytes,us_mean,us_peak,in_total,fw\n");
+    if (!test_report_begin("BENCH", REPORT_LINES_MAX)) { return; }
+    test_report_line("columns module,core,static_bytes,hot_bytes,cold_bytes,us_mean,us_peak,in_total,fw");
     run_on(core1_benches, "bench_core1", CORE_SACH);
     run_on(core0_benches, "bench_core0", CORE_NHAN);
-    printf("BENCH done\n");
+    test_report_line("done");
+    test_report_serve();
 }
