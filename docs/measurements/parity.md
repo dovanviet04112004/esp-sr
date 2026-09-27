@@ -14,12 +14,13 @@ lại trong thư mục build, qua `python3 pytest_parity.py --report <file>`.
 | `mel` — MFCC (13, 20, 24 hệ số) | 3 | 1,5e-5 | 136,0 | ≤ 1e-3, ≥ 110 dB | — | a934a6a | 27/09 |
 | `chain` — `pcm` ra của mặt tiền `dsp_afe`, mọi module tắt (int16) | 4 | 1 LSB | 77,8 | ≤ 1 LSB, ≥ 60 dB | lệch một mẫu: 15 090 LSB, −2,9 dB → đỏ | a934a6a | 27/09 |
 | `chain` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | — | a934a6a | 27/09 |
-| `chain_modules` — `pcm` ra với `hpf`, `balance`, `vad`, `agc` của `sdkconfig.afe`, hiệu chuẩn và số gieo của ca (int16); máy tính và board B | 4 | 1 LSB | 77,1 | ≤ 1 LSB, ≥ 60 dB | bỏ qua `calib/bal`: 697 LSB, 12,8 dB → đỏ | a934a6a | 27/09 |
-| `chain_modules` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | cùng ca: `vad` 1, `gain_db` 1 dB, `level_dbfs` 2 → đỏ | a934a6a | 27/09 |
+| `chain_modules` — `pcm` ra với `hpf`, `balance`, `ns_omlsa`, `vad`, `agc` của `sdkconfig.afe`, hiệu chuẩn và số gieo của ca (int16); máy tính và board B | 4 | 1 LSB | 70,5 | ≤ 1 LSB, ≥ 60 dB | bỏ qua `calib/bal`: 473 LSB, 16,4 dB → đỏ | 5636ed9 | 27/09 |
+| `chain_modules` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | cùng ca: `level_dbfs` 2 → đỏ | 5636ed9 | 27/09 |
 | `hpf` — biquad dạng II chuyển vị viết tay (ADR-0004), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | trễ một mẫu: 0,996, −3,1 dB → đỏ | a934a6a | 27/09 |
 | `balance` — nhân phức viết tay (ADR-0005), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | hệ số liên hợp: 26,0, −3,5 dB → đỏ | a934a6a | 27/09 |
 | `vad` — mức sáu dải, quyết định thô, `speech` sau kéo dài; máy tính và board B | 4 | 0 | — | mức ≤ 1e-6, ≥ 120 dB; quyết định khớp tuyệt đối | `speech` trễ một bước: 1 → đỏ | a934a6a | 27/09 |
 | `agc` — mọi mẫu ra, `gain_db` mỗi bước; máy tính và board B | 3 | 0 (ra), 4,8e-7 dB (`gain_db`) | 143,2 (`gain_db`) | ra ≤ 1e-6, ≥ 120 dB; `gain_db` ≤ 1e-5 | bỏ qua cờ nói: 1,5e-3, 19,4 dB → đỏ | a934a6a | 27/09 |
+| `ns_omlsa` — gain mỗi vạch và xác suất có tiếng nói mỗi bước; máy tính và board B | 5 | 0 | — | ≤ 1e-6, ≥ 120 dB | hệ số làm trơn không bình phương ở bước 16 ms: 0,75, 13,1 dB → đỏ | 5636ed9 | 27/09 |
 
 ## Bản tham chiếu Python: STFT phân tích rồi tổng hợp (E6-T1)
 
@@ -85,9 +86,18 @@ cả ba ca. `gain_db` là số báo: Python lấy `log10` ở double rồi làm 
 lẫn newlib lệch giá trị làm tròn đúng ấy tới một bit cuối (4,8e-7 dB). Đối chứng âm bỏ qua cờ nói nên gain không nhúc
 nhích: đỏ.
 
+## `ns_omlsa` (E9-T1)
+
+Năm ca công suất mỗi bước, mỗi ca quá hai cửa sổ cực tiểu của IMCRA: tiếng nói từng cụm trên ồn trắng; tiếng nhỏ trên ồn
+đỏ ở sàn −6 dB; nhiễu tăng 20 dB; im số rồi tiếng rất nhỏ ở sàn −18 dB, để sàn bắt đầu ở trạng thái chờ; tiếng nói có vọng
+dư đưa vào làm phổ vọng. Module và bản soi gương làm cùng từng phép float32 theo cùng thứ tự, exp2, log2, nghịch đảo và
+nghịch đảo căn là của riêng module, hằng số dựng bằng phép tính cơ bản ở double: máy tính và board B ở `-O2` khớp **từng
+bit** cả gain lẫn xác suất ở cả năm ca. Đối chứng âm giữ hệ số làm trơn của bài ở 8 ms mà không bình phương ở bước 16 ms,
+lỗi dễ mắc nhất khi đem bài sang lưới này: đỏ.
+
 ## Chuỗi với các module sản phẩm (E7-T5)
 
-`chain_modules`: mặt tiền dựng với đúng các module `firmware/sdkconfig.afe` bật (`hpf`, `balance`, `vad`, `agc`), mỗi ca
+`chain_modules`: mặt tiền dựng với đúng các module `firmware/sdkconfig.afe` bật (`hpf`, `balance`, `ns_omlsa`, `vad`, `agc`; `ns` từ E9-T1), mỗi ca
 mang `config` (sàn `ns` dB, đích `agc` dBFS, mức `vad`) và, nếu board của ca đã hiệu chuẩn, `gains` làm `calib/bal`. Bốn
 ca 192 bước: tiếng nhỏ có quãng nghỉ trên board có ch1 thấp 11 dB, đã hiệu chuẩn (gain leo 5 dB trong 3 s); tiếng to có
 cụm vượt toàn thang trên board chưa hiệu chuẩn, đích −20 dBFS, `vad` mức 3 (bộ chặn đỉnh giữ ở −3 dBFS, cờ `clipped`);
@@ -99,9 +109,9 @@ nhỏ (tín hiệu ra chỉ khoảng −60 dBFS), mọi trường số nguyên k
 
 ## Chỗ chứa bộ vàng
 
-App parity có bảng phân vùng riêng (KẾ HOẠCH §4.3) với `storage` 8 MB. Bộ vàng hiện 3 480 004 B, 3 592 192 B tính theo
-khối 4 KB của LittleFS, 43% phân vùng; mọi ca giữ đủ độ dài và đủ mẫu, ca lớn nhất 294 KB (`chain_modules`, 192 bước)
-trong bộ đệm đọc 512 KB.
+App parity có bảng phân vùng riêng (KẾ HOẠCH §4.3) với `storage` 8 MB. Bộ vàng hiện 6 087 200 B, 6 209 536 B tính theo
+khối 4 KB của LittleFS, 74% phân vùng; mọi ca giữ đủ độ dài và đủ mẫu, ca lớn nhất 483 KB (`ns_omlsa`, 240 bước công suất
+và gain) trong bộ đệm đọc 512 KB.
 
 ## Bộ vàng không phụ thuộc máy
 

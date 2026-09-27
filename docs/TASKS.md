@@ -173,7 +173,7 @@ Dựng cả hai đường rồi chấm, không chọn trước.
 
 | ID | Module | Việc | Xong khi | Chặn bởi | V5 |
 |---|---|---|---|---|---|
-| E9-T1 | `ns_omlsa` | OM-LSA + IMCRA, hằng số quy đổi theo bước 256, `E₁` tra bảng (§3.9) | dìm nhiễu và phần mất của tiếng nói đo trên bản thu thật; đủ bốn bước | Cửa 0 | V5.3.1 |
+| E9-T1 | `ns_omlsa` | OM-LSA + IMCRA, hằng số quy đổi theo bước 256, `E₁` tra bảng (§3.9). **Bốn bước xong 27/09**, đã bật trong sản phẩm: bản soi gương theo `omlsa.m` 2003, gain chặn ở 1; bộ vàng năm ca có đối chứng âm, C khớp từng bit trên máy tính và board B; 1,69 ms mỗi bước (dự trù 0,35 ms, `afe/ns.md` §4). Trên cảnh VIVOS: nhiễu dừng giảm 10–11,6 dB trong quãng nghỉ, tiếng nói mất ≤ 1,2 dB. **Còn**: đo trên bản thu thật (gộp vào phiên tiếng nói của E2-T5), đối chiếu `omlsa.m` gốc trong Octave | dìm nhiễu và phần mất của tiếng nói đo trên bản thu thật; đủ bốn bước | Cửa 0 | V5.3.1 |
 | E9-T2 | khe `ns` | `dsp_afe_ns_ops_t` và bản giả | một bản giả cắm từ ngoài chạy trong chuỗi, `dsp_afe` không `REQUIRES` gì thêm | E3-T2 | V5.3.3 |
 | E9-T3 | dữ liệu | tiếng Việt sạch + nhiễu §1.2 + nhiễu phòng dùng thu bằng `capture` | bảng nguồn, số giờ, giấy phép ở `DU_LIEU.md`; split có `SPLIT.md` | E11-T1, E5-T12 | V5.3.2 |
 | E9-T4 | RNNoise-16k | dựng lại 18–22 dải trên 257 vạch, huấn luyện ở lưới §3.1 | run có đủ `config.resolved.yaml`, `split.lock`; điểm trên tập thử | E9-T3, E4-T2 | V5.3.3 |

@@ -20,7 +20,7 @@ module vào `hot` hay `cold` theo cột dưới đây. Số tính cho ESP32-S3 (
 | `dsp_afe` | `doa` | ~2 450 (Φ 257 phức + R(θ) 91 góc) | ~2 460 | 0 | ước 🔬 |
 | `dsp_afe` | `gsc` | ~3 100 (W 257 phức + P_B 257) | ~3 120 | 0 | ước 🔬 |
 | `dsp_afe` | `bss` | ~24 700 (V₁, V₂, W: 3 ma trận 2×2 phức mỗi vạch) | ~24 720 | 0 | ước 🔬 |
-| `dsp_afe` | `ns` sàn OM-LSA + IMCRA | ~12 400 (~12 `float` mỗi vạch); bảng E₁ 256 điểm là hằng trong flash | ~12 420 | 0 | ước 🔬 |
+| `dsp_afe` | `ns` sàn OM-LSA + IMCRA | 33 280 đo: 16 KB là 2 × 8 cửa sổ cực tiểu của IMCRA, chạm mỗi 8 bước; bảng E₁ 256 điểm, hệ số Hann và hằng số dựng lúc khởi tạo | 33 280 | 0 | `bench` @ `5636ed9` |
 | `dsp_afe` | `vad` | ~1 150 (GMM 6 dải × 2 lớp × 2 thành phần, 16 cực tiểu mỗi dải) | ~1 170 | 0 | ước 🔬 |
 | `dsp_afe` | `agc` | ~560 (đường nhìn trước 64 mẫu + hàng giữ đỉnh 64) | ~580 | 0 | ước 🔬 |
 | `dsp_afe` | `aec`, 2 micro × 8 phân đoạn, chỉ `"MMR"` | ~60 650 (trọng số 32 896 + phổ tham chiếu 16 448 + đệm) + 4 B mỗi mẫu `calib/aec_delay` | ~60 700 + đường trễ | 0 | ước 🔬 |
@@ -82,6 +82,8 @@ Số của E5-T6 là **sàn**: thân task chưa có `dsp_afe`, `wake`, MQTT. Ch�
 | như trên, máy nhận nghẽn 30 s, board nối lại mỗi giây: thấp nhất | 45895 | — | — | `dev` @ `253ddf7` | 26/09 |
 | `sb_stream` 512 KB ở PSRAM, luồng `mode 5` gửi liền 10 phút (E5-T11): còn / thấp nhất | 83659 / 64791 | — | 7 776 928 / 7 776 148 | `dev` @ `3d3335d` | 26/09 |
 | sau `svc_front_init`: `dsp_afe` với `hpf`, `balance`, `vad`, `agc`, `calib/bal` nạp (E7-T5) | 135147 | 90100 | 7 788 684 | `dev` @ `ca660e9` | 27/09 |
+| như trên cộng `ns_omlsa` (E9-T1) | 102231 | 59380 | 7 788 684 | `dev` @ `c2f97b5` | 27/09 |
+| như trên, Wi-Fi + MQTT chạy, heartbeat 5 phút: còn / thấp nhất | 43979 / 36931 | — | 7 776 928 / 7 776 484 | `dev` @ `c2f97b5` | 27/09 |
 
 Đọc từ log `heap_init` của board B qua CH340. Đây là **trần** cho mọi thứ ở KẾ HOẠCH §6.5 cộng lại, trước khi Wi-Fi và lwIP lấy phần của chúng; nó khớp khoảng ước 300–340 KB của §6.5.
 
