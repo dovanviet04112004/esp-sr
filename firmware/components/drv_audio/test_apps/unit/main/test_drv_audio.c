@@ -3,6 +3,8 @@
 
 #include "drv_audio.h"
 #include "esp_err.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "gen_grid.h"
 #include "unity.h"
 
@@ -10,6 +12,7 @@
 #define READ_TIMEOUT_MS 100
 #define DMA_DESC_NUM 8
 #define PCM_SHIFT_TOP16 16
+#define SLOW_BOOT_MS 300 // longer than the 128 ms DMA ring
 
 static int16_t s_hop[GEN_GRID_HOP_SAMPLES * 2];
 
@@ -18,12 +21,14 @@ static double dbfs(double rms)
     return 20.0 * log10(rms / 32768.0 + 1e-12);
 }
 
-TEST_CASE("ten seconds arrive whole, in order, from two live and distinct microphones", "[drv_audio]")
+TEST_CASE("after a slow boot, ten seconds arrive whole, in order, from two live and distinct microphones",
+          "[drv_audio]")
 {
     const drv_audio_config_t cfg = {
         .pcm_shift = PCM_SHIFT_TOP16, .enable_tx = false, .dma_desc_num = DMA_DESC_NUM};
     TEST_ASSERT_EQUAL(ESP_OK, drv_audio_init(&cfg));
     TEST_ASSERT_EQUAL(2, drv_audio_channels());
+    vTaskDelay(pdMS_TO_TICKS(SLOW_BOOT_MS));
 
     double sum[2] = {0}, sum_sq[2] = {0}, diff_sq = 0;
     uint32_t seq = 0;

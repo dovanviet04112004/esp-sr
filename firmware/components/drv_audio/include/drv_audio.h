@@ -21,7 +21,7 @@ typedef struct {
 
 typedef struct {
     uint32_t hops;
-    uint32_t dma_overflows;
+    uint32_t dma_overflows; // hops dropped since the first read
     uint32_t tx_underruns;
     uint32_t clipped_samples;
 } drv_audio_stats_t;
@@ -37,7 +37,7 @@ esp_err_t drv_audio_init(const drv_audio_config_t *cfg);
  */
 uint8_t drv_audio_channels(void);
 
-/** Wait for the next hop and copy it interleaved; seq counts hops since init, gaps included.
+/** Wait for the next hop and copy it interleaved; seq counts hops from the first read, gaps included.
  *  @ctx thu_task | blocking up to timeout_ms | caller owns out, channels x GEN_GRID_HOP_SAMPLES
  *  @ret ESP_OK | ESP_ERR_TIMEOUT no hop in time, which means the I2S clock stopped
  */

@@ -1,6 +1,7 @@
 #include "drv_audio.h"
 
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <string.h>
 
 #include "app_config.h"
@@ -18,6 +19,8 @@ static i2s_chan_handle_t s_rx;
 static uint8_t s_shift;
 static uint32_t s_next_seq;
 static uint32_t s_overflows_seen;
+static uint32_t s_overflows_before_read;
+static bool s_reading;
 static _Atomic uint32_t s_overflows;
 static drv_audio_stats_t s_stats;
 static int32_t s_slots[SLOT_WORDS];
@@ -83,6 +86,11 @@ esp_err_t drv_audio_read_frame(int16_t *interleaved, uint32_t *seq, uint32_t tim
     if (got != sizeof(s_slots)) { return ESP_ERR_INVALID_SIZE; }
 
     const uint32_t overflows = atomic_load(&s_overflows);
+    // Buffers dropped until the first read had no reader to fall behind, so seq and the count start here.
+    if (!s_reading) {
+        s_overflows_seen = s_overflows_before_read = overflows;
+        s_reading = true;
+    }
     const uint32_t lost = overflows - s_overflows_seen;
     s_overflows_seen = overflows;
     *seq = s_next_seq + lost;
@@ -97,7 +105,7 @@ esp_err_t drv_audio_read_frame(int16_t *interleaved, uint32_t *seq, uint32_t tim
         interleaved[i] = (int16_t)v;
     }
     s_stats.hops++;
-    s_stats.dma_overflows = overflows;
+    s_stats.dma_overflows = overflows - s_overflows_before_read;
     return ESP_OK;
 }
 
