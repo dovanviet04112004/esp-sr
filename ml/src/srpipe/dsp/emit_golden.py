@@ -26,13 +26,10 @@ CHAIN_HOPS = 16
 CHAIN_RESET_HOP = 8
 HPF_HOPS = 16
 BALANCE_HOPS = 16
-# One case outlives the 100-hop window of the minimum tracker; the storage partition limits the rest.
-VAD_LONG_HOPS = 160
-VAD_HOPS = 64
+# Every vad case outlives the 100-hop window of the minimum tracker.
+VAD_HOPS = 160
 AGC_LONG_HOPS = 128
 AGC_HOPS = 48
-# Every eighth output sample is kept: the storage partition cannot hold them all (TASKS E5-T15).
-AGC_OUT_STEP = 8
 LSB = 1.0 / 32768.0
 MEL_CASES = (
     (mel.MelConfig(n_bands=40, f_min_hz=20.0, f_max_hz=7600.0, log_floor=1e-6), 13),
@@ -291,14 +288,14 @@ def speechlike(rng: np.random.Generator, n: int, peak: float) -> np.ndarray:
 def _vad_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, int]]:
     """(int16 samples, aggressiveness) per case: speech over white noise, quiet speech over red noise, silence that
     is never modelled then loud bursts, noise whose level jumps."""
-    long_n, n = VAD_LONG_HOPS * grid.HOP_SAMPLES, VAD_HOPS * grid.HOP_SAMPLES
+    n = VAD_HOPS * grid.HOP_SAMPLES
     red = np.cumsum(rng.standard_normal(n))
     red = red - np.convolve(red, np.ones(64) / 64, mode="same")
     bursts = np.zeros(n)
     bursts[n // 4 :] = speechlike(rng, n - n // 4, 0.9)
     jump = rng.standard_normal(n) * np.where(np.arange(n) < n // 2, 0.002, 0.05)
     cases = [
-        (speechlike(rng, long_n, 0.3) + 0.01 * rng.standard_normal(long_n), 0),
+        (speechlike(rng, n, 0.3) + 0.01 * rng.standard_normal(n), 0),
         (speechlike(rng, n, 0.01) + 0.0005 * red / red.std(), 2),
         (bursts, 3),
         (jump, 1),
@@ -364,13 +361,13 @@ def _agc_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray, 
 def agc_case(
     pcm: np.ndarray, speech: np.ndarray, target_dbfs: float, heed_speech: bool = True
 ) -> dict[str, np.ndarray]:
-    """int16 hops, their speech flags and the target; every AGC_OUT_STEP-th output sample and the gain of each hop."""
+    """int16 hops, their speech flags and the target; every output sample and the gain of each hop."""
     hops = pcm.reshape(-1, grid.HOP_SAMPLES)
     control = agc.Agc(agc.AgcConfig(target_dbfs=target_dbfs))
     outs, gains = [], []
     for hop, flag in zip(hops, speech, strict=True):
         out, gain_db = control.process(hop.astype(np.float32) / np.float32(32768.0), bool(flag) and heed_speech)
-        outs.append(out[::AGC_OUT_STEP])
+        outs.append(out)
         gains.append(gain_db)
     return {
         "pcm": hops,

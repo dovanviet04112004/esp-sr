@@ -1,7 +1,7 @@
 # C dsp_afe agc against srpipe.dsp.afe.agc (KEHOACH 3.10, E7-T4). Constants are made once in double and rounded,
 # each hop uses basic float32 arithmetic and sqrt, and dsp_afe builds without contraction (ADR-0006): the output
 # matches bit for bit. gain_db is a report through log10f, whose last bit a libm may round its own way.
-# out holds every eighth sample (TASKS E5-T15). case_neg_* ignores the speech flags, so its gain never moves.
+# case_neg_* ignores the speech flags, so its gain never moves.
 tensors:
   out:
     max_abs: 1.0e-6
