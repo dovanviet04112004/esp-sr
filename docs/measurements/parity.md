@@ -8,18 +8,18 @@ lại trong thư mục build, qua `python3 pytest_parity.py --report <file>`.
 
 | Khối | Số ca | Sai số tuyệt đối lớn nhất | SNR nhỏ nhất dB | Ngưỡng | Đối chứng âm đỏ | Commit | Ngày |
 |---|---|---|---|---|---|---|---|
-| `stft` — phổ phân tích | 4 | 7,6e-6 | 137,2 | ≤ 1e-4, ≥ 115 dB | — | cab1eb3 | 27/09 |
-| `stft` — tổng hợp từ phổ vàng | 4 | 3,0e-7 | 137,5 | ≤ 1e-5, ≥ 115 dB | lệch một mẫu: 0,96, −3,1 dB → đỏ | cab1eb3 | 27/09 |
-| `mel` — log-mel, ba cấu hình (40, 80, 24 dải) | 3 | 1,9e-6 | 140,0 | ≤ 1e-4, ≥ 115 dB | lệch một dải: 2,24, 3,0 dB → đỏ | cab1eb3 | 27/09 |
-| `mel` — MFCC (13, 20, 24 hệ số) | 3 | 1,5e-5 | 134,8 | ≤ 1e-3, ≥ 110 dB | — | cab1eb3 | 27/09 |
-| `chain` — `pcm` ra của mặt tiền `dsp_afe`, mọi module tắt (int16) | 4 | 1 LSB | 77,9 | ≤ 1 LSB, ≥ 60 dB | lệch một mẫu: 15 090 LSB, −2,9 dB → đỏ | 229c321 | 27/09 |
-| `chain` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | — | 229c321 | 27/09 |
-| `chain_modules` — `pcm` ra với `hpf`, `balance`, `vad`, `agc` của `sdkconfig.afe`, hiệu chuẩn và số gieo của ca (int16); máy tính và board B | 4 | 1 LSB | 77,1 | ≤ 1 LSB, ≥ 60 dB | bỏ qua `calib/bal`: 697 LSB, 12,8 dB → đỏ | 229c321 | 27/09 |
-| `chain_modules` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | cùng ca: `vad` 1, `gain_db` 1 dB, `level_dbfs` 2 → đỏ | 229c321 | 27/09 |
-| `hpf` — biquad dạng II chuyển vị viết tay (ADR-0004), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | trễ một mẫu: 0,996, −3,1 dB → đỏ | cab1eb3 | 27/09 |
-| `balance` — nhân phức viết tay (ADR-0005), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | hệ số liên hợp: 26,0, −3,5 dB → đỏ | cab1eb3 | 27/09 |
-| `vad` — mức sáu dải, quyết định thô, `speech` sau kéo dài; máy tính và board B | 4 | 0 | — | mức ≤ 1e-6, ≥ 120 dB; quyết định khớp tuyệt đối | `speech` trễ một bước: 1 → đỏ | 17bdfac | 27/09 |
-| `agc` — mọi mẫu ra, `gain_db` mỗi bước; máy tính và board B | 3 | 0 (ra), 4,8e-7 dB (`gain_db`, board) | 151,0 (`gain_db`) | ra ≤ 1e-6, ≥ 120 dB; `gain_db` ≤ 1e-5 | bỏ qua cờ nói: 1,5e-3, 19,5 dB → đỏ | 17bdfac | 27/09 |
+| `stft` — phổ phân tích | 4 | 7,6e-6 | 137,2 | ≤ 1e-4, ≥ 115 dB | — | a934a6a | 27/09 |
+| `stft` — tổng hợp từ phổ vàng | 4 | 3,0e-7 | 137,8 | ≤ 1e-5, ≥ 115 dB | lệch một mẫu: 0,96, −3,1 dB → đỏ | a934a6a | 27/09 |
+| `mel` — log-mel, ba cấu hình (40, 80, 24 dải) | 3 | 9,5e-7 | 143,1 | ≤ 1e-4, ≥ 115 dB | lệch một dải: 2,24, 3,0 dB → đỏ | a934a6a | 27/09 |
+| `mel` — MFCC (13, 20, 24 hệ số) | 3 | 1,5e-5 | 136,0 | ≤ 1e-3, ≥ 110 dB | — | a934a6a | 27/09 |
+| `chain` — `pcm` ra của mặt tiền `dsp_afe`, mọi module tắt (int16) | 4 | 1 LSB | 77,8 | ≤ 1 LSB, ≥ 60 dB | lệch một mẫu: 15 090 LSB, −2,9 dB → đỏ | a934a6a | 27/09 |
+| `chain` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | — | a934a6a | 27/09 |
+| `chain_modules` — `pcm` ra với `hpf`, `balance`, `vad`, `agc` của `sdkconfig.afe`, hiệu chuẩn và số gieo của ca (int16); máy tính và board B | 4 | 1 LSB | 77,1 | ≤ 1 LSB, ≥ 60 dB | bỏ qua `calib/bal`: 697 LSB, 12,8 dB → đỏ | a934a6a | 27/09 |
+| `chain_modules` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | cùng ca: `vad` 1, `gain_db` 1 dB, `level_dbfs` 2 → đỏ | a934a6a | 27/09 |
+| `hpf` — biquad dạng II chuyển vị viết tay (ADR-0004), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | trễ một mẫu: 0,996, −3,1 dB → đỏ | a934a6a | 27/09 |
+| `balance` — nhân phức viết tay (ADR-0005), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | hệ số liên hợp: 26,0, −3,5 dB → đỏ | a934a6a | 27/09 |
+| `vad` — mức sáu dải, quyết định thô, `speech` sau kéo dài; máy tính và board B | 4 | 0 | — | mức ≤ 1e-6, ≥ 120 dB; quyết định khớp tuyệt đối | `speech` trễ một bước: 1 → đỏ | a934a6a | 27/09 |
+| `agc` — mọi mẫu ra, `gain_db` mỗi bước; máy tính và board B | 3 | 0 (ra), 4,8e-7 dB (`gain_db`) | 143,2 (`gain_db`) | ra ≤ 1e-6, ≥ 120 dB; `gain_db` ≤ 1e-5 | bỏ qua cờ nói: 1,5e-3, 19,4 dB → đỏ | a934a6a | 27/09 |
 
 ## Bản tham chiếu Python: STFT phân tích rồi tổng hợp (E6-T1)
 
@@ -81,8 +81,9 @@ bit** cả ba tensor của cả bốn ca. Đối chứng âm cho `speech` trễ 
 Ba ca đầu vào `int16` kèm cờ nói mỗi bước: tiếng nhỏ để gain leo 64 bước, đóng băng 32 bước rồi leo tiếp (128 bước); tiếng
 to có sáu cụm tràn thang để bộ chặn đỉnh giữ dưới −3 dBFS trong lúc gain hạ; nhiễu dưới đích −20 dBFS, cờ nói bốn trên
 sáu bước. Máy tính và board B khớp **từng bit** mọi mẫu ra của
-cả ba ca; `gain_db` là số báo qua `log10f`, khớp từng bit trên máy tính, lệch một bit cuối (4,8e-7 dB) ở một ca trên board
-vì `log10f` của newlib làm tròn khác numpy. Đối chứng âm bỏ qua cờ nói nên gain không nhúc nhích: đỏ.
+cả ba ca. `gain_db` là số báo: Python lấy `log10` ở double rồi làm tròn một lần (§3.14), bản C gọi `log10f`, và cả glibc
+lẫn newlib lệch giá trị làm tròn đúng ấy tới một bit cuối (4,8e-7 dB). Đối chứng âm bỏ qua cờ nói nên gain không nhúc
+nhích: đỏ.
 
 ## Chuỗi với các module sản phẩm (E7-T5)
 
@@ -101,6 +102,14 @@ nhỏ (tín hiệu ra chỉ khoảng −60 dBFS), mọi trường số nguyên k
 App parity có bảng phân vùng riêng (KẾ HOẠCH §4.3) với `storage` 8 MB. Bộ vàng hiện 3 480 004 B, 3 592 192 B tính theo
 khối 4 KB của LittleFS, 43% phân vùng; mọi ca giữ đủ độ dài và đủ mẫu, ca lớn nhất 294 KB (`chain_modules`, 192 bước)
 trong bộ đệm đọc 512 KB.
+
+## Bộ vàng không phụ thuộc máy
+
+Workflow `ml` tại `1c460d2` thấy bộ `agc` đã commit khác bản máy chạy CI sinh ra ở bit cuối của `gain_db`: numpy lấy
+`log10` float32 theo đường SVML trên máy AVX-512, làm tròn khác. Cùng loại lỗi nằm ở cửa sổ (`sin` float32) và log-mel
+(tổng qua BLAS, `log` float32), chưa đỏ chỉ vì máy ấy tình cờ ra cùng số. Từ `a934a6a` bản soi gương theo luật mới của
+KẾ HOẠCH §3.14: hàm siêu việt tính ở double rồi làm tròn một lần, tổng float32 cộng theo thứ tự của bản C. `log_mel` nhờ
+đó sát C hơn: 9,5e-7 (143,1 dB) trên board, 4,8e-7 (163 dB) trên máy tính.
 
 ## Đường nối tiếp
 
