@@ -12,6 +12,10 @@ endif()
 
 set(SPEC "${FIRMWARE}/components/dsp_spec")
 set(PARITY "${FIRMWARE}/test_apps/parity/main")
+# The PARITY lines go out through test_report, as on the board, so one reader judges both.
+set(REPORT "${FIRMWARE}/test_apps/components/test_report")
+add_library(test_report_host STATIC "${REPORT}/test_report.c")
+target_include_directories(test_report_host PUBLIC "${REPORT}/include")
 set(DL_FFT_SRCS
     "${DL_FFT_DIR}/dl_rfft_f32.c" "${DL_FFT_DIR}/dl_fft_f32.c" "${DL_FFT_DIR}/dl_rfft_s16.c" "${DL_FFT_DIR}/dl_fft_s16.c"
     "${DL_FFT_DIR}/base/dl_fft_base.c" "${DL_FFT_DIR}/base/dl_fft_table.c"
@@ -33,4 +37,4 @@ add_executable(dsp_spec_host
 target_include_directories(dsp_spec_host PRIVATE "${PARITY}")
 set_target_properties(dsp_spec_host PROPERTIES C_STANDARD 17 C_EXTENSIONS ON)
 target_compile_options(dsp_spec_host PRIVATE -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare)
-target_link_libraries(dsp_spec_host PRIVATE dsp_spec_host_lib)
+target_link_libraries(dsp_spec_host PRIVATE dsp_spec_host_lib test_report_host)

@@ -15,5 +15,5 @@ endif()
 idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS "."
-    REQUIRES dsp_spec dsp_afe sys_storage esp_psram
+    REQUIRES dsp_spec dsp_afe sys_storage esp_psram test_report
 )

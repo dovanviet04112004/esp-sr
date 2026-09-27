@@ -22,13 +22,13 @@ bool parity_tensor(const void *buf, size_t len, const char *name, gold_tensor_t 
  */
 bool parity_floats(const gold_tensor_t *t, float *out, size_t n);
 
-/** Print "PARITY block case tensor max_abs=… snr_db=…" for got against want, n floats each.
- *  @ctx task | blocking on the console
+/** Report "block case tensor max_abs=… snr_db=…" for got against want, n floats each, through test_report.
+ *  @ctx task | blocking on the console | the caller has begun the PARITY report
  */
 void parity_report(const char *block, const char *case_name, const char *tensor, const float *want,
                    const float *got, size_t n);
 
-/** Read every root/block/(*.gold) into buf through read and run it; "PARITY error" for a case that fails.
+/** Read every root/block/(*.gold) into buf through read and run it; reports "error" for a case that fails.
  *  @ctx task | blocking on the filesystem and the console
  *  @ret cases run; errors, when not NULL, gets the cases that could not run
  */

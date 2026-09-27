@@ -6,12 +6,14 @@
 #include "dsp_spec.h"
 #include "gen_grid.h"
 #include "parity.h"
+#include "test_report.h"
 
 #define MIN_ROUND_TRIP_SNR_DB 110.0
 #define HOPS 64
 #define MEL_BANDS 40
 #define N_CEPS 13
 #define CASE_BYTES_MAX (512 * 1024)
+#define REPORT_LINES_MAX 1024
 
 static const struct {
     const char *block;
@@ -167,7 +169,11 @@ int main(int argc, char **argv)
     check_fft();
     check_round_trip();
     check_mel();
-    if (argc > 1) { printf("PARITY done %u cases\n", run_golden(argv[1])); }
+    if (argc > 1) {
+        test_report_begin("PARITY", REPORT_LINES_MAX);
+        test_report_line("done %u cases", run_golden(argv[1]));
+        test_report_serve();
+    }
     printf("HOST %u failure(s)\n", s_failures);
     return s_failures == 0 ? 0 : 1;
 }

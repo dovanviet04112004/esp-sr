@@ -1,7 +1,8 @@
 """Run the parity app on board B and judge every PARITY line against contracts/golden/<block>/tolerance.yaml.
 
-Also runs by hand on a captured log: python3 pytest_parity.py <log>. Cases named case_neg_* are
-negative controls and must fail, or the golden set is not checking anything (KEHOACH 3.14).
+Lines arrive through test_report, CRC-checked and asked for again when lost (KEHOACH 4.5.7). Also runs by hand on a
+captured log: python3 pytest_parity.py <log>. Cases named case_neg_* are negative controls and must fail, or the
+golden set is not checking anything (KEHOACH 3.14).
 """
 
 from __future__ import annotations
@@ -13,18 +14,22 @@ from pathlib import Path
 import pytest
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from test_report import collect, from_log
+
 GOLDEN = Path(__file__).resolve().parents[3] / "contracts" / "golden"
-LINE = re.compile(r"PARITY (\S+) (\S+) (\S+) max_abs=(\S+) snr_db=(\S+)")
-DONE = re.compile(r"PARITY done (\d+) cases")
-PLAN = re.compile(r"PARITY plan ((?:\S+ ?)+)$")
+TAG = "PARITY"
+LINE = re.compile(r"^(\S+) (\S+) (\S+) max_abs=(\S+) snr_db=(\S+)$")
+DONE = re.compile(r"^done (\d+) cases$")
+PLAN = re.compile(r"^plan ((?:\S+ ?)+)$")
 NEGATIVE_PREFIX = "case_neg_"
 
 
 def judge(lines: list[str], golden: Path = GOLDEN) -> list[str]:
-    """Every broken expectation: a case outside tolerance, a negative control inside it, a case never run, a tensor of
-    tolerance.yaml a case never reported (a line lost on the serial link must not pass for a good one).
+    """Every broken expectation over the texts of a report: a case outside tolerance, a negative control inside it, a
+    case never run, a tensor of tolerance.yaml a case never reported.
 
-    A run that prints "PARITY plan <blocks>" answers for those blocks only; without a plan every block counts.
+    A run that reports "plan <blocks>" answers for those blocks only; without a plan every block counts.
     """
     passed: dict[tuple[str, str], list[bool]] = {}
     reported: dict[tuple[str, str], set[str]] = {}
@@ -60,13 +65,10 @@ def judge(lines: list[str], golden: Path = GOLDEN) -> list[str]:
 
 @pytest.mark.esp32s3
 def test_parity(dut) -> None:
-    lines = []
-    while not lines or not DONE.search(lines[-1]):
-        lines.append(dut.expect(re.compile(rb"PARITY [^\r\n]+(?=\r?\n)"), timeout=120).group(0).decode())
-    assert judge(lines) == []
+    assert judge(collect(dut, TAG)) == []
 
 
 if __name__ == "__main__":
-    found = judge(Path(sys.argv[1]).read_text(encoding="utf-8").splitlines())
+    found = judge(from_log(Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines(), TAG))
     print("\n".join(found) if found else "parity: every case as expected")
     raise SystemExit(1 if found else 0)

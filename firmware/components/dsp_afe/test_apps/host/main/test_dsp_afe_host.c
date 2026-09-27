@@ -19,6 +19,7 @@
 
 #if DSP_AFE_HOST_GOLDEN
 #include "parity.h"
+#include "test_report.h"
 #endif
 
 #define HOPS 32
@@ -27,6 +28,7 @@
 #define TONE_HZ 440.0
 #define MAX_ERROR_LSB 1
 #define CASE_BYTES_MAX (512 * 1024)
+#define REPORT_LINES_MAX 1024
 #define PCM_FULL_SCALE 32768.0f
 
 #if CONFIG_DSP_AFE_VAD_ENABLE
@@ -475,6 +477,7 @@ static bool read_case(const char *path, void *buf, size_t cap, size_t *len)
 static void run_golden(const char *root)
 {
     static uint8_t buf[CASE_BYTES_MAX];
+    test_report_begin("PARITY", REPORT_LINES_MAX);
 #if DSP_AFE_HOST_ALL_MODULES
     const unsigned cases =
         parity_run_block(root, "hpf", parity_hpf, read_case, buf, sizeof(buf), &s_failures) +
@@ -485,7 +488,8 @@ static void run_golden(const char *root)
     const unsigned cases =
         parity_run_block(root, "chain", parity_chain, read_case, buf, sizeof(buf), &s_failures);
 #endif
-    printf("PARITY done %u cases\n", cases);
+    test_report_line("done %u cases", cases);
+    test_report_serve();
 }
 #endif
 

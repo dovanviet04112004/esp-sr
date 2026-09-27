@@ -4,14 +4,9 @@
 #include <string.h>
 
 #include "parity.h"
-
-#ifdef ESP_PLATFORM
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#endif
+#include "test_report.h"
 
 #define SNR_NO_ERROR_DB 999.0
-#define LINE_GAP_MS 2 // lets the USB serial bridge drain between lines
 #define DIR_BYTES 256
 #define NAME_BYTES 256 // struct dirent d_name
 #define PATH_BYTES (DIR_BYTES + 1 + NAME_BYTES)
@@ -58,12 +53,7 @@ void parity_report(const char *block, const char *case_name, const char *tensor,
         max_abs = fmax(max_abs, fabs(d));
     }
     const double snr_db = error > 0.0 ? 10.0 * log10(reference / error) : SNR_NO_ERROR_DB;
-    printf("PARITY %s %s %s max_abs=%.3e snr_db=%.1f\n", block, case_name, tensor, max_abs, snr_db);
-#ifdef ESP_PLATFORM
-    // Bursts of lines lost bytes on the CH340 over usbipd, and a lost line leaves a tensor unjudged.
-    fflush(stdout);
-    vTaskDelay(pdMS_TO_TICKS(LINE_GAP_MS));
-#endif
+    test_report_line("%s %s %s max_abs=%.3e snr_db=%.1f", block, case_name, tensor, max_abs, snr_db);
 }
 
 unsigned parity_run_block(const char *root, const char *block, parity_runner_t run, parity_reader_t read,
@@ -73,7 +63,7 @@ unsigned parity_run_block(const char *root, const char *block, parity_runner_t r
     snprintf(dir_path, sizeof(dir_path), "%s/%s", root, block);
     DIR *dir = opendir(dir_path);
     if (dir == NULL) {
-        printf("PARITY missing %s\n", dir_path);
+        test_report_line("missing %s", dir_path);
         return 0;
     }
     unsigned cases = 0;
@@ -89,7 +79,7 @@ unsigned parity_run_block(const char *root, const char *block, parity_runner_t r
         snprintf(case_name, sizeof(case_name), "%.*s", (int)(name_len - suffix_len), entry->d_name);
         size_t len = 0;
         if (!read(path, buf, cap, &len) || !run(case_name, buf, len)) {
-            printf("PARITY error %s %s\n", block, case_name);
+            test_report_line("error %s %s", block, case_name);
             if (errors != NULL) { (*errors)++; }
             continue;
         }

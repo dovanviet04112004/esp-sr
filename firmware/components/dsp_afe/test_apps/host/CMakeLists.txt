@@ -16,7 +16,7 @@ function(add_afe_host name)
     target_include_directories(${name} PRIVATE shim "${AFE}/include" "${AFE}/priv_include")
     set_target_properties(${name} PROPERTIES C_STANDARD 17 C_EXTENSIONS ON)
     target_compile_options(${name} PRIVATE -Wall -Wextra -Werror -Wno-sign-compare -ffp-contract=off)
-    target_link_libraries(${name} PRIVATE dsp_spec_host_lib)
+    target_link_libraries(${name} PRIVATE dsp_spec_host_lib test_report_host)
 endfunction()
 
 set(PARITY "${FIRMWARE}/test_apps/parity/main")

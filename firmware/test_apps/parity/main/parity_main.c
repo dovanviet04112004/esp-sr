@@ -1,12 +1,16 @@
 #include <stdio.h>
+#include <string.h>
 
 #include "esp_heap_caps.h"
 #include "parity.h"
 #include "sdkconfig.h"
 #include "sys_storage.h"
+#include "test_report.h"
 
 #define GOLDEN_DIR STORAGE_LFS_MOUNT "/golden"
 #define CASE_BYTES_MAX (512 * 1024)
+#define REPORT_LINES_MAX 1024
+#define PLAN_BYTES 128
 
 static const struct {
     const char *block;
@@ -37,20 +41,23 @@ static bool read_case(const char *path, void *buf, size_t cap, size_t *len)
 
 void app_main(void)
 {
+    if (!test_report_begin("PARITY", REPORT_LINES_MAX)) { return; }
     uint8_t *buf = heap_caps_malloc(CASE_BYTES_MAX, MALLOC_CAP_SPIRAM);
     if (sys_storage_init() != ESP_OK || buf == NULL) {
-        printf("PARITY error setup\n");
-        return;
+        test_report_line("error setup");
+        test_report_serve();
     }
-    printf("PARITY plan");
+    char plan[PLAN_BYTES] = "plan";
     for (size_t i = 0; i < sizeof(kBlocks) / sizeof(kBlocks[0]); i++) {
-        printf(" %s", kBlocks[i].block);
+        strncat(plan, " ", sizeof(plan) - strlen(plan) - 1);
+        strncat(plan, kBlocks[i].block, sizeof(plan) - strlen(plan) - 1);
     }
-    printf("\n");
+    test_report_line("%s", plan);
     unsigned cases = 0;
     for (size_t i = 0; i < sizeof(kBlocks) / sizeof(kBlocks[0]); i++) {
         cases += parity_run_block(GOLDEN_DIR, kBlocks[i].block, kBlocks[i].run, read_case, buf,
                                   CASE_BYTES_MAX, NULL);
     }
-    printf("PARITY done %u cases\n", cases);
+    test_report_line("done %u cases", cases);
+    test_report_serve();
 }
