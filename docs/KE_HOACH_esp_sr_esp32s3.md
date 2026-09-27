@@ -1449,8 +1449,13 @@ host/
 │   ├── session.py                 # phiên thu có nhãn: danh sách câu nhắc, mã người nói, mã phiếu đồng ý
 │   ├── score.py                   # chấm một phiên đã thu theo nhãn, gọi ml/src/srpipe/metrics
 │   └── calib.py                   # ước balance từ phiên ồn trắng (srpipe), kiểm chéo, ghi xuống test_apps/calib
+├── plans/                         # kịch bản một buổi thu: mỗi dòng một lời dặn và nhãn một phiên
 └── tests/
 ```
+
+Một buổi thu nhiều phiên đi theo một file ở `host/plans/`: `make session-plan` hiện lời dặn của từng dòng, chờ
+người thu bấm Enter rồi chạy đúng `make session` với nhãn của dòng ấy, nên mỗi phiên vẫn là một thư mục và một dòng
+manifest như thu tay. Mã người nói và mã phiếu điền lúc chạy, không nằm trong file.
 
 Ba vai của TỔNG QUAN "gửi về máy để xem và chấm": **xem** (`live.py`), **chấm** (`score.py`), **thu**
 (`session.py` + `stream_rx.py`). `score.py` import thước đo từ `ml/`, không viết lại: `srpipe` là phần phụ
