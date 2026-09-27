@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../../components" "${CMAKE_CURRENT_LIST_DIR}/../components")
-set(COMPONENTS main dsp_spec dsp_afe sys_storage test_report)
+set(COMPONENTS main dsp_spec dsp_afe lang_vi sys_storage test_report)
 
 # One board: test apps take clock, cache, PSRAM and console settings from the firmware's own file.
 # Parity checks the code as it ships, so the compiler settings are those of bench, which are prod's (KEHOACH 3.14).
