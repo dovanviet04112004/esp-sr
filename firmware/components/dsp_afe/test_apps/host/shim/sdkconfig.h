@@ -1,4 +1,5 @@
-/** Module switches of dsp_afe for the host build: none, or every module when DSP_AFE_HOST_ALL_MODULES is set.
+/** Module switches of dsp_afe for the host build: none, every module when DSP_AFE_HOST_ALL_MODULES is set, or
+ *  the product's, which CMake defines from firmware/sdkconfig.afe.
  *  @ctx any | compile time; module numbers come from gen_afe.h, not from here
  */
 #pragma once
