@@ -53,6 +53,40 @@ static const dsp_afe_config_t kPlain = {
     .vad_aggressiveness = 1,
 };
 
+static size_t unit_ns_bytes(void *ctx)
+{
+    (void)ctx;
+    return sizeof(uint32_t);
+}
+
+static esp_err_t unit_ns_init(void *ctx, void *state, size_t bytes)
+{
+    (void)ctx;
+    return state != NULL && bytes >= sizeof(uint32_t) ? ESP_OK : ESP_ERR_INVALID_ARG;
+}
+
+static esp_err_t unit_ns_process(void *ctx, void *state, const float *power, const float *echo_power,
+                                 float *gain, float *speech_prob)
+{
+    (void)ctx;
+    (void)state;
+    (void)power;
+    (void)echo_power;
+    for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
+        gain[k] = 1.0f;
+    }
+    *speech_prob = 0.0f;
+    return ESP_OK;
+}
+
+// A slot implementation with unit gains: the real floor learns a steady tone as noise and has its own golden
+// cases.
+static const dsp_afe_ns_ops_t kUnitNs = {
+    .state_bytes = unit_ns_bytes,
+    .init = unit_ns_init,
+    .process = unit_ns_process,
+};
+
 static void check(bool ok, const char *what)
 {
     printf("HOST %s: %s\n", ok ? "PASS" : "FAIL", what);
@@ -161,7 +195,9 @@ static void check_round_trip(const dsp_afe_config_t *cfg, const char *what)
 #endif
     const uint8_t n_channels = channels_of(cfg);
     const uint16_t want_flags = n_channels == MAX_CHANNELS ? DSP_AFE_FLAG_NO_REF : 0u;
-    dsp_afe_t *afe = make(cfg);
+    dsp_afe_config_t unit_ns = *cfg;
+    unit_ns.ns = &kUnitNs;
+    dsp_afe_t *afe = make(&unit_ns);
     bool ok = afe != NULL && (agc != NULL || !kAgcBuilt);
     int worst = 0;
     memset(previous, 0, sizeof(previous));
@@ -388,7 +424,8 @@ static void check_module_shells(void)
                        ns->process(&ns_cfg, ns_state, power, NULL, gain, &speech_prob) == ESP_OK &&
                        gain[0] == 1.0f && gain[GEN_GRID_N_BINS - 1] == 1.0f && speech_prob == 0.0f;
     ns_cfg.floor_db = 3.0f;
-    check(ns_ok && ns->state_bytes(&ns_cfg) == 0, "ns_omlsa shell: unit gains, refuses a positive floor");
+    check(ns_ok && ns->state_bytes(&ns_cfg) == 0,
+          "ns_omlsa: unit gains before any power, refuses a positive floor");
 
     const dsp_afe_vad_config_t vad_cfg = {.aggressiveness = 3, .hangover_ms = 240};
     const dsp_afe_vad_config_t vad_bad = {.aggressiveness = 4, .hangover_ms = 240};
@@ -463,6 +500,39 @@ static void check_balance_in_chain(void)
 }
 #endif
 
+#if CONFIG_DSP_AFE_NS_OMLSA_ENABLE
+static float mean_level_dbfs(const dsp_afe_config_t *cfg, size_t hops, size_t from)
+{
+    static int16_t in[GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS];
+    uint32_t lcg = 12345u;
+    dsp_afe_t *afe = make(cfg);
+    float sum = 0.0f;
+    for (size_t h = 0; afe != NULL && h < hops; h++) {
+        for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS; i++) {
+            lcg = lcg * 1664525u + 1013904223u;
+            in[i] = (int16_t)((int32_t)(lcg >> 16) - 32768) / 16;
+        }
+        dsp_afe_frame_t out;
+        if (dsp_afe_feed(afe, in, 1) != ESP_OK || dsp_afe_fetch(afe, &out) != ESP_OK) { return 0.0f; }
+        sum += h >= from ? out.level_dbfs : 0;
+    }
+    return afe != NULL ? sum / (float)(hops - from) : 0.0f;
+}
+
+static void check_ns_floor_in_chain(void)
+{
+    dsp_afe_config_t unit_ns = kPlain;
+    unit_ns.ns = &kUnitNs;
+    const float floor_db = mean_level_dbfs(&kPlain, HOPS * 8, HOPS * 5);
+    const float unit_db = mean_level_dbfs(&unit_ns, HOPS * 8, HOPS * 5);
+    char line[160];
+    snprintf(line, sizeof(line),
+             "ns_omlsa by default: steady noise %.1f dB under the unit-gain slot (floor %.0f dB)",
+             (double)(unit_db - floor_db), (double)kPlain.ns_floor_db);
+    check(unit_db - floor_db > -kPlain.ns_floor_db - 3.0f, line);
+}
+#endif
+
 #if DSP_AFE_HOST_GOLDEN
 static bool read_case(const char *path, void *buf, size_t cap, size_t *len)
 {
@@ -482,6 +552,7 @@ static void run_golden(const char *root)
     const unsigned cases =
         parity_run_block(root, "hpf", parity_hpf, read_case, buf, sizeof(buf), &s_failures) +
         parity_run_block(root, "balance", parity_balance, read_case, buf, sizeof(buf), &s_failures) +
+        parity_run_block(root, "ns_omlsa", parity_ns_omlsa, read_case, buf, sizeof(buf), &s_failures) +
         parity_run_block(root, "vad", parity_vad, read_case, buf, sizeof(buf), &s_failures) +
         parity_run_block(root, "agc", parity_agc, read_case, buf, sizeof(buf), &s_failures);
 #elif DSP_AFE_HOST_PRODUCT
@@ -509,6 +580,9 @@ int main(int argc, char **argv)
     check_module_shells();
     check_every_path();
     check_balance_in_chain();
+#endif
+#if CONFIG_DSP_AFE_NS_OMLSA_ENABLE
+    check_ns_floor_in_chain();
 #endif
 #if DSP_AFE_HOST_GOLDEN
     if (argc > 1) { run_golden(argv[1]); }
