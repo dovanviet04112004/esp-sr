@@ -19,7 +19,38 @@ gsc:
 bss:
   forget_tau_s: 1.0
 ns:
-  floor_db: -12.0                     # seed of NVS afe/ns_floor_db
+  floor_db: -12.0                     # seed of NVS afe/ns_floor_db: G_min of OM-LSA
+  # OM-LSA with IMCRA (KEHOACH 3.9) as the author's omlsa.m of 2003: 'medium' non-stationarity, broadband decision,
+  # no tone removal. The paper's smoothing factors at 8 ms are time constants here; at 16 ms they square.
+  freq_smooth_bins: 1                 # Hann window of 2w + 1 bins over frequency
+  smooth_tau_s: 0.075929773           # alpha_s 0.9
+  min_subwindows: 8                   # U
+  min_subwindow_s: 0.128              # V: 15 frames of 8 ms in the paper, 8 hops here
+  min_bias: 1.66                      # B_min
+  zeta0: 1.67
+  gamma0: 4.6
+  gamma1: 3.0
+  noise_tau_s: 0.049225035            # alpha_d 0.85
+  noise_bias: 1.4685                  # beta
+  xi_tau_s: 0.022429386               # alpha_xi 0.7
+  xi_local_bins: 1
+  xi_global_bins: 15
+  frame_band_hz: [50.0, 10000.0]      # f_l, f_u; f_u stops at Nyquist
+  p_min: 0.005
+  xi_local_db: [-10.0, -5.0]
+  xi_global_db: [-10.0, -5.0]
+  xi_frame_db: [-10.0, -5.0]
+  xi_peak_db: [0.0, 10.0]             # bounds of xi_m
+  local_mean_hz: [62.5, 3937.5]       # omlsa.m averages bins 3 .. k2 + k3 - 3 of its 512-point frame
+  local_reset_hz: [500.0, 3500.0]
+  local_reset_below: 0.25
+  q_max: 0.998
+  q_presence_max: 0.9                 # p is 0 where q reaches it
+  eta_tau_s: 0.155965806              # alpha_eta 0.95
+  eta_min_db: -18.0
+  lsa_v_max: 5.0                      # above it G_H1 is Wiener's
+  e1_points: 256
+  power_floor: 1.0e-10
 vad:
   hangover_ms: 240
   aggressiveness: 2                   # seed of NVS afe/vad_mode; agc needs it (docs/measurements/afe/agc.md)
