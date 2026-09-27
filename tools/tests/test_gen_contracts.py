@@ -263,3 +263,37 @@ class AfeTests(unittest.TestCase):
                     gen_contracts.afe_values()
             finally:
                 gen_contracts.load_yaml = original
+
+
+class LangViTest(unittest.TestCase):
+    def patched(self, edit) -> None:
+        doc = gen_contracts.load_yaml("lang_vi.yaml")
+        edit(doc)
+        original = gen_contracts.load_yaml
+        gen_contracts.load_yaml = lambda name: doc
+        try:
+            gen_contracts.lang_vi_values()
+        finally:
+            gen_contracts.load_yaml = original
+
+    def test_c_strings_escape_utf8_without_swallowing_the_next_digit(self) -> None:
+        self.assertEqual(gen_contracts.c_str('à1"\\'), '"\\303\\2401\\042\\134"')
+
+    def test_a_tone_form_that_is_not_its_base_with_the_mark_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, "ặ"):
+            self.patched(lambda doc: doc["vowels"]["a"].__setitem__(5, "ặ"))
+
+    def test_a_key_yaml_reads_as_a_boolean_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, "quote it"):
+            self.patched(lambda doc: doc["rhymes"].__setitem__(True, ["", "O", "n"]))
+
+    def test_a_rule_naming_an_unknown_unit_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, "south rules"):
+            self.patched(lambda doc: doc["dialect_rules"]["south"]["tone"].__setitem__("T3", "T9"))
+
+    def test_the_c_tables_hold_every_row_of_the_contract(self) -> None:
+        values = gen_contracts.lang_vi_values()
+        header = gen_contracts.gen_lang_vi_h(values)
+        for table in ("rhymes", "q_rhymes", "onsets", "dictionary"):
+            self.assertIn(f"#define GEN_LANG_VI_N_{table.upper()} {len(values[table])}\n", header)
+        self.assertEqual(len(values["letters"]), 2 * len(values["vowels"]) * len(values["tones"]) + 2)

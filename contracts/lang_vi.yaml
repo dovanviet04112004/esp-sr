@@ -1,0 +1,336 @@
+# Rules of lang_vi, one source for the firmware component and its srpipe.lang mirror (KEHOACH 3.12, 4.9).
+# A unit's id is its place in units; names are X-SAMPA. Any list of three values holds north (Ha Noi),
+# central (Hue) and south (Sai Gon), the order of dialects and of LANG_VI_DIALECT_* bits.
+version: 1
+dialects: [north, central, south]
+units: ["b_<", "m", "f", "v", "t", "t_h", "d_<", "n", "s", "s`", "z", "j", "z`", "l", "c", "t`", "J", "k", "x",
+        "N", "G", "h", "p", "w", "a:", "a", "@", "E", "e", "i", "O", "o", "@:", "u", "M", "i@", "u@", "M@",
+        "T1", "T2", "T3", "T4", "T5", "T6"]
+# Tones in the order of every six-form list below: ngang, huyen, nga, hoi, sac, nang.
+tones: ["T1", "T2", "T3", "T4", "T5", "T6"]
+tone_marks: ["", "̀", "̃", "̉", "́", "̣"]   # combining mark of each tone (NFD)
+tone_mark_aliases: {"̀": "̀", "́": "́"}          # deprecated Unicode tone marks
+# Each base vowel in the six tones, lower case; upper case comes from Unicode case mapping.
+vowels:
+  a: [a, à, ã, ả, á, ạ]
+  ă: [ă, ằ, ẵ, ẳ, ắ, ặ]
+  â: [â, ầ, ẫ, ẩ, ấ, ậ]
+  e: [e, è, ẽ, ẻ, é, ẹ]
+  ê: [ê, ề, ễ, ể, ế, ệ]
+  i: [i, ì, ĩ, ỉ, í, ị]
+  o: [o, ò, õ, ỏ, ó, ọ]
+  ô: [ô, ồ, ỗ, ổ, ố, ộ]
+  ơ: [ơ, ờ, ỡ, ở, ớ, ợ]
+  u: [u, ù, ũ, ủ, ú, ụ]
+  ư: [ư, ừ, ữ, ử, ứ, ự]
+  y: [y, ỳ, ỹ, ỷ, ý, ỵ]
+# Combining marks that turn one base letter into another (NFD).
+modifiers:
+  "̂": {a: â, e: ê, o: ô}
+  "̆": {a: ă}
+  "̛": {o: ơ, u: ư}
+# Letters that are not ASCII and not a vowel above.
+extra_letters: [đ]
+# Onset spellings and their unit in each dialect.
+onsets:
+  b: ["b_<", "b_<", "b_<"]
+  c: ["k", "k", "k"]
+  ch: ["c", "c", "c"]
+  d: ["z", "j", "j"]
+  đ: ["d_<", "d_<", "d_<"]
+  g: ["G", "G", "G"]
+  gh: ["G", "G", "G"]
+  gi: ["z", "j", "j"]
+  h: ["h", "h", "h"]
+  k: ["k", "k", "k"]
+  kh: ["x", "x", "x"]
+  l: ["l", "l", "l"]
+  m: ["m", "m", "m"]
+  n: ["n", "n", "n"]
+  ng: ["N", "N", "N"]
+  ngh: ["N", "N", "N"]
+  nh: ["J", "J", "J"]
+  p: ["p", "p", "p"]
+  ph: ["f", "f", "f"]
+  qu: ["k", "k", "k"]
+  r: ["z", "z`", "z`"]
+  s: ["s", "s`", "s`"]
+  t: ["t", "t", "t"]
+  th: ["t_h", "t_h", "t_h"]
+  tr: ["c", "t`", "t`"]
+  v: ["v", "v", "j"]
+  x: ["s", "s", "s"]
+# Spelling by the first letter of the rhyme: k, gh, ngh need one of these letters there; c, g, ng take none.
+front_only: {k: [i, e, ê, y], gh: [i, e, ê], ngh: [i, e, ê]}
+never_front: {c: [i, e, ê, y], g: [i, e, ê, y], ng: [i, e, ê, y]}
+no_glide: [c, k, gi]          # /kw/ is spelled qu, and gi takes no glide
+# gi shares its i with a rhyme that starts with i and has no other vowel (gì, gìn), or with iê (giếng), so
+# after gi the written rhyme never starts with i or y.
+gi_shares_before: [ê]
+gi_never_before: [i, y]
+# Rhyme spellings after any onset but qu: glide, nucleus, coda; "" for none.
+rhymes:
+  a: ["", "a:", ""]
+  ai: ["", "a:", "j"]
+  ao: ["", "a:", "w"]
+  am: ["", "a:", "m"]
+  an: ["", "a:", "n"]
+  ang: ["", "a:", "N"]
+  anh: ["", "a", "J"]
+  ap: ["", "a:", "p"]
+  at: ["", "a:", "t"]
+  ac: ["", "a:", "k"]
+  ach: ["", "a", "c"]
+  ay: ["", "a", "j"]
+  au: ["", "a", "w"]
+  ăm: ["", "a", "m"]
+  ăn: ["", "a", "n"]
+  ăng: ["", "a", "N"]
+  ăp: ["", "a", "p"]
+  ăt: ["", "a", "t"]
+  ăc: ["", "a", "k"]
+  âm: ["", "@", "m"]
+  ân: ["", "@", "n"]
+  âng: ["", "@", "N"]
+  âp: ["", "@", "p"]
+  ât: ["", "@", "t"]
+  âc: ["", "@", "k"]
+  ây: ["", "@", "j"]
+  âu: ["", "@", "w"]
+  e: ["", "E", ""]
+  eo: ["", "E", "w"]
+  em: ["", "E", "m"]
+  en: ["", "E", "n"]
+  eng: ["", "E", "N"]
+  ep: ["", "E", "p"]
+  et: ["", "E", "t"]
+  ec: ["", "E", "k"]
+  ê: ["", "e", ""]
+  êu: ["", "e", "w"]
+  êm: ["", "e", "m"]
+  ên: ["", "e", "n"]
+  ênh: ["", "e", "J"]
+  êp: ["", "e", "p"]
+  êt: ["", "e", "t"]
+  êch: ["", "e", "c"]
+  i: ["", "i", ""]
+  y: ["", "i", ""]
+  iu: ["", "i", "w"]
+  im: ["", "i", "m"]
+  in: ["", "i", "n"]
+  inh: ["", "i", "J"]
+  ip: ["", "i", "p"]
+  it: ["", "i", "t"]
+  ich: ["", "i", "c"]
+  ia: ["", "i@", ""]
+  iêu: ["", "i@", "w"]
+  iêm: ["", "i@", "m"]
+  iên: ["", "i@", "n"]
+  iêng: ["", "i@", "N"]
+  iêp: ["", "i@", "p"]
+  iêt: ["", "i@", "t"]
+  iêc: ["", "i@", "k"]
+  yêu: ["", "i@", "w"]
+  yêm: ["", "i@", "m"]
+  yên: ["", "i@", "n"]
+  yêng: ["", "i@", "N"]
+  yêt: ["", "i@", "t"]
+  o: ["", "O", ""]
+  oi: ["", "O", "j"]
+  om: ["", "O", "m"]
+  "on": ["", "O", "n"]
+  ong: ["", "O", "N"]
+  op: ["", "O", "p"]
+  ot: ["", "O", "t"]
+  oc: ["", "O", "k"]
+  oong: ["", "O", "N"]
+  ooc: ["", "O", "k"]
+  ô: ["", "o", ""]
+  ôi: ["", "o", "j"]
+  ôm: ["", "o", "m"]
+  ôn: ["", "o", "n"]
+  ông: ["", "o", "N"]
+  ôp: ["", "o", "p"]
+  ôt: ["", "o", "t"]
+  ôc: ["", "o", "k"]
+  ơ: ["", "@:", ""]
+  ơi: ["", "@:", "j"]
+  ơm: ["", "@:", "m"]
+  ơn: ["", "@:", "n"]
+  ơp: ["", "@:", "p"]
+  ơt: ["", "@:", "t"]
+  u: ["", "u", ""]
+  ui: ["", "u", "j"]
+  um: ["", "u", "m"]
+  un: ["", "u", "n"]
+  ung: ["", "u", "N"]
+  up: ["", "u", "p"]
+  ut: ["", "u", "t"]
+  uc: ["", "u", "k"]
+  ua: ["", "u@", ""]
+  uôi: ["", "u@", "j"]
+  uôm: ["", "u@", "m"]
+  uôn: ["", "u@", "n"]
+  uông: ["", "u@", "N"]
+  uôt: ["", "u@", "t"]
+  uôc: ["", "u@", "k"]
+  ư: ["", "M", ""]
+  ưi: ["", "M", "j"]
+  ưu: ["", "M", "w"]
+  ưm: ["", "M", "m"]
+  ưn: ["", "M", "n"]
+  ưng: ["", "M", "N"]
+  ưt: ["", "M", "t"]
+  ưc: ["", "M", "k"]
+  ưa: ["", "M@", ""]
+  ươi: ["", "M@", "j"]
+  ươu: ["", "M@", "w"]
+  ươm: ["", "M@", "m"]
+  ươn: ["", "M@", "n"]
+  ương: ["", "M@", "N"]
+  ươp: ["", "M@", "p"]
+  ươt: ["", "M@", "t"]
+  ươc: ["", "M@", "k"]
+  oa: ["w", "a:", ""]
+  oai: ["w", "a:", "j"]
+  oao: ["w", "a:", "w"]
+  oam: ["w", "a:", "m"]
+  oan: ["w", "a:", "n"]
+  oang: ["w", "a:", "N"]
+  oanh: ["w", "a", "J"]
+  oap: ["w", "a:", "p"]
+  oat: ["w", "a:", "t"]
+  oac: ["w", "a:", "k"]
+  oach: ["w", "a", "c"]
+  oay: ["w", "a", "j"]
+  oăm: ["w", "a", "m"]
+  oăn: ["w", "a", "n"]
+  oăng: ["w", "a", "N"]
+  oăt: ["w", "a", "t"]
+  oăc: ["w", "a", "k"]
+  oe: ["w", "E", ""]
+  oeo: ["w", "E", "w"]
+  oen: ["w", "E", "n"]
+  oet: ["w", "E", "t"]
+  uân: ["w", "@", "n"]
+  uâng: ["w", "@", "N"]
+  uât: ["w", "@", "t"]
+  uây: ["w", "@", "j"]
+  uê: ["w", "e", ""]
+  uênh: ["w", "e", "J"]
+  uêch: ["w", "e", "c"]
+  uơ: ["w", "@:", ""]
+  uy: ["w", "i", ""]
+  uya: ["w", "i@", ""]
+  uyu: ["w", "i", "w"]
+  uynh: ["w", "i", "J"]
+  uych: ["w", "i", "c"]
+  uyt: ["w", "i", "t"]
+  uyp: ["w", "i", "p"]
+  uyên: ["w", "i@", "n"]
+  uyêt: ["w", "i@", "t"]
+zero_onset_only: [yêu, yêm, yên, yêng, yêt]   # iê is spelled yê without an onset
+onset_only: [iêu, iêm, iên, iêng, iêp, iêt, iêc]
+# Rhymes after qu, spelled without the u: its u is the glide, or the u of uô in quốc.
+q_rhymes:
+  a: ["w", "a:", ""]
+  ai: ["w", "a:", "j"]
+  ao: ["w", "a:", "w"]
+  an: ["w", "a:", "n"]
+  ang: ["w", "a:", "N"]
+  anh: ["w", "a", "J"]
+  at: ["w", "a:", "t"]
+  ac: ["w", "a:", "k"]
+  ach: ["w", "a", "c"]
+  ay: ["w", "a", "j"]
+  ăm: ["w", "a", "m"]
+  ăn: ["w", "a", "n"]
+  ăng: ["w", "a", "N"]
+  ăp: ["w", "a", "p"]
+  ăt: ["w", "a", "t"]
+  ăc: ["w", "a", "k"]
+  ân: ["w", "@", "n"]
+  âng: ["w", "@", "N"]
+  ât: ["w", "@", "t"]
+  ây: ["w", "@", "j"]
+  e: ["w", "E", ""]
+  eo: ["w", "E", "w"]
+  en: ["w", "E", "n"]
+  et: ["w", "E", "t"]
+  ê: ["w", "e", ""]
+  ên: ["w", "e", "n"]
+  êt: ["w", "e", "t"]
+  ênh: ["w", "e", "J"]
+  êch: ["w", "e", "c"]
+  i: ["w", "i", ""]
+  y: ["w", "i", ""]
+  ynh: ["w", "i", "J"]
+  ych: ["w", "i", "c"]
+  yt: ["w", "i", "t"]
+  yên: ["w", "i@", "n"]
+  yêt: ["w", "i@", "t"]
+  ơ: ["w", "@:", ""]
+  ôc: ["", "u@", "k"]
+checked_codas: ["p", "t", "k", "c"]           # stops: the syllable takes only sac or nang
+checked_tones: ["T5", "T6"]
+# Each region's rewrites of a syllable's units, in key order; a rewrite looks at the nucleus and coda as spelled.
+# glide_drops_onset: onsets the glide w silences; velar_codas skip the nuclei of velar_keep_after.
+dialect_rules:
+  north: {glide_drops_onset: [], velar_codas: {}, velar_keep_after: [], palatal_codas: {}, centralize: {},
+          centralize_before: [], tone: {}}
+  central: {glide_drops_onset: [], velar_codas: {"n": "N", "t": "k"}, velar_keep_after: ["i", "e"],
+            palatal_codas: {}, centralize: {}, centralize_before: [], tone: {"T3": "T4"}}
+  south: {glide_drops_onset: ["k", "h"], velar_codas: {"n": "N", "t": "k"}, velar_keep_after: ["i", "e"],
+          palatal_codas: {"J": "n", "c": "t"}, centralize: {"i": "M", "e": "@"},
+          centralize_before: ["n", "t", "J", "c"], tone: {"T3": "T4"}}
+# Reading numbers out (KEHOACH 3.12): up to max_digits as a number, longer or with a leading 0 digit by digit.
+numbers:
+  digits: [không, một, hai, ba, bốn, năm, sáu, bảy, tám, chín]
+  ten: mười                   # 10 to 19
+  tens: mươi                  # after a tens digit of 2 to 9
+  hundred: trăm
+  million: triệu
+  billion: tỷ
+  thousand: [nghìn, ngàn, ngàn]
+  zero_tens: [linh, lẻ, lẻ]   # 105: một trăm linh năm
+  one_after_tens: mốt         # 21: hai mươi mốt
+  four_after_tens: tư         # 24: hai mươi tư
+  five_after_ten: lăm         # 15, 25: mười lăm, hai mươi lăm
+  decimal_comma: phẩy
+  dot: chấm
+  max_digits: 12
+  ordinal_word: thứ
+  ordinals: {1: nhất, 4: tư}  # thứ 1, thứ 4: thứ nhất, thứ tư
+symbols: {"%": phần trăm, "&": và, "+": cộng}
+# Abbreviations and loanwords, looked up whole and in lower case; every value is valid Vietnamese syllables.
+dictionary:
+  app: áp
+  bluetooth: bờ lu tút
+  camera: ca mê ra
+  cm: xen ti mét
+  email: i meo
+  facebook: phây búc
+  fm: ép em
+  google: gu gồ
+  h: giờ
+  hcm: hồ chí minh
+  internet: in tơ nét
+  karaoke: ca ra ô kê
+  kg: ki lô gam
+  km: ki lô mét
+  laptop: láp tốp
+  led: lét
+  ok: ô kê
+  okay: ô kê
+  radio: ra đi ô
+  tivi: ti vi
+  tp: thành phố
+  tv: ti vi
+  usb: u ét bê
+  video: vi đê ô
+  vn: việt nam
+  wi-fi: oai phai
+  wifi: oai phai
+  youtube: diu túp
+  zalo: da lô
+  đ: đồng

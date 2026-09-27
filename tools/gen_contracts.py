@@ -13,6 +13,7 @@ import json
 import pprint
 import re
 import sys
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -233,6 +234,356 @@ def gen_afe_h(values: list[tuple[str, AfeValue]]) -> str:
 def gen_afe_py(values: list[tuple[str, AfeValue]], modules: list[str]) -> str:
     lines = "".join(f"{name} = {value!r}\n" for name, value in values)
     return banner("contracts/afe.yaml", "#") + "\n" + lines + f"MODULES = {tuple(modules)!r}\n"
+
+
+LANG_INC = "firmware/components/lang_vi/priv_include"
+LANG_UNIT_NONE = 0xFF
+LANG_RULE_KEYS = (
+    "glide_drops_onset",
+    "velar_codas",
+    "velar_keep_after",
+    "palatal_codas",
+    "centralize",
+    "centralize_before",
+    "tone",
+)
+LANG_RHYME_ZERO_ONSET_ONLY = 1
+LANG_RHYME_ONSET_ONLY = 2
+
+
+def _lang_check(ok: bool, what: str) -> None:
+    if not ok:
+        raise ValueError(f"lang_vi.yaml: {what}")
+
+
+def _lang_strings(node: object) -> list[str]:
+    if isinstance(node, str):
+        return [node]
+    if isinstance(node, dict):
+        return [s for k, v in node.items() for s in _lang_strings(k) + _lang_strings(v)]
+    if isinstance(node, list):
+        return [s for v in node for s in _lang_strings(v)]
+    return []
+
+
+def lang_vi_values() -> dict:
+    """lang_vi.yaml, checked: units known, letters and marks as Unicode composes them, text in NFC lower case."""
+    doc = load_yaml("lang_vi.yaml")
+    tables = ("onsets", "rhymes", "q_rhymes", "symbols", "dictionary")
+    _lang_check(all(isinstance(k, str) for t in tables for k in doc[t]), "YAML read a key as a non-string: quote it")
+    units = doc["units"]
+    _lang_check(len(set(units)) == len(units) < LANG_UNIT_NONE, "units must be distinct and fewer than 255")
+    known = set(units)
+    composed = {k: v for k, v in doc.items() if k != "tone_mark_aliases"}
+    _lang_check(all(unicodedata.is_normalized("NFC", s) for s in _lang_strings(composed)), "strings must be NFC")
+    n_dialects = len(doc["dialects"])
+    tones, marks = doc["tones"], doc["tone_marks"]
+    _lang_check(len(tones) == len(marks) and set(tones) <= known, "tones must be units, one mark each")
+    for base, forms in doc["vowels"].items():
+        _lang_check(len(forms) == len(tones) and forms[0] == base, f"vowel {base} needs its {len(tones)} tone forms")
+        for form, mark in zip(forms, marks, strict=True):
+            _lang_check(unicodedata.normalize("NFC", base + mark) == form, f"{form} is not {base} with its mark")
+            _lang_check(len(form.upper()) == 1 and form.upper().lower() == form, f"{form} has no single upper case")
+    for mark, pairs in doc["modifiers"].items():
+        _lang_check(all(unicodedata.normalize("NFC", a + mark) == b for a, b in pairs.items()), f"modifier {mark!r}")
+    _lang_check(all(unicodedata.normalize("NFC", a) == b for a, b in doc["tone_mark_aliases"].items()), "aliases")
+    for spelling, per_dialect in doc["onsets"].items():
+        _lang_check(len(per_dialect) == n_dialects and set(per_dialect) <= known, f"onset {spelling}")
+    for table in ("rhymes", "q_rhymes"):
+        for spelling, (glide, nucleus, coda) in doc[table].items():
+            _lang_check(glide in ("", "w") and nucleus in known and coda in known | {""}, f"{table} {spelling}")
+    _lang_check(set(doc["zero_onset_only"]) | set(doc["onset_only"]) <= set(doc["rhymes"]), "rhyme contexts")
+    _lang_check(set(doc["checked_codas"]) | set(doc["checked_tones"]) <= known, "checked codas and tones")
+    for dialect in doc["dialects"]:
+        rules = doc["dialect_rules"][dialect]
+        _lang_check(tuple(rules) == LANG_RULE_KEYS, f"{dialect} rules must be {LANG_RULE_KEYS}")
+        _lang_check(set(_lang_strings(list(rules.values()))) <= known, f"{dialect} rules name unknown units")
+    numbers = doc["numbers"]
+    _lang_check(len(numbers["digits"]) == 10, "numbers need ten digits")
+    _lang_check(all(len(numbers[k]) == n_dialects for k in ("thousand", "zero_tens")), "per-dialect number words")
+    _lang_check(all(k == k.lower() for k in doc["dictionary"]), "dictionary keys must be lower case")
+    letters = {}
+    for base, forms in doc["vowels"].items():
+        for tone, form in enumerate(forms):
+            letters[form] = letters[form.upper()] = (base, tone)
+    for extra in doc["extra_letters"]:
+        letters[extra] = letters[extra.upper()] = (extra, 0)
+    return {**doc, "letters": letters}
+
+
+def c_str(text: str) -> str:
+    """A C literal of text in UTF-8; other bytes as three-digit octal, which never swallows the next character."""
+    body = "".join(chr(b) if 0x20 <= b < 0x7F and chr(b) not in '"\\' else f"\\{b:03o}" for b in text.encode("utf-8"))
+    return f'"{body}"'
+
+
+def _c_array(ctype: str, name: str, size: str, rows: list[str]) -> str:
+    return f"static const {ctype} {name}[{size}] = {{\n" + "".join(f"    {r},\n" for r in rows) + "};\n"
+
+
+def gen_lang_vi_h(v: dict) -> str:
+    uid = {name: i for i, name in enumerate(v["units"])}
+
+    def unit(name: str) -> str:
+        return str(uid[name]) if name else "GEN_LANG_VI_UNIT_NONE"
+
+    def units(names: list[str]) -> str:
+        return "{" + ", ".join(unit(n) for n in names) + "}"
+
+    def pairs(mapping: dict) -> str:
+        return "{" + ", ".join(f"{{{unit(a)}, {unit(b)}}}" for a, b in mapping.items()) + "}" if mapping else "{{0, 0}}"
+
+    def rhymes(table: str) -> list[str]:
+        flags = {s: LANG_RHYME_ZERO_ONSET_ONLY for s in v["zero_onset_only"]} if table == "rhymes" else {}
+        flags |= {s: LANG_RHYME_ONSET_ONLY for s in v["onset_only"]} if table == "rhymes" else {}
+        rows = v[table].items()
+        return [f"{{{c_str(s)}, {unit(g)}, {unit(n)}, {unit(c)}, {flags.get(s, 0)}}}" for s, (g, n, c) in rows]
+
+    rules = [v["dialect_rules"][d] for d in v["dialects"]]
+    rule_max = max(len(r[k]) for r in rules for k in LANG_RULE_KEYS)
+    spelling_rules = [(o, True, ls) for o, ls in v["front_only"].items()]
+    spelling_rules += [(o, False, ls) for o, ls in v["never_front"].items()]
+    front_max = max(len(ls) for _, _, ls in spelling_rules)
+    onsets = sorted(v["onsets"].items(), key=lambda item: -len(item[0].encode("utf-8")))
+    numbers = v["numbers"]
+    tone_marks = [(m, t) for t, m in enumerate(v["tone_marks"]) if m]
+    tone_marks += [(a, v["tone_marks"].index(m)) for a, m in v["tone_mark_aliases"].items()]
+    modifiers = [(m, a, b) for m, ps in v["modifiers"].items() for a, b in ps.items()]
+    counts = {
+        "VERSION": v["version"],
+        "N_UNITS": len(v["units"]),
+        "N_DIALECTS": len(v["dialects"]),
+        "N_TONES": len(v["tones"]),
+        "N_VOWELS": len(v["vowels"]),
+        "N_LETTERS": len(v["letters"]),
+        "N_TONE_MARKS": len(tone_marks),
+        "N_MODIFIERS": len(modifiers),
+        "N_ONSETS": len(onsets),
+        "N_SPELLING_RULES": len(spelling_rules),
+        "FRONT_MAX": front_max,
+        "N_NO_GLIDE": len(v["no_glide"]),
+        "N_GI_SHARES_BEFORE": len(v["gi_shares_before"]),
+        "N_GI_NEVER_BEFORE": len(v["gi_never_before"]),
+        "N_RHYMES": len(v["rhymes"]),
+        "N_Q_RHYMES": len(v["q_rhymes"]),
+        "N_CHECKED_CODAS": len(v["checked_codas"]),
+        "N_CHECKED_TONES": len(v["checked_tones"]),
+        "RULE_MAX": rule_max,
+        "NUMBER_MAX_DIGITS": numbers["max_digits"],
+        "N_ORDINALS": len(numbers["ordinals"]),
+        "N_SYMBOLS": len(v["symbols"]),
+        "N_DICTIONARY": len(v["dictionary"]),
+    }
+    out = [banner("contracts/lang_vi.yaml", "//"), "#pragma once\n", "#include <stdbool.h>", "#include <stdint.h>\n"]
+    out += [f"#define GEN_LANG_VI_{name} {value}" for name, value in counts.items()]
+    out += [
+        f"#define GEN_LANG_VI_UNIT_NONE 0x{LANG_UNIT_NONE:02X}",
+        f"#define GEN_LANG_VI_RHYME_ZERO_ONSET_ONLY {LANG_RHYME_ZERO_ONSET_ONLY}u",
+        f"#define GEN_LANG_VI_RHYME_ONSET_ONLY {LANG_RHYME_ONSET_ONLY}u",
+    ]
+    for key in ("ten", "tens", "hundred", "million", "billion", "one_after_tens", "four_after_tens"):
+        out.append(f"#define GEN_LANG_VI_NUMBER_{key.upper()} {c_str(numbers[key])}")
+    for key in ("five_after_ten", "decimal_comma", "dot", "ordinal_word"):
+        out.append(f"#define GEN_LANG_VI_NUMBER_{key.upper()} {c_str(numbers[key])}")
+    out += [
+        "",
+        "typedef struct { uint32_t codepoint; uint32_t base; uint8_t tone; } gen_lang_vi_letter_t;",
+        "typedef struct { uint32_t mark; uint8_t tone; } gen_lang_vi_tone_mark_t;",
+        "typedef struct { uint32_t mark; uint32_t from; uint32_t to; } gen_lang_vi_modifier_t;",
+        "typedef struct { const char *spelling; uint8_t units[GEN_LANG_VI_N_DIALECTS]; } gen_lang_vi_onset_t;",
+        "typedef struct {",
+        "    const char *onset;",
+        "    bool only;",
+        "    uint8_t n_letters;",
+        "    uint32_t letters[GEN_LANG_VI_FRONT_MAX];",
+        "} gen_lang_vi_spelling_rule_t;",
+        "typedef struct {",
+        "    const char *spelling;",
+        "    uint8_t glide;",
+        "    uint8_t nucleus;",
+        "    uint8_t coda;",
+        "    uint8_t flags;",
+        "} gen_lang_vi_rhyme_t;",
+        "typedef struct { uint8_t from; uint8_t to; } gen_lang_vi_pair_t;",
+        "typedef struct {",
+    ]
+    for key in LANG_RULE_KEYS:
+        kind = "gen_lang_vi_pair_t" if isinstance(rules[0][key], dict) else "uint8_t"
+        out += [f"    uint8_t n_{key};", f"    {kind} {key}[GEN_LANG_VI_RULE_MAX];"]
+    out += [
+        "} gen_lang_vi_dialect_rules_t;",
+        "typedef struct { uint32_t value; const char *word; } gen_lang_vi_ordinal_t;",
+        "typedef struct { uint32_t codepoint; const char *text; } gen_lang_vi_symbol_t;",
+        "typedef struct { const char *key; const char *text; } gen_lang_vi_entry_t;",
+        "",
+    ]
+    out.append(_c_array("char *const", "GEN_LANG_VI_UNIT_NAMES", "GEN_LANG_VI_N_UNITS", [c_str(u) for u in v["units"]]))
+    out.append(_c_array("uint8_t", "GEN_LANG_VI_TONE_UNITS", "GEN_LANG_VI_N_TONES", [unit(t) for t in v["tones"]]))
+    out.append(
+        _c_array(
+            "uint32_t",
+            "GEN_LANG_VI_VOWEL_FORMS",
+            "GEN_LANG_VI_N_VOWELS][GEN_LANG_VI_N_TONES",
+            ["{" + ", ".join(f"0x{ord(f):04X}" for f in forms) + "}" for forms in v["vowels"].values()],
+        )
+    )
+    out.append(
+        _c_array(
+            "gen_lang_vi_letter_t",
+            "GEN_LANG_VI_LETTERS",
+            "GEN_LANG_VI_N_LETTERS",
+            [f"{{0x{ord(c):04X}, 0x{ord(b):04X}, {t}}}" for c, (b, t) in v["letters"].items()],
+        )
+    )
+    out.append(
+        _c_array(
+            "gen_lang_vi_tone_mark_t",
+            "GEN_LANG_VI_TONE_MARKS",
+            "GEN_LANG_VI_N_TONE_MARKS",
+            [f"{{0x{ord(m):04X}, {t}}}" for m, t in tone_marks],
+        )
+    )
+    out.append(
+        _c_array(
+            "gen_lang_vi_modifier_t",
+            "GEN_LANG_VI_MODIFIERS",
+            "GEN_LANG_VI_N_MODIFIERS",
+            [f"{{0x{ord(m):04X}, 0x{ord(a):04X}, 0x{ord(b):04X}}}" for m, a, b in modifiers],
+        )
+    )
+    out.append(
+        _c_array(
+            "gen_lang_vi_onset_t",
+            "GEN_LANG_VI_ONSETS",
+            "GEN_LANG_VI_N_ONSETS",
+            [f"{{{c_str(s)}, {units(us)}}}" for s, us in onsets],
+        )
+    )
+    out.append(
+        _c_array(
+            "gen_lang_vi_spelling_rule_t",
+            "GEN_LANG_VI_SPELLING_RULES",
+            "GEN_LANG_VI_N_SPELLING_RULES",
+            [
+                f"{{{c_str(o)}, {'true' if only else 'false'}, {len(ls)}, "
+                + "{"
+                + ", ".join(f"0x{ord(ch):04X}" for ch in ls)
+                + "}}"
+                for o, only, ls in spelling_rules
+            ],
+        )
+    )
+    out.append(
+        _c_array("char *const", "GEN_LANG_VI_NO_GLIDE", "GEN_LANG_VI_N_NO_GLIDE", [c_str(o) for o in v["no_glide"]])
+    )
+    out.append(
+        _c_array(
+            "uint32_t",
+            "GEN_LANG_VI_GI_SHARES_BEFORE",
+            "GEN_LANG_VI_N_GI_SHARES_BEFORE",
+            [f"0x{ord(ch):04X}" for ch in v["gi_shares_before"]],
+        )
+    )
+    out.append(
+        _c_array(
+            "uint32_t",
+            "GEN_LANG_VI_GI_NEVER_BEFORE",
+            "GEN_LANG_VI_N_GI_NEVER_BEFORE",
+            [f"0x{ord(ch):04X}" for ch in v["gi_never_before"]],
+        )
+    )
+    out.append(_c_array("gen_lang_vi_rhyme_t", "GEN_LANG_VI_RHYMES", "GEN_LANG_VI_N_RHYMES", rhymes("rhymes")))
+    out.append(_c_array("gen_lang_vi_rhyme_t", "GEN_LANG_VI_Q_RHYMES", "GEN_LANG_VI_N_Q_RHYMES", rhymes("q_rhymes")))
+    out.append(
+        _c_array(
+            "uint8_t", "GEN_LANG_VI_CHECKED_CODAS", "GEN_LANG_VI_N_CHECKED_CODAS", [unit(c) for c in v["checked_codas"]]
+        )
+    )
+    out.append(
+        _c_array(
+            "uint8_t", "GEN_LANG_VI_CHECKED_TONES", "GEN_LANG_VI_N_CHECKED_TONES", [unit(t) for t in v["checked_tones"]]
+        )
+    )
+    rule_rows = []
+    for r in rules:
+        fields = []
+        for key in LANG_RULE_KEYS:
+            body = pairs(r[key]) if isinstance(r[key], dict) else units(r[key]) if r[key] else "{0}"
+            fields.append(f".n_{key} = {len(r[key])}, .{key} = {body}")
+        rule_rows.append("{" + ", ".join(fields) + "}")
+    out.append(
+        _c_array("gen_lang_vi_dialect_rules_t", "GEN_LANG_VI_DIALECT_RULES", "GEN_LANG_VI_N_DIALECTS", rule_rows)
+    )
+    out.append(_c_array("char *const", "GEN_LANG_VI_NUMBER_DIGITS", "10", [c_str(d) for d in numbers["digits"]]))
+    for key in ("thousand", "zero_tens"):
+        out.append(
+            _c_array(
+                "char *const",
+                f"GEN_LANG_VI_NUMBER_{key.upper()}",
+                "GEN_LANG_VI_N_DIALECTS",
+                [c_str(w) for w in numbers[key]],
+            )
+        )
+    out.append(
+        _c_array(
+            "gen_lang_vi_ordinal_t",
+            "GEN_LANG_VI_ORDINALS",
+            "GEN_LANG_VI_N_ORDINALS",
+            [f"{{{n}, {c_str(w)}}}" for n, w in numbers["ordinals"].items()],
+        )
+    )
+    out.append(
+        _c_array(
+            "gen_lang_vi_symbol_t",
+            "GEN_LANG_VI_SYMBOLS",
+            "GEN_LANG_VI_N_SYMBOLS",
+            [f"{{0x{ord(s):04X}, {c_str(t)}}}" for s, t in v["symbols"].items()],
+        )
+    )
+    out.append(
+        _c_array(
+            "gen_lang_vi_entry_t",
+            "GEN_LANG_VI_DICTIONARY",
+            "GEN_LANG_VI_N_DICTIONARY",
+            [f"{{{c_str(k)}, {c_str(t)}}}" for k, t in v["dictionary"].items()],
+        )
+    )
+    return "\n".join(out)
+
+
+def gen_lang_vi_py(v: dict) -> str:
+    names = [
+        "version",
+        "dialects",
+        "units",
+        "tones",
+        "tone_marks",
+        "tone_mark_aliases",
+        "vowels",
+        "modifiers",
+        "extra_letters",
+        "letters",
+        "onsets",
+        "front_only",
+        "never_front",
+        "no_glide",
+        "gi_shares_before",
+        "gi_never_before",
+        "rhymes",
+        "zero_onset_only",
+        "onset_only",
+        "q_rhymes",
+        "checked_codas",
+        "checked_tones",
+        "dialect_rules",
+        "numbers",
+        "symbols",
+        "dictionary",
+    ]
+    body = "".join(f"{n.upper()} = {pprint.pformat(v[n], width=116, sort_dicts=False)}\n" for n in names)
+    # Combining marks only ever sit inside string literals here; escaped, they stay visible.
+    body = "".join(f"\\u{ord(ch):04x}" if unicodedata.category(ch) == "Mn" else ch for ch in body)
+    return banner("contracts/lang_vi.yaml", "#") + "\n" + body
 
 
 def stream_values() -> dict:
@@ -678,6 +1029,7 @@ def outputs() -> dict[str, str]:
     t = topic_values()
     afe = afe_values()
     modules = afe_modules()
+    lang = lang_vi_values()
     init = banner("contracts/", "#")
     return {
         f"{COMMON_INC}/gen_grid.h": gen_grid_h(g),
@@ -687,10 +1039,12 @@ def outputs() -> dict[str, str]:
         f"{MQTT_INC}/gen_payload.h": gen_payload_h(),
         f"{AFE_INC}/gen_afe.h": gen_afe_h(afe),
         SDKCONFIG_AFE: gen_sdkconfig_afe(modules),
+        f"{LANG_INC}/gen_lang_vi.h": gen_lang_vi_h(lang),
         f"{ML_GEN}/__init__.py": init,
         f"{ML_GEN}/grid.py": gen_grid_py(g),
         f"{ML_GEN}/array.py": gen_array_py(a),
         f"{ML_GEN}/afe.py": gen_afe_py(afe, modules),
+        f"{ML_GEN}/lang_vi.py": gen_lang_vi_py(lang),
         f"{HOST_GEN}/__init__.py": init,
         f"{HOST_GEN}/grid.py": gen_grid_py(g),
         f"{HOST_GEN}/stream.py": gen_stream_py(s),
