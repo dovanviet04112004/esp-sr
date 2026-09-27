@@ -34,7 +34,7 @@ jobs:
           idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.afe;sdkconfig.ci" build
           idf.py size
 
-      - name: dsp_spec and dsp_afe on the host, and C against Python on every golden case
+      - name: dsp_spec, dsp_afe and lang_vi on the host, and C against Python on every golden case
         if: steps.guard.outputs.ready == 'true'
         shell: bash
         run: |
@@ -42,16 +42,14 @@ jobs:
           pip install pytest==8.3.3 pyyaml==6.0.2
           make parity-host PARITY_PY=python
 
-      - name: lang_vi and ai_engine shells on the host
+      - name: ai_engine shell on the host
         if: steps.guard.outputs.ready == 'true'
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
-          for c in lang_vi ai_engine; do
-            cmake -S firmware/components/$c/test_apps/host -B build_host_$c -DCMAKE_BUILD_TYPE=Release
-            cmake --build build_host_$c -j
-            ./build_host_$c/${c}_host
-          done
+          cmake -S firmware/components/ai_engine/test_apps/host -B build_host_ai_engine -DCMAKE_BUILD_TYPE=Release
+          cmake --build build_host_ai_engine -j
+          ./build_host_ai_engine/ai_engine_host
 
       - name: Generated C compiles and round-trips against the fetched cJSON
         if: steps.guard.outputs.ready == 'true'

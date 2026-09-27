@@ -18,7 +18,7 @@ PARITY_APP := firmware/test_apps/parity
 PARITY_DEFAULTS := firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.bench $(PARITY_APP)/sdkconfig.defaults \
                    $(PARITY_APP)/CMakeLists.txt
 HOST_BUILD := build/host
-HOST_RUNS := dsp_spec/dsp_spec_host dsp_afe_host_off dsp_afe_host_on dsp_afe_host_product
+HOST_RUNS := dsp_spec/dsp_spec_host dsp_afe_host_off dsp_afe_host_on dsp_afe_host_product lang_vi/lang_vi_host
 # The judge imports pytest: the ml environment has it here, CI installs it and passes PARITY_PY=python.
 PARITY_PY ?= $(if $(shell command -v uv 2>/dev/null),uv run --project ml python,python3)
 
@@ -103,9 +103,11 @@ bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/ben
 	cd firmware/test_apps/bench_afe && pytest pytest_bench_afe.py --embedded-services esp,idf --target esp32s3 --port $(PORT) -s -p no:cacheprovider
 	python3 -m tools.budget
 
-parity-host: ## Run every golden case through dsp_spec and dsp_afe built for the host: modules off, all on, the product's
+parity-host: ## Run every golden case through dsp_spec, dsp_afe (modules off, all on, the product's) and lang_vi on the host
 	cd firmware/components/dsp_afe/test_apps/host && cmake -S . -B $(CURDIR)/$(HOST_BUILD) -DCMAKE_BUILD_TYPE=Release
 	cd $(HOST_BUILD) && cmake --build . -j
+	cd firmware/components/lang_vi/test_apps/host && cmake -S . -B $(CURDIR)/$(HOST_BUILD)/lang_vi -DCMAKE_BUILD_TYPE=Release
+	cd $(HOST_BUILD)/lang_vi && cmake --build . -j
 	@: > $(HOST_BUILD)/parity.log; for run in $(HOST_RUNS); do \
 	  $(HOST_BUILD)/$$run contracts/golden >> $(HOST_BUILD)/parity.log || { tail -n 30 $(HOST_BUILD)/parity.log; exit 1; }; \
 	done; grep -h "^HOST [0-9]* failure" $(HOST_BUILD)/parity.log

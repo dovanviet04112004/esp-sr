@@ -91,3 +91,22 @@ bool parity_ns_omlsa(const char *case_name, const void *buf, size_t len);
  *  @ret false when the case lacks a tensor, has the wrong shape or the module refuses it
  */
 bool parity_agc(const char *case_name, const void *buf, size_t len);
+
+/** Run one g2p case: every item in each dialect with room for as many units as the case has columns; compare
+ * the status and the units padded with 0xFF.
+ *  @ctx any | non-blocking
+ *  @ret false when the case lacks a tensor, has the wrong shape or memory runs out
+ */
+bool parity_g2p(const char *case_name, const void *buf, size_t len);
+
+/** Run one normalize case into as many bytes as the case has columns; compare the status and the output.
+ *  @ctx any | non-blocking
+ *  @ret false when the case lacks a tensor, has the wrong shape or memory runs out
+ */
+bool parity_normalize(const char *case_name, const void *buf, size_t len);
+
+/** Run one lexicon case with the mask of each line; compare the status and every field of lang_vi_pron_t.
+ *  @ctx any | non-blocking
+ *  @ret false when the case lacks a tensor, has the wrong shape or memory runs out
+ */
+bool parity_lexicon(const char *case_name, const void *buf, size_t len);
