@@ -55,3 +55,10 @@ Bản soi gương chạy khung 20 ms kèm bộ đếm kéo dài của WebRTC, so
 `py-webrtcvad`) trên tiếng tổng hợp giống lời nói, ba mức, ồn trắng, hồng, nâu, SNR 20 và 5 dB, 18 cảnh × 12 s mỗi mức:
 khớp **99,6%, 99,5%, 99,4%, 99,3%** số khung ở mức 0–3. Phần lệch nằm ở tín hiệu rất nhỏ và lúc mô hình nhiễu đang hội tụ,
 nơi số học nguyên của WebRTC làm tròn bước cập nhật nhỏ về 0. `ml/tests/test_vad.py` giữ phép so này với ngưỡng 97%.
+
+## 4. Giới hạn: nền ồn to
+
+WebRTC chặn trung bình mô hình nhiễu ở 67–72 dB thang `int16` mỗi dải (`noise_mean_max_db`), nên nền ồn to hơn cỡ
+−40 dBFS không được học thành nhiễu và bị gọi là lời nói. Trong phép đo `agc` (`agc.md`), lời nói −10 dBFS trên ồn trắng
+SNR 20 dB (nền −30 dBFS) bị `vad` mức 0 gắn cờ nói gần như suốt cảnh. Mức 2 chịu được mọi cảnh ở đó; đó là lý do mức
+gieo cho `afe/vad_mode` là 2.
