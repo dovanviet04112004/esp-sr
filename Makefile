@@ -11,6 +11,8 @@ STREAM_PORT = $(shell sed -n 's/^SRHOST_STREAM_PORT=//p' host/.env 2>/dev/null)
 DATA_ROOT = $(shell sed -n 's/^SRPIPE_DATA_ROOT=//p' host/.env 2>/dev/null)
 # idf.py only adds options a generated sdkconfig lacks, so one older than its defaults or their list is dropped.
 fresh_sdkconfig = if [ -f $(1) ] && [ -n "$$(find $(2) -newer $(1))" ]; then rm $(1); echo "$(1) regenerated"; fi
+FW_DEFAULTS := firmware/sdkconfig.defaults firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.afe \
+               firmware/CMakeLists.txt $(wildcard firmware/sdkconfig.secrets)
 BENCH_APP := firmware/test_apps/bench_afe
 PARITY_APP := firmware/test_apps/parity
 PARITY_DEFAULTS := firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.bench $(PARITY_APP)/sdkconfig.defaults \
@@ -68,9 +70,11 @@ report: measure ## Rebuild every number in docs/measurements/ with one command
 
 # firmware build profiles (KEHOACH 4.5.8)
 fw-dev: ## Build the dev profile
+	@$(call fresh_sdkconfig,firmware/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.dev)
 	cd firmware && idf.py -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.dev$(SECRETS)" build
 
 fw-bench: ## Build the bench profile, the only one numbers are reported from
+	@$(call fresh_sdkconfig,firmware/build_bench/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.bench)
 	cd firmware && idf.py -B build_bench -D SDKCONFIG=build_bench/sdkconfig \
 	  -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.bench$(SECRETS)" build
 
@@ -80,6 +84,7 @@ fw-prod: ## Build the prod profile in build_prod, from its own sdkconfig
 	  -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.prod$(SECRETS)" build
 
 flash: ## Flash and monitor the dev profile over the CH340 port
+	@$(call fresh_sdkconfig,firmware/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.dev)
 	cd firmware && idf.py -p $(PORT) -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.dev$(SECRETS)" flash monitor
 
 monitor: ## Open the serial monitor on the CH340 port
