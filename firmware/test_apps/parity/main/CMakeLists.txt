@@ -8,6 +8,9 @@ endif()
 if(CONFIG_DSP_AFE_VAD_ENABLE)
     list(APPEND srcs "parity_vad.c")
 endif()
+if(CONFIG_DSP_AFE_AGC_ENABLE)
+    list(APPEND srcs "parity_agc.c")
+endif()
 
 idf_component_register(
     SRCS ${srcs}

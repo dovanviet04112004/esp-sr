@@ -25,6 +25,9 @@ static const struct {
 #if CONFIG_DSP_AFE_VAD_ENABLE
     {"vad", parity_vad},
 #endif
+#if CONFIG_DSP_AFE_AGC_ENABLE
+    {"agc", parity_agc},
+#endif
 };
 
 static bool read_case(const char *path, void *buf, size_t cap, size_t *len)

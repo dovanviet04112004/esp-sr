@@ -71,3 +71,10 @@ bool parity_balance(const char *case_name, const void *buf, size_t len);
  *  @ret false when the case lacks a tensor, has the wrong shape or the module refuses it
  */
 bool parity_vad(const char *case_name, const void *buf, size_t len);
+
+/** Run one agc case with the target it carries, its int16 hops / 32768 and speech flags; compare the kept
+ * output samples and the gain of each hop.
+ *  @ctx task | blocking | builds only with CONFIG_DSP_AFE_AGC_ENABLE, where agc.c is compiled
+ *  @ret false when the case lacks a tensor, has the wrong shape or the module refuses it
+ */
+bool parity_agc(const char *case_name, const void *buf, size_t len);

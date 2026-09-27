@@ -479,7 +479,8 @@ static void run_golden(const char *root)
     const unsigned cases =
         parity_run_block(root, "hpf", parity_hpf, read_case, buf, sizeof(buf), &s_failures) +
         parity_run_block(root, "balance", parity_balance, read_case, buf, sizeof(buf), &s_failures) +
-        parity_run_block(root, "vad", parity_vad, read_case, buf, sizeof(buf), &s_failures);
+        parity_run_block(root, "vad", parity_vad, read_case, buf, sizeof(buf), &s_failures) +
+        parity_run_block(root, "agc", parity_agc, read_case, buf, sizeof(buf), &s_failures);
 #else
     const unsigned cases =
         parity_run_block(root, "chain", parity_chain, read_case, buf, sizeof(buf), &s_failures);
