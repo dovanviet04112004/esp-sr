@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from srpipe.dsp import emit_golden
-from srpipe.dsp.afe import balance, chain
+from srpipe.dsp.afe import balance, chain, ns_omlsa
 from srpipe.dsp.spec import mel, stft
 from srpipe.generated import afe, grid
 from srpipe.golden.gold import read_gold
@@ -168,3 +168,22 @@ def test_the_agc_negative_control_never_moves_its_gain() -> None:
     case = read_gold(emit_golden.GOLDEN_ROOT / "agc" / "case_neg_000.gold")
     right = emit_golden.agc_case(case["pcm"].reshape(-1), case["speech"], float(case["config"][0]))
     assert np.all(case["gain_db"] == 0.0) and np.any(right["gain_db"] != 0.0)
+
+
+def test_committed_ns_omlsa_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_ns_omlsa(tmp_path):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
+
+
+def test_the_ns_omlsa_negative_control_left_the_smoothing_unsquared() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "ns_omlsa" / "case_neg_000.gold")
+    right = emit_golden.ns_omlsa_case(case["power"], float(case["config"][0]))
+    wrong = emit_golden.ns_omlsa_case(case["power"], float(case["config"][0]), cfg=ns_omlsa.OmlsaConfig(hop_s=0.008))
+    np.testing.assert_array_equal(case["gain"], wrong["gain"])
+    assert np.max(np.abs(case["gain"] - right["gain"])) > 0.1
+
+
+def test_every_ns_omlsa_case_fits_the_parity_read_buffer() -> None:
+    for path in (emit_golden.GOLDEN_ROOT / "ns_omlsa").glob("*.gold"):
+        assert path.stat().st_size <= 512 * 1024

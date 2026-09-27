@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from srpipe.dsp.afe import agc, balance, chain, hpf, vad
+from srpipe.dsp.afe import agc, balance, chain, hpf, ns_omlsa, vad
 from srpipe.dsp.spec import mel, stft
 from srpipe.generated import afe, array, grid
 from srpipe.golden.gold import write_gold
@@ -31,6 +31,13 @@ BALANCE_HOPS = 16
 VAD_HOPS = 160
 AGC_LONG_HOPS = 128
 AGC_HOPS = 48
+# ns cases outlive two minimum windows of IMCRA (2 x 64 hops), what a rise of the noise takes to follow.
+NS_HOPS = 200
+NS_RISE_HOPS = 240
+NS_RISE_AT_HOP = 60
+NS_ECHO_HOPS = 150
+NS_SILENT_LEAD_HOPS = 20
+NS_BURST_HOPS = 40
 LSB = 1.0 / 32768.0
 MEL_CASES = (
     (mel.MelConfig(n_bands=40, f_min_hz=20.0, f_max_hz=7600.0, log_floor=1e-6), 13),
@@ -463,12 +470,76 @@ def emit_agc(root: Path) -> list[Path]:
     return written
 
 
+def ns_power(x: np.ndarray) -> np.ndarray:
+    """Power of every bin of every hop, as the facade hands the ns slot."""
+    spectra = stft.analyze_signal(x.astype(np.float32))
+    return (spectra.real * spectra.real + spectra.imag * spectra.imag).astype(np.float32)
+
+
+def ns_omlsa_case(
+    power: np.ndarray, floor_db: float, echo: np.ndarray | None = None, cfg: ns_omlsa.OmlsaConfig | None = None
+) -> dict[str, np.ndarray]:
+    """Power per hop, the gain floor, residual echo when the case has one; the gains and speech probability."""
+    model = ns_omlsa.Omlsa(cfg)
+    model.set_floor(floor_db)
+    echoes = echo if echo is not None else [None] * len(power)
+    outs = [model.process(p, e) for p, e in zip(power, echoes, strict=True)]
+    case = {"power": power, "config": np.array([floor_db], dtype=np.float32)}
+    if echo is not None:
+        case["echo"] = echo
+    case["gain"] = np.stack([o.gain for o in outs]).astype(np.float32)
+    case["speech_prob"] = np.array([o.speech_prob for o in outs], dtype=np.float32)
+    return case
+
+
+def _ns_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, float, np.ndarray | None]]:
+    """(power, floor dB, residual echo) per case: speech bursts over white noise; quiet speech over red noise at a -6 dB
+    floor; noise rising 20 dB; digital silence then faint speech at a -18 dB floor; speech with residual echo."""
+    n = NS_HOPS * grid.HOP_SAMPLES
+    bursts = np.repeat((np.arange(NS_HOPS) // NS_BURST_HOPS) % 2 == 1, grid.HOP_SAMPLES)
+    red = np.cumsum(rng.standard_normal(n))
+    red = red - np.convolve(red, np.ones(64) / 64, mode="same")
+    rise = 0.003 * rng.standard_normal(NS_RISE_HOPS * grid.HOP_SAMPLES)
+    rise[NS_RISE_AT_HOP * grid.HOP_SAMPLES :] *= 10.0
+    lead = NS_SILENT_LEAD_HOPS * grid.HOP_SAMPLES
+    faint = (0.002 * rng.standard_normal(n) + speechlike(rng, n, 0.05) * bursts) * (np.arange(n) >= lead)
+    m = NS_ECHO_HOPS * grid.HOP_SAMPLES
+    residual = speechlike(rng, m, 0.03)
+    near = speechlike(rng, m, 0.1) * bursts[:m] + 0.005 * rng.standard_normal(m)
+    return [
+        (ns_power(0.01 * rng.standard_normal(n) + speechlike(rng, n, 0.2) * bursts), -12.0, None),
+        (ns_power(0.02 * red / red.std() + speechlike(rng, n, 0.05) * bursts), -6.0, None),
+        (ns_power(rise), -12.0, None),
+        (ns_power(faint), -18.0, None),
+        (ns_power(near + residual), -12.0, ns_power(residual)),
+    ]
+
+
+def emit_ns_omlsa(root: Path) -> list[Path]:
+    """Five cases, then a negative control computed with the paper's 8 ms smoothing left unsquared at the 16 ms hop."""
+    rng = np.random.default_rng(SEED + 8)
+    written = []
+    for index, (power, floor_db, echo) in enumerate(_ns_inputs(rng)):
+        path = root / "ns_omlsa" / f"case_{index:03d}.gold"
+        write_gold(path, ns_omlsa_case(power, floor_db, echo))
+        written.append(path)
+    n = NS_HOPS * grid.HOP_SAMPLES
+    bursts = np.repeat((np.arange(NS_HOPS) // NS_BURST_HOPS) % 2 == 1, grid.HOP_SAMPLES)
+    power = ns_power(0.01 * rng.standard_normal(n) + speechlike(rng, n, 0.2) * bursts)
+    unsquared = ns_omlsa.OmlsaConfig(hop_s=0.008)
+    path = root / "ns_omlsa" / "case_neg_000.gold"
+    write_gold(path, {**ns_omlsa_case(power, -12.0, cfg=unsquared), "config": np.array([-12.0], dtype=np.float32)})
+    written.append(path)
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
     emitted = emit_stft(args.out) + emit_mel(args.out) + emit_chain(args.out) + emit_chain_modules(args.out)
-    for path in emitted + emit_hpf(args.out) + emit_balance(args.out) + emit_vad(args.out) + emit_agc(args.out):
+    emitted += emit_hpf(args.out) + emit_balance(args.out) + emit_vad(args.out) + emit_agc(args.out)
+    for path in emitted + emit_ns_omlsa(args.out):
         print(path.relative_to(args.out) if path.is_relative_to(args.out) else path)
     return 0
 
