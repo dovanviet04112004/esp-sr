@@ -608,13 +608,19 @@ QUAN V5.1.3): mức ra trong ±3 dB quanh đích với mức vào từ −50 t�
 
 | Phần | Cách làm |
 |---|---|
-| Mức lời nói | trung bình công suất của các bước `vad = 1` ở **đầu vào**, một cực hằng thời gian `level_tau_s` 0,5 s; khởi đầu bằng đích nên gain bắt đầu ở 0 dB |
+| Mức lời nói | trung bình công suất của các bước `vad = 1` ở **đầu vào**, một cực hằng thời gian `level_tau_s` 2 s, chỉ trên các bước không thấp hơn mức hiện tại quá `level_gate_db` 15,9 dB, như mức hoạt động của ITU-T P.56: `vad` gắn cờ cả khoảng nghỉ giữa từ và phần kéo dài, không có cổng thì mức ước thấp 1–3 dB và gain cao theo. Khi mọi bước nói đều dưới cổng (người nói nhỏ hẳn đi), mức tụt `level_fall_db_per_s` 1 dB/s cho tới khi bắt lại. Mức khởi đầu là đích trừ `gain_max_db`, để tiếng −50 dBFS qua cổng ngay; gain vẫn bắt đầu ở 0 dB |
 | Gain chậm | gain đích = √(công suất đích / mức lời nói), kẹp trong `gain_min_db` … `gain_max_db` (−20 … +30 dB, đủ cho vào −50 … −10 dBFS); gain đi về đích tối đa ×10^(3·0,016/20) mỗi bước lên, ×10^(−6·0,016/20) mỗi bước xuống, không vượt đích; áp một số cho cả bước |
 | Chặn đỉnh | tín hiệu sau gain chậm trễ `lookahead_ms` (64 mẫu); gain cần cho mỗi mẫu = trần / \|x\| khi vượt trần −3 dBFS, không thì 1; lấy cực tiểu trượt trên 65 mẫu, hồi phục tuyến tính về 1 trong `release_ms` 50 ms, rồi trung bình hộp 65 mẫu. Mọi mẫu trong cửa sổ trung bình đều ≤ gain cần của mẫu đỉnh, nên mẫu ra không vượt trần |
 | Số học | hằng số tuyến tính (công suất đích, bước lên xuống, giới hạn gain, hệ số làm trơn) tính một lần lúc init bằng double rồi làm tròn; mỗi bước chỉ còn nhân, cộng, chia, `sqrt`, nên C khớp bản soi gương từng bit. `gain_db` báo ra khung là 20·log₁₀ của gain chậm |
 
 Trên tín hiệu dừng gain hội tụ về đúng đích rồi đứng yên (bước cuối dừng tại đích, không vượt), nên không có chu kỳ.
 Mọi số ở `agc:` của `contracts/afe.yaml`.
+
+`agc` chỉ tốt bằng cờ `vad` gác nó. `vad` của WebRTC chặn trung bình mô hình nhiễu ở 67–72 dB thang `int16` mỗi dải, nên
+nền ồn to hơn cỡ −40 dBFS bị coi là lời nói; ở mức 0, nền ồn trắng −30 dBFS được gắn cờ gần như liên tục và `agc` thích
+nghi trên nhiễu. Đo trên cảnh VIVOS, τ 0,5 s để gain bám cả chênh mức giữa các câu, lệch đích tới 4–7 dB; τ 2 s với
+`vad` mức 2 giữ mọi mức vào −50 … −10 dBFS trong ±3 dB (`docs/measurements/afe/agc.md`). Vì thế mức mặc định gieo cho
+NVS `afe/vad_mode` là **2**, ở `vad.aggressiveness` của `contracts/afe.yaml`.
 
 ### 3.11 Đặc trưng và `wake`
 
