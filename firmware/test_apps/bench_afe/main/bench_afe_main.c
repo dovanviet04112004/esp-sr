@@ -8,6 +8,7 @@
 #include "dsp_afe/agc.h"
 #include "dsp_afe/balance.h"
 #include "dsp_afe/hpf.h"
+#include "dsp_afe/ns.h"
 #include "dsp_afe/vad.h"
 #include "dsp_spec/fft.h"
 #include "dsp_spec/mel.h"
@@ -31,6 +32,8 @@
 #define CORE_NHAN 0 // nhan_task computes log-mel (KEHOACH 5.2)
 #define PCM_FULL_SCALE 32768.0f
 #define REPORT_LINES_MAX 64
+#define NS_LEVEL_HOPS 40 // quiet and loud stretches reach every branch
+#define NS_LOUD 100.0f
 // The 40-band case of contracts/golden/mel until E11 fixes the recogniser's front end.
 #define MEL_BANDS 40
 #define MEL_F_MIN_HZ 20.0f
@@ -58,6 +61,8 @@ static dsp_spec_cplx_t s_work[GEN_GRID_N_BINS];
 static float s_work_pcm[GEN_GRID_HOP_SAMPLES];
 static dsp_afe_calib_t s_calib;
 static float s_log_mel[MEL_BANDS];
+static float s_power[GEN_GRID_N_BINS];
+static float s_gain[GEN_GRID_N_BINS];
 static uint32_t s_rng = 0x2545F491u;
 
 static float noise(void)
@@ -208,6 +213,31 @@ static void bench_vad(void)
     report(&row, &t);
 }
 
+static void bench_ns(void)
+{
+    dsp_afe_ns_omlsa_config_t cfg = {.floor_db = GEN_AFE_NS_FLOOR_DB};
+    const dsp_afe_ns_ops_t *ns = dsp_afe_ns_omlsa_ops();
+    row_t row = {.module = "dsp_afe ns_omlsa", .core = CORE_SACH, .in_total = false};
+    row.hot_bytes = ns->state_bytes(&cfg);
+    void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
+    const size_t before = heap_free();
+    ESP_ERROR_CHECK(ns->init(&cfg, mem, row.hot_bytes));
+    row.static_bytes = before - heap_free();
+    float speech_prob = 0.0f;
+    timing_t t = {0};
+    for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
+        const float level = (h / NS_LEVEL_HOPS) % 2 ? NS_LOUD : 1.0f;
+        for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
+            const float x = noise();
+            s_power[k] = level * x * x;
+        }
+        const uint32_t start = esp_cpu_get_cycle_count();
+        ESP_ERROR_CHECK(ns->process(&cfg, mem, s_power, NULL, s_gain, &speech_prob));
+        if (h >= WARMUP_HOPS) { timing_add(&t, start); }
+    }
+    report(&row, &t);
+}
+
 // limiting: a 0 dBFS target drives the bench noise into the ceiling, so the limiter works on every sample.
 static void bench_agc(bool limiting)
 {
@@ -247,9 +277,10 @@ static void bench_chain(void)
     const dsp_afe_config_t cfg = {.input_format = "MM",
                                   .spatial = DSP_AFE_SPATIAL_NONE,
                                   .calib = &s_calib,
+                                  .ns_floor_db = GEN_AFE_NS_FLOOR_DB,
                                   .agc_target_dbfs = GEN_AFE_AGC_TARGET_DBFS,
                                   .vad_aggressiveness = GEN_AFE_VAD_AGGRESSIVENESS};
-    row_t row = {.module = "dsp_afe chuỗi (hpf + stft x2 + balance + trộn + istft + vad + agc)",
+    row_t row = {.module = "dsp_afe chuỗi (hpf + stft x2 + balance + trộn + ns + istft + vad + agc)",
                  .core = CORE_SACH,
                  .in_total = true};
     ESP_ERROR_CHECK(dsp_afe_workspace_bytes(&cfg, &row.hot_bytes, &row.cold_bytes));
@@ -303,6 +334,8 @@ static void core1_benches(void *done)
     bench_hpf();
     vTaskDelay(1);
     bench_balance();
+    vTaskDelay(1);
+    bench_ns();
     vTaskDelay(1);
     bench_vad();
     vTaskDelay(1);
