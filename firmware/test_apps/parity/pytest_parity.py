@@ -1,8 +1,8 @@
 """Run the parity app on board B and judge every PARITY line against contracts/golden/<block>/tolerance.yaml.
 
-Lines arrive through test_report, CRC-checked and asked for again when lost (KEHOACH 4.5.7). Also runs by hand on a
-captured log: python3 pytest_parity.py <log>. Cases named case_neg_* are negative controls and must fail, or the
-golden set is not checking anything (KEHOACH 3.14).
+Lines arrive through test_report, CRC-checked and asked for again when lost (KEHOACH 4.5.7); a board run keeps them in
+<build dir>/parity_report.txt. By hand: python3 pytest_parity.py <host log> | --report <parity_report.txt>, which also
+prints the worst figures per tensor. Cases named case_neg_* are negative controls and must fail (KEHOACH 3.14).
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ LINE = re.compile(r"^(\S+) (\S+) (\S+) max_abs=(\S+) snr_db=(\S+)$")
 DONE = re.compile(r"^done (\d+) cases$")
 PLAN = re.compile(r"^plan ((?:\S+ ?)+)$")
 NEGATIVE_PREFIX = "case_neg_"
+REPORT_FILE = "parity_report.txt"
 
 
 def judge(lines: list[str], golden: Path = GOLDEN) -> list[str]:
@@ -63,12 +64,37 @@ def judge(lines: list[str], golden: Path = GOLDEN) -> list[str]:
     return problems
 
 
+def summary(lines: list[str]) -> list[str]:
+    """Per block and tensor, the worst max_abs and SNR over the cases, and the mildest over the negative controls."""
+    figures: dict[tuple[str, str, bool], list[tuple[float, float]]] = {}
+    for line in lines:
+        if match := LINE.search(line):
+            block, case, tensor, max_abs, snr_db = match.groups()
+            key = (block, tensor, case.startswith(NEGATIVE_PREFIX))
+            figures.setdefault(key, []).append((float(max_abs), float(snr_db)))
+    rows = []
+    for (block, tensor, negative), pairs in sorted(figures.items()):
+        pick = min if negative else max
+        max_abs = pick(a for a, _ in pairs)
+        snr_db = (max if negative else min)(s for _, s in pairs)
+        label = "negative control" if negative else f"{len(pairs)} cases"
+        rows.append(f"{block} {tensor}: {label}, max_abs {max_abs:.3g}, snr_db {snr_db:.1f}")
+    return rows
+
+
 @pytest.mark.esp32s3
 def test_parity(dut) -> None:
-    assert judge(collect(dut, TAG)) == []
+    texts = collect(dut, TAG)
+    (Path(dut.app.binary_path) / REPORT_FILE).write_text("\n".join(texts) + "\n", encoding="utf-8")
+    assert judge(texts) == []
 
 
 if __name__ == "__main__":
-    found = judge(from_log(Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines(), TAG))
+    if sys.argv[1] == "--report":
+        texts = Path(sys.argv[2]).read_text(encoding="utf-8").splitlines()
+    else:
+        texts = from_log(Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines(), TAG)
+    found = judge(texts)
+    print("\n".join(summary(texts)))
     print("\n".join(found) if found else "parity: every case as expected")
     raise SystemExit(1 if found else 0)
