@@ -1,0 +1,39 @@
+# The board simulation of E4-T8 (KEHOACH 1.2): sessions of split items in a bank of rooms, on board B's microphones,
+# through the product's chain to log-mel. python -m srpipe.scenes.device build <split file> <out> writes processed/<out>/.
+name: device
+seed: 20260928
+rooms:                            # the bank, built once into interim/scenes/<name>/rooms/; each session draws one
+  count: 512
+  room_m: {x: [3.0, 8.0], y: [3.0, 7.0], z: [2.4, 3.2]}
+  rt60_s: [0.15, 0.8]             # drawn uniformly per room
+  rt60_tolerance: 0.1             # measured RT60 within 10% of the draw, refitting the design RT60
+  rt60_fit_rounds: 3
+  wall_margin_m: 0.5
+  array_height_m: [0.7, 1.1]      # on a table or a shelf
+  talker: {distance_m: [0.3, 4.0], height_m: [1.0, 1.8]}
+  interferer: {distance_m: [0.5, 4.0], height_m: [0.3, 2.0], min_separation_deg: 0.0}
+  max_tries: 500
+session:
+  items: 8                        # consecutive items of the split file share a room, a talker level and a noise
+  lead_s: 3.0                     # room noise alone ahead of the first utterance
+  gap_s: [0.4, 2.0]               # silence after each utterance, drawn per utterance
+  pad_s: 0.3                      # kept on each side of an utterance in the output
+talker:
+  spl_1m_db: [56.0, 74.0]         # ANSI S3.5: casual 56, normal 62, raised 68, loud 75 dB SPL at 1 m
+  jitter_db: 3.0                  # each utterance within this of its session's level
+  active_below_peak_db: 40.0      # a hop counts as speech within this of the utterance's loudest hop
+noise:
+  probability: 0.85               # a session without one hears the microphones' own noise only
+  snr_db: [0.0, 30.0]             # active talker over the whole noise, in the air at ch0
+  pools:                          # under raw/; a session draws a pool by weight, then a file
+    - {dir: noise/musan/musan/noise, glob: "**/*.wav", weight: 3}
+    - {dir: noise/musan/musan/music, glob: "**/*.wav", weight: 1}
+    - {dir: noise/musan/musan/speech, glob: "**/*.wav", weight: 1}
+    - {dir: noise/demand, glob: "*/ch01.wav", weight: 2}
+microphone:
+  sensitivity_dbfs: -29.0         # INMP441: -26 dBFS sine at 94 dB SPL, on the firmware's square-wave scale
+  self_noise_dbfs_a: -90.0        # INMP441: SNR 61 dBA below that sensitivity
+  balance: docs/measurements/calib/board_b_balance.csv   # calib/bal of the board simulated, from the repo root
+  pcm_shift: 16                   # APP_PCM_SHIFT_FALLBACK until E2-T5 stores calib/pcm_shift
+features: {n_bands: 40, f_min_hz: 20.0, f_max_hz: 7600.0, log_floor: 1.0e-6}
+sessions_per_shard: 32
