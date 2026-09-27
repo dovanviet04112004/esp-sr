@@ -26,6 +26,11 @@
 #define EXP2_MIN (-126.0f)
 #define EXP2_MAX 127.0f
 #define EMPTY_XI_DB (-100.0f) // omlsa.m's level of a frame without xi
+#define FLOAT_EXP_MASK 0x7f800000u
+#define FLOAT_EXP_SHIFT 23
+#define FLOAT_EXP_BIAS 127
+#define FLOAT_EXP_MAX 0xffu
+#define FLOAT_HALF_EXP 0x3f000000u // exponent field of 0.5
 
 static const float kFrameBandHz[2] = GEN_AFE_NS_FRAME_BAND_HZ;
 static const float kLocalMeanHz[2] = GEN_AFE_NS_LOCAL_MEAN_HZ;
@@ -51,6 +56,7 @@ typedef struct {
     bin_range_t reset_bins;
     float floor_db;
     float log2_gain_min;
+    float gain_at_floor; // the gain where speech is surely absent
     float alpha_s;
     float alpha_d;
     float alpha_xi;
@@ -160,16 +166,41 @@ static bin_range_t bins_of(const float band_hz[2])
     return (bin_range_t){.first = bin_of(band_hz[0]), .last = bin_of(band_hz[1])};
 }
 
-static void set_floor(omlsa_state_t *st, float floor_db)
+static uint32_t bits_of(float x)
 {
-    st->floor_db = floor_db;
-    st->log2_gain_min = (float)((double)floor_db / 20.0 * LOG2_10);
+    uint32_t b = 0;
+    memcpy(&b, &x, sizeof(b));
+    return b;
+}
+
+static float float_of(uint32_t b)
+{
+    float x = 0.0f;
+    memcpy(&x, &b, sizeof(x));
+    return x;
+}
+
+// frexpf of a positive normal number read off its bits, as newlib's frexpf costs a call per bin.
+static float mantissa_of(float x, int *exponent)
+{
+    const uint32_t b = bits_of(x);
+    const uint32_t field = (b & FLOAT_EXP_MASK) >> FLOAT_EXP_SHIFT;
+    if (field == 0 || field == FLOAT_EXP_MAX || x < 0.0f) { return frexpf(x, exponent); }
+    *exponent = (int)field - (FLOAT_EXP_BIAS - 1);
+    return float_of((b & ~FLOAT_EXP_MASK) | FLOAT_HALF_EXP);
+}
+
+// floorf for |t| < 2^31: truncation, less one for a negative fraction.
+static int floor_int(float t)
+{
+    const int i = (int)t;
+    return (float)i > t ? i - 1 : i;
 }
 
 static float log2_f32(const omlsa_state_t *st, float x)
 {
     int exponent = 0;
-    float mantissa = frexpf(x, &exponent);
+    float mantissa = mantissa_of(x, &exponent);
     if (mantissa < st->sqrt_half) {
         mantissa = mantissa * 2.0f;
         exponent = exponent - 1;
@@ -184,13 +215,24 @@ static float log2_f32(const omlsa_state_t *st, float x)
 static float exp2_f32(const omlsa_state_t *st, float y)
 {
     if (y < EXP2_MIN) { return 0.0f; }
-    const float whole = floorf(y + 0.5f);
-    const float f = y - whole;
+    const int whole = floor_int(y + 0.5f);
+    const float f = y - (float)whole;
     float p = st->exp2_coeffs[EXP2_DEGREE];
     for (int k = EXP2_DEGREE - 1; k >= 0; k--) {
         p = st->exp2_coeffs[k] + f * p;
     }
-    return ldexpf(p, (int)(whole > EXP2_MAX ? EXP2_MAX : whole));
+    const int n = whole > (int)EXP2_MAX ? (int)EXP2_MAX : whole;
+    // Scaling by an exact power of two is ldexpf's result wherever it stays normal, which only n = -126 can
+    // miss.
+    if (n <= (int)EXP2_MIN) { return ldexpf(p, n); }
+    return p * float_of((uint32_t)(n + FLOAT_EXP_BIAS) << FLOAT_EXP_SHIFT);
+}
+
+static void set_floor(omlsa_state_t *st, float floor_db)
+{
+    st->floor_db = floor_db;
+    st->log2_gain_min = (float)((double)floor_db / 20.0 * LOG2_10);
+    st->gain_at_floor = exp2_f32(st, st->log2_gain_min);
 }
 
 static float exp_f32(const omlsa_state_t *st, float x)
@@ -213,9 +255,28 @@ static float smooth_at(const float *x, size_t k, const float *taps, int n_taps)
 {
     const int w = (n_taps - 1) / 2;
     float acc = 0.0f;
+    if ((int)k >= w && (int)k + w < N_BINS) {
+        const float *at = x + k + w;
+        for (int i = 0; i < n_taps; i++) {
+            acc += taps[i] * at[-i];
+        }
+        return acc;
+    }
     for (int i = 0; i < n_taps; i++) {
         const int j = (int)k + w - i;
         acc += taps[i] * (j >= 0 && j < N_BINS ? x[j] : 0.0f);
+    }
+    return acc;
+}
+
+// smooth_at of a[j] b[j], each product rounded ahead of the tap.
+static float smooth_product_at(const float *a, const float *b, size_t k, const float *taps, int n_taps)
+{
+    const int w = (n_taps - 1) / 2;
+    float acc = 0.0f;
+    for (int i = 0; i < n_taps; i++) {
+        const int j = (int)k + w - i;
+        acc += taps[i] * (j >= 0 && j < N_BINS ? a[j] * b[j] : 0.0f);
     }
     return acc;
 }
@@ -288,11 +349,7 @@ static void track_noise(omlsa_state_t *st, const float *power)
     }
     for (size_t k = 0; k < N_BINS; k++) {
         const float weight = smooth_at(st->absent, k, st->freq_taps, FREQ_TAPS);
-        float weighted = 0.0f;
-        for (int i = 0; i < FREQ_TAPS; i++) {
-            const int j = (int)k + (FREQ_TAPS - 1) / 2 - i;
-            weighted += st->freq_taps[i] * (j >= 0 && j < N_BINS ? st->absent[j] * power[j] : 0.0f);
-        }
+        const float weighted = smooth_product_at(st->absent, power, k, st->freq_taps, FREQ_TAPS);
         const float sft = weight != 0.0f ? weighted / weight : st->st[k];
         if (warming) {
             st->st[k] = st->s[k];
@@ -493,7 +550,9 @@ static esp_err_t process(void *ctx, void *state, const float *power, const float
         const float q = min_f(1.0f - st->p_global[k] * st->p_local[k] * p_frame, GEN_AFE_NS_Q_MAX);
         const float p = q < GEN_AFE_NS_Q_PRESENCE_MAX ? presence(st, q, eta, v) : 0.0f;
         const float g_h1 = lsa_gain(st, eta, v);
-        const float g = exp2_f32(st, p * log2_f32(st, g_h1) + (1.0f - p) * st->log2_gain_min);
+        // At p = 0 the product vanishes and the exponent is log2 G_min exactly, so the gain is the floor's.
+        const float g = p > 0.0f ? exp2_f32(st, p * log2_f32(st, g_h1) + (1.0f - p) * st->log2_gain_min)
+                                 : st->gain_at_floor;
         // LSA lifts bins far under the noise to their expected level; the slot promises 0 .. 1 (KEHOACH 3.9).
         gain[k] = min_f(g, 1.0f);
         st->eta_2term[k] = g_h1 * (g_h1 * gamma);
