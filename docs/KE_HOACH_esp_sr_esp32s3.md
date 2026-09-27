@@ -1457,7 +1457,8 @@ host/
 │   ├── live.py                    # xem trực tiếp: hướng, cờ tiếng nói, mức, sự kiện
 │   ├── session.py                 # phiên thu có nhãn: danh sách câu nhắc, mã người nói, mã phiếu đồng ý
 │   ├── score.py                   # chấm một phiên đã thu theo nhãn, gọi ml/src/srpipe/metrics
-│   └── calib.py                   # ước balance từ phiên ồn trắng (srpipe), kiểm chéo, ghi xuống test_apps/calib
+│   └── calib.py                   # ước balance từ phiên ồn trắng (srpipe), kiểm chéo; ghi calib/bal và calib/pcm_shift
+│                                  #   xuống test_apps/calib
 ├── plans/                         # kịch bản một buổi thu: mỗi dòng một lời dặn và nhãn một phiên
 └── tests/
 ```
