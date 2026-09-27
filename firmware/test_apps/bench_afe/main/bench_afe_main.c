@@ -206,10 +206,11 @@ static void bench_vad(void)
     report(&row, &t);
 }
 
-static void bench_agc(void)
+// limiting: a 0 dBFS target drives the bench noise into the ceiling, so the limiter works on every sample.
+static void bench_agc(bool limiting)
 {
     const dsp_afe_agc_config_t cfg = {
-        .target_dbfs = GEN_AFE_AGC_TARGET_DBFS,
+        .target_dbfs = limiting ? 0.0f : GEN_AFE_AGC_TARGET_DBFS,
         .gain_min_db = GEN_AFE_AGC_GAIN_MIN_DB,
         .gain_max_db = GEN_AFE_AGC_GAIN_MAX_DB,
         .up_db_per_s = GEN_AFE_AGC_UP_DB_PER_S,
@@ -221,7 +222,7 @@ static void bench_agc(void)
         .level_fall_db_per_s = GEN_AFE_AGC_LEVEL_FALL_DB_PER_S,
         .release_ms = GEN_AFE_AGC_RELEASE_MS,
     };
-    row_t row = {.module = "dsp_afe agc", .core = CORE_SACH, .in_total = false};
+    row_t row = {.module = limiting ? "dsp_afe agc, chặn đỉnh mọi mẫu" : "dsp_afe agc", .core = CORE_SACH};
     row.hot_bytes = dsp_afe_agc_workspace_bytes(&cfg);
     void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
     const size_t before = heap_free();
@@ -241,7 +242,11 @@ static void bench_agc(void)
 
 static void bench_chain(void)
 {
-    const dsp_afe_config_t cfg = {.input_format = "MM", .spatial = DSP_AFE_SPATIAL_NONE, .calib = &s_calib};
+    const dsp_afe_config_t cfg = {.input_format = "MM",
+                                  .spatial = DSP_AFE_SPATIAL_NONE,
+                                  .calib = &s_calib,
+                                  .agc_target_dbfs = GEN_AFE_AGC_TARGET_DBFS,
+                                  .vad_aggressiveness = GEN_AFE_VAD_AGGRESSIVENESS};
     row_t row = {.module = "dsp_afe chuỗi (hpf + stft x2 + balance + trộn + istft + vad + agc)",
                  .core = CORE_SACH,
                  .in_total = true};
@@ -299,7 +304,9 @@ static void core1_benches(void *done)
     vTaskDelay(1);
     bench_vad();
     vTaskDelay(1);
-    bench_agc();
+    bench_agc(false);
+    vTaskDelay(1);
+    bench_agc(true);
     xTaskNotifyGive((TaskHandle_t)done);
     vTaskDelete(NULL);
 }
