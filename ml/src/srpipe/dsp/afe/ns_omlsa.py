@@ -1,9 +1,9 @@
 """ns floor of dsp_afe: the OM-LSA gain with IMCRA noise estimation, one hop of power at a time (KEHOACH 3.9).
 
-Mirrors firmware/components/dsp_afe/src/ns_omlsa.c in float32, vectorised over the bins, with every sum taken in the
-order the C takes it. Follows the author's omlsa.m of 2003 ('medium' non-stationarity, broadband decision, no tone
-removal), after Cohen and Berdugo (2001) and Cohen (2003). exp and log are the module's own, from frexp, ldexp and
-polynomials, and the E1 table is built with basic double arithmetic, so the C matches bit for bit on any libm.
+Mirrors firmware/components/dsp_afe/src/ns_omlsa.c in float32, vectorised over the bins, every sum in the C's order.
+Follows omlsa.m of 2003 ('medium', broadband decision, no tone removal) after Cohen and Berdugo (2001), Cohen (2003).
+exp, log, 1/x and 1/sqrt x are the module's own (bits, series, Newton steps: a float32 division costs ~60 cycles on the
+ESP32-S3) and the E1 table is built with basic double arithmetic, so the C matches bit for bit on any libm.
 """
 
 from __future__ import annotations
@@ -26,6 +26,9 @@ LN_10 = 2.30258509299404568402
 LOG2_10 = 3.32192809488736234787
 SQRT_HALF = f32(math.sqrt(0.5))
 EXP2_MIN = f32(-126.0)
+RECIP_MAGIC = np.uint32(0x7EF311C3)
+RSQRT_MAGIC = np.uint32(0x5F3759DF)
+NEWTON_STEPS = 3
 # 2 atanh(t) / ln 2 = log2((1 + t) / (1 - t)): odd powers 1 .. 9, |t| <= 0.172 on [sqrt(1/2), sqrt(2)).
 LOG2_COEFFS = tuple(f32(2.0 / (k * LN_2)) for k in (1, 3, 5, 7, 9))
 DB_PER_LOG2 = f32(10.0 / LOG2_10)
@@ -44,13 +47,32 @@ def _exp2_coeffs(degree: int) -> tuple[np.float32, ...]:
 EXP2_COEFFS = _exp2_coeffs(7)
 
 
+def recip_f32(b: np.ndarray) -> np.ndarray:
+    """1 / b for positive normal float32 b: a guess off the bits, then three Newton steps; relative error < 3e-7."""
+    b = np.asarray(b, dtype=np.float32)
+    r = (RECIP_MAGIC - b.view(np.uint32)).view(np.float32)
+    for _ in range(NEWTON_STEPS):
+        r = r * (f32(2.0) - b * r)
+    return r
+
+
+def rsqrt_f32(v: np.ndarray) -> np.ndarray:
+    """1 / sqrt(v) for positive normal float32 v: a guess off the bits, then three Newton steps."""
+    v = np.asarray(v, dtype=np.float32)
+    half = f32(0.5) * v
+    r = (RSQRT_MAGIC - (v.view(np.uint32) >> np.uint32(1))).view(np.float32)
+    for _ in range(NEWTON_STEPS):
+        r = r * (f32(1.5) - half * r * r)
+    return r
+
+
 def log2_f32(x: np.ndarray) -> np.ndarray:
     """log2 of positive float32 values: exponent from frexp, mantissa by an atanh series; relative error < 1e-6."""
     mantissa, exponent = np.frexp(np.asarray(x, dtype=np.float32))
     low = mantissa < SQRT_HALF
     mantissa = np.where(low, mantissa * f32(2.0), mantissa)
     exponent = np.where(low, exponent - 1, exponent)
-    t = (mantissa - f32(1.0)) / (mantissa + f32(1.0))
+    t = (mantissa - f32(1.0)) * recip_f32(mantissa + f32(1.0))
     t2 = t * t
     c1, c3, c5, c7, c9 = LOG2_COEFFS
     series = t * (c1 + t2 * (c3 + t2 * (c5 + t2 * (c7 + t2 * c9))))
@@ -130,15 +152,33 @@ def smooth(x: np.ndarray, taps: np.ndarray) -> np.ndarray:
     return out
 
 
-def ordered_mean(x: np.ndarray) -> np.float32:
-    return np.cumsum(x, dtype=np.float32)[-1] / f32(len(x))
+def ordered_sum(x: np.ndarray) -> np.float32:
+    return np.cumsum(x, dtype=np.float32)[-1]
 
 
-def ramp(level_db: np.ndarray, bounds_db: tuple[float, float], p_min: np.float32) -> np.ndarray:
-    """p_min at or under the lower bound, 1 at or over the upper, linear in dB between."""
-    low, high = f32(bounds_db[0]), f32(bounds_db[1])
-    rising = p_min + (level_db - low) / (high - low) * (f32(1.0) - p_min)
-    return np.where(level_db <= low, p_min, np.where(level_db >= high, f32(1.0), rising)).astype(np.float32)
+@dataclass(frozen=True)
+class Ramp:
+    """From p_min to 1 over a span in dB: the bounds in dB and as linear ratios, and 1 / span, made once."""
+
+    low_db: np.float32
+    high_db: np.float32
+    low: np.float32
+    high: np.float32
+    per_db: np.float32
+
+    @classmethod
+    def of(cls, bounds_db: tuple[float, float]) -> Ramp:
+        low, high = (float(f32(b)) for b in bounds_db)
+        ratio = [f32(exp_series(b / 10.0 * LN_10)) for b in (low, high)]
+        return cls(f32(low), f32(high), ratio[0], ratio[1], f32(1.0 / (high - low)))
+
+    def between(self, level_db: np.ndarray, p_min: np.float32) -> np.ndarray:
+        return p_min + (level_db - self.low_db) * self.per_db * (f32(1.0) - p_min)
+
+    def of_ratio(self, x: np.ndarray, p_min: np.float32) -> np.ndarray:
+        """p_min at or under the lower bound, 1 at or over the upper, linear in dB between; log only in between."""
+        rising = self.between(DB_PER_LOG2 * log2_f32(x), p_min)
+        return np.where(x <= self.low, p_min, np.where(x >= self.high, f32(1.0), rising)).astype(np.float32)
 
 
 def bin_of(freq_hz: float, fs_hz: int, fft_points: int, n_bins: int) -> int:
@@ -226,6 +266,12 @@ class Omlsa:
         self.local_reset_bins = slice(at[0], at[1] + 1)
         self.table = e1_table(cfg.e1_points, cfg.lsa_v_max)
         self.table_per_v = f32((cfg.e1_points - 1) / cfg.lsa_v_max)
+        self.per_gamma1 = f32(1.0 / (float(f32(cfg.gamma1)) - 1.0))
+        self.per_frame_bin = f32(1.0 / (self.frame_bins.stop - self.frame_bins.start))
+        self.per_mean_bin = f32(1.0 / (self.local_mean_bins.stop - self.local_mean_bins.start))
+        self.local_ramp = Ramp.of(cfg.xi_local_db)
+        self.global_ramp = Ramp.of(cfg.xi_global_db)
+        self.frame_ramp = Ramp.of(cfg.xi_frame_db)
         self.set_floor(cfg.floor_db)
         self.reset()
 
@@ -253,15 +299,18 @@ class Omlsa:
         self.windows_t = np.zeros((self.cfg.min_subwindows, n), np.float32)
         self.in_subwindow = 0
 
-    def _prior_snr(self, power: np.ndarray, noise: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        gamma = power / np.maximum(noise, self.floor)
+    def _prior_snr(self, power: np.ndarray, noise: np.ndarray) -> tuple[np.ndarray, ...]:
+        """gamma, the decision-directed eta, v and the Wiener gain eta / (1 + eta), which v and G_H1 share."""
+        gamma = power * recip_f32(np.maximum(noise, self.floor))
         eta = self.alpha_eta * self.eta_2term + (f32(1.0) - self.alpha_eta) * np.maximum(gamma - f32(1.0), f32(0.0))
         eta = np.maximum(eta, self.eta_min)
-        return gamma, eta, gamma * eta / (f32(1.0) + eta)
+        wiener = eta * recip_f32(f32(1.0) + eta)
+        return gamma, eta, gamma * wiener, wiener
 
     def _presence(self, q: np.ndarray, eta: np.ndarray, v: np.ndarray) -> np.ndarray:
-        """1 / (1 + q / (1 - q) (1 + eta) e^-v): the probability that speech is present, given the prior q."""
-        return f32(1.0) / (f32(1.0) + q / (f32(1.0) - q) * (f32(1.0) + eta) * exp_f32(-v))
+        """(1 - q) / (1 - q + q (1 + eta) e^-v): the probability that speech is present, given the prior q."""
+        absent = f32(1.0) - q
+        return absent * recip_f32(absent + q * (f32(1.0) + eta) * exp_f32(-v))
 
     def _track_noise(self, power: np.ndarray, eta: np.ndarray, v: np.ndarray) -> None:
         a_s, one = self.alpha_s, f32(1.0)
@@ -284,7 +333,7 @@ class Omlsa:
         absent = ((power < gamma0 * bias * self.s_min) & (self.s < zeta0 * bias * self.s_min)).astype(np.float32)
         weight = smooth(absent, self.freq_taps)
         weighted = smooth(absent * power, self.freq_taps)
-        sft = np.where(weight != f32(0.0), weighted / np.where(weight != f32(0.0), weight, one), self.st)
+        sft = np.where(weight != f32(0.0), weighted * recip_f32(np.where(weight != f32(0.0), weight, one)), self.st)
         if warming:
             self.st = self.s.copy()
             self.s_min_t = self.st.copy()
@@ -293,11 +342,11 @@ class Omlsa:
             self.st = a_s * self.st + (one - a_s) * sft
             self.s_min_t = np.minimum(self.s_min_t, self.st)
             self.s_act_t = np.minimum(self.s_act_t, self.st)
-        floor_t = np.maximum(self.s_min_t, self.floor)
-        gamma_min = power / bias / floor_t
-        zeta = self.s / bias / floor_t
+        per_floor = recip_f32(bias * np.maximum(self.s_min_t, self.floor))
+        gamma_min = power * per_floor
+        zeta = self.s * per_floor
         between = (gamma_min > one) & (gamma_min < gamma1) & (zeta < zeta0)
-        q_hat = np.where(between, (gamma1 - gamma_min) / (gamma1 - one), one)
+        q_hat = np.where(between, (gamma1 - gamma_min) * self.per_gamma1, one)
         p_hat = np.where(between, self._presence(np.where(between, q_hat, f32(0.5)), eta, v), f32(0.0))
         p_hat = np.where((gamma_min >= gamma1) | (zeta >= zeta0), one, p_hat).astype(np.float32)
         alpha = self.alpha_d + (one - self.alpha_d) * p_hat
@@ -321,17 +370,15 @@ class Omlsa:
         """q, the prior probability that speech is absent, from xi at the local, global and frame scales."""
         cfg, p_min, one = self.cfg, self.p_min, f32(1.0)
         self.xi = self.alpha_xi * self.xi + (one - self.alpha_xi) * eta
-        local_db = DB_PER_LOG2 * log2_f32(smooth(self.xi, self.local_taps))
-        global_db = DB_PER_LOG2 * log2_f32(smooth(self.xi, self.global_taps))
+        p_local = self.local_ramp.of_ratio(smooth(self.xi, self.local_taps), p_min)
+        p_global = self.global_ramp.of_ratio(smooth(self.xi, self.global_taps), p_min)
         previous = self.xi_frame
-        self.xi_frame = ordered_mean(self.xi[self.frame_bins])
+        self.xi_frame = ordered_sum(self.xi[self.frame_bins]) * self.per_frame_bin
         rising = self.xi_frame - previous >= f32(0.0)
         frame_db = DB_PER_LOG2 * log2_f32(self.xi_frame)[()] if self.xi_frame > 0 else f32(-100.0)
-        p_local = ramp(local_db, cfg.xi_local_db, p_min)
-        p_global = ramp(global_db, cfg.xi_global_db, p_min)
-        if ordered_mean(p_local[self.local_mean_bins]) < f32(cfg.local_reset_below):
+        if ordered_sum(p_local[self.local_mean_bins]) * self.per_mean_bin < f32(cfg.local_reset_below):
             p_local[self.local_reset_bins] = p_min
-        low, high = f32(cfg.xi_frame_db[0]), f32(cfg.xi_frame_db[1])
+        low, high = self.frame_ramp.low_db, self.frame_ramp.high_db
         if frame_db <= low:
             p_frame = p_min
         elif rising:
@@ -342,19 +389,18 @@ class Omlsa:
         elif frame_db <= self.xi_peak_db + low:
             p_frame = p_min
         else:
-            p_frame = p_min + (frame_db - self.xi_peak_db - low) / (high - low) * (one - p_min)
+            p_frame = self.frame_ramp.between(frame_db - self.xi_peak_db, p_min)
         q = one - p_global * p_local * f32(p_frame)
         return np.minimum(q, f32(cfg.q_max))
 
-    def _lsa_gain(self, eta: np.ndarray, v: np.ndarray) -> np.ndarray:
+    def _lsa_gain(self, wiener: np.ndarray, v: np.ndarray) -> np.ndarray:
         """G_H1: eta / (1 + eta) exp(E1(v) / 2), Wiener's over lsa_v_max, 1 where v is 0, as omlsa.m."""
-        wiener = eta / (f32(1.0) + eta)
         clipped = np.minimum(v, f32(self.cfg.lsa_v_max))
         position = clipped * self.table_per_v
         index = np.minimum(position.astype(np.int32), len(self.table) - 2)
         frac = position - index.astype(np.float32)
         smooth_part = self.table[index] + frac * (self.table[index + 1] - self.table[index])
-        lsa = wiener * (smooth_part / np.sqrt(np.where(v > f32(0.0), v, f32(1.0))))
+        lsa = wiener * (smooth_part * rsqrt_f32(np.where(v > f32(0.0), v, f32(1.0))))
         gain = np.where(v > f32(self.cfg.lsa_v_max), wiener, lsa)
         return np.where(v > f32(0.0), gain, f32(1.0)).astype(np.float32)
 
@@ -369,15 +415,15 @@ class Omlsa:
             self.started = True
             self.lambda_d = power.copy()
         echo = np.zeros(self.n_bins, np.float32) if echo_power is None else np.asarray(echo_power, np.float32)
-        _, eta, v = self._prior_snr(power, self.lambda_d + echo)
+        _, eta, v, _ = self._prior_snr(power, self.lambda_d + echo)
         self._track_noise(power, eta, v)
         q = self._absence_prior(eta)
-        gamma, eta, v = self._prior_snr(power, self.lambda_d + echo)
+        gamma, eta, v, wiener = self._prior_snr(power, self.lambda_d + echo)
         p = np.where(q < f32(self.cfg.q_presence_max), self._presence(q, eta, v), f32(0.0)).astype(np.float32)
-        g_h1 = self._lsa_gain(eta, v)
+        g_h1 = self._lsa_gain(wiener, v)
         # LSA lifts bins far under the noise towards their expected level, up to gains in the thousands; the slot
         # promises 0 .. 1, so only the applied gain is capped and the decision-directed state keeps G_H1 (KEHOACH 3.9).
         gain = np.minimum(exp2_f32(p * log2_f32(g_h1) + (f32(1.0) - p) * self.log2_gain_min), f32(1.0))
         self.eta_2term = g_h1 * (g_h1 * gamma)
         self.hop += 1
-        return OmlsaHop(gain, ordered_mean(p[self.frame_bins]), self.lambda_d.copy())
+        return OmlsaHop(gain, ordered_sum(p[self.frame_bins]) * self.per_frame_bin, self.lambda_d.copy())

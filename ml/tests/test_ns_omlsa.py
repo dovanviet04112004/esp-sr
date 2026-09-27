@@ -39,6 +39,13 @@ def test_log2_and_exp2_are_within_a_few_float32_steps() -> None:
     assert ns_omlsa.exp2_f32(np.float32(-200.0)) == 0.0
 
 
+def test_reciprocal_and_reciprocal_root_are_within_a_few_float32_steps() -> None:
+    b = np.float32(10.0) ** np.linspace(-12, 12, 20001).astype(np.float32)
+    exact = b.astype(np.float64)
+    assert np.max(np.abs(ns_omlsa.recip_f32(b) * exact - 1.0)) < 3e-7
+    assert np.max(np.abs(ns_omlsa.rsqrt_f32(b) * np.sqrt(exact) - 1.0)) < 3e-7
+
+
 def test_the_e1_table_is_the_smooth_part_of_e1() -> None:
     table = ns_omlsa.e1_table()
     v = np.linspace(0.0, afe.NS_LSA_V_MAX, afe.NS_E1_POINTS)[1:]
@@ -50,9 +57,9 @@ def test_the_e1_table_is_the_smooth_part_of_e1() -> None:
 def test_the_lsa_gain_between_table_points_stays_within_1e5() -> None:
     om = ns_omlsa.Omlsa()
     v = np.linspace(1e-4, afe.NS_LSA_V_MAX, 5001).astype(np.float32)
-    eta = np.ones_like(v)
+    wiener = np.full_like(v, 0.5)
     want = 0.5 * np.exp(0.5 * exp1(v.astype(np.float64)))
-    assert np.max(np.abs(om._lsa_gain(eta, v) / want - 1.0)) < 1e-5
+    assert np.max(np.abs(om._lsa_gain(wiener, v) / want - 1.0)) < 1e-5
 
 
 def test_nothing_happens_until_the_first_hop_with_power() -> None:
