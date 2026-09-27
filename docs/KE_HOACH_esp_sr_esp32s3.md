@@ -977,6 +977,7 @@ ml/
 ├── configs/
 │   ├── common/{paths.yaml, hardware.yaml}
 │   ├── afe/{hpf.yaml, aec.yaml, doa.yaml, gsc.yaml, bss.yaml, ns_omlsa.yaml, vad.yaml, agc.yaml}  # chỉ ghi đè cho thí nghiệm; mặc định là contracts/afe.yaml
+│   ├── scenes/standard.yaml           # bộ cảnh có nhãn chuẩn của E4-T4: phòng, RT60, góc, SNR, seed
 │   └── models/{ns.yaml, wake.yaml, command.yaml, synth.yaml, quant.yaml}
 │
 ├── src/srpipe/
@@ -989,6 +990,8 @@ ml/
 │   ├── golden/gold.py                 # ★ khuôn .gold — một khuôn, một chỗ
 │   ├── scenes/                        # ★ dựng cảnh có nhãn bằng pyroomacoustics: phòng, RT60,
 │   │                                  #   hướng người nói và nhiễu, SNR, dàn micro từ array.yaml
+│   │   ├── room.py                    # ★ một cảnh: phòng hộp, dàn array.yaml, người nói và nguồn nhiễu ở góc cho
+│   │   │                              #   trước → hỗn hợp hai kênh, ảnh riêng từng nguồn, nhãn góc tính từ hình học
 │   │   ├── vad.py                     # câu đọc + khoảng nghỉ + nhiễu ở SNR và mức cho trước, nhãn mỗi bước
 │   │   │                              #   từ tiếng sạch; chấm vad với ngưỡng năng lượng trần (§3.10)
 │   │   ├── agc.py                     # cùng cảnh ở mức vào −50 … −10 dBFS qua vad rồi agc; mức ra, đỉnh (§3.10)
