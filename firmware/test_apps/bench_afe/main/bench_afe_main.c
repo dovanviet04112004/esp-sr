@@ -222,7 +222,7 @@ static void bench_agc(bool limiting)
         .level_fall_db_per_s = GEN_AFE_AGC_LEVEL_FALL_DB_PER_S,
         .release_ms = GEN_AFE_AGC_RELEASE_MS,
     };
-    row_t row = {.module = limiting ? "dsp_afe agc, chặn đỉnh mọi mẫu" : "dsp_afe agc", .core = CORE_SACH};
+    row_t row = {.module = limiting ? "dsp_afe agc chặn đỉnh mọi mẫu" : "dsp_afe agc", .core = CORE_SACH};
     row.hot_bytes = dsp_afe_agc_workspace_bytes(&cfg);
     void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
     const size_t before = heap_free();
