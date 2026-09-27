@@ -54,6 +54,32 @@ def whole_hops(x: np.ndarray) -> np.ndarray:
     return np.concatenate([x, np.zeros(-len(x) % HOP, dtype=x.dtype)])
 
 
+def parts(
+    utterances: list[np.ndarray],
+    noise: np.ndarray,
+    snr_db: float,
+    level_dbfs: float,
+    cfg: dict,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Speech, noise and labels apart: utterances in the given order with a pause before each, speech scaled to
+    level_dbfs over its speech hops, noise looped from a random offset and scaled to snr_db under that level."""
+    pieces, labels = [], []
+    for u in utterances:
+        pause = np.zeros(round(rng.uniform(*cfg["pause_s"]) * grid.SAMPLE_RATE_HZ / HOP) * HOP)
+        u = whole_hops(u.astype(np.float64))
+        pieces += [pause, u]
+        labels += [np.zeros(len(pause) // HOP, dtype=bool), utterance_labels(u, cfg)]
+    speech = np.concatenate(pieces)
+    label = np.concatenate(labels)
+    active = np.mean(speech.reshape(-1, HOP)[label] ** 2)
+    speech *= 10 ** (level_dbfs / 20) / np.sqrt(active)
+    start = int(rng.integers(len(noise)))
+    looped = np.resize(np.roll(noise.astype(np.float64), -start), len(speech))
+    looped *= 10 ** ((level_dbfs - snr_db) / 20) / np.sqrt(np.mean(looped**2))
+    return speech, looped, label
+
+
 def build(
     utterances: list[np.ndarray],
     noise: np.ndarray,
@@ -63,21 +89,8 @@ def build(
     cfg: dict,
     rng: np.random.Generator,
 ) -> Scene:
-    """Utterances in the given order with a pause before each, speech scaled to level_dbfs over its speech hops,
-    noise looped from a random offset and scaled to snr_db under that level."""
-    parts, labels = [], []
-    for u in utterances:
-        pause = np.zeros(round(rng.uniform(*cfg["pause_s"]) * grid.SAMPLE_RATE_HZ / HOP) * HOP)
-        u = whole_hops(u.astype(np.float64))
-        parts += [pause, u]
-        labels += [np.zeros(len(pause) // HOP, dtype=bool), utterance_labels(u, cfg)]
-    speech = np.concatenate(parts)
-    label = np.concatenate(labels)
-    active = np.mean(speech.reshape(-1, HOP)[label] ** 2)
-    speech *= 10 ** (level_dbfs / 20) / np.sqrt(active)
-    start = int(rng.integers(len(noise)))
-    looped = np.resize(np.roll(noise.astype(np.float64), -start), len(speech))
-    looped *= 10 ** ((level_dbfs - snr_db) / 20) / np.sqrt(np.mean(looped**2))
+    """The scene of parts(), speech and noise summed."""
+    speech, looped, label = parts(utterances, noise, snr_db, level_dbfs, cfg, rng)
     return Scene((speech + looped).astype(np.float32), label, noise_name, snr_db, level_dbfs)
 
 
@@ -94,17 +107,33 @@ class SceneResult:
     energy_db: np.ndarray
 
 
-def _score_scene(job: tuple[int, str, float, float, dict, dict]) -> SceneResult:
-    index, noise_name, snr_db, level_dbfs, cfg, files = job
-    rng = np.random.default_rng([cfg["seed"], index])
-    order = rng.permutation(len(files["speech"]))
+def pick_utterances(files: list[str], cfg: dict, rng: np.random.Generator) -> list[np.ndarray]:
+    """Utterances in a random order until speech_s_per_scene seconds of read speech."""
     utterances, seconds = [], 0.0
-    for i in order:
-        u = read_wav(Path(files["speech"][i]))[0][:, 0]
+    for i in rng.permutation(len(files)):
+        u = read_wav(Path(files[i]))[0][:, 0]
         utterances.append(u)
         seconds += len(u) / grid.SAMPLE_RATE_HZ
         if seconds >= cfg["speech_s_per_scene"]:
             break
+    return utterances
+
+
+def scene_files(cfg: dict, raw_root: Path) -> dict:
+    """Every speech file and every noise, by name, that cfg points to under raw/."""
+    speech = sorted(str(p) for p in (raw_root / cfg["speech"]).glob("*/*.wav"))
+    noise = {p.stem: str(p) for p in sorted((raw_root / cfg["noise"]).glob("*.wav"))}
+    if not speech or not noise:
+        raise FileNotFoundError(
+            f"no speech under {raw_root / cfg['speech']} or no noise under {raw_root / cfg['noise']}"
+        )
+    return {"speech": speech, "noise": noise}
+
+
+def _score_scene(job: tuple[int, str, float, float, dict, dict]) -> SceneResult:
+    index, noise_name, snr_db, level_dbfs, cfg, files = job
+    rng = np.random.default_rng([cfg["seed"], index])
+    utterances = pick_utterances(files["speech"], cfg, rng)
     noise = read_wav(Path(files["noise"][noise_name]))[0][:, 0]
     scene = build(utterances, noise, noise_name, snr_db, level_dbfs, cfg, rng)
     raws = {a: gmm_raw(scene, a) for a in cfg["aggressiveness"]}
@@ -112,14 +141,8 @@ def _score_scene(job: tuple[int, str, float, float, dict, dict]) -> SceneResult:
 
 
 def evaluate(cfg: dict, raw_root: Path, workers: int) -> list[SceneResult]:
-    speech = sorted(str(p) for p in (raw_root / cfg["speech"]).glob("*/*.wav"))
-    noise = {p.stem: str(p) for p in sorted((raw_root / cfg["noise"]).glob("*.wav"))}
-    if not speech or not noise:
-        raise FileNotFoundError(
-            f"no speech under {raw_root / cfg['speech']} or no noise under {raw_root / cfg['noise']}"
-        )
-    files = {"speech": speech, "noise": noise}
-    conditions = list(product(noise, cfg["snr_db"], cfg["level_dbfs"]))
+    files = scene_files(cfg, raw_root)
+    conditions = list(product(files["noise"], cfg["snr_db"], cfg["level_dbfs"]))
     jobs = [(i, n, s, lv, cfg, files) for i, (n, s, lv) in enumerate(conditions)]
     with ProcessPoolExecutor(max_workers=workers) as pool:
         return list(pool.map(_score_scene, jobs))
