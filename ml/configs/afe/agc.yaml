@@ -1,0 +1,6 @@
+# Scoring of agc on the scenes of configs/afe/vad.yaml (KEHOACH 3.10); what is not here comes from there.
+eval:
+  seed: 20260928
+  snr_db: [20.0]
+  level_dbfs: [-50.0, -40.0, -30.0, -20.0, -10.0]   # speech at the input, the range the plan names
+  settle_s: 30.0                                     # scored after this, the slowest climb being 24 dB at 3 dB/s

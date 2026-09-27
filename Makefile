@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session
 
 PORT ?= /dev/ttyUSB0
@@ -49,6 +49,9 @@ golden: ## Emit golden vectors into contracts/golden/
 
 eval-vad: ## Score vad against a bare energy threshold on labelled scenes of VIVOS test (docs/measurements/afe/vad.md)
 	cd ml && uv run python -m srpipe.scenes.vad --workers 16
+
+eval-agc: ## Score agc on VIVOS scenes at input levels -50 .. -10 dBFS through vad and agc (docs/measurements/afe/agc.md)
+	cd ml && uv run python -m srpipe.scenes.agc --workers 16
 
 measure: ## Merge bench CSVs into docs/measurements/budget.md
 	python3 -m tools.budget
