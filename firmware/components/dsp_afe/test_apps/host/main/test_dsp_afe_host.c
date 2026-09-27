@@ -35,6 +35,11 @@ static const bool kVadBuilt = true;
 #else
 static const bool kVadBuilt = false;
 #endif
+#if CONFIG_DSP_AFE_AGC_ENABLE
+static const bool kAgcBuilt = true;
+#else
+static const bool kAgcBuilt = false;
+#endif
 
 static unsigned s_failures;
 
@@ -83,10 +88,9 @@ static void fill_hop(int16_t *interleaved, uint8_t n_channels, size_t hop, bool 
     }
 }
 
-// The tone as the chain should give it back: through hpf when hpf is built, as it is the only real module.
-static void expected_hop(void *hpf_mem, dsp_afe_hpf_t **hpf, size_t hop, int16_t *out)
+// The tone of one hop, through hpf when hpf is built.
+static void expected_tone(void *hpf_mem, dsp_afe_hpf_t **hpf, size_t hop, float *x)
 {
-    static float x[GEN_GRID_HOP_SAMPLES];
     for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
         x[i] = tone(hop * GEN_GRID_HOP_SAMPLES + i) / PCM_FULL_SCALE;
     }
@@ -98,37 +102,85 @@ static void expected_hop(void *hpf_mem, dsp_afe_hpf_t **hpf, size_t hop, int16_t
     (void)hpf_mem;
     (void)hpf;
 #endif
+}
+
+#if CONFIG_DSP_AFE_AGC_ENABLE
+static dsp_afe_agc_t *make_agc(const dsp_afe_config_t *cfg)
+{
+    const dsp_afe_agc_config_t agc_cfg = {
+        .target_dbfs = cfg->agc_target_dbfs,
+        .gain_min_db = GEN_AFE_AGC_GAIN_MIN_DB,
+        .gain_max_db = GEN_AFE_AGC_GAIN_MAX_DB,
+        .up_db_per_s = GEN_AFE_AGC_UP_DB_PER_S,
+        .down_db_per_s = GEN_AFE_AGC_DOWN_DB_PER_S,
+        .limit_dbfs = GEN_AFE_AGC_LIMIT_DBFS,
+        .lookahead_ms = GEN_AFE_AGC_LOOKAHEAD_MS,
+        .level_tau_s = GEN_AFE_AGC_LEVEL_TAU_S,
+        .level_gate_db = GEN_AFE_AGC_LEVEL_GATE_DB,
+        .level_fall_db_per_s = GEN_AFE_AGC_LEVEL_FALL_DB_PER_S,
+        .release_ms = GEN_AFE_AGC_RELEASE_MS,
+    };
+    const size_t bytes = dsp_afe_agc_workspace_bytes(&agc_cfg);
+    dsp_afe_agc_t *agc = NULL;
+    return dsp_afe_agc_init(&agc, &agc_cfg, malloc(bytes), bytes) == ESP_OK ? agc : NULL;
+}
+#endif
+
+// The frame the chain should give for the previous hop's tone: through agc with this frame's vad when agc is
+// built.
+static void expected_frame(void *agc, const float *previous, uint8_t vad, int16_t *pcm, int *gain_db)
+{
+    static float y[GEN_GRID_HOP_SAMPLES];
+    memcpy(y, previous, sizeof(y));
+    float gain = 0.0f;
+#if CONFIG_DSP_AFE_AGC_ENABLE
+    dsp_afe_agc_process(agc, y, vad != 0, &gain);
+#else
+    (void)agc;
+    (void)vad;
+#endif
     for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
-        out[i] = (int16_t)lrintf(x[i] * PCM_FULL_SCALE);
+        pcm[i] = (int16_t)lrintf(y[i] * PCM_FULL_SCALE);
     }
+    *gain_db = (int)lrintf(gain);
 }
 
 static void check_round_trip(const dsp_afe_config_t *cfg, const char *what)
 {
     static int16_t in[GEN_GRID_HOP_SAMPLES * MAX_CHANNELS];
     static int16_t want[GEN_GRID_HOP_SAMPLES];
+    static float previous[GEN_GRID_HOP_SAMPLES];
     static uint64_t hpf_mem[64];
     dsp_afe_hpf_t *hpf = NULL;
+#if CONFIG_DSP_AFE_AGC_ENABLE
+    void *agc = make_agc(cfg);
+#else
+    void *agc = NULL;
+#endif
     const uint8_t n_channels = channels_of(cfg);
     const uint16_t want_flags = n_channels == MAX_CHANNELS ? DSP_AFE_FLAG_NO_REF : 0u;
     dsp_afe_t *afe = make(cfg);
-    bool ok = afe != NULL;
+    bool ok = afe != NULL && (agc != NULL || !kAgcBuilt);
     int worst = 0;
+    memset(previous, 0, sizeof(previous));
     for (size_t h = 0; ok && h < HOPS; h++) {
         dsp_afe_frame_t out;
+        int want_gain_db = 0;
         fill_hop(in, n_channels, h, false);
         ok = dsp_afe_feed(afe, in, 1) == ESP_OK && dsp_afe_fetch(afe, &out) == ESP_OK && out.seq == h &&
-             out.doa_deg == -1 && (kVadBuilt || out.vad == 0) && out.gain_db == 0 && out.flags == want_flags;
+             out.doa_deg == -1 && (kVadBuilt || out.vad == 0) && out.flags == want_flags;
+        expected_frame(agc, previous, out.vad, want, &want_gain_db);
+        ok = ok && abs(out.gain_db - want_gain_db) <= 1;
         for (size_t i = 0; ok && h > 0 && i < GEN_GRID_HOP_SAMPLES; i++) {
             const int err = abs(out.pcm[i] - want[i]);
             worst = err > worst ? err : worst;
         }
-        expected_hop(hpf_mem, &hpf, h, want);
+        expected_tone(hpf_mem, &hpf, h, previous);
     }
     char line[160];
     snprintf(line, sizeof(line),
-             "%s: the tone, through hpf when built, comes back one hop late within %d LSB (worst %d)", what,
-             MAX_ERROR_LSB, worst);
+             "%s: the tone, through hpf and agc when built, comes back one hop late within %d LSB (worst %d)",
+             what, MAX_ERROR_LSB, worst);
     check(ok && worst <= MAX_ERROR_LSB, line);
 }
 
@@ -346,14 +398,28 @@ static void check_module_shells(void)
               dsp_afe_vad_process(vad, hop, &speech) == ESP_OK && !speech,
           "vad: a silent hop is not speech, aggressiveness 4 refused");
 
-    const dsp_afe_agc_config_t agc_cfg = {-26.0f, -10.0f, 30.0f, 3.0f, 6.0f, -3.0f, 4.0f};
+    dsp_afe_agc_config_t agc_cfg = {
+        .target_dbfs = GEN_AFE_AGC_TARGET_DBFS,
+        .gain_min_db = GEN_AFE_AGC_GAIN_MIN_DB,
+        .gain_max_db = GEN_AFE_AGC_GAIN_MAX_DB,
+        .up_db_per_s = GEN_AFE_AGC_UP_DB_PER_S,
+        .down_db_per_s = GEN_AFE_AGC_DOWN_DB_PER_S,
+        .limit_dbfs = GEN_AFE_AGC_LIMIT_DBFS,
+        .lookahead_ms = GEN_AFE_AGC_LOOKAHEAD_MS,
+        .level_tau_s = GEN_AFE_AGC_LEVEL_TAU_S,
+        .level_gate_db = GEN_AFE_AGC_LEVEL_GATE_DB,
+        .level_fall_db_per_s = GEN_AFE_AGC_LEVEL_FALL_DB_PER_S,
+        .release_ms = GEN_AFE_AGC_RELEASE_MS,
+    };
     dsp_afe_agc_t *agc = NULL;
     float gain_db = 5.0f;
     bytes = dsp_afe_agc_workspace_bytes(&agc_cfg);
     const bool agc_ok = dsp_afe_agc_init(&agc, &agc_cfg, region(bytes), bytes) == ESP_OK &&
-                        dsp_afe_agc_process(agc, hop, true, &gain_db) == ESP_OK && gain_db == 0.0f;
+                        dsp_afe_agc_process(agc, hop, false, &gain_db) == ESP_OK && gain_db == 0.0f;
     if (agc_ok) { dsp_afe_agc_set_target(agc, -20.0f); }
-    check(agc_ok, "agc shell: 0 dB gain");
+    agc_cfg.release_ms = 0.0f;
+    check(agc_ok && dsp_afe_agc_workspace_bytes(&agc_cfg) == 0,
+          "agc: 0 dB without speech, refuses a release of 0 ms");
 }
 
 static void check_every_path(void)

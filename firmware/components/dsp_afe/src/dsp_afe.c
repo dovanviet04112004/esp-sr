@@ -303,10 +303,16 @@ static void walk_agc(walker_t *w, const dsp_afe_config_t *cfg, dsp_afe_t *afe)
 #if CONFIG_DSP_AFE_AGC_ENABLE
     const dsp_afe_agc_config_t agc = {
         .target_dbfs = cfg->agc_target_dbfs,
+        .gain_min_db = GEN_AFE_AGC_GAIN_MIN_DB,
+        .gain_max_db = GEN_AFE_AGC_GAIN_MAX_DB,
         .up_db_per_s = GEN_AFE_AGC_UP_DB_PER_S,
         .down_db_per_s = GEN_AFE_AGC_DOWN_DB_PER_S,
         .limit_dbfs = GEN_AFE_AGC_LIMIT_DBFS,
         .lookahead_ms = GEN_AFE_AGC_LOOKAHEAD_MS,
+        .level_tau_s = GEN_AFE_AGC_LEVEL_TAU_S,
+        .level_gate_db = GEN_AFE_AGC_LEVEL_GATE_DB,
+        .level_fall_db_per_s = GEN_AFE_AGC_LEVEL_FALL_DB_PER_S,
+        .release_ms = GEN_AFE_AGC_RELEASE_MS,
     };
     const size_t bytes = dsp_afe_agc_workspace_bytes(&agc);
     void *mem = region(w, bytes);

@@ -1,5 +1,5 @@
 /** Two-stage level control: slow speech-level gain, fast look-ahead limiter (KEHOACH 3.10).
- *  The limiter delays the output by lookahead_ms.
+ *  The limiter delays the output by lookahead_ms and keeps every sample under limit_dbfs.
  */
 #pragma once
 
@@ -16,10 +16,14 @@ typedef struct {
     float target_dbfs; // speech level to reach, -26
     float gain_min_db;
     float gain_max_db;
-    float up_db_per_s;   // 3
-    float down_db_per_s; // 6
-    float limit_dbfs;    // -3
-    float lookahead_ms;  // 4
+    float up_db_per_s;         // 3
+    float down_db_per_s;       // 6
+    float limit_dbfs;          // -3
+    float lookahead_ms;        // 4
+    float level_tau_s;         // speech level time constant, 2
+    float level_gate_db;       // hops this far under the level are left out
+    float level_fall_db_per_s; // while every speech hop is left out
+    float release_ms;          // limiter gain back to 1
 } dsp_afe_agc_config_t;
 
 typedef struct dsp_afe_agc_s dsp_afe_agc_t;
