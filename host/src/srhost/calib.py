@@ -34,6 +34,7 @@ BINS_PER_LINE = 6
 BAUD = 115200
 READY_TIMEOUT_S = 15.0
 REPLY_TIMEOUT_S = 3.0
+SETTLE_S = 0.2
 PROMPT = b"calib> "
 COLUMNS = "bin,freq_hz,re,im,level_db,phase_deg"
 
@@ -136,10 +137,24 @@ def command(port: serial.Serial, line: str) -> str:
     return answers[-1]
 
 
-def write_to_board(gains: np.ndarray, port_name: str) -> str:
+def open_console(port_name: str) -> serial.Serial:
+    """The console of test_apps/calib at a fresh prompt, whether or not opening the port reset the board."""
     port = serial.Serial(port_name, BAUD, timeout=0.1)
     try:
+        # A board that did not reset has printed its prompt already; an empty line makes it print another.
+        port.write(b"\r\n")
         read_until(port, PROMPT, READY_TIMEOUT_S)
+        time.sleep(SETTLE_S)
+        port.reset_input_buffer()
+    except BaseException:
+        port.close()
+        raise
+    return port
+
+
+def write_to_board(gains: np.ndarray, port_name: str) -> str:
+    port = open_console(port_name)
+    try:
         command(port, "bal clear")
         for line in put_lines(gains):
             command(port, line)
@@ -191,9 +206,8 @@ def write_main(args: argparse.Namespace) -> int:
 
 
 def shift_main(args: argparse.Namespace) -> int:
-    port = serial.Serial(args.port, BAUD, timeout=0.1)
+    port = open_console(args.port)
     try:
-        read_until(port, PROMPT, READY_TIMEOUT_S)
         reply = command(port, f"shift set {args.shift}")
     finally:
         port.close()
