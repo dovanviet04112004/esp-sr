@@ -554,14 +554,14 @@ bản quyền nên chỉ lấy thuật toán và hằng số, cũng là của ha
 | IMCRA | làm trơn tần số bằng cửa sổ Hann 3 vạch, làm trơn thời gian τ 76 ms; hai lượt tìm cực tiểu (thô, rồi chỉ trên vạch được coi là vắng tiếng) trên 8 cửa con 8 bước, tức ~1 s như 8 × 15 khung 8 ms của bài; `B_min` 1,66, `ζ₀` 1,67, `γ₀` 4,6, `γ₁` 3; nhiễu làm trơn τ 49 ms, chậm lại theo xác suất có tiếng, nhân bù 1,4685 |
 | Vắng tiếng | xác suất tiên nghiệm từ `ξ` làm trơn τ 22 ms ở ba mức: cục bộ (Hann 3 vạch), toàn cục (Hann 31 vạch), khung (trung bình 50 Hz – 8 kHz); ngưỡng −10 / −5 dB, `P_min` 0,005, `q` tối đa 0,998; mức cục bộ ép về `P_min` ở 500–3500 Hz khi trung bình của nó dưới 0,25 |
 | SNR tiên nghiệm | quyết định hướng, τ 156 ms, sàn −18 dB |
-| Gain | `G = G_H1^p · G_min^(1−p)`, `G_H1` là gain LSA, gain Wiener khi `v > 5`. `G_min` là sàn, khởi đầu **−12 dB** (NVS `afe/ns_floor_db`), nông hơn con số −20 dB hay dùng cho nghe: tiếng nhạc và méo làm hỏng bộ nhận dạng nhanh hơn nhiễu còn sót. Chốt bằng thước cuối của §3.15 |
+| Gain | `G = G_H1^p · G_min^(1−p)`, `G_H1` là gain LSA, gain Wiener khi `v > 5`. `G_min` là sàn, khởi đầu **−12 dB** (NVS `afe/ns_floor_db`), nông hơn con số −20 dB hay dùng cho nghe: tiếng nhạc và méo làm hỏng bộ nhận dạng nhanh hơn nhiễu còn sót. Chốt bằng thước cuối của §3.15. Gain áp ra chặn ở 1, khác `omlsa.m`: LSA nâng vạch nằm sâu dưới nhiễu về mức kỳ vọng, gain có lúc tới hàng nghìn, còn khe `ns` hứa 0..1 và năng lượng bịa từ tiên nghiệm không giúp bộ nhận dạng; trạng thái quyết định hướng vẫn dùng `G_H1` gốc |
 | `E₁(v)` | tra bảng 256 điểm trên [0, 5] của phần trơn `E₁(v) + ln v`, dựng lúc khởi tạo bằng chuỗi ở double chỉ với phép tính cơ bản; lúc chạy `exp(E₁/2)` là giá trị bảng chia `√v`, không tính chuỗi |
 | exp, log | của riêng module: `frexp`, `ldexp` và đa thức float32, sai số tương đối dưới 1e-6, nên C khớp bản soi gương từng bit mà không phụ thuộc `expf` / `logf` của từng libm, như `vad` (§3.10) |
 | Chưa làm | dìm tông thuần và sàn gain thích nghi của `omlsa.m` (`tone_flag`); xoá vạch 0–2 và Nyquist như `omlsa.m` là việc của `hpf`. Thêm lại khi đo thấy có lợi |
 
 Độ trung thành: bản soi gương chạy ở đúng khung của bài (Hamming 512, bước 128, hằng số gốc) so với `omlsa.m` gốc trong
 Octave, trên cùng tín hiệu. Thước (TỔNG QUAN V5.3.1): nhiễu bị dìm bao nhiêu dB và tiếng nói mất bao nhiêu dB, đo bằng
-cách áp đúng gain tính trên hỗn hợp vào riêng phần tiếng nói và riêng phần nhiễu.
+cách áp đúng gain tính trên hỗn hợp vào riêng phần tiếng nói và riêng phần nhiễu, mỗi phần qua `hpf` trước như trong chuỗi.
 
 **Mạng — RNNoise dựng lại cho 16 kHz**, mô hình học, nằm ở `ai_engine/src/ns/`, cắm vào khe `ns`.
 
