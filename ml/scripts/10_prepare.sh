@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fetch the corpus of data/manifests/<kind>/<name>.yaml into raw/<kind>/<name>/ of SRPIPE_DATA_ROOT, each archive
+# Fetch the corpus of data/manifests/<kind>/<name>.yaml into raw/<kind>/<name>/ of SRPIPE_DATA_ROOT, each file
 # checked against its published checksum (KEHOACH 1.2, 4.4.1); only this script and host/session.py write raw/.
 # Usage: scripts/10_prepare.sh <kind>/<name>, e.g. speech/common_voice_vi. KEEP_ARCHIVES=1 keeps the archives.
 set -euo pipefail
@@ -9,11 +9,16 @@ manifest_value() { python3 -c 'import sys, yaml; print(yaml.safe_load(open(sys.a
 json_value() { python3 -c 'import json, sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1"; }
 DATA_ROOT="${SRPIPE_DATA_ROOT:-$(env_value SRPIPE_DATA_ROOT)}"
 MDC_API="${MDC_API_URL:-https://mozilladatacollective.com/api}"
+HF_HUB="${HF_ENDPOINT:-https://huggingface.co}"
 
-# Resumes an interrupted download, checks it, prints its sha256 for the manifest, unpacks it.
+# Resumes an interrupted download, checks it, prints its sha256 for the manifest, unpacks an archive; a marker
+# beside it lets a rerun skip what is done, archive removed or not.
 fetch() {
-  local url=$1 dir=$2 file=$3 algo=$4 sum=$5
-  curl -fL -C - --retry 5 -o "$dir/$file" "$url"
+  local url=$1 dir=$2 file=$3 algo=$4 sum=$5 header=${6:-}
+  local done_marker="$dir/.done/$file"
+  if [ -e "$done_marker" ]; then return; fi
+  mkdir -p "$(dirname "$dir/$file")"
+  curl -fL -C - --retry 5 ${header:+-H "$header"} -o "$dir/$file" "$url"
   if [ "$algo" != "-" ]; then echo "$sum  $dir/$file" | "${algo}sum" -c -; fi
   echo "sha256 $(sha256sum "$dir/$file" | cut -d' ' -f1)  $file"
   case "$file" in
@@ -23,6 +28,7 @@ fetch() {
   if [ "${KEEP_ARCHIVES:-0}" != 1 ] && [[ "$file" == *.zip || "$file" == *.tar.gz || "$file" == *.tgz ]]; then
     rm "$dir/$file"
   fi
+  mkdir -p "$(dirname "$done_marker")" && touch "$done_marker"
 }
 
 # Mozilla Data Collective signs a fresh URL per request; the terms are accepted once on its website.
@@ -46,10 +52,32 @@ for f in yaml.safe_load(open(sys.argv[1])).get("files", []):
     while IFS=$'\t' read -r url file algo sum; do fetch "$url" "$dir" "$file" "$algo" "$sum"; done
 }
 
+# hf_dataset: <repo> in the manifest; every file of its main branch, large ones checked by their LFS sha256.
+hf_fetch() {
+  local manifest=$1 dir=$2 repo auth
+  repo=$(manifest_value "$manifest" hf_dataset)
+  auth="Authorization: Bearer ${HF_TOKEN:-$(env_value HF_TOKEN)}"
+  curl -sf -H "$auth" "$HF_HUB/api/datasets/$repo/tree/main?recursive=true" | python3 -c '
+import json, sys
+for f in json.load(sys.stdin):
+    if f["type"] == "file":
+        oid = (f.get("lfs") or {}).get("oid")
+        print(f["path"], "sha256" if oid else "-", oid or "-", sep="\t")' |
+    while IFS=$'\t' read -r file algo sum; do
+      fetch "$HF_HUB/datasets/$repo/resolve/main/$file" "$dir" "$file" "$algo" "$sum" "$auth"
+    done
+}
+
 target=${1:?usage: $0 <kind>/<name> of a manifest under data/manifests}
 manifest=data/manifests/$target.yaml
 test -f "$manifest" || { echo "no $manifest" >&2; exit 2; }
 dir="$DATA_ROOT/raw/$target"
 mkdir -p "$dir"
-if grep -q '^mdc_dataset_id:' "$manifest"; then mdc_fetch "$manifest" "$dir"; else files_fetch "$manifest" "$dir"; fi
+if grep -q '^mdc_dataset_id:' "$manifest"; then
+  mdc_fetch "$manifest" "$dir"
+elif grep -q '^hf_dataset:' "$manifest"; then
+  hf_fetch "$manifest" "$dir"
+else
+  files_fetch "$manifest" "$dir"
+fi
 echo "$target is in $dir"

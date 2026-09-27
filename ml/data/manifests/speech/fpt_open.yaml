@@ -1,0 +1,10 @@
+name: fpt_open
+source_url: https://huggingface.co/datasets/doof-ferb/fpt_fosd
+hf_dataset: doof-ferb/fpt_fosd
+release: FPT Open Speech Dataset (FOSD), as re-packed in parquet on Hugging Face
+downloaded: 2026-09-27
+license: CC-BY-4.0 as the Hugging Face card states; the original FPT release terms are still to check
+counts: {}
+consumed_by: [command]
+notes: >-
+  Fetched by ml/scripts/10_prepare.sh speech/fpt_open, each parquet checked against its LFS sha256.
