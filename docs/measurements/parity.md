@@ -2,7 +2,9 @@
 
 Kết quả `test_apps/parity` trên board, đọc `contracts/golden/`. Ngưỡng lấy từ `tolerance.yaml` của từng khối.
 App dựng bằng cờ trình biên dịch của `bench`, cũng là của `prod` (`-O2`, KẾ HOẠCH §3.14), hai lần: mọi module tắt với bộ
-vàng `chain`, và profile `modules` với bộ vàng của từng module thật. Chạy: `make parity-board`.
+vàng `chain`, và profile `modules` (đúng `firmware/sdkconfig.afe`) với bộ vàng của từng module thật và `chain_modules`.
+Chạy: `make parity-board`; trên máy tính: `make parity-host`. Số trong bảng lấy từ `parity_report.txt` mà lượt board để
+lại trong thư mục build, qua `python3 pytest_parity.py --report <file>`.
 
 | Khối | Số ca | Sai số tuyệt đối lớn nhất | SNR nhỏ nhất dB | Ngưỡng | Đối chứng âm đỏ | Commit | Ngày |
 |---|---|---|---|---|---|---|---|
@@ -10,8 +12,10 @@ vàng `chain`, và profile `modules` với bộ vàng của từng module thật
 | `stft` — tổng hợp từ phổ vàng | 4 | 3,0e-7 | 137,5 | ≤ 1e-5, ≥ 115 dB | lệch một mẫu: 0,96, −3,1 dB → đỏ | cab1eb3 | 27/09 |
 | `mel` — log-mel, ba cấu hình (40, 80, 24 dải) | 3 | 1,9e-6 | 140,0 | ≤ 1e-4, ≥ 115 dB | lệch một dải: 2,24, 3,0 dB → đỏ | cab1eb3 | 27/09 |
 | `mel` — MFCC (13, 20, 24 hệ số) | 3 | 1,5e-5 | 134,8 | ≤ 1e-3, ≥ 110 dB | — | cab1eb3 | 27/09 |
-| `chain` — `pcm` ra của mặt tiền `dsp_afe`, mọi module tắt (int16) | 4 | 1 LSB | 77,9 | ≤ 1 LSB, ≥ 60 dB | lệch một mẫu: 15 090 LSB, −2,9 dB → đỏ | cab1eb3 | 27/09 |
-| `chain` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | — | cab1eb3 | 27/09 |
+| `chain` — `pcm` ra của mặt tiền `dsp_afe`, mọi module tắt (int16) | 4 | 1 LSB | 77,9 | ≤ 1 LSB, ≥ 60 dB | lệch một mẫu: 15 090 LSB, −2,9 dB → đỏ | 229c321 | 27/09 |
+| `chain` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | — | 229c321 | 27/09 |
+| `chain_modules` — `pcm` ra với `hpf`, `balance`, `vad`, `agc` của `sdkconfig.afe`, hiệu chuẩn và số gieo của ca (int16); máy tính và board B | 4 | 1 LSB | 77,1 | ≤ 1 LSB, ≥ 60 dB | bỏ qua `calib/bal`: 697 LSB, 12,8 dB → đỏ | 229c321 | 27/09 |
+| `chain_modules` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | cùng ca: `vad` 1, `gain_db` 1 dB, `level_dbfs` 2 → đỏ | 229c321 | 27/09 |
 | `hpf` — biquad dạng II chuyển vị viết tay (ADR-0004), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | trễ một mẫu: 0,996, −3,1 dB → đỏ | cab1eb3 | 27/09 |
 | `balance` — nhân phức viết tay (ADR-0005), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | hệ số liên hợp: 26,0, −3,5 dB → đỏ | cab1eb3 | 27/09 |
 | `vad` — mức sáu dải, quyết định thô, `speech` sau kéo dài; máy tính và board B | 4 | 0 | — | mức ≤ 1e-6, ≥ 120 dB; quyết định khớp tuyệt đối | `speech` trễ một bước: 1 → đỏ | 17bdfac | 27/09 |
@@ -80,10 +84,23 @@ sáu bước. Máy tính và board B khớp **từng bit** mọi mẫu ra của
 cả ba ca; `gain_db` là số báo qua `log10f`, khớp từng bit trên máy tính, lệch một bit cuối (4,8e-7 dB) ở một ca trên board
 vì `log10f` của newlib làm tròn khác numpy. Đối chứng âm bỏ qua cờ nói nên gain không nhúc nhích: đỏ.
 
+## Chuỗi với các module sản phẩm (E7-T5)
+
+`chain_modules`: mặt tiền dựng với đúng các module `firmware/sdkconfig.afe` bật (`hpf`, `balance`, `vad`, `agc`), mỗi ca
+mang `config` (sàn `ns` dB, đích `agc` dBFS, mức `vad`) và, nếu board của ca đã hiệu chuẩn, `gains` làm `calib/bal`. Bốn
+ca 192 bước: tiếng nhỏ có quãng nghỉ trên board có ch1 thấp 11 dB, đã hiệu chuẩn (gain leo 5 dB trong 3 s); tiếng to có
+cụm vượt toàn thang trên board chưa hiệu chuẩn, đích −20 dBFS, `vad` mức 3 (bộ chặn đỉnh giữ ở −3 dBFS, cờ `clipped`);
+tiếng trên hum 50 Hz và một chiều, reset giữa ca, `vad` mức 0; chỉ ồn, đích −30 dBFS. Từng module khớp từng bit riêng
+lẻ; hai FFT (`dl_fft` trên board, numpy ở Python) lệch ở mức nhiễu float32, chỉ đủ đẩy một phép làm tròn `pcm` đi 1 LSB,
+không đổi quyết định `vad` hay `gain_db` nào. Máy tính và board B như nhau: tới 1 LSB, SNR nhỏ nhất 77,1 dB ở ca tiếng
+nhỏ (tín hiệu ra chỉ khoảng −60 dBFS), mọi trường số nguyên khớp tuyệt đối. Đối chứng âm mang `gains` dáng board nhưng
+được tính như chưa hiệu chuẩn: lệch 697 LSB, đỏ.
+
 ## Chỗ chứa bộ vàng
 
-App parity có bảng phân vùng riêng (KẾ HOẠCH §4.3) với `storage` 8 MB. Bộ vàng hiện 1 982 265 B, 2 109 440 B tính theo
-khối 4 KB của LittleFS, 25% phân vùng; mọi ca giữ đủ độ dài và đủ mẫu, ca lớn nhất 196 KB trong bộ đệm đọc 512 KB.
+App parity có bảng phân vùng riêng (KẾ HOẠCH §4.3) với `storage` 8 MB. Bộ vàng hiện 3 480 004 B, 3 592 192 B tính theo
+khối 4 KB của LittleFS, 43% phân vùng; mọi ca giữ đủ độ dài và đủ mẫu, ca lớn nhất 294 KB (`chain_modules`, 192 bước)
+trong bộ đệm đọc 512 KB.
 
 ## Đường nối tiếp
 
@@ -91,4 +108,6 @@ Cầu CH340 sau usbipd có lúc rơi byte: có lượt mất cả dòng, có lư
 các URB bị huỷ của `vhci_hcd`. Kết quả vì thế đi qua `test_report` (KẾ HOẠCH §4.5.7): mỗi dòng có số thứ tự và CRC32,
 dòng cuối là `end <n> lines`, máy tính bỏ dòng sai CRC và xin lại dòng thiếu. Lượt parity `modules` tại `9e56e13` gặp đúng
 chuyện ấy: dòng 42 mất đuôi, dòng 43 mất hẳn, dòng 44 mất đầu; bộ gom xin lại `42 43 44`, board in lại cả ba với CRC đúng,
-và lượt qua mà không phải chạy lại. Đổi một chữ số trong một dòng của log, hay xoá một dòng, bộ chấm đều từ chối.
+và lượt qua mà không phải chạy lại. Đổi một chữ số trong một dòng của log, hay xoá một dòng, bộ chấm đều từ chối. Lượt
+`modules` tại `229c321` gặp hai chỗ: dòng 14 cụt đuôi dính vào dòng 15; dòng 47 cụt đuôi, 48 tới 50 mất hẳn, dính vào 51.
+Bộ gom bỏ hai dòng sai CRC, xin lại bảy dòng thiếu, đủ 94 trên 94, và lượt qua.

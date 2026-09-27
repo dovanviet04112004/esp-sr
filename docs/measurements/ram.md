@@ -43,7 +43,8 @@ Cộng theo chuỗi, RAM nội, ước 🔬:
 | `"MMR"` + `aec` + `bss` (cần loa, E10) | ~148 700 + đường trễ | ~20 400 | ~169 100 + đường trễ |
 
 Dòng app khung rỗng đã đo trên board B ở E3-T4: heap nội giảm 47 268 B qua `svc_front_init` = ~41 KB `hot` + 6 244 B
-bảng `dl_fft`. Ước thấp vì đệm tạm trong struct mặt tiền (~19,7 KB: PCM float ba kênh, phổ hai micro, hai lối
+bảng `dl_fft`. Bản sản phẩm E7-T5 (`hpf`, `balance`, `vad`, `agc` của `firmware/sdkconfig.afe`, `calib/bal` nạp): giảm
+51 364 B, tức bốn module thêm 4 096 B. Ước thấp vì đệm tạm trong struct mặt tiền (~19,7 KB: PCM float ba kênh, phổ hai micro, hai lối
 ra không gian, công suất, gain, FIFO, bản sao hiệu chuẩn) được cấp cho mọi cấu hình, kể cả phần chỉ `bss` hay
 `"MMR"` dùng. Mọi dòng khác cộng thêm chừng ấy chênh lệch.
 
@@ -80,6 +81,7 @@ Số của E5-T6 là **sàn**: thân task chưa có `dsp_afe`, `wake`, MQTT. Ch�
 | thêm `sb_stream` 64 KB ở PSRAM, luồng `mode 2` đang gửi: còn / thấp nhất | 77471 / 64019 | — | — | `dev` @ `253ddf7` | 26/09 |
 | như trên, máy nhận nghẽn 30 s, board nối lại mỗi giây: thấp nhất | 45895 | — | — | `dev` @ `253ddf7` | 26/09 |
 | `sb_stream` 512 KB ở PSRAM, luồng `mode 5` gửi liền 10 phút (E5-T11): còn / thấp nhất | 83659 / 64791 | — | 7 776 928 / 7 776 148 | `dev` @ `3d3335d` | 26/09 |
+| sau `svc_front_init`: `dsp_afe` với `hpf`, `balance`, `vad`, `agc`, `calib/bal` nạp (E7-T5) | 135147 | 90100 | 7 788 684 | `dev` @ `ca660e9` | 27/09 |
 
 Đọc từ log `heap_init` của board B qua CH340. Đây là **trần** cho mọi thứ ở KẾ HOẠCH §6.5 cộng lại, trước khi Wi-Fi và lwIP lấy phần của chúng; nó khớp khoảng ước 300–340 KB của §6.5.
 

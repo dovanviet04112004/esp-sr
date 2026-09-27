@@ -42,3 +42,25 @@ Cùng cảnh, bản rút gọn 40 s mỗi cảnh trừ dòng cuối; lệch xa n
 
 `vad` mức 0 hỏng ở mức vào −10 dBFS vì nền ồn −30 dBFS vượt trần mô hình nhiễu của WebRTC và được gắn cờ nói gần như
 liên tục (`vad.md` §4); `agc` khi ấy thích nghi trên nhiễu.
+
+## 4. Mức vào `agc` trên board B (E7-T5)
+
+`srhost.score` chạy `ch0 ch1` của từng phiên qua chuỗi sản phẩm tới trước `agc` (`hpf`, `balance` theo
+`calib/board_b_balance.csv`, đúng bảng board giữ ở `calib/bal`, `vad` mức 2) và in `level_dbfs` của từng bước; chuỗi này
+khớp board tới 1 LSB (`parity.md`). `pcm_shift` 16.
+
+| Phiên | Nội dung | p10 dBFS | p50 dBFS | p90 dBFS | Bước `vad = 1` |
+|---|---|---|---|---|---|
+| `20260926_home_005` | phòng yên, Wi-Fi tắt, 60 s | −82 | −80 | −78 | 0 % |
+| `20260926_home_004` | phòng yên, Wi-Fi phát, 60 s | −82 | −81 | −79 | 0 % |
+| `20260926_home_006` | cào cạnh lỗ micro A | −82 | −80 | −79 | 3,1 % |
+| `20260926_home_009` | ồn trắng từ loa 1 m trước hộp | −82 | −63 | −60 | 0 % |
+| `20260926_home_011` | ồn trắng 20 cm trước hộp, âm lượng tối đa | −80 | −57 | −55 | 4,0 % |
+
+Nền phòng yên tới `agc` ở −80 dBFS; không có `balance` thì −73 dBFS. `balance` hạ `ch1` 11 dB cho khớp `ch0` (`mic_array.md`
+§1), nên cả chuỗi chạy ở mức của `ch0`, micro nghe nhỏ. `vad` không gắn cờ nói cho ồn trắng dừng.
+
+Chưa phiên nào có tiếng người. Ước lượng 🔬: tiếng nói thường ở 1 m khoảng 62 dB SPL, `ch1` theo độ nhạy datasheet (−29,0
+dBFS ở 94 dB SPL, `mic_array.md` §0) ra khoảng −61 dBFS, chuỗi sau `balance` khoảng −72 dBFS, `agc` thêm tối đa 30 dB được
+−42 dBFS, thiếu đích −26 dBFS 16 dB; ở 3 m tiếng nói ngang nền phòng. Số thật cần một phép đo tiếng nói trên board: E2-T5
+đo tiếng nói to ở 10 cm để chọn `pcm_shift`, và cùng phiên ấy cho mức vào `agc` của tiếng nói ở các khoảng cách.
