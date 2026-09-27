@@ -8,6 +8,7 @@
 #include "esp_check.h"
 #include "esp_console.h"
 #include "esp_log.h"
+#include "drv_audio.h"
 #include "esp_rom_crc.h"
 #include "gen_grid.h"
 #include "storage_format.h"
@@ -130,6 +131,31 @@ static int bal_cmd(int argc, char **argv)
     return 1;
 }
 
+static int shift_cmd(int argc, char **argv)
+{
+    const char *action = argc > 1 ? argv[1] : "";
+    uint32_t shift = 0;
+    if (strcmp(action, "set") == 0 && argc == 3 && parse_u32(argv[2], &shift) &&
+        shift >= DRV_AUDIO_PCM_SHIFT_MIN && shift <= DRV_AUDIO_PCM_SHIFT_MAX) {
+        const esp_err_t err = sys_storage_set_u8(STORAGE_NS_CALIB, STORAGE_KEY_PCM_SHIFT, (uint8_t)shift);
+        if (err != ESP_OK) {
+            printf("error writing calib/pcm_shift: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+    } else if (strcmp(action, "show") != 0) {
+        printf("error usage: shift set <%d..%d> | show\n", DRV_AUDIO_PCM_SHIFT_MIN, DRV_AUDIO_PCM_SHIFT_MAX);
+        return 1;
+    }
+    uint8_t stored = 0;
+    const esp_err_t err = sys_storage_get_u8(STORAGE_NS_CALIB, STORAGE_KEY_PCM_SHIFT, &stored);
+    if (err != ESP_OK) {
+        printf("error no calib/pcm_shift: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+    printf("ok shift %u\n", stored);
+    return 0;
+}
+
 void app_main(void)
 {
     ESP_ERROR_CHECK(sys_storage_init());
@@ -147,6 +173,12 @@ void app_main(void)
         .func = bal_cmd,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&bal));
+    const esp_console_cmd_t shift = {
+        .command = "shift",
+        .help = "Store and read back NVS calib/pcm_shift, the right shift drv_audio applies (E2-T5)",
+        .func = shift_cmd,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&shift));
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
     ESP_LOGI(TAG, "ready: %d bins of %d bytes each", GEN_GRID_N_BINS, (int)(VALUES_PER_BIN * sizeof(float)));
 }
