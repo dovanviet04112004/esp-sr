@@ -18,6 +18,7 @@ bss:
   forget_tau_s: 1.0
 vad:
   hangover_ms: 240
+  aggressiveness: 2                   # seed of NVS afe/vad_mode; agc needs it (docs/measurements/afe/agc.md)
   # WebRTC VAD in float32 (KEHOACH 3.10), its tables as real values; source in firmware/third_party/webrtc_vad.
   # Bands 0-5: 80-250, 250-500, 500-1k, 1-2k, 3-4k, 2-3k Hz; Gaussian tables [gaussian][band]; dB of int16 energy.
   bands: 6
@@ -78,7 +79,9 @@ agc:
   target_dbfs: -26.0                  # seed of NVS afe/agc_target_dbfs
   gain_min_db: -20.0                  # inputs of -50 .. -10 dBFS need -16 .. +24 dB
   gain_max_db: 30.0
-  level_tau_s: 0.5                    # power mean of the speech hops at the input
+  level_tau_s: 2.0                    # power mean of the speech hops at the input
+  level_gate_db: 15.9                 # speech hops this far under the level are left out, as ITU-T P.56 does
+  level_fall_db_per_s: 1.0            # the level sinks at this rate while every speech hop is gated out
   up_db_per_s: 3.0
   down_db_per_s: 6.0
   limit_dbfs: -3.0
