@@ -8,6 +8,7 @@
 #include "dsp_afe/agc.h"
 #include "dsp_afe/balance.h"
 #include "dsp_afe/doa.h"
+#include "dsp_afe/gsc.h"
 #include "dsp_afe/hpf.h"
 #include "dsp_afe/ns.h"
 #include "dsp_afe/vad.h"
@@ -42,6 +43,8 @@
 #define MEL_F_MIN_HZ 20.0f
 #define MEL_F_MAX_HZ 7600.0f
 #define MEL_LOG_FLOOR 1e-6f
+#define BENCH_STEER_DEG 60.0f
+#define GSC_ANGLES 91 // the doa grid, 0..180 deg
 #if CONFIG_DSP_AFE_DOA_ENABLE
 #define CHAIN_ROW "dsp_afe chuỗi (hpf + stft x2 + balance + doa + trộn + ns + istft + vad + agc)"
 #else
@@ -242,6 +245,37 @@ static void bench_doa(bool search)
 }
 #endif
 
+#if CONFIG_DSP_AFE_GSC_ENABLE
+// turning: the steer moves every hop, so the phasors are rebuilt each time, the worst doa can ask for.
+static void bench_gsc(bool turning)
+{
+    const dsp_afe_gsc_config_t cfg = {
+        .spacing_m = GEN_ARRAY_SPACING_M,
+        .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
+        .step_size = GEN_AFE_GSC_STEP_SIZE,
+        .leakage = GEN_AFE_GSC_LEAKAGE,
+        .weight_max = GEN_AFE_GSC_WEIGHT_MAX,
+    };
+    row_t row = {.module = turning ? "dsp_afe gsc học và đổi góc lái mỗi bước" : "dsp_afe gsc học",
+                 .core = CORE_SACH};
+    row.hot_bytes = dsp_afe_gsc_workspace_bytes(&cfg);
+    void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
+    const size_t before = heap_free();
+    dsp_afe_gsc_t *gsc = NULL;
+    ESP_ERROR_CHECK(dsp_afe_gsc_init(&gsc, &cfg, mem, row.hot_bytes));
+    row.static_bytes = before - heap_free();
+    timing_t t = {0};
+    for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
+        const float angle_deg =
+            turning ? (float)(h % GSC_ANGLES) * GEN_AFE_DOA_GRID_STEP_DEG : BENCH_STEER_DEG;
+        const uint32_t start = esp_cpu_get_cycle_count();
+        ESP_ERROR_CHECK(dsp_afe_gsc_process(gsc, s_bins[0], s_bins[1], angle_deg, true, s_work));
+        hop_done(&t, h, start);
+    }
+    report(&row, &t);
+}
+#endif
+
 static void bench_vad(void)
 {
     const dsp_afe_vad_config_t cfg = {.aggressiveness = 0, .hangover_ms = GEN_AFE_VAD_HANGOVER_MS};
@@ -382,6 +416,12 @@ static void core1_benches(void *done)
     vTaskDelay(1);
     bench_balance();
     vTaskDelay(1);
+#if CONFIG_DSP_AFE_GSC_ENABLE
+    bench_gsc(false);
+    vTaskDelay(1);
+    bench_gsc(true);
+    vTaskDelay(1);
+#endif
 #if CONFIG_DSP_AFE_DOA_ENABLE
     bench_doa(false);
     vTaskDelay(1);

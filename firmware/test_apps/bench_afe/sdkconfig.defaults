@@ -1,2 +1,4 @@
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_FREERTOS_HZ=1000
+# Spatial modules outside the product get their own rows; the chain row runs with spatial none.
+CONFIG_DSP_AFE_GSC_ENABLE=y
