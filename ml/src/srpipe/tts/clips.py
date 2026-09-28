@@ -17,7 +17,7 @@ import soundfile as sf
 from srpipe.lang.normalize import LangError, normalize
 from srpipe.tts import engines
 
-ROW_KEYS = ("speaker", "text", "seed", "speed")
+ROW_KEYS = ("speaker", "text", "say", "seed", "speed")
 
 
 @dataclass(frozen=True)
@@ -87,25 +87,37 @@ def parquet_references(
     return refs
 
 
+def said(request: dict) -> str:
+    """What a clip must say: its say field, or the text it was read from."""
+    return request.get("say", request["text"])
+
+
 def render(requests: dict[str, list[dict]], tts: dict, work: Path, cache: Path) -> list[dict]:
-    """Synthesise every engine's requests {id, speaker, text, out, ...} whose clip is not there yet, hear every clip
-    back, and return one manifest row per clip, passed when the checker spells back the requested text."""
+    """Synthesise every engine's requests {id, speaker, text, out, say?, rivals?, ...} whose clip is not there yet,
+    hear every clip back, and return one manifest row per clip: heard, what the checker heard; passed, whether it
+    spells what the clip must say; margin, how much more log-probability the checker gives what it heard than what the
+    clip must say, near 0 when only the spelling differs; rivals, the same margin for each text it must not say."""
     rows = []
     for engine, reqs in requests.items():
         missing = [r for r in reqs if not Path(r["out"]).exists()]
         if missing:
             engines.synthesise(engine, missing, tts, work, cache)
-        heard = engines.hear([{"id": f"{engine}/{r['id']}", "wav": r["out"]} for r in reqs], tts, work, cache)
+        targets = {r["id"]: [said(r), *r.get("rivals", [])] for r in reqs}
+        asked = [{"id": f"{engine}/{r['id']}", "wav": r["out"], "targets": targets[r["id"]]} for r in reqs]
+        heard = engines.hear(asked, tts, work, cache)
         for r in reqs:
             wav = Path(r["out"])
-            text = heard[f"{engine}/{r['id']}"]
+            h = heard[f"{engine}/{r['id']}"]
+            gap = {t: round(h["logp"] - p, 3) for t, p in h["targets"].items()}
             rows.append(
                 {
                     "engine": engine,
                     "id": r["id"],
                     **{k: r[k] for k in ROW_KEYS if k in r},
-                    "heard": text,
-                    "passed": spelled(text) == spelled(r["text"]),
+                    "heard": h["text"],
+                    "passed": spelled(h["text"]) == spelled(said(r)),
+                    "margin": gap[said(r)],
+                    **({"rivals": {t: gap[t] for t in r["rivals"]}} if "rivals" in r else {}),
                     "seconds": round(sf.info(str(wav)).duration, 3),
                     "sha256": hashlib.sha256(wav.read_bytes()).hexdigest(),
                 }

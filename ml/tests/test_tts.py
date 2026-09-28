@@ -1,5 +1,6 @@
 """Shared TTS: the checker compares spelling with tones, references are the first clip in the span or parquet draws
-spread over the files, and a rendered clip passes only when its own text is heard back, made again only when missing."""
+spread over the files, and a rendered clip carries what was heard, whether it spells what the clip must say and the
+checker's margins; a rerun makes only the missing clips."""
 
 from __future__ import annotations
 
@@ -88,7 +89,8 @@ def test_every_engine_and_the_checker_has_a_pinned_project() -> None:
 
 
 def render_with_fakes(requests: dict, heard: dict, root: Path, monkeypatch) -> tuple[list[dict], list[str]]:
-    """Render with an engine that writes one second of silence and records what it was asked for."""
+    """Render with an engine that writes one second of silence and records what it was asked for, and a checker that
+    hears the given text and scores a target 5 nats below it unless they spell alike."""
     made: list[str] = []
 
     def synthesise(engine, reqs, tts, work, cache):
@@ -96,22 +98,52 @@ def render_with_fakes(requests: dict, heard: dict, root: Path, monkeypatch) -> t
             write_wav(Path(r["out"]), np.zeros(grid.SAMPLE_RATE_HZ))
             made.append(r["id"])
 
+    def hear(asked, *a):
+        return {
+            c["id"]: {
+                "text": heard[c["id"]],
+                "logp": -1.0,
+                "targets": {t: -1.0 - 5.0 * (clips.spelled(t) != clips.spelled(heard[c["id"]])) for t in c["targets"]},
+            }
+            for c in asked
+        }
+
     monkeypatch.setattr(engines, "synthesise", synthesise)
-    monkeypatch.setattr(engines, "hear", lambda c, *a: heard)
+    monkeypatch.setattr(engines, "hear", hear)
     return clips.render(requests, {}, root / "work", root), made
 
 
-def test_a_clip_passes_only_when_its_own_text_is_heard(tmp_path: Path, monkeypatch) -> None:
+def test_a_clip_passes_only_when_what_it_must_say_is_heard(tmp_path: Path, monkeypatch) -> None:
     requests = {
         "e": [
-            {"id": "a", "speaker": "A", "text": "Chào Mina!", "seed": 3, "out": str(tmp_path / "a.wav")},
+            {
+                "id": "a",
+                "speaker": "A",
+                "text": "Chào Mina!",
+                "say": "chào mi na",
+                "seed": 3,
+                "out": str(tmp_path / "a.wav"),
+            },
             {"id": "b", "speaker": "B", "text": "chào mi na", "out": str(tmp_path / "b.wav")},
+            {
+                "id": "c",
+                "speaker": "C",
+                "text": "chào mi nhé",
+                "rivals": ["chào mi na"],
+                "out": str(tmp_path / "c.wav"),
+            },
         ]
     }
-    rows, made = render_with_fakes(requests, {"e/a": "chào mi na.", "e/b": "chào mí na"}, tmp_path, monkeypatch)
-    assert [(r["id"], r["speaker"], r["passed"]) for r in rows] == [("a", "A", True), ("b", "B", False)]
-    assert rows[0]["seconds"] == 1.0 and rows[0]["seed"] == 3 and "seed" not in rows[1]
-    assert made == ["a", "b"]
+    heard = {"e/a": "chào minah.", "e/b": "chào mí na", "e/c": "chào mi nhé."}
+    rows, made = render_with_fakes(requests, heard, tmp_path, monkeypatch)
+    assert [(r["id"], r["speaker"], r["passed"], r["margin"]) for r in rows] == [
+        ("a", "A", False, 5.0),
+        ("b", "B", False, 5.0),
+        ("c", "C", True, 0.0),
+    ]
+    assert rows[2]["rivals"] == {"chào mi na": 5.0} and "rivals" not in rows[0]
+    assert rows[0]["say"] == "chào mi na" and rows[0]["seed"] == 3 and "seed" not in rows[1]
+    assert rows[0]["seconds"] == 1.0 and made == ["a", "b", "c"]
 
 
 def test_a_rerun_makes_only_the_missing_clips_and_hears_them_all(tmp_path: Path, monkeypatch) -> None:

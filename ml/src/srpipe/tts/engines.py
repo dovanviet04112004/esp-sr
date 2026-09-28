@@ -45,9 +45,10 @@ def synthesise(engine: str, requests: list[dict], tts: dict, work: Path, cache: 
     run(engine, *engine_args(engine, tts), str(listing), cache=cache)
 
 
-def hear(clips: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, str]:
-    """The checker's text for every clip {id, wav}, by id."""
+def hear(clips: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, dict]:
+    """What the checker makes of every clip {id, wav, targets}, by id: {text, logp, targets}, the text it heard and the
+    log-probability of that text and of each target given the clip."""
     listing, heard = work / "asr_clips.jsonl", work / "asr_heard.jsonl"
     write_jsonl(listing, clips)
     run("asr", tts["asr"]["model"], str(tts["asr"]["batch"]), str(listing), str(heard), cache=cache)
-    return {r["id"]: r["text"] for r in map(json.loads, heard.read_text(encoding="utf-8").splitlines())}
+    return {r["id"]: r for r in map(json.loads, heard.read_text(encoding="utf-8").splitlines())}
