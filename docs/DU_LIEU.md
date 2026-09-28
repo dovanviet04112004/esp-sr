@@ -27,6 +27,23 @@ Dữ liệu đã tải và đã xử lí — số đo trên đĩa, không phải
 
 Trên máy còn hai kho tải từ trước cho dự án khác, **chưa nhập** vào `raw/`: LibriSpeech `dev-clean`, `test-clean`, `train-clean-100` (tiếng Anh, CC BY 4.0, 7 GB) và phần lời của Speech Commands (tiếng Anh, CC BY 4.0). Nhập kho nào thì theo đúng cách của VIVOS: chép nguyên vào `raw/`, manifest có sha256 cây, một dòng ở bảng trên.
 
+### 1.1 Sàng lọc (E11-T16)
+
+`make screen` ngày 28/09 (KẾ HOẠCH §1.2). Mọi nơi đọc kho bỏ qua các mẩu ở `interim/screen/rejects.tsv`. Ngưỡng và
+bảng quét ở `measurements/data_screen.md`.
+
+| Kho | Loại | Lý do chính | Còn dùng được (giờ) |
+|---|---|---|---|
+| Common Voice 27.0 | 143 mẩu, 0,15 h | câm 62, lời lệch tiếng 81 | 22,20 |
+| VIVOS | 17 mẩu, 0,02 h | lời lệch tiếng 13 | 15,65 |
+| FPT | 470 mẩu, 0,73 h | câm 442, trong đó 437 mẩu Set002 toàn số 0 | 29,45 |
+| VLSP2020-100h | 701 mẩu, 0,44 h | lời lệch tiếng 668 | 100,94 |
+| Bud500 | 15 mẩu, 0,02 h | trùng 10 | 462,06 |
+| DNS Challenge | 132 mẩu, 0,36 h | câm 109, trùng 23 | 180,09 |
+| MUSAN | 1 mẩu | câm | 109,29 |
+| OpenSLR 28 | 843 mẩu, 5,91 h | `pointsource_noises` là bản chép nhiễu MUSAN: 842 trùng | 20,34 |
+| DEMAND, Speech Commands | 0 | | 22,67; 0,11 |
+
 ## 2. Split
 
 | Nhánh | Split | Luật | Seed | sha256 `split.lock` | `SPLIT.md` |
