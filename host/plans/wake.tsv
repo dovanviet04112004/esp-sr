@@ -1,11 +1,9 @@
 # E11-T6 wake test set: "Chào Mina", read as the name (ADR-0007), 10 times a session at 1 m and 3 m, front and side,
-# normal and soft; then spoken near misses and an hour of room background for test_neg, in two sessions
-# since capture streams at most CONFIG_CAPTURE_DURATION_S (1860 s) a boot. Columns as in levels.tsv.
+# normal and soft, then spoken near misses; the room background for test_neg is background.tsv, recorded last.
+# Columns as in levels.tsv.
 Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "Chào Mina" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'chào mi na'
 Chính diện, cách 1 m. Chờ 2 s, nói "Chào Mina" 10 lần, mỗi lần cách 2-3 s, giọng NHỎ như nói trong phòng lúc tối.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'chào mi na, giọng nhỏ'
 Bên PHẢI, phía lỗ B (ch1), cách 1 m. Chờ 2 s, nói "Chào Mina" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 0 --duration-s 40 --prompt 'chào mi na'
 Chính diện, cách 3 m. Chờ 2 s, nói "Chào Mina" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 300 --doa-deg 90 --duration-s 40 --prompt 'chào mi na'
 Chéo giữa chính diện và bên phải, cách 3 m. Chờ 2 s, nói "Chào Mina" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 300 --doa-deg 45 --duration-s 40 --prompt 'chào mi na'
 Chính diện, cách 1 m. Chờ 2 s rồi đọc lần lượt, mỗi cụm 2 lần, cách 2 s: chào mi, mi na, mi na ơi, chào chị na, chào mi nhé, chào minh, chào mẹ, bang mi na, và vi na, chào bạn.	--kind neg --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 60 --prompt 'chào mi | mi na | mi na ơi | chào chị na | chào mi nhé | chào minh | chào mẹ | bang mi na | và vi na | chào bạn'
-Để board thu 30 phút nền phòng như lúc bình thường: quạt, điều hoà, TV, nhạc đều được, nhưng không ai nói chuyện gần board.	--kind noise --duration-s 1800 --prompt 'nền phòng 30 phút, không người nói, phần 1'
-Tiếp 30 phút nữa như trên, đổi nguồn nền nếu có (bật TV hoặc nhạc nếu phần 1 yên), vẫn không ai nói gần board.	--kind noise --duration-s 1800 --prompt 'nền phòng 30 phút, không người nói, phần 2'

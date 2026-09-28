@@ -1,0 +1,5 @@
+# E11-T6 room background for wake test_neg: an hour, with the 22.9 public hours past the 24 the false-accept gate
+# needs (KEHOACH 3.11). Two sessions since capture streams at most CONFIG_CAPTURE_DURATION_S (1860 s) a boot; record
+# them last, at the product's pcm_shift, and leave the board alone. Columns as in levels.tsv.
+Để board thu 30 phút nền phòng như lúc bình thường: quạt, điều hoà, TV, nhạc đều được, nhưng không ai nói chuyện gần board.	--kind noise --duration-s 1800 --prompt 'nền phòng 30 phút, không người nói, phần 1'
+Tiếp 30 phút nữa như trên, đổi nguồn nền nếu có (bật TV hoặc nhạc nếu phần 1 yên), vẫn không ai nói gần board.	--kind noise --duration-s 1800 --prompt 'nền phòng 30 phút, không người nói, phần 2'
