@@ -1,0 +1,12 @@
+# The wake network of KEHOACH 3.11. E11-T10 exports it with random weights to prove esp-dl streams it one hop at a time.
+features: scenes/device.yaml       # the log-mel the network reads, its n_bands among them
+model:
+  kernel: 3
+  channels: 32
+  dilations: [1, 2, 4, 8, 16, 32]  # receptive field 1 + (kernel - 1) * 63 = 127 hops, about 2 s
+probe:
+  seed: 20260928
+  hops: 200                        # streamed on the board, longer than the receptive field
+  calib_sequences: 16
+  input_mean: -8.0                 # natural-log mel energies between the 1e-6 floor and speech
+  input_std: 2.0
