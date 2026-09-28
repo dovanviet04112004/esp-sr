@@ -1,4 +1,4 @@
-/** The part of ESP-IDF's esp_err.h that dsp_spec and dl_fft use, for the host build (KEHOACH 4.5.7).
+/** The part of ESP-IDF's esp_err.h that the host builds use (KEHOACH 4.5.7).
  *  @ctx any | non-blocking
  */
 #pragma once
@@ -15,3 +15,5 @@ typedef int esp_err_t;
 #define ESP_ERR_INVALID_SIZE 0x104
 #define ESP_ERR_NOT_FOUND 0x105
 #define ESP_ERR_NOT_SUPPORTED 0x106
+#define ESP_ERR_INVALID_CRC 0x109
+#define ESP_ERR_INVALID_VERSION 0x10A

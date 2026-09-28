@@ -42,10 +42,12 @@ jobs:
           pip install pytest==8.3.3 pyyaml==6.0.2
           make parity-host PARITY_PY=python
 
-      - name: ai_engine shell on the host
+      - name: ai_engine loader and shells on the host
         if: steps.guard.outputs.ready == 'true'
         shell: bash
         run: |
+          # The host shim hashes model entries with OpenSSL, which the IDF image does not ship.
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends libssl-dev
           . "$IDF_PATH/export.sh"
           cmake -S firmware/components/ai_engine/test_apps/host -B build_host_ai_engine -DCMAKE_BUILD_TYPE=Release
           cmake --build build_host_ai_engine -j

@@ -3,13 +3,19 @@
 cmake_minimum_required(VERSION 3.16)
 project(ai_engine_host C CXX)
 
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+
 set(FIRMWARE "${CMAKE_CURRENT_LIST_DIR}/../../../..")
 set(ENGINE "${FIRMWARE}/components/ai_engine")
-add_executable(ai_engine_host main/test_ai_engine_host.c
-    "${ENGINE}/src/core/engine.cpp" "${ENGINE}/src/ns/ns.cpp" "${ENGINE}/src/wake/wake.cpp"
-    "${ENGINE}/src/command/command.cpp" "${ENGINE}/src/synth/synth.cpp")
+add_executable(ai_engine_host main/test_ai_engine_host.c main/fake_storage.c main/image_probe.cpp
+    "${ENGINE}/src/core/engine.cpp" "${ENGINE}/src/core/model_image.cpp" "${ENGINE}/src/ns/ns.cpp"
+    "${ENGINE}/src/wake/wake.cpp" "${ENGINE}/src/command/command.cpp" "${ENGINE}/src/synth/synth.cpp")
 target_include_directories(ai_engine_host PRIVATE
-    "${ENGINE}/include" "${FIRMWARE}/components/dsp_afe/include" "${FIRMWARE}/components/common/include"
-    "${FIRMWARE}/components/dsp_spec/test_apps/host/shim")
+    "${ENGINE}/include" "${ENGINE}/src" "${FIRMWARE}/components/dsp_afe/include"
+    "${FIRMWARE}/components/common/include" "${FIRMWARE}/components/sys_storage/include"
+    "${CMAKE_CURRENT_LIST_DIR}/shim" "${FIRMWARE}/components/dsp_spec/test_apps/host/shim")
+target_link_libraries(ai_engine_host PRIVATE OpenSSL::Crypto)
 set_target_properties(ai_engine_host PROPERTIES C_STANDARD 17 CXX_STANDARD 20 CXX_EXTENSIONS OFF)
+# The toolchain's C library maps _Static_assert onto static_assert for C++; glibc leaves it to C.
+target_compile_definitions(ai_engine_host PRIVATE $<$<COMPILE_LANGUAGE:CXX>:_Static_assert=static_assert>)
 target_compile_options(ai_engine_host PRIVATE -Wall -Wextra -Werror $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
