@@ -10,3 +10,29 @@ probe:
   calib_sequences: 16
   input_mean: -8.0                 # natural-log mel energies between the 1e-6 floor and speech
   input_std: 2.0
+candidates:                        # scored by python -m srpipe.tasks.wake.candidates (E11-T5); one gets chosen
+  - bí đỏ ơi
+  - cà pháo ơi
+  - hạt tiêu ơi
+  - bắp cải ơi
+  - kẹo lạc ơi
+  - cốm vòng ơi
+  - bé bắp ơi
+  - chú cuội ơi
+  - tí hon ơi
+  - cá bống ơi
+  - củ cải ơi
+  - ốc bươu ơi
+  - hạt dẻ ơi
+  - khoai lang ơi
+  - bông gòn ơi
+  - tép mỡ ơi
+  - chó mực ơi
+  - ông bụt ơi
+  - này bí đỏ ơi
+  - ê cà pháo ơi
+  - chào bé bắp ơi
+  - cô bé tí hon
+  - bác tí hon ơi
+  - hạt tiêu nhỏ ơi
+  - xin chào cà pháo
