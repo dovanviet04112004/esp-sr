@@ -48,6 +48,8 @@ bảng quét ở `measurements/data_screen.md`.
 
 | Nhánh | Split | Luật | Seed | sha256 `split.lock` | `SPLIT.md` |
 |---|---|---|---|---|---|
+| `wake` | v1: `train_pos` 3 466 (1,0 h TTS), `train_neg` 122 483 (100,1 h), `val_pos` 118, `val_neg` 2 497 (3,3 h), `test_neg` 20 717 (22,9 h) | theo người nói; giọng nhân bản theo vai của người được nhân bản; `test_neg` là Common Voice và VIVOS test, không kho nào làm giọng mẫu; không âm bản nào nói từ đánh thức | 20260928 | `6f81be63…` | `ml/data/splits/wake/v1/SPLIT.md` |
+| `command` | v1: `train_*` một file mỗi kho, 758 897 mẩu (626,2 h), `val` 1 583 (1,9 h), `test` 2 000 (2,0 h, 59 người nói) | theo người nói; FPT, VLSP, Bud500 chỉ vào học; 196 câu chứa "chụp ảnh" rời tập học (lệnh chưa học, E11-T13) | 20260928 | `4bfcd902…` | `ml/data/splits/command/v1/SPLIT.md` |
 
 ## 3. Đặc trưng qua đường mô phỏng board
 
