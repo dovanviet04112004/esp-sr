@@ -17,6 +17,8 @@ doa:
 gsc:
   step_size: 0.05
   leakage: 0.0001
+  weight_max: 16.0                  # norm cap of each bin's weight: past 16 the scenes gain < 0.1 dB (KEHOACH 3.7)
+  power_floor: 1.0e-10              # added to the block's power before the NLMS division
 bss:
   forget_tau_s: 1.0
 ns:
