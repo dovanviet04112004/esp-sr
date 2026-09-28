@@ -2,14 +2,15 @@
 # Units follow the fields of the module headers; module switches stay in the Kconfig of dsp_afe.
 version: 1
 # The modules the product turns on; firmware/sdkconfig.afe and srpipe.generated.afe.MODULES come from it.
-modules: [hpf, balance, ns_omlsa, vad, agc]
+modules: [hpf, balance, doa, ns_omlsa, vad, agc]
 hpf:
   cutoff_hz: 80.0
 aec:
   partitions: 8
 doa:
-  band_min_hz: 200.0
-  band_max_hz: 0.0          # 0 means the spatial alias frequency of array.yaml
+  # Above the alias frequency the room's diffuse field decorrelates; below it pulls the angle to broadside (KEHOACH 3.6).
+  band_min_hz: 2000.0
+  band_max_hz: 8000.0       # 0 means the spatial alias frequency of array.yaml
   grid_step_deg: 2.0
   smooth_tau_s: 0.2
   update_every_hops: 2

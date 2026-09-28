@@ -5,8 +5,8 @@
 VERSION = 1
 HPF_CUTOFF_HZ = 80.0
 AEC_PARTITIONS = 8
-DOA_BAND_MIN_HZ = 200.0
-DOA_BAND_MAX_HZ = 0.0
+DOA_BAND_MIN_HZ = 2000.0
+DOA_BAND_MAX_HZ = 8000.0
 DOA_GRID_STEP_DEG = 2.0
 DOA_SMOOTH_TAU_S = 0.2
 DOA_UPDATE_EVERY_HOPS = 2
@@ -101,4 +101,4 @@ AGC_DOWN_DB_PER_S = 6.0
 AGC_LIMIT_DBFS = -3.0
 AGC_LOOKAHEAD_MS = 4.0
 AGC_RELEASE_MS = 50.0
-MODULES = ('hpf', 'balance', 'ns_omlsa', 'vad', 'agc')
+MODULES = ('hpf', 'balance', 'doa', 'ns_omlsa', 'vad', 'agc')
