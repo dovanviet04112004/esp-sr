@@ -9,6 +9,7 @@
     {"id": "dong_cua", "text": "đóng cửa", "response": "da_dong_cua"},
     {"id": "tang_am_luong", "text": "tăng âm lượng", "response": "da_tang"},
     {"id": "giam_am_luong", "text": "giảm âm lượng", "response": "da_giam"},
-    {"id": "dung_lai", "text": "dừng lại", "response": "da_dung"}
+    {"id": "dung_lai", "text": "dừng lại", "response": "da_dung"},
+    {"id": "chup_anh", "text": "chụp ảnh", "response": "da_chup_anh"}
   ]
 }

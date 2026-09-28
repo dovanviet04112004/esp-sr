@@ -11,6 +11,7 @@
     {"id": "da_dong_cua", "text": "đã đóng cửa"},
     {"id": "da_tang", "text": "đã tăng âm lượng"},
     {"id": "da_giam", "text": "đã giảm âm lượng"},
-    {"id": "da_dung", "text": "đã dừng"}
+    {"id": "da_dung", "text": "đã dừng"},
+    {"id": "da_chup_anh", "text": "đã chụp ảnh"}
   ]
 }
