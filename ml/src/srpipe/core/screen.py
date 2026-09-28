@@ -304,6 +304,19 @@ def kept(raw: Path, files: list[Path], rejected: set[str] | dict[str, str]) -> l
     return [f for f in files if str(f.relative_to(raw)) not in rejected]
 
 
+def kept_clips(cfg: dict, paths: dict[str, Path], kind: str) -> list[corpus.Clip]:
+    """Every clip of the kind's corpora that the last judge run kept, corpora in config order."""
+    rejects = rejected(paths["interim"])
+    listed = (corpus.clips(paths["raw"], kind, name, spec) for name, spec in cfg["corpora"][kind].items())
+    return [c for clips in listed for c in clips if c.item not in rejects]
+
+
+def lengths(cfg: dict, paths: dict[str, Path], kind: str) -> dict[str, float]:
+    """Seconds of every measured clip of the kind's corpora, by item."""
+    measures = paths["interim"] / "screen" / "measures" / kind
+    return {r["item"]: r["seconds"] for name in cfg["corpora"][kind] for r in read_measures(measures / f"{name}.tsv")}
+
+
 def rejected(interim: Path) -> dict[str, str]:
     """Every rejected item and its reason, from the last judge run."""
     listing = interim / "screen" / "rejects.tsv"

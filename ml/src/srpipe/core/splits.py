@@ -7,10 +7,15 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
+from srpipe.core import corpus
+
 ORIGINS = frozenset({"public", "board", "synth", "scene"})
 ROLES = frozenset({"train", "val", "calib", "test"})
 LEARNING_ROLES = frozenset({"train", "val", "calib"})
 ABSENT = "-"
+SECONDS_PER_HOUR = 3600.0
 CHECKSUM_LINE = re.compile(r"^- (\S+\.txt): ([0-9a-f]{64})\s*$")
 
 
@@ -42,6 +47,40 @@ def read_split(path: Path) -> list[Row]:
             raise ValueError(f"{path.name}:{number}: want item, spk, room, origin separated by tabs")
         rows.append(Row(*fields))
     return rows
+
+
+def clip_rows(clips: list[corpus.Clip], origin: str) -> list[Row]:
+    """Clips as split rows, ABSENT for a speaker the corpus does not name and for the room."""
+    return [Row(c.item, c.speaker or ABSENT, ABSENT, origin) for c in clips]
+
+
+def hours(rows: list[Row], seconds: dict[str, float]) -> float:
+    return sum(seconds[r.item] for r in rows) / SECONDS_PER_HOUR
+
+
+def line(row: Row) -> str:
+    return "\t".join((row.item, row.spk, row.room, row.origin))
+
+
+def speaker_roles(speakers: set[str], fractions: dict[str, float], rest: str, seed: int) -> dict[str, str]:
+    """Each speaker's role: the sorted speakers shuffled once with the seed, each role of fractions taking its share
+    in turn and rest taking what is left, so a speaker never sits in two roles."""
+    order = [sorted(speakers)[k] for k in np.random.default_rng(seed).permutation(len(speakers))]
+    roles, start = {}, 0
+    for role, fraction in fractions.items():
+        count = round(fraction * len(order))
+        roles |= dict.fromkeys(order[start : start + count], role)
+        start += count
+    return roles | dict.fromkeys(order[start:], rest)
+
+
+def write_version(directory: Path, files: dict[str, list[Row]], notes: str) -> None:
+    """Write each split file, then SPLIT.md: the notes, then '- <file>: <sha256>' for every file (KEHOACH 4.4.1)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    for name, rows in files.items():
+        (directory / name).write_text("".join(line(row) + "\n" for row in rows), encoding="utf-8")
+    sums = "".join(f"- {name}: {sha256_of(directory / name)}\n" for name in files)
+    (directory / "SPLIT.md").write_text(f"{notes.rstrip()}\n\n{sums}", encoding="utf-8")
 
 
 def versions(splits_root: Path) -> list[Path]:

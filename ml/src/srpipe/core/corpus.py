@@ -87,3 +87,9 @@ def read_text(text: str) -> tuple[list[str], int]:
 def words(text: str) -> list[str]:
     """Normalised syllables of text; a piece normalize refuses is dropped."""
     return read_text(text)[0]
+
+
+def says(syllables: list[str], phrase: list[str]) -> bool:
+    """Whether phrase occurs in syllables as consecutive syllables."""
+    n = len(phrase)
+    return any(syllables[k : k + n] == phrase for k in range(len(syllables) - n + 1))

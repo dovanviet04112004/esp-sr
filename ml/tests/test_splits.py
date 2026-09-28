@@ -104,3 +104,23 @@ def test_a_row_without_four_fields_is_refused(tmp_path: Path) -> None:
     path.write_text("device/board_b/20261001_r1_001\tspk_001\tboard\n", encoding="utf-8")
     with pytest.raises(ValueError, match=r"train\.txt:1"):
         splits.read_split(path)
+
+
+def test_speaker_roles_take_their_shares_once_and_the_same_every_time() -> None:
+    speakers = {f"s{k:02d}" for k in range(20)}
+    roles = splits.speaker_roles(speakers, {"val": 0.1, "test": 0.25}, "train", seed=7)
+    assert set(roles) == speakers
+    assert sorted(roles.values()).count("val") == 2 and sorted(roles.values()).count("test") == 5
+    assert splits.speaker_roles(speakers, {"val": 0.1, "test": 0.25}, "train", seed=7) == roles
+    assert splits.speaker_roles(speakers, {"val": 0.1, "test": 0.25}, "train", seed=8) != roles
+
+
+def test_a_written_version_records_every_file_and_passes(tmp_path: Path) -> None:
+    rows = {
+        "train_a.txt": [splits.Row("speech/a/1.wav", "s1", "-", "public")],
+        "test.txt": [splits.Row("speech/a/2.wav", "s2", "-", "public")],
+    }
+    splits.write_version(tmp_path / "v1", rows, "# notes")
+    assert splits.check_version(tmp_path / "v1") == []
+    assert splits.read_split(tmp_path / "v1" / "train_a.txt") == rows["train_a.txt"]
+    assert (tmp_path / "v1" / "SPLIT.md").read_text().startswith("# notes\n\n- train_a.txt: ")

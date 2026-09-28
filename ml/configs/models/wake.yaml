@@ -59,3 +59,10 @@ synth:                             # E11-T7: clips from the engines of common/tt
     openings: 30                   # the commonest corpus phrases of its length opening with its first syllable
     phrases: [chào mi, mi na, mi na ơi, chào chị na, chào mi nhé]
     voices: {vieneu: 6, f5: 4}     # per phrase, drawn with the seed; VieNeu from presets and clones
+split:                             # E11-T11: data/splits/wake/<version> by python -m srpipe.tasks.wake.data (KEHOACH 1.3)
+  version: v1
+  seed: 20260928
+  val_speakers: 0.2                # of VIVOS train speakers and of VieNeu presets, each held out whole with its clones
+  learning: [speech/vivos/train/, speech/fpt_open/, speech/vlsp/, speech/bud500/]   # gave the reference voices
+  negative_hours: 100              # public speech drawn from learning into train_neg
+  test_neg: [speech/common_voice_vi/, speech/vivos/test/]   # no reference voice came from these
