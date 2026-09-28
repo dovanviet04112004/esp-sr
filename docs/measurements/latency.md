@@ -119,3 +119,16 @@ nhân 1, 2000 bước sau 16 bước làm nóng; ba lượt, lệch giữa các 
 Lệnh `madd.s` của S3 làm tròn một lần cho cả tích lẫn tổng, nên bản gộp khác bản ghép từ `esp-dsp` (mỗi phép làm tròn
 riêng), còn bản không gộp trùng nó từng bit. GCC chỉ gộp từ `-O2`; ở `-Og` hai bản như nhau, nên parity dựng bằng cờ của
 `bench` mới kiểm được mã chạy thật. Tắt gộp tốn 4,1 µs ở `hpf` và 2,2 µs ở `balance`, tức 0,04% một bước 16 ms.
+
+## 7. Nạp ảnh model lúc boot (E11-T9)
+
+Board B, `ai_engine/test_apps/unit` (profile mặc định `-Og`), IDF 6.0.2, 28/09. Slot 1 chứa hai mục: 1 MB (cỡ mạng
+`command`, KẾ HOẠCH §6.6) và 4 000 B. `ai_engine_load` map slot, chép từng mục sang PSRAM rồi băm sha256 bản chép bằng
+`esp_sha`, một lượt.
+
+| Nội dung | Thời gian | Tốc độ | PSRAM giữ |
+|---|---|---|---|
+| 1 027 KB, hai mục | 87 ms | 12,0 MB/s (đọc flash + chép + SHA) | 1 027 KB, đúng tổng hai mục |
+
+Ảnh đủ bốn model (~2,1 MB theo §6.6) vì thế thêm cỡ 180 ms 🔬 vào lúc boot. Ảnh sai lưới và ảnh lật một bit bị từ chối, và
+PSRAM trả về đúng số trước lượt nạp.
