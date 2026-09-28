@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns screen screen-audit eval-tts wake-synth parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns screen screen-audit splits eval-tts wake-synth parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -69,6 +69,9 @@ screen: ## Measure every clip of every corpus once, then list what the rules rej
 
 screen-audit: screen ## Hear clips in bins of each speech measure through PhoWhisper, to place the rules (docs/measurements/data_screen.md)
 	cd ml && uv run python -m srpipe.core.screen audit
+
+splits: screen ## Cut the wake and command splits from screened clips into ml/data/splits (KEHOACH 1.3)
+	cd ml && uv run python -m srpipe.tasks.wake.data && uv run python -m srpipe.tasks.command.data
 
 eval-tts: screen ## Compare the desktop TTS engines on the wake word, every clip heard back by PhoWhisper (docs/measurements/tts_engines.md)
 	cd ml && uv run python -m srpipe.tasks.wake.synth pilot
