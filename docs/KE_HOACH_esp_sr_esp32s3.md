@@ -1035,8 +1035,8 @@ ml/
 │   ├── tts/                           # ★ tiếng tổng hợp cho mọi nhánh: dương wake (E11-T7), tiếng nguồn của synth
 │   │   │                              #   (§3.13); không biết nhánh nào gọi nó
 │   │   ├── engines.py                 # gọi ml/tts/<bộ>/run.py qua uv run: giọng có sẵn, sinh theo lô, nghe lại
-│   │   └── clips.py                   # giọng nhân bản từ kho có chữ; sinh → nghe lại → dòng manifest; mẩu đạt khi
-│   │                                  #   bộ nghe kiểm đọc ra đúng chữ, kể cả dấu
+│   │   └── clips.py                   # giọng nhân bản từ kho có chữ; sinh → nghe lại → dòng manifest: chữ bộ nghe
+│   │                                  #   kiểm đọc ra và độ chênh log-xác suất giữa chữ ấy với chữ phải nói, kể cả dấu
 │   │
 │   ├── dsp/                           # ── THUẬT TOÁN THUẦN, soi gương firmware 1:1 ──
 │   │   ├── spec/{fft.py, window.py, stft.py, mel.py, pitch.py}        # ★ dsp_spec
@@ -1051,7 +1051,8 @@ ml/
 │   │   ├── ns/                        # RNNoise-16k; postproc/bands.py ★
 │   │   ├── wake/                      # TCN; postproc/smooth.py ★; candidates.py chấm từ đánh thức trên kho (E11-T5);
 │   │   │                              #   synth.py chọn chữ, giọng, seed, tốc độ cho dương và âm bản gần âm rồi
-│   │   │                              #   sinh qua srpipe/tts vào interim/wake/synth_{pos,neg}/ (E11-T7)
+│   │   │                              #   sinh qua srpipe/tts vào interim/wake/synth_{pos,neg}/ (E11-T7); ngưỡng
+│   │   │                              #   độ chênh đặt trên âm bản gần âm, để chỉ 1% lọt thành dương
 │   │   ├── command/                   # mạng âm học + CTC; postproc/ctc_score.py ★
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
