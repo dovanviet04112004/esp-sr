@@ -53,9 +53,9 @@ synth:                             # E11-T7: clips from the engines of common/tt
     f5: {texts: [chào mi na], seeds: [0, 1, 2], speeds: [1.0]}
   positives:                       # every text spells the wake word
     vieneu: {texts: [chào mi na, Chào Mina!], preset_seeds: [0, 1, 2], clone_seeds: [0, 1]}  # drops end punctuation
-    f5: {texts: [chào mi na], seeds: [0], speeds: [0.85, 1.0, 1.15]}         # VieNeu has no speed of its own
+    f5: {texts: [chào mi na, chào mi na!], seeds: [0], speeds: [0.85, 1.0, 1.15]}  # clearer than VieNeu by ear
   negatives:                       # ADR-0007 near misses, read by the voices of the positives
     misses: 3                      # every corpus phrase at most this many syllable components from the word
     openings: 30                   # the commonest corpus phrases of its length opening with its first syllable
     phrases: [chào mi, mi na, mi na ơi, chào chị na, chào mi nhé]
-    voices: {vieneu: 6, f5: 2}     # per phrase, drawn with the seed; VieNeu from presets and clones
+    voices: {vieneu: 6, f5: 4}     # per phrase, drawn with the seed; VieNeu from presets and clones
