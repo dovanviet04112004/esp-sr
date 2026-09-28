@@ -1,0 +1,108 @@
+"""The model slot image of KEHOACH 6.3: a 1 KB header, then each entry 64-byte aligned with its sha256.
+
+The layout constants are read from firmware/components/sys_storage/include/storage_format.h and the slot size from
+firmware/partitions.csv, so ai_engine_load and this packer cannot disagree on either.
+Run: python -m srpipe.export.pack_models <out.bin> <name>:<espdl|norm|units>:<file>...
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import re
+import struct
+from dataclasses import dataclass
+from pathlib import Path
+
+from srpipe.core.config import ML_ROOT
+from srpipe.generated import grid
+
+FIRMWARE = ML_ROOT.parent / "firmware"
+FORMAT_HEADER = FIRMWARE / "components" / "sys_storage" / "include" / "storage_format.h"
+PARTITIONS = FIRMWARE / "partitions.csv"
+HEAD = struct.Struct("<IIII48x")
+ENTRY_TAIL = struct.Struct("<II")
+
+
+def storage_define(name: str) -> int:
+    """The integer a #define or enumerator of storage_format.h gives name."""
+    text = FORMAT_HEADER.read_text(encoding="utf-8")
+    match = re.search(rf"^\s*(?:#define\s+{name}\s+|{name}\s*=\s*)(0x[0-9a-fA-F]+|\d+)u?\b", text, flags=re.MULTILINE)
+    if match is None:
+        raise KeyError(f"{name} is not in {FORMAT_HEADER.name}")
+    return int(match.group(1), 0)
+
+
+MAGIC = storage_define("STORAGE_MODEL_MAGIC")
+FORMAT_VER = storage_define("STORAGE_MODEL_FORMAT_VER")
+MAX_ENTRIES = storage_define("STORAGE_MODEL_MAX_ENTRIES")
+NAME_BYTES = storage_define("STORAGE_MODEL_NAME_BYTES")
+HEADER_BYTES = storage_define("STORAGE_MODEL_HEADER_BYTES")
+ALIGN_BYTES = storage_define("STORAGE_MODEL_ALIGN_BYTES")
+SHA256_BYTES = storage_define("STORAGE_MODEL_SHA256_BYTES")
+KINDS = {kind: storage_define(f"STORAGE_MODEL_KIND_{kind.upper()}") for kind in ("espdl", "norm", "units")}
+ENTRY = struct.Struct(f"<{NAME_BYTES}sII{SHA256_BYTES}sII")
+
+
+@dataclass(frozen=True)
+class Entry:
+    name: str
+    kind: str
+    data: bytes
+
+
+def storage_string(name: str) -> str:
+    """The string a #define of storage_format.h gives name."""
+    text = FORMAT_HEADER.read_text(encoding="utf-8")
+    match = re.search(rf'^#define\s+{name}\s+"([^"]*)"', text, flags=re.MULTILINE)
+    if match is None:
+        raise KeyError(f"{name} is not in {FORMAT_HEADER.name}")
+    return match.group(1)
+
+
+def slot_bytes() -> int:
+    """Size of model slot 0 in partitions.csv; slot 1 has the same (KEHOACH 6.1)."""
+    label = storage_string("STORAGE_MODEL_LABEL_SLOT0")
+    with PARTITIONS.open(encoding="utf-8") as f:
+        rows = [[c.strip() for c in row] for row in csv.reader(f) if row and not row[0].lstrip().startswith("#")]
+    return next(int(row[4], 0) for row in rows if row[0] == label)
+
+
+def pack(entries: list[Entry], grid_hash: int = grid.GRID_HASH) -> bytes:
+    """The image bytes: header, then the entries in order, each at the next ALIGN_BYTES boundary."""
+    if not 0 < len(entries) <= MAX_ENTRIES:
+        raise ValueError(f"{len(entries)} entries, the header holds 1..{MAX_ENTRIES}")
+    body, table, at = bytearray(), [], HEADER_BYTES
+    for e in entries:
+        name = e.name.encode("ascii")
+        if len(name) > NAME_BYTES or not e.data or e.kind not in KINDS:
+            raise ValueError(f"entry {e.name!r}: name over {NAME_BYTES} bytes, no data, or kind not in {sorted(KINDS)}")
+        table.append(ENTRY.pack(name, at, len(e.data), hashlib.sha256(e.data).digest(), KINDS[e.kind], 0))
+        padded = e.data + bytes(-len(e.data) % ALIGN_BYTES)
+        body += padded
+        at += len(padded)
+    header = HEAD.pack(MAGIC, FORMAT_VER, len(entries), grid_hash) + b"".join(table)
+    image = header + bytes(HEADER_BYTES - len(header)) + bytes(body)
+    if len(image) > slot_bytes():
+        raise ValueError(f"image of {len(image)} bytes overflows the {slot_bytes()}-byte slot")
+    return image
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("out", type=Path)
+    parser.add_argument("entries", nargs="+", help="<name>:<espdl|norm|units>:<file>")
+    args = parser.parse_args(argv)
+    entries = []
+    for spec in args.entries:
+        name, kind, path = spec.split(":", 2)
+        entries.append(Entry(name, kind, Path(path).read_bytes()))
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_bytes(pack(entries))
+    print(f"{args.out}: {len(entries)} entries, {args.out.stat().st_size} bytes, grid 0x{grid.GRID_HASH:08x}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
