@@ -188,18 +188,24 @@ def test_a_batch_reaches_the_engine_one_voice_at_a_time(tmp_path: Path, monkeypa
     assert sent == ["a0", "a1", "a2", "b0", "b1", "b2", "p0", "p1", "p2"]
 
 
-def test_a_clip_is_heard_again_only_for_a_new_target_or_new_bytes(tmp_path: Path, monkeypatch) -> None:
-    asked: list[list[str]] = []
+def fake_checker(monkeypatch) -> list[list[tuple[str, list[str]]]]:
+    """engines.run standing in for the checker: every call's (wave name, targets) pairs, each target 1 nat below."""
+    asked: list[list[tuple[str, list[str]]]] = []
 
     def run(name, model, batch, listing, heard, cache):
         lines = [json.loads(line) for line in Path(listing).read_text(encoding="utf-8").splitlines()]
-        asked.append([c["id"] for c in lines])
+        asked.append([(Path(c["wav"]).stem, c["targets"]) for c in lines])
         answers = [
             {"id": c["id"], "text": "x", "logp": -1.0, "targets": dict.fromkeys(c["targets"], -2.0)} for c in lines
         ]
         Path(heard).write_text("".join(json.dumps(a) + "\n" for a in answers), encoding="utf-8")
 
     monkeypatch.setattr(engines, "run", run)
+    return asked
+
+
+def test_a_clip_is_heard_again_only_for_a_new_target_or_new_bytes(tmp_path: Path, monkeypatch) -> None:
+    asked = fake_checker(monkeypatch)
     tts = {"asr": {"model": "m@r", "batch": 1}}
     for name in "ab":
         write_wav(tmp_path / f"{name}.wav", np.full(grid.SAMPLE_RATE_HZ, ord(name) / 1000))
@@ -210,5 +216,18 @@ def test_a_clip_is_heard_again_only_for_a_new_target_or_new_bytes(tmp_path: Path
     engines.hear(clip_list, tts, tmp_path, tmp_path)
     write_wav(tmp_path / "b.wav", np.zeros(grid.SAMPLE_RATE_HZ))
     heard = engines.hear(clip_list, tts, tmp_path, tmp_path)
-    assert asked == [["a", "b"], ["a"], ["b"]]
+    assert asked == [[("a", ["t"]), ("b", ["t"])], [("a", ["u"])], [("b", ["t"])]]
     assert heard["a"]["targets"] == {"t": -2.0, "u": -2.0}
+
+
+def test_clips_with_the_same_bytes_are_heard_once_for_the_targets_of_both(tmp_path: Path, monkeypatch) -> None:
+    asked = fake_checker(monkeypatch)
+    tts = {"asr": {"model": "m@r", "batch": 1}}
+    for name in "ab":
+        write_wav(tmp_path / f"{name}.wav", np.zeros(grid.SAMPLE_RATE_HZ))
+    clip_list = [{"id": n, "wav": str(tmp_path / f"{n}.wav"), "targets": [f"say {n}", "w"]} for n in "ab"]
+    heard = engines.hear(clip_list, tts, tmp_path, tmp_path)
+    assert asked == [[("a", ["say a", "w", "say b"])]]
+    assert heard["a"]["targets"].keys() == heard["b"]["targets"].keys() == {"say a", "say b", "w"}
+    assert engines.hear(clip_list, tts, tmp_path, tmp_path) == heard
+    assert len(asked) == 1
