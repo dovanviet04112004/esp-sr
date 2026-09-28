@@ -20,6 +20,11 @@ train = [
     "torch>=2.4",
     "torchaudio>=2.4",
 ]
+# ESP-PPQ quantises and exports .espdl for esp-dl; pinned like esp-dl in ai_engine, since model->test()
+# on the board proves one exporter and runtime pair (KEHOACH 4.5.1).
+espdl = [
+    "esp-ppq==1.3.11",
+]
 
 [dependency-groups]
 dev = [
