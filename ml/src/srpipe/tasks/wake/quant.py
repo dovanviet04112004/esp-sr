@@ -18,9 +18,9 @@ import torch
 from srpipe.compress.quant import ptq_espdl
 from srpipe.core.config import CONFIGS, ML_ROOT, load_yaml
 from srpipe.export import pack_models
+from srpipe.tasks.wake import CONFIG
 from srpipe.tasks.wake.model.tcn import Tcn
 
-CONFIG = CONFIGS / "models" / "wake.yaml"
 PROBE_DIR = ML_ROOT.parent / "firmware" / "components" / "ai_engine" / "test_apps" / "unit" / "main" / "probe"
 PROBE_ENTRY = "probe"
 # hops, bands, outputs, input exponent, output exponent; then int8 input (hops x bands), int8 output (hops x outputs).

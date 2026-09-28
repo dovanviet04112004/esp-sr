@@ -24,7 +24,7 @@ import pyarrow.parquet as pq
 from srpipe.core.config import data_paths, load_yaml
 from srpipe.lang import g2p, lexicon
 from srpipe.lang.normalize import LangError, normalize
-from srpipe.tasks.wake.quant import CONFIG
+from srpipe.tasks.wake import CONFIG
 
 COMPONENTS = ("onset", "glide", "nucleus", "coda", "tone")
 NORTH = 0
