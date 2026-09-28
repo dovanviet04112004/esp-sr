@@ -1,0 +1,39 @@
+# Screening of every clip under raw/, ahead of any use (KEHOACH 1.2, E11-T16): measured once, judged here.
+processes: 12                      # a worker holds a parquet row group, ~400 MB resident on Bud500; 20 swap a 10 GB WSL
+corpora:                           # raw/<kind>/<name>, in this order: a duplicate is the later of two kept clips
+  speech:
+    common_voice_vi: {layout: common_voice, dirs: cv-corpus-*/vi, lists: [validated.tsv, other.tsv]}
+    vivos: {layout: vivos, parts: [train, test]}
+    fpt_open: {layout: parquet, files: data/*.parquet}
+    vlsp: {layout: parquet, files: data/*.parquet}
+    bud500: {layout: parquet, files: data/*.parquet}
+  noise:
+    demand: {layout: files}
+    musan: {layout: files}
+    dns: {layout: files}
+    speech_commands: {layout: files}
+  rir:
+    openslr28: {layout: files}
+measure:
+  frame_seconds: 0.032             # frame of the level percentiles and of the active time
+  quiet_percentile: 10             # frame level of the pauses, the noise under speech
+  loud_percentile: 95              # frame level of the speech
+  active_below_peak_db: 40.0       # a frame is active within this of the loudest, as scenes count speech hops
+  full_scale: 0.999                # a sample at or past this magnitude sits on the rail
+  batch_clips: 256                 # files per worker task; a parquet task is one row group
+judge:                             # per kind, the rules it applies, tried in KEHOACH 1.2 order; duplicate always last
+  speech:                          # placed by make screen-audit (docs/measurements/data_screen.md); no bin of
+    silent_rms_dbfs: -55.0         #   clipped or span_db holds half unusable clips, so neither has a rule
+    text: true
+    syllables_per_second: [1.0, 10.0]
+  noise: {silent_rms_dbfs: -90.3}  # one 16-bit step: quieter holds nothing but rounding; DEMAND rooms sit at -57
+  rir: {silent_rms_dbfs: -90.3}    # simulated RIRs are one short impulse in 2 s, down to -80 dBFS
+audit:                             # clips heard by the TTS checker in bins of each speech measure (make screen-audit)
+  per_bin: 30
+  seed: 20260928
+  unusable_errors: 0.5             # a clip whose text the checker gets this share of syllables wrong or more is unusable
+  bins:                            # edges over the tails a rule may cut, and the body beside them
+    rms_dbfs: [-.inf, -70, -60, -55, -50, -45, -40, -35, 0]
+    clipped: [0, 0.001, 0.003, 0.01, 0.03, 0.1, 1.01]
+    span_db: [0, 2, 3, 4, 5, 6, 8, 10, 1000]
+    syllable_rate: [0, 0.5, 0.75, 1.0, 1.25, 1.5, 6, 7, 8, 9, 10, 12, 1000]

@@ -37,14 +37,16 @@ def fake_corpus(root: Path) -> Path:
     return corpus
 
 
-def test_the_reference_is_the_first_clip_inside_the_span(tmp_path: Path) -> None:
+def test_the_reference_is_the_first_clip_inside_the_span_that_screening_kept(tmp_path: Path) -> None:
     corpus = fake_corpus(tmp_path)
-    refs = clips.speaker_references(corpus, ["A", "B"], [4.0, 7.5])
+    refs = clips.speaker_references(corpus, ["A", "B"], [4.0, 7.5], tmp_path, set())
     assert [(r.speaker, r.wav.name, r.text) for r in refs] == [
         ("A", "A_1.wav", "câu số một"),
         ("B", "B_1.wav", "câu số một"),
     ]
-    assert clips.speaker_references(corpus, None, [4.0, 7.5]) == refs
+    assert clips.speaker_references(corpus, None, [4.0, 7.5], tmp_path, set()) == refs
+    kept = clips.speaker_references(corpus, ["A", "B"], [4.0, 7.5], tmp_path, {"c/waves/A/A_1.wav"})
+    assert [r.wav.name for r in kept] == ["A_2.wav", "B_1.wav"]
 
 
 def wav_bytes(seconds: float) -> bytes:
@@ -69,13 +71,19 @@ def fake_parquet(root: Path) -> list[Path]:
 
 def test_parquet_references_spread_over_the_files_and_skip_what_does_not_fit(tmp_path: Path) -> None:
     files = fake_parquet(tmp_path)
-    refs = clips.parquet_references("c", files, 5, [4.0, 7.5], np.random.default_rng(1), tmp_path / "out")
+
+    def draw(rejected: set[str]) -> list[clips.Reference]:
+        rng = np.random.default_rng(1)
+        return clips.parquet_references("c", files, 5, [4.0, 7.5], rng, tmp_path / "out", tmp_path, rejected)
+
+    refs = draw(set())
     assert len(refs) == 5 and len({r.speaker for r in refs}) == 5
     assert all(4.0 <= sf.info(str(r.wav)).duration <= 7.5 and r.text.startswith("tệp") for r in refs)
     per_file = Counter(r.speaker.split("_")[1] for r in refs)
     assert len(per_file) == len(files) and max(per_file.values()) == 2
-    again = clips.parquet_references("c", files, 5, [4.0, 7.5], np.random.default_rng(1), tmp_path / "out")
-    assert again == refs
+    assert draw(set()) == refs
+    screened = {f"{f.name}#{row}" for f in files for row in range(4)}
+    assert {tuple(r.speaker.split("_")[2:]) for r in draw(screened)} == {("001", "00000"), ("001", "00001")}
 
 
 def test_every_engine_and_the_checker_has_a_pinned_project() -> None:

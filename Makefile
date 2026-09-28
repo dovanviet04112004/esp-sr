@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-tts wake-synth parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns screen screen-audit eval-tts wake-synth parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -64,10 +64,16 @@ eval-agc: ## Score agc on VIVOS scenes at input levels -50 .. -10 dBFS through v
 eval-ns: ## Score the ns floor on VIVOS scenes: noise and speech lost, SNR gained (docs/measurements/afe/ns.md)
 	cd ml && uv run python -m srpipe.scenes.ns --workers 16
 
-eval-tts: ## Compare the desktop TTS engines on the wake word, every clip heard back by PhoWhisper (docs/measurements/tts_engines.md)
+screen: ## Measure every clip of every corpus once, then list what the rules reject (E11-T16, docs/measurements/data_screen.md)
+	cd ml && uv run python -m srpipe.core.screen measure && uv run python -m srpipe.core.screen judge
+
+screen-audit: screen ## Hear clips in bins of each speech measure through PhoWhisper, to place the rules (docs/measurements/data_screen.md)
+	cd ml && uv run python -m srpipe.core.screen audit
+
+eval-tts: screen ## Compare the desktop TTS engines on the wake word, every clip heard back by PhoWhisper (docs/measurements/tts_engines.md)
 	cd ml && uv run python -m srpipe.tasks.wake.synth pilot
 
-wake-synth: ## Synthesise the wake positives and near-miss negatives, then keep what the checker allows (E11-T7)
+wake-synth: screen ## Synthesise the wake positives and near-miss negatives, then keep what the checker allows (E11-T7)
 	cd ml && uv run python -m srpipe.tasks.wake.synth positives && uv run python -m srpipe.tasks.wake.synth negatives \
 	  && uv run python -m srpipe.tasks.wake.synth select
 

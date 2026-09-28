@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 import yaml
 
+from srpipe.core import corpus
 from srpipe.core.config import load_yaml
 from srpipe.tasks.wake import CONFIG, candidates, synth
 from srpipe.tts import clips
@@ -49,7 +50,7 @@ def stream_of(texts: list[str]) -> tuple[np.ndarray, list[str]]:
     vocab: dict[str, int] = {}
     ids: list[int] = []
     for text in texts:
-        ids += [vocab.setdefault(w, len(vocab)) for w in candidates.words(text)]
+        ids += [vocab.setdefault(w, len(vocab)) for w in corpus.words(text)]
         ids.append(candidates.SEPARATOR)
     return np.array(ids, dtype=np.int32), list(vocab)
 

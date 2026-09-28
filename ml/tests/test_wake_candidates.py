@@ -1,10 +1,11 @@
-"""Candidate scoring: long transcripts are read in pieces, phrases never span two transcripts, a phrase a few
-syllable components away counts as a neighbour and one further away does not."""
+"""Candidate scoring: phrases never span two transcripts, a phrase a few syllable components away counts as a
+neighbour and one further away does not."""
 
 from __future__ import annotations
 
 import numpy as np
 
+from srpipe.core import corpus
 from srpipe.tasks.wake import candidates
 
 
@@ -12,15 +13,9 @@ def stream_of(texts: list[str]) -> tuple[np.ndarray, list[str]]:
     vocab: dict[str, int] = {}
     ids: list[int] = []
     for text in texts:
-        ids += [vocab.setdefault(w, len(vocab)) for w in candidates.words(text)]
+        ids += [vocab.setdefault(w, len(vocab)) for w in corpus.words(text)]
         ids.append(candidates.SEPARATOR)
     return np.array(ids, dtype=np.int32), list(vocab)
-
-
-def test_a_transcript_longer_than_normalize_takes_is_read_whole() -> None:
-    text = " ".join(["một hai ba bốn năm"] * 30)
-    assert len(text) > candidates.CHUNK_CHARS
-    assert candidates.words(text) == ["một", "hai", "ba", "bốn", "năm"] * 30
 
 
 def test_exact_near_and_far_phrases_are_told_apart() -> None:

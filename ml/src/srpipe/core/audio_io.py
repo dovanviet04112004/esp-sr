@@ -75,9 +75,13 @@ class ItemReader:
             self._group = group
         return self._audio[row - self._starts[group]].as_py()["bytes"]
 
-    def read(self, item: str) -> np.ndarray:
+    def native(self, item: str) -> tuple[np.ndarray, int]:
+        """Mono float64 at the item's own rate, and that rate."""
         name, _, row = item.partition("#")
         path = self.raw_root / name
         source = io.BytesIO(self._row_bytes(path, int(row))) if row else path
         x, rate = sf.read(source, dtype="float64", always_2d=True)
-        return to_grid_rate(x.mean(axis=1), rate)
+        return x.mean(axis=1), rate
+
+    def read(self, item: str) -> np.ndarray:
+        return to_grid_rate(*self.native(item))

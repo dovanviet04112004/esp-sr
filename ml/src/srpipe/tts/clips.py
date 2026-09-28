@@ -34,9 +34,12 @@ def spelled(text: str) -> str:
     return re.sub(r"[\W_]", "", unicodedata.normalize("NFC", text).lower())
 
 
-def speaker_references(corpus: Path, speakers: list[str] | None, ref_seconds: list[float]) -> list[Reference]:
-    """Per speaker, every one when speakers is None, the first clip whose length falls inside ref_seconds, with its
-    prompt as normalised text; the corpus holds waves/<speaker>/*.wav beside prompts.txt, as VIVOS does."""
+def speaker_references(
+    corpus: Path, speakers: list[str] | None, ref_seconds: list[float], raw: Path, rejected: set[str]
+) -> list[Reference]:
+    """Per speaker, every one when speakers is None, the first clip whose length falls inside ref_seconds and whose
+    item under raw is not rejected by screening, with its prompt as normalised text; the corpus holds
+    waves/<speaker>/*.wav beside prompts.txt, as VIVOS does."""
     prompts = dict(
         line.split(" ", 1) for line in (corpus / "prompts.txt").read_text(encoding="utf-8").splitlines() if " " in line
     )
@@ -44,33 +47,47 @@ def speaker_references(corpus: Path, speakers: list[str] | None, ref_seconds: li
     refs = []
     for speaker in speakers or sorted(d.name for d in (corpus / "waves").iterdir() if d.is_dir()):
         for wav in sorted((corpus / "waves" / speaker).glob("*.wav")):
-            if low <= sf.info(str(wav)).duration <= high:
+            if str(wav.relative_to(raw)) not in rejected and low <= sf.info(str(wav)).duration <= high:
                 refs.append(Reference(speaker, wav, normalize(prompts[wav.stem])))
                 break
     return refs
 
 
 def parquet_references(
-    name: str, files: list[Path], count: int, ref_seconds: list[float], rng: np.random.Generator, out: Path
+    name: str,
+    files: list[Path],
+    count: int,
+    ref_seconds: list[float],
+    rng: np.random.Generator,
+    out: Path,
+    raw: Path,
+    rejected: set[str],
 ) -> list[Reference]:
-    """count clips inside ref_seconds from Hugging Face audio parquet files, written to out/<name>/ as WAV at their own
-    rate. Each visit of a file takes one unused clip of a random row group and the files are visited in turn, so the
-    clips spread over the corpus and its speakers. A transcript normalize refuses is skipped."""
+    """count clips inside ref_seconds from Hugging Face audio parquet files under raw, written to out/<name>/ as WAV
+    at their own rate. Each visit of a file takes one unused clip of a random row group and the files are visited in
+    turn, so the clips spread over the corpus and its speakers. A row screening rejected, or whose transcript normalize
+    refuses, is skipped."""
     low, high = ref_seconds
     used: set[tuple[int, int, int]] = set()
+    spent: set[tuple[int, int]] = set()
+    groups = sum(pq.ParquetFile(f).num_row_groups for f in files)
     refs: list[Reference] = []
     while len(refs) < count:
-        found = len(refs)
+        if len(spent) == groups:
+            raise ValueError(f"{name}: no clip of {low}-{high} s left to draw")
         for i in rng.permutation(len(files)):
             if len(refs) == count:
                 break
             table = pq.ParquetFile(files[i])
             group = int(rng.integers(table.num_row_groups))
+            first = sum(table.metadata.row_group(g).num_rows for g in range(group))
             rows = table.read_row_group(group, columns=["audio", "transcription"]).to_pylist()
             for j in rng.permutation(len(rows)):
                 if (i, group, j) in used:
                     continue
                 used.add((i, group, j))
+                if f"{files[i].relative_to(raw)}#{first + j}" in rejected:
+                    continue
                 audio, rate = sf.read(io.BytesIO(rows[j]["audio"]["bytes"]), dtype="int16")
                 if not low <= len(audio) / rate <= high:
                     continue
@@ -84,8 +101,8 @@ def parquet_references(
                 sf.write(str(wav), audio, rate, subtype="PCM_16")
                 refs.append(Reference(speaker, wav, text))
                 break
-        if len(refs) == found:
-            raise ValueError(f"{name}: no clip of {low}-{high} s left to draw")
+            else:
+                spent.add((i, group))
     return refs
 
 

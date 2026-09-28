@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+from srpipe.core import screen
 from srpipe.core.config import data_paths, load_yaml
 from srpipe.tasks.wake import CONFIG, candidates
 from srpipe.tts import CONFIG as TTS_CONFIG
@@ -104,16 +105,16 @@ def negative_requests(
     return {engine: [r | {"rivals": [cfg["word"]]} for r in reqs] for engine, reqs in requests.items()}
 
 
-def training_references(cfg: dict, raw: Path, interim: Path) -> list[clips.Reference]:
-    """Every VIVOS train speaker and the parquet draws of the config, the same on every run since the draws are seeded;
-    listed in references.yaml."""
+def training_references(cfg: dict, raw: Path, interim: Path, rejected: set[str]) -> list[clips.Reference]:
+    """Every VIVOS train speaker and the parquet draws of the config, among the clips screening kept; the same on every
+    run since the draws are seeded; listed in references.yaml."""
     listing = interim / REFERENCES / "references.yaml"
     spec, seconds = cfg["synth"]["references"], cfg["synth"]["ref_seconds"]
     rng = np.random.default_rng(cfg["synth"]["seed"])
-    refs = clips.speaker_references(raw / spec["vivos"], None, seconds)
+    refs = clips.speaker_references(raw / spec["vivos"], None, seconds, raw, rejected)
     for name, count in spec["parquet"]["counts"].items():
         files = sorted((raw / "speech" / name).glob(spec["parquet"]["files"]))
-        refs += clips.parquet_references(name, files, count, seconds, rng, interim / REFERENCES)
+        refs += clips.parquet_references(name, files, count, seconds, rng, interim / REFERENCES, raw, rejected)
     rows = [{"speaker": r.speaker, "wav": str(r.wav), "text": r.text} for r in refs]
     listing.write_text(yaml.safe_dump(rows, allow_unicode=True, sort_keys=False), encoding="utf-8")
     return refs
@@ -185,16 +186,16 @@ def main(argv: list[str] | None = None) -> int:
             print("\n".join(table(interim / SETS[s] / "manifest.yaml", by_text=False)))
         return 0
     out = interim / SETS[which]
+    rejected = set(screen.rejected(paths["interim"]))
     presets = engines.presets("vieneu", tts, cache)
     body = {"word": cfg["word"], "synth": cfg["synth"], "tts": tts}
     if which == "pilot":
         spec = cfg["synth"]["pilot"]
-        refs = clips.speaker_references(
-            paths["raw"] / cfg["synth"]["references"]["vivos"], spec["speakers"], cfg["synth"]["ref_seconds"]
-        )
+        corpus = paths["raw"] / cfg["synth"]["references"]["vivos"]
+        refs = clips.speaker_references(corpus, spec["speakers"], cfg["synth"]["ref_seconds"], paths["raw"], rejected)
         requests = positive_requests(cfg, spec, presets, refs, out)
     else:
-        refs = training_references(cfg, paths["raw"], interim)
+        refs = training_references(cfg, paths["raw"], interim, rejected)
         if which == "positives":
             requests = positive_requests(cfg, cfg["synth"]["positives"], presets, refs, out)
         else:

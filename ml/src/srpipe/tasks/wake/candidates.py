@@ -9,7 +9,6 @@ transcripts are cached under cache/wake_candidates/, so adding a candidate resco
 from __future__ import annotations
 
 import argparse
-import contextlib
 import csv
 import itertools
 import json
@@ -22,13 +21,13 @@ import numpy as np
 import pyarrow.parquet as pq
 
 from srpipe.core.config import data_paths, load_yaml
+from srpipe.core.corpus import words
 from srpipe.lang import g2p, lexicon
 from srpipe.lang.normalize import LangError, normalize
 from srpipe.tasks.wake import CONFIG
 
 COMPONENTS = ("onset", "glide", "nucleus", "coda", "tone")
 NORTH = 0
-CHUNK_CHARS = 200
 SEPARATOR = -1
 PARQUET_CORPORA = ("fpt_open", "vlsp", "bud500")
 CV_FILES = ("validated.tsv", "other.tsv")
@@ -49,20 +48,6 @@ def transcripts(speech: Path) -> Iterator[str]:
     for corpus in PARQUET_CORPORA:
         for path in sorted((speech / corpus / "data").glob("*.parquet")):
             yield from pq.read_table(path, columns=["transcription"]).column(0).to_pylist()
-
-
-def words(text: str) -> list[str]:
-    """Normalised syllables of text, read in pieces short enough for normalize; a piece it refuses is dropped."""
-    out: list[str] = []
-    piece: list[str] = []
-    for word in [*text.split(), None]:
-        if word is not None and sum(map(len, piece)) + len(piece) + len(word) <= CHUNK_CHARS:
-            piece.append(word)
-            continue
-        with contextlib.suppress(LangError):
-            out += normalize(" ".join(piece)).split()
-        piece = [word] if word is not None else []
-    return out
 
 
 def token_stream(speech: Path, cache: Path) -> tuple[np.ndarray, list[str]]:
