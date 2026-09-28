@@ -471,6 +471,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "esp-ppq", marker = "extra == 'espdl'", specifier = "==1.3.11" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pesq", specifier = ">=0.0.4" },
     { name = "pyarrow", specifier = ">=25.0.1" },
@@ -483,7 +484,7 @@ requires-dist = [
     { name = "torch", marker = "extra == 'train'", specifier = ">=2.4" },
     { name = "torchaudio", marker = "extra == 'train'", specifier = ">=2.4" },
 ]
-provides-extras = ["train"]
+provides-extras = ["train", "espdl"]
 
 [package.metadata.requires-dev]
 dev = [
