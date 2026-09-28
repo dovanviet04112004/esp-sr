@@ -38,3 +38,17 @@ def test_no_phrase_spans_two_transcripts() -> None:
     assert candidates.score("bí đỏ ơi", stream, vocab, codes, tables).exact_per_m == 0.0
     assert candidates.pair_per_m(("đỏ", "ơi"), stream, vocab) == 0.0
     assert candidates.pair_per_m(("xin", "chào"), stream, vocab) > 0.0
+
+
+def test_neighbours_stop_at_the_miss_limit_and_leave_the_phrase_out() -> None:
+    stream, vocab = stream_of(["ai đó gọi bí đỏ ơi nhé", "anh ấy bị bỏ rơi", "bị bỏ rơi", "chào bạn"])
+    codes, tables = candidates.component_codes(vocab)
+    near = candidates.neighbours("bí đỏ ơi", candidates.NEIGHBOUR_MISSES, stream, vocab, codes, tables)
+    assert near == {"bị bỏ rơi": 2}
+    assert candidates.neighbours("bí đỏ ơi", 1, stream, vocab, codes, tables) == {}
+
+
+def test_openings_keep_the_first_syllable_and_stay_inside_a_transcript() -> None:
+    stream, vocab = stream_of(["xin chào mọi người", "chào các bạn nhé", "chào mọi người", "nói chào", "chào mi na"])
+    assert candidates.openings("chào mi na", stream, vocab) == {"chào mọi người": 2, "chào các bạn": 1}
+    assert candidates.openings("xa lắm", stream, vocab) == {}

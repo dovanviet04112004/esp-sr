@@ -120,35 +120,66 @@ class Score:
     neighbours: list[tuple[str, int]]
 
 
-def score(phrase: str, stream: np.ndarray, vocab: list[str], codes: np.ndarray, tables: dict) -> Score:
-    words_of = normalize(phrase).split()
-    syllables = g2p.syllables(" ".join(words_of), NORTH)
+def mismatches(phrase: str, stream: np.ndarray, codes: np.ndarray, tables: dict) -> tuple[np.ndarray, np.ndarray]:
+    """For every start in the stream, whether a phrase of the same length fits there and how many syllable components
+    of it differ from phrase in the north reading."""
+    syllables = g2p.syllables(normalize(phrase), NORTH)
     wanted = np.array([[tables[c].get(getattr(s, c), -2) for c in COMPONENTS] for s in syllables])
     n = len(syllables)
     span = len(stream) - n + 1
     valid = np.ones(span, dtype=bool)
-    mismatches = np.zeros(span, dtype=np.int32)
+    missed = np.zeros(span, dtype=np.int32)
     for k in range(n):
         ids = stream[k : k + span]
         valid &= ids != SEPARATOR
         # A syllable spelling cannot build has code -1 everywhere, so it misses on all five components.
-        mismatches += np.sum(codes[ids.clip(0)] != wanted[k], axis=1)
+        missed += np.sum(codes[ids.clip(0)] != wanted[k], axis=1)
+    return valid, missed
+
+
+def phrases_at(starts: np.ndarray, length: int, stream: np.ndarray, vocab: list[str]) -> Counter:
+    return Counter(" ".join(vocab[stream[i + k]] for k in range(length)) for i in starts)
+
+
+def neighbours(
+    phrase: str, misses: int, stream: np.ndarray, vocab: list[str], codes: np.ndarray, tables: dict
+) -> Counter:
+    """Every corpus phrase one to misses syllable components away from phrase, with its count."""
+    valid, missed = mismatches(phrase, stream, codes, tables)
+    at = np.flatnonzero(valid & (missed > 0) & (missed <= misses))
+    return phrases_at(at, len(normalize(phrase).split()), stream, vocab)
+
+
+def openings(phrase: str, stream: np.ndarray, vocab: list[str]) -> Counter:
+    """Every corpus phrase as long as phrase that opens with its first syllable, phrase itself left out."""
+    words_of = normalize(phrase).split()
+    if words_of[0] not in vocab:
+        return Counter()
+    n = len(words_of)
+    first = np.flatnonzero(stream[: len(stream) - n + 1] == vocab.index(words_of[0]))
+    at = first[np.all([stream[first + k] != SEPARATOR for k in range(n)], axis=0)]
+    found = phrases_at(at, n, stream, vocab)
+    found.pop(" ".join(words_of), None)
+    return found
+
+
+def score(phrase: str, stream: np.ndarray, vocab: list[str], codes: np.ndarray, tables: dict) -> Score:
+    words_of = normalize(phrase).split()
+    syllables = g2p.syllables(" ".join(words_of), NORTH)
+    valid, missed = mismatches(phrase, stream, codes, tables)
     phrases = int(valid.sum())
-    near = valid & (mismatches <= NEIGHBOUR_MISSES)
-    at = np.flatnonzero(near & (mismatches > 0))
-    found = Counter(" ".join(vocab[stream[i + k]] for k in range(n)) for i in at)
     return Score(
         phrase=phrase,
         reading=" | ".join(" ".join(s.units()) for s in syllables),
         tones=len({s.tone for s in syllables}),
         nuclei=len({s.nucleus for s in syllables}),
         readings=len(lexicon.entry(phrase, lexicon.ALL_DIALECTS)),
-        exact_per_m=PER_MILLION * int(np.sum(valid & (mismatches == 0))) / phrases,
-        near1_per_m=PER_MILLION * int(np.sum(valid & (mismatches <= 1))) / phrases,
-        near2_per_m=PER_MILLION * int(np.sum(valid & (mismatches <= 2))) / phrases,
-        near3_per_m=PER_MILLION * int(near.sum()) / phrases,
+        exact_per_m=PER_MILLION * int(np.sum(valid & (missed == 0))) / phrases,
+        near1_per_m=PER_MILLION * int(np.sum(valid & (missed <= 1))) / phrases,
+        near2_per_m=PER_MILLION * int(np.sum(valid & (missed <= 2))) / phrases,
+        near3_per_m=PER_MILLION * int(np.sum(valid & (missed <= NEIGHBOUR_MISSES))) / phrases,
         common_pair_per_m=max(pair_per_m(pair, stream, vocab) for pair in itertools.pairwise(words_of)),
-        neighbours=found.most_common(TOP_NEIGHBOURS),
+        neighbours=neighbours(phrase, NEIGHBOUR_MISSES, stream, vocab, codes, tables).most_common(TOP_NEIGHBOURS),
     )
 
 
