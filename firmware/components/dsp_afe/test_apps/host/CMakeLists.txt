@@ -24,7 +24,8 @@ add_afe_host(dsp_afe_host_off "${PARITY}/parity_common.c" "${PARITY}/parity_chai
 target_include_directories(dsp_afe_host_off PRIVATE "${PARITY}")
 target_compile_definitions(dsp_afe_host_off PRIVATE DSP_AFE_HOST_GOLDEN=1)
 add_afe_host(dsp_afe_host_on ${AFE_MODULE_SRCS} "${PARITY}/parity_common.c" "${PARITY}/parity_hpf.c"
-              "${PARITY}/parity_balance.c" "${PARITY}/parity_ns_omlsa.c" "${PARITY}/parity_vad.c" "${PARITY}/parity_agc.c")
+              "${PARITY}/parity_balance.c" "${PARITY}/parity_ns_omlsa.c" "${PARITY}/parity_vad.c" "${PARITY}/parity_agc.c"
+              "${PARITY}/parity_doa.c")
 target_include_directories(dsp_afe_host_on PRIVATE "${PARITY}")
 target_compile_definitions(dsp_afe_host_on PRIVATE DSP_AFE_HOST_ALL_MODULES=1 DSP_AFE_HOST_GOLDEN=1)
 

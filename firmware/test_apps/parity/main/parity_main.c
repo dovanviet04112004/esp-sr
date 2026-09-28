@@ -32,6 +32,9 @@ static const struct {
 #if CONFIG_DSP_AFE_BALANCE_ENABLE
     {"balance", parity_balance},
 #endif
+#if CONFIG_DSP_AFE_DOA_ENABLE
+    {"doa", parity_doa},
+#endif
 #if CONFIG_DSP_AFE_NS_OMLSA_ENABLE
     {"ns_omlsa", parity_ns_omlsa},
 #endif

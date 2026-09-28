@@ -30,12 +30,19 @@
 #define CASE_BYTES_MAX (512 * 1024)
 #define REPORT_LINES_MAX 1024
 #define PCM_FULL_SCALE 32768.0f
+#define BROADSIDE_DEG ((GEN_ARRAY_DOA_MIN_DEG + GEN_ARRAY_DOA_MAX_DEG) / 2)
 
 #if CONFIG_DSP_AFE_VAD_ENABLE
 // A real vad may call the test tone speech; its own golden cases judge it.
 static const bool kVadBuilt = true;
 #else
 static const bool kVadBuilt = false;
+#endif
+#if CONFIG_DSP_AFE_DOA_ENABLE
+// The same tone on both microphones: a search after a speech hop can only find broadside.
+static const bool kDoaBuilt = true;
+#else
+static const bool kDoaBuilt = false;
 #endif
 #if CONFIG_DSP_AFE_AGC_ENABLE
 static const bool kAgcBuilt = true;
@@ -206,7 +213,8 @@ static void check_round_trip(const dsp_afe_config_t *cfg, const char *what)
         int want_gain_db = 0;
         fill_hop(in, n_channels, h, false);
         ok = dsp_afe_feed(afe, in, 1) == ESP_OK && dsp_afe_fetch(afe, &out) == ESP_OK && out.seq == h &&
-             out.doa_deg == -1 && (kVadBuilt || out.vad == 0) && out.flags == want_flags;
+             (out.doa_deg == -1 || (kDoaBuilt && out.doa_deg == BROADSIDE_DEG)) &&
+             (kVadBuilt || out.vad == 0) && out.flags == want_flags;
         expected_frame(agc, previous, out.vad, want, &want_gain_db);
         ok = ok && abs(out.gain_db - want_gain_db) <= 1;
         for (size_t i = 0; ok && h > 0 && i < GEN_GRID_HOP_SAMPLES; i++) {
@@ -387,13 +395,18 @@ static void check_module_shells(void)
 
     const dsp_afe_doa_config_t doa_cfg = {
         GEN_ARRAY_SPACING_M, GEN_ARRAY_SPEED_OF_SOUND_M_S, 200.0f, GEN_ARRAY_ALIAS_HZ, 2.0f, 0.2f};
+    dsp_afe_doa_config_t doa_bad = doa_cfg;
+    doa_bad.grid_step_deg = 7.0f;
     dsp_afe_doa_t *doa = NULL;
-    dsp_afe_doa_result_t doa_out = {.angle_deg = 45, .confidence = 9};
+    dsp_afe_doa_result_t unsearched = {.angle_deg = 45, .confidence = 9};
+    dsp_afe_doa_result_t searched = unsearched;
     bytes = dsp_afe_doa_workspace_bytes(&doa_cfg);
-    check(dsp_afe_doa_init(&doa, &doa_cfg, region(bytes), bytes) == ESP_OK &&
-              dsp_afe_doa_process(doa, x0, x1, true, &doa_out) == ESP_OK && doa_out.angle_deg == -1 &&
-              doa_out.confidence == 0,
-          "doa shell: the angle stays unknown");
+    check(dsp_afe_doa_workspace_bytes(&doa_bad) == 0 &&
+              dsp_afe_doa_init(&doa, &doa_cfg, region(bytes), bytes) == ESP_OK &&
+              dsp_afe_doa_process(doa, x0, x1, false, &unsearched) == ESP_OK && unsearched.angle_deg == -1 &&
+              dsp_afe_doa_process(doa, x0, x1, true, &searched) == ESP_OK && searched.angle_deg >= 0 &&
+              searched.angle_deg <= 180 && searched.angle_deg % 2 == 0,
+          "doa: unknown until searched, then an angle of the grid; refuses a step that leaves no mirror");
 
     const dsp_afe_gsc_config_t gsc_cfg = {GEN_ARRAY_SPACING_M, GEN_ARRAY_SPEED_OF_SOUND_M_S, 0.05f, 1e-4f,
                                           0.0f};
@@ -554,6 +567,7 @@ static void run_golden(const char *root)
         parity_run_block(root, "balance", parity_balance, read_case, buf, sizeof(buf), &s_failures) +
         parity_run_block(root, "ns_omlsa", parity_ns_omlsa, read_case, buf, sizeof(buf), &s_failures) +
         parity_run_block(root, "vad", parity_vad, read_case, buf, sizeof(buf), &s_failures) +
+        parity_run_block(root, "doa", parity_doa, read_case, buf, sizeof(buf), &s_failures) +
         parity_run_block(root, "agc", parity_agc, read_case, buf, sizeof(buf), &s_failures);
 #elif DSP_AFE_HOST_PRODUCT
     const unsigned cases = parity_run_block(root, "chain_modules", parity_chain_modules, read_case, buf,
