@@ -149,3 +149,22 @@ trường nhìn 127 bước, `.espdl` 48 KB. Dựng bằng `make ai-probe`, đo 
 
 Bản đầu dùng `auto_streaming` của ESP-PPQ: phép cộng dư nhận bộ đệm cả cửa sổ, đầu ra phình tới 127 bước và
 `model->test()` báo sai hình. Bộ đệm gắn theo từng tích chập (`ptq_espdl.cache_each_causal_conv`) cho kết quả trên.
+
+## 9. Dò lưới của `doa`: xoay pha dồn viết tay so với bảng và `esp-dsp` (E8-T1, ADR-0008)
+
+Bản sao tạm của `bench_afe` có thêm `esp-dsp` 1.8.2 (không vào repo), mã `dsp_afe` tại `a88a6fa` cộng `doa.c` của E8-T1,
+profile `bench`, board B, nhân 1, 2000 lượt, 28/09. Chỉ phần dò: 46 góc nửa lưới × số vạch của dải, phổ chéo đã chuẩn
+hoá là pha ngẫu nhiên; sai số là lớn nhất trên 91 góc của `R(θ)` so với bản float64 dùng `cos`/`sin` của libm.
+
+| Dải | Vạch | Xoay dồn viết tay | Viết tay, hai góc xen kẽ | Bảng RAM nội + `dsps_dotprod_f32` | Bảng PSRAM + `dsps_dotprod_f32` | Bảng |
+|---|---|---|---|---|---|---|
+| 200 Hz – 3,81 kHz | 115 | 317,3 µs, sai 6,9e-6 | 658,6 µs, cùng bit | 193,4 µs, sai 3,0e-6 | 193,4 µs | 42 320 B |
+| 200 Hz – 8 kHz | 250 | 680,8 µs, sai 1,1e-4 | 1 425,2 µs | 401,5 µs, sai 1,0e-5 | 736,9 µs | 92 000 B |
+| 1 – 8 kHz | 225 | 613,4 µs, sai 7,1e-5 | 1 283,4 µs | 363,0 µs, sai 1,3e-5 | 668,9 µs | 82 800 B |
+| **2 – 8 kHz** | 193 | **527,2 µs, sai 7,0e-5** | 1 101,6 µs | 313,7 µs, sai 5,4e-6 | 428,7 µs | 71 024 B |
+
+Cả module (`dsp_afe_doa_process`, cùng lần đo): gộp phổ chéo 13,2 / 28,6 / 25,7 / 22,1 µs mỗi bước; gộp và dò 387,0 /
+826,5 / 745,1 / 640,9 µs, theo bốn dải trên. Sai 7e-5 trên một đáp ứng cỡ 193 là 4e-7 tương đối, nhỏ hơn nhiều khoảng
+cách giữa hai góc kề nhau của lưới. Xen kẽ hai góc trong một vòng chậm gấp đôi, có lẽ vì 14 biến float sống cùng lúc tràn khỏi 16 thanh ghi FPU
+(chưa đọc mã máy). Bảng ở PSRAM chỉ nhanh ngang RAM nội khi bảng lọt cache
+dữ liệu (42 KB); lớn hơn thì trượt cache, và ở 250 vạch chậm hơn cả bản viết tay.

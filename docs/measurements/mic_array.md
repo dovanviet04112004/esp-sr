@@ -125,7 +125,7 @@ hai đầu dàn. Góc suy ra bằng `arccos(tau / 2,10)`.
 | `20260928_home_044` | 135° | −1,13 | −1,48 | ~123° | đúng |
 
 Dấu đúng ở cả bốn hướng xét được. Góc lệch 12–18° ở các hướng chéo: vang của phòng, loa đặt bằng tay, và trễ còn dò trên
-số nguyên mẫu. Dò lưới 2° của `doa` (E8-T1) sẽ chấm lại trên chính các phiên này. Phiên 043 và 044 đặt loa ngược thứ tự
+số nguyên mẫu. Module `doa` chấm lại chính các phiên này ở `afe/doa.md` §2. Phiên 043 và 044 đặt loa ngược thứ tự
 kịch bản; nhãn đã sửa theo chỗ loa thật, và `tau` xác nhận nhãn mới.
 
 ## 3. Hiệu chuẩn `balance` (E2-T6)
