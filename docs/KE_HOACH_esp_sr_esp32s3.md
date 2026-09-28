@@ -114,7 +114,7 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | DNS Challenge (Microsoft) | `ns` | hàng trăm giờ | CC BY 4.0 phần nhiễu 🔬 | |
 | OpenSLR 28 | tăng cường vang | RIR thật và mô phỏng | Apache 2.0 | |
 | Cảnh dựng bằng `pyroomacoustics` | `doa` `gsc` `bss` `ns`, đường mô phỏng board | không giới hạn | của dự án | vật liệu **có nhãn** cho mọi khối không gian (§4.4) |
-| Tiếng tổng hợp bằng TTS trên máy tính | **`wake` dương — nguồn chính**, cụm gần âm cho âm bản, tăng lượng `command` | không giới hạn, nhiều giọng | theo giấy phép mô hình TTS dùng 🔬 | **không bao giờ** vào tập thử |
+| Tiếng tổng hợp bằng TTS trên máy tính (`srpipe/tts/`, §4.4) | **`wake` dương — nguồn chính**, cụm gần âm cho âm bản, tăng lượng `command`; **tiếng nguồn của `synth`** (§3.13) | không giới hạn, nhiều giọng | theo giấy phép mô hình TTS dùng, ghi ở `DU_LIEU.md` | **không bao giờ** vào tập thử |
 | Thu qua chính board | tập thử của `wake` và `command`, âm bản gần âm; nhiễu phòng; tập học khi cần tiếng thật | vài người nói, ≥ 2 phòng (E11-T6) | của dự án, có phiếu đồng ý (§1.4) | nguồn **duy nhất** đúng miền thiết bị |
 
 **Đường mô phỏng board** (`srpipe/scenes/device.py`, cấu hình `configs/scenes/device.yaml`) biến các mẩu tiếng sạch
@@ -777,12 +777,18 @@ Chốt ở E12-T1 bằng bảng so bộ nhớ, flash, phép tính, chất lượ
 
 | Phương án | Loại | Chỗ nằm | Giá |
 |---|---|---|---|
-| **Ghép mẩu cả câu và số** | thuần | `svc_speak` + phân vùng `voice` | thu sẵn câu trả lời và các từ số; 100 câu × 1,5 s × 16 kHz × 2 B = 4,8 MB PCM, ~1,2 MB với IMA-ADPCM. Chất lượng tốt nhất, chỉ nói được câu có sẵn |
+| **Ghép mẩu cả câu và số** | thuần | `svc_speak` + phân vùng `voice` | sinh sẵn câu trả lời và các từ số; 100 câu × 1,5 s × 16 kHz × 2 B = 4,8 MB PCM, ~1,2 MB với IMA-ADPCM. Chất lượng tốt nhất, chỉ nói được câu có sẵn |
 | Ghép âm tiết hoặc âm đôi | thuần | `svc_speak` | kho âm tiết đóng làm việc này khả thi hơn ngôn ngữ đa âm tiết; ngôn điệu khô |
 | Mạng chưng cất kiểu sanoTTS | mô hình | `ai_engine/src/synth/` | mốc ngoài: 567 008 tham số, 0,22× thời gian thực trên ESP32-S3, đường trường độ → âm học → iSTFT, **22,05 kHz**, tiếng Anh |
 
 **Phương án ghép mẩu luôn được dựng**, vì nó là lối lui của Cửa 4 và là cách duy nhất có tiếng nói
 trước khi mạng xong.
+
+**Tiếng nguồn của cả ba phương án là một giọng của bộ TTS trên máy tính**, qua `srpipe/tts/` (§4.4). Đó
+cũng là bộ sinh dương `wake` (E11-T7). Ghép mẩu và ghép âm tiết lấy mẩu từ giọng đó. Mạng chưng cất học
+vài chục giờ tiếng của đúng giọng đó, bộ TTS máy tính làm thầy. Mẩu nào PhoWhisper nghe không ra đúng
+chữ, kể cả dấu, thì sinh lại. Một giọng cho cả máy nên đổi câu trả lời chỉ cần sinh lại, không cần người
+đọc hay phiếu đồng ý. E12-T1 chọn bộ và giọng bằng nghe thật, và ghi giấy phép của bộ đã chọn ở `DU_LIEU.md`.
 
 **Tiếng ra 16 kHz** (§2.4): mạng phải huấn luyện ở 16 kHz; lấy mẫu lại 22,05 → 16 kHz trên máy tỉ lệ
 320/441, đắt và thừa. Đường iSTFT của sanoTTS đi qua `dsp_spec`, nên `ai_engine` phụ thuộc `dsp_spec`.
@@ -880,7 +886,7 @@ esp-sr/
     ├── FREERTOS.md                      # sổ kiểm lỗi đồng thời, soát lại mỗi khi thêm task
     ├── DU_LIEU.md                       # dữ liệu đã tải, giấy phép, số giờ, sha256
     ├── adr/                             # quyết định có bảng đối chứng
-    └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md, synth.md}
+    └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md, tts_engines.md}
                       ├ bench/           # CSV thô của bench_*, commit cùng bảng nó sinh ra
                       ├ calib/           # hệ số hiệu chuẩn từng board (balance), bản đã ghi xuống NVS
                       └ {afe,kws,tts}/   # số 🔬 theo khối
@@ -999,7 +1005,7 @@ ml/
 ├── pyproject.toml  ├── uv.lock        # ✅ ghim phiên bản, không requirements.txt rời
 ├── .env.example                       # ✅ commit — biến và giá trị giả
 ├── configs/
-│   ├── common/{paths.yaml, hardware.yaml}
+│   ├── common/{paths.yaml, hardware.yaml, tts.yaml}   # tts.yaml: bộ TTS và bộ nghe kiểm, ghim repo@revision
 │   ├── afe/{hpf.yaml, aec.yaml, doa.yaml, gsc.yaml, bss.yaml, ns_omlsa.yaml, vad.yaml, agc.yaml}  # chỉ ghi đè cho thí nghiệm; mặc định là contracts/afe.yaml
 │   ├── scenes/standard.yaml           # bộ cảnh có nhãn chuẩn của E4-T4: phòng, RT60, góc, SNR, seed
 │   ├── scenes/device.yaml             # đường mô phỏng board của E4-T8: kho phòng, mức nói, nhiễu, micro, log-mel
@@ -1025,6 +1031,12 @@ ml/
 │   │   └── device.py                  # ★ đường mô phỏng board: phòng hoặc RIR thật → dàn array.yaml → chênh micro
 │   │                                  #   đã hiệu chuẩn, pcm_shift → dsp.afe.chain → log-mel; dữ liệu học (§1.2)
 │   │
+│   ├── tts/                           # ★ tiếng tổng hợp cho mọi nhánh: dương wake (E11-T7), tiếng nguồn của synth
+│   │   │                              #   (§3.13); không biết nhánh nào gọi nó
+│   │   ├── engines.py                 # gọi ml/tts/<bộ>/run.py qua uv run: giọng có sẵn, sinh theo lô, nghe lại
+│   │   └── clips.py                   # giọng nhân bản từ kho có chữ; sinh → nghe lại → dòng manifest; mẩu đạt khi
+│   │                                  #   bộ nghe kiểm đọc ra đúng chữ, kể cả dấu
+│   │
 │   ├── dsp/                           # ── THUẬT TOÁN THUẦN, soi gương firmware 1:1 ──
 │   │   ├── spec/{fft.py, window.py, stft.py, mel.py, pitch.py}        # ★ dsp_spec
 │   │   ├── afe/{hpf.py, balance.py, aec.py, doa.py, gsc.py, bss.py,
@@ -1037,7 +1049,7 @@ ml/
 │   │   │   ★ postproc/ là phần phải khớp 1:1 với ai_engine/src/<nhánh>/, kiểm bằng golden
 │   │   ├── ns/                        # RNNoise-16k; postproc/bands.py ★
 │   │   ├── wake/                      # TCN; postproc/smooth.py ★; candidates.py chấm từ đánh thức trên kho (E11-T5);
-│   │   │                              #   synth.py sinh dương bằng các bộ TTS, nghe lại bằng PhoWhisper (E11-T7)
+│   │   │                              #   synth.py chọn chữ, giọng, seed cho dương rồi sinh qua srpipe/tts (E11-T7)
 │   │   ├── command/                   # mạng âm học + CTC; postproc/ctc_score.py ★
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
@@ -1046,7 +1058,7 @@ ml/
 │   └── export/{pack_models.py, update_lock.py}
 │
 ├── tts/<bộ>/{pyproject.toml, uv.lock, run.py}  # mỗi bộ TTS và bộ nghe kiểm (asr) một dự án uv riêng, ghim bản:
-│                                      #   phụ thuộc của chúng đá nhau và đá torch của srpipe; srpipe gọi run.py qua uv run
+│                                      #   phụ thuộc của chúng đá nhau và đá torch của srpipe; srpipe/tts gọi qua uv run
 ├── scripts/                           # đánh số theo thứ tự chạy; mỗi script một việc
 │   ├── 10_prepare.sh  ├── 11_scenes.sh
 │   ├── 20_train_ns.sh ├── 21_train_wake.sh ├── 22_train_command.sh ├── 23_train_synth.sh
