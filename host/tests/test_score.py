@@ -28,7 +28,11 @@ def board_session(tmp_path: Path) -> tuple[Path, dict[str, np.ndarray]]:
 
 
 def write(
-    session: Path, channels: dict[str, np.ndarray], gap_offsets: tuple[int, ...] = (), doa_deg: int | None = None
+    session: Path,
+    channels: dict[str, np.ndarray],
+    gap_offsets: tuple[int, ...] = (),
+    doa_deg: int | None = None,
+    pcm_shift: int = 16,
 ) -> Path:
     for name, pcm in channels.items():
         with wave.open(str(session / f"{name}.wav"), "wb") as wav:
@@ -43,7 +47,7 @@ def write(
         "board": "board_without_calib",
         "kind": "probe",
         "fw": "0.1.0+test",
-        "pcm_shift": 16,
+        "pcm_shift": pcm_shift,
         "seq_gaps": len(gap_offsets),
         "doa_deg": doa_deg,
     }
@@ -171,3 +175,16 @@ def test_channels_of_unequal_length_are_scored_on_their_common_part(tmp_path: Pa
     assert result.trimmed_samples == HOP
     assert result.parity.hops_compared == HOPS - 1 - score.WARMUP_HOPS
     assert f"last {HOP} samples" in score.table(result)
+
+
+def test_a_larger_shift_floors_every_sample_as_the_board_shifts(tmp_path: Path) -> None:
+    x = np.array([-32768, -9, -8, -1, 0, 1, 7, 8, 32767], dtype=np.int16)
+    assert score.floored(x, 14, 13).tolist() == [-16384, -5, -4, -1, 0, 0, 3, 4, 16383]
+    assert score.floored(x, 13, 13).tolist() == x.tolist()
+    with pytest.raises(ValueError, match="cannot come back"):
+        score.floored(x, 12, 13)
+    session, channels = board_session(tmp_path)
+    result = score.score(write(session, channels, pcm_shift=13), shift=15)
+    assert result.parity is None and result.meta["pcm_shift"] == "15 (floored from 13)"
+    shifted = channels["ch1"] >> 2
+    assert {f.name: f.peak_lsb for f in result.channels}["ch1"] == max(-int(shifted.min()), int(shifted.max()))

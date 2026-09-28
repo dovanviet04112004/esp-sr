@@ -2,8 +2,8 @@
 
 Every session gets level, DC, peak, clipping and A-weighted floor per channel, and the level the product chain hands
 agc. With doa_deg labelled, ch0 and ch1 also get the pair figures of srpipe.metrics.mic_pair (E2-T4, E2-T7). With
-clean (stream mode 5), it is checked against the chain with every module off, skipping hops that overlap unseen audio.
-Run: uv run --extra score python -m srhost.score <session directory>
+clean (stream mode 5), it is checked against the chain with every module off, skipping hops that overlap unseen audio;
+--shift scores the session as if the board had shifted more bits away. Run: python -m srhost.score <session> [--shift n]
 """
 
 from __future__ import annotations
@@ -211,11 +211,21 @@ def pair_figures(stats: mic_pair.PairStats, doa_deg: int) -> PairFigures:
     )
 
 
-def score(session: Path) -> Score:
+def floored(pcm: np.ndarray, shift: int, recorded_shift: int) -> np.ndarray:
+    """What the board would have captured at a larger shift: floor(x / 2^k), as drv_audio shifts (KEHOACH 3.1)."""
+    if shift < recorded_shift:
+        raise ValueError(f"shift {shift} is below the recorded {recorded_shift}: the lost bits cannot come back")
+    return np.right_shift(pcm, shift - recorded_shift).astype("<i2")
+
+
+def score(session: Path, shift: int | None = None) -> Score:
     meta = json.loads((session / "session.json").read_text(encoding="utf-8"))
     pcm = {p.stem: read_wav(p) for p in sorted(session.glob("*.wav"))}
     if not pcm:
         raise ValueError(f"{session} holds no WAV")
+    if shift is not None:
+        pcm = {name: floored(samples, shift, int(meta["pcm_shift"])) for name, samples in pcm.items()}
+        meta = meta | {"pcm_shift": f"{shift} (floored from {meta['pcm_shift']})"}
     # A receiver stopped inside a frame leaves the last frame on some channels only; score the common part.
     common = min(len(samples) for samples in pcm.values())
     trimmed = max(len(samples) for samples in pcm.values()) - common
@@ -229,7 +239,7 @@ def score(session: Path) -> Score:
         floors[name] = mic_pair.noise_floor_dbfs(mic_pair.pair_stats(pcm[name], pcm[name]), 0)
     channels = [channel_figures(name, samples, floors[name]) for name, samples in pcm.items()]
     parity = None
-    if all(name in pcm for name in PARITY_CHANNELS):
+    if shift is None and all(name in pcm for name in PARITY_CHANNELS):
         parity = chain_parity(pcm["ch0"], pcm["ch1"], pcm["clean"], read_gap_offsets(session))
     pair = None
     front = None
@@ -307,9 +317,10 @@ def table(result: Score) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("session", type=Path, help="a directory under raw/device/<board>/")
+    parser.add_argument("--shift", type=int, help="score as if recorded at this larger pcm_shift (E2-T5)")
     args = parser.parse_args(argv)
     try:
-        print(table(score(args.session)))
+        print(table(score(args.session, args.shift)))
     except (OSError, ValueError, KeyError) as err:
         print(f"score: {err}", file=sys.stderr)
         return 2
