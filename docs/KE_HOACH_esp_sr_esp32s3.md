@@ -145,6 +145,7 @@ máy khác: đáp ứng của micro là một phần của miền dữ liệu.
 | Mỗi con số trên tập thu qua board ghi kèm **số người nói và số phòng** | Tập thử chỉ có vài người; con số không kèm cỡ mẫu trông chắc hơn thực tế |
 | Âm bản để đo báo nhầm của `wake`: **≥ 24 giờ**, không trùng nguồn học — phần kho công khai giữ riêng, qua đường mô phỏng board, cộng nền phòng thu qua board | Đo "≤ 1 lần mỗi giờ" trên một giờ âm bản là không đo gì cả |
 | Tiếng tổng hợp không vào tập thử | Nó đúng miền của TTS, không đúng miền của người thật |
+| Giọng mẫu để TTS nhân bản chỉ lấy từ vật liệu học: người nói của tập học, hoặc kho chỉ vào tập học | Nhân bản giọng của một người ở tập thử là đưa người đó vào tập học qua đường TTS |
 | Tập hiệu chuẩn int8 lấy từ vật liệu học (mô phỏng board, hoặc bản thu của tập học), không lấy mẩu hay người nói nào của tập thử | Tập thử không góp gì vào model, kể cả dải giá trị của lượng tử |
 | Mỗi split có `SPLIT.md` ghi luật, seed, sha256, commit ở `ml/data/splits/` | Dựng lại được bằng một lệnh |
 | So hai biến thể: cùng split, cùng seed, cùng số epoch | Khác một điều kiện là bảng vô nghĩa |
@@ -1049,7 +1050,8 @@ ml/
 │   │   │   ★ postproc/ là phần phải khớp 1:1 với ai_engine/src/<nhánh>/, kiểm bằng golden
 │   │   ├── ns/                        # RNNoise-16k; postproc/bands.py ★
 │   │   ├── wake/                      # TCN; postproc/smooth.py ★; candidates.py chấm từ đánh thức trên kho (E11-T5);
-│   │   │                              #   synth.py chọn chữ, giọng, seed cho dương rồi sinh qua srpipe/tts (E11-T7)
+│   │   │                              #   synth.py chọn chữ, giọng, seed, tốc độ cho dương và âm bản gần âm rồi
+│   │   │                              #   sinh qua srpipe/tts vào interim/wake/synth_{pos,neg}/ (E11-T7)
 │   │   ├── command/                   # mạng âm học + CTC; postproc/ctc_score.py ★
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
