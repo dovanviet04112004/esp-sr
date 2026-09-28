@@ -7,6 +7,7 @@
 #include "dsp_afe.h"
 #include "dsp_afe/agc.h"
 #include "dsp_afe/balance.h"
+#include "dsp_afe/doa.h"
 #include "dsp_afe/hpf.h"
 #include "dsp_afe/ns.h"
 #include "dsp_afe/vad.h"
@@ -41,6 +42,11 @@
 #define MEL_F_MIN_HZ 20.0f
 #define MEL_F_MAX_HZ 7600.0f
 #define MEL_LOG_FLOOR 1e-6f
+#if CONFIG_DSP_AFE_DOA_ENABLE
+#define CHAIN_ROW "dsp_afe chuỗi (hpf + stft x2 + balance + doa + trộn + ns + istft + vad + agc)"
+#else
+#define CHAIN_ROW "dsp_afe chuỗi (hpf + stft x2 + balance + trộn + ns + istft + vad + agc)"
+#endif
 // A command with a number and a symbol: normalize, then g2p in each region, as nhan_task does on a new set.
 #define LANG_LINE "t\xc4\x83ng \xc3\xa2m l\xc6\xb0\xe1\xbb\xa3ng l\xc3\xaan 50%"
 
@@ -204,6 +210,38 @@ static void bench_balance(void)
     report(&row, &t);
 }
 
+#if CONFIG_DSP_AFE_DOA_ENABLE
+// search: every hop searches the grid, the cost of a hop that doa updates on; otherwise the fold of every
+// hop.
+static void bench_doa(bool search)
+{
+    const dsp_afe_doa_config_t cfg = {
+        .spacing_m = GEN_ARRAY_SPACING_M,
+        .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
+        .band_min_hz = GEN_AFE_DOA_BAND_MIN_HZ,
+        .band_max_hz = GEN_AFE_DOA_BAND_MAX_HZ > 0.0f ? GEN_AFE_DOA_BAND_MAX_HZ : GEN_ARRAY_ALIAS_HZ,
+        .grid_step_deg = GEN_AFE_DOA_GRID_STEP_DEG,
+        .smooth_tau_s = GEN_AFE_DOA_SMOOTH_TAU_S,
+    };
+    row_t row = {.module = search ? "dsp_afe doa gộp và dò lưới" : "dsp_afe doa gộp phổ chéo",
+                 .core = CORE_SACH};
+    row.hot_bytes = dsp_afe_doa_workspace_bytes(&cfg);
+    void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
+    const size_t before = heap_free();
+    dsp_afe_doa_t *doa = NULL;
+    ESP_ERROR_CHECK(dsp_afe_doa_init(&doa, &cfg, mem, row.hot_bytes));
+    row.static_bytes = before - heap_free();
+    dsp_afe_doa_result_t out;
+    timing_t t = {0};
+    for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
+        const uint32_t start = esp_cpu_get_cycle_count();
+        ESP_ERROR_CHECK(dsp_afe_doa_process(doa, s_bins[0], s_bins[1], search, &out));
+        hop_done(&t, h, start);
+    }
+    report(&row, &t);
+}
+#endif
+
 static void bench_vad(void)
 {
     const dsp_afe_vad_config_t cfg = {.aggressiveness = 0, .hangover_ms = GEN_AFE_VAD_HANGOVER_MS};
@@ -291,9 +329,7 @@ static void bench_chain(void)
                                   .ns_floor_db = GEN_AFE_NS_FLOOR_DB,
                                   .agc_target_dbfs = GEN_AFE_AGC_TARGET_DBFS,
                                   .vad_aggressiveness = GEN_AFE_VAD_AGGRESSIVENESS};
-    row_t row = {.module = "dsp_afe chuỗi (hpf + stft x2 + balance + trộn + ns + istft + vad + agc)",
-                 .core = CORE_SACH,
-                 .in_total = true};
+    row_t row = {.module = CHAIN_ROW, .core = CORE_SACH, .in_total = true};
     ESP_ERROR_CHECK(dsp_afe_workspace_bytes(&cfg, &row.hot_bytes, &row.cold_bytes));
     void *hot = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
     void *cold = row.cold_bytes > 0 ? heap_caps_malloc(row.cold_bytes, MALLOC_CAP_SPIRAM) : NULL;
@@ -346,6 +382,12 @@ static void core1_benches(void *done)
     vTaskDelay(1);
     bench_balance();
     vTaskDelay(1);
+#if CONFIG_DSP_AFE_DOA_ENABLE
+    bench_doa(false);
+    vTaskDelay(1);
+    bench_doa(true);
+    vTaskDelay(1);
+#endif
     bench_ns();
     vTaskDelay(1);
     bench_vad();
