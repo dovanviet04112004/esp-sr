@@ -880,7 +880,7 @@ esp-sr/
     ├── FREERTOS.md                      # sổ kiểm lỗi đồng thời, soát lại mỗi khi thêm task
     ├── DU_LIEU.md                       # dữ liệu đã tải, giấy phép, số giờ, sha256
     ├── adr/                             # quyết định có bảng đối chứng
-    └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md}
+    └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md, synth.md}
                       ├ bench/           # CSV thô của bench_*, commit cùng bảng nó sinh ra
                       ├ calib/           # hệ số hiệu chuẩn từng board (balance), bản đã ghi xuống NVS
                       └ {afe,kws,tts}/   # số 🔬 theo khối
@@ -1036,7 +1036,8 @@ ml/
 │   │   │   Cùng khuôn: README · model/ · data.py · train.py · eval.py · quant.py · postproc/
 │   │   │   ★ postproc/ là phần phải khớp 1:1 với ai_engine/src/<nhánh>/, kiểm bằng golden
 │   │   ├── ns/                        # RNNoise-16k; postproc/bands.py ★
-│   │   ├── wake/                      # TCN; postproc/smooth.py ★; candidates.py chấm từ đánh thức trên kho (E11-T5)
+│   │   ├── wake/                      # TCN; postproc/smooth.py ★; candidates.py chấm từ đánh thức trên kho (E11-T5);
+│   │   │                              #   synth.py sinh dương bằng các bộ TTS, nghe lại bằng PhoWhisper (E11-T7)
 │   │   ├── command/                   # mạng âm học + CTC; postproc/ctc_score.py ★
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
@@ -1044,6 +1045,8 @@ ml/
 │   ├── compress/quant/ptq_espdl.py    # ESP-PPQ → .espdl + mô phỏng int8 trên máy tính
 │   └── export/{pack_models.py, update_lock.py}
 │
+├── tts/<bộ>/{pyproject.toml, uv.lock, run.py}  # mỗi bộ TTS và bộ nghe kiểm (asr) một dự án uv riêng, ghim bản:
+│                                      #   phụ thuộc của chúng đá nhau và đá torch của srpipe; srpipe gọi run.py qua uv run
 ├── scripts/                           # đánh số theo thứ tự chạy; mỗi script một việc
 │   ├── 10_prepare.sh  ├── 11_scenes.sh
 │   ├── 20_train_ns.sh ├── 21_train_wake.sh ├── 22_train_command.sh ├── 23_train_synth.sh
