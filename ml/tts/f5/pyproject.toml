@@ -1,0 +1,12 @@
+[project]
+name = "tts-f5"
+version = "0.1.0"
+description = "F5-TTS with the Vietnamese viVoice checkpoint (CC BY-NC-SA 4.0) behind run.py, for srpipe.tasks.wake.synth"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "f5-tts==1.1.22",
+    "huggingface-hub>=0.24",
+]
+
+[tool.uv]
+package = false
