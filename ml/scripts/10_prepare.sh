@@ -10,6 +10,7 @@ json_value() { python3 -c 'import json, sys; print(json.load(sys.stdin)[sys.argv
 DATA_ROOT="${SRPIPE_DATA_ROOT:-$(env_value SRPIPE_DATA_ROOT)}"
 MDC_API="${MDC_API_URL:-https://mozilladatacollective.com/api}"
 HF_HUB="${HF_ENDPOINT:-https://huggingface.co}"
+command -v aria2c >/dev/null || { echo "10_prepare.sh downloads with aria2: sudo apt install aria2" >&2; exit 2; }
 
 # Resumes an interrupted download, checks it, prints its sha256 for the manifest, unpacks an archive; a marker
 # beside it lets a rerun skip what is done, archive removed or not.
@@ -18,14 +19,17 @@ fetch() {
   local done_marker="$dir/.done/$file"
   if [ -e "$done_marker" ]; then return; fi
   mkdir -p "$(dirname "$dir/$file")"
-  curl -fL -C - --retry 5 ${header:+-H "$header"} -o "$dir/$file" "$url"
+  # Sixteen connections: Azure and some mirrors cap each connection far below the line's speed.
+  aria2c -c -x 16 -s 16 --max-tries=5 --file-allocation=none --console-log-level=warn --summary-interval=60 \
+    ${header:+--header="$header"} -d "$(dirname "$dir/$file")" -o "$(basename "$file")" "$url"
   if [ "$algo" != "-" ]; then echo "$sum  $dir/$file" | "${algo}sum" -c -; fi
   echo "sha256 $(sha256sum "$dir/$file" | cut -d' ' -f1)  $file"
   case "$file" in
     *.zip) unzip -q -o "$dir/$file" -d "$dir" ;;
     *.tar.gz | *.tgz) tar -xzf "$dir/$file" -C "$dir" ;;
+    *.tar.bz2) tar -xjf "$dir/$file" -C "$dir" ;;
   esac
-  if [ "${KEEP_ARCHIVES:-0}" != 1 ] && [[ "$file" == *.zip || "$file" == *.tar.gz || "$file" == *.tgz ]]; then
+  if [ "${KEEP_ARCHIVES:-0}" != 1 ] && [[ "$file" =~ \.(zip|tar\.gz|tgz|tar\.bz2)$ ]]; then
     rm "$dir/$file"
   fi
   mkdir -p "$(dirname "$done_marker")" && touch "$done_marker"
