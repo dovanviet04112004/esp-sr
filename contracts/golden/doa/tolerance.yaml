@@ -1,0 +1,10 @@
+# C dsp_afe doa against srpipe.dsp.afe.doa (KEHOACH 3.6, E8-T1). Both fold and steer in float32 in the same order,
+# tables come from double series of basic arithmetic and 1 / sqrt is the Newton form (ADR-0006): the search lands on
+# the same grid angle with the same confidence. case_neg_* has every angle one grid step off.
+tensors:
+  angle:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  confidence:
+    max_abs: 0.0
+    min_snr_db: 0.0

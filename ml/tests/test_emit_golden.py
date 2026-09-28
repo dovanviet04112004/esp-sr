@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from srpipe.dsp import emit_golden
-from srpipe.dsp.afe import balance, chain, ns_omlsa
+from srpipe.dsp.afe import balance, chain, doa, ns_omlsa
 from srpipe.dsp.spec import mel, stft
 from srpipe.generated import afe, grid
 from srpipe.golden.gold import read_gold
@@ -187,3 +187,19 @@ def test_the_ns_omlsa_negative_control_left_the_smoothing_unsquared() -> None:
 def test_every_ns_omlsa_case_fits_the_parity_read_buffer() -> None:
     for path in (emit_golden.GOLDEN_ROOT / "ns_omlsa").glob("*.gold"):
         assert path.stat().st_size <= 512 * 1024
+
+
+def test_committed_doa_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_doa(tmp_path):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
+
+
+def test_the_doa_negative_control_is_one_grid_step_off() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "doa" / "case_neg_000.gold")
+    searcher = doa.Doa(doa.DoaConfig(*[float(v) for v in case["config"]]))
+    bins = [case[f"bins{m}"][..., 0] + 1j * case[f"bins{m}"][..., 1] for m in range(2)]
+    right = [searcher.process(bins[0][h], bins[1][h], bool(u)).angle_deg for h, u in enumerate(case["update"])]
+    known = np.array(right) != doa.ANGLE_UNKNOWN_DEG
+    assert known.any()
+    np.testing.assert_array_equal(case["angle"][known] - np.array(right)[known], round(afe.DOA_GRID_STEP_DEG))
