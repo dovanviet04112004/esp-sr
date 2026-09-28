@@ -4,6 +4,7 @@ asr: vinai/PhoWhisper-large@b9136a44b5f2ca664bd0b8f74baecf1715f6eeeb
 engines:
   vieneu:                          # preset voices, and clones of a reference clip
     checkpoint: pnnbao-ump/VieNeu-TTS-v3-Turbo@61b85e3d937fbbacb387714180e8182823512523
-    codec: OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX@ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae
+    codec: OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano@6aa02b01e445cc585582cf0ba480bc3ea6c8dd68
+    dtype: float32                 # the checkpoint's own precision; the GPU default of bfloat16 rounds it
   f5:                              # clones only, from a reference clip and its text
     checkpoint: hynt/F5-TTS-Vietnamese-ViVoice@5c14cdd4e3f62b69e75140558bea2b2e293ee8f1

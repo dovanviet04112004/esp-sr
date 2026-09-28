@@ -1,18 +1,15 @@
-"""VieNeu-TTS v3 Turbo, fp32 ONNX on the CPU, for srpipe.tts.
+"""VieNeu-TTS v3 Turbo for srpipe.tts, PyTorch on the GPU from the checkpoint's own weights.
 
-`run.py <root> <model>@<rev> <codec>@<rev> voices` prints the preset voices as JSON; with <requests.jsonl> instead of
-`voices` it synthesises each line {id, text, out, voice | ref_audio} into out, a 48 kHz WAV. Both repos are fetched into
-<root>/hub as plain files, since ONNX Runtime refuses external weights reached through symlinks, checked against their
-pinned revisions, and read offline after that, so VieNeu cannot pull a newer model on its own.
+`run.py <model>@<rev> <codec>@<rev> <dtype> voices` prints the preset voices as JSON; with <requests.jsonl> instead of
+`voices` it synthesises each line {id, text, out, voice | ref_audio} into out, a 48 kHz WAV. Both repos are fetched,
+checked against their pinned revisions and read offline after that, since VieNeu and the codec's remote code would
+otherwise follow the hub's main on their own.
 """
 
 import json
 import os
 import sys
 from pathlib import Path
-
-os.environ["HF_HUB_CACHE"] = str(Path(sys.argv[1]) / "hub")
-os.environ["HF_HUB_DISABLE_SYMLINKS"] = "1"
 
 from huggingface_hub import constants, snapshot_download
 
@@ -22,8 +19,7 @@ MODEL_FILES = [
     "speaker_encoder.onnx",
     "special_tokens_map.json",
     "tokenizer*.json",
-    "voices*.json",
-    "onnx_update/*",
+    "update/*",
 ]
 
 
@@ -37,12 +33,13 @@ def fetch(pinned: str, patterns: list[str] | None) -> str:
 
 
 def main() -> int:
-    model = fetch(sys.argv[2], MODEL_FILES)
-    fetch(sys.argv[3], None)
+    model = fetch(sys.argv[1], MODEL_FILES)
+    codec = fetch(sys.argv[2], None)
+    os.environ["HF_HUB_OFFLINE"] = "1"
     constants.HF_HUB_OFFLINE = True
     from vieneu import Vieneu
 
-    tts = Vieneu(backbone_repo=model, precision="fp32")
+    tts = Vieneu(backbone_repo=model, moss_tokenizer=codec, backend="pytorch", device="cuda", dtype=sys.argv[3])
     if sys.argv[4] == "voices":
         print(json.dumps([{"label": label, "id": voice_id} for label, voice_id in tts.list_preset_voices()]))
         return 0

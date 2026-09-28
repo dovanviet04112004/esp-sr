@@ -1,10 +1,13 @@
 [project]
 name = "tts-vieneu"
 version = "0.1.0"
-description = "VieNeu-TTS v3 Turbo (Apache 2.0) behind run.py, for srpipe.tasks.wake.synth (E11-T7)"
+description = "VieNeu-TTS v3 Turbo (Apache 2.0) behind run.py, PyTorch on the GPU, for srpipe.tts"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "vieneu==3.8.3",
+    "torch>=2.5",
+    "transformers==5.17.0",
+    "safetensors>=0.4",
     "soundfile>=0.12",
 ]
 
