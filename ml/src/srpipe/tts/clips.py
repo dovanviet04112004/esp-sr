@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from srpipe.lang.normalize import LangError, normalize
 from srpipe.tts import engines
 
 ROW_KEYS = ("speaker", "text", "say", "seed", "speed")
+NOT_SPOKEN = ("id", "out", "speaker", "say", "rivals")
 
 
 @dataclass(frozen=True)
@@ -92,16 +94,51 @@ def said(request: dict) -> str:
     return request.get("say", request["text"])
 
 
+def sha256_of(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def fingerprint(engine: str, request: dict, tts: dict) -> str:
+    """What a clip is made from: the engine's pins, run.py and lock, and every request field that reaches the engine,
+    a reference clip by its bytes rather than its path."""
+    project = engines.PROJECTS / engine
+    fields = {k: v for k, v in request.items() if k not in NOT_SPOKEN}
+    if "ref_audio" in fields:
+        fields["ref_audio"] = sha256_of(Path(fields["ref_audio"]))
+    made_of = json.dumps({"engine": tts["engines"][engine], "request": fields}, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(
+        made_of.encode() + (project / "run.py").read_bytes() + (project / "uv.lock").read_bytes()
+    ).hexdigest()
+
+
+def made(work: Path) -> dict[str, str]:
+    """The fingerprint each clip was last made from, by its path; work/made.jsonl."""
+    listing = work / "made.jsonl"
+    if not listing.exists():
+        return {}
+    return {r["out"]: r["fingerprint"] for r in map(json.loads, listing.read_text(encoding="utf-8").splitlines())}
+
+
+def record_made(work: Path, fingerprints: dict[str, str]) -> None:
+    work.mkdir(parents=True, exist_ok=True)
+    with (work / "made.jsonl").open("a", encoding="utf-8") as f:
+        f.writelines(json.dumps({"out": out, "fingerprint": fp}) + "\n" for out, fp in fingerprints.items())
+
+
 def render(requests: dict[str, list[dict]], tts: dict, work: Path, cache: Path) -> list[dict]:
-    """Synthesise every engine's requests {id, speaker, text, out, say?, rivals?, ...} whose clip is not there yet,
-    hear every clip back, and return one manifest row per clip: heard, what the checker heard; passed, whether it
-    spells what the clip must say; margin, how much more log-probability the checker gives what it heard than what the
-    clip must say, near 0 when only the spelling differs; rivals, the same margin for each text it must not say."""
+    """Synthesise every engine's requests {id, speaker, text, out, say?, rivals?, ...} whose clip is missing or was made
+    from another fingerprint, hear every clip back, and return one manifest row per clip: heard, what the checker
+    heard; passed, whether it spells what the clip must say; margin, how much more log-probability the checker gives
+    what it heard than what the clip must say, near 0 when only the spelling differs; rivals, the same margin for each
+    text it must not say."""
     rows = []
     for engine, reqs in requests.items():
-        missing = [r for r in reqs if not Path(r["out"]).exists()]
-        if missing:
-            engines.synthesise(engine, missing, tts, work, cache)
+        wanted = {r["out"]: fingerprint(engine, r, tts) for r in reqs}
+        before = made(work)
+        stale = [r for r in reqs if not Path(r["out"]).exists() or before.get(r["out"]) != wanted[r["out"]]]
+        if stale:
+            engines.synthesise(engine, stale, tts, work, cache)
+            record_made(work, {r["out"]: wanted[r["out"]] for r in stale})
         targets = {r["id"]: [said(r), *r.get("rivals", [])] for r in reqs}
         asked = [{"id": f"{engine}/{r['id']}", "wav": r["out"], "targets": targets[r["id"]]} for r in reqs]
         heard = engines.hear(asked, tts, work, cache)
@@ -119,7 +156,7 @@ def render(requests: dict[str, list[dict]], tts: dict, work: Path, cache: Path) 
                     "margin": gap[said(r)],
                     **({"rivals": {t: gap[t] for t in r["rivals"]}} if "rivals" in r else {}),
                     "seconds": round(sf.info(str(wav)).duration, 3),
-                    "sha256": hashlib.sha256(wav.read_bytes()).hexdigest(),
+                    "sha256": sha256_of(wav),
                 }
             )
     return rows

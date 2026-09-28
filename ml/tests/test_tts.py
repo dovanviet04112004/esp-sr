@@ -108,9 +108,15 @@ def render_with_fakes(requests: dict, heard: dict, root: Path, monkeypatch) -> t
             for c in asked
         }
 
+    project = root / "projects" / "e"
+    if not project.exists():
+        project.mkdir(parents=True)
+        (project / "run.py").write_text("v1")
+        (project / "uv.lock").write_text("lock")
+    monkeypatch.setattr(engines, "PROJECTS", root / "projects")
     monkeypatch.setattr(engines, "synthesise", synthesise)
     monkeypatch.setattr(engines, "hear", hear)
-    return clips.render(requests, {}, root / "work", root), made
+    return clips.render(requests, {"engines": {"e": {"checkpoint": "c@1"}}}, root / "work", root), made
 
 
 def test_a_clip_passes_only_when_what_it_must_say_is_heard(tmp_path: Path, monkeypatch) -> None:
@@ -146,13 +152,28 @@ def test_a_clip_passes_only_when_what_it_must_say_is_heard(tmp_path: Path, monke
     assert rows[0]["seconds"] == 1.0 and made == ["a", "b", "c"]
 
 
-def test_a_rerun_makes_only_the_missing_clips_and_hears_them_all(tmp_path: Path, monkeypatch) -> None:
-    requests = {"e": [{"id": i, "speaker": i, "text": "x", "out": str(tmp_path / f"{i}.wav")} for i in "abc"]}
+def test_a_rerun_makes_only_the_clips_whose_making_changed(tmp_path: Path, monkeypatch) -> None:
+    ref = tmp_path / "ref.wav"
+    write_wav(ref, np.zeros(grid.SAMPLE_RATE_HZ))
+    requests = {
+        "e": [
+            {"id": i, "speaker": i, "text": "x", "ref_audio": str(ref), "out": str(tmp_path / f"{i}.wav")}
+            for i in "abc"
+        ]
+    }
     heard = {f"e/{i}": "x" for i in "abc"}
-    render_with_fakes(requests, heard, tmp_path, monkeypatch)
+    assert render_with_fakes(requests, heard, tmp_path, monkeypatch)[1] == ["a", "b", "c"]
+    assert render_with_fakes(requests, heard, tmp_path, monkeypatch)[1] == []
     (tmp_path / "b.wav").unlink()
-    rows, made = render_with_fakes(requests, heard, tmp_path, monkeypatch)
-    assert made == ["b"] and [r["id"] for r in rows] == ["a", "b", "c"]
+    requests["e"][2]["text"] = "y"
+    rows, made = render_with_fakes(requests, heard | {"e/c": "y"}, tmp_path, monkeypatch)
+    assert made == ["b", "c"] and [r["id"] for r in rows] == ["a", "b", "c"]
+    (tmp_path / "work" / "made.jsonl").write_text("")
+    assert render_with_fakes(requests, heard | {"e/c": "y"}, tmp_path, monkeypatch)[1] == ["a", "b", "c"]
+    (tmp_path / "projects" / "e" / "run.py").write_text("v2")
+    assert render_with_fakes(requests, heard | {"e/c": "y"}, tmp_path, monkeypatch)[1] == ["a", "b", "c"]
+    write_wav(ref, np.ones(grid.SAMPLE_RATE_HZ) / 2)
+    assert render_with_fakes(requests, heard | {"e/c": "y"}, tmp_path, monkeypatch)[1] == ["a", "b", "c"]
 
 
 def test_a_batch_reaches_the_engine_one_voice_at_a_time(tmp_path: Path, monkeypatch) -> None:
