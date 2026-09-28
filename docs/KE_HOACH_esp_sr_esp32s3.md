@@ -680,7 +680,8 @@ thanh**; thắng mới dựng `dsp_spec/pitch`.
 
 **Từ đánh thức 3–4 âm tiết.** Âm tiết tiếng Việt dài cỡ 200–300 ms; cụm hai âm tiết chỉ nửa giây và
 trùng lời nói thường ngày nhiều. Chọn cụm pha **thanh khác nhau** và nguyên âm tương phản, không phải
-từ thông dụng (E11-T5).
+từ thông dụng, và người dùng nói giống nhau mọi lần. Chốt ở ADR-0007: **"Chào Mina"**, đọc "chào mi na", chấm bằng
+`srpipe.tasks.wake.candidates` trên lời của cả năm kho tiếng; hàng xóm gần của nó vào âm bản khó (E11-T7).
 
 **Dữ liệu dương** là tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, qua đường
 mô phỏng board (§1.2). **Âm bản** gồm các kho lời nói tiếng Việt, cộng các cụm gần âm cố ý chọn đọc bằng

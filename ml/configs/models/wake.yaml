@@ -1,5 +1,6 @@
 # The wake network of KEHOACH 3.11. E11-T10 exports it with random weights to prove esp-dl streams it one hop at a time.
 features: scenes/device.yaml       # the log-mel the network reads, its n_bands among them
+word: chào mi na                   # ADR-0007, read level as the name Mina is read
 model:
   kernel: 3
   channels: 32
