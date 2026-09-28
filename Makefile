@@ -136,6 +136,13 @@ calib-shift: ## Store NVS calib/pcm_shift through test_apps/calib: make calib-sh
 	@test -n "$(SHIFT)" || { echo "usage: make calib-shift SHIFT=<8..16>"; exit 1; }
 	cd host && uv run --extra score python -m srhost.calib shift $(SHIFT) --port $(PORT)
 
+ai-probe: ## Export the streaming TCN probe of E11-T10 into ai_engine/test_apps/unit (ml extras train and espdl)
+	cd ml && uv run --extra train --extra espdl python -m srpipe.tasks.wake.quant probe
+
+ai-unit: ai-probe ## Run the ai_engine suite on board B; model slot 1 is rewritten and left erased
+	cd firmware/components/ai_engine/test_apps/unit && idf.py build && \
+	  pytest pytest_unit.py --embedded-services esp,idf --target esp32s3 --port $(PORT) -s -p no:cacheprovider
+
 # broker and host
 broker-up: ## Start the bench MQTT broker (needs deploy/.env and deploy/emqx/users.csv)
 	@test -f deploy/.env || { echo "copy deploy/.env.example to deploy/.env and fill it"; exit 1; }
