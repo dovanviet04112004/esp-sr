@@ -75,7 +75,7 @@ trên đúng thứ board sẽ thu ở mỗi dịch.
 Ở dịch 16 chuỗi **gần như không thấy người nói ở 1 m**: `vad` bật ở 4–15% số bước trong khi người đọc liền 15 s, nên
 `agc` đứng yên gần 0 dB và tiếng ra ở −65 dBFS. Từ dịch 14 trở xuống `vad` bắt được lời và `agc` kéo lên. Bản thu chỉ
 15 s nên `agc` chưa tới trạng thái dừng; mức ra lấy trung vị theo dB của từng bước, thấp hơn trung bình công suất mà
-`agc` bám. Chọn dịch vẫn là E2-T5: nó cần thêm tiếng to ở 10 cm để biết dịch nhỏ nhất không cắt đỉnh (`host/plans/loud.tsv`).
+`agc` bám. E2-T5 chọn dịch 13 trên bản thu 28/09 của chính board B, có cả tiếng to ở 10 cm (`mic_array.md` §2).
 
 **Mô phỏng board cho cùng kết luận** (27/09, E4-T8, `configs/scenes/device.yaml`, `pcm_shift` 16, `calib/bal` của board B):
 760 câu VIVOS test, người nói 56–74 dB SPL ở 1 m, cách 0,3–4 m (trung vị 1,5 m), 89% phiên có nhiễu ở SNR 0–30 dB. Trên

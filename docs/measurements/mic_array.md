@@ -84,14 +84,31 @@ hoặc chính micro `ch0` đang hỏng. Soi lỗ A trước buổi thu kế ti�
 
 ## 2. Dịch 24 → 16 bit (E2-T5)
 
-| `pcm_shift` | Mức tiếng nói to ở 10 cm dBFS | Nền ồn phòng yên dBFS | Cắt đỉnh | Chọn |
-|---|---|---|---|---|
+**Chọn 13**, ghi NVS `calib/pcm_shift` của board B ngày 28/09 (`make calib-shift SHIFT=13`, đọc lại khớp). Hai phép đo trên
+board B trong vỏ, phòng ở nhà: tiếng to đọc cách 10 cm (`20260928_home_045`, thu ở dịch 16 để không đỉnh nào cắt) và nền
+phòng yên 60 s (`20260928_home_004`, thu ở dịch 13). Các dịch khác dựng lại đúng từng mẫu bằng `floor(x / 2^k)` như
+`drv_audio` dịch (`srhost.score --shift`), riêng dịch 12 quy từ 13 bằng cộng 6,02 dB. Mức là RMS phần xoay chiều.
 
-**Số sơ bộ từ bản thu cũ** (28/09, repo tinyai-signal, thu ở dịch 13, quy về dịch 16 bằng trừ 18,06 dB). Người đọc giọng
-thường ở 1 m: `ch1` −53 … −56 dBFS, `ch0` −60 … −63 dBFS (trung bình công suất các bước có tiếng); đỉnh ở dịch 13 tới
-4 223 LSB. Vỗ tay ở 40 cm cắt đỉnh ở dịch 13 (136 mẫu). Chưa có tiếng to ở 10 cm, nên chưa chọn được dịch: `loud.tsv` thu
-nó ở dịch 16, mọi phiên khác thu ở dịch 13 (`make calib-shift SHIFT=13`), vì dịch lớn hơn dựng lại đúng từng mẫu bằng
-`floor(x / 2^k)`. Chuỗi sản phẩm trên các bản 1 m ấy ở từng dịch: `afe/agc.md` §4.
+| `pcm_shift` | Tiếng to 10 cm `ch0` / `ch1` dBFS | Đỉnh `ch1` LSB | Nền phòng yên `ch0` / `ch1` dBFS | Cắt đỉnh | Chọn |
+|---|---|---|---|---|---|
+| 12 | −29,1 / −18,7 | 51 328 | −57,1 / −53,1 | **có** | |
+| 13 | −35,1 / −24,7 | 25 664 | −63,1 / −59,1 | không, dư 2,1 dB | ✅ |
+| 14 | −41,2 / −30,8 | 12 832 | −69,1 / −65,1 | không | |
+| 16 | −53,2 / −42,8 | 3 208 | −81,1 / −77,1 | không | |
+
+Ở dịch 13 nền phòng yên còn cao hơn một bước lượng tử `int16` (−90,3 dBFS) 27–31 dB. Tiếng to 10 cm không cắt, nhưng chỉ
+dư 2,1 dB: hét sát micro thì cắt. Dịch 13 thắng vì chuỗi sản phẩm nghe được tiếng nhỏ và tiếng xa, cũng trên bản thu
+hôm ấy (`srhost.score --shift`, `balance` của board, `ns` sàn, `vad` mức 2, tỉ lệ bước `vad = 1`):
+
+| Phiên | Nội dung | Dịch 13 | Dịch 14 | Dịch 16 |
+|---|---|---|---|---|
+| `20260928_home_005` | đọc giọng thường 1 m | 53 % | 46 % | 6 % |
+| `20260928_home_006` | đọc giọng nhỏ 1 m | 29 % | 3,8 % | 0 % |
+| `20260928_home_007` | đọc giọng thường 3 m | 47 % | 11 % | 0 % |
+| `20260928_home_037` | "Chào Mina" 10 lần, 3 m | 33 % | 21 % | 5,7 % |
+| `20260928_home_004` | phòng yên, không ai nói | 0,4 % | 0 % | 0 % |
+
+Ở dịch 14 chuỗi đã mất tiếng nhỏ và tiếng 3 m. Đó là lý do đổi lấy 6 dB dư trần.
 
 ## 3. Hiệu chuẩn `balance` (E2-T6)
 
