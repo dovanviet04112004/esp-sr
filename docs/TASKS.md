@@ -228,10 +228,10 @@ Con số báo nhầm quan trọng hơn con số bắt được: một máy tự 
 
 | ID | Module | Việc | Xong khi | Chặn bởi | V5 |
 |---|---|---|---|---|---|
-| E12-T1 | | Bảng so ghép mẩu / ghép âm tiết / mạng chưng cất: bộ nhớ, flash, phép tính, chất lượng | bảng đủ ba cột, **có phương án không mạng**; ADR | E11-T4 | V5.6.1 |
-| E12-T2 | `svc_speak` | Ghép mẩu: thu câu trả lời và từ số (có phiếu đồng ý người đọc), IMA-ADPCM, phân vùng `voice`, dựng trước rồi phát | nói được mọi câu trong `responses/vi.json` và mọi số 0–9999 | E10-T1, E11-T2 | V5.6.3 |
+| E12-T1 | | Bảng so ghép mẩu / ghép âm tiết / mạng chưng cất: bộ nhớ, flash, phép tính, chất lượng; chọn bộ TTS máy tính và một giọng nguồn (KẾ HOẠCH §3.13) | bảng đủ ba cột, **có phương án không mạng**; giọng chọn bằng nghe thật; ADR | E11-T4, E11-T7 | V5.6.1 |
+| E12-T2 | `svc_speak` | Ghép mẩu: sinh câu trả lời và từ số bằng giọng nguồn qua `srpipe/tts`, mỗi mẩu PhoWhisper nghe ra đúng chữ; IMA-ADPCM, phân vùng `voice`, dựng trước rồi phát | nói được mọi câu trong `responses/vi.json` và mọi số 0–9999 | E10-T1, E11-T2, E12-T1 | V5.6.3 |
 | E12-T3 | | Nối `lang_vi` vào đường mạng, thêm trường độ và ngôn điệu | **không viết lại `g2p`**; chỉ khi E12-T1 chọn mạng | E12-T1 | V5.6.2 |
-| E12-T4 | `ai_engine/src/synth/` | mạng huấn luyện ở **16 kHz**, iSTFT qua `dsp_spec` | 🔬 **Cửa 4**: dưới 1× thời gian thực, vừa bộ nhớ; không đạt thì lui về E12-T2, không nới ngân sách | E12-T3 | V5.6.3 |
+| E12-T4 | `ai_engine/src/synth/` | mạng huấn luyện ở **16 kHz** trên tiếng giọng nguồn do `srpipe/tts` sinh (thầy), iSTFT qua `dsp_spec` | 🔬 **Cửa 4**: dưới 1× thời gian thực, vừa bộ nhớ; không đạt thì lui về E12-T2, không nới ngân sách | E12-T3 | V5.6.3 |
 | E12-T5 | | Chấm chất lượng | điểm tự động cộng nghe thật, ghi cả hai | E12-T2 hoặc E12-T4 | V5.6.4 |
 
 ---
