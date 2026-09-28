@@ -1,0 +1,11 @@
+# Scoring of doa on the labelled scenes of configs/scenes/standard.yaml (KEHOACH 3.6, E8-T1); the module's own numbers
+# stay in contracts/afe.yaml, and a variant here only overrides them.
+eval:
+  scenes: standard                  # interim/scenes/<name>/
+  tolerance_deg: 10.0
+  endfire_deg: 30.0                 # 0 .. 30 and 180 - 30 .. 180 scored apart, the array's worst resolution
+  variants:                         # the product's band of contracts/afe.yaml runs as "product"
+    below_alias: {band_min_hz: 200.0, band_max_hz: 3811.111}
+    full_band: {band_min_hz: 0.0, band_max_hz: 8000.0}
+    from_200_hz: {band_min_hz: 200.0, band_max_hz: 8000.0}
+    from_1_khz: {band_min_hz: 1000.0, band_max_hz: 8000.0}

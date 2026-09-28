@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns screen screen-audit splits wake-features wake-train eval-tts wake-synth parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa screen screen-audit splits wake-features wake-train eval-tts wake-synth parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -63,6 +63,9 @@ eval-agc: ## Score agc on VIVOS scenes at input levels -50 .. -10 dBFS through v
 
 eval-ns: ## Score the ns floor on VIVOS scenes: noise and speech lost, SNR gained (docs/measurements/afe/ns.md)
 	cd ml && uv run python -m srpipe.scenes.ns --workers 16
+
+eval-doa: ## Score doa on the labelled standard scenes by band, condition and region (docs/measurements/afe/doa.md)
+	cd ml && uv run python -m srpipe.scenes.spatial doa --workers 16
 
 screen: ## Measure every clip of every corpus once, then list what the rules reject (E11-T16, docs/measurements/data_screen.md)
 	cd ml && uv run python -m srpipe.core.screen measure && uv run python -m srpipe.core.screen judge
