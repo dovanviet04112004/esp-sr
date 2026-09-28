@@ -93,6 +93,11 @@ def measure_batch(task: tuple[Path, list[corpus.Clip], dict]) -> list[dict]:
     return rows
 
 
+# Read at import: the code this process runs, even when the files on disk change while it measures.
+MEASURE_CODE = "".join(inspect.getsource(f) for f in (measure, measure_batch)).encode()
+MEASURE_CODE += b"".join(Path(mod.__file__).read_bytes() for mod in (corpus, audio_io, normalize, lang_vi))
+
+
 def batches(raw: Path, clips: list[corpus.Clip], size: int) -> list[list[corpus.Clip]]:
     """Runs of consecutive clips: one parquet row group each, so a group is read once, or size files."""
     starts: dict[str, np.ndarray] = {}
@@ -112,10 +117,8 @@ def batches(raw: Path, clips: list[corpus.Clip], size: int) -> list[list[corpus.
 
 def measured_by(spec: dict, m: dict) -> str:
     """What a corpus's measures come from: its layout, the measure settings and every piece of code on the way."""
-    code = [inspect.getsource(f) for f in (measure, measure_batch)]
-    modules = b"".join(Path(mod.__file__).read_bytes() for mod in (corpus, audio_io, normalize, lang_vi))
     settings = json.dumps({"spec": spec, "measure": m}, sort_keys=True)
-    return hashlib.sha256(settings.encode() + "".join(code).encode() + modules).hexdigest()
+    return hashlib.sha256(settings.encode() + MEASURE_CODE).hexdigest()
 
 
 def write_tsv(path: Path, fields: tuple[str, ...], rows: list[dict]) -> None:
