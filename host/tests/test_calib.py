@@ -75,35 +75,49 @@ def test_placements_that_agree_pass_and_an_outlier_blocks_the_estimate(tmp_path:
 
 
 class FakeBoard:
-    """A serial port that answers like test_apps/calib: 'ok ...' lines, then the prompt."""
+    """A serial port that answers like test_apps/calib: 'ok ...' or 'error ...' lines, then the prompt; an empty
+    line gets only a prompt. A board that reset on open has printed its boot prompt already."""
 
-    def __init__(self) -> None:
-        self.pending = bytearray(calib.PROMPT)
+    def __init__(self, reset_on_open: bool = True) -> None:
+        self.pending = bytearray(calib.PROMPT if reset_on_open else b"")
+        self.in_waiting = len(self.pending)
         self.values: dict[int, tuple[float, float]] = {}
         self.stored: bytes | None = None
-        self.in_waiting = 0
+        self.shift: int | None = None
 
     def read(self, n: int) -> bytes:
         out, self.pending = bytes(self.pending[:n]), self.pending[n:]
         self.in_waiting = len(self.pending)
         return out
 
-    def write(self, data: bytes) -> None:
-        words = data.decode().split()
+    def reset_input_buffer(self) -> None:
+        self.pending.clear()
+        self.in_waiting = 0
+
+    def answer(self, words: list[str]) -> str | None:
+        if not words:
+            return None
         if words[:2] == ["bal", "clear"]:
             self.values.clear()
-            reply = "ok cleared"
-        elif words[:2] == ["bal", "put"]:
+            return "ok cleared"
+        if words[:2] == ["bal", "put"]:
             first, numbers = int(words[2]), [np.float32(v) for v in words[3:]]
             for i in range(0, len(numbers), 2):
                 self.values[first + i // 2] = (numbers[i], numbers[i + 1])
-            reply = f"ok put {first}"
-        elif words[:2] == ["bal", "commit"]:
+            return f"ok put {first}"
+        if words[:2] == ["bal", "commit"]:
             self.stored = b"".join(struct.pack("<ff", *self.values[k]) for k in range(grid.N_BINS))
-            reply = "ok committed"
-        else:
-            reply = f"ok bal ver 1 at 0 crc 0x{zlib.crc32(self.stored):08x} bins {grid.N_BINS}"
-        self.pending += (reply + "\r\n").encode() + calib.PROMPT
+            return "ok committed"
+        if words[:2] == ["bal", "show"] and self.stored is not None:
+            return f"ok bal ver 1 at 0 crc 0x{zlib.crc32(self.stored):08x} bins {grid.N_BINS}"
+        if words[:2] == ["shift", "set"] and 8 <= int(words[2]) <= 16:
+            self.shift = int(words[2])
+            return f"ok shift {self.shift}"
+        return "error usage"
+
+    def write(self, data: bytes) -> None:
+        reply = self.answer(data.decode().split())
+        self.pending += (b"" if reply is None else (reply + "\r\n").encode()) + calib.PROMPT
         self.in_waiting = len(self.pending)
 
     def close(self) -> None:
@@ -127,3 +141,20 @@ def test_an_error_reply_stops_the_write() -> None:
     board.write = lambda data: None
     with pytest.raises(RuntimeError, match="out of range"):
         calib.command(board, "bal put 300 1 0")
+
+
+@pytest.mark.parametrize("reset_on_open", [True, False])
+def test_the_console_is_reached_whether_or_not_opening_resets_the_board(
+    monkeypatch: pytest.MonkeyPatch, reset_on_open: bool
+) -> None:
+    board = FakeBoard(reset_on_open)
+    monkeypatch.setattr(calib.serial, "Serial", lambda *a, **k: board)
+    assert calib.main(["shift", "13", "--port", "/dev/null"]) == 0
+    assert board.shift == 13
+
+
+def test_a_shift_the_board_refuses_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    board = FakeBoard()
+    monkeypatch.setattr(calib.serial, "Serial", lambda *a, **k: board)
+    assert calib.main(["shift", "7", "--port", "/dev/null"]) == 2
+    assert board.shift is None
