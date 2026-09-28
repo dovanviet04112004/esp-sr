@@ -170,6 +170,9 @@ máy khác: đáp ứng của micro là một phần của miền dữ liệu.
 | Mỗi con số trên tập thu qua board ghi kèm **số người nói và số phòng** | Tập thử chỉ có vài người; con số không kèm cỡ mẫu trông chắc hơn thực tế |
 | Âm bản để đo báo nhầm của `wake`: **≥ 24 giờ**, không trùng nguồn học — phần kho công khai giữ riêng, qua đường mô phỏng board, cộng nền phòng thu qua board | Đo "≤ 1 lần mỗi giờ" trên một giờ âm bản là không đo gì cả |
 | Split, giọng mẫu TTS và nhiễu để trộn chỉ lấy mẩu đã qua sàng lọc (§1.2) | Mẩu câm hay lệch lời dạy sai, và nằm trong tập thử thì chấm sai |
+| Lệnh giữ làm **lệnh chưa học** (E11-T13, cấu hình ở `configs/models/command.yaml`) không có trong tập học của `command`: mẩu nào có lời chứa nó thì bỏ khỏi `train`, `val`, `calib`, và TTS không đọc nó | Phép thử "thêm lệnh không cần học lại" chỉ đo được khi mô hình chưa từng nghe lệnh ấy |
+| Âm bản của `wake` không có mẩu nào lời chứa từ đánh thức | Một câu nói "chào mi na" gắn nhãn âm dạy mô hình bỏ qua chính nó, và nằm trong tập thử thì tính thành báo nhầm |
+| Tập thử không lấy từ kho đã làm giọng mẫu cho TTS của cùng nhánh | Kho không có mã người nói thì không tách được người; giọng đã nhân bản vào tập học sẽ có mặt ở cả hai phía |
 | Tiếng tổng hợp không vào tập thử | Nó đúng miền của TTS, không đúng miền của người thật |
 | Giọng mẫu để TTS nhân bản chỉ lấy từ vật liệu học: người nói của tập học, hoặc kho chỉ vào tập học | Nhân bản giọng của một người ở tập thử là đưa người đó vào tập học qua đường TTS |
 | Tập hiệu chuẩn int8 lấy từ vật liệu học (mô phỏng board, hoặc bản thu của tập học), không lấy mẩu hay người nói nào của tập thử | Tập thử không góp gì vào model, kể cả dải giá trị của lượng tử |
@@ -1081,8 +1084,10 @@ ml/
 │   │   ├── wake/                      # TCN; postproc/smooth.py ★; candidates.py chấm từ đánh thức trên kho (E11-T5);
 │   │   │                              #   synth.py chọn chữ, giọng, seed, tốc độ cho dương và âm bản gần âm rồi
 │   │   │                              #   sinh qua srpipe/tts vào interim/wake/synth_{pos,neg}/ (E11-T7); ngưỡng
-│   │   │                              #   độ chênh đặt trên âm bản gần âm, để chỉ 1% lọt thành dương
-│   │   ├── command/                   # mạng âm học + CTC; postproc/ctc_score.py ★
+│   │   │                              #   độ chênh đặt trên âm bản gần âm, để chỉ 1% lọt thành dương; data.py dựng
+│   │   │                              #   split wake/v<n> (§1.3)
+│   │   ├── command/                   # mạng âm học + CTC; postproc/ctc_score.py ★; data.py dựng split command/v<n>,
+│   │   │                              #   bỏ lệnh chưa học khỏi tập học (§1.3)
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
 │   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py}
@@ -1182,7 +1187,7 @@ notes: phi thương mại — ràng buộc lan sang model (§1.4)
 ```
 
 **Một dòng split** là TSV bốn cột `item  spk  room  origin`: `item` là đường dẫn so với `raw/` hoặc
-`interim/`; `spk` là mã người nói của kho hoặc `spk_NNN`, `-` với nhiễu; `room` là phòng thu với bản của
+`interim/`, hay `<parquet>#<dòng>` với kho đóng gói parquet; `spk` là mã người nói của kho hoặc `spk_NNN`, `-` với nhiễu; `room` là phòng thu với bản của
 board, `-` với kho công khai; `origin` là `public` | `board` | `synth` | `scene`. Một file tự đủ để kiểm
 luật mà không mở dữ liệu. `SPLIT.md` ghi luật, seed, lệnh sinh, và một dòng `- <file>: <sha256>` cho mỗi
 file của phiên bản.
