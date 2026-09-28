@@ -1,9 +1,8 @@
 """The dsp_afe facade: interleaved int16 hops in, one clean channel and its figures out (KEHOACH 3.2, 4.5.5).
 
-Mirror of firmware/components/dsp_afe/src/dsp_afe.c: hpf per microphone, STFT per microphone, balance on ch1, the
-plain two-channel mean, the ns floor's gains, iSTFT, vad on the clean hop, its level, agc, back to int16. The modules
-follow ChainConfig.modules, by default the product's list of contracts/afe.yaml that firmware/sdkconfig.afe turns on;
-contracts/golden/chain/ runs with none of them, contracts/golden/chain_modules/ with that list.
+Mirror of dsp_afe.c: hpf and the STFT per microphone, balance on ch1, doa searched every second hop after a speech hop,
+the plain two-channel mean, the ns floor's gains, iSTFT, vad on the clean hop, its level, agc, back to int16. Modules
+follow ChainConfig.modules, by default the product's of contracts/afe.yaml; golden/chain runs with none of them.
 """
 
 from __future__ import annotations
@@ -12,17 +11,16 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from srpipe.dsp.afe import agc, balance, hpf, ns_omlsa, vad
+from srpipe.dsp.afe import agc, balance, doa, hpf, ns_omlsa, vad
 from srpipe.dsp.spec.stft import Istft, Stft
 from srpipe.generated import afe, array, grid
 
 FORMATS = {"MM": array.N_MICS, "MMR": array.N_MICS + 1}
-MODULES_BUILT = ("hpf", "balance", "ns_omlsa", "vad", "agc")
+MODULES_BUILT = ("hpf", "balance", "doa", "ns_omlsa", "vad", "agc")
 PCM_FULL_SCALE = np.float32(32768.0)
 PCM_MIN, PCM_MAX = -32768, 32767
 INT8_MIN, INT8_MAX = -128, 127
 LEVEL_MIN_DBFS = INT8_MIN
-ANGLE_UNKNOWN_DEG = -1
 
 FLAG_GAP = 1 << 0
 FLAG_CLIPPED = 1 << 1
@@ -107,6 +105,8 @@ class Chain:
     def _start_modules(self) -> None:
         on = self.cfg.modules
         self._hpf = hpf.Hpf() if "hpf" in on else None
+        self._doa = doa.Doa() if "doa" in on else None
+        self._last_vad = False
         self._ns = None
         if "ns_omlsa" in on:
             self._ns = ns_omlsa.Omlsa()
@@ -134,6 +134,10 @@ class Chain:
         bins = [st.analyze(samples[:, m]) for m, st in enumerate(self._analysis)]
         if self._gains is not None:
             bins[1] = balance.apply(bins[1], self._gains)
+        direction = doa.DoaResult(doa.ANGLE_UNKNOWN_DEG, 0)
+        if self._doa is not None:
+            update = self._last_vad and self._seq % afe.DOA_UPDATE_EVERY_HOPS == 0
+            direction = self._doa.process(bins[0], bins[1], update)
         mixed = np.float32(0.5) * (bins[0] + bins[1])
         if self._ns is not None:
             gains = self._ns.process(mixed.real * mixed.real + mixed.imag * mixed.imag).gain
@@ -148,8 +152,8 @@ class Chain:
         frame = Frame(
             pcm=to_pcm(clean),
             seq=self._seq,
-            doa_deg=ANGLE_UNKNOWN_DEG,
-            doa_conf=0,
+            doa_deg=direction.angle_deg,
+            doa_conf=direction.confidence,
             vad=int(speech),
             level_dbfs=level,
             gain_db=to_int8(gain_db),
@@ -157,4 +161,5 @@ class Chain:
         )
         self._seq += 1
         self._gap = False
+        self._last_vad = speech
         return frame

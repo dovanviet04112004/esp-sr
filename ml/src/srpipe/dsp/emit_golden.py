@@ -7,11 +7,12 @@ unchanged reference rewrites the same bytes, which ml/tests/test_emit_golden.py 
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 
-from srpipe.dsp.afe import agc, balance, chain, hpf, ns_omlsa, vad
+from srpipe.dsp.afe import agc, balance, chain, doa, hpf, ns_omlsa, vad
 from srpipe.dsp.spec import mel, stft
 from srpipe.generated import afe, array, grid
 from srpipe.golden.gold import write_gold
@@ -38,6 +39,8 @@ NS_RISE_AT_HOP = 60
 NS_ECHO_HOPS = 150
 NS_SILENT_LEAD_HOPS = 20
 NS_BURST_HOPS = 40
+DOA_HOPS = 64
+DOA_SILENT_HOPS = 16
 LSB = 1.0 / 32768.0
 MEL_CASES = (
     (mel.MelConfig(n_bands=40, f_min_hz=20.0, f_max_hz=7600.0, log_floor=1e-6), 13),
@@ -533,12 +536,94 @@ def emit_ns_omlsa(root: Path) -> list[Path]:
     return written
 
 
+def plane_wave(signal: np.ndarray, angle_deg: float) -> np.ndarray:
+    """(n, 2) far-field copies of signal from angle_deg: ch0 lags ch1 by tau = d cos(theta) / c (array.yaml)."""
+    n = len(signal)
+    freqs = np.fft.rfftfreq(2 * n, 1.0 / grid.SAMPLE_RATE_HZ)
+    spectrum = np.fft.rfft(signal, 2 * n)
+    tau_s = array.SPACING_M * np.cos(np.radians(angle_deg)) / array.SPEED_OF_SOUND_M_S
+    shifted = [np.fft.irfft(spectrum * np.exp(-2j * np.pi * freqs * lag), 2 * n)[:n] for lag in (tau_s / 2, -tau_s / 2)]
+    return np.stack(shifted, axis=-1)
+
+
+def doa_case(pair: np.ndarray, update: np.ndarray, cfg: doa.DoaConfig) -> dict[str, np.ndarray]:
+    """Both channels' bins per hop, the update flags and the configuration; the angle and confidence after each hop."""
+    bins = [stft.analyze_signal(pair[:, m].astype(np.float32)) for m in range(array.N_MICS)]
+    searcher = doa.Doa(cfg)
+    out = [searcher.process(bins[0][h], bins[1][h], bool(update[h])) for h in range(len(update))]
+    fields = (
+        cfg.spacing_m,
+        cfg.speed_of_sound_m_s,
+        cfg.band_min_hz,
+        cfg.band_max_hz,
+        cfg.grid_step_deg,
+        cfg.smooth_tau_s,
+    )
+    return {
+        "config": np.array(fields, dtype=np.float32),
+        "bins0": _pairs(bins[0]),
+        "bins1": _pairs(bins[1]),
+        "update": update.astype(np.uint8),
+        "angle": np.array([o.angle_deg for o in out], dtype=np.int32),
+        "confidence": np.array([o.confidence for o in out], dtype=np.uint8),
+    }
+
+
+def _doa_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray, doa.DoaConfig]]:
+    """(two channels, update flags, configuration): noise from 30 deg searched every second hop; a voice moving from
+    150 to 70 deg over the full band on a 3 deg grid; noise at 100 deg under a louder voice at 20 deg on a 4 deg grid,
+    whose angles have no middle; silence, then noise from the ch1 end."""
+    n = DOA_HOPS * grid.HOP_SAMPLES
+    every = np.arange(DOA_HOPS)
+    moving = np.concatenate(
+        [plane_wave(speechlike(rng, n, 0.3), 150.0)[: n // 2], plane_wave(speechlike(rng, n, 0.3), 70.0)[n // 2 :]]
+    )
+    late = np.zeros((n, 2))
+    late[DOA_SILENT_HOPS * grid.HOP_SAMPLES :] = plane_wave(rng.uniform(-0.3, 0.3, n), 0.0)[
+        DOA_SILENT_HOPS * grid.HOP_SAMPLES :
+    ]
+    base = doa.DoaConfig()
+    return [
+        (
+            plane_wave(rng.uniform(-0.3, 0.3, n), 30.0) + 0.01 * rng.standard_normal((n, 2)),
+            (every >= 4) & (every % 2 == 0),
+            base,
+        ),
+        (moving, np.ones(DOA_HOPS, dtype=bool), replace(base, band_min_hz=0.0, band_max_hz=8000.0, grid_step_deg=3.0)),
+        (
+            plane_wave(rng.uniform(-0.1, 0.1, n), 100.0) + plane_wave(speechlike(rng, n, 0.4), 20.0),
+            every % 3 == 0,
+            replace(base, band_min_hz=300.0, band_max_hz=3000.0, grid_step_deg=4.0, smooth_tau_s=0.1),
+        ),
+        (late, np.ones(DOA_HOPS, dtype=bool), base),
+    ]
+
+
+def emit_doa(root: Path) -> list[Path]:
+    """Four cases, then a negative control whose angles sit one grid step off."""
+    rng = np.random.default_rng(SEED + 9)
+    written = []
+    for index, (pair, update, cfg) in enumerate(_doa_inputs(rng)):
+        path = root / "doa" / f"case_{index:03d}.gold"
+        write_gold(path, doa_case(pair, update, cfg))
+        written.append(path)
+    n = DOA_HOPS * grid.HOP_SAMPLES
+    negative = doa_case(plane_wave(rng.uniform(-0.3, 0.3, n), 60.0), np.ones(DOA_HOPS, dtype=bool), doa.DoaConfig())
+    known = negative["angle"] != doa.ANGLE_UNKNOWN_DEG
+    negative["angle"][known] += round(afe.DOA_GRID_STEP_DEG)
+    path = root / "doa" / "case_neg_000.gold"
+    write_gold(path, negative)
+    written.append(path)
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
     emitted = emit_stft(args.out) + emit_mel(args.out) + emit_chain(args.out) + emit_chain_modules(args.out)
     emitted += emit_hpf(args.out) + emit_balance(args.out) + emit_vad(args.out) + emit_agc(args.out)
+    emitted += emit_doa(args.out)
     for path in emitted + emit_ns_omlsa(args.out):
         print(path.relative_to(args.out) if path.is_relative_to(args.out) else path)
     return 0
