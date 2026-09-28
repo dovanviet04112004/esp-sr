@@ -110,6 +110,24 @@ hôm ấy (`srhost.score --shift`, `balance` của board, `ns` sàn, `vad` mức
 
 Ở dịch 14 chuỗi đã mất tiếng nhỏ và tiếng 3 m. Đó là lý do đổi lấy 6 dB dư trần.
 
+### Hướng từ bản phát loa (28/09, E8-T1)
+
+`host/plans/playback.tsv`: `interim/playback/vivos_test.wav` phát từ loa điện thoại cách tâm dàn 1 m, cao ngang board, ở
+năm hướng; `srhost.score` đo trễ GCC-PHAT `tau = t0 − t1` theo mẫu 16 kHz. Hợp đồng `array.yaml` (44,4 mm) cho ±2,10 mẫu ở
+hai đầu dàn. Góc suy ra bằng `arccos(tau / 2,10)`.
+
+| Phiên | Loa ở | `tau` đo | `tau` hợp đồng | Góc suy ra | Dấu |
+|---|---|---|---|---|---|
+| `20260928_home_040` | 90° | −0,50 | 0,00 | ~104° | không xét gần chính diện |
+| `20260928_home_041` | 0° (lỗ B, `ch1`) | +1,81 | +2,10 | ~31° | đúng |
+| `20260928_home_042` | 45° | +0,97 | +1,48 | ~62° | đúng |
+| `20260928_home_043` | 180° (lỗ A, `ch0`) | −2,62 | −2,10 | 180° | đúng |
+| `20260928_home_044` | 135° | −1,13 | −1,48 | ~123° | đúng |
+
+Dấu đúng ở cả bốn hướng xét được. Góc lệch 12–18° ở các hướng chéo: vang của phòng, loa đặt bằng tay, và trễ còn dò trên
+số nguyên mẫu. Dò lưới 2° của `doa` (E8-T1) sẽ chấm lại trên chính các phiên này. Phiên 043 và 044 đặt loa ngược thứ tự
+kịch bản; nhãn đã sửa theo chỗ loa thật, và `tau` xác nhận nhãn mới.
+
 ## 3. Hiệu chuẩn `balance` (E2-T6)
 
 | Lần | Chênh biên độ sau bù lớn nhất dB | Chênh pha sau bù lớn nhất ° | Nhiệt độ phòng | Ngày |
