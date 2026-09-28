@@ -4,6 +4,7 @@ spread over the files, and a rendered clip passes only when its own text is hear
 from __future__ import annotations
 
 import io
+import json
 from collections import Counter
 from pathlib import Path
 
@@ -120,3 +121,15 @@ def test_a_rerun_makes_only_the_missing_clips_and_hears_them_all(tmp_path: Path,
     (tmp_path / "b.wav").unlink()
     rows, made = render_with_fakes(requests, heard, tmp_path, monkeypatch)
     assert made == ["b"] and [r["id"] for r in rows] == ["a", "b", "c"]
+
+
+def test_a_batch_reaches_the_engine_one_voice_at_a_time(tmp_path: Path, monkeypatch) -> None:
+    requests = [
+        {"id": f"{v}{n}", "text": "x", "out": "o", **({"ref_audio": v} if v != "p" else {"voice": "p"})}
+        for n in range(3)
+        for v in ("b", "a", "p")
+    ]
+    monkeypatch.setattr(engines, "run", lambda *a, **k: "")
+    engines.synthesise("f5", requests, {"engines": {"f5": {"checkpoint": "c", "vocoder": "v"}}}, tmp_path, tmp_path)
+    sent = [json.loads(line)["id"] for line in (tmp_path / "f5_requests.jsonl").read_text().splitlines()]
+    assert sent == ["a0", "a1", "a2", "b0", "b1", "b2", "p0", "p1", "p2"]

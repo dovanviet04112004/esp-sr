@@ -40,7 +40,8 @@ def presets(engine: str, tts: dict, cache: Path) -> list[dict]:
 def synthesise(engine: str, requests: list[dict], tts: dict, work: Path, cache: Path) -> None:
     """Write each request's clip to its out path; the keys a request carries are those of ml/tts/<engine>/run.py."""
     listing = work / f"{engine}_requests.jsonl"
-    write_jsonl(listing, requests)
+    # One voice back to back: VieNeu enrolls a reference on the CPU and keeps only the last 32 (REF_CACHE_MAX).
+    write_jsonl(listing, sorted(requests, key=lambda r: r.get("ref_audio") or r.get("voice") or ""))
     run(engine, *engine_args(engine, tts), str(listing), cache=cache)
 
 
