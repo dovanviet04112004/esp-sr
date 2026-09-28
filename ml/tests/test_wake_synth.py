@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 
 from srpipe.core.config import load_yaml
 from srpipe.tasks.wake import CONFIG, candidates, synth
@@ -25,7 +26,8 @@ def test_positives_ask_every_engine_for_every_voice_text_seed_and_speed(tmp_path
     spec = cfg["synth"][which]
     requests = synth.positive_requests(cfg, spec, PRESETS, refs(tmp_path), tmp_path)
     vieneu, f5 = spec["vieneu"], spec["f5"]
-    assert len(requests["vieneu"]) == len(vieneu["texts"]) * (len(PRESETS) * len(vieneu["seeds"]) + 3)
+    voices = len(PRESETS) * len(vieneu["preset_seeds"]) + 3 * len(vieneu["clone_seeds"])
+    assert len(requests["vieneu"]) == len(vieneu["texts"]) * voices
     assert len(requests["f5"]) == len(f5["texts"]) * 3 * len(f5["seeds"]) * len(f5["speeds"])
     for reqs in requests.values():
         assert len({r["id"] for r in reqs}) == len({r["out"] for r in reqs}) == len(reqs)
@@ -33,6 +35,7 @@ def test_positives_ask_every_engine_for_every_voice_text_seed_and_speed(tmp_path
     assert {r["speed"] for r in requests["f5"]} == set(f5["speeds"])
     assert all(r["ref_text"].startswith("câu của") for r in requests["f5"])
     assert {r["speaker"] for r in requests["vieneu"]} == {"Một", "Hai", "Ba", "A", "B", "C"}
+    assert all(r["say"] == cfg["word"] for reqs in requests.values() for r in reqs)
 
 
 def test_a_positive_that_is_not_the_wake_word_is_refused(tmp_path: Path) -> None:
@@ -65,13 +68,44 @@ def test_negatives_come_neighbours_first_then_openings_then_the_hand_picked(tmp_
 
 def test_each_negative_is_read_by_distinct_voices(tmp_path: Path) -> None:
     cfg = load_yaml(CONFIG)
-    spec = cfg["synth"]["negatives"]
-    spec["voices"] = {"vieneu": 4, "f5": 2}
+    cfg["synth"]["negatives"]["voices"] = {"vieneu": 4, "f5": 2}
     texts = ["chào mi", "mi na ơi"]
-    requests = synth.negative_requests(spec, texts, PRESETS, refs(tmp_path), np.random.default_rng(0), tmp_path)
+    requests = synth.negative_requests(cfg, texts, PRESETS, refs(tmp_path), np.random.default_rng(0), tmp_path)
     assert len(requests["vieneu"]) == 4 * len(texts) and len(requests["f5"]) == 2 * len(texts)
     for reqs in requests.values():
         assert len({r["id"] for r in reqs}) == len(reqs)
         for text in texts:
             assert len({r["speaker"] for r in reqs if r["text"] == text}) == sum(r["text"] == text for r in reqs)
     assert all(r["speed"] == 1.0 and r["seed"] == 0 for r in requests["f5"])
+    assert all(r["rivals"] == [cfg["word"]] and "say" not in r for reqs in requests.values() for r in reqs)
+
+
+def clip(n: int, passed: bool, margin: float, rival: float, sha: str) -> dict:
+    return {
+        "engine": "e",
+        "id": f"clone_{n}",
+        "passed": passed,
+        "margin": margin,
+        "rivals": {"chào mi na": rival},
+        "sha256": sha,
+    }
+
+
+def test_the_threshold_lets_the_configured_share_of_near_misses_pass_and_no_clip_repeats(tmp_path: Path) -> None:
+    cfg = load_yaml(CONFIG)
+    cfg["synth"]["false_accept"] = 0.1
+    negatives = [clip(n, True, 0.0, float(n + 1), f"n{n}") for n in range(10)]
+    negatives += [clip(10, False, 3.0, 0.5, "n10"), clip(11, True, 0.0, 9.5, "n9")]
+    positives = [clip(0, True, 0.0, 0.0, "p0"), clip(1, False, 1.5, 0.0, "p1"), clip(2, False, 4.0, 0.0, "p2")]
+    positives += [clip(3, True, 0.0, 0.0, "p0")]
+    for name, rows in (("positives", positives), ("negatives", negatives)):
+        (tmp_path / synth.SETS[name]).mkdir()
+        synth.write_manifest(tmp_path / synth.SETS[name], {"clips": rows})
+    margin = synth.select(cfg, tmp_path)
+    assert margin == pytest.approx(2.0)
+    kept = {
+        s: [c["kept"] for c in yaml.safe_load((tmp_path / synth.SETS[s] / "manifest.yaml").read_text())["clips"]]
+        for s in synth.SETS_KEPT
+    }
+    assert kept["positives"] == [True, True, False, False]
+    assert kept["negatives"] == [False, False, *[True] * 8, False, False]

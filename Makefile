@@ -67,8 +67,9 @@ eval-ns: ## Score the ns floor on VIVOS scenes: noise and speech lost, SNR gaine
 eval-tts: ## Compare the desktop TTS engines on the wake word, every clip heard back by PhoWhisper (docs/measurements/tts_engines.md)
 	cd ml && uv run python -m srpipe.tasks.wake.synth pilot
 
-wake-synth: ## Synthesise the wake positives and near-miss negatives (E11-T7); a rerun makes only the missing clips
-	cd ml && uv run python -m srpipe.tasks.wake.synth positives && uv run python -m srpipe.tasks.wake.synth negatives
+wake-synth: ## Synthesise the wake positives and near-miss negatives, then keep what the checker allows (E11-T7)
+	cd ml && uv run python -m srpipe.tasks.wake.synth positives && uv run python -m srpipe.tasks.wake.synth negatives \
+	  && uv run python -m srpipe.tasks.wake.synth select
 
 measure: ## Merge bench CSVs into docs/measurements/budget.md
 	python3 -m tools.budget
