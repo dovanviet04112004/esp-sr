@@ -36,7 +36,7 @@
 
 ## 2b. Trên bản thu thật qua board B (28/09)
 
-`srhost.score` trên các phiên của `host/plans/levels.tsv`, `noisy.tsv` và một phiên nền phòng, board B trong vỏ, ở nhà,
+`srhost.score` trên các phiên của `host/plans/levels.tsv` và `noisy.tsv`, board B trong vỏ, ở nhà,
 `pcm_shift` 13. Chuỗi sản phẩm tới trước `agc` (`hpf`, `balance` của board, `ns_omlsa` sàn −12 dB, `vad` mức 2) chạy hai
 lần, có và không có `ns`. Mỗi bước lấy mức vào `agc` không `ns` trừ mức có `ns`, tách theo `vad` của chuỗi có `ns`.
 Ô là trung vị của phần chênh ấy. Không có bản sạch để so, nên "tiếng nói mất" gồm cả phần nhiễu nằm chung vạch với lời.
@@ -51,16 +51,13 @@ lần, có và không có `ns`. Mỗi bước lấy mức vào `agc` không `ns`
 | `20260928_home_009` | đọc 1 m, quạt chạy | −81 / −77 / −49 | 57 % | 12 dB | 1 dB |
 | `20260928_home_010` | nhạc không lời, không ai nói, 60 s | −76 / −68 / −58 | 1,1 % | **4 dB** | – |
 | `20260928_home_011` | đọc 1 m, nhạc nền | −70 / −55 / −45 | 81 % | **4 dB** | 0 dB |
-| `20260928_home_046` | nền phòng, cửa mở ra đường, 4,4 phút | −76 / −65 / −37 | 56 % | 11 dB | 1 dB |
 
-- Nhiễu dừng của phòng, của đường phố và quạt xuống 11–12 dB ở quãng nghỉ, chạm sàn. Tiếng nói mất tối đa 1 dB, như trên
+- Nhiễu dừng của phòng và quạt xuống 11–12 dB ở quãng nghỉ, chạm sàn. Tiếng nói mất tối đa 1 dB, như trên
   cảnh VIVOS (§1).
 - Nhạc chỉ xuống 4 dB: nó đổi nhanh hơn cực tiểu trượt ~1 s mà OM-LSA học nhiễu, nên bị coi là tiếng nói. Đây là chỗ
   bản mạng E9-T4 phải hơn sàn.
 - Quạt đặt quá xa. Mức micro của `home_008` bằng đúng phòng yên (`ch0` −63,1 dBFS cả hai), nên phiên này chưa thử được
   nhiễu quạt. Cần thu lại với quạt gần board.
-- `home_046` gắn nhãn "không người nói", nhưng `vad` bật ở 56 % số bước và p90 lên −37 dBFS, gần mức đọc ở 1 m. Chưa rõ
-  là tiếng xe hay tiếng người, cần người thu xác nhận.
 
 ## 3. Độ trung thành với `omlsa.m`
 
