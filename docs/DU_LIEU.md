@@ -19,6 +19,9 @@ Dữ liệu đã tải và đã xử lí — số đo trên đĩa, không phải
 | DEMAND, 16 kHz | `ns`, nhiễu của đường mô phỏng board | CC BY 4.0 (bản ghi Zenodo) | 1,42 mỗi kênh: 17 môi trường × 5 phút, 16 kênh | — | 27/09 | md5 từng môi trường (`manifests/noise/demand.yaml`) | ở `raw/noise/demand` |
 | OpenSLR 28 (RIRS_NOISES) | tăng cường vang, đường mô phỏng board | Apache 2.0 | 325 RIR thật, 60 000 RIR mô phỏng; nhiễu nguồn điểm 5,91 (843 tệp), 92 nhiễu đẳng hướng | — | 27/09 | `3b50cfde…` (`manifests/rir/openslr28.yaml`) | ở `raw/rir/openslr28` |
 | Speech Commands v0.02, chỉ `_background_noise_` | nhiễu của cảnh `vad` | CC BY 4.0 | 0,11 | — | 07/09, vào `raw/` 27/09 | cây `ded5bbb6…` (`manifests/noise/speech_commands.yaml`) | ở `raw/noise/speech_commands` |
+| Tiếng tổng hợp VieNeu-TTS v3 Turbo, codec MOSS-Audio-Tokenizer-Nano | dương `wake` (E11-T7), tiếng nguồn `synth` (KẾ HOẠCH §3.13); không bao giờ vào tập thử | Apache 2.0 cả hai | sinh theo lệnh | 25 giọng có sẵn, giọng nhân bản | 28/09 | ghim `repo@revision` ở `ml/configs/common/tts.yaml` | pilot 60 mẩu (`measurements/tts_engines.md`); chưa sinh bộ đủ |
+| Tiếng tổng hợp F5-TTS ViVoice, vocoder vocos-mel-24khz | như trên | CC BY-NC-SA 4.0, **phi thương mại**; vocos MIT | sinh theo lệnh | giọng nhân bản | 28/09 | như trên | pilot 15 mẩu; chưa sinh bộ đủ |
+| PhoWhisper-large (VinAI) | nghe lại mọi mẩu tổng hợp, mẩu không qua thì bỏ | BSD-3-Clause | — | — | 28/09 | như trên | đang dùng |
 | Thu qua board | `wake`, lệnh, tập thử | của dự án, có phiếu đồng ý | | | | | chưa thu |
 
 Trên máy còn hai kho tải từ trước cho dự án khác, **chưa nhập** vào `raw/`: LibriSpeech `dev-clean`, `test-clean`, `train-clean-100` (tiếng Anh, CC BY 4.0, 7 GB) và phần lời của Speech Commands (tiếng Anh, CC BY 4.0). Nhập kho nào thì theo đúng cách của VIVOS: chép nguyên vào `raw/`, manifest có sha256 cây, một dòng ở bảng trên.
