@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from srpipe.dsp.afe import agc, balance, chain, doa, hpf, ns_omlsa, vad
+from srpipe.dsp.afe import agc, balance, chain, doa, gsc, hpf, ns_omlsa, vad
 from srpipe.dsp.spec import mel, stft
 from srpipe.generated import afe, array, grid
 from srpipe.golden.gold import write_gold
@@ -41,6 +41,8 @@ NS_SILENT_LEAD_HOPS = 20
 NS_BURST_HOPS = 40
 DOA_HOPS = 64
 DOA_SILENT_HOPS = 16
+GSC_HOPS = 64
+GSC_LEARN_HOPS = 16
 LSB = 1.0 / 32768.0
 MEL_CASES = (
     (mel.MelConfig(n_bands=40, f_min_hz=20.0, f_max_hz=7600.0, log_floor=1e-6), 13),
@@ -617,13 +619,78 @@ def emit_doa(root: Path) -> list[Path]:
     return written
 
 
+def gsc_case(pair: np.ndarray, angle: np.ndarray, adapt: np.ndarray, cfg: gsc.GscConfig) -> dict[str, np.ndarray]:
+    """Both channels' bins, the steering angle and learning flag of each hop, the configuration; the output bins."""
+    bins = [stft.analyze_signal(pair[:, m].astype(np.float32)) for m in range(array.N_MICS)]
+    canceller = gsc.Gsc(cfg)
+    out = np.stack(
+        [canceller.process(bins[0][h], bins[1][h], float(angle[h]), bool(adapt[h])) for h in range(len(adapt))]
+    )
+    return {
+        "config": np.array(
+            [cfg.spacing_m, cfg.speed_of_sound_m_s, cfg.step_size, cfg.leakage, cfg.weight_max], dtype=np.float32
+        ),
+        "bins0": _pairs(bins[0]),
+        "bins1": _pairs(bins[1]),
+        "angle": angle.astype(np.float32),
+        "adapt": adapt.astype(np.uint8),
+        "out": _pairs(out),
+    }
+
+
+def _gsc_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray, np.ndarray, gsc.GscConfig]]:
+    """(two channels, angle and learning flag per hop, configuration): a voice at 90 deg under noise from 30 deg, the
+    weights learning while it pauses; a steer sweeping 60 to 120 deg under a 1.0 cap and a large leak; a voice at 150
+    deg under noise from 20 deg with a large step; silence, then noise, learning throughout."""
+    n = GSC_HOPS * grid.HOP_SAMPLES
+    hops = np.arange(GSC_HOPS)
+    voice = speechlike(rng, n, 0.3)
+    pauses = (hops < GSC_LEARN_HOPS) | (hops % 4 == 0)
+    late = np.zeros((n, 2))
+    late[n // 2 :] = plane_wave(rng.uniform(-0.3, 0.3, n), 50.0)[n // 2 :]
+    base = gsc.GscConfig()
+    return [
+        (plane_wave(voice, 90.0) + plane_wave(rng.uniform(-0.2, 0.2, n), 30.0), np.full(GSC_HOPS, 90.0), pauses, base),
+        (
+            plane_wave(rng.uniform(-0.2, 0.2, n), 45.0) + plane_wave(speechlike(rng, n, 0.2), 100.0),
+            60.0 + 60.0 * hops / (GSC_HOPS - 1),
+            np.ones(GSC_HOPS, dtype=bool),
+            replace(base, weight_max=1.0, leakage=0.01),
+        ),
+        (
+            plane_wave(speechlike(rng, n, 0.3), 150.0) + plane_wave(rng.uniform(-0.3, 0.3, n), 20.0),
+            np.full(GSC_HOPS, 150.0),
+            hops % 2 == 0,
+            replace(base, step_size=0.2),
+        ),
+        (late, np.full(GSC_HOPS, 90.0), np.ones(GSC_HOPS, dtype=bool), base),
+    ]
+
+
+def emit_gsc(root: Path) -> list[Path]:
+    """Four cases, then a negative control whose output comes from weights that never learn."""
+    rng = np.random.default_rng(SEED + 10)
+    written = []
+    for index, (pair, angle, adapt, cfg) in enumerate(_gsc_inputs(rng)):
+        path = root / "gsc" / f"case_{index:03d}.gold"
+        write_gold(path, gsc_case(pair, angle, adapt, cfg))
+        written.append(path)
+    pair, angle, adapt, cfg = _gsc_inputs(rng)[0]
+    negative = gsc_case(pair, angle, adapt, cfg)
+    negative["out"] = gsc_case(pair, angle, np.zeros_like(adapt), cfg)["out"]
+    path = root / "gsc" / "case_neg_000.gold"
+    write_gold(path, negative)
+    written.append(path)
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
     emitted = emit_stft(args.out) + emit_mel(args.out) + emit_chain(args.out) + emit_chain_modules(args.out)
     emitted += emit_hpf(args.out) + emit_balance(args.out) + emit_vad(args.out) + emit_agc(args.out)
-    emitted += emit_doa(args.out)
+    emitted += emit_doa(args.out) + emit_gsc(args.out)
     for path in emitted + emit_ns_omlsa(args.out):
         print(path.relative_to(args.out) if path.is_relative_to(args.out) else path)
     return 0

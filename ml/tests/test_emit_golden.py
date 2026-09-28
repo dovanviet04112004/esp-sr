@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from srpipe.dsp import emit_golden
-from srpipe.dsp.afe import balance, chain, doa, ns_omlsa
+from srpipe.dsp.afe import balance, chain, doa, gsc, ns_omlsa
 from srpipe.dsp.spec import mel, stft
 from srpipe.generated import afe, grid
 from srpipe.golden.gold import read_gold
@@ -203,3 +203,25 @@ def test_the_doa_negative_control_is_one_grid_step_off() -> None:
     known = np.array(right) != doa.ANGLE_UNKNOWN_DEG
     assert known.any()
     np.testing.assert_array_equal(case["angle"][known] - np.array(right)[known], round(afe.DOA_GRID_STEP_DEG))
+
+
+def test_committed_gsc_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_gsc(tmp_path):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
+
+
+def test_the_gsc_negative_control_comes_from_weights_that_never_learn() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "gsc" / "case_neg_000.gold")
+    cfg = gsc.GscConfig(*[float(v) for v in case["config"]])
+    bins = [case[f"bins{m}"][..., 0] + 1j * case[f"bins{m}"][..., 1] for m in range(2)]
+    hops = range(len(case["adapt"]))
+
+    def output(learn: bool) -> np.ndarray:
+        canceller = gsc.Gsc(cfg)
+        adapt = case["adapt"].astype(bool) & learn
+        y = np.stack([canceller.process(bins[0][h], bins[1][h], float(case["angle"][h]), bool(adapt[h])) for h in hops])
+        return np.stack([y.real, y.imag], axis=-1)
+
+    np.testing.assert_array_equal(case["out"], output(learn=False))
+    assert np.abs(case["out"] - output(learn=True)).max() > 1.0

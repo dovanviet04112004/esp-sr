@@ -1,0 +1,7 @@
+# C dsp_afe gsc against srpipe.dsp.afe.gsc (KEHOACH 3.7, E8-T2). Both steer, beam, block and learn in float32 in the
+# same order; the steering phasors come from double series and the NLMS division and the cap from the Newton forms
+# (ADR-0006): the output bins match bit for bit. case_neg_* has weights that never learn.
+tensors:
+  out:
+    max_abs: 1.0e-6
+    min_snr_db: 120.0
