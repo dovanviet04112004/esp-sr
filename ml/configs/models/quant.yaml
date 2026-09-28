@@ -1,0 +1,10 @@
+# The quantisation ladder of KEHOACH 3.14 for ESP-PPQ: rungs 1 and 2 by default, each branch overriding what it measured.
+default:
+  equalization: {iterations: 4, value_threshold: 0.4, opt_level: 2}   # measured on face attendance; each branch re-measures
+  bias_correction: true
+  calibration: kl                  # minmax, percentile, mse or kl
+  int16_ops: []                    # rung 3: ESP-PPQ operation names quantised w8a16
+branches:
+  ns: {}
+  wake: {}
+  command: {}

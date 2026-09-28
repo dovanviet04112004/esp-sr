@@ -15,9 +15,13 @@ import numpy as np
 import torch
 from torch import nn
 
+from srpipe.core.config import CONFIGS, deep_merge, load_yaml
+
 TARGET = "esp32s3"
 BITS = 8
+WIDE_BITS = 16
 INT8_MIN, INT8_MAX = -128, 127
+LADDER = CONFIGS / "models" / "quant.yaml"
 
 
 @dataclass(frozen=True)
@@ -30,8 +34,34 @@ class Io:
     output_exponent: int
 
 
-def quantize(model: nn.Module, calib: list[torch.Tensor], work: Path):
-    """The quantised ESP-PPQ graph of model, calibrated on batches of one shaped like calib[0]; work keeps the ONNX."""
+def ladder(branch: str) -> dict:
+    """The branch's rungs of configs/models/quant.yaml over the default ones (KEHOACH 3.14)."""
+    cfg = load_yaml(LADDER)
+    return deep_merge(cfg["default"], cfg["branches"][branch])
+
+
+def setting_of(rungs: dict):
+    """The ESP-PPQ setting for esp-dl that rungs describe: equalization, bias correction, calibration, int16 layers."""
+    from esp_ppq.api.espdl_interface import get_target_platform
+    from esp_ppq.api.setting import QuantizationSettingFactory
+
+    setting = QuantizationSettingFactory.espdl_setting(BITS)
+    equalization = rungs["equalization"]
+    setting.equalization = equalization is not None
+    if equalization is not None:
+        setting.equalization_setting.iterations = equalization["iterations"]
+        setting.equalization_setting.value_threshold = equalization["value_threshold"]
+        setting.equalization_setting.opt_level = equalization["opt_level"]
+    setting.bias_correct = rungs["bias_correction"]
+    setting.quantize_activation_setting.calib_algorithm = rungs["calibration"]
+    for op in rungs["int16_ops"]:
+        setting.dispatching_table.append(op, get_target_platform(TARGET, WIDE_BITS))
+    return setting
+
+
+def quantize(model: nn.Module, calib: list[torch.Tensor], work: Path, rungs: dict):
+    """The quantised ESP-PPQ graph of model under rungs, calibrated on batches of one shaped like calib[0]; work keeps
+    the ONNX."""
     from esp_ppq.api import espdl_quantize_torch
 
     work.mkdir(parents=True, exist_ok=True)
@@ -44,6 +74,7 @@ def quantize(model: nn.Module, calib: list[torch.Tensor], work: Path):
         target=TARGET,
         num_of_bits=BITS,
         collate_fn=lambda batch: batch.to("cpu"),
+        setting=setting_of(rungs),
         device="cpu",
         error_report=False,
         skip_export=True,

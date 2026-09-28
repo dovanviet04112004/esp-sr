@@ -48,7 +48,8 @@ def probe(cfg: dict, out: Path, work: Path) -> tuple[Path, Path]:
     def draw() -> np.ndarray:
         return rng.normal(p["input_mean"], p["input_std"], shape).astype(np.float32)
 
-    graph = ptq_espdl.quantize(model, [torch.from_numpy(draw()) for _ in range(p["calib_sequences"])], work)
+    calib = [torch.from_numpy(draw()) for _ in range(p["calib_sequences"])]
+    graph = ptq_espdl.quantize(model, calib, work, ptq_espdl.ladder("wake"))
     io = ptq_espdl.io_of(graph)
     x_int8 = ptq_espdl.to_int8(draw(), io.input_exponent)
     x = x_int8.astype(np.float32) * np.float32(2.0**io.input_exponent)
