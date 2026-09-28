@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
+from srpipe.core import screen
 from srpipe.core.audio_io import read_wav
 from srpipe.core.config import data_paths, deep_merge, load_config
 from srpipe.dsp.afe import hpf, ns_omlsa
@@ -110,8 +111,8 @@ def _score(job: tuple[int, str, float, float, dict, dict]) -> NsResult:
     return NsResult(noise_name, snr_db, figures(shadow(speech, looped, omlsa_gains()), labels, settle))
 
 
-def evaluate(cfg: dict, raw_root: Path, workers: int) -> list[NsResult]:
-    files = vad_scenes.scene_files(cfg, raw_root)
+def evaluate(cfg: dict, raw_root: Path, workers: int, rejected: dict[str, str]) -> list[NsResult]:
+    files = vad_scenes.scene_files(cfg, raw_root, rejected)
     conditions = product(files["noise"], cfg["snr_db"], cfg["level_dbfs"])
     jobs = [(i, n, s, lv, cfg, files) for i, (n, s, lv) in enumerate(conditions)]
     with ProcessPoolExecutor(max_workers=workers) as pool:
@@ -149,7 +150,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("overrides", nargs="*", help="a.b=value overrides of configs/afe/ns_omlsa.yaml")
     args = parser.parse_args(argv)
     cfg = deep_merge(load_config("afe/vad")["eval"], load_config("afe/ns_omlsa", overrides=args.overrides)["eval"])
-    print(table(evaluate(cfg, data_paths()["raw"], args.workers), cfg))
+    paths = data_paths()
+    print(table(evaluate(cfg, paths["raw"], args.workers, screen.rejected(paths["interim"])), cfg))
     return 0
 
 

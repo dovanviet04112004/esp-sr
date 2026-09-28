@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
+from srpipe.core import screen
 from srpipe.core.audio_io import read_wav
 from srpipe.core.config import data_paths, load_config
 from srpipe.dsp.afe import vad
@@ -119,10 +120,10 @@ def pick_utterances(files: list[str], cfg: dict, rng: np.random.Generator) -> li
     return utterances
 
 
-def scene_files(cfg: dict, raw_root: Path) -> dict:
-    """Every speech file and every noise, by name, that cfg points to under raw/."""
-    speech = sorted(str(p) for p in (raw_root / cfg["speech"]).glob("*/*.wav"))
-    noise = {p.stem: str(p) for p in sorted((raw_root / cfg["noise"]).glob("*.wav"))}
+def scene_files(cfg: dict, raw_root: Path, rejected: dict[str, str]) -> dict:
+    """Every speech file and every noise, by name, that cfg points to under raw/ and screening kept."""
+    speech = [str(p) for p in screen.kept(raw_root, sorted((raw_root / cfg["speech"]).glob("*/*.wav")), rejected)]
+    noise = {p.stem: str(p) for p in screen.kept(raw_root, sorted((raw_root / cfg["noise"]).glob("*.wav")), rejected)}
     if not speech or not noise:
         raise FileNotFoundError(
             f"no speech under {raw_root / cfg['speech']} or no noise under {raw_root / cfg['noise']}"
@@ -140,8 +141,8 @@ def _score_scene(job: tuple[int, str, float, float, dict, dict]) -> SceneResult:
     return SceneResult(scene, raws, hop_energy_db(scene.signal))
 
 
-def evaluate(cfg: dict, raw_root: Path, workers: int) -> list[SceneResult]:
-    files = scene_files(cfg, raw_root)
+def evaluate(cfg: dict, raw_root: Path, workers: int, rejected: dict[str, str]) -> list[SceneResult]:
+    files = scene_files(cfg, raw_root, rejected)
     conditions = list(product(files["noise"], cfg["snr_db"], cfg["level_dbfs"]))
     jobs = [(i, n, s, lv, cfg, files) for i, (n, s, lv) in enumerate(conditions)]
     with ProcessPoolExecutor(max_workers=workers) as pool:
@@ -199,7 +200,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("overrides", nargs="*", help="a.b=value overrides of configs/afe/vad.yaml")
     args = parser.parse_args(argv)
     cfg = load_config("afe/vad", overrides=args.overrides)["eval"]
-    results = evaluate(cfg, data_paths()["raw"], args.workers)
+    paths = data_paths()
+    results = evaluate(cfg, paths["raw"], args.workers, screen.rejected(paths["interim"]))
     print("Kéo dài 240 ms, như dsp_afe:\n")
     print(table(results, cfg))
     print("\nQuyết định thô, không kéo dài:\n")

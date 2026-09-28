@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 import yaml
 
+from srpipe.core import screen
 from srpipe.core.audio_io import write_wav
 from srpipe.core.config import CONFIGS, load_yaml
 from srpipe.generated import array, grid
@@ -143,8 +144,17 @@ def split_file(path: Path, raw: Path, origin: str = "public") -> Path:
     return path
 
 
+def screened(interim: Path, *rejected: str) -> Path:
+    """interim with the rejects.tsv make screen would write, listing rejected."""
+    rows = [{"item": item, "corpus": "-", "reason": "silent", "seconds": 1.0} for item in rejected]
+    screen.write_tsv(interim / "screen" / "rejects.tsv", screen.REJECT_FIELDS, rows)
+    return interim
+
+
 def test_the_same_seed_writes_the_same_shards_and_items_line_up(raw_root: Path, tmp_path: Path) -> None:
     split = split_file(tmp_path / "train.txt", raw_root)
+    for interim in ("interim", "interim_again"):
+        screened(tmp_path / interim)
     first = device.build(tiny(), split, raw_root, tmp_path / "interim", tmp_path / "a", workers=2)
     second = device.build(tiny(), split, raw_root, tmp_path / "interim_again", tmp_path / "b", workers=1)
     assert yaml.safe_load(first.read_text()) == yaml.safe_load(second.read_text())
@@ -167,3 +177,13 @@ def test_board_recordings_are_refused(raw_root: Path, tmp_path: Path) -> None:
     split = split_file(tmp_path / "test.txt", raw_root, origin="board")
     with pytest.raises(ValueError, match="clean speech"):
         device.build(tiny(), split, raw_root, tmp_path / "interim", tmp_path / "out")
+
+
+def test_screening_rejects_leave_the_noise_pools_and_refuse_a_split(raw_root: Path, tmp_path: Path) -> None:
+    write_wav(raw_root / "noise" / "hum" / "zero.wav", np.zeros(FS))
+    assert device.noise_files(tiny(), raw_root, set()) == [["noise/hum/hum.wav", "noise/hum/zero.wav"]]
+    assert device.noise_files(tiny(), raw_root, {"noise/hum/zero.wav"}) == [["noise/hum/hum.wav"]]
+    split = split_file(tmp_path / "train.txt", raw_root)
+    interim = screened(tmp_path / "interim", split.read_text().split("\t")[0])
+    with pytest.raises(ValueError, match="screening rejected"):
+        device.build(tiny(), split, raw_root, interim, tmp_path / "out")

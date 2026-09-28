@@ -296,6 +296,11 @@ def audit(cfg: dict, paths: dict) -> list[str]:
     return lines
 
 
+def kept(raw: Path, files: list[Path], rejected: set[str] | dict[str, str]) -> list[Path]:
+    """The files under raw whose item screening did not reject, in their order."""
+    return [f for f in files if str(f.relative_to(raw)) not in rejected]
+
+
 def rejected(interim: Path) -> dict[str, str]:
     """Every rejected item and its reason, from the last judge run."""
     listing = interim / "screen" / "rejects.tsv"

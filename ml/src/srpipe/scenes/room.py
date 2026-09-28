@@ -20,6 +20,7 @@ import numpy as np
 import pyroomacoustics as pra
 import yaml
 
+from srpipe.core import screen
 from srpipe.core.audio_io import read_wav, write_wav
 from srpipe.core.config import CONFIGS, data_paths, load_yaml
 from srpipe.generated import array, grid
@@ -161,24 +162,28 @@ def noise_piece(files: list[Path], rng: np.random.Generator, n: int) -> tuple[np
     return np.resize(x[start:], n), f"{path.parent.name}/{path.name}"
 
 
-def build_scene(cfg: dict, raw_root: Path, index: int) -> dict:
-    """Scene index of the set: its signals and its labels, the same for the same seed and index."""
+def build_scene(cfg: dict, raw_root: Path, index: int, rejected: set[str]) -> dict:
+    """Scene index of the set, from files screening kept: its signals and its labels, the same for the same seed and
+    index."""
     rt60_s, kind, snr_db = combinations(cfg)[index % len(combinations(cfg))]
     rng = np.random.default_rng([cfg["seed"], index])
     n = round(cfg["duration_s"] * FS)
     speakers = sorted(p for p in (raw_root / cfg["speech"]).iterdir() if p.is_dir())
     who = rng.permutation(len(speakers))
-    talker_dry, utterances = talk(sorted(speakers[who[0]].glob("*.wav")), cfg, rng, n)
+    talker_dry, utterances = talk(screen.kept(raw_root, sorted(speakers[who[0]].glob("*.wav")), rejected), cfg, rng, n)
     p = place(cfg, rng, kind is not None)
     labels: dict = {"scene": index, "rt60_target_s": rt60_s, "room_m": p.room_m.tolist(), "mics_m": p.mics_m.T.tolist()}
     signals = [talker_dry]
     interferer: dict | None = None
     if kind == "talker":
-        other, other_used = talk(sorted(speakers[who[1]].glob("*.wav")), {**cfg, "lead_s": 0.0}, rng, n)
+        others = screen.kept(raw_root, sorted(speakers[who[1]].glob("*.wav")), rejected)
+        other, other_used = talk(others, {**cfg, "lead_s": 0.0}, rng, n)
         signals.append(other)
         interferer = {"kind": kind, "speaker": speakers[who[1]].name, "utterances": other_used}
     elif kind == "noise":
-        noise, source = noise_piece(sorted((raw_root / cfg["noise"]).glob("*/ch01.wav")), rng, n)
+        noise, source = noise_piece(
+            screen.kept(raw_root, sorted((raw_root / cfg["noise"]).glob("*/ch01.wav")), rejected), rng, n
+        )
         signals.append(noise)
         interferer = {"kind": kind, "source": source}
     per_source, measured = images(p, rt60_s, signals, cfg)
@@ -227,15 +232,15 @@ def write_scene(out_dir: Path, scene: dict) -> list[Path]:
     return written
 
 
-def _one(job: tuple[dict, Path, Path, int]) -> list[Path]:
-    cfg, raw_root, out_root, index = job
-    return write_scene(out_root / f"scene_{index:04d}", build_scene(cfg, raw_root, index))
+def _one(job: tuple[dict, Path, Path, int, set[str]]) -> list[Path]:
+    cfg, raw_root, out_root, index, rejected = job
+    return write_scene(out_root / f"scene_{index:04d}", build_scene(cfg, raw_root, index, rejected))
 
 
-def build_set(cfg: dict, raw_root: Path, out_root: Path, workers: int = 1) -> Path:
+def build_set(cfg: dict, raw_root: Path, out_root: Path, rejected: set[str], workers: int = 1) -> Path:
     """Every scene of the set into out_root, then manifest.yaml: the config and each file's sha256."""
     count = cfg["scenes_per_combination"] * len(combinations(cfg))
-    jobs = [(cfg, raw_root, out_root, i) for i in range(count)]
+    jobs = [(cfg, raw_root, out_root, i, rejected) for i in range(count)]
     with multiprocessing.get_context("spawn").Pool(workers) as pool:
         written = [p for paths in pool.map(_one, jobs) for p in paths]
     sums = {str(p.relative_to(out_root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(written)}
@@ -252,7 +257,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     cfg = load_yaml(Path(args.config))
     paths = data_paths()
-    manifest = build_set(cfg, paths["raw"], paths["interim"] / "scenes" / cfg["name"], args.workers)
+    rejected = set(screen.rejected(paths["interim"]))
+    manifest = build_set(cfg, paths["raw"], paths["interim"] / "scenes" / cfg["name"], rejected, args.workers)
     print(f"{manifest}")
     return 0
 

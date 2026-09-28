@@ -43,7 +43,7 @@ def gcc_phat_tdoa_samples(x: np.ndarray) -> float:
 
 @pytest.mark.parametrize("index", range(4))
 def test_the_angle_label_is_what_the_microphone_delay_measures(raw_root: Path, index: int) -> None:
-    scene = room.build_scene(small(rt60_s=[0.0]), raw_root, index)
+    scene = room.build_scene(small(rt60_s=[0.0]), raw_root, index, set())
     talker = scene["labels"]["talker"]
     measured = gcc_phat_tdoa_samples(scene["talker"])
     assert abs(measured - talker["tdoa_s"] * grid.SAMPLE_RATE_HZ) <= 1.0 / UPSAMPLE
@@ -54,7 +54,7 @@ def test_the_angle_label_is_what_the_microphone_delay_measures(raw_root: Path, i
 
 def test_level_and_snr_are_the_ones_asked_for(raw_root: Path) -> None:
     cfg = small(rt60_s=[0.3], interferer={**small()["interferer"], "kinds": ["noise"]}, snr_db=[5.0])
-    scene = room.build_scene(cfg, raw_root, 1)
+    scene = room.build_scene(cfg, raw_root, 1, set())
     active = room.active_hops(scene["talker_dry"], cfg["active_below_peak_db"])
     hops = scene["talker"][: len(active) * grid.HOP_SAMPLES, 0].reshape(-1, grid.HOP_SAMPLES)[active]
     level = 10 * np.log10(np.mean(hops**2))
@@ -66,14 +66,14 @@ def test_level_and_snr_are_the_ones_asked_for(raw_root: Path) -> None:
 
 def test_the_measured_rt60_is_the_target_within_tolerance(raw_root: Path) -> None:
     cfg = small(rt60_s=[0.5])
-    labels = room.build_scene(cfg, raw_root, 0)["labels"]
+    labels = room.build_scene(cfg, raw_root, 0, set())["labels"]
     assert abs(labels["rt60_measured_s"] / 0.5 - 1.0) <= cfg["rt60_tolerance"]
 
 
 def test_an_interferer_sits_apart_from_the_talker(raw_root: Path) -> None:
     cfg = small(rt60_s=[0.0])
     for index in range(len(room.combinations(cfg))):
-        labels = room.build_scene(cfg, raw_root, index)["labels"]
+        labels = room.build_scene(cfg, raw_root, index, set())["labels"]
         if labels["interferer"] is not None:
             gap = abs(labels["interferer"]["angle_deg"] - labels["talker"]["angle_deg"])
             assert gap >= cfg["interferer"]["min_separation_deg"]
@@ -81,7 +81,7 @@ def test_an_interferer_sits_apart_from_the_talker(raw_root: Path) -> None:
 
 def test_the_same_seed_writes_the_same_set(raw_root: Path, tmp_path: Path) -> None:
     cfg = small(rt60_s=[0.2], interferer={**small()["interferer"], "kinds": ["talker"]}, snr_db=[10.0])
-    first = room.build_set(cfg, raw_root, tmp_path / "a", workers=2).read_text()
-    second = room.build_set(cfg, raw_root, tmp_path / "b", workers=1).read_text()
+    first = room.build_set(cfg, raw_root, tmp_path / "a", set(), workers=2).read_text()
+    second = room.build_set(cfg, raw_root, tmp_path / "b", set(), workers=1).read_text()
     assert first == second
     assert read_wav(tmp_path / "a" / "scene_0001" / "mix.wav")[0].shape[1] == 2

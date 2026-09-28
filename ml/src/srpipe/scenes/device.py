@@ -22,7 +22,7 @@ import yaml
 from scipy import fft as sfft
 from scipy import signal
 
-from srpipe.core import splits
+from srpipe.core import screen, splits
 from srpipe.core.audio_io import ItemReader, read_wav, to_float, write_wav
 from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml
 from srpipe.dsp.afe.chain import PCM_MAX, PCM_MIN, Chain, ChainConfig
@@ -184,10 +184,11 @@ def active_rms(x: np.ndarray, below_peak_db: float) -> float:
     return math.sqrt(float(np.mean(hops[room.active_hops(x, below_peak_db)] ** 2)))
 
 
-def noise_files(cfg: dict, raw_root: Path) -> list[list[str]]:
-    """Per pool, its files as names under raw/, sorted."""
+def noise_files(cfg: dict, raw_root: Path, rejected: set[str]) -> list[list[str]]:
+    """Per pool, its files as names under raw/, sorted, without those screening rejected (KEHOACH 1.2)."""
     pools = cfg["noise"]["pools"]
-    found = [sorted(str(f.relative_to(raw_root)) for f in (raw_root / p["dir"]).glob(p["glob"])) for p in pools]
+    listed = [sorted(str(f.relative_to(raw_root)) for f in (raw_root / p["dir"]).glob(p["glob"])) for p in pools]
+    found = [[name for name in names if name not in rejected] for names in listed]
     if empty := [pool["dir"] for pool, files in zip(pools, found, strict=True) if not files]:
         raise FileNotFoundError(f"no noise under raw/ for {', '.join(empty)}")
     return found
@@ -294,11 +295,14 @@ def build(cfg: dict, split_file: Path, raw_root: Path, interim: Path, out: Path,
     rows = splits.read_split(split_file)
     if foreign := sorted({row.origin for row in rows} - CLEAN_ORIGINS):
         raise ValueError(f"{split_file}: the simulation takes clean speech, not origin {', '.join(foreign)}")
+    rejected = screen.rejected(interim)
+    if unscreened := [row.item for row in rows if row.item in rejected]:
+        raise ValueError(f"{split_file}: {len(unscreened)} items screening rejected, e.g. {unscreened[0]}")
     bank = room_bank(cfg, interim, workers)
     per = cfg["session"]["items"]
     sessions = [(k, rows[i : i + per]) for k, i in enumerate(range(0, len(rows), per))]
     per_shard = cfg["sessions_per_shard"]
-    pools = noise_files(cfg, raw_root)
+    pools = noise_files(cfg, raw_root, set(rejected))
     out.mkdir(parents=True, exist_ok=True)
     jobs = [
         (cfg, raw_root, bank, out, j, sessions[i : i + per_shard], pools)
