@@ -86,8 +86,11 @@ Chỉ bốn khối dùng mô hình học. Mọi khối khác là công thức, k
 
 Runtime của cả bốn là `esp-dl`, ghim bản chính xác (§4.5.1). `esp-dl` có sẵn GRU int8
 (`dl_module_gru.hpp`) cho `ns` và mô-đun `StreamingCache` (`dl_module_streaming_cache.hpp`) cho mạng
-tích chập chạy dòng, nên `wake` không phải tính lại cả cửa sổ mỗi khung. Xuất được mạng dòng qua
-ESP-PPQ hay không là việc phải chứng minh ở E11-T10, chưa phải sự thật.
+tích chập chạy dòng, nên `wake` không phải tính lại cả cửa sổ mỗi khung. E11-T10 đã chứng minh đường ấy
+trên board B: TCN kiểu `wake` xuất qua ESP-PPQ, đẩy từng bước, ra int8 **trùng từng bit** với mô phỏng cả chuỗi
+(`docs/measurements/latency.md` §8). Mỗi `StreamingCache` phải gắn vào đúng một tích chập: `auto_streaming` của
+ESP-PPQ gắn bộ đệm cho mọi nơi đọc biến, nên phép cộng dư của khối TCN nhận cả cửa sổ thay vì bước hiện tại;
+`srpipe.compress.quant.ptq_espdl` tự đăng ký bộ đệm theo từng tích chập.
 
 ### 1.2 Dữ liệu
 
@@ -1144,7 +1147,7 @@ chứng âm cố ý vi phạm:
 | Phụ thuộc | Khai ở | Ghim |
 |---|---|---|
 | `espressif/dl_fft` | `dsp_spec` | `==0.7.0`, bản đo ở E6-T3 (ADR-0002) |
-| `espressif/esp-dl` | `ai_engine` | `==` bản xuất model ở E11-T10 |
+| `espressif/esp-dl` | `ai_engine` | `==3.3.11`, cặp với ESP-PPQ `==1.3.11` ở `ml/pyproject.toml`; chạy dòng khớp mô phỏng từng bit ở E11-T10 |
 | `espressif/mqtt`, `espressif/cjson` | `net_mqtt` | `^`; IDF v6 đã đưa cả hai ra khỏi lõi, `REQUIRES mqtt` trơ fail ở bước giải phụ thuộc |
 | `joltwallet/littlefs` | `sys_storage` | `^` |
 
