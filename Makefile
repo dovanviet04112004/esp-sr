@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns screen screen-audit splits eval-tts wake-synth parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns screen screen-audit splits wake-features eval-tts wake-synth parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -72,6 +72,12 @@ screen-audit: screen ## Hear clips in bins of each speech measure through PhoWhi
 
 splits: screen ## Cut the wake and command splits from screened clips into ml/data/splits (KEHOACH 1.3)
 	cd ml && uv run python -m srpipe.tasks.wake.data && uv run python -m srpipe.tasks.command.data
+
+WAKE_SPLIT ?= v1
+WORKERS ?= 12
+wake-features: ## Run each file of split wake/$(WAKE_SPLIT) through the board simulation into processed/wake/$(WAKE_SPLIT) (E4-T8)
+	cd ml && for f in $$(ls -S -r data/splits/wake/$(WAKE_SPLIT)/*.txt); do \
+	  uv run python -m srpipe.scenes.device build $$f wake/$(WAKE_SPLIT)/$$(basename $$f .txt) --workers $(WORKERS) || exit 1; done
 
 eval-tts: screen ## Compare the desktop TTS engines on the wake word, every clip heard back by PhoWhisper (docs/measurements/tts_engines.md)
 	cd ml && uv run python -m srpipe.tasks.wake.synth pilot
