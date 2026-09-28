@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-tts parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -63,6 +63,9 @@ eval-agc: ## Score agc on VIVOS scenes at input levels -50 .. -10 dBFS through v
 
 eval-ns: ## Score the ns floor on VIVOS scenes: noise and speech lost, SNR gained (docs/measurements/afe/ns.md)
 	cd ml && uv run python -m srpipe.scenes.ns --workers 16
+
+eval-tts: ## Compare the desktop TTS engines on the wake word, every clip heard back by PhoWhisper (docs/measurements/tts_engines.md)
+	cd ml && uv run python -m srpipe.tasks.wake.synth pilot
 
 measure: ## Merge bench CSVs into docs/measurements/budget.md
 	python3 -m tools.budget
