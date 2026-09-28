@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from srpipe.dsp.afe.chain import Chain, ChainConfig
+from srpipe.dsp.emit_golden import plane_wave
 from srpipe.generated import array
 
 from srhost import score
@@ -196,3 +197,14 @@ def test_ns_takes_off_steady_noise_and_reports_it_by_vad(tmp_path: Path) -> None
     effect = score.ns_effect(noise[:, 0], noise[:, 1], [], None)
     assert effect.pause_hops + effect.speech_hops == 400 - score.WARMUP_HOPS
     assert effect.pause_hops > 9 * effect.speech_hops and effect.pause_db >= 10
+
+
+def test_doa_is_read_on_speech_hops_against_the_label() -> None:
+    rng = np.random.default_rng(5)
+    pair = plane_wave(rng.uniform(-0.3, 0.3, 4 * HOPS * HOP), 45.0)
+    pcm = np.rint(pair * 32768.0).astype(np.int16)
+    front = score.front_level(pcm[:, 0], pcm[:, 1], [], None, ("hpf", "doa", "vad"), doa_label_deg=45)
+    assert front.doa_hops > 0 and abs(front.doa_percentiles_deg[1] - 45) <= 2
+    assert front.doa_within_pct == 100.0
+    silent = score.front_level(pcm[:, 0], pcm[:, 1], [], None, ("hpf", "vad"), doa_label_deg=45)
+    assert silent.doa_hops == 0 and silent.doa_within_pct is None

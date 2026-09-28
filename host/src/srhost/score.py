@@ -12,7 +12,7 @@ import argparse
 import json
 import sys
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import pairwise
 from pathlib import Path
 
@@ -21,6 +21,7 @@ import yaml
 from srpipe.dsp.afe.chain import Chain, ChainConfig
 from srpipe.generated import afe, array
 from srpipe.metrics import mic_pair
+from srpipe.metrics.doa_err import ANGLE_UNKNOWN_DEG, TOLERANCE_DEG, doa_score
 
 from srhost.config import REPO_ROOT
 from srhost.generated import grid
@@ -45,6 +46,7 @@ PLAIN = ChainConfig(modules=())
 INTO_AGC_MODULES = tuple(m for m in afe.MODULES if m != "agc")
 NS_MODULE = "ns_omlsa"
 LEVEL_PERCENTILES = (10, 50, 90)
+DOA_PERCENTILES = (25, 50, 75)
 COHERENCE_MIN = 0.9
 
 
@@ -101,6 +103,9 @@ class FrontLevel:
     balanced: bool
     percentiles_dbfs: tuple[int, ...]
     speech_share: float
+    doa_percentiles_deg: tuple[int, ...] = ()  # over speech hops with an angle; empty when no hop has one
+    doa_hops: int = 0
+    doa_within_pct: float | None = None  # of those hops, near the session's doa_deg label
 
 
 def read_wav(path: Path) -> np.ndarray:
@@ -163,12 +168,13 @@ def chain_parity(ch0: np.ndarray, ch1: np.ndarray, clean: np.ndarray, gap_offset
 
 def chain_hops(
     ch0: np.ndarray, ch1: np.ndarray, gap_offsets: list[int], gains: np.ndarray | None, modules: tuple[str, ...]
-) -> tuple[np.ndarray, np.ndarray]:
-    """level_dbfs and vad of every hop past the warm-up, the chain restarted after each gap as the board does."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """level_dbfs, vad and doa_deg of every hop past the warm-up, the chain restarted after each gap as the board
+    does."""
     hop = grid.HOP_SAMPLES
     bounds = [0, *gap_offsets, min(len(ch0), len(ch1))]
     cfg = ChainConfig(modules=modules, balance_gains=gains)
-    levels, speech = [], []
+    levels, speech, angles = [], [], []
     for start, end in pairwise(bounds):
         chain = Chain(cfg=cfg)
         for k, at in enumerate(range(start, end - hop + 1, hop)):
@@ -176,9 +182,10 @@ def chain_hops(
             if k >= WARMUP_HOPS:
                 levels.append(frame.level_dbfs)
                 speech.append(frame.vad)
+                angles.append(frame.doa_deg)
     if not levels:
         raise ValueError("no hop of ch0 and ch1 outlasts the warm-up")
-    return np.array(levels, dtype=np.float64), np.array(speech, dtype=bool)
+    return np.array(levels, dtype=np.float64), np.array(speech, dtype=bool), np.array(angles, dtype=np.int64)
 
 
 def front_level(
@@ -187,18 +194,28 @@ def front_level(
     gap_offsets: list[int],
     gains: np.ndarray | None,
     modules: tuple[str, ...] = INTO_AGC_MODULES,
+    doa_label_deg: int | None = None,
 ) -> FrontLevel:
-    """Run the product chain up to agc over each stretch between gaps, as the board restarts it, skipping warm-up."""
-    levels, speech = chain_hops(ch0, ch1, gap_offsets, gains, modules)
+    """Run the product chain up to agc over each stretch between gaps, as the board restarts it, skipping warm-up;
+    doa is read on the speech hops, as a talker's direction."""
+    levels, speech, angles = chain_hops(ch0, ch1, gap_offsets, gains, modules)
     percentiles = tuple(round(float(np.percentile(levels, q))) for q in LEVEL_PERCENTILES)
-    return FrontLevel(gains is not None, percentiles, float(np.mean(speech)))
+    front = FrontLevel(gains is not None, percentiles, float(np.mean(speech)))
+    heard = angles[speech & (angles != ANGLE_UNKNOWN_DEG)]
+    if not heard.size:
+        return front
+    within = None
+    if doa_label_deg is not None:
+        within = doa_score(heard, np.full(heard.size, doa_label_deg)).within_pct
+    doa_deg = tuple(round(float(np.percentile(heard, q))) for q in DOA_PERCENTILES)
+    return replace(front, doa_percentiles_deg=doa_deg, doa_hops=int(heard.size), doa_within_pct=within)
 
 
 def ns_effect(ch0: np.ndarray, ch1: np.ndarray, gap_offsets: list[int], gains: np.ndarray | None) -> NsEffect:
     """What ns takes off the level into agc, per hop the chain with it against the chain without, split by the vad
     of the chain with it: the noise it removes in pauses and the speech it loses (E9-T1)."""
-    with_ns, speech = chain_hops(ch0, ch1, gap_offsets, gains, INTO_AGC_MODULES)
-    without, _ = chain_hops(ch0, ch1, gap_offsets, gains, tuple(m for m in INTO_AGC_MODULES if m != NS_MODULE))
+    with_ns, speech, _ = chain_hops(ch0, ch1, gap_offsets, gains, INTO_AGC_MODULES)
+    without, _, _ = chain_hops(ch0, ch1, gap_offsets, gains, tuple(m for m in INTO_AGC_MODULES if m != NS_MODULE))
     taken = without - with_ns
 
     def median(mask: np.ndarray) -> float | None:
@@ -278,7 +295,7 @@ def score(session: Path, shift: int | None = None) -> Score:
     front = ns = None
     if stats is not None:
         gains = board_gains(meta["board"])
-        front = front_level(pcm["ch0"], pcm["ch1"], read_gap_offsets(session), gains)
+        front = front_level(pcm["ch0"], pcm["ch1"], read_gap_offsets(session), gains, doa_label_deg=meta.get("doa_deg"))
         ns = ns_effect(pcm["ch0"], pcm["ch1"], read_gap_offsets(session), gains)
         if meta.get("doa_deg") is not None:
             pair = pair_figures(stats, int(meta["doa_deg"]))
@@ -335,6 +352,15 @@ def table(result: Score) -> str:
             f"|{'---|' * (len(LEVEL_PERCENTILES) + 1)}",
             f"| {' | '.join(str(v) for v in front.percentiles_dbfs)} | {100 * front.speech_share:.1f} % |",
         ]
+        if front.doa_hops:
+            p25, p50, p75 = front.doa_percentiles_deg
+            label = meta.get("doa_deg")
+            near = (
+                ""
+                if label is None
+                else f"; {front.doa_within_pct:.1f} % within {TOLERANCE_DEG:g} deg of the label {label} deg"
+            )
+            lines += ["", f"doa over {front.doa_hops} speech hops: median {p50} deg, p25-p75 {p25}-{p75} deg{near}"]
     if result.ns is not None:
         ns = result.ns
 
