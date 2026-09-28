@@ -1,9 +1,9 @@
 """VieNeu-TTS v3 Turbo for srpipe.tts, PyTorch on the GPU from the checkpoint's own weights.
 
 `run.py <model>@<rev> <codec>@<rev> <dtype> voices` prints the preset voices as JSON; with <requests.jsonl> instead of
-`voices` it synthesises each line {id, text, out, voice | ref_audio} into out, a 48 kHz WAV. Both repos are fetched,
-checked against their pinned revisions and read offline after that, since VieNeu and the codec's remote code would
-otherwise follow the hub's main on their own.
+`voices` it synthesises each line {id, text, seed, out, voice | ref_audio} into out, a 48 kHz WAV, the sampling seeded
+per line. Both repos are fetched, checked against their pinned revisions and read offline after that, since VieNeu and
+the codec's remote code would otherwise follow the hub's main on their own.
 """
 
 import json
@@ -11,6 +11,7 @@ import os
 import sys
 from pathlib import Path
 
+import torch
 from huggingface_hub import constants, snapshot_download
 
 MODEL_FILES = [
@@ -45,6 +46,7 @@ def main() -> int:
         return 0
     for line in Path(sys.argv[4]).read_text(encoding="utf-8").splitlines():
         req = json.loads(line)
+        torch.manual_seed(req["seed"])
         if "ref_audio" in req:
             audio = tts.infer(req["text"], ref_audio=req["ref_audio"], denoise=True)
         else:

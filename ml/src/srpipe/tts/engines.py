@@ -48,5 +48,5 @@ def hear(clips: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, str
     """The checker's text for every clip {id, wav}, by id."""
     listing, heard = work / "asr_clips.jsonl", work / "asr_heard.jsonl"
     write_jsonl(listing, clips)
-    run("asr", tts["asr"], str(listing), str(heard), cache=cache)
+    run("asr", tts["asr"]["model"], str(tts["asr"]["batch"]), str(listing), str(heard), cache=cache)
     return {r["id"]: r["text"] for r in map(json.loads, heard.read_text(encoding="utf-8").splitlines())}
