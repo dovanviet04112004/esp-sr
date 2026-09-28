@@ -132,3 +132,20 @@ Board B, `ai_engine/test_apps/unit` (profile mặc định `-Og`), IDF 6.0.2, 28
 
 Ảnh đủ bốn model (~2,1 MB theo §6.6) vì thế thêm cỡ 180 ms 🔬 vào lúc boot. Ảnh sai lưới và ảnh lật một bit bị từ chối, và
 PSRAM trả về đúng số trước lượt nạp.
+
+## 8. TCN chạy dòng trên esp-dl (E11-T10)
+
+Board B, `ai_engine/test_apps/unit` (profile mặc định `-Og`), IDF 6.0.2, esp-dl 3.3.11, ESP-PPQ 1.3.11, 28/09. Mạng là
+TCN của `configs/models/wake.yaml` với trọng số ngẫu nhiên có seed: 40 dải vào, 32 kênh, 6 khối giãn 1 … 32, kernel 3,
+trường nhìn 127 bước, `.espdl` 48 KB. Dựng bằng `make ai-probe`, đo bằng `make ai-unit`.
+
+| Đo | Kết quả |
+|---|---|
+| 200 bước đẩy từng khung, so mô phỏng cả chuỗi của ESP-PPQ | chênh int8 lớn nhất **0** |
+| `model->test()` (bước đầu, lưu trong `.espdl`) | qua |
+| Một bước (`model->run()`) | **427 µs** trung bình, 493 µs đỉnh |
+| Dựng mạng lúc nạp, gồm một bước khởi động | 24,7 ms; RAM nội 0 B, PSRAM 23,5 KB |
+| Chạy lại cùng đầu vào không `reset` (đối chứng âm) | chênh 27: bộ đệm giữ đúng các bước trước |
+
+Bản đầu dùng `auto_streaming` của ESP-PPQ: phép cộng dư nhận bộ đệm cả cửa sổ, đầu ra phình tới 127 bước và
+`model->test()` báo sai hình. Bộ đệm gắn theo từng tích chập (`ptq_espdl.cache_each_causal_conv`) cho kết quả trên.
