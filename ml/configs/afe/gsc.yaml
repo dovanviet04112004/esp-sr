@@ -1,0 +1,11 @@
+# Scoring of gsc on the labelled scenes of configs/scenes/standard.yaml (KEHOACH 3.7, E8-T2); the module's own numbers
+# stay in contracts/afe.yaml, and a variant here only overrides them.
+eval:
+  scenes: standard                  # interim/scenes/<name>/
+  steer_errors_deg: [-45.0, -20.0, 20.0, 45.0]   # the product steered this far off the talker, kept within 0 .. 180
+  variants:
+    cap_1: {weight_max: 1.0}
+    cap_2: {weight_max: 2.0}
+    cap_8: {weight_max: 8.0}
+    cap_16: {weight_max: 16.0}
+    cap_32: {weight_max: 32.0}

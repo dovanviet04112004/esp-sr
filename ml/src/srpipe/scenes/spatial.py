@@ -1,8 +1,8 @@
 """The spatial stage scored on the labelled scenes of room.py (KEHOACH 3.6-3.8, 3.15).
 
-doa: the mix through hpf, the STFT and doa, searched on every second hop after a hop where the talker speaks (the
-label, from its dry signal), and again through the chain whose own vad gates it; scored on the talker's speaking hops
-against its angle, by condition and RT60, and apart near the array's ends. python -m srpipe.scenes.spatial doa
+doa: searched after the talker's labelled speech, and through the chain's own vad; scored against the talker's angle by
+condition, RT60 and region. gsc: steered by the label, by doa, or by the label off by a set error, learning after the
+talker's silent hops; both sources' images pass the same weights, so SIR gained and talker loss are exact.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import numpy as np
 
 from srpipe.core.audio_io import read_wav
 from srpipe.core.config import data_paths, load_config
-from srpipe.dsp.afe import doa, hpf
+from srpipe.dsp.afe import doa, gsc, hpf
 from srpipe.dsp.afe.chain import PCM_FULL_SCALE, PCM_MAX, PCM_MIN, Chain, ChainConfig
 from srpipe.dsp.spec.stft import Stft
 from srpipe.generated import afe, array, grid
@@ -131,9 +131,105 @@ def doa_tables(scenes: list[SceneDoa], spec: dict) -> str:
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class SceneGsc:
+    """Per run of one scene: the SIR gained over the plain mean and the talker's level against it, both in dB over
+    the talker's speaking hops; SIR is None without an interferer."""
+
+    labels: dict
+    runs: dict[str, tuple[float | None, float]]
+
+
+def component_bins(x: np.ndarray, n_hops: int) -> list[np.ndarray]:
+    """Both channels' bins per hop after hpf, as the chain analyses them."""
+    filters, analysis = hpf.Hpf(), [Stft() for _ in range(array.N_MICS)]
+    return [
+        np.stack([analysis[m].analyze(filters.process(m, x[h * HOP : (h + 1) * HOP, m])) for h in range(n_hops)])
+        for m in range(array.N_MICS)
+    ]
+
+
+def searched_angles(mix: list[np.ndarray], speaking: np.ndarray) -> np.ndarray:
+    """The product doa per hop from the mix's bins, searched as the chain times it; broadside until it has an angle,
+    as dsp_afe steers gsc."""
+    searcher = doa.Doa()
+    out = np.empty(len(speaking))
+    for h in range(len(speaking)):
+        update = h > 0 and bool(speaking[h - 1]) and h % afe.DOA_UPDATE_EVERY_HOPS == 0
+        angle = searcher.process(mix[0][h], mix[1][h], update).angle_deg
+        out[h] = angle if angle != doa.ANGLE_UNKNOWN_DEG else sum(array.DOA_RANGE_DEG) / 2
+    return out
+
+
+def gsc_run(
+    cfg: gsc.GscConfig, talker, interferer, steer: np.ndarray, speaking: np.ndarray
+) -> tuple[float | None, float]:
+    canceller = gsc.Gsc(cfg)
+    power = np.zeros(4)
+    for h in range(len(speaking)):
+        y_t = canceller.apply(talker[0][h], talker[1][h], steer[h])
+        y_i = canceller.apply(interferer[0][h], interferer[1][h], steer[h])
+        mix = [talker[m][h] + interferer[m][h] for m in range(array.N_MICS)]
+        canceller.process(mix[0], mix[1], steer[h], adapt=h > 0 and not speaking[h - 1])
+        if speaking[h]:
+            plain_t = 0.5 * (talker[0][h] + talker[1][h])
+            plain_i = 0.5 * (interferer[0][h] + interferer[1][h])
+            power += [np.sum(np.abs(v) ** 2, dtype=np.float64) for v in (y_t, y_i, plain_t, plain_i)]
+    out_t, out_i, in_t, in_i = power
+    sir = 10 * np.log10(out_t / out_i) - 10 * np.log10(in_t / in_i) if in_i > 0 else None
+    return sir, 10 * np.log10(out_t / in_t)
+
+
+def gsc_scene(job: tuple[Path, dict, list[float], dict]) -> SceneGsc:
+    folder, variants, errors, scene_cfg = job
+    labels = json.loads((folder / "labels.json").read_text(encoding="utf-8"))
+    talker_wav, _ = read_wav(folder / "talker.wav")
+    dry, _ = read_wav(folder / "talker_dry.wav")
+    interferer_wav = read_wav(folder / "interferer.wav")[0] if labels["interferer"] else np.zeros_like(talker_wav)
+    speaking = room.active_hops(dry[:, 0], scene_cfg["active_below_peak_db"])
+    n_hops = min(len(speaking), len(talker_wav) // HOP)
+    speaking = speaking[:n_hops]
+    talker, interferer = component_bins(talker_wav, n_hops), component_bins(interferer_wav, n_hops)
+    truth = labels["talker"]["angle_deg"]
+    low, high = array.DOA_RANGE_DEG
+    steers = {
+        "label": np.full(n_hops, truth),
+        "doa": searched_angles([t + i for t, i in zip(talker, interferer, strict=True)], speaking),
+    }
+    runs = {}
+    for name, cfg in variants.items():
+        for steer in steers if name == PRODUCT else ("label",):
+            runs[f"{name}, {steer}"] = gsc_run(cfg, talker, interferer, steers[steer], speaking)
+        for error in errors:
+            steer = np.full(n_hops, min(max(truth + error, low), high))
+            runs[f"{name}, label {error:+g}°"] = gsc_run(cfg, talker, interferer, steer, speaking)
+    return SceneGsc(labels, runs)
+
+
+def gsc_tables(scenes: list[SceneGsc]) -> str:
+    """Per run: mean over scenes of SIR gained / talker level, by condition; alone scenes give the talker only."""
+    conditions = list(dict.fromkeys(condition(s.labels) for s in sorted(scenes, key=lambda s: s.labels["scene"])))
+    runs = list(scenes[0].runs)
+    lines = [
+        "",
+        "SIR gained over the plain mean dB / talker level against it dB, mean over scenes",
+        "| Run | " + " | ".join(conditions) + " |",
+        "|---|" + "---|" * len(conditions),
+    ]
+    for run in runs:
+        cells = []
+        for c in conditions:
+            group = [s.runs[run] for s in scenes if condition(s.labels) == c]
+            sirs = [g[0] for g in group if g[0] is not None]
+            sir = f"{np.mean(sirs):+.1f}" if sirs else "—"
+            cells.append(f"{sir} / {np.mean([g[1] for g in group]):+.1f}")
+        lines.append(f"| {run} | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("block", choices=["doa"])
+    parser.add_argument("block", choices=["doa", "gsc"])
     parser.add_argument("--workers", type=int, default=12)
     parser.add_argument("overrides", nargs="*", help="a.b=value overrides of configs/afe/<block>.yaml")
     args = parser.parse_args(argv)
@@ -142,8 +238,15 @@ def main(argv: list[str] | None = None) -> int:
     folders = sorted((data_paths()["interim"] / "scenes" / spec["scenes"]).glob("scene_*"))
     print(f"{len(folders)} scenes of {spec['scenes']}")
     with ProcessPoolExecutor(args.workers) as pool:
-        variants = doa_variants(spec)
-        print(doa_tables(list(pool.map(score_scene, [(f, variants, scene_cfg) for f in folders])), spec))
+        if args.block == "doa":
+            variants = doa_variants(spec)
+            print(doa_tables(list(pool.map(score_scene, [(f, variants, scene_cfg) for f in folders])), spec))
+        else:
+            variants = {PRODUCT: gsc.GscConfig()} | {
+                name: replace(gsc.GscConfig(), **o) for name, o in spec["variants"].items()
+            }
+            jobs = [(f, variants, spec["steer_errors_deg"], scene_cfg) for f in folders]
+            print(gsc_tables(list(pool.map(gsc_scene, jobs))))
     return 0
 
 
