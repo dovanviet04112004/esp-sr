@@ -423,7 +423,7 @@ OM-LSA nằm ngay trong `dsp_afe`; bản RNNoise nằm ở `ai_engine/src/ns/` v
 | `hpf` | thuần | `dsp_afe` | IIR bậc hai Butterworth, dạng II chuyển vị viết tay (ADR-0004) | 80 Hz | ~41 µs hai kênh | E7-T1 |
 | `balance` | thuần | `dsp_afe` | nhân hệ số phức hiệu chuẩn mỗi vạch cho `ch1`, vòng viết tay (ADR-0005) | từ NVS `calib/bal` | ~18 µs | E7-T2 |
 | `aec` | thuần | `dsp_afe` | MDF chồng-lưu, bước học tự chỉnh, khử vọng dư | 8 phân đoạn × 256 = 128 ms đuôi | ~1,3 ms hai micro | E10-T4 |
-| `doa` | thuần | `dsp_afe` | GCC-PHAT trên phổ chéo đã làm trơn, dò lưới 2° | dải 200 Hz – c/2d | ~550 µs khi cập nhật | E8-T1 |
+| `doa` | thuần | `dsp_afe` | GCC-PHAT trên phổ chéo đã làm trơn, dò lưới 2°, xoay pha dồn viết tay (ADR-0008) | dải 2–8 kHz | **641 µs đo** ở bước dò, 22 µs các bước khác | E8-T1 |
 | `gsc` | thuần | `dsp_afe` | chùm trễ và cộng, ma trận chặn, NLMS rò có điều khiển thích nghi | μ 0,05, rò 1e-4 | ~150 µs | E8-T2 |
 | `bss` | thuần | `dsp_afe` | AuxIVA online, cập nhật IP2 kín cho 2×2, chiếu ngược | quên α ứng τ 1 s | ~400 µs | E8-T3 |
 | `ns` sàn | thuần | `dsp_afe` | OM-LSA + IMCRA | gain sàn −12 dB | **1,69 ms đo** (đỉnh 1,88); FPU của S3 tốn 4–6 chu kỳ mỗi lệnh float, không chạy chồng | E9-T1 |
@@ -529,12 +529,13 @@ R(θ)  = Σₖ Re{ Φ[k]/|Φ[k]| · exp(j·ωₖ·d·cosθ / c) }   với k tron
 
 | Chốt | Giá trị | Vì sao |
 |---|---|---|
-| Dải dùng | 200 Hz – c/2d (3,81 kHz ở 4,5 cm) | trên tần số gập, vạch nào cũng cho đỉnh ma; dải đầy đủ là biến thể đem so ở E8-T1 |
-| Pha xoay | tính dồn: `exp(jωₖτ) = exp(jω₁τ)^k`, mỗi vạch một phép nhân phức | bảng cos/sin 91 góc × 257 vạch là 187 KB, không đáng |
+| Dải dùng | **2–8 kHz** (193 vạch), chốt bằng đo ở E8-T1 (`afe/doa.md`) | dưới vài kHz trường vang khuếch tán giữa hai micro 4,5 cm còn kết hợp cao (sinc(kd) ≈ 0,9 ở 1 kHz) với pha 0, nên kéo góc về chính diện: dải 200 Hz – c/2d cho 4–12% khung trong ±10° ở hai đầu dàn trên cảnh dựng và lệch 35–75° trên bản thu board; trên tần số gập tiếng vang mất kết hợp, đỉnh ma của từng vạch không trùng nhau nên tổng trên dải vẫn một đỉnh. 2–8 kHz ngang hoặc hơn 200 Hz – 8 kHz ở mọi ô và rẻ hơn 23% |
+| Pha xoay | tính dồn: `exp(jωₖτ) = exp(jω₁τ)^k`, mỗi vạch một phép nhân phức; góc θ và 180° − θ chung một lượt vì trễ ngược dấu: `R(θ) = Σaₖcₖ − Σbₖsₖ`, `R(180°−θ) = Σaₖcₖ + Σbₖsₖ` | bảng cos/sin nửa lưới trên dải dùng (46 × 193 phức) là 71 KB RAM nội để gọi tích vô hướng của `esp-dsp`, chỉ nhanh hơn 1,7 lần ở bước dò; ở PSRAM thì trượt cache (ADR-0008) |
 | Khi nào cập nhật | khung trước có `vad = 1`, mỗi hai khung một lần | ngoài lúc nói, đỉnh là hướng của nhiễu |
-| Ra | góc 0–180°, độ tin là tỉ số đỉnh trên trung bình | trước và sau không phân biệt được (§2.3) |
+| Ra | góc 0–180°; độ tin `255·(1 − trung bình/đỉnh)` của đáp ứng nâng về 0…1, tức `(R + K)/2K` với `K` số vạch có công suất | trước và sau không phân biệt được (§2.3); độ tin là một hàm tăng của tỉ số đỉnh trên trung bình, nằm sẵn trong 0…255 nên không cần thang riêng |
 
-Chi phí ~91 góc × ~115 vạch phép nhân phức mỗi lần cập nhật, cỡ 550 µs 🔬.
+Chi phí đo trên board B (`budget.md`): 91 góc × 193 vạch, **641 µs** mỗi lần dò, 22 µs gộp phổ chéo ở các bước khác; trạng
+thái 4,3 KB.
 
 **Thước** (TỔNG QUAN V5.2.1): sai số góc trung bình và phần trăm khung trong ±10° trên cảnh dựng có
 nhãn, theo SNR và RT60; ghi riêng vùng gần hai đầu dàn (0–30°, 150–180°) vì ở đó độ phân giải kém
@@ -1015,8 +1016,8 @@ mỗi tensor một bản ghi — tên 32 B, `dtype` u32 (0 `f32`, 1 `i8`, 2 `i32
 hàm ghi và hàm đọc. `test_apps/parity` nướng cả cây `contracts/golden/` vào phân vùng `storage` bằng
 `littlefs_create_partition_image(... FLASH_IN_PROJECT)`, theo **bảng phân vùng riêng** của app ấy
 (`test_apps/parity/partitions.csv`): `nvs` đúng chỗ và đúng cỡ như §6.1 để hiệu chuẩn và khoá trên board còn nguyên, app
-ở chỗ `ota_0`, `storage` 8 MB ở chỗ `ota_1` và các khe model. `storage` 1,75 MB của §6.1 đã đầy 91% sau bốn module của
-E7; bộ vàng của E8–E10 cần gấp nhiều lần.
+ở chỗ `ota_0`, `storage` 12 MB từ chỗ `ota_1` tới trước 1 MB cuối flash. `storage` 1,75 MB của §6.1 đã đầy 91% sau bốn
+module của E7, và 8 MB đầy 95% khi thêm `doa` ở E8; bộ vàng của E8–E10 cần gấp nhiều lần.
 
 **File sinh ra không sửa tay.** CI chạy lại generator rồi `git diff --exit-code`.
 
@@ -1026,7 +1027,7 @@ E7; bộ vàng của E8–E10 cần gấp nhiều lần.
 |---|---|---|
 | Source | code, YAML, schema, `SPLIT.md`, file in 3D nguồn | ✅ commit |
 | Sinh từ `contracts/` | `gen_*.h`, `*/generated/*` | ✅ commit — không sửa tay, CI sinh lại rồi diff |
-| Vector vàng | `contracts/golden/**` | ✅ commit — vài trăm KB, mất là mất khả năng tái lập |
+| Vector vàng | `contracts/golden/**` | ✅ commit — vài MB, mất là mất khả năng tái lập |
 | Split và manifest | `ml/data/splits/**`, `ml/data/manifests/**` | ✅ commit |
 | Khoá model | `contracts/models.lock.json`, `firmware/models/*/meta.json` | ✅ commit |
 | Sinh lại được tại chỗ | `sdkconfig`, `managed_components/`, `build*/` | ❌ gitignore |
@@ -1071,6 +1072,8 @@ ml/
 │   │   ├── agc.py                     # cùng cảnh ở mức vào −50 … −10 dBFS qua vad rồi agc; mức ra, đỉnh (§3.10)
 │   │   ├── ns.py                      # câu đọc + nhiễu ở SNR cho trước; chấm khe ns: nhiễu bị dìm, tiếng nói mất,
 │   │   │                              #   bằng đúng gain áp riêng vào từng phần (§3.9)
+│   │   ├── spatial.py                 # cảnh chuẩn của room.py qua doa, gsc, bss và trộn trần: lỗi góc theo SNR,
+│   │   │                              #   RT60, vùng góc; SIR, SDR (§3.6–3.8)
 │   │   └── device.py                  # ★ đường mô phỏng board: phòng hoặc RIR thật → dàn array.yaml → chênh micro
 │   │                                  #   đã hiệu chuẩn, pcm_shift → dsp.afe.chain → log-mel; dữ liệu học (§1.2)
 │   │
@@ -1290,7 +1293,7 @@ firmware/
 ├── test_apps/                        # test TÍCH HỢP toàn hệ; unit test nằm trong component
 │   ├── components/test_report/       # dòng kết quả có số thứ tự và CRC32, gửi lại khi máy tính xin (§4.5.7)
 │   ├── test_report.py                # phía máy tính của test_report: kiểm CRC, xin lại dòng thiếu
-│   ├── parity/                       # đọc contracts/golden/, so C với Python; partitions.csv riêng, storage 8 MB
+│   ├── parity/                       # đọc contracts/golden/, so C với Python; partitions.csv riêng, storage 12 MB
 │   ├── bench_afe/  ├── bench_kws/    # µs trung bình và đỉnh mỗi module → CSV
 │   ├── bench_mem/                    # heap đỉnh, watermark ngăn xếp, RAM tĩnh
 │   ├── soak/                         # chạy dài, đếm khung mất, theo dõi heap
@@ -1791,13 +1794,13 @@ trung bình ≤ 70%. Mọi ô là ước 🔬 lấy từ §3.3; `docs/measuremen
 | `aec` hai micro | 1 300 | `command`, trạng thái `LENH` | 34–56% (thay `wake`) |
 | `stft` hai kênh | 314 | `synth`, trạng thái `DAP` | < 100% trong thời gian dựng |
 | `balance` | 10 | `gui` + `mqtt` + `luong` | 2–5% |
-| `doa` (mỗi hai khung) | 150 | | |
+| `doa` (dò mỗi hai khung khi có tiếng; đo) | 641 | | |
 | `bss` (nặng hơn `gsc`) | 400 | | |
 | `ns` RNNoise (nặng hơn sàn) | 800–1 600 | | |
 | `istft` | 196 | | |
 | `vad` + `agc` | 80 | | |
 | chép vào `sb_stream` | 20 | | |
-| **Cộng, trường hợp nặng nhất** | **~4 300 µs ≈ 27%** | **Cộng, `LENH`** | **~45–75%** |
+| **Cộng, trường hợp nặng nhất** | **~4 800 µs ≈ 30%** | **Cộng, `LENH`** | **~45–75%** |
 
 Nhân 1 còn biên rộng; nhân 0 chật ở trạng thái `LENH`. Nếu số đo xác nhận điều đó thì thứ tự cắt là:
 giảm tần suất `doa` và `telemetry` trong `LENH`, rồi thu nhỏ mạng `command` — không chuyển việc sang
@@ -1888,7 +1891,7 @@ trả `ESP_ERR_INVALID_VERSION` và không nạp. Không có chốt này, đổi
 |---|---|---|
 | `/lfs/cmd/set.json` | bộ lệnh đang dùng, theo `command_set.schema.json` | `down/commands` tới; ghi `set.json.tmp` rồi đổi tên — chống mất điện |
 | `/lfs/resp/vi.json` | câu trả lời: id → chữ, id → tên mẩu | nướng lúc dựng; đổi qua OTA |
-| `/lfs/golden/**` | vector vàng | chỉ trong ảnh của `test_apps/parity`, phân vùng `storage` 8 MB của bảng riêng app ấy (§4.3) |
+| `/lfs/golden/**` | vector vàng | chỉ trong ảnh của `test_apps/parity`, phân vùng `storage` 12 MB của bảng riêng app ấy (§4.3) |
 
 **Không ghi log hay hàng đợi offline xuống flash.** Số liệu mất được: mất mạng thì mất số liệu của
 khoảng ấy, và `heartbeat` kế tiếp khai bộ đếm. Ghi theo nhịp vừa mòn flash vừa đóng băng nhân 1
