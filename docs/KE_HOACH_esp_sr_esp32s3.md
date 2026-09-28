@@ -718,6 +718,16 @@ mô phỏng board (§1.2). **Âm bản** gồm các kho lời nói tiếng Việ
 TTS. Bản thu qua board để chấm (§1.3). Nếu thiếu Cửa 2 vì giọng tổng hợp khác giọng thật, thêm mẫu
 dương thật của vài người tình nguyện vào tập học, tách người với tập thử.
 
+**Huấn luyện** (`tasks/wake/train.py`, `eval.py`, mục `train` của `configs/models/wake.yaml`). Đầu vào là log-mel
+của `processed/wake/<split>/` do đường mô phỏng board dựng, chuẩn hoá bằng trung bình và độ lệch từng dải tính trên
+`train`. Nhãn theo bước: một mẩu dương gắn 1 ở các bước quanh lúc từ đánh thức vừa nói xong (cuối `speech_frames`,
+độ rộng trước và sau ở cấu hình), vì chỉ khi ấy mạng đã nghe đủ cả từ; mọi bước khác và mọi mẩu âm gắn 0. Mạng học
+trên cửa sổ dài hơn trường nhìn: cắt sao cho chứa cuối một mẩu dương, hoặc ở chỗ ngẫu nhiên trong một mẩu âm, với
+tỉ lệ dương cố định mỗi lô; mất mát là BCE theo bước. Chấm như trên máy: điểm làm trơn trung bình trượt 5 khung rồi so
+ngưỡng. Bắt được là tỉ lệ mẩu dương có một lần vượt ngưỡng. Báo nhầm là số lần vượt trên âm bản, mỗi lần vượt khoá
+một quãng rồi mới đếm tiếp như máy khoá sau khi thức, quy ra lần mỗi giờ. Ngưỡng chọn trên `val` sao cho báo nhầm
+không quá mục tiêu, rồi ghi vào NVS `kws/wake_th`.
+
 **Thước** (TỔNG QUAN V5.5.7, Cửa 2): bắt **≥ 95%** ở 1 m phòng yên; báo nhầm **≤ 1 lần mỗi giờ** đo
 trên **≥ 24 giờ** âm bản. Ghi thêm, không làm cửa: bắt được ở 3 m, ở SNR 10 dB và 5 dB.
 
