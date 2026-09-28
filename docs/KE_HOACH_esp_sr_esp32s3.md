@@ -424,7 +424,7 @@ OM-LSA nằm ngay trong `dsp_afe`; bản RNNoise nằm ở `ai_engine/src/ns/` v
 | `balance` | thuần | `dsp_afe` | nhân hệ số phức hiệu chuẩn mỗi vạch cho `ch1`, vòng viết tay (ADR-0005) | từ NVS `calib/bal` | ~18 µs | E7-T2 |
 | `aec` | thuần | `dsp_afe` | MDF chồng-lưu, bước học tự chỉnh, khử vọng dư | 8 phân đoạn × 256 = 128 ms đuôi | ~1,3 ms hai micro | E10-T4 |
 | `doa` | thuần | `dsp_afe` | GCC-PHAT trên phổ chéo đã làm trơn, dò lưới 2°, xoay pha dồn viết tay (ADR-0008) | dải 2–8 kHz | **641 µs đo** ở bước dò, 22 µs các bước khác | E8-T1 |
-| `gsc` | thuần | `dsp_afe` | chùm trễ và cộng, ma trận chặn, NLMS rò có điều khiển thích nghi | μ 0,05, rò 1e-4 | ~150 µs | E8-T2 |
+| `gsc` | thuần | `dsp_afe` | chùm trễ và cộng, ma trận chặn, NLMS rò có điều khiển thích nghi, vòng viết tay (ADR-0009) | μ 0,05, rò 1e-4, trần 16 | **141 µs đo**; 485 µs ở bước đổi góc lái | E8-T2 |
 | `bss` | thuần | `dsp_afe` | AuxIVA online, cập nhật IP2 kín cho 2×2, chiếu ngược | quên α ứng τ 1 s | ~400 µs | E8-T3 |
 | `ns` sàn | thuần | `dsp_afe` | OM-LSA + IMCRA | gain sàn −12 dB | **1,69 ms đo** (đỉnh 1,88); FPU của S3 tốn 4–6 chu kỳ mỗi lệnh float, không chạy chồng | E9-T1 |
 | `ns` mạng | **mô hình** | `ai_engine/src/ns/` | RNNoise dựng lại cho 16 kHz | 18–22 dải | ~0,8–1,6 ms float, ít hơn nếu int8 | E9-T5 |
@@ -550,9 +550,16 @@ căn:     X̃₁[k] = X₁[k] · exp(−jωₖτ̂)
 chùm:    F[k]  = ½ (X₀[k] + X̃₁[k])
 chặn:    B[k]  = X₀[k] − X̃₁[k]                       tham chiếu nhiễu duy nhất
 trừ:     Y[k]  = F[k] − W[k]* · B[k]
-học:     W[k] ← (1 − μλ)·W[k] + μ · B[k]·conj(Y[k]) / (P_B[k] + ε)   chỉ khi được phép học
+học:     W[k] ← (1 − μλ)·W[k] + μ · B[k]·conj(Y[k]) / (|B[k]|² + ε)   chỉ khi được phép học
 chặn chuẩn: |W[k]| ≤ W_max
 ```
+
+| Chốt | Giá trị | Vì sao |
+|---|---|---|
+| `P_B` | `‖B[k]‖²` của chính bước ấy, `ε` 1e-10 | NLMS một nhánh chuẩn hoá theo năng lượng của chính đầu vào; `ε` chỉ chặn phép chia khi `B` bằng 0 |
+| `W_max` | 16, chốt bằng đo ở E8-T2 (`afe/gsc.md`) | trọng số tối ưu cho một nguồn có hướng là `‖F/B‖`, vượt 4 dưới ~300 Hz ở 4,5 cm; trên cảnh dựng trần 4 → 16 thêm 1,2–1,8 dB SIR với nhiễu có hướng mà lái sai ±45° không dìm người nói thêm (−2,9 so với −2,8 dB), trần 32 thêm < 0,1 dB |
+| Góc lái | pha `exp(−jω₁τ̂)` từ chuỗi double rồi xoay dồn qua 257 vạch, tính lại khi góc đổi | cùng lý do khớp từng bit như `doa`; mỗi lần đổi góc tốn ~345 µs 🔬 tối ưu sau |
+| Điều khiển học | mặt tiền cho học khi bước trước `vad = 0` | vế "tỉ số `F/B` thấp" chưa dựng: trên bản thu hai người nói lệch 17°, học theo hướng của `doa` làm `gsc` triệt chính người được lái tới 13–17 dB |
 
 **Điều khiển thích nghi là phần quyết định, không phải chi tiết.** GSC hỏng theo đúng một cách: tiếng
 người nói lọt vào `B` (lái lệch, vang) rồi bộ lọc học cách trừ chính người nói. Nên `W` chỉ học khi
