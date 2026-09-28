@@ -205,3 +205,16 @@ def test_synth_rows_are_read_from_interim(raw_root: Path, tmp_path: Path) -> Non
         for line in p.read_text().splitlines()
     ]
     assert [i["origin"] for i in items] == ["public"] * 5 + ["synth"]
+
+
+def test_repeats_pass_over_the_split_again_in_other_sessions(raw_root: Path, tmp_path: Path) -> None:
+    split = split_file(tmp_path / "train.txt", raw_root)
+    manifest = device.build(tiny(), split, raw_root, screened(tmp_path / "interim"), tmp_path / "out", repeats=2)
+    items = [
+        json.loads(line)
+        for p in sorted((tmp_path / "out").glob("*.items.jsonl"))
+        for line in p.read_text().splitlines()
+    ]
+    assert yaml.safe_load(manifest.read_text())["repeats"] == 2 and len(items) == 10
+    assert [i["item"] for i in items[:5]] == [i["item"] for i in items[5:]]
+    assert all(first["session"] != again["session"] for first, again in zip(items[:5], items[5:], strict=True))

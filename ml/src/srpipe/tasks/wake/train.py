@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import math
 
 import numpy as np
 import torch
@@ -44,36 +45,55 @@ def band_stats(shards: list[Shard]) -> tuple[np.ndarray, np.ndarray]:
 
 
 class Windows:
-    """Examples of window_hops hops: around the labelled end of a positive, or anywhere in a negative."""
+    """Examples of window_hops hops: one that holds a positive's whole label past the warm-up, or one anywhere in a
+    negative."""
 
     def __init__(self, positives: list[Shard], negatives: list[Shard], cfg: dict, rng: np.random.Generator) -> None:
         self.cfg, self.rng = cfg["train"], rng
         self.positives, self.negatives = positives, negatives
-        self.ends = [
-            (k, int(e)) for k, s in enumerate(positives) for e in np.flatnonzero(np.diff(s.labels.astype(int)) < 0)
-        ]
+        self.before, self.after = label_hops(self.cfg["label_s"])
+        width = self.cfg["window_hops"]
+        if short := [len(s.features) for s in positives + negatives if len(s.features) < width]:
+            raise ValueError(f"a shard of {min(short)} hops is shorter than a {width}-hop window")
+        self.ends = [(k, i["frame_offset"] + i["speech_frames"][1]) for k, s in enumerate(positives) for i in s.items]
         self.weights = np.array([len(s.features) for s in negatives], dtype=np.float64)
         self.weights /= self.weights.sum()
+        self.slack = width - self.cfg["warmup_hops"] - self.before - self.after
+        if self.slack < 1:
+            raise ValueError("window_hops leaves no room for a whole label past the warm-up")
 
     def cut(self, shard: Shard, stop: int) -> tuple[np.ndarray, np.ndarray]:
         width = self.cfg["window_hops"]
-        start = min(max(0, stop - width), max(0, len(shard.features) - width))
+        start = min(max(0, stop - width), len(shard.features) - width)
         return shard.features[start : start + width], shard.labels[start : start + width]
 
     def batch(self) -> tuple[np.ndarray, np.ndarray]:
-        n, width, warm = self.cfg["batch"], self.cfg["window_hops"], self.cfg["warmup_hops"]
+        n, width = self.cfg["batch"], self.cfg["window_hops"]
         n_pos = round(n * self.cfg["positive_share"])
         xs, ys = [], []
         for k in self.rng.integers(len(self.ends), size=n_pos):
             shard_index, end = self.ends[k]
-            stop = end + 1 + int(self.rng.integers(width - warm))
+            stop = end + self.after + int(self.rng.integers(self.slack))
             x, y = self.cut(self.positives[shard_index], stop)
             xs.append(x), ys.append(y)
         for k in self.rng.choice(len(self.negatives), size=n - n_pos, p=self.weights):
             shard = self.negatives[k]
-            x, y = self.cut(shard, int(self.rng.integers(width, max(width, len(shard.features)) + 1)))
+            x, y = self.cut(shard, int(self.rng.integers(width, len(shard.features) + 1)))
             xs.append(x), ys.append(y)
         return np.stack(xs), np.stack(ys)
+
+
+def coverage(cfg: dict, windows: Windows) -> str:
+    """How often training sees each positive and each negative hop, for the run's log."""
+    spec = cfg["train"]
+    n_pos = round(spec["batch"] * spec["positive_share"])
+    seen = spec["steps"] * (spec["batch"] - n_pos) * spec["window_hops"]
+    negative_hops = sum(len(s.features) for s in windows.negatives)
+    visits = spec["steps"] * n_pos / len(windows.ends)
+    return (
+        f"{spec['steps']} steps: each of {len(windows.ends)} positives about {visits:.0f} times,"
+        f" each of {negative_hops} negative hops about {seen / negative_hops:.1f} times"
+    )
 
 
 def train(cfg: dict, sets: dict[str, list[Shard]], device: str) -> tuple[Tcn, dict, list[dict]]:
@@ -83,9 +103,14 @@ def train(cfg: dict, sets: dict[str, list[Shard]], device: str) -> tuple[Tcn, di
     n_bands = len(mean)
     model = Tcn(n_bands, **cfg["model"]).to(device)
     optimiser = torch.optim.Adam(model.parameters(), lr=spec["learning_rate"])
+    final = spec["final_learning_rate"] / spec["learning_rate"]
+    schedule = torch.optim.lr_scheduler.LambdaLR(
+        optimiser, lambda step: final + (1 - final) * 0.5 * (1 + math.cos(math.pi * step / spec["steps"]))
+    )
     windows = Windows(sets["train_pos"], sets["train_neg"], cfg, rng)
     mean_t, std_t = torch.tensor(mean, device=device)[:, None], torch.tensor(std, device=device)[:, None]
-    best, history = None, []
+    best, history, losses = None, [], []
+    print(coverage(cfg, windows), flush=True)
     for step in range(1, spec["steps"] + 1):
         x, y = windows.batch()
         x = (torch.from_numpy(x.astype(np.float32)).to(device).transpose(1, 2) - mean_t) / std_t
@@ -95,12 +120,16 @@ def train(cfg: dict, sets: dict[str, list[Shard]], device: str) -> tuple[Tcn, di
         optimiser.zero_grad()
         loss.backward()
         optimiser.step()
+        schedule.step()
+        losses.append(float(loss))
         if step % spec["eval_every"] == 0:
             model.eval()
             val = sweep(model, sets["val_pos"], sets["val_neg"], mean, std, cfg, device)
             model.train()
             threshold, recall, rate = operating_point(val, cfg["eval"]["false_accepts_per_hour"])
-            row = {"step": step, "loss": float(loss), "threshold": threshold, "recall": recall, "fa_per_hour": rate}
+            row = {"step": step, "loss": float(np.mean(losses)), "lr": schedule.get_last_lr()[0]}
+            row |= {"threshold": threshold, "recall": recall, "fa_per_hour": rate}
+            losses = []
             history.append(row)
             print(" ".join(f"{k} {v:.4g}" for k, v in row.items()), flush=True)
             if best is None or (recall, -rate) > (best["recall"], -best["fa_per_hour"]):

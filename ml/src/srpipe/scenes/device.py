@@ -296,9 +296,12 @@ def _shard(job: tuple) -> list[Path]:
     return written
 
 
-def build(cfg: dict, split_file: Path, raw_root: Path, interim: Path, out: Path, workers: int = 1) -> Path:
-    """Every item of split_file through the simulation into out, then manifest.yaml: the config, the split's sha256,
-    the room bank's, and each file's sha256."""
+def build(
+    cfg: dict, split_file: Path, raw_root: Path, interim: Path, out: Path, workers: int = 1, repeats: int = 1
+) -> Path:
+    """Every item of split_file through the simulation into out, repeats times over, each pass in sessions of their
+    own rooms, levels and noise; then manifest.yaml: the config, the split's sha256, the repeats, the room bank's
+    sha256 and each file's."""
     rows = splits.read_split(split_file)
     if foreign := sorted({row.origin for row in rows} - CLEAN_ORIGINS):
         raise ValueError(f"{split_file}: the simulation takes clean speech, not origin {', '.join(foreign)}")
@@ -306,6 +309,7 @@ def build(cfg: dict, split_file: Path, raw_root: Path, interim: Path, out: Path,
     if unscreened := [row.item for row in rows if row.item in rejected]:
         raise ValueError(f"{split_file}: {len(unscreened)} items screening rejected, e.g. {unscreened[0]}")
     bank = room_bank(cfg, interim, workers)
+    rows = rows * repeats
     per = cfg["session"]["items"]
     sessions = [(k, rows[i : i + per]) for k, i in enumerate(range(0, len(rows), per))]
     per_shard = cfg["sessions_per_shard"]
@@ -321,6 +325,7 @@ def build(cfg: dict, split_file: Path, raw_root: Path, interim: Path, out: Path,
     body = {
         "config": cfg,
         "split": {"file": split_file.name, "sha256": sha256_of(split_file)},
+        "repeats": repeats,
         "rooms_sha256": sha256_of(bank / "rooms.yaml"),
         "items": len(rows),
         "hours": round(frames * HOP / FS / 3600, 3),
@@ -359,13 +364,15 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("out", help="under processed/, e.g. command/train_v1")
     run.add_argument("--config", type=Path, default=CONFIGS / "scenes" / "device.yaml")
     run.add_argument("--workers", type=int, default=4)
+    run.add_argument("--repeats", type=int, default=1, help="passes over the split, each in other sessions")
     make = sub.add_parser("playback", help="write interim/playback/vivos_test.wav and its JSON")
     make.add_argument("--seconds", type=float, default=60.0)
     args = parser.parse_args(argv)
     paths = data_paths()
     if args.command == "build":
         cfg = load_yaml(args.config)
-        print(build(cfg, args.split, paths["raw"], paths["interim"], paths["processed"] / args.out, args.workers))
+        out = paths["processed"] / args.out
+        print(build(cfg, args.split, paths["raw"], paths["interim"], out, args.workers, args.repeats))
         return 0
     signal_, items = playback(paths["raw"] / SPEECH, args.seconds)
     out = paths["interim"] / OUT

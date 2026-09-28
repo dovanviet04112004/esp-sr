@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 
 from srpipe.core.config import load_yaml
 from srpipe.tasks.wake import CONFIG, data, train
@@ -39,7 +40,9 @@ def processed(folder: Path, items: list[tuple[int, int, int]], rng: np.random.Ge
         offset += n
     np.save(folder / "shard_00000.features.npy", np.concatenate(feats))
     (folder / "shard_00000.items.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-    (folder / "manifest.yaml").write_text("items: 1\n")
+    (folder / "shard_00001.items.jsonl").write_text("left over from a larger build, not in the manifest\n")
+    listed = {"shard_00000.features.npy": "-", "shard_00000.items.jsonl": "-"}
+    (folder / "manifest.yaml").write_text(yaml.safe_dump({"sha256": listed}))
     return folder
 
 

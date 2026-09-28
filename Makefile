@@ -71,13 +71,10 @@ screen-audit: screen ## Hear clips in bins of each speech measure through PhoWhi
 	cd ml && uv run python -m srpipe.core.screen audit
 
 splits: screen ## Cut the wake and command splits from screened clips into ml/data/splits (KEHOACH 1.3)
-	cd ml && uv run python -m srpipe.tasks.wake.data && uv run python -m srpipe.tasks.command.data
+	cd ml && uv run python -m srpipe.tasks.wake.data split && uv run python -m srpipe.tasks.command.data
 
-WAKE_SPLIT ?= v1
-WORKERS ?= 12
-wake-features: ## Run each file of split wake/$(WAKE_SPLIT) through the board simulation into processed/wake/$(WAKE_SPLIT) (E4-T8)
-	cd ml && for f in $$(ls -S -r data/splits/wake/$(WAKE_SPLIT)/*.txt); do \
-	  uv run python -m srpipe.scenes.device build $$f wake/$(WAKE_SPLIT)/$$(basename $$f .txt) --workers $(WORKERS) || exit 1; done
+wake-features: ## Run each file of the wake split through the board simulation into processed/wake (E4-T8)
+	cd ml && uv run python -m srpipe.tasks.wake.data simulate
 
 wake-train: ## Train the wake TCN on processed/wake/<split> on the GPU into ml/artifacts/wake/runs (E11-T11)
 	cd ml && uv run --extra train python -m srpipe.tasks.wake.train

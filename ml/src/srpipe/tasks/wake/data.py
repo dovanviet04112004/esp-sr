@@ -1,8 +1,8 @@
 """Split wake/v<n> (KEHOACH 1.3, 3.11): kept TTS clips of E11-T7 and public speech, by role and label.
 
 Positives and near misses by the role of their voice, public negatives from the corpora that gave the reference
-voices, test_neg from Common Voice and VIVOS test; no negative says the wake word. test_pos waits for E11-T6.
-Run: python -m srpipe.tasks.wake.data
+voices, test_neg from Common Voice and VIVOS test; no negative says the wake word. simulate runs each file through
+the board simulation. Run: python -m srpipe.tasks.wake.data {split,simulate}
 """
 
 from __future__ import annotations
@@ -16,8 +16,9 @@ import numpy as np
 import yaml
 
 from srpipe.core import corpus, screen, splits
-from srpipe.core.config import data_paths, load_yaml
+from srpipe.core.config import CONFIGS, data_paths, load_yaml
 from srpipe.generated import grid
+from srpipe.scenes import device
 from srpipe.tasks.wake import CONFIG, synth
 
 PUBLIC, SYNTH = "public", "synth"
@@ -44,8 +45,10 @@ def load_set(folder: Path, positive: bool, around: tuple[int, int], dtype: str) 
     manifest of a finished build."""
     if not (folder / "manifest.yaml").exists():
         raise FileNotFoundError(f"{folder} has no manifest.yaml: run make wake-features to the end")
+    built = yaml.safe_load((folder / "manifest.yaml").read_text(encoding="utf-8"))["sha256"]
     shards = []
-    for listing in sorted(folder.glob("shard_*.items.jsonl")):
+    for name in sorted(n for n in built if n.endswith(".items.jsonl")):
+        listing = folder / name
         stem = str(listing).removesuffix(".items.jsonl")
         features = np.load(stem + ".features.npy").astype(dtype)
         items = [json.loads(line) for line in listing.read_text(encoding="utf-8").splitlines()]
@@ -143,9 +146,31 @@ Dựng bằng `python -m srpipe.tasks.wake.data` (`make splits`), seed {spec["se
 """
 
 
-def main(argv: list[str] | None = None) -> int:
-    argparse.ArgumentParser(description=__doc__.splitlines()[0]).parse_args(argv)
-    cfg, paths, screening = load_yaml(CONFIG), data_paths(), load_yaml(screen.CONFIG)
+def built_as(out: Path, device_cfg: dict, split_file: Path, repeats: int) -> bool:
+    """Whether out holds a finished simulation of split_file with this config and number of passes."""
+    if not (out / "manifest.yaml").exists():
+        return False
+    body = yaml.safe_load((out / "manifest.yaml").read_text(encoding="utf-8"))
+    same_split = body["split"]["sha256"] == splits.sha256_of(split_file)
+    return body["config"] == device_cfg and same_split and body.get("repeats", 1) == repeats
+
+
+def simulate(cfg: dict, paths: dict[str, Path]) -> None:
+    """Every file of the split through the board simulation into processed/wake/<split>/<file>, smallest first,
+    each as many passes as simulate.repeats asks; a file already built the same way is left as it is."""
+    spec = cfg["simulate"]
+    device_cfg = load_yaml(CONFIGS / cfg["features"])
+    for split_file in sorted((paths["splits"] / "wake" / spec["split"]).glob("*.txt"), key=lambda f: f.stat().st_size):
+        out = paths["processed"] / "wake" / spec["split"] / split_file.stem
+        repeats = spec["repeats"].get(split_file.stem, 1)
+        if built_as(out, device_cfg, split_file, repeats):
+            print(f"{out}: already built", flush=True)
+            continue
+        print(device.build(device_cfg, split_file, paths["raw"], paths["interim"], out, spec["workers"], repeats))
+
+
+def cut_split(cfg: dict, paths: dict[str, Path]) -> int:
+    screening = load_yaml(screen.CONFIG)
     public = screen.kept_clips(screening, paths, "speech")
     seconds = screen.lengths(screening, paths, "speech")
     manifests = {}
@@ -162,6 +187,17 @@ def main(argv: list[str] | None = None) -> int:
     print("\n".join(f"{name}: {len(rows)} rows, {splits.hours(rows, seconds):.2f} h" for name, rows in files.items()))
     print("\n".join(problems) or f"{out}: every rule of KEHOACH 1.3 holds")
     return 1 if problems else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("step", choices=["split", "simulate"])
+    step = parser.parse_args(argv).step
+    cfg, paths = load_yaml(CONFIG), data_paths()
+    if step == "simulate":
+        simulate(cfg, paths)
+        return 0
+    return cut_split(cfg, paths)
 
 
 if __name__ == "__main__":
