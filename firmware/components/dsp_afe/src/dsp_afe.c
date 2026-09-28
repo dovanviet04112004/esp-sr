@@ -215,6 +215,7 @@ static void walk_spatial(walker_t *w, dsp_afe_spatial_t spatial, dsp_afe_t *afe)
             .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
             .step_size = GEN_AFE_GSC_STEP_SIZE,
             .leakage = GEN_AFE_GSC_LEAKAGE,
+            .weight_max = GEN_AFE_GSC_WEIGHT_MAX,
         };
         const size_t bytes = dsp_afe_gsc_workspace_bytes(&cfg);
         void *mem = region(w, bytes);

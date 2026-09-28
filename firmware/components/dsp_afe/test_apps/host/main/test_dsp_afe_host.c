@@ -409,13 +409,19 @@ static void check_module_shells(void)
           "doa: unknown until searched, then an angle of the grid; refuses a step that leaves no mirror");
 
     const dsp_afe_gsc_config_t gsc_cfg = {GEN_ARRAY_SPACING_M, GEN_ARRAY_SPEED_OF_SOUND_M_S, 0.05f, 1e-4f,
-                                          0.0f};
+                                          4.0f};
+    dsp_afe_gsc_config_t gsc_bad = gsc_cfg;
+    gsc_bad.weight_max = 0.0f;
     dsp_afe_gsc_t *gsc = NULL;
     bytes = dsp_afe_gsc_workspace_bytes(&gsc_cfg);
-    check(dsp_afe_gsc_init(&gsc, &gsc_cfg, region(bytes), bytes) == ESP_OK &&
-              dsp_afe_gsc_process(gsc, x0, x1, 30.0f, true, y0) == ESP_OK && y0[7].re == 2.0f &&
-              y0[7].im == 0.0f,
-          "gsc shell: writes the mean of both microphones");
+    const bool gsc_first = dsp_afe_gsc_workspace_bytes(&gsc_bad) == 0 &&
+                           dsp_afe_gsc_init(&gsc, &gsc_cfg, region(bytes), bytes) == ESP_OK &&
+                           dsp_afe_gsc_process(gsc, x0, x1, 90.0f, true, y0) == ESP_OK &&
+                           fabsf(y0[7].re - 2.0f) < 1e-5f && fabsf(y0[7].im) < 1e-5f;
+    const bool gsc_learnt =
+        dsp_afe_gsc_process(gsc, x0, x1, 90.0f, false, y1) == ESP_OK && fabsf(y1[7].re - 2.0f) > 1e-3f;
+    check(gsc_first && gsc_learnt,
+          "gsc: zero weights give the steered mean, a learning hop changes the next; refuses a zero cap");
 
     const dsp_afe_bss_config_t bss_cfg = {1.0f, GEN_ARRAY_SPACING_M, GEN_ARRAY_SPEED_OF_SOUND_M_S};
     dsp_afe_bss_t *bss = NULL;
@@ -568,6 +574,7 @@ static void run_golden(const char *root)
         parity_run_block(root, "ns_omlsa", parity_ns_omlsa, read_case, buf, sizeof(buf), &s_failures) +
         parity_run_block(root, "vad", parity_vad, read_case, buf, sizeof(buf), &s_failures) +
         parity_run_block(root, "doa", parity_doa, read_case, buf, sizeof(buf), &s_failures) +
+        parity_run_block(root, "gsc", parity_gsc, read_case, buf, sizeof(buf), &s_failures) +
         parity_run_block(root, "agc", parity_agc, read_case, buf, sizeof(buf), &s_failures);
 #elif DSP_AFE_HOST_PRODUCT
     const unsigned cases = parity_run_block(root, "chain_modules", parity_chain_modules, read_case, buf,

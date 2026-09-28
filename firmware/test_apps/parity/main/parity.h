@@ -85,6 +85,13 @@ bool parity_vad(const char *case_name, const void *buf, size_t len);
  */
 bool parity_doa(const char *case_name, const void *buf, size_t len);
 
+/** Run one gsc case with the configuration it carries: both channels' bins one hop at a time, steered and
+ * learning where the case says; compare the output bins.
+ *  @ctx task | blocking | builds only with CONFIG_DSP_AFE_GSC_ENABLE, where gsc.c is compiled
+ *  @ret false when the case lacks a tensor, has the wrong shape or the module refuses it
+ */
+bool parity_gsc(const char *case_name, const void *buf, size_t len);
+
 /** Run one ns_omlsa case with the gain floor it carries, one hop of power at a time with its residual echo,
  * if any; compare the gains and the speech probability.
  *  @ctx task | blocking | builds only with CONFIG_DSP_AFE_NS_OMLSA_ENABLE, where ns_omlsa.c is compiled
