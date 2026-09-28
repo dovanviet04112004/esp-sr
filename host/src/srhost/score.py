@@ -43,6 +43,7 @@ SIGN_COS_MIN = 0.5
 PLAIN = ChainConfig(modules=())
 # agc does not change the level it is handed, so the level is measured without it.
 INTO_AGC_MODULES = tuple(m for m in afe.MODULES if m != "agc")
+NS_MODULE = "ns_omlsa"
 LEVEL_PERCENTILES = (10, 50, 90)
 COHERENCE_MIN = 0.9
 
@@ -81,6 +82,16 @@ class ParityFigures:
     over_tolerance: int
     tolerance_lsb: float
     snr_db: float
+
+
+@dataclass(frozen=True)
+class NsEffect:
+    """dB that ns takes off the level into agc, median over pause hops and over speech hops (vad of the product)."""
+
+    pause_db: float | None
+    speech_db: float | None
+    pause_hops: int
+    speech_hops: int
 
 
 @dataclass(frozen=True)
@@ -150,14 +161,10 @@ def chain_parity(ch0: np.ndarray, ch1: np.ndarray, clean: np.ndarray, gap_offset
     return ParityFigures(compared, skipped, max_abs, over, tolerance, snr_db)
 
 
-def front_level(
-    ch0: np.ndarray,
-    ch1: np.ndarray,
-    gap_offsets: list[int],
-    gains: np.ndarray | None,
-    modules: tuple[str, ...] = INTO_AGC_MODULES,
-) -> FrontLevel:
-    """Run the product chain up to agc over each stretch between gaps, as the board restarts it, skipping warm-up."""
+def chain_hops(
+    ch0: np.ndarray, ch1: np.ndarray, gap_offsets: list[int], gains: np.ndarray | None, modules: tuple[str, ...]
+) -> tuple[np.ndarray, np.ndarray]:
+    """level_dbfs and vad of every hop past the warm-up, the chain restarted after each gap as the board does."""
     hop = grid.HOP_SAMPLES
     bounds = [0, *gap_offsets, min(len(ch0), len(ch1))]
     cfg = ChainConfig(modules=modules, balance_gains=gains)
@@ -171,8 +178,33 @@ def front_level(
                 speech.append(frame.vad)
     if not levels:
         raise ValueError("no hop of ch0 and ch1 outlasts the warm-up")
+    return np.array(levels, dtype=np.float64), np.array(speech, dtype=bool)
+
+
+def front_level(
+    ch0: np.ndarray,
+    ch1: np.ndarray,
+    gap_offsets: list[int],
+    gains: np.ndarray | None,
+    modules: tuple[str, ...] = INTO_AGC_MODULES,
+) -> FrontLevel:
+    """Run the product chain up to agc over each stretch between gaps, as the board restarts it, skipping warm-up."""
+    levels, speech = chain_hops(ch0, ch1, gap_offsets, gains, modules)
     percentiles = tuple(round(float(np.percentile(levels, q))) for q in LEVEL_PERCENTILES)
     return FrontLevel(gains is not None, percentiles, float(np.mean(speech)))
+
+
+def ns_effect(ch0: np.ndarray, ch1: np.ndarray, gap_offsets: list[int], gains: np.ndarray | None) -> NsEffect:
+    """What ns takes off the level into agc, per hop the chain with it against the chain without, split by the vad
+    of the chain with it: the noise it removes in pauses and the speech it loses (E9-T1)."""
+    with_ns, speech = chain_hops(ch0, ch1, gap_offsets, gains, INTO_AGC_MODULES)
+    without, _ = chain_hops(ch0, ch1, gap_offsets, gains, tuple(m for m in INTO_AGC_MODULES if m != NS_MODULE))
+    taken = without - with_ns
+
+    def median(mask: np.ndarray) -> float | None:
+        return float(np.median(taken[mask])) if mask.any() else None
+
+    return NsEffect(median(~speech), median(speech), int((~speech).sum()), int(speech.sum()))
 
 
 def board_gains(board: str) -> np.ndarray | None:
@@ -192,6 +224,7 @@ class Score:
     pair: PairFigures | None
     trimmed_samples: int = 0
     front: FrontLevel | None = None
+    ns: NsEffect | None = None
 
 
 def pair_figures(stats: mic_pair.PairStats, doa_deg: int) -> PairFigures:
@@ -242,12 +275,14 @@ def score(session: Path, shift: int | None = None) -> Score:
     if shift is None and all(name in pcm for name in PARITY_CHANNELS):
         parity = chain_parity(pcm["ch0"], pcm["ch1"], pcm["clean"], read_gap_offsets(session))
     pair = None
-    front = None
+    front = ns = None
     if stats is not None:
-        front = front_level(pcm["ch0"], pcm["ch1"], read_gap_offsets(session), board_gains(meta["board"]))
+        gains = board_gains(meta["board"])
+        front = front_level(pcm["ch0"], pcm["ch1"], read_gap_offsets(session), gains)
+        ns = ns_effect(pcm["ch0"], pcm["ch1"], read_gap_offsets(session), gains)
         if meta.get("doa_deg") is not None:
             pair = pair_figures(stats, int(meta["doa_deg"]))
-    return Score(meta, channels, parity, pair, trimmed, front)
+    return Score(meta, channels, parity, pair, trimmed, front, ns)
 
 
 def pair_lines(pair: PairFigures) -> list[str]:
@@ -299,6 +334,17 @@ def table(result: Score) -> str:
             f"| {' | '.join(f'p{q} dBFS' for q in LEVEL_PERCENTILES)} | Speech hops (vad) |",
             f"|{'---|' * (len(LEVEL_PERCENTILES) + 1)}",
             f"| {' | '.join(str(v) for v in front.percentiles_dbfs)} | {100 * front.speech_share:.1f} % |",
+        ]
+    if result.ns is not None:
+        ns = result.ns
+
+        def db(value: float | None) -> str:
+            return "no hop" if value is None else f"{value:.1f} dB"
+
+        lines += [
+            "",
+            f"ns takes off pauses {db(ns.pause_db)} ({ns.pause_hops} hops), speech {db(ns.speech_db)}"
+            f" ({ns.speech_hops} hops), medians of the level into agc without ns minus with it",
         ]
     if result.pair is not None:
         lines += pair_lines(result.pair)

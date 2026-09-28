@@ -188,3 +188,11 @@ def test_a_larger_shift_floors_every_sample_as_the_board_shifts(tmp_path: Path) 
     assert result.parity is None and result.meta["pcm_shift"] == "15 (floored from 13)"
     shifted = channels["ch1"] >> 2
     assert {f.name: f.peak_lsb for f in result.channels}["ch1"] == max(-int(shifted.min()), int(shifted.max()))
+
+
+def test_ns_takes_off_steady_noise_and_reports_it_by_vad(tmp_path: Path) -> None:
+    rng = np.random.default_rng(11)
+    noise = (rng.standard_normal((400 * HOP, 2)) * 300).astype(np.int16)
+    effect = score.ns_effect(noise[:, 0], noise[:, 1], [], None)
+    assert effect.pause_hops + effect.speech_hops == 400 - score.WARMUP_HOPS
+    assert effect.pause_hops > 9 * effect.speech_hops and effect.pause_db >= 10
