@@ -8,3 +8,4 @@ engines:
     dtype: float32                 # the checkpoint's own precision; the GPU default of bfloat16 rounds it
   f5:                              # clones only, from a reference clip and its text
     checkpoint: hynt/F5-TTS-Vietnamese-ViVoice@5c14cdd4e3f62b69e75140558bea2b2e293ee8f1
+    vocoder: charactr/vocos-mel-24khz@0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21

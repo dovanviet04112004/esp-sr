@@ -43,7 +43,8 @@ def test_every_engine_and_the_checker_has_a_pinned_project() -> None:
     for name in [*tts["engines"], "asr"]:
         assert (PROJECTS / name / "run.py").is_file()
         assert (PROJECTS / name / "uv.lock").is_file()
-    pins = [tts["asr"], *(spec[k] for spec in tts["engines"].values() for k in ("checkpoint", "codec") if k in spec)]
+    repos = ("checkpoint", "codec", "vocoder")
+    pins = [tts["asr"], *(spec[k] for spec in tts["engines"].values() for k in repos if k in spec)]
     assert all(len(pin.split("@")[1]) == 40 for pin in pins)
 
 

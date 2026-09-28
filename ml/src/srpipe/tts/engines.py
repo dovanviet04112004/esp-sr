@@ -20,11 +20,11 @@ def run(name: str, *args: str, cache: Path) -> str:
 
 def engine_args(engine: str, tts: dict) -> list[str]:
     """What the engine's run.py takes ahead of its command: VieNeu two pinned repos and its dtype, F5 its pinned
-    checkpoint."""
+    checkpoint and vocoder."""
     spec = tts["engines"][engine]
     if engine == "vieneu":
         return [spec["checkpoint"], spec["codec"], spec["dtype"]]
-    return [spec["checkpoint"]]
+    return [spec["checkpoint"], spec["vocoder"]]
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
