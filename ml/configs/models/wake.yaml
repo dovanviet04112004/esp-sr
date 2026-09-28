@@ -37,3 +37,14 @@ candidates:                        # scored by python -m srpipe.tasks.wake.candi
   - bác tí hon ơi
   - hạt tiêu nhỏ ơi
   - xin chào cà pháo
+synth:                             # E11-T7: positives from the engines of common/tts.yaml, each heard back before it counts
+  vieneu:                          # preset voices, and clones of the reference speakers
+    texts: [chào mi na, Chào Mina!]
+  f5:                              # clones only; seeds give different takes
+    texts: [chào mi na]
+    seeds: [0, 1, 2]
+    speed: 1.0
+  pilot:                           # a first comparison of the engines on a few voices, before the full set
+    references: speech/vivos/train # under raw/: one directory per speaker, prompts.txt beside waves/
+    speakers: [VIVOSSPK01, VIVOSSPK05, VIVOSSPK12, VIVOSSPK27, VIVOSSPK40]
+    ref_seconds: [4.0, 7.5]        # the first clip of each speaker inside this span is its reference
