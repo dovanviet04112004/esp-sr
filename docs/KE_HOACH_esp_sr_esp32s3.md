@@ -1187,7 +1187,7 @@ notes: phi thương mại — ràng buộc lan sang model (§1.4)
 ```
 
 **Một dòng split** là TSV bốn cột `item  spk  room  origin`: `item` là đường dẫn so với `raw/` hoặc
-`interim/`, hay `<parquet>#<dòng>` với kho đóng gói parquet; `spk` là mã người nói của kho hoặc `spk_NNN`, `-` với nhiễu; `room` là phòng thu với bản của
+`interim/`, hay `<parquet>#<dòng>` với kho đóng gói parquet; dòng `synth` so với `interim/`, mọi dòng khác so với `raw/`; `spk` là mã người nói của kho hoặc `spk_NNN`, `-` với nhiễu; `room` là phòng thu với bản của
 board, `-` với kho công khai; `origin` là `public` | `board` | `synth` | `scene`. Một file tự đủ để kiểm
 luật mà không mở dữ liệu. `SPLIT.md` ghi luật, seed, lệnh sinh, và một dòng `- <file>: <sha256>` cho mỗi
 file của phiên bản.
