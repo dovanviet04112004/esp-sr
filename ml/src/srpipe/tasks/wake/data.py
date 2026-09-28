@@ -8,15 +8,54 @@ Run: python -m srpipe.tasks.wake.data
 from __future__ import annotations
 
 import argparse
+import json
+from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import yaml
 
 from srpipe.core import corpus, screen, splits
 from srpipe.core.config import data_paths, load_yaml
+from srpipe.generated import grid
 from srpipe.tasks.wake import CONFIG, synth
 
 PUBLIC, SYNTH = "public", "synth"
+
+
+@dataclass
+class Shard:
+    """One shard of processed/wake/<split>/<file>: log-mel per hop, the per-hop target, and its items."""
+
+    features: np.ndarray  # (hops, n_bands), natural-log mel as the device computes it
+    labels: np.ndarray  # (hops,) uint8, 1 around the end of a positive's speech
+    items: list[dict]
+    positive: bool
+
+
+def label_hops(label_s: list[float]) -> tuple[int, int]:
+    """Hops before and after the end of a positive's speech that are labelled 1."""
+    rate = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
+    return round(label_s[0] * rate), round(label_s[1] * rate)
+
+
+def load_set(folder: Path, positive: bool, around: tuple[int, int], dtype: str) -> list[Shard]:
+    """Every shard of one processed split file, labelled, its features held as dtype; the folder must hold the
+    manifest of a finished build."""
+    if not (folder / "manifest.yaml").exists():
+        raise FileNotFoundError(f"{folder} has no manifest.yaml: run make wake-features to the end")
+    shards = []
+    for listing in sorted(folder.glob("shard_*.items.jsonl")):
+        stem = str(listing).removesuffix(".items.jsonl")
+        features = np.load(stem + ".features.npy").astype(dtype)
+        items = [json.loads(line) for line in listing.read_text(encoding="utf-8").splitlines()]
+        labels = np.zeros(len(features), dtype=np.uint8)
+        if positive:
+            for item in items:
+                end = item["frame_offset"] + item["speech_frames"][1]
+                labels[max(0, end - around[0]) : end + around[1]] = 1
+        shards.append(Shard(features, labels, items, positive))
+    return shards
 
 
 def voice_of(clip: dict) -> str:
