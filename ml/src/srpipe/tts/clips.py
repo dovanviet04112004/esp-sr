@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import math
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -52,22 +51,24 @@ def speaker_references(corpus: Path, speakers: list[str] | None, ref_seconds: li
 def parquet_references(
     name: str, files: list[Path], count: int, ref_seconds: list[float], rng: np.random.Generator, out: Path
 ) -> list[Reference]:
-    """count clips inside ref_seconds from Hugging Face audio parquet files, each file visited in turn so the clips
-    spread over the corpus, written to out/<name>/ as WAV at their own rate. A transcript normalize refuses is
-    skipped."""
+    """count clips inside ref_seconds from Hugging Face audio parquet files, written to out/<name>/ as WAV at their own
+    rate. Each visit of a file takes one unused clip of a random row group and the files are visited in turn, so the
+    clips spread over the corpus and its speakers. A transcript normalize refuses is skipped."""
     low, high = ref_seconds
-    per_visit = math.ceil(count / len(files))
+    used: set[tuple[int, int, int]] = set()
     refs: list[Reference] = []
     while len(refs) < count:
         found = len(refs)
         for i in rng.permutation(len(files)):
+            if len(refs) == count:
+                break
             table = pq.ParquetFile(files[i])
             group = int(rng.integers(table.num_row_groups))
             rows = table.read_row_group(group, columns=["audio", "transcription"]).to_pylist()
-            taken = 0
             for j in rng.permutation(len(rows)):
-                if taken == per_visit or len(refs) == count:
-                    break
+                if (i, group, j) in used:
+                    continue
+                used.add((i, group, j))
                 audio, rate = sf.read(io.BytesIO(rows[j]["audio"]["bytes"]), dtype="int16")
                 if not low <= len(audio) / rate <= high:
                     continue
@@ -80,8 +81,6 @@ def parquet_references(
                 wav.parent.mkdir(parents=True, exist_ok=True)
                 sf.write(str(wav), audio, rate, subtype="PCM_16")
                 refs.append(Reference(speaker, wav, text))
-                taken += 1
-            if len(refs) == count:
                 break
         if len(refs) == found:
             raise ValueError(f"{name}: no clip of {low}-{high} s left to draw")

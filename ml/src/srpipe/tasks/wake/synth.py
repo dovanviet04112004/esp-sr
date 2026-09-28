@@ -103,11 +103,9 @@ def negative_requests(
 
 
 def training_references(cfg: dict, raw: Path, interim: Path) -> list[clips.Reference]:
-    """Every VIVOS train speaker and the parquet draws of the config, drawn once and read back from references.yaml."""
+    """Every VIVOS train speaker and the parquet draws of the config, the same on every run since the draws are seeded;
+    listed in references.yaml."""
     listing = interim / REFERENCES / "references.yaml"
-    if listing.exists():
-        rows = yaml.safe_load(listing.read_text(encoding="utf-8"))
-        return [clips.Reference(r["speaker"], Path(r["wav"]), r["text"]) for r in rows]
     spec, seconds = cfg["synth"]["references"], cfg["synth"]["ref_seconds"]
     rng = np.random.default_rng(cfg["synth"]["seed"])
     refs = clips.speaker_references(raw / spec["vivos"], None, seconds)

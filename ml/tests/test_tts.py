@@ -4,6 +4,7 @@ spread over the files, and a rendered clip passes only when its own text is hear
 from __future__ import annotations
 
 import io
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -69,7 +70,8 @@ def test_parquet_references_spread_over_the_files_and_skip_what_does_not_fit(tmp
     refs = clips.parquet_references("c", files, 5, [4.0, 7.5], np.random.default_rng(1), tmp_path / "out")
     assert len(refs) == 5 and len({r.speaker for r in refs}) == 5
     assert all(4.0 <= sf.info(str(r.wav)).duration <= 7.5 and r.text.startswith("tệp") for r in refs)
-    assert len({r.speaker.split("_")[1] for r in refs}) == len(files)
+    per_file = Counter(r.speaker.split("_")[1] for r in refs)
+    assert len(per_file) == len(files) and max(per_file.values()) == 2
     again = clips.parquet_references("c", files, 5, [4.0, 7.5], np.random.default_rng(1), tmp_path / "out")
     assert again == refs
 
