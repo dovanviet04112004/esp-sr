@@ -135,8 +135,11 @@ Một mẩu bị loại theo luật đầu tiên nó phạm, xét từ trên xu�
 | `rate` | số âm tiết mỗi giây tiếng hoạt động nằm ngoài khoảng: lời không khớp tiếng | tiếng nói |
 | `duplicate` | qua mọi luật trên nhưng PCM đã giải mã trùng một mẩu **giữ lại** đứng trước, theo thứ tự kho trong cấu hình | mọi kho |
 
-Luật chỉ loại mẩu **hỏng rõ ràng**. Mẩu ồn vừa phải vẫn giữ, vì mô hình phải chịu được nhiễu. Ngưỡng chọn từ phân bố
-số đo, rồi kiểm bằng bộ nghe kiểm của `srpipe/tts` trên các mẩu nằm quanh ngưỡng. Số đo và kết quả kiểm ghi ở
+Luật chỉ loại mẩu **hỏng rõ ràng**. Mẩu ồn vừa phải vẫn giữ, vì mô hình phải chịu được nhiễu. Ngưỡng của tiếng nói
+đặt bằng **quét**: mỗi thước chia thành ô, bộ nghe kiểm của `srpipe/tts` nghe một mẫu rút ngẫu nhiên của mỗi ô, và một
+mẩu là **không dùng được** khi nó nghe sai từ nửa số âm tiết của lời trở lên. Ô nào từ nửa số mẩu trở lên không dùng
+được thì luật cắt tới ranh của ô ấy; thước nào không có ô như thế thì luật của nó tắt trong cấu hình. Nhiễu và RIR
+không có lời để nghe, nên chỉ loại mẩu dưới một bước lượng tử 16 bit và mẩu trùng. Bảng quét ghi ở
 `docs/measurements/data_screen.md`, số mẩu và số giờ bị loại theo từng lý do ghi ở `DU_LIEU.md`.
 
 **Đường mô phỏng board** (`srpipe/scenes/device.py`, cấu hình `configs/scenes/device.yaml`) biến các mẩu tiếng sạch
