@@ -165,3 +165,29 @@ def test_a_batch_reaches_the_engine_one_voice_at_a_time(tmp_path: Path, monkeypa
     engines.synthesise("f5", requests, {"engines": {"f5": {"checkpoint": "c", "vocoder": "v"}}}, tmp_path, tmp_path)
     sent = [json.loads(line)["id"] for line in (tmp_path / "f5_requests.jsonl").read_text().splitlines()]
     assert sent == ["a0", "a1", "a2", "b0", "b1", "b2", "p0", "p1", "p2"]
+
+
+def test_a_clip_is_heard_again_only_for_a_new_target_or_new_bytes(tmp_path: Path, monkeypatch) -> None:
+    asked: list[list[str]] = []
+
+    def run(name, model, batch, listing, heard, cache):
+        lines = [json.loads(line) for line in Path(listing).read_text(encoding="utf-8").splitlines()]
+        asked.append([c["id"] for c in lines])
+        answers = [
+            {"id": c["id"], "text": "x", "logp": -1.0, "targets": dict.fromkeys(c["targets"], -2.0)} for c in lines
+        ]
+        Path(heard).write_text("".join(json.dumps(a) + "\n" for a in answers), encoding="utf-8")
+
+    monkeypatch.setattr(engines, "run", run)
+    tts = {"asr": {"model": "m@r", "batch": 1}}
+    for name in "ab":
+        write_wav(tmp_path / f"{name}.wav", np.full(grid.SAMPLE_RATE_HZ, ord(name) / 1000))
+    clip_list = [{"id": n, "wav": str(tmp_path / f"{n}.wav"), "targets": ["t"]} for n in "ab"]
+    first = engines.hear(clip_list, tts, tmp_path, tmp_path)
+    assert engines.hear(clip_list, tts, tmp_path, tmp_path) == first
+    clip_list[0]["targets"] = ["t", "u"]
+    engines.hear(clip_list, tts, tmp_path, tmp_path)
+    write_wav(tmp_path / "b.wav", np.zeros(grid.SAMPLE_RATE_HZ))
+    heard = engines.hear(clip_list, tts, tmp_path, tmp_path)
+    assert asked == [["a", "b"], ["a"], ["b"]]
+    assert heard["a"]["targets"] == {"t": -2.0, "u": -2.0}

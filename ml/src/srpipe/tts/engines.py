@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -47,8 +48,26 @@ def synthesise(engine: str, requests: list[dict], tts: dict, work: Path, cache: 
 
 def hear(clips: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, dict]:
     """What the checker makes of every clip {id, wav, targets}, by id: {text, logp, targets}, the text it heard and the
-    log-probability of that text and of each target given the clip."""
-    listing, heard = work / "asr_clips.jsonl", work / "asr_heard.jsonl"
-    write_jsonl(listing, clips)
-    run("asr", tts["asr"]["model"], str(tts["asr"]["batch"]), str(listing), str(heard), cache=cache)
-    return {r["id"]: r for r in map(json.loads, heard.read_text(encoding="utf-8").splitlines())}
+    log-probability of that text and of each target given the clip. Answers are kept in cache/tts/heard.jsonl by the
+    clip's bytes and the checker, its settings and run.py, so a clip is heard again only for a target it lacks."""
+    store = cache / "tts" / "heard.jsonl"
+    settings = json.dumps(tts["asr"], sort_keys=True).encode()
+    checker_id = hashlib.sha256(settings + (PROJECTS / "asr" / "run.py").read_bytes()).hexdigest()
+    known: dict[str, dict] = {}
+    if store.exists():
+        for row in map(json.loads, store.read_text(encoding="utf-8").splitlines()):
+            if row["checker"] == checker_id:
+                known[row["sha256"]] = row
+    digest = {c["id"]: hashlib.sha256(Path(c["wav"]).read_bytes()).hexdigest() for c in clips}
+    todo = [c for c in clips if not set(c["targets"]) <= known.get(digest[c["id"]], {}).get("targets", {}).keys()]
+    if todo:
+        listing, heard = work / "asr_clips.jsonl", work / "asr_heard.jsonl"
+        write_jsonl(listing, todo)
+        run("asr", tts["asr"]["model"], str(tts["asr"]["batch"]), str(listing), str(heard), cache=cache)
+        answers = [json.loads(line) for line in heard.read_text(encoding="utf-8").splitlines()]
+        rows = [{"checker": checker_id, "sha256": digest[c["id"]], **a} for c, a in zip(todo, answers, strict=True)]
+        known |= {r["sha256"]: r for r in rows}
+        store.parent.mkdir(parents=True, exist_ok=True)
+        with store.open("a", encoding="utf-8") as f:
+            f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+    return {c["id"]: known[digest[c["id"]]] for c in clips}
