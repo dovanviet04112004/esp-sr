@@ -813,6 +813,21 @@ trên board dựng bằng cờ trình biên dịch của `bench`, cũng là củ
 **Mỗi bộ vàng có đối chứng âm** (TỔNG QUAN §5.3 bước 2): một ca cố ý sai một chỗ — đảo dấu một hệ số,
 lệch một mẫu — và phép kiểm phải đỏ ở ca đó. Bộ vàng không bắt được lỗi cố ý là bộ vàng không kiểm gì.
 
+**Lượng tử hoá mô hình.** esp-dl trên S3 nhận **một số mũ luỹ thừa 2 cho cả tensor**, đối xứng, zero point 0, ở cả
+trọng số lẫn activation; không có hệ số riêng từng kênh như TFLite. Mạng có dải kênh lệch nhau mất độ chính xác đúng ở
+luật ấy, nên mỗi nhánh đi một thang và dừng ở bậc đầu tiên đạt cửa của nó:
+
+| Bậc | Làm gì | Khi nào |
+|---|---|---|
+| 1 | PTQ ESP-PPQ w8a8, gộp BatchNorm, **layerwise equalization** (4 vòng, ngưỡng 0,4, `opt_level` 2: bộ số repo face attendance đo ra, mỗi nhánh đo lại), bias correction | luôn |
+| 2 | Thuật toán hiệu chuẩn: min-max, percentile, MSE, KL, cùng tập hiệu chuẩn (§1.3) | luôn, bảng bốn cột, chọn theo số sau int8 |
+| 3 | int16 cho từng lớp nhạy (w8a16): lớp đầu đọc log-mel, lớp ra của CTC, GRU của `ns`, theo phân tích sai số từng lớp của ESP-PPQ | khi bậc 2 còn trượt cửa và µs còn trong ngân sách §3.3 |
+| 4 | QAT: huấn luyện tiếp với lượng tử giả đúng luật luỹ thừa 2 | khi bậc 3 vẫn trượt |
+
+Cấu hình nằm ở `configs/models/quant.yaml`, một khối mặc định và một khối ghi đè mỗi nhánh; `srpipe.compress.quant.ptq_espdl`
+đọc từ đó. Chọn bậc bằng số **sau int8 trên tập thu qua board** (§1.3), mỗi nhánh một ADR kèm bảng đối chứng. Mạng mẫu của
+E11-T10 dùng cùng cấu hình, vì nó kiểm runtime khớp mô phỏng, không kiểm độ chính xác.
+
 ### 3.15 Thước đo
 
 | Khối | Thước |
@@ -987,7 +1002,7 @@ ml/
 │   ├── afe/{hpf.yaml, aec.yaml, doa.yaml, gsc.yaml, bss.yaml, ns_omlsa.yaml, vad.yaml, agc.yaml}  # chỉ ghi đè cho thí nghiệm; mặc định là contracts/afe.yaml
 │   ├── scenes/standard.yaml           # bộ cảnh có nhãn chuẩn của E4-T4: phòng, RT60, góc, SNR, seed
 │   ├── scenes/device.yaml             # đường mô phỏng board của E4-T8: kho phòng, mức nói, nhiễu, micro, log-mel
-│   └── models/{ns.yaml, wake.yaml, command.yaml, synth.yaml, quant.yaml}
+│   └── models/{ns.yaml, wake.yaml, command.yaml, synth.yaml, quant.yaml}   # quant.yaml: thang lượng tử §3.14
 │
 ├── src/srpipe/
 │   ├── core/                          # ── HẠ TẦNG: không chứa tên khối nào ──
