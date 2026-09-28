@@ -1,0 +1,15 @@
+name: dns
+source_url: https://github.com/microsoft/DNS-Challenge
+release: DNS Challenge 2 and 3 (ICASSP 2021, Interspeech 2021), wideband noise at 16 kHz
+downloaded: 2026-09-28
+license: >-
+  CC-BY-4.0 for the collection (repository LICENSE); per source, AudioSet clips CC-BY-4.0, Freesound clips CC0 only
+files:
+  - {name: datasets.noise.tar.bz2, sha256: 801773f8ca648faa5b79281d138cb6125285f07786acc1a085bf31d5e1bbbe3f, url: 'https://dns3public.blob.core.windows.net/dns3archive/datasets/datasets.noise.tar.bz2'}
+consumed_by: [ns, wake, command]
+notes: >-
+  The 16 kHz noise of the ns branch and the board simulation (KEHOACH 1.2): AudioSet clips named by their YouTube id and
+  Freesound clips named by class (door, fan, typing, squeak, breath, munching, copy-machine, dragging). DEMAND ships as
+  a separate archive and is not in this one, so nothing here repeats raw/noise/demand. The fullband set of DNS 4 and 5
+  is the same material at 48 kHz and three times the size. Azure publishes no checksum, so the sha256 of the first
+  download is recorded here.
