@@ -187,3 +187,18 @@ def test_screening_rejects_leave_the_noise_pools_and_refuse_a_split(raw_root: Pa
     interim = screened(tmp_path / "interim", split.read_text().split("\t")[0])
     with pytest.raises(ValueError, match="screening rejected"):
         device.build(tiny(), split, raw_root, interim, tmp_path / "out")
+
+
+def test_synth_rows_are_read_from_interim(raw_root: Path, tmp_path: Path) -> None:
+    interim = screened(tmp_path / "interim")
+    burst = np.random.default_rng(3).standard_normal(FS) * np.hanning(FS) * 0.1
+    write_wav(interim / "wake" / "synth_pos" / "f5" / "clone_a.wav", burst)
+    split = split_file(tmp_path / "train.txt", raw_root)
+    split.write_text(split.read_text() + "wake/synth_pos/f5/clone_a.wav\t-\t-\tsynth\n", encoding="utf-8")
+    device.build(tiny(), split, raw_root, interim, tmp_path / "out")
+    items = [
+        json.loads(line)
+        for p in sorted((tmp_path / "out").glob("*.items.jsonl"))
+        for line in p.read_text().splitlines()
+    ]
+    assert [i["origin"] for i in items] == ["public"] * 5 + ["synth"]

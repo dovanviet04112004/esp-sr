@@ -45,6 +45,7 @@ A_WEIGHT_GRID_POINTS = 4097
 ROOM_STREAM, SESSION_STREAM = 1, 2
 TALKER, NOISE = 0, 1
 CLEAN_ORIGINS = frozenset({"public", "synth"})
+ROOT_OF = {"public": "raw", "synth": "interim"}  # where a split row's item lies, by origin (KEHOACH 4.4.1)
 
 SPEECH = Path("speech") / "vivos" / "test"
 OUT = Path("playback") / "vivos_test.wav"
@@ -200,7 +201,7 @@ def add_noise(
     rirs: np.ndarray,
     cfg: dict,
     pools: list[list[str]],
-    reader: ItemReader,
+    raw: ItemReader,
     rng: np.random.Generator,
 ) -> tuple[np.ndarray, dict | None]:
     """The talker's sound plus, with the configured probability, a noise file from the room's noise source at an SNR
@@ -210,7 +211,7 @@ def add_noise(
     weights = np.array([pool["weight"] for pool in cfg["noise"]["pools"]], dtype=np.float64)
     pool = int(rng.choice(len(weights), p=weights / weights.sum()))
     name = pools[pool][int(rng.integers(len(pools[pool])))]
-    y = reader.read(name)
+    y = raw.read(name)
     n = talker.shape[1]
     start = int(rng.integers(max(1, len(y) - n)))
     y = np.resize(y[start:], n)
@@ -226,10 +227,16 @@ def add_noise(
 
 
 def simulate_session(
-    cfg: dict, k: int, rows: list[splits.Row], bank: Path, mics: Microphones, pools: list[list[str]], reader: ItemReader
+    cfg: dict,
+    k: int,
+    rows: list[splits.Row],
+    bank: Path,
+    mics: Microphones,
+    pools: list[list[str]],
+    readers: dict[str, ItemReader],
 ) -> tuple[np.ndarray, list[tuple[int, int]], dict]:
     """Session k: the interleaved int16 frames board B would capture, each utterance's [start, end) in samples, and
-    the session's draws; bank_room indexes the labels of rooms.yaml."""
+    the session's draws; bank_room indexes the labels of rooms.yaml, readers read raw/ and interim/ by root name."""
     rng = np.random.default_rng([cfg["seed"], SESSION_STREAM, k])
     s, t = cfg["session"], cfg["talker"]
     entry = int(rng.integers(cfg["rooms"]["count"]))
@@ -238,7 +245,7 @@ def simulate_session(
     at = round(s["lead_s"] * FS)
     pieces, spans = [np.zeros(at)], []
     for row in rows:
-        x = reader.read(row.item)
+        x = readers[ROOT_OF[row.origin]].read(row.item)
         jitter_db = float(rng.uniform(-t["jitter_db"], t["jitter_db"]))
         pieces.append(x * 10.0 ** (jitter_db / 20.0) / active_rms(x, t["active_below_peak_db"]))
         spans.append((at, at + len(x)))
@@ -249,7 +256,7 @@ def simulate_session(
     level = mics.sensitivity_dbfs + spl_db - SENSITIVITY_SPL_DB
     dry = np.concatenate([*pieces, np.zeros(total - at)]) * TALKER_REFERENCE_M * 10.0 ** (level / 20.0)
     talker = np.stack([signal.fftconvolve(dry, rirs[TALKER, m])[:total] for m in range(array.N_MICS)])
-    air, noise = add_noise(talker, dry, rirs, cfg, pools, reader, rng)
+    air, noise = add_noise(talker, dry, rirs, cfg, pools, readers["raw"], rng)
     draws = {"session": k, "bank_room": entry, "spl_1m_db": spl_db, "noise": noise}
     return hear(air, mics, rng), spans, draws
 
@@ -263,14 +270,14 @@ def item_frames(span: tuple[int, int], pad_s: float, n_hops: int) -> tuple[int, 
 
 
 def _shard(job: tuple) -> list[Path]:
-    cfg, raw_root, bank, out, shard, sessions, pools = job
+    cfg, roots, bank, out, shard, sessions, pools = job
     mics = load_microphones(cfg["microphone"])
     chain_cfg = ChainConfig(balance_gains=mics.gains)
     mel = Mel(MelConfig(**cfg["features"]))
-    reader = ItemReader(raw_root)
+    readers = {name: ItemReader(root) for name, root in roots.items()}
     features, figures, pcm, items, offset = [], [], [], [], 0
     for k, rows in sessions:
-        captured, spans, draws = simulate_session(cfg, k, rows, bank, mics, pools, reader)
+        captured, spans, draws = simulate_session(cfg, k, rows, bank, mics, pools, readers)
         clean, figs, feats = listen(captured, chain_cfg, mel)
         for row, span in zip(rows, spans, strict=True):
             first, stop, speech_first, speech_stop = item_frames(span, cfg["session"]["pad_s"], len(feats))
@@ -305,7 +312,7 @@ def build(cfg: dict, split_file: Path, raw_root: Path, interim: Path, out: Path,
     pools = noise_files(cfg, raw_root, set(rejected))
     out.mkdir(parents=True, exist_ok=True)
     jobs = [
-        (cfg, raw_root, bank, out, j, sessions[i : i + per_shard], pools)
+        (cfg, {"raw": raw_root, "interim": interim}, bank, out, j, sessions[i : i + per_shard], pools)
         for j, i in enumerate(range(0, len(sessions), per_shard))
     ]
     with multiprocessing.get_context("spawn").Pool(workers) as pool:
