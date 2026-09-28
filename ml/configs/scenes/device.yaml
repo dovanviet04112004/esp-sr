@@ -34,6 +34,6 @@ microphone:
   sensitivity_dbfs: -29.0         # INMP441: -26 dBFS sine at 94 dB SPL, on the firmware's square-wave scale
   self_noise_dbfs_a: -90.0        # INMP441: SNR 61 dBA below that sensitivity
   balance: docs/measurements/calib/board_b_balance.csv   # calib/bal of the board simulated, from the repo root
-  pcm_shift: 16                   # APP_PCM_SHIFT_FALLBACK until E2-T5 stores calib/pcm_shift
+  pcm_shift: 13                   # calib/pcm_shift board B stores (E2-T5, docs/measurements/mic_array.md §2)
 features: {n_bands: 40, f_min_hz: 20.0, f_max_hz: 7600.0, log_floor: 1.0e-6}
 sessions_per_shard: 32

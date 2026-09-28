@@ -13,7 +13,7 @@ import pytest
 import yaml
 
 from srpipe.core import screen
-from srpipe.core.audio_io import write_wav
+from srpipe.core.audio_io import INT16_SCALE, write_wav
 from srpipe.core.config import CONFIGS, load_yaml
 from srpipe.generated import array, grid
 from srpipe.metrics import mic_pair
@@ -93,8 +93,11 @@ def test_the_floor_of_silence_is_the_datasheet_self_noise() -> None:
     mics = board_b()
     pcm = device.hear(np.zeros((2, 30 * FS)), mics, np.random.default_rng(6))
     stats = mic_pair.pair_stats(pcm[:, 0], pcm[:, 1])
+    datasheet = load_yaml(CONFIGS / "scenes" / "device.yaml")["microphone"]["self_noise_dbfs_a"]
+    # The datasheet level is on the slot's scale; the shift sets how far int16 full scale sits below it.
+    expected = datasheet + 20 * math.log10(2.0 ** (device.SLOT_FRACTION_BITS - mics.pcm_shift) / INT16_SCALE)
     for channel in (0, 1):
-        assert abs(mic_pair.noise_floor_dbfs(stats, channel) - (-90.0)) < 0.5
+        assert abs(mic_pair.noise_floor_dbfs(stats, channel) - expected) < 0.5
 
 
 def test_the_shift_floors_and_saturates_as_drv_audio() -> None:
