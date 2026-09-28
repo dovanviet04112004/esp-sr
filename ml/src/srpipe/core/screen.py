@@ -94,8 +94,9 @@ def measure_batch(task: tuple[Path, list[corpus.Clip], dict]) -> list[dict]:
 
 
 # Read at import: the code this process runs, even when the files on disk change while it measures.
-MEASURE_CODE = "".join(inspect.getsource(f) for f in (measure, measure_batch)).encode()
-MEASURE_CODE += b"".join(Path(mod.__file__).read_bytes() for mod in (corpus, audio_io, normalize, lang_vi))
+MEASURED_WITH = (measure, measure_batch, corpus.clips, corpus.read_text, *corpus.LAYOUTS.values(), audio_io.ItemReader)
+MEASURE_CODE = "".join(inspect.getsource(f) for f in MEASURED_WITH).encode()
+MEASURE_CODE += b"".join(Path(mod.__file__).read_bytes() for mod in (normalize, lang_vi))
 
 
 def batches(raw: Path, clips: list[corpus.Clip], size: int) -> list[list[corpus.Clip]]:
