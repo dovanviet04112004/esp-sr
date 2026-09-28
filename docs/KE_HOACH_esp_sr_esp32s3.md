@@ -117,6 +117,28 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | Tiếng tổng hợp bằng TTS trên máy tính (`srpipe/tts/`, §4.4) | **`wake` dương — nguồn chính**, cụm gần âm cho âm bản, tăng lượng `command`; **tiếng nguồn của `synth`** (§3.13) | không giới hạn, nhiều giọng | theo giấy phép mô hình TTS dùng, ghi ở `DU_LIEU.md` | **không bao giờ** vào tập thử |
 | Thu qua chính board | tập thử của `wake` và `command`, âm bản gần âm; nhiễu phòng; tập học khi cần tiếng thật | vài người nói, ≥ 2 phòng (E11-T6) | của dự án, có phiếu đồng ý (§1.4) | nguồn **duy nhất** đúng miền thiết bị |
 
+**Sàng lọc trước mọi lần dùng** (`srpipe/core/screen.py`, luật ở `configs/common/screen.yaml`, `make screen`). Kho
+công khai có mẩu hỏng: FPT có hàng trăm mẩu câm hoàn toàn mà vẫn kèm lời, và một mẩu như thế dạy mô hình gắn chữ vào
+im lặng. Nên mỗi mẩu của mọi kho trong `raw/` được **đo một lần**, rồi **chấm theo luật** trước khi vào split, làm
+giọng mẫu cho TTS hay làm nhiễu để trộn. `raw/` giữ nguyên; mẩu bị loại chỉ nằm trong danh sách loại, và mọi nơi
+đọc kho bỏ qua nó. Đo là giải mã toàn bộ nên chạy một lần, chấm chỉ đọc số đo, nên đổi ngưỡng không phải đo lại.
+
+Một mẩu bị loại theo luật đầu tiên nó phạm, xét từ trên xuống:
+
+| Lý do loại | Khi nào | Áp cho |
+|---|---|---|
+| `decode` | không giải mã được, hoặc không có mẫu nào | mọi kho |
+| `silent` | RMS cả mẩu dưới sàn | mọi kho |
+| `text` | lời rỗng, hoặc `lang.normalize` từ chối một đoạn của lời | tiếng nói |
+| `clipped` | tỉ lệ mẫu chạm trần vượt ngưỡng | tiếng nói |
+| `noisy` | khung to (phân vị cao) chỉ hơn khung nhỏ (phân vị thấp) dưới một khoảng dB: tiếng chìm trong nhiễu | tiếng nói |
+| `rate` | số âm tiết mỗi giây tiếng hoạt động nằm ngoài khoảng: lời không khớp tiếng | tiếng nói |
+| `duplicate` | qua mọi luật trên nhưng PCM đã giải mã trùng một mẩu **giữ lại** đứng trước, theo thứ tự kho trong cấu hình | mọi kho |
+
+Luật chỉ loại mẩu **hỏng rõ ràng**. Mẩu ồn vừa phải vẫn giữ, vì mô hình phải chịu được nhiễu. Ngưỡng chọn từ phân bố
+số đo, rồi kiểm bằng bộ nghe kiểm của `srpipe/tts` trên các mẩu nằm quanh ngưỡng. Số đo và kết quả kiểm ghi ở
+`docs/measurements/data_screen.md`, số mẩu và số giờ bị loại theo từng lý do ghi ở `DU_LIEU.md`.
+
 **Đường mô phỏng board** (`srpipe/scenes/device.py`, cấu hình `configs/scenes/device.yaml`) biến các mẩu tiếng sạch
 của một file split thành đúng thứ bộ nhận dạng thấy trên máy:
 1. Mỗi **phiên** là vài mẩu liên tiếp của file split trong một phòng của **kho phòng** `pyroomacoustics` dựng một lần
@@ -144,6 +166,7 @@ máy khác: đáp ứng của micro là một phần của miền dữ liệu.
 | Bản thu qua board tách theo **phiên** và **phòng**; tập thử có ít nhất một phòng không góp gì vào tập học (`train`, `val`, `calib`) | Vang và nhiễu nền của phòng là thứ mô hình học thuộc được |
 | Mỗi con số trên tập thu qua board ghi kèm **số người nói và số phòng** | Tập thử chỉ có vài người; con số không kèm cỡ mẫu trông chắc hơn thực tế |
 | Âm bản để đo báo nhầm của `wake`: **≥ 24 giờ**, không trùng nguồn học — phần kho công khai giữ riêng, qua đường mô phỏng board, cộng nền phòng thu qua board | Đo "≤ 1 lần mỗi giờ" trên một giờ âm bản là không đo gì cả |
+| Split, giọng mẫu TTS và nhiễu để trộn chỉ lấy mẩu đã qua sàng lọc (§1.2) | Mẩu câm hay lệch lời dạy sai, và nằm trong tập thử thì chấm sai |
 | Tiếng tổng hợp không vào tập thử | Nó đúng miền của TTS, không đúng miền của người thật |
 | Giọng mẫu để TTS nhân bản chỉ lấy từ vật liệu học: người nói của tập học, hoặc kho chỉ vào tập học | Nhân bản giọng của một người ở tập thử là đưa người đó vào tập học qua đường TTS |
 | Tập hiệu chuẩn int8 lấy từ vật liệu học (mô phỏng board, hoặc bản thu của tập học), không lấy mẩu hay người nói nào của tập thử | Tập thử không góp gì vào model, kể cả dải giá trị của lượng tử |
@@ -887,7 +910,7 @@ esp-sr/
     ├── FREERTOS.md                      # sổ kiểm lỗi đồng thời, soát lại mỗi khi thêm task
     ├── DU_LIEU.md                       # dữ liệu đã tải, giấy phép, số giờ, sha256
     ├── adr/                             # quyết định có bảng đối chứng
-    └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md, tts_engines.md}
+    └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md, tts_engines.md, data_screen.md}
                       ├ bench/           # CSV thô của bench_*, commit cùng bảng nó sinh ra
                       ├ calib/           # hệ số hiệu chuẩn từng board (balance), bản đã ghi xuống NVS
                       └ {afe,kws,tts}/   # số 🔬 theo khối
@@ -1006,7 +1029,8 @@ ml/
 ├── pyproject.toml  ├── uv.lock        # ✅ ghim phiên bản, không requirements.txt rời
 ├── .env.example                       # ✅ commit — biến và giá trị giả
 ├── configs/
-│   ├── common/{paths.yaml, hardware.yaml, tts.yaml}   # tts.yaml: bộ TTS và bộ nghe kiểm, ghim repo@revision
+│   ├── common/{paths.yaml, hardware.yaml, tts.yaml, screen.yaml}   # tts.yaml: bộ TTS và bộ nghe kiểm, ghim
+│   │                                  #   repo@revision; screen.yaml: bố cục từng kho và ngưỡng sàng lọc (§1.2)
 │   ├── afe/{hpf.yaml, aec.yaml, doa.yaml, gsc.yaml, bss.yaml, ns_omlsa.yaml, vad.yaml, agc.yaml}  # chỉ ghi đè cho thí nghiệm; mặc định là contracts/afe.yaml
 │   ├── scenes/standard.yaml           # bộ cảnh có nhãn chuẩn của E4-T4: phòng, RT60, góc, SNR, seed
 │   ├── scenes/device.yaml             # đường mô phỏng board của E4-T8: kho phòng, mức nói, nhiễu, micro, log-mel
@@ -1017,6 +1041,8 @@ ml/
 │   │   ├── config.py                  # pydantic + gộp YAML + ghi đè CLI
 │   │   ├── run_dir.py                 # ★ thư mục run: config.resolved + env + split.lock
 │   │   ├── audio_io.py  ├── seed.py  ├── logger.py
+│   │   ├── corpus.py                  # mọi mẩu của một kho trong raw/: tên mục như split, người nói nếu kho có, lời
+│   │   ├── screen.py                  # ★ sàng lọc (§1.2): đo mọi mẩu một lần, chấm theo luật, danh sách loại
 │   │   └── splits.py                  # ★ đọc split, kiểm luật §1.3 (§4.4.1)
 │   ├── generated/                     # sinh từ contracts/, không sửa tay
 │   ├── golden/gold.py                 # ★ khuôn .gold — một khuôn, một chỗ
@@ -1114,6 +1140,7 @@ $SRPIPE_DATA_ROOT/                         # ổ ngoài — ❌ không bao giờ
 │       └── gaps.txt                       # các đoạn hở seq
 ├── interim/                               # sinh lại được từ raw/; từ đây theo nhánh
 │   ├── scenes/<bộ>/                       # cảnh dựng có nhãn (E4-T4) cho doa gsc bss ns; kho phòng của E4-T8
+│   ├── screen/                            # sàng lọc (§1.2): measures/<kho>.tsv số đo mọi mẩu, rejects.tsv mẩu loại
 │   └── {ns, wake, command, synth}/        # đã cắt, lấy mẫu lại, trộn, căn nhãn; TTS ở <nhánh>/synth_*
 ├── processed/{ns, wake, command, synth}/  # đặc trưng, shard sẵn sàng nạp
 └── cache/                                 # xoá lúc nào cũng được
