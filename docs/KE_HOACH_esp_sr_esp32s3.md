@@ -723,11 +723,14 @@ chừng nửa giây, 28 lần mỗi triệu âm tiết lời nói: ngắn và th
 siết báo nhầm để sau, khi có dữ liệu thu thật.
 
 **Dữ liệu dương** gồm tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, và **người thật nói
-"trợ lý" trong kho học**: 222 câu, cắt từ đầu câu đến ngay sau "lý" theo mốc thời gian từng từ của PhoWhisper, nên cuối
-lời của mẩu cắt là cuối từ đánh thức; câu mà PhoWhisper không nghe ra từ ấy thì bỏ. Các kho ấy không có mã người nói,
-nên mẩu cắt chỉ vào `train`. Tất cả qua đường mô phỏng board (§1.2). **Âm bản** gồm các kho lời nói tiếng Việt trừ câu
-có từ đánh thức, cộng một bộ câu ngắn không liên quan đọc bằng giọng TTS của mẫu dương, để giọng TTS không thành dấu
-hiệu của lớp dương. Bản thu qua board để chấm (§1.3).
+"trợ lý" trong kho học**: 224 câu, cắt từ 2 s trước "trợ" (một trường nhìn, hay từ đầu câu nếu gần hơn) đến ngay sau
+"lý" theo mốc thời gian từng từ của PhoWhisper, nên cuối lời của mẩu cắt là cuối từ đánh thức; câu mà PhoWhisper không
+nghe ra từ ấy thì bỏ. Các kho ấy không có mã người nói, nên mẩu cắt chỉ vào `train`. Tất cả qua đường mô phỏng board
+(§1.2). Từ đánh thức được nhận theo **cách đọc** giọng Bắc của `lang_vi`, không theo chữ viết: "trợ lí" cũng là nó.
+**Âm bản** gồm các kho lời nói tiếng Việt trừ câu đọc ra từ đánh thức, cộng một bộ nhẹ cụm ngắn đọc bằng giọng TTS của
+mẫu dương: cụm của kho cách từ đánh thức một thành phần âm tiết ("chị lý", "vợ lý") và cụm hay gặp nhất mở đầu bằng
+"trợ" ("trợ giúp", "trợ cấp"), để giọng TTS không thành dấu hiệu của lớp dương và một mình "trợ" không đủ đánh thức.
+Bản thu qua board để chấm (§1.3).
 
 **Âm bản khó** — cơ chế để siết báo nhầm, **tắt ở bản demo**. Khi bật (mục `synth.hard` và `split.hard` của cấu
 hình), split thêm `train_hard` và `val_hard` từ ba nguồn: TTS đọc các họ cụm gần âm, các cụm gần âm của `synth_neg`, và
