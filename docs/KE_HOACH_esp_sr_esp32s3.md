@@ -750,6 +750,21 @@ ngưỡng. Bắt được là tỉ lệ mẩu dương có một lần vượt ng
 một quãng rồi mới đếm tiếp như máy khoá sau khi thức, quy ra lần mỗi giờ. Ngưỡng chọn trên `val` sao cho báo nhầm
 không quá mục tiêu, rồi ghi vào NVS `kws/wake_th`.
 
+**Việc phụ trên tiếng người thật.** Mẫu dương chỉ có TTS; bị âm bản khó ép phân biệt tinh, thân mạng bám vào "chào mi
+na" kiểu TTS và giọng thật nói đúng từ rơi ra ngoài (`docs/measurements/wake.md` §4). Vì thế cùng một thân mạng học
+thêm một việc trên lời nói thật của `train_neg`: một đầu CTC đọc chuỗi đơn vị `lang_vi` (§3.12) của cả câu, đọc theo
+vùng Bắc vì kho không ghi vùng người nói; mất mát CTC cộng vào BCE với trọng số ở cấu hình. Hàng nghìn người thật nói
+đủ các âm của từ đánh thức ("chào" 3 367 lần, "mi" 722, "na" 656 trong kho) dù không ai nói cả cụm, nên thân mạng phải
+biểu diễn các âm ấy theo giọng người. Câu `lang_vi` không đọc được, hay dài quá cấu hình, bị bỏ khỏi việc phụ. Việc
+phụ không chốt đơn vị của `command` (E11-T3). Đầu phụ bị bỏ khi lưu mạng, nên mạng xuất ra board, chi phí và
+`StreamingCache` không đổi.
+
+**Mốc và ngưỡng.** Mạng giữ là trọng số cuối lịch học. Mỗi mốc chấm được lưu để xem đường học, không dùng để chọn:
+chọn mốc có tỉ lệ bắt `val` cao nhất trong hàng chục lần đo nhiễu là chọn lần may, và mốc ấy báo nhầm gấp đôi mục tiêu
+trên `test_neg` (`wake.md` §4). `val_neg` gồm thêm một phần người nói Common Voice rút theo seed (tỉ lệ ở mục `split`),
+để mục tiêu báo nhầm của `val` dựa trên hàng chục lần vượt chứ không phải ba lần của 3,76 giờ; `test_neg` giữ phần còn
+lại, và phần thiếu so với 24 giờ của Cửa 2 do nền phòng thu qua board (E11-T6) bù.
+
 **Thước** (TỔNG QUAN V5.5.7, Cửa 2): bắt **≥ 95%** ở 1 m phòng yên; báo nhầm **≤ 1 lần mỗi giờ** đo
 trên **≥ 24 giờ** âm bản. Ghi thêm, không làm cửa: bắt được ở 3 m, ở SNR 10 dB và 5 dB.
 
