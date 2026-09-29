@@ -81,6 +81,7 @@ train:                             # E11-T11: python -m srpipe.tasks.wake.train 
   warmup_hops: 128                 # a window's first hops see zero padding, not audio: no loss on them
   label_s: [0.2, 0.3]              # a positive is 1 from this long before the end of its speech to this long after
   positive_share: 0.25             # of each batch
+  real_share: 0.5                  # of those positives, from real speech: drawn evenly they would be about 6%
   batch: 128
   steps: 20000
   learning_rate: 1.0e-3

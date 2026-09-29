@@ -168,6 +168,25 @@ def test_hard_windows_take_their_share_hold_the_phrase_and_carry_no_label(tmp_pa
     assert train.Windows(pos, neg, cfg, np.random.default_rng(7)).counts() == (4, 0, 12)
 
 
+def test_real_speech_takes_its_share_of_the_positives_however_few_its_clips(tmp_path: Path) -> None:
+    rng = np.random.default_rng(8)
+    cfg = tiny_cfg()
+    cfg["train"]["real_share"] = 0.5
+    around = data.label_hops(cfg["train"]["label_s"])
+    tts = data.load_set(processed(tmp_path / "t", [(60, 20, 40)] * 8, rng, True, "synth"), True, around, "float16")
+    real = data.load_set(processed(tmp_path / "r", [(60, 20, 40)], rng, True), True, around, "float16")
+    neg = data.load_set(processed(tmp_path / "n", [(60, 0, 60)] * 4, rng, False), False, around, "float16")
+    windows = train.Windows(tts + real, neg, cfg, np.random.default_rng(9))
+    assert (len(windows.real), len(windows.synth), windows.real_count(4)) == (1, 8, 2)
+    for _ in range(20):
+        assert [shard for shard, _ in windows.positive_ends(4)].count(1) == 2
+    assert "each of 1 real positives about 80 times, each of 8 TTS positives about 10 times" in train.coverage(
+        cfg, windows
+    )
+    assert train.Windows(tts, neg, cfg, np.random.default_rng(9)).real_count(4) == 0
+    assert train.Windows(real, neg, cfg, np.random.default_rng(9)).real_count(4) == 4
+
+
 def test_board_rows_keep_their_columns_when_a_prompt_lists_phrases() -> None:
     results = [
         wake_eval.BoardSession("s1", "wake", "chào mi na", 40.0, [0.9, 0.2], 1, 0),

@@ -1,9 +1,9 @@
 """Train the wake TCN on board-simulated log-mel (E11-T11, KEHOACH 3.11) and write a run directory.
 
 Windows around a positive's end, a hard near miss (a TTS phrase's end, anywhere in a corpus sentence's speech) or
-anywhere in a negative, with fixed shares of positives and hard negatives per batch; per-hop BCE past the warm-up, plus
-a CTC head on the trunk reading the lang_vi units of real sentences of train_neg. The last weights are kept, each
-evaluated net saved beside them. Train sets float16, val and test float32. Run: python -m srpipe.tasks.wake.train"""
+anywhere in a negative, with fixed shares of positives, of real speech among them, and of hard negatives per batch;
+per-hop BCE past the warm-up, plus a CTC head on the trunk reading the lang_vi units of real sentences of train_neg.
+The last weights are kept, each evaluated one saved beside them. Run: python -m srpipe.tasks.wake.train"""
 
 from __future__ import annotations
 
@@ -70,6 +70,9 @@ class Windows:
         if short := [len(s.features) for s in positives + negatives + self.hard if len(s.features) < width]:
             raise ValueError(f"a shard of {min(short)} hops is shorter than a {width}-hop window")
         self.ends = [(k, i["frame_offset"] + i["speech_frames"][1]) for k, s in enumerate(positives) for i in s.items]
+        spoken = [i["origin"] != "synth" for s in positives for i in s.items]
+        self.real = [e for e, r in zip(self.ends, spoken, strict=True) if r]
+        self.synth = [e for e, r in zip(self.ends, spoken, strict=True) if not r]
         self.hard_items = [(k, i) for k, s in enumerate(self.hard) for i in s.items]
         self.weights = np.array([len(s.features) for s in negatives], dtype=np.float64)
         self.weights /= self.weights.sum()
@@ -89,6 +92,19 @@ class Windows:
         n_hard = round(n * self.cfg.get("hard_share", 0.0)) if self.hard_items else 0
         return n_pos, n_hard, n - n_pos - n_hard
 
+    def real_count(self, n_pos: int) -> int:
+        """Positives of a batch drawn from real speech: real_share of them while both kinds exist, else all of one."""
+        if not self.real or not self.synth:
+            return n_pos if self.real else 0
+        return round(n_pos * self.cfg.get("real_share", 0.0))
+
+    def positive_ends(self, n_pos: int) -> list[tuple[int, int]]:
+        n_real = self.real_count(n_pos)
+        picks = [self.real[k] for k in self.rng.integers(len(self.real), size=n_real)] if n_real else []
+        if n_pos > n_real:
+            picks += [self.synth[k] for k in self.rng.integers(len(self.synth), size=n_pos - n_real)]
+        return picks
+
     def hard_stop(self, item: dict) -> int:
         """A TTS phrase ends inside the loss region as a positive would; a corpus sentence has no word timing, so the
         window ends anywhere in its speech."""
@@ -102,8 +118,7 @@ class Windows:
         width = self.cfg["window_hops"]
         n_pos, n_hard, n_neg = self.counts()
         xs, ys = [], []
-        for k in self.rng.integers(len(self.ends), size=n_pos):
-            shard_index, end = self.ends[k]
+        for shard_index, end in self.positive_ends(n_pos):
             stop = end + self.after + int(self.rng.integers(self.slack))
             x, y = self.cut(self.positives[shard_index], stop)
             xs.append(x), ys.append(y)
@@ -154,13 +169,16 @@ def coverage(cfg: dict, windows: Windows) -> str:
     """How often training sees each positive, each hard near miss and each negative hop, for the run's log."""
     spec = cfg["train"]
     n_pos, n_hard, n_neg = windows.counts()
+    n_real = windows.real_count(n_pos)
     negative_hops = sum(len(s.features) for s in windows.negatives)
-    visits = spec["steps"] * n_pos / len(windows.ends)
     passes = spec["steps"] * n_neg * spec["window_hops"] / negative_hops
-    line = (
-        f"{spec['steps']} steps: each of {len(windows.ends)} positives about {visits:.0f} times,"
-        f" each of {negative_hops} negative hops about {passes:.1f} times"
+    kinds = [(windows.real, n_real, "real"), (windows.synth, n_pos - n_real, "TTS")]
+    line = f"{spec['steps']} steps: " + ", ".join(
+        f"each of {len(ends)} {name} positives about {spec['steps'] * n / len(ends):.0f} times"
+        for ends, n, name in kinds
+        if ends
     )
+    line += f", each of {negative_hops} negative hops about {passes:.1f} times"
     if n_hard:
         hard_visits = spec["steps"] * n_hard / len(windows.hard_items)
         line += f", each of {len(windows.hard_items)} hard near misses about {hard_visits:.0f} times"
