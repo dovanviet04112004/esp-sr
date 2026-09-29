@@ -98,7 +98,12 @@ train:                             # E11-T11: python -m srpipe.tasks.wake.train 
   steps: 20000
   learning_rate: 1.0e-3
   final_learning_rate: 5.0e-5       # cosine decay to this by the last step
-  eval_every: 1000
+  eval_every: 1000                 # each evaluated net is saved; the run keeps the last (KEHOACH 3.11)
+  aux:                             # CTC side task on the real sentences of train_neg (KEHOACH 3.11); weight 0 is off
+    weight: 0.1                    # of the CTC loss, added to the per-hop BCE
+    batch: 32                      # sentences per step, besides the wake batch
+    max_s: 8.0                     # longer sentences are left out: 92% of train_neg is shorter
+    dialect: north                 # lang_vi reads every sentence so: the corpora do not record the region
 eval:
   smooth_hops: 5                   # the moving average ahead of the threshold (KEHOACH 3.11)
   lockout_s: 2.0                   # the device stays awake after a trigger, so a second one inside this is not counted

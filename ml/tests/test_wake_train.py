@@ -1,6 +1,6 @@
 """Wake training: the smoothing and lockout the device mirrors, labels around a positive's end, windows that hold
-the whole label past the warm-up, a tiny run whose sweep never gains recall or false accepts as the threshold
-rises, a board table whose rows keep their columns, and a run scored with the network it was trained as."""
+the whole label past the warm-up, sentences for the CTC side task, a tiny run that keeps its last weights and saves each
+evaluated one, a board table whose rows keep their columns, and a run scored with the network it was trained as."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import torch
 import yaml
 
 from srpipe.core.config import load_yaml
+from srpipe.generated import grid
 from srpipe.tasks.wake import CONFIG, data, train
 from srpipe.tasks.wake import eval as wake_eval
 from srpipe.tasks.wake.model.tcn import Tcn
@@ -90,7 +91,30 @@ def test_windows_hold_the_label_past_the_warm_up(tmp_path: Path) -> None:
     assert all(y[k, 8:].any() for k in range(4)) and not y[4:].any()
 
 
-def test_a_tiny_run_keeps_its_best_weights_and_its_sweep_is_monotonic(tmp_path: Path) -> None:
+def test_sentences_carry_the_lead_before_them_their_units_and_nothing_too_long(tmp_path: Path) -> None:
+    rng = np.random.default_rng(8)
+    cfg = tiny_cfg()
+    cfg["train"]["aux"] |= {"batch": 64, "max_s": 50 * grid.HOP_SAMPLES / grid.SAMPLE_RATE_HZ}
+    around = data.label_hops(cfg["train"]["label_s"])
+    (shard,) = data.load_set(
+        processed(tmp_path / "n", [(30, 0, 30), (50, 0, 50), (60, 0, 60)], rng, False), False, around, "float32"
+    )
+    units = {"i0": [0, 5], "i30": [1, 2, 3]}
+    sentences = train.Sentences([shard], units | {"i80": [4]}, cfg, np.random.default_rng(9))
+    assert sorted(i[1] for i in sentences.items) == [0, 30]
+    x, lengths, targets, counts = sentences.batch()
+    lead = cfg["train"]["warmup_hops"]
+    assert x.shape == (64, lead + lengths.max(), BANDS) and set(lengths.tolist()) == {30, 50}
+    assert counts.sum() == len(targets) and set(targets.tolist()) <= {1, 2, 3, 4, 6}
+    k = int(np.flatnonzero(lengths == 50)[0])
+    np.testing.assert_array_equal(x[k, : lead + 50], shard.features[30 - lead : 80])
+    j = int(np.flatnonzero(lengths == 30)[0])
+    np.testing.assert_array_equal(x[j, lead : lead + 30], shard.features[:30])
+    with pytest.raises(ValueError, match=r"aux\.max_s"):
+        train.Sentences([shard], {"i80": [4]}, cfg, np.random.default_rng(9))
+
+
+def test_a_tiny_run_keeps_its_last_weights_saves_each_evaluated_one_and_its_sweep_is_monotonic(tmp_path: Path) -> None:
     rng = np.random.default_rng(3)
     cfg = tiny_cfg()
     around = data.label_hops(cfg["train"]["label_s"])
@@ -102,11 +126,18 @@ def test_a_tiny_run_keeps_its_best_weights_and_its_sweep_is_monotonic(tmp_path: 
         "val_pos": data.load_set(processed(tmp_path / "vp", pos, rng, True), True, around, "float32"),
         "val_neg": data.load_set(processed(tmp_path / "vn", neg, rng, False), False, around, "float32"),
     }
-    model, stats, history = train.train(cfg, sets, "cpu")
-    assert [row["step"] for row in history] == [20, 40] and stats["best"]["step"] in (20, 40)
+    units = {i["item"]: [3, 7, 3] for s in sets["train_neg"] for i in s.items}
+    model, stats, history = train.train(cfg, sets, "cpu", units, tmp_path / "run")
+    assert [row["step"] for row in history] == [20, 40] and stats["kept"] == history[-1]
+    assert all(row["ctc_loss"] > 0 for row in history)
+    last = torch.load(wake_eval.checkpoint(tmp_path / "run", 40))
+    assert last.keys() == model.state_dict().keys() and wake_eval.checkpoint(tmp_path / "run", 20).exists()
+    assert all(torch.equal(last[k], v) for k, v in model.state_dict().items())
     result = wake_eval.sweep(model, sets["val_pos"], sets["val_neg"], stats["mean"], stats["std"], cfg, "cpu")
     assert result.positives == 6 and np.all(np.diff(result.recall) <= 0)
     assert np.all(np.diff(result.false_accepts_per_hour) <= 0)
+    _, _, plain = train.train(cfg, sets, "cpu")
+    assert "ctc_loss" not in plain[-1]
 
 
 def test_hard_windows_take_their_share_hold_the_phrase_and_carry_no_label(tmp_path: Path) -> None:
@@ -155,10 +186,18 @@ def test_a_run_is_scored_with_its_own_network_and_the_current_scoring_rules(tmp_
     net = Tcn(BANDS, **trained["model"])
     torch.save(net.state_dict(), tmp_path / "model.pt")
     np.savez(tmp_path / "band_stats.npz", mean=np.zeros(BANDS), std=np.ones(BANDS))
-    (tmp_path / "metrics.yaml").write_text(yaml.safe_dump({"val": {"threshold": 0.8}}), encoding="utf-8")
+    history = [{"step": 10, "threshold": 0.6}, {"step": 20, "threshold": 0.8}]
+    (tmp_path / "metrics.yaml").write_text(yaml.safe_dump({"val": history[-1], "history": history}), encoding="utf-8")
+    earlier = Tcn(BANDS, **trained["model"])
+    wake_eval.checkpoint(tmp_path, 10).parent.mkdir()
+    torch.save(earlier.state_dict(), wake_eval.checkpoint(tmp_path, 10))
     scoring = cfg | {"eval": cfg["eval"] | {"smooth_hops": 3}}
     model, stats, used, threshold = wake_eval.load_run(tmp_path, scoring)
     assert threshold == 0.8 and len(stats["mean"]) == BANDS
     assert model.inp.out_channels == trained["model"]["channels"]
     assert used["model"] == trained["model"] and used["features"] == "trained.yaml"
     assert used["eval"]["smooth_hops"] == 3
+    model, _, _, threshold = wake_eval.load_run(tmp_path, scoring, 10)
+    assert threshold == 0.6 and torch.equal(model.inp.weight, earlier.inp.weight)
+    with pytest.raises(ValueError, match="no step 30"):
+        wake_eval.load_run(tmp_path, scoring, 30)

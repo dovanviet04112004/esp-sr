@@ -168,16 +168,24 @@ def board_table(results: list[BoardSession], threshold: float) -> str:
     return "\n".join(lines)
 
 
-def load_run(run: Path, cfg: dict) -> tuple[Tcn, dict, dict, float]:
-    """The run's network, band statistics and val threshold, and cfg with the run's own model and features, since
-    the net was built and fed by those; scoring keeps cfg's rules so every run is scored alike."""
+def checkpoint(run: Path, step: int) -> Path:
+    """Where a run keeps the net of one evaluated step."""
+    return run / "checkpoints" / f"step_{step:06d}.pt"
+
+
+def load_run(run: Path, cfg: dict, step: int | None = None) -> tuple[Tcn, dict, dict, float]:
+    """The run's kept network, or the one of an evaluated step, its band statistics and its val threshold, and cfg
+    with the run's own model and features, since the net was built and fed by those; scoring keeps cfg's rules."""
+    metrics = yaml.safe_load((run / "metrics.yaml").read_text(encoding="utf-8"))
+    rows = [r for r in metrics["history"] if r["step"] == step] if step else [metrics["val"]]
+    if not rows:
+        raise ValueError(f"{run} evaluated no step {step}")
     trained = load_yaml(run / "config.resolved.yaml")
     stats = dict(np.load(run / "band_stats.npz"))
     model = Tcn(len(stats["mean"]), **trained["model"])
-    model.load_state_dict(torch.load(run / "model.pt", map_location="cpu"))
+    model.load_state_dict(torch.load(checkpoint(run, step) if step else run / "model.pt", map_location="cpu"))
     model.eval()
-    threshold = yaml.safe_load((run / "metrics.yaml").read_text(encoding="utf-8"))["val"]["threshold"]
-    return model, stats, cfg | {"model": trained["model"], "features": trained["features"]}, threshold
+    return model, stats, cfg | {"model": trained["model"], "features": trained["features"]}, rows[0]["threshold"]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -185,8 +193,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("what", choices=["board"])
     parser.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.wake.train")
     parser.add_argument("--threshold", type=float, help="instead of the one the run chose on val")
+    parser.add_argument("--step", type=int, help="score the net saved at this evaluated step, not the kept one")
     args = parser.parse_args(argv)
-    model, stats, cfg, chosen = load_run(args.run, load_yaml(CONFIG))
+    model, stats, cfg, chosen = load_run(args.run, load_yaml(CONFIG), args.step)
     threshold = args.threshold if args.threshold is not None else chosen
     print(board_table(board(model, stats["mean"], stats["std"], cfg, data_paths(), threshold, "cpu"), threshold))
     return 0

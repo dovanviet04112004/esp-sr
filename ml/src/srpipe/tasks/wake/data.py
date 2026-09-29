@@ -20,7 +20,9 @@ import yaml
 
 from srpipe.core import corpus, screen, splits
 from srpipe.core.config import CONFIGS, data_paths, load_yaml
-from srpipe.generated import grid
+from srpipe.generated import grid, lang_vi
+from srpipe.lang import g2p
+from srpipe.lang.normalize import LangError, normalize
 from srpipe.scenes import device
 from srpipe.tasks.wake import CONFIG, synth
 
@@ -153,6 +155,22 @@ def is_hard(clip: corpus.Clip, patterns: list[re.Pattern], held: list[list[str]]
     said = corpus.words(clip.text or "")
     text = " ".join(said)
     return any(p.search(text) for p in patterns) and not any(corpus.says(said, h) for h in held)
+
+
+def sentence_units(clips: list[corpus.Clip], items: set[str], dialect: str) -> dict[str, list[int]]:
+    """lang_vi unit ids of every clip among items, read in dialect; a text lang_vi refuses, or none, is left out."""
+    region = lang_vi.DIALECTS.index(dialect)
+    units = {}
+    for clip in clips:
+        if clip.item not in items or not clip.text:
+            continue
+        try:
+            said = g2p.g2p(normalize(clip.text, region), region)
+        except LangError:
+            continue
+        if said:
+            units[clip.item] = said
+    return units
 
 
 def notes(cfg: dict, files: dict[str, list[splits.Row]], seconds: dict[str, float]) -> str:

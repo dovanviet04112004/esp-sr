@@ -32,5 +32,9 @@ class Tcn(nn.Module):
         self.out = nn.Conv1d(channels, n_out, 1)
         self.receptive_field_hops = 1 + sum(b.past_hops for b in self.blocks)
 
+    def trunk(self, x: Tensor) -> Tensor:
+        """The features every head reads, (batch, channels, hops)."""
+        return self.blocks(functional.relu(self.inp(x)))
+
     def forward(self, x: Tensor) -> Tensor:
-        return self.out(self.blocks(functional.relu(self.inp(x))))
+        return self.out(self.trunk(x))
