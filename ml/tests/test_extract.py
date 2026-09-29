@@ -40,7 +40,10 @@ class FakeHttp:
         data = self.files[self.path(url)]
         return io.BytesIO(data if start is None else data[start:stop])
 
-    def read(self, url: str, start: int, stop: int) -> bytes:
+    def resolve(self, url: str) -> str:
+        return url
+
+    def read(self, url: str, start: int, stop: int, auth: bool = True) -> bytes:
         self.reads.append((start, stop))
         return self.files[self.path(url)][start:stop]
 
@@ -81,12 +84,12 @@ def test_parquet_rows_come_from_their_row_groups_and_a_rerun_has_nothing_left(tm
         (3, ["bật đèn"]),
     ]
     assert max(stop - start for start, stop in http.reads) < len(buf.getvalue())
-    extract.fetch(job)
+    extract.fetch(job, False)
     wholes = sorted((tmp_path / "cache/extract/t/whole").glob("*.wav"))
     assert [round(sf.info(str(w)).duration, 1) for w in wholes] == [0.6, 0.8]
     http.reads.clear()
     extract.scan(job)
-    extract.fetch(job)
+    extract.fetch(job, False)
     assert http.reads == []
 
 
@@ -113,8 +116,11 @@ def test_tar_shards_stream_and_keep_only_their_matches(tmp_path: Path) -> None:
     }
     job = job_for(tmp_path, [source], http)
     extract.scan(job)
-    extract.fetch(job)
-    assert sorted(p.stem for p in (tmp_path / "cache/extract/t/whole").glob("*.wav")) == ["s_g__7_1_0", "s_g__8_2_0"]
+    extract.fetch(job, False)
+    assert sorted(p.stem for p in (tmp_path / "cache/extract/t/whole").glob("*.wav")) == [
+        "s_g__t__7_1_0",
+        "s_g__t__8_2_0",
+    ]
 
 
 def test_a_cut_keeps_the_first_start_heard_alone_and_deletes_the_sentence(tmp_path: Path, monkeypatch) -> None:
@@ -133,7 +139,7 @@ def test_a_cut_keeps_the_first_start_heard_alone_and_deletes_the_sentence(tmp_pa
         extract.engines, "hear", lambda clips, *a: {c["id"]: {"text": heard[int(c["id"][-1])]} for c in clips}
     )
     device = load_yaml(extract.CONFIGS / "scenes" / "device.yaml")
-    extract.cut(job, {}, device, tmp_path)
+    extract.cut(job, {}, device, tmp_path, False)
     (clip,) = (tmp_path / "raw/speech/t/tro_ly").glob("*.wav")
     assert abs(sf.info(str(clip)).duration - (1.0 + job.cfg["cut"]["tail_s"] - 0.52)) < 0.002
     assert not list((tmp_path / "cache/extract/t/whole").iterdir())

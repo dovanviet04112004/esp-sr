@@ -3,7 +3,7 @@
 scan reads every source's text over HTTP and lists the rows that say a phrase of configs/common/extract.yaml; fetch
 streams only the audio that holds a match into cache/extract/<name>/whole/; cut aligns each sentence, keeps the first
 start the checker hears as the phrase alone into raw/speech/<name>/<phrase>/ and deletes the sentence. Each step
-records what it finished and resumes from there. Run: python -m srpipe.core.extract <name> {scan,fetch,cut}"""
+resumes where it stopped. Run: python -m srpipe.core.extract <name> {scan,fetch,cut} [--follow]"""
 
 from __future__ import annotations
 
@@ -15,25 +15,25 @@ import os
 import re
 import shutil
 import tarfile
+import threading
 import time
 import unicodedata
-import urllib.error
 import urllib.parse
-import urllib.request
 from collections import defaultdict
 from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
 
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import requests
 import soundfile as sf
 import yaml
 
-from srpipe.core import corpus
-from srpipe.core.audio_io import ramped, to_grid_rate, write_wav
+from srpipe.core import corpus, screen
+from srpipe.core.audio_io import ItemReader, ramped, to_grid_rate, write_wav
 from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml, read_dotenv
 from srpipe.generated import grid
 from srpipe.tts import CONFIG as TTS_CONFIG
@@ -44,71 +44,76 @@ TEXT_COLUMNS = ("transcription", "text", "sentence", "transcript", "normalized_t
 RETRY_CODES = (429, 500, 502, 503, 504)
 
 
-class _NoTokenAcrossHosts(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        new = super().redirect_request(req, fp, code, msg, headers, newurl)
-        if new is not None and urllib.parse.urlsplit(newurl).netloc != urllib.parse.urlsplit(req.full_url).netloc:
-            new.remove_header("Authorization")
-        return new
-
-
 class Http:
-    """GET with the token, range reads and retries of the http section; the token never leaves the hub's host."""
+    """GET with the token, range reads and retries of the http section, over one kept-alive session per thread;
+    requests drops the token on a redirect off the hub, so the storage it redirects to never sees it."""
 
     def __init__(self, spec: dict, token: str | None) -> None:
-        self.spec, self.token = spec, token
-        self.opener = urllib.request.build_opener(_NoTokenAcrossHosts)
+        self.spec, self.token, self.local = spec, token, threading.local()
 
-    def open(self, url: str, start: int | None = None, stop: int | None = None):
-        headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
+    def session(self) -> requests.Session:
+        if not hasattr(self.local, "session"):
+            self.local.session = requests.Session()
+        return self.local.session
+
+    def get(self, url: str, start: int | None = None, stop: int | None = None, stream: bool = False, auth: bool = True):
+        headers = {"Authorization": f"Bearer {self.token}"} if self.token and auth else {}
         if start is not None:
             headers["Range"] = f"bytes={start}-{stop - 1}"
         wait = self.spec["first_wait_s"]
         for attempt in range(self.spec["retries"] + 1):
             try:
-                return self.opener.open(urllib.request.Request(url, headers=headers), timeout=self.spec["timeout_s"])
-            except urllib.error.HTTPError as e:
-                if e.code not in RETRY_CODES or attempt == self.spec["retries"]:
-                    raise
-            except (urllib.error.URLError, TimeoutError, ConnectionError):
-                if attempt == self.spec["retries"]:
-                    raise
+                r = self.session().get(url, headers=headers, stream=stream, timeout=self.spec["timeout_s"])
+                if r.status_code not in RETRY_CODES:
+                    r.raise_for_status()
+                    return r
+            except (requests.ConnectionError, requests.Timeout):
+                pass
+            if attempt == self.spec["retries"]:
+                raise OSError(f"{url}: gave up after {attempt + 1} tries")
             time.sleep(wait)
             wait *= 2
         raise AssertionError("unreachable")
 
-    def read(self, url: str, start: int, stop: int) -> bytes:
-        wait = self.spec["first_wait_s"]
-        for attempt in range(self.spec["retries"] + 1):
-            try:
-                with self.open(url, start, stop) as r:
-                    return r.read()
-            except (OSError, urllib.error.URLError):
-                if attempt == self.spec["retries"]:
-                    raise
-                time.sleep(wait)
-                wait *= 2
-        raise AssertionError("unreachable")
+    def open(self, url: str):
+        """The body of url as a file to stream through, never held whole."""
+        raw = self.get(url, stream=True).raw
+        raw.decode_content = True
+        return io.BufferedReader(raw, buffer_size=self.spec["stream_buffer_bytes"])
+
+    def resolve(self, url: str) -> str:
+        """Where the hub redirects url, a signed storage address read without the token and without the hub."""
+        return self.get(url, 0, 1).url
+
+    def read(self, url: str, start: int, stop: int, auth: bool = True) -> bytes:
+        return self.get(url, start, stop, auth=auth).content
 
     def json(self, url: str):
-        with self.open(url) as r:
-            return json.loads(r.read())
+        return self.get(url).json()
 
     def pages(self, url: str) -> Iterator:
-        """Every item of a paginated hub listing, following its Link: <...>; rel="next" headers."""
+        """Every item of a paginated hub listing, following its Link rel=next."""
         while url:
-            with self.open(url) as r:
-                yield from json.loads(r.read())
-                found = re.search(r'<([^>]+)>;\s*rel="next"', r.headers.get("Link", ""))
-            url = found.group(1) if found else ""
+            r = self.get(url)
+            yield from r.json()
+            url = r.links.get("next", {}).get("url", "")
 
 
 class RangeFile(io.RawIOBase):
-    """A remote file read by range requests of at least read_ahead bytes, for pyarrow to seek in."""
+    """A remote file read by range requests of at least read_ahead bytes, for pyarrow to seek in; the hub is asked
+    once where the file lives, every read then goes to storage."""
 
     def __init__(self, http: Http, url: str, size: int, read_ahead: int) -> None:
         self.http, self.url, self.size, self.read_ahead = http, url, size, read_ahead
-        self.pos, self.buf, self.buf_start = 0, b"", 0
+        self.pos, self.buf, self.buf_start, self.target = 0, b"", 0, None
+        self.blocks: list[tuple[int, bytes]] = []
+
+    def prefetch(self, ranges: list[tuple[int, int]], parallel: int) -> None:
+        """Read the byte ranges [start, stop) at once, parallel requests at a time, for later reads to find."""
+        self.target = self.target or self.http.resolve(self.url)
+        with ThreadPoolExecutor(parallel) as pool:
+            data = list(pool.map(lambda r: self.http.read(self.target, r[0], r[1], auth=False), ranges))
+        self.blocks = [(start, d) for (start, _), d in zip(ranges, data, strict=True)]
 
     def readable(self) -> bool:
         return True
@@ -123,13 +128,25 @@ class RangeFile(io.RawIOBase):
         self.pos = {io.SEEK_SET: 0, io.SEEK_CUR: self.pos, io.SEEK_END: self.size}[whence] + offset
         return self.pos
 
+    def fill(self, stop: int) -> None:
+        self.target = self.target or self.http.resolve(self.url)
+        try:
+            self.buf = self.http.read(self.target, self.pos, stop, auth=False)
+        except requests.HTTPError:
+            # A signed address expires; ask the hub again.
+            self.target = self.http.resolve(self.url)
+            self.buf = self.http.read(self.target, self.pos, stop, auth=False)
+        self.buf_start = self.pos
+
     def readinto(self, b) -> int:
         n = min(len(b), self.size - self.pos)
         if n <= 0:
             return 0
-        if not (self.buf_start <= self.pos and self.pos + n <= self.buf_start + len(self.buf)):
-            stop = min(self.size, self.pos + max(n, self.read_ahead))
-            self.buf, self.buf_start = self.http.read(self.url, self.pos, stop), self.pos
+        held = next((b for b in self.blocks if b[0] <= self.pos and self.pos + n <= b[0] + len(b[1])), None)
+        if held:
+            self.buf_start, self.buf = held
+        elif not (self.buf_start <= self.pos and self.pos + n <= self.buf_start + len(self.buf)):
+            self.fill(min(self.size, self.pos + max(n, self.read_ahead)))
         offset = self.pos - self.buf_start
         b[:n] = self.buf[offset : offset + n]
         self.pos += n
@@ -175,6 +192,7 @@ class Job:
         self.out = paths["raw"] / "speech" / name
         self.manifest = paths["manifests"] / "speech" / f"{name}.yaml"
         self.hub, self.read_ahead = cfg["http"]["hub"], cfg["http"]["read_ahead_bytes"]
+        self.paths, self.lock, self.kept = paths, threading.Lock(), None
 
     def pins(self) -> dict[str, dict]:
         """Each source's revision and licence, the first read of an unpinned one fixing it in pins.json."""
@@ -183,7 +201,10 @@ class Job:
         for s in self.spec["sources"]:
             if s["repo"] in known:
                 continue
-            branch = "refs%2Fconvert%2Fparquet" if s["kind"] == "parquet" else "main"
+            if s["kind"] == "local":
+                known[s["repo"]] = {"revision": "local", "license": "per corpus, docs/DU_LIEU.md"}
+                continue
+            branch = "refs%2Fconvert%2Fparquet" if s["kind"] == "parquet" and not s.get("own") else "main"
             sha = s.get("revision") or self.http.json(f"{self.hub}/api/datasets/{s['repo']}/revision/{branch}")["sha"]
             tags = self.http.json(f"{self.hub}/api/datasets/{s['repo']}").get("tags", [])
             licence = next((t.split(":", 1)[1] for t in tags if t.startswith("license:")), "none stated")
@@ -209,8 +230,15 @@ class Job:
         return self.state / "whole" / f"{key}.wav"
 
     def save_whole(self, key: str, x: np.ndarray, match: dict) -> None:
+        """The sentence, then its match written atomically: a match on disk always has its whole sentence."""
         write_wav(self.whole(key), x)
-        self.whole(key).with_suffix(".json").write_text(json.dumps(match, ensure_ascii=False), encoding="utf-8")
+        done_write(self.whole(key).with_suffix(".json"), [match])
+
+    def local_clips(self) -> list[corpus.Clip]:
+        with self.lock:
+            if self.kept is None:
+                self.kept = screen.kept_clips(load_yaml(screen.CONFIG), self.paths, "speech")
+        return self.kept
 
 
 def done_write(path: Path, lines: list[dict]) -> None:
@@ -240,9 +268,22 @@ def parquet_parts(job: Job, source: dict, pin: dict) -> list[tuple[str, dict]]:
     return [(f["path"], f) for f in job.files(source, pin["revision"], ".parquet", under)]
 
 
+def chunk_ranges(metadata: pq.FileMetaData, column: str) -> list[tuple[int, int]]:
+    """Byte ranges of one column's chunk in every row group, dictionary page included."""
+    ranges = []
+    for g in range(metadata.num_row_groups):
+        group = metadata.row_group(g)
+        chunk = next(group.column(c) for c in range(group.num_columns) if group.column(c).path_in_schema == column)
+        start = chunk.dictionary_page_offset if chunk.has_dictionary_page else chunk.data_page_offset
+        ranges.append((start, start + chunk.total_compressed_size))
+    return ranges
+
+
 def scan_parquet(job: Job, source: dict, pin: dict, part: str, info: dict) -> list[dict]:
-    pf = pq.ParquetFile(RangeFile(job.http, job.url(source, pin["revision"], part), info["size"], job.read_ahead))
+    remote = RangeFile(job.http, job.url(source, pin["revision"], part), info["size"], job.read_ahead)
+    pf = pq.ParquetFile(remote)
     column = text_column(pf.schema_arrow.names)
+    remote.prefetch(chunk_ranges(pf.metadata, column), job.cfg["http"]["file_parallel"])
     texts = pf.read(columns=[column]).column(0).to_pylist()
     return [
         {"key": f"{slug(source['repo'])}__{slug(part)}__{i}", "text": t, "phrases": said, "fetch": part, "row": i}
@@ -293,7 +334,7 @@ def scan_tsv(job: Job, source: dict, pin: dict) -> list[dict]:
                 shard = source["shards"].format(shard=ident.split("-")[0])
                 matches.append(
                     {
-                        "key": f"{slug(source['repo'])}__{slug(ident)}",
+                        "key": f"{slug(source['repo'])}__{slug(Path(source['transcripts']).stem)}__{slug(ident)}",
                         "text": text,
                         "phrases": said,
                         "fetch": shard,
@@ -373,6 +414,21 @@ def fetch_tar(job: Job, source: dict, pin: dict, shard: str, matches: list[dict]
                     return
 
 
+def scan_local(job: Job, prefix: str) -> list[dict]:
+    """Clips of a corpus under raw/ that screening kept and that say a phrase."""
+    return [
+        {"key": f"local__{slug(c.item)}", "text": c.text, "phrases": said, "fetch": prefix, "item": c.item}
+        for c in job.local_clips()
+        if c.item.startswith(prefix) and (said := job.phrases.said(c.text))
+    ]
+
+
+def fetch_local(job: Job, matches: list[dict]) -> None:
+    reader = ItemReader(job.paths["raw"])
+    for m in sorted(matches, key=lambda m: m["item"]):
+        job.save_whole(m["key"], reader.read(m["item"]), m)
+
+
 def scan_parts(job: Job, pins: dict) -> list[tuple[dict, str, dict]]:
     """(source, part, file info) of every text part of every source."""
     parts = []
@@ -385,6 +441,8 @@ def scan_parts(job: Job, pins: dict) -> list[tuple[dict, str, dict]]:
         elif s["kind"] == "yodas":
             for lang in s["languages"]:
                 parts += [(s, f["path"], f) for f in job.files(s, revision, ".json", f"data/{lang}/text")]
+        elif s["kind"] == "local":
+            parts += [(s, prefix, {}) for prefix in s["corpora"]]
         else:
             parts.append((s, s["transcripts"] if s["kind"] == "tsv_tar" else s["manifest"], {}))
     return parts
@@ -398,6 +456,8 @@ def scan_part(job: Job, source: dict, pin: dict, part: str, info: dict) -> list[
         return scan_arrow(job, source, pin, part, info)
     if kind == "yodas":
         return scan_yodas(job, source, pin, part)
+    if kind == "local":
+        return scan_local(job, part)
     return scan_tsv(job, source, pin) if kind == "tsv_tar" else scan_manifest(job, source, pin)
 
 
@@ -406,7 +466,8 @@ def run_parallel(tasks: list, work, workers: int, label: str) -> None:
     retries; a failed task never stops the others."""
     with ThreadPoolExecutor(workers) as pool:
         futures = {pool.submit(work, *t): t for t in tasks}
-        for n, (future, t) in enumerate(futures.items(), 1):
+        for n, future in enumerate(as_completed(futures), 1):
+            t = futures[future]
             try:
                 note = future.result()
                 print(f"{label} {n}/{len(tasks)} {t[0]['repo']} {t[1]}{note or ''}", flush=True)
@@ -425,9 +486,13 @@ def scan(job: Job) -> None:
             job.fetched_mark(source, part).touch()
         return f": {len(matches)}"
 
-    todo = [p for p in scan_parts(job, pins) if not job.scan_file(p[0], p[1]).exists()]
+    parts = scan_parts(job, pins)
+    todo = [p for p in parts if not job.scan_file(p[0], p[1]).exists()]
     print(f"scan: {len(todo)} text parts left", flush=True)
+    (job.state / "scan.done").unlink(missing_ok=True)
     run_parallel(todo, one, job.cfg["workers"]["scan"], "scan")
+    if all(job.scan_file(p[0], p[1]).exists() for p in parts):
+        (job.state / "scan.done").touch()
 
 
 def fetch_parts(job: Job, pins: dict) -> list[tuple[dict, str, list[dict], dict]]:
@@ -436,7 +501,11 @@ def fetch_parts(job: Job, pins: dict) -> list[tuple[dict, str, list[dict], dict]
     for s in job.spec["sources"]:
         if s["kind"] == "arrow":
             continue
-        matches = [m for f in sorted((job.state / "scan" / slug(s["repo"])).glob("*.jsonl")) for m in read_jsonl(f)]
+        own = [s["transcripts"] if s["kind"] == "tsv_tar" else s["manifest"]] if "_tar" in s["kind"] else None
+        found = (
+            [job.scan_file(s, part) for part in own] if own else (job.state / "scan" / slug(s["repo"])).glob("*.jsonl")
+        )
+        matches = [m for f in sorted(f for f in found if f.exists()) for m in read_jsonl(f)]
         if s["kind"] == "manifest_tar":
             shards = job.files(s, pins[s["repo"]]["revision"], ".tar.zst")
             parts += [(s, f["path"], matches, f) for f in shards if matches]
@@ -457,21 +526,34 @@ def read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
-def fetch(job: Job) -> None:
+def fetch(job: Job, follow: bool) -> None:
+    """Every audio part not fetched yet; with follow, again as scan finishes parts, until scan is done."""
     pins = job.pins()
 
     def one(source: dict, part: str, matches: list[dict], info: dict) -> str:
         if source["kind"] == "parquet":
             fetch_parquet(job, source, pins[source["repo"]], part, matches, info)
+        elif source["kind"] == "local":
+            fetch_local(job, matches)
         else:
             fetch_tar(job, source, pins[source["repo"]], part, matches)
         job.fetched_mark(source, part).parent.mkdir(parents=True, exist_ok=True)
         job.fetched_mark(source, part).touch()
         return f": {len(matches)} matches"
 
-    todo = [p for p in fetch_parts(job, pins) if not job.fetched_mark(p[0], p[1]).exists()]
-    print(f"fetch: {len(todo)} audio parts left, {sum(len(p[2]) for p in todo)} matches", flush=True)
-    run_parallel(todo, one, job.cfg["workers"]["fetch"], "fetch")
+    while True:
+        scanned = (job.state / "scan.done").exists()
+        todo = [p for p in fetch_parts(job, pins) if not job.fetched_mark(p[0], p[1]).exists()]
+        print(f"fetch: {len(todo)} audio parts left, {sum(len(p[2]) for p in todo)} matches", flush=True)
+        if todo:
+            (job.state / "fetch.done").unlink(missing_ok=True)
+            run_parallel(todo, one, job.cfg["workers"]["fetch"], "fetch")
+            continue
+        if scanned:
+            (job.state / "fetch.done").touch()
+        if scanned or not follow:
+            return
+        time.sleep(job.cfg["follow_poll_s"])
 
 
 def phrase_spans(words: list[dict], phrase: list[tuple[str, ...]]) -> list[tuple[float, float]]:
@@ -490,14 +572,26 @@ def segment(path: Path, start_s: float, end_s: float) -> np.ndarray:
     return sf.read(str(path), start=round(start_s * rate), stop=round(end_s * rate), dtype="float64")[0]
 
 
-def cut(job: Job, tts: dict, device: dict, cache: Path) -> None:
-    """Align the fetched sentences in batches, try each phrase's start in turn until the checker hears the phrase
-    alone, keep those clips, then delete the sentences and every try."""
+def cut(job: Job, tts: dict, device: dict, cache: Path, follow: bool) -> None:
+    """Every fetched sentence; with follow, again as fetch brings more, until fetch is done."""
+    while True:
+        fetched = (job.state / "fetch.done").exists()
+        sentences = sorted(f for f in (job.state / "whole").glob("*.json") if f.with_suffix(".wav").exists())
+        if sentences:
+            cut_sentences(job, sentences, tts, device, cache)
+            continue
+        if fetched or not follow:
+            return
+        time.sleep(job.cfg["follow_poll_s"])
+
+
+def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cache: Path) -> None:
+    """Align the sentences in batches, try each phrase's start in turn until the checker hears the phrase alone,
+    keep those clips, then delete the sentences and every try."""
     spec, rate = job.cfg["cut"], grid.SAMPLE_RATE_HZ
     pad, ramp_s = np.zeros(round(device["session"]["pad_s"] * rate)), device["talker"]["edge_ramp_s"]
     sounds = dict(zip(job.phrases.phrases, job.phrases.sounds, strict=True))
     work = job.state / "work"
-    sentences = sorted(f for f in (job.state / "whole").glob("*.json") if f.with_suffix(".wav").exists())
     print(f"cut: {len(sentences)} sentences left", flush=True)
     for first in range(0, len(sentences), spec["align_batch"]):
         batch = [json.loads(f.read_text(encoding="utf-8")) for f in sentences[first : first + spec["align_batch"]]]
@@ -600,6 +694,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("name", help="an extract of configs/common/extract.yaml")
     parser.add_argument("step", choices=["scan", "fetch", "cut"])
+    parser.add_argument("--follow", action="store_true", help="fetch or cut, keep taking up what the step before adds")
     args = parser.parse_args(argv)
     cfg, paths = load_yaml(CONFIG), data_paths()
     token = {**read_dotenv(ML_ROOT / ".env"), **os.environ}.get(cfg["http"]["token_env"])
@@ -609,9 +704,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.step == "scan":
         scan(job)
     elif args.step == "fetch":
-        fetch(job)
+        fetch(job, args.follow)
     else:
-        cut(job, load_yaml(TTS_CONFIG), load_yaml(CONFIGS / "scenes" / "device.yaml"), paths["cache"])
+        cut(job, load_yaml(TTS_CONFIG), load_yaml(CONFIGS / "scenes" / "device.yaml"), paths["cache"], args.follow)
     return 0
 
 
