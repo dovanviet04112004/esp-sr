@@ -1,6 +1,6 @@
 """Wake split: voices follow their speaker's role, clones of speakerless corpora train, negatives never say the wake
-word, test_neg comes only from its corpora less the speakers moved whole into val_neg, and train_neg stops at its
-hours."""
+word, test_neg comes only from its corpora less the speakers moved whole into val_neg, train_neg stops at its hours,
+and corpus clips that say the word join the positives as cuts around it."""
 
 from __future__ import annotations
 
@@ -14,8 +14,18 @@ def synth_clip(kind: str, speaker: str, n: int) -> dict:
     return {"engine": "f5", "id": ident, "speaker": speaker, "kept": n != 3, "seconds": 1.0}
 
 
-def test_the_wake_split_keeps_speakers_words_and_sources_apart() -> None:
+def pinned() -> dict:
+    """wake.yaml with the word and hard near-miss settings these tests were written around, whatever word is chosen."""
     cfg = load_yaml(CONFIG)
+    cfg["word"] = "chào mi na"
+    cfg["synth"]["hard"] = {"held_out": ["chào mẹ", "chào minh", "chào bạn"]}
+    cfg["split"]["hard"] = ["\\bchào [mnlbv]", "\\bmươi (lăm|năm|ba|nhăm)\\b", "i n[aàáảãạ]\\b"]
+    cfg["split"].pop("val_from_test", None)
+    return cfg
+
+
+def test_the_wake_split_keeps_speakers_words_and_sources_apart() -> None:
+    cfg = pinned()
     cfg["split"] |= {"val_speakers": 0.5, "negative_hours": 3 / 3600}
     speakers = [f"VIVOSSPK{k:02d}" for k in range(1, 5)]
     public = [
@@ -42,7 +52,7 @@ def test_the_wake_split_keeps_speakers_words_and_sources_apart() -> None:
 
 
 def test_a_share_of_test_speakers_moves_whole_into_val_neg() -> None:
-    cfg = load_yaml(CONFIG)
+    cfg = pinned()
     cfg["split"] |= {"val_speakers": 0.5, "negative_hours": 1.0, "val_from_test": {"speech/common_voice_vi/": 0.5}}
     people = [f"cv{k}" for k in range(6)]
     public = [
@@ -63,7 +73,7 @@ def test_a_share_of_test_speakers_moves_whole_into_val_neg() -> None:
 
 
 def test_hard_files_mine_the_families_by_role_and_leave_the_other_five_as_they_were() -> None:
-    cfg = load_yaml(CONFIG)
+    cfg = pinned()
     cfg["split"] |= {"val_speakers": 0.5, "negative_hours": 1.0}
     speakers = [f"VIVOSSPK{k:02d}" for k in range(1, 5)]
     texts = ["sáu mươi lăm", "chào mọi người", "chào mẹ đi", "một câu"]
@@ -105,3 +115,35 @@ def test_simulate_links_a_twin_build_instead_of_running_it_again(tmp_path, monke
     data.simulate(cfg | {"simulate": {"split": "v2", "workers": 1, "repeats": {}}}, paths)
     linked = tmp_path / "processed" / "wake" / "v2" / "val_pos" / "shard_00000.features.npy"
     assert linked.stat().st_ino == (built / "shard_00000.features.npy").stat().st_ino
+
+
+def test_corpus_clips_that_say_the_word_join_the_positives_cut_around_it() -> None:
+    heard = [
+        {"word": "theo", "start": 0.0, "end": 0.8},
+        {"word": "Trợ", "start": 0.84, "end": 1.06},
+        {"word": "lý,", "start": 1.06, "end": 1.2},
+        {"word": "trợ", "start": 2.0, "end": 2.2},
+    ]
+    assert data.spoken_at(heard, corpus.words("trợ lý")) == (0.84, 1.2)
+    assert data.spoken_at(heard, corpus.words("chào mi na")) is None
+    assert (
+        data.cut_item("speech/bud500/data/train-0.parquet#6", 0.0, 1.25)
+        == "speech/bud500/data/train-0.parquet#6@0.000-1.250"
+    )
+    cfg = pinned()
+    cfg["word"] = "trợ lý"
+    cfg["split"] |= {"val_speakers": 0.5, "negative_hours": 1.0}
+    public = [corpus.Clip(f"speech/bud500/data/train-0.parquet#{n}", None, "một câu") for n in range(3)]
+    public += [corpus.Clip("speech/bud500/data/train-0.parquet#3", None, "theo các trợ lý tổng thống")]
+    seconds = dict.fromkeys((c.item for c in public), 1.0)
+    cut = data.cut_item("speech/bud500/data/train-0.parquet#3", 0.0, 1.25)
+    found = [
+        {"item": "speech/bud500/data/train-0.parquet#3", "speaker": splits.ABSENT, "kept": True, "cut": cut},
+        {"item": "speech/bud500/data/train-0.parquet#9", "speaker": splits.ABSENT, "kept": False},
+    ]
+    manifests = {synth.SETS["positives"]: [], synth.SETS["negatives"]: [], data.CORPUS_POS: found}
+    files = data.build(cfg, public, seconds, manifests)
+    assert [(r.item, r.origin) for r in files["train_pos.txt"]] == [(cut, "public")]
+    assert not files["val_pos.txt"]
+    negatives = [r.item for name in ("train_neg.txt", "val_neg.txt", "test_neg.txt") for r in files[name]]
+    assert "speech/bud500/data/train-0.parquet#3" not in negatives and len(negatives) == 3
