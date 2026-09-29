@@ -12,6 +12,7 @@ import pytest
 import torch
 import yaml
 
+from srpipe.core import corpus
 from srpipe.core.config import load_yaml
 from srpipe.generated import grid
 from srpipe.tasks.wake import CONFIG, data, train
@@ -201,3 +202,10 @@ def test_a_run_is_scored_with_its_own_network_and_the_current_scoring_rules(tmp_
     assert threshold == 0.6 and torch.equal(model.inp.weight, earlier.inp.weight)
     with pytest.raises(ValueError, match="no step 30"):
         wake_eval.load_run(tmp_path, scoring, 30)
+
+
+def test_a_wake_session_for_another_word_is_scored_as_a_negative() -> None:
+    word = corpus.words("trợ lý")
+    assert wake_eval.session_kind("wake", "Trợ lý!", word) == "wake"
+    assert wake_eval.session_kind("wake", "chào mi na", word) == "neg"
+    assert wake_eval.session_kind("cmd", "trợ lý bật đèn", word) == "cmd"
