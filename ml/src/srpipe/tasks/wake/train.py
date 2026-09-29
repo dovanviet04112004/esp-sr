@@ -16,7 +16,7 @@ import torch
 import yaml
 from torch.nn import functional
 
-from srpipe.core.config import data_paths, load_yaml
+from srpipe.core.config import apply_overrides, data_paths, load_yaml
 from srpipe.core.run_dir import create_run_dir
 from srpipe.core.seed import seed_everything
 from srpipe.tasks.wake import CONFIG
@@ -175,8 +175,16 @@ def train(cfg: dict, sets: dict[str, list[Shard]], device: str) -> tuple[Tcn, di
 
 
 def main(argv: list[str] | None = None) -> int:
-    argparse.ArgumentParser(description=__doc__.splitlines()[0]).parse_args(argv)
-    cfg, paths = load_yaml(CONFIG), data_paths()
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="a dotted override of wake.yaml, e.g. model.channels=64",
+    )
+    cfg, paths = apply_overrides(load_yaml(CONFIG), parser.parse_args(argv).overrides), data_paths()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     root = paths["processed"] / "wake" / cfg["train"]["split"]
     around = label_hops(cfg["train"]["label_s"])
