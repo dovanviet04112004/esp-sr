@@ -40,7 +40,17 @@ from srpipe.tts import CONFIG as TTS_CONFIG
 from srpipe.tts import engines
 
 CONFIG = CONFIGS / "common" / "extract.yaml"
-TEXT_COLUMNS = ("transcription", "text", "sentence", "transcript", "normalized_text", "raw_transcription", "content")
+TEXT_COLUMNS = (
+    "transcription",
+    "text",
+    "sentence",
+    "transcript",
+    "normalized_text",
+    "raw_transcription",
+    "content",
+    "utt",
+    "human_transcript",
+)
 RETRY_CODES = (429, 500, 502, 503, 504)
 
 
