@@ -740,7 +740,8 @@ dương vì thế chỉ chứa từ đánh thức và dừng ở âm cuối củ
 và nhiễu phòng như mọi câu khác (§1.2). Từ đánh thức được nhận theo **cách đọc** giọng Bắc của `lang_vi`, không theo chữ viết: "trợ lí" cũng là nó.
 **Âm bản** gồm các kho lời nói tiếng Việt trừ câu đọc ra từ đánh thức, cộng một bộ nhẹ cụm ngắn đọc bằng giọng TTS của
 mẫu dương: cụm của kho cách từ đánh thức một thành phần âm tiết ("chị lý", "vợ lý") và cụm hay gặp nhất mở đầu bằng
-"trợ" ("trợ giúp", "trợ cấp"), để giọng TTS không thành dấu hiệu của lớp dương và một mình "trợ" không đủ đánh thức.
+"trợ" ("trợ giúp", "trợ cấp"), cùng từng nửa của từ đánh thức nói riêng ("trợ", "lý"), để giọng TTS không thành dấu
+hiệu của lớp dương và một nửa của từ không đủ đánh thức.
 Bản thu qua board để chấm (§1.3).
 
 **Âm bản khó** — cơ chế để siết báo nhầm, **tắt ở bản demo**. Khi bật (mục `synth.hard` và `split.hard` của cấu
