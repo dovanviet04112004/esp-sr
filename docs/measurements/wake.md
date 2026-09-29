@@ -280,6 +280,14 @@ p95 là 0,25 / 0,38 / 0,58 s. `python -m srpipe.tasks.wake.data corpus` cắt c�
 **218**: Bud500 190, VLSP 27, FPT 1. Sáu mẩu bỏ vì PhoWhisper nghe lại không ra "trợ lý", phần lớn khi từ ấy ở cuối
 mẩu và câu gốc nói tiếp tên người ("trợ lý long" nghe thành "chợ ly", "quà trợ lý" thành "quà thợ lý").
 
+**Bao nhiêu giọng trong 218 mẩu giữ lại.** Các kho không có mã người nói, nên đếm bằng vân giọng (Resemblyzer, GE2E)
+của câu nguyên, cosin giữa hai mẩu. Hiệu chuẩn trên VIVOS train, 30 người × 6 câu: cùng người 0,727 / 0,867 / 0,944
+(p5 / p50 / p95), khác người 0,500 / 0,635 / 0,785; gom cụm liên kết trung bình ở 0,8 ra 40 cụm cho 30 người, ở 0,75 ra
+23 cụm và gộp nhầm. Trên 218 mẩu: cosin giữa hai mẩu 0,451 / 0,638 / 0,815, ngang hai người khác nhau của VIVOS; gom ở
+0,8 ra **97 giọng**, giọng lớn nhất 15 mẩu (7%), năm giọng lớn nhất 31%. 8,1% cặp đạt 0,8, tức khoảng 6% cặp cùng
+giọng theo tỉ lệ của VIVOS, nên kể cả khi dồn cả vào một người thì người ấy cũng chỉ giữ tối đa 25% số mẩu. Tên hay đứng
+sau "trợ lý" ("minh" 8, "quân" 7, "nam" 6) cho thấy vài truyện audio góp mỗi truyện một cụm giọng.
+
 **Mốc từ của PhoWhisper không dùng.** Chế độ mốc từng từ (chú ý chéo, kernel eager) trên card 4 GB đầy bộ nhớ (3,9 GB)
 và tràn sang RAM: 240 mẩu ghép chưa xong sau 25 phút, tức hơn 6 s mỗi mẩu, nên không có số. Theo WhisperX (Bain và
 cộng sự, 2023), mốc từ của Whisper kém căn cưỡng bức, và họ cũng căn lại bằng mô hình âm vị.
