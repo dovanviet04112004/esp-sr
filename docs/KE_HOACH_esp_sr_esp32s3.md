@@ -724,16 +724,18 @@ chừng nửa giây, 28 lần mỗi triệu âm tiết lời nói: ngắn và th
 siết báo nhầm để sau, khi có dữ liệu thu thật.
 
 **Dữ liệu dương** gồm tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, và **người thật nói
-"trợ lý" trong kho học**: 224 câu, cắt từ 2 s trước "trợ" (một trường nhìn, hay từ đầu câu nếu gần hơn) đến sau cuối
-"lý" một quãng ở cấu hình. Cuối "lý" lấy bằng **căn cưỡng bức** (Montreal Forced Aligner, mô hình tiếng Việt, chạy
-trong Docker) trên lời của câu: mốc ấy trùng lúc âm tụt 30 dB dưới đỉnh, lệch trung vị 16 ms khi có từ nói nối sau.
-Mốc từng từ đọc từ chú ý chéo của PhoWhisper thì không dùng: nó chậm hơn 6 s mỗi mẩu trên card 4 GB, và mốc từ của
-Whisper kém căn cưỡng bức, lý do WhisperX (Bain và cộng sự, 2023) căn lại bằng mô hình âm vị (`docs/measurements/wake.md`
-§6). Mẩu cắt nào PhoWhisper nghe lại không ra từ ấy thì bỏ. Các kho
-ấy không có mã người nói, nên mẩu cắt chỉ vào `train`. Mẩu TTS cũng cắt: TTS để lại khoảng lặng sau từ (VieNeu trung vị
-0,16 s, 5% số mẩu tới 0,39 s), nên mẩu dương TTS dừng ở bước cuối còn trong 30 dB so với bước to nhất của nó, đúng chỗ
-bộ căn đặt cuối từ, cộng cùng quãng ấy. Mọi mẩu dương vì thế kết thúc cùng một quãng sau âm cuối của từ, và nhãn đặt ở
-đó. Tất cả qua đường mô phỏng board (§1.2). Từ đánh thức được nhận theo **cách đọc** giọng Bắc của `lang_vi`, không theo chữ viết: "trợ lí" cũng là nó.
+"trợ lý" trong kho học**: 224 câu, mỗi câu **cắt lấy đúng hai tiếng "trợ lý"**, từ đầu "trợ" đến cuối "lý". Mốc lấy
+bằng **căn cưỡng bức** (Montreal Forced Aligner, mô hình tiếng Việt, chạy trong Docker) trên lời của câu. Mốc cuối hay
+sớm nên cộng một quãng ở cấu hình, để trung vị còn lệch 12 ms. Mốc đầu trong lời nói liền hay còn dính âm cuối của từ
+trước, nên mép đầu thử lần lượt vài độ dời vào trong "tr" (cấu hình), lấy lần đầu PhoWhisper nghe ra đúng từ. Hai mép cắt vuốt nhỏ dần trong 10 ms (`talker.edge_ramp_s` của đường mô phỏng board)
+để mẩu cắt không có tiếng "tách" mà âm bản không có. Mẩu cắt được PhoWhisper nghe lại đúng như lúc mô phỏng phát, và chỉ
+giữ khi nó nghe ra đúng "trợ lý", không thừa tiếng nào. Mốc từng từ đọc từ chú ý chéo của PhoWhisper thì không dùng: nó
+chậm hơn 6 s mỗi mẩu trên card 4 GB, và mốc từ của Whisper kém căn cưỡng bức, lý do WhisperX (Bain và cộng sự, 2023) căn
+lại bằng mô hình âm vị (`docs/measurements/wake.md` §6). Các kho ấy không có mã người nói, nên mẩu cắt chỉ vào `train`.
+Mẩu TTS cũng cắt: TTS để lại khoảng lặng sau từ (VieNeu trung vị 0,16 s, 5% số mẩu tới 0,39 s), nên mẩu dương TTS dừng ở
+bước cuối còn trong 40 dB so với bước to nhất của nó, đúng chuẩn "cuối từ" mà mốc của câu thật được đo theo. Mọi mẩu
+dương vì thế chỉ chứa từ đánh thức và dừng ở âm cuối của nó; nhãn đặt ở đó, và đường mô phỏng đặt mẩu giữa khoảng lặng
+và nhiễu phòng như mọi câu khác (§1.2). Từ đánh thức được nhận theo **cách đọc** giọng Bắc của `lang_vi`, không theo chữ viết: "trợ lí" cũng là nó.
 **Âm bản** gồm các kho lời nói tiếng Việt trừ câu đọc ra từ đánh thức, cộng một bộ nhẹ cụm ngắn đọc bằng giọng TTS của
 mẫu dương: cụm của kho cách từ đánh thức một thành phần âm tiết ("chị lý", "vợ lý") và cụm hay gặp nhất mở đầu bằng
 "trợ" ("trợ giúp", "trợ cấp"), để giọng TTS không thành dấu hiệu của lớp dương và một mình "trợ" không đủ đánh thức.
