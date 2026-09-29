@@ -14,7 +14,7 @@ workers:
   scan: 32                         # text files read at once, each file_parallel requests at a time
   fetch: 6                         # audio parts streamed at once: one stream runs at ~16 MB/s; each holds a
                                    #   row group or a tar member in memory, and WSL has 10 GB with the aligner
-  stream: 2                        # .arrow parts read end to end at once, their audio passing through memory
+  stream: 4                        # .arrow parts read end to end at once, their audio passing through memory
 follow_poll_s: 60                  # how often fetch --follow and cut --follow look for new work
 cut:                               # as wake.yaml split.corpus_pos, measured in wake.md §6
   start_shifts_s: [0.0, 0.02, 0.04, 0.06]   # tried in turn after the aligned start; the first heard as the phrase
@@ -36,7 +36,7 @@ extracts:
       - dừng lại
     sources:                       # a source without a revision is pinned when first read, in the manifest;
                                    #   parquet is the dataset viewer's refs/convert/parquet, arrow the repo's own
-                                   #   files; yodas2_sidon and yodas v1 repeat yodas2 and stay out
+                                   #   files; yodas2_sidon and yodas v1 repeat yodas2, ViSEC has no text
       - {kind: parquet, repo: thivux/phoaudiobook, revision: e716faf3780d89cdd630b3a778476bb9e1ad316d}
       - {kind: parquet, repo: NhutP/VietSpeech, revision: 35f7d6081b8de7cafa593d741a74068e7d40822c}
       - {kind: parquet, repo: capleaf/viVoice, revision: cb55a42ab775fbff4f78849679b14b6e8934176d}
@@ -63,7 +63,6 @@ extracts:
       - {kind: parquet, repo: HieuNguyen203/Vietnamese_Medical_Consultation}
       - {kind: parquet, repo: tensorxt/ViMedCSS}
       - {kind: parquet, repo: Cets/audio-logs-vie}
-      - {kind: parquet, repo: hustep-lab/ViSEC}
       - {kind: arrow, repo: pnnbao-ump/VieNeu-TTS-1000h}   # its 140h set is the LanguaMan copy above
       - {kind: parquet, repo: BlossomsAI/Blum_vi_voice, own: true}
       - {kind: parquet, repo: beyoru/vietnamese-voice, own: true}

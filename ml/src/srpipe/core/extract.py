@@ -30,6 +30,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import requests
 import soundfile as sf
+import urllib3
 import yaml
 
 from srpipe.core import corpus, screen
@@ -50,6 +51,7 @@ TEXT_COLUMNS = (
     "content",
     "utt",
     "human_transcript",
+    "segment_text",
 )
 RETRY_CODES = (429, 500, 502, 503, 504)
 
@@ -69,7 +71,7 @@ class Http:
     def get(self, url: str, start: int | None = None, stop: int | None = None, stream: bool = False, auth: bool = True):
         headers = {"Authorization": f"Bearer {self.token}"} if self.token and auth else {}
         if start is not None:
-            headers["Range"] = f"bytes={start}-{stop - 1}"
+            headers["Range"] = f"bytes={start}-{stop - 1}" if stop is not None else f"bytes={start}-"
         wait = self.spec["first_wait_s"]
         for attempt in range(self.spec["retries"] + 1):
             try:
@@ -86,10 +88,14 @@ class Http:
         raise AssertionError("unreachable")
 
     def open(self, url: str):
-        """The body of url as a file to stream through, never held whole."""
-        raw = self.get(url, stream=True).raw
-        raw.decode_content = True
-        return io.BufferedReader(raw, buffer_size=self.spec["stream_buffer_bytes"])
+        """The body of url as a file to stream through, never held whole, picking up where it broke."""
+        return io.BufferedReader(Resumed(self, url), buffer_size=self.spec["stream_buffer_bytes"])
+
+    def body(self, url: str, start: int):
+        raw = self.get(url, start if start else None, None, stream=True).raw
+        # Closed at its end, the body fails a reader that asks once more past it, as zstd does.
+        raw.decode_content, raw.auto_close = True, False
+        return raw
 
     def resolve(self, url: str) -> str:
         """Where the hub redirects url, a signed storage address read without the token and without the hub."""
@@ -117,6 +123,35 @@ class Http:
             r = self.get(url)
             yield from r.json()
             url = r.links.get("next", {}).get("url", "")
+
+
+class Resumed(io.RawIOBase):
+    """A streamed body that, when the connection breaks, asks again from the byte it reached: a shard of gigabytes
+    over a long-haul line breaks now and then, and starting it over would never end."""
+
+    def __init__(self, http: Http, url: str) -> None:
+        self.http, self.url, self.pos, self.tries = http, url, 0, 0
+        self.raw = http.body(url, 0)
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, b) -> int:
+        while True:
+            try:
+                n = self.raw.readinto(b)
+                self.pos += n
+                return n
+            except (requests.exceptions.RequestException, urllib3.exceptions.HTTPError, OSError):
+                self.tries += 1
+                if self.tries > self.http.spec["retries"]:
+                    raise
+                time.sleep(self.http.spec["first_wait_s"])
+                self.raw = self.http.body(self.url, self.pos)
+
+    def close(self) -> None:
+        self.raw.close()
+        super().close()
 
 
 class RangeFile(io.RawIOBase):

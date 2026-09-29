@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import requests
 import soundfile as sf
 import yaml
 
@@ -149,3 +150,24 @@ def test_a_cut_keeps_the_first_start_heard_alone_and_deletes_the_sentence(tmp_pa
     assert manifest["counts"]["by_phrase"] == {"trợ lý": 1} and manifest["sources"][0]["revision"] == "rev0"
     (done,) = extract.read_jsonl(next((tmp_path / "cache/extract/t/cut").glob("*.jsonl")))
     assert done["clips"][0]["shift_s"] == 0.02 and done["clips"][0]["heard"] == "Trợ lý."
+
+
+def test_a_stream_that_breaks_goes_on_from_the_byte_it_reached() -> None:
+    data = bytes(range(256)) * 100
+
+    class Cut(io.BytesIO):
+        def readinto(self, b) -> int:
+            if self.tell() >= 1000:
+                raise requests.ConnectionError("connection broken")
+            return super().readinto(memoryview(b)[: 1000 - self.tell()])
+
+    class Hub:
+        def __init__(self) -> None:
+            self.spec, self.starts = {"retries": 2, "first_wait_s": 0.0}, []
+
+        def body(self, url: str, start: int) -> io.BytesIO:
+            self.starts.append(start)
+            return (Cut if len(self.starts) == 1 else io.BytesIO)(data[start:])
+
+    hub = Hub()
+    assert io.BufferedReader(extract.Resumed(hub, "u"), 64).read() == data and hub.starts == [0, 1000]
