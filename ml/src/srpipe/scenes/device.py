@@ -23,7 +23,7 @@ from scipy import fft as sfft
 from scipy import signal
 
 from srpipe.core import screen, splits
-from srpipe.core.audio_io import ItemReader, read_wav, to_float, write_wav
+from srpipe.core.audio_io import ItemReader, ramped, read_wav, to_float, write_wav
 from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml
 from srpipe.dsp.afe.chain import PCM_MAX, PCM_MIN, Chain, ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
@@ -245,7 +245,7 @@ def simulate_session(
     at = round(s["lead_s"] * FS)
     pieces, spans = [np.zeros(at)], []
     for row in rows:
-        x = readers[ROOT_OF[row.origin]].read(row.item)
+        x = ramped(readers[ROOT_OF[row.origin]].read(row.item), t["edge_ramp_s"])
         jitter_db = float(rng.uniform(-t["jitter_db"], t["jitter_db"]))
         pieces.append(x * 10.0 ** (jitter_db / 20.0) / active_rms(x, t["active_below_peak_db"]))
         spans.append((at, at + len(x)))

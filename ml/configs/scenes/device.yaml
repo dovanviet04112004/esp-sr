@@ -22,6 +22,7 @@ talker:
   spl_1m_db: [56.0, 74.0]         # ANSI S3.5: casual 56, normal 62, raised 68, loud 75 dB SPL at 1 m
   jitter_db: 3.0                  # each utterance within this of its session's level
   active_below_peak_db: 40.0      # a hop counts as speech within this of the utterance's loudest hop
+  edge_ramp_s: 0.01               # each utterance fades in and out over this: a clip cut from a sentence has no step
 noise:
   probability: 0.85               # a session without one hears the microphones' own noise only
   snr_db: [0.0, 30.0]             # active talker over the whole noise, in the air at ch0

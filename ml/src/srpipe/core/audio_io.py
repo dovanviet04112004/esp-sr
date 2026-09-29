@@ -40,6 +40,18 @@ def write_wav(path: Path, x: np.ndarray, rate_hz: int = grid.SAMPLE_RATE_HZ) -> 
     sf.write(str(path), to_int16(x), rate_hz, subtype="PCM_16")
 
 
+def ramped(x: np.ndarray, ramp_s: float) -> np.ndarray:
+    """x faded in and out over ramp_s at the grid's rate by a raised cosine: a cut starts and ends without a step."""
+    n = min(round(ramp_s * grid.SAMPLE_RATE_HZ), len(x) // 2)
+    if n == 0:
+        return x
+    ramp = 0.5 - 0.5 * np.cos(np.pi * (np.arange(n) + 0.5) / n)
+    y = np.array(x, dtype=np.float64)
+    y[:n] *= ramp
+    y[len(y) - n :] *= ramp[::-1]
+    return y
+
+
 def to_grid_rate(x: np.ndarray, rate_hz: int) -> np.ndarray:
     """Mono float64 at the grid's rate, by polyphase resampling when the rate differs."""
     if rate_hz == grid.SAMPLE_RATE_HZ:

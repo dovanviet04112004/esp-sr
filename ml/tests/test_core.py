@@ -109,3 +109,13 @@ def test_items_come_from_files_and_parquet_rows_at_the_grid_rate_whole_or_a_span
     assert span.shape == (800,)
     np.testing.assert_allclose(span[100:700], third[500:1100], atol=1e-3)
     assert reader.read("one.wav@0-0.005").shape == (80,)
+
+
+def test_a_ramp_fades_both_edges_and_leaves_the_middle() -> None:
+    x = np.ones(1000)
+    y = audio_io.ramped(x, 0.005)
+    n = round(0.005 * audio_io.grid.SAMPLE_RATE_HZ)
+    assert y[0] < 0.01 and y[-1] < 0.01 and np.all(np.diff(y[:n]) > 0)
+    np.testing.assert_array_equal(y[n:-n], 1.0)
+    assert np.array_equal(audio_io.ramped(x, 0.0), x) and np.all(x == 1.0)
+    assert audio_io.ramped(np.ones(10), 0.01).max() <= 1.0
