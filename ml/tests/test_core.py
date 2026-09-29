@@ -92,7 +92,7 @@ def _wav_bytes(x: np.ndarray, rate_hz: int) -> bytes:
     return buffer.getvalue()
 
 
-def test_items_come_from_files_and_parquet_rows_at_the_grid_rate(tmp_path: Path) -> None:
+def test_items_come_from_files_and_parquet_rows_at_the_grid_rate_whole_or_a_span(tmp_path: Path) -> None:
     tone = 0.25 * np.sin(2 * np.pi * 440.0 * np.arange(4800) / 48000.0)
     rows = [{"bytes": _wav_bytes(tone * (k + 1) / 4, 48000), "path": None} for k in range(4)]
     table = pa.table({"audio": rows, "transcription": ["a", "b", "c", "d"]})
@@ -105,3 +105,7 @@ def test_items_come_from_files_and_parquet_rows_at_the_grid_rate(tmp_path: Path)
     assert abs(np.sqrt(np.mean(third[400:1200] ** 2)) / np.sqrt(np.mean(first[400:1200] ** 2)) - 4.0) < 0.01
     with pytest.raises(IndexError):
         reader.read("corpus.parquet#4")
+    span = reader.read("corpus.parquet#3@0.025-0.075")
+    assert span.shape == (800,)
+    np.testing.assert_allclose(span[100:700], third[500:1100], atol=1e-3)
+    assert reader.read("one.wav@0-0.005").shape == (80,)

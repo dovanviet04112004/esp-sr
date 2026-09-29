@@ -52,7 +52,8 @@ class ItemReader:
     """Clean speech by the item name of a split file, mono float64 at the grid's rate.
 
     An item is a file under raw/ (WAV, FLAC, MP3), or <parquet under raw/>#<row> for corpora packed with an audio
-    column of encoded bytes. The last row group read is kept, as a split lists a parquet's rows in order.
+    column of encoded bytes; either may end in @<start>-<end>, that span of it in seconds. The last row group read is
+    kept, as a split lists a parquet's rows in order.
     """
 
     def __init__(self, raw_root: Path) -> None:
@@ -77,11 +78,16 @@ class ItemReader:
 
     def native(self, item: str) -> tuple[np.ndarray, int]:
         """Mono float64 at the item's own rate, and that rate."""
-        name, _, row = item.partition("#")
+        whole, _, span = item.partition("@")
+        name, _, row = whole.partition("#")
         path = self.raw_root / name
         source = io.BytesIO(self._row_bytes(path, int(row))) if row else path
         x, rate = sf.read(source, dtype="float64", always_2d=True)
-        return x.mean(axis=1), rate
+        x = x.mean(axis=1)
+        if span:
+            start_s, end_s = (float(v) for v in span.split("-"))
+            x = x[round(start_s * rate) : round(end_s * rate)]
+        return x, rate
 
     def read(self, item: str) -> np.ndarray:
         return to_grid_rate(*self.native(item))
