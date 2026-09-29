@@ -725,8 +725,9 @@ chừng nửa giây, 28 lần mỗi triệu âm tiết lời nói: ngắn và th
 siết báo nhầm để sau, khi có dữ liệu thu thật.
 
 **Dữ liệu dương** gồm tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, và **người thật nói
-"trợ lý"**: 224 câu của kho học, cộng các câu trích theo lời từ những kho tiếng Việt lớn trên Hugging Face (§1.2, kho
-`hf_extract`). Mỗi câu **cắt lấy đúng hai tiếng "trợ lý"**, từ đầu "trợ" đến cuối "lý". Mốc lấy
+"trợ lý"**: mọi câu có lời đọc ra từ ấy, của kho học lẫn của những kho tiếng Việt lớn trên Hugging Face, trích theo
+lời vào một kho duy nhất (§1.2, kho `hf_extract`); `wake` lấy mẩu người thật chỉ từ kho ấy. Mỗi câu **cắt lấy đúng hai
+tiếng "trợ lý"**, từ đầu "trợ" đến cuối "lý". Mốc lấy
 bằng **căn cưỡng bức** (Montreal Forced Aligner, mô hình tiếng Việt, chạy trong Docker) trên lời của câu. Mốc cuối hay
 sớm nên cộng một quãng ở cấu hình, để trung vị còn lệch 12 ms. Mốc đầu trong lời nói liền hay còn dính âm cuối của từ
 trước, nên mép đầu thử lần lượt vài độ dời vào trong "tr" (cấu hình), lấy lần đầu PhoWhisper nghe ra đúng từ. Hai mép cắt vuốt nhỏ dần trong 10 ms (`talker.edge_ramp_s` của đường mô phỏng board)
@@ -1155,9 +1156,8 @@ ml/
 │   │   ├── wake/                      # TCN; postproc/smooth.py ★; candidates.py chấm từ đánh thức trên kho (E11-T5);
 │   │   │                              #   synth.py chọn chữ, giọng, seed, tốc độ cho dương và âm bản gần âm rồi
 │   │   │                              #   sinh qua srpipe/tts vào interim/wake/synth_{pos,neg,hard}/ (E11-T7); ngưỡng
-│   │   │                              #   độ chênh đặt trên âm bản gần âm, để chỉ 1% lọt thành dương; data.py cắt
-│   │   │                              #   câu kho nói từ đánh thức vào interim/wake/corpus_pos/ và dựng split
-│   │   │                              #   wake/v<n> (§1.3)
+│   │   │                              #   độ chênh đặt trên âm bản gần âm, để chỉ 1% lọt thành dương; data.py dựng
+│   │   │                              #   split wake/v<n> (§1.3), mẩu dương người thật lấy từ kho trích hf_extract
 │   │   ├── command/                   # mạng âm học + CTC; postproc/ctc_score.py ★; data.py dựng split command/v<n>,
 │   │   │                              #   bỏ lệnh chưa học khỏi tập học (§1.3)
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
