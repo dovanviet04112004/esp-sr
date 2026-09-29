@@ -86,7 +86,17 @@ class Http:
         return self.get(url, 0, 1).url
 
     def read(self, url: str, start: int, stop: int, auth: bool = True) -> bytes:
-        return self.get(url, start, stop, auth=auth).content
+        """The bytes [start, stop) of url, asked again when the connection breaks while the body arrives."""
+        wait = self.spec["first_wait_s"]
+        for attempt in range(self.spec["retries"] + 1):
+            try:
+                return self.get(url, start, stop, auth=auth).content
+            except (requests.exceptions.ChunkedEncodingError, requests.ConnectionError, requests.Timeout):
+                if attempt == self.spec["retries"]:
+                    raise
+            time.sleep(wait)
+            wait *= 2
+        raise AssertionError("unreachable")
 
     def json(self, url: str):
         return self.get(url).json()
@@ -469,9 +479,10 @@ def scan_part(job: Job, source: dict, pin: dict, part: str, info: dict) -> list[
     return scan_tsv(job, source, pin) if kind == "tsv_tar" else scan_manifest(job, source, pin)
 
 
-def run_parallel(tasks: list, work, workers: int, label: str) -> None:
-    """Run work on every task on a thread pool, reporting each finished one and every failure, which the next run
-    retries; a failed task never stops the others."""
+def run_parallel(tasks: list, work, workers: int, label: str) -> list:
+    """Run work on every task on a thread pool, reporting each as it finishes; a failed task never stops the others,
+    and the failed ones come back for the caller to try again."""
+    failed = []
     with ThreadPoolExecutor(workers) as pool:
         futures = {pool.submit(work, *t): t for t in tasks}
         for n, future in enumerate(as_completed(futures), 1):
@@ -481,6 +492,8 @@ def run_parallel(tasks: list, work, workers: int, label: str) -> None:
                 print(f"{label} {n}/{len(tasks)} {t[0]['repo']} {t[1]}{note or ''}", flush=True)
             except Exception as e:
                 print(f"{label} {n}/{len(tasks)} {t[0]['repo']} {t[1]} FAILED {type(e).__name__}: {e}", flush=True)
+                failed.append(t)
+    return failed
 
 
 def scan(job: Job) -> None:
@@ -551,13 +564,18 @@ def fetch(job: Job, follow: bool) -> None:
         job.fetched_mark(source, part).touch()
         return f": {len(matches)} matches"
 
+    failures = defaultdict(int)
     while True:
         scanned = (job.state / "scan.done").exists()
-        todo = [p for p in fetch_parts(job, pins) if not job.fetched_mark(p[0], p[1]).exists()]
+        left = [p for p in fetch_parts(job, pins) if not job.fetched_mark(p[0], p[1]).exists()]
+        todo = [p for p in left if failures[(p[0]["repo"], p[1])] < job.cfg["http"]["retries"]]
         print(f"fetch: {len(todo)} audio parts left, {sum(len(p[2]) for p in todo)} matches", flush=True)
+        if len(left) > len(todo):
+            print(f"fetch: {len(left) - len(todo)} parts failed every try; a later run tries them again", flush=True)
         if todo:
             (job.state / "fetch.done").unlink(missing_ok=True)
-            run_parallel(todo, one, job.cfg["workers"]["fetch"], "fetch")
+            for p in run_parallel(todo, one, job.cfg["workers"]["fetch"], "fetch"):
+                failures[(p[0]["repo"], p[1])] += 1
             continue
         if scanned:
             (job.state / "fetch.done").touch()
