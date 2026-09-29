@@ -1,9 +1,9 @@
 # The wake network of KEHOACH 3.11. E11-T10 exports it with random weights to prove esp-dl streams it one hop at a time.
 features: scenes/device.yaml       # the log-mel the network reads, its n_bands among them
-word: chào mi na                   # ADR-0007, read level as the name Mina is read
+word: trợ lý                        # ADR-0011: the demo favours catching it over refusing look-alikes
 model:
   kernel: 3
-  channels: 32
+  channels: 64                     # with the CTC side task it lifts real speech, 32 does not (wake.md §5)
   dilations: [1, 2, 4, 8, 16, 32]  # receptive field 1 + (kernel - 1) * 63 = 127 hops, about 2 s
 probe:
   seed: 20260928
@@ -49,51 +49,38 @@ synth:                             # E11-T7: clips from the engines of common/tt
       counts: {fpt_open: 80, vlsp: 80, bud500: 150}
   pilot:                           # make eval-tts: the engines side by side on a few voices
     speakers: [VIVOSSPK01, VIVOSSPK05, VIVOSSPK12, VIVOSSPK27, VIVOSSPK40]
-    vieneu: {texts: [chào mi na, Chào Mina!], preset_seeds: [0], clone_seeds: [0]}
-    f5: {texts: [chào mi na], seeds: [0, 1, 2], speeds: [1.0]}
+    vieneu: {texts: [trợ lý, Trợ lý!], preset_seeds: [0], clone_seeds: [0]}
+    f5: {texts: [trợ lý], seeds: [0, 1, 2], speeds: [1.0]}
   positives:                       # every text spells the wake word
-    vieneu: {texts: [chào mi na, Chào Mina!], preset_seeds: [0, 1, 2], clone_seeds: [0, 1]}  # drops end punctuation
-    f5: {texts: [chào mi na, chào mi na!], seeds: [0], speeds: [0.85, 1.0, 1.15]}  # clearer than VieNeu by ear
-  negatives:                       # ADR-0007 near misses, read by the voices of the positives
-    misses: 3                      # every corpus phrase at most this many syllable components from the word
-    openings: 30                   # the commonest corpus phrases of its length opening with its first syllable
-    phrases: [chào mi, mi na, mi na ơi, chào chị na, chào mi nhé]
+    vieneu: {texts: [trợ lý, Trợ lý!], preset_seeds: [0, 1, 2], clone_seeds: [0, 1]}  # drops end punctuation
+    f5: {texts: [trợ lý, trợ lý!], seeds: [0], speeds: [0.85, 1.0, 1.15]}
+  negatives:                       # a light set read by the voices of the positives, so a TTS voice is no cue (ADR-0011)
+    misses: 1                      # every corpus phrase this many syllable components from the word: 6 for "trợ lý"
+    openings: 10                   # the commonest corpus phrases of its length opening with its first syllable
+    phrases: []
     voices: {vieneu: 6, f5: 4}     # per phrase, drawn with the seed; VieNeu from presets and clones
-  hard:                            # near-miss families the component distance misses (KEHOACH 3.11)
-    onsets: [m, n, J, l, b_<, v]   # g2p onsets (nh is J, b is b_<) of the syllables filling a "near" slot
-    near_syllables: 30             # the commonest corpus syllables with those onsets
-    any_syllables: 15              # the commonest corpus syllables of any onset
-    families:                      # {x} takes each syllable of its fill
-      - {text: "chào {x}", fill: near}
-      - {text: "chào mi {x}", fill: near}
-      - {text: "chào {x} na", fill: near}
-      - {text: "{x} mi na", fill: any}
-    held_out: [chào mẹ, chào minh, chào bạn]   # board near misses v1 never learnt (host/plans/wake.tsv)
-    voices: {vieneu: 4, f5: 3}     # per text, drawn with the seed as for the negatives
 split:                             # E11-T11: data/splits/wake/<version> by python -m srpipe.tasks.wake.data (KEHOACH 1.3)
-  version: v3
+  version: v4
   seed: 20260928
   val_speakers: 0.2                # of VIVOS train speakers and of VieNeu presets, each held out whole with its clones
   learning: [speech/vivos/train/, speech/fpt_open/, speech/vlsp/, speech/bud500/]   # gave the reference voices
   negative_hours: 100              # public speech drawn from learning into train_neg
   test_neg: [speech/common_voice_vi/, speech/vivos/test/]   # no reference voice came from these
   val_from_test: {speech/common_voice_vi/: 0.4}   # share of its speakers moved whole into val_neg (KEHOACH 3.11)
-  hard:                            # a learning clip whose words match one of these joins the hard files (KEHOACH 3.11)
-    - '\bchào [mnlbv]'           # "chào" and a syllable of a near onset
-    - '\bmươi (lăm|năm|ba|nhăm)\b'  # numbers read aloud
-    - 'i n[aàáảãạ]\b'             # a syllable ending in "i" before "na"
+  corpus_pos:                      # learning clips that say the word, cut around it as real positives (KEHOACH 3.11)
+    context_s: 2.0                 # kept ahead of the word, the receptive field
+    tail_s: 0.05                   # kept after it: a positive's label sits at the end of its clip
 simulate:                          # make wake-features: python -m srpipe.tasks.wake.data simulate (E4-T8)
-  split: v3
+  split: v4
   workers: 12                      # each holds about 450 MB; more push a 10 GB WSL into swap
-  repeats: {train_pos: 8, train_hard: 4}   # passes over a file, each in other rooms, levels and noise; else 1
+  repeats: {train_pos: 8}          # passes over a file, each in other rooms, levels and noise; else 1
 train:                             # E11-T11: python -m srpipe.tasks.wake.train (KEHOACH 3.11), on the GPU when present
-  split: v3                        # processed/wake/<split>/<file> of make wake-features
+  split: v4                        # processed/wake/<split>/<file> of make wake-features
   seed: 20260928
   window_hops: 256                 # one example, twice the receptive field
   warmup_hops: 128                 # a window's first hops see zero padding, not audio: no loss on them
   label_s: [0.2, 0.3]              # a positive is 1 from this long before the end of its speech to this long after
   positive_share: 0.25             # of each batch
-  hard_share: 0.15                 # of each batch, from train_hard when the split has it (KEHOACH 3.11)
   batch: 128
   steps: 20000
   learning_rate: 1.0e-3
@@ -107,7 +94,8 @@ train:                             # E11-T11: python -m srpipe.tasks.wake.train 
 eval:
   smooth_hops: 5                   # the moving average ahead of the threshold (KEHOACH 3.11)
   lockout_s: 2.0                   # the device stays awake after a trigger, so a second one inside this is not counted
-  false_accepts_per_hour: 1.0      # Cửa 2: the threshold is the lowest whose rate on val_neg stays at or under this
+  false_accepts_per_hour: 3.0      # the threshold is the lowest whose val rate stays at or under this; Cửa 2 is 1,
+                                   #   the demo takes more to catch the word (ADR-0011)
   thresholds: {first: 0.05, last: 0.995, step: 0.005}
   board:                           # sessions recorded through board B, run through the same chain and log-mel
     manifest: device/board_b.csv   # under data/manifests

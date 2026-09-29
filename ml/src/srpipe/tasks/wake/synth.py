@@ -211,6 +211,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("set", choices=[*SETS, "select"])
     which = parser.parse_args(argv).set
     cfg, tts, paths = load_yaml(CONFIG), load_yaml(TTS_CONFIG), data_paths()
+    if which == "hard" and "hard" not in cfg["synth"]:
+        parser.error("synth.hard is off in wake.yaml: no hard near-miss families to read (KEHOACH 3.11)")
     interim, cache = paths["interim"] / "wake", paths["cache"]
     if which == "select":
         print(f"margin threshold {select(cfg, interim):.3f}")

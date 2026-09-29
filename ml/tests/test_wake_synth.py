@@ -46,6 +46,23 @@ def test_a_positive_that_is_not_the_wake_word_is_refused(tmp_path: Path) -> None
         synth.positive_requests(cfg, cfg["synth"]["positives"], PRESETS, refs(tmp_path), tmp_path)
 
 
+def pinned() -> dict:
+    """wake.yaml with the word and near-miss settings these tests were written around, whatever word is chosen."""
+    cfg = load_yaml(CONFIG)
+    cfg["word"] = "chào mi na"
+    phrases = ["chào mi", "mi na", "mi na ơi", "chào chị na", "chào mi nhé"]
+    cfg["synth"]["negatives"] |= {"misses": 3, "openings": 30, "phrases": phrases}
+    cfg["synth"]["hard"] = {
+        "onsets": ["m", "n", "J", "l", "b_<", "v"],
+        "near_syllables": 30,
+        "any_syllables": 15,
+        "families": [{"text": "chào {x}", "fill": "near"}],
+        "held_out": ["chào mẹ"],
+        "voices": {"vieneu": 4, "f5": 3},
+    }
+    return cfg
+
+
 def stream_of(texts: list[str]) -> tuple[np.ndarray, list[str]]:
     vocab: dict[str, int] = {}
     ids: list[int] = []
@@ -56,7 +73,7 @@ def stream_of(texts: list[str]) -> tuple[np.ndarray, list[str]]:
 
 
 def test_negatives_come_neighbours_first_then_openings_then_the_hand_picked(tmp_path: Path) -> None:
-    cfg = load_yaml(CONFIG)
+    cfg = pinned()
     corpus = ["trào thi đua", "trào thi đua nhé", "cho mi na", "chào mọi người", "chào mọi người", "chào mi nhé"]
     stream, vocab = stream_of(corpus)
     texts = synth.negative_texts(cfg, stream, vocab, *candidates.component_codes(vocab))
@@ -95,7 +112,7 @@ def clip(n: int, passed: bool, margin: float, rival: float, sha: str) -> dict:
 
 
 def test_the_threshold_lets_the_configured_share_of_near_misses_pass_and_no_clip_repeats(tmp_path: Path) -> None:
-    cfg = load_yaml(CONFIG)
+    cfg = pinned()
     cfg["synth"]["false_accept"] = 0.1
     negatives = [clip(n, True, 0.0, float(n + 1), f"n{n}") for n in range(10)]
     negatives += [clip(10, False, 3.0, 0.5, "n10"), clip(11, True, 0.0, 9.5, "n9")]
@@ -117,7 +134,7 @@ def test_the_threshold_lets_the_configured_share_of_near_misses_pass_and_no_clip
 
 
 def test_hard_families_fill_their_slots_and_never_say_the_word_or_a_held_out_phrase() -> None:
-    cfg = load_yaml(CONFIG)
+    cfg = pinned()
     cfg["synth"]["hard"] |= {
         "near_syllables": 3,
         "any_syllables": 2,
