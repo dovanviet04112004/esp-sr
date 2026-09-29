@@ -228,3 +228,58 @@ cuối và lưu mọi mốc chấm ở `checkpoints/`. Việc phụ CTC (KẾ HO
   15,9 nat) còn lần thứ nhất là "chào đi nhé", nên đây là cụm gần âm thật, chỉ khác âm tiết cuối. Tập học gần như không
   có họ này: trong 80 mẩu TTS "chào mi n…" của `synth_neg` và `synth_hard` chỉ 6 mẩu được giữ, vì luật chọn bỏ mẩu nghe
   sai chữ và mẩu cách "chào mi na" dưới 15,40 nat, đúng vùng của cụm ấy.
+
+## 6. Cuối từ của mẫu dương: căn cưỡng bức và khoảng lặng TTS (29/09)
+
+Nhãn của một mẫu dương đặt ở cuối mẩu (KẾ HOẠCH §3.11), nên mẩu phải dừng ngay sau âm cuối của từ đánh thức.
+Mục này đo hai chỗ lệch: khoảng lặng TTS để lại sau từ, và độ đúng của mốc cuối từ khi cắt câu thật trong kho.
+
+**Khoảng lặng TTS.** Mẩu dương "chào mi na" của `synth_pos` (một mẩu trong mười), bước 16 ms, âm tính là còn trong
+40 dB so với bước to nhất:
+
+| Bộ | Mẩu | Dài p5 / p50 / p95 (s) | Lặng đầu (s) | Lặng cuối (s) |
+|---|---|---|---|---|
+| VieNeu | 158 | 0,80 / 1,04 / 1,36 | 0,00 / 0,05 / 0,08 | 0,00 / 0,16 / 0,39 |
+| F5 | 214 | 0,59 / 0,97 / 1,64 | 0,08 / 0,21 / 0,69 | 0,00 / 0,00 / 0,18 |
+
+Nhãn đặt ở cuối mẩu nghĩa là với VieNeu, nhãn trễ trung vị 0,16 s sau từ, có mẩu tới 0,4 s.
+
+**Mẩu ghép có đáp án.** 120 mẩu TTS ấy, cắt ở cuối âm, đặt sau 0,3–1,0 s lặng, rồi hoặc để lặng 0,5 s ("đứng một
+mình"), hoặc nối ngay một câu VIVOS train đã bỏ lặng đầu ("có từ nói nối sau"), hai phần cùng mức RMS. Đáp án là
+cuối âm của mẩu TTS. Bộ căn: Montreal Forced Aligner 3.4 (image Docker `v3.4.2`), mô hình âm học và từ điển
+`vietnamese_mfa` 3.0.0, lời đã chuẩn hoá. 464 mẩu (240 ghép và 224 câu thật) căn trong 37 s với 8 tiến trình; mọi
+mẩu đều căn được.
+
+Mốc cuối "na" của bộ căn trừ đáp án, tính theo ngưỡng của đáp án (âm tụt bao nhiêu dB dưới đỉnh):
+
+| Mẩu | Đáp án | p5 | p50 | p95 | Sớm > 0,1 s | Muộn > 0,1 s |
+|---|---|---|---|---|---|---|
+| đứng một mình | −15 dB | −0,070 | +0,031 | +0,189 | 3% | 23% |
+| đứng một mình | −25 dB | −0,111 | +0,002 | +0,140 | 6% | 11% |
+| đứng một mình | −30 dB | −0,124 | −0,005 | +0,098 | 7% | 5% |
+| đứng một mình | −40 dB | −0,174 | −0,022 | −0,004 | 10% | 0% |
+| có từ nói nối sau | −30 dB | −0,160 | −0,016 | +0,028 | | |
+| có từ nói nối sau | −40 dB | −0,202 | −0,038 | −0,002 | | |
+
+Bộ căn đặt cuối từ ở lúc âm tụt khoảng 30 dB (lệch trung vị 5–16 ms). Đáp án −40 dB tính thêm đuôi rất nhỏ nên muộn
+hơn bộ căn vài chục ms. Khi có từ nói nối sau, sai số lệch về phía sớm, 5% sớm hơn 0,16 s.
+
+**Quãng chừa sau mốc** (mẩu có từ nói nối sau; "lẫn từ sau" tính từ chỗ nối, tức đáp án −40 dB):
+
+| Chừa | Cắt trước cuối từ (−30 dB) | Lẫn hơn 0,1 s của từ sau |
+|---|---|---|
+| 0,05 s | 22% | 2% |
+| **0,1 s** | **12%** | **5%** |
+| 0,15 s | 7% | 59% |
+
+Chọn **0,1 s** (`split.positive_tail_s`). Mẩu TTS dừng ở bước cuối còn trong **30 dB** (`split.tts_pos`), đúng chỗ bộ
+căn đặt cuối từ, cộng cùng 0,1 s. Hai loại mẫu dương nhờ vậy dừng cùng một kiểu.
+
+**Câu thật.** Cả 224 câu kho học nói "trợ lý" đều căn được, tìm thấy "trợ lý" ở cả 224. Độ dài hai âm tiết p5 / p50 /
+p95 là 0,25 / 0,38 / 0,58 s. `python -m srpipe.tasks.wake.data corpus` cắt cả 224 (dài 0,62 / 1,70 / 2,52 s) và giữ
+**218**: Bud500 190, VLSP 27, FPT 1. Sáu mẩu bỏ vì PhoWhisper nghe lại không ra "trợ lý", phần lớn khi từ ấy ở cuối
+mẩu và câu gốc nói tiếp tên người ("trợ lý long" nghe thành "chợ ly", "quà trợ lý" thành "quà thợ lý").
+
+**Mốc từ của PhoWhisper không dùng.** Chế độ mốc từng từ (chú ý chéo, kernel eager) trên card 4 GB đầy bộ nhớ (3,9 GB)
+và tràn sang RAM: 240 mẩu ghép chưa xong sau 25 phút, tức hơn 6 s mỗi mẩu, nên không có số. Theo WhisperX (Bain và
+cộng sự, 2023), mốc từ của Whisper kém căn cưỡng bức, và họ cũng căn lại bằng mô hình âm vị.
