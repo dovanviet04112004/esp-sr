@@ -581,7 +581,7 @@ def fetch_parts(job: Job, pins: dict) -> list[tuple[dict, str, list[dict], dict]
     """(source, audio part, its matches, file info) of every part holding a match, most matches first."""
     parts = []
     for s in job.spec["sources"]:
-        if s["kind"] == "arrow":
+        if s["kind"] == "arrow" or s.get("hold"):
             continue
         own = [s["transcripts"] if s["kind"] == "tsv_tar" else s["manifest"]] if "_tar" in s["kind"] else None
         found = (

@@ -75,6 +75,7 @@ extracts:
       - {kind: tsv_tar, repo: speechcolab/gigaspeech2, transcripts: data/vi/test.tsv, shards: data/vi/test.tar.gz}
       - kind: yodas                  # per shard, text/<n>.json of segments and audio/<n>.tar.gz of whole videos
         repo: espnet/yodas2
+        hold: true                   # scanned; its 2.1 TB of shards for a quarter of the matches wait for a later fetch
         languages: [vi000, vi100, vi101]
       - kind: manifest_tar           # one zstd JSONL manifest of {audio_filepath, text}; tar.zst shards of the files
         repo: anhtunguyen98/vi-asr-youtube-1582h
