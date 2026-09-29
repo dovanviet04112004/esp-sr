@@ -1136,8 +1136,8 @@ ml/
 │   │
 │   ├── tts/                           # ★ tiếng tổng hợp cho mọi nhánh: dương wake (E11-T7), tiếng nguồn của synth
 │   │   │                              #   (§3.13); không biết nhánh nào gọi nó
-│   │   ├── engines.py                 # gọi ml/tts/<bộ>/run.py qua uv run: giọng có sẵn, sinh theo lô, nghe lại;
-│   │   │                              #   căn mốc từng từ bằng Montreal Forced Aligner chạy trong Docker
+│   │   ├── engines.py                 # gọi ml/tts/<bộ>/run.py qua uv run: giọng có sẵn, sinh theo lô, nghe lại (bản
+│   │   │                              #   CTranslate2 int8 chỉ lấy chữ cho việc cắt mẩu); căn mốc bằng MFA trong Docker
 │   │   └── clips.py                   # giọng nhân bản từ kho có chữ; sinh → nghe lại → dòng manifest: chữ bộ nghe
 │   │                                  #   kiểm đọc ra và độ chênh log-xác suất giữa chữ ấy với chữ phải nói, kể cả dấu
 │   │

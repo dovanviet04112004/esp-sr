@@ -80,3 +80,24 @@ mục `synth` của `ml/configs/models/wake.yaml`.
   sha256 của mẩu ở `cache/tts/heard.jsonl`, nên chạy lại chỉ nghe mẩu mới.
 - Mẩu nằm ở `$SRPIPE_DATA_ROOT/interim/wake/synth_{pos,neg}/{vieneu,f5}/`; `manifest.yaml` ghi mỗi mẩu: chữ, giọng,
   seed, tốc độ, chữ nghe được, độ chênh, `kept`, sha256. Không mẩu nào vào tập thử (KẾ HOẠCH §1.3).
+
+## 4. Bộ nghe kiểm nhanh cho việc cắt mẩu (29/09)
+
+Bước `cut` của `srpipe.core.extract` cho PhoWhisper-large nghe lại từng mẩu cắt, mỗi mẩu được đệm thành cửa sổ 30 s.
+Trên RTX 3050 Laptop 4 GB, bản float16 qua transformers nghe khoảng **1 mẩu/giây**, và với hàng chục nghìn cụm thì đây
+là nút thắt của cả chuỗi trích. Cùng trọng số (`vinai/PhoWhisper-large@b9136a44`) được chuyển sang CTranslate2
+int8_float16 (1,55 GB, bằng nửa bản float16), chạy tham lam, chỉ lấy chữ (`ml/tts/asr_ct2`).
+
+400 mẩu cắt mà bản float16 đã nghe ra đúng cụm, rút ngẫu nhiên (seed 0), vuốt 10 ms và đệm 0,3 s lặng như bước `cut`:
+
+| Lô | Thời gian cho 400 mẩu, tính cả nạp mô hình | Mẩu/giây | Cùng chữ với bản float16 | Vẫn nghe ra đúng cụm |
+|---|---|---|---|---|
+| 1 | 224 s | 1,8 | 392 | 393 |
+| 2 | 206 s | 1,9 | 394 | 394 |
+| **4** | **197 s** | **2,0** | **394** | **394** |
+| 8 | hết bộ nhớ GPU | — | — | — |
+
+Sáu mẩu lệch đều là bản int8 nghe sai thứ bản float16 nghe đúng ("dừng lại" thành "đứng lại" hai lần, "đóng cửa" thành
+"đống cửa", một lần nghe ra cả câu không có trong mẩu), tức nó chỉ bỏ oan chừng 1,5% mẩu tốt. Phép đo chưa có mẩu mà
+bản float16 từ chối, nên chưa biết bản int8 có nhận nhầm mẩu nào bản float16 bỏ hay không. Bước `cut` dùng bản int8,
+lô 4 (`asr_fast` của `ml/configs/common/tts.yaml`); bước chọn mẩu TTS vẫn dùng bản float16, vì cần log-xác suất.
