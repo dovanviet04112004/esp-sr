@@ -1,0 +1,64 @@
+# Clips of real voices saying a phrase, cut from Vietnamese speech corpora on Hugging Face (KEHOACH 1.2):
+# python -m srpipe.core.extract <name> {scan,fetch,cut}. Every step resumes where a stopped run left off.
+http:
+  hub: https://huggingface.co        # every listing and file of a source is read from here
+  token_env: HF_TOKEN              # from ml/.env or the environment; gated corpora need an account that took their terms
+  read_ahead_bytes: 4194304        # least bytes asked per range request of a parquet file
+  retries: 6                       # of a request that fails, each after twice the wait of the one before
+  first_wait_s: 2.0
+  timeout_s: 180.0
+workers:
+  scan: 24                         # text files read at once; the network sets the pace
+  fetch: 10                        # audio parts streamed at once: one stream runs at ~16 MB/s, ten fill the line
+cut:                               # as wake.yaml split.corpus_pos, measured in wake.md §6
+  start_shifts_s: [0.0, 0.02, 0.04, 0.06]   # tried in turn after the aligned start; the first heard as the phrase
+                                   #   alone is kept
+  tail_s: 0.03                     # added to the aligned end, which runs early
+  align_batch: 3000                # sentences per aligner run
+extracts:
+  hf_extract:
+    phrases:                       # matched by their northern reading, so "trợ lí" is "trợ lý"; chụp ảnh stays out,
+      - trợ lý                     #   the command E11-T13 adds by text alone
+      - bật đèn
+      - tắt đèn
+      - bật quạt
+      - tắt quạt
+      - mở cửa
+      - đóng cửa
+      - tăng âm lượng
+      - giảm âm lượng
+      - dừng lại
+    sources:                       # a source without a revision is pinned when first read, in the manifest;
+                                   #   parquet is the dataset viewer's refs/convert/parquet, arrow the repo's own
+                                   #   files; yodas2_sidon repeats yodas2 vi000 and is left out
+      - {kind: parquet, repo: thivux/phoaudiobook, revision: e716faf3780d89cdd630b3a778476bb9e1ad316d}
+      - {kind: parquet, repo: NhutP/VietSpeech, revision: 35f7d6081b8de7cafa593d741a74068e7d40822c}
+      - {kind: parquet, repo: capleaf/viVoice, revision: cb55a42ab775fbff4f78849679b14b6e8934176d}
+      - {kind: arrow, repo: nampdn-ai/vietspeech}   # the viewer converted part of it: read its own .arrow
+      - {kind: parquet, repo: linhtran92/viet_youtube_asr_corpus_v2, revision: ecde94a62130e6eb4a67845375f18f6787e60b66}
+      - {kind: parquet, repo: doof-ferb/LSVSC, revision: 416b1ef54953db4a1c72f1566b2295c029859d10}
+      - {kind: parquet, repo: dolly-vn/dolly-audio-1000h-vietnamese, revision: 1614861fb753346812a8d0654c96b72e4a85609c}
+      - {kind: parquet, repo: doof-ferb/vais1000, revision: 35051e3e3547cac75ceae39c017445bd86b9b359}
+      - {kind: parquet, repo: doof-ferb/infore1_25hours, revision: 7f60edb0aa03a6e22de091ff10749e21b33c8a8a}
+      - {kind: parquet, repo: doof-ferb/infore2_audiobooks, revision: 8d1895fe7c2b65abe5a9c47e9e7b6d2efc1f940c}
+      - {kind: parquet, repo: doof-ferb/VietMed_labeled, revision: 6dcd684b24cefafbfdf647b00cdf3ac13b5f7159}
+      - {kind: parquet, repo: doof-ferb/Speech-MASSIVE_vie, revision: 094a186ca0e9246fc7302f169bc8760930175201}
+      - {kind: parquet, repo: PhongGoldFish/youtube-center-vietnamese-asr}
+      - {kind: parquet, repo: qhuy242/VNAVC}
+      - {kind: arrow, repo: LanguaMan/vieneu-tts-140h-dataset}
+      - {kind: parquet, repo: doduy1911/voiceNam}
+      - {kind: parquet, repo: leduckhai/MultiMed, config: Vietnamese}
+      - {kind: parquet, repo: disco-eth/WorldSpeech, config: vn_vi}
+      - {kind: parquet, repo: TrangLe2108/DNU-ViSpeech}
+      - kind: tsv_tar                # transcripts in one TSV of <id>\t<text>; audio <id>.wav in tar.gz shards
+        repo: speechcolab/gigaspeech2
+        revision: 8dc0d0e502b7e6d5649a13cd4b677cf10c0b21e3
+        transcripts: data/vi/train_refined.tsv
+        shards: data/vi/train/{shard}.tar.gz   # {shard} is the part of an id before its first "-"
+      - kind: yodas                  # per shard, text/<n>.json of segments and audio/<n>.tar.gz of whole videos
+        repo: espnet/yodas2
+        languages: [vi000, vi100, vi101]
+      - kind: manifest_tar           # one zstd JSONL manifest of {audio_filepath, text}; tar.zst shards of the files
+        repo: anhtunguyen98/vi-asr-youtube-1582h
+        manifest: manifest.jsonl.zst
+        shards: shard-*.tar.zst
