@@ -1,0 +1,139 @@
+# `wake` (E11)
+
+## 1. `wake/v1`: lượt học đầu
+
+Run `ml/artifacts/wake/runs/20260929_08b3d06-dirty_b33b0b` (`make wake-train` tại `08b3d06`; phần chưa commit của cây là
+`bss`, không đụng `wake`). Split `wake/v1` (`ml/data/splits/wake/v1/SPLIT.md`): 3 466 mẩu dương TTS mô phỏng 8 lượt,
+100 giờ lời nói của kho học cộng 370 mẩu gần âm TTS làm âm bản. Mục `train` của `ml/configs/models/wake.yaml`: 20 000
+bước, lô 128, 25% cửa sổ dương, cửa sổ 256 bước, seed 20260928. Học hết khoảng 10 phút trên RTX 3050 4 GB.
+
+| Tập | Ngưỡng | Bắt | Báo nhầm |
+|---|---|---|---|
+| `val`: 118 mẩu dương TTS, 3,76 giờ âm bản đã mô phỏng | 0,975 | **77,1%** (91/118) | 0,80/giờ (3 lần) |
+| `test_neg`: Common Voice + VIVOS `test`, 26,49 giờ đã mô phỏng | 0,975 | chưa có `test_pos` | **0,45/giờ** (12 lần) |
+
+Ngưỡng là điểm làm việc chọn trên `val`: bắt nhiều nhất mà báo nhầm ≤ 1/giờ. Giữa các mốc 1 000 bước, bắt trên `val` nhảy
+từ 41% tới 77% trong khi loss giảm đều, vì chỉ vài âm bản điểm cao đã đẩy ngưỡng lên 0,915–0,985. Mạng giữ là mốc
+18 000. Các âm bản ấy phần lớn là câu đọc số:
+
+| Âm bản `val_neg` | Điểm | Câu |
+|---|---|---|
+| VIVOSSPK13_229 | 0,994 | sáu mươi bốn sáu mươi lăm |
+| VIVOSSPK15_228 | 0,986 | sáu mươi hai sáu mươi ba |
+| VIVOSSPK13_256 | 0,983 | đây là vòng đua cuối cùng |
+| VIVOSSPK15_223, VIVOSSPK15_238, VIVOSSPK13_239 | 0,93–0,96 | năm/tám mươi hai … ba, tám mươi bốn … lăm |
+
+## 2. `wake/v1` trên bản thu qua board B
+
+`cd ml && uv run --extra train python -m srpipe.tasks.wake.eval board artifacts/wake/runs/20260929_08b3d06-dirty_b33b0b`,
+cấu hình mục `eval.board` của `ml/configs/models/wake.yaml`. Phiên của `ml/data/manifests/device/board_b.csv` ở
+`pcm_shift` 13: thu 28/09 ở nhà, một người nói (phiếu C001), firmware `capture@contract-v1-368-gc786e8f`. Mỗi phiên đi
+qua chuỗi của sản phẩm (`device.listen`: `dsp_afe`, hệ số cân bằng của board, log-mel). Một đoạn là một chuỗi `vad`
+liền, nối qua chỗ ngắt ≤ 0,4 s, dài ≥ 0,25 s; điểm của đoạn là đỉnh điểm làm trơn từ đầu đoạn tới 0,3 s sau cuối.
+
+| Phiên | Nói | Khoảng cách, hướng | Đoạn | Trung vị | Đỉnh | ≥ 0,975 | ≥ 0,9 | ≥ 0,85 |
+|---|---|---|---|---|---|---|---|---|
+| 034 | chào mi na | 1 m, 90° chính diện | 11 | 0,87 | 0,94 | 0 | 5 | 7 |
+| 035 | chào mi na, giọng nhỏ | 1 m, 90° | 12 | 0,68 | 0,88 | 0 | 0 | 2 |
+| 036 | chào mi na | 1 m, 0° dọc trục mic | 14 | 0,74 | 0,88 | 0 | 0 | 5 |
+| 037 | chào mi na | 3 m, 90° | 12 | 0,84 | 0,95 | 0 | 3 | 6 |
+| 038 | chào mi na | 3 m, 45° | 11 | 0,74 | 0,94 | 0 | 2 | 2 |
+| **Năm phiên từ đánh thức** | | | **60** | **0,77** | | **0** | **10** | **22** |
+| 039 | mười cụm gần âm, mỗi cụm hai lần (§3.3) | 1 m, 90° | 20 | | 0,92 | 0 | 1 | 5 |
+| 032 | lệnh và cụm gần lệnh ("bật điện", "đóng góp"…) | 1 m, 90° | 11 | | 0,21 | 0 | 0 | 0 |
+| 033 | nói tự do | 1 m, 90° | 13 | | 0,28 | 0 | 0 | 0 |
+
+Báo nhầm trên 39 phiên không có từ đánh thức (0,39 giờ: 20 phiên lệnh, 3 phiên âm bản gồm 039, 3 phiên ồn, 13 phiên phát
+loa): **0** ở ngưỡng 0,975.
+
+- **Không bắt được lần nào.** Đỉnh mỗi phiên nói đúng từ chỉ 0,88–0,95, dưới ngưỡng 0,975 chọn trên `val`.
+- **Hạ ngưỡng không cứu được.** Ở 0,9, bắt 10 đoạn và một cụm gần âm qua. Ở 0,85, bắt 22 đoạn nhưng 5/20 lần đọc cụm gần
+  âm cũng qua.
+- Phiên nói nhỏ (035) và phiên nói dọc trục mic (036) thấp nhất.
+- Mỗi phiên có 11–14 đoạn `vad`, nhiều hơn số lần nói. Các đoạn điểm dưới 0,2 có lẽ là tiếng thở hay tiếng động; chưa
+  nghe lại để chắc.
+
+## 3. Nguyên nhân, không dùng bản tự thu để học
+
+Mọi phép dò chấm bằng mạng của §1, bản thu board đi qua cùng chuỗi như ở §2. §3.1, §3.2 và §3.4 chạy bằng script
+một lần ngoài repo; chỉ lệnh ở §2 dựng lại được từ repo.
+
+### 3.1 Mức: không phải; phổ lệch cỡ hai nhóm mô phỏng với nhau
+
+Thống kê trên các bước có tiếng (`vad` = 1). Log-mel là log tự nhiên của công suất, một đơn vị ≈ 4,3 dB. Cột dải là
+trung bình log-mel của 8 trong 40 dải, trừ đi của mẩu dương mô phỏng.
+
+| Nhóm | Bước có tiếng | Mức | Gain `agc` | Log-mel TB | Chênh 8 dải so với dương mô phỏng |
+|---|---|---|---|---|---|
+| Thật, "chào mi na" 1 m (034, 036) | 37% | −54 dBFS | +21 dB | −9,78 | +2,1 +1,0 +1,6 −0,7 −0,8 −0,4 +1,1 +0,0 |
+| Thật, "chào mi na" 3 m (037, 038) | 32% | −54 dBFS | +19 dB | −9,83 | +2,0 +1,8 +1,6 −0,7 −1,1 −0,6 +0,8 +0,0 |
+| Loa phát VIVOS 1 m (040) | 57% | −55 dBFS | +19 dB | −9,26 | −0,4 +0,5 +3,1 −0,5 −0,7 +1,3 +2,6 +1,5 |
+| Dương TTS mô phỏng (`train_pos`) | 67% | −57 dBFS | +15 dB | −10,10 | 0 |
+| Âm bản kho mô phỏng (`train_neg`) | 78% | −56 dBFS | +22 dB | −8,78 | +1,4 +2,2 +1,8 +1,6 +0,9 +1,2 +1,3 +0,4 |
+
+Giọng thật lệch dương mô phỏng tới 2,1 đơn vị ở các dải thấp, cỡ độ lệch giữa hai nhóm mô phỏng với nhau (tới 2,2);
+chưa thử bù riêng từng dải. Dời cả log-mel của bản thu đi một mức cố định không đưa lần nói nào qua ngưỡng:
+
+| Dời | 034: trung vị điểm, số lần ≥ 0,975 | 037: trung vị, số lần ≥ 0,975 | 039: đỉnh |
+|---|---|---|---|
+| −9 dB | 0,738, 0/11 | 0,758, 0/12 | 0,895 |
+| −6 dB | 0,838, 0/11 | 0,817, 0/12 | 0,909 |
+| −3 dB | 0,864, 0/11 | 0,825, 0/12 | 0,925 |
+| 0 | 0,865, 0/11 | 0,835, 0/12 | 0,922 |
+| +3 dB | 0,720, 0/11 | 0,837, 0/12 | 0,919 |
+
+### 3.2 Giọng TTS và giọng người: không phải
+
+Cặp đối chứng: 38 câu VIVOS `test` (5–12 từ, hai câu mỗi người nói), người đọc và TTS đọc lại bằng giọng của mẫu dương
+(19 VieNeu, 19 F5), cùng qua đường mô phỏng board hai lượt. Không câu nào có từ đánh thức, nên điểm cao chỉ có thể do
+mạng nghe ra "chất TTS".
+
+| Người đọc | Số lượt | Trung vị | Trung bình | Phân vị 90 | > 0,5 | > 0,9 |
+|---|---|---|---|---|---|---|
+| TTS | 76 | 0,001 | 0,061 | 0,200 | 5% | 0% |
+| Người | 76 | 0,001 | 0,049 | 0,151 | 3% | 0% |
+
+### 3.3 Cụm gần âm: nguyên nhân
+
+Phiên 039 đọc mười cụm, mỗi cụm hai lần liền nhau; 20 đoạn `vad` ghép với cụm theo thứ tự và độ dài (cụm hai âm tiết
+0,74–0,93 s, ba âm tiết 1,17–1,71 s). Điểm là của lệnh ở §2. Cột "Trong `v1`" là cụm có trong 69 chữ của `synth_neg`.
+
+| Cụm | Trong `v1` | Điểm hai lần |
+|---|---|---|
+| chào mi | có | 0,65 0,48 |
+| mi na | có | 0,84 0,21 |
+| mi na ơi | có | 0,03 0,08 |
+| chào chị na | có | 0,44 0,05 |
+| chào mi nhé | có | 0,06 0,89 |
+| **chào minh** | không | **0,86 0,88** |
+| **chào mẹ** | không | **0,92 0,89** |
+| bang mi na | có | 0,03 0,00 |
+| và vi na | có | 0,05 0,02 |
+| chào bạn | không | 0,01 0,00 |
+
+- Cụm đã học thì mạng đẩy xuống gần 0 ("mi na ơi", "bang mi na", "và vi na"). "chào" + một âm tiết mở đầu bằng "m" chưa
+  từng có trong tập học, và lên 0,86–0,92, ngang đỉnh của giọng thật nói đúng từ (0,88–0,95). "chào bạn" không lên: lỗi nằm ở
+  âm đầu "m", không ở mọi cụm "chào X".
+- 69 chữ của `synth_neg` chọn theo khoảng cách thành phần âm tiết (`candidates`) và "chào X Y" hay gặp. Cả hai cách đều
+  không sinh ra "chào" + âm tiết "m", hay số đọc "…mươi lăm / ba".
+- Mạng hầu như không gặp cụm gần âm: 370 mẩu ngắn giữa 122 483 âm bản dài 100 giờ, cửa sổ rút theo độ dài, nên chỉ
+  khoảng 0,1% cửa sổ âm là cụm gần âm. Loss vẫn thấp dù mạng không phân biệt chúng.
+
+### 3.4 Tốc độ đọc: không phải, giữ mẩu đọc nhanh
+
+Độ dài phần có tiếng: mẩu dương TTS trung vị 1,06 s (phân vị 5 / 25 / 75 / 95: 0,63 / 0,85 / 1,22 / 1,59 s; F5 ở tốc độ
+0,85 / 1,0 / 1,15 là 1,18 / 1,01 / 0,88 s; VieNeu 1,06 s), giọng thật trên board trung vị 1,19 s (48 đoạn `vad`, có thể lẫn
+đoạn không phải lần nói; 1,12–1,27 s phân vị 25–75). Dưới 0,5 s chỉ có ≤ 1% mẩu mỗi nhóm.
+
+Học lại `wake/v1` cùng seed và số bước, bỏ 7 164 trên 27 728 mẩu dương đã mô phỏng (26%) có tiếng ngắn hơn 0,85 s, rồi
+chấm trên board bằng cùng hàm của §2:
+
+| | Bắt trên `val` | Ngưỡng | Trung vị 60 đoạn từ đánh thức | Đỉnh của chúng | Đỉnh 039 |
+|---|---|---|---|---|---|
+| `wake/v1` | 77,1% | 0,975 | 0,77 | 0,95 | 0,92 |
+| Bỏ mẩu đọc nhanh | 60,2% | 0,925 | 0,54 | 0,82 | 0,85 |
+
+Bỏ mẩu đọc nhanh hạ điểm của cả giọng thật lẫn cụm gần âm mà không tách chúng ra, nên không phải nguyên nhân và mẩu
+đọc nhanh được giữ.
+
+Cách sửa là âm bản khó của `wake/v2`, ở KẾ HOẠCH §3.11.

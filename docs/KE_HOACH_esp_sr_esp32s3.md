@@ -728,7 +728,7 @@ dương thật của vài người tình nguyện vào tập học, tách ngư�
 
 **Âm bản khó** (`wake/v2`, `docs/measurements/wake.md`). Lượt học đầu trên `wake/v1` cho thấy mạng nhầm "chào mi
 na" với ba họ cụm mà thước khoảng cách thành phần âm tiết của `candidates` không bắt: "chào" + một âm tiết ("chào mẹ",
-"chào minh" 0,88–0,92 trên board, ngang giọng thật 0,85–0,95), số đọc "…mươi lăm / ba / năm / nhăm" (0,99 trên
+"chào minh" 0,86–0,92 trên board, ngang giọng thật 0,85–0,95), số đọc "…mươi lăm / ba / năm / nhăm" (0,99 trên
 VIVOS) và "… i na". Âm bản khó gồm ba nguồn: bộ TTS `synth_hard` đọc các họ ấy (cụm hai, ba âm tiết dựng từ
 những âm tiết phổ biến của kho) bằng giọng của mẫu dương; các cụm gần âm của `synth_neg`; và câu thật của kho học
 có cụm thuộc họ. Các cụm chính xác của phiên gần âm thu qua board mà `wake/v1` chưa từng học ("chào mẹ", "chào
