@@ -321,11 +321,18 @@ def text_column(names: list[str]) -> str:
     return found
 
 
-def audio_of(value) -> np.ndarray:
-    """One row's audio cell, bytes of a file or a decoded array with its rate, as mono float64 at the grid's rate."""
+def audio_of(job: Job, value: dict) -> np.ndarray:
+    """One row's audio cell as mono float64 at the grid's rate: the bytes of a file, a decoded array with its rate,
+    or an hf://datasets/<repo>@<revision>/<path> the file is fetched from."""
     if value.get("bytes"):
         return decode(value["bytes"])
-    return to_grid_rate(np.asarray(value["array"], dtype=np.float64), int(value["sampling_rate"]))
+    if value.get("array") is not None:
+        return to_grid_rate(np.asarray(value["array"], dtype=np.float64), int(value["sampling_rate"]))
+    found = re.fullmatch(r"hf://datasets/([^@]+)@([^/]+)/(.+)", value.get("path") or "")
+    if not found:
+        raise ValueError(f"an audio cell with neither bytes, array nor an hf:// path: {value.get('path')!r}")
+    repo, revision, path = found.groups()
+    return decode(job.http.get(f"{job.hub}/datasets/{repo}/resolve/{revision}/{urllib.parse.quote(path)}").content)
 
 
 def parquet_parts(job: Job, source: dict, pin: dict) -> list[tuple[str, dict]]:
@@ -368,7 +375,7 @@ def fetch_parquet(job: Job, source: dict, pin: dict, part: str, matches: list[di
     for group, found in sorted(by_group.items()):
         cells = pf.read_row_group(group, columns=[audio]).column(0)
         for m in found:
-            job.save_whole(m["key"], audio_of(cells[m["row"] - starts[group]].as_py()), m)
+            job.save_whole(m["key"], audio_of(job, cells[m["row"] - starts[group]].as_py()), m)
 
 
 def scan_arrow(job: Job, source: dict, pin: dict, part: str, info: dict) -> list[dict]:
@@ -384,7 +391,7 @@ def scan_arrow(job: Job, source: dict, pin: dict, part: str, info: dict) -> list
             for i, t in enumerate(texts):
                 if said := job.phrases.said(t):
                     m = {"key": f"{slug(source['repo'])}__{slug(part)}__{offset + i}", "text": t, "phrases": said}
-                    job.save_whole(m["key"], audio_of(batch.column(audio)[i].as_py()), m | {"fetch": part})
+                    job.save_whole(m["key"], audio_of(job, batch.column(audio)[i].as_py()), m | {"fetch": part})
                     matches.append(m | {"fetch": part, "row": offset + i})
             offset += len(texts)
     return matches
@@ -447,11 +454,18 @@ def scan_manifest(job: Job, source: dict, pin: dict) -> list[dict]:
     return matches
 
 
-def fetch_tar(job: Job, source: dict, pin: dict, shard: str, matches: list[dict]) -> None:
-    """Stream one shard end to end and keep the members that hold a match; a shard is never stored."""
+def member_id(source: dict, name: str) -> str:
+    """What a tar member is matched by: a manifest's files by name alone, as its paths and the tar's differ above it;
+    a YODAS video or a GigaSpeech2 utterance by its stem."""
+    return Path(name).name if source["kind"] == "manifest_tar" else Path(name).stem
+
+
+def fetch_tar(job: Job, source: dict, pin: dict, shard: str, matches: list[dict]) -> str:
+    """Stream one shard end to end and keep the members that hold a match; a shard is never stored. Says how many
+    of the matches it held, so a shard that held none of those it should is seen."""
     wanted = defaultdict(list)
     for m in matches:
-        wanted[yodas_segment(m["id"])[0] if source["kind"] == "yodas" else m["id"]].append(m)
+        wanted[yodas_segment(m["id"])[0] if source["kind"] == "yodas" else member_id(source, m["id"])].append(m)
     left = set(wanted)
     with job.http.open(job.url(source, pin["revision"], shard)) as r:
         if shard.endswith(".zst"):
@@ -462,8 +476,7 @@ def fetch_tar(job: Job, source: dict, pin: dict, shard: str, matches: list[dict]
             stream, mode = r, "r|gz"
         with tarfile.open(fileobj=stream, mode=mode) as tar:
             for member in tar:
-                name = member.name.removeprefix("./")
-                ident = name if source["kind"] == "manifest_tar" else Path(name).stem
+                ident = member_id(source, member.name)
                 if not member.isfile() or ident not in left:
                     continue
                 data = tar.extractfile(member).read()
@@ -474,7 +487,8 @@ def fetch_tar(job: Job, source: dict, pin: dict, shard: str, matches: list[dict]
                         job.save_whole(m["key"], decode(data), m)
                 left.discard(ident)
                 if not left:
-                    return
+                    break
+    return f", held {len(wanted) - len(left)} of {len(wanted)} wanted files"
 
 
 def scan_local(job: Job, prefix: str) -> list[dict]:
@@ -599,15 +613,16 @@ def fetch(job: Job, follow: bool) -> None:
     pins = job.pins()
 
     def one(source: dict, part: str, matches: list[dict], info: dict) -> str:
+        note = ""
         if source["kind"] == "parquet":
             fetch_parquet(job, source, pins[source["repo"]], part, matches, info)
         elif source["kind"] == "local":
             fetch_local(job, matches)
         else:
-            fetch_tar(job, source, pins[source["repo"]], part, matches)
+            note = fetch_tar(job, source, pins[source["repo"]], part, matches)
         job.fetched_mark(source, part).parent.mkdir(parents=True, exist_ok=True)
         job.fetched_mark(source, part).touch()
-        return f": {len(matches)} matches"
+        return f": {len(matches)} matches{note}"
 
     failures = defaultdict(int)
     while True:
@@ -649,13 +664,24 @@ def cut(job: Job, tts: dict, device: dict, cache: Path, follow: bool) -> None:
     """Every fetched sentence; with follow, again as fetch brings more, until fetch is done."""
     while True:
         fetched = (job.state / "fetch.done").exists()
-        sentences = sorted(f for f in (job.state / "whole").glob("*.json") if f.with_suffix(".wav").exists())
+        sentences = rarest_first(f for f in (job.state / "whole").glob("*.json") if f.with_suffix(".wav").exists())
         if sentences:
             cut_sentences(job, sentences, tts, device, cache)
             continue
         if fetched or not follow:
             return
         time.sleep(job.cfg["follow_poll_s"])
+
+
+def rarest_first(paths: Iterator[Path]) -> list[Path]:
+    """The waiting sentences, those holding the rarest phrase among them first: the checker hears about one try a
+    second, so the wake word and the rare commands are cut before the thousands of common ones."""
+    phrases = {path: json.loads(path.read_text(encoding="utf-8"))["phrases"] for path in paths}
+    counts = defaultdict(int)
+    for said in phrases.values():
+        for p in said:
+            counts[p] += 1
+    return sorted(phrases, key=lambda path: (min(counts[p] for p in phrases[path]), path.name))
 
 
 def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cache: Path) -> None:

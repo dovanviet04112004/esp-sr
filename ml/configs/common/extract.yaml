@@ -34,9 +34,8 @@ extracts:
       - tăng âm lượng
       - giảm âm lượng
       - dừng lại
-    sources:                       # a source without a revision is pinned when first read, in the manifest;
-                                   #   parquet is the dataset viewer's refs/convert/parquet, arrow the repo's own
-                                   #   files; yodas2_sidon and yodas v1 repeat yodas2, ViSEC has no text
+    sources:                       # an unpinned source is pinned on first read; parquet is the viewer's
+                                   #   refs/convert/parquet unless own; copies of yodas2 and textless sets stay out
       - {kind: parquet, repo: thivux/phoaudiobook, revision: e716faf3780d89cdd630b3a778476bb9e1ad316d}
       - {kind: parquet, repo: NhutP/VietSpeech, revision: 35f7d6081b8de7cafa593d741a74068e7d40822c}
       - {kind: parquet, repo: capleaf/viVoice, revision: cb55a42ab775fbff4f78849679b14b6e8934176d}
@@ -63,9 +62,6 @@ extracts:
       - {kind: parquet, repo: HieuNguyen203/Vietnamese_Medical_Consultation}
       - {kind: parquet, repo: tensorxt/ViMedCSS}
       - {kind: parquet, repo: Cets/audio-logs-vie}
-      - {kind: arrow, repo: pnnbao-ump/VieNeu-TTS-1000h}   # its 140h set is the LanguaMan copy above
-      - {kind: parquet, repo: BlossomsAI/Blum_vi_voice, own: true}
-      - {kind: parquet, repo: beyoru/vietnamese-voice, own: true}
       - kind: local                  # corpora under raw/ that screening kept; VIVOS and Common Voice stay out, their
         repo: local                  #   speakers are split into val and test
         corpora: [speech/fpt_open/, speech/vlsp/, speech/bud500/]

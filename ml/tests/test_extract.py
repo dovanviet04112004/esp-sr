@@ -7,6 +7,7 @@ import io
 import tarfile
 import urllib.parse
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pyarrow as pa
@@ -43,6 +44,9 @@ class FakeHttp:
 
     def resolve(self, url: str) -> str:
         return url
+
+    def get(self, url: str) -> SimpleNamespace:
+        return SimpleNamespace(content=self.files[self.path(url)])
 
     def read(self, url: str, start: int, stop: int, auth: bool = True) -> bytes:
         self.reads.append((start, stop))
@@ -171,3 +175,14 @@ def test_a_stream_that_breaks_goes_on_from_the_byte_it_reached() -> None:
 
     hub = Hub()
     assert io.BufferedReader(extract.Resumed(hub, "u"), 64).read() == data and hub.starts == [0, 1000]
+
+
+def test_audio_by_hub_path_and_manifest_members_by_file_name(tmp_path: Path) -> None:
+    job = job_for(tmp_path, [], FakeHttp({"data/a.wav": wav_bytes(0.3)}))
+    x = extract.audio_of(job, {"bytes": None, "path": "hf://datasets/o/d@rev0/data/a.wav"})
+    assert abs(len(x) - 0.3 * grid.SAMPLE_RATE_HZ) <= 1
+    manifest = {"kind": "manifest_tar"}
+    assert extract.member_id(manifest, "long/audio/C/v_00001.mp3") == extract.member_id(
+        manifest, "long/audio-khong-sub/C/v_00001.mp3"
+    )
+    assert extract.member_id({"kind": "tsv_tar"}, "dev/22/22-52.wav") == "22-52"
