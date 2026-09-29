@@ -62,6 +62,9 @@ extracts:
       - {kind: parquet, repo: tensorxt/ViMedCSS}
       - {kind: parquet, repo: Cets/audio-logs-vie}
       - {kind: parquet, repo: hustep-lab/ViSEC}
+      - {kind: arrow, repo: pnnbao-ump/VieNeu-TTS-1000h}   # its 140h set is the LanguaMan copy above
+      - {kind: parquet, repo: BlossomsAI/Blum_vi_voice, own: true}
+      - {kind: parquet, repo: beyoru/vietnamese-voice, own: true}
       - kind: local                  # corpora under raw/ that screening kept; VIVOS and Common Voice stay out, their
         repo: local                  #   speakers are split into val and test
         corpora: [speech/fpt_open/, speech/vlsp/, speech/bud500/]

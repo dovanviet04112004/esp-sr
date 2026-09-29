@@ -636,7 +636,9 @@ def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cach
                 name = f"{slug(o['phrase'])}/{m['key']}__{o['n']}.wav"
                 write_wav(job.out / name, segment(job.whole(m["key"]), *kept[i]["cut_s"]))
                 clips.append({"file": name, "phrase": o["phrase"], "span_s": o["span"]} | kept[i])
-            done_write(job.state / "cut" / f"{m['key']}.jsonl", [m | {"clips": clips}])
+            done_write(
+                job.state / "cut" / f"{m['key']}.jsonl", [m | {"clips": clips, "found": len(by_key.get(m["key"], []))}]
+            )
             job.whole(m["key"]).unlink()
             job.whole(m["key"]).with_suffix(".json").unlink()
         for folder in work.glob("align_*"):
@@ -690,13 +692,45 @@ def write_index(job: Job) -> None:
     job.manifest.write_text(yaml.safe_dump(body, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
 
+def report(job: Job) -> str:
+    """Where the extract stands: matches found, sentences waiting, clips kept per phrase with the share of aligned
+    phrases the checker kept and the clip lengths, and the data disk's free space."""
+    matches = defaultdict(int)
+    for f in (job.state / "scan").glob("*/*.jsonl"):
+        for m in read_jsonl(f):
+            for p in m["phrases"]:
+                matches[p] += 1
+    kept, found, unaligned, lengths = defaultdict(int), 0, 0, defaultdict(list)
+    for f in (job.state / "cut").glob("*.jsonl"):
+        for m in read_jsonl(f):
+            found += m.get("found", 0)
+            unaligned += m.get("found", 0) == 0
+            for c in m["clips"]:
+                kept[c["phrase"]] += 1
+                lengths[c["phrase"]].append(c["cut_s"][1] - c["cut_s"][0])
+    waiting = sum(1 for _ in (job.state / "whole").glob("*.json"))
+    free_gb = shutil.disk_usage(job.out.parent).free / 1e9
+    lines = [
+        f"scanned parts {sum(1 for _ in (job.state / 'scan').glob('*/*.jsonl'))}, waiting sentences {waiting},"
+        f" kept {sum(kept.values())} of {found} aligned phrases ({sum(kept.values()) / max(found, 1):.0%}),"
+        f" sentences without the phrase aligned {unaligned}, disk free {free_gb:.0f} GB"
+    ]
+    for p in job.phrases.phrases:
+        spread = np.percentile(lengths[p], [5, 50, 95]).round(2).tolist() if lengths[p] else "-"
+        lines.append(f"  {p}: matched {matches[p]}, kept {kept[p]}, seconds p5/p50/p95 {spread}")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("name", help="an extract of configs/common/extract.yaml")
-    parser.add_argument("step", choices=["scan", "fetch", "cut"])
+    parser.add_argument("step", choices=["scan", "fetch", "cut", "report"])
     parser.add_argument("--follow", action="store_true", help="fetch or cut, keep taking up what the step before adds")
     args = parser.parse_args(argv)
     cfg, paths = load_yaml(CONFIG), data_paths()
+    if args.step == "report":
+        print(report(Job(args.name, cfg, paths, Http(cfg["http"], None))))
+        return 0
     token = {**read_dotenv(ML_ROOT / ".env"), **os.environ}.get(cfg["http"]["token_env"])
     if not token:
         parser.error(f"{cfg['http']['token_env']} is not set in ml/.env: the gated corpora refuse an anonymous read")
