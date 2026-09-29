@@ -176,6 +176,16 @@ def slug(text: str) -> str:
     return re.sub(r"[^0-9A-Za-z]+", "_", ascii_text).strip("_")
 
 
+def decode_span(data: bytes, start_s: float, end_s: float) -> np.ndarray:
+    """[start_s, end_s) of encoded audio as mono float64 at the grid's rate; the rest is never decoded, so a long
+    video costs only its segment in memory."""
+    rate = sf.info(io.BytesIO(data)).samplerate
+    x, _ = sf.read(
+        io.BytesIO(data), start=round(start_s * rate), stop=round(end_s * rate), dtype="float64", always_2d=True
+    )
+    return to_grid_rate(x.mean(axis=1), rate)
+
+
 def decode(data: bytes) -> np.ndarray:
     """Encoded audio bytes as mono float64 at the grid's rate."""
     x, rate = sf.read(io.BytesIO(data), dtype="float64", always_2d=True)
@@ -401,14 +411,12 @@ def fetch_tar(job: Job, source: dict, pin: dict, shard: str, matches: list[dict]
                 ident = name if source["kind"] == "manifest_tar" else Path(name).stem
                 if not member.isfile() or ident not in left:
                     continue
-                x = decode(tar.extractfile(member).read())
+                data = tar.extractfile(member).read()
                 for m in wanted[ident]:
                     if source["kind"] == "yodas":
-                        _, start, end = yodas_segment(m["id"])
-                        rate = grid.SAMPLE_RATE_HZ
-                        job.save_whole(m["key"], x[round(start * rate) : round(end * rate)], m)
+                        job.save_whole(m["key"], decode_span(data, *yodas_segment(m["id"])[1:]), m)
                     else:
-                        job.save_whole(m["key"], x, m)
+                        job.save_whole(m["key"], decode(data), m)
                 left.discard(ident)
                 if not left:
                     return
@@ -490,7 +498,9 @@ def scan(job: Job) -> None:
     todo = [p for p in parts if not job.scan_file(p[0], p[1]).exists()]
     print(f"scan: {len(todo)} text parts left", flush=True)
     (job.state / "scan.done").unlink(missing_ok=True)
-    run_parallel(todo, one, job.cfg["workers"]["scan"], "scan")
+    # An .arrow part streams its audio through memory, so few run at once, after the rest.
+    run_parallel([p for p in todo if p[0]["kind"] != "arrow"], one, job.cfg["workers"]["scan"], "scan")
+    run_parallel([p for p in todo if p[0]["kind"] == "arrow"], one, job.cfg["workers"]["stream"], "scan")
     if all(job.scan_file(p[0], p[1]).exists() for p in parts):
         (job.state / "scan.done").touch()
 

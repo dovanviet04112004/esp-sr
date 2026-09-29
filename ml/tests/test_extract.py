@@ -58,7 +58,7 @@ class FakeHttp:
 def job_for(tmp_path: Path, sources: list[dict], http: FakeHttp) -> extract.Job:
     cfg = load_yaml(extract.CONFIG)
     cfg["extracts"] = {"t": {"phrases": ["trợ lý", "bật đèn", "mở cửa"], "sources": sources}}
-    cfg["workers"] = {"scan": 2, "fetch": 2}
+    cfg["workers"] = {"scan": 2, "fetch": 2, "stream": 1}
     cfg["http"]["read_ahead_bytes"] = 64
     paths = {"cache": tmp_path / "cache", "raw": tmp_path / "raw", "manifests": tmp_path / "manifests"}
     return extract.Job("t", cfg, paths, http)
