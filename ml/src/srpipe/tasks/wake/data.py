@@ -130,6 +130,9 @@ def build(cfg: dict, public: list[corpus.Clip], seconds: dict[str, float], manif
     mined = {role: [c for c in clips if is_hard(c, patterns, held)] for role, clips in (("train", heard), ("val", val))}
     for role in ("train", "val"):
         files[f"{role}_hard.txt"] = families[role] + near[role] + splits.clip_rows(mined[role], PUBLIC)
+    # val scores val_neg and val_hard together, so a clip in both would count twice among its false accepts.
+    counted = {r.item for r in files["val_neg.txt"]}
+    files["val_hard.txt"] = [r for r in files["val_hard.txt"] if r.item not in counted]
     return files
 
 
@@ -153,7 +156,8 @@ def notes(cfg: dict, files: dict[str, list[splits.Row]], seconds: dict[str, floa
         hard = (
             "\n- `train_hard`, `val_hard` (KẾ HOẠCH §3.11): mẩu TTS có `kept` của `interim/wake/synth_hard`, âm bản"
             " gần âm của\n  `interim/wake/synth_neg`, và câu của kho học có lời khớp một mẫu của `split.hard`; không"
-            f" câu nào chứa\n  {held}, để phiên gần âm thu qua board đo được mô hình tổng quát hoá."
+            f" câu nào chứa\n  {held}, để phiên gần âm thu qua board đo được mô hình tổng quát hoá. `val_hard` bỏ"
+            " mẩu đã có trong\n  `val_neg`, vì `val` chấm báo nhầm trên cả hai file và mỗi mẩu chỉ được đếm một lần."
         )
     return f"""# wake/{spec["version"]}
 

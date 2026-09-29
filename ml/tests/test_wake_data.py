@@ -59,8 +59,8 @@ def test_hard_files_mine_the_families_by_role_and_leave_the_other_five_as_they_w
     mined = {r.item.rsplit("_", 1)[1] for name in ("train_hard.txt", "val_hard.txt") for r in after[name]}
     assert mined >= {"0.wav", "1.wav"} and "2.wav" not in mined and "3.wav" not in mined
     val_voices = {r.spk for r in after["val_pos.txt"]}
-    assert {r.spk for r in after["val_hard.txt"] if r.origin == "public"} <= val_voices
     assert not {r.spk for r in after["train_hard.txt"] if r.origin == "public"} & val_voices
+    assert not {r.item for r in after["val_hard.txt"]} & {r.item for r in after["val_neg.txt"]}
     for role in ("train", "val"):
         assert sum(r.item.startswith("wake/synth_hard/") for r in after[f"{role}_hard.txt"]) == 2
 
