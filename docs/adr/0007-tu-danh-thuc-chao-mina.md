@@ -1,6 +1,6 @@
 # ADR-0007 — Từ đánh thức là "Chào Mina", đọc "chào mi na"
 
-- **Trạng thái**: Chấp nhận
+- **Trạng thái**: Thay bởi ADR-0011
 - **Ngày**: 2026-09-28
 - **Liên quan**: KẾ HOẠCH §1.2, §3.11; TASKS E11-T5, E11-T7, E11-T11; `ml/src/srpipe/tasks/wake/candidates.py`
 

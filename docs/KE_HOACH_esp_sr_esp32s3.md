@@ -54,7 +54,7 @@ Bảng này tồn tại cho tới khi TỔNG QUAN được sửa theo (E1-T9). S
 | 8 | DOA GCC-PHAT, không nói độ phân giải | Dò **lưới góc** trên phổ chéo đã làm trơn, không lấy đỉnh trễ nguyên | Micro của board B cách 4,5 cm ở 16 kHz chỉ có ±2,10 mẫu trễ: lấy đỉnh nguyên chỉ ra 5 góc | §3.6 |
 | 9 | `command` so chuỗi âm vị với danh sách | **Chấm CTC có ràng buộc** từng lệnh bằng thuật toán tiến, kèm **biến thể phương ngữ** | Giải tham lam rồi so chuỗi vứt đi xác suất; tập lệnh đóng cho phép chấm thẳng từng lệnh với giá gần bằng không | §3.12 |
 | 10 | Thanh điệu: ba đường | **Nhãn thanh chen trong cùng chuỗi CTC** trên 44 đơn vị, từ **log-mel 40 cộng ba chiều cao độ** (ADR-0010) | Tài liệu: thanh phải nằm trong đơn vị và cao độ hạ lỗi rõ ở ngôn ngữ có thanh, còn cách đặt thanh không đổi lỗi gộp; một đầu ra, bộ ký hiệu nhỏ nhất | §3.11, §3.12 |
-| 11 | Từ đánh thức 2–3 âm tiết | **3–4 âm tiết** | Âm tiết tiếng Việt ngắn; cụm hai âm tiết dài chừng nửa giây và trùng lời nói thường ngày nhiều | §3.11 |
+| 11 | Từ đánh thức 2–3 âm tiết | Bản demo: **"trợ lý"**, 2 âm tiết, ưu tiên bắt được (ADR-0011); cụm 3–4 âm tiết là hướng khi siết báo nhầm | Cụm hai âm tiết dài chừng nửa giây và trùng lời nói thường nhiều hơn; đổi lại nó tự nhiên và người thật trong kho nói nó 223 lần, nên có mẫu dương giọng thật | §3.11 |
 | 12 | `ns` mạng ~24% một nhân, ~40 MFLOPS | RNNoise phải **dựng lại dải cho 16 kHz và huấn luyện lại**; ở 62,5 khung/s phần mạng ~11 MFLOP/s 🔬 | Số 40 MFLOPS là của bản 48 kHz, 100 khung/s | §3.9 |
 | 13 | Task `nhan` ở nhân 1 cùng `thu` và `sach` | `nhan` ở **nhân 0** | TỔNG QUAN tự nói "một nhân không đủ", nhưng lại dồn cả ba việc liên tục vào nhân 1; cửa sổ lệnh 11–18 ms mỗi 32 ms đẩy nhân 1 quá 100% | §5.1 |
 | 14 | RAM nội ~97 KB; luật "RAM nội chỉ giữ thứ bị chạm mỗi khung" kéo trọng số `ns` và `wake` vào RAM nội | Ước lại, thiếu ba khoản: ngăn xếp mạng, trạng thái AEC thật, đệm luồng. **Mọi model — trọng số và vùng làm việc — nằm ở PSRAM**, trọng số chép từ flash lên lúc nạp | Cộng cả trọng số `ns` và `wake` vào thì RAM nội vượt phần còn cấp được sau Wi-Fi | §6.5 |
@@ -80,7 +80,7 @@ Chỉ bốn khối dùng mô hình học. Mọi khối khác là công thức, k
 | Nhánh | Chỗ chạy | Kiến trúc | Vào | Ra | Cỡ mục tiêu | Khởi đầu từ |
 |---|---|---|---|---|---|---|
 | `ns` | `ai_engine/src/ns/`, cắm vào khe `ns` của `dsp_afe` | RNNoise dựng lại cho 16 kHz: dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải + xác suất tiếng nói | đặc trưng dải tính từ 257 vạch | gain từng dải, nội suy ra 257 vạch | ~88 k tham số, ~90 KB int8 🔬 | kiến trúc RNNoise; **huấn luyện mới hoàn toàn** vì dải và tần số lấy mẫu khác bản gốc |
-| `wake` | `ai_engine/src/wake/` | TCN tích chập giãn nở nhân quả, 6–8 tầng, bước giãn 1 → 32 | log-mel 40 dải × khung 16 ms | xác suất từ đánh thức mỗi khung | 16–50 KB int8 | tự huấn luyện |
+| `wake` | `ai_engine/src/wake/` | TCN tích chập giãn nở nhân quả, 6 tầng, bước giãn 1 → 32, 64 kênh | log-mel 40 dải × khung 16 ms | xác suất từ đánh thức mỗi khung | ~100 KB int8 🔬 | tự huấn luyện |
 | `command` | `ai_engine/src/command/` | CRNN nhỏ (tích chập rồi GRU một chiều) chạy dòng + CTC trên đơn vị của §3.12, như MultiNet; lùi về TCN nếu GRU int8 qua esp-dl không đạt trên board (ADR-0010) | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung | **≤ ~1,8 MB int8** — trần sinh ra từ bảng phân vùng §6.1 | tự huấn luyện trên kho tiếng Việt |
 | `synth` | `ai_engine/src/synth/` | chốt ở E12-T1: mạng chưng cất kiểu sanoTTS (trường độ → âm học → iSTFT) | chuỗi đơn vị + trường độ | PCM 16 kHz | ≤ 1 MB | tuỳ phương án; phương án không mạng nằm ở `svc_speak` (§3.13) |
 
@@ -171,7 +171,7 @@ máy khác: đáp ứng của micro là một phần của miền dữ liệu.
 | Âm bản để đo báo nhầm của `wake`: **≥ 24 giờ**, không trùng nguồn học — phần kho công khai giữ riêng, qua đường mô phỏng board, cộng nền phòng thu qua board | Đo "≤ 1 lần mỗi giờ" trên một giờ âm bản là không đo gì cả |
 | Split, giọng mẫu TTS và nhiễu để trộn chỉ lấy mẩu đã qua sàng lọc (§1.2) | Mẩu câm hay lệch lời dạy sai, và nằm trong tập thử thì chấm sai |
 | Lệnh giữ làm **lệnh chưa học** (E11-T13, cấu hình ở `configs/models/command.yaml`) không có trong tập học của `command`: mẩu nào có lời chứa nó thì bỏ khỏi `train`, `val`, `calib`, và TTS không đọc nó | Phép thử "thêm lệnh không cần học lại" chỉ đo được khi mô hình chưa từng nghe lệnh ấy |
-| Âm bản của `wake` không có mẩu nào lời chứa từ đánh thức | Một câu nói "chào mi na" gắn nhãn âm dạy mô hình bỏ qua chính nó, và nằm trong tập thử thì tính thành báo nhầm |
+| Âm bản của `wake` không có mẩu nào lời chứa từ đánh thức | Một câu nói từ đánh thức gắn nhãn âm dạy mô hình bỏ qua chính nó, và nằm trong tập thử thì tính thành báo nhầm |
 | Tập thử không lấy từ kho đã làm giọng mẫu cho TTS của cùng nhánh | Kho không có mã người nói thì không tách được người; giọng đã nhân bản vào tập học sẽ có mặt ở cả hai phía |
 | Tiếng tổng hợp không vào tập thử | Nó đúng miền của TTS, không đúng miền của người thật |
 | Giọng mẫu để TTS nhân bản chỉ lấy từ vật liệu học: người nói của tập học, hoặc kho chỉ vào tập học | Nhân bản giọng của một người ở tập thử là đưa người đó vào tập học qua đường TTS |
@@ -712,33 +712,28 @@ F0 nằm. `command` đọc log-mel 40 cộng ba chiều cao độ của `dsp_spe
 bố cho ngôn ngữ có thanh đều thấy cao độ hạ lỗi, ở tiếng Việt khoảng 18% tương đối, còn 80 dải không có số cho mạng nhỏ
 (ADR-0010). `wake` giữ log-mel 40, vì lỗi của nó nằm ở dữ liệu dương chứ không ở thanh.
 
-**`wake`** — TCN tích chập giãn nở nhân quả, kernel 3, giãn 1, 2, 4, …, 32 hai lượt: trường nhìn
-~127 khung ≈ 2 s. Int8, chạy dòng bằng `StreamingCache` của esp-dl. Đầu ra làm trơn trung bình trượt
-5 khung rồi so ngưỡng; ngưỡng nằm ở NVS `kws/wake_th`.
+**`wake`** — TCN tích chập giãn nở nhân quả, kernel 3, giãn 1, 2, 4, …, 32 một lượt: trường nhìn 127 khung ≈ 2 s;
+64 kênh, vì cùng việc phụ CTC dưới đây nó cho giọng thật cao nhất (`docs/measurements/wake.md` §5). Int8, chạy dòng
+bằng `StreamingCache` của esp-dl. Đầu ra làm trơn trung bình trượt 5 khung rồi so ngưỡng; ngưỡng nằm ở NVS
+`kws/wake_th`.
 
-**Từ đánh thức 3–4 âm tiết.** Âm tiết tiếng Việt dài cỡ 200–300 ms; cụm hai âm tiết chỉ nửa giây và
-trùng lời nói thường ngày nhiều. Chọn cụm pha **thanh khác nhau** và nguyên âm tương phản, không phải
-từ thông dụng, và người dùng nói giống nhau mọi lần. Chốt ở ADR-0007: **"Chào Mina"**, đọc "chào mi na", chấm bằng
-`srpipe.tasks.wake.candidates` trên lời của cả năm kho tiếng; hàng xóm gần của nó vào âm bản khó (E11-T7).
+**Từ đánh thức "trợ lý"** (ADR-0011, thay "Chào Mina" của ADR-0007). Chủ dự án chọn vì tự nhiên. Hai âm tiết, dài
+chừng nửa giây, 28 lần mỗi triệu âm tiết lời nói: ngắn và thông dụng hơn luật 3–4 âm tiết, pha thanh khác nhau, mà
+`candidates` vẫn chấm. Bản demo **ưu tiên bắt được**: cụm na ná như "trợ giúp", "trợ cấp" bị bắt nhầm cũng chấp nhận;
+siết báo nhầm để sau, khi có dữ liệu thu thật.
 
-**Dữ liệu dương** là tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, qua đường
-mô phỏng board (§1.2). **Âm bản** gồm các kho lời nói tiếng Việt, cộng các cụm gần âm cố ý chọn đọc bằng
-TTS. Bản thu qua board để chấm (§1.3). Nếu thiếu Cửa 2 vì giọng tổng hợp khác giọng thật, thêm mẫu
-dương thật của vài người tình nguyện vào tập học, tách người với tập thử.
+**Dữ liệu dương** gồm tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, và **người thật nói
+"trợ lý" trong kho học**: 222 câu, cắt từ đầu câu đến ngay sau "lý" theo mốc thời gian từng từ của PhoWhisper, nên cuối
+lời của mẩu cắt là cuối từ đánh thức; câu mà PhoWhisper không nghe ra từ ấy thì bỏ. Các kho ấy không có mã người nói,
+nên mẩu cắt chỉ vào `train`. Tất cả qua đường mô phỏng board (§1.2). **Âm bản** gồm các kho lời nói tiếng Việt trừ câu
+có từ đánh thức, cộng một bộ câu ngắn không liên quan đọc bằng giọng TTS của mẫu dương, để giọng TTS không thành dấu
+hiệu của lớp dương. Bản thu qua board để chấm (§1.3).
 
-**Âm bản khó** (`wake/v2`, `docs/measurements/wake.md`). Lượt học đầu trên `wake/v1` cho thấy mạng nhầm "chào mi
-na" với ba họ cụm mà thước khoảng cách thành phần âm tiết của `candidates` không bắt: "chào" + một âm tiết ("chào mẹ",
-"chào minh" 0,86–0,92 trên board, ngang giọng thật 0,85–0,95), số đọc "…mươi lăm / ba / năm / nhăm" (0,99 trên
-VIVOS) và "… i na". Âm bản khó gồm ba nguồn: bộ TTS `synth_hard` đọc các họ ấy (cụm hai, ba âm tiết dựng từ
-những âm tiết phổ biến của kho) bằng giọng của mẫu dương; các cụm gần âm của `synth_neg`; và câu thật của kho học
-có cụm thuộc họ. Các cụm chính xác của phiên gần âm thu qua board mà `wake/v1` chưa từng học ("chào mẹ", "chào
-minh", "chào bạn") bị loại khỏi cả ba nguồn, để phiên ấy đo được mạng có tổng quát hoá hay không. Split giữ chúng ở
-`train_hard` và `val_hard`, chia người như mọi file khác; năm file của `wake/v1` giữ nguyên nên bản mô phỏng của
-chúng dùng lại được. Mỗi lô dành một tỉ lệ cố định cho âm bản khó, như cho mẫu dương: rút theo độ dài từ 100 giờ
-lời nói, 370 cụm gần âm chỉ chiếm ~0,1% cửa sổ, nên mạng không có lý do học phân biệt chúng. Cửa sổ của một cụm TTS
-cắt quanh cuối lời như mẫu dương; của một câu kho cắt ngẫu nhiên trong phần có tiếng, vì không có mốc thời gian
-từng từ. Tốc độ đọc không phải nguyên nhân: bỏ 26% mẫu dương đọc nhanh nhất (dưới 0,85 s) hạ điểm của cả giọng thật
-lẫn cụm gần âm mà không tách chúng ra.
+**Âm bản khó** — cơ chế để siết báo nhầm, **tắt ở bản demo**. Khi bật (mục `synth.hard` và `split.hard` của cấu
+hình), split thêm `train_hard` và `val_hard` từ ba nguồn: TTS đọc các họ cụm gần âm, các cụm gần âm của `synth_neg`, và
+câu thật của kho khớp mẫu họ; cụm của phiên gần âm thu qua board bị loại khỏi cả ba để đo tổng quát hoá; mỗi lô dành
+một tỉ lệ cố định cho chúng. Với "Chào Mina" nó chặn được các họ na ná, nhưng khắt khe tới mức giọng thật tụt theo khi
+dương chỉ có TTS (`docs/measurements/wake.md` §3–§5).
 
 **Huấn luyện** (`tasks/wake/train.py`, `eval.py`, mục `train` của `configs/models/wake.yaml`). Đầu vào là log-mel
 của `processed/wake/<split>/` do đường mô phỏng board dựng, chuẩn hoá bằng trung bình và độ lệch từng dải tính trên
@@ -750,12 +745,12 @@ ngưỡng. Bắt được là tỉ lệ mẩu dương có một lần vượt ng
 một quãng rồi mới đếm tiếp như máy khoá sau khi thức, quy ra lần mỗi giờ. Ngưỡng chọn trên `val` sao cho báo nhầm
 không quá mục tiêu, rồi ghi vào NVS `kws/wake_th`.
 
-**Việc phụ trên tiếng người thật.** Mẫu dương chỉ có TTS; bị âm bản khó ép phân biệt tinh, thân mạng bám vào "chào mi
-na" kiểu TTS và giọng thật nói đúng từ rơi ra ngoài (`docs/measurements/wake.md` §4). Vì thế cùng một thân mạng học
-thêm một việc trên lời nói thật của `train_neg`: một đầu CTC đọc chuỗi đơn vị `lang_vi` (§3.12) của cả câu, đọc theo
-vùng Bắc vì kho không ghi vùng người nói; mất mát CTC cộng vào BCE với trọng số ở cấu hình. Hàng nghìn người thật nói
-đủ các âm của từ đánh thức ("chào" 3 367 lần, "mi" 722, "na" 656 trong kho) dù không ai nói cả cụm, nên thân mạng phải
-biểu diễn các âm ấy theo giọng người. Câu `lang_vi` không đọc được, hay dài quá cấu hình, bị bỏ khỏi việc phụ. Đơn vị
+**Việc phụ trên tiếng người thật.** Mẫu dương phần lớn là TTS; với "Chào Mina", thân mạng bám vào từ đánh thức kiểu TTS
+và giọng thật nói đúng từ rơi ra ngoài (`docs/measurements/wake.md` §4). Vì thế cùng một thân mạng học thêm một việc
+trên lời nói thật của `train_neg`: một đầu CTC đọc chuỗi đơn vị `lang_vi` (§3.12) của cả câu, đọc theo vùng Bắc vì kho
+không ghi vùng người nói; mất mát CTC cộng vào BCE với trọng số ở cấu hình. Hàng nghìn người thật nói các âm của từ
+đánh thức ("trợ" 1 919 lần, "lý" 9 318 trong kho), nên thân mạng phải biểu diễn các âm ấy theo giọng người; ở 64
+kênh việc phụ nâng giọng thật lên, ở 32 kênh thì không (`wake.md` §5). Câu `lang_vi` không đọc được, hay dài quá cấu hình, bị bỏ khỏi việc phụ. Đơn vị
 là đúng đơn vị của `command` (§3.12). Đầu phụ bị bỏ khi lưu mạng, nên mạng xuất ra board, chi phí và `StreamingCache`
 không đổi.
 
@@ -763,7 +758,9 @@ không đổi.
 chọn mốc có tỉ lệ bắt `val` cao nhất trong hàng chục lần đo nhiễu là chọn lần may, và mốc ấy báo nhầm gấp đôi mục tiêu
 trên `test_neg` (`wake.md` §4). `val_neg` gồm thêm một phần người nói Common Voice rút theo seed (tỉ lệ ở mục `split`),
 để mục tiêu báo nhầm của `val` dựa trên hàng chục lần vượt chứ không phải ba lần của 3,76 giờ; `test_neg` giữ phần còn
-lại, và phần thiếu so với 24 giờ của Cửa 2 do nền phòng thu qua board (E11-T6) bù.
+lại, và phần thiếu so với 24 giờ của Cửa 2 do nền phòng thu qua board (E11-T6) bù. Bản demo đặt mục tiêu báo nhầm
+của `val` ở mục `eval` của cấu hình, rộng hơn Cửa 2, để ưu tiên bắt; ngưỡng trên máy chỉnh được qua NVS `kws/wake_th`
+mà không học lại.
 
 **Thước** (TỔNG QUAN V5.5.7, Cửa 2): bắt **≥ 95%** ở 1 m phòng yên; báo nhầm **≤ 1 lần mỗi giờ** đo
 trên **≥ 24 giờ** âm bản. Ghi thêm, không làm cửa: bắt được ở 3 m, ở SNR 10 dB và 5 dB.
@@ -1136,8 +1133,9 @@ ml/
 │   │   ├── wake/                      # TCN; postproc/smooth.py ★; candidates.py chấm từ đánh thức trên kho (E11-T5);
 │   │   │                              #   synth.py chọn chữ, giọng, seed, tốc độ cho dương và âm bản gần âm rồi
 │   │   │                              #   sinh qua srpipe/tts vào interim/wake/synth_{pos,neg,hard}/ (E11-T7); ngưỡng
-│   │   │                              #   độ chênh đặt trên âm bản gần âm, để chỉ 1% lọt thành dương; data.py dựng
-│   │   │                              #   split wake/v<n> (§1.3)
+│   │   │                              #   độ chênh đặt trên âm bản gần âm, để chỉ 1% lọt thành dương; data.py cắt
+│   │   │                              #   câu kho nói từ đánh thức vào interim/wake/corpus_pos/ và dựng split
+│   │   │                              #   wake/v<n> (§1.3)
 │   │   ├── command/                   # mạng âm học + CTC; postproc/ctc_score.py ★; data.py dựng split command/v<n>,
 │   │   │                              #   bỏ lệnh chưa học khỏi tập học (§1.3)
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
@@ -1868,7 +1866,7 @@ coredump,   data, coredump, 0xFE0000,  0x10000,
 ```
 
 **Trần 3 MB của một slot model là hệ quả của bảng này, không phải ngược lại.** Cộng `ns` ~90 KB,
-`wake` ≤ 50 KB, `synth` ≤ 1 MB thì `command` còn **≤ ~1,8 MB**; TỔNG QUAN ghi `command` "1 tới 4 MB
+`wake` ~100 KB, `synth` ≤ 1 MB thì `command` còn **≤ ~1,8 MB**; TỔNG QUAN ghi `command` "1 tới 4 MB
 ngoài". Nếu E11 chứng minh `command` cần hơn thế, đường lùi là **bỏ `models_1`** — mất khả năng quay
 về model cũ khi cập nhật hỏng — và cho `models_0` 6 MB. Quyết định ghi ADR, không lặng lẽ nới.
 
@@ -1955,7 +1953,7 @@ TỔNG QUAN §7 ước ~97 KB và thiếu bốn khoản. Bảng ước lại �
 **Mọi model nằm ở PSRAM — trọng số lẫn vùng làm việc.** `ai_engine_load` mmap slot model qua
 `sys_storage`, kiểm sha256 và `grid_hash`, **chép trọng số từng model lên PSRAM**, rồi nhả mmap: lúc chạy
 không model nào đọc thẳng từ flash, và không model nào chiếm RAM nội. Kéo trọng số `ns` (~90 KB) và `wake`
-(16–50 KB) về RAM nội như luật "chỉ giữ thứ bị chạm mỗi khung" của TỔNG QUAN thì cộng lên ~350–420 KB,
+(~100 KB) về RAM nội như luật "chỉ giữ thứ bị chạm mỗi khung" của TỔNG QUAN thì cộng lên ~430–470 KB,
 vượt phần còn cấp được; RAM nội để dành cho đệm DMA, trạng thái khung của `dsp_afe`, ngăn xếp và Wi-Fi.
 PSRAM octal cũng đọc nhanh hơn flash QIO, nên chép lên là lợi hơn chạy thẳng qua mmap.
 
@@ -1972,7 +1970,7 @@ nên lớn hơn; đó là giá của mã đọc được và khớp Python từn
 |---|---|
 | Trọng số và vùng làm việc `command` | ≤ 1,8 MB + ~0,3 MB |
 | Trọng số và vùng làm việc `synth` (nếu mạng) | ≤ 1 MB + ~0,3 MB |
-| Trọng số và vùng làm việc `ns` + `wake` | ~140 KB + ~50 KB |
+| Trọng số và vùng làm việc `ns` + `wake` | ~140 KB + ~100 KB |
 | `q_clean` | ~34 KB |
 | `q_dialog`, `q_cmd`, `q_speak`, `q_event_up` (§5.3) | ~6 KB |
 | `sb_stream` | 512 KB |

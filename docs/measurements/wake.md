@@ -1,5 +1,8 @@
 # `wake` (E11)
 
+Mục 1–5 đo từ đánh thức "chào mi na" (ADR-0007), đã thay bằng "trợ lý" (ADR-0011); các bài học về mốc, ngưỡng,
+âm bản khó và việc phụ CTC dùng tiếp cho từ mới.
+
 ## 1. `wake/v1`: lượt học đầu
 
 Run `ml/artifacts/wake/runs/20260929_08b3d06-dirty_b33b0b` (`make wake-train` tại `08b3d06`; phần chưa commit của cây là
