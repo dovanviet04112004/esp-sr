@@ -1,6 +1,6 @@
 """Wake training: the smoothing and lockout the device mirrors, labels around a positive's end, windows that hold
-the whole label past the warm-up, and a tiny run whose sweep never gains recall or false accepts as the threshold
-rises."""
+the whole label past the warm-up, a tiny run whose sweep never gains recall or false accepts as the threshold
+rises, and a board table whose rows keep their columns."""
 
 from __future__ import annotations
 
@@ -133,3 +133,14 @@ def test_hard_windows_take_their_share_hold_the_phrase_and_carry_no_label(tmp_pa
         end = item["frame_offset"] + item["speech_frames"][1]
         assert all(first < spoken.hard_stop(item) <= end + after for _ in range(20))
     assert train.Windows(pos, neg, cfg, np.random.default_rng(7)).counts() == (4, 0, 12)
+
+
+def test_board_rows_keep_their_columns_when_a_prompt_lists_phrases() -> None:
+    results = [
+        wake_eval.BoardSession("s1", "wake", "chào mi na", 40.0, [0.9, 0.2], 1, 0),
+        wake_eval.BoardSession("s2", "neg", "chào mi | mi na | chào mẹ", 60.0, [0.1], 0, 0),
+    ]
+    rows = [line for line in wake_eval.board_table(results, 0.5).splitlines() if line.startswith("| s")]
+    header = wake_eval.board_table([], 0.5).splitlines()[2]
+    assert len(rows) == 2
+    assert all(row.replace("\\|", "").count("|") == header.count("|") for row in rows)

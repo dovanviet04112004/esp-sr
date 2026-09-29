@@ -156,7 +156,8 @@ def board_table(results: list[BoardSession], threshold: float) -> str:
         if r.kind in ("wake", "neg"):
             over = sum(p >= threshold for p in r.peaks)
             scores = " ".join(f"{p:.2f}" for p in r.peaks)
-            lines.append(f"| {r.session} | {r.kind} | {r.prompt[:40]} | {over}/{len(r.peaks)} | {r.stray} | {scores} |")
+            prompt = r.prompt[:40].replace("|", "\\|")
+            lines.append(f"| {r.session} | {r.kind} | {prompt} | {over}/{len(r.peaks)} | {r.stray} | {scores} |")
     others = [r for r in results if r.kind != "wake"]
     hours, fired = sum(r.seconds for r in others) / 3600, sum(r.triggers for r in others)
     rate = fired / hours if hours else float("nan")
