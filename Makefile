@@ -85,9 +85,9 @@ wake-train: ## Train the wake TCN on processed/wake/<split> on the GPU into ml/a
 eval-tts: screen ## Compare the desktop TTS engines on the wake word, every clip heard back by PhoWhisper (docs/measurements/tts_engines.md)
 	cd ml && uv run python -m srpipe.tasks.wake.synth pilot
 
-wake-synth: screen ## Synthesise the wake positives and near-miss negatives, then keep what the checker allows (E11-T7)
+wake-synth: screen ## Synthesise the wake positives, near misses and hard near-miss families, then keep what the checker allows (E11-T7)
 	cd ml && uv run python -m srpipe.tasks.wake.synth positives && uv run python -m srpipe.tasks.wake.synth negatives \
-	  && uv run python -m srpipe.tasks.wake.synth select
+	  && uv run python -m srpipe.tasks.wake.synth hard && uv run python -m srpipe.tasks.wake.synth select
 
 measure: ## Merge bench CSVs into docs/measurements/budget.md
 	python3 -m tools.budget

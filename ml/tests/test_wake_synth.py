@@ -71,7 +71,9 @@ def test_each_negative_is_read_by_distinct_voices(tmp_path: Path) -> None:
     cfg = load_yaml(CONFIG)
     cfg["synth"]["negatives"]["voices"] = {"vieneu": 4, "f5": 2}
     texts = ["chào mi", "mi na ơi"]
-    requests = synth.negative_requests(cfg, texts, PRESETS, refs(tmp_path), np.random.default_rng(0), tmp_path)
+    requests = synth.negative_requests(
+        cfg, texts, PRESETS, refs(tmp_path), np.random.default_rng(0), tmp_path, cfg["synth"]["negatives"]["voices"]
+    )
     assert len(requests["vieneu"]) == 4 * len(texts) and len(requests["f5"]) == 2 * len(texts)
     for reqs in requests.values():
         assert len({r["id"] for r in reqs}) == len(reqs)
@@ -99,7 +101,8 @@ def test_the_threshold_lets_the_configured_share_of_near_misses_pass_and_no_clip
     negatives += [clip(10, False, 3.0, 0.5, "n10"), clip(11, True, 0.0, 9.5, "n9")]
     positives = [clip(0, True, 0.0, 0.0, "p0"), clip(1, False, 1.5, 0.0, "p1"), clip(2, False, 4.0, 0.0, "p2")]
     positives += [clip(3, True, 0.0, 0.0, "p0")]
-    for name, rows in (("positives", positives), ("negatives", negatives)):
+    hard = [clip(0, True, 0.0, 5.0, "h0"), clip(1, True, 0.0, 1.0, "h1"), clip(2, True, 0.0, 9.0, "n9")]
+    for name, rows in (("positives", positives), ("negatives", negatives), ("hard", hard)):
         (tmp_path / synth.SETS[name]).mkdir()
         synth.write_manifest(tmp_path / synth.SETS[name], {"clips": rows})
     margin = synth.select(cfg, tmp_path)
@@ -110,3 +113,26 @@ def test_the_threshold_lets_the_configured_share_of_near_misses_pass_and_no_clip
     }
     assert kept["positives"] == [True, True, False, False]
     assert kept["negatives"] == [False, False, *[True] * 8, False, False]
+    assert kept["hard"] == [True, False, False]
+
+
+def test_hard_families_fill_their_slots_and_never_say_the_word_or_a_held_out_phrase() -> None:
+    cfg = load_yaml(CONFIG)
+    cfg["synth"]["hard"] |= {
+        "near_syllables": 3,
+        "any_syllables": 2,
+        "held_out": ["chào mẹ"],
+        "families": [
+            {"text": "chào {x}", "fill": "near"},
+            {"text": "chào {x} na", "fill": "near"},
+            {"text": "{x} mi na", "fill": "any"},
+        ],
+    }
+    vocab = ["mẹ", "mi", "là", "tôi", "chào", "na", "có"]
+    counts = {"mẹ": 9, "mi": 8, "là": 7, "tôi": 6, "chào": 5, "na": 4, "có": 1}
+    stream = np.array([vocab.index(w) for w, n in counts.items() for _ in range(n)], dtype=np.int32)
+    codes, tables = candidates.component_codes(vocab)
+    texts = synth.hard_texts(cfg, stream, vocab, codes, tables)
+    assert texts == ["chào mi", "chào là", "chào là na", "mẹ mi na", "mi mi na"]
+    assert "chào mi na" not in texts and "chào mẹ" not in texts and "chào mẹ na" not in texts
+    assert len(texts) == len(set(texts))

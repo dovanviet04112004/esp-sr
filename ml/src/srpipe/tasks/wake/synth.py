@@ -1,9 +1,9 @@
 """Wake word clips from the desktop TTS engines (E11-T7, KEHOACH 1.2, 3.11), heard back through srpipe.tts.
 
 pilot compares the engines on a few VIVOS voices (make eval-tts); positives reads the wake word in every preset voice
-and in voices cloned from training material; negatives reads its near misses (ADR-0007) in voices of the same pool;
-select keeps the clips the checker's margins allow. Each set writes interim/wake/synth_<set>/manifest.yaml.
-Run: python -m srpipe.tasks.wake.synth {pilot,positives,negatives,select}
+and in voices cloned from training material; negatives reads its near misses (ADR-0007) and hard its near-miss families
+(KEHOACH 3.11) in voices of the same pool; select keeps the clips the checker's margins allow. Each set writes
+interim/wake/synth_<set>/manifest.yaml. Run: python -m srpipe.tasks.wake.synth {pilot,positives,negatives,hard,select}
 """
 
 from __future__ import annotations
@@ -15,14 +15,14 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from srpipe.core import screen
+from srpipe.core import corpus, screen
 from srpipe.core.config import data_paths, load_yaml
 from srpipe.tasks.wake import CONFIG, candidates
 from srpipe.tts import CONFIG as TTS_CONFIG
 from srpipe.tts import clips, engines
 
-SETS = {"pilot": "synth_pilot", "positives": "synth_pos", "negatives": "synth_neg"}
-SETS_KEPT = ("positives", "negatives")
+SETS = {"pilot": "synth_pilot", "positives": "synth_pos", "negatives": "synth_neg", "hard": "synth_hard"}
+SETS_KEPT = ("positives", "negatives", "hard")
 REFERENCES = "synth_refs"
 
 
@@ -85,12 +85,16 @@ def negative_texts(cfg: dict, stream: np.ndarray, vocab: list[str], codes: np.nd
 
 
 def negative_requests(
-    cfg: dict, texts: list[str], presets: list[dict], refs: list[clips.Reference], rng: np.random.Generator, out: Path
+    cfg: dict,
+    texts: list[str],
+    presets: list[dict],
+    refs: list[clips.Reference],
+    rng: np.random.Generator,
+    out: Path,
+    counts: dict[str, int],
 ) -> dict:
-    """Each text read by the configured number of VieNeu voices drawn from presets and clones, and of F5 clones, at seed
-    0 and speed 1; the wake word is each clip's rival."""
-    spec = cfg["synth"]["negatives"]
-    counts = spec["voices"]
+    """Each text read by counts of VieNeu voices drawn from presets and clones, and of F5 clones, at seed 0 and speed
+    1; the wake word is each clip's rival."""
     requests: dict[str, list[dict]] = {"vieneu": [], "f5": []}
     pool = len(presets) + len(refs)
     for n, text in enumerate(texts):
@@ -103,6 +107,32 @@ def negative_requests(
         for i in sorted(rng.choice(len(refs), counts["f5"], replace=False)):
             requests["f5"].append(clone_request("f5", refs[i], n, text, 0, 1.0, out / "f5"))
     return {engine: [r | {"rivals": [cfg["word"]]} for r in reqs] for engine, reqs in requests.items()}
+
+
+def commonest_syllables(stream: np.ndarray, vocab: list[str], codes: np.ndarray, tables: dict, onsets, count: int):
+    """The count commonest corpus syllables whose onset is one of onsets, or of any onset when onsets is None."""
+    onset_of = {code: name for name, code in tables["onset"].items()}
+    counts = np.bincount(stream[stream >= 0], minlength=len(vocab))
+    picked = []
+    for i in np.argsort(-counts, kind="stable"):
+        if codes[i, 0] >= 0 and (onsets is None or onset_of[codes[i, 0]] in onsets):
+            picked.append(vocab[i])
+        if len(picked) == count:
+            break
+    return picked
+
+
+def hard_texts(cfg: dict, stream: np.ndarray, vocab: list[str], codes: np.ndarray, tables: dict) -> list[str]:
+    """Every family of the hard config filled with its syllables, without repeats or any text that holds the wake
+    word or a held-out phrase."""
+    spec, word = cfg["synth"]["hard"], cfg["word"]
+    fills = {
+        "near": commonest_syllables(stream, vocab, codes, tables, set(spec["onsets"]), spec["near_syllables"]),
+        "any": commonest_syllables(stream, vocab, codes, tables, None, spec["any_syllables"]),
+    }
+    held = [corpus.words(t) for t in [word, *spec["held_out"]]]
+    texts = [f["text"].format(x=x) for f in spec["families"] for x in fills[f["fill"]]]
+    return [t for t in dict.fromkeys(texts) if not any(corpus.says(corpus.words(t), h) for h in held)]
 
 
 def training_references(cfg: dict, raw: Path, interim: Path, rejected: set[str]) -> list[clips.Reference]:
@@ -132,18 +162,20 @@ def threshold(negatives: list[dict], word: str, false_accept: float) -> float:
 
 
 def select(cfg: dict, interim: Path) -> float:
-    """Mark kept on both sets: a positive heard as the wake word or within the threshold of it, a negative heard right
-    and beyond it, and neither when an earlier kept clip has the same bytes; the threshold, returned, goes into both
-    manifests."""
+    """Mark kept on every set made: a positive heard as the wake word or within the threshold of it, a negative or hard
+    near miss heard right and beyond it, and none when an earlier kept clip has the same bytes; the threshold, set on
+    the negatives and returned, goes into every manifest."""
     word, false_accept = cfg["word"], cfg["synth"]["false_accept"]
-    body = {s: yaml.safe_load((interim / SETS[s] / "manifest.yaml").read_text(encoding="utf-8")) for s in SETS_KEPT}
+    made = [s for s in SETS_KEPT if (interim / SETS[s] / "manifest.yaml").exists()]
+    body = {s: yaml.safe_load((interim / SETS[s] / "manifest.yaml").read_text(encoding="utf-8")) for s in made}
     margin = threshold(body["negatives"]["clips"], word, false_accept)
     for c in body["positives"]["clips"]:
         c["kept"] = c["passed"] or c["margin"] <= margin
-    for c in body["negatives"]["clips"]:
-        c["kept"] = c["passed"] and c["rivals"][word] > margin
+    for s in made[1:]:
+        for c in body[s]["clips"]:
+            c["kept"] = c["passed"] and c["rivals"][word] > margin
     seen: set[str] = set()
-    for s in SETS_KEPT:
+    for s in made:
         for c in body[s]["clips"]:
             c["kept"] = c["kept"] and c["sha256"] not in seen
             seen |= {c["sha256"]} if c["kept"] else set()
@@ -183,7 +215,8 @@ def main(argv: list[str] | None = None) -> int:
     if which == "select":
         print(f"margin threshold {select(cfg, interim):.3f}")
         for s in SETS_KEPT:
-            print("\n".join(table(interim / SETS[s] / "manifest.yaml", by_text=False)))
+            if (interim / SETS[s] / "manifest.yaml").exists():
+                print("\n".join(table(interim / SETS[s] / "manifest.yaml", by_text=False)))
         return 0
     out = interim / SETS[which]
     rejected = set(screen.rejected(paths["interim"]))
@@ -198,11 +231,17 @@ def main(argv: list[str] | None = None) -> int:
         refs = training_references(cfg, paths["raw"], interim, rejected)
         if which == "positives":
             requests = positive_requests(cfg, cfg["synth"]["positives"], presets, refs, out)
+        elif which == "hard":
+            stream, vocab = candidates.token_stream(paths["raw"] / "speech", cache / "wake_candidates")
+            texts = hard_texts(cfg, stream, vocab, *candidates.component_codes(vocab))
+            rng = np.random.default_rng(cfg["synth"]["seed"])
+            requests = negative_requests(cfg, texts, presets, refs, rng, out, cfg["synth"]["hard"]["voices"])
+            body["texts"] = texts
         else:
             stream, vocab = candidates.token_stream(paths["raw"] / "speech", cache / "wake_candidates")
             texts = negative_texts(cfg, stream, vocab, *candidates.component_codes(vocab))
             rng = np.random.default_rng(cfg["synth"]["seed"])
-            requests = negative_requests(cfg, texts, presets, refs, rng, out)
+            requests = negative_requests(cfg, texts, presets, refs, rng, out, cfg["synth"]["negatives"]["voices"])
             body["texts"] = texts
     body |= {"references": [str(r.wav) for r in refs], "clips": clips.render(requests, tts, out / "work", cache)}
     print("\n".join(table(write_manifest(out, body), by_text=which == "pilot")))

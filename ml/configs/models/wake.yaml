@@ -59,24 +59,40 @@ synth:                             # E11-T7: clips from the engines of common/tt
     openings: 30                   # the commonest corpus phrases of its length opening with its first syllable
     phrases: [chào mi, mi na, mi na ơi, chào chị na, chào mi nhé]
     voices: {vieneu: 6, f5: 4}     # per phrase, drawn with the seed; VieNeu from presets and clones
+  hard:                            # near-miss families the component distance misses (KEHOACH 3.11)
+    onsets: [m, n, J, l, b_<, v]   # g2p onsets (nh is J, b is b_<) of the syllables filling a "near" slot
+    near_syllables: 30             # the commonest corpus syllables with those onsets
+    any_syllables: 15              # the commonest corpus syllables of any onset
+    families:                      # {x} takes each syllable of its fill
+      - {text: "chào {x}", fill: near}
+      - {text: "chào mi {x}", fill: near}
+      - {text: "chào {x} na", fill: near}
+      - {text: "{x} mi na", fill: any}
+    held_out: [chào mẹ, chào minh, chào bạn]   # board near misses v1 never learnt (host/plans/wake.tsv)
+    voices: {vieneu: 4, f5: 3}     # per text, drawn with the seed as for the negatives
 split:                             # E11-T11: data/splits/wake/<version> by python -m srpipe.tasks.wake.data (KEHOACH 1.3)
-  version: v1
+  version: v2
   seed: 20260928
   val_speakers: 0.2                # of VIVOS train speakers and of VieNeu presets, each held out whole with its clones
   learning: [speech/vivos/train/, speech/fpt_open/, speech/vlsp/, speech/bud500/]   # gave the reference voices
   negative_hours: 100              # public speech drawn from learning into train_neg
   test_neg: [speech/common_voice_vi/, speech/vivos/test/]   # no reference voice came from these
+  hard:                            # a learning clip whose words match one of these joins the hard files (KEHOACH 3.11)
+    - '\bchào [mnlbv]'           # "chào" and a syllable of a near onset
+    - '\bmươi (lăm|năm|ba|nhăm)\b'  # numbers read aloud
+    - 'i n[aàáảãạ]\b'             # a syllable ending in "i" before "na"
 simulate:                          # make wake-features: python -m srpipe.tasks.wake.data simulate (E4-T8)
-  split: v1
+  split: v2
   workers: 12                      # each holds about 450 MB; more push a 10 GB WSL into swap
-  repeats: {train_pos: 8}          # passes over a file, each in other rooms, levels and noise; 1 for the others
+  repeats: {train_pos: 8, train_hard: 4}   # passes over a file, each in other rooms, levels and noise; else 1
 train:                             # E11-T11: python -m srpipe.tasks.wake.train (KEHOACH 3.11), on the GPU when present
-  split: v1                        # processed/wake/<split>/<file> of make wake-features
+  split: v2                        # processed/wake/<split>/<file> of make wake-features
   seed: 20260928
   window_hops: 256                 # one example, twice the receptive field
   warmup_hops: 128                 # a window's first hops see zero padding, not audio: no loss on them
   label_s: [0.2, 0.3]              # a positive is 1 from this long before the end of its speech to this long after
   positive_share: 0.25             # of each batch
+  hard_share: 0.15                 # of each batch, from train_hard when the split has it (KEHOACH 3.11)
   batch: 128
   steps: 20000
   learning_rate: 1.0e-3

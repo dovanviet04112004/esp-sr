@@ -1,14 +1,17 @@
 """Split wake/v<n> (KEHOACH 1.3, 3.11): kept TTS clips of E11-T7 and public speech, by role and label.
 
 Positives and near misses by the role of their voice, public negatives from the corpora that gave the reference
-voices, test_neg from Common Voice and VIVOS test; no negative says the wake word. simulate runs each file through
-the board simulation. Run: python -m srpipe.tasks.wake.data {split,simulate}
+voices, test_neg from Common Voice and VIVOS test; the hard files hold the near-miss families; no negative says the
+wake word. simulate runs each file through the board simulation, linking a file another version built the same way.
+Run: python -m srpipe.tasks.wake.data {split,simulate}
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -111,13 +114,30 @@ def build(cfg: dict, public: list[corpus.Clip], seconds: dict[str, float], manif
     val = [c for c in learning if roles.get(c.speaker or "") == "val"]
     drawn = draw_hours(heard, seconds, spec["negative_hours"], spec["seed"])
     test = [c for c in usable if c.item.startswith(tuple(spec["test_neg"]))]
-    return {
+    files = {
         "train_pos.txt": pos["train"],
         "train_neg.txt": near["train"] + splits.clip_rows(drawn, PUBLIC),
         "val_pos.txt": pos["val"],
         "val_neg.txt": near["val"] + splits.clip_rows(val, PUBLIC),
         "test_neg.txt": splits.clip_rows(test, PUBLIC),
     }
+    if "hard" not in spec:
+        return files
+    folder = synth.SETS["hard"]
+    families = synth_rows(manifests.get(folder, []), folder, roles)
+    held = [corpus.words(t) for t in cfg["synth"]["hard"]["held_out"]]
+    patterns = [re.compile(p) for p in spec["hard"]]
+    mined = {role: [c for c in clips if is_hard(c, patterns, held)] for role, clips in (("train", heard), ("val", val))}
+    for role in ("train", "val"):
+        files[f"{role}_hard.txt"] = families[role] + near[role] + splits.clip_rows(mined[role], PUBLIC)
+    return files
+
+
+def is_hard(clip: corpus.Clip, patterns: list[re.Pattern], held: list[list[str]]) -> bool:
+    """Whether the clip's words hold a near-miss family and no held-out phrase."""
+    said = corpus.words(clip.text or "")
+    text = " ".join(said)
+    return any(p.search(text) for p in patterns) and not any(corpus.says(said, h) for h in held)
 
 
 def notes(cfg: dict, files: dict[str, list[splits.Row]], seconds: dict[str, float]) -> str:
@@ -127,6 +147,14 @@ def notes(cfg: dict, files: dict[str, list[splits.Row]], seconds: dict[str, floa
         f"| `{name}` | {len(rows)} | {splits.hours(rows, seconds):.2f} | {sum(r.origin == SYNTH for r in rows)} |"
         for name, rows in files.items()
     )
+    hard = ""
+    if "hard" in spec:
+        held = ", ".join(f'"{t}"' for t in cfg["synth"]["hard"]["held_out"])
+        hard = (
+            "\n- `train_hard`, `val_hard` (KẾ HOẠCH §3.11): mẩu TTS có `kept` của `interim/wake/synth_hard`, âm bản"
+            " gần âm của\n  `interim/wake/synth_neg`, và câu của kho học có lời khớp một mẫu của `split.hard`; không"
+            f" câu nào chứa\n  {held}, để phiên gần âm thu qua board đo được mô hình tổng quát hoá."
+        )
     return f"""# wake/{spec["version"]}
 
 Dựng bằng `python -m srpipe.tasks.wake.data` (`make splits`), seed {spec["seed"]}, cấu hình mục `split` của
@@ -138,7 +166,7 @@ Dựng bằng `python -m srpipe.tasks.wake.data` (`make splits`), seed {spec["se
   trọn vẹn, cùng mọi giọng nhân bản từ họ; giọng nhân bản từ kho không có mã người nói chỉ vào `train`.
 - `train_neg` rút {spec["negative_hours"]} giờ lời nói ngẫu nhiên từ {", ".join(spec["learning"])}.
 - `test_neg` là {", ".join(spec["test_neg"])}: không kho nào đã làm giọng mẫu cho TTS. Đủ 24 giờ khi thêm nền phòng
-  thu qua board (E11-T6); `test_pos` cũng chờ bản thu ấy.
+  thu qua board (E11-T6); `test_pos` cũng chờ bản thu ấy.{hard}
 
 | File | Mẩu | Giờ | Mẩu TTS |
 |---|---|---|---|
@@ -166,7 +194,20 @@ def simulate(cfg: dict, paths: dict[str, Path]) -> None:
         if built_as(out, device_cfg, split_file, repeats):
             print(f"{out}: already built", flush=True)
             continue
+        twins = [d for d in sorted(out.parent.parent.glob(f"*/{split_file.stem}")) if d != out]
+        twin = next((d for d in twins if built_as(d, device_cfg, split_file, repeats)), None)
+        if twin is not None:
+            print(f"{out}: linked from {link(twin, out)}", flush=True)
+            continue
         print(device.build(device_cfg, split_file, paths["raw"], paths["interim"], out, spec["workers"], repeats))
+
+
+def link(built: Path, out: Path) -> Path:
+    """Hard-link every file of a finished build into out, which must hold none of them: no copy, no second run."""
+    out.mkdir(parents=True, exist_ok=True)
+    for f in sorted(built.iterdir()):
+        os.link(f, out / f.name)
+    return built
 
 
 def cut_split(cfg: dict, paths: dict[str, Path]) -> int:
@@ -174,10 +215,11 @@ def cut_split(cfg: dict, paths: dict[str, Path]) -> int:
     public = screen.kept_clips(screening, paths, "speech")
     seconds = screen.lengths(screening, paths, "speech")
     manifests = {}
-    for folder in (synth.SETS["positives"], synth.SETS["negatives"]):
-        clips = yaml.safe_load((paths["interim"] / "wake" / folder / "manifest.yaml").read_text(encoding="utf-8"))[
-            "clips"
-        ]
+    for folder in (synth.SETS["positives"], synth.SETS["negatives"], synth.SETS["hard"]):
+        listing = paths["interim"] / "wake" / folder / "manifest.yaml"
+        if folder == synth.SETS["hard"] and not listing.exists():
+            continue
+        clips = yaml.safe_load(listing.read_text(encoding="utf-8"))["clips"]
         manifests[folder] = clips
         seconds |= {f"wake/{folder}/{c['engine']}/{c['id']}.wav": c["seconds"] for c in clips}
     files = build(cfg, public, seconds, manifests)

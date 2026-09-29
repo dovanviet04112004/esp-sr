@@ -27,7 +27,9 @@ def test_smoothing_averages_the_hops_so_far_and_a_lockout_swallows_repeats() -> 
     assert triggers(s, 0.99, 3).tolist() == []
 
 
-def processed(folder: Path, items: list[tuple[int, int, int]], rng: np.random.Generator, mark: bool) -> Path:
+def processed(
+    folder: Path, items: list[tuple[int, int, int]], rng: np.random.Generator, mark: bool, origin: str = "public"
+) -> Path:
     """A finished build of items (n_frames, speech_first, speech_stop); positives carry a bump in band 0."""
     folder.mkdir(parents=True)
     feats, rows, offset = [], [], 0
@@ -36,7 +38,15 @@ def processed(folder: Path, items: list[tuple[int, int, int]], rng: np.random.Ge
         if mark:
             x[first:stop, 0] += 6.0
         feats.append(x)
-        rows.append({"item": f"i{offset}", "frame_offset": offset, "n_frames": n, "speech_frames": [first, stop]})
+        rows.append(
+            {
+                "item": f"i{offset}",
+                "origin": origin,
+                "frame_offset": offset,
+                "n_frames": n,
+                "speech_frames": [first, stop],
+            }
+        )
         offset += n
     np.save(folder / "shard_00000.features.npy", np.concatenate(feats))
     (folder / "shard_00000.items.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
@@ -95,3 +105,31 @@ def test_a_tiny_run_keeps_its_best_weights_and_its_sweep_is_monotonic(tmp_path: 
     result = wake_eval.sweep(model, sets["val_pos"], sets["val_neg"], stats["mean"], stats["std"], cfg, "cpu")
     assert result.positives == 6 and np.all(np.diff(result.recall) <= 0)
     assert np.all(np.diff(result.false_accepts_per_hour) <= 0)
+
+
+def test_hard_windows_take_their_share_hold_the_phrase_and_carry_no_label(tmp_path: Path) -> None:
+    rng = np.random.default_rng(4)
+    cfg = tiny_cfg()
+    cfg["train"]["hard_share"] = 0.25
+    around = data.label_hops(cfg["train"]["label_s"])
+    pos = data.load_set(processed(tmp_path / "p", [(60, 20, 40)] * 4, rng, True), True, around, "float16")
+    neg = data.load_set(processed(tmp_path / "n", [(60, 0, 60)] * 4, rng, False), False, around, "float16")
+    tts = data.load_set(processed(tmp_path / "h", [(60, 20, 40)] * 4, rng, True, "synth"), False, around, "float16")
+    windows = train.Windows(pos, neg, cfg, np.random.default_rng(5), tts)
+    assert windows.counts() == (4, 4, 8)
+    x, y = windows.batch()
+    assert x.shape == (16, 32, BANDS) and not y[4:].any()
+    after, warmup = around[1], cfg["train"]["warmup_hops"]
+    for _ in range(50):
+        _, item = windows.hard_items[int(windows.rng.integers(len(windows.hard_items)))]
+        stop = windows.hard_stop(item)
+        end = item["frame_offset"] + item["speech_frames"][1]
+        assert end + after <= stop <= end + after + windows.slack
+        assert stop - cfg["train"]["window_hops"] + warmup <= end
+    corpus = data.load_set(processed(tmp_path / "c", [(60, 10, 50)] * 2, rng, False), False, around, "float16")
+    spoken = train.Windows(pos, neg, cfg, np.random.default_rng(6), corpus)
+    for _, item in spoken.hard_items:
+        first = item["frame_offset"] + item["speech_frames"][0]
+        end = item["frame_offset"] + item["speech_frames"][1]
+        assert all(first < spoken.hard_stop(item) <= end + after for _ in range(20))
+    assert train.Windows(pos, neg, cfg, np.random.default_rng(7)).counts() == (4, 0, 12)
