@@ -1,5 +1,6 @@
 """Wake split: voices follow their speaker's role, clones of speakerless corpora train, negatives never say the wake
-word, test_neg comes only from its corpora, and train_neg stops at its hours."""
+word, test_neg comes only from its corpora less the speakers moved whole into val_neg, and train_neg stops at its
+hours."""
 
 from __future__ import annotations
 
@@ -38,6 +39,27 @@ def test_the_wake_split_keeps_speakers_words_and_sources_apart() -> None:
     assert "speech/bud500/data/train-0.parquet#6" not in negatives
     assert [r.item for r in files["test_neg.txt"]] == ["speech/common_voice_vi/c/vi/clips/a.mp3"]
     assert sum(r.origin == "public" for r in files["train_neg.txt"]) == 3
+
+
+def test_a_share_of_test_speakers_moves_whole_into_val_neg() -> None:
+    cfg = load_yaml(CONFIG)
+    cfg["split"] |= {"val_speakers": 0.5, "negative_hours": 1.0, "val_from_test": {"speech/common_voice_vi/": 0.5}}
+    people = [f"cv{k}" for k in range(6)]
+    public = [
+        corpus.Clip(f"speech/common_voice_vi/c/vi/clips/{p}_{n}.mp3", p, "câu thử") for p in people for n in range(3)
+    ]
+    public += [corpus.Clip("speech/vivos/test/waves/VIVOSDEV01/VIVOSDEV01_1.wav", "VIVOSDEV01", "câu khác")]
+    public += [corpus.Clip("speech/vivos/train/waves/VIVOSSPK01/VIVOSSPK01_1.wav", "VIVOSSPK01", "một câu")]
+    seconds = dict.fromkeys((c.item for c in public), 1.0)
+    manifests = {synth.SETS["positives"]: [], synth.SETS["negatives"]: []}
+    files = data.build(cfg, public, seconds, manifests)
+    in_val = {r.spk for r in files["val_neg.txt"] if "common_voice" in r.item}
+    in_test = {r.spk for r in files["test_neg.txt"] if "common_voice" in r.item}
+    assert len(in_val) == 3 and in_val | in_test == set(people) and not in_val & in_test
+    assert sum(r.spk in in_val for r in files["val_neg.txt"]) == 3 * 3
+    assert any("vivos/test" in r.item for r in files["test_neg.txt"])
+    without = {**cfg, "split": {k: v for k, v in cfg["split"].items() if k != "val_from_test"}}
+    assert {r.spk for r in data.build(without, public, seconds, manifests)["test_neg.txt"]} >= set(people)
 
 
 def test_hard_files_mine_the_families_by_role_and_leave_the_other_five_as_they_were() -> None:

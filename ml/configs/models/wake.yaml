@@ -71,22 +71,23 @@ synth:                             # E11-T7: clips from the engines of common/tt
     held_out: [chào mẹ, chào minh, chào bạn]   # board near misses v1 never learnt (host/plans/wake.tsv)
     voices: {vieneu: 4, f5: 3}     # per text, drawn with the seed as for the negatives
 split:                             # E11-T11: data/splits/wake/<version> by python -m srpipe.tasks.wake.data (KEHOACH 1.3)
-  version: v2
+  version: v3
   seed: 20260928
   val_speakers: 0.2                # of VIVOS train speakers and of VieNeu presets, each held out whole with its clones
   learning: [speech/vivos/train/, speech/fpt_open/, speech/vlsp/, speech/bud500/]   # gave the reference voices
   negative_hours: 100              # public speech drawn from learning into train_neg
   test_neg: [speech/common_voice_vi/, speech/vivos/test/]   # no reference voice came from these
+  val_from_test: {speech/common_voice_vi/: 0.4}   # share of its speakers moved whole into val_neg (KEHOACH 3.11)
   hard:                            # a learning clip whose words match one of these joins the hard files (KEHOACH 3.11)
     - '\bchào [mnlbv]'           # "chào" and a syllable of a near onset
     - '\bmươi (lăm|năm|ba|nhăm)\b'  # numbers read aloud
     - 'i n[aàáảãạ]\b'             # a syllable ending in "i" before "na"
 simulate:                          # make wake-features: python -m srpipe.tasks.wake.data simulate (E4-T8)
-  split: v2
+  split: v3
   workers: 12                      # each holds about 450 MB; more push a 10 GB WSL into swap
   repeats: {train_pos: 8, train_hard: 4}   # passes over a file, each in other rooms, levels and noise; else 1
 train:                             # E11-T11: python -m srpipe.tasks.wake.train (KEHOACH 3.11), on the GPU when present
-  split: v2                        # processed/wake/<split>/<file> of make wake-features
+  split: v3                        # processed/wake/<split>/<file> of make wake-features
   seed: 20260928
   window_hops: 256                 # one example, twice the receptive field
   warmup_hops: 128                 # a window's first hops see zero padding, not audio: no loss on them

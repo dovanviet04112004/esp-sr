@@ -114,12 +114,14 @@ def build(cfg: dict, public: list[corpus.Clip], seconds: dict[str, float], manif
     val = [c for c in learning if roles.get(c.speaker or "") == "val"]
     drawn = draw_hours(heard, seconds, spec["negative_hours"], spec["seed"])
     test = [c for c in usable if c.item.startswith(tuple(spec["test_neg"]))]
+    moved = moved_to_val(test, spec.get("val_from_test", {}), spec["seed"])
+    kept = {c.item for c in test} - {c.item for c in moved}
     files = {
         "train_pos.txt": pos["train"],
         "train_neg.txt": near["train"] + splits.clip_rows(drawn, PUBLIC),
         "val_pos.txt": pos["val"],
-        "val_neg.txt": near["val"] + splits.clip_rows(val, PUBLIC),
-        "test_neg.txt": splits.clip_rows(test, PUBLIC),
+        "val_neg.txt": near["val"] + splits.clip_rows(val + moved, PUBLIC),
+        "test_neg.txt": splits.clip_rows([c for c in test if c.item in kept], PUBLIC),
     }
     if "hard" not in spec:
         return files
@@ -136,6 +138,16 @@ def build(cfg: dict, public: list[corpus.Clip], seconds: dict[str, float], manif
     return files
 
 
+def moved_to_val(test: list[corpus.Clip], shares: dict[str, float], seed: int) -> list[corpus.Clip]:
+    """The test clips of the speakers drawn with the seed into val, a share of each corpus's speakers taken whole."""
+    moved = []
+    for prefix, share in shares.items():
+        clips = [c for c in test if c.item.startswith(prefix)]
+        roles = splits.speaker_roles({c.speaker for c in clips if c.speaker}, {"val": share}, "test", seed)
+        moved += [c for c in clips if roles.get(c.speaker or "") == "val"]
+    return moved
+
+
 def is_hard(clip: corpus.Clip, patterns: list[re.Pattern], held: list[list[str]]) -> bool:
     """Whether the clip's words hold a near-miss family and no held-out phrase."""
     said = corpus.words(clip.text or "")
@@ -149,6 +161,11 @@ def notes(cfg: dict, files: dict[str, list[splits.Row]], seconds: dict[str, floa
     table = "\n".join(
         f"| `{name}` | {len(rows)} | {splits.hours(rows, seconds):.2f} | {sum(r.origin == SYNTH for r in rows)} |"
         for name, rows in files.items()
+    )
+    moved = "".join(
+        f"\n- {share:.0%} người nói của {prefix} rời `test_neg` sang `val_neg` trọn vẹn, rút theo seed, để mục tiêu báo"
+        " nhầm của\n  `val` dựa trên nhiều lần vượt (KẾ HOẠCH §3.11)."
+        for prefix, share in spec.get("val_from_test", {}).items()
     )
     hard = ""
     if "hard" in spec:
@@ -170,7 +187,7 @@ Dựng bằng `python -m srpipe.tasks.wake.data` (`make splits`), seed {spec["se
   trọn vẹn, cùng mọi giọng nhân bản từ họ; giọng nhân bản từ kho không có mã người nói chỉ vào `train`.
 - `train_neg` rút {spec["negative_hours"]} giờ lời nói ngẫu nhiên từ {", ".join(spec["learning"])}.
 - `test_neg` là {", ".join(spec["test_neg"])}: không kho nào đã làm giọng mẫu cho TTS. Đủ 24 giờ khi thêm nền phòng
-  thu qua board (E11-T6); `test_pos` cũng chờ bản thu ấy.{hard}
+  thu qua board (E11-T6); `test_pos` cũng chờ bản thu ấy.{moved}{hard}
 
 | File | Mẩu | Giờ | Mẩu TTS |
 |---|---|---|---|
