@@ -87,3 +87,8 @@ eval:
   lockout_s: 2.0                   # the device stays awake after a trigger, so a second one inside this is not counted
   false_accepts_per_hour: 1.0      # Cửa 2: the threshold is the lowest whose rate on val_neg stays at or under this
   thresholds: {first: 0.05, last: 0.995, step: 0.005}
+  board:                           # sessions recorded through board B, run through the same chain and log-mel
+    manifest: device/board_b.csv   # under data/manifests
+    pcm_shift: 13                  # the shift the product keeps (E2-T5); other sessions are left out
+    utterance_gap_s: 0.4           # speech hops of vad this close belong to one utterance
+    utterance_min_s: 0.25          # a shorter run of vad is a breath or a click
