@@ -122,3 +122,46 @@ def hear(clips: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, dic
         with store.open("a", encoding="utf-8") as f:
             f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
     return {c["id"]: known[digest[c["id"]]] for c in clips}
+
+
+def fast_model(tts: dict, cache: Path) -> Path:
+    """The CTranslate2 checker of tts['asr_fast'] under cache/ct2/, converted from its pinned Whisper the first time."""
+    spec = tts["asr_fast"]
+    repo, revision = spec["model"].split("@")
+    folder = cache / "ct2" / f"{repo.split('/')[-1]}-{revision[:8]}-{spec['quantization']}"
+    if not (folder / "model.bin").exists():
+        env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"} | {"HF_HOME": str(cache / "hf")}
+        convert = PROJECTS / "asr_ct2" / "convert.py"
+        cmd = ["uv", "run", "--project", str(PROJECTS / "asr"), "--with", spec["converter"], "python", str(convert)]
+        subprocess.run([*cmd, spec["model"], spec["quantization"], str(folder)], env=env, check=True)
+    return folder
+
+
+def hear_text(clips: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, str]:
+    """The text the fast checker hears in every clip {id, wav}, by id. Answers are kept in cache/tts/heard_fast.jsonl
+    by the clip's bytes and the checker, so a clip with the same bytes is heard once."""
+    store = cache / "tts" / "heard_fast.jsonl"
+    checker_id = hashlib.sha256(
+        json.dumps(tts["asr_fast"], sort_keys=True).encode() + (PROJECTS / "asr_ct2" / "run.py").read_bytes()
+    ).hexdigest()
+    known = {}
+    if store.exists():
+        for row in map(json.loads, store.read_text(encoding="utf-8").splitlines()):
+            if row["checker"] == checker_id:
+                known[row["sha256"]] = row["text"]
+    digest = {c["id"]: hashlib.sha256(Path(c["wav"]).read_bytes()).hexdigest() for c in clips}
+    todo = {digest[c["id"]]: c["wav"] for c in clips if digest[c["id"]] not in known}
+    if todo:
+        listing, heard = work / "fast_clips.jsonl", work / "fast_heard.jsonl"
+        write_jsonl(listing, [{"id": sha, "wav": wav} for sha, wav in todo.items()])
+        folder = fast_model(tts, cache)
+        run("asr_ct2", str(folder), str(tts["asr_fast"]["batch"]), str(listing), str(heard), cache=cache)
+        answers = {r["id"]: r["text"] for r in map(json.loads, heard.read_text(encoding="utf-8").splitlines())}
+        known |= answers
+        store.parent.mkdir(parents=True, exist_ok=True)
+        with store.open("a", encoding="utf-8") as f:
+            f.writelines(
+                json.dumps({"checker": checker_id, "sha256": sha, "text": text}, ensure_ascii=False) + "\n"
+                for sha, text in answers.items()
+            )
+    return {c["id"]: known[digest[c["id"]]] for c in clips}

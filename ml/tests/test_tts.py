@@ -270,3 +270,24 @@ def test_word_times_come_back_by_clip_from_the_aligner(tmp_path: Path, monkeypat
     (tmp_path / "mfa/3.0.0/pretrained_models/acoustic/vi.zip").write_bytes(b"model")
     assert engines.align(clips, tts, tmp_path / "work", tmp_path) == times
     assert "download acoustic" not in calls[1][-1] and "download dictionary" in calls[1][-1]
+
+
+def test_the_fast_checker_hears_each_distinct_clip_once(tmp_path: Path, monkeypatch) -> None:
+    calls = []
+
+    def run(name, *args, cache):
+        listing, heard = Path(args[2]), Path(args[3])
+        rows = [json.loads(line) for line in listing.read_text(encoding="utf-8").splitlines()]
+        calls.append((name, args[1], len(rows)))
+        heard.write_text("".join(json.dumps({"id": r["id"], "text": "trợ lý."}) + "\n" for r in rows), encoding="utf-8")
+
+    monkeypatch.setattr(engines, "run", run)
+    monkeypatch.setattr(engines, "fast_model", lambda tts, cache: tmp_path / "model")
+    tts = {"asr_fast": {"model": "m@r", "quantization": "int8_float16", "converter": "c", "batch": 4}}
+    write_wav(tmp_path / "a.wav", np.zeros(grid.SAMPLE_RATE_HZ))
+    write_wav(tmp_path / "b.wav", np.zeros(grid.SAMPLE_RATE_HZ))
+    write_wav(tmp_path / "c.wav", 0.1 * np.ones(grid.SAMPLE_RATE_HZ))
+    clips = [{"id": n, "wav": str(tmp_path / f"{n}.wav")} for n in "abc"]
+    heard = engines.hear_text(clips, tts, tmp_path, tmp_path)
+    assert heard == {"a": "trợ lý.", "b": "trợ lý.", "c": "trợ lý."} and calls == [("asr_ct2", "4", 2)]
+    assert engines.hear_text(clips, tts, tmp_path, tmp_path) == heard and len(calls) == 1

@@ -716,11 +716,11 @@ def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cach
                 start, end = max(0.0, o["span"][0] + shift), min(o["seconds"], o["span"][1] + spec["tail_s"])
                 wav = work / "tries" / f"{i}_{r}.wav"
                 write_wav(wav, np.concatenate([pad, ramped(segment(job.whole(o["key"]), start, end), ramp_s), pad]))
-                tries[f"{i}/{r}"] = {"id": f"{i}/{r}", "wav": str(wav), "targets": [o["phrase"]], "cut": [start, end]}
-            heard = engines.hear(list(tries.values()), tts, work, cache) if tries else {}
+                tries[f"{i}/{r}"] = {"id": f"{i}/{r}", "wav": str(wav), "cut": [start, end]}
+            heard = engines.hear_text(list(tries.values()), tts, work, cache) if tries else {}
             still = []
             for i in pending:
-                said = heard[f"{i}/{r}"]["text"]
+                said = heard[f"{i}/{r}"]
                 if corpus.sounds(said) == sounds[found[i]["phrase"]]:
                     kept[i] = {"shift_s": shift, "heard": said, "cut_s": tries[f"{i}/{r}"]["cut"]}
                 else:

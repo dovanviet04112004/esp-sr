@@ -141,7 +141,7 @@ def test_a_cut_keeps_the_first_start_heard_alone_and_deletes_the_sentence(tmp_pa
     monkeypatch.setattr(extract.engines, "align", lambda clips, *a: {c["id"]: words for c in clips})
     heard = {0: "nhờ trợ lý.", 1: "Trợ lý."}
     monkeypatch.setattr(
-        extract.engines, "hear", lambda clips, *a: {c["id"]: {"text": heard[int(c["id"][-1])]} for c in clips}
+        extract.engines, "hear_text", lambda clips, *a: {c["id"]: heard[int(c["id"][-1])] for c in clips}
     )
     device = load_yaml(extract.CONFIGS / "scenes" / "device.yaml")
     extract.cut(job, {}, device, tmp_path, False)

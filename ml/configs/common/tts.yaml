@@ -5,6 +5,12 @@ asr:
   model: vinai/PhoWhisper-large@b9136a44b5f2ca664bd0b8f74baecf1715f6eeeb
   batch: 1                         # 2 is 6% faster but peaks at 3.4 GB of a 4 GB card Windows shares; spilling past
                                    #   it runs 5 times slower (docs/measurements/tts_engines.md)
+asr_fast:                          # the same checker on CTranslate2 int8, text only, for the extract's cuts: twice as
+                                   #   fast, the same verdict on 394 of 400 cuts (tts_engines.md §4)
+  model: vinai/PhoWhisper-large@b9136a44b5f2ca664bd0b8f74baecf1715f6eeeb
+  quantization: int8_float16
+  converter: ctranslate2==4.6.0    # added to ml/tts/asr, which holds transformers and torch, to convert once
+  batch: 4                         # clips per forward; 8 runs out of a 4 GB card
 align:                             # word times by forced alignment (KEHOACH 3.11), in Docker as the aligner needs Kaldi
   image: mmcauliffe/montreal-forced-aligner:v3.4.2
   acoustic: vietnamese_mfa         # CC BY 4.0; learned on Common Voice 17, VIVOS and GlobalPhone
