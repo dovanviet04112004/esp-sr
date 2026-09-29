@@ -24,7 +24,7 @@ from srpipe.core.config import CONFIGS, data_paths, load_yaml
 from srpipe.generated import grid, lang_vi
 from srpipe.lang import g2p
 from srpipe.lang.normalize import LangError, normalize
-from srpipe.scenes import device
+from srpipe.scenes import device, room
 from srpipe.tasks.wake import CONFIG, candidates, synth
 from srpipe.tts import CONFIG as TTS_CONFIG
 from srpipe.tts import engines
@@ -78,15 +78,39 @@ def voice_of(clip: dict) -> str:
     return clip["speaker"] if clip["speaker"].startswith("VIVOS") else splits.ABSENT
 
 
+def synth_item(folder: str, clip: dict) -> str:
+    """A TTS clip's item under interim/, cut at cut_s when the split trimmed it."""
+    item = f"wake/{folder}/{clip['engine']}/{clip['id']}.wav"
+    return cut_item(item, 0.0, clip["cut_s"]) if "cut_s" in clip else item
+
+
 def synth_rows(clips: list[dict], folder: str, roles: dict[str, str]) -> dict[str, list[splits.Row]]:
     """Kept clips of one synth manifest as rows under interim/, by the role of their voice; train when unknown."""
     rows: dict[str, list[splits.Row]] = {"train": [], "val": []}
     for c in clips:
         if c["kept"]:
             voice = voice_of(c)
-            item = f"wake/{folder}/{c['engine']}/{c['id']}.wav"
-            rows[roles.get(voice, "train")].append(splits.Row(item, voice, splits.ABSENT, SYNTH))
+            rows[roles.get(voice, "train")].append(splits.Row(synth_item(folder, c), voice, splits.ABSENT, SYNTH))
     return rows
+
+
+def speech_end_s(x: np.ndarray, below_peak_db: float) -> float:
+    """Seconds to the end of the last hop within below_peak_db of the loudest hop."""
+    last = int(np.flatnonzero(room.active_hops(x, below_peak_db))[-1])
+    return (last + 1) * grid.HOP_SAMPLES / grid.SAMPLE_RATE_HZ
+
+
+def trimmed(clips: list[dict], folder: str, cfg: dict, interim: Path) -> list[dict]:
+    """The clips, each kept one given cut_s at its word's end plus positive_tail_s when that falls inside it."""
+    spec, reader = cfg["split"], ItemReader(interim)
+    out = []
+    for c in clips:
+        if c["kept"]:
+            end = speech_end_s(reader.read(synth_item(folder, c)), spec["tts_pos"]["below_peak_db"])
+            end += spec["positive_tail_s"]
+            c = c | ({"cut_s": round(end, 3)} if end < c["seconds"] else {})
+        out.append(c)
+    return out
 
 
 def corpus_rows(clips: list[dict], roles: dict[str, str]) -> dict[str, list[splits.Row]]:
@@ -238,7 +262,8 @@ Dựng bằng `python -m srpipe.tasks.wake.data` (`make splits`), seed {spec["se
 
 - Chỉ mẩu qua sàng lọc (`interim/screen/rejects.tsv`); không âm bản nào có lời đọc như "{cfg["word"]}" theo giọng
   Bắc, dù viết cách nào.
-- Dương: mẩu TTS có `kept` của `interim/wake/synth_pos`{real}; âm bản gần âm: của `interim/wake/synth_neg`.
+- Dương: mẩu TTS có `kept` của `interim/wake/synth_pos`, cắt bỏ khoảng lặng sau từ (`@0-cuối`){real}; âm bản gần
+  âm: của `interim/wake/synth_neg`. Mẩu dương nào cũng dừng {spec["positive_tail_s"]} s sau âm cuối của từ.
 - {spec["val_speakers"]:.0%} người nói VIVOS train và {spec["val_speakers"]:.0%} giọng có sẵn của VieNeu vào `val`
   trọn vẹn, cùng mọi giọng nhân bản từ họ; giọng nhân bản từ kho không có mã người nói chỉ vào `train`.
 - `train_neg` rút {spec["negative_hours"]} giờ lời nói ngẫu nhiên từ {", ".join(spec["learning"])}.
@@ -288,10 +313,11 @@ def link(built: Path, out: Path) -> Path:
 
 
 def corpus_positives(cfg: dict, paths: dict[str, Path]) -> Path:
-    """Cut every learning clip that says the wake word from context_s before the word to tail_s after it, by the
-    checker's word times, then hear each cut back: kept when it still says the word. The audio stays in raw/, a cut
-    being its item with @<start>-<end>; interim/wake/corpus_pos/manifest.yaml lists every clip found (KEHOACH 3.11)."""
-    spec, word = cfg["split"]["corpus_pos"], candidates.sounds(cfg["word"])
+    """Cut every learning clip that says the wake word from context_s before the word to positive_tail_s after it, by
+    forced alignment of its text, then hear each cut back: kept when it still says the word. The audio stays in raw/,
+    a cut being its item with @<start>-<end>; interim/wake/corpus_pos/manifest.yaml lists every clip (KEHOACH 3.11)."""
+    spec = cfg["split"]["corpus_pos"] | {"tail_s": cfg["split"]["positive_tail_s"]}
+    word = candidates.sounds(cfg["word"])
     tts, reader = load_yaml(TTS_CONFIG), ItemReader(paths["raw"])
     public = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
     found = [c for c in public if c.item.startswith(tuple(cfg["split"]["learning"])) and says_word(c, word)]
@@ -301,12 +327,15 @@ def corpus_positives(cfg: dict, paths: dict[str, Path]) -> Path:
         x = reader.read(c.item)
         seconds[c.item] = len(x) / grid.SAMPLE_RATE_HZ
         write_wav(work / "whole" / f"{k:05d}.wav", x)
-    asked = [{"id": str(k), "wav": str(work / "whole" / f"{k:05d}.wav")} for k in range(len(found))]
-    times = engines.words(asked, tts, work, paths["cache"])
+    asked = [
+        {"id": str(k), "wav": str(work / "whole" / f"{k:05d}.wav"), "text": " ".join(corpus.words(c.text or ""))}
+        for k, c in enumerate(found)
+    ]
+    times = engines.align(asked, tts, work, paths["cache"])
     rows = []
     for k, c in enumerate(found):
         row = {"item": c.item, "speaker": c.speaker or splits.ABSENT, "text": c.text, "kept": False}
-        if span := spoken_at(times[str(k)], word):
+        if span := spoken_at(times.get(str(k), []), word):
             start, end = max(0.0, span[0] - spec["context_s"]), min(seconds[c.item], span[1] + spec["tail_s"])
             row |= {"word_s": [round(t, 3) for t in span], "cut": cut_item(c.item, start, end)}
             row["seconds"] = round(end - start, 3)
@@ -342,8 +371,10 @@ def cut_split(cfg: dict, paths: dict[str, Path]) -> int:
         if folder == synth.SETS["hard"] and not listing.exists():
             continue
         clips = yaml.safe_load(listing.read_text(encoding="utf-8"))["clips"]
+        if folder == synth.SETS["positives"]:
+            clips = trimmed(clips, folder, cfg, paths["interim"])
         manifests[folder] = clips
-        seconds |= {f"wake/{folder}/{c['engine']}/{c['id']}.wav": c["seconds"] for c in clips}
+        seconds |= {synth_item(folder, c): c.get("cut_s", c["seconds"]) for c in clips}
     files = build(cfg, public, seconds, manifests)
     out = paths["splits"] / "wake" / cfg["split"]["version"]
     splits.write_version(out, files, notes(cfg, files, seconds))

@@ -67,9 +67,13 @@ split:                             # E11-T11: data/splits/wake/<version> by pyth
   negative_hours: 100              # public speech drawn from learning into train_neg
   test_neg: [speech/common_voice_vi/, speech/vivos/test/]   # no reference voice came from these
   val_from_test: {speech/common_voice_vi/: 0.4}   # share of its speakers moved whole into val_neg (KEHOACH 3.11)
+  positive_tail_s: 0.1             # every positive ends this long after the word's end, where its label sits; cut so,
+                                   #   88% of aligned words stay whole and 5% take 0.1 s of the next (wake.md §6)
   corpus_pos:                      # learning clips that say the word, cut around it as real positives (KEHOACH 3.11)
     context_s: 2.0                 # kept ahead of the word, the receptive field
-    tail_s: 0.05                   # kept after it: a positive's label sits at the end of its clip
+  tts_pos:
+    below_peak_db: 30.0            # a TTS clip's word ends at its last hop within this of its loudest, where the
+                                   #   aligner puts a word's end (wake.md §6)
 simulate:                          # make wake-features: python -m srpipe.tasks.wake.data simulate (E4-T8)
   split: v4
   workers: 12                      # each holds about 450 MB; more push a 10 GB WSL into swap
