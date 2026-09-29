@@ -1,6 +1,6 @@
 """Wake training: the smoothing and lockout the device mirrors, labels around a positive's end, windows that hold
 the whole label past the warm-up, a tiny run whose sweep never gains recall or false accepts as the threshold
-rises, and a board table whose rows keep their columns."""
+rises, a board table whose rows keep their columns, and a run scored with the network it was trained as."""
 
 from __future__ import annotations
 
@@ -9,11 +9,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 import yaml
 
 from srpipe.core.config import load_yaml
 from srpipe.tasks.wake import CONFIG, data, train
 from srpipe.tasks.wake import eval as wake_eval
+from srpipe.tasks.wake.model.tcn import Tcn
 from srpipe.tasks.wake.postproc.smooth import smooth, triggers
 
 BANDS = 8
@@ -144,3 +146,19 @@ def test_board_rows_keep_their_columns_when_a_prompt_lists_phrases() -> None:
     header = wake_eval.board_table([], 0.5).splitlines()[2]
     assert len(rows) == 2
     assert all(row.replace("\\|", "").count("|") == header.count("|") for row in rows)
+
+
+def test_a_run_is_scored_with_its_own_network_and_the_current_scoring_rules(tmp_path: Path) -> None:
+    cfg = load_yaml(CONFIG)
+    trained = cfg | {"model": cfg["model"] | {"channels": cfg["model"]["channels"] // 4}, "features": "trained.yaml"}
+    (tmp_path / "config.resolved.yaml").write_text(yaml.safe_dump(trained), encoding="utf-8")
+    net = Tcn(BANDS, **trained["model"])
+    torch.save(net.state_dict(), tmp_path / "model.pt")
+    np.savez(tmp_path / "band_stats.npz", mean=np.zeros(BANDS), std=np.ones(BANDS))
+    (tmp_path / "metrics.yaml").write_text(yaml.safe_dump({"val": {"threshold": 0.8}}), encoding="utf-8")
+    scoring = cfg | {"eval": cfg["eval"] | {"smooth_hops": 3}}
+    model, stats, used, threshold = wake_eval.load_run(tmp_path, scoring)
+    assert threshold == 0.8 and len(stats["mean"]) == BANDS
+    assert model.inp.out_channels == trained["model"]["channels"]
+    assert used["model"] == trained["model"] and used["features"] == "trained.yaml"
+    assert used["eval"]["smooth_hops"] == 3

@@ -168,20 +168,27 @@ def board_table(results: list[BoardSession], threshold: float) -> str:
     return "\n".join(lines)
 
 
+def load_run(run: Path, cfg: dict) -> tuple[Tcn, dict, dict, float]:
+    """The run's network, band statistics and val threshold, and cfg with the run's own model and features, since
+    the net was built and fed by those; scoring keeps cfg's rules so every run is scored alike."""
+    trained = load_yaml(run / "config.resolved.yaml")
+    stats = dict(np.load(run / "band_stats.npz"))
+    model = Tcn(len(stats["mean"]), **trained["model"])
+    model.load_state_dict(torch.load(run / "model.pt", map_location="cpu"))
+    model.eval()
+    threshold = yaml.safe_load((run / "metrics.yaml").read_text(encoding="utf-8"))["val"]["threshold"]
+    return model, stats, cfg | {"model": trained["model"], "features": trained["features"]}, threshold
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("what", choices=["board"])
     parser.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.wake.train")
     parser.add_argument("--threshold", type=float, help="instead of the one the run chose on val")
     args = parser.parse_args(argv)
-    cfg, paths = load_yaml(CONFIG), data_paths()
-    stats = np.load(args.run / "band_stats.npz")
-    model = Tcn(len(stats["mean"]), **cfg["model"])
-    model.load_state_dict(torch.load(args.run / "model.pt", map_location="cpu"))
-    model.eval()
-    chosen = yaml.safe_load((args.run / "metrics.yaml").read_text(encoding="utf-8"))["val"]["threshold"]
+    model, stats, cfg, chosen = load_run(args.run, load_yaml(CONFIG))
     threshold = args.threshold if args.threshold is not None else chosen
-    print(board_table(board(model, stats["mean"], stats["std"], cfg, paths, threshold, "cpu"), threshold))
+    print(board_table(board(model, stats["mean"], stats["std"], cfg, data_paths(), threshold, "cpu"), threshold))
     return 0
 
 
