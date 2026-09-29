@@ -744,7 +744,9 @@ của `processed/wake/<split>/` do đường mô phỏng board dựng, chuẩn h
 `train`. Nhãn theo bước: một mẩu dương gắn 1 ở các bước quanh lúc từ đánh thức vừa nói xong (cuối `speech_frames`,
 độ rộng trước và sau ở cấu hình), vì chỉ khi ấy mạng đã nghe đủ cả từ; mọi bước khác và mọi mẩu âm gắn 0. Mạng học
 trên cửa sổ dài hơn trường nhìn: cắt sao cho chứa cuối một mẩu dương, hoặc ở chỗ ngẫu nhiên trong một mẩu âm, với
-tỉ lệ dương cố định mỗi lô; mất mát là BCE theo bước. Chấm như trên máy: điểm làm trơn trung bình trượt 5 khung rồi so
+tỉ lệ dương cố định mỗi lô. Trong phần dương, một tỉ lệ cố định (mục `train`) lấy từ mẩu người thật: rút đều thì
+vài trăm câu thật giữa vài nghìn mẩu TTS chỉ chiếm chừng 6% đoạn dương, trong khi board nghe giọng người. Mất mát là
+BCE theo bước. Chấm như trên máy: điểm làm trơn trung bình trượt 5 khung rồi so
 ngưỡng. Bắt được là tỉ lệ mẩu dương có một lần vượt ngưỡng. Báo nhầm là số lần vượt trên âm bản, mỗi lần vượt khoá
 một quãng rồi mới đếm tiếp như máy khoá sau khi thức, quy ra lần mỗi giờ. Ngưỡng chọn trên `val` sao cho báo nhầm
 không quá mục tiêu, rồi ghi vào NVS `kws/wake_th`.
