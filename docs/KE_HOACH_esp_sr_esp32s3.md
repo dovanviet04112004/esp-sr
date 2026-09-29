@@ -726,6 +726,20 @@ mô phỏng board (§1.2). **Âm bản** gồm các kho lời nói tiếng Việ
 TTS. Bản thu qua board để chấm (§1.3). Nếu thiếu Cửa 2 vì giọng tổng hợp khác giọng thật, thêm mẫu
 dương thật của vài người tình nguyện vào tập học, tách người với tập thử.
 
+**Âm bản khó** (`wake/v2`, `docs/measurements/wake.md`). Lượt học đầu trên `wake/v1` cho thấy mạng nhầm "chào mi
+na" với ba họ cụm mà thước khoảng cách thành phần âm tiết của `candidates` không bắt: "chào" + một âm tiết ("chào mẹ",
+"chào minh" 0,88–0,92 trên board, ngang giọng thật 0,85–0,95), số đọc "…mươi lăm / ba / năm / nhăm" (0,99 trên
+VIVOS) và "… i na". Âm bản khó gồm ba nguồn: bộ TTS `synth_hard` đọc các họ ấy (cụm hai, ba âm tiết dựng từ
+những âm tiết phổ biến của kho) bằng giọng của mẫu dương; các cụm gần âm của `synth_neg`; và câu thật của kho học
+có cụm thuộc họ. Các cụm chính xác của phiên gần âm thu qua board mà `wake/v1` chưa từng học ("chào mẹ", "chào
+minh", "chào bạn") bị loại khỏi cả ba nguồn, để phiên ấy đo được mạng có tổng quát hoá hay không. Split giữ chúng ở
+`train_hard` và `val_hard`, chia người như mọi file khác; năm file của `wake/v1` giữ nguyên nên bản mô phỏng của
+chúng dùng lại được. Mỗi lô dành một tỉ lệ cố định cho âm bản khó, như cho mẫu dương: rút theo độ dài từ 100 giờ
+lời nói, 370 cụm gần âm chỉ chiếm ~0,1% cửa sổ, nên mạng không có lý do học phân biệt chúng. Cửa sổ của một cụm TTS
+cắt quanh cuối lời như mẫu dương; của một câu kho cắt ngẫu nhiên trong phần có tiếng, vì không có mốc thời gian
+từng từ. Tốc độ đọc không phải nguyên nhân: bỏ 26% mẫu dương đọc nhanh nhất (dưới 0,85 s) hạ điểm của cả giọng thật
+lẫn cụm gần âm mà không tách chúng ra.
+
 **Huấn luyện** (`tasks/wake/train.py`, `eval.py`, mục `train` của `configs/models/wake.yaml`). Đầu vào là log-mel
 của `processed/wake/<split>/` do đường mô phỏng board dựng, chuẩn hoá bằng trung bình và độ lệch từng dải tính trên
 `train`. Nhãn theo bước: một mẩu dương gắn 1 ở các bước quanh lúc từ đánh thức vừa nói xong (cuối `speech_frames`,
@@ -934,7 +948,7 @@ esp-sr/
     ├── FREERTOS.md                      # sổ kiểm lỗi đồng thời, soát lại mỗi khi thêm task
     ├── DU_LIEU.md                       # dữ liệu đã tải, giấy phép, số giờ, sha256
     ├── adr/                             # quyết định có bảng đối chứng
-    └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md, tts_engines.md, data_screen.md}
+    └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md, tts_engines.md, data_screen.md, wake.md}
                       ├ bench/           # CSV thô của bench_*, commit cùng bảng nó sinh ra
                       ├ calib/           # hệ số hiệu chuẩn từng board (balance), bản đã ghi xuống NVS
                       └ {afe,kws,tts}/   # số 🔬 theo khối
@@ -1103,7 +1117,7 @@ ml/
 │   │   ├── ns/                        # RNNoise-16k; postproc/bands.py ★
 │   │   ├── wake/                      # TCN; postproc/smooth.py ★; candidates.py chấm từ đánh thức trên kho (E11-T5);
 │   │   │                              #   synth.py chọn chữ, giọng, seed, tốc độ cho dương và âm bản gần âm rồi
-│   │   │                              #   sinh qua srpipe/tts vào interim/wake/synth_{pos,neg}/ (E11-T7); ngưỡng
+│   │   │                              #   sinh qua srpipe/tts vào interim/wake/synth_{pos,neg,hard}/ (E11-T7); ngưỡng
 │   │   │                              #   độ chênh đặt trên âm bản gần âm, để chỉ 1% lọt thành dương; data.py dựng
 │   │   │                              #   split wake/v<n> (§1.3)
 │   │   ├── command/                   # mạng âm học + CTC; postproc/ctc_score.py ★; data.py dựng split command/v<n>,
