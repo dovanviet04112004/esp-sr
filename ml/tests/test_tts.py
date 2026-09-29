@@ -1,6 +1,6 @@
 """Shared TTS: the checker compares spelling with tones, references are the first clip in the span or parquet draws
 spread over the files, and a rendered clip carries what was heard, whether it spells what the clip must say and the
-checker's margins; a rerun makes only the missing clips."""
+checker's margins; a rerun makes only the missing clips; the checker's word times come back by clip."""
 
 from __future__ import annotations
 
@@ -239,3 +239,19 @@ def test_clips_with_the_same_bytes_are_heard_once_for_the_targets_of_both(tmp_pa
     assert heard["a"]["targets"].keys() == heard["b"]["targets"].keys() == {"say a", "say b", "w"}
     assert engines.hear(clip_list, tts, tmp_path, tmp_path) == heard
     assert len(asked) == 1
+
+
+def test_word_times_come_back_by_clip_from_the_checkers_words_mode(tmp_path: Path, monkeypatch) -> None:
+    calls = []
+
+    def run(name, model, batch, listing, heard, *mode, cache):
+        calls.append((name, batch, mode))
+        lines = [json.loads(line) for line in Path(listing).read_text(encoding="utf-8").splitlines()]
+        answers = [{"id": c["id"], "words": [{"word": "trợ", "start": 0.1, "end": 0.3}]} for c in lines]
+        Path(heard).write_text("".join(json.dumps(a) + "\n" for a in answers), encoding="utf-8")
+
+    monkeypatch.setattr(engines, "run", run)
+    tts = {"asr": {"model": "m@r", "batch": 8}}
+    times = engines.words([{"id": "a", "wav": "a.wav"}, {"id": "b", "wav": "b.wav"}], tts, tmp_path, tmp_path)
+    assert calls == [("asr", "1", ("words",))]
+    assert times["b"] == [{"word": "trợ", "start": 0.1, "end": 0.3}] and set(times) == {"a", "b"}

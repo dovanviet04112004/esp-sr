@@ -46,6 +46,14 @@ def synthesise(engine: str, requests: list[dict], tts: dict, work: Path, cache: 
     run(engine, *engine_args(engine, tts), str(listing), cache=cache)
 
 
+def words(clips: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, list[dict]]:
+    """The words the checker hears in every clip {id, wav}, by id: [{word, start, end}], times in seconds."""
+    listing, heard = work / "words_clips.jsonl", work / "words_heard.jsonl"
+    write_jsonl(listing, clips)
+    run("asr", tts["asr"]["model"], "1", str(listing), str(heard), "words", cache=cache)
+    return {r["id"]: r["words"] for r in map(json.loads, heard.read_text(encoding="utf-8").splitlines())}
+
+
 def hear(clips: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, dict]:
     """What the checker makes of every clip {id, wav, targets}, by id: {text, logp, targets}, the text it heard and the
     log-probability of that text and of each target given the clip. Answers are kept in cache/tts/heard.jsonl by the
