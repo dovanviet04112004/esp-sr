@@ -329,6 +329,24 @@ def text_column(names: list[str]) -> str:
     return found
 
 
+def audio_column(schema: pa.Schema) -> str:
+    return next(n for n in schema.names if pa.types.is_struct(schema.field(n).type) or n == "audio")
+
+
+def holds_audio(meta: pq.FileMetaData, audio: str) -> bool:
+    """Whether any row of the file may hold audio by its column statistics: some sets keep only a link to the source
+    recording, every audio cell null."""
+    for g in range(meta.num_row_groups):
+        group = meta.row_group(g)
+        for c in (group.column(i) for i in range(group.num_columns)):
+            stats = c.statistics
+            if c.path_in_schema.split(".")[0] == audio and (
+                stats is None or not stats.has_null_count or stats.null_count < group.num_rows
+            ):
+                return True
+    return False
+
+
 def audio_of(job: Job, value: dict) -> np.ndarray:
     """One row's audio cell as mono float64 at the grid's rate: the bytes of a file, a decoded array with its rate,
     or an hf://datasets/<repo>@<revision>/<path> the file is fetched from."""
@@ -363,6 +381,8 @@ def scan_parquet(job: Job, source: dict, pin: dict, part: str, info: dict) -> li
     remote = RangeFile(job.http, job.url(source, pin["revision"], part), info["size"], job.read_ahead)
     pf = pq.ParquetFile(remote)
     column = text_column(pf.schema_arrow.names)
+    if not holds_audio(pf.metadata, audio_column(pf.schema_arrow)):
+        raise ValueError("no audio: every audio cell is null")
     remote.prefetch(chunk_ranges(pf.metadata, column), job.cfg["http"]["file_parallel"])
     texts = pf.read(columns=[column]).column(0).to_pylist()
     return [
@@ -374,8 +394,7 @@ def scan_parquet(job: Job, source: dict, pin: dict, part: str, info: dict) -> li
 
 def fetch_parquet(job: Job, source: dict, pin: dict, part: str, matches: list[dict], info: dict) -> None:
     pf = pq.ParquetFile(RangeFile(job.http, job.url(source, pin["revision"], part), info["size"], job.read_ahead))
-    names = pf.schema_arrow.names
-    audio = next(n for n in names if pa.types.is_struct(pf.schema_arrow.field(n).type) or n == "audio")
+    audio = audio_column(pf.schema_arrow)
     starts = np.cumsum([0] + [pf.metadata.row_group(g).num_rows for g in range(pf.num_row_groups)])
     by_group = defaultdict(list)
     for m in matches:
@@ -393,7 +412,7 @@ def scan_arrow(job: Job, source: dict, pin: dict, part: str, info: dict) -> list
     with job.http.open(job.url(source, pin["revision"], part)) as r:
         reader = pa.ipc.open_stream(r)
         column = text_column(reader.schema.names)
-        audio = next(n for n in reader.schema.names if pa.types.is_struct(reader.schema.field(n).type) or n == "audio")
+        audio = audio_column(reader.schema)
         for batch in reader:
             texts = batch.column(column).to_pylist()
             for i, t in enumerate(texts):

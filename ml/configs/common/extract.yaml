@@ -35,8 +35,8 @@ extracts:
       - tăng âm lượng
       - giảm âm lượng
       - dừng lại
-    sources:                       # an unpinned source is pinned on first read; parquet is the viewer's
-                                   #   refs/convert/parquet unless own; copies of yodas2 and textless sets stay out
+    sources:                       # pinned on first read when unpinned; parquet is the viewer's refs/convert/parquet
+                                   #   unless own; copies of yodas2, textless and audioless sets stay out
       - {kind: parquet, repo: thivux/phoaudiobook, revision: e716faf3780d89cdd630b3a778476bb9e1ad316d}
       - {kind: parquet, repo: NhutP/VietSpeech, revision: 35f7d6081b8de7cafa593d741a74068e7d40822c}
       - {kind: parquet, repo: capleaf/viVoice, revision: cb55a42ab775fbff4f78849679b14b6e8934176d}
@@ -54,7 +54,6 @@ extracts:
       - {kind: arrow, repo: LanguaMan/vieneu-tts-140h-dataset}
       - {kind: parquet, repo: doduy1911/voiceNam}
       - {kind: parquet, repo: leduckhai/MultiMed, config: Vietnamese}
-      - {kind: parquet, repo: disco-eth/WorldSpeech, config: vn_vi}
       - {kind: parquet, repo: TrangLe2108/DNU-ViSpeech}
       - {kind: parquet, repo: nguyendv02/ViMD_Dataset, own: true}   # own: the repo's parquet, the viewer's is partial
       - {kind: parquet, repo: google/fleurs, config: vi_vn}

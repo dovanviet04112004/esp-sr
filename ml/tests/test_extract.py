@@ -81,6 +81,17 @@ def test_parquet_rows_come_from_their_row_groups_and_a_rerun_has_nothing_left(tm
     audio = [{"bytes": wav_bytes(0.5 + k / 10), "path": f"{k}.wav"} for k in range(len(TEXTS))]
     buf = io.BytesIO()
     pq.write_table(pa.table({"audio": audio, "transcription": TEXTS}), buf, row_group_size=2)
+    assert extract.holds_audio(pq.ParquetFile(io.BytesIO(buf.getvalue())).metadata, "audio")
+    linked = io.BytesIO()
+    pq.write_table(
+        pa.table({"audio": [None] * len(TEXTS), "transcription": TEXTS}).cast(
+            pa.schema(
+                [("audio", pa.struct([("bytes", pa.binary()), ("path", pa.string())])), ("transcription", pa.string())]
+            )
+        ),
+        linked,
+    )
+    assert not extract.holds_audio(pq.ParquetFile(linked).metadata, "audio")
     http = FakeHttp({"default/train/0000.parquet": buf.getvalue()})
     job = job_for(tmp_path, [{"kind": "parquet", "repo": "o/d", "revision": "rev0"}], http)
     extract.scan(job)
