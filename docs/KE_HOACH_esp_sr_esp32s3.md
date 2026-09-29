@@ -109,6 +109,7 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | FPT Open Speech Data | `command` | ~30 giờ 🔬 | chưa kiểm 🔬 | |
 | VLSP các năm | `command` | lớn | đăng ký, chỉ nghiên cứu 🔬 | |
 | Bud500 (VietAI) | `command` | ~500 giờ, không có mã người nói | CC BY-NC-SA 4.0, chỉ nghiên cứu | người nói ba miền; **phi thương mại**, chỉ vào tập học |
+| **Câu trích theo lời** từ các kho tiếng Việt trên Hugging Face (`srpipe/core/extract.py`, `configs/common/extract.yaml`) | người thật nói đúng một cụm, trước hết từ đánh thức của `wake` | chỉ các câu có lời đọc ra cụm ấy, không tải phần còn lại | theo từng kho, ghi ở `DU_LIEU.md` | kho lớn (GigaSpeech2, PhoAudiobook, VietSpeech, viVoice…) quá cỡ ổ dữ liệu; dò lời qua mạng, chỉ kéo đoạn chứa câu khớp; chỉ vào tập học |
 | Lệnh điều khiển nhà tự thu (repo `edge-ai-voice-control-esp32`) | `command` | ~1 300 lệnh 1 s: bật/tắt đèn, bật/tắt quạt, bật/tắt hết; nhiễu phòng | MIT | người thật nói đúng lệnh của bộ lệnh; không có mã người nói, chỉ vào tập học |
 | MUSAN | `ns`, tăng cường | ~100 giờ nhiễu, nhạc, lời nói | CC BY 4.0 phần lớn 🔬 | |
 | DEMAND | `ns` | 15 môi trường, 16 kênh | CC BY-SA 3.0 🔬 | |
@@ -724,7 +725,8 @@ chừng nửa giây, 28 lần mỗi triệu âm tiết lời nói: ngắn và th
 siết báo nhầm để sau, khi có dữ liệu thu thật.
 
 **Dữ liệu dương** gồm tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, và **người thật nói
-"trợ lý" trong kho học**: 224 câu, mỗi câu **cắt lấy đúng hai tiếng "trợ lý"**, từ đầu "trợ" đến cuối "lý". Mốc lấy
+"trợ lý"**: 224 câu của kho học, cộng các câu trích theo lời từ những kho tiếng Việt lớn trên Hugging Face (§1.2, kho
+`hf_tro_ly`). Mỗi câu **cắt lấy đúng hai tiếng "trợ lý"**, từ đầu "trợ" đến cuối "lý". Mốc lấy
 bằng **căn cưỡng bức** (Montreal Forced Aligner, mô hình tiếng Việt, chạy trong Docker) trên lời của câu. Mốc cuối hay
 sớm nên cộng một quãng ở cấu hình, để trung vị còn lệch 12 ms. Mốc đầu trong lời nói liền hay còn dính âm cuối của từ
 trước, nên mép đầu thử lần lượt vài độ dời vào trong "tr" (cấu hình), lấy lần đầu PhoWhisper nghe ra đúng từ. Hai mép cắt vuốt nhỏ dần trong 10 ms (`talker.edge_ramp_s` của đường mô phỏng board)
@@ -1096,7 +1098,8 @@ ml/
 ├── pyproject.toml  ├── uv.lock        # ✅ ghim phiên bản, không requirements.txt rời
 ├── .env.example                       # ✅ commit — biến và giá trị giả
 ├── configs/
-│   ├── common/{paths.yaml, hardware.yaml, tts.yaml, screen.yaml}   # tts.yaml: bộ TTS, bộ nghe kiểm và bộ căn
+│   ├── common/{paths.yaml, hardware.yaml, tts.yaml, screen.yaml, extract.yaml}   # extract.yaml: cụm và kho ghim bản
+│   │                                  #   của từng lần trích; tts.yaml: bộ TTS, bộ nghe kiểm và bộ căn
 │   │                                  #   mốc từng từ, ghim bản; screen.yaml: bố cục từng kho và ngưỡng sàng lọc (§1.2)
 │   ├── afe/{hpf.yaml, aec.yaml, doa.yaml, gsc.yaml, bss.yaml, ns_omlsa.yaml, vad.yaml, agc.yaml}  # chỉ ghi đè cho thí nghiệm; mặc định là contracts/afe.yaml
 │   ├── scenes/standard.yaml           # bộ cảnh có nhãn chuẩn của E4-T4: phòng, RT60, góc, SNR, seed
@@ -1109,6 +1112,8 @@ ml/
 │   │   ├── run_dir.py                 # ★ thư mục run: config.resolved + env + split.lock
 │   │   ├── audio_io.py  ├── seed.py  ├── logger.py
 │   │   ├── corpus.py                  # mọi mẩu của một kho trong raw/: tên mục như split, người nói nếu kho có, lời
+│   │   ├── extract.py                 # câu của kho trên Hugging Face có lời đọc ra một cụm → raw/speech/<tên>/, dò
+│   │   │                              #   lời qua mạng, chỉ kéo đoạn chứa câu khớp, làm tiếp được khi bị ngắt (§1.2)
 │   │   ├── screen.py                  # ★ sàng lọc (§1.2): đo mọi mẩu một lần, chấm theo luật, danh sách loại
 │   │   └── splits.py                  # ★ đọc split, kiểm luật §1.3 (§4.4.1)
 │   ├── generated/                     # sinh từ contracts/, không sửa tay
