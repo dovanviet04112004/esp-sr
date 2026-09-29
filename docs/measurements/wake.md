@@ -264,24 +264,50 @@ Mốc cuối "na" của bộ căn trừ đáp án, tính theo ngưỡng của đ
 Bộ căn đặt cuối từ ở lúc âm tụt khoảng 30 dB (lệch trung vị 5–16 ms). Đáp án −40 dB tính thêm đuôi rất nhỏ nên muộn
 hơn bộ căn vài chục ms. Khi có từ nói nối sau, sai số lệch về phía sớm, 5% sớm hơn 0,16 s.
 
-**Quãng chừa sau mốc** (mẩu có từ nói nối sau; "lẫn từ sau" tính từ chỗ nối, tức đáp án −40 dB):
+**Mốc đầu từ.** 120 mẩu khác: một câu VIVOS train đã bỏ lặng cuối, nối ngay một mẩu TTS "chào mi na" đã bỏ lặng hai
+đầu; đáp án là chỗ nối. Mốc đầu "chào" trừ đáp án: p5 / p25 / p50 / p75 / p95 = −0,032 / −0,022 / −0,014 / −0,006 /
++0,012 s. Mốc đầu chuẩn hơn mốc cuối nhiều.
 
-| Chừa | Cắt trước cuối từ (−30 dB) | Lẫn hơn 0,1 s của từ sau |
-|---|---|---|
-| 0,05 s | 22% | 2% |
-| **0,1 s** | **12%** | **5%** |
-| 0,15 s | 7% | 59% |
+**Mẩu cắt chỉ lấy hai tiếng.** Mép cắt so với chỗ nối, tức đáp án −40 dB:
 
-Chọn **0,1 s** (`split.positive_tail_s`). Mẩu TTS dừng ở bước cuối còn trong **30 dB** (`split.tts_pos`), đúng chỗ bộ
-căn đặt cuối từ, cộng cùng 0,1 s. Hai loại mẫu dương nhờ vậy dừng cùng một kiểu.
+| Mép | Cách cắt | Lệch ≤ 20 ms | Lệch ≤ 40 ms | Cụt từ | Dính từ bên cạnh > 30 ms |
+|---|---|---|---|---|---|
+| đầu | **đúng mốc** | **66%** | **93%** | 4% quá 30 ms | **9%** |
+| đầu | mốc − 0,01 s | 29% | 87% | 4% quá 30 ms | 30% |
+| cuối | đúng mốc | 23% | 47% | 44% quá 50 ms | 2% |
+| cuối | mốc + 0,02 s | 42% | 63% | 29% quá 50 ms | 3% |
+| cuối | **mốc + 0,03 s** | **42%** | **68%** | **27% quá 50 ms** | **7%** |
+| cuối | mốc + 0,05 s | 32% | 61% | 24% quá 50 ms | 25% |
+
+"Cụt quá 50 ms" ở mép cuối tính tới đáp án −40 dB, nên gồm cả đuôi rất nhỏ dưới −30 dB. Dời mép cắt về chỗ âm nhỏ nhất
+trong ±0,1 s quanh mốc không hơn: mép cuối trung vị về 0 nhưng tản rộng hơn (p5 / p95 −0,162 / +0,072 s), mép đầu tệ đi
+(p5 −0,101 s).
+
+**Câu thật khác mẩu ghép ở mép đầu.** Cắt 224 câu kho từ đúng mốc đầu "trợ" đến mốc cuối "lý" + 0,03 s, vuốt 10 ms hai
+mép, đệm 0,3 s lặng hai đầu như đường mô phỏng đặt mẩu, rồi cho PhoWhisper nghe: chỉ 107 mẩu ra đúng "trợ lý". Phần còn
+lại nghe ra cả từ đứng trước ("chị trợ lý" 11, "những trợ lý" 11, "cựu trợ lý" 8, "các trợ lý" 5): trong lời nói liền,
+nguyên âm của từ trước chạy vào quãng ngậm của "tr", điều mẩu ghép không có. Không đệm lặng thì 133 mẩu đúng, nhưng
+PhoWhisper ghi "unk" cho mẩu âm lạ đầu mẩu, nên phép nghe có đệm mới là phép đo đúng. Dời mép đầu vào trong "tr":
+
+| Mép đầu | Nghe đúng "trợ lý" |
+|---|---|
+| đúng mốc | 107 / 224 |
+| mốc + 0,02 s | 163 |
+| mốc + 0,04 s | 182 |
+| mốc + 0,06 s | 182, bắt đầu mất "trợ" (nghe ra "lý" 6) |
+| mỗi câu thử lần lượt 0 / 0,02 / 0,04 / 0,06 s, lấy lần đầu nghe đúng | **205** |
+
+Chọn: **mép đầu thử lần lượt dời 0 / 0,02 / 0,04 / 0,06 s, mép cuối mốc + 0,03 s** (`split.corpus_pos`), mẩu chỉ được
+giữ khi PhoWhisper nghe ra đúng "trợ lý", không thừa tiếng nào. `data corpus` giữ **205 / 224**: Bud500 180, VLSP 24, FPT 1,
+dài 0,30 / 0,39 / 0,58 s (p5 / p50 / p95); độ dời dùng 0 s ở 107 mẩu, 0,02 s ở 61, 0,04 s ở 24, 0,06 s ở 13. Mẩu TTS
+dừng ở bước cuối còn trong **40 dB** (`split.tts_pos`), đúng đáp án các mép trên được đo theo. Hai mép mọi câu vuốt
+10 ms (`talker.edge_ramp_s`).
 
 **Câu thật.** Cả 224 câu kho học nói "trợ lý" đều căn được, tìm thấy "trợ lý" ở cả 224. Độ dài hai âm tiết p5 / p50 /
-p95 là 0,25 / 0,38 / 0,58 s. `python -m srpipe.tasks.wake.data corpus` cắt cả 224 (dài 0,62 / 1,70 / 2,52 s) và giữ
-**218**: Bud500 190, VLSP 27, FPT 1. Sáu mẩu bỏ vì PhoWhisper nghe lại không ra "trợ lý", phần lớn khi từ ấy ở cuối
-mẩu và câu gốc nói tiếp tên người ("trợ lý long" nghe thành "chợ ly", "quà trợ lý" thành "quà thợ lý").
+p95 là 0,25 / 0,38 / 0,58 s.
 
-**Bao nhiêu giọng trong 218 mẩu giữ lại.** Các kho không có mã người nói, nên đếm bằng vân giọng (Resemblyzer, GE2E)
-của câu nguyên, cosin giữa hai mẩu. Hiệu chuẩn trên VIVOS train, 30 người × 6 câu: cùng người 0,727 / 0,867 / 0,944
+**Bao nhiêu giọng.** Đếm trên 218 câu, những câu PhoWhisper nghe ra "trợ lý" khi cắt kèm 2 s ngữ cảnh trước từ. Các
+kho không có mã người nói, nên đếm bằng vân giọng (Resemblyzer, GE2E) của câu nguyên, cosin giữa hai mẩu. Hiệu chuẩn trên VIVOS train, 30 người × 6 câu: cùng người 0,727 / 0,867 / 0,944
 (p5 / p50 / p95), khác người 0,500 / 0,635 / 0,785; gom cụm liên kết trung bình ở 0,8 ra 40 cụm cho 30 người, ở 0,75 ra
 23 cụm và gộp nhầm. Trên 218 mẩu: cosin giữa hai mẩu 0,451 / 0,638 / 0,815, ngang hai người khác nhau của VIVOS; gom ở
 0,8 ra **97 giọng**, giọng lớn nhất 15 mẩu (7%), năm giọng lớn nhất 31%. 8,1% cặp đạt 0,8, tức khoảng 6% cặp cùng

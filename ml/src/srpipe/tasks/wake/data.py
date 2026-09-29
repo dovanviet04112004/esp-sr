@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,7 +20,7 @@ import numpy as np
 import yaml
 
 from srpipe.core import corpus, screen, splits
-from srpipe.core.audio_io import ItemReader, write_wav
+from srpipe.core.audio_io import ItemReader, ramped, write_wav
 from srpipe.core.config import CONFIGS, data_paths, load_yaml
 from srpipe.generated import grid, lang_vi
 from srpipe.lang import g2p
@@ -101,13 +102,12 @@ def speech_end_s(x: np.ndarray, below_peak_db: float) -> float:
 
 
 def trimmed(clips: list[dict], folder: str, cfg: dict, interim: Path) -> list[dict]:
-    """The clips, each kept one given cut_s at its word's end plus positive_tail_s when that falls inside it."""
-    spec, reader = cfg["split"], ItemReader(interim)
+    """The clips, each kept one given cut_s at its word's end when that falls inside it."""
+    below_peak_db, reader = cfg["split"]["tts_pos"]["below_peak_db"], ItemReader(interim)
     out = []
     for c in clips:
         if c["kept"]:
-            end = speech_end_s(reader.read(synth_item(folder, c)), spec["tts_pos"]["below_peak_db"])
-            end += spec["positive_tail_s"]
+            end = speech_end_s(reader.read(synth_item(folder, c)), below_peak_db)
             c = c | ({"cut_s": round(end, 3)} if end < c["seconds"] else {})
         out.append(c)
     return out
@@ -263,7 +263,7 @@ Dựng bằng `python -m srpipe.tasks.wake.data` (`make splits`), seed {spec["se
 - Chỉ mẩu qua sàng lọc (`interim/screen/rejects.tsv`); không âm bản nào có lời đọc như "{cfg["word"]}" theo giọng
   Bắc, dù viết cách nào.
 - Dương: mẩu TTS có `kept` của `interim/wake/synth_pos`, cắt bỏ khoảng lặng sau từ (`@0-cuối`){real}; âm bản gần
-  âm: của `interim/wake/synth_neg`. Mẩu dương nào cũng dừng {spec["positive_tail_s"]} s sau âm cuối của từ.
+  âm: của `interim/wake/synth_neg`. Mẩu dương nào cũng chỉ có từ đánh thức và dừng ở âm cuối của nó.
 - {spec["val_speakers"]:.0%} người nói VIVOS train và {spec["val_speakers"]:.0%} giọng có sẵn của VieNeu vào `val`
   trọn vẹn, cùng mọi giọng nhân bản từ họ; giọng nhân bản từ kho không có mã người nói chỉ vào `train`.
 - `train_neg` rút {spec["negative_hours"]} giờ lời nói ngẫu nhiên từ {", ".join(spec["learning"])}.
@@ -313,11 +313,15 @@ def link(built: Path, out: Path) -> Path:
 
 
 def corpus_positives(cfg: dict, paths: dict[str, Path]) -> Path:
-    """Cut every learning clip that says the wake word from context_s before the word to positive_tail_s after it, by
-    forced alignment of its text, then hear each cut back: kept when it still says the word. The audio stays in raw/,
-    a cut being its item with @<start>-<end>; interim/wake/corpus_pos/manifest.yaml lists every clip (KEHOACH 3.11)."""
-    spec = cfg["split"]["corpus_pos"] | {"tail_s": cfg["split"]["positive_tail_s"]}
-    word = candidates.sounds(cfg["word"])
+    """Cut every learning clip that says the wake word to the word alone by forced alignment of its text: from its
+    aligned start moved by each of start_shifts_s in turn to tail_s after its aligned end, each try heard back as the
+    simulation plays it, faded and between silences; the first the checker hears as the word and nothing else is
+    kept. The audio stays in raw/, a cut being its item with @<start>-<end>; interim/wake/corpus_pos/manifest.yaml
+    lists every clip and work/cut/ the try kept, or the first (KEHOACH 3.11)."""
+    spec, word = cfg["split"]["corpus_pos"], candidates.sounds(cfg["word"])
+    device_cfg = load_yaml(CONFIGS / cfg["features"])
+    ramp_s = device_cfg["talker"]["edge_ramp_s"]
+    pad = np.zeros(round(device_cfg["session"]["pad_s"] * grid.SAMPLE_RATE_HZ))
     tts, reader = load_yaml(TTS_CONFIG), ItemReader(paths["raw"])
     public = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
     found = [c for c in public if c.item.startswith(tuple(cfg["split"]["learning"])) and says_word(c, word)]
@@ -332,25 +336,29 @@ def corpus_positives(cfg: dict, paths: dict[str, Path]) -> Path:
         for k, c in enumerate(found)
     ]
     times = engines.align(asked, tts, work, paths["cache"])
-    rows = []
+    rows, tries = [], {}
     for k, c in enumerate(found):
         row = {"item": c.item, "speaker": c.speaker or splits.ABSENT, "text": c.text, "kept": False}
         if span := spoken_at(times.get(str(k), []), word):
-            start, end = max(0.0, span[0] - spec["context_s"]), min(seconds[c.item], span[1] + spec["tail_s"])
-            row |= {"word_s": [round(t, 3) for t in span], "cut": cut_item(c.item, start, end)}
-            row["seconds"] = round(end - start, 3)
-            write_wav(work / "cut" / f"{k:05d}.wav", reader.read(row["cut"]))
+            row["word_s"] = [round(t, 3) for t in span]
+            end = min(seconds[c.item], span[1] + spec["tail_s"])
+            for n, shift in enumerate(spec["start_shifts_s"]):
+                start = max(0.0, span[0] + shift)
+                cut, wav = cut_item(c.item, start, end), work / "tries" / f"{k:05d}_{n}.wav"
+                write_wav(wav, np.concatenate([pad, ramped(reader.read(cut), ramp_s), pad]))
+                tries[f"{k}/{n}"] = {"cut": cut, "wav": wav, "shift_s": shift, "seconds": round(end - start, 3)}
         rows.append(row)
-    cuts = [
-        {"id": f"cut/{k}", "wav": str(work / "cut" / f"{k:05d}.wav"), "targets": [cfg["word"]]}
-        for k, row in enumerate(rows)
-        if "cut" in row
-    ]
-    heard = engines.hear(cuts, tts, work, paths["cache"])
+    asked = [{"id": key, "wav": str(t["wav"]), "targets": [cfg["word"]]} for key, t in tries.items()]
+    heard = engines.hear(asked, tts, work, paths["cache"])
     for k, row in enumerate(rows):
-        if "cut" in row:
-            row["heard"] = heard[f"cut/{k}"]["text"]
-            row["kept"] = corpus.says(candidates.sounds(row["heard"]), word)
+        mine = [key for key in tries if key.split("/")[0] == str(k)]
+        good = [key for key in mine if candidates.sounds(heard[key]["text"]) == word]
+        if mine:
+            chosen = tries[(good or mine)[0]]
+            row |= {field: chosen[field] for field in ("cut", "shift_s", "seconds")}
+            row |= {"heard": heard[(good or mine)[0]]["text"], "kept": bool(good)}
+            (work / "cut").mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(chosen["wav"], work / "cut" / f"{k:05d}.wav")
     manifest = out / "manifest.yaml"
     body = {"word": cfg["word"], "corpus_pos": spec, "clips": rows}
     manifest.write_text(yaml.safe_dump(body, allow_unicode=True, sort_keys=False), encoding="utf-8")

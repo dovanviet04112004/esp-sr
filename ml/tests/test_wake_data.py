@@ -103,7 +103,7 @@ def test_hard_files_mine_the_families_by_role_and_leave_the_other_five_as_they_w
 
 def test_tts_positives_end_just_after_their_word(tmp_path) -> None:
     cfg = pinned()
-    hop, fs, tail = grid.HOP_SAMPLES, grid.SAMPLE_RATE_HZ, cfg["split"]["positive_tail_s"]
+    hop, fs = grid.HOP_SAMPLES, grid.SAMPLE_RATE_HZ
     word = np.zeros(fs)
     word[10 * hop : 30 * hop] = 0.5 * np.sin(np.arange(20 * hop) * 0.3)
     assert data.speech_end_s(word, 40.0) == 30 * hop / fs
@@ -112,7 +112,7 @@ def test_tts_positives_end_just_after_their_word(tmp_path) -> None:
     clips = [{"engine": "f5", "id": i, "speaker": "S", "kept": i != "c", "seconds": 1.0} for i in ("a", "b", "c")]
     clips[1]["seconds"] = 30 * hop / fs
     out = data.trimmed(clips, "synth_pos", cfg, tmp_path)
-    assert out[0]["cut_s"] == round(30 * hop / fs + tail, 3) and "cut_s" not in out[1] and "cut_s" not in out[2]
+    assert out[0]["cut_s"] == round(30 * hop / fs, 3) and "cut_s" not in out[1] and "cut_s" not in out[2]
     rows = data.synth_rows(out, "synth_pos", {})["train"]
     assert rows[0].item == f"wake/synth_pos/f5/a.wav@0.000-{out[0]['cut_s']:.3f}"
     assert rows[1].item == "wake/synth_pos/f5/b.wav" and len(rows) == 2
