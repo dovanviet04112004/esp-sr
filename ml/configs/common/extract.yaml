@@ -21,7 +21,7 @@ cut:                               # as wake.yaml split.corpus_pos, measured in 
   start_shifts_s: [0.0, 0.02, 0.04, 0.06]   # tried in turn after the aligned start; the first heard as the phrase
                                    #   alone is kept
   tail_s: 0.03                     # added to the aligned end, which runs early
-  align_batch: 3000                # sentences per aligner run
+  align_batch: 1500                # sentences per aligner run; its peak memory grows with it
 extracts:
   hf_extract:
     phrases:                       # matched by their northern reading, so "trợ lí" is "trợ lý"; chụp ảnh stays out,
