@@ -724,10 +724,16 @@ chừng nửa giây, 28 lần mỗi triệu âm tiết lời nói: ngắn và th
 siết báo nhầm để sau, khi có dữ liệu thu thật.
 
 **Dữ liệu dương** gồm tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, và **người thật nói
-"trợ lý" trong kho học**: 224 câu, cắt từ 2 s trước "trợ" (một trường nhìn, hay từ đầu câu nếu gần hơn) đến ngay sau
-"lý" theo mốc thời gian từng từ của PhoWhisper, nên cuối lời của mẩu cắt là cuối từ đánh thức; câu mà PhoWhisper không
-nghe ra từ ấy thì bỏ. Các kho ấy không có mã người nói, nên mẩu cắt chỉ vào `train`. Tất cả qua đường mô phỏng board
-(§1.2). Từ đánh thức được nhận theo **cách đọc** giọng Bắc của `lang_vi`, không theo chữ viết: "trợ lí" cũng là nó.
+"trợ lý" trong kho học**: 224 câu, cắt từ 2 s trước "trợ" (một trường nhìn, hay từ đầu câu nếu gần hơn) đến sau cuối
+"lý" một quãng ở cấu hình. Cuối "lý" lấy bằng **căn cưỡng bức** (Montreal Forced Aligner, mô hình tiếng Việt, chạy
+trong Docker) trên lời của câu: mốc ấy trùng lúc âm tụt 30 dB dưới đỉnh, lệch trung vị 16 ms khi có từ nói nối sau.
+Mốc từng từ đọc từ chú ý chéo của PhoWhisper thì không dùng: nó chậm hơn 6 s mỗi mẩu trên card 4 GB, và mốc từ của
+Whisper kém căn cưỡng bức, lý do WhisperX (Bain và cộng sự, 2023) căn lại bằng mô hình âm vị (`docs/measurements/wake.md`
+§6). Mẩu cắt nào PhoWhisper nghe lại không ra từ ấy thì bỏ. Các kho
+ấy không có mã người nói, nên mẩu cắt chỉ vào `train`. Mẩu TTS cũng cắt: TTS để lại khoảng lặng sau từ (VieNeu trung vị
+0,16 s, 5% số mẩu tới 0,39 s), nên mẩu dương TTS dừng ở bước cuối còn trong 30 dB so với bước to nhất của nó, đúng chỗ
+bộ căn đặt cuối từ, cộng cùng quãng ấy. Mọi mẩu dương vì thế kết thúc cùng một quãng sau âm cuối của từ, và nhãn đặt ở
+đó. Tất cả qua đường mô phỏng board (§1.2). Từ đánh thức được nhận theo **cách đọc** giọng Bắc của `lang_vi`, không theo chữ viết: "trợ lí" cũng là nó.
 **Âm bản** gồm các kho lời nói tiếng Việt trừ câu đọc ra từ đánh thức, cộng một bộ nhẹ cụm ngắn đọc bằng giọng TTS của
 mẫu dương: cụm của kho cách từ đánh thức một thành phần âm tiết ("chị lý", "vợ lý") và cụm hay gặp nhất mở đầu bằng
 "trợ" ("trợ giúp", "trợ cấp"), để giọng TTS không thành dấu hiệu của lớp dương và một mình "trợ" không đủ đánh thức.
@@ -1088,8 +1094,8 @@ ml/
 ├── pyproject.toml  ├── uv.lock        # ✅ ghim phiên bản, không requirements.txt rời
 ├── .env.example                       # ✅ commit — biến và giá trị giả
 ├── configs/
-│   ├── common/{paths.yaml, hardware.yaml, tts.yaml, screen.yaml}   # tts.yaml: bộ TTS và bộ nghe kiểm, ghim
-│   │                                  #   repo@revision; screen.yaml: bố cục từng kho và ngưỡng sàng lọc (§1.2)
+│   ├── common/{paths.yaml, hardware.yaml, tts.yaml, screen.yaml}   # tts.yaml: bộ TTS, bộ nghe kiểm và bộ căn
+│   │                                  #   mốc từng từ, ghim bản; screen.yaml: bố cục từng kho và ngưỡng sàng lọc (§1.2)
 │   ├── afe/{hpf.yaml, aec.yaml, doa.yaml, gsc.yaml, bss.yaml, ns_omlsa.yaml, vad.yaml, agc.yaml}  # chỉ ghi đè cho thí nghiệm; mặc định là contracts/afe.yaml
 │   ├── scenes/standard.yaml           # bộ cảnh có nhãn chuẩn của E4-T4: phòng, RT60, góc, SNR, seed
 │   ├── scenes/device.yaml             # đường mô phỏng board của E4-T8: kho phòng, mức nói, nhiễu, micro, log-mel
@@ -1121,7 +1127,8 @@ ml/
 │   │
 │   ├── tts/                           # ★ tiếng tổng hợp cho mọi nhánh: dương wake (E11-T7), tiếng nguồn của synth
 │   │   │                              #   (§3.13); không biết nhánh nào gọi nó
-│   │   ├── engines.py                 # gọi ml/tts/<bộ>/run.py qua uv run: giọng có sẵn, sinh theo lô, nghe lại
+│   │   ├── engines.py                 # gọi ml/tts/<bộ>/run.py qua uv run: giọng có sẵn, sinh theo lô, nghe lại;
+│   │   │                              #   căn mốc từng từ bằng Montreal Forced Aligner chạy trong Docker
 │   │   └── clips.py                   # giọng nhân bản từ kho có chữ; sinh → nghe lại → dòng manifest: chữ bộ nghe
 │   │                                  #   kiểm đọc ra và độ chênh log-xác suất giữa chữ ấy với chữ phải nói, kể cả dấu
 │   │
