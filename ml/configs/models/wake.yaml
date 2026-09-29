@@ -57,7 +57,7 @@ synth:                             # E11-T7: clips from the engines of common/tt
   negatives:                       # a light set read by the voices of the positives, so a TTS voice is no cue (ADR-0011)
     misses: 1                      # every corpus phrase this many syllable components from the word: 6 for "trợ lý"
     openings: 10                   # the commonest corpus phrases of its length opening with its first syllable
-    phrases: []
+    phrases: [trợ, lý]             # each half said alone must not wake the device either
     voices: {vieneu: 6, f5: 4}     # per phrase, drawn with the seed; VieNeu from presets and clones
 split:                             # E11-T11: data/splits/wake/<version> by python -m srpipe.tasks.wake.data (KEHOACH 1.3)
   version: v4
