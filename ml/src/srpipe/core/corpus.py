@@ -5,17 +5,21 @@ configs/common/screen.yaml."""
 from __future__ import annotations
 
 import csv
+import functools
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
 import pyarrow.parquet as pq
 
+from srpipe.generated import lang_vi
+from srpipe.lang import g2p
 from srpipe.lang.normalize import LangError, normalize
 
 AUDIO_SUFFIXES = (".wav", ".flac", ".mp3")
 TEXT_COLUMN = "transcription"
 CHUNK_CHARS = 200
+NORTH = lang_vi.DIALECTS.index("north")
 
 
 @dataclass(frozen=True)
@@ -93,3 +97,19 @@ def says(syllables: list[str], phrase: list[str]) -> bool:
     """Whether phrase occurs in syllables as consecutive syllables."""
     n = len(phrase)
     return any(syllables[k : k + n] == phrase for k in range(len(syllables) - n + 1))
+
+
+@functools.cache
+def reading(syllable: str) -> tuple[str, ...]:
+    """The units of a normalised syllable in the north reading, so "lí" reads as "lý"; itself when spelling cannot
+    build it."""
+    try:
+        (syllable_read,) = g2p.syllables(syllable, NORTH)
+    except (LangError, ValueError):
+        return (syllable,)
+    return tuple(syllable_read.units())
+
+
+def sounds(text: str) -> list[tuple[str, ...]]:
+    """The syllables of text as the north says them: two spellings of one phrase compare equal."""
+    return [reading(s) for s in words(text)]

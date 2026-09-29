@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import functools
 import itertools
 import json
 from collections import Counter
@@ -22,13 +21,12 @@ import numpy as np
 import pyarrow.parquet as pq
 
 from srpipe.core.config import data_paths, load_yaml
-from srpipe.core.corpus import words
+from srpipe.core.corpus import NORTH, words
 from srpipe.lang import g2p, lexicon
 from srpipe.lang.normalize import LangError, normalize
 from srpipe.tasks.wake import CONFIG
 
 COMPONENTS = ("onset", "glide", "nucleus", "coda", "tone")
-NORTH = 0
 SEPARATOR = -1
 PARQUET_CORPORA = ("fpt_open", "vlsp", "bud500")
 CV_FILES = ("validated.tsv", "other.tsv")
@@ -79,22 +77,6 @@ def component_codes(vocab: list[str]) -> tuple[np.ndarray, dict[str, dict[str, i
             continue
         codes[i] = [tables[c].setdefault(getattr(syllable, c), len(tables[c])) for c in COMPONENTS]
     return codes, tables
-
-
-@functools.cache
-def reading(syllable: str) -> tuple[str, ...]:
-    """The units of a normalised syllable in the north reading, so "lí" reads as "lý"; itself when spelling cannot
-    build it."""
-    try:
-        (syllable_read,) = g2p.syllables(syllable, NORTH)
-    except (LangError, ValueError):
-        return (syllable,)
-    return tuple(syllable_read.units())
-
-
-def sounds(text: str) -> list[tuple[str, ...]]:
-    """The syllables of text as the north says them: two spellings of one phrase compare equal."""
-    return [reading(s) for s in words(text)]
 
 
 def pair_per_m(pair: tuple[str, str], stream: np.ndarray, vocab: list[str]) -> float:

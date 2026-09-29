@@ -75,12 +75,12 @@ def positive_requests(cfg: dict, spec: dict, presets: list[dict], refs: list[cli
 def negative_texts(cfg: dict, stream: np.ndarray, vocab: list[str], codes: np.ndarray, tables: dict) -> list[str]:
     """The corpus neighbours of the wake word, commonest first, then its commonest openings, then the hand-picked
     phrases, without repeats and without any that sounds like the wake word, however it is spelled."""
-    spec, word = cfg["synth"]["negatives"], candidates.sounds(cfg["word"])
+    spec, word = cfg["synth"]["negatives"], corpus.sounds(cfg["word"])
     near = candidates.neighbours(cfg["word"], spec["misses"], stream, vocab, codes, tables)
     opening = [p for p, _ in candidates.openings(cfg["word"], stream, vocab).most_common()]
-    opening = [p for p in opening if not corpus.says(candidates.sounds(p), word)][: spec["openings"]]
+    opening = [p for p in opening if not corpus.says(corpus.sounds(p), word)][: spec["openings"]]
     texts = dict.fromkeys([*(p for p, _ in near.most_common()), *opening, *spec["phrases"]])
-    return [t for t in texts if not corpus.says(candidates.sounds(t), word)]
+    return [t for t in texts if not corpus.says(corpus.sounds(t), word)]
 
 
 def negative_requests(

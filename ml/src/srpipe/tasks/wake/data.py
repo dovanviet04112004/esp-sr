@@ -26,7 +26,7 @@ from srpipe.generated import grid, lang_vi
 from srpipe.lang import g2p
 from srpipe.lang.normalize import LangError, normalize
 from srpipe.scenes import device, room
-from srpipe.tasks.wake import CONFIG, candidates, synth
+from srpipe.tasks.wake import CONFIG, synth
 from srpipe.tts import CONFIG as TTS_CONFIG
 from srpipe.tts import engines
 
@@ -123,8 +123,8 @@ def corpus_rows(clips: list[dict], roles: dict[str, str]) -> dict[str, list[spli
 
 
 def spoken_at(words: list[dict], phrase: list[tuple[str, ...]]) -> tuple[float, float] | None:
-    """Start and end in seconds of the first run of heard words that sounds like phrase (candidates.sounds), or None."""
-    heard = [(candidates.reading(syllable), w) for w in words for syllable in corpus.words(w["word"])]
+    """Start and end in seconds of the first run of heard words that sounds like phrase (corpus.sounds), or None."""
+    heard = [(corpus.reading(syllable), w) for w in words for syllable in corpus.words(w["word"])]
     for k in range(len(heard) - len(phrase) + 1):
         if [syllable for syllable, _ in heard[k : k + len(phrase)]] == phrase:
             return heard[k][1]["start"], heard[k + len(phrase) - 1][1]["end"]
@@ -137,8 +137,8 @@ def cut_item(item: str, start_s: float, end_s: float) -> str:
 
 
 def says_word(clip: corpus.Clip, word: list[tuple[str, ...]]) -> bool:
-    """Whether the clip's text holds a phrase that sounds like word (candidates.sounds), however it is spelled."""
-    return corpus.says(candidates.sounds(clip.text or ""), word)
+    """Whether the clip's text holds a phrase that sounds like word (corpus.sounds), however it is spelled."""
+    return corpus.says(corpus.sounds(clip.text or ""), word)
 
 
 def draw_hours(clips: list[corpus.Clip], seconds: dict[str, float], hours: float, seed: int) -> list[corpus.Clip]:
@@ -156,7 +156,7 @@ def draw_hours(clips: list[corpus.Clip], seconds: dict[str, float], hours: float
 def build(cfg: dict, public: list[corpus.Clip], seconds: dict[str, float], manifests: dict[str, list[dict]]) -> dict:
     """Every split file of the version as rows, from the screened public clips, their lengths and the synth
     manifests by folder."""
-    spec, word = cfg["split"], candidates.sounds(cfg["word"])
+    spec, word = cfg["split"], corpus.sounds(cfg["word"])
     usable = [c for c in public if not says_word(c, word)]
     learning = [c for c in usable if c.item.startswith(tuple(spec["learning"]))]
     vivos = {c.speaker for c in learning if c.speaker}
@@ -318,7 +318,7 @@ def corpus_positives(cfg: dict, paths: dict[str, Path]) -> Path:
     simulation plays it, faded and between silences; the first the checker hears as the word and nothing else is
     kept. The audio stays in raw/, a cut being its item with @<start>-<end>; interim/wake/corpus_pos/manifest.yaml
     lists every clip and work/cut/ the try kept, or the first (KEHOACH 3.11)."""
-    spec, word = cfg["split"]["corpus_pos"], candidates.sounds(cfg["word"])
+    spec, word = cfg["split"]["corpus_pos"], corpus.sounds(cfg["word"])
     device_cfg = load_yaml(CONFIGS / cfg["features"])
     ramp_s = device_cfg["talker"]["edge_ramp_s"]
     pad = np.zeros(round(device_cfg["session"]["pad_s"] * grid.SAMPLE_RATE_HZ))
@@ -352,7 +352,7 @@ def corpus_positives(cfg: dict, paths: dict[str, Path]) -> Path:
     heard = engines.hear(asked, tts, work, paths["cache"])
     for k, row in enumerate(rows):
         mine = [key for key in tries if key.split("/")[0] == str(k)]
-        good = [key for key in mine if candidates.sounds(heard[key]["text"]) == word]
+        good = [key for key in mine if corpus.sounds(heard[key]["text"]) == word]
         if mine:
             chosen = tries[(good or mine)[0]]
             row |= {field: chosen[field] for field in ("cut", "shift_s", "seconds")}
