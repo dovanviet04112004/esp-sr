@@ -297,8 +297,9 @@ PhoWhisper ghi "unk" cho mẩu âm lạ đầu mẩu, nên phép nghe có đệm
 | mốc + 0,06 s | 182, bắt đầu mất "trợ" (nghe ra "lý" 6) |
 | mỗi câu thử lần lượt 0 / 0,02 / 0,04 / 0,06 s, lấy lần đầu nghe đúng | **205** |
 
-Chọn: **mép đầu thử lần lượt dời 0 / 0,02 / 0,04 / 0,06 s, mép cuối mốc + 0,03 s** (`split.corpus_pos`), mẩu chỉ được
-giữ khi PhoWhisper nghe ra đúng "trợ lý", không thừa tiếng nào. `data corpus` giữ **205 / 224**: Bud500 180, VLSP 24, FPT 1,
+Chọn: **mép đầu thử lần lượt dời 0 / 0,02 / 0,04 / 0,06 s, mép cuối mốc + 0,03 s** (mục `cut` của
+`configs/common/extract.yaml`), mẩu chỉ được giữ khi PhoWhisper nghe ra đúng "trợ lý", không thừa tiếng nào.
+`data corpus` giữ **205 / 224**: Bud500 180, VLSP 24, FPT 1,
 dài 0,30 / 0,39 / 0,58 s (p5 / p50 / p95); độ dời dùng 0 s ở 107 mẩu, 0,02 s ở 61, 0,04 s ở 24, 0,06 s ở 13. Mẩu TTS
 dừng ở bước cuối còn trong **40 dB** (`split.tts_pos`), đúng đáp án các mép trên được đo theo. Hai mép mọi câu vuốt
 10 ms (`talker.edge_ramp_s`).

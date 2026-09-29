@@ -55,6 +55,7 @@ TEXT_COLUMNS = (
 )
 RETRY_CODES = (429, 500, 502, 503, 504)
 STROKED_D = str.maketrans("đĐ", "dD")
+INDEX_FIELDS = ("file", "phrase", "seconds", "text", "source", "revision", "key", "shift_s", "heard")
 
 
 class Http:
@@ -249,6 +250,11 @@ def decode(data: bytes) -> np.ndarray:
     return to_grid_rate(x.mean(axis=1), rate)
 
 
+def clips_folder(raw: Path, name: str) -> Path:
+    """Where the extract of that name keeps its clips and clips.tsv."""
+    return raw / "speech" / name
+
+
 class Job:
     """One extract of the config: its phrases, sources, and where its state and clips live."""
 
@@ -256,7 +262,7 @@ class Job:
         self.name, self.cfg, self.spec, self.http = name, cfg, cfg["extracts"][name], http
         self.phrases = Phrases(self.spec["phrases"])
         self.state = paths["cache"] / "extract" / name
-        self.out = paths["raw"] / "speech" / name
+        self.out = clips_folder(paths["raw"], name)
         self.manifest = paths["manifests"] / "speech" / f"{name}.yaml"
         self.hub, self.read_ahead = cfg["http"]["hub"], cfg["http"]["read_ahead_bytes"]
         self.paths, self.lock, self.kept = paths, threading.Lock(), None
@@ -757,13 +763,13 @@ def write_index(job: Job) -> None:
     pins = job.pins()
     rows = [(c, m) for f in sorted((job.state / "cut").glob("*.jsonl")) for m in read_jsonl(f) for c in m["clips"]]
     repo_of = {slug(s["repo"]): s["repo"] for s in job.spec["sources"]}
-    fields = ("file", "phrase", "text", "source", "revision", "key", "shift_s", "heard")
-    lines = ["\t".join(fields)]
+    lines = ["\t".join(INDEX_FIELDS)]
     for c, m in rows:
         source = repo_of[m["key"].split("__")[0]]
         values = (
             c["file"],
             c["phrase"],
+            round(c["cut_s"][1] - c["cut_s"][0], 3),
             m["text"],
             source,
             pins[source]["revision"],
@@ -794,6 +800,14 @@ def write_index(job: Job) -> None:
     }
     job.manifest.parent.mkdir(parents=True, exist_ok=True)
     job.manifest.write_text(yaml.safe_dump(body, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+
+def read_index(folder: Path) -> list[dict]:
+    """Every clip of folder/clips.tsv as {field: value}, seconds a number and file relative to folder."""
+    lines = (folder / "clips.tsv").read_text(encoding="utf-8").splitlines()
+    fields = lines[0].split("\t")
+    rows = [dict(zip(fields, line.split("\t"), strict=True)) for line in lines[1:]]
+    return [r | {"seconds": float(r["seconds"])} for r in rows]
 
 
 def report(job: Job) -> str:

@@ -149,8 +149,9 @@ def test_a_cut_keeps_the_first_start_heard_alone_and_deletes_the_sentence(tmp_pa
     (clip,) = (tmp_path / "raw/speech/t/tro_ly").glob("*.wav")
     assert abs(sf.info(str(clip)).duration - (1.0 + job.cfg["cut"]["tail_s"] - 0.52)) < 0.002
     assert not list((tmp_path / "cache/extract/t/whole").iterdir())
-    index = (tmp_path / "raw/speech/t/clips.tsv").read_text(encoding="utf-8").splitlines()
-    assert len(index) == 2 and "\t0.02\t" in index[1]
+    (row,) = extract.read_index(tmp_path / "raw/speech/t")
+    assert row["file"] == str(clip.relative_to(tmp_path / "raw/speech/t")) and row["shift_s"] == "0.02"
+    assert abs(row["seconds"] - sf.info(str(clip)).duration) < 0.002
     manifest = yaml.safe_load((tmp_path / "manifests/speech/t.yaml").read_text(encoding="utf-8"))
     assert manifest["counts"]["by_phrase"] == {"trợ lý": 1} and manifest["sources"][0]["revision"] == "rev0"
     (done,) = extract.read_jsonl(next((tmp_path / "cache/extract/t/cut").glob("*.jsonl")))

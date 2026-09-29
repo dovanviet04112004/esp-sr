@@ -67,10 +67,8 @@ split:                             # E11-T11: data/splits/wake/<version> by pyth
   negative_hours: 100              # public speech drawn from learning into train_neg
   test_neg: [speech/common_voice_vi/, speech/vivos/test/]   # no reference voice came from these
   val_from_test: {speech/common_voice_vi/: 0.4}   # share of its speakers moved whole into val_neg (KEHOACH 3.11)
-  corpus_pos:                      # learning clips that say the word, cut to the word alone as real positives (KEHOACH 3.11)
-    start_shifts_s: [0.0, 0.02, 0.04, 0.06]   # tried in turn after the aligned start, which often keeps the last sound
-                                   #   of the previous word; the first heard as the word alone is kept (wake.md §6)
-    tail_s: 0.03                   # added to the aligned end, which runs early: median 12 ms off the true end
+  real_pos: hf_extract             # the extract of common/extract.yaml whose clips of the word are the real positives,
+                                   #   train only as it names no speakers (KEHOACH 3.11)
   tts_pos:
     below_peak_db: 40.0            # a TTS positive ends at its last hop within this of its loudest, the true end the
                                    #   corpus cuts are measured against

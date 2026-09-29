@@ -1,12 +1,14 @@
 """Wake split: voices follow their speaker's role, clones of speakerless corpora train, negatives never say the wake
 word, test_neg comes only from its corpora less the speakers moved whole into val_neg, train_neg stops at its hours,
-and corpus clips that say the word join the positives as cuts around it."""
+and the extract's clips of the word join the train positives."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
-from srpipe.core import corpus, splits
+from srpipe.core import corpus, extract, splits
 from srpipe.core.audio_io import write_wav
 from srpipe.core.config import load_yaml
 from srpipe.generated import grid
@@ -138,36 +140,28 @@ def test_simulate_links_a_twin_build_instead_of_running_it_again(tmp_path, monke
     assert linked.stat().st_ino == (built / "shard_00000.features.npy").stat().st_ino
 
 
-def test_corpus_clips_that_say_the_word_join_the_positives_cut_around_it() -> None:
-    heard = [
-        {"word": "theo", "start": 0.0, "end": 0.8},
-        {"word": "Trợ", "start": 0.84, "end": 1.06},
-        {"word": "lý,", "start": 1.06, "end": 1.2},
-        {"word": "trợ", "start": 2.0, "end": 2.2},
+def test_the_extracts_clips_of_the_word_join_the_train_positives(tmp_path: Path) -> None:
+    folder = tmp_path / "speech" / "x"
+    folder.mkdir(parents=True)
+    rows = [
+        ["tro_ly/a__0.wav", "trợ lí", "0.52", "nhờ trợ lí", "o/d", "rev0", "a", "0.0", "Trợ lí."],
+        ["mo_cua/b__0.wav", "mở cửa", "0.4", "mở cửa ra", "o/d", "rev0", "b", "0.0", "Mở cửa."],
     ]
-    assert data.spoken_at(heard, corpus.sounds("trợ lý")) == (0.84, 1.2)
-    assert data.spoken_at(heard, corpus.sounds("trợ lí")) == (0.84, 1.2)
-    assert data.spoken_at(heard, corpus.sounds("chào mi na")) is None
-    assert data.says_word(corpus.Clip("a", None, "nhờ trợ lí nhé"), corpus.sounds("trợ lý"))
-    assert not data.says_word(corpus.Clip("a", None, "hỗ trợ lực lượng"), corpus.sounds("trợ lý"))
-    assert (
-        data.cut_item("speech/bud500/data/train-0.parquet#6", 0.0, 1.25)
-        == "speech/bud500/data/train-0.parquet#6@0.000-1.250"
-    )
+    lines = [extract.INDEX_FIELDS, *rows]
+    (folder / "clips.tsv").write_text("".join("\t".join(r) + "\n" for r in lines), encoding="utf-8")
     cfg = pinned()
     cfg["word"] = "trợ lý"
-    cfg["split"] |= {"val_speakers": 0.5, "negative_hours": 1.0}
+    cfg["split"] |= {"val_speakers": 0.5, "negative_hours": 1.0, "real_pos": "x"}
+    real = data.real_positives(cfg, tmp_path)
+    assert real == {"speech/x/tro_ly/a__0.wav": 0.52}
+    assert data.says_word(corpus.Clip("a", None, "nhờ trợ lí nhé"), corpus.sounds("trợ lý"))
+    assert not data.says_word(corpus.Clip("a", None, "hỗ trợ lực lượng"), corpus.sounds("trợ lý"))
     public = [corpus.Clip(f"speech/bud500/data/train-0.parquet#{n}", None, "một câu") for n in range(3)]
     public += [corpus.Clip("speech/bud500/data/train-0.parquet#3", None, "theo các trợ lý tổng thống")]
-    seconds = dict.fromkeys((c.item for c in public), 1.0)
-    cut = data.cut_item("speech/bud500/data/train-0.parquet#3", 0.0, 1.25)
-    found = [
-        {"item": "speech/bud500/data/train-0.parquet#3", "speaker": splits.ABSENT, "kept": True, "cut": cut},
-        {"item": "speech/bud500/data/train-0.parquet#9", "speaker": splits.ABSENT, "kept": False},
-    ]
-    manifests = {synth.SETS["positives"]: [], synth.SETS["negatives"]: [], data.CORPUS_POS: found}
-    files = data.build(cfg, public, seconds, manifests)
-    assert [(r.item, r.origin) for r in files["train_pos.txt"]] == [(cut, "public")]
+    seconds = dict.fromkeys((c.item for c in public), 1.0) | real
+    manifests = {synth.SETS["positives"]: [], synth.SETS["negatives"]: []}
+    files = data.build(cfg, public, seconds, manifests, tuple(real))
+    assert [(r.item, r.spk, r.origin) for r in files["train_pos.txt"]] == [("speech/x/tro_ly/a__0.wav", "-", "public")]
     assert not files["val_pos.txt"]
     negatives = [r.item for name in ("train_neg.txt", "val_neg.txt", "test_neg.txt") for r in files[name]]
     assert "speech/bud500/data/train-0.parquet#3" not in negatives and len(negatives) == 3

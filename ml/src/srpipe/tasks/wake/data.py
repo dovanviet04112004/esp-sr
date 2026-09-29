@@ -1,9 +1,9 @@
 """Split wake/v<n> (KEHOACH 1.3, 3.11): kept TTS clips of E11-T7 and public speech, by role and label.
 
-corpus cuts learning clips that say the wake word around it as real positives; split sorts positives and near misses
-by the role of their voice, public negatives from the corpora of the reference voices, test_neg from Common Voice and
-VIVOS test, and near-miss families into hard files when on; simulate runs each file through the board simulation,
-linking a file another version built the same way. Run: python -m srpipe.tasks.wake.data {corpus,split,simulate}
+split sorts TTS positives and near misses by the role of their voice, takes the extract's clips of the wake word as
+real positives, public negatives from the corpora of the reference voices, test_neg from Common Voice and VIVOS test,
+and near-miss families into hard files when on; simulate runs each file through the board simulation, linking a file
+another version built the same way. Run: python -m srpipe.tasks.wake.data {split,simulate}
 """
 
 from __future__ import annotations
@@ -12,26 +12,22 @@ import argparse
 import json
 import os
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import yaml
 
-from srpipe.core import corpus, screen, splits
-from srpipe.core.audio_io import ItemReader, ramped, write_wav
+from srpipe.core import corpus, extract, screen, splits
+from srpipe.core.audio_io import ItemReader
 from srpipe.core.config import CONFIGS, data_paths, load_yaml
 from srpipe.generated import grid, lang_vi
 from srpipe.lang import g2p
 from srpipe.lang.normalize import LangError, normalize
 from srpipe.scenes import device, room
 from srpipe.tasks.wake import CONFIG, synth
-from srpipe.tts import CONFIG as TTS_CONFIG
-from srpipe.tts import engines
 
 PUBLIC, SYNTH = "public", "synth"
-CORPUS_POS = "corpus_pos"
 
 
 @dataclass
@@ -113,24 +109,6 @@ def trimmed(clips: list[dict], folder: str, cfg: dict, interim: Path) -> list[di
     return out
 
 
-def corpus_rows(clips: list[dict], roles: dict[str, str]) -> dict[str, list[splits.Row]]:
-    """Kept cuts of the corpus positives as public rows, by the role of their speaker; train when it has none."""
-    rows: dict[str, list[splits.Row]] = {"train": [], "val": []}
-    for c in clips:
-        if c["kept"]:
-            rows[roles.get(c["speaker"], "train")].append(splits.Row(c["cut"], c["speaker"], splits.ABSENT, PUBLIC))
-    return rows
-
-
-def spoken_at(words: list[dict], phrase: list[tuple[str, ...]]) -> tuple[float, float] | None:
-    """Start and end in seconds of the first run of heard words that sounds like phrase (corpus.sounds), or None."""
-    heard = [(corpus.reading(syllable), w) for w in words for syllable in corpus.words(w["word"])]
-    for k in range(len(heard) - len(phrase) + 1):
-        if [syllable for syllable, _ in heard[k : k + len(phrase)]] == phrase:
-            return heard[k][1]["start"], heard[k + len(phrase) - 1][1]["end"]
-    return None
-
-
 def cut_item(item: str, start_s: float, end_s: float) -> str:
     """The item that reads only [start_s, end_s) of item (core.audio_io.ItemReader)."""
     return f"{item}@{start_s:.3f}-{end_s:.3f}"
@@ -153,20 +131,24 @@ def draw_hours(clips: list[corpus.Clip], seconds: dict[str, float], hours: float
     return [clips[k] for k in sorted(taken)]
 
 
-def build(cfg: dict, public: list[corpus.Clip], seconds: dict[str, float], manifests: dict[str, list[dict]]) -> dict:
-    """Every split file of the version as rows, from the screened public clips, their lengths and the synth
-    manifests by folder."""
+def build(
+    cfg: dict,
+    public: list[corpus.Clip],
+    seconds: dict[str, float],
+    manifests: dict[str, list[dict]],
+    real: tuple[str, ...] = (),
+) -> dict:
+    """Every split file of the version as rows, from the screened public clips, their lengths, the synth manifests by
+    folder and the items of the real positives, which name no speaker and so only feed train."""
     spec, word = cfg["split"], corpus.sounds(cfg["word"])
     usable = [c for c in public if not says_word(c, word)]
     learning = [c for c in usable if c.item.startswith(tuple(spec["learning"]))]
     vivos = {c.speaker for c in learning if c.speaker}
-    tts = [clips for folder, clips in manifests.items() if folder != CORPUS_POS]
-    presets = {voice_of(c) for clips in tts for c in clips if c["id"].startswith("preset_")}
+    presets = {voice_of(c) for clips in manifests.values() for c in clips if c["id"].startswith("preset_")}
     roles = splits.speaker_roles(vivos, {"val": spec["val_speakers"]}, "train", spec["seed"])
     roles |= splits.speaker_roles(presets, {"val": spec["val_speakers"]}, "train", spec["seed"])
     pos, near = (synth_rows(manifests[synth.SETS[s]], synth.SETS[s], roles) for s in ("positives", "negatives"))
-    real = corpus_rows(manifests.get(CORPUS_POS, []), roles)
-    pos = {role: pos[role] + real[role] for role in pos}
+    pos["train"] += [splits.Row(item, splits.ABSENT, splits.ABSENT, PUBLIC) for item in real]
     heard = [c for c in learning if roles.get(c.speaker or "", "train") == "train"]
     val = [c for c in learning if roles.get(c.speaker or "") == "val"]
     drawn = draw_hours(heard, seconds, spec["negative_hours"], spec["seed"])
@@ -236,9 +218,9 @@ def notes(cfg: dict, files: dict[str, list[splits.Row]], seconds: dict[str, floa
         for name, rows in files.items()
     )
     real = (
-        ", và câu kho nói từ đánh thức cắt quanh từ ấy (`interim/wake/corpus_pos`,"
-        "\n  item kết thúc bằng `@đầu-cuối` giây)"
-        if "corpus_pos" in spec
+        f", và mẩu người thật nói từ ấy của kho trích `{spec['real_pos']}` (`raw/speech/{spec['real_pos']}/`), cắt"
+        "\n  đúng hai tiếng; kho ấy không có mã người nói nên mẩu chỉ vào `train`"
+        if "real_pos" in spec
         else ""
     )
     moved = "".join(
@@ -312,57 +294,11 @@ def link(built: Path, out: Path) -> Path:
     return built
 
 
-def corpus_positives(cfg: dict, paths: dict[str, Path]) -> Path:
-    """Cut every learning clip that says the wake word to the word alone by forced alignment of its text: from its
-    aligned start moved by each of start_shifts_s in turn to tail_s after its aligned end, each try heard back as the
-    simulation plays it, faded and between silences; the first the checker hears as the word and nothing else is
-    kept. The audio stays in raw/, a cut being its item with @<start>-<end>; interim/wake/corpus_pos/manifest.yaml
-    lists every clip and work/cut/ the try kept, or the first (KEHOACH 3.11)."""
-    spec, word = cfg["split"]["corpus_pos"], corpus.sounds(cfg["word"])
-    device_cfg = load_yaml(CONFIGS / cfg["features"])
-    ramp_s = device_cfg["talker"]["edge_ramp_s"]
-    pad = np.zeros(round(device_cfg["session"]["pad_s"] * grid.SAMPLE_RATE_HZ))
-    tts, reader = load_yaml(TTS_CONFIG), ItemReader(paths["raw"])
-    public = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
-    found = [c for c in public if c.item.startswith(tuple(cfg["split"]["learning"])) and says_word(c, word)]
-    out = paths["interim"] / "wake" / CORPUS_POS
-    work, seconds = out / "work", {}
-    for k, c in enumerate(found):
-        x = reader.read(c.item)
-        seconds[c.item] = len(x) / grid.SAMPLE_RATE_HZ
-        write_wav(work / "whole" / f"{k:05d}.wav", x)
-    asked = [
-        {"id": str(k), "wav": str(work / "whole" / f"{k:05d}.wav"), "text": " ".join(corpus.words(c.text or ""))}
-        for k, c in enumerate(found)
-    ]
-    times = engines.align(asked, tts, work, paths["cache"])
-    rows, tries = [], {}
-    for k, c in enumerate(found):
-        row = {"item": c.item, "speaker": c.speaker or splits.ABSENT, "text": c.text, "kept": False}
-        if span := spoken_at(times.get(str(k), []), word):
-            row["word_s"] = [round(t, 3) for t in span]
-            end = min(seconds[c.item], span[1] + spec["tail_s"])
-            for n, shift in enumerate(spec["start_shifts_s"]):
-                start = max(0.0, span[0] + shift)
-                cut, wav = cut_item(c.item, start, end), work / "tries" / f"{k:05d}_{n}.wav"
-                write_wav(wav, np.concatenate([pad, ramped(reader.read(cut), ramp_s), pad]))
-                tries[f"{k}/{n}"] = {"cut": cut, "wav": wav, "shift_s": shift, "seconds": round(end - start, 3)}
-        rows.append(row)
-    asked = [{"id": key, "wav": str(t["wav"]), "targets": [cfg["word"]]} for key, t in tries.items()]
-    heard = engines.hear(asked, tts, work, paths["cache"])
-    for k, row in enumerate(rows):
-        mine = [key for key in tries if key.split("/")[0] == str(k)]
-        good = [key for key in mine if corpus.sounds(heard[key]["text"]) == word]
-        if mine:
-            chosen = tries[(good or mine)[0]]
-            row |= {field: chosen[field] for field in ("cut", "shift_s", "seconds")}
-            row |= {"heard": heard[(good or mine)[0]]["text"], "kept": bool(good)}
-            (work / "cut").mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(chosen["wav"], work / "cut" / f"{k:05d}.wav")
-    manifest = out / "manifest.yaml"
-    body = {"word": cfg["word"], "corpus_pos": spec, "clips": rows}
-    manifest.write_text(yaml.safe_dump(body, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    return manifest
+def real_positives(cfg: dict, raw: Path) -> dict[str, float]:
+    """Items under raw/ of the extract's clips that say the wake word, however spelled, and their lengths in seconds."""
+    folder, word = extract.clips_folder(raw, cfg["split"]["real_pos"]), corpus.sounds(cfg["word"])
+    clips = [c for c in extract.read_index(folder) if corpus.sounds(c["phrase"]) == word]
+    return {str((folder / c["file"]).relative_to(raw)): c["seconds"] for c in clips}
 
 
 def cut_split(cfg: dict, paths: dict[str, Path]) -> int:
@@ -370,10 +306,8 @@ def cut_split(cfg: dict, paths: dict[str, Path]) -> int:
     public = screen.kept_clips(screening, paths, "speech")
     seconds = screen.lengths(screening, paths, "speech")
     manifests = {}
-    listing = paths["interim"] / "wake" / CORPUS_POS / "manifest.yaml"
-    if "corpus_pos" in cfg["split"]:
-        manifests[CORPUS_POS] = yaml.safe_load(listing.read_text(encoding="utf-8"))["clips"]
-        seconds |= {c["cut"]: c["seconds"] for c in manifests[CORPUS_POS] if c["kept"]}
+    real = real_positives(cfg, paths["raw"]) if "real_pos" in cfg["split"] else {}
+    seconds |= real
     for folder in (synth.SETS["positives"], synth.SETS["negatives"], synth.SETS["hard"]):
         listing = paths["interim"] / "wake" / folder / "manifest.yaml"
         if folder == synth.SETS["hard"] and not listing.exists():
@@ -383,7 +317,7 @@ def cut_split(cfg: dict, paths: dict[str, Path]) -> int:
             clips = trimmed(clips, folder, cfg, paths["interim"])
         manifests[folder] = clips
         seconds |= {synth_item(folder, c): c.get("cut_s", c["seconds"]) for c in clips}
-    files = build(cfg, public, seconds, manifests)
+    files = build(cfg, public, seconds, manifests, tuple(real))
     out = paths["splits"] / "wake" / cfg["split"]["version"]
     splits.write_version(out, files, notes(cfg, files, seconds))
     problems = splits.check_version(out)
@@ -394,14 +328,9 @@ def cut_split(cfg: dict, paths: dict[str, Path]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("step", choices=["corpus", "split", "simulate"])
+    parser.add_argument("step", choices=["split", "simulate"])
     step = parser.parse_args(argv).step
     cfg, paths = load_yaml(CONFIG), data_paths()
-    if step == "corpus":
-        manifest = corpus_positives(cfg, paths)
-        clips = yaml.safe_load(manifest.read_text(encoding="utf-8"))["clips"]
-        print(f"{manifest}: {sum(c['kept'] for c in clips)} of {len(clips)} clips that say the word kept")
-        return 0
     if step == "simulate":
         simulate(cfg, paths)
         return 0
