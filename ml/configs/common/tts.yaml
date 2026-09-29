@@ -1,9 +1,16 @@
 # Desktop TTS engines and the ASR checker every branch shares (KEHOACH 1.2, 3.13); each runs in ml/tts/<name>/.
-# Every model is pinned repo@revision: an engine refuses to run when the hub's main moved past its pin.
+# Every model is pinned repo@revision: an engine refuses to run when the hub's main moved past its pin. The aligner
+# is pinned by image tag and model version.
 asr:
   model: vinai/PhoWhisper-large@b9136a44b5f2ca664bd0b8f74baecf1715f6eeeb
   batch: 1                         # 2 is 6% faster but peaks at 3.4 GB of a 4 GB card Windows shares; spilling past
                                    #   it runs 5 times slower (docs/measurements/tts_engines.md)
+align:                             # word times by forced alignment (KEHOACH 3.11), in Docker as the aligner needs Kaldi
+  image: mmcauliffe/montreal-forced-aligner:v3.4.2
+  acoustic: vietnamese_mfa         # CC BY 4.0; learned on Common Voice 17, VIVOS and GlobalPhone
+  dictionary: vietnamese_mfa       # readings of the three regions
+  version: 3.0.0                   # of both models
+  jobs: 8
 engines:
   vieneu:                          # preset voices, and clones of a reference clip
     checkpoint: pnnbao-ump/VieNeu-TTS-v3-Turbo@61b85e3d937fbbacb387714180e8182823512523

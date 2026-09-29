@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from collections import Counter
 from pathlib import Path
 
@@ -241,17 +242,31 @@ def test_clips_with_the_same_bytes_are_heard_once_for_the_targets_of_both(tmp_pa
     assert len(asked) == 1
 
 
-def test_word_times_come_back_by_clip_from_the_checkers_words_mode(tmp_path: Path, monkeypatch) -> None:
+def test_word_times_come_back_by_clip_from_the_aligner(tmp_path: Path, monkeypatch) -> None:
     calls = []
 
-    def run(name, model, batch, listing, heard, *mode, cache):
-        calls.append((name, batch, mode))
-        lines = [json.loads(line) for line in Path(listing).read_text(encoding="utf-8").splitlines()]
-        answers = [{"id": c["id"], "words": [{"word": "trợ", "start": 0.1, "end": 0.3}]} for c in lines]
-        Path(heard).write_text("".join(json.dumps(a) + "\n" for a in answers), encoding="utf-8")
+    def docker(cmd, check):
+        calls.append(cmd)
+        data = Path(cmd[cmd.index("-v") + 3].split(":")[0])
+        for folder in (data / "corpus").iterdir():
+            if (folder / f"{folder.name}.lab").read_text(encoding="utf-8") != "không căn được":
+                entries = [[0.1, 0.3, "trợ"], [0.3, 0.62, "lý"]]
+                out = data / "aligned" / folder.name / f"{folder.name}.json"
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_text(json.dumps({"tiers": {"words": {"entries": entries}}}), encoding="utf-8")
 
-    monkeypatch.setattr(engines, "run", run)
-    tts = {"asr": {"model": "m@r", "batch": 8}}
-    times = engines.words([{"id": "a", "wav": "a.wav"}, {"id": "b", "wav": "b.wav"}], tts, tmp_path, tmp_path)
-    assert calls == [("asr", "1", ("words",))]
-    assert times["b"] == [{"word": "trợ", "start": 0.1, "end": 0.3}] and set(times) == {"a", "b"}
+    monkeypatch.setattr(engines.subprocess, "run", docker)
+    tts = {"align": {"image": "mfa:v1", "acoustic": "vi", "dictionary": "vi", "version": "3.0.0", "jobs": 2}}
+    for name in "abc":
+        write_wav(tmp_path / f"{name}.wav", np.zeros(grid.SAMPLE_RATE_HZ))
+    texts = {"a": "trợ lý", "b": "trợ lý", "c": "không căn được"}
+    clips = [{"id": n, "wav": str(tmp_path / f"{n}.wav"), "text": t} for n, t in texts.items()]
+    times = engines.align(clips, tts, tmp_path / "work", tmp_path)
+    assert set(times) == {"a", "b"} and times["b"][1] == {"word": "lý", "start": 0.3, "end": 0.62}
+    script = calls[0][-1]
+    assert "mfa model download acoustic vi --version 3.0.0" in script and "mfa align /data/corpus vi vi" in script
+    assert calls[0][calls[0].index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
+    (tmp_path / "mfa/3.0.0/pretrained_models/acoustic").mkdir(parents=True)
+    (tmp_path / "mfa/3.0.0/pretrained_models/acoustic/vi.zip").write_bytes(b"model")
+    assert engines.align(clips, tts, tmp_path / "work", tmp_path) == times
+    assert "download acoustic" not in calls[1][-1] and "download dictionary" in calls[1][-1]

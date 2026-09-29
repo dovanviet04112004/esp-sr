@@ -1,7 +1,6 @@
 """PhoWhisper for srpipe.tts: `run.py <repo>@<revision> <batch> <clips.jsonl> <out.jsonl>` transcribes each line
 {id, wav, targets?} as Vietnamese, batch clips per forward, and writes {id, text, logp, targets} lines in the same
-order: the text as the model spells it, and the log-probability of that text and of each target given the clip; a
-trailing `words` writes {id, words: [{word, start, end}]} instead, one clip at a time. The
+order: the text as the model spells it, and the log-probability of that text and of each target given the clip. The
 model is called directly: the transformers pipeline holds about 1 GB more VRAM, past what a 4 GB card shared with
 Windows leaves, and then spills into system memory at a quarter of the speed."""
 
@@ -40,62 +39,21 @@ def logp(model, tokenizer, encoded: torch.Tensor, text: str) -> float:
     return float(scores[len(tokenizer.prefix_tokens) - 1 :].sum())
 
 
-def words(model, processor, audio: np.ndarray, rate_hz: int) -> list[dict]:
-    """Each word the model hears in one clip, with its start and end in seconds from the alignment heads' cross
-    attention; a word runs from its first token's time to the next token's."""
-    inputs = processor.feature_extractor(
-        [audio], sampling_rate=rate_hz, return_tensors="pt", return_attention_mask=True
-    )
-    with torch.inference_mode():
-        out = model.generate(
-            inputs.input_features.to(model.device, model.dtype),
-            attention_mask=inputs.attention_mask.to(model.device),
-            language=LANGUAGE,
-            task="transcribe",
-            return_token_timestamps=True,
-            return_dict_in_generate=True,
-        )
-    ids, times = out["sequences"][0].tolist(), out["token_timestamps"][0].tolist()
-    special = set(processor.tokenizer.all_special_ids)
-    spans: list[dict] = []
-    for k, token in enumerate(ids):
-        if token in special:
-            continue
-        end = times[k + 1] if k + 1 < len(times) else times[k]
-        # A token that opens a word carries its leading space; a letter's UTF-8 bytes may span tokens.
-        if processor.tokenizer.convert_ids_to_tokens(token).startswith("Ġ") or not spans:
-            spans.append({"ids": [token], "start": times[k], "end": end})
-        else:
-            spans[-1] |= {"ids": spans[-1]["ids"] + [token], "end": end}
-    found = [
-        {"word": processor.tokenizer.decode(s["ids"]).strip(), "start": s["start"], "end": s["end"]} for s in spans
-    ]
-    return [w for w in found if w["word"]]
-
-
 def main() -> int:
     repo, revision = sys.argv[1].split("@")
-    timed = sys.argv[5:] == ["words"]
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if device == "cuda" else torch.float32
     processor = AutoProcessor.from_pretrained(repo, revision=revision)
     tokenizer = processor.tokenizer
     tokenizer.set_prefix_tokens(language=LANGUAGE, task="transcribe", predict_timestamps=False)
-    # Word times read the cross attention, which only the eager kernel returns.
     model = WhisperForConditionalGeneration.from_pretrained(
-        repo, revision=revision, dtype=dtype, attn_implementation="eager" if timed else "sdpa"
+        repo, revision=revision, dtype=dtype, attn_implementation="sdpa"
     )
     model = model.to(device).eval()
     rate_hz = processor.feature_extractor.sampling_rate
     batch = int(sys.argv[2])
     clips = [json.loads(line) for line in Path(sys.argv[3]).read_text(encoding="utf-8").splitlines()]
     lines = []
-    if timed:
-        for clip in clips:
-            row = {"id": clip["id"], "words": words(model, processor, load(clip["wav"], rate_hz), rate_hz)}
-            lines.append(json.dumps(row, ensure_ascii=False))
-        Path(sys.argv[4]).write_text("\n".join(lines) + "\n", encoding="utf-8")
-        return 0
     for start in range(0, len(clips), batch):
         part = clips[start : start + batch]
         audio = [load(c["wav"], rate_hz) for c in part]

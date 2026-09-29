@@ -1,10 +1,12 @@
-"""Calls into ml/tts/<name>/run.py through `uv run`, one batch of requests per call; models cache under cache/hf/."""
+"""Calls into ml/tts/<name>/run.py through `uv run`, one batch of requests per call, models cached under cache/hf/;
+and into the forced aligner's Docker image, models cached under cache/mfa/."""
 
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -46,12 +48,42 @@ def synthesise(engine: str, requests: list[dict], tts: dict, work: Path, cache: 
     run(engine, *engine_args(engine, tts), str(listing), cache=cache)
 
 
-def words(clips: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, list[dict]]:
-    """The words the checker hears in every clip {id, wav}, by id: [{word, start, end}], times in seconds."""
-    listing, heard = work / "words_clips.jsonl", work / "words_heard.jsonl"
-    write_jsonl(listing, clips)
-    run("asr", tts["asr"]["model"], "1", str(listing), str(heard), "words", cache=cache)
-    return {r["id"]: r["words"] for r in map(json.loads, heard.read_text(encoding="utf-8").splitlines())}
+def align(clips: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, list[dict]]:
+    """Every word of each clip {id, wav, text} by forced alignment with tts['align'], by id: [{word, start, end}],
+    times in seconds; a clip the aligner cannot align is left out. The text is normalised syllables. Runs in Docker, as
+    the aligner needs Kaldi; one folder per set of clips and settings, so a rerun of the same set reads its answers."""
+    spec = tts["align"]
+    digest = hashlib.sha256(json.dumps(spec, sort_keys=True).encode())
+    for c in clips:
+        digest.update(json.dumps([c["id"], c["text"]]).encode() + Path(c["wav"]).read_bytes())
+    folder = work / f"align_{digest.hexdigest()[:16]}"
+    for c in clips:
+        speaker = folder / "corpus" / c["id"]
+        speaker.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(c["wav"], speaker / f"{c['id']}.wav")
+        (speaker / f"{c['id']}.lab").write_text(c["text"], encoding="utf-8")
+    models = cache / "mfa" / spec["version"]
+    kinds = {"acoustic": f"{spec['acoustic']}.zip", "dictionary": f"{spec['dictionary']}.dict"}
+    steps = [
+        f"mfa model download {kind} {spec[kind]} --version {spec['version']}"
+        for kind, name in kinds.items()
+        if not (models / "pretrained_models" / kind / name).exists()
+    ]
+    steps.append(
+        f"mfa align /data/corpus {spec['acoustic']} {spec['dictionary']} /data/aligned --output_format json"
+        f" -j {spec['jobs']} --use_mp --clean"
+    )
+    models.mkdir(parents=True, exist_ok=True)
+    mounts = ["-v", f"{models}:/mfa", "-v", f"{folder}:/data", "-e", "MFA_ROOT_DIR=/mfa", "-e", "HOME=/mfa"]
+    docker = ["docker", "run", "--rm", "--user", f"{os.getuid()}:{os.getgid()}", *mounts, spec["image"]]
+    subprocess.run([*docker, "bash", "-c", " && ".join(steps)], check=True)
+    times = {}
+    for c in clips:
+        answer = folder / "aligned" / c["id"] / f"{c['id']}.json"
+        if answer.exists():
+            entries = json.loads(answer.read_text(encoding="utf-8"))["tiers"]["words"]["entries"]
+            times[c["id"]] = [{"word": word, "start": start, "end": end} for start, end, word in entries]
+    return times
 
 
 def hear(clips: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, dict]:
