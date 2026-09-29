@@ -84,6 +84,15 @@ def test_negatives_come_neighbours_first_then_openings_then_the_hand_picked(tmp_
     assert texts[-(len(phrases) - 1) :] == [p for p in phrases if p != "chào mi nhé"]
 
 
+def test_no_negative_sounds_like_the_wake_word_however_it_is_spelled() -> None:
+    cfg = load_yaml(CONFIG)
+    cfg["word"] = "trợ lý"
+    cfg["synth"]["negatives"] |= {"misses": 1, "openings": 1, "phrases": ["trợ lý ơi", "hỗ trợ"]}
+    stream, vocab = stream_of(["trợ lí", "trợ lí nhé", "trợ giúp", "chị lý"])
+    texts = synth.negative_texts(cfg, stream, vocab, *candidates.component_codes(vocab))
+    assert texts == ["chị lý", "trợ giúp", "hỗ trợ"]
+
+
 def test_each_negative_is_read_by_distinct_voices(tmp_path: Path) -> None:
     cfg = load_yaml(CONFIG)
     cfg["synth"]["negatives"]["voices"] = {"vieneu": 4, "f5": 2}

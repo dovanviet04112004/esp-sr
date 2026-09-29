@@ -12,10 +12,9 @@ import pytest
 import torch
 import yaml
 
-from srpipe.core import corpus
 from srpipe.core.config import load_yaml
 from srpipe.generated import grid
-from srpipe.tasks.wake import CONFIG, data, train
+from srpipe.tasks.wake import CONFIG, candidates, data, train
 from srpipe.tasks.wake import eval as wake_eval
 from srpipe.tasks.wake.model.tcn import Tcn
 from srpipe.tasks.wake.postproc.smooth import smooth, triggers
@@ -205,7 +204,8 @@ def test_a_run_is_scored_with_its_own_network_and_the_current_scoring_rules(tmp_
 
 
 def test_a_wake_session_for_another_word_is_scored_as_a_negative() -> None:
-    word = corpus.words("trợ lý")
+    word = candidates.sounds("trợ lý")
     assert wake_eval.session_kind("wake", "Trợ lý!", word) == "wake"
+    assert wake_eval.session_kind("wake", "trợ lí", word) == "wake"
     assert wake_eval.session_kind("wake", "chào mi na", word) == "neg"
     assert wake_eval.session_kind("cmd", "trợ lý bật đèn", word) == "cmd"

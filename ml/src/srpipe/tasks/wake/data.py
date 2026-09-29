@@ -25,7 +25,7 @@ from srpipe.generated import grid, lang_vi
 from srpipe.lang import g2p
 from srpipe.lang.normalize import LangError, normalize
 from srpipe.scenes import device
-from srpipe.tasks.wake import CONFIG, synth
+from srpipe.tasks.wake import CONFIG, candidates, synth
 from srpipe.tts import CONFIG as TTS_CONFIG
 from srpipe.tts import engines
 
@@ -98,9 +98,9 @@ def corpus_rows(clips: list[dict], roles: dict[str, str]) -> dict[str, list[spli
     return rows
 
 
-def spoken_at(words: list[dict], phrase: list[str]) -> tuple[float, float] | None:
-    """Start and end in seconds of the first run of heard words whose syllables spell phrase, or None."""
-    heard = [(syllable, w) for w in words for syllable in corpus.words(w["word"])]
+def spoken_at(words: list[dict], phrase: list[tuple[str, ...]]) -> tuple[float, float] | None:
+    """Start and end in seconds of the first run of heard words that sounds like phrase (candidates.sounds), or None."""
+    heard = [(candidates.reading(syllable), w) for w in words for syllable in corpus.words(w["word"])]
     for k in range(len(heard) - len(phrase) + 1):
         if [syllable for syllable, _ in heard[k : k + len(phrase)]] == phrase:
             return heard[k][1]["start"], heard[k + len(phrase) - 1][1]["end"]
@@ -112,8 +112,9 @@ def cut_item(item: str, start_s: float, end_s: float) -> str:
     return f"{item}@{start_s:.3f}-{end_s:.3f}"
 
 
-def says_word(clip: corpus.Clip, word: list[str]) -> bool:
-    return corpus.says(corpus.words(clip.text or ""), word)
+def says_word(clip: corpus.Clip, word: list[tuple[str, ...]]) -> bool:
+    """Whether the clip's text holds a phrase that sounds like word (candidates.sounds), however it is spelled."""
+    return corpus.says(candidates.sounds(clip.text or ""), word)
 
 
 def draw_hours(clips: list[corpus.Clip], seconds: dict[str, float], hours: float, seed: int) -> list[corpus.Clip]:
@@ -131,7 +132,7 @@ def draw_hours(clips: list[corpus.Clip], seconds: dict[str, float], hours: float
 def build(cfg: dict, public: list[corpus.Clip], seconds: dict[str, float], manifests: dict[str, list[dict]]) -> dict:
     """Every split file of the version as rows, from the screened public clips, their lengths and the synth
     manifests by folder."""
-    spec, word = cfg["split"], corpus.words(cfg["word"])
+    spec, word = cfg["split"], candidates.sounds(cfg["word"])
     usable = [c for c in public if not says_word(c, word)]
     learning = [c for c in usable if c.item.startswith(tuple(spec["learning"]))]
     vivos = {c.speaker for c in learning if c.speaker}
@@ -235,7 +236,8 @@ def notes(cfg: dict, files: dict[str, list[splits.Row]], seconds: dict[str, floa
 Dựng bằng `python -m srpipe.tasks.wake.data` (`make splits`), seed {spec["seed"]}, cấu hình mục `split` của
 `ml/configs/models/wake.yaml`. Luật ở KẾ HOẠCH §1.3:
 
-- Chỉ mẩu qua sàng lọc (`interim/screen/rejects.tsv`); không âm bản nào có lời chứa "{cfg["word"]}".
+- Chỉ mẩu qua sàng lọc (`interim/screen/rejects.tsv`); không âm bản nào có lời đọc như "{cfg["word"]}" theo giọng
+  Bắc, dù viết cách nào.
 - Dương: mẩu TTS có `kept` của `interim/wake/synth_pos`{real}; âm bản gần âm: của `interim/wake/synth_neg`.
 - {spec["val_speakers"]:.0%} người nói VIVOS train và {spec["val_speakers"]:.0%} giọng có sẵn của VieNeu vào `val`
   trọn vẹn, cùng mọi giọng nhân bản từ họ; giọng nhân bản từ kho không có mã người nói chỉ vào `train`.
@@ -289,7 +291,7 @@ def corpus_positives(cfg: dict, paths: dict[str, Path]) -> Path:
     """Cut every learning clip that says the wake word from context_s before the word to tail_s after it, by the
     checker's word times, then hear each cut back: kept when it still says the word. The audio stays in raw/, a cut
     being its item with @<start>-<end>; interim/wake/corpus_pos/manifest.yaml lists every clip found (KEHOACH 3.11)."""
-    spec, word = cfg["split"]["corpus_pos"], corpus.words(cfg["word"])
+    spec, word = cfg["split"]["corpus_pos"], candidates.sounds(cfg["word"])
     tts, reader = load_yaml(TTS_CONFIG), ItemReader(paths["raw"])
     public = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
     found = [c for c in public if c.item.startswith(tuple(cfg["split"]["learning"])) and says_word(c, word)]
@@ -319,7 +321,7 @@ def corpus_positives(cfg: dict, paths: dict[str, Path]) -> Path:
     for k, row in enumerate(rows):
         if "cut" in row:
             row["heard"] = heard[f"cut/{k}"]["text"]
-            row["kept"] = corpus.says(corpus.words(row["heard"]), word)
+            row["kept"] = corpus.says(candidates.sounds(row["heard"]), word)
     manifest = out / "manifest.yaml"
     body = {"word": cfg["word"], "corpus_pos": spec, "clips": rows}
     manifest.write_text(yaml.safe_dump(body, allow_unicode=True, sort_keys=False), encoding="utf-8")

@@ -22,7 +22,7 @@ from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.generated import array, grid
 from srpipe.scenes import device
-from srpipe.tasks.wake import CONFIG
+from srpipe.tasks.wake import CONFIG, candidates
 from srpipe.tasks.wake.data import Shard
 from srpipe.tasks.wake.model.tcn import Tcn
 from srpipe.tasks.wake.postproc.smooth import smooth, triggers
@@ -117,9 +117,9 @@ def session_features(session: Path, chain_cfg: ChainConfig, mel: Mel) -> tuple[n
     return features, figures[:, 0].astype(bool)
 
 
-def session_kind(kind: str, prompt: str, word: list[str]) -> str:
-    """A wake session says the configured word; one recorded for another word is a negative for this one."""
-    return kind if kind != "wake" or corpus.says(corpus.words(prompt), word) else "neg"
+def session_kind(kind: str, prompt: str, word: list[tuple[str, ...]]) -> str:
+    """A wake session says the configured word (candidates.sounds); one recorded for another word is a negative."""
+    return kind if kind != "wake" or corpus.says(candidates.sounds(prompt), word) else "neg"
 
 
 def board(model, mean: np.ndarray, std: np.ndarray, cfg: dict, paths: dict, threshold: float, dev: str):
@@ -147,7 +147,7 @@ def board(model, mean: np.ndarray, std: np.ndarray, cfg: dict, paths: dict, thre
         results.append(
             BoardSession(
                 r["session"],
-                session_kind(r["kind"], r["prompt"], corpus.words(cfg["word"])),
+                session_kind(r["kind"], r["prompt"], candidates.sounds(cfg["word"])),
                 r["prompt"],
                 seconds,
                 peaks,

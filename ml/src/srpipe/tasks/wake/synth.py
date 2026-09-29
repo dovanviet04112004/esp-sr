@@ -74,14 +74,13 @@ def positive_requests(cfg: dict, spec: dict, presets: list[dict], refs: list[cli
 
 def negative_texts(cfg: dict, stream: np.ndarray, vocab: list[str], codes: np.ndarray, tables: dict) -> list[str]:
     """The corpus neighbours of the wake word, commonest first, then its commonest openings, then the hand-picked
-    phrases, without repeats; none of them spells the wake word."""
-    spec, word = cfg["synth"]["negatives"], cfg["word"]
-    near = candidates.neighbours(word, spec["misses"], stream, vocab, codes, tables)
-    opening = candidates.openings(word, stream, vocab).most_common(spec["openings"])
-    texts = list(dict.fromkeys([*(p for p, _ in near.most_common()), *(p for p, _ in opening), *spec["phrases"]]))
-    if any(clips.spelled(t) == clips.spelled(word) for t in texts):
-        raise ValueError(f"a negative spells the wake word {word!r}")
-    return texts
+    phrases, without repeats and without any that sounds like the wake word, however it is spelled."""
+    spec, word = cfg["synth"]["negatives"], candidates.sounds(cfg["word"])
+    near = candidates.neighbours(cfg["word"], spec["misses"], stream, vocab, codes, tables)
+    opening = [p for p, _ in candidates.openings(cfg["word"], stream, vocab).most_common()]
+    opening = [p for p in opening if not corpus.says(candidates.sounds(p), word)][: spec["openings"]]
+    texts = dict.fromkeys([*(p for p, _ in near.most_common()), *opening, *spec["phrases"]])
+    return [t for t in texts if not corpus.says(candidates.sounds(t), word)]
 
 
 def negative_requests(

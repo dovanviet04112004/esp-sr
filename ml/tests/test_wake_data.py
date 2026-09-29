@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from srpipe.core import corpus, splits
 from srpipe.core.config import load_yaml
-from srpipe.tasks.wake import CONFIG, data, synth
+from srpipe.tasks.wake import CONFIG, candidates, data, synth
 
 
 def synth_clip(kind: str, speaker: str, n: int) -> dict:
@@ -124,8 +124,11 @@ def test_corpus_clips_that_say_the_word_join_the_positives_cut_around_it() -> No
         {"word": "lý,", "start": 1.06, "end": 1.2},
         {"word": "trợ", "start": 2.0, "end": 2.2},
     ]
-    assert data.spoken_at(heard, corpus.words("trợ lý")) == (0.84, 1.2)
-    assert data.spoken_at(heard, corpus.words("chào mi na")) is None
+    assert data.spoken_at(heard, candidates.sounds("trợ lý")) == (0.84, 1.2)
+    assert data.spoken_at(heard, candidates.sounds("trợ lí")) == (0.84, 1.2)
+    assert data.spoken_at(heard, candidates.sounds("chào mi na")) is None
+    assert data.says_word(corpus.Clip("a", None, "nhờ trợ lí nhé"), candidates.sounds("trợ lý"))
+    assert not data.says_word(corpus.Clip("a", None, "hỗ trợ lực lượng"), candidates.sounds("trợ lý"))
     assert (
         data.cut_item("speech/bud500/data/train-0.parquet#6", 0.0, 1.25)
         == "speech/bud500/data/train-0.parquet#6@0.000-1.250"

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import functools
 import itertools
 import json
 from collections import Counter
@@ -78,6 +79,22 @@ def component_codes(vocab: list[str]) -> tuple[np.ndarray, dict[str, dict[str, i
             continue
         codes[i] = [tables[c].setdefault(getattr(syllable, c), len(tables[c])) for c in COMPONENTS]
     return codes, tables
+
+
+@functools.cache
+def reading(syllable: str) -> tuple[str, ...]:
+    """The units of a normalised syllable in the north reading, so "lí" reads as "lý"; itself when spelling cannot
+    build it."""
+    try:
+        (syllable_read,) = g2p.syllables(syllable, NORTH)
+    except (LangError, ValueError):
+        return (syllable,)
+    return tuple(syllable_read.units())
+
+
+def sounds(text: str) -> list[tuple[str, ...]]:
+    """The syllables of text as the north says them: two spellings of one phrase compare equal."""
+    return [reading(s) for s in words(text)]
 
 
 def pair_per_m(pair: tuple[str, str], stream: np.ndarray, vocab: list[str]) -> float:
