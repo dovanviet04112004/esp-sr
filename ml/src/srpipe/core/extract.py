@@ -54,6 +54,7 @@ TEXT_COLUMNS = (
     "segment_text",
 )
 RETRY_CODES = (429, 500, 502, 503, 504)
+STROKED_D = str.maketrans("đĐ", "dD")
 
 
 class Http:
@@ -227,7 +228,8 @@ class Phrases:
 
 
 def slug(text: str) -> str:
-    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    # NFKD keeps đ whole, so dropping what is not ASCII would file "đóng cửa" under ong_cua.
+    ascii_text = unicodedata.normalize("NFKD", text.translate(STROKED_D)).encode("ascii", "ignore").decode()
     return re.sub(r"[^0-9A-Za-z]+", "_", ascii_text).strip("_")
 
 

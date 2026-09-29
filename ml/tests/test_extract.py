@@ -73,6 +73,7 @@ def test_phrases_match_by_reading_in_any_case_or_spelling() -> None:
     p = extract.Phrases(["trợ lý", "bật đèn", "mở cửa"])
     assert [p.said(t) for t in TEXTS] == [[], ["trợ lý", "mở cửa"], [], ["bật đèn"], []]
     assert p.said(None) == [] and p.said("chụp ảnh đi") == []
+    assert [extract.slug(t) for t in ("đóng cửa", "Đèn bàn", "trợ lý")] == ["dong_cua", "Den_ban", "tro_ly"]
     assert extract.yodas_segment("a-b-c-00012-00000766-00001096") == ("a-b-c", 7.66, 10.96)
 
 
