@@ -183,3 +183,45 @@ Hai run cùng split, seed và số bước, chỉ khác số kênh: `20260929_4f
 - **Cách chọn mốc và ngưỡng không tin được**: `val` có 3,76 giờ âm bản, "≤ 1 lần/giờ" là ≤ 3 lần, nên ngưỡng do câu
   âm bản thứ 4 quyết định và nhảy 0,785–0,95 giữa các mốc. Giữ mốc có tỉ lệ bắt cao nhất trong 20 lần đo nhiễu là giữ
   lần may: mốc 3 000 và 5 000, còn ở đầu lịch học, và ngưỡng của chúng cho 1,9–2,3 lần/giờ trên `test_neg`.
+
+## 5. `wake/v3`: mốc cuối, `val` lớn hơn, việc phụ CTC
+
+Split `wake/v3` (`ml/data/splits/wake/v3/SPLIT.md`): dữ liệu học y hệt `wake/v2`; 40% người nói Common Voice rời
+`test_neg` sang `val_neg`, nên `val_neg` 10,92 giờ và `test_neg` 19,33 giờ đã mô phỏng. Mỗi run giữ trọng số của bước
+cuối và lưu mọi mốc chấm ở `checkpoints/`. Việc phụ CTC (KẾ HOẠCH §3.11): 32 câu người thật mỗi bước, trọng số 0,1,
+117 981 câu của `train_neg`. Ba run cùng seed và số bước; board chấm bằng lệnh của §2.
+
+| | v3, 32, không CTC | v3, 32, CTC | v3, 64, CTC |
+|---|---|---|---|
+| Run | `20260929_5ad9f0c-dirty_8e233b` | `…_a74c64` | `…_0801aa` |
+| Mất mát CTC cuối, mỗi đơn vị | | 2,12 | 1,82 |
+| Ngưỡng chọn trên `val` | 0,940 | 0,895 | 0,925 |
+| Bắt trên `val` (TTS) / báo nhầm `val` | 83,1% / 0,92 lần/giờ | 86,4% / 0,55 | 94,1% / 0,92 |
+| Báo nhầm `test_neg` ở ngưỡng ấy | 1,09/giờ (21 lần) | 1,50/giờ (29 lần) | 1,50/giờ (29 lần) |
+| Board, 60 đoạn "chào mi na": trung vị / phân vị 75 / đỉnh | 0,48 / 0,68 / 0,98 | 0,38 / 0,57 / 0,84 | **0,71 / 0,86 / 0,95** |
+| Board, qua ngưỡng đã chọn | 2 | 0 | 5 |
+| Board, "chào minh" / "chào mẹ" | 0,05 0,09 / 0,02 0,03 | 0,05 0,06 / 0,10 0,04 | 0,43 0,24 / 0,02 0,00 |
+| Board, "chào mi nhé" hai lần | 0,06 0,77 | 0,05 0,74 | 0,03 **0,93** |
+| Board, lệnh và nói tự do, đỉnh | 0,47 | 0,05 | 0,02 |
+
+Đoạn qua ngưỡng / số lần đọc cụm gần âm của 039 qua ngưỡng, quét ngưỡng trên cùng các đoạn:
+
+| Ngưỡng | v1 | v3, 32, không CTC | v3, 32, CTC | v3, 64, CTC |
+|---|---|---|---|---|
+| 0,5 | 45 / 7 | 29 / 1 | 22 / 1 | 38 / 1 |
+| 0,6 | 41 / 7 | 21 / 1 | 12 / 1 | 34 / 1 |
+| 0,7 | 38 / 6 | 15 / 1 | 7 / 1 | 30 / 1 |
+| 0,8 | 25 / 6 | 8 / 0 | 2 / 0 | 22 / 1 |
+| 0,9 | 10 / 1 | 2 / 0 | 0 / 0 | 7 / 1 |
+
+- **Mốc cuối thay mốc may** là thay đổi lớn nhất giữa v2 và v3 32 không CTC (cùng dữ liệu): giọng thật trung vị 0,21 lên
+  0,48; ngưỡng chọn trên `val` 10,92 giờ đoán đúng `test_neg` (0,92 so với 1,09 lần/giờ) thay vì lệch gấp ba.
+- **CTC ở 32 kênh không giúp**: mạng dè dặt với mọi thứ, giọng thật cũng tụt; mất mát CTC 2,12 cho thấy thân mạng không
+  đủ sức gánh hai việc.
+- **CTC ở 64 kênh là cấu hình tốt nhất đến giờ**: giọng thật gần mức của v1 (≥ 0,7 ở 30/60 đoạn so với 38) trong khi cụm
+  gần âm chỉ còn một lần qua (v1: 6–7), lời nói thường ≤ 0,02. Mỗi cấu hình mới chạy một seed trên một người nói, nên
+  chênh giữa các cột chưa tách được khỏi dao động giữa các lần học.
+- **Lần qua còn lại là "chào mi nhé"**, lần đọc thứ hai. PhoWhisper nghe lần ấy là "chào my nhé" (cách "chào mi na"
+  15,9 nat) còn lần thứ nhất là "chào đi nhé", nên đây là cụm gần âm thật, chỉ khác âm tiết cuối. Tập học gần như không
+  có họ này: trong 80 mẩu TTS "chào mi n…" của `synth_neg` và `synth_hard` chỉ 6 mẩu được giữ, vì luật chọn bỏ mẩu nghe
+  sai chữ và mẩu cách "chào mi na" dưới 15,40 nat, đúng vùng của cụm ấy.
