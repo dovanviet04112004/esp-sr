@@ -53,7 +53,7 @@ Bảng này tồn tại cho tới khi TỔNG QUAN được sửa theo (E1-T9). S
 | 7 | Thứ tự `AGC → VAD` | **`VAD → AGC`** | AGC chỉ được thích nghi khi có người nói, nên cần cờ VAD; VAD dựa trên năng lượng dải, nên phải đọc mức chưa bị AGC kéo | §3.10 |
 | 8 | DOA GCC-PHAT, không nói độ phân giải | Dò **lưới góc** trên phổ chéo đã làm trơn, không lấy đỉnh trễ nguyên | Micro của board B cách 4,5 cm ở 16 kHz chỉ có ±2,10 mẫu trễ: lấy đỉnh nguyên chỉ ra 5 góc | §3.6 |
 | 9 | `command` so chuỗi âm vị với danh sách | **Chấm CTC có ràng buộc** từng lệnh bằng thuật toán tiến, kèm **biến thể phương ngữ** | Giải tham lam rồi so chuỗi vứt đi xác suất; tập lệnh đóng cho phép chấm thẳng từng lệnh với giá gần bằng không | §3.12 |
-| 10 | Thanh điệu: ba đường | Bốn đường, thêm **nhãn thanh chen trong cùng chuỗi CTC**; đặc trưng cao độ là biến số phải đo | Một đầu ra, bộ ký hiệu nhỏ, không phải căn hai đầu ra theo thời gian | §3.11, §3.12 |
+| 10 | Thanh điệu: ba đường | **Nhãn thanh chen trong cùng chuỗi CTC** trên 44 đơn vị, từ **log-mel 40 cộng ba chiều cao độ** (ADR-0010) | Tài liệu: thanh phải nằm trong đơn vị và cao độ hạ lỗi rõ ở ngôn ngữ có thanh, còn cách đặt thanh không đổi lỗi gộp; một đầu ra, bộ ký hiệu nhỏ nhất | §3.11, §3.12 |
 | 11 | Từ đánh thức 2–3 âm tiết | **3–4 âm tiết** | Âm tiết tiếng Việt ngắn; cụm hai âm tiết dài chừng nửa giây và trùng lời nói thường ngày nhiều | §3.11 |
 | 12 | `ns` mạng ~24% một nhân, ~40 MFLOPS | RNNoise phải **dựng lại dải cho 16 kHz và huấn luyện lại**; ở 62,5 khung/s phần mạng ~11 MFLOP/s 🔬 | Số 40 MFLOPS là của bản 48 kHz, 100 khung/s | §3.9 |
 | 13 | Task `nhan` ở nhân 1 cùng `thu` và `sach` | `nhan` ở **nhân 0** | TỔNG QUAN tự nói "một nhân không đủ", nhưng lại dồn cả ba việc liên tục vào nhân 1; cửa sổ lệnh 11–18 ms mỗi 32 ms đẩy nhân 1 quá 100% | §5.1 |
@@ -81,7 +81,7 @@ Chỉ bốn khối dùng mô hình học. Mọi khối khác là công thức, k
 |---|---|---|---|---|---|---|
 | `ns` | `ai_engine/src/ns/`, cắm vào khe `ns` của `dsp_afe` | RNNoise dựng lại cho 16 kHz: dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải + xác suất tiếng nói | đặc trưng dải tính từ 257 vạch | gain từng dải, nội suy ra 257 vạch | ~88 k tham số, ~90 KB int8 🔬 | kiến trúc RNNoise; **huấn luyện mới hoàn toàn** vì dải và tần số lấy mẫu khác bản gốc |
 | `wake` | `ai_engine/src/wake/` | TCN tích chập giãn nở nhân quả, 6–8 tầng, bước giãn 1 → 32 | log-mel 40 dải × khung 16 ms | xác suất từ đánh thức mỗi khung | 16–50 KB int8 | tự huấn luyện |
-| `command` | `ai_engine/src/command/` | mạng âm học chạy dòng (TCN hoặc CRNN nhỏ) + CTC trên đơn vị của §3.12 | log-mel, cộng cao độ nếu E11 chứng minh có lợi | xác suất đơn vị mỗi khung | **≤ ~1,8 MB int8** — trần sinh ra từ bảng phân vùng §6.1 | tự huấn luyện trên kho tiếng Việt |
+| `command` | `ai_engine/src/command/` | CRNN nhỏ (tích chập rồi GRU một chiều) chạy dòng + CTC trên đơn vị của §3.12, như MultiNet; lùi về TCN nếu GRU int8 qua esp-dl không đạt trên board (ADR-0010) | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung | **≤ ~1,8 MB int8** — trần sinh ra từ bảng phân vùng §6.1 | tự huấn luyện trên kho tiếng Việt |
 | `synth` | `ai_engine/src/synth/` | chốt ở E12-T1: mạng chưng cất kiểu sanoTTS (trường độ → âm học → iSTFT) | chuỗi đơn vị + trường độ | PCM 16 kHz | ≤ 1 MB | tuỳ phương án; phương án không mạng nằm ở `svc_speak` (§3.13) |
 
 Runtime của cả bốn là `esp-dl`, ghim bản chính xác (§4.5.1). `esp-dl` có sẵn GRU int8
@@ -419,7 +419,7 @@ OM-LSA nằm ngay trong `dsp_afe`; bản RNNoise nằm ở `ai_engine/src/ns/` v
 |---|---|---|---|---|---|---|
 | `fft` `window` `stft` | thuần | `dsp_spec` | FFT thực (`dl_fft`), căn Hann, chồng 50% | §3.1 | **451 µs đo** cả chuỗi | E6-T4 |
 | `mel` | thuần | `dsp_spec` | log-mel, MFCC giữ làm đối chiếu | 40 dải, 20–7 600 Hz | **~180 µs đo** (`rfft` 118 + 40 dải 62) | E6-T5 |
-| `pitch` | thuần | `dsp_spec` | NCCF, ra log F0 + delta + độ hữu thanh | 60–400 Hz | ~300 µs; **chỉ dựng nếu E11-T8 chứng minh có lợi** | E11-T8 |
+| `pitch` | thuần | `dsp_spec` | NCCF, ra log F0 + delta + độ hữu thanh | 60–400 Hz | ~300 µs 🔬; dựng cho `command` (ADR-0010) | E11-T8 |
 | `hpf` | thuần | `dsp_afe` | IIR bậc hai Butterworth, dạng II chuyển vị viết tay (ADR-0004) | 80 Hz | ~41 µs hai kênh | E7-T1 |
 | `balance` | thuần | `dsp_afe` | nhân hệ số phức hiệu chuẩn mỗi vạch cho `ch1`, vòng viết tay (ADR-0005) | từ NVS `calib/bal` | ~18 µs | E7-T2 |
 | `aec` | thuần | `dsp_afe` | MDF chồng-lưu, bước học tự chỉnh, khử vọng dư | 8 phân đoạn × 256 = 128 ms đuôi | ~1,3 ms hai micro | E10-T4 |
@@ -707,10 +707,10 @@ NVS `afe/vad_mode` là **2**, ở `vad.aggressiveness` của `contracts/afe.yaml
 hoá trung bình và phương sai theo **thống kê lúc huấn luyện**; thống kê ấy nằm **trong ảnh model**
 (§6.3) chứ không nằm trong code, nên model và thống kê không thể lệch nhau (TỔNG QUAN V5.5.4).
 
-**Cao độ là biến số phải đo, không phải mặc định.** Tiếng Việt có thanh là âm vị (TỔNG QUAN §3.2), và
-40 dải mel thô ở vùng 100–300 Hz nơi F0 nằm. Nhận dạng tiếng có thanh thường ghép thêm đặc trưng cao
-độ. E11-T8 so log-mel 40, log-mel 80, và log-mel 40 + ba chiều cao độ trên **các cặp lệnh chỉ khác
-thanh**; thắng mới dựng `dsp_spec/pitch`.
+**Cao độ vào `command`.** Tiếng Việt có thanh là âm vị (TỔNG QUAN §3.2), và 40 dải mel thô ở vùng 100–300 Hz nơi
+F0 nằm. `command` đọc log-mel 40 cộng ba chiều cao độ của `dsp_spec/pitch` (log F0, delta, độ hữu thanh): mọi số đã công
+bố cho ngôn ngữ có thanh đều thấy cao độ hạ lỗi, ở tiếng Việt khoảng 18% tương đối, còn 80 dải không có số cho mạng nhỏ
+(ADR-0010). `wake` giữ log-mel 40, vì lỗi của nó nằm ở dữ liệu dương chứ không ở thanh.
 
 **`wake`** — TCN tích chập giãn nở nhân quả, kernel 3, giãn 1, 2, 4, …, 32 hai lượt: trường nhìn
 ~127 khung ≈ 2 s. Int8, chạy dòng bằng `StreamingCache` của esp-dl. Đầu ra làm trơn trung bình trượt
@@ -755,9 +755,9 @@ na" kiểu TTS và giọng thật nói đúng từ rơi ra ngoài (`docs/measure
 thêm một việc trên lời nói thật của `train_neg`: một đầu CTC đọc chuỗi đơn vị `lang_vi` (§3.12) của cả câu, đọc theo
 vùng Bắc vì kho không ghi vùng người nói; mất mát CTC cộng vào BCE với trọng số ở cấu hình. Hàng nghìn người thật nói
 đủ các âm của từ đánh thức ("chào" 3 367 lần, "mi" 722, "na" 656 trong kho) dù không ai nói cả cụm, nên thân mạng phải
-biểu diễn các âm ấy theo giọng người. Câu `lang_vi` không đọc được, hay dài quá cấu hình, bị bỏ khỏi việc phụ. Việc
-phụ không chốt đơn vị của `command` (E11-T3). Đầu phụ bị bỏ khi lưu mạng, nên mạng xuất ra board, chi phí và
-`StreamingCache` không đổi.
+biểu diễn các âm ấy theo giọng người. Câu `lang_vi` không đọc được, hay dài quá cấu hình, bị bỏ khỏi việc phụ. Đơn vị
+là đúng đơn vị của `command` (§3.12). Đầu phụ bị bỏ khi lưu mạng, nên mạng xuất ra board, chi phí và `StreamingCache`
+không đổi.
 
 **Mốc và ngưỡng.** Mạng giữ là trọng số cuối lịch học. Mỗi mốc chấm được lưu để xem đường học, không dùng để chọn:
 chọn mốc có tỉ lệ bắt `val` cao nhất trong hàng chục lần đo nhiễu là chọn lần may, và mốc ấy báo nhầm gấp đôi mục tiêu
@@ -806,8 +806,8 @@ Cột Trung dựa trên mô tả giọng Huế, chưa đối chiếu người n�
 **Đơn vị ra** là âm đoạn cộng nhãn thanh: 23 phụ âm đầu, âm đệm `w`, 14 âm chính (11 nguyên âm đơn,
 3 nguyên âm đôi) và 6 thanh; âm cuối dùng lại ký hiệu phụ âm và bán âm. Cộng lại là 44 ký hiệu, đặt tên theo
 X-SAMPA và vừa `lang_vi_unit_t` một byte. Mỗi âm tiết ra theo thứ tự đầu, đệm, chính, cuối, thanh: `má` là
-`m a: T5`. Bộ này dùng chung cho đường 1 và đường 4 dưới đây. Bản Python ra thêm cấu trúc từng âm tiết, để
-E11-T3 dựng đường 2 và 3 mà không cần C. Chốt một trong hai đường ấy là đổi hợp đồng đã đóng băng (§4.5.5).
+`m a: T5`. Đây là đơn vị nhận dạng của `command` (dưới đây). Bản Python ra thêm cấu trúc từng âm tiết cho các thước
+chạy trên máy tính, như `candidates` của `wake`.
 
 **Âm tiết hợp lệ** là âm tiết mà chính tả tiếng Việt dựng được. Âm đầu ghép với vần theo luật `c/k/q`,
 `g/gh`, `ng/ngh`, `gi` và `qu`; vần tắc (`-p -t -c -ch`) chỉ mang sắc hoặc nặng. Âm tiết không dựng được thì
@@ -817,16 +817,19 @@ vùng, cách đọc số, từ điển viết tắt và từ mượn. C và Pyth
 Python ở `ml/src/srpipe/lang/` và C ở `lang_vi` phải cho **đầu ra giống hệt** trên danh sách mọi âm
 tiết hợp lệ cộng bộ thử có nhãn gồm số, từ mượn, tên riêng. Sai số cho phép bằng 0.
 
-**Đơn vị nhận dạng** chốt ở E11-T3 bằng đo, bốn đường:
+**Đơn vị nhận dạng** là 44 đơn vị ở trên, **thanh chen trong cùng chuỗi CTC**: một đầu ra, CTC tự căn thanh vào
+âm tiết. Chốt theo số đã công bố, không bằng phép so của repo (ADR-0010):
 
 | Đường | Bộ ký hiệu | Giá |
 |---|---|---|
-| Âm đoạn + đầu ra thanh riêng | ~45 + 6 | hai đầu ra phải khớp nhau theo thời gian |
-| Âm vị mang thanh | vần × 6 thanh, hàng trăm | bộ ký hiệu phình, mỗi ký hiệu ít dữ liệu |
-| Âm tiết | vài nghìn | tiếng Việt đơn âm tiết, kho âm tiết đóng |
-| **Nhãn thanh chen trong chuỗi CTC** | ~45 + 6 | một đầu ra, chuỗi `m a ⁵` — CTC tự căn; đây là đường đề xuất thử trước |
+| Âm đoạn + đầu ra thanh riêng | ~45 + 6 | hai đầu ra phải khớp theo thời gian; tầng thanh đứng riêng có lỗi thanh cao nhất |
+| Âm vị mang thanh | vần × 6 thanh, hàng trăm | bộ ký hiệu phình; đổi hợp đồng `lang_vi` đã đóng băng (§4.5.5); lỗi gộp ngang các đường khác |
+| Âm tiết | vài nghìn | quá nhiều ký hiệu cho mạng ≤ 1,8 MB |
+| **Nhãn thanh chen trong chuỗi CTC** | 44 | **chọn**: bộ ký hiệu nhỏ nhất, một đầu ra, `lang_vi` đã sinh và khớp từng bit |
 
-**`command`** — mạng âm học chạy dòng, CTC, int8, trọng số trong PSRAM. **Giải bằng chấm có ràng
+**`command`** — CRNN nhỏ chạy dòng (tích chập rồi GRU một chiều), CTC, int8, trọng số trong PSRAM, như MultiNet
+của Espressif trên cùng chip. GRU int8 chạy dòng qua esp-dl được thử trên board trước (E11-T12); không đạt thì lùi về TCN
+nhân quả tách chiều sâu, đường E11-T10 đã chạy khớp từng bit (ADR-0010). **Giải bằng chấm có ràng
 buộc**, không giải tham lam rồi so chuỗi:
 
 ```
@@ -1424,7 +1427,7 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | `mica_afe/{hpf, balance, aec, doa, gsc, agc, vad}` | `dsp_afe/{hpf, balance, aec, doa, gsc, agc, vad}` |
 | `mica_afe/mase` | `dsp_afe/bss` |
 | `mica_afe/ns` | sàn `dsp_afe/ns_omlsa` + mạng `ai_engine/src/ns/`, cùng khe `ns` |
-| `mica_kws/feature` | `dsp_spec/mel` (+ `dsp_spec/pitch` nếu E11-T8 chọn); chuẩn hoá đi theo model trong `ai_engine` |
+| `mica_kws/feature` | `dsp_spec/mel`, cộng `dsp_spec/pitch` cho `command` (ADR-0010); chuẩn hoá đi theo model trong `ai_engine` |
 | `mica_kws/g2p` | `lang_vi/{normalize, g2p, lexicon}` |
 | `mica_kws/wake` | `ai_engine/src/wake/` |
 | `mica_kws/command` | `ai_engine/src/command/` (mạng + chấm CTC); bảng lệnh do `svc_listen` dựng qua `lang_vi` |
