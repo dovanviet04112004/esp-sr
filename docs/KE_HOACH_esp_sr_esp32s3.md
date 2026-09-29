@@ -109,6 +109,7 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | FPT Open Speech Data | `command` | ~30 giờ 🔬 | chưa kiểm 🔬 | |
 | VLSP các năm | `command` | lớn | đăng ký, chỉ nghiên cứu 🔬 | |
 | Bud500 (VietAI) | `command` | ~500 giờ, không có mã người nói | CC BY-NC-SA 4.0, chỉ nghiên cứu | người nói ba miền; **phi thương mại**, chỉ vào tập học |
+| Lệnh điều khiển nhà tự thu (repo `edge-ai-voice-control-esp32`) | `command` | ~1 300 lệnh 1 s: bật/tắt đèn, bật/tắt quạt, bật/tắt hết; nhiễu phòng | MIT | người thật nói đúng lệnh của bộ lệnh; không có mã người nói, chỉ vào tập học |
 | MUSAN | `ns`, tăng cường | ~100 giờ nhiễu, nhạc, lời nói | CC BY 4.0 phần lớn 🔬 | |
 | DEMAND | `ns` | 15 môi trường, 16 kênh | CC BY-SA 3.0 🔬 | |
 | DNS Challenge (Microsoft) | `ns` | hàng trăm giờ | CC BY 4.0 phần nhiễu 🔬 | |

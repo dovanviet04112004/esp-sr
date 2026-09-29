@@ -1,0 +1,14 @@
+name: kws_vi_command
+source_url: https://github.com/nguyenthaozzz/edge-ai-voice-control-esp32
+downloaded: 2026-09-29
+license: MIT
+sha256: {"kws_vi_command/ (tree)": e25d54a3ead304ae7c803903baf4163502b8109fbaa740b2efe941d4b0fb0569}
+counts: {commands: 1343, noise: 260, seconds_each: 1.0, speakers: unknown}
+consumed_by: [command]
+notes: >-
+  dataset/, LICENSE, README.md and KWS-Vietnamese-command_TomTat.md of commit ae3957e3cd7c1b6e0d21af048264353da3e40ead,
+  sparse-checked out as they are. One folder per class: bat_den, tat_den, bat_quat, tat_quat, bat_het, tat_het, noise;
+  every clip 1 s, self-recorded by the authors, no speaker ids, so training only (KEHOACH 1.3). data_train/dataset_1s
+  (16 kHz) holds the same utterances as data_train/data_cutted (partly 48 kHz): read dataset_1s only. data_test/data_1s
+  adds 143 commands; its 60 noise clips repeat train noise byte for byte, and data_test/data_cutted repeats data_1s.
+  MIT asks that the copyright notice in LICENSE travels with copies of the data. Tree sha256 as for vivos.
