@@ -1,9 +1,9 @@
-# E11-T6 wake test set: "Chào Mina", read as the name (ADR-0007), 10 times a session at 1 m and 3 m, front and side,
-# normal and soft, then spoken near misses; the room background for test_neg is background.tsv, recorded last.
+# E11-T6 wake test set: "trợ lý" (ADR-0011), 10 times a session at 1 m and 3 m, front and side, normal and soft,
+# then everyday phrases that share a syllable with it; the room background for test_neg is background.tsv, recorded last.
 # Columns as in levels.tsv.
-Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "Chào Mina" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'chào mi na'
-Chính diện, cách 1 m. Chờ 2 s, nói "Chào Mina" 10 lần, mỗi lần cách 2-3 s, giọng NHỎ như nói trong phòng lúc tối.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'chào mi na, giọng nhỏ'
-Bên PHẢI, phía lỗ B (ch1), cách 1 m. Chờ 2 s, nói "Chào Mina" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 0 --duration-s 40 --prompt 'chào mi na'
-Chính diện, cách 3 m. Chờ 2 s, nói "Chào Mina" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 300 --doa-deg 90 --duration-s 40 --prompt 'chào mi na'
-Chéo giữa chính diện và bên phải, cách 3 m. Chờ 2 s, nói "Chào Mina" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 300 --doa-deg 45 --duration-s 40 --prompt 'chào mi na'
-Chính diện, cách 1 m. Chờ 2 s rồi đọc lần lượt, mỗi cụm 2 lần, cách 2 s: chào mi, mi na, mi na ơi, chào chị na, chào mi nhé, chào minh, chào mẹ, bang mi na, và vi na, chào bạn.	--kind neg --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 60 --prompt 'chào mi | mi na | mi na ơi | chào chị na | chào mi nhé | chào minh | chào mẹ | bang mi na | và vi na | chào bạn'
+Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "Trợ lý" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'trợ lý'
+Chính diện, cách 1 m. Chờ 2 s, nói "Trợ lý" 10 lần, mỗi lần cách 2-3 s, giọng NHỎ như nói trong phòng lúc tối.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'trợ lý, giọng nhỏ'
+Bên PHẢI, phía lỗ B (ch1), cách 1 m. Chờ 2 s, nói "Trợ lý" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 0 --duration-s 40 --prompt 'trợ lý'
+Chính diện, cách 3 m. Chờ 2 s, nói "Trợ lý" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 300 --doa-deg 90 --duration-s 40 --prompt 'trợ lý'
+Chéo giữa chính diện và bên phải, cách 3 m. Chờ 2 s, nói "Trợ lý" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 300 --doa-deg 45 --duration-s 40 --prompt 'trợ lý'
+Chính diện, cách 1 m. Chờ 2 s rồi đọc lần lượt, mỗi cụm 2 lần, cách 2 s: hỗ trợ, trợ giúp, trợ cấp, trợ lực, chị lý, vợ lý, xử lý, quản lý, hợp lý, lý do.	--kind neg --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 60 --prompt 'hỗ trợ | trợ giúp | trợ cấp | trợ lực | chị lý | vợ lý | xử lý | quản lý | hợp lý | lý do'
