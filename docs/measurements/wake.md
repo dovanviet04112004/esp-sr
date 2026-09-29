@@ -137,3 +137,49 @@ Bỏ mẩu đọc nhanh hạ điểm của cả giọng thật lẫn cụm gần
 đọc nhanh được giữ.
 
 Cách sửa là âm bản khó của `wake/v2`, ở KẾ HOẠCH §3.11.
+
+## 4. `wake/v2`: âm bản khó
+
+`make wake-synth` phần `hard`, rồi split `wake/v2` (`ml/data/splits/wake/v2/SPLIT.md`); năm file của `wake/v1` giữ
+nguyên sha256 nên bản mô phỏng của chúng là liên kết cứng. Bộ TTS `synth_hard` đọc 101 cụm, mỗi cụm 4 giọng VieNeu và
+3 giọng F5; giữ theo luật của âm bản gần âm (`tts_engines.md` §3: nghe đúng chữ, cách "chào mi na" hơn 15,40 nat):
+
+| Họ | Cụm | Mẩu | Nghe đúng chữ | Giữ |
+|---|---|---|---|---|
+| chào {x} | 28 | 196 | 101 | 101 |
+| chào mi {x} | 30 | 210 | 50 | 32 |
+| chào {x} na | 28 | 196 | 73 | 66 |
+| {x} mi na | 15 | 105 | 53 | 50 |
+| **Tổng** | **101** | **707** | **277** | **249** |
+
+Mẩu nghe sai chữ phần lớn vẫn là âm bản dùng được ("chào và" nghe thành "chào bà", "chào mà" thành "chào má") và
+cách "chào mi na" 20–50 nat, nhưng luật hiện tại bỏ chúng. `train_hard` có 2 590 mẩu, 4,19 giờ: 241 mẩu `synth_hard`,
+370 mẩu `synth_neg`, 1 979 câu kho học khớp một mẫu của `split.hard`; mô phỏng 4 lượt. `val_hard` chỉ giữ 8 mẩu
+`synth_hard` mà `val_neg` chưa có.
+
+Hai run cùng split, seed và số bước, chỉ khác số kênh: `20260929_4f8d92d-dirty_7d719b` (32) và
+`20260929_8aa9737-dirty_f578c6` (`--set model.channels=64`). Board chấm bằng lệnh của §2.
+
+| | `wake/v1`, 32 | `wake/v2`, 32 | `wake/v2`, 64 |
+|---|---|---|---|
+| Loss cuối | 0,049 | 0,054 | 0,025 |
+| Mốc giữ | 18 000 | 3 000 | 5 000 |
+| Ngưỡng chọn trên `val` | 0,975 | 0,785 | 0,830 |
+| Bắt trên `val` (TTS) | 77,1% | 93,2% | 94,1% |
+| Báo nhầm `test_neg` ở ngưỡng ấy | 0,45/giờ | **2,34/giờ** (62 lần) | **1,89/giờ** (50 lần) |
+| Board, 60 đoạn "chào mi na": trung vị / phân vị 75 / đỉnh | 0,77 / 0,88 / 0,95 | **0,21 / 0,38 / 0,67** | **0,14 / 0,27 / 0,71** |
+| Board, "chào minh" hai lần | 0,86 0,88 | 0,27 0,18 | 0,16 0,28 |
+| Board, "chào mẹ" hai lần | 0,92 0,89 | 0,22 0,15 | 0,05 0,01 |
+| Board, "chào mi" / "mi na" | 0,65 0,48 / 0,84 0,21 | 0,49 0,13 / 0,57 0,22 | 0,16 0,01 / 0,03 0,01 |
+| Board, lệnh và nói tự do, đỉnh | 0,28 | 0,15 | 0,16 |
+| Board, lần nói qua ngưỡng / báo nhầm trên 39 phiên | 0 / 0 | 0 / 0 | 0 / 0 |
+
+- **Âm bản khó tổng quát được**: "chào mẹ", "chào minh" không có trong tập học mà vẫn tụt từ ~0,9 xuống ≤ 0,28.
+- **Nhưng giọng thật nói đúng từ tụt theo**, từ trung vị 0,77 xuống 0,21 và 0,14, và lại chồng lên cụm gần âm ở mức
+  thấp hơn. Mạng bị ép phân biệt tinh hơn thì bám vào "chào mi na" kiểu TTS; giọng thật nằm ngoài vùng ấy. Mẫu dương
+  toàn TTS là giới hạn gốc (KẾ HOẠCH §3.11).
+- **64 kênh không giúp**: khớp tập học chặt hơn (loss 0,025 so với 0,054), bắt trên `val` TTS ngang, nhưng điểm giọng
+  thật còn thấp hơn. Thiếu là thiếu dữ liệu giọng thật, không phải sức chứa.
+- **Cách chọn mốc và ngưỡng không tin được**: `val` có 3,76 giờ âm bản, "≤ 1 lần/giờ" là ≤ 3 lần, nên ngưỡng do câu
+  âm bản thứ 4 quyết định và nhảy 0,785–0,95 giữa các mốc. Giữ mốc có tỉ lệ bắt cao nhất trong 20 lần đo nhiễu là giữ
+  lần may: mốc 3 000 và 5 000, còn ở đầu lịch học, và ngưỡng của chúng cho 1,9–2,3 lần/giờ trên `test_neg`.
