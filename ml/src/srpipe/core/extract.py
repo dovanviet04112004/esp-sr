@@ -613,6 +613,9 @@ def fetch(job: Job, follow: bool) -> None:
     pins = job.pins()
 
     def one(source: dict, part: str, matches: list[dict], info: dict) -> str:
+        # Sentences wait on the data disk for cut; below the floor, fetch waits for cut to free it.
+        while shutil.disk_usage(job.state).free < job.cfg["fetch_min_free_gb"] * 1e9:
+            time.sleep(job.cfg["follow_poll_s"])
         note = ""
         if source["kind"] == "parquet":
             fetch_parquet(job, source, pins[source["repo"]], part, matches, info)

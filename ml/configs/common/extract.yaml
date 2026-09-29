@@ -15,6 +15,7 @@ workers:
   fetch: 6                         # audio parts streamed at once: one stream runs at ~16 MB/s; each holds a
                                    #   row group or a tar member in memory, and WSL has 10 GB with the aligner
   stream: 4                        # .arrow parts read end to end at once, their audio passing through memory
+fetch_min_free_gb: 10              # fetch waits while the data disk has less free, until cut frees it
 follow_poll_s: 60                  # how often fetch --follow and cut --follow look for new work
 cut:                               # as wake.yaml split.corpus_pos, measured in wake.md §6
   start_shifts_s: [0.0, 0.02, 0.04, 0.06]   # tried in turn after the aligned start; the first heard as the phrase
