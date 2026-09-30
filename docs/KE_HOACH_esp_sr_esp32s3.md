@@ -1054,7 +1054,9 @@ mang đoạn khai tay. Hai người nói đè nhau nằm ngoài phạm vi (§9):
 
 **Biến thể** mang tên cố định; mỗi bên dựng ghi `<biến thể>.wav` một kênh 16 kHz vào thư mục của mục. Chủ repo chốt ngày
 30/09: BSS của ESP-SR, `gsc` của dự án và mọi mức dìm nhiễu của ESP-SR đều phải có số và có tệp để nghe; trên máy tính chỉ
-so hai mạng dìm nhiễu công bố.
+so hai mạng dìm nhiễu công bố. Trên S3, BSS là khối không gian duy nhất ESP-SR chạy được, nên nó là bên đối của cả `gsc`
+lẫn `bss` của dự án: GSC của họ (`esp_gsc.h`) chỉ có cho ESP32-P4 và S31, còn MASE (`esp_mase.h`) có header cho S3 nhưng
+thư viện 2.5.5 thiếu phần cài đặt (`docs/measurements/afe/compare.md`, mục "Khối không gian ESP-SR có trên S3").
 
 | Biến thể | Ai dựng | Là gì |
 |---|---|---|
