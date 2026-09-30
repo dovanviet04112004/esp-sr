@@ -1,8 +1,8 @@
 # ADR-0012 — `command` có hai đường cắm cùng một hợp đồng: DS-CNN phân lớp lệnh cố định, và CRNN + CTC của ADR-0010
 
-- **Trạng thái**: Đề xuất
+- **Trạng thái**: Chấp nhận (30/09)
 - **Ngày**: 2026-09-30
-- **Liên quan**: KẾ HOẠCH §3.11, §3.12, §4.4, §4.5.2, §4.5.5; TASKS E11-T8, E11-T12, E11-T13, E11-T17; ADR-0010
+- **Liên quan**: KẾ HOẠCH §3.3, §3.11, §3.12, §4.4, §4.4.1, §4.5.2, §4.5.5, §6.2, §6.3; TASKS E11-T7, E11-T8, E11-T12, E11-T13, E11-T17; ADR-0010
 
 ---
 
@@ -19,7 +19,7 @@ Edge") là mạng loại ấy, sinh ra cho vi điều khiển.
 | Phương án | Được | Mất | Số đo |
 |---|---|---|---|
 | Chỉ CTC (ADR-0010) | thêm lệnh bằng một dòng chữ; một mạng cho mọi bộ lệnh | chưa có lệnh nào chạy cho tới khi đủ ba khối trên | chưa đo |
-| Chỉ DS-CNN | nhỏ, một lần chạy mỗi câu; dữ liệu chỉ là mẩu lệnh và âm bản | bộ lệnh cố định lúc học, đổi lệnh là học lại; lệnh chưa học ("chụp ảnh") không bao giờ nhận | 94,4 / 94,9 / 95,4% trên Google Speech Commands, 12 lớp, ba cỡ [1] |
+| Chỉ DS-CNN | nhỏ, một lần chạy mỗi câu; dữ liệu chỉ là mẩu lệnh và âm bản | bộ lệnh cố định lúc học, đổi lệnh là học lại; lệnh chưa học ("chụp ảnh") không bao giờ nhận | trên Google Speech Commands, cửa sổ 1 s, 12 lớp (10 từ, `silence`, `unknown`): 94,4 / 94,9 / 95,4% ở ba cỡ 38,6 / 189,2 / 497,6 KB int8, 5,4 / 19,8 / 56,9 triệu phép mỗi lần chạy [1, bảng 5 và 7] |
 | **Hai đường sau cùng hợp đồng `ai_engine_command_*`** | lệnh chạy trong tuần bằng DS-CNN, CTC tới sau; đổi đường bằng Kconfig và ảnh model; chung một thước | giữ hai nhánh code và hai bộ dữ liệu | chọn đường mặc định bằng Cửa 3 trên tập thu qua board |
 
 ## Quyết định
@@ -28,13 +28,16 @@ Hai đường, **không đổi hợp đồng đã đóng băng** (KẾ HOẠCH �
 nguyên. `_step` nhận một khung đặc trưng mà độ dài do model khai, `_score` trả chỉ số lệnh hoặc −1 kèm ba điểm, cùng một
 khuôn cho cả hai.
 
-- **`kws` (DS-CNN).** Cửa sổ cố định (cấu hình, khoảng 1,5 s) tính ngược từ lúc `vad` báo hết câu; mạng chạy một lần
-  mỗi câu. Lớp gồm các lệnh có dữ liệu của `contracts/commands/default_vi.json`, theo đúng thứ tự file ấy, cộng `other`
-  và `silence`. `other` gồm lời nói thường, cụm gần âm ("bật điện", "mở cửa sổ", "đóng góp"…) và từng nửa của mỗi lệnh
-  ("bật", "đèn", "mở", "cửa"…), để gần âm hay nửa lệnh không thành lệnh. Từ chối khi lớp thắng là `other` hoặc
-  `silence`, khi xác suất của nó dưới ngưỡng, hoặc khi nó hơn lớp nhì quá ít; ngưỡng ở NVS `kws/` như `δ₁`, `δ₂`. Dương
-  lấy từ mẩu người thật của kho trích `hf_extract`, từ `kws_vi_command` và từ TTS VieNeu; tất cả qua đường mô phỏng
-  board như `wake`, rồi int8 bằng ESP-PPQ.
+- **`kws` (DS-CNN).** Cửa sổ cố định (cấu hình, khoảng 1,5 s = 94 bước 16 ms) tính ngược từ bước `vad` tắt sau câu;
+  mạng chạy một lần mỗi câu. Bản đầu theo cỡ nhỏ nhất của bài: một tích chập 64 kênh rồi bốn tầng tách chiều sâu 64
+  kênh và trung bình gộp [1, bảng 7]. Lớp gồm các lệnh có dữ liệu của `contracts/commands/default_vi.json`, theo đúng
+  thứ tự file ấy, cộng `other` và `silence`; "chụp ảnh" là lệnh chưa học của E11-T13 và đứng cuối file, nên các lớp
+  lệnh là phần đầu của bộ lệnh. `other` gồm lời nói thường, cụm gần âm ("bật điện", "mở cửa sổ", "đóng góp"…) và mọi
+  cụm từ liền nhau ngắn hơn một lệnh nói riêng ("bật", "đèn", "mở", "cửa", "âm lượng"…), để gần âm hay nửa lệnh không
+  thành lệnh. Từ chối khi lớp thắng là `other` hoặc `silence`, khi xác suất của nó dưới ngưỡng, hoặc khi nó hơn lớp nhì
+  quá ít; ngưỡng ở NVS `kws/` như `δ₁`, `δ₂`. Dương lấy từ mẩu người thật của kho trích `hf_extract`, từ
+  `kws_vi_command` và từ TTS (VieNeu và F5 như `wake`, E11-T7); tất cả qua đường mô phỏng board như `wake`, rồi int8
+  bằng ESP-PPQ.
 - **`ctc` (CRNN + CTC).** Như ADR-0010 và KẾ HOẠCH §3.12.
 - **Đặc trưng.** Khai ở cấu hình và ở `meta.json` của model: log-mel 40, hoặc log-mel 40 cộng ba chiều cao độ của
   `dsp_spec/pitch`. `kws` bản đầu dùng log-mel 40, vì chín lệnh khác nhau ở cả âm tiết lẫn phụ âm. Khi `pitch` xong,
@@ -44,22 +47,26 @@ khuôn cho cả hai.
   bộ lệnh mặc định, nên chỉ số trả về trùng chỉ số trong bảng lệnh. Khi chạy `kws`, lệnh đổi bộ lệnh qua MQTT bị từ chối
   bằng một mã lỗi; host đổi mã thành câu.
 - **Code.**
-  - `ml/src/srpipe/tasks/command/` giữ phần chung: `eval.py` với thước Cửa 3, và `backend.py` với giao diện "cửa sổ đặc
-    trưng → lệnh hoặc từ chối, kèm điểm". Hai thư mục con `kws/` và `ctc/` theo khuôn nhánh của §4.4; `data.py` hiện có
-    chuyển vào `ctc/`.
-  - Cấu hình `ml/configs/models/command.yaml` chọn `backend` và `features`, kèm hai file `command_kws.yaml` và
-    `command_ctc.yaml`.
+  - `ml/src/srpipe/tasks/command/` giữ phần chung: `eval.py` với thước Cửa 3, `backend.py` với giao diện "cửa sổ đặc
+    trưng → lệnh hoặc từ chối, kèm điểm", và `synth.py` sinh tiếng lệnh cho cả hai đường. Hai thư mục con `kws/` và
+    `ctc/` theo khuôn nhánh của KẾ HOẠCH §4.4; `data.py` hiện có chuyển vào `ctc/`.
+  - Cấu hình `ml/configs/models/command.yaml` chọn `backend` và `features` và giữ bộ TTS, kèm hai file
+    `command_kws.yaml` và `command_ctc.yaml`; split của `ctc` chuyển sang file sau.
   - Firmware: `ai_engine/src/command_kws/` và `command_ctc/`. Kconfig `AI_ENGINE_COMMAND_BACKEND` chọn danh sách nguồn
     trong CMake, đúng luật tắt module của CLAUDE.md §4.1. Ảnh model vẫn là `firmware/models/command/`.
-- **Chọn đường mặc định** của sản phẩm bằng Cửa 3 trên tập thu qua board, tách theo người nói và phòng.
+- **Chọn đường mặc định** của sản phẩm bằng Cửa 3 trên tập thu qua board, tách theo người nói và phòng. Tới lúc ấy mặc
+  định là `kws`, đường duy nhất chạy được trong tuần.
 
 ## Hệ quả
 
-- KẾ HOẠCH §3.12 thêm đoạn `kws`; bảng §3.3, cây §4.4 và §4.5.2 thêm hai thư mục; §4.5.5 ghi khung đặc trưng do
-  model khai; `meta.json` của `command` thêm `backend`, `classes`, `features`.
-- TASKS thêm E11-T17 (`kws`). E11-T12 và E11-T13 giữ nguyên cho `ctc`.
+- KẾ HOẠCH §3.12 thêm đoạn `kws`; bảng §3.3 tách `command` thành hai dòng; cây §4.4, §4.4.1 và §4.5.2 thêm hai thư mục,
+  split `command_kws` và Kconfig chọn đường; §4.5.5 ghi khung đặc trưng do model khai; §6.2 ghi nghĩa của `cmd_reject`,
+  `cmd_margin` theo đường; §6.3 ghi `meta.json` của `command` thêm `backend`, `classes`, `features`; hậu xử lý của
+  `kws` có bộ vàng ở `contracts/golden/`.
+- TASKS: E11-T17 (`kws`) bắt đầu; E11-T7 thêm bộ TTS của lệnh; E11-T12 và E11-T13 giữ nguyên cho `ctc`.
 - Xét lại khi `ctc` đạt Cửa 3 trong ngân sách thời gian của §3.3: lúc ấy `kws` chỉ còn là đường dự phòng, hoặc bỏ.
 
 ## Nguồn
 
 1. Y. Zhang, N. Suda, L. Lai, V. Chandra, *Hello Edge: Keyword Spotting on Microcontrollers*, arXiv:1711.07128, 2017.
+   Số ở bảng 5 và bảng 7, đã đọc lại trên bản PDF ngày 30/09.
