@@ -9,6 +9,8 @@ from pathlib import Path
 
 from tools import check_comments, check_layers, check_purity
 
+ESP_SR_PINNED = 'dependencies:\n  espressif/esp-sr: "==2.5.5"\n'
+
 
 def write(root: Path, rel: str, text: str) -> Path:
     path = root / rel
@@ -67,6 +69,27 @@ class LayerTests(unittest.TestCase):
     def test_esp_sr_in_a_manifest_fails(self) -> None:
         component(self.root, "ai_engine", "common", 'dependencies:\n  espressif/esp-sr: "^2.0"\n')
         self.assertIn("pulls ESP-SR", " ".join(self.problems()))
+
+    def test_esp_sr_in_the_compare_app_passes(self) -> None:
+        write(self.root, "test_apps/espsr_compare/main/idf_component.yml", ESP_SR_PINNED)
+        self.assertEqual(self.problems(), [])
+
+    def test_esp_sr_in_any_other_app_or_main_fails(self) -> None:
+        for rel in ("test_apps/parity/main", "main", "components/dsp_afe/test_apps/unit/main"):
+            write(self.root, f"{rel}/idf_component.yml", ESP_SR_PINNED)
+        found = [p for p in self.problems() if "pulls ESP-SR" in p]
+        self.assertEqual(len(found), 3, found)
+
+    def test_only_the_compare_app_at_its_own_path_is_exempt(self) -> None:
+        write(self.root, "test_apps/espsr_compare_old/main/idf_component.yml", ESP_SR_PINNED)
+        write(self.root, "components/svc_front/test_apps/espsr_compare/main/idf_component.yml", ESP_SR_PINNED)
+        found = [p for p in self.problems() if "pulls ESP-SR" in p]
+        self.assertEqual(len(found), 2, found)
+
+    def test_the_compare_app_does_not_excuse_a_component_requiring_esp_sr(self) -> None:
+        write(self.root, "test_apps/espsr_compare/main/idf_component.yml", ESP_SR_PINNED)
+        component(self.root, "svc_front", "common espressif__esp-sr")
+        self.assertIn("ESP-SR is banned", " ".join(self.problems()))
 
 
 class PurityTests(unittest.TestCase):

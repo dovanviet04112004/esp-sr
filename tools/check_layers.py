@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Enforce the firmware layering of KEHOACH 4.5.4 and keep ESP-SR out of every build.
+"""Enforce the firmware layering of KEHOACH 4.5.4 and keep ESP-SR out of every build but one test app.
 
 Reads REQUIRES and PRIV_REQUIRES from every component CMakeLists.txt, builds the dependency
 graph, and fails on an edge that points sideways or upwards, on a forbidden edge, on a cycle,
-or on any idf_component.yml that pulls espressif/esp-sr.
+on a component that requires espressif/esp-sr, or on an idf_component.yml that pulls it anywhere
+outside test_apps/espsr_compare, the app that measures ESP-SR against dsp_afe (KEHOACH 4.5.1).
 """
 
 from __future__ import annotations
@@ -49,6 +50,7 @@ FORBIDDEN_EDGES: set[tuple[str, str]] = {
 }
 
 BANNED_DEPENDENCY_RE = re.compile(r"esp[-_]sr\b")
+ESP_SR_APP = ("test_apps", "espsr_compare")
 REGISTER_RE = re.compile(r"idf_component_register\s*\((.*?)\)", re.DOTALL)
 REQUIRES_RE = re.compile(r"\b(PRIV_REQUIRES|REQUIRES)\b(.*?)(?=\b[A-Z_]{3,}\b\s|$)", re.DOTALL)
 KEYWORD_RE = re.compile(r"^[A-Z_]{3,}$")
@@ -146,10 +148,12 @@ def check_manifests(firmware_root: Path) -> list[Problem]:
     for manifest in sorted(firmware_root.rglob("idf_component.yml")):
         if "managed_components" in manifest.parts or any(p.startswith("build") for p in manifest.parts):
             continue
+        if manifest.relative_to(firmware_root).parts[: len(ESP_SR_APP)] == ESP_SR_APP:
+            continue
         for lineno, line in enumerate(manifest.read_text(encoding="utf-8").splitlines(), 1):
             if BANNED_DEPENDENCY_RE.search(line.split("#", 1)[0]):
                 where = f"{manifest.relative_to(firmware_root)}:{lineno}"
-                problems.append(Problem(where, "4.5.1", "pulls ESP-SR, which is banned (TONG QUAN 1)"))
+                problems.append(Problem(where, "4.5.1", "pulls ESP-SR outside test_apps/espsr_compare (TONG QUAN 1)"))
     return problems
 
 
