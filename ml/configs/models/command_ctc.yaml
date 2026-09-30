@@ -27,3 +27,13 @@ model:                             # MultiNet7's encoder frame (ADR-0013); sizes
   norm_eps: 1.0e-5
   bypass_init: 0.5                 # share of a layer's or a stack's output over its input at the start
 chunk_hops: 16                     # hops a streaming step takes: a multiple of the front's stride times the top rate
+esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches around every export of this branch
+  - requantise_graph_inputs        # a layer's input read by a Conv, an Add and the bypass Sub at two scales
+  - conv_caches_along_time         # the front's convolutions reached through a Slice of the features
+probe:                             # E11-T12: one layer, then the whole net, random weights, on board B (make ai-probe)
+  seed: 20260930
+  calib_sequences: 8
+  hops: 256                        # hops streamed on the board: a multiple of chunk_hops
+  input_mean: 0.0                  # the network reads features normalised by train's mean and deviation
+  input_std: 1.0
+  norm_scale: [0.5, 1.5]           # each norm's scale drawn uniform, as training leaves it, never exactly one

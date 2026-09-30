@@ -189,9 +189,10 @@ calib-shift: ## Store NVS calib/pcm_shift through test_apps/calib: make calib-sh
 	@test -n "$(SHIFT)" || { echo "usage: make calib-shift SHIFT=<8..16>"; exit 1; }
 	cd host && uv run --extra score python -m srhost.calib shift $(SHIFT) --port $(PORT)
 
-ai-probe: ## Export the streaming TCN probe of E11-T10 and the kws size probe of E11-T17 into ai_engine/test_apps/unit
+ai-probe: ## Export the probes of E11-T10 (TCN), E11-T17 (kws sizes) and E11-T12 (ctc) into ai_engine/test_apps/unit
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.wake.quant probe
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.kws.quant probe
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant probe
 
 ai-unit: ai-probe ## Run the ai_engine suite on board B; model slot 1 is rewritten and left erased
 	cd firmware/components/ai_engine/test_apps/unit && idf.py build && \
