@@ -9,9 +9,9 @@ import numpy as np
 import pytest
 import yaml
 
-from srpipe.core import corpus
+from srpipe.core import corpus, phrases
 from srpipe.core.config import load_yaml
-from srpipe.tasks.wake import CONFIG, candidates, synth
+from srpipe.tasks.wake import CONFIG, synth
 from srpipe.tts import clips
 
 PRESETS = [{"label": "Một", "id": "v1"}, {"label": "Hai", "id": "v2"}, {"label": "Ba", "id": "v3"}]
@@ -68,7 +68,7 @@ def stream_of(texts: list[str]) -> tuple[np.ndarray, list[str]]:
     ids: list[int] = []
     for text in texts:
         ids += [vocab.setdefault(w, len(vocab)) for w in corpus.words(text)]
-        ids.append(candidates.SEPARATOR)
+        ids.append(phrases.SEPARATOR)
     return np.array(ids, dtype=np.int32), list(vocab)
 
 
@@ -76,12 +76,12 @@ def test_negatives_come_neighbours_first_then_openings_then_the_hand_picked(tmp_
     cfg = pinned()
     corpus = ["trào thi đua", "trào thi đua nhé", "cho mi na", "chào mọi người", "chào mọi người", "chào mi nhé"]
     stream, vocab = stream_of(corpus)
-    texts = synth.negative_texts(cfg, stream, vocab, *candidates.component_codes(vocab))
-    phrases = cfg["synth"]["negatives"]["phrases"]
+    texts = synth.negative_texts(cfg, stream, vocab, *phrases.component_codes(vocab))
+    picked = cfg["synth"]["negatives"]["phrases"]
     assert texts[:2] == ["trào thi đua", "cho mi na"]
-    assert texts.index("chào mọi người") < texts.index(phrases[0])
+    assert texts.index("chào mọi người") < texts.index(picked[0])
     assert texts.count("chào mi nhé") == 1
-    assert texts[-(len(phrases) - 1) :] == [p for p in phrases if p != "chào mi nhé"]
+    assert texts[-(len(picked) - 1) :] == [p for p in picked if p != "chào mi nhé"]
 
 
 def test_no_negative_sounds_like_the_wake_word_however_it_is_spelled() -> None:
@@ -89,7 +89,7 @@ def test_no_negative_sounds_like_the_wake_word_however_it_is_spelled() -> None:
     cfg["word"] = "trợ lý"
     cfg["synth"]["negatives"] |= {"misses": 1, "openings": 1, "phrases": ["trợ lý ơi", "hỗ trợ"]}
     stream, vocab = stream_of(["trợ lí", "trợ lí nhé", "trợ giúp", "chị lý"])
-    texts = synth.negative_texts(cfg, stream, vocab, *candidates.component_codes(vocab))
+    texts = synth.negative_texts(cfg, stream, vocab, *phrases.component_codes(vocab))
     assert texts == ["chị lý", "trợ giúp", "hỗ trợ"]
 
 
@@ -130,7 +130,7 @@ def test_the_threshold_lets_the_configured_share_of_near_misses_pass_and_no_clip
     hard = [clip(0, True, 0.0, 5.0, "h0"), clip(1, True, 0.0, 1.0, "h1"), clip(2, True, 0.0, 9.0, "n9")]
     for name, rows in (("positives", positives), ("negatives", negatives), ("hard", hard)):
         (tmp_path / synth.SETS[name]).mkdir()
-        synth.write_manifest(tmp_path / synth.SETS[name], {"clips": rows})
+        clips.write_manifest(tmp_path / synth.SETS[name], {"clips": rows})
     margin = synth.select(cfg, tmp_path)
     assert margin == pytest.approx(2.0)
     kept = {
@@ -157,7 +157,7 @@ def test_hard_families_fill_their_slots_and_never_say_the_word_or_a_held_out_phr
     vocab = ["mẹ", "mi", "là", "tôi", "chào", "na", "có"]
     counts = {"mẹ": 9, "mi": 8, "là": 7, "tôi": 6, "chào": 5, "na": 4, "có": 1}
     stream = np.array([vocab.index(w) for w, n in counts.items() for _ in range(n)], dtype=np.int32)
-    codes, tables = candidates.component_codes(vocab)
+    codes, tables = phrases.component_codes(vocab)
     texts = synth.hard_texts(cfg, stream, vocab, codes, tables)
     assert texts == ["chào mi", "chào là", "chào là na", "mẹ mi na", "mi mi na"]
     assert "chào mi na" not in texts and "chào mẹ" not in texts and "chào mẹ na" not in texts

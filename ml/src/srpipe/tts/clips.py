@@ -14,12 +14,14 @@ from pathlib import Path
 import numpy as np
 import pyarrow.parquet as pq
 import soundfile as sf
+import yaml
 
 from srpipe.lang.normalize import LangError, normalize
 from srpipe.tts import engines
 
 ROW_KEYS = ("speaker", "text", "say", "seed", "speed")
 NOT_SPOKEN = ("id", "out", "speaker", "say", "rivals")
+REFERENCES = "synth_refs"
 
 
 @dataclass(frozen=True)
@@ -104,6 +106,55 @@ def parquet_references(
             else:
                 spent.add((i, group))
     return refs
+
+
+def training_references(
+    spec: dict, ref_seconds: list[float], seed: int, raw: Path, out: Path, rejected: set[str], vivos: list[str] | None
+) -> list[Reference]:
+    """The VIVOS train speakers of vivos (every one when None) and the parquet draws of spec, among the clips screening
+    kept; the same on every run since the draws are seeded; listed in out/references.yaml, parquet clips under out."""
+    rng = np.random.default_rng(seed)
+    refs = speaker_references(raw / spec["vivos"], vivos, ref_seconds, raw, rejected)
+    for name, count in spec["parquet"]["counts"].items():
+        files = sorted((raw / "speech" / name).glob(spec["parquet"]["files"]))
+        refs += parquet_references(name, files, count, ref_seconds, rng, out, raw, rejected)
+    rows = [{"speaker": r.speaker, "wav": str(r.wav), "text": r.text} for r in refs]
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "references.yaml").write_text(yaml.safe_dump(rows, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return refs
+
+
+def preset_request(k: int, voice: dict, n: int, text: str, seed: int, folder: Path) -> dict:
+    """Voice k of the engine's presets reading text n."""
+    rid = f"preset_{k:02d}_t{n}_s{seed}"
+    return {
+        "id": rid,
+        "speaker": voice["label"],
+        "text": text,
+        "seed": seed,
+        "voice": voice["id"],
+        "out": str(folder / f"{rid}.wav"),
+    }
+
+
+def clone_request(engine: str, ref: Reference, n: int, text: str, seed: int, speed: float, folder: Path) -> dict:
+    """The voice of ref reading text n; F5 also takes the reference's text and a speed, VieNeu neither."""
+    rid = f"clone_{ref.speaker}_t{n}_s{seed}" + (f"_v{round(speed * 100)}" if engine == "f5" else "")
+    req = {
+        "id": rid,
+        "speaker": ref.speaker,
+        "text": text,
+        "seed": seed,
+        "ref_audio": str(ref.wav),
+        "out": str(folder / f"{rid}.wav"),
+    }
+    return req | {"ref_text": ref.text, "speed": speed} if engine == "f5" else req
+
+
+def write_manifest(out: Path, body: dict) -> Path:
+    manifest = out / "manifest.yaml"
+    manifest.write_text(yaml.safe_dump(body, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return manifest
 
 
 def said(request: dict) -> str:

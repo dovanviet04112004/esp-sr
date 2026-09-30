@@ -15,40 +15,14 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from srpipe.core import corpus, screen
+from srpipe.core import corpus, phrases, screen
 from srpipe.core.config import data_paths, load_yaml
-from srpipe.tasks.wake import CONFIG, candidates
+from srpipe.tasks.wake import CONFIG
 from srpipe.tts import CONFIG as TTS_CONFIG
 from srpipe.tts import clips, engines
 
 SETS = {"pilot": "synth_pilot", "positives": "synth_pos", "negatives": "synth_neg", "hard": "synth_hard"}
 SETS_KEPT = ("positives", "negatives", "hard")
-REFERENCES = "synth_refs"
-
-
-def preset_request(k: int, voice: dict, n: int, text: str, seed: int, folder: Path) -> dict:
-    rid = f"preset_{k:02d}_t{n}_s{seed}"
-    return {
-        "id": rid,
-        "speaker": voice["label"],
-        "text": text,
-        "seed": seed,
-        "voice": voice["id"],
-        "out": str(folder / f"{rid}.wav"),
-    }
-
-
-def clone_request(engine: str, ref: clips.Reference, n: int, text: str, seed: int, speed: float, folder: Path) -> dict:
-    rid = f"clone_{ref.speaker}_t{n}_s{seed}" + (f"_v{round(speed * 100)}" if engine == "f5" else "")
-    req = {
-        "id": rid,
-        "speaker": ref.speaker,
-        "text": text,
-        "seed": seed,
-        "ref_audio": str(ref.wav),
-        "out": str(folder / f"{rid}.wav"),
-    }
-    return req | {"ref_text": ref.text, "speed": speed} if engine == "f5" else req
 
 
 def positive_requests(cfg: dict, spec: dict, presets: list[dict], refs: list[clips.Reference], out: Path) -> dict:
@@ -62,13 +36,15 @@ def positive_requests(cfg: dict, spec: dict, presets: list[dict], refs: list[cli
     vieneu, f5 = spec["vieneu"], spec["f5"]
     for n, text in enumerate(vieneu["texts"]):
         for seed in vieneu["preset_seeds"]:
-            requests["vieneu"] += [preset_request(k, v, n, text, seed, out / "vieneu") for k, v in enumerate(presets)]
+            requests["vieneu"] += [
+                clips.preset_request(k, v, n, text, seed, out / "vieneu") for k, v in enumerate(presets)
+            ]
         for seed in vieneu["clone_seeds"]:
-            requests["vieneu"] += [clone_request("vieneu", r, n, text, seed, 1.0, out / "vieneu") for r in refs]
+            requests["vieneu"] += [clips.clone_request("vieneu", r, n, text, seed, 1.0, out / "vieneu") for r in refs]
     for n, text in enumerate(f5["texts"]):
         for ref in refs:
             for seed in f5["seeds"]:
-                requests["f5"] += [clone_request("f5", ref, n, text, seed, v, out / "f5") for v in f5["speeds"]]
+                requests["f5"] += [clips.clone_request("f5", ref, n, text, seed, v, out / "f5") for v in f5["speeds"]]
     return {engine: [r | {"say": cfg["word"]} for r in reqs] for engine, reqs in requests.items()}
 
 
@@ -76,8 +52,8 @@ def negative_texts(cfg: dict, stream: np.ndarray, vocab: list[str], codes: np.nd
     """The corpus neighbours of the wake word, commonest first, then its commonest openings, then the hand-picked
     phrases, without repeats and without any that sounds like the wake word, however it is spelled."""
     spec, word = cfg["synth"]["negatives"], corpus.sounds(cfg["word"])
-    near = candidates.neighbours(cfg["word"], spec["misses"], stream, vocab, codes, tables)
-    opening = [p for p, _ in candidates.openings(cfg["word"], stream, vocab).most_common()]
+    near = phrases.neighbours(cfg["word"], spec["misses"], stream, vocab, codes, tables)
+    opening = [p for p, _ in phrases.openings(cfg["word"], stream, vocab).most_common()]
     opening = [p for p in opening if not corpus.says(corpus.sounds(p), word)][: spec["openings"]]
     texts = dict.fromkeys([*(p for p, _ in near.most_common()), *opening, *spec["phrases"]])
     return [t for t in texts if not corpus.says(corpus.sounds(t), word)]
@@ -99,12 +75,12 @@ def negative_requests(
     for n, text in enumerate(texts):
         for i in sorted(rng.choice(pool, counts["vieneu"], replace=False)):
             requests["vieneu"].append(
-                preset_request(i, presets[i], n, text, 0, out / "vieneu")
+                clips.preset_request(i, presets[i], n, text, 0, out / "vieneu")
                 if i < len(presets)
-                else clone_request("vieneu", refs[i - len(presets)], n, text, 0, 1.0, out / "vieneu")
+                else clips.clone_request("vieneu", refs[i - len(presets)], n, text, 0, 1.0, out / "vieneu")
             )
         for i in sorted(rng.choice(len(refs), counts["f5"], replace=False)):
-            requests["f5"].append(clone_request("f5", refs[i], n, text, 0, 1.0, out / "f5"))
+            requests["f5"].append(clips.clone_request("f5", refs[i], n, text, 0, 1.0, out / "f5"))
     return {engine: [r | {"rivals": [cfg["word"]]} for r in reqs] for engine, reqs in requests.items()}
 
 
@@ -135,24 +111,11 @@ def hard_texts(cfg: dict, stream: np.ndarray, vocab: list[str], codes: np.ndarra
 
 
 def training_references(cfg: dict, raw: Path, interim: Path, rejected: set[str]) -> list[clips.Reference]:
-    """Every VIVOS train speaker and the parquet draws of the config, among the clips screening kept; the same on every
-    run since the draws are seeded; listed in references.yaml."""
-    listing = interim / REFERENCES / "references.yaml"
-    spec, seconds = cfg["synth"]["references"], cfg["synth"]["ref_seconds"]
-    rng = np.random.default_rng(cfg["synth"]["seed"])
-    refs = clips.speaker_references(raw / spec["vivos"], None, seconds, raw, rejected)
-    for name, count in spec["parquet"]["counts"].items():
-        files = sorted((raw / "speech" / name).glob(spec["parquet"]["files"]))
-        refs += clips.parquet_references(name, files, count, seconds, rng, interim / REFERENCES, raw, rejected)
-    rows = [{"speaker": r.speaker, "wav": str(r.wav), "text": r.text} for r in refs]
-    listing.write_text(yaml.safe_dump(rows, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    return refs
-
-
-def write_manifest(out: Path, body: dict) -> Path:
-    manifest = out / "manifest.yaml"
-    manifest.write_text(yaml.safe_dump(body, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    return manifest
+    """Every VIVOS train speaker and the parquet draws of the config, among the clips screening kept (clips.py)."""
+    spec = cfg["synth"]
+    return clips.training_references(
+        spec["references"], spec["ref_seconds"], spec["seed"], raw, interim / clips.REFERENCES, rejected, None
+    )
 
 
 def threshold(negatives: list[dict], word: str, false_accept: float) -> float:
@@ -179,7 +142,7 @@ def select(cfg: dict, interim: Path) -> float:
             c["kept"] = c["kept"] and c["sha256"] not in seen
             seen |= {c["sha256"]} if c["kept"] else set()
         body[s]["threshold"] = {"false_accept": false_accept, "margin": round(margin, 3)}
-        write_manifest(interim / SETS[s], body[s])
+        clips.write_manifest(interim / SETS[s], body[s])
     return margin
 
 
@@ -233,19 +196,19 @@ def main(argv: list[str] | None = None) -> int:
         if which == "positives":
             requests = positive_requests(cfg, cfg["synth"]["positives"], presets, refs, out)
         elif which == "hard":
-            stream, vocab = candidates.token_stream(paths["raw"] / "speech", cache / "wake_candidates")
-            texts = hard_texts(cfg, stream, vocab, *candidates.component_codes(vocab))
+            stream, vocab = phrases.token_stream(paths["raw"] / "speech", cache / phrases.CACHE)
+            texts = hard_texts(cfg, stream, vocab, *phrases.component_codes(vocab))
             rng = np.random.default_rng(cfg["synth"]["seed"])
             requests = negative_requests(cfg, texts, presets, refs, rng, out, cfg["synth"]["hard"]["voices"])
             body["texts"] = texts
         else:
-            stream, vocab = candidates.token_stream(paths["raw"] / "speech", cache / "wake_candidates")
-            texts = negative_texts(cfg, stream, vocab, *candidates.component_codes(vocab))
+            stream, vocab = phrases.token_stream(paths["raw"] / "speech", cache / phrases.CACHE)
+            texts = negative_texts(cfg, stream, vocab, *phrases.component_codes(vocab))
             rng = np.random.default_rng(cfg["synth"]["seed"])
             requests = negative_requests(cfg, texts, presets, refs, rng, out, cfg["synth"]["negatives"]["voices"])
             body["texts"] = texts
     body |= {"references": [str(r.wav) for r in refs], "clips": clips.render(requests, tts, out / "work", cache)}
-    print("\n".join(table(write_manifest(out, body), by_text=which == "pilot")))
+    print("\n".join(table(clips.write_manifest(out, body), by_text=which == "pilot")))
     return 0
 
 
