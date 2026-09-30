@@ -21,6 +21,7 @@ TARGET = "esp32s3"
 BITS = 8
 WIDE_BITS = 16
 INT8_MIN, INT8_MAX = -128, 127
+OPSET = 18  # espdl_quantize_torch's
 LADDER = CONFIGS / "models" / "quant.yaml"
 
 
@@ -32,6 +33,14 @@ class Io:
     input_exponent: int
     output_name: str
     output_exponent: int
+
+
+@dataclass(frozen=True)
+class Port:
+    """One input or output of a graph with the power-of-two exponent its int8 carry: value = int8 * 2^exponent."""
+
+    name: str
+    exponent: int
 
 
 def ladder(branch: str) -> dict:
@@ -82,6 +91,47 @@ def quantize(model: nn.Module, calib: list[torch.Tensor], work: Path, rungs: dic
     )
 
 
+def quantize_named(
+    model: nn.Module,
+    calib: list[tuple[torch.Tensor, ...]],
+    work: Path,
+    rungs: dict,
+    inputs: list[str],
+    outputs: list[str],
+):
+    """quantize for a network of several inputs and outputs, exported to ONNX under the names given, so the chip
+    finds each tensor by name; calibrated on tuples shaped like calib[0]."""
+    from esp_ppq.api import espdl_quantize_onnx
+
+    work.mkdir(parents=True, exist_ok=True)
+    onnx = work / "graph.onnx"
+    torch.onnx.export(
+        model.eval(),
+        tuple(torch.zeros_like(t) for t in calib[0]),
+        str(onnx),
+        input_names=inputs,
+        output_names=outputs,
+        opset_version=OPSET,
+        do_constant_folding=True,
+        dynamo=False,
+    )
+    return espdl_quantize_onnx(
+        onnx_import_file=str(onnx),
+        espdl_export_file=str(work / "graph.espdl"),
+        calib_dataloader=calib,
+        calib_steps=len(calib),
+        input_shape=[list(t.shape) for t in calib[0]],
+        target=TARGET,
+        num_of_bits=BITS,
+        collate_fn=lambda batch: [t.to("cpu") for t in batch],
+        setting=setting_of(rungs),
+        device="cpu",
+        error_report=False,
+        skip_export=True,
+        verbose=0,
+    )
+
+
 def exponent_of(config) -> int:
     """log2 of a tensor quantisation scale, which esp-dl requires to be a power of two."""
     scale = float(config.scale)
@@ -101,6 +151,21 @@ def io_of(graph) -> Io:
     return Io(in_name, exponent_of(in_config), out_name, exponent_of(out_config))
 
 
+def ports_of(graph) -> tuple[list[Port], list[Port]]:
+    """Every input at the exponent its first reader takes and every output at its producer's, in the graph's order."""
+
+    def read(var) -> int:
+        reader = var.dest_ops[0]
+        return exponent_of(reader.input_quant_config[reader.inputs.index(var)])
+
+    def written(var) -> int:
+        producer = var.source_op
+        return exponent_of(producer.output_quant_config[producer.outputs.index(var)])
+
+    inputs = [Port(name, read(var)) for name, var in graph.inputs.items()]
+    return inputs, [Port(name, written(var)) for name, var in graph.outputs.items()]
+
+
 def to_int8(x: np.ndarray, exponent: int) -> np.ndarray:
     return np.clip(np.rint(x / 2.0**exponent), INT8_MIN, INT8_MAX).astype(np.int8)
 
@@ -116,6 +181,11 @@ class Simulator:
     def __call__(self, x: np.ndarray) -> np.ndarray:
         (out,) = self.executor.forward(inputs=torch.from_numpy(np.ascontiguousarray(x, dtype=np.float32)))
         return out.detach().cpu().numpy()
+
+    def run(self, *xs: np.ndarray) -> list[np.ndarray]:
+        """Every output of a graph of several inputs, given in the graph's order."""
+        tensors = [torch.from_numpy(np.ascontiguousarray(x, dtype=np.float32)) for x in xs]
+        return [out.detach().cpu().numpy() for out in self.executor.forward(inputs=tensors)]
 
 
 def cache_each_causal_conv(graph):
@@ -145,17 +215,21 @@ def cache_each_causal_conv(graph):
 
 
 def export(
-    graph, out: Path, streaming_input_shape: list[int] | None = None, test_input: np.ndarray | None = None
+    graph,
+    out: Path,
+    streaming_input_shape: list[int] | None = None,
+    test_input: np.ndarray | tuple[np.ndarray, ...] | None = None,
 ) -> Path:
     """Write out as .espdl, with StreamingCache ahead of every causal convolution when streaming_input_shape gives
-    the one-hop input; test_input, of that shape, is stored for model->test(). The exporter works on its own copy,
-    so graph stays the whole-sequence one the Simulator runs."""
+    the one-hop input; test_input, of that shape, or a tuple of one array an input, is stored for model->test(). The
+    exporter works on its own copy, so graph stays the whole-sequence one the Simulator runs."""
     import esp_ppq.lib as ppq_lib
     from esp_ppq.api.espdl_interface import generate_test_value, get_target_platform
 
     values = None
     if test_input is not None:
-        values = generate_test_value(graph, "cpu", [torch.from_numpy(np.ascontiguousarray(test_input))])
+        arrays = test_input if isinstance(test_input, tuple) else (test_input,)
+        values = generate_test_value(graph, "cpu", [torch.from_numpy(np.ascontiguousarray(a)) for a in arrays])
     out.parent.mkdir(parents=True, exist_ok=True)
     ppq_lib.Exporter(platform=get_target_platform(TARGET, BITS)).export(
         file_path=str(out),
