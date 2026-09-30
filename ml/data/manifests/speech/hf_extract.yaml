@@ -3,7 +3,7 @@ source_url: https://huggingface.co
 downloaded: '2026-09-30'
 license: per source, below
 sha256:
-  clips.tsv: ef0cd9dc971864d5953fb1f8b97ae678d1432608c2585f2502d0bba0e2cfa161
+  clips.tsv: f61a856fe8f7c6a691d0584f07a3702086aeee4444a82dc7c05aa0c1152aa515
 counts:
   clips: 35643
   by_phrase:
@@ -74,6 +74,7 @@ sources:
   license: cc-by-4.0
 - repo: dolly-vn/dolly-audio-1000h-vietnamese
   kind: parquet
+  synthetic: true
   revision: 1614861fb753346812a8d0654c96b72e4a85609c
   license: none stated
 - repo: doof-ferb/vais1000
