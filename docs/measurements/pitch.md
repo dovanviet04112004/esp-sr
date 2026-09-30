@@ -42,10 +42,16 @@ torchaudio 2.1 đã bỏ hàm này. Bản 2.0.2, bản cuối còn có, chạy m
 Trên 20 câu đầu, bản soi gương chỉ trùng torchaudio ở 20% khung, lệch ở đúng các khung lặng; cùng các câu ấy trùng Kaldi
 gốc 100%.
 
-## 3. Còn đo
+## 3. Bản C trên máy tính và board B
 
-| Việc | Ở đâu |
-|---|---|
-| Bộ vàng có đối chứng âm | `contracts/golden/pitch/` (bước 3) |
-| Bản C khớp bộ vàng trên máy tính và board B | `dsp_spec/pitch.{h,c}`, `make parity-host`, `make parity-board` (bước 4) |
-| µs mỗi bước trên board 🔬 | `budget.md` (bước 5) |
+`dsp_spec/pitch.{h,c}` tại `614c607`. Bộ vàng `contracts/golden/pitch/`: bốn ca 96 bước (tông trượt, chuỗi tiếng ngắt,
+nhiễu, lặng rồi tông có đặt lại ở bước 60) và một đối chứng âm là đặc trưng trễ một bước.
+
+| Phép đo | Kết quả | Lệnh |
+|---|---|---|
+| Bốn ca, `features` và `raw` | **khớp từng bit**, max_abs 0, trên máy tính và trên board B ở cả bản dựng mặc định lẫn bản bật module | `make parity-host`, `make parity-board` |
+| Đối chứng âm | max_abs 1,17, SNR 20,1 dB ở `features`: ngoài ngưỡng 1e-3 / 80 dB, phép kiểm báo đỏ đúng | như trên |
+| Thời gian mỗi bước, nhân 0, vùng làm việc 155 920 B trong PSRAM | trung bình **1 980 µs**, đỉnh 2 081 µs: 12,4% khung 16 ms, gấp 6,6 lần ước lượng ~300 µs của KẾ HOẠCH §3.3 | `make bench-board` |
+
+Bench chạy trên cây có sửa `docs/` chưa commit, nên cột commit của `budget.md` mang đuôi `-dirty`; mã firmware đúng là
+`614c607`. Chưa tách thời gian theo phần (NCCF, đổi sang lưới độ trễ log, Viterbi, truy vết 48 khung).
