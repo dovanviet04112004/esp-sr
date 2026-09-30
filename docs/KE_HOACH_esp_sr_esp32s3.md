@@ -730,9 +730,10 @@ Viterbi truy ngược từ trạng thái rẻ nhất của khung ấy, nên gi�
 nhiên vào delta, việc ấy thuộc tăng cường lúc học; và không tính lại 500 khung đầu khi ước lượng năng lượng đổi, vì
 cửa sổ lệnh đặt lại bộ dò từ lâu trước khung 500. Min của Viterbi lấy bằng biến đổi khoảng cách thay phép dò có chặn
 của Kaldi: cùng một min, thời gian tuyến tính theo số trạng thái. Trên bài của Kaldi, cao độ và độ hữu thanh ấy hạ WER
-tiếng Việt từ 71,3% xuống 65,6%, hơn getf0 và SAcC; bản chạy dòng được đo so với bản đọc cả tệp (`compute_kaldi_pitch` của
-torchaudio 2.1 trong `ml/afe_ref/kaldi_pitch/`, bằng `srpipe/metrics/pitch.py`, trên VIVOS test) ở
-`docs/measurements/`. Mọi tham số nằm ở cấu hình đặc trưng của model, như của `mel`.
+tiếng Việt từ 71,3% xuống 65,6%, hơn getf0 và SAcC; bản chạy dòng được đo trên VIVOS test so với chính Kaldi, qua kalpy trong image Docker của bộ căn
+mốc (`ml/afe_ref/kaldi_pitch/run.py`, gọi từ `srpipe/metrics/pitch.py`): lượt đầu chạy dòng không trễ phải trùng, bản
+đọc cả tệp là đích để đo; `compute_kaldi_pitch` của torchaudio không dùng được, lớp ma trận của nó làm hỏng Viterbi
+(`docs/measurements/pitch.md`). Mọi tham số nằm ở cấu hình đặc trưng của model, như của `mel`.
 
 **`wake`** — TCN tích chập giãn nở nhân quả, kernel 3, giãn 1, 2, 4, …, 32 một lượt: trường nhìn 127 khung ≈ 2 s;
 64 kênh, vì cùng việc phụ CTC dưới đây nó cho giọng thật cao nhất (`docs/measurements/wake.md` §5). Int8, chạy dòng
@@ -1330,7 +1331,8 @@ ml/
 │
 ├── tts/<bộ>/{pyproject.toml, uv.lock, run.py}  # mỗi bộ TTS và bộ nghe kiểm (asr) một dự án uv riêng, ghim bản:
 │                                      #   phụ thuộc của chúng đá nhau và đá torch của srpipe; srpipe/tts gọi qua uv run
-├── afe_ref/<bộ>/{pyproject.toml, uv.lock, run.py}   # webrtc_ns, nsnet2, rnnoise, dnsmos (§3.16), kaldi_pitch (§3.11): như
+├── afe_ref/<bộ>/{pyproject.toml, uv.lock, run.py}   # webrtc_ns, nsnet2, rnnoise, dnsmos (§3.16), kaldi_pitch (§3.11,
+│                                      #   chỉ run.py, chạy trong image của bộ căn mốc vì cần Kaldi gốc): như
 │                                      #   tts/; trọng số tải vào cache/ theo commit ghim và sha256
 ├── scripts/                           # đánh số theo thứ tự chạy; mỗi script một việc
 │   ├── 10_prepare.sh  ├── 11_scenes.sh
