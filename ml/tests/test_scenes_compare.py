@@ -243,7 +243,7 @@ def test_render_writes_each_pc_variant_through_the_python_chain(raw: Path, tmp_p
     assert not np.array_equal(mean, cleaned)
 
 
-def test_score_finds_delay_and_gain_and_credits_only_a_noise_cut(raw: Path, tmp_path: Path) -> None:
+def test_score_finds_delay_and_gain_and_credits_only_a_noise_cut(raw: Path, tmp_path: Path, monkeypatch) -> None:
     cfg = config()
     cfg["items"] = cfg["items"][:1]
     root = tmp_path / "set"
@@ -256,7 +256,10 @@ def test_score_finds_delay_and_gain_and_credits_only_a_noise_cut(raw: Path, tmp_
     for a, b in item_json(root, "read")["segments"]["noise_s"]:
         quiet_noise[round(a * FS) : round(b * FS)] *= 0.1
     sf.write(str(folder / "noise_cut.wav"), np.round(quiet_noise).astype(np.int16), FS, subtype="PCM_16")
-    rows = compare.score(cfg, root, tmp_path / "listen")["read"]
+    scores = {"sig": 3.0, "bak": 4.0, "ovrl": 2.5}
+    monkeypatch.setattr(compare.refs, "dnsmos", lambda clips, *a: {cid: scores for cid in clips})
+    rows = compare.score(cfg, root, tmp_path / "listen", tmp_path / "cache")["read"]
+    assert rows["late_half"]["ovrl"] == 2.5
     assert rows["raw_ch0"]["lag_ms"] == 0 and rows["raw_ch0"]["noise_db"] == 0 and rows["raw_ch0"]["snr_gain_db"] == 0
     assert rows["late_half"]["lag_ms"] == round(1000 * 100 / FS, 1)
     assert abs(rows["late_half"]["speech_db"] + 6.02) < 0.1 and abs(rows["late_half"]["snr_gain_db"]) < 0.1

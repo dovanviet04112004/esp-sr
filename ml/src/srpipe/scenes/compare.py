@@ -25,7 +25,7 @@ from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml
 from srpipe.dsp.afe import chain
 from srpipe.generated import afe, array, grid
 from srpipe.metrics import sisdr, stoi
-from srpipe.scenes import device
+from srpipe.scenes import device, refs
 
 CONFIG = CONFIGS / "afe" / "compare.yaml"
 MEASUREMENTS = ML_ROOT.parent / "docs" / "measurements" / "afe"
@@ -278,7 +278,7 @@ def render(cfg: dict, root: Path) -> list[str]:
 
 SIDE_FILES = ("input", "clean", "noise")
 COSTS_FILE = "board.json"
-MEASURES = ("lag_ms", "noise_db", "speech_db", "snr_gain_db", "si_sdr_db", "stoi")
+MEASURES = ("lag_ms", "noise_db", "speech_db", "snr_gain_db", "si_sdr_db", "stoi", "sig", "bak", "ovrl")
 COSTS = ("status", "us_mean", "us_peak", "internal_bytes", "psram_bytes")
 
 
@@ -366,9 +366,20 @@ def score_item(cfg: dict, folder: Path, listen: Path) -> dict[str, dict]:
     return rows
 
 
-def score(cfg: dict, root: Path, listen: Path) -> dict[str, dict[str, dict]]:
-    """score_item over every item of the set, by item then variant."""
-    return {item["name"]: score_item(cfg, root / item["name"], listen) for item in cfg["items"]}
+def score(cfg: dict, root: Path, listen: Path, cache: Path) -> dict[str, dict[str, dict]]:
+    """score_item over every item of the set, by item then variant, with DNSMOS P.835 of every variant written."""
+    found = {item["name"]: score_item(cfg, root / item["name"], listen) for item in cfg["items"]}
+    wavs = {
+        (item, variant): root / item / f"{variant}.wav"
+        for item, rows in found.items()
+        for variant in rows
+        if (root / item / f"{variant}.wav").exists()
+    }
+    ids = {f"{item}/{variant}": path for (item, variant), path in wavs.items()}
+    mos = refs.dnsmos(ids, cfg["refs"]["dnsmos"], cache, cache / "afe_ref" / "work")
+    for item, variant in wavs:
+        found[item][variant] |= {k: round(v, 3) for k, v in mos[f"{item}/{variant}"].items()}
+    return found
 
 
 def write_rows(found: dict[str, dict[str, dict]], path: Path) -> None:
@@ -395,7 +406,7 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(render(cfg, root)))
         return 0
     if args.step == "score":
-        write_rows(score(cfg, root, paths["cache"] / "listen" / cfg["name"]), args.out)
+        write_rows(score(cfg, root, paths["cache"] / "listen" / cfg["name"], paths["cache"]), args.out)
         print(f"wrote {args.out}")
         return 0
     manifest = prepare(cfg, paths["raw"], root)

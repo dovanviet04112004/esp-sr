@@ -15,6 +15,10 @@ score:                             # python -m srpipe.scenes.compare score: tabl
   align_max_s: 0.3                 # widest output delay searched against raw_ch0: the AFE and the nets buffer audio
   align_window_s: 20.0             # the start of each item the delay is read from
 workers: 8                         # items rendered at once on the PC
+refs:                              # the reference engines of ml/afe_ref (KEHOACH 3.16): weights pinned by URL and sha256
+  dnsmos:                          # DNSMOS P.835 of microsoft/DNS-Challenge: code MIT, its other content CC BY 4.0
+    url: https://raw.githubusercontent.com/microsoft/DNS-Challenge/591184a9fcb2cbdec02520fed81a32bbbf9d73ff/DNSMOS/DNSMOS/sig_bak_ovr.onnx
+    sha256: 269fbebdb513aa23cddfbb593542ecc540284a91849ac50516870e1ac78f6edd
 chain:                             # every variant of ours runs these modules; agc stays off so levels compare
   modules: [hpf, balance, doa, vad]
 variants:                          # by: who writes <variant>.wav, mono int16 at the grid's rate (KEHOACH 3.16)
