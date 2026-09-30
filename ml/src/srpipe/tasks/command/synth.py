@@ -17,8 +17,8 @@ import numpy as np
 import yaml
 
 from srpipe.core import corpus, phrases, screen
-from srpipe.core.config import ML_ROOT, data_paths, load_yaml
-from srpipe.tasks.command import COMMANDS, CONFIG
+from srpipe.core.config import data_paths, load_yaml
+from srpipe.tasks.command import CONFIG, learned
 from srpipe.tts import CONFIG as TTS_CONFIG
 from srpipe.tts import clips, engines
 
@@ -26,15 +26,6 @@ SETS = {"pilot": "synth_pilot", "positives": "synth_pos", "negatives": "synth_ne
 SETS_KEPT = ("positives", "negatives")
 HELD_ROLES = ("val", "test")
 KINDS = ("near", "opening", "half", "phrase")
-
-
-def learned(cfg: dict) -> list[dict]:
-    """The commands of default_vi.json in file order, without the unseen ones of the split."""
-    commands = json.loads(COMMANDS.read_text(encoding="utf-8"))["commands"]
-    unseen = set(cfg["split"]["unseen"])
-    if missing := unseen - {c["id"] for c in commands}:
-        raise ValueError(f"unseen commands {sorted(missing)} are not in {COMMANDS.name}")
-    return [c for c in commands if c["id"] not in unseen]
 
 
 def forms(text: str, templates: list[str]) -> list[str]:
@@ -209,8 +200,7 @@ def table(rows: list[dict], key) -> list[str]:
 def references(cfg: dict, paths: dict, interim: Path) -> list[clips.Reference]:
     """The clone voices: VIVOS train speakers the command split keeps in train, and the parquet draws."""
     spec = cfg["synth"]
-    split = ML_ROOT / "data" / "splits" / "command" / cfg["split"]["version"]
-    vivos = clone_speakers(paths["raw"] / spec["references"]["vivos"], split)
+    vivos = clone_speakers(paths["raw"] / spec["references"]["vivos"], paths["splits"] / cfg["speaker_split"])
     rejected = set(screen.rejected(paths["interim"]))
     out = interim / clips.REFERENCES
     return clips.training_references(

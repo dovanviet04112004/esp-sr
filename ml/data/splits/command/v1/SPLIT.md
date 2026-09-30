@@ -1,7 +1,7 @@
 # command/v1
 
-Dựng bằng `python -m srpipe.tasks.command.data` (`make splits`), seed 20260928, cấu hình mục `split` của
-`ml/configs/models/command.yaml`. Luật ở KẾ HOẠCH §1.3:
+Dựng bằng `python -m srpipe.tasks.command.ctc.data` (`make splits`), seed 20260928, cấu hình mục `split` của
+`ml/configs/models/command_ctc.yaml` và `unseen` của `ml/configs/models/command.yaml`. Luật ở KẾ HOẠCH §1.3:
 
 - Chỉ mẩu qua sàng lọc (`interim/screen/rejects.tsv`).
 - Theo người nói: mỗi kho trao cho `val` và `test` phần người nói của nó, còn lại vào `train`; kho không có mã người

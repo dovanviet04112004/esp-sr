@@ -12,7 +12,7 @@ import yaml
 
 from srpipe.core import corpus, phrases
 from srpipe.core.config import load_yaml
-from srpipe.tasks.command import CONFIG, synth
+from srpipe.tasks.command import CONFIG, learned, synth
 from srpipe.tts import clips
 
 PRESETS = [{"label": "Một", "id": "v1"}, {"label": "Hai", "id": "v2"}]
@@ -33,7 +33,7 @@ def stream_of(texts: list[str]) -> tuple[np.ndarray, list[str]]:
 
 def test_positives_read_every_learned_command_in_every_form_and_never_the_unseen_one(tmp_path: Path) -> None:
     cfg = load_yaml(CONFIG)
-    commands = synth.learned(cfg)
+    commands = learned(cfg)
     assert "chup_anh" not in {c["id"] for c in commands} and len(commands) == 9
     spec = cfg["synth"]["positives"]
     requests = synth.positive_requests(cfg, commands, spec, PRESETS, refs(tmp_path), tmp_path)
@@ -52,14 +52,14 @@ def test_a_form_that_does_not_spell_the_command_is_refused(tmp_path: Path) -> No
     cfg = load_yaml(CONFIG)
     cfg["synth"]["forms"] = ["{text}", "{text} nhé"]
     with pytest.raises(ValueError, match="does not spell the command"):
-        synth.positive_requests(cfg, synth.learned(cfg), cfg["synth"]["positives"], PRESETS, refs(tmp_path), tmp_path)
+        synth.positive_requests(cfg, learned(cfg), cfg["synth"]["positives"], PRESETS, refs(tmp_path), tmp_path)
 
 
 def test_an_unseen_id_missing_from_the_command_set_is_refused() -> None:
     cfg = load_yaml(CONFIG)
-    cfg["split"]["unseen"] = ["chup_anh", "bay_len"]
+    cfg["unseen"] = ["chup_anh", "bay_len"]
     with pytest.raises(ValueError, match="bay_len"):
-        synth.learned(cfg)
+        learned(cfg)
 
 
 def test_clones_come_only_from_speakers_the_split_keeps_in_train(tmp_path: Path) -> None:
@@ -80,7 +80,7 @@ def test_halves_are_every_shorter_run_of_words() -> None:
 
 def test_negatives_never_sound_like_a_whole_command_and_keep_longer_phrases_holding_one() -> None:
     cfg = load_yaml(CONFIG)
-    commands = [c for c in synth.learned(cfg) if c["id"] in ("bat_den", "tat_den", "mo_cua")]
+    commands = [c for c in learned(cfg) if c["id"] in ("bat_den", "tat_den", "mo_cua")]
     cfg["synth"]["negatives"] |= {"misses": 1, "neighbours": 5, "openings": 2, "phrases": ["mở cửa sổ", "bật đèn"]}
     stream, vocab = stream_of(
         ["tắt đèn đi", "bật đèn", "bặt đèn", "mở của", "mở cửa sổ", "bật lên", "bật lên", "mở ra"]
@@ -97,7 +97,7 @@ def test_negatives_never_sound_like_a_whole_command_and_keep_longer_phrases_hold
 
 def test_each_negative_is_read_by_distinct_voices_with_every_command_as_rival(tmp_path: Path) -> None:
     cfg = load_yaml(CONFIG)
-    commands = synth.learned(cfg)
+    commands = learned(cfg)
     texts = [{"text": "bật điện", "kind": "phrase"}, {"text": "đèn", "kind": "half"}]
     requests = synth.negative_requests(
         commands, texts, PRESETS, refs(tmp_path), np.random.default_rng(0), tmp_path, {"vieneu": 4, "f5": 2}, 18

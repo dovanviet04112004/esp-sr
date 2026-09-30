@@ -1,8 +1,8 @@
 """Split command/v<n> (KEHOACH 1.3, 3.12): screened public speech by speaker, the unseen command out of learning.
 
-Each corpus prefix of configs/models/command.yaml gives its speakers to val and test by share, the rest to train;
-a corpus without speaker ids goes to train whole. A clip whose text says an unseen command leaves train and val.
-Run: python -m srpipe.tasks.command.data
+Each corpus prefix of configs/models/command_ctc.yaml gives its speakers to val and test by share, the rest to train;
+a corpus without speaker ids goes to train whole. A clip whose text says an unseen command of
+configs/models/command.yaml leaves train and val. Run: python -m srpipe.tasks.command.ctc.data
 """
 
 from __future__ import annotations
@@ -12,18 +12,19 @@ import json
 
 from srpipe.core import corpus, screen, splits
 from srpipe.core.config import data_paths, load_yaml
-from srpipe.tasks.command import COMMANDS, CONFIG
+from srpipe.tasks import command
+from srpipe.tasks.command import ctc
 
 PUBLIC = "public"
 LEARNING = ("train", "val")
 
 
-def unseen_phrases(spec: dict, commands: dict) -> dict[str, list[str]]:
+def unseen_phrases(unseen: list[str], commands: dict) -> dict[str, list[str]]:
     """The syllables of each unseen command, by its text."""
     texts = {c["id"]: c["text"] for c in commands["commands"]}
-    if missing := [i for i in spec["unseen"] if i not in texts]:
-        raise ValueError(f"unseen commands {missing} are not in {COMMANDS.name}")
-    return {texts[i]: corpus.words(texts[i]) for i in spec["unseen"]}
+    if missing := [i for i in unseen if i not in texts]:
+        raise ValueError(f"unseen commands {missing} are not in {command.COMMANDS.name}")
+    return {texts[i]: corpus.words(texts[i]) for i in unseen}
 
 
 def roles_of(clips: list[corpus.Clip], spec: dict) -> dict[str, str]:
@@ -71,8 +72,8 @@ def notes(spec: dict, files: dict, dropped: dict[str, int], seconds: dict[str, f
     gone = ", ".join(f'"{text}" {count} mẩu' for text, count in dropped.items())
     return f"""# command/{spec["version"]}
 
-Dựng bằng `python -m srpipe.tasks.command.data` (`make splits`), seed {spec["seed"]}, cấu hình mục `split` của
-`ml/configs/models/command.yaml`. Luật ở KẾ HOẠCH §1.3:
+Dựng bằng `python -m srpipe.tasks.command.ctc.data` (`make splits`), seed {spec["seed"]}, cấu hình mục `split` của
+`ml/configs/models/command_ctc.yaml` và `unseen` của `ml/configs/models/command.yaml`. Luật ở KẾ HOẠCH §1.3:
 
 - Chỉ mẩu qua sàng lọc (`interim/screen/rejects.tsv`).
 - Theo người nói: mỗi kho trao cho `val` và `test` phần người nói của nó, còn lại vào `train`; kho không có mã người
@@ -89,8 +90,9 @@ Dựng bằng `python -m srpipe.tasks.command.data` (`make splits`), seed {spec[
 
 def main(argv: list[str] | None = None) -> int:
     argparse.ArgumentParser(description=__doc__.splitlines()[0]).parse_args(argv)
-    spec, paths, screening = load_yaml(CONFIG)["split"], data_paths(), load_yaml(screen.CONFIG)
-    unseen = unseen_phrases(spec, json.loads(COMMANDS.read_text(encoding="utf-8")))
+    spec, paths, screening = load_yaml(ctc.CONFIG)["split"], data_paths(), load_yaml(screen.CONFIG)
+    listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))
+    unseen = unseen_phrases(load_yaml(command.CONFIG)["unseen"], listed)
     files, dropped = build(spec, screen.kept_clips(screening, paths, "speech"), unseen)
     seconds = screen.lengths(screening, paths, "speech")
     out = paths["splits"] / "command" / spec["version"]

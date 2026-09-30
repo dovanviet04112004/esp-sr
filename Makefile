@@ -77,7 +77,7 @@ screen-audit: screen ## Hear clips in bins of each speech measure through PhoWhi
 	cd ml && uv run python -m srpipe.core.screen audit
 
 splits: screen ## Cut the wake and command splits from screened clips into ml/data/splits (KEHOACH 1.3)
-	cd ml && uv run python -m srpipe.tasks.wake.data split && uv run python -m srpipe.tasks.command.data
+	cd ml && uv run python -m srpipe.tasks.wake.data split && uv run python -m srpipe.tasks.command.ctc.data
 
 wake-features: ## Run each file of the wake split through the board simulation into processed/wake (E4-T8)
 	cd ml && uv run python -m srpipe.tasks.wake.data simulate
