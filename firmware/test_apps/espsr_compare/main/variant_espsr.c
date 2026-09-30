@@ -67,7 +67,25 @@ typedef struct {
     int channels;   // raw_data_channels of the last fetch with data
 } bss_fetches_t;
 
-esp_err_t espsr_run_bss(const espsr_job_t *job, const int16_t *input, int16_t *out, espsr_job_result_t *r)
+static esp_err_t take_output(const afe_fetch_result_t *res, int channel, size_t take, int16_t *out)
+{
+    if (channel == ESPSR_JOB_AFE_CHANNEL) {
+        memcpy(out, res->data, take * sizeof(int16_t));
+        return ESP_OK;
+    }
+    if (res->raw_data == NULL || channel < 0 || channel >= res->raw_data_channels) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    // raw_data interleaves its channels: data matched channel 2 of it on every fetch, and no channel laid out
+    // flat.
+    for (size_t i = 0; i < take; i++) {
+        out[i] = res->raw_data[i * (size_t)res->raw_data_channels + (size_t)channel];
+    }
+    return ESP_OK;
+}
+
+esp_err_t espsr_run_bss(const espsr_job_t *job, const espsr_job_variant_t *v, const int16_t *input,
+                        int16_t *out, espsr_job_result_t *r)
 {
     espsr_cost_t cost;
     espsr_cost_begin(&cost);
@@ -117,7 +135,7 @@ esp_err_t espsr_run_bss(const espsr_job_t *job, const int16_t *input, int16_t *o
         fetches.data++;
         const size_t n = (size_t)res->data_size / sizeof(int16_t);
         const size_t take = samples - got < n ? samples - got : n;
-        memcpy(out + got, res->data, take * sizeof(int16_t));
+        err = take_output(res, v->channel, take, out + got);
         got += take;
         r->channel = res->trigger_channel_id;
         fetches.channels = res->raw_data_channels;

@@ -12,13 +12,14 @@
 
 #define ESPSR_JOB_MAGIC 0x4A525345u    // "ESRJ"
 #define ESPSR_RESULT_MAGIC 0x52525345u // "ESRR"
-#define ESPSR_JOB_VERSION 2u
+#define ESPSR_JOB_VERSION 3u
 #define ESPSR_JOB_NAME_BYTES 40u
 #define ESPSR_JOB_MODEL_BYTES 16u
 #define ESPSR_JOB_VARIANTS_MAX 24u
-#define ESPSR_JOB_NO_SOURCE (-1) // a variant fed by the input itself
-#define ESPSR_JOB_ACK 0x06u      // the PC's byte after each result: link idle again
-#define ESPSR_JOB_REFUSED 0x106  // ESP_ERR_NOT_SUPPORTED: ESP-SR lacks the combination
+#define ESPSR_JOB_NO_SOURCE (-1)   // a variant fed by the input itself
+#define ESPSR_JOB_AFE_CHANNEL (-1) // BSS: the channel ESP-SR's AFE picks itself
+#define ESPSR_JOB_ACK 0x06u        // the PC's byte after each result: link idle again
+#define ESPSR_JOB_REFUSED 0x106    // ESP_ERR_NOT_SUPPORTED: ESP-SR lacks the combination
 
 typedef enum {
     ESPSR_JOB_KIND_DSP_AFE = 0, // dsp_afe with spatial, ns_on, ns_floor_db
@@ -36,6 +37,7 @@ typedef struct {
     uint32_t ns_on;    // 1: OM-LSA in the ns slot, 0: unity gains
     float ns_floor_db; // OM-LSA G_min
     int32_t level;     // ns_pro_create mode: 0 mild, 1 medium, 2 aggressive
+    int32_t channel;   // BSS: raw_data channel out, or ESPSR_JOB_AFE_CHANNEL
 } espsr_job_variant_t;
 
 typedef struct {
@@ -64,8 +66,8 @@ typedef struct {
     int32_t channel; // BSS: trigger_channel_id at the end; else -1
 } espsr_job_result_t;
 
-_Static_assert(sizeof(espsr_job_variant_t) == 80, "items.py packs 80-byte variants");
+_Static_assert(sizeof(espsr_job_variant_t) == 84, "items.py packs 84-byte variants");
 _Static_assert(sizeof(espsr_job_t) ==
-                   24 + ESPSR_JOB_NAME_BYTES + 8 * GEN_GRID_N_BINS + 80 * ESPSR_JOB_VARIANTS_MAX,
+                   24 + ESPSR_JOB_NAME_BYTES + 8 * GEN_GRID_N_BINS + 84 * ESPSR_JOB_VARIANTS_MAX,
                "items.py packs the job without padding");
 _Static_assert(sizeof(espsr_job_result_t) == 44, "items.py reads 44-byte results");

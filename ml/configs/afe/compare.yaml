@@ -39,7 +39,9 @@ variants:                          # by: who writes <variant>.wav, mono int16 at
   board_mean_omlsa: {by: board, spatial: none, ns: omlsa}
   board_gsc_omlsa: {by: board, spatial: gsc, ns: omlsa}
   board_gsc_omlsa20: {by: board, spatial: gsc, ns: omlsa, ns_floor_db: -20.0}
-  espsr_bss: {by: board, espsr: bss}                         # ESP-SR's speech-recognition AFE, two mics, SE only
+  espsr_bss: {by: board, espsr: bss, channel: 1}            # ESP-SR's speech-recognition AFE, two mics, SE only;
+                                                             #   raw_data channel 1 holds the talker
+  espsr_bss_ch0: {by: board, espsr: bss, channel: 0}        # BSS's other output, for the two-talker items
   espsr_bss_webrtc_mild: {by: board, after: espsr_bss, ns: espsr_webrtc, level: 0}   # ns_pro_create's mode
   espsr_bss_webrtc_medium: {by: board, after: espsr_bss, ns: espsr_webrtc, level: 1}
   espsr_bss_webrtc_aggressive: {by: board, after: espsr_bss, ns: espsr_webrtc, level: 2}

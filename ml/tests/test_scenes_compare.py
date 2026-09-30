@@ -44,6 +44,7 @@ FIXED_VARIANTS = {
     "board_gsc_omlsa",
     "board_gsc_omlsa20",
     "espsr_bss",
+    "espsr_bss_ch0",
     "espsr_bss_webrtc_mild",
     "espsr_bss_webrtc_medium",
     "espsr_bss_webrtc_aggressive",

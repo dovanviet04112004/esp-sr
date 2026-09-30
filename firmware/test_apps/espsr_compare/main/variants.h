@@ -56,10 +56,13 @@ esp_err_t espsr_models_load(void);
 esp_err_t espsr_run_dsp_afe(const espsr_job_t *job, const espsr_job_variant_t *v, const int16_t *input,
                             int16_t *out, espsr_job_result_t *r);
 
-/** ESP-SR's speech-recognition AFE on both microphones with SE (BSS) alone.
- *  @ret ESP_OK | ESP_ERR_NO_MEM | ESP_ERR_NOT_SUPPORTED a feed format other than two channels at 16 kHz
+/** ESP-SR's speech-recognition AFE on both microphones with SE (BSS) alone; the output is the
+ *  variant's channel of raw_data, or the AFE's own pick.
+ *  @ret ESP_OK | ESP_ERR_NO_MEM | ESP_ERR_NOT_SUPPORTED a feed format other than two channels at 16 kHz |
+ *  ESP_ERR_INVALID_ARG a channel raw_data lacks
  */
-esp_err_t espsr_run_bss(const espsr_job_t *job, const int16_t *input, int16_t *out, espsr_job_result_t *r);
+esp_err_t espsr_run_bss(const espsr_job_t *job, const espsr_job_variant_t *v, const int16_t *input,
+                        int16_t *out, espsr_job_result_t *r);
 
 /** ESP-SR's WebRTC noise suppressor (ns_pro_create) at the variant's level on mono samples.
  *  @ret ESP_OK | ESP_ERR_NO_MEM | ESP_ERR_INVALID_ARG a level outside 0..2

@@ -83,7 +83,7 @@ static esp_err_t run_variant(const espsr_job_t *job, uint32_t i, const int16_t *
     const int16_t *mono = v->source >= 0 ? outputs[v->source] : NULL;
     switch (v->kind) {
     case ESPSR_JOB_KIND_DSP_AFE: return espsr_run_dsp_afe(job, v, input, outputs[i], r);
-    case ESPSR_JOB_KIND_BSS: return espsr_run_bss(job, input, outputs[i], r);
+    case ESPSR_JOB_KIND_BSS: return espsr_run_bss(job, v, input, outputs[i], r);
     case ESPSR_JOB_KIND_WEBRTC: return espsr_run_webrtc(v, mono, job->samples, outputs[i], r);
     default: return espsr_run_nsnet(v, mono, job->samples, outputs[i], r);
     }

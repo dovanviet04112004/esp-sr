@@ -57,6 +57,7 @@ NAME_BYTES = int_define(FORMAT, "ESPSR_JOB_NAME_BYTES")
 MODEL_BYTES = int_define(FORMAT, "ESPSR_JOB_MODEL_BYTES")
 VARIANTS_MAX = int_define(FORMAT, "ESPSR_JOB_VARIANTS_MAX")
 NO_SOURCE = int_define(FORMAT, "ESPSR_JOB_NO_SOURCE")
+AFE_CHANNEL = int_define(FORMAT, "ESPSR_JOB_AFE_CHANNEL")
 ACK = bytes([int_define(FORMAT, "ESPSR_JOB_ACK")])
 REFUSED = int_define(FORMAT, "ESPSR_JOB_REFUSED")
 KINDS = {k: int_define(FORMAT, f"ESPSR_JOB_KIND_{k.upper()}") for k in ("dsp_afe", "bss", "webrtc", "nsnet")}
@@ -64,7 +65,7 @@ N_BINS = int_define(GRID, "GEN_GRID_N_BINS")
 FS = int_define(GRID, "GEN_GRID_SAMPLE_RATE_HZ")
 NS_FLOOR_DB = define(AFE, "GEN_AFE_NS_FLOOR_DB")
 SPATIAL = {"none": 0, "gsc": 1}
-VARIANT = struct.Struct(f"<{NAME_BYTES}s{MODEL_BYTES}sIiIIfi")
+VARIANT = struct.Struct(f"<{NAME_BYTES}s{MODEL_BYTES}sIiIIfii")
 JOB_HEAD = struct.Struct(f"<IIIIII{NAME_BYTES}s{2 * N_BINS}f")
 RESULT = struct.Struct("<IIIiIIIIIIi")
 RESULT_FIELDS = ("magic", "job", "index", "status", "crc32", "samples", "us_mean", "us_peak", "internal_bytes",
@@ -83,6 +84,7 @@ class Variant:
     ns_floor_db: float = NS_FLOOR_DB
     level: int = 0
     model: str = ""
+    channel: int = AFE_CHANNEL
 
 
 def board_variants(cfg: dict) -> list[Variant]:
@@ -95,7 +97,7 @@ def board_variants(cfg: dict) -> list[Variant]:
             floor = spec.get("ns_floor_db", NS_FLOOR_DB)
             v = Variant(name, "dsp_afe", spatial=spec["spatial"], ns_on=spec["ns"] == "omlsa", ns_floor_db=floor)
         elif spec.get("espsr") == "bss":
-            v = Variant(name, "bss")
+            v = Variant(name, "bss", channel=spec.get("channel", AFE_CHANNEL))
         elif spec["ns"] == "espsr_webrtc":
             v = Variant(name, "webrtc", source=spec["after"], level=spec["level"])
         else:
@@ -140,6 +142,7 @@ def job_bytes(job: int, item: str, samples: int, channels: int, gains: list[floa
             int(v.ns_on),
             v.ns_floor_db,
             v.level,
+            v.channel,
         )  # fmt: skip
         for v in variants
     ]
