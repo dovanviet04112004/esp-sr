@@ -899,7 +899,8 @@ V5.5.8 là thêm một lệnh chưa từng có trong dữ liệu huấn luyện 
 
 **`kws`** — DS-CNN (Zhang và cộng sự, 2017, "Hello Edge"): một tích chập thường, rồi các tầng tách chiều sâu (tích chập
 từng kênh 3 × 3 rồi tích chập 1 × 1), trung bình gộp và một lớp ra, ở ba cỡ của bài: S (64 kênh, bốn tầng), M (172
-kênh, bốn tầng), L (276 kênh, năm tầng), tích chập đầu nhân 10 × 4 bước 2 × 2. Bài đo 94,4 / 94,9 / 95,4% trên Google
+kênh, bốn tầng), L (276 kênh, năm tầng); tích chập đầu nhân 10 × 4, bước 2 × 2 ở S, còn ở M và L bước 2 × 1 rồi tầng
+tách chiều sâu đầu bước 2 × 2, theo `model_size_info` trong mã của bài. Bài đo 94,4 / 94,9 / 95,4% trên Google
 Speech Commands 12 lớp, với cửa sổ 1 s và 10 MFCC tức 49 × 10 đầu vào; cửa sổ 94 bước × 43 chiều ở đây cho khoảng 7,5
 lần số vị trí, nên S cỡ 20, M cỡ 75, L cỡ 215 triệu MAC mỗi câu 🔬. **Cỡ là lựa chọn cấu hình**: học các cỡ trên cùng
 split, seed và số epoch, chọn bằng Cửa 3 sau int8 trên tập thu qua board, trong ngân sách một lần chạy **≤ 100 ms trên nhân
