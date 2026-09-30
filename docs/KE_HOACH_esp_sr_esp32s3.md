@@ -1049,7 +1049,9 @@ chỉ nhiễu cách tiếng nói một lề. Mọi số của luật ở `compar
 mang đoạn khai tay. Hai người nói đè nhau nằm ngoài phạm vi (§9): mục ấy để nghe tách mù của ESP-SR làm được gì, không
 để chấm đạt.
 
-**Biến thể** mang tên cố định; mỗi bên dựng ghi `<biến thể>.wav` một kênh 16 kHz vào thư mục của mục:
+**Biến thể** mang tên cố định; mỗi bên dựng ghi `<biến thể>.wav` một kênh 16 kHz vào thư mục của mục. Chủ repo chốt ngày
+30/09: BSS của ESP-SR, `gsc` của dự án và mọi mức dìm nhiễu của ESP-SR đều phải có số và có tệp để nghe; trên máy tính chỉ
+so hai mạng dìm nhiễu công bố.
 
 | Biến thể | Ai dựng | Là gì |
 |---|---|---|
@@ -1057,24 +1059,28 @@ mang đoạn khai tay. Hai người nói đè nhau nằm ngoài phạm vi (§9):
 | `pc_mean`, `pc_gsc` | `srpipe.scenes.compare render` | `srpipe.dsp.afe.chain` trên máy tính: `hpf`, `balance` theo hiệu chuẩn board B, `doa`, `vad`, rồi trộn trần hay `gsc`; không `ns` |
 | `pc_mean_omlsa`, `pc_gsc_omlsa` | như trên | cộng `ns_omlsa` với sàn của sản phẩm, `contracts/afe.yaml` |
 | `pc_gsc_omlsa20` | như trên | `gsc` cộng `ns_omlsa` sàn −20 dB |
-| `pc_gsc_webrtc`, `pc_gsc_nsnet2`, `pc_gsc_rnnoise` | `srpipe.scenes.refs` | lối ra `pc_gsc` qua một bộ dìm nhiễu tham chiếu (dưới đây) |
+| `pc_gsc_nsnet2`, `pc_gsc_rnnoise` | `srpipe.scenes.refs` | lối ra `pc_gsc` qua NSNet2 hay RNNoise (dưới đây) |
 | `tinyai` | có sẵn | đầu ra chuỗi lọc của `tinyai-signal`, chỉ ở `tinyai_music_voice` |
-| `board_mean`, `board_gsc`, `board_mean_omlsa`, `board_gsc_omlsa` | `test_apps/espsr_compare` | bốn biến thể `pc_*` cùng tên đuôi, bằng `dsp_afe` C trên board |
-| `espsr_bss`, `espsr_bss_webrtc` | như trên | AFE của ESP-SR cho nhận dạng, hai micro: tách mù BSS của họ một mình, rồi cộng NS WebRTC của họ |
-| `board_gsc_espsr_webrtc`, `board_gsc_espsr_net` | như trên | lối ra `gsc` của `dsp_afe` qua NS WebRTC và NS mạng (nsnet) của ESP-SR |
+| `board_mean`, `board_gsc` | `test_apps/espsr_compare` | khối không gian của dự án: `dsp_afe` C trên board, không `ns` |
+| `board_mean_omlsa`, `board_gsc_omlsa`, `board_gsc_omlsa20` | như trên | cả chuỗi của dự án: cộng `ns_omlsa` sàn của sản phẩm, hay −20 dB |
+| `espsr_bss` | như trên | khối không gian của ESP-SR: AFE loại nhận dạng, hai micro, chỉ bật tách mù BSS (SE) |
+| `espsr_bss_webrtc_{mild,medium,aggressive}` | như trên | cả chuỗi của ESP-SR: lối ra `espsr_bss` qua NS WebRTC của họ ở ba mức |
+| `espsr_bss_nsnet{1,2,3}` | như trên | lối ra `espsr_bss` qua ba mạng dìm nhiễu của họ |
+| `board_gsc_espsr_webrtc_{mild,medium,aggressive}`, `board_gsc_espsr_nsnet{1,2,3}` | như trên | cùng sáu bộ dìm nhiễu của ESP-SR, nuôi bằng lối ra `board_gsc`: chỉ khối dìm nhiễu khác nhau |
 
 `agc` tắt ở mọi biến thể, của dự án lẫn của Espressif, để thước mức chỉ đo phần làm sạch; bản để nghe được cân về cùng
-độ to ở `cache/listen/afe_compare/`. Chế độ khác của ESP-SR mà app tìm thấy thì thêm biến thể `espsr_<chế độ>`. Theo tài
-liệu, NS mạng của ESP-SR chỉ mở cho loại AFE thoại chứ không cho loại nhận dạng 🔬: app kiểm trong header và ghi chế độ
-thật đã chạy.
+độ to ở `cache/listen/afe_compare/`. Trong AFE của ESP-SR, hai micro bật SE thì NS bị bỏ qua (`esp_afe_config.h`), nên NS
+của họ chạy bằng API riêng trên lối ra một kênh: WebRTC qua `ns_pro_create` với mức 0, 1, 2; mạng qua
+`esp_nsnet_handle_from_name`. Kconfig của họ chỉ nạp một mạng NS, nên app đóng gói cả `nsnet1`, `nsnet2`, `nsnet3` vào
+phân vùng model bằng `pack_model.py` của chính ESP-SR. API nào từ chối một tổ hợp thì app ghi đúng lý do vào báo cáo và
+bảng để trống ô ấy, không bỏ im lặng.
 
 **Bộ dìm nhiễu tham chiếu** chạy trên máy tính, mỗi bộ một dự án uv ghim bản ở `ml/afe_ref/<tên>/` như `ml/tts/`, vì phụ
 thuộc của chúng đá nhau và đá `srpipe`. `srpipe.scenes.refs` gọi `run.py` của chúng qua `uv run` với một lô JSON, như
-`srpipe.tts.engines`:
+`srpipe.tts.engines`. NS WebRTC chỉ so trên board, qua ESP-SR:
 
 | Tên | Là gì | Chạy |
 |---|---|---|
-| `webrtc_ns` | bộ dìm nhiễu của WebRTC, gói `webrtc-noise-gain` | 16 kHz, khung 10 ms |
 | `nsnet2` | NSNet2, mốc của DNS Challenge (Microsoft), `nsnet2-20ms-baseline.onnx` | ONNX, 16 kHz |
 | `rnnoise` | RNNoise gốc qua `pyrnnoise` | 48 kHz: lấy mẫu lên rồi xuống |
 | `dnsmos` | DNSMOS P.835: thước không cần tiếng sạch, ra SIG, BAK, OVRL | ONNX, 16 kHz |
@@ -1098,9 +1104,13 @@ Trọng số tải vào `cache/` theo commit ghim và sha256, không commit (CLA
 `idf_component.yml` của chính nó. Bảng phân vùng riêng: app `factory`, phân vùng model của ESP-SR, và một phân vùng dữ
 liệu thô `items` chứa các `input.wav` rồi nhận các lối ra. Máy tính chép tiếng vào và ra bằng `esptool write_flash` /
 `read_flash` có checksum, không qua console, vì cầu CH340 có lúc rơi byte (§4.5.7); khuôn của phân vùng khai một lần ở
-header của app và `items.py` phía máy tính đọc hằng số từ đó, như `pack_models` đọc `storage_format.h`. App đẩy từng mục
-qua từng biến thể theo đúng nhịp khung và in chi phí của mỗi biến thể qua `test_report`. Biến thể `board_*` dựng `dsp_afe`
-với `gsc` bật, dù sản phẩm hiện tắt nó.
+header của app và `items.py` phía máy tính đọc hằng số từ đó, như `pack_models` đọc `storage_format.h`. Mười tám lối ra
+một kênh của cả bộ mục (~378 s) nặng ~218 MB, quá flash 16 MB, nên máy tính chạy **theo lô**: mỗi lô một mục và một nhóm
+biến thể vừa phân vùng `items`; lối ra nào là nguồn của biến thể sau (`board_gsc`, `espsr_bss`) được giữ trong PSRAM, và
+mỗi lối ra mang CRC32 do board tính để máy tính đối chiếu sau khi đọc. App đẩy mục qua từng biến thể theo đúng nhịp khung
+và in chi phí của mỗi biến thể qua `test_report`. Biến thể `board_*` dựng `dsp_afe` với `gsc` bật, dù sản phẩm hiện tắt
+nó, và dùng đúng `balance` của hiệu chuẩn board B mà bản máy tính dùng, mang theo trong ảnh `items`, để hai bên chỉ khác
+nhau ở chỗ chạy.
 
 ---
 ## 4. Cấu trúc repo
@@ -1338,7 +1348,7 @@ ml/
 │
 ├── tts/<bộ>/{pyproject.toml, uv.lock, run.py}  # mỗi bộ TTS và bộ nghe kiểm (asr) một dự án uv riêng, ghim bản:
 │                                      #   phụ thuộc của chúng đá nhau và đá torch của srpipe; srpipe/tts gọi qua uv run
-├── afe_ref/<bộ>/{pyproject.toml, uv.lock, run.py}   # webrtc_ns, nsnet2, rnnoise, dnsmos (§3.16), kaldi_pitch (§3.11,
+├── afe_ref/<bộ>/{pyproject.toml, uv.lock, run.py}   # nsnet2, rnnoise, dnsmos (§3.16), kaldi_pitch (§3.11,
 │                                      #   chỉ run.py, chạy trong image của bộ căn mốc vì cần Kaldi gốc): như
 │                                      #   tts/; trọng số tải vào cache/ theo commit ghim và sha256
 ├── scripts/                           # đánh số theo thứ tự chạy; mỗi script một việc
@@ -1545,7 +1555,7 @@ firmware/
 │   └── espsr_compare/                # chỗ DUY NHẤT link espressif/esp-sr (§3.16, §4.5.1): AFE của ESP-SR và dsp_afe
 │       ├── main/{idf_component.yml, items_format.h, *.c}   # esp-sr ghim ở đây; khuôn phân vùng items một chỗ
 │       ├── partitions.csv            # factory, model của ESP-SR, dữ liệu thô items cho mục vào và lối ra
-│       ├── items.py                  # phía máy tính: đóng gói input.wav vào ảnh items, tách lối ra thành <biến thể>.wav
+│       ├── items.py                  # phía máy tính: ảnh model nsnet1–3, lô items, tách lối ra thành <biến thể>.wav
 │       └── pytest_espsr_compare.py   # chạy app, nhận dòng chi phí qua test_report
 └── scripts/                          # rỗng có chủ ý: script ngang khối ở /tools, nạp model ở ml/scripts
 ```
@@ -1734,7 +1744,7 @@ truyền vào chỉ được kiểm là có đủ các lớp lệnh.
 | Chạy dài | `test_apps/soak/` | 30 phút cho Cửa 5, 8 giờ trước khi báo cáo |
 | Thu dữ liệu | `test_apps/capture/` | đẩy thô về `host/` |
 | Hiệu chuẩn | `test_apps/calib/` | ghi NVS `calib/*` |
-| So với ESP-SR | `test_apps/espsr_compare/` | `make espsr-compare`: `items.py` đóng gói mục của bàn so §3.16, `esptool write_flash` xuống phân vùng `items`, app chạy mọi biến thể và in chi phí qua `test_report`, `esptool read_flash` lấy lối ra về, `items.py` tách thành `<biến thể>.wav`; số vào `docs/measurements/afe/compare.md` |
+| So với ESP-SR | `test_apps/espsr_compare/` | `make espsr-compare`: `items.py` đóng gói mục của bàn so §3.16, `esptool write_flash` xuống phân vùng `items`, app chạy mọi biến thể và in chi phí qua `test_report`, `esptool read_flash` lấy lối ra về, `items.py` tách thành `<biến thể>.wav`; lặp theo lô mục và nhóm biến thể; số vào `docs/measurements/afe/compare.md` |
 
 Case cần người đứng nói gắn tag `[manual]`; vòng tự động bỏ qua, như repo face attendance.
 
