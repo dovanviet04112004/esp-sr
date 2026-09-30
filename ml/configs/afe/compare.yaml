@@ -1,0 +1,97 @@
+# The comparison set of KEHOACH 3.16: its items, their known text and segments, the mixtures, and the variant
+# names every builder writes. python -m srpipe.scenes.compare prepare writes interim/scenes/<name>/<item>/.
+name: afe_compare
+seed: 20260930                     # draws where in its span each mixture's noise starts
+segments:                          # the energy rule of items marked auto, on ch0 of the clean part
+  floor_percentile: 10.0           # the item's floor: this percentile of its hop levels
+  speech_above_floor_db: 10.0      # a hop is active speech this far above the floor; mixtures' SNR is over these
+  merge_gap_s: 0.3                 # speech runs closer than this join into one segment
+  min_speech_s: 0.2                # a shorter run is a click or a breath
+  noise_margin_s: 0.3              # noise-only spans keep this far from any speech segment
+  min_noise_s: 0.5                 # a shorter noise-only span is left out
+listen:
+  level_dbfs: -26.0                # the copies in cache/listen/<name>/ match this over their active hops
+chain:                             # every variant of ours runs these modules; agc stays off so levels compare
+  modules: [hpf, balance, doa, vad]
+variants:                          # by: who writes <variant>.wav, mono int16 at the grid's rate (KEHOACH 3.16)
+  raw_ch0: {by: prepare}
+  pc_mean: {by: pc, spatial: none, ns: "off"}
+  pc_gsc: {by: pc, spatial: gsc, ns: "off"}
+  pc_mean_omlsa: {by: pc, spatial: none, ns: omlsa}          # the product's floor of contracts/afe.yaml
+  pc_gsc_omlsa: {by: pc, spatial: gsc, ns: omlsa}
+  pc_gsc_omlsa20: {by: pc, spatial: gsc, ns: omlsa, ns_floor_db: -20.0}
+  pc_gsc_nsnet2: {by: refs, after: pc_gsc, ns: nsnet2}       # a reference engine of ml/afe_ref on pc_gsc
+  pc_gsc_rnnoise: {by: refs, after: pc_gsc, ns: rnnoise}
+  tinyai: {by: outside}                                      # copied by prepare where an item names a file
+  board_mean: {by: board, spatial: none, ns: "off"}          # dsp_afe in C on board B, test_apps/espsr_compare
+  board_gsc: {by: board, spatial: gsc, ns: "off"}
+  board_mean_omlsa: {by: board, spatial: none, ns: omlsa}
+  board_gsc_omlsa: {by: board, spatial: gsc, ns: omlsa}
+  board_gsc_omlsa20: {by: board, spatial: gsc, ns: omlsa, ns_floor_db: -20.0}
+  espsr_bss: {by: board, espsr: bss}                         # ESP-SR's speech-recognition AFE, two mics, SE only
+  espsr_bss_webrtc_mild: {by: board, after: espsr_bss, ns: espsr_webrtc, level: 0}   # ns_pro_create's mode
+  espsr_bss_webrtc_medium: {by: board, after: espsr_bss, ns: espsr_webrtc, level: 1}
+  espsr_bss_webrtc_aggressive: {by: board, after: espsr_bss, ns: espsr_webrtc, level: 2}
+  espsr_bss_nsnet1: {by: board, after: espsr_bss, ns: espsr_nsnet, model: nsnet1}
+  espsr_bss_nsnet2: {by: board, after: espsr_bss, ns: espsr_nsnet, model: nsnet2}
+  espsr_bss_nsnet3: {by: board, after: espsr_bss, ns: espsr_nsnet, model: nsnet3}
+  board_gsc_espsr_webrtc_mild: {by: board, after: board_gsc, ns: espsr_webrtc, level: 0}
+  board_gsc_espsr_webrtc_medium: {by: board, after: board_gsc, ns: espsr_webrtc, level: 1}
+  board_gsc_espsr_webrtc_aggressive: {by: board, after: board_gsc, ns: espsr_webrtc, level: 2}
+  board_gsc_espsr_nsnet1: {by: board, after: board_gsc, ns: espsr_nsnet, model: nsnet1}
+  board_gsc_espsr_nsnet2: {by: board, after: board_gsc, ns: espsr_nsnet, model: nsnet2}
+  board_gsc_espsr_nsnet3: {by: board, after: board_gsc, ns: espsr_nsnet, model: nsnet3}
+items:                             # session: raw/device/board_b/<session>/; raw: a two-channel file under raw/
+  - name: board_read_1m
+    session: 20260928_home_005     # a paragraph read at 1 m in a quiet room
+    text: prompt                   # session.json's prompt after its first colon
+    segments: auto
+  - name: board_read_3m
+    session: 20260928_home_007
+    text: prompt
+    segments: auto
+  - name: board_read_fan
+    session: 20260928_home_009     # the fan sits within a few dB of the room's floor, so auto still finds speech
+    text: prompt
+    segments: auto
+  - name: board_read_music
+    session: 20260928_home_011
+    text: prompt
+    segments: {noise_s: [[0.0, 2.5]]}   # music alone before the talker, read off its levels; speech unknown
+  - name: board_cmd_bat_den
+    session: 20260928_home_012
+    text: prompt
+    text_scope: segment            # the command said once in each speech segment
+    segments: auto
+  - name: board_cmd_tang_am_luong
+    session: 20260928_home_018
+    text: prompt
+    text_scope: segment
+    segments: auto
+  - name: mix_fan_snr5
+    mix: {speech: 20260928_home_005, speech_span_s: [0.0, 27.0], noise: 20260928_home_008,
+          noise_span_s: [0.0, 60.0], snr_db: 5.0}
+    text: prompt
+  - name: mix_fan_snr0
+    mix: {speech: 20260928_home_005, speech_span_s: [0.0, 27.0], noise: 20260928_home_008,
+          noise_span_s: [0.0, 60.0], snr_db: 0.0}
+    text: prompt
+  - name: mix_music_snr5
+    mix: {speech: 20260928_home_005, speech_span_s: [0.0, 27.0], noise: 20260928_home_010,
+          noise_span_s: [29.0, 60.0], snr_db: 5.0}   # the louder second half of the music
+    text: prompt
+  - name: mix_music_snr0
+    mix: {speech: 20260928_home_005, speech_span_s: [0.0, 27.0], noise: 20260928_home_010,
+          noise_span_s: [29.0, 60.0], snr_db: 0.0}
+    text: prompt
+  - name: tinyai_alternating
+    raw: device/tinyai/hai_nguoi_30s_luanphien.wav
+  - name: tinyai_overlap
+    raw: device/tinyai/hai_nguoi_10s_10chongnhau.wav
+  - name: tinyai_talker_a
+    raw: device/tinyai/A_trai_1.wav
+  - name: tinyai_talker_b
+    raw: device/tinyai/B_phai_1.wav
+  - name: tinyai_music_voice
+    raw: device/tinyai/truoc_loc.wav
+    outside: {tinyai: device/tinyai/sau_loc.wav}   # tinyai-signal's own output of this input
