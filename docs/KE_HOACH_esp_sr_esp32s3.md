@@ -725,9 +725,13 @@ gần 0) để dò, một bản không để đo độ hữu thanh; nội suy si
 Viterbi với giá cục bộ `1 − NCCF + 10·L·NCCF` và phạt nhảy `0,1·ln²(1,005)·Δ²`, mỗi bước ra ngay trạng thái rẻ nhất.
 Ra ba chiều như Kaldi: độ hữu thanh `2·((1,0001 − c)^0,15 − 1)`; log F0 trừ trung bình có trọng số xác suất hữu thanh,
 ×2; delta ±2 khung của log F0, ×10. Chỉ khác Kaldi ở chỗ chạy dòng buộc phải khác: bước khung là bước của lưới (16 ms
-thay 10 ms); trung bình và delta chỉ dùng khung đã có, đúng như Kaldi thấy ở khung mới nhất khi chạy dòng; không cộng
-nhiễu ngẫu nhiên vào delta, việc ấy thuộc tăng cường lúc học. Trên bài của Kaldi, cao độ và độ hữu thanh ấy hạ WER
-tiếng Việt từ 71,3% xuống 65,6%, hơn getf0 và SAcC; bản chạy dòng được đo so với bản đọc cả tệp ở
+thay 10 ms); trung bình và delta chỉ dùng khung đã có, đúng như Kaldi thấy ở khung mới nhất khi chạy dòng — trên đường
+Viterbi truy ngược từ trạng thái rẻ nhất của khung ấy, nên giữ con trỏ lùi của 48 khung gần nhất; không cộng nhiễu ngẫu
+nhiên vào delta, việc ấy thuộc tăng cường lúc học; và không tính lại 500 khung đầu khi ước lượng năng lượng đổi, vì
+cửa sổ lệnh đặt lại bộ dò từ lâu trước khung 500. Min của Viterbi lấy bằng biến đổi khoảng cách thay phép dò có chặn
+của Kaldi: cùng một min, thời gian tuyến tính theo số trạng thái. Trên bài của Kaldi, cao độ và độ hữu thanh ấy hạ WER
+tiếng Việt từ 71,3% xuống 65,6%, hơn getf0 và SAcC; bản chạy dòng được đo so với bản đọc cả tệp (`compute_kaldi_pitch` của
+torchaudio 2.1 trong `ml/afe_ref/kaldi_pitch/`, bằng `srpipe/metrics/pitch.py`, trên VIVOS test) ở
 `docs/measurements/`. Mọi tham số nằm ở cấu hình đặc trưng của model, như của `mel`.
 
 **`wake`** — TCN tích chập giãn nở nhân quả, kernel 3, giãn 1, 2, 4, …, 32 một lượt: trường nhìn 127 khung ≈ 2 s;
@@ -1320,13 +1324,13 @@ ml/
 │   │   │                              #   command/v<n>, bỏ lệnh chưa học khỏi tập học (§1.3)
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
-│   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py}
+│   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py, pitch.py}
 │   ├── compress/quant/ptq_espdl.py    # ESP-PPQ → .espdl + mô phỏng int8 trên máy tính
 │   └── export/{pack_models.py, update_lock.py}
 │
 ├── tts/<bộ>/{pyproject.toml, uv.lock, run.py}  # mỗi bộ TTS và bộ nghe kiểm (asr) một dự án uv riêng, ghim bản:
 │                                      #   phụ thuộc của chúng đá nhau và đá torch của srpipe; srpipe/tts gọi qua uv run
-├── afe_ref/<bộ>/{pyproject.toml, uv.lock, run.py}   # webrtc_ns, nsnet2, rnnoise, dnsmos (§3.16): cùng luật như
+├── afe_ref/<bộ>/{pyproject.toml, uv.lock, run.py}   # webrtc_ns, nsnet2, rnnoise, dnsmos (§3.16), kaldi_pitch (§3.11): như
 │                                      #   tts/; trọng số tải vào cache/ theo commit ghim và sha256
 ├── scripts/                           # đánh số theo thứ tự chạy; mỗi script một việc
 │   ├── 10_prepare.sh  ├── 11_scenes.sh
