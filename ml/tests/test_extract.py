@@ -157,12 +157,14 @@ def test_only_a_phrase_with_a_pause_each_side_is_cut_into_those_pauses(tmp_path:
     words = {
         "s_g__1": [("nhờ", 0.1, 0.4), ("trợ", 0.6, 0.8), ("lí", 0.8, 1.0), ("nhé", 1.3, 1.6)],
         "s_g__2": [("nhờ", 0.1, 0.4), ("trợ", 0.4, 0.6), ("lý", 0.6, 0.8), ("nhé", 0.8, 1.1)],
+        "s_g__3": [("nhờ", 0.1, 0.4), ("trợ", 0.6, 0.8), ("lý", 0.8, 1.0), ("xanh", 1.02, 1.6)],
     }
+    # A soft onset: the level test hears quiet where the aligner already has the next word.
+    heard_from = {"s_g__3": {"xanh": 1.3}}
     for key, said in words.items():
         text = " ".join(w for w, _, _ in said)
-        job.save_whole(
-            key, spoken(2.0, [(a, b) for _, a, b in said]), {"key": key, "text": text, "phrases": ["trợ lý"]}
-        )
+        tones = [(heard_from.get(key, {}).get(w, a), b) for w, a, b in said]
+        job.save_whole(key, spoken(2.0, tones), {"key": key, "text": text, "phrases": ["trợ lý"]})
     aligned = {k: [{"word": w, "start": a, "end": b} for w, a, b in v] for k, v in words.items()}
     monkeypatch.setattr(extract.engines, "align", lambda clips, *a: {c["id"]: aligned[c["id"]] for c in clips})
     asked = []
@@ -185,9 +187,23 @@ def test_only_a_phrase_with_a_pause_each_side_is_cut_into_those_pauses(tmp_path:
     assert manifest["counts"]["by_phrase"] == {"trợ lý": 1} and manifest["sources"][0]["synthetic"]
     records = {f.stem: extract.read_jsonl(f)[0] for f in (tmp_path / "cache/extract/t/cut").glob("*.jsonl")}
     assert (records["s_g__1"]["paused"], records["s_g__2"]["paused"], records["s_g__2"]["clips"]) == (1, 0, [])
+    assert (records["s_g__3"]["apart"], records["s_g__3"]["paused"]) == (0, 0)
+    soft = spoken(2.0, [(0.1, 0.4), (0.6, 1.0), (1.3, 1.6)])
+    assert extract.pause_bounds(soft, (0.6, 1.0), spec) is not None
     short = spoken(2.0, [(0.1, 0.49), (0.6, 1.0), (1.3, 1.6)])
     start, _ = extract.pause_bounds(short, (0.6, 1.0), spec)
     assert 0.49 < start < 0.6 - spec["guard_s"]
+
+
+def test_a_phrase_is_apart_by_its_least_aligned_gap_and_alone_at_the_edges() -> None:
+    sounds = extract.Phrases(["bật đèn"]).sounds[0]
+    words = [
+        {"word": w, "start": a, "end": b} for w, a, b in [("bật", 0.3, 0.4), ("đèn", 0.6, 0.9), ("xanh", 0.92, 1.3)]
+    ]
+    ((start, end, gap_s),) = extract.phrase_spans(words, sounds)
+    assert (start, end) == (0.3, 0.9) and abs(gap_s - 0.02) < 1e-9
+    ((_, _, alone),) = extract.phrase_spans(words[:2], sounds)
+    assert alone == float("inf")
 
 
 def test_a_stream_that_breaks_goes_on_from_the_byte_it_reached() -> None:

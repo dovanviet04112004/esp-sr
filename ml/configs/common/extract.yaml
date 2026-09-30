@@ -29,6 +29,7 @@ cut:                               # only a phrase said with a pause on each sid
   min_pause_s: 0.08                # quiet each side needs past the guard; less is running speech, left out
   margin_s: 0.15                   # most a clip keeps past each aligned bound; a shorter pause is cut in its middle
   quiet_below_peak_db: 20.0        # every frame of a pause at least this far under the phrase's loudest frame
+  min_word_gap_s: 0.08             # least aligned gap to the word before and after: a weak onset passes the level test
   align_batch: 1500                # sentences per aligner run; its peak memory grows with it
 extracts:
   hf_extract:

@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -732,15 +733,21 @@ def fetch(job: Job, follow: bool, phrase: str | None = None, pilot: bool = False
         time.sleep(job.cfg["follow_poll_s"])
 
 
-def phrase_spans(words: list[dict], phrase: list[tuple[str, ...]]) -> list[tuple[float, float]]:
-    """Start and end in seconds of every run of aligned words that reads as phrase."""
-    heard = [(corpus.reading(s), w) for w in words for s in corpus.words(w["word"])]
+def phrase_spans(words: list[dict], phrase: list[tuple[str, ...]]) -> list[tuple[float, float, float]]:
+    """Start and end in seconds of every run of aligned words that reads as phrase, and its least aligned gap to the
+    word before or after it, infinite where no word is; the aligner leaves silence out of its words."""
+    heard = [(corpus.reading(s), i) for i, w in enumerate(words) for s in corpus.words(w["word"])]
     n = len(phrase)
-    return [
-        (heard[k][1]["start"], heard[k + n - 1][1]["end"])
-        for k in range(len(heard) - n + 1)
-        if [r for r, _ in heard[k : k + n]] == phrase
-    ]
+    spans = []
+    for k in range(len(heard) - n + 1):
+        if [r for r, _ in heard[k : k + n]] != phrase:
+            continue
+        first, last = heard[k][1], heard[k + n - 1][1]
+        start, end = words[first]["start"], words[last]["end"]
+        before = start - words[first - 1]["end"] if first > 0 else math.inf
+        after = words[last + 1]["start"] - end if last + 1 < len(words) else math.inf
+        spans.append((start, end, min(before, after)))
+    return spans
 
 
 def segment(path: Path, start_s: float, end_s: float) -> np.ndarray:
@@ -804,8 +811,9 @@ def pause_bounds(x: np.ndarray, span: tuple[float, float], spec: dict) -> tuple[
 
 
 def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cache: Path) -> None:
-    """Align the sentences in batches, cut each phrase said with a pause on each side into those pauses, keep the
-    clips the checker hears as the phrase alone, then delete the sentences and every try."""
+    """Align the sentences in batches, cut each phrase said with a pause on each side, one the aligner also sets apart
+    from its neighbours, into those pauses, keep the clips the checker hears as the phrase alone, then delete the
+    sentences and every try."""
     spec, rate = job.cfg["cut"], grid.SAMPLE_RATE_HZ
     if spec["guard_s"] + spec["min_pause_s"] > spec["margin_s"]:
         raise ValueError("cut: guard_s + min_pause_s must fit inside margin_s")
@@ -823,9 +831,11 @@ def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cach
         for m in batch:
             x = sf.read(str(job.whole(m["key"])), dtype="float64")[0]
             for p in m["phrases"]:
-                for n, span in enumerate(phrase_spans(times.get(m["key"], []), sounds[p])):
+                for n, (start, end, gap_s) in enumerate(phrase_spans(times.get(m["key"], []), sounds[p])):
+                    apart = gap_s >= spec["min_word_gap_s"]
+                    cut_s = pause_bounds(x, (start, end), spec) if apart else None
                     found.append(
-                        {"key": m["key"], "n": n, "phrase": p, "span": span, "cut": pause_bounds(x, span, spec)}
+                        {"key": m["key"], "n": n, "phrase": p, "span": (start, end), "apart": apart, "cut": cut_s}
                     )
         paused = [i for i, o in enumerate(found) if o["cut"]]
         tries = []
@@ -852,7 +862,13 @@ def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cach
                     {"file": name, "phrase": o["phrase"], "span_s": o["span"], "cut_s": o["cut"], "heard": kept[i]}
                 )
             mine = by_key.get(m["key"], [])
-            record = m | {"clips": clips, "found": len(mine), "paused": sum(o["cut"] is not None for _, o in mine)}
+            apart = sum(o["apart"] for _, o in mine)
+            record = m | {
+                "clips": clips,
+                "found": len(mine),
+                "apart": apart,
+                "paused": sum(o["cut"] is not None for _, o in mine),
+            }
             done_write(job.state / "cut" / f"{m['key']}.jsonl", [record])
             job.whole(m["key"]).unlink()
             job.whole(m["key"]).with_suffix(".json").unlink()
@@ -926,17 +942,18 @@ def read_index(folder: Path) -> list[dict]:
 
 
 def report(job: Job) -> str:
-    """Where the extract stands: matches found, sentences waiting, aligned phrases said with a pause and the share of
-    them the checker kept, clips and their lengths per phrase, and the data disk's free space."""
+    """Where the extract stands: matches found, sentences waiting, aligned phrases set apart from their neighbours and
+    said with a pause, the share of them the checker kept, clips and their lengths per phrase, the disk's free space."""
     matches = defaultdict(int)
     for f in (job.state / "scan").glob("*/*.jsonl"):
         for m in read_jsonl(f):
             for p in m["phrases"]:
                 matches[p] += 1
-    kept, found, paused, unaligned, lengths = defaultdict(int), 0, 0, 0, defaultdict(list)
+    kept, found, apart, paused, unaligned, lengths = defaultdict(int), 0, 0, 0, 0, defaultdict(list)
     for f in (job.state / "cut").glob("*.jsonl"):
         for m in read_jsonl(f):
             found += m.get("found", 0)
+            apart += m.get("apart", 0)
             paused += m.get("paused", 0)
             unaligned += m.get("found", 0) == 0
             for c in m["clips"]:
@@ -946,7 +963,8 @@ def report(job: Job) -> str:
     free_gb = shutil.disk_usage(job.out.parent).free / 1e9
     lines = [
         f"scanned parts {sum(1 for _ in (job.state / 'scan').glob('*/*.jsonl'))}, waiting sentences {waiting},"
-        f" {paused} of {found} aligned phrases said with a pause, kept {sum(kept.values())}"
+        f" {apart} of {found} aligned phrases apart from their neighbours, {paused} of those said with a pause,"
+        f" kept {sum(kept.values())}"
         f" ({sum(kept.values()) / max(paused, 1):.0%} of those),"
         f" sentences without the phrase aligned {unaligned}, disk free {free_gb:.0f} GB"
     ]
