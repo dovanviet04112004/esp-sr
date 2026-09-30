@@ -216,3 +216,20 @@ def test_every_babble_track_has_a_voice_from_its_start_and_no_silent_stretch(
     for offset, length in zip(index["offset"], index["length"], strict=True):
         loud = np.flatnonzero(track[offset : offset + length])
         assert loud[0] < HOP and np.max(np.diff(loud)) < FS
+
+
+def test_a_noise_stretch_read_alone_is_the_whole_files_stretch(world: tuple[dict, dict, dict], tmp_path: Path) -> None:
+    cfg, dev, paths = world
+    mixer = data.Mixer(cfg, dev, paths, "train", 7)
+    whole = mixer.reader.read("noise/fan/a.wav")
+    for seed, count in ((1, FS), (2, 3 * FS), (3, 6 * FS)):
+        start = int(np.random.default_rng(seed).integers(max(1, len(whole) - count)))
+        expected = np.resize(whole[start:], count)
+        assert np.array_equal(mixer.noise_stretch(np.random.default_rng(seed), "noise/fan/a.wav", count), expected)
+    write_wav(
+        paths["raw"] / "noise" / "fan" / "fast.wav", 0.05 * np.random.default_rng(4).standard_normal(44100), 44100
+    )
+    slow = np.resize(
+        mixer.reader.read("noise/fan/fast.wav")[int(np.random.default_rng(5).integers(FS // 2)) :], FS // 2
+    )
+    assert np.array_equal(mixer.noise_stretch(np.random.default_rng(5), "noise/fan/fast.wav", FS // 2), slow)

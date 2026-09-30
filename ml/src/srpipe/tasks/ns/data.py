@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import soundfile as sf
 import yaml
 from scipy import signal
 
@@ -555,6 +556,7 @@ class Mixer:
         for r in read_tsv(folder / "noise_index.tsv"):
             self.noise[r["pool"]].append((r["item"], float(r["seconds"])))
         self.reader = ItemReader(paths["raw"])
+        self._frames: dict[str, tuple[int, int]] = {}
         self.bank = device.room_bank(dev, paths["interim"], 1)
         self.mics = device.load_microphones(dev["microphone"])
         self.n = round(cfg["mix"]["example_s"] * FS) // HOP * HOP
@@ -647,11 +649,26 @@ class Mixer:
             files = self.noise[pool["name"]]
             seconds = np.array([s for _, s in files])
             item = files[int(rng.choice(len(files), p=seconds / seconds.sum()))][0]
-            y = self.reader.read(item)
-            start = int(rng.integers(max(1, len(y) - (n + taps))))
-            source, draws = np.resize(y[start:], n + taps), {"file": item}
+            source, draws = self.noise_stretch(rng, item, n + taps), {"file": item}
         noise = np.stack([signal.fftconvolve(source, rirs[device.NOISE, m])[taps : taps + n] for m in range(2)])
         return noise, {"class": cls, "pool": pool["name"], **draws}
+
+    def noise_stretch(self, rng: np.random.Generator, item: str, count: int) -> np.ndarray:
+        """count samples of a noise file from a start drawn over its length, tiled when the file is shorter; a file at
+        the grid's rate is read over that stretch alone, the same samples as the whole file's."""
+        path = self.reader.raw_root / item
+        if "#" not in item and "@" not in item:
+            if item not in self._frames:
+                info = sf.info(str(path))
+                self._frames[item] = (info.frames, info.samplerate)
+            frames, rate = self._frames[item]
+            if rate == FS:
+                start = int(rng.integers(max(1, frames - count)))
+                x = sf.read(str(path), start=start, stop=min(frames, start + count), dtype="float64", always_2d=True)[0]
+                return np.resize(x.mean(axis=1), count)
+        y = self.reader.read(item)
+        start = int(rng.integers(max(1, len(y) - count)))
+        return np.resize(y[start:], count)
 
     def available(self, pool: dict) -> bool:
         if pool.get("babble"):
