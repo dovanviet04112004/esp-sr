@@ -81,7 +81,7 @@ Chỉ bốn khối dùng mô hình học. Mọi khối khác là công thức, k
 |---|---|---|---|---|---|---|
 | `ns` | `ai_engine/src/ns/`, cắm vào khe `ns` của `dsp_afe` | RNNoise dựng lại cho 16 kHz: dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải + xác suất tiếng nói | đặc trưng dải tính từ 257 vạch | gain từng dải, nội suy ra 257 vạch | ~88 k tham số, ~90 KB int8 🔬 | kiến trúc RNNoise; **huấn luyện mới hoàn toàn** vì dải và tần số lấy mẫu khác bản gốc |
 | `wake` | `ai_engine/src/wake/` | TCN tích chập giãn nở nhân quả, 6 tầng, bước giãn 1 → 32, 64 kênh | log-mel 40 dải × khung 16 ms | xác suất từ đánh thức mỗi khung | ~100 KB int8 🔬 | tự huấn luyện |
-| `command` `kws` | `ai_engine/src/command_kws/` | DS-CNN (Zhang và cộng sự, 2017): một tích chập rồi bốn tầng tách chiều sâu, trung bình gộp, phân lớp một cửa sổ mỗi câu (ADR-0012) | log-mel 40 trên cửa sổ 94 bước tính ngược từ lúc `vad` tắt | xác suất của từng lệnh học được, `other`, `silence` | ~40 KB int8 🔬 (cỡ nhỏ của bài 38,6 KB) | tự huấn luyện trên mẩu lệnh người thật, TTS và âm bản |
+| `command` `kws` | `ai_engine/src/command_kws/` | DS-CNN (Zhang và cộng sự, 2017): một tích chập rồi bốn tầng tách chiều sâu, trung bình gộp, phân lớp một cửa sổ mỗi câu (ADR-0012) | log-mel 40 cộng ba chiều cao độ trên cửa sổ 94 bước tính ngược từ lúc `vad` tắt | xác suất của từng lệnh học được, `other`, `silence` | cỡ S, M hoặc L của bài, chọn bằng số đo: ~25 / ~200 / ~500 KB int8 🔬 | tự huấn luyện trên mẩu lệnh người thật, TTS và âm bản |
 | `command` `ctc` | `ai_engine/src/command_ctc/` | CRNN nhỏ (tích chập rồi GRU một chiều) chạy dòng + CTC trên đơn vị của §3.12, như MultiNet; lùi về TCN nếu GRU int8 qua esp-dl không đạt trên board (ADR-0010) | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung | **≤ ~1,8 MB int8** — trần sinh ra từ bảng phân vùng §6.1 | tự huấn luyện trên kho tiếng Việt |
 | `synth` | `ai_engine/src/synth/` | chốt ở E12-T1: mạng chưng cất kiểu sanoTTS (trường độ → âm học → iSTFT) | chuỗi đơn vị + trường độ | PCM 16 kHz | ≤ 1 MB | tuỳ phương án; phương án không mạng nằm ở `svc_speak` (§3.13) |
 
@@ -423,7 +423,7 @@ OM-LSA nằm ngay trong `dsp_afe`; bản RNNoise nằm ở `ai_engine/src/ns/` v
 |---|---|---|---|---|---|---|
 | `fft` `window` `stft` | thuần | `dsp_spec` | FFT thực (`dl_fft`), căn Hann, chồng 50% | §3.1 | **451 µs đo** cả chuỗi | E6-T4 |
 | `mel` | thuần | `dsp_spec` | log-mel, MFCC giữ làm đối chiếu | 40 dải, 20–7 600 Hz | **~180 µs đo** (`rfft` 118 + 40 dải 62) | E6-T5 |
-| `pitch` | thuần | `dsp_spec` | bộ dò cao độ của Kaldi chạy dòng: NCCF ở 4 kHz, Viterbi, ra độ hữu thanh + log F0 trừ trung bình + delta (§3.11) | 50–400 Hz | ~300 µs 🔬; dựng cho `command` (ADR-0010) | E11-T8 |
+| `pitch` | thuần | `dsp_spec` | bộ dò cao độ của Kaldi chạy dòng: NCCF ở 4 kHz, Viterbi, ra độ hữu thanh + log F0 trừ trung bình + delta (§3.11) | 50–400 Hz | **1,98 ms đo** mỗi bước ở nhân 0, vùng làm việc trong PSRAM (`measurements/pitch.md`); dựng cho `command` (ADR-0010) | E11-T8 |
 | `hpf` | thuần | `dsp_afe` | IIR bậc hai Butterworth, dạng II chuyển vị viết tay (ADR-0004) | 80 Hz | ~41 µs hai kênh | E7-T1 |
 | `balance` | thuần | `dsp_afe` | nhân hệ số phức hiệu chuẩn mỗi vạch cho `ch1`, vòng viết tay (ADR-0005) | từ NVS `calib/bal` | ~18 µs | E7-T2 |
 | `aec` | thuần | `dsp_afe` | MDF chồng-lưu, bước học tự chỉnh, khử vọng dư | 8 phân đoạn × 256 = 128 ms đuôi | ~1,3 ms hai micro | E10-T4 |
@@ -436,7 +436,7 @@ OM-LSA nằm ngay trong `dsp_afe`; bản RNNoise nằm ở `ai_engine/src/ns/` v
 | `agc` | thuần | `dsp_afe` | hai tầng: chậm theo mức nói, nhanh chặn đỉnh nhìn trước 4 ms | đích −26 dBFS | ~260 µs, ~340 µs khi chặn mọi mẫu | E7-T4 |
 | `wake` | **mô hình** | `ai_engine/src/wake/` | TCN giãn nở nhân quả int8, chạy dòng | trường nhìn ~2 s | ~3,6 ms (mốc 22,6% một nhân của mô hình cùng loại) | E11-T11 |
 | `normalize` `g2p` `lexicon` | thuần | `lang_vi` | luật chính tả → đơn vị, sinh biến thể phương ngữ | `contracts/lang_vi.yaml` | chỉ lúc nạp bộ lệnh: **1,18 ms đo** mỗi lệnh, ba vùng | E11-T4 |
-| `command` `kws` | **mô hình** + thuần | `ai_engine/src/command_kws/` | DS-CNN phân lớp các lệnh đã học + `other` + `silence` trên một cửa sổ mỗi câu; từ chối theo lớp thắng, xác suất và khoảng cách nhất–nhì (ADR-0012) | cửa sổ 94 bước log-mel 40; 64 kênh, bốn tầng tách chiều sâu | ~5,4 triệu phép **một lần mỗi câu** 🔬 (cỡ nhỏ của bài); `step` chỉ chép khung | E11-T17 |
+| `command` `kws` | **mô hình** + thuần | `ai_engine/src/command_kws/` | DS-CNN phân lớp các lệnh đã học + `other` + `silence` trên một cửa sổ mỗi câu; từ chối theo lớp thắng, xác suất và khoảng cách nhất–nhì (ADR-0012) | cửa sổ 94 bước log-mel 40 + 3 chiều cao độ; cỡ S, M, L ở cấu hình | S ~20, M ~75, L ~215 triệu MAC **một lần mỗi câu** 🔬; `step` chỉ chép khung, còn `pitch` tốn ~2 ms mỗi bước trên nhân 0 (`measurements/pitch.md`) | E11-T17 |
 | `command` `ctc` | **mô hình** + thuần | `ai_engine/src/command_ctc/` | mạng âm học + CTC, chấm có ràng buộc từng lệnh, từ chối theo khoảng cách với vòng tự do | | 11–18 ms mỗi 32 ms, **chỉ trong cửa sổ lệnh** | E11-T13 |
 | `synth` | **mô hình** hoặc thuần | `ai_engine/src/synth/` hoặc `svc_speak` | chốt ở E12-T1 | | < 1× thời gian thực, dựng trước rồi phát | E12-T4 |
 
@@ -715,7 +715,7 @@ hoá trung bình và phương sai theo **thống kê lúc huấn luyện**; th�
 **Cao độ vào `command`.** Tiếng Việt có thanh là âm vị (TỔNG QUAN §3.2), và 40 dải mel thô ở vùng 100–300 Hz nơi
 F0 nằm. `command` `ctc` đọc log-mel 40 cộng ba chiều cao độ của `dsp_spec/pitch` (log F0, delta, độ hữu thanh): mọi số đã
 công bố cho ngôn ngữ có thanh đều thấy cao độ hạ lỗi, ở tiếng Việt khoảng 18% tương đối, còn 80 dải không có số cho mạng
-nhỏ (ADR-0010). `command` `kws` bắt đầu bằng log-mel 40 và học lại với cao độ khi `pitch` xong (§3.12). `wake` giữ log-mel
+nhỏ (ADR-0010). `command` `kws` cũng đọc đủ 43 chiều ấy ngay từ bản đầu (§3.12). `wake` giữ log-mel
 40, vì lỗi của nó nằm ở dữ liệu dương chứ không ở thanh. Model khai đặc trưng nó đọc trong `meta.json` (§6.3).
 
 **`pitch`** là bộ dò cao độ của Kaldi (Ghahremani và cộng sự, 2014; `feat/pitch-functions.cc`) ở chế độ chạy dòng
@@ -898,9 +898,13 @@ bộ lệnh, qua MQTT `down/commands` hoặc từ `storage/cmd/set.json` (§6.4)
 V5.5.8 là thêm một lệnh chưa từng có trong dữ liệu huấn luyện rồi đo nó.
 
 **`kws`** — DS-CNN (Zhang và cộng sự, 2017, "Hello Edge"): một tích chập thường, rồi các tầng tách chiều sâu (tích chập
-từng kênh 3 × 3 rồi tích chập 1 × 1), trung bình gộp và một lớp ra. Bản đầu theo cỡ nhỏ nhất của bài: tích chập 64 kênh
-nhân 10 × 4 bước 2 × 2, bốn tầng tách chiều sâu 64 kênh; bài đo 94,4% trên Google Speech Commands 12 lớp với cửa sổ 1 s,
-38,6 KB int8, 5,4 triệu phép mỗi lần chạy. Cỡ mạng, cửa sổ và lịch học ở `configs/models/command_kws.yaml`.
+từng kênh 3 × 3 rồi tích chập 1 × 1), trung bình gộp và một lớp ra, ở ba cỡ của bài: S (64 kênh, bốn tầng), M (172
+kênh, bốn tầng), L (276 kênh, năm tầng), tích chập đầu nhân 10 × 4 bước 2 × 2. Bài đo 94,4 / 94,9 / 95,4% trên Google
+Speech Commands 12 lớp, với cửa sổ 1 s và 10 MFCC tức 49 × 10 đầu vào; cửa sổ 94 bước × 43 chiều ở đây cho khoảng 7,5
+lần số vị trí, nên S cỡ 20, M cỡ 75, L cỡ 215 triệu MAC mỗi câu 🔬. **Cỡ là lựa chọn cấu hình**: học các cỡ trên cùng
+split, seed và số epoch, chọn bằng Cửa 3 sau int8 trên tập thu qua board, trong ngân sách một lần chạy **≤ 100 ms trên nhân
+0** sau khi `vad` tắt 🔬; L chỉ vào cuộc khi đo thấy vừa ngân sách. Cỡ, cửa sổ và lịch học ở
+`configs/models/command_kws.yaml`.
 
 | Phần | Chốt |
 |---|---|
@@ -913,7 +917,7 @@ nhân 10 × 4 bước 2 × 2, bốn tầng tách chiều sâu 64 kênh; bài đo
 | Từ chối | lớp thắng là `other` hay `silence`; hoặc xác suất lớp thắng dưới ngưỡng; hoặc hơn lớp nhì quá ít. Hai ngưỡng ở NVS `kws/cmd_reject` và `kws/cmd_margin` (‰, §6.2), gieo từ Kconfig của `svc_listen`, chọn trên `val` |
 | Chạy | `_step` chỉ chép khung vào vòng đệm 94 bước; `_score` chạy mạng một lần rồi hậu xử lý thuần (softmax, luật từ chối), có bộ vàng ở `contracts/golden/command_kws/`. Ở `LENH` nhân 0 gần như rảnh, trừ một lần chạy mạng lúc hết câu |
 | Đổi lệnh | bộ lệnh cố định lúc học: khi chạy `kws`, `down/commands` bị từ chối bằng một mã lỗi mà `host` đổi thành câu (CLAUDE.md §3.1); lệnh chưa học không bao giờ được nhận |
-| Cao độ | bản đầu chỉ log-mel 40, vì chín lệnh khác nhau ở cả âm tiết lẫn phụ âm. Khi `dsp_spec/pitch` xong (E11-T8), học lại với log-mel 40 cộng ba chiều cao độ trên cùng split, seed và số epoch, rồi giữ bản thắng theo số, nhất là tỉ lệ từ chối cụm gần âm chỉ khác thanh |
+| Cao độ | **bản đầu học luôn log-mel 40 cộng ba chiều cao độ** của `dsp_spec/pitch` theo thứ tự POV, log F0 chuẩn hoá, delta: 43 chiều mỗi bước (chủ repo, 30/09: không học hai lượt), vì từ chối cụm gần âm chỉ khác thanh là việc khó nhất. Bộ dò đặt lại khi vào `LENH`, nên lúc cửa sổ bắt đầu nó đã chạy ít nhất khoảng lặng trước lệnh; lúc học, mô phỏng đặt lại ở đầu mẩu và chừa trước lệnh ít nhất 0,75 s, đúng quãng trung bình log F0 nhìn lại |
 
 **Tiếng tổng hợp của lệnh** (E11-T7, `tasks/command/synth.py`, mục `synth` của `configs/models/command.yaml`) đi đúng
 đường của `wake` (§3.11): cùng hai bộ TTS, cùng bộ nghe kiểm PhoWhisper, bốn bước `pilot`, `positives`, `negatives`,

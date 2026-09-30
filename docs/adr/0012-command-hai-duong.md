@@ -29,8 +29,8 @@ nguyên. `_step` nhận một khung đặc trưng mà độ dài do model khai, 
 khuôn cho cả hai.
 
 - **`kws` (DS-CNN).** Cửa sổ cố định (cấu hình, khoảng 1,5 s = 94 bước 16 ms) tính ngược từ bước `vad` tắt sau câu;
-  mạng chạy một lần mỗi câu. Bản đầu theo cỡ nhỏ nhất của bài: một tích chập 64 kênh rồi bốn tầng tách chiều sâu 64
-  kênh và trung bình gộp [1, bảng 7]. Lớp gồm các lệnh có dữ liệu của `contracts/commands/default_vi.json`, theo đúng
+  mạng chạy một lần mỗi câu. Ba cỡ S, M, L của bài [1, bảng 7] là lựa chọn cấu hình, chọn bằng Cửa 3 sau int8 trong
+  ngân sách thời gian của KẾ HOẠCH §3.12 (chủ repo, 30/09). Lớp gồm các lệnh có dữ liệu của `contracts/commands/default_vi.json`, theo đúng
   thứ tự file ấy, cộng `other` và `silence`; "chụp ảnh" là lệnh chưa học của E11-T13 và đứng cuối file, nên các lớp
   lệnh là phần đầu của bộ lệnh. `other` gồm lời nói thường, cụm gần âm ("bật điện", "mở cửa sổ", "đóng góp"…) và mọi
   cụm từ liền nhau ngắn hơn một lệnh nói riêng ("bật", "đèn", "mở", "cửa", "âm lượng"…), để gần âm hay nửa lệnh không
@@ -40,9 +40,8 @@ khuôn cho cả hai.
   bằng ESP-PPQ.
 - **`ctc` (CRNN + CTC).** Như ADR-0010 và KẾ HOẠCH §3.12.
 - **Đặc trưng.** Khai ở cấu hình và ở `meta.json` của model: log-mel 40, hoặc log-mel 40 cộng ba chiều cao độ của
-  `dsp_spec/pitch`. `kws` bản đầu dùng log-mel 40, vì chín lệnh khác nhau ở cả âm tiết lẫn phụ âm. Khi `pitch` xong,
-  `kws` học lại với cao độ trên cùng split, seed và số epoch, rồi giữ bản thắng theo số, nhất là tỉ lệ từ chối cụm gần âm
-  chỉ khác thanh.
+  `dsp_spec/pitch`. `kws` học đủ 43 chiều ngay từ bản đầu (chủ repo, 30/09: không học hai lượt), vì từ chối cụm gần âm
+  chỉ khác thanh là việc khó nhất.
 - **Bộ lệnh.** `meta.json` của `kws` ghi `backend` và `classes`. Bước đóng gói ảnh model kiểm `classes` là phần đầu của
   bộ lệnh mặc định, nên chỉ số trả về trùng chỉ số trong bảng lệnh. Khi chạy `kws`, lệnh đổi bộ lệnh qua MQTT bị từ chối
   bằng một mã lỗi; host đổi mã thành câu.
