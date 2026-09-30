@@ -14,6 +14,7 @@
 #include "dsp_afe/vad.h"
 #include "dsp_spec/fft.h"
 #include "dsp_spec/mel.h"
+#include "dsp_spec/pitch.h"
 #include "dsp_spec/stft.h"
 #include "esp_app_desc.h"
 #include "esp_cpu.h"
@@ -43,6 +44,28 @@
 #define MEL_F_MIN_HZ 20.0f
 #define MEL_F_MAX_HZ 7600.0f
 #define MEL_LOG_FLOOR 1e-6f
+// The pitch section of ml/configs/scenes/device.yaml, Kaldi's defaults (KEHOACH 3.11).
+#define PITCH_CONFIG                                                                                         \
+    {.resample_hz = 4000.0f,                                                                                 \
+     .lowpass_cutoff_hz = 1000.0f,                                                                           \
+     .lowpass_zeros = 1,                                                                                     \
+     .upsample_zeros = 5,                                                                                    \
+     .window_s = 0.025f,                                                                                     \
+     .min_f0_hz = 50.0f,                                                                                     \
+     .max_f0_hz = 400.0f,                                                                                    \
+     .soft_min_f0 = 10.0f,                                                                                   \
+     .penalty_factor = 0.1f,                                                                                 \
+     .delta_pitch = 0.005f,                                                                                  \
+     .nccf_ballast = 7000.0f,                                                                                \
+     .normalization_left_s = 0.75f,                                                                          \
+     .delta_window = 2,                                                                                      \
+     .pov_scale = 2.0f,                                                                                      \
+     .pitch_scale = 2.0f,                                                                                    \
+     .delta_pitch_scale = 10.0f}
+#define PITCH_VOICE_HOPS 64 // a gliding voiced tone in noise, cycled
+#define PITCH_F0_HZ 140.0f
+#define PITCH_GLIDE_HZ 60.0f
+#define PITCH_HARMONICS 5
 #define BENCH_STEER_DEG 60.0f
 #define GSC_ANGLES 91 // the doa grid, 0..180 deg
 #if CONFIG_DSP_AFE_DOA_ENABLE
@@ -74,6 +97,8 @@ static dsp_spec_cplx_t s_work[GEN_GRID_N_BINS];
 static float s_work_pcm[GEN_GRID_HOP_SAMPLES];
 static dsp_afe_calib_t s_calib;
 static float s_log_mel[MEL_BANDS];
+static float s_voice[PITCH_VOICE_HOPS][GEN_GRID_HOP_SAMPLES];
+static float s_pitch[DSP_SPEC_PITCH_FEATURES];
 static float s_power[GEN_GRID_N_BINS];
 static float s_gain[GEN_GRID_N_BINS];
 static uint32_t s_rng = 0x2545F491u;
@@ -402,6 +427,42 @@ static void bench_mel(void)
     report(&row, &t);
 }
 
+static void fill_voice(void)
+{
+    double phase = 0.0;
+    const size_t n = (size_t)PITCH_VOICE_HOPS * GEN_GRID_HOP_SAMPLES;
+    for (size_t i = 0; i < n; i++) {
+        const double f0 = PITCH_F0_HZ + PITCH_GLIDE_HZ * sin(2.0 * M_PI * (double)i / (double)n);
+        phase += 2.0 * M_PI * f0 / GEN_GRID_SAMPLE_RATE_HZ;
+        double x = 0.0;
+        for (int k = 1; k <= PITCH_HARMONICS; k++) {
+            x += sin(k * phase) / k;
+        }
+        s_voice[i / GEN_GRID_HOP_SAMPLES][i % GEN_GRID_HOP_SAMPLES] = (float)(0.2 * x) + 0.02f * noise();
+    }
+}
+
+static void bench_pitch(void)
+{
+    const dsp_spec_pitch_config_t cfg = PITCH_CONFIG;
+    row_t row = {.module = "dsp_spec pitch Kaldi (vùng làm việc PSRAM)", .core = CORE_NHAN, .in_total = true};
+    row.hot_bytes = dsp_spec_pitch_workspace_bytes(&cfg);
+    void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_SPIRAM);
+    const size_t before = heap_free();
+    dsp_spec_pitch_t *pitch = NULL;
+    ESP_ERROR_CHECK(dsp_spec_pitch_init(&pitch, &cfg, mem, row.hot_bytes));
+    row.static_bytes = before - heap_free();
+    fill_voice();
+    timing_t t = {0};
+    for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
+        const uint32_t start = esp_cpu_get_cycle_count();
+        dsp_spec_pitch_frame(pitch, s_voice[h % PITCH_VOICE_HOPS], s_pitch);
+        hop_done(&t, h, start);
+    }
+    report(&row, &t);
+    heap_caps_free(mem);
+}
+
 // A tick between benches lets the idle task of the core feed the task watchdog.
 // The chain goes first: dl_fft keeps its tables once made, so the first user of them pays their RAM.
 static void core1_benches(void *done)
@@ -458,6 +519,8 @@ static void bench_lang(void)
 static void core0_benches(void *done)
 {
     bench_mel();
+    vTaskDelay(1);
+    bench_pitch();
     xTaskNotifyGive((TaskHandle_t)done);
     vTaskDelete(NULL);
 }
