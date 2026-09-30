@@ -101,6 +101,9 @@ def test_parquet_rows_come_from_their_row_groups_and_a_rerun_has_nothing_left(tm
         (3, ["bật đèn"]),
     ]
     assert max(stop - start for start, stop in http.reads) < len(buf.getvalue())
+    extract.fetch(job, False, "bật đèn")
+    (first,) = (tmp_path / "cache/extract/t/whole").glob("*.wav")
+    assert first.stem.endswith("__3") and not (tmp_path / "cache/extract/t/fetched").exists()
     extract.fetch(job, False)
     wholes = sorted((tmp_path / "cache/extract/t/whole").glob("*.wav"))
     assert [round(sf.info(str(w)).duration, 1) for w in wholes] == [0.6, 0.8]

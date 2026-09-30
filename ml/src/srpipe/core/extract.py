@@ -636,9 +636,17 @@ def read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
-def fetch(job: Job, follow: bool) -> None:
-    """Every audio part not fetched yet; with follow, again as scan finishes parts, until scan is done."""
+def fetch(job: Job, follow: bool, phrase: str | None = None) -> None:
+    """Every audio part not fetched yet, for its matches neither cut nor waiting; with phrase, only the matches that
+    say it, every part left unmarked for a later whole fetch; with follow, again as scan finishes parts, until scan is
+    done."""
+    if phrase is not None and phrase not in job.phrases.phrases:
+        raise ValueError(f"{phrase!r} is none of the phrases of {job.name}")
     pins = job.pins()
+
+    def mark(source: dict, part: str) -> None:
+        job.fetched_mark(source, part).parent.mkdir(parents=True, exist_ok=True)
+        job.fetched_mark(source, part).touch()
 
     def one(source: dict, part: str, matches: list[dict], info: dict) -> str:
         # Sentences wait on the data disk for cut; below the floor, fetch waits for cut to free it.
@@ -651,14 +659,25 @@ def fetch(job: Job, follow: bool) -> None:
             fetch_local(job, matches)
         else:
             note = fetch_tar(job, source, pins[source["repo"]], part, matches)
-        job.fetched_mark(source, part).parent.mkdir(parents=True, exist_ok=True)
-        job.fetched_mark(source, part).touch()
+        if phrase is None:
+            mark(source, part)
         return f": {len(matches)} matches{note}"
 
     failures = defaultdict(int)
     while True:
         scanned = (job.state / "scan.done").exists()
-        left = [p for p in fetch_parts(job, pins) if not job.fetched_mark(p[0], p[1]).exists()]
+        taken = {f.stem for f in (job.state / "cut").glob("*.jsonl")} | {
+            f.stem for f in job.whole("").parent.glob("*.json")
+        }
+        left = []
+        for source, part, matches, info in fetch_parts(job, pins):
+            if job.fetched_mark(source, part).exists():
+                continue
+            wanted = [m for m in matches if (phrase is None or phrase in m["phrases"]) and m["key"] not in taken]
+            if wanted:
+                left.append((source, part, wanted, info))
+            elif phrase is None:
+                mark(source, part)
         todo = [p for p in left if failures[(p[0]["repo"], p[1])] < job.cfg["http"]["retries"]]
         print(f"fetch: {len(todo)} audio parts left, {sum(len(p[2]) for p in todo)} matches", flush=True)
         if len(left) > len(todo):
@@ -668,7 +687,7 @@ def fetch(job: Job, follow: bool) -> None:
             for p in run_parallel(todo, one, job.cfg["workers"]["fetch"], "fetch"):
                 failures[(p[0]["repo"], p[1])] += 1
             continue
-        if scanned:
+        if scanned and phrase is None:
             (job.state / "fetch.done").touch()
         if scanned or not follow:
             return
@@ -904,6 +923,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("name", help="an extract of configs/common/extract.yaml")
     parser.add_argument("step", choices=["scan", "fetch", "cut", "report"])
     parser.add_argument("--follow", action="store_true", help="fetch or cut, keep taking up what the step before adds")
+    parser.add_argument(
+        "--phrase", help="fetch only the matches that say this phrase of the extract, ahead of the rest"
+    )
     args = parser.parse_args(argv)
     cfg, paths = load_yaml(CONFIG), data_paths()
     if args.step == "report":
@@ -916,7 +938,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.step == "scan":
         scan(job)
     elif args.step == "fetch":
-        fetch(job, args.follow)
+        fetch(job, args.follow, args.phrase)
     else:
         cut(job, load_yaml(TTS_CONFIG), load_yaml(CONFIGS / "scenes" / "device.yaml"), paths["cache"], args.follow)
     return 0
