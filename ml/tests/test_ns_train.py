@@ -1,5 +1,6 @@
 """srpipe.tasks.ns.train: the loss's optimum, a batch that is a pure function of its step, a tiny run of every
-candidate on the CPU that keeps its last weights, and a resumed run that ends where an unbroken one ends."""
+candidate on the CPU that keeps its last weights and that eval scores, and a resumed run that ends where an unbroken
+one ends."""
 
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from srpipe.generated import grid
 from srpipe.scenes import device
 from srpipe.tasks import ns
 from srpipe.tasks.ns import data, model, train
+from srpipe.tasks.ns import eval as ns_eval
 
 FS = grid.SAMPLE_RATE_HZ
 UTTERANCES = 12
@@ -66,6 +68,8 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> tuple[dict, dict, dict]:
             n = int(rng.integers(FS // 2, 3 * FS // 2))
             pieces.append(0.1 * np.sin(2 * np.pi * (150 + 10 * k) * np.arange(n) / FS) * np.hanning(n))
         data.write_run(folder, "speech_0000", pieces, [0] * UTTERANCES)
+        names = "".join(f"speech/vivos/{role}/u{k:02d}.wav\n" for k in range(UTTERANCES))
+        (folder / "speech_items.txt").write_text(names, encoding="utf-8")
         index = np.load(folder / "speech_0000_index.npz")
         np.savez(
             folder / "speech_index.npz",
@@ -111,7 +115,7 @@ def test_a_batch_is_a_pure_function_of_its_step(world: tuple[dict, dict, dict]) 
     assert not torch.equal(a["power"], train.TrainBatches(cfg, dev, paths, steps)[4]["power"])
 
 
-def test_a_tiny_run_trains_every_candidate_on_the_same_batches_and_keeps_its_last_weights(
+def test_a_tiny_run_trains_every_candidate_on_the_same_batches_keeps_its_last_weights_and_is_scored(
     world: tuple[dict, dict, dict], tmp_path: Path
 ) -> None:
     cfg, dev, paths = world
@@ -128,6 +132,14 @@ def test_a_tiny_run_trains_every_candidate_on_the_same_batches_and_keeps_its_las
         start = model.build(cfg, name)
         assert all(not torch.equal(kept[k], p) for k, p in start.named_parameters())
         assert math.isfinite(val[name]["loss"]) and math.isfinite(val[name]["noise_down_db"])
+    summary = ns_eval.score(run, cfg, dev, paths, "val", 1)
+    floors = [ns_eval.floor_name(f) for f in cfg["eval"]["floors_db"]]
+    assert set(summary) == {ns_eval.OMLSA} | {f"{n}@{f}" for n in model.names(cfg) for f in floors}
+    whole = summary[ns_eval.OMLSA]["settled"]["all"]["all"]
+    listings = data.set_dir(paths, cfg, "val").glob("*.items.jsonl")
+    assert whole["examples"] == sum(len(p.read_text(encoding="utf-8").splitlines()) for p in listings)
+    assert whole["noise_down_db"] is not None and set(summary[ns_eval.OMLSA]["settled"]["corpus"]) == {"vivos"}
+    assert (run / "eval" / "val.yaml").exists()
 
 
 def test_a_resumed_run_ends_where_an_unbroken_one_ends(
