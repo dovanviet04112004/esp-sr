@@ -35,8 +35,14 @@ class EspdlNet {
      * stopped
      */
     esp_err_t build(Blob blob, const char *name) noexcept;
+    /** The graph's only input; empty when it has several, each then found by name. */
     Int8Tensor input() noexcept;
+    /** The graph's only output; empty when it has several, each then found by name. */
     Int8Tensor output() noexcept;
+    /** The input of that graph name; empty when the graph has none. */
+    Int8Tensor input(const char *name) noexcept;
+    /** The output of that graph name; empty when the graph has none. */
+    Int8Tensor output(const char *name) noexcept;
     /** One run over what input() holds; streaming caches keep the earlier hops. */
     esp_err_t step() noexcept;
     /** Clear every streaming cache, as after a gap in the frame sequence. */

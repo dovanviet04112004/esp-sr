@@ -1,6 +1,8 @@
 #include "core/espdl_net.hpp"
 
+#include <map>
 #include <new>
+#include <string>
 
 #include "dl_model_base.hpp"
 #include "esp_heap_caps.h"
@@ -36,6 +38,17 @@ Int8Tensor view(dl::TensorBase *tensor) noexcept
             tensor->get_exponent()};
 }
 
+Int8Tensor only(std::map<std::string, dl::TensorBase *> &tensors) noexcept
+{
+    return tensors.size() == 1 ? view(tensors.begin()->second) : Int8Tensor{nullptr, 0, 0};
+}
+
+Int8Tensor named(std::map<std::string, dl::TensorBase *> &tensors, const char *name) noexcept
+{
+    const auto found = tensors.find(name);
+    return found != tensors.end() ? view(found->second) : Int8Tensor{nullptr, 0, 0};
+}
+
 } // namespace
 
 esp_err_t EspdlNet::build(Blob blob, const char *name) noexcept
@@ -60,9 +73,10 @@ esp_err_t EspdlNet::build(Blob blob, const char *name) noexcept
         }
     }
     if (model == nullptr) { return ESP_ERR_NO_MEM; }
-    if (model->get_inputs().size() != 1 || model->get_outputs().size() != 1) {
-        ESP_LOGE(TAG, "%s: esp-dl built %u inputs and %u outputs, want one of each, see its log above", name_,
-                 (unsigned)model->get_inputs().size(), (unsigned)model->get_outputs().size());
+    if (model->get_inputs().empty() || model->get_outputs().empty()) {
+        ESP_LOGE(TAG,
+                 "%s: esp-dl built %u inputs and %u outputs, want one of each at least, see its log above",
+                 name_, (unsigned)model->get_inputs().size(), (unsigned)model->get_outputs().size());
         delete model;
         return ESP_ERR_NOT_SUPPORTED;
     }
@@ -76,12 +90,24 @@ esp_err_t EspdlNet::build(Blob blob, const char *name) noexcept
 
 Int8Tensor EspdlNet::input() noexcept
 {
-    return model_ != nullptr ? view(model_->get_inputs().begin()->second) : Int8Tensor{nullptr, 0, 0};
+    return model_ != nullptr ? only(model_->get_inputs()) : Int8Tensor{nullptr, 0, 0};
 }
 
 Int8Tensor EspdlNet::output() noexcept
 {
-    return model_ != nullptr ? view(model_->get_outputs().begin()->second) : Int8Tensor{nullptr, 0, 0};
+    return model_ != nullptr ? only(model_->get_outputs()) : Int8Tensor{nullptr, 0, 0};
+}
+
+Int8Tensor EspdlNet::input(const char *name) noexcept
+{
+    return model_ != nullptr && name != nullptr ? named(model_->get_inputs(), name)
+                                                : Int8Tensor{nullptr, 0, 0};
+}
+
+Int8Tensor EspdlNet::output(const char *name) noexcept
+{
+    return model_ != nullptr && name != nullptr ? named(model_->get_outputs(), name)
+                                                : Int8Tensor{nullptr, 0, 0};
 }
 
 esp_err_t EspdlNet::step() noexcept
