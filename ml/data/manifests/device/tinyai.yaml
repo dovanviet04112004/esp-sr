@@ -1,0 +1,65 @@
+name: tinyai
+source: tinyai-signal/data/raw     # the owner's previous project, a sibling repo of this one
+source_commit: 642e6e4a0420ba9a2961be5fefa2c289bc3fd038   # every file below is tracked there at this commit
+copied: 2026-09-30                 # by hand with cp, once, into raw/device/tinyai/ (KEHOACH 4.4.1)
+license: the owner's own recordings
+consent: null                      # none on record in this repo; human speech, never committed (KEHOACH 1.4)
+consumed_by: [afe_compare]         # the comparison set of KEHOACH 3.16 only; no split takes them
+board: board_b                     # tinyai-signal's data/raw/README.md: board B, 2 x INMP441, I2S 32-bit slots
+mic_spacing_m: 0.045               # its README and docs/chung/gioi_han_dan_hai_mic.md: 45 mm, as contracts/array.yaml
+pcm_shift: null                    # not recorded; tinyai-signal's firmware defaults to 13 today
+files:
+  hai_nguoi_30s_luanphien.wav:
+    from: tach_2nguoi/
+    sha256: 30bf0b3e19fed19c4e40e2b146aa754440db1bdbe3b843339be03bdf49f86e66
+    channels: 2
+    rate_hz: 16000
+    seconds: 29.975
+    recorded: 2026-09-03
+    what: two talkers taking turns, 1 m, lab, board in its case
+  hai_nguoi_10s_10chongnhau.wav:
+    from: tach_2nguoi/
+    sha256: 499fe0a57fea1cb0f414f9efb26e8911773182584dd855b992bda4b47c349e2c
+    channels: 2
+    rate_hz: 16000
+    seconds: 10.025
+    recorded: 2026-09-03
+    what: two talkers speaking over each other, 1 m, lab, board in its case
+  A_trai_1.wav:
+    from: tach_2nguoi/
+    sha256: 74d21f7a2eee113ca8f080bbe42ed431346c765bb978dfbe01bf769a351282ad
+    channels: 2
+    rate_hz: 16000
+    seconds: 15.0
+    recorded: 2026-09-02
+    what: talker A alone, 1 m, lab; tinyai-signal's manifest says the name's side is opposite to the measured delay
+  B_phai_1.wav:
+    from: tach_2nguoi/
+    sha256: f976d8d4fb8d26ef07998c6b12df2567b8b93935e8fd5d91cdd800de55ab8421
+    channels: 2
+    rate_hz: 16000
+    seconds: 15.0
+    recorded: 2026-09-02
+    what: talker B alone, 1 m, lab; the same note on the name's side
+  truoc_loc.wav:
+    from: doi_chung/
+    sha256: d397d3aa99c3cec758a87f5a62df3fde2230abf9dc2bdd2811621070e66ed3b1
+    channels: 2
+    rate_hz: 16000
+    seconds: 9.625
+    recorded: 2026-08-20
+    what: a voice with a loudspeaker playing music at 90 degrees at the same time, the input of sau_loc
+  sau_loc.wav:
+    from: doi_chung/
+    sha256: d8afb045860c3b28178a9fd058663eb71737ab0e8a3afe73a7b173b9c9dea1ce
+    channels: 1
+    rate_hz: 16000
+    seconds: 9.5
+    recorded: 2026-08-22
+    what: tinyai-signal's own chain run on truoc_loc (its docs/tuan_05/so_sanh_chuoi_dsp_khong_gian.md, section 10)
+notes: >-
+  Checked on the copies: every file is 16-bit PCM at 16 kHz. In three octaves from 200 to 1600 Hz ch0 lies 8.2 to
+  10.8 dB under ch1 on the four talker files and 4.5 to 5.1 dB under it on truoc_loc, as on the board B sessions of
+  28/09 (ch0 is the quiet INMP441 of E2-T4), so the channel order is this repo's (KEHOACH 2.3). sau_loc starts on the same sample as truoc_loc
+  (cross-correlation peak at lag 0, 0.95 against ch0) and stops 2 000 samples, 0.125 s, before it. The recordings were
+  made before this repo's consent forms: speakers A and B carry no spk_NNN code.
