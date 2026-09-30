@@ -43,3 +43,9 @@ def test_a_window_gives_one_logit_a_class_at_every_size() -> None:
         net = dscnn.build(cfg, window, len(names), size).eval()
         with torch.no_grad():
             assert net(torch.randn(3, 1, *window)).shape == (3, len(names))
+
+
+def test_the_probe_records_have_the_layout_the_board_reads() -> None:
+    from srpipe.tasks.command.kws import quant
+
+    assert quant.WINDOWS_HEAD.size == 12 and quant.RECORD.size == 28

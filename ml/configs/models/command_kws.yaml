@@ -10,3 +10,9 @@ model:
     S: {channels: 64, first_stride: [2, 2], strides: [[1, 1], [1, 1], [1, 1], [1, 1]]}
     M: {channels: 172, first_stride: [2, 1], strides: [[2, 2], [1, 1], [1, 1], [1, 1]]}
     L: {channels: 276, first_stride: [2, 1], strides: [[2, 2], [1, 1], [1, 1], [1, 1], [1, 1]]}
+probe:                             # E11-T17: every size with random weights timed on board B (make ai-probe, ai-unit)
+  seed: 20260930
+  calib_windows: 16
+  runs: 10                         # timed runs a size on the board, after one untimed
+  input_mean: 0.0                  # the network reads features normalised by train's mean and deviation
+  input_std: 1.0

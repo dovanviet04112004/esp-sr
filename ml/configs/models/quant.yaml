@@ -7,4 +7,5 @@ default:
 branches:
   ns: {}
   wake: {}
-  command: {}
+  command_kws: {}
+  command_ctc: {}
