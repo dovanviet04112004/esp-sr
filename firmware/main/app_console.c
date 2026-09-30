@@ -1,5 +1,6 @@
 #include "app_console.h"
 
+#include <ctype.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -44,6 +45,7 @@ static struct {
     struct arg_str *action;
     struct arg_str *ssid;
     struct arg_str *pass;
+    struct arg_lit *hex;
     struct arg_end *end;
 } s_wifi_args;
 
@@ -61,14 +63,41 @@ static bool is_secret(const char *key)
     return strcmp(key, STORAGE_KEY_PASS) == 0 || strcmp(key, STORAGE_KEY_MQTT_PASS) == 0;
 }
 
+// linenoise keeps printable ASCII only, so a name with other bytes, as UTF-8 is, arrives as two hex digits a
+// byte.
+static bool from_hex(const char *hex, char *out, size_t cap)
+{
+    const size_t n = strlen(hex);
+    if (n == 0 || n % 2 != 0 || n / 2 >= cap) { return false; }
+    for (size_t i = 0; i < n; i++) {
+        if (!isxdigit((unsigned char)hex[i])) { return false; }
+    }
+    for (size_t i = 0; i < n / 2; i++) {
+        const char pair[3] = {hex[2 * i], hex[2 * i + 1], '\0'};
+        out[i] = (char)strtoul(pair, NULL, 16);
+        if (out[i] == '\0') { return false; }
+    }
+    out[n / 2] = '\0';
+    return true;
+}
+
 static int wifi_cmd(int argc, char **argv)
 {
     if (arg_parse(argc, argv, (void **)&s_wifi_args) != 0 ||
         strcmp(s_wifi_args.action->sval[0], "set") != 0) {
-        printf("usage: wifi set <ssid> [pass]\n");
+        printf("usage: wifi set [-x] <ssid> [pass]\n");
         return 1;
     }
+    char decoded[SSID_MAX_BYTES + 1];
     const char *ssid = s_wifi_args.ssid->sval[0];
+    if (s_wifi_args.hex->count > 0) {
+        if (!from_hex(ssid, decoded, sizeof(decoded))) {
+            printf("with -x the ssid is 1..%u bytes, two hex digits each, none zero\n",
+                   (unsigned)SSID_MAX_BYTES);
+            return 1;
+        }
+        ssid = decoded;
+    }
     const char *pass = s_wifi_args.pass->count > 0 ? s_wifi_args.pass->sval[0] : "";
     const size_t pass_len = strlen(pass);
     if (strlen(ssid) > SSID_MAX_BYTES || pass_len > PASS_MAX_BYTES ||
@@ -269,7 +298,9 @@ static esp_err_t register_commands(void)
     s_wifi_args.action = arg_str1(NULL, NULL, "set", "the only action");
     s_wifi_args.ssid = arg_str1(NULL, NULL, "<ssid>", "network name");
     s_wifi_args.pass = arg_str0(NULL, NULL, "<pass>", "password; leave out for an open network");
-    s_wifi_args.end = arg_end(3);
+    s_wifi_args.hex =
+        arg_lit0("x", "hex", "<ssid> is its bytes in hex, for a name with letters the console drops");
+    s_wifi_args.end = arg_end(4);
     const esp_console_cmd_t wifi = {
         .command = "wifi",
         .help = "Store the network in NVS wifi/ssid and wifi/pass",
