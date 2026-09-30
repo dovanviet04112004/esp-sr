@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot command-synth-pilot command-synth ns-data ns-pilot ns-smoke ns-train espsr-compare parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot command-synth-pilot command-synth ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -120,6 +120,10 @@ ns-smoke: ## Train every ns candidate a few small steps on the CPU through the r
 
 ns-train: ## Train RNNoise-16k and NSNet-16k S/M/L on identical batches on the GPU into ml/artifacts/ns/runs (E9-T4)
 	cd ml && uv run --extra train python -m srpipe.tasks.ns.train
+
+ns-eval: ## Score the last ns run against the OM-LSA floor on the held val and test sets into its eval/ (E9-T4)
+	cd ml && uv run --extra train python -m srpipe.tasks.ns.eval score --set val \
+	  && uv run --extra train python -m srpipe.tasks.ns.eval score --set test
 
 measure: ## Merge bench CSVs into docs/measurements/budget.md
 	python3 -m tools.budget
