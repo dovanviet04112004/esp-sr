@@ -25,10 +25,12 @@ from scipy import signal
 from srpipe.core import screen, splits
 from srpipe.core.audio_io import ItemReader, ramped, read_wav, to_float, write_wav
 from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml
-from srpipe.dsp.afe.chain import PCM_MAX, PCM_MIN, Chain, ChainConfig
+from srpipe.dsp.afe import hpf
+from srpipe.dsp.afe.chain import PCM_FULL_SCALE, PCM_MAX, PCM_MIN, Chain, ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
 from srpipe.dsp.spec.stft import Stft
+from srpipe.dsp.spec.window import sqrt_hann
 from srpipe.generated import array, grid
 from srpipe.metrics import mic_pair
 from srpipe.scenes import room
@@ -95,10 +97,10 @@ def load_microphones(cfg: dict) -> Microphones:
     )
 
 
-def hear(air: np.ndarray, mics: Microphones, rng: np.random.Generator) -> np.ndarray:
-    """Interleaved int16 frames (samples, 2) from the sound at each microphone's place, given in full scale of a
-    microphone at the datasheet sensitivity: ch0 through the calib/bal response, the louder microphone kept at that
-    sensitivity, self noise, then drv_audio's right shift, which floors, and its saturation."""
+def respond(air: np.ndarray, mics: Microphones) -> np.ndarray:
+    """The pair's outputs (2, samples) for the sound at each microphone's place, given in full scale of a microphone
+    at the datasheet sensitivity, ahead of their own noise: ch0 through the calib/bal response, the louder microphone
+    kept at that sensitivity."""
     n = air.shape[1]
     size = sfft.next_fast_len(n + 2 * grid.FFT_SIZE)
     freqs = np.fft.rfftfreq(size, 1.0 / FS)
@@ -106,9 +108,51 @@ def hear(air: np.ndarray, mics: Microphones, rng: np.random.Generator) -> np.nda
     response = 10.0 ** (level / 20.0) * np.exp(1j * np.interp(freqs, mics.freqs_hz, mics.phase_rad))
     ch0 = sfft.irfft(sfft.rfft(air[0], size) * response, size)[:n]
     louder = max(1.0, float(np.median(np.abs(mics.gains))))
-    x = np.stack([ch0, air[1]]) / louder + mics.self_noise_rms * rng.standard_normal((2, n))
+    return np.stack([ch0, air[1]]) / louder
+
+
+def digitise(x: np.ndarray, mics: Microphones, rng: np.random.Generator) -> np.ndarray:
+    """Interleaved int16 frames (samples, 2) from the pair's outputs (2, samples) of respond: self noise, then
+    drv_audio's right shift, which floors, and its saturation."""
+    x = x + mics.self_noise_rms * rng.standard_normal(x.shape)
     pcm = np.floor(x * 2.0 ** (SLOT_FRACTION_BITS - mics.pcm_shift))
     return np.clip(pcm, PCM_MIN, PCM_MAX).astype(np.int16).T.copy()
+
+
+def hear(air: np.ndarray, mics: Microphones, rng: np.random.Generator) -> np.ndarray:
+    """Interleaved int16 frames (samples, 2) from the sound at each microphone's place: respond, then digitise."""
+    return digitise(respond(air, mics), mics, rng)
+
+
+def chain_scale(mics: Microphones) -> float:
+    """The chain's float sample per unit of respond's output: drv_audio's shift into int16, then the chain's division
+    by full scale, with neither the floor nor the saturation."""
+    return 2.0 ** (SLOT_FRACTION_BITS - mics.pcm_shift) / float(PCM_FULL_SCALE)
+
+
+def slot_bins(x: np.ndarray, balance_gains: np.ndarray | None) -> np.ndarray:
+    """Per hop, the bins (hops, N_BINS) the ns slot of the product's chain takes for float samples (2, n) on the
+    chain's scale, n a multiple of HOP: hpf, the STFT from silence, calib/bal on ch1, the mean of the pair. Filtered
+    in float64, all at once, where the chain filters float32 hop by hop (tests/test_scenes_device.py)."""
+    coef = hpf.coefficients().astype(np.float64)
+    y = signal.lfilter(coef[:3], np.concatenate([[1.0], coef[3:]]), np.asarray(x, dtype=np.float64), axis=-1)
+    padded = np.concatenate([np.zeros((y.shape[0], grid.FFT_SIZE - HOP)), y], axis=-1)
+    frames = np.lib.stride_tricks.sliding_window_view(padded, grid.FFT_SIZE, axis=-1)[:, ::HOP]
+    bins = np.fft.rfft(frames * sqrt_hann(grid.FFT_SIZE).astype(np.float64), axis=-1)
+    if balance_gains is not None:
+        bins[1] = bins[1] * np.asarray(balance_gains, dtype=np.complex128)
+    return (0.5 * (bins[0] + bins[1])).astype(np.complex64)
+
+
+def diffuse_pair(u: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """Two channels (2, n) from two independent signals of one kind, with the coherence of a spherically isotropic
+    field across the pair's spacing, sinc(2 f d / c) (contracts/array.yaml); ch0 is u."""
+    n = len(u)
+    size = sfft.next_fast_len(n)
+    freqs = np.fft.rfftfreq(size, 1.0 / FS)
+    coherence = np.sinc(2.0 * freqs * array.SPACING_M / array.SPEED_OF_SOUND_M_S)
+    mixed = coherence * sfft.rfft(u, size) + np.sqrt(1.0 - coherence**2) * sfft.rfft(v, size)
+    return np.stack([np.asarray(u, dtype=np.float64), sfft.irfft(mixed, size)[:n]])
 
 
 def listen(pcm: np.ndarray, chain_cfg: ChainConfig, mel: Mel) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

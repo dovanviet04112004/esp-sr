@@ -261,3 +261,60 @@ def test_wider_pads_keep_more_hops_before_each_item(raw_root: Path, tmp_path: Pa
         assert (
             wide["speech_frames"][1] - wide["speech_frames"][0] == plain["speech_frames"][1] - plain["speech_frames"][0]
         )
+
+
+def hear_as_one_formula(air: np.ndarray, mics: device.Microphones, rng: np.random.Generator) -> np.ndarray:
+    """hear as one expression, the form it had while wake and command features were built from it."""
+    n = air.shape[1]
+    size = device.sfft.next_fast_len(n + 2 * grid.FFT_SIZE)
+    freqs = np.fft.rfftfreq(size, 1.0 / FS)
+    level = np.interp(freqs, mics.freqs_hz, mics.level_db)
+    response = 10.0 ** (level / 20.0) * np.exp(1j * np.interp(freqs, mics.freqs_hz, mics.phase_rad))
+    ch0 = device.sfft.irfft(device.sfft.rfft(air[0], size) * response, size)[:n]
+    louder = max(1.0, float(np.median(np.abs(mics.gains))))
+    x = np.stack([ch0, air[1]]) / louder + mics.self_noise_rms * rng.standard_normal((2, n))
+    pcm = np.floor(x * 2.0 ** (device.SLOT_FRACTION_BITS - mics.pcm_shift))
+    return np.clip(pcm, -32768, 32767).astype(np.int16).T.copy()
+
+
+def test_hear_is_respond_plus_self_noise_then_the_shift_byte_for_byte() -> None:
+    mics = board_b()
+    air = 0.01 * np.random.default_rng(5).standard_normal((2, 3 * FS))
+    got = device.hear(air, mics, np.random.default_rng(6))
+    assert np.array_equal(got, hear_as_one_formula(air, mics, np.random.default_rng(6)))
+    assert not np.array_equal(got, hear_as_one_formula(air, mics, np.random.default_rng(7)))
+
+
+def test_the_slot_bins_are_the_chains_hop_by_hop() -> None:
+    from srpipe.dsp.afe import balance, hpf
+    from srpipe.dsp.spec.stft import Stft
+
+    mics = board_b()
+    pcm = device.hear(0.05 * np.random.default_rng(8).standard_normal((2, 2 * FS)), mics, np.random.default_rng(9))
+    x = pcm.T.astype(np.float32) / np.float32(INT16_SCALE)
+    got = device.slot_bins(x, mics.gains)
+    filters, stfts = hpf.Hpf(), [Stft(), Stft()]
+    for t, hop in enumerate(pcm.reshape(-1, grid.HOP_SAMPLES, array.N_MICS)):
+        samples = hop.astype(np.float32) / np.float32(INT16_SCALE)
+        bins = [stfts[m].analyze(filters.process(m, samples[:, m])) for m in range(array.N_MICS)]
+        want = np.float32(0.5) * (bins[0] + balance.apply(bins[1], mics.gains))
+        power, want_power = np.abs(got[t]) ** 2, np.abs(want) ** 2
+        db = np.abs(10 * np.log10((power + 1e-30) / (want_power + 1e-30)))
+        loud = want_power > want_power.max() * 1e-6
+        # Bins 0-3 lie in the hpf's stopband, where float32 and float64 filtering part by up to a dB.
+        assert np.all(db[4:][loud[4:]] < 1e-2) and np.all(db[:4] < 1.5)
+
+
+def test_the_diffuse_pair_has_the_coherence_of_the_spacing() -> None:
+    from scipy import signal
+
+    rng = np.random.default_rng(10)
+    pair = device.diffuse_pair(rng.standard_normal(40 * FS), rng.standard_normal(40 * FS))
+    freqs, coherence = signal.csd(pair[0], pair[1], FS, nperseg=grid.FFT_SIZE)
+    _, p0 = signal.welch(pair[0], FS, nperseg=grid.FFT_SIZE)
+    _, p1 = signal.welch(pair[1], FS, nperseg=grid.FFT_SIZE)
+    measured = np.real(coherence) / np.sqrt(p0 * p1)
+    expected = np.sinc(2.0 * freqs * array.SPACING_M / array.SPEED_OF_SOUND_M_S)
+    assert np.max(np.abs(measured - expected)) < 0.05
+    independent = np.real(signal.csd(pair[0], rng.standard_normal(40 * FS), FS, nperseg=grid.FFT_SIZE)[1])
+    assert np.max(np.abs(independent / np.sqrt(p0 * p0))) < 0.1
