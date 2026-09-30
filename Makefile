@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa screen screen-audit splits wake-features wake-train eval-tts wake-synth command-synth-pilot command-synth parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth command-synth-pilot command-synth parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -66,6 +66,9 @@ eval-ns: ## Score the ns floor on VIVOS scenes: noise and speech lost, SNR gaine
 
 eval-doa: ## Score doa on the labelled standard scenes by band, condition and region (docs/measurements/afe/doa.md)
 	cd ml && uv run python -m srpipe.scenes.spatial doa --workers 16
+
+eval-pitch: ## Measure the pitch mirror against Kaldi itself on VIVOS test, on the CPU (docs/measurements/pitch.md)
+	cd ml && CUDA_VISIBLE_DEVICES= uv run python -m srpipe.metrics.pitch
 
 screen: ## Measure every clip of every corpus once, then list what the rules reject (E11-T16, docs/measurements/data_screen.md)
 	cd ml && uv run python -m srpipe.core.screen measure && uv run python -m srpipe.core.screen judge
