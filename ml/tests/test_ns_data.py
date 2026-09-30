@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import copy
 import math
+import shutil
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -195,3 +197,22 @@ def test_train_takes_only_clean_clips_of_its_corpora_and_never_common_voice() ->
     assert data.clean_enough(quiet, rule["min_span_db"], rule["max_quiet_dbfs"])
     assert not data.clean_enough(noisy, rule["min_span_db"], rule["max_quiet_dbfs"])
     assert not data.clean_enough({"quiet_dbfs": None, "loud_dbfs": -10.0}, rule["min_span_db"])
+
+
+def test_every_babble_track_has_a_voice_from_its_start_and_no_silent_stretch(
+    world: tuple[dict, dict, dict], tmp_path: Path
+) -> None:
+    cfg, dev, paths = world
+    cfg = copy.deepcopy(cfg)
+    cfg["babble"] |= {"track_s": 6.0, "hours": {"train": 0.005}}
+    own = paths | {"interim": tmp_path}
+    folder = data.pool_dir(own, cfg, "train")
+    folder.mkdir(parents=True)
+    for name in ("speech_0000.npy", "speech_index.npz"):
+        shutil.copy(data.pool_dir(paths, cfg, "train") / name, folder / name)
+    data.pool_babble(cfg, dev, own, "train")
+    track, index = np.load(folder / "babble.npy"), np.load(folder / "babble_index.npz")
+    assert len(index["length"]) == 3
+    for offset, length in zip(index["offset"], index["length"], strict=True):
+        loud = np.flatnonzero(track[offset : offset + length])
+        assert loud[0] < HOP and np.max(np.diff(loud)) < FS

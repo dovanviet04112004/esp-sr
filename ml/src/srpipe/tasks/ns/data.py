@@ -454,7 +454,8 @@ class SpeechPool:
 
 
 def pool_babble(cfg: dict, dev: dict, paths: dict, role: str) -> None:
-    """babble.npy: tracks of several voices of the role's own speech, each a chain of utterances at one level."""
+    """babble.npy: tracks of several voices of the role's own speech, each a chain of utterances at one level; the
+    voices come in over the first half, the earliest at the track's start, so no stretch of a track is silent."""
     spec, folder = cfg["babble"], pool_dir(paths, cfg, role)
     speech = SpeechPool(folder)
     n = round(spec["track_s"] * FS)
@@ -463,8 +464,8 @@ def pool_babble(cfg: dict, dev: dict, paths: dict, role: str) -> None:
     for k in range(round(spec["hours"][role] * splits.SECONDS_PER_HOUR / spec["track_s"])):
         rng = np.random.default_rng([spec["seed"], BABBLE_STREAM, ROLES.index(role), k])
         track = np.zeros(n)
-        for _ in range(int(rng.integers(spec["talkers"][0], spec["talkers"][1] + 1))):
-            at = int(rng.integers(n // 2))
+        starts = rng.integers(n // 2, size=int(rng.integers(spec["talkers"][0], spec["talkers"][1] + 1)))
+        for at in (starts - starts.min()).tolist():
             while at < n:
                 u = int(rng.integers(len(speech)))
                 x = ramped(speech.utterance(u), ramp) / float(speech.active_rms[u])
