@@ -3,7 +3,7 @@
 prepare writes each item's input.wav (the array's channels, int16, the grid's rate), raw_ch0.wav, the variants made
 outside this repo, and item.json with the item's source, text and known segments; a mixture adds its clean and noise
 parts, the only draw, seeded by the item's name. render writes the pc_* variants with the Python chain and board B's
-calib/bal; score measures every variant written. Run: python -m srpipe.scenes.compare {prepare,render,score}
+calib/bal, refs the NSNet2 and RNNoise ones from pc_gsc; score measures all. Run: python -m srpipe.scenes.compare STEP
 """
 
 from __future__ import annotations
@@ -394,9 +394,23 @@ def write_rows(found: dict[str, dict[str, dict]], path: Path) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def run_refs(cfg: dict, root: Path, cache: Path) -> list[str]:
+    """Every refs variant of every item: its engine of ml/afe_ref over the variant it names in after, each engine run
+    once over the whole set."""
+    jobs: dict[str, list[tuple[Path, Path]]] = {}
+    for item in cfg["items"]:
+        for name, variant in cfg["variants"].items():
+            if variant.get("by") == "refs":
+                pair = (root / item["name"] / f"{variant['after']}.wav", root / item["name"] / f"{name}.wav")
+                jobs.setdefault(variant["ns"], []).append(pair)
+    for engine, pairs in jobs.items():
+        refs.enhance(engine, pairs, cfg["refs"].get(engine), cache, cache / "afe_ref" / "work")
+    return [f"{engine}: {len(pairs)} clips" for engine, pairs in jobs.items()]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("step", choices=["prepare", "render", "score"])
+    parser.add_argument("step", choices=["prepare", "render", "refs", "score"])
     parser.add_argument("--out", type=Path, help="score: the CSV of every row", default=MEASUREMENTS / "compare.csv")
     parser.add_argument("--config", type=Path, default=CONFIG)
     args = parser.parse_args(argv)
@@ -404,6 +418,9 @@ def main(argv: list[str] | None = None) -> int:
     root = paths["interim"] / "scenes" / cfg["name"]
     if args.step == "render":
         print("\n".join(render(cfg, root)))
+        return 0
+    if args.step == "refs":
+        print("\n".join(run_refs(cfg, root, paths["cache"])))
         return 0
     if args.step == "score":
         write_rows(score(cfg, root, paths["cache"] / "listen" / cfg["name"], paths["cache"]), args.out)

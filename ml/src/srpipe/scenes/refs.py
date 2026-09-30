@@ -1,7 +1,7 @@
 """The reference engines of KEHOACH 3.16 on the PC, each a pinned uv project ml/afe_ref/<name>/ run through its run.py
 as srpipe.tts runs the TTS engines, since their dependencies clash with srpipe's. Weights come to cache/afe_ref/<name>/
-from the pinned URL in compare.yaml's refs and must match its sha256. dnsmos scores clips; scores are kept by the
-clip's bytes in cache/afe_ref/dnsmos/scores.jsonl, so a clip is scored once."""
+from the pinned URL in compare.yaml's refs and must match its sha256. dnsmos scores clips, kept by the clip's bytes in
+cache/afe_ref/dnsmos/scores.jsonl so a clip is scored once; nsnet2 and rnnoise clean clips into new files."""
 
 from __future__ import annotations
 
@@ -75,3 +75,14 @@ def dnsmos(clips: dict[str, Path], spec: dict, cache: Path, work: Path) -> dict[
         with store.open("a", encoding="utf-8") as f:
             f.writelines(json.dumps({"model": pin, "sha256": r["id"], **r}) + "\n" for r in rows)
     return {cid: known[digest[cid]] for cid in clips}
+
+
+def enhance(name: str, jobs: list[tuple[Path, Path]], spec: dict | None, cache: Path, work: Path) -> None:
+    """Clean every (in, out) pair of mono wavs with the engine name, its weights from spec when it takes any."""
+    missing = [str(src) for src, _ in jobs if not src.exists()]
+    if missing:
+        raise FileNotFoundError(f"{name}: {len(missing)} inputs missing, e.g. {missing[0]}")
+    work.mkdir(parents=True, exist_ok=True)
+    listing = work / f"{name}_jobs.jsonl"
+    listing.write_text("".join(json.dumps({"in": str(a), "out": str(b)}) + "\n" for a, b in jobs), "utf-8")
+    run(name, *([str(weights(name, spec, cache))] if spec else []), str(listing))

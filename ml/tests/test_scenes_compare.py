@@ -267,3 +267,15 @@ def test_score_finds_delay_and_gain_and_credits_only_a_noise_cut(raw: Path, tmp_
     assert (tmp_path / "listen/read/late_half.wav").exists()
     compare.write_rows({"read": rows}, tmp_path / "rows.csv")
     assert (tmp_path / "rows.csv").read_text().splitlines()[0].startswith("item,variant,lag_ms")
+
+
+def test_refs_runs_each_engine_once_over_every_item_from_the_variant_it_follows(tmp_path: Path, monkeypatch) -> None:
+    cfg = config()
+    calls = []
+    monkeypatch.setattr(compare.refs, "enhance", lambda name, pairs, spec, *a: calls.append((name, pairs, spec)))
+    done = compare.run_refs(cfg, tmp_path, tmp_path / "cache")
+    names = [item["name"] for item in cfg["items"]]
+    assert [c[0] for c in calls] == ["nsnet2", "rnnoise"]
+    assert done == [f"nsnet2: {len(names)} clips", f"rnnoise: {len(names)} clips"]
+    assert calls[0][1] == [(tmp_path / n / "pc_gsc.wav", tmp_path / n / "pc_gsc_nsnet2.wav") for n in names]
+    assert calls[0][2] == cfg["refs"]["nsnet2"] and calls[1][2] is None

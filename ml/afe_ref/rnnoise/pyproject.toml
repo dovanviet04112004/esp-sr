@@ -1,0 +1,13 @@
+[project]
+name = "afe-ref-rnnoise"
+version = "0.1.0"
+description = "RNNoise of xiph through pyrnnoise behind run.py: cleans 16 kHz clips in batches"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pyrnnoise==0.4.5",
+    "numpy==2.5.3",
+    "soundfile==0.14.0",
+]
+
+[tool.uv]
+package = false
