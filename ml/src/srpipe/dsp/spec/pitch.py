@@ -9,7 +9,7 @@ OnlineProcessPitch with no right context. The frame shift is the grid hop, and a
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 import numpy as np
 
@@ -41,14 +41,23 @@ class PitchConfig:
     delta_pitch_scale: float
 
 
-def sinc_filter(t: np.ndarray, cutoff_hz: float, zeros: int) -> np.ndarray:
+def as_float32(cfg: PitchConfig) -> PitchConfig:
+    """Every field as the C struct and Kaldi's BaseFloat hold it."""
+    return PitchConfig(
+        **{
+            f.name: float(np.float32(getattr(cfg, f.name))) if f.type == "float" else getattr(cfg, f.name)
+            for f in fields(cfg)
+        }
+    )
+
+
+def sinc_value(t: float, cutoff_hz: float, zeros: int) -> float:
     """Kaldi's windowed sinc h(t) = f(t) g(t): a Hann window over zeros / (2 cutoff) each side of a lowpass at cutoff;
-    float64, as the C builds its tables once at init."""
-    t = np.asarray(t, dtype=np.float64)
-    half_width = zeros / (2.0 * cutoff_hz)
-    window = np.where(np.abs(t) < half_width, 0.5 * (1.0 + np.cos(2.0 * np.pi * cutoff_hz / zeros * t)), 0.0)
-    safe = np.where(t == 0.0, 1.0, t)
-    return np.where(t == 0.0, 2.0 * cutoff_hz, np.sin(2.0 * np.pi * cutoff_hz * t) / (np.pi * safe)) * window
+    in double through the C library's sin and cos, as the C builds its tables once at init."""
+    if not abs(t) < zeros / (2.0 * cutoff_hz):
+        return 0.0
+    window = 0.5 * (1.0 + math.cos(2.0 * math.pi * cutoff_hz / zeros * t))
+    return (2.0 * cutoff_hz if t == 0.0 else math.sin(2.0 * math.pi * cutoff_hz * t) / (math.pi * t)) * window
 
 
 def log_lags(cfg: PitchConfig) -> np.ndarray:
@@ -114,14 +123,15 @@ class PitchTracker:
         rate, hop = grid.SAMPLE_RATE_HZ, grid.HOP_SAMPLES
         if rate % cfg.resample_hz or (hop * cfg.resample_hz) % rate:
             raise ValueError(f"resample_hz {cfg.resample_hz} must divide {rate} Hz into whole hops")
+        cfg = as_float32(cfg)
         self.cfg = cfg
         self.decimation = int(rate // cfg.resample_hz)
         self.shift = int(hop * cfg.resample_hz // rate)
         half = cfg.lowpass_zeros / (2.0 * cfg.lowpass_cutoff_hz)
         self.taps_before = math.ceil(-half * rate)
-        taps = np.arange(self.taps_before, math.floor(half * rate) + 1)
-        self.down_weights = (sinc_filter(taps / rate, cfg.lowpass_cutoff_hz, cfg.lowpass_zeros) / rate).astype(
-            np.float32
+        taps = range(self.taps_before, math.floor(half * rate) + 1)
+        self.down_weights = np.array(
+            [sinc_value(k / rate, cfg.lowpass_cutoff_hz, cfg.lowpass_zeros) / rate for k in taps], dtype=np.float32
         )
         self.down_delay = math.floor(half * rate)
         self.window = int(cfg.resample_hz * cfg.window_s)
@@ -131,9 +141,12 @@ class PitchTracker:
         self.frame_length = self.window + self.last_lag
         self.lags = log_lags(cfg)
         self._nccf_weights()
-        self.factor = np.float32(math.log(1.0 + float(np.float32(cfg.delta_pitch))) ** 2 * cfg.penalty_factor)
+        # Kaldi rounds the squared log step to float, then scales it (ComputeBacktraces).
+        step_sq = np.float32(math.log(1.0 + cfg.delta_pitch) ** 2)
+        self.factor = step_sq * np.float32(cfg.penalty_factor)
         self.soft_min = np.float32(cfg.soft_min_f0)
-        self.history = max(round(cfg.normalization_left_s * rate / hop), cfg.delta_window)
+        self.context = round(cfg.normalization_left_s * rate / hop)
+        self.history = max(self.context, cfg.delta_window)
         self.delta_scales = np.array(
             [
                 j / sum(k * k for k in range(-cfg.delta_window, cfg.delta_window + 1))
@@ -154,8 +167,9 @@ class PitchTracker:
         self.up_taps = int(np.max(high - low + 1))
         weights = np.zeros((len(points), self.up_taps), dtype=np.float32)
         for i, (p, lo, hi) in enumerate(zip(points, low, high, strict=True)):
-            t = np.float32(p) - (lo + np.arange(hi - lo + 1)) / np.float32(cfg.resample_hz)
-            weights[i, : hi - lo + 1] = sinc_filter(t.astype(np.float32), cutoff, cfg.upsample_zeros) / cfg.resample_hz
+            for j in range(hi - lo + 1):
+                t = float(np.float32(float(p) - (lo + j) / cfg.resample_hz))
+                weights[i, j] = sinc_value(t, cutoff, cfg.upsample_zeros) / cfg.resample_hz
         self.up_weights = weights
         self.up_index = np.minimum(low[:, None] + np.arange(self.up_taps)[None, :], measured - 1)
 
@@ -232,7 +246,7 @@ class PitchTracker:
         nccf = [self.pov_nccf[k][s] for k, s in enumerate(path)]
         log_pitch = [np.float32(math.log(float(np.float32(1.0 / float(self.lags[s]))))) for s in path]
         self.latest = (nccf[-1], np.float32(1.0 / float(self.lags[state])))
-        window = min(len(path), round(self.cfg.normalization_left_s * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES) + 1)
+        window = min(len(path), self.context + 1)
         sum_pov, sum_log_pitch_pov = np.float32(0.0), np.float32(0.0)
         for k in range(len(path) - window, len(path)):
             pov = nccf_to_pov(nccf[k])
