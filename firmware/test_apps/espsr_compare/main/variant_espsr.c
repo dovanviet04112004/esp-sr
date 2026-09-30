@@ -100,8 +100,9 @@ esp_err_t espsr_run_bss(const espsr_job_t *job, const espsr_job_variant_t *v, co
     afe->print_pipeline(data);
     const size_t chunk = (size_t)afe->get_feed_chunksize(data);
     const size_t fetch_chunk = (size_t)afe->get_fetch_chunksize(data);
-    // Never more than half the AFE's ring in flight: a full ring overwrites what it has not processed yet.
-    const size_t window = (cfg->afe_ringbuf_size > 2 ? (size_t)cfg->afe_ringbuf_size / 2 : 1) * chunk;
+    // A quarter of the AFE's ring in flight at most: with half, it reports a full ring and drops the first
+    // chunks.
+    const size_t window = (cfg->afe_ringbuf_size > 4 ? (size_t)cfg->afe_ringbuf_size / 4 : 1) * chunk;
     esp_err_t err = afe->get_feed_channel_num(data) == GEN_ARRAY_N_MICS &&
                             afe->get_samp_rate(data) == GEN_GRID_SAMPLE_RATE_HZ
                         ? ESP_OK
