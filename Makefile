@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot command-synth-pilot command-synth parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot command-synth-pilot command-synth espsr-compare parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -17,6 +17,9 @@ FW_DEFAULTS := firmware/sdkconfig.defaults firmware/sdkconfig.defaults.esp32s3 f
                firmware/CMakeLists.txt $(wildcard firmware/sdkconfig.secrets)
 BENCH_APP := firmware/test_apps/bench_afe
 PARITY_APP := firmware/test_apps/parity
+ESPSR_APP := firmware/test_apps/espsr_compare
+# Where srpipe.scenes.compare prepare wrote the items, read from ml/ only when a recipe needs it.
+COMPARE_ITEMS = $(shell cd ml && uv run --quiet python -c "from srpipe.core.config import data_paths; print(data_paths()['interim'] / 'scenes' / 'afe_compare')")
 PARITY_DEFAULTS := firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.bench $(PARITY_APP)/sdkconfig.defaults \
                    $(PARITY_APP)/CMakeLists.txt
 HOST_BUILD := build/host
@@ -145,6 +148,12 @@ bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/ben
 	cd firmware/test_apps/bench_afe && idf.py build
 	cd firmware/test_apps/bench_afe && pytest pytest_bench_afe.py --embedded-services esp,idf --target esp32s3 --port $(PORT) -s -p no:cacheprovider
 	python3 -m tools.budget
+
+espsr-compare: ## Run every board variant of KEHOACH 3.16 on board B into interim/scenes/afe_compare; ONLY="<item> ..." limits it
+	@$(call fresh_sdkconfig,$(ESPSR_APP)/sdkconfig,firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.bench $(ESPSR_APP)/sdkconfig.defaults $(ESPSR_APP)/CMakeLists.txt)
+	cd $(ESPSR_APP) && idf.py build
+	cd $(ESPSR_APP) && ESPSR_COMPARE_ITEMS=$(COMPARE_ITEMS) ESPSR_COMPARE_ONLY="$(ONLY)" pytest pytest_espsr_compare.py \
+	  --embedded-services esp,idf --target esp32s3 --port $(PORT) -s -p no:cacheprovider
 
 parity-host: ## Run every golden case through dsp_spec, dsp_afe (modules off, all on, the product's), lang_vi and kws on the host
 	cd firmware/components/dsp_afe/test_apps/host && cmake -S . -B $(CURDIR)/$(HOST_BUILD) -DCMAKE_BUILD_TYPE=Release

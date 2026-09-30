@@ -1,0 +1,10 @@
+menu "espsr_compare"
+
+    config ESPSR_COMPARE_PORT
+        int "TCP port the board listens on for jobs (KEHOACH 3.16)"
+        range 1024 65535
+        default 7711
+        help
+            The PC connects to this port at the address the board prints once it has joined Wi-Fi.
+
+endmenu

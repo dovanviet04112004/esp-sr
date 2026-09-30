@@ -1,0 +1,21 @@
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+# dsp_afe as KEHOACH 3.16 compares it: gsc built though the product leaves it out, agc off in every variant.
+CONFIG_DSP_AFE_HPF_ENABLE=y
+CONFIG_DSP_AFE_BALANCE_ENABLE=y
+CONFIG_DSP_AFE_DOA_ENABLE=y
+CONFIG_DSP_AFE_GSC_ENABLE=y
+CONFIG_DSP_AFE_NS_OMLSA_ENABLE=y
+CONFIG_DSP_AFE_VAD_ENABLE=y
+# CPU time per variant from the idle tasks' run time, in esp_timer microseconds that do not wrap in a job.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_RUN_TIME_COUNTER_TYPE_U64=y
+# A variant runs a whole item without yielding; the task watchdog would reset the board mid-item.
+CONFIG_ESP_TASK_WDT_INIT=n
+# ESP-SR's models come from the image items.py packs and writes; its own image carries no net NS.
+CONFIG_MODEL_IN_FLASH=y
+CONFIG_SR_NSN_WEBRTC=y

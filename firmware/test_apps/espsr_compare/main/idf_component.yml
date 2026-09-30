@@ -1,0 +1,4 @@
+# The one place espressif/esp-sr may be pulled (KEHOACH 4.5.1): the newest release on the registry on 30/09.
+dependencies:
+  espressif/esp-sr: "==2.5.5"
+  espressif/dl_fft: "==0.7.0"      # dsp_spec's pin; without it the solver takes a dl_fft esp-sr 2.5.5 cannot build with
