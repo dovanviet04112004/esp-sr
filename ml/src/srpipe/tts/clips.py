@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import re
+import time
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -193,23 +194,51 @@ def record_made(work: Path, fingerprints: dict[str, str]) -> None:
         f.writelines(json.dumps({"out": out, "fingerprint": fp}) + "\n" for out, fp in fingerprints.items())
 
 
-def render(requests: dict[str, list[dict]], tts: dict, work: Path, cache: Path) -> list[dict]:
+def edges(wav: Path, frame_s: float, below_peak_db: float) -> dict:
+    """Seconds of lead and tail quieter than below_peak_db under the loudest frame of frame_s, the peak in dBFS and
+    the samples at full scale: what a listener hears as a clipped start, a cut end or distortion."""
+    x, rate = sf.read(str(wav), dtype="float32")
+    hop = max(1, round(frame_s * rate))
+    n = len(x) // hop
+    level = 10.0 * np.log10(np.mean(x[: n * hop].reshape(n, hop) ** 2, axis=1) + np.finfo(np.float32).tiny)
+    loud = np.flatnonzero(level >= level.max() - below_peak_db)
+    peak = float(np.max(np.abs(x)))
+    return {
+        "lead_s": round(float(loud[0] * frame_s), 3),
+        "tail_s": round(float((n - 1 - loud[-1]) * frame_s), 3),
+        "peak_dbfs": round(20.0 * float(np.log10(peak + np.finfo(np.float32).tiny)), 2),
+        "full_scale": int(np.sum(np.abs(x) >= 1.0 - 1.0 / 32768.0)),
+    }
+
+
+def render(
+    requests: dict[str, list[dict]], tts: dict, work: Path, cache: Path, timings: dict[str, dict] | None = None
+) -> list[dict]:
     """Synthesise every engine's requests {id, speaker, text, out, say?, rivals?, ...} whose clip is missing or was made
     from another fingerprint, hear every clip back, and return one manifest row per clip: heard, what the checker
     heard; passed, whether it spells what the clip must say; margin, how much more log-probability the checker gives
     what it heard than what the clip must say, near 0 when only the spelling differs; rivals, the same margin for each
-    text it must not say."""
+    text it must not say. timings, when given, gets per engine the clips made and heard and the seconds of each."""
     rows = []
     for engine, reqs in requests.items():
         wanted = {r["out"]: fingerprint(engine, r, tts) for r in reqs}
         before = made(work)
         stale = [r for r in reqs if not Path(r["out"]).exists() or before.get(r["out"]) != wanted[r["out"]]]
+        started = time.monotonic()
         if stale:
             engines.synthesise(engine, stale, tts, work, cache)
             record_made(work, {r["out"]: wanted[r["out"]] for r in stale})
+        synthesised = time.monotonic()
         targets = {r["id"]: [said(r), *r.get("rivals", [])] for r in reqs}
         asked = [{"id": f"{engine}/{r['id']}", "wav": r["out"], "targets": targets[r["id"]]} for r in reqs]
         heard = engines.hear(asked, tts, work, cache)
+        if timings is not None:
+            timings[engine] = {
+                "made": len(stale),
+                "made_s": round(synthesised - started, 1),
+                "heard": len(reqs),
+                "heard_s": round(time.monotonic() - synthesised, 1),
+            }
         for r in reqs:
             wav = Path(r["out"])
             h = heard[f"{engine}/{r['id']}"]
