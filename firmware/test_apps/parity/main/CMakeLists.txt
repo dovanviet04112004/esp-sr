@@ -1,5 +1,7 @@
+# ai_engine's kws decision is pure C: compiled here alone, it brings no esp-dl into the parity app (KEHOACH 4.5.4).
+set(ai_engine_src "${CMAKE_CURRENT_LIST_DIR}/../../../components/ai_engine/src")
 set(srcs "parity_main.c" "parity_common.c" "parity_stft.c" "parity_mel.c" "parity_pitch.c" "parity_chain.c"
-    "parity_lang_vi.c")
+    "parity_lang_vi.c" "parity_command_kws.c" "${ai_engine_src}/command_kws/decide.c")
 if(CONFIG_DSP_AFE_HPF_ENABLE)
     list(APPEND srcs "parity_hpf.c")
 endif()
@@ -25,6 +27,7 @@ endif()
 idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS "."
+    PRIV_INCLUDE_DIRS "${ai_engine_src}"
     REQUIRES dsp_spec dsp_afe lang_vi sys_storage esp_psram test_report
 )
 # The modules profile builds firmware/sdkconfig.afe, whose chain is contracts/golden/chain_modules.

@@ -22,6 +22,7 @@ static const struct {
     {"g2p", parity_g2p},
     {"normalize", parity_normalize},
     {"lexicon", parity_lexicon},
+    {"command_kws", parity_command_kws},
 #if PARITY_CHAIN_MODULES
     {"chain_modules", parity_chain_modules},
 #else
