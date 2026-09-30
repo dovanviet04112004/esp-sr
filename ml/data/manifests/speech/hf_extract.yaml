@@ -1,0 +1,177 @@
+name: hf_extract
+source_url: https://huggingface.co
+downloaded: '2026-09-30'
+license: per source, below
+sha256:
+  clips.tsv: ef0cd9dc971864d5953fb1f8b97ae678d1432608c2585f2502d0bba0e2cfa161
+counts:
+  clips: 35643
+  by_phrase:
+    đóng cửa: 6929
+    mở cửa: 11631
+    dừng lại: 13801
+    trợ lý: 2032
+    bật đèn: 583
+    tắt đèn: 544
+    giảm âm lượng: 45
+    tắt quạt: 5
+    bật quạt: 31
+    tăng âm lượng: 42
+  by_source:
+    LanguaMan/vieneu-tts-140h-dataset: 257
+    NhutP/VietSpeech: 2603
+    PhongGoldFish/youtube-center-vietnamese-asr: 203
+    TrangLe2108/DNU-ViSpeech: 163
+    anhtunguyen98/vi-asr-youtube-1582h: 2777
+    capleaf/viVoice: 2539
+    doduy1911/voiceNam: 16
+    dolly-vn/dolly-audio-1000h-vietnamese: 2571
+    doof-ferb/BibleMMS_vie: 8
+    doof-ferb/LSVSC: 246
+    doof-ferb/Speech-MASSIVE_vie: 61
+    doof-ferb/VietMed_labeled: 1
+    doof-ferb/infore1_25hours: 61
+    doof-ferb/infore2_audiobooks: 1194
+    doof-ferb/vais1000: 4
+    google/fleurs: 25
+    leduckhai/MultiMed: 1
+    linhtran92/viet_youtube_asr_corpus_v2: 622
+    local: 2254
+    nampdn-ai/vietspeech: 1281
+    nguyendv02/ViMD_Dataset: 47
+    qhuy242/VNAVC: 301
+    speechcolab/gigaspeech2: 14098
+    tensorxt/ViMedCSS: 10
+    thangnzt/NgocHuyenViVoice: 16
+    thivux/phoaudiobook: 4284
+consumed_by:
+- wake
+- command
+sources:
+- repo: thivux/phoaudiobook
+  kind: parquet
+  revision: e716faf3780d89cdd630b3a778476bb9e1ad316d
+  license: none stated
+- repo: NhutP/VietSpeech
+  kind: parquet
+  revision: 35f7d6081b8de7cafa593d741a74068e7d40822c
+  license: apache-2.0
+- repo: capleaf/viVoice
+  kind: parquet
+  revision: cb55a42ab775fbff4f78849679b14b6e8934176d
+  license: cc-by-nc-sa-4.0
+- repo: nampdn-ai/vietspeech
+  kind: arrow
+  revision: 34ea54193870540c513ca02ccb07a78bfb77fe66
+  license: mit
+- repo: linhtran92/viet_youtube_asr_corpus_v2
+  kind: parquet
+  revision: ecde94a62130e6eb4a67845375f18f6787e60b66
+  license: none stated
+- repo: doof-ferb/LSVSC
+  kind: parquet
+  revision: 416b1ef54953db4a1c72f1566b2295c029859d10
+  license: cc-by-4.0
+- repo: dolly-vn/dolly-audio-1000h-vietnamese
+  kind: parquet
+  revision: 1614861fb753346812a8d0654c96b72e4a85609c
+  license: none stated
+- repo: doof-ferb/vais1000
+  kind: parquet
+  revision: 35051e3e3547cac75ceae39c017445bd86b9b359
+  license: cc-by-4.0
+- repo: doof-ferb/infore1_25hours
+  kind: parquet
+  revision: 7f60edb0aa03a6e22de091ff10749e21b33c8a8a
+  license: cc-by-4.0
+- repo: doof-ferb/infore2_audiobooks
+  kind: parquet
+  revision: 8d1895fe7c2b65abe5a9c47e9e7b6d2efc1f940c
+  license: cc-by-4.0
+- repo: doof-ferb/VietMed_labeled
+  kind: parquet
+  revision: 6dcd684b24cefafbfdf647b00cdf3ac13b5f7159
+  license: cc-by-4.0
+- repo: doof-ferb/Speech-MASSIVE_vie
+  kind: parquet
+  revision: 094a186ca0e9246fc7302f169bc8760930175201
+  license: cc-by-4.0
+- repo: PhongGoldFish/youtube-center-vietnamese-asr
+  kind: parquet
+  revision: 32f20267b2118c67b26c5b92cc364e02c3d2e849
+  license: none stated
+- repo: qhuy242/VNAVC
+  kind: parquet
+  revision: b37c86b4863add142bacaadca763b020f4384d77
+  license: cc-by-4.0
+- repo: LanguaMan/vieneu-tts-140h-dataset
+  kind: arrow
+  revision: 060d6aba717b304cf62d8674d3a1fcfe36a437ec
+  license: apache-2.0
+- repo: doduy1911/voiceNam
+  kind: parquet
+  revision: bfd598d97f2ea0bb8cbde71b48826120cee193ea
+  license: mit
+- repo: leduckhai/MultiMed
+  kind: parquet
+  revision: 86180414afa7740ffcd7d2f8b5b62f65967c0aee
+  license: mit
+- repo: TrangLe2108/DNU-ViSpeech
+  kind: parquet
+  revision: 221a35b718dee894febbfce350f4bbf15b759a59
+  license: cc-by-nc-4.0
+- repo: nguyendv02/ViMD_Dataset
+  kind: parquet
+  revision: 3a5b30157034e7eadd5c75fae1a820c6f9383398
+  license: cc-by-nc-nd-4.0
+- repo: google/fleurs
+  kind: parquet
+  revision: 168de341b3db6859a9bac1c50a2ef5e3b47647e0
+  license: cc-by-4.0
+- repo: doof-ferb/BibleMMS_vie
+  kind: parquet
+  revision: 475a3eba83332161aa0bc18e91b72d7e75d7def1
+  license: cc-by-4.0
+- repo: thangnzt/NgocHuyenViVoice
+  kind: parquet
+  revision: 3e115cb0fa53af3fa190197788c53577716b2fdb
+  license: mit
+- repo: HieuNguyen203/Vietnamese_Medical_Consultation
+  kind: parquet
+  revision: 18ade9cfa0641f975ab583c4184f2dfb0db532d4
+  license: none stated
+- repo: tensorxt/ViMedCSS
+  kind: parquet
+  revision: 38c3025f11458cce939822018782f38382116142
+  license: cc-by-4.0
+- repo: Cets/audio-logs-vie
+  kind: parquet
+  revision: 35b4d0bd00a71a6b7e4e3ee8f1c51ac533e3fcc3
+  license: none stated
+- repo: local
+  kind: local
+  revision: local
+  license: per corpus, docs/DU_LIEU.md
+- repo: speechcolab/gigaspeech2
+  kind: tsv_tar
+  revision: 8dc0d0e502b7e6d5649a13cd4b677cf10c0b21e3
+  license: apache-2.0
+- repo: speechcolab/gigaspeech2
+  kind: tsv_tar
+  revision: 8dc0d0e502b7e6d5649a13cd4b677cf10c0b21e3
+  license: apache-2.0
+- repo: speechcolab/gigaspeech2
+  kind: tsv_tar
+  revision: 8dc0d0e502b7e6d5649a13cd4b677cf10c0b21e3
+  license: apache-2.0
+- repo: espnet/yodas2
+  kind: yodas
+  revision: c9674490249665d658f527e2684848377108d82c
+  license: cc-by-3.0
+- repo: anhtunguyen98/vi-asr-youtube-1582h
+  kind: manifest_tar
+  revision: d0527ef1680f19bf7f75d173b2e995fbf0858276
+  license: other
+notes: 'Clips cut to one phrase each by configs/common/extract.yaml (KEHOACH 1.2);
+  the sentences they came from are deleted once cut. No speaker ids: training only
+  (KEHOACH 1.3).'
