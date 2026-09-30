@@ -726,19 +726,23 @@ siết báo nhầm để sau, khi có dữ liệu thu thật.
 
 **Dữ liệu dương** gồm tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, và **người thật nói
 "trợ lý"**: mọi câu có lời đọc ra từ ấy, của kho học lẫn của những kho tiếng Việt lớn trên Hugging Face, trích theo
-lời vào một kho duy nhất (§1.2, kho `hf_extract`); `wake` lấy mẩu người thật chỉ từ kho ấy. Mỗi câu **cắt lấy đúng hai
-tiếng "trợ lý"**, từ đầu "trợ" đến cuối "lý". Mốc lấy
-bằng **căn cưỡng bức** (Montreal Forced Aligner, mô hình tiếng Việt, chạy trong Docker) trên lời của câu. Mốc cuối hay
-sớm nên cộng một quãng ở cấu hình, để trung vị còn lệch 12 ms. Mốc đầu trong lời nói liền hay còn dính âm cuối của từ
-trước, nên mép đầu thử lần lượt vài độ dời vào trong "tr" (cấu hình), lấy lần đầu PhoWhisper nghe ra đúng từ. Hai mép cắt vuốt nhỏ dần trong 10 ms (`talker.edge_ramp_s` của đường mô phỏng board)
-để mẩu cắt không có tiếng "tách" mà âm bản không có. Mẩu cắt được PhoWhisper nghe lại đúng như lúc mô phỏng phát, và chỉ
-giữ khi nó nghe ra đúng "trợ lý", không thừa tiếng nào. Mốc từng từ đọc từ chú ý chéo của PhoWhisper thì không dùng: nó
-chậm hơn 6 s mỗi mẩu trên card 4 GB, và mốc từ của Whisper kém căn cưỡng bức, lý do WhisperX (Bain và cộng sự, 2023) căn
-lại bằng mô hình âm vị (`docs/measurements/wake.md` §6). Các kho ấy không có mã người nói, nên mẩu cắt chỉ vào `train`.
-Mẩu TTS cũng cắt: TTS để lại khoảng lặng sau từ (VieNeu trung vị 0,16 s, 5% số mẩu tới 0,39 s), nên mẩu dương TTS dừng ở
-bước cuối còn trong 40 dB so với bước to nhất của nó, đúng chuẩn "cuối từ" mà mốc của câu thật được đo theo. Mọi mẩu
-dương vì thế chỉ chứa từ đánh thức và dừng ở âm cuối của nó; nhãn đặt ở đó, và đường mô phỏng đặt mẩu giữa khoảng lặng
-và nhiễu phòng như mọi câu khác (§1.2). Từ đánh thức được nhận theo **cách đọc** giọng Bắc của `lang_vi`, không theo chữ viết: "trợ lí" cũng là nó.
+lời vào một kho duy nhất (§1.2, kho `hf_extract`); `wake` lấy mẩu người thật chỉ từ kho ấy. Chỉ lấy **chỗ người nói
+ngắt hơi trước và sau từ**, như khi gọi thiết bị. Mốc từ lấy bằng **căn cưỡng bức** (Montreal Forced Aligner, mô hình
+tiếng Việt, chạy trong Docker) trên lời của câu; ngay ngoài hai mốc, qua một khoảng đệm cho sai số của bộ căn và cho
+hơi của phụ âm, mỗi bên phải có một quãng lặng đủ dài mà mọi khung đều thấp hơn khung to nhất của cụm một ngưỡng (ba số
+ở cấu hình). Chỗ nói liền không có quãng ấy thì bỏ: cắt sát mốc giữa lời nói liền để lại tiếng từ bên cạnh ở mép, lần
+trích đầu chỉ 1–22% mẩu mỗi cụm có hai mép yên (`docs/measurements/wake.md` §6). Mẩu cắt vào giữa mỗi quãng lặng, giữ
+tối đa một khoảng lặng ở mỗi đầu (cấu hình), nên nghe tròn tiếng. Mẩu được PhoWhisper nghe lại đúng như lúc mô phỏng
+phát, và chỉ giữ khi nó nghe ra đúng "trợ lý", không thừa tiếng nào. Trước khi chạy cả kho, cắt thử vài chục câu để
+nghe. Mốc từng từ đọc từ chú ý chéo của PhoWhisper thì không dùng: nó chậm hơn 6 s mỗi mẩu trên card 4 GB, và mốc từ
+của Whisper kém căn cưỡng bức, lý do WhisperX (Bain và cộng sự, 2023) căn lại bằng mô hình âm vị. Các kho ấy không có
+mã người nói, nên mẩu cắt chỉ vào `train`.
+Đường mô phỏng đặt nhãn ở cuối mẩu, nên trong split **mọi mẩu dương dừng ở bước cuối còn trong 40 dB** so với bước to
+nhất của nó: mẩu thật bỏ quãng lặng sau từ, mẩu TTS bỏ khoảng lặng TTS để lại (VieNeu trung vị 0,16 s, 5% số mẩu tới
+0,39 s). Hai mép vuốt nhỏ dần trong 10 ms (`talker.edge_ramp_s` của đường mô phỏng board) để mép cắt không có tiếng
+"tách" mà âm bản không có. Mọi mẩu dương vì thế dừng ở âm cuối của từ đánh thức; nhãn đặt ở đó, và đường mô phỏng đặt
+mẩu giữa khoảng lặng và nhiễu phòng như mọi câu khác (§1.2). Từ đánh thức được nhận theo **cách đọc** giọng Bắc
+của `lang_vi`, không theo chữ viết: "trợ lí" cũng là nó.
 **Âm bản** gồm các kho lời nói tiếng Việt trừ câu đọc ra từ đánh thức, cộng một bộ nhẹ cụm ngắn đọc bằng giọng TTS của
 mẫu dương: cụm của kho cách từ đánh thức một thành phần âm tiết ("chị lý", "vợ lý") và cụm hay gặp nhất mở đầu bằng
 "trợ" ("trợ giúp", "trợ cấp"), cùng từng nửa của từ đánh thức nói riêng ("trợ", "lý"), để giọng TTS không thành dấu
