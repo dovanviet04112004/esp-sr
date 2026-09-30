@@ -116,8 +116,8 @@ train:                             # python -m srpipe.tasks.ns.train; the GPU wh
   final_learning_rate: 5.0e-5      # cosine decay to this by the last step, as wake
   grad_clip_norm: 1.0              # GRUs trained through 625 hops
   norm_batches: 64                 # the first batches of the stream give each feature's mean and deviation
-  workers: 12                      # loader processes, ~470 MB each with torch and a batch in hand, measured
-  prefetch: 2                      # batches each worker keeps ready: 24 of ~62 MB in shared memory at most
+  workers: 10                      # loader processes, ~470 MB each with torch and a batch in hand; 12 swapped 5 GB
+  prefetch: 1                      # batches each worker keeps ready: 10 of ~62 MB in shared memory at most
   val_workers: 4                   # loader processes of each epoch's val pass, started for it alone
   val_floor_db: -12.0              # the gain floor of the epoch's val figures: the product's, as OM-LSA's G_min
   divergence_ratio: 3.0            # a val loss this many times epoch 0's stops the run; a safety, never a stop rule
