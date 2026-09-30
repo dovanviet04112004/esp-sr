@@ -101,3 +101,28 @@ Sáu mẩu lệch đều là bản int8 nghe sai thứ bản float16 nghe đúng
 "đống cửa", một lần nghe ra cả câu không có trong mẩu), tức nó chỉ bỏ oan chừng 1,5% mẩu tốt. Phép đo chưa có mẩu mà
 bản float16 từ chối, nên chưa biết bản int8 có nhận nhầm mẩu nào bản float16 bỏ hay không. Bước `cut` dùng bản int8,
 lô 4 (`asr_fast` của `ml/configs/common/tts.yaml`); bước chọn mẩu TTS vẫn dùng bản float16, vì cần log-xác suất.
+
+## 5. Pilot lệnh (30/09): VieNeu sạch, F5 cụt đuôi và chạm trần
+
+`make command-synth-pilot` tại `f06b90d` (`srpipe.tasks.command.synth pilot`, mục `synth.pilot` của
+`configs/models/command.yaml`): ba lệnh "bật đèn", "tăng âm lượng", "dừng lại" ở hai dạng chữ, 5 giọng có sẵn và 8 giọng
+nhân bản, 4 âm bản mỗi loại (gần âm, mở đầu, nửa lệnh, danh sách tay); 254 mẩu trên RTX 3050 4 GB. Mép đo bằng
+`clips.edges`: khung 10 ms, im lặng là dưới đỉnh 40 dB.
+
+| Bộ | Mẩu | Sinh (s, kể cả nạp) | Nghe lại (s, kể cả nạp) | Chạm trần | 30 ms cuối so với đỉnh, trung vị | Lặng đầu / cuối, trung vị (s) |
+|---|---|---|---|---|---|---|
+| VieNeu | 126 | 57,9 | 103,8 | 0 | −90 dB | 0,03–0,06 / 0,12–0,27 |
+| F5 | 128 | 331,5 | 130,2 | 18 mẩu | **−22 dB** | 0,06–0,15 / **0,00** |
+
+| Lệnh | VieNeu giọng có sẵn | VieNeu nhân bản | F5 nhân bản |
+|---|---|---|---|
+| bật đèn | 2/10 ("bật đền", "bớt đen") | 9/16 | 18/32 |
+| tăng âm lượng | 10/10 | 12/16 | 26/32 |
+| dừng lại | 10/10 | 16/16 | 10/32 ("đừng lại", câu dài không liên quan) |
+
+F5 đặt độ dài theo tốc độ đọc của câu mẫu, nên một lệnh hai âm tiết chỉ được khoảng 0,35 s: mẩu dừng khi âm cuối còn
+kêu (30 ms cuối chỉ dưới đỉnh 22 dB), và có mẩu bị đọc lan ra câu khác. Ghi PCM 16 bit không chặn đỉnh nên 18 mẩu chạm
+trần. Sửa ở `ml/tts/f5/run.py` với `engines.f5.timing` của `common/tts.yaml`: mỗi âm tiết ít nhất 0,3 s (VieNeu đọc lệnh
+khoảng 0,26 s một âm tiết, trừ lặng hai đầu), thêm 0,25 s đuôi, đỉnh chặn ở −1 dBFS. Pilot F5 phải chạy lại để nghe
+trước khi chạy bộ đủ; đổi `run.py` và cấu hình cũng đổi dấu vân tay của mẩu F5 của `wake`, nên chạy lại `wake-synth` sẽ
+sinh lại chúng.

@@ -25,3 +25,7 @@ engines:
   f5:                              # clones only, from a reference clip and its text
     checkpoint: hynt/F5-TTS-Vietnamese-ViVoice@5c14cdd4e3f62b69e75140558bea2b2e293ee8f1
     vocoder: charactr/vocos-mel-24khz@0feb3fdd929bcd6649e0e7c5a688cf7dd012ef21
+    timing:                        # the reference's rate cut commands short: pilot of 30/09, tts_engines.md §5
+      min_syllable_s: 0.3          # VieNeu says a command at about 0.26 s a syllable, silences aside
+      tail_s: 0.25                 # room for the last syllable to fade before the clip ends
+      peak_dbfs: -1.0              # louder clips are scaled down, or 16-bit writing clips them

@@ -192,7 +192,8 @@ def test_a_batch_reaches_the_engine_one_voice_at_a_time(tmp_path: Path, monkeypa
         for v in ("b", "a", "p")
     ]
     monkeypatch.setattr(engines, "run", lambda *a, **k: "")
-    engines.synthesise("f5", requests, {"engines": {"f5": {"checkpoint": "c", "vocoder": "v"}}}, tmp_path, tmp_path)
+    f5 = {"checkpoint": "c", "vocoder": "v", "timing": {"min_syllable_s": 0.3, "tail_s": 0.25, "peak_dbfs": -1.0}}
+    engines.synthesise("f5", requests, {"engines": {"f5": f5}}, tmp_path, tmp_path)
     sent = [json.loads(line)["id"] for line in (tmp_path / "f5_requests.jsonl").read_text().splitlines()]
     assert sent == ["a0", "a1", "a2", "b0", "b1", "b2", "p0", "p1", "p2"]
 
