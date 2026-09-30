@@ -21,6 +21,8 @@
 #define FETCH_WAIT_MS 1000
 // Chunks of silence fed past the end at most, to push out what the AFE still holds.
 #define FLUSH_CHUNKS_MAX 64
+// Every buffer an ESP-SR net reads or writes: the S3's vector loads take 16-byte aligned addresses.
+#define NSN_ALIGN_BYTES 16
 
 static srmodel_list_t *s_models;
 
@@ -195,8 +197,10 @@ esp_err_t espsr_run_nsnet(const espsr_job_variant_t *v, const int16_t *mono, siz
     if (model == NULL) { return ESP_ERR_NO_MEM; }
     const size_t chunk = (size_t)nsn->get_samp_chunksize(model);
     esp_err_t err = nsn->get_samp_rate(model) == GEN_GRID_SAMPLE_RATE_HZ ? ESP_OK : ESP_ERR_NOT_SUPPORTED;
-    int16_t *in_chunk = heap_caps_malloc(chunk * sizeof(int16_t), MALLOC_CAP_INTERNAL);
-    int16_t *out_chunk = heap_caps_malloc(chunk * sizeof(int16_t), MALLOC_CAP_INTERNAL);
+    int16_t *in_chunk =
+        heap_caps_aligned_alloc(NSN_ALIGN_BYTES, chunk * sizeof(int16_t), MALLOC_CAP_INTERNAL);
+    int16_t *out_chunk =
+        heap_caps_aligned_alloc(NSN_ALIGN_BYTES, chunk * sizeof(int16_t), MALLOC_CAP_INTERNAL);
     err = err == ESP_OK && (in_chunk == NULL || out_chunk == NULL) ? ESP_ERR_NO_MEM : err;
     espsr_cost_memory(&cost, r);
     espsr_cost_start(&cost);
@@ -205,11 +209,13 @@ esp_err_t espsr_run_nsnet(const espsr_job_variant_t *v, const int16_t *mono, siz
         memset(in_chunk, 0, chunk * sizeof(int16_t));
         memcpy(in_chunk, mono + at, n * sizeof(int16_t));
         const int64_t started_us = esp_timer_get_time();
-        nsn->process(model, in_chunk, out_chunk);
+        const int ret = nsn->process(model, in_chunk, out_chunk);
         espsr_cost_call(&cost, esp_timer_get_time() - started_us);
+        err = ret == 0 ? ESP_OK : ESP_FAIL;
         memcpy(out + at, out_chunk, n * sizeof(int16_t));
     }
     espsr_cost_end(&cost, samples, chunk, r);
+    test_report_line("nsnet %s chunk=%u rate=%d", name, (unsigned)chunk, nsn->get_samp_rate(model));
     r->samples = err == ESP_OK ? (uint32_t)samples : 0;
     heap_caps_free(in_chunk);
     heap_caps_free(out_chunk);
