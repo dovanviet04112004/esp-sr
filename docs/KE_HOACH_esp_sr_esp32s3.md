@@ -905,8 +905,9 @@ Speech Commands 12 lớp, với cửa sổ 1 s và 10 MFCC tức 49 × 10 đầu
 lần số vị trí, nên S cỡ 20, M cỡ 75, L cỡ 215 triệu MAC mỗi câu 🔬. **Cỡ là lựa chọn cấu hình**: học các cỡ trên cùng
 split, seed và số epoch, chọn bằng Cửa 3 sau int8 trên tập thu qua board, trong ngân sách một lần chạy **≤ 100 ms trên nhân
 0** sau khi `vad` tắt. Đo trên board B ngày 30/09 với trọng số ngẫu nhiên, mỗi cỡ khớp mô phỏng ESP-PPQ tuyệt đối: S
-41,9 ms, M 277 ms, L 2,03 s mỗi cửa sổ (`measurements/latency.md` §10), nên **bản đầu học S**; M và L chỉ quay lại khi
-thời gian của chúng xuống dưới ngân sách. Cỡ, cửa sổ và lịch học ở `configs/models/command_kws.yaml`.
+41,9 ms, M 277 ms, L 2,03 s mỗi cửa sổ (`measurements/latency.md` §10), nên **bản đầu học S**. M và L giữ nguyên trong
+cấu hình, mã mạng và probe (chủ repo, 30/09), để nâng cỡ khi cần, như khi S không đạt Cửa 3; nâng thì xét lại ngân
+sách. Cỡ, cửa sổ và lịch học ở `configs/models/command_kws.yaml`.
 
 | Phần | Chốt |
 |---|---|
