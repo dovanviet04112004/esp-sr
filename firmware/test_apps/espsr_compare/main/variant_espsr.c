@@ -42,9 +42,13 @@ static afe_config_t *bss_config(void)
     cfg->aec_init = false;
     cfg->se_init = true;
     cfg->ns_init = false;
-    cfg->vad_init = false;
     cfg->wakenet_init = false;
     cfg->agc_init = false;
+    // A pinned output channel is the raw first mic; with no wake word, their vad picks the separated one.
+    cfg->fixed_output_channel = false;
+    cfg->fixed_first_channel = false;
+    cfg->vad_init = true;
+    cfg->vad_enable_channel_trigger = true;
     cfg->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
     return afe_config_check(cfg);
 }
@@ -60,6 +64,7 @@ typedef struct {
     uint32_t empty; // fetches that came back without data
     uint32_t data;  // fetches that brought data
     int last_ret;   // ret_value of the last fetch that brought none
+    int channels;   // raw_data_channels of the last fetch with data
 } bss_fetches_t;
 
 esp_err_t espsr_run_bss(const espsr_job_t *job, const int16_t *input, int16_t *out, espsr_job_result_t *r)
@@ -74,6 +79,7 @@ esp_err_t espsr_run_bss(const espsr_job_t *job, const int16_t *input, int16_t *o
         afe_config_free(cfg);
         return ESP_ERR_NO_MEM;
     }
+    afe->print_pipeline(data);
     const size_t chunk = (size_t)afe->get_feed_chunksize(data);
     const size_t fetch_chunk = (size_t)afe->get_fetch_chunksize(data);
     // Never more than half the AFE's ring in flight: a full ring overwrites what it has not processed yet.
@@ -114,13 +120,14 @@ esp_err_t espsr_run_bss(const espsr_job_t *job, const int16_t *input, int16_t *o
         memcpy(out + got, res->data, take * sizeof(int16_t));
         got += take;
         r->channel = res->trigger_channel_id;
+        fetches.channels = res->raw_data_channels;
     }
     // The AFE works in its own task, so a fetch's wait is not its work: no peak, the mean alone.
     espsr_cost_end(&cost, samples, 0, r);
-    test_report_line("bss feed=%u fetch=%u ring=%d fetches=%lu empty=%lu last_ret=%d fed=%u got=%u",
-                     (unsigned)chunk, (unsigned)fetch_chunk, cfg->afe_ringbuf_size,
-                     (unsigned long)fetches.data, (unsigned long)fetches.empty, fetches.last_ret,
-                     (unsigned)fed, (unsigned)got);
+    test_report_line(
+        "bss feed=%u fetch=%u ring=%d fetches=%lu empty=%lu last_ret=%d fed=%u got=%u raw_channels=%d",
+        (unsigned)chunk, (unsigned)fetch_chunk, cfg->afe_ringbuf_size, (unsigned long)fetches.data,
+        (unsigned long)fetches.empty, fetches.last_ret, (unsigned)fed, (unsigned)got, fetches.channels);
     r->samples = err == ESP_OK ? (uint32_t)samples : 0;
     heap_caps_free(buf);
     afe->destroy(data);
