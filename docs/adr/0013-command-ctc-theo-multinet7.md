@@ -64,8 +64,10 @@ thái [4].
   nhãn thanh cộng khoảng trắng, vì tiếng Việt có sáu thanh và lệnh có thể chỉ khác nhau ở thanh, điều MultiNet7 tiếng
   Trung bỏ qua (ADR-0010, KẾ HOẠCH §3.1, §3.12); đầu ra giữ 31,25 khung mỗi giây, bỏ lần hạ ×2 cuối của MultiNet7, vì
   chuỗi 44 đơn vị có thanh dày hơn chuỗi mảnh âm vị tiếng Anh ra ở 25 khung mỗi giây 🔬.
-- **Cỡ**: trần 1,8 MB int8 của `ctc` (KẾ HOẠCH, bảng mô hình) nhỏ hơn 2,1 MB mà giảm khung, encoder và đầu CTC của
-  MultiNet7 chiếm, nên khối feedforward hẹp lại; bề rộng chốt ở E11-T12 sau khi đo µs 🔬.
+- **Cỡ theo chất lượng** (chủ dự án, 30/09: chất lượng của `command` đi trước): bắt đầu đúng cỡ MultiNet7 — giảm khung,
+  encoder và đầu CTC khoảng 2,1 MB int8 🔬 — và thử rộng hơn, sâu hơn khi µs đo trên board còn trong 18 ms mỗi 32 ms của
+  KẾ HOẠCH §3.3; thời gian là trần duy nhất. Bộ nhớ nới theo: slot model 3 MB của §6.1 còn ~2,8 MB sau `ns` và `wake`,
+  PSRAM dùng ~4,3 MB trên 8 MB (§6.6); vượt slot thì theo đường lùi của §6.1, bỏ `models_1` cho `models_0` 6 MB.
 - **Khối trộn**: một ma trận 128 × 128 như `pool` của MultiNet7, đặt trên trung bình nhân quả trong khúc 🔬, vì phép tính
   của họ không đọc được từ trọng số.
 - **Học**: CTC cộng RNN-T phụ trợ (mạng dự đoán không trạng thái và bộ nối, bỏ khi xuất), so với CTC trơn cùng seed, cùng
@@ -75,8 +77,8 @@ thái [4].
 
 ## Hệ quả
 
-- KẾ HOẠCH §3.12, bảng mô hình và cây thư mục §4.1, TASKS E11-T12 theo ADR này. ADR-0010 giữ đơn vị và đặc trưng; ADR-0012
-  giữ hai đường.
+- KẾ HOẠCH §3.12, bảng mô hình, cây thư mục §4.1, §6.1, §6.6 và TASKS E11-T12 theo ADR này. ADR-0010 giữ đơn vị và đặc
+  trưng; ADR-0012 giữ hai đường.
 - GRU int8 qua esp-dl vẫn phải thử trên board cho mạng dìm nhiễu (E9-T5).
 - Xét lại khi lớp encoder xuất qua esp-dl không khớp mô phỏng hoặc vượt 18 ms mỗi 32 ms của KẾ HOẠCH §3.3: lùi về TCN của
   E11-T10.
