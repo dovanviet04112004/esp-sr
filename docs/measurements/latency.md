@@ -189,3 +189,33 @@ Cả module (`dsp_afe_doa_process`, cùng lần đo): gộp phổ chéo 13,2 / 2
 cách giữa hai góc kề nhau của lưới. Xen kẽ hai góc trong một vòng chậm gấp đôi, có lẽ vì 14 biến float sống cùng lúc tràn khỏi 16 thanh ghi FPU
 (chưa đọc mã máy). Bảng ở PSRAM chỉ nhanh ngang RAM nội khi bảng lọt cache
 dữ liệu (42 KB); lớn hơn thì trượt cache, và ở 250 vạch chậm hơn cả bản viết tay.
+
+## 11. Encoder kiểu MultiNet7 của `ctc` chạy dòng trên esp-dl (E11-T12)
+
+Board B, `ai_engine/test_apps/unit` (profile mặc định `-Og`), IDF 6.0.2, esp-dl 3.3.11, ESP-PPQ 1.3.11 cộng hai bản vá
+nhánh `command_ctc` khai (`compress/quant/esp_ppq_patches.py`), `f1302f1`, 30/09. Mạng của `configs/models/command_ctc.yaml`
+với trọng số ngẫu nhiên có seed, hệ số chuẩn hoá rút đều trong 0,5–1,5, vào 40 log-mel + 3 cao độ mỗi hop; lượng tử bậc 1
+và 2 mặc định của KẾ HOẠCH §3.14. Dựng bằng `make ai-probe`, đo bằng `make ai-unit`.
+
+| Mạng | Một bước | `.espdl` | Chênh int8 so với mô phỏng cả chuỗi | Một bước, trung bình / đỉnh | Mỗi 32 ms audio | Dựng mạng | PSRAM | Không `reset` (đối chứng âm) |
+|---|---|---|---|---|---|---|---|---|
+| `ctc_lay`: một lớp của tầng đầu (bề rộng 128, nhân 17) | 1 hop, 256 bước | 356 KB | **0** | 5 030 / 5 151 µs | 10,1 ms | 36 ms | 40,1 KB | chênh 13 |
+| `ctc_net`: cả mạng (3 tích chập 2D, 6 lớp, đầu CTC 45 lớp; 1,98 triệu tham số) | 16 hop (256 ms), 16 bước | 2 276 KB | **0** | 46 484 / 46 830 µs | **5,8 ms** | 331 ms | 269,6 KB | chênh 46 |
+
+`model->test()` qua ở cả hai. Ngân sách của `ctc` ở KẾ HOẠCH §3.3 là 11–18 ms mỗi 32 ms trong cửa sổ lệnh: cả mạng cỡ
+MultiNet7 dùng 5,8 ms, còn chỗ để rộng hơn hay sâu hơn theo chất lượng (ADR-0013). Một lớp đẩy từng hop tốn 10,1 ms mỗi
+32 ms, gấp đôi cả mạng đẩy 16 hop một lần: mỗi bước đọc trọng số từ PSRAM một lần cho mọi khung của bước, nên bước dài là
+điểm chạy của mạng. `ctc_net` còn 12 `Transpose` quanh chuẩn hoá của các lớp trong tầng (`ctc_lay` không còn cái nào);
+phần thời gian của chúng chưa đo tách.
+
+Ba chỗ phải sửa trước khi board khớp mô phỏng, theo thứ tự tìm ra:
+
+- Chuẩn hoá viết `x / sqrt(mean(x * x))` theo kênh thành chuỗi int8: bình phương làm tròn bước 0,125, và `Div` int8 có số
+  chia một phần tử dựng bảng tra một lần theo bước đầu. Viết theo dạng ESP-PPQ gộp thành `RMSNormalization` (tính float
+  trong esp-dl): trên PC, sai số int8 so với float của một lớp giảm từ 0,0444 xuống 0,0299 trung bình, 1,224 xuống 0,536
+  lớn nhất.
+- Hai lỗi xuất của ESP-PPQ 1.3.11, vá ở `esp_ppq_patches`: input đồ thị bị hai op đọc ở hai số mũ không được đổi mũ
+  (`model->test()` của `ctc_lay` lệch 8 bậc), và bộ đệm lấy trục khung của input đồ thị, là trục kênh khi `Slice` đứng
+  trước các tích chập (esp-dl assert ở `Reshape` lúc dựng `ctc_net`).
+- Bản ghi của probe: ESP-PPQ giữ input của `ctc_net` theo thứ tự (chiều, hop) của ONNX vì chỉ `Slice` đọc nó, còn output
+  theo (khung, lớp); probe đọc bố cục từ dữ liệu kiểm lưu trong `.espdl` và so byte bước đầu trước khi ghi.
