@@ -1,6 +1,12 @@
 # Desktop TTS engines and the ASR checker every branch shares (KEHOACH 1.2, 3.13); each runs in ml/tts/<name>/.
 # Every model is pinned repo@revision: an engine refuses to run when the hub's main moved past its pin. The aligner
 # is pinned by image tag and model version.
+chunk_clips:                       # clips a run of each engine and of the checker; a run is recorded when it ends, so a
+                                   #   stop loses one run at most. Kept apart from engines and asr, whose settings are
+                                   #   part of every clip's and every answer's fingerprint
+  vieneu: 1000                     # ~0.5 s a clip, the model loads in seconds (tts_engines.md)
+  f5: 300                          # ~2.9 s a clip
+  asr: 3000                        # ~0.5 s a clip, but a run loads 3 GB from E: for about 3 min
 asr:
   model: vinai/PhoWhisper-large@b9136a44b5f2ca664bd0b8f74baecf1715f6eeeb
   batch: 1                         # 2 is 6% faster but peaks at 3.4 GB of a 4 GB card Windows shares; spilling past

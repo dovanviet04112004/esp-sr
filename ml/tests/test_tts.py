@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 import soundfile as sf
 
 from srpipe.core.audio_io import write_wav
@@ -97,13 +98,18 @@ def test_every_engine_and_the_checker_has_a_pinned_project() -> None:
     assert all(len(pin.split("@")[1]) == 40 for pin in pins)
 
 
-def render_with_fakes(requests: dict, heard: dict, root: Path, monkeypatch) -> tuple[list[dict], list[str]]:
-    """Render with an engine that writes one second of silence and records what it was asked for, and a checker that
-    hears the given text and scores a target 5 nats below it unless they spell alike."""
+def render_with_fakes(
+    requests: dict, heard: dict, root: Path, monkeypatch, chunk: int = 100, stop_after: int | None = None
+) -> tuple[list[dict], list[str]]:
+    """Render with an engine that writes one second of silence and records what it was asked for, stopping like a
+    killed run once it has written stop_after clips, and a checker that hears the given text and scores a target 5
+    nats below it unless they spell alike."""
     made: list[str] = []
 
     def synthesise(engine, reqs, tts, work, cache):
         for r in reqs:
+            if stop_after is not None and len(made) == stop_after:
+                raise KeyboardInterrupt
             write_wav(Path(r["out"]), np.zeros(grid.SAMPLE_RATE_HZ))
             made.append(r["id"])
 
@@ -125,7 +131,8 @@ def render_with_fakes(requests: dict, heard: dict, root: Path, monkeypatch) -> t
     monkeypatch.setattr(engines, "PROJECTS", root / "projects")
     monkeypatch.setattr(engines, "synthesise", synthesise)
     monkeypatch.setattr(engines, "hear", hear)
-    return clips.render(requests, {"engines": {"e": {"checkpoint": "c@1"}}}, root / "work", root), made
+    tts = {"engines": {"e": {"checkpoint": "c@1"}}, "chunk_clips": {"e": chunk}}
+    return clips.render(requests, tts, root / "work", root), made
 
 
 def test_a_clip_passes_only_when_what_it_must_say_is_heard(tmp_path: Path, monkeypatch) -> None:
@@ -185,6 +192,15 @@ def test_a_rerun_makes_only_the_clips_whose_making_changed(tmp_path: Path, monke
     assert render_with_fakes(requests, heard | {"e/c": "y"}, tmp_path, monkeypatch)[1] == ["a", "b", "c"]
 
 
+def test_a_stopped_render_resumes_at_the_run_it_lost(tmp_path: Path, monkeypatch) -> None:
+    requests = {"e": [{"id": i, "speaker": i, "text": "x", "out": str(tmp_path / f"{i}.wav")} for i in "abcde"]}
+    heard = {f"e/{i}": "x" for i in "abcde"}
+    with pytest.raises(KeyboardInterrupt):
+        render_with_fakes(requests, heard, tmp_path, monkeypatch, chunk=2, stop_after=3)
+    rows, made = render_with_fakes(requests, heard, tmp_path, monkeypatch, chunk=2)
+    assert made == ["c", "d", "e"] and [r["id"] for r in rows] == list("abcde")
+
+
 def test_a_batch_reaches_the_engine_one_voice_at_a_time(tmp_path: Path, monkeypatch) -> None:
     requests = [
         {"id": f"{v}{n}", "text": "x", "out": "o", **({"ref_audio": v} if v != "p" else {"voice": "p"})}
@@ -216,7 +232,7 @@ def fake_checker(monkeypatch) -> list[list[tuple[str, list[str]]]]:
 
 def test_a_clip_is_heard_again_only_for_a_new_target_or_new_bytes(tmp_path: Path, monkeypatch) -> None:
     asked = fake_checker(monkeypatch)
-    tts = {"asr": {"model": "m@r", "batch": 1}}
+    tts = {"asr": {"model": "m@r", "batch": 1}, "chunk_clips": {"asr": 100}}
     for name in "ab":
         write_wav(tmp_path / f"{name}.wav", np.full(grid.SAMPLE_RATE_HZ, ord(name) / 1000))
     clip_list = [{"id": n, "wav": str(tmp_path / f"{n}.wav"), "targets": ["t"]} for n in "ab"]
@@ -232,7 +248,7 @@ def test_a_clip_is_heard_again_only_for_a_new_target_or_new_bytes(tmp_path: Path
 
 def test_clips_with_the_same_bytes_are_heard_once_for_the_targets_of_both(tmp_path: Path, monkeypatch) -> None:
     asked = fake_checker(monkeypatch)
-    tts = {"asr": {"model": "m@r", "batch": 1}}
+    tts = {"asr": {"model": "m@r", "batch": 1}, "chunk_clips": {"asr": 100}}
     for name in "ab":
         write_wav(tmp_path / f"{name}.wav", np.zeros(grid.SAMPLE_RATE_HZ))
     clip_list = [{"id": n, "wav": str(tmp_path / f"{n}.wav"), "targets": [f"say {n}", "w"]} for n in "ab"]
@@ -292,3 +308,25 @@ def test_the_fast_checker_hears_each_distinct_clip_once(tmp_path: Path, monkeypa
     heard = engines.hear_text(clips, tts, tmp_path, tmp_path)
     assert heard == {"a": "trợ lý.", "b": "trợ lý.", "c": "trợ lý."} and calls == [("asr_ct2", "4", 2)]
     assert engines.hear_text(clips, tts, tmp_path, tmp_path) == heard and len(calls) == 1
+
+
+def test_a_stopped_checker_keeps_the_runs_it_finished(tmp_path: Path, monkeypatch) -> None:
+    asked = fake_checker(monkeypatch)
+    checker = engines.run
+
+    def stops_on_the_second_run(*a, **k):
+        if len(asked) == 1:
+            raise KeyboardInterrupt
+        checker(*a, **k)
+
+    tts = {"asr": {"model": "m@r", "batch": 1}, "chunk_clips": {"asr": 2}}
+    for name in "abcde":
+        write_wav(tmp_path / f"{name}.wav", np.full(grid.SAMPLE_RATE_HZ, ord(name) / 1000))
+    clip_list = [{"id": n, "wav": str(tmp_path / f"{n}.wav"), "targets": ["t"]} for n in "abcde"]
+    monkeypatch.setattr(engines, "run", stops_on_the_second_run)
+    with pytest.raises(KeyboardInterrupt):
+        engines.hear(clip_list, tts, tmp_path, tmp_path)
+    monkeypatch.setattr(engines, "run", checker)
+    heard = engines.hear(clip_list, tts, tmp_path, tmp_path)
+    assert [[stem for stem, _ in run] for run in asked] == [["a", "b"], ["c", "d"], ["e"]]
+    assert sorted(heard) == list("abcde")

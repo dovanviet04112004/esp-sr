@@ -215,7 +215,8 @@ def render(
     requests: dict[str, list[dict]], tts: dict, work: Path, cache: Path, timings: dict[str, dict] | None = None
 ) -> list[dict]:
     """Synthesise every engine's requests {id, speaker, text, out, say?, rivals?, ...} whose clip is missing or was made
-    from another fingerprint, hear every clip back, and return one manifest row per clip: heard, what the checker
+    from another fingerprint, chunk_clips a run, each run recorded as made when it ends so a stopped render resumes at
+    the run it lost; hear every clip back, and return one manifest row per clip: heard, what the checker
     heard; passed, whether it spells what the clip must say; margin, how much more log-probability the checker gives
     what it heard than what the clip must say, near 0 when only the spelling differs; rivals, the same margin for each
     text it must not say. timings, when given, gets per engine the clips made and heard and the seconds of each."""
@@ -225,9 +226,11 @@ def render(
         before = made(work)
         stale = [r for r in reqs if not Path(r["out"]).exists() or before.get(r["out"]) != wanted[r["out"]]]
         started = time.monotonic()
-        if stale:
-            engines.synthesise(engine, stale, tts, work, cache)
-            record_made(work, {r["out"]: wanted[r["out"]] for r in stale})
+        stale.sort(key=engines.voice_of)
+        size = tts["chunk_clips"][engine]
+        for k in range(0, len(stale), size):
+            engines.synthesise(engine, stale[k : k + size], tts, work, cache)
+            record_made(work, {r["out"]: wanted[r["out"]] for r in stale[k : k + size]})
         synthesised = time.monotonic()
         targets = {r["id"]: [said(r), *r.get("rivals", [])] for r in reqs}
         asked = [{"id": f"{engine}/{r['id']}", "wav": r["out"], "targets": targets[r["id"]]} for r in reqs]

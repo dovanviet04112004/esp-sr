@@ -40,11 +40,16 @@ def presets(engine: str, tts: dict, cache: Path) -> list[dict]:
     return json.loads(run(engine, *engine_args(engine, tts), "voices", cache=cache))
 
 
+def voice_of(request: dict) -> str:
+    """The voice a request reads with: its reference clip, or its preset."""
+    return request.get("ref_audio") or request.get("voice") or ""
+
+
 def synthesise(engine: str, requests: list[dict], tts: dict, work: Path, cache: Path) -> None:
     """Write each request's clip to its out path; the keys a request carries are those of ml/tts/<engine>/run.py."""
     listing = work / f"{engine}_requests.jsonl"
     # One voice back to back: VieNeu enrolls a reference on the CPU and keeps only the last 32 (REF_CACHE_MAX).
-    write_jsonl(listing, sorted(requests, key=lambda r: r.get("ref_audio") or r.get("voice") or ""))
+    write_jsonl(listing, sorted(requests, key=voice_of))
     run(engine, *engine_args(engine, tts), str(listing), cache=cache)
 
 
@@ -89,8 +94,8 @@ def align(clips: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, li
 def hear(clips: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, dict]:
     """What the checker makes of every clip {id, wav, targets}, by id: {text, logp, targets}, the text it heard and the
     log-probability of that text and of each target given the clip. Answers are kept in cache/tts/heard.jsonl by the
-    clip's bytes and the checker, its settings and run.py: clips with the same bytes are heard once, for the targets of
-    them all, and a clip is heard again only for a target it lacks."""
+    clip's bytes and the checker, its settings and run.py, after each run of chunk_clips: clips with the same bytes are
+    heard once, for the targets of them all, and a clip is heard again only for a target it lacks."""
     store = cache / "tts" / "heard.jsonl"
     settings = json.dumps(tts["asr"], sort_keys=True).encode()
     checker_id = hashlib.sha256(settings + (PROJECTS / "asr" / "run.py").read_bytes()).hexdigest()
@@ -111,9 +116,10 @@ def hear(clips: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, dic
         if lacking:
             ask = todo.setdefault(sha, {"id": sha, "wav": c["wav"], "targets": []})
             ask["targets"] += [t for t in lacking if t not in ask["targets"]]
-    if todo:
-        listing, heard = work / "asr_clips.jsonl", work / "asr_heard.jsonl"
-        write_jsonl(listing, list(todo.values()))
+    listing, heard = work / "asr_clips.jsonl", work / "asr_heard.jsonl"
+    asks, size = list(todo.values()), tts["chunk_clips"]["asr"]
+    for k in range(0, len(asks), size):
+        write_jsonl(listing, asks[k : k + size])
         run("asr", tts["asr"]["model"], str(tts["asr"]["batch"]), str(listing), str(heard), cache=cache)
         answers = [json.loads(line) for line in heard.read_text(encoding="utf-8").splitlines()]
         rows = [merged({"checker": checker_id, "sha256": a["id"], **a}) for a in answers]
