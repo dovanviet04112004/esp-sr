@@ -219,3 +219,36 @@ Ba chỗ phải sửa trước khi board khớp mô phỏng, theo thứ tự tì
   trước các tích chập (esp-dl assert ở `Reshape` lúc dựng `ctc_net`).
 - Bản ghi của probe: ESP-PPQ giữ input của `ctc_net` theo thứ tự (chiều, hop) của ONNX vì chỉ `Slice` đọc nó, còn output
   theo (khung, lớp); probe đọc bố cục từ dữ liệu kiểm lưu trong `.espdl` và so byte bước đầu trước khi ghi.
+
+## 12. Hai ứng viên của khe `ns` chạy dòng có trạng thái trên esp-dl (E9-T10)
+
+Board B, `ai_engine/test_apps/unit` dựng với thiết lập trình biên dịch của profile bench (`-O2`, KẾ HOẠCH §4.5.8), IDF
+6.0.2, esp-dl 3.3.11, ESP-PPQ 1.3.11, 01/10. Mỗi ứng viên của `configs/models/ns.yaml` với trọng số ngẫu nhiên có seed,
+dựng thành đồ thị một bước: đặc trưng đã chuẩn hoá và trạng thái của từng GRU vào, đầu ra và trạng thái sau bước ra; sau
+mỗi bước board chép trạng thái ra về trạng thái vào. Lượng tử bậc 1 và 2 mặc định (KẾ HOẠCH §3.14). Dựng bằng
+`make ai-probe`, đo bằng `make ai-unit`: 200 bước, mỗi bước tính giờ.
+
+| Mạng | Vào / ra mỗi bước | GRU | `.espdl` | PSRAM lúc dựng | Chênh int8 so với mô phỏng từng bước, ra / trạng thái | Một bước, trung bình / đỉnh | Không chép trạng thái (đối chứng âm) |
+|---|---|---|---|---|---|---|---|
+| RNNoise-16k (82 603 tham số) | 31 / 19 | 24, 48, 96 | 104 KB | 83,0 KB | **0** / 0 | 4 809 / 4 858 µs | chênh 15 |
+| NSNet-16k S (161 248) | 256 / 256 | 96, 96 | 173 KB | 54,5 KB | **0** / 0 | **3 019** / 3 084 µs | chênh 15 |
+| NSNet-16k M (264 064) | 256 / 256 | 128, 128 | 276 KB | 56,3 KB | **0** / 0 | 4 414 / 4 475 µs | chênh 29 |
+| NSNet-16k L (324 688) | 256 / 256 | 144, 144 | 337 KB | 57,1 KB | 1 / 1, từ bước 112 | 5 054 / 5 127 µs | chênh 15 |
+
+`model->test()` qua ở cả bốn. Dựng mạng 60–89 ms, RAM nội 0 B. Trạng thái vào và ra của từng GRU cùng một số mũ, vì
+ESP-PPQ gắn `initial_h` và `Y_h` theo `Y` của GRU ấy; không có `initial_h`, GRU của esp-dl xoá trạng thái mỗi lần chạy.
+Bộ quản lý bộ nhớ của esp-dl được đặt một trạng thái ra vào chỗ của một trạng thái vào đã đọc xong: chép thẳng từng cặp
+thì ghi đè trạng thái chưa chép, NSNet-16k S lệch 83 bậc từ bước 1. Mọi trạng thái phải chép ra chỗ tạm trước rồi mới
+ghi về; bộ nối của E9-T5 và E9-T11 làm đúng như vậy.
+
+Trần của ADR-0014 là nsnet2 của ESP-SR trên cùng board, cùng thiết lập trình biên dịch: 4 182 µs trung bình, 395 760 B
+PSRAM. Tính cả `.espdl` nằm trong ảnh đã nạp ở PSRAM:
+
+- NSNet-16k S dùng 3,0 ms và 227 KB, lọt trần; M dùng 4,4 ms, vượt trần thời gian 6%; L dùng 5,1 ms và 394 KB, vượt
+  trần thời gian 21%.
+- Thời gian của NSNet-16k tăng gần theo số byte trọng số: 57, 63, 67 MB/s đọc từ PSRAM mỗi bước.
+- RNNoise-16k tốn 4,8 ms dù ít phép tính nhất: độ dài 24, 31, 79 và 103 không chia hết cho 16 nên tích vô hướng của
+  esp-dl chạy đường C, và mạng có 26 op nhỏ.
+
+Cùng lượt, cùng thiết lập: TCN của §8 1 944 µs, `kws` S 41,6 ms và M 276,7 ms của §10, `ctc_lay` 4 899 µs và `ctc_net`
+45 227 µs của §11, trong 4% so với số `-Og` đã ghi ở các mục ấy: thời gian nằm ở nhân dịch sẵn của esp-dl và ở PSRAM.
