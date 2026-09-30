@@ -21,7 +21,7 @@
 #define FETCH_WAIT_MS 1000
 // Chunks of silence fed past the end at most, to push out what the AFE still holds.
 #define FLUSH_CHUNKS_MAX 64
-// Every buffer an ESP-SR net reads or writes: the S3's vector loads take 16-byte aligned addresses.
+// The S3's vector loads drop the low four address bits, so a net's buffers start 16-byte aligned.
 #define NSN_ALIGN_BYTES 16
 
 static srmodel_list_t *s_models;
@@ -78,8 +78,7 @@ static esp_err_t take_output(const afe_fetch_result_t *res, int channel, size_t 
     if (res->raw_data == NULL || channel < 0 || channel >= res->raw_data_channels) {
         return ESP_ERR_INVALID_ARG;
     }
-    // raw_data interleaves its channels: data matched channel 2 of it on every fetch, and no channel laid out
-    // flat.
+    // raw_data interleaves its channels: data matches its channel 2 on every fetch (compare.md).
     for (size_t i = 0; i < take; i++) {
         out[i] = res->raw_data[i * (size_t)res->raw_data_channels + (size_t)channel];
     }
@@ -102,8 +101,7 @@ esp_err_t espsr_run_bss(const espsr_job_t *job, const espsr_job_variant_t *v, co
     afe->print_pipeline(data);
     const size_t chunk = (size_t)afe->get_feed_chunksize(data);
     const size_t fetch_chunk = (size_t)afe->get_fetch_chunksize(data);
-    // A quarter of the AFE's ring in flight at most: with half, it reports a full ring and drops the first
-    // chunks.
+    // At most a quarter of the AFE's ring in flight: half of it overflows and drops the first chunks.
     const size_t window = (cfg->afe_ringbuf_size > 4 ? (size_t)cfg->afe_ringbuf_size / 4 : 1) * chunk;
     esp_err_t err = afe->get_feed_channel_num(data) == GEN_ARRAY_N_MICS &&
                             afe->get_samp_rate(data) == GEN_GRID_SAMPLE_RATE_HZ
