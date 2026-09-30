@@ -1,0 +1,65 @@
+# ADR-0012 — `command` có hai đường cắm cùng một hợp đồng: DS-CNN phân lớp lệnh cố định, và CRNN + CTC của ADR-0010
+
+- **Trạng thái**: Đề xuất
+- **Ngày**: 2026-09-30
+- **Liên quan**: KẾ HOẠCH §3.11, §3.12, §4.4, §4.5.2, §4.5.5; TASKS E11-T8, E11-T12, E11-T13, E11-T17; ADR-0010
+
+---
+
+## Bối cảnh
+
+Đường CTC của ADR-0010 còn thiếu ba khối: `dsp_spec/pitch` (E11-T8), GRU int8 chạy dòng qua esp-dl trên board
+(E11-T12) và chấm có ràng buộc (E11-T13). Mẩu người thật của các lệnh phải trích lại theo luật ngắt hơi (KẾ HOẠCH
+§3.11). Bản demo cần nhận lệnh ngay trong tuần, trong khi đường CTC cần thêm khoảng một tuần. Một mạng phân lớp trên
+một bộ lệnh cố định học được từ chính các mẩu lệnh, không cần `lang_vi` hay CTC. DS-CNN (Zhang và cộng sự, 2017, "Hello
+Edge") là mạng loại ấy, sinh ra cho vi điều khiển.
+
+## Các phương án
+
+| Phương án | Được | Mất | Số đo |
+|---|---|---|---|
+| Chỉ CTC (ADR-0010) | thêm lệnh bằng một dòng chữ; một mạng cho mọi bộ lệnh | chưa có lệnh nào chạy cho tới khi đủ ba khối trên | chưa đo |
+| Chỉ DS-CNN | nhỏ, một lần chạy mỗi câu; dữ liệu chỉ là mẩu lệnh và âm bản | bộ lệnh cố định lúc học, đổi lệnh là học lại; lệnh chưa học ("chụp ảnh") không bao giờ nhận | 94,4 / 94,9 / 95,4% trên Google Speech Commands, 12 lớp, ba cỡ [1] |
+| **Hai đường sau cùng hợp đồng `ai_engine_command_*`** | lệnh chạy trong tuần bằng DS-CNN, CTC tới sau; đổi đường bằng Kconfig và ảnh model; chung một thước | giữ hai nhánh code và hai bộ dữ liệu | chọn đường mặc định bằng Cửa 3 trên tập thu qua board |
+
+## Quyết định
+
+Hai đường, **không đổi hợp đồng đã đóng băng** (KẾ HOẠCH §4.5.5): `ai_engine_command_begin`, `_step`, `_score` giữ
+nguyên. `_step` nhận một khung đặc trưng mà độ dài do model khai, `_score` trả chỉ số lệnh hoặc −1 kèm ba điểm, cùng một
+khuôn cho cả hai.
+
+- **`kws` (DS-CNN).** Cửa sổ cố định (cấu hình, khoảng 1,5 s) tính ngược từ lúc `vad` báo hết câu; mạng chạy một lần
+  mỗi câu. Lớp gồm các lệnh có dữ liệu của `contracts/commands/default_vi.json`, theo đúng thứ tự file ấy, cộng `other`
+  và `silence`. `other` gồm lời nói thường, cụm gần âm ("bật điện", "mở cửa sổ", "đóng góp"…) và từng nửa của mỗi lệnh
+  ("bật", "đèn", "mở", "cửa"…), để gần âm hay nửa lệnh không thành lệnh. Từ chối khi lớp thắng là `other` hoặc
+  `silence`, khi xác suất của nó dưới ngưỡng, hoặc khi nó hơn lớp nhì quá ít; ngưỡng ở NVS `kws/` như `δ₁`, `δ₂`. Dương
+  lấy từ mẩu người thật của kho trích `hf_extract`, từ `kws_vi_command` và từ TTS VieNeu; tất cả qua đường mô phỏng
+  board như `wake`, rồi int8 bằng ESP-PPQ.
+- **`ctc` (CRNN + CTC).** Như ADR-0010 và KẾ HOẠCH §3.12.
+- **Đặc trưng.** Khai ở cấu hình và ở `meta.json` của model: log-mel 40, hoặc log-mel 40 cộng ba chiều cao độ của
+  `dsp_spec/pitch`. `kws` bản đầu dùng log-mel 40, vì chín lệnh khác nhau ở cả âm tiết lẫn phụ âm. Khi `pitch` xong,
+  `kws` học lại với cao độ trên cùng split, seed và số epoch, rồi giữ bản thắng theo số, nhất là tỉ lệ từ chối cụm gần âm
+  chỉ khác thanh.
+- **Bộ lệnh.** `meta.json` của `kws` ghi `backend` và `classes`. Bước đóng gói ảnh model kiểm `classes` là phần đầu của
+  bộ lệnh mặc định, nên chỉ số trả về trùng chỉ số trong bảng lệnh. Khi chạy `kws`, lệnh đổi bộ lệnh qua MQTT bị từ chối
+  bằng một mã lỗi; host đổi mã thành câu.
+- **Code.**
+  - `ml/src/srpipe/tasks/command/` giữ phần chung: `eval.py` với thước Cửa 3, và `backend.py` với giao diện "cửa sổ đặc
+    trưng → lệnh hoặc từ chối, kèm điểm". Hai thư mục con `kws/` và `ctc/` theo khuôn nhánh của §4.4; `data.py` hiện có
+    chuyển vào `ctc/`.
+  - Cấu hình `ml/configs/models/command.yaml` chọn `backend` và `features`, kèm hai file `command_kws.yaml` và
+    `command_ctc.yaml`.
+  - Firmware: `ai_engine/src/command_kws/` và `command_ctc/`. Kconfig `AI_ENGINE_COMMAND_BACKEND` chọn danh sách nguồn
+    trong CMake, đúng luật tắt module của CLAUDE.md §4.1. Ảnh model vẫn là `firmware/models/command/`.
+- **Chọn đường mặc định** của sản phẩm bằng Cửa 3 trên tập thu qua board, tách theo người nói và phòng.
+
+## Hệ quả
+
+- KẾ HOẠCH §3.12 thêm đoạn `kws`; bảng §3.3, cây §4.4 và §4.5.2 thêm hai thư mục; §4.5.5 ghi khung đặc trưng do
+  model khai; `meta.json` của `command` thêm `backend`, `classes`, `features`.
+- TASKS thêm E11-T17 (`kws`). E11-T12 và E11-T13 giữ nguyên cho `ctc`.
+- Xét lại khi `ctc` đạt Cửa 3 trong ngân sách thời gian của §3.3: lúc ấy `kws` chỉ còn là đường dự phòng, hoặc bỏ.
+
+## Nguồn
+
+1. Y. Zhang, N. Suda, L. Lai, V. Chandra, *Hello Edge: Keyword Spotting on Microcontrollers*, arXiv:1711.07128, 2017.
