@@ -12,8 +12,9 @@ from pathlib import Path
 
 import numpy as np
 
+from srpipe.core.config import CONFIGS, load_yaml
 from srpipe.dsp.afe import agc, balance, chain, doa, gsc, hpf, ns_omlsa, vad
-from srpipe.dsp.spec import mel, stft
+from srpipe.dsp.spec import mel, pitch, stft
 from srpipe.generated import afe, array, grid
 from srpipe.golden.gold import write_gold
 
@@ -43,6 +44,8 @@ DOA_HOPS = 64
 DOA_SILENT_HOPS = 16
 GSC_HOPS = 64
 GSC_LEARN_HOPS = 16
+PITCH_HOPS = 96
+PITCH_RESET_HOP = 60
 LSB = 1.0 / 32768.0
 MEL_CASES = (
     (mel.MelConfig(n_bands=40, f_min_hz=20.0, f_max_hz=7600.0, log_floor=1e-6), 13),
@@ -120,6 +123,65 @@ def emit_mel(root: Path) -> list[Path]:
     negative = mel_case(*MEL_CASES[0], rng.uniform(-0.5, 0.5, n))
     negative["log_mel"] = np.roll(negative["log_mel"], -1, axis=1)
     path = root / "mel" / "case_neg_000.gold"
+    write_gold(path, negative)
+    written.append(path)
+    return written
+
+
+def pitch_case(cfg: pitch.PitchConfig, signal: np.ndarray, reset: np.ndarray) -> dict[str, np.ndarray]:
+    """The configuration as floats, the samples, a reset flag per hop taken before that hop, and per hop the three
+    features and the newest frame's [NCCF, F0 Hz] the reference gives."""
+    tracker = pitch.PitchTracker(cfg)
+    hops = len(reset)
+    features = np.zeros((hops, pitch.N_FEATURES), dtype=np.float32)
+    raw = np.zeros((hops, 2), dtype=np.float32)
+    since_reset = 0
+    for h in range(hops):
+        if reset[h]:
+            tracker.reset()
+            since_reset = 0
+        features[h] = tracker.step(signal[h * grid.HOP_SAMPLES : (h + 1) * grid.HOP_SAMPLES])
+        if since_reset >= pitch.LEAD_HOPS:
+            raw[h] = tracker.latest
+        since_reset += 1
+    return {
+        "config": np.array([getattr(cfg, f) for f in cfg.__dataclass_fields__], dtype=np.float32),
+        "pcm": signal.astype(np.float32),
+        "reset": reset.astype(np.uint8),
+        "features": features,
+        "raw": raw,
+    }
+
+
+def emit_pitch(root: Path, cfg: pitch.PitchConfig) -> list[Path]:
+    """A glide, voiced bursts between pauses, noise, and a quiet lead into a tone with a reset part way, then a
+    negative control whose features come one hop late."""
+    rng = np.random.default_rng(SEED + 11)
+    n = PITCH_HOPS * grid.HOP_SAMPLES
+    t = np.arange(n) / grid.SAMPLE_RATE_HZ
+    glide = 2.0 * np.pi * np.cumsum(np.linspace(110.0, 240.0, n)) / grid.SAMPLE_RATE_HZ
+    voiced = sum(np.sin(k * glide) / k for k in range(1, 6))
+    bursts = (np.sin(2.0 * np.pi * 3.0 * t) > 0.2) * sum(np.sin(2 * np.pi * k * 180.0 * t) / k for k in range(1, 6))
+    quiet_then_tone = np.where(t < t[-1] / 3, rng.uniform(-1e-3, 1e-3, n), 0.3 * np.sin(2 * np.pi * 95.0 * t))
+    no_reset = np.zeros(PITCH_HOPS, dtype=np.uint8)
+    reset_part_way = no_reset.copy()
+    reset_part_way[PITCH_RESET_HOP] = 1
+    inputs = (
+        (0.3 * voiced + rng.normal(0.0, 0.01, n), no_reset),
+        (0.3 * bursts + rng.normal(0.0, 0.003, n), no_reset),
+        (rng.uniform(-0.5, 0.5, n), no_reset),
+        (quiet_then_tone, reset_part_way),
+    )
+    written = []
+    for index, (signal, reset) in enumerate(inputs):
+        path = root / "pitch" / f"case_{index:03d}.gold"
+        write_gold(path, pitch_case(cfg, signal, reset))
+        written.append(path)
+    negative = pitch_case(cfg, inputs[0][0], no_reset)
+    negative["features"] = np.concatenate([np.zeros((1, pitch.N_FEATURES)), negative["features"][:-1]]).astype(
+        np.float32
+    )
+    path = root / "pitch" / "case_neg_000.gold"
     write_gold(path, negative)
     written.append(path)
     return written
@@ -684,13 +746,18 @@ def emit_gsc(root: Path) -> list[Path]:
     return written
 
 
+def pitch_config() -> pitch.PitchConfig:
+    """The pitch settings the models read, from the features config (KEHOACH 3.11)."""
+    return pitch.PitchConfig(**load_yaml(CONFIGS / "scenes" / "device.yaml")["pitch"])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
     emitted = emit_stft(args.out) + emit_mel(args.out) + emit_chain(args.out) + emit_chain_modules(args.out)
     emitted += emit_hpf(args.out) + emit_balance(args.out) + emit_vad(args.out) + emit_agc(args.out)
-    emitted += emit_doa(args.out) + emit_gsc(args.out)
+    emitted += emit_doa(args.out) + emit_gsc(args.out) + emit_pitch(args.out, pitch_config())
     for path in emitted + emit_ns_omlsa(args.out):
         print(path.relative_to(args.out) if path.is_relative_to(args.out) else path)
     return 0

@@ -5,10 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 from srpipe.dsp import emit_golden
 from srpipe.dsp.afe import balance, chain, doa, gsc, ns_omlsa
-from srpipe.dsp.spec import mel, stft
+from srpipe.dsp.spec import mel, pitch, stft
 from srpipe.generated import afe, grid
 from srpipe.golden.gold import read_gold
 
@@ -225,3 +226,36 @@ def test_the_gsc_negative_control_comes_from_weights_that_never_learn() -> None:
 
     np.testing.assert_array_equal(case["out"], output(learn=False))
     assert np.abs(case["out"] - output(learn=True)).max() > 1.0
+
+
+def test_committed_pitch_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_pitch(tmp_path, emit_golden.pitch_config()):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), committed
+
+
+def test_the_pitch_negative_control_is_one_hop_late() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "pitch" / "case_neg_000.gold")
+    right = read_gold(emit_golden.GOLDEN_ROOT / "pitch" / "case_000.gold")
+    np.testing.assert_array_equal(case["features"][1:], right["features"][:-1])
+    assert not np.array_equal(case["features"], right["features"])
+
+
+def test_the_pitch_reset_case_starts_over_after_its_reset() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "pitch" / "case_003.gold")
+    at = int(np.flatnonzero(case["reset"])[0])
+    assert np.all(case["features"][at : at + pitch.LEAD_HOPS] == 0.0)
+    assert np.any(case["features"][at + pitch.LEAD_HOPS] != 0.0)
+
+
+def test_every_pitch_case_fits_the_parity_read_buffer() -> None:
+    for path in (emit_golden.GOLDEN_ROOT / "pitch").glob("*.gold"):
+        assert path.stat().st_size <= 512 * 1024
+
+
+def test_the_pitch_tolerance_rejects_the_negative_control() -> None:
+    limits = yaml.safe_load((emit_golden.GOLDEN_ROOT / "pitch" / "tolerance.yaml").read_text())["tensors"]["features"]
+    wrong = read_gold(emit_golden.GOLDEN_ROOT / "pitch" / "case_neg_000.gold")["features"].astype(np.float64)
+    right = read_gold(emit_golden.GOLDEN_ROOT / "pitch" / "case_000.gold")["features"].astype(np.float64)
+    snr_db = 10.0 * np.log10(np.sum(right**2) / np.sum((wrong - right) ** 2))
+    assert np.max(np.abs(wrong - right)) > limits["max_abs"] and snr_db < limits["min_snr_db"]

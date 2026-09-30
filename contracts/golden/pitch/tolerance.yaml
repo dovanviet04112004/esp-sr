@@ -1,0 +1,11 @@
+# C dsp_spec/pitch against srpipe.dsp.spec.pitch (KEHOACH 3.11, 3.14, E11-T8 step 3).
+# Both sides are float32 and take the same Viterbi decisions; only exp, log and pow of the features differ by
+# rounding. The C side has not run yet: its first run records its SNR here and keeps 20 dB of margin.
+# case_neg_* must fall outside these limits.
+tensors:
+  features:
+    max_abs: 1.0e-3
+    min_snr_db: 80.0
+  raw:
+    max_abs: 1.0e-2
+    min_snr_db: 80.0
