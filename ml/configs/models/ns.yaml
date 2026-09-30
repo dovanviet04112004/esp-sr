@@ -1,0 +1,136 @@
+# The two learned candidates of the ns slot (KEHOACH 3.9): RNNoise-16k and NSNet-16k on one data stream, one grid,
+# one seed and one schedule; one is kept only if it beats the OM-LSA floor by the recogniser's ruler (KEHOACH 3.15).
+# python -m srpipe.tasks.ns.data {clean,split,pool,sets,pilot}, then .train, .eval, .quant probe (ADR-0014).
+device: scenes/device.yaml         # rooms, microphones, talker levels of the board simulation, read as they are
+version: v1                        # data/splits/ns/<v>, interim/ns/<v>, processed/ns/<v>
+power_floor: 1.0e-9                # added to a power under every log: 13 dB under a bin of int16 rounding noise
+clean:                             # python -m srpipe.tasks.ns.data clean: one decode of every speech candidate
+  workers: 6                       # a Bud500 row group holds ~400 MB a worker (common/screen.yaml)
+  batch_items: 256                 # clips a worker task decodes, a parquet file's rows kept together
+  save_every: 20                   # batches between writes of cutoff.tsv, so a stopped run resumes
+  speech_band_hz: [300.0, 3400.0]  # a clip's reference: the median of its Welch spectrum here
+  cutoff_within_db: 50.0           # its cutoff: the highest frequency within this of the reference
+  smooth_bins: 5                   # moving average over the 512-point Welch spectrum
+  dnsmos_sample: 1500              # train clips DNSMOS scores for the pilot report; 0 skips it
+split:                             # data/splits/ns/<version> (KEHOACH 1.3)
+  seed: 20260930
+  from: command/v1                 # its val and test rows are ns val and test; their speakers never train ns
+  train:                           # item prefix: the rule its clips meet; span = loud - quiet dB of screening
+    speech/vivos/train/: {min_span_db: 35.0}
+    speech/fpt_open/: {min_span_db: 40.0, max_quiet_dbfs: -55.0}
+    speech/vlsp/: {min_span_db: 40.0, max_quiet_dbfs: -55.0}
+    speech/bud500/: {min_span_db: 40.0, max_quiet_dbfs: -55.0}
+  eval_min_span_db: 30.0           # val and test references; VIVOS test's p10 is 30.9
+  min_cutoff_hz: 7000.0            # a narrowband target teaches the net to cut 7-8 kHz; 8% of FPT ends lower
+noise:                             # foreground sources: one an example, under raw/, never a group in two roles
+  classes:                         # share of the examples with a foreground; SNR over the talker's active hops at ch0
+    stationary: {share: 0.20, snr_db: [-5.0, 25.0]}
+    nonstationary: {share: 0.35, snr_db: [0.0, 25.0]}
+    music: {share: 0.15, snr_db: [0.0, 25.0]}
+    music_vocals: {share: 0.15, snr_db: [0.0, 25.0]}   # sung voices; OM-LSA takes 4 dB off music (afe/ns.md 2b)
+    babble: {share: 0.15, snr_db: [0.0, 20.0]}
+  pools:                           # weight: share inside the class; roles: share of groups by the split seed;
+                                   # every screened file of a role is used, read in place from raw/
+    - {name: dns_fan, class: stationary, weight: 0.35, prefix: noise/dns/datasets/noise/fan_,
+       group: freesound, roles: {val: 0.05, test: 0.05}}
+    - {name: dns_copy, class: stationary, weight: 0.05, prefix: noise/dns/datasets/noise/copy-machine_,
+       group: freesound, roles: {val: 0.1, test: 0.1}}
+    - {name: demand_steady, class: stationary, weight: 0.45, prefix: noise/demand/, file: ch01.wav,
+       group: environment, envs: {NFIELD: train, NPARK: train, NRIVER: train, TBUS: train, TCAR: train,
+                                  TMETRO: val, STRAFFIC: test}}
+    - {name: coloured, class: stationary, weight: 0.15, synthetic: {slope_db_per_octave: [-6.0, 3.0]}}
+    - {name: audioset, class: nonstationary, weight: 0.50, prefix: noise/dns/datasets/noise/,
+       pattern: '^[A-Za-z0-9_-]{11}\.wav$', group: file, roles: {val: 0.05, test: 0.05}}
+    - {name: dns_events, class: nonstationary, weight: 0.25, prefix: noise/dns/datasets/noise/,
+       pattern: '^(door|typing|squeak|breath|munching|dragging)_', group: freesound,
+       roles: {val: 0.05, test: 0.05}}
+    - {name: musan_noise, class: nonstationary, weight: 0.15, prefix: noise/musan/musan/noise/, background: false,
+       group: file, roles: {val: 0.1, test: 0.1}}
+    - {name: demand_busy, class: nonstationary, weight: 0.10, prefix: noise/demand/, file: ch01.wav,
+       group: environment, envs: {PRESTO: train, PSTATION: train, SPSQUARE: train, DWASHING: val,
+                                  DKITCHEN: test, PCAFETER: test}}
+    - {name: music, class: music, weight: 1.0, prefix: noise/musan/musan/music/, vocals: N, group: artist,
+       roles: {val: 0.1, test: 0.1}}
+    - {name: music_vocals, class: music_vocals, weight: 1.0, prefix: noise/musan/musan/music/, vocals: Y,
+       group: artist, roles: {val: 0.1, test: 0.1}}
+    - {name: babble, class: babble, weight: 1.0, babble: true}
+tone:                              # the room's own floor: every example, diffuse at the pair's coherence
+  level_dbfs: [-65.0, -53.0]       # RMS at ch1 of the capture; board B's quiet room reads ch1 -59.1 dBFS
+  pools:                           # a role draws among the pools it has, weights renormalised
+    - {name: demand_quiet, weight: 0.4, prefix: noise/demand/, file: ch01.wav, group: environment,
+       envs: {DLIVING: train, OHALLWAY: train, OMEETING: train, OOFFICE: train}}
+    - {name: isotropic, weight: 0.4, prefix: rir/openslr28/RIRS_NOISES/real_rirs_isotropic_noises/,
+       listing: noise_list, group: room, roles: {val: 0.15, test: 0.15}}
+    - {name: musan_background, weight: 0.2, prefix: noise/musan/musan/noise/free-sound/, background: true,
+       group: file, roles: {val: 0.15, test: 0.15}}
+babble:                            # tracks mixed once from each role's own speech pool
+  seed: 20260930
+  track_s: 60.0
+  talkers: [5, 10]                 # voices summed in a track, drawn a track
+  gap_s: [0.1, 0.5]                # between one voice's utterances
+  jitter_db: 3.0                   # each utterance's level around its voice's
+  hours: {train: 3.0, val: 0.25, test: 0.25}
+pool:                              # python -m srpipe.tasks.ns.data pool: int16 pools under interim/ns/<version>/<role>/
+  workers: 6                       # speech, tone and babble; noise stays in raw/ and is read in place
+  batch_items: 500                 # clips a speech_<k>.npy run holds, ~80 MB decoded in a worker at a time
+  level_dbfs: -26.0                # every tone and babble file's RMS in its pool; the mixer sets levels
+  peak_dbfs: -1.0                  # a file whose peak would pass this goes in quieter
+mix:                               # the example builder of train, val, test and calib alike
+  seed: 20260930
+  example_s: 10.0                  # 625 hops: one sequence of a batch
+  rooms: {train: [0, 448], val: [448, 480], test: [480, 512]}   # indices into device.yaml's bank of 512
+  gap_s: [0.3, 2.0]                # silence after each utterance of an epoch's stream
+  long_pause: {probability: 0.08, seconds: [3.0, 8.0]}   # the room alone for a while, as between two commands
+  no_speech: 0.1                   # share of examples with no talker at all
+  foreground: 0.9                  # share of examples with one foreground source; the rest hear the room only
+  noise_only_dbfs: [-70.0, -25.0]  # foreground RMS at ch0 of the capture when no talker sets an SNR
+  global_gain_db: [-6.0, 6.0]      # all sources together: microphone tolerance and pcm_shift 12..14
+sets:                              # held in processed/ns/<version>/: val and test, once over their speech
+  seed: 20260930
+  examples_per_shard: 64
+  calib_examples: 256              # int8 calibration from train material (KEHOACH 1.3), drawn when quant needs it
+rnnoise:                           # RNNoise-16k (KEHOACH 1.1, 3.9)
+  bands_hz: [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 2000, 2400, 2800, 3200, 4000, 4800, 5600, 6800, 8000]
+  delta_ceps: 6                    # cepstra with a first and a second difference, as RNNoise's NB_DELTA_CEPS
+  variability_hops: 8              # cepstra the spectral variability compares, as RNNoise's CEPS_MEM
+  range_db: 80.0                   # a band's log energy stays within this of the loudest band under it
+  follow_db: 15.0                  # and falls at most this much from the band under it
+  dense: 24
+  gru: {vad: 24, noise: 48, denoise: 96}
+  vad_weight: 0.05                 # BCE of the speech head next to the gain loss
+nsnet:                             # NSNet-16k: log power in, a gain a bin out (ADR-0014)
+  bins: 256                        # 0 .. 7969 Hz, 16-aligned for esp-dl's SIMD; bin 256 takes bin 255's gain
+  layers: 2                        # stacked GRUs between one input and one output layer
+  sizes: {S: {hidden: 96}, M: {hidden: 128}, L: {hidden: 144}}
+  train_sizes: [S, M, L]           # trained on the same batches; the board probe picks one (4.2 ms, 387 KB)
+  speech_prob_band_hz: [300.0, 3400.0]   # speech_prob: the share of this band's power the gains pass
+loss:                              # the same for every candidate, on the 257 gains the slot applies
+  alpha: 0.6                       # speech distortion against residual noise; 0.5 is Wiener, more keeps speech
+  compression: 0.3                 # a bin weighs (|S|^2 + |N|^2)^c, normalised over its sequence
+train:                             # python -m srpipe.tasks.ns.train; the GPU when present
+  seed: 20260930
+  batch: 32                        # sequences of mix.example_s
+  epochs: 25                       # passes over the train speech, the same for every candidate (CLAUDE.md 4.3)
+  learning_rate: 1.0e-3
+  final_learning_rate: 5.0e-5      # cosine decay to this by the last step, as wake
+  grad_clip_norm: 1.0              # GRUs trained through 625 hops
+  norm_batches: 64                 # the first batches of the stream give each feature's mean and deviation
+  workers: 12                      # loader processes, ~300 MB each with torch; more swap a 10 GB WSL
+  prefetch: 2                      # batches each worker keeps ready: 24 of ~62 MB in shared memory at most
+  val_workers: 4                   # loader processes of each epoch's val pass, started for it alone
+  val_floor_db: -12.0              # the gain floor of the epoch's val figures: the product's, as OM-LSA's G_min
+  divergence_ratio: 3.0            # a val loss this many times epoch 0's stops the run; a safety, never a stop rule
+  log_every: 100                   # steps between log lines: losses, rate, data wait
+  smoke: {epochs: 1, steps: 20, batch: 4, workers: 2, val_workers: 2, example_s: 4.0, val_examples: 16,
+          log_every: 5}            # make ns-smoke
+eval:
+  settle_s: 3.0                    # figures after this, as E9-T1; the first 3 s are reported apart
+  floors_db: [-12.0, -18.0, -24.0, null]   # gain floor after the net; -12 is the product's; null is none
+  snr_edges_db: [-5.0, 0.0, 5.0, 10.0, 20.0, 25.0]
+  level_edges_dbfs: [-50.0, -40.0, -30.0]  # active speech at the slot
+  workers: 8
+  scenes: {level_dbfs: [-26.0, -40.0, -50.0]}   # E9-T1 scenes; OM-LSA needs one level, the nets do not
+probe:                             # make ai-probe: every candidate with random weights, for ai_engine/test_apps/unit
+  seed: 20260930
+  calib_hops: 64                   # random normalised feature hops ESP-PPQ calibrates on
+  runs: 50                         # timed runs of one hop on the board, after one untimed
