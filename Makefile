@@ -194,8 +194,11 @@ ai-probe: ## Export the probes of E11-T10 (TCN), E11-T17 (kws sizes) and E11-T12
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.kws.quant probe
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant probe
 
-ai-unit: ai-probe ## Run the ai_engine suite on board B; model slot 1 is rewritten and left erased
+ai-unit: ai-probe ## Run the ai_engine suite on board B; both model slots are rewritten and left erased
 	cd firmware/components/ai_engine/test_apps/unit && idf.py build && \
+	  python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
+	    --partition-table-file ../../../../partitions.csv write_partition --partition-name models_0 \
+	    --input main/probe/ctc_models.bin && \
 	  pytest pytest_unit.py --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) -s -p no:cacheprovider
 
 # broker and host

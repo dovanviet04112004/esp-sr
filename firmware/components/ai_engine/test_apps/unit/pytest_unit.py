@@ -1,4 +1,4 @@
-"""Run the ai_engine suite on board B: model slot 1 is rewritten with test images and left erased."""
+"""Run the ai_engine suite on board B: both model slots are rewritten with test images and left erased."""
 
 import pytest
 from pytest_embedded_idf.dut import IdfDut
