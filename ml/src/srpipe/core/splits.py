@@ -65,7 +65,8 @@ def line(row: Row) -> str:
 def speaker_roles(speakers: set[str], fractions: dict[str, float], rest: str, seed: int) -> dict[str, str]:
     """Each speaker's role: the sorted speakers shuffled once with the seed, each role of fractions taking its share
     in turn and rest taking what is left, so a speaker never sits in two roles."""
-    order = [sorted(speakers)[k] for k in np.random.default_rng(seed).permutation(len(speakers))]
+    ranked = sorted(speakers)
+    order = [ranked[k] for k in np.random.default_rng(seed).permutation(len(ranked))]
     roles, start = {}, 0
     for role, fraction in fractions.items():
         count = round(fraction * len(order))
