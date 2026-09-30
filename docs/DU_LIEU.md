@@ -57,6 +57,7 @@ bảng quét ở `measurements/data_screen.md`.
 |---|---|---|---|---|---|
 | `wake` | v1: `train_pos` 3 466 (1,0 h TTS), `train_neg` 122 483 (100,1 h), `val_pos` 118, `val_neg` 2 497 (3,3 h), `test_neg` 20 717 (22,9 h) | theo người nói; giọng nhân bản theo vai của người được nhân bản; `test_neg` là Common Voice và VIVOS test, không kho nào làm giọng mẫu; không âm bản nào nói từ đánh thức | 20260928 | `6f81be63…` | `ml/data/splits/wake/v1/SPLIT.md` |
 | `command` | v1: `train_*` một file mỗi kho, 758 897 mẩu (626,2 h), `val` 1 583 (1,9 h), `test` 2 000 (2,0 h, 59 người nói) | theo người nói; FPT, VLSP, Bud500 chỉ vào học; 196 câu chứa "chụp ảnh" rời tập học (lệnh chưa học, E11-T13) | 20260928 | `4bfcd902…` | `ml/data/splits/command/v1/SPLIT.md` |
+| `ns` | v1: `train` tiếng 150 614 mẩu (135,1 h: VIVOS train, FPT, VLSP, Bud500), nhiễu 59 845 tệp (201,4 h), nền phòng 52 (0,4 h); `val` 1 520 mẩu (1,8 h, 25 người nói), nhiễu 14,6 h; `test` 1 780 (1,7 h, 57 người nói), nhiễu 13,5 h | tiếng học qua luật sạch từng kho và dải tần ≥ 7 kHz đo từng mẩu, không trần giờ, không Common Voice; `val`, `test` là dòng của `command/v1` qua khoảng động ≥ 30 dB và cùng luật dải tần, người nói của chúng không vào học; nhiễu chia vai theo nhóm nguồn (Freesound, nghệ sĩ, môi trường DEMAND, phòng, tệp), không nhóm nào ở hai vai; giấy phép theo nguồn ở §1, VIVOS và Bud500 phi thương mại | 20260930 | `2d6a8556…` | `ml/data/splits/ns/v1/SPLIT.md` |
 
 ## 3. Đặc trưng qua đường mô phỏng board
 
