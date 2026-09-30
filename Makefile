@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot command-synth-pilot command-synth espsr-compare parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot command-synth-pilot command-synth ns-data ns-pilot ns-smoke ns-train espsr-compare parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -107,6 +107,19 @@ command-synth-pilot: screen ## Synthesise a few command clips and near misses to
 command-synth: screen ## Synthesise the command clips, near misses and halves, keep what the checker allows (E11-T7)
 	cd ml && uv run python -m srpipe.tasks.command.synth positives && uv run python -m srpipe.tasks.command.synth negatives \
 	  && uv run python -m srpipe.tasks.command.synth select
+
+ns-data: screen ## Split, pools and held val/test sets of the ns branch into data/splits/ns, interim and processed (E9-T3)
+	cd ml && uv run python -m srpipe.tasks.ns.data clean && uv run python -m srpipe.tasks.ns.data split \
+	  && uv run python -m srpipe.tasks.ns.data pool && uv run python -m srpipe.tasks.ns.data sets
+
+ns-pilot: ## Write ns training examples to cache/listen/ns/pilot, to hear ahead of the GPU run (E9-T3)
+	cd ml && uv run python -m srpipe.tasks.ns.data pilot
+
+ns-smoke: ## Train every ns candidate a few small steps on the CPU through the real loader, to time it (E9-T4)
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train python -m srpipe.tasks.ns.train --smoke
+
+ns-train: ## Train RNNoise-16k and NSNet-16k S/M/L on identical batches on the GPU into ml/artifacts/ns/runs (E9-T4)
+	cd ml && uv run --extra train python -m srpipe.tasks.ns.train
 
 measure: ## Merge bench CSVs into docs/measurements/budget.md
 	python3 -m tools.budget
