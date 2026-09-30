@@ -4,3 +4,4 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 uv run python -m srpipe.dsp.emit_golden "$@"
 uv run python -m srpipe.lang.emit_golden "$@"
+uv run python -m srpipe.tasks.command.kws.postproc.decide "$@"
