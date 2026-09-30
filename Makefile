@@ -146,14 +146,14 @@ capture-radio-off-flash: ## Flash capture that records 60 s with the radio off, 
 bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/bench, then rebuild budget.md
 	@$(call fresh_sdkconfig,$(BENCH_APP)/sdkconfig,firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.bench firmware/sdkconfig.afe $(BENCH_APP)/sdkconfig.defaults $(BENCH_APP)/CMakeLists.txt)
 	cd firmware/test_apps/bench_afe && idf.py build
-	cd firmware/test_apps/bench_afe && pytest pytest_bench_afe.py --embedded-services esp,idf --target esp32s3 --port $(PORT) -s -p no:cacheprovider
+	cd firmware/test_apps/bench_afe && pytest pytest_bench_afe.py --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) -s -p no:cacheprovider
 	python3 -m tools.budget
 
 espsr-compare: ## Run every board variant of KEHOACH 3.16 on board B into interim/scenes/afe_compare; ONLY="<item> ..." limits it
 	@$(call fresh_sdkconfig,$(ESPSR_APP)/sdkconfig,firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.bench $(ESPSR_APP)/sdkconfig.defaults $(ESPSR_APP)/CMakeLists.txt)
 	cd $(ESPSR_APP) && idf.py build
 	cd $(ESPSR_APP) && ESPSR_COMPARE_ITEMS=$(COMPARE_ITEMS) ESPSR_COMPARE_ONLY="$(ONLY)" pytest pytest_espsr_compare.py \
-	  --embedded-services esp,idf --target esp32s3 --port $(PORT) -s -p no:cacheprovider
+	  --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) -s -p no:cacheprovider
 
 parity-host: ## Run every golden case through dsp_spec, dsp_afe (modules off, all on, the product's), lang_vi and kws on the host
 	cd firmware/components/dsp_afe/test_apps/host && cmake -S . -B $(CURDIR)/$(HOST_BUILD) -DCMAKE_BUILD_TYPE=Release
@@ -173,8 +173,8 @@ parity-board: ## Run every golden case on board B: the default chain build, then
 	@$(call fresh_sdkconfig,$(PARITY_APP)/build_modules/sdkconfig,$(PARITY_DEFAULTS) firmware/sdkconfig.afe)
 	cd firmware/test_apps/parity && idf.py build
 	cd firmware/test_apps/parity && idf.py -B build_modules -D SDKCONFIG=build_modules/sdkconfig -D PARITY_PROFILE=modules build
-	cd firmware/test_apps/parity && pytest pytest_parity.py --embedded-services esp,idf --target esp32s3 --port $(PORT) --build-dir build -p no:cacheprovider
-	cd firmware/test_apps/parity && pytest pytest_parity.py --embedded-services esp,idf --target esp32s3 --port $(PORT) --build-dir build_modules -p no:cacheprovider
+	cd firmware/test_apps/parity && pytest pytest_parity.py --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) --build-dir build -p no:cacheprovider
+	cd firmware/test_apps/parity && pytest pytest_parity.py --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) --build-dir build_modules -p no:cacheprovider
 
 calib-estimate: ## Estimate balance from frontal white noise sessions: make calib-estimate SESSIONS="<dir> <dir> ..."
 	cd host && uv run --extra score python -m srhost.calib estimate $(SESSIONS)
@@ -195,7 +195,7 @@ ai-probe: ## Export the streaming TCN probe of E11-T10 and the kws size probe of
 
 ai-unit: ai-probe ## Run the ai_engine suite on board B; model slot 1 is rewritten and left erased
 	cd firmware/components/ai_engine/test_apps/unit && idf.py build && \
-	  pytest pytest_unit.py --embedded-services esp,idf --target esp32s3 --port $(PORT) -s -p no:cacheprovider
+	  pytest pytest_unit.py --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) -s -p no:cacheprovider
 
 # broker and host
 broker-up: ## Start the bench MQTT broker (needs deploy/.env and deploy/emqx/users.csv)
