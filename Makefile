@@ -119,8 +119,8 @@ ns-pilot: ## Write ns training examples and a DNSMOS report of the targets to ca
 ns-smoke: ## Train every ns candidate a few small steps on the CPU through the real loader, to time it (E9-T4)
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train python -m srpipe.tasks.ns.train --smoke
 
-ns-train: ## Train RNNoise-16k and NSNet-16k S/M/L on identical batches on the GPU into ml/artifacts/ns/runs (E9-T4)
-	cd ml && uv run --extra train python -m srpipe.tasks.ns.train
+ns-train: ## Train RNNoise-16k and NSNet-16k S/M/L on identical batches on the GPU; RESUME=<run under ml/> goes on from its last epoch (E9-T4)
+	cd ml && uv run --extra train python -m srpipe.tasks.ns.train $(if $(RESUME),--resume $(RESUME))
 
 ns-eval: ## Score the last ns run against the OM-LSA floor on the held val and test sets into its eval/ (E9-T4)
 	cd ml && uv run --extra train python -m srpipe.tasks.ns.eval score --set val \
