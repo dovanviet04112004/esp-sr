@@ -33,7 +33,7 @@ Ký hiệu: 🔬 là số ước hoặc số của tài liệu ngoài, **chưa �
 |---|---|
 | Việc | chuỗi tiếng nói đầy đủ trên board hai micro, từ thu tới nói lại, bằng mã đọc được |
 | Ngôn ngữ đích | tiếng Việt cho từ đánh thức, lệnh và tiếng nói ra |
-| Nền | `dl_fft`, `esp-dl` — hai thư viện mã mở của Espressif; `esp-dsp` được đo và loại ba lần: FFT ở ADR-0002, biquad của `hpf` ở ADR-0004, nhân phức của `balance` ở ADR-0005. **Không** link bất kỳ `.a` nào của ESP-SR (TỔNG QUAN §1) |
+| Nền | `dl_fft`, `esp-dl` — hai thư viện mã mở của Espressif; `esp-dsp` được đo và loại ba lần: FFT ở ADR-0002, biquad của `hpf` ở ADR-0004, nhân phức của `balance` ở ADR-0005. **Không** link bất kỳ `.a` nào của ESP-SR vào sản phẩm (TỔNG QUAN §1); chỗ duy nhất được link là app đo `test_apps/espsr_compare` (§3.16, §4.5.1) |
 | Chip | ESP32-S3, hai nhân Xtensa LX7 240 MHz, flash 16 MB, PSRAM 8 MB octal |
 | Đường về máy tính | MQTT cho trạng thái, số liệu, sự kiện; TCP cho tiếng khi bật tay |
 | XONG khi | mọi khối đạt cửa riêng; chạy đồng thời trong một bản dựng; liền 30 phút **0 khung mất**, heap không trôi; mọi con số dựng lại được bằng **một lệnh** `make` |
@@ -119,6 +119,7 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | Cảnh dựng bằng `pyroomacoustics` | `doa` `gsc` `bss` `ns`, đường mô phỏng board | không giới hạn | của dự án | vật liệu **có nhãn** cho mọi khối không gian (§4.4) |
 | Tiếng tổng hợp bằng TTS trên máy tính (`srpipe/tts/`, §4.4) | **`wake` dương — nguồn chính**, cụm gần âm cho âm bản; dương, cụm gần âm và nửa lệnh của `command` (§3.12); **tiếng nguồn của `synth`** (§3.13) | không giới hạn, nhiều giọng | theo giấy phép mô hình TTS dùng, ghi ở `DU_LIEU.md` | **không bao giờ** vào tập thử |
 | Thu qua chính board | tập thử của `wake` và `command`, âm bản gần âm; nhiễu phòng; tập học khi cần tiếng thật | vài người nói, ≥ 2 phòng (E11-T6) | của dự án, có phiếu đồng ý (§1.4) | nguồn **duy nhất** đúng miền thiết bị |
+| Bản thu hai kênh của repo `tinyai-signal`, dự án trước của chủ dự án, trên cùng board B | bàn so làm sạch (§3.16), **không vào split nào** | 6 tệp, ~1,5 phút: hai người nói luân phiên, đè nhau, từng người một mình, giọng cùng loa nhạc, và đầu ra chuỗi lọc của dự án ấy | của chủ dự án; tiếng người, không vào git | chép tay một lần vào `raw/device/tinyai/`, manifest có sha256 |
 
 **Sàng lọc trước mọi lần dùng** (`srpipe/core/screen.py`, luật ở `configs/common/screen.yaml`, `make screen`). Kho
 công khai có mẩu hỏng: FPT có hàng trăm mẩu câm hoàn toàn mà vẫn kèm lời, và một mẩu như thế dạy mô hình gắn chữ vào
@@ -1006,6 +1007,89 @@ biến thể bằng tỉ lệ bắt `wake` và đúng `command` trên tập thu 
 cái tai người nghe thấy; một bộ dìm nhiễu điểm PESQ cao vẫn có thể xoá đúng phần phổ mà mạng nhận
 dạng cần. Hai loại số đều ghi, nhưng chỉ loại thứ hai được quyết.
 
+### 3.16 Bàn so với bản ngoài
+
+Chuỗi làm sạch của dự án được đặt cạnh ba thứ ngoài nó, trên **cùng vật liệu** và **cùng thước**: AFE đóng của ESP-SR
+chạy trên chính board B, ba bộ dìm nhiễu công bố chạy trên máy tính, và chuỗi lọc của `tinyai-signal`, dự án trước của
+chủ dự án trên cùng board. Bàn này không thay thước quyết định của §3.15: biến thể của sản phẩm vẫn chọn bằng tỉ lệ bắt
+`wake` và đúng `command` khi hai khối ấy chạy. Nó đo sớm, bằng thước thay thế, để biết khoảng cách còn bao xa và việc
+nào đáng làm trước (E8-T5, E9-T9).
+
+**Bộ mục** khai ở `ml/configs/afe/compare.yaml`. Bước chuẩn bị (`srpipe.scenes.compare prepare`, tất định theo seed
+của cấu hình) ghi mỗi mục vào `interim/scenes/afe_compare/<mục>/`: `input.wav` hai kênh `int16` 16 kHz, `item.json` mang
+nguồn, lời và các đoạn đã biết, và với mục trộn thêm `clean.wav`, `noise.wav` là hai phần của hỗn hợp.
+
+| Mục | Nguồn | Lời | Đoạn tiếng nói và chỉ nhiễu |
+|---|---|---|---|
+| `board_read_1m` | phiên `20260928_home_005`: một đoạn văn đọc ở 1 m, phòng yên | phần sau dấu hai chấm của `prompt` trong `session.json` | tự dò |
+| `board_read_3m` | `20260928_home_007`: cùng đoạn ở 3 m | như trên | tự dò |
+| `board_read_fan` | `20260928_home_009`: cùng đoạn, quạt chạy | như trên | tự dò |
+| `board_read_music` | `20260928_home_011`: cùng đoạn, nhạc không lời | như trên | chỉ đoạn nhạc trước lời, khai tay |
+| `board_cmd_bat_den`, `board_cmd_tang_am_luong` | `20260928_home_012`, `…_018`: một lệnh nói lặp nhiều lần | lệnh, mỗi đoạn tiếng nói một lần | tự dò |
+| `mix_fan_snr5`, `mix_fan_snr0`, `mix_music_snr5`, `mix_music_snr0` | `20260928_home_005` cộng phiên nhiễu `…_008` (quạt) hay `…_010` (nhạc), cả hai thu qua board B, ở SNR 5 và 0 dB đo trên các bước có tiếng của phần sạch | như `board_read_1m` | dò trên phần sạch |
+| `tinyai_alternating`, `tinyai_overlap` | hai người nói luân phiên 30 s, và đè nhau 10 s | — | — |
+| `tinyai_talker_a`, `tinyai_talker_b` | từng người một mình, 15 s | — | — |
+| `tinyai_music_voice` | giọng nói cùng loa nhạc đặt ở 90°, 9,6 s; kèm đầu ra chuỗi lọc của `tinyai-signal` làm biến thể `tinyai` | — | — |
+
+"Tự dò" là luật năng lượng trên `ch0` của phần sạch: một bước có tiếng khi mức của nó cao hơn nền của chính mục (một
+phân vị thấp của mức các bước) quá một ngưỡng; hai quãng gần nhau hơn một khoảng thì gộp, quãng quá ngắn thì bỏ; đoạn
+chỉ nhiễu cách tiếng nói một lề. Mọi số của luật ở `compare.yaml`. Phiên có nhạc không dò được theo cách ấy, nên chỉ
+mang đoạn khai tay. Hai người nói đè nhau nằm ngoài phạm vi (§9): mục ấy để nghe tách mù của ESP-SR làm được gì, không
+để chấm đạt.
+
+**Biến thể** mang tên cố định; mỗi bên dựng ghi `<biến thể>.wav` một kênh 16 kHz vào thư mục của mục:
+
+| Biến thể | Ai dựng | Là gì |
+|---|---|---|
+| `raw_ch0` | bước chuẩn bị | `ch0` như thu |
+| `pc_mean`, `pc_gsc` | `srpipe.scenes.compare render` | `srpipe.dsp.afe.chain` trên máy tính: `hpf`, `balance` theo hiệu chuẩn board B, `doa`, `vad`, rồi trộn trần hay `gsc`; không `ns` |
+| `pc_mean_omlsa`, `pc_gsc_omlsa` | như trên | cộng `ns_omlsa` với sàn của sản phẩm, `contracts/afe.yaml` |
+| `pc_gsc_omlsa20` | như trên | `gsc` cộng `ns_omlsa` sàn −20 dB |
+| `pc_gsc_webrtc`, `pc_gsc_nsnet2`, `pc_gsc_rnnoise` | `srpipe.scenes.refs` | lối ra `pc_gsc` qua một bộ dìm nhiễu tham chiếu (dưới đây) |
+| `tinyai` | có sẵn | đầu ra chuỗi lọc của `tinyai-signal`, chỉ ở `tinyai_music_voice` |
+| `board_mean`, `board_gsc`, `board_mean_omlsa`, `board_gsc_omlsa` | `test_apps/espsr_compare` | bốn biến thể `pc_*` cùng tên đuôi, bằng `dsp_afe` C trên board |
+| `espsr_bss`, `espsr_bss_webrtc` | như trên | AFE của ESP-SR cho nhận dạng, hai micro: tách mù BSS của họ một mình, rồi cộng NS WebRTC của họ |
+| `board_gsc_espsr_webrtc`, `board_gsc_espsr_net` | như trên | lối ra `gsc` của `dsp_afe` qua NS WebRTC và NS mạng (nsnet) của ESP-SR |
+
+`agc` tắt ở mọi biến thể, của dự án lẫn của Espressif, để thước mức chỉ đo phần làm sạch; bản để nghe được cân về cùng
+độ to ở `cache/listen/afe_compare/`. Chế độ khác của ESP-SR mà app tìm thấy thì thêm biến thể `espsr_<chế độ>`. Theo tài
+liệu, NS mạng của ESP-SR chỉ mở cho loại AFE thoại chứ không cho loại nhận dạng 🔬: app kiểm trong header và ghi chế độ
+thật đã chạy.
+
+**Bộ dìm nhiễu tham chiếu** chạy trên máy tính, mỗi bộ một dự án uv ghim bản ở `ml/afe_ref/<tên>/` như `ml/tts/`, vì phụ
+thuộc của chúng đá nhau và đá `srpipe`. `srpipe.scenes.refs` gọi `run.py` của chúng qua `uv run` với một lô JSON, như
+`srpipe.tts.engines`:
+
+| Tên | Là gì | Chạy |
+|---|---|---|
+| `webrtc_ns` | bộ dìm nhiễu của WebRTC, gói `webrtc-noise-gain` | 16 kHz, khung 10 ms |
+| `nsnet2` | NSNet2, mốc của DNS Challenge (Microsoft), `nsnet2-20ms-baseline.onnx` | ONNX, 16 kHz |
+| `rnnoise` | RNNoise gốc qua `pyrnnoise` | 48 kHz: lấy mẫu lên rồi xuống |
+| `dnsmos` | DNSMOS P.835: thước không cần tiếng sạch, ra SIG, BAK, OVRL | ONNX, 16 kHz |
+
+Trọng số tải vào `cache/` theo commit ghim và sha256, không commit (CLAUDE.md §6); giấy phép của từng bộ ghi ở
+`DU_LIEU.md` khi đã kiểm.
+
+**Thước** (`srpipe.scenes.compare score`, bảng ở `docs/measurements/afe/compare.md`), một thước cho mọi biến thể:
+
+| Thước | Ở mục nào | Vì sao |
+|---|---|---|
+| CER của PhoWhisper trên lời đã biết, bằng bộ `asr_fast` của `configs/common/tts.yaml` | mục có lời | đứng thay thước bộ nhận dạng của §3.15 tới khi `wake` và `command` chạy |
+| DNSMOS SIG, BAK, OVRL | mọi mục | điểm nghe không cần tiếng sạch, dùng được cả với bản thu thật |
+| mức giảm trên bước chỉ nhiễu, mức mất trên bước có tiếng | mục biết đoạn | cùng ý với thước của `ns` (§3.9), trên bản thu thật |
+| SI-SDR, STOI so với phần sạch | mục trộn | chỉ ở đây phần sạch được biết |
+| µs mỗi khung và RAM của từng biến thể | biến thể chạy trên board | từ `test_report` của `espsr_compare` |
+
+Ô nào mục thiếu thứ thước cần thì để trống, không suy.
+
+**App `espsr_compare`** (§4.5.1, §4.5.7) là chỗ duy nhất link `espressif/esp-sr`, ghim bản chính xác trong
+`idf_component.yml` của chính nó. Bảng phân vùng riêng: app `factory`, phân vùng model của ESP-SR, và một phân vùng dữ
+liệu thô `items` chứa các `input.wav` rồi nhận các lối ra. Máy tính chép tiếng vào và ra bằng `esptool write_flash` /
+`read_flash` có checksum, không qua console, vì cầu CH340 có lúc rơi byte (§4.5.7); khuôn của phân vùng khai một lần ở
+header của app và `items.py` phía máy tính đọc hằng số từ đó, như `pack_models` đọc `storage_format.h`. App đẩy từng mục
+qua từng biến thể theo đúng nhịp khung và in chi phí của mỗi biến thể qua `test_report`. Biến thể `board_*` dựng `dsp_afe`
+với `gsc` bật, dù sản phẩm hiện tắt nó.
+
 ---
 ## 4. Cấu trúc repo
 
@@ -1159,6 +1243,7 @@ ml/
 │   │                                  #   của từng lần trích; tts.yaml: bộ TTS, bộ nghe kiểm và bộ căn
 │   │                                  #   mốc từng từ, ghim bản; screen.yaml: bố cục từng kho và ngưỡng sàng lọc (§1.2)
 │   ├── afe/{hpf.yaml, aec.yaml, doa.yaml, gsc.yaml, bss.yaml, ns_omlsa.yaml, vad.yaml, agc.yaml}  # chỉ ghi đè cho thí nghiệm; mặc định là contracts/afe.yaml
+│   ├── afe/compare.yaml               # bàn so §3.16: mục, lời, đoạn, phép trộn, seed, biến thể, luật dò đoạn
 │   ├── scenes/standard.yaml           # bộ cảnh có nhãn chuẩn của E4-T4: phòng, RT60, góc, SNR, seed
 │   ├── scenes/device.yaml             # đường mô phỏng board của E4-T8: kho phòng, mức nói, nhiễu, micro, log-mel
 │   └── models/{ns.yaml, wake.yaml, command.yaml, command_kws.yaml, command_ctc.yaml, synth.yaml, quant.yaml}
@@ -1192,6 +1277,10 @@ ml/
 │   │   │                              #   bằng đúng gain áp riêng vào từng phần (§3.9)
 │   │   ├── spatial.py                 # cảnh chuẩn của room.py qua doa, gsc, bss và trộn trần: lỗi góc theo SNR,
 │   │   │                              #   RT60, vùng góc; SIR, SDR (§3.6–3.8)
+│   │   ├── compare.py                 # bàn so §3.16: prepare dựng mục vào interim/scenes/afe_compare/, render dựng
+│   │   │                              #   biến thể pc_*, score chấm mọi biến thể bằng một thước → afe/compare.md
+│   │   ├── refs.py                    # gọi ml/afe_ref/<bộ>/run.py qua uv run với một lô JSON: dìm nhiễu tham
+│   │   │                              #   chiếu, DNSMOS
 │   │   └── device.py                  # ★ đường mô phỏng board: phòng hoặc RIR thật → dàn array.yaml → chênh micro
 │   │                                  #   đã hiệu chuẩn, pcm_shift → dsp.afe.chain → log-mel; dữ liệu học (§1.2)
 │   │
@@ -1216,10 +1305,10 @@ ml/
 │   │   ├── ns/                        # RNNoise-16k; postproc/bands.py ★
 │   │   ├── wake/                      # TCN; postproc/smooth.py ★; candidates.py chấm từ đánh thức trên kho (E11-T5)
 │   │   │                              #   bằng core/phrases.py; synth.py chọn chữ, giọng, seed, tốc độ cho dương và
-│   │   │                              #   âm bản gần âm (core/phrases.py) rồi
-│   │   │                              #   sinh qua srpipe/tts vào interim/wake/synth_{pos,neg,hard}/ (E11-T7); ngưỡng
-│   │   │                              #   độ chênh đặt trên âm bản gần âm, để chỉ 1% lọt thành dương; data.py dựng
-│   │   │                              #   split wake/v<n> (§1.3), mẩu dương người thật lấy từ kho trích hf_extract
+│   │   │                              #   âm bản gần âm (cụm của core/phrases.py) rồi sinh qua srpipe/tts vào
+│   │   │                              #   interim/wake/synth_{pos,neg,hard}/ (E11-T7); ngưỡng độ chênh đặt trên âm bản
+│   │   │                              #   gần âm, để chỉ 1% lọt thành dương; data.py dựng split wake/v<n> (§1.3), mẩu
+│   │   │                              #   dương người thật lấy từ kho trích hf_extract
 │   │   ├── command/                   # hai đường sau một hợp đồng (§3.12, ADR-0012); phần chung nằm ở gốc
 │   │   │   ├── README.md  ├── backend.py   # giao diện chung: cửa sổ đặc trưng → lệnh hoặc từ chối, kèm ba điểm
 │   │   │   ├── eval.py                # thước Cửa 3 cho cả hai đường, trên tập thu qua board
@@ -1237,6 +1326,8 @@ ml/
 │
 ├── tts/<bộ>/{pyproject.toml, uv.lock, run.py}  # mỗi bộ TTS và bộ nghe kiểm (asr) một dự án uv riêng, ghim bản:
 │                                      #   phụ thuộc của chúng đá nhau và đá torch của srpipe; srpipe/tts gọi qua uv run
+├── afe_ref/<bộ>/{pyproject.toml, uv.lock, run.py}   # webrtc_ns, nsnet2, rnnoise, dnsmos (§3.16): cùng luật như
+│                                      #   tts/; trọng số tải vào cache/ theo commit ghim và sha256
 ├── scripts/                           # đánh số theo thứ tự chạy; mỗi script một việc
 │   ├── 10_prepare.sh  ├── 11_scenes.sh
 │   ├── 20_train_ns.sh ├── 21_train_wake.sh ├── 22_train_command.sh ├── 23_train_synth.sh
@@ -1272,7 +1363,8 @@ ml/data/                                   # trong repo — chỉ siêu dữ li�
 │   ├── speech/{common_voice_vi, vivos, fpt_open, vlsp, bud500}.yaml
 │   ├── noise/{musan, demand, dns, speech_commands}.yaml
 │   ├── rir/openslr28.yaml
-│   └── device/board_b.csv                 # ★ mỗi phiên thu qua board một dòng
+│   ├── device/board_b.csv                 # ★ mỗi phiên thu qua board một dòng
+│   └── device/tinyai.yaml                 # bản thu của tinyai-signal chép tay vào raw/: nguồn, sha256, kênh, nội dung
 └── splits/                                # mỗi nhánh một thư mục, mỗi phiên bản một thư mục con
     ├── ns/v1/{train, val, test}.txt + SPLIT.md
     ├── wake/v1/{train, val, test_pos, test_neg}.txt + SPLIT.md
@@ -1284,18 +1376,20 @@ ml/data/                                   # trong repo — chỉ siêu dữ li�
 $SRPIPE_DATA_ROOT/                         # ổ ngoài — ❌ không bao giờ vào git
 ├── raw/                                   # CHỈ ĐỌC; theo loại vật liệu
 │   ├── speech/<kho>/  noise/<kho>/  rir/<kho>/   # đúng như lúc tải về
-│   └── device/board_b/<phiên>/            # ★ thu qua board; phiên = <yyyymmdd>_<phòng>_<nnn>
-│       ├── ch0.wav  ch1.wav  [ref.wav]    # 16 kHz int16, đúng như stream_rx ghi
-│       ├── session.json                   # nhãn của phiên, trường ở bảng dưới
-│       └── gaps.txt                       # các đoạn hở seq
+│   ├── device/board_b/<phiên>/            # ★ thu qua board; phiên = <yyyymmdd>_<phòng>_<nnn>
+│   │   ├── ch0.wav  ch1.wav  [ref.wav]    # 16 kHz int16, đúng như stream_rx ghi
+│   │   ├── session.json                   # nhãn của phiên, trường ở bảng dưới
+│   │   └── gaps.txt                       # các đoạn hở seq
+│   └── device/tinyai/                     # bản thu hai kênh của tinyai-signal, chép nguyên; chỉ cho bàn so §3.16
 ├── interim/                               # sinh lại được từ raw/; từ đây theo nhánh
-│   ├── scenes/<bộ>/                       # cảnh dựng có nhãn (E4-T4) cho doa gsc bss ns; kho phòng của E4-T8
+│   ├── scenes/<bộ>/                       # cảnh dựng có nhãn (E4-T4) cho doa gsc bss ns; kho phòng của E4-T8;
+│   │                                      #   afe_compare/<mục>/: input.wav, item.json, <biến thể>.wav (§3.16)
 │   ├── screen/                            # sàng lọc (§1.2): measures/<kho>.tsv số đo mọi mẩu, rejects.tsv mẩu loại
 │   └── {ns, wake, command, synth}/        # đã cắt, lấy mẫu lại, trộn, căn nhãn; TTS ở <nhánh>/synth_*:
 │                                          #   wake/synth_{pos,neg,hard}, command/synth_{pilot,pos,neg} chung hai đường
 ├── processed/{ns, wake, command, command_kws, synth}/   # đặc trưng, shard sẵn sàng nạp; command_kws: của split
 │                                          #   command_kws, tách khỏi đặc trưng của đường ctc
-└── cache/                                 # xoá lúc nào cũng được
+└── cache/                                 # xoá lúc nào cũng được; listen/afe_compare/: bản nghe đã cân độ to
 ```
 
 **Bản thu qua board vào `raw/`** vì nó là nguồn gốc, như một kho vừa tải về: `host/session.py` ghi thư
@@ -1363,14 +1457,18 @@ chứng âm cố ý vi phạm:
 | `espressif/esp-dl` | `ai_engine` | `==3.3.11`, cặp với ESP-PPQ `==1.3.11` ở `ml/pyproject.toml`; chạy dòng khớp mô phỏng từng bit ở E11-T10 |
 | `espressif/mqtt`, `espressif/cjson` | `net_mqtt` | `^`; IDF v6 đã đưa cả hai ra khỏi lõi, `REQUIRES mqtt` trơ fail ở bước giải phụ thuộc |
 | `joltwallet/littlefs` | `sys_storage` | `^` |
+| `espressif/esp-sr` | **chỉ** `test_apps/espsr_compare/main` | `==2.5.5`, bản mới nhất trên registry ngày 30/09; không dựng được trên IDF v6.0.2 thì ghim bản dựng được và sửa dòng này |
 
 **Ghim bản chính xác cho mọi thư viện tính toán.** Lý do là bài học đã trả giá ở repo face
 attendance: thêm một phụ thuộc bất kỳ làm trình quản lý giải lại cả cây, một thư viện tính toán nhảy
 bản, kernel đổi, và số trên board lệch số trên máy tính mà không dòng code nào của dự án đổi. Mọi số
 trong `docs/measurements/` chỉ đúng với đúng bản đã đo.
 
-**`espressif/esp-sr` bị cấm** trong mọi `idf_component.yml`, và `tools/check_layers.py` fail nếu thấy
-nó. Toàn bộ lý do tồn tại của repo này là TỔNG QUAN §1.
+**`espressif/esp-sr` bị cấm ở mọi nơi trừ một app đo.** Toàn bộ lý do tồn tại của repo này là TỔNG QUAN §1: `main`, mọi
+component và mọi app khác không được khai nó trong `idf_component.yml`, cũng không `REQUIRES` nó. Ngoại lệ duy nhất là
+`firmware/test_apps/espsr_compare/`, app so chuỗi của dự án với AFE của ESP-SR trên cùng board (§3.16); nó ghim bản
+chính xác trong `idf_component.yml` của chính nó, và không gì của nó đi vào sản phẩm. `tools/check_layers.py` fail khi
+thấy `esp-sr` trong manifest nằm ngoài thư mục ấy, hay trong `REQUIRES` của bất kỳ component nào.
 
 #### 4.5.2 Cây thư mục
 
@@ -1430,7 +1528,12 @@ firmware/
 │   ├── bench_mem/                    # heap đỉnh, watermark ngăn xếp, RAM tĩnh
 │   ├── soak/                         # chạy dài, đếm khung mất, theo dõi heap
 │   ├── capture/                      # ★ app chỉ thu: đẩy thô ch0 ch1 ref về máy để lấy dữ liệu
-│   └── calib/                        # ★ hiệu chuẩn balance và trễ tham chiếu, ghi NVS
+│   ├── calib/                        # ★ hiệu chuẩn balance và trễ tham chiếu, ghi NVS
+│   └── espsr_compare/                # chỗ DUY NHẤT link espressif/esp-sr (§3.16, §4.5.1): AFE của ESP-SR và dsp_afe
+│       ├── main/{idf_component.yml, items_format.h, *.c}   # esp-sr ghim ở đây; khuôn phân vùng items một chỗ
+│       ├── partitions.csv            # factory, model của ESP-SR, dữ liệu thô items cho mục vào và lối ra
+│       ├── items.py                  # phía máy tính: đóng gói input.wav vào ảnh items, tách lối ra thành <biến thể>.wav
+│       └── pytest_espsr_compare.py   # chạy app, nhận dòng chi phí qua test_report
 └── scripts/                          # rỗng có chủ ý: script ngang khối ở /tools, nạp model ở ml/scripts
 ```
 
@@ -1514,7 +1617,8 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
    `svc_front` cắm (§3.2). **`svc_dialog` không gọi `svc_listen` hay `svc_speak`**; ba bên gặp nhau qua
    hàng đợi do `app_wiring.c` nối (§5.3).
 3. `tools/check_layers.py` đọc `REQUIRES` và `PRIV_REQUIRES` trong mọi `CMakeLists.txt`, fail khi có
-   cạnh đi ngược hoặc khi thấy `espressif/esp-sr`. `tools/check_purity.py` fail khi `common`, `dsp_*`,
+   cạnh đi ngược, khi một component `REQUIRES` `espressif/esp-sr`, hay khi một `idf_component.yml` ngoài
+   `test_apps/espsr_compare/` khai nó (§4.5.1). `tools/check_purity.py` fail khi `common`, `dsp_*`,
    `lang_*` include một header FreeRTOS, driver, Wi-Fi, `esp_timer`, `esp_log` hay `esp_heap_caps`.
 
 **Ánh xạ từ TỔNG QUAN §4.2** — 18 module, không mất module nào:
@@ -1617,6 +1721,7 @@ truyền vào chỉ được kiểm là có đủ các lớp lệnh.
 | Chạy dài | `test_apps/soak/` | 30 phút cho Cửa 5, 8 giờ trước khi báo cáo |
 | Thu dữ liệu | `test_apps/capture/` | đẩy thô về `host/` |
 | Hiệu chuẩn | `test_apps/calib/` | ghi NVS `calib/*` |
+| So với ESP-SR | `test_apps/espsr_compare/` | `make espsr-compare`: `items.py` đóng gói mục của bàn so §3.16, `esptool write_flash` xuống phân vùng `items`, app chạy mọi biến thể và in chi phí qua `test_report`, `esptool read_flash` lấy lối ra về, `items.py` tách thành `<biến thể>.wav`; số vào `docs/measurements/afe/compare.md` |
 
 Case cần người đứng nói gắn tag `[manual]`; vòng tự động bỏ qua, như repo face attendance.
 
@@ -1765,7 +1870,7 @@ broker khởi động lại là mất `status` `offline` của máy đang tắt.
 |---|---|---|
 | `gen_contracts.py` | sinh mọi file ở bảng §4.2; chạy hai lần cho ra file giống hệt | `make gen`, CI |
 | `check_comments.py` | luật comment CLAUDE.md §2.3, §2.4, §2.6 | pre-commit, CI |
-| `check_layers.py` | bảng tầng §4.5.4, cấm `espressif/esp-sr` | pre-commit, CI |
+| `check_layers.py` | bảng tầng §4.5.4, cấm `espressif/esp-sr` ngoài `test_apps/espsr_compare/` (§4.5.1) | pre-commit, CI |
 | `check_purity.py` | `common`, `dsp_*`, `lang_*` không include FreeRTOS, driver, log, heap | pre-commit, CI |
 | `budget.py` | gộp CSV của `bench_*` ở `docs/measurements/bench/` thành bảng RAM và µs theo module (TỔNG QUAN V5.0.10); CSV commit cùng bảng nên `make report` dựng lại số chỉ từ repo | `make measure` |
 | `ci_status.py` | đọc kết quả GitHub Actions của một commit bằng `gh`, gắn trạng thái lên đúng commit ấy trên Gitea qua API | `make ci-status` |
@@ -2298,7 +2403,7 @@ thêm bốn mục:
 
 **Không gian**: Knapp, Carter — *The generalized correlation method for estimation of time delay*, IEEE Trans. ASSP, 1976 · Hoshuyama, Sugiyama, Hirano — *A robust adaptive beamformer for microphone arrays with a blocking matrix using constrained adaptive filters*, IEEE Trans. SP, 1999 · Ono — *Stable and fast update rules for independent vector analysis based on auxiliary function technique*, WASPAA 2011 · Ono — *Fast stereo independent vector analysis and its implementation on mobile phone*, IWAENC 2012 · Taniguchi và cộng sự — *An auxiliary-function approach to online independent vector analysis for real-time blind source separation*, HSCMA 2014 · Araki và cộng sự — *The fundamental limitation of frequency domain blind source separation for convolutive mixtures of speech*, IEEE TSAP, 2003 · [pyroomacoustics](https://github.com/LCAV/pyroomacoustics)
 
-**Dìm nhiễu**: Cohen, Berdugo — *Speech enhancement for non-stationary noise environments*, Signal Processing, 2001 · Cohen — *Noise spectrum estimation in adverse environments: improved minima controlled recursive averaging*, IEEE TSAP, 2003 · Valin — *A hybrid DSP/deep learning approach to real-time full-band speech enhancement*, 2018 · [RNNoise](https://github.com/xiph/rnnoise)
+**Dìm nhiễu**: Cohen, Berdugo — *Speech enhancement for non-stationary noise environments*, Signal Processing, 2001 · Cohen — *Noise spectrum estimation in adverse environments: improved minima controlled recursive averaging*, IEEE TSAP, 2003 · Valin — *A hybrid DSP/deep learning approach to real-time full-band speech enhancement*, 2018 · [RNNoise](https://github.com/xiph/rnnoise) · Xia và cộng sự — *Weighted speech distortion losses for neural-network-based real-time speech enhancement* (NSNet2), ICASSP 2020 · Reddy, Gopal, Cutler — *DNSMOS P.835: A non-intrusive perceptual objective speech quality metric to evaluate noise suppressors*, ICASSP 2022 · [DNS Challenge](https://github.com/microsoft/DNS-Challenge) · [WebRTC audio processing](https://webrtc.googlesource.com/src/+/refs/heads/main/modules/audio_processing/)
 
 **Nhận dạng và tổng hợp**: Graves và cộng sự — *Connectionist temporal classification*, ICML 2006 · Zhang, Suda, Lai,
 Chandra — *Hello Edge: Keyword spotting on microcontrollers*, arXiv:1711.07128, 2017 · [sanoTTS](https://arxiv.org/abs/2608.21378) — mốc TTS chưng cất trên ESP32-S3
