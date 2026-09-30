@@ -1101,16 +1101,17 @@ Trọng số tải vào `cache/` theo commit ghim và sha256, không commit (CLA
 Ô nào mục thiếu thứ thước cần thì để trống, không suy.
 
 **App `espsr_compare`** (§4.5.1, §4.5.7) là chỗ duy nhất link `espressif/esp-sr`, ghim bản chính xác trong
-`idf_component.yml` của chính nó. Bảng phân vùng riêng: app `factory`, phân vùng model của ESP-SR, và một phân vùng dữ
-liệu thô `items` chứa các `input.wav` rồi nhận các lối ra. Máy tính chép tiếng vào và ra bằng `esptool write_flash` /
-`read_flash` có checksum, không qua console, vì cầu CH340 có lúc rơi byte (§4.5.7); khuôn của phân vùng khai một lần ở
-header của app và `items.py` phía máy tính đọc hằng số từ đó, như `pack_models` đọc `storage_format.h`. Mười tám lối ra
-một kênh của cả bộ mục (~378 s) nặng ~218 MB, quá flash 16 MB, nên máy tính chạy **theo lô**: mỗi lô một mục và một nhóm
-biến thể vừa phân vùng `items`; lối ra nào là nguồn của biến thể sau (`board_gsc`, `espsr_bss`) được giữ trong PSRAM, và
-mỗi lối ra mang CRC32 do board tính để máy tính đối chiếu sau khi đọc. App đẩy mục qua từng biến thể theo đúng nhịp khung
-và in chi phí của mỗi biến thể qua `test_report`. Biến thể `board_*` dựng `dsp_afe` với `gsc` bật, dù sản phẩm hiện tắt
-nó, và dùng đúng `balance` của hiệu chuẩn board B mà bản máy tính dùng, mang theo trong ảnh `items`, để hai bên chỉ khác
-nhau ở chỗ chạy.
+`idf_component.yml` của chính nó. Bảng phân vùng riêng: `nvs` và `storage` đúng chỗ của sản phẩm để app đọc được
+`wifi/*` qua `sys_storage`, app `factory`, và phân vùng model của ESP-SR, ghi bằng `esptool write_flash`. **Tiếng vào và
+ra đi qua Wi-Fi TCP**, không qua console hay `esptool read_flash`: chiều board → máy tính của cầu CH340 qua usbipd rơi
+byte với mọi luồng dài, đo ngày 30/09 thấy `read_flash` hỏng ở mọi tốc độ baud kể cả 115200 (chủ repo duyệt 30/09). Board
+nối Wi-Fi bằng `wifi/ssid`, `wifi/pass`, mở một cổng TCP (Kconfig của app) và in địa chỉ ra console; máy tính nối tới
+board, vì WSL chạy chế độ NAT nên nhận kết nối từ LAN không được. Mỗi mục là một việc: máy tính gửi khuôn việc (tên mục,
+số mẫu, `balance` của hiệu chuẩn board B mà bản máy tính dùng, danh sách biến thể) rồi `input.wav`; board chạy lần lượt
+mọi biến thể, gửi mỗi lối ra ngay khi xong kèm trạng thái, chi phí và CRC32 do board tính, và giữ trong PSRAM chỉ những
+lối ra còn là nguồn của biến thể sau (`board_gsc`, `espsr_bss`). Khuôn việc và khuôn kết quả khai một lần ở
+`main/job_format.h`; `items.py` phía máy tính đọc hằng số từ đó, như `pack_models` đọc `storage_format.h`. App cũng in chi
+phí của mỗi biến thể qua `test_report`. Biến thể `board_*` dựng `dsp_afe` với `gsc` bật, dù sản phẩm hiện tắt nó.
 
 ---
 ## 4. Cấu trúc repo
@@ -1553,9 +1554,10 @@ firmware/
 │   ├── capture/                      # ★ app chỉ thu: đẩy thô ch0 ch1 ref về máy để lấy dữ liệu
 │   ├── calib/                        # ★ hiệu chuẩn balance và trễ tham chiếu, ghi NVS
 │   └── espsr_compare/                # chỗ DUY NHẤT link espressif/esp-sr (§3.16, §4.5.1): AFE của ESP-SR và dsp_afe
-│       ├── main/{idf_component.yml, items_format.h, *.c}   # esp-sr ghim ở đây; khuôn phân vùng items một chỗ
-│       ├── partitions.csv            # factory, model của ESP-SR, dữ liệu thô items cho mục vào và lối ra
-│       ├── items.py                  # phía máy tính: ảnh model nsnet1–3, lô items, tách lối ra thành <biến thể>.wav
+│       ├── main/{idf_component.yml, Kconfig.projbuild, job_format.h, *.c}   # esp-sr ghim ở đây; khuôn việc
+│       │                             #   và kết quả qua TCP một chỗ, cổng TCP ở Kconfig
+│       ├── partitions.csv            # nvs và storage như sản phẩm, factory, model của ESP-SR
+│       ├── items.py                  # phía máy tính: ảnh model nsnet1–3, khuôn việc, lối ra thành <biến thể>.wav
 │       └── pytest_espsr_compare.py   # chạy app, nhận dòng chi phí qua test_report
 └── scripts/                          # rỗng có chủ ý: script ngang khối ở /tools, nạp model ở ml/scripts
 ```
@@ -1744,7 +1746,7 @@ truyền vào chỉ được kiểm là có đủ các lớp lệnh.
 | Chạy dài | `test_apps/soak/` | 30 phút cho Cửa 5, 8 giờ trước khi báo cáo |
 | Thu dữ liệu | `test_apps/capture/` | đẩy thô về `host/` |
 | Hiệu chuẩn | `test_apps/calib/` | ghi NVS `calib/*` |
-| So với ESP-SR | `test_apps/espsr_compare/` | `make espsr-compare`: `items.py` đóng gói mục của bàn so §3.16, `esptool write_flash` xuống phân vùng `items`, app chạy mọi biến thể và in chi phí qua `test_report`, `esptool read_flash` lấy lối ra về, `items.py` tách thành `<biến thể>.wav`; lặp theo lô mục và nhóm biến thể; số vào `docs/measurements/afe/compare.md` |
+| So với ESP-SR | `test_apps/espsr_compare/` | `make espsr-compare`: `esptool write_flash` ảnh model của ESP-SR, board nối Wi-Fi và mở cổng TCP, máy tính gửi từng mục của bàn so §3.16 và nhận lối ra của mọi biến thể kèm CRC32 thành `<biến thể>.wav`, app in chi phí qua `test_report`; số vào `docs/measurements/afe/compare.md` |
 
 Case cần người đứng nói gắn tag `[manual]`; vòng tự động bỏ qua, như repo face attendance.
 
