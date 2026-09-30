@@ -126,3 +126,22 @@ trần. Sửa ở `ml/tts/f5/run.py` với `engines.f5.timing` của `common/tts
 khoảng 0,26 s một âm tiết, trừ lặng hai đầu), thêm 0,25 s đuôi, đỉnh chặn ở −1 dBFS. Pilot F5 phải chạy lại để nghe
 trước khi chạy bộ đủ; đổi `run.py` và cấu hình cũng đổi dấu vân tay của mẩu F5 của `wake`, nên chạy lại `wake-synth` sẽ
 sinh lại chúng.
+
+Pilot F5 chạy lại sau bản sửa (`f7f07c4`), cùng giọng, cùng chữ; mẩu VieNeu giữ nguyên dấu vân tay nên không sinh lại:
+
+| F5 | Trước sửa | Sau sửa |
+|---|---|---|
+| "bật đèn" nghe đúng | 18/32 | **31/32** |
+| "tăng âm lượng" nghe đúng | 26/32 | **32/32** |
+| "dừng lại" nghe đúng | 10/32 | 16/32, 13 mẩu nghe thành "đừng lại" |
+| âm bản nghe đúng | 15/32 | 26/32 |
+| chạm trần | 18 mẩu | 0, đỉnh −1 dBFS |
+| 30 ms cuối so với đỉnh, trung vị / tệ nhất | −22 dB / −2,6 dB | −48 dB / −17 dB |
+| độ dài trung vị | 0,54 s | 0,91 s, lặng đầu 0,26–0,38 s |
+| sinh (kể cả nạp) | 331,5 s | 378,6 s cho 128 mẩu, khoảng 2,9 s một mẩu |
+
+Không mẩu nào còn đọc lan ra câu khác. "đừng lại" nằm trong âm bản gần âm của "dừng lại", nên ngưỡng độ chênh của `select`
+quyết mẩu nào đủ gần "dừng lại" để giữ. Bộ đủ theo cấu hình hiện tại: dương 7 668 mẩu VieNeu và 6 318 mẩu F5 cho 9 lệnh,
+351 giọng nhân bản (41 người VIVOS mà split `command` giữ ở `train`, cộng 310 mẩu parquet) và 25 giọng có sẵn; âm bản 84 cụm
+(26 gần âm, 35 mở đầu, 16 nửa lệnh, 7 danh sách tay) × 10 giọng = 840 mẩu. Theo tốc độ pilot (VieNeu khoảng 0,9 s, F5
+khoảng 3,5 s một mẩu kể cả nghe lại) là khoảng 8,5 giờ trên RTX 3050 🔬.
