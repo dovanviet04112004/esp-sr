@@ -3,6 +3,16 @@
 Bàn so của KẾ HOẠCH §3.16. Bộ mục, biến thể và thước ở `ml/configs/afe/compare.yaml`; số từng mục, từng biến thể ở
 `compare.csv` cùng thư mục.
 
+## Khối không gian ESP-SR có trên S3
+
+ESP-SR 2.5.5, `managed_components` của `test_apps/espsr_compare`, 30/09:
+
+| Khối | Có cho S3 không | Căn cứ |
+|---|---|---|
+| BSS, qua AFE (SE với hai micro) | có | chạy trên board B, mục dưới |
+| GSC (`esp_gsc.h`, `gsc_core_types.h`) | không | header chỉ có ở `include/esp32p4*` và `include/esp32s31`, không ở `include/esp32s3` |
+| MASE (`esp_mase.h`: hai micro thẳng hàng hoặc ba micro vòng, khung 16 ms) | không chạy được | có header và lớp bọc `esp_mase.c` trong `libesp_audio_processor.a`, nhưng link báo thiếu `mase_create_normal_mode`, `mase_create_wake_up_mode`, `mase_process_normal_mode`, `mase_process_wake_up_mode`, `mase_destroy_normal_mode`, `mase_destroy_wake_up_mode`: không thư viện S3 nào định nghĩa chúng |
+
 ## Ba kênh ra của AFE ESP-SR
 
 Đo ngày 30/09 trên board B, ESP-SR 2.5.5, AFE loại nhận dạng, hai micro, chỉ bật SE (BSS) và VAD WebRTC, không
