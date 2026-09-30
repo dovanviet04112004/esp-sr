@@ -3,7 +3,7 @@
 prepare writes each item's input.wav (the array's channels, int16, the grid's rate), raw_ch0.wav, the variants made
 outside this repo, and item.json with the item's source, text and known segments; a mixture adds its clean and noise
 parts, the only draw, seeded by the item's name. render writes the pc_* variants with the Python chain and board B's
-calib/bal. Run: python -m srpipe.scenes.compare {prepare,render}
+calib/bal; score measures every variant written. Run: python -m srpipe.scenes.compare {prepare,render,score}
 """
 
 from __future__ import annotations
@@ -24,9 +24,11 @@ from srpipe.core.audio_io import INT16_SCALE
 from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml
 from srpipe.dsp.afe import chain
 from srpipe.generated import afe, array, grid
+from srpipe.metrics import sisdr, stoi
 from srpipe.scenes import device
 
 CONFIG = CONFIGS / "afe" / "compare.yaml"
+MEASUREMENTS = ML_ROOT.parent / "docs" / "measurements" / "afe"
 HOP = grid.HOP_SAMPLES
 FS = grid.SAMPLE_RATE_HZ
 BOARD = Path("device") / "board_b"
@@ -274,15 +276,127 @@ def render(cfg: dict, root: Path) -> list[str]:
     return [f"{job[1].name}: {', '.join(names)}" for job, names in zip(jobs, written, strict=True)]
 
 
+SIDE_FILES = ("input", "clean", "noise")
+COSTS_FILE = "board.json"
+MEASURES = ("lag_ms", "noise_db", "speech_db", "snr_gain_db", "si_sdr_db", "stoi")
+COSTS = ("status", "us_mean", "us_peak", "internal_bytes", "psram_bytes")
+
+
+def read_mono(path: Path) -> np.ndarray:
+    """A mono int16 wav, or ch0 of a wider one, as float64 in full scale."""
+    return read_pcm_any(path)[:, 0].astype(np.float64) / INT16_SCALE
+
+
+def read_pcm_any(path: Path) -> np.ndarray:
+    pcm, rate = sf.read(str(path), dtype="int16", always_2d=True)
+    if rate != FS:
+        raise ValueError(f"{path}: {rate} Hz, the set is {FS} Hz")
+    return pcm
+
+
+def lag_samples(y: np.ndarray, ref: np.ndarray, most: int, window: int) -> int:
+    """Samples y runs behind ref: the peak of their cross-correlation over the first window samples, within most."""
+    n = min(len(y), len(ref), window)
+    size = 1 << int(np.ceil(np.log2(2 * n)))
+    xc = np.fft.irfft(np.fft.rfft(y[:n], size) * np.conj(np.fft.rfft(ref[:n], size)), size)
+    lags = np.concatenate([np.arange(0, most + 1), np.arange(-most, 0)])
+    return int(lags[np.argmax(np.abs(xc[lags]))])
+
+
+def aligned(y: np.ndarray, lag: int, n: int) -> np.ndarray:
+    """y moved back by lag samples to line up with its reference, cut or zero-padded to n."""
+    out = y[lag:] if lag >= 0 else np.concatenate([np.zeros(-lag), y])
+    return np.pad(out[:n], (0, max(0, n - len(out))))
+
+
+def span_db(x: np.ndarray, spans_s: list[list[float]] | None) -> float | None:
+    """Mean power over the samples of the spans in dB of full scale; None without spans."""
+    if not spans_s:
+        return None
+    parts = [x[round(a * FS) : round(b * FS)] for a, b in spans_s]
+    power = np.mean(np.concatenate(parts) ** 2)
+    return float(10.0 * np.log10(power + ENERGY_FLOOR))
+
+
+def measure(y: np.ndarray, raw: np.ndarray, item: dict, clean: np.ndarray | None, rule: dict) -> dict:
+    """One variant against the item: its delay, its level change on noise-only and speech spans against raw_ch0,
+    their difference as a gain in SNR, and SI-SDR and STOI against the clean part when the item is a mixture."""
+    lag = lag_samples(y, raw, round(rule["align_max_s"] * FS), round(rule["align_window_s"] * FS))
+    y = aligned(y, lag, len(raw))
+    segments = item.get("segments") or {}
+    out: dict = {"lag_ms": round(1000 * lag / FS, 1)}
+    for key, spans in (("noise_db", segments.get("noise_s")), ("speech_db", segments.get("speech_s"))):
+        mine, theirs = span_db(y, spans), span_db(raw, spans)
+        out[key] = None if mine is None else round(mine - theirs, 2)
+    if out["noise_db"] is not None and out["speech_db"] is not None:
+        out["snr_gain_db"] = round(out["speech_db"] - out["noise_db"], 2)
+    if clean is not None:
+        n = min(len(y), len(clean))
+        out["si_sdr_db"] = round(sisdr.si_sdr_db(y[:n], clean[:n]), 2)
+        out["stoi"] = round(stoi.stoi_score(y[:n], clean[:n]), 3)
+    return out
+
+
+def listen_copy(y: np.ndarray, item: dict, level_dbfs: float) -> np.ndarray:
+    """y at level_dbfs over the item's speech spans, or over all of it, kept under full scale."""
+    spans = (item.get("segments") or {}).get("speech_s") or [[0.0, len(y) / FS]]
+    level = span_db(y, spans)
+    gain = 10 ** ((level_dbfs - level) / 20)
+    return y * min(gain, 0.99 / max(np.max(np.abs(y)), ENERGY_FLOOR))
+
+
+def score_item(cfg: dict, folder: Path, listen: Path) -> dict[str, dict]:
+    """Every variant written for one item: its measures, its board costs when it ran on the board, and a copy to
+    listen to in listen/<item>/."""
+    item = json.loads((folder / "item.json").read_text(encoding="utf-8"))
+    raw = read_mono(folder / f"{RAW_CH0}.wav")
+    clean = read_mono(folder / "clean.wav") if (folder / "clean.wav").exists() else None
+    costs = json.loads((folder / COSTS_FILE).read_text()) if (folder / COSTS_FILE).exists() else {}
+    rows = {}
+    for wav in sorted(folder.glob("*.wav")):
+        if wav.stem in SIDE_FILES:
+            continue
+        y = read_mono(wav)
+        rows[wav.stem] = measure(y, raw, item, clean, cfg["score"]) | {k: costs.get(wav.stem, {}).get(k) for k in COSTS}
+        out = listen / folder.name / wav.name
+        out.parent.mkdir(parents=True, exist_ok=True)
+        sf.write(str(out), listen_copy(y, item, cfg["listen"]["level_dbfs"]), FS, subtype="PCM_16")
+    for name, cost in costs.items():
+        rows.setdefault(name, {k: cost.get(k) for k in COSTS})
+    return rows
+
+
+def score(cfg: dict, root: Path, listen: Path) -> dict[str, dict[str, dict]]:
+    """score_item over every item of the set, by item then variant."""
+    return {item["name"]: score_item(cfg, root / item["name"], listen) for item in cfg["items"]}
+
+
+def write_rows(found: dict[str, dict[str, dict]], path: Path) -> None:
+    """Every item and variant with every measure and cost, one CSV row each."""
+    fields = ["item", "variant", *MEASURES, *COSTS]
+    lines = [",".join(fields)]
+    for item, rows in found.items():
+        for variant, row in sorted(rows.items()):
+            values = [item, variant, *("" if row.get(k) is None else str(row[k]) for k in (*MEASURES, *COSTS))]
+            lines.append(",".join(values))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("step", choices=["prepare", "render"])
+    parser.add_argument("step", choices=["prepare", "render", "score"])
+    parser.add_argument("--out", type=Path, help="score: the CSV of every row", default=MEASUREMENTS / "compare.csv")
     parser.add_argument("--config", type=Path, default=CONFIG)
     args = parser.parse_args(argv)
     cfg, paths = load_yaml(args.config), data_paths()
     root = paths["interim"] / "scenes" / cfg["name"]
     if args.step == "render":
         print("\n".join(render(cfg, root)))
+        return 0
+    if args.step == "score":
+        write_rows(score(cfg, root, paths["cache"] / "listen" / cfg["name"]), args.out)
+        print(f"wrote {args.out}")
         return 0
     manifest = prepare(cfg, paths["raw"], root)
     for name, digests in yaml.safe_load(manifest.read_text(encoding="utf-8"))["items"].items():

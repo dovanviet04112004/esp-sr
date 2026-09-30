@@ -241,3 +241,26 @@ def test_render_writes_each_pc_variant_through_the_python_chain(raw: Path, tmp_p
     mean, cleaned = read(tmp_path / "set/read/pc_mean.wav"), read(tmp_path / "set/read/pc_gsc_omlsa.wav")
     assert len(mean) == len(cleaned) == len(x) // HOP * HOP
     assert not np.array_equal(mean, cleaned)
+
+
+def test_score_finds_delay_and_gain_and_credits_only_a_noise_cut(raw: Path, tmp_path: Path) -> None:
+    cfg = config()
+    cfg["items"] = cfg["items"][:1]
+    root = tmp_path / "set"
+    compare.prepare(cfg, raw, root)
+    folder = root / "read"
+    x = read(folder / "raw_ch0.wav")[:, 0].astype(np.float64)
+    late = np.concatenate([np.zeros(100), 0.5 * x])[: len(x)]
+    sf.write(str(folder / "late_half.wav"), np.round(late).astype(np.int16), FS, subtype="PCM_16")
+    quiet_noise = x.copy()
+    for a, b in item_json(root, "read")["segments"]["noise_s"]:
+        quiet_noise[round(a * FS) : round(b * FS)] *= 0.1
+    sf.write(str(folder / "noise_cut.wav"), np.round(quiet_noise).astype(np.int16), FS, subtype="PCM_16")
+    rows = compare.score(cfg, root, tmp_path / "listen")["read"]
+    assert rows["raw_ch0"]["lag_ms"] == 0 and rows["raw_ch0"]["noise_db"] == 0 and rows["raw_ch0"]["snr_gain_db"] == 0
+    assert rows["late_half"]["lag_ms"] == round(1000 * 100 / FS, 1)
+    assert abs(rows["late_half"]["speech_db"] + 6.02) < 0.1 and abs(rows["late_half"]["snr_gain_db"]) < 0.1
+    assert abs(rows["noise_cut"]["noise_db"] + 20) < 0.5 and rows["noise_cut"]["snr_gain_db"] > 19
+    assert (tmp_path / "listen/read/late_half.wav").exists()
+    compare.write_rows({"read": rows}, tmp_path / "rows.csv")
+    assert (tmp_path / "rows.csv").read_text().splitlines()[0].startswith("item,variant,lag_ms")

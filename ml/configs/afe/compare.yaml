@@ -11,6 +11,9 @@ segments:                          # the energy rule of items marked auto, on ch
   min_noise_s: 0.5                 # a shorter noise-only span is left out
 listen:
   level_dbfs: -26.0                # the copies in cache/listen/<name>/ match this over their active hops
+score:                             # python -m srpipe.scenes.compare score: tables into docs/measurements/afe/
+  align_max_s: 0.3                 # widest output delay searched against raw_ch0: the AFE and the nets buffer audio
+  align_window_s: 20.0             # the start of each item the delay is read from
 workers: 8                         # items rendered at once on the PC
 chain:                             # every variant of ours runs these modules; agc stays off so levels compare
   modules: [hpf, balance, doa, vad]
