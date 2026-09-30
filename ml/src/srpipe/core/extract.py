@@ -1,9 +1,9 @@
 """Clips of real voices saying a phrase, cut from Vietnamese speech corpora on Hugging Face (KEHOACH 1.2).
 
-scan reads every source's text over HTTP and lists the rows that say a phrase of configs/common/extract.yaml; fetch
-streams only the audio that holds a match into cache/extract/<name>/whole/; cut aligns each sentence, keeps the first
-start the checker hears as the phrase alone into raw/speech/<name>/<phrase>/ and deletes the sentence. Each step
-resumes where it stopped. Run: python -m srpipe.core.extract <name> {scan,fetch,cut} [--follow]"""
+scan lists the rows whose text says a phrase of configs/common/extract.yaml; fetch streams only the audio of a match;
+cut keeps each phrase said with a pause on each side, cut into those pauses and heard alone by the checker, then deletes
+the sentence. Each step resumes; stopping fetch and cut after a few parts is a pilot to listen to before the rest.
+Run: python -m srpipe.core.extract <name> {scan,fetch,cut,report} [--follow]"""
 
 from __future__ import annotations
 
@@ -55,7 +55,8 @@ TEXT_COLUMNS = (
 )
 RETRY_CODES = (429, 500, 502, 503, 504)
 STROKED_D = str.maketrans("đĐ", "dD")
-INDEX_FIELDS = ("file", "phrase", "seconds", "origin", "text", "source", "revision", "key", "shift_s", "heard")
+INDEX_FIELDS = ("file", "phrase", "seconds", "origin", "text", "source", "revision", "key", "heard")
+LEVEL_FLOOR = 1e-12  # -120 dB: digital silence counts as quiet
 
 
 class Http:
@@ -714,10 +715,43 @@ def rarest_first(paths: Iterator[Path]) -> list[Path]:
     return sorted(phrases, key=lambda path: (min(counts[p] for p in phrases[path]), path.name))
 
 
+def quiet_run(quiet: np.ndarray, frame: int, step: int, most: int) -> int:
+    """Consecutive quiet frames from frame on, stepping by step, at most most."""
+    n = 0
+    while n < most and 0 <= frame + step * n < len(quiet) and quiet[frame + step * n]:
+        n += 1
+    return n
+
+
+def pause_bounds(x: np.ndarray, span: tuple[float, float], spec: dict) -> tuple[float, float] | None:
+    """Seconds to cut a phrase aligned at span out of its sentence x: into the pause on each side past guard_s, at most
+    margin_s past the aligned bound. None for running speech, where a side lacks min_pause_s of frames all
+    quiet_below_peak_db under the phrase's loudest (KEHOACH 3.11)."""
+    frame_s = spec["frame_s"]
+    hop = round(frame_s * grid.SAMPLE_RATE_HZ)
+    n = len(x) // hop
+    level = 10 * np.log10(np.mean(x[: n * hop].reshape(n, hop) ** 2, axis=1) + LEVEL_FLOOR)
+    first, last = int(span[0] / frame_s), min(n, int(np.ceil(span[1] / frame_s)))
+    if last <= first:
+        return None
+    quiet = level <= level[first:last].max() - spec["quiet_below_peak_db"]
+    guard, need, most = (round(spec[k] / frame_s) for k in ("guard_s", "min_pause_s", "margin_s"))
+    reach = most - guard
+    before = quiet_run(quiet, first - guard - 1, -1, reach)
+    after = quiet_run(quiet, last + guard, 1, reach)
+    if min(before, after) < need:
+        return None
+    start = first - guard - (before if before == reach else before // 2)
+    stop = last + guard + (after if after == reach else after // 2)
+    return round(start * frame_s, 3), round(stop * frame_s, 3)
+
+
 def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cache: Path) -> None:
-    """Align the sentences in batches, try each phrase's start in turn until the checker hears the phrase alone,
-    keep those clips, then delete the sentences and every try."""
+    """Align the sentences in batches, cut each phrase said with a pause on each side into those pauses, keep the
+    clips the checker hears as the phrase alone, then delete the sentences and every try."""
     spec, rate = job.cfg["cut"], grid.SAMPLE_RATE_HZ
+    if spec["guard_s"] + spec["min_pause_s"] > spec["margin_s"]:
+        raise ValueError("cut: guard_s + min_pause_s must fit inside margin_s")
     pad, ramp_s = np.zeros(round(device["session"]["pad_s"] * rate)), device["talker"]["edge_ramp_s"]
     sounds = dict(zip(job.phrases.phrases, job.phrases.sounds, strict=True))
     work = job.state / "work"
@@ -728,32 +762,25 @@ def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cach
             {"id": m["key"], "wav": str(job.whole(m["key"])), "text": " ".join(corpus.words(m["text"]))} for m in batch
         ]
         times = engines.align(asked, tts, work, cache)
-        length = {m["key"]: sf.info(str(job.whole(m["key"]))).duration for m in batch}
-        found = [
-            {"key": m["key"], "n": n, "phrase": p, "span": span, "seconds": length[m["key"]]}
-            for m in batch
-            for p in m["phrases"]
-            for n, span in enumerate(phrase_spans(times.get(m["key"], []), sounds[p]))
-        ]
-        kept, pending = {}, list(range(len(found)))
-        for r, shift in enumerate(spec["start_shifts_s"]):
-            tries = {}
-            for i in pending:
-                o = found[i]
-                start, end = max(0.0, o["span"][0] + shift), min(o["seconds"], o["span"][1] + spec["tail_s"])
-                wav = work / "tries" / f"{i}_{r}.wav"
-                write_wav(wav, np.concatenate([pad, ramped(segment(job.whole(o["key"]), start, end), ramp_s), pad]))
-                tries[f"{i}/{r}"] = {"id": f"{i}/{r}", "wav": str(wav), "cut": [start, end]}
-            heard = engines.hear_text(list(tries.values()), tts, work, cache) if tries else {}
-            still = []
-            for i in pending:
-                said = heard[f"{i}/{r}"]
-                if corpus.sounds(said) == sounds[found[i]["phrase"]]:
-                    kept[i] = {"shift_s": shift, "heard": said, "cut_s": tries[f"{i}/{r}"]["cut"]}
-                else:
-                    still.append(i)
-            pending = still
-            shutil.rmtree(work / "tries", ignore_errors=True)
+        found = []
+        for m in batch:
+            x = sf.read(str(job.whole(m["key"])), dtype="float64")[0]
+            for p in m["phrases"]:
+                for n, span in enumerate(phrase_spans(times.get(m["key"], []), sounds[p])):
+                    found.append(
+                        {"key": m["key"], "n": n, "phrase": p, "span": span, "cut": pause_bounds(x, span, spec)}
+                    )
+        paused = [i for i, o in enumerate(found) if o["cut"]]
+        tries = []
+        for i in paused:
+            wav = work / "tries" / f"{i}.wav"
+            write_wav(
+                wav, np.concatenate([pad, ramped(segment(job.whole(found[i]["key"]), *found[i]["cut"]), ramp_s), pad])
+            )
+            tries.append({"id": str(i), "wav": str(wav)})
+        heard = engines.hear_text(tries, tts, work, cache) if tries else {}
+        shutil.rmtree(work / "tries", ignore_errors=True)
+        kept = {i: heard[str(i)] for i in paused if corpus.sounds(heard[str(i)]) == sounds[found[i]["phrase"]]}
         by_key = defaultdict(list)
         for i, o in enumerate(found):
             by_key[o["key"]].append((i, o))
@@ -763,18 +790,24 @@ def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cach
                 if i not in kept:
                     continue
                 name = f"{slug(o['phrase'])}/{m['key']}__{o['n']}.wav"
-                write_wav(job.out / name, segment(job.whole(m["key"]), *kept[i]["cut_s"]))
-                clips.append({"file": name, "phrase": o["phrase"], "span_s": o["span"]} | kept[i])
-            done_write(
-                job.state / "cut" / f"{m['key']}.jsonl", [m | {"clips": clips, "found": len(by_key.get(m["key"], []))}]
-            )
+                write_wav(job.out / name, ramped(segment(job.whole(m["key"]), *o["cut"]), ramp_s))
+                clips.append(
+                    {"file": name, "phrase": o["phrase"], "span_s": o["span"], "cut_s": o["cut"], "heard": kept[i]}
+                )
+            mine = by_key.get(m["key"], [])
+            record = m | {"clips": clips, "found": len(mine), "paused": sum(o["cut"] is not None for _, o in mine)}
+            done_write(job.state / "cut" / f"{m['key']}.jsonl", [record])
             job.whole(m["key"]).unlink()
             job.whole(m["key"]).with_suffix(".json").unlink()
         for folder in work.glob("align_*"):
             shutil.rmtree(folder)
         write_index(job)
         done = min(first + spec["align_batch"], len(sentences))
-        print(f"cut: {done}/{len(sentences)} sentences, {len(kept)} of {len(found)} clips kept", flush=True)
+        print(
+            f"cut: {done}/{len(sentences)} sentences, {len(paused)} of {len(found)} phrases said with a pause,"
+            f" {len(kept)} kept",
+            flush=True,
+        )
 
 
 def write_index(job: Job) -> None:
@@ -795,7 +828,6 @@ def write_index(job: Job) -> None:
             source,
             pins[source]["revision"],
             m["key"],
-            c["shift_s"],
             c["heard"],
         )
         lines.append("\t".join(str(v).replace("\t", " ").replace("\n", " ") for v in values))
@@ -837,17 +869,18 @@ def read_index(folder: Path) -> list[dict]:
 
 
 def report(job: Job) -> str:
-    """Where the extract stands: matches found, sentences waiting, clips kept per phrase with the share of aligned
-    phrases the checker kept and the clip lengths, and the data disk's free space."""
+    """Where the extract stands: matches found, sentences waiting, aligned phrases said with a pause and the share of
+    them the checker kept, clips and their lengths per phrase, and the data disk's free space."""
     matches = defaultdict(int)
     for f in (job.state / "scan").glob("*/*.jsonl"):
         for m in read_jsonl(f):
             for p in m["phrases"]:
                 matches[p] += 1
-    kept, found, unaligned, lengths = defaultdict(int), 0, 0, defaultdict(list)
+    kept, found, paused, unaligned, lengths = defaultdict(int), 0, 0, 0, defaultdict(list)
     for f in (job.state / "cut").glob("*.jsonl"):
         for m in read_jsonl(f):
             found += m.get("found", 0)
+            paused += m.get("paused", 0)
             unaligned += m.get("found", 0) == 0
             for c in m["clips"]:
                 kept[c["phrase"]] += 1
@@ -856,7 +889,8 @@ def report(job: Job) -> str:
     free_gb = shutil.disk_usage(job.out.parent).free / 1e9
     lines = [
         f"scanned parts {sum(1 for _ in (job.state / 'scan').glob('*/*.jsonl'))}, waiting sentences {waiting},"
-        f" kept {sum(kept.values())} of {found} aligned phrases ({sum(kept.values()) / max(found, 1):.0%}),"
+        f" {paused} of {found} aligned phrases said with a pause, kept {sum(kept.values())}"
+        f" ({sum(kept.values()) / max(paused, 1):.0%} of those),"
         f" sentences without the phrase aligned {unaligned}, disk free {free_gb:.0f} GB"
     ]
     for p in job.phrases.phrases:

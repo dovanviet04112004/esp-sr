@@ -17,10 +17,12 @@ workers:
   stream: 4                        # .arrow parts read end to end at once, their audio passing through memory
 fetch_min_free_gb: 10              # fetch waits while the data disk has less free, until cut frees it
 follow_poll_s: 60                  # how often fetch --follow and cut --follow look for new work
-cut:                               # measured in wake.md §6
-  start_shifts_s: [0.0, 0.02, 0.04, 0.06]   # tried in turn after the aligned start; the first heard as the phrase
-                                   #   alone is kept
-  tail_s: 0.03                     # added to the aligned end, which runs early
+cut:                               # only a phrase said with a pause on each side is cut (KEHOACH 3.11)
+  frame_s: 0.01                    # level frames of the pause test
+  guard_s: 0.03                    # next to each aligned bound, out of the test: the aligner's error, a consonant's breath
+  min_pause_s: 0.08                # quiet each side needs past the guard; less is running speech, left out
+  margin_s: 0.15                   # most a clip keeps past each aligned bound; a shorter pause is cut in its middle
+  quiet_below_peak_db: 20.0        # every frame of a pause at least this far under the phrase's loudest frame
   align_batch: 1500                # sentences per aligner run; its peak memory grows with it
 extracts:
   hf_extract:

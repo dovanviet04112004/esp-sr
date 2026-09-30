@@ -140,34 +140,51 @@ def test_tar_shards_stream_and_keep_only_their_matches(tmp_path: Path) -> None:
     ]
 
 
-def test_a_cut_keeps_the_first_start_heard_alone_and_deletes_the_sentence(tmp_path: Path, monkeypatch) -> None:
+def spoken(seconds: float, words: list[tuple[float, float]]) -> np.ndarray:
+    """A sentence of silence with a tone over each (start, end) span, as the words a speaker says."""
+    rate = grid.SAMPLE_RATE_HZ
+    x = np.zeros(round(seconds * rate))
+    for a, b in words:
+        x[round(a * rate) : round(b * rate)] = 0.3 * np.sin(np.arange(round((b - a) * rate)) * 0.2)
+    return x
+
+
+def test_only_a_phrase_with_a_pause_each_side_is_cut_into_those_pauses(tmp_path: Path, monkeypatch) -> None:
     job = job_for(tmp_path, [{"kind": "tsv_tar", "repo": "s/g", "revision": "rev0", "synthetic": True}], FakeHttp({}))
-    match = {"key": "s_g__7_1_0", "text": "nhờ trợ lý nhé", "phrases": ["trợ lý"], "fetch": "x", "id": "7-1-0"}
-    job.save_whole(match["key"], np.zeros(2 * grid.SAMPLE_RATE_HZ), match)
-    words = [
-        {"word": "nhờ", "start": 0.1, "end": 0.4},
-        {"word": "trợ", "start": 0.5, "end": 0.7},
-        {"word": "lí", "start": 0.7, "end": 1.0},
-        {"word": "nhé", "start": 1.0, "end": 1.3},
-    ]
-    monkeypatch.setattr(extract.engines, "align", lambda clips, *a: {c["id"]: words for c in clips})
-    heard = {0: "nhờ trợ lý.", 1: "Trợ lý."}
+    words = {
+        "s_g__1": [("nhờ", 0.1, 0.4), ("trợ", 0.6, 0.8), ("lí", 0.8, 1.0), ("nhé", 1.3, 1.6)],
+        "s_g__2": [("nhờ", 0.1, 0.4), ("trợ", 0.4, 0.6), ("lý", 0.6, 0.8), ("nhé", 0.8, 1.1)],
+    }
+    for key, said in words.items():
+        text = " ".join(w for w, _, _ in said)
+        job.save_whole(
+            key, spoken(2.0, [(a, b) for _, a, b in said]), {"key": key, "text": text, "phrases": ["trợ lý"]}
+        )
+    aligned = {k: [{"word": w, "start": a, "end": b} for w, a, b in v] for k, v in words.items()}
+    monkeypatch.setattr(extract.engines, "align", lambda clips, *a: {c["id"]: aligned[c["id"]] for c in clips})
+    asked = []
     monkeypatch.setattr(
-        extract.engines, "hear_text", lambda clips, *a: {c["id"]: heard[int(c["id"][-1])] for c in clips}
+        extract.engines, "hear_text", lambda clips, *a: asked.extend(clips) or {c["id"]: "Trợ lý." for c in clips}
     )
     device = load_yaml(extract.CONFIGS / "scenes" / "device.yaml")
     extract.cut(job, {}, device, tmp_path, False)
+    spec = job.cfg["cut"]
     (clip,) = (tmp_path / "raw/speech/t/tro_ly").glob("*.wav")
-    assert abs(sf.info(str(clip)).duration - (1.0 + job.cfg["cut"]["tail_s"] - 0.52)) < 0.002
+    assert clip.stem.startswith("s_g__1") and len(asked) == 1
+    assert abs(sf.info(str(clip)).duration - (1.0 - 0.6 + 2 * spec["margin_s"])) < 0.002
+    x = sf.read(str(clip))[0]
+    assert np.abs(x[: round(0.1 * grid.SAMPLE_RATE_HZ)]).max() == 0 and np.abs(x[-160:]).max() == 0
     assert not list((tmp_path / "cache/extract/t/whole").iterdir())
     (row,) = extract.read_index(tmp_path / "raw/speech/t")
-    assert row["file"] == str(clip.relative_to(tmp_path / "raw/speech/t")) and row["shift_s"] == "0.02"
-    assert abs(row["seconds"] - sf.info(str(clip)).duration) < 0.002 and row["origin"] == "synth"
+    assert row["file"] == str(clip.relative_to(tmp_path / "raw/speech/t")) and row["origin"] == "synth"
+    assert abs(row["seconds"] - sf.info(str(clip)).duration) < 0.002
     manifest = yaml.safe_load((tmp_path / "manifests/speech/t.yaml").read_text(encoding="utf-8"))
-    assert manifest["counts"]["by_phrase"] == {"trợ lý": 1} and manifest["sources"][0]["revision"] == "rev0"
-    assert manifest["sources"][0]["synthetic"]
-    (done,) = extract.read_jsonl(next((tmp_path / "cache/extract/t/cut").glob("*.jsonl")))
-    assert done["clips"][0]["shift_s"] == 0.02 and done["clips"][0]["heard"] == "Trợ lý."
+    assert manifest["counts"]["by_phrase"] == {"trợ lý": 1} and manifest["sources"][0]["synthetic"]
+    records = {f.stem: extract.read_jsonl(f)[0] for f in (tmp_path / "cache/extract/t/cut").glob("*.jsonl")}
+    assert (records["s_g__1"]["paused"], records["s_g__2"]["paused"], records["s_g__2"]["clips"]) == (1, 0, [])
+    short = spoken(2.0, [(0.1, 0.49), (0.6, 1.0), (1.3, 1.6)])
+    start, _ = extract.pause_bounds(short, (0.6, 1.0), spec)
+    assert 0.49 < start < 0.6 - spec["guard_s"]
 
 
 def test_a_stream_that_breaks_goes_on_from_the_byte_it_reached() -> None:
