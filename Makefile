@@ -113,7 +113,7 @@ ns-data: screen ## Split, pools and held val/test sets of the ns branch into dat
 	cd ml && uv run python -m srpipe.tasks.ns.data clean && uv run python -m srpipe.tasks.ns.data split \
 	  && uv run python -m srpipe.tasks.ns.data pool && uv run python -m srpipe.tasks.ns.data sets
 
-ns-pilot: ## Write ns training examples to cache/listen/ns/pilot, to hear ahead of the GPU run (E9-T3)
+ns-pilot: ## Write ns training examples and a DNSMOS report of the targets to cache/listen/ns/pilot, to hear first (E9-T3)
 	cd ml && uv run python -m srpipe.tasks.ns.data pilot
 
 ns-smoke: ## Train every ns candidate a few small steps on the CPU through the real loader, to time it (E9-T4)

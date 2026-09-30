@@ -12,6 +12,7 @@ clean:                             # python -m srpipe.tasks.ns.data clean: one d
   cutoff_within_db: 50.0           # its cutoff: the highest frequency within this of the reference
   smooth_bins: 5                   # moving average over the 512-point Welch spectrum
   dnsmos_sample: 1500              # train clips DNSMOS scores for the pilot report; 0 skips it
+  dnsmos_refs: afe/compare.yaml    # its refs.dnsmos pins DNSMOS's weights
 split:                             # data/splits/ns/<version> (KEHOACH 1.3)
   seed: 20260930
   from: command/v1                 # its val and test rows are ns val and test; their speakers never train ns

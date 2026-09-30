@@ -28,13 +28,13 @@ from srpipe.core.audio_io import INT16_SCALE, ItemReader, ramped, to_int16, writ
 from srpipe.core.config import CONFIGS, data_paths, load_yaml
 from srpipe.dsp.spec.stft import Istft
 from srpipe.generated import grid
-from srpipe.scenes import device, room
+from srpipe.scenes import device, refs, room
 from srpipe.tasks import ns
 
 FS, HOP = grid.SAMPLE_RATE_HZ, grid.HOP_SAMPLES
 ROLES = ("train", "val", "test")
 HELD = ("val", "test")
-BABBLE_STREAM, PACK_STREAM, KIND_STREAM, EXAMPLE_STREAM = 1, 2, 3, 4
+BABBLE_STREAM, PACK_STREAM, KIND_STREAM, EXAMPLE_STREAM, DNSMOS_STREAM = 1, 2, 3, 4, 5
 SPEECH = "speech/"
 CUTOFF_FIELDS = ("item", "cutoff_hz", "seconds")
 NOISE_FIELDS = ("item", "pool", "group", "seconds")
@@ -792,7 +792,8 @@ def istft(bins: np.ndarray) -> np.ndarray:
 
 def pilot(cfg: dict, dev: dict, paths: dict) -> Path:
     """cache/listen/ns/pilot/: PILOT_PER_CLASS train examples of each foreground class and with no talker, as the
-    capture's ch0, the talker at the slot and everything else at the slot, with pilot.tsv of their draws."""
+    capture's ch0, the talker at the slot and everything else at the slot, with pilot.tsv of their draws; then the
+    DNSMOS report of the targets."""
     out = paths["cache"] / "listen" / "ns" / "pilot"
     out.mkdir(parents=True, exist_ok=True)
     mixer = Mixer(cfg, dev, paths, "train", cfg["mix"]["seed"])
@@ -816,10 +817,46 @@ def pilot(cfg: dict, dev: dict, paths: dict) -> Path:
         write_wav(out / f"{name}_target.wav", istft(ss))
         write_wav(out / f"{name}_noise.wav", istft(xs - ss))
         slot_snr = 10.0 * math.log10((power_s + POWER_TINY) / (power_n + POWER_TINY))
-        rows.append({"file": name, "slot_snr_db": round(slot_snr, 1), **e.draws})
-    fields = sorted({k for r in rows for k in r}, key=lambda k: (k != "file", k))
+        rows.append({"wav": name, "slot_snr_db": round(slot_snr, 1), **e.draws})
+    fields = sorted({k for r in rows for k in r}, key=lambda k: (k != "wav", k))
     write_tsv(out / "pilot.tsv", tuple(fields), rows)
+    if cfg["clean"]["dnsmos_sample"]:
+        dnsmos_report(cfg, paths, out)
     return out
+
+
+def dnsmos_report(cfg: dict, paths: dict, out: Path) -> list[dict]:
+    """DNSMOS P.835 of seeded train utterances as the pool holds them, how clean the targets are: dnsmos.tsv and
+    dnsmos_by_corpus.tsv in out, the latter returned."""
+    folder = pool_dir(paths, cfg, "train")
+    speech = SpeechPool(folder)
+    items = (folder / "speech_items.txt").read_text(encoding="utf-8").splitlines()
+    rng = np.random.default_rng([cfg["split"]["seed"], DNSMOS_STREAM])
+    picks = sorted(rng.choice(len(speech), size=min(cfg["clean"]["dnsmos_sample"], len(speech)), replace=False))
+    clips = {}
+    for k in picks:
+        clips[items[k]] = out / "dnsmos" / f"{k:06d}.wav"
+        write_wav(clips[items[k]], speech.utterance(int(k)))
+    spec = load_yaml(CONFIGS / cfg["clean"]["dnsmos_refs"])["refs"]["dnsmos"]
+    scores = refs.dnsmos(clips, spec, paths["cache"], paths["cache"] / "afe_ref" / "work")
+    rows = [{"item": item, **scores[item]} for item in clips]
+    write_tsv(out / "dnsmos.tsv", ("item", "sig", "bak", "ovrl"), rows)
+    summary = []
+    for corpus in sorted({corpus_name(r["item"]) for r in rows}):
+        mine = np.array([[r[k] for k in ("sig", "bak", "ovrl")] for r in rows if corpus_name(r["item"]) == corpus])
+        means, lows = mine.mean(axis=0), np.percentile(mine, 10, axis=0)
+        figures = {
+            f"{k}_{what}": round(float(v[i]), 2)
+            for what, v in (("mean", means), ("p10", lows))
+            for i, k in enumerate(("sig", "bak", "ovrl"))
+        }
+        summary.append({"corpus": corpus, "clips": len(mine), **figures})
+    write_tsv(out / "dnsmos_by_corpus.tsv", tuple(summary[0]), summary)
+    return summary
+
+
+def corpus_name(item: str) -> str:
+    return item.split("/")[1]
 
 
 def main(argv: list[str] | None = None) -> int:
