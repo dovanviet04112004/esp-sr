@@ -1,6 +1,6 @@
 # ADR-0012 — `command` có hai đường cắm cùng một hợp đồng: DS-CNN phân lớp lệnh cố định, và CRNN + CTC của ADR-0010
 
-- **Trạng thái**: Chấp nhận (30/09)
+- **Trạng thái**: Chấp nhận (30/09); mạng của `ctc` theo ADR-0013
 - **Ngày**: 2026-09-30
 - **Liên quan**: KẾ HOẠCH §3.3, §3.11, §3.12, §4.4, §4.4.1, §4.5.2, §4.5.5, §6.2, §6.3; TASKS E11-T7, E11-T8, E11-T12, E11-T13, E11-T17; ADR-0010
 

@@ -1,6 +1,6 @@
 # ADR-0010 — `command` là CRNN + CTC trên 44 đơn vị `lang_vi`, thanh chen trong chuỗi, từ log-mel 40 cộng cao độ
 
-- **Trạng thái**: Chấp nhận
+- **Trạng thái**: Chấp nhận; phần kiến trúc thay bởi ADR-0013
 - **Ngày**: 2026-09-29
 - **Liên quan**: KẾ HOẠCH §3.3, §3.11, §3.12; TASKS E11-T3, E11-T8, E11-T12
 
