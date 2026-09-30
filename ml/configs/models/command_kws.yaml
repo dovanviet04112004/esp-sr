@@ -1,0 +1,12 @@
+# The kws track of command (KEHOACH 3.12, ADR-0012): DS-CNN over one window a utterance, classes the learned commands,
+# other and silence; each hop is log-mel then pitch's POV, normalised log F0 and delta.
+features: scenes/device.yaml       # mel and pitch as the device computes them
+window_hops: 94                    # ending at the hop vad turns off after an utterance, about 1.5 s
+model:
+  size: S                          # a key of sizes; every size trains on the same split, seed and epochs (KEHOACH 3.12)
+  first_kernel: [10, 4]            # hops by feature dims
+  depthwise_kernel: [3, 3]
+  sizes:                           # Zhang et al. 2017, model_size_info of the paper's code; strides as [hops, dims]
+    S: {channels: 64, first_stride: [2, 2], strides: [[1, 1], [1, 1], [1, 1], [1, 1]]}
+    M: {channels: 172, first_stride: [2, 1], strides: [[2, 2], [1, 1], [1, 1], [1, 1]]}
+    L: {channels: 276, first_stride: [2, 1], strides: [[2, 2], [1, 1], [1, 1], [1, 1], [1, 1]]}
