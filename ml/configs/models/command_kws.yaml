@@ -16,3 +16,25 @@ probe:                             # E11-T17: every size with random weights tim
   runs: 10                         # timed runs a size on the board, after one untimed
   input_mean: 0.0                  # the network reads features normalised by train's mean and deviation
   input_std: 1.0
+split:                             # data/splits/command_kws/<version>: python -m srpipe.tasks.command.kws.data split (KEHOACH 1.3)
+  version: v1
+  seed: 20260930
+  command_split: command/v1        # its train files lend ordinary speech to other, its val.txt to val
+  val_voices: 0.2                  # of the TTS voices, each held out whole with its clones, as wake holds them
+  other_hours: {train: 8.0, val: 1.0}   # ordinary speech for other, no sentence saying a command
+  hf_extract: hf_extract           # raw/speech/<name>: the extract's real clips, no speaker ids, so train only
+  kws_vi_command:                  # the authors' own recordings, no speaker ids, so train only (DU_LIEU.md)
+    folders: [speech/kws_vi_command/dataset/data_train/dataset_1s, speech/kws_vi_command/dataset/data_test/data_1s]
+    other: [bat_het, tat_het]      # their phrases outside the command set
+    silence: speech/kws_vi_command/dataset/data_train/dataset_1s/noise   # data_test's noise repeats it byte for byte
+  silence:                         # stretches of noise with no talker for the silence class
+    pools:                         # under raw/, drawn by weight; the simulation's own pools hold MUSAN speech
+      - {dir: noise/musan/musan/noise, glob: "**/*.wav", weight: 3}
+      - {dir: noise/demand, glob: "*/ch01.wav", weight: 2}
+    count: {train: 3000, val: 300}
+    seconds: [1.0, 3.0]
+    val_files: 0.1                 # of each pool's files, held out whole for val
+simulate:                          # python -m srpipe.tasks.command.kws.data simulate, into processed/command_kws/<version>
+  workers: 6
+  pads_s: [1.6, 0.6]               # before: the 94-hop window, 0.75 s of pitch past in it; after: vad's 240 ms hangover
+  repeats: {real: 4}               # passes of a file by its source, each in rooms and noise of its own
