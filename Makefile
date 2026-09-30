@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot command-synth-pilot command-synth ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot command-synth-pilot command-synth kws-split kws-features ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -108,6 +108,12 @@ command-synth-pilot: screen ## Synthesise a few command clips and near misses to
 command-synth: screen ## Synthesise the command clips, near misses and halves, keep what the checker allows (E11-T7)
 	cd ml && uv run python -m srpipe.tasks.command.synth positives && uv run python -m srpipe.tasks.command.synth negatives \
 	  && uv run python -m srpipe.tasks.command.synth select
+
+kws-split: screen ## Cut command_kws/v1 from the command TTS, real clips, ordinary speech and noise into ml/data/splits (E11-T17)
+	cd ml && uv run python -m srpipe.tasks.command.kws.data split
+
+kws-features: ## Run each file of command_kws/v1 through the board simulation with pitch into processed/command_kws (E11-T17)
+	cd ml && uv run python -m srpipe.tasks.command.kws.data simulate
 
 ns-data: screen ## Split, pools and held val/test sets of the ns branch into data/splits/ns, interim and processed (E9-T3)
 	cd ml && uv run python -m srpipe.tasks.ns.data clean && uv run python -m srpipe.tasks.ns.data split \
