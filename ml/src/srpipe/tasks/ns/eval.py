@@ -11,6 +11,7 @@ import argparse
 import json
 import math
 import multiprocessing
+import os
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -99,38 +100,35 @@ def floor_name(floor_db: float | None) -> str:
     return "none" if floor_db is None else f"{floor_db:g}"
 
 
-def variants(powers: np.ndarray, floors: list[float | None]) -> list[dict[str, np.ndarray]]:
-    """Per example, every variant's 257 gains a hop: OM-LSA from a reset, each candidate at each floor."""
-    out = []
-    for power in powers:
-        omlsa = ns_omlsa.Omlsa()
-        out.append({OMLSA: np.stack([omlsa.process(p).gain for p in power])})
+def variants(power: np.ndarray, floors: list[float | None]) -> dict[str, np.ndarray]:
+    """One example's 257 gains a hop for every variant: OM-LSA from a reset, each candidate at each floor."""
+    omlsa = ns_omlsa.Omlsa()
+    out = {OMLSA: np.stack([omlsa.process(p).gain for p in power])}
     with torch.no_grad():
         for name, net in _nets.items():
-            gains = net(torch.from_numpy(powers))[0].numpy()
+            gains = net(torch.from_numpy(power)[None])[0][0].numpy()
             for floor in floors:
-                for example, g in zip(out, gains, strict=True):
-                    example[f"{name}@{floor_name(floor)}"] = slot_gains.floored(g, floor)
+                out[f"{name}@{floor_name(floor)}"] = slot_gains.floored(gains, floor)
     return out
 
 
 def _score_shard(task: tuple) -> list[dict]:
     stem, balance, spec, meta = task
-    capture, talker, scale, labels = (np.load(f"{stem}.{part}.npy") for part in ("capture", "talker", "scale", "vad"))
-    x = [device.slot_bins(c.T.astype(np.float64) / INT16_SCALE, balance) for c in capture]
-    s = [device.slot_bins(t.T.astype(np.float32) * f, balance) for t, f in zip(talker, scale, strict=True)]
-    powers = np.stack([(np.abs(b) ** 2).astype(np.float32) for b in x])
+    capture, talker, scale, labels = (
+        np.load(f"{stem}.{part}.npy", mmap_mode="r") for part in ("capture", "talker", "scale", "vad")
+    )
     settle = round(spec["settle_s"] * grid.SAMPLE_RATE_HZ / HOP)
     rows = []
-    for k, gains in enumerate(variants(powers, spec["floors_db"])):
-        noise_bins = x[k] - s[k]
-        refs = {"speech_ref": synthesis(s[k]), "noise_ref": synthesis(noise_bins)}
-        hops = len(refs["speech_ref"]) // HOP
-        settled = np.arange(hops) >= settle
+    for k in range(len(scale)):
+        x = device.slot_bins(np.asarray(capture[k]).T.astype(np.float64) / INT16_SCALE, balance)
+        s = device.slot_bins(np.asarray(talker[k], dtype=np.float32).T * scale[k], balance)
+        noise_bins = x - s
+        refs = {"speech_ref": synthesis(s), "noise_ref": synthesis(noise_bins)}
+        settled = np.arange(len(refs["speech_ref"]) // HOP) >= settle
         level = level_dbfs(refs["speech_ref"], labels[k]) if meta[k]["class"] != "no_talker" else None
         slices = meta[k] | {"level": bucket(level, spec["level_edges_dbfs"])}
-        for name, g in gains.items():
-            parts = refs | {"speech": synthesis(g * s[k]), "noise": synthesis(g * noise_bins)}
+        for name, g in variants((np.abs(x) ** 2).astype(np.float32), spec["floors_db"]).items():
+            parts = refs | {"speech": synthesis(g * s), "noise": synthesis(g * noise_bins)}
             for window, within in zip(WINDOWS, (settled, ~settled), strict=True):
                 rows.append({"variant": name, "window": window, **slices, **window_figures(parts, labels[k], within)})
     return rows
@@ -231,6 +229,8 @@ def score(run: Path, cfg: dict, dev: dict, paths: dict, role: str, workers: int)
         tasks.append(
             (stem, mixer.mics.gains, cfg["eval"], example_meta(mixer, items, draws, cfg["eval"]["snr_edges_db"]))
         )
+    # Spawned workers read these as they load numpy: one BLAS thread each, not one a core in each of them.
+    os.environ.update(dict.fromkeys(("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"), "1"))
     spawn = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(workers, mp_context=spawn, initializer=load_nets, initargs=(run, cfg)) as pool:
         rows = [r for shard in pool.map(_score_shard, tasks) for r in shard]
