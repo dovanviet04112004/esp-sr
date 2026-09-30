@@ -40,6 +40,7 @@ CUTOFF_FIELDS = ("item", "cutoff_hz", "seconds")
 NOISE_FIELDS = ("item", "pool", "group", "seconds")
 POWER_TINY = 1e-30
 PILOT_PER_CLASS = 4
+EPOCHS_HELD = 2  # a loader worker crosses one epoch boundary at a time
 
 
 def configs() -> tuple[dict, dict]:
@@ -531,6 +532,12 @@ class Stream:
     total: int
 
 
+def forget_old(cache: dict[int, object]) -> None:
+    """Keep the EPOCHS_HELD epochs a per-epoch cache took last."""
+    while len(cache) > EPOCHS_HELD:
+        del cache[next(iter(cache))]
+
+
 class Mixer:
     """Examples of one role (KEHOACH 3.9): every speech sample once an epoch in windows of mix.example_s, plus
     windows without a talker, each in a room of the role, with a foreground source, the room's tone, board B's
@@ -567,6 +574,7 @@ class Mixer:
             jitter = rng.uniform(-t["jitter_db"], t["jitter_db"], len(order))
             scale = 10.0 ** (jitter / 20.0) / self.speech.active_rms[order]
             self._streams[epoch] = Stream(order, start, scale, int(start[-1] + steps[-1]) if len(order) else 0)
+            forget_old(self._streams)
         return self._streams[epoch]
 
     def kinds(self, epoch: int) -> np.ndarray:
@@ -577,6 +585,7 @@ class Mixer:
             empty = round(windows * share / (1.0 - share))
             kinds = np.concatenate([np.arange(windows), -np.ones(empty, dtype=np.int64)])
             self._kinds[epoch] = kinds[np.random.default_rng([self.seed, KIND_STREAM, epoch]).permutation(len(kinds))]
+            forget_old(self._kinds)
         return self._kinds[epoch]
 
     def dry(self, epoch: int, begin: int, end: int) -> tuple[np.ndarray, np.ndarray]:

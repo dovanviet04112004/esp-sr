@@ -14,6 +14,7 @@ import hashlib
 import math
 import resource
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -75,11 +76,19 @@ def plan(cfg: dict, mixer: data.Mixer) -> Plan:
     return Plan(spec["batch"], tuple(min(f, cap) for f in firsts))
 
 
-def batch_of(examples: list[data.Example], gains: np.ndarray) -> dict[str, Tensor]:
-    """Examples at the slot: powers of the capture, of the talker alone and of the rest (batch, hops, 257), and vad."""
-    powers = [data.slot_powers(e, gains) for e in examples]
-    out = {part: torch.from_numpy(np.stack([p[k] for p in powers])) for k, part in enumerate(PARTS)}
-    return out | {"vad": torch.from_numpy(np.stack([e.vad for e in examples]).astype(np.float32))}
+def batch_of(examples: Iterable[data.Example], count: int, gains: np.ndarray) -> dict[str, Tensor]:
+    """count examples at the slot, each into its row as it comes: powers of the capture, of the talker alone and of
+    the rest (count, hops, 257), and vad; in shared memory, so a loader worker hands it over without a copy."""
+    out: dict[str, Tensor] = {}
+    for i, e in enumerate(examples):
+        powers = data.slot_powers(e, gains)
+        if not out:
+            out = {part: torch.empty((count, *powers[0].shape)).share_memory_() for part in PARTS}
+            out["vad"] = torch.empty((count, len(e.vad))).share_memory_()
+        for part, value in zip(PARTS, powers, strict=True):
+            out[part][i] = torch.from_numpy(value)
+        out["vad"][i] = torch.from_numpy(e.vad.astype(np.float32))
+    return out
 
 
 class TrainBatches(Dataset):
@@ -96,8 +105,8 @@ class TrainBatches(Dataset):
         if self.mixer is None:
             self.mixer = data.Mixer(self.cfg, self.dev, self.paths, "train", self.cfg["mix"]["seed"])
         epoch, first = self.steps.where(step)
-        examples = [self.mixer.example(epoch, j) for j in range(first, first + self.steps.batch)]
-        return batch_of(examples, self.mixer.mics.gains)
+        examples = (self.mixer.example(epoch, j) for j in range(first, first + self.steps.batch))
+        return batch_of(examples, self.steps.batch, self.mixer.mics.gains)
 
 
 class HeldBatches(Dataset):
@@ -123,11 +132,11 @@ class HeldBatches(Dataset):
         capture, talker, scale, vad = (
             np.load(f"{stem}.{part}.npy", mmap_mode="r")[lo:hi] for part in ("capture", "talker", "scale", "vad")
         )
-        examples = [
+        examples = (
             data.Example(np.asarray(c), np.asarray(t, dtype=np.float32).T * s, np.asarray(v), {})
             for c, t, s, v in zip(capture, talker, scale, vad, strict=True)
-        ]
-        return batch_of(examples, self.gains)
+        )
+        return batch_of(examples, hi - lo, self.gains)
 
 
 def single_thread(_: int) -> None:
