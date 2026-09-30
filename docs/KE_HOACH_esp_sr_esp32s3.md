@@ -82,7 +82,7 @@ Chỉ bốn khối dùng mô hình học. Mọi khối khác là công thức, k
 | `ns` | `ai_engine/src/ns/`, cắm vào khe `ns` của `dsp_afe` | RNNoise dựng lại cho 16 kHz: dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải + xác suất tiếng nói | đặc trưng dải tính từ 257 vạch | gain từng dải, nội suy ra 257 vạch | ~88 k tham số, ~90 KB int8 🔬 | kiến trúc RNNoise; **huấn luyện mới hoàn toàn** vì dải và tần số lấy mẫu khác bản gốc |
 | `wake` | `ai_engine/src/wake/` | TCN tích chập giãn nở nhân quả, 6 tầng, bước giãn 1 → 32, 64 kênh | log-mel 40 dải × khung 16 ms | xác suất từ đánh thức mỗi khung | ~100 KB int8 🔬 | tự huấn luyện |
 | `command` `kws` | `ai_engine/src/command_kws/` | DS-CNN (Zhang và cộng sự, 2017): một tích chập rồi bốn tầng tách chiều sâu, trung bình gộp, phân lớp một cửa sổ mỗi câu (ADR-0012) | log-mel 40 cộng ba chiều cao độ trên cửa sổ 94 bước tính ngược từ lúc `vad` tắt | xác suất của từng lệnh học được, `other`, `silence` | cỡ S của bài: `.espdl` 40,6 KB; M, L (156, 438 KB) quá ngân sách thời gian (§3.12) | tự huấn luyện trên mẩu lệnh người thật, TTS và âm bản |
-| `command` `ctc` | `ai_engine/src/command_ctc/` | CRNN nhỏ (tích chập rồi GRU một chiều) chạy dòng + CTC trên đơn vị của §3.12, như MultiNet; lùi về TCN nếu GRU int8 qua esp-dl không đạt trên board (ADR-0010) | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung | **≤ ~1,8 MB int8** — trần sinh ra từ bảng phân vùng §6.1 | tự huấn luyện trên kho tiếng Việt |
+| `command` `ctc` | `ai_engine/src/command_ctc/` | encoder chạy dòng theo bộ khung MultiNet7 của Espressif (ADR-0013): ba tích chập 2D giảm khung, 6 lớp chia 4 tầng tốc độ khung, mỗi lớp khối feedforward, khối tích chập có cổng và khối trộn thay attention; đầu CTC trên đơn vị của §3.12; lùi về TCN nếu một lớp của nó qua esp-dl không đạt trên board | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung | **≤ ~1,8 MB int8** — trần sinh ra từ bảng phân vùng §6.1 | tự huấn luyện trên kho tiếng Việt |
 | `synth` | `ai_engine/src/synth/` | chốt ở E12-T1: mạng chưng cất kiểu sanoTTS (trường độ → âm học → iSTFT) | chuỗi đơn vị + trường độ | PCM 16 kHz | ≤ 1 MB | tuỳ phương án; phương án không mạng nằm ở `svc_speak` (§3.13) |
 
 Runtime của cả bốn là `esp-dl`, ghim bản chính xác (§4.5.1). `esp-dl` có sẵn GRU int8
@@ -437,7 +437,7 @@ OM-LSA nằm ngay trong `dsp_afe`; bản RNNoise nằm ở `ai_engine/src/ns/` v
 | `wake` | **mô hình** | `ai_engine/src/wake/` | TCN giãn nở nhân quả int8, chạy dòng | trường nhìn ~2 s | **1,99 ms đo** mỗi bước, 64 kênh, trọng số ngẫu nhiên (`measurements/latency.md` §8) | E11-T11 |
 | `normalize` `g2p` `lexicon` | thuần | `lang_vi` | luật chính tả → đơn vị, sinh biến thể phương ngữ | `contracts/lang_vi.yaml` | chỉ lúc nạp bộ lệnh: **1,18 ms đo** mỗi lệnh, ba vùng | E11-T4 |
 | `command` `kws` | **mô hình** + thuần | `ai_engine/src/command_kws/` | DS-CNN phân lớp các lệnh đã học + `other` + `silence` trên một cửa sổ mỗi câu; từ chối theo lớp thắng, xác suất và khoảng cách nhất–nhì (ADR-0012) | cửa sổ 94 bước log-mel 40 + 3 chiều cao độ; cỡ S, M, L ở cấu hình | S **41,9 ms đo** một lần mỗi câu (22 triệu MAC; M 277 ms, L 2,03 s, `measurements/latency.md` §10); `step` chỉ chép khung, còn `pitch` tốn ~2 ms mỗi bước trên nhân 0 (`measurements/pitch.md`) | E11-T17 |
-| `command` `ctc` | **mô hình** + thuần | `ai_engine/src/command_ctc/` | mạng âm học + CTC, chấm có ràng buộc từng lệnh, từ chối theo khoảng cách với vòng tự do | | 11–18 ms mỗi 32 ms, **chỉ trong cửa sổ lệnh** | E11-T13 |
+| `command` `ctc` | **mô hình** + thuần | `ai_engine/src/command_ctc/` | encoder kiểu MultiNet7 + CTC (ADR-0013), chấm có ràng buộc từng lệnh, từ chối theo khoảng cách với vòng tự do | | 11–18 ms mỗi 32 ms, **chỉ trong cửa sổ lệnh** | E11-T13 |
 | `synth` | **mô hình** hoặc thuần | `ai_engine/src/synth/` hoặc `svc_speak` | chốt ở E12-T1 | | < 1× thời gian thực, dựng trước rồi phát | E12-T4 |
 
 Cột chi phí là **ước để kiểm kế hoạch có vừa không**, không phải số để báo cáo. Bước 4 của công thức
@@ -878,10 +878,17 @@ vào âm tiết. Chốt theo số đã công bố, không bằng phép so của 
 | Âm tiết | vài nghìn | quá nhiều ký hiệu cho mạng ≤ 1,8 MB |
 | **Nhãn thanh chen trong chuỗi CTC** | 44 | **chọn**: bộ ký hiệu nhỏ nhất, một đầu ra, `lang_vi` đã sinh và khớp từng bit |
 
-**`ctc`** — CRNN nhỏ chạy dòng (tích chập rồi GRU một chiều), CTC, int8, trọng số trong PSRAM, như MultiNet
-của Espressif trên cùng chip. GRU int8 chạy dòng qua esp-dl được thử trên board trước (E11-T12); không đạt thì lùi về TCN
-nhân quả tách chiều sâu, đường E11-T10 đã chạy khớp từng bit (ADR-0010). **Giải bằng chấm có ràng
-buộc**, không giải tham lam rồi so chuỗi:
+**`ctc`** — encoder chạy dòng cùng bộ khung với MultiNet7, mạng nhận lệnh mới nhất Espressif chạy trên chính ESP32-S3,
+dựng lại từ trọng số của nó (ADR-0013): ba tích chập 2D 3×3 (8, 32, 48 kênh) giảm khung rồi chiếu xuống bề rộng 128;
+6 lớp chia 4 tầng (1, 2, 2, 1 lớp) ở tốc độ khung ×1, ×2, ×4, ×2, hạ và nâng khung giữa các tầng; mỗi lớp ba khối
+feedforward, hai khối tích chập có cổng (nhân theo chiều sâu 17, 9, 5, 9 theo tầng) và một khối trộn thay self-attention,
+cộng một hệ số chuẩn hoá và một nhánh tắt; đầu CTC. MultiNet7 không có chiều cao độ nào và bản tiếng Trung của nó bỏ
+thanh; `ctc` giữ đặc trưng và đơn vị của ADR-0010 — log-mel 40 cộng ba chiều cao độ, 44 đơn vị có nhãn thanh — và đầu ra
+31,25 khung mỗi giây cho chuỗi đơn vị có thanh 🔬. Cỡ nằm trong trần 1,8 MB int8 của bảng mô hình, nên khối feedforward
+hẹp hơn của MultiNet7 🔬. Học CTC cộng RNN-T phụ trợ như MultiNet7, so với CTC trơn cùng seed, split và số epoch. Chạy
+int8 qua esp-dl với `StreamingCache`: một lớp encoder được xuất và chạy dòng trên board trước (E11-T12); không đạt thì
+lùi về TCN nhân quả tách chiều sâu, đường E11-T10 đã chạy khớp từng bit. **Giải bằng chấm có ràng buộc**, không giải
+tham lam rồi so chuỗi:
 
 ```
 với mỗi lệnh c, mỗi biến thể v của c:
@@ -1345,7 +1352,7 @@ ml/
 │   │   │   │                          #   srpipe/tts và core/phrases.py vào interim/command/synth_{pilot,pos,neg}/
 │   │   │   ├── kws/{model/, data.py, train.py, quant.py, postproc/}   # DS-CNN; data.py dựng split command_kws/v<n>
 │   │   │   │                          #   và đặc trưng processed/command_kws/; postproc/ ★ softmax và luật từ chối
-│   │   │   └── ctc/{data.py, model/, train.py, postproc/ctc_score.py ★}   # CRNN + CTC; data.py dựng split
+│   │   │   └── ctc/{data.py, model/, train.py, postproc/ctc_score.py ★}   # encoder kiểu MultiNet7 + CTC; data.py dựng split
 │   │   │                              #   command/v<n>, bỏ lệnh chưa học khỏi tập học (§1.3)
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
