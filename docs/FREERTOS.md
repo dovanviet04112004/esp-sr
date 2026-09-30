@@ -128,7 +128,7 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 |---|---|---|---|
 | 11.1 | Task có vòng lặp mà không đăng ký watchdog | mọi task trong bảng §5.2 đăng ký và nạp mỗi vòng | ⏳ |
 | 11.2 | Task có watchdog chặn vô hạn → watchdog kêu nhầm tên | mọi chỗ chờ có hạn (§3), hết hạn thì nạp rồi chờ tiếp | ⏳ |
-| 11.3 | IDLE1 không bao giờ chạy | `sach_task` chặn trên `q_frame` giữa hai khung; ở tải ~27% IDLE1 luôn có lượt | ⏳ |
+| 11.3 | IDLE1 không bao giờ chạy | `sach_task` chặn trên `q_frame` giữa hai khung; ở tải tới ~45% (NSNet-16k ở trần, KẾ HOẠCH §5.6) IDLE1 luôn có lượt | ⏳ |
 
 ## 12. FPU và nhân
 

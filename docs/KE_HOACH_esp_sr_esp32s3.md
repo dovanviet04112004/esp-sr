@@ -55,7 +55,7 @@ Bảng này tồn tại cho tới khi TỔNG QUAN được sửa theo (E1-T9). S
 | 9 | `command` so chuỗi âm vị với danh sách | Hai đường sau một hợp đồng (ADR-0012): **chấm CTC có ràng buộc** từng lệnh bằng thuật toán tiến, kèm **biến thể phương ngữ** (`ctc`); và **DS-CNN phân lớp** bộ lệnh cố định (`kws`), đường mặc định tới khi Cửa 3 chọn | Giải tham lam rồi so chuỗi vứt đi xác suất; tập lệnh đóng cho phép chấm thẳng từng lệnh với giá gần bằng không. `kws` chạy được trước khi cao độ, GRU chạy dòng và chấm CTC xong | §3.12 |
 | 10 | Thanh điệu: ba đường | **Nhãn thanh chen trong cùng chuỗi CTC** trên 44 đơn vị, từ **log-mel 40 cộng ba chiều cao độ** (ADR-0010) | Tài liệu: thanh phải nằm trong đơn vị và cao độ hạ lỗi rõ ở ngôn ngữ có thanh, còn cách đặt thanh không đổi lỗi gộp; một đầu ra, bộ ký hiệu nhỏ nhất | §3.11, §3.12 |
 | 11 | Từ đánh thức 2–3 âm tiết | Bản demo: **"trợ lý"**, 2 âm tiết, ưu tiên bắt được (ADR-0011); cụm 3–4 âm tiết là hướng khi siết báo nhầm | Cụm hai âm tiết dài chừng nửa giây và trùng lời nói thường nhiều hơn; đổi lại nó tự nhiên và người thật trong kho nói nó 223 lần, nên có mẫu dương giọng thật | §3.11 |
-| 12 | `ns` mạng ~24% một nhân, ~40 MFLOPS | RNNoise phải **dựng lại dải cho 16 kHz và huấn luyện lại**; ở 62,5 khung/s phần mạng ~11 MFLOP/s 🔬 | Số 40 MFLOPS là của bản 48 kHz, 100 khung/s | §3.9 |
+| 12 | `ns` mạng là RNNoise, không chọn mạng theo vạch vì đắt; ~24% một nhân, ~40 MFLOPS | **Hai ứng viên** cùng dữ liệu, cùng lưới, học trong một lượt, cắm vào cùng khe `ns` (chủ repo chốt 30/09 và 01/10): **RNNoise-16k**, dựng lại dải cho 16 kHz và huấn luyện lại, phần mạng ~11 MFLOP/s ở 62,5 khung/s 🔬; và **NSNet-16k**, mạng theo vạch họ NSNet2, cỡ tới giá của `nsnet2` ESP-SR đo trên board B (ADR-0014). Bản hơn sàn bằng thước của §3.15 thì giữ, không bản nào hơn thì giữ sàn; ADR ghi | Bàn so §3.16 thấy mạng dìm nhiễu hạ nhiễu sâu hơn sàn nhiều trên cùng lối vào (`docs/measurements/afe/compare.md`, mục "Dìm nhiễu trên cùng lối vào gsc"). Giá của mạng theo vạch nằm ở bề rộng lớp hồi tiếp, hai lớp dày vào và ra chỉ tăng tuyến tính theo số vạch, nên cỡ bằng mạng của ESP-SR vẫn vừa nhân 1 (§5.6) 🔬. Số 40 MFLOPS là của bản 48 kHz, 100 khung/s | §3.9 |
 | 13 | Task `nhan` ở nhân 1 cùng `thu` và `sach` | `nhan` ở **nhân 0** | TỔNG QUAN tự nói "một nhân không đủ", nhưng lại dồn cả ba việc liên tục vào nhân 1; cửa sổ lệnh 11–18 ms mỗi 32 ms đẩy nhân 1 quá 100% | §5.1 |
 | 14 | RAM nội ~97 KB; luật "RAM nội chỉ giữ thứ bị chạm mỗi khung" kéo trọng số `ns` và `wake` vào RAM nội | Ước lại, thiếu ba khoản: ngăn xếp mạng, trạng thái AEC thật, đệm luồng. **Mọi model — trọng số và vùng làm việc — nằm ở PSRAM**, trọng số chép từ flash lên lúc nạp | Cộng cả trọng số `ns` và `wake` vào thì RAM nội vượt phần còn cấp được sau Wi-Fi | §6.5 |
 | 15 | Mốc TTS ngoài chạy 22,05 kHz | Tiếng ra **16 kHz** | I2S song công dùng chung xung nhịp, nên phát và thu cùng một tần số | §2.4, §3.13 |
@@ -79,7 +79,8 @@ Chỉ bốn khối dùng mô hình học. Mọi khối khác là công thức, k
 
 | Nhánh | Chỗ chạy | Kiến trúc | Vào | Ra | Cỡ mục tiêu | Khởi đầu từ |
 |---|---|---|---|---|---|---|
-| `ns` | `ai_engine/src/ns/`, cắm vào khe `ns` của `dsp_afe` | RNNoise dựng lại cho 16 kHz: dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải + xác suất tiếng nói | đặc trưng dải tính từ 257 vạch | gain từng dải, nội suy ra 257 vạch | ~88 k tham số, ~90 KB int8 🔬 | kiến trúc RNNoise; **huấn luyện mới hoàn toàn** vì dải và tần số lấy mẫu khác bản gốc |
+| `ns` `rnnoise` | `ai_engine/src/ns_rnnoise/`, cắm vào khe `ns` của `dsp_afe` | **RNNoise-16k**: RNNoise dựng lại cho 16 kHz, dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải + xác suất tiếng nói (§3.9) | đặc trưng dải tính từ 257 vạch | gain từng dải, nội suy ra 257 vạch | ~88 k tham số, ~90 KB int8 🔬 | kiến trúc RNNoise; **huấn luyện mới hoàn toàn** vì dải và tần số lấy mẫu khác bản gốc |
+| `ns` `nsnet` | `ai_engine/src/ns_nsnet/`, cắm vào cùng khe | **NSNet-16k**: mạng theo vạch họ NSNet2, dày 256 → H → GRU H → GRU H → dày H → 256, một sigmoid mỗi vạch, vạch 256 lấy gain vạch 255; ba cỡ H = 96 / 128 / 144 học cùng lượt (§3.9) | log công suất 256 vạch đầu | gain 257 vạch | 161 / 264 / 325 k tham số, ~170 / 270 / 330 KB int8 🔬; giữ cỡ lớn nhất còn trong giá `nsnet2` của ESP-SR trên board B, ~4,2 ms mỗi bước và ~387 KB PSRAM (ADR-0014) | kiến trúc NSNet2; **huấn luyện mới hoàn toàn** vì NSNet2 công bố chạy khung 20 ms, 161 vạch |
 | `wake` | `ai_engine/src/wake/` | TCN tích chập giãn nở nhân quả, 6 tầng, bước giãn 1 → 32, 64 kênh | log-mel 40 dải × khung 16 ms | xác suất từ đánh thức mỗi khung | ~100 KB int8 🔬 | tự huấn luyện |
 | `command` `kws` | `ai_engine/src/command_kws/` | DS-CNN (Zhang và cộng sự, 2017): một tích chập rồi bốn tầng tách chiều sâu, trung bình gộp, phân lớp một cửa sổ mỗi câu (ADR-0012) | log-mel 40 cộng ba chiều cao độ trên cửa sổ 94 bước tính ngược từ lúc `vad` tắt | xác suất của từng lệnh học được, `other`, `silence` | cỡ S của bài: `.espdl` 40,6 KB; M, L (156, 438 KB) quá ngân sách thời gian (§3.12) | tự huấn luyện trên mẩu lệnh người thật, TTS và âm bản |
 | `command` `ctc` | `ai_engine/src/command_ctc/` | encoder chạy dòng theo bộ khung MultiNet7 của Espressif (ADR-0013): ba tích chập 2D giảm khung, 6 lớp chia 4 tầng tốc độ khung, mỗi lớp khối feedforward, khối tích chập có cổng và khối trộn thay attention; đầu CTC trên đơn vị của §3.12; lùi về TCN nếu một lớp của nó qua esp-dl không đạt trên board | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung | **theo chất lượng**, từ cỡ MultiNet7 ~2,1 MB int8 🔬 trở lên; trần là µs trên board (§3.3), bộ nhớ nới theo §6.1, §6.6 (ADR-0013) | tự huấn luyện trên kho tiếng Việt |
@@ -394,7 +395,7 @@ flowchart TB
     H1 --> I
     H2 --> I
     H3 --> I
-    I["<b>khe ns</b><br/>OM-LSA + IMCRA (dsp_afe)<br/>hoặc RNNoise-16k (ai_engine)"] --> J
+    I["<b>khe ns</b><br/>OM-LSA + IMCRA (dsp_afe)<br/>hoặc một mạng của ai_engine:<br/>RNNoise-16k hay NSNet-16k"] --> J
     J["<b>istft</b>"] --> K
     K["<b>vad</b><br/>GMM sáu dải"] --> L
     L["<b>agc</b><br/>hai tầng, chỉ thích nghi khi vad = 1"] --> M
@@ -409,12 +410,13 @@ flowchart TB
 ```
 
 Sáu chỗ khoá cứng của TỔNG QUAN §2.2 vẫn đúng. Ba chỗ đổi, đã ghi ở §0.2: `balance` sang sau STFT,
-`vad` lên trước `agc`, `ns` thành một **khe** nhận hai bản cài.
+`vad` lên trước `agc`, `ns` thành một **khe** nhận sàn hay một bản mạng.
 
 **Khe `ns` là cách giữ `dsp_afe` không biết mô hình học tồn tại.** `dsp_afe` khai một bảng hàm
 `dsp_afe_ns_ops_t` (cỡ trạng thái, khởi tạo, xử lý một khung phổ công suất ra gain 257 vạch). Bản
-OM-LSA nằm ngay trong `dsp_afe`; bản RNNoise nằm ở `ai_engine/src/ns/` và phơi ra đúng bảng hàm ấy;
-`svc_front` chọn bản nào và cắm vào lúc khởi tạo. Hướng phụ thuộc vẫn đi xuống, và `dsp_afe` vẫn dịch
+OM-LSA nằm ngay trong `dsp_afe`; hai ứng viên mạng, RNNoise-16k ở `ai_engine/src/ns_rnnoise/` và NSNet-16k ở
+`ai_engine/src/ns_nsnet/`, mỗi bản phơi ra đúng bảng hàm ấy qua `ai_engine_ns_ops()`; `svc_front` chọn bản nào và cắm
+vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đi xuống, và `dsp_afe` vẫn dịch
 được trên máy tính mà không kéo theo esp-dl.
 
 ### 3.3 Bảng chốt từng khối
@@ -431,7 +433,8 @@ OM-LSA nằm ngay trong `dsp_afe`; bản RNNoise nằm ở `ai_engine/src/ns/` v
 | `gsc` | thuần | `dsp_afe` | chùm trễ và cộng, ma trận chặn, NLMS rò có điều khiển thích nghi, vòng viết tay (ADR-0009) | μ 0,05, rò 1e-4, trần 16 | **141 µs đo**; 485 µs ở bước đổi góc lái | E8-T2 |
 | `bss` | thuần | `dsp_afe` | AuxIVA online, cập nhật IP2 kín cho 2×2, chiếu ngược | quên α ứng τ 1 s | ~400 µs | E8-T3 |
 | `ns` sàn | thuần | `dsp_afe` | OM-LSA + IMCRA | gain sàn −12 dB | **1,69 ms đo** (đỉnh 1,88); FPU của S3 tốn 4–6 chu kỳ mỗi lệnh float, không chạy chồng | E9-T1 |
-| `ns` mạng | **mô hình** | `ai_engine/src/ns/` | RNNoise dựng lại cho 16 kHz | 18–22 dải | ~0,8–1,6 ms float, ít hơn nếu int8 | E9-T5 |
+| `ns` mạng `rnnoise` | **mô hình** | `ai_engine/src/ns_rnnoise/` | RNNoise-16k: RNNoise dựng lại cho 16 kHz | 18–22 dải | ~0,8–1,6 ms float, ít hơn nếu int8 | E9-T12 |
+| `ns` mạng `nsnet` | **mô hình** | `ai_engine/src/ns_nsnet/` | NSNet-16k: mạng theo vạch họ NSNet2, một gain sigmoid mỗi vạch | 256 vạch, GRU 2 × 96–144 | tới ~4,2 ms 🔬: trần là `nsnet2` của ESP-SR trên board B, probe chọn cỡ (ADR-0014) | E9-T12 |
 | `vad` | thuần | `dsp_afe` | GMM sáu dải kiểu WebRTC, kéo dài 240 ms | bảng WebRTC ở `contracts/afe.yaml` | ~140 µs | E7-T3 |
 | `agc` | thuần | `dsp_afe` | hai tầng: chậm theo mức nói, nhanh chặn đỉnh nhìn trước 4 ms | đích −26 dBFS | ~260 µs, ~340 µs khi chặn mọi mẫu | E7-T4 |
 | `wake` | **mô hình** | `ai_engine/src/wake/` | TCN giãn nở nhân quả int8, chạy dòng | trường nhìn ~2 s | **1,99 ms đo** mỗi bước, 64 kênh, trọng số ngẫu nhiên (`measurements/latency.md` §8) | E11-T11 |
@@ -635,19 +638,45 @@ bản quyền nên chỉ lấy thuật toán và hằng số, cũng là của ha
 Octave, trên cùng tín hiệu. Thước (TỔNG QUAN V5.3.1): nhiễu bị dìm bao nhiêu dB và tiếng nói mất bao nhiêu dB, đo bằng
 cách áp đúng gain tính trên hỗn hợp vào riêng phần tiếng nói và riêng phần nhiễu, mỗi phần qua `hpf` trước như trong chuỗi.
 
-**Mạng — RNNoise dựng lại cho 16 kHz**, mô hình học, nằm ở `ai_engine/src/ns/`, cắm vào khe `ns`.
+**Mạng — hai ứng viên cùng dữ liệu, cùng lưới** (chủ repo chốt 30/09 và 01/10, ADR-0014): **RNNoise-16k** và
+**NSNet-16k**, mô hình học, mỗi bản một thư mục ở `ai_engine/src/`, cắm vào khe `ns` qua `ai_engine_ns_ops()`, đúng hợp
+đồng đã đóng băng của khe (§4.5.5). Bàn so §3.16 thấy mạng dìm nhiễu hạ nhiễu sâu hơn sàn nhiều trên cùng lối vào, đổi
+lại tiếng nói cũng mất nhiều hơn, ở cả mạng tham chiếu trên máy tính lẫn mạng của ESP-SR chạy trên board B
+(`docs/measurements/afe/compare.md`, mục "Dìm nhiễu trên cùng lối vào gsc"). Hai mạng tham chiếu trên máy tính lớn gấp
+hàng chục lần mọi ứng viên dưới đây 🔬, nên số của chúng là mốc trên chứ không phải dự đoán; mạng của ESP-SR không vào
+được sản phẩm (§0.1) nhưng cho mốc giá trên chính board B, và NSNet-16k lấy giá ấy làm trần (ADR-0014). Hai ứng viên
+khác nhau đúng ở chỗ TỔNG QUAN §3.1 cân nhắc: RNNoise để mạng chỉ tính gain của 18–22 dải, họ NSNet tính thẳng một gain
+mỗi vạch. Giá của mạng theo vạch nằm ở bề rộng lớp hồi tiếp, còn hai lớp dày vào và ra chỉ tăng tuyến tính theo số vạch,
+nên mạng theo vạch cỡ bằng mạng của ESP-SR vẫn vừa nhân 1.
+
+| Điểm | RNNoise-16k (`ns_rnnoise`) | NSNet-16k (`ns_nsnet`) |
+|---|---|---|
+| Kiến trúc | RNNoise (Valin, 2018): dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải, cộng một đầu xác suất tiếng nói | họ NSNet2 (Braun và Tashev, 2020; NSNet: Xia và cộng sự, 2020): dày 256 → H (ReLU) → GRU H → GRU H → dày H → 256 (sigmoid); ba cỡ H = 96 / 128 / 144 học cùng lượt |
+| Vào | DCT của log năng lượng 18–22 dải kiểu Bark dựng lại trên 257 vạch, 0–8 kHz, cùng đạo hàm và độ biến thiên phổ như RNNoise; không có đặc trưng cao độ, vì khe chỉ đưa công suất | log công suất 256 vạch đầu (0 – 7,97 kHz, bội 16 cho SIMD của esp-dl), chặn dưới ở một hằng số, chuẩn hoá trung bình và phương sai từng vạch theo thống kê của `train`; thống kê nằm trong ảnh model như của `wake` (§6.3) |
+| Ra khe | gain từng dải nội suy tuyến tính ra 257 vạch, nên vẫn trong 0..1; đầu xác suất tiếng nói vào `speech_prob` | một gain sigmoid mỗi vạch, vạch 256 (8 kHz, trên dải mel) lấy gain vạch 255; `speech_prob` là phần công suất 300 – 3 400 Hz mà gain cho qua. Chuỗi không đọc `speech_prob`: cờ `vad` là của GMM (§3.10) |
+| Trọng số công bố | không dùng được: 22 dải gốc trải tới 20 kHz ở 48 kHz | không dùng được: NSNet2 chạy khung 20 ms, 161 vạch |
+| Bộ lọc cao độ | bỏ. Nó cần dò cao độ mỗi khung, tốn hơn cả phần mạng, và cần phổ phức của khung cùng của khung trễ theo cao độ, còn khe chỉ đưa công suất và nhận gain thực: giữ nó trên board là đổi hợp đồng đã đóng băng (§4.5.5). E9-T6 thử nó trên máy tính, chỉ khi bản này được giữ | không có |
+| Cỡ | ~88 k tham số, ~90 KB int8 🔬 | S / M / L: 161 / 264 / 325 k tham số, ~170 / 270 / 330 KB int8 🔬; probe trên board giữ cỡ lớn nhất có thời gian trung bình ≤ ~4,2 ms và PSRAM ≤ ~387 KB, giá của `nsnet2` ESP-SR đo trên board B (ADR-0014) |
+| Chi phí | 88 k trọng số × 2 phép tính × 62,5 khung/s ≈ **11 MFLOP/s** cho phần mạng, cỡ 5–10% một nhân float 🔬. TỔNG QUAN ghi ~24% từ con số 40 MFLOPS của bản 48 kHz, 100 khung/s | 10 / 16 / 20 MMAC/s cho S / M / L, cộng 256 phép log mỗi bước, ~0,2 ms 🔬; 2–8 ms mỗi bước tuỳ cỡ và tốc độ đọc PSRAM 🔬, probe quyết |
+
+Chung cho hai ứng viên:
 
 | Điểm | Chốt |
 |---|---|
-| Dải | dựng lại 18–22 dải kiểu Bark trên 257 vạch, 0–8 kHz. 22 dải gốc trải tới 20 kHz ở 48 kHz nên **không dùng lại được trọng số công bố** |
-| Bộ lọc cao độ | bỏ ở bản đầu; thêm lại nếu E9-T6 thấy có lợi. Nó cần dò cao độ mỗi khung, tốn hơn cả phần mạng |
-| Huấn luyện | tiếng Việt sạch trộn nhiễu của §1.2 cộng nhiễu phòng dùng, qua RIR, ở đúng lưới §3.1 |
-| Chạy | `esp-dl` GRU int8; mã suy luận C của RNNoise là phương án lùi |
-| Chi phí | 88 k trọng số × 2 phép tính × 62,5 khung/s ≈ **11 MFLOP/s** cho phần mạng, cỡ 5–10% một nhân float 🔬. TỔNG QUAN ghi ~24% từ con số 40 MFLOPS của bản 48 kHz, 100 khung/s |
-| Chỗ đặt trọng số | ~90 KB, bị chạm **mỗi khung**, nằm ở PSRAM như mọi model (§6.5); E9-T7 đo độ trễ đỉnh một khung |
+| Huấn luyện | tiếng Việt sạch trộn nhiễu của §1.2 cộng nhiễu phòng dùng, qua RIR, ở đúng lưới §3.1. Vào là công suất lối ra không gian của đường mô phỏng board (§1.2), đúng thứ khe nhận trên máy. **Một lượt học** cho RNNoise-16k và ba cỡ NSNet-16k trên cùng batch, cùng seed, cùng số epoch, split `ns/v<n>`; dùng **mọi mẩu tiếng sạch qua luật sạch và mọi file nhiễu đã sàng lọc, không trần giờ**. Common Voice không vào tập học: người nói của nó là giọng thử của `wake` và `command`; `val` và `test` là của `command/v1`. So bằng số sau int8 (§1.3) |
+| Trần cỡ | RNNoise-16k: ~90 KB int8 🔬. NSNet-16k: tới giá của `nsnet2` ESP-SR trên board B, ~4,2 ms mỗi bước và ~387 KB PSRAM (ADR-0014): nhân 1 tới ~45% ở trường hợp nặng nhất, vẫn trong mục tiêu của §5.6; §6.1 và §6.6 tính ~340 KB trong slot và ~390 KB PSRAM cho `ns`. Vượt giá ấy phải kèm ADR mới, không lặng lẽ nới |
+| Chạy | GRU int8 của `esp-dl`. GRU ấy bắt đầu mỗi lần chạy từ `initial_h` hay từ 0, nên trạng thái ẩn của từng GRU là một cặp tensor vào và ra của mạng, chép lại sau mỗi bước; chạy dòng kiểm như `wake` (E11-T10): nhiều bước khớp từng bit mô phỏng cả chuỗi. Probe có trạng thái chạy trên board với trọng số ngẫu nhiên trong lúc học (E9-T10), trước khi lượng tử bản đã học. Phương án lùi: lớp dày và GRU int8 viết tay bằng C, như mã suy luận của RNNoise |
+| Tiền và hậu xử lý | C thuần trong thư mục của ứng viên, soi gương `srpipe.tasks.ns`, bộ vàng có đối chứng âm (§3.14). Mạng ra logit, sigmoid tính ở hậu xử lý bằng float, vì int8 không biểu diễn được gain 1 |
+| Trạng thái | trạng thái GRU và lịch sử đặc trưng nằm trong vùng trạng thái của khe, nên `dsp_afe_reset` xoá được chúng; trọng số và tensor của esp-dl nằm ở PSRAM của `ai_engine` |
+| Chỗ đặt trọng số | bị chạm **mỗi khung**, nằm ở PSRAM như mọi model (§6.5); E9-T7 đo độ trễ đỉnh một khung của từng ứng viên |
+| Vọng dư | bản đầu không đọc `echo_power`: chưa có loa thì chưa có vọng để học (E10). Sàn cộng vọng dư vào ước lượng nhiễu, nên chuỗi `"MMR"` chạy sàn tới khi bản được giữ học với phổ vọng dư |
+| Dựng và cắm | Kconfig `AI_ENGINE_NS_BACKEND` đưa tối đa một ứng viên vào bản dựng (§4.5.2); `meta.json` của ảnh model khai ứng viên (§6.3). `svc_front` cắm `ai_engine_ns_ops()` khi hàm ấy khác `NULL` và luật vọng dư ở trên cho phép, không thì để khe trống và chuỗi chạy sàn |
 
-**Luật chọn** giữ nguyên: bản mạng phải hơn sàn bằng số đo, không hơn thì bỏ (Cửa 1) — với thước
-quyết định của §3.15.
+**Luật chọn**: sàn, và hai ứng viên sau int8, chấm trên cùng vật liệu bằng thước quyết định của §3.15. Bản hơn sàn thì
+giữ; cả hai hơn sàn thì giữ bản cao hơn, còn khi hai bản ngang nhau trong sai số của tập thử thì giữ bản rẻ hơn về µs
+đỉnh và PSRAM; không bản nào hơn sàn thì bỏ cả hai và giữ sàn (Cửa 1). Thước chạy với `wake` và `command` đã học trên
+chuỗi có sàn, trên phiên thu qua board có nhiễu, cho cả ba biến thể; chỉ bản thắng được học lại `wake` và `command` để
+xác nhận. ADR ghi bảng ba cột, và bản được giữ thành mặc định của `AI_ENGINE_NS_BACKEND`.
 
 ### 3.10 `vad` và `agc`
 
@@ -1283,8 +1312,10 @@ ml/
 │   ├── scenes/standard.yaml           # bộ cảnh có nhãn chuẩn của E4-T4: phòng, RT60, góc, SNR, seed
 │   ├── scenes/device.yaml             # đường mô phỏng board của E4-T8: kho phòng, mức nói, nhiễu, micro, log-mel
 │   └── models/{ns.yaml, wake.yaml, command.yaml, command_kws.yaml, command_ctc.yaml, synth.yaml, quant.yaml}
-│                                      #   command.yaml: đường sản phẩm (backend), đặc trưng; command_kws.yaml,
-│                                      #   command_ctc.yaml: split, mạng, lịch học của từng đường; quant.yaml: thang §3.14
+│                                      #   ns.yaml: split, bộ trộn, hai ứng viên và lịch học chung của khe ns
+│                                      #   (§3.9); command.yaml: đường sản phẩm (backend), đặc trưng;
+│                                      #   command_kws.yaml, command_ctc.yaml: split, mạng, lịch học của từng
+│                                      #   đường; quant.yaml: thang §3.14
 │
 ├── src/srpipe/
 │   ├── core/                          # ── HẠ TẦNG: không chứa tên khối nào ──
@@ -1338,7 +1369,12 @@ ml/
 │   ├── tasks/                         # ── MÔ HÌNH HỌC, mỗi nhánh một thư mục độc lập ──
 │   │   │   Cùng khuôn: README · model/ · data.py · train.py · eval.py · quant.py · postproc/
 │   │   │   ★ postproc/ là phần phải khớp 1:1 với ai_engine/src/<nhánh>/, kiểm bằng golden
-│   │   ├── ns/                        # RNNoise-16k; postproc/bands.py ★
+│   │   ├── ns/{README.md, data.py, model/{rnnoise.py, nsnet.py}, postproc/{bands.py ★, bins.py ★}, train.py,
+│   │   │    eval.py, quant.py}        # hai ứng viên học trong một lượt trên cùng batch (§3.9); data.py dựng
+│   │   │                              #   split ns/v<n>, kho giải mã sẵn và bộ trộn lúc học; postproc: dải của
+│   │   │                              #   RNNoise-16k, log công suất và gain từng vạch của NSNet-16k; eval.py
+│   │   │                              #   chấm sàn và các ứng viên trên cùng vật liệu, mạng vào khe ns của
+│   │   │                              #   dsp.afe.chain như một hàm, dsp/ không biết nó
 │   │   ├── wake/                      # TCN; postproc/smooth.py ★; candidates.py chấm từ đánh thức trên kho (E11-T5)
 │   │   │                              #   bằng core/phrases.py; synth.py chọn chữ, giọng, seed, tốc độ cho dương và
 │   │   │                              #   âm bản gần âm (cụm của core/phrases.py) rồi sinh qua srpipe/tts vào
@@ -1393,7 +1429,7 @@ Hai câu hỏi, hai cách chia:
 | Câu hỏi | Trả lời | Vì sao |
 |---|---|---|
 | Nằm ở đâu? | **Siêu dữ liệu** (`README.md`, `manifests/`, `splits/`) ở `ml/data/` trong repo, commit. **Dữ liệu** (`raw/`, `interim/`, `processed/`, `cache/`) ở `SRPIPE_DATA_ROOT`, không bao giờ vào git | kho tiếng hàng trăm GB nằm ổ khác; thứ để dựng lại kết quả thì phải đi theo commit |
-| Chia thế nào? | `raw/` theo **loại vật liệu**; từ `interim/` trở đi theo **nhánh** | một kho tiếng phục vụ nhiều nhánh — Common Voice là dữ liệu học của `command`, âm bản của `wake`, tiếng sạch để trộn của `ns` — nên tải một lần; xử lý và chia tập thì mỗi nhánh một kiểu |
+| Chia thế nào? | `raw/` theo **loại vật liệu**; từ `interim/` trở đi theo **nhánh** | một kho tiếng phục vụ nhiều nhánh — Common Voice là dữ liệu học của `command` và âm bản của `wake`, VIVOS là tiếng sạch để trộn của `ns` lẫn tập thử của `command` — nên tải một lần; xử lý và chia tập thì mỗi nhánh một kiểu |
 
 ```
 ml/data/                                   # trong repo — chỉ siêu dữ liệu, ✅ commit
@@ -1543,8 +1579,10 @@ firmware/
 │   ├── drv_led/       [C]   L2  # LED trạng thái và riêng tư
 │   ├── sys_storage/   [C]   L2  # NVS + LittleFS + mmap ảnh model; sở hữu storage_format.h
 │   ├── sys_time/      [C]   L2  # SNTP
-│   ├── ai_engine/     [C++] L3  # esp-dl; src/core/ không biết tên model; src/{ns,wake,command_kws,command_ctc,synth}/;
-│   │                            #   Kconfig AI_ENGINE_COMMAND_BACKEND chọn một thư mục command_* vào danh sách nguồn
+│   ├── ai_engine/     [C++] L3  # esp-dl; src/core/ không biết tên model;
+│   │                            #   src/{ns,ns_rnnoise,ns_nsnet,wake,command_kws,command_ctc,synth}/;
+│   │                            #   Kconfig AI_ENGINE_NS_BACKEND chọn một thư mục ns*, AI_ENGINE_COMMAND_BACKEND
+│   │                            #   một thư mục command_* vào danh sách nguồn
 │   ├── net_wifi/      [C]   L3
 │   ├── net_mqtt/      [C]   L3  # include/gen_topics.h, gen_payload.h
 │   ├── net_stream/    [C]   L3  # TCP khách, đẩy khung theo khuôn contracts/stream
@@ -1581,6 +1619,12 @@ firmware/
 mặc định `kws`) đưa đúng một trong `src/command_kws/`, `src/command_ctc/` vào danh sách nguồn theo luật 5 của §4.5.3;
 `REQUIRES` không đổi. Hai thư mục cài cùng ba hàm `ai_engine_command_*`, nên `svc_listen` không biết đường nào đang chạy
 ngoài mã lỗi khi đổi bộ lệnh.
+
+**Ứng viên của `ns` chọn lúc dựng** (§3.9). Kconfig `AI_ENGINE_NS_BACKEND` của `ai_engine` (`none` | `rnnoise` |
+`nsnet`, mặc định `none` tới khi ADR của E9-T12 chọn) đưa đúng một trong `src/ns/`, `src/ns_rnnoise/`, `src/ns_nsnet/`
+vào danh sách nguồn theo luật 5 của §4.5.3; `REQUIRES` không đổi. `src/ns/` là vỏ trung tính của `none`:
+`ai_engine_ns_ops()` trả `NULL`, và bản dựng không mang mã hay bộ nhớ của mạng nào. Hai thư mục ứng viên cài cùng hàm
+ấy; ảnh model không có mục của ứng viên đã dựng thì hàm cũng trả `NULL`, và `svc_front` để khe trống cho chuỗi chạy sàn.
 
 **App khung rỗng của TỔNG QUAN V5.0.9 không phải app thứ hai.** Nó là `main` khi mọi module của
 `dsp_afe` còn tắt trong Kconfig: thu → STFT → iSTFT → gửi ra. Một app khung riêng sẽ trôi khỏi `main`
@@ -1653,7 +1697,7 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 1. Không component nào `REQUIRES` lên tầng trên hoặc ngang tầng, **không ngoại lệ**. Hai component
    cùng tầng cần nhau nghĩa là một trong hai đặt sai tầng: hạ nó xuống. Đây chính là lý do `g2p`
    rời `mica_kws` của TỔNG QUAN xuống `lang_vi` ở L1: cả `svc_listen` lẫn `svc_speak` cần nó.
-2. **`dsp_afe` không biết `ai_engine` tồn tại.** RNNoise vào chuỗi qua khe `dsp_afe_ns_ops_t`, do
+2. **`dsp_afe` không biết `ai_engine` tồn tại.** Mạng dìm nhiễu của `ai_engine` vào chuỗi qua khe `dsp_afe_ns_ops_t`, do
    `svc_front` cắm (§3.2). **`svc_dialog` không gọi `svc_listen` hay `svc_speak`**; ba bên gặp nhau qua
    hàng đợi do `app_wiring.c` nối (§5.3).
 3. `tools/check_layers.py` đọc `REQUIRES` và `PRIV_REQUIRES` trong mọi `CMakeLists.txt`, fail khi có
@@ -1668,7 +1712,7 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | `mica_spec/{fft, window, stft, mel}` | `dsp_spec/{fft, window, stft, mel}` |
 | `mica_afe/{hpf, balance, aec, doa, gsc, agc, vad}` | `dsp_afe/{hpf, balance, aec, doa, gsc, agc, vad}` |
 | `mica_afe/mase` | `dsp_afe/bss` |
-| `mica_afe/ns` | sàn `dsp_afe/ns_omlsa` + mạng `ai_engine/src/ns/`, cùng khe `ns` |
+| `mica_afe/ns` | sàn `dsp_afe/ns_omlsa` + mạng `ai_engine/src/ns_rnnoise/` hoặc `ai_engine/src/ns_nsnet/`, cùng khe `ns` |
 | `mica_kws/feature` | `dsp_spec/mel`, cộng `dsp_spec/pitch` cho `command` (ADR-0010); chuẩn hoá đi theo model trong `ai_engine` |
 | `mica_kws/g2p` | `lang_vi/{normalize, g2p, lexicon}` |
 | `mica_kws/wake` | `ai_engine/src/wake/` |
@@ -1677,8 +1721,8 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 
 **`ai_engine` giữ đúng khuôn của repo face attendance.** `src/core/` nạp ảnh model, cấp vùng làm
 việc, chạy, đo — không biết tên model nào. Mỗi model một thư mục `src/<nhánh>/` chứa tiền xử lý và
-hậu xử lý riêng của nó (dải RNNoise, làm trơn đầu ra `wake`, chấm CTC của `command_ctc`, luật từ chối của
-`command_kws`). Phần hậu xử lý
+hậu xử lý riêng của nó (dải của `ns_rnnoise`, log công suất và sigmoid của `ns_nsnet`, làm trơn đầu ra `wake`, chấm CTC
+của `command_ctc`, luật từ chối của `command_kws`). Phần hậu xử lý
 là C thuần và có golden riêng, dù nằm trong component C++.
 
 #### 4.5.5 Hợp đồng gọi — đóng băng ở E3
@@ -1691,7 +1735,7 @@ CLAUDE.md §1.2. Phác thảo dưới đây chốt **hình dạng**; tên trư�
 typedef struct {
     const char *input_format;              // "MM" hoặc "MMR": ch0, ch1, rồi ref nếu có
     dsp_afe_spatial_t spatial;             // NONE | GSC | BSS, từ Kconfig
-    const dsp_afe_ns_ops_t *ns;            // NULL là OM-LSA nội bộ; ai_engine cắm RNNoise vào đây
+    const dsp_afe_ns_ops_t *ns;            // NULL là OM-LSA nội bộ; ai_engine cắm mạng dìm nhiễu vào đây
     void *ns_ctx;
     const dsp_afe_calib_t *calib;          // hệ số balance, trễ tham chiếu — từ NVS
 } dsp_afe_config_t;
@@ -1739,6 +1783,10 @@ mà `_step` nhận do model khai trong `meta.json` (`features`, §6.3): 40 với
 `svc_listen` dựng khung theo đó. `_score` trả cùng một khuôn `ai_engine_command_result_t`: chỉ số lệnh hoặc −1, kèm ba
 điểm. Với `kws`, điểm là xác suất lớp thắng, khoảng cách tới lớp nhì, và xác suất của `other` cộng `silence`; bảng lệnh
 truyền vào chỉ được kiểm là có đủ các lớp lệnh.
+
+**`ai_engine_ns_ops()` và khe `dsp_afe_ns_ops_t` giữ nguyên cho cả hai ứng viên của `ns`** (§3.9): khe nhận công suất
+257 vạch cùng phổ vọng dư khi có, trả 257 gain trong 0..1 và `speech_prob`. Đặc trưng, dải, chuẩn hoá và trạng thái GRU
+nằm sau khe, trong thư mục của ứng viên, nên đổi ứng viên không chạm `dsp_afe` hay `svc_front`.
 
 #### 4.5.6 Model vào flash bằng cách nào
 
@@ -1956,7 +2004,7 @@ không chép lại các bảng này.
 **Chỗ đổi so với TỔNG QUAN §6.3.** TỔNG QUAN đặt `thu`, `sach` và `nhan` cùng ở nhân 1, trong khi
 chính nó tính tải liên tục là 66–81% một nhân và kết luận "một nhân không đủ". Cộng cửa sổ lệnh 11–18
 ms mỗi 32 ms (34–56%) vào đó là nhân 1 quá 100% đúng lúc người dùng đang ra lệnh. Đặt `nhan` ở nhân 0
-thì nhân 1 còn ~27% (§5.6) và mọi dao động của phần nhận dạng không chạm được vào hạn chót của khung.
+thì nhân 1 còn ~27% với sàn, tới ~45% với NSNet-16k ở trần (§5.6), và mọi dao động của phần nhận dạng không chạm được vào hạn chót của khung.
 
 Cái giá: `nhan_task` chung nhân với Wi-Fi. Hàng đợi `q_clean` sâu 1 s là thứ trả giá ấy, và điểm cao
 nhất của nó là con số phải đo ở E14-T6 (TỔNG QUAN V5.7.6). Cao hơn nửa độ sâu thì nới hàng đợi hoặc
@@ -2085,13 +2133,13 @@ trung bình ≤ 70%. Mọi ô là ước 🔬 lấy từ §3.3; `docs/measuremen
 | `balance` | 10 | `gui` + `mqtt` + `luong` | 2–5% |
 | `doa` (dò mỗi hai khung khi có tiếng; đo) | 641 | | |
 | `bss` (nặng hơn `gsc`) | 400 | | |
-| `ns` RNNoise (nặng hơn sàn) | 800–1 600 | | |
+| `ns` mạng thay sàn trong khe: RNNoise-16k 800–1 800, NSNet-16k tới trần 4 200 (§3.9, ADR-0014) | 800–4 200 | | |
 | `istft` | 196 | | |
 | `vad` + `agc` | 80 | | |
 | chép vào `sb_stream` | 20 | | |
-| **Cộng, trường hợp nặng nhất** | **~4 800 µs ≈ 30%** | **Cộng, `LENH`** | **~45–75%** |
+| **Cộng, trường hợp nặng nhất** | **~7 200 µs ≈ 45%** | **Cộng, `LENH`** | **~45–75%** |
 
-Nhân 1 còn biên rộng; nhân 0 chật ở trạng thái `LENH`. Nếu số đo xác nhận điều đó thì thứ tự cắt là:
+Nhân 1 vẫn dưới mục tiêu trung bình 50% kể cả khi NSNet-16k ở trần; nhân 0 chật ở trạng thái `LENH`. Nếu số đo xác nhận điều đó thì thứ tự cắt là:
 giảm tần suất `doa` và `telemetry` trong `LENH`, rồi thu nhỏ mạng `command` — không chuyển việc sang
 nhân 1.
 
@@ -2117,8 +2165,8 @@ coredump,   data, coredump, 0xFE0000,  0x10000,
 # còn trống: 0xFF0000 → 0x1000000 (64 KB)
 ```
 
-**Trần 3 MB của một slot model là hệ quả của bảng này, không phải ngược lại.** Sau `ns` ~90 KB và
-`wake` ~100 KB, slot còn **~2,8 MB cho `command`**, mà cỡ chọn theo chất lượng từ ~2,1 MB của bộ khung
+**Trần 3 MB của một slot model là hệ quả của bảng này, không phải ngược lại.** Sau `ns` tới ~340 KB
+(NSNet-16k ở trần, ADR-0014) và `wake` ~100 KB, slot còn **~2,5 MB cho `command`**, mà cỡ chọn theo chất lượng từ ~2,1 MB của bộ khung
 MultiNet7 trở lên (ADR-0013) 🔬; TỔNG QUAN ghi `command` "1 tới 4 MB ngoài". `synth` ghép mẩu nằm ở
 `voice` (E12-T2), không chiếm slot. Khi `command`, hay `synth` mạng nếu E12-T1 chọn nó, vượt chỗ còn lại,
 đường lùi là **bỏ `models_1`** — mất khả năng quay về model cũ khi cập nhật hỏng — và cho `models_0`
@@ -2180,6 +2228,9 @@ offset 0x400  dữ liệu, mỗi entry căn 64 B
 | `features` | `log_mel40` \| `log_mel40_pitch3`, kèm số chiều mỗi khung | `svc_listen`, qua độ dài khung của `ai_engine_command_step` (§4.5.5) |
 | `classes` | `kws`: `id` các lệnh đã học theo thứ tự, rồi `other`, `silence`; `ctc`: không có | bước đóng gói kiểm các `id` lệnh là phần đầu của `contracts/commands/default_vi.json`, để chỉ số trả về trùng chỉ số trong bảng lệnh |
 
+Của `ns` có thêm trường `backend` (`rnnoise` | `nsnet`, §3.9): bước đóng gói đặt tên mục trong ảnh theo nó (`ns_rnnoise`
+hay `ns_nsnet`), nên bản dựng của ứng viên kia không tìm thấy model, `ai_engine_ns_ops()` trả `NULL` và chuỗi chạy sàn.
+
 **`grid_hash` chặn lệch lúc huấn luyện và lúc chạy.** Firmware biên dịch với băm của `grid.yaml`
 trong `gen_grid.h`; ảnh model mang băm của lưới nó được huấn luyện. Khác nhau thì `ai_engine_load`
 trả `ESP_ERR_INVALID_VERSION` và không nạp. Không có chốt này, đổi bước khung từ 256 sang 160 vẫn nạp
@@ -2215,8 +2266,9 @@ TỔNG QUAN §7 ước ~97 KB và thiếu bốn khoản. Bảng ước lại �
 
 **Mọi model nằm ở PSRAM — trọng số lẫn vùng làm việc.** `ai_engine_load` mmap slot model qua
 `sys_storage`, kiểm sha256 và `grid_hash`, **chép trọng số từng model lên PSRAM**, rồi nhả mmap: lúc chạy
-không model nào đọc thẳng từ flash, và không model nào chiếm RAM nội. Kéo trọng số `ns` (~90 KB) và `wake`
-(~100 KB) về RAM nội như luật "chỉ giữ thứ bị chạm mỗi khung" của TỔNG QUAN thì cộng lên ~430–470 KB,
+không model nào đọc thẳng từ flash, và không model nào chiếm RAM nội. Kéo trọng số `ns` (~90 KB với RNNoise-16k,
+tới ~340 KB với NSNet-16k) và `wake` (~100 KB) về RAM nội như luật "chỉ giữ thứ bị chạm mỗi khung" của TỔNG QUAN
+thì cộng lên ~430–720 KB,
 vượt phần còn cấp được; RAM nội để dành cho đệm DMA, trạng thái khung của `dsp_afe`, ngăn xếp và Wi-Fi.
 PSRAM octal cũng đọc nhanh hơn flash QIO, nên chép lên là lợi hơn chạy thẳng qua mmap.
 
@@ -2233,18 +2285,19 @@ nên lớn hơn; đó là giá của mã đọc được và khớp Python từn
 |---|---|
 | Trọng số và vùng làm việc `command` | ~2,1 MB trở lên + ~0,3 MB (ADR-0013) |
 | Trọng số và vùng làm việc `synth` (nếu mạng) | ≤ 1 MB + ~0,3 MB |
-| Trọng số và vùng làm việc `ns` + `wake` | ~140 KB + ~100 KB |
+| Trọng số và vùng làm việc `ns` + `wake` | ~140 KB (RNNoise-16k) tới ~390 KB (NSNet-16k ở trần) + ~100 KB |
 | `q_clean` | ~34 KB |
 | `q_dialog`, `q_cmd`, `q_speak`, `q_event_up` (§5.3) | ~6 KB |
 | `sb_stream` | 512 KB |
 | Đệm dựng câu của `noi_task`: 5 s × 16 kHz × 2 B | 160 KB |
 | Ngăn xếp `mqtt_task`, vùng TLS | ~50 KB |
-| **Cộng** | **~4,3 MB trên 8 MB** |
+| **Cộng** | **~4,3–4,6 MB trên 8 MB** |
 
 **PSRAM không miễn phí về băng thông.** Flash và PSRAM chung một bus MSPI và chung cache dữ liệu; repo
 face attendance đo được suy luận chậm đi 16,6% khi nhân kia đẩy ~8,7 MB/s qua PSRAM, kể cả model có
 vùng làm việc ở RAM nội. Luồng tiếng thô ba kênh là 96 KB/s — nhỏ — nhưng `command` đọc hơn 2 MB trọng
-số mỗi khúc chạy dòng thì không. Đo ở E14-T6.
+số mỗi khúc chạy dòng thì không, và `ns` NSNet-16k ở trần đọc ~330 KB trọng số mỗi khung, ~20 MB/s, gấp đôi mốc
+ấy. Đo ở E9-T7 và E14-T6.
 
 ---
 ## 7. Mạng: Wi-Fi, MQTT, luồng tiếng, OTA
@@ -2413,7 +2466,7 @@ mặc định là trộn trần cho tới khi E8-T4 chốt; câu trả lời b�
 | Cửa | Sau | Đòi | Không đạt thì |
 |---|---|---|---|
 | **0** | E2, E3, E5, E6 | dàn micro đạt ba chỉ tiêu sửa được; `dsp_spec` khớp Python trong ngưỡng; app khung chạy 10 phút 0 khung mất; hợp đồng đóng băng | **dừng hẳn** |
-| **1** | E8, E9 | đường không gian thắng trộn trần; `ns` mạng thắng sàn — **bằng thước của bộ nhận dạng** (§3.15) | giữ trộn trần, giữ sàn, ghi đúng như vậy |
+| **1** | E8, E9 | đường không gian thắng trộn trần; một trong hai ứng viên `ns` mạng, RNNoise-16k hay NSNet-16k, thắng sàn — **bằng thước của bộ nhận dạng** (§3.15) | giữ trộn trần, giữ sàn, ghi đúng như vậy |
 | **2** | E11-T11 | `wake` bắt ≥ 95% ở 1 m, báo nhầm ≤ 1 lần mỗi giờ trên ≥ 24 giờ âm bản | thu thêm dữ liệu; vẫn không đạt thì đổi từ đánh thức |
 | **3** | E11-T13, E11-T17 | mỗi lệnh ≥ 90%, từ chối đúng ≥ 95%, cùng một thước cho hai đường của `command`; đường đạt và tốt hơn thành mặc định (§3.12) | **giảm số lệnh**, không nới mô hình |
 | **4** | E12 | `synth` dưới 1× thời gian thực, vừa bộ nhớ | **lui về ghép mẩu**, không nới ngân sách |
@@ -2445,7 +2498,7 @@ thêm bốn mục:
 
 **Không gian**: Knapp, Carter — *The generalized correlation method for estimation of time delay*, IEEE Trans. ASSP, 1976 · Hoshuyama, Sugiyama, Hirano — *A robust adaptive beamformer for microphone arrays with a blocking matrix using constrained adaptive filters*, IEEE Trans. SP, 1999 · Ono — *Stable and fast update rules for independent vector analysis based on auxiliary function technique*, WASPAA 2011 · Ono — *Fast stereo independent vector analysis and its implementation on mobile phone*, IWAENC 2012 · Taniguchi và cộng sự — *An auxiliary-function approach to online independent vector analysis for real-time blind source separation*, HSCMA 2014 · Araki và cộng sự — *The fundamental limitation of frequency domain blind source separation for convolutive mixtures of speech*, IEEE TSAP, 2003 · [pyroomacoustics](https://github.com/LCAV/pyroomacoustics)
 
-**Dìm nhiễu**: Cohen, Berdugo — *Speech enhancement for non-stationary noise environments*, Signal Processing, 2001 · Cohen — *Noise spectrum estimation in adverse environments: improved minima controlled recursive averaging*, IEEE TSAP, 2003 · Valin — *A hybrid DSP/deep learning approach to real-time full-band speech enhancement*, 2018 · [RNNoise](https://github.com/xiph/rnnoise) · Xia và cộng sự — *Weighted speech distortion losses for neural-network-based real-time speech enhancement* (NSNet2), ICASSP 2020 · Reddy, Gopal, Cutler — *DNSMOS P.835: A non-intrusive perceptual objective speech quality metric to evaluate noise suppressors*, ICASSP 2022 · [DNS Challenge](https://github.com/microsoft/DNS-Challenge) · [WebRTC audio processing](https://webrtc.googlesource.com/src/+/refs/heads/main/modules/audio_processing/)
+**Dìm nhiễu**: Cohen, Berdugo — *Speech enhancement for non-stationary noise environments*, Signal Processing, 2001 · Cohen — *Noise spectrum estimation in adverse environments: improved minima controlled recursive averaging*, IEEE TSAP, 2003 · Valin — *A hybrid DSP/deep learning approach to real-time full-band speech enhancement*, 2018 · [RNNoise](https://github.com/xiph/rnnoise) · Xia và cộng sự — *Weighted speech distortion losses for neural-network-based real-time speech enhancement* (NSNet), ICASSP 2020 · Braun, Tashev — *Data augmentation and loss normalization for deep noise suppression* (NSNet2), SPECOM 2020 · Reddy, Gopal, Cutler — *DNSMOS P.835: A non-intrusive perceptual objective speech quality metric to evaluate noise suppressors*, ICASSP 2022 · [DNS Challenge](https://github.com/microsoft/DNS-Challenge) · [WebRTC audio processing](https://webrtc.googlesource.com/src/+/refs/heads/main/modules/audio_processing/)
 
 **Nhận dạng và tổng hợp**: Graves và cộng sự — *Connectionist temporal classification*, ICML 2006 · Zhang, Suda, Lai,
 Chandra — *Hello Edge: Keyword spotting on microcontrollers*, arXiv:1711.07128, 2017 · [sanoTTS](https://arxiv.org/abs/2608.21378) — mốc TTS chưng cất trên ESP32-S3
