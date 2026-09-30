@@ -18,6 +18,7 @@ static const struct {
 } kBlocks[] = {
     {"stft", parity_stft},
     {"mel", parity_mel},
+    {"pitch", parity_pitch},
     {"g2p", parity_g2p},
     {"normalize", parity_normalize},
     {"lexicon", parity_lexicon},

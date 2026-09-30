@@ -1,4 +1,5 @@
-set(srcs "parity_main.c" "parity_common.c" "parity_stft.c" "parity_mel.c" "parity_chain.c" "parity_lang_vi.c")
+set(srcs "parity_main.c" "parity_common.c" "parity_stft.c" "parity_mel.c" "parity_pitch.c" "parity_chain.c"
+    "parity_lang_vi.c")
 if(CONFIG_DSP_AFE_HPF_ENABLE)
     list(APPEND srcs "parity_hpf.c")
 endif()

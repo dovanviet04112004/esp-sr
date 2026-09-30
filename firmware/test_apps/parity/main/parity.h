@@ -47,6 +47,14 @@ bool parity_stft(const char *case_name, const void *buf, size_t len);
  */
 bool parity_mel(const char *case_name, const void *buf, size_t len);
 
+/** Run one pitch case with the configuration it carries, one hop at a time, resetting where it says; compare
+ * the features and the newest frame's NCCF and F0 after every hop.
+ *  @ctx task | blocking
+ *  @ret false when the case lacks a tensor, has the wrong shape, carries a bad configuration or memory runs
+ * out
+ */
+bool parity_pitch(const char *case_name, const void *buf, size_t len);
+
 /** Run one chain case through a fresh dsp_afe with the settings and calib/bal of the case, if it has one,
  *  resetting where it says; compare every frame field. The build's modules decide which golden set holds.
  *  @ctx task | blocking | each case builds a new fft plan, so dl_fft allocates its tables again

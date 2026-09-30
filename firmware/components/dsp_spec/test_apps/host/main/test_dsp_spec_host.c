@@ -21,6 +21,7 @@ static const struct {
 } kBlocks[] = {
     {"stft", parity_stft},
     {"mel", parity_mel},
+    {"pitch", parity_pitch},
 };
 
 static unsigned s_failures;

@@ -1,6 +1,7 @@
 # C dsp_spec/pitch against srpipe.dsp.spec.pitch (KEHOACH 3.11, 3.14, E11-T8 step 3).
-# Both sides are float32 and take the same Viterbi decisions; only exp, log and pow of the features differ by
-# rounding. The C side has not run yet: its first run records its SNR here and keeps 20 dB of margin.
+# Both sides are float32 and take the same Viterbi decisions; exp, log, pow and the filter tables' sin and cos
+# come from each platform's C library. On the host the C matches bit for bit (max_abs 0 on every case); board B
+# has not run yet, and a libm that rounds one table entry differently must still pass these limits.
 # case_neg_* must fall outside these limits.
 tensors:
   features:

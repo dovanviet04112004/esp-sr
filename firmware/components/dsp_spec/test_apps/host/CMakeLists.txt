@@ -23,17 +23,20 @@ set(DL_FFT_SRCS
     "${DL_FFT_DIR}/base/dl_fft2r_sc16_ansi.c" "${DL_FFT_DIR}/base/dl_fft2r_sc16_dif_ansi.c")
 
 add_library(dsp_spec_host_lib STATIC
-    "${SPEC}/src/window.c" "${SPEC}/src/stft.c" "${SPEC}/src/mel.c" "${SPEC}/src/fft_dl.c" ${DL_FFT_SRCS})
+    "${SPEC}/src/window.c" "${SPEC}/src/stft.c" "${SPEC}/src/mel.c" "${SPEC}/src/pitch.c" "${SPEC}/src/fft_dl.c"
+    ${DL_FFT_SRCS})
 target_include_directories(dsp_spec_host_lib
     PUBLIC "${CMAKE_CURRENT_LIST_DIR}/shim" "${SPEC}/include" "${FIRMWARE}/components/common/include"
     PRIVATE "${SPEC}/priv_include" "${DL_FFT_DIR}" "${DL_FFT_DIR}/base" "${DL_FFT_DIR}/base/isa")
 set_target_properties(dsp_spec_host_lib PROPERTIES C_STANDARD 17 C_EXTENSIONS ON)
 target_compile_options(dsp_spec_host_lib PRIVATE -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare)
 set_source_files_properties(${DL_FFT_SRCS} PROPERTIES COMPILE_OPTIONS "-Wno-error")
+set_source_files_properties("${SPEC}/src/pitch.c" PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 target_link_libraries(dsp_spec_host_lib PUBLIC m)
 
 add_executable(dsp_spec_host
-    main/test_dsp_spec_host.c "${PARITY}/parity_common.c" "${PARITY}/parity_stft.c" "${PARITY}/parity_mel.c")
+    main/test_dsp_spec_host.c "${PARITY}/parity_common.c" "${PARITY}/parity_stft.c" "${PARITY}/parity_mel.c"
+    "${PARITY}/parity_pitch.c")
 target_include_directories(dsp_spec_host PRIVATE "${PARITY}")
 set_target_properties(dsp_spec_host PROPERTIES C_STANDARD 17 C_EXTENSIONS ON)
 target_compile_options(dsp_spec_host PRIVATE -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare)
