@@ -141,7 +141,7 @@ def test_tar_shards_stream_and_keep_only_their_matches(tmp_path: Path) -> None:
 
 
 def test_a_cut_keeps_the_first_start_heard_alone_and_deletes_the_sentence(tmp_path: Path, monkeypatch) -> None:
-    job = job_for(tmp_path, [{"kind": "tsv_tar", "repo": "s/g", "revision": "rev0"}], FakeHttp({}))
+    job = job_for(tmp_path, [{"kind": "tsv_tar", "repo": "s/g", "revision": "rev0", "synthetic": True}], FakeHttp({}))
     match = {"key": "s_g__7_1_0", "text": "nhờ trợ lý nhé", "phrases": ["trợ lý"], "fetch": "x", "id": "7-1-0"}
     job.save_whole(match["key"], np.zeros(2 * grid.SAMPLE_RATE_HZ), match)
     words = [
@@ -162,9 +162,10 @@ def test_a_cut_keeps_the_first_start_heard_alone_and_deletes_the_sentence(tmp_pa
     assert not list((tmp_path / "cache/extract/t/whole").iterdir())
     (row,) = extract.read_index(tmp_path / "raw/speech/t")
     assert row["file"] == str(clip.relative_to(tmp_path / "raw/speech/t")) and row["shift_s"] == "0.02"
-    assert abs(row["seconds"] - sf.info(str(clip)).duration) < 0.002
+    assert abs(row["seconds"] - sf.info(str(clip)).duration) < 0.002 and row["origin"] == "synth"
     manifest = yaml.safe_load((tmp_path / "manifests/speech/t.yaml").read_text(encoding="utf-8"))
     assert manifest["counts"]["by_phrase"] == {"trợ lý": 1} and manifest["sources"][0]["revision"] == "rev0"
+    assert manifest["sources"][0]["synthetic"]
     (done,) = extract.read_jsonl(next((tmp_path / "cache/extract/t/cut").glob("*.jsonl")))
     assert done["clips"][0]["shift_s"] == 0.02 and done["clips"][0]["heard"] == "Trợ lý."
 

@@ -43,7 +43,10 @@ extracts:
       - {kind: arrow, repo: nampdn-ai/vietspeech}   # the viewer converted part of it: read its own .arrow
       - {kind: parquet, repo: linhtran92/viet_youtube_asr_corpus_v2, revision: ecde94a62130e6eb4a67845375f18f6787e60b66}
       - {kind: parquet, repo: doof-ferb/LSVSC, revision: 416b1ef54953db4a1c72f1566b2295c029859d10}
-      - {kind: parquet, repo: dolly-vn/dolly-audio-1000h-vietnamese, revision: 1614861fb753346812a8d0654c96b72e4a85609c}
+      - kind: parquet                # tagged synthetic and tts on the hub: its clips are labelled synth in clips.tsv
+        repo: dolly-vn/dolly-audio-1000h-vietnamese
+        revision: 1614861fb753346812a8d0654c96b72e4a85609c
+        synthetic: true
       - {kind: parquet, repo: doof-ferb/vais1000, revision: 35051e3e3547cac75ceae39c017445bd86b9b359}
       - {kind: parquet, repo: doof-ferb/infore1_25hours, revision: 7f60edb0aa03a6e22de091ff10749e21b33c8a8a}
       - {kind: parquet, repo: doof-ferb/infore2_audiobooks, revision: 8d1895fe7c2b65abe5a9c47e9e7b6d2efc1f940c}

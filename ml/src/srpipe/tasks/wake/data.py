@@ -295,9 +295,10 @@ def link(built: Path, out: Path) -> Path:
 
 
 def real_positives(cfg: dict, raw: Path) -> dict[str, float]:
-    """Items under raw/ of the extract's clips that say the wake word, however spelled, and their lengths in seconds."""
+    """Items under raw/ of the extract's clips of real voices that say the wake word, however spelled, and their
+    lengths in seconds."""
     folder, word = extract.clips_folder(raw, cfg["split"]["real_pos"]), corpus.sounds(cfg["word"])
-    clips = [c for c in extract.read_index(folder) if corpus.sounds(c["phrase"]) == word]
+    clips = [c for c in extract.read_index(folder) if c["origin"] == PUBLIC and corpus.sounds(c["phrase"]) == word]
     return {str((folder / c["file"]).relative_to(raw)): c["seconds"] for c in clips}
 
 

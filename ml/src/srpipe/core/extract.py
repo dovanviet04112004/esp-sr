@@ -55,7 +55,7 @@ TEXT_COLUMNS = (
 )
 RETRY_CODES = (429, 500, 502, 503, 504)
 STROKED_D = str.maketrans("đĐ", "dD")
-INDEX_FIELDS = ("file", "phrase", "seconds", "text", "source", "revision", "key", "shift_s", "heard")
+INDEX_FIELDS = ("file", "phrase", "seconds", "origin", "text", "source", "revision", "key", "shift_s", "heard")
 
 
 class Http:
@@ -782,6 +782,7 @@ def write_index(job: Job) -> None:
     pins = job.pins()
     rows = [(c, m) for f in sorted((job.state / "cut").glob("*.jsonl")) for m in read_jsonl(f) for c in m["clips"]]
     repo_of = {slug(s["repo"]): s["repo"] for s in job.spec["sources"]}
+    synthetic = {s["repo"] for s in job.spec["sources"] if s.get("synthetic")}
     lines = ["\t".join(INDEX_FIELDS)]
     for c, m in rows:
         source = repo_of[m["key"].split("__")[0]]
@@ -789,6 +790,7 @@ def write_index(job: Job) -> None:
             c["file"],
             c["phrase"],
             round(c["cut_s"][1] - c["cut_s"][0], 3),
+            "synth" if source in synthetic else "public",
             m["text"],
             source,
             pins[source]["revision"],
@@ -813,7 +815,12 @@ def write_index(job: Job) -> None:
         "sha256": {"clips.tsv": hashlib.sha256(index.read_bytes()).hexdigest()},
         "counts": {"clips": len(rows), "by_phrase": dict(counts), "by_source": dict(by_source)},
         "consumed_by": ["wake", "command"],
-        "sources": [{"repo": s["repo"], "kind": s["kind"]} | pins[s["repo"]] for s in job.spec["sources"]],
+        "sources": [
+            {"repo": s["repo"], "kind": s["kind"]}
+            | ({"synthetic": True} if s.get("synthetic") else {})
+            | pins[s["repo"]]
+            for s in job.spec["sources"]
+        ],
         "notes": "Clips cut to one phrase each by configs/common/extract.yaml (KEHOACH 1.2); the sentences they came "
         "from are deleted once cut. No speaker ids: training only (KEHOACH 1.3).",
     }
