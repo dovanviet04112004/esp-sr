@@ -99,7 +99,7 @@ def speech_end_s(x: np.ndarray, below_peak_db: float) -> float:
 
 def trimmed(clips: list[dict], folder: str, cfg: dict, interim: Path) -> list[dict]:
     """The clips, each kept one given cut_s at its word's end when that falls inside it."""
-    below_peak_db, reader = cfg["split"]["tts_pos"]["below_peak_db"], ItemReader(interim)
+    below_peak_db, reader = cfg["split"]["end_below_peak_db"], ItemReader(interim)
     out = []
     for c in clips:
         if c["kept"]:
@@ -295,11 +295,16 @@ def link(built: Path, out: Path) -> Path:
 
 
 def real_positives(cfg: dict, raw: Path) -> dict[str, float]:
-    """Items under raw/ of the extract's clips of real voices that say the wake word, however spelled, and their
-    lengths in seconds."""
+    """Items under raw/ of the extract's clips of real voices that say the wake word, however spelled, each cut at the
+    end of its speech as the TTS positives are, and their lengths in seconds."""
     folder, word = extract.clips_folder(raw, cfg["split"]["real_pos"]), corpus.sounds(cfg["word"])
     clips = [c for c in extract.read_index(folder) if c["origin"] == PUBLIC and corpus.sounds(c["phrase"]) == word]
-    return {str((folder / c["file"]).relative_to(raw)): c["seconds"] for c in clips}
+    reader, items = ItemReader(raw), {}
+    for c in clips:
+        item = str((folder / c["file"]).relative_to(raw))
+        end = round(speech_end_s(reader.read(item), cfg["split"]["end_below_peak_db"]), 3)
+        items[cut_item(item, 0.0, end) if end < c["seconds"] else item] = min(end, c["seconds"])
+    return items
 
 
 def cut_split(cfg: dict, paths: dict[str, Path]) -> int:

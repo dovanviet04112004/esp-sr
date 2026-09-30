@@ -69,9 +69,8 @@ split:                             # E11-T11: data/splits/wake/<version> by pyth
   val_from_test: {speech/common_voice_vi/: 0.4}   # share of its speakers moved whole into val_neg (KEHOACH 3.11)
   real_pos: hf_extract             # the extract of common/extract.yaml whose clips of the word are the real positives,
                                    #   train only as it names no speakers (KEHOACH 3.11)
-  tts_pos:
-    below_peak_db: 40.0            # a TTS positive ends at its last hop within this of its loudest, the true end the
-                                   #   corpus cuts are measured against
+  end_below_peak_db: 40.0          # every positive, TTS or real, ends at its last hop within this of its loudest: the
+                                   #   simulation labels a clip's end, and both kinds carry silence after the word
 simulate:                          # make wake-features: python -m srpipe.tasks.wake.data simulate (E4-T8)
   split: v4
   workers: 12                      # each holds about 450 MB; more push a 10 GB WSL into swap
