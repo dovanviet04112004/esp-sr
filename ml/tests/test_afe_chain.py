@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import soundfile as sf
 
 from srpipe.dsp.afe import chain
 from srpipe.dsp.emit_golden import speechlike
@@ -123,3 +124,32 @@ def test_reset_starts_every_module_again() -> None:
     fresh = run(chain.Chain(), hops[HOPS:])
     assert all(np.array_equal(a.pcm, b.pcm) for a, b in zip(again, fresh, strict=True))
     assert [(a.vad, a.gain_db, a.level_dbfs) for a in again] == [(b.vad, b.gain_db, b.level_dbfs) for b in fresh]
+
+
+def test_gsc_steered_at_broadside_passes_identical_microphones_as_the_mean() -> None:
+    x = tone(HOPS * grid.HOP_SAMPLES)
+    hops = interleave(x, x)
+    plain = run(chain.Chain("MM", PLAIN), hops)
+    steered = run(chain.Chain("MM", chain.ChainConfig(modules=(), spatial="gsc")), hops)
+    assert all(np.array_equal(a.pcm, b.pcm) for a, b in zip(plain, steered, strict=True))
+
+
+def test_gsc_learns_to_cancel_what_only_one_microphone_hears() -> None:
+    rng = np.random.default_rng(5)
+    noise = np.rint(rng.normal(0.0, 3000.0, 8 * HOPS * grid.HOP_SAMPLES)).astype(np.int16)
+    hops = interleave(noise, np.zeros_like(noise))
+    plain = run(chain.Chain("MM", PLAIN), hops)
+    steered = run(chain.Chain("MM", chain.ChainConfig(modules=(), spatial="gsc")), hops)
+    tail = slice(-HOPS, None)
+    power = [np.mean(np.stack([f.pcm for f in frames[tail]]).astype(np.float64) ** 2) for frames in (plain, steered)]
+    assert power[1] < 0.5 * power[0]
+    with pytest.raises(NotImplementedError):
+        chain.Chain("MM", chain.ChainConfig(spatial="beam"))
+
+
+def test_render_writes_every_whole_hop_of_a_recording(tmp_path) -> None:
+    x = tone(HOPS * grid.HOP_SAMPLES + 100)
+    sf.write(tmp_path / "in.wav", np.stack([x, x], axis=-1), grid.SAMPLE_RATE_HZ, subtype="PCM_16")
+    chain.main([str(tmp_path / "in.wav"), str(tmp_path / "out.wav"), "--spatial", "gsc"])
+    info = sf.info(str(tmp_path / "out.wav"))
+    assert (info.channels, info.frames) == (1, HOPS * grid.HOP_SAMPLES)

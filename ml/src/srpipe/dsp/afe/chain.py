@@ -1,22 +1,28 @@
 """The dsp_afe facade: interleaved int16 hops in, one clean channel and its figures out (KEHOACH 3.2, 4.5.5).
 
 Mirror of dsp_afe.c: hpf and the STFT per microphone, balance on ch1, doa searched every second hop after a speech hop,
-the plain two-channel mean, the ns floor's gains, iSTFT, vad on the clean hop, its level, agc, back to int16. Modules
-follow ChainConfig.modules, by default the product's of contracts/afe.yaml; golden/chain runs with none of them.
+the spatial stage (the plain two-channel mean, or gsc steered by doa), the ns floor's gains, iSTFT, vad on the clean
+hop, its level, agc, back to int16. Modules follow ChainConfig.modules, by default the product's of contracts/afe.yaml;
+golden/chain runs with none of them. Run: python -m srpipe.dsp.afe.chain <in.wav> <out.wav> [--spatial gsc]
 """
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
+import soundfile as sf
 
-from srpipe.dsp.afe import agc, balance, doa, hpf, ns_omlsa, vad
+from srpipe.dsp.afe import agc, balance, doa, gsc, hpf, ns_omlsa, vad
 from srpipe.dsp.spec.stft import Istft, Stft
 from srpipe.generated import afe, array, grid
 
 FORMATS = {"MM": array.N_MICS, "MMR": array.N_MICS + 1}
 MODULES_BUILT = ("hpf", "balance", "doa", "ns_omlsa", "vad", "agc")
+SPATIALS = ("none", "gsc")
+BROADSIDE_DEG = np.float32(sum(array.DOA_RANGE_DEG) / 2.0)
 PCM_FULL_SCALE = np.float32(32768.0)
 PCM_MIN, PCM_MAX = -32768, 32767
 INT8_MIN, INT8_MAX = -128, 127
@@ -31,7 +37,8 @@ class ChainConfig:
     """What app_boot gives dsp_afe_init: the modules built, calib/bal, and the afe/* settings.
 
     balance_gains is calib/bal, one complex gain per bin on ch1, or None for a board never calibrated, which
-    runs without balance as the firmware does.
+    runs without balance as the firmware does. spatial is dsp_afe_config_t.spatial: none for the plain mean, gsc for
+    the canceller steered by doa, broadside while doa has no angle.
     """
 
     modules: tuple[str, ...] = afe.MODULES
@@ -39,6 +46,7 @@ class ChainConfig:
     ns_floor_db: float = afe.NS_FLOOR_DB
     agc_target_dbfs: float = afe.AGC_TARGET_DBFS
     vad_aggressiveness: int = afe.VAD_AGGRESSIVENESS
+    spatial: str = "none"
 
 
 @dataclass(frozen=True)
@@ -91,6 +99,8 @@ class Chain:
             raise NotImplementedError("MMR needs aec, which lands in E10")
         if missing := sorted(set(cfg.modules) - set(MODULES_BUILT)):
             raise NotImplementedError(f"no Python reference yet for {', '.join(missing)}")
+        if cfg.spatial not in SPATIALS:
+            raise NotImplementedError(f"spatial {cfg.spatial!r} is none of {', '.join(SPATIALS)}")
         self.cfg = cfg
         self.n_channels = FORMATS[input_format]
         self._analysis = [Stft() for _ in range(array.N_MICS)]
@@ -106,6 +116,7 @@ class Chain:
         on = self.cfg.modules
         self._hpf = hpf.Hpf() if "hpf" in on else None
         self._doa = doa.Doa() if "doa" in on else None
+        self._gsc = gsc.Gsc() if self.cfg.spatial == "gsc" else None
         self._last_vad = False
         self._ns = None
         if "ns_omlsa" in on:
@@ -138,7 +149,11 @@ class Chain:
         if self._doa is not None:
             update = self._last_vad and self._seq % afe.DOA_UPDATE_EVERY_HOPS == 0
             direction = self._doa.process(bins[0], bins[1], update)
-        mixed = np.float32(0.5) * (bins[0] + bins[1])
+        if self._gsc is not None:
+            angle_deg = direction.angle_deg if direction.angle_deg >= 0 else BROADSIDE_DEG
+            mixed = self._gsc.process(bins[0], bins[1], angle_deg, not self._last_vad)
+        else:
+            mixed = np.float32(0.5) * (bins[0] + bins[1])
         if self._ns is not None:
             gains = self._ns.process(mixed.real * mixed.real + mixed.imag * mixed.imag).gain
             mixed = (mixed.real * gains + 1j * (mixed.imag * gains)).astype(np.complex64)
@@ -163,3 +178,31 @@ class Chain:
         self._gap = False
         self._last_vad = speech
         return frame
+
+
+def render(wav_in: Path, wav_out: Path, cfg: ChainConfig) -> None:
+    """Every whole hop of a two-microphone int16 WAV through the chain into a mono int16 WAV of the clean frames."""
+    x, rate = sf.read(wav_in, dtype="int16", always_2d=True)
+    if rate != grid.SAMPLE_RATE_HZ or x.shape[1] != array.N_MICS:
+        raise ValueError(
+            f"{wav_in}: want {array.N_MICS} channels at {grid.SAMPLE_RATE_HZ} Hz, got {x.shape[1]} at {rate}"
+        )
+    chain = Chain("MM", cfg)
+    hop = grid.HOP_SAMPLES
+    clean = [chain.process(x[k * hop : (k + 1) * hop].reshape(-1)).pcm for k in range(len(x) // hop)]
+    wav_out.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(wav_out, np.concatenate(clean), rate, subtype="PCM_16")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("wav_in", type=Path, help="two microphones, int16 at the grid's rate")
+    parser.add_argument("wav_out", type=Path)
+    parser.add_argument("--spatial", choices=SPATIALS, default="none")
+    args = parser.parse_args(argv)
+    render(args.wav_in, args.wav_out, ChainConfig(spatial=args.spatial))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
