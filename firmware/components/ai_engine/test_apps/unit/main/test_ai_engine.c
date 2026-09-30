@@ -117,6 +117,8 @@ void app_main(void)
 {
     ESP_ERROR_CHECK(sys_storage_init());
     UNITY_BEGIN();
-    unity_run_all_tests();
+    // The ns probe reads models_1 as make ai-unit wrote it; every other case rewrites that slot.
+    unity_run_tests_by_tag("[ns_probe]", false);
+    unity_run_tests_by_tag("[ns_probe]", true);
     UNITY_END();
 }
