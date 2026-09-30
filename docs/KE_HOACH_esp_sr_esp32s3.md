@@ -117,7 +117,7 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | DNS Challenge (Microsoft) | `ns` | hàng trăm giờ | CC BY 4.0 phần nhiễu 🔬 | |
 | OpenSLR 28 | tăng cường vang | RIR thật và mô phỏng | Apache 2.0 | |
 | Cảnh dựng bằng `pyroomacoustics` | `doa` `gsc` `bss` `ns`, đường mô phỏng board | không giới hạn | của dự án | vật liệu **có nhãn** cho mọi khối không gian (§4.4) |
-| Tiếng tổng hợp bằng TTS trên máy tính (`srpipe/tts/`, §4.4) | **`wake` dương — nguồn chính**, cụm gần âm cho âm bản, tăng lượng `command`; **tiếng nguồn của `synth`** (§3.13) | không giới hạn, nhiều giọng | theo giấy phép mô hình TTS dùng, ghi ở `DU_LIEU.md` | **không bao giờ** vào tập thử |
+| Tiếng tổng hợp bằng TTS trên máy tính (`srpipe/tts/`, §4.4) | **`wake` dương — nguồn chính**, cụm gần âm cho âm bản; dương, cụm gần âm và nửa lệnh của `command` (§3.12); **tiếng nguồn của `synth`** (§3.13) | không giới hạn, nhiều giọng | theo giấy phép mô hình TTS dùng, ghi ở `DU_LIEU.md` | **không bao giờ** vào tập thử |
 | Thu qua chính board | tập thử của `wake` và `command`, âm bản gần âm; nhiễu phòng; tập học khi cần tiếng thật | vài người nói, ≥ 2 phòng (E11-T6) | của dự án, có phiếu đồng ý (§1.4) | nguồn **duy nhất** đúng miền thiết bị |
 
 **Sàng lọc trước mọi lần dùng** (`srpipe/core/screen.py`, luật ở `configs/common/screen.yaml`, `make screen`). Kho
@@ -177,7 +177,7 @@ máy khác: đáp ứng của micro là một phần của miền dữ liệu.
 | Âm bản của `wake` không có mẩu nào lời chứa từ đánh thức | Một câu nói từ đánh thức gắn nhãn âm dạy mô hình bỏ qua chính nó, và nằm trong tập thử thì tính thành báo nhầm |
 | Tập thử không lấy từ kho đã làm giọng mẫu cho TTS của cùng nhánh | Kho không có mã người nói thì không tách được người; giọng đã nhân bản vào tập học sẽ có mặt ở cả hai phía |
 | Tiếng tổng hợp không vào tập thử | Nó đúng miền của TTS, không đúng miền của người thật |
-| Giọng mẫu để TTS nhân bản chỉ lấy từ vật liệu học: người nói của tập học, hoặc kho chỉ vào tập học | Nhân bản giọng của một người ở tập thử là đưa người đó vào tập học qua đường TTS |
+| Giọng mẫu để TTS nhân bản chỉ lấy từ vật liệu học của split chính nhánh ấy: người nói nó giao cho tập học, hoặc kho chỉ vào tập học; mẩu nhân bản vào đúng vai của người được nhân bản | Nhân bản giọng của một người ở tập thử là đưa người đó vào tập học qua đường TTS; hai nhánh chia người nói khác nhau, nên người `train` của `wake` có thể là người `val` của `command` |
 | Tập hiệu chuẩn int8 lấy từ vật liệu học (mô phỏng board, hoặc bản thu của tập học), không lấy mẩu hay người nói nào của tập thử | Tập thử không góp gì vào model, kể cả dải giá trị của lượng tử |
 | Mỗi split có `SPLIT.md` ghi luật, seed, sha256, commit ở `ml/data/splits/` | Dựng lại được bằng một lệnh |
 | So hai biến thể: cùng split, cùng seed, cùng số epoch | Khác một điều kiện là bảng vô nghĩa |
@@ -909,6 +909,15 @@ nhân 10 × 4 bước 2 × 2, bốn tầng tách chiều sâu 64 kênh; bài đo
 | Đổi lệnh | bộ lệnh cố định lúc học: khi chạy `kws`, `down/commands` bị từ chối bằng một mã lỗi mà `host` đổi thành câu (CLAUDE.md §3.1); lệnh chưa học không bao giờ được nhận |
 | Cao độ | bản đầu chỉ log-mel 40, vì chín lệnh khác nhau ở cả âm tiết lẫn phụ âm. Khi `dsp_spec/pitch` xong (E11-T8), học lại với log-mel 40 cộng ba chiều cao độ trên cùng split, seed và số epoch, rồi giữ bản thắng theo số, nhất là tỉ lệ từ chối cụm gần âm chỉ khác thanh |
 
+**Tiếng tổng hợp của lệnh** (E11-T7, `tasks/command/synth.py`, mục `synth` của `configs/models/command.yaml`) đi đúng
+đường của `wake` (§3.11): cùng hai bộ TTS, cùng bộ nghe kiểm PhoWhisper, bốn bước `pilot`, `positives`, `negatives`,
+`select` vào `interim/command/synth_{pilot,pos,neg}/manifest.yaml`. Dương là mọi lệnh của `default_vi.json` trừ lệnh chưa
+học: "chụp ảnh" không bao giờ được đọc, để nó vẫn chưa ai nghe khi đo E11-T13 (§1.3). Âm bản gồm cụm của kho cách một
+lệnh một thành phần âm tiết, danh sách tay ở cấu hình, và mọi cụm từ liền nhau ngắn hơn một lệnh nói riêng; không cụm
+nào đọc ra một lệnh, và mọi lệnh là đối thủ của từng âm bản. Ngưỡng độ chênh đặt trên âm bản như `wake`, để chỉ một tỉ lệ
+cấu hình lọt thành dương. Giọng nhân bản chỉ lấy từ người nói mà split `command` giao cho `train`, nên giọng của một người
+`val` hay `test` không tới được tập học qua TTS (§1.3).
+
 **Thước** (Cửa 3), chung cho hai đường, ở `srpipe/tasks/command/eval.py`: mỗi lệnh **≥ 90%**, từ chối đúng **≥ 95%**,
 trên tập thu qua board, tách theo người nói và phòng.
 
@@ -1166,6 +1175,9 @@ ml/
 │   │   │                              #   đúng phần âm thanh, căn và cắt lấy cụm, giữ mẩu vào raw/speech/<tên>/,
 │   │   │                              #   xoá câu gốc; làm tiếp được khi bị ngắt (§1.2)
 │   │   ├── screen.py                  # ★ sàng lọc (§1.2): đo mọi mẩu một lần, chấm theo luật, danh sách loại
+│   │   ├── phrases.py                 # dò cụm trên lời của mọi kho: dòng âm tiết, mã thành phần âm tiết, cụm cách một
+│   │   │                              #   cụm cho trước vài thành phần, cụm mở đầu bằng âm tiết đầu của nó; wake và
+│   │   │                              #   command lấy âm bản gần âm từ đây
 │   │   └── splits.py                  # ★ đọc split, kiểm luật §1.3 (§4.4.1)
 │   ├── generated/                     # sinh từ contracts/, không sửa tay
 │   ├── golden/gold.py                 # ★ khuôn .gold — một khuôn, một chỗ
@@ -1183,12 +1195,13 @@ ml/
 │   │   └── device.py                  # ★ đường mô phỏng board: phòng hoặc RIR thật → dàn array.yaml → chênh micro
 │   │                                  #   đã hiệu chuẩn, pcm_shift → dsp.afe.chain → log-mel; dữ liệu học (§1.2)
 │   │
-│   ├── tts/                           # ★ tiếng tổng hợp cho mọi nhánh: dương wake (E11-T7), tiếng nguồn của synth
-│   │   │                              #   (§3.13); không biết nhánh nào gọi nó
+│   ├── tts/                           # ★ tiếng tổng hợp cho mọi nhánh: dương và âm bản của wake và command (E11-T7),
+│   │   │                              #   tiếng nguồn của synth (§3.13); không biết nhánh nào gọi nó
 │   │   ├── engines.py                 # gọi ml/tts/<bộ>/run.py qua uv run: giọng có sẵn, sinh theo lô, nghe lại (bản
 │   │   │                              #   CTranslate2 int8 chỉ lấy chữ cho việc cắt mẩu); căn mốc bằng MFA trong Docker
-│   │   └── clips.py                   # giọng nhân bản từ kho có chữ; sinh → nghe lại → dòng manifest: chữ bộ nghe
-│   │                                  #   kiểm đọc ra và độ chênh log-xác suất giữa chữ ấy với chữ phải nói, kể cả dấu
+│   │   └── clips.py                   # giọng nhân bản từ kho có chữ, giọng mẫu từ người nói học mà nhánh gọi đưa vào;
+│   │                                  #   dựng yêu cầu giọng có sẵn và giọng nhân bản; sinh → nghe lại → dòng manifest:
+│   │                                  #   chữ bộ nghe kiểm đọc ra và độ chênh log-xác suất với chữ phải nói, kể cả dấu
 │   │
 │   ├── dsp/                           # ── THUẬT TOÁN THUẦN, soi gương firmware 1:1 ──
 │   │   ├── spec/{fft.py, window.py, stft.py, mel.py, pitch.py}        # ★ dsp_spec
@@ -1201,14 +1214,17 @@ ml/
 │   │   │   Cùng khuôn: README · model/ · data.py · train.py · eval.py · quant.py · postproc/
 │   │   │   ★ postproc/ là phần phải khớp 1:1 với ai_engine/src/<nhánh>/, kiểm bằng golden
 │   │   ├── ns/                        # RNNoise-16k; postproc/bands.py ★
-│   │   ├── wake/                      # TCN; postproc/smooth.py ★; candidates.py chấm từ đánh thức trên kho (E11-T5);
-│   │   │                              #   synth.py chọn chữ, giọng, seed, tốc độ cho dương và âm bản gần âm rồi
+│   │   ├── wake/                      # TCN; postproc/smooth.py ★; candidates.py chấm từ đánh thức trên kho (E11-T5)
+│   │   │                              #   bằng core/phrases.py; synth.py chọn chữ, giọng, seed, tốc độ cho dương và
+│   │   │                              #   âm bản gần âm (core/phrases.py) rồi
 │   │   │                              #   sinh qua srpipe/tts vào interim/wake/synth_{pos,neg,hard}/ (E11-T7); ngưỡng
 │   │   │                              #   độ chênh đặt trên âm bản gần âm, để chỉ 1% lọt thành dương; data.py dựng
 │   │   │                              #   split wake/v<n> (§1.3), mẩu dương người thật lấy từ kho trích hf_extract
 │   │   ├── command/                   # hai đường sau một hợp đồng (§3.12, ADR-0012); phần chung nằm ở gốc
 │   │   │   ├── README.md  ├── backend.py   # giao diện chung: cửa sổ đặc trưng → lệnh hoặc từ chối, kèm ba điểm
 │   │   │   ├── eval.py                # thước Cửa 3 cho cả hai đường, trên tập thu qua board
+│   │   │   ├── synth.py               # TTS của lệnh cho cả hai đường (E11-T7): dương, âm bản gần âm, nửa lệnh, qua
+│   │   │   │                          #   srpipe/tts và core/phrases.py vào interim/command/synth_{pilot,pos,neg}/
 │   │   │   ├── kws/{model/, data.py, train.py, quant.py, postproc/}   # DS-CNN; data.py dựng split command_kws/v<n>
 │   │   │   │                          #   và đặc trưng processed/command_kws/; postproc/ ★ softmax và luật từ chối
 │   │   │   └── ctc/{data.py, model/, train.py, postproc/ctc_score.py ★}   # CRNN + CTC; data.py dựng split
@@ -1275,7 +1291,8 @@ $SRPIPE_DATA_ROOT/                         # ổ ngoài — ❌ không bao giờ
 ├── interim/                               # sinh lại được từ raw/; từ đây theo nhánh
 │   ├── scenes/<bộ>/                       # cảnh dựng có nhãn (E4-T4) cho doa gsc bss ns; kho phòng của E4-T8
 │   ├── screen/                            # sàng lọc (§1.2): measures/<kho>.tsv số đo mọi mẩu, rejects.tsv mẩu loại
-│   └── {ns, wake, command, synth}/        # đã cắt, lấy mẫu lại, trộn, căn nhãn; TTS ở <nhánh>/synth_*
+│   └── {ns, wake, command, synth}/        # đã cắt, lấy mẫu lại, trộn, căn nhãn; TTS ở <nhánh>/synth_*:
+│                                          #   wake/synth_{pos,neg,hard}, command/synth_{pilot,pos,neg} chung hai đường
 ├── processed/{ns, wake, command, command_kws, synth}/   # đặc trưng, shard sẵn sàng nạp; command_kws: của split
 │                                          #   command_kws, tách khỏi đặc trưng của đường ctc
 └── cache/                                 # xoá lúc nào cũng được
