@@ -26,6 +26,7 @@ from srpipe.dsp.afe import chain
 from srpipe.generated import afe, array, grid
 from srpipe.metrics import sisdr, stoi
 from srpipe.scenes import device, refs
+from srpipe.scenes.vad import number
 
 CONFIG = CONFIGS / "afe" / "compare.yaml"
 MEASUREMENTS = ML_ROOT.parent / "docs" / "measurements" / "afe"
@@ -394,6 +395,75 @@ def write_rows(found: dict[str, dict[str, dict]], path: Path) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+SHOWN = {  # header, the sign that makes a cut positive, digits
+    "noise_db": ("Nhiễu giảm dB", -1.0, 1),
+    "speech_db": ("Tiếng giảm dB", -1.0, 1),
+    "snr_gain_db": ("SNR tăng dB", 1.0, 1),
+    "si_sdr_db": ("SI-SDR dB", 1.0, 1),
+    "stoi": ("STOI", 1.0, 3),
+    "sig": ("SIG", 1.0, 2),
+    "bak": ("BAK", 1.0, 2),
+    "ovrl": ("OVRL", 1.0, 2),
+}
+COST_HEADS = ("µs/bước", "đỉnh µs", "RAM trong KB", "PSRAM KB")
+KIB = 1024
+
+
+def shown(key: str, value: float | None) -> str:
+    _, sign, digits = SHOWN[key]
+    return "" if value is None else number(round(sign * value, digits) + 0.0, digits)
+
+
+def mean_of(rows: list[dict], key: str) -> float | None:
+    values = [r[key] for r in rows if r.get(key) is not None]
+    return float(np.mean(values)) if values else None
+
+
+def cost_cells(rows: list[dict]) -> list[str]:
+    """Median µs a hop, the highest peak, median internal and PSRAM KB over the items a board variant ran on."""
+    ran = [r for r in rows if r.get("status") == 0]
+    if not ran:
+        return [""] * len(COST_HEADS)
+    median = {k: float(np.median([r[k] for r in ran])) for k in ("us_mean", "internal_bytes", "psram_bytes")}
+    peak = max(r["us_peak"] for r in ran)
+    kib = [number(median[k] / KIB, 1) for k in ("internal_bytes", "psram_bytes")]
+    return [f"{median['us_mean']:.0f}", f"{peak:.0f}" if peak else "", *kib]
+
+
+def summary_table(found: dict[str, dict[str, dict]], variants: list[str]) -> list[str]:
+    """Markdown rows of each variant: how many items measured it, each measure averaged over the items that have it,
+    and its board costs."""
+    heads = ["Biến thể", "Mục", *(SHOWN[k][0] for k in SHOWN), *COST_HEADS]
+    lines = ["| " + " | ".join(heads) + " |", "|---" * len(heads) + "|"]
+    for name in variants:
+        rows = [item_rows[name] for item_rows in found.values() if name in item_rows]
+        measured = [r for r in rows if r.get("lag_ms") is not None]
+        cells = [f"`{name}`", str(len(measured)), *(shown(k, mean_of(measured, k)) for k in SHOWN), *cost_cells(rows)]
+        lines.append("| " + " | ".join(cells) + " |")
+    return lines
+
+
+def item_table(found: dict[str, dict[str, dict]], variants: list[str], key: str) -> list[str]:
+    """Markdown rows of one measure, a variant a row and an item a column, over the items that have it."""
+    items = [i for i, rows in found.items() if any(r.get(key) is not None for r in rows.values())]
+    lines = ["| Biến thể | " + " | ".join(items) + " |", "|---" * (len(items) + 1) + "|"]
+    for name in variants:
+        cells = [shown(key, found[i].get(name, {}).get(key)) for i in items]
+        lines.append(f"| `{name}` | " + " | ".join(cells) + " |")
+    return lines
+
+
+def tables(cfg: dict, found: dict[str, dict[str, dict]]) -> list[str]:
+    """Every table of score.tables, then score.by_item's measures item by item over all their variants."""
+    out: list[str] = []
+    for title, variants in cfg["score"]["tables"].items():
+        out += [f"{title}:", "", *summary_table(found, variants), ""]
+    every = list(dict.fromkeys(v for variants in cfg["score"]["tables"].values() for v in variants))
+    for key in cfg["score"]["by_item"]:
+        out += [f"{key} by item:", "", *item_table(found, every, key), ""]
+    return out
+
+
 def run_refs(cfg: dict, root: Path, cache: Path) -> list[str]:
     """Every refs variant of every item: its engine of ml/afe_ref over the variant it names in after, each engine run
     once over the whole set."""
@@ -423,7 +493,9 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(run_refs(cfg, root, paths["cache"])))
         return 0
     if args.step == "score":
-        write_rows(score(cfg, root, paths["cache"] / "listen" / cfg["name"], paths["cache"]), args.out)
+        found = score(cfg, root, paths["cache"] / "listen" / cfg["name"], paths["cache"])
+        write_rows(found, args.out)
+        print("\n".join(tables(cfg, found)))
         print(f"wrote {args.out}")
         return 0
     manifest = prepare(cfg, paths["raw"], root)

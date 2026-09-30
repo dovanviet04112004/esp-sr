@@ -280,3 +280,17 @@ def test_refs_runs_each_engine_once_over_every_item_from_the_variant_it_follows(
     assert done == [f"nsnet2: {len(names)} clips", f"rnnoise: {len(names)} clips"]
     assert calls[0][1] == [(tmp_path / n / "pc_gsc.wav", tmp_path / n / "pc_gsc_nsnet2.wav") for n in names]
     assert calls[0][2] == cfg["refs"]["nsnet2"] and calls[1][2] is None
+
+
+def test_tables_average_each_measure_where_it_exists_and_leave_pc_costs_empty() -> None:
+    board = {"status": 0, "us_mean": 100, "us_peak": 150, "internal_bytes": 2048, "psram_bytes": 0, "lag_ms": 0.0}
+    found = {
+        "a": {"v": board | {"noise_db": -3.0, "ovrl": 3.0}, "pc": {"lag_ms": 0.0, "noise_db": -1.0}},
+        "b": {"v": board | {"noise_db": -5.0, "ovrl": 2.0, "us_mean": 300, "us_peak": 900}},
+        "c": {"v": {"status": 262, "us_mean": 0, "us_peak": 0, "internal_bytes": 0, "psram_bytes": 0}},
+    }
+    heads, _, v, pc = compare.summary_table(found, ["v", "pc"])
+    assert heads.startswith("| Biến thể | Mục | Nhiễu giảm dB")
+    assert v == "| `v` | 2 | 4,0 |  |  |  |  |  |  | 2,50 | 200 | 900 | 2,0 | 0,0 |"
+    assert pc == "| `pc` | 1 | 1,0 |  |  |  |  |  |  |  |  |  |  |  |"
+    assert compare.item_table(found, ["v", "pc"], "noise_db")[2:] == ["| `v` | 3,0 | 5,0 |", "| `pc` | 1,0 |  |"]

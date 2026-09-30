@@ -14,6 +14,15 @@ listen:
 score:                             # python -m srpipe.scenes.compare score: tables into docs/measurements/afe/
   align_max_s: 0.3                 # widest output delay searched against raw_ch0: the AFE and the nets buffer audio
   align_window_s: 20.0             # the start of each item the delay is read from
+  tables:                          # the rows of each summary table score prints for docs/measurements/afe/compare.md
+    spatial: [raw_ch0, pc_mean, pc_gsc, board_mean, board_gsc, espsr_bss]
+    ns_on_gsc: [board_gsc, board_gsc_omlsa, board_gsc_omlsa20, board_gsc_espsr_webrtc_mild,
+                board_gsc_espsr_webrtc_medium, board_gsc_espsr_webrtc_aggressive, board_gsc_espsr_nsnet1,
+                board_gsc_espsr_nsnet2, board_gsc_espsr_nsnet3, pc_gsc, pc_gsc_omlsa, pc_gsc_omlsa20, pc_gsc_nsnet2,
+                pc_gsc_rnnoise]
+    chains: [raw_ch0, board_mean_omlsa, board_gsc_omlsa, board_gsc_omlsa20, espsr_bss_webrtc_mild,
+             espsr_bss_webrtc_medium, espsr_bss_webrtc_aggressive, espsr_bss_nsnet1, espsr_bss_nsnet2, espsr_bss_nsnet3]
+  by_item: [noise_db, ovrl]        # measures also printed item by item, over every variant of the tables
 workers: 8                         # items rendered at once on the PC
 refs:                              # the reference engines of ml/afe_ref (KEHOACH 3.16): weights pinned by URL and sha256
   dnsmos:                          # DNSMOS P.835 of microsoft/DNS-Challenge: code MIT, its other content CC BY 4.0
