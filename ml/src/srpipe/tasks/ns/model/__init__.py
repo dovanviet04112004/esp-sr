@@ -16,6 +16,11 @@ def names(cfg: dict) -> list[str]:
     return [RNNOISE] + [NSNET + size.lower() for size in cfg["nsnet"]["train_sizes"]]
 
 
+def family(name: str) -> str:
+    """rnnoise16k, or nsnet16k for any NSNet-16k size."""
+    return name if name == RNNOISE else NSNET.rstrip("_")
+
+
 def build(cfg: dict, name: str) -> nn.Module:
     if name == RNNOISE:
         return Rnnoise(cfg["rnnoise"], cfg["power_floor"])

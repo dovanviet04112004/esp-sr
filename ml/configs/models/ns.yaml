@@ -130,7 +130,10 @@ eval:
   level_edges_dbfs: [-50.0, -40.0, -30.0]  # active speech at the slot
   workers: 8
   scenes: {level_dbfs: [-26.0, -40.0, -50.0]}   # E9-T1 scenes; OM-LSA needs one level, the nets do not
-probe:                             # make ai-probe: every candidate with random weights, for ai_engine/test_apps/unit
+probe:                             # make ai-probe: every candidate's step graph, random weights (E9-T10)
   seed: 20260930
-  calib_hops: 64                   # random normalised feature hops ESP-PPQ calibrates on
-  runs: 50                         # timed runs of one hop on the board, after one untimed
+  calib_hops: 64                   # N(0, 1) feature hops, states fed back, that ESP-PPQ calibrates on
+  hops: 200                        # hops streamed on board B with the states fed back, each timed
+  esp_ppq_patches:                 # compress/quant/esp_ppq_patches.py, per candidate
+    rnnoise16k: [requantise_graph_inputs]   # x feeds dense and two Concats, each at its own exponent
+    nsnet16k: []
