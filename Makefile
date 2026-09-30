@@ -16,6 +16,7 @@ fresh_sdkconfig = if [ -f $(1) ] && [ -n "$$(find $(2) -newer $(1))" ]; then rm 
 FW_DEFAULTS := firmware/sdkconfig.defaults firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.afe \
                firmware/CMakeLists.txt $(wildcard firmware/sdkconfig.secrets)
 BENCH_APP := firmware/test_apps/bench_afe
+UNIT_APP := firmware/components/ai_engine/test_apps/unit
 PARITY_APP := firmware/test_apps/parity
 ESPSR_APP := firmware/test_apps/espsr_compare
 # Where srpipe.scenes.compare prepare wrote the items, read from ml/ only when a recipe needs it.
@@ -206,16 +207,22 @@ calib-shift: ## Store NVS calib/pcm_shift through test_apps/calib: make calib-sh
 	@test -n "$(SHIFT)" || { echo "usage: make calib-shift SHIFT=<8..16>"; exit 1; }
 	cd host && uv run --extra score python -m srhost.calib shift $(SHIFT) --port $(PORT)
 
-ai-probe: ## Export the probes of E11-T10 (TCN), E11-T17 (kws sizes) and E11-T12 (ctc) into ai_engine/test_apps/unit
+ai-probe: ## Export the probes of E11-T10 (TCN), E11-T17 (kws), E11-T12 (ctc) and E9-T10 (ns) into ai_engine/test_apps/unit
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.wake.quant probe
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.kws.quant probe
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant probe
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.ns.quant probe
 
-ai-unit: ai-probe ## Run the ai_engine suite on board B; both model slots are rewritten and left erased
-	cd firmware/components/ai_engine/test_apps/unit && idf.py build && \
+ai-unit: ai-probe ## Run the ai_engine suite on board B at bench's compiler settings; both model slots end erased
+	@$(call fresh_sdkconfig,$(UNIT_APP)/sdkconfig,firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.bench \
+	  $(UNIT_APP)/sdkconfig.defaults $(UNIT_APP)/CMakeLists.txt)
+	cd $(UNIT_APP) && idf.py build && \
 	  python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
 	    --partition-table-file ../../../../partitions.csv write_partition --partition-name models_0 \
 	    --input main/probe/ctc_models.bin && \
+	  python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
+	    --partition-table-file ../../../../partitions.csv write_partition --partition-name models_1 \
+	    --input main/probe/ns_models.bin && \
 	  pytest pytest_unit.py --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) -s -p no:cacheprovider
 
 # broker and host
