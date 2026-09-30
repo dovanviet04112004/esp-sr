@@ -421,7 +421,7 @@ OM-LSA nằm ngay trong `dsp_afe`; bản RNNoise nằm ở `ai_engine/src/ns/` v
 |---|---|---|---|---|---|---|
 | `fft` `window` `stft` | thuần | `dsp_spec` | FFT thực (`dl_fft`), căn Hann, chồng 50% | §3.1 | **451 µs đo** cả chuỗi | E6-T4 |
 | `mel` | thuần | `dsp_spec` | log-mel, MFCC giữ làm đối chiếu | 40 dải, 20–7 600 Hz | **~180 µs đo** (`rfft` 118 + 40 dải 62) | E6-T5 |
-| `pitch` | thuần | `dsp_spec` | NCCF, ra log F0 + delta + độ hữu thanh | 60–400 Hz | ~300 µs 🔬; dựng cho `command` (ADR-0010) | E11-T8 |
+| `pitch` | thuần | `dsp_spec` | bộ dò cao độ của Kaldi chạy dòng: NCCF ở 4 kHz, Viterbi, ra độ hữu thanh + log F0 trừ trung bình + delta (§3.11) | 50–400 Hz | ~300 µs 🔬; dựng cho `command` (ADR-0010) | E11-T8 |
 | `hpf` | thuần | `dsp_afe` | IIR bậc hai Butterworth, dạng II chuyển vị viết tay (ADR-0004) | 80 Hz | ~41 µs hai kênh | E7-T1 |
 | `balance` | thuần | `dsp_afe` | nhân hệ số phức hiệu chuẩn mỗi vạch cho `ch1`, vòng viết tay (ADR-0005) | từ NVS `calib/bal` | ~18 µs | E7-T2 |
 | `aec` | thuần | `dsp_afe` | MDF chồng-lưu, bước học tự chỉnh, khử vọng dư | 8 phân đoạn × 256 = 128 ms đuôi | ~1,3 ms hai micro | E10-T4 |
@@ -713,6 +713,18 @@ hoá trung bình và phương sai theo **thống kê lúc huấn luyện**; th�
 F0 nằm. `command` đọc log-mel 40 cộng ba chiều cao độ của `dsp_spec/pitch` (log F0, delta, độ hữu thanh): mọi số đã công
 bố cho ngôn ngữ có thanh đều thấy cao độ hạ lỗi, ở tiếng Việt khoảng 18% tương đối, còn 80 dải không có số cho mạng nhỏ
 (ADR-0010). `wake` giữ log-mel 40, vì lỗi của nó nằm ở dữ liệu dương chứ không ở thanh.
+
+**`pitch`** là bộ dò cao độ của Kaldi (Ghahremani và cộng sự, 2014; `feat/pitch-functions.cc`) ở chế độ chạy dòng
+không trễ của chính Kaldi (`max_frames_latency` 0), giữ mọi hằng số mặc định: hạ về 4 kHz qua lọc sinc cắt 1 kHz; NCCF
+trên cửa sổ 25 ms ở mọi độ trễ nguyên, một bản có "ballast" theo năng lượng trung bình từ lúc bắt đầu (khung lặng ra
+gần 0) để dò, một bản không để đo độ hữu thanh; nội suy sinc lên 417 độ trễ cấp số nhân bước 0,5% từ 1/400 đến 1/50 s;
+Viterbi với giá cục bộ `1 − NCCF + 10·L·NCCF` và phạt nhảy `0,1·ln²(1,005)·Δ²`, mỗi bước ra ngay trạng thái rẻ nhất.
+Ra ba chiều như Kaldi: độ hữu thanh `2·((1,0001 − c)^0,15 − 1)`; log F0 trừ trung bình có trọng số xác suất hữu thanh,
+×2; delta ±2 khung của log F0, ×10. Chỉ khác Kaldi ở chỗ chạy dòng buộc phải khác: bước khung là bước của lưới (16 ms
+thay 10 ms); trung bình và delta chỉ dùng khung đã có, đúng như Kaldi thấy ở khung mới nhất khi chạy dòng; không cộng
+nhiễu ngẫu nhiên vào delta, việc ấy thuộc tăng cường lúc học. Trên bài của Kaldi, cao độ và độ hữu thanh ấy hạ WER
+tiếng Việt từ 71,3% xuống 65,6%, hơn getf0 và SAcC; bản chạy dòng được đo so với bản đọc cả tệp ở
+`docs/measurements/`. Mọi tham số nằm ở cấu hình đặc trưng của model, như của `mel`.
 
 **`wake`** — TCN tích chập giãn nở nhân quả, kernel 3, giãn 1, 2, 4, …, 32 một lượt: trường nhìn 127 khung ≈ 2 s;
 64 kênh, vì cùng việc phụ CTC dưới đây nó cho giọng thật cao nhất (`docs/measurements/wake.md` §5). Int8, chạy dòng
