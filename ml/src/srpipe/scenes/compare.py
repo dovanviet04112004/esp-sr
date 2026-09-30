@@ -2,8 +2,8 @@
 
 prepare writes each item's input.wav (the array's channels, int16, the grid's rate), raw_ch0.wav, the variants made
 outside this repo, and item.json with the item's source, text and known segments; a mixture adds its clean and noise
-parts. Every run writes the same bytes: the only draw, where a mixture's noise starts, is seeded by the config's seed
-and the item's name. Run: python -m srpipe.scenes.compare prepare
+parts, the only draw, seeded by the item's name. render writes the pc_* variants with the Python chain and board B's
+calib/bal. Run: python -m srpipe.scenes.compare {prepare,render}
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import math
+import multiprocessing
 import zlib
 from pathlib import Path
 
@@ -20,8 +21,10 @@ import soundfile as sf
 import yaml
 
 from srpipe.core.audio_io import INT16_SCALE
-from srpipe.core.config import CONFIGS, data_paths, load_yaml
-from srpipe.generated import array, grid
+from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml
+from srpipe.dsp.afe import chain
+from srpipe.generated import afe, array, grid
+from srpipe.scenes import device
 
 CONFIG = CONFIGS / "afe" / "compare.yaml"
 HOP = grid.HOP_SAMPLES
@@ -235,13 +238,52 @@ def prepare(cfg: dict, raw: Path, root: Path) -> Path:
     return manifest
 
 
+def pc_config(cfg: dict, variant: dict, gains: np.ndarray) -> chain.ChainConfig:
+    """The Python chain of a pc variant: the config's modules, ns_omlsa when it asks, board B's balance."""
+    ns = ("ns_omlsa",) if variant["ns"] == "omlsa" else ()
+    return chain.ChainConfig(
+        modules=tuple(cfg["chain"]["modules"]) + ns,
+        balance_gains=gains,
+        ns_floor_db=variant.get("ns_floor_db", afe.NS_FLOOR_DB),
+        spatial=variant["spatial"],
+    )
+
+
+def board_gains() -> np.ndarray:
+    """calib/bal of board B, the file configs/scenes/device.yaml names, as the board and espsr_compare take it."""
+    spec = load_yaml(CONFIGS / "scenes" / "device.yaml")["microphone"]["balance"]
+    return device.read_balance(ML_ROOT.parent / spec)[0]
+
+
+def _render_item(job: tuple[dict, Path]) -> list[str]:
+    cfg, folder = job
+    gains = board_gains()
+    done = []
+    for name, variant in cfg["variants"].items():
+        if variant.get("by") == "pc":
+            chain.render(folder / "input.wav", folder / f"{name}.wav", pc_config(cfg, variant, gains))
+            done.append(name)
+    return done
+
+
+def render(cfg: dict, root: Path) -> list[str]:
+    """Every pc variant of every prepared item, items in parallel."""
+    jobs = [(cfg, root / item["name"]) for item in cfg["items"]]
+    with multiprocessing.get_context("spawn").Pool(cfg["workers"]) as pool:
+        written = pool.map(_render_item, jobs)
+    return [f"{job[1].name}: {', '.join(names)}" for job, names in zip(jobs, written, strict=True)]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("step", choices=["prepare"])
+    parser.add_argument("step", choices=["prepare", "render"])
     parser.add_argument("--config", type=Path, default=CONFIG)
     args = parser.parse_args(argv)
     cfg, paths = load_yaml(args.config), data_paths()
     root = paths["interim"] / "scenes" / cfg["name"]
+    if args.step == "render":
+        print("\n".join(render(cfg, root)))
+        return 0
     manifest = prepare(cfg, paths["raw"], root)
     for name, digests in yaml.safe_load(manifest.read_text(encoding="utf-8"))["items"].items():
         print(f"{name}: {', '.join(digests)}")

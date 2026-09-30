@@ -11,6 +11,7 @@ segments:                          # the energy rule of items marked auto, on ch
   min_noise_s: 0.5                 # a shorter noise-only span is left out
 listen:
   level_dbfs: -26.0                # the copies in cache/listen/<name>/ match this over their active hops
+workers: 8                         # items rendered at once on the PC
 chain:                             # every variant of ours runs these modules; agc stays off so levels compare
   modules: [hpf, balance, doa, vad]
 variants:                          # by: who writes <variant>.wav, mono int16 at the grid's rate (KEHOACH 3.16)

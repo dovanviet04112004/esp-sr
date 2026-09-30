@@ -228,3 +228,16 @@ def test_prepare_refuses_a_rate_a_short_noise_span_and_a_clipping_mix(raw: Path,
     for bad, match in ((fast, "Hz"), (short, "shorter than the speech"), (loud, "clips")):
         with pytest.raises(ValueError, match=match):
             compare.prepare(bad, raw, tmp_path / "out")
+
+
+def test_render_writes_each_pc_variant_through_the_python_chain(raw: Path, tmp_path: Path) -> None:
+    cfg = config()
+    cfg["items"] = cfg["items"][:1]
+    cfg["variants"] = {k: v for k, v in cfg["variants"].items() if k in ("raw_ch0", "pc_mean", "pc_gsc_omlsa")}
+    cfg["workers"] = 1
+    compare.prepare(cfg, raw, tmp_path / "set")
+    assert compare.render(cfg, tmp_path / "set") == ["read: pc_mean, pc_gsc_omlsa"]
+    x = read(tmp_path / "set/read/input.wav")
+    mean, cleaned = read(tmp_path / "set/read/pc_mean.wav"), read(tmp_path / "set/read/pc_gsc_omlsa.wav")
+    assert len(mean) == len(cleaned) == len(x) // HOP * HOP
+    assert not np.array_equal(mean, cleaned)
