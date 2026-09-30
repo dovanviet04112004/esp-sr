@@ -1063,7 +1063,7 @@ so hai mạng dìm nhiễu công bố.
 | `tinyai` | có sẵn | đầu ra chuỗi lọc của `tinyai-signal`, chỉ ở `tinyai_music_voice` |
 | `board_mean`, `board_gsc` | `test_apps/espsr_compare` | khối không gian của dự án: `dsp_afe` C trên board, không `ns` |
 | `board_mean_omlsa`, `board_gsc_omlsa`, `board_gsc_omlsa20` | như trên | cả chuỗi của dự án: cộng `ns_omlsa` sàn của sản phẩm, hay −20 dB |
-| `espsr_bss` | như trên | khối không gian của ESP-SR: AFE loại nhận dạng, hai micro, chỉ bật tách mù BSS (SE) |
+| `espsr_bss` | như trên | khối không gian của ESP-SR: AFE loại nhận dạng, hai micro, tách mù BSS (SE); VAD WebRTC của họ chỉ chọn kênh đã tách làm lối ra, vì không có từ đánh thức, và khi khoá kênh ra thì AFE trả micro đầu để thô |
 | `espsr_bss_webrtc_{mild,medium,aggressive}` | như trên | cả chuỗi của ESP-SR: lối ra `espsr_bss` qua NS WebRTC của họ ở ba mức |
 | `espsr_bss_nsnet{1,2,3}` | như trên | lối ra `espsr_bss` qua ba mạng dìm nhiễu của họ |
 | `board_gsc_espsr_webrtc_{mild,medium,aggressive}`, `board_gsc_espsr_nsnet{1,2,3}` | như trên | cùng sáu bộ dìm nhiễu của ESP-SR, nuôi bằng lối ra `board_gsc`: chỉ khối dìm nhiễu khác nhau |
