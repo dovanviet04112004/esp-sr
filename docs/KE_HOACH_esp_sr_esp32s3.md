@@ -1352,12 +1352,14 @@ ml/
 │   │   │   │                          #   srpipe/tts và core/phrases.py vào interim/command/synth_{pilot,pos,neg}/
 │   │   │   ├── kws/{model/, data.py, train.py, quant.py, postproc/}   # DS-CNN; data.py dựng split command_kws/v<n>
 │   │   │   │                          #   và đặc trưng processed/command_kws/; postproc/ ★ softmax và luật từ chối
-│   │   │   └── ctc/{data.py, model/, train.py, postproc/ctc_score.py ★}   # encoder kiểu MultiNet7 + CTC; data.py dựng split
+│   │   │   └── ctc/{data.py, model/, train.py, quant.py, postproc/ctc_score.py ★}   # encoder kiểu MultiNet7 + CTC; data.py dựng split
 │   │   │                              #   command/v<n>, bỏ lệnh chưa học khỏi tập học (§1.3)
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
 │   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py, pitch.py}
 │   ├── compress/quant/ptq_espdl.py    # ESP-PPQ → .espdl + mô phỏng int8 trên máy tính
+│   ├── compress/quant/esp_ppq_patches.py   # vá lỗi ESP-PPQ 1.3.11, mỗi bản vá một hàm ghi lỗi, triệu chứng trên
+│   │                                  #   board và test ghim nó; chỉ nhánh khai `esp_ppq_patches` trong config mới bật
 │   └── export/{pack_models.py, update_lock.py}
 │
 ├── tts/<bộ>/{pyproject.toml, uv.lock, run.py}  # mỗi bộ TTS và bộ nghe kiểm (asr) một dự án uv riêng, ghim bản:
