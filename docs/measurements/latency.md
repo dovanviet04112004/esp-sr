@@ -150,6 +150,27 @@ trường nhìn 127 bước, `.espdl` 48 KB. Dựng bằng `make ai-probe`, đo 
 Bản đầu dùng `auto_streaming` của ESP-PPQ: phép cộng dư nhận bộ đệm cả cửa sổ, đầu ra phình tới 127 bước và
 `model->test()` báo sai hình. Bộ đệm gắn theo từng tích chập (`ptq_espdl.cache_each_causal_conv`) cho kết quả trên.
 
+Lượt 30/09 tại `b85f271`, cùng app, với 64 kênh như `wake.yaml` hiện giữ: chênh int8 lớn nhất 0, một bước **1 994 µs**
+trung bình, 2 032 µs đỉnh; dựng mạng 26,3 ms, PSRAM 31,4 KB.
+
+## 10. DS-CNN của `kws` trên esp-dl, ba cỡ (E11-T17)
+
+Board B, `ai_engine/test_apps/unit` (profile mặc định `-Og`; nhân chập của esp-dl là mã dịch sẵn), IDF 6.0.2, esp-dl
+3.3.11, ESP-PPQ 1.3.11, `b85f271`, 30/09. Mỗi cỡ của `configs/models/command_kws.yaml` với trọng số ngẫu nhiên có seed,
+một cửa sổ 94 bước × 43 chiều vào, 11 lớp ra, trọng số và tensor ở PSRAM. Dựng bằng `make ai-probe`, đo bằng
+`make ai-unit`: một lần chạy không tính giờ, rồi 10 lần trên nhân 0.
+
+| Cỡ | Kênh | MAC mỗi cửa sổ | `.espdl` | PSRAM của mạng dựng xong | Chênh int8 so với mô phỏng | Một cửa sổ, trung bình | Đỉnh |
+|---|---|---|---|---|---|---|---|
+| S | 64 | 22,0 triệu | 40,6 KB | 148 KB | 0 | **41,9 ms** | 41,9 ms |
+| M | 172 | 79,7 triệu | 156 KB | 458 KB | 0 | 277,0 ms | 277,0 ms |
+| L | 276 | 230,0 triệu | 438 KB | 730 KB | 0 | 2 027 ms | 2 059 ms |
+
+`model->test()` qua ở cả ba cỡ. Ngân sách của KẾ HOẠCH §3.12 là một lần chạy ≤ 100 ms trên nhân 0 sau khi `vad` tắt:
+**chỉ S vừa**, M gấp 2,8 lần, L gấp 20 lần. Tốc độ rơi theo cỡ: S 0,53, M 0,29, L 0,11 tỉ MAC mỗi giây. Tensor
+ra của tích chập đầu là 66 KB ở S, 348 KB ở M và 558 KB ở L, đều trong PSRAM, nên có thể thời gian đi vào đọc ghi
+PSRAM; 172 và 276 kênh cũng không chia hết cho 16 làn SIMD. Hai nguyên nhân này chưa đo tách.
+
 ## 9. Dò lưới của `doa`: xoay pha dồn viết tay so với bảng và `esp-dsp` (E8-T1, ADR-0008)
 
 Bản sao tạm của `bench_afe` có thêm `esp-dsp` 1.8.2 (không vào repo), mã `dsp_afe` tại `a88a6fa` cộng `doa.c` của E8-T1,
