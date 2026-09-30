@@ -1,0 +1,10 @@
+# C command_kws decision against srpipe.tasks.command.kws.postproc.decide (KEHOACH 3.12, 3.14, E11-T17). Choosing a
+# command is discrete, so the decision matches exactly; the probabilities are float32 with exp from each platform's C
+# library. case_neg_* rejects a winner exactly on the reject threshold, which the C accepts.
+tensors:
+  probs:
+    max_abs: 1.0e-6
+    min_snr_db: 100.0
+  decision:
+    max_abs: 0.0
+    min_snr_db: 0.0
