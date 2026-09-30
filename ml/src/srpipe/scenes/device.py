@@ -1,7 +1,7 @@
 """The board simulation of KEHOACH 1.2 (E4-T8): clean speech becomes what the recogniser hears on board B.
 
-build runs sessions of consecutive items of a split file in rooms of a bank built once, on the microphones and through
-the chain and log-mel of configs/scenes/device.yaml, into processed/<out>/ with a manifest of sha256s. playback writes
+build runs sessions of split items in rooms of a bank built once, on the microphones and through the chain, log-mel
+and, when asked, pitch of configs/scenes/device.yaml, into processed/<out>/ with a manifest of sha256s. playback writes
 interim/playback/vivos_test.wav, VIVOS test to play from a loudspeaker at a known place (host/plans/playback.tsv).
 Run: python -m srpipe.scenes.device build <split file> <out> | playback
 """
@@ -27,6 +27,7 @@ from srpipe.core.audio_io import ItemReader, ramped, read_wav, to_float, write_w
 from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml
 from srpipe.dsp.afe.chain import PCM_MAX, PCM_MIN, Chain, ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
+from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
 from srpipe.dsp.spec.stft import Stft
 from srpipe.generated import array, grid
 from srpipe.metrics import mic_pair
@@ -261,29 +262,40 @@ def simulate_session(
     return hear(air, mics, rng), spans, draws
 
 
-def item_frames(span: tuple[int, int], pad_s: float, n_hops: int) -> tuple[int, int, int, int]:
-    """Output hops [first, stop) of an utterance with its padding, and the utterance's own hops within them."""
-    pad = round(pad_s * FS)
-    first = max(0, (span[0] - pad) // HOP + CHAIN_LAG_HOPS)
-    stop = min(n_hops, -(-(span[1] + pad) // HOP) + CHAIN_LAG_HOPS)
+def item_frames(span: tuple[int, int], pads_s: tuple[float, float], n_hops: int) -> tuple[int, int, int, int]:
+    """Output hops [first, stop) of an utterance with its padding before and after, and the utterance's own hops
+    within them."""
+    before, after = (round(pad_s * FS) for pad_s in pads_s)
+    first = max(0, (span[0] - before) // HOP + CHAIN_LAG_HOPS)
+    stop = min(n_hops, -(-(span[1] + after) // HOP) + CHAIN_LAG_HOPS)
     return first, stop, span[0] // HOP + CHAIN_LAG_HOPS - first, -(-span[1] // HOP) + CHAIN_LAG_HOPS - first
 
 
+def item_pitch(tracker: PitchTracker, clean: np.ndarray) -> np.ndarray:
+    """Pitch features (hops, 3) of an item's clean int16 samples, the tracker reset at its first hop as svc_listen
+    resets it on entering LENH (KEHOACH 3.12)."""
+    tracker.reset()
+    return np.stack([tracker.step(to_float(hop)) for hop in clean.reshape(-1, HOP)])
+
+
 def _shard(job: tuple) -> list[Path]:
-    cfg, roots, bank, out, shard, sessions, pools = job
+    cfg, roots, bank, out, shard, sessions, pools, pads_s, with_pitch = job
     mics = load_microphones(cfg["microphone"])
     chain_cfg = ChainConfig(balance_gains=mics.gains)
     mel = Mel(MelConfig(**cfg["features"]))
+    tracker = PitchTracker(PitchConfig(**cfg["pitch"])) if with_pitch else None
     readers = {name: ItemReader(root) for name, root in roots.items()}
-    features, figures, pcm, items, offset = [], [], [], [], 0
+    features, figures, pcm, pitches, items, offset = [], [], [], [], [], 0
     for k, rows in sessions:
         captured, spans, draws = simulate_session(cfg, k, rows, bank, mics, pools, readers)
         clean, figs, feats = listen(captured, chain_cfg, mel)
         for row, span in zip(rows, spans, strict=True):
-            first, stop, speech_first, speech_stop = item_frames(span, cfg["session"]["pad_s"], len(feats))
+            first, stop, speech_first, speech_stop = item_frames(span, pads_s, len(feats))
             features.append(feats[first:stop])
             figures.append(figs[first:stop])
             pcm.append(clean[first * HOP : stop * HOP])
+            if tracker is not None:
+                pitches.append(item_pitch(tracker, pcm[-1]))
             where = {"frame_offset": offset, "n_frames": stop - first, "speech_frames": [speech_first, speech_stop]}
             items.append({"item": row.item, "spk": row.spk, "room": row.room, "origin": row.origin, **where, **draws})
             offset += stop - first
@@ -293,15 +305,27 @@ def _shard(job: tuple) -> list[Path]:
     np.save(written[1], np.concatenate(figures))
     np.save(written[2], np.concatenate(pcm))
     written[3].write_text("".join(json.dumps(i, ensure_ascii=False) + "\n" for i in items), encoding="utf-8")
+    if tracker is not None:
+        written.append(stem.with_suffix(".pitch.npy"))
+        np.save(written[4], np.concatenate(pitches))
     return written
 
 
 def build(
-    cfg: dict, split_file: Path, raw_root: Path, interim: Path, out: Path, workers: int = 1, repeats: int = 1
+    cfg: dict,
+    split_file: Path,
+    raw_root: Path,
+    interim: Path,
+    out: Path,
+    workers: int = 1,
+    repeats: int = 1,
+    pads_s: tuple[float, float] | None = None,
+    pitch: bool = False,
 ) -> Path:
     """Every item of split_file through the simulation into out, repeats times over, each pass in sessions of their
-    own rooms, levels and noise; then manifest.yaml: the config, the split's sha256, the repeats, the room bank's
-    sha256 and each file's."""
+    own rooms, levels and noise, each item kept with pads_s before and after it (session.pad_s both sides unless
+    given) and, with pitch, its pitch features from a reset at its first hop; then manifest.yaml: the config, the
+    split's sha256, the repeats, the pads and pitch when asked, the room bank's sha256 and each file's."""
     rows = splits.read_split(split_file)
     if foreign := sorted({row.origin for row in rows} - CLEAN_ORIGINS):
         raise ValueError(f"{split_file}: the simulation takes clean speech, not origin {', '.join(foreign)}")
@@ -315,8 +339,9 @@ def build(
     per_shard = cfg["sessions_per_shard"]
     pools = noise_files(cfg, raw_root, set(rejected))
     out.mkdir(parents=True, exist_ok=True)
+    pads = pads_s or (cfg["session"]["pad_s"], cfg["session"]["pad_s"])
     jobs = [
-        (cfg, {"raw": raw_root, "interim": interim}, bank, out, j, sessions[i : i + per_shard], pools)
+        (cfg, {"raw": raw_root, "interim": interim}, bank, out, j, sessions[i : i + per_shard], pools, pads, pitch)
         for j, i in enumerate(range(0, len(sessions), per_shard))
     ]
     with multiprocessing.get_context("spawn").Pool(workers) as pool:
@@ -326,6 +351,8 @@ def build(
         "config": cfg,
         "split": {"file": split_file.name, "sha256": sha256_of(split_file)},
         "repeats": repeats,
+        **({"pads_s": list(pads)} if pads_s else {}),
+        **({"pitch": True} if pitch else {}),
         "rooms_sha256": sha256_of(bank / "rooms.yaml"),
         "items": len(rows),
         "hours": round(frames * HOP / FS / 3600, 3),

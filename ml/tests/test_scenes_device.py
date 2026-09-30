@@ -1,5 +1,6 @@
 """srpipe.scenes.device: levels in dB SPL that distance and sensitivity turn into dBFS, ch0 hearing ch1 through
-calib/bal, the datasheet self noise, drv_audio's shift, the same shards for the same seed; the playback file."""
+calib/bal, the datasheet self noise, drv_audio's shift, the same shards for the same seed, pitch and wider pads that
+leave every other file alone; the playback file."""
 
 from __future__ import annotations
 
@@ -13,8 +14,9 @@ import pytest
 import yaml
 
 from srpipe.core import screen
-from srpipe.core.audio_io import INT16_SCALE, write_wav
+from srpipe.core.audio_io import INT16_SCALE, to_float, write_wav
 from srpipe.core.config import CONFIGS, load_yaml
+from srpipe.dsp.spec.pitch import PitchConfig, pitch_features
 from srpipe.generated import array, grid
 from srpipe.metrics import mic_pair
 from srpipe.scenes import device, room
@@ -218,3 +220,44 @@ def test_repeats_pass_over_the_split_again_in_other_sessions(raw_root: Path, tmp
     assert yaml.safe_load(manifest.read_text())["repeats"] == 2 and len(items) == 10
     assert [i["item"] for i in items[:5]] == [i["item"] for i in items[5:]]
     assert all(first["session"] != again["session"] for first, again in zip(items[:5], items[5:], strict=True))
+
+
+def items_of(out: Path) -> list[dict]:
+    return [json.loads(line) for p in sorted(out.glob("*.items.jsonl")) for line in p.read_text().splitlines()]
+
+
+def test_pitch_rides_along_and_changes_no_other_file(raw_root: Path, tmp_path: Path) -> None:
+    split = split_file(tmp_path / "train.txt", raw_root)
+    interim = screened(tmp_path / "interim")
+    plain = yaml.safe_load(device.build(tiny(), split, raw_root, interim, tmp_path / "plain").read_text())
+    with_pitch = yaml.safe_load(
+        device.build(tiny(), split, raw_root, interim, tmp_path / "pitch", pitch=True).read_text()
+    )
+    assert "pitch" not in plain and "pads_s" not in plain and with_pitch["pitch"] is True
+    assert {n: s for n, s in with_pitch["sha256"].items() if not n.endswith(".pitch.npy")} == plain["sha256"]
+    cfg = PitchConfig(**tiny()["pitch"])
+    for shard in sorted((tmp_path / "pitch").glob("*.items.jsonl")):
+        stem = str(shard).removesuffix(".items.jsonl")
+        feats, pcm, pitch = (np.load(f"{stem}.{kind}.npy") for kind in ("features", "pcm", "pitch"))
+        assert pitch.shape == (len(feats), 3) and pitch.dtype == np.float32
+        for row in (json.loads(line) for line in shard.read_text().splitlines()):
+            at, n = row["frame_offset"], row["n_frames"]
+            fresh, _ = pitch_features(to_float(pcm[at * grid.HOP_SAMPLES : (at + n) * grid.HOP_SAMPLES]), cfg)
+            assert np.array_equal(pitch[at : at + n], fresh)
+
+
+def test_wider_pads_keep_more_hops_before_each_item(raw_root: Path, tmp_path: Path) -> None:
+    split = split_file(tmp_path / "train.txt", raw_root)
+    interim = screened(tmp_path / "interim")
+    pad = tiny()["session"]["pad_s"]
+    device.build(tiny(), split, raw_root, interim, tmp_path / "plain")
+    manifest = device.build(tiny(), split, raw_root, interim, tmp_path / "wide", pads_s=(pad + 0.2, pad))
+    assert yaml.safe_load(manifest.read_text())["pads_s"] == [pad + 0.2, pad]
+    whole = round(0.2 * FS) // grid.HOP_SAMPLES
+    for plain, wide in zip(items_of(tmp_path / "plain"), items_of(tmp_path / "wide"), strict=True):
+        extra = wide["speech_frames"][0] - plain["speech_frames"][0]
+        assert extra in (whole, whole + 1)
+        assert wide["n_frames"] - plain["n_frames"] == extra
+        assert (
+            wide["speech_frames"][1] - wide["speech_frames"][0] == plain["speech_frames"][1] - plain["speech_frames"][0]
+        )
