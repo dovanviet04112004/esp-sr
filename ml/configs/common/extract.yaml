@@ -17,6 +17,12 @@ workers:
   stream: 4                        # .arrow parts read end to end at once, their audio passing through memory
 fetch_min_free_gb: 10              # fetch waits while the data disk has less free, until cut frees it
 follow_poll_s: 60                  # how often fetch --follow and cut --follow look for new work
+pilot:                             # fetch --pilot, cut, listen: a sample of every phrase to hear before the whole run
+  per_phrase: 40                   # matches of each phrase fetched, spread over the sources that hold it
+  per_source: 8                    # rows next to each other in one part of a source, so few row groups or tar members
+  listen_per_phrase: 8             # kept clips copied to cache/listen/<extract>/, taken from source after source
+  level_dbfs: -26.0                # the copies match this over the frames within cut.quiet_below_peak_db of the peak
+  seed: 20261001
 cut:                               # only a phrase said with a pause on each side is cut (KEHOACH 3.11)
   frame_s: 0.01                    # level frames of the pause test
   guard_s: 0.03                    # next to each aligned bound, out of the test: the aligner's error, a consonant's breath

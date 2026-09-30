@@ -2,8 +2,8 @@
 
 scan lists the rows whose text says a phrase of configs/common/extract.yaml; fetch streams only the audio of a match;
 cut keeps each phrase said with a pause on each side, cut into those pauses and heard alone by the checker, then deletes
-the sentence. Each step resumes; stopping fetch and cut after a few parts is a pilot to listen to before the rest.
-Run: python -m srpipe.core.extract <name> {scan,fetch,cut,report} [--follow]"""
+the sentence. Each step resumes. fetch --pilot, cut, listen is the sample to hear before the whole run.
+Run: python -m srpipe.core.extract <name> {scan,fetch,cut,report,listen} [--follow | --pilot]"""
 
 from __future__ import annotations
 
@@ -636,10 +636,44 @@ def read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
-def fetch(job: Job, follow: bool, phrase: str | None = None) -> None:
+def taken_keys(job: Job) -> set[str]:
+    """Matches already cut or waiting to be cut."""
+    return {f.stem for f in (job.state / "cut").glob("*.jsonl")} | {f.stem for f in job.whole("").parent.glob("*.json")}
+
+
+def pilot_parts(
+    job: Job, parts: list[tuple[dict, str, list[dict], dict]], taken: set[str]
+) -> list[tuple[dict, str, list[dict], dict]]:
+    """The pilot's parts and matches: for each phrase, pilot.per_source matches next to each other, from a seeded start,
+    in the part of each source that says it most, sources in config order, until pilot.per_phrase."""
+    spec = job.cfg["pilot"]
+    rng = np.random.default_rng(spec["seed"])
+    order = [s["repo"] for s in job.spec["sources"]]
+    chosen: dict[tuple[str, str], tuple[dict, str, dict, dict]] = {}
+    for phrase in job.phrases.phrases:
+        best: dict[str, tuple[dict, str, list[dict], dict]] = {}
+        for source, part, matches, info in parts:
+            said = [m for m in matches if phrase in m["phrases"] and m["key"] not in taken]
+            if said and len(said) > len(best.get(source["repo"], (None, None, []))[2]):
+                best[source["repo"]] = (source, part, said, info)
+        need = spec["per_phrase"]
+        for repo in dict.fromkeys(r for r in order if r in best):
+            if need <= 0:
+                break
+            source, part, said, info = best[repo]
+            said = sorted(said, key=lambda m: (m.get("row", 0), m["key"]))
+            k = min(spec["per_source"], len(said), need)
+            at = int(rng.integers(len(said) - k + 1))
+            entry = chosen.setdefault((repo, part), (source, part, {}, info))
+            entry[2].update({m["key"]: m for m in said[at : at + k]})
+            need -= k
+    return [(source, part, list(ms.values()), info) for source, part, ms, info in chosen.values()]
+
+
+def fetch(job: Job, follow: bool, phrase: str | None = None, pilot: bool = False) -> None:
     """Every audio part not fetched yet, for its matches neither cut nor waiting; with phrase, only the matches that
-    say it, every part left unmarked for a later whole fetch; with follow, again as scan finishes parts, until scan is
-    done."""
+    say it, and with pilot, only the pilot's matches (pilot_parts), every part left unmarked for a later whole fetch;
+    with follow, again as scan finishes parts, until scan is done."""
     if phrase is not None and phrase not in job.phrases.phrases:
         raise ValueError(f"{phrase!r} is none of the phrases of {job.name}")
     pins = job.pins()
@@ -659,16 +693,20 @@ def fetch(job: Job, follow: bool, phrase: str | None = None) -> None:
             fetch_local(job, matches)
         else:
             note = fetch_tar(job, source, pins[source["repo"]], part, matches)
-        if phrase is None:
+        if phrase is None and not pilot:
             mark(source, part)
         return f": {len(matches)} matches{note}"
 
+    if pilot:
+        todo = pilot_parts(job, fetch_parts(job, pins), taken_keys(job))
+        print(f"fetch: pilot of {sum(len(p[2]) for p in todo)} matches in {len(todo)} audio parts", flush=True)
+        failed = run_parallel(todo, one, job.cfg["workers"]["fetch"], "fetch")
+        print(f"fetch: pilot done, {len(failed)} parts failed every try", flush=True)
+        return
     failures = defaultdict(int)
     while True:
         scanned = (job.state / "scan.done").exists()
-        taken = {f.stem for f in (job.state / "cut").glob("*.jsonl")} | {
-            f.stem for f in job.whole("").parent.glob("*.json")
-        }
+        taken = taken_keys(job)
         left = []
         for source, part, matches, info in fetch_parts(job, pins):
             if job.fetched_mark(source, part).exists():
@@ -918,18 +956,74 @@ def report(job: Job) -> str:
     return "\n".join(lines)
 
 
+def listen(job: Job) -> str:
+    """Copies of the kept clips for the owner to hear, pilot.listen_per_phrase of each phrase taken from source after
+    source and matched to pilot.level_dbfs, into cache/listen/<name>/, with index.tsv; and per phrase the sentences
+    cut, the clips kept, their sources, lengths, and the quiet each clip keeps before and after its phrase."""
+    spec, rule = job.cfg["pilot"], job.cfg["cut"]
+    rng = np.random.default_rng(spec["seed"])
+    repo_of = {slug(s["repo"]): s["repo"] for s in job.spec["sources"]}
+    records = [m for f in sorted((job.state / "cut").glob("*.jsonl")) for m in read_jsonl(f)]
+    out = job.paths["cache"] / "listen" / job.name
+    rows, lines = [], []
+    for p in job.phrases.phrases:
+        mine = [m for m in records if p in m["phrases"]]
+        clips = [(c, m) for m in mine for c in m["clips"] if c["phrase"] == p]
+        if not clips:
+            lines.append(f"  {p}: {len(mine)} sentences cut, no clip kept")
+            continue
+        seconds = [c["cut_s"][1] - c["cut_s"][0] for c, _ in clips]
+        lead = [1000 * (c["span_s"][0] - c["cut_s"][0]) for c, _ in clips]
+        tail = [1000 * (c["cut_s"][1] - c["span_s"][1]) for c, _ in clips]
+        sources = defaultdict(list)
+        for c, m in clips:
+            sources[repo_of[m["key"].split("__")[0]]].append((c, m))
+        lines.append(
+            f"  {p}: {len(mine)} sentences cut, {len(clips)} clips kept ({len(clips) / len(mine):.0%}),"
+            f" {len(sources)} sources, seconds p5/p50/p95 {np.percentile(seconds, [5, 50, 95]).round(2).tolist()},"
+            f" quiet kept before / after ms p5/p50 {np.percentile(lead, [5, 50]).round().tolist()}"
+            f" / {np.percentile(tail, [5, 50]).round().tolist()}"
+        )
+        queues = [list(rng.permutation(len(v))) for v in sources.values()]
+        picked = []
+        while len(picked) < spec["listen_per_phrase"] and any(queues):
+            for (repo, got), queue in zip(sources.items(), queues, strict=True):
+                if queue and len(picked) < spec["listen_per_phrase"]:
+                    picked.append((repo, *got[queue.pop(0)]))
+        for n, (repo, c, m) in enumerate(picked):
+            x = sf.read(str(job.out / c["file"]), dtype="float64")[0]
+            hop = round(rule["frame_s"] * grid.SAMPLE_RATE_HZ)
+            frames = x[: len(x) // hop * hop].reshape(-1, hop)
+            power = np.mean(frames * frames, axis=1)
+            loud = power >= power.max() * 10 ** (-rule["quiet_below_peak_db"] / 10)
+            gain = 10 ** (spec["level_dbfs"] / 20) / np.sqrt(np.mean(power[loud]))
+            name = f"{slug(p)}/{n:02d}_{slug(repo)}.wav"
+            write_wav(out / name, x * min(gain, 1.0 / np.max(np.abs(x))))
+            lead_ms = round(1000 * (c["span_s"][0] - c["cut_s"][0]))
+            tail_ms = round(1000 * (c["cut_s"][1] - c["span_s"][1]))
+            length = f"{c['cut_s'][1] - c['cut_s'][0]:.2f}"
+            rows.append([name, p, repo, length, c["heard"], lead_ms, tail_ms, m["text"]])
+    fields = ["file", "phrase", "source", "seconds", "heard", "quiet_before_ms", "quiet_after_ms", "text"]
+    out.mkdir(parents=True, exist_ok=True)
+    body = "\n".join("\t".join(str(v).replace("\t", " ") for v in r) for r in [fields, *rows])
+    (out / "index.tsv").write_text(body + "\n", encoding="utf-8")
+    return "\n".join([f"{len(rows)} copies in {out}", *lines])
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("name", help="an extract of configs/common/extract.yaml")
-    parser.add_argument("step", choices=["scan", "fetch", "cut", "report"])
+    parser.add_argument("step", choices=["scan", "fetch", "cut", "report", "listen"])
     parser.add_argument("--follow", action="store_true", help="fetch or cut, keep taking up what the step before adds")
+    parser.add_argument("--pilot", action="store_true", help="fetch only the pilot's sample of every phrase")
     parser.add_argument(
         "--phrase", help="fetch only the matches that say this phrase of the extract, ahead of the rest"
     )
     args = parser.parse_args(argv)
     cfg, paths = load_yaml(CONFIG), data_paths()
-    if args.step == "report":
-        print(report(Job(args.name, cfg, paths, Http(cfg["http"], None))))
+    if args.step in ("report", "listen"):
+        job = Job(args.name, cfg, paths, Http(cfg["http"], None))
+        print(report(job) if args.step == "report" else listen(job))
         return 0
     token = {**read_dotenv(ML_ROOT / ".env"), **os.environ}.get(cfg["http"]["token_env"])
     if not token:
@@ -938,7 +1032,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.step == "scan":
         scan(job)
     elif args.step == "fetch":
-        fetch(job, args.follow, args.phrase)
+        fetch(job, args.follow, args.phrase, args.pilot)
     else:
         cut(job, load_yaml(TTS_CONFIG), load_yaml(CONFIGS / "scenes" / "device.yaml"), paths["cache"], args.follow)
     return 0

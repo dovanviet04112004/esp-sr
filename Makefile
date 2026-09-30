@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth command-synth-pilot command-synth parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot command-synth-pilot command-synth parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -92,6 +92,11 @@ eval-tts: screen ## Compare the desktop TTS engines on the wake word, every clip
 wake-synth: screen ## Synthesise the wake positives and near misses, keep what the checker allows (E11-T7)
 	cd ml && uv run python -m srpipe.tasks.wake.synth positives && uv run python -m srpipe.tasks.wake.synth negatives \
 	  && uv run python -m srpipe.tasks.wake.synth select
+
+extract-pilot: ## A sample of every phrase of hf_extract fetched, cut and copied to cache/listen/hf_extract, before the whole run
+	cd ml && uv run python -m srpipe.core.extract hf_extract fetch --pilot
+	cd ml && uv run python -m srpipe.core.extract hf_extract cut
+	cd ml && uv run python -m srpipe.core.extract hf_extract listen
 
 command-synth-pilot: screen ## Synthesise a few command clips and near misses to hear before the overnight run (E11-T7)
 	cd ml && uv run python -m srpipe.tasks.command.synth pilot

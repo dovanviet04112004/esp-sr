@@ -220,3 +220,55 @@ def test_audio_by_hub_path_and_manifest_members_by_file_name(tmp_path: Path) -> 
         manifest, "long/audio-khong-sub/C/v_00001.mp3"
     )
     assert extract.member_id({"kind": "tsv_tar"}, "dev/22/22-52.wav") == "22-52"
+
+
+def pilot_job(tmp_path: Path) -> extract.Job:
+    sources = [{"kind": "parquet", "repo": f"o/{s}", "revision": "rev0"} for s in "abc"]
+    job = job_for(tmp_path, sources, FakeHttp({}))
+    job.cfg["pilot"] |= {"per_phrase": 5, "per_source": 2}
+    return job
+
+
+def matches_of(repo: str, part: str, phrase: str, rows: range) -> list[dict]:
+    return [{"key": f"{repo}__{part}__{r}", "phrases": [phrase], "row": r} for r in rows]
+
+
+def test_the_pilot_spreads_each_phrase_over_sources_in_runs_of_rows(tmp_path: Path) -> None:
+    job = pilot_job(tmp_path)
+    sources = {s["repo"]: s for s in job.spec["sources"]}
+    parts = [
+        (sources["o/a"], "p0", matches_of("o_a", "p0", "mở cửa", range(10)), {}),
+        (sources["o/a"], "p1", matches_of("o_a", "p1", "mở cửa", range(3)), {}),
+        (sources["o/b"], "p0", matches_of("o_b", "p0", "mở cửa", range(4)), {}),
+        (sources["o/c"], "p0", matches_of("o_c", "p0", "bật đèn", range(1)), {}),
+    ]
+    taken = {"o_b__p0__0", "o_b__p0__1", "o_b__p0__2"}
+    chosen = {(s["repo"], part): ms for s, part, ms, _ in extract.pilot_parts(job, parts, taken)}
+    assert set(chosen) == {("o/a", "p0"), ("o/b", "p0"), ("o/c", "p0")}
+    rows_a = [m["row"] for m in chosen[("o/a", "p0")]]
+    assert len(rows_a) == 2 and rows_a[1] == rows_a[0] + 1
+    assert [m["key"] for m in chosen[("o/b", "p0")]] == ["o_b__p0__3"]
+    assert [m["key"] for m in chosen[("o/c", "p0")]] == ["o_c__p0__0"]
+    assert extract.pilot_parts(job, parts, taken) == extract.pilot_parts(job, parts, taken)
+
+
+def test_listen_copies_clips_from_source_after_source_at_one_level(tmp_path: Path) -> None:
+    job = pilot_job(tmp_path)
+    job.cfg["pilot"] |= {"listen_per_phrase": 3}
+    for n, (repo, amp) in enumerate([("o_a", 0.3), ("o_a", 0.02), ("o_b", 0.1)]):
+        name = f"mo_cua/{repo}__p__{n}__0.wav"
+        extract.write_wav(job.out / name, amp * np.sin(np.arange(8000) * 0.05))
+        clip = {"file": name, "phrase": "mở cửa", "span_s": [0.1, 0.4], "cut_s": [0.05, 0.5], "heard": "mở cửa"}
+        record = {"key": f"{repo}__p__{n}", "text": "mở cửa ra", "phrases": ["mở cửa"], "clips": [clip]}
+        extract.done_write(job.state / "cut" / f"{record['key']}.jsonl", [record])
+    summary = extract.listen(job)
+    assert "mở cửa: 3 sentences cut, 3 clips kept (100%), 2 sources" in summary
+    index = (tmp_path / "cache/listen/t/index.tsv").read_text(encoding="utf-8").splitlines()
+    assert index[0].split("\t")[:3] == ["file", "phrase", "source"] and len(index) == 4
+    assert [line.split("\t")[2] for line in index[1:3]] == ["o/a", "o/b"]
+    levels = []
+    for line in index[1:]:
+        x = sf.read(str(tmp_path / "cache/listen/t" / line.split("\t")[0]))[0]
+        levels.append(10 * np.log10(np.mean(x**2)))
+    assert max(levels) - min(levels) < 0.5
+    assert [line.split("\t")[5:7] for line in index[1:2]] == [["50", "100"]]
