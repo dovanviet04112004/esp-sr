@@ -55,7 +55,7 @@ Bảng này tồn tại cho tới khi TỔNG QUAN được sửa theo (E1-T9). S
 | 9 | `command` so chuỗi âm vị với danh sách | Hai đường sau một hợp đồng (ADR-0012): **chấm CTC có ràng buộc** từng lệnh bằng thuật toán tiến, kèm **biến thể phương ngữ** (`ctc`); và **DS-CNN phân lớp** bộ lệnh cố định (`kws`), đường mặc định tới khi Cửa 3 chọn | Giải tham lam rồi so chuỗi vứt đi xác suất; tập lệnh đóng cho phép chấm thẳng từng lệnh với giá gần bằng không. `kws` chạy được trước khi cao độ, GRU chạy dòng và chấm CTC xong | §3.12 |
 | 10 | Thanh điệu: ba đường | **Nhãn thanh chen trong cùng chuỗi CTC** trên 44 đơn vị, từ **log-mel 40 cộng ba chiều cao độ** (ADR-0010) | Tài liệu: thanh phải nằm trong đơn vị và cao độ hạ lỗi rõ ở ngôn ngữ có thanh, còn cách đặt thanh không đổi lỗi gộp; một đầu ra, bộ ký hiệu nhỏ nhất | §3.11, §3.12 |
 | 11 | Từ đánh thức 2–3 âm tiết | Bản demo: **"trợ lý"**, 2 âm tiết, ưu tiên bắt được (ADR-0011); cụm 3–4 âm tiết là hướng khi siết báo nhầm | Cụm hai âm tiết dài chừng nửa giây và trùng lời nói thường nhiều hơn; đổi lại nó tự nhiên và người thật trong kho nói nó 223 lần, nên có mẫu dương giọng thật | §3.11 |
-| 12 | `ns` mạng là RNNoise, không chọn mạng theo vạch vì đắt; ~24% một nhân, ~40 MFLOPS | **Hai ứng viên** cùng dữ liệu, cùng lưới, học trong một lượt, cắm vào cùng khe `ns` (chủ repo chốt 30/09 và 01/10): **RNNoise-16k**, dựng lại dải cho 16 kHz và huấn luyện lại, phần mạng ~11 MFLOP/s ở 62,5 khung/s 🔬; và **NSNet-16k**, mạng theo vạch họ NSNet2, cỡ tới giá của `nsnet2` ESP-SR đo trên board B (ADR-0014). Bản hơn sàn bằng thước của §3.15 thì giữ, không bản nào hơn thì giữ sàn; ADR ghi | Bàn so §3.16 thấy mạng dìm nhiễu hạ nhiễu sâu hơn sàn nhiều trên cùng lối vào (`docs/measurements/afe/compare.md`, mục "Dìm nhiễu trên cùng lối vào gsc"). Giá của mạng theo vạch nằm ở bề rộng lớp hồi tiếp, hai lớp dày vào và ra chỉ tăng tuyến tính theo số vạch, nên cỡ bằng mạng của ESP-SR vẫn vừa nhân 1 (§5.6) 🔬. Số 40 MFLOPS là của bản 48 kHz, 100 khung/s | §3.9 |
+| 12 | `ns` mạng là RNNoise, không chọn mạng theo vạch vì đắt; ~24% một nhân, ~40 MFLOPS | **Hai ứng viên** cùng dữ liệu, cùng lưới, học trong một lượt, cắm vào cùng khe `ns` (chủ repo chốt 30/09 và 01/10): **RNNoise-16k**, dựng lại dải cho 16 kHz và huấn luyện lại, phần mạng ~11 MFLOP/s ở 62,5 khung/s 🔬; và **NSNet-16k**, mạng theo vạch họ NSNet2, cỡ L chủ repo chọn sau probe trên board B (ADR-0014). Bản hơn sàn bằng thước của §3.15 thì giữ, không bản nào hơn thì giữ sàn; ADR ghi | Bàn so §3.16 thấy mạng dìm nhiễu hạ nhiễu sâu hơn sàn nhiều trên cùng lối vào (`docs/measurements/afe/compare.md`, mục "Dìm nhiễu trên cùng lối vào gsc"). Giá của mạng theo vạch nằm ở bề rộng lớp hồi tiếp, hai lớp dày vào và ra chỉ tăng tuyến tính theo số vạch, nên NSNet-16k L, 5,1 ms mỗi bước trên board B, giữ nhân 1 quanh mục tiêu 50% (§5.6). Số 40 MFLOPS là của bản 48 kHz, 100 khung/s | §3.9 |
 | 13 | Task `nhan` ở nhân 1 cùng `thu` và `sach` | `nhan` ở **nhân 0** | TỔNG QUAN tự nói "một nhân không đủ", nhưng lại dồn cả ba việc liên tục vào nhân 1; cửa sổ lệnh 11–18 ms mỗi 32 ms đẩy nhân 1 quá 100% | §5.1 |
 | 14 | RAM nội ~97 KB; luật "RAM nội chỉ giữ thứ bị chạm mỗi khung" kéo trọng số `ns` và `wake` vào RAM nội | Ước lại, thiếu ba khoản: ngăn xếp mạng, trạng thái AEC thật, đệm luồng. **Mọi model — trọng số và vùng làm việc — nằm ở PSRAM**, trọng số chép từ flash lên lúc nạp | Cộng cả trọng số `ns` và `wake` vào thì RAM nội vượt phần còn cấp được sau Wi-Fi | §6.5 |
 | 15 | Mốc TTS ngoài chạy 22,05 kHz | Tiếng ra **16 kHz** | I2S song công dùng chung xung nhịp, nên phát và thu cùng một tần số | §2.4, §3.13 |
@@ -79,8 +79,8 @@ Chỉ bốn khối dùng mô hình học. Mọi khối khác là công thức, k
 
 | Nhánh | Chỗ chạy | Kiến trúc | Vào | Ra | Cỡ mục tiêu | Khởi đầu từ |
 |---|---|---|---|---|---|---|
-| `ns` `rnnoise` | `ai_engine/src/ns_rnnoise/`, cắm vào khe `ns` của `dsp_afe` | **RNNoise-16k**: RNNoise dựng lại cho 16 kHz, dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải + xác suất tiếng nói (§3.9) | đặc trưng dải tính từ 257 vạch | gain từng dải, nội suy ra 257 vạch | ~88 k tham số, ~90 KB int8 🔬 | kiến trúc RNNoise; **huấn luyện mới hoàn toàn** vì dải và tần số lấy mẫu khác bản gốc |
-| `ns` `nsnet` | `ai_engine/src/ns_nsnet/`, cắm vào cùng khe | **NSNet-16k**: mạng theo vạch họ NSNet2, dày 256 → H → GRU H → GRU H → dày H → 256, một sigmoid mỗi vạch, vạch 256 lấy gain vạch 255; ba cỡ H = 96 / 128 / 144 học cùng lượt (§3.9) | log công suất 256 vạch đầu | gain 257 vạch | 161 / 264 / 325 k tham số, ~170 / 270 / 330 KB int8 🔬; giữ cỡ lớn nhất còn trong giá `nsnet2` của ESP-SR trên board B, ~4,2 ms mỗi bước và ~387 KB PSRAM (ADR-0014) | kiến trúc NSNet2; **huấn luyện mới hoàn toàn** vì NSNet2 công bố chạy khung 20 ms, 161 vạch |
+| `ns` `rnnoise` | `ai_engine/src/ns_rnnoise/`, cắm vào khe `ns` của `dsp_afe` | **RNNoise-16k**: RNNoise dựng lại cho 16 kHz, dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải + xác suất tiếng nói (§3.9) | đặc trưng dải tính từ 257 vạch | gain từng dải, nội suy ra 257 vạch | 82 603 tham số, 104 KB `.espdl` int8 (probe E9-T10) | kiến trúc RNNoise; **huấn luyện mới hoàn toàn** vì dải và tần số lấy mẫu khác bản gốc |
+| `ns` `nsnet` | `ai_engine/src/ns_nsnet/`, cắm vào cùng khe | **NSNet-16k**: mạng theo vạch họ NSNet2, dày 256 → H → GRU H → GRU H → dày H → 256, một sigmoid mỗi vạch, vạch 256 lấy gain vạch 255; cỡ **L**, H = 144, chủ repo chọn; S (96) và M (128) học cùng lượt làm đường lùi (§3.9) | log công suất 256 vạch đầu | gain 257 vạch | L: 324 688 tham số, 337 KB `.espdl` int8, 5,1 ms mỗi bước trên board B (probe E9-T10, ADR-0014) | kiến trúc NSNet2; **huấn luyện mới hoàn toàn** vì NSNet2 công bố chạy khung 20 ms, 161 vạch |
 | `wake` | `ai_engine/src/wake/` | TCN tích chập giãn nở nhân quả, 6 tầng, bước giãn 1 → 32, 64 kênh | log-mel 40 dải × khung 16 ms | xác suất từ đánh thức mỗi khung | ~100 KB int8 🔬 | tự huấn luyện |
 | `command` `kws` | `ai_engine/src/command_kws/` | DS-CNN (Zhang và cộng sự, 2017): một tích chập rồi bốn tầng tách chiều sâu, trung bình gộp, phân lớp một cửa sổ mỗi câu (ADR-0012) | log-mel 40 cộng ba chiều cao độ trên cửa sổ 94 bước tính ngược từ lúc `vad` tắt | xác suất của từng lệnh học được, `other`, `silence` | cỡ S của bài: `.espdl` 40,6 KB; M, L (156, 438 KB) quá ngân sách thời gian (§3.12) | tự huấn luyện trên mẩu lệnh người thật, TTS và âm bản |
 | `command` `ctc` | `ai_engine/src/command_ctc/` | encoder chạy dòng theo bộ khung MultiNet7 của Espressif (ADR-0013): ba tích chập 2D giảm khung, 6 lớp chia 4 tầng tốc độ khung, mỗi lớp khối feedforward, khối tích chập có cổng và khối trộn thay attention; đầu CTC trên đơn vị của §3.12; lùi về TCN nếu một lớp của nó qua esp-dl không đạt trên board | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung | **theo chất lượng**, từ cỡ MultiNet7 ~2,1 MB int8 🔬 trở lên; trần là µs trên board (§3.3), bộ nhớ nới theo §6.1, §6.6 (ADR-0013) | tự huấn luyện trên kho tiếng Việt |
@@ -433,8 +433,8 @@ vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đ
 | `gsc` | thuần | `dsp_afe` | chùm trễ và cộng, ma trận chặn, NLMS rò có điều khiển thích nghi, vòng viết tay (ADR-0009) | μ 0,05, rò 1e-4, trần 16 | **141 µs đo**; 485 µs ở bước đổi góc lái | E8-T2 |
 | `bss` | thuần | `dsp_afe` | AuxIVA online, cập nhật IP2 kín cho 2×2, chiếu ngược | quên α ứng τ 1 s | ~400 µs | E8-T3 |
 | `ns` sàn | thuần | `dsp_afe` | OM-LSA + IMCRA | gain sàn −12 dB | **1,69 ms đo** (đỉnh 1,88); FPU của S3 tốn 4–6 chu kỳ mỗi lệnh float, không chạy chồng | E9-T1 |
-| `ns` mạng `rnnoise` | **mô hình** | `ai_engine/src/ns_rnnoise/` | RNNoise-16k: RNNoise dựng lại cho 16 kHz | 18–22 dải | ~0,8–1,6 ms float, ít hơn nếu int8 | E9-T12 |
-| `ns` mạng `nsnet` | **mô hình** | `ai_engine/src/ns_nsnet/` | NSNet-16k: mạng theo vạch họ NSNet2, một gain sigmoid mỗi vạch | 256 vạch, GRU 2 × 96–144 | tới ~4,2 ms 🔬: trần là `nsnet2` của ESP-SR trên board B, probe chọn cỡ (ADR-0014) | E9-T12 |
+| `ns` mạng `rnnoise` | **mô hình** | `ai_engine/src/ns_rnnoise/` | RNNoise-16k: RNNoise dựng lại cho 16 kHz | 18–22 dải | 4,8 ms int8 đo trên board B (E9-T10) | E9-T12 |
+| `ns` mạng `nsnet` | **mô hình** | `ai_engine/src/ns_nsnet/` | NSNet-16k: mạng theo vạch họ NSNet2, một gain sigmoid mỗi vạch | 256 vạch, GRU 2 × 144 (cỡ L) | 5,1 ms int8 đo trên board B (E9-T10), hơn `nsnet2` của ESP-SR 21%; chủ repo chọn L (ADR-0014) | E9-T12 |
 | `vad` | thuần | `dsp_afe` | GMM sáu dải kiểu WebRTC, kéo dài 240 ms | bảng WebRTC ở `contracts/afe.yaml` | ~140 µs | E7-T3 |
 | `agc` | thuần | `dsp_afe` | hai tầng: chậm theo mức nói, nhanh chặn đỉnh nhìn trước 4 ms | đích −26 dBFS | ~260 µs, ~340 µs khi chặn mọi mẫu | E7-T4 |
 | `wake` | **mô hình** | `ai_engine/src/wake/` | TCN giãn nở nhân quả int8, chạy dòng | trường nhìn ~2 s | **1,99 ms đo** mỗi bước, 64 kênh, trọng số ngẫu nhiên (`measurements/latency.md` §8) | E11-T11 |
@@ -644,27 +644,27 @@ cách áp đúng gain tính trên hỗn hợp vào riêng phần tiếng nói v�
 lại tiếng nói cũng mất nhiều hơn, ở cả mạng tham chiếu trên máy tính lẫn mạng của ESP-SR chạy trên board B
 (`docs/measurements/afe/compare.md`, mục "Dìm nhiễu trên cùng lối vào gsc"). Hai mạng tham chiếu trên máy tính lớn gấp
 hàng chục lần mọi ứng viên dưới đây 🔬, nên số của chúng là mốc trên chứ không phải dự đoán; mạng của ESP-SR không vào
-được sản phẩm (§0.1) nhưng cho mốc giá trên chính board B, và NSNet-16k lấy giá ấy làm trần (ADR-0014). Hai ứng viên
+được sản phẩm (§0.1) nhưng cho mốc giá trên chính board B; NSNet-16k chọn cỡ L, hơn giá ấy 21% về thời gian (ADR-0014). Hai ứng viên
 khác nhau đúng ở chỗ TỔNG QUAN §3.1 cân nhắc: RNNoise để mạng chỉ tính gain của 18–22 dải, họ NSNet tính thẳng một gain
 mỗi vạch. Giá của mạng theo vạch nằm ở bề rộng lớp hồi tiếp, còn hai lớp dày vào và ra chỉ tăng tuyến tính theo số vạch,
 nên mạng theo vạch cỡ bằng mạng của ESP-SR vẫn vừa nhân 1.
 
 | Điểm | RNNoise-16k (`ns_rnnoise`) | NSNet-16k (`ns_nsnet`) |
 |---|---|---|
-| Kiến trúc | RNNoise (Valin, 2018): dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải, cộng một đầu xác suất tiếng nói | họ NSNet2 (Braun và Tashev, 2020; NSNet: Xia và cộng sự, 2020): dày 256 → H (ReLU) → GRU H → GRU H → dày H → 256 (sigmoid); ba cỡ H = 96 / 128 / 144 học cùng lượt |
+| Kiến trúc | RNNoise (Valin, 2018): dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải, cộng một đầu xác suất tiếng nói | họ NSNet2 (Braun và Tashev, 2020; NSNet: Xia và cộng sự, 2020): dày 256 → H (ReLU) → GRU H → GRU H → dày H → 256 (sigmoid); cỡ L, H = 144; S (96) và M (128) học cùng lượt làm đường lùi |
 | Vào | DCT của log năng lượng 18–22 dải kiểu Bark dựng lại trên 257 vạch, 0–8 kHz, cùng đạo hàm và độ biến thiên phổ như RNNoise; không có đặc trưng cao độ, vì khe chỉ đưa công suất | log công suất 256 vạch đầu (0 – 7,97 kHz, bội 16 cho SIMD của esp-dl), chặn dưới ở một hằng số, chuẩn hoá trung bình và phương sai từng vạch theo thống kê của `train`; thống kê nằm trong ảnh model như của `wake` (§6.3) |
 | Ra khe | gain từng dải nội suy tuyến tính ra 257 vạch, nên vẫn trong 0..1; đầu xác suất tiếng nói vào `speech_prob` | một gain sigmoid mỗi vạch, vạch 256 (8 kHz, trên dải mel) lấy gain vạch 255; `speech_prob` là phần công suất 300 – 3 400 Hz mà gain cho qua. Chuỗi không đọc `speech_prob`: cờ `vad` là của GMM (§3.10) |
 | Trọng số công bố | không dùng được: 22 dải gốc trải tới 20 kHz ở 48 kHz | không dùng được: NSNet2 chạy khung 20 ms, 161 vạch |
 | Bộ lọc cao độ | bỏ. Nó cần dò cao độ mỗi khung, tốn hơn cả phần mạng, và cần phổ phức của khung cùng của khung trễ theo cao độ, còn khe chỉ đưa công suất và nhận gain thực: giữ nó trên board là đổi hợp đồng đã đóng băng (§4.5.5). E9-T6 thử nó trên máy tính, chỉ khi bản này được giữ | không có |
-| Cỡ | ~88 k tham số, ~90 KB int8 🔬 | S / M / L: 161 / 264 / 325 k tham số, ~170 / 270 / 330 KB int8 🔬; probe trên board giữ cỡ lớn nhất có thời gian trung bình ≤ ~4,2 ms và PSRAM ≤ ~387 KB, giá của `nsnet2` ESP-SR đo trên board B (ADR-0014) |
-| Chi phí | 88 k trọng số × 2 phép tính × 62,5 khung/s ≈ **11 MFLOP/s** cho phần mạng, cỡ 5–10% một nhân float 🔬. TỔNG QUAN ghi ~24% từ con số 40 MFLOPS của bản 48 kHz, 100 khung/s | 10 / 16 / 20 MMAC/s cho S / M / L, cộng 256 phép log mỗi bước, ~0,2 ms 🔬; 2–8 ms mỗi bước tuỳ cỡ và tốc độ đọc PSRAM 🔬, probe quyết |
+| Cỡ | 82 603 tham số, 104 KB `.espdl` int8, 187 KB PSRAM cả tensor (E9-T10) | **L**, chủ repo chọn ngày 01/10 (ADR-0014): 324 688 tham số, 337 KB `.espdl` int8, 394 KB PSRAM cả tensor; S / M: 161 / 264 k tham số, 173 / 276 KB (E9-T10) |
+| Chi phí | 5,1 MMAC/s, nhưng **4 809 µs** mỗi bước int8 trên board B (E9-T10): độ dài 24, 31, 79, 103 không chia hết cho 16 nên tích vô hướng của esp-dl chạy đường C, và mạng có 26 op nhỏ | L: 20 MMAC/s, **5 054 µs** mỗi bước int8 trên board B; S / M: 3 019 / 4 414 µs (E9-T10). Thời gian tăng theo số byte trọng số đọc từ PSRAM, 57–67 MB/s; 256 phép log mỗi bước ~0,2 ms 🔬 |
 
 Chung cho hai ứng viên:
 
 | Điểm | Chốt |
 |---|---|
 | Huấn luyện | tiếng Việt sạch trộn nhiễu của §1.2 cộng nhiễu phòng dùng, qua RIR, ở đúng lưới §3.1. Vào là công suất lối ra không gian của đường mô phỏng board (§1.2), đúng thứ khe nhận trên máy. **Một lượt học** cho RNNoise-16k và ba cỡ NSNet-16k trên cùng batch, cùng seed, cùng số epoch, split `ns/v<n>`; dùng **mọi mẩu tiếng sạch qua luật sạch và mọi file nhiễu đã sàng lọc, không trần giờ**. Common Voice không vào tập học: người nói của nó là giọng thử của `wake` và `command`; `val` và `test` là của `command/v1`. So bằng số sau int8 (§1.3) |
-| Trần cỡ | RNNoise-16k: ~90 KB int8 🔬. NSNet-16k: tới giá của `nsnet2` ESP-SR trên board B, ~4,2 ms mỗi bước và ~387 KB PSRAM (ADR-0014): nhân 1 tới ~45% ở trường hợp nặng nhất, vẫn trong mục tiêu của §5.6; §6.1 và §6.6 tính ~340 KB trong slot và ~390 KB PSRAM cho `ns`. Vượt giá ấy phải kèm ADR mới, không lặng lẽ nới |
+| Trần cỡ | Mốc là `nsnet2` ESP-SR trên board B: 4 182 µs mỗi bước, 395 760 B PSRAM. NSNet-16k L hơn mốc 21% về thời gian và nằm trong mốc về PSRAM; chủ repo chọn L (ADR-0014): nhân 1 tới ~51% ở trường hợp nặng nhất, nhỉnh hơn mục tiêu trung bình 50% của §5.6; §6.1 và §6.6 tính 337 KB trong slot và 394 KB PSRAM cho `ns`. E9-T7 đo trên chuỗi thật có Wi-Fi; vượt nhịp thì lùi về M hay S, không kéo trọng số về RAM nội. Lớn hơn L phải kèm ADR mới |
 | Chạy | GRU int8 của `esp-dl`. GRU ấy bắt đầu mỗi lần chạy từ `initial_h` hay từ 0, nên trạng thái ẩn của từng GRU là một cặp tensor vào và ra của mạng, chép lại sau mỗi bước; chạy dòng kiểm như `wake` (E11-T10): nhiều bước khớp từng bit mô phỏng cả chuỗi. Probe có trạng thái chạy trên board với trọng số ngẫu nhiên trong lúc học (E9-T10), trước khi lượng tử bản đã học. Phương án lùi: lớp dày và GRU int8 viết tay bằng C, như mã suy luận của RNNoise |
 | Tiền và hậu xử lý | C thuần trong thư mục của ứng viên, soi gương `srpipe.tasks.ns`, bộ vàng có đối chứng âm (§3.14). Mạng ra logit, sigmoid tính ở hậu xử lý bằng float, vì int8 không biểu diễn được gain 1 |
 | Trạng thái | trạng thái GRU và lịch sử đặc trưng nằm trong vùng trạng thái của khe, nên `dsp_afe_reset` xoá được chúng; trọng số và tensor của esp-dl nằm ở PSRAM của `ai_engine` |
@@ -2004,7 +2004,7 @@ không chép lại các bảng này.
 **Chỗ đổi so với TỔNG QUAN §6.3.** TỔNG QUAN đặt `thu`, `sach` và `nhan` cùng ở nhân 1, trong khi
 chính nó tính tải liên tục là 66–81% một nhân và kết luận "một nhân không đủ". Cộng cửa sổ lệnh 11–18
 ms mỗi 32 ms (34–56%) vào đó là nhân 1 quá 100% đúng lúc người dùng đang ra lệnh. Đặt `nhan` ở nhân 0
-thì nhân 1 còn ~27% với sàn, tới ~45% với NSNet-16k ở trần (§5.6), và mọi dao động của phần nhận dạng không chạm được vào hạn chót của khung.
+thì nhân 1 còn ~27% với sàn, tới ~51% với NSNet-16k L (§5.6), và mọi dao động của phần nhận dạng không chạm được vào hạn chót của khung.
 
 Cái giá: `nhan_task` chung nhân với Wi-Fi. Hàng đợi `q_clean` sâu 1 s là thứ trả giá ấy, và điểm cao
 nhất của nó là con số phải đo ở E14-T6 (TỔNG QUAN V5.7.6). Cao hơn nửa độ sâu thì nới hàng đợi hoặc
@@ -2133,13 +2133,13 @@ trung bình ≤ 70%. Mọi ô là ước 🔬 lấy từ §3.3; `docs/measuremen
 | `balance` | 10 | `gui` + `mqtt` + `luong` | 2–5% |
 | `doa` (dò mỗi hai khung khi có tiếng; đo) | 641 | | |
 | `bss` (nặng hơn `gsc`) | 400 | | |
-| `ns` mạng thay sàn trong khe: RNNoise-16k 800–1 800, NSNet-16k tới trần 4 200 (§3.9, ADR-0014) | 800–4 200 | | |
+| `ns` mạng thay sàn trong khe: RNNoise-16k 4 809, NSNet-16k L 5 054, đo trên board B (§3.9, ADR-0014) | 4 809–5 054 | | |
 | `istft` | 196 | | |
 | `vad` + `agc` | 80 | | |
 | chép vào `sb_stream` | 20 | | |
-| **Cộng, trường hợp nặng nhất** | **~7 200 µs ≈ 45%** | **Cộng, `LENH`** | **~45–75%** |
+| **Cộng, trường hợp nặng nhất** | **~8 100 µs ≈ 51%** | **Cộng, `LENH`** | **~45–75%** |
 
-Nhân 1 vẫn dưới mục tiêu trung bình 50% kể cả khi NSNet-16k ở trần; nhân 0 chật ở trạng thái `LENH`. Nếu số đo xác nhận điều đó thì thứ tự cắt là:
+Với NSNet-16k L, nhân 1 nhỉnh hơn mục tiêu trung bình 50% ở trường hợp nặng nhất, trong đó `aec` và `bss` còn là ước: E9-T7 đo, vượt thì `ns` lùi về NSNet-16k M hay S, học cùng lượt. Nhân 0 chật ở trạng thái `LENH`. Nếu số đo xác nhận điều đó thì thứ tự cắt là:
 giảm tần suất `doa` và `telemetry` trong `LENH`, rồi thu nhỏ mạng `command` — không chuyển việc sang
 nhân 1.
 
@@ -2165,8 +2165,8 @@ coredump,   data, coredump, 0xFE0000,  0x10000,
 # còn trống: 0xFF0000 → 0x1000000 (64 KB)
 ```
 
-**Trần 3 MB của một slot model là hệ quả của bảng này, không phải ngược lại.** Sau `ns` tới ~340 KB
-(NSNet-16k ở trần, ADR-0014) và `wake` ~100 KB, slot còn **~2,5 MB cho `command`**, mà cỡ chọn theo chất lượng từ ~2,1 MB của bộ khung
+**Trần 3 MB của một slot model là hệ quả của bảng này, không phải ngược lại.** Sau `ns` 337 KB
+(NSNet-16k L, ADR-0014) và `wake` ~100 KB, slot còn **~2,5 MB cho `command`**, mà cỡ chọn theo chất lượng từ ~2,1 MB của bộ khung
 MultiNet7 trở lên (ADR-0013) 🔬; TỔNG QUAN ghi `command` "1 tới 4 MB ngoài". `synth` ghép mẩu nằm ở
 `voice` (E12-T2), không chiếm slot. Khi `command`, hay `synth` mạng nếu E12-T1 chọn nó, vượt chỗ còn lại,
 đường lùi là **bỏ `models_1`** — mất khả năng quay về model cũ khi cập nhật hỏng — và cho `models_0`
@@ -2266,9 +2266,9 @@ TỔNG QUAN §7 ước ~97 KB và thiếu bốn khoản. Bảng ước lại �
 
 **Mọi model nằm ở PSRAM — trọng số lẫn vùng làm việc.** `ai_engine_load` mmap slot model qua
 `sys_storage`, kiểm sha256 và `grid_hash`, **chép trọng số từng model lên PSRAM**, rồi nhả mmap: lúc chạy
-không model nào đọc thẳng từ flash, và không model nào chiếm RAM nội. Kéo trọng số `ns` (~90 KB với RNNoise-16k,
-tới ~340 KB với NSNet-16k) và `wake` (~100 KB) về RAM nội như luật "chỉ giữ thứ bị chạm mỗi khung" của TỔNG QUAN
-thì cộng lên ~430–720 KB,
+không model nào đọc thẳng từ flash, và không model nào chiếm RAM nội. Kéo trọng số `ns` (104 KB với RNNoise-16k,
+337 KB với NSNet-16k L) và `wake` (~100 KB) về RAM nội như luật "chỉ giữ thứ bị chạm mỗi khung" của TỔNG QUAN
+thì cộng lên ~440–720 KB,
 vượt phần còn cấp được; RAM nội để dành cho đệm DMA, trạng thái khung của `dsp_afe`, ngăn xếp và Wi-Fi.
 PSRAM octal cũng đọc nhanh hơn flash QIO, nên chép lên là lợi hơn chạy thẳng qua mmap.
 
@@ -2285,7 +2285,7 @@ nên lớn hơn; đó là giá của mã đọc được và khớp Python từn
 |---|---|
 | Trọng số và vùng làm việc `command` | ~2,1 MB trở lên + ~0,3 MB (ADR-0013) |
 | Trọng số và vùng làm việc `synth` (nếu mạng) | ≤ 1 MB + ~0,3 MB |
-| Trọng số và vùng làm việc `ns` + `wake` | ~140 KB (RNNoise-16k) tới ~390 KB (NSNet-16k ở trần) + ~100 KB |
+| Trọng số và vùng làm việc `ns` + `wake` | 187 KB (RNNoise-16k) tới 394 KB (NSNet-16k L), đo ở E9-T10, + ~100 KB |
 | `q_clean` | ~34 KB |
 | `q_dialog`, `q_cmd`, `q_speak`, `q_event_up` (§5.3) | ~6 KB |
 | `sb_stream` | 512 KB |
@@ -2296,7 +2296,7 @@ nên lớn hơn; đó là giá của mã đọc được và khớp Python từn
 **PSRAM không miễn phí về băng thông.** Flash và PSRAM chung một bus MSPI và chung cache dữ liệu; repo
 face attendance đo được suy luận chậm đi 16,6% khi nhân kia đẩy ~8,7 MB/s qua PSRAM, kể cả model có
 vùng làm việc ở RAM nội. Luồng tiếng thô ba kênh là 96 KB/s — nhỏ — nhưng `command` đọc hơn 2 MB trọng
-số mỗi khúc chạy dòng thì không, và `ns` NSNet-16k ở trần đọc ~330 KB trọng số mỗi khung, ~20 MB/s, gấp đôi mốc
+số mỗi khúc chạy dòng thì không, và `ns` NSNet-16k L đọc 337 KB trọng số mỗi khung, ~21 MB/s, gấp đôi mốc
 ấy. Đo ở E9-T7 và E14-T6.
 
 ---
