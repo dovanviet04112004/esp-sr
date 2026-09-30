@@ -82,7 +82,7 @@ Chỉ bốn khối dùng mô hình học. Mọi khối khác là công thức, k
 | `ns` | `ai_engine/src/ns/`, cắm vào khe `ns` của `dsp_afe` | RNNoise dựng lại cho 16 kHz: dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải + xác suất tiếng nói | đặc trưng dải tính từ 257 vạch | gain từng dải, nội suy ra 257 vạch | ~88 k tham số, ~90 KB int8 🔬 | kiến trúc RNNoise; **huấn luyện mới hoàn toàn** vì dải và tần số lấy mẫu khác bản gốc |
 | `wake` | `ai_engine/src/wake/` | TCN tích chập giãn nở nhân quả, 6 tầng, bước giãn 1 → 32, 64 kênh | log-mel 40 dải × khung 16 ms | xác suất từ đánh thức mỗi khung | ~100 KB int8 🔬 | tự huấn luyện |
 | `command` `kws` | `ai_engine/src/command_kws/` | DS-CNN (Zhang và cộng sự, 2017): một tích chập rồi bốn tầng tách chiều sâu, trung bình gộp, phân lớp một cửa sổ mỗi câu (ADR-0012) | log-mel 40 cộng ba chiều cao độ trên cửa sổ 94 bước tính ngược từ lúc `vad` tắt | xác suất của từng lệnh học được, `other`, `silence` | cỡ S của bài: `.espdl` 40,6 KB; M, L (156, 438 KB) quá ngân sách thời gian (§3.12) | tự huấn luyện trên mẩu lệnh người thật, TTS và âm bản |
-| `command` `ctc` | `ai_engine/src/command_ctc/` | encoder chạy dòng theo bộ khung MultiNet7 của Espressif (ADR-0013): ba tích chập 2D giảm khung, 6 lớp chia 4 tầng tốc độ khung, mỗi lớp khối feedforward, khối tích chập có cổng và khối trộn thay attention; đầu CTC trên đơn vị của §3.12; lùi về TCN nếu một lớp của nó qua esp-dl không đạt trên board | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung | **≤ ~1,8 MB int8** — trần sinh ra từ bảng phân vùng §6.1 | tự huấn luyện trên kho tiếng Việt |
+| `command` `ctc` | `ai_engine/src/command_ctc/` | encoder chạy dòng theo bộ khung MultiNet7 của Espressif (ADR-0013): ba tích chập 2D giảm khung, 6 lớp chia 4 tầng tốc độ khung, mỗi lớp khối feedforward, khối tích chập có cổng và khối trộn thay attention; đầu CTC trên đơn vị của §3.12; lùi về TCN nếu một lớp của nó qua esp-dl không đạt trên board | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung | **theo chất lượng**, từ cỡ MultiNet7 ~2,1 MB int8 🔬 trở lên; trần là µs trên board (§3.3), bộ nhớ nới theo §6.1, §6.6 (ADR-0013) | tự huấn luyện trên kho tiếng Việt |
 | `synth` | `ai_engine/src/synth/` | chốt ở E12-T1: mạng chưng cất kiểu sanoTTS (trường độ → âm học → iSTFT) | chuỗi đơn vị + trường độ | PCM 16 kHz | ≤ 1 MB | tuỳ phương án; phương án không mạng nằm ở `svc_speak` (§3.13) |
 
 Runtime của cả bốn là `esp-dl`, ghim bản chính xác (§4.5.1). `esp-dl` có sẵn GRU int8
@@ -875,7 +875,7 @@ vào âm tiết. Chốt theo số đã công bố, không bằng phép so của 
 |---|---|---|
 | Âm đoạn + đầu ra thanh riêng | ~45 + 6 | hai đầu ra phải khớp theo thời gian; tầng thanh đứng riêng có lỗi thanh cao nhất |
 | Âm vị mang thanh | vần × 6 thanh, hàng trăm | bộ ký hiệu phình; đổi hợp đồng `lang_vi` đã đóng băng (§4.5.5); lỗi gộp ngang các đường khác |
-| Âm tiết | vài nghìn | quá nhiều ký hiệu cho mạng ≤ 1,8 MB |
+| Âm tiết | vài nghìn | quá nhiều ký hiệu cho đầu ra của một mạng chạy trên chip |
 | **Nhãn thanh chen trong chuỗi CTC** | 44 | **chọn**: bộ ký hiệu nhỏ nhất, một đầu ra, `lang_vi` đã sinh và khớp từng bit |
 
 **`ctc`** — encoder chạy dòng cùng bộ khung với MultiNet7, mạng nhận lệnh mới nhất Espressif chạy trên chính ESP32-S3,
@@ -884,8 +884,8 @@ dựng lại từ trọng số của nó (ADR-0013): ba tích chập 2D 3×3 (8,
 feedforward, hai khối tích chập có cổng (nhân theo chiều sâu 17, 9, 5, 9 theo tầng) và một khối trộn thay self-attention,
 cộng một hệ số chuẩn hoá và một nhánh tắt; đầu CTC. MultiNet7 không có chiều cao độ nào và bản tiếng Trung của nó bỏ
 thanh; `ctc` giữ đặc trưng và đơn vị của ADR-0010 — log-mel 40 cộng ba chiều cao độ, 44 đơn vị có nhãn thanh — và đầu ra
-31,25 khung mỗi giây cho chuỗi đơn vị có thanh 🔬. Cỡ nằm trong trần 1,8 MB int8 của bảng mô hình, nên khối feedforward
-hẹp hơn của MultiNet7 🔬. Học CTC cộng RNN-T phụ trợ như MultiNet7, so với CTC trơn cùng seed, split và số epoch. Chạy
+31,25 khung mỗi giây cho chuỗi đơn vị có thanh 🔬. Cỡ chọn theo chất lượng: bắt đầu đúng cỡ MultiNet7, khoảng 2,1 MB
+int8 🔬, rộng hơn hay sâu hơn khi µs đo trên board còn trong ngân sách §3.3; bộ nhớ nới theo §6.1 và §6.6. Học CTC cộng RNN-T phụ trợ như MultiNet7, so với CTC trơn cùng seed, split và số epoch. Chạy
 int8 qua esp-dl với `StreamingCache`: một lớp encoder được xuất và chạy dòng trên board trước (E11-T12); không đạt thì
 lùi về TCN nhân quả tách chiều sâu, đường E11-T10 đã chạy khớp từng bit. **Giải bằng chấm có ràng buộc**, không giải
 tham lam rồi so chuỗi:
@@ -2115,10 +2115,12 @@ coredump,   data, coredump, 0xFE0000,  0x10000,
 # còn trống: 0xFF0000 → 0x1000000 (64 KB)
 ```
 
-**Trần 3 MB của một slot model là hệ quả của bảng này, không phải ngược lại.** Cộng `ns` ~90 KB,
-`wake` ~100 KB, `synth` ≤ 1 MB thì `command` còn **≤ ~1,8 MB**; TỔNG QUAN ghi `command` "1 tới 4 MB
-ngoài". Nếu E11 chứng minh `command` cần hơn thế, đường lùi là **bỏ `models_1`** — mất khả năng quay
-về model cũ khi cập nhật hỏng — và cho `models_0` 6 MB. Quyết định ghi ADR, không lặng lẽ nới.
+**Trần 3 MB của một slot model là hệ quả của bảng này, không phải ngược lại.** Sau `ns` ~90 KB và
+`wake` ~100 KB, slot còn **~2,8 MB cho `command`**, mà cỡ chọn theo chất lượng từ ~2,1 MB của bộ khung
+MultiNet7 trở lên (ADR-0013) 🔬; TỔNG QUAN ghi `command` "1 tới 4 MB ngoài". `synth` ghép mẩu nằm ở
+`voice` (E12-T2), không chiếm slot. Khi `command`, hay `synth` mạng nếu E12-T1 chọn nó, vượt chỗ còn lại,
+đường lùi là **bỏ `models_1`** — mất khả năng quay về model cũ khi cập nhật hỏng — và cho `models_0`
+6 MB. Quyết định ghi ADR, không lặng lẽ nới.
 
 **Slot app 3 MB** vì esp-dl chiếm ~860 KB flash khi link (số của repo face attendance, cùng chip); cộng
 Wi-Fi, MQTT, TLS, ảnh dựng cỡ 2 MB 🔬. `idf.py size` trong CI báo biên còn lại.
@@ -2227,7 +2229,7 @@ nên lớn hơn; đó là giá của mã đọc được và khớp Python từn
 
 | Khoản | Ước 🔬 |
 |---|---|
-| Trọng số và vùng làm việc `command` | ≤ 1,8 MB + ~0,3 MB |
+| Trọng số và vùng làm việc `command` | ~2,1 MB trở lên + ~0,3 MB (ADR-0013) |
 | Trọng số và vùng làm việc `synth` (nếu mạng) | ≤ 1 MB + ~0,3 MB |
 | Trọng số và vùng làm việc `ns` + `wake` | ~140 KB + ~100 KB |
 | `q_clean` | ~34 KB |
@@ -2235,12 +2237,12 @@ nên lớn hơn; đó là giá của mã đọc được và khớp Python từn
 | `sb_stream` | 512 KB |
 | Đệm dựng câu của `noi_task`: 5 s × 16 kHz × 2 B | 160 KB |
 | Ngăn xếp `mqtt_task`, vùng TLS | ~50 KB |
-| **Cộng** | **~4 MB trên 8 MB** |
+| **Cộng** | **~4,3 MB trên 8 MB** |
 
 **PSRAM không miễn phí về băng thông.** Flash và PSRAM chung một bus MSPI và chung cache dữ liệu; repo
 face attendance đo được suy luận chậm đi 16,6% khi nhân kia đẩy ~8,7 MB/s qua PSRAM, kể cả model có
-vùng làm việc ở RAM nội. Luồng tiếng thô ba kênh là 96 KB/s — nhỏ — nhưng `command` đọc 1,8 MB trọng
-số mỗi lần chạy thì không. Đo ở E14-T6.
+vùng làm việc ở RAM nội. Luồng tiếng thô ba kênh là 96 KB/s — nhỏ — nhưng `command` đọc hơn 2 MB trọng
+số mỗi khúc chạy dòng thì không. Đo ở E14-T6.
 
 ---
 ## 7. Mạng: Wi-Fi, MQTT, luồng tiếng, OTA
