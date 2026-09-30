@@ -52,7 +52,7 @@ Bảng này tồn tại cho tới khi TỔNG QUAN được sửa theo (E1-T9). S
 | 6 | "Bù bằng phần mềm chỉ sửa được biên độ", nhưng module `balance` lại "cân độ nhạy và pha" | Pha **tĩnh** bù được nếu đo ở hướng chính diện trong phòng ít vang; phần trôi theo nhiệt và tuổi thì không. Mốc 10° giữ nguyên làm tiêu chí chọn linh kiện | Hai câu trong TỔNG QUAN mâu thuẫn nhau | §2.3, §3.4 |
 | 7 | Thứ tự `AGC → VAD` | **`VAD → AGC`** | AGC chỉ được thích nghi khi có người nói, nên cần cờ VAD; VAD dựa trên năng lượng dải, nên phải đọc mức chưa bị AGC kéo | §3.10 |
 | 8 | DOA GCC-PHAT, không nói độ phân giải | Dò **lưới góc** trên phổ chéo đã làm trơn, không lấy đỉnh trễ nguyên | Micro của board B cách 4,5 cm ở 16 kHz chỉ có ±2,10 mẫu trễ: lấy đỉnh nguyên chỉ ra 5 góc | §3.6 |
-| 9 | `command` so chuỗi âm vị với danh sách | **Chấm CTC có ràng buộc** từng lệnh bằng thuật toán tiến, kèm **biến thể phương ngữ** | Giải tham lam rồi so chuỗi vứt đi xác suất; tập lệnh đóng cho phép chấm thẳng từng lệnh với giá gần bằng không | §3.12 |
+| 9 | `command` so chuỗi âm vị với danh sách | Hai đường sau một hợp đồng (ADR-0012): **chấm CTC có ràng buộc** từng lệnh bằng thuật toán tiến, kèm **biến thể phương ngữ** (`ctc`); và **DS-CNN phân lớp** bộ lệnh cố định (`kws`), đường mặc định tới khi Cửa 3 chọn | Giải tham lam rồi so chuỗi vứt đi xác suất; tập lệnh đóng cho phép chấm thẳng từng lệnh với giá gần bằng không. `kws` chạy được trước khi cao độ, GRU chạy dòng và chấm CTC xong | §3.12 |
 | 10 | Thanh điệu: ba đường | **Nhãn thanh chen trong cùng chuỗi CTC** trên 44 đơn vị, từ **log-mel 40 cộng ba chiều cao độ** (ADR-0010) | Tài liệu: thanh phải nằm trong đơn vị và cao độ hạ lỗi rõ ở ngôn ngữ có thanh, còn cách đặt thanh không đổi lỗi gộp; một đầu ra, bộ ký hiệu nhỏ nhất | §3.11, §3.12 |
 | 11 | Từ đánh thức 2–3 âm tiết | Bản demo: **"trợ lý"**, 2 âm tiết, ưu tiên bắt được (ADR-0011); cụm 3–4 âm tiết là hướng khi siết báo nhầm | Cụm hai âm tiết dài chừng nửa giây và trùng lời nói thường nhiều hơn; đổi lại nó tự nhiên và người thật trong kho nói nó 223 lần, nên có mẫu dương giọng thật | §3.11 |
 | 12 | `ns` mạng ~24% một nhân, ~40 MFLOPS | RNNoise phải **dựng lại dải cho 16 kHz và huấn luyện lại**; ở 62,5 khung/s phần mạng ~11 MFLOP/s 🔬 | Số 40 MFLOPS là của bản 48 kHz, 100 khung/s | §3.9 |
@@ -81,7 +81,8 @@ Chỉ bốn khối dùng mô hình học. Mọi khối khác là công thức, k
 |---|---|---|---|---|---|---|
 | `ns` | `ai_engine/src/ns/`, cắm vào khe `ns` của `dsp_afe` | RNNoise dựng lại cho 16 kHz: dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải + xác suất tiếng nói | đặc trưng dải tính từ 257 vạch | gain từng dải, nội suy ra 257 vạch | ~88 k tham số, ~90 KB int8 🔬 | kiến trúc RNNoise; **huấn luyện mới hoàn toàn** vì dải và tần số lấy mẫu khác bản gốc |
 | `wake` | `ai_engine/src/wake/` | TCN tích chập giãn nở nhân quả, 6 tầng, bước giãn 1 → 32, 64 kênh | log-mel 40 dải × khung 16 ms | xác suất từ đánh thức mỗi khung | ~100 KB int8 🔬 | tự huấn luyện |
-| `command` | `ai_engine/src/command/` | CRNN nhỏ (tích chập rồi GRU một chiều) chạy dòng + CTC trên đơn vị của §3.12, như MultiNet; lùi về TCN nếu GRU int8 qua esp-dl không đạt trên board (ADR-0010) | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung | **≤ ~1,8 MB int8** — trần sinh ra từ bảng phân vùng §6.1 | tự huấn luyện trên kho tiếng Việt |
+| `command` `kws` | `ai_engine/src/command_kws/` | DS-CNN (Zhang và cộng sự, 2017): một tích chập rồi bốn tầng tách chiều sâu, trung bình gộp, phân lớp một cửa sổ mỗi câu (ADR-0012) | log-mel 40 trên cửa sổ 94 bước tính ngược từ lúc `vad` tắt | xác suất của từng lệnh học được, `other`, `silence` | ~40 KB int8 🔬 (cỡ nhỏ của bài 38,6 KB) | tự huấn luyện trên mẩu lệnh người thật, TTS và âm bản |
+| `command` `ctc` | `ai_engine/src/command_ctc/` | CRNN nhỏ (tích chập rồi GRU một chiều) chạy dòng + CTC trên đơn vị của §3.12, như MultiNet; lùi về TCN nếu GRU int8 qua esp-dl không đạt trên board (ADR-0010) | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung | **≤ ~1,8 MB int8** — trần sinh ra từ bảng phân vùng §6.1 | tự huấn luyện trên kho tiếng Việt |
 | `synth` | `ai_engine/src/synth/` | chốt ở E12-T1: mạng chưng cất kiểu sanoTTS (trường độ → âm học → iSTFT) | chuỗi đơn vị + trường độ | PCM 16 kHz | ≤ 1 MB | tuỳ phương án; phương án không mạng nằm ở `svc_speak` (§3.13) |
 
 Runtime của cả bốn là `esp-dl`, ghim bản chính xác (§4.5.1). `esp-dl` có sẵn GRU int8
@@ -399,7 +400,7 @@ flowchart TB
     M["đệm khung sạch → nhân 0"] --> N
     N["<b>mel</b> · dsp_spec<br/>log-mel 40 dải"] --> O
     O["<b>wake</b> · ai_engine"] -->|"thức"| P
-    P["<b>command</b> · ai_engine<br/>CTC có ràng buộc"] --> Q
+    P["<b>command</b> · ai_engine<br/>DS-CNN (kws) hoặc CTC có ràng buộc (ctc)"] --> Q
     Q["<b>svc_dialog</b>"] --> R
     R["<b>synth</b> · ai_engine<br/>hoặc ghép mẩu · svc_speak"] -->|"PCM 16 kHz"| A
     L -.->|"số liệu"| S["<b>svc_report</b><br/>MQTT, TCP"]
@@ -434,7 +435,8 @@ OM-LSA nằm ngay trong `dsp_afe`; bản RNNoise nằm ở `ai_engine/src/ns/` v
 | `agc` | thuần | `dsp_afe` | hai tầng: chậm theo mức nói, nhanh chặn đỉnh nhìn trước 4 ms | đích −26 dBFS | ~260 µs, ~340 µs khi chặn mọi mẫu | E7-T4 |
 | `wake` | **mô hình** | `ai_engine/src/wake/` | TCN giãn nở nhân quả int8, chạy dòng | trường nhìn ~2 s | ~3,6 ms (mốc 22,6% một nhân của mô hình cùng loại) | E11-T11 |
 | `normalize` `g2p` `lexicon` | thuần | `lang_vi` | luật chính tả → đơn vị, sinh biến thể phương ngữ | `contracts/lang_vi.yaml` | chỉ lúc nạp bộ lệnh: **1,18 ms đo** mỗi lệnh, ba vùng | E11-T4 |
-| `command` | **mô hình** + thuần | `ai_engine/src/command/` | mạng âm học + CTC, chấm có ràng buộc từng lệnh, từ chối theo khoảng cách với vòng tự do | | 11–18 ms mỗi 32 ms, **chỉ trong cửa sổ lệnh** | E11-T13 |
+| `command` `kws` | **mô hình** + thuần | `ai_engine/src/command_kws/` | DS-CNN phân lớp các lệnh đã học + `other` + `silence` trên một cửa sổ mỗi câu; từ chối theo lớp thắng, xác suất và khoảng cách nhất–nhì (ADR-0012) | cửa sổ 94 bước log-mel 40; 64 kênh, bốn tầng tách chiều sâu | ~5,4 triệu phép **một lần mỗi câu** 🔬 (cỡ nhỏ của bài); `step` chỉ chép khung | E11-T17 |
+| `command` `ctc` | **mô hình** + thuần | `ai_engine/src/command_ctc/` | mạng âm học + CTC, chấm có ràng buộc từng lệnh, từ chối theo khoảng cách với vòng tự do | | 11–18 ms mỗi 32 ms, **chỉ trong cửa sổ lệnh** | E11-T13 |
 | `synth` | **mô hình** hoặc thuần | `ai_engine/src/synth/` hoặc `svc_speak` | chốt ở E12-T1 | | < 1× thời gian thực, dựng trước rồi phát | E12-T4 |
 
 Cột chi phí là **ước để kiểm kế hoạch có vừa không**, không phải số để báo cáo. Bước 4 của công thức
@@ -710,9 +712,10 @@ hoá trung bình và phương sai theo **thống kê lúc huấn luyện**; th�
 (§6.3) chứ không nằm trong code, nên model và thống kê không thể lệch nhau (TỔNG QUAN V5.5.4).
 
 **Cao độ vào `command`.** Tiếng Việt có thanh là âm vị (TỔNG QUAN §3.2), và 40 dải mel thô ở vùng 100–300 Hz nơi
-F0 nằm. `command` đọc log-mel 40 cộng ba chiều cao độ của `dsp_spec/pitch` (log F0, delta, độ hữu thanh): mọi số đã công
-bố cho ngôn ngữ có thanh đều thấy cao độ hạ lỗi, ở tiếng Việt khoảng 18% tương đối, còn 80 dải không có số cho mạng nhỏ
-(ADR-0010). `wake` giữ log-mel 40, vì lỗi của nó nằm ở dữ liệu dương chứ không ở thanh.
+F0 nằm. `command` `ctc` đọc log-mel 40 cộng ba chiều cao độ của `dsp_spec/pitch` (log F0, delta, độ hữu thanh): mọi số đã
+công bố cho ngôn ngữ có thanh đều thấy cao độ hạ lỗi, ở tiếng Việt khoảng 18% tương đối, còn 80 dải không có số cho mạng
+nhỏ (ADR-0010). `command` `kws` bắt đầu bằng log-mel 40 và học lại với cao độ khi `pitch` xong (§3.12). `wake` giữ log-mel
+40, vì lỗi của nó nằm ở dữ liệu dương chứ không ở thanh. Model khai đặc trưng nó đọc trong `meta.json` (§6.3).
 
 **`pitch`** là bộ dò cao độ của Kaldi (Ghahremani và cộng sự, 2014; `feat/pitch-functions.cc`) ở chế độ chạy dòng
 không trễ của chính Kaldi (`max_frames_latency` 0), giữ mọi hằng số mặc định: hạ về 4 kHz qua lọc sinc cắt 1 kHz; NCCF
@@ -848,8 +851,16 @@ vùng, cách đọc số, từ điển viết tắt và từ mượn. C và Pyth
 Python ở `ml/src/srpipe/lang/` và C ở `lang_vi` phải cho **đầu ra giống hệt** trên danh sách mọi âm
 tiết hợp lệ cộng bộ thử có nhãn gồm số, từ mượn, tên riêng. Sai số cho phép bằng 0.
 
-**Đơn vị nhận dạng** là 44 đơn vị ở trên, **thanh chen trong cùng chuỗi CTC**: một đầu ra, CTC tự căn thanh vào
-âm tiết. Chốt theo số đã công bố, không bằng phép so của repo (ADR-0010):
+**`command` có hai đường sau một hợp đồng** (ADR-0012). Cả hai cắm sau cùng ba hàm đã đóng băng
+`ai_engine_command_{begin,step,score}` (§4.5.5) và trả cùng một khuôn: chỉ số lệnh hoặc −1, kèm ba điểm. **`ctc`** nhận
+mọi bộ lệnh viết bằng chữ, qua `lang_vi`; **`kws`** phân lớp một bộ lệnh cố định lúc học. Kconfig
+`AI_ENGINE_COMMAND_BACKEND` chọn thư mục nguồn nào dựng vào `ai_engine` (§4.5.2), và ảnh model khai đường của nó trong
+`meta.json` (§6.3). Đường mặc định của sản phẩm là **`kws`**, đường duy nhất chạy được trong tuần, tới khi Cửa 3 trên
+tập thu qua board chọn (§8). Xét lại khi `ctc` đạt Cửa 3 trong ngân sách của §3.3: lúc ấy `kws` chỉ còn là đường dự
+phòng, hoặc bỏ. Đơn vị và phép chấm dưới đây là của `ctc`; `kws` ở sau.
+
+**Đơn vị nhận dạng** của `ctc` là 44 đơn vị ở trên, **thanh chen trong cùng chuỗi CTC**: một đầu ra, CTC tự căn thanh
+vào âm tiết. Chốt theo số đã công bố, không bằng phép so của repo (ADR-0010):
 
 | Đường | Bộ ký hiệu | Giá |
 |---|---|---|
@@ -858,7 +869,7 @@ tiết hợp lệ cộng bộ thử có nhãn gồm số, từ mượn, tên ri�
 | Âm tiết | vài nghìn | quá nhiều ký hiệu cho mạng ≤ 1,8 MB |
 | **Nhãn thanh chen trong chuỗi CTC** | 44 | **chọn**: bộ ký hiệu nhỏ nhất, một đầu ra, `lang_vi` đã sinh và khớp từng bit |
 
-**`command`** — CRNN nhỏ chạy dòng (tích chập rồi GRU một chiều), CTC, int8, trọng số trong PSRAM, như MultiNet
+**`ctc`** — CRNN nhỏ chạy dòng (tích chập rồi GRU một chiều), CTC, int8, trọng số trong PSRAM, như MultiNet
 của Espressif trên cùng chip. GRU int8 chạy dòng qua esp-dl được thử trên board trước (E11-T12); không đạt thì lùi về TCN
 nhân quả tách chiều sâu, đường E11-T10 đã chạy khớp từng bit (ADR-0010). **Giải bằng chấm có ràng
 buộc**, không giải tham lam rồi so chuỗi:
@@ -873,14 +884,33 @@ từ chối khi  s_free − s(c*) > δ₁   hoặc   s(c*) − s(c₂) < δ₂
 ```
 
 Chi phí: 50 lệnh × 3 biến thể × 100 khung × ~30 trạng thái ≈ 450 k phép cộng log mỗi lần chấm — vài
-ms, chỉ chạy một lần khi `vad` báo hết câu. `δ₁`, `δ₂` ở NVS `kws/`, gieo từ Kconfig.
+ms, chỉ chạy một lần khi `vad` báo hết câu. `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ
+Kconfig.
 
-Thêm lệnh là thêm một dòng chữ (TỔNG QUAN §3.1): dòng mới đi qua `lang_vi` **ngay trên máy** lúc nạp
+Với `ctc`, thêm lệnh là thêm một dòng chữ (TỔNG QUAN §3.1): dòng mới đi qua `lang_vi` **ngay trên máy** lúc nạp
 bộ lệnh, qua MQTT `down/commands` hoặc từ `storage/cmd/set.json` (§6.4). Phép kiểm chứng minh của
 V5.5.8 là thêm một lệnh chưa từng có trong dữ liệu huấn luyện rồi đo nó.
 
-**Thước** (Cửa 3): mỗi lệnh **≥ 90%**, từ chối đúng **≥ 95%**, trên tập thu qua board, tách theo người
-nói và phòng.
+**`kws`** — DS-CNN (Zhang và cộng sự, 2017, "Hello Edge"): một tích chập thường, rồi các tầng tách chiều sâu (tích chập
+từng kênh 3 × 3 rồi tích chập 1 × 1), trung bình gộp và một lớp ra. Bản đầu theo cỡ nhỏ nhất của bài: tích chập 64 kênh
+nhân 10 × 4 bước 2 × 2, bốn tầng tách chiều sâu 64 kênh; bài đo 94,4% trên Google Speech Commands 12 lớp với cửa sổ 1 s,
+38,6 KB int8, 5,4 triệu phép mỗi lần chạy. Cỡ mạng, cửa sổ và lịch học ở `configs/models/command_kws.yaml`.
+
+| Phần | Chốt |
+|---|---|
+| Vào | log-mel 40 của `dsp_spec/mel` (§3.11) trên **cửa sổ 94 bước ≈ 1,5 s**, kết thúc ở bước `vad` tắt sau câu, tức gồm cả 240 ms kéo dài của `vad` (§3.10). Chuẩn hoá bằng trung bình và độ lệch từng dải của `train`, nằm trong ảnh model như `wake` |
+| Lớp | các lệnh có dữ liệu của `contracts/commands/default_vi.json`, theo đúng thứ tự file: mọi lệnh trừ lệnh chưa học "chụp ảnh", đứng cuối file (§1.3); cộng `other` và `silence`, 11 lớp. Các lớp lệnh là phần đầu của bộ lệnh, nên chỉ số lớp trùng chỉ số trong bảng lệnh |
+| `other` | lời nói thường của kho; cụm gần âm của từng lệnh — cụm của kho cách lệnh một thành phần âm tiết, như âm bản của `wake` (§3.11), cộng danh sách tay ở cấu hình ("bật điện", "tắt điện", "bật quạt trần", "mở cửa sổ", "đóng góp"…, gồm các cụm của phiên gần âm thu qua board); và **mọi cụm từ liền nhau ngắn hơn một lệnh** nói riêng ("bật", "đèn", "tăng âm", "âm lượng", "dừng", "lại"…), để nửa lệnh không thành lệnh |
+| `silence` | nền phòng và nhiễu không người nói, qua cùng đường mô phỏng board |
+| Dữ liệu | dương từ mẩu người thật của kho trích `hf_extract`, trích lại theo luật ngắt hơi của §3.11; từ `kws_vi_command`; và từ TTS của E11-T7 (§4.4). Mọi thứ qua đường mô phỏng board (§1.2) vào split `command_kws/v<n>` (§4.4.1). Mẩu không có mã người nói chỉ vào `train`; `val` gồm giọng TTS giữ riêng cả người lẫn mẩu nhân bản, cộng lời nói `val` của split `command`; tập thử là phiên thu qua board |
+| Học | entropy chéo trên cửa sổ đặt đúng như trên máy: cuối cửa sổ là bước `vad` của chuỗi mô phỏng tắt sau mẩu, vì đường mô phỏng ghi `vad` từng bước; int8 bằng ESP-PPQ theo thang §3.14 |
+| Từ chối | lớp thắng là `other` hay `silence`; hoặc xác suất lớp thắng dưới ngưỡng; hoặc hơn lớp nhì quá ít. Hai ngưỡng ở NVS `kws/cmd_reject` và `kws/cmd_margin` (‰, §6.2), gieo từ Kconfig của `svc_listen`, chọn trên `val` |
+| Chạy | `_step` chỉ chép khung vào vòng đệm 94 bước; `_score` chạy mạng một lần rồi hậu xử lý thuần (softmax, luật từ chối), có bộ vàng ở `contracts/golden/command_kws/`. Ở `LENH` nhân 0 gần như rảnh, trừ một lần chạy mạng lúc hết câu |
+| Đổi lệnh | bộ lệnh cố định lúc học: khi chạy `kws`, `down/commands` bị từ chối bằng một mã lỗi mà `host` đổi thành câu (CLAUDE.md §3.1); lệnh chưa học không bao giờ được nhận |
+| Cao độ | bản đầu chỉ log-mel 40, vì chín lệnh khác nhau ở cả âm tiết lẫn phụ âm. Khi `dsp_spec/pitch` xong (E11-T8), học lại với log-mel 40 cộng ba chiều cao độ trên cùng split, seed và số epoch, rồi giữ bản thắng theo số, nhất là tỉ lệ từ chối cụm gần âm chỉ khác thanh |
+
+**Thước** (Cửa 3), chung cho hai đường, ở `srpipe/tasks/command/eval.py`: mỗi lệnh **≥ 90%**, từ chối đúng **≥ 95%**,
+trên tập thu qua board, tách theo người nói và phòng.
 
 ### 3.13 `synth`
 
@@ -1122,7 +1152,9 @@ ml/
 │   ├── afe/{hpf.yaml, aec.yaml, doa.yaml, gsc.yaml, bss.yaml, ns_omlsa.yaml, vad.yaml, agc.yaml}  # chỉ ghi đè cho thí nghiệm; mặc định là contracts/afe.yaml
 │   ├── scenes/standard.yaml           # bộ cảnh có nhãn chuẩn của E4-T4: phòng, RT60, góc, SNR, seed
 │   ├── scenes/device.yaml             # đường mô phỏng board của E4-T8: kho phòng, mức nói, nhiễu, micro, log-mel
-│   └── models/{ns.yaml, wake.yaml, command.yaml, synth.yaml, quant.yaml}   # quant.yaml: thang lượng tử §3.14
+│   └── models/{ns.yaml, wake.yaml, command.yaml, command_kws.yaml, command_ctc.yaml, synth.yaml, quant.yaml}
+│                                      #   command.yaml: đường sản phẩm (backend), đặc trưng; command_kws.yaml,
+│                                      #   command_ctc.yaml: split, mạng, lịch học của từng đường; quant.yaml: thang §3.14
 │
 ├── src/srpipe/
 │   ├── core/                          # ── HẠ TẦNG: không chứa tên khối nào ──
@@ -1174,8 +1206,13 @@ ml/
 │   │   │                              #   sinh qua srpipe/tts vào interim/wake/synth_{pos,neg,hard}/ (E11-T7); ngưỡng
 │   │   │                              #   độ chênh đặt trên âm bản gần âm, để chỉ 1% lọt thành dương; data.py dựng
 │   │   │                              #   split wake/v<n> (§1.3), mẩu dương người thật lấy từ kho trích hf_extract
-│   │   ├── command/                   # mạng âm học + CTC; postproc/ctc_score.py ★; data.py dựng split command/v<n>,
-│   │   │                              #   bỏ lệnh chưa học khỏi tập học (§1.3)
+│   │   ├── command/                   # hai đường sau một hợp đồng (§3.12, ADR-0012); phần chung nằm ở gốc
+│   │   │   ├── README.md  ├── backend.py   # giao diện chung: cửa sổ đặc trưng → lệnh hoặc từ chối, kèm ba điểm
+│   │   │   ├── eval.py                # thước Cửa 3 cho cả hai đường, trên tập thu qua board
+│   │   │   ├── kws/{model/, data.py, train.py, quant.py, postproc/}   # DS-CNN; data.py dựng split command_kws/v<n>
+│   │   │   │                          #   và đặc trưng processed/command_kws/; postproc/ ★ softmax và luật từ chối
+│   │   │   └── ctc/{data.py, model/, train.py, postproc/ctc_score.py ★}   # CRNN + CTC; data.py dựng split
+│   │   │                              #   command/v<n>, bỏ lệnh chưa học khỏi tập học (§1.3)
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
 │   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py}
@@ -1223,7 +1260,8 @@ ml/data/                                   # trong repo — chỉ siêu dữ li�
 └── splits/                                # mỗi nhánh một thư mục, mỗi phiên bản một thư mục con
     ├── ns/v1/{train, val, test}.txt + SPLIT.md
     ├── wake/v1/{train, val, test_pos, test_neg}.txt + SPLIT.md
-    ├── command/v1/{train, val, test}.txt + SPLIT.md
+    ├── command/v1/{train, val, test}.txt + SPLIT.md     # đường ctc
+    ├── command_kws/v1/{train*, val*, test*}.txt + SPLIT.md   # đường kws: lớp lệnh, other, silence (§3.12)
     ├── synth/                             # chỉ khi E12-T1 chọn mạng
     └── device/v1/{calib_ns, calib_wake, calib_command, test_device}.txt + SPLIT.md
 
@@ -1238,7 +1276,8 @@ $SRPIPE_DATA_ROOT/                         # ổ ngoài — ❌ không bao giờ
 │   ├── scenes/<bộ>/                       # cảnh dựng có nhãn (E4-T4) cho doa gsc bss ns; kho phòng của E4-T8
 │   ├── screen/                            # sàng lọc (§1.2): measures/<kho>.tsv số đo mọi mẩu, rejects.tsv mẩu loại
 │   └── {ns, wake, command, synth}/        # đã cắt, lấy mẫu lại, trộn, căn nhãn; TTS ở <nhánh>/synth_*
-├── processed/{ns, wake, command, synth}/  # đặc trưng, shard sẵn sàng nạp
+├── processed/{ns, wake, command, command_kws, synth}/   # đặc trưng, shard sẵn sàng nạp; command_kws: của split
+│                                          #   command_kws, tách khỏi đặc trưng của đường ctc
 └── cache/                                 # xoá lúc nào cũng được
 ```
 
@@ -1250,9 +1289,9 @@ ghi vào `raw/`. Tiếng tổng hợp bằng TTS trên máy tính sinh lại đ�
 | `kind` của phiên | Là gì | Vào split của |
 |---|---|---|
 | `wake` | người nói đọc từ đánh thức | `wake` |
-| `cmd` | câu lệnh | `command` |
-| `neg` | lời nói thường, âm bản gần âm | `wake` (âm bản), `command` (từ chối) |
-| `noise` | nhiễu phòng, không người nói (TỔNG QUAN V5.3.2) | `ns`, tăng cường |
+| `cmd` | câu lệnh | `command`, `command_kws` |
+| `neg` | lời nói thường, âm bản gần âm | `wake` (âm bản), `command` và `command_kws` (từ chối) |
+| `noise` | nhiễu phòng, không người nói (TỔNG QUAN V5.3.2) | `ns`, tăng cường, lớp `silence` của `command_kws` |
 | `probe` | thu thử để kiểm đường thu | **không nhánh nào** |
 
 `session.json` mang `session`, `board`, `fw` (`PROJECT_VER` + commit), `grid_hash`, `pcm_shift`, `kind`,
@@ -1350,7 +1389,8 @@ firmware/
 │   ├── drv_led/       [C]   L2  # LED trạng thái và riêng tư
 │   ├── sys_storage/   [C]   L2  # NVS + LittleFS + mmap ảnh model; sở hữu storage_format.h
 │   ├── sys_time/      [C]   L2  # SNTP
-│   ├── ai_engine/     [C++] L3  # esp-dl; src/core/ không biết tên model; src/{ns,wake,command,synth}/
+│   ├── ai_engine/     [C++] L3  # esp-dl; src/core/ không biết tên model; src/{ns,wake,command_kws,command_ctc,synth}/;
+│   │                            #   Kconfig AI_ENGINE_COMMAND_BACKEND chọn một thư mục command_* vào danh sách nguồn
 │   ├── net_wifi/      [C]   L3
 │   ├── net_mqtt/      [C]   L3  # include/gen_topics.h, gen_payload.h
 │   ├── net_stream/    [C]   L3  # TCP khách, đẩy khung theo khuôn contracts/stream
@@ -1376,6 +1416,11 @@ firmware/
 │   └── calib/                        # ★ hiệu chuẩn balance và trễ tham chiếu, ghi NVS
 └── scripts/                          # rỗng có chủ ý: script ngang khối ở /tools, nạp model ở ml/scripts
 ```
+
+**Đường của `command` chọn lúc dựng** (§3.12). Kconfig `AI_ENGINE_COMMAND_BACKEND` của `ai_engine` (`kws` | `ctc`,
+mặc định `kws`) đưa đúng một trong `src/command_kws/`, `src/command_ctc/` vào danh sách nguồn theo luật 5 của §4.5.3;
+`REQUIRES` không đổi. Hai thư mục cài cùng ba hàm `ai_engine_command_*`, nên `svc_listen` không biết đường nào đang chạy
+ngoài mã lỗi khi đổi bộ lệnh.
 
 **App khung rỗng của TỔNG QUAN V5.0.9 không phải app thứ hai.** Nó là `main` khi mọi module của
 `dsp_afe` còn tắt trong Kconfig: thu → STFT → iSTFT → gửi ra. Một app khung riêng sẽ trôi khỏi `main`
@@ -1466,12 +1511,13 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | `mica_kws/feature` | `dsp_spec/mel`, cộng `dsp_spec/pitch` cho `command` (ADR-0010); chuẩn hoá đi theo model trong `ai_engine` |
 | `mica_kws/g2p` | `lang_vi/{normalize, g2p, lexicon}` |
 | `mica_kws/wake` | `ai_engine/src/wake/` |
-| `mica_kws/command` | `ai_engine/src/command/` (mạng + chấm CTC); bảng lệnh do `svc_listen` dựng qua `lang_vi` |
+| `mica_kws/command` | `ai_engine/src/command_ctc/` (mạng + chấm CTC), hoặc `ai_engine/src/command_kws/` (DS-CNN, ADR-0012); bảng lệnh do `svc_listen` dựng qua `lang_vi` |
 | `mica_tts/synth` | `ai_engine/src/synth/`, hoặc ghép mẩu trong `svc_speak` |
 
 **`ai_engine` giữ đúng khuôn của repo face attendance.** `src/core/` nạp ảnh model, cấp vùng làm
 việc, chạy, đo — không biết tên model nào. Mỗi model một thư mục `src/<nhánh>/` chứa tiền xử lý và
-hậu xử lý riêng của nó (dải RNNoise, làm trơn đầu ra `wake`, chấm CTC của `command`). Phần hậu xử lý
+hậu xử lý riêng của nó (dải RNNoise, làm trơn đầu ra `wake`, chấm CTC của `command_ctc`, luật từ chối của
+`command_kws`). Phần hậu xử lý
 là C thuần và có golden riêng, dù nằm trong component C++.
 
 #### 4.5.5 Hợp đồng gọi — đóng băng ở E3
@@ -1526,6 +1572,12 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 | `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{begin,step,score}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `step` không chặn |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |
 | `svc_*` | `svc_<x>_init`, `svc_<x>_step` | task, gọi từ đúng task của bảng §5.2 |
+
+**`ai_engine_command_{begin,step,score}` giữ nguyên cho cả hai đường của `command`** (ADR-0012). Độ dài khung đặc trưng
+mà `_step` nhận do model khai trong `meta.json` (`features`, §6.3): 40 với log-mel 40, 43 khi cộng ba chiều cao độ;
+`svc_listen` dựng khung theo đó. `_score` trả cùng một khuôn `ai_engine_command_result_t`: chỉ số lệnh hoặc −1, kèm ba
+điểm. Với `kws`, điểm là xác suất lớp thắng, khoảng cách tới lớp nhì, và xác suất của `other` cộng `silence`; bảng lệnh
+truyền vào chỉ được kiểm là có đủ các lớp lệnh.
 
 #### 4.5.6 Model vào flash bằng cách nào
 
@@ -1825,7 +1877,7 @@ nguyên tử và gọi hàm `*FromISR`. Không log, không `malloc`, không floa
 | Trạng thái | Nhân 1 | `nhan_task` | `noi_task` | Ghi chú |
 |---|---|---|---|---|
 | `NGHE` | `thu` + `sach` | `wake` mỗi khung | nghỉ | tải thường trực |
-| `LENH` | `thu` + `sach` | `command` mỗi khung, **`wake` dừng** | nghỉ | 11–18 ms mỗi 32 ms, tối đa 3 s |
+| `LENH` | `thu` + `sach` | `command` mỗi khung, **`wake` dừng** | nghỉ | `ctc`: 11–18 ms mỗi 32 ms, tối đa 3 s; `kws`: chép khung, một lần chạy mạng lúc hết câu (§3.12) |
 | `DAP` | `thu` + `sach`; `aec` tiếp tục học | nghỉ | dựng rồi phát | nói chen khi máy đang nói nằm ngoài phạm vi (§9) |
 
 Trong code và payload, ba trạng thái mang tên tiếng Anh theo CLAUDE.md §3.1: `NGHE` = `LISTEN`,
@@ -1923,7 +1975,7 @@ Bảng phân vùng không đi qua OTA được: đổi bảng là nạp lại qu
 | `device` | `serial`, `mqtt_uri`, `mqtt_user`, `mqtt_pass`, `stream_host`, `stream_port`, `sntp_host`, `tz` | str / u16 | vắng `serial` thì dựng từ eFuse MAC: `sr-` + 12 hex thường (board B: `sr-3485188f7a70`); `mqtt_uri` mang cả scheme; vắng thì lùi về `Kconfig` của `net_mqtt` |
 | `calib` | `bal` (blob 257 × 2 float), `bal_ver` (u32), `bal_at` (u32 epoch), `aec_delay` (u32, mẫu), `pcm_shift` (u8) | | kết quả của `test_apps/calib`; **đo trên từng board**, không phải hằng số |
 | `afe` | `ns_floor_db` (i8), `agc_target_dbfs` (i8), `vad_mode` (u8) | | gieo từ `contracts/afe.yaml`, đổi bằng `SET_CONFIG` |
-| `kws` | `wake_th` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16) | | gieo từ `Kconfig` của `svc_listen` |
+| `kws` | `wake_th` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16) | | gieo từ `Kconfig` của `svc_listen`; hai khoá lệnh mang nghĩa của đường đang dựng (§3.12): `δ₁`, `δ₂` của `ctc`, hay xác suất thấp nhất và khoảng nhất–nhì của `kws`, ‰ |
 | `model` | `active_slot` (u8), `version` (str), `sha256` (blob 32 B) | | chọn `models_0` hay `models_1` |
 | `sys` | `boot_count` (u32), `seed_ver` (u32), `last_ota_result` (u8), `fw_valid` (u8) | | |
 
@@ -1953,7 +2005,16 @@ offset 0x400  dữ liệu, mỗi entry căn 64 B
 ```
 
 `kind`: `ESPDL` (một file `.espdl`), `NORM` (thống kê chuẩn hoá của một model, float32), `UNITS`
-(bảng đơn vị của `command`).
+(bảng đơn vị của `command` `ctc`).
+
+**`firmware/models/<nhánh>/meta.json`** đi cùng mỗi `.espdl` và được commit (§4.3): `grid_hash`, nguồn dữ liệu đã học
+(CLAUDE.md §4.3), run sinh ra nó. Của `command` có thêm ba trường (ADR-0012):
+
+| Trường | Giá trị | Ai đọc |
+|---|---|---|
+| `backend` | `kws` \| `ctc` | bước đóng gói đặt tên mục trong ảnh theo nó (`command_kws` hay `command_ctc`), nên bản dựng của đường kia không tìm thấy model và coi ảnh là không có `command` |
+| `features` | `log_mel40` \| `log_mel40_pitch3`, kèm số chiều mỗi khung | `svc_listen`, qua độ dài khung của `ai_engine_command_step` (§4.5.5) |
+| `classes` | `kws`: `id` các lệnh đã học theo thứ tự, rồi `other`, `silence`; `ctc`: không có | bước đóng gói kiểm các `id` lệnh là phần đầu của `contracts/commands/default_vi.json`, để chỉ số trả về trùng chỉ số trong bảng lệnh |
 
 **`grid_hash` chặn lệch lúc huấn luyện và lúc chạy.** Firmware biên dịch với băm của `grid.yaml`
 trong `gen_grid.h`; ảnh model mang băm của lưới nó được huấn luyện. Khác nhau thì `ai_engine_load`
@@ -2176,7 +2237,7 @@ board, kết quả lên server, máy tính hiện ra theo thời gian thực:
 |---|---|
 | Nền, hợp đồng, app khung | Cửa 0 |
 | Tầng một kênh và dìm nhiễu sàn | E7, E9-T1 |
-| `lang_vi`, `wake`, `command`, `svc_listen` | E11-T4, E11-T9 … E11-T14 |
+| `lang_vi`, `wake`, `command` (đường `kws` trước), `svc_listen` | E11-T4, E11-T9 … E11-T14, E11-T17 |
 | Broker, kênh sự kiện, màn xem | E13-T1, E13-T2, E13-T5, E5-T9 |
 | Kịch bản demo | E13-T11 |
 
@@ -2190,7 +2251,7 @@ mặc định là trộn trần cho tới khi E8-T4 chốt; câu trả lời b�
 | **0** | E2, E3, E5, E6 | dàn micro đạt ba chỉ tiêu sửa được; `dsp_spec` khớp Python trong ngưỡng; app khung chạy 10 phút 0 khung mất; hợp đồng đóng băng | **dừng hẳn** |
 | **1** | E8, E9 | đường không gian thắng trộn trần; `ns` mạng thắng sàn — **bằng thước của bộ nhận dạng** (§3.15) | giữ trộn trần, giữ sàn, ghi đúng như vậy |
 | **2** | E11-T11 | `wake` bắt ≥ 95% ở 1 m, báo nhầm ≤ 1 lần mỗi giờ trên ≥ 24 giờ âm bản | thu thêm dữ liệu; vẫn không đạt thì đổi từ đánh thức |
-| **3** | E11-T13 | mỗi lệnh ≥ 90%, từ chối đúng ≥ 95% | **giảm số lệnh**, không nới mô hình |
+| **3** | E11-T13, E11-T17 | mỗi lệnh ≥ 90%, từ chối đúng ≥ 95%, cùng một thước cho hai đường của `command`; đường đạt và tốt hơn thành mặc định (§3.12) | **giảm số lệnh**, không nới mô hình |
 | **4** | E12 | `synth` dưới 1× thời gian thực, vừa bộ nhớ | **lui về ghép mẩu**, không nới ngân sách |
 | **5** | E14 | liền 30 phút, 0 khung mất ngoài `OTA_RUNNING`, heap không trôi | bỏ khối đắt nhất theo `budget.md`, đo lại |
 
@@ -2222,6 +2283,7 @@ thêm bốn mục:
 
 **Dìm nhiễu**: Cohen, Berdugo — *Speech enhancement for non-stationary noise environments*, Signal Processing, 2001 · Cohen — *Noise spectrum estimation in adverse environments: improved minima controlled recursive averaging*, IEEE TSAP, 2003 · Valin — *A hybrid DSP/deep learning approach to real-time full-band speech enhancement*, 2018 · [RNNoise](https://github.com/xiph/rnnoise)
 
-**Nhận dạng và tổng hợp**: Graves và cộng sự — *Connectionist temporal classification*, ICML 2006 · [sanoTTS](https://arxiv.org/abs/2608.21378) — mốc TTS chưng cất trên ESP32-S3
+**Nhận dạng và tổng hợp**: Graves và cộng sự — *Connectionist temporal classification*, ICML 2006 · Zhang, Suda, Lai,
+Chandra — *Hello Edge: Keyword spotting on microcontrollers*, arXiv:1711.07128, 2017 · [sanoTTS](https://arxiv.org/abs/2608.21378) — mốc TTS chưng cất trên ESP32-S3
 
 **Dữ liệu**: [Common Voice](https://commonvoice.mozilla.org) · [VIVOS](https://ailab.hcmus.edu.vn/vivos) · [MUSAN](https://www.openslr.org/17/) · [OpenSLR 28](https://www.openslr.org/28/)
