@@ -103,7 +103,7 @@ nsnet:                             # NSNet-16k: log power in, a gain a bin out (
   bins: 256                        # 0 .. 7969 Hz, 16-aligned for esp-dl's SIMD; bin 256 takes bin 255's gain
   layers: 2                        # stacked GRUs between one input and one output layer
   sizes: {S: {hidden: 96}, M: {hidden: 128}, L: {hidden: 144}}
-  train_sizes: [S, M, L]           # trained on the same batches; the board probe picks one (4.2 ms, 387 KB)
+  train_sizes: [S, M, L]           # same batches; L is the product's (ADR-0014), S and M the fallback
   speech_prob_band_hz: [300.0, 3400.0]   # speech_prob: the share of this band's power the gains pass
 loss:                              # the same for every candidate, on the 257 gains the slot applies
   alpha: 0.6                       # speech distortion against residual noise; 0.5 is Wiener, more keeps speech
