@@ -91,6 +91,24 @@ giờ, mô phỏng nối lại). Split `wake/yes1`, 10 000 bước, run `ml/arti
 Câu thứ sáu của phiên "yes", bị cắt cụt ở cuối phiên 15 s, được 0,80. Câu gần âm và "chào mi na" không câu nào vượt ngưỡng, cao nhất "bật điện"
 0,95. Chấm: `python -m srpipe.tasks.wake.eval board <run>`; phiên lệnh mà câu là đúng từ ấy được tính là phiên có từ.
 
+Ở ngưỡng 0,9, 61 lần báo nhầm trên `val_neg`: khoảng 40 lần rơi vào 0,85–1,33 s sau lúc câu bắt đầu, dù câu dài vài
+giây. Mẩu dương nào cũng là một từ ngay sau khoảng lặng, nên mạng học lối tắt "đầu câu cộng chừng 1 s". Lượt sửa
+(KẾ HOẠCH §3.11, `a1ea5e9`): 25% cửa sổ âm dừng trong 2 s đầu tiếng nói của một câu; âm bản khó dài không quá 1,2 s cắt
+ở cuối như mẩu dương; 20 000 bước. Run `ml/artifacts/wake/runs/20261001_a1ea5e9-dirty_aa99da`.
+
+| Báo nhầm/giờ trên `val` (`val_neg` + `val_hard`) | Bắt được, lượt đầu | Bắt được, lượt sửa |
+|---|---|---|
+| 1 | 74,5% (ngưỡng 0,9888) | 80,2% (0,9998) |
+| 2 | 81,6% (0,9797) | 86,4% (0,9990) |
+| 2,5 | 85,0% (0,9721) | 89,7% (0,9978) |
+| 3 | 86,4% (0,9657) | 91,6% (0,9957) |
+| 5 | 91,9% (0,9236) | 93,8% (0,9857) |
+
+Phần báo nhầm `val_neg` nằm trong 0,85–1,33 s đầu câu, ở ngưỡng của 3 lần/giờ: lượt đầu 75% (21/28), lượt sửa 52%
+(12/23). Điểm của lượt sửa dồn sát 1: thang ngưỡng của `eval` dừng ở 0,995 nên `train` chọn 0,995, ở đó `val` bắt 92,4%
+với 3,13 lần/giờ. Board ở 0,995: phiên "yes" 1,00; 1,00; 1,00; 1,00; 0,86; câu cắt cụt 1,00 — 4/5 câu trọn vẹn; báo
+nhầm 2 lần trên 0,48 giờ (4,15/giờ); "bật điện" 0,99.
+
 ## 5. Điều số đo cho thấy
 
 - Cùng đường mô phỏng, cùng chuỗi trên board, cùng thước: DS-CNN học từ hàng nghìn người nói nhận giọng board của người
