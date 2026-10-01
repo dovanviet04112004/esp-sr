@@ -163,14 +163,14 @@ def decisions(net: Kws, x: np.ndarray) -> list[tuple[str, int]]:
     return out
 
 
-def ctc_windows(clean: np.ndarray, features: np.ndarray, spans: Spans, longest: int, lead: int, tracker: PitchTracker):
-    """Per utterance the window ending where vad turns off after it and starting lead hops before it, as a simulated
-    sentence starts, but never before the utterance ahead of it ends nor more than longest hops back; its log-mel,
-    then pitch from a tracker reset at its first hop."""
+def ctc_windows(clean: np.ndarray, features: np.ndarray, spans: Spans, longest: int, tracker: PitchTracker):
+    """Per utterance the window ending where vad turns off after it and reaching longest hops back, as LENH keeps it
+    from its start, but never into the utterance ahead of it; its log-mel, then pitch from a tracker reset at its first
+    hop."""
     out, after = [], 0
-    for first, last in spans:
+    for _, last in spans:
         end = min(last + 1, len(features) - 1)
-        start = max(first - lead, end + 1 - longest, after)
+        start = max(end + 1 - longest, after)
         pitch = device.item_pitch(tracker, clean[start * grid.HOP_SAMPLES : (end + 1) * grid.HOP_SAMPLES])
         out.append(np.concatenate([features[start : end + 1], pitch], axis=1).astype(np.float32))
         after = end + 1
@@ -226,12 +226,11 @@ def kws_board(net: Kws, spec: dict, paths: dict) -> list[Scored]:
 
 
 def ctc_board(net: Ctc, spec: dict, paths: dict, window_s: float) -> list[Scored]:
-    lead = round(load_yaml(CONFIGS / net.cfg["features"])["session"]["pad_s"] * HOPS_PER_S)
     longest = round(window_s * HOPS_PER_S)
     listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
 
     def decided_of(clean, features, spans, tracker):
-        return [ctc_heard(net, x) for x in ctc_windows(clean, features, spans, longest, lead, tracker)]
+        return [ctc_heard(net, x) for x in ctc_windows(clean, features, spans, longest, tracker)]
 
     return board(net.cfg, spec, paths, {c["id"]: c["text"] for c in listed}, decided_of)
 

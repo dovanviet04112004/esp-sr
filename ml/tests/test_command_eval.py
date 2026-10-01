@@ -57,14 +57,14 @@ def test_the_table_scores_each_command_and_the_rejections_by_kind() -> None:
     assert "bật điện \\| tắt điện" in text
 
 
-def test_a_ctc_window_starts_a_pad_before_its_utterance_after_the_one_ahead_and_within_the_longest() -> None:
+def test_a_ctc_window_reaches_the_longest_back_but_never_into_the_utterance_ahead() -> None:
     hops, bands = 400, 40
     features = np.arange(hops, dtype=np.float32)[:, None].repeat(bands, axis=1)
     clean = np.zeros(hops * grid.HOP_SAMPLES, dtype=np.int16)
     tracker = PitchTracker(PitchConfig(**load_yaml(CONFIGS / "scenes" / "device.yaml")["pitch"]))
-    xs = gate.ctc_windows(clean, features, [(30, 60), (70, 100), (200, 390)], 120, 19, tracker)
+    xs = gate.ctc_windows(clean, features, [(30, 60), (70, 100), (200, 390)], 120, tracker)
     dims = bands + N_FEATURES
-    assert [(x[0, 0], x[-1, 0], x.shape[1]) for x in xs] == [(11, 61, dims), (62, 101, dims), (272, 391, dims)]
+    assert [(x[0, 0], x[-1, 0], x.shape[1]) for x in xs] == [(0, 61, dims), (62, 101, dims), (272, 391, dims)]
 
 
 def test_a_ctc_window_reaches_the_decision_as_frames_of_its_own_hops(monkeypatch) -> None:
