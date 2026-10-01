@@ -5,13 +5,15 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-import torch
 
 from srpipe.core.config import load_yaml
 from srpipe.generated import grid
 from srpipe.tasks import ns
-from srpipe.tasks.ns.model import rnnoise
 from srpipe.tasks.ns.postproc import bands, bins
+
+torch = pytest.importorskip("torch")
+
+from srpipe.tasks.ns.model import rnnoise  # noqa: E402
 
 CFG = load_yaml(ns.CONFIG)
 SPEC = CFG["rnnoise"]

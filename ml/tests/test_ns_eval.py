@@ -10,6 +10,9 @@ import pytest
 
 from srpipe.dsp.spec.stft import Istft
 from srpipe.generated import grid
+
+pytest.importorskip("torch")
+
 from srpipe.tasks.ns import eval as ns_eval
 
 HOP = grid.HOP_SAMPLES

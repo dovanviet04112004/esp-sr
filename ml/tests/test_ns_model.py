@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import pytest
-import torch
 
 from srpipe.core.config import load_yaml
 from srpipe.generated import grid
 from srpipe.tasks import ns
-from srpipe.tasks.ns import model
+
+torch = pytest.importorskip("torch")
+
+from srpipe.tasks.ns import model  # noqa: E402
 
 CFG = load_yaml(ns.CONFIG)
 PARAMETERS = {"rnnoise16k": 82_603, "nsnet16k_s": 161_248, "nsnet16k_m": 264_064, "nsnet16k_l": 324_688}

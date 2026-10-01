@@ -10,7 +10,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import torch
 import yaml
 
 from srpipe.core.audio_io import write_wav
@@ -18,8 +17,12 @@ from srpipe.core.config import CONFIGS, load_yaml
 from srpipe.generated import grid
 from srpipe.scenes import device
 from srpipe.tasks import ns
-from srpipe.tasks.ns import data, model, train
-from srpipe.tasks.ns import eval as ns_eval
+from srpipe.tasks.ns import data
+
+torch = pytest.importorskip("torch")
+
+from srpipe.tasks.ns import eval as ns_eval  # noqa: E402
+from srpipe.tasks.ns import model, train  # noqa: E402
 
 FS = grid.SAMPLE_RATE_HZ
 UTTERANCES = 12

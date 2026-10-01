@@ -9,13 +9,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from srpipe.compress.quant import ptq_espdl
 from srpipe.core.config import load_yaml
 from srpipe.tasks import ns
-from srpipe.tasks.ns import model, quant
 from srpipe.tasks.ns.postproc import bands
 
+pytest.importorskip("torch")
 pytest.importorskip("esp_ppq")
+
+from srpipe.compress.quant import ptq_espdl
+from srpipe.tasks.ns import model, quant
 
 HOPS = 12
 

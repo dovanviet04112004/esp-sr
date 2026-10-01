@@ -9,15 +9,18 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import torch
 import yaml
 
 from srpipe.core.config import load_yaml
 from srpipe.dsp.spec import pitch
 from srpipe.tasks import command
 from srpipe.tasks.command import kws
-from srpipe.tasks.command.kws import data, train
+from srpipe.tasks.command.kws import data
 from srpipe.tasks.command.kws.postproc import decide
+
+torch = pytest.importorskip("torch")
+
+from srpipe.tasks.command.kws import train  # noqa: E402
 
 CFG = load_yaml(kws.CONFIG)
 NAMES = kws.classes(load_yaml(command.CONFIG))

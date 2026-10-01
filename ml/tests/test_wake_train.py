@@ -9,16 +9,19 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import torch
 import yaml
 
 from srpipe.core import corpus
 from srpipe.core.config import load_yaml
 from srpipe.generated import grid
-from srpipe.tasks.wake import CONFIG, data, train
-from srpipe.tasks.wake import eval as wake_eval
-from srpipe.tasks.wake.model.tcn import Tcn
+from srpipe.tasks.wake import CONFIG, data
 from srpipe.tasks.wake.postproc.smooth import smooth, triggers
+
+torch = pytest.importorskip("torch")
+
+from srpipe.tasks.wake import eval as wake_eval  # noqa: E402
+from srpipe.tasks.wake import train  # noqa: E402
+from srpipe.tasks.wake.model.tcn import Tcn  # noqa: E402
 
 BANDS = 8
 
