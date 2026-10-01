@@ -26,7 +26,7 @@ from srpipe.tasks.command.synth import SETS
 PUBLIC, SYNTH = "public", "synth"
 SOURCES = ("tts", "real", "speech", "noise")
 ROLES = ("train", "val")
-SPEECH_STREAM, SILENCE_STREAM = 1, 2
+SPEECH_STREAM, SILENCE_STREAM, SPEECH_COMMANDS_STREAM = 1, 2, 3
 Rows = dict[str, list[splits.Row]]
 
 
@@ -178,10 +178,38 @@ def silence_rows(spec: dict, raw: Path, rejected: set[str], seed: int) -> tuple[
     return rows, seconds
 
 
-def build(cfg: dict, command_cfg: dict, paths: dict) -> tuple[Rows, dict[str, float]]:
-    """Every split file of the version by name, and the seconds of every item in them."""
+def speech_commands_files(raw: Path, spec: dict, seed: int) -> tuple[Rows, dict[str, float]]:
+    """A Speech Commands pilot's files but silence's: each keyword, and the other words as other, drawn to their
+    counts a role; val from the corpus's testing list, train from neither of its lists, so speakers stay apart as the
+    corpus keeps them."""
+    root = raw / spec["dir"]
+    held = {n: set((root / f"{n}_list.txt").read_text(encoding="utf-8").split()) for n in ("testing", "validation")}
+    found: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for folder in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith("_")):
+        cls = folder.name if folder.name in spec["keywords"] else kws.OTHER
+        for f in sorted(folder.glob("*.wav")):
+            name = f"{folder.name}/{f.name}"
+            if name not in held["validation"]:
+                found[("val" if name in held["testing"] else "train", cls)].append(name)
+    rng = np.random.default_rng([seed, SPEECH_COMMANDS_STREAM])
+    files: Rows = {}
+    seconds: dict[str, float] = {}
+    for (role, cls), names in sorted(found.items()):
+        count = spec["other_clips" if cls == kws.OTHER else "clips"][role]
+        drawn = sorted(rng.choice(names, size=min(count, len(names)), replace=False).tolist())
+        speaker = [n.split("/")[1].split("_nohash_")[0] for n in drawn]
+        rows = [splits.Row(f"{spec['dir']}/{n}", s, splits.ABSENT, PUBLIC) for n, s in zip(drawn, speaker, strict=True)]
+        files[file_name(role, cls, "real")] = rows
+        for r in rows:
+            info = sf.info(str(raw / r.item))
+            seconds[r.item] = info.frames / info.samplerate
+    return files, seconds
+
+
+def command_files(cfg: dict, command_cfg: dict, paths: dict) -> tuple[Rows, dict[str, float]]:
+    """The command set's files but silence's: TTS clips, real clips, and ordinary speech for other."""
     spec = cfg["split"]
-    names = kws.classes(command_cfg, cfg["commands"])
+    names = kws.classes(cfg, command_cfg)
     # A learned command the net leaves out is other to it.
     command_of = {c["text"]: c["id"] if c["id"] in names else kws.OTHER for c in command.learned(command_cfg)}
     manifests = [
@@ -210,30 +238,40 @@ def build(cfg: dict, command_cfg: dict, paths: dict) -> tuple[Rows, dict[str, fl
         if val:
             files[file_name("val", cls, "real")] = val
     speech, lengths = speech_rows(spec, paths, list(command_of), held)
-    seconds |= lengths
-    rejected = set(screen.rejected(paths["interim"]))
-    noise, lengths = silence_rows(spec["silence"], paths["raw"], rejected, spec["seed"])
-    seconds |= lengths
     for role in ROLES:
         files[file_name(role, kws.OTHER, "speech")] = speech[role]
+    return files, seconds | lengths
+
+
+def build(cfg: dict, command_cfg: dict, paths: dict) -> tuple[Rows, dict[str, float]]:
+    """Every split file of the version by name, and the seconds of every item in them."""
+    spec = cfg["split"]
+    if cfg["speech_commands"]:
+        files, seconds = speech_commands_files(paths["raw"], cfg["speech_commands"], spec["seed"])
+    else:
+        files, seconds = command_files(cfg, command_cfg, paths)
+    rejected = set(screen.rejected(paths["interim"]))
+    noise, lengths = silence_rows(spec["silence"], paths["raw"], rejected, spec["seed"])
+    for role in ROLES:
         files[file_name(role, kws.SILENCE, "noise")] = noise[role]
-    return dict(sorted(files.items())), seconds
+    return dict(sorted(files.items())), seconds | lengths
 
 
 def notes(cfg: dict, command_cfg: dict, files: Rows, seconds: dict[str, float]) -> str:
     """SPLIT.md ahead of the checksums: rules, seed, and each file's class, rows and hours."""
     spec = cfg["split"]
-    names = kws.classes(command_cfg, cfg["commands"])
+    names = kws.classes(cfg, command_cfg)
     table = "\n".join(
         f"| `{name}` | `{class_of(name, names)}` | {len(rows)} | {splits.hours(rows, seconds):.2f} |"
         for name, rows in files.items()
     )
-    return f"""# command_kws/{spec["version"]}
-
-Dựng bằng `python -m srpipe.tasks.command.kws.data split`, seed {spec["seed"]}, mục `split` của
-`ml/configs/models/command_kws.yaml` (KẾ HOẠCH §1.3, §3.12). Mỗi file một vai, một lớp, một nguồn:
-`<vai>_<lớp>_<nguồn>.txt`; lớp theo thứ tự đầu ra của mạng: {", ".join(f"`{n}`" for n in names)}.
-
+    if pilot := cfg["speech_commands"]:
+        sources = f"""\
+- `real`: mẩu của Speech Commands v0.02 ở `raw/{pilot["dir"]}`, mỗi từ khoá {pilot["clips"]} mẩu một vai, các từ còn
+  lại vào `other`, {pilot["other_clips"]} mẩu một vai; `val` lấy từ `testing_list.txt`, `train` từ mẩu không nằm ở danh
+  sách nào của bộ, nên người nói tách như bộ tách. Pilot kiểm đường kws trên kho nhiều người nói."""
+    else:
+        sources = f"""\
 - `tts`: mẩu TTS có `kept` của `interim/command/synth_pos` (lệnh nó nói) và `synth_neg` (`other`: cụm gần âm, cụm mở
   đầu, nửa lệnh, cụm tay). {spec["val_voices"]:.0%} giọng có sẵn của VieNeu và {spec["val_voices"]:.0%} người nói VIVOS
   làm giọng mẫu vào `val` trọn vẹn cùng mọi giọng nhân bản từ họ; giọng nhân bản từ kho không mã người nói chỉ vào
@@ -241,7 +279,14 @@ Dựng bằng `python -m srpipe.tasks.command.kws.data split`, seed {spec["seed"
 - `real`: mẩu người thật của kho trích `{spec["hf_extract"]}` và của `kws_vi_command` (lệnh của bộ; "bật hết", "tắt
   hết" vào `other`; nhiễu phòng của họ vào `silence`). Không kho nào có mã người nói nên chỉ vào `train`.
 - `speech`: lời nói thường cho `other`, từ các file `train_*` của `{spec["command_split"]}` cho `train` và `val.txt` cho
-  `val`, không câu nào nói một lệnh đã học; người nói có giọng nhân bản ở `val` không vào `train`.
+  `val`, không câu nào nói một lệnh đã học; người nói có giọng nhân bản ở `val` không vào `train`."""
+    return f"""# command_kws/{spec["version"]}
+
+Dựng bằng `python -m srpipe.tasks.command.kws.data split`, seed {spec["seed"]}, mục `split` của
+`ml/configs/models/command_kws.yaml` (KẾ HOẠCH §1.3, §3.12). Mỗi file một vai, một lớp, một nguồn:
+`<vai>_<lớp>_<nguồn>.txt`; lớp theo thứ tự đầu ra của mạng: {", ".join(f"`{n}`" for n in names)}.
+
+{sources}
 - `noise`: đoạn {spec["silence"]["seconds"][0]:g} tới {spec["silence"]["seconds"][1]:g} s của nhiễu MUSAN và DEMAND cho
   `silence`; mỗi file nhiễu chỉ ở một vai.
 - Tập thử là phiên thu qua board (E11-T6), chưa có.

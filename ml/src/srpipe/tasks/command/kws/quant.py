@@ -63,7 +63,7 @@ def probe_size(cfg: dict, size: str, n_classes: int, work: Path) -> tuple[bytes,
 
 def probe(cfg: dict, command_cfg: dict, out: Path, work: Path) -> tuple[Path, Path]:
     """Write out/kws_models.bin and out/kws_windows.bin over every size; work keeps each ONNX and .espdl."""
-    n_classes = len(kws.classes(command_cfg, cfg["commands"]))
+    n_classes = len(kws.classes(cfg, command_cfg))
     sizes = list(cfg["model"]["sizes"])
     built = [probe_size(cfg, size, n_classes, work) for size in sizes]
     out.mkdir(parents=True, exist_ok=True)

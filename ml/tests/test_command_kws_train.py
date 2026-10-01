@@ -23,7 +23,7 @@ torch = pytest.importorskip("torch")
 from srpipe.tasks.command.kws import train  # noqa: E402
 
 CFG = load_yaml(kws.CONFIG)
-NAMES = kws.classes(load_yaml(command.CONFIG))
+NAMES = kws.classes(load_yaml(kws.CONFIG), load_yaml(command.CONFIG))
 WINDOW = CFG["window_hops"]
 N_BANDS = kws.n_dims(CFG) - pitch.N_FEATURES
 ITEM_HOPS, SPEECH, VOICED, LATE = 160, [100, 120], (100, 136), 19

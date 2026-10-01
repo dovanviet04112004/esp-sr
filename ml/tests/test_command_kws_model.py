@@ -33,7 +33,7 @@ def test_same_padding_leaves_the_ceiling_of_size_over_stride() -> None:
 
 def test_a_window_gives_one_logit_a_class_at_every_size() -> None:
     cfg = load_yaml(kws.CONFIG)
-    names = kws.classes(load_yaml(command.CONFIG))
+    names = kws.classes(load_yaml(kws.CONFIG), load_yaml(command.CONFIG))
     assert names[-2:] == [kws.OTHER, kws.SILENCE]
     assert "chup_anh" not in names
     window = (cfg["window_hops"], kws.n_dims(cfg))

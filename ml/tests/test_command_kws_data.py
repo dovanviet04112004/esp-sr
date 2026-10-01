@@ -20,7 +20,7 @@ from srpipe.tasks.command import kws
 from srpipe.tasks.command.kws import data
 
 FS = grid.SAMPLE_RATE_HZ
-NAMES = kws.classes(load_yaml(command.CONFIG))
+NAMES = kws.classes(load_yaml(kws.CONFIG), load_yaml(command.CONFIG))
 COMMAND_OF = {c["text"]: c["id"] for c in command.learned(load_yaml(command.CONFIG))}
 
 
@@ -38,10 +38,13 @@ def test_a_file_name_carries_role_class_and_source() -> None:
 
 
 def test_a_net_of_some_commands_keeps_their_order_and_refuses_an_unlearned_one() -> None:
-    command_cfg = load_yaml(command.CONFIG)
-    assert kws.classes(command_cfg, ["tat_den", "bat_den"]) == ["bat_den", "tat_den", kws.OTHER, kws.SILENCE]
+    cfg, command_cfg = load_yaml(kws.CONFIG), load_yaml(command.CONFIG)
+    some = cfg | {"commands": ["tat_den", "bat_den"]}
+    assert kws.classes(some, command_cfg) == ["bat_den", "tat_den", kws.OTHER, kws.SILENCE]
     with pytest.raises(ValueError, match="chup_anh"):
-        kws.classes(command_cfg, ["bat_den", "chup_anh"])
+        kws.classes(cfg | {"commands": ["bat_den", "chup_anh"]}, command_cfg)
+    pilot = cfg | {"speech_commands": {"keywords": ["yes", "no"]}}
+    assert kws.classes(pilot, command_cfg) == ["yes", "no", kws.OTHER, kws.SILENCE]
 
 
 def test_a_tts_clip_goes_to_its_voices_role_and_its_commands_class(tmp_path: Path) -> None:
@@ -143,3 +146,26 @@ def test_simulate_links_a_file_another_version_built_the_same_way(tmp_path: Path
     out = paths["processed"] / "command_kws" / "v2" / "train_silence_noise"
     assert (out / "manifest.yaml").samefile(built / "manifest.yaml")
     assert (out / "shard_00000.features.npy").samefile(built / "shard_00000.features.npy")
+
+
+def test_a_speech_commands_pilot_keeps_the_corpus_speakers_apart_and_draws_its_counts(tmp_path: Path) -> None:
+    root = tmp_path / "speech" / "sc"
+    names = {
+        "yes": ["aa_nohash_0", "aa_nohash_1", "bb_nohash_0", "cc_nohash_0", "dd_nohash_0"],
+        "cat": ["aa_nohash_0", "ee_nohash_0", "ff_nohash_0"],
+        "_background_noise_": ["white"],
+    }
+    for word, stems in names.items():
+        for stem in stems:
+            write_wav(root / word / f"{stem}.wav", np.zeros(FS // 2))
+    (root / "testing_list.txt").write_text("yes/bb_nohash_0.wav\ncat/ee_nohash_0.wav\n", encoding="utf-8")
+    (root / "validation_list.txt").write_text("yes/cc_nohash_0.wav\n", encoding="utf-8")
+    counts = {"clips": {"train": 2, "val": 5}, "other_clips": {"train": 9, "val": 9}}
+    spec = {"dir": "speech/sc", "keywords": ["yes"]} | counts
+    files, seconds = data.speech_commands_files(tmp_path, spec, 0)
+    assert set(files) == {"train_yes_real.txt", "val_yes_real.txt", "train_other_real.txt", "val_other_real.txt"}
+    assert len(files["train_yes_real.txt"]) == 2 and {r.spk for r in files["train_yes_real.txt"]} <= {"aa", "dd"}
+    assert [r.item for r in files["val_yes_real.txt"]] == ["speech/sc/yes/bb_nohash_0.wav"]
+    assert {r.spk for r in files["train_other_real.txt"]} == {"aa", "ff"}
+    assert [r.spk for r in files["val_other_real.txt"]] == ["ee"]
+    assert all(s == pytest.approx(0.5) for s in seconds.values())

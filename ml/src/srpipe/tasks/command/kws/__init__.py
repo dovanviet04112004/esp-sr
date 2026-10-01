@@ -9,10 +9,12 @@ CONFIG = CONFIGS / "models" / "command_kws.yaml"
 OTHER, SILENCE = "other", "silence"
 
 
-def classes(command_cfg: dict, only: list[str] | None = None) -> list[str]:
-    """Class names in output order: the learned command ids as default_vi.json lists them, only those of only when
-    given, then other and silence."""
-    ids = [c["id"] for c in command.learned(command_cfg)]
+def classes(cfg: dict, command_cfg: dict) -> list[str]:
+    """Class names in output order: a Speech Commands pilot's keywords, else the learned command ids as default_vi.json
+    lists them, only those of commands when it names some; then other and silence."""
+    if cfg["speech_commands"]:
+        return [*cfg["speech_commands"]["keywords"], OTHER, SILENCE]
+    ids, only = [c["id"] for c in command.learned(command_cfg)], cfg["commands"]
     if only is not None and (unknown := set(only) - set(ids)):
         raise ValueError(f"{sorted(unknown)} are no learned commands")
     return [i for i in ids if only is None or i in only] + [OTHER, SILENCE]

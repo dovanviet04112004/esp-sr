@@ -3,6 +3,7 @@
 features: scenes/device.yaml       # mel and pitch as the device computes them
 window_hops: 94                    # ending at the hop vad turns off after an utterance, about 1.5 s
 commands: null                     # learned command ids the net tells apart, the rest are other to it; null for all
+speech_commands: null              # a pilot on English keywords of Speech Commands v0.02 in place of the commands
 model:
   size: S                          # a key of sizes; every size trains on the same split, seed and epochs (KEHOACH 3.12)
   first_kernel: [10, 4]            # hops by feature dims

@@ -353,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
         help="a dotted override of command_kws.yaml, e.g. model.size=M",
     )
     cfg, paths = apply_overrides(load_yaml(kws.CONFIG), parser.parse_args(argv).overrides), data_paths()
-    names = kws.classes(load_yaml(command.CONFIG), cfg["commands"])
+    names = kws.classes(cfg, load_yaml(command.CONFIG))
     window, version = cfg["window_hops"], cfg["split"]["version"]
     late = round(cfg["train"]["late_s"] * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES)
     split_files = sorted((paths["splits"] / BRANCH / version).glob("*.txt"))

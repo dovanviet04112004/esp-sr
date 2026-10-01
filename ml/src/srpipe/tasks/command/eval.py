@@ -64,7 +64,7 @@ class Kws:
 
 def load_kws(run: Path) -> Kws:
     trained = load_yaml(run / "config.resolved.yaml")
-    names = kws.classes(load_yaml(command.CONFIG), trained["commands"])
+    names = kws.classes(trained, load_yaml(command.CONFIG))
     stats = np.load(run / "feature_stats.npz")
     model = dscnn.build(trained, (trained["window_hops"], len(stats["mean"])), len(names))
     model.load_state_dict(torch.load(run / "model.pt", map_location="cpu"))
