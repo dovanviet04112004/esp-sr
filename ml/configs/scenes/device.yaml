@@ -19,7 +19,9 @@ session:
   gap_s: [0.4, 2.0]               # silence after each utterance, drawn per utterance
   pad_s: 0.3                      # kept on each side of an utterance in the output
 talker:
-  spl_1m_db: [56.0, 74.0]         # ANSI S3.5: casual 56, normal 62, raised 68, loud 75 dB SPL at 1 m
+  spl_1m_db: [45.0, 74.0]         # ANSI S3.5: casual 56, normal 62, raised 68, loud 75 dB SPL at 1 m; soft down to 45
+  tilt_db_per_octave: [-6.0, 3.0] # a session's slope above tilt_from_hz: the enclosure's and the voice's (KEHOACH 1.2)
+  tilt_from_hz: 1000.0
   jitter_db: 3.0                  # each utterance within this of its session's level
   active_below_peak_db: 40.0      # a hop counts as speech within this of the utterance's loudest hop
   edge_ramp_s: 0.01               # each utterance fades in and out over this: a clip cut from a sentence has no step
@@ -33,7 +35,10 @@ noise:
     - {dir: noise/demand, glob: "*/ch01.wav", weight: 2}
 microphone:
   sensitivity_dbfs: -29.0         # INMP441: -26 dBFS sine at 94 dB SPL, on the firmware's square-wave scale
-  self_noise_dbfs_a: -90.0        # INMP441: SNR 61 dBA below that sensitivity
+  self_noise_dbfs_a: -90.0        # INMP441: SNR 61 dBA below that sensitivity; a mixer without the board's floor (ns)
+  floor:                          # board B's floor under every session of build (KEHOACH 1.2): quiet-room probes
+    board: board_b
+    sessions: [20261001_home_011, 20261001_home_012, 20261001_home_013]
   balance: docs/measurements/calib/board_b_balance.csv   # calib/bal of the board simulated, from the repo root
   pcm_shift: 13                   # calib/pcm_shift board B stores (E2-T5, docs/measurements/mic_array.md §2)
 features: {n_bands: 40, f_min_hz: 20.0, f_max_hz: 7600.0, log_floor: 1.0e-6}

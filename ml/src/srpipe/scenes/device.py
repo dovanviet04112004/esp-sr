@@ -28,7 +28,7 @@ from srpipe.core.audio_io import ItemReader, ramped, read_wav, to_float, write_w
 from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml
 from srpipe.dsp.afe import hpf
 from srpipe.dsp.afe.chain import PCM_FULL_SCALE, PCM_MAX, PCM_MIN, Chain, ChainConfig
-from srpipe.dsp.spec.mel import Mel, MelConfig
+from srpipe.dsp.spec.mel import Mel, MelConfig, hz_to_mel, mel_to_hz
 from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
 from srpipe.dsp.spec.stft import Stft
 from srpipe.dsp.spec.window import sqrt_hann
@@ -50,6 +50,9 @@ ROOM_STREAM, SESSION_STREAM = 1, 2
 TALKER, NOISE = 0, 1
 CLEAN_ORIGINS = frozenset({"public", "synth"})
 ROOT_OF = {"public": "raw", "synth": "interim"}  # where a split row's item lies, by origin (KEHOACH 4.4.1)
+FLOOR_KIND = "probe"  # no gate scores a probe: a floor never leaks a test
+FLOOR_BANDS_HZ = ((50, 300), (300, 1000), (1000, 2000), (2000, 4000), (4000, 8000))
+LEVEL_GROUPS = 5  # equal runs of mel bands the speech comparison reports
 
 SPEECH = Path("speech") / "vivos" / "test"
 OUT = Path("playback") / "vivos_test.wav"
@@ -112,17 +115,54 @@ def respond(air: np.ndarray, mics: Microphones) -> np.ndarray:
     return np.stack([ch0, air[1]]) / louder
 
 
-def digitise(x: np.ndarray, mics: Microphones, rng: np.random.Generator) -> np.ndarray:
-    """Interleaved int16 frames (samples, 2) from the pair's outputs (2, samples) of respond: self noise, then
-    drv_audio's right shift, which floors, and its saturation."""
-    x = x + mics.self_noise_rms * rng.standard_normal(x.shape)
-    pcm = np.floor(x * 2.0 ** (SLOT_FRACTION_BITS - mics.pcm_shift))
+@dataclass(frozen=True)
+class Floor:
+    """Board B's own floor as it captured it in a quiet room at the product's pcm_shift: one (2, samples) array a
+    session, in respond's scale, so a floored shift of the sum gives back its samples exactly."""
+
+    sessions: list[np.ndarray]
+
+
+def load_floor(cfg: dict, raw_root: Path, pcm_shift: int) -> Floor:
+    """The floor sessions of the config under raw/device/<board>/: each a probe at pcm_shift, which no gate scores."""
+    sessions = []
+    for name in cfg["sessions"]:
+        folder = raw_root / "device" / cfg["board"] / name
+        meta = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+        if meta["kind"] != FLOOR_KIND or meta["pcm_shift"] != pcm_shift:
+            raise ValueError(
+                f"{name} is a {meta['kind']} at pcm_shift {meta['pcm_shift']}, a floor a {FLOOR_KIND} at {pcm_shift}"
+            )
+        channels = [read_wav(folder / f"ch{m}.wav")[0][:, 0] for m in range(array.N_MICS)]
+        n = min(len(c) for c in channels)
+        scale = PCM_FULL_SCALE / 2.0 ** (SLOT_FRACTION_BITS - pcm_shift)
+        sessions.append(np.stack([c[:n] for c in channels]).astype(np.float64) * scale)
+    return Floor(sessions)
+
+
+def floor_segment(floor: Floor, n: int, rng: np.random.Generator) -> np.ndarray:
+    """n samples of one floor session from a drawn start, wrapping round its end."""
+    captured = floor.sessions[int(rng.integers(len(floor.sessions)))]
+    return np.take(captured, np.arange(n) + int(rng.integers(captured.shape[1])), axis=1, mode="wrap")
+
+
+def digitise(x: np.ndarray, mics: Microphones, rng: np.random.Generator, floor: Floor | None = None) -> np.ndarray:
+    """Interleaved int16 frames (samples, 2) from the pair's outputs (2, samples) of respond: the board's floor when
+    given, else the datasheet's self noise, then drv_audio's right shift, which floors, and its saturation."""
+    noise = floor_segment(floor, x.shape[1], rng) if floor else mics.self_noise_rms * rng.standard_normal(x.shape)
+    pcm = np.floor((x + noise) * 2.0 ** (SLOT_FRACTION_BITS - mics.pcm_shift))
     return np.clip(pcm, PCM_MIN, PCM_MAX).astype(np.int16).T.copy()
 
 
-def hear(air: np.ndarray, mics: Microphones, rng: np.random.Generator) -> np.ndarray:
+def hear(air: np.ndarray, mics: Microphones, rng: np.random.Generator, floor: Floor | None = None) -> np.ndarray:
     """Interleaved int16 frames (samples, 2) from the sound at each microphone's place: respond, then digitise."""
-    return digitise(respond(air, mics), mics, rng)
+    return digitise(respond(air, mics), mics, rng, floor)
+
+
+def tilted(x: np.ndarray, db_per_octave: float, from_hz: float) -> np.ndarray:
+    """x through a zero-phase gain that rises db_per_octave for each octave above from_hz and is flat below."""
+    octaves = np.log2(np.maximum(sfft.rfftfreq(len(x), 1.0 / FS), from_hz) / from_hz)
+    return sfft.irfft(sfft.rfft(x) * 10.0 ** (db_per_octave * octaves / 20.0), len(x))
 
 
 def chain_scale(mics: Microphones) -> float:
@@ -280,6 +320,7 @@ def simulate_session(
     mics: Microphones,
     pools: list[list[str]],
     readers: dict[str, ItemReader],
+    floor: Floor | None = None,
 ) -> tuple[np.ndarray, list[tuple[int, int]], dict]:
     """Session k: the interleaved int16 frames board B would capture, each utterance's [start, end) in samples, and
     the session's draws; bank_room indexes the labels of rooms.yaml, readers read raw/ and interim/ by root name."""
@@ -288,6 +329,7 @@ def simulate_session(
     entry = int(rng.integers(cfg["rooms"]["count"]))
     rirs = np.load(bank / f"room_{entry:04d}.npy")
     spl_db = float(rng.uniform(*t["spl_1m_db"]))
+    tilt_db = float(rng.uniform(*t["tilt_db_per_octave"]))
     at = round(s["lead_s"] * FS)
     pieces, spans = [np.zeros(at)], []
     for row in rows:
@@ -301,10 +343,11 @@ def simulate_session(
     total = -(-(at + round(s["pad_s"] * FS)) // HOP) * HOP
     level = mics.sensitivity_dbfs + spl_db - SENSITIVITY_SPL_DB
     dry = np.concatenate([*pieces, np.zeros(total - at)]) * TALKER_REFERENCE_M * 10.0 ** (level / 20.0)
+    dry = tilted(dry, tilt_db, t["tilt_from_hz"])
     talker = np.stack([signal.fftconvolve(dry, rirs[TALKER, m])[:total] for m in range(array.N_MICS)])
     air, noise = add_noise(talker, dry, rirs, cfg, pools, readers["raw"], rng)
-    draws = {"session": k, "bank_room": entry, "spl_1m_db": spl_db, "noise": noise}
-    return hear(air, mics, rng), spans, draws
+    draws = {"session": k, "bank_room": entry, "spl_1m_db": spl_db, "tilt_db_per_octave": tilt_db, "noise": noise}
+    return hear(air, mics, rng, floor), spans, draws
 
 
 def item_frames(span: tuple[int, int], pads_s: tuple[float, float], n_hops: int) -> tuple[int, int, int, int]:
@@ -337,13 +380,14 @@ def shard_done(out: Path, shard: int) -> Path:
 def _shard(job: tuple) -> list[Path]:
     cfg, roots, bank, out, shard, sessions, pools, pads_s, with_pitch, keep_pcm = job
     mics = load_microphones(cfg["microphone"])
+    floor = load_floor(cfg["microphone"]["floor"], roots["raw"], mics.pcm_shift)
     chain_cfg = ChainConfig(balance_gains=mics.gains)
     mel = Mel(MelConfig(**cfg["features"]))
     tracker = PitchTracker(PitchConfig(**cfg["pitch"])) if with_pitch else None
     readers = {name: ItemReader(root) for name, root in roots.items()}
     features, figures, pcm, pitches, items, offset = [], [], [], [], [], 0
     for k, rows in sessions:
-        captured, spans, draws = simulate_session(cfg, k, rows, bank, mics, pools, readers)
+        captured, spans, draws = simulate_session(cfg, k, rows, bank, mics, pools, readers, floor)
         clean, figs, feats = listen(captured, chain_cfg, mel)
         for row, span in zip(rows, spans, strict=True):
             first, stop, speech_first, speech_stop = item_frames(span, pads_s, len(feats))
@@ -397,6 +441,9 @@ def build(
     sessions = [(k, rows[i : i + per]) for k, i in enumerate(range(0, len(rows), per))]
     per_shard = cfg["sessions_per_shard"]
     pools = noise_files(cfg, raw_root, set(rejected))
+    floor_cfg = cfg["microphone"]["floor"]
+    load_floor(floor_cfg, raw_root, cfg["microphone"]["pcm_shift"])
+    floor_files = [Path(name) / f"ch{m}.wav" for name in floor_cfg["sessions"] for m in range(array.N_MICS)]
     out.mkdir(parents=True, exist_ok=True)
     pads = pads_s or (cfg["session"]["pad_s"], cfg["session"]["pad_s"])
     head = {
@@ -407,6 +454,7 @@ def build(
         **({"pitch": True} if pitch else {}),
         **({} if keep_pcm else {"pcm": False}),
         "rooms_sha256": sha256_of(bank / "rooms.yaml"),
+        "floor_sha256": {str(f): sha256_of(raw_root / "device" / floor_cfg["board"] / f) for f in floor_files},
     }
     begun = out / "build.yaml"
     if begun.exists() and yaml.safe_load(begun.read_text(encoding="utf-8")) != head:
@@ -462,6 +510,63 @@ def playback(speech_root: Path, seconds: float) -> tuple[np.ndarray, list[dict]]
     return np.concatenate(pieces), items
 
 
+def band_levels(x: np.ndarray) -> list[float]:
+    """dBFS on the square-wave scale of float samples x in each band of FLOOR_BANDS_HZ, by Welch's method."""
+    freqs, power = signal.welch(x - x.mean(), fs=FS, nperseg=2 * grid.FFT_SIZE)
+    picked = [(freqs >= lo) & (freqs < hi) for lo, hi in FLOOR_BANDS_HZ]
+    return [10.0 * math.log10(float(np.trapezoid(power[m], freqs[m]))) for m in picked]
+
+
+def floor_table(folder: Path, sessions: list[str], cfg: dict) -> str:
+    """Each channel of each session in the bands of FLOOR_BANDS_HZ, then the datasheet self noise as the simulation
+    without the board's floor digitises it at the configured pcm_shift."""
+    heads = " | ".join(f"{lo}-{hi} Hz" for lo, hi in FLOOR_BANDS_HZ)
+    lines = [f"| Phiên | Kênh | {heads} |", "|---" * (2 + len(FLOOR_BANDS_HZ)) + "|"]
+    for name in sessions:
+        for m in range(array.N_MICS):
+            x = read_wav(folder / name / f"ch{m}.wav")[0][:, 0].astype(np.float64)
+            lines.append(f"| `{name}` | ch{m} | " + " | ".join(f"{v:.1f}" for v in band_levels(x)) + " |")
+    mics = load_microphones(cfg["microphone"])
+    quiet = digitise(np.zeros((2, 30 * FS)), mics, np.random.default_rng(0))[:, 0].astype(np.float64) / PCM_FULL_SCALE
+    lines.append("| nhiễu tự thân datasheet | ch0 | " + " | ".join(f"{v:.1f}" for v in band_levels(quiet)) + " |")
+    return "\n".join(lines)
+
+
+def session_speech(folder: Path, cfg: dict) -> np.ndarray:
+    """Log-mel of the hops vad marks in a board session run through the product's chain."""
+    channels = [read_wav(folder / f"ch{m}.wav")[0][:, 0] for m in range(array.N_MICS)]
+    n = min(len(c) for c in channels) // HOP * HOP
+    pcm = (np.stack([c[:n] for c in channels], axis=1) * PCM_FULL_SCALE).astype(np.int16)
+    chain_cfg = ChainConfig(balance_gains=load_microphones(cfg["microphone"]).gains)
+    _, figures, features = listen(pcm, chain_cfg, Mel(MelConfig(**cfg["features"])))
+    return features[figures[:, 0].astype(bool)]
+
+
+def built_speech(folder: Path) -> np.ndarray:
+    """Log-mel of every item's own hops in a finished build, its pads left out."""
+    out = []
+    for listing in sorted(folder.glob("*.items.jsonl")):
+        features = np.load(str(listing).removesuffix(".items.jsonl") + ".features.npy", mmap_mode="r")
+        for line in listing.read_text(encoding="utf-8").splitlines():
+            item = json.loads(line)
+            first, stop = (item["frame_offset"] + f for f in item["speech_frames"])
+            out.append(np.asarray(features[first:stop]))
+    return np.concatenate(out)
+
+
+def levels_table(sources: list[tuple[str, np.ndarray]], cfg: dict) -> str:
+    """Mean log-mel of each source's speech hops over LEVEL_GROUPS equal runs of bands, nats."""
+    f = cfg["features"]
+    edges = mel_to_hz(np.linspace(hz_to_mel(f["f_min_hz"]), hz_to_mel(f["f_max_hz"]), f["n_bands"] + 2))
+    runs = np.array_split(np.arange(f["n_bands"]), LEVEL_GROUPS)
+    heads = " | ".join(f"{edges[r[0]]:.0f}-{edges[r[-1] + 2]:.0f} Hz" for r in runs)
+    lines = [f"| Nguồn | Bước tiếng | {heads} |", "|---" * (2 + LEVEL_GROUPS) + "|"]
+    for name, speech in sources:
+        means = " | ".join(f"{float(speech[:, r].mean()):.2f}" for r in runs)
+        lines.append(f"| {name} | {len(speech)} | {means} |")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -473,12 +578,33 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--repeats", type=int, default=1, help="passes over the split, each in other sessions")
     make = sub.add_parser("playback", help="write interim/playback/vivos_test.wav and its JSON")
     make.add_argument("--seconds", type=float, default=60.0)
+    bands = sub.add_parser("floor", help="band levels of board sessions beside the datasheet self noise (E4-T8)")
+    bands.add_argument("sessions", nargs="+", help="session names under raw/device/<board>/")
+    bands.add_argument("--board", default="board_b")
+    speech = sub.add_parser("levels", help="speech log-mel of board sessions beside finished builds (E4-T8)")
+    speech.add_argument("--sessions", nargs="*", default=[], help="session names under raw/device/<board>/")
+    speech.add_argument("--built", nargs="*", default=[], help="finished builds under processed/")
+    speech.add_argument("--board", default="board_b")
     args = parser.parse_args(argv)
     paths = data_paths()
     if args.command == "build":
         cfg = load_yaml(args.config)
         out = paths["processed"] / args.out
         print(build(cfg, args.split, paths["raw"], paths["interim"], out, args.workers, args.repeats))
+        return 0
+    if args.command == "levels":
+        cfg = load_yaml(CONFIGS / "scenes" / "device.yaml")
+        board = paths["raw"] / "device" / args.board
+        sources = [(f"`{name}`", session_speech(board / name, cfg)) for name in args.sessions]
+        sources += [(f"`{name}`", built_speech(paths["processed"] / name)) for name in args.built]
+        print(levels_table(sources, cfg))
+        return 0
+    if args.command == "floor":
+        print(
+            floor_table(
+                paths["raw"] / "device" / args.board, args.sessions, load_yaml(CONFIGS / "scenes" / "device.yaml")
+            )
+        )
         return 0
     signal_, items = playback(paths["raw"] / SPEECH, args.seconds)
     out = paths["interim"] / OUT

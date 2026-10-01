@@ -1,6 +1,6 @@
 """srpipe.scenes.device: levels in dB SPL that distance and sensitivity turn into dBFS, ch0 hearing ch1 through
-calib/bal, the datasheet self noise, drv_audio's shift, the same shards for the same seed, pitch and wider pads that
-leave every other file alone; the playback file."""
+calib/bal, the datasheet self noise or the board's captured floor, a talker's spectral tilt, drv_audio's shift, the
+same shards for the same seed, pitch and wider pads that leave every other file alone; the playback file."""
 
 from __future__ import annotations
 
@@ -121,7 +121,17 @@ def raw_root(tmp_path: Path) -> Path:
             burst = rng.standard_normal(FS) * np.hanning(FS) * 0.1
             write_wav(raw / "speech" / "corpus" / spk / f"{spk}{n}.wav", burst)
     write_wav(raw / "noise" / "hum" / "hum.wav", 0.05 * rng.standard_normal(3 * FS))
+    floor_session(raw, "floor_a", "probe", 13, rng.integers(-40, 40, (2, FS // 2)))
     return raw
+
+
+def floor_session(raw: Path, name: str, kind: str, pcm_shift: int, samples: np.ndarray) -> Path:
+    """A capture session of int16 samples (2, n) as srhost.session writes it, under raw/device/board_b."""
+    folder = raw / "device" / "board_b" / name
+    for m in range(array.N_MICS):
+        write_wav(folder / f"ch{m}.wav", samples[m] / INT16_SCALE)
+    (folder / "session.json").write_text(json.dumps({"kind": kind, "pcm_shift": pcm_shift}), encoding="utf-8")
+    return folder
 
 
 def tiny(**changes: object) -> dict:
@@ -138,6 +148,7 @@ def tiny(**changes: object) -> dict:
         "session": {"items": 2, "lead_s": 0.5, "gap_s": [0.2, 0.3], "pad_s": 0.1},
         "noise": {**cfg["noise"], "probability": 0.5, "pools": [{"dir": "noise/hum", "glob": "*.wav", "weight": 1}]},
         "sessions_per_shard": 2,
+        "microphone": {**cfg["microphone"], "floor": {"board": "board_b", "sessions": ["floor_a"]}},
     }
     return {**cfg, **small, **changes}
 
@@ -347,3 +358,37 @@ def test_a_build_without_clean_samples_keeps_every_other_file(raw_root: Path, tm
     assert lean.pop("pcm") is False and not list((tmp_path / "lean").glob("*.pcm.npy"))
     assert {k: v for k, v in full["sha256"].items() if not k.endswith(".pcm.npy")} == lean.pop("sha256")
     assert {k: v for k, v in full.items() if k != "sha256"} == lean
+
+
+def test_the_captured_floor_comes_back_sample_for_sample_wrapping_round(tmp_path: Path) -> None:
+    samples = np.random.default_rng(8).integers(-300, 300, (2, 1000))
+    floor_session(tmp_path, "f", "probe", 13, samples)
+    floor = device.load_floor({"board": "board_b", "sessions": ["f"]}, tmp_path, 13)
+    mics = dataclasses.replace(board_b(), pcm_shift=13)
+    pcm = device.digitise(np.zeros((2, 2500)), mics, np.random.default_rng(0), floor)
+    wrapped = np.concatenate([samples] * 4, axis=1)
+    assert sum(np.array_equal(wrapped[:, k : k + 2500], pcm.T) for k in range(1000)) == 1
+
+
+def test_a_floor_is_a_probe_at_the_products_shift(tmp_path: Path) -> None:
+    samples = np.zeros((2, 100), dtype=np.int64)
+    floor_session(tmp_path, "noise", "noise", 13, samples)
+    floor_session(tmp_path, "shift16", "probe", 16, samples)
+    for name in ("noise", "shift16"):
+        with pytest.raises(ValueError, match="a floor a probe at 13"):
+            device.load_floor({"board": "board_b", "sessions": [name]}, tmp_path, 13)
+
+
+def test_a_tilt_is_flat_below_its_corner_and_slopes_by_the_octave_above() -> None:
+    t = np.arange(4 * FS) / FS
+    for hz, octaves in ((500.0, 0.0), (2000.0, 1.0), (4000.0, 2.0)):
+        tone = np.sin(2 * np.pi * hz * t)
+        gain_db = 20 * np.log10(np.std(device.tilted(tone, -6.0, 1000.0)) / np.std(tone))
+        assert abs(gain_db - (-6.0 * octaves)) < 0.01
+
+
+def test_a_band_level_is_the_power_of_what_falls_in_the_band() -> None:
+    t = np.arange(4 * FS) / FS
+    levels = device.band_levels(0.1 * np.sin(2 * np.pi * 1500.0 * t))
+    assert abs(levels[2] - 10 * np.log10(0.1**2 / 2)) < 0.1
+    assert max(levels[:2] + levels[3:]) < levels[2] - 60
