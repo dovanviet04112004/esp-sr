@@ -817,7 +817,8 @@ def pause_bounds(x: np.ndarray, span: tuple[float, float], spec: dict) -> tuple[
     after = quiet_run(quiet, last + guard, 1, reach)
     if (min(before, after) if spec["sides"] == "both" else after) < need:
         return None
-    start = first - guard - (before if before == reach else before // 2)
+    # soundfile reads a negative start from the end of the file: a phrase opening its sentence starts at 0.
+    start = max(0, first - guard - (before if before == reach else before // 2))
     stop = last + guard + (after if after == reach else after // 2)
     return round(start * frame_s, 3), round(stop * frame_s, 3)
 

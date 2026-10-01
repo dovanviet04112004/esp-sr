@@ -200,6 +200,8 @@ def test_a_phrase_is_cut_where_a_pause_follows_it(tmp_path: Path, monkeypatch) -
     short = spoken(2.0, [(0.1, 0.49), (0.6, 1.0), (1.3, 1.6)])
     start, _ = extract.pause_bounds(short, (0.6, 1.0), spec)
     assert 0.49 < start < 0.6 - spec["guard_s"]
+    opening = extract.pause_bounds(spoken(2.0, [(0.0, 0.4), (0.8, 1.2)]), (0.0, 0.4), spec)
+    assert opening is not None and opening[0] == 0.0
     both = spec | {"sides": "both"}
     assert extract.pause_bounds(spoken(2.0, [(0.1, 0.6), (0.6, 1.0), (1.3, 1.6)]), (0.6, 1.0), both) is None
     assert extract.pause_bounds(soft, (0.6, 1.0), both) is not None
