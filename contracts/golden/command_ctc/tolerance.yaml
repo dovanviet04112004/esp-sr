@@ -1,0 +1,11 @@
+# C command_ctc decision against srpipe.tasks.command.ctc.postproc.ctc_score (KEHOACH 3.12, 3.14, E11-T13). Both take
+# exp and log in double rounded to float and add in the same order, so the command scores match to the bit; choosing a
+# command is discrete and matches exactly. A command no window can reach scores -inf on both sides. case_neg_* forbids
+# moving from one unit straight to the next, which the C allows, so its scores and decisions differ.
+tensors:
+  scores:
+    max_abs: 1.0e-6
+    min_snr_db: 100.0
+  decision:
+    max_abs: 0.0
+    min_snr_db: 0.0
