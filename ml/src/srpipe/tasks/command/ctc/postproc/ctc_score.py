@@ -1,7 +1,8 @@
 """The ctc decision that ai_engine/src/command_ctc/ mirrors (KEHOACH 3.12): each variant of each command scored by the
-CTC forward pass in float32 over the window's log-probabilities, per frame; a command takes its best variant; the best
-command is rejected when the free unit loop beats it by more than reject or the second best trails it by less than
-margin, both in thousandths of a nat a frame. emit writes contracts/golden/command_ctc/, which the C matches exactly.
+CTC forward pass over the window's probabilities, per frame, each state a float32 mantissa with an exponent of its own
+so no alignment underflows; a command takes its best variant; the best command is rejected when the free unit loop
+beats it by more than reject or the second best trails it by less than margin, both in thousandths of a nat a frame.
+emit writes contracts/golden/command_ctc/, which the C matches bit for bit.
 Run: python -m srpipe.tasks.command.ctc.postproc.ctc_score [--out <golden root>]
 """
 
@@ -36,6 +37,17 @@ SPREAD = (0.5, 6.0)
 DECIDE_HEAD = struct.Struct("<4sHHBBBBHH")
 DECIDE_MAGIC = b"SRCD"
 DECISION_RECORD = struct.Struct("<hHHH")
+ZERO_EXP = -(1 << 30)  # the exponent of a zero, below any a live value reaches
+DROP_BELOW = 100  # orders under its sum's top: float32 rounds it away
+EXP_MIN_NATS, EXP_MAX_NATS = np.float32(-10000.0), np.float32(10000.0)
+LN2 = 0.6931471805599453
+LOG2E = np.float32(float.fromhex("0x1.715476p+0"))
+LN2_HI, LN2_LO = np.float32(float.fromhex("0x1.63p-1")), np.float32(float.fromhex("-0x1.bd0106p-13"))
+# Cephes expf: e^r = 1 + r + r^2 p(r) on |r| <= ln(2)/2, p highest degree first.
+EXP_POLY = tuple(
+    np.float32(float.fromhex(h))
+    for h in ("0x1.a0d2cep-13", "0x1.6e879cp-10", "0x1.11121p-7", "0x1.555382p-5", "0x1.555554p-3", "0x1p-1")
+)
 
 
 def variants(text: str) -> list[np.ndarray]:
@@ -52,38 +64,77 @@ def exp32(x: np.float32) -> np.float32:
     return np.float32(math.exp(float(x)))
 
 
-def logsumexp(terms: list[np.float32]) -> np.float32:
-    """log of the sum of exp of terms: exp and log in double rounded to float, the sum in float in order, as the C."""
-    top = max(terms)
-    if top == -np.inf:
-        return np.float32(-np.inf)
-    total = np.float32(0.0)
-    for t in terms:
-        total = np.float32(total + exp32(np.float32(t - top)))
-    return np.float32(top + np.float32(math.log(float(total))))
+Wide = tuple[np.ndarray, np.ndarray]
 
 
-def sequence_score(log_probs: np.ndarray, units: np.ndarray, skip: bool = True) -> np.float32:
-    """log P(units | window) / frames by the CTC forward pass over log_probs (classes, frames), a unit's class its id
-    plus one past the blank; -inf when the window is too short. skip off forbids moving from a unit straight to the
-    next, the negative control of the golden set."""
-    frames = log_probs.shape[1]
-    labels = [BLANK]
-    for u in units:
-        labels += [int(u) + 1, BLANK]
-    alpha = np.full(len(labels), -np.inf, dtype=np.float32)
-    alpha[0] = log_probs[BLANK, 0]
-    if len(labels) > 1:
-        alpha[1] = log_probs[labels[1], 0]
+def normalized(x: np.ndarray, e: np.ndarray) -> Wide:
+    """x 2^e as float32 mantissas in [1, 2) and their exponents, a zero as (0, ZERO_EXP)."""
+    mantissa, k = np.frexp(x.astype(np.float32))
+    live = mantissa != 0
+    return (
+        np.where(live, mantissa * np.float32(2.0), np.float32(0.0)).astype(np.float32),
+        np.where(live, e.astype(np.int64) + k - 1, ZERO_EXP),
+    )
+
+
+def exp_wide(x: np.ndarray) -> Wide:
+    """e^x of float32 x as mantissas and exponents, by the float32 steps the C takes in the same order; 0 below
+    EXP_MIN_NATS and for NaN, x held at EXP_MAX_NATS above it."""
+    x = np.asarray(x, dtype=np.float32)
+    live = x >= EXP_MIN_NATS
+    x = np.minimum(np.where(live, x, np.float32(0.0)), EXP_MAX_NATS)
+    n = np.floor(x * LOG2E + np.float32(0.5))
+    r = (x - n * LN2_HI) - n * LN2_LO
+    poly = np.full_like(r, EXP_POLY[0])
+    for c in EXP_POLY[1:]:
+        poly = poly * r + c
+    poly = (poly * (r * r) + r) + np.float32(1.0)
+    mantissa, e = normalized(poly, n.astype(np.int64))
+    return np.where(live, mantissa, np.float32(0.0)).astype(np.float32), np.where(live, e, ZERO_EXP)
+
+
+def wide_sum(terms: list[Wide]) -> Wide:
+    """The float32 sum of terms in order, each scaled to the largest exponent among them exactly, a term DROP_BELOW
+    orders under it dropped; the sum and that exponent."""
+    top = np.max([e for _, e in terms], axis=0)
+    total = np.zeros_like(terms[0][0])
+    for m, e in terms:
+        d = e - top
+        scale = np.ldexp(np.float32(1.0), np.maximum(d, -DROP_BELOW).astype(np.int32))
+        total = total + m * np.where(d >= -DROP_BELOW, scale, np.float32(0.0)).astype(np.float32)
+    return total.astype(np.float32), top
+
+
+def shifted(alpha: Wide, by: int, keep: np.ndarray | None = None) -> Wide:
+    """alpha moved by states up, zeros in from the start; states outside keep zeroed too."""
+    n = len(alpha[0])
+    m = np.concatenate([np.zeros(by, np.float32), alpha[0]])[:n]
+    e = np.concatenate([np.full(by, ZERO_EXP, np.int64), alpha[1]])[:n]
+    if keep is not None:
+        m, e = np.where(keep, m, np.float32(0.0)).astype(np.float32), np.where(keep, e, ZERO_EXP)
+    return m, e
+
+
+def sequence_score(table: Wide, units: np.ndarray, skip: bool = True) -> np.float32:
+    """log P(units | window) / frames by the CTC forward pass over the window's probabilities as exp_wide gives them,
+    (classes, frames), a unit's class its id plus one past the blank; -inf when the window is too short. skip off
+    forbids moving from a unit straight to the next, the negative control of the golden set."""
+    mantissas, exponents = table
+    frames = mantissas.shape[1]
+    labels = np.array([BLANK] + [c for u in units for c in (int(u) + 1, BLANK)])
+    jumps = np.zeros(len(labels), dtype=bool)
+    jumps[2:] = skip & (labels[2:] != BLANK) & (labels[2:] != labels[:-2])
+    m, e = np.zeros(len(labels), np.float32), np.full(len(labels), ZERO_EXP, np.int64)
+    first = labels[:2]
+    m[: len(first)], e[: len(first)] = mantissas[first, 0], exponents[first, 0]
     for t in range(1, frames):
-        before = alpha.copy()
-        for s, label in enumerate(labels):
-            terms = [before[s]] + ([before[s - 1]] if s >= 1 else [])
-            if skip and s >= 2 and label != BLANK and label != labels[s - 2]:
-                terms.append(before[s - 2])
-            alpha[s] = np.float32(logsumexp(terms) + log_probs[label, t])
-    tail = [alpha[-1]] + ([alpha[-2]] if len(labels) > 1 else [])
-    return np.float32(logsumexp(tail) / np.float32(frames))
+        total, top = wide_sum([(m, e), shifted((m, e), 1), shifted((m, e), 2, jumps)])
+        m, e = normalized(total * mantissas[labels, t], top + exponents[labels, t])
+    tail = [(m[-1:], e[-1:])] + ([(m[-2:-1], e[-2:-1])] if len(labels) > 1 else [])
+    total, top = wide_sum(tail)
+    if total[0] == 0:
+        return np.float32(-np.inf)
+    return np.float32((math.log(float(total[0])) + float(top[0]) * LN2) / float(frames))
 
 
 def free_score(log_probs: np.ndarray) -> np.float32:
@@ -99,15 +150,15 @@ def milli(x: np.float32) -> int:
     return int(min(CAP, max(0, np.rint(np.float32(x * MILLI)))))
 
 
-def command_scores(log_probs: np.ndarray, lexicon: list[list[np.ndarray]], skip: bool = True) -> np.ndarray:
+def command_scores(table: Wide, lexicon: list[list[np.ndarray]], skip: bool = True) -> np.ndarray:
     """Each command's best variant score."""
-    return np.array([max(sequence_score(log_probs, v, skip) for v in forms) for forms in lexicon], dtype=np.float32)
+    return np.array([max(sequence_score(table, v, skip) for v in forms) for forms in lexicon], dtype=np.float32)
 
 
 def decide(log_probs: np.ndarray, lexicon: list[list[np.ndarray]], reject: int, margin: int, skip: bool = True):
-    """The decision of one window, int32 in the order of DECISION; the score field is the winner's per-frame
-    probability in permille. The first of equal scores wins."""
-    scores = command_scores(log_probs, lexicon, skip)
+    """The decision of one window of (classes, frames) log-probabilities, int32 in the order of DECISION; the score
+    field is the winner's per-frame probability in permille. The first of equal scores wins."""
+    scores = command_scores(exp_wide(log_probs), lexicon, skip)
     best = int(np.argmax(scores))
     second = max((s for k, s in enumerate(scores) if k != best), default=np.float32(-np.inf))
     reached = bool(scores[best] > -np.inf)

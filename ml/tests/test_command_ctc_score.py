@@ -1,5 +1,6 @@
-"""The ctc decision: the forward pass equals the sum over every alignment, the best command wins, and a window the free
-loop explains better or two commands too close are rejected."""
+"""The ctc decision: the forward pass equals the sum over every alignment, also when alignments drift apart past the
+range of float32, the best command wins, and a window the free loop explains better or two commands too close are
+rejected."""
 
 from __future__ import annotations
 
@@ -29,9 +30,47 @@ def test_the_forward_pass_sums_every_alignment_of_the_units() -> None:
             for path in itertools.product(range(4), repeat=5)
             if collapse(path) == [u + 1 for u in units]
         )
-        score = ctc_score.sequence_score(log_probs, np.array(units, dtype=np.uint8))
-        assert np.isclose(score, np.log(total) / 5, atol=1e-5)
-    assert ctc_score.sequence_score(log_probs[:, :2], np.array([0, 0, 0], dtype=np.uint8)) == -np.inf
+        score = ctc_score.sequence_score(ctc_score.exp_wide(log_probs), np.array(units, dtype=np.uint8))
+        assert np.isclose(score, np.log(total) / 5, atol=1e-6)
+    too_short = ctc_score.exp_wide(log_probs[:, :2])
+    assert ctc_score.sequence_score(too_short, np.array([0, 0, 0], dtype=np.uint8)) == -np.inf
+
+
+def test_exp_holds_a_few_ulp_and_its_range_ends() -> None:
+    x = np.linspace(-9000.0, 30.0, 200001, dtype=np.float32)
+    m, e = ctc_score.exp_wide(x)
+    assert ((m >= 1.0) & (m < 2.0)).all()
+    got = np.log(m.astype(np.float64)) + e * np.log(2.0)
+    assert np.abs(got - x.astype(np.float64)).max() < 4 * 2.0**-24
+    zeros = ctc_score.exp_wide(np.array([-np.inf, np.nan, -10001.0], dtype=np.float32))
+    assert (zeros[0] == 0).all() and (zeros[1] == ctc_score.ZERO_EXP).all()
+
+
+def reference(log_probs: np.ndarray, units: list[int]) -> float:
+    """The forward pass in float64 log space."""
+    labels = [0] + [c for u in units for c in (u + 1, 0)]
+    alpha = np.full(len(labels), -np.inf)
+    alpha[:2] = log_probs[labels[:2], 0]
+    for t in range(1, log_probs.shape[1]):
+        before = alpha.copy()
+        for s, label in enumerate(labels):
+            jump = s >= 2 and label != 0 and label != labels[s - 2]
+            alpha[s] = np.logaddexp.reduce(before[max(0, s - (2 if jump else 1)) : s + 1]) + log_probs[label, t]
+    return float(np.logaddexp(alpha[-1], alpha[-2]) / log_probs.shape[1])
+
+
+def test_an_alignment_hundreds_of_nats_behind_still_counts_when_it_catches_up() -> None:
+    frames = ["a"] * 5 + ["_"] * 5 + ["a"] * 5 + ["_"] * 3
+    logits = np.zeros((3, len(frames)), dtype=np.float32)
+    for t, said_now in enumerate(frames):
+        logits[1 if said_now == "a" else 0, t] = 60.0
+    log_probs = log_softmax(logits)
+    score = ctc_score.sequence_score(ctc_score.exp_wide(log_probs), np.array([0], dtype=np.uint8))
+    assert np.isclose(score, reference(log_probs, [0]), rtol=1e-6, atol=0)
+
+
+def log_softmax(logits: np.ndarray) -> np.ndarray:
+    return (logits - np.log(np.exp(logits - logits.max(axis=0)).sum(axis=0)) - logits.max(axis=0)).astype(np.float32)
 
 
 def window(units: list[int], classes: int, frames_each: int = 3) -> np.ndarray:
