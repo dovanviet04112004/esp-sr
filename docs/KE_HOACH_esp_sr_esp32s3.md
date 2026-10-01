@@ -810,7 +810,8 @@ Bản thu qua board để chấm (§1.3).
 **Âm bản khó** — cơ chế để siết báo nhầm, **tắt ở bản demo**. Khi bật (mục `synth.hard` và `split.hard` của cấu
 hình), split thêm `train_hard` và `val_hard` từ ba nguồn: TTS đọc các họ cụm gần âm, các cụm gần âm của `synth_neg`, và
 câu thật của kho khớp mẫu họ; cụm của phiên gần âm thu qua board bị loại khỏi cả ba để đo tổng quát hoá; mỗi lô dành
-một tỉ lệ cố định cho chúng. Với "Chào Mina" nó chặn được các họ na ná, nhưng khắt khe tới mức giọng thật tụt theo khi
+một tỉ lệ cố định cho chúng. Cụm TTS và mẩu không dài hơn một từ (`train.word_s`) cắt cho cuối cụm rơi vào vùng nhãn như
+mẩu dương; câu của kho không có mốc từng từ nên cắt ở chỗ ngẫu nhiên trong tiếng nói. Với "Chào Mina" nó chặn được các họ na ná, nhưng khắt khe tới mức giọng thật tụt theo khi
 dương chỉ có TTS (`docs/measurements/wake.md` §3–§5).
 
 **Huấn luyện** (`tasks/wake/train.py`, `eval.py`, mục `train` của `configs/models/wake.yaml`). Đầu vào là log-mel
@@ -818,7 +819,9 @@ của `processed/wake/<split>/` do đường mô phỏng board dựng, chuẩn h
 `train`. Nhãn theo bước: một mẩu dương gắn 1 ở các bước quanh lúc từ đánh thức vừa nói xong (cuối `speech_frames`,
 độ rộng trước và sau ở cấu hình), vì chỉ khi ấy mạng đã nghe đủ cả từ; mọi bước khác và mọi mẩu âm gắn 0. Mạng học
 trên cửa sổ dài hơn trường nhìn: cắt sao cho chứa cuối một mẩu dương, hoặc ở chỗ ngẫu nhiên trong một mẩu âm, với
-tỉ lệ dương cố định mỗi lô. Trong phần dương, một tỉ lệ cố định (mục `train`) lấy từ mẩu người thật. Luật cắt của
+tỉ lệ dương cố định mỗi lô. Một tỉ lệ cố định của cửa sổ âm (`train.onset_share`) dừng trong `train.onset_s` đầu tiếng
+nói của một câu âm: mẩu dương nào cũng là một từ ngay sau khoảng lặng, nên thiếu những cửa sổ ấy mạng học lối tắt "đầu
+câu cộng chừng 1 s" và báo nhầm ở đó (`measurements/speech_commands.md` §4). Trong phần dương, một tỉ lệ cố định (mục `train`) lấy từ mẩu người thật. Luật cắt của
 §1.2 chỉ để lại 24 mẩu "trợ lý" thật giữa 2 219 mẩu TTS, nên tỉ lệ ấy bằng đúng phần của chúng, chừng 1%: đẩy cao hơn
 thì mạng học thuộc 24 mẩu (chủ repo, 01/10). Tăng lại khi phiên thu qua board (E11-T6) cho thêm giọng thật. Mất mát là
 BCE theo bước. Chấm như trên máy: điểm làm trơn trung bình trượt 5 khung rồi so
