@@ -323,8 +323,19 @@ def item_pitch(tracker: PitchTracker, clean: np.ndarray) -> np.ndarray:
     return np.stack([tracker.step(to_float(hop)) for hop in clean.reshape(-1, HOP)])
 
 
+def shard_files(out: Path, shard: int, with_pitch: bool, keep_pcm: bool) -> list[Path]:
+    """The files a finished shard holds, in the order _shard writes them."""
+    stem = out / f"shard_{shard:05d}"
+    kinds = (".features.npy", ".figures.npy") + ((".pcm.npy",) if keep_pcm else ()) + (".items.jsonl",)
+    return [stem.with_suffix(k) for k in kinds + ((".pitch.npy",) if with_pitch else ())]
+
+
+def shard_done(out: Path, shard: int) -> Path:
+    return out / f"shard_{shard:05d}.done"
+
+
 def _shard(job: tuple) -> list[Path]:
-    cfg, roots, bank, out, shard, sessions, pools, pads_s, with_pitch = job
+    cfg, roots, bank, out, shard, sessions, pools, pads_s, with_pitch, keep_pcm = job
     mics = load_microphones(cfg["microphone"])
     chain_cfg = ChainConfig(balance_gains=mics.gains)
     mel = Mel(MelConfig(**cfg["features"]))
@@ -345,15 +356,17 @@ def _shard(job: tuple) -> list[Path]:
             items.append({"item": row.item, "spk": row.spk, "room": row.room, "origin": row.origin, **where, **draws})
             offset += stop - first
     stem = out / f"shard_{shard:05d}"
-    written = [stem.with_suffix(s) for s in (".features.npy", ".figures.npy", ".pcm.npy", ".items.jsonl")]
-    np.save(written[0], np.concatenate(features))
-    np.save(written[1], np.concatenate(figures))
-    np.save(written[2], np.concatenate(pcm))
-    written[3].write_text("".join(json.dumps(i, ensure_ascii=False) + "\n" for i in items), encoding="utf-8")
+    np.save(stem.with_suffix(".features.npy"), np.concatenate(features))
+    np.save(stem.with_suffix(".figures.npy"), np.concatenate(figures))
+    if keep_pcm:
+        np.save(stem.with_suffix(".pcm.npy"), np.concatenate(pcm))
+    listing = "".join(json.dumps(i, ensure_ascii=False) + "\n" for i in items)
+    stem.with_suffix(".items.jsonl").write_text(listing, encoding="utf-8")
     if tracker is not None:
-        written.append(stem.with_suffix(".pitch.npy"))
-        np.save(written[4], np.concatenate(pitches))
-    return written
+        np.save(stem.with_suffix(".pitch.npy"), np.concatenate(pitches))
+    # Written last: a shard stopped part way has no marker and is built again whole.
+    shard_done(out, shard).write_text("", encoding="utf-8")
+    return shard_files(out, shard, tracker is not None, keep_pcm)
 
 
 def build(
@@ -366,11 +379,12 @@ def build(
     repeats: int = 1,
     pads_s: tuple[float, float] | None = None,
     pitch: bool = False,
+    keep_pcm: bool = True,
 ) -> Path:
     """Every item of split_file through the simulation into out, repeats times over, each pass in sessions of their
     own rooms, levels and noise, each item kept with pads_s before and after it (session.pad_s both sides unless
-    given) and, with pitch, its pitch features from a reset at its first hop; then manifest.yaml: the config, the
-    split's sha256, the repeats, the pads and pitch when asked, the room bank's sha256 and each file's."""
+    given), with pitch its pitch features from a reset at its first hop, its clean samples unless keep_pcm is off;
+    then manifest.yaml. A build stopped part way goes on from its finished shards when run again the same way."""
     rows = splits.read_split(split_file)
     if foreign := sorted({row.origin for row in rows} - CLEAN_ORIGINS):
         raise ValueError(f"{split_file}: the simulation takes clean speech, not origin {', '.join(foreign)}")
@@ -385,20 +399,32 @@ def build(
     pools = noise_files(cfg, raw_root, set(rejected))
     out.mkdir(parents=True, exist_ok=True)
     pads = pads_s or (cfg["session"]["pad_s"], cfg["session"]["pad_s"])
-    jobs = [
-        (cfg, {"raw": raw_root, "interim": interim}, bank, out, j, sessions[i : i + per_shard], pools, pads, pitch)
-        for j, i in enumerate(range(0, len(sessions), per_shard))
-    ]
-    with multiprocessing.get_context("spawn").Pool(workers) as pool:
-        written = [p for paths in pool.map(_shard, jobs) for p in paths]
-    frames = sum(len(np.load(p, mmap_mode="r")) for p in written if p.name.endswith(".features.npy"))
-    body = {
+    head = {
         "config": cfg,
         "split": {"file": split_file.name, "sha256": sha256_of(split_file)},
         "repeats": repeats,
         **({"pads_s": list(pads)} if pads_s else {}),
         **({"pitch": True} if pitch else {}),
+        **({} if keep_pcm else {"pcm": False}),
         "rooms_sha256": sha256_of(bank / "rooms.yaml"),
+    }
+    begun = out / "build.yaml"
+    if begun.exists() and yaml.safe_load(begun.read_text(encoding="utf-8")) != head:
+        raise ValueError(f"{out} holds part of a build of another config or split: delete it or build elsewhere")
+    begun.write_text(yaml.safe_dump(head, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    roots = {"raw": raw_root, "interim": interim}
+    shards = range(math.ceil(len(sessions) / per_shard))
+    jobs = [
+        (cfg, roots, bank, out, j, sessions[j * per_shard : (j + 1) * per_shard], pools, pads, pitch, keep_pcm)
+        for j in shards
+        if not shard_done(out, j).exists()
+    ]
+    with multiprocessing.get_context("spawn").Pool(workers) as pool:
+        for k, _ in enumerate(pool.imap_unordered(_shard, jobs), start=len(shards) - len(jobs) + 1):
+            print(f"{out.name}: shard {k}/{len(shards)}", flush=True)
+    written = [p for j in shards for p in shard_files(out, j, pitch, keep_pcm)]
+    frames = sum(len(np.load(p, mmap_mode="r")) for p in written if p.name.endswith(".features.npy"))
+    body = head | {
         "items": len(rows),
         "hours": round(frames * HOP / FS / 3600, 3),
         "sha256": {p.name: sha256_of(p) for p in sorted(written)},

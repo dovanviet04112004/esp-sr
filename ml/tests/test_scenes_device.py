@@ -318,3 +318,32 @@ def test_the_diffuse_pair_has_the_coherence_of_the_spacing() -> None:
     assert np.max(np.abs(measured - expected)) < 0.05
     independent = np.real(signal.csd(pair[0], rng.standard_normal(40 * FS), FS, nperseg=grid.FFT_SIZE)[1])
     assert np.max(np.abs(independent / np.sqrt(p0 * p0))) < 0.1
+
+
+def test_a_stopped_build_goes_on_from_its_finished_shards_and_refuses_another_config(
+    raw_root: Path, tmp_path: Path
+) -> None:
+    split = split_file(tmp_path / "train.txt", raw_root)
+    interim, out = screened(tmp_path / "interim"), tmp_path / "out"
+    whole = yaml.safe_load(device.build(tiny(), split, raw_root, interim, tmp_path / "whole").read_text())
+    device.build(tiny(), split, raw_root, interim, out)
+    (out / "manifest.yaml").unlink()
+    device.shard_done(out, 1).unlink()
+    for path in device.shard_files(out, 1, False, True):
+        path.unlink()
+    kept = (out / "shard_00000.features.npy").stat().st_mtime_ns
+    again = yaml.safe_load(device.build(tiny(), split, raw_root, interim, out).read_text())
+    assert again == whole and (out / "shard_00000.features.npy").stat().st_mtime_ns == kept
+    (out / "manifest.yaml").unlink()
+    with pytest.raises(ValueError, match="another config"):
+        device.build(tiny(), split, raw_root, interim, out, repeats=2)
+
+
+def test_a_build_without_clean_samples_keeps_every_other_file(raw_root: Path, tmp_path: Path) -> None:
+    split = split_file(tmp_path / "train.txt", raw_root)
+    interim = screened(tmp_path / "interim")
+    full = yaml.safe_load(device.build(tiny(), split, raw_root, interim, tmp_path / "full").read_text())
+    lean = yaml.safe_load(device.build(tiny(), split, raw_root, interim, tmp_path / "lean", keep_pcm=False).read_text())
+    assert lean.pop("pcm") is False and not list((tmp_path / "lean").glob("*.pcm.npy"))
+    assert {k: v for k, v in full["sha256"].items() if not k.endswith(".pcm.npy")} == lean.pop("sha256")
+    assert {k: v for k, v in full.items() if k != "sha256"} == lean
