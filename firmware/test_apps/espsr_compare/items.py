@@ -143,7 +143,7 @@ def job_bytes(job: int, item: str, samples: int, channels: int, gains: list[floa
             v.ns_floor_db,
             v.level,
             v.channel,
-        )  # fmt: skip
+        )
         for v in variants
     ]
     records += [bytes(VARIANT.size)] * (VARIANTS_MAX - len(variants))
