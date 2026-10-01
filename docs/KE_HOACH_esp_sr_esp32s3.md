@@ -153,8 +153,13 @@ của một file split thành đúng thứ bộ nhận dạng thấy trên máy:
    (hoặc chập RIR thật của OpenSLR 28), lên dàn hai micro của `array.yaml`: nền phòng một mình vài giây, rồi từng câu
    cách một quãng nghỉ; người nói ở mức dB SPL tại 1 m rút cho phiên, một nguồn nhiễu điểm ở SNR rút cho phiên. Chuỗi
    chạy liền cả phiên, nên `ns`, `vad`, `agc` đã nghe phòng trước khi câu tới, như trên máy.
-2. Áp độ nhạy micro theo datasheet, chênh lệch giữa hai micro theo hiệu chuẩn của board (`calib/bal`, §3.4), nền ồn
-   micro và lượng tử `pcm_shift` (dịch phải rồi bão hoà, như `drv_audio`).
+2. Áp độ nhạy micro theo datasheet và chênh lệch giữa hai micro theo hiệu chuẩn của board (`calib/bal`, §3.4). Tiếng
+   người nói qua thêm một **độ nghiêng phổ** rút cho phiên, dB mỗi octave trên 1 kHz, khoảng ở cấu hình, phủ đáp ứng
+   của vỏ hộp và giọng mà phòng mô phỏng không có. Rồi cộng **nền ồn thật của board**: một đoạn rút ngẫu nhiên từ các
+   phiên nền phòng yên thu bằng `capture` ở đúng `pcm_shift` sản phẩm, nhãn `probe` nên không vào tập chấm, cộng thẳng
+   vào mẫu hai kênh nên giữ đúng phổ, mức và tương quan giữa hai micro. Nền ấy cao hơn nhiễu tự thân theo datasheet ở mọi
+   băng, 13–27 dB dưới 2 kHz và 2–5 dB trên, có gò ở 1–2 kHz, và ngang tiếng ở 1 m trong dải 2–8 kHz của micro nghe nhỏ
+   (`measurements/mic_array.md` §4), nên thay hẳn nhiễu tự thân. Cuối cùng lượng tử `pcm_shift` (dịch phải rồi bão hoà, như `drv_audio`).
 3. Chạy `srpipe.dsp.afe.chain` và log-mel của `srpipe.dsp.spec`. Đây là bản soi gương khớp firmware từng bit
    (§3.14), với đúng danh sách module sản phẩm. Ra `processed/<nhánh>/<tập>/`: đặc trưng, số của chuỗi (`vad`, mức,
    gain) và PCM sạch của từng mẩu, cộng manifest sha256.
@@ -1217,7 +1222,7 @@ esp-sr/
     ├── DU_LIEU.md                       # dữ liệu đã tải, giấy phép, số giờ, sha256
     ├── adr/                             # quyết định có bảng đối chứng
     └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md, tts_engines.md, data_screen.md, wake.md,
-                                  speech_commands.md}
+                                  speech_commands.md, command.md}
                       ├ bench/           # CSV thô của bench_*, commit cùng bảng nó sinh ra
                       ├ calib/           # hệ số hiệu chuẩn từng board (balance), bản đã ghi xuống NVS
                       └ {afe,kws,tts}/   # số 🔬 theo khối
