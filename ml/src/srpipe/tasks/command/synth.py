@@ -275,7 +275,9 @@ def references(cfg: dict, paths: dict, interim: Path) -> list[clips.Reference]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("set", choices=[*SETS, "select"])
-    which = parser.parse_args(argv).set
+    parser.add_argument("--make-only", action="store_true", help="make the clips, no checker and no manifest yet")
+    args = parser.parse_args(argv)
+    which = args.set
     cfg, tts, paths = load_yaml(CONFIG), load_yaml(TTS_CONFIG), data_paths()
     interim, cache = paths["interim"] / "command", paths["cache"]
     if which == "select":
@@ -303,6 +305,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         texts = negative_texts(cfg, commands, stream, vocab, codes, tables)
         requests = negative_requests(commands, texts, presets, refs, rng, out, cfg["synth"]["negatives"]["voices"])
+    if args.make_only:
+        for engine, reqs in requests.items():
+            print(f"{engine}: {clips.make_clips(engine, reqs, tts, out / 'work', cache)} clips made", flush=True)
+        return 0
     timings: dict[str, dict] = {}
     rows = clips.render(requests, tts, out / "work", cache, timings)
     wav_of = {(e, r["id"]): r["out"] for e, reqs in requests.items() for r in reqs}

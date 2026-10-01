@@ -211,33 +211,39 @@ def edges(wav: Path, frame_s: float, below_peak_db: float) -> dict:
     }
 
 
+def make_clips(engine: str, reqs: list[dict], tts: dict, work: Path, cache: Path) -> int:
+    """Synthesise engine's requests whose clip is missing or was made from another fingerprint, chunk_clips a run,
+    each run recorded as made when it ends so a stopped make resumes at the run it lost; the number made."""
+    wanted = {r["out"]: fingerprint(engine, r, tts) for r in reqs}
+    before = made(work)
+    stale = [r for r in reqs if not Path(r["out"]).exists() or before.get(r["out"]) != wanted[r["out"]]]
+    stale.sort(key=engines.voice_of)
+    size = tts["chunk_clips"][engine]
+    for k in range(0, len(stale), size):
+        engines.synthesise(engine, stale[k : k + size], tts, work, cache)
+        record_made(work, {r["out"]: wanted[r["out"]] for r in stale[k : k + size]})
+    return len(stale)
+
+
 def render(
     requests: dict[str, list[dict]], tts: dict, work: Path, cache: Path, timings: dict[str, dict] | None = None
 ) -> list[dict]:
-    """Synthesise every engine's requests {id, speaker, text, out, say?, rivals?, ...} whose clip is missing or was made
-    from another fingerprint, chunk_clips a run, each run recorded as made when it ends so a stopped render resumes at
-    the run it lost; hear every clip back, and return one manifest row per clip: heard, what the checker
-    heard; passed, whether it spells what the clip must say; margin, how much more log-probability the checker gives
-    what it heard than what the clip must say, near 0 when only the spelling differs; rivals, the same margin for each
-    text it must not say. timings, when given, gets per engine the clips made and heard and the seconds of each."""
+    """Make every engine's requests {id, speaker, text, out, say?, rivals?, ...} as make_clips does, hear every clip
+    back, and return one manifest row per clip: heard, what the checker heard; passed, whether it spells what the
+    clip must say; margin, how much more log-probability the checker gives what it heard than what the clip must say,
+    near 0 when only the spelling differs; rivals, the same margin for each text it must not say. timings, when given,
+    gets per engine the clips made and heard and the seconds of each."""
     rows = []
     for engine, reqs in requests.items():
-        wanted = {r["out"]: fingerprint(engine, r, tts) for r in reqs}
-        before = made(work)
-        stale = [r for r in reqs if not Path(r["out"]).exists() or before.get(r["out"]) != wanted[r["out"]]]
         started = time.monotonic()
-        stale.sort(key=engines.voice_of)
-        size = tts["chunk_clips"][engine]
-        for k in range(0, len(stale), size):
-            engines.synthesise(engine, stale[k : k + size], tts, work, cache)
-            record_made(work, {r["out"]: wanted[r["out"]] for r in stale[k : k + size]})
+        count = make_clips(engine, reqs, tts, work, cache)
         synthesised = time.monotonic()
         targets = {r["id"]: [said(r), *r.get("rivals", [])] for r in reqs}
         asked = [{"id": f"{engine}/{r['id']}", "wav": r["out"], "targets": targets[r["id"]]} for r in reqs]
         heard = engines.hear(asked, tts, work, cache)
         if timings is not None:
             timings[engine] = {
-                "made": len(stale),
+                "made": count,
                 "made_s": round(synthesised - started, 1),
                 "heard": len(reqs),
                 "heard_s": round(time.monotonic() - synthesised, 1),

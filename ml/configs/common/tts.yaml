@@ -6,7 +6,7 @@ chunk_clips:                       # clips a run of each engine and of the check
                                    #   part of every clip's and every answer's fingerprint
   vieneu: 1000                     # ~0.5 s a clip, the model loads in seconds (tts_engines.md)
   f5: 300                          # ~2.9 s a clip
-  asr: 3000                        # ~0.5 s a clip, but a run loads 3 GB from E: for about 3 min
+  asr: 500                         # ~0.5 s a clip, a run loads 3 GB from E: in ~3 min; 3000 lost 43 min to a crash
 asr:
   model: vinai/PhoWhisper-large@b9136a44b5f2ca664bd0b8f74baecf1715f6eeeb
   batch: 1                         # 2 is 6% faster but peaks at 3.4 GB of a 4 GB card Windows shares; spilling past
