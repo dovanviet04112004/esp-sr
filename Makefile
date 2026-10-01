@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -125,6 +125,9 @@ kws-features: ## Run each file of command_kws/v1 through the board simulation wi
 
 kws-train: ## Train the kws DS-CNN on processed/command_kws on the GPU into ml/artifacts/command_kws/runs (E11-T17)
 	cd ml && uv run --extra train python -m srpipe.tasks.command.kws.train
+
+ctc-features: ## Run each file of the command split through the board simulation with pitch into processed/command; stopped, it goes on where it was (E11-T12)
+	cd ml && uv run python -m srpipe.tasks.command.ctc.data simulate
 
 ns-data: screen ## Split, pools and held val/test sets of the ns branch into data/splits/ns, interim and processed (E9-T3)
 	cd ml && uv run python -m srpipe.tasks.ns.data clean && uv run python -m srpipe.tasks.ns.data split \

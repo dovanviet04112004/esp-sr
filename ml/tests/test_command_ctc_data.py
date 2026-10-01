@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from srpipe.core import corpus
+from srpipe.core import corpus, splits
 from srpipe.tasks.command.ctc import data
 
 COMMANDS = {"commands": [{"id": "bat_den", "text": "bật đèn"}, {"id": "chup_anh", "text": "chụp ảnh"}]}
@@ -36,3 +36,18 @@ def test_shares_need_speakers_and_unseen_commands_must_exist() -> None:
         data.build(spec(**{"speech/bud500/": {"val": 0.1}}), clips, {})
     with pytest.raises(ValueError, match="not in"):
         data.unseen_phrases(["chup_hinh"], COMMANDS)
+
+
+def test_an_hours_cap_draws_a_corpus_down_and_leaves_the_others_whole() -> None:
+    rows = {
+        "train_bud500.txt": [
+            splits.Row(f"speech/bud500/{k}.wav", splits.ABSENT, splits.ABSENT, "public") for k in range(10)
+        ],
+        "train_vivos.txt": [splits.Row("speech/vivos/train/a.wav", "S1", splits.ABSENT, "public")],
+    }
+    seconds = {r.item: 1800.0 for rs in rows.values() for r in rs}
+    spec = {"seed": 1, "hours": {"speech/bud500/": 2.0}}
+    capped = data.capped(rows, seconds, spec)
+    kept = capped["train_bud500.txt"]
+    assert len(kept) == 4 and kept == sorted(kept, key=lambda r: int(r.item.split("/")[-1].split(".")[0]))
+    assert capped["train_vivos.txt"] == rows["train_vivos.txt"] and data.capped(rows, seconds, spec) == capped

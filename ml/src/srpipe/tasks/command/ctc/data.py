@@ -1,22 +1,28 @@
 """Split command/v<n> (KEHOACH 1.3, 3.12): screened public speech by speaker, the unseen command out of learning.
 
-Each corpus prefix of configs/models/command_ctc.yaml gives its speakers to val and test by share, the rest to train;
-a corpus without speaker ids goes to train whole. A clip whose text says an unseen command of
-configs/models/command.yaml leaves train and val. Run: python -m srpipe.tasks.command.ctc.data
-"""
+Each corpus prefix of configs/models/command_ctc.yaml gives its speakers to val and test by share, the rest to train
+(down to its hours cap); a corpus without speaker ids goes to train whole; a clip saying an unseen command leaves
+train and val. simulate runs each file through the board simulation with pitch and no clean samples, resumably.
+Run: python -m srpipe.tasks.command.ctc.data [split|simulate]"""
 
 from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
+
+import numpy as np
+import yaml
 
 from srpipe.core import corpus, screen, splits
-from srpipe.core.config import data_paths, load_yaml
+from srpipe.core.config import CONFIGS, apply_overrides, data_paths, load_yaml
+from srpipe.scenes import device
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc
 
 PUBLIC = "public"
 LEARNING = ("train", "val")
+HOURS_STREAM = 4
 
 
 def unseen_phrases(unseen: list[str], commands: dict) -> dict[str, list[str]]:
@@ -61,6 +67,24 @@ def build(spec: dict, clips: list[corpus.Clip], unseen: dict[str, list[str]]) ->
     return dict(sorted(files.items())), dropped
 
 
+def capped(files: dict, seconds: dict[str, float], spec: dict) -> dict:
+    """The files with each train file of a corpus under an hours cap drawn down to it, rows in a seeded order until
+    their length passes the cap, then back in listing order."""
+    out = dict(files)
+    for prefix, hours in spec["hours"].items():
+        name = f"train_{prefix.strip('/').split('/')[1]}.txt"
+        rows = files[name]
+        order = np.random.default_rng([spec["seed"], HOURS_STREAM]).permutation(len(rows))
+        total, taken = 0.0, []
+        for k in order:
+            if total >= hours * splits.SECONDS_PER_HOUR:
+                break
+            taken.append(k)
+            total += seconds[rows[k].item]
+        out[name] = [rows[k] for k in sorted(taken)]
+    return out
+
+
 def notes(spec: dict, files: dict, dropped: dict[str, int], seconds: dict[str, float]) -> str:
     """SPLIT.md ahead of the checksums: rules, seed, command and each file's size."""
     speakers = {name: len({r.spk for r in rows} - {splits.ABSENT}) for name, rows in files.items()}
@@ -80,6 +104,7 @@ Dựng bằng `python -m srpipe.tasks.command.ctc.data` (`make splits`), seed {s
   nói chỉ vào `train`.
 {shares}
 - Lệnh chưa học (E11-T13) không có trong `train` và `val`: bỏ {gone} có lời chứa lệnh ấy. Ở `test` thì giữ.
+- Kho có trần giờ chỉ giữ phần rút theo seed tới trần: {spec["hours"] or "không kho nào"}.
 - `train` chia một file mỗi kho; vai của file là phần tên trước dấu `_` đầu tiên.
 
 | File | Mẩu | Giờ | Người nói |
@@ -88,13 +113,44 @@ Dựng bằng `python -m srpipe.tasks.command.ctc.data` (`make splits`), seed {s
 """
 
 
+def built_as(out: Path, device_cfg: dict, split_file: Path) -> bool:
+    """Whether out holds a finished simulation of split_file with this config."""
+    if not (out / "manifest.yaml").exists():
+        return False
+    body = yaml.safe_load((out / "manifest.yaml").read_text(encoding="utf-8"))
+    return body["config"] == device_cfg and body["split"]["sha256"] == splits.sha256_of(split_file)
+
+
+def simulate(cfg: dict, paths: dict) -> None:
+    """Every file of the split into processed/command/<version>/<file>, smallest first, with pitch and without the
+    clean samples; a file stopped part way goes on from its finished shards."""
+    spec, version = cfg["simulate"], cfg["split"]["version"]
+    device_cfg = load_yaml(CONFIGS / cfg["features"])
+    folder = paths["splits"] / "command" / version
+    for split_file in sorted(folder.glob("*.txt"), key=lambda f: f.stat().st_size):
+        out = paths["processed"] / "command" / version / split_file.stem
+        if built_as(out, device_cfg, split_file):
+            print(f"{out}: already built", flush=True)
+            continue
+        raw, interim = paths["raw"], paths["interim"]
+        print(device.build(device_cfg, split_file, raw, interim, out, spec["workers"], pitch=True, keep_pcm=False))
+
+
 def main(argv: list[str] | None = None) -> int:
-    argparse.ArgumentParser(description=__doc__.splitlines()[0]).parse_args(argv)
-    spec, paths, screening = load_yaml(ctc.CONFIG)["split"], data_paths(), load_yaml(screen.CONFIG)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("step", nargs="?", default="split", choices=["split", "simulate"])
+    parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
+    args = parser.parse_args(argv)
+    cfg, paths = apply_overrides(load_yaml(ctc.CONFIG), args.overrides), data_paths()
+    if args.step == "simulate":
+        simulate(cfg, paths)
+        return 0
+    spec, screening = cfg["split"], load_yaml(screen.CONFIG)
     listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))
     unseen = unseen_phrases(load_yaml(command.CONFIG)["unseen"], listed)
-    files, dropped = build(spec, screen.kept_clips(screening, paths, "speech"), unseen)
     seconds = screen.lengths(screening, paths, "speech")
+    files, dropped = build(spec, screen.kept_clips(screening, paths, "speech"), unseen)
+    files = capped(files, seconds, spec)
     out = paths["splits"] / "command" / spec["version"]
     splits.write_version(out, files, notes(spec, files, dropped, seconds))
     problems = splits.check_version(out)

@@ -1,6 +1,6 @@
 # The ctc track of command (KEHOACH 3.12, ADR-0010): a streaming acoustic model with CTC over the units of E11-T3.
 split:                             # data/splits/command/<version> by python -m srpipe.tasks.command.ctc.data (KEHOACH 1.3)
-  version: v1
+  version: v2
   seed: 20260928
   corpora:                         # item prefix: the share of its speakers each role takes, train the rest
     speech/common_voice_vi/: {val: 0.05, test: 0.1}
@@ -9,7 +9,10 @@ split:                             # data/splits/command/<version> by python -m 
     speech/fpt_open/: {}           # no speaker ids: train only (KEHOACH 1.3)
     speech/vlsp/: {}
     speech/bud500/: {}
+  hours: {speech/vlsp/: 15, speech/bud500/: 25}   # train hours kept of a corpus, drawn with the seed; others whole
 features: scenes/device.yaml       # mel then pitch's three, a hop, as the device computes them
+simulate:                          # python -m srpipe.tasks.command.ctc.data simulate, into processed/command/<version>
+  workers: 16
 model:                             # MultiNet7's encoder frame (ADR-0013); sizes read from its weights
   front:                           # three conv2d over (hops, mel bands); pitch skips them and joins the projection
     channels: [8, 32, 48]
