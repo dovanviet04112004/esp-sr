@@ -1,0 +1,12 @@
+# E11-T17 Speech Commands pilot: the ten keywords of Speech Commands v0.02, 5 times each at 1 m, to score through
+# the board a kws net learned on that corpus. Board capture, one speaker. Columns as in levels.tsv.
+Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "yes" (tiếng Anh) 5 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind cmd --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 25 --prompt 'yes'
+Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "no" (tiếng Anh) 5 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind cmd --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 25 --prompt 'no'
+Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "up" (tiếng Anh) 5 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind cmd --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 25 --prompt 'up'
+Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "down" (tiếng Anh) 5 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind cmd --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 25 --prompt 'down'
+Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "left" (tiếng Anh) 5 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind cmd --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 25 --prompt 'left'
+Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "right" (tiếng Anh) 5 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind cmd --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 25 --prompt 'right'
+Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "on" (tiếng Anh) 5 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind cmd --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 25 --prompt 'on'
+Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "off" (tiếng Anh) 5 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind cmd --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 25 --prompt 'off'
+Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "stop" (tiếng Anh) 5 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind cmd --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 25 --prompt 'stop'
+Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "go" (tiếng Anh) 5 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind cmd --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 25 --prompt 'go'

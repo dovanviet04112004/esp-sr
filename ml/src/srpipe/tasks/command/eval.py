@@ -127,8 +127,11 @@ def board(net: Kws, spec: dict, paths: dict) -> list[Scored]:
     chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
     tracker = PitchTracker(PitchConfig(**device_cfg["pitch"]))
     lead = round(net.cfg["simulate"]["pads_s"][0] * HOPS_PER_S)
-    learned = command.learned(load_yaml(command.CONFIG))
-    command_of = {tuple(corpus.sounds(c["text"])): c["id"] for c in learned if c["id"] in net.names}
+    if pilot := net.cfg["speech_commands"]:
+        said = {word: word for word in pilot["keywords"]}
+    else:
+        said = {c["id"]: c["text"] for c in command.learned(load_yaml(command.CONFIG))}
+    command_of = {tuple(corpus.sounds(text)): cid for cid, text in said.items() if cid in net.names}
     results = []
     for r in csv.DictReader((paths["manifests"] / spec["manifest"]).open(encoding="utf-8")):
         folder = paths["raw"] / "device" / r["board"] / r["session"]
