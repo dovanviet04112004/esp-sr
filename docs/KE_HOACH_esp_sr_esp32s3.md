@@ -440,7 +440,7 @@ vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đ
 | `wake` | **mô hình** | `ai_engine/src/wake/` | TCN giãn nở nhân quả int8, chạy dòng | trường nhìn ~2 s | **1,99 ms đo** mỗi bước, 64 kênh, trọng số ngẫu nhiên (`measurements/latency.md` §8) | E11-T11 |
 | `normalize` `g2p` `lexicon` | thuần | `lang_vi` | luật chính tả → đơn vị, sinh biến thể phương ngữ | `contracts/lang_vi.yaml` | chỉ lúc nạp bộ lệnh: **1,18 ms đo** mỗi lệnh, ba vùng | E11-T4 |
 | `command` `kws` | **mô hình** + thuần | `ai_engine/src/command_kws/` | DS-CNN phân lớp các lệnh đã học + `other` + `silence` trên một cửa sổ mỗi câu; từ chối theo lớp thắng, xác suất và khoảng cách nhất–nhì (ADR-0012) | cửa sổ 94 bước log-mel 40 + 3 chiều cao độ; cỡ S, M, L ở cấu hình | S **41,9 ms đo** một lần mỗi câu (22 triệu MAC; M 277 ms, L 2,03 s, `measurements/latency.md` §10); `step` chỉ chép khung, còn `pitch` tốn ~2 ms mỗi bước trên nhân 0 (`measurements/pitch.md`) | E11-T17 |
-| `command` `ctc` | **mô hình** + thuần | `ai_engine/src/command_ctc/` | encoder kiểu MultiNet7 + CTC (ADR-0013), chấm có ràng buộc từng lệnh, từ chối theo khoảng cách với vòng tự do | | 11–18 ms mỗi 32 ms, **chỉ trong cửa sổ lệnh**; chấm ~7 ms 🔬 một lần mỗi câu (§3.12) | E11-T13 |
+| `command` `ctc` | **mô hình** + thuần | `ai_engine/src/command_ctc/` | encoder kiểu MultiNet7 + CTC (ADR-0013), chấm có ràng buộc từng lệnh, từ chối theo khoảng cách với vòng tự do | | 11–18 ms mỗi 32 ms, **chỉ trong cửa sổ lệnh**; chấm **14,7 ms đo** một lần mỗi câu với bộ lệnh mặc định (§3.12) | E11-T13 |
 | `synth` | **mô hình** hoặc thuần | `ai_engine/src/synth/` hoặc `svc_speak` | chốt ở E12-T1 | | < 1× thời gian thực, dựng trước rồi phát | E12-T4 |
 
 Cột chi phí là **ước để kiểm kế hoạch có vừa không**, không phải số để báo cáo. Bước 4 của công thức
@@ -944,9 +944,9 @@ float32 trong [1, 2) cùng một số mũ nguyên: cộng và nhân làm tròn n
 căn cách nhau hàng nghìn nat, nên kết quả vẫn là tổng mọi đường căn, không xấp xỉ. Trong một phép cộng, số hạng có số mũ
 thấp hơn số mũ lớn nhất quá 100 thì bỏ, vì làm tròn float32 đằng nào cũng xoá nó. `exp` chạy một lần mỗi khung × lớp vào
 vùng làm việc người gọi cấp, 8 byte mỗi ô (cửa sổ 3 s: 94 × 45, ~34 KB ở PSRAM); `log` một lần mỗi biến thể. Mỗi trạng
-thái mỗi khung còn hai phép cộng, một phép nhân và chỉnh số mũ: ước ~7 ms cho bộ lệnh mặc định (19 biến thể), ~40 ms cho
-64 lệnh cùng cỡ 🔬, trong ngân sách ≤ 100 ms một lần chấm như `kws`, chỉ chạy một lần khi `vad` báo hết câu. `δ₁`, `δ₂`
-ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ Kconfig.
+thái mỗi khung còn hai phép cộng, một phép nhân và chỉnh số mũ: board B đo 14,7 ms cho bộ lệnh mặc định (19 biến thể) và
+79,4 ms cho 64 lệnh (`measurements/latency.md` §13), trong ngân sách ≤ 100 ms một lần chấm như `kws`, chỉ chạy một lần
+khi `vad` báo hết câu. `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ Kconfig.
 
 Mọi điểm tính theo khung: `s(·)` là log xác suất chia số khung, đơn vị nat mỗi khung. `ai_engine_command_result_t`
 mang `score_permille` = 1000·e^s(c*) (xác suất trung bình nhân mỗi khung, ‰), `margin_permille` = 1000·(s(c*) − s(c₂))
