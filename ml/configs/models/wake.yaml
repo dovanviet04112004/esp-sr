@@ -83,6 +83,9 @@ train:                             # E11-T11: python -m srpipe.tasks.wake.train 
   warmup_hops: 128                 # a window's first hops see zero padding, not audio: no loss on them
   label_s: [0.2, 0.3]              # a positive is 1 from this long before the end of its speech to this long after
   positive_share: 0.25             # of each batch
+  onset_share: 0.25                # of the negative windows, ending within onset_s of a sentence's first speech hop:
+  onset_s: 2.0                     #   every positive follows a silence, so a net never shown these fires there
+  word_s: 1.2                      # a hard negative this short is a word: its window ends where a positive's label does
   real_share: 0.01                 # of those positives, from real speech: the 24 real clips' own share (KEHOACH 3.11)
   batch: 128
   steps: 20000

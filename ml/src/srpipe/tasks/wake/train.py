@@ -1,7 +1,7 @@
 """Train the wake TCN on board-simulated log-mel (E11-T11, KEHOACH 3.11) and write a run directory.
 
-Windows around a positive's end, a hard near miss (a TTS phrase's end, anywhere in a corpus sentence's speech) or
-anywhere in a negative, with fixed shares of positives, of real speech among them, and of hard negatives per batch;
+Windows around a positive's end, a hard near miss (the end of a TTS phrase or of a word-long clip, anywhere in a corpus
+sentence's speech), the first seconds of a negative sentence, or anywhere in a negative, with fixed shares per batch;
 per-hop BCE past the warm-up, plus a CTC head on the trunk reading the lang_vi units of real sentences of train_neg.
 The last weights are kept, each evaluated one saved beside them. Run: python -m srpipe.tasks.wake.train"""
 
@@ -53,7 +53,7 @@ def band_stats(shards: list[Shard]) -> tuple[np.ndarray, np.ndarray]:
 
 class Windows:
     """Examples of window_hops hops: one that holds a positive's whole label past the warm-up, one over a hard near
-    miss, or one anywhere in a negative."""
+    miss, one ending in the first onset_s of a negative sentence's speech, or one anywhere in a negative."""
 
     def __init__(
         self,
@@ -74,6 +74,9 @@ class Windows:
         self.real = [e for e, r in zip(self.ends, spoken, strict=True) if r]
         self.synth = [e for e, r in zip(self.ends, spoken, strict=True) if not r]
         self.hard_items = [(k, i) for k, s in enumerate(self.hard) for i in s.items]
+        self.onsets = [(k, i["frame_offset"] + i["speech_frames"][0]) for k, s in enumerate(negatives) for i in s.items]
+        rate = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
+        self.onset_hops, self.word_hops = round(self.cfg["onset_s"] * rate), round(self.cfg["word_s"] * rate)
         self.weights = np.array([len(s.features) for s in negatives], dtype=np.float64)
         self.weights /= self.weights.sum()
         self.slack = width - self.cfg["warmup_hops"] - self.before - self.after
@@ -112,11 +115,11 @@ class Windows:
         return picks
 
     def hard_stop(self, item: dict) -> int:
-        """A TTS phrase ends inside the loss region as a positive would; a corpus sentence has no word timing, so the
-        window ends anywhere in its speech."""
+        """A TTS phrase or a clip no longer than a word ends inside the loss region as a positive would; a corpus
+        sentence has no word timing, so the window ends anywhere in its speech."""
         first = item["frame_offset"] + item["speech_frames"][0]
         end = item["frame_offset"] + item["speech_frames"][1]
-        if item["origin"] == "synth":
+        if item["origin"] == "synth" or end - first <= self.word_hops:
             return end + self.after + int(self.rng.integers(self.slack))
         return int(self.rng.integers(first + 1, end + self.after + 1))
 
@@ -132,7 +135,12 @@ class Windows:
             shard_index, item = self.hard_items[k]
             x, y = self.cut(self.hard[shard_index], self.hard_stop(item))
             xs.append(x), ys.append(y)
-        for k in self.rng.choice(len(self.negatives), size=n_neg, p=self.weights):
+        n_onset = round(n_neg * self.cfg["onset_share"]) if self.onsets else 0
+        for k in self.rng.integers(len(self.onsets), size=n_onset) if n_onset else []:
+            shard_index, first = self.onsets[k]
+            x, y = self.cut(self.negatives[shard_index], first + 1 + int(self.rng.integers(self.onset_hops)))
+            xs.append(x), ys.append(y)
+        for k in self.rng.choice(len(self.negatives), size=n_neg - n_onset, p=self.weights):
             shard = self.negatives[k]
             x, y = self.cut(shard, int(self.rng.integers(width, len(shard.features) + 1)))
             xs.append(x), ys.append(y)

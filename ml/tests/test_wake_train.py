@@ -163,13 +163,41 @@ def test_hard_windows_take_their_share_hold_the_phrase_and_carry_no_label(tmp_pa
         end = item["frame_offset"] + item["speech_frames"][1]
         assert end + after <= stop <= end + after + windows.slack
         assert stop - cfg["train"]["window_hops"] + warmup <= end
+    cfg["train"]["word_s"] = 0.32
     corpus = data.load_set(processed(tmp_path / "c", [(60, 10, 50)] * 2, rng, False), False, around, "float16")
     spoken = train.Windows(pos, neg, cfg, np.random.default_rng(6), corpus)
     for _, item in spoken.hard_items:
         first = item["frame_offset"] + item["speech_frames"][0]
         end = item["frame_offset"] + item["speech_frames"][1]
         assert all(first < spoken.hard_stop(item) <= end + after for _ in range(20))
+    words = data.load_set(processed(tmp_path / "w", [(60, 20, 35)] * 2, rng, False), False, around, "float16")
+    said = train.Windows(pos, neg, cfg, np.random.default_rng(6), words)
+    for _, item in said.hard_items:
+        end = item["frame_offset"] + item["speech_frames"][1]
+        assert all(end + after <= said.hard_stop(item) <= end + after + said.slack for _ in range(20))
     assert train.Windows(pos, neg, cfg, np.random.default_rng(7)).counts() == (4, 0, 12)
+
+
+def test_onset_windows_end_in_the_first_seconds_of_a_negative_sentence(tmp_path: Path) -> None:
+    cfg = tiny_cfg()
+    cfg["train"] |= {"onset_share": 0.5, "onset_s": 0.16}
+    around = data.label_hops(cfg["train"]["label_s"])
+    pos = data.load_set(
+        processed(tmp_path / "p", [(60, 20, 40)] * 4, np.random.default_rng(10), True), True, around, "float16"
+    )
+    items = [
+        {"item": f"s{k}", "origin": "public", "frame_offset": 100 * k, "n_frames": 100, "speech_frames": [50, 95]}
+        for k in range(4)
+    ]
+    position = np.arange(400, dtype=np.float32)[:, None].repeat(BANDS, axis=1)
+    windows = train.Windows(
+        pos, [data.Shard(position, np.zeros(400, np.uint8), items, False)], cfg, np.random.default_rng(11)
+    )
+    n_pos, _, n_neg = windows.counts()
+    x, y = windows.batch()
+    stops = x[n_pos : n_pos + round(n_neg * 0.5), -1, 0] + 1
+    first = [i["frame_offset"] + i["speech_frames"][0] for i in items]
+    assert all(any(f < stop <= f + windows.onset_hops for f in first) for stop in stops) and not y[n_pos:].any()
 
 
 def test_real_speech_takes_its_share_of_the_positives_however_few_its_clips(tmp_path: Path) -> None:
