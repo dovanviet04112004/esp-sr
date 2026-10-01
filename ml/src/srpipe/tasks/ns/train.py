@@ -178,20 +178,20 @@ def feature_stats(nets: dict[str, nn.Module], batches: DataLoader, device: str) 
     return stats
 
 
-def gain_loss(gains: Tensor, speech: Tensor, noise: Tensor, spec: dict, power_floor: float) -> Tensor:
-    """The speech-distortion weighted loss on compressed spectra (KEHOACH 3.9): per bin a S^c (1 - g^c)^2 +
-    (1 - a) N^c g^2c of the powers S and N, least at g^c = a S^c / (a S^c + (1 - a) N^c); each sequence over its mean
-    compressed power."""
-    c, alpha = spec["compression"], spec["alpha"]
+def gain_loss(gains: Tensor, speech: Tensor, mixture: Tensor, spec: dict, power_floor: float) -> Tensor:
+    """Clean against output on compressed magnitudes (KEHOACH 3.9), as Braun and Tashev train NSNet2: per bin
+    (S^c - g^c X^c)^2 of the speech and mixture magnitudes S and X, least at g = S / X; each sequence over its
+    compressed mixture power."""
+    c = spec["compression"]
     # A sigmoid can underflow to 0, where g**c has no gradient.
     kept = gains.clamp_min(torch.finfo(gains.dtype).tiny) ** c
-    per_bin = alpha * speech**c * (1.0 - kept) ** 2 + (1.0 - alpha) * noise**c * kept**2
-    level = (speech + noise + power_floor) ** c
-    return (per_bin.sum(dim=(-2, -1)) / level.sum(dim=(-2, -1))).mean()
+    level = (mixture + power_floor) ** (c / 2)
+    per_bin = (speech ** (c / 2) - kept * level) ** 2
+    return (per_bin.sum(dim=(-2, -1)) / (level**2).sum(dim=(-2, -1))).mean()
 
 
 def loss_of(gains: Tensor, logit: Tensor | None, batch: dict[str, Tensor], cfg: dict) -> Tensor:
-    loss = gain_loss(gains, batch["speech"], batch["noise"], cfg["loss"], cfg["power_floor"])
+    loss = gain_loss(gains, batch["speech"], batch["power"], cfg["loss"], cfg["power_floor"])
     if logit is None:
         return loss
     return loss + cfg["rnnoise"]["vad_weight"] * functional.binary_cross_entropy_with_logits(logit, batch["vad"])

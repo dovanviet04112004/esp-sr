@@ -106,8 +106,7 @@ nsnet:                             # NSNet-16k: log power in, a gain a bin out (
   train_sizes: [S, M, L]           # same batches; L is the product's (ADR-0014), S and M the fallback
   speech_prob_band_hz: [300.0, 3400.0]   # speech_prob: the share of this band's power the gains pass
 loss:                              # the same for every candidate, on the 257 gains the slot applies (KEHOACH 3.9)
-  alpha: 0.7                       # speech distortion against residual noise; more keeps speech (afe/ns.md 5)
-  compression: 0.3                 # errors on magnitudes to this power, as Braun and Tashev: residual noise stays costly
+  compression: 0.3                 # clean against output magnitudes to this power, as Braun and Tashev train NSNet2
 train:                             # python -m srpipe.tasks.ns.train; the GPU when present
   seed: 20260930
   batch: 32                        # sequences of mix.example_s

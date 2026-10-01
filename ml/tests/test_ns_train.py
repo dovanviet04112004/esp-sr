@@ -90,20 +90,19 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> tuple[dict, dict, dict]:
     return cfg, dev, paths
 
 
-def test_the_loss_is_least_where_compressed_speech_and_noise_balance() -> None:
+def test_the_loss_is_least_at_the_magnitude_ratio_of_speech_to_mixture() -> None:
     spec = load_yaml(ns.CONFIG)["loss"]
-    alpha, c = spec["alpha"], spec["compression"]
     speech = torch.tensor([1.0, 1.0, 1.0, 0.1, 0.0], dtype=torch.float64)
-    noise = torch.tensor([1.0, 0.1, 10.0, 1.0, 1.0], dtype=torch.float64)
-    best = (alpha * speech**c / (alpha * speech**c + (1 - alpha) * noise**c)) ** (1 / c)
-    assert float(best[0]) == pytest.approx(alpha ** (1 / c)) and float(best[4]) == 0.0
+    mixture = speech + torch.tensor([1.0, 0.1, 10.0, 1.0, 1.0], dtype=torch.float64)
+    best = torch.sqrt(speech / mixture)
+    assert float(best[0]) == pytest.approx(0.5**0.5) and float(best[4]) == 0.0
     scan = torch.linspace(0.0, 1.0, 2001, dtype=torch.float64)
-    for s, n, g in zip(speech, noise, best, strict=True):
-        losses = [float(train.gain_loss(v.view(1, 1, 1), s.view(1, 1, 1), n.view(1, 1, 1), spec, 1e-9)) for v in scan]
+    for s, x, g in zip(speech, mixture, best, strict=True):
+        losses = [float(train.gain_loss(v.view(1, 1, 1), s.view(1, 1, 1), x.view(1, 1, 1), spec, 1e-9)) for v in scan]
         assert abs(float(scan[int(np.argmin(losses))]) - float(g)) <= 1e-3
-    whole = train.gain_loss(best.view(1, 1, -1), speech.view(1, 1, -1), noise.view(1, 1, -1), spec, 1e-9)
+    whole = train.gain_loss(best.view(1, 1, -1), speech.view(1, 1, -1), mixture.view(1, 1, -1), spec, 1e-9)
     nudged = (best + 0.02 * torch.tensor([1.0, -1.0, 1.0, 1.0, 1.0], dtype=torch.float64)).clamp(0.0, 1.0)
-    assert whole < train.gain_loss(nudged.view(1, 1, -1), speech.view(1, 1, -1), noise.view(1, 1, -1), spec, 1e-9)
+    assert whole < train.gain_loss(nudged.view(1, 1, -1), speech.view(1, 1, -1), mixture.view(1, 1, -1), spec, 1e-9)
 
 
 def test_residual_noise_keeps_pulling_the_gain_down_far_under_the_speech() -> None:
