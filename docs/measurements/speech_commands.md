@@ -107,7 +107,22 @@ giây. Mẩu dương nào cũng là một từ ngay sau khoảng lặng, nên m�
 Phần báo nhầm `val_neg` nằm trong 0,85–1,33 s đầu câu, ở ngưỡng của 3 lần/giờ: lượt đầu 75% (21/28), lượt sửa 52%
 (12/23). Điểm của lượt sửa dồn sát 1: thang ngưỡng của `eval` dừng ở 0,995 nên `train` chọn 0,995, ở đó `val` bắt 92,4%
 với 3,13 lần/giờ. Board ở 0,995: phiên "yes" 1,00; 1,00; 1,00; 1,00; 0,86; câu cắt cụt 1,00 — 4/5 câu trọn vẹn; báo
-nhầm 2 lần trên 0,48 giờ (4,15/giờ); "bật điện" 0,99.
+nhầm 2 lần trên 0,48 giờ (4,15/giờ); "bật điện" 0,99. Ở 0,996, mức `kws/wake_th` (‰) lưu được của 3 lần/giờ, board y như thế.
+
+Lượt thử thêm (`228c8a8`, run `20261001_228c8a8-dirty_25ca6a`): nhãn làm mềm 0,1 và 50% cửa sổ âm ở đầu câu, cùng seed và
+20 000 bước. Điểm không còn dồn sát 1 nhưng bắt kém hơn ở cùng mức báo nhầm, và cụm đầu câu không giảm thêm.
+
+| Báo nhầm/giờ trên `val` | Lượt sửa | Lượt thử |
+|---|---|---|
+| 1 | 80,2% (0,9998, vượt ‰ của `kws/wake_th`) | 65,6% (0,954) |
+| 2 | 86,4% (0,9990) | 86,9% (0,930) |
+| 2,5 | 89,7% (0,9978) | 88,1% (0,924) |
+| 3 | 91,6% (0,9957) | 89,7% (0,912) |
+| 5 | 93,8% (0,9860) | 92,8% (0,862) |
+| Báo nhầm `val_neg` ở 0,85–1,33 s đầu câu | 52% | 54% |
+
+Board của lượt thử ở 0,915: phiên "yes" 6/6 (0,93–0,99), nhưng báo nhầm 8 lần trên 0,48 giờ (16,6/giờ). Cấu hình mặc
+định giữ của lượt sửa: `onset_share` 0,25, `label_smoothing` 0.
 
 ## 5. Điều số đo cho thấy
 
