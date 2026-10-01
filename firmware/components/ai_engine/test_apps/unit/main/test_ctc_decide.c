@@ -49,6 +49,9 @@ TEST_CASE("the ctc decision of the default commands over LENH's longest window m
     float want_scores[AI_ENGINE_COMMANDS_MAX], got_scores[AI_ENGINE_COMMANDS_MAX];
     memcpy(want_scores, p, head.n_commands * sizeof(float));
     TEST_ASSERT_EQUAL_PTR(ctc_decide_end, p + head.n_commands * sizeof(float));
+    void *work =
+        heap_caps_malloc(ai_engine_command_ctc_work_bytes(head.n_classes, head.n_frames), MALLOC_CAP_SPIRAM);
+    TEST_ASSERT_NOT_NULL(work);
 
     s_lexicon.n_commands = head.n_commands;
     for (size_t c = 0; c < head.n_commands; c++) {
@@ -62,12 +65,12 @@ TEST_CASE("the ctc decision of the default commands over LENH's longest window m
     ai_engine_command_result_t out;
     TEST_ASSERT_EQUAL(ESP_OK,
                       ai_engine_command_ctc_decide(log_probs, head.n_classes, head.n_frames, &s_lexicon,
-                                                   head.reject, head.margin, got_scores, &out));
+                                                   head.reject, head.margin, work, got_scores, &out));
     int64_t total_us = 0, peak_us = 0;
     for (uint8_t r = 0; r < head.runs; r++) {
         const int64_t started_us = esp_timer_get_time();
         ai_engine_command_ctc_decide(log_probs, head.n_classes, head.n_frames, &s_lexicon, head.reject,
-                                     head.margin, got_scores, &out);
+                                     head.margin, work, got_scores, &out);
         const int64_t took_us = esp_timer_get_time() - started_us;
         total_us += took_us;
         peak_us = took_us > peak_us ? took_us : peak_us;
@@ -81,6 +84,7 @@ TEST_CASE("the ctc decision of the default commands over LENH's longest window m
            head.n_commands, (unsigned)forms, head.n_frames, head.n_classes, total_us / head.runs, peak_us,
            head.runs);
     heap_caps_free(log_probs);
+    heap_caps_free(work);
     TEST_ASSERT_EQUAL_INT16(want.command, out.command);
     TEST_ASSERT_EQUAL_UINT16(want.score, out.score_permille);
     TEST_ASSERT_EQUAL_UINT16(want.margin, out.margin_permille);

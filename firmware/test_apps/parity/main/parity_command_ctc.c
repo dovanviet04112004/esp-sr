@@ -77,8 +77,9 @@ bool parity_command_ctc(const char *case_name, const void *buf, size_t len)
     float *got = malloc(windows * DECISION_COUNT * sizeof(float));
     ai_engine_lexicon_t *lex = calloc(1, sizeof(*lex));
     uint8_t *ids = malloc(units.dims[0] * units.dims[1] * units.dims[2]);
+    void *work = malloc(ai_engine_command_ctc_work_bytes(classes, longest));
     bool ok = in != NULL && lengths != NULL && limits != NULL && want_scores != NULL && want != NULL &&
-              got_scores != NULL && got != NULL && lex != NULL && ids != NULL &&
+              got_scores != NULL && got != NULL && lex != NULL && ids != NULL && work != NULL &&
               parity_floats(&log_probs, in, windows * longest * classes) &&
               parity_floats(&frames, lengths, windows) &&
               parity_floats(&thresholds, limits, windows * THRESHOLD_COUNT) &&
@@ -91,7 +92,7 @@ bool parity_command_ctc(const char *case_name, const void *buf, size_t len)
         ok =
             ai_engine_command_ctc_decide(in + w * longest * classes, classes, (size_t)lengths[w], lex,
                                          (uint16_t)limit[THRESHOLD_REJECT], (uint16_t)limit[THRESHOLD_MARGIN],
-                                         got_scores + w * commands, &d) == ESP_OK;
+                                         work, got_scores + w * commands, &d) == ESP_OK;
         decision_row(&d, got + w * DECISION_COUNT);
     }
     if (ok) {
@@ -109,5 +110,6 @@ bool parity_command_ctc(const char *case_name, const void *buf, size_t len)
     free(got);
     free(lex);
     free(ids);
+    free(work);
     return ok;
 }
