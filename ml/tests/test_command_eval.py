@@ -4,12 +4,16 @@ table scores them."""
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from srpipe.core import corpus
 from srpipe.core.config import CONFIGS, load_yaml
 from srpipe.dsp.spec.pitch import N_FEATURES, PitchConfig, PitchTracker
 from srpipe.generated import grid
+from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
+from srpipe.tasks.command.ctc.model import encoder
+from srpipe.tasks.command.ctc.postproc import ctc_score
 from srpipe.tasks.command.eval import REJECT, Scored
 
 SPEC = {"pcm_shift": 13, "kinds": ["cmd", "neg"], "left_out": ["s3"]}
@@ -51,3 +55,51 @@ def test_the_table_scores_each_command_and_the_rejections_by_kind() -> None:
     assert "- bat_den: 2/3 right (fail at 90%)" in text
     assert "- rejected: 2/3 (fail at 95%)" in text and "  - cmd: 1/2" in text and "  - neg: 1/1" in text
     assert "bật điện \\| tắt điện" in text
+
+
+def test_a_ctc_window_starts_a_pad_before_its_utterance_after_the_one_ahead_and_within_the_longest() -> None:
+    hops, bands = 400, 40
+    features = np.arange(hops, dtype=np.float32)[:, None].repeat(bands, axis=1)
+    clean = np.zeros(hops * grid.HOP_SAMPLES, dtype=np.int16)
+    tracker = PitchTracker(PitchConfig(**load_yaml(CONFIGS / "scenes" / "device.yaml")["pitch"]))
+    xs = gate.ctc_windows(clean, features, [(30, 60), (70, 100), (200, 390)], 120, 19, tracker)
+    dims = bands + N_FEATURES
+    assert [(x[0, 0], x[-1, 0], x.shape[1]) for x in xs] == [(11, 61, dims), (62, 101, dims), (272, 391, dims)]
+
+
+def test_a_ctc_window_reaches_the_decision_as_frames_of_its_own_hops(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    cfg = load_yaml(ctc.CONFIG)
+    torch.manual_seed(0)
+    dims = encoder.n_dims(cfg)
+    lexicon = [[np.array([0, 1], np.uint8)], [np.array([2], np.uint8)]]
+    net = gate.Ctc(
+        encoder.build(cfg).eval(), np.zeros(dims, np.float32), np.ones(dims, np.float32), ["a", "b"], lexicon, cfg
+    )
+    seen, decide = [], ctc_score.decide
+    monkeypatch.setattr(
+        ctc_score, "decide", lambda log_probs, *rest: seen.append(log_probs.shape) or decide(log_probs, *rest)
+    )
+    heard = gate.ctc_heard(net, np.random.default_rng(0).normal(size=(50, dims)).astype(np.float32))
+    assert seen == [(encoder.n_classes(), 25)] and heard.command in ("a", "b") and 0 <= heard.gap <= ctc_score.CAP
+
+
+def test_the_ctc_table_counts_best_commands_and_sweeps_the_reject_threshold() -> None:
+    h = gate.Heard
+    results = [
+        Scored(
+            "a",
+            "cmd",
+            "100",
+            "bật đèn",
+            "bat_den",
+            [h("bat_den", 700, 300, 100), h("bat_den", 600, 20, 200), h("tat_den", 500, 100, 150)],
+        ),
+        Scored("b", "neg", "100", "bật điện", REJECT, [h("bat_den", 400, 100, 500), h(REJECT, 0, 65535, 65535)]),
+        Scored("c", "noise", "", "quạt", REJECT, [h("tat_den", 300, 200, 900)]),
+    ]
+    spec, sweep = {"command_recall": 0.9, "rejection": 0.95}, {"margin": 50, "reject_sweep": [150, 600]}
+    text = gate.ctc_table(results, ["bat_den", "tat_den"], spec, sweep)
+    assert "- bat_den: best 2/3" in text and "- tat_den: best 0/0" in text
+    assert "| 150 | 33% | 33% | 3/3 | 2/2 | 1/1 |" in text
+    assert "| 600 | 33% | 33% | 2/3 | 1/2 | 1/1 |" in text

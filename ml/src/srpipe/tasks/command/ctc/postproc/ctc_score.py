@@ -260,7 +260,7 @@ def probe_record(cfg: dict) -> bytes:
     the frames' log-probabilities from the next four-byte boundary, the expected decision, every command's score."""
     spec = cfg["probe"]["decide"]
     stride = math.prod(cfg["model"]["front"]["hop_strides"])
-    frames = math.ceil(spec["window_s"] * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES / stride)
+    frames = math.ceil(cfg["window_s"] * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES / stride)
     rng, lexicon = np.random.default_rng(SEED), default_lexicon()
     window = said(rng, lexicon[0][0], frames)
     decision, scores = decide(window, lexicon, *spec["thresholds"])

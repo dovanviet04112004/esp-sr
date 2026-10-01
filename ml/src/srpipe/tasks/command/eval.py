@@ -1,16 +1,19 @@
 """Gate 3 of the command tracks (KEHOACH 3.12) on the sessions recorded through board B: each session through the
 product's chain, each utterance its vad finds scored once where vad turns off after it, as LENH scores it. A session
-saying a command the net learned counts the utterances decided as that command; any other counts those rejected.
-Run: python -m srpipe.tasks.command.eval kws <run under ml/>
+saying a command the net knows counts the utterances decided as that command; any other counts those rejected.
+Run: python -m srpipe.tasks.command.eval {kws,ctc} <run under ml/>
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import soundfile as sf
@@ -25,13 +28,16 @@ from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
 from srpipe.generated import array, grid
 from srpipe.scenes import device
 from srpipe.tasks import command
-from srpipe.tasks.command import kws
+from srpipe.tasks.command import ctc, kws
+from srpipe.tasks.command.ctc.model import encoder
+from srpipe.tasks.command.ctc.postproc import ctc_score
 from srpipe.tasks.command.kws.model import dscnn
 from srpipe.tasks.command.kws.postproc import decide
 from srpipe.tasks.wake.eval import utterances
 
 REJECT = "reject"
 HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
+Spans = list[tuple[int, int]]
 
 
 @dataclass(frozen=True)
@@ -43,11 +49,48 @@ class Scored:
     distance_cm: str
     prompt: str
     expected: str  # a command id, or REJECT
-    decided: list[tuple[str, int]]  # a command id or REJECT, and its score in permille
+    decided: list[tuple]  # per utterance: a command id or REJECT, then ‰
 
     @property
     def right(self) -> int:
-        return sum(d == self.expected for d, _ in self.decided)
+        return sum(d[0] == self.expected for d in self.decided)
+
+
+class Heard(NamedTuple):
+    """One utterance of the ctc track: the command scoring best, unless no command fits the window, with the figures
+    of KEHOACH 3.12 in permille: its score, its lead over the second, and the free loop's gap over it."""
+
+    command: str
+    score: int
+    lead: int
+    gap: int
+
+    def accepted(self, reject: int, margin: int) -> bool:
+        return self.command != REJECT and self.gap <= reject and self.lead >= margin
+
+
+@dataclass(frozen=True)
+class Ctc:
+    """A ctc run as the board runs it: the net, its feature statistics, every listed command and its variants, the
+    run's config."""
+
+    model: encoder.CtcNet
+    mean: np.ndarray
+    std: np.ndarray
+    names: list[str]
+    lexicon: list[list[np.ndarray]]
+    cfg: dict
+
+
+def load_ctc(run: Path) -> Ctc:
+    trained = load_yaml(run / "config.resolved.yaml")
+    stats = np.load(run / "feature_stats.npz")
+    model = encoder.build(trained)
+    model.load_state_dict(torch.load(run / "model.pt", map_location="cpu"))
+    model.eval()
+    listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
+    lexicon = [ctc_score.variants(c["text"]) for c in listed]
+    return Ctc(model, stats["mean"], stats["std"], [c["id"] for c in listed], lexicon, trained)
 
 
 @dataclass(frozen=True)
@@ -120,30 +163,77 @@ def decisions(net: Kws, x: np.ndarray) -> list[tuple[str, int]]:
     return out
 
 
-def board(net: Kws, spec: dict, paths: dict) -> list[Scored]:
-    """Every counted session of the board manifest found on disk, scored."""
-    device_cfg = load_yaml(CONFIGS / net.cfg["features"])
+def ctc_windows(clean: np.ndarray, features: np.ndarray, spans: Spans, longest: int, lead: int, tracker: PitchTracker):
+    """Per utterance the window ending where vad turns off after it and starting lead hops before it, as a simulated
+    sentence starts, but never before the utterance ahead of it ends nor more than longest hops back; its log-mel,
+    then pitch from a tracker reset at its first hop."""
+    out, after = [], 0
+    for first, last in spans:
+        end = min(last + 1, len(features) - 1)
+        start = max(first - lead, end + 1 - longest, after)
+        pitch = device.item_pitch(tracker, clean[start * grid.HOP_SAMPLES : (end + 1) * grid.HOP_SAMPLES])
+        out.append(np.concatenate([features[start : end + 1], pitch], axis=1).astype(np.float32))
+        after = end + 1
+    return out
+
+
+def ctc_heard(net: Ctc, x: np.ndarray) -> Heard:
+    """One window decided as the device decides it, with no threshold: zero-padded to the net's chunk as in training,
+    normalised, the frames of its own hops kept."""
+    multiple, hops = net.model.chunk_multiple, len(x)
+    padded = np.zeros((-(-hops // multiple) * multiple, x.shape[1]), dtype=np.float32)
+    padded[:hops] = x
+    with torch.no_grad():
+        logits = net.model(torch.from_numpy((padded - net.mean) / net.std).T[None])
+    log_probs = logits.log_softmax(1)[0, :, : -(-hops // net.model.front.hop_stride)].numpy()
+    decision, _ = ctc_score.decide(log_probs, net.lexicon, ctc_score.CAP, 0)
+    k, score, lead, gap = (int(v) for v in decision)
+    return Heard(REJECT if k == ctc_score.REJECTED else net.names[k], score, lead, gap)
+
+
+def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: Callable) -> list[Scored]:
+    """Every counted session of the board manifest found on disk, its utterances decided by decided_of(clean,
+    features, spans, tracker); a session saying the text of a command of said expects that command."""
+    device_cfg = load_yaml(CONFIGS / cfg["features"])
     mics = device.load_microphones(device_cfg["microphone"])
     chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
     tracker = PitchTracker(PitchConfig(**device_cfg["pitch"]))
-    lead = round(net.cfg["simulate"]["pads_s"][0] * HOPS_PER_S)
-    if pilot := net.cfg["speech_commands"]:
-        said = {word: word for word in pilot["keywords"]}
-    else:
-        said = {c["id"]: c["text"] for c in command.learned(load_yaml(command.CONFIG))}
-    command_of = {tuple(corpus.sounds(text)): cid for cid, text in said.items() if cid in net.names}
+    command_of = {tuple(corpus.sounds(text)): cid for cid, text in said.items()}
     results = []
     for r in csv.DictReader((paths["manifests"] / spec["manifest"]).open(encoding="utf-8")):
         folder = paths["raw"] / "device" / r["board"] / r["session"]
         if not counted(r, spec) or not folder.exists():
             continue
         clean, vad, features = heard(folder, chain_cfg, mel)
-        decided = []
-        if spans := utterances(vad, spec):
-            decided = decisions(net, windows(clean, features, spans, net.cfg["window_hops"], lead, tracker))
+        spans = utterances(vad, spec)
+        decided = decided_of(clean, features, spans, tracker) if spans else []
         expected = expected_of(r["kind"], r["prompt"], command_of)
         results.append(Scored(r["session"], r["kind"], r["distance_cm"], r["prompt"], expected, decided))
     return results
+
+
+def kws_board(net: Kws, spec: dict, paths: dict) -> list[Scored]:
+    lead = round(net.cfg["simulate"]["pads_s"][0] * HOPS_PER_S)
+    if pilot := net.cfg["speech_commands"]:
+        said = {word: word for word in pilot["keywords"]}
+    else:
+        said = {c["id"]: c["text"] for c in command.learned(load_yaml(command.CONFIG))}
+
+    def decided_of(clean, features, spans, tracker):
+        return decisions(net, windows(clean, features, spans, net.cfg["window_hops"], lead, tracker))
+
+    return board(net.cfg, spec, paths, {cid: text for cid, text in said.items() if cid in net.names}, decided_of)
+
+
+def ctc_board(net: Ctc, spec: dict, paths: dict, window_s: float) -> list[Scored]:
+    lead = round(load_yaml(CONFIGS / net.cfg["features"])["session"]["pad_s"] * HOPS_PER_S)
+    longest = round(window_s * HOPS_PER_S)
+    listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
+
+    def decided_of(clean, features, spans, tracker):
+        return [ctc_heard(net, x) for x in ctc_windows(clean, features, spans, longest, lead, tracker)]
+
+    return board(net.cfg, spec, paths, {c["id"]: c["text"] for c in listed}, decided_of)
 
 
 def share(results: list[Scored]) -> tuple[int, int]:
@@ -173,15 +263,64 @@ def table(results: list[Scored], names: list[str], spec: dict) -> str:
     return "\n".join(lines)
 
 
+def ctc_table(results: list[Scored], names: list[str], spec: dict, sweep: dict) -> str:
+    """Each session's best command per utterance with its figures, each command's utterances its best command gets
+    right, then per reject threshold of the sweep at its margin the share of each command's utterances accepted as it
+    and of every other utterance rejected, by kind."""
+    lines = [
+        "| Session | Kind | cm | Prompt | Expected | Best right | Best: score/lead/gap ‰ |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for r in results:
+        said = " · ".join(f"{h.command} {h.score}/{h.lead}/{h.gap}" for h in r.decided) or "-"
+        prompt = r.prompt[:40].replace("|", "\\|")
+        right = f"{r.right}/{len(r.decided)}"
+        lines.append(f"| {r.session} | {r.kind} | {r.distance_cm} | {prompt} | {r.expected} | {right} | {said} |")
+    lines.append("")
+    for cid in names:
+        right, total = share([r for r in results if r.expected == cid])
+        lines.append(f"- {cid}: best {right}/{total}")
+    others = [r for r in results if r.expected == REJECT]
+    kinds = list(dict.fromkeys(r.kind for r in others))
+    margin, recall, rejection = sweep["margin"], spec["command_recall"], spec["rejection"]
+    lines += [
+        "",
+        f"| δ₁ ‰, δ₂ {margin} ‰ | worst command (gate {recall:.0%}) | commands | rejected (gate {rejection:.0%}) | "
+        + " | ".join(kinds)
+        + " |",
+        "|---" * (4 + len(kinds)) + "|",
+    ]
+    for reject in sweep["reject_sweep"]:
+        accepted = []
+        for cid in names:
+            heard = [h for r in results if r.expected == cid for h in r.decided]
+            if heard:
+                accepted.append(sum(h.command == cid and h.accepted(reject, margin) for h in heard) / len(heard))
+        cells = []
+        for group in [others] + [[r for r in others if r.kind == kind] for kind in kinds]:
+            heard = [h for r in group for h in r.decided]
+            cells.append(f"{sum(not h.accepted(reject, margin) for h in heard)}/{len(heard)}")
+        worst, mean = (min(accepted), sum(accepted) / len(accepted)) if accepted else (0.0, 0.0)
+        lines.append(f"| {reject} | {worst:.0%} | {mean:.0%} | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("track", choices=["kws"])
-    parser.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.command.kws.train")
+    parser.add_argument("track", choices=["kws", "ctc"])
+    parser.add_argument("run", type=Path, help="a run directory of the track's train")
     args = parser.parse_args(argv)
     spec = load_yaml(command.CONFIG)["eval"]
-    net = load_kws(args.run)
-    print(f"{args.run}: reject {net.thresholds[0]}‰, margin {net.thresholds[1]}‰")
-    print(table(board(net, spec["board"], data_paths()), net.names, spec))
+    if args.track == "kws":
+        net = load_kws(args.run)
+        print(f"{args.run}: reject {net.thresholds[0]}‰, margin {net.thresholds[1]}‰")
+        print(table(kws_board(net, spec["board"], data_paths()), net.names, spec))
+        return 0
+    ctc_cfg = load_yaml(ctc.CONFIG)
+    net = load_ctc(args.run)
+    forms = sum(len(v) for v in net.lexicon)
+    print(f"{args.run}: {len(net.names)} commands, {forms} variants, windows up to {ctc_cfg['window_s']} s")
+    print(ctc_table(ctc_board(net, spec["board"], data_paths(), ctc_cfg["window_s"]), net.names, spec, ctc_cfg["eval"]))
     return 0
 
 
