@@ -37,6 +37,13 @@ def test_a_file_name_carries_role_class_and_source() -> None:
         data.class_of("train_bat_den_board.txt", NAMES)
 
 
+def test_a_net_of_some_commands_keeps_their_order_and_refuses_an_unlearned_one() -> None:
+    command_cfg = load_yaml(command.CONFIG)
+    assert kws.classes(command_cfg, ["tat_den", "bat_den"]) == ["bat_den", "tat_den", kws.OTHER, kws.SILENCE]
+    with pytest.raises(ValueError, match="chup_anh"):
+        kws.classes(command_cfg, ["bat_den", "chup_anh"])
+
+
 def test_a_tts_clip_goes_to_its_voices_role_and_its_commands_class(tmp_path: Path) -> None:
     def clip(cid: str, speaker: str, kept: bool, say: str | None) -> dict:
         wav = tmp_path / "command" / "synth_pos" / "f5" / f"{cid}.wav"
@@ -65,8 +72,12 @@ def test_real_clips_land_in_their_commands_class(tmp_path: Path) -> None:
         "bat_den/a.wav\tbật đèn\t0.8\tpublic",
         "tro_ly/b.wav\ttrợ lý\t0.6\tpublic",
         "bat_den/c.wav\tbật đèn\t0.7\tsynth",
+        "bat_den/d.wav\tbật đèn\t0.5\tpublic",
     ]
     (extract / "clips.tsv").write_text("\n".join([fields, *lines]) + "\n", encoding="utf-8")
+    lengths = {"bat_den/a.wav": 0.8, "tro_ly/b.wav": 0.6, "bat_den/c.wav": 0.7, "bat_den/d.wav": 0.0}
+    for name, seconds in lengths.items():
+        write_wav(extract / name, np.zeros(round(seconds * FS)))
     rows, seconds = data.hf_rows(raw, "hf", COMMAND_OF)
     assert list(rows) == ["bat_den"] and [r.item for r in rows["bat_den"]] == ["speech/hf/bat_den/a.wav"]
     assert seconds == {"speech/hf/bat_den/a.wav": 0.8}

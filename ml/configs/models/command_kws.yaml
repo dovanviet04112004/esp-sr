@@ -2,6 +2,7 @@
 # other and silence; each hop is log-mel then pitch's POV, normalised log F0 and delta.
 features: scenes/device.yaml       # mel and pitch as the device computes them
 window_hops: 94                    # ending at the hop vad turns off after an utterance, about 1.5 s
+commands: null                     # learned command ids the net tells apart, the rest are other to it; null for all
 model:
   size: S                          # a key of sizes; every size trains on the same split, seed and epochs (KEHOACH 3.12)
   first_kernel: [10, 4]            # hops by feature dims
@@ -22,10 +23,12 @@ split:                             # data/splits/command_kws/<version>: python -
   command_split: command/v1        # its train files lend ordinary speech to other, its val.txt to val
   val_voices: 0.2                  # of the TTS voices, each held out whole with its clones, as wake holds them
   other_hours: {train: 8.0, val: 1.0}   # ordinary speech for other, no sentence saying a command
-  hf_extract: hf_extract           # raw/speech/<name>: the extract's real clips, no speaker ids, so train only
+  tts: true                        # E11-T7's clips; false for a pilot on real voices alone
+  hf_extract: hf_extract           # raw/speech/<name>: the extract's clips, no speaker ids, so train only; null: none
   kws_vi_command:                  # the authors' own recordings, no speaker ids, so train only (DU_LIEU.md)
     folders: [speech/kws_vi_command/dataset/data_train/dataset_1s, speech/kws_vi_command/dataset/data_test/data_1s]
     other: [bat_het, tat_het]      # their phrases outside the command set
+    val_folders: []                # of folders, those held out whole for val when TTS gives val no voice
     silence: speech/kws_vi_command/dataset/data_train/dataset_1s/noise   # data_test's noise repeats it byte for byte
   silence:                         # stretches of noise with no talker for the silence class
     pools:                         # under raw/, drawn by weight; the simulation's own pools hold MUSAN speech

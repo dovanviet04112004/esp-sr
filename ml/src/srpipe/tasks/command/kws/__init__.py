@@ -9,9 +9,13 @@ CONFIG = CONFIGS / "models" / "command_kws.yaml"
 OTHER, SILENCE = "other", "silence"
 
 
-def classes(command_cfg: dict) -> list[str]:
-    """Class names in output order: the learned command ids as default_vi.json lists them, then other and silence."""
-    return [c["id"] for c in command.learned(command_cfg)] + [OTHER, SILENCE]
+def classes(command_cfg: dict, only: list[str] | None = None) -> list[str]:
+    """Class names in output order: the learned command ids as default_vi.json lists them, only those of only when
+    given, then other and silence."""
+    ids = [c["id"] for c in command.learned(command_cfg)]
+    if only is not None and (unknown := set(only) - set(ids)):
+        raise ValueError(f"{sorted(unknown)} are no learned commands")
+    return [i for i in ids if only is None or i in only] + [OTHER, SILENCE]
 
 
 def n_dims(cfg: dict) -> int:

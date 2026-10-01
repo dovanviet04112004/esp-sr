@@ -200,8 +200,8 @@ def held_windows(sources: list[Source], names: list[str], window: int, seed: int
         labels.append(np.full(len(ends), names.index(s.cls)))
         files.append(np.full(len(ends), k))
     held = Held(np.concatenate(xs), np.concatenate(labels), np.concatenate(files), [s.name for s in sources])
-    if missing := sorted(set(range(len(names))) - set(held.labels.tolist())):
-        raise ValueError(f"val holds no window of {', '.join(names[k] for k in missing)}")
+    if not (held.labels < names.index(kws.OTHER)).any():
+        raise ValueError("val holds no window of any command")
     return held
 
 
@@ -232,13 +232,15 @@ def operating_point(decided: np.ndarray, labels: np.ndarray, names: list[str], s
     said = labels < n_commands
     right = said & (decided[:, 0] == labels)
     counts = np.bincount(labels[said], minlength=n_commands)
+    # A command with no val window has no recall to weigh in the choice.
+    present = np.flatnonzero(counts)
     steps = range(0, int(decide.PERMILLE) + 1, spec["step_permille"])
     best, chosen = None, None
     for r in steps:
         for m in steps:
             accepted = accepted_at(decided, r, m)
             rejection = 1.0 - float(accepted[~said].mean())
-            recall = np.bincount(labels[right & accepted], minlength=n_commands) / counts
+            recall = np.bincount(labels[right & accepted], minlength=n_commands)[present] / counts[present]
             meets = rejection >= spec["reject_target"]
             key = (meets, float(recall.min()) if meets else rejection, float(recall.mean()), rejection)
             if best is None or key > best:
@@ -252,7 +254,7 @@ def operating_point(decided: np.ndarray, labels: np.ndarray, names: list[str], s
         "min_recall": float(recall.min()),
         "mean_recall": float(recall.mean()),
         "wrong_command": float(wrong[said].mean()),
-        "recall": dict(zip(names[:n_commands], recall.tolist(), strict=True)),
+        "recall": {names[k]: float(v) for k, v in zip(present, recall, strict=True)},
     }
 
 
@@ -351,7 +353,7 @@ def main(argv: list[str] | None = None) -> int:
         help="a dotted override of command_kws.yaml, e.g. model.size=M",
     )
     cfg, paths = apply_overrides(load_yaml(kws.CONFIG), parser.parse_args(argv).overrides), data_paths()
-    names = kws.classes(load_yaml(command.CONFIG))
+    names = kws.classes(load_yaml(command.CONFIG), cfg["commands"])
     window, version = cfg["window_hops"], cfg["split"]["version"]
     late = round(cfg["train"]["late_s"] * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES)
     split_files = sorted((paths["splits"] / BRANCH / version).glob("*.txt"))

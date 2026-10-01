@@ -17,7 +17,7 @@ import soundfile as sf
 import yaml
 
 from srpipe.core import corpus, extract, screen, splits
-from srpipe.core.config import CONFIGS, data_paths, load_yaml
+from srpipe.core.config import CONFIGS, apply_overrides, data_paths, load_yaml
 from srpipe.scenes import device
 from srpipe.tasks import command
 from srpipe.tasks.command import kws
@@ -69,8 +69,8 @@ def tts_rows(clips: list[dict], interim: Path, roles: dict[str, str], command_of
 
 
 def hf_rows(raw: Path, name: str, command_of: dict[str, str]) -> tuple[Rows, dict[str, float]]:
-    """The extract's clips of real voices by the command they say, however spelled, and their seconds; any other
-    phrase, and a source tagged synthetic, is left out."""
+    """The extract's clips of real voices by the command they say, however spelled, and their seconds as written; any
+    other phrase, a source tagged synthetic and an empty file are left out."""
     folder = extract.clips_folder(raw, name)
     by_sound = {tuple(corpus.sounds(text)): cid for text, cid in command_of.items()}
     rows: Rows = defaultdict(list)
@@ -78,9 +78,11 @@ def hf_rows(raw: Path, name: str, command_of: dict[str, str]) -> tuple[Rows, dic
     for c in extract.read_index(folder):
         cid = by_sound.get(tuple(corpus.sounds(c["phrase"])))
         if c["origin"] == PUBLIC and cid is not None:
-            item = str((folder / c["file"]).relative_to(raw))
-            rows[cid].append(splits.Row(item, splits.ABSENT, splits.ABSENT, PUBLIC))
-            seconds[item] = c["seconds"]
+            info = sf.info(str(folder / c["file"]))
+            if info.frames:
+                item = str((folder / c["file"]).relative_to(raw))
+                rows[cid].append(splits.Row(item, splits.ABSENT, splits.ABSENT, PUBLIC))
+                seconds[item] = info.frames / info.samplerate
     return rows, seconds
 
 
@@ -179,11 +181,13 @@ def silence_rows(spec: dict, raw: Path, rejected: set[str], seed: int) -> tuple[
 def build(cfg: dict, command_cfg: dict, paths: dict) -> tuple[Rows, dict[str, float]]:
     """Every split file of the version by name, and the seconds of every item in them."""
     spec = cfg["split"]
-    learned = command.learned(command_cfg)
-    command_of = {c["text"]: c["id"] for c in learned}
+    names = kws.classes(command_cfg, cfg["commands"])
+    # A learned command the net leaves out is other to it.
+    command_of = {c["text"]: c["id"] if c["id"] in names else kws.OTHER for c in command.learned(command_cfg)}
     manifests = [
         yaml.safe_load((paths["interim"] / "command" / SETS[s] / "manifest.yaml").read_text(encoding="utf-8"))["clips"]
         for s in ("positives", "negatives")
+        if spec["tts"]
     ]
     voices = {voice_of(c) for clips in manifests for c in clips if c.get("kept")} - {splits.ABSENT}
     roles = splits.speaker_roles(voices, {"val": spec["val_voices"]}, "train", spec["seed"])
@@ -193,13 +197,18 @@ def build(cfg: dict, command_cfg: dict, paths: dict) -> tuple[Rows, dict[str, fl
     for clips in manifests:
         for (role, cls), rows in tts_rows(clips, paths["interim"], roles, command_of).items():
             files.setdefault(file_name(role, cls, "tts"), []).extend(rows)
-    real, lengths = hf_rows(paths["raw"], spec["hf_extract"], command_of)
+    real, lengths = hf_rows(paths["raw"], spec["hf_extract"], command_of) if spec["hf_extract"] else ({}, {})
     seconds |= lengths
-    theirs, lengths = kws_vi_rows(paths["raw"], spec["kws_vi_command"], set(command_of.values()))
+    theirs, lengths = kws_vi_rows(paths["raw"], spec["kws_vi_command"], set(names[: names.index(kws.OTHER)]))
     seconds |= lengths
-    for cls in kws.classes(command_cfg):
-        if rows := real.get(cls, []) + theirs.get(cls, []):
-            files[file_name("train", cls, "real")] = rows
+    held_folders = spec["kws_vi_command"]["val_folders"]
+    for cls in names:
+        rows = real.get(cls, []) + theirs.get(cls, [])
+        val = [r for r in rows if any(r.item.startswith(f + "/") for f in held_folders)]
+        if train := [r for r in rows if r not in val]:
+            files[file_name("train", cls, "real")] = train
+        if val:
+            files[file_name("val", cls, "real")] = val
     speech, lengths = speech_rows(spec, paths, list(command_of), held)
     seconds |= lengths
     rejected = set(screen.rejected(paths["interim"]))
@@ -214,7 +223,7 @@ def build(cfg: dict, command_cfg: dict, paths: dict) -> tuple[Rows, dict[str, fl
 def notes(cfg: dict, command_cfg: dict, files: Rows, seconds: dict[str, float]) -> str:
     """SPLIT.md ahead of the checksums: rules, seed, and each file's class, rows and hours."""
     spec = cfg["split"]
-    names = kws.classes(command_cfg)
+    names = kws.classes(command_cfg, cfg["commands"])
     table = "\n".join(
         f"| `{name}` | `{class_of(name, names)}` | {len(rows)} | {splits.hours(rows, seconds):.2f} |"
         for name, rows in files.items()
@@ -294,9 +303,10 @@ def simulate(cfg: dict, paths: dict) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("step", choices=["split", "simulate"])
-    step = parser.parse_args(argv).step
-    cfg, paths = load_yaml(kws.CONFIG), data_paths()
-    if step == "simulate":
+    parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
+    args = parser.parse_args(argv)
+    cfg, paths = apply_overrides(load_yaml(kws.CONFIG), args.overrides), data_paths()
+    if args.step == "simulate":
         simulate(cfg, paths)
         return 0
     return cut_split(cfg, load_yaml(command.CONFIG), paths)
