@@ -187,8 +187,15 @@ def said(rng: np.random.Generator, units: np.ndarray, frames: int) -> np.ndarray
 
 
 def log_softmax(logits: np.ndarray) -> np.ndarray:
-    top = logits.max(axis=0)
-    return (logits - top - np.log(np.exp(logits - top).sum(axis=0))).astype(np.float32)
+    """Log-probabilities per frame of logits (classes, frames): exp and log in double, an exact sum, one rounding to
+    float32, so the golden set comes out the same on every CPU (KEHOACH 3.14)."""
+    out = np.empty(logits.shape, dtype=np.float32)
+    for t in range(logits.shape[1]):
+        column = [float(v) for v in logits[:, t]]
+        top = max(column)
+        total = math.log(math.fsum(math.exp(v - top) for v in column))
+        out[:, t] = [v - top - total for v in column]
+    return out
 
 
 def case(windows: list[np.ndarray], lexicon: list[list[np.ndarray]], thresholds: np.ndarray, skip: bool = True):
