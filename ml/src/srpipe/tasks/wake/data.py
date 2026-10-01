@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -281,17 +280,9 @@ def simulate(cfg: dict, paths: dict[str, Path]) -> None:
         twins = [d for d in sorted(out.parent.parent.glob(f"*/{split_file.stem}")) if d != out]
         twin = next((d for d in twins if built_as(d, device_cfg, split_file, repeats)), None)
         if twin is not None:
-            print(f"{out}: linked from {link(twin, out)}", flush=True)
+            print(f"{out}: linked from {device.link_build(twin, out)}", flush=True)
             continue
         print(device.build(device_cfg, split_file, paths["raw"], paths["interim"], out, spec["workers"], repeats))
-
-
-def link(built: Path, out: Path) -> Path:
-    """Hard-link every file of a finished build into out, which must hold none of them: no copy, no second run."""
-    out.mkdir(parents=True, exist_ok=True)
-    for f in sorted(built.iterdir()):
-        os.link(f, out / f.name)
-    return built
 
 
 def real_positives(cfg: dict, raw: Path) -> dict[str, float]:

@@ -14,6 +14,7 @@ import hashlib
 import json
 import math
 import multiprocessing
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -405,6 +406,14 @@ def build(
     manifest = out / "manifest.yaml"
     manifest.write_text(yaml.safe_dump(body, allow_unicode=True, sort_keys=False), encoding="utf-8")
     return manifest
+
+
+def link_build(built: Path, out: Path) -> Path:
+    """Hard-link every file of a finished build into out, which must hold none of them: no copy, no second run."""
+    out.mkdir(parents=True, exist_ok=True)
+    for f in sorted(built.iterdir()):
+        os.link(f, out / f.name)
+    return built
 
 
 def playback(speech_root: Path, seconds: float) -> tuple[np.ndarray, list[dict]]:
