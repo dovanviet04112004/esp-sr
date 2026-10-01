@@ -779,16 +779,18 @@ siết báo nhầm để sau, khi có dữ liệu thu thật.
 **Dữ liệu dương** gồm tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, và **người thật nói
 "trợ lý"**: mọi câu có lời đọc ra từ ấy, của kho học lẫn của những kho tiếng Việt lớn trên Hugging Face, trích theo
 lời vào một kho duy nhất (§1.2, kho `hf_extract`); `wake` lấy mẩu người thật chỉ từ kho ấy. Chỉ lấy **chỗ người nói
-ngắt hơi trước và sau từ**, như khi gọi thiết bị. Mốc từ lấy bằng **căn cưỡng bức** (Montreal Forced Aligner, mô hình
-tiếng Việt, chạy trong Docker) trên lời của câu; ngay ngoài hai mốc, qua một khoảng đệm cho sai số của bộ căn và cho
-hơi của phụ âm, mỗi bên phải có một quãng lặng đủ dài mà mọi khung đều thấp hơn khung to nhất của cụm một ngưỡng, **và**
-bộ căn phải đặt từ đứng trước và từ đứng sau cách hai mốc ít nhất một khoảng (bốn số ở cấu hình). Hai phép thử bù nhau:
-phụ âm xát mở đầu từ sau ("x", "s", "kh") nhỏ hơn khung to nhất quá ngưỡng nên lọt phép thử mức, như "bật đèn" trong
-"bật đèn xanh" của lần cắt thử 30/09, còn bộ căn biết từ ấy đã bắt đầu; mốc của bộ căn lệch vài chục ms nên một mình nó
-không đủ. Chỗ nói liền không qua cả hai thì bỏ: cắt sát mốc giữa lời nói liền để lại tiếng từ bên cạnh ở mép, lần
-trích đầu chỉ 1–22% mẩu mỗi cụm có hai mép yên (`docs/measurements/wake.md` §6). Mẩu cắt vào giữa mỗi quãng lặng, giữ
-tối đa một khoảng lặng ở mỗi đầu (cấu hình), nên nghe tròn tiếng. Mẩu được PhoWhisper nghe lại đúng như lúc mô phỏng
-phát, và chỉ giữ khi nó nghe ra đúng "trợ lý", không thừa tiếng nào. Trước khi chạy cả kho, cắt thử vài chục câu để
+ngắt hơi sau cụm**: nhãn của `wake` và cuối cửa sổ của `kws` đều neo ở đó, còn tiếng nói ngay trước cụm là chuyện
+thường khi gọi thiết bị ("ơi trợ lý", "này bật đèn"). Mốc từ lấy bằng **căn cưỡng bức** (Montreal Forced Aligner, mô
+hình tiếng Việt, chạy trong Docker) trên lời của câu; ngay sau mốc cuối, qua một khoảng đệm cho sai số của bộ căn và cho
+hơi của phụ âm, phải có một quãng lặng đủ dài mà mọi khung đều thấp hơn khung to nhất của cụm một ngưỡng, **và** bộ căn
+phải đặt từ đứng sau cách mốc cuối ít nhất một khoảng (bốn số ở cấu hình). Hai phép thử bù nhau: phụ âm xát mở đầu từ
+sau ("x", "s", "kh") nhỏ hơn khung to nhất quá ngưỡng nên lọt phép thử mức, như "bật đèn" trong "bật đèn xanh" của lần
+cắt thử 30/09, còn bộ căn biết từ ấy đã bắt đầu; mốc của bộ căn lệch vài chục ms nên một mình nó không đủ. Mép trước cắt
+vào giữa quãng lặng khi có, không thì ở mốc đầu lùi một khoảng đệm. Bắt lặng cả hai bên thì chỉ chừng 1% chỗ nói một cụm
+qua luật, vì "trợ lý" và các lệnh hầu như luôn nằm giữa câu (`docs/measurements/wake.md` §6). Mẩu giữ tối đa một khoảng
+lặng ở mỗi đầu (cấu hình) và được làm mềm mép. Mẩu được PhoWhisper nghe lại đúng như lúc mô phỏng
+phát, và chỉ giữ khi nó nghe ra đúng cụm, không thừa tiếng nào, nên mẩu còn nghe ra mảnh từ phía trước thì bị loại.
+Kho có sẵn trên đĩa cắt lại được ngay; câu của Hugging Face đã xóa sau lần cắt trước, tải lại chờ E11-T18. Trước khi chạy cả kho, cắt thử vài chục câu để
 nghe. Mốc từng từ đọc từ chú ý chéo của PhoWhisper thì không dùng: nó chậm hơn 6 s mỗi mẩu trên card 4 GB, và mốc từ
 của Whisper kém căn cưỡng bức, lý do WhisperX (Bain và cộng sự, 2023) căn lại bằng mô hình âm vị. Các kho ấy không có
 mã người nói, nên mẩu cắt chỉ vào `train`.
