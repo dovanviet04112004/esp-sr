@@ -3,15 +3,17 @@ silence stretches that keep each noise file in one role."""
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import numpy as np
 import pytest
 import soundfile as sf
+import yaml
 
 from srpipe.core import splits
 from srpipe.core.audio_io import write_wav
-from srpipe.core.config import load_yaml
+from srpipe.core.config import CONFIGS, load_yaml
 from srpipe.generated import grid
 from srpipe.tasks import command
 from srpipe.tasks.command import kws
@@ -106,3 +108,27 @@ def test_silence_stretches_keep_each_noise_file_in_one_role(tmp_path: Path) -> N
             assert seconds[r.item] == pytest.approx(end - start, abs=1e-3)
     again, _ = data.silence_rows(spec, raw, set(), 7)
     assert again == rows
+
+
+def test_simulate_links_a_file_another_version_built_the_same_way(tmp_path: Path, monkeypatch) -> None:
+    cfg = copy.deepcopy(load_yaml(kws.CONFIG))
+    paths = {k: tmp_path / k for k in ("splits", "processed", "raw", "interim")}
+    base = load_yaml(CONFIGS / cfg["features"])
+    device_cfg = base | {"session": base["session"] | {"items": cfg["simulate"]["session_items"]}}
+    for version in ("v1", "v2"):
+        folder = paths["splits"] / "command_kws" / version
+        folder.mkdir(parents=True)
+        (folder / "train_silence_noise.txt").write_text("noise/a.wav@0.000-1.000\t-\t-\tpublic\n", encoding="utf-8")
+    split_file = paths["splits"] / "command_kws" / "v1" / "train_silence_noise.txt"
+    built = paths["processed"] / "command_kws" / "v1" / "train_silence_noise"
+    built.mkdir(parents=True)
+    (built / "shard_00000.features.npy").write_bytes(b"x")
+    body = {"config": device_cfg, "split": {"file": split_file.name, "sha256": splits.sha256_of(split_file)}}
+    body |= {"repeats": 1, "pads_s": list(cfg["simulate"]["pads_s"]), "pitch": True}
+    (built / "manifest.yaml").write_text(yaml.safe_dump(body, allow_unicode=True), encoding="utf-8")
+    monkeypatch.setattr(data.device, "build", lambda *a, **k: pytest.fail("built again"))
+    cfg["split"]["version"] = "v2"
+    data.simulate(cfg, paths)
+    out = paths["processed"] / "command_kws" / "v2" / "train_silence_noise"
+    assert (out / "manifest.yaml").samefile(built / "manifest.yaml")
+    assert (out / "shard_00000.features.npy").samefile(built / "shard_00000.features.npy")

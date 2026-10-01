@@ -270,7 +270,7 @@ def built_as(out: Path, device_cfg: dict, split_file: Path, repeats: int, pads_s
 def simulate(cfg: dict, paths: dict) -> None:
     """Every file of the split through the board simulation, one utterance a session, with pitch and the window's
     pads, into processed/command_kws/<version>/<file>, smallest first; a file already built the same way is left as
-    it is."""
+    it is, or hard-linked from the version that built it."""
     spec, version = cfg["simulate"], cfg["split"]["version"]
     base = load_yaml(CONFIGS / cfg["features"])
     device_cfg = base | {"session": base["session"] | {"items": spec["session_items"]}}
@@ -281,6 +281,11 @@ def simulate(cfg: dict, paths: dict) -> None:
         repeats = spec["repeats"].get(source_of(split_file.name), 1)
         if built_as(out, device_cfg, split_file, repeats, pads):
             print(f"{out}: already built", flush=True)
+            continue
+        twins = [d for d in sorted(out.parent.parent.glob(f"*/{split_file.stem}")) if d != out]
+        twin = next((d for d in twins if built_as(d, device_cfg, split_file, repeats, pads)), None)
+        if twin is not None:
+            print(f"{out}: linked from {device.link_build(twin, out)}", flush=True)
             continue
         raw, interim, workers = paths["raw"], paths["interim"], spec["workers"]
         print(device.build(device_cfg, split_file, raw, interim, out, workers, repeats, tuple(pads), pitch=True))
