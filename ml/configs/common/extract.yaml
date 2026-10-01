@@ -23,13 +23,14 @@ pilot:                             # fetch --pilot, cut, listen: a sample of eve
   listen_per_phrase: 8             # kept clips copied to cache/listen/<extract>/, taken from source after source
   level_dbfs: -26.0                # the copies match this over the frames within cut.quiet_below_peak_db of the peak
   seed: 20261001
-cut:                               # only a phrase said with a pause on each side is cut (KEHOACH 3.11)
+cut:                               # only a phrase said with a pause after it is cut (KEHOACH 3.11)
+  sides: after                     # sides that must pause: after, or both; both kept 1% of phrases (wake.md 6)
   frame_s: 0.01                    # level frames of the pause test
   guard_s: 0.03                    # next to each aligned bound, out of the test: the aligner's error, a consonant's breath
-  min_pause_s: 0.08                # quiet each side needs past the guard; less is running speech, left out
+  min_pause_s: 0.08                # quiet a pausing side needs past the guard; less is running speech, left out
   margin_s: 0.15                   # most a clip keeps past each aligned bound; a shorter pause is cut in its middle
   quiet_below_peak_db: 20.0        # every frame of a pause at least this far under the phrase's loudest frame
-  min_word_gap_s: 0.08             # least aligned gap to the word before and after: a weak onset passes the level test
+  min_word_gap_s: 0.08             # least aligned gap to a pausing side's word: a weak onset passes the level test
   align_batch: 1500                # sentences per aligner run; its peak memory grows with it
 extracts:
   hf_extract:

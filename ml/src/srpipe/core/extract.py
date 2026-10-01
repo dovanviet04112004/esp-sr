@@ -58,6 +58,7 @@ RETRY_CODES = (429, 500, 502, 503, 504)
 STROKED_D = str.maketrans("đĐ", "dD")
 INDEX_FIELDS = ("file", "phrase", "seconds", "origin", "text", "source", "revision", "key", "heard")
 LEVEL_FLOOR = 1e-12  # -120 dB: digital silence counts as quiet
+SIDES = ("after", "both")
 
 
 class Http:
@@ -535,6 +536,17 @@ def fetch_local(job: Job, matches: list[dict]) -> None:
         job.save_whole(m["key"], reader.read(m["item"]), m)
 
 
+def recut(job: Job, repo: str) -> int:
+    """Queue every scanned match of a local source for cut again, under the rule of the moment, its sentences read anew
+    from raw/; a fetched source's sentences were deleted once cut. The number queued."""
+    source = next((s for s in job.spec["sources"] if s["repo"] == repo), None)
+    if source is None or source["kind"] != "local":
+        raise ValueError(f"{repo}: no local source of {job.name}; only those are cut again without fetching")
+    matches = [m for prefix in source["corpora"] for m in read_jsonl(job.scan_file(source, prefix))]
+    fetch_local(job, matches)
+    return len(matches)
+
+
 def scan_parts(job: Job, pins: dict) -> list[tuple[dict, str, dict]]:
     """(source, part, file info) of every text part of every source."""
     parts = []
@@ -733,9 +745,9 @@ def fetch(job: Job, follow: bool, phrase: str | None = None, pilot: bool = False
         time.sleep(job.cfg["follow_poll_s"])
 
 
-def phrase_spans(words: list[dict], phrase: list[tuple[str, ...]]) -> list[tuple[float, float, float]]:
-    """Start and end in seconds of every run of aligned words that reads as phrase, and its least aligned gap to the
-    word before or after it, infinite where no word is; the aligner leaves silence out of its words."""
+def phrase_spans(words: list[dict], phrase: list[tuple[str, ...]]) -> list[tuple[float, float, float, float]]:
+    """Start and end in seconds of every run of aligned words that reads as phrase, and its aligned gaps to the word
+    before it and to the word after it, infinite where no word is; the aligner leaves silence out of its words."""
     heard = [(corpus.reading(s), i) for i, w in enumerate(words) for s in corpus.words(w["word"])]
     n = len(phrase)
     spans = []
@@ -746,7 +758,7 @@ def phrase_spans(words: list[dict], phrase: list[tuple[str, ...]]) -> list[tuple
         start, end = words[first]["start"], words[last]["end"]
         before = start - words[first - 1]["end"] if first > 0 else math.inf
         after = words[last + 1]["start"] - end if last + 1 < len(words) else math.inf
-        spans.append((start, end, min(before, after)))
+        spans.append((start, end, before, after))
     return spans
 
 
@@ -789,8 +801,8 @@ def quiet_run(quiet: np.ndarray, frame: int, step: int, most: int) -> int:
 
 def pause_bounds(x: np.ndarray, span: tuple[float, float], spec: dict) -> tuple[float, float] | None:
     """Seconds to cut a phrase aligned at span out of its sentence x: into the pause on each side past guard_s, at most
-    margin_s past the aligned bound. None for running speech, where a side lacks min_pause_s of frames all
-    quiet_below_peak_db under the phrase's loudest (KEHOACH 3.11)."""
+    margin_s past the aligned bound, or guard_s before the start where speech runs into it. None where a side that
+    cut.sides names lacks min_pause_s of frames all quiet_below_peak_db under the phrase's loudest (KEHOACH 3.11)."""
     frame_s = spec["frame_s"]
     hop = round(frame_s * grid.SAMPLE_RATE_HZ)
     n = len(x) // hop
@@ -803,7 +815,7 @@ def pause_bounds(x: np.ndarray, span: tuple[float, float], spec: dict) -> tuple[
     reach = most - guard
     before = quiet_run(quiet, first - guard - 1, -1, reach)
     after = quiet_run(quiet, last + guard, 1, reach)
-    if min(before, after) < need:
+    if (min(before, after) if spec["sides"] == "both" else after) < need:
         return None
     start = first - guard - (before if before == reach else before // 2)
     stop = last + guard + (after if after == reach else after // 2)
@@ -811,10 +823,12 @@ def pause_bounds(x: np.ndarray, span: tuple[float, float], spec: dict) -> tuple[
 
 
 def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cache: Path) -> None:
-    """Align the sentences in batches, cut each phrase said with a pause on each side, one the aligner also sets apart
-    from its neighbours, into those pauses, keep the clips the checker hears as the phrase alone, then delete the
+    """Align the sentences in batches, cut each phrase said with a pause on the sides cut.sides names, where the aligner
+    also sets it apart from its neighbours, keep the clips the checker hears as the phrase alone, then delete the
     sentences and every try."""
     spec, rate = job.cfg["cut"], grid.SAMPLE_RATE_HZ
+    if spec["sides"] not in SIDES:
+        raise ValueError(f"cut: sides is {spec['sides']!r}, none of {', '.join(SIDES)}")
     if spec["guard_s"] + spec["min_pause_s"] > spec["margin_s"]:
         raise ValueError("cut: guard_s + min_pause_s must fit inside margin_s")
     pad, ramp_s = np.zeros(round(device["session"]["pad_s"] * rate)), device["talker"]["edge_ramp_s"]
@@ -831,8 +845,8 @@ def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cach
         for m in batch:
             x = sf.read(str(job.whole(m["key"])), dtype="float64")[0]
             for p in m["phrases"]:
-                for n, (start, end, gap_s) in enumerate(phrase_spans(times.get(m["key"], []), sounds[p])):
-                    apart = gap_s >= spec["min_word_gap_s"]
+                for n, (start, end, before_s, after_s) in enumerate(phrase_spans(times.get(m["key"], []), sounds[p])):
+                    apart = (min(before_s, after_s) if spec["sides"] == "both" else after_s) >= spec["min_word_gap_s"]
                     cut_s = pause_bounds(x, (start, end), spec) if apart else None
                     found.append(
                         {"key": m["key"], "n": n, "phrase": p, "span": (start, end), "apart": apart, "cut": cut_s}
@@ -1031,12 +1045,13 @@ def listen(job: Job) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("name", help="an extract of configs/common/extract.yaml")
-    parser.add_argument("step", choices=["scan", "fetch", "cut", "report", "listen"])
+    parser.add_argument("step", choices=["scan", "fetch", "cut", "recut", "report", "listen"])
     parser.add_argument("--follow", action="store_true", help="fetch or cut, keep taking up what the step before adds")
     parser.add_argument("--pilot", action="store_true", help="fetch only the pilot's sample of every phrase")
     parser.add_argument(
         "--phrase", help="fetch only the matches that say this phrase of the extract, ahead of the rest"
     )
+    parser.add_argument("--source", default="local", help="recut: the local source whose sentences are cut again")
     args = parser.parse_args(argv)
     cfg, paths = load_yaml(CONFIG), data_paths()
     if args.step in ("report", "listen"):
@@ -1052,6 +1067,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.step == "fetch":
         fetch(job, args.follow, args.phrase, args.pilot)
     else:
+        if args.step == "recut":
+            print(f"recut: {recut(job, args.source)} sentences queued", flush=True)
         cut(job, load_yaml(TTS_CONFIG), load_yaml(CONFIGS / "scenes" / "device.yaml"), paths["cache"], args.follow)
     return 0
 

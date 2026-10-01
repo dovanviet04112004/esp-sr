@@ -12,11 +12,13 @@ from types import SimpleNamespace
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 import requests
 import soundfile as sf
 import yaml
 
 from srpipe.core import extract
+from srpipe.core.audio_io import write_wav
 from srpipe.core.config import load_yaml
 from srpipe.generated import grid
 
@@ -152,12 +154,13 @@ def spoken(seconds: float, words: list[tuple[float, float]]) -> np.ndarray:
     return x
 
 
-def test_only_a_phrase_with_a_pause_each_side_is_cut_into_those_pauses(tmp_path: Path, monkeypatch) -> None:
+def test_a_phrase_is_cut_where_a_pause_follows_it(tmp_path: Path, monkeypatch) -> None:
     job = job_for(tmp_path, [{"kind": "tsv_tar", "repo": "s/g", "revision": "rev0", "synthetic": True}], FakeHttp({}))
     words = {
         "s_g__1": [("nhờ", 0.1, 0.4), ("trợ", 0.6, 0.8), ("lí", 0.8, 1.0), ("nhé", 1.3, 1.6)],
         "s_g__2": [("nhờ", 0.1, 0.4), ("trợ", 0.4, 0.6), ("lý", 0.6, 0.8), ("nhé", 0.8, 1.1)],
         "s_g__3": [("nhờ", 0.1, 0.4), ("trợ", 0.6, 0.8), ("lý", 0.8, 1.0), ("xanh", 1.02, 1.6)],
+        "s_g__4": [("nhờ", 0.1, 0.6), ("trợ", 0.6, 0.8), ("lý", 0.8, 1.0), ("nhé", 1.3, 1.6)],
     }
     # A soft onset: the level test hears quiet where the aligner already has the next word.
     heard_from = {"s_g__3": {"xanh": 1.3}}
@@ -174,36 +177,58 @@ def test_only_a_phrase_with_a_pause_each_side_is_cut_into_those_pauses(tmp_path:
     device = load_yaml(extract.CONFIGS / "scenes" / "device.yaml")
     extract.cut(job, {}, device, tmp_path, False)
     spec = job.cfg["cut"]
-    (clip,) = (tmp_path / "raw/speech/t/tro_ly").glob("*.wav")
-    assert clip.stem.startswith("s_g__1") and len(asked) == 1
-    assert abs(sf.info(str(clip)).duration - (1.0 - 0.6 + 2 * spec["margin_s"])) < 0.002
-    x = sf.read(str(clip))[0]
-    assert np.abs(x[: round(0.1 * grid.SAMPLE_RATE_HZ)]).max() == 0 and np.abs(x[-160:]).max() == 0
+    clips = {c.stem: c for c in (tmp_path / "raw/speech/t/tro_ly").glob("*.wav")}
+    assert sorted(clips) == ["s_g__1__0", "s_g__4__0"] and len(asked) == 2
+    paused, running = (sf.read(str(clips[k]))[0] for k in ("s_g__1__0", "s_g__4__0"))
+    assert abs(len(paused) / grid.SAMPLE_RATE_HZ - (1.0 - 0.6 + 2 * spec["margin_s"])) < 0.002
+    assert abs(len(running) / grid.SAMPLE_RATE_HZ - (1.0 - 0.6 + spec["guard_s"] + spec["margin_s"])) < 0.002
+    assert np.abs(paused[: round(0.1 * grid.SAMPLE_RATE_HZ)]).max() == 0 and np.abs(paused[-160:]).max() == 0
+    assert np.abs(running[:160]).max() > 0 and np.abs(running[-160:]).max() == 0
     assert not list((tmp_path / "cache/extract/t/whole").iterdir())
-    (row,) = extract.read_index(tmp_path / "raw/speech/t")
-    assert row["file"] == str(clip.relative_to(tmp_path / "raw/speech/t")) and row["origin"] == "synth"
-    assert abs(row["seconds"] - sf.info(str(clip)).duration) < 0.002
+    rows = extract.read_index(tmp_path / "raw/speech/t")
+    folder = tmp_path / "raw/speech/t"
+    assert sorted(r["file"] for r in rows) == sorted(str(c.relative_to(folder)) for c in clips.values())
+    assert all(r["origin"] == "synth" for r in rows)
     manifest = yaml.safe_load((tmp_path / "manifests/speech/t.yaml").read_text(encoding="utf-8"))
-    assert manifest["counts"]["by_phrase"] == {"trợ lý": 1} and manifest["sources"][0]["synthetic"]
+    assert manifest["counts"]["by_phrase"] == {"trợ lý": 2} and manifest["sources"][0]["synthetic"]
     records = {f.stem: extract.read_jsonl(f)[0] for f in (tmp_path / "cache/extract/t/cut").glob("*.jsonl")}
     assert (records["s_g__1"]["paused"], records["s_g__2"]["paused"], records["s_g__2"]["clips"]) == (1, 0, [])
-    assert (records["s_g__3"]["apart"], records["s_g__3"]["paused"]) == (0, 0)
+    assert (records["s_g__3"]["apart"], records["s_g__3"]["paused"], records["s_g__4"]["paused"]) == (0, 0, 1)
     soft = spoken(2.0, [(0.1, 0.4), (0.6, 1.0), (1.3, 1.6)])
     assert extract.pause_bounds(soft, (0.6, 1.0), spec) is not None
     short = spoken(2.0, [(0.1, 0.49), (0.6, 1.0), (1.3, 1.6)])
     start, _ = extract.pause_bounds(short, (0.6, 1.0), spec)
     assert 0.49 < start < 0.6 - spec["guard_s"]
+    both = spec | {"sides": "both"}
+    assert extract.pause_bounds(spoken(2.0, [(0.1, 0.6), (0.6, 1.0), (1.3, 1.6)]), (0.6, 1.0), both) is None
+    assert extract.pause_bounds(soft, (0.6, 1.0), both) is not None
 
 
-def test_a_phrase_is_apart_by_its_least_aligned_gap_and_alone_at_the_edges() -> None:
+def test_a_phrase_has_its_aligned_gaps_to_the_words_on_each_side() -> None:
     sounds = extract.Phrases(["bật đèn"]).sounds[0]
     words = [
         {"word": w, "start": a, "end": b} for w, a, b in [("bật", 0.3, 0.4), ("đèn", 0.6, 0.9), ("xanh", 0.92, 1.3)]
     ]
-    ((start, end, gap_s),) = extract.phrase_spans(words, sounds)
-    assert (start, end) == (0.3, 0.9) and abs(gap_s - 0.02) < 1e-9
-    ((_, _, alone),) = extract.phrase_spans(words[:2], sounds)
+    ((start, end, before, after),) = extract.phrase_spans(words, sounds)
+    assert (start, end) == (0.3, 0.9) and before == float("inf") and abs(after - 0.02) < 1e-9
+    ((_, _, _, alone),) = extract.phrase_spans(words[:2], sounds)
     assert alone == float("inf")
+
+
+def test_recut_queues_a_local_sources_sentences_again(tmp_path: Path) -> None:
+    sources = [
+        {"kind": "local", "repo": "local", "corpora": ["speech/x/"]},
+        {"kind": "tsv_tar", "repo": "s/g", "revision": "rev0"},
+    ]
+    job = job_for(tmp_path, sources, FakeHttp({}))
+    write_wav(tmp_path / "raw/speech/x/a.wav", np.full(grid.SAMPLE_RATE_HZ, 0.1))
+    match = {"key": "local__a", "text": "nhờ trợ lý", "phrases": ["trợ lý"], "fetch": "speech/x/"}
+    match["item"] = "speech/x/a.wav"
+    extract.done_write(job.scan_file(sources[0], "speech/x/"), [match])
+    assert extract.recut(job, "local") == 1
+    assert job.whole("local__a").exists() and extract.read_jsonl(job.whole("local__a").with_suffix(".json")) == [match]
+    with pytest.raises(ValueError):
+        extract.recut(job, "s/g")
 
 
 def test_a_stream_that_breaks_goes_on_from_the_byte_it_reached() -> None:
