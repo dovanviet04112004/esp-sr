@@ -25,6 +25,7 @@ pilot:                             # fetch --pilot, cut, listen: a sample of eve
   seed: 20261001
 cut:                               # only a phrase said with a pause after it is cut (KEHOACH 3.11)
   sides: after                     # sides that must pause: after, or both; both kept 1% of phrases (wake.md 6)
+  hear: false                      # PhoWhisper keeps a cut it hears as the phrase alone; off, text and aligner vouch
   frame_s: 0.01                    # level frames of the pause test
   guard_s: 0.03                    # next to each aligned bound, out of the test: the aligner's error, a consonant's breath
   min_pause_s: 0.08                # quiet a pausing side needs past the guard; less is running speech, left out

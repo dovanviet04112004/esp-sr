@@ -156,6 +156,7 @@ def spoken(seconds: float, words: list[tuple[float, float]]) -> np.ndarray:
 
 def test_a_phrase_is_cut_where_a_pause_follows_it(tmp_path: Path, monkeypatch) -> None:
     job = job_for(tmp_path, [{"kind": "tsv_tar", "repo": "s/g", "revision": "rev0", "synthetic": True}], FakeHttp({}))
+    job.cfg["cut"]["hear"] = True
     words = {
         "s_g__1": [("nhờ", 0.1, 0.4), ("trợ", 0.6, 0.8), ("lí", 0.8, 1.0), ("nhé", 1.3, 1.6)],
         "s_g__2": [("nhờ", 0.1, 0.4), ("trợ", 0.4, 0.6), ("lý", 0.6, 0.8), ("nhé", 0.8, 1.1)],
@@ -202,6 +203,24 @@ def test_a_phrase_is_cut_where_a_pause_follows_it(tmp_path: Path, monkeypatch) -
     both = spec | {"sides": "both"}
     assert extract.pause_bounds(spoken(2.0, [(0.1, 0.6), (0.6, 1.0), (1.3, 1.6)]), (0.6, 1.0), both) is None
     assert extract.pause_bounds(soft, (0.6, 1.0), both) is not None
+
+
+def test_without_the_checker_every_cut_is_kept(tmp_path: Path, monkeypatch) -> None:
+    job = job_for(tmp_path, [{"kind": "tsv_tar", "repo": "s/g", "revision": "rev0"}], FakeHttp({}))
+    job.cfg["cut"]["hear"] = False
+    said = [("nhờ", 0.1, 0.6), ("trợ", 0.6, 0.8), ("lý", 0.8, 1.0), ("nhé", 1.3, 1.6)]
+    job.save_whole(
+        "s_g__1",
+        spoken(2.0, [(a, b) for _, a, b in said]),
+        {"key": "s_g__1", "text": "nhờ trợ lý nhé", "phrases": ["trợ lý"]},
+    )
+    aligned = {"s_g__1": [{"word": w, "start": a, "end": b} for w, a, b in said]}
+    monkeypatch.setattr(extract.engines, "align", lambda clips, *a: {c["id"]: aligned[c["id"]] for c in clips})
+    monkeypatch.setattr(extract.engines, "hear_text", lambda *a: pytest.fail("the checker was asked"))
+    device = load_yaml(extract.CONFIGS / "scenes" / "device.yaml")
+    extract.cut(job, {}, device, tmp_path, False)
+    (row,) = extract.read_index(tmp_path / "raw/speech/t")
+    assert row["phrase"] == "trợ lý" and row["heard"] == ""
 
 
 def test_a_phrase_has_its_aligned_gaps_to_the_words_on_each_side() -> None:

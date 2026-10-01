@@ -822,10 +822,28 @@ def pause_bounds(x: np.ndarray, span: tuple[float, float], spec: dict) -> tuple[
     return round(start * frame_s, 3), round(stop * frame_s, 3)
 
 
+def heard_alone(
+    job: Job, found: list[dict], paused: list[int], sounds: dict, play: tuple, run: tuple
+) -> dict[int, str]:
+    """The cuts the checker hears as their phrase alone, played as the simulation plays them, with what it heard."""
+    pad, ramp_s = play
+    tts, work, cache = run
+    tries = []
+    for i in paused:
+        wav = work / "tries" / f"{i}.wav"
+        write_wav(
+            wav, np.concatenate([pad, ramped(segment(job.whole(found[i]["key"]), *found[i]["cut"]), ramp_s), pad])
+        )
+        tries.append({"id": str(i), "wav": str(wav)})
+    heard = engines.hear_text(tries, tts, work, cache) if tries else {}
+    shutil.rmtree(work / "tries", ignore_errors=True)
+    return {i: heard[str(i)] for i in paused if corpus.sounds(heard[str(i)]) == sounds[found[i]["phrase"]]}
+
+
 def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cache: Path) -> None:
     """Align the sentences in batches, cut each phrase said with a pause on the sides cut.sides names, where the aligner
-    also sets it apart from its neighbours, keep the clips the checker hears as the phrase alone, then delete the
-    sentences and every try."""
+    also sets it apart from its neighbours, keep every cut or, with cut.hear, those the checker hears as the phrase
+    alone, then delete the sentences and every try."""
     spec, rate = job.cfg["cut"], grid.SAMPLE_RATE_HZ
     if spec["sides"] not in SIDES:
         raise ValueError(f"cut: sides is {spec['sides']!r}, none of {', '.join(SIDES)}")
@@ -852,16 +870,10 @@ def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cach
                         {"key": m["key"], "n": n, "phrase": p, "span": (start, end), "apart": apart, "cut": cut_s}
                     )
         paused = [i for i, o in enumerate(found) if o["cut"]]
-        tries = []
-        for i in paused:
-            wav = work / "tries" / f"{i}.wav"
-            write_wav(
-                wav, np.concatenate([pad, ramped(segment(job.whole(found[i]["key"]), *found[i]["cut"]), ramp_s), pad])
-            )
-            tries.append({"id": str(i), "wav": str(wav)})
-        heard = engines.hear_text(tries, tts, work, cache) if tries else {}
-        shutil.rmtree(work / "tries", ignore_errors=True)
-        kept = {i: heard[str(i)] for i in paused if corpus.sounds(heard[str(i)]) == sounds[found[i]["phrase"]]}
+        if spec["hear"]:
+            kept = heard_alone(job, found, paused, sounds, (pad, ramp_s), (tts, work, cache))
+        else:
+            kept = dict.fromkeys(paused, "")
         by_key = defaultdict(list)
         for i, o in enumerate(found):
             by_key[o["key"]].append((i, o))
