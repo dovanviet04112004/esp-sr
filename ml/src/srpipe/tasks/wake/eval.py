@@ -138,24 +138,40 @@ def board(model, mean: np.ndarray, std: np.ndarray, cfg: dict, paths: dict, thre
         if not (root / r["session"]).exists():
             continue
         features, vad = session_features(root / r["session"], chain_cfg, mel)
-        s = smooth(probabilities(model, Shard(features, vad, [], False), mean, std, dev), cfg["eval"]["smooth_hops"])
-        spans = utterances(vad, spec)
-        fired = triggers(s, threshold, lockout)
-        inside = [any(a <= f <= b + after for a, b in spans) for f in fired]
-        peaks = [float(s[a : b + after + 1].max()) for a, b in spans]
-        seconds = len(vad) / rate
-        results.append(
-            BoardSession(
-                r["session"],
-                session_kind(r["kind"], r["prompt"], corpus.sounds(cfg["word"])),
-                r["prompt"],
-                seconds,
-                peaks,
-                len(fired),
-                inside.count(False),
-            )
-        )
+        kind = session_kind(r["kind"], r["prompt"], corpus.sounds(cfg["word"]))
+        heard = (r["session"], kind, r["prompt"])
+        results.append(scored(heard, features, vad, (model, mean, std, dev), cfg, (after, lockout), threshold))
     return results
+
+
+def scored(heard: tuple, features: np.ndarray, vad: np.ndarray, net: tuple, cfg: dict, hops: tuple, threshold: float):
+    """One session's (name, kind, prompt) scored: each utterance's peak, and the triggers inside none of them."""
+    model, mean, std, dev = net
+    after, lockout = hops
+    s = smooth(probabilities(model, Shard(features, vad, [], False), mean, std, dev), cfg["eval"]["smooth_hops"])
+    spans = utterances(vad, cfg["eval"]["board"])
+    fired = triggers(s, threshold, lockout)
+    inside = [any(a <= f <= b + after for a, b in spans) for f in fired]
+    peaks = [float(s[a : b + after + 1].max()) for a, b in spans]
+    seconds = len(vad) / (grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES)
+    return BoardSession(*heard, seconds, peaks, len(fired), inside.count(False))
+
+
+def recording(model, mean: np.ndarray, std: np.ndarray, cfg: dict, wav: Path, threshold: float, dev: str):
+    """A mono recording at the grid's rate scored as a wake session: both microphones hear it, the product's chain
+    and log-mel run on it, its utterances found by the chain's vad."""
+    rate = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
+    device_cfg = load_yaml(CONFIGS / cfg["features"])
+    mics = device.load_microphones(device_cfg["microphone"])
+    chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
+    x, fs = sf.read(wav, dtype="int16")
+    if fs != grid.SAMPLE_RATE_HZ or x.ndim != 1:
+        raise ValueError(f"{wav} is {fs} Hz with shape {x.shape}, not mono at {grid.SAMPLE_RATE_HZ} Hz")
+    n = len(x) // grid.HOP_SAMPLES * grid.HOP_SAMPLES
+    _, figures, features = device.listen(np.stack([x[:n], x[:n]], axis=1), chain_cfg, mel)
+    hops = (round(cfg["train"]["label_s"][1] * rate), round(cfg["eval"]["lockout_s"] * rate))
+    heard = (wav.stem, "wake", cfg["word"])
+    return scored(heard, features, figures[:, 0].astype(bool), (model, mean, std, dev), cfg, hops, threshold)
 
 
 def board_table(results: list[BoardSession], threshold: float) -> str:
@@ -204,14 +220,19 @@ def load_run(run: Path, cfg: dict, step: int | None = None) -> tuple[Tcn, dict, 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("what", choices=["board"])
+    parser.add_argument("what", choices=["board", "wav"])
     parser.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.wake.train")
+    parser.add_argument("--wav", type=Path, help="wav: a mono recording at the grid's rate saying the wake word")
     parser.add_argument("--threshold", type=float, help="instead of the one the run chose on val")
     parser.add_argument("--step", type=int, help="score the net saved at this evaluated step, not the kept one")
     args = parser.parse_args(argv)
     model, stats, cfg, chosen = load_run(args.run, load_yaml(CONFIG), args.step)
     threshold = args.threshold if args.threshold is not None else chosen
-    print(board_table(board(model, stats["mean"], stats["std"], cfg, data_paths(), threshold, "cpu"), threshold))
+    if args.what == "wav":
+        results = [recording(model, stats["mean"], stats["std"], cfg, args.wav, threshold, "cpu")]
+    else:
+        results = board(model, stats["mean"], stats["std"], cfg, data_paths(), threshold, "cpu")
+    print(board_table(results, threshold))
     return 0
 
 
