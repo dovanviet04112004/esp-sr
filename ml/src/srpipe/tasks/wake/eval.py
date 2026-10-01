@@ -48,7 +48,10 @@ def probabilities(model: torch.nn.Module, shard: Shard, mean: np.ndarray, std: n
 
 
 def thresholds(spec: dict) -> np.ndarray:
-    return np.arange(spec["first"], spec["last"] + spec["step"] / 2, spec["step"])
+    """The coarse grid up to fine_from, then the fine one up to last."""
+    coarse = np.arange(spec["first"], spec["fine_from"] - spec["step"] / 2, spec["step"])
+    fine = np.arange(spec["fine_from"], spec["last"] + spec["fine_step"] / 2, spec["fine_step"])
+    return np.concatenate([coarse, fine])
 
 
 def sweep(model, positives: list[Shard], negatives: list[Shard], mean, std, cfg: dict, device: str) -> Sweep:

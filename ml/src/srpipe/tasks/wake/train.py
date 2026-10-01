@@ -229,7 +229,8 @@ def train(
         x = (torch.from_numpy(x.astype(np.float32)).to(device).transpose(1, 2) - mean_t) / std_t
         y = torch.from_numpy(y.astype(np.float32)).to(device)
         logits = model(x)[:, 0, spec["warmup_hops"] :]
-        loss = functional.binary_cross_entropy_with_logits(logits, y[:, spec["warmup_hops"] :])
+        target = y[:, spec["warmup_hops"] :] * (1.0 - spec["label_smoothing"]) + spec["label_smoothing"] / 2
+        loss = functional.binary_cross_entropy_with_logits(logits, target)
         if sentences:
             heard, lengths, targets, counts = sentences.batch()
             heard = (torch.from_numpy(heard.astype(np.float32)).to(device).transpose(1, 2) - mean_t) / std_t

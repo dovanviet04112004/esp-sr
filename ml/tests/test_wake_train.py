@@ -81,7 +81,7 @@ def tiny_cfg() -> dict:
     cfg["model"] = {"kernel": 3, "channels": 4, "dilations": [1, 2]}
     cfg["train"] |= {"window_hops": 32, "warmup_hops": 8, "batch": 16, "steps": 40, "eval_every": 20}
     cfg["train"]["label_s"] = [0.032, 0.048]
-    cfg["eval"]["thresholds"] = {"first": 0.05, "last": 0.95, "step": 0.05}
+    cfg["eval"]["thresholds"] = {"first": 0.05, "step": 0.05, "fine_from": 0.9, "fine_step": 0.01, "last": 0.95}
     return cfg
 
 

@@ -86,6 +86,7 @@ train:                             # E11-T11: python -m srpipe.tasks.wake.train 
   onset_share: 0.25                # of the negative windows, ending within onset_s of a sentence's first speech hop:
   onset_s: 2.0                     #   every positive follows a silence, so a net never shown these fires there
   word_s: 1.2                      # a hard negative this short is a word: its window ends where a positive's label does
+  label_smoothing: 0.0             # BCE targets pulled this far toward 0.5 in total; 0 keeps them 0 and 1
   real_share: 0.01                 # of those positives, from real speech: the 24 real clips' own share (KEHOACH 3.11)
   batch: 128
   steps: 20000
@@ -102,7 +103,7 @@ eval:
   lockout_s: 2.0                   # the device stays awake after a trigger, so a second one inside this is not counted
   false_accepts_per_hour: 3.0      # the threshold is the lowest whose val rate stays at or under this; Cửa 2 is 1,
                                    #   the demo takes more to catch the word (ADR-0011)
-  thresholds: {first: 0.05, last: 0.995, step: 0.005}
+  thresholds: {first: 0.05, step: 0.005, fine_from: 0.99, fine_step: 0.001, last: 0.999}   # kws/wake_th is in permille
   board:                           # sessions recorded through board B, run through the same chain and log-mel
     manifest: device/board_b.csv   # under data/manifests
     pcm_shift: 13                  # the shift the product keeps (E2-T5); other sessions are left out
