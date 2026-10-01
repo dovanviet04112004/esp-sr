@@ -36,5 +36,6 @@ split:                             # data/splits/command_kws/<version>: python -
     val_files: 0.1                 # of each pool's files, held out whole for val
 simulate:                          # python -m srpipe.tasks.command.kws.data simulate, into processed/command_kws/<version>
   workers: 6
+  session_items: 1                 # one utterance a session: a window never reaches the one before it
   pads_s: [1.6, 0.6]               # before: the 94-hop window, 0.75 s of pitch past in it; after: vad's 240 ms hangover
   repeats: {real: 4}               # passes of a file by its source, each in rooms and noise of its own

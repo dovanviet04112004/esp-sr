@@ -268,10 +268,12 @@ def built_as(out: Path, device_cfg: dict, split_file: Path, repeats: int, pads_s
 
 
 def simulate(cfg: dict, paths: dict) -> None:
-    """Every file of the split through the board simulation, with pitch and the window's pads, into
-    processed/command_kws/<version>/<file>, smallest first; a file already built the same way is left as it is."""
+    """Every file of the split through the board simulation, one utterance a session, with pitch and the window's
+    pads, into processed/command_kws/<version>/<file>, smallest first; a file already built the same way is left as
+    it is."""
     spec, version = cfg["simulate"], cfg["split"]["version"]
-    device_cfg = load_yaml(CONFIGS / cfg["features"])
+    base = load_yaml(CONFIGS / cfg["features"])
+    device_cfg = base | {"session": base["session"] | {"items": spec["session_items"]}}
     pads = list(spec["pads_s"])
     folder = paths["splits"] / "command_kws" / version
     for split_file in sorted(folder.glob("*.txt"), key=lambda f: f.stat().st_size):
