@@ -788,9 +788,10 @@ sau ("x", "s", "kh") nhỏ hơn khung to nhất quá ngưỡng nên lọt phép 
 cắt thử 30/09, còn bộ căn biết từ ấy đã bắt đầu; mốc của bộ căn lệch vài chục ms nên một mình nó không đủ. Mép trước cắt
 vào giữa quãng lặng khi có, không thì ở mốc đầu lùi một khoảng đệm. Bắt lặng cả hai bên thì chỉ chừng 1% chỗ nói một cụm
 qua luật, vì "trợ lý" và các lệnh hầu như luôn nằm giữa câu (`docs/measurements/wake.md` §6). Mẩu giữ tối đa một khoảng
-lặng ở mỗi đầu (cấu hình) và được làm mềm mép. Mẩu được PhoWhisper nghe lại đúng như lúc mô phỏng
-phát, và chỉ giữ khi nó nghe ra đúng cụm, không thừa tiếng nào, nên mẩu còn nghe ra mảnh từ phía trước thì bị loại.
-Kho có sẵn trên đĩa cắt lại được ngay; câu của Hugging Face đã xóa sau lần cắt trước, tải lại chờ E11-T18. Trước khi chạy cả kho, cắt thử vài chục câu để
+lặng ở mỗi đầu (cấu hình) và được làm mềm mép. Bộ nghe lại (PhoWhisper nghe mẩu như lúc mô phỏng phát, giữ mẩu nó
+nghe ra đúng cụm, không thừa tiếng) là tuỳ chọn `cut.hear` ở cấu hình; chủ repo tắt nó ngày 01/10, vì lời của câu và
+bộ căn đã bảo đảm cụm có mặt, còn bộ nghe giữ GPU mà TTS và học đang cần; mẩu vì thế có thể còn mảnh của từ trước ở
+mép đầu. Kho có sẵn trên đĩa cắt lại được ngay; câu của Hugging Face đã xóa sau lần cắt trước, tải lại chờ E11-T18. Trước khi chạy cả kho, cắt thử vài chục câu để
 nghe. Mốc từng từ đọc từ chú ý chéo của PhoWhisper thì không dùng: nó chậm hơn 6 s mỗi mẩu trên card 4 GB, và mốc từ
 của Whisper kém căn cưỡng bức, lý do WhisperX (Bain và cộng sự, 2023) căn lại bằng mô hình âm vị. Các kho ấy không có
 mã người nói, nên mẩu cắt chỉ vào `train`.
