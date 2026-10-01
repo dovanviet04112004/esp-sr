@@ -318,3 +318,24 @@ sau "trợ lý" ("minh" 8, "quân" 7, "nam" 6) cho thấy vài truyện audio g�
 **Mốc từ của PhoWhisper không dùng.** Chế độ mốc từng từ (chú ý chéo, kernel eager) trên card 4 GB đầy bộ nhớ (3,9 GB)
 và tràn sang RAM: 240 mẩu ghép chưa xong sau 25 phút, tức hơn 6 s mỗi mẩu, nên không có số. Theo WhisperX (Bain và
 cộng sự, 2023), mốc từ của Whisper kém căn cưỡng bức, và họ cũng căn lại bằng mô hình âm vị.
+
+**Luật lặng hai bên giữ khoảng 1% (01/10).** Đếm trên bản ghi bước cắt của `hf_extract` (36 552 câu đã tải và cắt). "Tìm
+thấy" là chỗ nói cụm mà bộ căn đặt được mốc, "cách" là chỗ bộ căn đặt từ trước và sau cách mốc ≥ 80 ms, "lặng" là chỗ có
+thêm quãng lặng ≥ 80 ms mỗi bên, "giữ" là mẩu PhoWhisper nghe ra đúng cụm.
+
+| Cụm | Câu | Trong đó kho trên đĩa | Tìm thấy | Cách | Lặng | Giữ |
+|---|---|---|---|---|---|---|
+| dừng lại | 14 428 | 944 | 14 584 | 596 | 150 | 142 |
+| mở cửa | 11 675 | 756 | 11 832 | 354 | 78 | 76 |
+| đóng cửa | 7 122 | 353 | 7 182 | 250 | 63 | 57 |
+| trợ lý | 2 155 | 224 | 2 224 | 89 | 26 | 25 |
+| bật đèn | 731 | 63 | 736 | 25 | 14 | 11 |
+| tắt đèn | 612 | 64 | 616 | 62 | 33 | 34 |
+| giảm âm lượng | 46 | 22 | 47 | 2 | 4 | 3 |
+| bật quạt | 40 | 3 | 43 | 4 | 2 | 2 |
+| tăng âm lượng | 39 | 17 | 39 | 2 | 1 | 1 |
+| tắt quạt | 7 | 2 | 7 | 0 | 2 | 1 |
+
+Cột "lặng" có chỗ lớn hơn "cách" vì bản ghi chia đều số đếm cho các cụm cùng câu. Các cụm hầu như luôn nằm giữa câu,
+nên luật giờ chỉ bắt lặng ở mép sau (KẾ HOẠCH §3.11). Audio của các câu Hugging Face đã xóa sau lần cắt ấy, nên chỉ kho
+trên đĩa cắt lại được ngay.
