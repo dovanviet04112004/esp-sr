@@ -998,7 +998,11 @@ cấu hình lọt thành dương. Giọng nhân bản chỉ lấy từ người 
 `val` hay `test` không tới được tập học qua TTS (§1.3).
 
 **Thước** (Cửa 3), chung cho hai đường, ở `srpipe/tasks/command/eval.py`: mỗi lệnh **≥ 90%**, từ chối đúng **≥ 95%**,
-trên tập thu qua board, tách theo người nói và phòng.
+trên tập thu qua board, tách theo người nói và phòng. Mỗi câu `vad` tìm ra chấm một lần ở bước `vad` tắt sau nó, như
+`LENH`: `kws` trên cửa sổ 94 bước của nó, ngưỡng lấy từ `val` của run; `ctc` trên tối đa 3 s tính ngược từ đó, mạng chạy
+lại từ đầu cửa sổ như lúc vào `LENH`, bộ lệnh là mọi dòng của `default_vi.json` qua `lang_vi`, cả lệnh chưa học. Tới khi
+E11-T13 chỉnh `δ₁` `δ₂` trên cụm na ná lệnh, bảng của `ctc` ghi lệnh điểm cao nhất của từng câu và quét `δ₁` để thấy đánh
+đổi giữa nhận và từ chối, chưa kết luận đạt hay trượt. Chấm float để đọc nhanh; số chọn model là số sau int8 (§1.3).
 
 ### 3.13 `synth`
 
