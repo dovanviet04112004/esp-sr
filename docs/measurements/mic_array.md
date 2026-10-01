@@ -145,8 +145,8 @@ loa, hay một phòng ít vang. Lần đo ở nhiệt độ phòng thứ hai, đ
 
 ## 4. Mô phỏng so với board: nền ồn và phổ tiếng nói (E4-T8)
 
-Cửa 3 của `ctc` ở float (`command.md` §1) đúng 48% trên phiên board, trong khi cùng mạng giải tự do câu mô phỏng gần
-đúng. Hai phép đo dưới đây, ngày 02/10 ở dịch 13, chỉ dùng phiên `probe`, không đụng phiên nào của tập chấm.
+Phần 🔬 của E4-T8: mô phỏng của KẾ HOẠCH §1.2 lệch board ở đâu. Hai phép đo dưới đây, ngày 02/10 ở dịch 13, chỉ dùng
+phiên `probe`, không đụng phiên nào của tập chấm.
 
 **Nền ồn theo băng**, `python -m srpipe.scenes.device floor <phiên>…`: dBFS thang sóng vuông của từng kênh, Welch 1 024
 mẫu. Ba phiên `20261001_home_011`–`013` là nền phòng yên 120 s thu sáng 02/10 cho mô phỏng; `20260928_home_003` là
