@@ -4,9 +4,11 @@ loop explains better or two commands too close are rejected."""
 from __future__ import annotations
 
 import itertools
+from pathlib import Path
 
 import numpy as np
 
+from srpipe.golden.gold import read_gold
 from srpipe.tasks.command.ctc.postproc import ctc_score
 
 
@@ -42,14 +44,14 @@ def window(units: list[int], classes: int, frames_each: int = 3) -> np.ndarray:
 
 def test_the_said_command_wins_and_the_rest_are_rejected_by_their_rules() -> None:
     lexicon = [[np.array([0, 1], np.uint8)], [np.array([2, 3], np.uint8), np.array([2, 4], np.uint8)]]
-    said = ctc_score.decide(window([2, 4], 6), lexicon, reject=500, margin=50)
+    said, _ = ctc_score.decide(window([2, 4], 6), lexicon, reject=500, margin=50)
     assert said[0] == 1 and said[1] > 500 and said[2] >= 50 and said[3] <= 500
-    other = ctc_score.decide(window([3, 0], 6), lexicon, reject=100, margin=50)
+    other, _ = ctc_score.decide(window([3, 0], 6), lexicon, reject=100, margin=50)
     assert other[0] == ctc_score.REJECTED and other[3] > 100
     close = [[np.array([0, 1], np.uint8)], [np.array([0, 1], np.uint8)]]
-    tie = ctc_score.decide(window([0, 1], 6), close, reject=1000, margin=1)
+    tie, _ = ctc_score.decide(window([0, 1], 6), close, reject=1000, margin=1)
     assert tie[0] == ctc_score.REJECTED and tie[2] == 0
-    short = ctc_score.decide(window([0], 6, 1), [[np.array([0, 1, 2, 3], np.uint8)]], reject=1000, margin=0)
+    short, _ = ctc_score.decide(window([0], 6, 1), [[np.array([0, 1, 2, 3], np.uint8)]], reject=1000, margin=0)
     assert short.tolist() == [ctc_score.REJECTED, 0, ctc_score.CAP, ctc_score.CAP]
 
 
@@ -57,3 +59,16 @@ def test_a_command_reads_once_per_distinct_dialect_form() -> None:
     forms = ctc_score.variants("bật đèn")
     assert 1 <= len(forms) <= 3 and all(f.dtype == np.uint8 for f in forms)
     assert len({tuple(f.tolist()) for f in forms}) == len(forms)
+
+
+def test_the_golden_set_holds_its_edges_and_its_negative_control_differs(tmp_path: Path) -> None:
+    written = ctc_score.emit(tmp_path)
+    assert [p.name for p in written] == ["case_000.gold", "case_001.gold", "case_002.gold", "case_neg_000.gold"]
+    cases = {p.stem: read_gold(p) for p in written}
+    edge = cases["case_002"]["decision"]
+    assert edge[0, 0] == 0 and edge[2, 0] == ctc_score.REJECTED and edge[2, 2] == 0
+    assert edge[3].tolist() == [ctc_score.REJECTED, 0, ctc_score.CAP, ctc_score.CAP]
+    assert edge[4, 0] == 0 and edge[4, 3] == cases["case_002"]["thresholds"][4, 0]
+    assert edge[5, 0] == 0 and edge[5, 2] == cases["case_002"]["thresholds"][5, 1]
+    assert (cases["case_000"]["decision"][:, 0] != ctc_score.REJECTED).any()
+    assert not np.array_equal(cases["case_000"]["scores"], cases["case_neg_000"]["scores"])
