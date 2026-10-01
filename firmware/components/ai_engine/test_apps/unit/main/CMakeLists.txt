@@ -15,3 +15,5 @@ idf_component_register(
                 "probe/ctc_streams.bin" "probe/ctc_decide.bin" "probe/ns_streams.bin"
     WHOLE_ARCHIVE
 )
+# The ctc decision matches its mirror rounding for rounding: no multiply-add fused into one rounding (KEHOACH 3.12).
+set_source_files_properties("../../../src/command_ctc/ctc_score.c" PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")

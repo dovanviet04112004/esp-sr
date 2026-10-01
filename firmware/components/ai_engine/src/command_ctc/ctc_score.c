@@ -4,9 +4,6 @@
 #include <stdbool.h>
 #include <string.h>
 
-// Each product rounds on its own, as in numpy: a fused madd.s breaks bit parity (KEHOACH 3.12).
-#pragma GCC optimize("fp-contract=off")
-
 #define BLANK 0
 #define MILLI 1000.0f
 #define FIELD_MAX 65535 // the uint16 fields of ai_engine_command_result_t

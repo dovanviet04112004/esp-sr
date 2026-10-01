@@ -17,6 +17,8 @@ target_include_directories(ai_engine_parity_host PRIVATE
     "${FIRMWARE}/components/dsp_spec/test_apps/host/shim" "${PARITY}" "${REPORT}/include")
 set_target_properties(ai_engine_parity_host PROPERTIES C_STANDARD 17 C_EXTENSIONS ON)
 target_compile_options(ai_engine_parity_host PRIVATE -Wall -Wextra -Werror)
+# The ctc decision matches its mirror rounding for rounding: no multiply-add fused into one rounding (KEHOACH 3.12).
+set_source_files_properties("${ENGINE}/src/command_ctc/ctc_score.c" PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 target_link_libraries(ai_engine_parity_host PRIVATE m)
 if(AI_ENGINE_HOST_PARITY_ONLY)
     return()

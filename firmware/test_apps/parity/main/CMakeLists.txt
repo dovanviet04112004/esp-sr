@@ -33,6 +33,8 @@ idf_component_register(
     PRIV_INCLUDE_DIRS "${ai_engine_src}" "${ai_engine}/include"
     REQUIRES dsp_spec dsp_afe lang_vi sys_storage esp_psram test_report
 )
+# The ctc decision matches its mirror rounding for rounding: no multiply-add fused into one rounding (KEHOACH 3.12).
+set_source_files_properties("${ai_engine_src}/command_ctc/ctc_score.c" PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 # The modules profile builds firmware/sdkconfig.afe, whose chain is contracts/golden/chain_modules.
 if(PARITY_PROFILE STREQUAL "modules")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE PARITY_CHAIN_MODULES=1)
