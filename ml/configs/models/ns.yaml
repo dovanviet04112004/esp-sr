@@ -105,9 +105,9 @@ nsnet:                             # NSNet-16k: log power in, a gain a bin out (
   sizes: {S: {hidden: 96}, M: {hidden: 128}, L: {hidden: 144}}
   train_sizes: [S, M, L]           # same batches; L is the product's (ADR-0014), S and M the fallback
   speech_prob_band_hz: [300.0, 3400.0]   # speech_prob: the share of this band's power the gains pass
-loss:                              # the same for every candidate, on the 257 gains the slot applies
-  alpha: 0.6                       # speech distortion against residual noise; 0.5 is Wiener, more keeps speech
-  compression: 0.3                 # a bin weighs (|S|^2 + |N|^2)^c, normalised over its sequence
+loss:                              # the same for every candidate, on the 257 gains the slot applies (KEHOACH 3.9)
+  alpha: 0.7                       # speech distortion against residual noise; more keeps speech (afe/ns.md 5)
+  compression: 0.3                 # errors on magnitudes to this power, as Braun and Tashev: residual noise stays costly
 train:                             # python -m srpipe.tasks.ns.train; the GPU when present
   seed: 20260930
   batch: 32                        # sequences of mix.example_s
@@ -119,14 +119,14 @@ train:                             # python -m srpipe.tasks.ns.train; the GPU wh
   workers: 10                      # loader processes, ~470 MB each with torch and a batch in hand; 12 swapped 5 GB
   prefetch: 1                      # batches each worker keeps ready: 10 of ~62 MB in shared memory at most
   val_workers: 4                   # loader processes of each epoch's val pass, started for it alone
-  val_floor_db: -12.0              # the gain floor of the epoch's val figures: the product's, as OM-LSA's G_min
+  val_floor_db: null               # the epoch's val figures without a floor: E9-T12 picks the net's (KEHOACH 3.9)
   divergence_ratio: 3.0            # a val loss this many times epoch 0's stops the run; a safety, never a stop rule
   log_every: 100                   # steps between log lines: losses, rate, data wait
   smoke: {epochs: 1, steps: 20, batch: 4, workers: 2, val_workers: 2, example_s: 4.0, val_examples: 16,
           log_every: 5}            # make ns-smoke
 eval:
   settle_s: 3.0                    # figures after this, as E9-T1; the first 3 s are reported apart
-  floors_db: [-12.0, -18.0, -24.0, null]   # gain floor after the net; -12 is the product's; null is none
+  floors_db: [-12.0, -20.0, -30.0, null]   # gain floor after the net, the choices of E9-T12; null is none
   snr_edges_db: [-5.0, 0.0, 5.0, 10.0, 20.0, 25.0]
   level_edges_dbfs: [-50.0, -40.0, -30.0]  # active speech at the slot
   workers: 8

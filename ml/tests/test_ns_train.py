@@ -87,13 +87,13 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> tuple[dict, dict, dict]:
     return cfg, dev, paths
 
 
-def test_the_loss_is_least_at_the_biased_wiener_gain() -> None:
+def test_the_loss_is_least_where_compressed_speech_and_noise_balance() -> None:
     spec = load_yaml(ns.CONFIG)["loss"]
-    alpha = spec["alpha"]
+    alpha, c = spec["alpha"], spec["compression"]
     speech = torch.tensor([1.0, 1.0, 1.0, 0.1, 0.0], dtype=torch.float64)
     noise = torch.tensor([1.0, 0.1, 10.0, 1.0, 1.0], dtype=torch.float64)
-    best = alpha * speech / (alpha * speech + (1 - alpha) * noise)
-    torch.testing.assert_close(best[:3], torch.tensor([0.6, 0.9375, 0.6 / 4.6], dtype=torch.float64))
+    best = (alpha * speech**c / (alpha * speech**c + (1 - alpha) * noise**c)) ** (1 / c)
+    assert float(best[0]) == pytest.approx(alpha ** (1 / c)) and float(best[4]) == 0.0
     scan = torch.linspace(0.0, 1.0, 2001, dtype=torch.float64)
     for s, n, g in zip(speech, noise, best, strict=True):
         losses = [float(train.gain_loss(v.view(1, 1, 1), s.view(1, 1, 1), n.view(1, 1, 1), spec, 1e-9)) for v in scan]
@@ -101,6 +101,21 @@ def test_the_loss_is_least_at_the_biased_wiener_gain() -> None:
     whole = train.gain_loss(best.view(1, 1, -1), speech.view(1, 1, -1), noise.view(1, 1, -1), spec, 1e-9)
     nudged = (best + 0.02 * torch.tensor([1.0, -1.0, 1.0, 1.0, 1.0], dtype=torch.float64)).clamp(0.0, 1.0)
     assert whole < train.gain_loss(nudged.view(1, 1, -1), speech.view(1, 1, -1), noise.view(1, 1, -1), spec, 1e-9)
+
+
+def test_residual_noise_keeps_pulling_the_gain_down_far_under_the_speech() -> None:
+    spec = load_yaml(ns.CONFIG)["loss"]
+    silent, noisy = torch.zeros(1, 1, 1, dtype=torch.float64), torch.ones(1, 1, 1, dtype=torch.float64)
+
+    def pull(gain_db: float) -> float:
+        logit = torch.logit(torch.tensor(10.0 ** (gain_db / 20.0), dtype=torch.float64)).requires_grad_()
+        train.gain_loss(torch.sigmoid(logit).view(1, 1, 1), silent, noisy, spec, 1e-9).backward()
+        return float(logit.grad)
+
+    assert pull(-40.0) > 0.2 * pull(-20.0) > 0.0
+    zero = torch.zeros(1, 2, 3, dtype=torch.float64, requires_grad=True)
+    train.gain_loss(zero, torch.ones_like(zero), torch.ones_like(zero), spec, 1e-9).backward()
+    assert torch.all(torch.isfinite(zero.grad))
 
 
 def test_a_batch_is_a_pure_function_of_its_step(world: tuple[dict, dict, dict]) -> None:

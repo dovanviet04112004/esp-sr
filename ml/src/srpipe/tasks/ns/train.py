@@ -179,14 +179,15 @@ def feature_stats(nets: dict[str, nn.Module], batches: DataLoader, device: str) 
 
 
 def gain_loss(gains: Tensor, speech: Tensor, noise: Tensor, spec: dict, power_floor: float) -> Tensor:
-    """NSNet's speech-distortion weighted loss (KEHOACH 3.9), least at the biased Wiener gain aS / (aS + (1 - a)N);
-    each bin weighs its power to the compression, over its sequence's mean."""
-    total = speech + noise + power_floor
-    weight = total ** spec["compression"]
-    weight = weight / weight.mean(dim=(-2, -1), keepdim=True)
-    alpha = spec["alpha"]
-    per_bin = (alpha * speech * (1.0 - gains) ** 2 + (1.0 - alpha) * noise * gains**2) / total
-    return (weight * per_bin).mean()
+    """The speech-distortion weighted loss on compressed spectra (KEHOACH 3.9): per bin a S^c (1 - g^c)^2 +
+    (1 - a) N^c g^2c of the powers S and N, least at g^c = a S^c / (a S^c + (1 - a) N^c); each sequence over its mean
+    compressed power."""
+    c, alpha = spec["compression"], spec["alpha"]
+    # A sigmoid can underflow to 0, where g**c has no gradient.
+    kept = gains.clamp_min(torch.finfo(gains.dtype).tiny) ** c
+    per_bin = alpha * speech**c * (1.0 - kept) ** 2 + (1.0 - alpha) * noise**c * kept**2
+    level = (speech + noise + power_floor) ** c
+    return (per_bin.sum(dim=(-2, -1)) / level.sum(dim=(-2, -1))).mean()
 
 
 def loss_of(gains: Tensor, logit: Tensor | None, batch: dict[str, Tensor], cfg: dict) -> Tensor:
@@ -202,10 +203,11 @@ def db(num: float, den: float) -> float:
 
 
 def score(nets: dict[str, nn.Module], batches: DataLoader, cfg: dict, device: str) -> dict[str, dict[str, float]]:
-    """Per candidate on a held set: the loss, and at the val floor the noise and speech taken down and the SNR gained
-    on the slot's power after settle_s, the spectral twin of scenes.ns.figures."""
+    """Per candidate on a held set: the loss, and at the val floor, when there is one, the noise and speech taken down
+    and the SNR gained on the slot's power after settle_s, the spectral twin of scenes.ns.figures."""
     settle = round(cfg["eval"]["settle_s"] * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES)
-    floor = 10.0 ** (cfg["train"]["val_floor_db"] / 20.0)
+    floor_db = cfg["train"]["val_floor_db"]
+    floor = 0.0 if floor_db is None else 10.0 ** (floor_db / 20.0)
     sums = {name: torch.zeros(8, dtype=torch.float64, device=device) for name in nets}
     with torch.no_grad():
         for batch in batches:
