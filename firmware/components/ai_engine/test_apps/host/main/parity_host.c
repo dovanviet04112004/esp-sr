@@ -4,7 +4,7 @@
 #include "parity.h"
 #include "test_report.h"
 
-#define CASE_BYTES_MAX (64 * 1024)
+#define CASE_BYTES_MAX (512 * 1024)
 #define REPORT_LINES_MAX 64
 
 static bool read_case(const char *path, void *buf, size_t cap, size_t *len)
@@ -26,8 +26,10 @@ int main(int argc, char **argv)
     static uint8_t buf[CASE_BYTES_MAX];
     unsigned errors = 0;
     test_report_begin("PARITY", REPORT_LINES_MAX);
-    const unsigned cases =
+    unsigned cases =
         parity_run_block(argv[1], "command_kws", parity_command_kws, read_case, buf, sizeof(buf), &errors);
+    cases +=
+        parity_run_block(argv[1], "command_ctc", parity_command_ctc, read_case, buf, sizeof(buf), &errors);
     test_report_line("done %u cases", cases);
     test_report_serve();
     printf("HOST %u failure(s)\n", errors);

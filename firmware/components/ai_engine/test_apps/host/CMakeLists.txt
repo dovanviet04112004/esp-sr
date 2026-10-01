@@ -1,5 +1,5 @@
 # ai_engine on the host with plain CMake: the C++ sources behind the C facade, called from a C test over the
-# ESP-IDF header shims of dsp_spec's host test (KEHOACH 4.5.7); and the kws decision against contracts/golden through
+# ESP-IDF header shims of dsp_spec's host test (KEHOACH 4.5.7); and the kws and ctc decisions against contracts/golden through
 # the parity comparators, alone with AI_ENGINE_HOST_PARITY_ONLY, which needs no OpenSSL (make parity-host).
 cmake_minimum_required(VERSION 3.16)
 project(ai_engine_host C CXX)
@@ -10,9 +10,11 @@ set(ENGINE "${FIRMWARE}/components/ai_engine")
 set(PARITY "${FIRMWARE}/test_apps/parity/main")
 set(REPORT "${FIRMWARE}/test_apps/components/test_report")
 add_executable(ai_engine_parity_host main/parity_host.c "${ENGINE}/src/command_kws/decide.c"
-    "${PARITY}/parity_common.c" "${PARITY}/parity_command_kws.c" "${REPORT}/test_report.c")
+    "${ENGINE}/src/command_ctc/ctc_score.c" "${PARITY}/parity_common.c" "${PARITY}/parity_command_kws.c"
+    "${PARITY}/parity_command_ctc.c" "${REPORT}/test_report.c")
 target_include_directories(ai_engine_parity_host PRIVATE
-    "${ENGINE}/src" "${FIRMWARE}/components/dsp_spec/test_apps/host/shim" "${PARITY}" "${REPORT}/include")
+    "${ENGINE}/src" "${ENGINE}/include" "${FIRMWARE}/components/dsp_afe/include" "${FIRMWARE}/components/common/include"
+    "${FIRMWARE}/components/dsp_spec/test_apps/host/shim" "${PARITY}" "${REPORT}/include")
 set_target_properties(ai_engine_parity_host PROPERTIES C_STANDARD 17 C_EXTENSIONS ON)
 target_compile_options(ai_engine_parity_host PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(ai_engine_parity_host PRIVATE m)
