@@ -79,8 +79,17 @@ Board trừ train tác giả, theo nhóm 5 dải từ thấp lên: +6,4 dB ở d
 ## 4. Pilot wake "yes"
 
 TCN của `wake` (KẾ HOẠCH §3.11), cùng công thức `v4`, chỉ đổi dữ liệu: dương là mọi mẩu "yes" của bộ (3 228 train, 419
-`val`), âm bản khó là các từ còn lại (3 000 train, 600 `val`), âm bản thường là của `wake/v4` (100 giờ). Split
-`wake/yes1`. Kết quả 🔬, chờ run xong.
+`val`), âm bản khó là các từ còn lại (3 000 train, 600 `val`, `hard_share` 0,25), âm bản thường là của `wake/v4` (100
+giờ, mô phỏng nối lại). Split `wake/yes1`, 10 000 bước, run `ml/artifacts/wake/runs/20261001_bf9d4d7-dirty_9630cd`.
+
+| | Pilot "yes" | `v4` "trợ lý" (`measurements/wake.md`) |
+|---|---|---|
+| `val` | bắt 85,2% "yes" của người lạ ở 2,5 lần báo nhầm/giờ, ngưỡng 0,97 | — |
+| Phiên board có từ | 4/5 lần nói vượt ngưỡng: 1,00; 0,98; 0,99; 0,99; lần thứ năm 0,44 | 1/104 câu vượt ngưỡng |
+| Báo nhầm trên board | 1 lần trên 53 phiên không có từ, 0,48 giờ: 2,07/giờ | 4,5/giờ |
+
+Mảnh `vad` cắt thừa của phiên "yes" được 0,80. Câu gần âm và "chào mi na" không câu nào vượt ngưỡng, cao nhất "bật điện"
+0,95. Chấm: `python -m srpipe.tasks.wake.eval board <run>`; phiên lệnh mà câu là đúng từ ấy được tính là phiên có từ.
 
 ## 5. Điều số đo cho thấy
 
@@ -88,6 +97,8 @@ TCN của `wake` (KẾ HOẠCH §3.11), cùng công thức `v4`, chỉ đổi d�
   nói `spk_001` ở 851–1000‰ (`p5`). Đường xử lý và mô hình không làm hỏng nhận dạng.
 - Số mẩu mỗi lệnh quyết định: cùng từ "no", cùng phiên board, 200 mẩu (`p4`) nhận 2/7, 3 130 mẩu (`p5`) nhận 7/7.
 - 200 mẩu một người nói (`p2`) không ra được giọng khác: trượt người nói HF và board.
+- TCN của `wake` cũng vậy: học từ người thật nhiều giọng, nó bắt giọng board ở 0,98–1,00, nên chỗ hỏng của `v4` nằm
+  ở dữ liệu dương (TTS và 24 mẩu thật), không ở mô hình hay đường xử lý.
 
 ## 6. Chạy lại
 
