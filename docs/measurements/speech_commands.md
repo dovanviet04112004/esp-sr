@@ -53,8 +53,8 @@ trong `train`.
 `p2` chấm trước khi có phiên tiếng Anh. Câu `vad` tìm được có thể nhiều hơn số lần nói: một câu bị tách đôi được tính
 hai lần.
 
-- `p5`: 5 lần nói "yes" đều ra `yes` ở 851–1000‰, câu thứ sáu là mảnh `vad` cắt thừa, bị từ chối; 7/7 câu "no" ở
-  998–1000‰. Lọt: "down" thành `no` 5/7, "go" thành `no` 1/1, "chụp ảnh" 3 m thành `no` 3/5, hai câu gần âm.
+- `p5`: 5 câu "yes" trọn vẹn đều ra `yes` ở 851–1000‰; câu thứ sáu (14,40–15,01 s) bị cắt cụt ở giây 15, lúc phiên
+  15 s hết, và bị từ chối ở 542‰; 7/7 câu "no" ở 998–1000‰. Lọt: "down" thành `no` 5/7, "go" thành `no` 1/1, "chụp ảnh" 3 m thành `no` 3/5, hai câu gần âm.
 - `p2` trượt cả mẩu người thật của người khác: 58 mẩu HF chưa từng học, qua cùng đường mô phỏng, bật đèn 7/15, tắt đèn
   22/40, bật quạt 2/2, tắt quạt 1/1; cùng lúc mẩu thử của tác giả bật đèn 38/46, tắt đèn 28/44, bật quạt 38/44, tắt
   quạt 37/50.
@@ -85,10 +85,10 @@ giờ, mô phỏng nối lại). Split `wake/yes1`, 10 000 bước, run `ml/arti
 | | Pilot "yes" | `v4` "trợ lý" (`measurements/wake.md`) |
 |---|---|---|
 | `val` | bắt 85,2% "yes" của người lạ ở 2,5 lần báo nhầm/giờ, ngưỡng 0,97 | — |
-| Phiên board có từ | 4/5 lần nói vượt ngưỡng: 1,00; 0,98; 0,99; 0,99; lần thứ năm 0,44 | 1/104 câu vượt ngưỡng |
+| Phiên board có từ | 4/5 câu trọn vẹn vượt ngưỡng: 1,00; 0,98; 0,99; 0,99; câu thứ năm 0,44 | 1/104 câu vượt ngưỡng |
 | Báo nhầm trên board | 1 lần trên 53 phiên không có từ, 0,48 giờ: 2,07/giờ | 4,5/giờ |
 
-Mảnh `vad` cắt thừa của phiên "yes" được 0,80. Câu gần âm và "chào mi na" không câu nào vượt ngưỡng, cao nhất "bật điện"
+Câu thứ sáu của phiên "yes", bị cắt cụt ở cuối phiên 15 s, được 0,80. Câu gần âm và "chào mi na" không câu nào vượt ngưỡng, cao nhất "bật điện"
 0,95. Chấm: `python -m srpipe.tasks.wake.eval board <run>`; phiên lệnh mà câu là đúng từ ấy được tính là phiên có từ.
 
 ## 5. Điều số đo cho thấy
