@@ -10,12 +10,13 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import struct
 from pathlib import Path
 
 import numpy as np
 
 from srpipe.core.config import ML_ROOT
-from srpipe.generated import lang_vi
+from srpipe.generated import grid, lang_vi
 from srpipe.golden.gold import write_gold
 from srpipe.lang import g2p
 from srpipe.lang.normalize import normalize
@@ -31,6 +32,10 @@ DECISION = ("command", "score_permille", "margin_permille", "free_gap_permille")
 SEED = 20261001
 WINDOWS, FRAMES = 12, 48  # a case's windows and their longest, in frames
 SPREAD = (0.5, 6.0)
+# Magic, classes, frames, commands, most variants, most units, timed runs, reject and margin.
+DECIDE_HEAD = struct.Struct("<4sHHBBBBHH")
+DECIDE_MAGIC = b"SRCD"
+DECISION_RECORD = struct.Struct("<hHHH")
 
 
 def variants(text: str) -> list[np.ndarray]:
@@ -196,6 +201,29 @@ def edge_case(rng: np.random.Generator):
     thresholds[4, 0] = decide(windows[4], lexicon, 0, 0)[0][3]
     thresholds[5] = (CAP, decide(windows[5], lexicon, 0, 0)[0][2])
     return case(windows, lexicon, thresholds)
+
+
+def probe_record(cfg: dict) -> bytes:
+    """The decision of the default commands over one window of the longest LENH keeps, saying one of them, as the
+    unit app of ai_engine times it on board B: DECIDE_HEAD, variants a command, units a variant, the units padded,
+    the frames' log-probabilities from the next four-byte boundary, the expected decision, every command's score."""
+    spec = cfg["probe"]["decide"]
+    stride = math.prod(cfg["model"]["front"]["hop_strides"])
+    frames = math.ceil(spec["window_s"] * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES / stride)
+    rng, lexicon = np.random.default_rng(SEED), default_lexicon()
+    window = said(rng, lexicon[0][0], frames)
+    decision, scores = decide(window, lexicon, *spec["thresholds"])
+    most, longest = max(len(f) for f in lexicon), max(len(u) for f in lexicon for u in f)
+    units = np.zeros((len(lexicon), most, longest), dtype=np.uint8)
+    n_units = np.zeros((len(lexicon), most), dtype=np.uint8)
+    for c, forms in enumerate(lexicon):
+        for v, u in enumerate(forms):
+            units[c, v, : len(u)], n_units[c, v] = u, len(u)
+    sizes = (n_classes(), frames, len(lexicon), most, longest, spec["runs"])
+    head = DECIDE_HEAD.pack(DECIDE_MAGIC, *sizes, *spec["thresholds"])
+    body = head + bytes(len(f) for f in lexicon) + n_units.tobytes() + units.tobytes()
+    body += b"\0" * (-len(body) % 4) + np.ascontiguousarray(window.T, dtype="<f4").tobytes()
+    return body + DECISION_RECORD.pack(*decision.tolist()) + scores.astype("<f4").tobytes()
 
 
 def emit(root: Path) -> list[Path]:

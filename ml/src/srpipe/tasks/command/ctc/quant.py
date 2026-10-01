@@ -22,9 +22,10 @@ from srpipe.core.config import ML_ROOT, load_yaml
 from srpipe.export import pack_models
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command.ctc.model import encoder
+from srpipe.tasks.command.ctc.postproc import ctc_score
 
 PROBE_DIR = ML_ROOT.parent / "firmware" / "components" / "ai_engine" / "test_apps" / "unit" / "main" / "probe"
-MODELS_FILE, STREAMS_FILE = "ctc_models.bin", "ctc_streams.bin"
+MODELS_FILE, STREAMS_FILE, DECIDE_FILE = "ctc_models.bin", "ctc_streams.bin", "ctc_decide.bin"
 LADDER = "command_ctc"
 LAYER_ENTRY, NET_ENTRY = "ctc_lay", "ctc_net"
 # Count; then a record a net: entry name, hops a step, input dims, outputs a step, steps, input and output exponents,
@@ -118,9 +119,9 @@ def draw_norm_scales(model: nn.Module, low: float, high: float) -> nn.Module:
     return model
 
 
-def probe(cfg: dict, out: Path, work: Path) -> tuple[Path, Path]:
+def probe(cfg: dict, out: Path, work: Path) -> tuple[Path, Path, Path]:
     """Write out/ctc_models.bin and out/ctc_streams.bin: the first stack's layer a frame a step, the net a chunk a
-    step; work keeps each ONNX and .espdl."""
+    step, work keeping each ONNX and .espdl; and out/ctc_decide.bin, the decision of the default commands (E11-T13)."""
     if cfg["probe"]["hops"] % cfg["chunk_hops"]:
         raise ValueError(f"probe hops {cfg['probe']['hops']} are not a multiple of chunk_hops {cfg['chunk_hops']}")
     scales = cfg["probe"]["norm_scale"]
@@ -140,7 +141,9 @@ def probe(cfg: dict, out: Path, work: Path) -> tuple[Path, Path]:
     streams.write_bytes(STREAMS_HEAD.pack(STREAMS_MAGIC, len(built)) + b"".join(record for _, (_, record) in built))
     for name, (espdl, _) in built:
         print(f"{name}: {len(espdl)} bytes of .espdl")
-    return image, streams
+    decide = out / DECIDE_FILE
+    decide.write_bytes(ctc_score.probe_record(cfg))
+    return image, streams, decide
 
 
 def main(argv: list[str] | None = None) -> int:

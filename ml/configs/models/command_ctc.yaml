@@ -51,3 +51,7 @@ probe:                             # E11-T12: one layer, then the whole net, ran
   input_mean: 0.0                  # the network reads features normalised by train's mean and deviation
   input_std: 1.0
   norm_scale: [0.5, 1.5]           # each norm's scale drawn uniform, as training leaves it, never exactly one
+  decide:                          # E11-T13: the decision of the default commands timed on board B (make ai-unit)
+    window_s: 3.0                  # LENH's longest window (KEHOACH 5.4)
+    runs: 10                       # timed runs, after one untimed
+    thresholds: [1000, 50]         # reject and margin, thousandths of a nat a frame
