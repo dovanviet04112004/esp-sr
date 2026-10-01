@@ -1,0 +1,11 @@
+name: speech_commands
+source_url: http://download.tensorflow.org/data/speech_commands_v0.02.tar.gz
+downloaded: 2026-09-07            # taken into raw/speech/speech_commands on 2026-10-01 from an earlier download on this machine
+license: CC BY 4.0
+sha256: {"speech_commands/ (tree)": 37ff2c21bd3f25c7f08eb580977d82c4b43f3db3f4519838f4647bc6d358b26d}
+counts: {hours: 28.84, utterances: 105829, speakers: 2618, words: 35, testing: 11005, validation: 9981}
+consumed_by: [command]
+notes: >-
+  Release v0.02 as extracted: 16 kHz 16-bit mono clips of at most 1 s named <word>/<speaker>_nohash_<n>.wav,
+  testing_list.txt and validation_list.txt held out by speaker, LICENSE, README and _background_noise_/. Only the
+  kws pilots of E11-T17 read it, to check the kws path on a corpus of many speakers. Tree sha256 as in vivos.yaml.
