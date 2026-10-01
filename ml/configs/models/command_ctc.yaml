@@ -13,6 +13,17 @@ split:                             # data/splits/command/<version> by python -m 
 features: scenes/device.yaml       # mel then pitch's three, a hop, as the device computes them
 simulate:                          # python -m srpipe.tasks.command.ctc.data simulate, into processed/command/<version>
   workers: 16
+train:                             # python -m srpipe.tasks.command.ctc.train (E11-T12); the GPU when present
+  seed: 20261001
+  dialect: north                   # lang_vi reads every sentence so: the corpora do not record the region
+  max_s: 12.0                      # a longer sentence, with its pads, is left out
+  batch: 32                        # sentences a step
+  steps: 40000
+  learning_rate: 1.0e-3
+  final_learning_rate: 1.0e-5      # cosine decay to this by the last step
+  clip_norm: 5.0                   # of the gradient, against the rare sentence CTC aligns badly early on
+  masks: {bands: 2, band_width: 8, hops: 4, hop_width: 15}   # SpecAugment: masks a sentence, each up to this wide
+  eval_every: 2000                 # steps between val passes, each net saved beside the run
 model:                             # MultiNet7's encoder frame (ADR-0013); sizes read from its weights
   front:                           # three conv2d over (hops, mel bands); pitch skips them and joins the projection
     channels: [8, 32, 48]
