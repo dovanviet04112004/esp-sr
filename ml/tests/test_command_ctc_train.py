@@ -75,6 +75,8 @@ def test_a_tiny_run_evaluates_saves_each_evaluated_net_and_keeps_the_last(tmp_pa
     net, (mean, std), history = train.train(cfg, sets, "cpu", tmp_path / "run")
     assert [row["step"] for row in history] == [2, 4] and len(mean) == len(std) == DIMS
     assert all(row["loss"] > 0 and row["unit_error_rate"] >= 0 for row in history)
+    assert yaml.safe_load(yaml.safe_dump(history)) == history
+    assert type(train.edit_distance([3, 3, 5], np.array([3, 5], dtype=np.uint8))) is int
     last = torch.load(train.checkpoint(tmp_path / "run", 4))
     assert all(torch.equal(last[k], v) for k, v in net.state_dict().items())
 

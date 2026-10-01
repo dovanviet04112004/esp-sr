@@ -132,7 +132,7 @@ def edit_distance(a: list[int], b: list[int] | np.ndarray) -> int:
     for i, x in enumerate(a, start=1):
         diagonal, row[0] = row[0], i
         for j, y in enumerate(b, start=1):
-            diagonal, row[j] = row[j], min(row[j] + 1, row[j - 1] + 1, diagonal + (x != y))
+            diagonal, row[j] = row[j], min(row[j] + 1, row[j - 1] + 1, diagonal + int(x != y))
     return row[-1]
 
 
