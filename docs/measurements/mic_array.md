@@ -142,3 +142,54 @@ Dải 1,6–8 kHz chưa đạt được mốc "dưới 1 dB toàn băng" một c
 loa tự khác nhau vài dB vì phòng, nên hệ số gộp là trung bình của ba chỗ, sai số cỡ ±2 dB. Hẹp sai số này cần thêm chỗ đặt
 loa, hay một phòng ít vang. Lần đo ở nhiệt độ phòng thứ hai, để biết phần trôi theo nhiệt, **không làm**: chủ dự án chốt
 đóng E2-T6 sau lần 1 (26/09). Khi làm: thu lại bước 5 của §0 ở ba chỗ, `make calib-estimate`, so pha sau bù bằng hệ số lần 1.
+
+## 4. Mô phỏng so với board: nền ồn và phổ tiếng nói (E4-T8)
+
+Cửa 3 của `ctc` ở float (`command.md` §1) đúng 48% trên phiên board, trong khi cùng mạng giải tự do câu mô phỏng gần
+đúng. Hai phép đo dưới đây, ngày 02/10 ở dịch 13, chỉ dùng phiên `probe`, không đụng phiên nào của tập chấm.
+
+**Nền ồn theo băng**, `python -m srpipe.scenes.device floor <phiên>…`: dBFS thang sóng vuông của từng kênh, Welch 1 024
+mẫu. Ba phiên `20261001_home_011`–`013` là nền phòng yên 120 s thu sáng 02/10 cho mô phỏng; `20260928_home_003` là
+5 s nền của buổi thu 28/09; `20260928_home_005` là người thật đọc giọng thường ở 1 m. Dòng cuối là nhiễu tự thân theo
+datasheet mà mô phỏng dùng trước khi sửa, sau dịch 13.
+
+| Phiên | Kênh | 50–300 Hz | 300–1000 Hz | 1000–2000 Hz | 2000–4000 Hz | 4000–8000 Hz |
+|---|---|---|---|---|---|---|
+| `20261001_home_011` | ch0 | −60,4 | −68,0 | −69,7 | −74,1 | −73,4 |
+| `20261001_home_011` | ch1 | −50,2 | −59,0 | −63,9 | −71,1 | −71,0 |
+| `20261001_home_012` | ch0 | −59,7 | −67,4 | −69,7 | −73,3 | −73,3 |
+| `20261001_home_012` | ch1 | −49,8 | −58,6 | −63,8 | −67,5 | −70,8 |
+| `20261001_home_013` | ch0 | −60,4 | −69,1 | −69,7 | −73,9 | −73,3 |
+| `20261001_home_013` | ch1 | −50,3 | −60,7 | −63,9 | −70,7 | −70,7 |
+| `20260928_home_003` | ch0 | −70,9 | −74,1 | −67,9 | −73,6 | −71,8 |
+| `20260928_home_003` | ch1 | −67,1 | −71,8 | −66,3 | −72,3 | −68,9 |
+| `20260928_home_005` (giọng 1 m) | ch0 | −62,6 | −53,9 | −66,5 | −72,2 | −71,9 |
+| `20260928_home_005` (giọng 1 m) | ch1 | −52,0 | −43,3 | −59,9 | −62,7 | −66,8 |
+| nhiễu tự thân datasheet | ch0 | −87,4 | −82,9 | −81,2 | −78,2 | −75,1 |
+
+- Nền thật của board cao hơn nhiễu tự thân datasheet ở mọi băng: ở `ch0` 13–27 dB dưới 2 kHz và 2–5 dB trên 2 kHz,
+  ở `ch1` còn cao hơn. Trên 2 kHz nền giữ nguyên giữa các ngày (−73…−74 dBFS ở `ch0`, gò 1–2 kHz cũng thế), nên là của
+  board; dưới 300 Hz sáng 02/10 cao hơn 28/09 khoảng 10 dB, phần ấy là tiếng phòng.
+- Giọng thường ở 1 m trên `ch0` chỉ hơn nền 1–2 dB ở 2–8 kHz; trên `ch1`, micro nghe to hơn ~10 dB (§1), hơn 4–8 dB.
+  Mô phỏng cũ để dải ấy trên nhiễu tự thân hàng chục dB, nên mạng học dựa vào nó.
+
+**Phổ tiếng nói sau chuỗi**, `python -m srpipe.scenes.device levels --sessions … --built command/v2/test
+command/v2/val`: log-mel trung bình (nat) trên các bước `vad` của phiên board qua chuỗi sản phẩm, và trên các bước tiếng
+của từng mẩu trong bản dựng, bỏ khoảng đệm; năm nhóm 8 dải mel. `command/v2` là mô phỏng trước khi sửa: nhiễu tự thân
+datasheet, người nói 56–74 dB SPL ở 1 m, không nghiêng phổ.
+
+| Nguồn | Bước tiếng | 20–667 Hz | 595–1283 Hz | 1192–2322 Hz | 2156–4201 Hz | 3900–7600 Hz |
+|---|---|---|---|---|---|---|
+| `20260928_home_005`, giọng thường 1 m | 1 162 | −5,95 | −7,23 | −10,32 | −11,65 | −12,49 |
+| `20260928_home_006`, giọng nhỏ 1 m | 634 | −6,85 | −8,71 | −11,62 | −12,61 | −12,94 |
+| `20260928_home_007`, giọng thường 3 m | 1 022 | −6,12 | −7,61 | −10,64 | −11,71 | −12,46 |
+| `command/v2/test` | 447 493 | −6,79 | −8,44 | −9,76 | −11,01 | −12,13 |
+| `command/v2/val` | 425 067 | −6,60 | −8,10 | −9,86 | −11,28 | −12,20 |
+
+Giọng thật ở 1 m mạnh hơn mô phỏng 0,8–1,2 nat dưới 1,3 kHz và yếu hơn 0,4–0,6 nat trên 1,2 kHz: so với mô phỏng, phổ
+nghiêng xuống 3–5 dB mỗi octave từ nhóm quanh 900 Hz tới nhóm quanh 3 kHz. Giọng nhỏ thấp thêm khoảng 1 nat ở mọi nhóm. Nhóm cao nhất của
+giọng thật sát sàn log (−13,8 nat). Một người nói, một phòng: hướng lệch rõ, cỡ lệch chỉ là của người và phòng này.
+
+Theo hai bảng, mô phỏng sửa theo KẾ HOẠCH §1.2. Nền ồn thật của ba phiên `20261001_home_011`–`013` thay nhiễu tự thân
+trong `build`, cộng thẳng vào mẫu hai kênh. Mỗi phiên rút một độ nghiêng −6…+3 dB mỗi octave trên 1 kHz cho tiếng người
+nói, và mức nói 45–74 dB SPL ở 1 m. Đo lại hai bảng trên bản dựng mới trước khi học lại.
