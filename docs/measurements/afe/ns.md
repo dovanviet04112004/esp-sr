@@ -100,3 +100,42 @@ mô phỏng FMA làm tròn đúng để giữ khớp từng bit. Để dành ở
 
 Trên `main` bản `dev` của board B (`c2f97b5`), `ns` trong chuỗi sản phẩm: heartbeat 5 phút có Wi-Fi và MQTT, 0 tràn DMA,
 0 khung bỏ, RAM nội thấp nhất 36,1 KiB (`ram.md` §3).
+
+## 5. Mạng học: dìm sâu tới đâu, và vì sao (01/10)
+
+Đo trên máy tính, float, 980 mẫu `val` của `ns/v1` (lối vào là trung bình hai mic của đường mô phỏng board). Gain áp
+lên riêng phần tiếng và riêng phần nhiễu ở khe, tính sau 3 s đầu; "quãng nghỉ" là các bước người nói im. Lượt học
+`20261001_ec62294-dirty_437ed0`, hàm mất mát cũ: trọng số méo tiếng nói của Xia và cộng sự, α = 0,6, sai số trên gain
+chưa nén.
+
+| NSNet-16k L | Sàn −12 dB | Không sàn | Quãng nghỉ, không sàn | Tiếng mất |
+|---|---|---|---|---|
+| epoch 0 | 10,9 dB | 16,1 dB | 19,9 dB | 1,88 dB |
+| epoch 1 | 9,8 dB | 12,9 dB | 16,2 dB | 0,78 dB |
+| epoch 2 | 10,2 dB | 14,1 dB | 18,1 dB | 0,86 dB |
+
+Ở epoch 2, RNNoise-16k không sàn dìm 13,3 dB (quãng nghỉ 17,7 dB); S và M 13,0 và 11,1 dB. Từ sàn −30 dB trở xuống số
+gần như không đổi. Với sàn −12 dB mọi bản dừng ở 9–10 dB, ngang OM-LSA.
+
+Gain lý tưởng là gain tính từ phần tiếng và phần nhiễu thật của từng vạch: mạng hoàn hảo của mỗi hàm mất mát sẽ cho ra đúng
+nó.
+
+| Gain lý tưởng | Sàn −12 dB | Không sàn | Quãng nghỉ | Tiếng mất |
+|---|---|---|---|---|
+| hàm cũ, α = 0,6 | 11,5 dB | 20,5 dB | 41,2 dB | 0,10 dB |
+| Wiener | 11,6 dB | 21,3 dB | 42,5 dB | 0,13 dB |
+| tỉ lệ biên độ tiếng / hỗn hợp | 11,3 dB | 18,6 dB | 37,6 dB | 0,15 dB |
+| trọng số méo tiếng nói trên phổ nén, c = 0,3, α = 0,6 | 12,0 dB | 28,2 dB | 49,8 dB | 1,88 dB |
+| như trên, α = 0,7 | — | 25,1 dB | 45,5 dB | 1,33 dB |
+| như trên, α = 0,8 | — | 21,9 dB | 40,8 dB | 0,85 dB |
+| như trên, α = 0,9 | — | 18,0 dB | 34,6 dB | 0,41 dB |
+
+Đọc hai bảng:
+
+- Sàn −12 dB là trần chung: cả gain lý tưởng cũng chỉ dìm 11,5–12 dB. Dưới sàn ấy không mạng nào hơn được OM-LSA về độ dìm.
+- Không sàn, mạng cách xa đích của chính nó: 18 dB ở quãng nghỉ so với 41 dB. Một nửa số vạch trong quãng nghỉ đã dưới
+  −35 dB, nhưng các vạch nhiễu to, nơi dồn năng lượng, vẫn để gain cao. Hàm cũ phạt nhiễu sót theo bình phương gain, nên
+  để một vạch nhiễu ở −10 dB chỉ tốn một phần mười so với để nguyên, ở −20 dB một phần trăm.
+- Đặt sai số lên phổ nén thì nhiễu sót bị phạt theo gain mũ 0,6: ở −20 dB vẫn tốn một phần tư so với để nguyên, và lực
+  kéo gain xuống ở −40 dB còn một phần tư so với ở −20 dB, thay vì một phần trăm. Đó là cách NSNet2 (phổ nén mũ 0,3) và RNNoise (căn bậc hai gain) của bản PC học dìm sâu;
+  đổi lại tiếng mất nhiều hơn, chỉnh bằng α.
