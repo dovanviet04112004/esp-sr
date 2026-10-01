@@ -252,3 +252,25 @@ PSRAM. Tính cả `.espdl` nằm trong ảnh đã nạp ở PSRAM:
 
 Cùng lượt, cùng thiết lập: TCN của §8 1 944 µs, `kws` S 41,6 ms và M 276,7 ms của §10, `ctc_lay` 4 899 µs và `ctc_net`
 45 227 µs của §11, trong 4% so với số `-Og` đã ghi ở các mục ấy: thời gian nằm ở nhân dịch sẵn của esp-dl và ở PSRAM.
+
+## 13. Chấm lệnh của `ctc` sau mạng (E11-T13)
+
+Board B, `ai_engine/test_apps/unit` với cờ trình biên dịch của `sdkconfig.bench` (`-O2`, 240 MHz), IDF 6.0.2, 01–02/10.
+Bộ lệnh mặc định của `contracts/commands/default_vi.json` qua `lang_vi` ba vùng (10 lệnh, 19 biến thể); 64 lệnh là bộ ấy
+lặp lại tới `AI_ENGINE_COMMANDS_MAX`. Một cửa sổ 3 s nói lệnh đầu (`ctc_score.said`, 94 khung × 45 lớp), log-xác suất và
+vùng làm việc ở PSRAM. Dựng bằng `make ai-probe`, đo bằng `make ai-unit`: một lần không tính giờ, rồi 10 lần trên nhân 0.
+Mỗi cách khớp bản soi gương của nó từng bit, cả điểm từng lệnh lẫn quyết định, trên máy tính và board B.
+
+| Cách tính | Commit | 10 lệnh, 19 biến thể | 64 lệnh, 124 biến thể |
+|---|---|---|---|
+| Miền log: hai, ba `exp` và một `log` double mỗi trạng thái mỗi khung | `af7d3ef` | 705,9 ms, đỉnh 744,7 | — |
+| Miền xác suất, số mũ riêng từng trạng thái; bit của float đọc qua `memcpy` | `3c5fd74` | 43,5 ms | 257,8 ms |
+| **Như trên, bit đọc qua `union` — đang dùng** | `a3091cb` | **14,7 ms** | **79,4 ms** |
+
+Hai dòng dưới có đỉnh lệch trung bình dưới 0,01 ms. Miền log gọi khoảng 106 nghìn `exp` và `log` double mỗi lần chấm; S3
+chỉ có FPU float nên double chạy giả lập, khoảng 6,7 µs mỗi lần. Miền xác suất tính `exp` một lần mỗi khung × lớp (4 230
+lần, đa thức float32), còn mỗi trạng thái mỗi khung chỉ cộng, nhân và chỉnh số mũ. GCC cho S3 dịch `memcpy` 4 byte thành
+một lời gọi hàm, năm, sáu lời gọi mỗi trạng thái mỗi khung, và vì thế không inline `normalized`; đọc bit qua `union` như
+`ns_omlsa.c` để vòng trong không còn lời gọi nào. Suy từ hai cột của bản đang dùng: khoảng 3 ms cố định (bảng `exp` và
+vòng tự do) cộng 0,62 ms mỗi biến thể, tức khoảng 0,37 µs (89 chu kỳ) mỗi trạng thái mỗi khung. Ngân sách của KẾ HOẠCH
+§3.12 là ≤ 100 ms một lần chấm: 64 lệnh dùng 79,4 ms.
