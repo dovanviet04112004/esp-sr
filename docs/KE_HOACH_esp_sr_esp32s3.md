@@ -957,7 +957,7 @@ sách. Cỡ, cửa sổ và lịch học ở `configs/models/command_kws.yaml`.
 |---|---|
 | Vào | log-mel 40 của `dsp_spec/mel` (§3.11) trên **cửa sổ 94 bước ≈ 1,5 s**, kết thúc ở bước `vad` tắt sau câu, tức gồm cả 240 ms kéo dài của `vad` (§3.10). Chuẩn hoá bằng trung bình và độ lệch từng dải của `train`, nằm trong ảnh model như `wake` |
 | Lớp | các lệnh có dữ liệu của `contracts/commands/default_vi.json`, theo đúng thứ tự file: mọi lệnh trừ lệnh chưa học "chụp ảnh", đứng cuối file (§1.3); cộng `other` và `silence`, 11 lớp. Các lớp lệnh là phần đầu của bộ lệnh, nên chỉ số lớp trùng chỉ số trong bảng lệnh |
-| `other` | lời nói thường của kho; cụm gần âm của từng lệnh — cụm của kho cách lệnh một thành phần âm tiết, như âm bản của `wake` (§3.11), cộng danh sách tay ở cấu hình ("bật điện", "tắt điện", "bật quạt trần", "mở cửa sổ", "đóng góp"…, gồm các cụm của phiên gần âm thu qua board); và **mọi cụm từ liền nhau ngắn hơn một lệnh** nói riêng ("bật", "đèn", "tăng âm", "âm lượng", "dừng", "lại"…), để nửa lệnh không thành lệnh |
+| `other` | lời nói thường của kho; cụm gần âm của từng lệnh — cụm của kho cách lệnh một thành phần âm tiết, như âm bản của `wake` (§3.11), cộng **mọi cách đổi thanh một âm tiết của lệnh** ("bất đèn", "tắt quát", "dứng lại", "tăng âm lương"…), vì cụm chỉ khác thanh là ca khó nhất mà kho hiếm khi có, cộng danh sách tay ở cấu hình ("bật điện", "tắt điện", "bật quạt trần", "mở cửa sổ", "đóng góp"…, gồm các cụm của phiên gần âm thu qua board); và **mọi cụm từ liền nhau ngắn hơn một lệnh** nói riêng ("bật", "đèn", "tăng âm", "âm lượng", "dừng", "lại"…), để nửa lệnh không thành lệnh |
 | `silence` | nền phòng và nhiễu không người nói, qua cùng đường mô phỏng board |
 | Dữ liệu | dương từ mẩu người thật của kho trích `hf_extract`, trích lại theo luật ngắt hơi của §3.11; từ `kws_vi_command`; và từ TTS của E11-T7 (§4.4). Mọi thứ qua đường mô phỏng board (§1.2) vào split `command_kws/v<n>` (§4.4.1). Mẩu không có mã người nói chỉ vào `train`; `val` gồm giọng TTS giữ riêng cả người lẫn mẩu nhân bản, cộng lời nói `val` của split `command`; tập thử là phiên thu qua board |
 | Học | entropy chéo trên cửa sổ đặt như trên máy, vì đường mô phỏng ghi `vad` từng bước: mẩu lệnh, cụm TTS và mẩu người thật có cuối cửa sổ ở bước `vad` tắt sau mẩu hoặc muộn hơn tới 300 ms, quãng `LENH` chờ để chốt hết câu (§5.4); lời nói thường và nhiễu có cuối cửa sổ ở bước bất kỳ, vì `LENH` còn chấm khi `vad` tắt giữa câu hay hết 3 s. Mỗi phiên mô phỏng một mẩu, để cửa sổ không với tới lời của mẩu trước. Lô chia lớp và nguồn theo tỉ lệ ở cấu hình; SpecAugment che vài dải mel và vài bước; giữ trọng số bước cuối; int8 bằng ESP-PPQ theo thang §3.14 |
@@ -970,8 +970,10 @@ sách. Cỡ, cửa sổ và lịch học ở `configs/models/command_kws.yaml`.
 đường của `wake` (§3.11): cùng hai bộ TTS, cùng bộ nghe kiểm PhoWhisper, bốn bước `pilot`, `positives`, `negatives`,
 `select` vào `interim/command/synth_{pilot,pos,neg}/manifest.yaml`. Dương là mọi lệnh của `default_vi.json` trừ lệnh chưa
 học: "chụp ảnh" không bao giờ được đọc, để nó vẫn chưa ai nghe khi đo E11-T13 (§1.3). Âm bản gồm cụm của kho cách một
-lệnh một thành phần âm tiết, danh sách tay ở cấu hình, và mọi cụm từ liền nhau ngắn hơn một lệnh nói riêng; không cụm
-nào đọc ra một lệnh, và mọi lệnh là đối thủ của từng âm bản. Ngưỡng độ chênh đặt trên âm bản như `wake`, để chỉ một tỉ lệ
+lệnh một thành phần âm tiết, mọi cách đổi thanh một âm tiết của lệnh, danh sách tay ở cấu hình, và mọi cụm từ liền nhau
+ngắn hơn một lệnh nói riêng; không cụm nào đọc trùng một lệnh ở bất kỳ vùng nào của `lang_vi`: hỏi với ngã, "-n" với
+"-ng", "-t" với "-c" nhập ở Trung và Nam, nên "mỡ cửa" không là âm bản, kẻo mạng học từ chối người
+Nam nói "mở cửa". Mọi lệnh là đối thủ của từng âm bản. Ngưỡng độ chênh đặt trên âm bản như `wake`, để chỉ một tỉ lệ
 cấu hình lọt thành dương. Giọng nhân bản chỉ lấy từ người nói mà split `command` giao cho `train`, nên giọng của một người
 `val` hay `test` không tới được tập học qua TTS (§1.3).
 
