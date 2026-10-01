@@ -92,11 +92,17 @@ class Windows:
         n_hard = round(n * self.cfg.get("hard_share", 0.0)) if self.hard_items else 0
         return n_pos, n_hard, n - n_pos - n_hard
 
-    def real_count(self, n_pos: int) -> int:
-        """Positives of a batch drawn from real speech: real_share of them while both kinds exist, else all of one."""
+    def expected_real(self, n_pos: int) -> float:
+        """Real positives a batch draws on average: real_share of them while both kinds exist, else all of one."""
         if not self.real or not self.synth:
-            return n_pos if self.real else 0
-        return round(n_pos * self.cfg.get("real_share", 0.0))
+            return float(n_pos) if self.real else 0.0
+        return n_pos * self.cfg.get("real_share", 0.0)
+
+    def real_count(self, n_pos: int) -> int:
+        """Positives of this batch from real speech: expected_real rounded at random, so a share under one clip a batch
+        still comes up in its proportion of batches."""
+        wanted = self.expected_real(n_pos)
+        return int(wanted) + int(self.rng.random() < wanted - int(wanted))
 
     def positive_ends(self, n_pos: int) -> list[tuple[int, int]]:
         n_real = self.real_count(n_pos)
@@ -169,7 +175,7 @@ def coverage(cfg: dict, windows: Windows) -> str:
     """How often training sees each positive, each hard near miss and each negative hop, for the run's log."""
     spec = cfg["train"]
     n_pos, n_hard, n_neg = windows.counts()
-    n_real = windows.real_count(n_pos)
+    n_real = windows.expected_real(n_pos)
     negative_hops = sum(len(s.features) for s in windows.negatives)
     passes = spec["steps"] * n_neg * spec["window_hops"] / negative_hops
     kinds = [(windows.real, n_real, "real"), (windows.synth, n_pos - n_real, "TTS")]

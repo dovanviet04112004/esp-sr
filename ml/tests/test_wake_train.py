@@ -189,6 +189,10 @@ def test_real_speech_takes_its_share_of_the_positives_however_few_its_clips(tmp_
     )
     assert train.Windows(tts, neg, cfg, np.random.default_rng(9)).real_count(4) == 0
     assert train.Windows(real, neg, cfg, np.random.default_rng(9)).real_count(4) == 4
+    cfg["train"]["real_share"] = 0.01
+    rare = train.Windows(real + tts, neg, cfg, np.random.default_rng(9))
+    drawn = [rare.real_count(32) for _ in range(4000)]
+    assert set(drawn) == {0, 1} and abs(np.mean(drawn) - 0.32) < 0.03
 
 
 def test_board_rows_keep_their_columns_when_a_prompt_lists_phrases() -> None:
