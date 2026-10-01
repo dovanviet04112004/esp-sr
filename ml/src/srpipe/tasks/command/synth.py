@@ -1,8 +1,8 @@
 """Command clips from the desktop TTS engines for both command tracks (E11-T7, KEHOACH 1.2, 3.12), heard back.
 
 positives reads every learned command of contracts/commands/default_vi.json, never an unseen one; negatives reads
-the corpus near misses of each command, the hand-picked phrases and every shorter run of a command's words said alone,
-with every command as each clip's rival; pilot does a few of both; select keeps what the checker's margins allow.
+its corpus near misses and tone changes, the hand-picked phrases and every shorter run of its words said alone, with
+every command as each clip's rival; pilot does a few of both; select keeps what the checker's margins allow.
 Run: python -m srpipe.tasks.command.synth {pilot,positives,negatives,select}
 """
 
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import unicodedata
 from collections import defaultdict
 from pathlib import Path
 
@@ -18,6 +19,9 @@ import yaml
 
 from srpipe.core import corpus, phrases, screen
 from srpipe.core.config import data_paths, load_yaml
+from srpipe.generated import lang_vi
+from srpipe.lang import g2p
+from srpipe.lang.normalize import LangError
 from srpipe.tasks.command import CONFIG, learned
 from srpipe.tts import CONFIG as TTS_CONFIG
 from srpipe.tts import clips, engines
@@ -25,7 +29,9 @@ from srpipe.tts import clips, engines
 SETS = {"pilot": "synth_pilot", "positives": "synth_pos", "negatives": "synth_neg"}
 SETS_KEPT = ("positives", "negatives")
 HELD_ROLES = ("val", "test")
-KINDS = ("near", "opening", "half", "phrase")
+KINDS = ("near", "opening", "tone", "half", "phrase")
+TONE_MARKS = ("\u0300", "\u0301", "\u0309", "\u0303", "\u0323")  # huyền, sắc, hỏi, ngã, nặng after their vowel
+VOWELS = "aeiouy"
 
 
 def forms(text: str, templates: list[str]) -> list[str]:
@@ -89,11 +95,69 @@ def halves(text: str) -> list[str]:
     return [" ".join(w[i : i + n]) for n in range(len(w) - 1, 0, -1) for i in range(len(w) - n + 1)]
 
 
+def readings(text: str) -> list[list[tuple[str, ...]]] | None:
+    """text's syllables as each dialect of lang_vi reads them, a list a dialect; None when spelling cannot build one."""
+    try:
+        return [
+            [tuple(s.units()) for w in corpus.words(text) for s in g2p.syllables(w, d)]
+            for d in range(len(lang_vi.DIALECTS))
+        ]
+    except (LangError, ValueError):
+        return None
+
+
+def mark_spots(plain: str) -> list[int]:
+    """Where a tone mark may go in an unmarked NFD syllable: after each vowel and the vowel's own marks."""
+    spots = []
+    for i, ch in enumerate(plain):
+        if ch in VOWELS:
+            j = i + 1
+            while j < len(plain) and unicodedata.combining(plain[j]):
+                j += 1
+            spots.append(j)
+    return spots
+
+
+def retoned(syllable: str) -> list[str]:
+    """syllable in each other tone lang_vi can spell, its sounds otherwise the same, one spelling a tone; the spot
+    of its own mark is tried first."""
+    bare = unicodedata.normalize("NFD", syllable)
+    plain = "".join(ch for ch in bare if ch not in TONE_MARKS)
+    own = corpus.reading(syllable)
+    marked = next((i for i, ch in enumerate(bare) if ch in TONE_MARKS), None)
+    spots = mark_spots(plain)
+    if marked is not None:
+        before = len([ch for ch in bare[:marked] if ch not in TONE_MARKS])
+        spots = sorted(spots, key=lambda spot: spot != before)
+    found: dict[str, str] = {}
+    for spelled in [plain] + [plain[:at] + mark + plain[at:] for mark in TONE_MARKS for at in spots]:
+        text = unicodedata.normalize("NFC", spelled)
+        heard = corpus.reading(text)
+        if len(heard) > 1 and heard[:-1] == own[:-1] and heard[-1] != own[-1]:
+            found.setdefault(heard[-1], text)
+    return list(found.values())
+
+
+def tone_changes(text: str) -> list[str]:
+    """text with one syllable in another tone, never one that any dialect reads as text itself."""
+    words, own = corpus.words(text), readings(text)
+    changed = (" ".join([*words[:k], v, *words[k + 1 :]]) for k, w in enumerate(words) for v in retoned(w))
+    return [t for t in changed if (heard := readings(t)) and not any(a == b for a, b in zip(heard, own, strict=True))]
+
+
+def sounds_like_one(text: str, commands: list[dict]) -> bool:
+    """Whether some dialect reads text as some command; the north reading alone for text spelling cannot build."""
+    heard = readings(text)
+    if heard is None:
+        return any(corpus.sounds(text) == corpus.sounds(c["text"]) for c in commands)
+    return any(any(a == b for a, b in zip(heard, readings(c["text"]), strict=True)) for c in commands)
+
+
 def negative_texts(
     cfg: dict, commands: list[dict], stream: np.ndarray, vocab: list[str], codes: np.ndarray, tables: dict
 ) -> list[dict]:
-    """Per command its commonest corpus neighbours and openings, then every half of every command, then the
-    hand-picked phrases, without repeats and without any that sounds like a whole command however it is spelled:
+    """Per command its commonest corpus neighbours and openings and its tone changes, then every half of every
+    command, then the hand-picked phrases, without repeats and without any that a dialect reads as a whole command:
     [{text, kind}]."""
     spec = cfg["synth"]["negatives"]
     found: dict[str, str] = {}
@@ -102,11 +166,11 @@ def negative_texts(
         found |= {p: "near" for p, _ in near.most_common(spec["neighbours"]) if p not in found}
         opening = phrases.openings(command["text"], stream, vocab)
         found |= {p: "opening" for p, _ in opening.most_common(spec["openings"]) if p not in found}
+        found |= {t: "tone" for t in tone_changes(command["text"]) if t not in found}
     for command in commands:
         found |= {h: "half" for h in halves(command["text"]) if h not in found}
     found |= {p: "phrase" for p in spec["phrases"] if p not in found}
-    whole = [corpus.sounds(c["text"]) for c in commands]
-    return [{"text": t, "kind": k} for t, k in found.items() if corpus.sounds(t) not in whole]
+    return [{"text": t, "kind": k} for t, k in found.items() if not sounds_like_one(t, commands)]
 
 
 def negative_requests(

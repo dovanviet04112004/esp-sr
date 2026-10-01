@@ -89,10 +89,19 @@ def test_negatives_never_sound_like_a_whole_command_and_keep_longer_phrases_hold
     found = {t["text"]: t["kind"] for t in texts}
     assert found["bặt đèn"] == "near" and found["mở của"] == "near"
     assert found["bật lên"] == "opening" and found["mở ra"] == "opening"
+    assert found["bất đèn"] == "tone" and found["mờ cửa"] == "tone"
     assert found["đèn"] == "half" and found["cửa"] == "half"
     assert found["mở cửa sổ"] == "phrase"
-    assert not {"bật đèn", "tắt đèn", "mở cửa"} & set(found)
+    assert not {"bật đèn", "tắt đèn", "mở cửa", "mỡ cửa"} & set(found)
     assert len(texts) == len(found)
+
+
+def test_tone_changes_never_read_as_the_command_in_any_dialect() -> None:
+    assert synth.tone_changes("tắt quạt") == ["tặt quạt", "tắt quát"]
+    changed = synth.tone_changes("mở cửa")
+    assert len(changed) == 8 and {"mờ cửa", "mở cựa", "mơ cửa"} <= set(changed)
+    assert not {"mỡ cửa", "mở cữa"} & set(changed)
+    assert synth.retoned("lượng") == ["lương", "lường", "lướng", "lưởng", "lưỡng"]
 
 
 def test_each_negative_is_read_by_distinct_voices_with_every_command_as_rival(tmp_path: Path) -> None:

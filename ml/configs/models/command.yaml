@@ -30,4 +30,4 @@ synth:                             # E11-T7 for both tracks: python -m srpipe.ta
     neighbours: 10                 # the commonest such phrases per command
     openings: 5                    # the commonest corpus phrases of a command's length opening with its first syllable
     phrases: [bật điện, tắt điện, bật quạt trần, đèn đẹp quá, mở cửa sổ, đóng góp, tăng ca, giảm giá, dừng xe, lại đây]
-    voices: {vieneu: 6, f5: 4}     # per text, drawn with the seed; VieNeu from presets and clones
+    voices: {vieneu: 12, f5: 8}    # per text, drawn with the seed; VieNeu from presets and clones
