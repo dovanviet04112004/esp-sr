@@ -45,6 +45,8 @@ def test_a_net_of_some_commands_keeps_their_order_and_refuses_an_unlearned_one()
         kws.classes(cfg | {"commands": ["bat_den", "chup_anh"]}, command_cfg)
     pilot = cfg | {"speech_commands": {"keywords": ["yes", "no"]}}
     assert kws.classes(pilot, command_cfg) == ["yes", "no", kws.OTHER, kws.SILENCE]
+    with pytest.raises(ValueError, match="booleans"):
+        kws.classes(cfg | {"speech_commands": yaml.safe_load("{keywords: [yes, up]}")}, command_cfg)
 
 
 def test_a_tts_clip_goes_to_its_voices_role_and_its_commands_class(tmp_path: Path) -> None:
@@ -162,7 +164,7 @@ def test_a_speech_commands_pilot_keeps_the_corpus_speakers_apart_and_draws_its_c
     (root / "validation_list.txt").write_text("yes/cc_nohash_0.wav\n", encoding="utf-8")
     counts = {"clips": {"train": 2, "val": 5}, "other_clips": {"train": 9, "val": 9}}
     spec = {"dir": "speech/sc", "keywords": ["yes"]} | counts
-    files, seconds = data.speech_commands_files(tmp_path, spec, 0)
+    files, seconds = data.speech_commands_files(tmp_path, spec, ["yes"], 0)
     assert set(files) == {"train_yes_real.txt", "val_yes_real.txt", "train_other_real.txt", "val_other_real.txt"}
     assert len(files["train_yes_real.txt"]) == 2 and {r.spk for r in files["train_yes_real.txt"]} <= {"aa", "dd"}
     assert [r.item for r in files["val_yes_real.txt"]] == ["speech/sc/yes/bb_nohash_0.wav"]

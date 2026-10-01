@@ -13,7 +13,10 @@ def classes(cfg: dict, command_cfg: dict) -> list[str]:
     """Class names in output order: a Speech Commands pilot's keywords, else the learned command ids as default_vi.json
     lists them, only those of commands when it names some; then other and silence."""
     if cfg["speech_commands"]:
-        return [*cfg["speech_commands"]["keywords"], OTHER, SILENCE]
+        keywords = cfg["speech_commands"]["keywords"]
+        if wrong := [w for w in keywords if not isinstance(w, str)]:
+            raise ValueError(f"keywords {wrong} are no strings: YAML reads yes, no, on and off unquoted as booleans")
+        return [*keywords, OTHER, SILENCE]
     ids, only = [c["id"] for c in command.learned(command_cfg)], cfg["commands"]
     if only is not None and (unknown := set(only) - set(ids)):
         raise ValueError(f"{sorted(unknown)} are no learned commands")

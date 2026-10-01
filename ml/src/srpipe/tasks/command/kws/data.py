@@ -178,7 +178,7 @@ def silence_rows(spec: dict, raw: Path, rejected: set[str], seed: int) -> tuple[
     return rows, seconds
 
 
-def speech_commands_files(raw: Path, spec: dict, seed: int) -> tuple[Rows, dict[str, float]]:
+def speech_commands_files(raw: Path, spec: dict, keywords: list[str], seed: int) -> tuple[Rows, dict[str, float]]:
     """A Speech Commands pilot's files but silence's: each keyword, and the other words as other, drawn to their
     counts a role; val from the corpus's testing list, train from neither of its lists, so speakers stay apart as the
     corpus keeps them."""
@@ -186,7 +186,7 @@ def speech_commands_files(raw: Path, spec: dict, seed: int) -> tuple[Rows, dict[
     held = {n: set((root / f"{n}_list.txt").read_text(encoding="utf-8").split()) for n in ("testing", "validation")}
     found: dict[tuple[str, str], list[str]] = defaultdict(list)
     for folder in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith("_")):
-        cls = folder.name if folder.name in spec["keywords"] else kws.OTHER
+        cls = folder.name if folder.name in keywords else kws.OTHER
         for f in sorted(folder.glob("*.wav")):
             name = f"{folder.name}/{f.name}"
             if name not in held["validation"]:
@@ -246,8 +246,10 @@ def command_files(cfg: dict, command_cfg: dict, paths: dict) -> tuple[Rows, dict
 def build(cfg: dict, command_cfg: dict, paths: dict) -> tuple[Rows, dict[str, float]]:
     """Every split file of the version by name, and the seconds of every item in them."""
     spec = cfg["split"]
+    names = kws.classes(cfg, command_cfg)
     if cfg["speech_commands"]:
-        files, seconds = speech_commands_files(paths["raw"], cfg["speech_commands"], spec["seed"])
+        keywords = names[: names.index(kws.OTHER)]
+        files, seconds = speech_commands_files(paths["raw"], cfg["speech_commands"], keywords, spec["seed"])
     else:
         files, seconds = command_files(cfg, command_cfg, paths)
     rejected = set(screen.rejected(paths["interim"]))
