@@ -2,7 +2,6 @@
 
 #include <math.h>
 #include <stdbool.h>
-#include <string.h>
 
 #define BLANK 0
 #define MILLI 1000.0f
@@ -26,18 +25,20 @@ typedef struct {
 static const float EXP_POLY[] = {0x1.a0d2cep-13f, 0x1.6e879cp-10f, 0x1.11121p-7f,
                                  0x1.555382p-5f,  0x1.555554p-3f,  0x1p-1f};
 
+// A union, not memcpy: GCC for the ESP32-S3 turns a 4-byte memcpy into a call, ~35 cycles each way.
+typedef union {
+    float f;
+    uint32_t u;
+} float_bits_t;
+
 static float bits_float(uint32_t bits)
 {
-    float x;
-    memcpy(&x, &bits, sizeof(x));
-    return x;
+    return ((float_bits_t){.u = bits}).f;
 }
 
 static uint32_t float_bits(float x)
 {
-    uint32_t bits;
-    memcpy(&bits, &x, sizeof(bits));
-    return bits;
+    return ((float_bits_t){.f = x}).u;
 }
 
 static wide_t normalized(float x, int32_t e)
