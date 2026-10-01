@@ -171,3 +171,29 @@ def test_the_extracts_clips_of_the_word_join_the_train_positives(tmp_path: Path)
     assert not files["val_pos.txt"]
     negatives = [r.item for name in ("train_neg.txt", "val_neg.txt", "test_neg.txt") for r in files[name]]
     assert "speech/bud500/data/train-0.parquet#3" not in negatives and len(negatives) == 3
+
+
+def test_a_speech_commands_pilot_cuts_the_word_reuses_negatives_and_draws_hard_ones(tmp_path: Path) -> None:
+    root, hop = tmp_path / "speech" / "sc", grid.HOP_SAMPLES
+    tone = 0.3 * np.sin(2 * np.pi * 300.0 * np.arange(20 * hop) / grid.SAMPLE_RATE_HZ)
+    said = {"yes": ["aa_nohash_0", "bb_nohash_0", "cc_nohash_0"], "no": ["aa_nohash_0", "dd_nohash_0"]}
+    for word, stems in said.items():
+        for stem in stems:
+            write_wav(root / word / f"{stem}.wav", np.concatenate([tone, np.zeros(30 * hop)]))
+    write_wav(root / "_background_noise_" / "white.wav", np.zeros(hop))
+    (root / "testing_list.txt").write_text("yes/bb_nohash_0.wav\nno/dd_nohash_0.wav\n", encoding="utf-8")
+    (root / "validation_list.txt").write_text("yes/cc_nohash_0.wav\n", encoding="utf-8")
+    earlier = tmp_path / "splits" / "wake" / "v4"
+    earlier.mkdir(parents=True)
+    for name in data.NEGATIVES:
+        (earlier / name).write_text(f"speech/vivos/{name}.wav\tVIVOSSPK01\t-\tpublic\n", encoding="utf-8")
+    pilot = {"dir": "speech/sc", "negatives_from": "v4", "hard_clips": {"train": 5, "val": 5}}
+    cfg = load_yaml(CONFIG)
+    cfg = cfg | {"word": "yes", "split": cfg["split"] | {"speech_commands": pilot}}
+    files, seconds = data.speech_commands_files(cfg, {"raw": tmp_path, "splits": tmp_path / "splits"})
+    assert set(files) == {"train_pos.txt", "val_pos.txt", "train_hard.txt", "val_hard.txt", *data.NEGATIVES}
+    assert [r.item for r in files["train_pos.txt"]] == ["speech/sc/yes/aa_nohash_0.wav@0.000-0.320"]
+    assert [r.spk for r in files["val_pos.txt"]] == ["bb"] and [r.spk for r in files["val_hard.txt"]] == ["dd"]
+    assert [r.spk for r in files["train_hard.txt"]] == ["aa"]
+    assert files["train_neg.txt"] == splits.read_split(earlier / "train_neg.txt")
+    assert seconds["speech/sc/yes/aa_nohash_0.wav@0.000-0.320"] == 0.32

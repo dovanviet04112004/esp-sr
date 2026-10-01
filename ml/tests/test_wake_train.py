@@ -236,3 +236,4 @@ def test_a_wake_session_for_another_word_is_scored_as_a_negative() -> None:
     assert wake_eval.session_kind("wake", "trợ lí", word) == "wake"
     assert wake_eval.session_kind("wake", "chào mi na", word) == "neg"
     assert wake_eval.session_kind("cmd", "trợ lý bật đèn", word) == "cmd"
+    assert wake_eval.session_kind("cmd", "yes", corpus.sounds("yes")) == "wake"

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,7 +20,7 @@ import yaml
 
 from srpipe.core import corpus, extract, screen, splits
 from srpipe.core.audio_io import ItemReader
-from srpipe.core.config import CONFIGS, data_paths, load_yaml
+from srpipe.core.config import CONFIGS, apply_overrides, data_paths, load_yaml
 from srpipe.generated import grid, lang_vi
 from srpipe.lang import g2p
 from srpipe.lang.normalize import LangError, normalize
@@ -27,6 +28,8 @@ from srpipe.scenes import device, room
 from srpipe.tasks.wake import CONFIG, synth
 
 PUBLIC, SYNTH = "public", "synth"
+SPEECH_COMMANDS_STREAM = 3
+NEGATIVES = ("train_neg.txt", "val_neg.txt", "test_neg.txt")
 
 
 @dataclass
@@ -176,6 +179,44 @@ def build(
     return files
 
 
+def speech_commands_files(cfg: dict, paths: dict[str, Path]) -> tuple[dict[str, list[splits.Row]], dict[str, float]]:
+    """A Speech Commands pilot's files and their lengths: the word's clips as positives, each cut at the end of its
+    speech; the other words as hard negatives drawn to their counts; val from the corpus's testing list, train from
+    neither of its lists; and an earlier version's negatives as they are, so their simulation is linked, not rerun."""
+    spec, word = cfg["split"]["speech_commands"], cfg["word"]
+    if not isinstance(word, str):
+        raise ValueError(f"word {word!r} is no string: YAML reads yes, no, on and off unquoted as booleans")
+    root, reader = paths["raw"] / spec["dir"], ItemReader(paths["raw"])
+    held = {n: set((root / f"{n}_list.txt").read_text(encoding="utf-8").split()) for n in ("testing", "validation")}
+    found: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for folder in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith("_")):
+        kind = "pos" if folder.name == word else "hard"
+        for f in sorted(folder.glob("*.wav")):
+            name = f"{folder.name}/{f.name}"
+            if name not in held["validation"]:
+                found[("val" if name in held["testing"] else "train", kind)].append(name)
+    rng = np.random.default_rng([cfg["split"]["seed"], SPEECH_COMMANDS_STREAM])
+    files: dict[str, list[splits.Row]] = {}
+    seconds: dict[str, float] = {}
+    for (role, kind), names in sorted(found.items()):
+        if kind == "hard":
+            count = min(spec["hard_clips"][role], len(names))
+            names = sorted(rng.choice(names, size=count, replace=False).tolist())
+        rows = []
+        for name in names:
+            item = f"{spec['dir']}/{name}"
+            x = reader.read(item)
+            length = len(x) / grid.SAMPLE_RATE_HZ
+            if kind == "pos" and (end := round(speech_end_s(x, cfg["split"]["end_below_peak_db"]), 3)) < length:
+                item, length = cut_item(item, 0.0, end), end
+            rows.append(splits.Row(item, name.split("/")[1].split("_nohash_")[0], splits.ABSENT, PUBLIC))
+            seconds[item] = length
+        files[f"{role}_{kind}.txt"] = rows
+    earlier = paths["splits"] / "wake" / spec["negatives_from"]
+    files |= {name: splits.read_split(earlier / name) for name in NEGATIVES}
+    return dict(sorted(files.items())), seconds
+
+
 def moved_to_val(test: list[corpus.Clip], shares: dict[str, float], seed: int) -> list[corpus.Clip]:
     """The test clips of the speakers drawn with the seed into val, a share of each corpus's speakers taken whole."""
     moved = []
@@ -216,6 +257,22 @@ def notes(cfg: dict, files: dict[str, list[splits.Row]], seconds: dict[str, floa
         f"| `{name}` | {len(rows)} | {splits.hours(rows, seconds):.2f} | {sum(r.origin == SYNTH for r in rows)} |"
         for name, rows in files.items()
     )
+    if pilot := spec["speech_commands"]:
+        return f"""# wake/{spec["version"]}
+
+Dựng bằng `python -m srpipe.tasks.wake.data split`, seed {spec["seed"]}, mục `split` của `ml/configs/models/wake.yaml`
+(KẾ HOẠCH §1.3). Pilot kiểm đường wake trên kho nhiều người nói, từ đánh thức "{cfg["word"]}" của Speech Commands v0.02:
+
+- `train_pos`, `val_pos`: mọi mẩu của từ ấy ở `raw/{pilot["dir"]}`, cắt ở cuối tiếng nói như mọi mẩu dương; `val` lấy từ
+  `testing_list.txt`, `train` từ mẩu không nằm ở danh sách nào của bộ, nên người nói tách như bộ tách.
+- `train_hard`, `val_hard`: các từ còn lại của bộ, rút theo seed {pilot["hard_clips"]["train"]} và
+  {pilot["hard_clips"]["val"]} mẩu.
+- `train_neg`, `val_neg`, `test_neg`: nguyên văn của `wake/{pilot["negatives_from"]}`.
+
+| File | Mẩu | Giờ | Mẩu TTS |
+|---|---|---|---|
+{table}
+"""
     real = (
         f", và mẩu người thật nói từ ấy của kho trích `{spec['real_pos']}` (`raw/speech/{spec['real_pos']}/`), cắt"
         "\n  đúng hai tiếng; kho ấy không có mã người nói nên mẩu chỉ vào `train`"
@@ -314,7 +371,11 @@ def cut_split(cfg: dict, paths: dict[str, Path]) -> int:
             clips = trimmed(clips, folder, cfg, paths["interim"])
         manifests[folder] = clips
         seconds |= {synth_item(folder, c): c.get("cut_s", c["seconds"]) for c in clips}
-    files = build(cfg, public, seconds, manifests, tuple(real))
+    if cfg["split"]["speech_commands"]:
+        files, lengths = speech_commands_files(cfg, paths)
+        seconds |= lengths
+    else:
+        files = build(cfg, public, seconds, manifests, tuple(real))
     out = paths["splits"] / "wake" / cfg["split"]["version"]
     splits.write_version(out, files, notes(cfg, files, seconds))
     problems = splits.check_version(out)
@@ -326,9 +387,10 @@ def cut_split(cfg: dict, paths: dict[str, Path]) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("step", choices=["split", "simulate"])
-    step = parser.parse_args(argv).step
-    cfg, paths = load_yaml(CONFIG), data_paths()
-    if step == "simulate":
+    parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
+    args = parser.parse_args(argv)
+    cfg, paths = apply_overrides(load_yaml(CONFIG), args.overrides), data_paths()
+    if args.step == "simulate":
         simulate(cfg, paths)
         return 0
     return cut_split(cfg, paths)

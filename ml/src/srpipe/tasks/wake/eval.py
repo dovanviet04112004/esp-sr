@@ -118,8 +118,12 @@ def session_features(session: Path, chain_cfg: ChainConfig, mel: Mel) -> tuple[n
 
 
 def session_kind(kind: str, prompt: str, word: list[tuple[str, ...]]) -> str:
-    """A wake session says the configured word (corpus.sounds); one recorded for another word is a negative."""
-    return kind if kind != "wake" or corpus.says(corpus.sounds(prompt), word) else "neg"
+    """A wake session says the configured word (corpus.sounds); one recorded for another word is a negative, and a
+    command session whose prompt is the word alone counts as a wake session."""
+    said = corpus.sounds(prompt)
+    if kind == "cmd" and said == word:
+        return "wake"
+    return kind if kind != "wake" or corpus.says(said, word) else "neg"
 
 
 def board(model, mean: np.ndarray, std: np.ndarray, cfg: dict, paths: dict, threshold: float, dev: str):
@@ -205,7 +209,8 @@ def checkpoint(run: Path, step: int) -> Path:
 
 def load_run(run: Path, cfg: dict, step: int | None = None) -> tuple[Tcn, dict, dict, float]:
     """The run's kept network, or the one of an evaluated step, its band statistics and its val threshold, and cfg
-    with the run's own model and features, since the net was built and fed by those; scoring keeps cfg's rules."""
+    with the run's own model, features and word, since the net was built, fed and taught by those; scoring keeps cfg's
+    rules."""
     metrics = yaml.safe_load((run / "metrics.yaml").read_text(encoding="utf-8"))
     rows = [r for r in metrics["history"] if r["step"] == step] if step else [metrics["val"]]
     if not rows:
@@ -215,7 +220,8 @@ def load_run(run: Path, cfg: dict, step: int | None = None) -> tuple[Tcn, dict, 
     model = Tcn(len(stats["mean"]), **trained["model"])
     model.load_state_dict(torch.load(checkpoint(run, step) if step else run / "model.pt", map_location="cpu"))
     model.eval()
-    return model, stats, cfg | {"model": trained["model"], "features": trained["features"]}, rows[0]["threshold"]
+    used = cfg | {"model": trained["model"], "features": trained["features"], "word": trained["word"]}
+    return model, stats, used, rows[0]["threshold"]
 
 
 def main(argv: list[str] | None = None) -> int:
