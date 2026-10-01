@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth kws-split kws-features kws-train ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -112,6 +112,10 @@ command-synth-pilot: screen ## Synthesise a few command clips and near misses to
 command-synth: screen ## Synthesise the command clips, near misses and halves, keep what the checker allows (E11-T7)
 	cd ml && uv run python -m srpipe.tasks.command.synth positives && uv run python -m srpipe.tasks.command.synth negatives \
 	  && uv run python -m srpipe.tasks.command.synth select
+
+command-synth-make: screen ## Make the command clips and near misses without the checker; make command-synth hears them later (E11-T7)
+	cd ml && uv run python -m srpipe.tasks.command.synth positives --make-only \
+	  && uv run python -m srpipe.tasks.command.synth negatives --make-only
 
 kws-split: screen ## Cut command_kws/v1 from the command TTS, real clips, ordinary speech and noise into ml/data/splits (E11-T17)
 	cd ml && uv run python -m srpipe.tasks.command.kws.data split
