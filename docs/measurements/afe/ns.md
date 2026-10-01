@@ -139,3 +139,16 @@ nó.
 - Đặt sai số lên phổ nén thì nhiễu sót bị phạt theo gain mũ 0,6: ở −20 dB vẫn tốn một phần tư so với để nguyên, và lực
   kéo gain xuống ở −40 dB còn một phần tư so với ở −20 dB, thay vì một phần trăm. Đó là cách NSNet2 (phổ nén mũ 0,3) và RNNoise (căn bậc hai gain) của bản PC học dìm sâu;
   đổi lại tiếng mất nhiều hơn, chỉnh bằng α.
+
+Lượt `20261001_7f42622-dirty_095d54` học hàm trên phổ nén, α = 0,7, rồi dừng sau epoch 0 để đo trên cùng 980 mẫu:
+
+| Hàm, epoch 0 | Sàn −12 dB | Sàn −20 dB | Không sàn | Quãng nghỉ | Tiếng mất |
+|---|---|---|---|---|---|
+| NSNet-16k L, hàm cũ | 10,9 dB | — | 16,1 dB | 19,9 dB | 1,88 dB |
+| NSNet-16k L, phổ nén α = 0,7 | 11,5 dB | 16,6 dB | 18,8 dB | 22,5 dB | 4,18 dB |
+| RNNoise-16k, phổ nén α = 0,7 | 11,4 dB | 16,5 dB | 18,6 dB | 23,4 dB | 3,39 dB |
+
+Sâu hơn 2,7 dB nhưng tiếng mất gấp đôi. Đích của hàm ấy ép cả vạch tiếng đang lấn nhiễu: nén làm 10 dB SNR còn 3 dB, nên ở
++10 dB SNR gain lý tưởng với α = 0,7 lấy đi 5,6 dB tiếng, ở +25 dB vẫn lấy 2,1 dB. Hàm khớp phổ nén của đầu ra với tiếng
+sạch, (S^c − (g·X)^c)² trên biên độ, có đích là tỉ lệ biên độ tiếng / hỗn hợp (bảng trên: 37,6 dB ở quãng nghỉ, tiếng mất
+0,15 dB): nhiễu sót chỗ không có tiếng vẫn bị phạt theo gain mũ 0,6, còn chỗ có tiếng đích không ép tiếng.
