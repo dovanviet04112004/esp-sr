@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot command-synth-pilot command-synth kws-split kws-features kws-train ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth kws-split kws-features kws-train ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -100,6 +100,10 @@ wake-synth: screen ## Synthesise the wake positives and near misses, keep what t
 extract-pilot: ## A sample of every phrase of hf_extract fetched, cut and copied to cache/listen/hf_extract, before the whole run
 	cd ml && uv run python -m srpipe.core.extract hf_extract fetch --pilot
 	cd ml && uv run python -m srpipe.core.extract hf_extract cut
+	cd ml && uv run python -m srpipe.core.extract hf_extract listen
+
+extract-recut: ## Cut hf_extract's sentences of the corpora on disk again under the current rule, then copy samples to listen to
+	cd ml && uv run python -m srpipe.core.extract hf_extract recut
 	cd ml && uv run python -m srpipe.core.extract hf_extract listen
 
 command-synth-pilot: screen ## Synthesise a few command clips and near misses to hear before the overnight run (E11-T7)
