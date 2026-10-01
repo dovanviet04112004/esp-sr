@@ -941,6 +941,13 @@ Chi phí: 50 lệnh × 3 biến thể × 100 khung × ~30 trạng thái ≈ 450 
 ms, chỉ chạy một lần khi `vad` báo hết câu. `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ
 Kconfig.
 
+Mọi điểm tính theo khung: `s(·)` là log xác suất chia số khung, đơn vị nat mỗi khung. `ai_engine_command_result_t`
+mang `score_permille` = 1000·e^s(c*) (xác suất trung bình nhân mỗi khung, ‰), `margin_permille` = 1000·(s(c*) − s(c₂))
+và `free_gap_permille` = 1000·(s_free − s(c*)), hai trường sau theo phần nghìn nat mỗi khung, chặn ở 65 535; `δ₁`,
+`δ₂` cùng đơn vị ấy. Biến thể là chuỗi đơn vị `lang_vi` của câu lệnh theo từng vùng, bỏ cách đọc trùng. Bản soi gương
+`ctc/postproc/ctc_score.py` tính bằng float32, `exp` và `log` lấy bằng double rồi làm tròn về float như C, để hai
+bên khớp từng bit; bộ vàng ở `contracts/golden/command_ctc/` có đối chứng âm, bản C ở `ai_engine/src/command_ctc/`.
+
 Với `ctc`, thêm lệnh là thêm một dòng chữ (TỔNG QUAN §3.1): dòng mới đi qua `lang_vi` **ngay trên máy** lúc nạp
 bộ lệnh, qua MQTT `down/commands` hoặc từ `storage/cmd/set.json` (§6.4). Phép kiểm chứng minh của
 V5.5.8 là thêm một lệnh chưa từng có trong dữ liệu huấn luyện rồi đo nó.
@@ -2199,7 +2206,7 @@ Bảng phân vùng không đi qua OTA được: đổi bảng là nạp lại qu
 | `device` | `serial`, `mqtt_uri`, `mqtt_user`, `mqtt_pass`, `stream_host`, `stream_port`, `sntp_host`, `tz` | str / u16 | vắng `serial` thì dựng từ eFuse MAC: `sr-` + 12 hex thường (board B: `sr-3485188f7a70`); `mqtt_uri` mang cả scheme; vắng thì lùi về `Kconfig` của `net_mqtt` |
 | `calib` | `bal` (blob 257 × 2 float), `bal_ver` (u32), `bal_at` (u32 epoch), `aec_delay` (u32, mẫu), `pcm_shift` (u8) | | kết quả của `test_apps/calib`; **đo trên từng board**, không phải hằng số |
 | `afe` | `ns_floor_db` (i8), `agc_target_dbfs` (i8), `vad_mode` (u8) | | gieo từ `contracts/afe.yaml`, đổi bằng `SET_CONFIG` |
-| `kws` | `wake_th` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16) | | gieo từ `Kconfig` của `svc_listen`; hai khoá lệnh mang nghĩa của đường đang dựng (§3.12): `δ₁`, `δ₂` của `ctc`, hay xác suất thấp nhất và khoảng nhất–nhì của `kws`, ‰ |
+| `kws` | `wake_th` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16) | | gieo từ `Kconfig` của `svc_listen`; hai khoá lệnh mang nghĩa của đường đang dựng (§3.12): `δ₁`, `δ₂` của `ctc` theo phần nghìn nat mỗi khung, hay xác suất thấp nhất và khoảng nhất–nhì của `kws`, ‰ |
 | `model` | `active_slot` (u8), `version` (str), `sha256` (blob 32 B) | | chọn `models_0` hay `models_1` |
 | `sys` | `boot_count` (u32), `seed_ver` (u32), `last_ota_result` (u8), `fw_valid` (u8) | | |
 
