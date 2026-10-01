@@ -77,3 +77,31 @@ def test_a_tiny_run_evaluates_saves_each_evaluated_net_and_keeps_the_last(tmp_pa
     assert all(row["loss"] > 0 and row["unit_error_rate"] >= 0 for row in history)
     last = torch.load(train.checkpoint(tmp_path / "run", 4))
     assert all(torch.equal(last[k], v) for k, v in net.state_dict().items())
+
+
+def test_a_stopped_run_resumed_from_its_last_checkpoint_ends_as_an_unbroken_one(tmp_path: Path, monkeypatch) -> None:
+    rng = np.random.default_rng(3)
+    units = {f"s{k}": [k % 5, (k + 1) % 5] for k in range(6)}
+    sets = {
+        "train": train.load_role([processed(tmp_path / "t", [48, 40, 56, 32, 48, 40], rng)], units, 64, "float16"),
+        "val": train.load_role([processed(tmp_path / "v", [40, 48], rng)], units, 64, "float32"),
+    }
+    cfg = load_yaml(ctc.CONFIG)
+    cfg["train"] |= {"batch": 2, "steps": 4, "eval_every": 2}
+    whole, _, unbroken = train.train(cfg, sets, "cpu", tmp_path / "whole")
+    evaluate, calls = train.evaluate, []
+
+    def stop_at_the_second(*args):
+        calls.append(1)
+        if len(calls) == 2:
+            raise KeyboardInterrupt
+        return evaluate(*args)
+
+    monkeypatch.setattr(train, "evaluate", stop_at_the_second)
+    with pytest.raises(KeyboardInterrupt):
+        train.train(cfg, sets, "cpu", tmp_path / "stopped")
+    monkeypatch.setattr(train, "evaluate", evaluate)
+    assert torch.load(train.checkpoint(tmp_path / "stopped"), weights_only=False)["step"] == 2
+    resumed, _, history = train.train(cfg, sets, "cpu", tmp_path / "stopped", resume=True)
+    assert history == unbroken
+    assert all(torch.equal(resumed.state_dict()[k], v) for k, v in whole.state_dict().items())

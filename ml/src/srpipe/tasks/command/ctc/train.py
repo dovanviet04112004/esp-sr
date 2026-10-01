@@ -3,7 +3,7 @@
 An example is one sentence of processed/command/<version> as the device computes its features; its target the lang_vi
 units of its text read in the configured dialect, tones in the same sequence. Plain CTC, SpecAugment on the mel bands,
 Adam with a cosine decay; val gives the CTC loss and the unit error rate of the best path.
-Run: python -m srpipe.tasks.command.ctc.train [--set train.steps=40000]"""
+Run: python -m srpipe.tasks.command.ctc.train [--set train.steps=40000] [--resume RUN]"""
 
 from __future__ import annotations
 
@@ -155,13 +155,15 @@ def evaluate(net: encoder.CtcNet, data: Sentences, stats: tuple, device: str) ->
     return {"loss": sum(losses) / len(data.first), "unit_error_rate": errors / total}
 
 
-def checkpoint(run: Path, step: int) -> Path:
-    return run / "checkpoints" / f"step_{step:06d}.pt"
+def checkpoint(run: Path, step: int | None = None) -> Path:
+    """An evaluated step's weights, or with no step the last state a resumed run goes on from."""
+    return run / "checkpoints" / ("last.pt" if step is None else f"step_{step:06d}.pt")
 
 
-def train(cfg: dict, sets: dict[str, Sentences], device: str, run: Path | None = None) -> tuple:
-    """The net of the last step, the feature statistics and one row of val figures per evaluation; each evaluated
-    net is saved in the run's checkpoints when run is given."""
+def train(cfg: dict, sets: dict[str, Sentences], device: str, run: Path | None = None, resume: bool = False) -> tuple:
+    """The net of the last step, the feature statistics and one row of val figures per evaluation. With run, each
+    evaluated net is saved beside the state the run goes on from when resumed: weights, optimiser, schedule, the
+    batch draws and the history, so a resumed run ends where an unbroken one would."""
     spec = cfg["train"]
     rng = seed_everything(spec["seed"])
     data = sets["train"]
@@ -172,11 +174,20 @@ def train(cfg: dict, sets: dict[str, Sentences], device: str, run: Path | None =
     schedule = torch.optim.lr_scheduler.LambdaLR(
         optimiser, lambda step: final + (1 - final) * 0.5 * (1 + math.cos(math.pi * step / spec["steps"]))
     )
+    history, first = [], 1
+    if resume:
+        state = torch.load(checkpoint(run), map_location=device, weights_only=False)
+        net.load_state_dict(state["model"])
+        optimiser.load_state_dict(state["optimiser"])
+        schedule.load_state_dict(state["schedule"])
+        rng.bit_generator.state = state["draws"]
+        history, first = state["history"], state["step"] + 1
     n_mel = data.features.shape[1] - pitch.N_FEATURES
     hours = data.hops.sum() / HOPS_PER_S / splits.SECONDS_PER_HOUR
-    print(f"{len(data.first)} sentences, {hours:.1f} h; {spec['steps']} steps of {spec['batch']}", flush=True)
-    history, losses = [], []
-    for step in range(1, spec["steps"] + 1):
+    said = f"{len(data.first)} sentences, {hours:.1f} h"
+    print(f"{said}; steps {first} to {spec['steps']} of {spec['batch']}", flush=True)
+    losses = []
+    for step in range(first, spec["steps"] + 1):
         x, hops, units = batch_of(data, rng.integers(len(data.first), size=spec["batch"]), net.chunk_multiple)
         x = (x - mean) / std
         mask(x, hops, spec["masks"], n_mel, rng)
@@ -199,6 +210,9 @@ def train(cfg: dict, sets: dict[str, Sentences], device: str, run: Path | None =
             if run:
                 checkpoint(run, step).parent.mkdir(parents=True, exist_ok=True)
                 torch.save(net.state_dict(), checkpoint(run, step))
+                state = {"model": net.state_dict(), "optimiser": optimiser.state_dict(), "step": step}
+                state |= {"schedule": schedule.state_dict(), "draws": rng.bit_generator.state, "history": history}
+                torch.save(state, checkpoint(run))
     net.eval()
     return net, (mean, std), history
 
@@ -206,7 +220,13 @@ def train(cfg: dict, sets: dict[str, Sentences], device: str, run: Path | None =
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
-    cfg, paths = apply_overrides(load_yaml(ctc.CONFIG), parser.parse_args(argv).overrides), data_paths()
+    parser.add_argument("--resume", type=Path, metavar="RUN", help="go on from a run's last checkpoint")
+    args = parser.parse_args(argv)
+    if args.resume:
+        cfg = load_yaml(args.resume / "config.resolved.yaml")
+    else:
+        cfg = apply_overrides(load_yaml(ctc.CONFIG), args.overrides)
+    paths = data_paths()
     spec, version = cfg["train"], cfg["split"]["version"]
     folder = paths["splits"] / "command" / version
     split_files = sorted(folder.glob("*.txt"))
@@ -221,8 +241,8 @@ def main(argv: list[str] | None = None) -> int:
         for (role, files), dtype in zip(roles.items(), ("float16", "float32"), strict=True)
     }
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    run = create_run_dir(paths["artifacts"], BRANCH, cfg, split_files)
-    net, (mean, std), history = train(cfg, sets, device, run)
+    run = args.resume or create_run_dir(paths["artifacts"], BRANCH, cfg, split_files)
+    net, (mean, std), history = train(cfg, sets, device, run, bool(args.resume))
     torch.save(net.state_dict(), run / "model.pt")
     np.savez(run / "feature_stats.npz", mean=mean, std=std)
     report = {"val": history[-1], "history": history}
