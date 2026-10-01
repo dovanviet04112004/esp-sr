@@ -23,10 +23,36 @@ typedef struct __attribute__((packed)) {
     uint16_t score, margin, gap;
 } decide_want_t;
 
-static ai_engine_lexicon_t s_lexicon;
+static ai_engine_lexicon_t s_lexicon, s_most;
 
-TEST_CASE("the ctc decision of the default commands over LENH's longest window matches its mirror, timed",
-          "[ai_engine]")
+static void time_decide(const decide_head_t *head, const float *log_probs, const ai_engine_lexicon_t *lexicon,
+                        void *work, float *scores, ai_engine_command_result_t *out)
+{
+    int64_t total_us = 0, peak_us = 0;
+    for (uint8_t r = 0; r < head->runs; r++) {
+        const int64_t started_us = esp_timer_get_time();
+        const esp_err_t err =
+            ai_engine_command_ctc_decide(log_probs, head->n_classes, head->n_frames, lexicon, head->reject,
+                                         head->margin, work, scores, out);
+        const int64_t took_us = esp_timer_get_time() - started_us;
+        TEST_ASSERT_EQUAL(ESP_OK, err);
+        total_us += took_us;
+        peak_us = took_us > peak_us ? took_us : peak_us;
+    }
+    size_t forms = 0;
+    for (size_t c = 0; c < lexicon->n_commands; c++) {
+        forms += lexicon->n_variants[c];
+    }
+    printf("ctc_decide: %u commands, %u variants, %u frames x %u classes: %" PRId64 " us mean, %" PRId64
+           " us peak over %u runs\n",
+           lexicon->n_commands, (unsigned)forms, head->n_frames, head->n_classes, total_us / head->runs,
+           peak_us, head->runs);
+}
+
+TEST_CASE(
+    "the ctc decision of the default commands over LENH's longest window matches its mirror, timed with "
+    "them and with the most commands",
+    "[ai_engine]")
 {
     const uint8_t *p = ctc_decide_start;
     decide_head_t head;
@@ -66,23 +92,15 @@ TEST_CASE("the ctc decision of the default commands over LENH's longest window m
     TEST_ASSERT_EQUAL(ESP_OK,
                       ai_engine_command_ctc_decide(log_probs, head.n_classes, head.n_frames, &s_lexicon,
                                                    head.reject, head.margin, work, got_scores, &out));
-    int64_t total_us = 0, peak_us = 0;
-    for (uint8_t r = 0; r < head.runs; r++) {
-        const int64_t started_us = esp_timer_get_time();
-        ai_engine_command_ctc_decide(log_probs, head.n_classes, head.n_frames, &s_lexicon, head.reject,
-                                     head.margin, work, got_scores, &out);
-        const int64_t took_us = esp_timer_get_time() - started_us;
-        total_us += took_us;
-        peak_us = took_us > peak_us ? took_us : peak_us;
+    time_decide(&head, log_probs, &s_lexicon, work, got_scores, &out);
+    s_most.n_commands = AI_ENGINE_COMMANDS_MAX;
+    for (size_t c = 0; c < AI_ENGINE_COMMANDS_MAX; c++) {
+        s_most.n_variants[c] = s_lexicon.n_variants[c % head.n_commands];
+        memcpy(s_most.variants[c], s_lexicon.variants[c % head.n_commands], sizeof(s_most.variants[c]));
     }
-    size_t forms = 0;
-    for (size_t c = 0; c < head.n_commands; c++) {
-        forms += n_variants[c];
-    }
-    printf("ctc_decide: %u commands, %u variants, %u frames x %u classes: %" PRId64 " us mean, %" PRId64
-           " us peak over %u runs\n",
-           head.n_commands, (unsigned)forms, head.n_frames, head.n_classes, total_us / head.runs, peak_us,
-           head.runs);
+    float most_scores[AI_ENGINE_COMMANDS_MAX];
+    ai_engine_command_result_t most_out;
+    time_decide(&head, log_probs, &s_most, work, most_scores, &most_out);
     heap_caps_free(log_probs);
     heap_caps_free(work);
     TEST_ASSERT_EQUAL_INT16(want.command, out.command);
