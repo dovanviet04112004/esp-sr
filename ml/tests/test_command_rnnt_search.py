@@ -121,3 +121,22 @@ def test_the_free_path_ahead_or_no_command_reached_turns_the_window_down() -> No
     off = decided(said, 8, reject=100)
     assert off[0] == ctc_score.REJECTED and off[3] > 100
     assert decided([], 0).tolist() == [ctc_score.REJECTED, 0, ctc_score.CAP, ctc_score.CAP]
+
+
+def test_the_golden_set_holds_its_edges_and_each_negative_control_differs(tmp_path) -> None:
+    from srpipe.golden.gold import read_gold
+
+    written = rs.emit(tmp_path)
+    assert [p.name for p in written] == [
+        f"{n}.gold" for n in ("case_000", "case_001", "case_002", "case_neg_000", "case_neg_001")
+    ]
+    cases = {p.stem: read_gold(p) for p in written}
+    edge = cases["case_002"]["decision"]
+    assert edge[0].tolist() == edge[1].tolist() == [ctc_score.REJECTED, 0, ctc_score.CAP, ctc_score.CAP]
+    assert edge[2, 0] == 0 and edge[4, 0] == 0 and edge[3, 0] == ctc_score.REJECTED and edge[3, 1] > 0
+    assert cases["case_neg_000"]["decision"][3, 0] == 0
+    assert not np.array_equal(cases["case_002"]["scores"], cases["case_neg_001"]["scores"])
+    assert (
+        cases["case_002"]["frames"].dtype == np.int8
+        and (cases["case_000"]["decision"][:, 0] != ctc_score.REJECTED).any()
+    )
