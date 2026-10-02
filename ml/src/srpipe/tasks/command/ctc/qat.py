@@ -41,9 +41,9 @@ def evaluate(net: qat_espdl.Trainable, data: train.Sentences, stats: tuple, mode
     return {"loss": sum(losses) / len(data.first), "unit_error_rate": errors / total}
 
 
-def fit(graph, sets: dict[str, train.Sentences], stats: tuple, cfg: dict, trained: dict, model, device: str) -> list:
-    """graph trained quant.qat.steps steps of its batch at a cosine-decayed learning rate, masked and clipped as the
-    run trained (trained, its config); the val rows."""
+def fit(graph, sets: dict, stats: tuple, cfg: dict, trained: dict, model, device: str) -> list:
+    """graph trained quant.qat.steps steps of its batch at a cosine-decayed learning rate on train.load_sets' sets,
+    drawn from its pool, masked and clipped as the run trained (trained, its config); the val rows."""
     spec = cfg["quant"]["qat"]
     mean, std = stats
     net = qat_espdl.Trainable(graph, device)
@@ -53,12 +53,13 @@ def fit(graph, sets: dict[str, train.Sentences], stats: tuple, cfg: dict, traine
         optimiser, lambda step: final + (1 - final) * 0.5 * (1 + math.cos(math.pi * step / spec["steps"]))
     )
     rng = seed_everything(cfg["quant"]["seed"])
-    data, batch = sets["train"], qat_espdl.batch_of(graph)
-    n_mel = data.features.shape[1] - pitch.N_FEATURES
+    pool, batch = sets["train"], qat_espdl.batch_of(graph)
+    n_mel = pool.dims - pitch.N_FEATURES
     history = [{"step": 0} | evaluate(net, sets["val"], stats, model, device)]
     print(history[0], flush=True)
     losses = []
     for step in range(1, spec["steps"] + 1):
+        data = pool.at(step)
         x, hops, units = train.batch_of(data, rng.integers(len(data.first), size=batch), model.chunk_multiple)
         x = (x - mean) / std
         train.mask(x, hops, trained["train"]["masks"], n_mel, rng)

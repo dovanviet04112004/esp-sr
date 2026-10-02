@@ -1,8 +1,8 @@
 """Train the ctc net of command (E11-T12, KEHOACH 3.12) on board-simulated log-mel and pitch, write a run directory.
 
-An example is one sentence of processed/command/<version> as the device computes its features; its target the lang_vi
-units of its text read in the configured dialect, tones in the same sequence. Plain CTC, SpecAugment on the mel bands,
-Adam with a cosine decay; val gives the CTC loss and the unit error rate of the best path.
+An example is a sentence of processed/command/<version> as the device computes it, drawn from a ring of train's shards;
+its target the lang_vi units of its text in the configured dialect. CTC, SpecAugment, Adam with a cosine decay; val
+gives the CTC loss and the best path's unit error rate.
 Run: python -m srpipe.tasks.command.ctc.train [--set train.steps=40000] [--resume RUN]"""
 
 from __future__ import annotations
@@ -37,6 +37,23 @@ HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
 VAL_BATCH = 64
 DELTA_PITCH = 2  # pitch's third feature: delta log pitch a hop
 LOG_PER_DB = math.log(10.0) / 10.0  # log-mel is a natural log of power
+POOL_STREAM = 1  # pass p's shard order: [train.seed, POOL_STREAM, p]
+POOL_DTYPE = np.float16
+GB = 1e9
+
+
+class Units:
+    """Sentences' unit ids end to end, sentence k the slice from starts[k] to starts[k + 1]: a list of arrays without
+    an array object a sentence, read as int64 like one."""
+
+    def __init__(self, flat: np.ndarray, starts: np.ndarray) -> None:
+        self.flat, self.starts = flat, starts
+
+    def __len__(self) -> int:
+        return len(self.starts) - 1
+
+    def __getitem__(self, k: int) -> np.ndarray:
+        return self.flat[self.starts[k] : self.starts[k + 1]].astype(np.int64)
 
 
 @dataclass
@@ -46,7 +63,7 @@ class Sentences:
     features: np.ndarray
     first: np.ndarray
     hops: np.ndarray
-    units: list[np.ndarray]  # lang_vi unit ids, shifted past the CTC blank
+    units: list[np.ndarray] | Units  # lang_vi unit ids, shifted past the CTC blank
 
 
 def load_role(folders: list[Path], units_of: dict[str, list[int]], longest: int, dtype: str) -> Sentences:
@@ -73,14 +90,162 @@ def load_role(folders: list[Path], units_of: dict[str, list[int]], longest: int,
     return Sentences(np.concatenate(features), np.array(first), np.array(hops), units)
 
 
-def feature_stats(features: np.ndarray, block: int = 1 << 20) -> tuple[np.ndarray, np.ndarray]:
-    """Mean and deviation of every dim over every hop, accumulated in float64."""
+def feature_sums(features: np.ndarray, block: int = 1 << 20) -> tuple[np.ndarray, np.ndarray]:
+    """The sum and the sum of squares of every dim over every hop, in float64."""
     total, square = np.zeros(features.shape[1]), np.zeros(features.shape[1])
     for k in range(0, len(features), block):
         x = features[k : k + block].astype(np.float64)
         total, square = total + x.sum(axis=0), square + (x * x).sum(axis=0)
-    mean = total / len(features)
-    return mean.astype(np.float32), np.sqrt(square / len(features) - mean * mean).astype(np.float32)
+    return total, square
+
+
+def stats_of(total: np.ndarray, square: np.ndarray, hops: int) -> tuple[np.ndarray, np.ndarray]:
+    """Mean and deviation of every dim from feature_sums over hops hops."""
+    mean = total / hops
+    return mean.astype(np.float32), np.sqrt(square / hops - mean * mean).astype(np.float32)
+
+
+def feature_stats(features: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Mean and deviation of every dim over every hop, accumulated in float64."""
+    return stats_of(*feature_sums(features), len(features))
+
+
+@dataclass(frozen=True)
+class Shard:
+    """A finished shard of a train build: its files' stem, its hops, and the sentences it gives, each one's first hop
+    within it, hops, and units past the blank as uint8 end to end from unit_starts."""
+
+    stem: str
+    n_hops: int
+    first: np.ndarray
+    hops: np.ndarray
+    units: np.ndarray
+    unit_starts: np.ndarray
+
+    def features(self) -> np.ndarray:
+        """Its log-mel and pitch side by side (hops, dims), as stored."""
+        mel, pitch_ = (np.load(self.stem + s) for s in (".features.npy", ".pitch.npy"))
+        if len(mel) != self.n_hops or len(pitch_) != self.n_hops:
+            raise ValueError(f"{self.stem}: {len(mel)} and {len(pitch_)} hops, its items list {self.n_hops}")
+        return np.concatenate([mel, pitch_], axis=1)
+
+
+def shards_of(folders: list[Path], units_of: dict[str, list[int]], longest: int) -> list[Shard]:
+    """Every shard of the finished builds in folders, with its sentences that have lang_vi units and at most longest
+    hops; read from the item listings alone."""
+    out = []
+    for folder in folders:
+        built = yaml.safe_load((folder / "manifest.yaml").read_text(encoding="utf-8"))
+        if not built.get("pitch"):
+            raise ValueError(f"{folder} was simulated without pitch")
+        for name in sorted(n for n in built["sha256"] if n.endswith(".items.jsonl")):
+            first, hops, units, n_hops = [], [], [], 0
+            for line in (folder / name).read_text(encoding="utf-8").splitlines():
+                item = json.loads(line)
+                n_hops = max(n_hops, item["frame_offset"] + item["n_frames"])
+                said = units_of.get(item["item"].split("@")[0])
+                if said and item["n_frames"] <= longest:
+                    first.append(item["frame_offset"])
+                    hops.append(item["n_frames"])
+                    units.append(np.asarray(said, dtype=np.uint8) + 1)
+            starts = np.cumsum([0] + [len(u) for u in units])
+            flat = np.concatenate(units) if units else np.zeros(0, dtype=np.uint8)
+            stem = str(folder / name).removesuffix(".items.jsonl")
+            out.append(Shard(stem, n_hops, np.array(first, dtype=np.int64), np.array(hops), flat, starts))
+    if not any(len(s.first) for s in out):
+        raise ValueError(f"no sentence of {[f.name for f in folders]} has units within {longest} hops")
+    return out
+
+
+class Pool:
+    """Train's sentences from a ring of its shards (KEHOACH 3.12). The ring holds capacity hops: it fills with the
+    shards of pass 0's order while they fit, then before every rotate_steps-th step the next shard of the order not in
+    the ring comes in, at the end or back at the start, over the shards it overlaps, the oldest. A pass is a seeded
+    order of every shard. The ring of a step is a function of the step alone, which a resumed run rebuilds; train
+    within capacity is held whole."""
+
+    def __init__(self, shards: list[Shard], dims: int, capacity: int, rotate_steps: int, seed: int) -> None:
+        if wide := [s.stem for s in shards if s.n_hops > capacity]:
+            raise ValueError(f"{wide[0]}: a shard longer than the ring's {capacity} hops")
+        self.shards, self.dims, self.rotate_steps, self.seed = shards, dims, rotate_steps, seed
+        total = sum(s.n_hops for s in shards)
+        self.whole = total <= capacity
+        self.capacity = total if self.whole else capacity
+        self.ring = np.empty((self.capacity, dims), dtype=POOL_DTYPE)
+        self.placed: list[tuple[int, int]] = []  # (shard, first hop in the ring), oldest first
+        self.held: set[tuple[int, int]] = set()  # what the ring's memory holds
+        self.rotations, self.write, self.passes, self.at_order = -1, 0, -1, 0
+        self.order = np.zeros(0, dtype=np.int64)
+        self.view: Sentences | None = None
+
+    @property
+    def sentences(self) -> int:
+        return sum(len(s.first) for s in self.shards)
+
+    @property
+    def hours(self) -> float:
+        return sum(int(s.hops.sum()) for s in self.shards) / HOPS_PER_S / splits.SECONDS_PER_HOUR
+
+    def stats(self) -> tuple[np.ndarray, np.ndarray]:
+        """Mean and deviation of every dim over every hop of every shard, read one shard at a time."""
+        total, square = np.zeros(self.dims), np.zeros(self.dims)
+        for shard in self.shards:
+            more, more_square = feature_sums(shard.features())
+            total, square = total + more, square + more_square
+        return stats_of(total, square, sum(s.n_hops for s in self.shards))
+
+    def _upcoming(self) -> int:
+        """The next shard of the order not in the ring, the order going on into the next pass."""
+        inside = {shard for shard, _ in self.placed}
+        while True:
+            if self.at_order == len(self.order):
+                self.passes += 1
+                self.order = np.random.default_rng([self.seed, POOL_STREAM, self.passes]).permutation(len(self.shards))
+                self.at_order = 0
+            shard = int(self.order[self.at_order])
+            if shard not in inside:
+                return shard
+            self.at_order += 1
+
+    def _place(self, shard: int) -> None:
+        n = self.shards[shard].n_hops
+        if self.write + n > self.capacity:
+            self.write = 0
+        end = self.write + n
+        self.placed = [(s, a) for s, a in self.placed if a + self.shards[s].n_hops <= self.write or a >= end]
+        self.placed.append((shard, self.write))
+        self.write, self.at_order = end, self.at_order + 1
+
+    def _rotate_to(self, rotations: int) -> None:
+        if self.rotations < 0:
+            if self.whole:
+                self.placed = [(k, a) for k, a in enumerate(np.cumsum([0] + [s.n_hops for s in self.shards])[:-1])]
+            else:
+                while self.write + self.shards[shard := self._upcoming()].n_hops <= self.capacity:
+                    self._place(shard)
+            self.rotations = 0
+        while self.rotations < rotations:
+            self._place(self._upcoming())
+            self.rotations += 1
+
+    def at(self, step: int) -> Sentences:
+        """The sentences of the ring as step's batch draws from it, the shards it lacks read in."""
+        rotations = 0 if self.whole else (step - 1) // self.rotate_steps
+        if self.view is not None and rotations == self.rotations:
+            return self.view
+        if rotations < self.rotations:
+            raise ValueError(f"step {step} is behind the ring's {self.rotations} rotations")
+        self._rotate_to(rotations)
+        for shard, start in self.placed:
+            if (shard, start) not in self.held:
+                self.ring[start : start + self.shards[shard].n_hops] = self.shards[shard].features()
+        self.held = set(self.placed)
+        mine = [self.shards[shard] for shard, _ in self.placed]
+        first = np.concatenate([start + self.shards[shard].first for shard, start in self.placed])
+        lengths = np.concatenate([np.diff(s.unit_starts) for s in mine])
+        units = Units(np.concatenate([s.units for s in mine]), np.concatenate([[0], np.cumsum(lengths)]))
+        self.view = Sentences(self.ring, first, np.concatenate([s.hops for s in mine]), units)
+        return self.view
 
 
 def batch_of(data: Sentences, picks: np.ndarray, multiple: int) -> tuple[np.ndarray, np.ndarray, list[np.ndarray]]:
@@ -245,34 +410,40 @@ def checkpoint(run: Path, step: int | None = None) -> Path:
     return run / "checkpoints" / ("last.pt" if step is None else f"step_{step:06d}.pt")
 
 
-def train(cfg: dict, sets: dict[str, Sentences], device: str, run: Path | None = None, resume: bool = False) -> tuple:
-    """The net of the last step, the feature statistics and one row of val figures per evaluation. With run, each
-    evaluated net is saved beside the state the run goes on from when resumed: weights, optimiser, schedule, the
-    batch draws and the history, so a resumed run ends where an unbroken one would."""
+def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: bool = False) -> tuple:
+    """The net of the last step, the feature statistics and one row of val figures per evaluation; sets["train"] a
+    Pool, sets["val"] Sentences. With run, each evaluated net is saved beside the state the run goes on from when
+    resumed: weights, optimiser, schedule, the batch draws, the history and the train losses since the last
+    evaluation, so a resumed run ends where an unbroken one would."""
     spec = cfg["train"]
     rng = seed_everything(spec["seed"])
-    data = sets["train"]
-    mean, std = feature_stats(data.features)
+    pool = sets["train"]
+    mean, std = pool.stats()
     net = encoder.build(cfg).to(device)
     optimiser = torch.optim.Adam(net.parameters(), lr=spec["learning_rate"])
     final = spec["final_learning_rate"] / spec["learning_rate"]
     schedule = torch.optim.lr_scheduler.LambdaLR(
         optimiser, lambda step: final + (1 - final) * 0.5 * (1 + math.cos(math.pi * step / spec["steps"]))
     )
-    history, first = [], 1
+    history, first, losses = [], 1, []
     if resume:
         state = torch.load(checkpoint(run), map_location=device, weights_only=False)
         net.load_state_dict(state["model"])
         optimiser.load_state_dict(state["optimiser"])
         schedule.load_state_dict(state["schedule"])
         rng.bit_generator.state = state["draws"]
-        history, first = state["history"], state["step"] + 1
-    n_mel = data.features.shape[1] - pitch.N_FEATURES
-    hours = data.hops.sum() / HOPS_PER_S / splits.SECONDS_PER_HOUR
-    said = f"{len(data.first)} sentences, {hours:.1f} h"
+        history, first, losses = state["history"], state["step"] + 1, state.get("losses", [])
+
+    def save(step: int) -> None:
+        state = {"model": net.state_dict(), "optimiser": optimiser.state_dict(), "step": step, "losses": losses}
+        state |= {"schedule": schedule.state_dict(), "draws": rng.bit_generator.state, "history": history}
+        torch.save(state, checkpoint(run))
+
+    n_mel = pool.dims - pitch.N_FEATURES
+    said = f"{pool.sentences} sentences, {pool.hours:.1f} h, a ring of {len(pool.ring) / HOPS_PER_S / 3600:.1f} h"
     print(f"{said}; steps {first} to {spec['steps']} of {spec['batch']}", flush=True)
-    losses = []
     for step in range(first, spec["steps"] + 1):
+        data = pool.at(step)
         picks = rng.integers(len(data.first), size=spec["batch"])
         if "augment" in spec:
             stride = net.front.hop_stride
@@ -299,16 +470,14 @@ def train(cfg: dict, sets: dict[str, Sentences], device: str, run: Path | None =
             if run:
                 checkpoint(run, step).parent.mkdir(parents=True, exist_ok=True)
                 torch.save(net.state_dict(), checkpoint(run, step))
-                state = {"model": net.state_dict(), "optimiser": optimiser.state_dict(), "step": step}
-                state |= {"schedule": schedule.state_dict(), "draws": rng.bit_generator.state, "history": history}
-                torch.save(state, checkpoint(run))
+                save(step)
     net.eval()
     return net, (mean, std), history
 
 
-def load_sets(cfg: dict) -> dict[str, Sentences]:
-    """The train and val sentences of cfg's split with units in its dialect, at most train.max_s long; train held in
-    float16."""
+def load_sets(cfg: dict) -> dict:
+    """The sentences of cfg's split with units in its dialect, at most train.max_s long: train a Pool of
+    train.pool_gb in float16, val Sentences in float32."""
     paths = data_paths()
     if stale := built.unbuilt(cfg, paths):
         raise ValueError(f"{', '.join(str(p) for p in stale)}: not simulated as the config asks; make ctc-features")
@@ -321,9 +490,12 @@ def load_sets(cfg: dict) -> dict[str, Sentences]:
     clips = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
     units_of = sentence_units(clips, listed, spec["dialect"])
     longest = round(spec["max_s"] * HOPS_PER_S)
+    dims = encoder.n_dims(cfg)
+    capacity = int(spec["pool_gb"] * GB // (dims * np.dtype(POOL_DTYPE).itemsize))
+    shards = shards_of([root / f.stem for f in roles["train"]], units_of, longest)
     return {
-        role: load_role([root / f.stem for f in files], units_of, longest, dtype)
-        for (role, files), dtype in zip(roles.items(), ("float16", "float32"), strict=True)
+        "train": Pool(shards, dims, capacity, spec["rotate_steps"], spec["seed"]),
+        "val": load_role([root / f.stem for f in roles["val"]], units_of, longest, "float32"),
     }
 
 

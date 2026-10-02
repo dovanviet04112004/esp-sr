@@ -107,6 +107,23 @@ def sentences(rng: np.random.Generator, hops: list[int]) -> train.Sentences:
     return train.Sentences(rng.normal(size=(sum(hops), DIMS)).astype(np.float32), first, np.array(hops), units)
 
 
+def pooled(folder: Path, rng: np.random.Generator, hops: list[int]) -> train.Pool:
+    """The sentences of sentences() as a finished build of one shard, through the trainer's pool."""
+    folder.mkdir(parents=True)
+    data = sentences(rng, hops)
+    np.save(folder / "shard_00000.features.npy", data.features[:, : DIMS - 3].astype(np.float16))
+    np.save(folder / "shard_00000.pitch.npy", data.features[:, DIMS - 3 :].astype(np.float16))
+    rows = [
+        {"item": f"s{k}", "frame_offset": int(a), "n_frames": int(n)}
+        for k, (a, n) in enumerate(zip(data.first, hops, strict=True))
+    ]
+    (folder / "shard_00000.items.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    listed = {f"shard_00000{s}": "-" for s in (".features.npy", ".pitch.npy", ".items.jsonl")}
+    (folder / "manifest.yaml").write_text(yaml.safe_dump({"pitch": True, "sha256": listed}))
+    units = {f"s{k}": (u - 1).tolist() for k, u in enumerate(data.units)}
+    return train.Pool(train.shards_of([folder], units, 64), DIMS, 1 << 20, 1, 0)
+
+
 def test_rung_4_trains_a_batch_graph_and_the_graph_of_one_carries_it(tmp_path: Path) -> None:
     cfg = load_yaml(ctc.CONFIG)
     cfg["quant"]["qat"] |= {"steps": 2, "eval_every": 1}
@@ -116,7 +133,7 @@ def test_rung_4_trains_a_batch_graph_and_the_graph_of_one_carries_it(tmp_path: P
     calib = [torch.from_numpy(rng.normal(size=(1, DIMS, 64)).astype(np.float32)) for _ in range(4)]
     rungs = ptq_espdl.ladder(quant.LADDER) | {"equalization": None, "bias_correction": False, "calibration": "minmax"}
     wide = quant.quantized(model, quant.batched(calib, 2), tmp_path / "b", rungs, cfg["esp_ppq_patches"])
-    sets = {"train": sentences(rng, [48, 40, 56, 32]), "val": sentences(rng, [40, 48, 32])}
+    sets = {"train": pooled(tmp_path / "t", rng, [48, 40, 56, 32]), "val": sentences(rng, [40, 48, 32])}
     stats = (np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32))
     with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
         history = qat.fit(wide, sets, stats, cfg, cfg, model, "cpu")

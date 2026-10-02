@@ -1,7 +1,8 @@
 """ctc training: sentences load with their units and nothing too long, batches pad to the net's chunk, the best path
 merges repeats and drops blanks, the RNN-T loss sums every alignment whatever chunk of sentences builds its lattice,
-greedy RNN-T paths of a batch are those of each sentence, and a tiny run evaluates, saves each evaluated net and keeps
-the last."""
+greedy RNN-T paths of a batch are those of each sentence, a ring smaller than train goes round every shard and is the
+same rebuilt for a resume, and a tiny run evaluates, saves each evaluated net, keeps the last, and stopped then
+resumed ends as an unbroken one."""
 
 from __future__ import annotations
 
@@ -41,6 +42,72 @@ def processed(folder: Path, hops: list[int], rng: np.random.Generator) -> Path:
     return folder
 
 
+def sharded(folder: Path, shards: list[list[int]], rng: np.random.Generator) -> Path:
+    """A finished build with pitch in float16, a shard a list of sentence hops, sentences s0, s1, ... throughout."""
+    folder.mkdir(parents=True)
+    listed, k = {}, 0
+    for j, hops in enumerate(shards):
+        stem, rows, offset = f"shard_{j:05d}", [], 0
+        for n in hops:
+            rows.append({"item": f"s{k}", "frame_offset": offset, "n_frames": n, "speech_frames": [0, n]})
+            offset, k = offset + n, k + 1
+        np.save(folder / f"{stem}.features.npy", rng.normal(size=(offset, DIMS - 3)).astype(np.float16))
+        np.save(folder / f"{stem}.pitch.npy", rng.normal(size=(offset, 3)).astype(np.float16))
+        (folder / f"{stem}.items.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        listed |= {f"{stem}{s}": "-" for s in (".features.npy", ".pitch.npy", ".items.jsonl")}
+    (folder / "manifest.yaml").write_text(yaml.safe_dump({"pitch": True, "sha256": listed}))
+    return folder
+
+
+def pool_of(folders: list[Path], units: dict, capacity: int = 1 << 20, rotate_steps: int = 1) -> train.Pool:
+    return train.Pool(train.shards_of(folders, units, 64), DIMS, capacity, rotate_steps, 5)
+
+
+def stored(folder: Path, k: int) -> np.ndarray:
+    """Sentence s<k>'s features as its build stores them."""
+    for listing in sorted(folder.glob("*.items.jsonl")):
+        for line in listing.read_text().splitlines():
+            item = json.loads(line)
+            if item["item"] == f"s{k}":
+                stem = str(listing).removesuffix(".items.jsonl")
+                mel, pitch = (np.load(stem + s) for s in (".features.npy", ".pitch.npy"))
+                span = slice(item["frame_offset"], item["frame_offset"] + item["n_frames"])
+                return np.concatenate([mel[span], pitch[span]], axis=1)
+    raise KeyError(k)
+
+
+def test_a_pool_within_its_capacity_holds_train_whole_as_load_role_does(tmp_path: Path) -> None:
+    folder = sharded(tmp_path / "t", [[40, 90, 30], [20, 50]], np.random.default_rng(6))
+    units = {"s0": [0, 5], "s1": [3], "s3": [7], "s4": [2, 2]}
+    whole, pool = train.load_role([folder], units, 64, "float16"), pool_of([folder], units)
+    data = pool.at(1)
+    assert pool.whole and data.first.tolist() == whole.first.tolist() and data.hops.tolist() == whole.hops.tolist()
+    assert [data.units[k].tolist() for k in range(len(data.units))] == [u.tolist() for u in whole.units]
+    np.testing.assert_array_equal(data.features, whole.features)
+    assert pool.at(57) is data and pool.sentences == 3 and len(pool.ring) == 230
+    mean, std = pool.stats()
+    np.testing.assert_allclose(mean, whole.features.astype(np.float64).mean(axis=0), rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(std, whole.features.astype(np.float64).std(axis=0), rtol=1e-4)
+
+
+def test_a_ring_smaller_than_train_goes_round_every_shard_and_is_the_same_rebuilt(tmp_path: Path) -> None:
+    rng = np.random.default_rng(7)
+    folder = sharded(tmp_path / "t", [[int(n) for n in rng.integers(10, 40, 3)] for _ in range(7)], rng)
+    units = {f"s{k}": [k] for k in range(21)}
+    pool, seen = pool_of([folder], units, capacity=150), set()
+    for step in range(1, 61):
+        data = pool.at(step)
+        assert sum(pool.shards[s].n_hops for s, _ in pool.placed) <= 150 == len(pool.ring)
+        seen |= {s for s, _ in pool.placed}
+        if step in (1, 17, 60):
+            again = pool_of([folder], units, capacity=150).at(step)
+            assert again.first.tolist() == data.first.tolist() and again.hops.tolist() == data.hops.tolist()
+            for k, (a, n) in enumerate(zip(data.first, data.hops, strict=True)):
+                np.testing.assert_array_equal(data.features[a : a + n], stored(folder, int(data.units[k][0]) - 1))
+                np.testing.assert_array_equal(again.features[a : a + n], data.features[a : a + n])
+    assert seen == set(range(7)) and not pool.whole and pool.passes >= 1
+
+
 def test_sentences_keep_their_units_past_the_blank_and_leave_out_the_unread_and_the_long(tmp_path: Path) -> None:
     folder = processed(tmp_path / "a", [40, 90, 30], np.random.default_rng(0))
     data = train.load_role([folder], {"s0": [0, 5], "s1": [3], "s2": []}, 64, "float16")
@@ -72,7 +139,7 @@ def test_a_tiny_run_evaluates_saves_each_evaluated_net_and_keeps_the_last(tmp_pa
     rng = np.random.default_rng(2)
     units = {f"s{k}": [k % 5, (k + 1) % 5] for k in range(6)}
     sets = {
-        "train": train.load_role([processed(tmp_path / "t", [48, 40, 56, 32, 48, 40], rng)], units, 64, "float16"),
+        "train": pool_of([processed(tmp_path / "t", [48, 40, 56, 32, 48, 40], rng)], units),
         "val": train.load_role([processed(tmp_path / "v", [40, 48], rng)], units, 64, "float32"),
     }
     cfg = load_yaml(ctc.CONFIG)
@@ -87,13 +154,19 @@ def test_a_tiny_run_evaluates_saves_each_evaluated_net_and_keeps_the_last(tmp_pa
     assert all(torch.equal(last[k], v) for k, v in net.state_dict().items())
 
 
-def test_a_stopped_run_resumed_from_its_last_checkpoint_ends_as_an_unbroken_one(tmp_path: Path, monkeypatch) -> None:
-    rng = np.random.default_rng(3)
-    units = {f"s{k}": [k % 5, (k + 1) % 5] for k in range(6)}
-    sets = {
-        "train": train.load_role([processed(tmp_path / "t", [48, 40, 56, 32, 48, 40], rng)], units, 64, "float16"),
+def ringed_sets(tmp_path: Path, seed: int) -> dict:
+    """Train in three shards through a ring of about two that turns every step, and val."""
+    rng = np.random.default_rng(seed)
+    units = {f"s{k}": [k % 5, (k + 1) % 5] for k in range(8)}
+    folder = sharded(tmp_path / "t", [[48, 40, 56], [32, 48], [40, 44, 36]], rng)
+    return {
+        "train": pool_of([folder], units, capacity=230),
         "val": train.load_role([processed(tmp_path / "v", [40, 48], rng)], units, 64, "float32"),
     }
+
+
+def test_a_stopped_run_resumed_from_its_last_checkpoint_ends_as_an_unbroken_one(tmp_path: Path, monkeypatch) -> None:
+    sets = ringed_sets(tmp_path, 3)
     cfg = load_yaml(ctc.CONFIG)
     cfg["train"] |= {"batch": 2, "steps": 4, "eval_every": 2}
     whole, _, unbroken = train.train(cfg, sets, "cpu", tmp_path / "whole")
@@ -107,10 +180,10 @@ def test_a_stopped_run_resumed_from_its_last_checkpoint_ends_as_an_unbroken_one(
 
     monkeypatch.setattr(train, "evaluate", stop_at_the_second)
     with pytest.raises(KeyboardInterrupt):
-        train.train(cfg, sets, "cpu", tmp_path / "stopped")
+        train.train(cfg, ringed_sets(tmp_path / "b", 3), "cpu", tmp_path / "stopped")
     monkeypatch.setattr(train, "evaluate", evaluate)
     assert torch.load(train.checkpoint(tmp_path / "stopped"), weights_only=False)["step"] == 2
-    resumed, _, history = train.train(cfg, sets, "cpu", tmp_path / "stopped", resume=True)
+    resumed, _, history = train.train(cfg, ringed_sets(tmp_path / "c", 3), "cpu", tmp_path / "stopped", resume=True)
     assert history == unbroken
     assert all(torch.equal(resumed.state_dict()[k], v) for k, v in whole.state_dict().items())
 

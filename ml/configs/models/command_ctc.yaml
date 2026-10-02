@@ -21,6 +21,8 @@ train:                             # python -m srpipe.tasks.command.ctc.train (E
   max_s: 12.0                      # a longer sentence, with its pads, is left out
   batch: 32                        # sentences a step
   steps: 40000
+  pool_gb: 4.0                     # train's features held at once, float16: v3's are about 15 GB, the machine has 10
+  rotate_steps: 8                  # steps between one shard in and the oldest out: 256 sentences a shard, 32 a batch
   learning_rate: 1.0e-3
   final_learning_rate: 1.0e-5      # cosine decay to this by the last step
   clip_norm: 5.0                   # of the gradient, against the rare sentence CTC aligns badly early on
