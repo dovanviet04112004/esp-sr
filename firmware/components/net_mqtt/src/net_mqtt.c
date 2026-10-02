@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include "app_err.h"
 #include "app_events.h"
 #include "cJSON.h"
 #include "esp_heap_caps.h"
@@ -232,6 +233,26 @@ esp_err_t net_mqtt_publish_heartbeat(heartbeat_t *hb)
     hb->json_arena_peak = (uint16_t)s_arena_peak;
     hb->has_json_arena_peak = true;
     return send_payload(heartbeat_to_json(hb), GEN_TOPIC_HEARTBEAT);
+}
+
+esp_err_t net_mqtt_parse_command_set(const char *text, size_t len, command_set_t *out)
+{
+    if (text == NULL || out == NULL) { return ESP_ERR_INVALID_ARG; }
+    const uint32_t failures = s_stats.json_alloc_failures;
+    cJSON *root = cJSON_ParseWithLength(text, len);
+    const bool valid = root != NULL && command_set_from_json(root, out);
+    cJSON_Delete(root);
+    json_end();
+    if (valid) { return ESP_OK; }
+    return s_stats.json_alloc_failures != failures ? ESP_ERR_NO_MEM : APP_ERR_COMMANDS_INVALID;
+}
+
+esp_err_t net_mqtt_publish_event(event_t *ev)
+{
+    if (ev == NULL) { return ESP_ERR_INVALID_ARG; }
+    if (s_client == NULL || !s_connected) { return ESP_ERR_INVALID_STATE; }
+    strlcpy(ev->device_id, s_device_id, sizeof(ev->device_id));
+    return send_payload(event_to_json(ev), GEN_TOPIC_EVENT);
 }
 
 void net_mqtt_stats(net_mqtt_stats_t *out)

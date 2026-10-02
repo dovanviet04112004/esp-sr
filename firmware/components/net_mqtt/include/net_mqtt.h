@@ -46,6 +46,18 @@ esp_err_t net_mqtt_start(const net_mqtt_config_t *cfg);
  */
 esp_err_t net_mqtt_publish_heartbeat(heartbeat_t *hb);
 
+/** Queue one event of the listener; deviceId is filled here.
+ *  @ctx task | non-blocking, never waits on the network | caller keeps ev
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session | ESP_ERR_NO_MEM arena or outbox full
+ */
+esp_err_t net_mqtt_publish_event(event_t *ev);
+
+/** Parse a command set laid out as contracts/schema/command_set.schema.json, through the caller's arena.
+ *  @ctx task | non-blocking | text need not end in NUL; out belongs to the caller, about 20 KB: not the stack
+ *  @ret ESP_OK | APP_ERR_COMMANDS_INVALID not JSON or outside the schema | ESP_ERR_NO_MEM arena full
+ */
+esp_err_t net_mqtt_parse_command_set(const char *text, size_t len, command_set_t *out);
+
 /** Session counters and arena peak.
  *  @ctx any | non-blocking
  */
