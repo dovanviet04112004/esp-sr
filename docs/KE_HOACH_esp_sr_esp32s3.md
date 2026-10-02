@@ -1015,7 +1015,7 @@ hàm giải CTC nào, còn MultiNet6 gọi cả hai. Thêm lệnh vẫn là thê
 | Cây lệnh | cây tiền tố, tức FST tất định, của mọi biến thể `lang_vi` của mọi lệnh, cộng mọi **phần** của chúng như `ctc` (đoạn âm tiết liền nhau thiếu ít nhất một âm tiết) đánh dấu không phải lệnh, để nửa lệnh tranh trong cùng chùm |
 | Quyết | hết cửa sổ, `c*` là giả thuyết đi trọn một lệnh, điểm cao nhất. Từ chối khi không giả thuyết nào trọn lệnh; khi đường tham lam không ràng buộc hơn `c*` quá `δ₁`; khi giả thuyết trọn một lệnh khác sát `c*` dưới `δ₂`; hay khi giả thuyết trọn một phần của `c*` không kém `c*`. Điểm là log xác suất chia số khung như `ctc`; cùng ba trường kết quả, cùng `δ₁` `δ₂` ở NVS |
 | Chạy | `_step` như `ctc`, thêm: mỗi khối 8 khung encoder ra thì tìm luôn trên 8 khung ấy, nên `_score` chỉ chốt. Mạng dự đoán và bộ nối là hai mạng int8 nhỏ qua esp-dl, mục `rnnt_predictor` và `rnnt_joiner` của ảnh (§6.3): bộ nối chạy mỗi khung × mỗi giả thuyết, mạng dự đoán mỗi khi giả thuyết có thêm đơn vị 🔬 |
-| Khớp | hai mạng nhỏ khớp mô phỏng ESP-PPQ bằng `model->test()`; tìm chùm và cây lệnh là C thuần, bản soi gương `ctc/postproc/rnnt_search.py` float32 cùng thứ tự phép, đọc đầu ra int8 của bộ nối như C đọc; bộ vàng `contracts/golden/command_rnnt/` có đối chứng âm, sai số 0 |
+| Khớp | hai mạng nhỏ khớp mô phỏng ESP-PPQ bằng `model->test()`; tìm chùm và cây lệnh là C thuần, bản soi gương `rnnt/postproc/rnnt_search.py` float32 cùng thứ tự phép, đọc đầu ra int8 của bộ nối như C đọc; bộ vàng `contracts/golden/command_rnnt/` có đối chứng âm, sai số 0 |
 | Chọn | giữa `ctc` và `rnnt` bằng Cửa 3 sau int8 trên tập thu qua board, cùng encoder, trong ngân sách µs của §3.3 |
 
 **`kws`** — DS-CNN (Zhang và cộng sự, 2017, "Hello Edge"): một tích chập thường, rồi các tầng tách chiều sâu (tích chập
@@ -1503,11 +1503,13 @@ ml/
 │   │   │   │                          #   srpipe/tts và core/phrases.py vào interim/command/synth_{pilot,pos,neg}/
 │   │   │   ├── kws/{model/, data.py, train.py, quant.py, postproc/}   # DS-CNN; data.py dựng split command_kws/v<n>
 │   │   │   │                          #   và đặc trưng processed/command_kws/; postproc/ ★ softmax và luật từ chối
-│   │   │   └── ctc/{data.py, model/{encoder.py, transducer.py}, train.py, quant.py, qat.py, probe.py,
-│   │   │        postproc/{ctc_score.py ★, rnnt_search.py ★}}   # transducer: mạng dự đoán, bộ nối của rnnt
-│   │   │                              #   encoder kiểu MultiNet7 + CTC; data.py dựng split command/v<n>, bỏ lệnh
-│   │   │                              #   chưa học khỏi tập học (§1.3); quant.py dựng thang §3.14, lệnh con ptq,
-│   │   │                              #   int16, qat; qat.py vòng học CTC của bậc 4; probe.py bản dò board E11-T12
+│   │   │   ├── ctc/{data.py, model/encoder.py, train.py, quant.py, qat.py, probe.py, postproc/ctc_score.py ★}
+│   │   │   │                          # phần chung của ctc và rnnt cộng phần giải CTC: encoder kiểu MultiNet7,
+│   │   │   │                          #   lượt học RNN-T cộng CTC; data.py dựng split command/v<n>, bỏ lệnh chưa
+│   │   │   │                          #   học khỏi tập học (§1.3); quant.py dựng thang §3.14, lệnh con ptq, int16,
+│   │   │   │                          #   qat; qat.py vòng học CTC của bậc 4; probe.py bản dò board E11-T12
+│   │   │   └── rnnt/{model/transducer.py, postproc/rnnt_search.py ★}   # phần riêng của rnnt: mạng dự đoán và
+│   │   │                              #   bộ nối kiểu MultiNet7, tìm chùm theo cây lệnh (ADR-0016)
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
 │   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py, pitch.py}
