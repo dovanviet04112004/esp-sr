@@ -17,10 +17,14 @@ class Model;
 
 namespace ai {
 
+constexpr size_t kRankMax = 4;
+
 struct Int8Tensor {
     int8_t *data; // value = data[i] * 2^exponent; nullptr if unbuilt
     size_t elements;
     int exponent;
+    size_t rank = 0;
+    size_t dims[kRankMax] = {}; // esp-dl's layout: channels last
 };
 
 class EspdlNet {
@@ -47,6 +51,8 @@ class EspdlNet {
     esp_err_t step() noexcept;
     /** Clear every streaming cache, as after a gap in the frame sequence. */
     void reset() noexcept;
+    /** Free the graph, ahead of the image entry it reads being dropped; build may run again after. */
+    void release() noexcept;
     bool ready() const noexcept
     {
         return model_ != nullptr;

@@ -9,9 +9,14 @@
 #include "ai_engine.h"
 #include "esp_err.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define AI_ENGINE_COMMAND_CTC_REJECTED (-1)
-#define AI_ENGINE_COMMAND_CTC_UNITS_MAX 48   // a variant's units; its forward pass keeps 2 n + 1 states
-#define AI_ENGINE_COMMAND_CTC_CLASSES_MAX 64 // a frame's classes, one exp kept on the stack each
+#define AI_ENGINE_COMMAND_CTC_UNITS_MAX 48    // a variant's units; its forward pass keeps 2 n + 1 states
+#define AI_ENGINE_COMMAND_CTC_CLASSES_MAX 64  // a frame's classes, one exp kept on the stack each
+#define AI_ENGINE_COMMAND_CTC_FEATURES_MAX 64 // a hop's features, normalised on the stack
 
 /** Log-probabilities of int8 logits worth logits * 2^exponent, frame after frame of n_classes, as
  *  ctc_score.py's frame_log_probs: largest off, exp summed over an exponent of its own, log in double.
@@ -35,3 +40,7 @@ size_t ai_engine_command_ctc_work_bytes(size_t n_classes, size_t n_frames);
 esp_err_t ai_engine_command_ctc_decide(const float *log_probs, size_t n_classes, size_t n_frames,
                                        const ai_engine_lexicon_t *lexicon, uint16_t reject, uint16_t margin,
                                        void *work, float *scores, ai_engine_command_result_t *out);
+
+#ifdef __cplusplus
+}
+#endif

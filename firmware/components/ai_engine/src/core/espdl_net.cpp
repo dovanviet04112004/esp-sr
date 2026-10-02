@@ -33,9 +33,16 @@ class ExternalMallocGuard {
 
 Int8Tensor view(dl::TensorBase *tensor) noexcept
 {
-    if (tensor == nullptr || tensor->get_dtype() != dl::DATA_TYPE_INT8) { return {nullptr, 0, 0}; }
-    return {tensor->get_element_ptr<int8_t>(), static_cast<size_t>(tensor->get_size()),
-            tensor->get_exponent()};
+    if (tensor == nullptr || tensor->get_dtype() != dl::DATA_TYPE_INT8 || tensor->shape.size() > kRankMax) {
+        return {nullptr, 0, 0};
+    }
+    Int8Tensor out{tensor->get_element_ptr<int8_t>(), static_cast<size_t>(tensor->get_size()),
+                   tensor->get_exponent()};
+    out.rank = tensor->shape.size();
+    for (size_t i = 0; i < out.rank; i++) {
+        out.dims[i] = static_cast<size_t>(tensor->shape[i]);
+    }
+    return out;
 }
 
 Int8Tensor only(std::map<std::string, dl::TensorBase *> &tensors) noexcept
@@ -120,6 +127,12 @@ esp_err_t EspdlNet::step() noexcept
 void EspdlNet::reset() noexcept
 {
     if (model_ != nullptr) { model_->reset(); }
+}
+
+void EspdlNet::release() noexcept
+{
+    delete model_;
+    model_ = nullptr;
 }
 
 } // namespace ai

@@ -1,10 +1,28 @@
 #include "ai_engine.h"
+#include "core/branch.hpp"
 
-// Neutral shell of E3-T4: the acoustic network and constrained CTC land in E11-T13 (KEHOACH 3.12).
+// Neutral shell of E3-T4 for the kws backend until E11-T17 runs its net (KEHOACH 3.12).
 
 namespace {
 bool s_window_open;
 }
+
+namespace ai {
+
+void command_drop() noexcept
+{}
+
+esp_err_t command_load() noexcept
+{
+    return ESP_OK;
+}
+
+bool command_ready() noexcept
+{
+    return false;
+}
+
+} // namespace ai
 
 esp_err_t ai_engine_command_begin(void)
 {
