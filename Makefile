@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-deploy rnnt-ptq models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-deploy rnnt-ptq ai-unit-rnnt models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live commands session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -282,6 +282,30 @@ ai-unit: ai-probe ## Run the ai_engine suite on board B at bench's compiler sett
 	  exit $$(cat build/unit.status)
 	@if [ -f $(UNIT_APP)/main/probe/ctc_gate.json ]; then \
 	  cd ml && uv run --extra train python -m srpipe.tasks.command.ctc.probe --gate-log ../$(UNIT_APP)/build/unit.log; \
+	fi
+
+ai-unit-rnnt: ## Run the rnnt build of the ai_engine suite on board B: rnnt/probe.py's three graphs in model slot 0, every rnnt call against Python, timed; RNNT_RUN=<run under ml/> RNNT_ROW=<rnnt_* row> runs that row and Gate 3 on the chip; slot 0 ends erased (E11-T20)
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.rnnt.probe \
+	  $(if $(RNNT_RUN),--run $(RNNT_RUN) --row $(RNNT_ROW))
+	@$(call fresh_sdkconfig,$(UNIT_APP)/build_rnnt/sdkconfig,firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.bench \
+	  $(UNIT_APP)/sdkconfig.defaults $(UNIT_APP)/CMakeLists.txt)
+	cd $(UNIT_APP) && idf.py -B build_rnnt -D SDKCONFIG=build_rnnt/sdkconfig -D UNIT_PROFILE=rnnt build && \
+	  python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
+	    --partition-table-file ../../../../partitions.csv write_partition --partition-name models_0 \
+	    --input main/probe/rnnt_models.bin && \
+	  if [ -f main/probe/rnnt_gate.bin ]; then \
+	    python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
+	      --partition-table-file ../../../../partitions.csv write_partition --partition-name voice \
+	      --input main/probe/rnnt_gate.bin; \
+	  else \
+	    python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
+	      --partition-table-file ../../../../partitions.csv erase_partition --partition-name voice; \
+	  fi && \
+	  { pytest pytest_unit.py --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) \
+	      --build-dir build_rnnt -s -p no:cacheprovider; echo $$? > build_rnnt/unit.status; } 2>&1 | tee build_rnnt/unit.log; \
+	  exit $$(cat build_rnnt/unit.status)
+	@if [ -f $(UNIT_APP)/main/probe/rnnt_gate.json ]; then \
+	  cd ml && uv run --extra train python -m srpipe.tasks.command.rnnt.probe --gate-log ../$(UNIT_APP)/build_rnnt/unit.log; \
 	fi
 
 # broker and host
