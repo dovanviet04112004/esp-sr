@@ -15,7 +15,7 @@ pytest.importorskip("esp_ppq")
 from torch import nn  # noqa: E402
 from torch.nn import functional  # noqa: E402
 
-from srpipe.compress.quant import esp_ppq_patches, ptq_espdl  # noqa: E402
+from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl  # noqa: E402
 
 BANDS, HOPS = 8, 40
 RUNGS = ptq_espdl.ladder("command_ctc")
@@ -27,7 +27,7 @@ def calib(rng: np.random.Generator) -> list:
 
 def export_info(graph, out: Path, patches: list[str], streaming_input_shape: list[int] | None = None) -> str:
     with esp_ppq_patches.applied(patches):
-        path = ptq_espdl.export(graph, out, streaming_input_shape=streaming_input_shape)
+        path = export_espdl.export(graph, out, streaming_input_shape=streaming_input_shape)
     return path.with_suffix(".info").read_text()
 
 

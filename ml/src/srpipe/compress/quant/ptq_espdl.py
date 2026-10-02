@@ -1,5 +1,5 @@
-"""ESP-PPQ for esp-dl (KEHOACH 3.14): quantise a torch network to int8 under the chip's power-of-two scales, simulate
-it as the chip computes, and export .espdl, streamed one hop at a time when asked.
+"""Step 2 of the path to the chip (KEHOACH 3.14): ESP-PPQ quantises a network's ONNX on rungs 1 and 2, with the int16
+layers rung 3 names, under the chip's power-of-two scales, and simulates the int8 graph as the chip computes it.
 
 The simulation runs whole sequences. A causal network streamed from empty caches must give the same int8 at every
 hop, and that equality is what the board is held to (E11-T10).
@@ -15,13 +15,13 @@ import numpy as np
 import torch
 from torch import nn
 
+from srpipe.compress.quant import onnx_export
 from srpipe.core.config import CONFIGS, deep_merge, load_yaml
 
 TARGET = "esp32s3"
 BITS = 8
 WIDE_BITS = 16
 INT8_MIN, INT8_MAX = -128, 127
-OPSET = 18  # espdl_quantize_torch's
 LADDER = CONFIGS / "models" / "quant.yaml"
 
 
@@ -69,17 +69,18 @@ def setting_of(rungs: dict):
 
 
 def quantize(model: nn.Module, calib: list[torch.Tensor], work: Path, rungs: dict):
-    """The quantised ESP-PPQ graph of model under rungs, calibrated on batches of one shaped like calib[0]; work keeps
-    the ONNX."""
-    from esp_ppq.api import espdl_quantize_torch
+    """The quantised ESP-PPQ graph of model under rungs, calibrated on batches shaped like calib[0]; work keeps the
+    ONNX, held to torch on calib[0]."""
+    from esp_ppq.api import espdl_quantize_onnx
 
-    work.mkdir(parents=True, exist_ok=True)
-    return espdl_quantize_torch(
-        model=model.eval(),
+    first = calib[0].numpy()
+    onnx = onnx_export.checked(model, (first,), work / "graph.onnx", rungs["onnx_rtol"])
+    return espdl_quantize_onnx(
+        onnx_import_file=str(onnx),
         espdl_export_file=str(work / "graph.espdl"),
         calib_dataloader=calib,
         calib_steps=len(calib),
-        input_shape=list(calib[0].shape),
+        input_shape=[list(first.shape)],
         target=TARGET,
         num_of_bits=BITS,
         collate_fn=lambda batch: batch.to("cpu"),
@@ -103,18 +104,8 @@ def quantize_named(
     finds each tensor by name; calibrated on tuples shaped like calib[0]."""
     from esp_ppq.api import espdl_quantize_onnx
 
-    work.mkdir(parents=True, exist_ok=True)
-    onnx = work / "graph.onnx"
-    torch.onnx.export(
-        model.eval(),
-        tuple(torch.zeros_like(t) for t in calib[0]),
-        str(onnx),
-        input_names=inputs,
-        output_names=outputs,
-        opset_version=OPSET,
-        do_constant_folding=True,
-        dynamo=False,
-    )
+    first = tuple(t.numpy() for t in calib[0])
+    onnx = onnx_export.checked(model, first, work / "graph.onnx", rungs["onnx_rtol"], inputs, outputs)
     return espdl_quantize_onnx(
         onnx_import_file=str(onnx),
         espdl_export_file=str(work / "graph.espdl"),
@@ -186,57 +177,3 @@ class Simulator:
         """Every output of a graph of several inputs, given in the graph's order."""
         tensors = [torch.from_numpy(np.ascontiguousarray(x, dtype=np.float32)) for x in xs]
         return [out.detach().cpu().numpy() for out in self.executor.forward(inputs=tensors)]
-
-
-def cache_each_causal_conv(graph):
-    """Register a StreamingCache between each causal convolution and its input, and drop the convolution's pads.
-
-    ESP-PPQ's auto_streaming caches a variable for all its consumers, so the residual Add that reads a block's input
-    would get a window of hops instead of the current one; a cache tied to the convolution leaves the Add alone.
-    """
-    from esp_ppq.parser.espdl.espdl_streaming import StreamingTable, get_conv_cache_window_size, set_conv_new_padding
-
-    table = StreamingTable()
-    for op in list(graph.operations.values()):
-        if op.type != "Conv":
-            continue
-        kernel = op.attributes["kernel_shape"][0]
-        effective = op.attributes.get("dilations", [1])[0] * (kernel - 1) + 1
-        window = get_conv_cache_window_size(op)
-        if effective > 1 and window != effective:
-            raise ValueError(f"{op.name} pads ahead in time, so it cannot stream: pads {op.attributes.get('pads')}")
-        if window > 1:
-            source = op.inputs[0].name
-            if source in table:
-                raise ValueError(f"{source} feeds two convolutions; one cache per variable is all ESP-PPQ keeps")
-            table.add(source, op.name, window)
-            set_conv_new_padding(op)
-    return graph
-
-
-def export(
-    graph,
-    out: Path,
-    streaming_input_shape: list[int] | None = None,
-    test_input: np.ndarray | tuple[np.ndarray, ...] | None = None,
-) -> Path:
-    """Write out as .espdl, with StreamingCache ahead of every causal convolution when streaming_input_shape gives
-    the one-hop input; test_input, of that shape, or a tuple of one array an input, is stored for model->test(). The
-    exporter works on its own copy, so graph stays the whole-sequence one the Simulator runs."""
-    import esp_ppq.lib as ppq_lib
-    from esp_ppq.api.espdl_interface import generate_test_value, get_target_platform
-
-    values = None
-    if test_input is not None:
-        arrays = test_input if isinstance(test_input, tuple) else (test_input,)
-        values = generate_test_value(graph, "cpu", [torch.from_numpy(np.ascontiguousarray(a)) for a in arrays])
-    out.parent.mkdir(parents=True, exist_ok=True)
-    ppq_lib.Exporter(platform=get_target_platform(TARGET, BITS)).export(
-        file_path=str(out),
-        graph=graph,
-        values_for_test=values,
-        export_config=True,
-        streaming_input_shape=streaming_input_shape,
-        streaming_custom_passes=[cache_each_causal_conv] if streaming_input_shape is not None else None,
-    )
-    return out

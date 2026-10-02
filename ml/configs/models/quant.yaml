@@ -3,7 +3,8 @@ default:
   equalization: {iterations: 4, value_threshold: 0.4, opt_level: 2}   # measured on face attendance; each branch re-measures
   bias_correction: true
   calibration: kl                  # minmax, percentile, mse or kl
-  int16_ops: []                    # rung 3: ESP-PPQ operation names quantised w8a16
+  int16_ops: []                    # rung 3: ESP-PPQ operation names whose weights and activations go to 16 bits
+  onnx_rtol: 1.0e-4                # largest onnxruntime − torch gap allowed, as a share of an output's largest magnitude
 branches:
   ns: {}
   wake: {}

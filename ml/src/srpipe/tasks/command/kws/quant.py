@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from srpipe.compress.quant import ptq_espdl
+from srpipe.compress.quant import export_espdl, ptq_espdl
 from srpipe.core.config import ML_ROOT, load_yaml
 from srpipe.export import pack_models
 from srpipe.tasks import command
@@ -55,7 +55,7 @@ def probe_size(cfg: dict, size: str, n_classes: int, work: Path) -> tuple[bytes,
     y_int8 = ptq_espdl.to_int8(y, io.output_exponent)
     if not np.array_equal(y_int8.astype(np.float32) * np.float32(2.0**io.output_exponent), y):
         raise ValueError(f"{size}: the simulated logits are not on the int8 grid of their exponent")
-    espdl = ptq_espdl.export(graph, work / size / f"{entry_of(size)}.espdl", test_input=x)
+    espdl = export_espdl.export(graph, work / size / f"{entry_of(size)}.espdl", test_input=x)
     head = RECORD.pack(entry_of(size).encode("ascii"), *window, n_classes, io.input_exponent, io.output_exponent)
     body = x_int8.tobytes() + y_int8.tobytes()
     return espdl.read_bytes(), head + body + b"\0" * (-len(body) % 4)

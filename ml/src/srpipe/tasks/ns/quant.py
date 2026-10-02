@@ -16,7 +16,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from srpipe.compress.quant import esp_ppq_patches, ptq_espdl
+from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
 from srpipe.core.config import ML_ROOT, load_yaml
 from srpipe.export import pack_models
 from srpipe.tasks import ns
@@ -131,7 +131,7 @@ def probe_net(name: str, cfg: dict, work: Path) -> tuple[bytes, bytes]:
     y_int8, states = stream(graph, x_int8, inputs, outputs, sizes, feed=True)
     first = (x_int8[0].reshape(1, 1, -1).astype(np.float32) * np.float32(2.0 ** inputs[0].exponent),)
     with esp_ppq_patches.applied(p["esp_ppq_patches"][model.family(name)]):
-        espdl = ptq_espdl.export(
+        espdl = export_espdl.export(
             graph,
             work / name / f"{name}.espdl",
             test_input=first + tuple(np.zeros((1, 1, h), np.float32) for h in sizes),

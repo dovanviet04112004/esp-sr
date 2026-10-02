@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from srpipe.compress.quant import ptq_espdl
+from srpipe.compress.quant import export_espdl, ptq_espdl
 from srpipe.core.config import CONFIGS, ML_ROOT, load_yaml
 from srpipe.export import pack_models
 from srpipe.tasks.wake import CONFIG
@@ -57,7 +57,9 @@ def probe(cfg: dict, out: Path, work: Path) -> tuple[Path, Path]:
     y_int8 = ptq_espdl.to_int8(y, io.output_exponent)
     if not np.array_equal(y_int8.astype(np.float32) * np.float32(2.0**io.output_exponent), y):
         raise ValueError("the simulated output is not on the int8 grid of its exponent")
-    espdl = ptq_espdl.export(graph, work / "probe.espdl", streaming_input_shape=[*shape[:2], 1], test_input=x[..., :1])
+    espdl = export_espdl.export(
+        graph, work / "probe.espdl", streaming_input_shape=[*shape[:2], 1], test_input=x[..., :1]
+    )
     out.mkdir(parents=True, exist_ok=True)
     image = out / "models.bin"
     image.write_bytes(pack_models.pack([pack_models.Entry(PROBE_ENTRY, "espdl", espdl.read_bytes())]))
