@@ -39,6 +39,7 @@ và khoá nó trong `contracts/models.lock.json`; khối `command_ctc` của `qu
 
 - `quant.yaml`: `command_ctc` lấy `calibration: percentile` thay mặc định KL.
 - Mỗi lần học lại mạng: `make ctc-ptq`, `make ctc-qat`, rồi `make ctc-deploy ROW=qat`; bậc 3 không vào sản phẩm.
+- Phần học là phần lợi: QAT đổi 16% trọng số int8, và cùng đồ thị không học có lỗi đơn vị 36,56%, tức 2 000 bước gỡ
+  0,81 điểm trên 2 000 câu thử; trên `val` lỗi đơn vị đứng yên ở 31,38% (`command.md` §2), nên phần lợi còn nhỏ.
 - Xét lại khi: mạng float đạt Cửa 3 mà int8 làm nó trượt; mạng đổi cỡ hoặc đổi dữ liệu học; hay QAT lâu hơn, tốc độ học
-  cao hơn gỡ thêm phần int8 làm mất. Lỗi đơn vị `val` của đồ thị học gần như không đổi suốt 2 000 bước (31,38% ở bước 0
-  và ở bước 2 000), nên chưa tách được phần QAT hơn percentile đến từ việc học hay từ thang hiệu chuẩn trên lô 16.
+  cao hơn gỡ thêm phần int8 làm mất.
