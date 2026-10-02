@@ -204,3 +204,28 @@ không gần cách đọc vùng khác hơn, không đo được nhãn sai làm c
   và ồn.
 - Nói nhanh nằm ngoài tập học (§4.2) và chạm trần khung ở khoảng 7–8 âm tiết/s (§4.3).
 - Common Voice lỗi hơn VIVOS 13 điểm; chưa đo vì sao.
+
+### 4.8 Cách giải của `rnnt` trên Cửa 3
+
+Cùng run, mạng cuối (bước 40 000), float, phiên board của §1; đo ngày 02/10 bằng script chẩn đoán chạy một lần.
+Nhận đúng ở `δ₁` 300‰, `δ₂` 50‰ trên 112 câu lệnh; "đầu" là lệnh điểm cao nhất đúng lệnh, không ngưỡng.
+
+| Cách giải | Nhận đúng | Đầu | "tăng âm lượng" (đầu) | Câu lệnh không giả thuyết nào trọn lệnh |
+|---|---|---|---|---|
+| tìm chùm 4, một đơn vị mỗi khung | 53/112 | | 0/13 | 126 trên 198 cửa sổ |
+| tìm chùm 16, một đơn vị mỗi khung | 66/112 | | 1/13 | 108 trên 198 |
+| tìm chùm 16, ba đơn vị mỗi khung | 71/112 | | 2/13 | |
+| tìm chùm 32, một đơn vị mỗi khung | | | 4/13 | 96 trên 198 |
+| chấm chính xác mọi lệnh | 39% trung bình mỗi lệnh | 81/112 | 8/13 | không có |
+| `ctc`, thuật toán tiến | 67% trung bình mỗi lệnh | 84/112 | 11/13 | không có |
+| cộng điểm `ctc` và `rnnt` chính xác, tỉ trọng `rnnt` 0,3–0,5 | | 85/112 | 11/13 | không có |
+
+Tìm chùm làm rơi lệnh đúng: phần của lệnh tạm điểm cao hơn lệnh trọn giữa câu, chùm hết chỗ, và tới cuối cửa sổ không
+còn giả thuyết nào trọn một lệnh. Chấm chính xác không rơi lệnh nào. Ở chấm chính xác, nhận đúng không đổi khi quét
+`δ₁` từ 100 tới 1000: thứ chặn là `δ₂` 50‰ chỉnh cho `ctc`, vì khoảng cách nhất nhì của `rnnt` nhỏ hơn (ví dụ "tăng âm
+lượng" 16–83‰ so với 102–154‰ ở `ctc`); ngưỡng của `rnnt` phải chọn riêng trên `val`. Đứng đầu đúng, ba cách đều
+81–85/112, trong sai số khoảng ±5 câu; 21 trong 27 câu sai ở cách tốt nhất là "tắt đèn", "tắt quạt".
+
+Giải tham lam cho tới ba đơn vị mỗi khung trên các cửa sổ "tăng âm lượng" và "tắt đèn": 643 khung phát một đơn vị, 220
+phát hai, 67 phát ba. Chuỗi giải tự do sai xa ở cả hai lệnh, ví dụ "tăng âm lượng" ra `o N T1 m u@ n T5 l o T3`, "tắt
+đèn" ra `@: t T5 J a: k T6`.
