@@ -45,22 +45,31 @@ Tám lệnh đúng 83–100%. Chỗ trượt là "tắt": 21/22 câu ra "bật �
 thanh ra đúng sắc, phụ âm đầu và nguyên âm vẫn sai. Ba hướng chưa tách: tiếng bật hơi của "t" chìm dưới nền ồn của board
 (`mic_array.md` §4), cao độ đặt lại ở đầu cửa sổ chưa có quá khứ cho âm tiết đầu, giọng riêng của một người nói.
 
-## 2. `ctc` sau int8, theo thang KẾ HOẠCH §3.14 (E11-T12)
+## 2. `ctc` sau int8, theo thang KẾ HOẠCH §3.14 (E11-T12, E11-T19)
 
 Cùng run với §1. Bậc 1 (cân bằng lớp 4 vòng, ngưỡng 0,4, `opt_level` 2; sửa bias) có trong mọi dòng int8; hiệu chuẩn trên
 64 câu `train` rút theo seed 20261002, mỗi câu đệm tới 768 bước. Lỗi đơn vị trên 2 000 câu `test` rút theo cùng seed,
-mô phỏng int8 cả câu bằng ESP-PPQ, đúng số board chạy dòng ra (`latency.md` §11); Cửa 3 trên phiên board như §1, `δ₁`
-300‰, `δ₂` 50‰. Đo ngày 02/10: bậc 2 ở `c63eb8a` bằng lệnh `export` của bản trước (`make ctc-ptq` bây giờ), bậc 3 ở
-`d849413` bằng `make ctc-int16`.
+mô phỏng int8 cả câu bằng ESP-PPQ dưới bốn bản sửa của nhánh (`esp_ppq_patches`), đúng số chip tính; Cửa 3 trên phiên
+board như §1, `δ₁` 300‰, `δ₂` 50‰, luật phần của §3. Đo ngày 02/10 tại `2b49747` bằng `make ctc-ptq`, `make ctc-int16`,
+`make ctc-qat`.
 
 | Dòng | Lỗi đơn vị | Lệnh điểm cao nhất đúng | Nhận đúng ở `δ₁` 300 | Nhận nhầm |
 |---|---|---|---|---|
-| float | 34,45% | 85/112 | 79/112 | 3/86 |
-| bậc 2: minmax | 38,61% | 81/112 | 65/112 | 5/86 |
-| bậc 2: percentile | 36,44% | 82/112 | 73/112 | 3/86 |
-| bậc 2: MSE | 37,50% | 85/112 | 73/112 | 4/86 |
-| bậc 2: KL | 39,85% | 85/112 | 74/112 | 3/86 |
-| bậc 3: percentile, int16 `/front/convs.1` | 36,07% | 84/112 | 75/112 | 3/86 |
+| float | 34,45% | 85/112 | 74/112 | 2/86 |
+| bậc 2: minmax | 38,61% | 81/112 | 64/112 | 5/86 |
+| bậc 2: percentile | 36,34% | 83/112 | 69/112 | 3/86 |
+| bậc 2: MSE | 37,50% | 85/112 | 68/112 | 4/86 |
+| bậc 2: KL | 39,93% | 83/112 | 68/112 | 2/86 |
+| bậc 3: percentile, int16 `/front/convs.1` | 36,13% | 84/112 | 70/112 | 3/86 |
+| bậc 3: như trên, thêm `/front/convs.2` | 36,36% | 83/112 | 73/112 | 2/86 |
+| bậc 3: như trên, thêm tích chập sâu đầu của tầng 0 và `/front/proj` | 36,23% | 83/112 | 70/112 | 3/86 |
+| bậc 4: QAT trên percentile, 2 000 bước | 35,75% | 86/112 | 68/112 | 3/86 |
+
+Mọi dòng int8 trừ minmax nằm trong `quant.gate_tie` 5 câu nhận đúng của dòng cao nhất (73/112), nên lỗi đơn vị quyết:
+QAT thấp nhất. QAT học trên đồ thị lô 16, tốc độ học 3e-5 giảm cosine về 1e-6; lỗi đơn vị `val` của đồ thị ấy 31,38% ở
+bước 0, 31,54%, 31,63%, 31,33% ở bước 500, 1 000, 1 500 và 31,38% ở bước 2 000, loss 0,977 xuống 0,969: phần học gần như
+không đổi `val`, và chưa tách được phần 0,59 điểm QAT hơn percentile trên `test` đến từ việc học hay từ thang hiệu chuẩn
+trên lô 16 chép sang đồ thị lô 1.
 
 ## 3. `ctc`: lệnh nói thiếu âm tiết (KẾ HOẠCH §3.12, E11-T19)
 

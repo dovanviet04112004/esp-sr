@@ -274,3 +274,24 @@ một lời gọi hàm, năm, sáu lời gọi mỗi trạng thái mỗi khung, 
 `ns_omlsa.c` để vòng trong không còn lời gọi nào. Suy từ hai cột của bản đang dùng: khoảng 3 ms cố định (bảng `exp` và
 vòng tự do) cộng 0,62 ms mỗi biến thể, tức khoảng 0,37 µs (89 chu kỳ) mỗi trạng thái mỗi khung. Ngân sách của KẾ HOẠCH
 §3.12 là ≤ 100 ms một lần chấm: 64 lệnh dùng 79,4 ms.
+
+## 14. `ctc` đã học trên chip: chạy dòng, chấm và Cửa 3 (E11-T19)
+
+Board B, `ai_engine/test_apps/unit` với cờ trình biên dịch của `sdkconfig.bench` (`-O2`, 240 MHz), IDF 6.0.2, esp-dl
+3.3.11, ESP-PPQ 1.3.11 cộng bốn bản sửa của nhánh, `2b49747`, 02/10. Mạng là dòng `qat` của run
+`20261002_128545c-dirty_64e7a4` (ADR-0015, `command.md` §2), xuất bằng `make ctc-deploy ROW=qat`; đo bằng
+`make ai-unit CTC_RUN=<run> CTC_ROW=qat`.
+
+| Đo | Kết quả |
+|---|---|
+| Dựng mạng | 308 ms; PSRAM 274 KB, RAM nội 0 B |
+| 48 bước 16 hop (256 ms audio), so mô phỏng cả chuỗi | chênh int8 lớn nhất **0**; 44,8 ms trung bình, 45,1 ms đỉnh một bước |
+| `_step` | 30 µs ở hop chỉ đệm; 46,0 ms trung bình, 46,4 ms đỉnh ở hop đủ khối 16 hop: **5,7 ms mỗi 32 ms audio** |
+| `_score`, cửa sổ Cửa 3 tới 3 s, 10 lệnh, 19 biến thể, luật phần | **56,3 ms** trung bình, 64,9 ms đỉnh |
+| Chấm riêng, cửa sổ 3 s (94 khung) | 16,3 ms với 10 lệnh; 79,7 ms với 64 lệnh, 124 biến thể |
+| Cửa 3 trên chip: 198 cửa sổ từ phân vùng `voice` qua `_begin`, `_step`, `_score` | **198/198** trùng quyết định Python từng trường; đếm trên quyết định của chip: nhận đúng 68/112, nhận nhầm 3/86, bằng dòng `qat` của `command.md` §2 |
+
+Ngân sách của KẾ HOẠCH §3.3 là 11–18 ms mỗi 32 ms trong cửa sổ lệnh, của §3.12 là ≤ 100 ms một lần chấm: mạng dùng 5,7 ms,
+chấm 56,3 ms. Lượt đầu cùng ngày, trước bản sửa `rmsnorm_as_espdl`, 196/198 cửa sổ trùng: cửa sổ 67 và 197 lệch một bước
+điểm vì `RMSNormalization` của ESP-PPQ làm tròn khác nhân esp-dl (KẾ HOẠCH §3.14); mô phỏng lại đúng số học esp-dl thì
+Python ra đúng 198 quyết định của chip.
