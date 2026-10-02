@@ -43,8 +43,8 @@ struct Window {
     ai::Int8Tensor in, out, hot, prefix_out, join_frame, join_prefix, join_out;
     const float *mean, *deviation; // NORM entry: means, then deviations
     int8_t *zero;                  // raw zeros on the input grid: the pad
-    int8_t *projected;             // window frames x width, frames graph grid, PSRAM
-    int8_t *prefixes;              // (pad + 1)^2 contexts x width, predictor grid, PSRAM
+    int8_t *projected;             // window frames x width, joiner frame grid, PSRAM
+    int8_t *prefixes;              // (pad + 1)^2 contexts x width, joiner grid, PSRAM
     uint8_t *known;                // whether prefixes holds a context yet
     void *tree;                    // ai_engine_command_rnnt_build's area, PSRAM
     void *work;                    // ai_engine_command_rnnt_decide's, PSRAM
@@ -89,7 +89,10 @@ esp_err_t run_chunk()
 {
     const esp_err_t err = s_frames.step();
     if (err != ESP_OK) { return err; }
-    memcpy(s.projected + s.frames * s.width, s.out.data, s.chunk_frames * s.width);
+    int8_t *frames = s.projected + s.frames * s.width;
+    for (size_t i = 0; i < s.chunk_frames * s.width; i++) {
+        frames[i] = requant(s.out.data[i], s.frame_shift);
+    }
     s.frames += s.chunk_frames;
     s.pending = 0;
     return ESP_OK;
@@ -120,7 +123,9 @@ esp_err_t prefix_of(const uint8_t *context, const int8_t **prefix)
         }
         const esp_err_t err = s_predictor.step();
         if (err != ESP_OK) { return err; }
-        memcpy(slot, s.prefix_out.data, s.width);
+        for (size_t d = 0; d < s.width; d++) {
+            slot[d] = requant(s.prefix_out.data[d], s.prefix_shift);
+        }
         s.known[key] = 1;
     }
     *prefix = slot;
@@ -134,11 +139,8 @@ esp_err_t joined(void *ctx, size_t frame, const uint8_t *context, float *log_pro
     const int8_t *prefix = nullptr;
     const esp_err_t err = prefix_of(context, &prefix);
     if (err != ESP_OK) { return err; }
-    const int8_t *projected = s.projected + frame * s.width;
-    for (size_t d = 0; d < s.width; d++) {
-        s.join_frame.data[d] = requant(projected[d], s.frame_shift);
-        s.join_prefix.data[d] = requant(prefix[d], s.prefix_shift);
-    }
+    memcpy(s.join_frame.data, s.projected + frame * s.width, s.width);
+    memcpy(s.join_prefix.data, prefix, s.width);
     const esp_err_t ran = s_joiner.step();
     if (ran != ESP_OK) { return ran; }
     return ai_engine_command_ctc_log_probs(s.join_out.data, s.join_out.exponent, s.classes, 1, log_probs);
