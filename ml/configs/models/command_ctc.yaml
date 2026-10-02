@@ -74,3 +74,5 @@ probe:                             # E11-T12: one layer, then the whole net, ran
   decide:                          # E11-T13: the decision of the default commands timed on board B (make ai-unit)
     runs: 10                       # timed runs, after one untimed; the window is window_s long
     thresholds: [1000, 50]         # reject and margin, thousandths of a nat a frame
+  command:                         # E11-T19: windows through ai_engine_command_{begin,step,score} (make ai-unit)
+    windows: 12                    # board windows of a trained run spread evenly, or random ones without

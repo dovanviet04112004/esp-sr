@@ -28,6 +28,8 @@ from srpipe.tasks.wake.data import sentence_units
 
 LADDER = "command_ctc"
 GRAPH_FILE = "graph.native"
+# The image names a branch's entries after its backend (KEHOACH 6.3).
+ENTRY = "command_ctc"
 
 
 def padded(x: np.ndarray, hops: int, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
@@ -36,6 +38,21 @@ def padded(x: np.ndarray, hops: int, mean: np.ndarray, std: np.ndarray) -> np.nd
     out = np.zeros((hops, x.shape[1]), dtype=np.float32)
     out[: len(x)] = x
     return ((out - mean) / std).T[None].astype(np.float32)
+
+
+def test_sentence(cfg: dict, net: gate.Ctc) -> np.ndarray:
+    """The first sentence of the run's test files, padded to quant.hops and normalised as the net reads it."""
+    hops = cfg["quant"]["hops"]
+    listing = sorted(
+        (data_paths()["processed"] / "command" / net.cfg["split"]["version"] / "test").glob("*.items.jsonl")
+    )[0]
+    item = json.loads(listing.read_text(encoding="utf-8").splitlines()[0])
+    stem = str(listing).removesuffix(".items.jsonl")
+    first, n = item["frame_offset"], min(item["n_frames"], hops)
+    x = np.concatenate(
+        [np.load(stem + s, mmap_mode="r")[first : first + n] for s in (".features.npy", ".pitch.npy")], 1
+    )
+    return padded(x, hops, net.mean, net.std)
 
 
 def calibration(trained: dict, spec: dict, mean: np.ndarray, std: np.ndarray, root: Path) -> list[torch.Tensor]:
@@ -132,27 +149,31 @@ class Bench:
     windows: list[gate.Scored]
 
 
-def bench(cfg: dict, run: Path) -> Bench:
-    """The run's net, its calibration, quant.test_sentences test sentences drawn with the seed, and the windows LENH
-    keeps on the board sessions."""
-    spec, paths = cfg["quant"], data_paths()
-    net = gate.load_ctc(run)
-    version = net.cfg["split"]["version"]
-    root = paths["processed"] / "command" / version
-    listed = {r.item for r in splits.read_split(paths["splits"] / "command" / version / "test.txt")}
-    clips = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
-    test = train.load_role(
-        [root / "test"], sentence_units(clips, listed, net.cfg["train"]["dialect"]), spec["hops"], "float32"
-    )
-    rng = np.random.default_rng(spec["seed"])
-    picks = np.sort(rng.choice(len(test.first), min(spec["test_sentences"], len(test.first)), replace=False))
+def board_windows(cfg: dict, net: gate.Ctc, paths: dict) -> list[gate.Scored]:
+    """The windows LENH keeps on the board sessions of Gate 3: each utterance from vad-off back at most window_s."""
     longest = round(cfg["window_s"] * gate.HOPS_PER_S)
     said = {c["id"]: c["text"] for c in json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]}
 
     def window_of(clean, features, spans, tracker):
         return gate.ctc_windows(clean, features, spans, longest, tracker)
 
-    windows = gate.board(net.cfg, load_yaml(command.CONFIG)["eval"]["board"], paths, said, window_of)
+    return gate.board(net.cfg, load_yaml(command.CONFIG)["eval"]["board"], paths, said, window_of)
+
+
+def bench(cfg: dict, run: Path) -> Bench:
+    """The run's net, its calibration, quant.test_sentences test sentences drawn with the seed, and the board
+    windows."""
+    spec, paths = cfg["quant"], data_paths()
+    net = gate.load_ctc(run)
+    version = net.cfg["split"]["version"]
+    root = paths["processed"] / "command" / version
+    listed = {r.item for r in splits.read_split(paths["splits"] / "command" / version / "test.txt")}
+    clips = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
+    units_of = sentence_units(clips, listed, net.cfg["train"]["dialect"])
+    test = train.load_role([root / "test"], units_of, spec["hops"], "float32")
+    rng = np.random.default_rng(spec["seed"])
+    picks = np.sort(rng.choice(len(test.first), min(spec["test_sentences"], len(test.first)), replace=False))
+    windows = board_windows(cfg, net, paths)
     return Bench(net, calibration(net.cfg, spec, net.mean, net.std, root), test, picks, windows)
 
 

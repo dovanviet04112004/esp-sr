@@ -1,13 +1,13 @@
-"""The board probe of the ctc net (E11-T12). Run: python -m srpipe.tasks.command.ctc.probe [--run <run> --row <row>].
-It writes what ai_engine/test_apps/unit streams on board B: the first stack's layer and the net, seeded random or the
-graph of a row of a trained run's ladder (quant.py), with each step's int8 input and output from the whole-sequence
-simulation, and the decision of the default commands (E11-T13).
+"""The board probe of the ctc net (E11-T12, E11-T19). Run: python -m srpipe.tasks.command.ctc.probe [--run <run>
+--row <row>]. It writes what ai_engine/test_apps/unit runs on board B: the first stack's layer and the net, seeded
+random or the graph of a row of a trained run's ladder (quant.py), with each step's int8 input and output from the
+whole-sequence simulation; the decision of the default commands (E11-T13); and windows of raw features through the
+command calls, each with the decision Python takes on its int8 simulation.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import struct
 from pathlib import Path
@@ -27,12 +27,17 @@ from srpipe.tasks.command.ctc.postproc import ctc_score
 
 PROBE_DIR = ML_ROOT.parent / "firmware" / "components" / "ai_engine" / "test_apps" / "unit" / "main" / "probe"
 MODELS_FILE, STREAMS_FILE, DECIDE_FILE = "ctc_models.bin", "ctc_streams.bin", "ctc_decide.bin"
-LAYER_ENTRY, NET_ENTRY = "ctc_lay", "ctc_net"
+WINDOWS_FILE = "ctc_windows.bin"
+LAYER_ENTRY, NET_ENTRY = "ctc_lay", quant.ENTRY
 # Count; then a record a net: entry name, hops a step, input dims, outputs a step, steps, input and output exponents,
 # then each step's int8 input, then each step's int8 output, in esp-dl's layout of each, padded to four bytes.
 STREAMS_HEAD = struct.Struct("<4sI")
 STREAMS_MAGIC = b"SRCT"
-RECORD = struct.Struct("<8sIIIIii")
+RECORD = struct.Struct("<16sIIIIii")
+# Magic, features a hop, windows, reject, margin, commands, most variants, longest variant, hops a chunk; then the
+# packed lexicon; then from a four-byte boundary each window's hops, its raw features and its DECISION_RECORD.
+WINDOWS_HEAD = struct.Struct("<4sHHHHBBBB")
+WINDOWS_MAGIC = b"SRCW"
 # ESP-PPQ's helper.save heads an .espdl with "EDL2", the encryption flag, the length and four pad bytes.
 ESPDL_HEAD_BYTES = 16
 
@@ -115,25 +120,43 @@ def drawn(cfg: dict, dims: int, count: int) -> list[np.ndarray]:
     return [rng.normal(p["input_mean"], p["input_std"], (1, dims, p["hops"])).astype(np.float32) for _ in range(count)]
 
 
-def test_sentence(cfg: dict, net: gate.Ctc) -> np.ndarray:
-    """The first sentence of the run's test files, padded to quant.hops and normalised as the net reads it."""
-    hops = cfg["quant"]["hops"]
-    listing = sorted(
-        (data_paths()["processed"] / "command" / net.cfg["split"]["version"] / "test").glob("*.items.jsonl")
-    )[0]
-    item = json.loads(listing.read_text(encoding="utf-8").splitlines()[0])
-    stem = str(listing).removesuffix(".items.jsonl")
-    first, n = item["frame_offset"], min(item["n_frames"], hops)
-    x = np.concatenate(
-        [np.load(stem + s, mmap_mode="r")[first : first + n] for s in (".features.npy", ".pitch.npy")], 1
-    )
-    return quant.padded(x, hops, net.mean, net.std)
+def random_windows(cfg: dict, mean: np.ndarray, std: np.ndarray) -> list[np.ndarray]:
+    """Windows of random raw features with the probe's seed, standing as normalised ones: the longest LENH keeps, one
+    hop, one chunk, and lengths drawn between."""
+    p = cfg["probe"]
+    rng = np.random.default_rng(p["seed"])
+    longest = round(cfg["window_s"] * gate.HOPS_PER_S)
+    lengths = [longest, 1, cfg["chunk_hops"], *rng.integers(2, longest, p["command"]["windows"] - 3)]
+    return [rng.normal(mean, std, (int(n), len(mean))).astype(np.float32) for n in lengths]
 
 
-def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | None = None) -> tuple[Path, Path, Path]:
+def command_windows(cfg: dict, graph, model: encoder.CtcNet, norm: tuple, windows: list[np.ndarray]) -> bytes:
+    """Raw feature windows (hops, features) as ai_engine_command_{begin,step,score} take them on board B, each with
+    the decision Python takes on the int8 simulation of the window, laid out as WINDOWS_HEAD says."""
+    mean, std = norm
+    reject, margin = cfg["quant"]["reject"], cfg["eval"]["margin"]
+    lexicon = ctc_score.default_lexicon()
+    (commands, most, longest), packed = ctc_score.packed_lexicon(lexicon)
+    int8 = quant.Int8Net(graph, cfg["quant"]["hops"], mean, std, model)
+    sizes = (commands, most, longest, cfg["chunk_hops"])
+    body = WINDOWS_HEAD.pack(WINDOWS_MAGIC, len(mean), len(windows), reject, margin, *sizes)
+    body += packed + b"\0" * (-(WINDOWS_HEAD.size + len(packed)) % 4)
+    for x in windows:
+        logits = int8(torch.from_numpy(((x - mean) / std).T[None].astype(np.float32))).numpy()[0]
+        frames = -(-len(x) // model.front.hop_stride)
+        q = ptq_espdl.to_int8(logits[:, :frames], int8.io.output_exponent)
+        log_probs = ctc_score.frame_log_probs(q, int8.io.output_exponent)
+        decision, _ = ctc_score.decide(log_probs, lexicon, reject, margin)
+        body += struct.pack("<I", len(x)) + np.ascontiguousarray(x, dtype="<f4").tobytes()
+        body += ctc_score.DECISION_RECORD.pack(*decision.tolist())
+    return body
+
+
+def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | None = None) -> tuple[Path, ...]:
     """Write out/ctc_models.bin and out/ctc_streams.bin: the first stack's layer a frame a step, the net a chunk a
-    step, work keeping each ONNX and .espdl; and out/ctc_decide.bin, the decision of the default commands (E11-T13).
-    With run, the net is the graph of row in its ladder, streaming a test sentence."""
+    step, work keeping each ONNX and .espdl; out/ctc_decide.bin, the decision of the default commands (E11-T13); and
+    out/ctc_windows.bin, windows through the command calls. With run, the net is the graph of row in its ladder,
+    streaming a test sentence, and the windows are the board's."""
     if cfg["probe"]["hops"] % cfg["chunk_hops"] or cfg["quant"]["hops"] % cfg["chunk_hops"]:
         raise ValueError(f"probe and quant hops must be multiples of chunk_hops {cfg['chunk_hops']}")
     scales, p, rungs = cfg["probe"]["norm_scale"], cfg["probe"], ptq_espdl.ladder(quant.LADDER)
@@ -144,9 +167,14 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
         torch.manual_seed(p["seed"])
         net = draw_norm_scales(encoder.build(cfg), *scales)
         *net_calib, net_x = drawn(cfg, encoder.n_dims(cfg), p["calib_sequences"] + 1)
+        dims = encoder.n_dims(cfg)
+        norm = (np.full(dims, p["input_mean"], np.float32), np.full(dims, p["input_std"], np.float32))
+        windows = random_windows(cfg, *norm)
     else:
         trained = gate.load_ctc(run)
-        net, net_x = trained.model, test_sentence(cfg, trained)
+        net, net_x, norm = trained.model, quant.test_sentence(cfg, trained), (trained.mean, trained.std)
+        board = [x for scored in quant.board_windows(cfg, trained, data_paths()) for x in scored.decided]
+        windows = board[:: max(1, len(board) // p["command"]["windows"])][: p["command"]["windows"]]
     layer_graph = quant.quantized(one_layer, [torch.from_numpy(c) for c in layer_calib], work / LAYER_ENTRY, rungs)
     built = [(LAYER_ENTRY, probe_net(layer_graph, LAYER_ENTRY, 1, cfg, work, layer_x))]
     if run is None:
@@ -156,14 +184,18 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
     built.append((NET_ENTRY, probe_net(net_graph, NET_ENTRY, cfg["chunk_hops"], cfg, work, net_x)))
     out.mkdir(parents=True, exist_ok=True)
     image = out / MODELS_FILE
-    image.write_bytes(pack_models.pack([pack_models.Entry(name, "espdl", espdl) for name, (espdl, _) in built]))
+    entries = [pack_models.Entry(name, "espdl", espdl) for name, (espdl, _) in built]
+    entries.append(pack_models.Entry(NET_ENTRY, "norm", np.concatenate(norm).astype("<f4").tobytes()))
+    image.write_bytes(pack_models.pack(entries))
     streams = out / STREAMS_FILE
     streams.write_bytes(STREAMS_HEAD.pack(STREAMS_MAGIC, len(built)) + b"".join(record for _, (_, record) in built))
     for name, (espdl, _) in built:
         print(f"{name}: {len(espdl)} bytes of .espdl")
     decide = out / DECIDE_FILE
     decide.write_bytes(ctc_score.probe_record(cfg))
-    return image, streams, decide
+    command = out / WINDOWS_FILE
+    command.write_bytes(command_windows(cfg, net_graph, net, norm, windows))
+    return image, streams, decide, command
 
 
 def main(argv: list[str] | None = None) -> int:
