@@ -165,7 +165,8 @@ của một file split thành đúng thứ bộ nhận dạng thấy trên máy:
    (`measurements/mic_array.md` §4), nên thay hẳn nhiễu tự thân. Cuối cùng lượng tử `pcm_shift` (dịch phải rồi bão hoà, như `drv_audio`).
 3. Chạy `srpipe.dsp.afe.chain` và log-mel của `srpipe.dsp.spec`. Đây là bản soi gương khớp firmware từng bit
    (§3.14), với đúng danh sách module sản phẩm. Ra `processed/<nhánh>/<tập>/`: đặc trưng, số của chuỗi (`vad`, mức,
-   gain) và PCM sạch của từng mẩu, cộng manifest sha256.
+   gain) và PCM sạch của từng mẩu, cộng manifest sha256. Nhánh nào khai kiểu lưu cho tập học thì đặc trưng của `train`
+   lưu theo kiểu ấy (float16 ở `command`, đúng kiểu bộ nạp giữ lúc học); `val` và `test` luôn float32.
 
 Phần thuần của đặc trưng lúc học vì thế trùng đặc trưng trên board. Phần còn khác là phòng thật, micro thật và giọng
 thật, và tập thu qua board đo đúng phần ấy. Chuỗi đổi (bật một module, chọn đường không gian) thì sinh lại đặc
@@ -937,7 +938,11 @@ thanh; `ctc` giữ đặc trưng và đơn vị của ADR-0010 — log-mel 40 c�
 SpecAugment: đổi nhịp giữ cao độ (kéo hay nén trục bước theo hệ số rút log-đều trong `train.augment.tempo`, không bao
 giờ ít bước hơn số khung CTC cần cho chuỗi đơn vị của câu, delta cao độ nhân theo), time-warp của SpecAugment quanh
 một bước, và một độ nghiêng thẳng qua các dải mel; cộng đổi tốc độ lúc mô phỏng của §1.2, vì tập học gần như không có
-câu nói nhanh (`measurements/command.md` §4). Cỡ chọn theo chất lượng: bắt đầu đúng cỡ MultiNet7, khoảng 2,1 MB
+câu nói nhanh (`measurements/command.md` §4). Tập học là **mọi mẩu tiếng nói đã sàng lọc** của các kho ở `split.corpora`,
+không trần giờ (từ split `command/v3`). Đặc trưng float16 của nó lớn hơn RAM máy học, nên bộ nạp giữ một vòng đệm cỡ
+`train.pool_gb`: mỗi `train.rotate_steps` bước nạp thêm một shard, đè lên shard cũ nhất. Thứ tự shard rút lại mỗi lượt
+bằng seed. Trung bình và độ lệch vẫn tính trên cả tập học, và lượt học tiếp tục dựng lại đúng vòng đệm của bước dừng.
+Cỡ chọn theo chất lượng: bắt đầu đúng cỡ MultiNet7, khoảng 2,1 MB
 int8 🔬, rộng hơn hay sâu hơn khi µs đo trên board còn trong ngân sách §3.3; bộ nhớ nới theo §6.1 và §6.6. Học CTC cộng RNN-T phụ trợ như MultiNet7, so với CTC trơn cùng seed, split và số epoch. Chạy
 int8 qua esp-dl với `StreamingCache`: một lớp encoder được xuất và chạy dòng trên board trước (E11-T12); không đạt thì
 lùi về TCN nhân quả tách chiều sâu, đường E11-T10 đã chạy khớp từng bit. **Giải bằng chấm có ràng buộc**, không giải
@@ -1593,7 +1598,7 @@ ml/data/                                   # trong repo — chỉ siêu dữ li�
 └── splits/                                # mỗi nhánh một thư mục, mỗi phiên bản một thư mục con
     ├── ns/v1/{train, val, test}.txt + SPLIT.md
     ├── wake/v1/{train, val, test_pos, test_neg}.txt + SPLIT.md
-    ├── command/v1/{train, val, test}.txt + SPLIT.md     # đường ctc
+    ├── command/v<n>/{train_<kho>, val, test}.txt + SPLIT.md   # đường ctc; train một file mỗi kho
     ├── command_kws/v1/{train*, val*, test*}.txt + SPLIT.md   # đường kws: lớp lệnh, other, silence (§3.12)
     ├── synth/                             # chỉ khi E12-T1 chọn mạng
     └── device/v1/{calib_ns, calib_wake, calib_command, test_device}.txt + SPLIT.md
