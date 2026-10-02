@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 from pathlib import Path
 
 import numpy as np
@@ -167,7 +168,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     cfg, paths = apply_overrides(load_yaml(ctc.CONFIG), args.overrides), data_paths()
     if args.step == "simulate":
-        simulate(cfg, paths)
+        try:
+            simulate(cfg, paths)
+        except KeyboardInterrupt:
+            return 128 + signal.SIGINT
         return 0
     spec, screening = cfg["split"], load_yaml(screen.CONFIG)
     listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))

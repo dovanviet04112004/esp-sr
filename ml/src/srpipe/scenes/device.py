@@ -18,6 +18,8 @@ import os
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
+from signal import SIG_IGN, SIGINT
+from signal import signal as set_handler
 
 import numpy as np
 import yaml
@@ -396,6 +398,11 @@ def shard_done(out: Path, shard: int) -> Path:
     return out / f"shard_{shard:05d}.done"
 
 
+def _ignore_interrupt() -> None:
+    # Ctrl-C reaches every process of the terminal: the parent alone stops a build, terminating its workers.
+    set_handler(SIGINT, SIG_IGN)
+
+
 def _shard(job: tuple) -> list[Path]:
     cfg, roots, bank, out, shard, sessions, pools, pads_s, with_pitch, keep_pcm, speeds, dtype = job
     mics = load_microphones(cfg["microphone"])
@@ -453,8 +460,8 @@ def build(
     """Every item of split_file through the simulation into out, repeats times over, each pass in sessions of their
     own rooms, levels and noise, each item kept with pads_s before and after it (session.pad_s both sides unless
     given), with pitch its pitch features from a reset at its first hop, its clean samples unless keep_pcm is off,
-    with speeds each item spoken at one drawn from them, features and pitch stored as dtype; then manifest.yaml. A
-    build stopped part way goes on from its finished shards when run again the same way."""
+    with speeds each item spoken at one drawn from them, features and pitch stored as dtype; then manifest.yaml.
+    Ctrl-C stops a build at once, its workers with it; run again the same way, it goes on from its finished shards."""
     rows = splits.read_split(split_file)
     if foreign := sorted({row.origin for row in rows} - CLEAN_ORIGINS):
         raise ValueError(f"{split_file}: the simulation takes clean speech, not origin {', '.join(foreign)}")
@@ -496,9 +503,14 @@ def build(
         for j in shards
         if not shard_done(out, j).exists()
     ]
-    with multiprocessing.get_context("spawn").Pool(workers) as pool:
-        for k, _ in enumerate(pool.imap_unordered(_shard, jobs), start=len(shards) - len(jobs) + 1):
-            print(f"{out.name}: shard {k}/{len(shards)}", flush=True)
+    with multiprocessing.get_context("spawn").Pool(workers, initializer=_ignore_interrupt) as pool:
+        try:
+            for k, _ in enumerate(pool.imap_unordered(_shard, jobs), start=len(shards) - len(jobs) + 1):
+                print(f"{out.name}: shard {k}/{len(shards)}", flush=True)
+        except KeyboardInterrupt:
+            done = sum(shard_done(out, j).exists() for j in shards)
+            print(f"{out.name}: paused, {done}/{len(shards)} shards done; the same build goes on from them", flush=True)
+            raise
     written = [p for j in shards for p in shard_files(out, j, pitch, keep_pcm)]
     frames = sum(len(np.load(p, mmap_mode="r")) for p in written if p.name.endswith(".features.npy"))
     body = head | {
