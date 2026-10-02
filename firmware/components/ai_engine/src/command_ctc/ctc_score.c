@@ -3,6 +3,8 @@
 #include <math.h>
 #include <stdbool.h>
 
+#include "gen_units.h"
+
 #define BLANK 0
 #define MILLI 1000.0f
 #define FIELD_MAX 65535 // the uint16 fields of ai_engine_command_result_t
@@ -123,6 +125,38 @@ static float free_score(const float *log_probs, size_t n_classes, size_t n_frame
     return total / (float)n_frames;
 }
 
+static bool ends_syllable(uint8_t unit)
+{
+    for (size_t k = 0; k < GEN_UNITS_N_TONES; k++) {
+        if (unit == GEN_UNITS_TONES[k]) { return true; }
+    }
+    return false;
+}
+
+// A part said alone must not pass for the whole command (KEHOACH 3.12).
+static bool outscored_by_a_part(const wide_t *probs, size_t n_classes, size_t n_frames,
+                                const ai_engine_seq_t *variants, size_t n_variants, float score)
+{
+    for (size_t v = 0; v < n_variants; v++) {
+        const ai_engine_seq_t *seq = &variants[v];
+        size_t ends[AI_ENGINE_COMMAND_CTC_UNITS_MAX + 1];
+        size_t n_syllables = 0;
+        for (size_t k = 0; k < seq->n_units; k++) {
+            if (ends_syllable(seq->units[k])) { ends[n_syllables++] = k + 1; }
+        }
+        if (n_syllables == 0 || ends[n_syllables - 1] != seq->n_units) { ends[n_syllables++] = seq->n_units; }
+        for (size_t first = 0; first < n_syllables; first++) {
+            const size_t start = first == 0 ? 0 : ends[first - 1];
+            for (size_t last = first; last < n_syllables - (first == 0); last++) {
+                const ai_engine_seq_t part = {.n_units = (uint8_t)(ends[last] - start),
+                                              .units = seq->units + start};
+                if (sequence_score(probs, n_classes, n_frames, &part) >= score) { return true; }
+            }
+        }
+    }
+    return false;
+}
+
 static uint16_t milli(float x)
 {
     const float scaled_x = x * MILLI;
@@ -222,7 +256,9 @@ esp_err_t ai_engine_command_ctc_decide(const float *log_probs, size_t n_classes,
     const bool reached = best_score > -INFINITY;
     const uint16_t gap = reached ? milli(free_score(log_probs, n_classes, n_frames) - best_score) : FIELD_MAX;
     const uint16_t lead = second > -INFINITY ? milli(best_score - second) : FIELD_MAX;
-    const bool accepted = reached && gap <= reject && lead >= margin;
+    const bool accepted = reached && gap <= reject && lead >= margin &&
+                          !outscored_by_a_part(probs, n_classes, n_frames, lexicon->variants[best],
+                                               lexicon->n_variants[best], best_score);
     *out = (ai_engine_command_result_t){
         .command = accepted ? (int16_t)best : AI_ENGINE_COMMAND_CTC_REJECTED,
         .score_permille = reached ? milli((float)exp((double)best_score)) : 0,
