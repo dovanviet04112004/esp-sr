@@ -140,17 +140,93 @@ def test_fuse_passive_ops_on_graph_inputs_keeps_each_slice_on_the_inputs_exponen
     assert set(slice_exponents(info).values()) == {exponent(info, name)}
 
 
+NORM_HOPS, NORM_WIDTH, NORM_EPS = 4096, 256, 1e-5
+
+
+class ChannelNorm(nn.Module):
+    """A norm over the last axis with a float scale a channel, in the form ESP-PPQ fuses into RMSNormalization."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.scale = nn.Parameter(torch.linspace(0.5, 1.5, NORM_WIDTH))
+
+    def forward(self, x):
+        return x / torch.sqrt(x.pow(2).mean(dim=-1, keepdim=True) + NORM_EPS) * self.scale
+
+
+def norm_graph(tmp_path: Path):
+    rng = np.random.default_rng(8)
+    calib = [torch.from_numpy(rng.normal(0, 2, (1, NORM_HOPS, NORM_WIDTH)).astype(np.float32)) for _ in range(2)]
+    with esp_ppq_patches.applied(["rmsnorm_as_espdl"]):
+        graph = ptq_espdl.quantize(ChannelNorm(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    (op,) = [op for op in graph.operations.values() if op.type == "RMSNormalization"]
+    return graph, op
+
+
+def espdl_rmsnorm(q: np.ndarray, scale: np.ndarray, e_in: int, e_out: int) -> np.ndarray:
+    """esp-dl's S3 int8 RMSNormalization of q over its last axis, each float32 step as dl_module_rms_normalization.hpp
+    and dl_tie728_rmsnorm_s8 take it."""
+    s_in, s_out = np.float32(2.0**e_in), np.float32(2.0**e_out)
+    sum_sq = (q.astype(np.int64) ** 2).sum(-1, keepdims=True).astype(np.float32)
+    mean_sq = sum_sq * (s_in * s_in) / np.float32(q.shape[-1])
+    rms = np.float32(1.0) / np.sqrt(mean_sq + np.float32(NORM_EPS)) * (s_in / s_out)
+    return np.clip(np.floor(q.astype(np.float32) * rms * scale + np.float32(0.5)), -128, 127)
+
+
+def test_rmsnorm_as_espdl_simulates_each_norm_as_the_chip_rounds_it(tmp_path: Path) -> None:
+    """ESP-PPQ as is rounds about one output in a few million a step off the chip; four batches of this seed hold
+    two such."""
+    graph, op = norm_graph(tmp_path)
+    e_in, e_out = (ptq_espdl.exponent_of(c) for c in (op.input_quant_config[0], op.output_quant_config[0]))
+    scale = op.inputs[1].value.detach().numpy().astype(np.float32)
+    patched, as_is = ptq_espdl.Simulator(graph, ["rmsnorm_as_espdl"]), ptq_espdl.Simulator(graph)
+    rng, step, flips = np.random.default_rng(11), np.float32(2.0**e_out), 0
+    for _ in range(4):
+        q = rng.normal(0, 40, (1, NORM_HOPS, NORM_WIDTH)).round().clip(-128, 127)
+        x, want = q.astype(np.float32) * np.float32(2.0**e_in), espdl_rmsnorm(q, scale, e_in, e_out)
+        assert np.array_equal(patched(x) / step, want)
+        off = as_is(x) / step - want
+        assert np.abs(off).max() <= 1
+        flips += np.count_nonzero(off)
+    assert flips > 0
+
+
+def test_rmsnorm_as_espdl_passes_the_gradient_of_the_float_norm(tmp_path: Path) -> None:
+    from esp_ppq.executor.op.torch.default import RMSNormalization_forward
+
+    _, op = norm_graph(tmp_path)
+    e_in = ptq_espdl.exponent_of(op.input_quant_config[0])
+    q = np.random.default_rng(10).normal(0, 40, (1, 8, NORM_WIDTH)).round().clip(-128, 127)
+    x = torch.from_numpy(q.astype(np.float32) * np.float32(2.0**e_in))
+    grads, outs = [], []
+    patched = {"simulate": RMSNormalization_forward, "platforms": frozenset({op.platform})}
+    elsewhere = patched | {"platforms": frozenset()}
+    for kwargs in ({}, patched, elsewhere):
+        forward = esp_ppq_patches.rmsnorm_like_espdl if kwargs else RMSNormalization_forward
+        xs, scale = x.clone().requires_grad_(), op.inputs[1].value.detach().clone().requires_grad_()
+        outs.append(forward(op, [xs, scale], **kwargs))
+        (outs[-1] * torch.linspace(-1, 1, NORM_WIDTH)).sum().backward()
+        grads.append((xs.grad, scale.grad))
+    assert all(torch.equal(a, b) and torch.equal(a, c) for a, b, c in zip(*grads, strict=True))
+    assert torch.equal(outs[2], outs[0]) and not torch.equal(outs[1], outs[0])
+
+
 def test_every_patch_is_undone_when_its_block_ends() -> None:
+    from esp_ppq.executor.base import OPERATION_FORWARD_TABLE
     from esp_ppq.parser import espdl_exporter
     from esp_ppq.parser.espdl.espdl_streaming import StreamingTable
     from esp_ppq.quantization.optim import QuantizeFusionPass
 
     pattern, add, fuse = espdl_exporter.InsertRequantNodePattern, StreamingTable.add, QuantizeFusionPass.optimize
+    norms = {platform: table.get("RMSNormalization") for platform, table in OPERATION_FORWARD_TABLE.items()}
     with esp_ppq_patches.applied(list(esp_ppq_patches.PATCHES)):
         assert espdl_exporter.InsertRequantNodePattern is not pattern and StreamingTable.add is not add
         assert QuantizeFusionPass.optimize is not fuse
+        s3 = [p for p in OPERATION_FORWARD_TABLE if p.name in ("ESPDL_S3_INT8", "ESPDL_S3_INT16")]
+        assert len(s3) == 2 and all(OPERATION_FORWARD_TABLE[p]["RMSNormalization"] is not norms[p] for p in s3)
     assert espdl_exporter.InsertRequantNodePattern is pattern and StreamingTable.add is add
     assert QuantizeFusionPass.optimize is fuse
+    assert all(table.get("RMSNormalization") is norms[p] for p, table in OPERATION_FORWARD_TABLE.items())
 
 
 def test_an_unknown_patch_is_refused() -> None:

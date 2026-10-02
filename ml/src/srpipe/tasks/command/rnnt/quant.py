@@ -138,12 +138,14 @@ def requant(x: np.ndarray, src: int, dst: int) -> np.ndarray:
 
 
 class Int8Rnnt:
-    """The three graphs as the chip runs them: a window's projected frames once, each context's prefix once, and the
-    joiner's int8 logits to log-probabilities by ctc_score's frame_log_probs."""
+    """The three graphs as the chip runs them, simulated under the branch's ESP-PPQ fixes: a window's projected frames
+    once, each context's prefix once, and the joiner's int8 logits to log-probabilities by ctc_score's
+    frame_log_probs."""
 
-    def __init__(self, graphs: Graphs, hops: int, net: gate.Ctc) -> None:
-        self.frames = ctc_quant.Int8Net(graphs.frames, hops, net.mean, net.std, net.model)
-        self.predictor, self.joiner = ptq_espdl.Simulator(graphs.predictor), ptq_espdl.Simulator(graphs.joiner)
+    def __init__(self, graphs: Graphs, hops: int, net: gate.Ctc, patches: list[str]) -> None:
+        self.frames = ctc_quant.Int8Net(graphs.frames, hops, net.mean, net.std, net.model, patches)
+        self.predictor = ptq_espdl.Simulator(graphs.predictor, patches)
+        self.joiner = ptq_espdl.Simulator(graphs.joiner, patches)
         self.frames_out = ptq_espdl.io_of(graphs.frames).output_exponent
         self.predictor_io = ptq_espdl.io_of(graphs.predictor)
         (self.join_frame, self.join_prefix), (self.join_out,) = ptq_espdl.ports_of(graphs.joiner)

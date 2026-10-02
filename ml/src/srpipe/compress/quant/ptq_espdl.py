@@ -8,6 +8,7 @@ hop, and that equality is what the board is held to (E11-T10).
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,7 +16,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from srpipe.compress.quant import onnx_export
+from srpipe.compress.quant import esp_ppq_patches, onnx_export
 from srpipe.core.config import CONFIGS, deep_merge, load_yaml
 
 TARGET = "esp32s3"
@@ -162,18 +163,21 @@ def to_int8(x: np.ndarray, exponent: int) -> np.ndarray:
 
 
 class Simulator:
-    """The quantised graph run by ESP-PPQ's executor on whole sequences: the numbers the chip computes."""
+    """The quantised graph run by ESP-PPQ's executor on whole sequences, under the ESP-PPQ fixes its branch names: the
+    numbers the chip computes."""
 
-    def __init__(self, graph) -> None:
+    def __init__(self, graph, patches: Sequence[str] = ()) -> None:
         from esp_ppq.executor.torch import TorchExecutor
 
-        self.executor = TorchExecutor(graph=graph, device="cpu")
+        self.executor, self.patches = TorchExecutor(graph=graph, device="cpu"), list(patches)
 
     def __call__(self, x: np.ndarray) -> np.ndarray:
-        (out,) = self.executor.forward(inputs=torch.from_numpy(np.ascontiguousarray(x, dtype=np.float32)))
-        return out.detach().cpu().numpy()
+        (out,) = self.run(x)
+        return out
 
     def run(self, *xs: np.ndarray) -> list[np.ndarray]:
         """Every output of a graph of several inputs, given in the graph's order."""
         tensors = [torch.from_numpy(np.ascontiguousarray(x, dtype=np.float32)) for x in xs]
-        return [out.detach().cpu().numpy() for out in self.executor.forward(inputs=tensors)]
+        with esp_ppq_patches.applied(self.patches):
+            outs = self.executor.forward(inputs=tensors)
+        return [out.detach().cpu().numpy() for out in outs]

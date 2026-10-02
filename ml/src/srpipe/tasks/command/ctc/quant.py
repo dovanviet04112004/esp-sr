@@ -91,10 +91,12 @@ def batched(calib: list[torch.Tensor], batch: int) -> list[torch.Tensor]:
 class Int8Net:
     """A quantised graph called as the float net is, on normalised features (1, dims, hops) of at most the graph's
     hops: padded on as training pads, the input on its int8 grid as the chip takes it, logits as the chip gives
-    them."""
+    them, simulated under the branch's ESP-PPQ fixes."""
 
-    def __init__(self, graph, hops: int, mean: np.ndarray, std: np.ndarray, like: encoder.CtcNet) -> None:
-        self.simulate, self.io, self.hops = ptq_espdl.Simulator(graph), ptq_espdl.io_of(graph), hops
+    def __init__(
+        self, graph, hops: int, mean: np.ndarray, std: np.ndarray, like: encoder.CtcNet, patches: list[str]
+    ) -> None:
+        self.simulate, self.io, self.hops = ptq_espdl.Simulator(graph, patches), ptq_espdl.io_of(graph), hops
         self.zero = (-mean / std).astype(np.float32)
         self.chunk_multiple, self.front = like.chunk_multiple, like.front
 
@@ -198,7 +200,7 @@ def row_of(cfg: dict, b: Bench, model) -> dict:
 def int8_row(cfg: dict, b: Bench, graph, folder: Path, rungs: dict) -> dict:
     """graph kept at folder/graph.native, and its row headed by the calibration and int16 layers it was built on."""
     export_espdl.save_native(graph, folder / GRAPH_FILE)
-    int8 = Int8Net(graph, cfg["quant"]["hops"], b.net.mean, b.net.std, b.net.model)
+    int8 = Int8Net(graph, cfg["quant"]["hops"], b.net.mean, b.net.std, b.net.model, cfg["esp_ppq_patches"])
     return {"calibration": rungs["calibration"], "int16_ops": rungs["int16_ops"], **row_of(cfg, b, int8)}
 
 
@@ -252,7 +254,8 @@ def step_int16(cfg: dict, run: Path) -> Path:
     spec, b = cfg["quant"], bench(cfg, run)
     rungs = ptq_espdl.ladder(LADDER) | {"calibration": best_calibration(run, spec["calibrations"], spec["gate_tie"])}
     base = quantized(b.net.model, b.calib, run / "int8" / "int16_base", rungs, cfg["esp_ppq_patches"])
-    ranked = mixed_espdl.ranked_layers(base, b.calib[: spec["layerwise_sentences"]])
+    with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
+        ranked = mixed_espdl.ranked_layers(base, b.calib[: spec["layerwise_sentences"]])
     layers = [{"op": name, "noise_to_signal": round(error, 6)} for name, error in ranked]
     head = {"int16_base": rungs["calibration"], "layerwise": layers}
     out = recorded(run, head, {})
@@ -271,10 +274,12 @@ def step_qat(cfg: dict, run: Path, device: str) -> Path:
     folder, patches = run / "int8" / "qat", cfg["esp_ppq_patches"]
     wide = quantized(b.net.model, batched(b.calib, spec["qat"]["batch"]), folder / "batch", rungs, patches)
     stats = (b.net.mean, b.net.std)
-    history = qat.fit(wide, train.load_sets(b.net.cfg), stats, cfg, b.net.cfg, b.net.model, device)
+    with esp_ppq_patches.applied(patches):
+        history = qat.fit(wide, train.load_sets(b.net.cfg), stats, cfg, b.net.cfg, b.net.model, device)
     (folder / "history.yaml").write_text(yaml.safe_dump(history, sort_keys=False), encoding="utf-8")
     graph = quantized(b.net.model, b.calib, folder, rungs, patches)
-    qat_espdl.carry(wide, graph, b.calib[0].numpy())
+    with esp_ppq_patches.applied(patches):
+        qat_espdl.carry(wide, graph, b.calib[0].numpy())
     return recorded(run, {"qat": spec["qat"]}, {"qat": int8_row(cfg, b, graph, folder, rungs)})
 
 

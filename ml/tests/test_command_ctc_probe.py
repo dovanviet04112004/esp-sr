@@ -29,7 +29,7 @@ INPUT_EXPONENT = -3
 class DrawnLogits:
     """Stands for quant.Int8Net: fresh int8 logits on the grid of 2^EXPONENT for each window, from a fixed seed."""
 
-    def __init__(self, graph, hops: int, mean: np.ndarray, std: np.ndarray, like) -> None:
+    def __init__(self, graph, hops: int, mean: np.ndarray, std: np.ndarray, like, patches: list[str]) -> None:
         self.io = SimpleNamespace(input_exponent=INPUT_EXPONENT, output_exponent=EXPONENT)
         self.frames = hops // like.front.hop_stride
         self.rng = np.random.default_rng(7)
@@ -66,7 +66,7 @@ def test_the_windows_record_reads_back_with_the_decisions_python_takes(monkeypat
     at = probe.WINDOWS_HEAD.size
     assert body[at : at + len(packed)] == packed
     at += len(packed) + (-(at + len(packed)) % 4)
-    replay = DrawnLogits(None, cfg["quant"]["hops"], *norm, model)
+    replay = DrawnLogits(None, cfg["quant"]["hops"], *norm, model, cfg["esp_ppq_patches"])
     for x in windows:
         (hops,) = struct.unpack_from("<I", body, at)
         at += 4
@@ -98,7 +98,7 @@ def test_the_gate_record_reads_back_each_window_as_its_int8_input_and_python_dec
     at += 2 * DIMS * 4
     assert sizes == [commands, most, longest, cfg["chunk_hops"]] and body[at : at + len(packed)] == packed
     at += len(packed) + (-(at + len(packed)) % 4)
-    replay = DrawnLogits(None, cfg["quant"]["hops"], mean, std, model)
+    replay = DrawnLogits(None, cfg["quant"]["hops"], mean, std, model, cfg["esp_ppq_patches"])
     for x in windows:
         (hops,) = struct.unpack_from("<I", body, at)
         at += 4

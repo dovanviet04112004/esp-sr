@@ -87,7 +87,7 @@ def probe_net(graph, name: str, step_hops: int, cfg: dict, work: Path, probe_x: 
     io = ptq_espdl.io_of(graph)
     x_int8 = ptq_espdl.to_int8(probe_x, io.input_exponent)
     x = x_int8.astype(np.float32) * np.float32(2.0**io.input_exponent)
-    y = ptq_espdl.Simulator(graph)(x)
+    y = ptq_espdl.Simulator(graph, cfg["esp_ppq_patches"])(x)
     y_int8 = ptq_espdl.to_int8(y, io.output_exponent)
     if not np.array_equal(y_int8.astype(np.float32) * np.float32(2.0**io.output_exponent), y):
         raise ValueError(f"{name}: the simulated output is not on the int8 grid of its exponent")
@@ -144,7 +144,7 @@ def command_windows(cfg: dict, graph, model: encoder.CtcNet, norm: tuple, window
     reject, margin = cfg["quant"]["reject"], cfg["eval"]["margin"]
     lexicon = ctc_score.default_lexicon()
     (commands, most, longest), packed = ctc_score.packed_lexicon(lexicon)
-    int8 = quant.Int8Net(graph, cfg["quant"]["hops"], mean, std, model)
+    int8 = quant.Int8Net(graph, cfg["quant"]["hops"], mean, std, model, cfg["esp_ppq_patches"])
     sizes = (commands, most, longest, cfg["chunk_hops"])
     body = WINDOWS_HEAD.pack(WINDOWS_MAGIC, len(mean), len(windows), reject, margin, *sizes)
     body += packed + b"\0" * (-(WINDOWS_HEAD.size + len(packed)) % 4)
@@ -167,7 +167,7 @@ def gate_windows(cfg: dict, graph, model: encoder.CtcNet, norm: tuple, windows: 
     reject, margin = cfg["quant"]["reject"], cfg["eval"]["margin"]
     lexicon = ctc_score.default_lexicon()
     (commands, most, longest), packed = ctc_score.packed_lexicon(lexicon)
-    int8 = quant.Int8Net(graph, cfg["quant"]["hops"], mean, std, model)
+    int8 = quant.Int8Net(graph, cfg["quant"]["hops"], mean, std, model, cfg["esp_ppq_patches"])
     e = int8.io.input_exponent
     sizes = (commands, most, longest, cfg["chunk_hops"])
     body = GATE_HEAD.pack(GATE_MAGIC, len(mean), len(windows), reject, margin, *sizes, e)

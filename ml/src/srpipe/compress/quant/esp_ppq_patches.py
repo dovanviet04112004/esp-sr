@@ -1,5 +1,5 @@
-"""Fixes to ESP-PPQ 1.3.11's quantisation and esp-dl export, in force around both for the branch whose config names
-them; a branch that names none quantises and exports exactly as ESP-PPQ does.
+"""Fixes to ESP-PPQ 1.3.11's quantisation, simulation and esp-dl export, in force wherever the branch whose config names
+them runs ESP-PPQ (KEHOACH 3.14); a branch that names none runs exactly as ESP-PPQ does.
 
 Each fix states the bug, what board B showed without it and the test that pins it (tests/test_esp_ppq_patches.py);
 when the ESP-PPQ pin moves, re-check each one upstream.
@@ -8,7 +8,9 @@ when the ESP-PPQ pin moves, re-check each one upstream.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator, Sequence
+import functools
+import math
+from collections.abc import Callable, Iterator, Sequence
 
 # esp-dl runs convolutions channels last, so time, the first spatial axis of every conv streamed here, is axis 1.
 CONV_TIME_AXIS = 1
@@ -112,10 +114,62 @@ def fuse_passive_ops_on_graph_inputs() -> Iterator[None]:
         QuantizeFusionPass.optimize = optimize
 
 
+def rmsnorm_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platforms: frozenset, **kwargs):
+    """op's output as esp-dl's S3 kernel computes it once op, on one of platforms, has its input and output quantised,
+    each float32 step in the kernel's order; simulate's float output otherwise. The gradient is simulate's."""
+    import torch
+    from esp_ppq.core import QuantizationStates
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    floating = simulate(op, values, ctx, **kwargs)
+    if not isinstance(op, QuantableOperation) or op.platform not in platforms:
+        return floating
+    given, out = op.input_quant_config[0], op.output_quant_config[0]
+    if not all(QuantizationStates.is_activated(c.dominated_by.state) for c in (given, out)):
+        return floating
+    with torch.no_grad():
+        x, weight = values[0].to(floating.device), values[1].to(floating.device)
+        s_in, s_out = given.scale.to(floating.device), out.scale.to(floating.device)
+        axes = list(range(x.ndim - weight.ndim, x.ndim))
+        q = x / s_in
+        sum_sq = (q.double() ** 2).sum(axes, keepdim=True).float()
+        # Tensor by tensor: torch divides a CUDA tensor by a Python number through its reciprocal.
+        mean_sq = sum_sq * (s_in * s_in) / torch.full_like(sum_sq, math.prod(x.shape[a] for a in axes))
+        eps = torch.full_like(mean_sq, op.attributes.get("epsilon", 1e-5))
+        rms = torch.ones_like(mean_sq) / torch.sqrt(mean_sq + eps) * (s_in / s_out)
+        y = torch.clamp(torch.floor(q * rms * weight + 0.5), out.quant_min, out.quant_max) * s_out
+    return floating - floating.detach() + y
+
+
+@contextlib.contextmanager
+def rmsnorm_as_espdl() -> Iterator[None]:
+    """ESP-PPQ simulates RMSNormalization as x / sqrt(mean(x^2) + eps) * scale rounded at its output; esp-dl's S3 kernel
+    multiplies the integers by 1 / sqrtf of the mean square, already scaled between the grids, then by the float scale,
+    and rounds half up. Board B, command_ctc qat: 2 of 198 Gate 3 windows scored a step off the simulation.
+    """
+    from esp_ppq.api.espdl_interface import get_target_platform
+    from esp_ppq.executor.base import OPERATION_FORWARD_TABLE
+
+    from srpipe.compress.quant.ptq_espdl import BITS, TARGET, WIDE_BITS
+
+    platforms = frozenset(get_target_platform(TARGET, bits) for bits in (BITS, WIDE_BITS))
+    # Every esp-dl platform shares one table, so the patched forward checks the platform itself.
+    tables = list({id(t): t for t in (OPERATION_FORWARD_TABLE[p] for p in platforms)}.values())
+    simulated = [table["RMSNormalization"] for table in tables]
+    for table, simulate in zip(tables, simulated, strict=True):
+        table["RMSNormalization"] = functools.partial(rmsnorm_like_espdl, simulate=simulate, platforms=platforms)
+    try:
+        yield
+    finally:
+        for table, simulate in zip(tables, simulated, strict=True):
+            table["RMSNormalization"] = simulate
+
+
 PATCHES = {
     "requantise_graph_inputs": requantise_graph_inputs,
     "conv_caches_along_time": conv_caches_along_time,
     "fuse_passive_ops_on_graph_inputs": fuse_passive_ops_on_graph_inputs,
+    "rmsnorm_as_espdl": rmsnorm_as_espdl,
 }
 
 

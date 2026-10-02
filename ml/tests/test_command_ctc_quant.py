@@ -13,7 +13,7 @@ import yaml
 
 torch = pytest.importorskip("torch")
 
-from srpipe.compress.quant import ptq_espdl, qat_espdl  # noqa: E402
+from srpipe.compress.quant import esp_ppq_patches, ptq_espdl, qat_espdl  # noqa: E402
 from srpipe.core.config import load_yaml  # noqa: E402
 from srpipe.tasks.command import ctc  # noqa: E402
 from srpipe.tasks.command import eval as gate  # noqa: E402
@@ -117,10 +117,12 @@ def test_rung_4_trains_a_batch_graph_and_the_graph_of_one_carries_it(tmp_path: P
     wide = quant.quantized(model, quant.batched(calib, 2), tmp_path / "b", rungs, cfg["esp_ppq_patches"])
     sets = {"train": sentences(rng, [48, 40, 56, 32]), "val": sentences(rng, [40, 48, 32])}
     stats = (np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32))
-    history = qat.fit(wide, sets, stats, cfg, cfg, model, "cpu")
+    with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
+        history = qat.fit(wide, sets, stats, cfg, cfg, model, "cpu")
     assert [row["step"] for row in history] == [0, 1, 2] and all(row["unit_error_rate"] >= 0 for row in history)
     one = quant.quantized(model, calib, tmp_path / "1", rungs, cfg["esp_ppq_patches"])
-    qat_espdl.carry(wide, one, calib[0].numpy())
+    with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
+        qat_espdl.carry(wide, one, calib[0].numpy())
 
 
 def test_a_net_whose_norms_stay_an_int8_chain_is_refused(tmp_path: Path) -> None:

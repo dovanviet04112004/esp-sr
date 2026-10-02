@@ -71,6 +71,7 @@ esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches aroun
   - requantise_graph_inputs        # a layer's input read by a Conv, an Add and the bypass Sub at two scales
   - conv_caches_along_time         # the front's convolutions reached through a Slice of the features
   - fuse_passive_ops_on_graph_inputs   # the Slices of the features take the features' scale
+  - rmsnorm_as_espdl               # each norm computed and rounded as esp-dl's S3 kernel does
 probe:                             # E11-T12: one layer, then the whole net, random weights, on board B (make ai-probe)
   seed: 20260930
   calib_sequences: 8

@@ -73,7 +73,7 @@ def test_the_int8_chain_gives_log_probabilities_and_a_decision(cfg, net, tmp_pat
     stats = (np.zeros(dims, np.float32), np.ones(dims, np.float32))
     lexicon = [[np.array([0, 38, 1, 39], np.uint8)], [np.array([2, 40], np.uint8)]]
     ctc_net = gate.Ctc(net, *stats, ["a", "b"], lexicon, cfg)
-    sim = rnnt_quant.Int8Rnnt(graphs, hops, ctc_net)
+    sim = rnnt_quant.Int8Rnnt(graphs, hops, ctc_net, cfg["esp_ppq_patches"])
     x = rng.normal(size=(40, dims)).astype(np.float32)
     lp = sim.log_probs(((x - stats[0]) / stats[1]).T[None].astype(np.float32), 20)(0, contexts[0])
     assert lp.shape == (encoder.n_classes(),) and abs(np.logaddexp.reduce(lp.astype(np.float64))) < 1e-5
