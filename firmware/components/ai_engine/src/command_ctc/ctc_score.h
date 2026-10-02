@@ -10,7 +10,16 @@
 #include "esp_err.h"
 
 #define AI_ENGINE_COMMAND_CTC_REJECTED (-1)
-#define AI_ENGINE_COMMAND_CTC_UNITS_MAX 48 // a variant's units; its forward pass keeps 2 n + 1 states
+#define AI_ENGINE_COMMAND_CTC_UNITS_MAX 48   // a variant's units; its forward pass keeps 2 n + 1 states
+#define AI_ENGINE_COMMAND_CTC_CLASSES_MAX 64 // a frame's classes, one exp kept on the stack each
+
+/** Log-probabilities of int8 logits worth logits * 2^exponent, frame after frame of n_classes, as
+ *  ctc_score.py's frame_log_probs: largest off, exp summed over an exponent of its own, log in double.
+ *  @ctx any | non-blocking | caller owns logits and log_probs, both n_frames x n_classes
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG no class, or more than AI_ENGINE_COMMAND_CTC_CLASSES_MAX
+ */
+esp_err_t ai_engine_command_ctc_log_probs(const int8_t *logits, int exponent, size_t n_classes,
+                                          size_t n_frames, float *log_probs);
 
 /** Bytes of the work area ai_engine_command_ctc_decide fills with the window's probabilities.
  *  @ctx any | non-blocking

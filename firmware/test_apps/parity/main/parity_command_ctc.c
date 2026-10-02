@@ -53,8 +53,10 @@ static bool lexicon_of(const gold_tensor_t *units, const gold_tensor_t *n_varian
 
 bool parity_command_ctc(const char *case_name, const void *buf, size_t len)
 {
-    gold_tensor_t log_probs, frames, units, n_variants, n_units, thresholds, scores, decision;
-    if (!parity_tensor(buf, len, "log_probs", &log_probs) || !parity_tensor(buf, len, "frames", &frames) ||
+    gold_tensor_t logits, exponent, log_probs, frames, units, n_variants, n_units, thresholds, scores,
+        decision;
+    if (!parity_tensor(buf, len, "logits", &logits) || !parity_tensor(buf, len, "exponent", &exponent) ||
+        !parity_tensor(buf, len, "log_probs", &log_probs) || !parity_tensor(buf, len, "frames", &frames) ||
         !parity_tensor(buf, len, "units", &units) || !parity_tensor(buf, len, "n_variants", &n_variants) ||
         !parity_tensor(buf, len, "n_units", &n_units) ||
         !parity_tensor(buf, len, "thresholds", &thresholds) || !parity_tensor(buf, len, "scores", &scores) ||
@@ -63,12 +65,17 @@ bool parity_command_ctc(const char *case_name, const void *buf, size_t len)
     }
     const size_t windows = log_probs.dims[0], longest = log_probs.dims[1], classes = log_probs.dims[2];
     const size_t commands = units.dims[0];
-    if (frames.dims[0] != windows || thresholds.dims[0] != windows || thresholds.dims[1] != THRESHOLD_COUNT ||
-        scores.dims[0] != windows || scores.dims[1] != commands || decision.dims[0] != windows ||
-        decision.dims[1] != DECISION_COUNT) {
+    if (logits.dims[0] != windows || logits.dims[1] != longest || logits.dims[2] != classes ||
+        exponent.dims[0] != windows || frames.dims[0] != windows || thresholds.dims[0] != windows ||
+        thresholds.dims[1] != THRESHOLD_COUNT || scores.dims[0] != windows || scores.dims[1] != commands ||
+        decision.dims[0] != windows || decision.dims[1] != DECISION_COUNT) {
         return false;
     }
+    float *raw = malloc(windows * longest * classes * sizeof(float));
+    float *steps = malloc(windows * sizeof(float));
+    int8_t *q = malloc(longest * classes);
     float *in = malloc(windows * longest * classes * sizeof(float));
+    float *got_log_probs = calloc(windows * longest * classes, sizeof(float));
     float *lengths = malloc(windows * sizeof(float));
     float *limits = malloc(windows * THRESHOLD_COUNT * sizeof(float));
     float *want_scores = malloc(windows * commands * sizeof(float));
@@ -78,8 +85,11 @@ bool parity_command_ctc(const char *case_name, const void *buf, size_t len)
     ai_engine_lexicon_t *lex = calloc(1, sizeof(*lex));
     uint8_t *ids = malloc(units.dims[0] * units.dims[1] * units.dims[2]);
     void *work = malloc(ai_engine_command_ctc_work_bytes(classes, longest));
-    bool ok = in != NULL && lengths != NULL && limits != NULL && want_scores != NULL && want != NULL &&
+    bool ok = raw != NULL && steps != NULL && q != NULL && in != NULL && got_log_probs != NULL &&
+              lengths != NULL && limits != NULL && want_scores != NULL && want != NULL &&
               got_scores != NULL && got != NULL && lex != NULL && ids != NULL && work != NULL &&
+              parity_floats(&logits, raw, windows * longest * classes) &&
+              parity_floats(&exponent, steps, windows) &&
               parity_floats(&log_probs, in, windows * longest * classes) &&
               parity_floats(&frames, lengths, windows) &&
               parity_floats(&thresholds, limits, windows * THRESHOLD_COUNT) &&
@@ -87,21 +97,31 @@ bool parity_command_ctc(const char *case_name, const void *buf, size_t len)
               parity_floats(&decision, want, windows * DECISION_COUNT) &&
               lexicon_of(&units, &n_variants, &n_units, lex, ids);
     for (size_t w = 0; ok && w < windows; w++) {
+        const size_t n = (size_t)lengths[w];
+        float *mine = got_log_probs + w * longest * classes;
+        for (size_t i = 0; i < n * classes; i++) {
+            q[i] = (int8_t)raw[w * longest * classes + i];
+        }
         ai_engine_command_result_t d;
         const float *limit = limits + w * THRESHOLD_COUNT;
-        ok =
-            ai_engine_command_ctc_decide(in + w * longest * classes, classes, (size_t)lengths[w], lex,
-                                         (uint16_t)limit[THRESHOLD_REJECT], (uint16_t)limit[THRESHOLD_MARGIN],
-                                         work, got_scores + w * commands, &d) == ESP_OK;
+        ok = ai_engine_command_ctc_log_probs(q, (int)steps[w], classes, n, mine) == ESP_OK &&
+             ai_engine_command_ctc_decide(mine, classes, n, lex, (uint16_t)limit[THRESHOLD_REJECT],
+                                          (uint16_t)limit[THRESHOLD_MARGIN], work, got_scores + w * commands,
+                                          &d) == ESP_OK;
         decision_row(&d, got + w * DECISION_COUNT);
     }
     if (ok) {
         mark_unreached(want_scores, windows * commands);
         mark_unreached(got_scores, windows * commands);
+        parity_report("command_ctc", case_name, "log_probs", in, got_log_probs, windows * longest * classes);
         parity_report("command_ctc", case_name, "scores", want_scores, got_scores, windows * commands);
         parity_report("command_ctc", case_name, "decision", want, got, windows * DECISION_COUNT);
     }
+    free(raw);
+    free(steps);
+    free(q);
     free(in);
+    free(got_log_probs);
     free(lengths);
     free(limits);
     free(want_scores);

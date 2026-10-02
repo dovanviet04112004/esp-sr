@@ -148,6 +148,41 @@ static esp_err_t check(const ai_engine_lexicon_t *lexicon, size_t n_classes)
     return ESP_OK;
 }
 
+esp_err_t ai_engine_command_ctc_log_probs(const int8_t *logits, int exponent, size_t n_classes,
+                                          size_t n_frames, float *log_probs)
+{
+    if (logits == NULL || log_probs == NULL || n_classes == 0 ||
+        n_classes > AI_ENGINE_COMMAND_CTC_CLASSES_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const float step = ldexpf(1.0f, exponent);
+    wide_t probs[AI_ENGINE_COMMAND_CTC_CLASSES_MAX];
+    for (size_t t = 0; t < n_frames; t++) {
+        const int8_t *q = logits + t * n_classes;
+        float *out = log_probs + t * n_classes;
+        int8_t largest = q[0];
+        for (size_t c = 1; c < n_classes; c++) {
+            if (q[c] > largest) { largest = q[c]; }
+        }
+        const float top = (float)largest * step;
+        int32_t top_e = ZERO_EXP;
+        for (size_t c = 0; c < n_classes; c++) {
+            out[c] = (float)q[c] * step - top;
+            probs[c] = exp_wide(out[c]);
+            if (probs[c].e > top_e) { top_e = probs[c].e; }
+        }
+        float total = 0.0f;
+        for (size_t c = 0; c < n_classes; c++) {
+            total += scaled(probs[c], top_e);
+        }
+        const float log_total = (float)(log((double)total) + (double)top_e * LN2);
+        for (size_t c = 0; c < n_classes; c++) {
+            out[c] -= log_total;
+        }
+    }
+    return ESP_OK;
+}
+
 size_t ai_engine_command_ctc_work_bytes(size_t n_classes, size_t n_frames)
 {
     return n_classes * n_frames * sizeof(wide_t);
