@@ -1,6 +1,6 @@
 """The ctc decision: the forward pass equals the sum over every alignment, also when alignments drift apart past the
-range of float32, the best command wins, and a window the free loop explains better or two commands too close are
-rejected."""
+range of float32, the best command wins, and a window the free loop explains better, two commands too close or a part
+of the winner said alone are rejected."""
 
 from __future__ import annotations
 
@@ -94,6 +94,39 @@ def test_the_said_command_wins_and_the_rest_are_rejected_by_their_rules() -> Non
     assert short.tolist() == [ctc_score.REJECTED, 0, ctc_score.CAP, ctc_score.CAP]
 
 
+def test_parts_are_the_runs_of_whole_syllables_short_of_the_whole_command() -> None:
+    tone = sorted(ctc_score.TONE_UNITS)
+    units = np.array([0, 1, tone[0], 2, tone[1], 3, 4, tone[2]], np.uint8)
+    assert [u.tolist() for u in ctc_score.syllables(units)] == [[0, 1, tone[0]], [2, tone[1]], [3, 4, tone[2]]]
+    runs = [u.tolist() for u in ctc_score.parts([units])]
+    assert runs == [
+        [0, 1, tone[0]],
+        [0, 1, tone[0], 2, tone[1]],
+        [2, tone[1]],
+        [2, tone[1], 3, 4, tone[2]],
+        [3, 4, tone[2]],
+    ]
+    assert ctc_score.parts([units[:3]]) == []
+    chup_anh = ctc_score.variants("chụp ảnh")
+    assert {tuple(u.tolist()) for u in ctc_score.parts(chup_anh)} == {
+        tuple(u.tolist()) for u in ctc_score.variants("chụp") + ctc_score.variants("ảnh")
+    }
+
+
+def test_a_part_of_the_winner_said_alone_is_rejected_and_the_whole_command_taken() -> None:
+    tone = sorted(ctc_score.TONE_UNITS)
+    whole = np.array([0, 1, tone[0], 2, tone[1]], np.uint8)
+    lexicon = [[whole], [np.array([3, tone[2]], np.uint8)]]
+    classes = ctc_score.n_classes()
+    taken, _ = ctc_score.decide(window(whole.tolist(), classes), lexicon, reject=ctc_score.CAP, margin=50)
+    assert taken[0] == 0 and taken[2] >= 50
+    for alone in ([0, 1, tone[0]], [2, tone[1]]):
+        part, _ = ctc_score.decide(window(alone, classes), lexicon, reject=ctc_score.CAP, margin=50)
+        assert part[0] == ctc_score.REJECTED and part[2] >= 50
+        blind, _ = ctc_score.decide(window(alone, classes), lexicon, ctc_score.CAP, 50, own_parts=False)
+        assert blind[0] == 0
+
+
 def test_a_command_reads_once_per_distinct_dialect_form() -> None:
     forms = ctc_score.variants("bật đèn")
     assert 1 <= len(forms) <= 3 and all(f.dtype == np.uint8 for f in forms)
@@ -102,7 +135,8 @@ def test_a_command_reads_once_per_distinct_dialect_form() -> None:
 
 def test_the_golden_set_holds_its_edges_and_its_negative_control_differs(tmp_path: Path) -> None:
     written = ctc_score.emit(tmp_path)
-    names = ["case_000.gold", "case_001.gold", "case_002.gold", "case_neg_000.gold", "case_neg_001.gold"]
+    names = ["case_000", "case_001", "case_002", "case_003", "case_neg_000", "case_neg_001", "case_neg_002"]
+    names = [f"{name}.gold" for name in names]
     assert [p.name for p in written] == names
     cases = {p.stem: read_gold(p) for p in written}
     edge = cases["case_002"]["decision"]
@@ -114,6 +148,10 @@ def test_the_golden_set_holds_its_edges_and_its_negative_control_differs(tmp_pat
     assert not np.array_equal(cases["case_000"]["scores"], cases["case_neg_000"]["scores"])
     assert np.array_equal(cases["case_000"]["log_probs"], cases["case_neg_000"]["log_probs"])
     assert not np.array_equal(cases["case_000"]["log_probs"], cases["case_neg_001"]["log_probs"])
+    partial, blind = cases["case_003"]["decision"], cases["case_neg_002"]["decision"]
+    assert len(partial) % 3 == 0 and (partial[0::3, 0] == ctc_score.REJECTED).all()
+    assert (partial[1::3, 0] == ctc_score.REJECTED).all() and (partial[2::3, 0] != ctc_score.REJECTED).all()
+    assert (blind[0::3, 0] != ctc_score.REJECTED).any() and np.array_equal(partial[2::3], blind[2::3])
 
 
 def test_frame_log_probs_are_a_softmax_of_the_int8_logits_and_the_largest_comes_off_first() -> None:

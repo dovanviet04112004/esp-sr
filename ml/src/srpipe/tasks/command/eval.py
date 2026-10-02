@@ -58,7 +58,8 @@ class Scored:
 
 class Heard(NamedTuple):
     """One utterance of the ctc track: the command scoring best, unless no command fits the window, with the figures
-    of KEHOACH 3.12 in permille: its score, its lead over the second, and the free loop's gap over it."""
+    of KEHOACH 3.12 in permille: its score, its lead over its nearest rival, another command or a part of its own, and
+    the free loop's gap over it."""
 
     command: str
     score: int
