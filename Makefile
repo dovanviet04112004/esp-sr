@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-int8 command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -132,6 +132,9 @@ ctc-features: ## Run each file of the command split through the board simulation
 ctc-train: ## Train the ctc net on processed/command on the GPU into ml/artifacts/command_ctc/runs; RESUME=<run under ml/> goes on from its last checkpoint (E11-T12)
 	cd ml && uv run --extra train python -m srpipe.tasks.command.ctc.train $(if $(RESUME),--resume $(RESUME))
 
+ctc-int8: ## Quantise a trained ctc run on the ladder of KEHOACH 3.14 and compare every calibration with float: make ctc-int8 RUN=<run under ml/> (E11-T12)
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant export $(RUN)
+
 command-eval: ## Score Gate 3 of a command track on the board sessions: make command-eval TRACK=kws|ctc RUN=<run under ml/> (E11-T13, E11-T17)
 	cd ml && uv run --extra train python -m srpipe.tasks.command.eval $(TRACK) $(RUN)
 
@@ -233,10 +236,10 @@ calib-shift: ## Store NVS calib/pcm_shift through test_apps/calib: make calib-sh
 	@test -n "$(SHIFT)" || { echo "usage: make calib-shift SHIFT=<8..16>"; exit 1; }
 	cd host && uv run --extra score python -m srhost.calib shift $(SHIFT) --port $(PORT)
 
-ai-probe: ## Export the probes of E11-T10 (TCN), E11-T17 (kws), E11-T12 (ctc) and E9-T10 (ns) into ai_engine/test_apps/unit
+ai-probe: ## Export the probes of E11-T10 (TCN), E11-T17 (kws), E11-T12 (ctc; CTC_RUN=<run under ml/> streams that trained net) and E9-T10 (ns) into ai_engine/test_apps/unit
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.wake.quant probe
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.kws.quant probe
-	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant probe
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant probe $(if $(CTC_RUN),--run $(CTC_RUN))
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.ns.quant probe
 
 ai-unit: ai-probe ## Run the ai_engine suite on board B at bench's compiler settings; both model slots end erased

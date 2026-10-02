@@ -1,28 +1,34 @@
-"""Quantise and export the ctc net (KEHOACH 3.12, 3.14, ADR-0013). Run: python -m srpipe.tasks.command.ctc.quant probe
-
-probe builds one encoder layer and the whole net of configs/models/command_ctc.yaml with seeded random weights,
-quantises each with ESP-PPQ, exports the layer streamed a frame at a time and the net a chunk at a time, and writes
-what ai_engine/test_apps/unit streams on board B (E11-T12): one model image and, a record a net, the int8 input and
-the int8 output of every step from the whole-sequence simulation.
+"""Quantise and export the ctc net (KEHOACH 3.12, 3.14, ADR-0013). Run: python -m srpipe.tasks.command.ctc.quant
+probe [--run <run>] | export <run>. probe writes what ai_engine/test_apps/unit streams on board B (E11-T12): the first
+stack's layer and the net, seeded random or a trained run, with each step's int8 input and output from the whole-
+sequence simulation. export compares a trained run quantised on rung 1 with each calibration of rung 2 against float,
+on the test set's unit error rate and Gate 3 over the board sessions.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import struct
 from pathlib import Path
 
 import numpy as np
 import torch
+import yaml
 from torch import nn
 
 from srpipe.compress.quant import esp_ppq_patches, ptq_espdl
-from srpipe.core.config import ML_ROOT, load_yaml
+from srpipe.core import screen, splits
+from srpipe.core.config import ML_ROOT, apply_overrides, data_paths, load_yaml
 from srpipe.export import pack_models
+from srpipe.tasks import command
 from srpipe.tasks.command import ctc
+from srpipe.tasks.command import eval as gate
+from srpipe.tasks.command.ctc import train
 from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc import ctc_score
+from srpipe.tasks.wake.data import sentence_units
 
 PROBE_DIR = ML_ROOT.parent / "firmware" / "components" / "ai_engine" / "test_apps" / "unit" / "main" / "probe"
 MODELS_FILE, STREAMS_FILE, DECIDE_FILE = "ctc_models.bin", "ctc_streams.bin", "ctc_decide.bin"
@@ -68,23 +74,20 @@ def steps_in_layout(x: np.ndarray, per_step: int, perm: tuple[int, ...]) -> byte
     return b"".join(np.ascontiguousarray(step.transpose(perm)).tobytes() for step in steps)
 
 
-def probe_net(model: nn.Module, name: str, dims: int, step_hops: int, cfg: dict, work: Path) -> tuple[bytes, bytes]:
-    """The .espdl of model streamed step_hops at a time, and its record: every step's int8 input and output."""
-    p = cfg["probe"]
-    rng = np.random.default_rng(p["seed"])
-    shape = (1, dims, p["hops"])
-
-    def draw() -> np.ndarray:
-        return rng.normal(p["input_mean"], p["input_std"], shape).astype(np.float32)
-
-    calib = [torch.from_numpy(draw()) for _ in range(p["calib_sequences"])]
+def probe_net(
+    model: nn.Module, name: str, step_hops: int, cfg: dict, work: Path, calib: list[torch.Tensor], probe_x: np.ndarray
+) -> tuple[bytes, bytes]:
+    """The .espdl of model quantised on calib and streamed step_hops at a time, and its record: every step's int8
+    input and output over probe_x (1, dims, hops)."""
+    dims = probe_x.shape[1]
+    shape = probe_x.shape
     graph = ptq_espdl.quantize(model.eval(), calib, work / name, ptq_espdl.ladder(LADDER))
     norms = sum(isinstance(m, encoder.ScalarRmsNorm) for m in model.modules())
     fused = sum(op.type == "RMSNormalization" for op in graph.operations.values())
     if fused != norms:
         raise ValueError(f"{name}: ESP-PPQ fused {fused} of {norms} norms into esp-dl's RMSNormalization")
     io = ptq_espdl.io_of(graph)
-    x_int8 = ptq_espdl.to_int8(draw(), io.input_exponent)
+    x_int8 = ptq_espdl.to_int8(probe_x, io.input_exponent)
     x = x_int8.astype(np.float32) * np.float32(2.0**io.input_exponent)
     y = ptq_espdl.Simulator(graph)(x)
     y_int8 = ptq_espdl.to_int8(y, io.output_exponent)
@@ -119,20 +122,52 @@ def draw_norm_scales(model: nn.Module, low: float, high: float) -> nn.Module:
     return model
 
 
-def probe(cfg: dict, out: Path, work: Path) -> tuple[Path, Path, Path]:
+def drawn(cfg: dict, dims: int, count: int) -> list[np.ndarray]:
+    """count random inputs (1, dims, probe hops) of the probe's seed, as normalised features stand."""
+    p = cfg["probe"]
+    rng = np.random.default_rng(p["seed"])
+    return [rng.normal(p["input_mean"], p["input_std"], (1, dims, p["hops"])).astype(np.float32) for _ in range(count)]
+
+
+def trained_net(cfg: dict, run: Path) -> tuple[nn.Module, list[torch.Tensor], np.ndarray]:
+    """A trained run's net, its calibration as export draws it, and one test sentence it streams in the probe."""
+    spec, paths = cfg["quant"], data_paths()
+    net = gate.load_ctc(run)
+    root = paths["processed"] / "command" / net.cfg["split"]["version"]
+    listing = sorted((root / "test").glob("*.items.jsonl"))[0]
+    item = json.loads(listing.read_text(encoding="utf-8").splitlines()[0])
+    stem = str(listing).removesuffix(".items.jsonl")
+    first, n = item["frame_offset"], min(item["n_frames"], spec["hops"])
+    x = np.concatenate(
+        [np.load(stem + s, mmap_mode="r")[first : first + n] for s in (".features.npy", ".pitch.npy")], 1
+    )
+    return net.model, calibration(net.cfg, spec, net.mean, net.std, root), padded(x, spec["hops"], net.mean, net.std)
+
+
+def probe(cfg: dict, out: Path, work: Path, run: Path | None = None) -> tuple[Path, Path, Path]:
     """Write out/ctc_models.bin and out/ctc_streams.bin: the first stack's layer a frame a step, the net a chunk a
-    step, work keeping each ONNX and .espdl; and out/ctc_decide.bin, the decision of the default commands (E11-T13)."""
-    if cfg["probe"]["hops"] % cfg["chunk_hops"]:
-        raise ValueError(f"probe hops {cfg['probe']['hops']} are not a multiple of chunk_hops {cfg['chunk_hops']}")
-    scales = cfg["probe"]["norm_scale"]
-    torch.manual_seed(cfg["probe"]["seed"])
+    step, work keeping each ONNX and .espdl; and out/ctc_decide.bin, the decision of the default commands (E11-T13).
+    With run, the net is that trained run on its calibration of export, streaming a test sentence."""
+    if cfg["probe"]["hops"] % cfg["chunk_hops"] or cfg["quant"]["hops"] % cfg["chunk_hops"]:
+        raise ValueError(f"probe and quant hops must be multiples of chunk_hops {cfg['chunk_hops']}")
+    scales, p = cfg["probe"]["norm_scale"], cfg["probe"]
+    torch.manual_seed(p["seed"])
     first = cfg["model"]["stacks"][0]
     one_layer = draw_norm_scales(encoder.layer(cfg, first["kernel"]), *scales)
-    torch.manual_seed(cfg["probe"]["seed"])
-    net = draw_norm_scales(encoder.build(cfg), *scales)
+    *layer_calib, layer_x = drawn(cfg, cfg["model"]["width"], p["calib_sequences"] + 1)
+    if run is None:
+        torch.manual_seed(p["seed"])
+        net = draw_norm_scales(encoder.build(cfg), *scales)
+        *net_calib, net_x = drawn(cfg, encoder.n_dims(cfg), p["calib_sequences"] + 1)
+        net_calib = [torch.from_numpy(c) for c in net_calib]
+    else:
+        net, net_calib, net_x = trained_net(cfg, run)
     built = [
-        (LAYER_ENTRY, probe_net(one_layer, LAYER_ENTRY, cfg["model"]["width"], 1, cfg, work)),
-        (NET_ENTRY, probe_net(net, NET_ENTRY, encoder.n_dims(cfg), cfg["chunk_hops"], cfg, work)),
+        (
+            LAYER_ENTRY,
+            probe_net(one_layer, LAYER_ENTRY, 1, cfg, work, [torch.from_numpy(c) for c in layer_calib], layer_x),
+        ),
+        (NET_ENTRY, probe_net(net, NET_ENTRY, cfg["chunk_hops"], cfg, work, net_calib, net_x)),
     ]
     out.mkdir(parents=True, exist_ok=True)
     image = out / MODELS_FILE
@@ -146,14 +181,144 @@ def probe(cfg: dict, out: Path, work: Path) -> tuple[Path, Path, Path]:
     return image, streams, decide
 
 
+def padded(x: np.ndarray, hops: int, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+    """Raw features (n, dims) zero-padded at the end to hops, as training pads a batch, then normalised: (1, dims,
+    hops)."""
+    out = np.zeros((hops, x.shape[1]), dtype=np.float32)
+    out[: len(x)] = x
+    return ((out - mean) / std).T[None].astype(np.float32)
+
+
+def calibration(trained: dict, spec: dict, mean: np.ndarray, std: np.ndarray, root: Path) -> list[torch.Tensor]:
+    """spec's calib_sentences sentences of the run's train files under root, drawn with spec's seed among those within
+    spec's hops, normalised and padded as the net reads them."""
+    found = []
+    for listing in sorted(root.glob("train_*/*.items.jsonl")):
+        for line in listing.read_text(encoding="utf-8").splitlines():
+            item = json.loads(line)
+            if item["n_frames"] <= spec["hops"]:
+                found.append((listing, item["frame_offset"], item["n_frames"]))
+    picks = np.random.default_rng(spec["seed"]).choice(len(found), spec["calib_sentences"], replace=False)
+    out = []
+    for listing, first, n in (found[k] for k in sorted(picks)):
+        stem = str(listing).removesuffix(".items.jsonl")
+        mel = np.load(stem + ".features.npy", mmap_mode="r")[first : first + n]
+        pitch = np.load(stem + ".pitch.npy", mmap_mode="r")[first : first + n]
+        out.append(torch.from_numpy(padded(np.concatenate([mel, pitch], axis=1), spec["hops"], mean, std)))
+    return out
+
+
+class Int8Net:
+    """A quantised graph called as the float net is, on normalised features (1, dims, hops) of at most the graph's
+    hops: padded on as training pads, the input on its int8 grid as the chip takes it, logits as the chip gives
+    them."""
+
+    def __init__(self, graph, hops: int, mean: np.ndarray, std: np.ndarray, like: encoder.CtcNet) -> None:
+        self.simulate, self.io, self.hops = ptq_espdl.Simulator(graph), ptq_espdl.io_of(graph), hops
+        self.zero = (-mean / std).astype(np.float32)
+        self.chunk_multiple, self.front = like.chunk_multiple, like.front
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.numpy()
+        if x.shape[2] > self.hops:
+            raise ValueError(f"{x.shape[2]} hops, the graph takes {self.hops}")
+        whole = np.repeat(self.zero[None, :, None], self.hops, axis=2)
+        whole[..., : x.shape[2]] = x
+        exponent = np.float32(2.0**self.io.input_exponent)
+        return torch.from_numpy(self.simulate(ptq_espdl.to_int8(whole, self.io.input_exponent) * exponent))
+
+
+def unit_error_rate(net, data: train.Sentences, picks: np.ndarray, hops: int, mean: np.ndarray, std: np.ndarray):
+    """Unit error rate of net's best path over the picked sentences, each padded to hops as the graph reads it."""
+    errors = total = 0
+    for k in picks:
+        x = data.features[data.first[k] : data.first[k] + data.hops[k]]
+        with torch.no_grad():
+            logits = net(torch.from_numpy(padded(x, hops, mean, std)))
+        frames = -(-int(data.hops[k]) // net.front.hop_stride)
+        log_probs = logits.log_softmax(1)[0, :, :frames].numpy()
+        errors += train.edit_distance(train.best_path(log_probs), data.units[k])
+        total += len(data.units[k])
+    return errors / total
+
+
+def gate_row(net: gate.Ctc, windows: list[gate.Scored], reject: int, margin: int) -> dict:
+    """Gate 3 of net on the board windows: utterances whose best command is right, those accepted right at reject and
+    margin, and the false accepts among the rest."""
+    heard = [(s.expected, gate.ctc_heard(net, x)) for s in windows for x in s.decided]
+    commands = [(e, h) for e, h in heard if e != gate.REJECT]
+    others = [h for e, h in heard if e == gate.REJECT]
+    accepted = [(e, h) for e, h in commands if h.accepted(reject, margin)]
+    return {
+        "best_right": f"{sum(h.command == e for e, h in commands)}/{len(commands)}",
+        "accepted_right": f"{sum(h.command == e for e, h in accepted)}/{len(commands)}",
+        "false_accepts": f"{sum(h.accepted(reject, margin) for h in others)}/{len(others)}",
+    }
+
+
+def export(cfg: dict, run: Path) -> Path:
+    """Rung 1 with each calibration of rung 2 against float: the test set's unit error rate and Gate 3 on the board
+    sessions, into <run>/int8/ladder.yaml."""
+    spec, paths = cfg["quant"], data_paths()
+    net = gate.load_ctc(run)
+    root = paths["processed"] / "command" / net.cfg["split"]["version"]
+    calib = calibration(net.cfg, spec, net.mean, net.std, root)
+    folder = paths["splits"] / "command" / net.cfg["split"]["version"]
+    listed = {r.item for r in splits.read_split(folder / "test.txt")}
+    units_of = sentence_units(
+        screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech"), listed, net.cfg["train"]["dialect"]
+    )
+    data = train.load_role([root / "test"], units_of, spec["hops"], "float32")
+    rng = np.random.default_rng(spec["seed"])
+    picks = np.sort(rng.choice(len(data.first), min(spec["test_sentences"], len(data.first)), replace=False))
+    board_spec = load_yaml(command.CONFIG)["eval"]["board"]
+    longest = round(cfg["window_s"] * gate.HOPS_PER_S)
+    said = {c["id"]: c["text"] for c in json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]}
+
+    def window_of(clean, features, spans, tracker):
+        return gate.ctc_windows(clean, features, spans, longest, tracker)
+
+    windows = gate.board(net.cfg, board_spec, paths, said, window_of)
+    reject, margin = spec["reject"], cfg["eval"]["margin"]
+    rows = {
+        "float": {
+            "unit_error_rate": round(unit_error_rate(net.model, data, picks, spec["hops"], net.mean, net.std), 4),
+            **gate_row(net, windows, reject, margin),
+        }
+    }
+    print(f"float: {rows['float']}", flush=True)
+    rungs = ptq_espdl.ladder(LADDER)
+    for name in spec["calibrations"]:
+        graph = ptq_espdl.quantize(net.model, calib, run / "int8" / name, rungs | {"calibration": name})
+        int8 = Int8Net(graph, spec["hops"], net.mean, net.std, net.model)
+        int8_net = gate.Ctc(int8, net.mean, net.std, net.names, net.lexicon, net.cfg)
+        rows[name] = {
+            "unit_error_rate": round(unit_error_rate(int8, data, picks, spec["hops"], net.mean, net.std), 4),
+            **gate_row(int8_net, windows, reject, margin),
+        }
+        print(f"{name}: {rows[name]}", flush=True)
+    out = run / "int8" / "ladder.yaml"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    head = {"rungs": rungs, "quant": spec, "test_sentences": len(picks)}
+    out.write_text(yaml.safe_dump(head | {"rows": rows}, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("probe", help="write the streaming probe of E11-T12 for ai_engine/test_apps/unit")
     run.add_argument("--out", type=Path, default=PROBE_DIR)
     run.add_argument("--work", type=Path, default=ML_ROOT / "artifacts" / "command_ctc" / "probe")
+    run.add_argument("--run", type=Path, help="stream this trained run's net instead of random weights")
+    ladder_run = sub.add_parser("export", help="quantise a trained run on the ladder and compare it with float")
+    ladder_run.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.command.ctc.train")
+    ladder_run.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     args = parser.parse_args(argv)
-    for path in probe(load_yaml(ctc.CONFIG), args.out, args.work):
+    if args.command == "export":
+        print(export(apply_overrides(load_yaml(ctc.CONFIG), args.overrides), args.run))
+        return 0
+    for path in probe(load_yaml(ctc.CONFIG), args.out, args.work, args.run):
         print(f"{path}: {path.stat().st_size} bytes")
     return 0
 

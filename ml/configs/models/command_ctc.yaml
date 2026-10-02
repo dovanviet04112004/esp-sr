@@ -42,6 +42,13 @@ model:                             # MultiNet7's encoder frame (ADR-0013); sizes
   bypass_init: 0.5                 # share of a layer's or a stack's output over its input at the start
 chunk_hops: 16                     # hops a streaming step takes: a multiple of the front's stride times the top rate
 window_s: 3.0                      # LENH's longest window (KEHOACH 5.4): the decision looks this far back at most
+quant:                             # python -m srpipe.tasks.command.ctc.quant export <run> (E11-T12, KEHOACH 3.14)
+  seed: 20261002
+  calib_sentences: 64              # train sentences of the run's split the int8 scales are drawn from
+  hops: 768                        # every sentence zero-padded to this: a multiple of chunk_hops past train.max_s
+  calibrations: [minmax, percentile, mse, kl]   # rung 2 of KEHOACH 3.14, one row each
+  test_sentences: 2000             # of test, drawn with the seed
+  reject: 300                      # δ₁ of the Gate 3 rows, ‰: float rejected 96.5% at it (measurements/command.md)
 eval:                              # python -m srpipe.tasks.command.eval ctc <run> (KEHOACH 3.12, E11-T13)
   margin: 50                       # δ₂ while δ₁ is swept, thousandths of a nat a frame, until E11-T13 tunes both
   reject_sweep: [100, 200, 300, 400, 500, 600, 800, 1000]   # δ₁ values the table shows, the same unit
