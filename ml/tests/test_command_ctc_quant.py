@@ -19,6 +19,7 @@ from srpipe.tasks.command import ctc  # noqa: E402
 from srpipe.tasks.command import eval as gate  # noqa: E402
 from srpipe.tasks.command.ctc import probe, qat, quant, train  # noqa: E402
 from srpipe.tasks.command.ctc.model import encoder  # noqa: E402
+from srpipe.tasks.command.ctc.postproc import ctc_score  # noqa: E402
 
 DIMS = 43
 
@@ -123,6 +124,21 @@ def test_rung_4_trains_a_batch_graph_and_the_graph_of_one_carries_it(tmp_path: P
     one = quant.quantized(model, calib, tmp_path / "1", rungs, cfg["esp_ppq_patches"])
     with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
         qat_espdl.carry(wide, one, calib[0].numpy())
+
+
+def test_the_int8_net_decides_a_board_window_as_the_float_net_is_called(tmp_path: Path) -> None:
+    cfg = load_yaml(ctc.CONFIG)
+    torch.manual_seed(0)
+    model = probe.draw_norm_scales(encoder.build(cfg), *cfg["probe"]["norm_scale"]).eval()
+    rng = np.random.default_rng(6)
+    calib = [torch.from_numpy(rng.normal(size=(1, DIMS, 64)).astype(np.float32)) for _ in range(2)]
+    rungs = ptq_espdl.ladder(quant.LADDER) | {"equalization": None, "bias_correction": False, "calibration": "minmax"}
+    graph = quant.quantized(model, calib, tmp_path, rungs, cfg["esp_ppq_patches"])
+    stats = (np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32))
+    int8 = quant.Int8Net(graph, 64, *stats, model, cfg["esp_ppq_patches"])
+    lexicon = [[np.array([0, 1], np.uint8)], [np.array([2], np.uint8)]]
+    heard = gate.ctc_heard(gate.Ctc(int8, *stats, ["a", "b"], lexicon, cfg), rng.normal(size=(50, DIMS)).astype("f4"))
+    assert heard.command in ("a", "b", gate.REJECT) and 0 <= heard.gap <= ctc_score.CAP
 
 
 def test_a_net_whose_norms_stay_an_int8_chain_is_refused(tmp_path: Path) -> None:

@@ -180,15 +180,13 @@ def ctc_windows(clean: np.ndarray, features: np.ndarray, spans: Spans, longest: 
     return out
 
 
-def encoded_window(net: Ctc, x: np.ndarray) -> tuple[torch.Tensor, int]:
-    """A window as the device runs it, zero-padded to the net's chunk as in training and normalised, encoded
-    (1, width, frames); and the frames of its own hops."""
+def normalised_window(net: Ctc, x: np.ndarray) -> tuple[torch.Tensor, int]:
+    """A window as the device runs it, zero-padded to the net's chunk as in training and normalised: (1, dims, hops);
+    and the frames of its own hops."""
     multiple, hops = net.model.chunk_multiple, len(x)
     padded = np.zeros((-(-hops // multiple) * multiple, x.shape[1]), dtype=np.float32)
     padded[:hops] = x
-    with torch.no_grad():
-        encoded = net.model.encode(torch.from_numpy((padded - net.mean) / net.std).T[None])
-    return encoded, -(-hops // net.model.front.hop_stride)
+    return torch.from_numpy((padded - net.mean) / net.std).T[None], -(-hops // net.model.front.hop_stride)
 
 
 def heard_of(net: Ctc, decision: np.ndarray, scores: np.ndarray) -> Heard:
@@ -202,10 +200,11 @@ def heard_of(net: Ctc, decision: np.ndarray, scores: np.ndarray) -> Heard:
 
 
 def ctc_heard(net: Ctc, x: np.ndarray) -> Heard:
-    """One window decided by the ctc track as the device decides it, with no threshold."""
-    encoded, frames = encoded_window(net, x)
+    """One window decided by the ctc track as the device decides it, with no threshold; net.model is the float net or
+    anything called as it is, such as the ladder's int8 simulation."""
+    window, frames = normalised_window(net, x)
     with torch.no_grad():
-        log_probs = net.model.head(encoded).log_softmax(1)[0, :, :frames].numpy()
+        log_probs = net.model(window).log_softmax(1)[0, :, :frames].numpy()
     return heard_of(net, *ctc_score.decide(log_probs, net.lexicon, ctc_score.CAP, 0))
 
 
@@ -229,7 +228,9 @@ def rnnt_heard(net: Ctc, x: np.ndarray) -> Heard:
     """One window decided by the rnnt track (ADR-0016) with no threshold, the beam and context of the run's config."""
     if net.model.transducer is None:
         raise ValueError("the run learnt no transducer: its config has no rnnt section")
-    encoded, frames = encoded_window(net, x)
+    window, frames = normalised_window(net, x)
+    with torch.no_grad():
+        encoded = net.model.encode(window)
     fst, r = rnnt_search.command_fst(net.lexicon), net.cfg["rnnt"]
     log_probs, pad = rnnt_log_probs(net, encoded), net.model.transducer.predictor.pad
     decision = rnnt_search.decide(
