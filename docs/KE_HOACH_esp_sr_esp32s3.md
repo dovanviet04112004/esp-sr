@@ -746,8 +746,9 @@ NVS `afe/vad_mode` là **2**, ở `vad.aggressiveness` của `contracts/afe.yaml
 
 ### 3.11 Đặc trưng và `wake`
 
-**Đặc trưng** — log-mel 40 dải từ một `rfft` 512 trên tín hiệu ra của `dsp_afe`, cùng lưới §3.1. Chuẩn
-hoá trung bình và phương sai theo **thống kê lúc huấn luyện**; thống kê ấy nằm **trong ảnh model**
+**Đặc trưng** — log-mel 40 dải từ một `rfft` 512 trên tín hiệu ra của `dsp_afe`, cùng lưới §3.1. Tham số của log-mel
+và của cao độ nằm ở `contracts/listen.yaml`, nguồn chung cho `svc_listen` trên board, đường mô phỏng board và mọi nhánh
+ml, nên board tính đúng đặc trưng mạng đã học. Chuẩn hoá trung bình và phương sai theo **thống kê lúc huấn luyện**; thống kê ấy nằm **trong ảnh model**
 (§6.3) chứ không nằm trong code, nên model và thống kê không thể lệch nhau (TỔNG QUAN V5.5.4).
 
 **Cao độ vào `command`.** Tiếng Việt có thanh là âm vị (TỔNG QUAN §3.2), và 40 dải mel thô ở vùng 100–300 Hz nơi
@@ -771,7 +772,7 @@ của Kaldi: cùng một min, thời gian tuyến tính theo số trạng thái.
 tiếng Việt từ 71,3% xuống 65,6%, hơn getf0 và SAcC; bản chạy dòng được đo trên VIVOS test so với chính Kaldi, qua kalpy trong image Docker của bộ căn
 mốc (`ml/afe_ref/kaldi_pitch/run.py`, gọi từ `srpipe/metrics/pitch.py`): lượt đầu chạy dòng không trễ phải trùng, bản
 đọc cả tệp là đích để đo; `compute_kaldi_pitch` của torchaudio không dùng được, lớp ma trận của nó làm hỏng Viterbi
-(`docs/measurements/pitch.md`). Mọi tham số nằm ở cấu hình đặc trưng của model, như của `mel`.
+(`docs/measurements/pitch.md`). Mọi tham số nằm ở `contracts/listen.yaml`, như của `mel`.
 
 **`wake`** — TCN tích chập giãn nở nhân quả, kernel 3, giãn 1, 2, 4, …, 32 một lượt: trường nhìn 127 khung ≈ 2 s;
 64 kênh, vì cùng việc phụ CTC dưới đây nó cho giọng thật cao nhất (`docs/measurements/wake.md` §5). Int8, chạy dòng
@@ -1060,7 +1061,10 @@ cấu hình lọt thành dương. Giọng nhân bản chỉ lấy từ người 
 **Thước** (Cửa 3), chung cho hai đường, ở `srpipe/tasks/command/eval.py`: mỗi lệnh **≥ 90%**, từ chối đúng **≥ 95%**,
 trên tập thu qua board, tách theo người nói và phòng. Mỗi câu `vad` tìm ra chấm một lần ở bước `vad` tắt sau nó, như
 `LENH`: `kws` trên cửa sổ 94 bước của nó, ngưỡng lấy từ `val` của run; `ctc` trên tối đa 3 s tính ngược từ đó, mạng chạy
-lại từ đầu cửa sổ như lúc vào `LENH`, bộ lệnh là mọi dòng của `default_vi.json` qua `lang_vi`, cả lệnh chưa học. Tới khi
+lại từ đầu cửa sổ như lúc vào `LENH`, bộ lệnh là mọi dòng của `default_vi.json` qua `lang_vi`, cả lệnh chưa học. Câu là
+các đoạn `vad` cách nhau không quá `utterance.gap_s`, bỏ câu ngắn hơn `utterance.min_s`; hai số ấy và độ dài cửa sổ nằm ở
+`contracts/listen.yaml`. Board chưa có `wake` cắt đúng như vậy (§5.4), nên quyết định của board trên tiếng nói trực tiếp
+là quyết định Cửa 3 đếm. Tới khi
 E11-T13 chỉnh `δ₁` `δ₂` trên cụm na ná lệnh, bảng của `ctc` ghi lệnh điểm cao nhất của từng câu và quét `δ₁` để thấy đánh
 đổi giữa nhận và từ chối, chưa kết luận đạt hay trượt. Chấm float để đọc nhanh; số chọn model là số sau int8 (§1.3).
 
@@ -1350,6 +1354,8 @@ contracts/
 ├── array.yaml                     # hình học dàn micro, thứ tự kênh, quy ước dấu §2.3
 ├── afe.yaml                       # tham số số của từng module dsp_afe (§3.4–§3.10), mặc định cho cả hai đầu
 ├── lang_vi.yaml                   # bảng luật của lang_vi: đơn vị, âm đầu, vần, luật vùng, đọc số, từ điển (§3.12)
+├── listen.yaml                    # đặc trưng bộ nhận dạng đọc (log-mel, cao độ), luật cắt câu từ vad, cửa sổ LENH
+│                                  #   (§3.11, §3.12, §5.4): board và mọi nhánh ml tính cùng một thứ
 ├── schema/                        # JSON Schema — viết một lần, sinh ra C và Python
 │   ├── status.schema.json         #   online/offline, kèm LWT
 │   ├── heartbeat.schema.json
@@ -1379,6 +1385,7 @@ contracts/
 | `afe.yaml` | `dsp_afe/include/gen_afe.h`, `ml/src/srpipe/generated/afe.py`, `firmware/sdkconfig.afe` | `dsp_afe` và bản soi gương của nó; `sdkconfig.afe` bật đúng các module của `modules:` cho mọi bản dựng sản phẩm, `bench_afe` và profile `modules` của parity, còn `srpipe.dsp.afe.chain` đọc cùng danh sách để dựng bộ vàng `chain_modules` |
 | `lang_vi.yaml` | `lang_vi/priv_include/gen_lang_vi.h`, `ml/src/srpipe/generated/lang_vi.py` | `lang_vi` và bản soi gương `srpipe.lang` |
 | `lang_vi.yaml` | `common/include/gen_units.h`: mã các đơn vị thanh, đơn vị kết mỗi âm tiết | `ai_engine` tách phần của lệnh khi chấm `ctc` (§3.12) |
+| `listen.yaml` | `common/include/gen_listen.h`, `ml/src/srpipe/generated/listen.py` | `svc_listen`, `ai_engine` (độ dài cửa sổ `command`), `bench_afe`; đường mô phỏng board, mọi nhánh ml tính đặc trưng, Cửa 3 |
 | `stream/frame.yaml` | `common/include/gen_stream.h`, `host/src/srhost/generated/stream.py` | `net_stream`, `svc_report`, `host` |
 | `schema/` | `firmware/components/net_mqtt/include/gen_payload.h` | `svc_report`, `svc_dialog`, `main` |
 | `schema/` | `host/src/srhost/generated/payload.py` | `host` |
@@ -1706,7 +1713,8 @@ firmware/
 │   └── app_console.{c,h}             # NVS, hiệu chuẩn, mở luồng tiếng qua USB; Kconfig tắt ở prod
 │
 ├── components/                       # ── 100% CODE TỰ VIẾT ──
-│   ├── common/        [C]   L0  # header thuần: app_err.h, app_events.h, gen_grid.h, gen_array.h, gen_stream.h, gen_units.h
+│   ├── common/        [C]   L0  # header thuần: app_err.h, app_events.h, gen_grid.h, gen_array.h, gen_stream.h, gen_units.h,
+│   │                            #   gen_listen.h
 │   ├── dsp_spec/      [C]   L1  # fft, window, stft, mel, pitch — thuật toán thuần
 │   ├── lang_vi/       [C]   L1  # normalize, g2p, lexicon — luật ngôn ngữ thuần
 │   ├── bsp_board/     [C]   L1  # include/app_config.h: MỌI chân GPIO, một file duy nhất
@@ -1753,7 +1761,9 @@ firmware/
 
 **Đường của `command` chọn lúc dựng** (§3.12). Kconfig `AI_ENGINE_COMMAND_BACKEND` của `ai_engine` (`kws` | `ctc` |
 `rnnt`, mặc định `kws`) đưa đúng một trong `src/command_kws/`, `src/command_ctc/`, `src/command_rnnt/` vào danh sách
-nguồn theo luật 5 của §4.5.3; `REQUIRES` không đổi. Ba thư mục cài cùng ba hàm `ai_engine_command_*`, nên `svc_listen`
+nguồn theo luật 5 của §4.5.3; `REQUIRES` không đổi. `firmware/sdkconfig.defaults` chọn đường của model `command` đang
+khoá ở `contracts/models.lock.json`, hiện là `ctc` (ADR-0015). Độ dài cửa sổ của `command` lấy từ `window_s` của
+`contracts/listen.yaml` qua `gen_listen.h`. Ba thư mục cài cùng ba hàm `ai_engine_command_*`, nên `svc_listen`
 không biết đường nào đang chạy ngoài mã lỗi khi đổi bộ lệnh. `command_rnnt` dùng lại log-softmax của
 `command_ctc/ctc_score.c`.
 
@@ -2108,6 +2118,7 @@ broker khởi động lại là mất `status` `offline` của máy đang tắt.
 | Chân GPIO | `bsp_board/include/app_config.h` + §2.2 | `#include "app_config.h"` |
 | Lưới thời gian | `contracts/grid.yaml` | `gen_grid.h` · `srpipe.generated.grid` |
 | Hình học dàn, thứ tự kênh, dấu | `contracts/array.yaml` | `gen_array.h` · `srpipe.generated.array` |
+| Đặc trưng bộ nhận dạng đọc (dải mel, cao độ), luật cắt câu từ `vad`, cửa sổ `LENH` | `contracts/listen.yaml` | `gen_listen.h` · `srpipe.generated.listen` |
 | Trường payload MQTT | `contracts/schema/*.json` | `gen_payload.h` · `srhost.generated.payload` |
 | Topic, QoS, retained | `contracts/mqtt_topics.yaml` | `gen_topics.h` · `srhost.generated.topics` |
 | Khuôn luồng tiếng | `contracts/stream/frame.yaml` | `gen_stream.h` · `srhost.generated.stream` |
@@ -2160,7 +2171,7 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 |---|---|---|---|---|---|---|
 | `thu_task` | `svc_front` | 1 | 17 | 3 KB | chặn trong `drv_audio_read_frame` tới khi DMA đủ một khung | lấy khung `ch0 ch1 [ref]`, gắn `seq`, đẩy chỉ số ô vào `q_frame`; đếm tràn DMA. **Không làm gì khác** |
 | `sach_task` | `svc_front` | 1 | 16 | 6 KB | `q_frame` | `dsp_afe_feed` rồi `fetch`; khung sạch vào `q_clean`; ghi `s_afe_stats`; luồng mở thì chép khung vào `sb_stream` không chờ |
-| `nhan_task` | `svc_listen` | 0 | 10 | 8 KB | `q_clean` | log-mel → `wake` mỗi khung; ở trạng thái `LENH` thì chạy `command` thay `wake`; hết câu → chấm → `q_dialog` |
+| `nhan_task` | `svc_listen` | 0 | 10 | 8 KB | `q_clean` | log-mel → `wake` mỗi khung; ở trạng thái `LENH` thì chạy `command` thay `wake`; hết câu → chấm → `q_dialog`; ảnh không có `wake` thì chấm mọi câu `vad` cắt như Cửa 3 (§5.4), sự kiện → `q_event_up` |
 | `dieu_task` | `svc_dialog` | 0 | 8 | 4 KB | `q_dialog`, `q_cmd` | máy trạng thái §5.4; ra `q_speak`, `q_event_up`; báo `nhan_task` đổi chế độ |
 | `noi_task` | `svc_speak` | 0 | 5 | 8 KB | `q_speak` | dựng trọn câu vào PSRAM rồi đẩy xuống TX; giương `SPEAKING` suốt lúc phát |
 | `gui_task` | `svc_report` | 0 | 4 | 4 KB | nhịp 100 ms | lấy mẫu `s_afe_stats`, gộp 10 mẫu thành một `telemetry` mỗi giây; phát `q_event_up`; `heartbeat` mỗi 30 s |
@@ -2232,6 +2243,23 @@ Trong code và payload, ba trạng thái mang tên tiếng Anh theo CLAUDE.md §
 
 Chính máy trạng thái này là thứ làm tải nhân 0 **không cộng dồn**: `wake`, `command`, `synth` không bao
 giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec` đạt, như một tuỳ chọn ở E14.
+
+**Ảnh model không có `wake`** (trước khi `wake` qua Cửa 2, hay khi chỉ demo `command`): không có gì đưa máy vào `LENH`,
+nên `nhan_task` chấm mọi câu `vad` tìm ra, cắt đúng như Cửa 3 (§3.12) theo `contracts/listen.yaml`:
+
+- câu là các đoạn `vad` cách nhau không quá `utterance.gap_s`, chốt khi `vad` đã tắt lâu hơn thế; câu ngắn hơn
+  `utterance.min_s` bị bỏ, không chấm;
+- cửa sổ kết thúc ở bước ngay sau đoạn `vad` cuối của câu, lùi tối đa `window_s` nhưng không lấn vào cửa sổ trước; bộ dò
+  cao độ đặt lại ở đầu cửa sổ rồi chạy qua mẫu sạch của nó; `ai_engine_command_{begin,step,score}` trên cả cửa sổ;
+- `svc_listen` tính log-mel mỗi bước và giữ log-mel cùng mẫu sạch của các bước gần nhất ở PSRAM; cao độ và mạng của cửa
+  sổ chạy từng bước một, xen giữa các khung mới của `q_clean`, nên `q_clean` không đầy dù một cửa sổ đủ dài tốn chừng
+  1 s tính 🔬; quyết định ra sau khi câu chốt cộng thời gian ấy;
+- mỗi quyết định là một sự kiện vào `q_event_up`: `COMMAND` kèm điểm và khoảng cách nhất–nhì, hay `REJECT` kèm mã:
+  `LOW_SCORE` khi lệnh tốt nhất kém vòng tự do quá `δ₁`, `LOW_MARGIN` khi hơn lệnh nhì chưa đủ `δ₂`, `PART` khi một phần
+  của lệnh được điểm bằng hay hơn cả lệnh; kèm một dòng log có bước đầu, bước cuối của cửa sổ, để máy tính dựng lại đúng
+  cửa sổ ấy từ luồng tiếng (`mode` 5 mang mẫu sạch) và so quyết định của board với Python.
+
+Ảnh có `wake` thì máy trạng thái trên áp dụng như cũ.
 
 ### 5.5 Quy chuẩn thêm task hoặc việc song song
 
