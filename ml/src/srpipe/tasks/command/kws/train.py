@@ -21,6 +21,7 @@ from torch.nn import functional
 
 from srpipe.core import splits
 from srpipe.core.config import apply_overrides, data_paths, load_yaml
+from srpipe.core.logger import row_line
 from srpipe.core.run_dir import create_run_dir
 from srpipe.core.seed import seed_everything
 from srpipe.dsp.spec import pitch
@@ -334,7 +335,7 @@ def train(
             row |= {k: v for k, v in figures.items() if not isinstance(v, dict)}
             losses = []
             history.append(row)
-            print(" ".join(f"{k} {v:.4g}" for k, v in row.items()), flush=True)
+            print(row_line(row), flush=True)
             if run:
                 checkpoint(run, step).parent.mkdir(parents=True, exist_ok=True)
                 torch.save(model.state_dict(), checkpoint(run, step))

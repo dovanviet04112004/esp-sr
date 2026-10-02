@@ -13,7 +13,12 @@ import pytest
 import soundfile as sf
 import yaml
 
-from srpipe.core import audio_io, config, run_dir, seed
+from srpipe.core import audio_io, config, logger, run_dir, seed
+
+
+def test_a_history_row_prints_counts_whole_and_measures_to_four_digits() -> None:
+    row = {"step": 10000, "draws": np.int64(12000), "loss": 0.123456, "lr": 0.000855}
+    assert logger.row_line(row) == "step 10000 draws 12000 loss 0.1235 lr 0.000855"
 
 
 def test_later_config_wins_and_nested_keys_merge() -> None:

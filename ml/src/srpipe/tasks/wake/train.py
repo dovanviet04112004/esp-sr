@@ -19,6 +19,7 @@ from torch.nn import functional
 
 from srpipe.core import screen
 from srpipe.core.config import apply_overrides, data_paths, load_yaml
+from srpipe.core.logger import row_line
 from srpipe.core.run_dir import create_run_dir
 from srpipe.core.seed import seed_everything
 from srpipe.generated import grid
@@ -259,7 +260,7 @@ def train(
             row |= {"threshold": threshold, "recall": recall, "fa_per_hour": rate}
             losses, side = [], []
             history.append(row)
-            print(" ".join(f"{k} {v:.4g}" for k, v in row.items()), flush=True)
+            print(row_line(row), flush=True)
             if run:
                 checkpoint(run, step).parent.mkdir(parents=True, exist_ok=True)
                 torch.save(model.state_dict(), checkpoint(run, step))

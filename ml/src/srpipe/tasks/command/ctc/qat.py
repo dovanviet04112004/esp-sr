@@ -10,6 +10,7 @@ import numpy as np
 import torch
 
 from srpipe.compress.quant import qat_espdl
+from srpipe.core.logger import row_line
 from srpipe.core.seed import seed_everything
 from srpipe.dsp.spec import pitch
 from srpipe.tasks.command.ctc import train
@@ -72,7 +73,7 @@ def fit(graph, sets: dict[str, train.Sentences], stats: tuple, cfg: dict, traine
         if step % spec["eval_every"] == 0 or step == spec["steps"]:
             row = {"step": step, "train_loss": float(np.mean(losses)), "lr": schedule.get_last_lr()[0]}
             history.append(row | evaluate(net, sets["val"], stats, model, device))
-            print(" ".join(f"{k} {v:.4g}" for k, v in history[-1].items()), flush=True)
+            print(row_line(history[-1]), flush=True)
             losses = []
     net.freeze()
     return history

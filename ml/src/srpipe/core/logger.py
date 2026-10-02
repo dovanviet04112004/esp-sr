@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import logging
+from numbers import Integral
 from pathlib import Path
 
 FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+
+
+def row_line(row: dict[str, float]) -> str:
+    """A row of a training history as key value pairs: counts as they are, measures to four significant digits."""
+    return " ".join(f"{k} {v}" if isinstance(v, Integral) else f"{k} {v:.4g}" for k, v in row.items())
 
 
 def get_logger(name: str, run_dir: Path | None = None) -> logging.Logger:
