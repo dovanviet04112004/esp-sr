@@ -1,8 +1,9 @@
 """The model slot image of KEHOACH 6.3: a 1 KB header, then each entry 64-byte aligned with its sha256.
 
 The layout constants are read from firmware/components/sys_storage/include/storage_format.h and the slot size from
-firmware/partitions.csv, so ai_engine_load and this packer cannot disagree on either.
-Run: python -m srpipe.export.pack_models <out.bin> <name>:<espdl|norm|units>:<file>...
+firmware/partitions.csv, so ai_engine_load and this packer cannot disagree on either. --lock packs every file
+contracts/models.lock.json lists instead, each held to its sha256 (KEHOACH 4.5.6).
+Run: python -m srpipe.export.pack_models <out.bin> (--lock | <name>:<espdl|norm|units>:<file>...)
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import json
 import re
 import struct
 from dataclasses import dataclass
@@ -21,6 +23,8 @@ from srpipe.generated import grid
 FIRMWARE = ML_ROOT.parent / "firmware"
 FORMAT_HEADER = FIRMWARE / "components" / "sys_storage" / "include" / "storage_format.h"
 PARTITIONS = FIRMWARE / "partitions.csv"
+LOCK = FIRMWARE.parent / "contracts" / "models.lock.json"
+MODELS = FIRMWARE / "models"
 HEAD = struct.Struct("<IIII48x")
 ENTRY_TAIL = struct.Struct("<II")
 
@@ -89,12 +93,28 @@ def pack(entries: list[Entry], grid_hash: int = grid.GRID_HASH) -> bytes:
     return image
 
 
+def locked() -> list[Entry]:
+    """Every file models.lock.json lists, in its order, as the image entry it names; refused when a file under
+    firmware/models/<branch>/ differs from its sha256."""
+    entries = []
+    for branch, row in json.loads(LOCK.read_text(encoding="utf-8"))["models"].items():
+        for f in row["files"]:
+            data = (MODELS / branch / f["file"]).read_bytes()
+            if hashlib.sha256(data).hexdigest() != f["sha256"]:
+                raise ValueError(f"{branch}/{f['file']} differs from the sha256 {LOCK.name} holds")
+            entries.append(Entry(f["entry"], f["kind"], data))
+    return entries
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("out", type=Path)
-    parser.add_argument("entries", nargs="+", help="<name>:<espdl|norm|units>:<file>")
+    parser.add_argument("entries", nargs="*", help="<name>:<espdl|norm|units>:<file>")
+    parser.add_argument("--lock", action="store_true", help="pack every file of contracts/models.lock.json")
     args = parser.parse_args(argv)
-    entries = []
+    if args.lock == bool(args.entries):
+        parser.error("give either --lock or entries")
+    entries = locked() if args.lock else []
     for spec in args.entries:
         name, kind, path = spec.split(":", 2)
         entries.append(Entry(name, kind, Path(path).read_bytes()))
