@@ -127,8 +127,9 @@ def search(log_probs: LogProbs, frames: int, fst: Fst, beam: int, size: int, pad
     return hyps
 
 
-def greedy_score(log_probs: LogProbs, frames: int, size: int, pad: int) -> np.float32:
-    """The free path: each frame the likeliest class for the units so far, a unit appended; its summed log-prob."""
+def greedy(log_probs: LogProbs, frames: int, size: int, pad: int) -> tuple[tuple[int, ...], np.float32]:
+    """The free path: each frame the likeliest class for the units so far, a unit appended; its units and its summed
+    log-prob."""
     units: tuple[int, ...] = ()
     total = np.float32(0.0)
     for t in range(frames):
@@ -137,7 +138,7 @@ def greedy_score(log_probs: LogProbs, frames: int, size: int, pad: int) -> np.fl
         total = np.float32(total + lp[best])
         if best != BLANK:
             units = (*units, best - 1)
-    return total
+    return units, total
 
 
 def decide(
@@ -167,7 +168,7 @@ def decide(
     if not reached:
         return np.array([REJECTED, 0, CAP, CAP], dtype=np.int32), scores
     second = max((s for k, s in enumerate(scores) if k != best), default=np.float32(-np.inf))
-    free = np.float32(greedy_score(log_probs, frames, size, pad) / np.float32(frames))
+    free = np.float32(greedy(log_probs, frames, size, pad)[1] / np.float32(frames))
     gap = milli(np.float32(free - scores[best]))
     lead = milli(np.float32(scores[best] - second)) if second > -np.inf else CAP
     whole = not own_parts or bool(part[best] < scores[best])
