@@ -34,17 +34,24 @@ luật phần (KẾ HOẠCH §3.12); RNN-T vẫn phải có luật từ chối, 
 ## Quyết định
 
 **C, giữ A.** Một lượt học RNN-T cộng CTC ra encoder có cả hai đầu; `command` có hai đường giải `ctc` và `rnnt` trên
-cùng encoder, chọn bằng Cửa 3 sau int8 trên tập thu qua board. Thiết kế ở KẾ HOẠCH §3.12: mạng dự đoán 384 chiều ngữ
-cảnh 2, bộ nối 384 chiều như MultiNet7; tìm chùm có sửa `N` giả thuyết theo cây lệnh; luật từ chối như `ctc`; mạng dự
-đoán và bộ nối là hai mạng int8 qua esp-dl, tìm chùm là C thuần có bản soi gương.
+cùng encoder, chọn bằng Cửa 3 sau int8 trên tập thu qua board. Thiết kế ở KẾ HOẠCH §3.12, theo đúng những gì MultiNet7
+để lộ: mạng dự đoán 384 chiều ngữ cảnh 2 và bộ nối 384 chiều như trọng số của nó; học RNN-T cộng CTC như `rnnt_ctc`;
+FST dựng từ bộ lệnh lúc nạp, tất định hoá rồi tối giản như `fst_compile_from_commands`, `fst_determinize`,
+`fst_minimize`; tìm chùm RNN-T bị FST ràng buộc; lệnh nhận ra bằng chuỗi đơn vị của đường đi như
+`update_results_by_rnnt_path`. Mạng dự đoán và bộ nối là hai mạng int8 qua esp-dl, tìm chùm và FST là C thuần có bản
+soi gương.
 
-Khác MultiNet7 ở bốn chỗ, cùng lý do với ADR-0013 hay vì bộ lệnh nhỏ:
+Khác MultiNet7 ở ba chỗ, có lý do:
 
-- 45 lớp (44 đơn vị `lang_vi` có thanh cộng blank) thay 496 mảnh SentencePiece;
-- cây tiền tố thay FST tối giản: cùng tập chuỗi được nhận, giả thuyết so theo chuỗi đơn vị như `rnnt_path_cmp`;
-  tối giản chỉ bớt bộ nhớ, mà bộ lệnh tối đa 64 lệnh × 4 biến thể;
-- phần của lệnh nằm ngay trong cây, đánh dấu không phải lệnh, thay phép kiểm tiền tố và hậu tố riêng;
-- luật từ chối `δ₁` `δ₂` và phần như `ctc` thay một ngưỡng phát hiện, để hai đường cùng thước và cùng khoá NVS.
+- 45 lớp (44 đơn vị `lang_vi` có thanh cộng blank) thay 496 mảnh SentencePiece: tiếng Việt cần thanh (ADR-0010);
+- mọi phần của lệnh (đoạn âm tiết liền nhau) nằm trong FST và tranh trong chùm, vì buổi demo 02/10 cho thấy nửa lệnh
+  phải bị từ chối; MultiNet7 có phép kiểm tiền tố, hậu tố riêng mà thư viện không cho đọc cách dùng;
+- luật từ chối `δ₁` `δ₂` và phần như `ctc` thay ngưỡng phát hiện của `model_set_det_threshold`, để hai đường cùng
+  thước và cùng khoá NVS.
+
+Thư viện đóng nên không đọc được: MultiNet7 dùng FST đảo ngược (`fst_compile_from_commands_reversed`) vào việc gì, bề
+rộng chùm, số ký hiệu tối đa mỗi khung, và công thức ngưỡng phát hiện của nó. Ở đây chùm và các ngưỡng đặt trong cấu
+hình và đo trên phiên board; mỗi khung tối đa một ký hiệu như tìm chùm có sửa của k2.
 
 ## Hệ quả
 
