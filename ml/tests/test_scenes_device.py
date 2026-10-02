@@ -360,6 +360,17 @@ def test_a_build_without_clean_samples_keeps_every_other_file(raw_root: Path, tm
     assert {k: v for k, v in full.items() if k != "sha256"} == lean
 
 
+def test_a_build_stored_in_float16_holds_the_float32_features_rounded(raw_root: Path, tmp_path: Path) -> None:
+    split = split_file(tmp_path / "train.txt", raw_root)
+    interim = screened(tmp_path / "interim")
+    full = yaml.safe_load(device.build(tiny(), split, raw_root, interim, tmp_path / "full", pitch=True).read_text())
+    half = device.build(tiny(), split, raw_root, interim, tmp_path / "half", pitch=True, dtype="float16")
+    assert yaml.safe_load(half.read_text())["dtype"] == "float16" and "dtype" not in full
+    for kind in (".features.npy", ".pitch.npy"):
+        wide, narrow = (np.load(tmp_path / d / f"shard_00000{kind}") for d in ("full", "half"))
+        assert narrow.dtype == np.float16 and np.array_equal(narrow, wide.astype(np.float16))
+
+
 def test_the_captured_floor_comes_back_sample_for_sample_wrapping_round(tmp_path: Path) -> None:
     samples = np.random.default_rng(8).integers(-300, 300, (2, 1000))
     floor_session(tmp_path, "f", "probe", 13, samples)

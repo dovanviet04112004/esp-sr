@@ -14,6 +14,7 @@ features: scenes/device.yaml       # the board simulation; mel then pitch's thre
 simulate:                          # python -m srpipe.tasks.command.ctc.data simulate, into processed/command/<version>
   workers: 16
   speeds: [0.9, 1.0, 1.1]          # each train item spoken at one, drawn per item: Kaldi's speed perturbation
+  train_dtype: float16             # train's features as stored: the trainer holds them so (KEHOACH 1.2)
 train:                             # python -m srpipe.tasks.command.ctc.train (E11-T12); the GPU when present
   seed: 20261001
   dialect: north                   # lang_vi reads every sentence so: the corpora do not record the region

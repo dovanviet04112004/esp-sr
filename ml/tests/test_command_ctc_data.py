@@ -58,7 +58,7 @@ def test_an_hours_cap_draws_a_corpus_down_and_leaves_the_others_whole() -> None:
     assert capped["train_vivos.txt"] == rows["train_vivos.txt"] and data.capped(rows, seconds, spec) == capped
 
 
-def built(paths: dict, name: str, config: dict, speeds: list[float] | None = None) -> None:
+def built(paths: dict, name: str, config: dict, speeds: list[float] | None = None, dtype: str = "float32") -> None:
     """A finished build of split file name under paths, as device.build's manifest records it."""
     split = paths["splits"] / "command" / "v9" / f"{name}.txt"
     split.parent.mkdir(parents=True, exist_ok=True)
@@ -66,19 +66,23 @@ def built(paths: dict, name: str, config: dict, speeds: list[float] | None = Non
     out = paths["processed"] / "command" / "v9" / name
     out.mkdir(parents=True)
     body = {"config": config, "split": {"file": split.name, "sha256": splits.sha256_of(split)}}
-    (out / "manifest.yaml").write_text(yaml.safe_dump(body | ({"speeds": speeds} if speeds else {})), encoding="utf-8")
+    body |= ({"speeds": speeds} if speeds else {}) | ({"dtype": dtype} if dtype != "float32" else {})
+    (out / "manifest.yaml").write_text(yaml.safe_dump(body), encoding="utf-8")
 
 
 def test_features_simulated_otherwise_than_the_config_asks_are_named(tmp_path: Path) -> None:
-    cfg = {"features": "scenes/device.yaml", "split": {"version": "v9"}, "simulate": {"speeds": [0.9, 1.0, 1.1]}}
+    simulated = {"speeds": [0.9, 1.0, 1.1], "train_dtype": "float16"}
+    cfg = {"features": "scenes/device.yaml", "split": {"version": "v9"}, "simulate": simulated}
     device_cfg = load_device(cfg["features"])
     paths = {"splits": tmp_path / "splits", "processed": tmp_path / "processed"}
-    built(paths, "train_x", device_cfg, [0.9, 1.0, 1.1])
+    built(paths, "train_x", device_cfg, [0.9, 1.0, 1.1], "float16")
     built(paths, "val", device_cfg)
     assert data.unbuilt(cfg, paths) == []
     older = {k: v for k, v in device_cfg.items() if k != "microphone"} | {"microphone": {"pcm_shift": 13}}
     built(paths, "test", older)
-    built(paths, "train_y", device_cfg)
+    built(paths, "train_w", device_cfg, [0.9, 1.0, 1.1])
+    built(paths, "train_y", device_cfg, dtype="float16")
     (paths["splits"] / "command" / "v9" / "train_z.txt").write_text("", encoding="utf-8")
     stale = [p.name for p in data.unbuilt(cfg, paths)]
-    assert stale == ["test", "train_y", "train_z"]
+    assert stale == ["test", "train_w", "train_y", "train_z"]
+    assert data.options_of(cfg, paths["splits"] / "val.txt") == {"speeds": (), "dtype": "float32"}

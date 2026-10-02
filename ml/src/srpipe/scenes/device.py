@@ -397,7 +397,7 @@ def shard_done(out: Path, shard: int) -> Path:
 
 
 def _shard(job: tuple) -> list[Path]:
-    cfg, roots, bank, out, shard, sessions, pools, pads_s, with_pitch, keep_pcm, speeds = job
+    cfg, roots, bank, out, shard, sessions, pools, pads_s, with_pitch, keep_pcm, speeds, dtype = job
     mics = load_microphones(cfg["microphone"])
     floor = load_floor(cfg["microphone"]["floor"], roots["raw"], mics.pcm_shift)
     chain_cfg = ChainConfig(balance_gains=mics.gains)
@@ -423,14 +423,14 @@ def _shard(job: tuple) -> list[Path]:
             )
             offset += stop - first
     stem = out / f"shard_{shard:05d}"
-    np.save(stem.with_suffix(".features.npy"), np.concatenate(features))
+    np.save(stem.with_suffix(".features.npy"), np.concatenate(features).astype(dtype))
     np.save(stem.with_suffix(".figures.npy"), np.concatenate(figures))
     if keep_pcm:
         np.save(stem.with_suffix(".pcm.npy"), np.concatenate(pcm))
     listing = "".join(json.dumps(i, ensure_ascii=False) + "\n" for i in items)
     stem.with_suffix(".items.jsonl").write_text(listing, encoding="utf-8")
     if tracker is not None:
-        np.save(stem.with_suffix(".pitch.npy"), np.concatenate(pitches))
+        np.save(stem.with_suffix(".pitch.npy"), np.concatenate(pitches).astype(dtype))
     # Written last: a shard stopped part way has no marker and is built again whole.
     shard_done(out, shard).write_text("", encoding="utf-8")
     return shard_files(out, shard, tracker is not None, keep_pcm)
@@ -448,12 +448,13 @@ def build(
     pitch: bool = False,
     keep_pcm: bool = True,
     speeds: tuple[float, ...] = (),
+    dtype: str = "float32",
 ) -> Path:
     """Every item of split_file through the simulation into out, repeats times over, each pass in sessions of their
     own rooms, levels and noise, each item kept with pads_s before and after it (session.pad_s both sides unless
     given), with pitch its pitch features from a reset at its first hop, its clean samples unless keep_pcm is off,
-    with speeds each item spoken at one drawn from them; then manifest.yaml. A build stopped part way goes on from its
-    finished shards when run again the same way."""
+    with speeds each item spoken at one drawn from them, features and pitch stored as dtype; then manifest.yaml. A
+    build stopped part way goes on from its finished shards when run again the same way."""
     rows = splits.read_split(split_file)
     if foreign := sorted({row.origin for row in rows} - CLEAN_ORIGINS):
         raise ValueError(f"{split_file}: the simulation takes clean speech, not origin {', '.join(foreign)}")
@@ -479,6 +480,7 @@ def build(
         **({"pitch": True} if pitch else {}),
         **({} if keep_pcm else {"pcm": False}),
         **({"speeds": list(speeds)} if speeds else {}),
+        **({"dtype": dtype} if dtype != "float32" else {}),
         "rooms_sha256": sha256_of(bank / "rooms.yaml"),
         "floor_sha256": {str(f): sha256_of(raw_root / "device" / floor_cfg["board"] / f) for f in floor_files},
     }
@@ -488,8 +490,9 @@ def build(
     begun.write_text(yaml.safe_dump(head, allow_unicode=True, sort_keys=False), encoding="utf-8")
     roots = {"raw": raw_root, "interim": interim}
     shards = range(math.ceil(len(sessions) / per_shard))
+    options = (pools, pads, pitch, keep_pcm, speeds, dtype)
     jobs = [
-        (cfg, roots, bank, out, j, sessions[j * per_shard : (j + 1) * per_shard], pools, pads, pitch, keep_pcm, speeds)
+        (cfg, roots, bank, out, j, sessions[j * per_shard : (j + 1) * per_shard], *options)
         for j in shards
         if not shard_done(out, j).exists()
     ]
