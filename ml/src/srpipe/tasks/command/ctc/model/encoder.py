@@ -15,6 +15,7 @@ from torch.nn import functional
 
 from srpipe.core.config import CONFIGS, load_yaml
 from srpipe.dsp.spec import pitch
+from srpipe.tasks.command.ctc.model import transducer
 from srpipe.tasks.command.ctc.postproc.ctc_score import n_classes
 
 
@@ -166,13 +167,17 @@ class Front(nn.Module):
 
 
 class CtcNet(nn.Module):
-    """Features (batch, n_mel + n_pitch, hops) to CTC logits (batch, n_classes, hops / hop_stride)."""
+    """Features (batch, n_mel + n_pitch, hops) to CTC logits (batch, n_classes, hops / hop_stride); with a transducer,
+    also the predictor and joiner the rnnt track decodes the same frames with (ADR-0016)."""
 
-    def __init__(self, front: Front, stacks: list[Stack], width: int, classes: int) -> None:
+    def __init__(
+        self, front: Front, stacks: list[Stack], width: int, classes: int, rnnt: transducer.Transducer | None = None
+    ) -> None:
         super().__init__()
         self.front = front
         self.stacks = nn.Sequential(*stacks)
         self.head = nn.Conv1d(width, classes, 1)
+        self.transducer = rnnt
         self.chunk_multiple = front.hop_stride * max(s.rate for s in stacks)
 
     def encode(self, x: Tensor) -> Tensor:
@@ -195,14 +200,17 @@ def layer(cfg: dict, kernel: int) -> Layer:
 
 
 def build(cfg: dict) -> CtcNet:
-    """The net of the model section of command_ctc.yaml; refuse a chunk the stacks cannot keep aligned."""
+    """The net of the model section of command_ctc.yaml, with the rnnt section's transducer when there is one; refuse a
+    chunk the stacks cannot keep aligned."""
     m, f = cfg["model"], cfg["model"]["front"]
     n_mel = n_dims(cfg) - pitch.N_FEATURES
     front = Front(n_mel, pitch.N_FEATURES, f["channels"], f["kernel"], f["hop_strides"], f["band_strides"], m["width"])
     stacks = [
         Stack(s["rate"], [layer(cfg, s["kernel"]) for _ in range(s["layers"])], m["bypass_init"]) for s in m["stacks"]
     ]
-    net = CtcNet(front, stacks, m["width"], n_classes())
+    r = cfg.get("rnnt")
+    rnnt = transducer.Transducer(m["width"], n_classes(), r["width"], r["context"]) if r else None
+    net = CtcNet(front, stacks, m["width"], n_classes(), rnnt)
     if cfg["chunk_hops"] % net.chunk_multiple:
         raise ValueError(f"chunk_hops {cfg['chunk_hops']} is not a multiple of {net.chunk_multiple}")
     return net

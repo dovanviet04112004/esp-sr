@@ -25,7 +25,7 @@ from srpipe.core.seed import seed_everything
 from srpipe.dsp.spec import pitch
 from srpipe.generated import grid
 from srpipe.tasks.command import ctc
-from srpipe.tasks.command.ctc.model import encoder
+from srpipe.tasks.command.ctc.model import encoder, transducer
 from srpipe.tasks.command.ctc.postproc.ctc_score import BLANK
 from srpipe.tasks.wake.data import sentence_units
 
@@ -106,9 +106,21 @@ def frames_of(hops: np.ndarray, stride: int) -> np.ndarray:
     return -(-hops // stride)
 
 
-def log_probs_of(net: encoder.CtcNet, x: torch.Tensor) -> torch.Tensor:
-    """Per-frame log-probabilities (batch, classes, frames) of normalised sentences (batch, hops, dims)."""
-    return net(x.transpose(1, 2)).log_softmax(1)
+def encoded_of(net: encoder.CtcNet, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """The encoder's frames (batch, width, frames) of normalised sentences (batch, hops, dims), and the CTC head's
+    per-frame log-probabilities (batch, classes, frames) of them."""
+    encoded = net.encode(x.transpose(1, 2))
+    return encoded, net.head(encoded).log_softmax(1)
+
+
+def loss_of(net: encoder.CtcNet, cfg: dict, x: torch.Tensor, frames: np.ndarray, units: list[np.ndarray]):
+    """The CTC loss of a batch; with a transducer, its RNN-T loss plus rnnt.ctc_weight times that (ADR-0016)."""
+    encoded, log_probs = encoded_of(net, x)
+    loss = ctc_loss(log_probs, frames, units)
+    if net.transducer is None:
+        return loss
+    r = cfg["rnnt"]
+    return transducer.rnnt_loss_of(net.transducer, encoded, frames, units, r["loss_chunk"]) + r["ctc_weight"] * loss
 
 
 def ctc_loss(log_probs: torch.Tensor, frames: np.ndarray, units: list[np.ndarray]) -> torch.Tensor:
@@ -137,23 +149,33 @@ def edit_distance(a: list[int], b: list[int] | np.ndarray) -> int:
     return row[-1]
 
 
-def evaluate(net: encoder.CtcNet, data: Sentences, stats: tuple, device: str) -> dict:
-    """Mean CTC loss of val and the unit error rate of the best path over every val sentence."""
+def evaluate(net: encoder.CtcNet, data: Sentences, stats: tuple, device: str, chunk: int = 4) -> dict:
+    """Mean CTC loss of val and the unit error rate of the best path over every val sentence; with a transducer, also
+    its mean RNN-T loss per unit and the unit error rate of its greedy path, chunk sentences of lattice at a time."""
     mean, std = stats
     stride = net.front.hop_stride
-    losses, errors, total = [], 0, 0
+    losses, rnnt_losses, errors, rnnt_errors, total = [], [], 0, 0, 0
     with torch.no_grad():
         for k in range(0, len(data.first), VAL_BATCH):
             picks = np.arange(k, min(k + VAL_BATCH, len(data.first)))
             x, hops, units = batch_of(data, picks, net.chunk_multiple)
-            log_probs = log_probs_of(net, torch.from_numpy((x - mean) / std).to(device))
+            encoded, log_probs = encoded_of(net, torch.from_numpy((x - mean) / std).to(device))
             frames = frames_of(hops, stride)
             losses.append(float(ctc_loss(log_probs, frames, units)) * len(picks))
             heard = log_probs.cpu().numpy()
             for row, n in enumerate(frames):
                 errors += edit_distance(best_path(heard[row, :, :n]), units[row])
                 total += len(units[row])
-    return {"loss": sum(losses) / len(data.first), "unit_error_rate": errors / total}
+            if net.transducer is not None:
+                rnnt_losses.append(
+                    float(transducer.rnnt_loss_of(net.transducer, encoded, frames, units, chunk)) * len(picks)
+                )
+                paths = transducer.greedy_paths(net.transducer, encoded, frames)
+                rnnt_errors += sum(edit_distance(p, u) for p, u in zip(paths, units, strict=True))
+    row = {"loss": sum(losses) / len(data.first), "unit_error_rate": errors / total}
+    if net.transducer is not None:
+        row |= {"rnnt_loss": sum(rnnt_losses) / len(data.first), "rnnt_unit_error_rate": rnnt_errors / total}
+    return row
 
 
 def checkpoint(run: Path, step: int | None = None) -> Path:
@@ -192,8 +214,7 @@ def train(cfg: dict, sets: dict[str, Sentences], device: str, run: Path | None =
         x, hops, units = batch_of(data, rng.integers(len(data.first), size=spec["batch"]), net.chunk_multiple)
         x = (x - mean) / std
         mask(x, hops, spec["masks"], n_mel, rng)
-        log_probs = log_probs_of(net, torch.from_numpy(x).to(device))
-        loss = ctc_loss(log_probs, frames_of(hops, net.front.hop_stride), units)
+        loss = loss_of(net, cfg, torch.from_numpy(x).to(device), frames_of(hops, net.front.hop_stride), units)
         optimiser.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(net.parameters(), spec["clip_norm"])
@@ -203,7 +224,7 @@ def train(cfg: dict, sets: dict[str, Sentences], device: str, run: Path | None =
         if step % spec["eval_every"] == 0 or step == spec["steps"]:
             net.eval()
             row = {"step": step, "train_loss": float(np.mean(losses)), "lr": schedule.get_last_lr()[0]}
-            row |= evaluate(net, sets["val"], (mean, std), device)
+            row |= evaluate(net, sets["val"], (mean, std), device, cfg.get("rnnt", {}).get("loss_chunk", 4))
             net.train()
             losses = []
             history.append(row)

@@ -1,8 +1,11 @@
 """ctc training: sentences load with their units and nothing too long, batches pad to the net's chunk, the best path
-merges repeats and drops blanks, and a tiny run evaluates, saves each evaluated net and keeps the last."""
+merges repeats and drops blanks, the RNN-T loss sums every alignment whatever chunk of sentences builds its lattice,
+greedy RNN-T paths of a batch are those of each sentence, and a tiny run evaluates, saves each evaluated net and keeps
+the last."""
 
 from __future__ import annotations
 
+import itertools
 import json
 from pathlib import Path
 
@@ -16,7 +19,8 @@ from srpipe.tasks.command import ctc
 torch = pytest.importorskip("torch")
 
 from srpipe.tasks.command.ctc import train  # noqa: E402
-from srpipe.tasks.command.ctc.model import encoder  # noqa: E402
+from srpipe.tasks.command.ctc.model import encoder, transducer  # noqa: E402
+from srpipe.tasks.command.ctc.postproc.ctc_score import BLANK  # noqa: E402
 
 DIMS = encoder.n_dims(load_yaml(ctc.CONFIG))
 
@@ -75,6 +79,7 @@ def test_a_tiny_run_evaluates_saves_each_evaluated_net_and_keeps_the_last(tmp_pa
     net, (mean, std), history = train.train(cfg, sets, "cpu", tmp_path / "run")
     assert [row["step"] for row in history] == [2, 4] and len(mean) == len(std) == DIMS
     assert all(row["loss"] > 0 and row["unit_error_rate"] >= 0 for row in history)
+    assert all(row["rnnt_loss"] > 0 and row["rnnt_unit_error_rate"] >= 0 for row in history)
     assert yaml.safe_load(yaml.safe_dump(history)) == history
     assert type(train.edit_distance([3, 3, 5], np.array([3, 5], dtype=np.uint8))) is int
     last = torch.load(train.checkpoint(tmp_path / "run", 4))
@@ -107,3 +112,59 @@ def test_a_stopped_run_resumed_from_its_last_checkpoint_ends_as_an_unbroken_one(
     resumed, _, history = train.train(cfg, sets, "cpu", tmp_path / "stopped", resume=True)
     assert history == unbroken
     assert all(torch.equal(resumed.state_dict()[k], v) for k, v in whole.state_dict().items())
+
+
+def every_alignment(log_probs: np.ndarray, units: list[int]) -> float:
+    """-log P(units) by summing, in float64, every path through the (frames, units + 1) lattice: a unit moves up at
+    the same frame, a blank moves to the next frame, and the path ends on a blank from the last frame."""
+    frames, total = log_probs.shape[0], []
+    for ups in itertools.combinations(range(frames + len(units) - 1), len(units)):
+        t = u = 0
+        path = 0.0
+        for move in range(frames + len(units)):
+            if move in ups:
+                path += log_probs[t, u, units[u] + 1]
+                u += 1
+            else:
+                path += log_probs[t, u, BLANK]
+                t += 1
+        total.append(path)
+    return -float(np.logaddexp.reduce(total))
+
+
+@pytest.fixture
+def small():
+    """A transducer on a narrow encoder, three sentences of encoded frames and their units."""
+    torch.manual_seed(4)
+    t = transducer.Transducer(8, encoder.n_classes(), 16, 2).double()
+    encoded = torch.randn(3, 8, 5, dtype=torch.float64)
+    return t, encoded, np.array([5, 3, 4]), [np.array([4, 0]), np.array([2]), np.array([1, 1, 7])]
+
+
+def test_the_rnnt_loss_sums_every_alignment_whatever_chunk_builds_the_lattice(small) -> None:
+    t, encoded, n_frames, units = small
+    want = []
+    with torch.no_grad():
+        frames = t.joiner.frame_proj(encoded.transpose(1, 2))
+        prefixes, _ = transducer.with_blank_first(units, encoded.device)
+        projected = t.joiner.prefix_proj(t.predictor(prefixes))
+        lattice = t.joiner(frames[:, :, None], projected[:, None]).log_softmax(-1).numpy()
+    for row, (n, u) in enumerate(zip(n_frames, units, strict=True)):
+        want.append(every_alignment(lattice[row, :n, : len(u) + 1], u.tolist()) / len(u))
+    grads = []
+    for chunk in (1, 2, 3):
+        t.zero_grad()
+        loss = transducer.rnnt_loss_of(t.float(), encoded.float(), n_frames, units, chunk)
+        loss.backward()
+        assert abs(loss.item() - np.mean(want)) < 1e-4
+        grads.append(torch.cat([p.grad.flatten() for p in t.parameters()]))
+        t.double()
+    assert all(torch.allclose(g, grads[0], atol=1e-6) for g in grads[1:])
+
+
+def test_a_batch_of_greedy_paths_is_each_sentences_own(small) -> None:
+    t, encoded, n_frames, _ = small
+    t, encoded = t.float(), encoded.float()
+    batch = transducer.greedy_paths(t, encoded, n_frames)
+    alone = [transducer.greedy_paths(t, encoded[k : k + 1, :, :n], np.array([n]))[0] for k, n in enumerate(n_frames)]
+    assert batch == alone and all(0 <= u < encoder.n_classes() - 1 for path in batch for u in path)

@@ -1,4 +1,5 @@
-"""The ctc net keeps MultiNet7's encoder size and never reads a later chunk, the premise of streaming it by chunks."""
+"""The ctc net keeps MultiNet7's encoder size and never reads a later chunk, the premise of streaming it by chunks;
+its transducer is MultiNet7's predictor and joiner on our classes, and a prefix never reads a later unit."""
 
 from __future__ import annotations
 
@@ -75,3 +76,25 @@ def test_build_refuses_a_chunk_the_stacks_cannot_align(cfg) -> None:
     bad["chunk_hops"] = 12
     with pytest.raises(ValueError, match="multiple"):
         encoder.build(bad)
+
+
+MULTINET7_RNNT_PARAMS = 580_000  # ADR-0013: its predictor and joiner, over 496 classes
+
+
+def test_the_transducer_is_multinet7s_predictor_and_joiner_on_our_classes(cfg, net) -> None:
+    t, width = net.transducer, cfg["rnnt"]["width"]
+    assert t.predictor.embed.weight.shape == (encoder.n_classes() + 1, width) and t.predictor.mix.kernel_size == (2,)
+    assert t.joiner.frame_proj.in_features == cfg["model"]["width"] and t.joiner.out.out_features == encoder.n_classes()
+    multinet7_rows = (496 - encoder.n_classes()) * (2 * width + 1)  # embedding and output rows of its extra classes
+    assert abs(trainable(t) - width + multinet7_rows - MULTINET7_RNNT_PARAMS) / MULTINET7_RNNT_PARAMS < 0.01
+
+
+def test_a_prefix_never_reads_a_later_unit_and_starts_as_greedy_decoding_does(net) -> None:
+    predictor = net.transducer.predictor
+    units = torch.tensor([[ctc_score.BLANK, 3, 7, 9]])
+    later = units.clone()
+    later[0, 3] = 20
+    with torch.no_grad():
+        assert torch.equal(predictor(units)[:, :3], predictor(later)[:, :3])
+        first = predictor(torch.tensor([[ctc_score.BLANK]]))[:, 0]
+        assert torch.equal(first, predictor(torch.tensor([[predictor.pad, ctc_score.BLANK]]))[:, -1])
