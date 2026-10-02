@@ -995,7 +995,10 @@ của tổng bằng double rồi làm tròn về float, rồi trừ: bản soi g
 `contracts/golden/command_ctc/`, khớp từng bit. Trên board, bản dò của E11-T12 chạy dòng chính mục `command_ctc` của ảnh và
 so int8 từng khối với mô phỏng; rồi đặc trưng thô của các câu thu qua board đi qua `_begin`, `_step`, `_score`, và bốn
 trường của kết quả chấm phải bằng quyết định Python lấy trên mô phỏng int8 của cùng cửa sổ; đo µs mỗi bước, mỗi khối
-và mỗi lần chấm.
+và mỗi lần chấm. **Cửa 3 đo trên chip**: mọi cửa sổ của Cửa 3 (§3.12, Thước) đi qua chip, và Cửa 3 đếm trên chính quyết
+định của chip. Bản ghi giữ đầu vào int8 của từng cửa sổ, tức đặc trưng đã chuẩn hoá trên lưới số mũ đầu vào, vì chip
+lượng tử về đúng lưới ấy; test dựng lại đặc trưng thô từ đó bằng `NORM` rồi gọi `_step`, nên chip thấy đúng các số int8
+của bản thu, và cả bộ vừa phân vùng `voice` (§6.1) mà app unit không dùng.
 
 Với `ctc`, thêm lệnh là thêm một dòng chữ (TỔNG QUAN §3.1): dòng mới đi qua `lang_vi` **ngay trên máy** lúc nạp
 bộ lệnh, qua MQTT `down/commands` hoặc từ `storage/cmd/set.json` (§6.4). Phép kiểm chứng minh của
