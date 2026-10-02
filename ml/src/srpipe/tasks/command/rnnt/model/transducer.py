@@ -53,12 +53,12 @@ class Transducer(nn.Module):
 
 
 def with_blank_first(units: list[np.ndarray], device: torch.device) -> tuple[Tensor, Tensor]:
-    """The predictor's input, each unit list as classes after a leading blank, zero-padded: (batch, longest + 1); and
-    the targets as classes, zero-padded: (batch, longest) int32."""
+    """The predictor's input, each list of classes (unit ids past the blank, as train.Sentences holds them) after a
+    leading blank, zero-padded: (batch, longest + 1); and the targets, zero-padded: (batch, longest) int32."""
     longest = max(len(u) for u in units)
     targets = np.zeros((len(units), longest), dtype=np.int32)
     for row, u in enumerate(units):
-        targets[row, : len(u)] = np.asarray(u, dtype=np.int32) + 1
+        targets[row, : len(u)] = np.asarray(u, dtype=np.int32)
     targets = torch.from_numpy(targets).to(device)
     return functional.pad(targets.long(), (1, 0), value=BLANK), targets
 
@@ -75,9 +75,9 @@ def lattice_loss(out: nn.Module, frames: Tensor, prefixes: Tensor, targets: Tens
 def rnnt_loss_of(
     transducer: Transducer, encoded: Tensor, n_frames: np.ndarray, units: list[np.ndarray], chunk: int
 ) -> Tensor:
-    """Mean over the batch of each sentence's RNN-T loss per unit, encoded (batch, width, frames). The joiner's
-    lattice is built chunk sentences at a time and built again for the backward pass, so one chunk's is all a step
-    holds: a batch of 12 s sentences would need gigabytes."""
+    """Mean over the batch of each sentence's RNN-T loss per unit, encoded (batch, width, frames), units as classes.
+    The joiner's lattice is built chunk sentences at a time and built again for the backward pass, so one chunk's is
+    all a step holds: a batch of 12 s sentences would need gigabytes."""
     device = encoded.device
     prefixes, targets = with_blank_first(units, device)
     frames = transducer.joiner.frame_proj(encoded.transpose(1, 2))
@@ -94,7 +94,8 @@ def rnnt_loss_of(
 
 @torch.no_grad()
 def greedy_paths(transducer: Transducer, encoded: Tensor, n_frames: np.ndarray) -> list[list[int]]:
-    """Each sentence's greedy RNN-T path, at most one unit a frame, as unit ids; the batch steps frame by frame."""
+    """Each sentence's greedy RNN-T path, at most one unit a frame, as classes like train.Sentences' units; the batch
+    steps frame by frame."""
     batch, predictor = encoded.shape[0], transducer.predictor
     frames = transducer.joiner.frame_proj(encoded.transpose(1, 2))
     history = torch.full((batch, predictor.context), predictor.pad, dtype=torch.long, device=encoded.device)
@@ -104,7 +105,7 @@ def greedy_paths(transducer: Transducer, encoded: Tensor, n_frames: np.ndarray) 
         prefix = transducer.joiner.prefix_proj(predictor(history)[:, -1])
         best = transducer.joiner(frames[:, t], prefix).argmax(-1)
         for row in torch.nonzero((best != BLANK) & (t < torch.as_tensor(n_frames, device=best.device))).flatten():
-            paths[int(row)].append(int(best[row]) - 1)
+            paths[int(row)].append(int(best[row]))
         moved = best != BLANK
         history[moved] = torch.cat([history[moved, 1:], best[moved, None]], dim=1)
     return paths

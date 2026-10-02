@@ -116,15 +116,16 @@ def test_a_stopped_run_resumed_from_its_last_checkpoint_ends_as_an_unbroken_one(
 
 
 def every_alignment(log_probs: np.ndarray, units: list[int]) -> float:
-    """-log P(units) by summing, in float64, every path through the (frames, units + 1) lattice: a unit moves up at
-    the same frame, a blank moves to the next frame, and the path ends on a blank from the last frame."""
+    """-log P(units), units as classes, by summing in float64 every path through the (frames, units + 1) lattice: a
+    unit moves up at the same frame, a blank moves to the next frame, and the path ends on a blank from the last
+    frame."""
     frames, total = log_probs.shape[0], []
     for ups in itertools.combinations(range(frames + len(units) - 1), len(units)):
         t = u = 0
         path = 0.0
         for move in range(frames + len(units)):
             if move in ups:
-                path += log_probs[t, u, units[u] + 1]
+                path += log_probs[t, u, units[u]]
                 u += 1
             else:
                 path += log_probs[t, u, BLANK]
@@ -135,11 +136,12 @@ def every_alignment(log_probs: np.ndarray, units: list[int]) -> float:
 
 @pytest.fixture
 def small():
-    """A transducer on a narrow encoder, three sentences of encoded frames and their units."""
+    """A transducer on a narrow encoder, three sentences of encoded frames and their units as train.Sentences holds
+    them, classes past the blank, the last class among them."""
     torch.manual_seed(4)
     t = transducer.Transducer(8, encoder.n_classes(), 16, 2).double()
     encoded = torch.randn(3, 8, 5, dtype=torch.float64)
-    return t, encoded, np.array([5, 3, 4]), [np.array([4, 0]), np.array([2]), np.array([1, 1, 7])]
+    return t, encoded, np.array([5, 3, 4]), [np.array([5, 1]), np.array([encoder.n_classes() - 1]), np.array([2, 2, 8])]
 
 
 def test_the_rnnt_loss_sums_every_alignment_whatever_chunk_builds_the_lattice(small) -> None:
@@ -168,4 +170,4 @@ def test_a_batch_of_greedy_paths_is_each_sentences_own(small) -> None:
     t, encoded = t.float(), encoded.float()
     batch = transducer.greedy_paths(t, encoded, n_frames)
     alone = [transducer.greedy_paths(t, encoded[k : k + 1, :, :n], np.array([n]))[0] for k, n in enumerate(n_frames)]
-    assert batch == alone and all(0 <= u < encoder.n_classes() - 1 for path in batch for u in path)
+    assert batch == alone and all(BLANK < u < encoder.n_classes() for path in batch for u in path)
