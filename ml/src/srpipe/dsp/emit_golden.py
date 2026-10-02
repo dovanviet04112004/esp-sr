@@ -610,6 +610,12 @@ def plane_wave(signal: np.ndarray, angle_deg: float) -> np.ndarray:
     return np.stack(shifted, axis=-1)
 
 
+def on_pcm(x: np.ndarray) -> np.ndarray:
+    """x on the int16 grid of the device's PCM, at the scale of ±1: numpy's float64 sin and exp run through SVML on
+    AVX-512 CPUs and land a few ulps from libm, which never crosses half a step (KEHOACH 3.14)."""
+    return _pcm(x) * LSB
+
+
 def doa_case(pair: np.ndarray, update: np.ndarray, cfg: doa.DoaConfig) -> dict[str, np.ndarray]:
     """Both channels' bins per hop, the update flags and the configuration; the angle and confidence after each hop."""
     bins = [stft.analyze_signal(pair[:, m].astype(np.float32)) for m in range(array.N_MICS)]
@@ -649,17 +655,21 @@ def _doa_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray, 
     base = doa.DoaConfig()
     return [
         (
-            plane_wave(rng.uniform(-0.3, 0.3, n), 30.0) + 0.01 * rng.standard_normal((n, 2)),
+            on_pcm(plane_wave(rng.uniform(-0.3, 0.3, n), 30.0) + 0.01 * rng.standard_normal((n, 2))),
             (every >= 4) & (every % 2 == 0),
             base,
         ),
-        (moving, np.ones(DOA_HOPS, dtype=bool), replace(base, band_min_hz=0.0, band_max_hz=8000.0, grid_step_deg=3.0)),
         (
-            plane_wave(rng.uniform(-0.1, 0.1, n), 100.0) + plane_wave(speechlike(rng, n, 0.4), 20.0),
+            on_pcm(moving),
+            np.ones(DOA_HOPS, dtype=bool),
+            replace(base, band_min_hz=0.0, band_max_hz=8000.0, grid_step_deg=3.0),
+        ),
+        (
+            on_pcm(plane_wave(rng.uniform(-0.1, 0.1, n), 100.0) + plane_wave(speechlike(rng, n, 0.4), 20.0)),
             every % 3 == 0,
             replace(base, band_min_hz=300.0, band_max_hz=3000.0, grid_step_deg=4.0, smooth_tau_s=0.1),
         ),
-        (late, np.ones(DOA_HOPS, dtype=bool), base),
+        (on_pcm(late), np.ones(DOA_HOPS, dtype=bool), base),
     ]
 
 
@@ -672,7 +682,9 @@ def emit_doa(root: Path) -> list[Path]:
         write_gold(path, doa_case(pair, update, cfg))
         written.append(path)
     n = DOA_HOPS * grid.HOP_SAMPLES
-    negative = doa_case(plane_wave(rng.uniform(-0.3, 0.3, n), 60.0), np.ones(DOA_HOPS, dtype=bool), doa.DoaConfig())
+    negative = doa_case(
+        on_pcm(plane_wave(rng.uniform(-0.3, 0.3, n), 60.0)), np.ones(DOA_HOPS, dtype=bool), doa.DoaConfig()
+    )
     known = negative["angle"] != doa.ANGLE_UNKNOWN_DEG
     negative["angle"][known] += round(afe.DOA_GRID_STEP_DEG)
     path = root / "doa" / "case_neg_000.gold"
