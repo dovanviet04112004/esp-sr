@@ -1,7 +1,8 @@
 """The quantisation ladder of the ctc net (KEHOACH 3.14, ADR-0013). Run: python -m srpipe.tasks.command.ctc.quant
-ptq|int16|qat <run>: rungs 1 and 2, rung 3, rung 4, the last two on the calibration of rung 2 that Gate 3 rates best.
-Each step adds rows to <run>/int8/ladder.yaml, the test set's unit error rate and Gate 3 on the board sessions after
-int8 beside float, and keeps each row's graph under <run>/int8/<row>/ for probe.py.
+ptq|int16|qat <run> | deploy <run> --row <row>: rungs 1 and 2, rung 3, rung 4, the last two on the calibration of
+rung 2 that Gate 3 rates best. Each adds rows to <run>/int8/ladder.yaml, the test set's unit error rate and Gate 3 on
+the board sessions after int8 beside float, and keeps each row's graph under <run>/int8/<row>/ for probe.py. deploy
+puts a row's graph into firmware/models/command/ and records it with update_lock (E11-T19).
 """
 
 from __future__ import annotations
@@ -16,9 +17,10 @@ import torch
 import yaml
 from torch import nn
 
-from srpipe.compress.quant import export_espdl, mixed_espdl, ptq_espdl, qat_espdl
+from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, ptq_espdl, qat_espdl
 from srpipe.core import screen, splits
 from srpipe.core.config import apply_overrides, data_paths, load_yaml
+from srpipe.export import update_lock
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
@@ -29,7 +31,8 @@ from srpipe.tasks.wake.data import sentence_units
 LADDER = "command_ctc"
 GRAPH_FILE = "graph.native"
 # The image names a branch's entries after its backend (KEHOACH 6.3).
-ENTRY = "command_ctc"
+BRANCH, ENTRY = "command", "command_ctc"
+FEATURES = "log_mel40_pitch3"  # meta.json's name of the 43 features a hop
 
 
 def padded(x: np.ndarray, hops: int, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
@@ -268,14 +271,52 @@ def step_qat(cfg: dict, run: Path, device: str) -> Path:
     return recorded(run, {"qat": spec["qat"]}, {"qat": int8_row(cfg, b, graph, folder, rungs)})
 
 
+def step_deploy(cfg: dict, run: Path, row: str) -> tuple[Path, Path]:
+    """The graph of row as firmware/models/command/ holds it: the .espdl streamed chunk_hops at a time with a test
+    sentence's first chunk stored for model->test(), as probe.py streams it, and the train statistics as the NORM
+    entry; update_lock records both with the row's rungs."""
+    net = gate.load_ctc(run)
+    graph = export_espdl.load_native(run / "int8" / row / GRAPH_FILE)
+    rungs = yaml.safe_load(ladder_file(run).read_text(encoding="utf-8"))["rows"][row]
+    x = test_sentence(cfg, net)
+    io = ptq_espdl.io_of(graph)
+    on_grid = ptq_espdl.to_int8(x, io.input_exponent).astype(np.float32) * np.float32(2.0**io.input_exponent)
+    with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
+        built = export_espdl.export(
+            graph,
+            run / "int8" / row / "deploy" / f"{ENTRY}.espdl",
+            streaming_input_shape=[1, x.shape[1], cfg["chunk_hops"]],
+            test_input=on_grid[..., : cfg["chunk_hops"]],
+        )
+    folder = update_lock.MODELS / BRANCH
+    folder.mkdir(parents=True, exist_ok=True)
+    espdl, norm = folder / f"{ENTRY}.espdl", folder / f"{ENTRY}.norm.bin"
+    espdl.write_bytes(built.read_bytes())
+    norm.write_bytes(np.concatenate([net.mean, net.std]).astype("<f4").tobytes())
+    files = [update_lock.Deployed(espdl, ENTRY, "espdl"), update_lock.Deployed(norm, ENTRY, "norm")]
+    fields = {
+        "backend": "ctc",
+        "features": {"name": FEATURES, "dims": int(x.shape[1])},
+        "row": row,
+        "rungs": {"calibration": rungs["calibration"], "int16_ops": rungs["int16_ops"]},
+    }
+    return update_lock.record(BRANCH, run, files, fields)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("step", choices=["ptq", "int16", "qat"])
+    parser.add_argument("step", choices=["ptq", "int16", "qat", "deploy"])
     parser.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.command.ctc.train")
+    parser.add_argument("--row", help="deploy: the row of <run>/int8/ladder.yaml to deploy")
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     args = parser.parse_args(argv)
     cfg = apply_overrides(load_yaml(ctc.CONFIG), args.overrides)
-    if args.step == "qat":
+    if args.step == "deploy":
+        if args.row is None:
+            parser.error("deploy needs --row")
+        for path in step_deploy(cfg, args.run, args.row):
+            print(path)
+    elif args.step == "qat":
         print(step_qat(cfg, args.run, "cuda" if torch.cuda.is_available() else "cpu"))
     else:
         print({"ptq": step_ptq, "int16": step_int16}[args.step](cfg, args.run))
