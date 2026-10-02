@@ -230,10 +230,10 @@ def rnnt_heard(net: Ctc, x: np.ndarray) -> Heard:
     if net.model.transducer is None:
         raise ValueError("the run learnt no transducer: its config has no rnnt section")
     encoded, frames = encoded_window(net, x)
-    tree, r = rnnt_search.command_tree(net.lexicon), net.cfg["rnnt"]
+    fst, r = rnnt_search.command_fst(net.lexicon), net.cfg["rnnt"]
     log_probs, pad = rnnt_log_probs(net, encoded), net.model.transducer.predictor.pad
     decision = rnnt_search.decide(
-        log_probs, frames, tree, len(net.names), ctc_score.CAP, 0, r["beam"], r["context"], pad
+        log_probs, frames, fst, len(net.names), ctc_score.CAP, 0, r["beam"], r["context"], pad
     )
     return heard_of(net, *decision)
 

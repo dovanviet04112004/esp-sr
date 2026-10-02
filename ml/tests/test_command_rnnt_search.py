@@ -1,6 +1,6 @@
-"""The rnnt decision: the tree holds every variant and part, a wide enough beam scores each unit sequence as the sum
-over every one-symbol-a-frame path, and the winner is taken when said whole, turned down when a part of it, the free
-path or no command fits the window better."""
+"""The rnnt decision: the FST accepts every variant and part and nothing else and is minimal, a wide enough beam scores
+each unit sequence as the sum over every one-symbol-a-frame path, and the winner is taken when said whole, turned down
+when a part of it, the free path or no command fits the window better."""
 
 from __future__ import annotations
 
@@ -41,15 +41,28 @@ def lexicon() -> list[list[np.ndarray]]:
     ]
 
 
-def test_the_tree_ends_every_variant_on_its_command_and_every_part_as_a_part() -> None:
-    lex = lexicon()
-    tree = rs.command_tree(lex)
+def walked(fst: rs.Fst) -> set[tuple[int, ...]]:
+    """Every sequence the acceptor ends on, by a walk over its arcs."""
+    found, stack = set(), [(0, ())]
+    while stack:
+        state, units = stack.pop()
+        if fst.final[state]:
+            found.add(units)
+        stack += [(after, (*units, u)) for u, after in fst.arcs[state].items()]
+    return found
+
+
+def test_the_fst_accepts_every_variant_and_part_and_nothing_else_and_is_minimal() -> None:
+    t1 = sorted(ctc_score.TONE_UNITS)[0]
+    lex = [*lexicon(), [np.array([5, t1, 3, t1], np.uint8)]]  # shares its last syllable with the second command
+    fst = rs.command_fst(lex)
+    assert walked(fst) == set(fst.ends)
     for c, forms in enumerate(lex):
-        for units in [*forms, *ctc_score.parts(forms)]:
-            node = 0
-            for u in units:
-                node = tree.children[node][int(u)]
-            assert any(end[0] == c for end in tree.ends[node])
+        assert all((c, False) in fst.ends[tuple(int(u) for u in f)] for f in forms)
+        assert all((c, True) in fst.ends[tuple(int(u) for u in p)] for p in ctc_score.parts(forms))
+    alike = [(fst.final[s], tuple(sorted(fst.arcs[s].items()))) for s in range(len(fst.arcs))]
+    prefixes = {units[:k] for units in fst.ends for k in range(len(units) + 1)}
+    assert len(set(alike)) == len(alike) and len(fst.arcs) < len(prefixes)
     assert rs.context_of((), SIZE, PAD) == (PAD, ctc_score.BLANK) and rs.context_of((3, 5), SIZE, PAD) == (4, 6)
 
 
@@ -81,7 +94,7 @@ def every_path(log_probs: rs.LogProbs, frames: int, units: tuple[int, ...]) -> f
 def test_a_wide_beam_scores_each_sequence_as_the_sum_over_its_paths() -> None:
     lex = lexicon()
     log_probs = toy(np.random.default_rng(1), list(lex[0][0]), 6, strength=1.0)
-    hyps = rs.search(log_probs, 6, rs.command_tree(lex), 10_000, SIZE, PAD)
+    hyps = rs.search(log_probs, 6, rs.command_fst(lex), 10_000, SIZE, PAD)
     assert len(hyps) >= 10
     for h in hyps:
         assert math.isclose(float(h.score), every_path(log_probs, 6, h.units), abs_tol=2e-4)
@@ -90,8 +103,8 @@ def test_a_wide_beam_scores_each_sequence_as_the_sum_over_its_paths() -> None:
 def decided(said: list[int], frames: int, reject: int = ctc_score.CAP, own_parts: bool = True, beam: int = 4):
     lex = lexicon()
     log_probs = toy(np.random.default_rng(2), said, frames)
-    tree = rs.command_tree(lex)
-    return rs.decide(log_probs, frames, tree, len(lex), reject, 50, beam, SIZE, PAD, own_parts)[0]
+    fst = rs.command_fst(lex)
+    return rs.decide(log_probs, frames, fst, len(lex), reject, 50, beam, SIZE, PAD, own_parts)[0]
 
 
 def test_a_command_said_whole_is_taken_and_a_part_of_it_turned_down() -> None:
