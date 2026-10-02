@@ -6,4 +6,5 @@ from pytest_embedded_idf.dut import IdfDut
 
 @pytest.mark.esp32s3
 def test_ai_engine(dut: IdfDut) -> None:
-    dut.expect_unity_test_output(timeout=180)
+    # The Gate 3 case runs every board window of the record through the chip, minutes of it.
+    dut.expect_unity_test_output(timeout=900)
