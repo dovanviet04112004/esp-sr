@@ -939,8 +939,18 @@ với mỗi lệnh c, mỗi biến thể v của c:
 s(c) = max_v s(v)
 s_free = điểm đường tốt nhất không ràng buộc (vòng đơn vị tự do)
 chọn c* = argmax s(c)
-từ chối khi  s_free − s(c*) > δ₁   hoặc   s(c*) − s(c₂) < δ₂
+phần của c*: mỗi đoạn âm tiết liền nhau của một biến thể của c*, thiếu ít nhất một âm tiết
+từ chối khi  s_free − s(c*) > δ₁   hoặc   s(c*) − s(c₂) < δ₂   hoặc   s(p) ≥ s(c*) với một phần p của c*
 ```
+
+**Phần của lệnh không được hơn cả lệnh.** Chia cho `T` làm phần thiếu của một lệnh loãng theo cả cửa sổ: nói mỗi "chụp",
+thuật toán tiến vẫn ép "ảnh" vào vài khung, mất vài chục nat, chia cho cả cửa sổ còn dưới `δ₁`; không lệnh nào khác có
+"chụp" nên `δ₂` cũng qua. Vòng tự do không bắt được chỗ thiếu cục bộ ấy, phần của lệnh thì bắt được: "chụp" một mình
+hơn "chụp ảnh" khi chỉ có "chụp", và kém khi có đủ, vì lúc ấy nó phải đổ các khung của "ảnh" vào blank. Phép so là so
+dấu, không ngưỡng: bắt phần kém cả lệnh `δ₂` nữa thì Cửa 3 mất thêm nhiều câu nhận đúng, vì chữ đầu của "tăng âm lượng"
+nhiều câu nghe rất yếu (`measurements/command.md` §3). Âm tiết `lang_vi` nào cũng kết bằng đúng một đơn vị thanh, nên
+phần tách thẳng từ chuỗi đơn vị của biến thể, không thêm gì vào hợp đồng gọi; chỉ phần của `c*` được chấm, vài chuỗi
+ngắn mỗi câu.
 
 **Thuật toán tiến chạy trong miền xác suất, mỗi trạng thái một số mũ riêng.** Trong miền log, mỗi trạng thái mỗi khung
 cần hai, ba `exp` và một `log`; FPU của S3 chỉ có float, nên `exp` và `log` khớp từng bit với Python phải giả lập double,
