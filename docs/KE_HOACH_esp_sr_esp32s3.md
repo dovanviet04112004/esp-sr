@@ -92,7 +92,7 @@ tích chập chạy dòng, nên `wake` không phải tính lại cả cửa sổ
 trên board B: TCN kiểu `wake` xuất qua ESP-PPQ, đẩy từng bước, ra int8 **trùng từng bit** với mô phỏng cả chuỗi
 (`docs/measurements/latency.md` §8). Mỗi `StreamingCache` phải gắn vào đúng một tích chập: `auto_streaming` của
 ESP-PPQ gắn bộ đệm cho mọi nơi đọc biến, nên phép cộng dư của khối TCN nhận cả cửa sổ thay vì bước hiện tại;
-`srpipe.compress.quant.ptq_espdl` tự đăng ký bộ đệm theo từng tích chập.
+`srpipe.compress.quant.export_espdl` tự đăng ký bộ đệm theo từng tích chập.
 
 ### 1.2 Dữ liệu
 
@@ -1060,18 +1060,39 @@ lệch một mẫu — và phép kiểm phải đỏ ở ca đó. Bộ vàng kh�
 
 **Lượng tử hoá mô hình.** esp-dl trên S3 nhận **một số mũ luỹ thừa 2 cho cả tensor**, đối xứng, zero point 0, ở cả
 trọng số lẫn activation; không có hệ số riêng từng kênh như TFLite. Mạng có dải kênh lệch nhau mất độ chính xác đúng ở
-luật ấy, nên mỗi nhánh đi một thang và dừng ở bậc đầu tiên đạt cửa của nó:
+luật ấy, nên mỗi nhánh đi một thang và dừng ở bậc đầu tiên đạt cửa của nó. Nhánh mà mạng float chưa đạt cửa thì không bậc
+nào đạt được, nên đo đủ bốn bậc và chọn bậc mất ít nhất so với float trong ngân sách µs của §3.3.
 
-| Bậc | Làm gì | Khi nào |
-|---|---|---|
-| 1 | PTQ ESP-PPQ w8a8, gộp BatchNorm, **layerwise equalization** (4 vòng, ngưỡng 0,4, `opt_level` 2: bộ số repo face attendance đo ra, mỗi nhánh đo lại), bias correction | luôn |
-| 2 | Thuật toán hiệu chuẩn: min-max, percentile, MSE, KL, cùng tập hiệu chuẩn (§1.3) | luôn, bảng bốn cột, chọn theo số sau int8 |
-| 3 | int16 cho từng lớp nhạy (w8a16): lớp đầu đọc log-mel, lớp ra của CTC, GRU của `ns`, theo phân tích sai số từng lớp của ESP-PPQ | khi bậc 2 còn trượt cửa và µs còn trong ngân sách §3.3 |
-| 4 | QAT: huấn luyện tiếp với lượng tử giả đúng luật luỹ thừa 2 | khi bậc 3 vẫn trượt |
+| Bậc | Làm gì | Code | Khi nào |
+|---|---|---|---|
+| 1 | PTQ ESP-PPQ w8a8, gộp BatchNorm, **layerwise equalization** (4 vòng, ngưỡng 0,4, `opt_level` 2: bộ số repo face attendance đo ra, mỗi nhánh đo lại), bias correction | `ptq_espdl.py` | luôn |
+| 2 | Thuật toán hiệu chuẩn: min-max, percentile, MSE, KL, cùng tập hiệu chuẩn (§1.3) | `ptq_espdl.py` | luôn, bảng bốn cột |
+| 3 | int16 cho các tích chập nhạy nhất, xếp theo sai số từng lớp của ESP-PPQ trên đồ thị của bậc 2 đã chọn; mỗi dòng int16 cho k lớp đứng đầu. ESP-PPQ cho S3 giữ cả trọng số lẫn activation của lớp ấy ở 16 bit | `mixed_espdl.py` | khi bậc 2 còn trượt cửa và µs còn trong ngân sách §3.3 |
+| 4 | QAT: học tiếp chính đồ thị int8 của bậc 2 đã chọn qua lượng tử giả của ESP-PPQ, gradient đi thẳng qua phép làm tròn; số mũ giữ như lúc hiệu chuẩn, chỉ tham số float học, nên đồ thị học xong là đồ thị xuất ra chip | `qat_espdl.py` | khi bậc 3 vẫn trượt |
 
-Cấu hình nằm ở `configs/models/quant.yaml`, một khối mặc định và một khối ghi đè mỗi nhánh; `srpipe.compress.quant.ptq_espdl`
-đọc từ đó. Chọn bậc bằng số **sau int8 trên tập thu qua board** (§1.3), mỗi nhánh một ADR kèm bảng đối chứng. Mạng mẫu của
-E11-T10 dùng cùng cấu hình, vì nó kiểm runtime khớp mô phỏng, không kiểm độ chính xác.
+Một mạng đi từ torch tới chip qua các file của `srpipe/compress/quant/`, mỗi file một bước:
+
+1. `onnx_export.py`: torch thành ONNX opset 18 trên hình đầu vào cố định, hằng số gộp sẵn, như ESP-PPQ tự xuất;
+   onnxruntime phải khớp torch trên mẩu hiệu chuẩn đầu, trong sai số `onnx_rtol` của `quant.yaml`;
+2. `ptq_espdl.py`: ESP-PPQ lượng tử ONNX theo bậc 1–2, kèm lớp int16 khi bậc 3 khai, và mô phỏng int8 cả chuỗi trên
+   máy tính (`Simulator`), đúng số chip tính;
+3. `mixed_espdl.py`, `qat_espdl.py`: bậc 3 và bậc 4. ONNX của ESP-PPQ ghim lô 1 vào các phép `Reshape`, nên QAT học trên
+   đồ thị dựng với lô lớn hơn rồi chép tham số và số mũ sang đồ thị lô 1 cùng các phép; hai đồ thị phải cho cùng đầu ra;
+4. `export_espdl.py`: ghi `.espdl`, chạy dòng thì đặt `StreamingCache` trước từng tích chập nhân quả, kèm mẫu thử cho
+   `model->test()`; ghi cả đồ thị native để bước sau đọc lại mà không lượng tử lại. `esp_ppq_patches.py` vá ESP-PPQ lúc
+   xuất, chỉ cho nhánh khai nó.
+
+Mỗi nhánh dựng thang của mình ở `tasks/<nhánh>/quant.py`: mỗi bậc một lệnh con, mỗi dòng so với float bằng thước của
+nhánh sau int8, ghi vào `<run>/int8/ladder.yaml`, đồ thị của dòng ở `<run>/int8/<dòng>/`. Bậc 3 và 4 dựng trên cách hiệu
+chuẩn tốt nhất của bậc 2 theo thước ấy. Với `command` `ctc`: đếm câu lệnh được nhận đúng trên phiên board ở `δ₁`
+`quant.reject` và `δ₂` `eval.margin`; cách nào kém cách đầu không quá `quant.gate_tie` câu, cỡ một sai số chuẩn của
+phép đếm trên 112 câu, coi như hoà, và giữa các cách hoà thì lỗi đơn vị trên 2 000 câu thử thấp nhất thắng, rồi ít câu
+nhận nhầm hơn.
+
+Cấu hình thang nằm ở `configs/models/quant.yaml`, một khối mặc định và một khối ghi đè mỗi nhánh; những gì thang đem ra
+thử (các cách hiệu chuẩn, số lớp int16 mỗi dòng, bước học QAT) nằm ở mục `quant` của config nhánh. Chọn bậc bằng số
+**sau int8 trên tập thu qua board** (§1.3), mỗi nhánh một ADR kèm bảng đối chứng, rồi ghi bậc đã chọn vào khối nhánh
+của `quant.yaml`. Mạng mẫu của E11-T10 dùng cùng cấu hình, vì nó kiểm runtime khớp mô phỏng, không kiểm độ chính xác.
 
 ### 3.15 Thước đo
 
@@ -1425,14 +1446,21 @@ ml/
 │   │   │   │                          #   srpipe/tts và core/phrases.py vào interim/command/synth_{pilot,pos,neg}/
 │   │   │   ├── kws/{model/, data.py, train.py, quant.py, postproc/}   # DS-CNN; data.py dựng split command_kws/v<n>
 │   │   │   │                          #   và đặc trưng processed/command_kws/; postproc/ ★ softmax và luật từ chối
-│   │   │   └── ctc/{data.py, model/, train.py, quant.py, postproc/ctc_score.py ★}   # encoder kiểu MultiNet7 + CTC; data.py dựng split
-│   │   │                              #   command/v<n>, bỏ lệnh chưa học khỏi tập học (§1.3)
+│   │   │   └── ctc/{data.py, model/, train.py, quant.py, qat.py, probe.py, postproc/ctc_score.py ★}
+│   │   │                              #   encoder kiểu MultiNet7 + CTC; data.py dựng split command/v<n>, bỏ lệnh
+│   │   │                              #   chưa học khỏi tập học (§1.3); quant.py dựng thang §3.14, lệnh con ptq,
+│   │   │                              #   int16, qat; qat.py vòng học CTC của bậc 4; probe.py bản dò board E11-T12
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
 │   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py, pitch.py}
-│   ├── compress/quant/ptq_espdl.py    # ESP-PPQ → .espdl + mô phỏng int8 trên máy tính
-│   ├── compress/quant/esp_ppq_patches.py   # vá lỗi ESP-PPQ 1.3.11, mỗi bản vá một hàm ghi lỗi, triệu chứng trên
-│   │                                  #   board và test ghim nó; chỉ nhánh khai `esp_ppq_patches` trong config mới bật
+│   ├── compress/quant/                # đường torch → chip của §3.14, mỗi bước một file
+│   │   ├── onnx_export.py             # torch → ONNX như ESP-PPQ đọc, kiểm onnxruntime khớp torch
+│   │   ├── ptq_espdl.py               # bậc 1–2: ESP-PPQ lượng tử, mô phỏng int8 trên máy tính
+│   │   ├── mixed_espdl.py             # bậc 3: xếp tích chập theo sai số từng lớp, chọn lớp int16
+│   │   ├── qat_espdl.py               # bậc 4: học tiếp đồ thị qua lượng tử giả, chép sang đồ thị lô 1
+│   │   ├── export_espdl.py            # ghi .espdl (chạy dòng, mẫu thử) và đồ thị native
+│   │   └── esp_ppq_patches.py         # vá lỗi ESP-PPQ 1.3.11, mỗi bản vá một hàm ghi lỗi, triệu chứng trên board
+│   │                                  #   và test ghim nó; chỉ nhánh khai `esp_ppq_patches` trong config mới bật
 │   └── export/{pack_models.py, update_lock.py}
 │
 ├── tts/<bộ>/{pyproject.toml, uv.lock, run.py}  # mỗi bộ TTS và bộ nghe kiểm (asr) một dự án uv riêng, ghim bản:
