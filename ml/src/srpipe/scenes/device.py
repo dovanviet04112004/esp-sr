@@ -16,6 +16,7 @@ import math
 import multiprocessing
 import os
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 
 import numpy as np
@@ -46,7 +47,9 @@ SLOT_FRACTION_BITS = 31
 # The chain's iSTFT hands a hop out one hop after it came in.
 CHAIN_LAG_HOPS = 1
 A_WEIGHT_GRID_POINTS = 4097
-ROOM_STREAM, SESSION_STREAM = 1, 2
+# Speeds draw from their own stream, so a build with speeds keeps the rooms, levels and noise of one without.
+ROOM_STREAM, SESSION_STREAM, SPEED_STREAM = 1, 2, 3
+SPEED_DENOMINATOR = 100  # resampling ratios as small fractions: 1.1 is 10/11
 TALKER, NOISE = 0, 1
 CLEAN_ORIGINS = frozenset({"public", "synth"})
 ROOT_OF = {"public": "raw", "synth": "interim"}  # where a split row's item lies, by origin (KEHOACH 4.4.1)
@@ -157,6 +160,14 @@ def digitise(x: np.ndarray, mics: Microphones, rng: np.random.Generator, floor: 
 def hear(air: np.ndarray, mics: Microphones, rng: np.random.Generator, floor: Floor | None = None) -> np.ndarray:
     """Interleaved int16 frames (samples, 2) from the sound at each microphone's place: respond, then digitise."""
     return digitise(respond(air, mics), mics, rng, floor)
+
+
+def spoken_at(x: np.ndarray, speed: float) -> np.ndarray:
+    """x played speed times as fast with its pitch moved along, Kaldi's speed perturbation: resampled by 1 / speed."""
+    if speed == 1.0:
+        return x
+    ratio = Fraction(1.0 / speed).limit_denominator(SPEED_DENOMINATOR)
+    return signal.resample_poly(x, ratio.numerator, ratio.denominator)
 
 
 def tilted(x: np.ndarray, db_per_octave: float, from_hz: float) -> np.ndarray:
@@ -321,10 +332,17 @@ def simulate_session(
     pools: list[list[str]],
     readers: dict[str, ItemReader],
     floor: Floor | None = None,
+    speeds: tuple[float, ...] = (),
 ) -> tuple[np.ndarray, list[tuple[int, int]], dict]:
     """Session k: the interleaved int16 frames board B would capture, each utterance's [start, end) in samples, and
-    the session's draws; bank_room indexes the labels of rooms.yaml, readers read raw/ and interim/ by root name."""
+    the session's draws; bank_room indexes the labels of rooms.yaml, readers read raw/ and interim/ by root name.
+    With speeds, each utterance is spoken at one drawn from them, and the draws list them as speeds."""
     rng = np.random.default_rng([cfg["seed"], SESSION_STREAM, k])
+    said_at = (
+        [float(v) for v in np.random.default_rng([cfg["seed"], SPEED_STREAM, k]).choice(speeds, len(rows))]
+        if speeds
+        else []
+    )
     s, t = cfg["session"], cfg["talker"]
     entry = int(rng.integers(cfg["rooms"]["count"]))
     rirs = np.load(bank / f"room_{entry:04d}.npy")
@@ -332,8 +350,9 @@ def simulate_session(
     tilt_db = float(rng.uniform(*t["tilt_db_per_octave"]))
     at = round(s["lead_s"] * FS)
     pieces, spans = [np.zeros(at)], []
-    for row in rows:
-        x = ramped(readers[ROOT_OF[row.origin]].read(row.item), t["edge_ramp_s"])
+    for i, row in enumerate(rows):
+        x = readers[ROOT_OF[row.origin]].read(row.item)
+        x = ramped(spoken_at(x, said_at[i]) if said_at else x, t["edge_ramp_s"])
         jitter_db = float(rng.uniform(-t["jitter_db"], t["jitter_db"]))
         pieces.append(x * 10.0 ** (jitter_db / 20.0) / active_rms(x, t["active_below_peak_db"]))
         spans.append((at, at + len(x)))
@@ -347,7 +366,7 @@ def simulate_session(
     talker = np.stack([signal.fftconvolve(dry, rirs[TALKER, m])[:total] for m in range(array.N_MICS)])
     air, noise = add_noise(talker, dry, rirs, cfg, pools, readers["raw"], rng)
     draws = {"session": k, "bank_room": entry, "spl_1m_db": spl_db, "tilt_db_per_octave": tilt_db, "noise": noise}
-    return hear(air, mics, rng, floor), spans, draws
+    return hear(air, mics, rng, floor), spans, draws | ({"speeds": said_at} if said_at else {})
 
 
 def item_frames(span: tuple[int, int], pads_s: tuple[float, float], n_hops: int) -> tuple[int, int, int, int]:
@@ -378,7 +397,7 @@ def shard_done(out: Path, shard: int) -> Path:
 
 
 def _shard(job: tuple) -> list[Path]:
-    cfg, roots, bank, out, shard, sessions, pools, pads_s, with_pitch, keep_pcm = job
+    cfg, roots, bank, out, shard, sessions, pools, pads_s, with_pitch, keep_pcm, speeds = job
     mics = load_microphones(cfg["microphone"])
     floor = load_floor(cfg["microphone"]["floor"], roots["raw"], mics.pcm_shift)
     chain_cfg = ChainConfig(balance_gains=mics.gains)
@@ -387,9 +406,10 @@ def _shard(job: tuple) -> list[Path]:
     readers = {name: ItemReader(root) for name, root in roots.items()}
     features, figures, pcm, pitches, items, offset = [], [], [], [], [], 0
     for k, rows in sessions:
-        captured, spans, draws = simulate_session(cfg, k, rows, bank, mics, pools, readers, floor)
+        captured, spans, draws = simulate_session(cfg, k, rows, bank, mics, pools, readers, floor, speeds)
         clean, figs, feats = listen(captured, chain_cfg, mel)
-        for row, span in zip(rows, spans, strict=True):
+        said_at = draws.pop("speeds", [])
+        for i, (row, span) in enumerate(zip(rows, spans, strict=True)):
             first, stop, speech_first, speech_stop = item_frames(span, pads_s, len(feats))
             features.append(feats[first:stop])
             figures.append(figs[first:stop])
@@ -397,7 +417,10 @@ def _shard(job: tuple) -> list[Path]:
             if tracker is not None:
                 pitches.append(item_pitch(tracker, pcm[-1]))
             where = {"frame_offset": offset, "n_frames": stop - first, "speech_frames": [speech_first, speech_stop]}
-            items.append({"item": row.item, "spk": row.spk, "room": row.room, "origin": row.origin, **where, **draws})
+            spoken = {"speed": said_at[i]} if said_at else {}
+            items.append(
+                {"item": row.item, "spk": row.spk, "room": row.room, "origin": row.origin, **where, **draws, **spoken}
+            )
             offset += stop - first
     stem = out / f"shard_{shard:05d}"
     np.save(stem.with_suffix(".features.npy"), np.concatenate(features))
@@ -424,11 +447,13 @@ def build(
     pads_s: tuple[float, float] | None = None,
     pitch: bool = False,
     keep_pcm: bool = True,
+    speeds: tuple[float, ...] = (),
 ) -> Path:
     """Every item of split_file through the simulation into out, repeats times over, each pass in sessions of their
     own rooms, levels and noise, each item kept with pads_s before and after it (session.pad_s both sides unless
-    given), with pitch its pitch features from a reset at its first hop, its clean samples unless keep_pcm is off;
-    then manifest.yaml. A build stopped part way goes on from its finished shards when run again the same way."""
+    given), with pitch its pitch features from a reset at its first hop, its clean samples unless keep_pcm is off,
+    with speeds each item spoken at one drawn from them; then manifest.yaml. A build stopped part way goes on from its
+    finished shards when run again the same way."""
     rows = splits.read_split(split_file)
     if foreign := sorted({row.origin for row in rows} - CLEAN_ORIGINS):
         raise ValueError(f"{split_file}: the simulation takes clean speech, not origin {', '.join(foreign)}")
@@ -453,6 +478,7 @@ def build(
         **({"pads_s": list(pads)} if pads_s else {}),
         **({"pitch": True} if pitch else {}),
         **({} if keep_pcm else {"pcm": False}),
+        **({"speeds": list(speeds)} if speeds else {}),
         "rooms_sha256": sha256_of(bank / "rooms.yaml"),
         "floor_sha256": {str(f): sha256_of(raw_root / "device" / floor_cfg["board"] / f) for f in floor_files},
     }
@@ -463,7 +489,7 @@ def build(
     roots = {"raw": raw_root, "interim": interim}
     shards = range(math.ceil(len(sessions) / per_shard))
     jobs = [
-        (cfg, roots, bank, out, j, sessions[j * per_shard : (j + 1) * per_shard], pools, pads, pitch, keep_pcm)
+        (cfg, roots, bank, out, j, sessions[j * per_shard : (j + 1) * per_shard], pools, pads, pitch, keep_pcm, speeds)
         for j in shards
         if not shard_done(out, j).exists()
     ]

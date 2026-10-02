@@ -392,3 +392,28 @@ def test_a_band_level_is_the_power_of_what_falls_in_the_band() -> None:
     levels = device.band_levels(0.1 * np.sin(2 * np.pi * 1500.0 * t))
     assert abs(levels[2] - 10 * np.log10(0.1**2 / 2)) < 0.1
     assert max(levels[:2] + levels[3:]) < levels[2] - 60
+
+
+def test_a_speed_resamples_so_the_clip_shortens_and_its_pitch_rises() -> None:
+    t = np.arange(FS) / FS
+    tone = np.sin(2 * np.pi * 200.0 * t)
+    assert device.spoken_at(tone, 1.0) is tone
+    fast = device.spoken_at(tone, 1.1)
+    assert abs(len(fast) - FS / 1.1) <= 1
+    peak_hz = np.argmax(np.abs(np.fft.rfft(fast))) * FS / len(fast)
+    assert abs(peak_hz - 220.0) < 2.0
+
+
+def test_speeds_draw_per_item_and_leave_the_rooms_levels_and_noise_alone(raw_root: Path, tmp_path: Path) -> None:
+    split = split_file(tmp_path / "train.txt", raw_root)
+    interim = screened(tmp_path / "interim")
+    plain = device.build(tiny(), split, raw_root, interim, tmp_path / "plain")
+    sped = device.build(tiny(), split, raw_root, interim, tmp_path / "sped", speeds=(0.9, 1.1))
+    assert "speeds" not in yaml.safe_load(plain.read_text()) and yaml.safe_load(sped.read_text())["speeds"] == [
+        0.9,
+        1.1,
+    ]
+    for before, after in zip(items_of(tmp_path / "plain"), items_of(tmp_path / "sped"), strict=True):
+        assert after["speed"] in (0.9, 1.1) and "speed" not in before
+        assert all(after[k] == before[k] for k in ("item", "session", "bank_room", "spl_1m_db", "noise"))
+    assert {i["speed"] for i in items_of(tmp_path / "sped")} == {0.9, 1.1}

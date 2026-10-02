@@ -113,27 +113,32 @@ Dựng bằng `python -m srpipe.tasks.command.ctc.data` (`make splits`), seed {s
 """
 
 
-def built_as(out: Path, device_cfg: dict, split_file: Path) -> bool:
-    """Whether out holds a finished simulation of split_file with this config."""
+def built_as(out: Path, device_cfg: dict, split_file: Path, speeds: tuple[float, ...] = ()) -> bool:
+    """Whether out holds a finished simulation of split_file with this config and these speeds."""
     if not (out / "manifest.yaml").exists():
         return False
     body = yaml.safe_load((out / "manifest.yaml").read_text(encoding="utf-8"))
-    return body["config"] == device_cfg and body["split"]["sha256"] == splits.sha256_of(split_file)
+    same_split = body["split"]["sha256"] == splits.sha256_of(split_file)
+    return body["config"] == device_cfg and same_split and body.get("speeds", []) == list(speeds)
 
 
 def simulate(cfg: dict, paths: dict) -> None:
     """Every file of the split into processed/command/<version>/<file>, smallest first, with pitch and without the
-    clean samples; a file stopped part way goes on from its finished shards."""
+    clean samples, train's items each spoken at a speed of simulate.speeds; a file stopped part way goes on from its
+    finished shards."""
     spec, version = cfg["simulate"], cfg["split"]["version"]
     device_cfg = load_device(cfg["features"])
     folder = paths["splits"] / "command" / version
     for split_file in sorted(folder.glob("*.txt"), key=lambda f: f.stat().st_size):
         out = paths["processed"] / "command" / version / split_file.stem
-        if built_as(out, device_cfg, split_file):
+        speeds = tuple(spec.get("speeds", ())) if splits.role_of(split_file.name) == "train" else ()
+        if built_as(out, device_cfg, split_file, speeds):
             print(f"{out}: already built", flush=True)
             continue
-        raw, interim = paths["raw"], paths["interim"]
-        print(device.build(device_cfg, split_file, raw, interim, out, spec["workers"], pitch=True, keep_pcm=False))
+        raw, interim, workers = paths["raw"], paths["interim"], spec["workers"]
+        print(
+            device.build(device_cfg, split_file, raw, interim, out, workers, pitch=True, keep_pcm=False, speeds=speeds)
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
