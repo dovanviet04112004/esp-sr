@@ -22,6 +22,7 @@
 #define USER_BYTES 65
 #define PASS_BYTES 65
 #define TLS_SCHEME "mqtts://"
+#define COMMANDS_SLOTS 2 // the set its receiver reads, and one filling or waiting
 
 typedef struct {
     TaskHandle_t owner;
@@ -44,6 +45,13 @@ static char s_fw[sizeof(((status_t *)NULL)->fw)];
 static char s_status_topic[GEN_TOPIC_MAX_LEN + 1];
 static char s_will[STATUS_BYTES];
 static net_mqtt_stats_t s_stats;
+
+static QueueHandle_t s_cmdset;
+static char s_commands_topic[GEN_TOPIC_MAX_LEN + 1];
+static net_mqtt_commands_t *s_commands; // COMMANDS_SLOTS in PSRAM
+static net_mqtt_commands_t *s_filling;  // esp-mqtt task only: the slot a payload goes into
+static net_mqtt_commands_t *s_sent;     // esp-mqtt task only: the slot queued last
+static bool s_rx_commands;              // the data events in flight carry down/commands
 
 // A task owns an arena from its first allocation until json_end, so two tasks never share one.
 static json_arena_t *arena_of_caller(bool claim)
@@ -98,7 +106,13 @@ esp_err_t net_mqtt_init(void)
     if (s_arena_ready) { return ESP_ERR_INVALID_STATE; }
     uint8_t *region =
         heap_caps_malloc((size_t)JSON_ARENAS * CONFIG_NET_MQTT_JSON_ARENA_BYTES, MALLOC_CAP_SPIRAM);
-    if (region == NULL) { return ESP_ERR_NO_MEM; }
+    s_commands = heap_caps_calloc(COMMANDS_SLOTS, sizeof(net_mqtt_commands_t), MALLOC_CAP_SPIRAM);
+    if (region == NULL || s_commands == NULL) {
+        heap_caps_free(region);
+        heap_caps_free(s_commands);
+        s_commands = NULL;
+        return ESP_ERR_NO_MEM;
+    }
     for (size_t i = 0; i < JSON_ARENAS; i++) {
         s_arena[i].base = region + i * CONFIG_NET_MQTT_JSON_ARENA_BYTES;
     }
@@ -148,8 +162,58 @@ static void on_connected(void)
                                 GEN_TOPIC_INFO[GEN_TOPIC_STATUS].retain, true) < 0) {
         s_stats.publish_failures++;
     }
+    if (s_cmdset != NULL && esp_mqtt_client_subscribe_single(s_client, s_commands_topic,
+                                                             GEN_TOPIC_INFO[GEN_TOPIC_COMMANDS].qos) < 0) {
+        ESP_LOGW(TAG, "subscribe to %s not sent", s_commands_topic);
+    }
     xEventGroupSetBits(s_system, APP_BIT_MQTT_OK);
     ESP_LOGI(TAG, "session up, %s ONLINE", s_status_topic);
+}
+
+static bool carries_commands(const esp_mqtt_event_handle_t e)
+{
+    return s_cmdset != NULL && e->topic != NULL && (size_t)e->topic_len == strlen(s_commands_topic) &&
+           memcmp(e->topic, s_commands_topic, (size_t)e->topic_len) == 0;
+}
+
+// A newer set takes back the one still waiting; the receiver keeps the one it took until it takes the next.
+static net_mqtt_commands_t *commands_slot(void)
+{
+    net_mqtt_commands_t *waiting = NULL;
+    if (s_filling != NULL) { return s_filling; }
+    if (xQueueReceive(s_cmdset, &waiting, 0) == pdTRUE) { return waiting; }
+    return s_sent == &s_commands[0] ? &s_commands[1] : &s_commands[0];
+}
+
+// esp-mqtt hands a payload longer than its buffer over in pieces; only the first names the topic.
+static void on_data(const esp_mqtt_event_handle_t e)
+{
+    if (e->current_data_offset == 0) {
+        s_rx_commands = e->total_data_len > 0 && carries_commands(e);
+        if (!s_rx_commands) { return; }
+        s_filling = commands_slot();
+        s_filling->text_bytes = 0;
+        s_filling->parsed =
+            e->total_data_len <= NET_MQTT_COMMANDS_TEXT_BYTES ? ESP_OK : APP_ERR_COMMANDS_INVALID;
+    }
+    net_mqtt_commands_t *slot = s_filling;
+    if (!s_rx_commands || slot == NULL) { return; }
+    const size_t piece = (size_t)e->data_len;
+    if (slot->parsed == ESP_OK && (size_t)e->current_data_offset == slot->text_bytes &&
+        slot->text_bytes + piece <= NET_MQTT_COMMANDS_TEXT_BYTES) {
+        memcpy(slot->text + slot->text_bytes, e->data, piece);
+        slot->text_bytes += piece;
+    } else {
+        slot->parsed = APP_ERR_COMMANDS_INVALID;
+    }
+    if (e->current_data_offset + e->data_len < e->total_data_len) { return; }
+    if (slot->parsed == ESP_OK) {
+        slot->parsed = net_mqtt_parse_command_set(slot->text, slot->text_bytes, &slot->set);
+    }
+    s_filling = NULL;
+    s_sent = slot;
+    s_rx_commands = false;
+    xQueueOverwrite(s_cmdset, &slot);
 }
 
 static void on_mqtt_event(void *arg, esp_event_base_t base, int32_t id, void *data)
@@ -157,6 +221,7 @@ static void on_mqtt_event(void *arg, esp_event_base_t base, int32_t id, void *da
     const esp_mqtt_event_handle_t event = data;
     switch ((esp_mqtt_event_id_t)id) {
     case MQTT_EVENT_CONNECTED: on_connected(); break;
+    case MQTT_EVENT_DATA: on_data(event); break;
     case MQTT_EVENT_DISCONNECTED:
         s_connected = false;
         s_stats.disconnects++;
@@ -187,6 +252,7 @@ esp_err_t net_mqtt_start(const net_mqtt_config_t *cfg)
     if (strncmp(uri, TLS_SCHEME, strlen(TLS_SCHEME)) != 0) { return ESP_ERR_NOT_SUPPORTED; }
 #endif
     s_system = cfg->system;
+    s_cmdset = cfg->cmdset;
     strlcpy(s_device_id, cfg->device_id, sizeof(s_device_id));
     strlcpy(s_fw, cfg->fw_version, sizeof(s_fw));
     char user[USER_BYTES];
@@ -197,6 +263,7 @@ esp_err_t net_mqtt_start(const net_mqtt_config_t *cfg)
     const bool has_pass =
         sys_storage_get_str(STORAGE_NS_DEVICE, STORAGE_KEY_MQTT_PASS, pass, sizeof(pass)) == ESP_OK;
     if (!gen_topic_status(s_device_id, s_status_topic, sizeof(s_status_topic)) ||
+        !gen_topic_commands(s_device_id, s_commands_topic, sizeof(s_commands_topic)) ||
         status_json(STATUS_STATE_OFFLINE, s_will, sizeof(s_will)) != ESP_OK) {
         return ESP_ERR_INVALID_ARG;
     }
