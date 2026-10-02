@@ -23,6 +23,7 @@ firmware/managed_components/
 firmware/**/managed_components/
 firmware/models/**/*.espdl
 firmware/models/**/*.bin
+firmware/components/ai_engine/test_apps/unit/main/probe/
 
 # ── Artifact nặng ──
 *.espdl
