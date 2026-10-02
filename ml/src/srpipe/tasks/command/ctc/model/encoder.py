@@ -15,14 +15,7 @@ from torch.nn import functional
 
 from srpipe.core.config import CONFIGS, load_yaml
 from srpipe.dsp.spec import pitch
-from srpipe.generated import lang_vi
-
-BLANK = 0
-
-
-def n_classes() -> int:
-    """The lang_vi units and the CTC blank, which takes class 0."""
-    return len(lang_vi.UNITS) + 1
+from srpipe.tasks.command.ctc.postproc.ctc_score import n_classes
 
 
 class CausalConv(nn.Module):

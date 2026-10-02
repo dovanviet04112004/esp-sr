@@ -6,6 +6,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+pytest.importorskip("torch")
+
 from srpipe.core import corpus
 from srpipe.core.config import CONFIGS, load_yaml
 from srpipe.dsp.spec.pitch import N_FEATURES, PitchConfig, PitchTracker

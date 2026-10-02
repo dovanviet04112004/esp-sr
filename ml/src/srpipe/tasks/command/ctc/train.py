@@ -26,6 +26,7 @@ from srpipe.dsp.spec import pitch
 from srpipe.generated import grid
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command.ctc.model import encoder
+from srpipe.tasks.command.ctc.postproc.ctc_score import BLANK
 from srpipe.tasks.wake.data import sentence_units
 
 BRANCH = "command_ctc"
@@ -116,7 +117,7 @@ def ctc_loss(log_probs: torch.Tensor, frames: np.ndarray, units: list[np.ndarray
         torch.from_numpy(np.concatenate(units)).to(log_probs.device),
         torch.from_numpy(frames),
         torch.tensor([len(u) for u in units]),
-        blank=encoder.BLANK,
+        blank=BLANK,
         zero_infinity=True,
     )
 
@@ -124,7 +125,7 @@ def ctc_loss(log_probs: torch.Tensor, frames: np.ndarray, units: list[np.ndarray
 def best_path(log_probs: np.ndarray) -> list[int]:
     """The classes of the most likely frame sequence, repeats merged and blanks dropped."""
     path = log_probs.argmax(axis=0)
-    return [int(c) for k, c in enumerate(path) if c != encoder.BLANK and (k == 0 or c != path[k - 1])]
+    return [int(c) for k, c in enumerate(path) if c != BLANK and (k == 0 or c != path[k - 1])]
 
 
 def edit_distance(a: list[int], b: list[int] | np.ndarray) -> int:

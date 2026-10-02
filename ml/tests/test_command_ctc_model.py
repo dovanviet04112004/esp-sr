@@ -11,6 +11,7 @@ torch = pytest.importorskip("torch")
 from srpipe.core.config import load_yaml  # noqa: E402
 from srpipe.tasks.command import ctc  # noqa: E402
 from srpipe.tasks.command.ctc.model import encoder  # noqa: E402
+from srpipe.tasks.command.ctc.postproc import ctc_score  # noqa: E402
 
 MULTINET7_ENCODER_PARAMS = 1_896_000  # ADR-0013: 1.90 million, read from mn7_data
 
@@ -47,7 +48,7 @@ def test_the_encoder_is_multinet7s_size_and_the_head_its_units(cfg, net) -> None
     with torch.no_grad():
         y = net(x)
     assert y.shape == (1, encoder.n_classes(), x.shape[-1] // net.front.hop_stride)
-    assert encoder.n_classes() == 45 and encoder.BLANK == 0
+    assert encoder.n_classes() == 45 and ctc_score.BLANK == 0
 
 
 def test_a_chunk_never_reads_a_later_chunk(cfg, net) -> None:

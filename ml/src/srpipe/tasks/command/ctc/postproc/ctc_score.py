@@ -22,7 +22,6 @@ from srpipe.golden.gold import write_gold
 from srpipe.lang import g2p
 from srpipe.lang.normalize import normalize
 from srpipe.tasks import command
-from srpipe.tasks.command.ctc.model.encoder import BLANK, n_classes
 
 GOLDEN_ROOT = ML_ROOT.parent / "contracts" / "golden"
 BLOCK = "command_ctc"
@@ -39,6 +38,7 @@ DECIDE_HEAD = struct.Struct("<4sHHBBBBHH")
 DECIDE_MAGIC = b"SRCD"
 DECISION_RECORD = struct.Struct("<hHHH")
 ZERO_EXP = -(1 << 30)  # the exponent of a zero, below any a live value reaches
+BLANK = 0  # a frame's CTC blank; a lang_vi unit takes its id plus one
 DROP_BELOW = 100  # orders under its sum's top: float32 rounds it away
 EXP_MIN_NATS, EXP_MAX_NATS = np.float32(-10000.0), np.float32(10000.0)
 LN2 = 0.6931471805599453
@@ -49,6 +49,11 @@ EXP_POLY = tuple(
     np.float32(float.fromhex(h))
     for h in ("0x1.a0d2cep-13", "0x1.6e879cp-10", "0x1.11121p-7", "0x1.555382p-5", "0x1.555554p-3", "0x1p-1")
 )
+
+
+def n_classes() -> int:
+    """The lang_vi units and the CTC blank, which takes class 0."""
+    return len(lang_vi.UNITS) + 1
 
 
 def variants(text: str) -> list[np.ndarray]:
