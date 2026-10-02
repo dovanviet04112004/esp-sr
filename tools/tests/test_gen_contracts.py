@@ -297,3 +297,18 @@ class LangViTest(unittest.TestCase):
         for table in ("rhymes", "q_rhymes", "onsets", "dictionary"):
             self.assertIn(f"#define GEN_LANG_VI_N_{table.upper()} {len(values[table])}\n", header)
         self.assertEqual(len(values["letters"]), 2 * len(values["vowels"]) * len(values["tones"]) + 2)
+
+    def test_the_tone_units_ai_engine_reads_are_the_ids_of_the_contracts_tones(self) -> None:
+        values = gen_contracts.lang_vi_values()
+        probe = (
+            '#include <stdio.h>\n#include "gen_units.h"\nint main(void)\n{\n'
+            '    for (int k = 0; k < GEN_UNITS_N_TONES; k++) { printf("%d\\n", GEN_UNITS_TONES[k]); }\n'
+            "    return 0;\n}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            src, exe = Path(tmp) / "units.c", Path(tmp) / "units"
+            src.write_text(probe)
+            inc = REPO / gen_contracts.COMMON_INC
+            subprocess.run(["gcc", "-std=c11", "-Wall", "-Werror", f"-I{inc}", str(src), "-o", str(exe)], check=True)
+            printed = subprocess.run([str(exe)], capture_output=True, text=True, check=True).stdout.split()
+        self.assertEqual([int(p) for p in printed], [values["units"].index(t) for t in values["tones"]])

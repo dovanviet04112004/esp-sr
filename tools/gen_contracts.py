@@ -321,6 +321,17 @@ def _c_array(ctype: str, name: str, size: str, rows: list[str]) -> str:
     return f"static const {ctype} {name}[{size}] = {{\n" + "".join(f"    {r},\n" for r in rows) + "};\n"
 
 
+def gen_units_h(v: dict) -> str:
+    uid = {name: i for i, name in enumerate(v["units"])}
+    return (
+        banner("contracts/lang_vi.yaml", "//")
+        + "\n#pragma once\n\n#include <stdint.h>\n\n"
+        + f"#define GEN_UNITS_N_TONES {len(v['tones'])}\n\n"
+        + "// lang_vi's tone units: every syllable's units end on exactly one of them.\n"
+        + _c_array("uint8_t", "GEN_UNITS_TONES", "GEN_UNITS_N_TONES", [str(uid[t]) for t in v["tones"]])
+    )
+
+
 def gen_lang_vi_h(v: dict) -> str:
     uid = {name: i for i, name in enumerate(v["units"])}
 
@@ -1036,6 +1047,7 @@ def outputs() -> dict[str, str]:
         f"{COMMON_INC}/gen_grid.h": gen_grid_h(g),
         f"{COMMON_INC}/gen_array.h": gen_array_h(a),
         f"{COMMON_INC}/gen_stream.h": gen_stream_h(s),
+        f"{COMMON_INC}/gen_units.h": gen_units_h(lang),
         f"{MQTT_INC}/gen_topics.h": gen_topics_h(t),
         f"{MQTT_INC}/gen_payload.h": gen_payload_h(),
         f"{AFE_INC}/gen_afe.h": gen_afe_h(afe),
