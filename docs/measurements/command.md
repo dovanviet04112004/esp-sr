@@ -44,3 +44,20 @@ Tám lệnh đúng 83–100%. Chỗ trượt là "tắt": 21/22 câu ra "bật �
 40–115‰. Giải tự do âm tiết đầu ra `@ t T6`: mất phụ âm đầu, "ă" nghe thành "â", sắc thành nặng; giải cả phiên liền thì
 thanh ra đúng sắc, phụ âm đầu và nguyên âm vẫn sai. Ba hướng chưa tách: tiếng bật hơi của "t" chìm dưới nền ồn của board
 (`mic_array.md` §4), cao độ đặt lại ở đầu cửa sổ chưa có quá khứ cho âm tiết đầu, giọng riêng của một người nói.
+
+## 2. `ctc` sau int8, theo thang KẾ HOẠCH §3.14 (E11-T12)
+
+Cùng run với §1. Bậc 1 (cân bằng lớp 4 vòng, ngưỡng 0,4, `opt_level` 2; sửa bias) có trong mọi dòng int8; hiệu chuẩn trên
+64 câu `train` rút theo seed 20261002, mỗi câu đệm tới 768 bước. Lỗi đơn vị trên 2 000 câu `test` rút theo cùng seed,
+mô phỏng int8 cả câu bằng ESP-PPQ, đúng số board chạy dòng ra (`latency.md` §11); Cửa 3 trên phiên board như §1, `δ₁`
+300‰, `δ₂` 50‰. Đo ngày 02/10: bậc 2 ở `c63eb8a` bằng lệnh `export` của bản trước (`make ctc-ptq` bây giờ), bậc 3 ở
+`d849413` bằng `make ctc-int16`.
+
+| Dòng | Lỗi đơn vị | Lệnh điểm cao nhất đúng | Nhận đúng ở `δ₁` 300 | Nhận nhầm |
+|---|---|---|---|---|
+| float | 34,45% | 85/112 | 79/112 | 3/86 |
+| bậc 2: minmax | 38,61% | 81/112 | 65/112 | 5/86 |
+| bậc 2: percentile | 36,44% | 82/112 | 73/112 | 3/86 |
+| bậc 2: MSE | 37,50% | 85/112 | 73/112 | 4/86 |
+| bậc 2: KL | 39,85% | 85/112 | 74/112 | 3/86 |
+| bậc 3: percentile, int16 `/front/convs.1` | 36,07% | 84/112 | 75/112 | 3/86 |
