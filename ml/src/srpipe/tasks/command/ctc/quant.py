@@ -58,18 +58,24 @@ def test_sentence(cfg: dict, net: gate.Ctc) -> np.ndarray:
     return padded(x, hops, net.mean, net.std)
 
 
-def calibration(trained: dict, spec: dict, mean: np.ndarray, std: np.ndarray, root: Path) -> list[torch.Tensor]:
-    """spec's calib_sentences sentences of the run's train files under root, drawn with spec's seed among those within
-    spec's hops, normalised and padded as the net reads them."""
+def calibration_items(spec: dict, root: Path) -> list[tuple[Path, dict]]:
+    """spec's calib_sentences items of the run's train files under root, drawn with spec's seed among those within
+    spec's hops, each with its listing, in file order."""
     found = []
     for listing in sorted(root.glob("train_*/*.items.jsonl")):
         for line in listing.read_text(encoding="utf-8").splitlines():
             item = json.loads(line)
             if item["n_frames"] <= spec["hops"]:
-                found.append((listing, item["frame_offset"], item["n_frames"]))
+                found.append((listing, item))
     picks = np.random.default_rng(spec["seed"]).choice(len(found), spec["calib_sentences"], replace=False)
+    return [found[k] for k in sorted(picks)]
+
+
+def calibration(trained: dict, spec: dict, mean: np.ndarray, std: np.ndarray, root: Path) -> list[torch.Tensor]:
+    """The sentences of calibration_items, normalised and padded as the net reads them."""
     out = []
-    for listing, first, n in (found[k] for k in sorted(picks)):
+    for listing, item in calibration_items(spec, root):
+        first, n = item["frame_offset"], item["n_frames"]
         stem = str(listing).removesuffix(".items.jsonl")
         mel = np.load(stem + ".features.npy", mmap_mode="r")[first : first + n]
         pitch = np.load(stem + ".pitch.npy", mmap_mode="r")[first : first + n]
