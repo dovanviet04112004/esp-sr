@@ -175,10 +175,13 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
         net, net_x, norm = trained.model, quant.test_sentence(cfg, trained), (trained.mean, trained.std)
         board = [x for scored in quant.board_windows(cfg, trained, data_paths()) for x in scored.decided]
         windows = board[:: max(1, len(board) // p["command"]["windows"])][: p["command"]["windows"]]
-    layer_graph = quant.quantized(one_layer, [torch.from_numpy(c) for c in layer_calib], work / LAYER_ENTRY, rungs)
+    fixes = cfg["esp_ppq_patches"]
+    layer_graph = quant.quantized(
+        one_layer, [torch.from_numpy(c) for c in layer_calib], work / LAYER_ENTRY, rungs, fixes
+    )
     built = [(LAYER_ENTRY, probe_net(layer_graph, LAYER_ENTRY, 1, cfg, work, layer_x))]
     if run is None:
-        net_graph = quant.quantized(net, [torch.from_numpy(c) for c in net_calib], work / NET_ENTRY, rungs)
+        net_graph = quant.quantized(net, [torch.from_numpy(c) for c in net_calib], work / NET_ENTRY, rungs, fixes)
     else:
         net_graph = export_espdl.load_native(run / "int8" / row / quant.GRAPH_FILE)
     built.append((NET_ENTRY, probe_net(net_graph, NET_ENTRY, cfg["chunk_hops"], cfg, work, net_x)))

@@ -10,6 +10,31 @@ import torch
 
 from srpipe.compress.quant.ptq_espdl import BITS, TARGET
 
+# Of ESP-PPQ's passive ops, esp-dl rescales only in these; the others copy integers whatever the exponents.
+RESCALING_PASSIVE = frozenset({"ReduceMax", "ReduceMin"})
+
+
+def rescales(given, config) -> bool:
+    """config quantises at another scale or width than given; a config without a scale quantises nothing."""
+    if given.scale is None or config.scale is None:
+        return False
+    return config.num_of_bits != given.num_of_bits or not torch.equal(config.scale.flatten(), given.scale.flatten())
+
+
+def rescaling_passive_ops(graph) -> list[str]:
+    """The passive ops of graph that end on another scale or width than they start on, a rescale the chip skips."""
+    from esp_ppq.core import PASSIVE_OPERATIONS
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    copying = PASSIVE_OPERATIONS - RESCALING_PASSIVE
+    return [
+        op.name
+        for op in graph.operations.values()
+        if op.type in copying
+        and isinstance(op, QuantableOperation)
+        and any(rescales(op.input_quant_config[0], config) for config in op.output_quant_config)
+    ]
+
 
 def cache_each_causal_conv(graph):
     """Register a StreamingCache between each causal convolution and its input, and drop the convolution's pads.
@@ -45,10 +70,14 @@ def export(
 ) -> Path:
     """Write out as .espdl, with StreamingCache ahead of every causal convolution when streaming_input_shape gives
     the one-hop input; test_input, of that shape, or a tuple of one array an input, is stored for model->test(). The
-    exporter works on its own copy, so graph stays the whole-sequence one the Simulator runs."""
+    exporter works on its own copy, so graph stays the whole-sequence one the Simulator runs. A graph whose passive
+    ops rescale is refused (KEHOACH 3.14)."""
     import esp_ppq.lib as ppq_lib
     from esp_ppq.api.espdl_interface import generate_test_value, get_target_platform
 
+    rescaling = rescaling_passive_ops(graph)
+    if rescaling:
+        raise ValueError(f"{rescaling} rescale at their output, which esp-dl's passive modules never do")
     values = None
     if test_input is not None:
         arrays = test_input if isinstance(test_input, tuple) else (test_input,)

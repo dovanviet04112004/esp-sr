@@ -1,8 +1,8 @@
-"""Patches to ESP-PPQ 1.3.11's esp-dl export, applied around an export by the branch whose config names them.
+"""Fixes to ESP-PPQ 1.3.11's quantisation and esp-dl export, in force around both for the branch whose config names
+them; a branch that names none quantises and exports exactly as ESP-PPQ does.
 
-Only configs/models/command_ctc.yaml names any; every other branch exports exactly as ESP-PPQ does. Each patch states
-the bug, what board B showed without it and the test that pins it (tests/test_esp_ppq_patches.py); when the ESP-PPQ
-pin moves, re-check each one upstream.
+Each fix states the bug, what board B showed without it and the test that pins it (tests/test_esp_ppq_patches.py);
+when the ESP-PPQ pin moves, re-check each one upstream.
 """
 
 from __future__ import annotations
@@ -85,7 +85,38 @@ def conv_caches_along_time() -> Iterator[None]:
         StreamingTable.add = add
 
 
-PATCHES = {"requantise_graph_inputs": requantise_graph_inputs, "conv_caches_along_time": conv_caches_along_time}
+@contextlib.contextmanager
+def fuse_passive_ops_on_graph_inputs() -> Iterator[None]:
+    """QuantizeFusionPass gives each passive op its input's scale, except one that reads a graph input, which ESP-PPQ
+    then rescales at its output; esp-dl's passive modules copy integers, so the chip skips that rescale.
+    Board B, command_ctc on percentile: the pitch Slice at 2^-4 under the features' 2^-3, the pitch halved on chip.
+    """
+    from esp_ppq.core import PASSIVE_OPERATIONS
+    from esp_ppq.IR.quantize import QuantableOperation
+    from esp_ppq.quantization.optim import QuantizeFusionPass
+
+    optimize = QuantizeFusionPass.optimize
+
+    def fused(self, graph, **kwargs):
+        optimize(self, graph, **kwargs)
+        for op in graph.operations.values():
+            reads_input = isinstance(op, QuantableOperation) and op.inputs[0].source_op is None
+            if self.fuse_passive_op and op.type in PASSIVE_OPERATIONS and reads_input:
+                for config in op.output_quant_config:
+                    config.dominated_by = op.input_quant_config[0]
+
+    QuantizeFusionPass.optimize = fused
+    try:
+        yield
+    finally:
+        QuantizeFusionPass.optimize = optimize
+
+
+PATCHES = {
+    "requantise_graph_inputs": requantise_graph_inputs,
+    "conv_caches_along_time": conv_caches_along_time,
+    "fuse_passive_ops_on_graph_inputs": fuse_passive_ops_on_graph_inputs,
+}
 
 
 @contextlib.contextmanager

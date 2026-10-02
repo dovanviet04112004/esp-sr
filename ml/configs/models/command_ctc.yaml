@@ -61,9 +61,10 @@ quant:                             # python -m srpipe.tasks.command.ctc.quant pt
 eval:                              # python -m srpipe.tasks.command.eval ctc <run> (KEHOACH 3.12, E11-T13)
   margin: 50                       # δ₂ while δ₁ is swept, thousandths of a nat a frame, until E11-T13 tunes both
   reject_sweep: [100, 200, 300, 400, 500, 600, 800, 1000]   # δ₁ values the table shows, the same unit
-esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches around every export of this branch
+esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches around this branch's quantisation and export
   - requantise_graph_inputs        # a layer's input read by a Conv, an Add and the bypass Sub at two scales
   - conv_caches_along_time         # the front's convolutions reached through a Slice of the features
+  - fuse_passive_ops_on_graph_inputs   # the Slices of the features take the features' scale
 probe:                             # E11-T12: one layer, then the whole net, random weights, on board B (make ai-probe)
   seed: 20260930
   calib_sequences: 8

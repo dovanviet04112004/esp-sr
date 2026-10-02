@@ -113,12 +113,12 @@ def test_rung_4_trains_a_batch_graph_and_the_graph_of_one_carries_it(tmp_path: P
     rng = np.random.default_rng(4)
     calib = [torch.from_numpy(rng.normal(size=(1, DIMS, 64)).astype(np.float32)) for _ in range(4)]
     rungs = ptq_espdl.ladder(quant.LADDER) | {"equalization": None, "bias_correction": False, "calibration": "minmax"}
-    wide = quant.quantized(model, quant.batched(calib, 2), tmp_path / "b", rungs)
+    wide = quant.quantized(model, quant.batched(calib, 2), tmp_path / "b", rungs, cfg["esp_ppq_patches"])
     sets = {"train": sentences(rng, [48, 40, 56, 32]), "val": sentences(rng, [40, 48, 32])}
     stats = (np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32))
     history = qat.fit(wide, sets, stats, cfg, cfg, model, "cpu")
     assert [row["step"] for row in history] == [0, 1, 2] and all(row["unit_error_rate"] >= 0 for row in history)
-    one = quant.quantized(model, calib, tmp_path / "1", rungs)
+    one = quant.quantized(model, calib, tmp_path / "1", rungs, cfg["esp_ppq_patches"])
     qat_espdl.carry(wide, one, calib[0].numpy())
 
 
@@ -129,4 +129,4 @@ def test_a_net_whose_norms_stay_an_int8_chain_is_refused(tmp_path: Path) -> None
     calib = [torch.from_numpy(rng.normal(size=(1, DIMS, 64)).astype(np.float32)) for _ in range(4)]
     rungs = ptq_espdl.ladder(quant.LADDER) | {"equalization": None, "bias_correction": False, "calibration": "minmax"}
     with pytest.raises(ValueError, match="fused 0 of 6 norms"):
-        quant.quantized(encoder.build(cfg).eval(), calib, tmp_path, rungs)
+        quant.quantized(encoder.build(cfg).eval(), calib, tmp_path, rungs, cfg["esp_ppq_patches"])
