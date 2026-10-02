@@ -153,7 +153,9 @@ của một file split thành đúng thứ bộ nhận dạng thấy trên máy:
 1. Mỗi **phiên** là vài mẩu liên tiếp của file split trong một phòng của **kho phòng** `pyroomacoustics` dựng một lần
    (hoặc chập RIR thật của OpenSLR 28), lên dàn hai micro của `array.yaml`: nền phòng một mình vài giây, rồi từng câu
    cách một quãng nghỉ; người nói ở mức dB SPL tại 1 m rút cho phiên, một nguồn nhiễu điểm ở SNR rút cho phiên. Chuỗi
-   chạy liền cả phiên, nên `ns`, `vad`, `agc` đã nghe phòng trước khi câu tới, như trên máy.
+   chạy liền cả phiên, nên `ns`, `vad`, `agc` đã nghe phòng trước khi câu tới, như trên máy. Nhánh nào khai `speeds`
+   thì mỗi câu học được đọc ở một tốc độ rút cho câu, lấy mẫu lại như đổi tốc độ của Kaldi (nhịp và cao độ cùng đổi);
+   tốc độ rút từ dòng ngẫu nhiên riêng, nên phòng, mức và nhiễu vẫn như bản dựng không đổi tốc độ.
 2. Áp độ nhạy micro theo datasheet và chênh lệch giữa hai micro theo hiệu chuẩn của board (`calib/bal`, §3.4). Tiếng
    người nói qua thêm một **độ nghiêng phổ** rút cho phiên, dB mỗi octave trên 1 kHz, khoảng ở cấu hình, phủ đáp ứng
    của vỏ hộp và giọng mà phòng mô phỏng không có. Rồi cộng **nền ồn thật của board**: một đoạn rút ngẫu nhiên từ các
@@ -931,7 +933,11 @@ dựng lại từ trọng số của nó (ADR-0013): ba tích chập 2D 3×3 (8,
 feedforward, hai khối tích chập có cổng (nhân theo chiều sâu 17, 9, 5, 9 theo tầng) và một khối trộn thay self-attention,
 cộng một hệ số chuẩn hoá và một nhánh tắt; đầu CTC. MultiNet7 không có chiều cao độ nào và bản tiếng Trung của nó bỏ
 thanh; `ctc` giữ đặc trưng và đơn vị của ADR-0010 — log-mel 40 cộng ba chiều cao độ, 44 đơn vị có nhãn thanh — và đầu ra
-31,25 khung mỗi giây cho chuỗi đơn vị có thanh 🔬. Cỡ chọn theo chất lượng: bắt đầu đúng cỡ MultiNet7, khoảng 2,1 MB
+31,25 khung mỗi giây cho chuỗi đơn vị có thanh 🔬. Tăng cường lúc học, mỗi lần rút mới khi câu vào lô, trước mặt nạ
+SpecAugment: đổi nhịp giữ cao độ (kéo hay nén trục bước theo hệ số rút log-đều trong `train.augment.tempo`, không bao
+giờ ít bước hơn số khung CTC cần cho chuỗi đơn vị của câu, delta cao độ nhân theo), time-warp của SpecAugment quanh
+một bước, và một độ nghiêng thẳng qua các dải mel; cộng đổi tốc độ lúc mô phỏng của §1.2, vì tập học gần như không có
+câu nói nhanh (`measurements/command.md` §4). Cỡ chọn theo chất lượng: bắt đầu đúng cỡ MultiNet7, khoảng 2,1 MB
 int8 🔬, rộng hơn hay sâu hơn khi µs đo trên board còn trong ngân sách §3.3; bộ nhớ nới theo §6.1 và §6.6. Học CTC cộng RNN-T phụ trợ như MultiNet7, so với CTC trơn cùng seed, split và số epoch. Chạy
 int8 qua esp-dl với `StreamingCache`: một lớp encoder được xuất và chạy dòng trên board trước (E11-T12); không đạt thì
 lùi về TCN nhân quả tách chiều sâu, đường E11-T10 đã chạy khớp từng bit. **Giải bằng chấm có ràng buộc**, không giải
