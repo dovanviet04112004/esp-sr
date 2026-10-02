@@ -30,6 +30,8 @@ int main(int argc, char **argv)
         parity_run_block(argv[1], "command_kws", parity_command_kws, read_case, buf, sizeof(buf), &errors);
     cases +=
         parity_run_block(argv[1], "command_ctc", parity_command_ctc, read_case, buf, sizeof(buf), &errors);
+    cases +=
+        parity_run_block(argv[1], "command_rnnt", parity_command_rnnt, read_case, buf, sizeof(buf), &errors);
     test_report_line("done %u cases", cases);
     test_report_serve();
     printf("HOST %u failure(s)\n", errors);

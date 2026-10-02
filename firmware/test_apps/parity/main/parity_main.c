@@ -24,6 +24,7 @@ static const struct {
     {"lexicon", parity_lexicon},
     {"command_kws", parity_command_kws},
     {"command_ctc", parity_command_ctc},
+    {"command_rnnt", parity_command_rnnt},
 #if PARITY_CHAIN_MODULES
     {"chain_modules", parity_chain_modules},
 #else

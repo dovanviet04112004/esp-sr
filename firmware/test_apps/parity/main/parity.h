@@ -140,6 +140,13 @@ bool parity_lexicon(const char *case_name, const void *buf, size_t len);
  */
 bool parity_command_kws(const char *case_name, const void *buf, size_t len);
 
+/** Run one command_rnnt case window by window: its lexicon's FST, the stand-in joiner of its tables, each
+ * window's reject, margin and beam; compare every command's best score and the decision.
+ *  @ctx any | non-blocking
+ *  @ret false when the case lacks a tensor, has the wrong shape, breaks the limits or memory runs out
+ */
+bool parity_command_rnnt(const char *case_name, const void *buf, size_t len);
+
 /** Run one command_ctc case window by window over the lexicon it carries, with each window's thresholds;
  * compare every command's best score and the decision.
  *  @ctx any | non-blocking
