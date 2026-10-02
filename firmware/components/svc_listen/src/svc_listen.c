@@ -1,5 +1,6 @@
 #include "svc_listen.h"
 
+#include <inttypes.h>
 #include <string.h>
 
 #include "ai_engine.h"
@@ -32,6 +33,13 @@ typedef struct {
     void *fft, *stft, *mel, *pitch;
 } workspaces_t;
 
+typedef struct {
+    uint8_t (*units)[AI_ENGINE_VARIANTS_MAX][LANG_VI_UNITS_MAX];
+    char (*ids)[APP_EVT_ID_MAX_BYTES];
+    ai_engine_lexicon_t *lexicon;
+    uint32_t version;
+} table_t;
+
 static const char *TAG = "svc_listen";
 
 static struct {
@@ -43,9 +51,9 @@ static struct {
     dsp_spec_cplx_t *bins;
     float (*log_mel)[GEN_LISTEN_N_BANDS];
     int16_t (*pcm)[GEN_GRID_HOP_SAMPLES];
-    uint8_t (*units)[AI_ENGINE_VARIANTS_MAX][LANG_VI_UNITS_MAX];
-    char (*ids)[APP_EVT_ID_MAX_BYTES];
-    ai_engine_lexicon_t *lexicon;
+    table_t tables[2]; // the one in use, and a spare to read a new set into
+    size_t active;
+    lang_vi_dialect_t dialects;
     uint16_t reject, margin;
     bool started, in_run, working;
     uint32_t next_seq, after, run_first, run_last, at;
@@ -59,10 +67,30 @@ static void *take(size_t bytes)
     return heap_caps_aligned_alloc(MEM_ALIGN, bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
+static bool take_table(table_t *t)
+{
+    t->units = take(AI_ENGINE_COMMANDS_MAX * sizeof(*t->units));
+    t->ids = take(AI_ENGINE_COMMANDS_MAX * sizeof(*t->ids));
+    t->lexicon = take(sizeof(*t->lexicon));
+    return t->units != NULL && t->ids != NULL && t->lexicon != NULL;
+}
+
 static void release(workspaces_t *w)
 {
-    void *const blocks[] = {s.hop,     s.bins, s.log_mel, s.pcm,  s.units, s.ids,
-                            s.lexicon, w->fft, w->stft,   w->mel, w->pitch};
+    void *const blocks[] = {s.hop,
+                            s.bins,
+                            s.log_mel,
+                            s.pcm,
+                            s.tables[0].units,
+                            s.tables[0].ids,
+                            s.tables[0].lexicon,
+                            s.tables[1].units,
+                            s.tables[1].ids,
+                            s.tables[1].lexicon,
+                            w->fft,
+                            w->stft,
+                            w->mel,
+                            w->pitch};
     for (size_t i = 0; i < sizeof(blocks) / sizeof(blocks[0]); i++) {
         heap_caps_free(blocks[i]);
     }
@@ -90,62 +118,82 @@ static esp_err_t front_end(workspaces_t *w)
     return err;
 }
 
-static esp_err_t build_lexicon(const svc_listen_config_t *cfg)
+static bool well_formed(const svc_listen_commands_t *c)
+{
+    return c != NULL && c->texts != NULL && c->ids != NULL && c->n_commands > 0 &&
+           c->n_commands <= AI_ENGINE_COMMANDS_MAX;
+}
+
+static esp_err_t build_lexicon(const svc_listen_commands_t *c, table_t *t, uint8_t *unreadable)
 {
     size_t variants = 0;
-    for (uint8_t c = 0; c < cfg->n_commands; c++) {
+    memset(t->lexicon, 0, sizeof(*t->lexicon));
+    for (uint8_t k = 0; k < c->n_commands; k++) {
         lang_vi_pron_t pron;
-        const esp_err_t err = lang_vi_lexicon_entry(cfg->texts[c], cfg->dialects, &pron);
+        const esp_err_t err = lang_vi_lexicon_entry(c->texts[k], s.dialects, &pron);
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "command %s: lang_vi cannot read \"%s\" (%s)", cfg->ids[c], cfg->texts[c],
+            ESP_LOGE(TAG, "command %s: lang_vi cannot read \"%s\" (%s)", c->ids[k], c->texts[k],
                      esp_err_to_name(err));
-            return ESP_ERR_INVALID_ARG;
+            *unreadable = k;
+            return APP_ERR_COMMANDS_INVALID;
         }
-        s.lexicon->n_variants[c] = pron.n_variants;
+        t->lexicon->n_variants[k] = pron.n_variants;
         for (uint8_t v = 0; v < pron.n_variants; v++) {
-            memcpy(s.units[c][v], pron.units[v], pron.n_units[v]);
-            s.lexicon->variants[c][v] = (ai_engine_seq_t){.n_units = pron.n_units[v], .units = s.units[c][v]};
+            memcpy(t->units[k][v], pron.units[v], pron.n_units[v]);
+            t->lexicon->variants[k][v] =
+                (ai_engine_seq_t){.n_units = pron.n_units[v], .units = t->units[k][v]};
         }
-        strlcpy(s.ids[c], cfg->ids[c], APP_EVT_ID_MAX_BYTES);
+        strlcpy(t->ids[k], c->ids[k], APP_EVT_ID_MAX_BYTES);
         variants += pron.n_variants;
     }
-    s.lexicon->n_commands = cfg->n_commands;
-    ESP_LOGI(TAG, "%u commands, %u readings", (unsigned)cfg->n_commands, (unsigned)variants);
+    t->lexicon->n_commands = c->n_commands;
+    t->version = c->version;
+    ESP_LOGI(TAG, "commands v%" PRIu32 ": %u commands, %u readings", c->version, (unsigned)c->n_commands,
+             (unsigned)variants);
     return ESP_OK;
 }
 
 esp_err_t svc_listen_init(const svc_listen_config_t *cfg)
 {
     if (s.ready) { return ESP_ERR_INVALID_STATE; }
-    if (cfg == NULL || cfg->texts == NULL || cfg->ids == NULL || cfg->n_commands == 0 ||
-        cfg->n_commands > AI_ENGINE_COMMANDS_MAX) {
-        return ESP_ERR_INVALID_ARG;
-    }
+    if (cfg == NULL || !well_formed(&cfg->commands)) { return ESP_ERR_INVALID_ARG; }
     if (!ai_engine_has(AI_ENGINE_MODEL_COMMAND)) { return ESP_ERR_NOT_SUPPORTED; }
     workspaces_t w = {0};
     s.hop = take(GEN_GRID_HOP_SAMPLES * sizeof(float));
     s.bins = take(GEN_GRID_N_BINS * sizeof(dsp_spec_cplx_t));
     s.log_mel = take(RING_HOPS * sizeof(*s.log_mel));
     s.pcm = take(RING_HOPS * sizeof(*s.pcm));
-    s.units = take(AI_ENGINE_COMMANDS_MAX * sizeof(*s.units));
-    s.ids = take(AI_ENGINE_COMMANDS_MAX * sizeof(*s.ids));
-    s.lexicon = take(sizeof(*s.lexicon));
-    esp_err_t err = s.hop != NULL && s.bins != NULL && s.log_mel != NULL && s.pcm != NULL &&
-                            s.units != NULL && s.ids != NULL && s.lexicon != NULL
+    const bool tables = take_table(&s.tables[0]) && take_table(&s.tables[1]);
+    esp_err_t err = s.hop != NULL && s.bins != NULL && s.log_mel != NULL && s.pcm != NULL && tables
                         ? front_end(&w)
                         : ESP_ERR_NO_MEM;
-    if (err == ESP_OK) {
-        memset(s.lexicon, 0, sizeof(*s.lexicon));
-        err = build_lexicon(cfg);
-    }
+    uint8_t unreadable = 0;
+    s.dialects = cfg->dialects;
+    if (err == ESP_OK) { err = build_lexicon(&cfg->commands, &s.tables[0], &unreadable); }
     if (err != ESP_OK) {
         release(&w);
         return err;
     }
+    s.active = 0;
     s.reject = cfg->reject_permille;
     s.margin = cfg->margin_permille;
     s.ready = true;
     return ESP_OK;
+}
+
+esp_err_t svc_listen_set_commands(const svc_listen_commands_t *commands, uint8_t *unreadable)
+{
+    if (!s.ready || s.count > 0) { return ESP_ERR_INVALID_STATE; }
+    if (!well_formed(commands) || unreadable == NULL) { return ESP_ERR_INVALID_ARG; }
+    const size_t spare = 1 - s.active;
+    const esp_err_t err = build_lexicon(commands, &s.tables[spare], unreadable);
+    if (err == ESP_OK) { s.active = spare; }
+    return err;
+}
+
+uint32_t svc_listen_commands_version(void)
+{
+    return s.ready ? s.tables[s.active].version : 0;
 }
 
 static void to_float(const int16_t *pcm, float *out)
@@ -223,7 +271,7 @@ static void decide(const window_t *w, const ai_engine_command_result_t *r, svc_l
     e->margin_permille = r->margin_permille < PERMILLE_MAX ? r->margin_permille : PERMILLE_MAX;
     if (r->command >= 0) {
         e->kind = APP_EVT_COMMAND;
-        strlcpy(e->command_id, s.ids[r->command], sizeof(e->command_id));
+        strlcpy(e->command_id, s.tables[s.active].ids[r->command], sizeof(e->command_id));
     } else {
         e->kind = APP_EVT_REJECT;
         // ctc_score.c's order: far from the free loop, then too close to the second, then a part.
@@ -267,7 +315,7 @@ bool svc_listen_work(svc_listen_decision_t *out)
     }
     if (s.at++ != w->last) { return false; }
     ai_engine_command_result_t result;
-    err = ai_engine_command_score(s.lexicon, &result);
+    err = ai_engine_command_score(s.tables[s.active].lexicon, &result);
     if (err != ESP_OK) {
         drop(w, esp_err_to_name(err));
         return false;

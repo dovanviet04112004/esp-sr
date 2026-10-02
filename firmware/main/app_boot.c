@@ -27,8 +27,6 @@
 #define DMA_DESC_NUM 8       // 128 ms of hops outlasts one flash erase (KEHOACH 5.5)
 #define MODEL_SLOT_DEFAULT 0 // model/active_slot absent: models_0
 
-#define COMMANDS_TEXT_BYTES 32768 // set.json: 64 commands of 64-character lines
-
 #define APP_SEED_VER GEN_AFE_VERSION // raised in afe.yaml when a seed changes (KEHOACH 6.2)
 
 _Static_assert(sizeof(((dsp_afe_calib_t *)0)->balance) == STORAGE_CALIB_BAL_BYTES,
@@ -123,18 +121,22 @@ static void load_models(void)
     }
 }
 
-static esp_err_t listen_to(const command_set_t *set)
+svc_listen_commands_t app_boot_commands(const command_set_t *set, const char **texts, const char **ids)
 {
-    const char *texts[AI_ENGINE_COMMANDS_MAX];
-    const char *ids[AI_ENGINE_COMMANDS_MAX];
     for (uint8_t c = 0; c < set->commands_count; c++) {
         texts[c] = set->commands[c].text;
         ids[c] = set->commands[c].id;
     }
+    return (svc_listen_commands_t){
+        .texts = texts, .ids = ids, .n_commands = set->commands_count, .version = set->version};
+}
+
+static esp_err_t listen_to(const command_set_t *set)
+{
+    const char *texts[AI_ENGINE_COMMANDS_MAX];
+    const char *ids[AI_ENGINE_COMMANDS_MAX];
     svc_listen_config_t cfg = {
-        .texts = texts,
-        .ids = ids,
-        .n_commands = set->commands_count,
+        .commands = app_boot_commands(set, texts, ids),
         .dialects = LANG_VI_DIALECT_ALL,
         .reject_permille = CONFIG_SVC_LISTEN_CMD_REJECT_PERMILLE,
         .margin_permille = CONFIG_SVC_LISTEN_CMD_MARGIN_PERMILLE,
@@ -155,12 +157,12 @@ static void start_listener(void)
         ESP_LOGW(TAG, "no command in the models, not listening");
         return;
     }
-    char *text = heap_caps_malloc(COMMANDS_TEXT_BYTES, MALLOC_CAP_SPIRAM);
+    char *text = heap_caps_malloc(NET_MQTT_COMMANDS_TEXT_BYTES, MALLOC_CAP_SPIRAM);
     command_set_t *set = heap_caps_malloc(sizeof(*set), MALLOC_CAP_SPIRAM);
     size_t len = 0;
-    esp_err_t err = text != NULL && set != NULL
-                        ? sys_storage_read_file(STORAGE_PATH_COMMANDS, text, COMMANDS_TEXT_BYTES, &len)
-                        : ESP_ERR_NO_MEM;
+    esp_err_t err = text != NULL && set != NULL ? sys_storage_read_file(STORAGE_PATH_COMMANDS, text,
+                                                                        NET_MQTT_COMMANDS_TEXT_BYTES, &len)
+                                                : ESP_ERR_NO_MEM;
     if (err == ESP_OK) { err = net_mqtt_parse_command_set(text, len, set); }
     if (err == ESP_OK) { err = listen_to(set); }
     if (err != ESP_OK) {
