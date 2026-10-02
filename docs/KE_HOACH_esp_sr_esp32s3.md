@@ -2024,6 +2024,7 @@ host/
 │   ├── mqtt_rx.py                 # đăng ký topic, kiểm schema, ghi jsonl theo phiên
 │   ├── stream_rx.py               # máy chủ TCP: nhận khung, phát hiện hở seq, ghi WAV từng kênh + json kèm
 │   ├── live.py                    # xem trực tiếp: hướng, cờ tiếng nói, mức, sự kiện
+│   ├── commands.py                # gửi bộ lệnh xuống down/commands của một board, in lỗi COMMANDS_* board báo về
 │   ├── session.py                 # phiên thu có nhãn: danh sách câu nhắc, mã người nói, mã phiếu đồng ý
 │   ├── score.py                   # chấm một phiên đã thu theo nhãn, gọi ml/src/srpipe/metrics
 │   └── calib.py                   # ước balance từ phiên ồn trắng (srpipe), kiểm chéo; ghi calib/bal và calib/pcm_shift
@@ -2077,6 +2078,15 @@ hay mang `deviceId` khác với topic **không bị bỏ lặng lẽ**: nó thà
 `live.py` đếm nó trên màn hình. File jsonl do người chạy chỉ ra bằng `--jsonl`, mỗi lần chạy nối thêm vào.
 `live.py` chạy thẳng trong WSL: kết nối đi ra tới cổng 1883 của Docker Desktop ở `localhost`, nên không cần
 container như máy nhận luồng.
+
+`commands.py` (`make commands DEVICE=<deviceId> SET=<file.json>`) gửi một bộ lệnh xuống `down/commands` của đúng
+một board, retained, cũng bằng tài khoản `srhost`. Trước khi gửi, nó kiểm bộ lệnh bằng `SCHEMAS` và từ chối hai lệnh
+trùng `id` hay trùng dòng chữ sau khi chuẩn hoá (NFC, chữ thường, khoảng trắng): hai dòng như nhau luôn hoà điểm,
+nên board từ chối cả hai mãi. `version` lấy giờ Unix lúc gửi, nên mỗi lần gửi là một bộ mới với board, còn bản
+retained gửi lại lúc board nối lại thì trùng `version` với bộ đang dùng và bị bỏ qua (§5.3). Gửi xong, nó nghe
+`up/status` và `up/event` của board 5 s: board offline thì báo bộ lệnh sẽ tới lúc board nối lại; sự kiện `ERROR` mã
+`COMMANDS_*` thì in mã và lệnh hỏng nếu có `commandId`. Board không gửi xác nhận thành công: bằng chứng là log của
+board và sự kiện `COMMAND` mang `id` mới. `CLEAR=1` xoá bản retained; board giữ bộ đang dùng.
 
 ### 4.7 `deploy/`
 
@@ -2171,7 +2181,7 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 |---|---|---|---|---|---|---|
 | `thu_task` | `svc_front` | 1 | 17 | 3 KB | chặn trong `drv_audio_read_frame` tới khi DMA đủ một khung | lấy khung `ch0 ch1 [ref]`, gắn `seq`, đẩy chỉ số ô vào `q_frame`; đếm tràn DMA. **Không làm gì khác** |
 | `sach_task` | `svc_front` | 1 | 16 | 6 KB | `q_frame` | `dsp_afe_feed` rồi `fetch`; khung sạch vào `q_clean`; ghi `s_afe_stats`; luồng mở thì chép khung vào `sb_stream` không chờ |
-| `nhan_task` | `svc_listen` | 0 | 10 | 8 KB | `q_clean` | log-mel → `wake` mỗi khung; ở trạng thái `LENH` thì chạy `command` thay `wake`; hết câu → chấm → `q_dialog`; ảnh không có `wake` thì chấm mọi câu `vad` cắt như Cửa 3 (§5.4), sự kiện → `q_event_up` |
+| `nhan_task` | `svc_listen` | 0 | 10 | 8 KB | `q_clean`, `q_cmdset` | log-mel → `wake` mỗi khung; ở trạng thái `LENH` thì chạy `command` thay `wake`; hết câu → chấm → `q_dialog`; ảnh không có `wake` thì chấm mọi câu `vad` cắt như Cửa 3 (§5.4), sự kiện → `q_event_up`; giữa hai câu nhận bộ lệnh mới từ `q_cmdset`, đổi bảng lệnh, ghi `set.json` (§5.3, §6.4) |
 | `dieu_task` | `svc_dialog` | 0 | 8 | 4 KB | `q_dialog`, `q_cmd` | máy trạng thái §5.4; ra `q_speak`, `q_event_up`; báo `nhan_task` đổi chế độ |
 | `noi_task` | `svc_speak` | 0 | 5 | 8 KB | `q_speak` | dựng trọn câu vào PSRAM rồi đẩy xuống TX; giương `SPEAKING` suốt lúc phát |
 | `gui_task` | `svc_report` | 0 | 4 | 4 KB | nhịp 100 ms | lấy mẫu `s_afe_stats`, gộp 10 mẫu thành một `telemetry` mỗi giây; phát `q_event_up`; `heartbeat` mỗi 30 s |
@@ -2205,7 +2215,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `sb_stream` | StreamBuffer ở PSRAM, **chỉ tồn tại khi** `NET_STREAM_ENABLE`; cỡ `SVC_REPORT_STREAM_BUFFER_KB` | 512 KB: ~5 s ở `mode` 5, ~8 s ở `mode` 2 | `sach_task` | `luong_task` | ghi với timeout 0; không đủ chỗ cho **cả khung** thì bỏ cả khung, đếm; không bao giờ ghi nửa khung | một người ghi, một người đọc — đúng hợp đồng của stream buffer. Đường tới máy nhận khựng 0,4–0,8 s vài lần mỗi 10 phút trên board B (`latency.md` §4), quá 64 KB |
 | `q_dialog` | Queue depth 8, `app_event_t`, bộ nhớ ở PSRAM | 8 × 80 B | `nhan_task` | `dieu_task` | chờ 20 ms rồi bỏ, log **một lần** ở cạnh đầy | `nhan_task` không được đứng chờ lâu: sau lưng nó là 1 s đệm đang đầy dần |
 | `q_cmd` | Queue depth 4, `device_cmd_t` (sinh từ `contracts/`, chở cả chữ 512 B của `SPEAK`), bộ nhớ ở PSRAM | 4 × ~600 B | task của esp-mqtt | `dieu_task` | bỏ, log | callback esp-mqtt chỉ **phân tích** rồi bỏ vào đây; chờ ở callback là chặn cả đường MQTT |
-| `q_cmdset` | Queue depth 1, con trỏ bộ lệnh đã phân tích (PSRAM) | 4 B | task của esp-mqtt | `nhan_task` | bản mới thay bản chờ | `nhan_task` tự chạy `lang_vi` và đổi bảng lệnh **giữa hai câu**, ở trạng thái `NGHE` |
+| `q_cmdset` | Queue depth 1, con trỏ tới một trong hai ô bộ lệnh của `net_mqtt` ở PSRAM, cấp lúc boot: bộ đã phân tích, kết quả phân tích, payload nguyên văn | 4 B + 2 × ~53 KB | task của esp-mqtt | `nhan_task` | bản mới thay bản chờ: task esp-mqtt rút bản chờ về rồi gửi bản mới; ô `nhan_task` đã nhận giữ nguyên tới lần nhận sau (`FREERTOS.md` 8.10); payload rỗng, tức bản retained bị xoá, không vào hàng | `nhan_task` tự chạy `lang_vi` và đổi bảng lệnh **giữa hai câu**: ở trạng thái `NGHE`, hay ở ảnh không có `wake` khi không còn cửa sổ chờ chấm; bộ trùng `version` với bộ đang dùng bị bỏ qua |
 | `q_speak` | Queue depth 4, `app_speak_req_t`, bộ nhớ ở PSRAM | 4 × 546 B | `dieu_task` | `noi_task` | bỏ, log | |
 | `q_event_up` | Queue depth 16, `app_event_t`, bộ nhớ ở PSRAM | 16 × 80 B | `nhan_task`, `dieu_task` | `gui_task` | bỏ, tăng `events_dropped` | **người phát sự kiện không bao giờ publish**: publish QoS 1 chờ PUBACK, và `nhan_task` đứng chờ mạng là đệm 1 s đầy dần |
 | `eg_system` | EventGroup | 4 B | mọi task | mọi task | — | bit `WIFI_OK` `MQTT_OK` `TIME_OK` `MODELS_OK` `STREAM_ON` `SPEAKING` `CALIBRATING` `OTA_RUNNING` |
@@ -2405,7 +2415,7 @@ trả `ESP_ERR_INVALID_VERSION` và không nạp. Không có chốt này, đổi
 
 | Đường dẫn | Chứa | Ghi khi |
 |---|---|---|
-| `/lfs/cmd/set.json` | bộ lệnh đang dùng, theo `command_set.schema.json` | `down/commands` tới; ghi `set.json.tmp` rồi đổi tên — chống mất điện |
+| `/lfs/cmd/set.json` | bộ lệnh đang dùng, theo `command_set.schema.json` | `down/commands` mang `version` khác bộ đang dùng và `lang_vi` đọc được mọi dòng: `nhan_task` ghi `set.json.tmp` rồi đổi tên — chống mất điện |
 | `/lfs/resp/vi.json` | câu trả lời: id → chữ, id → tên mẩu | nướng lúc dựng; đổi qua OTA |
 | `/lfs/golden/**` | vector vàng | chỉ trong ảnh của `test_apps/parity`, phân vùng `storage` 12 MB của bảng riêng app ấy (§4.3) |
 
@@ -2453,10 +2463,12 @@ nên lớn hơn; đó là giá của mã đọc được và khớp Python từn
 | Trọng số và vùng làm việc `ns` + `wake` | 187 KB (RNNoise-16k) tới 394 KB (NSNet-16k L), đo ở E9-T10, + ~100 KB |
 | `q_clean` | ~34 KB |
 | `q_dialog`, `q_cmd`, `q_speak`, `q_event_up` (§5.3) | ~6 KB |
+| `svc_listen`: vòng 512 bước log-mel và mẫu sạch, đầu đặc trưng, hai bảng lexicon (§5.4) | ~0,55 MB; board B đo 0,53 MB khi còn một bảng |
+| `net_mqtt`: hai vùng JSON 2 × 48 KB, hai ô bộ lệnh của `q_cmdset` 2 × ~53 KB (§5.3) | ~0,2 MB |
 | `sb_stream` | 512 KB |
 | Đệm dựng câu của `noi_task`: 5 s × 16 kHz × 2 B | 160 KB |
 | Ngăn xếp `mqtt_task`, vùng TLS | ~50 KB |
-| **Cộng** | **~4,3–4,6 MB trên 8 MB** |
+| **Cộng** | **~5,0–5,4 MB trên 8 MB** |
 
 **PSRAM không miễn phí về băng thông.** Flash và PSRAM chung một bus MSPI và chung cache dữ liệu; repo
 face attendance đo được suy luận chậm đi 16,6% khi nhân kia đẩy ~8,7 MB/s qua PSRAM, kể cả model có
@@ -2516,7 +2528,7 @@ Topic, QoS, retained và schema khai ở `contracts/mqtt_topics.yaml`; bảng d�
 |---|---|---|
 | `heartbeat` | uptime, heap nội và PSRAM còn / thấp nhất, `frames_dropped`, `clean_dropped`, `events_dropped`, điểm cao nhất `q_clean`, điểm cao nhất vùng nhớ JSON của `net_mqtt` (`FREERTOS.md` §14 P1), tải từng nhân (ở `bench`), RSSI, phiên bản firmware và model | ~420 B |
 | `telemetry` | 10 × {hướng, độ tin, cờ tiếng nói, mức, gain}, trạng thái hội thoại | ~350 B |
-| `event` | loại, `seq` khung, điểm, lệnh, khoảng cách với lệnh thứ hai, lý do từ chối | ~150 B |
+| `event` | loại, `seq` khung, điểm, lệnh, khoảng cách với lệnh thứ hai, lý do từ chối; khi đổi bộ lệnh hỏng, `ERROR` với `COMMANDS_INVALID` (kèm `commandId` của dòng `lang_vi` không đọc được), `COMMANDS_REFUSED` hay `COMMANDS_NOT_SAVED` | ~150 B |
 
 Tổng ở chế độ thường: ~350 B/s telemetry + ~13 B/s heartbeat + sự kiện thưa → **dưới 1 KB/s**, đạt
 TỔNG QUAN V5.7.4, **không gửi tiếng**.
