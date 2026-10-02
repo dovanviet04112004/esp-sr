@@ -66,10 +66,12 @@ board như §1, `δ₁` 300‰, `δ₂` 50‰, luật phần của §3. Đo ngà
 | bậc 4: QAT trên percentile, 2 000 bước | 35,75% | 86/112 | 68/112 | 3/86 |
 
 Mọi dòng int8 trừ minmax nằm trong `quant.gate_tie` 5 câu nhận đúng của dòng cao nhất (73/112), nên lỗi đơn vị quyết:
-QAT thấp nhất. QAT học trên đồ thị lô 16, tốc độ học 3e-5 giảm cosine về 1e-6; lỗi đơn vị `val` của đồ thị ấy 31,38% ở
-bước 0, 31,54%, 31,63%, 31,33% ở bước 500, 1 000, 1 500 và 31,38% ở bước 2 000, loss 0,977 xuống 0,969: phần học gần như
-không đổi `val`, và chưa tách được phần 0,59 điểm QAT hơn percentile trên `test` đến từ việc học hay từ thang hiệu chuẩn
-trên lô 16 chép sang đồ thị lô 1.
+QAT thấp nhất. QAT học trên đồ thị lô 16 (hiệu chuẩn percentile trên 4 lô 16 câu), tốc độ học 3e-5 giảm cosine về 1e-6,
+rồi chép tham số và thang sang đồ thị lô 1. Phần học đổi 318 873 trên 1 985 623 trọng số int8 (16%), có trọng số trôi tới
+23,6 bậc. Cùng đồ thị lô 16 chép sang mà không học: lỗi đơn vị 36,56%, lệnh đúng 84/112, nhận đúng 70/112, nhận nhầm 2/86;
+nên 0,81 điểm lỗi đơn vị trên `test` là của phần học, còn hiệu chuẩn theo lô không hơn hiệu chuẩn từng câu. Trên `val` phần
+học không thấy: lỗi đơn vị của đồ thị lô 16 là 31,38% ở bước 0, 31,54%, 31,63%, 31,33% ở bước 500, 1 000, 1 500 và 31,38% ở
+bước 2 000, loss 0,977 xuống 0,969.
 
 ## 3. `ctc`: lệnh nói thiếu âm tiết (KẾ HOẠCH §3.12, E11-T19)
 
