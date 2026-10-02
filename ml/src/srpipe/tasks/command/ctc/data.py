@@ -15,7 +15,7 @@ import numpy as np
 import yaml
 
 from srpipe.core import corpus, screen, splits
-from srpipe.core.config import CONFIGS, apply_overrides, data_paths, load_yaml
+from srpipe.core.config import apply_overrides, data_paths, load_device, load_yaml
 from srpipe.scenes import device
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc
@@ -125,7 +125,7 @@ def simulate(cfg: dict, paths: dict) -> None:
     """Every file of the split into processed/command/<version>/<file>, smallest first, with pitch and without the
     clean samples; a file stopped part way goes on from its finished shards."""
     spec, version = cfg["simulate"], cfg["split"]["version"]
-    device_cfg = load_yaml(CONFIGS / cfg["features"])
+    device_cfg = load_device(cfg["features"])
     folder = paths["splits"] / "command" / version
     for split_file in sorted(folder.glob("*.txt"), key=lambda f: f.stat().st_size):
         out = paths["processed"] / "command" / version / split_file.stem

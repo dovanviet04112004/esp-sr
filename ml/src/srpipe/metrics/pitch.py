@@ -18,9 +18,9 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml
+from srpipe.core.config import ML_ROOT, data_paths, load_yaml
 from srpipe.dsp.spec import pitch
-from srpipe.generated import grid
+from srpipe.generated import grid, listen
 from srpipe.tts import CONFIG as TTS_CONFIG
 
 REFERENCE = ML_ROOT / "afe_ref" / "kaldi_pitch"
@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=None, help="only the first N utterances")
     limit = parser.parse_args(argv).limit
     paths = data_paths()
-    spec = load_yaml(CONFIGS / "scenes" / "device.yaml")["pitch"]
+    spec = listen.PITCH
     cfg = pitch.PitchConfig(**spec)
     wavs = sorted((paths["raw"] / CORPUS).glob("*/*.wav"))[:limit]
     work = paths["cache"] / "pitch_ref"

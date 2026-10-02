@@ -21,11 +21,11 @@ import torch
 import yaml
 
 from srpipe.core import corpus
-from srpipe.core.config import CONFIGS, data_paths, load_yaml
+from srpipe.core.config import data_paths, load_device, load_yaml
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
-from srpipe.generated import array, grid
+from srpipe.generated import array, grid, listen
 from srpipe.scenes import device
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc, kws
@@ -242,7 +242,7 @@ def rnnt_heard(net: Ctc, x: np.ndarray) -> Heard:
 def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: Callable) -> list[Scored]:
     """Every counted session of the board manifest found on disk, its utterances decided by decided_of(clean,
     features, spans, tracker); a session saying the text of a command of said expects that command."""
-    device_cfg = load_yaml(CONFIGS / cfg["features"])
+    device_cfg = load_device(cfg["features"])
     mics = device.load_microphones(device_cfg["microphone"])
     chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
     tracker = PitchTracker(PitchConfig(**device_cfg["pitch"]))
@@ -253,7 +253,7 @@ def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: 
         if not counted(r, spec) or not folder.exists():
             continue
         clean, vad, features = heard(folder, chain_cfg, mel)
-        spans = utterances(vad, spec)
+        spans = utterances(vad)
         decided = decided_of(clean, features, spans, tracker) if spans else []
         expected = expected_of(r["kind"], r["prompt"], command_of)
         results.append(Scored(r["session"], r["kind"], r["distance_cm"], r["prompt"], expected, decided))
@@ -273,9 +273,9 @@ def kws_board(net: Kws, spec: dict, paths: dict) -> list[Scored]:
     return board(net.cfg, spec, paths, {cid: text for cid, text in said.items() if cid in net.names}, decided_of)
 
 
-def ctc_board(net: Ctc, spec: dict, paths: dict, window_s: float, heard: Callable = ctc_heard) -> list[Scored]:
+def ctc_board(net: Ctc, spec: dict, paths: dict, heard: Callable = ctc_heard) -> list[Scored]:
     """The board sessions decided over LENH's windows by heard, the ctc track's or the rnnt track's."""
-    longest = round(window_s * HOPS_PER_S)
+    longest = listen.WINDOW_HOPS
     listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
 
     def decided_of(clean, features, spans, tracker):
@@ -367,9 +367,9 @@ def main(argv: list[str] | None = None) -> int:
     ctc_cfg = load_yaml(ctc.CONFIG)
     net = load_ctc(args.run)
     forms = sum(len(v) for v in net.lexicon)
-    print(f"{args.run}: {len(net.names)} commands, {forms} variants, windows up to {ctc_cfg['window_s']} s")
+    print(f"{args.run}: {len(net.names)} commands, {forms} variants, windows up to {listen.WINDOW_S} s")
     heard = rnnt_heard if args.track == "rnnt" else ctc_heard
-    results = ctc_board(net, spec["board"], data_paths(), ctc_cfg["window_s"], heard)
+    results = ctc_board(net, spec["board"], data_paths(), heard)
     print(ctc_table(results, net.names, spec, ctc_cfg["eval"]))
     return 0
 

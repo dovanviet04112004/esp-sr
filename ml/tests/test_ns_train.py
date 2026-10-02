@@ -13,7 +13,7 @@ import pytest
 import yaml
 
 from srpipe.core.audio_io import write_wav
-from srpipe.core.config import CONFIGS, load_yaml
+from srpipe.core.config import CONFIGS, load_device, load_yaml
 from srpipe.generated import grid
 from srpipe.scenes import device
 from srpipe.tasks import ns
@@ -46,7 +46,7 @@ def tiny_config() -> dict:
 
 
 def device_config() -> dict:
-    dev = copy.deepcopy(load_yaml(CONFIGS / "scenes" / "device.yaml"))
+    dev = copy.deepcopy(load_device(CONFIGS / "scenes" / "device.yaml"))
     dev["name"] = "ns_train_test"
     dev["rooms"]["count"] = 2
     dev["rooms"]["rt60_s"] = [0.2, 0.3]

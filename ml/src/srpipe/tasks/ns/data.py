@@ -26,7 +26,7 @@ from scipy import signal
 
 from srpipe.core import screen, splits
 from srpipe.core.audio_io import INT16_SCALE, ItemReader, ramped, to_int16, write_wav
-from srpipe.core.config import CONFIGS, data_paths, load_yaml
+from srpipe.core.config import CONFIGS, data_paths, load_device, load_yaml
 from srpipe.dsp.spec.stft import Istft
 from srpipe.generated import grid
 from srpipe.scenes import device, refs, room
@@ -47,7 +47,7 @@ EPOCHS_HELD = 2  # a loader worker crosses one epoch boundary at a time
 def configs() -> tuple[dict, dict]:
     """ns.yaml and the board simulation it points at."""
     cfg = load_yaml(ns.CONFIG)
-    return cfg, load_yaml(CONFIGS / cfg["device"])
+    return cfg, load_device(cfg["device"])
 
 
 def split_dir(paths: dict, cfg: dict) -> Path:

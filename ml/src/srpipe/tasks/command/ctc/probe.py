@@ -21,6 +21,7 @@ from torch import nn
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
 from srpipe.core.config import ML_ROOT, data_paths, load_yaml
 from srpipe.export import pack_models
+from srpipe.generated import listen
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc import quant
@@ -132,7 +133,7 @@ def random_windows(cfg: dict, mean: np.ndarray, std: np.ndarray) -> list[np.ndar
     hop, one chunk, and lengths drawn between."""
     p = cfg["probe"]
     rng = np.random.default_rng(p["seed"])
-    longest = round(cfg["window_s"] * gate.HOPS_PER_S)
+    longest = listen.WINDOW_HOPS
     lengths = [longest, 1, cfg["chunk_hops"], *rng.integers(2, longest, p["command"]["windows"] - 3)]
     return [rng.normal(mean, std, (int(n), len(mean))).astype(np.float32) for n in lengths]
 

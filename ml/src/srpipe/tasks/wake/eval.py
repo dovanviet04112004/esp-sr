@@ -17,10 +17,10 @@ import torch
 import yaml
 
 from srpipe.core import corpus
-from srpipe.core.config import CONFIGS, data_paths, load_yaml
+from srpipe.core.config import data_paths, load_device, load_yaml
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
-from srpipe.generated import array, grid
+from srpipe.generated import array, grid, listen
 from srpipe.scenes import device
 from srpipe.tasks.wake import CONFIG
 from srpipe.tasks.wake.data import Shard
@@ -98,10 +98,10 @@ class BoardSession:
     stray: int
 
 
-def utterances(vad: np.ndarray, spec: dict) -> list[tuple[int, int]]:
-    """(first, last) hop of each run of vad, runs closer than the gap joined, the shortest dropped."""
-    rate = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
-    gap, least = round(spec["utterance_gap_s"] * rate), round(spec["utterance_min_s"] * rate)
+def utterances(vad: np.ndarray) -> list[tuple[int, int]]:
+    """(first, last) hop of each run of vad, runs closer than listen's gap joined, those shorter than its least dropped,
+    as svc_listen cuts them on a board without wake (KEHOACH 5.4)."""
+    gap, least = listen.UTTERANCE_GAP_HOPS, listen.UTTERANCE_MIN_HOPS
     runs: list[list[int]] = []
     for hop in np.flatnonzero(vad):
         if runs and hop - runs[-1][1] <= gap:
@@ -132,7 +132,7 @@ def session_kind(kind: str, prompt: str, word: list[tuple[str, ...]]) -> str:
 def board(model, mean: np.ndarray, std: np.ndarray, cfg: dict, paths: dict, threshold: float, dev: str):
     """Every session of the board manifest at the product's pcm_shift, scored at threshold."""
     spec, rate = cfg["eval"]["board"], grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
-    device_cfg = load_yaml(CONFIGS / cfg["features"])
+    device_cfg = load_device(cfg["features"])
     mics = device.load_microphones(device_cfg["microphone"])
     chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
     after = round(cfg["train"]["label_s"][1] * rate)
@@ -156,7 +156,7 @@ def scored(heard: tuple, features: np.ndarray, vad: np.ndarray, net: tuple, cfg:
     model, mean, std, dev = net
     after, lockout = hops
     s = smooth(probabilities(model, Shard(features, vad, [], False), mean, std, dev), cfg["eval"]["smooth_hops"])
-    spans = utterances(vad, cfg["eval"]["board"])
+    spans = utterances(vad)
     fired = triggers(s, threshold, lockout)
     inside = [any(a <= f <= b + after for a, b in spans) for f in fired]
     peaks = [float(s[a : b + after + 1].max()) for a, b in spans]
@@ -168,7 +168,7 @@ def recording(model, mean: np.ndarray, std: np.ndarray, cfg: dict, wav: Path, th
     """A mono recording at the grid's rate scored as a wake session: both microphones hear it, the product's chain
     and log-mel run on it, its utterances found by the chain's vad."""
     rate = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
-    device_cfg = load_yaml(CONFIGS / cfg["features"])
+    device_cfg = load_device(cfg["features"])
     mics = device.load_microphones(device_cfg["microphone"])
     chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
     x, fs = sf.read(wav, dtype="int16")

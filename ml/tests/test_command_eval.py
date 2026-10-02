@@ -9,9 +9,9 @@ import pytest
 pytest.importorskip("torch")
 
 from srpipe.core import corpus
-from srpipe.core.config import CONFIGS, load_yaml
+from srpipe.core.config import load_yaml
 from srpipe.dsp.spec.pitch import N_FEATURES, PitchConfig, PitchTracker
-from srpipe.generated import grid
+from srpipe.generated import grid, listen
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc.model import encoder
@@ -41,7 +41,7 @@ def test_a_window_ends_where_vad_turns_off_and_repeats_the_first_hop_before_the_
     hops, window, lead, bands = 200, 94, 100, 40
     features = np.arange(hops, dtype=np.float32)[:, None].repeat(bands, axis=1)
     clean = np.zeros(hops * grid.HOP_SAMPLES, dtype=np.int16)
-    tracker = PitchTracker(PitchConfig(**load_yaml(CONFIGS / "scenes" / "device.yaml")["pitch"]))
+    tracker = PitchTracker(PitchConfig(**listen.PITCH))
     x = gate.windows(clean, features, [(120, 150), (10, 30)], window, lead, tracker)
     assert x.shape == (2, window, bands + N_FEATURES)
     assert x[0, -1, 0] == 151 and x[0, 0, 0] == 151 - window + 1
@@ -64,7 +64,7 @@ def test_a_ctc_window_reaches_the_longest_back_but_never_into_the_utterance_ahea
     hops, bands = 400, 40
     features = np.arange(hops, dtype=np.float32)[:, None].repeat(bands, axis=1)
     clean = np.zeros(hops * grid.HOP_SAMPLES, dtype=np.int16)
-    tracker = PitchTracker(PitchConfig(**load_yaml(CONFIGS / "scenes" / "device.yaml")["pitch"]))
+    tracker = PitchTracker(PitchConfig(**listen.PITCH))
     xs = gate.ctc_windows(clean, features, [(30, 60), (70, 100), (200, 390)], 120, tracker)
     dims = bands + N_FEATURES
     assert [(x[0, 0], x[-1, 0], x.shape[1]) for x in xs] == [(0, 61, dims), (62, 101, dims), (272, 391, dims)]

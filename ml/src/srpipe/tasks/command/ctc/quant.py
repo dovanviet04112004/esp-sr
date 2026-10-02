@@ -21,6 +21,7 @@ from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, pt
 from srpipe.core import screen, splits
 from srpipe.core.config import apply_overrides, data_paths, load_yaml
 from srpipe.export import update_lock
+from srpipe.generated import listen
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
@@ -162,8 +163,9 @@ class Bench:
 
 
 def board_windows(cfg: dict, net: gate.Ctc, paths: dict) -> list[gate.Scored]:
-    """The windows LENH keeps on the board sessions of Gate 3: each utterance from vad-off back at most window_s."""
-    longest = round(cfg["window_s"] * gate.HOPS_PER_S)
+    """The windows LENH keeps on the board sessions of Gate 3: each utterance from vad-off back at most listen's
+    window."""
+    longest = listen.WINDOW_HOPS
     said = {c["id"]: c["text"] for c in json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]}
 
     def window_of(clean, features, spans, tracker):

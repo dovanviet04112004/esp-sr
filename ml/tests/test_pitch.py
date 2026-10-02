@@ -6,15 +6,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from srpipe.core.config import CONFIGS, load_yaml
 from srpipe.dsp.spec import pitch
-from srpipe.generated import grid
+from srpipe.generated import grid, listen
 
 RATE = grid.SAMPLE_RATE_HZ
 
 
 def config() -> pitch.PitchConfig:
-    return pitch.PitchConfig(**load_yaml(CONFIGS / "scenes" / "device.yaml")["pitch"])
+    return pitch.PitchConfig(**listen.PITCH)
 
 
 def harmonics(f0_hz: np.ndarray, seconds: float, level: float = 0.3) -> np.ndarray:

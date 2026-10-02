@@ -21,7 +21,7 @@ import torch
 import yaml
 
 from srpipe.core.audio_io import INT16_SCALE
-from srpipe.core.config import CONFIGS, data_paths, load_yaml
+from srpipe.core.config import data_paths, load_device, load_yaml
 from srpipe.dsp.afe import ns_omlsa
 from srpipe.dsp.spec import fft
 from srpipe.dsp.spec.window import sqrt_hann
@@ -250,7 +250,7 @@ def main(argv: list[str] | None = None) -> int:
     paths = data_paths()
     run = args.run or last_run(paths)
     cfg = load_yaml(run / "config.resolved.yaml")
-    summary = score(run, cfg, load_yaml(CONFIGS / cfg["device"]), paths, args.role, cfg["eval"]["workers"])
+    summary = score(run, cfg, load_device(cfg["device"]), paths, args.role, cfg["eval"]["workers"])
     for key in ("all", *SLICES):
         print(f"\n{args.role}, {key}\n\n{table(summary, key)}")
     print(f"\n{run / 'eval' / f'{args.role}.yaml'}")

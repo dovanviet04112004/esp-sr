@@ -12,10 +12,9 @@ from pathlib import Path
 
 import numpy as np
 
-from srpipe.core.config import CONFIGS, load_yaml
 from srpipe.dsp.afe import agc, balance, chain, doa, gsc, hpf, ns_omlsa, vad
 from srpipe.dsp.spec import mel, pitch, stft
-from srpipe.generated import afe, array, grid
+from srpipe.generated import afe, array, grid, listen
 from srpipe.golden.gold import write_gold
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -760,7 +759,7 @@ def emit_gsc(root: Path) -> list[Path]:
 
 def pitch_config() -> pitch.PitchConfig:
     """The pitch settings the models read, from the features config (KEHOACH 3.11)."""
-    return pitch.PitchConfig(**load_yaml(CONFIGS / "scenes" / "device.yaml")["pitch"])
+    return pitch.PitchConfig(**listen.PITCH)
 
 
 def main() -> int:

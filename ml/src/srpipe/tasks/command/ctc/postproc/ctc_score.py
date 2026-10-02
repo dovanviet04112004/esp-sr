@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from srpipe.core.config import ML_ROOT
-from srpipe.generated import grid, lang_vi
+from srpipe.generated import lang_vi, listen
 from srpipe.golden.gold import write_gold
 from srpipe.lang import g2p
 from srpipe.lang.normalize import normalize
@@ -346,7 +346,7 @@ def probe_record(cfg: dict) -> bytes:
     the next four-byte boundary, the expected decision, every command's score."""
     spec = cfg["probe"]["decide"]
     stride = math.prod(cfg["model"]["front"]["hop_strides"])
-    frames = math.ceil(cfg["window_s"] * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES / stride)
+    frames = math.ceil(listen.WINDOW_HOPS / stride)
     rng, lexicon, e = np.random.default_rng(SEED), default_lexicon(), LOGIT_EXPONENTS[1]
     window = frame_log_probs(said(rng, lexicon[0][0], frames, e), e)
     decision, scores = decide(window, lexicon, *spec["thresholds"])

@@ -9,6 +9,8 @@ from typing import Any
 
 import yaml
 
+from srpipe.generated import listen
+
 ML_ROOT = Path(__file__).resolve().parents[3]
 CONFIGS = ML_ROOT / "configs"
 DATA_ROOT_ENV = "SRPIPE_DATA_ROOT"
@@ -41,6 +43,12 @@ def apply_overrides(cfg: dict[str, Any], overrides: list[str]) -> dict[str, Any]
             node = node.setdefault(part, {})
         node[leaf] = yaml.safe_load(raw)
     return out
+
+
+def load_device(path: Path) -> dict[str, Any]:
+    """A board simulation config with the features and the pitch tracker of contracts/listen.yaml, the recogniser's
+    front end every build records as its own (KEHOACH 3.11); path is under configs/ when relative."""
+    return load_yaml(CONFIGS / path) | {"features": dict(listen.FEATURES), "pitch": dict(listen.PITCH)}
 
 
 def load_config(*names: str, overrides: list[str] | None = None) -> dict[str, Any]:

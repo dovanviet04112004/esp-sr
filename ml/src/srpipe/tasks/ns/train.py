@@ -26,7 +26,7 @@ from torch.nn import functional
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, Dataset
 
-from srpipe.core.config import CONFIGS, apply_overrides, data_paths, load_yaml
+from srpipe.core.config import apply_overrides, data_paths, load_device, load_yaml
 from srpipe.core.logger import get_logger
 from srpipe.core.run_dir import create_run_dir
 from srpipe.core.seed import seed_everything
@@ -397,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
     seed_everything(cfg["train"]["seed"])
     torch.backends.cudnn.deterministic, torch.backends.cudnn.benchmark = True, False
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    val = train(cfg, load_yaml(CONFIGS / cfg["device"]), paths, run, device, bool(args.resume))
+    val = train(cfg, load_device(cfg["device"]), paths, run, device, bool(args.resume))
     (run / "metrics.yaml").write_text(yaml.safe_dump({"val": val}, sort_keys=False), encoding="utf-8")
     print(f"{run}\n" + yaml.safe_dump(val, sort_keys=False))
     return 0

@@ -36,7 +36,7 @@ import yaml
 
 from srpipe.core import corpus, screen
 from srpipe.core.audio_io import ItemReader, ramped, to_grid_rate, write_wav
-from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml, read_dotenv
+from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_device, load_yaml, read_dotenv
 from srpipe.generated import grid
 from srpipe.tts import CONFIG as TTS_CONFIG
 from srpipe.tts import engines
@@ -1082,7 +1082,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if args.step == "recut":
             print(f"recut: {recut(job, args.source)} sentences queued", flush=True)
-        cut(job, load_yaml(TTS_CONFIG), load_yaml(CONFIGS / "scenes" / "device.yaml"), paths["cache"], args.follow)
+        cut(job, load_yaml(TTS_CONFIG), load_device(CONFIGS / "scenes" / "device.yaml"), paths["cache"], args.follow)
     return 0
 
 

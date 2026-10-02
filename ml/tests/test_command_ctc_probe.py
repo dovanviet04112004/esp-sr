@@ -15,6 +15,7 @@ pytest.importorskip("torch")
 import torch
 
 from srpipe.core.config import load_yaml
+from srpipe.generated import listen
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc import probe, quant
@@ -42,7 +43,7 @@ class DrawnLogits:
 def test_random_windows_hold_the_longest_one_hop_and_one_chunk() -> None:
     cfg = load_yaml(ctc.CONFIG)
     windows = probe.random_windows(cfg, np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32))
-    longest = round(cfg["window_s"] * gate.HOPS_PER_S)
+    longest = listen.WINDOW_HOPS
     assert [len(w) for w in windows[:3]] == [longest, 1, cfg["chunk_hops"]]
     assert len(windows) == cfg["probe"]["command"]["windows"]
     assert all(w.shape[1] == DIMS and w.dtype == np.float32 and 1 <= len(w) <= longest for w in windows)

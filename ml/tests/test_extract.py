@@ -19,7 +19,7 @@ import yaml
 
 from srpipe.core import extract
 from srpipe.core.audio_io import write_wav
-from srpipe.core.config import load_yaml
+from srpipe.core.config import load_device, load_yaml
 from srpipe.generated import grid
 
 TEXTS = ["hôm nay trời đẹp", "nhờ trợ lí mở cửa giúp", "hỗ trợ lực lượng", "BẬT ĐÈN lên đi", "không có gì"]
@@ -175,7 +175,7 @@ def test_a_phrase_is_cut_where_a_pause_follows_it(tmp_path: Path, monkeypatch) -
     monkeypatch.setattr(
         extract.engines, "hear_text", lambda clips, *a: asked.extend(clips) or {c["id"]: "Trợ lý." for c in clips}
     )
-    device = load_yaml(extract.CONFIGS / "scenes" / "device.yaml")
+    device = load_device(extract.CONFIGS / "scenes" / "device.yaml")
     extract.cut(job, {}, device, tmp_path, False)
     spec = job.cfg["cut"]
     clips = {c.stem: c for c in (tmp_path / "raw/speech/t/tro_ly").glob("*.wav")}
@@ -219,7 +219,7 @@ def test_without_the_checker_every_cut_is_kept(tmp_path: Path, monkeypatch) -> N
     aligned = {"s_g__1": [{"word": w, "start": a, "end": b} for w, a, b in said]}
     monkeypatch.setattr(extract.engines, "align", lambda clips, *a: {c["id"]: aligned[c["id"]] for c in clips})
     monkeypatch.setattr(extract.engines, "hear_text", lambda *a: pytest.fail("the checker was asked"))
-    device = load_yaml(extract.CONFIGS / "scenes" / "device.yaml")
+    device = load_device(extract.CONFIGS / "scenes" / "device.yaml")
     extract.cut(job, {}, device, tmp_path, False)
     (row,) = extract.read_index(tmp_path / "raw/speech/t")
     assert row["phrase"] == "trợ lý" and row["heard"] == ""

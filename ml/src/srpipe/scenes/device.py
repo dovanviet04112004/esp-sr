@@ -1,7 +1,7 @@
 """The board simulation of KEHOACH 1.2 (E4-T8): clean speech becomes what the recogniser hears on board B.
 
 build runs sessions of split items in rooms of a bank built once, on the microphones and through the chain, log-mel
-and, when asked, pitch of configs/scenes/device.yaml, into processed/<out>/ with a manifest of sha256s. playback writes
+and, when asked, pitch of contracts/listen.yaml, into processed/<out>/ with a manifest of sha256s. playback writes
 interim/playback/vivos_test.wav, VIVOS test to play from a loudspeaker at a known place (host/plans/playback.tsv).
 Run: python -m srpipe.scenes.device build <split file> <out> | playback
 """
@@ -25,7 +25,7 @@ from scipy import signal
 
 from srpipe.core import screen, splits
 from srpipe.core.audio_io import ItemReader, ramped, read_wav, to_float, write_wav
-from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml
+from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_device
 from srpipe.dsp.afe import hpf
 from srpipe.dsp.afe.chain import PCM_FULL_SCALE, PCM_MAX, PCM_MIN, Chain, ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig, hz_to_mel, mel_to_hz
@@ -588,12 +588,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     paths = data_paths()
     if args.command == "build":
-        cfg = load_yaml(args.config)
+        cfg = load_device(args.config)
         out = paths["processed"] / args.out
         print(build(cfg, args.split, paths["raw"], paths["interim"], out, args.workers, args.repeats))
         return 0
     if args.command == "levels":
-        cfg = load_yaml(CONFIGS / "scenes" / "device.yaml")
+        cfg = load_device(CONFIGS / "scenes" / "device.yaml")
         board = paths["raw"] / "device" / args.board
         sources = [(f"`{name}`", session_speech(board / name, cfg)) for name in args.sessions]
         sources += [(f"`{name}`", built_speech(paths["processed"] / name)) for name in args.built]
@@ -602,7 +602,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "floor":
         print(
             floor_table(
-                paths["raw"] / "device" / args.board, args.sessions, load_yaml(CONFIGS / "scenes" / "device.yaml")
+                paths["raw"] / "device" / args.board, args.sessions, load_device(CONFIGS / "scenes" / "device.yaml")
             )
         )
         return 0

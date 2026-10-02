@@ -10,7 +10,7 @@ import numpy as np
 
 from srpipe.core import corpus, extract, splits
 from srpipe.core.audio_io import write_wav
-from srpipe.core.config import load_yaml
+from srpipe.core.config import load_device, load_yaml
 from srpipe.generated import grid
 from srpipe.tasks.wake import CONFIG, data, synth
 
@@ -122,7 +122,7 @@ def test_tts_positives_end_just_after_their_word(tmp_path) -> None:
 
 def test_simulate_links_a_twin_build_instead_of_running_it_again(tmp_path, monkeypatch) -> None:
     cfg = load_yaml(CONFIG)
-    device_cfg = load_yaml(data.CONFIGS / cfg["features"])
+    device_cfg = load_device(cfg["features"])
     lines = "wake/synth_pos/f5/a.wav\tx\t-\tsynth\n"
     split_v1, split_v2 = tmp_path / "splits" / "wake" / "v1", tmp_path / "splits" / "wake" / "v2"
     for folder in (split_v1, split_v2):

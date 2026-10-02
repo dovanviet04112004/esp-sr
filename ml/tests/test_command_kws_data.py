@@ -13,7 +13,7 @@ import yaml
 
 from srpipe.core import splits
 from srpipe.core.audio_io import write_wav
-from srpipe.core.config import CONFIGS, load_yaml
+from srpipe.core.config import load_device, load_yaml
 from srpipe.generated import grid
 from srpipe.tasks import command
 from srpipe.tasks.command import kws
@@ -129,7 +129,7 @@ def test_silence_stretches_keep_each_noise_file_in_one_role(tmp_path: Path) -> N
 def test_simulate_links_a_file_another_version_built_the_same_way(tmp_path: Path, monkeypatch) -> None:
     cfg = copy.deepcopy(load_yaml(kws.CONFIG))
     paths = {k: tmp_path / k for k in ("splits", "processed", "raw", "interim")}
-    base = load_yaml(CONFIGS / cfg["features"])
+    base = load_device(cfg["features"])
     device_cfg = base | {"session": base["session"] | {"items": cfg["simulate"]["session_items"]}}
     for version in ("v1", "v2"):
         folder = paths["splits"] / "command_kws" / version

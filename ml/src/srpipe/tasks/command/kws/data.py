@@ -17,7 +17,7 @@ import soundfile as sf
 import yaml
 
 from srpipe.core import corpus, extract, screen, splits
-from srpipe.core.config import CONFIGS, apply_overrides, data_paths, load_yaml
+from srpipe.core.config import apply_overrides, data_paths, load_device, load_yaml
 from srpipe.scenes import device
 from srpipe.tasks import command
 from srpipe.tasks.command import kws
@@ -328,7 +328,7 @@ def simulate(cfg: dict, paths: dict) -> None:
     pads, into processed/command_kws/<version>/<file>, smallest first; a file already built the same way is left as
     it is, or hard-linked from the version that built it."""
     spec, version = cfg["simulate"], cfg["split"]["version"]
-    base = load_yaml(CONFIGS / cfg["features"])
+    base = load_device(cfg["features"])
     device_cfg = base | {"session": base["session"] | {"items": spec["session_items"]}}
     pads = list(spec["pads_s"])
     folder = paths["splits"] / "command_kws" / version

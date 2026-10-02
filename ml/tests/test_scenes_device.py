@@ -15,7 +15,7 @@ import yaml
 
 from srpipe.core import screen
 from srpipe.core.audio_io import INT16_SCALE, to_float, write_wav
-from srpipe.core.config import CONFIGS, load_yaml
+from srpipe.core.config import CONFIGS, load_device, load_yaml
 from srpipe.dsp.spec.pitch import PitchConfig, pitch_features
 from srpipe.generated import array, grid
 from srpipe.metrics import mic_pair
@@ -135,7 +135,7 @@ def floor_session(raw: Path, name: str, kind: str, pcm_shift: int, samples: np.n
 
 
 def tiny(**changes: object) -> dict:
-    cfg = load_yaml(CONFIGS / "scenes" / "device.yaml")
+    cfg = load_device(CONFIGS / "scenes" / "device.yaml")
     small = {
         "rooms": {
             **cfg["rooms"],

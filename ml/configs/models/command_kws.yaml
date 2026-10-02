@@ -1,6 +1,6 @@
 # The kws track of command (KEHOACH 3.12, ADR-0012): DS-CNN over one window a utterance, classes the learned commands,
 # other and silence; each hop is log-mel then pitch's POV, normalised log F0 and delta.
-features: scenes/device.yaml       # mel and pitch as the device computes them
+features: scenes/device.yaml       # the board simulation; mel and pitch a hop from contracts/listen.yaml
 window_hops: 94                    # ending at the hop vad turns off after an utterance, about 1.5 s
 commands: null                     # learned command ids the net tells apart, the rest are other to it; null for all
 speech_commands: null              # a pilot on English keywords of Speech Commands v0.02 in place of the commands

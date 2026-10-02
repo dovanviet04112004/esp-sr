@@ -1,7 +1,7 @@
 """The kws track: DS-CNN over one window of features a utterance, classes the learned commands, other and silence
 (KEHOACH 3.12, ADR-0012)."""
 
-from srpipe.core.config import CONFIGS, load_yaml
+from srpipe.core.config import CONFIGS, load_device
 from srpipe.dsp.spec import pitch
 from srpipe.tasks import command
 
@@ -25,4 +25,4 @@ def classes(cfg: dict, command_cfg: dict) -> list[str]:
 
 def n_dims(cfg: dict) -> int:
     """Features a hop: the mel bands of the feature config, then pitch's."""
-    return load_yaml(CONFIGS / cfg["features"])["features"]["n_bands"] + pitch.N_FEATURES
+    return load_device(cfg["features"])["features"]["n_bands"] + pitch.N_FEATURES

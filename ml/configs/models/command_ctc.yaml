@@ -10,7 +10,7 @@ split:                             # data/splits/command/<version> by python -m 
     speech/vlsp/: {}
     speech/bud500/: {}
   hours: {speech/vlsp/: 15, speech/bud500/: 25}   # train hours kept of a corpus, drawn with the seed; others whole
-features: scenes/device.yaml       # mel then pitch's three, a hop, as the device computes them
+features: scenes/device.yaml       # the board simulation; mel then pitch's three a hop from contracts/listen.yaml
 simulate:                          # python -m srpipe.tasks.command.ctc.data simulate, into processed/command/<version>
   workers: 16
 train:                             # python -m srpipe.tasks.command.ctc.train (E11-T12); the GPU when present
@@ -47,7 +47,6 @@ rnnt:                              # the rnnt track (KEHOACH 3.12, ADR-0016): Mu
   loss_chunk: 4                    # sentences whose joiner lattice a step holds at once: the GPU has 4 GB
   beam: 4                          # hypotheses the search keeps
 chunk_hops: 16                     # hops a streaming step takes: a multiple of the front's stride times the top rate
-window_s: 3.0                      # LENH's longest window (KEHOACH 5.4): the decision looks this far back at most
 quant:                             # python -m srpipe.tasks.command.ctc.quant ptq|int16|qat <run> (E11-T12, KEHOACH 3.14)
   seed: 20261002
   calib_sentences: 64              # train sentences of the run's split the int8 scales are drawn from
@@ -80,7 +79,7 @@ probe:                             # E11-T12: one layer, then the whole net, ran
   input_std: 1.0
   norm_scale: [0.5, 1.5]           # each norm's scale drawn uniform, as training leaves it, never exactly one
   decide:                          # E11-T13: the decision of the default commands timed on board B (make ai-unit)
-    runs: 10                       # timed runs, after one untimed; the window is window_s long
+    runs: 10                       # timed runs, after one untimed; the window is listen.yaml's window_s long
     thresholds: [1000, 50]         # reject and margin, thousandths of a nat a frame
   command:                         # E11-T19: windows through ai_engine_command_{begin,step,score} (make ai-unit)
     windows: 12                    # board windows of a trained run spread evenly, or random ones without

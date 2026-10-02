@@ -20,7 +20,7 @@ import yaml
 
 from srpipe.core import corpus, extract, screen, splits
 from srpipe.core.audio_io import ItemReader
-from srpipe.core.config import CONFIGS, apply_overrides, data_paths, load_yaml
+from srpipe.core.config import apply_overrides, data_paths, load_device, load_yaml
 from srpipe.generated import grid, lang_vi
 from srpipe.lang import g2p
 from srpipe.lang.normalize import LangError, normalize
@@ -327,7 +327,7 @@ def simulate(cfg: dict, paths: dict[str, Path]) -> None:
     """Every file of the split through the board simulation into processed/wake/<split>/<file>, smallest first,
     each as many passes as simulate.repeats asks; a file already built the same way is left as it is."""
     spec = cfg["simulate"]
-    device_cfg = load_yaml(CONFIGS / cfg["features"])
+    device_cfg = load_device(cfg["features"])
     for split_file in sorted((paths["splits"] / "wake" / spec["split"]).glob("*.txt"), key=lambda f: f.stat().st_size):
         out = paths["processed"] / "wake" / spec["split"] / split_file.stem
         repeats = spec["repeats"].get(split_file.stem, 1)
