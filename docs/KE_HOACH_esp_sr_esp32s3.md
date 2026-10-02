@@ -84,6 +84,7 @@ Chỉ bốn khối dùng mô hình học. Mọi khối khác là công thức, k
 | `wake` | `ai_engine/src/wake/` | TCN tích chập giãn nở nhân quả, 6 tầng, bước giãn 1 → 32, 64 kênh | log-mel 40 dải × khung 16 ms | xác suất từ đánh thức mỗi khung | ~100 KB int8 🔬 | tự huấn luyện |
 | `command` `kws` | `ai_engine/src/command_kws/` | DS-CNN (Zhang và cộng sự, 2017): một tích chập rồi bốn tầng tách chiều sâu, trung bình gộp, phân lớp một cửa sổ mỗi câu (ADR-0012) | log-mel 40 cộng ba chiều cao độ trên cửa sổ 94 bước tính ngược từ lúc `vad` tắt | xác suất của từng lệnh học được, `other`, `silence` | cỡ S của bài: `.espdl` 40,6 KB; M, L (156, 438 KB) quá ngân sách thời gian (§3.12) | tự huấn luyện trên mẩu lệnh người thật, TTS và âm bản |
 | `command` `ctc` | `ai_engine/src/command_ctc/` | encoder chạy dòng theo bộ khung MultiNet7 của Espressif (ADR-0013): ba tích chập 2D giảm khung, 6 lớp chia 4 tầng tốc độ khung, mỗi lớp khối feedforward, khối tích chập có cổng và khối trộn thay attention; đầu CTC trên đơn vị của §3.12; lùi về TCN nếu một lớp của nó qua esp-dl không đạt trên board | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung | **theo chất lượng**, từ cỡ MultiNet7 ~2,1 MB int8 🔬 trở lên; trần là µs trên board (§3.3), bộ nhớ nới theo §6.1, §6.6 (ADR-0013) | tự huấn luyện trên kho tiếng Việt |
+| `command` `rnnt` | `ai_engine/src/command_rnnt/` | encoder của `ctc` cộng mạng dự đoán không trạng thái và bộ nối như MultiNet7 (ADR-0016): nhúng 45 lớp thành 384 chiều, tích chập ngữ cảnh 2, bộ nối 384 chiều; tìm chùm theo cây lệnh (§3.12) | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung × giả thuyết | encoder như `ctc` cộng ~0,23 MB int8 🔬 | cùng lượt học với `ctc` (RNN-T cộng CTC) |
 | `synth` | `ai_engine/src/synth/` | chốt ở E12-T1: mạng chưng cất kiểu sanoTTS (trường độ → âm học → iSTFT) | chuỗi đơn vị + trường độ | PCM 16 kHz | ≤ 1 MB | tuỳ phương án; phương án không mạng nằm ở `svc_speak` (§3.13) |
 
 Runtime của cả bốn là `esp-dl`, ghim bản chính xác (§4.5.1). `esp-dl` có sẵn GRU int8
@@ -446,6 +447,7 @@ vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đ
 | `normalize` `g2p` `lexicon` | thuần | `lang_vi` | luật chính tả → đơn vị, sinh biến thể phương ngữ | `contracts/lang_vi.yaml` | chỉ lúc nạp bộ lệnh: **1,18 ms đo** mỗi lệnh, ba vùng | E11-T4 |
 | `command` `kws` | **mô hình** + thuần | `ai_engine/src/command_kws/` | DS-CNN phân lớp các lệnh đã học + `other` + `silence` trên một cửa sổ mỗi câu; từ chối theo lớp thắng, xác suất và khoảng cách nhất–nhì (ADR-0012) | cửa sổ 94 bước log-mel 40 + 3 chiều cao độ; cỡ S, M, L ở cấu hình | S **41,9 ms đo** một lần mỗi câu (22 triệu MAC; M 277 ms, L 2,03 s, `measurements/latency.md` §10); `step` chỉ chép khung, còn `pitch` tốn ~2 ms mỗi bước trên nhân 0 (`measurements/pitch.md`) | E11-T17 |
 | `command` `ctc` | **mô hình** + thuần | `ai_engine/src/command_ctc/` | encoder kiểu MultiNet7 + CTC (ADR-0013), chấm có ràng buộc từng lệnh, từ chối theo khoảng cách với vòng tự do | | 11–18 ms mỗi 32 ms, **chỉ trong cửa sổ lệnh**; chấm **14,7 ms đo** một lần mỗi câu với bộ lệnh mặc định (§3.12) | E11-T13 |
+| `command` `rnnt` | **mô hình** + thuần | `ai_engine/src/command_rnnt/` | encoder của `ctc` + mạng dự đoán và bộ nối kiểu MultiNet7 (ADR-0016), tìm chùm theo cây lệnh, từ chối như `ctc` | | encoder như `ctc`; bộ nối mỗi khung × chùm trong cửa sổ lệnh 🔬 | E11-T20 |
 | `synth` | **mô hình** hoặc thuần | `ai_engine/src/synth/` hoặc `svc_speak` | chốt ở E12-T1 | | < 1× thời gian thực, dựng trước rồi phát | E12-T4 |
 
 Cột chi phí là **ước để kiểm kế hoạch có vừa không**, không phải số để báo cáo. Bước 4 của công thức
@@ -903,13 +905,14 @@ vùng, cách đọc số, từ điển viết tắt và từ mượn. C và Pyth
 Python ở `ml/src/srpipe/lang/` và C ở `lang_vi` phải cho **đầu ra giống hệt** trên danh sách mọi âm
 tiết hợp lệ cộng bộ thử có nhãn gồm số, từ mượn, tên riêng. Sai số cho phép bằng 0.
 
-**`command` có hai đường sau một hợp đồng** (ADR-0012). Cả hai cắm sau cùng ba hàm đã đóng băng
-`ai_engine_command_{begin,step,score}` (§4.5.5) và trả cùng một khuôn: chỉ số lệnh hoặc −1, kèm ba điểm. **`ctc`** nhận
-mọi bộ lệnh viết bằng chữ, qua `lang_vi`; **`kws`** phân lớp một bộ lệnh cố định lúc học. Kconfig
-`AI_ENGINE_COMMAND_BACKEND` chọn thư mục nguồn nào dựng vào `ai_engine` (§4.5.2), và ảnh model khai đường của nó trong
-`meta.json` (§6.3). Đường mặc định của sản phẩm là **`kws`**, đường duy nhất chạy được trong tuần, tới khi Cửa 3 trên
-tập thu qua board chọn (§8). Xét lại khi `ctc` đạt Cửa 3 trong ngân sách của §3.3: lúc ấy `kws` chỉ còn là đường dự
-phòng, hoặc bỏ. Đơn vị và phép chấm dưới đây là của `ctc`; `kws` ở sau.
+**`command` có ba đường sau một hợp đồng** (ADR-0012, ADR-0016). Cả ba cắm sau cùng ba hàm đã đóng băng
+`ai_engine_command_{begin,step,score}` (§4.5.5) và trả cùng một khuôn: chỉ số lệnh hoặc −1, kèm ba điểm. **`ctc`** và
+**`rnnt`** dùng chung một encoder, nhận mọi bộ lệnh viết bằng chữ qua `lang_vi`, khác nhau ở cách giải; **`kws`** phân
+lớp một bộ lệnh cố định lúc học. Kconfig `AI_ENGINE_COMMAND_BACKEND` chọn thư mục nguồn nào dựng vào `ai_engine`
+(§4.5.2), và ảnh model khai đường của nó trong `meta.json` (§6.3). Đường mặc định của sản phẩm là **`kws`**, đường duy
+nhất chạy được trong tuần, tới khi Cửa 3 trên tập thu qua board chọn (§8). Xét lại khi `ctc` hay `rnnt` đạt Cửa 3 trong
+ngân sách của §3.3: lúc ấy `kws` chỉ còn là đường dự phòng, hoặc bỏ. Đơn vị và phép chấm dưới đây là của `ctc`, rồi
+`rnnt`; `kws` ở sau.
 
 **Đơn vị nhận dạng** của `ctc` là 44 đơn vị ở trên, **thanh chen trong cùng chuỗi CTC**: một đầu ra, CTC tự căn thanh
 vào âm tiết. Chốt theo số đã công bố, không bằng phép so của repo (ADR-0010):
@@ -997,6 +1000,23 @@ và mỗi lần chấm.
 Với `ctc`, thêm lệnh là thêm một dòng chữ (TỔNG QUAN §3.1): dòng mới đi qua `lang_vi` **ngay trên máy** lúc nạp
 bộ lệnh, qua MQTT `down/commands` hoặc từ `storage/cmd/set.json` (§6.4). Phép kiểm chứng minh của
 V5.5.8 là thêm một lệnh chưa từng có trong dữ liệu huấn luyện rồi đo nó.
+
+**`rnnt`** — cùng encoder với `ctc`, giải bằng RNN-T như MultiNet7 giải trên chip (ADR-0016). Trong `libmultinet.a` của
+ESP-SR 2.5.5, MultiNet7 gọi `rnnt_beam_search_with_fst`: tìm chùm RNN-T bị ràng buộc bởi FST dựng từ bộ lệnh lúc nạp
+(`fst_compile_from_commands`, tất định hoá, tối giản), chạy mạng dự đoán và bộ nối mỗi bước (`decoder_joiner_run`), kiểm
+tiền tố và hậu tố của lệnh (`fst_command_list_contains_prefix`, `_suffix`), chốt bằng một ngưỡng phát hiện; nó không gọi
+hàm giải CTC nào, còn MultiNet6 gọi cả hai. Thêm lệnh vẫn là thêm một dòng chữ: cây lệnh dựng trên máy từ `lang_vi`.
+
+| Phần | Chốt |
+|---|---|
+| Mạng | encoder của `ctc`, cùng mã, cùng cỡ, giữ cả đầu CTC; cộng **mạng dự đoán không trạng thái** như MultiNet7: nhúng 45 lớp (blank làm lớp đầu chuỗi) thành 384 chiều, tích chập theo chiều sâu trên 2 đơn vị cuối, ReLU; và **bộ nối**: chiếu khung encoder 128 → 384 và đầu ra mạng dự đoán 384 → 384, cộng, tanh, chiếu 384 → 45 |
+| Học | RNN-T cộng CTC trong cùng một lượt, như cấu hình `rnnt_ctc` của MultiNet7: `rnnt_loss` của torchaudio trên cả lưới khung × đơn vị, cộng CTC nhân hệ số ở cấu hình; cùng split, seed, số bước, SpecAugment với lượt CTC trơn. Lượt ấy ra cả hai đầu, nên `ctc` và `rnnt` so trên cùng một encoder |
+| Tìm | **tìm chùm có sửa**, mỗi khung phát tối đa một đơn vị, chùm `N` giả thuyết ở cấu hình. Mỗi khung, mỗi giả thuyết chạy bộ nối trên khung ấy với đầu ra mạng dự đoán của nó, rồi log-softmax 45 lớp bằng đúng hàm của `ctc`; blank giữ giả thuyết, đơn vị `k` nối vào khi **cây lệnh** cho đi tiếp; giả thuyết trùng chuỗi đơn vị thì cộng xác suất; giữ `N` giả thuyết điểm cao nhất |
+| Cây lệnh | cây tiền tố, tức FST tất định, của mọi biến thể `lang_vi` của mọi lệnh, cộng mọi **phần** của chúng như `ctc` (đoạn âm tiết liền nhau thiếu ít nhất một âm tiết) đánh dấu không phải lệnh, để nửa lệnh tranh trong cùng chùm |
+| Quyết | hết cửa sổ, `c*` là giả thuyết đi trọn một lệnh, điểm cao nhất. Từ chối khi không giả thuyết nào trọn lệnh; khi đường tham lam không ràng buộc hơn `c*` quá `δ₁`; khi giả thuyết trọn một lệnh khác sát `c*` dưới `δ₂`; hay khi giả thuyết trọn một phần của `c*` không kém `c*`. Điểm là log xác suất chia số khung như `ctc`; cùng ba trường kết quả, cùng `δ₁` `δ₂` ở NVS |
+| Chạy | `_step` như `ctc`, thêm: mỗi khối 8 khung encoder ra thì tìm luôn trên 8 khung ấy, nên `_score` chỉ chốt. Mạng dự đoán và bộ nối là hai mạng int8 nhỏ qua esp-dl, mục `rnnt_predictor` và `rnnt_joiner` của ảnh (§6.3): bộ nối chạy mỗi khung × mỗi giả thuyết, mạng dự đoán mỗi khi giả thuyết có thêm đơn vị 🔬 |
+| Khớp | hai mạng nhỏ khớp mô phỏng ESP-PPQ bằng `model->test()`; tìm chùm và cây lệnh là C thuần, bản soi gương `ctc/postproc/rnnt_search.py` float32 cùng thứ tự phép, đọc đầu ra int8 của bộ nối như C đọc; bộ vàng `contracts/golden/command_rnnt/` có đối chứng âm, sai số 0 |
+| Chọn | giữa `ctc` và `rnnt` bằng Cửa 3 sau int8 trên tập thu qua board, cùng encoder, trong ngân sách µs của §3.3 |
 
 **`kws`** — DS-CNN (Zhang và cộng sự, 2017, "Hello Edge"): một tích chập thường, rồi các tầng tách chiều sâu (tích chập
 từng kênh 3 × 3 rồi tích chập 1 × 1), trung bình gộp và một lớp ra, ở ba cỡ của bài: S (64 kênh, bốn tầng), M (172
@@ -1483,7 +1503,8 @@ ml/
 │   │   │   │                          #   srpipe/tts và core/phrases.py vào interim/command/synth_{pilot,pos,neg}/
 │   │   │   ├── kws/{model/, data.py, train.py, quant.py, postproc/}   # DS-CNN; data.py dựng split command_kws/v<n>
 │   │   │   │                          #   và đặc trưng processed/command_kws/; postproc/ ★ softmax và luật từ chối
-│   │   │   └── ctc/{data.py, model/, train.py, quant.py, qat.py, probe.py, postproc/ctc_score.py ★}
+│   │   │   └── ctc/{data.py, model/{encoder.py, transducer.py}, train.py, quant.py, qat.py, probe.py,
+│   │   │        postproc/{ctc_score.py ★, rnnt_search.py ★}}   # transducer: mạng dự đoán, bộ nối của rnnt
 │   │   │                              #   encoder kiểu MultiNet7 + CTC; data.py dựng split command/v<n>, bỏ lệnh
 │   │   │                              #   chưa học khỏi tập học (§1.3); quant.py dựng thang §3.14, lệnh con ptq,
 │   │   │                              #   int16, qat; qat.py vòng học CTC của bậc 4; probe.py bản dò board E11-T12
@@ -1682,7 +1703,7 @@ firmware/
 │   ├── sys_storage/   [C]   L2  # NVS + LittleFS + mmap ảnh model; sở hữu storage_format.h
 │   ├── sys_time/      [C]   L2  # SNTP
 │   ├── ai_engine/     [C++] L3  # esp-dl; src/core/ không biết tên model;
-│   │                            #   src/{ns,ns_rnnoise,ns_nsnet,wake,command_kws,command_ctc,synth}/;
+│   │                            #   src/{ns,ns_rnnoise,ns_nsnet,wake,command_kws,command_ctc,command_rnnt,synth}/;
 │   │                            #   Kconfig AI_ENGINE_NS_BACKEND chọn một thư mục ns*, AI_ENGINE_COMMAND_BACKEND
 │   │                            #   một thư mục command_* vào danh sách nguồn
 │   ├── net_wifi/      [C]   L3
@@ -1717,10 +1738,11 @@ firmware/
 └── scripts/                          # rỗng có chủ ý: script ngang khối ở /tools, nạp model ở ml/scripts
 ```
 
-**Đường của `command` chọn lúc dựng** (§3.12). Kconfig `AI_ENGINE_COMMAND_BACKEND` của `ai_engine` (`kws` | `ctc`,
-mặc định `kws`) đưa đúng một trong `src/command_kws/`, `src/command_ctc/` vào danh sách nguồn theo luật 5 của §4.5.3;
-`REQUIRES` không đổi. Hai thư mục cài cùng ba hàm `ai_engine_command_*`, nên `svc_listen` không biết đường nào đang chạy
-ngoài mã lỗi khi đổi bộ lệnh.
+**Đường của `command` chọn lúc dựng** (§3.12). Kconfig `AI_ENGINE_COMMAND_BACKEND` của `ai_engine` (`kws` | `ctc` |
+`rnnt`, mặc định `kws`) đưa đúng một trong `src/command_kws/`, `src/command_ctc/`, `src/command_rnnt/` vào danh sách
+nguồn theo luật 5 của §4.5.3; `REQUIRES` không đổi. Ba thư mục cài cùng ba hàm `ai_engine_command_*`, nên `svc_listen`
+không biết đường nào đang chạy ngoài mã lỗi khi đổi bộ lệnh. `command_rnnt` dùng lại log-softmax của
+`command_ctc/ctc_score.c`.
 
 **Ứng viên của `ns` chọn lúc dựng** (§3.9). Kconfig `AI_ENGINE_NS_BACKEND` của `ai_engine` (`none` | `rnnoise` |
 `nsnet`, mặc định `none` tới khi ADR của E9-T12 chọn) đưa đúng một trong `src/ns/`, `src/ns_rnnoise/`, `src/ns_nsnet/`
@@ -1818,7 +1840,7 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | `mica_kws/feature` | `dsp_spec/mel`, cộng `dsp_spec/pitch` cho `command` (ADR-0010); chuẩn hoá đi theo model trong `ai_engine` |
 | `mica_kws/g2p` | `lang_vi/{normalize, g2p, lexicon}` |
 | `mica_kws/wake` | `ai_engine/src/wake/` |
-| `mica_kws/command` | `ai_engine/src/command_ctc/` (mạng + chấm CTC), hoặc `ai_engine/src/command_kws/` (DS-CNN, ADR-0012); bảng lệnh do `svc_listen` dựng qua `lang_vi` |
+| `mica_kws/command` | `ai_engine/src/command_ctc/` (mạng + chấm CTC), `ai_engine/src/command_rnnt/` (cùng encoder, tìm chùm RNN-T, ADR-0016), hoặc `ai_engine/src/command_kws/` (DS-CNN, ADR-0012); bảng lệnh do `svc_listen` dựng qua `lang_vi` |
 | `mica_tts/synth` | `ai_engine/src/synth/`, hoặc ghép mẩu trong `svc_speak` |
 
 **`ai_engine` giữ đúng khuôn của repo face attendance.** `src/core/` nạp ảnh model, cấp vùng làm
@@ -2326,7 +2348,7 @@ offset 0x400  dữ liệu, mỗi entry căn 64 B
 
 | Trường | Giá trị | Ai đọc |
 |---|---|---|
-| `backend` | `kws` \| `ctc` | bước đóng gói đặt tên mục trong ảnh theo nó (`command_kws` hay `command_ctc`), nên bản dựng của đường kia không tìm thấy model và coi ảnh là không có `command` |
+| `backend` | `kws` \| `ctc` \| `rnnt` | bước đóng gói đặt tên mục trong ảnh theo nó (`command_kws`, `command_ctc`, hay `command_rnnt` cùng `rnnt_predictor` và `rnnt_joiner`), nên bản dựng của đường khác không tìm thấy model và coi ảnh là không có `command` |
 | `features` | `log_mel40` \| `log_mel40_pitch3`, kèm số chiều mỗi khung | `svc_listen`, qua độ dài khung của `ai_engine_command_step` (§4.5.5) |
 | `classes` | `kws`: `id` các lệnh đã học theo thứ tự, rồi `other`, `silence`; `ctc`: không có | bước đóng gói kiểm các `id` lệnh là phần đầu của `contracts/commands/default_vi.json`, để chỉ số trả về trùng chỉ số trong bảng lệnh |
 
