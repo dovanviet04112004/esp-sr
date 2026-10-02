@@ -11,10 +11,12 @@ STREAM_PORT = $(shell sed -n 's/^SRHOST_STREAM_PORT=//p' host/.env 2>/dev/null)
 DATA_ROOT = $(shell sed -n 's/^SRPIPE_DATA_ROOT=//p' host/.env 2>/dev/null)
 PCM_SHIFT ?= 16
 PLAN_FW ?= capture@$(shell git describe --always --tags)
-# idf.py only adds options a generated sdkconfig lacks, so one older than its defaults or their list is dropped.
+# idf.py only adds options a generated sdkconfig lacks, so one older than its defaults, their list or a Kconfig
+# default is dropped.
 fresh_sdkconfig = if [ -f $(1) ] && [ -n "$$(find $(2) -newer $(1))" ]; then rm $(1); echo "$(1) regenerated"; fi
 FW_DEFAULTS := firmware/sdkconfig.defaults firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.afe \
-               firmware/CMakeLists.txt $(wildcard firmware/sdkconfig.secrets)
+               firmware/CMakeLists.txt $(wildcard firmware/sdkconfig.secrets) \
+               $(wildcard firmware/components/*/Kconfig) firmware/main/Kconfig.projbuild
 BENCH_APP := firmware/test_apps/bench_afe
 UNIT_APP := firmware/components/ai_engine/test_apps/unit
 PARITY_APP := firmware/test_apps/parity
