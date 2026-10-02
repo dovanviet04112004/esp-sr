@@ -11,6 +11,9 @@ menu "ai_engine"
 
         config AI_ENGINE_COMMAND_BACKEND_CTC
             bool "ctc: src/command_ctc/, the streaming encoder and the constrained CTC decision"
+
+        config AI_ENGINE_COMMAND_BACKEND_RNNT
+            bool "rnnt: src/command_rnnt/, the ctc encoder with a predictor and a joiner, every command scored exactly"
     endchoice
 
 endmenu
