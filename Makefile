@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-deploy models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
-        fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live session session-plan
+        fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live commands session session-plan
 
 PORT ?= /dev/ttyUSB0
 SDKCONFIG_BASE := sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.afe
@@ -292,6 +292,9 @@ broker-down: ## Stop the bench MQTT broker
 
 host-live: ## Show wake and command events live
 	cd host && uv run python -m srhost.live
+
+commands: ## Send a command set to one board, retained, and show its answer: make commands DEVICE=<deviceId> SET=<file.json> [CLEAR=1]
+	cd host && uv run python -m srhost.commands --device "$(DEVICE)" $(if $(CLEAR),--clear,"$(abspath $(SET))")
 
 # The LAN cannot reach WSL in NAT mode; a port Docker Desktop publishes on Windows it can (KEHOACH 4.6).
 # The board waits in its bootloader until the receiver listens, so a session starts at seq 0 of one boot.
