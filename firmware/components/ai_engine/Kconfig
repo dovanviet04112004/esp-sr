@@ -13,13 +13,4 @@ menu "ai_engine"
             bool "ctc: src/command_ctc/, the streaming encoder and the constrained CTC decision"
     endchoice
 
-    config AI_ENGINE_COMMAND_WINDOW_MS
-        int "longest command window, ms"
-        depends on AI_ENGINE_COMMAND_BACKEND_CTC
-        default 3000
-        range 1000 10000
-        help
-            The longest window LENH keeps (KEHOACH 5.4). The ctc backend holds that many hops of log-probabilities
-            in PSRAM, and a step past it returns ESP_ERR_NO_MEM.
-
 endmenu

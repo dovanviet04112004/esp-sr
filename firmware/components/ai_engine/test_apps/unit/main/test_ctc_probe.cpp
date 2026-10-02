@@ -14,6 +14,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "gen_grid.h"
+#include "gen_listen.h"
 #include "sdkconfig.h"
 #include "storage_format.h"
 #include "sys_storage.h"
@@ -29,7 +30,6 @@ constexpr int kToleranceSteps = 1; // one int8 step, as model->test() allows (KE
 constexpr size_t kNetsMax = 2;
 constexpr int64_t kUsPerMs = 1000;
 constexpr size_t kFeaturesMax = 64;
-constexpr int32_t kMsPerS = 1000;
 constexpr const char *kGateLabel = "voice"; // partitions.csv: ctc_gate.bin goes there
 
 // Layout written by srpipe.tasks.command.ctc.probe; each record's int8 data is padded to four bytes.
@@ -77,8 +77,7 @@ ai_engine_lexicon_t s_lexicon;
 // LENH's longest window in hops, the most ai_engine_command_step takes.
 size_t window_hops_max()
 {
-    const size_t hop_units = GEN_GRID_HOP_SAMPLES * kMsPerS;
-    return (CONFIG_AI_ENGINE_COMMAND_WINDOW_MS * GEN_GRID_SAMPLE_RATE_HZ + hop_units / 2) / hop_units;
+    return GEN_LISTEN_WINDOW_HOPS;
 }
 
 // The lexicon packed at base + at; returns where the windows start, on a four-byte boundary of base.

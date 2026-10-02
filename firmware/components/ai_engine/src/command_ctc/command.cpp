@@ -7,7 +7,7 @@
 #include "core/model_image.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "gen_grid.h"
+#include "gen_listen.h"
 #include "sdkconfig.h"
 #include "storage_format.h"
 #include "sys_storage.h"
@@ -21,7 +21,6 @@ constexpr long kInt8Min = -128;
 constexpr long kInt8Max = 127;
 constexpr size_t kLayoutRank = 3; // esp-dl: (1, features, hops) in, (1, frames, classes) out
 constexpr uint16_t kFieldMax = UINT16_MAX;
-constexpr int32_t kMsPerS = 1000;
 
 struct Window {
     bool ready, open;
@@ -116,9 +115,7 @@ esp_err_t command_load() noexcept
     s.chunk_hops = s.in.dims[2];
     s.chunk_frames = s.out.dims[1];
     s.classes = s.out.dims[2];
-    const int32_t hop_ms_units = GEN_GRID_HOP_SAMPLES * kMsPerS;
-    s.hops_max =
-        (CONFIG_AI_ENGINE_COMMAND_WINDOW_MS * GEN_GRID_SAMPLE_RATE_HZ + hop_ms_units / 2) / hop_ms_units;
+    s.hops_max = GEN_LISTEN_WINDOW_HOPS;
     const size_t frames_max = (s.hops_max + s.chunk_hops - 1) / s.chunk_hops * s.chunk_frames;
     s.mean = reinterpret_cast<const float *>(norm.data);
     s.deviation = s.mean + s.features;
