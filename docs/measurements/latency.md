@@ -295,3 +295,23 @@ Ngân sách của KẾ HOẠCH §3.3 là 11–18 ms mỗi 32 ms trong cửa sổ
 chấm 56,3 ms. Lượt đầu cùng ngày, trước bản sửa `rmsnorm_as_espdl`, 196/198 cửa sổ trùng: cửa sổ 67 và 197 lệch một bước
 điểm vì `RMSNormalization` của ESP-PPQ làm tròn khác nhân esp-dl (KẾ HOẠCH §3.14); mô phỏng lại đúng số học esp-dl thì
 Python ra đúng 198 quyết định của chip.
+
+## 15. `rnnt` trên chip: ba đồ thị int8 và chấm chính xác (E11-T20)
+
+Board B, bản dựng `rnnt` của `ai_engine/test_apps/unit` (`idf.py -D UNIT_PROFILE=rnnt`) với cờ trình biên dịch của
+`sdkconfig.bench` (`-O2`, 240 MHz), IDF 6.0.2, esp-dl 3.3.11, ESP-PPQ 1.3.11 cộng bốn bản sửa của nhánh, 03/10. Ba đồ thị
+của `rnnt/probe.py` trên trọng số ngẫu nhiên theo seed của `probe` (thời gian không phụ thuộc trọng số), bộ 10 lệnh mặc
+định: cây lệnh có 75 ngữ cảnh. Đo bằng `make ai-unit-rnnt`.
+
+| Đo | Kết quả |
+|---|---|
+| `command_rnnt` (encoder cộng phép chiếu khung 128 → 384), 16 bước 16 hop | chênh int8 lớn nhất **0**; 45,4 ms một bước, như mạng `ctc` (§14) |
+| `rnnt_predictor`, 75 ngữ cảnh | **75/75** trùng Python; 2,0 ms một lần, mỗi ngữ cảnh một lần trong lúc model nạp |
+| `rnnt_joiner`, 256 cặp khung và ngữ cảnh | **256/256** trùng Python; 98 µs một lần |
+| Log-softmax 45 lớp của một đầu ra bộ nối (hàm của `ctc`) | 52 µs |
+| Vòng tìm riêng, cửa sổ 3 s (94 khung), mọi hàng log-xác suất chép sẵn | 173 ms, **1,84 ms mỗi khung**; 80 hàng mỗi khung: 75 ngữ cảnh của cây và đường tham lam |
+| `_score`, 12 cửa sổ 1–188 hop | **12/12** trùng Python từng trường; **26,8 ms mỗi khung**, cửa sổ 3 s 2,6 s |
+| Như trên, khung và prefix lượng tử lại sang lưới của bộ nối một lần (`63fc4de`) | 12/12 trùng; **15,5 ms mỗi khung**, cửa sổ 3 s **1,56 s** |
+
+Ngân sách của KẾ HOẠCH §3.12 là ≤ 100 ms một lần chấm: còn vượt khoảng 15 lần. Phần đắt là 80 lần gọi bộ nối mỗi khung,
+mỗi lần một đồ thị esp-dl 98 µs và một log-softmax 52 µs; vòng tìm chỉ chiếm 1,84 ms mỗi khung.
