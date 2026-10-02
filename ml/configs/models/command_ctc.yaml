@@ -13,6 +13,7 @@ split:                             # data/splits/command/<version> by python -m 
 features: scenes/device.yaml       # the board simulation; mel then pitch's three a hop from contracts/listen.yaml
 simulate:                          # python -m srpipe.tasks.command.ctc.data simulate, into processed/command/<version>
   workers: 16
+  speeds: [0.9, 1.0, 1.1]          # each train item spoken at one, drawn per item: Kaldi's speed perturbation
 train:                             # python -m srpipe.tasks.command.ctc.train (E11-T12); the GPU when present
   seed: 20261001
   dialect: north                   # lang_vi reads every sentence so: the corpora do not record the region
@@ -23,6 +24,10 @@ train:                             # python -m srpipe.tasks.command.ctc.train (E
   final_learning_rate: 1.0e-5      # cosine decay to this by the last step
   clip_norm: 5.0                   # of the gradient, against the rare sentence CTC aligns badly early on
   masks: {bands: 2, band_width: 8, hops: 4, hop_width: 15}   # SpecAugment: masks a sentence, each up to this wide
+  augment:                         # every draw new each time a sentence is batched, ahead of the masks (KEHOACH 3.12)
+    tempo: [0.8, 1.6]              # said this many times as fast, pitch kept, log-uniform: train's 90th 4.9 syllables/s to 7.8
+    warp_hops: 8                   # SpecAugment's time warp: one hop of the sentence moved at most this far
+    tilt_db: 3.0                   # a straight slope across the mel bands, up to this at either edge
   eval_every: 2000                 # steps between val passes, each net saved beside the run
 model:                             # MultiNet7's encoder frame (ADR-0013); sizes read from its weights
   front:                           # three conv2d over (hops, mel bands); pitch skips them and joins the projection

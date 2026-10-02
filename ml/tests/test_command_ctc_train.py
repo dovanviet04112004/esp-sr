@@ -183,3 +183,61 @@ def test_a_batch_of_greedy_paths_is_each_sentences_own(small) -> None:
     batch = transducer.greedy_paths(t, encoded, n_frames)
     alone = [transducer.greedy_paths(t, encoded[k : k + 1, :, :n], np.array([n]))[0] for k, n in enumerate(n_frames)]
     assert batch == alone and all(BLANK < u < encoder.n_classes() for path in batch for u in path)
+
+
+N_MEL = DIMS - 3
+STILL = {"tempo": [1.0, 1.0], "warp_hops": 0, "tilt_db": 0.0}
+
+
+def ramp(hops: int) -> np.ndarray:
+    return np.tile(np.arange(hops, dtype=np.float32)[:, None], (1, DIMS))
+
+
+def test_ctc_needs_a_frame_a_unit_and_a_blank_between_equal_neighbours() -> None:
+    assert train.need_frames(np.array([3, 4, 4, 5, 5, 5])) == 6 + 3
+
+
+def test_unchanged_draws_give_the_sentence_back() -> None:
+    x = np.random.default_rng(0).standard_normal((50, DIMS)).astype(np.float32)
+    y = train.augmented(x, np.array([1, 2]), STILL, N_MEL, 2, np.random.default_rng(1))
+    np.testing.assert_allclose(y, x, atol=1e-6)
+
+
+def test_a_faster_tempo_shortens_the_sentence_and_scales_delta_pitch() -> None:
+    spec = STILL | {"tempo": [2.0, 2.0]}
+    y = train.augmented(ramp(101), np.array([1]), spec, N_MEL, 2, np.random.default_rng(0))
+    assert len(y) == 50
+    np.testing.assert_allclose(y[:, 0], np.linspace(0.0, 100.0, 50), atol=1e-4)
+    np.testing.assert_allclose(y[:, N_MEL + train.DELTA_PITCH], np.linspace(0.0, 100.0, 50) * 100 / 49, rtol=1e-5)
+
+
+def test_tempo_never_leaves_ctc_fewer_frames_than_the_units_need() -> None:
+    units = np.arange(1, 31)
+    spec = STILL | {"tempo": [1.6, 1.6]}
+    y = train.augmented(ramp(70), units, spec, N_MEL, 2, np.random.default_rng(0))
+    assert len(y) == 60 and -(-len(y) // 2) >= train.need_frames(units)
+
+
+def test_the_warp_keeps_both_ends_and_runs_forward() -> None:
+    spec = STILL | {"warp_hops": 8}
+    for seed in range(20):
+        y = train.augmented(ramp(80), np.array([1]), spec, N_MEL, 2, np.random.default_rng(seed))
+        assert len(y) == 80 and y[0, 0] == 0.0 and y[-1, 0] == 79.0
+        assert np.all(np.diff(y[:, 0]) > 0.0)
+
+
+def test_the_tilt_slopes_the_mel_bands_only() -> None:
+    x = np.zeros((40, DIMS), dtype=np.float32)
+    y = train.augmented(x, np.array([1]), STILL | {"tilt_db": 3.0}, N_MEL, 2, np.random.default_rng(4))
+    slope = y[0, :N_MEL]
+    assert abs(slope.mean()) < 1e-6 and abs(slope[-1]) <= 3.0 * train.LOG_PER_DB + 1e-6
+    np.testing.assert_allclose(np.diff(slope), np.diff(slope)[0], atol=1e-6)
+    assert np.all(y[:, N_MEL:] == 0.0) and np.all(y == y[0])
+
+
+def test_an_augmented_batch_pads_to_its_longest_sentence() -> None:
+    data = train.Sentences(ramp(150), np.array([0, 60]), np.array([60, 90]), [np.array([2, 3]), np.array([4])])
+    spec = STILL | {"tempo": [2.0, 2.0]}
+    x, hops, units = train.augmented_batch(data, np.array([0, 1]), 16, spec, N_MEL, 2, np.random.default_rng(0))
+    assert hops.tolist() == [30, 45] and x.shape == (2, 48, DIMS)
+    assert np.all(x[0, 30:] == 0.0) and [u.tolist() for u in units] == [[2, 3], [4]]

@@ -34,6 +34,8 @@ from srpipe.tasks.wake.data import sentence_units
 BRANCH = "command_ctc"
 HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
 VAL_BATCH = 64
+DELTA_PITCH = 2  # pitch's third feature: delta log pitch a hop
+LOG_PER_DB = math.log(10.0) / 10.0  # log-mel is a natural log of power
 
 
 @dataclass
@@ -101,6 +103,62 @@ def mask(x: np.ndarray, hops: np.ndarray, spec: dict, n_mel: int, rng: np.random
             width = min(int(rng.integers(spec["hop_width"] + 1)), int(n))
             at = int(rng.integers(n - width + 1))
             w[at : at + width] = 0.0
+
+
+def need_frames(units: np.ndarray) -> int:
+    """The fewest CTC frames units fit in: one a unit, and a blank between two equal neighbours."""
+    return len(units) + int(np.count_nonzero(units[1:] == units[:-1]))
+
+
+def resampled(x: np.ndarray, places: np.ndarray) -> np.ndarray:
+    """x (hops, dims) read at fractional hop places, linearly between the two hops around each."""
+    low = np.floor(places).astype(np.int64)
+    high = np.minimum(low + 1, len(x) - 1)
+    share = (places - low).astype(np.float32)[:, None]
+    return x[low] * (1.0 - share) + x[high] * share
+
+
+def augmented(
+    x: np.ndarray, units: np.ndarray, spec: dict, n_mel: int, stride: int, rng: np.random.Generator
+) -> np.ndarray:
+    """One sentence's raw features (hops, dims), every draw new (KEHOACH 3.12): said tempo times as fast with its pitch
+    kept, never in fewer hops than CTC's frames for its units; SpecAugment's time warp about one hop; a straight slope
+    across the mel bands."""
+    n = len(x)
+    rate = math.exp(rng.uniform(math.log(spec["tempo"][0]), math.log(spec["tempo"][1])))
+    m = max(min(n, stride * need_frames(units)), round(n / rate))
+    hop = np.arange(m, dtype=np.float64)
+    w = spec["warp_hops"]
+    if m > 2 * (w + 1):
+        at, by = int(rng.integers(w + 1, m - w - 1)), int(rng.integers(-w, w + 1))
+        hop = np.where(hop < at, hop * (at + by) / at, at + by + (hop - at) * (m - 1 - at - by) / (m - 1 - at))
+    y = resampled(x, hop * (n - 1) / max(m - 1, 1))
+    y[:, n_mel + DELTA_PITCH] *= (n - 1) / max(m - 1, 1)
+    tilt_db = rng.uniform(-spec["tilt_db"], spec["tilt_db"])
+    y[:, :n_mel] += np.linspace(-tilt_db, tilt_db, n_mel, dtype=np.float32) * LOG_PER_DB
+    return y
+
+
+def augmented_batch(
+    data: Sentences, picks: np.ndarray, multiple: int, spec: dict, n_mel: int, stride: int, rng: np.random.Generator
+) -> tuple[np.ndarray, np.ndarray, list[np.ndarray]]:
+    """batch_of over the picked sentences each augmented, their hops as augmented."""
+    said = [
+        augmented(
+            data.features[data.first[k] : data.first[k] + data.hops[k]].astype(np.float32),
+            data.units[k],
+            spec,
+            n_mel,
+            stride,
+            rng,
+        )
+        for k in picks
+    ]
+    hops = np.array([len(s) for s in said])
+    x = np.zeros((len(picks), -(-int(hops.max()) // multiple) * multiple, data.features.shape[1]), dtype=np.float32)
+    for row, s in enumerate(said):
+        x[row, : len(s)] = s
+    return x, hops, [data.units[k] for k in picks]
 
 
 def frames_of(hops: np.ndarray, stride: int) -> np.ndarray:
@@ -214,7 +272,12 @@ def train(cfg: dict, sets: dict[str, Sentences], device: str, run: Path | None =
     print(f"{said}; steps {first} to {spec['steps']} of {spec['batch']}", flush=True)
     losses = []
     for step in range(first, spec["steps"] + 1):
-        x, hops, units = batch_of(data, rng.integers(len(data.first), size=spec["batch"]), net.chunk_multiple)
+        picks = rng.integers(len(data.first), size=spec["batch"])
+        if "augment" in spec:
+            stride = net.front.hop_stride
+            x, hops, units = augmented_batch(data, picks, net.chunk_multiple, spec["augment"], n_mel, stride, rng)
+        else:
+            x, hops, units = batch_of(data, picks, net.chunk_multiple)
         x = (x - mean) / std
         mask(x, hops, spec["masks"], n_mel, rng)
         loss = loss_of(net, cfg, torch.from_numpy(x).to(device), frames_of(hops, net.front.hop_stride), units)
