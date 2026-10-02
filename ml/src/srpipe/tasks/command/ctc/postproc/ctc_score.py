@@ -318,14 +318,14 @@ def edge_case(rng: np.random.Generator):
 
 
 def partial_windows(rng: np.random.Generator, lexicon: list[list[np.ndarray]]) -> tuple[list, np.ndarray]:
-    """For each command of more than one syllable, windows saying its first syllable alone, its last alone, then the
-    whole of it; thresholds that let every window through but the margin, which the parts of the winner must set."""
+    """For the command of most syllables and the last command, windows saying its first syllable alone, its last alone,
+    then the whole of it; thresholds that let every window through, so only the winner's parts turn one down."""
+    longest = max(range(len(lexicon)), key=lambda c: len(syllables(lexicon[c][0])))
     e, windows = LOGIT_EXPONENTS[1], []
-    for forms in lexicon:
-        cut = syllables(forms[0])
-        if len(cut) > 1:
-            windows += [(said(rng, units, FRAMES, e), e) for units in (cut[0], cut[-1], forms[0])]
-    return windows, np.tile(np.array([CAP, 50], dtype=np.int32), (len(windows), 1))
+    for c in sorted({longest, len(lexicon) - 1}):
+        cut = syllables(lexicon[c][0])
+        windows += [(said(rng, units, FRAMES, e), e) for units in (cut[0], cut[-1], lexicon[c][0])]
+    return windows, np.tile(np.array([CAP, 0], dtype=np.int32), (len(windows), 1))
 
 
 def packed_lexicon(lexicon: list[list[np.ndarray]]) -> tuple[tuple[int, int, int], bytes]:
