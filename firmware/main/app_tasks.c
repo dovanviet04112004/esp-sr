@@ -1,5 +1,6 @@
 #include "app_tasks.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -22,6 +23,7 @@
 #include "net_wifi.h"
 #include "sdkconfig.h"
 #include "svc_front.h"
+#include "svc_listen.h"
 #include "svc_report.h"
 #include "sys_storage.h"
 
@@ -56,6 +58,7 @@
 #define LINK_WAIT_MS 1000
 #define HEARTBEAT_TICKS (GEN_TOPIC_HEARTBEAT_INTERVAL_S * 1000 / GUI_PERIOD_MS)
 #define US_PER_S 1000000
+#define US_PER_MS 1000
 
 typedef struct {
     TaskFunction_t entry;
@@ -145,13 +148,35 @@ static void sach_task(void *arg)
     }
 }
 
+static void raise_decision(const app_wiring_t *w, const svc_listen_decision_t *d)
+{
+    const app_event_t *e = &d->event;
+    ESP_LOGI(TAG, "%s %s score %u margin %u gap %u, hops %" PRIu32 "..%" PRIu32 ", %" PRIu32 " ms",
+             e->kind == APP_EVT_COMMAND ? "COMMAND" : "REJECT",
+             e->kind == APP_EVT_COMMAND ? e->command_id : e->code, (unsigned)e->score_permille,
+             (unsigned)e->margin_permille, (unsigned)d->free_gap_permille, d->first_seq, e->seq,
+             d->work_us / US_PER_MS);
+    // Zero timeout: nhan_task never waits behind the network (KEHOACH 5.3).
+    if (xQueueSend(w->event_up, e, 0) != pdTRUE) { count_in_stats(w, &w->afe_stats->events_dropped); }
+}
+
 static void nhan_task(void *arg)
 {
     const app_wiring_t *w = arg;
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
     for (;;) {
         dsp_afe_frame_t frame;
-        if (xQueueReceive(w->clean, &frame, pdMS_TO_TICKS(CLEAN_WAIT_MS)) == pdTRUE) { (void)frame; }
+        // A window runs a hop at a time, blocking a tick so core 0's lower tasks run (KEHOACH 5.4).
+        const TickType_t wait = svc_listen_pending() ? 1 : pdMS_TO_TICKS(CLEAN_WAIT_MS);
+        svc_listen_decision_t decision;
+        if (xQueueReceive(w->clean, &frame, wait) == pdTRUE) {
+            if (svc_listen_feed(frame.pcm, frame.seq, frame.vad != 0) == ESP_ERR_NO_MEM) {
+                ESP_LOGW(TAG, "window queue full: the utterance closed at hop %" PRIu32 " is dropped",
+                         frame.seq);
+            }
+        } else if (svc_listen_work(&decision)) {
+            raise_decision(w, &decision);
+        }
         esp_task_wdt_reset();
     }
 }
@@ -213,12 +238,47 @@ static void fill_heartbeat(const app_afe_stats_t *afe, heartbeat_t *hb)
     hb->dma_overflows = audio.dma_overflows;
     hb->frames_dropped = afe->frames_dropped;
     hb->clean_dropped = afe->clean_dropped;
+    hb->events_dropped = afe->events_dropped;
 #if CONFIG_NET_STREAM_ENABLE
     hb->stream_dropped = svc_report_stream_dropped();
     hb->has_stream_dropped = true;
 #endif
     hb->rssi_dbm = wifi.rssi_dbm;
     hb->has_rssi_dbm = wifi.rssi_dbm != 0;
+}
+
+static void event_payload(const app_event_t *e, event_t *out)
+{
+    static const event_kind_t kKinds[] = {
+        [APP_EVT_WAKE] = EVENT_KIND_WAKE,
+        [APP_EVT_COMMAND] = EVENT_KIND_COMMAND,
+        [APP_EVT_REJECT] = EVENT_KIND_REJECT,
+        [APP_EVT_ERROR] = EVENT_KIND_ERROR,
+    };
+    memset(out, 0, sizeof(*out));
+    out->seq = e->seq;
+    out->kind = kKinds[e->kind];
+    out->score_permille = e->score_permille;
+    out->margin_permille = e->margin_permille;
+    out->has_score_permille = out->has_margin_permille = e->kind != APP_EVT_ERROR;
+    strlcpy(out->command_id, e->command_id, sizeof(out->command_id));
+    out->has_command_id = e->command_id[0] != '\0';
+    strlcpy(out->code, e->code, sizeof(out->code));
+    out->has_code = e->code[0] != '\0';
+    out->doa_deg = e->doa_deg;
+    out->has_doa_deg = e->doa_deg >= 0;
+}
+
+static void send_events(const app_wiring_t *w, bool online)
+{
+    app_event_t e;
+    while (xQueueReceive(w->event_up, &e, 0) == pdTRUE) {
+        event_t payload;
+        event_payload(&e, &payload);
+        if (!online || net_mqtt_publish_event(&payload) != ESP_OK) {
+            count_in_stats(w, &w->afe_stats->events_dropped);
+        }
+    }
 }
 
 static void gui_task(void *arg)
@@ -235,6 +295,7 @@ static void gui_task(void *arg)
         snapshot = *w->afe_stats;
         taskEXIT_CRITICAL(w->afe_stats_lock);
         const bool online = (xEventGroupGetBits(w->system) & APP_BIT_MQTT_OK) != 0;
+        send_events(w, online);
         since_heartbeat++;
         if (online && (!was_online || since_heartbeat >= HEARTBEAT_TICKS)) {
             heartbeat_t hb;

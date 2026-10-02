@@ -15,15 +15,19 @@
 #include "gen_afe.h"
 #include "gen_grid.h"
 #include "gen_topics.h"
+#include "lang_vi.h"
 #include "net_mqtt.h"
 #include "sdkconfig.h"
 #include "svc_front.h"
 #include "storage_format.h"
+#include "svc_listen.h"
 #include "svc_report.h"
 #include "sys_storage.h"
 
 #define DMA_DESC_NUM 8       // 128 ms of hops outlasts one flash erase (KEHOACH 5.5)
 #define MODEL_SLOT_DEFAULT 0 // model/active_slot absent: models_0
+
+#define COMMANDS_TEXT_BYTES 32768 // set.json: 64 commands of 64-character lines
 
 #define APP_SEED_VER GEN_AFE_VERSION // raised in afe.yaml when a seed changes (KEHOACH 6.2)
 
@@ -54,16 +58,19 @@ static uint8_t pcm_shift(void)
     return CONFIG_APP_PCM_SHIFT_FALLBACK;
 }
 
-static void seed_afe(void)
+// ai_engine reads the kws keys while it loads, so the seeds go first.
+static void seed_operating(void)
 {
     const sys_storage_seed_t seeds[] = {
         {STORAGE_NS_AFE, STORAGE_KEY_NS_FLOOR_DB, SYS_STORAGE_I8, lrintf(GEN_AFE_NS_FLOOR_DB)},
         {STORAGE_NS_AFE, STORAGE_KEY_AGC_TARGET_DBFS, SYS_STORAGE_I8, lrintf(GEN_AFE_AGC_TARGET_DBFS)},
         {STORAGE_NS_AFE, STORAGE_KEY_VAD_MODE, SYS_STORAGE_U8, GEN_AFE_VAD_AGGRESSIVENESS},
+        {STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, SYS_STORAGE_U16, CONFIG_SVC_LISTEN_CMD_REJECT_PERMILLE},
+        {STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, SYS_STORAGE_U16, CONFIG_SVC_LISTEN_CMD_MARGIN_PERMILLE},
     };
     const esp_err_t err = sys_storage_seed(APP_SEED_VER, seeds, sizeof(seeds) / sizeof(seeds[0]));
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "afe seeds not written (%s), falling back to afe.yaml", esp_err_to_name(err));
+        ESP_LOGW(TAG, "seeds not written (%s), falling back to afe.yaml and Kconfig", esp_err_to_name(err));
     }
 }
 
@@ -116,6 +123,53 @@ static void load_models(void)
     }
 }
 
+static esp_err_t listen_to(const command_set_t *set)
+{
+    const char *texts[AI_ENGINE_COMMANDS_MAX];
+    const char *ids[AI_ENGINE_COMMANDS_MAX];
+    for (uint8_t c = 0; c < set->commands_count; c++) {
+        texts[c] = set->commands[c].text;
+        ids[c] = set->commands[c].id;
+    }
+    svc_listen_config_t cfg = {
+        .texts = texts,
+        .ids = ids,
+        .n_commands = set->commands_count,
+        .dialects = LANG_VI_DIALECT_ALL,
+        .reject_permille = CONFIG_SVC_LISTEN_CMD_REJECT_PERMILLE,
+        .margin_permille = CONFIG_SVC_LISTEN_CMD_MARGIN_PERMILLE,
+    };
+    (void)sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, &cfg.reject_permille);
+    (void)sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, &cfg.margin_permille);
+    const esp_err_t err = svc_listen_init(&cfg);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "listening: every utterance vad finds, delta1 %u, delta2 %u (KEHOACH 5.4)",
+                 (unsigned)cfg.reject_permille, (unsigned)cfg.margin_permille);
+    }
+    return err;
+}
+
+static void start_listener(void)
+{
+    if (!ai_engine_has(AI_ENGINE_MODEL_COMMAND)) {
+        ESP_LOGW(TAG, "no command in the models, not listening");
+        return;
+    }
+    char *text = heap_caps_malloc(COMMANDS_TEXT_BYTES, MALLOC_CAP_SPIRAM);
+    command_set_t *set = heap_caps_malloc(sizeof(*set), MALLOC_CAP_SPIRAM);
+    size_t len = 0;
+    esp_err_t err = text != NULL && set != NULL
+                        ? sys_storage_read_file(STORAGE_PATH_COMMANDS, text, COMMANDS_TEXT_BYTES, &len)
+                        : ESP_ERR_NO_MEM;
+    if (err == ESP_OK) { err = net_mqtt_parse_command_set(text, len, set); }
+    if (err == ESP_OK) { err = listen_to(set); }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "%s: not listening (%s)", STORAGE_PATH_COMMANDS, esp_err_to_name(err));
+    }
+    heap_caps_free(text);
+    heap_caps_free(set);
+}
+
 esp_err_t app_boot(void)
 {
     ESP_RETURN_ON_ERROR(bsp_board_init(), TAG, "board");
@@ -131,9 +185,9 @@ esp_err_t app_boot(void)
     };
     ESP_RETURN_ON_ERROR(drv_audio_init(&audio), TAG, "audio");
     log_heap("audio");
+    seed_operating();
     load_models();
     log_heap("models");
-    seed_afe();
     const svc_front_config_t front = {
         .n_channels = drv_audio_channels(),
         .calib = load_calib(),
@@ -145,6 +199,8 @@ esp_err_t app_boot(void)
              (double)front.agc_target_dbfs, (unsigned)front.vad_aggressiveness);
     ESP_RETURN_ON_ERROR(svc_front_init(&front), TAG, "front end");
     log_heap("front");
+    start_listener();
+    log_heap("listen");
 #if CONFIG_NET_STREAM_ENABLE
     const svc_report_stream_config_t stream = {
         .sb = app_wiring()->stream, .system = app_wiring()->system, .raw_channels = drv_audio_channels()};

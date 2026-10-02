@@ -26,6 +26,7 @@ typedef struct {
     uint32_t hops;           // hops sach_task finished
     uint32_t frames_dropped; // thu_task found no free slot
     uint32_t clean_dropped;  // q_clean full, hop discarded
+    uint32_t events_dropped; // q_event_up full, or no broker to send to
     int16_t doa_deg;         // -1 when unknown
     uint8_t doa_conf;
     uint8_t vad;
