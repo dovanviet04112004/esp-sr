@@ -217,15 +217,9 @@ def train(cfg: dict, sets: dict[str, Sentences], device: str, run: Path | None =
     return net, (mean, std), history
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
-    parser.add_argument("--resume", type=Path, metavar="RUN", help="go on from a run's last checkpoint")
-    args = parser.parse_args(argv)
-    if args.resume:
-        cfg = load_yaml(args.resume / "config.resolved.yaml")
-    else:
-        cfg = apply_overrides(load_yaml(ctc.CONFIG), args.overrides)
+def load_sets(cfg: dict) -> dict[str, Sentences]:
+    """The train and val sentences of cfg's split with units in its dialect, at most train.max_s long; train held in
+    float16."""
     paths = data_paths()
     spec, version = cfg["train"], cfg["split"]["version"]
     folder = paths["splits"] / "command" / version
@@ -236,10 +230,24 @@ def main(argv: list[str] | None = None) -> int:
     clips = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
     units_of = sentence_units(clips, listed, spec["dialect"])
     longest = round(spec["max_s"] * HOPS_PER_S)
-    sets = {
+    return {
         role: load_role([root / f.stem for f in files], units_of, longest, dtype)
         for (role, files), dtype in zip(roles.items(), ("float16", "float32"), strict=True)
     }
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
+    parser.add_argument("--resume", type=Path, metavar="RUN", help="go on from a run's last checkpoint")
+    args = parser.parse_args(argv)
+    if args.resume:
+        cfg = load_yaml(args.resume / "config.resolved.yaml")
+    else:
+        cfg = apply_overrides(load_yaml(ctc.CONFIG), args.overrides)
+    paths = data_paths()
+    split_files = sorted((paths["splits"] / "command" / cfg["split"]["version"]).glob("*.txt"))
+    sets = load_sets(cfg)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     run = args.resume or create_run_dir(paths["artifacts"], BRANCH, cfg, split_files)
     net, (mean, std), history = train(cfg, sets, device, run, bool(args.resume))
