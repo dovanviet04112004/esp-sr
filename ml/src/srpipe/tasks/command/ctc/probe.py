@@ -8,7 +8,9 @@ command calls, each with the decision Python takes on its int8 simulation.
 from __future__ import annotations
 
 import argparse
+import json
 import math
+import re
 import struct
 from pathlib import Path
 
@@ -38,6 +40,11 @@ RECORD = struct.Struct("<16sIIIIii")
 # packed lexicon; then from a four-byte boundary each window's hops, its raw features and its DECISION_RECORD.
 WINDOWS_HEAD = struct.Struct("<4sHHHHBBBB")
 WINDOWS_MAGIC = b"SRCW"
+GATE_FILE, GATE_LABELS = "ctc_gate.bin", "ctc_gate.json"
+# WINDOWS_HEAD's fields and the input exponent; the mean then the std of each feature; the packed lexicon; then from a
+# four-byte boundary each window's hops, its int8 input (hops, features) padded to four bytes, and its DECISION_RECORD.
+GATE_HEAD = struct.Struct("<4sHHHHBBBBb3x")
+GATE_MAGIC = b"SRCG"
 # ESP-PPQ's helper.save heads an .espdl with "EDL2", the encryption flag, the length and four pad bytes.
 ESPDL_HEAD_BYTES = 16
 
@@ -152,11 +159,38 @@ def command_windows(cfg: dict, graph, model: encoder.CtcNet, norm: tuple, window
     return body
 
 
+def gate_windows(cfg: dict, graph, model: encoder.CtcNet, norm: tuple, windows: list[np.ndarray]) -> bytes:
+    """Every Gate 3 window as its int8 input, the normalised features on the graph's input grid that _step quantises
+    raw features to, each with the decision Python takes on the int8 simulation, laid out as GATE_HEAD says; the test
+    rebuilds raw features from it with the mean and std the record carries, so the chip sees the same int8."""
+    mean, std = norm
+    reject, margin = cfg["quant"]["reject"], cfg["eval"]["margin"]
+    lexicon = ctc_score.default_lexicon()
+    (commands, most, longest), packed = ctc_score.packed_lexicon(lexicon)
+    int8 = quant.Int8Net(graph, cfg["quant"]["hops"], mean, std, model)
+    e = int8.io.input_exponent
+    sizes = (commands, most, longest, cfg["chunk_hops"])
+    body = GATE_HEAD.pack(GATE_MAGIC, len(mean), len(windows), reject, margin, *sizes, e)
+    body += np.concatenate([mean, std]).astype("<f4").tobytes() + packed
+    body += b"\0" * (-len(body) % 4)
+    for x in windows:
+        normalised = ((x - mean) / std).T[None].astype(np.float32)
+        logits = int8(torch.from_numpy(normalised)).numpy()[0]
+        frames = -(-len(x) // model.front.hop_stride)
+        q = ptq_espdl.to_int8(logits[:, :frames], int8.io.output_exponent)
+        decision, _ = ctc_score.decide(ctc_score.frame_log_probs(q, int8.io.output_exponent), lexicon, reject, margin)
+        hops = np.ascontiguousarray(ptq_espdl.to_int8(normalised, e)[0].T).tobytes()
+        body += struct.pack("<I", len(x)) + hops + b"\0" * (-len(hops) % 4)
+        body += ctc_score.DECISION_RECORD.pack(*decision.tolist())
+    return body
+
+
 def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | None = None) -> tuple[Path, ...]:
     """Write out/ctc_models.bin and out/ctc_streams.bin: the first stack's layer a frame a step, the net a chunk a
     step, work keeping each ONNX and .espdl; out/ctc_decide.bin, the decision of the default commands (E11-T13); and
     out/ctc_windows.bin, windows through the command calls. With run, the net is the graph of row in its ladder,
-    streaming a test sentence, and the windows are the board's."""
+    streaming a test sentence, and the windows are the board's; out/ctc_gate.bin then holds every Gate 3 window and
+    out/ctc_gate.json what each should get, for the on-chip Gate 3, and without run neither is left."""
     if cfg["probe"]["hops"] % cfg["chunk_hops"] or cfg["quant"]["hops"] % cfg["chunk_hops"]:
         raise ValueError(f"probe and quant hops must be multiples of chunk_hops {cfg['chunk_hops']}")
     scales, p, rungs = cfg["probe"]["norm_scale"], cfg["probe"], ptq_espdl.ladder(quant.LADDER)
@@ -173,7 +207,10 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
     else:
         trained = gate.load_ctc(run)
         net, net_x, norm = trained.model, quant.test_sentence(cfg, trained), (trained.mean, trained.std)
-        board = [x for scored in quant.board_windows(cfg, trained, data_paths()) for x in scored.decided]
+        sessions = quant.board_windows(cfg, trained, data_paths())
+        board = [x for scored in sessions for x in scored.decided]
+        expected = [{"session": s.session, "expected": s.expected} for s in sessions for _ in s.decided]
+        names = trained.names
         windows = board[:: max(1, len(board) // p["command"]["windows"])][: p["command"]["windows"]]
     fixes = cfg["esp_ppq_patches"]
     layer_graph = quant.quantized(
@@ -198,7 +235,30 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
     decide.write_bytes(ctc_score.probe_record(cfg))
     command = out / WINDOWS_FILE
     command.write_bytes(command_windows(cfg, net_graph, net, norm, windows))
-    return image, streams, decide, command
+    every, labels = out / GATE_FILE, out / GATE_LABELS
+    if run is None:
+        every.unlink(missing_ok=True)
+        labels.unlink(missing_ok=True)
+        return image, streams, decide, command
+    every.write_bytes(gate_windows(cfg, net_graph, net, norm, board))
+    labels.write_text(json.dumps({"names": names, "windows": expected}, ensure_ascii=False), encoding="utf-8")
+    return image, streams, decide, command, every, labels
+
+
+def gate_on_chip(log: Path, labels: Path) -> dict:
+    """Gate 3 counted on the chip's own decisions, as the unit app prints one for each window of ctc_gate.bin."""
+    meta = json.loads(labels.read_text(encoding="utf-8"))
+    decided = {
+        int(w): int(c) for w, c in re.findall(r"gate window (\d+): board (-?\d+)", log.read_text(errors="replace"))
+    }
+    if sorted(decided) != list(range(len(meta["windows"]))):
+        raise ValueError(f"{log}: {len(decided)} gate windows, the record holds {len(meta['windows'])}")
+    names = meta["names"]
+    commands = [(w["expected"], decided[k]) for k, w in enumerate(meta["windows"]) if w["expected"] != gate.REJECT]
+    others = [decided[k] for k, w in enumerate(meta["windows"]) if w["expected"] == gate.REJECT]
+    right = sum(c != ctc_score.REJECTED and names[c] == e for e, c in commands)
+    accepted = sum(c != ctc_score.REJECTED for c in others)
+    return {"accepted_right": f"{right}/{len(commands)}", "false_accepts": f"{accepted}/{len(others)}"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -207,7 +267,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--work", type=Path, default=ML_ROOT / "artifacts" / "command_ctc" / "probe")
     parser.add_argument("--run", type=Path, help="stream a row of this trained run's ladder instead of random weights")
     parser.add_argument("--row", help="the row of <run>/int8/ladder.yaml whose graph streams")
+    parser.add_argument("--gate-log", type=Path, help="count Gate 3 on the chip's decisions in this unit app log")
     args = parser.parse_args(argv)
+    if args.gate_log:
+        print(gate_on_chip(args.gate_log, args.out / GATE_LABELS))
+        return 0
     if (args.run is None) != (args.row is None):
         parser.error("--run and --row go together")
     for path in probe(load_yaml(ctc.CONFIG), args.out, args.work, args.run, args.row):

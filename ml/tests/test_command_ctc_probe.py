@@ -1,5 +1,6 @@
-"""The ctc probe's command windows: random windows of the lengths the board must handle, and a record whose head,
-lexicon and windows read back, each window's decision the one ctc_score takes on its int8 logits."""
+"""The ctc probe's command windows: random windows of the lengths the board must handle, and records whose head,
+lexicon and windows read back, each window's decision the one ctc_score takes on its int8 logits; the Gate 3 record
+keeps each window's int8 input, and Gate 3 is counted on the decisions the chip prints."""
 
 from __future__ import annotations
 
@@ -22,13 +23,15 @@ from srpipe.tasks.command.ctc.postproc import ctc_score
 
 DIMS = 43
 EXPONENT = -3
+INPUT_EXPONENT = -3
 
 
 class DrawnLogits:
     """Stands for quant.Int8Net: fresh int8 logits on the grid of 2^EXPONENT for each window, from a fixed seed."""
 
     def __init__(self, graph, hops: int, mean: np.ndarray, std: np.ndarray, like) -> None:
-        self.io, self.frames = SimpleNamespace(output_exponent=EXPONENT), hops // like.front.hop_stride
+        self.io = SimpleNamespace(input_exponent=INPUT_EXPONENT, output_exponent=EXPONENT)
+        self.frames = hops // like.front.hop_stride
         self.rng = np.random.default_rng(7)
 
     def __call__(self, x: torch.Tensor) -> torch.Tensor:
@@ -74,3 +77,50 @@ def test_the_windows_record_reads_back_with_the_decisions_python_takes(monkeypat
         assert list(ctc_score.DECISION_RECORD.unpack_from(body, at)) == want.tolist()
         at += ctc_score.DECISION_RECORD.size
     assert at == len(body)
+
+
+def test_the_gate_record_reads_back_each_window_as_its_int8_input_and_python_decision(monkeypatch) -> None:
+    cfg = load_yaml(ctc.CONFIG)
+    monkeypatch.setattr(quant, "Int8Net", DrawnLogits)
+    model = SimpleNamespace(front=SimpleNamespace(hop_stride=2))
+    rng = np.random.default_rng(2)
+    windows = [rng.normal(size=(n, DIMS)).astype(np.float32) for n in (188, 3, 37)]
+    mean, std = rng.normal(size=DIMS).astype(np.float32), rng.uniform(0.5, 2.0, DIMS).astype(np.float32)
+    body = probe.gate_windows(cfg, None, model, (mean, std), windows)
+
+    magic, features, count, reject, margin, *sizes, exponent = probe.GATE_HEAD.unpack_from(body)
+    assert (magic, features, count, exponent) == (probe.GATE_MAGIC, DIMS, len(windows), INPUT_EXPONENT)
+    at = probe.GATE_HEAD.size
+    stats = np.frombuffer(body, "<f4", 2 * DIMS, at)
+    assert np.array_equal(stats, np.concatenate([mean, std]))
+    lexicon = ctc_score.default_lexicon()
+    (commands, most, longest), packed = ctc_score.packed_lexicon(lexicon)
+    at += 2 * DIMS * 4
+    assert sizes == [commands, most, longest, cfg["chunk_hops"]] and body[at : at + len(packed)] == packed
+    at += len(packed) + (-(at + len(packed)) % 4)
+    replay = DrawnLogits(None, cfg["quant"]["hops"], mean, std, model)
+    for x in windows:
+        (hops,) = struct.unpack_from("<I", body, at)
+        at += 4
+        want = np.clip(np.rint((x - mean) / std / 2.0**INPUT_EXPONENT), -128, 127).astype(np.int8)
+        assert hops == len(x) and body[at : at + x.size] == want.tobytes()
+        at += x.size + (-x.size % 4)
+        q = (replay(None).numpy()[0, :, : -(-hops // 2)] / 2.0**EXPONENT).astype(np.int8)
+        decision, _ = ctc_score.decide(ctc_score.frame_log_probs(q, EXPONENT), lexicon, reject, margin)
+        assert list(ctc_score.DECISION_RECORD.unpack_from(body, at)) == decision.tolist()
+        at += ctc_score.DECISION_RECORD.size
+    assert at == len(body)
+
+
+def test_gate_3_counts_the_chips_decisions_and_refuses_a_log_missing_a_window(tmp_path) -> None:
+    import json
+
+    labels = tmp_path / probe.GATE_LABELS
+    expected = ["bat_den", "bat_den", "tat_den", gate.REJECT, gate.REJECT]
+    labels.write_text(json.dumps({"names": ["bat_den", "tat_den"], "windows": [{"expected": e} for e in expected]}))
+    log = tmp_path / "unit.log"
+    log.write_text("".join(f"gate window {k}: board {c} 900 100 100\n" for k, c in enumerate([0, -1, 0, -1, 1])))
+    assert probe.gate_on_chip(log, labels) == {"accepted_right": "1/3", "false_accepts": "1/2"}
+    log.write_text("gate window 0: board 0 900 100 100\n")
+    with pytest.raises(ValueError, match="1 gate windows"):
+        probe.gate_on_chip(log, labels)
