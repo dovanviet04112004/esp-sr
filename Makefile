@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-deploy models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-deploy rnnt-ptq models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live commands session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -136,6 +136,9 @@ ctc-train: ## Train the ctc net on processed/command on the GPU into ml/artifact
 
 ctc-ptq: ## Rungs 1 and 2 of KEHOACH 3.14 on a trained ctc run, a row of each calibration beside float: make ctc-ptq RUN=<run under ml/> (E11-T12)
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant ptq $(RUN)
+
+rnnt-ptq: ## Rung 2 of the rnnt track on a trained run: its three graphs with each calibration, Gate 3 after int8 beside float, rows rnnt_* in the run's ladder: make rnnt-ptq RUN=<run under ml/> (E11-T20)
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.rnnt.quant ptq $(RUN)
 
 ctc-int16: ## Rung 3: the convolutions ESP-PPQ ranks worst at 16 bits, on the best calibration of ctc-ptq: make ctc-int16 RUN=<run under ml/> (E11-T12)
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant int16 $(RUN)

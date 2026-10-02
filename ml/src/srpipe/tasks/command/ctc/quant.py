@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -125,10 +126,12 @@ def unit_error_rate(net, data: train.Sentences, picks: np.ndarray, hops: int, me
     return errors / total
 
 
-def gate_row(net: gate.Ctc, windows: list[gate.Scored], reject: int, margin: int) -> dict:
-    """Gate 3 of net on the board windows: utterances whose best command is right, those accepted right at reject and
-    margin, and the false accepts among the rest."""
-    heard = [(s.expected, gate.ctc_heard(net, x)) for s in windows for x in s.decided]
+def gate_row(
+    net: gate.Ctc, windows: list[gate.Scored], reject: int, margin: int, heard_by: Callable = gate.ctc_heard
+) -> dict:
+    """Gate 3 of net on the board windows, each decided by heard_by(net, window): utterances whose best command is
+    right, those accepted right at reject and margin, and the false accepts among the rest."""
+    heard = [(s.expected, heard_by(net, x)) for s in windows for x in s.decided]
     commands = [(e, h) for e, h in heard if e != gate.REJECT]
     others = [h for e, h in heard if e == gate.REJECT]
     accepted = [(e, h) for e, h in commands if h.accepted(reject, margin)]

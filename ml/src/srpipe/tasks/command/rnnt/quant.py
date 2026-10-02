@@ -1,9 +1,14 @@
 """The int8 graphs of the rnnt track (KEHOACH 3.12, 3.14, ADR-0016): the encoder with the joiner's frame projection,
-the predictor reading its context one-hot, and the joiner of the two projections, each as esp-dl runs it.
+the predictor reading its context one-hot, and the joiner of the two projections, each as esp-dl runs it. Run: python
+-m srpipe.tasks.command.rnnt.quant ptq <run>: a float row, then the three graphs quantised with each calibration of
+rung 2, Gate 3 on the board sessions after int8, rows rnnt_* in <run>/int8/ladder.yaml beside the ctc track's, each
+row's graphs under <run>/int8/<row>/ for probe.py.
 """
 
 from __future__ import annotations
 
+import argparse
+import functools
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,7 +16,9 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 
-from srpipe.compress.quant import esp_ppq_patches, ptq_espdl
+from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
+from srpipe.core.config import apply_overrides, load_yaml
+from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc import quant as ctc_quant
 from srpipe.tasks.command.ctc.model import encoder
@@ -20,6 +27,8 @@ from srpipe.tasks.command.rnnt.model import transducer
 from srpipe.tasks.command.rnnt.postproc import rnnt_search
 
 FRAME, PREFIX, LOGITS = "frame", "prefix", "logits"  # the joiner graph's tensors, by name on the chip
+ROW_PREFIX = "rnnt_"  # its rows in <run>/int8/ladder.yaml, by ctc's
+GRAPH_FILES = {"frames": "frames.native", "predictor": "predictor.native", "joiner": "joiner.native"}
 
 
 def pointwise(linear: nn.Linear) -> nn.Conv1d:
@@ -210,3 +219,52 @@ def int8_heard(sim: Int8Rnnt, net: gate.Ctc, x: np.ndarray) -> gate.Heard:
     """One window decided by the rnnt track on its int8 graphs with no threshold, as rnnt_heard decides on float."""
     tree = rnnt_search.command_tree(net.lexicon)
     return gate.heard_of(net, *int8_decided(sim, x, net.mean, net.std, tree, ctc_score.CAP, 0))
+
+
+def saved(graphs: Graphs, folder: Path) -> Path:
+    """The three graphs as ESP-PPQ's native files under folder."""
+    for part, name in GRAPH_FILES.items():
+        export_espdl.save_native(getattr(graphs, part), folder / name)
+    return folder
+
+
+def loaded(folder: Path) -> Graphs:
+    """The three graphs saved saved."""
+    return Graphs(*(export_espdl.load_native(folder / name) for name in GRAPH_FILES.values()))
+
+
+def step_ptq(cfg: dict, run: Path) -> Path:
+    """Rung 2 of the rnnt track (KEHOACH 3.14): the float row, then a row of the three graphs quantised with each
+    calibration; Gate 3 of each at quant.reject and eval.margin, as the ctc track's rows."""
+    spec, b = cfg["quant"], ctc_quant.bench(cfg, run)
+    net, patches, thresholds = b.net, cfg["esp_ppq_patches"], (spec["reject"], cfg["eval"]["margin"])
+    if net.model.transducer is None:
+        raise ValueError(f"{run} learnt no transducer: its config has no rnnt section")
+    tree = rnnt_search.command_tree(net.lexicon)
+    contexts = tree_contexts(tree, net.cfg["rnnt"]["context"], net.model.transducer.predictor.pad)
+    head = {"rungs": ptq_espdl.ladder(ctc_quant.LADDER), "quant": spec}
+    float_row = ctc_quant.gate_row(net, b.windows, *thresholds, gate.rnnt_heard)
+    out = ctc_quant.recorded(run, head, {f"{ROW_PREFIX}float": float_row})
+    for name in spec["calibrations"]:
+        rungs = ptq_espdl.ladder(ctc_quant.LADDER) | {"calibration": name}
+        folder = run / "int8" / f"{ROW_PREFIX}{name}"
+        graphs = quantized(net.model, b.calib, contexts, folder, rungs, patches, spec["joiner_pairs"], spec["seed"])
+        saved(graphs, folder)
+        sim = Int8Rnnt(graphs, spec["hops"], net, patches)
+        row = ctc_quant.gate_row(net, b.windows, *thresholds, functools.partial(int8_heard, sim))
+        out = ctc_quant.recorded(run, head, {f"{ROW_PREFIX}{name}": {"calibration": name, **row}})
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("step", choices=["ptq"])
+    parser.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.command.ctc.train")
+    parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
+    args = parser.parse_args(argv)
+    print(step_ptq(apply_overrides(load_yaml(ctc.CONFIG), args.overrides), args.run))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
