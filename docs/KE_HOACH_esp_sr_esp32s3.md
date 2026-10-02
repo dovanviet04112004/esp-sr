@@ -1305,6 +1305,7 @@ esp-sr/
     ├── FREERTOS.md                      # sổ kiểm lỗi đồng thời, soát lại mỗi khi thêm task
     ├── DU_LIEU.md                       # dữ liệu đã tải, giấy phép, số giờ, sha256
     ├── adr/                             # quyết định có bảng đối chứng
+    ├── bao_cao/                         # báo cáo tuần gửi mentor, một file tuan_<nn>.md mỗi tuần
     └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md, tts_engines.md, data_screen.md, wake.md,
                                   speech_commands.md, command.md}
                       ├ bench/           # CSV thô của bench_*, commit cùng bảng nó sinh ra
