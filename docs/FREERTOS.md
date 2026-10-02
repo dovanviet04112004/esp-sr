@@ -90,6 +90,7 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 | 7.2 | **Ghi flash đóng băng `thu_task` quá chiều sâu DMA** | DMA RX 8 × 256 mẫu = 128 ms; chỉ ghi flash khi đổi cấu hình, đổi bộ lệnh, hiệu chuẩn | E14-T7: ghi NVS liên tục 10 phút, đếm khung mất | ⏳ |
 | 7.3 | Đệm DMA ở PSRAM | đệm DMA luôn `MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL` | đọc `drv_audio` | ⏳ |
 | 7.4 | Tranh chấp băng thông MSPI giữa flash, PSRAM và Wi-Fi làm chậm `sach_task` | trọng số `command` đọc từ PSRAM chỉ trong `LENH` | E14-T6 đo µs đỉnh của `sach_task` trong `LENH` so với `NGHE` | ⏳ |
+| 7.5 | `nhan_task` ghi `set.json` lâu quá 1 s đệm của `q_clean` | ghi một lần mỗi bộ lệnh mới, sau khi `lang_vi` đọc được mọi dòng; bộ trùng `version` với bộ đang dùng (bản retained gửi lại mỗi lần nối) không ghi | log in thời gian `lang_vi` và thời gian ghi; trên board B `clean_dropped` và `frames_dropped` của `heartbeat` không tăng qua một lần đổi bộ lệnh | ⏳ |
 
 ## 8. Hàng đợi và đệm
 
@@ -104,6 +105,7 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 | 8.6 | Stream buffer có hai người ghi | chỉ `sach_task` ghi `sb_stream` | đọc code | ✅ `xStreamBufferSend` chỉ có ở `svc_report_stream_push`, gọi từ `sach_task` @ `253ddf7` |
 | 8.7 | Hở `seq` không ai xử lý | `nhan_task` thấy hở thì đặt lại trạng thái `wake`; `host` ghi hở vào json | phép kiểm chặn mạng 5 s ở E5-T10 | ⏳ |
 | 8.8 | Callback esp-mqtt làm việc dài | callback chỉ phân tích rồi bỏ vào `q_cmd` / `q_cmdset` | đọc `app_wiring.c` | ⏳ |
+| 8.10 | Bản mới từ `down/commands` ghi đè bộ lệnh `nhan_task` đang đọc | hai ô bộ lệnh của `net_mqtt`, cấp lúc boot; task esp-mqtt chỉ ghi vào ô nó đang điền dở, ô nó rút lại được khỏi `q_cmdset` (bản chờ), hoặc, khi `q_cmdset` rỗng, ô không phải ô gửi sau cùng: `nhan_task` nhận theo thứ tự gửi và xong ô trước rồi mới nhận ô sau, nên ô ấy đã xong. Bản mới thay bản chờ bằng `xQueueOverwrite` | đọc `commands_slot` trong `net_mqtt.c`; trên board B gửi ba bộ lệnh liền nhau trong lúc `nhan_task` đang ghi `set.json`: bộ cuối được dùng, không bộ nào lẫn dòng của bộ khác | ⏳ |
 
 ## 9. Khoá
 

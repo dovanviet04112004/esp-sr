@@ -5,6 +5,9 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "ai_engine.h"
+#include "app_boot.h"
+#include "app_err.h"
 #include "app_events.h"
 #include "app_wiring.h"
 #include "drv_audio.h"
@@ -148,6 +151,12 @@ static void sach_task(void *arg)
     }
 }
 
+static void send_up(const app_wiring_t *w, const app_event_t *e)
+{
+    // Zero timeout: nhan_task never waits behind the network (KEHOACH 5.3).
+    if (xQueueSend(w->event_up, e, 0) != pdTRUE) { count_in_stats(w, &w->afe_stats->events_dropped); }
+}
+
 static void raise_decision(const app_wiring_t *w, const svc_listen_decision_t *d)
 {
     const app_event_t *e = &d->event;
@@ -156,20 +165,68 @@ static void raise_decision(const app_wiring_t *w, const svc_listen_decision_t *d
              e->kind == APP_EVT_COMMAND ? e->command_id : e->code, (unsigned)e->score_permille,
              (unsigned)e->margin_permille, (unsigned)d->free_gap_permille, d->first_seq, e->seq,
              d->work_us / US_PER_MS);
-    // Zero timeout: nhan_task never waits behind the network (KEHOACH 5.3).
-    if (xQueueSend(w->event_up, e, 0) != pdTRUE) { count_in_stats(w, &w->afe_stats->events_dropped); }
+    send_up(w, e);
+}
+
+static void raise_error(const app_wiring_t *w, uint32_t seq, const char *code, const char *command_id)
+{
+    app_event_t e = {.kind = APP_EVT_ERROR, .seq = seq, .doa_deg = -1};
+    strlcpy(e.code, code, sizeof(e.code));
+    if (command_id != NULL) { strlcpy(e.command_id, command_id, sizeof(e.command_id)); }
+    ESP_LOGW(TAG, "ERROR %s %s at hop %" PRIu32, e.code, e.command_id, seq);
+    send_up(w, &e);
+}
+
+// Only while no window waits: each utterance already cut is decided by the set it met (KEHOACH 5.3).
+static void take_commands(const app_wiring_t *w, uint32_t seq)
+{
+    const net_mqtt_commands_t *in = NULL;
+    if (svc_listen_pending() || xQueueReceive(w->cmdset, &in, 0) != pdTRUE) { return; }
+    if (in->parsed != ESP_OK) {
+        raise_error(w, seq,
+                    in->parsed == APP_ERR_COMMANDS_INVALID ? APP_CODE_COMMANDS_INVALID
+                                                           : APP_CODE_COMMANDS_REFUSED,
+                    NULL);
+        return;
+    }
+    if (in->set.version == svc_listen_commands_version()) {
+        ESP_LOGI(TAG, "commands v%" PRIu32 " already in use", in->set.version);
+        return;
+    }
+    const char *texts[AI_ENGINE_COMMANDS_MAX];
+    const char *ids[AI_ENGINE_COMMANDS_MAX];
+    const svc_listen_commands_t commands = app_boot_commands(&in->set, texts, ids);
+    uint8_t unreadable = 0;
+    int64_t began_us = esp_timer_get_time();
+    esp_err_t err = svc_listen_set_commands(&commands, &unreadable);
+    if (err != ESP_OK) {
+        const bool invalid = err == APP_ERR_COMMANDS_INVALID;
+        raise_error(w, seq, invalid ? APP_CODE_COMMANDS_INVALID : APP_CODE_COMMANDS_REFUSED,
+                    invalid ? ids[unreadable] : NULL);
+        return;
+    }
+    const uint32_t read_ms = (uint32_t)((esp_timer_get_time() - began_us) / US_PER_MS);
+    began_us = esp_timer_get_time();
+    err = sys_storage_write_file(STORAGE_PATH_COMMANDS, in->text, in->text_bytes);
+    const uint32_t write_ms = (uint32_t)((esp_timer_get_time() - began_us) / US_PER_MS);
+    ESP_LOGI(TAG, "commands v%" PRIu32 " in use: lang_vi %" PRIu32 " ms, %s %s in %" PRIu32 " ms",
+             in->set.version, read_ms, STORAGE_PATH_COMMANDS, esp_err_to_name(err), write_ms);
+    if (err != ESP_OK) { raise_error(w, seq, APP_CODE_COMMANDS_NOT_SAVED, NULL); }
 }
 
 static void nhan_task(void *arg)
 {
     const app_wiring_t *w = arg;
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
+    uint32_t seq = 0;
     for (;;) {
         dsp_afe_frame_t frame;
+        take_commands(w, seq);
         // A window runs a hop at a time, blocking a tick so core 0's lower tasks run (KEHOACH 5.4).
         const TickType_t wait = svc_listen_pending() ? 1 : pdMS_TO_TICKS(CLEAN_WAIT_MS);
         svc_listen_decision_t decision;
         if (xQueueReceive(w->clean, &frame, wait) == pdTRUE) {
+            seq = frame.seq;
             if (svc_listen_feed(frame.pcm, frame.seq, frame.vad != 0) == ESP_ERR_NO_MEM) {
                 ESP_LOGW(TAG, "window queue full: the utterance closed at hop %" PRIu32 " is dropped",
                          frame.seq);
@@ -385,8 +442,10 @@ static void net_task(void *arg)
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     }
-    const net_mqtt_config_t mqtt = {
-        .device_id = device_id, .fw_version = esp_app_get_description()->version, .system = w->system};
+    const net_mqtt_config_t mqtt = {.device_id = device_id,
+                                    .fw_version = esp_app_get_description()->version,
+                                    .system = w->system,
+                                    .cmdset = w->cmdset};
     told = false;
     for (err = err == ESP_OK && named ? net_mqtt_start(&mqtt) : ESP_ERR_INVALID_STATE;
          err == ESP_ERR_NOT_FOUND; err = net_mqtt_start(&mqtt)) {

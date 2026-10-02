@@ -7,6 +7,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "gen_payload.h"
+#include "net_mqtt.h"
 #include "sdkconfig.h"
 
 #define CLEAN_DEPTH 64 // about one second of hops
@@ -26,7 +27,7 @@ static size_t s_psram_bytes;
 static app_frame_slot_t s_pool[APP_FRAME_SLOTS];
 static uint8_t s_frame_items[APP_FRAME_SLOTS];
 static uint8_t s_free_items[APP_FRAME_SLOTS];
-static uint8_t s_cmdset_items[CMDSET_DEPTH * sizeof(const command_set_t *)];
+static uint8_t s_cmdset_items[CMDSET_DEPTH * sizeof(const net_mqtt_commands_t *)];
 static StaticQueue_t s_frame_q, s_free_q, s_clean_q, s_dialog_q, s_cmd_q, s_cmdset_q, s_event_up_q;
 #if CONFIG_APP_SPEAKER_ENABLE
 static StaticQueue_t s_speak_q;
@@ -56,7 +57,7 @@ esp_err_t app_wiring_init(void)
     s_wiring.dialog = psram_queue(DIALOG_DEPTH, sizeof(app_event_t), &s_dialog_q);
     s_wiring.cmd = psram_queue(CMD_DEPTH, sizeof(device_cmd_t), &s_cmd_q);
     s_wiring.cmdset =
-        xQueueCreateStatic(CMDSET_DEPTH, sizeof(const command_set_t *), s_cmdset_items, &s_cmdset_q);
+        xQueueCreateStatic(CMDSET_DEPTH, sizeof(const net_mqtt_commands_t *), s_cmdset_items, &s_cmdset_q);
     s_wiring.event_up = psram_queue(EVENT_UP_DEPTH, sizeof(app_event_t), &s_event_up_q);
     s_wiring.system = xEventGroupCreateStatic(&s_system_eg);
     s_wiring.afe_stats = &s_afe_stats;

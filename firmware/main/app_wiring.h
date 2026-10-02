@@ -47,7 +47,7 @@ typedef struct {
     QueueHandle_t clean;         // q_clean: dsp_afe_frame_t, PSRAM
     QueueHandle_t dialog;        // q_dialog: app_event_t, PSRAM
     QueueHandle_t cmd;           // q_cmd: device_cmd_t, PSRAM
-    QueueHandle_t cmdset;        // q_cmdset: const command_set_t *
+    QueueHandle_t cmdset;        // q_cmdset: const net_mqtt_commands_t *
     QueueHandle_t speak;         // q_speak: app_speak_req_t, PSRAM; NULL without a speaker
     QueueHandle_t event_up;      // q_event_up: app_event_t, PSRAM
     StreamBufferHandle_t stream; // sb_stream, PSRAM; NULL without NET_STREAM_ENABLE
