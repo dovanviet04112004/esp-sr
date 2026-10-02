@@ -194,6 +194,70 @@ class GeneratedCTests(unittest.TestCase):
         self.assertEqual(int(channels), 3)
 
 
+class ListenTests(unittest.TestCase):
+    """listen.yaml reaches the C initializers and Python with the same numbers, the cut in hops as Python rounds it."""
+
+    def test_c_and_python_carry_every_number_of_the_contract(self) -> None:
+        values = gen_contracts.listen_values(gen_contracts.grid_values())
+        namespace: dict = {}
+        exec(gen_contracts.gen_listen_py(values), namespace)
+        self.assertEqual(namespace["FEATURES"], values["features"])
+        self.assertEqual(namespace["PITCH"], values["pitch"])
+        sections = {"features": "GEN_LISTEN_MEL_CONFIG", "pitch": "GEN_LISTEN_PITCH_CONFIG"}
+        fields = [f"struct {s} {{ " + " ".join(f"double {n};" for n in values[s]) + " };" for s in sections]
+        lines = [f"    struct {s} {s} = {m};" for s, m in sections.items()]
+        for section in sections:
+            lines += [f'    printf("{section}.{n} %.9g\\n", {section}.{n});' for n in values[section]]
+        for name in ("UTTERANCE_GAP_HOPS", "UTTERANCE_MIN_HOPS", "WINDOW_HOPS"):
+            lines.append(f'    printf("{name} %d\\n", GEN_LISTEN_{name});')
+        probe = (
+            '#include <stdio.h>\n#include "gen_listen.h"\n'
+            + "\n".join(fields)
+            + "\nint main(void)\n{\n"
+            + "\n".join(lines)
+            + "\n    return 0;\n}\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            src, exe = Path(tmp) / "listen.c", Path(tmp) / "listen"
+            src.write_text(probe)
+            inc = REPO / gen_contracts.COMMON_INC
+            subprocess.run(["gcc", "-std=c11", "-Wall", "-Werror", f"-I{inc}", str(src), "-o", str(exe)], check=True)
+            printed = dict(
+                line.split() for line in subprocess.run([str(exe)], capture_output=True, text=True).stdout.splitlines()
+            )
+        for section in sections:
+            for name, number in values[section].items():
+                self.assertAlmostEqual(float(printed[f"{section}.{name}"]), float(number), places=6)
+        rate = gen_contracts.grid_values()["frames_per_s"]
+        self.assertEqual(int(printed["UTTERANCE_GAP_HOPS"]), round(values["utterance"]["gap_s"] * rate))
+        self.assertEqual(int(printed["UTTERANCE_MIN_HOPS"]), round(values["utterance"]["min_s"] * rate))
+        self.assertEqual(int(printed["WINDOW_HOPS"]), round(values["window_s"] * rate))
+        self.assertEqual(namespace["WINDOW_HOPS"], int(printed["WINDOW_HOPS"]))
+
+    def test_a_half_hop_rounds_to_even_as_python_does(self) -> None:
+        doc, grid = gen_contracts.load_yaml("listen.yaml"), gen_contracts.grid_values()
+        original = gen_contracts.load_yaml
+        gen_contracts.load_yaml = lambda name: {**doc, "window_s": 1.0}
+        try:
+            values = gen_contracts.listen_values(grid)
+        finally:
+            gen_contracts.load_yaml = original
+        self.assertEqual(grid["frames_per_s"], 62.5)
+        self.assertEqual(values["window_hops"], 62)
+
+    def test_a_value_that_is_not_a_number_is_refused(self) -> None:
+        doc, grid = gen_contracts.load_yaml("listen.yaml"), gen_contracts.grid_values()
+        original = gen_contracts.load_yaml
+        for section, name in (("features", "n_bands"), ("pitch", "min_f0_hz")):
+            bad = {**doc, section: {**doc[section], name: "40"}}
+            gen_contracts.load_yaml = lambda _, bad=bad: bad
+            try:
+                with self.assertRaisesRegex(ValueError, f"{section}.{name}"):
+                    gen_contracts.listen_values(grid)
+            finally:
+                gen_contracts.load_yaml = original
+
+
 if __name__ == "__main__":
     unittest.main()
 

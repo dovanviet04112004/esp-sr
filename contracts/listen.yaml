@@ -1,0 +1,30 @@
+# What the listener computes from the clean output and how it cuts speech into command windows (KEHOACH 3.11, 3.12,
+# 5.4). One source for svc_listen on the board, the board simulation and every ml branch: a model learns on these
+# features, and Gate 3 counts the windows the board decides.
+version: 1
+features:                          # log-mel of the clean output, a frame a hop
+  n_bands: 40
+  f_min_hz: 20.0
+  f_max_hz: 7600.0
+  log_floor: 1.0e-6                # added to the power inside the log
+pitch:                             # dsp_spec/pitch, Kaldi's online tracker at zero latency with its defaults
+  resample_hz: 4000.0              # the NCCF runs on the signal downsampled to this
+  lowpass_cutoff_hz: 1000.0        # windowed sinc ahead of downsampling
+  lowpass_zeros: 1
+  upsample_zeros: 5                # windowed sinc from whole lags to the log-spaced ones
+  window_s: 0.025                  # NCCF window; each frame also reads the longest lag past it
+  min_f0_hz: 50.0
+  max_f0_hz: 400.0
+  soft_min_f0: 10.0                # local cost 1 - NCCF + soft_min_f0 * lag * NCCF
+  penalty_factor: 0.1              # of ln^2(1 + delta_pitch) per squared lag step between frames
+  delta_pitch: 0.005               # ratio between neighbouring log-spaced lags: 417 lags
+  nccf_ballast: 7000.0             # times (mean square * window)^2: quiet frames get a low NCCF for tracking
+  normalization_left_s: 0.75       # past of the POV-weighted log-pitch mean; no right context online
+  delta_window: 2                  # frames each side, the right side clamped to the newest
+  pov_scale: 2.0
+  pitch_scale: 2.0
+  delta_pitch_scale: 10.0
+utterance:                         # runs of vad into utterances, as Gate 3 counts them and LENH without wake cuts them
+  gap_s: 0.4                       # vad hops this close belong to one utterance
+  min_s: 0.25                      # a shorter run is a breath or a click
+window_s: 3.0                      # LENH's longest window: a decision looks this far back at most

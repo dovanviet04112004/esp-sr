@@ -165,6 +165,65 @@ def gen_array_py(a: dict) -> str:
     )
 
 
+LISTEN_NUMBERS = ("features", "pitch")
+
+
+def listen_values(g: dict) -> dict:
+    """listen.yaml, checked to hold numbers only in features and pitch; the cut and the window also in hops of the
+    grid, rounded as Python rounds them, so the board cuts where Gate 3 does."""
+    doc = load_yaml("listen.yaml")
+    for section in LISTEN_NUMBERS:
+        for name, value in doc[section].items():
+            if not is_number(value):
+                raise ValueError(f"listen.yaml {section}.{name} must be a number, got {value!r}")
+    rate = g["frames_per_s"]
+    return {
+        **doc,
+        "gap_hops": round(doc["utterance"]["gap_s"] * rate),
+        "min_hops": round(doc["utterance"]["min_s"] * rate),
+        "window_hops": round(doc["window_s"] * rate),
+    }
+
+
+def c_initializer(fields: dict) -> str:
+    """A designated initializer of a struct whose fields are named as the contract's keys."""
+    return "{" + ", ".join(f".{name} = {c_number(value)}" for name, value in fields.items()) + "}"
+
+
+def gen_listen_h(v: dict) -> str:
+    lines = [
+        banner("contracts/listen.yaml", "//"),
+        "#pragma once\n",
+        f"#define GEN_LISTEN_VERSION {v['version']}",
+        f"#define GEN_LISTEN_N_BANDS {v['features']['n_bands']}",
+        f"#define GEN_LISTEN_MEL_CONFIG {c_initializer(v['features'])}       // dsp_spec_mel_config_t",
+        f"#define GEN_LISTEN_PITCH_CONFIG {c_initializer(v['pitch'])}       // dsp_spec_pitch_config_t",
+        f"#define GEN_LISTEN_UTTERANCE_GAP_HOPS {v['gap_hops']}",
+        f"#define GEN_LISTEN_UTTERANCE_MIN_HOPS {v['min_hops']}",
+        f"#define GEN_LISTEN_WINDOW_HOPS {v['window_hops']}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def gen_listen_py(v: dict) -> str:
+    def literal(value: object) -> str:
+        return pprint.pformat(value, width=112, sort_dicts=False)
+
+    return banner("contracts/listen.yaml", "#") + (
+        "\n"
+        f"VERSION = {v['version']}\n"
+        f"FEATURES = {literal(v['features'])}\n"
+        f"PITCH = {literal(v['pitch'])}\n"
+        f"N_BANDS = {v['features']['n_bands']}\n"
+        f"UTTERANCE_GAP_S = {v['utterance']['gap_s']!r}\n"
+        f"UTTERANCE_MIN_S = {v['utterance']['min_s']!r}\n"
+        f"UTTERANCE_GAP_HOPS = {v['gap_hops']}\n"
+        f"UTTERANCE_MIN_HOPS = {v['min_hops']}\n"
+        f"WINDOW_S = {v['window_s']!r}\n"
+        f"WINDOW_HOPS = {v['window_hops']}\n"
+    )
+
+
 AfeValue = int | float | tuple[int | float, ...]
 
 
@@ -1042,12 +1101,14 @@ def outputs() -> dict[str, str]:
     afe = afe_values()
     modules = afe_modules()
     lang = lang_vi_values()
+    listen = listen_values(g)
     init = banner("contracts/", "#")
     return {
         f"{COMMON_INC}/gen_grid.h": gen_grid_h(g),
         f"{COMMON_INC}/gen_array.h": gen_array_h(a),
         f"{COMMON_INC}/gen_stream.h": gen_stream_h(s),
         f"{COMMON_INC}/gen_units.h": gen_units_h(lang),
+        f"{COMMON_INC}/gen_listen.h": gen_listen_h(listen),
         f"{MQTT_INC}/gen_topics.h": gen_topics_h(t),
         f"{MQTT_INC}/gen_payload.h": gen_payload_h(),
         f"{AFE_INC}/gen_afe.h": gen_afe_h(afe),
@@ -1058,6 +1119,7 @@ def outputs() -> dict[str, str]:
         f"{ML_GEN}/array.py": gen_array_py(a),
         f"{ML_GEN}/afe.py": gen_afe_py(afe, modules),
         f"{ML_GEN}/lang_vi.py": gen_lang_vi_py(lang),
+        f"{ML_GEN}/listen.py": gen_listen_py(listen),
         f"{HOST_GEN}/__init__.py": init,
         f"{HOST_GEN}/grid.py": gen_grid_py(g),
         f"{HOST_GEN}/stream.py": gen_stream_py(s),
