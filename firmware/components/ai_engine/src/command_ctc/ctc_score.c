@@ -217,6 +217,18 @@ esp_err_t ai_engine_command_ctc_log_probs(const int8_t *logits, int exponent, si
     return ESP_OK;
 }
 
+float ai_engine_command_ctc_exp(float x, int32_t *exponent)
+{
+    const wide_t w = exp_wide(x);
+    *exponent = w.e;
+    return w.m;
+}
+
+uint16_t ai_engine_command_ctc_milli(float x)
+{
+    return milli(x);
+}
+
 size_t ai_engine_command_ctc_work_bytes(size_t n_classes, size_t n_frames)
 {
     return n_classes * n_frames * sizeof(wide_t);

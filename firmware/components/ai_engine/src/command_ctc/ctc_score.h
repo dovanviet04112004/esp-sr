@@ -26,6 +26,17 @@ extern "C" {
 esp_err_t ai_engine_command_ctc_log_probs(const int8_t *logits, int exponent, size_t n_classes,
                                           size_t n_frames, float *log_probs);
 
+/** e^x as ctc_score.py's exp_wide gives it, by the same float32 steps: a mantissa, 0 or in [1, 2), and its
+ *  exponent; 0 below the exp floor and for NaN.
+ *  @ctx any | non-blocking
+ */
+float ai_engine_command_ctc_exp(float x, int32_t *exponent);
+
+/** x in thousandths, rounded half to even, held within the uint16 fields of ai_engine_command_result_t.
+ *  @ctx any | non-blocking
+ */
+uint16_t ai_engine_command_ctc_milli(float x);
+
 /** Bytes of the work area ai_engine_command_ctc_decide fills with the window's probabilities.
  *  @ctx any | non-blocking
  */
