@@ -1,11 +1,16 @@
 """Command split: an unseen command leaves learning but stays in test, speakers keep one role, a corpus without
-speaker ids trains whole, and train is one file per corpus."""
+speaker ids trains whole, and train is one file per corpus; features simulated otherwise than the config asks are
+named before any training reads them."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from srpipe.core import corpus, splits
+from srpipe.core.config import load_device
 from srpipe.tasks.command.ctc import data
 
 COMMANDS = {"commands": [{"id": "bat_den", "text": "bật đèn"}, {"id": "chup_anh", "text": "chụp ảnh"}]}
@@ -51,3 +56,29 @@ def test_an_hours_cap_draws_a_corpus_down_and_leaves_the_others_whole() -> None:
     kept = capped["train_bud500.txt"]
     assert len(kept) == 4 and kept == sorted(kept, key=lambda r: int(r.item.split("/")[-1].split(".")[0]))
     assert capped["train_vivos.txt"] == rows["train_vivos.txt"] and data.capped(rows, seconds, spec) == capped
+
+
+def built(paths: dict, name: str, config: dict, speeds: list[float] | None = None) -> None:
+    """A finished build of split file name under paths, as device.build's manifest records it."""
+    split = paths["splits"] / "command" / "v9" / f"{name}.txt"
+    split.parent.mkdir(parents=True, exist_ok=True)
+    split.write_text(f"speech/x/{name}.wav\tA\t-\tpublic\n", encoding="utf-8")
+    out = paths["processed"] / "command" / "v9" / name
+    out.mkdir(parents=True)
+    body = {"config": config, "split": {"file": split.name, "sha256": splits.sha256_of(split)}}
+    (out / "manifest.yaml").write_text(yaml.safe_dump(body | ({"speeds": speeds} if speeds else {})), encoding="utf-8")
+
+
+def test_features_simulated_otherwise_than_the_config_asks_are_named(tmp_path: Path) -> None:
+    cfg = {"features": "scenes/device.yaml", "split": {"version": "v9"}, "simulate": {"speeds": [0.9, 1.0, 1.1]}}
+    device_cfg = load_device(cfg["features"])
+    paths = {"splits": tmp_path / "splits", "processed": tmp_path / "processed"}
+    built(paths, "train_x", device_cfg, [0.9, 1.0, 1.1])
+    built(paths, "val", device_cfg)
+    assert data.unbuilt(cfg, paths) == []
+    older = {k: v for k, v in device_cfg.items() if k != "microphone"} | {"microphone": {"pcm_shift": 13}}
+    built(paths, "test", older)
+    built(paths, "train_y", device_cfg)
+    (paths["splits"] / "command" / "v9" / "train_z.txt").write_text("", encoding="utf-8")
+    stale = [p.name for p in data.unbuilt(cfg, paths)]
+    assert stale == ["test", "train_y", "train_z"]

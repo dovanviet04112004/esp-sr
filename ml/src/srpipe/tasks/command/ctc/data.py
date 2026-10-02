@@ -122,6 +122,20 @@ def built_as(out: Path, device_cfg: dict, split_file: Path, speeds: tuple[float,
     return body["config"] == device_cfg and same_split and body.get("speeds", []) == list(speeds)
 
 
+def speeds_of(cfg: dict, split_file: Path) -> tuple[float, ...]:
+    """The speeds a file of the split is simulated at: simulate.speeds for train, none for val and test."""
+    return tuple(cfg["simulate"].get("speeds", ())) if splits.role_of(split_file.name) == "train" else ()
+
+
+def unbuilt(cfg: dict, paths: dict) -> list[Path]:
+    """Every file's processed folder that is missing, unfinished, or simulated with another device config or other
+    speeds than cfg now asks: features of a board the simulation no longer is."""
+    device_cfg = load_device(cfg["features"])
+    folder = paths["splits"] / "command" / cfg["split"]["version"]
+    outs = {f: paths["processed"] / "command" / cfg["split"]["version"] / f.stem for f in sorted(folder.glob("*.txt"))}
+    return [out for f, out in outs.items() if not built_as(out, device_cfg, f, speeds_of(cfg, f))]
+
+
 def simulate(cfg: dict, paths: dict) -> None:
     """Every file of the split into processed/command/<version>/<file>, smallest first, with pitch and without the
     clean samples, train's items each spoken at a speed of simulate.speeds; a file stopped part way goes on from its
@@ -131,7 +145,7 @@ def simulate(cfg: dict, paths: dict) -> None:
     folder = paths["splits"] / "command" / version
     for split_file in sorted(folder.glob("*.txt"), key=lambda f: f.stat().st_size):
         out = paths["processed"] / "command" / version / split_file.stem
-        speeds = tuple(spec.get("speeds", ())) if splits.role_of(split_file.name) == "train" else ()
+        speeds = speeds_of(cfg, split_file)
         if built_as(out, device_cfg, split_file, speeds):
             print(f"{out}: already built", flush=True)
             continue

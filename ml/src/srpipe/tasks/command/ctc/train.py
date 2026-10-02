@@ -26,6 +26,7 @@ from srpipe.core.seed import seed_everything
 from srpipe.dsp.spec import pitch
 from srpipe.generated import grid
 from srpipe.tasks.command import ctc
+from srpipe.tasks.command.ctc import data as built
 from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc.ctc_score import BLANK
 from srpipe.tasks.command.rnnt.model import transducer
@@ -309,6 +310,8 @@ def load_sets(cfg: dict) -> dict[str, Sentences]:
     """The train and val sentences of cfg's split with units in its dialect, at most train.max_s long; train held in
     float16."""
     paths = data_paths()
+    if stale := built.unbuilt(cfg, paths):
+        raise ValueError(f"{', '.join(str(p) for p in stale)}: not simulated as the config asks; make ctc-features")
     spec, version = cfg["train"], cfg["split"]["version"]
     folder = paths["splits"] / "command" / version
     split_files = sorted(folder.glob("*.txt"))
