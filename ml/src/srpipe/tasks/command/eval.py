@@ -225,18 +225,15 @@ def rnnt_log_probs(net: Ctc, encoded: torch.Tensor) -> rnnt_search.LogProbs:
 
 
 def rnnt_heard(net: Ctc, x: np.ndarray) -> Heard:
-    """One window decided by the rnnt track (ADR-0016) with no threshold, the beam and context of the run's config."""
+    """One window decided by the rnnt track (ADR-0016) with no threshold, the context of the run's config."""
     if net.model.transducer is None:
         raise ValueError("the run learnt no transducer: its config has no rnnt section")
     window, frames = normalised_window(net, x)
     with torch.no_grad():
         encoded = net.model.encode(window)
-    fst, r = rnnt_search.command_fst(net.lexicon), net.cfg["rnnt"]
+    tree, size = rnnt_search.command_tree(net.lexicon), net.cfg["rnnt"]["context"]
     log_probs, pad = rnnt_log_probs(net, encoded), net.model.transducer.predictor.pad
-    decision = rnnt_search.decide(
-        log_probs, frames, fst, len(net.names), ctc_score.CAP, 0, r["beam"], r["context"], pad
-    )
-    return heard_of(net, *decision)
+    return heard_of(net, *rnnt_search.decide(log_probs, frames, tree, ctc_score.CAP, 0, size, pad))
 
 
 def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: Callable) -> list[Scored]:

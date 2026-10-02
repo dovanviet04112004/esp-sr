@@ -179,9 +179,6 @@ def int8_heard(sim: Int8Rnnt, net: gate.Ctc, x: np.ndarray) -> gate.Heard:
     """One window decided by the rnnt track on its int8 graphs with no threshold, as rnnt_heard decides on float."""
     frames = -(-len(x) // net.model.front.hop_stride)
     window = ((x - net.mean) / net.std).T[None].astype(np.float32)
-    r = net.cfg["rnnt"]
-    fst = rnnt_search.command_fst(net.lexicon)
-    decision = rnnt_search.decide(
-        sim.log_probs(window, frames), frames, fst, len(net.names), ctc_score.CAP, 0, r["beam"], sim.size, sim.pad
-    )
+    tree = rnnt_search.command_tree(net.lexicon)
+    decision = rnnt_search.decide(sim.log_probs(window, frames), frames, tree, ctc_score.CAP, 0, sim.size, sim.pad)
     return gate.heard_of(net, *decision)
