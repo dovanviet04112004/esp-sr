@@ -33,6 +33,7 @@ from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc import ctc_score
 from srpipe.tasks.command.kws.model import dscnn
 from srpipe.tasks.command.kws.postproc import decide
+from srpipe.tasks.command.rnnt.postproc import rnnt_search
 from srpipe.tasks.wake.eval import utterances
 
 REJECT = "reject"
@@ -179,21 +180,62 @@ def ctc_windows(clean: np.ndarray, features: np.ndarray, spans: Spans, longest: 
     return out
 
 
-def ctc_heard(net: Ctc, x: np.ndarray) -> Heard:
-    """One window decided as the device decides it, with no threshold: zero-padded to the net's chunk as in training,
-    normalised, the frames of its own hops kept."""
+def encoded_window(net: Ctc, x: np.ndarray) -> tuple[torch.Tensor, int]:
+    """A window as the device runs it, zero-padded to the net's chunk as in training and normalised, encoded
+    (1, width, frames); and the frames of its own hops."""
     multiple, hops = net.model.chunk_multiple, len(x)
     padded = np.zeros((-(-hops // multiple) * multiple, x.shape[1]), dtype=np.float32)
     padded[:hops] = x
     with torch.no_grad():
-        logits = net.model(torch.from_numpy((padded - net.mean) / net.std).T[None])
-    log_probs = logits.log_softmax(1)[0, :, : -(-hops // net.model.front.hop_stride)].numpy()
-    decision, scores = ctc_score.decide(log_probs, net.lexicon, ctc_score.CAP, 0)
+        encoded = net.model.encode(torch.from_numpy((padded - net.mean) / net.std).T[None])
+    return encoded, -(-hops // net.model.front.hop_stride)
+
+
+def heard_of(net: Ctc, decision: np.ndarray, scores: np.ndarray) -> Heard:
+    """A decision taken with no threshold as Heard: the best command, unless none fits, and whether a part of it
+    turned it down, the only rejection left at such thresholds."""
     k, score, lead, gap = (int(v) for v in decision)
     best = int(np.argmax(scores))
     if scores[best] == -np.inf:
         return Heard(REJECT, score, lead, gap)
     return Heard(net.names[best], score, lead, gap, whole=k != ctc_score.REJECTED)
+
+
+def ctc_heard(net: Ctc, x: np.ndarray) -> Heard:
+    """One window decided by the ctc track as the device decides it, with no threshold."""
+    encoded, frames = encoded_window(net, x)
+    with torch.no_grad():
+        log_probs = net.model.head(encoded).log_softmax(1)[0, :, :frames].numpy()
+    return heard_of(net, *ctc_score.decide(log_probs, net.lexicon, ctc_score.CAP, 0))
+
+
+def rnnt_log_probs(net: Ctc, encoded: torch.Tensor) -> rnnt_search.LogProbs:
+    """The float joiner's log-probabilities over a window's frames, each predictor context projected once."""
+    t = net.model.transducer
+    with torch.no_grad():
+        frames = t.joiner.frame_proj(encoded[0].T)
+    projected: dict[tuple[int, ...], torch.Tensor] = {}
+
+    def log_probs(frame: int, context: tuple[int, ...]) -> np.ndarray:
+        with torch.no_grad():
+            if context not in projected:
+                projected[context] = t.joiner.prefix_proj(t.predictor(torch.tensor([context]))[0, -1])
+            return t.joiner(frames[frame], projected[context]).log_softmax(-1).numpy().astype(np.float32)
+
+    return log_probs
+
+
+def rnnt_heard(net: Ctc, x: np.ndarray) -> Heard:
+    """One window decided by the rnnt track (ADR-0016) with no threshold, the beam and context of the run's config."""
+    if net.model.transducer is None:
+        raise ValueError("the run learnt no transducer: its config has no rnnt section")
+    encoded, frames = encoded_window(net, x)
+    tree, r = rnnt_search.command_tree(net.lexicon), net.cfg["rnnt"]
+    log_probs, pad = rnnt_log_probs(net, encoded), net.model.transducer.predictor.pad
+    decision = rnnt_search.decide(
+        log_probs, frames, tree, len(net.names), ctc_score.CAP, 0, r["beam"], r["context"], pad
+    )
+    return heard_of(net, *decision)
 
 
 def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: Callable) -> list[Scored]:
@@ -230,12 +272,13 @@ def kws_board(net: Kws, spec: dict, paths: dict) -> list[Scored]:
     return board(net.cfg, spec, paths, {cid: text for cid, text in said.items() if cid in net.names}, decided_of)
 
 
-def ctc_board(net: Ctc, spec: dict, paths: dict, window_s: float) -> list[Scored]:
+def ctc_board(net: Ctc, spec: dict, paths: dict, window_s: float, heard: Callable = ctc_heard) -> list[Scored]:
+    """The board sessions decided over LENH's windows by heard, the ctc track's or the rnnt track's."""
     longest = round(window_s * HOPS_PER_S)
     listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
 
     def decided_of(clean, features, spans, tracker):
-        return [ctc_heard(net, x) for x in ctc_windows(clean, features, spans, longest, tracker)]
+        return [heard(net, x) for x in ctc_windows(clean, features, spans, longest, tracker)]
 
     return board(net.cfg, spec, paths, {c["id"]: c["text"] for c in listed}, decided_of)
 
@@ -311,7 +354,7 @@ def ctc_table(results: list[Scored], names: list[str], spec: dict, sweep: dict) 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("track", choices=["kws", "ctc"])
+    parser.add_argument("track", choices=["kws", "ctc", "rnnt"])
     parser.add_argument("run", type=Path, help="a run directory of the track's train")
     args = parser.parse_args(argv)
     spec = load_yaml(command.CONFIG)["eval"]
@@ -324,7 +367,9 @@ def main(argv: list[str] | None = None) -> int:
     net = load_ctc(args.run)
     forms = sum(len(v) for v in net.lexicon)
     print(f"{args.run}: {len(net.names)} commands, {forms} variants, windows up to {ctc_cfg['window_s']} s")
-    print(ctc_table(ctc_board(net, spec["board"], data_paths(), ctc_cfg["window_s"]), net.names, spec, ctc_cfg["eval"]))
+    heard = rnnt_heard if args.track == "rnnt" else ctc_heard
+    results = ctc_board(net, spec["board"], data_paths(), ctc_cfg["window_s"], heard)
+    print(ctc_table(results, net.names, spec, ctc_cfg["eval"]))
     return 0
 
 

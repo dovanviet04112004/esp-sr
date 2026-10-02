@@ -17,6 +17,7 @@ from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc import ctc_score
 from srpipe.tasks.command.eval import REJECT, Scored
+from srpipe.tasks.command.rnnt.postproc import rnnt_search
 
 SPEC = {"pcm_shift": 13, "kinds": ["cmd", "neg"], "left_out": ["s3"]}
 
@@ -84,6 +85,30 @@ def test_a_ctc_window_reaches_the_decision_as_frames_of_its_own_hops(monkeypatch
     )
     heard = gate.ctc_heard(net, np.random.default_rng(0).normal(size=(50, dims)).astype(np.float32))
     assert seen == [(encoder.n_classes(), 25)] and heard.command in ("a", "b") and 0 <= heard.gap <= ctc_score.CAP
+
+
+def test_an_rnnt_window_reaches_the_search_as_frames_of_its_own_hops(monkeypatch) -> None:
+    torch = pytest.importorskip("torch")
+    cfg = load_yaml(ctc.CONFIG)
+    torch.manual_seed(0)
+    dims = encoder.n_dims(cfg)
+    lexicon = [[np.array([0, 1], np.uint8)], [np.array([2], np.uint8)]]
+    stats = (np.zeros(dims, np.float32), np.ones(dims, np.float32))
+    net = gate.Ctc(encoder.build(cfg).eval(), *stats, ["a", "b"], lexicon, cfg)
+    seen, decide = [], rnnt_search.decide
+
+    def watched(log_probs, frames, *rest):
+        pad = net.model.transducer.predictor.pad
+        seen.append((log_probs(0, (pad, ctc_score.BLANK)).shape, frames))
+        return decide(log_probs, frames, *rest)
+
+    monkeypatch.setattr(rnnt_search, "decide", watched)
+    x = np.random.default_rng(0).normal(size=(50, dims)).astype(np.float32)
+    heard = gate.rnnt_heard(net, x)
+    assert seen == [((encoder.n_classes(),), 25)] and heard.command in ("a", "b", REJECT)
+    plain = gate.Ctc(encoder.build(cfg | {"rnnt": None}).eval(), *stats, ["a", "b"], lexicon, cfg)
+    with pytest.raises(ValueError, match="no transducer"):
+        gate.rnnt_heard(plain, x)
 
 
 def test_the_ctc_table_counts_best_commands_and_sweeps_the_reject_threshold() -> None:
