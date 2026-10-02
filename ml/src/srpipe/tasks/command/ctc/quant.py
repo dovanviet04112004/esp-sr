@@ -1,16 +1,14 @@
-"""Quantise and export the ctc net (KEHOACH 3.12, 3.14, ADR-0013). Run: python -m srpipe.tasks.command.ctc.quant
-probe [--run <run>] | export <run>. probe writes what ai_engine/test_apps/unit streams on board B (E11-T12): the first
-stack's layer and the net, seeded random or a trained run, with each step's int8 input and output from the whole-
-sequence simulation. export compares a trained run quantised on rung 1 with each calibration of rung 2 against float,
-on the test set's unit error rate and Gate 3 over the board sessions.
+"""The quantisation ladder of the ctc net (KEHOACH 3.14, ADR-0013). Run: python -m srpipe.tasks.command.ctc.quant
+ptq|int16|qat <run>: rungs 1 and 2, rung 3, rung 4, the last two on the calibration of rung 2 that Gate 3 rates best.
+Each step adds rows to <run>/int8/ladder.yaml, the test set's unit error rate and Gate 3 on the board sessions after
+int8 beside float, and keeps each row's graph under <run>/int8/<row>/ for probe.py.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import math
-import struct
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -18,167 +16,18 @@ import torch
 import yaml
 from torch import nn
 
-from srpipe.compress.quant import esp_ppq_patches, ptq_espdl
+from srpipe.compress.quant import export_espdl, mixed_espdl, ptq_espdl, qat_espdl
 from srpipe.core import screen, splits
-from srpipe.core.config import ML_ROOT, apply_overrides, data_paths, load_yaml
-from srpipe.export import pack_models
+from srpipe.core.config import apply_overrides, data_paths, load_yaml
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
-from srpipe.tasks.command.ctc import train
+from srpipe.tasks.command.ctc import qat, train
 from srpipe.tasks.command.ctc.model import encoder
-from srpipe.tasks.command.ctc.postproc import ctc_score
 from srpipe.tasks.wake.data import sentence_units
 
-PROBE_DIR = ML_ROOT.parent / "firmware" / "components" / "ai_engine" / "test_apps" / "unit" / "main" / "probe"
-MODELS_FILE, STREAMS_FILE, DECIDE_FILE = "ctc_models.bin", "ctc_streams.bin", "ctc_decide.bin"
 LADDER = "command_ctc"
-LAYER_ENTRY, NET_ENTRY = "ctc_lay", "ctc_net"
-# Count; then a record a net: entry name, hops a step, input dims, outputs a step, steps, input and output exponents,
-# then each step's int8 input, then each step's int8 output, in esp-dl's layout of each, padded to four bytes.
-STREAMS_HEAD = struct.Struct("<4sI")
-STREAMS_MAGIC = b"SRCT"
-RECORD = struct.Struct("<8sIIIIii")
-# ESP-PPQ's helper.save heads an .espdl with "EDL2", the encryption flag, the length and four pad bytes.
-ESPDL_HEAD_BYTES = 16
-
-
-def stored_test(espdl: Path) -> tuple[tuple[tuple[int, ...], bytes], tuple[tuple[int, ...], bytes]]:
-    """The test input and output ESP-PPQ stored in an .espdl for model->test(), as dims and int8 bytes, both in the
-    layout esp-dl holds the tensors in."""
-    from esp_ppq.parser.espdl.FlatBuffers.Dl.Model import Model
-
-    graph = Model.GetRootAs(espdl.read_bytes()[ESPDL_HEAD_BYTES:], 0).Graph()
-
-    def dims_and_bytes(tensor) -> tuple[tuple[int, ...], bytes]:
-        dims = tuple(int(d) for d in tensor.DimsAsNumpy())
-        raw = b"".join(tensor.RawData(j).BytesAsNumpy().tobytes() for j in range(tensor.RawDataLength()))
-        return dims, raw[: math.prod(dims)]
-
-    return dims_and_bytes(graph.TestInputsValue(0)), dims_and_bytes(graph.TestOutputsValue(0))
-
-
-def step_perm(channels: int, per_step: int, dims: tuple[int, ...]) -> tuple[int, ...]:
-    """The axes that take a step from ONNX's (1, channels, time) to esp-dl's dims of it: kept, or time first."""
-    if channels == per_step and channels > 1:
-        raise ValueError(f"a step of {per_step} x {channels} reads the same in both layouts")
-    for perm in ((0, 1, 2), (0, 2, 1)):
-        if tuple((1, channels, per_step)[a] for a in perm) == dims:
-            return perm
-    raise ValueError(f"esp-dl holds a (1, {channels}, {per_step}) step as {dims}")
-
-
-def steps_in_layout(x: np.ndarray, per_step: int, perm: tuple[int, ...]) -> bytes:
-    """x (1, channels, time) as the int8 of one step after another, each with its axes in perm's order."""
-    steps = (x[..., s : s + per_step] for s in range(0, x.shape[-1], per_step))
-    return b"".join(np.ascontiguousarray(step.transpose(perm)).tobytes() for step in steps)
-
-
-def probe_net(
-    model: nn.Module, name: str, step_hops: int, cfg: dict, work: Path, calib: list[torch.Tensor], probe_x: np.ndarray
-) -> tuple[bytes, bytes]:
-    """The .espdl of model quantised on calib and streamed step_hops at a time, and its record: every step's int8
-    input and output over probe_x (1, dims, hops)."""
-    dims = probe_x.shape[1]
-    shape = probe_x.shape
-    graph = ptq_espdl.quantize(model.eval(), calib, work / name, ptq_espdl.ladder(LADDER))
-    norms = sum(isinstance(m, encoder.ScalarRmsNorm) for m in model.modules())
-    fused = sum(op.type == "RMSNormalization" for op in graph.operations.values())
-    if fused != norms:
-        raise ValueError(f"{name}: ESP-PPQ fused {fused} of {norms} norms into esp-dl's RMSNormalization")
-    io = ptq_espdl.io_of(graph)
-    x_int8 = ptq_espdl.to_int8(probe_x, io.input_exponent)
-    x = x_int8.astype(np.float32) * np.float32(2.0**io.input_exponent)
-    y = ptq_espdl.Simulator(graph)(x)
-    y_int8 = ptq_espdl.to_int8(y, io.output_exponent)
-    if not np.array_equal(y_int8.astype(np.float32) * np.float32(2.0**io.output_exponent), y):
-        raise ValueError(f"{name}: the simulated output is not on the int8 grid of its exponent")
-    steps = shape[2] // step_hops
-    frames_per_step = y.shape[2] // steps
-    with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
-        espdl = ptq_espdl.export(
-            graph,
-            work / name / f"{name}.espdl",
-            streaming_input_shape=[1, dims, step_hops],
-            test_input=x[..., :step_hops],
-        )
-    (in_dims, in_test), (out_dims, out_test) = stored_test(espdl)
-    x_steps = steps_in_layout(x_int8, step_hops, step_perm(dims, step_hops, in_dims))
-    y_steps = steps_in_layout(y_int8, frames_per_step, step_perm(y.shape[1], frames_per_step, out_dims))
-    # ESP-PPQ ran the first step alone for model->test(): equal bytes prove the layout and the int8 graph's causality.
-    if x_steps[: len(in_test)] != in_test or y_steps[: len(out_test)] != out_test:
-        raise ValueError(f"{name}: the first step differs from the test values ESP-PPQ stored for model->test()")
-    outputs = frames_per_step * y.shape[1]
-    head = RECORD.pack(name.encode("ascii"), step_hops, dims, outputs, steps, io.input_exponent, io.output_exponent)
-    body = x_steps + y_steps
-    return espdl.read_bytes(), head + body + b"\0" * (-len(body) % 4)
-
-
-def draw_norm_scales(model: nn.Module, low: float, high: float) -> nn.Module:
-    """Norm scales drawn as training leaves them: a scale of exactly one drops out of the ONNX graph, and ESP-PPQ then
-    leaves the norm an int8 chain instead of fusing it."""
-    for norm in (m for m in model.modules() if isinstance(m, encoder.ScalarRmsNorm)):
-        nn.init.uniform_(norm.scale, low, high)
-    return model
-
-
-def drawn(cfg: dict, dims: int, count: int) -> list[np.ndarray]:
-    """count random inputs (1, dims, probe hops) of the probe's seed, as normalised features stand."""
-    p = cfg["probe"]
-    rng = np.random.default_rng(p["seed"])
-    return [rng.normal(p["input_mean"], p["input_std"], (1, dims, p["hops"])).astype(np.float32) for _ in range(count)]
-
-
-def trained_net(cfg: dict, run: Path) -> tuple[nn.Module, list[torch.Tensor], np.ndarray]:
-    """A trained run's net, its calibration as export draws it, and one test sentence it streams in the probe."""
-    spec, paths = cfg["quant"], data_paths()
-    net = gate.load_ctc(run)
-    root = paths["processed"] / "command" / net.cfg["split"]["version"]
-    listing = sorted((root / "test").glob("*.items.jsonl"))[0]
-    item = json.loads(listing.read_text(encoding="utf-8").splitlines()[0])
-    stem = str(listing).removesuffix(".items.jsonl")
-    first, n = item["frame_offset"], min(item["n_frames"], spec["hops"])
-    x = np.concatenate(
-        [np.load(stem + s, mmap_mode="r")[first : first + n] for s in (".features.npy", ".pitch.npy")], 1
-    )
-    return net.model, calibration(net.cfg, spec, net.mean, net.std, root), padded(x, spec["hops"], net.mean, net.std)
-
-
-def probe(cfg: dict, out: Path, work: Path, run: Path | None = None) -> tuple[Path, Path, Path]:
-    """Write out/ctc_models.bin and out/ctc_streams.bin: the first stack's layer a frame a step, the net a chunk a
-    step, work keeping each ONNX and .espdl; and out/ctc_decide.bin, the decision of the default commands (E11-T13).
-    With run, the net is that trained run on its calibration of export, streaming a test sentence."""
-    if cfg["probe"]["hops"] % cfg["chunk_hops"] or cfg["quant"]["hops"] % cfg["chunk_hops"]:
-        raise ValueError(f"probe and quant hops must be multiples of chunk_hops {cfg['chunk_hops']}")
-    scales, p = cfg["probe"]["norm_scale"], cfg["probe"]
-    torch.manual_seed(p["seed"])
-    first = cfg["model"]["stacks"][0]
-    one_layer = draw_norm_scales(encoder.layer(cfg, first["kernel"]), *scales)
-    *layer_calib, layer_x = drawn(cfg, cfg["model"]["width"], p["calib_sequences"] + 1)
-    if run is None:
-        torch.manual_seed(p["seed"])
-        net = draw_norm_scales(encoder.build(cfg), *scales)
-        *net_calib, net_x = drawn(cfg, encoder.n_dims(cfg), p["calib_sequences"] + 1)
-        net_calib = [torch.from_numpy(c) for c in net_calib]
-    else:
-        net, net_calib, net_x = trained_net(cfg, run)
-    built = [
-        (
-            LAYER_ENTRY,
-            probe_net(one_layer, LAYER_ENTRY, 1, cfg, work, [torch.from_numpy(c) for c in layer_calib], layer_x),
-        ),
-        (NET_ENTRY, probe_net(net, NET_ENTRY, cfg["chunk_hops"], cfg, work, net_calib, net_x)),
-    ]
-    out.mkdir(parents=True, exist_ok=True)
-    image = out / MODELS_FILE
-    image.write_bytes(pack_models.pack([pack_models.Entry(name, "espdl", espdl) for name, (espdl, _) in built]))
-    streams = out / STREAMS_FILE
-    streams.write_bytes(STREAMS_HEAD.pack(STREAMS_MAGIC, len(built)) + b"".join(record for _, (_, record) in built))
-    for name, (espdl, _) in built:
-        print(f"{name}: {len(espdl)} bytes of .espdl")
-    decide = out / DECIDE_FILE
-    decide.write_bytes(ctc_score.probe_record(cfg))
-    return image, streams, decide
+GRAPH_FILE = "graph.native"
 
 
 def padded(x: np.ndarray, hops: int, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
@@ -206,6 +55,11 @@ def calibration(trained: dict, spec: dict, mean: np.ndarray, std: np.ndarray, ro
         pitch = np.load(stem + ".pitch.npy", mmap_mode="r")[first : first + n]
         out.append(torch.from_numpy(padded(np.concatenate([mel, pitch], axis=1), spec["hops"], mean, std)))
     return out
+
+
+def batched(calib: list[torch.Tensor], batch: int) -> list[torch.Tensor]:
+    """calib stacked batch sentences a tensor, for a graph built for that batch; a short last batch is left out."""
+    return [torch.cat(calib[k : k + batch]) for k in range(0, len(calib) - batch + 1, batch)]
 
 
 class Int8Net:
@@ -256,70 +110,154 @@ def gate_row(net: gate.Ctc, windows: list[gate.Scored], reject: int, margin: int
     }
 
 
-def export(cfg: dict, run: Path) -> Path:
-    """Rung 1 with each calibration of rung 2 against float: the test set's unit error rate and Gate 3 on the board
-    sessions, into <run>/int8/ladder.yaml."""
+def quantized(model: nn.Module, calib: list[torch.Tensor], folder: Path, rungs: dict):
+    """model quantised under rungs into folder, refused unless ESP-PPQ fused every norm into esp-dl's
+    RMSNormalization, as the chip runs it: a norm left an int8 chain is another net."""
+    graph = ptq_espdl.quantize(model, calib, folder, rungs)
+    norms = sum(isinstance(m, encoder.ScalarRmsNorm) for m in model.modules())
+    fused = sum(op.type == "RMSNormalization" for op in graph.operations.values())
+    if fused != norms:
+        raise ValueError(f"{folder}: ESP-PPQ fused {fused} of {norms} norms into esp-dl's RMSNormalization")
+    return graph
+
+
+@dataclass
+class Bench:
+    """What every row is measured on: the float net and its calibration, the test sentences and the board windows."""
+
+    net: gate.Ctc
+    calib: list[torch.Tensor]
+    test: train.Sentences
+    picks: np.ndarray
+    windows: list[gate.Scored]
+
+
+def bench(cfg: dict, run: Path) -> Bench:
+    """The run's net, its calibration, quant.test_sentences test sentences drawn with the seed, and the windows LENH
+    keeps on the board sessions."""
     spec, paths = cfg["quant"], data_paths()
     net = gate.load_ctc(run)
-    root = paths["processed"] / "command" / net.cfg["split"]["version"]
-    calib = calibration(net.cfg, spec, net.mean, net.std, root)
-    folder = paths["splits"] / "command" / net.cfg["split"]["version"]
-    listed = {r.item for r in splits.read_split(folder / "test.txt")}
-    units_of = sentence_units(
-        screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech"), listed, net.cfg["train"]["dialect"]
+    version = net.cfg["split"]["version"]
+    root = paths["processed"] / "command" / version
+    listed = {r.item for r in splits.read_split(paths["splits"] / "command" / version / "test.txt")}
+    clips = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
+    test = train.load_role(
+        [root / "test"], sentence_units(clips, listed, net.cfg["train"]["dialect"]), spec["hops"], "float32"
     )
-    data = train.load_role([root / "test"], units_of, spec["hops"], "float32")
     rng = np.random.default_rng(spec["seed"])
-    picks = np.sort(rng.choice(len(data.first), min(spec["test_sentences"], len(data.first)), replace=False))
-    board_spec = load_yaml(command.CONFIG)["eval"]["board"]
+    picks = np.sort(rng.choice(len(test.first), min(spec["test_sentences"], len(test.first)), replace=False))
     longest = round(cfg["window_s"] * gate.HOPS_PER_S)
     said = {c["id"]: c["text"] for c in json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]}
 
     def window_of(clean, features, spans, tracker):
         return gate.ctc_windows(clean, features, spans, longest, tracker)
 
-    windows = gate.board(net.cfg, board_spec, paths, said, window_of)
-    reject, margin = spec["reject"], cfg["eval"]["margin"]
-    rows = {
-        "float": {
-            "unit_error_rate": round(unit_error_rate(net.model, data, picks, spec["hops"], net.mean, net.std), 4),
-            **gate_row(net, windows, reject, margin),
-        }
-    }
-    print(f"float: {rows['float']}", flush=True)
-    rungs = ptq_espdl.ladder(LADDER)
-    for name in spec["calibrations"]:
-        graph = ptq_espdl.quantize(net.model, calib, run / "int8" / name, rungs | {"calibration": name})
-        int8 = Int8Net(graph, spec["hops"], net.mean, net.std, net.model)
-        int8_net = gate.Ctc(int8, net.mean, net.std, net.names, net.lexicon, net.cfg)
-        rows[name] = {
-            "unit_error_rate": round(unit_error_rate(int8, data, picks, spec["hops"], net.mean, net.std), 4),
-            **gate_row(int8_net, windows, reject, margin),
-        }
-        print(f"{name}: {rows[name]}", flush=True)
-    out = run / "int8" / "ladder.yaml"
+    windows = gate.board(net.cfg, load_yaml(command.CONFIG)["eval"]["board"], paths, said, window_of)
+    return Bench(net, calibration(net.cfg, spec, net.mean, net.std, root), test, picks, windows)
+
+
+def row_of(cfg: dict, b: Bench, model) -> dict:
+    """The unit error rate of model, the float net or an Int8Net, over the picked test sentences, and its Gate 3."""
+    spec, n = cfg["quant"], b.net
+    errors = unit_error_rate(model, b.test, b.picks, spec["hops"], n.mean, n.std)
+    heard = gate.Ctc(model, n.mean, n.std, n.names, n.lexicon, n.cfg)
+    return {"unit_error_rate": round(errors, 4), **gate_row(heard, b.windows, spec["reject"], cfg["eval"]["margin"])}
+
+
+def int8_row(cfg: dict, b: Bench, graph, folder: Path, rungs: dict) -> dict:
+    """graph kept at folder/graph.native, and its row headed by the calibration and int16 layers it was built on."""
+    export_espdl.save_native(graph, folder / GRAPH_FILE)
+    int8 = Int8Net(graph, cfg["quant"]["hops"], b.net.mean, b.net.std, b.net.model)
+    return {"calibration": rungs["calibration"], "int16_ops": rungs["int16_ops"], **row_of(cfg, b, int8)}
+
+
+def ladder_file(run: Path) -> Path:
+    return run / "int8" / "ladder.yaml"
+
+
+def recorded(run: Path, head: dict, rows: dict) -> Path:
+    """head and rows merged into the run's ladder.yaml, rows of the other steps kept; each row printed."""
+    for name, row in rows.items():
+        print(f"{name}: {row}", flush=True)
+    out = ladder_file(run)
+    kept = yaml.safe_load(out.read_text(encoding="utf-8")) if out.is_file() else {}
+    merged = kept | head | {"rows": kept.get("rows", {}) | rows}
     out.parent.mkdir(parents=True, exist_ok=True)
-    head = {"rungs": rungs, "quant": spec, "test_sentences": len(picks)}
-    out.write_text(yaml.safe_dump(head | {"rows": rows}, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    out.write_text(yaml.safe_dump(merged, allow_unicode=True, sort_keys=False), encoding="utf-8")
     return out
+
+
+def counted(share: str) -> int:
+    return int(share.split("/")[0])
+
+
+def best_calibration(run: Path, calibrations: list[str], tie: int) -> str:
+    """The calibration of rung 2 rated best (KEHOACH 3.14): among those within tie commands accepted right of the
+    most, the lowest unit error rate on the test set, then the fewest false accepts."""
+    rows = yaml.safe_load(ladder_file(run).read_text(encoding="utf-8"))["rows"] if ladder_file(run).is_file() else {}
+    missing = [c for c in calibrations if c not in rows]
+    if missing:
+        raise ValueError(f"{ladder_file(run)} has no row of {missing}: run the ptq step first")
+    most = max(counted(rows[c]["accepted_right"]) for c in calibrations)
+    tied = [c for c in calibrations if counted(rows[c]["accepted_right"]) >= most - tie]
+    return min(tied, key=lambda c: (rows[c]["unit_error_rate"], counted(rows[c]["false_accepts"])))
+
+
+def step_ptq(cfg: dict, run: Path) -> Path:
+    """Rungs 1 and 2: the float row, then a row of the net quantised with each calibration."""
+    spec, b = cfg["quant"], bench(cfg, run)
+    head = {"rungs": ptq_espdl.ladder(LADDER), "quant": spec, "test_sentences": len(b.picks)}
+    out = recorded(run, head, {"float": row_of(cfg, b, b.net.model)})
+    for name in spec["calibrations"]:
+        rungs = ptq_espdl.ladder(LADDER) | {"calibration": name}
+        graph = quantized(b.net.model, b.calib, run / "int8" / name, rungs)
+        out = recorded(run, head, {name: int8_row(cfg, b, graph, run / "int8" / name, rungs)})
+    return out
+
+
+def step_int16(cfg: dict, run: Path) -> Path:
+    """Rung 3 on the best calibration: ESP-PPQ's per-layer error ranks the convolutions, and each row puts the worst
+    of them at 16 bits."""
+    spec, b = cfg["quant"], bench(cfg, run)
+    rungs = ptq_espdl.ladder(LADDER) | {"calibration": best_calibration(run, spec["calibrations"], spec["gate_tie"])}
+    base = quantized(b.net.model, b.calib, run / "int8" / "int16_base", rungs)
+    ranked = mixed_espdl.ranked_layers(base, b.calib[: spec["layerwise_sentences"]])
+    layers = [{"op": name, "noise_to_signal": round(error, 6)} for name, error in ranked]
+    head = {"int16_base": rungs["calibration"], "layerwise": layers}
+    out = recorded(run, head, {})
+    for name, ops in mixed_espdl.int16_rows(ranked, spec["int16_tops"]).items():
+        wide = rungs | {"int16_ops": ops}
+        graph = quantized(b.net.model, b.calib, run / "int8" / name, wide)
+        out = recorded(run, head, {name: int8_row(cfg, b, graph, run / "int8" / name, wide)})
+    return out
+
+
+def step_qat(cfg: dict, run: Path, device: str) -> Path:
+    """Rung 4 on the best calibration: the graph built for quant.qat.batch learns with CTC, then what it learnt moves
+    onto the graph of one, which the row measures; the val rows go to <run>/int8/qat/history.yaml."""
+    spec, b = cfg["quant"], bench(cfg, run)
+    rungs = ptq_espdl.ladder(LADDER) | {"calibration": best_calibration(run, spec["calibrations"], spec["gate_tie"])}
+    folder = run / "int8" / "qat"
+    wide = quantized(b.net.model, batched(b.calib, spec["qat"]["batch"]), folder / "batch", rungs)
+    stats = (b.net.mean, b.net.std)
+    history = qat.fit(wide, train.load_sets(b.net.cfg), stats, cfg, b.net.cfg, b.net.model, device)
+    (folder / "history.yaml").write_text(yaml.safe_dump(history, sort_keys=False), encoding="utf-8")
+    graph = quantized(b.net.model, b.calib, folder, rungs)
+    qat_espdl.carry(wide, graph, b.calib[0].numpy())
+    return recorded(run, {"qat": spec["qat"]}, {"qat": int8_row(cfg, b, graph, folder, rungs)})
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    sub = parser.add_subparsers(dest="command", required=True)
-    run = sub.add_parser("probe", help="write the streaming probe of E11-T12 for ai_engine/test_apps/unit")
-    run.add_argument("--out", type=Path, default=PROBE_DIR)
-    run.add_argument("--work", type=Path, default=ML_ROOT / "artifacts" / "command_ctc" / "probe")
-    run.add_argument("--run", type=Path, help="stream this trained run's net instead of random weights")
-    ladder_run = sub.add_parser("export", help="quantise a trained run on the ladder and compare it with float")
-    ladder_run.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.command.ctc.train")
-    ladder_run.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
+    parser.add_argument("step", choices=["ptq", "int16", "qat"])
+    parser.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.command.ctc.train")
+    parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     args = parser.parse_args(argv)
-    if args.command == "export":
-        print(export(apply_overrides(load_yaml(ctc.CONFIG), args.overrides), args.run))
-        return 0
-    for path in probe(load_yaml(ctc.CONFIG), args.out, args.work, args.run):
-        print(f"{path}: {path.stat().st_size} bytes")
+    cfg = apply_overrides(load_yaml(ctc.CONFIG), args.overrides)
+    if args.step == "qat":
+        print(step_qat(cfg, args.run, "cuda" if torch.cuda.is_available() else "cpu"))
+    else:
+        print({"ptq": step_ptq, "int16": step_int16}[args.step](cfg, args.run))
     return 0
 
 

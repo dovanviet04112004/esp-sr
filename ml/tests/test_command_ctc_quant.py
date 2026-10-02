@@ -1,5 +1,6 @@
-"""ctc int8 export: features padded and normalised as training reads them, calibration drawn only from sentences the
-graph holds, and the Gate 3 row counting best, accepted and falsely accepted utterances."""
+"""The ctc ladder: features padded and normalised as training reads them, calibration drawn only from sentences the
+graph holds and stacked for a batch, the Gate 3 row, the rows of every step kept in one file, the best calibration
+within the tie, a norm left unfused refused, and rung 4 training a batch graph the graph of one then carries."""
 
 from __future__ import annotations
 
@@ -8,11 +9,16 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 
-pytest.importorskip("torch")
+torch = pytest.importorskip("torch")
 
-from srpipe.tasks.command import eval as gate
-from srpipe.tasks.command.ctc import quant
+from srpipe.compress.quant import ptq_espdl, qat_espdl  # noqa: E402
+from srpipe.core.config import load_yaml  # noqa: E402
+from srpipe.tasks.command import ctc  # noqa: E402
+from srpipe.tasks.command import eval as gate  # noqa: E402
+from srpipe.tasks.command.ctc import probe, qat, quant, train  # noqa: E402
+from srpipe.tasks.command.ctc.model import encoder  # noqa: E402
 
 DIMS = 43
 
@@ -65,3 +71,62 @@ def test_the_gate_row_counts_best_accepted_and_false_accepts(monkeypatch) -> Non
     ]
     row = quant.gate_row(None, windows, 300, 50)
     assert row == {"best_right": "2/3", "accepted_right": "1/3", "false_accepts": "1/2"}
+
+
+def test_calibration_stacks_into_batches_and_leaves_a_short_one_out() -> None:
+    calib = [torch.full((1, DIMS, 4), float(k)) for k in range(5)]
+    out = quant.batched(calib, 2)
+    assert [tuple(t.shape) for t in out] == [(2, DIMS, 4)] * 2 and float(out[1][0, 0, 0]) == 2.0
+
+
+def gate_of(accepted: int, error: float, false_accepts: int = 3) -> dict:
+    return {"accepted_right": f"{accepted}/112", "false_accepts": f"{false_accepts}/86", "unit_error_rate": error}
+
+
+def test_each_step_keeps_the_rows_of_the_others(tmp_path: Path) -> None:
+    quant.recorded(tmp_path, {"rungs": 1}, {"float": gate_of(79, 0.34)})
+    quant.recorded(tmp_path, {"qat": 2}, {"qat": gate_of(75, 0.35)})
+    kept = yaml.safe_load(quant.ladder_file(tmp_path).read_text(encoding="utf-8"))
+    assert list(kept["rows"]) == ["float", "qat"] and (kept["rungs"], kept["qat"]) == (1, 2)
+
+
+def test_calibrations_within_the_tie_go_to_the_lowest_error(tmp_path: Path) -> None:
+    quant.recorded(tmp_path, {}, {"a": gate_of(65, 0.30), "b": gate_of(73, 0.36), "c": gate_of(74, 0.40)})
+    assert quant.best_calibration(tmp_path, ["a", "b", "c"], 5) == "b"
+    assert quant.best_calibration(tmp_path, ["a", "b", "c"], 0) == "c"
+    assert quant.best_calibration(tmp_path, ["a", "b", "c"], 9) == "a"
+    with pytest.raises(ValueError, match="ptq step first"):
+        quant.best_calibration(tmp_path, ["a", "d"], 5)
+
+
+def sentences(rng: np.random.Generator, hops: list[int]) -> train.Sentences:
+    first = np.cumsum([0, *hops[:-1]])
+    units = [np.array([1 + k % 5, 1 + (k + 1) % 5]) for k in range(len(hops))]
+    return train.Sentences(rng.normal(size=(sum(hops), DIMS)).astype(np.float32), first, np.array(hops), units)
+
+
+def test_rung_4_trains_a_batch_graph_and_the_graph_of_one_carries_it(tmp_path: Path) -> None:
+    cfg = load_yaml(ctc.CONFIG)
+    cfg["quant"]["qat"] |= {"steps": 2, "eval_every": 1}
+    torch.manual_seed(0)
+    model = probe.draw_norm_scales(encoder.build(cfg), *cfg["probe"]["norm_scale"]).eval()
+    rng = np.random.default_rng(4)
+    calib = [torch.from_numpy(rng.normal(size=(1, DIMS, 64)).astype(np.float32)) for _ in range(4)]
+    rungs = ptq_espdl.ladder(quant.LADDER) | {"equalization": None, "bias_correction": False, "calibration": "minmax"}
+    wide = quant.quantized(model, quant.batched(calib, 2), tmp_path / "b", rungs)
+    sets = {"train": sentences(rng, [48, 40, 56, 32]), "val": sentences(rng, [40, 48, 32])}
+    stats = (np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32))
+    history = qat.fit(wide, sets, stats, cfg, cfg, model, "cpu")
+    assert [row["step"] for row in history] == [0, 1, 2] and all(row["unit_error_rate"] >= 0 for row in history)
+    one = quant.quantized(model, calib, tmp_path / "1", rungs)
+    qat_espdl.carry(wide, one, calib[0].numpy())
+
+
+def test_a_net_whose_norms_stay_an_int8_chain_is_refused(tmp_path: Path) -> None:
+    cfg = load_yaml(ctc.CONFIG)
+    torch.manual_seed(0)
+    rng = np.random.default_rng(5)
+    calib = [torch.from_numpy(rng.normal(size=(1, DIMS, 64)).astype(np.float32)) for _ in range(4)]
+    rungs = ptq_espdl.ladder(quant.LADDER) | {"equalization": None, "bias_correction": False, "calibration": "minmax"}
+    with pytest.raises(ValueError, match="fused 0 of 6 norms"):
+        quant.quantized(encoder.build(cfg).eval(), calib, tmp_path, rungs)

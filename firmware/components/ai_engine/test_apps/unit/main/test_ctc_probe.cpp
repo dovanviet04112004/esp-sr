@@ -25,7 +25,7 @@ constexpr int kToleranceSteps = 1; // one int8 step, as model->test() allows (KE
 constexpr size_t kNetsMax = 2;
 constexpr int64_t kUsPerMs = 1000;
 
-// Layout written by srpipe.tasks.command.ctc.quant probe; each record's int8 data is padded to four bytes.
+// Layout written by srpipe.tasks.command.ctc.probe; each record's int8 data is padded to four bytes.
 struct StreamsHead {
     char magic[4];
     uint32_t nets;
