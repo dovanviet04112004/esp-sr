@@ -72,22 +72,40 @@ def lattice_loss(out: nn.Module, frames: Tensor, prefixes: Tensor, targets: Tens
     return rnnt_loss(logits, targets[:, :u].contiguous(), n_frames, n_units, blank=BLANK, reduction="none") / n_units
 
 
+def lattice_groups(n_frames: np.ndarray, n_units: np.ndarray, cells: int) -> list[np.ndarray]:
+    """The sentences in groups whose padded lattice, sentences by the group's most frames by its most units plus one,
+    stays within cells; larger lattices first, so a group pads little, and a sentence larger alone goes alone."""
+    order = np.argsort(-(np.asarray(n_frames) * (np.asarray(n_units) + 1)), kind="stable")
+    groups: list[list[int]] = []
+    frames = units = 0
+    for k in order:
+        t, u = max(frames, int(n_frames[k])), max(units, int(n_units[k]))
+        if groups and (len(groups[-1]) + 1) * t * (u + 1) <= cells:
+            groups[-1].append(int(k))
+        else:
+            groups.append([int(k)])
+            t, u = int(n_frames[k]), int(n_units[k])
+        frames, units = t, u
+    return [np.array(g) for g in groups]
+
+
 def rnnt_loss_of(
-    transducer: Transducer, encoded: Tensor, n_frames: np.ndarray, units: list[np.ndarray], chunk: int
+    transducer: Transducer, encoded: Tensor, n_frames: np.ndarray, units: list[np.ndarray], cells: int
 ) -> Tensor:
     """Mean over the batch of each sentence's RNN-T loss per unit, encoded (batch, width, frames), units as classes.
-    The joiner's lattice is built chunk sentences at a time and built again for the backward pass, so one chunk's is
-    all a step holds: a batch of 12 s sentences would need gigabytes."""
+    The joiner's lattice is built a group of lattice_groups at a time and built again for the backward pass, so one
+    group's, at most cells cells, is all a step holds: a batch of 12 s sentences would need gigabytes."""
     device = encoded.device
     prefixes, targets = with_blank_first(units, device)
     frames = transducer.joiner.frame_proj(encoded.transpose(1, 2))
     projected = transducer.joiner.prefix_proj(transducer.predictor(prefixes))
+    lengths = np.array([len(u) for u in units])
     n_f = torch.from_numpy(np.asarray(n_frames, dtype=np.int32)).to(device)
-    n_u = torch.tensor([len(u) for u in units], dtype=torch.int32, device=device)
+    n_u = torch.from_numpy(lengths.astype(np.int32)).to(device)
     losses = []
-    for k in range(0, len(units), chunk):
-        part = slice(k, k + chunk)
-        args = (frames[part], projected[part], targets[part], n_f[part], n_u[part])
+    for group in lattice_groups(np.asarray(n_frames), lengths, cells):
+        rows = torch.from_numpy(group).to(device)
+        args = (frames[rows], projected[rows], targets[rows], n_f[rows], n_u[rows])
         losses.append(checkpoint(lattice_loss, transducer.joiner.out, *args, use_reentrant=False))
     return torch.cat(losses).mean()
 

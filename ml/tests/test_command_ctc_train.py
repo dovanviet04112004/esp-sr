@@ -144,7 +144,19 @@ def small():
     return t, encoded, np.array([5, 3, 4]), [np.array([5, 1]), np.array([encoder.n_classes() - 1]), np.array([2, 2, 8])]
 
 
-def test_the_rnnt_loss_sums_every_alignment_whatever_chunk_builds_the_lattice(small) -> None:
+def test_lattice_groups_hold_every_sentence_once_each_group_within_its_cells() -> None:
+    rng = np.random.default_rng(5)
+    n_frames, n_units = rng.integers(1, 400, 64), rng.integers(1, 220, 64)
+    for cells in (1, 20_000, 100_000, 10**9):
+        groups = transducer.lattice_groups(n_frames, n_units, cells)
+        assert sorted(np.concatenate(groups).tolist()) == list(range(64))
+        for g in groups:
+            assert len(g) == 1 or len(g) * n_frames[g].max() * (n_units[g].max() + 1) <= cells
+    assert len(transducer.lattice_groups(n_frames, n_units, 10**9)) == 1
+    assert len(transducer.lattice_groups(n_frames, n_units, 1)) == 64
+
+
+def test_the_rnnt_loss_sums_every_alignment_whatever_groups_build_the_lattice(small) -> None:
     t, encoded, n_frames, units = small
     want = []
     with torch.no_grad():
@@ -155,9 +167,9 @@ def test_the_rnnt_loss_sums_every_alignment_whatever_chunk_builds_the_lattice(sm
     for row, (n, u) in enumerate(zip(n_frames, units, strict=True)):
         want.append(every_alignment(lattice[row, :n, : len(u) + 1], u.tolist()) / len(u))
     grads = []
-    for chunk in (1, 2, 3):
+    for cells in (1, 40, 100):
         t.zero_grad()
-        loss = transducer.rnnt_loss_of(t.float(), encoded.float(), n_frames, units, chunk)
+        loss = transducer.rnnt_loss_of(t.float(), encoded.float(), n_frames, units, cells)
         loss.backward()
         assert abs(loss.item() - np.mean(want)) < 1e-4
         grads.append(torch.cat([p.grad.flatten() for p in t.parameters()]))

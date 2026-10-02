@@ -121,7 +121,7 @@ def loss_of(net: encoder.CtcNet, cfg: dict, x: torch.Tensor, frames: np.ndarray,
     if net.transducer is None:
         return loss
     r = cfg["rnnt"]
-    return transducer.rnnt_loss_of(net.transducer, encoded, frames, units, r["loss_chunk"]) + r["ctc_weight"] * loss
+    return transducer.rnnt_loss_of(net.transducer, encoded, frames, units, r["lattice_cells"]) + r["ctc_weight"] * loss
 
 
 def ctc_loss(log_probs: torch.Tensor, frames: np.ndarray, units: list[np.ndarray]) -> torch.Tensor:
@@ -150,9 +150,10 @@ def edit_distance(a: list[int], b: list[int] | np.ndarray) -> int:
     return row[-1]
 
 
-def evaluate(net: encoder.CtcNet, data: Sentences, stats: tuple, device: str, chunk: int = 4) -> dict:
+def evaluate(net: encoder.CtcNet, data: Sentences, stats: tuple, device: str, cells: int | None = None) -> dict:
     """Mean CTC loss of val and the unit error rate of the best path over every val sentence; with a transducer, also
-    its mean RNN-T loss per unit and the unit error rate of its greedy path, chunk sentences of lattice at a time."""
+    its mean RNN-T loss per unit, its lattice built at most cells cells at a time, and the unit error rate of its
+    greedy path."""
     mean, std = stats
     stride = net.front.hop_stride
     losses, rnnt_losses, errors, rnnt_errors, total = [], [], 0, 0, 0
@@ -169,7 +170,7 @@ def evaluate(net: encoder.CtcNet, data: Sentences, stats: tuple, device: str, ch
                 total += len(units[row])
             if net.transducer is not None:
                 rnnt_losses.append(
-                    float(transducer.rnnt_loss_of(net.transducer, encoded, frames, units, chunk)) * len(picks)
+                    float(transducer.rnnt_loss_of(net.transducer, encoded, frames, units, cells)) * len(picks)
                 )
                 paths = transducer.greedy_paths(net.transducer, encoded, frames)
                 rnnt_errors += sum(edit_distance(p, u) for p, u in zip(paths, units, strict=True))
@@ -225,7 +226,7 @@ def train(cfg: dict, sets: dict[str, Sentences], device: str, run: Path | None =
         if step % spec["eval_every"] == 0 or step == spec["steps"]:
             net.eval()
             row = {"step": step, "train_loss": float(np.mean(losses)), "lr": schedule.get_last_lr()[0]}
-            row |= evaluate(net, sets["val"], (mean, std), device, cfg.get("rnnt", {}).get("loss_chunk", 4))
+            row |= evaluate(net, sets["val"], (mean, std), device, (cfg.get("rnnt") or {}).get("lattice_cells"))
             net.train()
             losses = []
             history.append(row)
