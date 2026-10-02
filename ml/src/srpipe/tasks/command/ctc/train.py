@@ -25,8 +25,9 @@ from srpipe.core.seed import seed_everything
 from srpipe.dsp.spec import pitch
 from srpipe.generated import grid
 from srpipe.tasks.command import ctc
-from srpipe.tasks.command.ctc.model import encoder, transducer
+from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc.ctc_score import BLANK
+from srpipe.tasks.command.rnnt.model import transducer
 from srpipe.tasks.wake.data import sentence_units
 
 BRANCH = "command_ctc"

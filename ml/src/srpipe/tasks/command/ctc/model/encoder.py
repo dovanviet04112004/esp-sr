@@ -15,8 +15,8 @@ from torch.nn import functional
 
 from srpipe.core.config import CONFIGS, load_yaml
 from srpipe.dsp.spec import pitch
-from srpipe.tasks.command.ctc.model import transducer
 from srpipe.tasks.command.ctc.postproc.ctc_score import n_classes
+from srpipe.tasks.command.rnnt.model import transducer
 
 
 class CausalConv(nn.Module):

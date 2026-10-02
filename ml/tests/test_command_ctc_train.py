@@ -19,8 +19,9 @@ from srpipe.tasks.command import ctc
 torch = pytest.importorskip("torch")
 
 from srpipe.tasks.command.ctc import train  # noqa: E402
-from srpipe.tasks.command.ctc.model import encoder, transducer  # noqa: E402
+from srpipe.tasks.command.ctc.model import encoder  # noqa: E402
 from srpipe.tasks.command.ctc.postproc.ctc_score import BLANK  # noqa: E402
+from srpipe.tasks.command.rnnt.model import transducer  # noqa: E402
 
 DIMS = encoder.n_dims(load_yaml(ctc.CONFIG))
 
