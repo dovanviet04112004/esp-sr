@@ -979,8 +979,10 @@ nhánh coi như không có (`ai_engine_has` trả false, ghi log một lần), n
 
 Log-softmax mỗi khung trừ lớp lớn nhất, cộng `exp` bằng cùng đa thức float32 và cùng số mũ riêng của phép chấm, lấy `log`
 của tổng bằng double rồi làm tròn về float, rồi trừ: bản soi gương ở `ctc_score.py`, ca vàng cùng thư mục
-`contracts/golden/command_ctc/`, khớp từng bit. Phép kiểm trên board đẩy đặc trưng của các câu thu qua board vào cả chuỗi,
-so int8 của từng khối, log-softmax và kết quả chấm với Python, rồi đo µs mỗi khối và mỗi lần chấm.
+`contracts/golden/command_ctc/`, khớp từng bit. Trên board, bản dò của E11-T12 chạy dòng chính mục `command_ctc` của ảnh và
+so int8 từng khối với mô phỏng; rồi đặc trưng thô của các câu thu qua board đi qua `_begin`, `_step`, `_score`, và bốn
+trường của kết quả chấm phải bằng quyết định Python lấy trên mô phỏng int8 của cùng cửa sổ; đo µs mỗi bước, mỗi khối
+và mỗi lần chấm.
 
 Với `ctc`, thêm lệnh là thêm một dòng chữ (TỔNG QUAN §3.1): dòng mới đi qua `lang_vi` **ngay trên máy** lúc nạp
 bộ lệnh, qua MQTT `down/commands` hoặc từ `storage/cmd/set.json` (§6.4). Phép kiểm chứng minh của
