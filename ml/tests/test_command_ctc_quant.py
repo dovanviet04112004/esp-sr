@@ -60,17 +60,18 @@ def test_the_gate_row_counts_best_accepted_and_false_accepts(monkeypatch) -> Non
             gate.Heard("bat_den", 900, 100, 100),
             gate.Heard("bat_den", 900, 10, 100),
             gate.Heard("tat_den", 900, 100, 100),
+            gate.Heard("bat_den", 900, 100, 100, whole=False),
             gate.Heard("bat_den", 900, 100, 200),
             gate.Heard("bat_den", 900, 100, 900),
         ]
     )
     monkeypatch.setattr(gate, "ctc_heard", lambda net, x: next(heard))
     windows = [
-        gate.Scored("a", "cmd", "100", "bật đèn", "bat_den", [0, 1, 2]),
+        gate.Scored("a", "cmd", "100", "bật đèn", "bat_den", [0, 1, 2, 5]),
         gate.Scored("b", "neg", "100", "bật điện", gate.REJECT, [3, 4]),
     ]
     row = quant.gate_row(None, windows, 300, 50)
-    assert row == {"best_right": "2/3", "accepted_right": "1/3", "false_accepts": "1/2"}
+    assert row == {"best_right": "3/4", "accepted_right": "1/4", "false_accepts": "1/2"}
 
 
 def test_calibration_stacks_into_batches_and_leaves_a_short_one_out() -> None:

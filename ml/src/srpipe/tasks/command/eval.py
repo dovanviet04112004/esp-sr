@@ -58,16 +58,17 @@ class Scored:
 
 class Heard(NamedTuple):
     """One utterance of the ctc track: the command scoring best, unless no command fits the window, with the figures
-    of KEHOACH 3.12 in permille: its score, its lead over its nearest rival, another command or a part of its own, and
-    the free loop's gap over it."""
+    of KEHOACH 3.12 in permille: its score, its lead over the second and the free loop's gap over it; whole is false
+    when a part of the command scores no lower than it, which rejects it at any threshold."""
 
     command: str
     score: int
     lead: int
     gap: int
+    whole: bool = True
 
     def accepted(self, reject: int, margin: int) -> bool:
-        return self.command != REJECT and self.gap <= reject and self.lead >= margin
+        return self.command != REJECT and self.whole and self.gap <= reject and self.lead >= margin
 
 
 @dataclass(frozen=True)
@@ -187,9 +188,12 @@ def ctc_heard(net: Ctc, x: np.ndarray) -> Heard:
     with torch.no_grad():
         logits = net.model(torch.from_numpy((padded - net.mean) / net.std).T[None])
     log_probs = logits.log_softmax(1)[0, :, : -(-hops // net.model.front.hop_stride)].numpy()
-    decision, _ = ctc_score.decide(log_probs, net.lexicon, ctc_score.CAP, 0)
+    decision, scores = ctc_score.decide(log_probs, net.lexicon, ctc_score.CAP, 0)
     k, score, lead, gap = (int(v) for v in decision)
-    return Heard(REJECT if k == ctc_score.REJECTED else net.names[k], score, lead, gap)
+    best = int(np.argmax(scores))
+    if scores[best] == -np.inf:
+        return Heard(REJECT, score, lead, gap)
+    return Heard(net.names[best], score, lead, gap, whole=k != ctc_score.REJECTED)
 
 
 def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: Callable) -> list[Scored]:
