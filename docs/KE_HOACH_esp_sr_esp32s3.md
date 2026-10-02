@@ -1101,8 +1101,12 @@ Một mạng đi từ torch tới chip qua các file của `srpipe/compress/quan
 3. `mixed_espdl.py`, `qat_espdl.py`: bậc 3 và bậc 4. ONNX của ESP-PPQ ghim lô 1 vào các phép `Reshape`, nên QAT học trên
    đồ thị dựng với lô lớn hơn rồi chép tham số và số mũ sang đồ thị lô 1 cùng các phép; hai đồ thị phải cho cùng đầu ra;
 4. `export_espdl.py`: ghi `.espdl`, chạy dòng thì đặt `StreamingCache` trước từng tích chập nhân quả, kèm mẫu thử cho
-   `model->test()`; ghi cả đồ thị native để bước sau đọc lại mà không lượng tử lại. `esp_ppq_patches.py` vá ESP-PPQ lúc
-   xuất, chỉ cho nhánh khai nó.
+   `model->test()`; ghi cả đồ thị native để bước sau đọc lại mà không lượng tử lại. Phép thụ động của ESP-PPQ (`Slice`,
+   `Transpose`, `Reshape`, `Pad`, `MaxPool`…) phải ra cùng số mũ với đầu vào, vì module esp-dl của chúng chỉ chép số
+   nguyên; đồ thị trái điều này bị từ chối ngay lúc xuất, mọi nhánh.
+
+`esp_ppq_patches.py` sửa lỗi của ESP-PPQ 1.3.11 lúc lượng tử và lúc xuất, chỉ cho nhánh khai nó trong config; mỗi lỗi ghi
+triệu chứng trên board và test ghim nó.
 
 Mỗi nhánh dựng thang của mình ở `tasks/<nhánh>/quant.py`: mỗi bậc một lệnh con, mỗi dòng so với float bằng thước của
 nhánh sau int8, ghi vào `<run>/int8/ladder.yaml`, đồ thị của dòng ở `<run>/int8/<dòng>/`. Bậc 3 và 4 dựng trên cách hiệu
