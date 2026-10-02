@@ -25,6 +25,7 @@
 #include "gen_afe.h"
 #include "gen_array.h"
 #include "gen_grid.h"
+#include "gen_listen.h"
 #include "lang_vi.h"
 #include "test_report.h"
 
@@ -39,29 +40,6 @@
 #define REPORT_LINES_MAX 64
 #define NS_LEVEL_HOPS 40 // quiet and loud stretches reach every branch
 #define NS_LOUD 100.0f
-// The 40-band case of contracts/golden/mel until E11 fixes the recogniser's front end.
-#define MEL_BANDS 40
-#define MEL_F_MIN_HZ 20.0f
-#define MEL_F_MAX_HZ 7600.0f
-#define MEL_LOG_FLOOR 1e-6f
-// The pitch section of ml/configs/scenes/device.yaml, Kaldi's defaults (KEHOACH 3.11).
-#define PITCH_CONFIG                                                                                         \
-    {.resample_hz = 4000.0f,                                                                                 \
-     .lowpass_cutoff_hz = 1000.0f,                                                                           \
-     .lowpass_zeros = 1,                                                                                     \
-     .upsample_zeros = 5,                                                                                    \
-     .window_s = 0.025f,                                                                                     \
-     .min_f0_hz = 50.0f,                                                                                     \
-     .max_f0_hz = 400.0f,                                                                                    \
-     .soft_min_f0 = 10.0f,                                                                                   \
-     .penalty_factor = 0.1f,                                                                                 \
-     .delta_pitch = 0.005f,                                                                                  \
-     .nccf_ballast = 7000.0f,                                                                                \
-     .normalization_left_s = 0.75f,                                                                          \
-     .delta_window = 2,                                                                                      \
-     .pov_scale = 2.0f,                                                                                      \
-     .pitch_scale = 2.0f,                                                                                    \
-     .delta_pitch_scale = 10.0f}
 #define PITCH_VOICE_HOPS 64 // a gliding voiced tone in noise, cycled
 #define PITCH_F0_HZ 140.0f
 #define PITCH_GLIDE_HZ 60.0f
@@ -96,7 +74,7 @@ static dsp_spec_cplx_t s_bins[GEN_ARRAY_N_MICS][GEN_GRID_N_BINS];
 static dsp_spec_cplx_t s_work[GEN_GRID_N_BINS];
 static float s_work_pcm[GEN_GRID_HOP_SAMPLES];
 static dsp_afe_calib_t s_calib;
-static float s_log_mel[MEL_BANDS];
+static float s_log_mel[GEN_LISTEN_N_BANDS];
 static float s_voice[PITCH_VOICE_HOPS][GEN_GRID_HOP_SAMPLES];
 static float s_pitch[DSP_SPEC_PITCH_FEATURES];
 static float s_power[GEN_GRID_N_BINS];
@@ -409,8 +387,7 @@ static void bench_chain(void)
 
 static void bench_mel(void)
 {
-    const dsp_spec_mel_config_t cfg = {
-        .n_bands = MEL_BANDS, .f_min_hz = MEL_F_MIN_HZ, .f_max_hz = MEL_F_MAX_HZ, .log_floor = MEL_LOG_FLOOR};
+    const dsp_spec_mel_config_t cfg = GEN_LISTEN_MEL_CONFIG;
     row_t row = {.module = "dsp_spec log-mel (40 dải)", .core = CORE_NHAN, .in_total = true};
     row.hot_bytes = dsp_spec_mel_workspace_bytes(&cfg);
     void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
@@ -444,7 +421,7 @@ static void fill_voice(void)
 
 static void bench_pitch(void)
 {
-    const dsp_spec_pitch_config_t cfg = PITCH_CONFIG;
+    const dsp_spec_pitch_config_t cfg = GEN_LISTEN_PITCH_CONFIG;
     row_t row = {.module = "dsp_spec pitch Kaldi (vùng làm việc PSRAM)", .core = CORE_NHAN, .in_total = true};
     row.hot_bytes = dsp_spec_pitch_workspace_bytes(&cfg);
     void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_SPIRAM);
