@@ -1,8 +1,8 @@
-"""The ctc decision that ai_engine/src/command_ctc/ mirrors (KEHOACH 3.12): each variant of each command scored by the
-CTC forward pass over the window's probabilities, per frame, each state a float32 mantissa with an exponent of its own
-so no alignment underflows; a command takes its best variant; the best command is rejected when the free unit loop
-beats it by more than reject or the second best trails it by less than margin, both in thousandths of a nat a frame.
-emit writes contracts/golden/command_ctc/, which the C matches bit for bit.
+"""The ctc postprocessing that ai_engine/src/command_ctc/ mirrors (KEHOACH 3.12): each frame's int8 logits to
+log-probabilities, then each variant of each command scored by the CTC forward pass over the window's probabilities,
+each state a float32 mantissa with an exponent of its own so no alignment underflows; the best command is rejected when
+the free unit loop beats it by more than reject or the second best trails it by less than margin, both in thousandths
+of a nat a frame. emit writes contracts/golden/command_ctc/, which the C matches bit for bit.
 Run: python -m srpipe.tasks.command.ctc.postproc.ctc_score [--out <golden root>]
 """
 
@@ -33,6 +33,7 @@ DECISION = ("command", "score_permille", "margin_permille", "free_gap_permille")
 SEED = 20261001
 WINDOWS, FRAMES = 12, 48  # a case's windows and their longest, in frames
 SPREAD = (0.5, 6.0)
+LOGIT_EXPONENTS = (-4, -3, -2)  # int8 steps 2^e of the golden logits
 # Magic, classes, frames, commands, most variants, most units, timed runs, reject and margin.
 DECIDE_HEAD = struct.Struct("<4sHHBBBBHH")
 DECIDE_MAGIC = b"SRCD"
@@ -175,32 +176,44 @@ def default_lexicon() -> list[list[np.ndarray]]:
     return [variants(c["text"]) for c in listed]
 
 
-def said(rng: np.random.Generator, units: np.ndarray, frames: int) -> np.ndarray:
-    """Log-probabilities of a window saying units, each unit held a few frames, blanks between and around them."""
+def quantised(logits: np.ndarray, exponent: int) -> np.ndarray:
+    """float logits on the int8 grid of 2^exponent, rounded half to even and held to int8, as the chip gives them."""
+    return np.clip(np.rint(logits / np.float32(2.0**exponent)), -128, 127).astype(np.int8)
+
+
+def frame_log_probs(logits: np.ndarray, exponent: int, center: bool = True) -> np.ndarray:
+    """Log-probabilities (classes, frames) of int8 logits worth logits 2^exponent, by the float32 steps the C takes:
+    each frame's largest logit taken off exactly, exp_wide of every class summed in class order by wide_sum, the log of
+    the sum in double rounded to float, taken off each. center off leaves the largest on, the negative control."""
+    x = np.ldexp(logits.astype(np.float32), exponent).astype(np.float32)
+    d = (x - x.max(axis=0)).astype(np.float32) if center else x
+    total, top = wide_sum([exp_wide(row) for row in d])
+    logs = [math.log(float(s)) + float(t) * LN2 for s, t in zip(total, top, strict=True)]
+    return (d - np.array(logs, dtype=np.float32)).astype(np.float32)
+
+
+def said(rng: np.random.Generator, units: np.ndarray, frames: int, exponent: int) -> np.ndarray:
+    """int8 logits (classes, frames) on the grid of 2^exponent of a window saying units, each unit held a few frames,
+    blanks between and around them."""
     logits = rng.standard_normal((n_classes(), frames)).astype(np.float32)
     per = max(1, frames // (len(units) + 1))
     for k, u in enumerate(units):
         logits[int(u) + 1, k * per : k * per + per - 1] += 6.0
         logits[BLANK, k * per + per - 1] += 6.0
     logits[BLANK, len(units) * per :] += 6.0
-    return log_softmax(logits)
+    return quantised(logits, exponent)
 
 
-def log_softmax(logits: np.ndarray) -> np.ndarray:
-    """Log-probabilities per frame of logits (classes, frames): exp and log in double, an exact sum, one rounding to
-    float32, so the golden set comes out the same on every CPU (KEHOACH 3.14)."""
-    out = np.empty(logits.shape, dtype=np.float32)
-    for t in range(logits.shape[1]):
-        column = [float(v) for v in logits[:, t]]
-        top = max(column)
-        total = math.log(math.fsum(math.exp(v - top) for v in column))
-        out[:, t] = [v - top - total for v in column]
-    return out
-
-
-def case(windows: list[np.ndarray], lexicon: list[list[np.ndarray]], thresholds: np.ndarray, skip: bool = True):
-    """One golden case: windows of (classes, frames) log-probabilities laid frame by frame and padded to FRAMES, the
-    lexicon padded, each window's thresholds, and the command scores and decision of each."""
+def case(
+    windows: list[tuple[np.ndarray, int]],
+    lexicon: list[list[np.ndarray]],
+    thresholds: np.ndarray,
+    skip: bool = True,
+    center: bool = True,
+):
+    """One golden case: windows of int8 logits (classes, frames) and their exponents, logits and log-probabilities
+    laid frame by frame and padded to FRAMES, the lexicon padded, each window's thresholds, and the command scores and
+    decision of each."""
     longest = max(len(u) for forms in lexicon for u in forms)
     most = max(len(forms) for forms in lexicon)
     units = np.zeros((len(lexicon), most, longest), dtype=np.int32)
@@ -208,16 +221,21 @@ def case(windows: list[np.ndarray], lexicon: list[list[np.ndarray]], thresholds:
     for c, forms in enumerate(lexicon):
         for v, u in enumerate(forms):
             units[c, v, : len(u)], n_units[c, v] = u, len(u)
+    logits = np.zeros((len(windows), FRAMES, n_classes()), dtype=np.float32)
     grid = np.zeros((len(windows), FRAMES, n_classes()), dtype=np.float32)
     decisions, scores = [], []
-    for w, (x, limits) in enumerate(zip(windows, thresholds, strict=True)):
+    for w, ((q, exponent), limits) in enumerate(zip(windows, thresholds, strict=True)):
+        x = frame_log_probs(q, exponent, center)
+        logits[w, : q.shape[1]] = q.T
         grid[w, : x.shape[1]] = x.T
         decision, row = decide(x, lexicon, int(limits[0]), int(limits[1]), skip)
         decisions.append(decision)
         scores.append(row)
     return {
+        "logits": logits,
+        "exponent": np.array([exponent for _, exponent in windows], dtype=np.int32),
         "log_probs": grid,
-        "frames": np.array([x.shape[1] for x in windows], dtype=np.int32),
+        "frames": np.array([q.shape[1] for q, _ in windows], dtype=np.int32),
         "units": units,
         "n_variants": np.array([len(forms) for forms in lexicon], dtype=np.int32),
         "n_units": n_units,
@@ -232,12 +250,14 @@ def random_case(rng: np.random.Generator, lexicon: list[list[np.ndarray]]):
     windows = []
     for k in range(WINDOWS):
         frames = int(rng.integers(8, FRAMES + 1))
+        exponent = int(rng.choice(LOGIT_EXPONENTS))
         if k % 3 == 0:
             forms = lexicon[int(rng.integers(len(lexicon)))]
-            windows.append(said(rng, forms[int(rng.integers(len(forms)))], frames))
+            windows.append((said(rng, forms[int(rng.integers(len(forms)))], frames, exponent), exponent))
         else:
             spread = np.float32(rng.uniform(*SPREAD))
-            windows.append(log_softmax(rng.standard_normal((n_classes(), frames)).astype(np.float32) * spread))
+            logits = rng.standard_normal((n_classes(), frames)).astype(np.float32) * spread
+            windows.append((quantised(logits, exponent), exponent))
     thresholds = np.stack([rng.integers(0, 3001, WINDOWS), rng.integers(0, 501, WINDOWS)], axis=1)
     return case(windows, lexicon, thresholds)
 
@@ -246,18 +266,14 @@ def edge_case(rng: np.random.Generator):
     """A command of a repeated unit said and said once, two equal commands, a window too short for any command,
     and a winner exactly on the reject threshold and one exactly on the margin."""
     lexicon = [[np.array([3, 3], np.uint8)], [np.array([0, 1], np.uint8)], [np.array([0, 1], np.uint8)]]
-    windows = [
-        said(rng, np.array([3, 3], np.uint8), 24),
-        said(rng, np.array([3], np.uint8), 24),
-        said(rng, np.array([0, 1], np.uint8), 24),
-        said(rng, np.array([3], np.uint8), 1),
-        said(rng, np.array([3, 3], np.uint8), 30),
-        said(rng, np.array([3, 3], np.uint8), 36),
-    ]
+    e = LOGIT_EXPONENTS[1]
+    said_units = ([3, 3], [3], [0, 1], [3], [3, 3], [3, 3])
+    lengths = (24, 24, 24, 1, 30, 36)
+    windows = [(said(rng, np.array(u, np.uint8), frames, e), e) for u, frames in zip(said_units, lengths, strict=True)]
     thresholds = np.full((len(windows), 2), (1000, 50), dtype=np.int32)
     thresholds[2, 1] = 1
-    thresholds[4, 0] = decide(windows[4], lexicon, 0, 0)[0][3]
-    thresholds[5] = (CAP, decide(windows[5], lexicon, 0, 0)[0][2])
+    thresholds[4, 0] = decide(frame_log_probs(*windows[4]), lexicon, 0, 0)[0][3]
+    thresholds[5] = (CAP, decide(frame_log_probs(*windows[5]), lexicon, 0, 0)[0][2])
     return case(windows, lexicon, thresholds)
 
 
@@ -268,8 +284,8 @@ def probe_record(cfg: dict) -> bytes:
     spec = cfg["probe"]["decide"]
     stride = math.prod(cfg["model"]["front"]["hop_strides"])
     frames = math.ceil(cfg["window_s"] * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES / stride)
-    rng, lexicon = np.random.default_rng(SEED), default_lexicon()
-    window = said(rng, lexicon[0][0], frames)
+    rng, lexicon, e = np.random.default_rng(SEED), default_lexicon(), LOGIT_EXPONENTS[1]
+    window = frame_log_probs(said(rng, lexicon[0][0], frames, e), e)
     decision, scores = decide(window, lexicon, *spec["thresholds"])
     most, longest = max(len(f) for f in lexicon), max(len(u) for f in lexicon for u in f)
     units = np.zeros((len(lexicon), most, longest), dtype=np.uint8)
@@ -285,8 +301,9 @@ def probe_record(cfg: dict) -> bytes:
 
 
 def emit(root: Path) -> list[Path]:
-    """Random windows over the default commands and over a small set, the edge windows, and a negative control whose
-    forward pass never moves from one unit straight to the next."""
+    """Random windows over the default commands and over a small set, the edge windows, and two negative controls:
+    a forward pass that never moves from one unit straight to the next, and log-probabilities with no largest taken
+    off."""
     rng = np.random.default_rng(SEED)
     lexicon = default_lexicon()
     cases = {
@@ -294,8 +311,13 @@ def emit(root: Path) -> list[Path]:
         "case_001": random_case(rng, lexicon[:3]),
         "case_002": edge_case(rng),
     }
-    windows = [x[:f].T for x, f in zip(cases["case_000"]["log_probs"], cases["case_000"]["frames"], strict=True)]
-    cases["case_neg_000"] = case(windows, lexicon, cases["case_000"]["thresholds"], skip=False)
+    first = cases["case_000"]
+    windows = [
+        (q[:f].T.astype(np.int8), int(e))
+        for q, f, e in zip(first["logits"], first["frames"], first["exponent"], strict=True)
+    ]
+    cases["case_neg_000"] = case(windows, lexicon, first["thresholds"], skip=False)
+    cases["case_neg_001"] = case(windows, lexicon, first["thresholds"], center=False)
     written = []
     for name, tensors in cases.items():
         path = root / BLOCK / f"{name}.gold"

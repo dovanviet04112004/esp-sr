@@ -102,7 +102,8 @@ def test_a_command_reads_once_per_distinct_dialect_form() -> None:
 
 def test_the_golden_set_holds_its_edges_and_its_negative_control_differs(tmp_path: Path) -> None:
     written = ctc_score.emit(tmp_path)
-    assert [p.name for p in written] == ["case_000.gold", "case_001.gold", "case_002.gold", "case_neg_000.gold"]
+    names = ["case_000.gold", "case_001.gold", "case_002.gold", "case_neg_000.gold", "case_neg_001.gold"]
+    assert [p.name for p in written] == names
     cases = {p.stem: read_gold(p) for p in written}
     edge = cases["case_002"]["decision"]
     assert edge[0, 0] == 0 and edge[2, 0] == ctc_score.REJECTED and edge[2, 2] == 0
@@ -111,3 +112,18 @@ def test_the_golden_set_holds_its_edges_and_its_negative_control_differs(tmp_pat
     assert edge[5, 0] == 0 and edge[5, 2] == cases["case_002"]["thresholds"][5, 1]
     assert (cases["case_000"]["decision"][:, 0] != ctc_score.REJECTED).any()
     assert not np.array_equal(cases["case_000"]["scores"], cases["case_neg_000"]["scores"])
+    assert np.array_equal(cases["case_000"]["log_probs"], cases["case_neg_000"]["log_probs"])
+    assert not np.array_equal(cases["case_000"]["log_probs"], cases["case_neg_001"]["log_probs"])
+
+
+def test_frame_log_probs_are_a_softmax_of_the_int8_logits_and_the_largest_comes_off_first() -> None:
+    rng = np.random.default_rng(5)
+    q = rng.integers(-128, 128, size=(45, 30)).astype(np.int8)
+    for exponent in ctc_score.LOGIT_EXPONENTS:
+        x = np.ldexp(q.astype(np.float64), exponent)
+        want = x - x.max(axis=0) - np.log(np.exp(x - x.max(axis=0)).sum(axis=0))
+        got = ctc_score.frame_log_probs(q, exponent)
+        assert got.dtype == np.float32 and np.abs(got - want).max() < 1e-5
+        assert not np.array_equal(got, ctc_score.frame_log_probs(q, exponent, center=False))
+    on_grid = ctc_score.quantised(np.array([[0.06], [-40.0], [3.0]], np.float32), -3)
+    assert on_grid.ravel().tolist() == [0, -128, 24]
