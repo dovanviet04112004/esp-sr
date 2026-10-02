@@ -1,13 +1,14 @@
 """ctc training: sentences load with their units and nothing too long, batches pad to the net's chunk, the best path
 merges repeats and drops blanks, the RNN-T loss sums every alignment whatever chunk of sentences builds its lattice,
 greedy RNN-T paths of a batch are those of each sentence, a ring smaller than train goes round every shard and is the
-same rebuilt for a resume, and a tiny run evaluates, saves each evaluated net, keeps the last, and stopped then
-resumed ends as an unbroken one."""
+same rebuilt for a resume, and a tiny run evaluates, saves each evaluated net, keeps the last, and paused or stopped
+then resumed ends as an unbroken one."""
 
 from __future__ import annotations
 
 import itertools
 import json
+import signal
 from pathlib import Path
 
 import numpy as np
@@ -184,6 +185,35 @@ def test_a_stopped_run_resumed_from_its_last_checkpoint_ends_as_an_unbroken_one(
     monkeypatch.setattr(train, "evaluate", evaluate)
     assert torch.load(train.checkpoint(tmp_path / "stopped"), weights_only=False)["step"] == 2
     resumed, _, history = train.train(cfg, ringed_sets(tmp_path / "c", 3), "cpu", tmp_path / "stopped", resume=True)
+    assert history == unbroken
+    assert all(torch.equal(resumed.state_dict()[k], v) for k, v in whole.state_dict().items())
+
+
+def test_ctrl_c_pauses_after_the_step_under_way_and_the_resumed_run_ends_as_an_unbroken_one(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cfg = load_yaml(ctc.CONFIG)
+    cfg["train"] |= {"batch": 2, "steps": 5, "eval_every": 2}
+    whole, _, unbroken = train.train(cfg, ringed_sets(tmp_path / "a", 4), "cpu", tmp_path / "whole")
+    mask, calls = train.mask, []
+
+    def interrupted_in_the_third(*args):
+        calls.append(1)
+        if len(calls) == 3:
+            signal.raise_signal(signal.SIGINT)
+        return mask(*args)
+
+    monkeypatch.setattr(train, "mask", interrupted_in_the_third)
+    with pytest.raises(KeyboardInterrupt):
+        train.train(cfg, ringed_sets(tmp_path / "b", 4), "cpu", tmp_path / "paused")
+    monkeypatch.setattr(train, "mask", mask)
+    state = torch.load(train.checkpoint(tmp_path / "paused"), weights_only=False)
+    assert (
+        state["step"] == 3
+        and len(state["losses"]) == 1
+        and signal.getsignal(signal.SIGINT) is signal.default_int_handler
+    )
+    resumed, _, history = train.train(cfg, ringed_sets(tmp_path / "c", 4), "cpu", tmp_path / "paused", resume=True)
     assert history == unbroken
     assert all(torch.equal(resumed.state_dict()[k], v) for k, v in whole.state_dict().items())
 

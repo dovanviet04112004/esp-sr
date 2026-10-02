@@ -2,7 +2,7 @@
 
 An example is a sentence of processed/command/<version> as the device computes it, drawn from a ring of train's shards;
 its target the lang_vi units of its text in the configured dialect. CTC, SpecAugment, Adam with a cosine decay; val
-gives the CTC loss and the best path's unit error rate.
+gives the CTC loss and the best path's unit error rate. Ctrl-C pauses after the step under way; --resume goes on.
 Run: python -m srpipe.tasks.command.ctc.train [--set train.steps=40000] [--resume RUN]"""
 
 from __future__ import annotations
@@ -10,6 +10,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import signal
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -410,11 +413,25 @@ def checkpoint(run: Path, step: int | None = None) -> Path:
     return run / "checkpoints" / ("last.pt" if step is None else f"step_{step:06d}.pt")
 
 
+@contextmanager
+def pause_asked() -> Iterator[Callable[[], bool]]:
+    """Whether Ctrl-C or SIGTERM came since entering: a loop inside pauses at its next step, not part way through
+    one; the handlers before are back on leaving."""
+    asked = []
+    before = {s: signal.signal(s, lambda signum, frame: asked.append(signum)) for s in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        yield lambda: bool(asked)
+    finally:
+        for s, handler in before.items():
+            signal.signal(s, handler)
+
+
 def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: bool = False) -> tuple:
     """The net of the last step, the feature statistics and one row of val figures per evaluation; sets["train"] a
     Pool, sets["val"] Sentences. With run, each evaluated net is saved beside the state the run goes on from when
     resumed: weights, optimiser, schedule, the batch draws, the history and the train losses since the last
-    evaluation, so a resumed run ends where an unbroken one would."""
+    evaluation, so a resumed run ends where an unbroken one would. Ctrl-C saves that state after the step under way
+    and raises KeyboardInterrupt."""
     spec = cfg["train"]
     rng = seed_everything(spec["seed"])
     pool = sets["train"]
@@ -442,35 +459,42 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
     n_mel = pool.dims - pitch.N_FEATURES
     said = f"{pool.sentences} sentences, {pool.hours:.1f} h, a ring of {len(pool.ring) / HOPS_PER_S / 3600:.1f} h"
     print(f"{said}; steps {first} to {spec['steps']} of {spec['batch']}", flush=True)
-    for step in range(first, spec["steps"] + 1):
-        data = pool.at(step)
-        picks = rng.integers(len(data.first), size=spec["batch"])
-        if "augment" in spec:
-            stride = net.front.hop_stride
-            x, hops, units = augmented_batch(data, picks, net.chunk_multiple, spec["augment"], n_mel, stride, rng)
-        else:
-            x, hops, units = batch_of(data, picks, net.chunk_multiple)
-        x = (x - mean) / std
-        mask(x, hops, spec["masks"], n_mel, rng)
-        loss = loss_of(net, cfg, torch.from_numpy(x).to(device), frames_of(hops, net.front.hop_stride), units)
-        optimiser.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(net.parameters(), spec["clip_norm"])
-        optimiser.step()
-        schedule.step()
-        losses.append(loss.item())
-        if step % spec["eval_every"] == 0 or step == spec["steps"]:
-            net.eval()
-            row = {"step": step, "train_loss": float(np.mean(losses)), "lr": schedule.get_last_lr()[0]}
-            row |= evaluate(net, sets["val"], (mean, std), device, (cfg.get("rnnt") or {}).get("lattice_cells"))
-            net.train()
-            losses = []
-            history.append(row)
-            print(row_line(row), flush=True)
-            if run:
-                checkpoint(run, step).parent.mkdir(parents=True, exist_ok=True)
-                torch.save(net.state_dict(), checkpoint(run, step))
-                save(step)
+    with pause_asked() as paused:
+        for step in range(first, spec["steps"] + 1):
+            data = pool.at(step)
+            picks = rng.integers(len(data.first), size=spec["batch"])
+            if "augment" in spec:
+                stride = net.front.hop_stride
+                x, hops, units = augmented_batch(data, picks, net.chunk_multiple, spec["augment"], n_mel, stride, rng)
+            else:
+                x, hops, units = batch_of(data, picks, net.chunk_multiple)
+            x = (x - mean) / std
+            mask(x, hops, spec["masks"], n_mel, rng)
+            loss = loss_of(net, cfg, torch.from_numpy(x).to(device), frames_of(hops, net.front.hop_stride), units)
+            optimiser.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(net.parameters(), spec["clip_norm"])
+            optimiser.step()
+            schedule.step()
+            losses.append(loss.item())
+            if step % spec["eval_every"] == 0 or step == spec["steps"]:
+                net.eval()
+                row = {"step": step, "train_loss": float(np.mean(losses)), "lr": schedule.get_last_lr()[0]}
+                row |= evaluate(net, sets["val"], (mean, std), device, (cfg.get("rnnt") or {}).get("lattice_cells"))
+                net.train()
+                losses = []
+                history.append(row)
+                print(row_line(row), flush=True)
+                if run:
+                    checkpoint(run, step).parent.mkdir(parents=True, exist_ok=True)
+                    torch.save(net.state_dict(), checkpoint(run, step))
+                    save(step)
+            if paused():
+                if run:
+                    checkpoint(run).parent.mkdir(parents=True, exist_ok=True)
+                    save(step)
+                    print(f"paused after step {step}; make ctc-train RESUME={run} goes on", flush=True)
+                raise KeyboardInterrupt
     net.eval()
     return net, (mean, std), history
 
@@ -513,7 +537,10 @@ def main(argv: list[str] | None = None) -> int:
     sets = load_sets(cfg)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     run = args.resume or create_run_dir(paths["artifacts"], BRANCH, cfg, split_files)
-    net, (mean, std), history = train(cfg, sets, device, run, bool(args.resume))
+    try:
+        net, (mean, std), history = train(cfg, sets, device, run, bool(args.resume))
+    except KeyboardInterrupt:
+        return 128 + signal.SIGINT
     torch.save(net.state_dict(), run / "model.pt")
     np.savez(run / "feature_stats.npz", mean=mean, std=std)
     report = {"val": history[-1], "history": history}
