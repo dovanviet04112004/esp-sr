@@ -1,0 +1,12 @@
+# C command_rnnt search against srpipe.tasks.command.rnnt.postproc.rnnt_search (KEHOACH 3.12, ADR-0016, E11-T20).
+# Both run the same float32 steps in the same order: the stand-in joiner's int8 logits through ctc_score's
+# log-softmax, each hypothesis' score, two of the same units added through the same exp and a log in double rounded to
+# float, so command scores match to the bit and decisions exactly. A command no hypothesis ends on scores -inf on both
+# sides. case_neg_000 ignores the winner's parts; case_neg_001 merges two hypotheses of the same units by the larger.
+tensors:
+  scores:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  decision:
+    max_abs: 0.0
+    min_snr_db: 0.0
