@@ -52,7 +52,7 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 |---|---|---|
 | Một khung DMA | `drv_audio_read_frame` (bên trong `i2s_channel_read`) | một khung cộng biên; hết hạn là lỗi phần cứng, log và đếm |
 | Khung thô | `xQueueReceive(q_frame)` | 100 ms; hết hạn thì nạp watchdog và đếm |
-| Khung sạch | `xQueueReceive(q_clean)` | 100 ms |
+| Khung sạch | `xQueueReceive(q_clean)` | 100 ms; 1 tick khi `svc_listen` còn cửa sổ chờ chấm, để giữa hai bước của cửa sổ (cao độ, rồi một khối mạng tới khoảng 46 ms) `mqtt_task`, `gui_task`, `luong_task` ở nhân 0 vẫn chạy (KẾ HOẠCH §5.4) |
 | Sự kiện, lệnh | `xQueueReceive(q_dialog / q_cmd / q_speak)` | 1 s, rồi nạp watchdog |
 | Nhịp `gui_task` | `vTaskDelayUntil` 100 ms | — |
 
