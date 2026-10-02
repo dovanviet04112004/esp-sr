@@ -962,6 +962,26 @@ và C dịch không gộp nhân với cộng, vì `madd.s` của S3 chỉ làm t
 biến thể lấy bằng double rồi làm tròn về float. Hai bên khớp từng bit, `tolerance.yaml` cho sai số 0; bộ vàng ở
 `contracts/golden/command_ctc/` có đối chứng âm, bản C ở `ai_engine/src/command_ctc/`.
 
+**Chạy `ctc` trên máy** (`ai_engine/src/command_ctc/`, dựng khi Kconfig `AI_ENGINE_COMMAND_BACKEND` là `ctc`). Ảnh model
+mang hai mục tên `command_ctc` (§6.3): `ESPDL` là đồ thị của bậc thang đã chọn (§3.14), xuất chạy dòng `chunk_hops` = 16
+bước một lần; `NORM` là trung bình rồi độ lệch 43 chiều của `train`, float32. `ai_engine_load` dựng mạng và đọc `δ₁`,
+`δ₂` từ NVS `kws/cmd_reject`, `kws/cmd_margin` một lần, vì `_begin` và `_score` không được chặn (§4.5.5); thiếu khoá thì
+nhánh coi như không có (`ai_engine_has` trả false, ghi log một lần), nên khoá phải được gieo trước lúc nạp.
+
+- `_begin` xoá mọi `StreamingCache` của mạng, như cửa sổ bắt đầu từ bộ đệm rỗng lúc học và lúc chấm trên máy tính, xoá
+  khối bước đang gom, mở cửa sổ.
+- `_step` nhận một bước 43 chiều, chuẩn hoá bằng `NORM`, đưa về lưới int8 của số mũ đầu vào (làm tròn về số chẵn gần
+  nhất, chặn ở −128..127, như `Int8Net` của `ctc/quant.py`); đủ 16 bước thì chạy mạng một lần ra 8 khung × 45 lớp int8,
+  đổi ra float theo số mũ đầu ra và lấy log-softmax từng khung. Cửa sổ giữ tối đa 3 s: 188 bước, 94 khung × 45 lớp float
+  ở PSRAM; bước thứ 189 trả `ESP_ERR_NO_MEM`.
+- `_score` đệm khối dở cuối cửa sổ bằng đặc trưng 0 đã chuẩn hoá, như lúc học đệm lô, chạy nó, giữ ⌈bước/2⌉ khung rồi
+  chấm như trên.
+
+Log-softmax mỗi khung trừ lớp lớn nhất, cộng `exp` bằng cùng đa thức float32 và cùng số mũ riêng của phép chấm, lấy `log`
+của tổng bằng double rồi làm tròn về float, rồi trừ: bản soi gương ở `ctc_score.py`, ca vàng cùng thư mục
+`contracts/golden/command_ctc/`, khớp từng bit. Phép kiểm trên board đẩy đặc trưng của các câu thu qua board vào cả chuỗi,
+so int8 của từng khối, log-softmax và kết quả chấm với Python, rồi đo µs mỗi khối và mỗi lần chấm.
+
 Với `ctc`, thêm lệnh là thêm một dòng chữ (TỔNG QUAN §3.1): dòng mới đi qua `lang_vi` **ngay trên máy** lúc nạp
 bộ lệnh, qua MQTT `down/commands` hoặc từ `storage/cmd/set.json` (§6.4). Phép kiểm chứng minh của
 V5.5.8 là thêm một lệnh chưa từng có trong dữ liệu huấn luyện rồi đo nó.
