@@ -9,4 +9,4 @@ branches:
   ns: {}
   wake: {}
   command_kws: {}
-  command_ctc: {}
+  command_ctc: {calibration: percentile}   # ADR-0015: QAT on it ships, int8 alone

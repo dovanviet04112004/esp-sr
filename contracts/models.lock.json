@@ -1,4 +1,58 @@
 {
   "version": 1,
-  "models": {}
+  "models": {
+    "command": {
+      "run": "20261002_128545c-dirty_64e7a4",
+      "grid_hash": "0x9c914b61",
+      "files": [
+        {
+          "file": "command_ctc.espdl",
+          "entry": "command_ctc",
+          "kind": "espdl",
+          "sha256": "202d92e62c38928379165c62561b6d2b10029f536eeb81b9ff3699a29418c695"
+        },
+        {
+          "file": "command_ctc.norm.bin",
+          "entry": "command_ctc",
+          "kind": "norm",
+          "sha256": "6f6215f5eefcd9c8b5c344d0e773b7a9d6bf48f40b1ad56ac7f8db1f1e5801a9"
+        }
+      ],
+      "learnt_from": {
+        "split": "v2",
+        "train": [
+          {
+            "file": "train_bud500.txt",
+            "sha256": "fa64dad974536413aa6376cd9f72b77524b2e47d743c1e2a70dc6164d9472353"
+          },
+          {
+            "file": "train_common_voice_vi.txt",
+            "sha256": "341fb26c92159d914a40151370760c646f9443c175938b046ac10e4febd3732a"
+          },
+          {
+            "file": "train_fpt_open.txt",
+            "sha256": "475bfd70a8b38c711d7e82f137fc038108fa9e211ff1dbd79a02ab2858592d30"
+          },
+          {
+            "file": "train_vivos.txt",
+            "sha256": "5ef518155363071203e5928cc4aa27b19272c869e0a0e28c881a3ebd080539f7"
+          },
+          {
+            "file": "train_vlsp.txt",
+            "sha256": "8ed3c8d2f522c46bd50fe79291f8f937b503abad0d8cd0c365bf2503e33ce5f9"
+          }
+        ]
+      },
+      "backend": "ctc",
+      "features": {
+        "name": "log_mel40_pitch3",
+        "dims": 43
+      },
+      "row": "qat",
+      "rungs": {
+        "calibration": "percentile",
+        "int16_ops": []
+      }
+    }
+  }
 }
