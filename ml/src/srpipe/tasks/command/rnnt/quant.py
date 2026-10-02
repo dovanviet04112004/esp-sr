@@ -140,7 +140,9 @@ def requant(x: np.ndarray, src: int, dst: int) -> np.ndarray:
 class Int8Rnnt:
     """The three graphs as the chip runs them, simulated under the branch's ESP-PPQ fixes: a window's projected frames
     once, each context's prefix once, and the joiner's int8 logits to log-probabilities by ctc_score's
-    frame_log_probs."""
+    frame_log_probs. The chip runs the joiner a frame and a context at a time; the simulation runs the contexts of a
+    frame side by side as columns, which gives each column's int8 exactly as alone: every product and sum of the
+    1x1 convolutions is an integer times a power of two that float32 holds exactly."""
 
     def __init__(self, graphs: Graphs, hops: int, net: gate.Ctc, patches: list[str]) -> None:
         self.frames = ctc_quant.Int8Net(graphs.frames, hops, net.mean, net.std, net.model, patches)
@@ -150,35 +152,61 @@ class Int8Rnnt:
         self.predictor_io = ptq_espdl.io_of(graphs.predictor)
         (self.join_frame, self.join_prefix), (self.join_out,) = ptq_espdl.ports_of(graphs.joiner)
         self.size, self.pad = net.cfg["rnnt"]["context"], net.model.transducer.predictor.pad
+        self.prefixes: dict[tuple[int, ...], np.ndarray] = {}
 
     def prefix(self, context: tuple[int, ...]) -> np.ndarray:
-        """The predictor graph's int8 output for a context."""
-        e = self.predictor_io.input_exponent
-        hot = ptq_espdl.to_int8(one_hot(context, self.pad), e).astype(np.float32) * np.float32(2.0**e)
-        return ptq_espdl.to_int8(self.predictor(hot), self.predictor_io.output_exponent)[0, :, 0]
+        """The predictor graph's int8 output for a context, run once a context."""
+        if context not in self.prefixes:
+            e = self.predictor_io.input_exponent
+            hot = ptq_espdl.to_int8(one_hot(context, self.pad), e).astype(np.float32) * np.float32(2.0**e)
+            out = ptq_espdl.to_int8(self.predictor(hot), self.predictor_io.output_exponent)[0, :, 0]
+            self.prefixes[context] = out
+        return self.prefixes[context]
 
-    def log_probs(self, x: np.ndarray, frames: int) -> rnnt_search.LogProbs:
-        """The search's log-probabilities over a normalised window (1, dims, hops) of frames frames."""
-        projected = ptq_espdl.to_int8(self.frames(torch.from_numpy(x)).numpy(), self.frames_out)[0, :, :frames]
-        prefixes: dict[tuple[int, ...], np.ndarray] = {}
+    def projected(self, x: np.ndarray, frames: int) -> np.ndarray:
+        """The frames graph's int8 output (width, frames) over a normalised window (1, dims, hops)."""
+        return ptq_espdl.to_int8(self.frames(torch.from_numpy(x)).numpy(), self.frames_out)[0, :, :frames]
+
+    def logits(self, frame: np.ndarray, contexts: list[tuple[int, ...]]) -> np.ndarray:
+        """The joiner's int8 logits (classes, contexts) of one projected frame (width,) with each context."""
+        f = requant(frame, self.frames_out, self.join_frame.exponent)
+        p = [requant(self.prefix(c), self.predictor_io.output_exponent, self.join_prefix.exponent) for c in contexts]
+        scale_f, scale_p = np.float32(2.0**self.join_frame.exponent), np.float32(2.0**self.join_prefix.exponent)
+        frames = np.repeat(f[None, :, None], len(contexts), axis=2).astype(np.float32) * scale_f
+        (out,) = self.joiner.run(frames, np.stack(p, axis=1)[None].astype(np.float32) * scale_p)
+        return ptq_espdl.to_int8(out, self.join_out.exponent)[0]
+
+    def log_probs(self, x: np.ndarray, frames: int, contexts: list[tuple[int, ...]] = ()) -> rnnt_search.LogProbs:
+        """The search's log-probabilities over a normalised window (1, dims, hops) of frames frames; contexts, those
+        the search will ask of every frame, are joined in one run the first time a frame is asked for."""
+        projected = self.projected(x, frames)
+        rows: dict[tuple[int, tuple[int, ...]], np.ndarray] = {}
 
         def log_probs(t: int, context: tuple[int, ...]) -> np.ndarray:
-            if context not in prefixes:
-                prefixes[context] = self.prefix(context)
-            f = requant(projected[:, t], self.frames_out, self.join_frame.exponent)
-            p = requant(prefixes[context], self.predictor_io.output_exponent, self.join_prefix.exponent)
-            scale_f, scale_p = np.float32(2.0**self.join_frame.exponent), np.float32(2.0**self.join_prefix.exponent)
-            (logits,) = self.joiner.run(f[None, :, None] * scale_f, p[None, :, None] * scale_p)
-            q = ptq_espdl.to_int8(logits, self.join_out.exponent)[0]
-            return ctc_score.frame_log_probs(q, self.join_out.exponent)[:, 0]
+            if (t, context) not in rows:
+                wanted = list(dict.fromkeys([context, *(c for c in contexts if (t, c) not in rows)]))
+                q = self.logits(projected[:, t], wanted)
+                for c, row in zip(wanted, ctc_score.frame_log_probs(q, self.join_out.exponent).T, strict=True):
+                    rows[(t, c)] = row
+            return rows[(t, context)]
 
         return log_probs
 
 
+def tree_contexts(tree: rnnt_search.Tree, size: int, pad: int) -> list[tuple[int, ...]]:
+    """The distinct predictor contexts of the tree's nodes, in the order the search first needs them."""
+    return list(dict.fromkeys(rnnt_search.context_of(u, size, pad) for u in tree.units))
+
+
+def int8_decided(sim: Int8Rnnt, x: np.ndarray, mean: np.ndarray, std: np.ndarray, tree, reject: int, margin: int):
+    """The decision of a raw window (hops, dims) on the int8 graphs, as rnnt_search.decide gives it."""
+    frames = -(-len(x) // sim.frames.front.hop_stride)
+    window = ((x - mean) / std).T[None].astype(np.float32)
+    log_probs = sim.log_probs(window, frames, tree_contexts(tree, sim.size, sim.pad))
+    return rnnt_search.decide(log_probs, frames, tree, reject, margin, sim.size, sim.pad)
+
+
 def int8_heard(sim: Int8Rnnt, net: gate.Ctc, x: np.ndarray) -> gate.Heard:
     """One window decided by the rnnt track on its int8 graphs with no threshold, as rnnt_heard decides on float."""
-    frames = -(-len(x) // net.model.front.hop_stride)
-    window = ((x - net.mean) / net.std).T[None].astype(np.float32)
     tree = rnnt_search.command_tree(net.lexicon)
-    decision = rnnt_search.decide(sim.log_probs(window, frames), frames, tree, ctc_score.CAP, 0, sim.size, sim.pad)
-    return gate.heard_of(net, *decision)
+    return gate.heard_of(net, *int8_decided(sim, x, net.mean, net.std, tree, ctc_score.CAP, 0))

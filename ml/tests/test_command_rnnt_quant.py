@@ -75,6 +75,13 @@ def test_the_int8_chain_gives_log_probabilities_and_a_decision(cfg, net, tmp_pat
     ctc_net = gate.Ctc(net, *stats, ["a", "b"], lexicon, cfg)
     sim = rnnt_quant.Int8Rnnt(graphs, hops, ctc_net, cfg["esp_ppq_patches"])
     x = rng.normal(size=(40, dims)).astype(np.float32)
-    lp = sim.log_probs(((x - stats[0]) / stats[1]).T[None].astype(np.float32), 20)(0, contexts[0])
+    window = ((x - stats[0]) / stats[1]).T[None].astype(np.float32)
+    lp = sim.log_probs(window, 20)(0, contexts[0])
     assert lp.shape == (encoder.n_classes(),) and abs(np.logaddexp.reduce(lp.astype(np.float64))) < 1e-5
+    frame = sim.projected(window, 20)[:, 3]
+    side_by_side = sim.logits(frame, contexts)
+    alone = np.concatenate([sim.logits(frame, [c]) for c in contexts], axis=1)
+    assert side_by_side.dtype == np.int8 and np.array_equal(side_by_side, alone)
+    batched = sim.log_probs(window, 20, contexts)
+    assert all(np.array_equal(batched(5, c), sim.log_probs(window, 20)(5, c)) for c in contexts)
     assert rnnt_quant.int8_heard(sim, ctc_net, x).command in ("a", "b", gate.REJECT)
