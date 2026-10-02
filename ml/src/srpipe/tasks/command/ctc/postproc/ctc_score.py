@@ -277,25 +277,33 @@ def edge_case(rng: np.random.Generator):
     return case(windows, lexicon, thresholds)
 
 
-def probe_record(cfg: dict) -> bytes:
-    """The decision of the default commands over one window of the longest LENH keeps, saying one of them, as the
-    unit app of ai_engine times it on board B: DECIDE_HEAD, variants a command, units a variant, the units padded,
-    the frames' log-probabilities from the next four-byte boundary, the expected decision, every command's score."""
-    spec = cfg["probe"]["decide"]
-    stride = math.prod(cfg["model"]["front"]["hop_strides"])
-    frames = math.ceil(cfg["window_s"] * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES / stride)
-    rng, lexicon, e = np.random.default_rng(SEED), default_lexicon(), LOGIT_EXPONENTS[1]
-    window = frame_log_probs(said(rng, lexicon[0][0], frames, e), e)
-    decision, scores = decide(window, lexicon, *spec["thresholds"])
+def packed_lexicon(lexicon: list[list[np.ndarray]]) -> tuple[tuple[int, int, int], bytes]:
+    """The lexicon as ai_engine's unit app reads it: variants a command, units a variant, the units padded; with its
+    commands, most variants and longest variant."""
     most, longest = max(len(f) for f in lexicon), max(len(u) for f in lexicon for u in f)
     units = np.zeros((len(lexicon), most, longest), dtype=np.uint8)
     n_units = np.zeros((len(lexicon), most), dtype=np.uint8)
     for c, forms in enumerate(lexicon):
         for v, u in enumerate(forms):
             units[c, v, : len(u)], n_units[c, v] = u, len(u)
-    sizes = (n_classes(), frames, len(lexicon), most, longest, spec["runs"])
-    head = DECIDE_HEAD.pack(DECIDE_MAGIC, *sizes, *spec["thresholds"])
-    body = head + bytes(len(f) for f in lexicon) + n_units.tobytes() + units.tobytes()
+    return (len(lexicon), most, longest), bytes(len(f) for f in lexicon) + n_units.tobytes() + units.tobytes()
+
+
+def probe_record(cfg: dict) -> bytes:
+    """The decision of the default commands over one window of the longest LENH keeps, saying one of them, as the
+    unit app of ai_engine times it on board B: DECIDE_HEAD, the packed lexicon, the frames' log-probabilities from
+    the next four-byte boundary, the expected decision, every command's score."""
+    spec = cfg["probe"]["decide"]
+    stride = math.prod(cfg["model"]["front"]["hop_strides"])
+    frames = math.ceil(cfg["window_s"] * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES / stride)
+    rng, lexicon, e = np.random.default_rng(SEED), default_lexicon(), LOGIT_EXPONENTS[1]
+    window = frame_log_probs(said(rng, lexicon[0][0], frames, e), e)
+    decision, scores = decide(window, lexicon, *spec["thresholds"])
+    (commands, most, longest), packed = packed_lexicon(lexicon)
+    head = DECIDE_HEAD.pack(
+        DECIDE_MAGIC, n_classes(), frames, commands, most, longest, spec["runs"], *spec["thresholds"]
+    )
+    body = head + packed
     body += b"\0" * (-len(body) % 4) + np.ascontiguousarray(window.T, dtype="<f4").tobytes()
     return body + DECISION_RECORD.pack(*decision.tolist()) + scores.astype("<f4").tobytes()
 
