@@ -1350,6 +1350,7 @@ contracts/
 | `array.yaml` | `common/include/gen_array.h`, `ml/src/srpipe/generated/array.py` | `doa`, `gsc`, `bss`, bộ dựng cảnh |
 | `afe.yaml` | `dsp_afe/include/gen_afe.h`, `ml/src/srpipe/generated/afe.py`, `firmware/sdkconfig.afe` | `dsp_afe` và bản soi gương của nó; `sdkconfig.afe` bật đúng các module của `modules:` cho mọi bản dựng sản phẩm, `bench_afe` và profile `modules` của parity, còn `srpipe.dsp.afe.chain` đọc cùng danh sách để dựng bộ vàng `chain_modules` |
 | `lang_vi.yaml` | `lang_vi/priv_include/gen_lang_vi.h`, `ml/src/srpipe/generated/lang_vi.py` | `lang_vi` và bản soi gương `srpipe.lang` |
+| `lang_vi.yaml` | `common/include/gen_units.h`: mã các đơn vị thanh, đơn vị kết mỗi âm tiết | `ai_engine` tách phần của lệnh khi chấm `ctc` (§3.12) |
 | `stream/frame.yaml` | `common/include/gen_stream.h`, `host/src/srhost/generated/stream.py` | `net_stream`, `svc_report`, `host` |
 | `schema/` | `firmware/components/net_mqtt/include/gen_payload.h` | `svc_report`, `svc_dialog`, `main` |
 | `schema/` | `host/src/srhost/generated/payload.py` | `host` |
@@ -1671,7 +1672,7 @@ firmware/
 │   └── app_console.{c,h}             # NVS, hiệu chuẩn, mở luồng tiếng qua USB; Kconfig tắt ở prod
 │
 ├── components/                       # ── 100% CODE TỰ VIẾT ──
-│   ├── common/        [C]   L0  # header thuần: app_err.h, app_events.h, gen_grid.h, gen_array.h, gen_stream.h
+│   ├── common/        [C]   L0  # header thuần: app_err.h, app_events.h, gen_grid.h, gen_array.h, gen_stream.h, gen_units.h
 │   ├── dsp_spec/      [C]   L1  # fft, window, stft, mel, pitch — thuật toán thuần
 │   ├── lang_vi/       [C]   L1  # normalize, g2p, lexicon — luật ngôn ngữ thuần
 │   ├── bsp_board/     [C]   L1  # include/app_config.h: MỌI chân GPIO, một file duy nhất
