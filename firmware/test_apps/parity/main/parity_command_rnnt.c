@@ -6,7 +6,7 @@
 #include "parity.h"
 #include "parity_command.h"
 
-enum { LIMIT_REJECT = 0, LIMIT_MARGIN, LIMIT_BEAM, LIMIT_COUNT };
+enum { LIMIT_REJECT = 0, LIMIT_MARGIN, LIMIT_COUNT };
 
 // The golden set's stand-in for the joiner: frame t's logits plus the pulls of the context's two classes.
 typedef struct {
@@ -64,11 +64,11 @@ bool parity_command_rnnt(const char *case_name, const void *buf, size_t len)
     int8_t *q = malloc(classes);
     ai_engine_lexicon_t *lex = calloc(1, sizeof(*lex));
     uint8_t *ids = malloc(units.dims[0] * units.dims[1] * units.dims[2]);
-    void *fst = malloc(ai_engine_command_rnnt_fst_bytes());
-    void *work = malloc(ai_engine_command_rnnt_work_bytes(AI_ENGINE_COMMAND_RNNT_BEAM_MAX, classes));
+    void *tree = malloc(ai_engine_command_rnnt_tree_bytes());
+    void *work = malloc(ai_engine_command_rnnt_work_bytes(classes));
     bool ok = raw != NULL && lengths != NULL && steps != NULL && pull_first != NULL && pull_last != NULL &&
               limit != NULL && want_scores != NULL && want != NULL && got_scores != NULL && got != NULL &&
-              q != NULL && lex != NULL && ids != NULL && fst != NULL && work != NULL &&
+              q != NULL && lex != NULL && ids != NULL && tree != NULL && work != NULL &&
               parity_floats(&frames, raw, windows * longest * classes) &&
               parity_floats(&n_frames, lengths, windows) && parity_floats(&exponent, steps, windows) &&
               parity_floats(&first, pull_first, table) && parity_floats(&last, pull_last, table) &&
@@ -76,13 +76,13 @@ bool parity_command_rnnt(const char *case_name, const void *buf, size_t len)
               parity_floats(&scores, want_scores, windows * commands) &&
               parity_floats(&decision, want, windows * PARITY_DECISION_COUNT) &&
               parity_lexicon_of(&units, &n_variants, &n_units, lex, ids) &&
-              ai_engine_command_rnnt_build(lex, fst, ai_engine_command_rnnt_fst_bytes()) == ESP_OK;
+              ai_engine_command_rnnt_build(lex, tree, ai_engine_command_rnnt_tree_bytes()) == ESP_OK;
     for (size_t w = 0; ok && w < windows; w++) {
         table_t t = {raw + w * longest * classes, pull_first, pull_last, classes, (int)steps[w], q};
         const float *l = limit + w * LIMIT_COUNT;
         ai_engine_command_result_t d;
-        ok = ai_engine_command_rnnt_decide(lex, fst, classes, (size_t)lengths[w], (size_t)l[LIMIT_BEAM],
-                                           (uint8_t)classes, table_log_probs, &t, (uint16_t)l[LIMIT_REJECT],
+        ok = ai_engine_command_rnnt_decide(lex, tree, classes, (size_t)lengths[w], (uint8_t)classes,
+                                           table_log_probs, &t, (uint16_t)l[LIMIT_REJECT],
                                            (uint16_t)l[LIMIT_MARGIN], work, got_scores + w * commands,
                                            &d) == ESP_OK;
         parity_decision_row(&d, got + w * PARITY_DECISION_COUNT);
@@ -106,7 +106,7 @@ bool parity_command_rnnt(const char *case_name, const void *buf, size_t len)
     free(q);
     free(lex);
     free(ids);
-    free(fst);
+    free(tree);
     free(work);
     return ok;
 }

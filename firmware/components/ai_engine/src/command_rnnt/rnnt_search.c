@@ -9,32 +9,29 @@
 
 #define BLANK 0
 #define NONE 0xffffu
+#define PAD_MARK 0xffu  // the root's older context class: the caller's pad
 #define FIELD_MAX 65535 // the uint16 fields of ai_engine_command_result_t
-#define STATES AI_ENGINE_COMMAND_RNNT_STATES_MAX
+#define NODES AI_ENGINE_COMMAND_RNNT_NODES_MAX
+#define CONTEXTS AI_ENGINE_COMMAND_RNNT_CONTEXTS_MAX
 #define CONTEXT AI_ENGINE_COMMAND_RNNT_CONTEXT
 #define UNITS_MAX AI_ENGINE_COMMAND_RNNT_UNITS_MAX
-#define REGISTER_SLOTS (2 * STATES) // open addressing at half load at most
+#define FREE_UNITS AI_ENGINE_COMMAND_RNNT_FREE_UNITS
 
-// The prefix tree, then the minimal FST in arcs by state; siblings stay in unit order throughout.
+_Static_assert(CONTEXT == 2, "a node's context is its parent's newer class and its own unit's");
+
+// The prefix tree as built, siblings in unit order, then laid out breadth first with each node's context.
 typedef struct {
-    uint16_t n_tree, n_states;
-    uint16_t child[STATES], sibling[STATES], canonical[STATES], rep[STATES], number[STATES], order[STATES];
-    uint8_t unit[STATES], final_tree[STATES];
-    uint16_t slot[REGISTER_SLOTS];
-    uint16_t first_arc[STATES + 1], arc_to[STATES];
-    uint8_t arc_unit[STATES], final[STATES];
-} fst_t;
+    uint16_t n_built, n_nodes, n_contexts;
+    uint16_t child[NODES], sibling[NODES], order[NODES], parent[NODES];
+    uint8_t unit[NODES];
+    uint16_t first_arc[NODES + 1], arc_to[NODES], context[NODES];
+    uint8_t arc_unit[NODES], newer[NODES];
+    uint8_t classes[CONTEXTS][CONTEXT];
+} tree_t;
 
-typedef struct {
-    float score;
-    uint16_t state;
-    uint8_t n;
-    uint8_t units[UNITS_MAX];
-} hyp_t;
-
-size_t ai_engine_command_rnnt_fst_bytes(void)
+size_t ai_engine_command_rnnt_tree_bytes(void)
 {
-    return sizeof(fst_t);
+    return sizeof(tree_t);
 }
 
 static bool ends_syllable(uint8_t unit)
@@ -56,7 +53,7 @@ static size_t syllable_ends(const ai_engine_seq_t *seq, size_t *ends)
     return n;
 }
 
-static uint16_t child_of(fst_t *f, uint16_t node, uint8_t u)
+static uint16_t child_of(tree_t *f, uint16_t node, uint8_t u)
 {
     uint16_t before = NONE, at = f->child[node];
     while (at != NONE && f->unit[at] < u) {
@@ -64,12 +61,11 @@ static uint16_t child_of(fst_t *f, uint16_t node, uint8_t u)
         at = f->sibling[at];
     }
     if (at != NONE && f->unit[at] == u) { return at; }
-    if (f->n_tree >= STATES) { return NONE; }
-    const uint16_t made = f->n_tree++;
+    if (f->n_built >= NODES) { return NONE; }
+    const uint16_t made = f->n_built++;
     f->child[made] = NONE;
     f->sibling[made] = at;
     f->unit[made] = u;
-    f->final_tree[made] = 0;
     if (before == NONE) {
         f->child[node] = made;
     } else {
@@ -78,91 +74,65 @@ static uint16_t child_of(fst_t *f, uint16_t node, uint8_t u)
     return made;
 }
 
-static bool insert(fst_t *f, const uint8_t *units, size_t n)
+static bool insert(tree_t *f, const uint8_t *units, size_t n)
 {
     uint16_t node = 0;
-    for (size_t k = 0; k < n; k++) {
+    for (size_t k = 0; k < n && node != NONE; k++) {
         node = child_of(f, node, units[k]);
-        if (node == NONE) { return false; }
     }
-    f->final_tree[node] = 1;
+    return node != NONE;
+}
+
+static bool context_id(tree_t *f, uint8_t older, uint8_t newer, uint16_t *id)
+{
+    for (uint16_t k = 0; k < f->n_contexts; k++) {
+        if (f->classes[k][0] == older && f->classes[k][1] == newer) {
+            *id = k;
+            return true;
+        }
+    }
+    if (f->n_contexts >= CONTEXTS) { return false; }
+    f->classes[f->n_contexts][0] = older;
+    f->classes[f->n_contexts][1] = newer;
+    *id = f->n_contexts++;
     return true;
 }
 
-static uint32_t signature_hash(const fst_t *f, uint16_t node)
+// Breadth first from the root: a node's children get the next numbers, in unit order, after its parent's.
+static bool lay_out(tree_t *f)
 {
-    uint32_t h = 2166136261u ^ f->final_tree[node];
-    for (uint16_t c = f->child[node]; c != NONE; c = f->sibling[c]) {
-        h = (h ^ f->unit[c]) * 16777619u;
-        h = (h ^ f->canonical[c]) * 16777619u;
-    }
-    return h;
-}
-
-static bool same_signature(const fst_t *f, uint16_t a, uint16_t b)
-{
-    if (f->final_tree[a] != f->final_tree[b]) { return false; }
-    uint16_t x = f->child[a], y = f->child[b];
-    for (; x != NONE && y != NONE; x = f->sibling[x], y = f->sibling[y]) {
-        if (f->unit[x] != f->unit[y] || f->canonical[x] != f->canonical[y]) { return false; }
-    }
-    return x == NONE && y == NONE;
-}
-
-// Children are made after their parent, so walking the states downward meets each child ahead of it.
-static void minimise(fst_t *f)
-{
-    uint16_t ids = 0;
-    for (size_t i = 0; i < REGISTER_SLOTS; i++) {
-        f->slot[i] = NONE;
-    }
-    for (size_t s = f->n_tree; s-- > 0;) {
-        size_t i = signature_hash(f, (uint16_t)s) % REGISTER_SLOTS;
-        while (f->slot[i] != NONE && !same_signature(f, f->rep[f->slot[i]], (uint16_t)s)) {
-            i = (i + 1) % REGISTER_SLOTS;
-        }
-        if (f->slot[i] == NONE) {
-            f->slot[i] = ids;
-            f->rep[ids++] = (uint16_t)s;
-        }
-        f->canonical[s] = f->slot[i];
-    }
-    for (size_t k = 0; k < ids; k++) {
-        f->number[k] = NONE;
-    }
-    uint16_t count = 0;
-    f->number[f->canonical[0]] = count;
-    f->order[count++] = f->canonical[0];
-    uint16_t arcs = 0;
+    uint16_t count = 1, arcs = 0;
+    f->order[0] = 0;
+    f->n_contexts = 0;
     for (uint16_t k = 0; k < count; k++) {
-        const uint16_t rep = f->rep[f->order[k]];
         f->first_arc[k] = arcs;
-        f->final[k] = f->final_tree[rep];
-        for (uint16_t c = f->child[rep]; c != NONE; c = f->sibling[c]) {
-            const uint16_t to = f->canonical[c];
-            if (f->number[to] == NONE) {
-                f->number[to] = count;
-                f->order[count++] = to;
-            }
+        for (uint16_t c = f->child[f->order[k]]; c != NONE; c = f->sibling[c]) {
+            f->parent[count] = k;
             f->arc_unit[arcs] = f->unit[c];
-            f->arc_to[arcs++] = f->number[to];
+            f->arc_to[arcs++] = count;
+            f->order[count++] = c;
         }
     }
     f->first_arc[count] = arcs;
-    f->n_states = count;
+    f->n_nodes = count;
+    for (uint16_t k = 0; k < count; k++) {
+        const uint8_t older = k == 0 ? PAD_MARK : f->newer[f->parent[k]];
+        f->newer[k] = k == 0 ? BLANK : (uint8_t)(f->unit[f->order[k]] + 1);
+        if (!context_id(f, older, f->newer[k], &f->context[k])) { return false; }
+    }
+    return true;
 }
 
-esp_err_t ai_engine_command_rnnt_build(const ai_engine_lexicon_t *lexicon, void *fst, size_t bytes)
+esp_err_t ai_engine_command_rnnt_build(const ai_engine_lexicon_t *lexicon, void *tree, size_t bytes)
 {
-    if (lexicon == NULL || fst == NULL || bytes < sizeof(fst_t) || lexicon->n_commands == 0 ||
+    if (lexicon == NULL || tree == NULL || bytes < sizeof(tree_t) || lexicon->n_commands == 0 ||
         lexicon->n_commands > AI_ENGINE_COMMANDS_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
-    fst_t *f = fst;
-    f->n_tree = 1;
+    tree_t *f = tree;
+    f->n_built = 1;
     f->child[0] = NONE;
     f->sibling[0] = NONE;
-    f->final_tree[0] = 0;
     for (size_t c = 0; c < lexicon->n_commands; c++) {
         if (lexicon->n_variants[c] == 0 || lexicon->n_variants[c] > AI_ENGINE_VARIANTS_MAX) {
             return ESP_ERR_INVALID_ARG;
@@ -181,22 +151,12 @@ esp_err_t ai_engine_command_rnnt_build(const ai_engine_lexicon_t *lexicon, void 
             }
         }
     }
-    minimise(f);
-    return ESP_OK;
+    return lay_out(f) ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
-size_t ai_engine_command_rnnt_work_bytes(size_t beam, size_t n_classes)
+size_t ai_engine_command_rnnt_work_bytes(size_t n_classes)
 {
-    return (2 * beam + beam * n_classes) * sizeof(hyp_t) + n_classes * sizeof(float);
-}
-
-// The predictor's last CONTEXT classes of a hypothesis: pad, then blank, then each unit's class.
-static void context_of(const hyp_t *h, uint8_t pad, uint8_t *context)
-{
-    for (size_t k = 0; k < CONTEXT; k++) {
-        const ptrdiff_t at = (ptrdiff_t)h->n - (ptrdiff_t)CONTEXT + (ptrdiff_t)k;
-        context[k] = at >= 0 ? (uint8_t)(h->units[at] + 1) : at == -1 ? BLANK : pad;
-    }
+    return (NODES + (size_t)CONTEXTS * n_classes) * sizeof(float);
 }
 
 static float log_add(float a, float b)
@@ -209,66 +169,34 @@ static float log_add(float a, float b)
     return top + (float)log(1.0 + (double)tail);
 }
 
-// Adds a candidate, or adds its probability into the earlier one of the same units, keeping that one's place.
-static void offer(hyp_t *found, size_t *n_found, const hyp_t *from, int unit, float score, uint16_t state)
+// Each frame: every distinct context's log-probabilities, each node's probability to its children, parents
+// first, then every node's blank.
+static esp_err_t forward(const tree_t *f, size_t n_classes, size_t n_frames, uint8_t pad,
+                         ai_engine_command_rnnt_log_probs_t log_probs, void *ctx, float *alpha, float *lp)
 {
-    const uint8_t n = (uint8_t)(from->n + (unit >= 0));
-    for (size_t i = 0; i < *n_found; i++) {
-        hyp_t *h = &found[i];
-        if (h->n == n && memcmp(h->units, from->units, from->n) == 0 &&
-            (unit < 0 || h->units[n - 1] == (uint8_t)unit)) {
-            h->score = log_add(h->score, score);
-            return;
-        }
+    for (size_t n = 0; n < f->n_nodes; n++) {
+        alpha[n] = -INFINITY;
     }
-    hyp_t *h = &found[(*n_found)++];
-    memcpy(h->units, from->units, from->n);
-    if (unit >= 0) { h->units[n - 1] = (uint8_t)unit; }
-    h->n = n;
-    h->score = score;
-    h->state = state;
-}
-
-// The beam best first, ties in the order they arose.
-static size_t keep_best(const hyp_t *found, size_t n_found, size_t beam, hyp_t *kept)
-{
-    size_t n = 0;
-    for (size_t i = 0; i < n_found; i++) {
-        size_t at = n;
-        while (at > 0 && kept[at - 1].score < found[i].score) {
-            at--;
-        }
-        if (at >= beam) { continue; }
-        const size_t moved = n < beam ? n - at : n - at - 1;
-        memmove(&kept[at + 1], &kept[at], moved * sizeof(hyp_t));
-        kept[at] = found[i];
-        n = n < beam ? n + 1 : n;
-    }
-    return n;
-}
-
-static esp_err_t search(const fst_t *f, size_t n_classes, size_t n_frames, size_t beam, uint8_t pad,
-                        ai_engine_command_rnnt_log_probs_t log_probs, void *ctx, hyp_t *hyps, hyp_t *found,
-                        float *lp, size_t *n_hyps)
-{
-    hyps[0] = (hyp_t){.score = 0.0f, .state = 0, .n = 0};
-    *n_hyps = 1;
-    uint8_t context[CONTEXT];
+    alpha[0] = 0.0f;
     for (size_t t = 0; t < n_frames; t++) {
-        size_t n_found = 0;
-        for (size_t k = 0; k < *n_hyps; k++) {
-            const hyp_t *h = &hyps[k];
-            context_of(h, pad, context);
-            const esp_err_t err = log_probs(ctx, t, context, lp);
+        for (size_t k = 0; k < f->n_contexts; k++) {
+            const uint8_t context[CONTEXT] = {f->classes[k][0] == PAD_MARK ? pad : f->classes[k][0],
+                                              f->classes[k][1]};
+            const esp_err_t err = log_probs(ctx, t, context, lp + k * n_classes);
             if (err != ESP_OK) { return err; }
-            offer(found, &n_found, h, -1, h->score + lp[BLANK], h->state);
-            for (uint16_t a = f->first_arc[h->state]; a < f->first_arc[h->state + 1]; a++) {
-                const uint8_t u = f->arc_unit[a];
-                if ((size_t)u + 1 >= n_classes || h->n >= UNITS_MAX) { return ESP_ERR_INVALID_SIZE; }
-                offer(found, &n_found, h, u, h->score + lp[u + 1], f->arc_to[a]);
+        }
+        for (size_t n = 0; n < f->n_nodes; n++) {
+            const float source = alpha[n];
+            if (source == -INFINITY) { continue; }
+            const float *row = lp + (size_t)f->context[n] * n_classes;
+            for (uint16_t a = f->first_arc[n]; a < f->first_arc[n + 1]; a++) {
+                if ((size_t)f->arc_unit[a] + 1 >= n_classes) { return ESP_ERR_INVALID_SIZE; }
+                alpha[f->arc_to[a]] = log_add(alpha[f->arc_to[a]], source + row[f->arc_unit[a] + 1]);
             }
         }
-        *n_hyps = keep_best(found, n_found, beam, hyps);
+        for (size_t n = 0; n < f->n_nodes; n++) {
+            alpha[n] = alpha[n] + lp[(size_t)f->context[n] * n_classes + BLANK];
+        }
     }
     return ESP_OK;
 }
@@ -282,14 +210,18 @@ static esp_err_t greedy(size_t n_classes, size_t n_frames, uint8_t pad,
     }
     *total = 0.0f;
     for (size_t t = 0; t < n_frames; t++) {
-        const esp_err_t err = log_probs(ctx, t, context, lp);
-        if (err != ESP_OK) { return err; }
-        size_t best = 0;
-        for (size_t c = 1; c < n_classes; c++) {
-            if (lp[c] > lp[best]) { best = c; }
-        }
-        *total += lp[best];
-        if (best != BLANK) {
+        for (size_t emitted = 0; emitted <= FREE_UNITS; emitted++) {
+            const esp_err_t err = log_probs(ctx, t, context, lp);
+            if (err != ESP_OK) { return err; }
+            size_t best = 0;
+            for (size_t c = 1; c < n_classes; c++) {
+                if (lp[c] > lp[best]) { best = c; }
+            }
+            if (best == BLANK || emitted == FREE_UNITS) {
+                *total += lp[BLANK];
+                break;
+            }
+            *total += lp[best];
             memmove(context, context + 1, CONTEXT - 1);
             context[CONTEXT - 1] = (uint8_t)best;
         }
@@ -297,58 +229,66 @@ static esp_err_t greedy(size_t n_classes, size_t n_frames, uint8_t pad,
     return ESP_OK;
 }
 
-// Whether units are a variant of command c, and whether they are a run of whole syllables of one short of it.
-static void ends_on(const ai_engine_lexicon_t *lexicon, size_t c, const hyp_t *h, bool *variant, bool *part)
+static uint16_t node_of(const tree_t *f, const uint8_t *units, size_t n)
 {
-    *variant = *part = false;
-    for (size_t v = 0; v < lexicon->n_variants[c]; v++) {
-        const ai_engine_seq_t *seq = &lexicon->variants[c][v];
-        *variant |= seq->n_units == h->n && memcmp(seq->units, h->units, h->n) == 0;
-        size_t ends[UNITS_MAX + 1];
-        const size_t n = syllable_ends(seq, ends);
-        for (size_t first = 0; first < n; first++) {
-            const size_t start = first == 0 ? 0 : ends[first - 1];
-            for (size_t last = first; last < n - (first == 0); last++) {
-                *part |= ends[last] - start == h->n && memcmp(seq->units + start, h->units, h->n) == 0;
+    uint16_t node = 0;
+    for (size_t k = 0; k < n && node != NONE; k++) {
+        uint16_t next = NONE;
+        for (uint16_t a = f->first_arc[node]; a < f->first_arc[node + 1]; a++) {
+            if (f->arc_unit[a] == units[k]) { next = f->arc_to[a]; }
+        }
+        node = next;
+    }
+    return node;
+}
+
+// Each command's best variant, and best run of whole syllables of a variant short of it, per frame.
+static void command_scores(const ai_engine_lexicon_t *lexicon, const tree_t *f, const float *alpha,
+                           size_t n_frames, float *best_of, float *part_of)
+{
+    for (size_t c = 0; c < lexicon->n_commands; c++) {
+        for (size_t v = 0; v < lexicon->n_variants[c]; v++) {
+            const ai_engine_seq_t *seq = &lexicon->variants[c][v];
+            const uint16_t whole = node_of(f, seq->units, seq->n_units);
+            if (whole != NONE && alpha[whole] / (float)n_frames > best_of[c]) {
+                best_of[c] = alpha[whole] / (float)n_frames;
+            }
+            size_t ends[UNITS_MAX + 1];
+            const size_t n = syllable_ends(seq, ends);
+            for (size_t first = 0; first < n; first++) {
+                const size_t start = first == 0 ? 0 : ends[first - 1];
+                for (size_t last = first; last < n - (first == 0); last++) {
+                    const uint16_t run = node_of(f, seq->units + start, ends[last] - start);
+                    if (run != NONE && alpha[run] / (float)n_frames > part_of[c]) {
+                        part_of[c] = alpha[run] / (float)n_frames;
+                    }
+                }
             }
         }
     }
 }
 
-esp_err_t ai_engine_command_rnnt_decide(const ai_engine_lexicon_t *lexicon, const void *fst, size_t n_classes,
-                                        size_t n_frames, size_t beam, uint8_t pad,
+esp_err_t ai_engine_command_rnnt_decide(const ai_engine_lexicon_t *lexicon, const void *tree,
+                                        size_t n_classes, size_t n_frames, uint8_t pad,
                                         ai_engine_command_rnnt_log_probs_t log_probs, void *ctx,
                                         uint16_t reject, uint16_t margin, void *work, float *scores,
                                         ai_engine_command_result_t *out)
 {
-    if (lexicon == NULL || fst == NULL || log_probs == NULL || work == NULL || out == NULL || n_classes < 2 ||
-        beam == 0 || beam > AI_ENGINE_COMMAND_RNNT_BEAM_MAX || lexicon->n_commands == 0 ||
-        lexicon->n_commands > AI_ENGINE_COMMANDS_MAX) {
+    if (lexicon == NULL || tree == NULL || log_probs == NULL || work == NULL || out == NULL ||
+        n_classes < 2 || lexicon->n_commands == 0 || lexicon->n_commands > AI_ENGINE_COMMANDS_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
-    const fst_t *f = fst;
-    hyp_t *hyps = work;
-    hyp_t *found = hyps + beam;
-    float *lp = (float *)(found + beam * n_classes + beam);
+    const tree_t *f = tree;
+    float *alpha = work;
+    float *lp = alpha + NODES;
     float best_of[AI_ENGINE_COMMANDS_MAX], part_of[AI_ENGINE_COMMANDS_MAX];
     for (size_t c = 0; c < lexicon->n_commands; c++) {
         best_of[c] = part_of[c] = -INFINITY;
     }
-    size_t n_hyps = 0;
     if (n_frames > 0) {
-        const esp_err_t err =
-            search(f, n_classes, n_frames, beam, pad, log_probs, ctx, hyps, found, lp, &n_hyps);
+        const esp_err_t err = forward(f, n_classes, n_frames, pad, log_probs, ctx, alpha, lp);
         if (err != ESP_OK) { return err; }
-    }
-    for (size_t k = 0; k < n_hyps; k++) {
-        if (!f->final[hyps[k].state]) { continue; }
-        const float per_frame = hyps[k].score / (float)n_frames;
-        for (size_t c = 0; c < lexicon->n_commands; c++) {
-            bool variant, part;
-            ends_on(lexicon, c, &hyps[k], &variant, &part);
-            if (variant && per_frame > best_of[c]) { best_of[c] = per_frame; }
-            if (part && per_frame > part_of[c]) { part_of[c] = per_frame; }
-        }
+        command_scores(lexicon, f, alpha, n_frames, best_of, part_of);
     }
     size_t best = 0;
     for (size_t c = 0; c < lexicon->n_commands; c++) {
