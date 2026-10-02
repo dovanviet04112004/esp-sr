@@ -1138,8 +1138,12 @@ Một mạng đi từ torch tới chip qua các file của `srpipe/compress/quan
    `Transpose`, `Reshape`, `Pad`, `MaxPool`…) phải ra cùng số mũ với đầu vào, vì module esp-dl của chúng chỉ chép số
    nguyên; đồ thị trái điều này bị từ chối ngay lúc xuất, mọi nhánh.
 
-`esp_ppq_patches.py` sửa lỗi của ESP-PPQ 1.3.11 lúc lượng tử và lúc xuất, chỉ cho nhánh khai nó trong config; mỗi lỗi ghi
-triệu chứng trên board và test ghim nó.
+`esp_ppq_patches.py` sửa lỗi của ESP-PPQ 1.3.11, chỉ cho nhánh khai nó trong config, ở mọi chỗ nhánh ấy dùng ESP-PPQ:
+lượng tử, QAT, mô phỏng và xuất; mỗi lỗi ghi triệu chứng trên board và test ghim nó. Mô phỏng phải tính từng phép như
+nhân esp-dl của S3, đến từng lần làm tròn float32, vì quyết định của chip phải bằng quyết định Python từng trường
+(§3.12). `RMSNormalization` là một chỗ ESP-PPQ tính khác: nó chia cho căn rồi làm tròn ở lượng tử đầu ra, còn esp-dl
+nhân số nguyên với `1/sqrtf` của bình phương trung bình đã nhân tỉ lệ hai lưới, nhân trọng số float rồi làm tròn nửa
+lên; bản vá tính đúng chuỗi ấy, gradient của QAT đi qua bản float.
 
 Mỗi nhánh dựng thang của mình ở `tasks/<nhánh>/quant.py`: mỗi bậc một lệnh con, mỗi dòng so với float bằng thước của
 nhánh sau int8, ghi vào `<run>/int8/ladder.yaml`, đồ thị của dòng ở `<run>/int8/<dòng>/`. Bậc 3 và 4 dựng trên cách hiệu
