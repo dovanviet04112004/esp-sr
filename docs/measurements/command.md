@@ -61,3 +61,29 @@ mô phỏng int8 cả câu bằng ESP-PPQ, đúng số board chạy dòng ra (`l
 | bậc 2: MSE | 37,50% | 85/112 | 73/112 | 4/86 |
 | bậc 2: KL | 39,85% | 85/112 | 74/112 | 3/86 |
 | bậc 3: percentile, int16 `/front/convs.1` | 36,07% | 84/112 | 75/112 | 3/86 |
+
+## 3. `ctc`: lệnh nói thiếu âm tiết (KẾ HOẠCH §3.12, E11-T19)
+
+Mạng float của run ở §1, `δ₁` 300‰, `δ₂` 50‰, đo ngày 02/10. Ba luật: chỉ `δ₁` và `δ₂`; thêm điều kiện phần của lệnh
+thắng phải kém nó ít nhất `δ₂`; thêm điều kiện phần ấy không được hơn hay bằng nó (so dấu, luật KẾ HOẠCH chọn).
+
+Phiên board của Cửa 3, như §1:
+
+| Luật | Nhận đúng ở `δ₁` 300 | Nhận nhầm |
+|---|---|---|
+| chỉ `δ₁`, `δ₂` | 79/112 | 3/86 |
+| phần kém lệnh `δ₂` | 65/112 | 2/86 |
+| **phần không hơn lệnh** | **74/112** | **2/86** |
+
+Năm câu đúng phép so dấu bỏ là "tăng âm lượng" ba câu, "giảm âm lượng" và "dừng lại" mỗi thứ một câu: mạng nghe chữ đầu
+yếu đến mức bỏ hẳn chữ ấy còn hợp hơn. Bắt thêm `δ₂` thì mất thêm chín câu, phần lớn cũng là "tăng/giảm âm lượng".
+
+Buổi demo trực tiếp sáng 02/10 (board B truyền qua `make session`, phiên `20261002_home_003` và `_004`, máy tính chạy
+chuỗi sản phẩm và `ctc_score.decide`), phát lại từ bản thu: luật chỉ `δ₁`, `δ₂` nhận 64 câu, phép so dấu nhận 54. Hai câu
+nói một chữ bị nhận thành "chụp ảnh": "ảnh" một mình (mạng nghe `a J T4`; cả lệnh kém phần "ảnh" 293‰ mỗi khung) và một
+chữ mạng nghe `c o t T6` (cả lệnh kém phần "chụp" 217‰). Phép so dấu từ chối cả hai; tám câu còn lại nó bỏ là câu mạng
+nghe thiếu hay sai một chữ của lệnh, hay không nghe ra chữ nào.
+
+Cắt từ 11 câu "chụp ảnh" của phiên board thì không tái hiện được lỗi: "ảnh" một mình và "chụp" cắt ngay sau đơn vị thanh
+của nó đều 0/11 bị nhận theo cả ba luật; cắt ở chỗ căn CTC đặt "a" của "ảnh", tức còn dính đầu âm, luật chỉ `δ₁`, `δ₂`
+nhận 7/11.
