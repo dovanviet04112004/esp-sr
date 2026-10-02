@@ -2,7 +2,7 @@
 
 - **Trạng thái**: Chấp nhận; thay phần kiến trúc của ADR-0010
 - **Ngày**: 2026-09-30
-- **Liên quan**: KẾ HOẠCH §3.3, §3.12, §4.1; TASKS E11-T12; ADR-0010, ADR-0012
+- **Liên quan**: KẾ HOẠCH §3.3, §3.12, §4.1; TASKS E11-T12; ADR-0010, ADR-0012, ADR-0016 (giải RNN-T trên cùng encoder)
 
 ---
 
@@ -31,8 +31,9 @@ Thông số đặc trưng đọc từ mã máy của `get_mfcc_opts_kaldi` trong
 | Đơn vị | 496 mảnh SentencePiece dựng trên bảng âm vị tiếng Anh, có `<blk>` (`phoneme_label` 1) | |
 | Số | trọng số int8; bias, tích chập 2D và nhân theo chiều sâu int16; một số mũ cố định mỗi tensor | tổng 2,65 triệu |
 
-Cấu hình ghi `rnnt_ctc_2.0`: mạng học với cả RNN-T và CTC. Trên chip, `libmultinet.a` giải bằng tìm chùm CTC bị ràng buộc
-bởi FST hay cây tiền tố của bộ lệnh (`ctc_beam_search_with_fst`). Espressif công bố trên S3: 11 ms mỗi khung 32 ms,
+Cấu hình ghi `rnnt_ctc_2.0`: mạng học với cả RNN-T và CTC. Trên chip, `multinet7_quantized.c` của `libmultinet.a` giải
+bằng tìm chùm RNN-T bị ràng buộc bởi FST của bộ lệnh (`rnnt_beam_search_with_fst`), không gọi hàm giải CTC nào; MultiNet6
+gọi cả hai (ADR-0016). Espressif công bố trên S3: 11 ms mỗi khung 32 ms,
 2 920 KB PSRAM, 18 KB RAM trong; lệnh tiếng Anh ở 3 m đúng 97,2% khi yên, 92,3% với nhiễu dừng, 90,6% với tiếng người
 [2].
 
