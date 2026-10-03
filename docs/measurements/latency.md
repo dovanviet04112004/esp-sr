@@ -315,3 +315,34 @@ của `rnnt/probe.py` trên trọng số ngẫu nhiên theo seed của `probe` (
 
 Ngân sách của KẾ HOẠCH §3.12 là ≤ 100 ms một lần chấm: còn vượt khoảng 15 lần. Phần đắt là 80 lần gọi bộ nối mỗi khung,
 mỗi lần một đồ thị esp-dl 98 µs và một log-softmax 52 µs; vòng tìm chỉ chiếm 1,84 ms mỗi khung.
+
+**Sau khi tỉa, chạy bộ nối theo lô và chấm dần** (KẾ HOẠCH §3.12 sửa ở `91c0e2f`), 03/10. Ngưỡng tỉa chọn trên 198 cửa sổ Cửa 3
+qua mô phỏng int8 của run `20261002_1538154-dirty_d6d74a`, dòng `kl`, quyết định so với chấm không tỉa:
+
+| Ngưỡng (nat) | Quyết định trùng | Hàng log-xác suất mỗi khung |
+|---|---|---|
+| không tỉa | 198/198 | 76,1 |
+| 30 | 198/198 | 69,4 |
+| 20 | 198/198 | 44,8 |
+| **15** (chọn) | **198/198** | **15,2** |
+| 10 | 198/198 | 5,3 |
+| 6 | 195/198 | 3,0 |
+
+Tỉa giữ quyết định (nhận lệnh nào hay từ chối), không giữ thứ hạng: ở ngưỡng 15, lệnh điểm cao nhất đúng của dòng float
+còn 79/112 thay vì 81/112, cả hai cửa sổ khác đều bị từ chối như trước; nhận đúng 42/112 và nhận nhầm 2/86 không đổi.
+
+Trên board B, cùng dòng `kl` lượng tử lại với bộ nối 16 cột, `make ai-unit-rnnt RNNT_RUN=<run> RNNT_ROW=rnnt_kl` (`07f39e7`):
+
+| Đo | Kết quả |
+|---|---|
+| `command_rnnt`, 48 bước 16 hop của một câu test | chênh int8 lớn nhất **0**; 45,7 ms một bước |
+| `rnnt_predictor`, 75 ngữ cảnh | **75/75** trùng Python; 2,0 ms một lần |
+| `rnnt_joiner`, 256 cặp, 16 cột một lần chạy | **256/256** trùng Python; 568 µs một lần, 35 µs một ngữ cảnh |
+| Vòng tìm riêng, cửa sổ 3 s, hàng chép từ một đầu ra thật của bộ nối | không tỉa 1 932 µs mỗi khung, 80 hàng; tỉa 15 nat **162 µs**, 12 hàng |
+| Cửa 3 trên chip: 198 cửa sổ của phân vùng `voice` qua `_begin`, `_step`, `_score` | **198/198** trùng Python từng trường; nhận đúng 30/112, nhận nhầm 1/86, đếm trên quyết định của chip |
+| `_score` trên 198 cửa sổ ấy | trung vị **79,6 ms**, phân vị 90 **100,8 ms**, nhỏ nhất 0,2 ms, lớn nhất **445 ms** |
+
+Phần lớn của `_score` là khối 16 hop cuối của encoder (45,7 ms) và các khung của nó; cửa sổ kết thúc đúng ở biên khối chỉ
+còn quyết định. Cửa sổ lớn nhất là cửa sổ đầu sau khi nạp: chưa có cây lệnh để chấm dần, và mạng dự đoán chạy lần đầu cho
+từng ngữ cảnh. Chất lượng của dòng này còn dưới `ctc` đang chạy (68/112 của §14) vì `δ₁` `δ₂` là của `ctc`, chưa chọn trên
+`val` cho `rnnt`, và `rnnt` mới có bậc 2 của thang §3.14.
