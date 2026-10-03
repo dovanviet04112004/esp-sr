@@ -346,3 +346,40 @@ Phần lớn của `_score` là khối 16 hop cuối của encoder (45,7 ms) và
 còn quyết định. Cửa sổ lớn nhất là cửa sổ đầu sau khi nạp: chưa có cây lệnh để chấm dần, và mạng dự đoán chạy lần đầu cho
 từng ngữ cảnh. Chất lượng của dòng này còn dưới `ctc` đang chạy (68/112 của §14) vì `δ₁` `δ₂` là của `ctc`, chưa chọn trên
 `val` cho `rnnt`, và `rnnt` mới có bậc 2 của thang §3.14.
+
+## 16. Cửa sổ lệnh chạy theo luồng: từ lúc câu chốt tới quyết định (E11-T14)
+
+Board B, IDF 6.0.2, cờ của `sdkconfig.bench`, `d530195`, 03/10. Model đang khoá: dòng `qat` của run
+`20261002_128545c-dirty_64e7a4`, `δ₁` 300‰, `δ₂` 50‰. Cửa sổ cắt theo KẾ HOẠCH §5.4: mở `utterance.lead_s` 1,25 s trước
+bước `vad` đầu, kết ở bước sau đoạn `vad` cuối, mọi điểm chia `T_W` = 94 khung.
+
+**`svc_listen` trên chip** (`make listen-unit`): 35 phiên Cửa 3, mỗi phiên cộng quãng lặng sau nó, nạp từng bước qua
+`svc_listen_feed`; sau mỗi bước `svc_listen_work` chạy tới khi hết việc, nên luồng theo kịp như trên máy thật khi nhân 0
+đủ rảnh. "Sau bước chốt" là từ lúc `feed` chốt câu tới lúc quyết định ra.
+
+| Đo | Kết quả |
+|---|---|
+| Cửa sổ trùng Python từng trường | **198/198**, ba lượt nạp 72, 66, 60 |
+| Từ bước chốt tới quyết định | **47,7 ms** trung vị, 49,4 ms p95; 10 cửa sổ dưới 1 ms vì dài đúng bội của khối 16 bước; 2 câu dài quá 3 s, cắt lùi từ cuối, 0,97 và 0,99 s |
+| Cao độ, mạng và chấm của một cửa sổ, cộng dồn qua các bước | 665 ms trung bình, 985 ms đỉnh |
+
+**`ai_engine` trên chip** (`make ai-unit CTC_RUN=… CTC_ROW=qat`, 8/8 bài thử):
+
+| Đo | Kết quả |
+|---|---|
+| `_prepare`, 10 lệnh | 177 µs |
+| `_step` | 30 µs ở hop chỉ đệm; 47,4 ms trung bình ở hop đủ khối, gồm thuật toán tiến của 19 biến thể qua 8 khung mới |
+| `_score`, 198 cửa sổ Cửa 3 | 44,7 ms trung bình, 50,5 ms đỉnh (§14 khi chấm một lần: 56,3 và 64,9 ms) |
+| Phần kết sau khi chấm dần, cửa sổ 94 khung | **1,5 ms** với 10 lệnh, **1,8 ms** với 64 lệnh; chấm một lần cả cửa sổ là 15,7 và 83,0 ms |
+| Cửa 3 trên chip | 198/198 trùng Python; nhận đúng 71/112, nhận nhầm 3/86, bằng `command.md` §5 |
+
+**`rnnt` trên chip** (`make ai-unit-rnnt`, dòng `rnnt_kl` của run `20261002_1538154-dirty_d6d74a`, 4/4 bài thử):
+`_prepare` dựng cây và chạy mạng dự đoán cho cả 75 ngữ cảnh của nó, 157 ms; `_score` qua 198 cửa sổ Cửa 3 73,6 ms trung bình,
+122 ms đỉnh (§15: 77,1 và 445 ms, đỉnh là cửa sổ đầu phải dựng cây); 198/198 trùng Python; nhận đúng 26/112, nhận nhầm
+1/86, cách cắt cũ 30/112 và 1/86, với `δ₁` `δ₂` vẫn là của `ctc` và `rnnt` chưa có QAT.
+
+Từ lúc người thôi nói tới quyết định: `vad` kéo dài 240 ms (KẾ HOẠCH §3.10), câu chốt sau `utterance.gap_s` 400 ms nữa,
+rồi chừng 48 ms tính, tổng chừng 0,69 s 🔬. Cửa sổ cắt lùi từ cuối câu thì phần tính sau bước chốt là cả cửa sổ, 0,72–0,88
+s trung bình và 0,99 s đỉnh trên cùng các phiên (`make listen-unit` ở `6eeb568`), tổng chừng 1,4 s 🔬. Phần còn lại phần
+lớn là chờ hết câu, 640 ms; trong 48 ms tính, khối dở cuối của mạng chiếm gần hết, vì mạng chạy theo khối 16 bước và cuối
+cửa sổ chỉ biết khi câu chốt.
