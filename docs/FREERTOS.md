@@ -52,7 +52,7 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 |---|---|---|
 | Một khung DMA | `drv_audio_read_frame` (bên trong `i2s_channel_read`) | một khung cộng biên; hết hạn là lỗi phần cứng, log và đếm |
 | Khung thô | `xQueueReceive(q_frame)` | 100 ms; hết hạn thì nạp watchdog và đếm |
-| Khung sạch | `xQueueReceive(q_clean)` | 100 ms; 1 tick khi `svc_listen` còn cửa sổ chờ chấm, để giữa hai bước của cửa sổ (cao độ, rồi một khối mạng tới khoảng 46 ms) `mqtt_task`, `gui_task`, `luong_task` ở nhân 0 vẫn chạy (KẾ HOẠCH §5.4) |
+| Khung sạch | `xQueueReceive(q_clean)` | 100 ms; 1 tick khi `svc_listen` có bước của cửa sổ đang chạy theo luồng hay cửa sổ đã chốt chờ chấm, để giữa hai bước của cửa sổ (cao độ, rồi một khối mạng tới khoảng 46 ms) `mqtt_task`, `gui_task`, `luong_task` ở nhân 0 vẫn chạy (KẾ HOẠCH §5.4) |
 | Sự kiện, lệnh | `xQueueReceive(q_dialog / q_cmd / q_speak)` | 1 s, rồi nạp watchdog |
 | Nhịp `gui_task` | `vTaskDelayUntil` 100 ms | — |
 
@@ -90,7 +90,7 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 | 7.2 | **Ghi flash đóng băng `thu_task` quá chiều sâu DMA** | DMA RX 8 × 256 mẫu = 128 ms; chỉ ghi flash khi đổi cấu hình, đổi bộ lệnh, hiệu chuẩn | E14-T7: ghi NVS liên tục 10 phút, đếm khung mất | ⏳ |
 | 7.3 | Đệm DMA ở PSRAM | đệm DMA luôn `MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL` | đọc `drv_audio` | ⏳ |
 | 7.4 | Tranh chấp băng thông MSPI giữa flash, PSRAM và Wi-Fi làm chậm `sach_task` | trọng số `command` đọc từ PSRAM chỉ trong `LENH` | E14-T6 đo µs đỉnh của `sach_task` trong `LENH` so với `NGHE` | ⏳ |
-| 7.5 | `nhan_task` ghi `set.json` lâu quá 1 s đệm của `q_clean` | ghi một lần mỗi bộ lệnh mới, sau khi `lang_vi` đọc được mọi dòng; bộ trùng `version` với bộ đang dùng (bản retained gửi lại mỗi lần nối) không ghi | log in thời gian `lang_vi` và thời gian ghi; trên board B `clean_dropped` và `frames_dropped` của `heartbeat` không tăng qua một lần đổi bộ lệnh | ⏳ |
+| 7.5 | `nhan_task` ghi `set.json` hay chạy `ai_engine_command_prepare` lâu quá 1 s đệm của `q_clean` | ghi một lần mỗi bộ lệnh mới, sau khi `lang_vi` đọc được mọi dòng và `prepare` nhận bộ ấy; bộ trùng `version` với bộ đang dùng (bản retained gửi lại mỗi lần nối) không ghi; `ctc` chỉ chép nhãn, còn `rnnt` chạy mạng dự đoán một lần cho mỗi ngữ cảnh chưa gặp, bộ lệnh lớn có thể chạm 1 s 🔬 | log in thời gian `lang_vi` và thời gian ghi; trên board B `clean_dropped` và `frames_dropped` của `heartbeat` không tăng qua một lần đổi bộ lệnh | ⏳ |
 
 ## 8. Hàng đợi và đệm
 
