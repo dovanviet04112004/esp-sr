@@ -224,7 +224,7 @@ static void nhan_task(void *arg)
     for (;;) {
         dsp_afe_frame_t frame;
         take_commands(w, seq);
-        // A window runs a hop at a time, blocking a tick so core 0's lower tasks run (KEHOACH 5.4).
+        // With window work left a frame is awaited a tick only, core 0's lower tasks' turn (KEHOACH 5.4).
         const TickType_t wait = svc_listen_pending() ? 1 : pdMS_TO_TICKS(CLEAN_WAIT_MS);
         svc_listen_decision_t decision;
         if (xQueueReceive(w->clean, &frame, wait) == pdTRUE) {
@@ -233,8 +233,11 @@ static void nhan_task(void *arg)
                 ESP_LOGW(TAG, "window queue full: the utterance opened at hop %" PRIu32 " gets no window",
                          frame.seq);
             }
-        } else if (svc_listen_work(&decision)) {
-            raise_decision(w, &decision);
+        } else {
+            // Back to back while no frame waits, so a window catches up with a short word (KEHOACH 5.4).
+            do {
+                if (svc_listen_work(&decision)) { raise_decision(w, &decision); }
+            } while (svc_listen_pending() && uxQueueMessagesWaiting(w->clean) == 0);
         }
         esp_task_wdt_reset();
     }
