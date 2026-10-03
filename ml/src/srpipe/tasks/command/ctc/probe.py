@@ -12,6 +12,7 @@ import json
 import math
 import re
 import struct
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -19,14 +20,19 @@ import torch
 from torch import nn
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
-from srpipe.core.config import ML_ROOT, data_paths, load_yaml
-from srpipe.export import pack_models
-from srpipe.generated import listen
+from srpipe.core.audio_io import to_float
+from srpipe.core.config import ML_ROOT, data_paths, load_device, load_yaml
+from srpipe.dsp.spec.mel import Mel, MelConfig
+from srpipe.dsp.spec.stft import Stft
+from srpipe.export import pack_models, update_lock
+from srpipe.generated import grid, listen
+from srpipe.tasks import command
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc import quant
 from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc import ctc_score
+from srpipe.tasks.wake.eval import utterances
 
 PROBE_DIR = ML_ROOT.parent / "firmware" / "components" / "ai_engine" / "test_apps" / "unit" / "main" / "probe"
 MODELS_FILE, STREAMS_FILE, DECIDE_FILE = "ctc_models.bin", "ctc_streams.bin", "ctc_decide.bin"
@@ -48,6 +54,15 @@ GATE_HEAD = struct.Struct("<4sHHHHBBBBb3x")
 GATE_MAGIC = b"SRCG"
 # ESP-PPQ's helper.save heads an .espdl with "EDL2", the encryption flag, the length and four pad bytes.
 ESPDL_HEAD_BYTES = 16
+LISTEN_DIR = ML_ROOT.parent / "firmware" / "components" / "svc_listen" / "test_apps" / "unit" / "main" / "probe"
+LISTEN_PARTITIONS = ("models_1", "voice")  # a round's records, slot 0 holding the locked models
+# Magic, sessions, commands, reject, margin; each command's id and text NUL-ended, padded to four bytes; then a
+# session: SESSION_HEAD, vad a bit a hop padded to four bytes, its segments of clean samples, its windows.
+LISTEN_HEAD = struct.Struct("<4sHHHH")
+LISTEN_MAGIC = b"SRLS"
+SESSION_HEAD = struct.Struct("<IHH")  # hops, segments, windows
+SEGMENT_HEAD = struct.Struct("<II")  # first hop, hops; their int16 samples follow
+WINDOW_RECORD = struct.Struct("<IIhHHH")  # first and last hop, then the decision's four fields
 
 
 def stored_test(espdl: Path) -> tuple[tuple[tuple[int, ...], bytes], tuple[tuple[int, ...], bytes]]:
@@ -246,6 +261,92 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
     return image, streams, decide, command, every, labels
 
 
+def listen_session(
+    clean: np.ndarray, vad: np.ndarray, features: np.ndarray, decided_of: Callable, tracker, mel: Mel
+) -> bytes:
+    """A board session as svc_listen's test feeds it: its vad, the clean samples of every hop a window reads and the
+    hop ahead of it, which the STFT of the window's first hop overlaps, and each window as Gate 3 cuts it with the
+    decision decided_of(window) takes; hops outside the segments are fed as zeros, which no window reads. Silence
+    follows the session, as the test feeds it to close an utterance running to the end: a window then reaches one hop
+    into it, with that hop's log-mel from the STFT going on from the session's last hop."""
+    hop, tail = grid.HOP_SAMPLES, listen.UTTERANCE_GAP_HOPS + 1
+    stft = Stft()
+    stft.analyze(to_float(clean[-hop:]))
+    silence = np.zeros(hop, dtype=np.int16)
+    after_mel = np.stack([mel.log(stft.analyze(to_float(silence))) for _ in range(tail)]).astype(features.dtype)
+    clean_on = np.concatenate([clean, np.zeros(tail * hop, dtype=clean.dtype)])
+    features_on = np.concatenate([features, after_mel])
+    spans, ranges, after = utterances(vad), [], 0
+    for _, last in spans:
+        end = last + 1
+        start = max(end + 1 - listen.WINDOW_HOPS, after)
+        ranges.append((start, end))
+        after = end + 1
+    segments: list[list[int]] = []
+    for start, end in ranges:
+        first, last = max(start - 1, 0), min(end, len(vad) - 1)
+        if segments and first <= segments[-1][1] + 1:
+            segments[-1][1] = max(segments[-1][1], last)
+        else:
+            segments.append([first, last])
+    windows = gate.ctc_windows(clean_on, features_on, spans, listen.WINDOW_HOPS, tracker)
+    body = SESSION_HEAD.pack(len(vad), len(segments), len(ranges))
+    body += np.packbits(vad.astype(np.uint8), bitorder="little").tobytes()
+    body += b"\0" * (-len(body) % 4)
+    for first, last in segments:
+        samples = clean[first * hop : (last + 1) * hop].astype("<i2")
+        body += SEGMENT_HEAD.pack(first, last + 1 - first) + samples.tobytes()
+    for (start, end), x in zip(ranges, windows, strict=True):
+        body += WINDOW_RECORD.pack(start, end, *decided_of(x))
+    return body
+
+
+def listen_rounds(cfg: dict, out: Path) -> list[Path]:
+    """Every Gate 3 session through svc_listen as listen_session lays it out, decided by the locked command model's
+    int8 simulation at quant.reject and eval.margin; sessions grouped into rounds, a round one record each in the
+    partitions of LISTEN_PARTITIONS, as listen_<round>_<partition>.bin."""
+    lock = json.loads(update_lock.LOCK.read_text(encoding="utf-8"))["models"]["command"]
+    meta = json.loads((update_lock.MODELS / "command" / "meta.json").read_text(encoding="utf-8"))
+    run = ML_ROOT / "artifacts" / "command_ctc" / "runs" / lock["run"]
+    trained = gate.load_ctc(run)
+    graph = export_espdl.load_native(run / "int8" / meta["row"] / quant.GRAPH_FILE)
+    int8 = quant.Int8Net(graph, cfg["quant"]["hops"], trained.mean, trained.std, trained.model, cfg["esp_ppq_patches"])
+    reject, margin = cfg["quant"]["reject"], cfg["eval"]["margin"]
+    lexicon = ctc_score.default_lexicon()
+
+    def decided_of(x: np.ndarray) -> list[int]:
+        logits = int8(torch.from_numpy(((x - trained.mean) / trained.std).T[None].astype(np.float32))).numpy()[0]
+        frames = -(-len(x) // trained.model.front.hop_stride)
+        q = ptq_espdl.to_int8(logits[:, :frames], int8.io.output_exponent)
+        return ctc_score.decide(ctc_score.frame_log_probs(q, int8.io.output_exponent), lexicon, reject, margin)[0]
+
+    spec = load_yaml(command.CONFIG)["eval"]["board"]
+    listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
+    named = b"".join(c["id"].encode() + b"\0" + c["text"].encode() + b"\0" for c in listed)
+    named += b"\0" * (-(LISTEN_HEAD.size + len(named)) % 4)
+    mel = Mel(MelConfig(**load_device(trained.cfg["features"])["features"]))
+    bodies = [
+        listen_session(clean, vad, features, decided_of, tracker, mel)
+        for _, clean, vad, features, tracker in gate.heard_sessions(trained.cfg, spec, data_paths())
+    ]
+    out.mkdir(parents=True, exist_ok=True)
+    for stale in out.glob("listen_*.bin"):
+        stale.unlink()
+    written, at, k = [], 0, 0
+    while at < len(bodies):
+        for label in LISTEN_PARTITIONS:
+            room, taken = pack_models.partition_bytes(label) - LISTEN_HEAD.size - len(named), []
+            while at < len(bodies) and sum(map(len, taken)) + len(bodies[at]) <= room:
+                taken.append(bodies[at])
+                at += 1
+            head = LISTEN_HEAD.pack(LISTEN_MAGIC, len(taken), len(listed), reject, margin)
+            path = out / f"listen_{k}_{label}.bin"
+            path.write_bytes(head + named + b"".join(taken))
+            written.append(path)
+        k += 1
+    return written
+
+
 def gate_on_chip(log: Path, labels: Path) -> dict:
     """Gate 3 counted on the chip's own decisions, as the unit app prints one for each window of ctc_gate.bin."""
     meta = json.loads(labels.read_text(encoding="utf-8"))
@@ -269,9 +370,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run", type=Path, help="stream a row of this trained run's ladder instead of random weights")
     parser.add_argument("--row", help="the row of <run>/int8/ladder.yaml whose graph streams")
     parser.add_argument("--gate-log", type=Path, help="count Gate 3 on the chip's decisions in this unit app log")
+    parser.add_argument("--listen", action="store_true", help="write svc_listen's rounds of Gate 3 sessions instead")
     args = parser.parse_args(argv)
     if args.gate_log:
         print(gate_on_chip(args.gate_log, args.out / GATE_LABELS))
+        return 0
+    if args.listen:
+        for path in listen_rounds(load_yaml(ctc.CONFIG), LISTEN_DIR):
+            print(f"{path}: {path.stat().st_size} bytes")
         return 0
     if (args.run is None) != (args.row is None):
         parser.error("--run and --row go together")

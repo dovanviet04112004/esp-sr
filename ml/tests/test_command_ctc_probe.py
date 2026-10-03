@@ -15,7 +15,7 @@ pytest.importorskip("torch")
 import torch
 
 from srpipe.core.config import load_yaml
-from srpipe.generated import listen
+from srpipe.generated import grid, listen
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc import probe, quant
@@ -125,3 +125,37 @@ def test_gate_3_counts_the_chips_decisions_and_refuses_a_log_missing_a_window(tm
     log.write_text("gate window 0: board 0 900 100 100\n")
     with pytest.raises(ValueError, match="1 gate windows"):
         probe.gate_on_chip(log, labels)
+
+
+def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read() -> None:
+    hop, rng = grid.HOP_SAMPLES, np.random.default_rng(5)
+    vad = np.zeros(400, dtype=bool)
+    vad[50:80] = vad[200:230] = vad[236:250] = vad[380:390] = True
+    clean = rng.integers(-2000, 2000, 400 * hop).astype(np.int16)
+    features = rng.normal(size=(400, listen.N_BANDS)).astype(np.float32)
+    tracker = SimpleNamespace(reset=lambda: None, step=lambda x: np.zeros(3, dtype=np.float32))
+    mel = SimpleNamespace(log=lambda bins: np.zeros(listen.N_BANDS, dtype=np.float32))
+    body = probe.listen_session(clean, vad, features, lambda x: [len(x), 1, 2, 3], tracker, mel)
+    hops, n_segments, n_windows = probe.SESSION_HEAD.unpack_from(body)
+    assert hops == 400 and n_windows == 2
+    at = probe.SESSION_HEAD.size
+    bits = np.unpackbits(np.frombuffer(body[at : at + 50], np.uint8), bitorder="little")[:400].astype(bool)
+    assert np.array_equal(bits, vad)
+    at += 52
+    segments = []
+    for _ in range(n_segments):
+        first, n = probe.SEGMENT_HEAD.unpack_from(body, at)
+        at += probe.SEGMENT_HEAD.size
+        samples = np.frombuffer(body[at : at + n * hop * 2], "<i2")
+        assert np.array_equal(samples, clean[first * hop : (first + n) * hop])
+        segments.append((first, first + n - 1))
+        at += n * hop * 2
+    windows = [probe.WINDOW_RECORD.unpack_from(body, at + k * probe.WINDOW_RECORD.size) for k in range(n_windows)]
+    assert [w[:2] for w in windows] == [(0, 80), (81, 250)]
+    assert [w[2] for w in windows] == [81, 170] and segments == [(0, 250)]
+    assert at + n_windows * probe.WINDOW_RECORD.size == len(body)
+    vad[380:400] = True
+    body = probe.listen_session(clean, vad, features, lambda x: [len(x), 1, 2, 3], tracker, mel)
+    *_, n_windows = probe.SESSION_HEAD.unpack_from(body)
+    last = probe.WINDOW_RECORD.unpack_from(body, len(body) - probe.WINDOW_RECORD.size)
+    assert n_windows == 3 and last[:3] == (251, 400, 150)

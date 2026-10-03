@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-deploy rnnt-ptq ai-unit-rnnt models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-deploy rnnt-ptq ai-unit-rnnt listen-unit models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live commands session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -20,6 +20,7 @@ FW_DEFAULTS := firmware/sdkconfig.defaults firmware/sdkconfig.defaults.esp32s3 f
 BENCH_APP := firmware/test_apps/bench_afe
 UNIT_APP := firmware/components/ai_engine/test_apps/unit
 PARITY_APP := firmware/test_apps/parity
+LISTEN_APP := firmware/components/svc_listen/test_apps/unit
 ESPSR_APP := firmware/test_apps/espsr_compare
 # Where srpipe.scenes.compare prepare wrote the items, read from ml/ only when a recipe needs it.
 COMPARE_ITEMS = $(shell cd ml && uv run --quiet python -c "from srpipe.core.config import data_paths; print(data_paths()['interim'] / 'scenes' / 'afe_compare')")
@@ -307,6 +308,25 @@ ai-unit-rnnt: ## Run the rnnt build of the ai_engine suite on board B: rnnt/prob
 	@if [ -f $(UNIT_APP)/main/probe/rnnt_gate.json ]; then \
 	  cd ml && uv run --extra train python -m srpipe.tasks.command.rnnt.probe --gate-log ../$(UNIT_APP)/build_rnnt/unit.log; \
 	fi
+
+listen-unit: ## Run svc_listen on board B over every Gate 3 session, round by round: the locked models in model slot 0, each window decided as Python decides its int8 simulation, field by field (E11-T14)
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.probe --listen
+	cd ml && uv run python -m srpipe.export.pack_models artifacts/models.bin --lock
+	@$(call fresh_sdkconfig,$(LISTEN_APP)/sdkconfig,firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.bench \
+	  $(LISTEN_APP)/sdkconfig.defaults $(LISTEN_APP)/CMakeLists.txt)
+	cd $(LISTEN_APP) && idf.py build
+	python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --partition-table-file firmware/partitions.csv \
+	  write_partition --partition-name models_0 --input ml/artifacts/models.bin
+	@skip=n; for round in $$(ls $(LISTEN_APP)/main/probe/listen_*_voice.bin | sed 's/.*listen_\([0-9]*\)_voice.bin/\1/' | sort -n); do \
+	  for part in models_1 voice; do \
+	    python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --partition-table-file firmware/partitions.csv \
+	      write_partition --partition-name $$part --input $(LISTEN_APP)/main/probe/listen_$${round}_$$part.bin || exit 1; \
+	  done; \
+	  { cd $(LISTEN_APP) && pytest pytest_unit.py --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) \
+	      -s -p no:cacheprovider --skip-autoflash $$skip; echo $$? > build/listen.status; cd $(CURDIR); } 2>&1 \
+	    | tee $(LISTEN_APP)/build/listen_$$round.log; \
+	  [ $$(cat $(LISTEN_APP)/build/listen.status) -eq 0 ] || exit 1; skip=y; \
+	done
 
 # broker and host
 broker-up: ## Start the bench MQTT broker (needs deploy/.env and deploy/emqx/users.csv)
