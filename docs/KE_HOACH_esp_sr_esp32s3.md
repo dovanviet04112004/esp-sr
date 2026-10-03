@@ -449,7 +449,7 @@ vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đ
 | `wake` | **mô hình** | `ai_engine/src/wake/` | TCN giãn nở nhân quả int8, chạy dòng | trường nhìn ~2 s | **1,99 ms đo** mỗi bước, 64 kênh, trọng số ngẫu nhiên (`measurements/latency.md` §8) | E11-T11 |
 | `normalize` `g2p` `lexicon` | thuần | `lang_vi` | luật chính tả → đơn vị, sinh biến thể phương ngữ | `contracts/lang_vi.yaml` | chỉ lúc nạp bộ lệnh: **1,18 ms đo** mỗi lệnh, ba vùng | E11-T4 |
 | `command` `kws` | **mô hình** + thuần | `ai_engine/src/command_kws/` | DS-CNN phân lớp các lệnh đã học + `other` + `silence` trên một cửa sổ mỗi câu; từ chối theo lớp thắng, xác suất và khoảng cách nhất–nhì (ADR-0012) | cửa sổ 94 bước log-mel 40 + 3 chiều cao độ; cỡ S, M, L ở cấu hình | S **41,9 ms đo** một lần mỗi câu (22 triệu MAC; M 277 ms, L 2,03 s, `measurements/latency.md` §10); `step` chỉ chép khung, còn `pitch` tốn ~2 ms mỗi bước trên nhân 0 (`measurements/pitch.md`) | E11-T17 |
-| `command` `ctc` | **mô hình** + thuần | `ai_engine/src/command_ctc/` | encoder kiểu MultiNet7 + CTC (ADR-0013), chấm có ràng buộc từng lệnh, từ chối theo khoảng cách với vòng tự do | | 11–18 ms mỗi 32 ms, **chỉ trong cửa sổ lệnh**; chấm **14,7 ms đo** một lần mỗi câu với bộ lệnh mặc định (§3.12) | E11-T13 |
+| `command` `ctc` | **mô hình** + thuần | `ai_engine/src/command_ctc/` | encoder kiểu MultiNet7 + CTC (ADR-0013), chấm có ràng buộc từng lệnh, từ chối theo khoảng cách với vòng tự do | | 11–18 ms mỗi 32 ms, **chỉ trong cửa sổ lệnh**; chấm dần theo khối, sau bước chốt còn phần kết **1,5 ms đo** với bộ lệnh mặc định, 1,8 ms với 64 lệnh (§3.12) | E11-T13 |
 | `command` `rnnt` | **mô hình** + thuần | `ai_engine/src/command_rnnt/` | encoder của `ctc` + mạng dự đoán và bộ nối kiểu MultiNet7 (ADR-0016), chấm chính xác mọi lệnh trên cây lệnh, từ chối như `ctc` | | encoder như `ctc`; vòng tìm chạy dần mỗi khối trong cửa sổ lệnh, bộ nối theo lô cho ngữ cảnh của nút còn sống 🔬; chấm từng cặp không tỉa đo 15,5 ms mỗi khung (`latency.md` §15) | E11-T20 |
 | `synth` | **mô hình** hoặc thuần | `ai_engine/src/synth/` hoặc `svc_speak` | chốt ở E12-T1 | | < 1× thời gian thực, dựng trước rồi phát | E12-T4 |
 
@@ -977,7 +977,7 @@ vùng làm việc người gọi cấp, 8 byte mỗi ô (cửa sổ 3 s: 94 × 4
 thái mỗi khung còn hai phép cộng, một phép nhân và chỉnh số mũ: board B đo 14,7 ms cho bộ lệnh mặc định (19 biến thể) và
 79,4 ms cho 64 lệnh (`measurements/latency.md` §13), trong ngân sách ≤ 100 ms một lần chấm như `kws`. Trên máy, thuật
 toán tiến của mọi biến thể đi dần theo khối mạng của cửa sổ (Chạy `ctc` trên máy, dưới), nên lúc câu chốt chỉ còn khối
-cuối và phần của `c*`. `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ Kconfig.
+cuối và phần của `c*`: phần kết đo 1,5 ms với bộ lệnh mặc định, 1,8 ms với 64 lệnh (`measurements/latency.md` §16). `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ Kconfig.
 
 **Mọi điểm chia cho `T_W`**, số khung của một cửa sổ dài `window_s` (94 khung với 3 s), không chia cho số khung của cửa
 sổ đang chấm; đơn vị là nat mỗi khung của `window_s`. Cửa sổ lệnh dài ngắn theo câu và theo chỗ nó mở (§5.4), mà khung
@@ -2292,10 +2292,11 @@ giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec`
   từng bước của cửa sổ đã có, đuổi kịp phần trước câu rồi đi cùng các khung mới, xen giữa các khung của `q_clean`; mạng
   chạy mỗi khối và phép chấm đi tiếp trên khung mới, theo bộ lệnh `ai_engine_command_prepare` đã nhận. Cuối cửa sổ chỉ
   dời về sau, nên một bước đã qua mà câu còn mở chắc chắn thuộc cửa sổ; lúc câu chốt chỉ còn khối dở cuối và phần kết của
-  phép chấm. Quyết định ra sau bước chốt cỡ một lần chạy mạng cộng phần kết 🔬, không phải sau cả cửa sổ: trên board B,
-  cao độ cộng mạng của một cửa sổ Cửa 3 tốn 0,72–0,88 s trung bình;
+  phép chấm. Trên board B quyết định ra sau bước chốt 47,7 ms trung vị, 49,4 ms p95 qua 198 cửa sổ Cửa 3, gần hết là khối
+  dở cuối của mạng (`measurements/latency.md` §16), không phải sau cả cửa sổ: cao độ cộng mạng một cửa sổ tốn 0,72–0,88 s
+  trung bình;
 - cửa sổ dài quá `window_s` thì thôi chạy theo luồng: lúc câu chốt nó lùi từ bước cuối tối đa `window_s`, không qua mốc
-  chặn, rồi chạy cả cửa sổ, quyết định chậm cỡ 1 s 🔬; Cửa 3 có 2 trên 198 câu như thế;
+  chặn, rồi chạy cả cửa sổ, quyết định chậm 0,97–0,99 s; Cửa 3 có 2 trên 198 câu như thế;
 - `svc_listen` tính log-mel mỗi bước và giữ log-mel cùng mẫu sạch của các bước gần nhất ở PSRAM; bộ dò cao độ đặt lại ở
   đầu cửa sổ, mạng bắt đầu từ bộ đệm rỗng như lúc học;
 - mỗi quyết định là một sự kiện vào `q_event_up`: `COMMAND` kèm điểm và khoảng cách nhất–nhì, hay `REJECT` kèm mã:
