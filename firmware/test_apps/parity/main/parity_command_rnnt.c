@@ -18,26 +18,34 @@ typedef struct {
     int8_t *q;
 } table_t;
 
-static esp_err_t table_log_probs(void *ctx, size_t frame, const uint8_t *context, float *log_probs)
+static esp_err_t table_rows(void *ctx, size_t frame, const uint8_t *contexts, size_t n, float *rows)
 {
     const table_t *t = ctx;
-    for (size_t k = 0; k < t->classes; k++) {
-        const int32_t sum = (int32_t)t->frames[frame * t->classes + k] +
-                            (int32_t)t->first[context[0] * t->classes + k] +
-                            (int32_t)t->last[context[1] * t->classes + k];
-        t->q[k] = (int8_t)(sum > INT8_MAX ? INT8_MAX : sum < INT8_MIN ? INT8_MIN : sum);
+    for (size_t j = 0; j < n; j++) {
+        const uint8_t *context = contexts + j * AI_ENGINE_COMMAND_RNNT_CONTEXT;
+        for (size_t k = 0; k < t->classes; k++) {
+            const int32_t sum = (int32_t)t->frames[frame * t->classes + k] +
+                                (int32_t)t->first[context[0] * t->classes + k] +
+                                (int32_t)t->last[context[1] * t->classes + k];
+            t->q[k] = (int8_t)(sum > INT8_MAX ? INT8_MAX : sum < INT8_MIN ? INT8_MIN : sum);
+        }
+        const esp_err_t err =
+            ai_engine_command_ctc_log_probs(t->q, t->exponent, t->classes, 1, rows + j * t->classes);
+        if (err != ESP_OK) { return err; }
     }
-    return ai_engine_command_ctc_log_probs(t->q, t->exponent, t->classes, 1, log_probs);
+    return ESP_OK;
 }
 
 bool parity_command_rnnt(const char *case_name, const void *buf, size_t len)
 {
-    gold_tensor_t frames, n_frames, exponent, first, last, units, n_variants, n_units, limits, scores,
+    gold_tensor_t frames, n_frames, exponent, first, last, units, n_variants, n_units, limits, beam, scores,
         decision;
+    float beam_nats = 0.0f;
     if (!parity_tensor(buf, len, "frames", &frames) || !parity_tensor(buf, len, "n_frames", &n_frames) ||
-        !parity_tensor(buf, len, "exponent", &exponent) || !parity_tensor(buf, len, "first", &first) ||
-        !parity_tensor(buf, len, "last", &last) || !parity_tensor(buf, len, "units", &units) ||
-        !parity_tensor(buf, len, "n_variants", &n_variants) ||
+        !parity_tensor(buf, len, "beam", &beam) || beam.dims[0] != 1 ||
+        !parity_floats(&beam, &beam_nats, 1) || !parity_tensor(buf, len, "exponent", &exponent) ||
+        !parity_tensor(buf, len, "first", &first) || !parity_tensor(buf, len, "last", &last) ||
+        !parity_tensor(buf, len, "units", &units) || !parity_tensor(buf, len, "n_variants", &n_variants) ||
         !parity_tensor(buf, len, "n_units", &n_units) || !parity_tensor(buf, len, "limits", &limits) ||
         !parity_tensor(buf, len, "scores", &scores) || !parity_tensor(buf, len, "decision", &decision)) {
         return false;
@@ -82,7 +90,7 @@ bool parity_command_rnnt(const char *case_name, const void *buf, size_t len)
         const float *l = limit + w * LIMIT_COUNT;
         ai_engine_command_result_t d;
         ok = ai_engine_command_rnnt_decide(lex, tree, classes, (size_t)lengths[w], (uint8_t)classes,
-                                           table_log_probs, &t, (uint16_t)l[LIMIT_REJECT],
+                                           beam_nats, table_rows, &t, (uint16_t)l[LIMIT_REJECT],
                                            (uint16_t)l[LIMIT_MARGIN], work, got_scores + w * commands,
                                            &d) == ESP_OK;
         parity_decision_row(&d, got + w * PARITY_DECISION_COUNT);

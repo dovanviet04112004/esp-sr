@@ -18,12 +18,14 @@ extern "C" {
 #define AI_ENGINE_COMMAND_RNNT_NODES_MAX 8192    // prefix tree nodes of every variant and part
 #define AI_ENGINE_COMMAND_RNNT_CONTEXTS_MAX 2048 // distinct predictor contexts of the tree
 #define AI_ENGINE_COMMAND_RNNT_FREE_UNITS 4      // the greedy path's most units a frame, then blank
+#define AI_ENGINE_COMMAND_RNNT_BEAM_NATS 15.0f   // a node this far behind a frame's best is dropped
 
-/** The log-probabilities of every class at frame for the predictor context, its last CONTEXT classes.
- *  @ctx the caller's | as the caller's model runs | context and log_probs belong to the decision
+/** The log-probabilities of every class at frame for n predictor contexts, each its last CONTEXT classes.
+ *  @ctx the caller's | as the caller's model runs | contexts (n x CONTEXT) and rows (n x classes) are the
+ * search's
  */
-typedef esp_err_t (*ai_engine_command_rnnt_log_probs_t)(void *ctx, size_t frame, const uint8_t *context,
-                                                        float *log_probs);
+typedef esp_err_t (*ai_engine_command_rnnt_rows_t)(void *ctx, size_t frame, const uint8_t *contexts, size_t n,
+                                                   float *rows);
 
 /** Bytes of the area ai_engine_command_rnnt_build lays the command tree out in.
  *  @ctx any | non-blocking
@@ -37,20 +39,46 @@ size_t ai_engine_command_rnnt_tree_bytes(void);
  */
 esp_err_t ai_engine_command_rnnt_build(const ai_engine_lexicon_t *lexicon, void *tree, size_t bytes);
 
-/** Bytes of the work area a decision over n_classes classes takes.
+/** Bytes of the work area a search over n_classes classes takes: its state between frames and one frame's
+ * rows.
  *  @ctx any | non-blocking
  */
 size_t ai_engine_command_rnnt_work_bytes(size_t n_classes);
 
-/** Decide a window: every variant and part scored exactly over the tree, then the ctc track's rules.
- *  @ctx any | blocking while log_probs runs | caller owns lexicon, tree, work (4-byte aligned), scores
+/** Start a window's search over tree: everything at the root, no frame yet.
+ *  @ctx any | non-blocking | caller owns tree and work (4-byte aligned) for the whole window
+ *  @param pad the predictor's id ahead of the leading blank; beam_nats nodes this far behind a frame's best
+ * drop
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG
+ */
+esp_err_t ai_engine_command_rnnt_begin(const void *tree, size_t n_classes, uint8_t pad, float beam_nats,
+                                       void *work);
+
+/** Search the next frame as frame does: far-behind nodes dropped, rows asked depth by depth, then the free
+ * path.
+ *  @ctx any | blocking while rows runs | caller owns tree and work, as begun
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no begin | ESP_ERR_INVALID_SIZE a unit past the classes | rows' error
+ */
+esp_err_t ai_engine_command_rnnt_frame(const void *tree, ai_engine_command_rnnt_rows_t rows, void *ctx,
+                                       void *work);
+
+/** Decide on the frames searched so far, by the ctc track's rules.
+ *  @ctx any | non-blocking | caller owns lexicon, the tree's, tree and work; scores n_commands floats or NULL
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_STATE no begin
+ */
+esp_err_t ai_engine_command_rnnt_finish(const ai_engine_lexicon_t *lexicon, const void *tree,
+                                        const void *work, uint16_t reject, uint16_t margin, float *scores,
+                                        ai_engine_command_result_t *out);
+
+/** Decide a whole window at once: begin, every frame, finish.
+ *  @ctx any | blocking while rows runs | caller owns lexicon, tree, work (4-byte aligned), scores
  *  @param pad the predictor's id ahead of the leading blank; scores n_commands floats or NULL
- *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_SIZE | log_probs' error
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_SIZE | rows' error
  */
 esp_err_t ai_engine_command_rnnt_decide(const ai_engine_lexicon_t *lexicon, const void *tree,
-                                        size_t n_classes, size_t n_frames, uint8_t pad,
-                                        ai_engine_command_rnnt_log_probs_t log_probs, void *ctx,
-                                        uint16_t reject, uint16_t margin, void *work, float *scores,
+                                        size_t n_classes, size_t n_frames, uint8_t pad, float beam_nats,
+                                        ai_engine_command_rnnt_rows_t rows, void *ctx, uint16_t reject,
+                                        uint16_t margin, void *work, float *scores,
                                         ai_engine_command_result_t *out);
 
 #ifdef __cplusplus
