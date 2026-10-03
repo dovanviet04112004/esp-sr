@@ -350,13 +350,14 @@ esp_err_t command_load() noexcept
     s.pad = s.classes;
     s.hot_rows_first = s.hot.dims[2] == kContext;
     s.hops_max = GEN_LISTEN_WINDOW_HOPS;
-    const long one = lrintf(ldexpf(1.0f, -s.hot.exponent));
-    if (one < 1 || one > kInt8Max) {
-        ESP_LOGE(TAG, "%s: a one-hot 1 is off the int8 grid of 2^%d", kPredictor, s.hot.exponent);
+    // A one-hot 1 held to int8 as quant.py's to_int8 holds it: a calibration whose grid stops short of 1
+    // gives 127.
+    s.one = on_grid(1.0f, ldexpf(1.0f, -s.hot.exponent));
+    if (s.one < 1) {
+        ESP_LOGE(TAG, "%s: a one-hot 1 rounds to 0 on the int8 grid of 2^%d", kPredictor, s.hot.exponent);
         command_drop();
         return ESP_ERR_INVALID_SIZE;
     }
-    s.one = static_cast<int8_t>(one);
     s.frame_shift = s.out.exponent - s.join_frame.exponent;
     s.prefix_shift = s.prefix_out.exponent - s.join_prefix.exponent;
     const size_t frames_max = (s.hops_max + s.chunk_hops - 1) / s.chunk_hops * s.chunk_frames;

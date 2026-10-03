@@ -117,7 +117,7 @@ void load_command(uint16_t reject, uint16_t margin)
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, reject));
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, margin));
     TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, ai_engine_load(0),
-                              "models_0 lacks rnnt_models.bin: run make ai-unit-rnnt");
+                              "slot 0 did not load: make ai-unit-rnnt, or the branch's log says why");
     TEST_ASSERT_TRUE_MESSAGE(ai_engine_has(AI_ENGINE_MODEL_COMMAND),
                              "the rnnt branch did not load its entries");
 }
@@ -252,9 +252,9 @@ TEST_CASE("the rnnt graphs run as their ESP-PPQ simulation does, timed", "[ai_en
     TEST_ASSERT_EQUAL(head.prefix_in_exponent, prefix_in.exponent);
     TEST_ASSERT_EQUAL(head.logits_exponent, logits.exponent);
     const bool rows_first = hot.dims[2] == head.context;
-    TEST_ASSERT_TRUE_MESSAGE(head.hot_exponent <= 0 && head.hot_exponent > -7,
-                             "a one-hot 1 is off the int8 grid");
-    const int8_t one = static_cast<int8_t>(1 << -head.hot_exponent);
+    const long rounded = lrintf(ldexpf(1.0f, -head.hot_exponent));
+    TEST_ASSERT_TRUE_MESSAGE(rounded >= 1, "a one-hot 1 rounds to 0 on the predictor's input grid");
+    const int8_t one = static_cast<int8_t>(rounded > INT8_MAX ? INT8_MAX : rounded);
 
     const uint8_t *at = rnnt_vectors_start + sizeof(head);
     int worst_prefix = 0, differ_prefix = 0;
