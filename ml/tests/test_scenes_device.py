@@ -390,6 +390,16 @@ def test_a_floor_is_a_probe_at_the_products_shift(tmp_path: Path) -> None:
             device.load_floor({"board": "board_b", "sessions": [name]}, tmp_path, 13)
 
 
+def test_a_build_without_a_floor_takes_the_self_noise_and_records_no_floor(raw_root: Path, tmp_path: Path) -> None:
+    split = split_file(tmp_path / "train.txt", raw_root)
+    screened(tmp_path / "interim")
+    microphone = {k: v for k, v in tiny()["microphone"].items() if k != "floor"}
+    manifest = device.build(tiny(microphone=microphone), split, raw_root, tmp_path / "interim", tmp_path / "out")
+    body = yaml.safe_load(manifest.read_text())
+    assert "floor_sha256" not in body and "floor" not in body["config"]["microphone"]
+    assert body["items"] == 5 and sorted((tmp_path / "out").glob("*.features.npy"))
+
+
 def test_a_tilt_is_flat_below_its_corner_and_slopes_by_the_octave_above() -> None:
     t = np.arange(4 * FS) / FS
     for hz, octaves in ((500.0, 0.0), (2000.0, 1.0), (4000.0, 2.0)):

@@ -406,7 +406,8 @@ def _ignore_interrupt() -> None:
 def _shard(job: tuple) -> list[Path]:
     cfg, roots, bank, out, shard, sessions, pools, pads_s, with_pitch, keep_pcm, speeds, dtype = job
     mics = load_microphones(cfg["microphone"])
-    floor = load_floor(cfg["microphone"]["floor"], roots["raw"], mics.pcm_shift)
+    floor_cfg = cfg["microphone"].get("floor")
+    floor = load_floor(floor_cfg, roots["raw"], mics.pcm_shift) if floor_cfg else None
     chain_cfg = ChainConfig(balance_gains=mics.gains)
     mel = Mel(MelConfig(**cfg["features"]))
     tracker = PitchTracker(PitchConfig(**cfg["pitch"])) if with_pitch else None
@@ -474,9 +475,12 @@ def build(
     sessions = [(k, rows[i : i + per]) for k, i in enumerate(range(0, len(rows), per))]
     per_shard = cfg["sessions_per_shard"]
     pools = noise_files(cfg, raw_root, set(rejected))
-    floor_cfg = cfg["microphone"]["floor"]
-    load_floor(floor_cfg, raw_root, cfg["microphone"]["pcm_shift"])
-    floor_files = [Path(name) / f"ch{m}.wav" for name in floor_cfg["sessions"] for m in range(array.N_MICS)]
+    floor_cfg = cfg["microphone"].get("floor")
+    floor_sha256 = {}
+    if floor_cfg:
+        load_floor(floor_cfg, raw_root, cfg["microphone"]["pcm_shift"])
+        floor_files = [Path(name) / f"ch{m}.wav" for name in floor_cfg["sessions"] for m in range(array.N_MICS)]
+        floor_sha256 = {str(f): sha256_of(raw_root / "device" / floor_cfg["board"] / f) for f in floor_files}
     out.mkdir(parents=True, exist_ok=True)
     pads = pads_s or (cfg["session"]["pad_s"], cfg["session"]["pad_s"])
     head = {
@@ -489,7 +493,7 @@ def build(
         **({"speeds": list(speeds)} if speeds else {}),
         **({"dtype": dtype} if dtype != "float32" else {}),
         "rooms_sha256": sha256_of(bank / "rooms.yaml"),
-        "floor_sha256": {str(f): sha256_of(raw_root / "device" / floor_cfg["board"] / f) for f in floor_files},
+        **({"floor_sha256": floor_sha256} if floor_sha256 else {}),
     }
     begun = out / "build.yaml"
     if begun.exists() and yaml.safe_load(begun.read_text(encoding="utf-8")) != head:
