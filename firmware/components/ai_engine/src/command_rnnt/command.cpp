@@ -29,6 +29,7 @@ constexpr long kInt8Min = -128;
 constexpr long kInt8Max = 127;
 constexpr size_t kLayoutRank = 3; // esp-dl: (1, features, hops) in, (1, frames, width) out
 constexpr size_t kContext = AI_ENGINE_COMMAND_RNNT_CONTEXT;
+constexpr size_t kColumnsMax = 64; // joiner columns a run at most, held on the stack
 
 // The commands the tree holds, compared at each score: the frozen contract hands them over only there.
 struct Built {
@@ -39,22 +40,26 @@ struct Built {
 };
 
 struct Window {
-    bool ready, open, built;
+    bool ready, open, built, streaming;
     ai::Int8Tensor in, out, hot, prefix_out, join_frame, join_prefix, join_out;
     const float *mean, *deviation; // NORM entry: means, then deviations
     int8_t *zero;                  // raw zeros on the input grid: the pad
     int8_t *projected;             // window frames x width, joiner frame grid, PSRAM
     int8_t *prefixes;              // (pad + 1)^2 contexts x width, joiner grid, PSRAM
     uint8_t *known;                // whether prefixes holds a context yet
+    float *rows;                   // (pad + 1)^2 contexts x classes of one frame, PSRAM
+    uint32_t *row_frame;           // frame + 1 a context's row in rows is of
     void *tree;                    // ai_engine_command_rnnt_build's area, PSRAM
-    void *work;                    // ai_engine_command_rnnt_decide's, PSRAM
+    void *work;                    // the search's, PSRAM
     Built *lexicon;                // the commands tree holds, PSRAM
     float inverse_step;            // 2^-exponent of the input
     int8_t one;                    // a one-hot 1 on the predictor's input grid
     bool hot_rows_first;           // predictor input (1, pad + 1, context), else swapped
+    bool columns_first;            // joiner inputs (1, columns, width), else swapped
+    bool logits_columns_first;     // joiner logits (1, columns, classes), else swapped
     int frame_shift, prefix_shift; // source exponent less the joiner input's
-    size_t features, chunk_hops, chunk_frames, width, classes, pad, hops_max;
-    size_t hops, pending, frames;
+    size_t features, chunk_hops, chunk_frames, width, classes, pad, columns, hops_max;
+    size_t hops, pending, frames, searched;
     uint16_t reject, margin;
 };
 
@@ -132,18 +137,79 @@ esp_err_t prefix_of(const uint8_t *context, const int8_t **prefix)
     return ESP_OK;
 }
 
-esp_err_t joined(void *ctx, size_t frame, const uint8_t *context, float *log_probs)
+// Column j of a joiner tensor of width values a column, in either layout esp-dl gives it.
+void put_column(const ai::Int8Tensor &t, size_t j, const int8_t *values, size_t width)
+{
+    if (s.columns_first) {
+        memcpy(t.data + j * width, values, width);
+        return;
+    }
+    for (size_t d = 0; d < width; d++) {
+        t.data[d * s.columns + j] = values[d];
+    }
+}
+
+void get_column(const ai::Int8Tensor &t, size_t j, int8_t *values, size_t width)
+{
+    for (size_t d = 0; d < width; d++) {
+        values[d] = s.logits_columns_first ? t.data[j * width + d] : t.data[d * s.columns + j];
+    }
+}
+
+// The rows of n contexts at frame: this frame's copied, the rest joined columns at a time, a column the frame
+// beside a context's prefix, its logits through ctc's log-softmax.
+esp_err_t joined(void *ctx, size_t frame, const uint8_t *contexts, size_t n, float *rows)
 {
     (void)ctx;
     if (frame >= s.frames) { return ESP_ERR_INVALID_ARG; }
-    const int8_t *prefix = nullptr;
-    const esp_err_t err = prefix_of(context, &prefix);
-    if (err != ESP_OK) { return err; }
-    memcpy(s.join_frame.data, s.projected + frame * s.width, s.width);
-    memcpy(s.join_prefix.data, prefix, s.width);
-    const esp_err_t ran = s_joiner.step();
-    if (ran != ESP_OK) { return ran; }
-    return ai_engine_command_ctc_log_probs(s.join_out.data, s.join_out.exponent, s.classes, 1, log_probs);
+    const uint32_t stamp = static_cast<uint32_t>(frame) + 1;
+    size_t waiting[kColumnsMax];
+    size_t keys[kColumnsMax];
+    size_t n_waiting = 0;
+    int8_t logits[AI_ENGINE_COMMAND_CTC_CLASSES_MAX];
+    for (size_t j = 0; j <= n; j++) {
+        if (j < n) {
+            const uint8_t *context = contexts + j * kContext;
+            if (context[0] > s.pad || context[1] > s.pad) { return ESP_ERR_INVALID_ARG; }
+            const size_t key = context[0] * (s.pad + 1) + context[1];
+            if (s.row_frame[key] == stamp) {
+                memcpy(rows + j * s.classes, s.rows + key * s.classes, s.classes * sizeof(float));
+                continue;
+            }
+            const int8_t *prefix = nullptr;
+            const esp_err_t err = prefix_of(context, &prefix);
+            if (err != ESP_OK) { return err; }
+            put_column(s.join_frame, n_waiting, s.projected + frame * s.width, s.width);
+            put_column(s.join_prefix, n_waiting, prefix, s.width);
+            waiting[n_waiting] = j;
+            keys[n_waiting++] = key;
+        }
+        if (n_waiting == s.columns || (j == n && n_waiting > 0)) {
+            const esp_err_t ran = s_joiner.step();
+            if (ran != ESP_OK) { return ran; }
+            for (size_t k = 0; k < n_waiting; k++) {
+                float *row = s.rows + keys[k] * s.classes;
+                get_column(s.join_out, k, logits, s.classes);
+                const esp_err_t err =
+                    ai_engine_command_ctc_log_probs(logits, s.join_out.exponent, s.classes, 1, row);
+                if (err != ESP_OK) { return err; }
+                s.row_frame[keys[k]] = stamp;
+                memcpy(rows + waiting[k] * s.classes, row, s.classes * sizeof(float));
+            }
+            n_waiting = 0;
+        }
+    }
+    return ESP_OK;
+}
+
+// The search over every projected frame not yet searched, up to frames.
+esp_err_t search_to(size_t frames)
+{
+    for (; s.searched < frames; s.searched++) {
+        const esp_err_t err = ai_engine_command_rnnt_frame(s.tree, joined, nullptr, s.work);
+        if (err != ESP_OK) { return err; }
+    }
+    return ESP_OK;
 }
 
 bool same_lexicon(const ai_engine_lexicon_t *lexicon)
@@ -189,13 +255,18 @@ bool laid_out(const ai::Blob &norm)
     const ai::Int8Tensor &in = s.in, &out = s.out;
     const size_t hot_rows =
         s.hot.rank == kLayoutRank && s.hot.dims[2] == kContext ? s.hot.dims[1] : s.hot.dims[2];
+    const size_t width = out.dims[2];
+    const size_t columns = width > 0 ? s.join_frame.elements / width : 0;
+    const size_t classes = columns > 0 ? s.join_out.elements / columns : 0;
     return in.data != nullptr && out.data != nullptr && in.rank == kLayoutRank && out.rank == kLayoutRank &&
            in.dims[1] * 2 * sizeof(float) == norm.size && out.dims[1] > 0 && in.dims[2] % out.dims[1] == 0 &&
            s.hot.data != nullptr && s.hot.elements == hot_rows * kContext && s.prefix_out.data != nullptr &&
-           s.prefix_out.elements == out.dims[2] && s.join_frame.data != nullptr &&
-           s.join_frame.elements == out.dims[2] && s.join_prefix.data != nullptr &&
-           s.join_prefix.elements == out.dims[2] && s.join_out.data != nullptr && s.join_out.elements >= 2 &&
-           s.join_out.elements + 1 == hot_rows && s.join_out.elements <= AI_ENGINE_COMMAND_CTC_CLASSES_MAX;
+           s.prefix_out.elements == width && s.join_frame.data != nullptr &&
+           s.join_frame.rank == kLayoutRank && columns >= 1 && columns <= AI_ENGINE_COMMAND_CTC_CLASSES_MAX &&
+           s.join_frame.elements == columns * width && s.join_prefix.data != nullptr &&
+           s.join_prefix.elements == columns * width && s.join_out.data != nullptr &&
+           s.join_out.elements == columns * classes && classes >= 2 && classes + 1 == hot_rows &&
+           classes <= AI_ENGINE_COMMAND_CTC_CLASSES_MAX;
 }
 
 void *psram(size_t bytes)
@@ -216,6 +287,8 @@ void command_drop() noexcept
     heap_caps_free(s.projected);
     heap_caps_free(s.prefixes);
     heap_caps_free(s.known);
+    heap_caps_free(s.rows);
+    heap_caps_free(s.row_frame);
     heap_caps_free(s.tree);
     heap_caps_free(s.work);
     heap_caps_free(s.lexicon);
@@ -270,7 +343,10 @@ esp_err_t command_load() noexcept
     s.chunk_hops = s.in.dims[2];
     s.chunk_frames = s.out.dims[1];
     s.width = s.out.dims[2];
-    s.classes = s.join_out.elements;
+    s.columns = s.join_frame.elements / s.width;
+    s.columns_first = s.join_frame.dims[1] == s.columns && s.join_frame.dims[2] == s.width;
+    s.classes = s.join_out.elements / s.columns;
+    s.logits_columns_first = s.join_out.dims[1] == s.columns && s.join_out.dims[2] == s.classes;
     s.pad = s.classes;
     s.hot_rows_first = s.hot.dims[2] == kContext;
     s.hops_max = GEN_LISTEN_WINDOW_HOPS;
@@ -292,11 +368,14 @@ esp_err_t command_load() noexcept
     s.projected = static_cast<int8_t *>(psram(frames_max * s.width));
     s.prefixes = static_cast<int8_t *>(psram(contexts * s.width));
     s.known = static_cast<uint8_t *>(psram(contexts));
+    s.rows = static_cast<float *>(psram(contexts * s.classes * sizeof(float)));
+    s.row_frame = static_cast<uint32_t *>(psram(contexts * sizeof(uint32_t)));
     s.tree = psram(ai_engine_command_rnnt_tree_bytes());
     s.work = psram(ai_engine_command_rnnt_work_bytes(s.classes));
     s.lexicon = static_cast<Built *>(psram(sizeof(Built)));
     if (s.zero == nullptr || s.projected == nullptr || s.prefixes == nullptr || s.known == nullptr ||
-        s.tree == nullptr || s.work == nullptr || s.lexicon == nullptr) {
+        s.rows == nullptr || s.row_frame == nullptr || s.tree == nullptr || s.work == nullptr ||
+        s.lexicon == nullptr) {
         command_drop();
         return ESP_ERR_NO_MEM;
     }
@@ -306,9 +385,11 @@ esp_err_t command_load() noexcept
     s.reject = reject;
     s.margin = margin;
     s.ready = true;
-    ESP_LOGI(TAG, "%s: %u features, %u hops a chunk, %u frames of %u wide, %u classes, %u hops at most",
+    ESP_LOGI(TAG,
+             "%s: %u features, %u hops a chunk, %u frames of %u wide, %u classes, %u joined a run, %u hops "
+             "at most",
              kFrames, (unsigned)s.features, (unsigned)s.chunk_hops, (unsigned)s.chunk_frames,
-             (unsigned)s.width, (unsigned)s.classes, (unsigned)s.hops_max);
+             (unsigned)s.width, (unsigned)s.classes, (unsigned)s.columns, (unsigned)s.hops_max);
     return ESP_OK;
 }
 
@@ -327,6 +408,10 @@ esp_err_t ai_engine_command_begin(void)
     s.hops = 0;
     s.pending = 0;
     s.frames = 0;
+    s.searched = 0;
+    memset(s.row_frame, 0, (s.pad + 1) * (s.pad + 1) * sizeof(uint32_t));
+    s.streaming = s.built && ai_engine_command_rnnt_begin(s.tree, s.classes, static_cast<uint8_t>(s.pad),
+                                                          AI_ENGINE_COMMAND_RNNT_BEAM_NATS, s.work) == ESP_OK;
     s.open = true;
     return ESP_OK;
 }
@@ -343,7 +428,12 @@ esp_err_t ai_engine_command_step(const float *log_mel)
     put_hop(s.pending, hop);
     s.hops++;
     s.pending++;
-    return s.pending == s.chunk_hops ? run_chunk() : ESP_OK;
+    if (s.pending < s.chunk_hops) { return ESP_OK; }
+    const esp_err_t err = run_chunk();
+    if (err != ESP_OK || !s.streaming) { return err; }
+    // The search goes on over the chunk with the last scored commands; _score starts afresh on others.
+    if (search_to(s.frames) != ESP_OK) { s.streaming = false; }
+    return ESP_OK;
 }
 
 esp_err_t ai_engine_command_score(const ai_engine_lexicon_t *lexicon, ai_engine_command_result_t *out)
@@ -358,12 +448,17 @@ esp_err_t ai_engine_command_score(const ai_engine_lexicon_t *lexicon, ai_engine_
         const esp_err_t err = run_chunk();
         if (err != ESP_OK) { return err; }
     }
-    if (!same_lexicon(lexicon)) {
-        const esp_err_t err = build_tree(lexicon);
+    if (!s.streaming || !same_lexicon(lexicon)) {
+        esp_err_t err = same_lexicon(lexicon) ? ESP_OK : build_tree(lexicon);
+        if (err == ESP_OK) {
+            err = ai_engine_command_rnnt_begin(s.tree, s.classes, static_cast<uint8_t>(s.pad),
+                                               AI_ENGINE_COMMAND_RNNT_BEAM_NATS, s.work);
+        }
         if (err != ESP_OK) { return err; }
+        s.searched = 0;
     }
     const size_t stride = s.chunk_hops / s.chunk_frames;
-    const size_t frames = (s.hops + stride - 1) / stride;
-    return ai_engine_command_rnnt_decide(lexicon, s.tree, s.classes, frames, static_cast<uint8_t>(s.pad),
-                                         joined, nullptr, s.reject, s.margin, s.work, nullptr, out);
+    const esp_err_t err = search_to((s.hops + stride - 1) / stride);
+    if (err != ESP_OK) { return err; }
+    return ai_engine_command_rnnt_finish(lexicon, s.tree, s.work, s.reject, s.margin, nullptr, out);
 }
