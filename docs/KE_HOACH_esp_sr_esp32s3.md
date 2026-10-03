@@ -2294,13 +2294,18 @@ giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec`
   trong `LENH` bước sau quyết định của `wake`; nó kết ở bước ngay sau đoạn `vad` cuối của câu. `lead_s` 1,25 s là p90
   của quãng từ đầu mẩu tới bước `vad` đầu trong các mẩu `val` của `command` (trung vị 0,69 s), nên mạng thấy trước câu ít
   nhất như lúc học; mở 0,5 s trước câu thì Cửa 3 sau int8 mất 5 câu lệnh đúng đứng đầu (`measurements/command.md` §5);
-- **cửa sổ chạy theo luồng**: từ khi câu đủ `utterance.min_s`, `svc_listen` chạy cao độ và `ai_engine_command_step` cho
-  từng bước của cửa sổ đã có, đuổi kịp phần trước câu rồi đi cùng các khung mới, xen giữa các khung của `q_clean`; mạng
-  chạy mỗi khối và phép chấm đi tiếp trên khung mới, theo bộ lệnh `ai_engine_command_prepare` đã nhận. Cuối cửa sổ chỉ
-  dời về sau, nên một bước đã qua mà câu còn mở chắc chắn thuộc cửa sổ; lúc câu chốt chỉ còn khối dở cuối và phần kết của
-  phép chấm. Trên board B quyết định ra sau bước chốt 47,7 ms trung vị, 49,4 ms p95 qua 198 cửa sổ Cửa 3, gần hết là khối
-  dở cuối của mạng (`measurements/latency.md` §16), không phải sau cả cửa sổ: cao độ cộng mạng một cửa sổ tốn 0,72–0,88 s
-  trung bình;
+- **cửa sổ chạy theo luồng**: ngay từ bước `vad` đầu của câu, `svc_listen` chạy cao độ và `ai_engine_command_step` cho
+  từng bước của cửa sổ đã có, đuổi kịp phần trước câu rồi đi cùng các khung mới; mạng chạy mỗi khối và phép chấm đi tiếp
+  trên khung mới, theo bộ lệnh `ai_engine_command_prepare` đã nhận. Cuối cửa sổ chỉ dời về sau, nên một bước đã qua mà
+  câu còn mở chắc chắn thuộc cửa sổ; lúc câu chốt chỉ còn khối dở cuối và phần kết của phép chấm. Trên board B quyết định
+  ra sau bước chốt 47,7 ms trung vị, 49,4 ms p95 qua 198 cửa sổ Cửa 3, gần hết là khối dở cuối của mạng
+  (`measurements/latency.md` §16), không phải sau cả cửa sổ: cao độ cộng mạng một cửa sổ tốn 0,72–0,88 s trung bình;
+- phần đuổi kịp là việc nặng nhất: 78 bước trước câu, mỗi bước khoảng 7 ms trên firmware thật, chỉ nhanh hơn thời gian
+  thực hơn hai lần. Nên nó bắt đầu từ bước `vad` đầu, không đợi câu đủ `utterance.min_s` (câu bị bỏ thì công ấy bỏ đi), và
+  khi `q_clean` không có khung chờ, `nhan_task` chạy liền các bước của cửa sổ tới khi có khung mới, chỉ chờ một tick giữa
+  hai đợt để các task thấp hơn ở nhân 0 chạy. Chạy mỗi lần một bước và đợi đủ `utterance.min_s` thì từ ngắn chưa đuổi kịp
+  khi câu chốt: quyết định ra 220–320 ms sau bước chốt trên board B, lệnh dài hơn thì 63–73 ms (`measurements/latency.md`
+  §17);
 - cửa sổ dài quá `window_s` thì thôi chạy theo luồng: lúc câu chốt nó lùi từ bước cuối tối đa `window_s`, không qua mốc
   chặn, rồi chạy cả cửa sổ, quyết định chậm 0,97–0,99 s; Cửa 3 có 2 trên 198 câu như thế;
 - `svc_listen` tính log-mel mỗi bước và giữ log-mel cùng mẫu sạch của các bước gần nhất ở PSRAM; bộ dò cao độ đặt lại ở

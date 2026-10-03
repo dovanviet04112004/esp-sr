@@ -383,3 +383,23 @@ rồi chừng 48 ms tính, tổng chừng 0,69 s 🔬. Cửa sổ cắt lùi t�
 s trung bình và 0,99 s đỉnh trên cùng các phiên (`make listen-unit` ở `6eeb568`), tổng chừng 1,4 s 🔬. Phần còn lại phần
 lớn là chờ hết câu, 640 ms; trong 48 ms tính, khối dở cuối của mạng chiếm gần hết, vì mạng chạy theo khối 16 bước và cuối
 cửa sổ chỉ biết khi câu chốt.
+
+## 17. Cửa sổ theo luồng trên firmware thật: từ ngắn chưa đuổi kịp lúc câu chốt (E11-T14)
+
+Board B chạy firmware dev ở `332b540`, cùng Wi-Fi, MQTT và khối lọc âm, model đang khoá, bộ lệnh 22 lệnh của chủ repo
+gửi bằng `make commands`; chủ repo nói trực tiếp trước board, 03/10. Mỗi dòng là một quyết định trong log của `nhan_task`.
+Ở bản này cửa sổ chỉ bắt đầu tính khi câu đủ `utterance.min_s`, và `nhan_task` chạy mỗi lần một bước rồi chờ một tick.
+
+| Quyết định | Bước của cửa sổ | Tính cả cửa sổ | Sau bước chốt |
+|---|---|---|---|
+| `COMMAND` mở cửa | 131 | 945 ms | 68 ms |
+| `COMMAND` đóng cửa | 129 | 935 ms | 63 ms |
+| `COMMAND` bật điều hoà | 141 | 1 026 ms | 73 ms |
+| `COMMAND` đắt | 105 | 760 ms | 221 ms |
+| `REJECT LOW_MARGIN`, bốn câu "bần cùng", "bắn cung" | 106–107 | 766–771 ms | 226–232 ms |
+| `REJECT LOW_SCORE`, hai tiếng ngắn | 99 | 745–751 ms | 323–324 ms |
+
+Trên firmware thật một bước của cửa sổ tốn chừng 7,2 ms (766 ms cho 107 bước), so với chừng 5,2 ms ở app thử của §16, chỉ
+nhanh hơn thời gian thực (16 ms một bước) hơn hai lần. Khi bắt đầu, cửa sổ đã sau 78 bước trước câu cộng 16 bước chờ đủ
+`utterance.min_s`; từ ngắn, cửa sổ chừng 100 bước, chốt trước khi đuổi kịp nên quyết định ra muộn 220–320 ms, còn lệnh
+dài từ 129 bước trở lên đã đuổi kịp và ra 63–73 ms sau bước chốt.
