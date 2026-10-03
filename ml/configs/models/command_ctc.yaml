@@ -53,6 +53,7 @@ rnnt:                              # the rnnt track (KEHOACH 3.12, ADR-0016): Mu
   context: 2                       # units the stateless predictor looks back at
   ctc_weight: 0.2                  # of the CTC loss added to the RNN-T one, both per unit
   lattice_cells: 100000            # joiner lattice a step holds at once, ~4.5 KB a cell: the 4 GB GPU shares Windows
+  joiner_columns: 16               # contexts the int8 joiner graph takes a run on the chip (KEHOACH 3.12)
 chunk_hops: 16                     # hops a streaming step takes: a multiple of the front's stride times the top rate
 quant:                             # python -m srpipe.tasks.command.ctc.quant ptq|int16|qat <run> (E11-T12, KEHOACH 3.14)
   seed: 20261002

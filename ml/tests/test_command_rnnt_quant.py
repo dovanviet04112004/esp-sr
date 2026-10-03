@@ -67,7 +67,7 @@ def test_the_int8_chain_gives_log_probabilities_and_a_decision(cfg, net, tmp_pat
     calib = [torch.from_numpy(rng.normal(size=(1, dims, hops)).astype(np.float32)) for _ in range(4)]
     contexts = rnnt_quant.contexts_of([np.array([0, 38, 1, 39]), np.array([2, 40])], 2, encoder.n_classes())
     rungs = ptq_espdl.ladder("command_ctc") | {"equalization": None, "bias_correction": False, "calibration": "minmax"}
-    graphs = rnnt_quant.quantized(net, calib, contexts, tmp_path, rungs, cfg["esp_ppq_patches"], 16, 4)
+    graphs = rnnt_quant.quantized(net, calib, contexts, tmp_path, rungs, cfg["esp_ppq_patches"], 16, 4, 4)
     e = ptq_espdl.io_of(graphs.predictor).input_exponent
     assert ptq_espdl.to_int8(np.ones(1, np.float32), e)[0] * 2.0**e == 1.0
     stats = (np.zeros(dims, np.float32), np.ones(dims, np.float32))
@@ -76,12 +76,12 @@ def test_the_int8_chain_gives_log_probabilities_and_a_decision(cfg, net, tmp_pat
     sim = rnnt_quant.Int8Rnnt(graphs, hops, ctc_net, cfg["esp_ppq_patches"])
     x = rng.normal(size=(40, dims)).astype(np.float32)
     window = ((x - stats[0]) / stats[1]).T[None].astype(np.float32)
-    lp = sim.log_probs(window, 20)(0, contexts[0])
+    lp = sim.log_probs(window, 20)(0, [contexts[0]])[0]
     assert lp.shape == (encoder.n_classes(),) and abs(np.logaddexp.reduce(lp.astype(np.float64))) < 1e-5
     frame = sim.projected(window, 20)[:, 3]
     side_by_side = sim.logits(frame, contexts)
     alone = np.concatenate([sim.logits(frame, [c]) for c in contexts], axis=1)
     assert side_by_side.dtype == np.int8 and np.array_equal(side_by_side, alone)
-    batched = sim.log_probs(window, 20, contexts)
-    assert all(np.array_equal(batched(5, c), sim.log_probs(window, 20)(5, c)) for c in contexts)
+    rows = sim.log_probs(window, 20)(5, contexts)
+    assert all(np.array_equal(rows[k], sim.log_probs(window, 20)(5, [c])[0]) for k, c in enumerate(contexts))
     assert rnnt_quant.int8_heard(sim, ctc_net, x).command in ("a", "b", gate.REJECT)

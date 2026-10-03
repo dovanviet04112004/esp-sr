@@ -99,13 +99,13 @@ def test_an_rnnt_window_reaches_the_search_as_frames_of_its_own_hops(monkeypatch
 
     def watched(log_probs, frames, *rest):
         pad = net.model.transducer.predictor.pad
-        seen.append((log_probs(0, (pad, ctc_score.BLANK)).shape, frames))
+        seen.append((log_probs(0, [(pad, ctc_score.BLANK)]).shape, frames))
         return decide(log_probs, frames, *rest)
 
     monkeypatch.setattr(rnnt_search, "decide", watched)
     x = np.random.default_rng(0).normal(size=(50, dims)).astype(np.float32)
     heard = gate.rnnt_heard(net, x)
-    assert seen == [((encoder.n_classes(),), 25)] and heard.command in ("a", "b", REJECT)
+    assert seen == [((1, encoder.n_classes()), 25)] and heard.command in ("a", "b", REJECT)
     plain = gate.Ctc(encoder.build(cfg | {"rnnt": None}).eval(), *stats, ["a", "b"], lexicon, cfg)
     with pytest.raises(ValueError, match="no transducer"):
         gate.rnnt_heard(plain, x)

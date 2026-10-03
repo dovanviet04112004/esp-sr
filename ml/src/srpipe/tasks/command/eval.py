@@ -215,11 +215,13 @@ def rnnt_log_probs(net: Ctc, encoded: torch.Tensor) -> rnnt_search.LogProbs:
         frames = t.joiner.frame_proj(encoded[0].T)
     projected: dict[tuple[int, ...], torch.Tensor] = {}
 
-    def log_probs(frame: int, context: tuple[int, ...]) -> np.ndarray:
+    def log_probs(frame: int, contexts: list[tuple[int, ...]]) -> np.ndarray:
         with torch.no_grad():
-            if context not in projected:
-                projected[context] = t.joiner.prefix_proj(t.predictor(torch.tensor([context]))[0, -1])
-            return t.joiner(frames[frame], projected[context]).log_softmax(-1).numpy().astype(np.float32)
+            for context in contexts:
+                if context not in projected:
+                    projected[context] = t.joiner.prefix_proj(t.predictor(torch.tensor([context]))[0, -1])
+            prefixes = torch.stack([projected[c] for c in contexts])
+            return t.joiner(frames[frame][None], prefixes).log_softmax(-1).numpy().astype(np.float32)
 
     return log_probs
 

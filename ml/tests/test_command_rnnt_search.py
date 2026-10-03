@@ -1,6 +1,7 @@
-"""The rnnt decision: the tree holds every variant and part once, breadth first; each node's score is the sum over every
-alignment of the RNN-T lattice, many units a frame included; the winner is taken when said whole, slow or fast, and
-turned down when a part of it or the free path fits the window better."""
+"""The rnnt decision: the tree holds every variant and part once, breadth first, depth by depth; each node's score is
+the sum over every alignment of the RNN-T lattice, many units a frame included; nodes far behind are dropped without
+their contexts being asked; a window scored frame by frame in any chunks decides as at once; the winner is taken when
+said whole, slow or fast, and turned down when a part of it or the free path fits the window better."""
 
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from srpipe.tasks.command.rnnt.postproc import rnnt_search as rs
 
 CLASSES, SIZE = ctc_score.n_classes(), 2
 PAD = CLASSES
+EVERY_NODE = rs.EVERY_NODE
 
 
 def toy(rng: np.random.Generator, said: list[list[int]], frames: int, strength: float = 6.0) -> rs.LogProbs:
@@ -22,12 +24,15 @@ def toy(rng: np.random.Generator, said: list[list[int]], frames: int, strength: 
     base = rng.normal(size=(frames, CLASSES)).astype(np.float32)
     nudge = rng.normal(scale=0.3, size=(CLASSES + 1, CLASSES)).astype(np.float32)
 
-    def log_probs(t: int, context: tuple[int, ...]) -> np.ndarray:
+    def one(t: int, context: tuple[int, ...]) -> np.ndarray:
         x = base[t] + nudge[context[-1]]
         targets = said[t] if t < len(said) else []
         done = targets.index(context[-1] - 1) + 1 if context[-1] - 1 in targets else 0
         x[targets[done] + 1 if done < len(targets) else ctc_score.BLANK] += strength
         return (x - np.float32(np.log(np.exp(x.astype(np.float64)).sum()))).astype(np.float32)
+
+    def log_probs(t: int, contexts: list[tuple[int, ...]]) -> np.ndarray:
+        return np.stack([one(t, c) for c in contexts])
 
     return log_probs
 
@@ -61,6 +66,10 @@ def test_the_tree_holds_every_variant_and_part_once_breadth_first() -> None:
         assert [tree.units[n] for n in tree.variants[c]] == [tuple(int(u) for u in f) for f in forms]
         assert [tree.units[n] for n in tree.parts[c]] == [tuple(int(u) for u in p) for p in ctc_score.parts(forms)]
     assert rs.context_of((), SIZE, PAD) == (PAD, ctc_score.BLANK) and rs.context_of((3, 5), SIZE, PAD) == (4, 6)
+    depths = [len(u) for u in tree.units]
+    for d, (lo, hi) in enumerate(zip(tree.levels[:-1], tree.levels[1:], strict=True)):
+        assert lo < hi and set(depths[lo:hi]) == {d}
+    assert tree.levels[-1] == len(tree.units)
 
 
 def test_log_add_is_the_log_of_the_summed_probabilities() -> None:
@@ -76,7 +85,8 @@ def lattice(log_probs: rs.LogProbs, frames: int, units: tuple[int, ...]) -> floa
     """log P(units) over every RNN-T alignment, any units a frame and a blank closing each frame, in float64."""
     alpha = [0.0] + [-math.inf] * len(units)
     for t in range(frames):
-        rows = [log_probs(t, rs.context_of(units[:u], SIZE, PAD)).astype(np.float64) for u in range(len(units) + 1)]
+        contexts = [rs.context_of(units[:u], SIZE, PAD) for u in range(len(units) + 1)]
+        rows = log_probs(t, contexts).astype(np.float64)
         for u in range(1, len(units) + 1):
             alpha[u] = float(np.logaddexp(alpha[u], alpha[u - 1] + rows[u - 1][units[u - 1] + 1]))
         alpha = [a + rows[u][ctc_score.BLANK] for u, a in enumerate(alpha)]
@@ -87,12 +97,46 @@ def test_each_node_scores_the_sum_over_every_alignment_many_units_a_frame() -> N
     lex = lexicon()
     log_probs = toy(np.random.default_rng(1), [[0, sorted(ctc_score.TONE_UNITS)[0]]], 5, strength=1.0)
     tree = rs.command_tree(lex)
-    alpha = rs.forward(log_probs, 5, tree, SIZE, PAD)
+    alpha = rs.forward(log_probs, 5, tree, SIZE, PAD, beam=EVERY_NODE)
     for n, units in enumerate(tree.units):
         assert math.isclose(float(alpha[n]), lattice(log_probs, 5, units), abs_tol=5e-4)
-    one = rs.forward(log_probs, 5, tree, SIZE, PAD, chain=False)
-    merged = rs.forward(log_probs, 5, tree, SIZE, PAD, add=False)
+    one = rs.forward(log_probs, 5, tree, SIZE, PAD, chain=False, beam=EVERY_NODE)
+    merged = rs.forward(log_probs, 5, tree, SIZE, PAD, add=False, beam=EVERY_NODE)
     assert all(one[n] < alpha[n] for n in tree.variants[0]) and np.all(merged <= alpha + 1e-6)
+
+
+def test_nodes_far_behind_are_dropped_and_their_contexts_never_asked() -> None:
+    whole = [int(u) for u in lexicon()[1][0]]
+    log_probs, tree = toy(np.random.default_rng(4), one_a_frame(whole), 12), rs.command_tree(lexicon())
+    asked: dict[str, int] = {}
+
+    def counted(name: str):
+        def ask(t: int, contexts: list[tuple[int, ...]]) -> np.ndarray:
+            asked[name] = asked.get(name, 0) + len(contexts)
+            return log_probs(t, contexts)
+
+        return ask
+
+    exact = rs.decide(counted("exact"), 12, tree, ctc_score.CAP, 50, SIZE, PAD, beam=EVERY_NODE)
+    pruned = rs.decide(counted("pruned"), 12, tree, ctc_score.CAP, 50, SIZE, PAD)
+    assert asked["pruned"] < asked["exact"]
+    # The winner, its score and its gap to the free path stay; the lead reads CAP when the runner-up drops.
+    assert pruned[0][[0, 1, 3]].tolist() == exact[0][[0, 1, 3]].tolist() and pruned[0][2] == ctc_score.CAP
+    assert (pruned[1] == -np.inf).sum() > (exact[1] == -np.inf).sum()
+
+
+def test_a_window_scored_frame_by_frame_in_any_chunks_decides_as_at_once() -> None:
+    whole = [int(u) for u in lexicon()[1][0]]
+    log_probs, tree = toy(np.random.default_rng(6), one_a_frame(whole), 12), rs.command_tree(lexicon())
+    at_once = rs.decide(log_probs, 12, tree, ctc_score.CAP, 50, SIZE, PAD)
+    for cut in (0, 5, 11):
+        s = rs.begin(tree, SIZE, PAD)
+        for _ in range(cut):
+            rs.frame(s, tree, log_probs)
+        for _ in range(12 - cut):
+            rs.frame(s, tree, log_probs)
+        decision, scores = rs.finish(s, tree, ctc_score.CAP, 50)
+        assert np.array_equal(decision, at_once[0]) and np.array_equal(scores, at_once[1])
 
 
 def decided(said: list[list[int]], frames: int, reject: int = ctc_score.CAP, own_parts: bool = True):
@@ -128,7 +172,8 @@ def test_the_golden_set_holds_its_edges_and_each_negative_control_differs(tmp_pa
     from srpipe.golden.gold import read_gold
 
     written = rs.emit(tmp_path)
-    names = ("case_000", "case_001", "case_002", "case_neg_000", "case_neg_001", "case_neg_002")
+    names = ("case_000", "case_001", "case_002", "case_003", "case_neg_000", "case_neg_001", "case_neg_002")
+    names += ("case_neg_003",)
     assert [p.name for p in written] == [f"{n}.gold" for n in names]
     cases = {p.stem: read_gold(p) for p in written}
     edge = cases["case_002"]["decision"]
@@ -137,5 +182,9 @@ def test_the_golden_set_holds_its_edges_and_each_negative_control_differs(tmp_pa
     assert cases["case_neg_000"]["decision"][3, 0] == 0
     assert not np.array_equal(cases["case_002"]["scores"], cases["case_neg_001"]["scores"])
     assert np.isfinite(cases["case_002"]["scores"][4, 0]) and cases["case_neg_002"]["scores"][4, 0] == -np.inf
+    narrow, product = cases["case_neg_003"], cases["case_003"]
+    assert product["beam"][0] == narrow["beam"][0] == rs.BEAM_NATS and cases["case_002"]["beam"][0] == np.inf
+    assert (narrow["scores"] == -np.inf).sum() > (product["scores"] == -np.inf).sum()
+    assert (product["decision"][:, 0] == edge[:, 0]).all()
     assert cases["case_002"]["limits"].shape == (5, 2) and cases["case_002"]["frames"].dtype == np.int8
     assert (cases["case_000"]["decision"][:, 0] != ctc_score.REJECTED).any()

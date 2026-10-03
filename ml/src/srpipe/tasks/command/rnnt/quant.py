@@ -118,10 +118,13 @@ def quantized(
     patches: list[str],
     pairs: int,
     seed: int,
+    columns: int,
 ) -> Graphs:
     """net's three graphs quantised under rungs into folder with the named ESP-PPQ fixes in force: the frames graph
     on the calibration sentences, the predictor on contexts one-hot, the joiner on pairs of a calibration frame and a
-    context's prefix, drawn with seed."""
+    context's prefix, drawn with seed, columns pairs side by side a run as the chip runs it."""
+    if pairs % columns:
+        raise ValueError(f"{pairs} joiner pairs do not fill runs of {columns} columns")
     t = net.transducer
     frames_graph, predictor_graph = FramesGraph(net).eval(), PredictorGraph(t).eval()
     hot = [torch.from_numpy(one_hot(c, t.predictor.pad)) for c in contexts]
@@ -129,8 +132,11 @@ def quantized(
         frames = torch.cat([frames_graph(x) for x in calib], dim=2)
         prefixes = torch.cat([predictor_graph(h) for h in hot], dim=2)
     rng = np.random.default_rng(seed)
-    drawn = zip(rng.integers(frames.shape[2], size=pairs), rng.integers(prefixes.shape[2], size=pairs), strict=True)
-    joined = [(frames[:, :, i : i + 1], prefixes[:, :, j : j + 1]) for i, j in drawn]
+    at_frame, at_prefix = rng.integers(frames.shape[2], size=pairs), rng.integers(prefixes.shape[2], size=pairs)
+    joined = [
+        (frames[:, :, at_frame[k : k + columns]], prefixes[:, :, at_prefix[k : k + columns]])
+        for k in range(0, pairs, columns)
+    ]
     built = ctc_quant.quantized(frames_graph, calib, folder / "frames", rungs, patches)
     with esp_ppq_patches.applied(patches):
         predictor = ptq_espdl.quantize(predictor_graph, hot, folder / "predictor", rungs)
@@ -149,9 +155,9 @@ def requant(x: np.ndarray, src: int, dst: int) -> np.ndarray:
 class Int8Rnnt:
     """The three graphs as the chip runs them, simulated under the branch's ESP-PPQ fixes: a window's projected frames
     once, each context's prefix once, and the joiner's int8 logits to log-probabilities by ctc_score's
-    frame_log_probs. The chip runs the joiner a frame and a context at a time; the simulation runs the contexts of a
-    frame side by side as columns, which gives each column's int8 exactly as alone: every product and sum of the
-    1x1 convolutions is an integer times a power of two that float32 holds exactly."""
+    frame_log_probs. The contexts the search asks for at once run side by side as columns, which gives each column's
+    int8 exactly as alone: every product and sum of the 1x1 convolutions is an integer times a power of two that
+    float32 holds exactly."""
 
     def __init__(self, graphs: Graphs, hops: int, net: gate.Ctc, patches: list[str]) -> None:
         self.frames = ctc_quant.Int8Net(graphs.frames, hops, net.mean, net.std, net.model, patches)
@@ -185,19 +191,19 @@ class Int8Rnnt:
         (out,) = self.joiner.run(frames, np.stack(p, axis=1)[None].astype(np.float32) * scale_p)
         return ptq_espdl.to_int8(out, self.join_out.exponent)[0]
 
-    def log_probs(self, x: np.ndarray, frames: int, contexts: list[tuple[int, ...]] = ()) -> rnnt_search.LogProbs:
-        """The search's log-probabilities over a normalised window (1, dims, hops) of frames frames; contexts, those
-        the search will ask of every frame, are joined in one run the first time a frame is asked for."""
+    def log_probs(self, x: np.ndarray, frames: int) -> rnnt_search.LogProbs:
+        """The search's log-probabilities over a normalised window (1, dims, hops) of frames frames, the contexts of
+        one request joined side by side in one run, each frame and context computed once."""
         projected = self.projected(x, frames)
         rows: dict[tuple[int, tuple[int, ...]], np.ndarray] = {}
 
-        def log_probs(t: int, context: tuple[int, ...]) -> np.ndarray:
-            if (t, context) not in rows:
-                wanted = list(dict.fromkeys([context, *(c for c in contexts if (t, c) not in rows)]))
-                q = self.logits(projected[:, t], wanted)
-                for c, row in zip(wanted, ctc_score.frame_log_probs(q, self.join_out.exponent).T, strict=True):
+        def log_probs(t: int, contexts: list[tuple[int, ...]]) -> np.ndarray:
+            missing = list(dict.fromkeys(c for c in contexts if (t, c) not in rows))
+            if missing:
+                q = self.logits(projected[:, t], missing)
+                for c, row in zip(missing, ctc_score.frame_log_probs(q, self.join_out.exponent).T, strict=True):
                     rows[(t, c)] = row
-            return rows[(t, context)]
+            return np.stack([rows[(t, c)] for c in contexts])
 
         return log_probs
 
@@ -211,8 +217,7 @@ def int8_decided(sim: Int8Rnnt, x: np.ndarray, mean: np.ndarray, std: np.ndarray
     """The decision of a raw window (hops, dims) on the int8 graphs, as rnnt_search.decide gives it."""
     frames = -(-len(x) // sim.frames.front.hop_stride)
     window = ((x - mean) / std).T[None].astype(np.float32)
-    log_probs = sim.log_probs(window, frames, tree_contexts(tree, sim.size, sim.pad))
-    return rnnt_search.decide(log_probs, frames, tree, reject, margin, sim.size, sim.pad)
+    return rnnt_search.decide(sim.log_probs(window, frames), frames, tree, reject, margin, sim.size, sim.pad)
 
 
 def int8_heard(sim: Int8Rnnt, net: gate.Ctc, x: np.ndarray) -> gate.Heard:
@@ -248,7 +253,10 @@ def step_ptq(cfg: dict, run: Path) -> Path:
     for name in spec["calibrations"]:
         rungs = ptq_espdl.ladder(ctc_quant.LADDER) | {"calibration": name}
         folder = run / "int8" / f"{ROW_PREFIX}{name}"
-        graphs = quantized(net.model, b.calib, contexts, folder, rungs, patches, spec["joiner_pairs"], spec["seed"])
+        columns = cfg["rnnt"]["joiner_columns"]
+        graphs = quantized(
+            net.model, b.calib, contexts, folder, rungs, patches, spec["joiner_pairs"], spec["seed"], columns
+        )
         saved(graphs, folder)
         sim = Int8Rnnt(graphs, spec["hops"], net, patches)
         row = ctc_quant.gate_row(net, b.windows, *thresholds, functools.partial(int8_heard, sim))
