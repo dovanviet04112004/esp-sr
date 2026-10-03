@@ -55,7 +55,7 @@ def test_calibration_draws_only_sentences_the_graph_holds(tmp_path: Path) -> Non
         quant.calibration({}, spec | {"calib_sentences": 5}, np.zeros(DIMS), np.ones(DIMS), root)
 
 
-def test_the_gate_row_counts_best_accepted_and_false_accepts(monkeypatch) -> None:
+def test_the_gate_row_counts_best_accepted_and_false_accepts() -> None:
     heard = iter(
         [
             gate.Heard("bat_den", 900, 100, 100),
@@ -66,12 +66,11 @@ def test_the_gate_row_counts_best_accepted_and_false_accepts(monkeypatch) -> Non
             gate.Heard("bat_den", 900, 100, 900),
         ]
     )
-    monkeypatch.setattr(gate, "ctc_heard", lambda net, x: next(heard))
     windows = [
         gate.Scored("a", "cmd", "100", "bật đèn", "bat_den", [0, 1, 2, 5]),
         gate.Scored("b", "neg", "100", "bật điện", gate.REJECT, [3, 4]),
     ]
-    row = quant.gate_row(None, windows, 300, 50)
+    row = quant.gate_row(None, windows, 300, 50, heard_by=lambda net, x: next(heard))
     assert row == {"best_right": "3/4", "accepted_right": "1/4", "false_accepts": "1/2"}
 
 
