@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "commands": [
+    {"id": "bat_den", "text": "bật đèn", "response": "da_bat_den"},
+    {"id": "tat_den", "text": "tắt đèn", "response": "da_tat_den"},
+    {"id": "bat_quat", "text": "bật quạt", "response": "da_bat_quat"},
+    {"id": "tat_quat", "text": "tắt quạt", "response": "da_tat_quat"},
+    {"id": "mo_cua", "text": "mở cửa", "response": "da_mo_cua"},
+    {"id": "dong_cua", "text": "đóng cửa", "response": "da_dong_cua"},
+    {"id": "tang_am_luong", "text": "tăng âm lượng", "response": "da_tang"},
+    {"id": "giam_am_luong", "text": "giảm âm lượng", "response": "da_giam"},
+    {"id": "dung_lai", "text": "dừng lại", "response": "da_dung"},
+    {"id": "chup_anh", "text": "chụp ảnh", "response": "da_chup_anh"},
+    {"id": "bat_ti_vi", "text": "bật ti vi"},
+    {"id": "tat_ti_vi", "text": "tắt ti vi"}
+  ]
+}
