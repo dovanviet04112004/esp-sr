@@ -229,3 +229,41 @@ lượng" 16–83‰ so với 102–154‰ ở `ctc`); ngưỡng của `rnnt` ph
 Giải tham lam cho tới ba đơn vị mỗi khung trên các cửa sổ "tăng âm lượng" và "tắt đèn": 643 khung phát một đơn vị, 220
 phát hai, 67 phát ba. Chuỗi giải tự do sai xa ở cả hai lệnh, ví dụ "tăng âm lượng" ra `o N T1 m u@ n T5 l o T3`, "tắt
 đèn" ra `@: t T5 J a: k T6`.
+
+## 5. Cửa sổ lệnh: neo đầu câu và chia điểm (KẾ HOẠCH §3.12, §5.4, E11-T14)
+
+Model đang khoá: run `20261002_128545c-dirty_64e7a4`, hàng `qat` sau int8 (mô phỏng ESP-PPQ như board chạy), cùng mạng
+float; phiên board của §1, 198 câu (112 câu lệnh, 86 câu khác); `δ₂` 50‰. Đo ngày 03/10 ở `6eeb568` bằng script chẩn
+đoán chạy một lần. Cách cắt cũ: cửa sổ kết ở bước sau đoạn `vad` cuối, lùi tối đa 3 s. Cách cắt mới: cửa sổ mở `lead`
+trước bước `vad` đầu của câu, kết cùng chỗ, câu dài quá 3 s thì lùi từ cuối như cũ. "Điểm chia" là số khung chia điểm:
+số khung của cửa sổ đang chấm, hay `T_W` = 94 khung của cửa sổ 3 s. Ô nhận ghi câu lệnh nhận đúng / câu lệnh nhận
+thành lệnh khác / câu khác nhận thành lệnh, ở `δ₁` 200, 300, 400‰.
+
+| Cách cắt | Điểm chia | Đầu đúng | `δ₁` 200 | `δ₁` 300 | `δ₁` 400 | Lùi từ cuối | Bước trung bình |
+|---|---|---|---|---|---|---|---|
+| cũ, lùi 3 s | khung thật | 86/112 | 67/15/1 | 68/15/3 | 68/15/3 | | 158 |
+| cũ, lùi 3 s | `T_W` | 86/112 | 67/13/1 | 68/13/3 | 68/13/4 | | 158 |
+| `lead` 0,5 s | khung thật | 81/112 | 42/7/0 | 50/9/1 | 57/9/1 | 2 | 82 |
+| `lead` 0,5 s | `T_W` | 81/112 | 53/6/1 | 54/6/4 | 54/6/4 | 2 | 82 |
+| `lead` 0,75 s | khung thật | 85/112 | 50/13/0 | 66/15/2 | 70/16/3 | 2 | 97 |
+| `lead` 0,75 s | `T_W` | 85/112 | 65/9/1 | 65/9/4 | 65/9/5 | 2 | 97 |
+| `lead` 1,0 s | khung thật | 84/112 | 60/19/1 | 70/21/3 | 74/21/4 | 2 | 112 |
+| `lead` 1,0 s | `T_W` | 84/112 | 65/15/2 | 67/15/5 | 67/15/6 | 2 | 112 |
+| `lead` 1,25 s | khung thật | 84/112 | 63/19/0 | 72/19/2 | 73/19/3 | 2 | 127 |
+| **`lead` 1,25 s** | **`T_W`** | **84/112** | 69/16/2 | **71/16/3** | 71/16/5 | 2 | 127 |
+
+Float cho cùng chiều: cũ 85/112 đầu đúng, 74/16/2 ở `δ₁` 300; `lead` 1,25 s chia `T_W` 83/112, 74/18/3. Kéo cuối cửa
+sổ thêm quãng `utterance.gap_s` sau đoạn `vad` cuối, như mẩu học có đệm sau câu (trung vị 0,45 s sau bước `vad` cuối),
+không cho gì rõ: ở `δ₁` 300, `lead` 1,25 s chia `T_W` ra 70/14/4 thay vì 71/16/3, cách cắt cũ chia khung thật ra 72/15/4
+thay vì 68/15/3; cuối cửa sổ giữ ở bước sau đoạn `vad` cuối.
+
+Đọc kết quả:
+
+- Mở cửa sổ càng sát câu thì mạng càng ít ngữ cảnh: `lead` 0,5 s mất 5 câu đầu đúng. Ở các mẩu `val` của `command/v2`
+  mà mạng học, quãng từ đầu mẩu tới bước `vad` đầu có trung vị 0,69 s, p90 1,17 s (1 583 mẩu); `lead` 1,25 s cho mạng
+  thấy trước câu ít nhất như lúc học ở chín phần mười số mẩu, và Cửa 3 không kém cách cắt cũ: 2 câu đầu đúng mất là hai
+  câu "dừng lại" mà cả hai cách đều từ chối.
+- Chia số khung thật thì cửa sổ ngắn hơn làm khoảng cách nhất nhì to ra, nên cùng `δ₂` nhận thêm cả lệnh đúng lẫn lệnh
+  sai: ở `lead` 1,25 s, 19 câu nhận thành lệnh khác so với 15 của cách cắt cũ, phần lớn là "tắt" nghe thành "bật". Chia
+  `T_W` giữ ngưỡng đúng nghĩa cũ: 71/16/3 so với 68/15/3.
+- Hai câu dài quá 3 s tính cả `lead` thì lùi từ cuối như cũ.
