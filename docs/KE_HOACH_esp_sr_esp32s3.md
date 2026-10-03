@@ -2056,8 +2056,14 @@ host/
 │   └── calib.py                   # ước balance từ phiên ồn trắng (srpipe), kiểm chéo; ghi calib/bal và calib/pcm_shift
 │                                  #   xuống test_apps/calib
 ├── plans/                         # kịch bản một buổi thu: mỗi dòng một lời dặn và nhãn một phiên
+├── sets/                          # bộ lệnh để gửi bằng make commands, mỗi file một bộ đầy đủ theo command_set
 └── tests/
 ```
+
+Bộ lệnh để demo và thử đổi lệnh nằm ở `host/sets/`: mỗi file là cả danh sách lệnh board sẽ dùng, đúng khuôn
+`command_set` của `contracts/`, nên thêm hay xoá một lệnh là sửa file rồi gửi lại bằng `make commands DEVICE=<deviceId>
+SET=host/sets/<file>.json`; `commands.py` tự đóng `version` bằng giờ gửi. Bộ mặc định nướng vào firmware vẫn chỉ ở
+`contracts/commands/default_vi.json`.
 
 Một buổi thu nhiều phiên đi theo một file ở `host/plans/`: `make session-plan` hiện lời dặn của từng dòng, chờ
 người thu bấm Enter rồi chạy đúng `make session` với nhãn của dòng ấy, nên mỗi phiên vẫn là một thư mục và một dòng
