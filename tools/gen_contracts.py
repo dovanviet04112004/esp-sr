@@ -181,6 +181,7 @@ def listen_values(g: dict) -> dict:
         **doc,
         "gap_hops": round(doc["utterance"]["gap_s"] * rate),
         "min_hops": round(doc["utterance"]["min_s"] * rate),
+        "lead_hops": round(doc["utterance"]["lead_s"] * rate),
         "window_hops": round(doc["window_s"] * rate),
     }
 
@@ -200,6 +201,7 @@ def gen_listen_h(v: dict) -> str:
         f"#define GEN_LISTEN_PITCH_CONFIG {c_initializer(v['pitch'])}       // dsp_spec_pitch_config_t",
         f"#define GEN_LISTEN_UTTERANCE_GAP_HOPS {v['gap_hops']}",
         f"#define GEN_LISTEN_UTTERANCE_MIN_HOPS {v['min_hops']}",
+        f"#define GEN_LISTEN_UTTERANCE_LEAD_HOPS {v['lead_hops']}",
         f"#define GEN_LISTEN_WINDOW_HOPS {v['window_hops']}",
     ]
     return "\n".join(lines) + "\n"
@@ -217,8 +219,10 @@ def gen_listen_py(v: dict) -> str:
         f"N_BANDS = {v['features']['n_bands']}\n"
         f"UTTERANCE_GAP_S = {v['utterance']['gap_s']!r}\n"
         f"UTTERANCE_MIN_S = {v['utterance']['min_s']!r}\n"
+        f"UTTERANCE_LEAD_S = {v['utterance']['lead_s']!r}\n"
         f"UTTERANCE_GAP_HOPS = {v['gap_hops']}\n"
         f"UTTERANCE_MIN_HOPS = {v['min_hops']}\n"
+        f"UTTERANCE_LEAD_HOPS = {v['lead_hops']}\n"
         f"WINDOW_S = {v['window_s']!r}\n"
         f"WINDOW_HOPS = {v['window_hops']}\n"
     )

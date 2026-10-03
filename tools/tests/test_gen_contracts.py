@@ -208,7 +208,7 @@ class ListenTests(unittest.TestCase):
         lines = [f"    struct {s} {s} = {m};" for s, m in sections.items()]
         for section in sections:
             lines += [f'    printf("{section}.{n} %.9g\\n", {section}.{n});' for n in values[section]]
-        for name in ("UTTERANCE_GAP_HOPS", "UTTERANCE_MIN_HOPS", "WINDOW_HOPS"):
+        for name in ("UTTERANCE_GAP_HOPS", "UTTERANCE_MIN_HOPS", "UTTERANCE_LEAD_HOPS", "WINDOW_HOPS"):
             lines.append(f'    printf("{name} %d\\n", GEN_LISTEN_{name});')
         probe = (
             '#include <stdio.h>\n#include "gen_listen.h"\n'
@@ -231,6 +231,8 @@ class ListenTests(unittest.TestCase):
         rate = gen_contracts.grid_values()["frames_per_s"]
         self.assertEqual(int(printed["UTTERANCE_GAP_HOPS"]), round(values["utterance"]["gap_s"] * rate))
         self.assertEqual(int(printed["UTTERANCE_MIN_HOPS"]), round(values["utterance"]["min_s"] * rate))
+        self.assertEqual(int(printed["UTTERANCE_LEAD_HOPS"]), round(values["utterance"]["lead_s"] * rate))
+        self.assertEqual(namespace["UTTERANCE_LEAD_HOPS"], int(printed["UTTERANCE_LEAD_HOPS"]))
         self.assertEqual(int(printed["WINDOW_HOPS"]), round(values["window_s"] * rate))
         self.assertEqual(namespace["WINDOW_HOPS"], int(printed["WINDOW_HOPS"]))
 

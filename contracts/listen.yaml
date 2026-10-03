@@ -1,7 +1,7 @@
 # What the listener computes from the clean output and how it cuts speech into command windows (KEHOACH 3.11, 3.12,
 # 5.4). One source for svc_listen on the board, the board simulation and every ml branch: a model learns on these
 # features, and Gate 3 counts the windows the board decides.
-version: 1
+version: 2
 features:                          # log-mel of the clean output, a frame a hop
   n_bands: 40
   f_min_hz: 20.0
@@ -24,7 +24,8 @@ pitch:                             # dsp_spec/pitch, Kaldi's online tracker at z
   pov_scale: 2.0
   pitch_scale: 2.0
   delta_pitch_scale: 10.0
-utterance:                         # runs of vad into utterances, as Gate 3 counts them and LENH without wake cuts them
-  gap_s: 0.4                       # vad hops this close belong to one utterance
+utterance:                         # runs of vad into utterances and each into its command window, as Gate 3 cuts them
+  gap_s: 0.4                       # vad hops this close belong to one utterance; it closes once vad is off longer
   min_s: 0.25                      # a shorter run is a breath or a click
-window_s: 3.0                      # LENH's longest window: a decision looks this far back at most
+  lead_s: 1.25                     # the window opens this far ahead of the first vad hop: p90 of what val items hold
+window_s: 3.0                      # a window's longest; one longer is cut back from its end once the utterance closes
