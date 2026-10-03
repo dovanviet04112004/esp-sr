@@ -10,7 +10,7 @@ import argparse
 import csv
 import json
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -238,20 +238,25 @@ def rnnt_heard(net: Ctc, x: np.ndarray) -> Heard:
     return heard_of(net, *rnnt_search.decide(log_probs, frames, tree, ctc_score.CAP, 0, size, pad))
 
 
-def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: Callable) -> list[Scored]:
-    """Every counted session of the board manifest found on disk, its utterances decided by decided_of(clean,
-    features, spans, tracker); a session saying the text of a command of said expects that command."""
+def heard_sessions(cfg: dict, spec: dict, paths: dict) -> Iterator[tuple]:
+    """Every counted session of the board manifest found on disk: its manifest row, its clean samples, vad and log-mel
+    per hop through the product's chain, and the pitch tracker of cfg's board simulation."""
     device_cfg = load_device(cfg["features"])
     mics = device.load_microphones(device_cfg["microphone"])
     chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
     tracker = PitchTracker(PitchConfig(**device_cfg["pitch"]))
-    command_of = {tuple(corpus.sounds(text)): cid for cid, text in said.items()}
-    results = []
     for r in csv.DictReader((paths["manifests"] / spec["manifest"]).open(encoding="utf-8")):
         folder = paths["raw"] / "device" / r["board"] / r["session"]
-        if not counted(r, spec) or not folder.exists():
-            continue
-        clean, vad, features = heard(folder, chain_cfg, mel)
+        if counted(r, spec) and folder.exists():
+            yield r, *heard(folder, chain_cfg, mel), tracker
+
+
+def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: Callable) -> list[Scored]:
+    """Every counted session of the board manifest found on disk, its utterances decided by decided_of(clean,
+    features, spans, tracker); a session saying the text of a command of said expects that command."""
+    command_of = {tuple(corpus.sounds(text)): cid for cid, text in said.items()}
+    results = []
+    for r, clean, vad, features, tracker in heard_sessions(cfg, spec, paths):
         spans = utterances(vad)
         decided = decided_of(clean, features, spans, tracker) if spans else []
         expected = expected_of(r["kind"], r["prompt"], command_of)
