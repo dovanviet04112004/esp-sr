@@ -267,3 +267,25 @@ thay vì 68/15/3; cuối cửa sổ giữ ở bước sau đoạn `vad` cuối.
   sai: ở `lead` 1,25 s, 19 câu nhận thành lệnh khác so với 15 của cách cắt cũ, phần lớn là "tắt" nghe thành "bật". Chia
   `T_W` giữ ngưỡng đúng nghĩa cũ: 71/16/3 so với 68/15/3.
 - Hai câu dài quá 3 s tính cả `lead` thì lùi từ cuối như cũ.
+
+## 6. "Tắt" của chủ repo trên board B: model nghe gì (03/10)
+
+Model đang khoá (dòng `qat` của run `20261002_128545c-dirty_64e7a4`), 22 câu "tắt đèn", "tắt quạt" và 23 câu "bật
+đèn", "bật quạt" của phiên §1, cắt theo §5; đo ở `0dc8de3` bằng script chẩn đoán chạy một lần. Nhận đúng "tắt": **0/22**.
+
+Xác suất từng khung (32 ms) ở âm tiết đầu, câu thứ hai của phiên 1 m:
+
+| | Phụ âm đầu | Nguyên âm | Thanh |
+|---|---|---|---|
+| nói "tắt" | t 0,12, b 0,10, blank 0,43 | **â 0,89**, ă 0,03 | **nặng 0,80**, sắc 0,18 |
+| nói "bật" | b 0,25 | ă 0,71, â 0,20 | nặng 0,76, sắc 0,22 |
+
+Đường giải tự do của cả 22 câu "tắt" là "ật" không phụ âm đầu (`@ t T6`, đôi khi `h`, `f`, `b` đứng trước). Cao độ thì có
+đủ: "tắt" cao và đều chừng 217 Hz, "đèn" chừng 137 Hz, tức thanh sắc rõ; đặc trưng cao độ chuẩn hoá theo 0,75 s trước nên ở
+âm tiết đầu câu nó vọt lên rồi tụt dần trong âm tiết, và cho bộ chuẩn hoá một mức giọng nền 140 Hz thì vài câu nghe ra sắc
+nhưng vẫn 0/22 câu đúng, vì phụ âm và nguyên âm vẫn sai. Tiếng bật hơi của "t" bị lọc ồn dìm (`afe/ns.md` §6), nhưng nới
+lọc ồn cũng không cứu được. Lỗi chính là nguyên âm ă nghe thành â và thanh sắc nghe thành nặng với giọng này, đúng loại nhầm
+model mắc nhiều trên `val` (§4.5: ă → a 365, ă → â 138; nặng ↔ hỏi, huyền). Cùng phiên chủ repo nói trực tiếp, "tét" và "đắt"
+được nhận, vì không lệnh nào khác chỉ khác chúng ở nguyên âm hay thanh, còn "tắt X" thua "bật X" ngay ở âm tiết đầu.
+
+Bảng này là mốc: model v3 phải đo lại đúng các câu này.

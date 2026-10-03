@@ -152,3 +152,36 @@ Sâu hơn 2,7 dB nhưng tiếng mất gấp đôi. Đích của hàm ấy ép c�
 +10 dB SNR gain lý tưởng với α = 0,7 lấy đi 5,6 dB tiếng, ở +25 dB vẫn lấy 2,1 dB. Hàm khớp phổ nén của đầu ra với tiếng
 sạch, (S^c − (g·X)^c)² trên biên độ, có đích là tỉ lệ biên độ tiếng / hỗn hợp (bảng trên: 37,6 dB ở quãng nghỉ, tiếng mất
 0,15 dB): nhiễu sót chỗ không có tiếng vẫn bị phạt theo gain mũ 0,6, còn chỗ có tiếng đích không ép tiếng.
+
+## 6. Tiếng bật hơi đầu câu bị dìm (03/10)
+
+Phiên "tắt đèn", "bật đèn" của chủ repo thu qua board B ở 1 m (dịch 13 của `board_b.csv`), chạy qua chuỗi sản phẩm bằng
+Python ở `0dc8de3`; năng lượng mỗi bước 16 ms trên cửa sổ Hann 512 mẫu, dB so với toàn thang, `ch0` thô và lối ra `clean`.
+Bước 0 là bước `vad` đầu của câu. Đo bằng script chẩn đoán chạy một lần.
+
+| Câu "tắt đèn" | Dải | Thô | Sau chuỗi | Bị dìm |
+|---|---|---|---|---|
+| nền ồn trước câu | 2,5–7 kHz | −50 dB | −68 dB | 18 dB |
+| câu 1, bước −1: tiếng bật hơi của "t" | 2,5–7 kHz | **−38,3 dB** | **−64,4 dB** | **26 dB** |
+| câu 1, bước +2: nguyên âm | 2,5–7 kHz | −35,5 dB | −36,5 dB | 1 dB |
+| câu 2, bước −1 | 2,5–7 kHz | −44,5 dB | −60,1 dB | 16 dB |
+| câu 3, bước −1 | 2,5–7 kHz | −47,4 dB | −62,7 dB | 15 dB |
+
+Tiếng bật hơi của "t" cao hơn nền 12 dB ở tín hiệu thô, sau chuỗi chỉ còn hơn nền chừng 4 dB. Nguyên nhân là SNR tiên
+nghiệm kiểu decision-directed của OM-LSA: ở khung đầu sau quãng lặng nó còn dựa vào độ lợi và SNR hậu nghiệm của khung
+lặng trước, nên trễ một khung mới tin là có tiếng nói, và xác suất có tiếng nói của IMCRA lại làm trơn theo `eta_tau_s`;
+tiếng bật hơi dài một khung rơi đúng khung ấy, độ lợi nằm ở sàn. Phụ âm hữu thanh như "b", "đ" có rung dây thanh từ trước
+nên không mất. Mọi phụ âm vô thanh đầu câu (t, k, p, ch, th) đều chịu cảnh này, và câu lệnh nào cũng bắt đầu sau quãng lặng.
+
+Với model `command` đang khoá, học trên đúng chuỗi này, nới sàn không cứu được "tắt" (`command.md` §6):
+
+| Chuỗi | Cửa 3 đầu đúng | Nhận đúng, `δ₁` 300 | "tắt" đầu đúng |
+|---|---|---|---|
+| như sản phẩm, sàn −12 dB | 84/112 | 71/112 | 0/22 |
+| sàn −6 dB | 85/111 | 70/111 | 0/22 |
+| tắt `ns_omlsa` | 83/111 | 54/111 | 3/22 |
+
+Hướng sửa, làm sau khi v3 của `command` học xong (chủ repo, 03/10; TASKS E9-T13): SNR tiên nghiệm hai bước (TSNR, Plapous
+và cộng sự, 2006) bỏ độ trễ một khung ở đầu và cuối tiếng nói mà không thêm nhiễu lấm tấm; nếu chưa đủ thì bắt đột biến
+năng lượng nhiều vạch cao trong một khung; nhìn trước một khung (thêm 16 ms trễ) là đường lùi. Lợi thật chỉ đo được sau khi
+`wake` và `command` học lại trên chuỗi mới.
