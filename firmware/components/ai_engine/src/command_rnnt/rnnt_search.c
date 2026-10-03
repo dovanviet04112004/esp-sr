@@ -172,6 +172,15 @@ esp_err_t ai_engine_command_rnnt_build(const ai_engine_lexicon_t *lexicon, void 
     return lay_out(f) ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
+bool ai_engine_command_rnnt_context(const void *tree, size_t k, uint8_t pad, uint8_t *classes)
+{
+    const tree_t *f = tree;
+    if (f == NULL || classes == NULL || k >= f->n_contexts) { return false; }
+    classes[0] = f->classes[k][0] == PAD_MARK ? pad : f->classes[k][0];
+    classes[1] = f->classes[k][1];
+    return true;
+}
+
 size_t ai_engine_command_rnnt_work_bytes(size_t n_classes)
 {
     return sizeof(search_t) + ((size_t)CONTEXTS + 1) * n_classes * sizeof(float);

@@ -244,6 +244,9 @@ TEST_CASE("the ctc command calls decide raw feature windows as Python decides th
 
     const uint8_t *at =
         read_lexicon(ctc_windows_start, sizeof(head), head.commands, head.variants_max, head.units_max);
+    const int64_t prepare_from_us = esp_timer_get_time();
+    TEST_ASSERT_EQUAL(ESP_OK, ai_engine_command_prepare(&s_lexicon));
+    printf("ctc prepare: %" PRId64 " us\n", esp_timer_get_time() - prepare_from_us);
     Timing t{};
     size_t differ = 0;
     for (uint16_t w = 0; w < head.windows; w++) {
@@ -303,6 +306,9 @@ TEST_CASE("the ctc command decides every Gate 3 window of the voice partition as
     const size_t lexicon_at = sizeof(head) + 2 * head.features * sizeof(float);
     const uint8_t *at = read_lexicon(base, lexicon_at, head.commands, head.variants_max, head.units_max);
     const size_t window_floats = window_hops_max() * head.features;
+    const int64_t prepare_from_us = esp_timer_get_time();
+    TEST_ASSERT_EQUAL(ESP_OK, ai_engine_command_prepare(&s_lexicon));
+    printf("ctc prepare: %" PRId64 " us\n", esp_timer_get_time() - prepare_from_us);
     float *raw = static_cast<float *>(heap_caps_malloc(window_floats * sizeof(float), MALLOC_CAP_SPIRAM));
     TEST_ASSERT_NOT_NULL(raw);
     const float step = ldexpf(1.0f, head.input_exponent);

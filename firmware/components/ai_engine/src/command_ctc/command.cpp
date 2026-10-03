@@ -23,15 +23,15 @@ constexpr size_t kLayoutRank = 3; // esp-dl: (1, features, hops) in, (1, frames,
 constexpr uint16_t kFieldMax = UINT16_MAX;
 
 struct Window {
-    bool ready, open;
+    bool ready, open, streaming;
     ai::Int8Tensor in, out;
     const float *mean, *deviation; // NORM entry: means, then deviations
     int8_t *zero;                  // raw zeros on the input grid: the pad
     float *log_probs;              // frames x classes of the window, PSRAM
-    void *work;                    // ai_engine_command_ctc_decide's, PSRAM
+    void *work;                    // the forward passes' and the decision's, PSRAM
     float inverse_step;            // 2^-exponent of the input
-    size_t features, chunk_hops, chunk_frames, classes, hops_max, per_frames;
-    size_t hops, pending, frames;
+    size_t features, chunk_hops, chunk_frames, classes, hops_max, frames_max, per_frames;
+    size_t hops, pending, frames, scored;
     uint16_t reject, margin;
 };
 
@@ -67,6 +67,16 @@ void put_hop(size_t h, const int8_t *hop)
 {
     for (size_t d = 0; d < s.features; d++) {
         s.in.data[d * s.chunk_hops + h] = hop[d];
+    }
+}
+
+// The forward passes over the window's frames not yet scored, up to frames; off for the window on an error.
+void score_to(size_t frames)
+{
+    if (s.streaming && frames > s.scored) {
+        const float *from = s.log_probs + s.scored * s.classes;
+        s.streaming = ai_engine_command_ctc_frames(from, frames - s.scored, s.work) == ESP_OK;
+        s.scored = frames;
     }
 }
 
@@ -117,15 +127,16 @@ esp_err_t command_load() noexcept
     s.classes = s.out.dims[2];
     s.hops_max = GEN_LISTEN_WINDOW_HOPS;
     const size_t stride = s.chunk_hops / s.chunk_frames;
-    s.per_frames = (s.hops_max + stride - 1) / stride;
     const size_t frames_max = (s.hops_max + s.chunk_hops - 1) / s.chunk_hops * s.chunk_frames;
+    s.frames_max = frames_max;
+    s.per_frames = (s.hops_max + stride - 1) / stride;
     s.mean = reinterpret_cast<const float *>(norm.data);
     s.deviation = s.mean + s.features;
     s.inverse_step = ldexpf(1.0f, -s.in.exponent);
     s.zero = static_cast<int8_t *>(heap_caps_malloc(s.features, MALLOC_CAP_SPIRAM));
     s.log_probs =
         static_cast<float *>(heap_caps_malloc(frames_max * s.classes * sizeof(float), MALLOC_CAP_SPIRAM));
-    s.work = heap_caps_malloc(ai_engine_command_ctc_work_bytes(s.classes, frames_max), MALLOC_CAP_SPIRAM);
+    s.work = heap_caps_calloc(1, ai_engine_command_ctc_work_bytes(s.classes, frames_max), MALLOC_CAP_SPIRAM);
     if (s.zero == nullptr || s.log_probs == nullptr || s.work == nullptr) {
         command_drop();
         return ESP_ERR_NO_MEM;
@@ -149,6 +160,12 @@ bool command_ready() noexcept
 
 } // namespace ai
 
+esp_err_t ai_engine_command_prepare(const ai_engine_lexicon_t *lexicon)
+{
+    if (!s.ready || s.open) { return ESP_ERR_INVALID_STATE; }
+    return ai_engine_command_ctc_prepare(lexicon, s.classes, s.frames_max, s.work);
+}
+
 esp_err_t ai_engine_command_begin(void)
 {
     if (!s.ready) { return ESP_ERR_INVALID_STATE; }
@@ -157,6 +174,9 @@ esp_err_t ai_engine_command_begin(void)
     s.hops = 0;
     s.pending = 0;
     s.frames = 0;
+    s.scored = 0;
+    ai_engine_command_ctc_begin(s.work);
+    s.streaming = true;
     s.open = true;
     return ESP_OK;
 }
@@ -173,7 +193,10 @@ esp_err_t ai_engine_command_step(const float *log_mel)
     put_hop(s.pending, hop);
     s.hops++;
     s.pending++;
-    return s.pending == s.chunk_hops ? run_chunk() : ESP_OK;
+    if (s.pending < s.chunk_hops) { return ESP_OK; }
+    const esp_err_t err = run_chunk();
+    if (err == ESP_OK) { score_to(s.frames); }
+    return err;
 }
 
 esp_err_t ai_engine_command_score(const ai_engine_lexicon_t *lexicon, ai_engine_command_result_t *out)
@@ -196,6 +219,10 @@ esp_err_t ai_engine_command_score(const ai_engine_lexicon_t *lexicon, ai_engine_
                                           .margin_permille = kFieldMax,
                                           .free_gap_permille = kFieldMax};
         return ESP_OK;
+    }
+    score_to(frames);
+    if (s.streaming && ai_engine_command_ctc_prepared_for(lexicon, s.work)) {
+        return ai_engine_command_ctc_finish(lexicon, s.per_frames, s.reject, s.margin, s.work, nullptr, out);
     }
     return ai_engine_command_ctc_decide(s.log_probs, s.classes, frames, lexicon, s.per_frames, s.reject,
                                         s.margin, s.work, nullptr, out);

@@ -31,7 +31,7 @@ constexpr size_t kLayoutRank = 3; // esp-dl: (1, features, hops) in, (1, frames,
 constexpr size_t kContext = AI_ENGINE_COMMAND_RNNT_CONTEXT;
 constexpr size_t kColumnsMax = 64; // joiner columns a run at most, held on the stack
 
-// The commands the tree holds, compared at each score: the frozen contract hands them over only there.
+// The commands the tree holds, compared at each score: one other than the prepared set is searched afresh.
 struct Built {
     uint8_t n_commands;
     uint8_t n_variants[AI_ENGINE_COMMANDS_MAX];
@@ -402,6 +402,23 @@ bool command_ready() noexcept
 }
 
 } // namespace ai
+
+esp_err_t ai_engine_command_prepare(const ai_engine_lexicon_t *lexicon)
+{
+    if (!s.ready || s.open) { return ESP_ERR_INVALID_STATE; }
+    if (lexicon == nullptr) { return ESP_ERR_INVALID_ARG; }
+    if (!same_lexicon(lexicon)) {
+        const esp_err_t err = build_tree(lexicon);
+        if (err != ESP_OK) { return err; }
+    }
+    uint8_t context[kContext];
+    for (size_t k = 0; ai_engine_command_rnnt_context(s.tree, k, static_cast<uint8_t>(s.pad), context); k++) {
+        const int8_t *prefix = nullptr;
+        const esp_err_t err = prefix_of(context, &prefix);
+        if (err != ESP_OK) { return err; }
+    }
+    return ESP_OK;
+}
 
 esp_err_t ai_engine_command_begin(void)
 {

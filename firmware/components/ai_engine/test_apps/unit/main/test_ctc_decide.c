@@ -28,7 +28,7 @@ static ai_engine_lexicon_t s_lexicon, s_most;
 static void time_decide(const decide_head_t *head, const float *log_probs, const ai_engine_lexicon_t *lexicon,
                         void *work, float *scores, ai_engine_command_result_t *out)
 {
-    int64_t total_us = 0, peak_us = 0;
+    int64_t total_us = 0, peak_us = 0, finish_us = 0;
     for (uint8_t r = 0; r < head->runs; r++) {
         const int64_t started_us = esp_timer_get_time();
         const esp_err_t err =
@@ -38,15 +38,19 @@ static void time_decide(const decide_head_t *head, const float *log_probs, const
         TEST_ASSERT_EQUAL(ESP_OK, err);
         total_us += took_us;
         peak_us = took_us > peak_us ? took_us : peak_us;
+        const int64_t finish_from_us = esp_timer_get_time();
+        TEST_ASSERT_EQUAL(ESP_OK, ai_engine_command_ctc_finish(lexicon, head->n_frames, head->reject,
+                                                               head->margin, work, scores, out));
+        finish_us += esp_timer_get_time() - finish_from_us;
     }
     size_t forms = 0;
     for (size_t c = 0; c < lexicon->n_commands; c++) {
         forms += lexicon->n_variants[c];
     }
     printf("ctc_decide: %u commands, %u variants, %u frames x %u classes: %" PRId64 " us mean, %" PRId64
-           " us peak over %u runs\n",
+           " us peak over %u runs; the finish after streamed frames %" PRId64 " us mean\n",
            lexicon->n_commands, (unsigned)forms, head->n_frames, head->n_classes, total_us / head->runs,
-           peak_us, head->runs);
+           peak_us, head->runs, finish_us / head->runs);
 }
 
 TEST_CASE(

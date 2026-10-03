@@ -341,6 +341,9 @@ TEST_CASE("the rnnt command decides every Gate 3 window of the voice partition a
     const float *std = mean + head.features;
     const size_t lexicon_at = sizeof(head) + 2 * head.features * sizeof(float);
     const uint8_t *at = read_lexicon(base, lexicon_at, head.commands, head.variants_max, head.units_max);
+    const int64_t prepare_from_us = esp_timer_get_time();
+    TEST_ASSERT_EQUAL(ESP_OK, ai_engine_command_prepare(&s_lexicon));
+    printf("rnnt prepare: %" PRId64 " us\n", esp_timer_get_time() - prepare_from_us);
     float *raw = static_cast<float *>(
         heap_caps_malloc(kWindowHopsMax * head.features * sizeof(float), MALLOC_CAP_SPIRAM));
     TEST_ASSERT_NOT_NULL(raw);
@@ -396,6 +399,9 @@ TEST_CASE("the rnnt command calls decide raw feature windows as Python decides t
     const uint32_t hops_a_frame = rec.step_hops / (rec.outputs / vectors.width);
     const uint8_t *at =
         read_lexicon(rnnt_windows_start, sizeof(head), head.commands, head.variants_max, head.units_max);
+    const int64_t prepare_from_us = esp_timer_get_time();
+    TEST_ASSERT_EQUAL(ESP_OK, ai_engine_command_prepare(&s_lexicon));
+    printf("rnnt prepare: %" PRId64 " us\n", esp_timer_get_time() - prepare_from_us);
     float *window = static_cast<float *>(
         heap_caps_malloc(kWindowHopsMax * head.features * sizeof(float), MALLOC_CAP_SPIRAM));
     TEST_ASSERT_NOT_NULL(window);

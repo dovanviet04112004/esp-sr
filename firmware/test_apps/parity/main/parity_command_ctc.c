@@ -8,6 +8,7 @@
 
 enum { THRESHOLD_REJECT = 0, THRESHOLD_MARGIN, THRESHOLD_COUNT };
 #define UNREACHED (-1.0e30f) // stands for -inf, which the comparators cannot difference
+#define STREAM_FRAMES 3      // frames a streamed call: chunks split a window unevenly
 
 void parity_decision_row(const ai_engine_command_result_t *d, float *row)
 {
@@ -85,12 +86,15 @@ bool parity_command_ctc(const char *case_name, const void *buf, size_t len)
     float *want = malloc(windows * PARITY_DECISION_COUNT * sizeof(float));
     float *got_scores = malloc(windows * commands * sizeof(float));
     float *got = malloc(windows * PARITY_DECISION_COUNT * sizeof(float));
+    float *streamed_scores = malloc(windows * commands * sizeof(float));
+    float *streamed = malloc(windows * PARITY_DECISION_COUNT * sizeof(float));
     ai_engine_lexicon_t *lex = calloc(1, sizeof(*lex));
     uint8_t *ids = malloc(units.dims[0] * units.dims[1] * units.dims[2]);
     void *work = malloc(ai_engine_command_ctc_work_bytes(classes, longest));
     bool ok = raw != NULL && steps != NULL && q != NULL && in != NULL && got_log_probs != NULL &&
               lengths != NULL && limits != NULL && want_scores != NULL && want != NULL &&
-              got_scores != NULL && got != NULL && lex != NULL && ids != NULL && work != NULL &&
+              got_scores != NULL && got != NULL && streamed_scores != NULL && streamed != NULL &&
+              lex != NULL && ids != NULL && work != NULL &&
               parity_floats(&logits, raw, windows * longest * classes) &&
               parity_floats(&exponent, steps, windows) &&
               parity_floats(&log_probs, in, windows * longest * classes) &&
@@ -105,20 +109,34 @@ bool parity_command_ctc(const char *case_name, const void *buf, size_t len)
         for (size_t i = 0; i < n * classes; i++) {
             q[i] = (int8_t)raw[w * longest * classes + i];
         }
-        ai_engine_command_result_t d;
+        ai_engine_command_result_t d, s;
         const float *limit = limits + w * THRESHOLD_COUNT;
+        const uint16_t reject = (uint16_t)limit[THRESHOLD_REJECT], margin = (uint16_t)limit[THRESHOLD_MARGIN];
         ok = ai_engine_command_ctc_log_probs(q, (int)steps[w], classes, n, mine) == ESP_OK &&
-             ai_engine_command_ctc_decide(
-                 mine, classes, n, lex, (size_t)per_frames, (uint16_t)limit[THRESHOLD_REJECT],
-                 (uint16_t)limit[THRESHOLD_MARGIN], work, got_scores + w * commands, &d) == ESP_OK;
+             ai_engine_command_ctc_decide(mine, classes, n, lex, (size_t)per_frames, reject, margin, work,
+                                          got_scores + w * commands, &d) == ESP_OK &&
+             ai_engine_command_ctc_prepare(lex, classes, longest, work) == ESP_OK;
+        ai_engine_command_ctc_begin(work);
+        for (size_t t = 0; ok && t < n; t += STREAM_FRAMES) {
+            const size_t step = n - t < STREAM_FRAMES ? n - t : STREAM_FRAMES;
+            ok = ai_engine_command_ctc_frames(mine + t * classes, step, work) == ESP_OK;
+        }
+        ok = ok && ai_engine_command_ctc_finish(lex, (size_t)per_frames, reject, margin, work,
+                                                streamed_scores + w * commands, &s) == ESP_OK;
         parity_decision_row(&d, got + w * PARITY_DECISION_COUNT);
+        parity_decision_row(&s, streamed + w * PARITY_DECISION_COUNT);
     }
     if (ok) {
         parity_mark_unreached(want_scores, windows * commands);
         parity_mark_unreached(got_scores, windows * commands);
+        parity_mark_unreached(streamed_scores, windows * commands);
         parity_report("command_ctc", case_name, "log_probs", in, got_log_probs, windows * longest * classes);
         parity_report("command_ctc", case_name, "scores", want_scores, got_scores, windows * commands);
         parity_report("command_ctc", case_name, "decision", want, got, windows * PARITY_DECISION_COUNT);
+        parity_report("command_ctc", case_name, "streamed_scores", want_scores, streamed_scores,
+                      windows * commands);
+        parity_report("command_ctc", case_name, "streamed_decision", want, streamed,
+                      windows * PARITY_DECISION_COUNT);
     }
     free(raw);
     free(steps);
@@ -131,6 +149,8 @@ bool parity_command_ctc(const char *case_name, const void *buf, size_t len)
     free(want);
     free(got_scores);
     free(got);
+    free(streamed_scores);
+    free(streamed);
     free(lex);
     free(ids);
     free(work);

@@ -105,7 +105,8 @@ static void check_shells(void)
     check(ai_engine_wake_step(log_mel, &score) == ESP_ERR_INVALID_STATE &&
               ai_engine_wake_step(NULL, &score) == ESP_ERR_INVALID_ARG,
           "wake shell: no wake model, arguments still checked");
-    check(ai_engine_command_begin() == ESP_ERR_INVALID_STATE &&
+    check(ai_engine_command_prepare(&lexicon) == ESP_ERR_INVALID_STATE &&
+              ai_engine_command_begin() == ESP_ERR_INVALID_STATE &&
               ai_engine_command_step(log_mel) == ESP_ERR_INVALID_STATE &&
               ai_engine_command_score(&lexicon, &result) == ESP_ERR_INVALID_STATE,
           "command shell: no command model, so no window ever opens");

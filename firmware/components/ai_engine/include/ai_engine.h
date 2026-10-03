@@ -71,6 +71,13 @@ esp_err_t ai_engine_wake_step(const float *log_mel, uint16_t *score_permille);
  */
 void ai_engine_wake_reset(void);
 
+/** Take the commands the next windows are scored with, so each step scores its frames (KEHOACH 3.12).
+ *  @ctx nhan_task | blocking: rnnt runs its predictor once a new context | no window open; lexicon read
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no command in the image, or a window open | ESP_ERR_INVALID_ARG |
+ *       ESP_ERR_INVALID_SIZE a variant past the backend's units | ESP_ERR_NO_MEM a tree past its nodes
+ */
+esp_err_t ai_engine_command_prepare(const ai_engine_lexicon_t *lexicon);
+
 /** Start a command window; unit posteriors accumulate until ai_engine_command_score.
  *  @ctx nhan_task | non-blocking
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE the loaded image has no command
@@ -83,8 +90,8 @@ esp_err_t ai_engine_command_begin(void);
  */
 esp_err_t ai_engine_command_step(const float *log_mel);
 
-/** Close the window and score every variant of every command by constrained CTC (KEHOACH 3.12).
- *  @ctx nhan_task | non-blocking, a few ms | lexicon is read, not kept
+/** Close the window and decide it on lexicon: the prepared set finishes its scores, another rescans.
+ *  @ctx nhan_task | non-blocking: the last chunk and the finish, a rescan the whole score | lexicon read
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE no window open
  */
 esp_err_t ai_engine_command_score(const ai_engine_lexicon_t *lexicon, ai_engine_command_result_t *out);

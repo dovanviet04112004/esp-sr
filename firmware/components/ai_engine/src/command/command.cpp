@@ -24,6 +24,12 @@ bool command_ready() noexcept
 
 } // namespace ai
 
+esp_err_t ai_engine_command_prepare(const ai_engine_lexicon_t *lexicon)
+{
+    if (!ai_engine_has(AI_ENGINE_MODEL_COMMAND) || s_window_open) { return ESP_ERR_INVALID_STATE; }
+    return lexicon != nullptr && lexicon->n_commands > 0 ? ESP_OK : ESP_ERR_INVALID_ARG;
+}
+
 esp_err_t ai_engine_command_begin(void)
 {
     if (!ai_engine_has(AI_ENGINE_MODEL_COMMAND)) { return ESP_ERR_INVALID_STATE; }

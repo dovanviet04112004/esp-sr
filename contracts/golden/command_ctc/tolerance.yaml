@@ -1,9 +1,9 @@
-# C command_ctc postprocessing against srpipe.tasks.command.ctc.postproc.ctc_score (KEHOACH 3.12, 3.14, E11-T13,
-# E11-T19). Same float32 steps in the same order, exp by one polynomial without fused multiply-add, each log in double
-# rounded to float, every score divided by the case's per_frames: log-probabilities and scores match to the bit and
-# decisions exactly; a command no window can reach scores -inf on both sides. case_003 says one syllable of each
-# command alone. case_neg_000 forbids moving from one unit straight to the next; case_neg_001 leaves each frame's
-# largest logit on; case_neg_002 scores no part; case_neg_003 divides by each window's own frames.
+# C command_ctc postprocessing against srpipe.tasks.command.ctc.postproc.ctc_score (KEHOACH 3.12, 3.14, E11-T19).
+# Same float32 steps in the same order, exp by one polynomial without fused multiply-add, each log in double rounded
+# to float, every score divided by per_frames: log-probabilities and scores match to the bit, decisions exactly, and
+# streamed_* feeds the frames three at a time; a command no window reaches scores -inf on both sides. case_003 says one
+# syllable of each command alone. case_neg_000 forbids moving from a unit straight to the next; case_neg_001 leaves
+# the largest logit on; case_neg_002 scores no part; case_neg_003 divides by each window's own frames.
 tensors:
   log_probs:
     max_abs: 0.0
@@ -12,5 +12,11 @@ tensors:
     max_abs: 0.0
     min_snr_db: 0.0
   decision:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  streamed_scores:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  streamed_decision:
     max_abs: 0.0
     min_snr_db: 0.0

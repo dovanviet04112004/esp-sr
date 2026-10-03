@@ -17,6 +17,7 @@
 #define LN2_HI 0x1.63p-1f
 #define LN2_LO (-0x1.bd0106p-13f)
 #define LN2 0.6931471805599453
+#define PREPARED 0x53524354u // "SRCT": prepare laid the commands out
 
 typedef struct {
     float m;   // 0, or in [1, 2)
@@ -71,58 +72,83 @@ static float scaled(wide_t x, int32_t top)
     return d < -DROP_BELOW ? 0.0f : x.m * bits_float((uint32_t)(d + 127) << 23);
 }
 
-static float sequence_score(const wide_t *probs, size_t n_classes, size_t n_frames,
-                            const ai_engine_seq_t *seq, size_t per_frames)
-{
+typedef struct {
+    uint8_t n_states;
     uint8_t labels[STATES_MAX];
-    size_t n = 0;
-    labels[n++] = BLANK;
-    for (size_t k = 0; k < seq->n_units; k++) {
-        labels[n++] = (uint8_t)(seq->units[k] + 1);
-        labels[n++] = BLANK;
-    }
+    uint8_t jump[STATES_MAX];
     wide_t alpha[STATES_MAX];
-    bool jump[STATES_MAX];
+} pass_t;
+
+// The work area: every variant's pass and the free loop's sum, then the window's probabilities frame by
+// frame.
+typedef struct {
+    uint32_t prepared;
+    uint32_t n_classes, n_commands, frames_cap, frames;
+    float free_total;
+    uint8_t n_variants[AI_ENGINE_COMMANDS_MAX];
+    pass_t pass[AI_ENGINE_COMMANDS_MAX][AI_ENGINE_VARIANTS_MAX];
+    wide_t probs[];
+} stream_t;
+
+static void lay_out(pass_t *p, const ai_engine_seq_t *seq)
+{
+    size_t n = 0;
+    p->labels[n++] = BLANK;
+    for (size_t k = 0; k < seq->n_units; k++) {
+        p->labels[n++] = (uint8_t)(seq->units[k] + 1);
+        p->labels[n++] = BLANK;
+    }
+    p->n_states = (uint8_t)n;
     for (size_t s = 0; s < n; s++) {
-        alpha[s] = (wide_t){0.0f, ZERO_EXP};
-        jump[s] = s >= 2 && labels[s] != BLANK && labels[s] != labels[s - 2];
+        p->jump[s] = s >= 2 && p->labels[s] != BLANK && p->labels[s] != p->labels[s - 2];
+        p->alpha[s] = (wide_t){0.0f, ZERO_EXP};
     }
-    alpha[0] = probs[BLANK];
-    if (n > 1) { alpha[1] = probs[labels[1]]; }
-    for (size_t t = 1; t < n_frames; t++) {
-        const wide_t *frame = probs + t * n_classes;
-        // Down from the last state, so each update still reads the previous frame.
-        for (size_t s = n; s-- > 0;) {
-            int32_t top = alpha[s].e;
-            if (s >= 1 && alpha[s - 1].e > top) { top = alpha[s - 1].e; }
-            if (jump[s] && alpha[s - 2].e > top) { top = alpha[s - 2].e; }
-            float total = scaled(alpha[s], top);
-            if (s >= 1) { total += scaled(alpha[s - 1], top); }
-            if (jump[s]) { total += scaled(alpha[s - 2], top); }
-            const wide_t p = frame[labels[s]];
-            alpha[s] = normalized(total * p.m, top + p.e);
+}
+
+static void pass_frame(pass_t *p, const wide_t *frame, bool first)
+{
+    const size_t n = p->n_states;
+    if (first) {
+        for (size_t s = 0; s < n; s++) {
+            p->alpha[s] = (wide_t){0.0f, ZERO_EXP};
         }
+        p->alpha[0] = frame[BLANK];
+        if (n > 1) { p->alpha[1] = frame[p->labels[1]]; }
+        return;
     }
-    int32_t top = alpha[n - 1].e;
-    if (n > 1 && alpha[n - 2].e > top) { top = alpha[n - 2].e; }
-    float total = scaled(alpha[n - 1], top);
-    if (n > 1) { total += scaled(alpha[n - 2], top); }
+    // Down from the last state, so each update still reads the previous frame.
+    for (size_t s = n; s-- > 0;) {
+        int32_t top = p->alpha[s].e;
+        if (s >= 1 && p->alpha[s - 1].e > top) { top = p->alpha[s - 1].e; }
+        if (p->jump[s] && p->alpha[s - 2].e > top) { top = p->alpha[s - 2].e; }
+        float total = scaled(p->alpha[s], top);
+        if (s >= 1) { total += scaled(p->alpha[s - 1], top); }
+        if (p->jump[s]) { total += scaled(p->alpha[s - 2], top); }
+        const wide_t q = frame[p->labels[s]];
+        p->alpha[s] = normalized(total * q.m, top + q.e);
+    }
+}
+
+static float pass_score(const pass_t *p, size_t per_frames)
+{
+    const size_t n = p->n_states;
+    int32_t top = p->alpha[n - 1].e;
+    if (n > 1 && p->alpha[n - 2].e > top) { top = p->alpha[n - 2].e; }
+    float total = scaled(p->alpha[n - 1], top);
+    if (n > 1) { total += scaled(p->alpha[n - 2], top); }
     if (total == 0.0f) { return -INFINITY; }
     return (float)((log((double)total) + (double)top * LN2) / (double)per_frames);
 }
 
-static float free_score(const float *log_probs, size_t n_classes, size_t n_frames, size_t per_frames)
+static float sequence_score(const wide_t *probs, size_t n_classes, size_t n_frames,
+                            const ai_engine_seq_t *seq, size_t per_frames)
 {
-    float total = 0.0f;
+    pass_t p;
+    lay_out(&p, seq);
     for (size_t t = 0; t < n_frames; t++) {
-        const float *frame = log_probs + t * n_classes;
-        float top = frame[0];
-        for (size_t c = 1; c < n_classes; c++) {
-            if (frame[c] > top) { top = frame[c]; }
-        }
-        total += top;
+        pass_frame(&p, probs + t * n_classes, t == 0);
     }
-    return total / (float)per_frames;
+    return pass_score(&p, per_frames);
 }
 
 static bool ends_syllable(uint8_t unit)
@@ -232,31 +258,101 @@ uint16_t ai_engine_command_ctc_milli(float x)
 
 size_t ai_engine_command_ctc_work_bytes(size_t n_classes, size_t n_frames)
 {
-    return n_classes * n_frames * sizeof(wide_t);
+    return sizeof(stream_t) + n_classes * n_frames * sizeof(wide_t);
 }
 
-esp_err_t ai_engine_command_ctc_decide(const float *log_probs, size_t n_classes, size_t n_frames,
-                                       const ai_engine_lexicon_t *lexicon, size_t per_frames, uint16_t reject,
-                                       uint16_t margin, void *work, float *scores,
-                                       ai_engine_command_result_t *out)
+esp_err_t ai_engine_command_ctc_prepare(const ai_engine_lexicon_t *lexicon, size_t n_classes, size_t n_frames,
+                                        void *work)
 {
-    if (log_probs == NULL || lexicon == NULL || work == NULL || out == NULL || n_classes < 2 ||
-        n_frames == 0 || per_frames == 0 || lexicon->n_commands == 0 ||
-        lexicon->n_commands > AI_ENGINE_COMMANDS_MAX) {
+    if (lexicon == NULL || work == NULL || n_classes < 2 || n_classes > AI_ENGINE_COMMAND_CTC_CLASSES_MAX ||
+        lexicon->n_commands == 0 || lexicon->n_commands > AI_ENGINE_COMMANDS_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
+    stream_t *st = work;
+    st->prepared = 0;
     const esp_err_t err = check(lexicon, n_classes);
     if (err != ESP_OK) { return err; }
-    wide_t *probs = work;
-    for (size_t i = 0; i < n_frames * n_classes; i++) {
-        probs[i] = exp_wide(log_probs[i]);
+    for (size_t c = 0; c < lexicon->n_commands; c++) {
+        st->n_variants[c] = lexicon->n_variants[c];
+        for (size_t v = 0; v < lexicon->n_variants[c]; v++) {
+            lay_out(&st->pass[c][v], &lexicon->variants[c][v]);
+        }
     }
+    st->n_classes = (uint32_t)n_classes;
+    st->n_commands = lexicon->n_commands;
+    st->frames_cap = (uint32_t)n_frames;
+    st->prepared = PREPARED;
+    ai_engine_command_ctc_begin(work);
+    return ESP_OK;
+}
+
+bool ai_engine_command_ctc_prepared_for(const ai_engine_lexicon_t *lexicon, const void *work)
+{
+    const stream_t *st = work;
+    if (lexicon == NULL || st == NULL || st->prepared != PREPARED || st->n_commands != lexicon->n_commands) {
+        return false;
+    }
+    for (size_t c = 0; c < st->n_commands; c++) {
+        if (st->n_variants[c] != lexicon->n_variants[c]) { return false; }
+        for (size_t v = 0; v < st->n_variants[c]; v++) {
+            const ai_engine_seq_t *seq = &lexicon->variants[c][v];
+            const pass_t *p = &st->pass[c][v];
+            if (p->n_states != 2 * seq->n_units + 1) { return false; }
+            for (size_t k = 0; k < seq->n_units; k++) {
+                if (p->labels[2 * k + 1] != seq->units[k] + 1) { return false; }
+            }
+        }
+    }
+    return true;
+}
+
+void ai_engine_command_ctc_begin(void *work)
+{
+    stream_t *st = work;
+    st->frames = 0;
+    st->free_total = 0.0f;
+}
+
+esp_err_t ai_engine_command_ctc_frames(const float *log_probs, size_t n_frames, void *work)
+{
+    stream_t *st = work;
+    if (log_probs == NULL || work == NULL) { return ESP_ERR_INVALID_ARG; }
+    if (st->prepared != PREPARED) { return ESP_ERR_INVALID_STATE; }
+    if (n_frames > st->frames_cap - st->frames) { return ESP_ERR_INVALID_SIZE; }
+    const size_t classes = st->n_classes;
+    for (size_t t = 0; t < n_frames; t++) {
+        const float *frame = log_probs + t * classes;
+        wide_t *probs = st->probs + (size_t)st->frames * classes;
+        float top = frame[0];
+        for (size_t c = 0; c < classes; c++) {
+            probs[c] = exp_wide(frame[c]);
+            if (frame[c] > top) { top = frame[c]; }
+        }
+        st->free_total += top;
+        for (size_t c = 0; c < st->n_commands; c++) {
+            for (size_t v = 0; v < st->n_variants[c]; v++) {
+                pass_frame(&st->pass[c][v], probs, st->frames == 0);
+            }
+        }
+        st->frames++;
+    }
+    return ESP_OK;
+}
+
+esp_err_t ai_engine_command_ctc_finish(const ai_engine_lexicon_t *lexicon, size_t per_frames, uint16_t reject,
+                                       uint16_t margin, const void *work, float *scores,
+                                       ai_engine_command_result_t *out)
+{
+    if (lexicon == NULL || work == NULL || out == NULL || per_frames == 0) { return ESP_ERR_INVALID_ARG; }
+    const stream_t *st = work;
+    if (st->prepared != PREPARED) { return ESP_ERR_INVALID_STATE; }
+    if (lexicon->n_commands != st->n_commands) { return ESP_ERR_INVALID_ARG; }
     size_t best = 0;
     float best_score = -INFINITY, second = -INFINITY;
-    for (size_t c = 0; c < lexicon->n_commands; c++) {
+    for (size_t c = 0; c < st->n_commands; c++) {
         float score = -INFINITY;
-        for (size_t v = 0; v < lexicon->n_variants[c]; v++) {
-            const float s = sequence_score(probs, n_classes, n_frames, &lexicon->variants[c][v], per_frames);
+        for (size_t v = 0; st->frames > 0 && v < st->n_variants[c]; v++) {
+            const float s = pass_score(&st->pass[c][v], per_frames);
             if (s > score) { score = s; }
         }
         if (scores != NULL) { scores[c] = score; }
@@ -269,11 +365,10 @@ esp_err_t ai_engine_command_ctc_decide(const float *log_probs, size_t n_classes,
         }
     }
     const bool reached = best_score > -INFINITY;
-    const uint16_t gap =
-        reached ? milli(free_score(log_probs, n_classes, n_frames, per_frames) - best_score) : FIELD_MAX;
+    const uint16_t gap = reached ? milli(st->free_total / (float)per_frames - best_score) : FIELD_MAX;
     const uint16_t lead = second > -INFINITY ? milli(best_score - second) : FIELD_MAX;
     const bool accepted = reached && gap <= reject && lead >= margin &&
-                          !outscored_by_a_part(probs, n_classes, n_frames, lexicon->variants[best],
+                          !outscored_by_a_part(st->probs, st->n_classes, st->frames, lexicon->variants[best],
                                                lexicon->n_variants[best], best_score, per_frames);
     *out = (ai_engine_command_result_t){
         .command = accepted ? (int16_t)best : AI_ENGINE_COMMAND_CTC_REJECTED,
@@ -282,4 +377,16 @@ esp_err_t ai_engine_command_ctc_decide(const float *log_probs, size_t n_classes,
         .free_gap_permille = gap,
     };
     return ESP_OK;
+}
+
+esp_err_t ai_engine_command_ctc_decide(const float *log_probs, size_t n_classes, size_t n_frames,
+                                       const ai_engine_lexicon_t *lexicon, size_t per_frames, uint16_t reject,
+                                       uint16_t margin, void *work, float *scores,
+                                       ai_engine_command_result_t *out)
+{
+    if (log_probs == NULL || out == NULL || n_frames == 0) { return ESP_ERR_INVALID_ARG; }
+    esp_err_t err = ai_engine_command_ctc_prepare(lexicon, n_classes, n_frames, work);
+    if (err == ESP_OK) { err = ai_engine_command_ctc_frames(log_probs, n_frames, work); }
+    if (err != ESP_OK) { return err; }
+    return ai_engine_command_ctc_finish(lexicon, per_frames, reject, margin, work, scores, out);
 }

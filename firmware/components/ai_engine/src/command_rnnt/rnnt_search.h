@@ -3,6 +3,7 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -38,6 +39,12 @@ size_t ai_engine_command_rnnt_tree_bytes(void);
  *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_NO_MEM more nodes or contexts than the _MAX above
  */
 esp_err_t ai_engine_command_rnnt_build(const ai_engine_lexicon_t *lexicon, void *tree, size_t bytes);
+
+/** Context k of the tree's nodes as the predictor reads its CONTEXT classes, pad for the root's older one.
+ *  @ctx any | non-blocking | caller owns tree, built, and classes (CONTEXT bytes)
+ *  @ret false when k is past the tree's contexts
+ */
+bool ai_engine_command_rnnt_context(const void *tree, size_t k, uint8_t pad, uint8_t *classes);
 
 /** Bytes of the work area a search over n_classes classes takes: its state between frames and one frame's
  * rows.
