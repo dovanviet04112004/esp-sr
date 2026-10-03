@@ -35,10 +35,7 @@ noise:
     - {dir: noise/demand, glob: "*/ch01.wav", weight: 2}
 microphone:
   sensitivity_dbfs: -29.0         # INMP441: -26 dBFS sine at 94 dB SPL, on the firmware's square-wave scale
-  self_noise_dbfs_a: -90.0        # INMP441: SNR 61 dBA below that sensitivity; a mixer without the board's floor (ns)
-  floor:                          # board B's floor under every session of build (KEHOACH 1.2): quiet-room probes
-    board: board_b
-    sessions: [20261001_home_011, 20261001_home_012, 20261001_home_013]
+  self_noise_dbfs_a: -90.0        # INMP441: SNR 61 dBA below that sensitivity; no floor: none captured quiet (KEHOACH 1.2)
   balance: docs/measurements/calib/board_b_balance.csv   # calib/bal of the board simulated, from the repo root
   pcm_shift: 13                   # calib/pcm_shift board B stores (E2-T5, docs/measurements/mic_array.md §2)
 sessions_per_shard: 32
