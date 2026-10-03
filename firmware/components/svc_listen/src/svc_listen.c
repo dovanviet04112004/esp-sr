@@ -19,6 +19,8 @@
 #define WINDOWS_MAX 4
 // Holds WINDOWS_MAX windows waiting behind the one being worked, each up to a window and a gap old.
 #define RING_HOPS 512
+#define LEAD_HOPS GEN_LISTEN_UTTERANCE_LEAD_HOPS
+#define WINDOW_HOPS GEN_LISTEN_WINDOW_HOPS
 #define PCM_FULL_SCALE 32768.0f // srpipe's to_float: int16 over 2^15, exact
 #define PERMILLE_MAX 1000       // event.schema caps score and margin here
 #define MEM_ALIGN 16
@@ -26,7 +28,11 @@
 _Static_assert(AI_ENGINE_VARIANTS_MAX == LANG_VI_VARIANTS_MAX, "one command's readings fit one lexicon row");
 
 typedef struct {
-    uint32_t first, last; // hops of the window, both in
+    uint32_t first, last; // hops, both in; last moves on while it is open
+    uint32_t floor;       // no window reaches back past this hop
+    bool open;            // its utterance still runs
+    bool cut_back;        // outgrew WINDOW_HOPS: worked from its end once closed
+    int64_t closed_us;
 } window_t;
 
 typedef struct {
@@ -55,11 +61,11 @@ static struct {
     size_t active;
     lang_vi_dialect_t dialects;
     uint16_t reject, margin;
-    bool started, in_run, working;
+    bool started, in_run, has_open, working;
     uint32_t next_seq, after, run_first, run_last, at;
     window_t queue[WINDOWS_MAX];
     size_t head, count;
-    int64_t began_us;
+    int64_t work_us;
 } s;
 
 static void *take(size_t bytes)
@@ -170,6 +176,7 @@ esp_err_t svc_listen_init(const svc_listen_config_t *cfg)
     uint8_t unreadable = 0;
     s.dialects = cfg->dialects;
     if (err == ESP_OK) { err = build_lexicon(&cfg->commands, &s.tables[0], &unreadable); }
+    if (err == ESP_OK) { err = ai_engine_command_prepare(s.tables[0].lexicon); }
     if (err != ESP_OK) {
         release(&w);
         return err;
@@ -183,11 +190,17 @@ esp_err_t svc_listen_init(const svc_listen_config_t *cfg)
 
 esp_err_t svc_listen_set_commands(const svc_listen_commands_t *commands, uint8_t *unreadable)
 {
-    if (!s.ready || s.count > 0) { return ESP_ERR_INVALID_STATE; }
+    if (!s.ready || svc_listen_busy()) { return ESP_ERR_INVALID_STATE; }
     if (!well_formed(commands) || unreadable == NULL) { return ESP_ERR_INVALID_ARG; }
     const size_t spare = 1 - s.active;
-    const esp_err_t err = build_lexicon(commands, &s.tables[spare], unreadable);
-    if (err == ESP_OK) { s.active = spare; }
+    esp_err_t err = build_lexicon(commands, &s.tables[spare], unreadable);
+    if (err == ESP_OK) { err = ai_engine_command_prepare(s.tables[spare].lexicon); }
+    if (err == ESP_OK) {
+        s.active = spare;
+        return ESP_OK;
+    }
+    // A prepare that failed half way leaves ai_engine on no set; the one still in use streams again.
+    ai_engine_command_prepare(s.tables[s.active].lexicon);
     return err;
 }
 
@@ -203,18 +216,64 @@ static void to_float(const int16_t *pcm, float *out)
     }
 }
 
-static esp_err_t queue_window(void)
+static window_t *open_window(void)
+{
+    return s.has_open ? &s.queue[(s.head + s.count - 1) % WINDOWS_MAX] : NULL;
+}
+
+static void stop_working(const window_t *w)
+{
+    if (s.count > 0 && w == &s.queue[s.head]) { s.working = false; }
+}
+
+static void drop_open(void)
+{
+    window_t *w = open_window();
+    if (w == NULL) { return; }
+    stop_working(w);
+    s.count--;
+    s.has_open = false;
+}
+
+static esp_err_t open_utterance(uint32_t seq)
+{
+    s.run_first = seq;
+    if (s.count == WINDOWS_MAX) { return ESP_ERR_NO_MEM; }
+    const uint32_t lead = seq >= LEAD_HOPS ? seq - LEAD_HOPS : 0;
+    s.queue[(s.head + s.count) % WINDOWS_MAX] =
+        (window_t){.first = lead > s.after ? lead : s.after, .last = seq, .floor = s.after, .open = true};
+    s.count++;
+    s.has_open = true;
+    return ESP_OK;
+}
+
+static void close_utterance(void)
 {
     s.in_run = false;
-    if (s.run_last - s.run_first < GEN_LISTEN_UTTERANCE_MIN_HOPS) { return ESP_OK; }
-    const uint32_t last = s.run_last + 1;
-    const uint32_t reach = last + 1 >= GEN_LISTEN_WINDOW_HOPS ? last + 1 - GEN_LISTEN_WINDOW_HOPS : 0;
-    const window_t w = {.first = reach > s.after ? reach : s.after, .last = last};
-    s.after = last + 1;
-    if (s.count == WINDOWS_MAX) { return ESP_ERR_NO_MEM; }
-    s.queue[(s.head + s.count) % WINDOWS_MAX] = w;
-    s.count++;
-    return ESP_OK;
+    const bool kept = s.run_last - s.run_first >= GEN_LISTEN_UTTERANCE_MIN_HOPS;
+    const uint32_t end = s.run_last + 1;
+    window_t *w = open_window();
+    if (w != NULL && !kept) { drop_open(); }
+    if (w != NULL && kept) {
+        w->open = false;
+        w->last = end;
+        w->closed_us = esp_timer_get_time();
+        if (w->cut_back) { w->first = end + 1 - WINDOW_HOPS > w->floor ? end + 1 - WINDOW_HOPS : w->floor; }
+        s.has_open = false;
+    }
+    if (kept) { s.after = end + 1; }
+}
+
+// The window's end only moves later, so every hop up to the one after the run's last is in it (KEHOACH 5.4).
+static void extend_open(uint32_t seq)
+{
+    window_t *w = open_window();
+    if (w == NULL) { return; }
+    w->last = s.run_last + 1 <= seq ? s.run_last + 1 : seq;
+    if (!w->cut_back && w->last + 1 - w->first > WINDOW_HOPS) {
+        w->cut_back = true;
+        stop_working(w);
+    }
 }
 
 esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad)
@@ -223,6 +282,7 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad)
     if (pcm == NULL) { return ESP_ERR_INVALID_ARG; }
     if (!s.started || seq != s.next_seq) {
         dsp_spec_stft_reset(s.stft);
+        drop_open();
         s.in_run = false;
         s.after = seq;
     }
@@ -234,18 +294,32 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad)
     esp_err_t err = dsp_spec_stft_analyze(s.stft, s.hop, s.bins);
     if (err == ESP_OK) { err = dsp_spec_mel_log(s.mel, s.bins, s.log_mel[slot]); }
     if (err != ESP_OK) { return err; }
-    if (s.in_run && seq - s.run_last > GEN_LISTEN_UTTERANCE_GAP_HOPS) { err = queue_window(); }
+    if (s.in_run && seq - s.run_last > GEN_LISTEN_UTTERANCE_GAP_HOPS) { close_utterance(); }
     if (vad) {
-        if (!s.in_run) { s.run_first = seq; }
+        if (!s.in_run) { err = open_utterance(seq); }
         s.in_run = true;
         s.run_last = seq;
     }
+    extend_open(seq);
     return err;
+}
+
+// An open window waits until its utterance is long enough to keep; one cut back waits for the close.
+static bool workable(const window_t *w)
+{
+    return !w->open || (!w->cut_back && s.run_last - s.run_first >= GEN_LISTEN_UTTERANCE_MIN_HOPS);
 }
 
 bool svc_listen_pending(void)
 {
-    return s.count > 0;
+    if (!s.ready || s.count == 0) { return false; }
+    const window_t *w = &s.queue[s.head];
+    return workable(w) && (!w->open || !s.working || s.at <= w->last);
+}
+
+bool svc_listen_busy(void)
+{
+    return s.ready && (s.count > 0 || s.in_run);
 }
 
 static void done(void)
@@ -258,6 +332,7 @@ static void done(void)
 static void drop(const window_t *w, const char *why)
 {
     ESP_LOGW(TAG, "window %u..%u dropped: %s", (unsigned)w->first, (unsigned)w->last, why);
+    if (w->open) { s.has_open = false; }
     done();
 }
 
@@ -282,13 +357,15 @@ static void decide(const window_t *w, const ai_engine_command_result_t *r, svc_l
     }
     out->first_seq = w->first;
     out->free_gap_permille = r->free_gap_permille;
-    out->work_us = (uint32_t)(esp_timer_get_time() - s.began_us);
+    out->work_us = (uint32_t)s.work_us;
+    out->close_us = (uint32_t)(esp_timer_get_time() - w->closed_us);
 }
 
 bool svc_listen_work(svc_listen_decision_t *out)
 {
-    if (!s.ready || s.count == 0 || out == NULL) { return false; }
+    if (!svc_listen_pending() || out == NULL) { return false; }
     const window_t *w = &s.queue[s.head];
+    const int64_t from_us = esp_timer_get_time();
     if (s.next_seq - (s.working ? s.at : w->first) > RING_HOPS) {
         drop(w, "the ring moved past it");
         return false;
@@ -301,21 +378,26 @@ bool svc_listen_work(svc_listen_decision_t *out)
         dsp_spec_pitch_reset(s.pitch);
         s.working = true;
         s.at = w->first;
-        s.began_us = esp_timer_get_time();
+        s.work_us = 0;
     }
-    const size_t slot = s.at % RING_HOPS;
-    float features[FEATURES];
-    memcpy(features, s.log_mel[slot], sizeof(s.log_mel[slot]));
-    to_float(s.pcm[slot], s.hop);
-    esp_err_t err = dsp_spec_pitch_frame(s.pitch, s.hop, features + GEN_LISTEN_N_BANDS);
-    if (err == ESP_OK) { err = ai_engine_command_step(features); }
-    if (err != ESP_OK) {
-        drop(w, esp_err_to_name(err));
+    if (s.at <= w->last) {
+        const size_t slot = s.at % RING_HOPS;
+        float features[FEATURES];
+        memcpy(features, s.log_mel[slot], sizeof(s.log_mel[slot]));
+        to_float(s.pcm[slot], s.hop);
+        esp_err_t err = dsp_spec_pitch_frame(s.pitch, s.hop, features + GEN_LISTEN_N_BANDS);
+        if (err == ESP_OK) { err = ai_engine_command_step(features); }
+        if (err != ESP_OK) {
+            drop(w, esp_err_to_name(err));
+            return false;
+        }
+        s.at++;
+        s.work_us += esp_timer_get_time() - from_us;
         return false;
     }
-    if (s.at++ != w->last) { return false; }
     ai_engine_command_result_t result;
-    err = ai_engine_command_score(s.tables[s.active].lexicon, &result);
+    const esp_err_t err = ai_engine_command_score(s.tables[s.active].lexicon, &result);
+    s.work_us += esp_timer_get_time() - from_us;
     if (err != ESP_OK) {
         drop(w, esp_err_to_name(err));
         return false;

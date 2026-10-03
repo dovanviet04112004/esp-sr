@@ -1,6 +1,7 @@
 /** The nhan half of the listener (KEHOACH 3.12, 5.2, 5.4): log-mel of every clean hop and, on an image
- * without wake, each utterance vad finds cut into a command window as Gate 3 cuts it and decided by
- * ai_engine. Memory is taken once in init; every other call belongs to nhan_task.
+ * without wake, a command window for each utterance vad finds, cut as Gate 3 cuts it, stepped through
+ * ai_engine while the utterance runs and decided once it closes. Memory is taken once in init; every
+ * other call belongs to nhan_task.
  */
 #pragma once
 
@@ -34,20 +35,22 @@ typedef struct {
     uint32_t first_seq;         // the window's first hop
     uint16_t free_gap_permille; // free unit loop over the best command
     uint32_t work_us;           // pitch, network and score of the window
+    uint32_t close_us;          // from the utterance's close to the decision
 } svc_listen_decision_t;
 
-/** Read the commands through lang_vi; take the front end, the rings and both lexicon tables from PSRAM.
- *  @ctx task | blocking, allocates | once at boot after ai_engine_load, ahead of nhan_task
+/** Read the commands through lang_vi and prepare ai_engine on them; take the front end, rings and tables.
+ *  @ctx task | blocking, allocates in PSRAM | once at boot after ai_engine_load, ahead of nhan_task
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE second call | ESP_ERR_NOT_SUPPORTED no command in the image |
- *       ESP_ERR_INVALID_ARG | APP_ERR_COMMANDS_INVALID a line lang_vi cannot read | ESP_ERR_NO_MEM
+ *       ESP_ERR_INVALID_ARG | APP_ERR_COMMANDS_INVALID a line lang_vi cannot read | ESP_ERR_NO_MEM |
+ *       ai_engine_command_prepare's error
  */
 esp_err_t svc_listen_init(const svc_listen_config_t *cfg);
 
-/** Read a command set through lang_vi into the spare table and listen with it, the old one kept on failure.
- *  @ctx nhan_task | blocking, lang_vi about 1.2 ms a command | only while no window waits
+/** Read a command set into the spare table, prepare it and listen with it; the old one stays on failure.
+ *  @ctx nhan_task | blocking: lang_vi about 1.2 ms a command, then prepare | while svc_listen_busy is false
  *  @param unreadable set to the index of the first line lang_vi cannot read
- *  @ret ESP_OK | ESP_ERR_INVALID_STATE no init, or a window waits | ESP_ERR_INVALID_ARG |
- *       APP_ERR_COMMANDS_INVALID a line lang_vi cannot read
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no init, or a window open or waiting | ESP_ERR_INVALID_ARG |
+ *       APP_ERR_COMMANDS_INVALID a line lang_vi cannot read | ai_engine_command_prepare's error
  */
 esp_err_t svc_listen_set_commands(const svc_listen_commands_t *commands, uint8_t *unreadable);
 
@@ -56,20 +59,25 @@ esp_err_t svc_listen_set_commands(const svc_listen_commands_t *commands, uint8_t
  */
 uint32_t svc_listen_commands_version(void);
 
-/** Take one clean hop into the ring; vad extends or closes the utterance, a long one queuing its window.
- *  A jump in seq starts afresh, and no window reaches across it.
+/** Take one clean hop into the ring; vad opens a window on a new utterance, extends it, or closes it.
+ *  A jump in seq starts afresh: the open window is dropped, and no window reaches across the jump.
  *  @ctx nhan_task | non-blocking | pcm holds GEN_GRID_HOP_SAMPLES samples, copied
- *  @ret ESP_OK | ESP_ERR_INVALID_STATE no init | ESP_ERR_NO_MEM a full queue: the newest window is dropped
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no init | ESP_ERR_NO_MEM a full queue: the utterance gets no window
  */
 esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad);
 
-/** Whether a queued window waits for svc_listen_work.
+/** Whether svc_listen_work has a hop to step or a closed window to decide now.
  *  @ctx nhan_task | non-blocking
  */
 bool svc_listen_pending(void);
 
-/** Run one hop of the oldest queued window: pitch, then the network, a chunk every 16 hops; score at its end.
- *  @ctx nhan_task | blocks for one hop of pitch and at most one chunk of the network
+/** Whether a window is open or waits, while the command set cannot change.
+ *  @ctx nhan_task | non-blocking
+ */
+bool svc_listen_busy(void);
+
+/** Step one hop of the oldest window: pitch, then the network, a chunk every 16 hops; decide it once closed.
+ *  @ctx nhan_task | blocks for one hop of pitch and at most one chunk of the network, or the decision
  *  @ret true with out filled once the window is decided; false otherwise, or on an error that drops it
  */
 bool svc_listen_work(svc_listen_decision_t *out);

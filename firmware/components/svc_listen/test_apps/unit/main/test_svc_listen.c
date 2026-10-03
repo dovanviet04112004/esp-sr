@@ -52,7 +52,7 @@ typedef struct {
 
 typedef struct {
     size_t windows, differ, decisions;
-    int64_t work_us, work_peak_us;
+    int64_t work_us, work_peak_us, close_us, close_peak_us;
 } tally_t;
 
 static const int16_t k_zeros[GEN_GRID_HOP_SAMPLES];
@@ -83,6 +83,9 @@ static size_t drain(svc_listen_decision_t *decided, size_t n, tally_t *t)
         if (svc_listen_work(&decided[n])) {
             t->work_us += decided[n].work_us;
             t->work_peak_us = decided[n].work_us > t->work_peak_us ? decided[n].work_us : t->work_peak_us;
+            t->close_us += decided[n].close_us;
+            t->close_peak_us =
+                decided[n].close_us > t->close_peak_us ? decided[n].close_us : t->close_peak_us;
             TEST_ASSERT_LESS_THAN(DECIDED_MAX, n + 1);
             n++;
         }
@@ -104,8 +107,8 @@ static bool same(const window_t *want, const svc_listen_decision_t *got, const n
            e->seq == base + want->last;
 }
 
-// One session hop by hop through svc_listen, zeros where no window reads, then a gap of silence that closes
-// its last utterance; every window decided compared with Python's. Returns where the next session starts.
+// One session and the silence after it, hop by hop through svc_listen, zeros where no window reads, each
+// window decided compared with Python's. Returns where the next session starts.
 static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_t *named, tally_t *t)
 {
     session_head_t h;
@@ -125,7 +128,7 @@ static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_
     segment_head_t seg = {0};
     uint16_t seg_index = 0;
     if (h.segments > 0) { memcpy(&seg, seg_at, sizeof(seg)); }
-    for (uint32_t hop = 0; hop < h.hops + GEN_LISTEN_UTTERANCE_GAP_HOPS + 1; hop++) {
+    for (uint32_t hop = 0; hop < h.hops; hop++) {
         while (seg_index < h.segments && hop >= seg.first + seg.hops) {
             seg_at += sizeof(seg) + seg.hops * GEN_GRID_HOP_SAMPLES * sizeof(int16_t);
             if (++seg_index < h.segments) { memcpy(&seg, seg_at, sizeof(seg)); }
@@ -134,7 +137,7 @@ static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_
         if (seg_index < h.segments && hop >= seg.first) {
             pcm = (const int16_t *)(seg_at + sizeof(seg)) + (hop - seg.first) * GEN_GRID_HOP_SAMPLES;
         }
-        const bool on = hop < h.hops && (vad[hop / 8] >> (hop % 8)) & 1;
+        const bool on = (vad[hop / 8] >> (hop % 8)) & 1;
         TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(pcm, base + hop, on));
         n = drain(decided, n, t);
     }
@@ -143,11 +146,12 @@ static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_
         const bool ok = same(&want[w], &decided[w], named, base);
         t->differ += ok ? 0 : 1;
         const app_event_t *e = &decided[w].event;
-        printf("listen window %" PRIu32 "..%" PRIu32 ": board %s %s %u %u %u, python %d %u %u %u%s\n",
+        printf("listen window %" PRIu32 "..%" PRIu32 ": board %s %s %u %u %u, python %d %u %u %u%s; %" PRIu32
+               " us after the close\n",
                decided[w].first_seq - base, e->seq - base, e->kind == APP_EVT_COMMAND ? "command" : "reject",
                e->kind == APP_EVT_COMMAND ? e->command_id : e->code, e->score_permille, e->margin_permille,
                decided[w].free_gap_permille, want[w].command, want[w].score, want[w].margin, want[w].gap,
-               ok ? "" : " DIFFERS");
+               ok ? "" : " DIFFERS", decided[w].close_us);
     }
     t->windows += n;
     return p + h.windows * sizeof(window_t);
@@ -206,9 +210,11 @@ TEST_CASE("svc_listen decides every Gate 3 session of the round as Python decide
         esp_partition_munmap(handle);
     }
     printf("svc_listen: %u sessions, %u windows, %u decided otherwise than python; work %" PRId64
-           " us mean, %" PRId64 " us peak a window\n",
+           " us mean, %" PRId64 " us peak a window; decided %" PRId64 " us mean, %" PRId64
+           " us peak after the close\n",
            (unsigned)sessions, (unsigned)t.windows, (unsigned)t.differ,
-           t.windows ? t.work_us / (int64_t)t.windows : 0, t.work_peak_us);
+           t.windows ? t.work_us / (int64_t)t.windows : 0, t.work_peak_us,
+           t.windows ? t.close_us / (int64_t)t.windows : 0, t.close_peak_us);
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT));
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN));
     TEST_ASSERT_EQUAL(0, t.differ);

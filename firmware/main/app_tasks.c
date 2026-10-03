@@ -160,11 +160,13 @@ static void send_up(const app_wiring_t *w, const app_event_t *e)
 static void raise_decision(const app_wiring_t *w, const svc_listen_decision_t *d)
 {
     const app_event_t *e = &d->event;
-    ESP_LOGI(TAG, "%s %s score %u margin %u gap %u, hops %" PRIu32 "..%" PRIu32 ", %" PRIu32 " ms",
+    ESP_LOGI(TAG,
+             "%s %s score %u margin %u gap %u, hops %" PRIu32 "..%" PRIu32 ", %" PRIu32 " ms work, %" PRIu32
+             " ms after the close",
              e->kind == APP_EVT_COMMAND ? "COMMAND" : "REJECT",
              e->kind == APP_EVT_COMMAND ? e->command_id : e->code, (unsigned)e->score_permille,
              (unsigned)e->margin_permille, (unsigned)d->free_gap_permille, d->first_seq, e->seq,
-             d->work_us / US_PER_MS);
+             d->work_us / US_PER_MS, d->close_us / US_PER_MS);
     send_up(w, e);
 }
 
@@ -177,11 +179,11 @@ static void raise_error(const app_wiring_t *w, uint32_t seq, const char *code, c
     send_up(w, &e);
 }
 
-// Only while no window waits: each utterance already cut is decided by the set it met (KEHOACH 5.3).
+// Only while no window is open or waits: each utterance is decided by the set it met (KEHOACH 5.3).
 static void take_commands(const app_wiring_t *w, uint32_t seq)
 {
     const net_mqtt_commands_t *in = NULL;
-    if (svc_listen_pending() || xQueueReceive(w->cmdset, &in, 0) != pdTRUE) { return; }
+    if (svc_listen_busy() || xQueueReceive(w->cmdset, &in, 0) != pdTRUE) { return; }
     if (in->parsed != ESP_OK) {
         raise_error(w, seq,
                     in->parsed == APP_ERR_COMMANDS_INVALID ? APP_CODE_COMMANDS_INVALID
@@ -228,7 +230,7 @@ static void nhan_task(void *arg)
         if (xQueueReceive(w->clean, &frame, wait) == pdTRUE) {
             seq = frame.seq;
             if (svc_listen_feed(frame.pcm, frame.seq, frame.vad != 0) == ESP_ERR_NO_MEM) {
-                ESP_LOGW(TAG, "window queue full: the utterance closed at hop %" PRIu32 " is dropped",
+                ESP_LOGW(TAG, "window queue full: the utterance opened at hop %" PRIu32 " gets no window",
                          frame.seq);
             }
         } else if (svc_listen_work(&decision)) {
