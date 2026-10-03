@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 import soundfile as sf
 from scipy import signal
@@ -84,8 +85,11 @@ class ItemReader:
             raise IndexError(f"{path}: row {row} outside 0..{self._starts[-1] - 1}")
         group = int(np.searchsorted(self._starts, row, side="right")) - 1
         if group != self._group:
+            # Drop the old group first and hand back what the read frees: mimalloc keeps ~0.4 GB a reader otherwise.
+            self._audio = None
             self._audio = pq.ParquetFile(path).read_row_group(group, columns=[PARQUET_AUDIO_COLUMN]).column(0)
             self._group = group
+            pa.default_memory_pool().release_unused()
         return self._audio[row - self._starts[group]].as_py()["bytes"]
 
     def native(self, item: str) -> tuple[np.ndarray, int]:
