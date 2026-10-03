@@ -950,7 +950,7 @@ tham lam rồi so chuỗi:
 
 ```
 với mỗi lệnh c, mỗi biến thể v của c:
-    s(v) = log P(v | X) / T         thuật toán tiến CTC trên ma trận xác suất X, T khung
+    s(v) = log P(v | X) / T_W       thuật toán tiến CTC trên ma trận xác suất X; T_W khung của cửa sổ window_s
 s(c) = max_v s(v)
 s_free = điểm đường tốt nhất không ràng buộc (vòng đơn vị tự do)
 chọn c* = argmax s(c)
@@ -958,8 +958,8 @@ phần của c*: mỗi đoạn âm tiết liền nhau của một biến thể c
 từ chối khi  s_free − s(c*) > δ₁   hoặc   s(c*) − s(c₂) < δ₂   hoặc   s(p) ≥ s(c*) với một phần p của c*
 ```
 
-**Phần của lệnh không được hơn cả lệnh.** Chia cho `T` làm phần thiếu của một lệnh loãng theo cả cửa sổ: nói mỗi "chụp",
-thuật toán tiến vẫn ép "ảnh" vào vài khung, mất vài chục nat, chia cho cả cửa sổ còn dưới `δ₁`; không lệnh nào khác có
+**Phần của lệnh không được hơn cả lệnh.** Chia cho `T_W` làm phần thiếu của một lệnh loãng theo cả cửa sổ: nói mỗi "chụp",
+thuật toán tiến vẫn ép "ảnh" vào vài khung, mất vài chục nat, chia cho `T_W` còn dưới `δ₁`; không lệnh nào khác có
 "chụp" nên `δ₂` cũng qua. Vòng tự do không bắt được chỗ thiếu cục bộ ấy, phần của lệnh thì bắt được: "chụp" một mình
 hơn "chụp ảnh" khi chỉ có "chụp", và kém khi có đủ, vì lúc ấy nó phải đổ các khung của "ảnh" vào blank. Phép so là so
 dấu, không ngưỡng: bắt phần kém cả lệnh `δ₂` nữa thì Cửa 3 mất thêm nhiều câu nhận đúng, vì chữ đầu của "tăng âm lượng"
@@ -975,13 +975,19 @@ căn cách nhau hàng nghìn nat, nên kết quả vẫn là tổng mọi đư�
 thấp hơn số mũ lớn nhất quá 100 thì bỏ, vì làm tròn float32 đằng nào cũng xoá nó. `exp` chạy một lần mỗi khung × lớp vào
 vùng làm việc người gọi cấp, 8 byte mỗi ô (cửa sổ 3 s: 94 × 45, ~34 KB ở PSRAM); `log` một lần mỗi biến thể. Mỗi trạng
 thái mỗi khung còn hai phép cộng, một phép nhân và chỉnh số mũ: board B đo 14,7 ms cho bộ lệnh mặc định (19 biến thể) và
-79,4 ms cho 64 lệnh (`measurements/latency.md` §13), trong ngân sách ≤ 100 ms một lần chấm như `kws`, chỉ chạy một lần
-khi `vad` báo hết câu. `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ Kconfig.
+79,4 ms cho 64 lệnh (`measurements/latency.md` §13), trong ngân sách ≤ 100 ms một lần chấm như `kws`. Trên máy, thuật
+toán tiến của mọi biến thể đi dần theo khối mạng của cửa sổ (Chạy `ctc` trên máy, dưới), nên lúc câu chốt chỉ còn khối
+cuối và phần của `c*`. `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ Kconfig.
 
-Mọi điểm tính theo khung: `s(·)` là log xác suất chia số khung, đơn vị nat mỗi khung. `ai_engine_command_result_t`
-mang `score_permille` = 1000·e^s(c*) (xác suất trung bình nhân mỗi khung, ‰), `margin_permille` = 1000·(s(c*) − s(c₂))
-và `free_gap_permille` = 1000·(s_free − s(c*)), hai trường sau theo phần nghìn nat mỗi khung, chặn ở 65 535; `δ₁`,
-`δ₂` cùng đơn vị ấy. Biến thể là chuỗi đơn vị `lang_vi` của câu lệnh theo từng vùng, bỏ cách đọc trùng. Bản soi gương
+**Mọi điểm chia cho `T_W`**, số khung của một cửa sổ dài `window_s` (94 khung với 3 s), không chia cho số khung của cửa
+sổ đang chấm; đơn vị là nat mỗi khung của `window_s`. Cửa sổ lệnh dài ngắn theo câu và theo chỗ nó mở (§5.4), mà khung
+lặng góp gần 0 vào hiệu giữa hai đường, nên chia cho số khung thật thì `δ₁`, `δ₂` đổi nghĩa theo lượng lặng quanh câu:
+cửa sổ ngắn làm khoảng cách to ra, cùng ngưỡng nhận thêm cả lệnh sai (`measurements/command.md` §5), và cửa sổ mở sau
+`wake` còn ngắn hơn. Chia cho `T_W` thì ngưỡng giữ một nghĩa ở mọi cửa sổ, và ở cửa sổ đủ `window_s` nó chính là chia
+cho số khung của cửa sổ. `ai_engine_command_result_t` mang `score_permille` =
+1000·e^s(c*) (‰), `margin_permille` = 1000·(s(c*) − s(c₂)) và `free_gap_permille` = 1000·(s_free − s(c*)), hai trường
+sau theo phần nghìn nat mỗi khung của `window_s`, chặn ở 65 535; `δ₁`, `δ₂` cùng đơn vị ấy. Biến thể là chuỗi đơn vị
+`lang_vi` của câu lệnh theo từng vùng, bỏ cách đọc trùng. Bản soi gương
 `ctc/postproc/ctc_score.py` tính bằng float32 đúng thứ tự phép tính của C: `exp` là cùng một đa thức float32 ở hai bên,
 và C dịch không gộp nhân với cộng, vì `madd.s` của S3 chỉ làm tròn một lần còn numpy làm tròn hai lần; `log` cuối mỗi
 biến thể lấy bằng double rồi làm tròn về float. Hai bên khớp từng bit, `tolerance.yaml` cho sai số 0; bộ vàng ở
@@ -993,14 +999,18 @@ bước một lần; `NORM` là trung bình rồi độ lệch 43 chiều của 
 `δ₂` từ NVS `kws/cmd_reject`, `kws/cmd_margin` một lần, vì `_begin` và `_score` không được chặn (§4.5.5); thiếu khoá thì
 nhánh coi như không có (`ai_engine_has` trả false, ghi log một lần), nên khoá phải được gieo trước lúc nạp.
 
+- `_prepare` nhận bộ lệnh lúc khởi động và mỗi lần đổi bộ lệnh, kiểm như phép chấm kiểm, chép chuỗi nhãn của mọi biến
+  thể vào vùng của nhánh.
 - `_begin` xoá mọi `StreamingCache` của mạng, như cửa sổ bắt đầu từ bộ đệm rỗng lúc học và lúc chấm trên máy tính, xoá
-  khối bước đang gom, mở cửa sổ.
+  khối bước đang gom, đặt thuật toán tiến của mọi biến thể về khung 0, mở cửa sổ.
 - `_step` nhận một bước 43 chiều, chuẩn hoá bằng `NORM`, đưa về lưới int8 của số mũ đầu vào (làm tròn về số chẵn gần
   nhất, chặn ở −128..127, như `Int8Net` của `ctc/quant.py`); đủ 16 bước thì chạy mạng một lần ra 8 khung × 45 lớp int8,
-  đổi ra float theo số mũ đầu ra và lấy log-softmax từng khung. Cửa sổ giữ tối đa 3 s: 188 bước, 94 khung × 45 lớp float
-  ở PSRAM; bước thứ 189 trả `ESP_ERR_NO_MEM`.
-- `_score` đệm khối dở cuối cửa sổ bằng đặc trưng 0 đã chuẩn hoá, như lúc học đệm lô, chạy nó, giữ ⌈bước/2⌉ khung rồi
-  chấm như trên.
+  đổi ra float theo số mũ đầu ra, lấy log-softmax từng khung, rồi đẩy thuật toán tiến của mọi biến thể và tổng của vòng
+  tự do qua 8 khung ấy, cùng phép tính, cùng thứ tự từng biến thể như chấm một lần. Cửa sổ giữ tối đa 3 s: 188 bước,
+  94 khung × 45 lớp float ở PSRAM; bước thứ 189 trả `ESP_ERR_NO_MEM`.
+- `_score` đệm khối dở cuối cửa sổ bằng đặc trưng 0 đã chuẩn hoá, như lúc học đệm lô, chạy nó, giữ ⌈bước/2⌉ khung, đẩy
+  nốt, rồi quyết: chỉ phần của `c*` còn chấm trên cả cửa sổ. Bộ lệnh đưa vào khác bộ `_prepare` đã nhận thì chấm lại cả
+  cửa sổ trên bộ ấy, nên quyết định không phụ thuộc việc đã chấm dần hay chưa.
 
 Log-softmax mỗi khung trừ lớp lớn nhất, cộng `exp` bằng cùng đa thức float32 và cùng số mũ riêng của phép chấm, lấy `log`
 của tổng bằng double rồi làm tròn về float, rồi trừ: bản soi gương ở `ctc_score.py`, ca vàng cùng thư mục
@@ -1027,10 +1037,10 @@ vì tìm chùm làm rơi lệnh đúng (bảng dưới, ADR-0016). Thêm lệnh 
 |---|---|
 | Mạng | encoder của `ctc`, cùng mã, cùng cỡ, giữ cả đầu CTC; cộng **mạng dự đoán không trạng thái** như MultiNet7: nhúng 45 lớp (blank làm lớp đầu chuỗi) thành 384 chiều, tích chập theo chiều sâu trên 2 đơn vị cuối, ReLU; và **bộ nối**: chiếu khung encoder 128 → 384 và đầu ra mạng dự đoán 384 → 384, cộng, tanh, chiếu 384 → 45 |
 | Học | RNN-T cộng CTC trong cùng một lượt, như cấu hình `rnnt_ctc` của MultiNet7: `rnnt_loss` của torchaudio trên cả lưới khung × đơn vị, cộng CTC nhân hệ số ở cấu hình; cùng split, seed, số bước, SpecAugment với lượt CTC trơn. Lượt ấy ra cả hai đầu, nên `ctc` và `rnnt` so trên cùng một encoder. Lưới của bộ nối dựng theo nhóm câu có checkpoint, mỗi nhóm không quá `rnnt.lattice_cells` ô (số câu × khung dài nhất × số đơn vị nhiều nhất cộng một): câu xếp theo cỡ lưới để nhóm ít ô đệm, câu một mình đã vượt ngân sách thì đi riêng. Nhóm theo số câu cố định thì nhóm có câu dài đòi một khối hàng trăm MB, tràn VRAM của card 4 GB dùng chung với màn hình Windows; loss và gradient không phụ thuộc cách nhóm |
-| Chấm | **chấm chính xác mọi lệnh**, như `ctc`, không tìm chùm: xác suất của mỗi biến thể và mỗi phần cộng trên mọi cách căn của lưới RNN-T, tính xuôi theo khung trên **cây lệnh**. Mỗi khung, nút kém nút tốt nhất quá `rnnt.beam_nats` nat bị bỏ trước (xác suất về 0, `AI_ENGINE_COMMAND_RNNT_BEAM_NATS` ở C), rồi vòng tìm hỏi một lượt log-xác suất cho mọi ngữ cảnh khác nhau (2 lớp cuối của tiền tố) của các nút còn lại và của con chúng: bộ nối chạy cho các ngữ cảnh ấy, rồi log-softmax 45 lớp bằng đúng hàm của `ctc`; trong khung, xác suất của mỗi nút đi xuống các nút con bằng đơn vị của cạnh, nút cha trước nút con, nên một khung phát được nhiều đơn vị như lưới học; ngữ cảnh của nút mới có xác suất giữa khung được hỏi thêm một lượt; hết khung, mọi nút còn xác suất cộng blank sang khung sau, kể cả khung cuối. Điểm của một chuỗi là xác suất ở nút cuối của nó chia số khung. Ngưỡng bỏ đặt đủ rộng để mọi quyết định (nhận lệnh nào, hay từ chối) của bản dò và của Cửa 3 sau int8 trùng chấm không bỏ; lệnh bị bỏ có điểm −∞, nên ở cửa sổ bị từ chối lệnh điểm cao nhất có thể khác, và trường lead đọc CAP khi lệnh nhì bị bỏ (`measurements/latency.md` §15). Tìm chùm 4 như MultiNet7 làm rơi lệnh đúng giữa chừng khi phần của nó tạm điểm cao hơn: Cửa 3 float của run E11-T20, 53/112 câu lệnh nhận đúng ở chùm 4 và 66/112 ở chùm 16, chấm chính xác 81/112 lệnh đúng đứng đầu, `ctc` 84/112 (`measurements/command.md` §4) |
+| Chấm | **chấm chính xác mọi lệnh**, như `ctc`, không tìm chùm: xác suất của mỗi biến thể và mỗi phần cộng trên mọi cách căn của lưới RNN-T, tính xuôi theo khung trên **cây lệnh**. Mỗi khung, nút kém nút tốt nhất quá `rnnt.beam_nats` nat bị bỏ trước (xác suất về 0, `AI_ENGINE_COMMAND_RNNT_BEAM_NATS` ở C), rồi vòng tìm hỏi một lượt log-xác suất cho mọi ngữ cảnh khác nhau (2 lớp cuối của tiền tố) của các nút còn lại và của con chúng: bộ nối chạy cho các ngữ cảnh ấy, rồi log-softmax 45 lớp bằng đúng hàm của `ctc`; trong khung, xác suất của mỗi nút đi xuống các nút con bằng đơn vị của cạnh, nút cha trước nút con, nên một khung phát được nhiều đơn vị như lưới học; ngữ cảnh của nút mới có xác suất giữa khung được hỏi thêm một lượt; hết khung, mọi nút còn xác suất cộng blank sang khung sau, kể cả khung cuối. Điểm của một chuỗi là xác suất ở nút cuối của nó chia `T_W`, như `ctc`. Ngưỡng bỏ đặt đủ rộng để mọi quyết định (nhận lệnh nào, hay từ chối) của bản dò và của Cửa 3 sau int8 trùng chấm không bỏ; lệnh bị bỏ có điểm −∞, nên ở cửa sổ bị từ chối lệnh điểm cao nhất có thể khác, và trường lead đọc CAP khi lệnh nhì bị bỏ (`measurements/latency.md` §15). Tìm chùm 4 như MultiNet7 làm rơi lệnh đúng giữa chừng khi phần của nó tạm điểm cao hơn: Cửa 3 float của run E11-T20, 53/112 câu lệnh nhận đúng ở chùm 4 và 66/112 ở chùm 16, chấm chính xác 81/112 lệnh đúng đứng đầu, `ctc` 84/112 (`measurements/command.md` §4) |
 | Cây lệnh | dựng lúc nạp bộ lệnh: mọi biến thể `lang_vi` của mọi lệnh, cộng mọi **phần** của chúng như `ctc` (đoạn âm tiết liền nhau thiếu ít nhất một âm tiết); một cây tiền tố không tối giản, vì mạng dự đoán đọc 2 lớp cuối của chính tiền tố nên hai tiền tố khác nhau không gộp được. Nút đánh số theo chiều rộng từ gốc, con theo thứ tự đơn vị; mỗi nút giữ số của ngữ cảnh, ngữ cảnh đánh số theo lần đầu gặp; mỗi biến thể và mỗi phần biết nút cuối của nó |
 | Quyết | hết cửa sổ, `c*` là lệnh điểm cao nhất, lệnh đầu trong các lệnh bằng điểm. Từ chối khi đường tham lam không ràng buộc hơn `c*` quá `δ₁`; khi lệnh nhì sát `c*` dưới `δ₂`; hay khi một phần của `c*` không kém `c*`. Đường tham lam đi trên chính lưới ấy: mỗi khung lấy lớp xác suất cao nhất, đơn vị thì nối vào và ở lại khung, tối đa 4 đơn vị rồi buộc blank, blank thì sang khung sau. Cùng ba trường kết quả, cùng `δ₁` `δ₂` ở NVS, giá trị riêng của đường `rnnt` chọn trên `val` |
-| Chạy | `_step` như `ctc`, nhưng chạy đồ thị `command_rnnt` và giữ các khung đã chiếu, đưa luôn về lưới đầu vào của bộ nối (cửa sổ 3 s: 96 × 384 byte int8 ở PSRAM). Hợp đồng đóng băng chỉ đưa bộ lệnh lúc `_score` (§4.5.5), nên **vòng tìm chạy dần** trên cây của bộ lệnh lần `_score` trước: mỗi khối 16 hop của `_step`, nó đi qua 8 khung mới; `_score` chạy nốt các khung còn lại rồi quyết định. Bộ lệnh khác lần trước (lần đầu sau boot, sau `down/commands`) thì `_score` dựng lại cây và chấm lại từ khung đầu, nên quyết định không phụ thuộc việc đã chấm dần hay chưa; cây và trạng thái vòng tìm nằm trong vùng làm việc cấp lúc nạp, bảng tiền tố đã chiếu (mọi cặp ngữ cảnh × 384 byte) cũng vậy, mỗi ngữ cảnh chạy mạng dự đoán một lần trong đời model. Ba đồ thị int8 qua esp-dl, mục của ảnh ở §6.3: `command_rnnt` là encoder kèm phép chiếu khung 128 → 384 của bộ nối, một lần mỗi khung; `rnnt_predictor` đọc 2 lớp ngữ cảnh dạng one-hot, phép nhúng thành tích chập 1 × 1 ngay trong đồ thị để `model->test()` kiểm cả nó, ra phép chiếu ngữ cảnh 384 chiều; `rnnt_joiner` nhận hai khối `rnnt.joiner_columns` cột (khung lặp lại, tiền tố của từng ngữ cảnh), cộng, tanh, ra 45 logit int8 mỗi cột, một lần cho mỗi lượt hỏi của vòng tìm, nhiều lượt khi số ngữ cảnh vượt số cột; các cột tính độc lập nên khớp từng bit với chạy từng cặp. Chấm cả câu chỉ còn phần chưa chấm dần, trong ngân sách ≤ 100 ms như `ctc` 🔬 |
+| Chạy | `_step` như `ctc`, nhưng chạy đồ thị `command_rnnt` và giữ các khung đã chiếu, đưa luôn về lưới đầu vào của bộ nối (cửa sổ 3 s: 96 × 384 byte int8 ở PSRAM). `_prepare` dựng cây của bộ lệnh và chạy mạng dự đoán cho mọi ngữ cảnh của cây, nên **vòng tìm chạy dần** từ khung đầu của mọi cửa sổ: mỗi khối 16 hop của `_step`, nó đi qua 8 khung mới; `_score` chạy nốt các khung còn lại rồi quyết định. Bộ lệnh đưa vào `_score` khác bộ `_prepare` đã nhận thì `_score` dựng lại cây và chấm lại từ khung đầu, nên quyết định không phụ thuộc việc đã chấm dần hay chưa; cây và trạng thái vòng tìm nằm trong vùng làm việc cấp lúc nạp, bảng tiền tố đã chiếu (mọi cặp ngữ cảnh × 384 byte) cũng vậy, mỗi ngữ cảnh chạy mạng dự đoán một lần trong đời model. Ba đồ thị int8 qua esp-dl, mục của ảnh ở §6.3: `command_rnnt` là encoder kèm phép chiếu khung 128 → 384 của bộ nối, một lần mỗi khung; `rnnt_predictor` đọc 2 lớp ngữ cảnh dạng one-hot, phép nhúng thành tích chập 1 × 1 ngay trong đồ thị để `model->test()` kiểm cả nó, ra phép chiếu ngữ cảnh 384 chiều; `rnnt_joiner` nhận hai khối `rnnt.joiner_columns` cột (khung lặp lại, tiền tố của từng ngữ cảnh), cộng, tanh, ra 45 logit int8 mỗi cột, một lần cho mỗi lượt hỏi của vòng tìm, nhiều lượt khi số ngữ cảnh vượt số cột; các cột tính độc lập nên khớp từng bit với chạy từng cặp. Chấm cả câu chỉ còn phần chưa chấm dần, trong ngân sách ≤ 100 ms như `ctc` 🔬 |
 | Khớp | hai mạng nhỏ khớp mô phỏng ESP-PPQ bằng `model->test()`; cây lệnh và phép chấm là C thuần, bản soi gương `rnnt/postproc/rnnt_search.py` float32 cùng thứ tự phép, đọc đầu ra int8 của bộ nối như C đọc; bộ vàng `contracts/golden/command_rnnt/` có đối chứng âm (bỏ phần của lệnh thắng, gộp bằng max thay vì cộng xác suất, một đơn vị mỗi khung, ngưỡng bỏ nút bằng 0), sai số 0; chấm dần theo khối cho đúng quyết định của chấm một lần cả cửa sổ |
 | Chọn | giữa `ctc` và `rnnt` bằng Cửa 3 sau int8 trên tập thu qua board, cùng encoder, trong ngân sách µs của §3.3 |
 
@@ -1071,12 +1081,13 @@ cấu hình lọt thành dương. Giọng nhân bản chỉ lấy từ người 
 `val` hay `test` không tới được tập học qua TTS (§1.3).
 
 **Thước** (Cửa 3), chung cho hai đường, ở `srpipe/tasks/command/eval.py`: mỗi lệnh **≥ 90%**, từ chối đúng **≥ 95%**,
-trên tập thu qua board, tách theo người nói và phòng. Mỗi câu `vad` tìm ra chấm một lần ở bước `vad` tắt sau nó, như
-`LENH`: `kws` trên cửa sổ 94 bước của nó, ngưỡng lấy từ `val` của run; `ctc` trên tối đa 3 s tính ngược từ đó, mạng chạy
-lại từ đầu cửa sổ như lúc vào `LENH`, bộ lệnh là mọi dòng của `default_vi.json` qua `lang_vi`, cả lệnh chưa học. Câu là
-các đoạn `vad` cách nhau không quá `utterance.gap_s`, bỏ câu ngắn hơn `utterance.min_s`; hai số ấy và độ dài cửa sổ nằm ở
-`contracts/listen.yaml`. Board chưa có `wake` cắt đúng như vậy (§5.4), nên quyết định của board trên tiếng nói trực tiếp
-là quyết định Cửa 3 đếm. Tới khi
+trên tập thu qua board, tách theo người nói và phòng. Mỗi câu `vad` tìm ra chấm một lần, trên cửa sổ lệnh của §5.4:
+`kws` trên cửa sổ 94 bước của nó, kết ở bước `vad` tắt sau câu, ngưỡng lấy từ `val` của run; `ctc` và `rnnt` từ
+`utterance.lead_s` trước bước `vad` đầu của câu tới bước `vad` tắt sau nó, tối đa `window_s`, mạng chạy từ đầu cửa sổ
+với bộ đệm rỗng như lúc học, bộ lệnh là mọi dòng của `default_vi.json` qua `lang_vi`, cả lệnh chưa học. Câu là các đoạn
+`vad` cách nhau không quá `utterance.gap_s`, bỏ câu ngắn hơn `utterance.min_s`; mọi số của luật cắt nằm ở
+`contracts/listen.yaml`. Phiên ghi xong được nối thêm lặng như board nghe tiếp sau phiên, để câu cuối cũng chốt. Board
+chưa có `wake` cắt đúng như vậy, nên quyết định của board trên tiếng nói trực tiếp là quyết định Cửa 3 đếm. Tới khi
 E11-T13 chỉnh `δ₁` `δ₂` trên cụm na ná lệnh, bảng của `ctc` ghi lệnh điểm cao nhất của từng câu và quét `δ₁` để thấy đánh
 đổi giữa nhận và từ chối, chưa kết luận đạt hay trượt. Chấm float để đọc nhanh; số chọn model là số sau int8 (§1.3).
 
@@ -1933,15 +1944,18 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 |---|---|---|
 | `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame` | any, không chặn, người gọi giữ bộ nhớ |
 | `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_entry`, `lang_vi_unit_name` | any, không chặn |
-| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{begin,step,score}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `step` không chặn |
+| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |
 | `svc_*` | `svc_<x>_init`, `svc_<x>_step` | task, gọi từ đúng task của bảng §5.2 |
 
-**`ai_engine_command_{begin,step,score}` giữ nguyên cho cả hai đường của `command`** (ADR-0012). Độ dài khung đặc trưng
-mà `_step` nhận do model khai trong `meta.json` (`features`, §6.3): 40 với log-mel 40, 43 khi cộng ba chiều cao độ;
-`svc_listen` dựng khung theo đó. `_score` trả cùng một khuôn `ai_engine_command_result_t`: chỉ số lệnh hoặc −1, kèm ba
-điểm. Với `kws`, điểm là xác suất lớp thắng, khoảng cách tới lớp nhì, và xác suất của `other` cộng `silence`; bảng lệnh
-truyền vào chỉ được kiểm là có đủ các lớp lệnh.
+**`ai_engine_command_{prepare,begin,step,score}` giữ nguyên cho mọi đường của `command`** (ADR-0012). Độ dài khung đặc
+trưng mà `_step` nhận do model khai trong `meta.json` (`features`, §6.3): 40 với log-mel 40, 43 khi cộng ba chiều cao độ;
+`svc_listen` dựng khung theo đó. `_prepare(lexicon)` nhận bộ lệnh trước mọi cửa sổ, lúc khởi động và mỗi lần đổi bộ lệnh,
+để `_step` chấm dần theo khối thay vì để cả phép chấm tới lúc câu chốt (§5.4); `_score` vẫn nhận bộ lệnh và chấm lại cả
+cửa sổ khi bộ ấy khác bộ `_prepare` đã nhận, nên thiếu `_prepare` chỉ chậm chứ không sai. `_score` trả cùng một khuôn
+`ai_engine_command_result_t`: chỉ số lệnh hoặc −1, kèm ba điểm. Với `kws`, điểm là xác suất lớp thắng, khoảng cách tới
+lớp nhì, và xác suất của `other` cộng `silence`; bảng lệnh truyền vào chỉ được kiểm là có đủ các lớp lệnh, ở `_prepare`
+cũng như ở `_score`.
 
 **`ai_engine_ns_ops()` và khe `dsp_afe_ns_ops_t` giữ nguyên cho cả hai ứng viên của `ns`** (§3.9): khe nhận công suất
 257 vạch cùng phổ vọng dư khi có, trả 257 gain trong 0..1 và `speech_prob`. Đặc trưng, dải, chuẩn hoá và trạng thái GRU
@@ -2193,7 +2207,7 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 |---|---|---|---|---|---|---|
 | `thu_task` | `svc_front` | 1 | 17 | 3 KB | chặn trong `drv_audio_read_frame` tới khi DMA đủ một khung | lấy khung `ch0 ch1 [ref]`, gắn `seq`, đẩy chỉ số ô vào `q_frame`; đếm tràn DMA. **Không làm gì khác** |
 | `sach_task` | `svc_front` | 1 | 16 | 6 KB | `q_frame` | `dsp_afe_feed` rồi `fetch`; khung sạch vào `q_clean`; ghi `s_afe_stats`; luồng mở thì chép khung vào `sb_stream` không chờ |
-| `nhan_task` | `svc_listen` | 0 | 10 | 8 KB | `q_clean`, `q_cmdset` | log-mel → `wake` mỗi khung; ở trạng thái `LENH` thì chạy `command` thay `wake`; hết câu → chấm → `q_dialog`; ảnh không có `wake` thì chấm mọi câu `vad` cắt như Cửa 3 (§5.4), sự kiện → `q_event_up`; giữa hai câu nhận bộ lệnh mới từ `q_cmdset`, đổi bảng lệnh, ghi `set.json` (§5.3, §6.4) |
+| `nhan_task` | `svc_listen` | 0 | 10 | 8 KB | `q_clean`, `q_cmdset` | log-mel → `wake` mỗi khung; ở trạng thái `LENH` thì chạy cửa sổ `command` theo luồng thay `wake`; câu chốt → chấm → `q_dialog`; ảnh không có `wake` thì mở cửa sổ cho mọi câu `vad` tìm ra, cắt như Cửa 3 (§5.4), sự kiện → `q_event_up`; giữa hai câu nhận bộ lệnh mới từ `q_cmdset`, đổi bảng lệnh, đưa cho `ai_engine_command_prepare`, ghi `set.json` (§5.3, §6.4) |
 | `dieu_task` | `svc_dialog` | 0 | 8 | 4 KB | `q_dialog`, `q_cmd` | máy trạng thái §5.4; ra `q_speak`, `q_event_up`; báo `nhan_task` đổi chế độ |
 | `noi_task` | `svc_speak` | 0 | 5 | 8 KB | `q_speak` | dựng trọn câu vào PSRAM rồi đẩy xuống TX; giương `SPEAKING` suốt lúc phát |
 | `gui_task` | `svc_report` | 0 | 4 | 4 KB | nhịp 100 ms | lấy mẫu `s_afe_stats`, gộp 10 mẫu thành một `telemetry` mỗi giây; phát `q_event_up`; `heartbeat` mỗi 30 s |
@@ -2227,7 +2241,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `sb_stream` | StreamBuffer ở PSRAM, **chỉ tồn tại khi** `NET_STREAM_ENABLE`; cỡ `SVC_REPORT_STREAM_BUFFER_KB` | 512 KB: ~5 s ở `mode` 5, ~8 s ở `mode` 2 | `sach_task` | `luong_task` | ghi với timeout 0; không đủ chỗ cho **cả khung** thì bỏ cả khung, đếm; không bao giờ ghi nửa khung | một người ghi, một người đọc — đúng hợp đồng của stream buffer. Đường tới máy nhận khựng 0,4–0,8 s vài lần mỗi 10 phút trên board B (`latency.md` §4), quá 64 KB |
 | `q_dialog` | Queue depth 8, `app_event_t`, bộ nhớ ở PSRAM | 8 × 80 B | `nhan_task` | `dieu_task` | chờ 20 ms rồi bỏ, log **một lần** ở cạnh đầy | `nhan_task` không được đứng chờ lâu: sau lưng nó là 1 s đệm đang đầy dần |
 | `q_cmd` | Queue depth 4, `device_cmd_t` (sinh từ `contracts/`, chở cả chữ 512 B của `SPEAK`), bộ nhớ ở PSRAM | 4 × ~600 B | task của esp-mqtt | `dieu_task` | bỏ, log | callback esp-mqtt chỉ **phân tích** rồi bỏ vào đây; chờ ở callback là chặn cả đường MQTT |
-| `q_cmdset` | Queue depth 1, con trỏ tới một trong hai ô bộ lệnh của `net_mqtt` ở PSRAM, cấp lúc boot: bộ đã phân tích, kết quả phân tích, payload nguyên văn | 4 B + 2 × ~53 KB | task của esp-mqtt | `nhan_task` | bản mới thay bản chờ: task esp-mqtt rút bản chờ về rồi gửi bản mới; ô `nhan_task` đã nhận giữ nguyên tới lần nhận sau (`FREERTOS.md` 8.10); payload rỗng, tức bản retained bị xoá, không vào hàng | `nhan_task` tự chạy `lang_vi` và đổi bảng lệnh **giữa hai câu**: ở trạng thái `NGHE`, hay ở ảnh không có `wake` khi không còn cửa sổ chờ chấm; bộ trùng `version` với bộ đang dùng bị bỏ qua |
+| `q_cmdset` | Queue depth 1, con trỏ tới một trong hai ô bộ lệnh của `net_mqtt` ở PSRAM, cấp lúc boot: bộ đã phân tích, kết quả phân tích, payload nguyên văn | 4 B + 2 × ~53 KB | task của esp-mqtt | `nhan_task` | bản mới thay bản chờ: task esp-mqtt rút bản chờ về rồi gửi bản mới; ô `nhan_task` đã nhận giữ nguyên tới lần nhận sau (`FREERTOS.md` 8.10); payload rỗng, tức bản retained bị xoá, không vào hàng | `nhan_task` tự chạy `lang_vi`, đổi bảng lệnh và gọi `ai_engine_command_prepare` **giữa hai câu**: ở trạng thái `NGHE`, hay ở ảnh không có `wake` khi không có cửa sổ nào mở hay chờ chấm; bộ trùng `version` với bộ đang dùng bị bỏ qua |
 | `q_speak` | Queue depth 4, `app_speak_req_t`, bộ nhớ ở PSRAM | 4 × 546 B | `dieu_task` | `noi_task` | bỏ, log | |
 | `q_event_up` | Queue depth 16, `app_event_t`, bộ nhớ ở PSRAM | 16 × 80 B | `nhan_task`, `dieu_task` | `gui_task` | bỏ, tăng `events_dropped` | **người phát sự kiện không bao giờ publish**: publish QoS 1 chờ PUBACK, và `nhan_task` đứng chờ mạng là đệm 1 s đầy dần |
 | `eg_system` | EventGroup | 4 B | mọi task | mọi task | — | bit `WIFI_OK` `MQTT_OK` `TIME_OK` `MODELS_OK` `STREAM_ON` `SPEAKING` `CALIBRATING` `OTA_RUNNING` |
@@ -2246,7 +2260,7 @@ nguyên tử và gọi hàm `*FromISR`. Không log, không `malloc`, không floa
 ### 5.4 Máy trạng thái hội thoại và lịch CPU theo trạng thái
 
 ```
-        wake ≥ ngưỡng                  hết câu (vad tắt + 300 ms) hoặc 3 s
+        wake ≥ ngưỡng                  câu chốt: vad tắt quá utterance.gap_s
  NGHE ─────────────────► LENH ───────────────────────────────────► chấm
   ▲                        │ im 1,5 s                                │
   │                        └──────────────► NGHE        lệnh ◄──────┤──── từ chối → NGHE
@@ -2257,7 +2271,7 @@ nguyên tử và gọi hàm `*FromISR`. Không log, không `malloc`, không floa
 | Trạng thái | Nhân 1 | `nhan_task` | `noi_task` | Ghi chú |
 |---|---|---|---|---|
 | `NGHE` | `thu` + `sach` | `wake` mỗi khung | nghỉ | tải thường trực |
-| `LENH` | `thu` + `sach` | `command` mỗi khung, **`wake` dừng** | nghỉ | `ctc`: 11–18 ms mỗi 32 ms, tối đa 3 s; `kws`: chép khung, một lần chạy mạng lúc hết câu (§3.12) |
+| `LENH` | `thu` + `sach` | cửa sổ `command` theo luồng, **`wake` dừng** | nghỉ | `ctc`, `rnnt`: cao độ mỗi bước, mạng và phép chấm mỗi khối 16 bước, tối đa `window_s`; `kws`: chép khung, một lần chạy mạng lúc câu chốt (§3.12) |
 | `DAP` | `thu` + `sach`; `aec` tiếp tục học | nghỉ | dựng rồi phát | nói chen khi máy đang nói nằm ngoài phạm vi (§9) |
 
 Trong code và payload, ba trạng thái mang tên tiếng Anh theo CLAUDE.md §3.1: `NGHE` = `LISTEN`,
@@ -2266,22 +2280,37 @@ Trong code và payload, ba trạng thái mang tên tiếng Anh theo CLAUDE.md §
 Chính máy trạng thái này là thứ làm tải nhân 0 **không cộng dồn**: `wake`, `command`, `synth` không bao
 giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec` đạt, như một tuỳ chọn ở E14.
 
-**Ảnh model không có `wake`** (trước khi `wake` qua Cửa 2, hay khi chỉ demo `command`): không có gì đưa máy vào `LENH`,
-nên `nhan_task` chấm mọi câu `vad` tìm ra, cắt đúng như Cửa 3 (§3.12) theo `contracts/listen.yaml`:
+**Cửa sổ lệnh**, một luật cho ảnh có và không có `wake`, theo `contracts/listen.yaml`; Cửa 3 (§3.12) cắt đúng như vậy:
 
-- câu là các đoạn `vad` cách nhau không quá `utterance.gap_s`, chốt khi `vad` đã tắt lâu hơn thế; câu ngắn hơn
+- câu là các đoạn `vad` cách nhau không quá `utterance.gap_s`, chốt ở bước `vad` đã tắt lâu hơn thế; câu ngắn hơn
   `utterance.min_s` bị bỏ, không chấm;
-- cửa sổ kết thúc ở bước ngay sau đoạn `vad` cuối của câu, lùi tối đa `window_s` nhưng không lấn vào cửa sổ trước; bộ dò
-  cao độ đặt lại ở đầu cửa sổ rồi chạy qua mẫu sạch của nó; `ai_engine_command_{begin,step,score}` trên cả cửa sổ;
-- `svc_listen` tính log-mel mỗi bước và giữ log-mel cùng mẫu sạch của các bước gần nhất ở PSRAM; cao độ và mạng của cửa
-  sổ chạy từng bước một, xen giữa các khung mới của `q_clean`, nên `q_clean` không đầy dù một cửa sổ đủ dài tốn chừng
-  1 s tính 🔬; quyết định ra sau khi câu chốt cộng thời gian ấy;
+- cửa sổ mở `utterance.lead_s` trước bước `vad` đầu của câu, không lùi qua **mốc chặn**: bước sau cửa sổ trước, hay
+  trong `LENH` bước sau quyết định của `wake`; nó kết ở bước ngay sau đoạn `vad` cuối của câu. `lead_s` 1,25 s là p90
+  của quãng từ đầu mẩu tới bước `vad` đầu trong các mẩu `val` của `command` (trung vị 0,69 s), nên mạng thấy trước câu ít
+  nhất như lúc học; mở 0,5 s trước câu thì Cửa 3 sau int8 mất 5 câu lệnh đúng đứng đầu (`measurements/command.md` §5);
+- **cửa sổ chạy theo luồng**: từ khi câu đủ `utterance.min_s`, `svc_listen` chạy cao độ và `ai_engine_command_step` cho
+  từng bước của cửa sổ đã có, đuổi kịp phần trước câu rồi đi cùng các khung mới, xen giữa các khung của `q_clean`; mạng
+  chạy mỗi khối và phép chấm đi tiếp trên khung mới, theo bộ lệnh `ai_engine_command_prepare` đã nhận. Cuối cửa sổ chỉ
+  dời về sau, nên một bước đã qua mà câu còn mở chắc chắn thuộc cửa sổ; lúc câu chốt chỉ còn khối dở cuối và phần kết của
+  phép chấm. Quyết định ra sau bước chốt cỡ một lần chạy mạng cộng phần kết 🔬, không phải sau cả cửa sổ: trên board B,
+  cao độ cộng mạng của một cửa sổ Cửa 3 tốn 0,72–0,88 s trung bình;
+- cửa sổ dài quá `window_s` thì thôi chạy theo luồng: lúc câu chốt nó lùi từ bước cuối tối đa `window_s`, không qua mốc
+  chặn, rồi chạy cả cửa sổ, quyết định chậm cỡ 1 s 🔬; Cửa 3 có 2 trên 198 câu như thế;
+- `svc_listen` tính log-mel mỗi bước và giữ log-mel cùng mẫu sạch của các bước gần nhất ở PSRAM; bộ dò cao độ đặt lại ở
+  đầu cửa sổ, mạng bắt đầu từ bộ đệm rỗng như lúc học;
 - mỗi quyết định là một sự kiện vào `q_event_up`: `COMMAND` kèm điểm và khoảng cách nhất–nhì, hay `REJECT` kèm mã:
   `LOW_SCORE` khi lệnh tốt nhất kém vòng tự do quá `δ₁`, `LOW_MARGIN` khi hơn lệnh nhì chưa đủ `δ₂`, `PART` khi một phần
-  của lệnh được điểm bằng hay hơn cả lệnh; kèm một dòng log có bước đầu, bước cuối của cửa sổ, để máy tính dựng lại đúng
-  cửa sổ ấy từ luồng tiếng (`mode` 5 mang mẫu sạch) và so quyết định của board với Python.
+  của lệnh được điểm bằng hay hơn cả lệnh; kèm một dòng log có bước đầu, bước cuối của cửa sổ và thời gian từ bước chốt
+  tới quyết định, để máy tính dựng lại đúng cửa sổ ấy từ luồng tiếng (`mode` 5 mang mẫu sạch) và so quyết định của board
+  với Python.
 
-Ảnh có `wake` thì máy trạng thái trên áp dụng như cũ.
+**Ảnh model không có `wake`** (trước khi `wake` qua Cửa 2, hay khi chỉ demo `command`): không có gì đưa máy vào `LENH`,
+nên `nhan_task` mở cửa sổ cho mọi câu `vad` tìm ra, mốc chặn là bước sau cửa sổ trước.
+
+**Ảnh có `wake`**: `wake` vượt ngưỡng ở bước k thì vào `LENH` với mốc chặn k + 1, nên cửa sổ không chứa từ đánh thức:
+câu đang chạy qua bước k ("trợ lý bật đèn" nói liền) mở cửa sổ ở k + 1, câu sau đó mở như trên. Cửa sổ ấy thấy trước lệnh
+ít hơn cửa sổ của ảnh không có `wake`; điểm chia `T_W` (§3.12) nên `δ₁` `δ₂` giữ nguyên nghĩa, còn độ đúng thì đo lại trên
+phiên có `wake` khi `wake` vào ảnh (E11-T14). Im 1,5 s mà không có câu nào thì về `NGHE`, không chấm.
 
 ### 5.5 Quy chuẩn thêm task hoặc việc song song
 
