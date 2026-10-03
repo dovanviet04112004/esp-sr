@@ -304,10 +304,10 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad)
     return err;
 }
 
-// An open window waits until its utterance is long enough to keep; one cut back waits for the close.
+// From the first vad hop, even of a click the close then drops: catching up is the costly part (KEHOACH 5.4).
 static bool workable(const window_t *w)
 {
-    return !w->open || (!w->cut_back && s.run_last - s.run_first >= GEN_LISTEN_UTTERANCE_MIN_HOPS);
+    return !w->open || !w->cut_back;
 }
 
 bool svc_listen_pending(void)
