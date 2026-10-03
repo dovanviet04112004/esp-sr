@@ -158,11 +158,13 @@ của một file split thành đúng thứ bộ nhận dạng thấy trên máy:
    tốc độ rút từ dòng ngẫu nhiên riêng, nên phòng, mức và nhiễu vẫn như bản dựng không đổi tốc độ.
 2. Áp độ nhạy micro theo datasheet và chênh lệch giữa hai micro theo hiệu chuẩn của board (`calib/bal`, §3.4). Tiếng
    người nói qua thêm một **độ nghiêng phổ** rút cho phiên, dB mỗi octave trên 1 kHz, khoảng ở cấu hình, phủ đáp ứng
-   của vỏ hộp và giọng mà phòng mô phỏng không có. Rồi cộng **nền ồn thật của board**: một đoạn rút ngẫu nhiên từ các
-   phiên nền phòng yên thu bằng `capture` ở đúng `pcm_shift` sản phẩm, nhãn `probe` nên không vào tập chấm, cộng thẳng
-   vào mẫu hai kênh nên giữ đúng phổ, mức và tương quan giữa hai micro. Nền ấy cao hơn nhiễu tự thân theo datasheet ở mọi
-   băng, 13–27 dB dưới 2 kHz và 2–5 dB trên, có gò ở 1–2 kHz, và ngang tiếng ở 1 m trong dải 2–8 kHz của micro nghe nhỏ
-   (`measurements/mic_array.md` §4), nên thay hẳn nhiễu tự thân. Cuối cùng lượng tử `pcm_shift` (dịch phải rồi bão hoà, như `drv_audio`).
+   của vỏ hộp và giọng mà phòng mô phỏng không có. Rồi cộng **nhiễu tự thân của micro** theo datasheet, độc lập ở hai
+   kênh. Mục `microphone.floor` của cấu hình, khi có, thay nhiễu ấy bằng **nền thật của board**: một đoạn rút ngẫu nhiên
+   từ các phiên nền thu bằng `capture` ở đúng `pcm_shift` sản phẩm, nhãn `probe` nên không vào tập chấm, cộng thẳng vào
+   mẫu hai kênh nên giữ đúng phổ, mức và tương quan giữa hai micro. Nền ấy phải thu ở phòng yên thật, không máy tính hay
+   quạt chạy gần board: các phiên nền thu đến nay có tiếng quạt máy tính, cao hơn nhiễu tự thân 13–27 dB dưới 2 kHz
+   (`measurements/mic_array.md` §4), nên cấu hình chưa khai nền nào. Cuối cùng lượng tử `pcm_shift` (dịch phải rồi bão
+   hoà, như `drv_audio`).
 3. Chạy `srpipe.dsp.afe.chain` và log-mel của `srpipe.dsp.spec`. Đây là bản soi gương khớp firmware từng bit
    (§3.14), với đúng danh sách module sản phẩm. Ra `processed/<nhánh>/<tập>/`: đặc trưng, số của chuỗi (`vad`, mức,
    gain) và PCM sạch của từng mẩu, cộng manifest sha256. Nhánh nào khai kiểu lưu cho tập học thì đặc trưng của `train`
