@@ -127,7 +127,8 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
         contexts = quant.tree_contexts(rnnt_search.command_tree(ctc_score.default_lexicon()), size, pad)
         calib_t = [torch.from_numpy(c) for c in calib]
         rungs = ptq_espdl.ladder(ctc_quant.LADDER)
-        graphs = quant.quantized(net, calib_t, contexts, work, rungs, patches, JOINER_PAIRS, p["seed"])
+        columns = cfg["rnnt"]["joiner_columns"]
+        graphs = quant.quantized(net, calib_t, contexts, work, rungs, patches, JOINER_PAIRS, p["seed"], columns)
         names, trained_cfg = [f"c{k}" for k in range(len(ctc_score.default_lexicon()))], cfg
         windows, board, expected = ctc_probe.random_windows(cfg, *norm), [], []
     else:
@@ -148,11 +149,17 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
     hot_e = sim.predictor_io.input_exponent
     hot = ptq_espdl.to_int8(quant.one_hot(contexts[0], pad), hot_e).astype(np.float32) * np.float32(2.0**hot_e)
     frames = sim.projected(probe_x, probe_x.shape[2] // net.front.hop_stride)
+    columns = cfg["rnnt"]["joiner_columns"]
     f = quant.requant(frames[:, 0], sim.frames_out, sim.join_frame.exponent).astype(np.float32)
-    q = quant.requant(sim.prefix(contexts[0]), sim.predictor_io.output_exponent, sim.join_prefix.exponent)
+    q = [
+        quant.requant(
+            sim.prefix(contexts[k % len(contexts)]), sim.predictor_io.output_exponent, sim.join_prefix.exponent
+        )
+        for k in range(columns)
+    ]
     pair = (
-        f[None, :, None] * np.float32(2.0**sim.join_frame.exponent),
-        q.astype(np.float32)[None, :, None] * np.float32(2.0**sim.join_prefix.exponent),
+        np.repeat(f[None, :, None], columns, axis=2) * np.float32(2.0**sim.join_frame.exponent),
+        np.stack(q, axis=1).astype(np.float32)[None] * np.float32(2.0**sim.join_prefix.exponent),
     )
     with esp_ppq_patches.applied(patches):
         predictor = export_espdl.export(

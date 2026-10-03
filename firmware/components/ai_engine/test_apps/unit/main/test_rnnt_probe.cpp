@@ -168,13 +168,15 @@ struct Copied {
 };
 
 // The search's log-probabilities without a joiner: every frame and context get the same row.
-esp_err_t copied(void *ctx, size_t frame, const uint8_t *context, float *log_probs)
+esp_err_t copied(void *ctx, size_t frame, const uint8_t *contexts, size_t n, float *rows)
 {
     (void)frame;
-    (void)context;
+    (void)contexts;
     Copied *c = static_cast<Copied *>(ctx);
-    memcpy(log_probs, c->row, c->classes * sizeof(float));
-    c->calls++;
+    for (size_t j = 0; j < n; j++) {
+        memcpy(rows + j * c->classes, c->row, c->classes * sizeof(float));
+    }
+    c->calls += n;
     return ESP_OK;
 }
 
@@ -233,9 +235,17 @@ TEST_CASE("the rnnt graphs run as their ESP-PPQ simulation does, timed", "[ai_en
     const ai::Int8Tensor frame_in = joiner.input("frame");
     const ai::Int8Tensor prefix_in = joiner.input("prefix");
     const ai::Int8Tensor logits = joiner.output("logits");
+    const size_t columns = frame_in.elements / head.width;
+    const bool columns_first = frame_in.dims[1] == columns;
+    const bool logits_columns_first = logits.dims[1] == columns;
+    printf("rnnt joiner tensors: frame (%u, %u, %u), logits (%u, %u, %u)\n", (unsigned)frame_in.dims[0],
+           (unsigned)frame_in.dims[1], (unsigned)frame_in.dims[2], (unsigned)logits.dims[0],
+           (unsigned)logits.dims[1], (unsigned)logits.dims[2]);
     TEST_ASSERT_EQUAL(head.hot_rows * head.context, hot.elements);
     TEST_ASSERT_EQUAL(head.width, prefix.elements);
-    TEST_ASSERT_EQUAL(head.classes, logits.elements);
+    TEST_ASSERT_EQUAL(columns * head.width, prefix_in.elements);
+    TEST_ASSERT_EQUAL(columns * head.classes, logits.elements);
+    TEST_ASSERT_EQUAL(0, head.pairs % columns);
     TEST_ASSERT_EQUAL(head.hot_exponent, hot.exponent);
     TEST_ASSERT_EQUAL(head.prefix_exponent, prefix.exponent);
     TEST_ASSERT_EQUAL(head.frame_in_exponent, frame_in.exponent);
@@ -269,26 +279,36 @@ TEST_CASE("the rnnt graphs run as their ESP-PPQ simulation does, timed", "[ai_en
     }
     int worst_logits = 0, differ_logits = 0;
     int64_t joiner_us = 0;
-    for (uint16_t k = 0; k < head.pairs; k++) {
-        memcpy(frame_in.data, at, head.width);
-        memcpy(prefix_in.data, at + head.width, head.width);
+    const size_t pair_bytes = padded4(2 * head.width + head.classes);
+    for (uint16_t k = 0; k < head.pairs; k += columns) {
+        for (size_t j = 0; j < columns; j++) {
+            const uint8_t *pair = at + j * pair_bytes;
+            for (size_t d = 0; d < head.width; d++) {
+                const size_t place = columns_first ? j * head.width + d : d * columns + j;
+                frame_in.data[place] = static_cast<int8_t>(pair[d]);
+                prefix_in.data[place] = static_cast<int8_t>(pair[head.width + d]);
+            }
+        }
         const int64_t started_us = esp_timer_get_time();
         TEST_ASSERT_EQUAL(ESP_OK, joiner.step());
         joiner_us += esp_timer_get_time() - started_us;
-        const int8_t *want = reinterpret_cast<const int8_t *>(at + 2 * head.width);
-        int worst = 0;
-        for (size_t c = 0; c < head.classes; c++) {
-            const int diff = abs(logits.data[c] - want[c]);
-            worst = diff > worst ? diff : worst;
+        for (size_t j = 0; j < columns; j++) {
+            const int8_t *want = reinterpret_cast<const int8_t *>(at + j * pair_bytes + 2 * head.width);
+            int worst = 0;
+            for (size_t c = 0; c < head.classes; c++) {
+                const int8_t got = logits.data[logits_columns_first ? j * head.classes + c : c * columns + j];
+                const int diff = abs(got - want[c]);
+                worst = diff > worst ? diff : worst;
+            }
+            worst_logits = worst > worst_logits ? worst : worst_logits;
+            differ_logits += worst > 0 ? 1 : 0;
         }
-        worst_logits = worst > worst_logits ? worst : worst_logits;
-        differ_logits += worst > 0 ? 1 : 0;
-        at += padded4(2 * head.width + head.classes);
+        at += columns * pair_bytes;
     }
     printf("rnnt predictor: %u contexts, %d off python, worst %d, %" PRId64 " us a run\n", head.contexts,
            differ_prefix, worst_prefix, predictor_us / head.contexts);
-    printf("rnnt joiner: %u pairs, %d off python, worst %d, %" PRId64 " us a run\n", head.pairs,
-           differ_logits, worst_logits, joiner_us / head.pairs);
+    printf("rnnt joiner: %u pairs, %u a run, %d off python, worst %d, %" PRId64 " us a run\n", head.pairs,
+           (unsigned)columns, differ_logits, worst_logits, joiner_us / (head.pairs / columns));
     frames.release();
     predictor.release();
     joiner.release();
@@ -452,18 +472,21 @@ TEST_CASE("the rnnt search alone and the log-probabilities of one joiner output,
     const int64_t log_probs_us = esp_timer_get_time() - started_us;
 
     const size_t frames = (kWindowHopsMax + 1) / 2;
-    Copied c = {row, classes, 0};
-    ai_engine_command_result_t out;
-    started_us = esp_timer_get_time();
-    TEST_ASSERT_EQUAL(ESP_OK, ai_engine_command_rnnt_decide(&s_lexicon, tree, classes, frames,
-                                                            static_cast<uint8_t>(classes), copied, &c,
-                                                            UINT16_MAX, 0, work, nullptr, &out));
-    const int64_t search_us = esp_timer_get_time() - started_us;
-    printf("rnnt search: tree built in %" PRId64 " us; %u frames searched in %" PRId64 " us, %" PRId64
-           " us a frame, %u log-probability rows asked, %u a frame; log-softmax of one joiner output %" PRId64
-           " ns\n",
-           build_us, (unsigned)frames, search_us, search_us / (int64_t)frames, (unsigned)c.calls,
-           (unsigned)(c.calls / frames), log_probs_us * 1000 / kRuns);
+    printf("rnnt search: tree built in %" PRId64 " us; log-softmax of one joiner output %" PRId64 " ns\n",
+           build_us, log_probs_us * 1000 / kRuns);
+    for (const float beam : {INFINITY, AI_ENGINE_COMMAND_RNNT_BEAM_NATS}) {
+        Copied c = {row, classes, 0};
+        ai_engine_command_result_t out;
+        started_us = esp_timer_get_time();
+        TEST_ASSERT_EQUAL(ESP_OK, ai_engine_command_rnnt_decide(&s_lexicon, tree, classes, frames,
+                                                                static_cast<uint8_t>(classes), beam, copied,
+                                                                &c, UINT16_MAX, 0, work, nullptr, &out));
+        const int64_t search_us = esp_timer_get_time() - started_us;
+        printf("rnnt search at a beam of %.0f nats: %u frames in %" PRId64 " us, %" PRId64
+               " us a frame, %u rows asked a frame\n",
+               (double)beam, (unsigned)frames, search_us, search_us / (int64_t)frames,
+               (unsigned)(c.calls / frames));
+    }
     heap_caps_free(tree);
     heap_caps_free(work);
     heap_caps_free(row);
