@@ -1,8 +1,8 @@
 """The ctc postprocessing that ai_engine/src/command_ctc/ mirrors (KEHOACH 3.12): int8 logits to log-probabilities,
 each variant of each command scored by the CTC forward pass, each state a float32 mantissa with an exponent of its
 own; the best command is rejected when the free unit loop beats it by more than reject, the second best trails it by
-less than margin, both in thousandths of a nat a frame, or a run of its own syllables short of it scores no lower.
-emit writes contracts/golden/command_ctc/, which the C matches bit for bit.
+less than margin, both in thousandths of a nat a frame of a window_s window, or a run of its own syllables short of it
+scores no lower. emit writes contracts/golden/command_ctc/, which the C matches bit for bit.
 Run: python -m srpipe.tasks.command.ctc.postproc.ctc_score [--out <golden root>]
 """
 
@@ -122,9 +122,9 @@ def shifted(alpha: Wide, by: int, keep: np.ndarray | None = None) -> Wide:
     return m, e
 
 
-def sequence_score(table: Wide, units: np.ndarray, skip: bool = True) -> np.float32:
-    """log P(units | window) / frames by the CTC forward pass over the window's probabilities as exp_wide gives them,
-    (classes, frames), a unit's class its id plus one past the blank; -inf when the window is too short. skip off
+def sequence_score(table: Wide, units: np.ndarray, per_frames: int, skip: bool = True) -> np.float32:
+    """log P(units | window) / per_frames by the CTC forward pass over the window's probabilities as exp_wide gives
+    them, (classes, frames), a unit's class its id plus one past the blank; -inf when the window is too short. skip off
     forbids moving from a unit straight to the next, the negative control of the golden set."""
     mantissas, exponents = table
     frames = mantissas.shape[1]
@@ -141,15 +141,20 @@ def sequence_score(table: Wide, units: np.ndarray, skip: bool = True) -> np.floa
     total, top = wide_sum(tail)
     if total[0] == 0:
         return np.float32(-np.inf)
-    return np.float32((math.log(float(total[0])) + float(top[0]) * LN2) / float(frames))
+    return np.float32((math.log(float(total[0])) + float(top[0]) * LN2) / float(per_frames))
 
 
-def free_score(log_probs: np.ndarray) -> np.float32:
-    """The best path with no constraint, per frame: every frame's likeliest class, summed in frame order."""
+def free_score(log_probs: np.ndarray, per_frames: int) -> np.float32:
+    """The best path with no constraint over per_frames: every frame's likeliest class, summed in frame order."""
     total = np.float32(0.0)
     for v in log_probs.max(axis=0):
         total = np.float32(total + np.float32(v))
-    return np.float32(total / np.float32(log_probs.shape[1]))
+    return np.float32(total / np.float32(per_frames))
+
+
+def window_frames(stride: int) -> int:
+    """T_W, every score's divisor: the frames of a window of listen's window_s at stride hops a frame (KEHOACH 3.12)."""
+    return math.ceil(listen.WINDOW_HOPS / stride)
 
 
 def milli(x: np.float32) -> int:
@@ -157,9 +162,11 @@ def milli(x: np.float32) -> int:
     return int(min(CAP, max(0, np.rint(np.float32(x * MILLI)))))
 
 
-def command_scores(table: Wide, lexicon: list[list[np.ndarray]], skip: bool = True) -> np.ndarray:
+def command_scores(table: Wide, lexicon: list[list[np.ndarray]], per_frames: int, skip: bool = True) -> np.ndarray:
     """Each command's best variant score."""
-    return np.array([max(sequence_score(table, v, skip) for v in forms) for forms in lexicon], dtype=np.float32)
+    return np.array(
+        [max(sequence_score(table, v, per_frames, skip) for v in forms) for forms in lexicon], dtype=np.float32
+    )
 
 
 def syllables(units: np.ndarray) -> list[np.ndarray]:
@@ -189,21 +196,24 @@ def decide(
     lexicon: list[list[np.ndarray]],
     reject: int,
     margin: int,
+    per_frames: int,
     skip: bool = True,
     own_parts: bool = True,
 ):
-    """The decision of one window of (classes, frames) log-probabilities, int32 in the order of DECISION; the score
-    field is the winner's per-frame probability in permille. The winner is also rejected when a part of its own scores
-    no lower than it (KEHOACH 3.12). The first of equal scores wins. own_parts off never scores the winner's parts, a
-    negative control of the golden set."""
+    """The decision of one window of (classes, frames) log-probabilities, int32 in the order of DECISION, every score
+    divided by per_frames, T_W on the device; the score field is e to the winner's score in permille. The winner is
+    also rejected when a part of its own scores no lower than it (KEHOACH 3.12). The first of equal scores wins.
+    own_parts off never scores the winner's parts, a negative control of the golden set."""
     table = exp_wide(log_probs)
-    scores = command_scores(table, lexicon, skip)
+    scores = command_scores(table, lexicon, per_frames, skip)
     best = int(np.argmax(scores))
     second = max((s for k, s in enumerate(scores) if k != best), default=np.float32(-np.inf))
     reached = bool(scores[best] > -np.inf)
-    gap = milli(np.float32(free_score(log_probs) - scores[best])) if reached else CAP
+    gap = milli(np.float32(free_score(log_probs, per_frames) - scores[best])) if reached else CAP
     lead = milli(np.float32(scores[best] - second)) if second > -np.inf else CAP
-    whole = not own_parts or all(sequence_score(table, p, skip) < scores[best] for p in parts(lexicon[best]))
+    whole = not own_parts or all(
+        sequence_score(table, p, per_frames, skip) < scores[best] for p in parts(lexicon[best])
+    )
     accepted = reached and gap <= reject and lead >= margin and whole
     score = milli(exp32(scores[best])) if reached else 0
     return np.array([best if accepted else REJECTED, score, lead, gap], dtype=np.int32), scores
@@ -250,10 +260,12 @@ def case(
     skip: bool = True,
     center: bool = True,
     own_parts: bool = True,
+    by_own_frames: bool = False,
 ):
     """One golden case: windows of int8 logits (classes, frames) and their exponents, logits and log-probabilities
-    laid frame by frame and padded to FRAMES, the lexicon padded, each window's thresholds, and the command scores and
-    decision of each."""
+    laid frame by frame and padded to FRAMES, the lexicon padded, each window's thresholds, FRAMES as the scores'
+    divisor, and the command scores and decision of each; by_own_frames divides by each window's own frames instead
+    while the case still says FRAMES, a negative control."""
     longest = max(len(u) for forms in lexicon for u in forms)
     most = max(len(forms) for forms in lexicon)
     units = np.zeros((len(lexicon), most, longest), dtype=np.int32)
@@ -268,7 +280,8 @@ def case(
         x = frame_log_probs(q, exponent, center)
         logits[w, : q.shape[1]] = q.T
         grid[w, : x.shape[1]] = x.T
-        decision, row = decide(x, lexicon, int(limits[0]), int(limits[1]), skip, own_parts)
+        per_frames = q.shape[1] if by_own_frames else FRAMES
+        decision, row = decide(x, lexicon, int(limits[0]), int(limits[1]), per_frames, skip, own_parts)
         decisions.append(decision)
         scores.append(row)
     return {
@@ -280,6 +293,7 @@ def case(
         "n_variants": np.array([len(forms) for forms in lexicon], dtype=np.int32),
         "n_units": n_units,
         "thresholds": np.asarray(thresholds, dtype=np.int32),
+        "per_frames": np.array([FRAMES], dtype=np.int32),
         "scores": np.stack(scores),
         "decision": np.stack(decisions),
     }
@@ -312,8 +326,8 @@ def edge_case(rng: np.random.Generator):
     windows = [(said(rng, np.array(u, np.uint8), frames, e), e) for u, frames in zip(said_units, lengths, strict=True)]
     thresholds = np.full((len(windows), 2), (1000, 50), dtype=np.int32)
     thresholds[2, 1] = 1
-    thresholds[4, 0] = decide(frame_log_probs(*windows[4]), lexicon, 0, 0)[0][3]
-    thresholds[5] = (CAP, decide(frame_log_probs(*windows[5]), lexicon, 0, 0)[0][2])
+    thresholds[4, 0] = decide(frame_log_probs(*windows[4]), lexicon, 0, 0, FRAMES)[0][3]
+    thresholds[5] = (CAP, decide(frame_log_probs(*windows[5]), lexicon, 0, 0, FRAMES)[0][2])
     return case(windows, lexicon, thresholds)
 
 
@@ -349,7 +363,7 @@ def probe_record(cfg: dict) -> bytes:
     frames = math.ceil(listen.WINDOW_HOPS / stride)
     rng, lexicon, e = np.random.default_rng(SEED), default_lexicon(), LOGIT_EXPONENTS[1]
     window = frame_log_probs(said(rng, lexicon[0][0], frames, e), e)
-    decision, scores = decide(window, lexicon, *spec["thresholds"])
+    decision, scores = decide(window, lexicon, *spec["thresholds"], frames)
     (commands, most, longest), packed = packed_lexicon(lexicon)
     head = DECIDE_HEAD.pack(
         DECIDE_MAGIC, n_classes(), frames, commands, most, longest, spec["runs"], *spec["thresholds"]
@@ -361,8 +375,9 @@ def probe_record(cfg: dict) -> bytes:
 
 def emit(root: Path) -> list[Path]:
     """Random windows over the default commands and over a small set, the edge windows, parts of commands said alone,
-    and three negative controls: a forward pass that never moves from one unit straight to the next, log-probabilities
-    with no largest taken off, and a winner whose parts are left out of its rivals."""
+    and four negative controls: a forward pass that never moves from one unit straight to the next, log-probabilities
+    with no largest taken off, a winner whose parts are left out of its rivals, and scores divided by each window's own
+    frames."""
     rng = np.random.default_rng(SEED)
     lexicon = default_lexicon()
     cases = {
@@ -380,6 +395,7 @@ def emit(root: Path) -> list[Path]:
     cases["case_neg_000"] = case(windows, lexicon, first["thresholds"], skip=False)
     cases["case_neg_001"] = case(windows, lexicon, first["thresholds"], center=False)
     cases["case_neg_002"] = case(partial, lexicon, limits, own_parts=False)
+    cases["case_neg_003"] = case(windows, lexicon, first["thresholds"], by_own_frames=True)
     written = []
     for name, tensors in cases.items():
         path = root / BLOCK / f"{name}.gold"

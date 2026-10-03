@@ -20,10 +20,7 @@ import torch
 from torch import nn
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
-from srpipe.core.audio_io import to_float
-from srpipe.core.config import ML_ROOT, data_paths, load_device, load_yaml
-from srpipe.dsp.spec.mel import Mel, MelConfig
-from srpipe.dsp.spec.stft import Stft
+from srpipe.core.config import ML_ROOT, data_paths, load_yaml
 from srpipe.export import pack_models, update_lock
 from srpipe.generated import grid, listen
 from srpipe.tasks import command
@@ -164,12 +161,13 @@ def command_windows(cfg: dict, graph, model: encoder.CtcNet, norm: tuple, window
     sizes = (commands, most, longest, cfg["chunk_hops"])
     body = WINDOWS_HEAD.pack(WINDOWS_MAGIC, len(mean), len(windows), reject, margin, *sizes)
     body += packed + b"\0" * (-(WINDOWS_HEAD.size + len(packed)) % 4)
+    per_frames = ctc_score.window_frames(model.front.hop_stride)
     for x in windows:
         logits = int8(torch.from_numpy(((x - mean) / std).T[None].astype(np.float32))).numpy()[0]
         frames = -(-len(x) // model.front.hop_stride)
         q = ptq_espdl.to_int8(logits[:, :frames], int8.io.output_exponent)
         log_probs = ctc_score.frame_log_probs(q, int8.io.output_exponent)
-        decision, _ = ctc_score.decide(log_probs, lexicon, reject, margin)
+        decision, _ = ctc_score.decide(log_probs, lexicon, reject, margin, per_frames)
         body += struct.pack("<I", len(x)) + np.ascontiguousarray(x, dtype="<f4").tobytes()
         body += ctc_score.DECISION_RECORD.pack(*decision.tolist())
     return body
@@ -189,12 +187,14 @@ def gate_windows(cfg: dict, graph, model: encoder.CtcNet, norm: tuple, windows: 
     body = GATE_HEAD.pack(GATE_MAGIC, len(mean), len(windows), reject, margin, *sizes, e)
     body += np.concatenate([mean, std]).astype("<f4").tobytes() + packed
     body += b"\0" * (-len(body) % 4)
+    per_frames = ctc_score.window_frames(model.front.hop_stride)
     for x in windows:
         normalised = ((x - mean) / std).T[None].astype(np.float32)
         logits = int8(torch.from_numpy(normalised)).numpy()[0]
         frames = -(-len(x) // model.front.hop_stride)
         q = ptq_espdl.to_int8(logits[:, :frames], int8.io.output_exponent)
-        decision, _ = ctc_score.decide(ctc_score.frame_log_probs(q, int8.io.output_exponent), lexicon, reject, margin)
+        log_probs = ctc_score.frame_log_probs(q, int8.io.output_exponent)
+        decision, _ = ctc_score.decide(log_probs, lexicon, reject, margin, per_frames)
         hops = np.ascontiguousarray(ptq_espdl.to_int8(normalised, e)[0].T).tobytes()
         body += struct.pack("<I", len(x)) + hops + b"\0" * (-len(hops) % 4)
         body += ctc_score.DECISION_RECORD.pack(*decision.tolist())
@@ -261,35 +261,21 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
     return image, streams, decide, command, every, labels
 
 
-def listen_session(
-    clean: np.ndarray, vad: np.ndarray, features: np.ndarray, decided_of: Callable, tracker, mel: Mel
-) -> bytes:
-    """A board session as svc_listen's test feeds it: its vad, the clean samples of every hop a window reads and the
-    hop ahead of it, which the STFT of the window's first hop overlaps, and each window as Gate 3 cuts it with the
-    decision decided_of(window) takes; hops outside the segments are fed as zeros, which no window reads. Silence
-    follows the session, as the test feeds it to close an utterance running to the end: a window then reaches one hop
-    into it, with that hop's log-mel from the STFT going on from the session's last hop."""
-    hop, tail = grid.HOP_SAMPLES, listen.UTTERANCE_GAP_HOPS + 1
-    stft = Stft()
-    stft.analyze(to_float(clean[-hop:]))
-    silence = np.zeros(hop, dtype=np.int16)
-    after_mel = np.stack([mel.log(stft.analyze(to_float(silence))) for _ in range(tail)]).astype(features.dtype)
-    clean_on = np.concatenate([clean, np.zeros(tail * hop, dtype=clean.dtype)])
-    features_on = np.concatenate([features, after_mel])
-    spans, ranges, after = utterances(vad), [], 0
-    for _, last in spans:
-        end = last + 1
-        start = max(end + 1 - listen.WINDOW_HOPS, after)
-        ranges.append((start, end))
-        after = end + 1
+def listen_session(clean: np.ndarray, vad: np.ndarray, features: np.ndarray, decided_of: Callable, tracker) -> bytes:
+    """A board session with the silence eval.heard puts after it, as svc_listen's test feeds it: its vad, the clean
+    samples of every hop a command window reads and the hop ahead of it, which the STFT of the window's first hop
+    overlaps, and each window with the decision decided_of(window) takes; hops outside the segments are fed as zeros,
+    which no window reads."""
+    hop, spans = grid.HOP_SAMPLES, utterances(vad)
+    ranges = gate.command_cut(spans)
     segments: list[list[int]] = []
     for start, end in ranges:
-        first, last = max(start - 1, 0), min(end, len(vad) - 1)
+        first = max(start - 1, 0)
         if segments and first <= segments[-1][1] + 1:
-            segments[-1][1] = max(segments[-1][1], last)
+            segments[-1][1] = max(segments[-1][1], end)
         else:
-            segments.append([first, last])
-    windows = gate.ctc_windows(clean_on, features_on, spans, listen.WINDOW_HOPS, tracker)
+            segments.append([first, end])
+    windows = gate.ctc_windows(clean, features, spans, tracker)
     body = SESSION_HEAD.pack(len(vad), len(segments), len(ranges))
     body += np.packbits(vad.astype(np.uint8), bitorder="little").tobytes()
     body += b"\0" * (-len(body) % 4)
@@ -312,21 +298,21 @@ def listen_rounds(cfg: dict, out: Path) -> list[Path]:
     graph = export_espdl.load_native(run / "int8" / meta["row"] / quant.GRAPH_FILE)
     int8 = quant.Int8Net(graph, cfg["quant"]["hops"], trained.mean, trained.std, trained.model, cfg["esp_ppq_patches"])
     reject, margin = cfg["quant"]["reject"], cfg["eval"]["margin"]
-    lexicon = ctc_score.default_lexicon()
+    lexicon, per_frames = ctc_score.default_lexicon(), ctc_score.window_frames(trained.model.front.hop_stride)
 
     def decided_of(x: np.ndarray) -> list[int]:
         logits = int8(torch.from_numpy(((x - trained.mean) / trained.std).T[None].astype(np.float32))).numpy()[0]
         frames = -(-len(x) // trained.model.front.hop_stride)
         q = ptq_espdl.to_int8(logits[:, :frames], int8.io.output_exponent)
-        return ctc_score.decide(ctc_score.frame_log_probs(q, int8.io.output_exponent), lexicon, reject, margin)[0]
+        log_probs = ctc_score.frame_log_probs(q, int8.io.output_exponent)
+        return ctc_score.decide(log_probs, lexicon, reject, margin, per_frames)[0]
 
     spec = load_yaml(command.CONFIG)["eval"]["board"]
     listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
     named = b"".join(c["id"].encode() + b"\0" + c["text"].encode() + b"\0" for c in listed)
     named += b"\0" * (-(LISTEN_HEAD.size + len(named)) % 4)
-    mel = Mel(MelConfig(**load_device(trained.cfg["features"])["features"]))
     bodies = [
-        listen_session(clean, vad, features, decided_of, tracker, mel)
+        listen_session(clean, vad, features, decided_of, tracker)
         for _, clean, vad, features, tracker in gate.heard_sessions(trained.cfg, spec, data_paths())
     ]
     out.mkdir(parents=True, exist_ok=True)

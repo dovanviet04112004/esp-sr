@@ -1,8 +1,8 @@
 """The rnnt decision that ai_engine/src/command_rnnt/ mirrors (KEHOACH 3.12, ADR-0016): every variant and part of every
 command scored by the RNN-T forward over a prefix tree of them, as many units a frame as the lattice takes, nodes far
-behind dropped, frame by frame; then the ctc track's rules: the greedy path ahead by more than reject, another command
-within margin, or a part of the winner no lower than it, in thousandths of a nat a frame. Every score is float32 in the
-C's order; two paths into one node add through ctc_score's exp and a log in double. emit writes the golden set.
+behind dropped, frame by frame; then the ctc track's rules in thousandths of a nat a frame of a window_s window. Every
+score is float32 in the C's order; two paths into one node add through ctc_score's exp and a log in double. emit writes
+the golden set.
 Run: python -m srpipe.tasks.command.rnnt.postproc.rnnt_search [--out <golden root>]
 """
 
@@ -187,23 +187,24 @@ def greedy(log_probs: LogProbs, frames: int, size: int, pad: int) -> tuple[tuple
     return s.units, s.total
 
 
-def finish(s: Search, tree: Tree, reject: int, margin: int, own_parts: bool = True):
+def finish(s: Search, tree: Tree, reject: int, margin: int, per_frames: int, own_parts: bool = True):
     """The decision of the search's frames, int32 in the order of ctc_score.DECISION, and each command's best variant
-    score a frame (-inf with no frame). The winner is the first of the best; own_parts off ignores its parts."""
+    score over per_frames, T_W on the device (-inf with no frame). The winner is the first of the best; own_parts off
+    ignores its parts."""
     n_commands = len(tree.variants)
     scores = np.full(n_commands, -np.inf, dtype=np.float32)
     part = np.full(n_commands, -np.inf, dtype=np.float32)
     if s.frames > 0:
         for c in range(n_commands):
             for n in tree.variants[c]:
-                scores[c] = max(scores[c], np.float32(s.alpha[n] / np.float32(s.frames)))
+                scores[c] = max(scores[c], np.float32(s.alpha[n] / np.float32(per_frames)))
             for n in tree.parts[c]:
-                part[c] = max(part[c], np.float32(s.alpha[n] / np.float32(s.frames)))
+                part[c] = max(part[c], np.float32(s.alpha[n] / np.float32(per_frames)))
     best = int(np.argmax(scores))
     if not scores[best] > -np.inf:
         return np.array([REJECTED, 0, CAP, CAP], dtype=np.int32), scores
     second = max((v for k, v in enumerate(scores) if k != best), default=np.float32(-np.inf))
-    free = np.float32(s.total / np.float32(s.frames))
+    free = np.float32(s.total / np.float32(per_frames))
     gap = milli(np.float32(free - scores[best]))
     lead = milli(np.float32(scores[best] - second)) if second > -np.inf else CAP
     whole = not own_parts or bool(part[best] < scores[best])
@@ -220,6 +221,7 @@ def decide(
     margin: int,
     size: int,
     pad: int,
+    per_frames: int,
     own_parts: bool = True,
     add: bool = True,
     chain: bool = True,
@@ -229,7 +231,7 @@ def decide(
     s = begin(tree, size, pad)
     for _ in range(frames):
         frame(s, tree, log_probs, add, chain, beam)
-    return finish(s, tree, reject, margin, own_parts)
+    return finish(s, tree, reject, margin, per_frames, own_parts)
 
 
 def table_log_probs(frames: np.ndarray, first: np.ndarray, last: np.ndarray, exponent: int) -> LogProbs:
@@ -266,10 +268,12 @@ def case(
     chain: bool = True,
     beam: np.float32 = BEAM_NATS,
     told: np.float32 | None = None,
+    by_own_frames: bool = False,
 ) -> dict[str, np.ndarray]:
     """One golden case: int8 frames (frames, classes) and their exponents padded to FRAMES, the lexicon padded, the
-    context tables, each window's reject and margin, the beam the C is told (beam unless told), and the command
-    scores and decision of each at beam."""
+    context tables, each window's reject and margin, the beam the C is told (beam unless told), FRAMES as the scores'
+    divisor, and the command scores and decision of each at beam; by_own_frames divides by each window's own frames
+    while the case still says FRAMES."""
     longest = max(len(u) for forms in lexicon for u in forms)
     most = max(len(forms) for forms in lexicon)
     units = np.zeros((len(lexicon), most, longest), dtype=np.int32)
@@ -283,7 +287,8 @@ def case(
     for w, ((q, exponent), (reject, margin)) in enumerate(zip(windows, limits, strict=True)):
         frames[w, : len(q)] = q
         lp = table_log_probs(q, *tables, exponent)
-        decision, row = decide(lp, len(q), tree, reject, margin, CONTEXT, pad, own_parts, add, chain, beam)
+        per_frames = max(len(q), 1) if by_own_frames else FRAMES
+        decision, row = decide(lp, len(q), tree, reject, margin, CONTEXT, pad, per_frames, own_parts, add, chain, beam)
         decisions.append(decision)
         scores.append(row)
     return {
@@ -297,6 +302,7 @@ def case(
         "n_units": n_units,
         "limits": np.asarray(limits, dtype=np.int32),
         "beam": np.array([beam if told is None else told], dtype=np.float32),
+        "per_frames": np.array([FRAMES], dtype=np.int32),
         "scores": np.stack(scores).astype(np.float32),
         "decision": np.stack(decisions),
     }
@@ -352,7 +358,7 @@ def emit(root: Path) -> list[Path]:
     """Random windows over the default commands and over a small set at the product's beam; the edge windows with no
     node dropped, and three negative controls on them: a winner whose parts are ignored, paths into a node merged by
     the larger, one unit a frame; the edge windows at the product's beam, and its negative control, every node but the
-    best dropped each frame."""
+    best dropped each frame; and the random windows with scores divided by each window's own frames."""
     rng = np.random.default_rng(SEED)
     lexicon = ctc_score.default_lexicon()
     tables = context_tables(rng)
@@ -368,6 +374,7 @@ def emit(root: Path) -> list[Path]:
         "case_neg_001": case(edges, lexicon, tables, edge_limits, add=False, beam=EVERY_NODE),
         "case_neg_002": case(edges, lexicon, tables, edge_limits, chain=False, beam=EVERY_NODE),
         "case_neg_003": case(edges, lexicon, tables, edge_limits, beam=np.float32(0.0), told=BEAM_NATS),
+        "case_neg_004": case(windows, lexicon, tables, limits, by_own_frames=True),
     }
     written = []
     for name, tensors in cases.items():

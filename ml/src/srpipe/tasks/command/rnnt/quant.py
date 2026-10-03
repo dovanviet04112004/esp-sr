@@ -215,9 +215,11 @@ def tree_contexts(tree: rnnt_search.Tree, size: int, pad: int) -> list[tuple[int
 
 def int8_decided(sim: Int8Rnnt, x: np.ndarray, mean: np.ndarray, std: np.ndarray, tree, reject: int, margin: int):
     """The decision of a raw window (hops, dims) on the int8 graphs, as rnnt_search.decide gives it."""
-    frames = -(-len(x) // sim.frames.front.hop_stride)
+    stride = sim.frames.front.hop_stride
+    frames, per_frames = -(-len(x) // stride), ctc_score.window_frames(stride)
     window = ((x - mean) / std).T[None].astype(np.float32)
-    return rnnt_search.decide(sim.log_probs(window, frames), frames, tree, reject, margin, sim.size, sim.pad)
+    log_probs = sim.log_probs(window, frames)
+    return rnnt_search.decide(log_probs, frames, tree, reject, margin, sim.size, sim.pad, per_frames)
 
 
 def int8_heard(sim: Int8Rnnt, net: gate.Ctc, x: np.ndarray) -> gate.Heard:

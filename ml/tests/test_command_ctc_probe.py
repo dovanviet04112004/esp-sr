@@ -74,7 +74,8 @@ def test_the_windows_record_reads_back_with_the_decisions_python_takes(monkeypat
         assert hops == len(x) and body[at : at + x.nbytes] == x.astype("<f4").tobytes()
         at += x.nbytes
         q = (replay(None).numpy()[0, :, : -(-hops // 2)] / 2.0**EXPONENT).astype(np.int8)
-        want, _ = ctc_score.decide(ctc_score.frame_log_probs(q, EXPONENT), lexicon, reject, margin)
+        per_frames = ctc_score.window_frames(2)
+        want, _ = ctc_score.decide(ctc_score.frame_log_probs(q, EXPONENT), lexicon, reject, margin, per_frames)
         assert list(ctc_score.DECISION_RECORD.unpack_from(body, at)) == want.tolist()
         at += ctc_score.DECISION_RECORD.size
     assert at == len(body)
@@ -107,7 +108,8 @@ def test_the_gate_record_reads_back_each_window_as_its_int8_input_and_python_dec
         assert hops == len(x) and body[at : at + x.size] == want.tobytes()
         at += x.size + (-x.size % 4)
         q = (replay(None).numpy()[0, :, : -(-hops // 2)] / 2.0**EXPONENT).astype(np.int8)
-        decision, _ = ctc_score.decide(ctc_score.frame_log_probs(q, EXPONENT), lexicon, reject, margin)
+        log_probs = ctc_score.frame_log_probs(q, EXPONENT)
+        decision, _ = ctc_score.decide(log_probs, lexicon, reject, margin, ctc_score.window_frames(2))
         assert list(ctc_score.DECISION_RECORD.unpack_from(body, at)) == decision.tolist()
         at += ctc_score.DECISION_RECORD.size
     assert at == len(body)
@@ -128,14 +130,13 @@ def test_gate_3_counts_the_chips_decisions_and_refuses_a_log_missing_a_window(tm
 
 
 def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read() -> None:
-    hop, rng = grid.HOP_SAMPLES, np.random.default_rng(5)
+    hop, rng, lead = grid.HOP_SAMPLES, np.random.default_rng(5), listen.UTTERANCE_LEAD_HOPS
     vad = np.zeros(400, dtype=bool)
     vad[50:80] = vad[200:230] = vad[236:250] = vad[380:390] = True
     clean = rng.integers(-2000, 2000, 400 * hop).astype(np.int16)
     features = rng.normal(size=(400, listen.N_BANDS)).astype(np.float32)
     tracker = SimpleNamespace(reset=lambda: None, step=lambda x: np.zeros(3, dtype=np.float32))
-    mel = SimpleNamespace(log=lambda bins: np.zeros(listen.N_BANDS, dtype=np.float32))
-    body = probe.listen_session(clean, vad, features, lambda x: [len(x), 1, 2, 3], tracker, mel)
+    body = probe.listen_session(clean, vad, features, lambda x: [len(x), 1, 2, 3], tracker)
     hops, n_segments, n_windows = probe.SESSION_HEAD.unpack_from(body)
     assert hops == 400 and n_windows == 2
     at = probe.SESSION_HEAD.size
@@ -151,11 +152,14 @@ def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read(
         segments.append((first, first + n - 1))
         at += n * hop * 2
     windows = [probe.WINDOW_RECORD.unpack_from(body, at + k * probe.WINDOW_RECORD.size) for k in range(n_windows)]
-    assert [w[:2] for w in windows] == [(0, 80), (81, 250)]
-    assert [w[2] for w in windows] == [81, 170] and segments == [(0, 250)]
+    assert [w[:2] for w in windows] == [(0, 80), (200 - lead, 250)]
+    assert [w[2] for w in windows] == [81, 51 + lead] and segments == [(0, 80), (199 - lead, 250)]
     assert at + n_windows * probe.WINDOW_RECORD.size == len(body)
     vad[380:400] = True
-    body = probe.listen_session(clean, vad, features, lambda x: [len(x), 1, 2, 3], tracker, mel)
-    *_, n_windows = probe.SESSION_HEAD.unpack_from(body)
+    mel = SimpleNamespace(log=lambda bins: np.zeros(listen.N_BANDS, dtype=np.float32))
+    session = gate.with_silence(clean, vad, features, mel)
+    body = probe.listen_session(*session, lambda x: [len(x), 1, 2, 3], tracker)
+    hops, _, n_windows = probe.SESSION_HEAD.unpack_from(body)
     last = probe.WINDOW_RECORD.unpack_from(body, len(body) - probe.WINDOW_RECORD.size)
-    assert n_windows == 3 and last[:3] == (251, 400, 150)
+    assert hops == 400 + listen.UTTERANCE_GAP_HOPS + 1 and n_windows == 3
+    assert last[:3] == (380 - lead, 400, 21 + lead)

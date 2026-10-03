@@ -1,6 +1,7 @@
 """Gate 3 of the command tracks (KEHOACH 3.12) on the sessions recorded through board B: each session through the
-product's chain, each utterance its vad finds scored once where vad turns off after it, as LENH scores it. A session
-saying a command the net knows counts the utterances decided as that command; any other counts those rejected.
+product's chain, each utterance its vad finds scored once on the command window svc_listen cuts for it (KEHOACH 5.4).
+A session saying a command the net knows counts the utterances decided as that command; any other counts those
+rejected.
 Run: python -m srpipe.tasks.command.eval {kws,ctc} <run under ml/>
 """
 
@@ -21,10 +22,12 @@ import torch
 import yaml
 
 from srpipe.core import corpus
+from srpipe.core.audio_io import to_float
 from srpipe.core.config import data_paths, load_device, load_yaml
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
+from srpipe.dsp.spec.stft import Stft
 from srpipe.generated import array, grid, listen
 from srpipe.scenes import device
 from srpipe.tasks import command
@@ -131,11 +134,29 @@ def expected_of(kind: str, prompt: str, command_of: dict[tuple, str]) -> str:
 
 
 def heard(folder: Path, chain_cfg: ChainConfig, mel: Mel) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Clean samples, vad and log-mel per hop of a session's ch0 and ch1 through the product's chain."""
+    """Clean samples, vad and log-mel per hop of a session's ch0 and ch1 through the product's chain, followed by
+    silence as the board hears on after the session."""
     channels = [sf.read(folder / f"ch{m}.wav", dtype="int16")[0] for m in range(array.N_MICS)]
     n = min(len(c) for c in channels) // grid.HOP_SAMPLES * grid.HOP_SAMPLES
     clean, figures, features = device.listen(np.stack([c[:n] for c in channels], axis=1), chain_cfg, mel)
-    return clean, figures[:, 0].astype(bool), features
+    return with_silence(clean, figures[:, 0].astype(bool), features, mel)
+
+
+def with_silence(
+    clean: np.ndarray, vad: np.ndarray, features: np.ndarray, mel: Mel
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """A session followed by listen's gap and a hop of digital silence, enough to close an utterance running to its
+    end: no vad, and log-mel from the STFT going on from the session's last hop, as svc_listen computes it."""
+    hop, tail = grid.HOP_SAMPLES, listen.UTTERANCE_GAP_HOPS + 1
+    stft = Stft()
+    stft.analyze(to_float(clean[-hop:]))
+    silence = np.zeros(hop, dtype=clean.dtype)
+    after = np.stack([mel.log(stft.analyze(to_float(silence))) for _ in range(tail)]).astype(features.dtype)
+    return (
+        np.concatenate([clean, np.zeros(tail * hop, dtype=clean.dtype)]),
+        np.concatenate([vad, np.zeros(tail, dtype=bool)]),
+        np.concatenate([features, after]),
+    )
 
 
 def windows(
@@ -166,17 +187,27 @@ def decisions(net: Kws, x: np.ndarray) -> list[tuple[str, int]]:
     return out
 
 
-def ctc_windows(clean: np.ndarray, features: np.ndarray, spans: Spans, longest: int, tracker: PitchTracker):
-    """Per utterance the window ending where vad turns off after it and reaching longest hops back, as LENH keeps it
-    from its start, but never into the utterance ahead of it; its log-mel, then pitch from a tracker reset at its first
-    hop."""
+def command_cut(spans: Spans) -> list[tuple[int, int]]:
+    """The first and last hop of each utterance's command window as svc_listen cuts it (KEHOACH 5.4): from listen's
+    lead ahead of its first vad hop to the hop after its last, never back past the window ahead of it; a window longer
+    than listen's reaches back that far from its end instead."""
     out, after = [], 0
-    for _, last in spans:
-        end = min(last + 1, len(features) - 1)
-        start = max(end + 1 - longest, after)
+    for first, last in spans:
+        end = last + 1
+        start = max(first - listen.UTTERANCE_LEAD_HOPS, after)
+        if end + 1 - start > listen.WINDOW_HOPS:
+            start = max(end + 1 - listen.WINDOW_HOPS, after)
+        out.append((start, end))
+        after = end + 1
+    return out
+
+
+def ctc_windows(clean: np.ndarray, features: np.ndarray, spans: Spans, tracker: PitchTracker) -> list[np.ndarray]:
+    """Each utterance's command window: its log-mel, then pitch from a tracker reset at its first hop."""
+    out = []
+    for start, end in command_cut(spans):
         pitch = device.item_pitch(tracker, clean[start * grid.HOP_SAMPLES : (end + 1) * grid.HOP_SAMPLES])
         out.append(np.concatenate([features[start : end + 1], pitch], axis=1).astype(np.float32))
-        after = end + 1
     return out
 
 
@@ -205,7 +236,8 @@ def ctc_heard(net: Ctc, x: np.ndarray) -> Heard:
     window, frames = normalised_window(net, x)
     with torch.no_grad():
         log_probs = net.model(window).log_softmax(1)[0, :, :frames].numpy()
-    return heard_of(net, *ctc_score.decide(log_probs, net.lexicon, ctc_score.CAP, 0))
+    per_frames = ctc_score.window_frames(net.model.front.hop_stride)
+    return heard_of(net, *ctc_score.decide(log_probs, net.lexicon, ctc_score.CAP, 0, per_frames))
 
 
 def rnnt_log_probs(net: Ctc, encoded: torch.Tensor) -> rnnt_search.LogProbs:
@@ -235,7 +267,8 @@ def rnnt_heard(net: Ctc, x: np.ndarray) -> Heard:
         encoded = net.model.encode(window)
     tree, size = rnnt_search.command_tree(net.lexicon), net.cfg["rnnt"]["context"]
     log_probs, pad = rnnt_log_probs(net, encoded), net.model.transducer.predictor.pad
-    return heard_of(net, *rnnt_search.decide(log_probs, frames, tree, ctc_score.CAP, 0, size, pad))
+    per_frames = ctc_score.window_frames(net.model.front.hop_stride)
+    return heard_of(net, *rnnt_search.decide(log_probs, frames, tree, ctc_score.CAP, 0, size, pad, per_frames))
 
 
 def heard_sessions(cfg: dict, spec: dict, paths: dict) -> Iterator[tuple]:
@@ -278,12 +311,11 @@ def kws_board(net: Kws, spec: dict, paths: dict) -> list[Scored]:
 
 
 def ctc_board(net: Ctc, spec: dict, paths: dict, heard: Callable = ctc_heard) -> list[Scored]:
-    """The board sessions decided over LENH's windows by heard, the ctc track's or the rnnt track's."""
-    longest = listen.WINDOW_HOPS
+    """The board sessions decided over their command windows by heard, the ctc track's or the rnnt track's."""
     listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
 
     def decided_of(clean, features, spans, tracker):
-        return [heard(net, x) for x in ctc_windows(clean, features, spans, longest, tracker)]
+        return [heard(net, x) for x in ctc_windows(clean, features, spans, tracker)]
 
     return board(net.cfg, spec, paths, {c["id"]: c["text"] for c in listed}, decided_of)
 

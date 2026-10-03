@@ -9,8 +9,11 @@ import pytest
 pytest.importorskip("torch")
 
 from srpipe.core import corpus
+from srpipe.core.audio_io import to_float
 from srpipe.core.config import load_yaml
+from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.pitch import N_FEATURES, PitchConfig, PitchTracker
+from srpipe.dsp.spec.stft import Stft
 from srpipe.generated import grid, listen
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
@@ -60,14 +63,33 @@ def test_the_table_scores_each_command_and_the_rejections_by_kind() -> None:
     assert "bật điện \\| tắt điện" in text
 
 
-def test_a_ctc_window_reaches_the_longest_back_but_never_into_the_utterance_ahead() -> None:
-    hops, bands = 400, 40
+def test_a_command_window_opens_its_lead_ahead_never_into_the_one_before_and_a_long_one_reaches_back() -> None:
+    lead, longest = listen.UTTERANCE_LEAD_HOPS, listen.WINDOW_HOPS
+    spans = [(30, 60), (70, 100), (200, 260), (300, 520)]
+    assert gate.command_cut(spans) == [(0, 61), (62, 101), (200 - lead, 261), (522 - longest, 521)]
+    hops, bands = 600, 40
     features = np.arange(hops, dtype=np.float32)[:, None].repeat(bands, axis=1)
     clean = np.zeros(hops * grid.HOP_SAMPLES, dtype=np.int16)
-    tracker = PitchTracker(PitchConfig(**listen.PITCH))
-    xs = gate.ctc_windows(clean, features, [(30, 60), (70, 100), (200, 390)], 120, tracker)
-    dims = bands + N_FEATURES
-    assert [(x[0, 0], x[-1, 0], x.shape[1]) for x in xs] == [(0, 61, dims), (62, 101, dims), (272, 391, dims)]
+    xs = gate.ctc_windows(clean, features, spans, PitchTracker(PitchConfig(**listen.PITCH)))
+    cut = [(int(x[0, 0]), int(x[-1, 0])) for x in xs]
+    assert cut == gate.command_cut(spans) and {x.shape[1] for x in xs} == {bands + N_FEATURES}
+
+
+def test_a_session_closes_on_silence_whose_log_mel_goes_on_from_its_last_hop() -> None:
+    hop, rng = grid.HOP_SAMPLES, np.random.default_rng(1)
+    clean = rng.integers(-3000, 3000, 20 * hop).astype(np.int16)
+    vad = np.zeros(20, dtype=bool)
+    vad[-1] = True
+    mel = Mel(MelConfig(**listen.FEATURES))
+    stft = Stft()
+    features = np.stack([mel.log(stft.analyze(to_float(h))) for h in clean.reshape(-1, hop)]).astype(np.float32)
+    on_clean, on_vad, on_features = gate.with_silence(clean, vad, features, mel)
+    tail = listen.UTTERANCE_GAP_HOPS + 1
+    assert len(on_clean) == (20 + tail) * hop and not on_clean[20 * hop :].any() and not on_vad[20:].any()
+    assert np.array_equal(on_features[:20], features)
+    went_on = np.stack([mel.log(stft.analyze(np.zeros(hop, np.float32))) for _ in range(tail)])
+    assert np.array_equal(on_features[20:], went_on.astype(np.float32))
+    assert gate.command_cut([(19 - listen.UTTERANCE_MIN_HOPS, 19)])[-1][1] == 20 < len(on_vad)
 
 
 def test_a_ctc_window_reaches_the_decision_as_frames_of_its_own_hops(monkeypatch) -> None:

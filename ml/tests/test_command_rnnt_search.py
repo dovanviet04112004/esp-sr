@@ -117,8 +117,8 @@ def test_nodes_far_behind_are_dropped_and_their_contexts_never_asked() -> None:
 
         return ask
 
-    exact = rs.decide(counted("exact"), 12, tree, ctc_score.CAP, 50, SIZE, PAD, beam=EVERY_NODE)
-    pruned = rs.decide(counted("pruned"), 12, tree, ctc_score.CAP, 50, SIZE, PAD)
+    exact = rs.decide(counted("exact"), 12, tree, ctc_score.CAP, 50, SIZE, PAD, 12, beam=EVERY_NODE)
+    pruned = rs.decide(counted("pruned"), 12, tree, ctc_score.CAP, 50, SIZE, PAD, 12)
     assert asked["pruned"] < asked["exact"]
     # The winner, its score and its gap to the free path stay; the lead reads CAP when the runner-up drops.
     assert pruned[0][[0, 1, 3]].tolist() == exact[0][[0, 1, 3]].tolist() and pruned[0][2] == ctc_score.CAP
@@ -128,21 +128,21 @@ def test_nodes_far_behind_are_dropped_and_their_contexts_never_asked() -> None:
 def test_a_window_scored_frame_by_frame_in_any_chunks_decides_as_at_once() -> None:
     whole = [int(u) for u in lexicon()[1][0]]
     log_probs, tree = toy(np.random.default_rng(6), one_a_frame(whole), 12), rs.command_tree(lexicon())
-    at_once = rs.decide(log_probs, 12, tree, ctc_score.CAP, 50, SIZE, PAD)
+    at_once = rs.decide(log_probs, 12, tree, ctc_score.CAP, 50, SIZE, PAD, 12)
     for cut in (0, 5, 11):
         s = rs.begin(tree, SIZE, PAD)
         for _ in range(cut):
             rs.frame(s, tree, log_probs)
         for _ in range(12 - cut):
             rs.frame(s, tree, log_probs)
-        decision, scores = rs.finish(s, tree, ctc_score.CAP, 50)
+        decision, scores = rs.finish(s, tree, ctc_score.CAP, 50, 12)
         assert np.array_equal(decision, at_once[0]) and np.array_equal(scores, at_once[1])
 
 
 def decided(said: list[list[int]], frames: int, reject: int = ctc_score.CAP, own_parts: bool = True):
     lex = lexicon()
     log_probs = toy(np.random.default_rng(2), said, frames)
-    return rs.decide(log_probs, frames, rs.command_tree(lex), reject, 50, SIZE, PAD, own_parts)[0]
+    return rs.decide(log_probs, frames, rs.command_tree(lex), reject, 50, SIZE, PAD, max(frames, 1), own_parts)[0]
 
 
 def test_a_command_said_whole_is_taken_slow_or_fast_and_a_part_of_it_turned_down() -> None:
@@ -173,7 +173,7 @@ def test_the_golden_set_holds_its_edges_and_each_negative_control_differs(tmp_pa
 
     written = rs.emit(tmp_path)
     names = ("case_000", "case_001", "case_002", "case_003", "case_neg_000", "case_neg_001", "case_neg_002")
-    names += ("case_neg_003",)
+    names += ("case_neg_003", "case_neg_004")
     assert [p.name for p in written] == [f"{n}.gold" for n in names]
     cases = {p.stem: read_gold(p) for p in written}
     edge = cases["case_002"]["decision"]
@@ -188,3 +188,7 @@ def test_the_golden_set_holds_its_edges_and_each_negative_control_differs(tmp_pa
     assert (product["decision"][:, 0] == edge[:, 0]).all()
     assert cases["case_002"]["limits"].shape == (5, 2) and cases["case_002"]["frames"].dtype == np.int8
     assert (cases["case_000"]["decision"][:, 0] != ctc_score.REJECTED).any()
+    own, divided = cases["case_neg_004"], cases["case_000"]
+    assert (own["per_frames"] == rs.FRAMES).all() and (divided["per_frames"] == rs.FRAMES).all()
+    shorter = divided["n_frames"] < rs.FRAMES
+    assert shorter.any() and not np.array_equal(divided["scores"][shorter], own["scores"][shorter])
