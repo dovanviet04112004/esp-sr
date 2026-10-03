@@ -312,16 +312,16 @@ static uint16_t node_of(const tree_t *f, const uint8_t *units, size_t n)
     return node;
 }
 
-// Each command's best variant, and best run of whole syllables of a variant short of it, per frame.
+// Each command's best variant, and best run of whole syllables of a variant short of it, over per_frames.
 static void command_scores(const ai_engine_lexicon_t *lexicon, const tree_t *f, const float *alpha,
-                           size_t n_frames, float *best_of, float *part_of)
+                           size_t per_frames, float *best_of, float *part_of)
 {
     for (size_t c = 0; c < lexicon->n_commands; c++) {
         for (size_t v = 0; v < lexicon->n_variants[c]; v++) {
             const ai_engine_seq_t *seq = &lexicon->variants[c][v];
             const uint16_t whole = node_of(f, seq->units, seq->n_units);
-            if (whole != NONE && alpha[whole] / (float)n_frames > best_of[c]) {
-                best_of[c] = alpha[whole] / (float)n_frames;
+            if (whole != NONE && alpha[whole] / (float)per_frames > best_of[c]) {
+                best_of[c] = alpha[whole] / (float)per_frames;
             }
             size_t ends[UNITS_MAX + 1];
             const size_t n = syllable_ends(seq, ends);
@@ -329,8 +329,8 @@ static void command_scores(const ai_engine_lexicon_t *lexicon, const tree_t *f, 
                 const size_t start = first == 0 ? 0 : ends[first - 1];
                 for (size_t last = first; last < n - (first == 0); last++) {
                     const uint16_t run = node_of(f, seq->units + start, ends[last] - start);
-                    if (run != NONE && alpha[run] / (float)n_frames > part_of[c]) {
-                        part_of[c] = alpha[run] / (float)n_frames;
+                    if (run != NONE && alpha[run] / (float)per_frames > part_of[c]) {
+                        part_of[c] = alpha[run] / (float)per_frames;
                     }
                 }
             }
@@ -339,11 +339,11 @@ static void command_scores(const ai_engine_lexicon_t *lexicon, const tree_t *f, 
 }
 
 esp_err_t ai_engine_command_rnnt_finish(const ai_engine_lexicon_t *lexicon, const void *tree,
-                                        const void *work, uint16_t reject, uint16_t margin, float *scores,
-                                        ai_engine_command_result_t *out)
+                                        const void *work, size_t per_frames, uint16_t reject, uint16_t margin,
+                                        float *scores, ai_engine_command_result_t *out)
 {
-    if (lexicon == NULL || tree == NULL || work == NULL || out == NULL || lexicon->n_commands == 0 ||
-        lexicon->n_commands > AI_ENGINE_COMMANDS_MAX) {
+    if (lexicon == NULL || tree == NULL || work == NULL || out == NULL || per_frames == 0 ||
+        lexicon->n_commands == 0 || lexicon->n_commands > AI_ENGINE_COMMANDS_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
     const tree_t *f = tree;
@@ -353,7 +353,7 @@ esp_err_t ai_engine_command_rnnt_finish(const ai_engine_lexicon_t *lexicon, cons
     for (size_t c = 0; c < lexicon->n_commands; c++) {
         best_of[c] = part_of[c] = -INFINITY;
     }
-    if (s->frames > 0) { command_scores(lexicon, f, s->alpha, s->frames, best_of, part_of); }
+    if (s->frames > 0) { command_scores(lexicon, f, s->alpha, per_frames, best_of, part_of); }
     size_t best = 0;
     for (size_t c = 0; c < lexicon->n_commands; c++) {
         if (scores != NULL) { scores[c] = best_of[c]; }
@@ -367,7 +367,7 @@ esp_err_t ai_engine_command_rnnt_finish(const ai_engine_lexicon_t *lexicon, cons
     for (size_t c = 0; c < lexicon->n_commands; c++) {
         if (c != best && best_of[c] > second) { second = best_of[c]; }
     }
-    const float free_score = s->free_total / (float)s->frames;
+    const float free_score = s->free_total / (float)per_frames;
     const uint16_t gap = ai_engine_command_ctc_milli(free_score - best_of[best]);
     const uint16_t lead =
         second > -INFINITY ? ai_engine_command_ctc_milli(best_of[best] - second) : FIELD_MAX;
@@ -382,9 +382,9 @@ esp_err_t ai_engine_command_rnnt_finish(const ai_engine_lexicon_t *lexicon, cons
 }
 
 esp_err_t ai_engine_command_rnnt_decide(const ai_engine_lexicon_t *lexicon, const void *tree,
-                                        size_t n_classes, size_t n_frames, uint8_t pad, float beam_nats,
-                                        ai_engine_command_rnnt_rows_t rows, void *ctx, uint16_t reject,
-                                        uint16_t margin, void *work, float *scores,
+                                        size_t n_classes, size_t n_frames, size_t per_frames, uint8_t pad,
+                                        float beam_nats, ai_engine_command_rnnt_rows_t rows, void *ctx,
+                                        uint16_t reject, uint16_t margin, void *work, float *scores,
                                         ai_engine_command_result_t *out)
 {
     if (lexicon == NULL || rows == NULL || out == NULL) { return ESP_ERR_INVALID_ARG; }
@@ -392,6 +392,7 @@ esp_err_t ai_engine_command_rnnt_decide(const ai_engine_lexicon_t *lexicon, cons
     for (size_t t = 0; err == ESP_OK && t < n_frames; t++) {
         err = ai_engine_command_rnnt_frame(tree, rows, ctx, work);
     }
-    return err == ESP_OK ? ai_engine_command_rnnt_finish(lexicon, tree, work, reject, margin, scores, out)
-                         : err;
+    return err == ESP_OK
+               ? ai_engine_command_rnnt_finish(lexicon, tree, work, per_frames, reject, margin, scores, out)
+               : err;
 }

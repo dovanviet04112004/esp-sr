@@ -478,7 +478,7 @@ TEST_CASE("the rnnt search alone and the log-probabilities of one joiner output,
         Copied c = {row, classes, 0};
         ai_engine_command_result_t out;
         started_us = esp_timer_get_time();
-        TEST_ASSERT_EQUAL(ESP_OK, ai_engine_command_rnnt_decide(&s_lexicon, tree, classes, frames,
+        TEST_ASSERT_EQUAL(ESP_OK, ai_engine_command_rnnt_decide(&s_lexicon, tree, classes, frames, frames,
                                                                 static_cast<uint8_t>(classes), beam, copied,
                                                                 &c, UINT16_MAX, 0, work, nullptr, &out));
         const int64_t search_us = esp_timer_get_time() - started_us;

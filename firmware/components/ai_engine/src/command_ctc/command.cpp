@@ -30,7 +30,7 @@ struct Window {
     float *log_probs;              // frames x classes of the window, PSRAM
     void *work;                    // ai_engine_command_ctc_decide's, PSRAM
     float inverse_step;            // 2^-exponent of the input
-    size_t features, chunk_hops, chunk_frames, classes, hops_max;
+    size_t features, chunk_hops, chunk_frames, classes, hops_max, per_frames;
     size_t hops, pending, frames;
     uint16_t reject, margin;
 };
@@ -116,6 +116,8 @@ esp_err_t command_load() noexcept
     s.chunk_frames = s.out.dims[1];
     s.classes = s.out.dims[2];
     s.hops_max = GEN_LISTEN_WINDOW_HOPS;
+    const size_t stride = s.chunk_hops / s.chunk_frames;
+    s.per_frames = (s.hops_max + stride - 1) / stride;
     const size_t frames_max = (s.hops_max + s.chunk_hops - 1) / s.chunk_hops * s.chunk_frames;
     s.mean = reinterpret_cast<const float *>(norm.data);
     s.deviation = s.mean + s.features;
@@ -195,6 +197,6 @@ esp_err_t ai_engine_command_score(const ai_engine_lexicon_t *lexicon, ai_engine_
                                           .free_gap_permille = kFieldMax};
         return ESP_OK;
     }
-    return ai_engine_command_ctc_decide(s.log_probs, s.classes, frames, lexicon, s.reject, s.margin, s.work,
-                                        nullptr, out);
+    return ai_engine_command_ctc_decide(s.log_probs, s.classes, frames, lexicon, s.per_frames, s.reject,
+                                        s.margin, s.work, nullptr, out);
 }

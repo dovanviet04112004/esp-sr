@@ -44,13 +44,14 @@ size_t ai_engine_command_ctc_work_bytes(size_t n_classes, size_t n_frames);
 
 /** Take the command whose best variant scores highest by the CTC forward pass, or reject (KEHOACH 3.12).
  *  @ctx any | non-blocking, a few ms | caller owns log_probs (n_frames x n_classes), work and scores
- *  @param reject, margin in thousandths of a nat a frame; work 4-byte aligned, of ..._work_bytes
- *  @param scores n_commands floats or NULL
+ *  @param per_frames every score's divisor, a window_s window's frames; reject, margin in thousandths of it
+ *  @param work 4-byte aligned, of ..._work_bytes; scores n_commands floats or NULL
  *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_SIZE a variant longer than the units max
  */
 esp_err_t ai_engine_command_ctc_decide(const float *log_probs, size_t n_classes, size_t n_frames,
-                                       const ai_engine_lexicon_t *lexicon, uint16_t reject, uint16_t margin,
-                                       void *work, float *scores, ai_engine_command_result_t *out);
+                                       const ai_engine_lexicon_t *lexicon, size_t per_frames, uint16_t reject,
+                                       uint16_t margin, void *work, float *scores,
+                                       ai_engine_command_result_t *out);
 
 #ifdef __cplusplus
 }

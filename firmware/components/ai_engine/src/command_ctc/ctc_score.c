@@ -72,7 +72,7 @@ static float scaled(wide_t x, int32_t top)
 }
 
 static float sequence_score(const wide_t *probs, size_t n_classes, size_t n_frames,
-                            const ai_engine_seq_t *seq)
+                            const ai_engine_seq_t *seq, size_t per_frames)
 {
     uint8_t labels[STATES_MAX];
     size_t n = 0;
@@ -108,10 +108,10 @@ static float sequence_score(const wide_t *probs, size_t n_classes, size_t n_fram
     float total = scaled(alpha[n - 1], top);
     if (n > 1) { total += scaled(alpha[n - 2], top); }
     if (total == 0.0f) { return -INFINITY; }
-    return (float)((log((double)total) + (double)top * LN2) / (double)n_frames);
+    return (float)((log((double)total) + (double)top * LN2) / (double)per_frames);
 }
 
-static float free_score(const float *log_probs, size_t n_classes, size_t n_frames)
+static float free_score(const float *log_probs, size_t n_classes, size_t n_frames, size_t per_frames)
 {
     float total = 0.0f;
     for (size_t t = 0; t < n_frames; t++) {
@@ -122,7 +122,7 @@ static float free_score(const float *log_probs, size_t n_classes, size_t n_frame
         }
         total += top;
     }
-    return total / (float)n_frames;
+    return total / (float)per_frames;
 }
 
 static bool ends_syllable(uint8_t unit)
@@ -135,7 +135,8 @@ static bool ends_syllable(uint8_t unit)
 
 // A part said alone must not pass for the whole command (KEHOACH 3.12).
 static bool outscored_by_a_part(const wide_t *probs, size_t n_classes, size_t n_frames,
-                                const ai_engine_seq_t *variants, size_t n_variants, float score)
+                                const ai_engine_seq_t *variants, size_t n_variants, float score,
+                                size_t per_frames)
 {
     for (size_t v = 0; v < n_variants; v++) {
         const ai_engine_seq_t *seq = &variants[v];
@@ -150,7 +151,7 @@ static bool outscored_by_a_part(const wide_t *probs, size_t n_classes, size_t n_
             for (size_t last = first; last < n_syllables - (first == 0); last++) {
                 const ai_engine_seq_t part = {.n_units = (uint8_t)(ends[last] - start),
                                               .units = seq->units + start};
-                if (sequence_score(probs, n_classes, n_frames, &part) >= score) { return true; }
+                if (sequence_score(probs, n_classes, n_frames, &part, per_frames) >= score) { return true; }
             }
         }
     }
@@ -235,11 +236,13 @@ size_t ai_engine_command_ctc_work_bytes(size_t n_classes, size_t n_frames)
 }
 
 esp_err_t ai_engine_command_ctc_decide(const float *log_probs, size_t n_classes, size_t n_frames,
-                                       const ai_engine_lexicon_t *lexicon, uint16_t reject, uint16_t margin,
-                                       void *work, float *scores, ai_engine_command_result_t *out)
+                                       const ai_engine_lexicon_t *lexicon, size_t per_frames, uint16_t reject,
+                                       uint16_t margin, void *work, float *scores,
+                                       ai_engine_command_result_t *out)
 {
     if (log_probs == NULL || lexicon == NULL || work == NULL || out == NULL || n_classes < 2 ||
-        n_frames == 0 || lexicon->n_commands == 0 || lexicon->n_commands > AI_ENGINE_COMMANDS_MAX) {
+        n_frames == 0 || per_frames == 0 || lexicon->n_commands == 0 ||
+        lexicon->n_commands > AI_ENGINE_COMMANDS_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
     const esp_err_t err = check(lexicon, n_classes);
@@ -253,7 +256,7 @@ esp_err_t ai_engine_command_ctc_decide(const float *log_probs, size_t n_classes,
     for (size_t c = 0; c < lexicon->n_commands; c++) {
         float score = -INFINITY;
         for (size_t v = 0; v < lexicon->n_variants[c]; v++) {
-            const float s = sequence_score(probs, n_classes, n_frames, &lexicon->variants[c][v]);
+            const float s = sequence_score(probs, n_classes, n_frames, &lexicon->variants[c][v], per_frames);
             if (s > score) { score = s; }
         }
         if (scores != NULL) { scores[c] = score; }
@@ -266,11 +269,12 @@ esp_err_t ai_engine_command_ctc_decide(const float *log_probs, size_t n_classes,
         }
     }
     const bool reached = best_score > -INFINITY;
-    const uint16_t gap = reached ? milli(free_score(log_probs, n_classes, n_frames) - best_score) : FIELD_MAX;
+    const uint16_t gap =
+        reached ? milli(free_score(log_probs, n_classes, n_frames, per_frames) - best_score) : FIELD_MAX;
     const uint16_t lead = second > -INFINITY ? milli(best_score - second) : FIELD_MAX;
     const bool accepted = reached && gap <= reject && lead >= margin &&
                           !outscored_by_a_part(probs, n_classes, n_frames, lexicon->variants[best],
-                                               lexicon->n_variants[best], best_score);
+                                               lexicon->n_variants[best], best_score, per_frames);
     *out = (ai_engine_command_result_t){
         .command = accepted ? (int16_t)best : AI_ENGINE_COMMAND_CTC_REJECTED,
         .score_permille = reached ? milli((float)exp((double)best_score)) : 0,

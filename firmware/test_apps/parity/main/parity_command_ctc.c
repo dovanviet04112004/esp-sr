@@ -53,9 +53,12 @@ bool parity_lexicon_of(const gold_tensor_t *units, const gold_tensor_t *n_varian
 
 bool parity_command_ctc(const char *case_name, const void *buf, size_t len)
 {
-    gold_tensor_t logits, exponent, log_probs, frames, units, n_variants, n_units, thresholds, scores,
-        decision;
-    if (!parity_tensor(buf, len, "logits", &logits) || !parity_tensor(buf, len, "exponent", &exponent) ||
+    gold_tensor_t logits, exponent, log_probs, frames, units, n_variants, n_units, thresholds, divisor,
+        scores, decision;
+    float per_frames = 0.0f;
+    if (!parity_tensor(buf, len, "per_frames", &divisor) || divisor.dims[0] != 1 ||
+        !parity_floats(&divisor, &per_frames, 1) || !parity_tensor(buf, len, "logits", &logits) ||
+        !parity_tensor(buf, len, "exponent", &exponent) ||
         !parity_tensor(buf, len, "log_probs", &log_probs) || !parity_tensor(buf, len, "frames", &frames) ||
         !parity_tensor(buf, len, "units", &units) || !parity_tensor(buf, len, "n_variants", &n_variants) ||
         !parity_tensor(buf, len, "n_units", &n_units) ||
@@ -105,9 +108,9 @@ bool parity_command_ctc(const char *case_name, const void *buf, size_t len)
         ai_engine_command_result_t d;
         const float *limit = limits + w * THRESHOLD_COUNT;
         ok = ai_engine_command_ctc_log_probs(q, (int)steps[w], classes, n, mine) == ESP_OK &&
-             ai_engine_command_ctc_decide(mine, classes, n, lex, (uint16_t)limit[THRESHOLD_REJECT],
-                                          (uint16_t)limit[THRESHOLD_MARGIN], work, got_scores + w * commands,
-                                          &d) == ESP_OK;
+             ai_engine_command_ctc_decide(
+                 mine, classes, n, lex, (size_t)per_frames, (uint16_t)limit[THRESHOLD_REJECT],
+                 (uint16_t)limit[THRESHOLD_MARGIN], work, got_scores + w * commands, &d) == ESP_OK;
         parity_decision_row(&d, got + w * PARITY_DECISION_COUNT);
     }
     if (ok) {

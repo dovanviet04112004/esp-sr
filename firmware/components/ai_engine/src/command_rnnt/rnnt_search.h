@@ -62,23 +62,24 @@ esp_err_t ai_engine_command_rnnt_begin(const void *tree, size_t n_classes, uint8
 esp_err_t ai_engine_command_rnnt_frame(const void *tree, ai_engine_command_rnnt_rows_t rows, void *ctx,
                                        void *work);
 
-/** Decide on the frames searched so far, by the ctc track's rules.
+/** Decide on the frames searched so far, by the ctc track's rules, every score divided by per_frames.
  *  @ctx any | non-blocking | caller owns lexicon, the tree's, tree and work; scores n_commands floats or NULL
+ *  @param per_frames the frames of a window_s window; reject, margin in thousandths of a nat over it
  *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_STATE no begin
  */
 esp_err_t ai_engine_command_rnnt_finish(const ai_engine_lexicon_t *lexicon, const void *tree,
-                                        const void *work, uint16_t reject, uint16_t margin, float *scores,
-                                        ai_engine_command_result_t *out);
+                                        const void *work, size_t per_frames, uint16_t reject, uint16_t margin,
+                                        float *scores, ai_engine_command_result_t *out);
 
 /** Decide a whole window at once: begin, every frame, finish.
  *  @ctx any | blocking while rows runs | caller owns lexicon, tree, work (4-byte aligned), scores
- *  @param pad the predictor's id ahead of the leading blank; scores n_commands floats or NULL
+ *  @param pad the predictor's id ahead of the leading blank; per_frames every score's divisor
  *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_SIZE | rows' error
  */
 esp_err_t ai_engine_command_rnnt_decide(const ai_engine_lexicon_t *lexicon, const void *tree,
-                                        size_t n_classes, size_t n_frames, uint8_t pad, float beam_nats,
-                                        ai_engine_command_rnnt_rows_t rows, void *ctx, uint16_t reject,
-                                        uint16_t margin, void *work, float *scores,
+                                        size_t n_classes, size_t n_frames, size_t per_frames, uint8_t pad,
+                                        float beam_nats, ai_engine_command_rnnt_rows_t rows, void *ctx,
+                                        uint16_t reject, uint16_t margin, void *work, float *scores,
                                         ai_engine_command_result_t *out);
 
 #ifdef __cplusplus

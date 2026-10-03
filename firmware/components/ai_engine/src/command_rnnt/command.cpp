@@ -58,7 +58,7 @@ struct Window {
     bool columns_first;            // joiner inputs (1, columns, width), else swapped
     bool logits_columns_first;     // joiner logits (1, columns, classes), else swapped
     int frame_shift, prefix_shift; // source exponent less the joiner input's
-    size_t features, chunk_hops, chunk_frames, width, classes, pad, columns, hops_max;
+    size_t features, chunk_hops, chunk_frames, width, classes, pad, columns, hops_max, per_frames;
     size_t hops, pending, frames, searched;
     uint16_t reject, margin;
 };
@@ -350,6 +350,8 @@ esp_err_t command_load() noexcept
     s.pad = s.classes;
     s.hot_rows_first = s.hot.dims[2] == kContext;
     s.hops_max = GEN_LISTEN_WINDOW_HOPS;
+    const size_t stride = s.chunk_hops / s.chunk_frames;
+    s.per_frames = (s.hops_max + stride - 1) / stride;
     // A one-hot 1 held to int8 as quant.py's to_int8 holds it: a calibration whose grid stops short of 1
     // gives 127.
     s.one = on_grid(1.0f, ldexpf(1.0f, -s.hot.exponent));
@@ -461,5 +463,6 @@ esp_err_t ai_engine_command_score(const ai_engine_lexicon_t *lexicon, ai_engine_
     const size_t stride = s.chunk_hops / s.chunk_frames;
     const esp_err_t err = search_to((s.hops + stride - 1) / stride);
     if (err != ESP_OK) { return err; }
-    return ai_engine_command_rnnt_finish(lexicon, s.tree, s.work, s.reject, s.margin, nullptr, out);
+    return ai_engine_command_rnnt_finish(lexicon, s.tree, s.work, s.per_frames, s.reject, s.margin, nullptr,
+                                         out);
 }
