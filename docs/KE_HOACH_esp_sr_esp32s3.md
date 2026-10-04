@@ -953,7 +953,12 @@ vẫn vào lô giữa hàng trăm nghìn câu mô phỏng. Đặc trưng float16
 `train.pool_gb`: mỗi `train.rotate_steps` bước nạp thêm một shard, đè lên shard cũ nhất. Thứ tự shard rút lại mỗi lượt
 bằng seed. Trung bình và độ lệch vẫn tính trên cả tập học, và lượt học tiếp tục dựng lại đúng vòng đệm của bước dừng.
 Cỡ chọn theo chất lượng: bắt đầu đúng cỡ MultiNet7, khoảng 2,1 MB
-int8 🔬, rộng hơn hay sâu hơn khi µs đo trên board còn trong ngân sách §3.3; bộ nhớ nới theo §6.1 và §6.6. Học CTC cộng RNN-T phụ trợ như MultiNet7, so với CTC trơn cùng seed, split và số epoch. Chạy
+int8 🔬, rộng hơn hay sâu hơn khi µs đo trên board còn trong ngân sách §3.3; bộ nhớ nới theo §6.1 và §6.6. Học CTC cộng RNN-T phụ trợ như MultiNet7, so với CTC trơn cùng seed, split và số epoch.
+**Dòng cộng dồn trong lớp có trần.** Dòng ấy chỉ đi vào phép chuẩn hoá cuối lớp, nên loss không giữ cỡ của nó và nó trôi
+được tới hàng trăm nghìn; int8 một số mũ cho cả tensor, nên khung nhỏ hơn khung lớn nhất cỡ trăm lần thì mất
+(`measurements/command.md` §10). Lúc học, mỗi khung của dòng sau mỗi khối cộng vào có RMS trên `train.stream.cap_rms`
+thì loss cộng thêm `train.stream.weight` nhân bình phương số octave vượt trần, trung bình theo khung, cộng qua mọi điểm
+của mọi lớp; dưới trần không thêm gì. Mỗi lần chấm `val` ghi RMS khung lớn nhất của dòng và lớp chứa nó. Chạy
 int8 qua esp-dl với `StreamingCache`: một lớp encoder được xuất và chạy dòng trên board trước (E11-T12); không đạt thì
 lùi về TCN nhân quả tách chiều sâu, đường E11-T10 đã chạy khớp từng bit. **Giải bằng chấm có ràng buộc**, không giải
 tham lam rồi so chuỗi:
