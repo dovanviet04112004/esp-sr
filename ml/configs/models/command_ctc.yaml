@@ -40,14 +40,14 @@ train:                             # python -m srpipe.tasks.command.ctc.train (E
     warp_hops: 8                   # SpecAugment's time warp: one hop of the sentence moved at most this far
     tilt_db: 3.0                   # a straight slope across the mel bands, up to this at either edge
   eval_every: 2000                 # steps between val passes, each net saved beside the run
-model:                             # MultiNet7's encoder frame (ADR-0013); sizes read from its weights
+model:                             # MultiNet7's encoder frame (ADR-0013), widened by ADR-0017
   front:                           # three conv2d over (hops, mel bands); pitch skips them and joins the projection
     channels: [8, 32, 48]
     kernel: [3, 3]                 # hops by bands
     hop_strides: [1, 2, 1]         # 62.5 hops/s in, 31.25 frames/s out, the CTC frame rate
     band_strides: [1, 2, 2]
-  width: 128
-  ff_width: 256
+  width: 160                       # MultiNet7's 128 and 256 times 1.25: 3.1 M parameters for its 2.0 M
+  ff_width: 320
   stacks:                          # rate: base frames a frame of the stack spans; kernel: LiGLU's depthwise
     - {layers: 1, rate: 1, kernel: 17}
     - {layers: 2, rate: 2, kernel: 9}
