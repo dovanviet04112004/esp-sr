@@ -935,9 +935,9 @@ vào âm tiết. Chốt theo số đã công bố, không bằng phép so của 
 | **Nhãn thanh chen trong chuỗi CTC** | 44 | **chọn**: bộ ký hiệu nhỏ nhất, một đầu ra, `lang_vi` đã sinh và khớp từng bit |
 
 **`ctc`** — encoder chạy dòng cùng bộ khung với MultiNet7, mạng nhận lệnh mới nhất Espressif chạy trên chính ESP32-S3,
-dựng lại từ trọng số của nó (ADR-0013): ba tích chập 2D 3×3 (8, 32, 48 kênh) giảm khung rồi chiếu xuống bề rộng 128;
+dựng lại từ trọng số của nó (ADR-0013): ba tích chập 2D 3×3 (8, 32, 48 kênh) giảm khung rồi chiếu xuống bề rộng 160;
 6 lớp chia 4 tầng (1, 2, 2, 1 lớp) ở tốc độ khung ×1, ×2, ×4, ×2, hạ và nâng khung giữa các tầng; mỗi lớp ba khối
-feedforward, hai khối tích chập có cổng (nhân theo chiều sâu 17, 9, 5, 9 theo tầng) và một khối trộn thay self-attention,
+feedforward bề rộng 320, hai khối tích chập có cổng (nhân theo chiều sâu 17, 9, 5, 9 theo tầng) và một khối trộn thay self-attention,
 cộng một hệ số chuẩn hoá và một nhánh tắt; đầu CTC. MultiNet7 không có chiều cao độ nào và bản tiếng Trung của nó bỏ
 thanh; `ctc` giữ đơn vị của ADR-0010 và đặc trưng của ADR-0017 — log-mel 80 cộng ba chiều cao độ, 44 đơn vị có nhãn thanh — và đầu ra
 31,25 khung mỗi giây cho chuỗi đơn vị có thanh 🔬. Tăng cường lúc học, mỗi lần rút mới khi câu vào lô, trước mặt nạ
@@ -952,8 +952,10 @@ không trần giờ (từ split `command/v3`), cộng các phiên thu qua board 
 vẫn vào lô giữa hàng trăm nghìn câu mô phỏng. Đặc trưng float16 của nó lớn hơn RAM máy học, nên bộ nạp giữ một vòng đệm cỡ
 `train.pool_gb`: mỗi `train.rotate_steps` bước nạp thêm một shard, đè lên shard cũ nhất. Thứ tự shard rút lại mỗi lượt
 bằng seed. Trung bình và độ lệch vẫn tính trên cả tập học, và lượt học tiếp tục dựng lại đúng vòng đệm của bước dừng.
-Cỡ chọn theo chất lượng: bắt đầu đúng cỡ MultiNet7, khoảng 2,1 MB
-int8 🔬, rộng hơn hay sâu hơn khi µs đo trên board còn trong ngân sách §3.3; bộ nhớ nới theo §6.1 và §6.6. Học CTC cộng RNN-T phụ trợ như MultiNet7, so với CTC trơn cùng seed, split và số epoch.
+Cỡ chọn theo chất lượng: rộng hơn hay sâu hơn MultiNet7 (bề rộng 128, feedforward 256, khoảng 2,1 MB int8 🔬) khi µs đo
+trên board còn trong ngân sách §3.3. Bề rộng 160 và feedforward 320 (ADR-0017) có 3,14 triệu tham số cho encoder và đầu
+CTC, `.espdl` 3,4 MB, chạy 10,2 ms mỗi 32 ms trên board B với trọng số ngẫu nhiên (`measurements/latency.md` §18); bộ nhớ
+nới theo §6.1 (ADR-0018) và §6.6. Học CTC cộng RNN-T phụ trợ như MultiNet7, so với CTC trơn cùng seed, split và số epoch.
 **Dòng cộng dồn trong lớp có trần.** Dòng ấy chỉ đi vào phép chuẩn hoá cuối lớp, nên loss không giữ cỡ của nó và nó trôi
 được tới hàng trăm nghìn; int8 một số mũ cho cả tensor, nên khung nhỏ hơn khung lớn nhất cỡ trăm lần thì mất
 (`measurements/command.md` §10). Lúc học, mỗi khung của dòng sau mỗi khối cộng vào có RMS trên `train.stream.cap_rms`
@@ -2536,7 +2538,7 @@ nên lớn hơn; đó là giá của mã đọc được và khớp Python từn
 
 | Khoản | Ước 🔬 |
 |---|---|
-| Trọng số và vùng làm việc `command` | ~2,1 MB trở lên + ~0,3 MB (ADR-0013); `rnnt` thêm ~0,2 MB hai mạng nhỏ và ~1 MB vùng làm việc, phần lớn là bảng tiền tố đã chiếu của mọi cặp ngữ cảnh |
+| Trọng số và vùng làm việc `command` | 3,4 MB `.espdl` + 0,3 MB đo với bề rộng 160 (`measurements/latency.md` §18); `rnnt` thêm ~0,2 MB hai mạng nhỏ và ~1 MB vùng làm việc, phần lớn là bảng tiền tố đã chiếu của mọi cặp ngữ cảnh |
 | Trọng số và vùng làm việc `synth` (nếu mạng) | ≤ 1 MB + ~0,3 MB |
 | Trọng số và vùng làm việc `ns` + `wake` | 187 KB (RNNoise-16k) tới 394 KB (NSNet-16k L), đo ở E9-T10, + ~100 KB |
 | `q_clean` | ~34 KB |
@@ -2546,7 +2548,7 @@ nên lớn hơn; đó là giá của mã đọc được và khớp Python từn
 | `sb_stream` | 512 KB |
 | Đệm dựng câu của `noi_task`: 5 s × 16 kHz × 2 B | 160 KB |
 | Ngăn xếp `mqtt_task`, vùng TLS | ~50 KB |
-| **Cộng** | **~5,0–5,4 MB trên 8 MB** |
+| **Cộng** | **~6,3–6,7 MB trên 8 MB** |
 
 **PSRAM không miễn phí về băng thông.** Flash và PSRAM chung một bus MSPI và chung cache dữ liệu; repo
 face attendance đo được suy luận chậm đi 16,6% khi nhân kia đẩy ~8,7 MB/s qua PSRAM, kể cả model có
