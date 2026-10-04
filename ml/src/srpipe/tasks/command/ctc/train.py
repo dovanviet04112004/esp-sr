@@ -280,11 +280,9 @@ def need_frames(units: np.ndarray) -> int:
 
 
 def resampled(x: np.ndarray, places: np.ndarray) -> np.ndarray:
-    """x (hops, dims) read at fractional hop places, linearly between the two hops around each."""
-    low = np.floor(places).astype(np.int64)
-    high = np.minimum(low + 1, len(x) - 1)
-    share = (places - low).astype(np.float32)[:, None]
-    return x[low] * (1.0 - share) + x[high] * share
+    """x (hops, dims) at the hop nearest each fractional place: hops dropped or repeated, never two blended, as the
+    board never gives a blend of two frames (KEHOACH 3.12)."""
+    return x[np.minimum(np.rint(places).astype(np.int64), len(x) - 1)]
 
 
 def augmented(

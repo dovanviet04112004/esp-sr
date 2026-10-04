@@ -309,9 +309,10 @@ def test_unchanged_draws_give_the_sentence_back() -> None:
 def test_a_faster_tempo_shortens_the_sentence_and_scales_delta_pitch() -> None:
     spec = STILL | {"tempo": [2.0, 2.0]}
     y = train.augmented(ramp(101), np.array([1]), spec, N_MEL, 2, np.random.default_rng(0))
+    nearest = np.rint(np.linspace(0.0, 100.0, 50))
     assert len(y) == 50
-    np.testing.assert_allclose(y[:, 0], np.linspace(0.0, 100.0, 50), atol=1e-4)
-    np.testing.assert_allclose(y[:, N_MEL + train.DELTA_PITCH], np.linspace(0.0, 100.0, 50) * 100 / 49, rtol=1e-5)
+    np.testing.assert_array_equal(y[:, 0], nearest)
+    np.testing.assert_allclose(y[:, N_MEL + train.DELTA_PITCH], nearest * 100 / 49, rtol=1e-5)
 
 
 def test_tempo_never_leaves_ctc_fewer_frames_than_the_units_need() -> None:
@@ -321,12 +322,23 @@ def test_tempo_never_leaves_ctc_fewer_frames_than_the_units_need() -> None:
     assert len(y) == 60 and -(-len(y) // 2) >= train.need_frames(units)
 
 
-def test_the_warp_keeps_both_ends_and_runs_forward() -> None:
+def test_the_warp_keeps_both_ends_and_never_runs_back() -> None:
     spec = STILL | {"warp_hops": 8}
     for seed in range(20):
         y = train.augmented(ramp(80), np.array([1]), spec, N_MEL, 2, np.random.default_rng(seed))
         assert len(y) == 80 and y[0, 0] == 0.0 and y[-1, 0] == 79.0
-        assert np.all(np.diff(y[:, 0]) > 0.0)
+        assert np.all(np.diff(y[:, 0]) >= 0.0)
+
+
+def test_tempo_and_warp_give_whole_hops_of_the_sentence_never_a_blend_of_two() -> None:
+    x = np.random.default_rng(2).standard_normal((120, DIMS)).astype(np.float32)
+    spec = {"tempo": [0.8, 1.6], "warp_hops": 8, "tilt_db": 0.0}
+    for seed in range(20):
+        y = train.augmented(x, np.array([1]), spec, N_MEL, 2, np.random.default_rng(seed))
+        matches = [np.flatnonzero((x[:, :N_MEL] == row[:N_MEL]).all(axis=1)) for row in y]
+        assert all(len(m) == 1 for m in matches)
+        source = [int(m[0]) for m in matches]
+        assert np.all(np.diff(source) >= 0) and source[0] == 0 and source[-1] == len(x) - 1
 
 
 def test_the_tilt_slopes_the_mel_bands_only() -> None:
