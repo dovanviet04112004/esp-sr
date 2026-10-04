@@ -948,7 +948,7 @@ câu nói nhanh (`measurements/command.md` §4). Đổi nhịp và time-warp l�
 bớt hay lặp lại bước, không bao giờ trộn hai bước: board không bao giờ đưa khung trộn, và mạng học trên khung trộn
 nghe khung thật kém hơn (`measurements/command.md` §8). Tập học là **mọi mẩu tiếng nói đã sàng lọc** của các kho ở `split.corpora`,
 không trần giờ (từ split `command/v3`), cộng các phiên thu qua board mà `split.board` giao cho `train` (§1.3): câu cắt như Cửa 3 qua
-đúng chuỗi của board, nhãn là lời nhắc của phiên, mỗi shard của chúng có mặt `split.board.repeat` lần trong thứ tự shard, để vài trăm câu ấy
+đúng chuỗi của board, nhãn là lời nhắc của phiên, trừ các lượt `split.board.noise` ghi là tiếng động (`measurements/command.md` §11), mỗi shard của chúng có mặt `split.board.repeat` lần trong thứ tự shard, để vài trăm câu ấy
 vẫn vào lô giữa hàng trăm nghìn câu mô phỏng. Đặc trưng float16 của nó lớn hơn RAM máy học, nên bộ nạp giữ một vòng đệm cỡ
 `train.pool_gb`: mỗi `train.rotate_steps` bước nạp thêm một shard, đè lên shard cũ nhất. Thứ tự shard rút lại mỗi lượt
 bằng seed. Trung bình và độ lệch vẫn tính trên cả tập học, và lượt học tiếp tục dựng lại đúng vòng đệm của bước dừng.
