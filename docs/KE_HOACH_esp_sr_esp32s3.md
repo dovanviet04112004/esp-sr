@@ -1784,6 +1784,7 @@ firmware/
 ├── test_apps/                        # test TÍCH HỢP toàn hệ; unit test nằm trong component
 │   ├── components/test_report/       # dòng kết quả có số thứ tự và CRC32, gửi lại khi máy tính xin (§4.5.7)
 │   ├── test_report.py                # phía máy tính của test_report: kiểm CRC, xin lại dòng thiếu
+│   ├── partitions_unit.csv           # unit test trên board: bảng §6.1, vùng ota_1 làm khe nháp models_1
 │   ├── parity/                       # đọc contracts/golden/, so C với Python; partitions.csv riêng, storage 12 MB
 │   ├── bench_afe/  ├── bench_kws/    # µs trung bình và đỉnh mỗi module → CSV
 │   ├── bench_mem/                    # heap đỉnh, watermark ngăn xếp, RAM tĩnh
@@ -1985,7 +1986,7 @@ nằm sau khe, trong thư mục của ứng viên, nên đổi ứng viên khôn
 
 | Loại | Là gì | Vào flash bằng |
 |---|---|---|
-| `.espdl` | artifact của `ml/`, không phải source | `ml/scripts/50_pack_and_flash.sh`: kiểm sha256 theo `contracts/models.lock.json` → gộp `models.bin` theo khuôn §6.3 → `parttool.py write_partition` xuống `models_0` và `models_1` |
+| `.espdl` | artifact của `ml/`, không phải source | `ml/scripts/50_pack_and_flash.sh`: kiểm sha256 theo `contracts/models.lock.json` → gộp `models.bin` theo khuôn §6.3 → `parttool.py write_partition` xuống `models_0` |
 | Mẩu tiếng cho ghép mẩu | bản thu, không phải source | `svc_speak` đọc từ phân vùng `voice` (§6.1) qua mmap |
 | Bộ lệnh mặc định, câu trả lời | source ở `contracts/` | nướng vào ảnh LittleFS `storage` lúc dựng |
 
@@ -2406,23 +2407,26 @@ phy_init,   data, phy,      0x11000,   0x1000,
 nvs_keys,   data, nvs_keys, 0x12000,   0x1000,   encrypted
 ota_0,      app,  ota_0,    0x20000,   0x300000,        # 3 MB   firmware A
 ota_1,      app,  ota_1,    0x320000,  0x300000,        # 3 MB   firmware B
-models_0,   data, 0x40,     0x620000,  0x300000,        # 3 MB   ns + wake + command + synth, slot A
-models_1,   data, 0x41,     0x920000,  0x300000,        # 3 MB   slot B
+models_0,   data, 0x40,     0x620000,  0x600000,        # 6 MB   ns + wake + command + synth
 voice,      data, 0x42,     0xC20000,  0x200000,        # 2 MB   mẩu tiếng cho ghép mẩu, IMA-ADPCM
 storage,    data, littlefs, 0xE20000,  0x1C0000,        # 1,75 MB bộ lệnh, câu trả lời
 coredump,   data, coredump, 0xFE0000,  0x10000,
 # còn trống: 0xFF0000 → 0x1000000 (64 KB)
 ```
 
-**Trần 3 MB của một slot model là hệ quả của bảng này, không phải ngược lại.** Sau `ns` 337 KB
-(NSNet-16k L, ADR-0014) và `wake` ~100 KB, slot còn **~2,5 MB cho `command`**, mà cỡ chọn theo chất lượng từ ~2,1 MB của bộ khung
-MultiNet7 trở lên (ADR-0013) 🔬; TỔNG QUAN ghi `command` "1 tới 4 MB ngoài". `synth` ghép mẩu nằm ở
-`voice` (E12-T2), không chiếm slot. Khi `command`, hay `synth` mạng nếu E12-T1 chọn nó, vượt chỗ còn lại,
-đường lùi là **bỏ `models_1`** — mất khả năng quay về model cũ khi cập nhật hỏng — và cho `models_0`
-6 MB. Quyết định ghi ADR, không lặng lẽ nới.
+**Một khe model 6 MB** (ADR-0018). Mạng `command` của ADR-0017, bề rộng 160, có 3,14 triệu tham số cho encoder và đầu
+CTC, thêm 0,25 triệu cho bộ dự đoán và bộ nối RNN-T: khoảng 3,5–3,7 MB int8 🔬, cộng `ns` 337 KB (NSNet-16k L, ADR-0014)
+và `wake` ~100 KB 🔬 là vượt một khe 3 MB của bảng hai khe. `models_0` lấy cả vùng của khe thứ hai, ở đúng địa chỉ cũ;
+`nvs`, `voice`, `storage`, `coredump` không dời. Cái giá là không còn quay về model cũ khi cập nhật hỏng (§7.6). `synth`
+ghép mẩu nằm ở `voice` (E12-T2), không chiếm khe model; còn khoảng 2 MB 🔬 cho `synth` mạng nếu E12-T1 chọn nó.
 
 **Slot app 3 MB** vì esp-dl chiếm ~860 KB flash khi link (số của repo face attendance, cùng chip); cộng
 Wi-Fi, MQTT, TLS, ảnh dựng cỡ 2 MB 🔬. `idf.py size` trong CI báo biên còn lại.
+
+**Unit test trên board dựng với `test_apps/partitions_unit.csv`**: bảng trên, riêng vùng 3 MB của `ota_1`, nơi test
+không bao giờ cập nhật OTA, là khe nháp `models_1`. Probe của `ai_engine`, bản ghi từng vòng của `make listen-unit` và
+các ca tự dựng ảnh model ghi vào đó, còn `models_0` mang model như sản phẩm. Nạp lại firmware sản phẩm thì otadata trỏ
+về `ota_0`; vùng ấy chỉ còn rác cho tới lần OTA sau ghi đè.
 
 Bảng phân vùng không đi qua OTA được: đổi bảng là nạp lại qua cổng CH340.
 
@@ -2437,7 +2441,7 @@ Bảng phân vùng không đi qua OTA được: đổi bảng là nạp lại qu
 | `calib` | `bal` (blob 257 × 2 float), `bal_ver` (u32), `bal_at` (u32 epoch), `aec_delay` (u32, mẫu), `pcm_shift` (u8) | | kết quả của `test_apps/calib`; **đo trên từng board**, không phải hằng số |
 | `afe` | `ns_floor_db` (i8), `agc_target_dbfs` (i8), `vad_mode` (u8) | | gieo từ `contracts/afe.yaml`, đổi bằng `SET_CONFIG` |
 | `kws` | `wake_th` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16) | | gieo từ `Kconfig` của `svc_listen`; hai khoá lệnh mang nghĩa của đường đang dựng (§3.12): `δ₁`, `δ₂` của `ctc` theo phần nghìn nat mỗi khung, hay xác suất thấp nhất và khoảng nhất–nhì của `kws`, ‰ |
-| `model` | `active_slot` (u8), `version` (str), `sha256` (blob 32 B) | | chọn `models_0` hay `models_1` |
+| `model` | `version` (str), `sha256` (blob 32 B) | | ảnh đang nằm ở `models_0` (§6.1) |
 | `sys` | `boot_count` (u32), `seed_ver` (u32), `last_ota_result` (u8), `fw_valid` (u8) | | |
 
 **`pcm_shift`** là số bit dịch khi đổi mẫu 24 bit của micro sang `int16` (E2-T5). Cắt thẳng 8 bit thấp
@@ -2655,9 +2659,10 @@ phiên nền ồn "Wi-Fi tắt" của E2-T4, cùng khuôn và cùng đường ch
 ### 7.6 OTA — E13, tuỳ chọn
 
 Firmware A/B bằng `esp_https_ota` với rollback (`esp_ota_mark_app_valid_cancel_rollback` sau khi tự
-kiểm lúc boot), model A/B bằng `model/active_slot` kèm chốt `sys/last_ota_result` chống đá qua đá lại
-giữa hai slot cùng hỏng — cùng khuôn repo face attendance. OTA ghi flash nhiều giây, nên nó **dừng
-chuỗi nghe** và giương `OTA_RUNNING` (§5.5 luật 10).
+kiểm lúc boot), cùng khuôn repo face attendance. Model chỉ có một khe (§6.1, ADR-0018): bản cập nhật ghi đè `models_0`,
+`ai_engine_load` kiểm sha256 từng mục nên ảnh ghi dở không bao giờ được nạp, và máy chạy thiếu model ấy tới khi cập
+nhật lại thành công; `sys/last_ota_result` ghi kết quả. OTA ghi flash nhiều giây, nên nó **dừng chuỗi nghe** và giương
+`OTA_RUNNING` (§5.5 luật 10).
 
 ### 7.7 Máy tính nhận
 

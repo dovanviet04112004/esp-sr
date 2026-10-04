@@ -52,7 +52,7 @@ GATE_MAGIC = b"SRCG"
 # ESP-PPQ's helper.save heads an .espdl with "EDL2", the encryption flag, the length and four pad bytes.
 ESPDL_HEAD_BYTES = 16
 LISTEN_DIR = ML_ROOT.parent / "firmware" / "components" / "svc_listen" / "test_apps" / "unit" / "main" / "probe"
-LISTEN_PARTITIONS = ("models_1", "voice")  # a round's records, slot 0 holding the locked models
+LISTEN_PARTITIONS = ("models_1", "voice")  # a round's records, sized by partitions_unit.csv
 # Magic, sessions, commands, reject, margin; each command's id and text NUL-ended, padded to four bytes; then a
 # session: SESSION_HEAD, vad a bit a hop padded to four bytes, its segments of clean samples, its windows.
 LISTEN_HEAD = struct.Struct("<4sHHHH")
@@ -321,7 +321,8 @@ def listen_rounds(cfg: dict, out: Path) -> list[Path]:
     written, at, k = [], 0, 0
     while at < len(bodies):
         for label in LISTEN_PARTITIONS:
-            room, taken = pack_models.partition_bytes(label) - LISTEN_HEAD.size - len(named), []
+            room = pack_models.partition_bytes(label, pack_models.UNIT_PARTITIONS) - LISTEN_HEAD.size - len(named)
+            taken = []
             while at < len(bodies) and sum(map(len, taken)) + len(bodies[at]) <= room:
                 taken.append(bodies[at])
                 at += 1

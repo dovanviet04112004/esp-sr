@@ -139,9 +139,10 @@ esp_err_t sys_storage_read_file(const char *path, void *buf, size_t cap, size_t 
  */
 esp_err_t sys_storage_write_file(const char *path, const void *data, size_t len);
 
-/** Memory-map model slot 0 or 1 read-only and check its header layout, not its grid_hash.
+/** Memory-map models_0, slot 0, or a test table's models_1, slot 1, read-only; check its header layout.
  *  @ctx task | blocking | the mapping stays valid until sys_storage_unmap_models
- *  @ret ESP_OK | ESP_ERR_NOT_FOUND no image | ESP_ERR_INVALID_VERSION | ESP_ERR_INVALID_SIZE bad entry
+ *  @ret ESP_OK | ESP_ERR_NOT_FOUND no image or no partition | ESP_ERR_INVALID_VERSION
+ *       | ESP_ERR_INVALID_SIZE bad entry
  */
 esp_err_t sys_storage_map_models(uint8_t slot, sys_storage_models_t *out);
 

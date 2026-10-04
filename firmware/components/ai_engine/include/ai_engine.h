@@ -1,4 +1,4 @@
-/** Every learned model: ns, wake, command, synth, run on esp-dl from the active model slot (KEHOACH 4.5.4).
+/** Every learned model: ns, wake, command, synth, run on esp-dl from the model slot (KEHOACH 4.5.4).
  *  Models are process-wide singletons, loaded once at boot; each step belongs to one task (KEHOACH 5.2).
  */
 #pragma once

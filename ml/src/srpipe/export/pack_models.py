@@ -23,6 +23,7 @@ from srpipe.generated import grid
 FIRMWARE = ML_ROOT.parent / "firmware"
 FORMAT_HEADER = FIRMWARE / "components" / "sys_storage" / "include" / "storage_format.h"
 PARTITIONS = FIRMWARE / "partitions.csv"
+UNIT_PARTITIONS = FIRMWARE / "test_apps" / "partitions_unit.csv"
 LOCK = FIRMWARE.parent / "contracts" / "models.lock.json"
 MODELS = FIRMWARE / "models"
 HEAD = struct.Struct("<IIII48x")
@@ -65,15 +66,15 @@ def storage_string(name: str) -> str:
     return match.group(1)
 
 
-def partition_bytes(label: str) -> int:
-    """Size of the partition of that label in partitions.csv."""
-    with PARTITIONS.open(encoding="utf-8") as f:
+def partition_bytes(label: str, table: Path = PARTITIONS) -> int:
+    """Size of the partition of that label in a partition table, the product's unless told."""
+    with table.open(encoding="utf-8") as f:
         rows = [[c.strip() for c in row] for row in csv.reader(f) if row and not row[0].lstrip().startswith("#")]
     return next(int(row[4], 0) for row in rows if row[0] == label)
 
 
 def slot_bytes() -> int:
-    """Size of model slot 0 in partitions.csv; slot 1 has the same (KEHOACH 6.1)."""
+    """Size of models_0, the one model partition of partitions.csv (KEHOACH 6.1)."""
     return partition_bytes(storage_string("STORAGE_MODEL_LABEL_SLOT0"))
 
 

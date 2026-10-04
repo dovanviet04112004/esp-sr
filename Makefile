@@ -150,7 +150,7 @@ ctc-qat: ## Rung 4: QAT on the GPU from the best calibration of ctc-ptq: make ct
 ctc-deploy: ## Export a ladder row into firmware/models/command and lock it: make ctc-deploy RUN=<run under ml/> ROW=<row> (E11-T19)
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant deploy $(RUN) --row $(ROW)
 
-models-flash: ## Pack every model of contracts/models.lock.json and write both model slots of board B (KEHOACH 4.5.6)
+models-flash: ## Pack every model of contracts/models.lock.json and write models_0 of board B (KEHOACH 4.5.6, 6.1)
 	cd ml && PORT=$(PORT) ./scripts/50_pack_and_flash.sh
 
 command-eval: ## Score Gate 3 of a command track on the board sessions: make command-eval TRACK=kws|ctc RUN=<run under ml/> (E11-T13, E11-T17)
@@ -265,18 +265,18 @@ ai-unit: ai-probe ## Run the ai_engine suite on board B at bench's compiler sett
 	  $(UNIT_APP)/sdkconfig.defaults $(UNIT_APP)/CMakeLists.txt)
 	cd $(UNIT_APP) && idf.py build && \
 	  python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
-	    --partition-table-file ../../../../partitions.csv write_partition --partition-name models_0 \
+	    --partition-table-file ../../../../test_apps/partitions_unit.csv write_partition --partition-name models_0 \
 	    --input main/probe/ctc_models.bin && \
 	  python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
-	    --partition-table-file ../../../../partitions.csv write_partition --partition-name models_1 \
+	    --partition-table-file ../../../../test_apps/partitions_unit.csv write_partition --partition-name models_1 \
 	    --input main/probe/ns_models.bin && \
 	  if [ -f main/probe/ctc_gate.bin ]; then \
 	    python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
-	      --partition-table-file ../../../../partitions.csv write_partition --partition-name voice \
+	      --partition-table-file ../../../../test_apps/partitions_unit.csv write_partition --partition-name voice \
 	      --input main/probe/ctc_gate.bin; \
 	  else \
 	    python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
-	      --partition-table-file ../../../../partitions.csv erase_partition --partition-name voice; \
+	      --partition-table-file ../../../../test_apps/partitions_unit.csv erase_partition --partition-name voice; \
 	  fi && \
 	  { pytest pytest_unit.py --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) -s \
 	      -p no:cacheprovider; echo $$? > build/unit.status; } 2>&1 | tee build/unit.log; \
@@ -292,15 +292,15 @@ ai-unit-rnnt: ## Run the rnnt build of the ai_engine suite on board B: rnnt/prob
 	  $(UNIT_APP)/sdkconfig.defaults $(UNIT_APP)/CMakeLists.txt)
 	cd $(UNIT_APP) && idf.py -B build_rnnt -D SDKCONFIG=build_rnnt/sdkconfig -D UNIT_PROFILE=rnnt build && \
 	  python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
-	    --partition-table-file ../../../../partitions.csv write_partition --partition-name models_0 \
+	    --partition-table-file ../../../../test_apps/partitions_unit.csv write_partition --partition-name models_0 \
 	    --input main/probe/rnnt_models.bin && \
 	  if [ -f main/probe/rnnt_gate.bin ]; then \
 	    python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
-	      --partition-table-file ../../../../partitions.csv write_partition --partition-name voice \
+	      --partition-table-file ../../../../test_apps/partitions_unit.csv write_partition --partition-name voice \
 	      --input main/probe/rnnt_gate.bin; \
 	  else \
 	    python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
-	      --partition-table-file ../../../../partitions.csv erase_partition --partition-name voice; \
+	      --partition-table-file ../../../../test_apps/partitions_unit.csv erase_partition --partition-name voice; \
 	  fi && \
 	  { pytest pytest_unit.py --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) \
 	      --build-dir build_rnnt -s -p no:cacheprovider; echo $$? > build_rnnt/unit.status; } 2>&1 | tee build_rnnt/unit.log; \
@@ -315,11 +315,11 @@ listen-unit: ## Run svc_listen on board B over every Gate 3 session, round by ro
 	@$(call fresh_sdkconfig,$(LISTEN_APP)/sdkconfig,firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.bench \
 	  $(LISTEN_APP)/sdkconfig.defaults $(LISTEN_APP)/CMakeLists.txt)
 	cd $(LISTEN_APP) && idf.py build
-	python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --partition-table-file firmware/partitions.csv \
+	python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --partition-table-file firmware/test_apps/partitions_unit.csv \
 	  write_partition --partition-name models_0 --input ml/artifacts/models.bin
 	@skip=n; for round in $$(ls $(LISTEN_APP)/main/probe/listen_*_voice.bin | sed 's/.*listen_\([0-9]*\)_voice.bin/\1/' | sort -n); do \
 	  for part in models_1 voice; do \
-	    python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --partition-table-file firmware/partitions.csv \
+	    python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --partition-table-file firmware/test_apps/partitions_unit.csv \
 	      write_partition --partition-name $$part --input $(LISTEN_APP)/main/probe/listen_$${round}_$$part.bin || exit 1; \
 	  done; \
 	  { cd $(LISTEN_APP) && pytest pytest_unit.py --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) \

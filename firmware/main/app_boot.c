@@ -24,8 +24,8 @@
 #include "svc_report.h"
 #include "sys_storage.h"
 
-#define DMA_DESC_NUM 8       // 128 ms of hops outlasts one flash erase (KEHOACH 5.5)
-#define MODEL_SLOT_DEFAULT 0 // model/active_slot absent: models_0
+#define DMA_DESC_NUM 8 // 128 ms of hops outlasts one flash erase (KEHOACH 5.5)
+#define MODEL_SLOT 0   // models_0, the one model partition (KEHOACH 6.1)
 
 #define APP_SEED_VER GEN_AFE_VERSION // raised in afe.yaml when a seed changes (KEHOACH 6.2)
 
@@ -111,13 +111,10 @@ static const dsp_afe_calib_t *load_calib(void)
 
 static void load_models(void)
 {
-    uint8_t slot = MODEL_SLOT_DEFAULT;
-    if (sys_storage_get_u8(STORAGE_NS_MODEL, STORAGE_KEY_ACTIVE_SLOT, &slot) != ESP_OK) {
-        slot = MODEL_SLOT_DEFAULT;
-    }
-    const esp_err_t err = ai_engine_load(slot);
+    const esp_err_t err = ai_engine_load(MODEL_SLOT);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "no models from slot %u (%s), running without them", slot, esp_err_to_name(err));
+        ESP_LOGW(TAG, "no models in " STORAGE_MODEL_LABEL_SLOT0 " (%s), running without them",
+                 esp_err_to_name(err));
     }
 }
 

@@ -38,7 +38,6 @@
 #define STORAGE_KEY_WAKE_TH "wake_th"                 // u16, permille
 #define STORAGE_KEY_CMD_REJECT "cmd_reject"           // u16
 #define STORAGE_KEY_CMD_MARGIN "cmd_margin"           // u16
-#define STORAGE_KEY_ACTIVE_SLOT "active_slot"         // u8, 0 or 1
 #define STORAGE_KEY_MODEL_VERSION "version"           // str
 #define STORAGE_KEY_MODEL_SHA256 "sha256"             // blob 32 B
 #define STORAGE_KEY_BOOT_COUNT "boot_count"           // u32
@@ -52,7 +51,6 @@ _Static_assert(STORAGE_NVS_NAME_FITS(STORAGE_KEY_AGC_TARGET_DBFS) &&
                    STORAGE_NVS_NAME_FITS(STORAGE_KEY_STREAM_HOST) &&
                    STORAGE_NVS_NAME_FITS(STORAGE_KEY_STREAM_PORT) &&
                    STORAGE_NVS_NAME_FITS(STORAGE_KEY_NS_FLOOR_DB) &&
-                   STORAGE_NVS_NAME_FITS(STORAGE_KEY_ACTIVE_SLOT) &&
                    STORAGE_NVS_NAME_FITS(STORAGE_KEY_BOOT_COUNT) &&
                    STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_REJECT) &&
                    STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_MARGIN),
@@ -74,7 +72,7 @@ _Static_assert(STORAGE_NVS_NAME_FITS(STORAGE_KEY_AGC_TARGET_DBFS) &&
 #define STORAGE_MODEL_HEADER_BYTES 1024
 #define STORAGE_MODEL_ALIGN_BYTES 64
 #define STORAGE_MODEL_LABEL_SLOT0 "models_0"
-#define STORAGE_MODEL_LABEL_SLOT1 "models_1"
+#define STORAGE_MODEL_LABEL_SLOT1 "models_1" // test_apps/partitions_unit.csv only
 
 typedef enum {
     STORAGE_MODEL_KIND_ESPDL = 1,
