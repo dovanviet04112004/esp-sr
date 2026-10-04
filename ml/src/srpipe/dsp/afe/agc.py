@@ -7,9 +7,9 @@ needs only products, sums, quotients and sqrt, so both sides match bit for bit. 
 from __future__ import annotations
 
 import math
-from collections import deque
 from dataclasses import dataclass
 
+import numba
 import numpy as np
 
 from srpipe.generated import afe, grid
@@ -57,50 +57,80 @@ def lookahead_samples(lookahead_ms: float) -> int:
     return int(np.rint(f32(lookahead_ms) * f32(grid.SAMPLE_RATE_HZ) / f32(MS_PER_S)))
 
 
-class _SlidingMin:
-    """Minimum of the last n values, from a deque of (index, value) whose values rise from front to back: O(1) per
-    push on average, and the same minimum as a scan since min rounds nothing."""
+@numba.njit
+def _energy(hop: np.ndarray) -> np.float32:
+    """Sum of squares in float32, sample by sample, as agc.c sums it."""
+    energy = np.float32(0.0)
+    for v in hop:
+        energy = energy + v * v
+    return energy
 
-    def __init__(self, n: int) -> None:
-        self.n = n
-        self.count = 0
-        self.rising: deque[tuple[int, np.float32]] = deque()
 
-    def push(self, v: np.float32) -> np.float32:
-        while self.rising and self.rising[-1][1] >= v:
-            self.rising.pop()
-        self.rising.append((self.count, v))
-        if self.rising[0][0] <= self.count - self.n:
-            self.rising.popleft()
-        self.count += 1
+@numba.njit
+def _limit(
+    x: np.ndarray,
+    gain: np.float32,
+    ceiling: np.float32,
+    release_step: np.float32,
+    need: np.ndarray,
+    need_at: np.ndarray,
+    held: np.ndarray,
+    delay: np.ndarray,
+    ints: np.ndarray,
+    floats: np.ndarray,
+) -> np.ndarray:
+    """x scaled by gain and limited sample by sample, lagging by the look-ahead, as agc.c loops. need, need_at: the
+    sliding minimum of the last n wanted gains, a ring of rising values and their sample counts from ints[0], ints[1]
+    of them: O(1) a sample on average, the scan's minimum since min rounds nothing. held: the last n held gains, oldest
+    at ints[4], ints[3] under one, summed afresh each hop so rounding cannot build up, mean exactly 1 while all are 1.
+    delay: the look-ahead's samples from ints[5]. ints[2] counts samples; floats: last held gain, running sum."""
+    n = len(held)
+    ring = len(need)
+    one = np.float32(1.0)
+    total = np.float32(0.0)
+    for j in range(n):
+        total = total + held[(ints[4] + j) % n]
+    floats[1] = total
+    out = np.empty_like(x)
+    for i in range(len(x)):
+        s = gain * x[i]
+        magnitude = abs(s)
+        wanted = ceiling / magnitude if magnitude > ceiling else one
+        head, size, count = ints[0], ints[1], ints[2]
+        while size > 0 and need[(head + size - 1) % ring] >= wanted:
+            size -= 1
+        slot = (head + size) % ring
+        need[slot] = wanted
+        need_at[slot] = count
+        size += 1
+        if need_at[head] <= count - n:
+            head = (head + 1) % ring
+            size -= 1
+        count += 1
+        ints[0], ints[1], ints[2] = head, size, count
         # The window starts full of ones, so until n pushes its minimum is at most 1.
-        return min(self.rising[0][1], f32(1.0)) if self.count < self.n else self.rising[0][1]
-
-
-class _BoxMean:
-    """Mean of the last n values, all ones at first: a running sum, summed afresh from oldest to newest at each hop
-    so rounding cannot build up, and exactly 1 while every value is 1."""
-
-    def __init__(self, n: int) -> None:
-        self.values = deque([f32(1.0)] * n, maxlen=n)
-        self.under_one = 0
-        self.total = f32(n)
-
-    def resum(self) -> None:
-        total = f32(0.0)
-        for v in self.values:
-            total = total + v
-        self.total = total
-
-    def push(self, v: np.float32) -> np.float32:
-        old = self.values[0]
-        if old < f32(1.0):
-            self.under_one -= 1
-        self.values.append(v)
-        if v < f32(1.0):
-            self.under_one += 1
-        self.total = (self.total - old) + v
-        return f32(1.0) if self.under_one == 0 else self.total / f32(len(self.values))
+        lowest = min(need[head], one) if count < n else need[head]
+        kept = min(lowest, floats[0] + release_step)
+        floats[0] = kept
+        at = ints[4]
+        oldest = held[at]
+        if oldest < one:
+            ints[3] -= 1
+        held[at] = kept
+        ints[4] = (at + 1) % n
+        if kept < one:
+            ints[3] += 1
+        floats[1] = (floats[1] - oldest) + kept
+        mean = one if ints[3] == 0 else floats[1] / np.float32(n)
+        if n > 1:
+            at = ints[5]
+            delayed = delay[at]
+            delay[at] = s
+            ints[5] = (at + 1) % (n - 1)
+        else:
+            delayed = s
+        out[i] = delayed * mean
+    return out
 
 
 class Agc:
@@ -130,10 +160,14 @@ class Agc:
         # Start the level at the target less the most gain, so quiet speech passes the gate at once.
         self.speech_power = self.target_power / (self.gain_max * self.gain_max)
         self.gain = f32(1.0)
-        self.delay = deque([f32(0.0)] * self.lookahead, maxlen=max(self.lookahead, 1))
-        self.need = _SlidingMin(self.lookahead + 1)
-        self.held = _BoxMean(self.lookahead + 1)
-        self.last_held = f32(1.0)
+        n = self.lookahead + 1
+        # One slot more than the window: a new value lands while the one it pushes out still sits there.
+        self.need = np.zeros(n + 1, dtype=np.float32)
+        self.need_at = np.zeros(n + 1, dtype=np.int64)
+        self.held = np.ones(n, dtype=np.float32)
+        self.delay = np.zeros(max(self.lookahead, 1), dtype=np.float32)
+        self.ints = np.zeros(6, dtype=np.int64)
+        self.floats = np.array([1.0, n], dtype=np.float32)
 
     def set_target(self, target_dbfs: float) -> None:
         """Target speech level in dBFS, square full scale; as NVS afe/agc_target_dbfs sets it."""
@@ -142,10 +176,7 @@ class Agc:
     def _slow_gain(self, hop: np.ndarray, speech: bool) -> None:
         if not speech:
             return
-        energy = f32(0.0)
-        for v in hop:
-            energy = energy + v * v
-        power = energy / f32(len(hop))
+        power = _energy(hop) / f32(len(hop))
         if power >= self.gate * self.speech_power:
             self.speech_power = self.level_keep * self.speech_power + (f32(1.0) - self.level_keep) * power
         else:
@@ -163,19 +194,16 @@ class Agc:
         """One hop scaled and limited, lagging by the look-ahead, and the slow gain applied to it in dB."""
         x = np.asarray(hop, dtype=np.float32)
         self._slow_gain(x, speech)
-        self.held.resum()
-        out = np.empty_like(x)
-        for i, v in enumerate(x):
-            s = self.gain * v
-            magnitude = abs(s)
-            lowest = self.need.push(self.ceiling / magnitude if magnitude > self.ceiling else f32(1.0))
-            held = min(lowest, self.last_held + self.release_step)
-            self.last_held = held
-            mean = self.held.push(held)
-            if self.lookahead:
-                delayed = self.delay[0]
-                self.delay.append(s)
-            else:
-                delayed = s
-            out[i] = delayed * mean
+        out = _limit(
+            x,
+            self.gain,
+            self.ceiling,
+            self.release_step,
+            self.need,
+            self.need_at,
+            self.held,
+            self.delay,
+            self.ints,
+            self.floats,
+        )
         return out, f32(20.0) * log10_f32(self.gain)
