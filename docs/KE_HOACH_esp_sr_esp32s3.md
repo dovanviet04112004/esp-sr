@@ -53,7 +53,7 @@ Bảng này tồn tại cho tới khi TỔNG QUAN được sửa theo (E1-T9). S
 | 7 | Thứ tự `AGC → VAD` | **`VAD → AGC`** | AGC chỉ được thích nghi khi có người nói, nên cần cờ VAD; VAD dựa trên năng lượng dải, nên phải đọc mức chưa bị AGC kéo | §3.10 |
 | 8 | DOA GCC-PHAT, không nói độ phân giải | Dò **lưới góc** trên phổ chéo đã làm trơn, không lấy đỉnh trễ nguyên | Micro của board B cách 4,5 cm ở 16 kHz chỉ có ±2,10 mẫu trễ: lấy đỉnh nguyên chỉ ra 5 góc | §3.6 |
 | 9 | `command` so chuỗi âm vị với danh sách | Hai đường sau một hợp đồng (ADR-0012): **chấm CTC có ràng buộc** từng lệnh bằng thuật toán tiến, kèm **biến thể phương ngữ** (`ctc`); và **DS-CNN phân lớp** bộ lệnh cố định (`kws`), đường mặc định tới khi Cửa 3 chọn | Giải tham lam rồi so chuỗi vứt đi xác suất; tập lệnh đóng cho phép chấm thẳng từng lệnh với giá gần bằng không. `kws` chạy được trước khi cao độ, GRU chạy dòng và chấm CTC xong | §3.12 |
-| 10 | Thanh điệu: ba đường | **Nhãn thanh chen trong cùng chuỗi CTC** trên 44 đơn vị, từ **log-mel 40 cộng ba chiều cao độ** (ADR-0010) | Tài liệu: thanh phải nằm trong đơn vị và cao độ hạ lỗi rõ ở ngôn ngữ có thanh, còn cách đặt thanh không đổi lỗi gộp; một đầu ra, bộ ký hiệu nhỏ nhất | §3.11, §3.12 |
+| 10 | Thanh điệu: ba đường | **Nhãn thanh chen trong cùng chuỗi CTC** trên 44 đơn vị, từ **log-mel 80 cộng ba chiều cao độ** (ADR-0010, ADR-0017) | Tài liệu: thanh phải nằm trong đơn vị và cao độ hạ lỗi rõ ở ngôn ngữ có thanh, còn cách đặt thanh không đổi lỗi gộp; một đầu ra, bộ ký hiệu nhỏ nhất | §3.11, §3.12 |
 | 11 | Từ đánh thức 2–3 âm tiết | Bản demo: **"trợ lý"**, 2 âm tiết, ưu tiên bắt được (ADR-0011); cụm 3–4 âm tiết là hướng khi siết báo nhầm | Cụm hai âm tiết dài chừng nửa giây và trùng lời nói thường nhiều hơn; đổi lại nó tự nhiên và người thật trong kho nói nó 223 lần, nên có mẫu dương giọng thật | §3.11 |
 | 12 | `ns` mạng là RNNoise, không chọn mạng theo vạch vì đắt; ~24% một nhân, ~40 MFLOPS | **Hai ứng viên** cùng dữ liệu, cùng lưới, học trong một lượt, cắm vào cùng khe `ns` (chủ repo chốt 30/09 và 01/10): **RNNoise-16k**, dựng lại dải cho 16 kHz và huấn luyện lại, phần mạng ~11 MFLOP/s ở 62,5 khung/s 🔬; và **NSNet-16k**, mạng theo vạch họ NSNet2, cỡ L chủ repo chọn sau probe trên board B (ADR-0014). Bản hơn sàn bằng thước của §3.15 thì giữ, không bản nào hơn thì giữ sàn; ADR ghi | Bàn so §3.16 thấy mạng dìm nhiễu hạ nhiễu sâu hơn sàn nhiều trên cùng lối vào (`docs/measurements/afe/compare.md`, mục "Dìm nhiễu trên cùng lối vào gsc"). Giá của mạng theo vạch nằm ở bề rộng lớp hồi tiếp, hai lớp dày vào và ra chỉ tăng tuyến tính theo số vạch, nên NSNet-16k L, 5,1 ms mỗi bước trên board B, giữ nhân 1 quanh mục tiêu 50% (§5.6). Số 40 MFLOPS là của bản 48 kHz, 100 khung/s | §3.9 |
 | 13 | Task `nhan` ở nhân 1 cùng `thu` và `sach` | `nhan` ở **nhân 0** | TỔNG QUAN tự nói "một nhân không đủ", nhưng lại dồn cả ba việc liên tục vào nhân 1; cửa sổ lệnh 11–18 ms mỗi 32 ms đẩy nhân 1 quá 100% | §5.1 |
@@ -81,10 +81,10 @@ Chỉ bốn khối dùng mô hình học. Mọi khối khác là công thức, k
 |---|---|---|---|---|---|---|
 | `ns` `rnnoise` | `ai_engine/src/ns_rnnoise/`, cắm vào khe `ns` của `dsp_afe` | **RNNoise-16k**: RNNoise dựng lại cho 16 kHz, dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải + xác suất tiếng nói (§3.9) | đặc trưng dải tính từ 257 vạch | gain từng dải, nội suy ra 257 vạch | 82 603 tham số, 104 KB `.espdl` int8 (probe E9-T10) | kiến trúc RNNoise; **huấn luyện mới hoàn toàn** vì dải và tần số lấy mẫu khác bản gốc |
 | `ns` `nsnet` | `ai_engine/src/ns_nsnet/`, cắm vào cùng khe | **NSNet-16k**: mạng theo vạch họ NSNet2, dày 256 → H → GRU H → GRU H → dày H → 256, một sigmoid mỗi vạch, vạch 256 lấy gain vạch 255; cỡ **L**, H = 144, chủ repo chọn; S (96) và M (128) học cùng lượt làm đường lùi (§3.9) | log công suất 256 vạch đầu | gain 257 vạch | L: 324 688 tham số, 337 KB `.espdl` int8, 5,1 ms mỗi bước trên board B (probe E9-T10, ADR-0014) | kiến trúc NSNet2; **huấn luyện mới hoàn toàn** vì NSNet2 công bố chạy khung 20 ms, 161 vạch |
-| `wake` | `ai_engine/src/wake/` | TCN tích chập giãn nở nhân quả, 6 tầng, bước giãn 1 → 32, 64 kênh | log-mel 40 dải × khung 16 ms | xác suất từ đánh thức mỗi khung | ~100 KB int8 🔬 | tự huấn luyện |
-| `command` `kws` | `ai_engine/src/command_kws/` | DS-CNN (Zhang và cộng sự, 2017): một tích chập rồi bốn tầng tách chiều sâu, trung bình gộp, phân lớp một cửa sổ mỗi câu (ADR-0012) | log-mel 40 cộng ba chiều cao độ trên cửa sổ 94 bước tính ngược từ lúc `vad` tắt | xác suất của từng lệnh học được, `other`, `silence` | cỡ S của bài: `.espdl` 40,6 KB; M, L (156, 438 KB) quá ngân sách thời gian (§3.12) | tự huấn luyện trên mẩu lệnh người thật, TTS và âm bản |
-| `command` `ctc` | `ai_engine/src/command_ctc/` | encoder chạy dòng theo bộ khung MultiNet7 của Espressif (ADR-0013): ba tích chập 2D giảm khung, 6 lớp chia 4 tầng tốc độ khung, mỗi lớp khối feedforward, khối tích chập có cổng và khối trộn thay attention; đầu CTC trên đơn vị của §3.12; lùi về TCN nếu một lớp của nó qua esp-dl không đạt trên board | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung | **theo chất lượng**, từ cỡ MultiNet7 ~2,1 MB int8 🔬 trở lên; trần là µs trên board (§3.3), bộ nhớ nới theo §6.1, §6.6 (ADR-0013) | tự huấn luyện trên kho tiếng Việt |
-| `command` `rnnt` | `ai_engine/src/command_rnnt/` | encoder của `ctc` cộng mạng dự đoán không trạng thái và bộ nối như MultiNet7 (ADR-0016): nhúng 45 lớp thành 384 chiều, tích chập ngữ cảnh 2, bộ nối 384 chiều; chấm chính xác mọi lệnh trên cây lệnh (§3.12) | log-mel 40 + ba chiều cao độ | xác suất đơn vị mỗi khung × ngữ cảnh của cây | encoder như `ctc` cộng ~0,23 MB int8 🔬 | cùng lượt học với `ctc` (RNN-T cộng CTC) |
+| `wake` | `ai_engine/src/wake/` | TCN tích chập giãn nở nhân quả, 6 tầng, bước giãn 1 → 32, 64 kênh | log-mel 80 dải × khung 16 ms | xác suất từ đánh thức mỗi khung | ~100 KB int8 🔬 | tự huấn luyện |
+| `command` `kws` | `ai_engine/src/command_kws/` | DS-CNN (Zhang và cộng sự, 2017): một tích chập rồi bốn tầng tách chiều sâu, trung bình gộp, phân lớp một cửa sổ mỗi câu (ADR-0012) | log-mel 80 cộng ba chiều cao độ trên cửa sổ 94 bước tính ngược từ lúc `vad` tắt | xác suất của từng lệnh học được, `other`, `silence` | cỡ S của bài: `.espdl` 40,6 KB; M, L (156, 438 KB) quá ngân sách thời gian (§3.12) | tự huấn luyện trên mẩu lệnh người thật, TTS và âm bản |
+| `command` `ctc` | `ai_engine/src/command_ctc/` | encoder chạy dòng theo bộ khung MultiNet7 của Espressif (ADR-0013): ba tích chập 2D giảm khung, 6 lớp chia 4 tầng tốc độ khung, mỗi lớp khối feedforward, khối tích chập có cổng và khối trộn thay attention; đầu CTC trên đơn vị của §3.12; lùi về TCN nếu một lớp của nó qua esp-dl không đạt trên board | log-mel 80 + ba chiều cao độ | xác suất đơn vị mỗi khung | **theo chất lượng**, từ cỡ MultiNet7 ~2,1 MB int8 🔬 trở lên; trần là µs trên board (§3.3), bộ nhớ nới theo §6.1, §6.6 (ADR-0013) | tự huấn luyện trên kho tiếng Việt |
+| `command` `rnnt` | `ai_engine/src/command_rnnt/` | encoder của `ctc` cộng mạng dự đoán không trạng thái và bộ nối như MultiNet7 (ADR-0016): nhúng 45 lớp thành 384 chiều, tích chập ngữ cảnh 2, bộ nối 384 chiều; chấm chính xác mọi lệnh trên cây lệnh (§3.12) | log-mel 80 + ba chiều cao độ | xác suất đơn vị mỗi khung × ngữ cảnh của cây | encoder như `ctc` cộng ~0,23 MB int8 🔬 | cùng lượt học với `ctc` (RNN-T cộng CTC) |
 | `synth` | `ai_engine/src/synth/` | chốt ở E12-T1: mạng chưng cất kiểu sanoTTS (trường độ → âm học → iSTFT) | chuỗi đơn vị + trường độ | PCM 16 kHz | ≤ 1 MB | tuỳ phương án; phương án không mạng nằm ở `svc_speak` (§3.13) |
 
 Runtime của cả bốn là `esp-dl`, ghim bản chính xác (§4.5.1). `esp-dl` có sẵn GRU int8
@@ -181,8 +181,9 @@ máy khác: đáp ứng của micro là một phần của miền dữ liệu.
 
 | Luật | Vì sao |
 |---|---|
-| Tách theo **người nói**: một người chỉ nằm ở một tập | Cùng giọng ở cả train lẫn test thổi phồng mọi con số nhận dạng |
-| Bản thu qua board tách theo **phiên** và **phòng**; tập thử có ít nhất một phòng không góp gì vào tập học (`train`, `val`, `calib`) | Vang và nhiễu nền của phòng là thứ mô hình học thuộc được |
+| Tách theo **người nói**: một người chỉ nằm ở một tập, trừ người dùng thật ở luật dưới | Cùng giọng ở cả train lẫn test thổi phồng mọi con số nhận dạng |
+| Bản thu qua board tách theo **phiên** và **phòng**; tập thử có ít nhất một phòng không góp gì vào tập học (`train`, `val`, `calib`), trừ người dùng thật ở luật dưới | Vang và nhiễu nền của phòng là thứ mô hình học thuộc được |
+| Bản thu qua board của **người dùng thật** được vào `train` để mô hình nghe đúng giọng người ấy, chỉ những phiên split giao cho `train`; phiên của Cửa 3 không bao giờ vào `train`, `val`, `calib`. Số Cửa 3 của mô hình đã học giọng ấy ghi kèm **"cùng người nói, cùng phòng, khác phiên"** và không thay số trên người chưa học (chủ repo 04/10) | Board của một nhà cần nghe đúng giọng chủ nhà, mà mô phỏng chưa phủ được cách đọc của từng người, như "tắt" của chủ repo (`measurements/command.md` §9) |
 | Mỗi con số trên tập thu qua board ghi kèm **số người nói và số phòng** | Tập thử chỉ có vài người; con số không kèm cỡ mẫu trông chắc hơn thực tế |
 | Âm bản để đo báo nhầm của `wake`: **≥ 24 giờ**, không trùng nguồn học — phần kho công khai giữ riêng, qua đường mô phỏng board, cộng nền phòng thu qua board | Đo "≤ 1 lần mỗi giờ" trên một giờ âm bản là không đo gì cả |
 | Split, giọng mẫu TTS và nhiễu để trộn chỉ lấy mẩu đã qua sàng lọc (§1.2) | Mẩu câm hay lệch lời dạy sai, và nằm trong tập thử thì chấm sai |
@@ -411,7 +412,7 @@ flowchart TB
     K["<b>vad</b><br/>GMM sáu dải"] --> L
     L["<b>agc</b><br/>hai tầng, chỉ thích nghi khi vad = 1"] --> M
     M["đệm khung sạch → nhân 0"] --> N
-    N["<b>mel</b> · dsp_spec<br/>log-mel 40 dải"] --> O
+    N["<b>mel</b> · dsp_spec<br/>log-mel 80 dải"] --> O
     O["<b>wake</b> · ai_engine"] -->|"thức"| P
     P["<b>command</b> · ai_engine<br/>DS-CNN (kws) hoặc CTC có ràng buộc (ctc)"] --> Q
     Q["<b>svc_dialog</b>"] --> R
@@ -435,7 +436,7 @@ vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đ
 | Khối | Loại | Chỗ nằm | Thuật toán chốt | Tham số khởi đầu | Chi phí ước mỗi khung 🔬 | Cửa |
 |---|---|---|---|---|---|---|
 | `fft` `window` `stft` | thuần | `dsp_spec` | FFT thực (`dl_fft`), căn Hann, chồng 50% | §3.1 | **451 µs đo** cả chuỗi | E6-T4 |
-| `mel` | thuần | `dsp_spec` | log-mel, MFCC giữ làm đối chiếu | 40 dải, 20–7 600 Hz | **~180 µs đo** (`rfft` 118 + 40 dải 62) | E6-T5 |
+| `mel` | thuần | `dsp_spec` | log-mel, MFCC giữ làm đối chiếu | 80 dải, 20–7 600 Hz | **~240 µs** 🔬 (`rfft` 118 đo; 40 dải đo 62, 80 dải ~124 🔬) | E6-T5 |
 | `pitch` | thuần | `dsp_spec` | bộ dò cao độ của Kaldi chạy dòng: NCCF ở 4 kHz, Viterbi, ra độ hữu thanh + log F0 trừ trung bình + delta (§3.11) | 50–400 Hz | **1,98 ms đo** mỗi bước ở nhân 0, vùng làm việc trong PSRAM (`measurements/pitch.md`); dựng cho `command` (ADR-0010) | E11-T8 |
 | `hpf` | thuần | `dsp_afe` | IIR bậc hai Butterworth, dạng II chuyển vị viết tay (ADR-0004) | 80 Hz | ~41 µs hai kênh | E7-T1 |
 | `balance` | thuần | `dsp_afe` | nhân hệ số phức hiệu chuẩn mỗi vạch cho `ch1`, vòng viết tay (ADR-0005) | từ NVS `calib/bal` | ~18 µs | E7-T2 |
@@ -450,7 +451,7 @@ vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đ
 | `agc` | thuần | `dsp_afe` | hai tầng: chậm theo mức nói, nhanh chặn đỉnh nhìn trước 4 ms | đích −26 dBFS | ~260 µs, ~340 µs khi chặn mọi mẫu | E7-T4 |
 | `wake` | **mô hình** | `ai_engine/src/wake/` | TCN giãn nở nhân quả int8, chạy dòng | trường nhìn ~2 s | **1,99 ms đo** mỗi bước, 64 kênh, trọng số ngẫu nhiên (`measurements/latency.md` §8) | E11-T11 |
 | `normalize` `g2p` `lexicon` | thuần | `lang_vi` | luật chính tả → đơn vị, sinh biến thể phương ngữ | `contracts/lang_vi.yaml` | chỉ lúc nạp bộ lệnh: **1,18 ms đo** mỗi lệnh, ba vùng | E11-T4 |
-| `command` `kws` | **mô hình** + thuần | `ai_engine/src/command_kws/` | DS-CNN phân lớp các lệnh đã học + `other` + `silence` trên một cửa sổ mỗi câu; từ chối theo lớp thắng, xác suất và khoảng cách nhất–nhì (ADR-0012) | cửa sổ 94 bước log-mel 40 + 3 chiều cao độ; cỡ S, M, L ở cấu hình | S **41,9 ms đo** một lần mỗi câu (22 triệu MAC; M 277 ms, L 2,03 s, `measurements/latency.md` §10); `step` chỉ chép khung, còn `pitch` tốn ~2 ms mỗi bước trên nhân 0 (`measurements/pitch.md`) | E11-T17 |
+| `command` `kws` | **mô hình** + thuần | `ai_engine/src/command_kws/` | DS-CNN phân lớp các lệnh đã học + `other` + `silence` trên một cửa sổ mỗi câu; từ chối theo lớp thắng, xác suất và khoảng cách nhất–nhì (ADR-0012) | cửa sổ 94 bước log-mel 80 + 3 chiều cao độ; cỡ S, M, L ở cấu hình | S **41,9 ms đo** ở 40 dải một lần mỗi câu (22 triệu MAC; M 277 ms, L 2,03 s, `measurements/latency.md` §10); `step` chỉ chép khung, còn `pitch` tốn ~2 ms mỗi bước trên nhân 0 (`measurements/pitch.md`) | E11-T17 |
 | `command` `ctc` | **mô hình** + thuần | `ai_engine/src/command_ctc/` | encoder kiểu MultiNet7 + CTC (ADR-0013), chấm có ràng buộc từng lệnh, từ chối theo khoảng cách với vòng tự do | | 11–18 ms mỗi 32 ms, **chỉ trong cửa sổ lệnh**; chấm dần theo khối, sau bước chốt còn phần kết **1,5 ms đo** với bộ lệnh mặc định, 1,8 ms với 64 lệnh (§3.12) | E11-T13 |
 | `command` `rnnt` | **mô hình** + thuần | `ai_engine/src/command_rnnt/` | encoder của `ctc` + mạng dự đoán và bộ nối kiểu MultiNet7 (ADR-0016), chấm chính xác mọi lệnh trên cây lệnh, từ chối như `ctc` | | encoder như `ctc`; vòng tìm chạy dần mỗi khối trong cửa sổ lệnh, bộ nối theo lô cho ngữ cảnh của nút còn sống 🔬; chấm từng cặp không tỉa đo 15,5 ms mỗi khung (`latency.md` §15) | E11-T20 |
 | `synth` | **mô hình** hoặc thuần | `ai_engine/src/synth/` hoặc `svc_speak` | chốt ở E12-T1 | | < 1× thời gian thực, dựng trước rồi phát | E12-T4 |
@@ -751,16 +752,19 @@ NVS `afe/vad_mode` là **2**, ở `vad.aggressiveness` của `contracts/afe.yaml
 
 ### 3.11 Đặc trưng và `wake`
 
-**Đặc trưng** — log-mel 40 dải từ một `rfft` 512 trên tín hiệu ra của `dsp_afe`, cùng lưới §3.1. Tham số của log-mel
+**Đặc trưng** — log-mel 80 dải (ADR-0017) từ một `rfft` 512 trên tín hiệu ra của `dsp_afe`, cùng lưới §3.1. Tham số của log-mel
 và của cao độ nằm ở `contracts/listen.yaml`, nguồn chung cho `svc_listen` trên board, đường mô phỏng board và mọi nhánh
-ml, nên board tính đúng đặc trưng mạng đã học. Chuẩn hoá trung bình và phương sai theo **thống kê lúc huấn luyện**; thống kê ấy nằm **trong ảnh model**
+ml, nên board tính đúng đặc trưng mạng đã học. Số dải là một con số ở đó: đổi nó là sinh lại code, dựng lại firmware
+và mô phỏng vào một phiên bản `processed` mới; `svc_listen` lúc khởi động kiểm model lệnh nhận đúng số dải ấy cộng ba
+chiều cao độ, lệch thì từ chối chạy. Chuẩn hoá trung bình và phương sai theo **thống kê lúc huấn luyện**; thống kê ấy nằm **trong ảnh model**
 (§6.3) chứ không nằm trong code, nên model và thống kê không thể lệch nhau (TỔNG QUAN V5.5.4).
 
-**Cao độ vào `command`.** Tiếng Việt có thanh là âm vị (TỔNG QUAN §3.2), và 40 dải mel thô ở vùng 100–300 Hz nơi
-F0 nằm. `command` `ctc` đọc log-mel 40 cộng ba chiều cao độ của `dsp_spec/pitch` (log F0, delta, độ hữu thanh): mọi số đã
-công bố cho ngôn ngữ có thanh đều thấy cao độ hạ lỗi, ở tiếng Việt khoảng 18% tương đối, còn 80 dải không có số cho mạng
-nhỏ (ADR-0010). `command` `kws` cũng đọc đủ 43 chiều ấy ngay từ bản đầu (§3.12). `wake` giữ log-mel
-40, vì lỗi của nó nằm ở dữ liệu dương chứ không ở thanh. Model khai đặc trưng nó đọc trong `meta.json` (§6.3).
+**Cao độ vào `command`.** Tiếng Việt có thanh là âm vị (TỔNG QUAN §3.2), và dải mel thô ở vùng 100–300 Hz nơi F0
+nằm. `command` `ctc` đọc log-mel 80 cộng ba chiều cao độ của `dsp_spec/pitch` (log F0, delta, độ hữu thanh): mọi số đã
+công bố cho ngôn ngữ có thanh đều thấy cao độ hạ lỗi, ở tiếng Việt khoảng 18% tương đối (ADR-0010); 80 dải làm F1, F2
+của các cặp nguyên âm ă/â, ơ/ô/o mịn gấp đôi 40 dải, như fbank 80 chiều của MultiNet7 (ADR-0017). `command` `kws`
+cũng đọc đủ 83 chiều ấy (§3.12). `wake` đọc log-mel 80 không cao độ, vì lỗi của nó nằm ở dữ liệu dương chứ không ở
+thanh. Model khai đặc trưng nó đọc trong `meta.json` (§6.3).
 
 **`pitch`** là bộ dò cao độ của Kaldi (Ghahremani và cộng sự, 2014; `feat/pitch-functions.cc`) ở chế độ chạy dòng
 không trễ của chính Kaldi (`max_frames_latency` 0), giữ mọi hằng số mặc định: hạ về 4 kHz qua lọc sinc cắt 1 kHz; NCCF
@@ -935,7 +939,7 @@ dựng lại từ trọng số của nó (ADR-0013): ba tích chập 2D 3×3 (8,
 6 lớp chia 4 tầng (1, 2, 2, 1 lớp) ở tốc độ khung ×1, ×2, ×4, ×2, hạ và nâng khung giữa các tầng; mỗi lớp ba khối
 feedforward, hai khối tích chập có cổng (nhân theo chiều sâu 17, 9, 5, 9 theo tầng) và một khối trộn thay self-attention,
 cộng một hệ số chuẩn hoá và một nhánh tắt; đầu CTC. MultiNet7 không có chiều cao độ nào và bản tiếng Trung của nó bỏ
-thanh; `ctc` giữ đặc trưng và đơn vị của ADR-0010 — log-mel 40 cộng ba chiều cao độ, 44 đơn vị có nhãn thanh — và đầu ra
+thanh; `ctc` giữ đơn vị của ADR-0010 và đặc trưng của ADR-0017 — log-mel 80 cộng ba chiều cao độ, 44 đơn vị có nhãn thanh — và đầu ra
 31,25 khung mỗi giây cho chuỗi đơn vị có thanh 🔬. Tăng cường lúc học, mỗi lần rút mới khi câu vào lô, trước mặt nạ
 SpecAugment: đổi nhịp giữ cao độ (kéo hay nén trục bước theo hệ số rút log-đều trong `train.augment.tempo`, không bao
 giờ ít bước hơn số khung CTC cần cho chuỗi đơn vị của câu, delta cao độ nhân theo), time-warp của SpecAugment quanh
@@ -943,7 +947,9 @@ một bước, và một độ nghiêng thẳng qua các dải mel; cộng đổ
 câu nói nhanh (`measurements/command.md` §4). Đổi nhịp và time-warp lấy nguyên bước gốc gần nhất cho mỗi bước mới, bỏ
 bớt hay lặp lại bước, không bao giờ trộn hai bước: board không bao giờ đưa khung trộn, và mạng học trên khung trộn
 nghe khung thật kém hơn (`measurements/command.md` §8). Tập học là **mọi mẩu tiếng nói đã sàng lọc** của các kho ở `split.corpora`,
-không trần giờ (từ split `command/v3`). Đặc trưng float16 của nó lớn hơn RAM máy học, nên bộ nạp giữ một vòng đệm cỡ
+không trần giờ (từ split `command/v3`), cộng các phiên thu qua board mà `split.board` giao cho `train` (§1.3): câu cắt như Cửa 3 qua
+đúng chuỗi của board, nhãn là lời nhắc của phiên, mỗi shard của chúng có mặt `split.board.repeat` lần trong thứ tự shard, để vài trăm câu ấy
+vẫn vào lô giữa hàng trăm nghìn câu mô phỏng. Đặc trưng float16 của nó lớn hơn RAM máy học, nên bộ nạp giữ một vòng đệm cỡ
 `train.pool_gb`: mỗi `train.rotate_steps` bước nạp thêm một shard, đè lên shard cũ nhất. Thứ tự shard rút lại mỗi lượt
 bằng seed. Trung bình và độ lệch vẫn tính trên cả tập học, và lượt học tiếp tục dựng lại đúng vòng đệm của bước dừng.
 Cỡ chọn theo chất lượng: bắt đầu đúng cỡ MultiNet7, khoảng 2,1 MB
@@ -999,7 +1005,7 @@ biến thể lấy bằng double rồi làm tròn về float. Hai bên khớp t�
 
 **Chạy `ctc` trên máy** (`ai_engine/src/command_ctc/`, dựng khi Kconfig `AI_ENGINE_COMMAND_BACKEND` là `ctc`). Ảnh model
 mang hai mục tên `command_ctc` (§6.3): `ESPDL` là đồ thị của bậc thang đã chọn (§3.14), xuất chạy dòng `chunk_hops` = 16
-bước một lần; `NORM` là trung bình rồi độ lệch 43 chiều của `train`, float32. `ai_engine_load` dựng mạng và đọc `δ₁`,
+bước một lần; `NORM` là trung bình rồi độ lệch 83 chiều của `train`, float32. `ai_engine_load` dựng mạng và đọc `δ₁`,
 `δ₂` từ NVS `kws/cmd_reject`, `kws/cmd_margin` một lần, vì `_begin` và `_score` không được chặn (§4.5.5); thiếu khoá thì
 nhánh coi như không có (`ai_engine_has` trả false, ghi log một lần), nên khoá phải được gieo trước lúc nạp.
 
@@ -1007,7 +1013,7 @@ nhánh coi như không có (`ai_engine_has` trả false, ghi log một lần), n
   thể vào vùng của nhánh.
 - `_begin` xoá mọi `StreamingCache` của mạng, như cửa sổ bắt đầu từ bộ đệm rỗng lúc học và lúc chấm trên máy tính, xoá
   khối bước đang gom, đặt thuật toán tiến của mọi biến thể về khung 0, mở cửa sổ.
-- `_step` nhận một bước 43 chiều, chuẩn hoá bằng `NORM`, đưa về lưới int8 của số mũ đầu vào (làm tròn về số chẵn gần
+- `_step` nhận một bước 83 chiều, chuẩn hoá bằng `NORM`, đưa về lưới int8 của số mũ đầu vào (làm tròn về số chẵn gần
   nhất, chặn ở −128..127, như `Int8Net` của `ctc/quant.py`); đủ 16 bước thì chạy mạng một lần ra 8 khung × 45 lớp int8,
   đổi ra float theo số mũ đầu ra, lấy log-softmax từng khung, rồi đẩy thuật toán tiến của mọi biến thể và tổng của vòng
   tự do qua 8 khung ấy, cùng phép tính, cùng thứ tự từng biến thể như chấm một lần. Cửa sổ giữ tối đa 3 s: 188 bước,
@@ -1052,8 +1058,8 @@ vì tìm chùm làm rơi lệnh đúng (bảng dưới, ADR-0016). Thêm lệnh 
 từng kênh 3 × 3 rồi tích chập 1 × 1), trung bình gộp và một lớp ra, ở ba cỡ của bài: S (64 kênh, bốn tầng), M (172
 kênh, bốn tầng), L (276 kênh, năm tầng); tích chập đầu nhân 10 × 4, bước 2 × 2 ở S, còn ở M và L bước 2 × 1 rồi tầng
 tách chiều sâu đầu bước 2 × 2, theo `model_size_info` trong mã của bài. Bài đo 94,4 / 94,9 / 95,4% trên Google
-Speech Commands 12 lớp, với cửa sổ 1 s và 10 MFCC tức 49 × 10 đầu vào; cửa sổ 94 bước × 43 chiều ở đây cho khoảng 7,5
-lần số vị trí, nên S cỡ 20, M cỡ 75, L cỡ 215 triệu MAC mỗi câu 🔬. **Cỡ là lựa chọn cấu hình**: học các cỡ trên cùng
+Speech Commands 12 lớp, với cửa sổ 1 s và 10 MFCC tức 49 × 10 đầu vào; cửa sổ 94 bước × 83 chiều ở đây cho khoảng 16
+lần số vị trí, nên S cỡ 40, M cỡ 150, L cỡ 430 triệu MAC mỗi câu 🔬. **Cỡ là lựa chọn cấu hình**: học các cỡ trên cùng
 split, seed và số epoch, chọn bằng Cửa 3 sau int8 trên tập thu qua board, trong ngân sách một lần chạy **≤ 100 ms trên nhân
 0** sau khi `vad` tắt. Đo trên board B ngày 30/09 với trọng số ngẫu nhiên, mỗi cỡ khớp mô phỏng ESP-PPQ tuyệt đối: S
 41,9 ms, M 277 ms, L 2,03 s mỗi cửa sổ (`measurements/latency.md` §10), nên **bản đầu học S**. M và L giữ nguyên trong
@@ -1062,7 +1068,7 @@ sách. Cỡ, cửa sổ và lịch học ở `configs/models/command_kws.yaml`.
 
 | Phần | Chốt |
 |---|---|
-| Vào | log-mel 40 của `dsp_spec/mel` (§3.11) trên **cửa sổ 94 bước ≈ 1,5 s**, kết thúc ở bước `vad` tắt sau câu, tức gồm cả 240 ms kéo dài của `vad` (§3.10). Chuẩn hoá bằng trung bình và độ lệch từng dải của `train`, nằm trong ảnh model như `wake` |
+| Vào | log-mel 80 của `dsp_spec/mel` (§3.11) trên **cửa sổ 94 bước ≈ 1,5 s**, kết thúc ở bước `vad` tắt sau câu, tức gồm cả 240 ms kéo dài của `vad` (§3.10). Chuẩn hoá bằng trung bình và độ lệch từng dải của `train`, nằm trong ảnh model như `wake` |
 | Lớp | các lệnh có dữ liệu của `contracts/commands/default_vi.json`, theo đúng thứ tự file: mọi lệnh trừ lệnh chưa học "chụp ảnh", đứng cuối file (§1.3); cộng `other` và `silence`, 11 lớp. Các lớp lệnh là phần đầu của bộ lệnh, nên chỉ số lớp trùng chỉ số trong bảng lệnh |
 | `other` | lời nói thường của kho; cụm gần âm của từng lệnh — cụm của kho cách lệnh một thành phần âm tiết, như âm bản của `wake` (§3.11), cộng **mọi cách đổi thanh một âm tiết của lệnh** ("bất đèn", "tắt quát", "dứng lại", "tăng âm lương"…), vì cụm chỉ khác thanh là ca khó nhất mà kho hiếm khi có, cộng danh sách tay ở cấu hình ("bật điện", "tắt điện", "bật quạt trần", "mở cửa sổ", "đóng góp"…, gồm các cụm của phiên gần âm thu qua board); và **mọi cụm từ liền nhau ngắn hơn một lệnh** nói riêng ("bật", "đèn", "tăng âm", "âm lượng", "dừng", "lại"…), để nửa lệnh không thành lệnh |
 | `silence` | nền phòng và nhiễu không người nói, qua cùng đường mô phỏng board |
@@ -1071,7 +1077,7 @@ sách. Cỡ, cửa sổ và lịch học ở `configs/models/command_kws.yaml`.
 | Từ chối | lớp thắng là `other` hay `silence`; hoặc xác suất lớp thắng dưới ngưỡng; hoặc hơn lớp nhì quá ít. Hai ngưỡng ở NVS `kws/cmd_reject` và `kws/cmd_margin` (‰, §6.2), gieo từ Kconfig của `svc_listen`, chọn trên `val` |
 | Chạy | `_step` chỉ chép khung vào vòng đệm 94 bước; `_score` chạy mạng một lần rồi hậu xử lý thuần (softmax, luật từ chối), có bộ vàng ở `contracts/golden/command_kws/`. Ở `LENH` nhân 0 gần như rảnh, trừ một lần chạy mạng lúc hết câu |
 | Đổi lệnh | bộ lệnh cố định lúc học: khi chạy `kws`, `down/commands` bị từ chối bằng một mã lỗi mà `host` đổi thành câu (CLAUDE.md §3.1); lệnh chưa học không bao giờ được nhận |
-| Cao độ | **bản đầu học luôn log-mel 40 cộng ba chiều cao độ** của `dsp_spec/pitch` theo thứ tự POV, log F0 chuẩn hoá, delta: 43 chiều mỗi bước (chủ repo, 30/09: không học hai lượt), vì từ chối cụm gần âm chỉ khác thanh là việc khó nhất. Bộ dò đặt lại khi vào `LENH`, nên lúc cửa sổ bắt đầu nó đã chạy ít nhất khoảng lặng trước lệnh; lúc học, mô phỏng đặt lại ở đầu mẩu và chừa trước lệnh ít nhất 0,75 s, đúng quãng trung bình log F0 nhìn lại |
+| Cao độ | **học luôn log-mel 80 cộng ba chiều cao độ** của `dsp_spec/pitch` theo thứ tự POV, log F0 chuẩn hoá, delta: 83 chiều mỗi bước (chủ repo, 30/09: không học hai lượt), vì từ chối cụm gần âm chỉ khác thanh là việc khó nhất. Bộ dò đặt lại khi vào `LENH`, nên lúc cửa sổ bắt đầu nó đã chạy ít nhất khoảng lặng trước lệnh; lúc học, mô phỏng đặt lại ở đầu mẩu và chừa trước lệnh ít nhất 0,75 s, đúng quãng trung bình log F0 nhìn lại |
 
 **Tiếng tổng hợp của lệnh** (E11-T7, `tasks/command/synth.py`, mục `synth` của `configs/models/command.yaml`) đi đúng
 đường của `wake` (§3.11): cùng hai bộ TTS, cùng bộ nghe kiểm PhoWhisper, bốn bước `pilot`, `positives`, `negatives`,
@@ -1085,7 +1091,8 @@ cấu hình lọt thành dương. Giọng nhân bản chỉ lấy từ người 
 `val` hay `test` không tới được tập học qua TTS (§1.3).
 
 **Thước** (Cửa 3), chung cho hai đường, ở `srpipe/tasks/command/eval.py`: mỗi lệnh **≥ 90%**, từ chối đúng **≥ 95%**,
-trên tập thu qua board, tách theo người nói và phòng. Mỗi câu `vad` tìm ra chấm một lần, trên cửa sổ lệnh của §5.4:
+trên các phiên thu qua board mà split giao cho `test`, tách theo người nói và phòng; phiên `train` của người dùng thật
+không bao giờ được đếm (§1.3). Mỗi câu `vad` tìm ra chấm một lần, trên cửa sổ lệnh của §5.4:
 `kws` trên cửa sổ 94 bước của nó, kết ở bước `vad` tắt sau câu, ngưỡng lấy từ `val` của run; `ctc` và `rnnt` từ
 `utterance.lead_s` trước bước `vad` đầu của câu tới bước `vad` tắt sau nó, tối đa `window_s`, mạng chạy từ đầu cửa sổ
 với bộ đệm rỗng như lúc học, bộ lệnh là mọi dòng của `default_vi.json` qua `lang_vi`, cả lệnh chưa học. Câu là các đoạn
@@ -1954,8 +1961,9 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 | `svc_*` | `svc_<x>_init`, `svc_<x>_step` | task, gọi từ đúng task của bảng §5.2 |
 
 **`ai_engine_command_{prepare,begin,step,score,abort}` giữ nguyên cho mọi đường của `command`** (ADR-0012). Độ dài khung đặc
-trưng mà `_step` nhận do model khai trong `meta.json` (`features`, §6.3): 40 với log-mel 40, 43 khi cộng ba chiều cao độ;
-`svc_listen` dựng khung theo đó. `_prepare(lexicon)` nhận bộ lệnh trước mọi cửa sổ, lúc khởi động và mỗi lần đổi bộ lệnh,
+trưng mà `_step` nhận do model khai trong `meta.json` (`features`, §6.3): 80 với log-mel 80, 83 khi cộng ba chiều cao độ;
+`svc_listen` dựng khung theo `contracts/listen.yaml` và lúc khởi động kiểm model nhận đúng số ấy, lệch thì từ chối chạy
+(ADR-0017). `_prepare(lexicon)` nhận bộ lệnh trước mọi cửa sổ, lúc khởi động và mỗi lần đổi bộ lệnh,
 để `_step` chấm dần theo khối thay vì để cả phép chấm tới lúc câu chốt (§5.4); `_score` vẫn nhận bộ lệnh và chấm lại cả
 cửa sổ khi bộ ấy khác bộ `_prepare` đã nhận, nên thiếu `_prepare` chỉ chậm chứ không sai. `_score` trả cùng một khuôn
 `ai_engine_command_result_t`: chỉ số lệnh hoặc −1, kèm ba điểm. `_abort` đóng cửa sổ đang mở mà không chấm, không có
