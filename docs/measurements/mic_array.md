@@ -149,7 +149,7 @@ Phần 🔬 của E4-T8: mô phỏng của KẾ HOẠCH §1.2 lệch board ở �
 phiên `probe`, không đụng phiên nào của tập chấm.
 
 **Nền ồn theo băng**, `python -m srpipe.scenes.device floor <phiên>…`: dBFS thang sóng vuông của từng kênh, Welch 1 024
-mẫu. Ba phiên `20261001_home_011`–`013` là nền phòng yên 120 s thu sáng 02/10 cho mô phỏng; `20260928_home_003` là
+mẫu. Ba phiên `20261001_home_011`–`013` là nền không người nói 120 s thu sáng 02/10 cho mô phỏng; `20260928_home_003` là
 5 s nền của buổi thu 28/09; `20260928_home_005` là người thật đọc giọng thường ở 1 m. Dòng cuối là nhiễu tự thân theo
 datasheet mà mô phỏng dùng trước khi sửa, sau dịch 13.
 
@@ -167,9 +167,10 @@ datasheet mà mô phỏng dùng trước khi sửa, sau dịch 13.
 | `20260928_home_005` (giọng 1 m) | ch1 | −52,0 | −43,3 | −59,9 | −62,7 | −66,8 |
 | nhiễu tự thân datasheet | ch0 | −87,4 | −82,9 | −81,2 | −78,2 | −75,1 |
 
-- Nền thật của board cao hơn nhiễu tự thân datasheet ở mọi băng: ở `ch0` 13–27 dB dưới 2 kHz và 2–5 dB trên 2 kHz,
-  ở `ch1` còn cao hơn. Trên 2 kHz nền giữ nguyên giữa các ngày (−73…−74 dBFS ở `ch0`, gò 1–2 kHz cũng thế), nên là của
-  board; dưới 300 Hz sáng 02/10 cao hơn 28/09 khoảng 10 dB, phần ấy là tiếng phòng.
+- Mọi phiên trong bảng thu khi quạt máy tính chạy cạnh board (chủ repo, 04/10), nên nền đo được là board cộng quạt;
+  phần riêng của board chỉ tách được bằng một phiên thu khi máy tính tắt. Nền ấy cao hơn nhiễu tự thân datasheet ở mọi
+  băng: ở `ch0` 13–27 dB dưới 2 kHz và 2–5 dB trên 2 kHz, ở `ch1` còn cao hơn; trên 2 kHz giữ nguyên giữa các ngày
+  (−73…−74 dBFS ở `ch0`, gò 1–2 kHz cũng thế), dưới 300 Hz sáng 02/10 cao hơn 28/09 khoảng 10 dB.
 - Giọng thường ở 1 m trên `ch0` chỉ hơn nền 1–2 dB ở 2–8 kHz; trên `ch1`, micro nghe to hơn ~10 dB (§1), hơn 4–8 dB.
   Mô phỏng cũ để dải ấy trên nhiễu tự thân hàng chục dB, nên mạng học dựa vào nó.
 
@@ -190,6 +191,7 @@ Giọng thật ở 1 m mạnh hơn mô phỏng 0,8–1,2 nat dưới 1,3 kHz và
 nghiêng xuống 3–5 dB mỗi octave từ nhóm quanh 900 Hz tới nhóm quanh 3 kHz. Giọng nhỏ thấp thêm khoảng 1 nat ở mọi nhóm. Nhóm cao nhất của
 giọng thật sát sàn log (−13,8 nat). Một người nói, một phòng: hướng lệch rõ, cỡ lệch chỉ là của người và phòng này.
 
-Theo hai bảng, mô phỏng sửa theo KẾ HOẠCH §1.2. Nền ồn thật của ba phiên `20261001_home_011`–`013` thay nhiễu tự thân
-trong `build`, cộng thẳng vào mẫu hai kênh. Mỗi phiên rút một độ nghiêng −6…+3 dB mỗi octave trên 1 kHz cho tiếng người
-nói, và mức nói 45–74 dB SPL ở 1 m. Đo lại hai bảng trên bản dựng mới trước khi học lại.
+Theo hai bảng, mô phỏng sửa theo KẾ HOẠCH §1.2: mỗi phiên rút một độ nghiêng −6…+3 dB mỗi octave trên 1 kHz cho tiếng
+người nói, và mức nói 45–74 dB SPL ở 1 m. Nền thu ở bảng đầu thì không dùng: nó có tiếng quạt máy tính, và cộng dưới mọi
+phiên thì mạng học từ đầu không học được (`command.md` §7); mô phỏng giữ nhiễu tự thân tới khi có nền thu lúc máy tính
+tắt.

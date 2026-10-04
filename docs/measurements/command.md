@@ -42,8 +42,8 @@ Quét `δ₁` ở `δ₂` 50‰: phần câu lệnh được nhận đúng lện
 
 Tám lệnh đúng 83–100%. Chỗ trượt là "tắt": 21/22 câu ra "bật đèn" hay "bật quạt" với điểm 830–960‰, khoảng cách nhất–nhì
 40–115‰. Giải tự do âm tiết đầu ra `@ t T6`: mất phụ âm đầu, "ă" nghe thành "â", sắc thành nặng; giải cả phiên liền thì
-thanh ra đúng sắc, phụ âm đầu và nguyên âm vẫn sai. Ba hướng chưa tách: tiếng bật hơi của "t" chìm dưới nền ồn của board
-(`mic_array.md` §4), cao độ đặt lại ở đầu cửa sổ chưa có quá khứ cho âm tiết đầu, giọng riêng của một người nói.
+thanh ra đúng sắc, phụ âm đầu và nguyên âm vẫn sai. Hai hướng chưa tách: cao độ đặt lại ở đầu cửa sổ chưa có quá khứ cho
+âm tiết đầu, giọng riêng của một người nói; tiếng bật hơi của "t" thì còn nguyên sau chuỗi (`afe/ns.md` §6).
 
 ## 2. `ctc` sau int8, theo thang KẾ HOẠCH §3.14 (E11-T12, E11-T19)
 
@@ -283,9 +283,45 @@ Xác suất từng khung (32 ms) ở âm tiết đầu, câu thứ hai của phi
 Đường giải tự do của cả 22 câu "tắt" là "ật" không phụ âm đầu (`@ t T6`, đôi khi `h`, `f`, `b` đứng trước). Cao độ thì có
 đủ: "tắt" cao và đều chừng 217 Hz, "đèn" chừng 137 Hz, tức thanh sắc rõ; đặc trưng cao độ chuẩn hoá theo 0,75 s trước nên ở
 âm tiết đầu câu nó vọt lên rồi tụt dần trong âm tiết, và cho bộ chuẩn hoá một mức giọng nền 140 Hz thì vài câu nghe ra sắc
-nhưng vẫn 0/22 câu đúng, vì phụ âm và nguyên âm vẫn sai. Tiếng bật hơi của "t" bị lọc ồn dìm (`afe/ns.md` §6), nhưng nới
-lọc ồn cũng không cứu được. Lỗi chính là nguyên âm ă nghe thành â và thanh sắc nghe thành nặng với giọng này, đúng loại nhầm
+nhưng vẫn 0/22 câu đúng, vì phụ âm và nguyên âm vẫn sai. Tiếng bật hơi của "t" nổi 25–28 dB trên nền sau chuỗi (`afe/ns.md`
+§6): phụ âm đầu có trong đặc trưng mà model không đọc ra, và nới hay tắt lọc ồn cũng không cứu được. Lỗi chính là nguyên
+âm ă nghe thành â và thanh sắc nghe thành nặng với giọng này, đúng loại nhầm
 model mắc nhiều trên `val` (§4.5: ă → a 365, ă → â 138; nặng ↔ hỏi, huyền). Cùng phiên chủ repo nói trực tiếp, "tét" và "đắt"
 được nhận, vì không lệnh nào khác chỉ khác chúng ở nguyên âm hay thanh, còn "tắt X" thua "bật X" ngay ở âm tiết đầu.
 
 Bảng này là mốc: model v3 phải đo lại đúng các câu này.
+
+## 7. Lượt học v3 đầu: nền quạt dưới mọi phiên (04/10)
+
+Split `command/v3` mô phỏng từ 02/10 23:24 tới 04/10 05:45 với nền thu của board (`20261001_home_011`–`013`) cộng thẳng
+dưới mọi phiên, người nói 45–74 dB SPL ở 1 m và nghiêng phổ −6…+3 dB mỗi octave trên 1 kHz. Ba phiên nền ấy thu khi
+quạt máy tính chạy cạnh board (chủ repo, 04/10): −56…−58 dBFS ở `ch0`, vạch 35, 102 và 1 875 Hz (`mic_array.md` §4).
+
+Run `20261004_90fd6d8-dirty_be34e4` (cấu hình đang khoá, 100 000 bước, dừng ở bước 6 000) và hai lượt thử 2 000 bước
+cùng code, cùng seed:
+
+| Lượt | Dữ liệu học | Tăng cường tempo, warp, tilt | Bước | UER `ctc` `val` | UER `rnnt` `val` |
+|---|---|---|---|---|---|
+| v3 | v3 nền quạt | có | 2 000 / 4 000 / 6 000 | 0,862 / 0,862 / 0,859 | 1,000 / 1,000 / 0,985 |
+| thử A | v3 nền quạt | không | 2 000 | 0,902 | 0,963 |
+| thử B | v2 | không | 2 000 | 0,571 | 0,565 |
+| run v2 `20261002_1538154-dirty_d6d74a` | v2 | không | 2 000 | 0,558 | 0,546 |
+
+Ở bước 6 000, mạng v3 phát blank ở 81–89% khung và sai 84–89% đơn vị trên chính câu học của mọi kho. Dữ liệu thì khớp:
+mạng v2 nghe câu học v3 sai 49–61% (ngang `val`), qua đúng đường nạp của trainer sai 0,494 khi để nguyên, 0,573 khi tăng
+cường. Thử B cho thấy code học không lỗi; lỗi ở dữ liệu.
+
+Cùng 150 câu `val` ở ba bản dựng, mạng v2 nghe:
+
+| | v2 | v3 nền quạt | v3 không nền (`3549465`) |
+|---|---|---|---|
+| Người nói ở 1 m, trung vị | 64,6 dB SPL | 58,8 dB SPL | 58,8 dB SPL |
+| Tiếng nói nổi trên khoảng đệm, p10 / trung vị / p90 | 17,4 / 33,7 / 45,5 dB | 6,0 / 18,1 / 30,3 dB | 10,0 / 30,5 / 41,8 dB |
+| UER mạng v2 | 0,298 | 0,486 | 0,348 |
+
+Nền quạt dưới mọi phiên, cộng người nói xuống 45 dB, để tiếng nói chỉ nổi 18 dB trên nền ở trung vị, và mạng học từ đầu
+không qua khỏi pha chỉ phát blank. Bỏ nền (KẾ HOẠCH §1.2) đưa `val` về gần v2; phần chênh còn lại là người nói nhỏ và
+nghiêng phổ. Trên 300 câu so cặp, `val` không nền: mạng v2 sai 0,332 (v2: 0,284), 7/300 câu sai từ 80% (v2: 2/300), không
+giá trị NaN hay vô cực, gò quanh 1,9 kHz của phổ trung bình 0,06 nat (bản nền quạt: ~1 nat); `test`: 0,377 (v2: 0,340),
+tiếng nói nổi 29,1 dB ở trung vị (v2: 31,0 dB). Mô phỏng lại không nền từ 04/10 06:55, mỗi kho qua cùng phép so cặp với
+v2 trước khi học.

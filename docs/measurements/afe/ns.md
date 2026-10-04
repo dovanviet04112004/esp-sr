@@ -153,27 +153,28 @@ Sâu hơn 2,7 dB nhưng tiếng mất gấp đôi. Đích của hàm ấy ép c�
 sạch, (S^c − (g·X)^c)² trên biên độ, có đích là tỉ lệ biên độ tiếng / hỗn hợp (bảng trên: 37,6 dB ở quãng nghỉ, tiếng mất
 0,15 dB): nhiễu sót chỗ không có tiếng vẫn bị phạt theo gain mũ 0,6, còn chỗ có tiếng đích không ép tiếng.
 
-## 6. Tiếng bật hơi đầu câu bị dìm (03/10)
+## 6. Tiếng bật hơi đầu câu qua `ns_omlsa` (03–04/10)
 
-Phiên "tắt đèn", "bật đèn" của chủ repo thu qua board B ở 1 m (dịch 13 của `board_b.csv`), chạy qua chuỗi sản phẩm bằng
-Python ở `0dc8de3`; năng lượng mỗi bước 16 ms trên cửa sổ Hann 512 mẫu, dB so với toàn thang, `ch0` thô và lối ra `clean`.
-Bước 0 là bước `vad` đầu của câu. Đo bằng script chẩn đoán chạy một lần.
+Các phiên "tắt đèn", "tắt quạt", "bật đèn" của chủ repo trong tập chấm Cửa 3 (board B, dịch 13 của `board_b.csv`), chạy
+qua chuỗi sản phẩm bằng Python ở `3549465`; năng lượng dải 2,5–7 kHz mỗi bước 16 ms trên cửa sổ Hann 512 mẫu. Chuỗi trả
+`clean` trễ một bước so với lối vào (`CHAIN_LAG_HOPS`), nên bước h của `ch0` thô so với bước h + 1 của `clean`. Tiếng bật
+hơi là bước thô nổi nhất trên nền trong khoảng sáu bước trước tới hai bước sau bước `vad` đầu của câu; nền là trung vị 14
+bước trước đó. Nền của các phiên này có tiếng quạt máy tính (`mic_array.md` §4). Đo bằng script chẩn đoán chạy một lần.
 
-| Câu "tắt đèn" | Dải | Thô | Sau chuỗi | Bị dìm |
+| Câu | Chuỗi | Câu đo | Tiếng bật hơi nổi trên nền, thô, trung vị | Sau chuỗi, trung vị |
 |---|---|---|---|---|
-| nền ồn trước câu | 2,5–7 kHz | −50 dB | −68 dB | 18 dB |
-| câu 1, bước −1: tiếng bật hơi của "t" | 2,5–7 kHz | **−38,3 dB** | **−64,4 dB** | **26 dB** |
-| câu 1, bước +2: nguyên âm | 2,5–7 kHz | −35,5 dB | −36,5 dB | 1 dB |
-| câu 2, bước −1 | 2,5–7 kHz | −44,5 dB | −60,1 dB | 16 dB |
-| câu 3, bước −1 | 2,5–7 kHz | −47,4 dB | −62,7 dB | 15 dB |
+| "tắt đèn" | như sản phẩm | 11 | 12,3 dB | **28,1 dB** |
+| "tắt quạt" | như sản phẩm | 11 | 9,7 dB | **24,9 dB** |
+| "bật đèn" | như sản phẩm | 12 | 3,8 dB | 13,8 dB |
+| "tắt đèn" | tắt `ns_omlsa` | 11 | 12,2 dB | 17,0 dB |
+| "tắt quạt" | tắt `ns_omlsa` | 11 | 9,8 dB | 14,4 dB |
 
-Tiếng bật hơi của "t" cao hơn nền 12 dB ở tín hiệu thô, sau chuỗi chỉ còn hơn nền chừng 4 dB. Nguyên nhân là SNR tiên
-nghiệm kiểu decision-directed của OM-LSA: ở khung đầu sau quãng lặng nó còn dựa vào độ lợi và SNR hậu nghiệm của khung
-lặng trước, nên trễ một khung mới tin là có tiếng nói, và xác suất có tiếng nói của IMCRA lại làm trơn theo `eta_tau_s`;
-tiếng bật hơi dài một khung rơi đúng khung ấy, độ lợi nằm ở sàn. Phụ âm hữu thanh như "b", "đ" có rung dây thanh từ trước
-nên không mất. Mọi phụ âm vô thanh đầu câu (t, k, p, ch, th) đều chịu cảnh này, và câu lệnh nào cũng bắt đầu sau quãng lặng.
+`ns_omlsa` hạ nền mà giữ tiếng bật hơi của "t", nên sau chuỗi phụ âm đầu nổi rõ hơn ở tín hiệu thô. Câu đầu của phiên
+`20260928_home_013`: tiếng bật hơi −38,3 dB thô trên nền −51 dB, sau chuỗi −42,4 dB trên nền −69 dB. Bước cùng chỉ số của
+`clean` (−64,4 dB) còn là nền trước câu, nên so bước h với bước h thì tiếng bật hơi trông như bị dìm 26 dB. "b" của "bật"
+hữu thanh, ít năng lượng ở dải này.
 
-Với model `command` đang khoá, học trên đúng chuỗi này, nới sàn không cứu được "tắt" (`command.md` §6):
+Với model `command` đang khoá, học trên đúng chuỗi này (`command.md` §6):
 
 | Chuỗi | Cửa 3 đầu đúng | Nhận đúng, `δ₁` 300 | "tắt" đầu đúng |
 |---|---|---|---|
@@ -181,7 +182,4 @@ Với model `command` đang khoá, học trên đúng chuỗi này, nới sàn k
 | sàn −6 dB | 85/111 | 70/111 | 0/22 |
 | tắt `ns_omlsa` | 83/111 | 54/111 | 3/22 |
 
-Hướng sửa, làm sau khi v3 của `command` học xong (chủ repo, 03/10; TASKS E9-T13): SNR tiên nghiệm hai bước (TSNR, Plapous
-và cộng sự, 2006) bỏ độ trễ một khung ở đầu và cuối tiếng nói mà không thêm nhiễu lấm tấm; nếu chưa đủ thì bắt đột biến
-năng lượng nhiều vạch cao trong một khung; nhìn trước một khung (thêm 16 ms trễ) là đường lùi. Lợi thật chỉ đo được sau khi
-`wake` và `command` học lại trên chuỗi mới.
+Lọc ồn không phải chỗ "tắt" trượt: phụ âm đầu có trong đặc trưng mà model không đọc ra (`command.md` §6).
