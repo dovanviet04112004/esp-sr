@@ -8,6 +8,7 @@
 #include "core/espdl_net.hpp"
 #include "core/model_image.hpp"
 #include "dl_model_base.hpp"
+#include "dsp_spec/pitch.h"
 #include "esp_heap_caps.h"
 #include "esp_partition.h"
 #include "esp_timer.h"
@@ -29,7 +30,7 @@ constexpr size_t kSectorBytes = 4096;
 constexpr int kToleranceSteps = 1; // one int8 step, as model->test() allows (KEHOACH 3.14)
 constexpr size_t kNetsMax = 2;
 constexpr int64_t kUsPerMs = 1000;
-constexpr size_t kFeaturesMax = 64;
+constexpr size_t kFeaturesMax = GEN_LISTEN_N_BANDS + DSP_SPEC_PITCH_FEATURES;
 constexpr const char *kGateLabel = "voice"; // partitions.csv: ctc_gate.bin goes there
 
 // Layout written by srpipe.tasks.command.ctc.probe; each record's int8 data is padded to four bytes.

@@ -19,7 +19,7 @@ endforeach()
 idf_component_register(
     SRCS ${tests}
     PRIV_INCLUDE_DIRS "../../../src"
-    REQUIRES ai_engine sys_storage unity esp_partition esp_timer mbedtls espressif__esp-dl
+    REQUIRES ai_engine dsp_spec sys_storage unity esp_partition esp_timer mbedtls espressif__esp-dl
     EMBED_FILES ${embedded}
     WHOLE_ARCHIVE
 )
