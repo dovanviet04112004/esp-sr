@@ -1,9 +1,9 @@
 """Train the ctc net of command (E11-T12, KEHOACH 3.12) on board-simulated log-mel and pitch, write a run directory.
 
-An example is a sentence of processed/command/<version> as the device computes it, drawn from a ring of train's shards;
-its target the lang_vi units of its text in the configured dialect. CTC, SpecAugment, Adam with a cosine decay; val
-gives the CTC loss and the best path's unit error rate. Ctrl-C pauses after the step under way; --resume goes on.
-Run: python -m srpipe.tasks.command.ctc.train [--set train.steps=40000] [--resume RUN]"""
+An example is a sentence of processed/command/<version> as the device computes it, drawn from a ring of train's shards,
+its target the lang_vi units of its text in the configured dialect. CTC, SpecAugment, Adam with a cosine decay, and a
+cost on a layer's stream above train.stream's cap; val gives the CTC loss, the best path's unit error rate and the
+loudest frame of any stream. Ctrl-C pauses after the step under way. Run: python -m srpipe.tasks.command.ctc.train"""
 
 from __future__ import annotations
 
@@ -43,6 +43,7 @@ LOG_PER_DB = math.log(10.0) / 10.0  # log-mel is a natural log of power
 POOL_STREAM = 1  # pass p's shard order: [train.seed, POOL_STREAM, p]
 POOL_DTYPE = np.float16
 GB = 1e9
+MEAN_SQUARE_FLOOR = 1e-12  # log2 of a silent frame's stream stays finite
 
 
 class Units:
@@ -361,6 +362,14 @@ def ctc_loss(log_probs: torch.Tensor, frames: np.ndarray, units: list[np.ndarray
     )
 
 
+def stream_penalty(kept: list[list[torch.Tensor]], spec: dict) -> torch.Tensor:
+    """spec's weight times, summed over every point of every layer's stream that encoder.streams_kept kept, the mean
+    over frames of the square of the octaves a frame's root mean square sits above spec's cap_rms (KEHOACH 3.12)."""
+    cap = math.log2(spec["cap_rms"])
+    above = [0.5 * torch.log2(ms.clamp_min(MEAN_SQUARE_FLOOR)) - cap for layer in kept for ms in layer]
+    return spec["weight"] * torch.stack([functional.relu(octaves).pow(2).mean() for octaves in above]).sum()
+
+
 def best_path(log_probs: np.ndarray) -> list[int]:
     """The classes of the most likely frame sequence, repeats merged and blanks dropped."""
     path = log_probs.argmax(axis=0)
@@ -377,17 +386,21 @@ def edit_distance(a: list[int], b: list[int] | np.ndarray) -> int:
 
 
 def evaluate(net: encoder.CtcNet, data: Sentences, stats: tuple, device: str, cells: int | None = None) -> dict:
-    """Mean CTC loss of val and the unit error rate of the best path over every val sentence; with a transducer, also
+    """Mean CTC loss of val and the unit error rate of the best path over every val sentence, and the root mean square
+    of the loudest frame of any layer's stream with that layer, counted through the stacks; with a transducer, also
     its mean RNN-T loss per unit, its lattice built at most cells cells at a time, and the unit error rate of its
     greedy path."""
     mean, std = stats
     stride = net.front.hop_stride
-    losses, rnnt_losses, errors, rnnt_errors, total = [], [], 0, 0, 0
-    with torch.no_grad():
+    losses, rnnt_losses, errors, rnnt_errors, total, peaks = [], [], 0, 0, 0, []
+    with torch.no_grad(), encoder.streams_kept(net) as kept:
         for k in range(0, len(data.first), VAL_BATCH):
             picks = np.arange(k, min(k + VAL_BATCH, len(data.first)))
             x, hops, units = batch_of(data, picks, net.chunk_multiple)
             encoded, log_probs = encoded_of(net, torch.from_numpy((x - mean) / std).to(device))
+            peaks.append([float(torch.stack([ms.max() for ms in layer]).max()) for layer in kept])
+            for layer in kept:
+                layer.clear()
             frames = frames_of(hops, stride)
             losses.append(float(ctc_loss(log_probs, frames, units)) * len(picks))
             heard = log_probs.cpu().numpy()
@@ -400,7 +413,9 @@ def evaluate(net: encoder.CtcNet, data: Sentences, stats: tuple, device: str, ce
                 )
                 paths = transducer.greedy_paths(net.transducer, encoded, frames)
                 rnnt_errors += sum(edit_distance(p, u) for p, u in zip(paths, units, strict=True))
+    loudest = np.sqrt(np.max(peaks, axis=0))
     row = {"loss": sum(losses) / len(data.first), "unit_error_rate": errors / total}
+    row |= {"stream_rms_max": float(loudest.max()), "stream_layer": int(loudest.argmax())}
     if net.transducer is not None:
         row |= {"rnnt_loss": sum(rnnt_losses) / len(data.first), "rnnt_unit_error_rate": rnnt_errors / total}
     return row
@@ -440,7 +455,7 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
     schedule = torch.optim.lr_scheduler.LambdaLR(
         optimiser, lambda step: final + (1 - final) * 0.5 * (1 + math.cos(math.pi * step / spec["steps"]))
     )
-    history, first, losses = [], 1, []
+    history, first, losses, penalties = [], 1, [], []
     if resume:
         state = torch.load(checkpoint(run), map_location=device, weights_only=False)
         net.load_state_dict(state["model"])
@@ -448,11 +463,12 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
         schedule.load_state_dict(state["schedule"])
         rng.bit_generator.state = state["draws"]
         history, first, losses = state["history"], state["step"] + 1, state.get("losses", [])
+        penalties = state.get("penalties", [])
 
     def save(step: int) -> None:
         state = {"model": net.state_dict(), "optimiser": optimiser.state_dict(), "step": step, "losses": losses}
-        state |= {"schedule": schedule.state_dict(), "draws": rng.bit_generator.state, "history": history}
-        torch.save(state, checkpoint(run))
+        state |= {"penalties": penalties, "schedule": schedule.state_dict(), "draws": rng.bit_generator.state}
+        torch.save(state | {"history": history}, checkpoint(run))
 
     n_mel = pool.dims - pitch.N_FEATURES
     said = f"{pool.sentences} sentences, {pool.hours:.1f} h, a ring of {len(pool.ring) / HOPS_PER_S / 3600:.1f} h"
@@ -468,19 +484,23 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
                 x, hops, units = batch_of(data, picks, net.chunk_multiple)
             x = (x - mean) / std
             mask(x, hops, spec["masks"], n_mel, rng)
-            loss = loss_of(net, cfg, torch.from_numpy(x).to(device), frames_of(hops, net.front.hop_stride), units)
+            with encoder.streams_kept(net) as kept:
+                loss = loss_of(net, cfg, torch.from_numpy(x).to(device), frames_of(hops, net.front.hop_stride), units)
+            penalty = stream_penalty(kept, spec["stream"]) if "stream" in spec else torch.zeros((), device=device)
             optimiser.zero_grad()
-            loss.backward()
+            (loss + penalty).backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), spec["clip_norm"])
             optimiser.step()
             schedule.step()
             losses.append(loss.item())
+            penalties.append(penalty.item())
             if step % spec["eval_every"] == 0 or step == spec["steps"]:
                 net.eval()
-                row = {"step": step, "train_loss": float(np.mean(losses)), "lr": schedule.get_last_lr()[0]}
+                row = {"step": step, "train_loss": float(np.mean(losses)), "stream_penalty": float(np.mean(penalties))}
+                row |= {"lr": schedule.get_last_lr()[0]}
                 row |= evaluate(net, sets["val"], (mean, std), device, (cfg.get("rnnt") or {}).get("lattice_cells"))
                 net.train()
-                losses = []
+                losses, penalties = [], []
                 history.append(row)
                 print(row_line(row), flush=True)
                 if run:

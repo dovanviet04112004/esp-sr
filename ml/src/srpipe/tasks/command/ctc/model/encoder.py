@@ -8,6 +8,8 @@ of each convolution (srpipe.compress.quant.ptq_espdl).
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 import torch
 from torch import Tensor, nn
@@ -186,6 +188,29 @@ class CtcNet(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         return self.head(self.encode(x))
+
+
+def frame_mean_square(x: Tensor) -> Tensor:
+    """The mean square across channels of each frame of (batch, channels, frames): (batch, frames)."""
+    return x.pow(2).mean(dim=1)
+
+
+@contextmanager
+def streams_kept(net: CtcNet) -> Iterator[list[list[Tensor]]]:
+    """Inside, each forward appends to list k the frame_mean_square of layer k's stream after each of its blocks, layers
+    counted through the stacks: the block's input plus its output, as Layer.forward adds each block to what it read."""
+    layers = [layer for stack in net.stacks for layer in stack.layers]
+    kept: list[list[Tensor]] = [[] for _ in layers]
+    hooks = [
+        block.register_forward_hook(lambda _block, given, out, k=k: kept[k].append(frame_mean_square(given[0] + out)))
+        for k, layer in enumerate(layers)
+        for block in (layer.ff1, layer.mixer, layer.conv1, layer.ff2, layer.conv2, layer.ff3)
+    ]
+    try:
+        yield kept
+    finally:
+        for hook in hooks:
+            hook.remove()
 
 
 def n_dims(cfg: dict) -> int:

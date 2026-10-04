@@ -1,8 +1,8 @@
 """ctc training: sentences load with their units and nothing too long, batches pad to the net's chunk, the best path
 merges repeats and drops blanks, the RNN-T loss sums every alignment whatever chunk of sentences builds its lattice,
 greedy RNN-T paths of a batch are those of each sentence, a ring smaller than train goes round every shard and is the
-same rebuilt for a resume, and a tiny run evaluates, saves each evaluated net, keeps the last, and paused or stopped
-then resumed ends as an unbroken one."""
+same rebuilt for a resume, a tiny run evaluates, saves each evaluated net, keeps the last, and paused or stopped then
+resumed ends as an unbroken one, and each layer's stream is kept after every block and costs only above its cap."""
 
 from __future__ import annotations
 
@@ -149,6 +149,9 @@ def test_a_tiny_run_evaluates_saves_each_evaluated_net_and_keeps_the_last(tmp_pa
     assert [row["step"] for row in history] == [2, 4] and len(mean) == len(std) == DIMS
     assert all(row["loss"] > 0 and row["unit_error_rate"] >= 0 for row in history)
     assert all(row["rnnt_loss"] > 0 and row["rnnt_unit_error_rate"] >= 0 for row in history)
+    layers = sum(s["layers"] for s in cfg["model"]["stacks"])
+    assert all(row["stream_rms_max"] > 0 and 0 <= row["stream_layer"] < layers for row in history)
+    assert all(row["stream_penalty"] >= 0 for row in history)
     assert yaml.safe_load(yaml.safe_dump(history)) == history
     assert type(train.edit_distance([3, 3, 5], np.array([3, 5], dtype=np.uint8))) is int
     last = torch.load(train.checkpoint(tmp_path / "run", 4))
@@ -216,6 +219,56 @@ def test_ctrl_c_pauses_after_the_step_under_way_and_the_resumed_run_ends_as_an_u
     resumed, _, history = train.train(cfg, ringed_sets(tmp_path / "c", 4), "cpu", tmp_path / "paused", resume=True)
     assert history == unbroken
     assert all(torch.equal(resumed.state_dict()[k], v) for k, v in whole.state_dict().items())
+
+
+def test_streams_kept_are_each_layers_stream_after_every_block_and_stop_on_leaving() -> None:
+    net = encoder.build(load_yaml(ctc.CONFIG)).eval()
+    layers = [layer for stack in net.stacks for layer in stack.layers]
+    given, normed = [], []
+    hooks = [layer.register_forward_pre_hook(lambda _m, args: given.append(args[0])) for layer in layers]
+    hooks += [layer.norm.register_forward_pre_hook(lambda _m, args: normed.append(args[0])) for layer in layers]
+    x = torch.from_numpy(np.random.default_rng(8).normal(size=(2, DIMS, 64)).astype(np.float32))
+    with torch.no_grad():
+        with encoder.streams_kept(net) as kept:
+            out = net(x)
+        for hook in hooks:
+            hook.remove()
+        assert [len(points) for points in kept] == [6] * len(layers)
+        for layer, y, last, points in zip(layers, given, normed, kept, strict=True):
+            blocks = (layer.ff1, layer.mixer, layer.conv1, layer.ff2, layer.conv2, layer.ff3)
+            for block, ms in zip(blocks, points, strict=True):
+                y = y + block(y)
+                torch.testing.assert_close(ms, encoder.frame_mean_square(y))
+            torch.testing.assert_close(points[-1], encoder.frame_mean_square(last))
+        torch.testing.assert_close(net(x), out, rtol=0, atol=0)
+    assert [len(points) for points in kept] == [6] * len(layers)
+
+
+def test_the_stream_penalty_is_nothing_under_the_cap_and_the_squared_octaves_over_it() -> None:
+    spec = {"cap_rms": 32.0, "weight": 0.5}
+    rms = torch.tensor([[64.0, 128.0, 16.0, 32.0, 0.0]], requires_grad=True)
+    penalty = train.stream_penalty([[rms.pow(2)], [torch.full((1, 5), 256.0**2)]], spec)
+    assert penalty.item() == pytest.approx(0.5 * ((1 + 4) / 5 + 9))
+    penalty.backward()
+    grad = rms.grad[0].tolist()
+    assert grad[0] > 0 and grad[1] > 0 and grad[2:] == [0.0, 0.0, 0.0]
+    assert float(train.stream_penalty([[torch.full((2, 3), 32.0**2)]], spec)) == 0.0
+
+
+def test_a_cap_over_every_stream_leaves_the_run_as_none_and_one_under_them_costs_and_steers_it(tmp_path: Path) -> None:
+    runs, caps = {}, {"none": None, "over": 1e6, "under": 1e-3}
+    for name, cap in caps.items():
+        cfg = load_yaml(ctc.CONFIG)
+        cfg["train"] |= {"batch": 2, "steps": 2, "eval_every": 2}
+        cfg["train"].pop("stream")
+        if cap is not None:
+            cfg["train"]["stream"] = {"cap_rms": cap, "weight": 1.0}
+        runs[name] = train.train(cfg, ringed_sets(tmp_path / name, 3), "cpu")
+    weights = {name: net.state_dict() for name, (net, _, _) in runs.items()}
+    assert all(torch.equal(weights["over"][k], v) for k, v in weights["none"].items())
+    assert not all(torch.equal(weights["under"][k], v) for k, v in weights["none"].items())
+    assert runs["none"][2][-1]["stream_penalty"] == runs["over"][2][-1]["stream_penalty"] == 0.0
+    assert runs["under"][2][-1]["stream_penalty"] > 0
 
 
 def every_alignment(log_probs: np.ndarray, units: list[int]) -> float:

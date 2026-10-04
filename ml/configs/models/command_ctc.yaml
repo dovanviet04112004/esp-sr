@@ -30,6 +30,9 @@ train:                             # python -m srpipe.tasks.command.ctc.train (E
   learning_rate: 1.0e-3
   final_learning_rate: 1.0e-5      # cosine decay to this by the last step
   clip_norm: 5.0                   # of the gradient, against the rare sentence CTC aligns badly early on
+  stream:                          # a layer's stream after each block, held under a cap (KEHOACH 3.12)
+    cap_rms: 32.0                  # a frame's RMS: the norm hides it from the loss, int8's one exponent a tensor does not
+    weight: 1.0                    # of each squared octave above the cap, a mean over frames summed over the points
   masks: {bands: 2, band_width: 8, hops: 4, hop_width: 15}   # SpecAugment: masks a sentence, each up to this wide
   augment:                         # every draw new each time a sentence is batched, ahead of the masks (KEHOACH 3.12)
     tempo: [0.8, 1.6]              # said this many times as fast, pitch kept, log-uniform: train's 90th 4.9 syllables/s to 7.8
