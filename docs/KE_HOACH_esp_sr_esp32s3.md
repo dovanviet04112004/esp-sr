@@ -911,8 +911,8 @@ vùng, cách đọc số, từ điển viết tắt và từ mượn. C và Pyth
 Python ở `ml/src/srpipe/lang/` và C ở `lang_vi` phải cho **đầu ra giống hệt** trên danh sách mọi âm
 tiết hợp lệ cộng bộ thử có nhãn gồm số, từ mượn, tên riêng. Sai số cho phép bằng 0.
 
-**`command` có ba đường sau một hợp đồng** (ADR-0012, ADR-0016). Cả ba cắm sau cùng ba hàm đã đóng băng
-`ai_engine_command_{begin,step,score}` (§4.5.5) và trả cùng một khuôn: chỉ số lệnh hoặc −1, kèm ba điểm. **`ctc`** và
+**`command` có ba đường sau một hợp đồng** (ADR-0012, ADR-0016). Cả ba cắm sau cùng các hàm đã đóng băng
+`ai_engine_command_{prepare,begin,step,score,abort}` (§4.5.5) và trả cùng một khuôn: chỉ số lệnh hoặc −1, kèm ba điểm. **`ctc`** và
 **`rnnt`** dùng chung một encoder, nhận mọi bộ lệnh viết bằng chữ qua `lang_vi`, khác nhau ở cách giải; **`kws`** phân
 lớp một bộ lệnh cố định lúc học. Kconfig `AI_ENGINE_COMMAND_BACKEND` chọn thư mục nguồn nào dựng vào `ai_engine`
 (§4.5.2), và ảnh model khai đường của nó trong `meta.json` (§6.3). Đường mặc định của sản phẩm là **`kws`**, đường duy
@@ -1949,16 +1949,18 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 |---|---|---|
 | `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame` | any, không chặn, người gọi giữ bộ nhớ |
 | `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_entry`, `lang_vi_unit_name` | any, không chặn |
-| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn |
+| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |
 | `svc_*` | `svc_<x>_init`, `svc_<x>_step` | task, gọi từ đúng task của bảng §5.2 |
 
-**`ai_engine_command_{prepare,begin,step,score}` giữ nguyên cho mọi đường của `command`** (ADR-0012). Độ dài khung đặc
+**`ai_engine_command_{prepare,begin,step,score,abort}` giữ nguyên cho mọi đường của `command`** (ADR-0012). Độ dài khung đặc
 trưng mà `_step` nhận do model khai trong `meta.json` (`features`, §6.3): 40 với log-mel 40, 43 khi cộng ba chiều cao độ;
 `svc_listen` dựng khung theo đó. `_prepare(lexicon)` nhận bộ lệnh trước mọi cửa sổ, lúc khởi động và mỗi lần đổi bộ lệnh,
 để `_step` chấm dần theo khối thay vì để cả phép chấm tới lúc câu chốt (§5.4); `_score` vẫn nhận bộ lệnh và chấm lại cả
 cửa sổ khi bộ ấy khác bộ `_prepare` đã nhận, nên thiếu `_prepare` chỉ chậm chứ không sai. `_score` trả cùng một khuôn
-`ai_engine_command_result_t`: chỉ số lệnh hoặc −1, kèm ba điểm. Với `kws`, điểm là xác suất lớp thắng, khoảng cách tới
+`ai_engine_command_result_t`: chỉ số lệnh hoặc −1, kèm ba điểm. `_abort` đóng cửa sổ đang mở mà không chấm, không có
+cửa sổ mở thì không làm gì: `svc_listen` gọi nó mỗi khi thôi chạy một cửa sổ chưa chấm (§5.4), vì `_prepare` chỉ nhận
+bộ lệnh khi không có cửa sổ mở. Với `kws`, điểm là xác suất lớp thắng, khoảng cách tới
 lớp nhì, và xác suất của `other` cộng `silence`; bảng lệnh truyền vào chỉ được kiểm là có đủ các lớp lệnh, ở `_prepare`
 cũng như ở `_score`.
 
@@ -2306,7 +2308,8 @@ giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec`
   ra sau bước chốt 47,7 ms trung vị, 49,4 ms p95 qua 198 cửa sổ Cửa 3, gần hết là khối dở cuối của mạng
   (`measurements/latency.md` §16), không phải sau cả cửa sổ: cao độ cộng mạng một cửa sổ tốn 0,72–0,88 s trung bình;
 - phần đuổi kịp là việc nặng nhất: 78 bước trước câu, mỗi bước khoảng 7 ms trên firmware thật, chỉ nhanh hơn thời gian
-  thực hơn hai lần. Nên nó bắt đầu từ bước `vad` đầu, không đợi câu đủ `utterance.min_s` (câu bị bỏ thì công ấy bỏ đi), và
+  thực hơn hai lần. Nên nó bắt đầu từ bước `vad` đầu, không đợi câu đủ `utterance.min_s` (câu bị bỏ thì công ấy bỏ đi và cửa sổ của
+  `ai_engine` đóng bằng `ai_engine_command_abort`, để bộ lệnh mới vẫn vào được giữa hai câu), và
   khi `q_clean` không có khung chờ, `nhan_task` chạy liền các bước của cửa sổ tới khi có khung mới, chỉ chờ một tick giữa
   hai đợt để các task thấp hơn ở nhân 0 chạy. Chạy mỗi lần một bước và đợi đủ `utterance.min_s` thì từ ngắn chưa đuổi kịp
   khi câu chốt: quyết định ra 220–320 ms sau bước chốt trên board B, lệnh dài hơn thì 63–73 ms (`measurements/latency.md`

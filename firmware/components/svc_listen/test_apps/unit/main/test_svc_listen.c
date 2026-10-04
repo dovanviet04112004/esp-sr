@@ -41,6 +41,10 @@ _Static_assert(sizeof(listen_head_t) == 12 && sizeof(session_head_t) == 8 && siz
 
 #define WORK_YIELD_HOPS 16 // work hops a yield: IDLE0 feeds the watchdog
 #define DECIDED_MAX 64
+#define CLICK_HOPS 2          // vad hops of a click, too short to be an utterance
+#define CLICK_SEQ 0xC0000000u // past every round's sessions, so svc_listen starts afresh
+
+_Static_assert(CLICK_HOPS < GEN_LISTEN_UTTERANCE_MIN_HOPS, "a click is dropped, never decided");
 
 static const char *const k_labels[] = {STORAGE_MODEL_LABEL_SLOT1, "voice"};
 
@@ -157,38 +161,88 @@ static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_
     return p + h.windows * sizeof(window_t);
 }
 
-TEST_CASE("svc_listen decides every Gate 3 session of the round as Python decides it, field by field",
-          "[svc_listen]")
+// The round's head and set from its first record, mapped until the caller unmaps handle.
+static void read_round(listen_head_t *head, named_t *named, esp_partition_mmap_handle_t *handle)
 {
     const esp_partition_t *first =
         esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, k_labels[0]);
     TEST_ASSERT_NOT_NULL(first);
     const void *mapped = NULL;
-    esp_partition_mmap_handle_t handle;
     TEST_ASSERT_EQUAL(ESP_OK,
-                      esp_partition_mmap(first, 0, first->size, ESP_PARTITION_MMAP_DATA, &mapped, &handle));
-    listen_head_t head;
-    memcpy(&head, mapped, sizeof(head));
-    TEST_ASSERT_EQUAL_MEMORY_MESSAGE("SRLS", head.magic, 4, "no listen record: make listen-unit");
-    named_t named;
-    read_named(mapped, head.commands, &named);
+                      esp_partition_mmap(first, 0, first->size, ESP_PARTITION_MMAP_DATA, &mapped, handle));
+    memcpy(head, mapped, sizeof(*head));
+    TEST_ASSERT_EQUAL_MEMORY_MESSAGE("SRLS", head->magic, 4, "no listen record: make listen-unit");
+    read_named(mapped, head->commands, named);
+}
 
+// svc_listen takes one init a boot: whichever case comes first starts it on the round's set and thresholds.
+static void listen_on(const listen_head_t *head, const named_t *named)
+{
+    static bool listening;
+    if (listening) { return; }
     const esp_err_t init = sys_storage_init();
     TEST_ASSERT_TRUE(init == ESP_OK || init == ESP_ERR_INVALID_STATE);
-    TEST_ASSERT_EQUAL(ESP_OK, sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, head.reject));
-    TEST_ASSERT_EQUAL(ESP_OK, sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, head.margin));
+    TEST_ASSERT_EQUAL(ESP_OK, sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, head->reject));
+    TEST_ASSERT_EQUAL(ESP_OK, sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, head->margin));
     TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, ai_engine_load(0),
                               "models_0 lacks the locked models: make listen-unit");
     TEST_ASSERT_TRUE(ai_engine_has(AI_ENGINE_MODEL_COMMAND));
+    TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT));
+    TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN));
     const svc_listen_config_t cfg = {
-        .commands = {.texts = named.texts, .ids = named.ids, .n_commands = (uint8_t)named.n, .version = 1},
+        .commands = {.texts = named->texts, .ids = named->ids, .n_commands = (uint8_t)named->n, .version = 1},
         .dialects = LANG_VI_DIALECT_ALL,
-        .reject_permille = head.reject,
-        .margin_permille = head.margin,
+        .reject_permille = head->reject,
+        .margin_permille = head->margin,
     };
     TEST_ASSERT_EQUAL(ESP_OK, svc_listen_init(&cfg));
+    listening = true;
+}
+
+TEST_CASE("svc_listen takes a new set after a click it began working and dropped", "[svc_listen]")
+{
+    listen_head_t head;
+    named_t named;
+    esp_partition_mmap_handle_t handle;
+    read_round(&head, &named, &handle);
+    listen_on(&head, &named);
+    static int16_t click[GEN_GRID_HOP_SAMPLES];
+    for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
+        click[i] = (int16_t)(i % 2 ? 4000 : -4000);
+    }
+    static svc_listen_decision_t decided[DECIDED_MAX];
+    tally_t t = {0};
+    size_t n = 0;
+    for (uint32_t hop = 0; hop < CLICK_HOPS + GEN_LISTEN_UTTERANCE_GAP_HOPS + 1; hop++) {
+        const bool on = hop < CLICK_HOPS;
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(on ? click : k_zeros, CLICK_SEQ + hop, on));
+        n = drain(decided, n, &t);
+    }
+    TEST_ASSERT_EQUAL_MESSAGE(0, n, "the click was decided, not dropped");
+    TEST_ASSERT_FALSE(svc_listen_busy());
+    const svc_listen_commands_t next = {
+        .texts = named.texts,
+        .ids = named.ids,
+        .n_commands = (uint8_t)named.n,
+        .version = svc_listen_commands_version() + 1,
+    };
+    uint8_t unreadable = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, svc_listen_set_commands(&next, &unreadable));
+    TEST_ASSERT_EQUAL(next.version, svc_listen_commands_version());
+    esp_partition_munmap(handle);
+}
+
+TEST_CASE("svc_listen decides every Gate 3 session of the round as Python decides it, field by field",
+          "[svc_listen]")
+{
+    listen_head_t head;
+    named_t named;
+    esp_partition_mmap_handle_t handle;
+    read_round(&head, &named, &handle);
+    listen_on(&head, &named);
     esp_partition_munmap(handle);
 
+    const void *mapped = NULL;
     tally_t t = {0};
     uint32_t base = 0;
     size_t sessions = 0;
@@ -215,8 +269,6 @@ TEST_CASE("svc_listen decides every Gate 3 session of the round as Python decide
            (unsigned)sessions, (unsigned)t.windows, (unsigned)t.differ,
            t.windows ? t.work_us / (int64_t)t.windows : 0, t.work_peak_us,
            t.windows ? t.close_us / (int64_t)t.windows : 0, t.close_peak_us);
-    TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT));
-    TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN));
     TEST_ASSERT_EQUAL(0, t.differ);
 }
 

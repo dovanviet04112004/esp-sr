@@ -483,3 +483,10 @@ esp_err_t ai_engine_command_score(const ai_engine_lexicon_t *lexicon, ai_engine_
     return ai_engine_command_rnnt_finish(lexicon, s.tree, s.work, s.per_frames, s.reject, s.margin, nullptr,
                                          out);
 }
+
+esp_err_t ai_engine_command_abort(void)
+{
+    if (!s.ready) { return ESP_ERR_INVALID_STATE; }
+    s.open = false;
+    return ESP_OK;
+}

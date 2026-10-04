@@ -52,3 +52,10 @@ esp_err_t ai_engine_command_score(const ai_engine_lexicon_t *lexicon, ai_engine_
         .command = -1, .score_permille = 0, .margin_permille = 0, .free_gap_permille = 0};
     return ESP_OK;
 }
+
+esp_err_t ai_engine_command_abort(void)
+{
+    if (!ai_engine_has(AI_ENGINE_MODEL_COMMAND)) { return ESP_ERR_INVALID_STATE; }
+    s_window_open = false;
+    return ESP_OK;
+}

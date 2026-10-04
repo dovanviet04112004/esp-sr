@@ -96,6 +96,12 @@ esp_err_t ai_engine_command_step(const float *log_mel);
  */
 esp_err_t ai_engine_command_score(const ai_engine_lexicon_t *lexicon, ai_engine_command_result_t *out);
 
+/** Close the open command window unscored, as for an utterance the listener drops (KEHOACH 5.4).
+ *  @ctx nhan_task | non-blocking
+ *  @ret ESP_OK, with a window open or none | ESP_ERR_INVALID_STATE the loaded image has no command
+ */
+esp_err_t ai_engine_command_abort(void);
+
 /** Render units to 16 kHz PCM; n_samples gets the count written.
  *  @ctx noi_task | non-blocking, runs slower than real time is allowed | caller owns pcm
  *  @ret ESP_OK | ESP_ERR_NOT_SUPPORTED no synth in the image | ESP_ERR_INVALID_SIZE pcm too short

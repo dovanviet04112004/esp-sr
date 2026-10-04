@@ -221,9 +221,16 @@ static window_t *open_window(void)
     return s.has_open ? &s.queue[(s.head + s.count - 1) % WINDOWS_MAX] : NULL;
 }
 
+// A window left open in ai_engine refuses every new set until a later one is scored (KEHOACH 4.5.5).
+static void stop_engine(void)
+{
+    if (s.working) { ai_engine_command_abort(); }
+    s.working = false;
+}
+
 static void stop_working(const window_t *w)
 {
-    if (s.count > 0 && w == &s.queue[s.head]) { s.working = false; }
+    if (s.count > 0 && w == &s.queue[s.head]) { stop_engine(); }
 }
 
 static void drop_open(void)
@@ -333,6 +340,7 @@ static void drop(const window_t *w, const char *why)
 {
     ESP_LOGW(TAG, "window %u..%u dropped: %s", (unsigned)w->first, (unsigned)w->last, why);
     if (w->open) { s.has_open = false; }
+    stop_engine();
     done();
 }
 
