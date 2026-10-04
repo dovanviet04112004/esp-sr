@@ -6,6 +6,7 @@ taken in double and rounded once so every libm agrees, then a transposed direct 
 
 from __future__ import annotations
 
+import numba
 import numpy as np
 
 from srpipe.generated import afe, array, grid
@@ -40,14 +41,20 @@ class Hpf:
 
     def process(self, channel: int, samples: np.ndarray) -> np.ndarray:
         """Filter one channel's samples, float32 in and out, sample by sample in transposed direct form II."""
-        b0, b1, b2, a1, a2 = (np.float32(v) for v in self.coef)
-        s0, s1 = np.float32(self.state[channel, 0]), np.float32(self.state[channel, 1])
-        x = np.asarray(samples, dtype=np.float32)
-        out = np.empty_like(x)
-        for i, xi in enumerate(x):
-            y = b0 * xi + s0
-            s0 = b1 * xi - a1 * y + s1
-            s1 = b2 * xi - a2 * y
-            out[i] = y
-        self.state[channel] = (s0, s1)
-        return out
+        return _biquad(np.asarray(samples, dtype=np.float32), self.coef, self.state[channel])
+
+
+@numba.njit
+def _biquad(x: np.ndarray, coef: np.ndarray, state: np.ndarray) -> np.ndarray:
+    """x through b0, b1, b2, a1, a2 in transposed direct form II from state, which it leaves at the end of x."""
+    b0, b1, b2, a1, a2 = coef[0], coef[1], coef[2], coef[3], coef[4]
+    s0, s1 = state[0], state[1]
+    out = np.empty_like(x)
+    for i in range(len(x)):
+        xi = x[i]
+        y = b0 * xi + s0
+        s0 = b1 * xi - a1 * y + s1
+        s1 = b2 * xi - a2 * y
+        out[i] = y
+    state[0], state[1] = s0, s1
+    return out
