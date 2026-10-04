@@ -16,7 +16,7 @@ import numpy as np
 import torch
 
 from srpipe.compress.quant import export_espdl, ptq_espdl
-from srpipe.core.config import ML_ROOT, load_device, load_yaml
+from srpipe.core.config import ML_ROOT, device_of, load_yaml
 from srpipe.export import pack_models
 from srpipe.tasks.wake import CONFIG
 from srpipe.tasks.wake.model.tcn import Tcn
@@ -29,7 +29,7 @@ VECTORS_MAGIC = b"SRST"
 
 
 def n_bands(cfg: dict) -> int:
-    return load_device(cfg["features"])["features"]["n_bands"]
+    return device_of(cfg)["features"]["n_bands"]
 
 
 def build(cfg: dict) -> Tcn:

@@ -1,13 +1,15 @@
 """Split command/v<n> (KEHOACH 1.3, 3.12): screened public speech by speaker, the unseen command out of learning.
 
 Each corpus prefix of configs/models/command_ctc.yaml gives its speakers to val and test by share, the rest to train
-(down to its hours cap); a corpus without speaker ids goes to train whole; a clip saying an unseen command leaves
-train and val. simulate runs each file through the board simulation with pitch and no clean samples, resumably.
-Run: python -m srpipe.tasks.command.ctc.data [split|simulate]"""
+(down to its hours cap); a corpus without speaker ids goes to train whole; a clip saying an unseen command leaves train
+and val. simulate runs each file through the board simulation with pitch, resumably, and cuts the board sessions given
+to train as Gate 3 does. Run: python -m srpipe.tasks.command.ctc.data [split|simulate]"""
 
 from __future__ import annotations
 
 import argparse
+import csv
+import hashlib
 import json
 import signal
 from pathlib import Path
@@ -16,14 +18,21 @@ import numpy as np
 import yaml
 
 from srpipe.core import corpus, screen, splits
-from srpipe.core.config import apply_overrides, data_paths, load_device, load_yaml
+from srpipe.core.config import apply_overrides, data_paths, device_of, load_yaml
+from srpipe.generated import grid
 from srpipe.scenes import device
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc
+from srpipe.tasks.command import eval as gate
+from srpipe.tasks.wake.data import sentence_units
+from srpipe.tasks.wake.eval import utterances
 
 PUBLIC = "public"
 LEARNING = ("train", "val")
 HOURS_STREAM = 4
+BOARD = "board"  # under processed/command/<version>, one shard
+BOARD_SHARD = "shard_00000"
+HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
 
 
 def unseen_phrases(unseen: list[str], commands: dict) -> dict[str, list[str]]:
@@ -86,8 +95,8 @@ def capped(files: dict, seconds: dict[str, float], spec: dict) -> dict:
     return out
 
 
-def notes(spec: dict, files: dict, dropped: dict[str, int], seconds: dict[str, float]) -> str:
-    """SPLIT.md ahead of the checksums: rules, seed, command and each file's size."""
+def notes(spec: dict, files: dict, dropped: dict[str, int], seconds: dict[str, float], sessions: list[str]) -> str:
+    """SPLIT.md ahead of the checksums: rules, seed, command, the board sessions given to train and each file's size."""
     speakers = {name: len({r.spk for r in rows} - {splits.ABSENT}) for name, rows in files.items()}
     table = "\n".join(
         f"| `{name}` | {len(rows)} | {splits.hours(rows, seconds):.2f} | {speakers[name]} |"
@@ -95,6 +104,13 @@ def notes(spec: dict, files: dict, dropped: dict[str, int], seconds: dict[str, f
     )
     shares = "\n".join(f"  - `{prefix}`: {shares or 'chỉ train'}" for prefix, shares in spec["corpora"].items())
     gone = ", ".join(f'"{text}" {count} mẩu' for text, count in dropped.items())
+    on_board = (
+        f"- Phiên thu qua board vào `train` (KẾ HOẠCH §1.3, `eval.board.train` của `command.yaml`): "
+        f"{', '.join(sessions)}; cắt như Cửa 3, giữ câu từ {board['min_s']} đến {board['max_s']} s, shard lặp "
+        f"{board['repeat']} lần trong thứ tự shard.\n"
+        if (board := spec.get("board"))
+        else ""
+    )
     return f"""# command/{spec["version"]}
 
 Dựng bằng `python -m srpipe.tasks.command.ctc.data` (`make splits`), seed {spec["seed"]}, cấu hình mục `split` của
@@ -107,7 +123,7 @@ Dựng bằng `python -m srpipe.tasks.command.ctc.data` (`make splits`), seed {s
 - Lệnh chưa học (E11-T13) không có trong `train` và `val`: bỏ {gone} có lời chứa lệnh ấy. Ở `test` thì giữ.
 - Kho có trần giờ chỉ giữ phần rút theo seed tới trần: {spec["hours"] or "không kho nào"}.
 - `train` chia một file mỗi kho; vai của file là phần tên trước dấu `_` đầu tiên.
-
+{on_board}
 | File | Mẩu | Giờ | Người nói |
 |---|---|---|---|
 {table}
@@ -135,13 +151,100 @@ def built_as(out: Path, device_cfg: dict, split_file: Path, options: dict) -> bo
     return body["config"] == device_cfg and same_split and same_options
 
 
+def board_rows(paths: dict) -> list[dict]:
+    """The manifest rows of the board sessions Gate 3's spec gives to train (KEHOACH 1.3)."""
+    spec = load_yaml(command.CONFIG)["eval"]["board"]
+    wanted = spec.get("train", [])
+    with (paths["manifests"] / spec["manifest"]).open(encoding="utf-8") as f:
+        rows = [r for r in csv.DictReader(f) if r["session"] in wanted]
+    if missing := sorted(set(wanted) - {r["session"] for r in rows}):
+        raise ValueError(f"{', '.join(missing)}: not in {spec['manifest']}")
+    if shifts := sorted({r["pcm_shift"] for r in rows} - {str(spec["pcm_shift"])}):
+        raise ValueError(f"train sessions at pcm_shift {shifts}; the product keeps {spec['pcm_shift']}")
+    return rows
+
+
+def board_cut(board: dict) -> dict:
+    """What of split.board shapes the cut; repeat only weighs it in training."""
+    return {"min_s": board["min_s"], "max_s": board["max_s"]}
+
+
+def board_built_as(out: Path, device_cfg: dict, rows: list[dict], board: dict) -> bool:
+    """Whether out holds the cut of these sessions with this device config and this split.board."""
+    if not (out / "manifest.yaml").exists():
+        return False
+    body = yaml.safe_load((out / "manifest.yaml").read_text(encoding="utf-8"))
+    same_sessions = body["sessions"] == [r["session"] for r in rows]
+    return body["config"] == device_cfg and same_sessions and body["board"] == board_cut(board)
+
+
+def cut_board(cfg: dict, paths: dict, out: Path) -> str:
+    """The board sessions given to train as one shard in train's dtype: each utterance whose vad run lasts
+    split.board's min_s to max_s, as its Gate 3 command window of log-mel and pitch, its session's prompt its text."""
+    board, rows = cfg["split"]["board"], board_rows(paths)
+    device_cfg = device_of(cfg)
+    n_bands = device_cfg["features"]["n_bands"]
+    shortest, longest = (round(board[k] * HOPS_PER_S) for k in ("min_s", "max_s"))
+    items, mels, pitches, offset, dropped = [], [], [], 0, 0
+    for r, clean, vad, features, tracker in gate.heard_rows(cfg, rows, paths):
+        spans = utterances(vad)
+        windows = gate.ctc_windows(clean, features, spans, tracker) if spans else []
+        for k, ((first, last), (start, _), x) in enumerate(zip(spans, gate.command_cut(spans), windows, strict=True)):
+            if not shortest <= last + 1 - first <= longest:
+                dropped += 1
+                continue
+            items.append(
+                {
+                    "item": f"{BOARD}/{r['session']}#{k}",
+                    "text": r["prompt"],
+                    "frame_offset": offset,
+                    "n_frames": len(x),
+                    "speech_frames": [first - start, last + 1 - start],
+                }
+            )
+            mels.append(x[:, :n_bands])
+            pitches.append(x[:, n_bands:])
+            offset += len(x)
+    dtype = cfg["simulate"].get("train_dtype", "float32")
+    out.mkdir(parents=True, exist_ok=True)
+    np.save(out / f"{BOARD_SHARD}.features.npy", np.concatenate(mels).astype(dtype))
+    np.save(out / f"{BOARD_SHARD}.pitch.npy", np.concatenate(pitches).astype(dtype))
+    lines = "".join(json.dumps(i, ensure_ascii=False) + "\n" for i in items)
+    (out / f"{BOARD_SHARD}.items.jsonl").write_text(lines, encoding="utf-8")
+    names = [f"{BOARD_SHARD}{s}" for s in (".features.npy", ".pitch.npy", ".items.jsonl")]
+    head = {
+        "pitch": True,
+        "config": device_cfg,
+        "sessions": [r["session"] for r in rows],
+        "board": board_cut(board),
+        "dtype": dtype,
+        "sha256": {n: hashlib.sha256((out / n).read_bytes()).hexdigest() for n in names},
+    }
+    (out / "manifest.yaml").write_text(yaml.safe_dump(head, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return (
+        f"{out}: {len(items)} utterances of {len(rows)} sessions, {dropped} outside {board['min_s']}-{board['max_s']} s"
+    )
+
+
+def board_units(folder: Path, dialect: str) -> dict[str, list[int]]:
+    """lang_vi unit ids of every item of a board cut, its session's prompt read in dialect."""
+    items = [
+        json.loads(line) for f in sorted(folder.glob("*.items.jsonl")) for line in f.read_text("utf-8").splitlines()
+    ]
+    return sentence_units([corpus.Clip(i["item"], None, i["text"]) for i in items], {i["item"] for i in items}, dialect)
+
+
 def unbuilt(cfg: dict, paths: dict) -> list[Path]:
     """Every file's processed folder that is missing, unfinished, or simulated with another device config or other
-    options than cfg now asks: features of a board the simulation no longer is."""
-    device_cfg = load_device(cfg["features"])
+    options than cfg now asks: features of a board the simulation no longer is; with split.board, its cut too."""
+    device_cfg = device_of(cfg)
     folder = paths["splits"] / "command" / cfg["split"]["version"]
     outs = {f: paths["processed"] / "command" / cfg["split"]["version"] / f.stem for f in sorted(folder.glob("*.txt"))}
-    return [out for f, out in outs.items() if not built_as(out, device_cfg, f, options_of(cfg, f))]
+    stale = [out for f, out in outs.items() if not built_as(out, device_cfg, f, options_of(cfg, f))]
+    if board := cfg["split"].get("board"):
+        out = paths["processed"] / "command" / cfg["split"]["version"] / BOARD
+        stale += [] if board_built_as(out, device_cfg, board_rows(paths), board) else [out]
+    return stale
 
 
 def simulate(cfg: dict, paths: dict) -> None:
@@ -149,7 +252,7 @@ def simulate(cfg: dict, paths: dict) -> None:
     clean samples, train's items each spoken at a speed of simulate.speeds and stored as simulate.train_dtype; a file
     stopped part way goes on from its finished shards."""
     spec, version = cfg["simulate"], cfg["split"]["version"]
-    device_cfg = load_device(cfg["features"])
+    device_cfg = device_of(cfg)
     folder = paths["splits"] / "command" / version
     for split_file in sorted(folder.glob("*.txt"), key=lambda f: f.stat().st_size):
         out = paths["processed"] / "command" / version / split_file.stem
@@ -159,6 +262,10 @@ def simulate(cfg: dict, paths: dict) -> None:
             continue
         raw, interim, workers = paths["raw"], paths["interim"], spec["workers"]
         print(device.build(device_cfg, split_file, raw, interim, out, workers, pitch=True, keep_pcm=False, **options))
+    if board := cfg["split"].get("board"):
+        out = paths["processed"] / "command" / version / BOARD
+        built = board_built_as(out, device_cfg, board_rows(paths), board)
+        print(f"{out}: already built" if built else cut_board(cfg, paths, out), flush=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -180,7 +287,8 @@ def main(argv: list[str] | None = None) -> int:
     files, dropped = build(spec, screen.kept_clips(screening, paths, "speech"), unseen)
     files = capped(files, seconds, spec)
     out = paths["splits"] / "command" / spec["version"]
-    splits.write_version(out, files, notes(spec, files, dropped, seconds))
+    sessions = [r["session"] for r in board_rows(paths)] if spec.get("board") else []
+    splits.write_version(out, files, notes(spec, files, dropped, seconds, sessions))
     problems = splits.check_version(out)
     print("\n".join(f"{name}: {len(rows)} rows, {splits.hours(rows, seconds):.2f} h" for name, rows in files.items()))
     print(f"left learning: {dropped}")

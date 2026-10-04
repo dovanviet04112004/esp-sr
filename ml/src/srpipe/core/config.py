@@ -45,10 +45,32 @@ def apply_overrides(cfg: dict[str, Any], overrides: list[str]) -> dict[str, Any]
     return out
 
 
-def load_device(path: Path) -> dict[str, Any]:
-    """A board simulation config with the features and the pitch tracker of contracts/listen.yaml, the recogniser's
-    front end every build records as its own (KEHOACH 3.11); path is under configs/ when relative."""
-    return load_yaml(CONFIGS / path) | {"features": dict(listen.FEATURES), "pitch": dict(listen.PITCH)}
+def contract_front() -> dict[str, Any]:
+    """The recogniser's front end of contracts/listen.yaml: the features and the pitch tracker (KEHOACH 3.11)."""
+    return {"features": dict(listen.FEATURES), "pitch": dict(listen.PITCH)}
+
+
+def front_of(cfg: dict[str, Any]) -> dict[str, Any]:
+    """The front end a config learns on: the one a run recorded under listen, else the contract's."""
+    return cfg.get("listen") or contract_front()
+
+
+def load_device(path: Path, front: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A board simulation config with a front end, the contract's unless given, that every build records as its own;
+    path is under configs/ when relative."""
+    return load_yaml(CONFIGS / path) | (front or contract_front())
+
+
+def device_of(cfg: dict[str, Any]) -> dict[str, Any]:
+    """The board simulation of a model config or a run, with the front end it learns on."""
+    return load_device(cfg["features"], front_of(cfg))
+
+
+def load_run_config(run: Path) -> dict[str, Any]:
+    """A run's resolved config with the front end it learnt on; a run without one learnt on 40 bands (ADR-0017)."""
+    cfg = load_yaml(run / "config.resolved.yaml")
+    front = contract_front()
+    return cfg if "listen" in cfg else cfg | {"listen": front | {"features": front["features"] | {"n_bands": 40}}}
 
 
 def load_config(*names: str, overrides: list[str] | None = None) -> dict[str, Any]:

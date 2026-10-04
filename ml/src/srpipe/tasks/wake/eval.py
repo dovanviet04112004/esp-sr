@@ -17,7 +17,7 @@ import torch
 import yaml
 
 from srpipe.core import corpus
-from srpipe.core.config import data_paths, load_device, load_yaml
+from srpipe.core.config import data_paths, device_of, load_run_config, load_yaml
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.generated import array, grid, listen
@@ -132,7 +132,7 @@ def session_kind(kind: str, prompt: str, word: list[tuple[str, ...]]) -> str:
 def board(model, mean: np.ndarray, std: np.ndarray, cfg: dict, paths: dict, threshold: float, dev: str):
     """Every session of the board manifest at the product's pcm_shift, scored at threshold."""
     spec, rate = cfg["eval"]["board"], grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
-    device_cfg = load_device(cfg["features"])
+    device_cfg = device_of(cfg)
     mics = device.load_microphones(device_cfg["microphone"])
     chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
     after = round(cfg["train"]["label_s"][1] * rate)
@@ -168,7 +168,7 @@ def recording(model, mean: np.ndarray, std: np.ndarray, cfg: dict, wav: Path, th
     """A mono recording at the grid's rate scored as a wake session: both microphones hear it, the product's chain
     and log-mel run on it, its utterances found by the chain's vad."""
     rate = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
-    device_cfg = load_device(cfg["features"])
+    device_cfg = device_of(cfg)
     mics = device.load_microphones(device_cfg["microphone"])
     chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
     x, fs = sf.read(wav, dtype="int16")
@@ -218,7 +218,7 @@ def load_run(run: Path, cfg: dict, step: int | None = None) -> tuple[Tcn, dict, 
     rows = [r for r in metrics["history"] if r["step"] == step] if step else [metrics["val"]]
     if not rows:
         raise ValueError(f"{run} evaluated no step {step}")
-    trained = load_yaml(run / "config.resolved.yaml")
+    trained = load_run_config(run)
     stats = dict(np.load(run / "band_stats.npz"))
     model = Tcn(len(stats["mean"]), **trained["model"])
     model.load_state_dict(torch.load(checkpoint(run, step) if step else run / "model.pt", map_location="cpu"))

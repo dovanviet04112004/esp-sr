@@ -37,5 +37,16 @@ eval:                              # gate 3 of both tracks: python -m srpipe.tas
     pcm_shift: 13                  # the shift the product keeps (E2-T5); other sessions are left out
     kinds: [cmd, neg, noise]       # probes test the capture, wake sessions the wake word
     left_out: [20260928_home_039]  # near misses of a wake word, not of a command
+    train:                         # the owner's sessions to learn from, never scored (KEHOACH 1.3)
+      - 20261004_home_001
+      - 20261004_home_002
+      - 20261004_home_003
+      - 20261004_home_004
+      - 20261004_home_005
+      - 20261004_home_006
+      - 20261004_home_007
+      - 20261004_home_008
+      - 20261004_home_009
+      - 20261004_home_010
   command_recall: 0.9              # each learned command, of its sessions' utterances
   rejection: 0.95                  # of every other session's utterances

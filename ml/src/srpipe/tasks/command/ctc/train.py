@@ -22,7 +22,7 @@ import yaml
 from torch.nn import functional
 
 from srpipe.core import screen, splits
-from srpipe.core.config import apply_overrides, data_paths, load_yaml
+from srpipe.core.config import apply_overrides, contract_front, data_paths, load_run_config, load_yaml
 from srpipe.core.logger import row_line
 from srpipe.core.run_dir import create_run_dir
 from srpipe.core.seed import seed_everything
@@ -499,7 +499,8 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
 
 def load_sets(cfg: dict) -> dict:
     """The sentences of cfg's split with units in its dialect, at most train.max_s long: train a Pool of
-    train.pool_gb in float16, val Sentences in float32."""
+    train.pool_gb in float16, with split.board the board cut's shard split.board.repeat times among them (KEHOACH
+    1.3), val Sentences in float32."""
     paths = data_paths()
     if stale := built.unbuilt(cfg, paths):
         raise ValueError(f"{', '.join(str(p) for p in stale)}: not simulated as the config asks; make ctc-features")
@@ -515,6 +516,9 @@ def load_sets(cfg: dict) -> dict:
     dims = encoder.n_dims(cfg)
     capacity = int(spec["pool_gb"] * GB // (dims * np.dtype(POOL_DTYPE).itemsize))
     shards = shards_of([root / f.stem for f in roles["train"]], units_of, longest)
+    if board := cfg["split"].get("board"):
+        cut = root / built.BOARD
+        shards += shards_of([cut], built.board_units(cut, spec["dialect"]), longest) * board["repeat"]
     return {
         "train": Pool(shards, dims, capacity, spec["rotate_steps"], spec["seed"]),
         "val": load_role([root / f.stem for f in roles["val"]], units_of, longest, "float32"),
@@ -526,10 +530,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     parser.add_argument("--resume", type=Path, metavar="RUN", help="go on from a run's last checkpoint")
     args = parser.parse_args(argv)
-    if args.resume:
-        cfg = load_yaml(args.resume / "config.resolved.yaml")
-    else:
-        cfg = apply_overrides(load_yaml(ctc.CONFIG), args.overrides)
+    cfg = (
+        load_run_config(args.resume)
+        if args.resume
+        else apply_overrides(load_yaml(ctc.CONFIG), args.overrides) | {"listen": contract_front()}
+    )
     paths = data_paths()
     split_files = sorted((paths["splits"] / "command" / cfg["split"]["version"]).glob("*.txt"))
     sets = load_sets(cfg)

@@ -1,6 +1,6 @@
 # The ctc track of command (KEHOACH 3.12, ADR-0010): a streaming acoustic model with CTC over the units of E11-T3.
 split:                             # data/splits/command/<version> by python -m srpipe.tasks.command.ctc.data (KEHOACH 1.3)
-  version: v3
+  version: v4
   seed: 20260928
   corpora:                         # item prefix: the share of its speakers each role takes, train the rest
     speech/common_voice_vi/: {val: 0.05, test: 0.1}
@@ -10,6 +10,10 @@ split:                             # data/splits/command/<version> by python -m 
     speech/vlsp/: {}
     speech/bud500/: {}
   hours: {}                        # train hours kept of a corpus, drawn with the seed; none: every screened clip
+  board:                           # command.yaml's eval.board.train sessions into train, cut as Gate 3 cuts (KEHOACH 1.3)
+    min_s: 0.8                     # an utterance's vad run kept: shorter is a click, longer two commands run together
+    max_s: 2.4
+    repeat: 75                     # copies of their shard in each pass's order: about 1% of the sentences drawn
 features: scenes/device.yaml       # the board simulation; mel then pitch's three a hop from contracts/listen.yaml
 simulate:                          # python -m srpipe.tasks.command.ctc.data simulate, into processed/command/<version>
   workers: 12                      # BUD500: a worker holds ~0.56 GB with numba's code; 12 leave ~1 GB of 10, no swapping

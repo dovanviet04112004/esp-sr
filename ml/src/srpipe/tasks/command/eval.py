@@ -23,7 +23,7 @@ import yaml
 
 from srpipe.core import corpus
 from srpipe.core.audio_io import to_float
-from srpipe.core.config import data_paths, load_device, load_yaml
+from srpipe.core.config import data_paths, device_of, load_run_config, load_yaml
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
@@ -89,7 +89,7 @@ class Ctc:
 
 
 def load_ctc(run: Path) -> Ctc:
-    trained = load_yaml(run / "config.resolved.yaml")
+    trained = load_run_config(run)
     stats = np.load(run / "feature_stats.npz")
     model = encoder.build(trained)
     model.load_state_dict(torch.load(run / "model.pt", map_location="cpu"))
@@ -112,7 +112,7 @@ class Kws:
 
 
 def load_kws(run: Path) -> Kws:
-    trained = load_yaml(run / "config.resolved.yaml")
+    trained = load_run_config(run)
     names = kws.classes(trained, load_yaml(command.CONFIG))
     stats = np.load(run / "feature_stats.npz")
     model = dscnn.build(trained, (trained["window_hops"], len(stats["mean"])), len(names))
@@ -123,9 +123,10 @@ def load_kws(run: Path) -> Kws:
 
 
 def counted(row: dict, spec: dict) -> bool:
-    """Whether a session of the board manifest is of the product's pcm_shift, of a kind scored, and not left out."""
+    """Whether a session of the board manifest is of the product's pcm_shift, of a kind scored, not left out and not
+    one the split gives to train (KEHOACH 1.3)."""
     kept = row["pcm_shift"] == str(spec["pcm_shift"]) and row["kind"] in spec["kinds"]
-    return kept and row["session"] not in spec["left_out"]
+    return kept and row["session"] not in spec["left_out"] and row["session"] not in spec.get("train", [])
 
 
 def expected_of(kind: str, prompt: str, command_of: dict[tuple, str]) -> str:
@@ -271,17 +272,23 @@ def rnnt_heard(net: Ctc, x: np.ndarray) -> Heard:
     return heard_of(net, *rnnt_search.decide(log_probs, frames, tree, ctc_score.CAP, 0, size, pad, per_frames))
 
 
-def heard_sessions(cfg: dict, spec: dict, paths: dict) -> Iterator[tuple]:
-    """Every counted session of the board manifest found on disk: its manifest row, its clean samples, vad and log-mel
-    per hop through the product's chain, and the pitch tracker of cfg's board simulation."""
-    device_cfg = load_device(cfg["features"])
+def heard_rows(cfg: dict, rows: list[dict], paths: dict) -> Iterator[tuple]:
+    """Each board manifest row found on disk: the row, its clean samples, vad and log-mel per hop through the
+    product's chain, and the pitch tracker of cfg's board simulation."""
+    device_cfg = device_of(cfg)
     mics = device.load_microphones(device_cfg["microphone"])
     chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
     tracker = PitchTracker(PitchConfig(**device_cfg["pitch"]))
-    for r in csv.DictReader((paths["manifests"] / spec["manifest"]).open(encoding="utf-8")):
+    for r in rows:
         folder = paths["raw"] / "device" / r["board"] / r["session"]
-        if counted(r, spec) and folder.exists():
+        if folder.exists():
             yield r, *heard(folder, chain_cfg, mel), tracker
+
+
+def heard_sessions(cfg: dict, spec: dict, paths: dict) -> Iterator[tuple]:
+    """heard_rows over every counted session of the board manifest."""
+    rows = csv.DictReader((paths["manifests"] / spec["manifest"]).open(encoding="utf-8"))
+    yield from heard_rows(cfg, [r for r in rows if counted(r, spec)], paths)
 
 
 def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: Callable) -> list[Scored]:

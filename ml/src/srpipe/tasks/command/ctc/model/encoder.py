@@ -13,7 +13,7 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional
 
-from srpipe.core.config import load_device
+from srpipe.core.config import device_of
 from srpipe.dsp.spec import pitch
 from srpipe.tasks.command.ctc.postproc.ctc_score import n_classes
 from srpipe.tasks.command.rnnt.model import transducer
@@ -190,7 +190,7 @@ class CtcNet(nn.Module):
 
 def n_dims(cfg: dict) -> int:
     """Features a hop: the mel bands of the feature config, then pitch's."""
-    return load_device(cfg["features"])["features"]["n_bands"] + pitch.N_FEATURES
+    return device_of(cfg)["features"]["n_bands"] + pitch.N_FEATURES
 
 
 def layer(cfg: dict, kernel: int) -> Layer:
