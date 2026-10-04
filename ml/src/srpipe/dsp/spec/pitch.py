@@ -109,17 +109,73 @@ def distance_transform(prev: np.ndarray, factor: np.float32) -> tuple[np.ndarray
     return (d * d) * factor + prev[best], best
 
 
-def nccf_to_pov(n: float) -> np.float32:
-    """Kaldi's probability of voicing from an NCCF (NccfToPov), the weight of each frame in the log-pitch mean."""
-    a = min(abs(float(n)), 1.0)
+@numba.njit
+def _nccf_to_pov(n: float) -> np.float32:
+    a = min(abs(np.float64(n)), 1.0)
     r = -5.2 + 5.4 * math.exp(7.5 * (a - 1.0)) + 4.8 * a - 2.0 * math.exp(-10.0 * a) + 4.2 * math.exp(20.0 * (a - 1.0))
     return np.float32(1.0 / (1.0 + math.exp(-r)))
 
 
+@numba.njit
+def _nccf_to_pov_feature(n: float) -> np.float32:
+    c = min(max(np.float64(n), -1.0), 1.0)
+    return np.float32((1.0001 - c) ** 0.15 - 1.0)
+
+
+def nccf_to_pov(n: float) -> np.float32:
+    """Kaldi's probability of voicing from an NCCF (NccfToPov), the weight of each frame in the log-pitch mean."""
+    return np.float32(_nccf_to_pov(n))
+
+
 def nccf_to_pov_feature(n: float) -> np.float32:
     """Kaldi's POV feature (NccfToPovFeature): the NCCF made roughly Gaussian."""
-    c = min(max(float(n), -1.0), 1.0)
-    return np.float32((1.0001 - c) ** 0.15 - 1.0)
+    return np.float32(_nccf_to_pov_feature(n))
+
+
+@numba.njit
+def _path_features(
+    forward: np.ndarray,
+    backpointers: np.ndarray,
+    pov_nccf: np.ndarray,
+    head: int,
+    count: int,
+    lags: np.ndarray,
+    context: int,
+    delta_scales: np.ndarray,
+    scales: np.ndarray,
+):
+    """POV, normalised log pitch and delta over the Viterbi path traced back from the best state, and the newest
+    frame's NCCF and F0; backpointers and pov_nccf ring the last count frames from head, oldest first; scales are
+    pov_scale, pitch_scale and delta_pitch_scale."""
+    rows = len(backpointers)
+    state = np.argmin(forward)
+    path = np.empty(count, dtype=np.int64)
+    path[count - 1] = state
+    for i in range(count - 1, 0, -1):
+        path[i - 1] = backpointers[(head + i) % rows, path[i]]
+    nccf = np.empty(count, dtype=np.float32)
+    log_pitch = np.empty(count, dtype=np.float32)
+    for k in range(count):
+        nccf[k] = pov_nccf[(head + k) % rows, path[k]]
+        log_pitch[k] = np.float32(math.log(np.float64(np.float32(1.0 / np.float64(lags[path[k]])))))
+    window = min(count, context + 1)
+    sum_pov, sum_log_pitch_pov = np.float32(0.0), np.float32(0.0)
+    for k in range(count - window, count):
+        pov = _nccf_to_pov(nccf[k])
+        sum_pov += pov
+        sum_log_pitch_pov += pov * log_pitch[k]
+    normalised = (log_pitch[count - 1] - sum_log_pitch_pov / sum_pov) * scales[1]
+    reach = (len(delta_scales) - 1) // 2
+    delta = np.float32(0.0)
+    newest = count - 1
+    for i in range(len(delta_scales)):
+        if delta_scales[i] != np.float32(0.0):
+            delta += delta_scales[i] * log_pitch[min(max(newest + i - reach, newest - min(newest, reach)), newest)]
+    out = np.empty(N_FEATURES, dtype=np.float32)
+    out[0] = scales[0] * _nccf_to_pov_feature(nccf[newest])
+    out[1] = normalised
+    out[2] = delta * scales[2]
+    return out, nccf[newest], np.float32(1.0 / np.float64(lags[state]))
 
 
 class PitchTracker:
@@ -190,8 +246,10 @@ class PitchTracker:
         self.sumsq = 0.0
         self.frames = 0
         self.forward = np.zeros(len(self.lags), dtype=np.float32)
-        self.backpointers: list[np.ndarray] = []
-        self.pov_nccf: list[np.ndarray] = []
+        self.backpointers = np.zeros((self.history + 1, len(self.lags)), dtype=np.int64)
+        self.pov_nccf = np.zeros((self.history + 1, len(self.lags)), dtype=np.float32)
+        self.ring_head = 0
+        self.ring_count = 0
         self.latest = (np.float32(0.0), np.float32(0.0))
 
     def _downsample(self) -> np.ndarray:
@@ -238,34 +296,33 @@ class PitchTracker:
         forward, backpointer = distance_transform(self.forward, self.factor)
         forward = forward + local
         self.forward = (forward - np.min(forward)).astype(np.float32)
-        self.backpointers = [*self.backpointers, backpointer][-(self.history + 1) :]
-        self.pov_nccf = [*self.pov_nccf, pov_lags][-(self.history + 1) :]
+        rows = len(self.backpointers)
+        if self.ring_count < rows:
+            slot = (self.ring_head + self.ring_count) % rows
+            self.ring_count += 1
+        else:
+            slot = self.ring_head
+            self.ring_head = (self.ring_head + 1) % rows
+        self.backpointers[slot] = backpointer
+        self.pov_nccf[slot] = pov_lags
 
     def _features(self) -> np.ndarray:
         """POV, normalised log pitch and delta of the newest frame over the Viterbi path traced back from its best
         state, as OnlineProcessPitch reads a zero-latency tracker with no right context."""
-        state = int(np.argmin(self.forward))
-        path = [state]
-        for bp in reversed(self.backpointers[1:]):
-            path.append(int(bp[path[-1]]))
-        path.reverse()
-        nccf = [self.pov_nccf[k][s] for k, s in enumerate(path)]
-        log_pitch = [np.float32(math.log(float(np.float32(1.0 / float(self.lags[s]))))) for s in path]
-        self.latest = (nccf[-1], np.float32(1.0 / float(self.lags[state])))
-        window = min(len(path), self.context + 1)
-        sum_pov, sum_log_pitch_pov = np.float32(0.0), np.float32(0.0)
-        for k in range(len(path) - window, len(path)):
-            pov = nccf_to_pov(nccf[k])
-            sum_pov += pov
-            sum_log_pitch_pov += pov * log_pitch[k]
-        normalised = (log_pitch[-1] - sum_log_pitch_pov / sum_pov) * np.float32(self.cfg.pitch_scale)
-        delta = np.float32(0.0)
-        newest = len(path) - 1
-        for j, scale in zip(range(-self.cfg.delta_window, self.cfg.delta_window + 1), self.delta_scales, strict=True):
-            if scale != 0:
-                delta += scale * log_pitch[min(max(newest + j, newest - min(newest, self.cfg.delta_window)), newest)]
-        pov_feature = np.float32(self.cfg.pov_scale) * nccf_to_pov_feature(nccf[-1])
-        return np.array([pov_feature, normalised, delta * np.float32(self.cfg.delta_pitch_scale)], dtype=np.float32)
+        scales = np.array([self.cfg.pov_scale, self.cfg.pitch_scale, self.cfg.delta_pitch_scale], dtype=np.float32)
+        features, nccf, f0 = _path_features(
+            self.forward,
+            self.backpointers,
+            self.pov_nccf,
+            self.ring_head,
+            self.ring_count,
+            self.lags,
+            self.context,
+            self.delta_scales,
+            scales,
+        )
+        self.latest = (np.float32(nccf), np.float32(f0))
+        return features
 
     def step(self, hop: np.ndarray) -> np.ndarray:
         """One grid hop of samples in, the three features of the frame it completes out; zeros for the first
