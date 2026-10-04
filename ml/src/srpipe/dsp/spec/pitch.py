@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, fields
 
+import numba
 import numpy as np
 
 from srpipe.generated import grid
@@ -76,23 +77,28 @@ def seq_dot(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return np.cumsum(np.asarray(a, np.float32) * np.asarray(b, np.float32), axis=-1, dtype=np.float32)[..., -1]
 
 
+@numba.njit
 def distance_transform(prev: np.ndarray, factor: np.float32) -> tuple[np.ndarray, np.ndarray]:
     """min over j of factor (i - j)^2 + prev[j] for every i, and the j reaching it, in time linear in the states by
-    the lower envelope of parabolas (Felzenszwalb and Huttenlocher, 2012); float32 throughout."""
+    the lower envelope of parabolas (Felzenszwalb and Huttenlocher, 2012); float32 throughout, compiled by numba."""
     n = len(prev)
-    idx = np.arange(n, dtype=np.float32)
+    idx = np.arange(n).astype(np.float32)
     anchor = prev + factor * idx * idx
     two_factor = np.float32(2.0) * factor
     v = np.zeros(n, dtype=np.int64)
     z = np.empty(n + 1, dtype=np.float32)
-    k, z[0], z[1] = 0, -np.inf, np.inf
+    k = 0
+    z[0] = -np.inf
+    z[1] = np.inf
     for q in range(1, n):
         s = (anchor[q] - anchor[v[k]]) / (two_factor * np.float32(q - v[k]))
         while s <= z[k]:
             k -= 1
             s = (anchor[q] - anchor[v[k]]) / (two_factor * np.float32(q - v[k]))
         k += 1
-        v[k], z[k], z[k + 1] = q, s, np.inf
+        v[k] = q
+        z[k] = s
+        z[k + 1] = np.inf
     best = np.empty(n, dtype=np.int64)
     k = 0
     for i in range(n):
