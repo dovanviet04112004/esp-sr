@@ -12,7 +12,7 @@ split:                             # data/splits/command/<version> by python -m 
   hours: {}                        # train hours kept of a corpus, drawn with the seed; none: every screened clip
 features: scenes/device.yaml       # the board simulation; mel then pitch's three a hop from contracts/listen.yaml
 simulate:                          # python -m srpipe.tasks.command.ctc.data simulate, into processed/command/<version>
-  workers: 14                      # a worker holds ~0.46 GB, ~0.85 GB while it reads a row group: 14 leave ~2 GB of 10
+  workers: 12                      # BUD500: a worker holds ~0.56 GB with numba's code; 12 leave ~1 GB of 10, no swapping
   speeds: [0.9, 1.0, 1.1]          # each train item spoken at one, drawn per item: Kaldi's speed perturbation
   train_dtype: float16             # train's features as stored: the trainer holds them so (KEHOACH 1.2)
 train:                             # python -m srpipe.tasks.command.ctc.train (E11-T12); the GPU when present
