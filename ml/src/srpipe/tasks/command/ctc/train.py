@@ -519,8 +519,8 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
 
 def load_sets(cfg: dict) -> dict:
     """The sentences of cfg's split with units in its dialect, at most train.max_s long: train a Pool of
-    train.pool_gb in float16, with split.board the board cut's shard split.board.repeat times among them (KEHOACH
-    1.3), val Sentences in float32."""
+    train.pool_gb in float16, with split.board the board cut's shard but its split.board.noise runs,
+    split.board.repeat times among them (KEHOACH 1.3, 3.12), val Sentences in float32."""
     paths = data_paths()
     if stale := built.unbuilt(cfg, paths):
         raise ValueError(f"{', '.join(str(p) for p in stale)}: not simulated as the config asks; make ctc-features")
@@ -538,7 +538,8 @@ def load_sets(cfg: dict) -> dict:
     shards = shards_of([root / f.stem for f in roles["train"]], units_of, longest)
     if board := cfg["split"].get("board"):
         cut = root / built.BOARD
-        shards += shards_of([cut], built.board_units(cut, spec["dialect"]), longest) * board["repeat"]
+        units = built.board_units(cut, spec["dialect"], board.get("noise", []))
+        shards += shards_of([cut], units, longest) * board["repeat"]
     return {
         "train": Pool(shards, dims, capacity, spec["rotate_steps"], spec["seed"]),
         "val": load_role([root / f.stem for f in roles["val"]], units_of, longest, "float32"),

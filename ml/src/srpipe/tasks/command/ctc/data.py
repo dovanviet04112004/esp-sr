@@ -226,12 +226,17 @@ def cut_board(cfg: dict, paths: dict, out: Path) -> str:
     )
 
 
-def board_units(folder: Path, dialect: str) -> dict[str, list[int]]:
-    """lang_vi unit ids of every item of a board cut, its session's prompt read in dialect."""
+def board_units(folder: Path, dialect: str, noise: list[str]) -> dict[str, list[int]]:
+    """lang_vi unit ids of every item of a board cut, its session's prompt read in dialect, but the <session>#<run>
+    utterances noise names; a name the cut lacks is refused."""
     items = [
         json.loads(line) for f in sorted(folder.glob("*.items.jsonl")) for line in f.read_text("utf-8").splitlines()
     ]
-    return sentence_units([corpus.Clip(i["item"], None, i["text"]) for i in items], {i["item"] for i in items}, dialect)
+    runs = {i["item"].removeprefix(f"{BOARD}/") for i in items}
+    if absent := sorted(set(noise) - runs):
+        raise ValueError(f"{', '.join(absent)}: not utterances of the board cut {folder}")
+    said = [i for i in items if i["item"].removeprefix(f"{BOARD}/") not in noise]
+    return sentence_units([corpus.Clip(i["item"], None, i["text"]) for i in said], {i["item"] for i in said}, dialect)
 
 
 def unbuilt(cfg: dict, paths: dict) -> list[Path]:

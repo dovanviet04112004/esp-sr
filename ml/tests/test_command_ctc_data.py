@@ -1,9 +1,10 @@
 """Command split: an unseen command leaves learning but stays in test, speakers keep one role, a corpus without
 speaker ids trains whole, and train is one file per corpus; features simulated otherwise than the config asks are
-named before any training reads them."""
+named before any training reads them, and a board cut's units leave out the runs its config names noise."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -86,3 +87,17 @@ def test_features_simulated_otherwise_than_the_config_asks_are_named(tmp_path: P
     stale = [p.name for p in data.unbuilt(cfg, paths)]
     assert stale == ["test", "train_w", "train_y", "train_z"]
     assert data.options_of(cfg, paths["splits"] / "val.txt") == {"speeds": (), "dtype": "float32"}
+
+
+def test_board_units_leave_out_the_runs_named_noise_and_refuse_a_name_the_cut_lacks(tmp_path: Path) -> None:
+    rows = [{"item": f"{data.BOARD}/s1#{k}", "text": "bật đèn"} for k in (0, 2, 3)]
+    (tmp_path / "shard_00000.items.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    every = data.board_units(tmp_path, "north", [])
+    kept = data.board_units(tmp_path, "north", ["s1#2"])
+    assert sorted(every) == [f"{data.BOARD}/s1#{k}" for k in (0, 2, 3)]
+    assert (
+        sorted(kept) == [f"{data.BOARD}/s1#0", f"{data.BOARD}/s1#3"]
+        and kept[f"{data.BOARD}/s1#0"] == every[f"{data.BOARD}/s1#0"]
+    )
+    with pytest.raises(ValueError, match="s1#1"):
+        data.board_units(tmp_path, "north", ["s1#1"])
