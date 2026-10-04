@@ -410,3 +410,59 @@ chủ repo (`host/sets/demo_vi.json`, có "tắt/bật ti vi", "tắt/bật đi�
 
 Cả hai đường mất năm câu khi bộ lệnh lớn lên, đều vì lệnh một âm tiết "tát", "tét", "mẹ nó" khớp một mẩu của câu dài hơn
 ("tăng âm lượng", "bật đèn", "giảm âm lượng"); `rnnt` không giữ tốt hơn `ctc`.
+
+## 10. Lượt v3 100 000 bước: một lớp trôi, int8 mất (04/10)
+
+Run `20261004_acde692-dirty_3fdaec`: split `command/v3`, đổi nhịp và warp lấy bước gần nhất (§8), 100 000 bước, cạnh run
+đang khoá `20261002_128545c-dirty_64e7a4` (split v2, 40 000 bước). Thang int8 của KẾ HOẠCH §3.14 (`make ctc-ptq`,
+`make rnnt-ptq`, `make ctc-qat`), ngày 04/10. Mỗi ô: lỗi đơn vị trên 2 000 câu `test` · đúng nhất /112 · nhận đúng /112 ·
+nhận nhầm /86 của Cửa 3.
+
+| Dòng | Run `128545c`, `ctc` | Run `acde692`, `ctc` | Run `acde692`, `rnnt` |
+|---|---|---|---|
+| float | 0,345 · 85 · 74 · 2 | 0,376 · 85 · 64 · 4 | 82 · 48 · 1 |
+| `minmax` | 0,386 · 81 · 64 · 5 | 0,804 · 21 · 0 · 0 | 14 · 0 · 0 |
+| `percentile` | 0,363 · 83 · 69 · 3 | 0,433 · 74 · 46 · 5 | 72 · 32 · 2 |
+| `mse` | 0,375 · 85 · 68 · 4 | 0,610 · 54 · 8 · 2 | 51 · 3 · 1 |
+| `kl` | 0,399 · 83 · 68 · 2 | 0,540 · 78 · 19 · 3 | 69 · 22 · 0 |
+| `qat` | 0,358 · 86 · 68 · 3 | 0,550 · 34 · 2 · 2 | |
+
+QAT của run `acde692` đi từ đồ thị `percentile`: lỗi đơn vị `val` 0,406 ở bước 0, rồi 0,420, 0,473, 0,505, 0,502 mỗi 500
+bước, loss học 1,90 lên 2,30 trong khi tốc độ học hạ từ 3·10⁻⁵ về 10⁻⁶; QAT của run `128545c` đứng ở 0,314 suốt 2 000
+bước.
+
+RMS của dòng cộng dồn ở đầu vào phép chuẩn hoá mỗi lớp, cả tensor, trên 4 câu hiệu chuẩn, qua các checkpoint. Lớp đếm
+qua các tầng: 0 ở tầng 1; 1, 2 ở tầng 2; 3, 4 ở tầng 3; 5 ở tầng 4.
+
+| Bước | Lớp 0 | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|---|
+| 8 000 | 5,1 | 6,9 | 5,2 | 4,4 | 19,1 | 5,4 |
+| 16 000 | 9,3 | 10,3 | 5,3 | 5,2 | 104,5 | 5,5 |
+| 24 000 | 10,2 | 19,5 | 4,9 | 6,4 | 252,2 | 5,2 |
+| 32 000 | 13,3 | 21,3 | 4,8 | 5,5 | 411,1 | 4,2 |
+| 40 000 | 9,1 | 18,9 | 5,1 | 6,3 | 33 471 | 5,1 |
+| 48 000 | 13,1 | 25,9 | 4,4 | 6,7 | 93 387 | 5,4 |
+| 64 000 | 10,3 | 15,5 | 4,7 | 7,7 | 94 690 | 3,9 |
+| 80 000 | 9,7 | 14,2 | 4,3 | 6,4 | 51 679 | 3,9 |
+| 96 000 | 9,7 | 13,0 | 4,1 | 6,4 | 135 355 | 4,0 |
+| Run `128545c`, 40 000 | 38,4 | 3,0 | 2,4 | 2,9 | 4,4 | 5,8 |
+
+RMS từng khung của dòng sau mỗi khối cộng vào, sáu điểm mỗi lớp, trên 16 câu hiệu chuẩn; mỗi ô: trung vị / lớn nhất.
+
+| Mạng | Lớp 0 | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|---|
+| Run `128545c`, 40 000 | 5,79 / 138,7 | 1,78 / 8,8 | 1,20 / 5,4 | 1,81 / 12,4 | 1,87 / 9,2 | 1,25 / 11,9 |
+| Run `acde692`, 8 000 | 1,84 / 15,8 | 2,30 / 28,7 | 1,55 / 16,1 | 1,53 / 62,2 | 4,71 / 119,3 | 1,48 / 8,3 |
+| Run `acde692`, 16 000 | 1,96 / 29,2 | 2,99 / 49,2 | 1,48 / 23,4 | 1,71 / 65,1 | 11,59 / 347,8 | 1,14 / 10,2 |
+| Run `acde692`, 32 000 | 2,32 / 42,0 | 4,17 / 100,6 | 1,59 / 17,1 | 1,67 / 53,0 | 15,67 / 2 268 | 1,35 / 13,3 |
+
+Dòng cộng dồn của lớp 4 lớn dần từ đầu lượt và nhảy hai bậc giữa bước 32 000 và 40 000; các lớp khác giữ dưới 30. Dòng
+ấy chỉ đi vào phép chuẩn hoá RMS cuối lớp, nên mạng float không đổi theo cỡ của nó và Cửa 3 float vẫn 85/112; Adam không
+có weight decay và không gì trong loss giữ cỡ ấy, nên nó trôi. int8 một số mũ cho cả tensor: ngay ở bước 32 000, bậc
+lượng tử `minmax` của lớp 4, ít nhất 2 268/127 ≈ 17,9, đã lớn hơn RMS khung trung vị 15,7, và ở mạng cuối dòng ấy lớn
+hơn bước 32 000 khoảng 300 lần. `minmax` giữ cả khung lớn nhất nên mất gần hết, `percentile` cắt bớt nên còn 74/112; QAT
+giữ số mũ của hiệu chuẩn, chỉ học trọng số, và lỗi `val` tăng dần thay vì giảm. Lớp 0 của run `128545c` cũng có khung
+tới 139, nhưng khung trung vị cách nó 24 lần, và int8 của run ấy chỉ kém float 0,02 lỗi đơn vị.
+
+Trần `train.stream.cap_rms` = 32 (KẾ HOẠCH §3.12): ở run `128545c`, khung lớn nhất của lớp 1–5 dưới 13 và của lớp 0 tới
+139; ở run `acde692` mọi lớp lớn dần, lớp 4 đã qua 32 trước bước 8 000. Đo ngày 04/10 bằng script chẩn đoán chạy một lần.
