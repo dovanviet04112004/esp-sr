@@ -325,3 +325,52 @@ nghiêng phổ. Trên 300 câu so cặp, `val` không nền: mạng v2 sai 0,332
 giá trị NaN hay vô cực, gò quanh 1,9 kHz của phổ trung bình 0,06 nat (bản nền quạt: ~1 nat); `test`: 0,377 (v2: 0,340),
 tiếng nói nổi 29,1 dB ở trung vị (v2: 31,0 dB). Mô phỏng lại không nền từ 04/10 06:55, mỗi kho qua cùng phép so cặp với
 v2 trước khi học.
+
+## 8. Lượt học v3 không nền, và đổi nhịp trộn hai khung (04/10)
+
+Run `20261004_651b321-dirty_3fdaec`: split `command/v3` mô phỏng lại không nền (§7), mỗi kho qua phép so cặp với v2;
+`command_ctc.yaml` ở `651b321`, 745 812 câu, 717,7 giờ, vòng đệm 206,7 giờ; tăng cường tempo 0,8–1,6 rút log-đều,
+warp 8 bước, tilt ±3 dB. Dừng ở bước 42 773 trên 100 000 để sửa tăng cường. Lỗi đơn vị `val` v3 qua các bước:
+
+| Bước | 2 000 | 4 000 | 8 000 | 12 000 | 16 000 | 20 000 | 24 000 | 28 000 | 32 000 | 36 000 | 40 000 | 42 000 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `ctc` | 0,855 | 0,651 | 0,557 | 0,519 | 0,504 | 0,489 | 0,463 | 0,466 | 0,461 | 0,445 | 0,446 | 0,437 |
+| `rnnt` | 0,973 | 0,657 | 0,579 | 0,559 | 0,520 | 0,535 | 0,499 | 0,489 | 0,502 | 0,467 | 0,466 | 0,468 |
+
+Mạng ra khỏi pha chỉ phát blank giữa bước 2 000 và 4 000; lượt nền quạt của §7 còn ở 0,86 tới bước 6 000. Ở bước 3 899,
+trên 40 câu học mỗi kho: BUD500 0,577, VIVOS 0,652, FPT 0,678, Common Voice 0,689, VLSP 0,693; 80 câu `val` 0,666.
+
+Checkpoint bước 32 000 cạnh mạng cuối của run v2 `20261002_1538154-dirty_d6d74a`, trên cả `val` v3 trainer chấm
+(1 580 câu tới 12 s, 62 072 đơn vị), giải tham lam CTC; câu `val` đổi nhịp qua đúng hàm tăng cường của trainer, không
+warp, không tilt. Đo ngày 04/10 bằng script chẩn đoán chạy một lần.
+
+| Nhịp | Mạng v2 | Mạng v3, bước 32 000 |
+|---|---|---|
+| 0,95 | 0,351 | 0,445 |
+| 1,00, khung gốc | 0,345 | 0,461 |
+| 1,05 | 0,342 | 0,434 |
+| 1,30 | 0,362 | 0,428 |
+| 1,60 | 0,436 | 0,442 |
+
+Trainer đổi nhịp và warp bằng cách đọc trục bước ở vị trí lẻ, trộn tuyến tính hai bước kề nhau. Hệ số nhịp rút liên tục
+nên gần như mọi câu học là khung trộn; `val` và board chỉ có khung gốc. Mạng v2, chưa học khung trộn nào, đi ngang quanh
+nhịp 1 và kém dần khi nói nhanh. Mạng v3 nghe nhịp 0,95 và 1,05, tốc độ gần như không đổi nhưng mọi khung là khung trộn,
+tốt hơn khung gốc 1,6–2,7 điểm: nó quen khung trộn. Đổi nhịp và warp nay lấy nguyên bước gần nhất (KẾ HOẠCH §3.12).
+
+Cùng checkpoint ở nhịp 1, theo điều kiện:
+
+| Ô | Mạng v2 | Mạng v3, bước 32 000 |
+|---|---|---|
+| người nói 45–50 dB SPL ở 1 m | 0,454 | 0,536 |
+| 50–56 dB | 0,358 | 0,489 |
+| 56–65 dB | 0,344 | 0,463 |
+| 65–74 dB | 0,274 | 0,394 |
+| không nhiễu | 0,313 | 0,425 |
+| SNR 20–30 dB | 0,285 | 0,409 |
+| SNR 10–20 dB | 0,322 | 0,450 |
+| SNR 0–10 dB | 0,451 | 0,549 |
+| nghiêng −6…−3 dB/octave | 0,399 | 0,510 |
+| VIVOS | 0,330 | 0,452 |
+| Common Voice | 0,489 | 0,555 |
+
+Mạng v2 là mạng cuối, tốc độ học đã hạ hết; mạng v3 ở bước 32 000 còn 77% tốc độ học đầu.
