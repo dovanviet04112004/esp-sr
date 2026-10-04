@@ -374,3 +374,39 @@ Cùng checkpoint ở nhịp 1, theo điều kiện:
 | Common Voice | 0,489 | 0,555 |
 
 Mạng v2 là mạng cuối, tốc độ học đã hạ hết; mạng v3 ở bước 32 000 còn 77% tốc độ học đầu.
+
+## 9. "Tắt" của chủ repo: bộ lệnh, phiên mới và bộ lệnh lớn (04/10)
+
+Mạng float, chấm như Cửa 3 không ngưỡng (lệnh điểm cao nhất của mỗi câu), đo ngày 04/10 bằng script chẩn đoán chạy một
+lần. Mạng: dòng `qat` đang khoá của run `20261002_128545c-dirty_64e7a4` dùng bản float `model.pt`; run
+`20261004_651b321-dirty_3fdaec` ở bước 42 000 (đổi nhịp trộn khung, §8); run `20261004_acde692-dirty_3fdaec` ở bước
+52 000 (khung gần nhất). Phiên 28/09 là của Cửa 3 (1 m và 3 m); mười phiên `20261004_home_001`–`010` chủ repo thu ở
+80 cm, mỗi lệnh mười lần, cộng hai–ba tiếng động ngắn mỗi phiên mà cách chấm này luôn tính sai.
+
+| Câu "tắt", bộ mặc định | Model đang khoá | Run `651b321`, 42 000 | Run `acde692`, 52 000 |
+|---|---|---|---|
+| Phiên 28/09, 22 câu | 0 | 3 | 1 |
+| Phiên 04/10, "tắt đèn" 14 cửa sổ / "tắt quạt" 14 | 2 / 6 | | 8 / 10 |
+
+Gần như mọi câu "tắt" sai đều thành "bật" cùng vật. Bộ lệnh có "mở đèn", "mở quạt" thay "bật đèn", "bật quạt":
+
+| Đổi "bật" thành "mở" | Model đang khoá | Run `651b321`, 42 000 | Run `acde692`, 52 000 |
+|---|---|---|---|
+| "tắt", phiên 28/09, 22 câu | 22 | 21 | 20 |
+| "tắt đèn" / "tắt quạt", phiên 04/10, 14 / 14 | 11 / 12 | | 10 / 12 |
+| "mở đèn" / "mở quạt", phiên 04/10, 13 / 14 | 11 / 11 | | 11 / 11 |
+
+Ranh giới "tắt"/"bật" của mạng v3 mỏng: cùng mạng, phiên 04/10 đúng phần lớn câu "tắt", phiên 28/09 gần như không câu
+nào. Không còn lệnh "bật" sát bên thì "tắt" thắng ở cả hai ngày, và "mở" đúng mọi câu không phải tiếng động.
+
+Bộ lệnh lớn: run `651b321` ở bước 42 000, 112 câu lệnh của phiên 28/09, bộ mặc định 10 lệnh so với bộ demo 34 lệnh của
+chủ repo (`host/sets/demo_vi.json`, có "tắt/bật ti vi", "tắt/bật điều hòa", "xoay trái/phải N độ", "đắt", "tát", "tét",
+"tiết" và các cặp gần âm):
+
+| | 10 lệnh | 34 lệnh |
+|---|---|---|
+| `ctc` | 88/112 | 83/112 |
+| `rnnt` | 83/112 | 78/112 |
+
+Cả hai đường mất năm câu khi bộ lệnh lớn lên, đều vì lệnh một âm tiết "tát", "tét", "mẹ nó" khớp một mẩu của câu dài hơn
+("tăng âm lượng", "bật đèn", "giảm âm lượng"); `rnnt` không giữ tốt hơn `ctc`.
