@@ -1,9 +1,9 @@
 # What the listener computes from the clean output and how it cuts speech into command windows (KEHOACH 3.11, 3.12,
 # 5.4). One source for svc_listen on the board, the board simulation and every ml branch: a model learns on these
 # features, and Gate 3 counts the windows the board decides.
-version: 2
+version: 3
 features:                          # log-mel of the clean output, a frame a hop
-  n_bands: 40
+  n_bands: 80                      # one number switches every branch, the board and the simulation (ADR-0017)
   f_min_hz: 20.0
   f_max_hz: 7600.0
   log_floor: 1.0e-6                # added to the power inside the log

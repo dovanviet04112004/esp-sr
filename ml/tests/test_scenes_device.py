@@ -17,7 +17,7 @@ from srpipe.core import screen
 from srpipe.core.audio_io import INT16_SCALE, to_float, write_wav
 from srpipe.core.config import CONFIGS, load_device, load_yaml
 from srpipe.dsp.spec.pitch import PitchConfig, pitch_features
-from srpipe.generated import array, grid
+from srpipe.generated import array, grid, listen
 from srpipe.metrics import mic_pair
 from srpipe.scenes import device, room
 
@@ -175,7 +175,7 @@ def test_the_same_seed_writes_the_same_shards_and_items_line_up(raw_root: Path, 
     second = device.build(tiny(), split, raw_root, tmp_path / "interim_again", tmp_path / "b", workers=1)
     assert yaml.safe_load(first.read_text()) == yaml.safe_load(second.read_text())
     features = np.concatenate([np.load(p) for p in sorted((tmp_path / "a").glob("*.features.npy"))])
-    assert features.shape[1] == 40 and features.dtype == np.float32
+    assert features.shape[1] == listen.N_BANDS and features.dtype == np.float32
     shards = sorted((tmp_path / "a").glob("*.items.jsonl"))
     assert sum(len(shard.read_text().splitlines()) for shard in shards) == 5
     for shard in shards:

@@ -2,8 +2,8 @@
 # Source: contracts/listen.yaml
 # Regenerate: python3 tools/gen_contracts.py
 
-VERSION = 2
-FEATURES = {'n_bands': 40, 'f_min_hz': 20.0, 'f_max_hz': 7600.0, 'log_floor': 1e-06}
+VERSION = 3
+FEATURES = {'n_bands': 80, 'f_min_hz': 20.0, 'f_max_hz': 7600.0, 'log_floor': 1e-06}
 PITCH = {'resample_hz': 4000.0,
  'lowpass_cutoff_hz': 1000.0,
  'lowpass_zeros': 1,
@@ -20,7 +20,7 @@ PITCH = {'resample_hz': 4000.0,
  'pov_scale': 2.0,
  'pitch_scale': 2.0,
  'delta_pitch_scale': 10.0}
-N_BANDS = 40
+N_BANDS = 80
 UTTERANCE_GAP_S = 0.4
 UTTERANCE_MIN_S = 0.25
 UTTERANCE_LEAD_S = 1.25

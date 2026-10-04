@@ -7,6 +7,8 @@ from __future__ import annotations
 import pytest
 
 from srpipe.core.config import load_yaml
+from srpipe.dsp.spec import pitch
+from srpipe.generated import listen
 from srpipe.tasks import command
 from srpipe.tasks.command import kws
 
@@ -37,7 +39,7 @@ def test_a_window_gives_one_logit_a_class_at_every_size() -> None:
     assert names[-2:] == [kws.OTHER, kws.SILENCE]
     assert "chup_anh" not in names
     window = (cfg["window_hops"], kws.n_dims(cfg))
-    assert window == (94, 43)
+    assert window == (94, listen.N_BANDS + pitch.N_FEATURES)
     torch.manual_seed(1)
     for size in cfg["model"]["sizes"]:
         net = dscnn.build(cfg, window, len(names), size).eval()

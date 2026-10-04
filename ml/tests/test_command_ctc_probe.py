@@ -22,7 +22,7 @@ from srpipe.tasks.command.ctc import probe, quant
 from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc import ctc_score
 
-DIMS = 43
+DIMS = encoder.n_dims(load_yaml(ctc.CONFIG))
 EXPONENT = -3
 INPUT_EXPONENT = -3
 

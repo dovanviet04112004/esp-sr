@@ -21,7 +21,7 @@ from srpipe.tasks.command.ctc import probe, qat, quant, train  # noqa: E402
 from srpipe.tasks.command.ctc.model import encoder  # noqa: E402
 from srpipe.tasks.command.ctc.postproc import ctc_score  # noqa: E402
 
-DIMS = 43
+DIMS = encoder.n_dims(load_yaml(ctc.CONFIG))
 
 
 def test_a_sentence_pads_with_raw_zeros_then_normalises_like_a_training_batch() -> None:
