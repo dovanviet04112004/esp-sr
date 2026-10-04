@@ -1701,7 +1701,7 @@ chứng âm cố ý vi phạm:
 | `espressif/mqtt`, `espressif/cjson` | `net_mqtt` | `^`; IDF v6 đã đưa cả hai ra khỏi lõi, `REQUIRES mqtt` trơ fail ở bước giải phụ thuộc |
 | `joltwallet/littlefs` | `sys_storage` | `^` |
 | `espressif/esp-sr` | **chỉ** `test_apps/espsr_compare/main` | `==2.5.5`, bản mới nhất trên registry ngày 30/09; không dựng được trên IDF v6.0.2 thì ghim bản dựng được và sửa dòng này |
-| `numba`, `llvmlite` | `ml/pyproject.toml` | `==0.68.0`, `==0.50.0`: hai vòng lặp từng mẫu của bản soi gương (bộ giới hạn của `agc`, biến đổi khoảng cách của `pitch`) biên dịch JIT, cùng thứ tự phép float32 nên ra đúng từng bit như numpy; LLVM khác bản có thể sinh mã khác |
+| `numba`, `llvmlite` | `ml/pyproject.toml` | `==0.68.0`, `==0.50.0`: các vòng lặp từng mẫu của bản soi gương (bộ giới hạn của `agc`, biquad của `hpf`, bộ lọc tách băng của `vad`, biến đổi khoảng cách của `pitch`) biên dịch JIT, cùng thứ tự phép float32 nên ra đúng từng bit như numpy; LLVM khác bản có thể sinh mã khác |
 
 **Ghim bản chính xác cho mọi thư viện tính toán.** Lý do là bài học đã trả giá ở repo face
 attendance: thêm một phụ thuộc bất kỳ làm trình quản lý giải lại cả cây, một thư viện tính toán nhảy
