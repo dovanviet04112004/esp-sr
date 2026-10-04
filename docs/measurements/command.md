@@ -466,3 +466,22 @@ tới 139, nhưng khung trung vị cách nó 24 lần, và int8 của run ấy c
 
 Trần `train.stream.cap_rms` = 32 (KẾ HOẠCH §3.12): ở run `128545c`, khung lớn nhất của lớp 1–5 dưới 13 và của lớp 0 tới
 139; ở run `acde692` mọi lớp lớn dần, lớp 4 đã qua 32 trước bước 8 000. Đo ngày 04/10 bằng script chẩn đoán chạy một lần.
+
+## 11. Các phiên của chủ repo vào tập học `command/v4` (04/10)
+
+Mười phiên `20261004_home_001`–`010` của `eval.board.train` (80 cm, mỗi phiên một lời nhắc), cắt như Cửa 3 bằng
+`ctc.data` vào `processed/command/v4/board`, log-mel 80 dải: 128 lượt `vad`, giữ 108 lượt dài 0,8–2,4 s. Mỗi lượt
+chấm thêm bằng mạng float của run `20261004_acde692-dirty_3fdaec` trên đúng chuỗi Cửa 3 ở 40 dải: khoảng cách của
+vòng tự do trên lời nhắc của phiên, ‰ nat mỗi khung (KẾ HOẠCH §3.12). Đo ngày 04/10 bằng script chẩn đoán chạy một lần.
+
+| Lượt `vad` | Số lượt | Khoảng cách trên lời nhắc |
+|---|---|---|
+| ngắn hơn 0,8 s, bỏ | 15 | 435–1 017 |
+| dài hơn 2,4 s, bỏ | 5 | 16–207 |
+| giữ, câu thật | 105 | 5–211 |
+| giữ, không lời nhắc nào khớp: `009#12` 0,90 s, `010#7` 0,85 s, `010#10` 1,31 s | 3 | 512–583 |
+
+Lượt ngắn là tiếng click và tiếng động; năm lượt dài là lệnh thật kéo dài hay dính tiếng sau, bỏ vì cửa sổ 3 s của
+Cửa 3 có thể cắt mất đầu câu. Ba lượt giữ mà không lời nhắc nào khớp cũng nhỏ hơn mọi câu thật: log-mel trung bình
+−12,4 so với −9,7 tới −11,8. Chúng là tiếng động, nhãn lời nhắc sai, nên `split.board.noise` bỏ chúng khỏi tập học. Câu thật mỗi phiên: 10, 11, 11, 11, 11, 10, 9, 10, 11, 11. Chấm giữa mười lời nhắc của các phiên, mạng cuối của run
+v3 nghe 36 trên 41 câu "tắt" thành "bật" cùng vật.
