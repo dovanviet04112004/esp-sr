@@ -403,3 +403,24 @@ Trên firmware thật một bước của cửa sổ tốn chừng 7,2 ms (766 m
 nhanh hơn thời gian thực (16 ms một bước) hơn hai lần. Khi bắt đầu, cửa sổ đã sau 78 bước trước câu cộng 16 bước chờ đủ
 `utterance.min_s`; từ ngắn, cửa sổ chừng 100 bước, chốt trước khi đuổi kịp nên quyết định ra muộn 220–320 ms, còn lệnh
 dài từ 129 bước trở lên đã đuổi kịp và ra 63–73 ms sau bước chốt.
+
+## 18. Mạng `ctc` rộng 160 trên 80 dải chạy dòng trên esp-dl (ADR-0017, ADR-0018, E11-T20)
+
+Board B, `ai_engine/test_apps/unit` dựng với thiết lập trình biên dịch của profile bench (`-O2`), bảng phân vùng
+`test_apps/partitions_unit.csv` (`models_0` 6 MB), IDF 6.0.2, `e1a544b` cộng bề rộng 160 / feedforward 320 chưa commit
+trong `configs/models/command_ctc.yaml`, 05/10. Trọng số ngẫu nhiên có seed như §11, vào 80 log-mel + 3 cao độ mỗi hop;
+lượng tử bậc 1 và 2 mặc định của KẾ HOẠCH §3.14. Dựng bằng `make ai-probe`, đo bằng `make ai-unit`.
+
+| Mạng | Một bước | `.espdl` | Chênh int8 so với mô phỏng cả chuỗi | Một bước, trung bình / đỉnh | Mỗi 32 ms audio | Dựng mạng | PSRAM | Không `reset` (đối chứng âm) |
+|---|---|---|---|---|---|---|---|---|
+| `ctc_lay`: một lớp của tầng đầu (bề rộng 160, nhân 17) | 1 hop, 256 bước | 523 KB | **0** | 7 038 / 7 159 µs | 14,1 ms | 36 ms | 44,1 KB | chênh 6 |
+| `ctc_net`: cả mạng (3 tích chập 2D trên 80 dải, 6 lớp, đầu CTC 45 lớp; 2,95 triệu tham số ở các tầng) | 16 hop (256 ms), 16 bước | 3 358 KB | **0** | 81 387 / 81 699 µs | **10,2 ms** | 330 ms | 293,2 KB | chênh 26 |
+
+`model->test()` qua ở cả hai. Qua các lệnh gọi của `command` (`_step` chuẩn hoá đặc trưng thô về int8 và gom khối 16 hop,
+`_score` chạy khối dở cuối rồi chấm), 12 cửa sổ đặc trưng thô cho đúng quyết định của mô phỏng Python: 56 µs mỗi hop,
+83 884 / 83 985 µs mỗi khối 16 hop, tức 10,5 ms mỗi 32 ms, và 76 780 / 84 186 µs mỗi lần chấm. Ảnh probe ba mục nạp vào
+PSRAM 3 881 KB; nạp qua bảng mới ánh xạ cả `models_0` 6 MB mà không lỗi.
+
+So với mạng cỡ MultiNet7 trên 40 dải (§11, 5,8 ms mỗi 32 ms), mạng này chậm hơn 1,75 lần, nhiều hơn tỉ lệ tham số 1,56
+lần của các tầng; tích chập 2D đầu chạy trên số dải gấp đôi, phần của nó chưa đo tách. Vẫn dưới ngân sách 11–18 ms mỗi
+32 ms trong cửa sổ lệnh của KẾ HOẠCH §3.3.
