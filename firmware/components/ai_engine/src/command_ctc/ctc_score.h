@@ -17,7 +17,7 @@ extern "C" {
 #define AI_ENGINE_COMMAND_CTC_REJECTED (-1)
 #define AI_ENGINE_COMMAND_CTC_UNITS_MAX 48    // a variant's units; its forward pass keeps 2 n + 1 states
 #define AI_ENGINE_COMMAND_CTC_CLASSES_MAX 64  // a frame's classes, one exp kept on the stack each
-#define AI_ENGINE_COMMAND_CTC_FEATURES_MAX 64 // a hop's features, normalised on the stack
+#define AI_ENGINE_COMMAND_CTC_FEATURES_MAX 96 // a hop's features, normalised on the stack
 
 /** Log-probabilities of int8 logits worth logits * 2^exponent, frame after frame of n_classes, as
  *  ctc_score.py's frame_log_probs: largest off, exp summed over an exponent of its own, log in double.

@@ -59,3 +59,8 @@ esp_err_t ai_engine_command_abort(void)
     s_window_open = false;
     return ESP_OK;
 }
+
+size_t ai_engine_command_features(void)
+{
+    return 0;
+}

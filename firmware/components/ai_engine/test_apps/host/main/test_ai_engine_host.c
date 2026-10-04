@@ -109,7 +109,7 @@ static void check_shells(void)
               ai_engine_command_begin() == ESP_ERR_INVALID_STATE &&
               ai_engine_command_step(log_mel) == ESP_ERR_INVALID_STATE &&
               ai_engine_command_score(&lexicon, &result) == ESP_ERR_INVALID_STATE &&
-              ai_engine_command_abort() == ESP_ERR_INVALID_STATE,
+              ai_engine_command_abort() == ESP_ERR_INVALID_STATE && ai_engine_command_features() == 0,
           "command shell: no command model, so no window ever opens");
     check(ai_engine_synth_render(units, 3, pcm, 16, &n_samples) == ESP_ERR_NOT_SUPPORTED &&
               ai_engine_synth_render(units, 3, pcm, 16, NULL) == ESP_ERR_INVALID_ARG,

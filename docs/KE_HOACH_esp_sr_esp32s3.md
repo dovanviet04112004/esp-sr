@@ -916,7 +916,7 @@ Python ở `ml/src/srpipe/lang/` và C ở `lang_vi` phải cho **đầu ra gi�
 tiết hợp lệ cộng bộ thử có nhãn gồm số, từ mượn, tên riêng. Sai số cho phép bằng 0.
 
 **`command` có ba đường sau một hợp đồng** (ADR-0012, ADR-0016). Cả ba cắm sau cùng các hàm đã đóng băng
-`ai_engine_command_{prepare,begin,step,score,abort}` (§4.5.5) và trả cùng một khuôn: chỉ số lệnh hoặc −1, kèm ba điểm. **`ctc`** và
+`ai_engine_command_{prepare,begin,step,score,abort,features}` (§4.5.5) và trả cùng một khuôn: chỉ số lệnh hoặc −1, kèm ba điểm. **`ctc`** và
 **`rnnt`** dùng chung một encoder, nhận mọi bộ lệnh viết bằng chữ qua `lang_vi`, khác nhau ở cách giải; **`kws`** phân
 lớp một bộ lệnh cố định lúc học. Kconfig `AI_ENGINE_COMMAND_BACKEND` chọn thư mục nguồn nào dựng vào `ai_engine`
 (§4.5.2), và ảnh model khai đường của nó trong `meta.json` (§6.3). Đường mặc định của sản phẩm là **`kws`**, đường duy
@@ -1956,11 +1956,11 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 |---|---|---|
 | `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame` | any, không chặn, người gọi giữ bộ nhớ |
 | `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_entry`, `lang_vi_unit_name` | any, không chặn |
-| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn |
+| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |
 | `svc_*` | `svc_<x>_init`, `svc_<x>_step` | task, gọi từ đúng task của bảng §5.2 |
 
-**`ai_engine_command_{prepare,begin,step,score,abort}` giữ nguyên cho mọi đường của `command`** (ADR-0012). Độ dài khung đặc
+**`ai_engine_command_{prepare,begin,step,score,abort,features}` giữ nguyên cho mọi đường của `command`** (ADR-0012). Độ dài khung đặc
 trưng mà `_step` nhận do model khai trong `meta.json` (`features`, §6.3): 80 với log-mel 80, 83 khi cộng ba chiều cao độ;
 `svc_listen` dựng khung theo `contracts/listen.yaml` và lúc khởi động kiểm model nhận đúng số ấy, lệch thì từ chối chạy
 (ADR-0017). `_prepare(lexicon)` nhận bộ lệnh trước mọi cửa sổ, lúc khởi động và mỗi lần đổi bộ lệnh,

@@ -164,6 +164,13 @@ esp_err_t svc_listen_init(const svc_listen_config_t *cfg)
     if (s.ready) { return ESP_ERR_INVALID_STATE; }
     if (cfg == NULL || !well_formed(&cfg->commands)) { return ESP_ERR_INVALID_ARG; }
     if (!ai_engine_has(AI_ENGINE_MODEL_COMMAND)) { return ESP_ERR_NOT_SUPPORTED; }
+    // A model of another band count reads every frame wrong (ADR-0017).
+    const size_t takes = ai_engine_command_features();
+    if (takes != 0 && takes != FEATURES) {
+        ESP_LOGE(TAG, "the command model takes %u features a hop, listen.yaml gives %u", (unsigned)takes,
+                 (unsigned)FEATURES);
+        return ESP_ERR_INVALID_SIZE;
+    }
     workspaces_t w = {0};
     s.hop = take(GEN_GRID_HOP_SAMPLES * sizeof(float));
     s.bins = take(GEN_GRID_N_BINS * sizeof(dsp_spec_cplx_t));

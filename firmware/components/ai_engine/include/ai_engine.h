@@ -102,6 +102,12 @@ esp_err_t ai_engine_command_score(const ai_engine_lexicon_t *lexicon, ai_engine_
  */
 esp_err_t ai_engine_command_abort(void);
 
+/** Features a hop the loaded command model takes: its mel bands then pitch's three (ADR-0017).
+ *  @ctx any | non-blocking
+ *  @ret the count, or 0 without a command model or with a backend that does not read it
+ */
+size_t ai_engine_command_features(void);
+
 /** Render units to 16 kHz PCM; n_samples gets the count written.
  *  @ctx noi_task | non-blocking, runs slower than real time is allowed | caller owns pcm
  *  @ret ESP_OK | ESP_ERR_NOT_SUPPORTED no synth in the image | ESP_ERR_INVALID_SIZE pcm too short

@@ -41,8 +41,8 @@ typedef struct {
 /** Read the commands through lang_vi and prepare ai_engine on them; take the front end, rings and tables.
  *  @ctx task | blocking, allocates in PSRAM | once at boot after ai_engine_load, ahead of nhan_task
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE second call | ESP_ERR_NOT_SUPPORTED no command in the image |
- *       ESP_ERR_INVALID_ARG | APP_ERR_COMMANDS_INVALID a line lang_vi cannot read | ESP_ERR_NO_MEM |
- *       ai_engine_command_prepare's error
+ *       ESP_ERR_INVALID_SIZE a model of other bands than listen.yaml | ESP_ERR_INVALID_ARG | ESP_ERR_NO_MEM |
+ *       APP_ERR_COMMANDS_INVALID a line lang_vi cannot read | ai_engine_command_prepare's error
  */
 esp_err_t svc_listen_init(const svc_listen_config_t *cfg);
 

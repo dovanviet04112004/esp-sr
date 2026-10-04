@@ -234,3 +234,8 @@ esp_err_t ai_engine_command_abort(void)
     s.open = false;
     return ESP_OK;
 }
+
+size_t ai_engine_command_features(void)
+{
+    return s.ready ? s.features : 0;
+}
