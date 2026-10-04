@@ -70,6 +70,23 @@ hình và sha256 ở `manifest.yaml` của tập. Kho phòng `interim/scenes/dev
 |---|---|---|---|---|---|---|
 | `command/vivos_test` | VIVOS test, 19 người nói, lập tay để đo chi phí | 760 | 0,876 | 2,9 phút trên 3 tiến trình, ~8 lần thời gian thực mỗi nhân | 36 MB/giờ đặc trưng, 115 MB/giờ PCM sạch | 27/09 |
 
+**Tốc độ dựng** (04/10, i7-12700H, WSL 10 GB, đo khi 14 tiến trình của bản dựng `command/v3` cùng chạy). Với chuỗi đủ module,
+`pitch` và tăng giảm tốc độ, mỗi nhân chỉ dựng chừng 1,6 lần thời gian thực; profile hai phiên BUD500 (16 mẩu) cho thấy
+thời gian nằm ở các vòng lặp Python của bản soi gương: bộ giới hạn của `agc` chạy từng mẫu qua ba hàng đợi 24%, `pitch`
+20% (một nửa là biến đổi khoảng cách), `vad` 17% (bộ lọc tách băng từng mẫu), `ns_omlsa` 14%, đọc và giải mã tiếng 11%.
+Bốn vòng ấy (`agc`, biquad của `hpf`, bộ lọc tách băng của `vad`, biến đổi khoảng cách của `pitch`) biên dịch bằng numba
+(KẾ HOẠCH §4.5.1), cùng thứ tự phép float32:
+
+| Đo | numpy | numba | Bit |
+|---|---|---|---|
+| Biến đổi khoảng cách, 400 trạng thái | 0,45 ms/lần | 5,7 µs/lần | 300/300 ca ngẫu nhiên trùng |
+| `agc`, 60 s tiếng có bùng nổ | 1,62 s | ~0,03 s, chưa tính 0,35 s biên dịch lần đầu | trùng |
+| Một shard 32 mẩu BUD500, `agc` và `pitch` | 51,3 s | 32,3 s (1,59×) | 4/4 tệp trùng sha256 |
+| Dựng lại shard 3 của `command/v3/train_vivos`, đủ bốn vòng | 371 s (chỉ `agc`, `pitch`) | 151 s | 4/4 tệp trùng bản đã dựng |
+
+Mọi bộ vàng của `srpipe.dsp` sinh lại không đổi tệp nào. Còn bằng numpy: `ns_omlsa` (chừng một phần tư), phần GMM của
+`vad`, NCCF của `pitch`, `doa`.
+
 ## 4. Bản thu qua board
 
 Mỗi phiên một dòng. Mã người nói `spk_NNN`; tên thật chỉ nằm trong bảng ngoài repo (KẾ HOẠCH §1.4).
