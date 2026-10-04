@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numba
 import numpy as np
 
 from srpipe.generated import afe, grid
@@ -65,17 +66,21 @@ class VadHop:
     features: np.ndarray
 
 
-class _AllPass:
-    """First-order all-pass y = c x + s, s = x - c y, one per branch of a half-band pair."""
-
-    def __init__(self, coefficient: float) -> None:
-        self.c = f32(coefficient)
-        self.s = f32(0.0)
-
-    def step(self, x: np.float32) -> np.float32:
-        y = self.c * x + self.s
-        self.s = x - self.c * y
-        return y
+@numba.njit
+def _half_band(x: np.ndarray, c: np.ndarray, s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Even samples through the all-pass y = c[0] x + s[0], s[0] = x - c[0] y, odd through c[1] and s[1]: their mean
+    is the low half, their half difference the high half, each at half the rate; s left as the last pair leaves it."""
+    half = np.float32(0.5)
+    high = np.empty(len(x) // 2, dtype=np.float32)
+    low = np.empty(len(x) // 2, dtype=np.float32)
+    for n in range(len(x) // 2):
+        yu = c[0] * x[2 * n] + s[0]
+        s[0] = x[2 * n] - c[0] * yu
+        yl = c[1] * x[2 * n + 1] + s[1]
+        s[1] = x[2 * n + 1] - c[1] * yl
+        high[n] = half * yu - half * yl
+        low[n] = half * yu + half * yl
+    return high, low
 
 
 class _HalfBand:
@@ -83,19 +88,26 @@ class _HalfBand:
     difference the high half, each at half the rate."""
 
     def __init__(self, coefficients: tuple[float, float]) -> None:
-        self.upper = _AllPass(coefficients[0])
-        self.lower = _AllPass(coefficients[1])
+        self.c = np.array(coefficients, dtype=np.float32)
+        self.s = np.zeros(2, dtype=np.float32)
 
     def split(self, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        half = f32(0.5)
-        high = np.empty(len(x) // 2, dtype=np.float32)
-        low = np.empty(len(x) // 2, dtype=np.float32)
-        for n in range(len(x) // 2):
-            yu = self.upper.step(x[2 * n])
-            yl = self.lower.step(x[2 * n + 1])
-            high[n] = half * yu - half * yl
-            low[n] = half * yu + half * yl
-        return high, low
+        return _half_band(np.asarray(x, dtype=np.float32), self.c, self.s)
+
+
+@numba.njit
+def _direct_form_one(x: np.ndarray, b: np.ndarray, a: np.ndarray, state: np.ndarray) -> np.ndarray:
+    """x through b and a in direct form I; state x1, x2, y1, y2, left as the end of x leaves it."""
+    out = np.empty_like(x)
+    x1, x2, y1, y2 = state[0], state[1], state[2], state[3]
+    for n in range(len(x)):
+        xn = x[n]
+        y = b[0] * xn + b[1] * x1 + b[2] * x2 - a[0] * y1 - a[1] * y2
+        x2, x1 = x1, xn
+        y2, y1 = y1, y
+        out[n] = y
+    state[0], state[1], state[2], state[3] = x1, x2, y1, y2
+    return out
 
 
 class _LowBandHighPass:
@@ -104,16 +116,10 @@ class _LowBandHighPass:
     def __init__(self) -> None:
         self.b = np.array(afe.VAD_LOW_BAND_HPF_B, dtype=np.float32)
         self.a = np.array(afe.VAD_LOW_BAND_HPF_A, dtype=np.float32)
-        self.x1 = self.x2 = self.y1 = self.y2 = f32(0.0)
+        self.state = np.zeros(4, dtype=np.float32)
 
     def run(self, x: np.ndarray) -> np.ndarray:
-        out = np.empty_like(x)
-        for n, xn in enumerate(x):
-            y = self.b[0] * xn + self.b[1] * self.x1 + self.b[2] * self.x2 - self.a[0] * self.y1 - self.a[1] * self.y2
-            self.x2, self.x1 = self.x1, xn
-            self.y2, self.y1 = self.y1, y
-            out[n] = y
-        return out
+        return _direct_form_one(np.asarray(x, dtype=np.float32), self.b, self.a, self.state)
 
 
 class _MinimumTracker:
