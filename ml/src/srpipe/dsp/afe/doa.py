@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numba
 import numpy as np
 
 from srpipe.dsp.afe.ns_omlsa import PI, cos_series, exp_series, rsqrt_f32
@@ -99,6 +100,24 @@ def phasors(cfg: DoaConfig) -> tuple[np.ndarray, np.ndarray]:
     return start, step
 
 
+@numba.njit
+def _steer(
+    a: np.ndarray, b: np.ndarray, start_re: np.ndarray, start_im: np.ndarray, step_re: np.ndarray, step_im: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Sums over the band of a and b against each angle's phasor, which turns by its step bin by bin, as doa.c."""
+    sum_c = np.zeros(len(start_re), dtype=np.float32)
+    sum_s = np.zeros(len(start_re), dtype=np.float32)
+    rot_re, rot_im = start_re.copy(), start_im.copy()
+    for k in range(len(a)):
+        for j in range(len(rot_re)):
+            sum_c[j] = sum_c[j] + a[k] * rot_re[j]
+            sum_s[j] = sum_s[j] + b[k] * rot_im[j]
+            turned_re = rot_re[j] * step_re[j] - rot_im[j] * step_im[j]
+            rot_im[j] = rot_re[j] * step_im[j] + rot_im[j] * step_re[j]
+            rot_re[j] = turned_re
+    return sum_c, sum_s
+
+
 class Doa:
     """One searcher; starts with a zero cross-spectrum and no estimate."""
 
@@ -141,16 +160,7 @@ class Doa:
             return None
         inv = np.where(live, rsqrt_f32(np.where(live, power, f32(1.0))), f32(0.0))
         a, b = self.cross_re * inv, self.cross_im * inv
-        sum_c = np.zeros(len(self.start_re), dtype=np.float32)
-        sum_s = np.zeros_like(sum_c)
-        rot_re, rot_im = self.start_re.copy(), self.start_im.copy()
-        for k in range(len(a)):
-            sum_c = sum_c + a[k] * rot_re
-            sum_s = sum_s + b[k] * rot_im
-            rot_re, rot_im = (
-                rot_re * self.step_re - rot_im * self.step_im,
-                rot_re * self.step_im + rot_im * self.step_re,
-            )
+        sum_c, sum_s = _steer(a, b, self.start_re, self.start_im, self.step_re, self.step_im)
         half = len(sum_c)
         self.response[:half] = sum_c - sum_s
         mirrors = np.arange(self.n_angles - half)
