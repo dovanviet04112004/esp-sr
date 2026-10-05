@@ -243,13 +243,13 @@ def train(
                 torch.from_numpy(counts),
                 zero_infinity=True,
             )
-            side.append(float(ctc))
+            side.append(ctc.item())
             loss = loss + spec["aux"]["weight"] * ctc
         optimiser.zero_grad()
         loss.backward()
         optimiser.step()
         schedule.step()
-        losses.append(float(loss))
+        losses.append(loss.item())
         if step % spec["eval_every"] == 0 or step == spec["steps"]:
             model.eval()
             val = sweep(model, sets["val_pos"], sets["val_neg"] + sets.get("val_hard", []), mean, std, cfg, device)
