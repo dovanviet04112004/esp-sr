@@ -1,13 +1,13 @@
 # What the listener computes from the clean output and how it cuts speech into command windows (KEHOACH 3.11, 3.12,
 # 5.4). One source for svc_listen on the board, the board simulation and every ml branch: a model learns on these
 # features, and Gate 3 counts the windows the board decides.
-version: 3
+version: 4
 features:                          # log-mel of the clean output, a frame a hop
   n_bands: 80                      # one number switches every branch, the board and the simulation (ADR-0017)
   f_min_hz: 20.0
   f_max_hz: 7600.0
   log_floor: 1.0e-6                # added to the power inside the log
-pitch:                             # dsp_spec/pitch, Kaldi's online tracker at zero latency with its defaults
+pitch:                             # dsp_spec/pitch, Kaldi's online tracker at zero latency with its defaults, on every hop
   resample_hz: 4000.0              # the NCCF runs on the signal downsampled to this
   lowpass_cutoff_hz: 1000.0        # windowed sinc ahead of downsampling
   lowpass_zeros: 1
@@ -27,5 +27,5 @@ pitch:                             # dsp_spec/pitch, Kaldi's online tracker at z
 utterance:                         # runs of vad into utterances and each into its command window, as Gate 3 cuts them
   gap_s: 0.4                       # vad hops this close belong to one utterance; it closes once vad is off longer
   min_s: 0.25                      # a shorter run is a breath or a click
-  lead_s: 1.25                     # the window opens this far ahead of the first vad hop: p90 of what val items hold
-window_s: 3.0                      # a window's longest; one longer is cut back from its end once the utterance closes
+  lead_s: 2.0                      # the window opens this far ahead of the first vad hop: the net settles in about 2 s
+window_s: 3.75                     # a window's longest, the lead and 1.75 s; one longer is cut back from its end once the utterance closes

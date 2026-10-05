@@ -131,18 +131,20 @@ def test_gate_3_counts_the_chips_decisions_and_refuses_a_log_missing_a_window(tm
 
 def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read() -> None:
     hop, rng, lead = grid.HOP_SAMPLES, np.random.default_rng(5), listen.UTTERANCE_LEAD_HOPS
-    vad = np.zeros(400, dtype=bool)
-    vad[50:80] = vad[200:230] = vad[236:250] = vad[380:390] = True
-    clean = rng.integers(-2000, 2000, 400 * hop).astype(np.int16)
-    features = rng.normal(size=(400, listen.N_BANDS)).astype(np.float32)
+    second = 120 + lead
+    total = -(-(second + 200) // 32) * 32
+    vad = np.zeros(total, dtype=bool)
+    vad[50:80] = vad[second : second + 30] = vad[second + 36 : second + 50] = vad[total - 20 : total - 10] = True
+    clean = rng.integers(-2000, 2000, total * hop).astype(np.int16)
+    features = rng.normal(size=(total, listen.N_BANDS)).astype(np.float32)
     tracker = SimpleNamespace(reset=lambda: None, step=lambda x: np.zeros(3, dtype=np.float32))
     body = probe.listen_session(clean, vad, features, lambda x: [len(x), 1, 2, 3], tracker)
     hops, n_segments, n_windows = probe.SESSION_HEAD.unpack_from(body)
-    assert hops == 400 and n_windows == 2
+    assert hops == total and n_windows == 2
     at = probe.SESSION_HEAD.size
-    bits = np.unpackbits(np.frombuffer(body[at : at + 50], np.uint8), bitorder="little")[:400].astype(bool)
+    bits = np.unpackbits(np.frombuffer(body[at : at + total // 8], np.uint8), bitorder="little").astype(bool)
     assert np.array_equal(bits, vad)
-    at += 52
+    at += total // 8
     segments = []
     for _ in range(n_segments):
         first, n = probe.SEGMENT_HEAD.unpack_from(body, at)
@@ -152,14 +154,14 @@ def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read(
         segments.append((first, first + n - 1))
         at += n * hop * 2
     windows = [probe.WINDOW_RECORD.unpack_from(body, at + k * probe.WINDOW_RECORD.size) for k in range(n_windows)]
-    assert [w[:2] for w in windows] == [(0, 80), (200 - lead, 250)]
-    assert [w[2] for w in windows] == [81, 51 + lead] and segments == [(0, 80), (199 - lead, 250)]
+    assert [w[:2] for w in windows] == [(0, 80), (second - lead, second + 50)]
+    assert [w[2] for w in windows] == [81, 51 + lead] and segments == [(0, 80), (second - 1 - lead, second + 50)]
     assert at + n_windows * probe.WINDOW_RECORD.size == len(body)
-    vad[380:400] = True
+    vad[total - 20 : total] = True
     mel = SimpleNamespace(log=lambda bins: np.zeros(listen.N_BANDS, dtype=np.float32))
     session = gate.with_silence(clean, vad, features, mel)
     body = probe.listen_session(*session, lambda x: [len(x), 1, 2, 3], tracker)
     hops, _, n_windows = probe.SESSION_HEAD.unpack_from(body)
     last = probe.WINDOW_RECORD.unpack_from(body, len(body) - probe.WINDOW_RECORD.size)
-    assert hops == 400 + listen.UTTERANCE_GAP_HOPS + 1 and n_windows == 3
-    assert last[:3] == (380 - lead, 400, 21 + lead)
+    assert hops == total + listen.UTTERANCE_GAP_HOPS + 1 and n_windows == 3
+    assert last[:3] == (total - 20 - lead, total, 21 + lead)

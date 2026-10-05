@@ -66,9 +66,10 @@ def test_the_table_scores_each_command_and_the_rejections_by_kind() -> None:
 
 def test_a_command_window_opens_its_lead_ahead_never_into_the_one_before_and_a_long_one_reaches_back() -> None:
     lead, longest = listen.UTTERANCE_LEAD_HOPS, listen.WINDOW_HOPS
-    spans = [(30, 60), (70, 100), (200, 260), (300, 520)]
-    assert device.command_cut(spans) == [(0, 61), (62, 101), (200 - lead, 261), (522 - longest, 521)]
-    hops, bands = 600, 40
+    spans = [(30, 60), (70, 100), (lead + 120, lead + 180), (lead + 220, lead + 250 + longest)]
+    expected = [(0, 61), (62, 101), (120, lead + 181), (lead + 252, lead + 251 + longest)]
+    assert device.command_cut(spans) == expected
+    hops, bands = lead + longest + 300, 40
     features = np.arange(hops, dtype=np.float32)[:, None].repeat(bands, axis=1)
     clean = np.zeros(hops * grid.HOP_SAMPLES, dtype=np.int16)
     xs = gate.ctc_windows(clean, features, spans, PitchTracker(PitchConfig(**listen.PITCH)))

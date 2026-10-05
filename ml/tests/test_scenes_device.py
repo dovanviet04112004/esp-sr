@@ -300,41 +300,50 @@ def vad_runs(n: int, *runs: tuple[int, int]) -> np.ndarray:
 
 
 def test_a_clip_gets_the_window_the_board_cuts_around_its_utterance() -> None:
-    windows, unheard = device.listen_windows([(95, 150)], vad_runs(400, (100, 140)))
-    assert windows == [device.Window(100 - LEAD, 141, 100, 140, (0,))] and unheard == []
+    at = LEAD + 50
+    windows, unheard = device.listen_windows([(at - 5, at + 50)], vad_runs(at + 300, (at, at + 40)))
+    assert windows == [device.Window(at - LEAD, at + 41, at, at + 40, (0,))] and unheard == []
 
 
 def test_a_window_never_reaches_back_past_the_one_before() -> None:
-    windows, _ = device.listen_windows([(95, 150), (195, 250)], vad_runs(600, (100, 140), (200, 240)))
-    assert windows[1].start == windows[0].end + 1 == 142 > 200 - LEAD
+    at = LEAD + 50
+    vad = vad_runs(at + 400, (at, at + 40), (at + 100, at + 140))
+    windows, _ = device.listen_windows([(at - 5, at + 50), (at + 95, at + 150)], vad)
+    assert windows[1].start == windows[0].end + 1 == at + 42 > at + 100 - LEAD
 
 
 def test_clips_sharing_an_utterance_are_one_window_holding_both() -> None:
-    windows, _ = device.listen_windows([(95, 145), (146, 200)], vad_runs(600, (100, 140), (150, 190)))
-    assert windows == [device.Window(100 - LEAD, 191, 100, 190, (0, 1))]
+    at = LEAD + 50
+    vad = vad_runs(at + 400, (at, at + 40), (at + 50, at + 90))
+    windows, _ = device.listen_windows([(at - 5, at + 45), (at + 46, at + 100)], vad)
+    assert windows == [device.Window(at - LEAD, at + 91, at, at + 90, (0, 1))]
 
 
 def test_a_clip_a_long_pause_splits_stays_one_window() -> None:
-    windows, _ = device.listen_windows([(95, 250)], vad_runs(800, (100, 140), (200, 240)))
-    assert windows == [device.Window(100 - LEAD, 241, 100, 240, (0,))]
+    at = LEAD + 50
+    windows, _ = device.listen_windows([(at - 5, at + 150)], vad_runs(at + 400, (at, at + 40), (at + 100, at + 140)))
+    assert windows == [device.Window(at - LEAD, at + 141, at, at + 140, (0,))]
 
 
 def test_a_clip_no_utterance_reaches_is_left_out() -> None:
-    short = vad_runs(600, (100, 140), (300, 300 + LEAST - 1))
-    windows, unheard = device.listen_windows([(95, 150), (295, 350)], short)
+    at = LEAD + 50
+    short = vad_runs(at + 400, (at, at + 40), (at + 200, at + 200 + LEAST - 1))
+    windows, unheard = device.listen_windows([(at - 5, at + 50), (at + 195, at + 250)], short)
     assert [w.clips for w in windows] == [(0,)] and unheard == [1]
 
 
 def test_an_utterance_no_clip_holds_is_still_a_floor_as_on_the_board() -> None:
-    vad = vad_runs(800, (100, 140), (200, 230), (300, 340))
-    windows, _ = device.listen_windows([(95, 150), (295, 350)], vad)
-    assert [w.clips for w in windows] == [(0,), (1,)] and windows[1].start == 232 > 300 - LEAD
+    at = LEAD + 50
+    vad = vad_runs(at + 500, (at, at + 40), (at + 100, at + 130), (at + 200, at + 240))
+    windows, _ = device.listen_windows([(at - 5, at + 50), (at + 195, at + 250)], vad)
+    assert [w.clips for w in windows] == [(0,), (1,)] and windows[1].start == at + 132 > at + 200 - LEAD
 
 
 def test_a_window_longer_than_the_boards_is_never_cut_back() -> None:
-    long = (100, 100 + listen.WINDOW_HOPS + 50)
-    windows, _ = device.listen_windows([(95, 400)], vad_runs(1200, long))
-    assert windows[0].start == 100 - LEAD and device.command_cut([long])[0][0] > 100 - LEAD
+    at = LEAD + 50
+    long = (at, at + listen.WINDOW_HOPS + 50)
+    windows, _ = device.listen_windows([(at - 5, at + 400)], vad_runs(at + 800, long))
+    assert windows[0].start == at - LEAD and device.command_cut([long])[0][0] > at - LEAD
 
 
 def test_the_listen_cut_keeps_the_boards_windows_and_counts_the_unheard(raw_root: Path, tmp_path: Path) -> None:
