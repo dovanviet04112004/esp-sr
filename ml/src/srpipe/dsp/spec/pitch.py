@@ -9,6 +9,7 @@ OnlineProcessPitch with no right context. The frame shift is the grid hop, and a
 from __future__ import annotations
 
 import math
+from collections import deque
 from dataclasses import dataclass, fields
 
 import numba
@@ -35,6 +36,7 @@ class PitchConfig:
     penalty_factor: float
     delta_pitch: float
     nccf_ballast: float
+    ballast_window_s: float
     normalization_left_s: float
     delta_window: int
     pov_scale: float
@@ -179,7 +181,8 @@ def _path_features(
 
 
 class PitchTracker:
-    """One stream of 16 kHz samples, one grid hop per step; reset at every command window (KEHOACH 3.11)."""
+    """One stream of 16 kHz samples, one grid hop per step, run without a break and reset only when the stream breaks
+    (KEHOACH 3.11)."""
 
     def __init__(self, cfg: PitchConfig) -> None:
         rate, hop = grid.SAMPLE_RATE_HZ, grid.HOP_SAMPLES
@@ -208,6 +211,9 @@ class PitchTracker:
         self.factor = step_sq * np.float32(cfg.penalty_factor)
         self.soft_min = np.float32(cfg.soft_min_f0)
         self.context = round(cfg.normalization_left_s * rate / hop)
+        self.stats_hops = round(cfg.ballast_window_s * rate / hop)
+        if cfg.ballast_window_s < 0 or (cfg.ballast_window_s > 0 and self.stats_hops < 1):
+            raise ValueError(f"ballast_window_s {cfg.ballast_window_s}: 0 for the whole stream, else at least a hop")
         self.history = max(self.context, cfg.delta_window)
         self.delta_scales = np.array(
             [
@@ -236,14 +242,16 @@ class PitchTracker:
         self.up_index = np.minimum(low[:, None] + np.arange(self.up_taps)[None, :], measured - 1)
 
     def reset(self) -> None:
-        """Forget the stream: the next step starts a new window, as after a command window ends."""
+        """Forget the stream, as when it breaks."""
         self.samples = np.zeros(0, dtype=np.float32)
         self.sample_offset = 0
         self.down = np.zeros(0, dtype=np.float32)
         self.down_offset = 0
         self.down_count = 0
+        self.hop_stats: deque[tuple[float, float, int]] = deque(maxlen=self.stats_hops or None)
         self.sum = 0.0
         self.sumsq = 0.0
+        self.count = 0
         self.frames = 0
         self.forward = np.zeros(len(self.lags), dtype=np.float32)
         self.backpointers = np.zeros((self.history + 1, len(self.lags)), dtype=np.int64)
@@ -285,7 +293,7 @@ class PitchTracker:
 
     def _frame(self, f: int) -> None:
         """Track frame f: NCCFs, resampled to the log lags, one Viterbi step, the best state kept for traceback."""
-        n = self.down_count
+        n = self.count
         mean_square = self.sumsq / n - (self.sum / n) ** 2
         ballast = np.float32((mean_square * self.window) ** 2 * self.cfg.nccf_ballast)
         start = f * self.shift - self.down_offset
@@ -324,6 +332,24 @@ class PitchTracker:
         self.latest = (np.float32(nccf), np.float32(f0))
         return features
 
+    def _keep_hop_stats(self, new: np.ndarray) -> None:
+        """The hop's downsampled sum and sum of squares in the ring of the newest stats_hops hops, then the ring's
+        totals, oldest hop first, which the ballast reads; with ballast_window_s 0, Kaldi's totals since the reset,
+        which runs before listen.yaml v5 learned on."""
+        # Each hop summed in float32 as Kaldi adds each chunk's VecVec; the totals in double, in the C's order.
+        hop_sum = float(np.cumsum(new, dtype=np.float32)[-1]) if len(new) else 0.0
+        hop_sumsq = float(seq_dot(new, new)) if len(new) else 0.0
+        if not self.stats_hops:
+            self.sum, self.sumsq, self.count = self.sum + hop_sum, self.sumsq + hop_sumsq, self.count + len(new)
+            return
+        self.hop_stats.append((hop_sum, hop_sumsq, len(new)))
+        self.sum = self.sumsq = 0.0
+        self.count = 0
+        for hop_sum, hop_sumsq, hop_count in self.hop_stats:
+            self.sum += hop_sum
+            self.sumsq += hop_sumsq
+            self.count += hop_count
+
     def step(self, hop: np.ndarray) -> np.ndarray:
         """One grid hop of samples in, the three features of the frame it completes out; zeros for the first
         LEAD_HOPS hops, which complete no frame."""
@@ -333,10 +359,7 @@ class PitchTracker:
         self.samples = np.concatenate([self.samples, hop])
         new = self._downsample()
         self.down = np.concatenate([self.down, new])
-        if len(new):
-            # Each hop summed in float32, the running totals in double, as Kaldi adds each chunk's VecVec.
-            self.sum += float(np.cumsum(new, dtype=np.float32)[-1])
-            self.sumsq += float(seq_dot(new, new))
+        self._keep_hop_stats(new)
         full = self.down_count >= self.frame_length
         ready = (self.down_count - self.frame_length) // self.shift + 1 if full else 0
         if ready == self.frames:
