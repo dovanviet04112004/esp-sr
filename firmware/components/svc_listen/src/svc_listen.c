@@ -17,7 +17,7 @@
 
 #define FEATURES (GEN_LISTEN_N_BANDS + DSP_SPEC_PITCH_FEATURES)
 #define WINDOWS_MAX 4
-// Holds WINDOWS_MAX windows waiting behind the one being worked, each up to a window and a gap old.
+// A queued window whose first hop the ring passes is dropped, never read torn.
 #define RING_HOPS 512
 #define LEAD_HOPS GEN_LISTEN_UTTERANCE_LEAD_HOPS
 #define WINDOW_HOPS GEN_LISTEN_WINDOW_HOPS
@@ -26,6 +26,7 @@
 #define MEM_ALIGN 16
 
 _Static_assert(AI_ENGINE_VARIANTS_MAX == LANG_VI_VARIANTS_MAX, "one command's readings fit one lexicon row");
+_Static_assert(RING_HOPS >= 2 * WINDOW_HOPS, "the ring holds the window worked and the next one whole");
 
 typedef struct {
     uint32_t first, last; // hops, both in; last moves on while it is open
