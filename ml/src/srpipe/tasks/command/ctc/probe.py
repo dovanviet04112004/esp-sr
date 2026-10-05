@@ -221,8 +221,10 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
         dims = encoder.n_dims(cfg)
         norm = (np.full(dims, p["input_mean"], np.float32), np.full(dims, p["input_std"], np.float32))
         windows = random_windows(cfg, *norm)
+        listen_hash = listen.HASH
     else:
         trained = gate.load_ctc(run)
+        listen_hash = trained.cfg.get("listen_hash", 0)
         net, net_x, norm = trained.model, quant.test_sentence(cfg, trained), (trained.mean, trained.std)
         sessions = quant.board_windows(cfg, trained, data_paths())
         board = [x for scored in sessions for x in scored.decided]
@@ -243,7 +245,7 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
     image = out / MODELS_FILE
     entries = [pack_models.Entry(name, "espdl", espdl) for name, (espdl, _) in built]
     entries.append(pack_models.Entry(NET_ENTRY, "norm", np.concatenate(norm).astype("<f4").tobytes()))
-    image.write_bytes(pack_models.pack(entries))
+    image.write_bytes(pack_models.pack(entries, listen_hash=listen_hash))
     streams = out / STREAMS_FILE
     streams.write_bytes(STREAMS_HEAD.pack(STREAMS_MAGIC, len(built)) + b"".join(record for _, (_, record) in built))
     for name, (espdl, _) in built:

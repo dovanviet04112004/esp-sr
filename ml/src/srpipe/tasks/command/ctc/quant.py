@@ -22,6 +22,7 @@ from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, pt
 from srpipe.core import screen, splits
 from srpipe.core.config import apply_overrides, data_paths, load_yaml
 from srpipe.export import update_lock
+from srpipe.generated import listen
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
@@ -288,8 +289,14 @@ def step_qat(cfg: dict, run: Path, device: str) -> Path:
 def step_deploy(cfg: dict, run: Path, row: str) -> tuple[Path, Path]:
     """The graph of row as firmware/models/command/ holds it: the .espdl streamed chunk_hops at a time with a test
     sentence's first chunk stored for model->test(), as probe.py streams it, and the train statistics as the NORM
-    entry; update_lock records both with the row's rungs."""
+    entry; update_lock records both with the row's rungs and the listen hash, refused for a run of another one."""
     net = gate.load_ctc(run)
+    learnt = net.cfg.get("listen_hash")
+    if learnt != listen.HASH:
+        raise ValueError(
+            f"{run.name} learned on listen hash {learnt and hex(learnt)}, the firmware cuts by {hex(listen.HASH)} "
+            "and would leave its command off (KEHOACH 6.3)"
+        )
     graph = export_espdl.load_native(run / "int8" / row / GRAPH_FILE)
     rungs = yaml.safe_load(ladder_file(run).read_text(encoding="utf-8"))["rows"][row]
     x = test_sentence(cfg, net)
@@ -310,6 +317,7 @@ def step_deploy(cfg: dict, run: Path, row: str) -> tuple[Path, Path]:
     files = [update_lock.Deployed(espdl, ENTRY, "espdl"), update_lock.Deployed(norm, ENTRY, "norm")]
     fields = {
         "backend": "ctc",
+        "listen_hash": f"0x{listen.HASH:08x}",
         "features": {"name": FEATURES, "dims": int(x.shape[1])},
         "row": row,
         "rungs": {"calibration": rungs["calibration"], "int16_ops": rungs["int16_ops"]},

@@ -1,11 +1,13 @@
 """The ctc ladder: features padded and normalised as training reads them, calibration drawn only from sentences the
 graph holds and stacked for a batch, the Gate 3 row, the rows of every step kept in one file, the best calibration
-within the tie, a norm left unfused refused, and rung 4 training a batch graph the graph of one then carries."""
+within the tie, a norm left unfused refused, rung 4 training a batch graph the graph of one then carries, and no deploy
+of a run cut by another listen.yaml."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -15,6 +17,7 @@ torch = pytest.importorskip("torch")
 
 from srpipe.compress.quant import esp_ppq_patches, ptq_espdl, qat_espdl  # noqa: E402
 from srpipe.core.config import load_yaml  # noqa: E402
+from srpipe.generated import listen  # noqa: E402
 from srpipe.tasks.command import ctc  # noqa: E402
 from srpipe.tasks.command import eval as gate  # noqa: E402
 from srpipe.tasks.command.ctc import probe, qat, quant, train  # noqa: E402
@@ -165,3 +168,12 @@ def test_a_net_whose_norms_stay_an_int8_chain_is_refused(tmp_path: Path) -> None
     rungs = ptq_espdl.ladder(quant.LADDER) | {"equalization": None, "bias_correction": False, "calibration": "minmax"}
     with pytest.raises(ValueError, match="fused 0 of 6 norms"):
         quant.quantized(encoder.build(cfg).eval(), calib, tmp_path, rungs, cfg["esp_ppq_patches"])
+
+
+@pytest.mark.parametrize("recorded", [{}, {"listen_hash": listen.HASH ^ 1}])
+def test_a_run_without_this_listen_hash_is_not_deployed(
+    recorded: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(gate, "load_ctc", lambda _run: SimpleNamespace(cfg=recorded))
+    with pytest.raises(ValueError, match="would leave its command off"):
+        quant.step_deploy(load_yaml(ctc.CONFIG), tmp_path, "row")

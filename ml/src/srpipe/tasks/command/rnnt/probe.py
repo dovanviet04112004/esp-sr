@@ -18,6 +18,7 @@ import torch
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
 from srpipe.core.config import ML_ROOT, data_paths, load_yaml
 from srpipe.export import pack_models
+from srpipe.generated import listen
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc import probe as ctc_probe
@@ -174,7 +175,8 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
         pack_models.Entry(PREDICTOR_ENTRY, "espdl", predictor.read_bytes()),
         pack_models.Entry(JOINER_ENTRY, "espdl", joiner.read_bytes()),
     ]
-    image.write_bytes(pack_models.pack(entries))
+    listen_hash = listen.HASH if run is None else trained_cfg.get("listen_hash", 0)
+    image.write_bytes(pack_models.pack(entries, listen_hash=listen_hash))
     streams = out / STREAMS_FILE
     streams.write_bytes(ctc_probe.STREAMS_HEAD.pack(ctc_probe.STREAMS_MAGIC, 1) + frames_record)
     tested = out / VECTORS_FILE
