@@ -621,6 +621,12 @@ làm mạng ấm nhanh hơn.
 Phiên 28/09 qua chuỗi mới chạy cho lời nói khoảng −51 dBFS sau `agc`; board đã nghe người dùng một lúc đưa lời nói về
 đích −26 dBFS.
 
+Bản dựng `command/v5` thật (lead 2,0 s, cao độ liền cả phiên), `val`, dựng 05/10: 1 371 mẫu từ 1 583 mẩu, 86 cửa sổ gộp
+mẩu, 45 mẩu `vad` không chạm. Trước bước `vad` đầu, phân vị 5/25/50/75/95: 0,51 / 1,26 / 2,00 / 2,00 / 2,00 s; ngắn hơn
+2,0 s khi câu trước chặn, như board chặn. Sau bước `vad` cuối 0,02 s. Độ lợi `agc` lúc có tiếng 9 / 16 / 22 / 28 / 30 dB.
+Log-mel trung bình trên các bước `vad` −12,56 / −11,07 / −9,71 / −9,06 / −8,23; phiên thật ở §12.4 có trung vị −11,87 tới
+−10,86.
+
 ### 12.7 Độ trễ quyết định ước từ chi phí trên board
 
 172 cửa sổ của Cửa 3 (28/09), chi phí đo trên board B của mạng bề rộng 160 (81,4 ms mỗi khối 16 bước,
