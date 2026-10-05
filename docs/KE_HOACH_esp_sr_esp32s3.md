@@ -1477,8 +1477,9 @@ mỗi tensor một bản ghi — tên 32 B, `dtype` u32 (0 `f32`, 1 `i8`, 2 `i32
 hàm ghi và hàm đọc. `test_apps/parity` nướng cả cây `contracts/golden/` vào phân vùng `storage` bằng
 `littlefs_create_partition_image(... FLASH_IN_PROJECT)`, theo **bảng phân vùng riêng** của app ấy
 (`test_apps/parity/partitions.csv`): `nvs` đúng chỗ và đúng cỡ như §6.1 để hiệu chuẩn và khoá trên board còn nguyên, app
-ở chỗ `ota_0`, `storage` 12 MB từ chỗ `ota_1` tới trước 1 MB cuối flash. `storage` 1,75 MB của §6.1 đã đầy 91% sau bốn
-module của E7, và 8 MB đầy 95% khi thêm `doa` ở E8; bộ vàng của E8–E10 cần gấp nhiều lần.
+1 MB ở chỗ `ota_0` (ảnh parity dưới 300 KB), `storage` 14 MB từ sau app tới 0xF20000, gần 1 MB trước cuối flash.
+`storage` 1,75 MB của §6.1 đã đầy 91% sau bốn module của E7, 8 MB đầy 95% khi thêm `doa` ở E8, và 12 MB không còn chứa
+được bộ vàng 12,3 MB của E11 cộng phần LittleFS giữ cho siêu dữ liệu.
 
 **File sinh ra không sửa tay.** CI chạy lại generator rồi `git diff --exit-code`.
 
@@ -1819,7 +1820,7 @@ firmware/
 │   ├── components/test_report/       # dòng kết quả có số thứ tự và CRC32, gửi lại khi máy tính xin (§4.5.7)
 │   ├── test_report.py                # phía máy tính của test_report: kiểm CRC, xin lại dòng thiếu
 │   ├── partitions_unit.csv           # unit test trên board: bảng §6.1, vùng ota_1 làm khe nháp models_1
-│   ├── parity/                       # đọc contracts/golden/, so C với Python; partitions.csv riêng, storage 12 MB
+│   ├── parity/                       # đọc contracts/golden/, so C với Python; partitions.csv riêng, storage 14 MB
 │   ├── bench_afe/  ├── bench_kws/    # µs trung bình và đỉnh mỗi module → CSV
 │   ├── bench_mem/                    # heap đỉnh, watermark ngăn xếp, RAM tĩnh
 │   ├── soak/                         # chạy dài, đếm khung mất, theo dõi heap
@@ -2543,7 +2544,7 @@ băm: `ai_engine_has(AI_ENGINE_MODEL_COMMAND)` trả false, `svc_listen` không 
 |---|---|---|
 | `/lfs/cmd/set.json` | bộ lệnh đang dùng, theo `command_set.schema.json` | `down/commands` mang `version` khác bộ đang dùng và `lang_vi` đọc được mọi dòng: `nhan_task` ghi `set.json.tmp` rồi đổi tên — chống mất điện |
 | `/lfs/resp/vi.json` | câu trả lời: id → chữ, id → tên mẩu | nướng lúc dựng; đổi qua OTA |
-| `/lfs/golden/**` | vector vàng | chỉ trong ảnh của `test_apps/parity`, phân vùng `storage` 12 MB của bảng riêng app ấy (§4.3) |
+| `/lfs/golden/**` | vector vàng | chỉ trong ảnh của `test_apps/parity`, phân vùng `storage` 14 MB của bảng riêng app ấy (§4.3) |
 
 **Không ghi log hay hàng đợi offline xuống flash.** Số liệu mất được: mất mạng thì mất số liệu của
 khoảng ấy, và `heartbeat` kế tiếp khai bộ đếm. Ghi theo nhịp vừa mòn flash vừa đóng băng nhân 1
