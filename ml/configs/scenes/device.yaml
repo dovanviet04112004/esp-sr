@@ -16,7 +16,7 @@ rooms:                            # the bank, built once into interim/scenes/<na
 session:
   items: 8                        # consecutive items of the split file share a room, a talker level and a noise
   lead_s: 3.0                     # room noise alone ahead of the first utterance
-  gap_s: [0.4, 2.0]               # silence after each utterance, drawn per utterance
+  gap_s: [1.2, 3.0]               # silence after each utterance, drawn: Gate 3's pace to sparser
   pad_s: 0.3                      # kept on each side of an utterance in the output
   agc_start_drawn: true           # the agc starts at a gain drawn in 0 dB..its most, as earlier speech left it
 talker:
