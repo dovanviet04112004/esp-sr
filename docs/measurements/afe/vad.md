@@ -62,3 +62,28 @@ WebRTC chặn trung bình mô hình nhiễu ở 67–72 dB thang `int16` mỗi d
 −40 dBFS không được học thành nhiễu và bị gọi là lời nói. Trong phép đo `agc` (`agc.md`), lời nói −10 dBFS trên ồn trắng
 SNR 20 dB (nền −30 dBFS) bị `vad` mức 0 gắn cờ nói gần như suốt cảnh. Mức 2 chịu được mọi cảnh ở đó; đó là lý do mức
 gieo cho `afe/vad_mode` là 2.
+
+## 5. Mức thấp của board B (E7-T6)
+
+Lời nói trên board B ở −57 … −52 dBFS trước `agc` (`measurements/command.md` §12.4), dưới cả hai mức của §1. Cùng cảnh
+của §1 (VIVOS test, nền `speech_commands`, nghỉ 0,5–2 s), thêm mức −50, −55, −60, −65 dBFS; `vad` mức 2 với 240 ms kéo
+dài, đầu vào như chuỗi đưa hay nhân một độ lợi cố định chỉ cho `vad`. Đo 05/10 bằng script chẩn đoán chạy một lần; mỗi ô
+gộp mọi nền của một mức và một SNR. Câu không chạm: câu của nhãn không bước `vad` nào chạm.
+
+| Mức, SNR | F1 ở 0 / +6 / +12 / +18 / +24 dB | Bước có tiếng bị sót ở 0 / +12 / +24 dB | Báo nhầm ở 0 / +12 / +24 dB | Câu không chạm ở 0 / +12 / +24 dB |
+|---|---|---|---|---|
+| −40, 20 dB | 0,846 / 0,845 / 0,844 / 0,841 / 0,840 | 1,3 / 1,3 / 1,1% | 29,5 / 30,0 / 31,2% | 2 / 2 / 2 trên 232 |
+| −40, 5 dB | 0,763 / 0,768 / 0,813 / 0,810 / 0,643 | 25,1 / 14,2 / 0,2% | 18,5 / 21,7 / 95,0% | 6 / 1 / 0 trên 221 |
+| −40, 0 dB | 0,592 / 0,630 / 0,727 / 0,652 / 0,640 | 51,1 / 27,1 / 0,0% | 14,6 / 24,4 / 99,7% | 50 / 16 / 0 trên 227 |
+| −50, 10 dB | 0,835 / 0,848 / 0,848 / 0,847 / 0,850 | 9,6 / 5,1 / 3,6% | 22,8 / 25,2 / 26,5% | 3 / 1 / 1 trên 224 |
+| −55, 10 dB | 0,761 / 0,840 / 0,842 / 0,842 / 0,842 | 26,3 / 7,1 / 6,6% | 17,0 / 23,6 / 24,2% | 12 / 0 / 0 trên 231 |
+| −60, 10 dB | 0,647 / 0,782 / 0,839 / 0,842 / 0,841 | 45,1 / 6,1 / 4,5% | 12,9 / 26,1 / 27,5% | 47 / 1 / 1 trên 230 |
+| −60, 5 dB | 0,442 / 0,624 / 0,745 / 0,757 / 0,758 | 68,6 / 26,8 / 23,6% | 8,9 / 19,3 / 20,9% | 112 / 21 / 15 trên 231 |
+| −65, 10 dB | 0,454 / 0,654 / 0,815 / 0,842 / 0,847 | 68,5 / 14,8 / 5,0% | 6,3 / 21,2 / 26,0% | 82 / 6 / 0 trên 217 |
+| −65, 20 dB | 0,802 / 0,864 / 0,850 / 0,849 / 0,846 | 22,5 / 1,6 / 1,4% | 14,0 / 29,1 / 30,2% | 4 / 0 / 0 trên 223 |
+
+Ở mức của board, đầu vào như chuỗi đưa sót phần lớn tiếng khi SNR từ 10 dB trở xuống, và nâng 12–24 dB đưa F1 về mức của
+−40 dBFS. Ở −40 dBFS, nâng từ 18 dB làm nền ồn của SNR 5 và 0 dB thành tiếng nói (báo nhầm 94–100%); ở −26 dBFS của §1
+còn tệ hơn. Không có một độ lợi cố định cho mọi mức: độ lợi cho `vad` phải theo mức của chính tín hiệu, ví dụ đưa nền
+ồn về quanh −58 … −70 dBFS rồi chặn trần, mà mọi ô trên đều hợp: nền −45 dBFS của −40 dBFS SNR 5 không được nâng, nền
+−70 dBFS của −60 dBFS SNR 10 được nâng 12 dB.
