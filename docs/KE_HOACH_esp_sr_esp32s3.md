@@ -167,12 +167,22 @@ của một file split thành đúng thứ bộ nhận dạng thấy trên máy:
    hoà, như `drv_audio`).
 3. Chạy `srpipe.dsp.afe.chain` và log-mel của `srpipe.dsp.spec`. Đây là bản soi gương khớp firmware từng bit
    (§3.14), với đúng danh sách module sản phẩm. Ra `processed/<nhánh>/<tập>/`: đặc trưng, số của chuỗi (`vad`, mức,
-   gain) và PCM sạch của từng mẩu, cộng manifest sha256. Nhánh nào khai kiểu lưu cho tập học thì đặc trưng của `train`
+   gain) và PCM sạch của từng mẫu, cộng manifest sha256. Nhánh nào khai kiểu lưu cho tập học thì đặc trưng của `train`
    lưu theo kiểu ấy (float16 ở `command`, đúng kiểu bộ nạp giữ lúc học); `val` và `test` luôn float32.
+4. Cắt mẫu. `command` `ctc` và `rnnt` cắt **đúng như board cắt cửa sổ lệnh** (§5.4), bằng chính code Cửa 3 dùng: các
+   đoạn `vad` của cả phiên thành câu theo `utterance` của `contracts/listen.yaml`; các mẩu nối với nhau qua một câu chung
+   thành một nhóm; mỗi nhóm là một mẫu, mở `utterance.lead_s` trước bước `vad` đầu của nhóm, không lùi qua bước sau mẫu
+   trước, kết ở bước ngay sau bước `vad` cuối của nhóm; nhãn là lời các mẩu của nhóm theo thứ tự. Không cắt lùi theo
+   `window_s`, vì câu của kho dài hơn lệnh và nhãn cần cả câu. Bộ dò cao độ đặt lại ở đầu mẫu và mạng học từ bộ đệm
+   rỗng ở đó, như `svc_listen` đặt lại ở đầu cửa sổ. Mẩu không bước `vad` nào chạm tới bị bỏ: board không bao giờ chấm
+   nó; manifest đếm số ấy. Mẫu học vì thế có đúng phần trước câu, điểm đặt lại bộ dò và điểm kết như cửa sổ trên board;
+   cắt theo mẩu cộng khoảng chừa cố định thì phần trước câu dài 0–1,5 s (trung vị 0,86 s) trong khi board luôn mở
+   1,25 s, và âm tiết đầu của lệnh phụ thuộc mạnh vào phần ấy (`measurements/command.md` §12). `wake` và `kws` cắt theo
+   mẩu cộng `session.pad_s` hai bên, hay khoảng chừa nhánh khai.
 
-Phần thuần của đặc trưng lúc học vì thế trùng đặc trưng trên board. Phần còn khác là phòng thật, micro thật và giọng
-thật, và tập thu qua board đo đúng phần ấy. Chuỗi đổi (bật một module, chọn đường không gian) thì sinh lại đặc
-trưng bằng một lệnh.
+Phần thuần của đặc trưng lúc học vì thế trùng đặc trưng trên board, và với `command` cả cách cắt cửa sổ. Phần còn
+khác là phòng thật, micro thật và giọng thật, và tập thu qua board đo đúng phần ấy. Chuỗi đổi (bật một module, chọn
+đường không gian) thì sinh lại đặc trưng bằng một lệnh.
 
 Nhiễu của chính phòng dùng (TỔNG QUAN V5.3.2) thu bằng `test_apps/capture` (§4.5.7), không thu bằng
 máy khác: đáp ứng của micro là một phần của miền dữ liệu.
@@ -947,7 +957,7 @@ một bước, và một độ nghiêng thẳng qua các dải mel; cộng đổ
 câu nói nhanh (`measurements/command.md` §4). Đổi nhịp và time-warp lấy nguyên bước gốc gần nhất cho mỗi bước mới, bỏ
 bớt hay lặp lại bước, không bao giờ trộn hai bước: board không bao giờ đưa khung trộn, và mạng học trên khung trộn
 nghe khung thật kém hơn (`measurements/command.md` §8). Tập học là **mọi mẩu tiếng nói đã sàng lọc** của các kho ở `split.corpora`,
-không trần giờ (từ split `command/v3`), cộng các phiên thu qua board mà `split.board` giao cho `train` (§1.3): câu cắt như Cửa 3 qua
+không trần giờ (từ split `command/v3`), cắt thành mẫu như board cắt cửa sổ (§1.2), cộng các phiên thu qua board mà `split.board` giao cho `train` (§1.3): câu cắt như Cửa 3 qua
 đúng chuỗi của board, nhãn là lời nhắc của phiên, trừ các lượt `split.board.noise` ghi là tiếng động (`measurements/command.md` §11), mỗi shard của chúng có mặt `split.board.repeat` lần trong thứ tự shard, để vài trăm câu ấy
 vẫn vào lô giữa hàng trăm nghìn câu mô phỏng. Đặc trưng float16 của nó lớn hơn RAM máy học, nên bộ nạp giữ một vòng đệm cỡ
 `train.pool_gb`: mỗi `train.rotate_steps` bước nạp thêm một shard, đè lên shard cũ nhất. Thứ tự shard rút lại mỗi lượt
@@ -2314,9 +2324,9 @@ giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec`
 - câu là các đoạn `vad` cách nhau không quá `utterance.gap_s`, chốt ở bước `vad` đã tắt lâu hơn thế; câu ngắn hơn
   `utterance.min_s` bị bỏ, không chấm;
 - cửa sổ mở `utterance.lead_s` trước bước `vad` đầu của câu, không lùi qua **mốc chặn**: bước sau cửa sổ trước, hay
-  trong `LENH` bước sau quyết định của `wake`; nó kết ở bước ngay sau đoạn `vad` cuối của câu. `lead_s` 1,25 s là p90
-  của quãng từ đầu mẩu tới bước `vad` đầu trong các mẩu `val` của `command` (trung vị 0,69 s), nên mạng thấy trước câu ít
-  nhất như lúc học; mở 0,5 s trước câu thì Cửa 3 sau int8 mất 5 câu lệnh đúng đứng đầu (`measurements/command.md` §5);
+  trong `LENH` bước sau quyết định của `wake`; nó kết ở bước ngay sau đoạn `vad` cuối của câu. Mẫu học của `command`
+  cắt cùng luật (§1.2), nên mạng thấy trước câu đúng như lúc học; mở 0,5 s trước câu thì Cửa 3 sau int8 mất 5 câu lệnh
+  đúng đứng đầu (`measurements/command.md` §5);
 - **cửa sổ chạy theo luồng**: ngay từ bước `vad` đầu của câu, `svc_listen` chạy cao độ và `ai_engine_command_step` cho
   từng bước của cửa sổ đã có, đuổi kịp phần trước câu rồi đi cùng các khung mới; mạng chạy mỗi khối và phép chấm đi tiếp
   trên khung mới, theo bộ lệnh `ai_engine_command_prepare` đã nhận. Cuối cửa sổ chỉ dời về sau, nên một bước đã qua mà
