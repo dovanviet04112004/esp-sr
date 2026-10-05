@@ -2337,7 +2337,7 @@ giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec`
   hay trong `LENH` bước sau quyết định của `wake`; nó kết ở bước ngay sau đoạn `vad` cuối của câu. Mạng bắt đầu cửa sổ
   từ bộ đệm rỗng, và âm tiết đầu của lệnh chỉ được nghe tốt khi mạng đã chạy chừng 2 s trước nó: mạng bề rộng 160 mở
   2,0 s thay 1,25 s thì Cửa 3 float 89 → 98/112, mở 3 hay 4 s không hơn (`measurements/command.md` §12). Mẫu học của
-  `command` cắt cùng luật (§1.2), nên mạng thấy trước câu đúng như lúc học;
+  `command` cắt cùng luật (§1.2), nên mạng thấy trước câu đúng như lúc học (ADR-0019);
 - **cửa sổ chạy theo luồng**: ngay từ bước `vad` đầu của câu, `svc_listen` đưa log-mel và cao độ đã có của từng bước
   của cửa sổ vào `ai_engine_command_step`, đuổi kịp phần trước câu rồi đi cùng các khung mới; mạng chạy mỗi khối và
   phép chấm đi tiếp trên khung mới, theo bộ lệnh `ai_engine_command_prepare` đã nhận. Cuối cửa sổ chỉ dời về sau, nên
@@ -2517,11 +2517,11 @@ trong `gen_grid.h`; ảnh model mang băm của lưới nó được huấn luy�
 trả `ESP_ERR_INVALID_VERSION` và không nạp. Không có chốt này, đổi bước khung từ 256 sang 160 vẫn nạp
 được model, vẫn chạy, và ra rác.
 
-**`listen_hash` chặn lệch cửa sổ lệnh lúc huấn luyện và lúc chạy.** `contracts/listen.yaml` định đặc trưng, bộ dò cao
-độ và cách `svc_listen` cắt cửa sổ (§3.11, §3.12, §5.4), và mô phỏng cắt mẫu học đúng theo nó, nên model `command` chỉ
-khớp một bản `listen.yaml`. Băm là 4 byte đầu sha256 của tệp ấy viết thành JSON khoá xếp thứ tự; firmware biên dịch với
-nó trong `gen_listen.h`. Ảnh mang băm khác thì nhánh `command` không dựng và ghi lỗi kèm hai băm:
-`ai_engine_has(AI_ENGINE_MODEL_COMMAND)` trả false, `svc_listen` không nghe, còn `wake` và `ns`, không đọc
+**`listen_hash` chặn lệch cửa sổ lệnh lúc huấn luyện và lúc chạy** (ADR-0019). `contracts/listen.yaml` định đặc
+trưng, bộ dò cao độ và cách `svc_listen` cắt cửa sổ (§3.11, §3.12, §5.4), và mô phỏng cắt mẫu học đúng theo nó, nên
+model `command` chỉ khớp một bản `listen.yaml`. Băm là 4 byte đầu sha256 của tệp ấy viết thành JSON khoá xếp thứ tự;
+firmware biên dịch với nó trong `gen_listen.h`. Ảnh mang băm khác thì nhánh `command` không dựng và ghi lỗi kèm hai
+băm: `ai_engine_has(AI_ENGINE_MODEL_COMMAND)` trả false, `svc_listen` không nghe, còn `wake` và `ns`, không đọc
 `listen.yaml`, vẫn nạp. Không có chốt này, đổi `lead_s` từ 2,0 sang 1,25 s vẫn nạp được model, vẫn chạy, và nhận kém
 đi mà không có dấu hiệu nào.
 
