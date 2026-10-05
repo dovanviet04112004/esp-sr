@@ -374,12 +374,27 @@ def ctc_loss(log_probs: torch.Tensor, frames: np.ndarray, units: list[np.ndarray
     )
 
 
-def stream_penalty(kept: list[list[torch.Tensor]], spec: dict) -> torch.Tensor:
+def stream_frames(kept: list[list[torch.Tensor]], frames: np.ndarray, rates: list[int]) -> list[torch.Tensor]:
+    """Per layer of kept at the rate of encoder.layer_rates, (batch, its frames) true where a frame reads a hop of its
+    sentence, false on the batch's padding, which the board never runs."""
+    real = []
+    for layer, rate in zip(kept, rates, strict=True):
+        ends = torch.from_numpy(-(-frames // rate)).to(layer[0].device)
+        real.append(torch.arange(layer[0].shape[1], device=layer[0].device)[None, :] < ends[:, None])
+    return real
+
+
+def stream_penalty(kept: list[list[torch.Tensor]], real: list[torch.Tensor], spec: dict) -> torch.Tensor:
     """spec's weight times, summed over every point of every layer's stream that encoder.streams_kept kept, the mean
-    over frames of the square of the octaves a frame's root mean square sits above spec's cap_rms (KEHOACH 3.12)."""
+    over the real frames of stream_frames of the square of the octaves a frame's root mean square sits above spec's
+    cap_rms (KEHOACH 3.12)."""
     cap = math.log2(spec["cap_rms"])
-    above = [0.5 * torch.log2(ms.clamp_min(MEAN_SQUARE_FLOOR)) - cap for layer in kept for ms in layer]
-    return spec["weight"] * torch.stack([functional.relu(octaves).pow(2).mean() for octaves in above]).sum()
+    terms = [
+        (functional.relu(0.5 * torch.log2(ms.clamp_min(MEAN_SQUARE_FLOOR)) - cap).pow(2) * mine).sum() / mine.sum()
+        for layer, mine in zip(kept, real, strict=True)
+        for ms in layer
+    ]
+    return spec["weight"] * torch.stack(terms).sum()
 
 
 def best_path(log_probs: np.ndarray) -> list[int]:
@@ -399,21 +414,23 @@ def edit_distance(a: list[int], b: list[int] | np.ndarray) -> int:
 
 def evaluate(net: encoder.CtcNet, data: Sentences, stats: tuple, device: str, cells: int | None = None) -> dict:
     """Mean CTC loss of val and the unit error rate of the best path over every val sentence, and the root mean square
-    of the loudest frame of any layer's stream with that layer, counted through the stacks; with a transducer, also
-    its mean RNN-T loss per unit, its lattice built at most cells cells at a time, and the unit error rate of its
+    of the loudest real frame of any layer's stream with that layer, counted through the stacks; with a transducer,
+    also its mean RNN-T loss per unit, its lattice built at most cells cells at a time, and the unit error rate of its
     greedy path."""
     mean, std = stats
-    stride = net.front.hop_stride
+    stride, rates = net.front.hop_stride, encoder.layer_rates(net)
     losses, rnnt_losses, errors, rnnt_errors, total, peaks = [], [], 0, 0, 0, []
     with torch.no_grad(), encoder.streams_kept(net) as kept:
         for k in range(0, len(data.first), VAL_BATCH):
             picks = np.arange(k, min(k + VAL_BATCH, len(data.first)))
             x, hops, units = batch_of(data, picks, net.chunk_multiple)
             encoded, log_probs = encoded_of(net, torch.from_numpy((x - mean) / std).to(device))
-            peaks.append([float(torch.stack([ms.max() for ms in layer]).max()) for layer in kept])
+            frames = frames_of(hops, stride)
+            real = stream_frames(kept, frames, rates)
+            loudest = [torch.stack([ms[m].max() for ms in layer]).max() for layer, m in zip(kept, real, strict=True)]
+            peaks.append([float(v) for v in loudest])
             for layer in kept:
                 layer.clear()
-            frames = frames_of(hops, stride)
             losses.append(float(ctc_loss(log_probs, frames, units)) * len(picks))
             heard = log_probs.cpu().numpy()
             for row, n in enumerate(frames):
@@ -486,7 +503,7 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
         state |= {"penalties": penalties, "schedule": schedule.state_dict(), "draws": rng.bit_generator.state}
         torch.save(state | {"history": history}, checkpoint(run))
 
-    n_mel = pool.dims - pitch.N_FEATURES
+    n_mel, rates = pool.dims - pitch.N_FEATURES, encoder.layer_rates(net)
     said = f"{pool.sentences} sentences, {pool.hours:.1f} h, a ring of {len(pool.ring) / HOPS_PER_S / 3600:.1f} h"
     print(f"{said}; steps {first} to {spec['steps']} of {spec['batch']}", flush=True)
     with pause_asked() as paused:
@@ -500,9 +517,12 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
                 x, hops, units = batch_of(data, picks, net.chunk_multiple)
             x = (x - mean) / std
             mask(x, hops, spec["masks"], n_mel, rng)
+            frames = frames_of(hops, net.front.hop_stride)
             with encoder.streams_kept(net) as kept:
-                loss = loss_of(net, cfg, torch.from_numpy(x).to(device), frames_of(hops, net.front.hop_stride), units)
-            penalty = stream_penalty(kept, spec["stream"]) if "stream" in spec else torch.zeros((), device=device)
+                loss = loss_of(net, cfg, torch.from_numpy(x).to(device), frames, units)
+            penalty = torch.zeros((), device=device)
+            if "stream" in spec:
+                penalty = stream_penalty(kept, stream_frames(kept, frames, rates), spec["stream"])
             optimiser.zero_grad()
             (loss + penalty).backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), spec["clip_norm"])

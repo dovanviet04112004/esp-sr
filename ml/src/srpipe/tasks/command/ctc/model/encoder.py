@@ -213,6 +213,11 @@ def streams_kept(net: CtcNet) -> Iterator[list[list[Tensor]]]:
             hook.remove()
 
 
+def layer_rates(net: CtcNet) -> list[int]:
+    """Base frames a frame of each layer spans, layers counted through the stacks as streams_kept counts them."""
+    return [stack.rate for stack in net.stacks for _ in stack.layers]
+
+
 def n_dims(cfg: dict) -> int:
     """Features a hop: the mel bands of the feature config, then pitch's."""
     return device_of(cfg)["features"]["n_bands"] + pitch.N_FEATURES

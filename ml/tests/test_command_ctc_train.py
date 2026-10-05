@@ -261,14 +261,51 @@ def test_streams_kept_are_each_layers_stream_after_every_block_and_stop_on_leavi
 
 
 def test_the_stream_penalty_is_nothing_under_the_cap_and_the_squared_octaves_over_it() -> None:
-    spec = {"cap_rms": 32.0, "weight": 0.5}
+    spec, every = {"cap_rms": 32.0, "weight": 0.5}, torch.ones((1, 5), dtype=torch.bool)
     rms = torch.tensor([[64.0, 128.0, 16.0, 32.0, 0.0]], requires_grad=True)
-    penalty = train.stream_penalty([[rms.pow(2)], [torch.full((1, 5), 256.0**2)]], spec)
+    penalty = train.stream_penalty([[rms.pow(2)], [torch.full((1, 5), 256.0**2)]], [every, every], spec)
     assert penalty.item() == pytest.approx(0.5 * ((1 + 4) / 5 + 9))
     penalty.backward()
     grad = rms.grad[0].tolist()
     assert grad[0] > 0 and grad[1] > 0 and grad[2:] == [0.0, 0.0, 0.0]
-    assert float(train.stream_penalty([[torch.full((2, 3), 32.0**2)]], spec)) == 0.0
+    still = torch.full((2, 3), 32.0**2)
+    assert float(train.stream_penalty([[still]], [torch.ones((2, 3), dtype=torch.bool)], spec)) == 0.0
+
+
+def test_the_batch_padding_is_no_frame_of_the_stream_penalty() -> None:
+    kept = [[torch.zeros((2, 6))], [torch.zeros((2, 3))]]
+    real = train.stream_frames(kept, np.array([5, 2]), [1, 2])
+    assert real[0].tolist() == [[True] * 5 + [False], [True] * 2 + [False] * 4]
+    assert real[1].tolist() == [[True, True, True], [True, False, False]]
+    rms = torch.tensor([[64.0, 128.0, 1e6], [1e6, 1e6, 1e6]], requires_grad=True)
+    mine = torch.tensor([[True, True, False], [False] * 3])
+    penalty = train.stream_penalty([[rms.pow(2)]], [mine], {"cap_rms": 32.0, "weight": 1.0})
+    assert penalty.item() == pytest.approx((1 + 4) / 2)
+    penalty.backward()
+    assert rms.grad[0, 2] == 0.0 and not rms.grad[1].any()
+
+
+def test_the_loudest_stream_of_val_is_that_of_its_sentences_alone_never_the_padding() -> None:
+    net = encoder.build(load_yaml(ctc.CONFIG)).eval()
+    flat = np.full((80, DIMS), 50.0, dtype=np.float32)
+    data = train.Sentences(flat, np.array([0, 16]), np.array([16, 64]), [np.array([2, 3]), np.array([4])])
+    stats = (np.full(DIMS, 50.0, dtype=np.float32), np.ones(DIMS, dtype=np.float32))
+    alone = [
+        train.evaluate(
+            net,
+            train.Sentences(flat, data.first[k : k + 1], data.hops[k : k + 1], [data.units[k]]),
+            stats,
+            "cpu",
+            100_000,
+        )
+        for k in range(2)
+    ]
+    loudest = train.evaluate(net, data, stats, "cpu", 100_000)["stream_rms_max"]
+    assert loudest == pytest.approx(max(row["stream_rms_max"] for row in alone), rel=1e-5)
+    x, _, _ = train.batch_of(data, np.arange(2), net.chunk_multiple)
+    with torch.no_grad(), encoder.streams_kept(net) as kept:
+        net(torch.from_numpy((x - stats[0]) / stats[1]).transpose(1, 2))
+    assert max(float(ms.max()) for layer in kept for ms in layer) ** 0.5 > 2 * loudest
 
 
 def test_a_cap_over_every_stream_leaves_the_run_as_none_and_one_under_them_costs_and_steers_it(tmp_path: Path) -> None:
