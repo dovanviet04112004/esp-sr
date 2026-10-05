@@ -97,7 +97,7 @@ esp_err_t command_load() noexcept
 {
     const Blob graph = image_find(kEntry, STORAGE_MODEL_KIND_ESPDL);
     const Blob norm = image_find(kEntry, STORAGE_MODEL_KIND_NORM);
-    if (graph.data == nullptr || norm.data == nullptr) { return ESP_OK; }
+    if (graph.data == nullptr || norm.data == nullptr || !image_listens_as_built(kEntry)) { return ESP_OK; }
     uint16_t reject = 0, margin = 0;
     if (sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, &reject) != ESP_OK ||
         sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, &margin) != ESP_OK) {

@@ -29,4 +29,8 @@ Blob image_find(const char *name, storage_model_kind_t kind) noexcept;
 /** PSRAM bytes the loaded entries hold. */
 size_t image_bytes() noexcept;
 
+/** Whether the loaded image's command learned on the listen.yaml this build cuts windows by (KEHOACH 6.3);
+ * logs both hashes under name when not. */
+bool image_listens_as_built(const char *name) noexcept;
+
 } // namespace ai

@@ -6,6 +6,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "gen_grid.h"
+#include "gen_listen.h"
 #include "sha/sha_core.h"
 #include "sys_storage.h"
 
@@ -26,6 +27,7 @@ struct Entry {
 
 Entry s_entries[STORAGE_MODEL_MAX_ENTRIES];
 size_t s_count;
+uint32_t s_listen_hash;
 
 void release() noexcept
 {
@@ -34,6 +36,7 @@ void release() noexcept
     }
     memset(s_entries, 0, sizeof(s_entries));
     s_count = 0;
+    s_listen_hash = 0;
 }
 
 esp_err_t copy_entries(const sys_storage_models_t &models) noexcept
@@ -75,6 +78,7 @@ esp_err_t image_load(uint8_t slot) noexcept
         err = ESP_ERR_INVALID_VERSION;
     } else {
         err = copy_entries(models);
+        s_listen_hash = models.header->listen_hash;
     }
     sys_storage_unmap_models(&models);
     if (err != ESP_OK) {
@@ -104,6 +108,14 @@ size_t image_bytes() noexcept
         total += s_entries[i].size;
     }
     return total;
+}
+
+bool image_listens_as_built(const char *name) noexcept
+{
+    if (s_listen_hash == GEN_LISTEN_HASH) { return true; }
+    ESP_LOGE(TAG, "%s learned on listen.yaml 0x%08" PRIx32 ", this build cuts by 0x%08" PRIx32, name,
+             s_listen_hash, (uint32_t)GEN_LISTEN_HASH);
+    return false;
 }
 
 } // namespace ai

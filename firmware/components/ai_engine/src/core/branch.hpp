@@ -11,7 +11,8 @@ namespace ai {
 /** Free whatever the command branch built over the image about to be dropped. */
 void command_drop() noexcept;
 
-/** Build the command branch over the loaded image; ESP_OK also when the image carries no command for it.
+/** Build the command branch over the loaded image; ESP_OK also when the image carries no command for it, or
+ * one learned on another listen.yaml (KEHOACH 6.3).
  *  @ret ESP_OK | ESP_ERR_NO_MEM | ESP_ERR_NOT_SUPPORTED esp-dl refused the graph | ESP_ERR_INVALID_SIZE
  */
 esp_err_t command_load() noexcept;

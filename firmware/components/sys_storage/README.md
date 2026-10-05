@@ -13,6 +13,6 @@ khai ở `include/storage_format.h`, kèm `static_assert` chốt `sizeof` (KẾ 
 | Bộ gieo | `sys_storage_seed(seed_ver, …)`: luôn ghi khoá vắng; ghi đè khoá khác giá trị chỉ khi `sys/seed_ver` nhỏ hơn. Bảng gieo và `APP_SEED_VER` nằm ở `main` |
 | `deviceId` | `device/serial` nếu có, không thì `sr-` + MAC eFuse 12 hex thường |
 | File | `write_file` ghi `path.tmp` rồi một lần `rename`; `lfs_rename` thay đích trong một commit nên mất điện chỉ để lại file cũ hoặc file mới |
-| Ảnh model | `map_models(slot)` mmap chỉ đọc, kiểm magic, `format_ver`, biên từng entry; `grid_hash` do `ai_engine` kiểm |
+| Ảnh model | `map_models(slot)` mmap chỉ đọc, kiểm magic, `format_ver`, biên từng entry; `grid_hash` và `listen_hash` do `ai_engine` kiểm |
 | Kiểm | `test_apps/unit`: tự cắt điện 20 lần giữa lúc ghi `set.json` bằng reset từ ISR ở IRAM, rồi 11 case NVS, file, ảnh model |
 | Số đo | thời gian thay một file 12 KB: `docs/measurements/latency.md` §2 |

@@ -302,7 +302,7 @@ esp_err_t command_load() noexcept
     const Blob predictor = image_find(kPredictor, STORAGE_MODEL_KIND_ESPDL);
     const Blob joiner = image_find(kJoiner, STORAGE_MODEL_KIND_ESPDL);
     if (frames.data == nullptr || norm.data == nullptr || predictor.data == nullptr ||
-        joiner.data == nullptr) {
+        joiner.data == nullptr || !image_listens_as_built(kFrames)) {
         return ESP_OK;
     }
     uint16_t reject = 0, margin = 0;
