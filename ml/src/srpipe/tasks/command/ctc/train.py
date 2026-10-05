@@ -472,18 +472,23 @@ def pause_asked() -> Iterator[Callable[[], bool]]:
 
 def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: bool = False) -> tuple:
     """The net of the last step, the feature statistics and one row of val figures per evaluation; sets["train"] a
-    Pool, sets["val"] Sentences. With run, each evaluated net is saved beside the state the run goes on from when
-    resumed: weights, optimiser, schedule, the batch draws, the history and the train losses since the last
-    evaluation, so a resumed run ends where an unbroken one would. Ctrl-C saves that state after the step under way
-    and raises KeyboardInterrupt."""
+    Pool, sets["val"] Sentences. With run, the statistics are saved at the start and a resumed run reads them back,
+    and each evaluated net is saved beside the state the run goes on from when resumed: weights, optimiser, schedule,
+    the batch draws, the history and the train losses since the last evaluation, so a resumed run ends where an
+    unbroken one would. Ctrl-C saves that state after the step under way and raises KeyboardInterrupt."""
     spec = cfg["train"]
     rng = seed_everything(spec["seed"])
     pool = sets["train"]
-    mean, std = pool.stats()
-    if run is not None:
-        # Saved at the start: the checkpoints of a run stopped part way can still be scored.
-        run.mkdir(parents=True, exist_ok=True)
-        np.savez(run / "feature_stats.npz", mean=mean, std=std)
+    saved = None if run is None else run / "feature_stats.npz"
+    if resume and saved.exists():
+        with np.load(saved) as stats:
+            mean, std = stats["mean"], stats["std"]
+    else:
+        mean, std = pool.stats()
+        if saved is not None:
+            # Saved at the start: the checkpoints of a run stopped part way can still be scored.
+            run.mkdir(parents=True, exist_ok=True)
+            np.savez(saved, mean=mean, std=std)
     net = encoder.build(cfg).to(device)
     optimiser = torch.optim.Adam(net.parameters(), lr=spec["learning_rate"])
     final = spec["final_learning_rate"] / spec["learning_rate"]

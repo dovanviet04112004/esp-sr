@@ -194,7 +194,7 @@ def ringed_sets(tmp_path: Path, seed: int) -> dict:
     }
 
 
-def test_a_stopped_run_resumed_from_its_last_checkpoint_ends_as_an_unbroken_one(tmp_path: Path, monkeypatch) -> None:
+def test_a_stopped_run_resumed_on_its_saved_statistics_ends_as_an_unbroken_one(tmp_path: Path, monkeypatch) -> None:
     sets = ringed_sets(tmp_path, 3)
     cfg = load_yaml(ctc.CONFIG)
     cfg["train"] |= {"batch": 2, "steps": 4, "eval_every": 2}
@@ -211,6 +211,7 @@ def test_a_stopped_run_resumed_from_its_last_checkpoint_ends_as_an_unbroken_one(
     with pytest.raises(KeyboardInterrupt):
         train.train(cfg, ringed_sets(tmp_path / "b", 3), "cpu", tmp_path / "stopped")
     monkeypatch.setattr(train, "evaluate", evaluate)
+    monkeypatch.setattr(train.Pool, "stats", lambda _pool: pytest.fail("a resumed run computed its statistics again"))
     assert torch.load(train.checkpoint(tmp_path / "stopped"), weights_only=False)["step"] == 2
     resumed, _, history = train.train(cfg, ringed_sets(tmp_path / "c", 3), "cpu", tmp_path / "stopped", resume=True)
     assert history == unbroken
