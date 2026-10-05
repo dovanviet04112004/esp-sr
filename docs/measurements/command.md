@@ -725,3 +725,26 @@ không còn thành cửa sổ riêng.
 câu của người nói: chuỗi mới mỗi phiên không chạm 68 câu (4,2%); chuỗi đã nghe chính phiên ấy một lượt rồi mới chấm
 lượt thứ hai không chạm 77 câu (4,8%). Quen phòng và người nói không đưa `vad` tới câu nó bỏ sót: chỗ thiếu là mức
 (E7-T6), không phải trạng thái.
+
+### 12.10 Kiểm bản dựng `command/v5`
+
+Script chẩn đoán đọc mọi shard đã xong như bộ học sẽ đọc, 05/10 22:50, khi `train_bud500` xong 1 250/2 536 shard. Bảy
+split cùng `config`, luật cắt (`cut` listen, `cut_vad` talker), `listen_hash` 0x354b1ae6, cao độ và bộ phòng; khác nhau
+đúng chỗ định: split học lưu float16, đọc ở tốc độ 0,9 / 1,0 / 1,1 (chia đều, mỗi tốc độ một phần ba), `val` và `test`
+float32, không đổi tốc độ. Không split nào có offset đứt, log-mel hay cao độ không hữu hạn, mẩu ngoài split hay sai thứ
+tự, tiếng ra ngoài cửa sổ; mọi mẩu đủ khung CTC cho đơn vị của nó. Log-mel −13,82 … 5,64 (sàn ln 10⁻⁶ = −13,82). Cửa sổ
+cắt trên `vad` của người nói không gộp mẩu nào.
+
+| Split | Cửa sổ | Trung vị, s | Đủ 2,0 s trước câu | Dài hơn `train.max_s` | Không ra đơn vị | Không bước `vad` chuỗi nào |
+|---|---|---|---|---|---|---|
+| `val` | 1 583 | 5,49 | 75,2% | 2 | 3 | 37 (2,3%) |
+| `test` | 2 000 | 5,01 | 74,7% | 1 | 36 | 45 (2,3%) |
+| `train_bud500`, 1 250 shard | 320 000 | 4,58 | 41,5% | 0 | 71 | 17 730 (5,5%) |
+| `train_vlsp` | 55 687 | 7,31 | 53,4% | 5 065 | 6 268 | 757 (1,4%) |
+| `train_fpt_open` | 25 432 | 5,63 | 61,7% | 262 | 2 777 | 512 (2,0%) |
+| `train_common_voice_vi` | 18 502 | 5,14 | 83,5% | 14 | 417 | 626 (3,4%) |
+| `train_vivos` | 10 266 | 5,63 | 70,6% | 161 | 33 | 52 (0,5%) |
+
+Trước câu ngắn hơn 2,0 s khi cửa sổ trước chặn, như board. Cửa sổ dài hơn `train.max_s` và mẩu không ra đơn vị bộ học bỏ
+qua (`load_role`, `shards_of`). Cửa sổ không có bước `vad` nào của chuỗi là câu
+board sẽ không cắt (E7-T6, `afe/vad.md` §6); bộ học vẫn học chúng vì cửa sổ cắt trên `vad` của người nói.
