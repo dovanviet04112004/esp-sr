@@ -3,6 +3,7 @@ by onnxruntime before anything is quantised."""
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,15 @@ import torch
 from torch import nn
 
 OPSET = 18  # espdl_quantize_torch's
+# What the TorchScript exporter says of itself, of the Slice its Pad reverses its list by, which onnxsim folds, of
+# every RNN whatever its batch, and of shapes its tracer cannot prove, which checked holds to torch on real inputs.
+LEGACY_EXPORT_NOTES = (
+    (DeprecationWarning, "You are using the legacy TorchScript-based ONNX export"),
+    (DeprecationWarning, "The feature will be removed"),
+    (UserWarning, "Constant folding - Only steps=1 can be constant folded"),
+    (UserWarning, "Exporting a model to ONNX with a batch_size other than 1"),
+    (torch.jit.TracerWarning, "Converting a tensor to a Python boolean might cause the trace to be incorrect"),
+)
 
 
 def export(
@@ -22,16 +32,20 @@ def export(
     """model traced on zeros of shapes into out with constants folded, as espdl_quantize_torch traces it; inputs and
     outputs name the graph's tensors, else torch names them."""
     out.parent.mkdir(parents=True, exist_ok=True)
-    torch.onnx.export(
-        model.eval(),
-        tuple(torch.zeros(shape) for shape in shapes),
-        str(out),
-        input_names=inputs,
-        output_names=outputs,
-        opset_version=OPSET,
-        do_constant_folding=True,
-        dynamo=False,
-    )
+    with warnings.catch_warnings():
+        # ESP-PPQ's patches read the TorchScript exporter's graph, as espdl_quantize_torch exports (KEHOACH 3.14).
+        for category, said in LEGACY_EXPORT_NOTES:
+            warnings.filterwarnings("ignore", message=f"{said}.*", category=category)
+        torch.onnx.export(
+            model.eval(),
+            tuple(torch.zeros(shape) for shape in shapes),
+            str(out),
+            input_names=inputs,
+            output_names=outputs,
+            opset_version=OPSET,
+            do_constant_folding=True,
+            dynamo=False,
+        )
     return out
 
 
