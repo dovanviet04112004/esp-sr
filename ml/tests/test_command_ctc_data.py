@@ -152,3 +152,24 @@ def test_a_board_session_given_to_train_that_says_an_unseen_command_is_refused(t
                 data.board_rows({"manifests": tmp_path})
         else:
             assert [r["session"] for r in data.board_rows({"manifests": tmp_path})] == ["s1", "s2"]
+
+
+def test_val_commands_hold_clips_heard_saying_just_a_learned_command_each_at_most_per_command(tmp_path: Path) -> None:
+    folder = tmp_path / "speech" / "ext"
+    folder.mkdir(parents=True)
+    rows = [
+        ("bat_den/a.wav", "bật đèn", "bật đèn."),
+        ("bat_den/b.wav", "bật đèn", "bật đèn lên"),
+        ("bat_den/c.wav", "bật đèn", "Bật đèn!"),
+        ("bat_den/d.wav", "bật đèn", "bật đèn"),
+        ("chup_anh/e.wav", "chụp ảnh", "chụp ảnh"),
+    ]
+    head = "file\tphrase\tseconds\torigin\ttext\tsource\trevision\tkey\theard\n"
+    body = "".join(f"{f}\t{p}\t0.8\tpublic\t-\t-\t-\t-\t{h}\n" for f, p, h in rows)
+    (folder / "clips.tsv").write_text(head + body, encoding="utf-8")
+    learned = [{"id": "bat_den", "text": "bật đèn"}, {"id": "tat_den", "text": "tắt đèn"}]
+    got = data.command_rows({"extract": "ext", "per_command": 2, "seed": 3}, tmp_path, learned)
+    assert len(got) == 2 and len({r.item for r in got}) == 2
+    assert {r.item for r in got} <= {f"speech/ext/bat_den/{n}.wav" for n in "acd"}
+    assert all(r.spk == splits.ABSENT and r.origin == "public" for r in got)
+    assert got == data.command_rows({"extract": "ext", "per_command": 2, "seed": 3}, tmp_path, learned)

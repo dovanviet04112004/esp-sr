@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from srpipe.core import corpus, screen, splits
+from srpipe.core import corpus, extract, screen, splits
 from srpipe.core.config import apply_overrides, data_paths, device_of, load_yaml
 from srpipe.generated import grid, listen
 from srpipe.scenes import device
@@ -27,6 +27,8 @@ from srpipe.tasks.wake.data import sentence_units
 
 PUBLIC = "public"
 LEARNING = ("train", "val")
+VAL_COMMANDS = "val_commands.txt"  # val's role, never trained on: delta1, delta2
+COMMANDS_STREAM = 2  # the draw of VAL_COMMANDS: [seed, COMMANDS_STREAM]
 HOURS_STREAM = 4
 BOARD = "board"  # under processed/command/<version>, one shard
 BOARD_CHAIN = "sittings"  # eval.heard_rows: one chain over a sitting
@@ -76,6 +78,23 @@ def build(spec: dict, clips: list[corpus.Clip], unseen: dict[str, list[str]]) ->
     return dict(sorted(files.items())), dropped
 
 
+def command_rows(spec: dict, raw: Path, learned: list[dict]) -> list[splits.Row]:
+    """VAL_COMMANDS: spec's per_command clips of the extract it names for the text of each learned command, drawn with
+    the split's seed among those whose checker heard just that text: real voices saying the commands, which training
+    never reads, to choose delta1 and delta2 on (KEHOACH 1.3, 3.12)."""
+    index = extract.read_index(raw / "speech" / spec["extract"])
+    rng = np.random.default_rng([spec["seed"], COMMANDS_STREAM])
+    rows = []
+    for c in learned:
+        said = [r for r in index if r["phrase"] == c["text"] and corpus.words(r["heard"]) == corpus.words(c["text"])]
+        picks = sorted(rng.choice(len(said), min(spec["per_command"], len(said)), replace=False)) if said else []
+        rows += [
+            splits.Row(f"speech/{spec['extract']}/{said[k]['file']}", splits.ABSENT, splits.ABSENT, said[k]["origin"])
+            for k in picks
+        ]
+    return rows
+
+
 def capped(files: dict, seconds: dict[str, float], spec: dict) -> dict:
     """The files with each train file of a corpus under an hours cap drawn down to it, rows in a seeded order until
     their length passes the cap, then back in listing order."""
@@ -110,6 +129,12 @@ def notes(spec: dict, files: dict, dropped: dict[str, int], seconds: dict[str, f
         if (board := spec.get("board"))
         else ""
     )
+    tuned = (
+        f"- `{VAL_COMMANDS}`: tới {commands['per_command']} mẩu mỗi lệnh đã học của kho trích `{commands['extract']}`, "
+        "người thật nói đúng lời lệnh, rút theo seed; không học, chỉ để chọn δ₁, δ₂ (KẾ HOẠCH §1.3, §3.12).\n"
+        if (commands := spec.get("commands"))
+        else ""
+    )
     return f"""# command/{spec["version"]}
 
 Dựng bằng `python -m srpipe.tasks.command.ctc.data` (`make splits`), seed {spec["seed"]}, cấu hình mục `split` của
@@ -122,7 +147,7 @@ Dựng bằng `python -m srpipe.tasks.command.ctc.data` (`make splits`), seed {s
 - Lệnh chưa học (E11-T13) không có trong `train` và `val`: bỏ {gone} có lời chứa lệnh ấy. Ở `test` thì giữ.
 - Kho có trần giờ chỉ giữ phần rút theo seed tới trần: {spec["hours"] or "không kho nào"}.
 - `train` chia một file mỗi kho; vai của file là phần tên trước dấu `_` đầu tiên.
-{on_board}
+{on_board}{tuned}
 | File | Mẩu | Giờ | Người nói |
 |---|---|---|---|
 {table}
@@ -305,6 +330,9 @@ def main(argv: list[str] | None = None) -> int:
     seconds = screen.lengths(screening, paths, "speech")
     files, dropped = build(spec, screen.kept_clips(screening, paths, "speech"), unseen)
     files = capped(files, seconds, spec)
+    if commands := spec.get("commands"):
+        learned = command.learned(load_yaml(command.CONFIG))
+        files[VAL_COMMANDS] = command_rows(commands | {"seed": spec["seed"]}, paths["raw"], learned)
     out = paths["splits"] / "command" / spec["version"]
     sessions = [r["session"] for r in board_rows(paths)] if spec.get("board") else []
     splits.write_version(out, files, notes(spec, files, dropped, seconds, sessions))

@@ -215,6 +215,7 @@ máy khác: đáp ứng của micro là một phần của miền dữ liệu.
 | Tiếng tổng hợp không vào tập thử | Nó đúng miền của TTS, không đúng miền của người thật |
 | Giọng mẫu để TTS nhân bản chỉ lấy từ vật liệu học của split chính nhánh ấy: người nói nó giao cho tập học, hoặc kho chỉ vào tập học; mẩu nhân bản vào đúng vai của người được nhân bản | Nhân bản giọng của một người ở tập thử là đưa người đó vào tập học qua đường TTS; hai nhánh chia người nói khác nhau, nên người `train` của `wake` có thể là người `val` của `command` |
 | Tập hiệu chuẩn int8 lấy từ vật liệu học (mô phỏng board, hoặc bản thu của tập học), không lấy mẩu hay người nói nào của tập thử | Tập thử không góp gì vào model, kể cả dải giá trị của lượng tử |
+| `δ₁`, `δ₂` của `command` chọn trên `val_commands` của split (§3.12): mẩu người thật nói đúng lời từng lệnh đã học, lấy từ kho trích (§1.2) mà tập học không đọc, qua đường mô phỏng board như `val`, không bao giờ vào `train` | Ngưỡng là một thông số của từng model như điểm dừng học: chọn trên dữ liệu không học, không thử, để Cửa 3 vẫn là phép đo độc lập |
 | Mỗi split có `SPLIT.md` ghi luật, seed, sha256, commit ở `ml/data/splits/` | Dựng lại được bằng một lệnh |
 | So hai biến thể: cùng split, cùng seed, cùng số epoch | Khác một điều kiện là bảng vô nghĩa |
 | Chọn mô hình bằng số **sau int8** trên **tập thu qua board** | Số FP32 trên tập công khai không nói gì về máy thật |

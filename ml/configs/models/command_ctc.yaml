@@ -15,6 +15,9 @@ split:                             # data/splits/command/<version> by python -m 
     max_s: 2.4
     repeat: 75                     # copies of their shard in each pass's order: about 1% of the sentences drawn
     noise: ["20261004_home_009#12", "20261004_home_010#7", "20261004_home_010#10"]   # runs no prompt fits: noises (measurements/command.md 11)
+  commands:                        # val_commands.txt: real voices saying each learned command, never trained on (KEHOACH 3.12)
+    extract: hf_extract            # raw/speech/<name>, the extract of common/extract.yaml
+    per_command: 60                # clips a command at most, drawn with the seed; the extract holds 5 of "tắt quạt"
 features: scenes/device.yaml       # the board simulation; mel then pitch's three a hop from contracts/listen.yaml
 simulate:                          # python -m srpipe.tasks.command.ctc.data simulate, into processed/command/<version>
   workers: 12                      # BUD500: a worker holds ~0.56 GB with numba's code; 12 leave ~1 GB of 10, no swapping
