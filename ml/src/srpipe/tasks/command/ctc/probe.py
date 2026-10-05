@@ -296,8 +296,11 @@ def listen_session(clean: np.ndarray, vad: np.ndarray, features: np.ndarray, dec
 def listen_rounds(cfg: dict, out: Path) -> list[Path]:
     """Every Gate 3 session through svc_listen as listen_session lays it out, decided by the locked command model's
     int8 simulation at quant.reject and eval.margin; sessions grouped into rounds, a round one record each in the
-    partitions of LISTEN_PARTITIONS, as listen_<round>_<partition>.bin."""
+    partitions of LISTEN_PARTITIONS, as listen_<round>_<partition>.bin. Refused while the lock holds a model of
+    another listen.yaml, which ai_engine leaves off (KEHOACH 6.3)."""
     lock = json.loads(update_lock.LOCK.read_text(encoding="utf-8"))["models"]["command"]
+    if (learnt := lock.get("listen_hash")) != f"0x{listen.HASH:08x}":
+        raise ValueError(f"the locked command learned on listen hash {learnt}, svc_listen cuts by 0x{listen.HASH:08x}")
     meta = json.loads((update_lock.MODELS / "command" / "meta.json").read_text(encoding="utf-8"))
     run = ML_ROOT / "artifacts" / "command_ctc" / "runs" / lock["run"]
     trained = gate.load_ctc(run)

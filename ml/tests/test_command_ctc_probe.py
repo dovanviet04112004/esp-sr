@@ -1,9 +1,11 @@
 """The ctc probe's command windows: random windows of the lengths the board must handle, and records whose head,
 lexicon and windows read back, each window's decision the one ctc_score takes on its int8 logits; the Gate 3 record
-keeps each window's int8 input, and Gate 3 is counted on the decisions the chip prints."""
+keeps each window's int8 input, Gate 3 is counted on the decisions the chip prints, and no listen round is made of a
+locked command of another listen.yaml."""
 
 from __future__ import annotations
 
+import json
 import struct
 from types import SimpleNamespace
 
@@ -165,3 +167,12 @@ def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read(
     last = probe.WINDOW_RECORD.unpack_from(body, len(body) - probe.WINDOW_RECORD.size)
     assert hops == total + listen.UTTERANCE_GAP_HOPS + 1 and n_windows == 3
     assert last[:3] == (total - 20 - lead, total, 21 + lead)
+
+
+@pytest.mark.parametrize("locked", [{}, {"listen_hash": f"0x{listen.HASH ^ 1:08x}"}])
+def test_no_listen_round_comes_of_a_locked_command_of_another_listen_yaml(locked, tmp_path, monkeypatch) -> None:
+    lock = tmp_path / "models.lock.json"
+    lock.write_text(json.dumps({"models": {"command": locked}}), encoding="utf-8")
+    monkeypatch.setattr(probe.update_lock, "LOCK", lock)
+    with pytest.raises(ValueError, match="svc_listen cuts by"):
+        probe.listen_rounds(load_yaml(ctc.CONFIG), tmp_path / "out")
