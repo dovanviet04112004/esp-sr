@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from srpipe.export import pack_models, update_lock
-from srpipe.generated import grid
+from srpipe.generated import grid, listen
 
 
 def run_dir(root: Path) -> Path:
@@ -72,12 +72,26 @@ def test_the_packer_takes_locked_files_and_refuses_a_changed_one(
         update_lock.Deployed(folder / "command_ctc.espdl", "command_ctc", "espdl"),
         update_lock.Deployed(folder / "command_ctc.norm.bin", "command_ctc", "norm"),
     ]
-    update_lock.record("command", run_dir(tmp_path), files, {})
-    entries = pack_models.locked()
+    update_lock.record("command", run_dir(tmp_path), files, {"listen_hash": f"0x{listen.HASH:08x}"})
+    entries, listen_hash = pack_models.locked()
     assert [(e.name, e.kind, e.data) for e in entries] == [
         ("command_ctc", "espdl", b"graph"),
         ("command_ctc", "norm", b"\0" * 8),
     ]
+    assert listen_hash == listen.HASH
     (folder / "command_ctc.espdl").write_bytes(b"other")
     with pytest.raises(ValueError, match="differs from the sha256"):
         pack_models.locked()
+
+
+def test_the_packer_refuses_rows_of_two_listen_contracts_and_takes_0_from_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = tmp_path / "models.lock.json"
+    monkeypatch.setattr(pack_models, "LOCK", lock)
+    rows = {"command": {"files": [], "listen_hash": "0x1"}, "wake": {"files": [], "listen_hash": "0x2"}}
+    lock.write_text(json.dumps({"version": 1, "models": rows}), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"2 listen\.yaml"):
+        pack_models.locked()
+    lock.write_text(json.dumps({"version": 1, "models": {"wake": {"files": []}}}), encoding="utf-8")
+    assert pack_models.locked() == ([], 0)

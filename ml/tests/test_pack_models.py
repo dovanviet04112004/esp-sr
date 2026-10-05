@@ -8,11 +8,11 @@ import hashlib
 import pytest
 
 from srpipe.export import pack_models
-from srpipe.generated import grid
+from srpipe.generated import grid, listen
 
 
 def entries_of(image: bytes) -> list[tuple[bytes, int, int, bytes, int]]:
-    magic, version, count, grid_hash = pack_models.HEAD.unpack_from(image, 0)
+    magic, version, count, grid_hash, _ = pack_models.HEAD.unpack_from(image, 0)
     assert (magic, version, grid_hash) == (pack_models.MAGIC, pack_models.FORMAT_VER, grid.GRID_HASH)
     rows = []
     for i in range(count):
@@ -52,6 +52,12 @@ def test_entries_are_aligned_hashed_and_in_order() -> None:
         assert offset % pack_models.ALIGN_BYTES == 0 and offset >= pack_models.HEADER_BYTES
         assert image[offset : offset + size] == part.data
         assert sha == hashlib.sha256(part.data).digest()
+
+
+def test_the_header_carries_the_listen_hash_of_its_command_and_0_without_one() -> None:
+    command = pack_models.pack([pack_models.Entry("command_ctc", "espdl", b"g" * 10)], listen_hash=listen.HASH)
+    assert pack_models.HEAD.unpack_from(command, 0)[4] == listen.HASH
+    assert pack_models.HEAD.unpack_from(pack_models.pack([pack_models.Entry("wake", "espdl", b"w")]), 0)[4] == 0
 
 
 def test_a_flipped_byte_no_longer_matches_its_sha256() -> None:
