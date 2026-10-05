@@ -1,49 +1,39 @@
 name: hf_extract
 source_url: https://huggingface.co
-downloaded: '2026-09-30'
+downloaded: '2026-10-01'
 license: per source, below
 sha256:
-  clips.tsv: f61a856fe8f7c6a691d0584f07a3702086aeee4444a82dc7c05aa0c1152aa515
+  clips.tsv: 3f41367d51aa2c986fad40d21c132a1f9702b557f7be64dbc6d8e90e90e05d50
 counts:
-  clips: 35643
+  clips: 840
   by_phrase:
-    đóng cửa: 6929
-    mở cửa: 11631
-    dừng lại: 13801
-    trợ lý: 2032
-    bật đèn: 583
-    tắt đèn: 544
-    giảm âm lượng: 45
-    tắt quạt: 5
-    bật quạt: 31
-    tăng âm lượng: 42
+    dừng lại: 421
+    tắt đèn: 42
+    mở cửa: 197
+    trợ lý: 40
+    bật đèn: 15
+    đóng cửa: 116
+    giảm âm lượng: 5
+    tăng âm lượng: 1
+    tắt quạt: 1
+    bật quạt: 2
   by_source:
-    LanguaMan/vieneu-tts-140h-dataset: 257
-    NhutP/VietSpeech: 2603
-    PhongGoldFish/youtube-center-vietnamese-asr: 203
-    TrangLe2108/DNU-ViSpeech: 163
-    anhtunguyen98/vi-asr-youtube-1582h: 2777
-    capleaf/viVoice: 2539
-    doduy1911/voiceNam: 16
-    dolly-vn/dolly-audio-1000h-vietnamese: 2571
-    doof-ferb/BibleMMS_vie: 8
-    doof-ferb/LSVSC: 246
-    doof-ferb/Speech-MASSIVE_vie: 61
-    doof-ferb/VietMed_labeled: 1
-    doof-ferb/infore1_25hours: 61
-    doof-ferb/infore2_audiobooks: 1194
-    doof-ferb/vais1000: 4
-    google/fleurs: 25
-    leduckhai/MultiMed: 1
-    linhtran92/viet_youtube_asr_corpus_v2: 622
-    local: 2254
-    nampdn-ai/vietspeech: 1281
-    nguyendv02/ViMD_Dataset: 47
-    qhuy242/VNAVC: 301
-    speechcolab/gigaspeech2: 14098
-    tensorxt/ViMedCSS: 10
-    thangnzt/NgocHuyenViVoice: 16
-    thivux/phoaudiobook: 4284
+    NhutP/VietSpeech: 29
+    PhongGoldFish/youtube-center-vietnamese-asr: 1
+    TrangLe2108/DNU-ViSpeech: 7
+    anhtunguyen98/vi-asr-youtube-1582h: 30
+    capleaf/viVoice: 21
+    dolly-vn/dolly-audio-1000h-vietnamese: 15
+    doof-ferb/LSVSC: 4
+    doof-ferb/Speech-MASSIVE_vie: 8
+    doof-ferb/infore1_25hours: 2
+    doof-ferb/infore2_audiobooks: 7
+    google/fleurs: 1
+    linhtran92/viet_youtube_asr_corpus_v2: 9
+    local: 525
+    qhuy242/VNAVC: 10
+    speechcolab/gigaspeech2: 93
+    thivux/phoaudiobook: 78
 consumed_by:
 - wake
 - command
