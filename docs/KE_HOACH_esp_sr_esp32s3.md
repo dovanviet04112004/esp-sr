@@ -153,7 +153,12 @@ của một file split thành đúng thứ bộ nhận dạng thấy trên máy:
 1. Mỗi **phiên** là vài mẩu liên tiếp của file split trong một phòng của **kho phòng** `pyroomacoustics` dựng một lần
    (hoặc chập RIR thật của OpenSLR 28), lên dàn hai micro của `array.yaml`: nền phòng một mình vài giây, rồi từng câu
    cách một quãng nghỉ; người nói ở mức dB SPL tại 1 m rút cho phiên, một nguồn nhiễu điểm ở SNR rút cho phiên. Chuỗi
-   chạy liền cả phiên, nên `ns`, `vad`, `agc` đã nghe phòng trước khi câu tới, như trên máy. Nhánh nào khai `speeds`
+   chạy liền cả phiên, nên `ns`, `vad`, `agc` đã nghe phòng trước khi câu tới, như trên máy. `agc` chỉ đổi độ lợi khi
+   có tiếng, nên trên máy nó vào một lệnh với độ lợi mà lời nói trước để lại; phiên mô phỏng vì thế bắt đầu `agc` ở
+   một độ lợi rút cho phiên giữa 0 dB (máy vừa bật) và độ lợi lớn nhất (đã nghe giọng nhỏ trong phòng yên), mức lời
+   nói nó ước khớp với độ lợi ấy, từ một dòng ngẫu nhiên riêng; câu đầu phiên gặp độ lợi bất kỳ, câu sau gặp độ lợi đã
+   theo người nói. Bắt đầu ở 0 dB như máy vừa bật thì phiên toàn câu dài nối nhau cho `agc` gần đích ở hầu hết câu
+   học, còn phiên lệnh thật chỉ +5…+7 dB (`measurements/command.md` §12). Nhánh nào khai `speeds`
    thì mỗi câu học được đọc ở một tốc độ rút cho câu, lấy mẫu lại như đổi tốc độ của Kaldi (nhịp và cao độ cùng đổi);
    tốc độ rút từ dòng ngẫu nhiên riêng, nên phòng, mức và nhiễu vẫn như bản dựng không đổi tốc độ.
 2. Áp độ nhạy micro theo datasheet và chênh lệch giữa hai micro theo hiệu chuẩn của board (`calib/bal`, §3.4). Tiếng
