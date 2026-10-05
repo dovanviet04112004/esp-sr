@@ -1026,7 +1026,7 @@ vùng làm việc người gọi cấp, 8 byte mỗi ô (cửa sổ 3 s: 94 × 4
 thái mỗi khung còn hai phép cộng, một phép nhân và chỉnh số mũ: board B đo 14,7 ms cho bộ lệnh mặc định (19 biến thể) và
 79,4 ms cho 64 lệnh (`measurements/latency.md` §13), trong ngân sách ≤ 100 ms một lần chấm như `kws`. Trên máy, thuật
 toán tiến của mọi biến thể đi dần theo khối mạng của cửa sổ (Chạy `ctc` trên máy, dưới), nên lúc câu chốt chỉ còn khối
-cuối và phần của `c*`: phần kết đo 1,5 ms với bộ lệnh mặc định, 1,8 ms với 64 lệnh (`measurements/latency.md` §16). `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ Kconfig.
+cuối và phần của `c*`: phần kết đo 1,5 ms với bộ lệnh mặc định, 1,8 ms với 64 lệnh (`measurements/latency.md` §16). `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ header của ảnh model (§6.3).
 
 **Mọi điểm chia cho `T_W`**, số khung của một cửa sổ dài `window_s` (94 khung với 3 s), không chia cho số khung của cửa
 sổ đang chấm; đơn vị là nat mỗi khung của `window_s`. Cửa sổ lệnh dài ngắn theo câu và theo chỗ nó mở (§5.4), mà khung
@@ -2481,7 +2481,7 @@ Bảng phân vùng không đi qua OTA được: đổi bảng là nạp lại qu
 | `device` | `serial`, `mqtt_uri`, `mqtt_user`, `mqtt_pass`, `stream_host`, `stream_port`, `sntp_host`, `tz` | str / u16 | vắng `serial` thì dựng từ eFuse MAC: `sr-` + 12 hex thường (board B: `sr-3485188f7a70`); `mqtt_uri` mang cả scheme; vắng thì lùi về `Kconfig` của `net_mqtt` |
 | `calib` | `bal` (blob 257 × 2 float), `bal_ver` (u32), `bal_at` (u32 epoch), `aec_delay` (u32, mẫu), `pcm_shift` (u8) | | kết quả của `test_apps/calib`; **đo trên từng board**, không phải hằng số |
 | `afe` | `ns_floor_db` (i8), `agc_target_dbfs` (i8), `vad_mode` (u8) | | gieo từ `contracts/afe.yaml`, đổi bằng `SET_CONFIG` |
-| `kws` | `wake_th` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16) | | gieo từ `Kconfig` của `svc_listen`; hai khoá lệnh mang nghĩa của đường đang dựng (§3.12): `δ₁`, `δ₂` của `ctc` theo phần nghìn nat mỗi khung, hay xác suất thấp nhất và khoảng nhất–nhì của `kws`, ‰ |
+| `kws` | `wake_th` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16), `cmd_seeded` (u32) | | `wake_th` gieo từ `Kconfig` của `svc_listen`; hai khoá lệnh mang nghĩa của đường đang dựng (§3.12): `δ₁`, `δ₂` của `ctc` theo phần nghìn nat mỗi khung, hay xác suất thấp nhất và khoảng nhất–nhì của `kws`, ‰. Chúng gieo từ header của ảnh ở `models_0` (§6.3), ảnh không mang thì từ `Kconfig`; `cmd_seeded` giữ cặp đã gieo, `δ₁` ở 16 bit cao: lúc boot, cặp gợi ý khác nó thì ghi lại cả hai, nên model mới mang ngưỡng chọn cho nó tới board, còn giá trị `SET_CONFIG` ghi giữ tới khi cặp gợi ý đổi |
 | `model` | `version` (str), `sha256` (blob 32 B) | | ảnh đang nằm ở `models_0` (§6.1) |
 | `sys` | `boot_count` (u32), `seed_ver` (u32), `last_ota_result` (u8), `fw_valid` (u8) | | |
 
@@ -2506,6 +2506,8 @@ offset 0x000  header 1 KB
    +0x008 count       u32, ≤ 8
    +0x00C grid_hash   u32 — băm của contracts/grid.yaml lúc huấn luyện
    +0x010 listen_hash u32 — băm của contracts/listen.yaml mà model command học theo; 0 khi ảnh không có command
+   +0x014 cmd_reject_permille u16 — δ₁ chọn cho model command của ảnh; 0 khi ảnh không mang ngưỡng
+   +0x016 cmd_margin_permille u16 — δ₂, cùng đơn vị
    +0x040 entry[8] × 64 B:
           name[16]  offset u32  size u32  sha256[32]  kind u32  flags u32
 offset 0x400  dữ liệu, mỗi entry căn 64 B
@@ -2525,7 +2527,9 @@ offset 0x400  dữ liệu, mỗi entry căn 64 B
 
 Của `command` còn có `listen_hash`: run ghi băm `contracts/listen.yaml` lúc bắt đầu học, bước deploy chép nó vào
 `meta.json` và `models.lock.json`, và từ chối run không ghi băm hay ghi băm khác `listen.yaml` hiện tại; bước đóng gói
-ghi nó vào header.
+ghi nó vào header. Và `thresholds` (`reject_permille`, `margin_permille`): `δ₁`, `δ₂` chọn cho đúng dòng thang int8 được
+deploy (§3.12), vì điểm của hai model khác nhau không cùng thang; deploy từ chối dòng chưa chọn ngưỡng, bước đóng gói
+ghi cặp ấy vào header, và lúc boot board gieo NVS từ đó (§6.2).
 
 Của `ns` có thêm trường `backend` (`rnnoise` | `nsnet`, §3.9): bước đóng gói đặt tên mục trong ảnh theo nó (`ns_rnnoise`
 hay `ns_nsnet`), nên bản dựng của ứng viên kia không tìm thấy model, `ai_engine_ns_ops()` trả `NULL` và chuỗi chạy sàn.
