@@ -748,3 +748,23 @@ cắt trên `vad` của người nói không gộp mẩu nào.
 Trước câu ngắn hơn 2,0 s khi cửa sổ trước chặn, như board. Cửa sổ dài hơn `train.max_s` và mẩu không ra đơn vị bộ học bỏ
 qua (`load_role`, `shards_of`). Cửa sổ không có bước `vad` nào của chuỗi là câu
 board sẽ không cắt (E7-T6, `afe/vad.md` §6); bộ học vẫn học chúng vì cửa sổ cắt trên `vad` của người nói.
+
+### 12.11 Cửa 3 của `command/v5` ở bước 70 000
+
+Run `20261006_7e65d01-dirty_2897b3` dừng ở bước 70 129 theo lời chủ repo; mạng float đã lưu ở bước 70 000, chấm như Cửa 3
+(`make command-eval`) trên phiên 28/09 ở 1 m và 3 m, không ngưỡng: ô là số câu có lệnh điểm cao nhất đúng. Cột cuối là bộ
+lệnh mặc định với "mở đèn", "mở quạt" thay "bật đèn", "bật quạt".
+
+| Lệnh | CTC | RNN-T | CTC, "mở" thay "bật" |
+|---|---|---|---|
+| bật đèn / bật quạt | 10/12 / 11/11 | 10/12 / 11/11 | — |
+| tắt đèn / tắt quạt | 0/11 / 0/11 | 0/11 / 0/11 | 10/11 / 8/11 |
+| mở cửa / đóng cửa | 10/10 / 5/11 | 10/10 / 6/11 | 10/10 / 5/11 |
+| tăng / giảm âm lượng | 10/13 / 11/11 | 8/13 / 11/11 | 10/13 / 11/11 |
+| dừng lại / chụp ảnh | 11/11 / 10/11 | 11/11 / 11/11 | 11/11 / 10/11 |
+| tổng, bộ mặc định | 78/112 | 78/112 | — |
+
+Có ngưỡng (δ₂ 50 ‰, δ₁ 200 … 1 000 ‰): lệnh nhận đúng 45% (CTC), 22% (RNN-T); từ chối 117/120 và 120/120 cửa sổ tiếng
+động, cửa sổ thừa và câu gần âm. Run B1 ở bước 40 000 cùng thước được 88/112, "tắt" có "bật" trong bộ 5/22. Mọi câu "tắt"
+sai thành "bật" cùng vật, gần nửa "đóng cửa" thành "mở cửa"; bỏ "bật" khỏi bộ thì "tắt" đúng 18/22: mạng nhận phần sau của
+lệnh, âm tiết đầu không đủ để tách. Cao độ chuẩn hoá so âm tiết đầu với nền trước nó (§12.3) vẫn nguyên trong v5.
