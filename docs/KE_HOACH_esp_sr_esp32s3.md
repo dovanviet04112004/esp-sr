@@ -2353,8 +2353,8 @@ giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec`
   ngắn chưa đuổi kịp khi câu chốt (`measurements/latency.md` §17);
 - cửa sổ dài quá `window_s` thì thôi chạy theo luồng: lúc câu chốt nó lùi từ bước cuối tối đa `window_s`, không qua mốc
   chặn, rồi chạy cả cửa sổ, quyết định chậm cỡ thời gian mạng chạy hết cửa sổ, khoảng 1,2 s 🔬;
-- `svc_listen` tính log-mel và cao độ mỗi bước ở mọi trạng thái và giữ chúng cùng mẫu sạch của các bước gần nhất ở
-  PSRAM; bộ dò chỉ đặt lại khi luồng đứt; mạng bắt đầu từ bộ đệm rỗng ở đầu cửa sổ như lúc học;
+- `svc_listen` tính log-mel và cao độ mỗi bước ở mọi trạng thái và giữ chúng cho các bước gần nhất ở PSRAM; bộ dò
+  chỉ đặt lại khi luồng đứt; mạng bắt đầu từ bộ đệm rỗng ở đầu cửa sổ như lúc học;
 - mỗi quyết định là một sự kiện vào `q_event_up`: `COMMAND` kèm điểm và khoảng cách nhất–nhì, hay `REJECT` kèm mã:
   `LOW_SCORE` khi lệnh tốt nhất kém vòng tự do quá `δ₁`, `LOW_MARGIN` khi hơn lệnh nhì chưa đủ `δ₂`, `PART` khi một phần
   của lệnh được điểm bằng hay hơn cả lệnh; kèm một dòng log có bước đầu, bước cuối của cửa sổ và thời gian từ bước chốt
