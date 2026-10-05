@@ -82,7 +82,7 @@ def test_batches_hold_the_shares_and_cut_windows_inside_their_spans() -> None:
 
 
 def test_masks_zero_whole_band_spans_and_whole_hop_spans() -> None:
-    spec = {"bands": 2, "band_width": 6, "hops": 2, "hop_width": 10}
+    spec = {"bands": 2, "band_share": 0.15, "hops": 2, "hop_width": 10}
     x = np.ones((64, WINDOW, N_BANDS + pitch.N_FEATURES), dtype=np.float32)
     train.mask(x, spec, N_BANDS, np.random.default_rng(1))
     zero = x == 0.0
@@ -92,7 +92,7 @@ def test_masks_zero_whole_band_spans_and_whole_hop_spans() -> None:
     for w, hops in zip(zero, masked_hops, strict=True):
         kept = w[~hops]
         assert np.array_equal(kept.all(axis=0), kept.any(axis=0))
-        assert kept.all(axis=0).sum() <= spec["bands"] * spec["band_width"]
+        assert kept.all(axis=0).sum() <= spec["bands"] * round(spec["band_share"] * N_BANDS)
         assert hops.sum() <= spec["hops"] * spec["hop_width"]
 
 

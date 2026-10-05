@@ -280,7 +280,7 @@ def mask(x: np.ndarray, hops: np.ndarray, spec: dict, n_mel: int, rng: np.random
     """SpecAugment in place on normalised sentences: zero over spans of mel bands and spans of each one's hops."""
     for w, n in zip(x, hops, strict=True):
         for _ in range(spec["bands"]):
-            width = int(rng.integers(spec["band_width"] + 1))
+            width = int(rng.integers(round(spec["band_share"] * n_mel) + 1))
             at = int(rng.integers(n_mel - width + 1))
             w[:n, at : at + width] = 0.0
         for _ in range(spec["hops"]):

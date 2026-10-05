@@ -53,7 +53,7 @@ train:                             # python -m srpipe.tasks.command.kws.train; t
   class_share: {other: 0.25, silence: 0.1}   # of a batch; the learned commands split the rest evenly
   source_share:                    # within a class; a class not listed draws its sources by their items
     other: {tts: 0.5, speech: 0.4, real: 0.1}   # near misses and half commands first
-  masks: {bands: 2, band_width: 6, hops: 2, hop_width: 10}   # SpecAugment: masks a window, each up to this wide
+  masks: {bands: 2, band_share: 0.15, hops: 2, hop_width: 10}   # SpecAugment: masks a window, each up to this wide; bands as a share of the mel bands
   norm_batches: 64                 # unmasked batches of the stream that give each dim's mean and deviation
   eval_every: 1000                 # steps between val passes, each net saved beside the run
 eval:                              # kws/cmd_reject and kws/cmd_margin, chosen on val (KEHOACH 3.12)

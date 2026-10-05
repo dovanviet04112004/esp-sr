@@ -182,7 +182,7 @@ def mask(x: np.ndarray, spec: dict, n_bands: int, rng: np.random.Generator) -> N
     """SpecAugment in place on normalised windows: zero, train's mean, over spans of mel bands and spans of hops."""
     for w in x:
         for _ in range(spec["bands"]):
-            width = int(rng.integers(spec["band_width"] + 1))
+            width = int(rng.integers(round(spec["band_share"] * n_bands) + 1))
             at = int(rng.integers(n_bands - width + 1))
             w[:, at : at + width] = 0.0
         for _ in range(spec["hops"]):

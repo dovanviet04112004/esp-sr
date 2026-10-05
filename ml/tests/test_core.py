@@ -64,6 +64,25 @@ def test_config_hash_ignores_key_order() -> None:
     assert run_dir.config_hash({"a": 1, "b": 2}) == run_dir.config_hash({"b": 2, "a": 1})
 
 
+def test_a_run_reads_back_with_the_front_it_learnt_on_and_its_band_masks_as_a_share(tmp_path: Path) -> None:
+    front = config.contract_front()
+    runs = {
+        "forty": {"train": {"masks": {"bands": 2, "band_width": 8, "hops": 4}}},
+        "eighty": {"listen": front, "train": {"masks": {"bands": 2, "band_width": 8, "hops": 4}}},
+        "share": {"listen": front, "train": {"masks": {"bands": 2, "band_share": 0.2, "hops": 4}}},
+    }
+    read = {}
+    for name, cfg in runs.items():
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "config.resolved.yaml").write_text(yaml.safe_dump(cfg))
+        read[name] = config.load_run_config(tmp_path / name)
+    assert read["forty"]["listen"]["features"]["n_bands"] == 40
+    assert read["forty"]["listen"]["pitch"]["ballast_window_s"] == 0.0
+    assert read["forty"]["train"]["masks"] == {"bands": 2, "band_share": 8 / 40, "hops": 4}
+    assert read["eighty"]["train"]["masks"] == {"bands": 2, "band_share": 8 / front["features"]["n_bands"], "hops": 4}
+    assert read["share"] == runs["share"]
+
+
 def test_same_seed_draws_the_same_numbers() -> None:
     first = seed.seed_everything(7).standard_normal(5)
     second = seed.seed_everything(7).standard_normal(5)
