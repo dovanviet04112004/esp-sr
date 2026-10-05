@@ -129,8 +129,8 @@ kws-features: ## Run each file of command_kws/v1 through the board simulation wi
 kws-train: ## Train the kws DS-CNN on processed/command_kws on the GPU into ml/artifacts/command_kws/runs (E11-T17)
 	cd ml && uv run --extra train python -m srpipe.tasks.command.kws.train
 
-ctc-features: ## Run each file of the command split through the board simulation with pitch into processed/command; Ctrl-C pauses at once, run again it goes on from the finished shards (E11-T12)
-	cd ml && uv run python -m srpipe.tasks.command.ctc.data simulate
+ctc-features: ## Run each file of the command split through the board simulation with pitch into processed/command, then cut the board sessions with Gate 3's code, which needs torch; Ctrl-C pauses at once, run again it goes on from the finished shards (E11-T12)
+	cd ml && uv run --extra train python -m srpipe.tasks.command.ctc.data simulate
 
 ctc-train: ## Train the ctc net on processed/command on the GPU into ml/artifacts/command_ctc/runs; RESUME=<run under ml/> goes on from its last checkpoint (E11-T12)
 	cd ml && uv run --extra train python -m srpipe.tasks.command.ctc.train $(if $(RESUME),--resume $(RESUME))
