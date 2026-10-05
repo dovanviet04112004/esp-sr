@@ -715,3 +715,8 @@ liền, và trong phiên lệnh cửa sổ không chồng câu nào chuỗi tìm
 bị từ chối như tiếng động (`32d8a89`). Với nhãn ấy, cùng model: câu lệnh đúng 85/112, như chuỗi mới mỗi phiên; cả 18
 cửa sổ thừa có lệnh điểm cao nhất là "mở cửa", điểm 684–819‰, hơn lệnh nhì 12–36‰, cách vòng tự do 175–379‰, nên
 `δ₂` 50 từ chối hết ở mọi `δ₁`.
+
+Shard board của tập học (10 phiên 04/10) cắt bằng chuỗi chạy liền giữ cửa sổ chứa đúng một câu của chuỗi chạy riêng
+phiên, cả hai dài 0,8–2,4 s: 105 câu, đúng 105 câu thật của §11; 10 cửa sổ ngoài khoảng dài (có 5 câu §11 bỏ vì dài,
+chuỗi liền cắt ngắn lại nên chỉ xét độ dài cửa sổ thì chúng lọt vào), 2 không chứa câu nào; ba lượt tiếng động của §11
+không còn thành cửa sổ riêng.

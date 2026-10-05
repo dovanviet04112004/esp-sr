@@ -116,9 +116,10 @@ def test_every_file_is_cut_as_simulate_cut_asks_and_another_cut_is_stale(tmp_pat
         assert data.options_of(cfg, paths["splits"] / name)["cut"] == "listen"
 
 
-def test_board_units_leave_out_the_runs_named_noise_and_refuse_a_name_the_cut_lacks(tmp_path: Path) -> None:
+def test_board_units_leave_out_the_runs_named_noise_and_refuse_a_name_no_utterance_holds(tmp_path: Path) -> None:
     rows = [{"item": f"{data.BOARD}/s1#{k}", "text": "bật đèn"} for k in (0, 2, 3)]
     (tmp_path / "shard_00000.items.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    (tmp_path / "manifest.yaml").write_text(yaml.safe_dump({"said": {"s1": 4}}), encoding="utf-8")
     every = data.board_units(tmp_path, "north", [])
     kept = data.board_units(tmp_path, "north", ["s1#2"])
     assert sorted(every) == [f"{data.BOARD}/s1#{k}" for k in (0, 2, 3)]
@@ -126,8 +127,9 @@ def test_board_units_leave_out_the_runs_named_noise_and_refuse_a_name_the_cut_la
         sorted(kept) == [f"{data.BOARD}/s1#0", f"{data.BOARD}/s1#3"]
         and kept[f"{data.BOARD}/s1#0"] == every[f"{data.BOARD}/s1#0"]
     )
-    with pytest.raises(ValueError, match="s1#1"):
-        data.board_units(tmp_path, "north", ["s1#1"])
+    assert data.board_units(tmp_path, "north", ["s1#1"]) == every
+    with pytest.raises(ValueError, match="s1#4"):
+        data.board_units(tmp_path, "north", ["s1#4"])
 
 
 def test_a_board_cut_of_another_listen_yaml_or_chain_run_is_stale(tmp_path: Path) -> None:
@@ -181,12 +183,12 @@ def test_the_board_cut_keeps_windows_holding_one_utterance_alone_named_by_it(tmp
     from srpipe.tasks.command import eval as gate
 
     row = {"session": "s1", "board": "b", "prompt": "bật đèn"}
-    on, alone = np.zeros(800, dtype=bool), np.zeros(800, dtype=bool)
-    for first, stop in ((60, 130), (200, 260), (320, 400), (460, 520), (560, 620), (700, 760)):
+    on, alone = np.zeros(1100, dtype=bool), np.zeros(1100, dtype=bool)
+    for first, stop in ((60, 130), (200, 260), (320, 400), (460, 520), (560, 620), (700, 760), (880, 950)):
         on[first:stop] = True
-    for first, stop in ((62, 128), (322, 350), (380, 398), (462, 618), (705, 755)):
+    for first, stop in ((62, 128), (322, 350), (380, 398), (462, 618), (705, 755), (860, 1020)):
         alone[first:stop] = True
-    features, pitch = np.zeros((800, 80), np.float32), np.zeros((800, 3), np.float32)
+    features, pitch = np.zeros((1100, 80), np.float32), np.zeros((1100, 3), np.float32)
     monkeypatch.setattr(data, "board_rows", lambda _paths: [row])
     monkeypatch.setattr(gate, "heard_rows", lambda *_: iter([(row, None, on, features, pitch)]))
     monkeypatch.setattr(gate, "said_alone", lambda *_: device.utterances(alone))
@@ -198,4 +200,5 @@ def test_the_board_cut_keeps_windows_holding_one_utterance_alone_named_by_it(tmp
     said = data.cut_board(cfg, {"raw": tmp_path}, tmp_path / "board")
     items = [json.loads(line) for line in (tmp_path / "board" / "shard_00000.items.jsonl").read_text().splitlines()]
     assert [i["item"] for i in items] == [f"{data.BOARD}/s1#0", f"{data.BOARD}/s1#4"]
-    assert all(i["text"] == "bật đèn" for i in items) and "4 not one utterance alone" in said
+    assert all(i["text"] == "bật đèn" for i in items) and "1 outside 0.8-2.4 s, 4 not one utterance alone" in said
+    assert yaml.safe_load((tmp_path / "board" / "manifest.yaml").read_text())["said"] == {"s1": 6}

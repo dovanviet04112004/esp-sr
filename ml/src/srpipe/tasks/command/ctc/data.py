@@ -218,8 +218,9 @@ def board_built_as(out: Path, device_cfg: dict, rows: list[dict], board: dict) -
 def cut_board(cfg: dict, paths: dict, out: Path) -> str:
     """The board sessions given to train as one shard in train's dtype: each utterance whose vad run lasts
     split.board's min_s to max_s, as its Gate 3 command window of log-mel and pitch, its session's prompt its text.
-    Only windows that hold exactly one utterance of eval.said_alone, held by no other window, are kept and named by
-    its index: the chain run over the sitting also opens windows on breaths and splits or joins utterances."""
+    Only windows that hold exactly one utterance of eval.said_alone, held by no other window and itself lasting
+    min_s to max_s, are kept and named by its index: the chain run over the sitting also opens windows on breaths and
+    splits or joins utterances."""
     # Gate 3 reads a session beside the nets that score it, which need torch; only the board cut pays for that.
     from srpipe.tasks.command import eval as gate
 
@@ -229,17 +230,20 @@ def cut_board(cfg: dict, paths: dict, out: Path) -> str:
     chain_cfg = ChainConfig(balance_gains=device.load_microphones(device_cfg["microphone"]).gains)
     mel = Mel(MelConfig(**device_cfg["features"]))
     shortest, longest = (round(board[k] * HOPS_PER_S) for k in ("min_s", "max_s"))
-    items, mels, pitches, offset, dropped, unowned = [], [], [], 0, 0, 0
+    items, mels, pitches, offset, dropped, unowned, said = [], [], [], 0, 0, 0, {}
     for r, _clean, vad, features, pitch in gate.heard_rows(cfg, rows, paths):
         spans = device.utterances(vad)
         windows = gate.ctc_windows(features, pitch, spans) if spans else []
-        owned = gate.owners(spans, gate.said_alone(r, paths, chain_cfg, mel))
+        alone = gate.said_alone(r, paths, chain_cfg, mel)
+        said[r["session"]] = len(alone)
+        owned = gate.owners(spans, alone)
         held = Counter(k for o in owned for k in o)
         for (first, last), (start, _), x, o in zip(spans, device.command_cut(spans), windows, owned, strict=True):
             if len(o) != 1 or held[o[0]] != 1:
                 unowned += 1
                 continue
-            if not shortest <= last + 1 - first <= longest:
+            lasting = (last + 1 - first, alone[o[0]][1] + 1 - alone[o[0]][0])
+            if not all(shortest <= n <= longest for n in lasting):
                 dropped += 1
                 continue
             items.append(
@@ -268,6 +272,7 @@ def cut_board(cfg: dict, paths: dict, out: Path) -> str:
         "board": board_cut(board),
         "listen_hash": f"0x{listen.HASH:08x}",
         "chain": BOARD_CHAIN,
+        "said": said,
         "dtype": dtype,
         "sha256": {n: hashlib.sha256((out / n).read_bytes()).hexdigest() for n in names},
     }
@@ -278,11 +283,12 @@ def cut_board(cfg: dict, paths: dict, out: Path) -> str:
 
 def board_units(folder: Path, dialect: str, noise: list[str]) -> dict[str, list[int]]:
     """lang_vi unit ids of every item of a board cut, its session's prompt read in dialect, but the <session>#<run>
-    utterances noise names; a name the cut lacks is refused."""
+    utterances noise names; a name that is no utterance of its session, kept or not, is refused."""
     items = [
         json.loads(line) for f in sorted(folder.glob("*.items.jsonl")) for line in f.read_text("utf-8").splitlines()
     ]
-    runs = {i["item"].removeprefix(f"{BOARD}/") for i in items}
+    said = yaml.safe_load((folder / "manifest.yaml").read_text(encoding="utf-8"))["said"]
+    runs = {f"{session}#{k}" for session, n in said.items() for k in range(n)}
     if absent := sorted(set(noise) - runs):
         raise ValueError(f"{', '.join(absent)}: not utterances of the board cut {folder}")
     said = [i for i in items if i["item"].removeprefix(f"{BOARD}/") not in noise]
