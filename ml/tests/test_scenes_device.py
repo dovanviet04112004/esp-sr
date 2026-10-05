@@ -17,7 +17,7 @@ from srpipe.core import screen
 from srpipe.core.audio_io import INT16_SCALE, to_float, write_wav
 from srpipe.core.config import CONFIGS, load_device, load_yaml
 from srpipe.dsp.spec.pitch import PitchConfig, pitch_features
-from srpipe.generated import array, grid, listen
+from srpipe.generated import afe, array, grid, listen
 from srpipe.metrics import mic_pair
 from srpipe.scenes import device, room
 
@@ -272,6 +272,21 @@ def test_wider_pads_keep_more_hops_before_each_item(raw_root: Path, tmp_path: Pa
         assert (
             wide["speech_frames"][1] - wide["speech_frames"][0] == plain["speech_frames"][1] - plain["speech_frames"][0]
         )
+
+
+def test_each_session_starts_its_agc_at_a_gain_drawn_for_it(raw_root: Path, tmp_path: Path) -> None:
+    split = split_file(tmp_path / "train.txt", raw_root)
+    interim = screened(tmp_path / "interim")
+    session = {**tiny()["session"], "agc_start_drawn": True}
+    device.build(tiny(session=session), split, raw_root, interim, tmp_path / "drawn")
+    device.build(tiny(), split, raw_root, interim, tmp_path / "boot")
+    drawn, boot = items_of(tmp_path / "drawn"), items_of(tmp_path / "boot")
+    starts = {i["session"]: i["agc_start_db"] for i in drawn}
+    assert len(set(starts.values())) == len(starts) and all(0.0 <= v <= afe.AGC_GAIN_MAX_DB for v in starts.values())
+    assert not any("agc_start_db" in i for i in boot)
+    for out, first, start in ((tmp_path / "drawn", drawn[0], starts[0]), (tmp_path / "boot", boot[0], 0.0)):
+        figures = np.load(sorted(out.glob("*.figures.npy"))[0])
+        assert abs(int(figures[first["frame_offset"], 2]) - start) <= 1.5
 
 
 LEAD, LEAST = listen.UTTERANCE_LEAD_HOPS, listen.UTTERANCE_MIN_HOPS

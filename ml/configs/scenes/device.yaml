@@ -18,6 +18,7 @@ session:
   lead_s: 3.0                     # room noise alone ahead of the first utterance
   gap_s: [0.4, 2.0]               # silence after each utterance, drawn per utterance
   pad_s: 0.3                      # kept on each side of an utterance in the output
+  agc_start_drawn: true           # the agc starts at a gain drawn in 0 dB..its most, as earlier speech left it
 talker:
   spl_1m_db: [45.0, 74.0]         # ANSI S3.5: casual 56, normal 62, raised 68, loud 75 dB SPL at 1 m; soft down to 45
   tilt_db_per_octave: [-6.0, 3.0] # a session's slope above tilt_from_hz: the enclosure's and the voice's (KEHOACH 1.2)

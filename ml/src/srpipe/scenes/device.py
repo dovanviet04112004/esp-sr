@@ -15,7 +15,7 @@ import json
 import math
 import multiprocessing
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 from signal import SIG_IGN, SIGINT
@@ -36,7 +36,7 @@ from srpipe.dsp.spec.pitch import N_FEATURES as N_PITCH
 from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
 from srpipe.dsp.spec.stft import Stft
 from srpipe.dsp.spec.window import sqrt_hann
-from srpipe.generated import array, grid
+from srpipe.generated import afe, array, grid
 from srpipe.generated.listen import UTTERANCE_GAP_HOPS, UTTERANCE_LEAD_HOPS, UTTERANCE_MIN_HOPS, WINDOW_HOPS
 from srpipe.metrics import mic_pair
 from srpipe.scenes import room
@@ -52,7 +52,7 @@ SLOT_FRACTION_BITS = 31
 CHAIN_LAG_HOPS = 1
 A_WEIGHT_GRID_POINTS = 4097
 # Speeds draw from their own stream, so a build with speeds keeps the rooms, levels and noise of one without.
-ROOM_STREAM, SESSION_STREAM, SPEED_STREAM = 1, 2, 3
+ROOM_STREAM, SESSION_STREAM, SPEED_STREAM, AGC_STREAM = 1, 2, 3, 4
 SPEED_DENOMINATOR = 100  # resampling ratios as small fractions: 1.1 is 10/11
 TALKER, NOISE = 0, 1
 CLEAN_ORIGINS = frozenset({"public", "synth"})
@@ -412,7 +412,8 @@ def simulate_session(
 ) -> tuple[np.ndarray, list[tuple[int, int]], dict]:
     """Session k: the interleaved int16 frames board B would capture, each utterance's [start, end) in samples, and
     the session's draws; bank_room indexes the labels of rooms.yaml, readers read raw/ and interim/ by root name.
-    With speeds, each utterance is spoken at one drawn from them, and the draws list them as speeds."""
+    With speeds, each utterance is spoken at one drawn from them, and the draws list them as speeds; with
+    session.agc_start_drawn, the gain the agc starts the session from as agc_start_db (KEHOACH 1.2)."""
     rng = np.random.default_rng([cfg["seed"], SESSION_STREAM, k])
     said_at = (
         [float(v) for v in np.random.default_rng([cfg["seed"], SPEED_STREAM, k]).choice(speeds, len(rows))]
@@ -442,6 +443,9 @@ def simulate_session(
     talker = np.stack([signal.fftconvolve(dry, rirs[TALKER, m])[:total] for m in range(array.N_MICS)])
     air, noise = add_noise(talker, dry, rirs, cfg, pools, readers["raw"], rng)
     draws = {"session": k, "bank_room": entry, "spl_1m_db": spl_db, "tilt_db_per_octave": tilt_db, "noise": noise}
+    if s.get("agc_start_drawn"):
+        start_db = np.random.default_rng([cfg["seed"], AGC_STREAM, k]).uniform(0.0, afe.AGC_GAIN_MAX_DB)
+        draws |= {"agc_start_db": round(float(start_db), 3)}
     return hear(air, mics, rng, floor), spans, draws | ({"speeds": said_at} if said_at else {})
 
 
@@ -514,7 +518,7 @@ def _shard(job: tuple) -> list[Path]:
     features, figures, pcm, pitches, items, offset = [], [], [], [], [], 0
     for k, rows in sessions:
         captured, spans, draws = simulate_session(cfg, k, rows, bank, mics, pools, readers, floor, speeds)
-        clean, figs, feats = listen(captured, chain_cfg, mel)
+        clean, figs, feats = listen(captured, replace(chain_cfg, agc_start_db=draws.get("agc_start_db")), mel)
         said_at = draws.pop("speeds", [])
         for first, stop, held, speech in cut_items(cut, spans, pads_s, figs[:, 0].astype(bool)):
             features.append(feats[first:stop])
