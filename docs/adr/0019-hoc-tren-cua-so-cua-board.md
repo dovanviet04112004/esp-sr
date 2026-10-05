@@ -42,8 +42,9 @@ Mạng thử học 8 000 bước cùng dữ liệu, cùng seed (§12.5); bản t
 - `contracts/listen.yaml` version 4: `utterance.lead_s` 2,0 s (125 bước), `window_s` 3,75 s (234 bước).
 - `svc_listen` tính cao độ mỗi bước trong `feed`, vào vòng đệm cùng log-mel, và chỉ đặt lại bộ dò khi mất khung; `work`
   chỉ chạy mạng trên hai vòng đệm (KẾ HOẠCH §5.4).
-- Mô phỏng cắt mẫu học bằng `utterances` và `command_cut` trên `vad` của cả phiên, như board, và tính cao độ liền cả phiên
-  (KẾ HOẠCH §1.2). Các mẩu chung một câu gộp thành một mẫu, nhãn nối theo thứ tự; mẩu `vad` không chạm thì bỏ.
+- Mô phỏng cắt mẫu học bằng `utterances` và `command_cut`, như board, trên `vad` của riêng tiếng người nói ở mức đích
+  của `agc`, và tính cao độ liền cả phiên (KẾ HOẠCH §1.2). Các mẩu chung một câu gộp thành một mẫu, nhãn nối theo thứ
+  tự. `vad` của tín hiệu có nhiễu thì cắt mất lời mà nhãn đòi ở 14% mẫu `val` (`measurements/command.md` §12.6).
 - Mỗi phiên mô phỏng bắt đầu `agc` ở độ lợi rút đều trong [0, +30] dB, trên một luồng ngẫu nhiên riêng.
 - Run ghi băm `listen.yaml`; ảnh model mang băm ấy, và `ai_engine` để `command` tắt khi băm khác bản dựng (KẾ HOẠCH §6.3).
 - Mạng, tăng cường và bộ dò cao độ (không nhìn sau) giữ nguyên.

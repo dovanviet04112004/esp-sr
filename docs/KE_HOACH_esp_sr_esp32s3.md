@@ -175,16 +175,20 @@ của một file split thành đúng thứ bộ nhận dạng thấy trên máy:
    lại, như `svc_listen` tính mỗi bước trên board (§3.11); mỗi mẫu lấy phần của nó. Ra `processed/<nhánh>/<tập>/`: đặc
    trưng, số của chuỗi (`vad`, mức, gain) và PCM sạch của từng mẫu, cộng manifest sha256. Nhánh nào khai kiểu lưu cho tập học thì đặc trưng của `train`
    lưu theo kiểu ấy (float16 ở `command`, đúng kiểu bộ nạp giữ lúc học); `val` và `test` luôn float32.
-4. Cắt mẫu. `command` `ctc` và `rnnt` cắt **đúng như board cắt cửa sổ lệnh** (§5.4), bằng chính code Cửa 3 dùng: các
-   đoạn `vad` của cả phiên thành câu theo `utterance` của `contracts/listen.yaml`; các mẩu nối với nhau qua một câu chung
-   thành một nhóm; mỗi nhóm là một mẫu, mở `utterance.lead_s` trước bước `vad` đầu của nhóm, không lùi qua bước sau mẫu
-   trước, kết ở bước ngay sau bước `vad` cuối của nhóm; nhãn là lời các mẩu của nhóm theo thứ tự. Không cắt lùi theo
-   `window_s`, vì câu của kho dài hơn lệnh và nhãn cần cả câu. Mạng học từ bộ đệm rỗng ở đầu mẫu, như `svc_listen`
-   bắt đầu mạng ở đầu cửa sổ. Mẩu không bước `vad` nào chạm tới bị bỏ: board không bao giờ chấm nó; manifest đếm số
-   ấy. Mẫu học vì thế có đúng phần trước câu, cao độ và điểm kết như cửa sổ trên board; cắt theo mẩu cộng khoảng chừa
+4. Cắt mẫu. `command` `ctc` và `rnnt` cắt theo **luật cửa sổ lệnh của board** (§5.4), bằng chính code Cửa 3 dùng,
+   trên `vad` của **riêng tiếng người nói**: bộ dò `vad` của chuỗi chạy trên tiếng người nói ở micro 0, đã qua phòng,
+   chưa cộng nhiễu, đưa về mức đích của `agc`. Các đoạn `vad` ấy thành câu theo `utterance` của
+   `contracts/listen.yaml`; các mẩu nối với nhau qua một câu chung thành một nhóm; mỗi nhóm là một mẫu, mở
+   `utterance.lead_s` trước bước `vad` đầu của nhóm, không lùi qua bước sau mẫu trước, kết ở bước ngay sau bước `vad`
+   cuối của nhóm; nhãn là lời các mẩu của nhóm theo thứ tự. Không cắt lùi theo `window_s`, vì câu của kho dài hơn lệnh
+   và nhãn cần cả câu. Mạng học từ bộ đệm rỗng ở đầu mẫu, như `svc_listen` bắt đầu mạng ở đầu cửa sổ. Mẫu học vì thế
+   có phần trước câu, cao độ và điểm kết như cửa sổ board cắt khi `vad` nghe trọn tiếng; cắt theo mẩu cộng khoảng chừa
    cố định thì phần trước câu dài 0–1,5 s (trung vị 0,86 s) trong khi board luôn mở `utterance.lead_s`, và âm tiết đầu
-   của lệnh phụ thuộc mạnh vào phần ấy (`measurements/command.md` §12). `wake` và `kws` cắt theo
-   mẩu cộng `session.pad_s` hai bên, hay khoảng chừa nhánh khai.
+   của lệnh phụ thuộc mạnh vào phần ấy (`measurements/command.md` §12). `vad` của chuỗi trên tín hiệu có nhiễu không
+   dùng để cắt: nó đọc mức trước `agc`, nên với người nói nhỏ hay xa nó tắt khi tiếng chưa hết và cắt mất phần lời mà
+   nhãn vẫn đòi; nhiễu giữ nó bật thì nối nhiều câu thành mẫu dài quá `train.max_s`; có mẩu nó không chạm tới (§12.6).
+   Cửa 3 vẫn cắt trên `vad` của bản thu thật, đúng như board. `wake` và `kws` cắt theo mẩu cộng `session.pad_s` hai
+   bên, hay khoảng chừa nhánh khai.
 
 Phần thuần của đặc trưng lúc học vì thế trùng đặc trưng trên board, và với `command` cả cách cắt cửa sổ. Phần còn
 khác là phòng thật, micro thật và giọng thật, và tập thu qua board đo đúng phần ấy. Chuỗi đổi (bật một module, chọn
