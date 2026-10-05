@@ -2487,6 +2487,7 @@ offset 0x000  header 1 KB
    +0x004 format_ver  u32
    +0x008 count       u32, ≤ 8
    +0x00C grid_hash   u32 — băm của contracts/grid.yaml lúc huấn luyện
+   +0x010 listen_hash u32 — băm của contracts/listen.yaml mà model command học theo; 0 khi ảnh không có command
    +0x040 entry[8] × 64 B:
           name[16]  offset u32  size u32  sha256[32]  kind u32  flags u32
 offset 0x400  dữ liệu, mỗi entry căn 64 B
@@ -2504,6 +2505,10 @@ offset 0x400  dữ liệu, mỗi entry căn 64 B
 | `features` | `log_mel40` \| `log_mel40_pitch3`, kèm số chiều mỗi khung | `svc_listen`, qua độ dài khung của `ai_engine_command_step` (§4.5.5) |
 | `classes` | `kws`: `id` các lệnh đã học theo thứ tự, rồi `other`, `silence`; `ctc`: không có | bước đóng gói kiểm các `id` lệnh là phần đầu của `contracts/commands/default_vi.json`, để chỉ số trả về trùng chỉ số trong bảng lệnh |
 
+Của `command` còn có `listen_hash`: run ghi băm `contracts/listen.yaml` lúc bắt đầu học, bước deploy chép nó vào
+`meta.json` và `models.lock.json`, và từ chối run không ghi băm hay ghi băm khác `listen.yaml` hiện tại; bước đóng gói
+ghi nó vào header.
+
 Của `ns` có thêm trường `backend` (`rnnoise` | `nsnet`, §3.9): bước đóng gói đặt tên mục trong ảnh theo nó (`ns_rnnoise`
 hay `ns_nsnet`), nên bản dựng của ứng viên kia không tìm thấy model, `ai_engine_ns_ops()` trả `NULL` và chuỗi chạy sàn.
 
@@ -2511,6 +2516,14 @@ hay `ns_nsnet`), nên bản dựng của ứng viên kia không tìm thấy mode
 trong `gen_grid.h`; ảnh model mang băm của lưới nó được huấn luyện. Khác nhau thì `ai_engine_load`
 trả `ESP_ERR_INVALID_VERSION` và không nạp. Không có chốt này, đổi bước khung từ 256 sang 160 vẫn nạp
 được model, vẫn chạy, và ra rác.
+
+**`listen_hash` chặn lệch cửa sổ lệnh lúc huấn luyện và lúc chạy.** `contracts/listen.yaml` định đặc trưng, bộ dò cao
+độ và cách `svc_listen` cắt cửa sổ (§3.11, §3.12, §5.4), và mô phỏng cắt mẫu học đúng theo nó, nên model `command` chỉ
+khớp một bản `listen.yaml`. Băm là 4 byte đầu sha256 của tệp ấy viết thành JSON khoá xếp thứ tự; firmware biên dịch với
+nó trong `gen_listen.h`. Ảnh mang băm khác thì nhánh `command` không dựng và ghi lỗi kèm hai băm:
+`ai_engine_has(AI_ENGINE_MODEL_COMMAND)` trả false, `svc_listen` không nghe, còn `wake` và `ns`, không đọc
+`listen.yaml`, vẫn nạp. Không có chốt này, đổi `lead_s` từ 2,0 sang 1,25 s vẫn nạp được model, vẫn chạy, và nhận kém
+đi mà không có dấu hiệu nào.
 
 ### 6.4 LittleFS (`storage`)
 

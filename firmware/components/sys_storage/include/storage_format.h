@@ -66,7 +66,7 @@ _Static_assert(STORAGE_NVS_NAME_FITS(STORAGE_KEY_AGC_TARGET_DBFS) &&
 #define STORAGE_PATH_RESPONSES "/lfs/resp/vi.json"
 
 #define STORAGE_MODEL_MAGIC 0x444d5253u // "SRMD" little-endian
-#define STORAGE_MODEL_FORMAT_VER 1
+#define STORAGE_MODEL_FORMAT_VER 2
 #define STORAGE_MODEL_MAX_ENTRIES 8
 #define STORAGE_MODEL_NAME_BYTES 16
 #define STORAGE_MODEL_HEADER_BYTES 1024
@@ -93,8 +93,9 @@ typedef struct {
     uint32_t magic;
     uint32_t format_ver;
     uint32_t count;
-    uint32_t grid_hash; // GEN_GRID_HASH of the grid the models learned on
-    uint8_t reserved[48];
+    uint32_t grid_hash;   // GEN_GRID_HASH of the grid the models learned on
+    uint32_t listen_hash; // GEN_LISTEN_HASH the command learned on; 0 without one
+    uint8_t reserved[44];
     storage_model_entry_t entry[STORAGE_MODEL_MAX_ENTRIES];
     uint8_t pad[STORAGE_MODEL_HEADER_BYTES - 64 - STORAGE_MODEL_MAX_ENTRIES * 64];
 } storage_model_header_t;
