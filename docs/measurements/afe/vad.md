@@ -106,4 +106,98 @@ cùng cảnh, thêm mức −26 dBFS của §1. Trung bình F1 của 4 SNR (20, 
 
 Tham chiếu càng cao càng đưa `vad` tới lời nhỏ, nhưng ở −26 và −40 dBFS cực tiểu trượt có lúc thấp hơn nền thật, nên
 nâng một chút và báo nhầm thêm: F1 tụt tới 0,007 ở −54. Điều kiện xong của E7-T6 đòi F1 trên cảnh của §1 không kém, nên
-bộ ước nền phải không bao giờ nâng cảnh to: phân vị trượt thay cực tiểu, hay ngưỡng dưới của độ lợi, là bước đo kế tiếp.
+bộ ước nền phải không bao giờ nâng cảnh to.
+
+Độ lợi bám đỉnh: đỉnh là năng lượng bước lớn nhất, giữ rồi nhả 2 dB/s; độ lợi bước sau = đích trừ đỉnh, kẹp 0 … 30 dB, nên
+không bao giờ nâng cảnh có đỉnh trên đích. Cùng cảnh và cùng cột với bảng trên:
+
+| Đích đỉnh | F1 ở −26 và −40 dBFS | F1 ở −50 dBFS | F1 ở −55 … −65 dBFS | Câu không chạm, −55 … −65 dBFS | Ô −26/−40 tụt nhất |
+|---|---|---|---|---|---|
+| như chuỗi đưa | 0,785 | 0,733 | 0,536 | 872 / 2 705 | — |
+| −40 | 0,782 | 0,702 | 0,703 | 358 | 0,016 |
+| −36 | 0,771 | 0,698 | 0,707 | 353 | 0,050 |
+| −32 | 0,765 | 0,708 | 0,719 | 290 | 0,083 |
+
+Thua tham chiếu nền −54 ở mọi cột, và kéo −50 dBFS xuống 0,03 (−50 dBFS SNR 5 dB: 0,735 → 0,680, bỏ sót 30,0 → 37,8%).
+
+Độ lợi theo phân vị: phân vị 10 (nền) và 90 (lời) của năng lượng các bước trong 6 s trước bước, nhân quả; độ lợi = tham
+chiếu nền trừ nền, hay nhỏ hơn nữa nếu tham chiếu lời trừ lời nhỏ hơn, kẹp 0 … 30 dB; một biến thể đổi độ lợi không quá
+6 dB/s. Cùng cảnh, cùng cột, chạy lại cả hai bộ ước trên (số trùng); thêm độ lợi trung bình trên bước có tiếng / bước im
+của nhãn ở −40 dBFS SNR 20 dB:
+
+| Bộ ước | F1 ở −26 và −40 dBFS | F1 ở −50 dBFS | F1 ở −55 … −65 dBFS | Câu không chạm, −55 … −65 dBFS | Ô −26/−40 tụt nhất | Độ lợi tiếng / im, dB |
+|---|---|---|---|---|---|---|
+| như chuỗi đưa | 0,785 | 0,733 | 0,536 | 872 / 2 705 | — | 0 / 0 |
+| cực tiểu trượt, nền −54 | 0,782 | 0,725 | 0,708 | 310 | 0,007 | 6,6 / 8,1 |
+| bám đỉnh, đích −40 | 0,782 | 0,702 | 0,703 | 358 | 0,016 | 0,1 / 1,1 |
+| phân vị, nền −54 | 0,785 | 0,738 | 0,718 | 315 | 0,001 | 9,0 / 9,0 |
+| phân vị, nền −54, lời −36 | 0,785 | 0,738 | 0,718 | 315 | 0,001 | 2,9 / 3,7 |
+| phân vị, nền −54, lời −32 | 0,785 | 0,738 | 0,718 | 315 | 0,002 | 6,2 / 6,6 |
+| phân vị, nền −54, lời −36, 6 dB/s | 0,785 | 0,741 | 0,721 | 313 | 0,001 | 3,0 / 3,6 |
+| phân vị, nền −50, lời −36 | 0,784 | 0,742 | 0,738 | 245 | 0,003 | 3,0 / 3,9 |
+| phân vị, nền −50, lời −32 | 0,783 | 0,743 | 0,739 | 244 | 0,005 | 6,7 / 7,6 |
+
+Cái hại không nằm ở mức nâng mà ở độ lợi lệch giữa lúc nói và lúc im. Ở −40 dBFS SNR 20 dB, nền phân vị nâng 9,0 dB đều
+cả hai loại bước và F1 giữ 0,833 như chuỗi đưa; cực tiểu trượt nâng ít hơn nhưng lúc im cao hơn lúc nói 1,5 dB, F1 tụt
+0,827. Bám đỉnh lên trong khoảng nghỉ rồi sập ở bước to đầu câu: lúc im cao hơn lúc nói 1,0 dB ở đây, 2,0 dB ở −50 dBFS
+SNR 5 dB (4,8 / 6,8), 2,5 dB ở −60 dBFS SNR 10 dB (15,4 / 17,9). Mô hình nhiễu của GMM học nền đã nâng, lời nói tới với
+độ lợi thấp hơn, nên tiếng bị sót thêm đúng ở các ô SNR thấp.
+
+Nền phân vị −54 giữ F1 trên cảnh của §1 ở 0,785 (lệch dưới 0,0005), ô tụt nhất 0,001, và hơn cực tiểu trượt ở mọi cột;
+thêm tham chiếu lời −36 không đổi số mà bớt nâng cảnh vốn đủ to (9,0 → 2,9 dB ở −40 dBFS SNR 20 dB); giới hạn 6 dB/s nhích
+thêm ở mức thấp. Nền −50 tới được lời nhỏ hơn (câu không chạm 245 so với 315) nhưng F1 trên §1 tụt 0,001–0,002. Ở
+−55 … −65 dBFS câu không chạm còn 11,6%, gần hết ở SNR 5 và 0 dB. Thước quyết định là của E7-T6: các bộ ước này chạy trong
+chuỗi trên 198 phiên `val` của `command/v5`, cắt như board (`measurements/command.md` §12.6).
+
+## 6. Trong chuỗi, cắt như board trên `val` (E7-T6)
+
+198 phiên `val` của `command/v5` (1 583 mẩu) dựng lại từng phiên qua đường mô phỏng board, chuỗi sản phẩm và luật cắt
+cửa sổ của `contracts/listen.yaml` trên `vad` của chuỗi, như `measurements/command.md` §12.6; script chẩn đoán chạy một lần
+05/10 trên code hiện tại. Bộ ước của §5 đưa đầu vào đã nâng cho `vad` của chuỗi (phân vị trên tần suất 1 dB của năng lượng
+bước trong 6 s); `agc` vẫn theo `vad` ấy. Phiên lấy nhiễu với xác suất 0,85, SNR 0 … 30 dB, từ bốn kho: ồn `musan` (trọng
+số 3), DEMAND (2), nhạc `musan` (1), người nói `musan` (1) (`configs/scenes/device.yaml`).
+
+Mẩu mất vì gộp là mẩu thứ hai trở đi của một cửa sổ nhiều mẩu: board chỉ quyết định 3,75 s cuối của câu. Mẩu một mình, đủ
+tiếng là mẩu đứng một mình trong cửa sổ, tiếng sau điểm kết không quá 15 bước và không có tiếng trước điểm mở.
+
+| Đầu vào `vad` | Mẩu không chạm | Cửa sổ mất > 15 bước tiếng cuối | Mẩu mất vì gộp | Cửa sổ dài hơn 12 s | Đủ 2,0 s trước câu | Mẩu một mình, đủ tiếng |
+|---|---|---|---|---|---|---|
+| như chuỗi đưa | 50 (3,2%) | 12,9% | 6,9% | 40 | 70,9% | 74,7% |
+| nền −50 | 0 | 2,8% | 21,4% | 118 | 39,5% | 67,0% |
+| nền −54 | 0 | 2,9% | 21,7% | 119 | 39,2% | 66,3% |
+| nền −58 | 0 | 3,0% | 21,9% | 116 | 38,8% | 66,1% |
+| nền −62 | 0 | 3,1% | 21,4% | 116 | 40,6% | 66,8% |
+| nền −54, lời −36, 6 dB/s | 0 | 3,5% | 14,2% | 71 | 52,7% | 76,2% |
+| nền −58, lời −36, 6 dB/s | 0 | 3,5% | 14,1% | 70 | 52,6% | 76,2% |
+| nền −62, lời −36, 6 dB/s | 0 | 3,5% | 14,0% | — | — | 76,4% |
+| nền −58, lời −40, 6 dB/s | 0 | 3,5% | 13,5% | — | — | 77,2% |
+| nền −58, lời −44, 6 dB/s | 0 | 3,7% | 12,8% | — | — | 77,8% |
+
+Tách theo kho nhiễu, mẩu mất vì gộp / mẩu một mình, đủ tiếng:
+
+| Kho (phiên, mẩu) | như chuỗi đưa | nền −54 | nền −58, lời −44, 6 dB/s |
+|---|---|---|---|
+| không nhiễu (34, 271) | 0,0% / 84,1% (không chạm 5,2%) | 2,2% / 92,6% | 0,0% / 94,8% |
+| DEMAND (49, 392) | 1,5% / 83,2% | 15,3% / 72,4% | 5,6% / 86,2% |
+| ồn `musan` (72, 576) | 10,1% / 71,0% | 21,0% / 68,1% | 15,5% / 75,3% |
+| nhạc `musan` (19, 152) | 5,9% / 67,8% | 46,1% / 37,5% | 21,7% / 65,8% |
+| người nói `musan` (24, 192) | 18,8% / 60,9% | 45,3% / 34,4% | 30,2% / 53,6% |
+
+Nâng chữa đúng hai lỗi E7-T6 nhắm tới: không mẩu nào bị sót, mất tiếng cuối từ 12,9% còn 3%. Ở phòng im nó là lợi thật,
+84,1 → 92,6%. Nhưng nó đưa cả nền vào vùng GMM nghe được, và GMM không tách được người nói với nhạc hay tiếng người nền:
+ở mọi kho có nhiễu `vad` bật trong khoảng nghỉ 1,2–3,0 s giữa hai mẩu, nối chúng thành một cửa sổ. Ở SNR 20–30 dB vẫn mất
+18,2% vì gộp, so với 3,0% của chuỗi đưa: chuỗi hiện tại không nghe nền nhỏ, và chính sự điếc ấy giữ cửa sổ của nó gọn.
+Mức tham chiếu nền −50 … −62 không đổi gì; giới hạn theo lời bớt nâng khi phân vị 90 đã cao, tức đúng ở phiên có nhạc hay
+người nói nền. Tham chiếu lời càng thấp càng gọn: −36 cho 76,2%, −44 cho 77,8%, hơn chuỗi đưa 3,1 điểm, gần hết nhờ phòng
+im và ồn không phải tiếng người; với nhạc và người nói nền vẫn thua chuỗi đưa 2 và 7 điểm.
+
+Kết luận 05/10: nâng đầu vào chỉ đổi sự điếc với lời nhỏ lấy sự điếc với nền nhỏ, vì GMM chỉ phân biệt theo mức và phổ
+thô, không tách được người dùng với tiếng người hay nhạc ở nền. Mức lợi trên thước gián tiếp (3 điểm) không đáng một lượt
+dựng lại mọi đặc trưng; chủ repo chốt giữ `vad` như hiện tại và chuyển câu hỏi sang `vad` học, đầu VAD của RNNoise-16k ở
+E9, đo bằng chính bảng trên. Cửa 3 với chuỗi nâng không chạy.
+
+RNNoise gốc của xiph (`pyrnnoise` 0.4.5, `ml/afe_ref/rnnoise`) cũng phụ thuộc mức. Trên phiên `val` đầu tiên (người nói
+nền `musan` ở SNR 6,9 dB; người dùng −75 dBFS trước `agc`, nền −86 dBFS), xác suất tiếng nói của nó lớn nhất 0,49 với
+đầu vào như chuỗi đưa. Nâng đầu vào cố định, bước có tiếng người dùng / bước khác vượt 0,5: +10 dB 1% / 0%, +20 dB 18% /
+3%, +30 dB 38% / 9%, +40 dB 47% / 13%. Nên `vad` học cũng phải được đưa về mức nó học, hoặc học ở mọi mức. Bảng trên cho
+RNNoise gốc, như chuỗi đưa và nâng như dòng nền −58, lời −44, chạy sau khi xong `command/v5` vì tốn CPU.
