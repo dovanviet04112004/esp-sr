@@ -52,7 +52,7 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 |---|---|---|
 | Một khung DMA | `drv_audio_read_frame` (bên trong `i2s_channel_read`) | một khung cộng biên; hết hạn là lỗi phần cứng, log và đếm |
 | Khung thô | `xQueueReceive(q_frame)` | 100 ms; hết hạn thì nạp watchdog và đếm |
-| Khung sạch | `xQueueReceive(q_clean)` | 100 ms; 1 tick khi `svc_listen` có bước của cửa sổ đang chạy theo luồng hay cửa sổ đã chốt chờ chấm. Hết tick mà không có khung, `nhan_task` chạy liền các bước của cửa sổ (cao độ, rồi một khối mạng tới khoảng 47 ms) tới khi `q_clean` có khung chờ hay hết việc; tick chờ giữa hai đợt là lúc `mqtt_task`, `gui_task`, `luong_task` ở nhân 0 chạy, nên khi cửa sổ đang đuổi kịp, chừng một giây, chúng chạy thưa hơn (KẾ HOẠCH §5.4) |
+| Khung sạch | `xQueueReceive(q_clean)` | 100 ms; 1 tick khi `svc_listen` có bước của cửa sổ đang chạy theo luồng hay cửa sổ đã chốt chờ chấm. Hết tick mà không có khung, `nhan_task` chạy liền các bước của cửa sổ (cao độ, rồi một khối mạng, khoảng 84 ms với mạng bề rộng 160 theo `measurements/latency.md` §18) tới khi `q_clean` có khung chờ hay hết việc; tick chờ giữa hai đợt là lúc `mqtt_task`, `gui_task`, `luong_task` ở nhân 0 chạy, nên khi cửa sổ đang đuổi kịp, chừng một giây, chúng chạy thưa hơn (KẾ HOẠCH §5.4) |
 | Sự kiện, lệnh | `xQueueReceive(q_dialog / q_cmd / q_speak)` | 1 s, rồi nạp watchdog |
 | Nhịp `gui_task` | `vTaskDelayUntil` 100 ms | — |
 

@@ -86,7 +86,7 @@ esp_err_t ai_engine_command_begin(void);
 
 /** Feed one frame of features into the open command window.
  *  @ctx nhan_task | non-blocking
- *  @ret ESP_OK | ESP_ERR_INVALID_STATE no window open | ESP_ERR_NO_MEM window longer than 3 s
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no window open | ESP_ERR_NO_MEM window past GEN_LISTEN_WINDOW_HOPS
  */
 esp_err_t ai_engine_command_step(const float *log_mel);
 
