@@ -66,9 +66,9 @@ rnnt:                              # the rnnt track (KEHOACH 3.12, ADR-0016): Mu
 chunk_hops: 16                     # hops a streaming step takes: a multiple of the front's stride times the top rate
 quant:                             # python -m srpipe.tasks.command.ctc.quant ptq|int16|qat <run> (E11-T12, KEHOACH 3.14)
   seed: 20261002
-  calib_sentences: 64              # train sentences of the run's split the int8 scales are drawn from
+  calib_sentences: 64              # spans of hops below from train sentence starts, the int8 scales drawn from them
   joiner_pairs: 1024               # rnnt: a calibration frame with a command tree context's prefix, drawn with the seed
-  hops: 768                        # every sentence zero-padded to this: a multiple of chunk_hops past train.max_s
+  hops: 768                        # the graph's: a test sentence zero-padded to it, a calibration span this long; a multiple of chunk_hops past train.max_s
   calibrations: [minmax, percentile, mse, kl]   # rung 2 of KEHOACH 3.14, one row each
   test_sentences: 2000             # of test, drawn with the seed
   reject: 300                      # δ₁ of the Gate 3 rows, ‰: float rejected 96.5% at it (measurements/command.md)

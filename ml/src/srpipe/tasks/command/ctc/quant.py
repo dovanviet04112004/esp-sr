@@ -61,28 +61,27 @@ def test_sentence(cfg: dict, net: gate.Ctc) -> np.ndarray:
     return padded(x, hops, net.mean, net.std)
 
 
-def calibration_items(spec: dict, root: Path) -> list[tuple[Path, dict]]:
-    """spec's calib_sentences items of the run's train files under root, drawn with spec's seed among those within
-    spec's hops, each with its listing, in file order."""
+def calibration_items(spec: dict, root: Path) -> list[tuple[Path, int]]:
+    """spec's calib_sentences first hops, drawn with spec's seed, of spans of spec's hops in the run's train shards
+    under root: each a sentence's start with a whole span after it in its shard, with its listing, in file order. A
+    sentence padded to the graph's hops would fill most of it with padding the chip never runs (KEHOACH 3.14)."""
     found = []
     for listing in sorted(root.glob("train_*/*.items.jsonl")):
-        for line in listing.read_text(encoding="utf-8").splitlines():
-            item = json.loads(line)
-            if item["n_frames"] <= spec["hops"]:
-                found.append((listing, item))
+        items = [json.loads(line) for line in listing.read_text(encoding="utf-8").splitlines()]
+        end = max((i["frame_offset"] + i["n_frames"] for i in items), default=0)
+        found += [(listing, i["frame_offset"]) for i in items if i["frame_offset"] + spec["hops"] <= end]
     picks = np.random.default_rng(spec["seed"]).choice(len(found), spec["calib_sentences"], replace=False)
     return [found[k] for k in sorted(picks)]
 
 
-def calibration(trained: dict, spec: dict, mean: np.ndarray, std: np.ndarray, root: Path) -> list[torch.Tensor]:
-    """The sentences of calibration_items, normalised and padded as the net reads them."""
+def calibration(spec: dict, mean: np.ndarray, std: np.ndarray, root: Path) -> list[torch.Tensor]:
+    """The spans of calibration_items normalised as the net reads them, (1, dims, hops) each."""
     out = []
-    for listing, item in calibration_items(spec, root):
-        first, n = item["frame_offset"], item["n_frames"]
+    for listing, first in calibration_items(spec, root):
         stem = str(listing).removesuffix(".items.jsonl")
-        mel = np.load(stem + ".features.npy", mmap_mode="r")[first : first + n]
-        pitch = np.load(stem + ".pitch.npy", mmap_mode="r")[first : first + n]
-        out.append(torch.from_numpy(padded(np.concatenate([mel, pitch], axis=1), spec["hops"], mean, std)))
+        span = slice(first, first + spec["hops"])
+        x = np.concatenate([np.load(stem + s, mmap_mode="r")[span] for s in (".features.npy", ".pitch.npy")], 1)
+        out.append(torch.from_numpy(((x.astype(np.float32) - mean) / std).T[None].astype(np.float32)))
     return out
 
 
@@ -190,7 +189,7 @@ def bench(cfg: dict, run: Path) -> Bench:
     rng = np.random.default_rng(spec["seed"])
     picks = np.sort(rng.choice(len(test.first), min(spec["test_sentences"], len(test.first)), replace=False))
     windows = board_windows(cfg, net, paths)
-    return Bench(net, calibration(net.cfg, spec, net.mean, net.std, root), test, picks, windows)
+    return Bench(net, calibration(spec, net.mean, net.std, root), test, picks, windows)
 
 
 def row_of(cfg: dict, b: Bench, model) -> dict:

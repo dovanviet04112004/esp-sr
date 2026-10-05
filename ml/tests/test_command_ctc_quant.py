@@ -1,5 +1,5 @@
-"""The ctc ladder: features padded and normalised as training reads them, calibration drawn only from sentences the
-graph holds and stacked for a batch, the Gate 3 row, the rows of every step kept in one file, the best calibration
+"""The ctc ladder: features padded and normalised as training reads them, calibration whole spans of real hops from
+sentence starts, stacked for a batch, the Gate 3 row, the rows of every step kept in one file, the best calibration
 within the tie, a norm left unfused refused, rung 4 training a batch graph the graph of one then carries, and no deploy
 of a run cut by another listen.yaml or of a row whose input or output is not int8."""
 
@@ -36,11 +36,13 @@ def test_a_sentence_pads_with_raw_zeros_then_normalises_like_a_training_batch() 
 
 
 def built(root: Path, lengths: list[int]) -> Path:
+    """A train shard of sentences of the given hops back to back, every feature of a hop its index."""
     folder = root / "train_a"
     folder.mkdir(parents=True)
     total = sum(lengths)
-    np.save(folder / "shard_00000.features.npy", np.zeros((total, DIMS - 3), np.float32))
-    np.save(folder / "shard_00000.pitch.npy", np.zeros((total, 3), np.float32))
+    hop = np.arange(total, dtype=np.float32)[:, None]
+    np.save(folder / "shard_00000.features.npy", np.repeat(hop, DIMS - 3, axis=1))
+    np.save(folder / "shard_00000.pitch.npy", np.repeat(hop, 3, axis=1))
     rows, at = [], 0
     for k, n in enumerate(lengths):
         rows.append(json.dumps({"item": f"s{k}", "frame_offset": at, "n_frames": n}))
@@ -49,13 +51,17 @@ def built(root: Path, lengths: list[int]) -> Path:
     return root
 
 
-def test_calibration_draws_only_sentences_the_graph_holds(tmp_path: Path) -> None:
+def test_calibration_takes_whole_spans_of_real_hops_from_sentence_starts_never_padding(tmp_path: Path) -> None:
     root = built(tmp_path, [10, 40, 12, 9, 16])
-    spec = {"seed": 1, "calib_sentences": 4, "hops": 16}
-    calib = quant.calibration({}, spec, np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32), root)
-    assert len(calib) == 4 and all(tuple(c.shape) == (1, DIMS, 16) for c in calib)
+    spec = {"seed": 1, "calib_sentences": 3, "hops": 30}
+    calib = quant.calibration(spec, np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32), root)
+    assert sorted(int(c[0, 0, 0]) for c in calib) == [0, 10, 50]
+    for c in calib:
+        assert tuple(c.shape) == (1, DIMS, 30)
+        start = float(c[0, 0, 0])
+        np.testing.assert_array_equal(c[0].numpy(), np.arange(start, start + 30)[None].repeat(DIMS, 0))
     with pytest.raises(ValueError):
-        quant.calibration({}, spec | {"calib_sentences": 5}, np.zeros(DIMS), np.ones(DIMS), root)
+        quant.calibration(spec | {"calib_sentences": 4}, np.zeros(DIMS), np.ones(DIMS), root)
 
 
 def test_the_gate_row_counts_best_accepted_and_false_accepts() -> None:
