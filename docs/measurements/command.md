@@ -694,3 +694,22 @@ cao độ tính liên tục thì mỗi bước tới vẫn tốn 1,98 ms của n
   cao độ, 1% bước lệch quá 0,1.
 - `vad` của board đọc mức trước `agc`, nên với người nói nhỏ hay xa nó tắt khi tiếng chưa hết: mẫu học cắt trên nó mất lời
   mà nhãn đòi, cắt trên `vad` của riêng tiếng người nói thì không (§12.6). Kéo cửa sổ board thêm sau `vad` không giúp Cửa 3.
+
+### 12.9 Cửa 3 với chuỗi chạy liền cả buổi thu
+
+Board chạy chuỗi và bộ dò cao độ liền từ lúc bật; Cửa 3 trước `2120246` dựng chuỗi mới mỗi phiên. Cùng model
+`20261004_acde692` (bề rộng 128), float, ballast cao độ 2,0 s, lệnh điểm cao nhất không ngưỡng, các phiên được đếm của
+28/09 và 01/10; "liền" là một chuỗi qua mọi phiên của buổi thu (các dòng manifest liền nhau cùng board, firmware,
+`pcm_shift`, kể cả phiên không đếm). Đo 05/10 bằng script chẩn đoán chạy một lần.
+
+| Chuỗi | Cửa sổ lệnh | Lệnh điểm cao nhất đúng | Độ lợi `agc` trung bình trên bước `vad`, phiên lệnh 28/09 / 01/10 |
+|---|---|---|---|
+| mới mỗi phiên | 112 | 85 | +5,5 … +9,4 dB / +1,6 … +7,0 dB |
+| liền cả buổi | 130 | 88 | +19,8 … +26,2 dB / +5,7 … +12,2 dB |
+
+Chạy liền, `agc` vào mỗi phiên lệnh với độ lợi phiên trước để lại, nên lời nói ra cao hơn chừng 15 dB; mô phỏng
+`command/v5` rút độ lợi đầu phiên ngẫu nhiên, trung vị +22 dB lúc có tiếng (§12.6), tức đúng vùng này. `vad` sau nhiều
+phiên của cùng người nói cắt câu dài hơn 10–15 bước, và ở 12/30 phiên lệnh bắt thêm 1–3 đoạn ngắn 17–36 bước giữa hai
+câu (hơi thở, tiếng động) hay tách một câu làm hai: 18 cửa sổ thừa, Cửa 3 cũ tính chúng là câu lệnh. Từ đây Cửa 3 chạy
+liền, và trong phiên lệnh cửa sổ không chồng câu nào chuỗi tìm thấy khi chạy riêng phiên ấy từ đầu là cửa sổ thừa, phải
+bị từ chối như tiếng động.
