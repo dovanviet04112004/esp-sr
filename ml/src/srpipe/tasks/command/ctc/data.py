@@ -88,11 +88,12 @@ def command_rows(spec: dict, raw: Path, learned: list[dict]) -> list[splits.Row]
     index = extract.read_index(raw / "speech" / spec["extract"])
     rng = np.random.default_rng([spec["seed"], COMMANDS_STREAM])
     rows = []
+    real = [r for r in index if r["origin"] == PUBLIC]
     for c in learned:
-        said = [r for r in index if r["phrase"] == c["text"] and corpus.words(r["heard"]) == corpus.words(c["text"])]
+        said = [r for r in real if r["phrase"] == c["text"] and corpus.words(r["heard"]) == corpus.words(c["text"])]
         picks = sorted(rng.choice(len(said), min(spec["per_command"], len(said)), replace=False)) if said else []
         rows += [
-            splits.Row(f"speech/{spec['extract']}/{said[k]['file']}", splits.ABSENT, splits.ABSENT, said[k]["origin"])
+            splits.Row(f"speech/{spec['extract']}/{said[k]['file']}", splits.ABSENT, splits.ABSENT, PUBLIC)
             for k in picks
         ]
     return rows
