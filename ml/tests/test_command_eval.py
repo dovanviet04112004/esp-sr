@@ -7,13 +7,15 @@ import json
 
 import numpy as np
 import pytest
+import soundfile as sf
 import yaml
 
 pytest.importorskip("torch")
 
 from srpipe.core import corpus
 from srpipe.core.audio_io import to_float
-from srpipe.core.config import contract_front, load_yaml
+from srpipe.core.config import contract_front, device_of, load_yaml
+from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.pitch import N_FEATURES
 from srpipe.dsp.spec.stft import Stft
@@ -39,9 +41,35 @@ def test_only_sessions_of_the_products_shift_and_a_scored_kind_count() -> None:
 
 def test_a_session_of_the_manifest_missing_on_disk_is_refused_not_skipped(tmp_path) -> None:
     (tmp_path / "device" / "board_b" / "s1").mkdir(parents=True)
-    rows = [{"board": "board_b", "session": "s1"}, {"board": "board_b", "session": "s2"}]
+    rows = [{"board": "board_b", "fw": "x", "pcm_shift": "13", "session": s} for s in ("s1", "s2")]
     with pytest.raises(FileNotFoundError, match="s2"):
-        next(gate.heard_rows({"features": "scenes/device.yaml"}, rows, {"raw": tmp_path}))
+        next(gate.heard_rows({"features": "scenes/device.yaml"}, rows[:1], {"raw": tmp_path}, rows))
+    with pytest.raises(ValueError, match="s9"):
+        next(
+            gate.heard_rows({"features": "scenes/device.yaml"}, [rows[0] | {"session": "s9"}], {"raw": tmp_path}, rows)
+        )
+
+
+def test_the_sessions_of_a_sitting_run_through_one_chain_and_one_tracker_without_a_reset(tmp_path) -> None:
+    hop, rng = grid.HOP_SAMPLES, np.random.default_rng(3)
+    a, b = (rng.normal(0.0, 800.0, (n * hop, 2)).astype(np.int16) for n in (60, 40))
+    for name, x in (("s1", a), ("s2", b), ("s3", b)):
+        (tmp_path / "device" / "board_b" / name).mkdir(parents=True)
+        for m in range(2):
+            sf.write(tmp_path / "device" / "board_b" / name / f"ch{m}.wav", x[:, m], grid.SAMPLE_RATE_HZ)
+    manifest = [
+        {"session": s, "board": "board_b", "fw": fw, "pcm_shift": "13"}
+        for s, fw in (("s1", "x"), ("s2", "x"), ("s3", "y"))
+    ]
+    cfg = {"features": "scenes/device.yaml"}
+    (_, second, *_), (_, other, *_) = gate.heard_rows(cfg, manifest[1:], {"raw": tmp_path}, manifest)
+    device_cfg = device_of(cfg)
+    chain_cfg = ChainConfig(balance_gains=device.load_microphones(device_cfg["microphone"]).gains)
+    mel = Mel(MelConfig(**device_cfg["features"]))
+    together, alone = device.listen(np.concatenate([a, b]), chain_cfg, mel)[0], device.listen(b, chain_cfg, mel)[0]
+    np.testing.assert_array_equal(second[: len(b)], together[len(a) :])
+    np.testing.assert_array_equal(other[: len(b)], alone)
+    assert not np.array_equal(together[len(a) :], alone)
 
 
 def test_a_command_session_expects_its_command_only_when_the_net_learned_it() -> None:

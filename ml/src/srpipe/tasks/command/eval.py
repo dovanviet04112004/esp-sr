@@ -1,5 +1,6 @@
-"""Gate 3 of the command tracks (KEHOACH 3.12) on the sessions recorded through board B: each session through the
-product's chain, each utterance its vad finds scored once on the command window svc_listen cuts for it (KEHOACH 5.4).
+"""Gate 3 of the command tracks (KEHOACH 3.12) on the sessions recorded through board B: the sessions of each sitting
+through the product's chain run on without a reset, each utterance its vad finds scored once on the command window
+svc_listen cuts for it (KEHOACH 5.4).
 A session saying a command the net knows counts the utterances decided as that command; any other counts those
 rejected.
 Run: python -m srpipe.tasks.command.eval {kws,ctc} <run under ml/>
@@ -40,6 +41,7 @@ from srpipe.tasks.command.rnnt.postproc import rnnt_search
 
 REJECT = "reject"
 HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
+SITTING_KEYS = ("board", "fw", "pcm_shift")  # a manifest row's fields one run of the board shares
 Spans = list[tuple[int, int]]
 
 
@@ -134,13 +136,23 @@ def expected_of(kind: str, prompt: str, command_of: dict[tuple, str]) -> str:
     return command_of.get(tuple(corpus.sounds(prompt)), REJECT) if kind == "cmd" else REJECT
 
 
-def heard(folder: Path, chain_cfg: ChainConfig, mel: Mel) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Clean samples, vad and log-mel per hop of a session's ch0 and ch1 through the product's chain, followed by
-    silence as the board hears on after the session."""
+def sittings(manifest: list[dict]) -> list[list[dict]]:
+    """Manifest rows in their order, cut where the board, its firmware or its pcm_shift changes: the sessions one run of
+    the board heard one after another."""
+    out: list[list[dict]] = []
+    for r in manifest:
+        if out and all(out[-1][-1][k] == r[k] for k in SITTING_KEYS):
+            out[-1].append(r)
+        else:
+            out.append([r])
+    return out
+
+
+def channels_of(folder: Path) -> np.ndarray:
+    """A session's ch0 and ch1 side by side, cut to whole hops: (samples, mics) int16."""
     channels = [sf.read(folder / f"ch{m}.wav", dtype="int16")[0] for m in range(array.N_MICS)]
     n = min(len(c) for c in channels) // grid.HOP_SAMPLES * grid.HOP_SAMPLES
-    clean, figures, features = device.listen(np.stack([c[:n] for c in channels], axis=1), chain_cfg, mel)
-    return with_silence(clean, figures[:, 0].astype(bool), features, mel)
+    return np.stack([c[:n] for c in channels], axis=1)
 
 
 def with_silence(
@@ -254,26 +266,45 @@ def rnnt_heard(net: Ctc, x: np.ndarray) -> Heard:
     return heard_of(net, *rnnt_search.decide(log_probs, frames, tree, ctc_score.CAP, 0, size, pad, per_frames))
 
 
-def heard_rows(cfg: dict, rows: list[dict], paths: dict) -> Iterator[tuple]:
-    """Each board manifest row: the row, its clean samples, vad, log-mel and pitch per hop through the product's
-    chain, pitch from one tracker over the whole session as svc_listen runs it (KEHOACH 3.11); a row whose recording
-    is not on disk is refused."""
+def heard_rows(cfg: dict, rows: list[dict], paths: dict, manifest: list[dict] | None = None) -> Iterator[tuple]:
+    """Each row in manifest order: the row, its clean samples, vad, log-mel and pitch per hop through the product's
+    chain, which runs on without a reset over every session of the row's sitting in manifest, the board manifest
+    unless given, as the board's chain and svc_listen's pitch run on between utterances (KEHOACH 3.11, 5.4); each
+    session followed by silence as with_silence closes it. A row outside manifest, or a sitting with a recording not
+    on disk, is refused."""
     device_cfg = device_of(cfg)
     mics = device.load_microphones(device_cfg["microphone"])
     chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
     tracker = PitchTracker(PitchConfig(**device_cfg["pitch"]))
-    folders = [paths["raw"] / "device" / r["board"] / r["session"] for r in rows]
-    if missing := [f.name for f in folders if not f.is_dir()]:
-        raise FileNotFoundError(f"{', '.join(missing)}: in the board manifest, not under {paths['raw'] / 'device'}")
-    for r, folder in zip(rows, folders, strict=True):
-        clean, vad, features = heard(folder, chain_cfg, mel)
-        yield r, clean, vad, features, device.stream_pitch(tracker, clean)
+    if manifest is None:
+        spec = load_yaml(command.CONFIG)["eval"]["board"]
+        manifest = list(csv.DictReader((paths["manifests"] / spec["manifest"]).open(encoding="utf-8")))
+    asked = {r["session"]: r for r in rows}
+    if absent := sorted(asked.keys() - {r["session"] for r in manifest}):
+        raise ValueError(f"{', '.join(absent)}: not sessions of the board manifest")
+    for sitting in sittings(manifest):
+        if not asked.keys() & {r["session"] for r in sitting}:
+            continue
+        folders = [paths["raw"] / "device" / r["board"] / r["session"] for r in sitting]
+        if missing := [f.name for f in folders if not f.is_dir()]:
+            raise FileNotFoundError(f"{', '.join(missing)}: in the board manifest, not under {paths['raw'] / 'device'}")
+        pcm = [channels_of(f) for f in folders]
+        clean, figures, features = device.listen(np.concatenate(pcm), chain_cfg, mel)
+        cuts = np.cumsum([len(p) // grid.HOP_SAMPLES for p in pcm])[:-1]
+        samples, vads = np.split(clean, cuts * grid.HOP_SAMPLES), np.split(figures[:, 0].astype(bool), cuts)
+        parts = zip(samples, vads, np.split(features, cuts), strict=True)
+        sessions = [with_silence(c, v, f, mel) for c, v, f in parts]
+        pitch = device.stream_pitch(tracker, np.concatenate([s[0] for s in sessions]))
+        pitches = np.split(pitch, np.cumsum([len(s[1]) for s in sessions])[:-1])
+        for r, (c, v, f), p in zip(sitting, sessions, pitches, strict=True):
+            if r["session"] in asked:
+                yield asked[r["session"]], c, v, f, p
 
 
 def heard_sessions(cfg: dict, spec: dict, paths: dict) -> Iterator[tuple]:
     """heard_rows over every counted session of the board manifest."""
-    rows = csv.DictReader((paths["manifests"] / spec["manifest"]).open(encoding="utf-8"))
-    yield from heard_rows(cfg, [r for r in rows if counted(r, spec)], paths)
+    rows = list(csv.DictReader((paths["manifests"] / spec["manifest"]).open(encoding="utf-8")))
+    yield from heard_rows(cfg, [r for r in rows if counted(r, spec)], paths, rows)
 
 
 def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: Callable) -> list[Scored]:

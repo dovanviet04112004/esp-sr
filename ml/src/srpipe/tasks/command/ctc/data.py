@@ -29,6 +29,7 @@ PUBLIC = "public"
 LEARNING = ("train", "val")
 HOURS_STREAM = 4
 BOARD = "board"  # under processed/command/<version>, one shard
+BOARD_CHAIN = "sittings"  # eval.heard_rows: one chain over a sitting
 BOARD_SHARD = "shard_00000"
 HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
 
@@ -182,7 +183,7 @@ def board_built_as(out: Path, device_cfg: dict, rows: list[dict], board: dict) -
         return False
     body = yaml.safe_load((out / "manifest.yaml").read_text(encoding="utf-8"))
     same_sessions = body["sessions"] == [r["session"] for r in rows]
-    same_rule = body.get("listen_hash") == f"0x{listen.HASH:08x}"
+    same_rule = body.get("listen_hash") == f"0x{listen.HASH:08x}" and body.get("chain") == BOARD_CHAIN
     return body["config"] == device_cfg and same_sessions and body["board"] == board_cut(board) and same_rule
 
 
@@ -229,6 +230,7 @@ def cut_board(cfg: dict, paths: dict, out: Path) -> str:
         "sessions": [r["session"] for r in rows],
         "board": board_cut(board),
         "listen_hash": f"0x{listen.HASH:08x}",
+        "chain": BOARD_CHAIN,
         "dtype": dtype,
         "sha256": {n: hashlib.sha256((out / n).read_bytes()).hexdigest() for n in names},
     }

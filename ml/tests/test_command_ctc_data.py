@@ -129,14 +129,17 @@ def test_board_units_leave_out_the_runs_named_noise_and_refuse_a_name_the_cut_la
         data.board_units(tmp_path, "north", ["s1#1"])
 
 
-def test_a_board_cut_of_another_listen_yaml_is_stale(tmp_path: Path) -> None:
+def test_a_board_cut_of_another_listen_yaml_or_chain_run_is_stale(tmp_path: Path) -> None:
     device_cfg = load_device("scenes/device.yaml")
     rows, board = [{"session": "s1"}], {"min_s": 0.8, "max_s": 2.4, "repeat": 75}
-    body = {"config": device_cfg, "sessions": ["s1"], "board": data.board_cut(board)}
+    body = {"config": device_cfg, "sessions": ["s1"], "board": data.board_cut(board), "chain": data.BOARD_CHAIN}
     for listen_hash, fresh in ((device.cut_marks("listen")["listen_hash"], True), ("0x0", False), (None, False)):
         written = body | ({"listen_hash": listen_hash} if listen_hash else {})
         (tmp_path / "manifest.yaml").write_text(yaml.safe_dump(written), encoding="utf-8")
         assert data.board_built_as(tmp_path, device_cfg, rows, board) is fresh
+    per_session = body | {"listen_hash": device.cut_marks("listen")["listen_hash"], "chain": None}
+    (tmp_path / "manifest.yaml").write_text(yaml.safe_dump(per_session), encoding="utf-8")
+    assert not data.board_built_as(tmp_path, device_cfg, rows, board)
 
 
 def test_a_board_session_given_to_train_that_says_an_unseen_command_is_refused(tmp_path: Path, monkeypatch) -> None:

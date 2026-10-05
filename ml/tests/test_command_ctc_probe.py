@@ -140,7 +140,8 @@ def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read(
     clean = rng.integers(-2000, 2000, total * hop).astype(np.int16)
     features = rng.normal(size=(total, listen.N_BANDS)).astype(np.float32)
     tracker = SimpleNamespace(reset=lambda: None, step=lambda x: np.zeros(3, dtype=np.float32))
-    body = probe.listen_session(clean, vad, features, lambda x: [len(x), 1, 2, 3], tracker)
+    mel = SimpleNamespace(log=lambda bins: np.zeros(listen.N_BANDS, dtype=np.float32))
+    body = probe.listen_session(clean, vad, lambda x: [len(x), 1, 2, 3], tracker, mel)
     hops, n_segments, n_windows = probe.SESSION_HEAD.unpack_from(body)
     assert hops == total and n_windows == 2
     at = probe.SESSION_HEAD.size
@@ -160,9 +161,8 @@ def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read(
     assert [w[2] for w in windows] == [81, 51 + lead] and segments == [(0, 80), (second - 1 - lead, second + 50)]
     assert at + n_windows * probe.WINDOW_RECORD.size == len(body)
     vad[total - 20 : total] = True
-    mel = SimpleNamespace(log=lambda bins: np.zeros(listen.N_BANDS, dtype=np.float32))
     session = gate.with_silence(clean, vad, features, mel)
-    body = probe.listen_session(*session, lambda x: [len(x), 1, 2, 3], tracker)
+    body = probe.listen_session(session[0], session[1], lambda x: [len(x), 1, 2, 3], tracker, mel)
     hops, _, n_windows = probe.SESSION_HEAD.unpack_from(body)
     last = probe.WINDOW_RECORD.unpack_from(body, len(body) - probe.WINDOW_RECORD.size)
     assert hops == total + listen.UTTERANCE_GAP_HOPS + 1 and n_windows == 3

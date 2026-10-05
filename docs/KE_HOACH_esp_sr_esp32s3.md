@@ -1138,7 +1138,10 @@ với bộ đệm rỗng như lúc học, bộ lệnh là mọi dòng của `def
 đẩy xuống (`/lfs/cmd/set.json`) thì chấm thêm trên chính bộ ấy (`make command-eval SET=`) để so với board, còn số chọn
 model là số của bộ mặc định. Câu là các đoạn
 `vad` cách nhau không quá `utterance.gap_s`, bỏ câu ngắn hơn `utterance.min_s`; mọi số của luật cắt nằm ở
-`contracts/listen.yaml`. Phiên ghi xong được nối thêm lặng như board nghe tiếp sau phiên, để câu cuối cũng chốt. Board
+`contracts/listen.yaml`. Chuỗi của sản phẩm và bộ dò cao độ chạy liền, không đặt lại, qua mọi phiên của một buổi thu
+(các dòng liền nhau của manifest cùng board, firmware và `pcm_shift`), như board chạy liền giữa các câu: `agc` vào phiên
+sau với độ lợi phiên trước để lại. Phiên ghi xong được nối thêm lặng như board nghe tiếp sau phiên, để câu cuối cũng
+chốt. Board
 chưa có `wake` cắt đúng như vậy, nên quyết định của board trên tiếng nói trực tiếp là quyết định Cửa 3 đếm. Tới khi
 E11-T13 chỉnh `δ₁` `δ₂` trên cụm na ná lệnh, bảng của `ctc` ghi lệnh điểm cao nhất của từng câu và quét `δ₁` để thấy đánh
 đổi giữa nhận và từ chối, chưa kết luận đạt hay trượt. Chấm float để đọc nhanh; số chọn model là số sau int8 (§1.3).

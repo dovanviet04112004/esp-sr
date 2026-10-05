@@ -20,8 +20,11 @@ import torch
 from torch import nn
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
+from srpipe.core.audio_io import to_float
 from srpipe.core.config import ML_ROOT, data_paths, device_of, load_yaml
+from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
+from srpipe.dsp.spec.stft import Stft
 from srpipe.export import pack_models, update_lock
 from srpipe.generated import grid, listen
 from srpipe.scenes import device
@@ -264,11 +267,12 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
     return image, streams, decide, command, every, labels
 
 
-def listen_session(clean: np.ndarray, vad: np.ndarray, features: np.ndarray, decided_of: Callable, tracker) -> bytes:
-    """A board session with the silence eval.heard puts after it, as svc_listen's test feeds it: its vad, the clean
+def listen_session(clean: np.ndarray, vad: np.ndarray, decided_of: Callable, tracker, mel: Mel) -> bytes:
+    """A board session with the silence eval.heard_rows puts after it, as svc_listen's test feeds it: its vad, the clean
     samples of every hop a command window reads and the hop ahead of it, which the STFT of the window's first hop
     overlaps, and each window with the decision decided_of(window) takes; hops outside the segments are fed as zeros,
-    which no window's log-mel reads, and the windows' pitch is the tracker's over that fed stream, as on the board."""
+    which no window's log-mel reads. The windows' log-mel and pitch are computed afresh over that fed stream, as
+    svc_listen does after the jump in seq the test puts between sessions."""
     hop, spans = grid.HOP_SAMPLES, device.utterances(vad)
     ranges = device.command_cut(spans)
     segments: list[list[int]] = []
@@ -281,6 +285,8 @@ def listen_session(clean: np.ndarray, vad: np.ndarray, features: np.ndarray, dec
     fed = np.zeros_like(clean)
     for first, last in segments:
         fed[first * hop : (last + 1) * hop] = clean[first * hop : (last + 1) * hop]
+    stft = Stft()
+    features = np.stack([mel.log(stft.analyze(to_float(h))) for h in fed.reshape(-1, hop)]).astype(np.float32)
     windows = gate.ctc_windows(features, device.stream_pitch(tracker, fed), spans)
     body = SESSION_HEAD.pack(len(vad), len(segments), len(ranges))
     body += np.packbits(vad.astype(np.uint8), bitorder="little").tobytes()
@@ -309,6 +315,7 @@ def listen_rounds(cfg: dict, out: Path) -> list[Path]:
     reject, margin = cfg["quant"]["reject"], cfg["eval"]["margin"]
     lexicon, per_frames = ctc_score.default_lexicon(), ctc_score.window_frames(trained.model.front.hop_stride)
     tracker = PitchTracker(PitchConfig(**device_of(trained.cfg)["pitch"]))
+    mel = Mel(MelConfig(**device_of(trained.cfg)["features"]))
 
     def decided_of(x: np.ndarray) -> list[int]:
         logits = int8(torch.from_numpy(((x - trained.mean) / trained.std).T[None].astype(np.float32))).numpy()[0]
@@ -322,8 +329,8 @@ def listen_rounds(cfg: dict, out: Path) -> list[Path]:
     named = b"".join(c["id"].encode() + b"\0" + c["text"].encode() + b"\0" for c in listed)
     named += b"\0" * (-(LISTEN_HEAD.size + len(named)) % 4)
     bodies = [
-        listen_session(clean, vad, features, decided_of, tracker)
-        for _, clean, vad, features, _pitch in gate.heard_sessions(trained.cfg, spec, data_paths())
+        listen_session(clean, vad, decided_of, tracker, mel)
+        for _, clean, vad, _features, _pitch in gate.heard_sessions(trained.cfg, spec, data_paths())
     ]
     out.mkdir(parents=True, exist_ok=True)
     for stale in out.glob("listen_*.bin"):
