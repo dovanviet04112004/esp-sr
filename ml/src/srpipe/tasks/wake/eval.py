@@ -20,7 +20,7 @@ from srpipe.core import corpus
 from srpipe.core.config import data_paths, device_of, load_run_config, load_yaml
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
-from srpipe.generated import array, grid, listen
+from srpipe.generated import array, grid
 from srpipe.scenes import device
 from srpipe.tasks.wake import CONFIG
 from srpipe.tasks.wake.data import Shard
@@ -98,19 +98,6 @@ class BoardSession:
     stray: int
 
 
-def utterances(vad: np.ndarray) -> list[tuple[int, int]]:
-    """(first, last) hop of each run of vad, runs closer than listen's gap joined, those shorter than its least dropped,
-    as svc_listen cuts them on a board without wake (KEHOACH 5.4)."""
-    gap, least = listen.UTTERANCE_GAP_HOPS, listen.UTTERANCE_MIN_HOPS
-    runs: list[list[int]] = []
-    for hop in np.flatnonzero(vad):
-        if runs and hop - runs[-1][1] <= gap:
-            runs[-1][1] = int(hop)
-        else:
-            runs.append([int(hop), int(hop)])
-    return [(a, b) for a, b in runs if b - a >= least]
-
-
 def session_features(session: Path, chain_cfg: ChainConfig, mel: Mel) -> tuple[np.ndarray, np.ndarray]:
     """Log-mel and vad per hop of ch0 and ch1 as the product's chain gives them, the channels cut to a common whole
     number of hops."""
@@ -156,7 +143,7 @@ def scored(heard: tuple, features: np.ndarray, vad: np.ndarray, net: tuple, cfg:
     model, mean, std, dev = net
     after, lockout = hops
     s = smooth(probabilities(model, Shard(features, vad, [], False), mean, std, dev), cfg["eval"]["smooth_hops"])
-    spans = utterances(vad)
+    spans = device.utterances(vad)
     fired = triggers(s, threshold, lockout)
     inside = [any(a <= f <= b + after for a, b in spans) for f in fired]
     peaks = [float(s[a : b + after + 1].max()) for a, b in spans]

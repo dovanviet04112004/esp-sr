@@ -25,7 +25,6 @@ from srpipe.tasks import command
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.wake.data import sentence_units
-from srpipe.tasks.wake.eval import utterances
 
 PUBLIC = "public"
 LEARNING = ("train", "val")
@@ -187,9 +186,9 @@ def cut_board(cfg: dict, paths: dict, out: Path) -> str:
     shortest, longest = (round(board[k] * HOPS_PER_S) for k in ("min_s", "max_s"))
     items, mels, pitches, offset, dropped = [], [], [], 0, 0
     for r, clean, vad, features, tracker in gate.heard_rows(cfg, rows, paths):
-        spans = utterances(vad)
+        spans = device.utterances(vad)
         windows = gate.ctc_windows(clean, features, spans, tracker) if spans else []
-        for k, ((first, last), (start, _), x) in enumerate(zip(spans, gate.command_cut(spans), windows, strict=True)):
+        for k, ((first, last), (start, _), x) in enumerate(zip(spans, device.command_cut(spans), windows, strict=True)):
             if not shortest <= last + 1 - first <= longest:
                 dropped += 1
                 continue

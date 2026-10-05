@@ -15,6 +15,7 @@ from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.pitch import N_FEATURES, PitchConfig, PitchTracker
 from srpipe.dsp.spec.stft import Stft
 from srpipe.generated import grid, listen
+from srpipe.scenes import device
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc.model import encoder
@@ -66,13 +67,13 @@ def test_the_table_scores_each_command_and_the_rejections_by_kind() -> None:
 def test_a_command_window_opens_its_lead_ahead_never_into_the_one_before_and_a_long_one_reaches_back() -> None:
     lead, longest = listen.UTTERANCE_LEAD_HOPS, listen.WINDOW_HOPS
     spans = [(30, 60), (70, 100), (200, 260), (300, 520)]
-    assert gate.command_cut(spans) == [(0, 61), (62, 101), (200 - lead, 261), (522 - longest, 521)]
+    assert device.command_cut(spans) == [(0, 61), (62, 101), (200 - lead, 261), (522 - longest, 521)]
     hops, bands = 600, 40
     features = np.arange(hops, dtype=np.float32)[:, None].repeat(bands, axis=1)
     clean = np.zeros(hops * grid.HOP_SAMPLES, dtype=np.int16)
     xs = gate.ctc_windows(clean, features, spans, PitchTracker(PitchConfig(**listen.PITCH)))
     cut = [(int(x[0, 0]), int(x[-1, 0])) for x in xs]
-    assert cut == gate.command_cut(spans) and {x.shape[1] for x in xs} == {bands + N_FEATURES}
+    assert cut == device.command_cut(spans) and {x.shape[1] for x in xs} == {bands + N_FEATURES}
 
 
 def test_a_session_closes_on_silence_whose_log_mel_goes_on_from_its_last_hop() -> None:
@@ -89,7 +90,7 @@ def test_a_session_closes_on_silence_whose_log_mel_goes_on_from_its_last_hop() -
     assert np.array_equal(on_features[:20], features)
     went_on = np.stack([mel.log(stft.analyze(np.zeros(hop, np.float32))) for _ in range(tail)])
     assert np.array_equal(on_features[20:], went_on.astype(np.float32))
-    assert gate.command_cut([(19 - listen.UTTERANCE_MIN_HOPS, 19)])[-1][1] == 20 < len(on_vad)
+    assert device.command_cut([(19 - listen.UTTERANCE_MIN_HOPS, 19)])[-1][1] == 20 < len(on_vad)
 
 
 def test_a_ctc_window_reaches_the_decision_as_frames_of_its_own_hops(monkeypatch) -> None:

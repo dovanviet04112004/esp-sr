@@ -36,6 +36,7 @@ from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
 from srpipe.dsp.spec.stft import Stft
 from srpipe.dsp.spec.window import sqrt_hann
 from srpipe.generated import array, grid
+from srpipe.generated.listen import UTTERANCE_GAP_HOPS, UTTERANCE_LEAD_HOPS, UTTERANCE_MIN_HOPS, WINDOW_HOPS
 from srpipe.metrics import mic_pair
 from srpipe.scenes import room
 
@@ -223,6 +224,34 @@ def listen(pcm: np.ndarray, chain_cfg: ChainConfig, mel: Mel) -> tuple[np.ndarra
         figures[i] = (frame.vad, frame.level_dbfs, frame.gain_db)
         features[i] = mel.log(stft.analyze(to_float(frame.pcm)))
     return clean.reshape(-1), figures, features
+
+
+def utterances(vad: np.ndarray) -> list[tuple[int, int]]:
+    """(first, last) hop of each run of vad, runs closer than listen's gap joined, those shorter than its least dropped,
+    as svc_listen cuts them on a board without wake (KEHOACH 5.4)."""
+    gap, least = UTTERANCE_GAP_HOPS, UTTERANCE_MIN_HOPS
+    runs: list[list[int]] = []
+    for hop in np.flatnonzero(vad):
+        if runs and hop - runs[-1][1] <= gap:
+            runs[-1][1] = int(hop)
+        else:
+            runs.append([int(hop), int(hop)])
+    return [(a, b) for a, b in runs if b - a >= least]
+
+
+def command_cut(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """The first and last hop of each utterance's command window as svc_listen cuts it (KEHOACH 5.4): from listen's
+    lead ahead of its first vad hop to the hop after its last, never back past the window ahead of it; a window longer
+    than listen's reaches back that far from its end instead."""
+    out, after = [], 0
+    for first, last in spans:
+        end = last + 1
+        start = max(first - UTTERANCE_LEAD_HOPS, after)
+        if end + 1 - start > WINDOW_HOPS:
+            start = max(end + 1 - WINDOW_HOPS, after)
+        out.append((start, end))
+        after = end + 1
+    return out
 
 
 def build_room(cfg: dict, index: int) -> tuple[np.ndarray, dict]:

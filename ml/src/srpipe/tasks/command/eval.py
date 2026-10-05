@@ -37,7 +37,6 @@ from srpipe.tasks.command.ctc.postproc import ctc_score
 from srpipe.tasks.command.kws.model import dscnn
 from srpipe.tasks.command.kws.postproc import decide
 from srpipe.tasks.command.rnnt.postproc import rnnt_search
-from srpipe.tasks.wake.eval import utterances
 
 REJECT = "reject"
 HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
@@ -188,25 +187,10 @@ def decisions(net: Kws, x: np.ndarray) -> list[tuple[str, int]]:
     return out
 
 
-def command_cut(spans: Spans) -> list[tuple[int, int]]:
-    """The first and last hop of each utterance's command window as svc_listen cuts it (KEHOACH 5.4): from listen's
-    lead ahead of its first vad hop to the hop after its last, never back past the window ahead of it; a window longer
-    than listen's reaches back that far from its end instead."""
-    out, after = [], 0
-    for first, last in spans:
-        end = last + 1
-        start = max(first - listen.UTTERANCE_LEAD_HOPS, after)
-        if end + 1 - start > listen.WINDOW_HOPS:
-            start = max(end + 1 - listen.WINDOW_HOPS, after)
-        out.append((start, end))
-        after = end + 1
-    return out
-
-
 def ctc_windows(clean: np.ndarray, features: np.ndarray, spans: Spans, tracker: PitchTracker) -> list[np.ndarray]:
     """Each utterance's command window: its log-mel, then pitch from a tracker reset at its first hop."""
     out = []
-    for start, end in command_cut(spans):
+    for start, end in device.command_cut(spans):
         pitch = device.item_pitch(tracker, clean[start * grid.HOP_SAMPLES : (end + 1) * grid.HOP_SAMPLES])
         out.append(np.concatenate([features[start : end + 1], pitch], axis=1).astype(np.float32))
     return out
@@ -297,7 +281,7 @@ def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: 
     command_of = {tuple(corpus.sounds(text)): cid for cid, text in said.items()}
     results = []
     for r, clean, vad, features, tracker in heard_sessions(cfg, spec, paths):
-        spans = utterances(vad)
+        spans = device.utterances(vad)
         decided = decided_of(clean, features, spans, tracker) if spans else []
         expected = expected_of(r["kind"], r["prompt"], command_of)
         results.append(Scored(r["session"], r["kind"], r["distance_cm"], r["prompt"], expected, decided))

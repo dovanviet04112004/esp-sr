@@ -23,13 +23,13 @@ from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
 from srpipe.core.config import ML_ROOT, data_paths, load_yaml
 from srpipe.export import pack_models, update_lock
 from srpipe.generated import grid, listen
+from srpipe.scenes import device
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc import quant
 from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc import ctc_score
-from srpipe.tasks.wake.eval import utterances
 
 PROBE_DIR = ML_ROOT.parent / "firmware" / "components" / "ai_engine" / "test_apps" / "unit" / "main" / "probe"
 MODELS_FILE, STREAMS_FILE, DECIDE_FILE = "ctc_models.bin", "ctc_streams.bin", "ctc_decide.bin"
@@ -266,8 +266,8 @@ def listen_session(clean: np.ndarray, vad: np.ndarray, features: np.ndarray, dec
     samples of every hop a command window reads and the hop ahead of it, which the STFT of the window's first hop
     overlaps, and each window with the decision decided_of(window) takes; hops outside the segments are fed as zeros,
     which no window reads."""
-    hop, spans = grid.HOP_SAMPLES, utterances(vad)
-    ranges = gate.command_cut(spans)
+    hop, spans = grid.HOP_SAMPLES, device.utterances(vad)
+    ranges = device.command_cut(spans)
     segments: list[list[int]] = []
     for start, end in ranges:
         first = max(start - 1, 0)
