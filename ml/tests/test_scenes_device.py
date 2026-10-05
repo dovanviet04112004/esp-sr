@@ -13,9 +13,11 @@ import numpy as np
 import pytest
 import yaml
 
-from srpipe.core import screen
-from srpipe.core.audio_io import INT16_SCALE, to_float, write_wav
+from srpipe.core import screen, splits
+from srpipe.core.audio_io import INT16_SCALE, ItemReader, to_float, write_wav
 from srpipe.core.config import CONFIGS, load_device, load_yaml
+from srpipe.dsp.afe.chain import ChainConfig
+from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.pitch import PitchConfig, pitch_features
 from srpipe.generated import afe, array, grid, listen
 from srpipe.metrics import mic_pair
@@ -246,15 +248,24 @@ def test_pitch_rides_along_and_changes_no_other_file(raw_root: Path, tmp_path: P
     )
     assert "pitch" not in plain and "pads_s" not in plain and with_pitch["pitch"] is True
     assert {n: s for n, s in with_pitch["sha256"].items() if not n.endswith(".pitch.npy")} == plain["sha256"]
-    cfg = PitchConfig(**tiny()["pitch"])
-    for shard in sorted((tmp_path / "pitch").glob("*.items.jsonl")):
-        stem = str(shard).removesuffix(".items.jsonl")
-        feats, pcm, pitch = (np.load(f"{stem}.{kind}.npy") for kind in ("features", "pcm", "pitch"))
-        assert pitch.shape == (len(feats), 3) and pitch.dtype == np.float32
-        for row in (json.loads(line) for line in shard.read_text().splitlines()):
-            at, n = row["frame_offset"], row["n_frames"]
-            fresh, _ = pitch_features(to_float(pcm[at * grid.HOP_SAMPLES : (at + n) * grid.HOP_SAMPLES]), cfg)
-            assert np.array_equal(pitch[at : at + n], fresh)
+    stem = str(sorted((tmp_path / "pitch").glob("*.items.jsonl"))[0]).removesuffix(".items.jsonl")
+    feats, pitch = (np.load(f"{stem}.{kind}.npy") for kind in ("features", "pitch"))
+    assert pitch.shape == (len(feats), 3) and pitch.dtype == np.float32
+    cfg, rows = tiny(), splits.read_split(split)[: tiny()["session"]["items"]]
+    mics = device.load_microphones(cfg["microphone"])
+    floor = device.load_floor(cfg["microphone"]["floor"], raw_root, mics.pcm_shift)
+    readers = {"raw": ItemReader(raw_root), "interim": ItemReader(interim)}
+    pools = device.noise_files(cfg, raw_root, set())
+    bank = device.room_bank(cfg, interim, 1)
+    captured, spans, draws = device.simulate_session(cfg, 0, rows, bank, mics, pools, readers, floor)
+    chain = dataclasses.replace(ChainConfig(balance_gains=mics.gains), agc_start_db=draws.get("agc_start_db"))
+    clean, figures, _ = device.listen(captured, chain, Mel(MelConfig(**cfg["features"])))
+    heard, _ = pitch_features(to_float(clean), PitchConfig(**cfg["pitch"]))
+    items = [json.loads(line) for line in Path(stem + ".items.jsonl").read_text().splitlines()]
+    pads = (cfg["session"]["pad_s"],) * 2
+    for item, (first, stop, _, _) in zip(items, device.cut_items("pads", spans, pads, figures[:, 0]), strict=False):
+        at, n = item["frame_offset"], item["n_frames"]
+        assert n == stop - first and np.array_equal(pitch[at : at + n], heard[first:stop])
 
 
 def test_wider_pads_keep_more_hops_before_each_item(raw_root: Path, tmp_path: Path) -> None:
@@ -354,17 +365,15 @@ def test_the_listen_cut_keeps_the_boards_windows_and_counts_the_unheard(raw_root
     items = items_of(tmp_path / "cut")
     assert body["cut"] == "listen" and items
     assert sum(len(i.get("clips", [i["item"]])) for i in items) + body["unheard"] == body["items"] == 5
-    cfg = PitchConfig(**tiny()["pitch"])
     for shard in sorted((tmp_path / "cut").glob("*.items.jsonl")):
         stem = str(shard).removesuffix(".items.jsonl")
-        figures, pcm, pitch = (np.load(f"{stem}.{kind}.npy") for kind in ("figures", "pcm", "pitch"))
+        figures, pitch = (np.load(f"{stem}.{kind}.npy") for kind in ("figures", "pitch"))
+        assert pitch.shape == (len(figures), 3)
         for row in (json.loads(line) for line in shard.read_text().splitlines()):
             at, n = row["frame_offset"], row["n_frames"]
             first, stop = row["speech_frames"]
             vad = figures[at : at + n, 0].astype(bool)
             assert first <= LEAD and stop == n - 1 and vad[first] and vad[stop - 1] and not vad[stop]
-            fresh, _ = pitch_features(to_float(pcm[at * grid.HOP_SAMPLES : (at + n) * grid.HOP_SAMPLES]), cfg)
-            assert np.array_equal(pitch[at : at + n], fresh)
 
 
 def test_the_listen_cut_takes_no_pads(raw_root: Path, tmp_path: Path) -> None:

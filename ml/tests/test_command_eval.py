@@ -12,7 +12,7 @@ from srpipe.core import corpus
 from srpipe.core.audio_io import to_float
 from srpipe.core.config import load_yaml
 from srpipe.dsp.spec.mel import Mel, MelConfig
-from srpipe.dsp.spec.pitch import N_FEATURES, PitchConfig, PitchTracker
+from srpipe.dsp.spec.pitch import N_FEATURES
 from srpipe.dsp.spec.stft import Stft
 from srpipe.generated import grid, listen
 from srpipe.scenes import device
@@ -44,12 +44,12 @@ def test_a_command_session_expects_its_command_only_when_the_net_learned_it() ->
 def test_a_window_ends_where_vad_turns_off_and_repeats_the_first_hop_before_the_session() -> None:
     hops, window, lead, bands = 200, 94, 100, 40
     features = np.arange(hops, dtype=np.float32)[:, None].repeat(bands, axis=1)
-    clean = np.zeros(hops * grid.HOP_SAMPLES, dtype=np.int16)
-    tracker = PitchTracker(PitchConfig(**listen.PITCH))
-    x = gate.windows(clean, features, [(120, 150), (10, 30)], window, lead, tracker)
+    pitch = np.arange(hops * N_FEATURES, dtype=np.float32).reshape(hops, N_FEATURES)
+    x = gate.windows(features, pitch, [(120, 150), (10, 30)], window, lead)
     assert x.shape == (2, window, bands + N_FEATURES)
     assert x[0, -1, 0] == 151 and x[0, 0, 0] == 151 - window + 1
     assert x[1, -1, 0] == 31 and np.all(x[1, : window - 31, 0] == 0)
+    np.testing.assert_array_equal(x[0, -1, bands:], pitch[151])
 
 
 def test_the_table_scores_each_command_and_the_rejections_by_kind() -> None:
@@ -71,10 +71,11 @@ def test_a_command_window_opens_its_lead_ahead_never_into_the_one_before_and_a_l
     assert device.command_cut(spans) == expected
     hops, bands = lead + longest + 300, 40
     features = np.arange(hops, dtype=np.float32)[:, None].repeat(bands, axis=1)
-    clean = np.zeros(hops * grid.HOP_SAMPLES, dtype=np.int16)
-    xs = gate.ctc_windows(clean, features, spans, PitchTracker(PitchConfig(**listen.PITCH)))
+    pitch = np.arange(hops * N_FEATURES, dtype=np.float32).reshape(hops, N_FEATURES)
+    xs = gate.ctc_windows(features, pitch, spans)
     cut = [(int(x[0, 0]), int(x[-1, 0])) for x in xs]
     assert cut == device.command_cut(spans) and {x.shape[1] for x in xs} == {bands + N_FEATURES}
+    assert all(np.array_equal(x[:, bands:], pitch[a : b + 1]) for x, (a, b) in zip(xs, cut, strict=True))
 
 
 def test_a_session_closes_on_silence_whose_log_mel_goes_on_from_its_last_hop() -> None:

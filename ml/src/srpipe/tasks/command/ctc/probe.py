@@ -20,7 +20,8 @@ import torch
 from torch import nn
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
-from srpipe.core.config import ML_ROOT, data_paths, load_yaml
+from srpipe.core.config import ML_ROOT, data_paths, device_of, load_yaml
+from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
 from srpipe.export import pack_models, update_lock
 from srpipe.generated import grid, listen
 from srpipe.scenes import device
@@ -265,7 +266,7 @@ def listen_session(clean: np.ndarray, vad: np.ndarray, features: np.ndarray, dec
     """A board session with the silence eval.heard puts after it, as svc_listen's test feeds it: its vad, the clean
     samples of every hop a command window reads and the hop ahead of it, which the STFT of the window's first hop
     overlaps, and each window with the decision decided_of(window) takes; hops outside the segments are fed as zeros,
-    which no window reads."""
+    which no window's log-mel reads, and the windows' pitch is the tracker's over that fed stream, as on the board."""
     hop, spans = grid.HOP_SAMPLES, device.utterances(vad)
     ranges = device.command_cut(spans)
     segments: list[list[int]] = []
@@ -275,7 +276,10 @@ def listen_session(clean: np.ndarray, vad: np.ndarray, features: np.ndarray, dec
             segments[-1][1] = max(segments[-1][1], end)
         else:
             segments.append([first, end])
-    windows = gate.ctc_windows(clean, features, spans, tracker)
+    fed = np.zeros_like(clean)
+    for first, last in segments:
+        fed[first * hop : (last + 1) * hop] = clean[first * hop : (last + 1) * hop]
+    windows = gate.ctc_windows(features, device.stream_pitch(tracker, fed), spans)
     body = SESSION_HEAD.pack(len(vad), len(segments), len(ranges))
     body += np.packbits(vad.astype(np.uint8), bitorder="little").tobytes()
     body += b"\0" * (-len(body) % 4)
@@ -299,6 +303,7 @@ def listen_rounds(cfg: dict, out: Path) -> list[Path]:
     int8 = quant.Int8Net(graph, cfg["quant"]["hops"], trained.mean, trained.std, trained.model, cfg["esp_ppq_patches"])
     reject, margin = cfg["quant"]["reject"], cfg["eval"]["margin"]
     lexicon, per_frames = ctc_score.default_lexicon(), ctc_score.window_frames(trained.model.front.hop_stride)
+    tracker = PitchTracker(PitchConfig(**device_of(trained.cfg)["pitch"]))
 
     def decided_of(x: np.ndarray) -> list[int]:
         logits = int8(torch.from_numpy(((x - trained.mean) / trained.std).T[None].astype(np.float32))).numpy()[0]
@@ -313,7 +318,7 @@ def listen_rounds(cfg: dict, out: Path) -> list[Path]:
     named += b"\0" * (-(LISTEN_HEAD.size + len(named)) % 4)
     bodies = [
         listen_session(clean, vad, features, decided_of, tracker)
-        for _, clean, vad, features, tracker in gate.heard_sessions(trained.cfg, spec, data_paths())
+        for _, clean, vad, features, _pitch in gate.heard_sessions(trained.cfg, spec, data_paths())
     ]
     out.mkdir(parents=True, exist_ok=True)
     for stale in out.glob("listen_*.bin"):

@@ -168,8 +168,8 @@ def board_windows(cfg: dict, net: gate.Ctc, paths: dict) -> list[gate.Scored]:
     """The command windows svc_listen cuts on the board sessions of Gate 3 (KEHOACH 5.4)."""
     said = {c["id"]: c["text"] for c in json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]}
 
-    def window_of(clean, features, spans, tracker):
-        return gate.ctc_windows(clean, features, spans, tracker)
+    def window_of(clean, features, pitch, spans):
+        return gate.ctc_windows(features, pitch, spans)
 
     return gate.board(net.cfg, load_yaml(command.CONFIG)["eval"]["board"], paths, said, window_of)
 

@@ -160,17 +160,15 @@ def with_silence(
 
 
 def windows(
-    clean: np.ndarray, features: np.ndarray, spans: list[tuple[int, int]], window: int, lead: int, tracker: PitchTracker
+    features: np.ndarray, pitch: np.ndarray, spans: list[tuple[int, int]], window: int, lead: int
 ) -> np.ndarray:
-    """Per utterance the window ending where vad turns off after it: log-mel, then pitch from a tracker reset lead hops
-    before the utterance as the simulation resets it for an item; a window reaching before the session repeats its
-    first hop."""
+    """Per utterance the window ending where vad turns off after it, from lead hops before it: log-mel, then the
+    session's pitch; a window reaching before the session repeats its first hop."""
     out = []
     for first, last in spans:
         end = min(last + 1, len(features) - 1)
         start = max(0, first - lead)
-        pitch = device.item_pitch(tracker, clean[start * grid.HOP_SAMPLES : (end + 1) * grid.HOP_SAMPLES])
-        x = np.concatenate([features[start : end + 1], pitch], axis=1)[-window:]
+        x = np.concatenate([features[start : end + 1], pitch[start : end + 1]], axis=1)[-window:]
         out.append(np.pad(x, ((window - len(x), 0), (0, 0)), mode="edge"))
     return np.stack(out).astype(np.float32)
 
@@ -187,13 +185,12 @@ def decisions(net: Kws, x: np.ndarray) -> list[tuple[str, int]]:
     return out
 
 
-def ctc_windows(clean: np.ndarray, features: np.ndarray, spans: Spans, tracker: PitchTracker) -> list[np.ndarray]:
-    """Each utterance's command window: its log-mel, then pitch from a tracker reset at its first hop."""
-    out = []
-    for start, end in device.command_cut(spans):
-        pitch = device.item_pitch(tracker, clean[start * grid.HOP_SAMPLES : (end + 1) * grid.HOP_SAMPLES])
-        out.append(np.concatenate([features[start : end + 1], pitch], axis=1).astype(np.float32))
-    return out
+def ctc_windows(features: np.ndarray, pitch: np.ndarray, spans: Spans) -> list[np.ndarray]:
+    """Each utterance's command window: its log-mel, then the session's pitch over it."""
+    return [
+        np.concatenate([features[start : end + 1], pitch[start : end + 1]], axis=1).astype(np.float32)
+        for start, end in device.command_cut(spans)
+    ]
 
 
 def normalised_window(net: Ctc, x: np.ndarray) -> tuple[torch.Tensor, int]:
@@ -257,8 +254,8 @@ def rnnt_heard(net: Ctc, x: np.ndarray) -> Heard:
 
 
 def heard_rows(cfg: dict, rows: list[dict], paths: dict) -> Iterator[tuple]:
-    """Each board manifest row found on disk: the row, its clean samples, vad and log-mel per hop through the
-    product's chain, and the pitch tracker of cfg's board simulation."""
+    """Each board manifest row found on disk: the row, its clean samples, vad, log-mel and pitch per hop through the
+    product's chain, pitch from one tracker over the whole session as svc_listen runs it (KEHOACH 3.11)."""
     device_cfg = device_of(cfg)
     mics = device.load_microphones(device_cfg["microphone"])
     chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
@@ -266,7 +263,8 @@ def heard_rows(cfg: dict, rows: list[dict], paths: dict) -> Iterator[tuple]:
     for r in rows:
         folder = paths["raw"] / "device" / r["board"] / r["session"]
         if folder.exists():
-            yield r, *heard(folder, chain_cfg, mel), tracker
+            clean, vad, features = heard(folder, chain_cfg, mel)
+            yield r, clean, vad, features, device.stream_pitch(tracker, clean)
 
 
 def heard_sessions(cfg: dict, spec: dict, paths: dict) -> Iterator[tuple]:
@@ -277,12 +275,12 @@ def heard_sessions(cfg: dict, spec: dict, paths: dict) -> Iterator[tuple]:
 
 def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: Callable) -> list[Scored]:
     """Every counted session of the board manifest found on disk, its utterances decided by decided_of(clean,
-    features, spans, tracker); a session saying the text of a command of said expects that command."""
+    features, pitch, spans); a session saying the text of a command of said expects that command."""
     command_of = {tuple(corpus.sounds(text)): cid for cid, text in said.items()}
     results = []
-    for r, clean, vad, features, tracker in heard_sessions(cfg, spec, paths):
+    for r, clean, vad, features, pitch in heard_sessions(cfg, spec, paths):
         spans = device.utterances(vad)
-        decided = decided_of(clean, features, spans, tracker) if spans else []
+        decided = decided_of(clean, features, pitch, spans) if spans else []
         expected = expected_of(r["kind"], r["prompt"], command_of)
         results.append(Scored(r["session"], r["kind"], r["distance_cm"], r["prompt"], expected, decided))
     return results
@@ -295,8 +293,8 @@ def kws_board(net: Kws, spec: dict, paths: dict) -> list[Scored]:
     else:
         said = {c["id"]: c["text"] for c in command.learned(load_yaml(command.CONFIG))}
 
-    def decided_of(clean, features, spans, tracker):
-        return decisions(net, windows(clean, features, spans, net.cfg["window_hops"], lead, tracker))
+    def decided_of(clean, features, pitch, spans):
+        return decisions(net, windows(features, pitch, spans, net.cfg["window_hops"], lead))
 
     return board(net.cfg, spec, paths, {cid: text for cid, text in said.items() if cid in net.names}, decided_of)
 
@@ -305,8 +303,8 @@ def ctc_board(net: Ctc, spec: dict, paths: dict, heard: Callable = ctc_heard) ->
     """The board sessions decided over their command windows by heard, the ctc track's or the rnnt track's."""
     listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
 
-    def decided_of(clean, features, spans, tracker):
-        return [heard(net, x) for x in ctc_windows(clean, features, spans, tracker)]
+    def decided_of(clean, features, pitch, spans):
+        return [heard(net, x) for x in ctc_windows(features, pitch, spans)]
 
     return board(net.cfg, spec, paths, {c["id"]: c["text"] for c in listed}, decided_of)
 

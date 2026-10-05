@@ -188,9 +188,9 @@ def cut_board(cfg: dict, paths: dict, out: Path) -> str:
     n_bands = device_cfg["features"]["n_bands"]
     shortest, longest = (round(board[k] * HOPS_PER_S) for k in ("min_s", "max_s"))
     items, mels, pitches, offset, dropped = [], [], [], 0, 0
-    for r, clean, vad, features, tracker in gate.heard_rows(cfg, rows, paths):
+    for r, _clean, vad, features, pitch in gate.heard_rows(cfg, rows, paths):
         spans = device.utterances(vad)
-        windows = gate.ctc_windows(clean, features, spans, tracker) if spans else []
+        windows = gate.ctc_windows(features, pitch, spans) if spans else []
         for k, ((first, last), (start, _), x) in enumerate(zip(spans, device.command_cut(spans), windows, strict=True)):
             if not shortest <= last + 1 - first <= longest:
                 dropped += 1

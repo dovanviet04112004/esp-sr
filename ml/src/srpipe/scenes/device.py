@@ -478,9 +478,9 @@ def cut_items(
     ]
 
 
-def item_pitch(tracker: PitchTracker, clean: np.ndarray) -> np.ndarray:
-    """Pitch features (hops, 3) of an item's clean int16 samples, the tracker reset at its first hop as svc_listen
-    resets it on entering LENH (KEHOACH 3.12)."""
+def stream_pitch(tracker: PitchTracker, clean: np.ndarray) -> np.ndarray:
+    """Pitch features (hops, 3) of a stream's clean int16 samples, the tracker reset at its first hop and run over
+    every hop after, as svc_listen runs it on board (KEHOACH 3.11)."""
     tracker.reset()
     return np.stack([tracker.step(to_float(hop)) for hop in clean.reshape(-1, HOP)])
 
@@ -519,13 +519,14 @@ def _shard(job: tuple) -> list[Path]:
     for k, rows in sessions:
         captured, spans, draws = simulate_session(cfg, k, rows, bank, mics, pools, readers, floor, speeds)
         clean, figs, feats = listen(captured, replace(chain_cfg, agc_start_db=draws.get("agc_start_db")), mel)
+        heard_pitch = stream_pitch(tracker, clean) if tracker is not None else None
         said_at = draws.pop("speeds", [])
         for first, stop, held, speech in cut_items(cut, spans, pads_s, figs[:, 0].astype(bool)):
             features.append(feats[first:stop])
             figures.append(figs[first:stop])
             pcm.append(clean[first * HOP : stop * HOP])
-            if tracker is not None:
-                pitches.append(item_pitch(tracker, pcm[-1]))
+            if heard_pitch is not None:
+                pitches.append(heard_pitch[first:stop])
             row = rows[held[0]]
             where = {"frame_offset": offset, "n_frames": stop - first, "speech_frames": speech}
             holding = {"clips": [rows[k].item for k in held]} if len(held) > 1 else {}
