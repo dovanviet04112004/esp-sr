@@ -87,3 +87,23 @@ gộp mọi nền của một mức và một SNR. Câu không chạm: câu củ
 còn tệ hơn. Không có một độ lợi cố định cho mọi mức: độ lợi cho `vad` phải theo mức của chính tín hiệu, ví dụ đưa nền
 ồn về quanh −58 … −70 dBFS rồi chặn trần, mà mọi ô trên đều hợp: nền −45 dBFS của −40 dBFS SNR 5 không được nâng, nền
 −70 dBFS của −60 dBFS SNR 10 được nâng 12 dB.
+
+Độ lợi theo mức của chính tín hiệu: nền ồn là cực tiểu trượt nhân quả 1,5 s của năng lượng bước đã làm mượt (hệ số 0,25),
+độ lợi cho `vad` bước sau = mức tham chiếu trừ nền, kẹp 0 … 24 dB (tham chiếu −58 … −70) hay 0 … 30 dB (−42 … −54);
+cùng cảnh, thêm mức −26 dBFS của §1. Trung bình F1 của 4 SNR (20, 10, 5, 0 dB) mỗi mức, rồi của các mức trong cột:
+
+| Tham chiếu nền | F1 ở −26 và −40 dBFS | F1 ở −50 dBFS | F1 ở −55 … −65 dBFS | Câu không chạm, −55 … −65 dBFS | Ô −26/−40 tụt nhất |
+|---|---|---|---|---|---|
+| như chuỗi đưa | 0,785 | 0,733 | 0,536 | 872 / 2 705 | — |
+| −70 | 0,784 | 0,731 | 0,586 | 744 | 0,004 |
+| −66 | 0,784 | 0,727 | 0,620 | 643 | 0,002 |
+| −62 | 0,784 | 0,724 | 0,648 | 542 | 0,003 |
+| −58 | 0,783 | 0,730 | 0,681 | 424 | 0,004 |
+| −54 | 0,782 | 0,725 | 0,708 | 310 | 0,007 |
+| −50 | 0,779 | 0,732 | 0,729 | 245 | 0,010 |
+| −46 | 0,776 | 0,737 | 0,736 | 208 | 0,015 |
+| −42 | 0,773 | 0,744 | 0,744 | 184 | 0,026 |
+
+Tham chiếu càng cao càng đưa `vad` tới lời nhỏ, nhưng ở −26 và −40 dBFS cực tiểu trượt có lúc thấp hơn nền thật, nên
+nâng một chút và báo nhầm thêm: F1 tụt tới 0,007 ở −54. Điều kiện xong của E7-T6 đòi F1 trên cảnh của §1 không kém, nên
+bộ ước nền phải không bao giờ nâng cảnh to: phân vị trượt thay cực tiểu, hay ngưỡng dưới của độ lợi, là bước đo kế tiếp.
