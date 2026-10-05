@@ -627,6 +627,34 @@ mẩu, 45 mẩu `vad` không chạm. Trước bước `vad` đầu, phân vị 5
 Log-mel trung bình trên các bước `vad` −12,56 / −11,07 / −9,71 / −9,06 / −8,23; phiên thật ở §12.4 có trung vị −11,87 tới
 −10,86.
 
+Cắt trên `vad` nào. 198 phiên `val` của `command/v5` dựng lại từng phiên, luật cửa sổ board trên hai `vad`: của chuỗi trên
+tín hiệu thu, có nhiễu, như board; và tham chiếu, cùng bộ dò chạy trên tiếng người nói ở micro 0, qua phòng, chưa cộng
+nhiễu, đưa về −26 dBFS. Tiếng ngoài cửa sổ là bước của mẩu khô trên đỉnh mẩu trừ 30 dB:
+
+| | `vad` có nhiễu | `vad` tham chiếu |
+|---|---|---|
+| Mẫu / mẩu | 1 371 / 1 583 | 1 568 / 1 583 |
+| Mẩu không chạm | 45 (2,8%) | 0 |
+| Cửa sổ gộp mẩu | 6,3% | 1,0% |
+| Dài, s, phân vị 50 / 95 / 99 | 4,85 / 10,45 / 24,44 | 5,15 / 8,69 / 10,12 |
+| Dài hơn 12 s (`train.max_s`) | 50 | 6 |
+| Đủ 2,0 s trước câu | 54,6% | 33,0% |
+| Tiếng sau điểm kết, hơn 5 / 15 / 30 bước | 19,4 / 13,7 / 8,8% | 4,3 / 2,4 / 0,7% |
+| Như trên, chỉ phiên không nhiễu | 19,5 / 12,5 / 6,6% | 4,5 / 1,5 / 0,7% |
+
+36 cửa sổ của `vad` tham chiếu còn tiếng sau điểm kết quá 15 bước đều chỉ ở −22,5 … −30 dB dưới đỉnh mẩu, không bước nào
+trên −20 dB: hơi thở, nền bản ghi. Ở cửa sổ một mẩu, điểm kết của `vad` có nhiễu trừ của tham chiếu, phân vị 5/25/50/75/95:
+−87 / −21 / −9 / −3 / +36 bước; chỉ phiên không nhiễu −57 / −20 / −8 / −2 / +1, sớm hơn quá 5 bước ở 58,5% cửa sổ. `vad`
+đọc mức trước `agc`, mà lời nói trên board B ở −57 … −52 dBFS (§12.4), nên tiếng nhỏ cuối câu không qua mô hình của nó.
+
+Bản dựng `command/v5` cắt trên `vad` có nhiễu (dừng ở VLSP 56/218): mẫu có ít khung CTC hơn số nhãn cần (đơn vị cộng số lần
+lặp liền) ở `val` 4, VIVOS 18, FPT 28, VLSP 111 trên 11 417; mẫu dài hơn 12 s ở VIVOS 447 (5,0%), FPT 814 (3,9%), VLSP
+1 441 (12,6%). Mẩu `lang_vi` không đọc được, bỏ lúc học như ở mọi bản dựng trước: BUD500 161 / 649 010, Common Voice
+417 / 18 502 (2,3%), FPT 2 777 / 25 432 (10,9%), VIVOS 33 / 10 266, VLSP 6 268 / 55 687 (11,3%), `val` 3 / 1 583.
+
+Cửa sổ trên board kéo thêm sau bước `vad` cuối, model `20261004_acde692` (bề rộng 128, học cắt theo mẩu), Cửa 3 float,
+mở 2,0 s: thêm 0 / 8 / 16 / 25 bước được 86 / 87 / 87 / 83 trên 112; ở 25 bước "đóng cửa" từ 11 xuống 8.
+
 ### 12.7 Độ trễ quyết định ước từ chi phí trên board
 
 172 cửa sổ của Cửa 3 (28/09), chi phí đo trên board B của mạng bề rộng 160 (81,4 ms mỗi khối 16 bước,
@@ -647,3 +675,5 @@ cao độ tính liên tục thì mỗi bước tới vẫn tốn 1,98 ms của n
 - Cao độ không nhìn sau làm mức âm tiết đầu dịch theo phiên tới 0,6–0,8, lớn hơn khoảng cách "tắt"–"bật"; nhìn sau bỏ
   được độ dịch ấy nhưng ở mạng 8 000 bước chỉ thêm một câu Cửa 3.
 - Mức và màu sau chuỗi của phiên thật khác mô phỏng: `agc` theo lịch sử, đáp tuyến micro và vỏ coi là phẳng.
+- `vad` của board đọc mức trước `agc`, nên với người nói nhỏ hay xa nó tắt khi tiếng chưa hết: mẫu học cắt trên nó mất lời
+  mà nhãn đòi, cắt trên `vad` của riêng tiếng người nói thì không (§12.6). Kéo cửa sổ board thêm sau `vad` không giúp Cửa 3.
