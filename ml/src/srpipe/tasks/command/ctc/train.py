@@ -27,7 +27,7 @@ from srpipe.core.logger import row_line
 from srpipe.core.run_dir import create_run_dir
 from srpipe.core.seed import seed_everything
 from srpipe.dsp.spec import pitch
-from srpipe.generated import grid
+from srpipe.generated import grid, listen
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command.ctc import data as built
 from srpipe.tasks.command.ctc.model import encoder
@@ -566,7 +566,8 @@ def main(argv: list[str] | None = None) -> int:
     cfg = (
         load_run_config(args.resume)
         if args.resume
-        else apply_overrides(load_yaml(ctc.CONFIG), args.overrides) | {"listen": contract_front()}
+        else apply_overrides(load_yaml(ctc.CONFIG), args.overrides)
+        | {"listen": contract_front(), "listen_hash": listen.HASH}
     )
     paths = data_paths()
     split_files = sorted((paths["splits"] / "command" / cfg["split"]["version"]).glob("*.txt"))
