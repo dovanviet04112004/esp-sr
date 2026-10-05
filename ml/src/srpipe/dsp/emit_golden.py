@@ -44,6 +44,7 @@ DOA_SILENT_HOPS = 16
 GSC_HOPS = 64
 GSC_LEARN_HOPS = 16
 PITCH_HOPS = 96
+PITCH_WINDOW_HOPS = 300  # past ballast_window_s: the ring of the ballast turns
 PITCH_RESET_HOP = 60
 LSB = 1.0 / 32768.0
 MEL_CASES = (
@@ -153,8 +154,9 @@ def pitch_case(cfg: pitch.PitchConfig, signal: np.ndarray, reset: np.ndarray) ->
 
 
 def emit_pitch(root: Path, cfg: pitch.PitchConfig) -> list[Path]:
-    """A glide, voiced bursts between pauses, noise, and a quiet lead into a tone with a reset part way, then a
-    negative control whose features come one hop late."""
+    """A glide, voiced bursts between pauses, noise, a quiet lead into a tone with a reset part way, a loud voice then
+    2.5 s of quiet then a softer one, whose ballast forgets the loud part, then a negative control whose features
+    come one hop late."""
     rng = np.random.default_rng(SEED + 11)
     n = PITCH_HOPS * grid.HOP_SAMPLES
     t = np.arange(n) / grid.SAMPLE_RATE_HZ
@@ -171,6 +173,12 @@ def emit_pitch(root: Path, cfg: pitch.PitchConfig) -> list[Path]:
         (rng.uniform(-0.5, 0.5, n), no_reset),
         (quiet_then_tone, reset_part_way),
     )
+    long_t = np.arange(PITCH_WINDOW_HOPS * grid.HOP_SAMPLES) / grid.SAMPLE_RATE_HZ
+    loud = 0.5 * sum(np.sin(2 * np.pi * k * 150.0 * long_t) / k for k in range(1, 6))
+    soft = 0.2 * sum(np.sin(2 * np.pi * k * 120.0 * long_t) / k for k in range(1, 6))
+    quiet = rng.uniform(-1e-3, 1e-3, len(long_t))
+    loud_quiet_soft = np.where(long_t < 1.5, loud, np.where(long_t < 4.0, quiet, soft))
+    inputs += ((loud_quiet_soft, np.zeros(PITCH_WINDOW_HOPS, dtype=np.uint8)),)
     written = []
     for index, (signal, reset) in enumerate(inputs):
         path = root / "pitch" / f"case_{index:03d}.gold"
