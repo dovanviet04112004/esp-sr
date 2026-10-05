@@ -768,3 +768,16 @@ Có ngưỡng (δ₂ 50 ‰, δ₁ 200 … 1 000 ‰): lệnh nhận đúng 45% 
 động, cửa sổ thừa và câu gần âm. Run B1 ở bước 40 000 cùng thước được 88/112, "tắt" có "bật" trong bộ 5/22. Mọi câu "tắt"
 sai thành "bật" cùng vật, gần nửa "đóng cửa" thành "mở cửa"; bỏ "bật" khỏi bộ thì "tắt" đúng 18/22: mạng nhận phần sau của
 lệnh, âm tiết đầu không đủ để tách. Cao độ chuẩn hoá so âm tiết đầu với nền trước nó (§12.3) vẫn nguyên trong v5.
+
+Cùng thước, cùng phiên, mạng float của hai run cũ (B1 không còn `feature_stats.npz` nên không chấm lại được; con số
+88/112 của nó đo sáng 05/10 với Cửa 3 cũ, mỗi phiên một chuỗi mới):
+
+| Lệnh | `20261002_128545c` (đang khoá) | `20261004_acde692`, 100 000 | v5, 70 000 |
+|---|---|---|---|
+| tắt đèn / tắt quạt | 0/11 / 0/11 | 0/11 / 0/11 | 0/11 / 0/11 |
+| đóng cửa | 11/11 | 10/11 | 5/11 |
+| tổng | 84/112 | 84/112 | 78/112 |
+| nhận đúng có ngưỡng, δ₁ 200 ‰ | 56% | 62% | 45% |
+
+Với chuỗi chạy liền cả buổi thu như board, không mạng nào nhận "tắt" khi có "bật" trong bộ: 5–10/22 của B1 là của thước
+cũ. v5 ở bước 70 000 thua hai run đủ bước 6 câu, gần hết ở "đóng cửa" → "mở cửa".
