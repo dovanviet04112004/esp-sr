@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-deploy rnnt-ptq ai-unit-rnnt listen-unit models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-thresholds ctc-deploy rnnt-ptq ai-unit-rnnt listen-unit models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live commands session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -147,7 +147,10 @@ ctc-int16: ## Rung 3: the convolutions ESP-PPQ ranks worst at 16 bits, on the be
 ctc-qat: ## Rung 4: QAT on the GPU from the best calibration of ctc-ptq: make ctc-qat RUN=<run under ml/> (E11-T12)
 	cd ml && uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant qat $(RUN)
 
-ctc-deploy: ## Export a ladder row into firmware/models/command and lock it: make ctc-deploy RUN=<run under ml/> ROW=<row> (E11-T19)
+ctc-thresholds: ## Choose delta1 and delta2 of a ladder row on val_commands and val, decided as the chip decides: make ctc-thresholds RUN=<run under ml/> ROW=<row> (E11-T13)
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant thresholds $(RUN) --row $(ROW)
+
+ctc-deploy: ## Export a ladder row and its chosen delta1, delta2 into firmware/models/command and lock them: make ctc-deploy RUN=<run under ml/> ROW=<row> (E11-T19)
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant deploy $(RUN) --row $(ROW)
 
 models-flash: ## Pack every model of contracts/models.lock.json and write models_0 of board B (KEHOACH 4.5.6, 6.1)

@@ -1144,10 +1144,16 @@ model là số của bộ mặc định. Câu là các đoạn
 sau với độ lợi phiên trước để lại. Phiên ghi xong được nối thêm lặng như board nghe tiếp sau phiên, để câu cuối cũng
 chốt. `vad` đã quen người nói bắt cả hơi thở và tiếng động giữa hai câu (`measurements/command.md` §12.9): trong phiên lệnh,
 cửa sổ không chồng câu nào chuỗi tìm thấy khi chạy riêng phiên ấy từ đầu là cửa sổ thừa, đếm riêng như phần phải từ chối.
-Board
-chưa có `wake` cắt đúng như vậy, nên quyết định của board trên tiếng nói trực tiếp là quyết định Cửa 3 đếm. Tới khi
-E11-T13 chỉnh `δ₁` `δ₂` trên cụm na ná lệnh, bảng của `ctc` ghi lệnh điểm cao nhất của từng câu và quét `δ₁` để thấy đánh
-đổi giữa nhận và từ chối, chưa kết luận đạt hay trượt. Chấm float để đọc nhanh; số chọn model là số sau int8 (§1.3).
+Board chưa có `wake` cắt đúng như vậy, nên quyết định của board trên tiếng nói trực tiếp là quyết định Cửa 3 đếm.
+
+`δ₁`, `δ₂` chọn riêng cho dòng int8 sẽ deploy (`make ctc-thresholds`, E11-T13): mọi cửa sổ của `val_commands` (người
+thật nói đúng một lệnh đã học, §1.3) và của `val` (lời nói thường) quyết như chip quyết trên đồ thị int8 của dòng ấy,
+cắt lùi về `window_s` như `svc_listen`; quét `δ₁` của `eval.reject_sweep` với `δ₂` của `quant.thresholds.margin_sweep`,
+lấy cặp nhận đúng nhiều nhất ở lệnh kém nhất, rồi nhiều nhất trung bình, trong các cặp giữ cửa sổ `val` bị nhận thành
+một lệnh mà lời nó không nói đúng lệnh ấy dưới `quant.thresholds.false_accept`; không cặp nào giữ được thì lấy cặp báo
+nhầm ít nhất và ghi là trượt. Cặp ấy đi theo model tới board (§6.3); Cửa 3 sau int8 ở chính cặp ấy ghi cùng file, là số
+kết luận đạt hay trượt. Bảng của `ctc` ghi thêm lệnh điểm cao nhất của từng câu và quét `δ₁` để thấy đánh đổi; chấm
+float để đọc nhanh, số chọn model là số sau int8 (§1.3).
 
 ### 3.13 `synth`
 

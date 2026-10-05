@@ -1,8 +1,9 @@
 """The quantisation ladder of the ctc net (KEHOACH 3.14, ADR-0013). Run: python -m srpipe.tasks.command.ctc.quant
-ptq|int16|qat <run> | deploy <run> --row <row>: rungs 1 and 2, rung 3, rung 4, the last two on the calibration of
-rung 2 that Gate 3 rates best. Each adds rows to <run>/int8/ladder.yaml, the test set's unit error rate and Gate 3 on
-the board sessions after int8 beside float, and keeps each row's graph under <run>/int8/<row>/ for probe.py. deploy
-puts a row's graph into firmware/models/command/ and records it with update_lock (E11-T19).
+ptq|int16|qat <run> | thresholds|deploy <run> --row <row>: rungs 1 and 2, rung 3, rung 4, the last two on the
+calibration of rung 2 that Gate 3 rates best. Each adds rows to <run>/int8/ladder.yaml, the test set's unit error rate
+and Gate 3 on the board sessions after int8 beside float, and keeps each row's graph under <run>/int8/<row>/ for
+probe.py. thresholds chooses a row's delta1 and delta2; deploy puts the row's graph and pair into
+firmware/models/command/ and records them with update_lock (E11-T19).
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import yaml
 from torch import nn
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, ptq_espdl, qat_espdl
-from srpipe.core import screen, splits
+from srpipe.core import corpus, extract, screen, splits
 from srpipe.core.config import apply_overrides, data_paths, load_yaml
 from srpipe.dsp.spec import pitch
 from srpipe.export import update_lock
@@ -27,7 +28,7 @@ from srpipe.generated import listen
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
-from srpipe.tasks.command.ctc import qat, train
+from srpipe.tasks.command.ctc import data, qat, train
 from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc import ctc_score
 from srpipe.tasks.wake.data import sentence_units
@@ -302,6 +303,102 @@ def step_qat(cfg: dict, run: Path, device: str) -> Path:
     return recorded(run, {"qat": spec["qat"]}, {"qat": int8_row(cfg, b, graph, folder, rungs)})
 
 
+def thresholds_file(run: Path, row: str) -> Path:
+    return run / "int8" / row / "thresholds.yaml"
+
+
+def built_windows(folder: Path) -> list[tuple[list[str], np.ndarray]]:
+    """Each window of a finished build of the split: the items of the clips it holds, and its log-mel and pitch."""
+    out = []
+    for listing in sorted(folder.glob("*.items.jsonl")):
+        stem = str(listing).removesuffix(".items.jsonl")
+        mel, pitch_ = (np.load(stem + s, mmap_mode="r") for s in (".features.npy", ".pitch.npy"))
+        for line in listing.read_text(encoding="utf-8").splitlines():
+            item = json.loads(line)
+            span = slice(item["frame_offset"], item["frame_offset"] + item["n_frames"])
+            x = np.concatenate([mel[span], pitch_[span]], axis=1).astype(np.float32)
+            out.append(([c.split("@")[0] for c in item.get("clips", [item["item"]])], x))
+    return out
+
+
+def operating_point(
+    said: dict[str, list[gate.Heard]], heard: list[gate.Heard], meant: list[bool], spec: dict, sweep: list[int]
+) -> dict:
+    """The pair of sweep x spec's margins that accepts the most of the worst command of said, its windows' Heard by
+    command id, then the most of them all, then the fewest false accepts, among those whose false accepts of heard,
+    windows of speech, an accept counting unless meant says the window says just that command, stay within spec's
+    false_accept; with every pair's row. With none within it, the pair of fewest false accepts, marked so."""
+    rows = []
+    for reject in sweep:
+        for margin in spec["margin_sweep"]:
+            shares = [
+                sum(h.command == c and h.accepted(reject, margin) for h in hs) / len(hs) for c, hs in said.items()
+            ]
+            false = sum(h.accepted(reject, margin) and not ok for h, ok in zip(heard, meant, strict=True))
+            rows.append(
+                {
+                    "reject_permille": reject,
+                    "margin_permille": margin,
+                    "worst": round(min(shares), 4),
+                    "mean": round(sum(shares) / len(shares), 4),
+                    "false_accepts": false,
+                }
+            )
+    within = [r for r in rows if r["false_accepts"] <= spec["false_accept"] * len(heard)]
+    best = (
+        max(within, key=lambda r: (r["worst"], r["mean"], -r["false_accepts"]))
+        if within
+        else min(rows, key=lambda r: (r["false_accepts"], -r["worst"]))
+    )
+    return {
+        "reject_permille": best["reject_permille"],
+        "margin_permille": best["margin_permille"],
+        "within_target": bool(within),
+        "chosen": best,
+        "table": rows,
+    }
+
+
+def step_thresholds(cfg: dict, run: Path, row: str) -> Path:
+    """delta1 and delta2 for row (KEHOACH 3.12): every window of val_commands, real voices saying one learned command,
+    and of val, speech that says none, decided as the chip decides on the row's int8 graph, each cut back to
+    window_s as svc_listen cuts it; operating_point over eval.reject_sweep and quant.thresholds, written with its
+    table and Gate 3 at the pair to <run>/int8/<row>/thresholds.yaml for deploy."""
+    net, paths = gate.load_ctc(run), data_paths()
+    graph = export_espdl.load_native(run / "int8" / row / GRAPH_FILE)
+    int8 = Int8Net(graph, cfg["quant"]["hops"], net.mean, net.std, net.model, cfg["esp_ppq_patches"])
+    chip = gate.Ctc(int8, net.mean, net.std, net.names, net.lexicon, net.cfg)
+    root = paths["processed"] / "command" / net.cfg["split"]["version"]
+    spec = net.cfg["split"]["commands"]
+    phrase_of = {
+        f"speech/{spec['extract']}/{r['file']}": r["phrase"]
+        for r in extract.read_index(paths["raw"] / "speech" / spec["extract"])
+    }
+    id_of = {c["text"]: c["id"] for c in command.learned(load_yaml(command.CONFIG))}
+    said: dict[str, list[gate.Heard]] = {}
+    for items, x in built_windows(root / data.VAL_COMMANDS.removesuffix(".txt")):
+        if len(items) == 1:
+            said.setdefault(id_of[phrase_of[items[0]]], []).append(chip_heard(chip, x[-listen.WINDOW_HOPS :]))
+    text_of = {c.item: corpus.words(c.text or "") for c in screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")}
+    texts = {
+        c["id"]: corpus.words(c["text"]) for c in json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
+    }
+    heard, meant = [], []
+    for items, x in built_windows(root / "val"):
+        h = chip_heard(chip, x[-listen.WINDOW_HOPS :])
+        heard.append(h)
+        meant.append(h.command != gate.REJECT and [w for i in items for w in text_of[i]] == texts[h.command])
+    chosen = operating_point(said, heard, meant, cfg["quant"]["thresholds"], cfg["eval"]["reject_sweep"])
+    pair = chosen["reject_permille"], chosen["margin_permille"]
+    gate3 = gate_row(chip, board_windows(cfg, net, paths), *pair, chip_heard)
+    out = thresholds_file(run, row)
+    counts = {"val_commands": {c: len(hs) for c, hs in said.items()}, "val": len(heard)}
+    body = chosen | {"gate3": gate3, "windows": counts}
+    out.write_text(yaml.safe_dump(body, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    print(f"{row}: delta1 {pair[0]}, delta2 {pair[1]}: {chosen['chosen']}; Gate 3 at them {gate3}", flush=True)
+    return out
+
+
 def step_deploy(cfg: dict, run: Path, row: str) -> tuple[Path, Path]:
     """The graph of row as firmware/models/command/ holds it: the .espdl streamed the run's chunk_hops at a time with a
     test sentence's first chunk stored for model->test(), as probe.py streams it, and the train statistics as the NORM
@@ -318,6 +415,9 @@ def step_deploy(cfg: dict, run: Path, row: str) -> tuple[Path, Path]:
     if (bits := ptq_espdl.io_bits(graph)) != (CHIP_BITS, CHIP_BITS):
         raise ValueError(f"row {row} reads {bits[0]} and gives {bits[1]} bits; the chip runs int8 at both ends")
     rungs = yaml.safe_load(ladder_file(run).read_text(encoding="utf-8"))["rows"][row]
+    if not thresholds_file(run, row).is_file():
+        raise ValueError(f"row {row} has no delta1, delta2 chosen: make ctc-thresholds RUN={run} ROW={row} first")
+    chosen = yaml.safe_load(thresholds_file(run, row).read_text(encoding="utf-8"))
     x, chunk = test_sentence(cfg, net), net.cfg["chunk_hops"]
     io = ptq_espdl.io_of(graph)
     on_grid = ptq_espdl.to_int8(x, io.input_exponent).astype(np.float32) * np.float32(2.0**io.input_exponent)
@@ -343,21 +443,24 @@ def step_deploy(cfg: dict, run: Path, row: str) -> tuple[Path, Path]:
         },
         "row": row,
         "rungs": {"calibration": rungs["calibration"], "int16_ops": rungs["int16_ops"]},
+        "thresholds": {k: chosen[k] for k in ("reject_permille", "margin_permille")},
     }
     return update_lock.record(BRANCH, run, files, fields)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("step", choices=["ptq", "int16", "qat", "deploy"])
+    parser.add_argument("step", choices=["ptq", "int16", "qat", "thresholds", "deploy"])
     parser.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.command.ctc.train")
-    parser.add_argument("--row", help="deploy: the row of <run>/int8/ladder.yaml to deploy")
+    parser.add_argument("--row", help="thresholds, deploy: the row of <run>/int8/ladder.yaml")
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     args = parser.parse_args(argv)
     cfg = apply_overrides(load_yaml(ctc.CONFIG), args.overrides)
-    if args.step == "deploy":
-        if args.row is None:
-            parser.error("deploy needs --row")
+    if args.step in ("thresholds", "deploy") and args.row is None:
+        parser.error(f"{args.step} needs --row")
+    if args.step == "thresholds":
+        print(step_thresholds(cfg, args.run, args.row))
+    elif args.step == "deploy":
         for path in step_deploy(cfg, args.run, args.row):
             print(path)
     elif args.step == "qat":
