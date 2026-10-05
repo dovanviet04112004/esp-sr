@@ -67,10 +67,14 @@ def device_of(cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_run_config(run: Path) -> dict[str, Any]:
-    """A run's resolved config with the front end it learnt on; a run without one learnt on 40 bands (ADR-0017)."""
+    """A run's resolved config with the front end it learnt on; a run without one learnt on 40 bands (ADR-0017), and
+    one from before listen.yaml v5 with the pitch ballast over the whole stream (ballast_window_s 0, KEHOACH 3.11)."""
     cfg = load_yaml(run / "config.resolved.yaml")
     front = contract_front()
-    return cfg if "listen" in cfg else cfg | {"listen": front | {"features": front["features"] | {"n_bands": 40}}}
+    before = front | {"features": front["features"] | {"n_bands": 40}, "pitch": {}}
+    learnt = cfg.get("listen", before)
+    pitch = learnt["pitch"] or front["pitch"] | {"ballast_window_s": 0.0}
+    return cfg | {"listen": learnt | {"pitch": {"ballast_window_s": 0.0} | pitch}}
 
 
 def load_config(*names: str, overrides: list[str] | None = None) -> dict[str, Any]:
