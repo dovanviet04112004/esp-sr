@@ -6,6 +6,7 @@
 #include "ai_engine.h"
 #include "fake_storage.h"
 #include "gen_grid.h"
+#include "gen_listen.h"
 #include "image_probe.h"
 #include "sha/sha_core.h"
 #include "storage_format.h"
@@ -37,13 +38,14 @@ static void add_entry(storage_model_header_t *header, const char *name, uint32_t
     esp_sha(SHA2_256, &s_image[offset], size, entry->sha256);
 }
 
-static void build_image(uint32_t grid_hash)
+static void build_image(uint32_t grid_hash, uint32_t listen_hash)
 {
     memset(s_image, 0, sizeof(s_image));
     storage_model_header_t *header = (storage_model_header_t *)s_image;
     header->magic = STORAGE_MODEL_MAGIC;
     header->format_ver = STORAGE_MODEL_FORMAT_VER;
     header->grid_hash = grid_hash;
+    header->listen_hash = listen_hash;
     add_entry(header, "wake", STORAGE_MODEL_KIND_ESPDL, STORAGE_MODEL_HEADER_BYTES, NET_BYTES);
     add_entry(header, "wake", STORAGE_MODEL_KIND_NORM,
               STORAGE_MODEL_HEADER_BYTES + 2 * STORAGE_MODEL_ALIGN_BYTES, NORM_BYTES);
@@ -55,20 +57,26 @@ static void check_loader(void)
     fake_storage_set_image(NULL, 0);
     check(ai_engine_load(0) == ESP_ERR_NOT_FOUND && image_probe_bytes() == 0, "an empty slot loads nothing");
 
-    build_image(GEN_GRID_HASH ^ 1u);
+    build_image(GEN_GRID_HASH ^ 1u, GEN_LISTEN_HASH);
     check(ai_engine_load(0) == ESP_ERR_INVALID_VERSION && image_probe_bytes() == 0,
           "an image learned on another grid is refused whole");
 
-    build_image(GEN_GRID_HASH);
+    build_image(GEN_GRID_HASH, GEN_LISTEN_HASH);
     s_image[STORAGE_MODEL_HEADER_BYTES + 2 * STORAGE_MODEL_ALIGN_BYTES + 7] ^= 0x01;
     check(ai_engine_load(1) == ESP_ERR_INVALID_CRC && image_probe_bytes() == 0,
           "one flipped bit in the second entry fails its sha256 and drops the first too");
 
-    build_image(GEN_GRID_HASH);
+    build_image(GEN_GRID_HASH, GEN_LISTEN_HASH ^ 1u);
+    check(ai_engine_load(1) == ESP_OK && image_probe_bytes() == NET_BYTES + NORM_BYTES &&
+              !image_probe_listens("command_ctc"),
+          "an image of another listen.yaml loads, and only its command is refused");
+
+    build_image(GEN_GRID_HASH, GEN_LISTEN_HASH);
     size_t net_bytes = 0;
     size_t norm_bytes = 0;
     size_t units_bytes = 7;
-    check(ai_engine_load(1) == ESP_OK, "a sound image on this grid loads");
+    check(ai_engine_load(1) == ESP_OK && image_probe_listens("command_ctc"),
+          "a sound image on this grid and listen.yaml loads");
     const uint8_t *net = image_probe_find("wake", STORAGE_MODEL_KIND_ESPDL, &net_bytes);
     const uint8_t *norm = image_probe_find("wake", STORAGE_MODEL_KIND_NORM, &norm_bytes);
     const uint8_t *units = image_probe_find("wake", STORAGE_MODEL_KIND_UNITS, &units_bytes);
@@ -82,8 +90,9 @@ static void check_loader(void)
     check(image_probe_bytes() == NET_BYTES + NORM_BYTES, "the PSRAM held is the sum of the entries");
 
     fake_storage_set_image(NULL, 0);
-    check(ai_engine_load(0) == ESP_ERR_NOT_FOUND && image_probe_bytes() == 0,
-          "loading again drops the image held, even when the new slot is empty");
+    check(ai_engine_load(0) == ESP_ERR_NOT_FOUND && image_probe_bytes() == 0 &&
+              !image_probe_listens("command_ctc"),
+          "loading again drops the image held and its listen hash, even when the new slot is empty");
 }
 
 static void check_shells(void)

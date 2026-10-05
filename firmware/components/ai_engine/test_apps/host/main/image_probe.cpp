@@ -13,3 +13,8 @@ extern "C" size_t image_probe_bytes(void)
 {
     return ai::image_bytes();
 }
+
+extern "C" bool image_probe_listens(const char *name)
+{
+    return ai::image_listens_as_built(name);
+}

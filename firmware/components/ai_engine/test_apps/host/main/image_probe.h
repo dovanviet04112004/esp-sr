@@ -3,6 +3,7 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -12,6 +13,7 @@ extern "C" {
 
 const uint8_t *image_probe_find(const char *name, uint32_t kind, size_t *size);
 size_t image_probe_bytes(void);
+bool image_probe_listens(const char *name);
 
 #ifdef __cplusplus
 }
