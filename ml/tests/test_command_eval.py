@@ -1,16 +1,19 @@
-"""Gate 3 of the command tracks: which board sessions count, what each should get, where its windows sit, and how the
-table scores them."""
+"""Gate 3 of the command tracks: which board sessions count, what each should get, where its windows sit, how the
+table scores them, and the command set a ctc run is scored on."""
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
+import yaml
 
 pytest.importorskip("torch")
 
 from srpipe.core import corpus
 from srpipe.core.audio_io import to_float
-from srpipe.core.config import load_yaml
+from srpipe.core.config import contract_front, load_yaml
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.pitch import N_FEATURES
 from srpipe.dsp.spec.stft import Stft
@@ -162,3 +165,19 @@ def test_the_ctc_table_counts_best_commands_and_sweeps_the_reject_threshold() ->
     assert "- bat_den: best 2/3" in text and "- tat_den: best 0/0" in text
     assert "| 150 | 33% | 33% | 3/3 | 2/2 | 1/1 |" in text
     assert "| 600 | 33% | 33% | 2/3 | 1/2 | 1/1 |" in text
+
+
+def test_a_ctc_run_scores_the_command_set_it_is_given(tmp_path) -> None:
+    torch = pytest.importorskip("torch")
+    cfg = load_yaml(ctc.CONFIG) | {"listen": contract_front(), "listen_hash": listen.HASH}
+    (tmp_path / "config.resolved.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    torch.save(encoder.build(cfg).state_dict(), tmp_path / "model.pt")
+    dims = encoder.n_dims(cfg)
+    np.savez(tmp_path / "feature_stats.npz", mean=np.zeros(dims, np.float32), std=np.ones(dims, np.float32))
+    given = tmp_path / "set.json"
+    given.write_text(
+        json.dumps({"version": 1, "commands": [{"id": "a", "text": "bật ti vi"}, {"id": "b", "text": "tắt ti vi"}]})
+    )
+    net = gate.load_ctc(tmp_path, given)
+    assert net.names == ["a", "b"] and len(net.lexicon) == 2
+    assert gate.load_ctc(tmp_path).names[0] == "bat_den"

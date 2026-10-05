@@ -153,8 +153,8 @@ ctc-deploy: ## Export a ladder row into firmware/models/command and lock it: mak
 models-flash: ## Pack every model of contracts/models.lock.json and write models_0 of board B (KEHOACH 4.5.6, 6.1)
 	cd ml && PORT=$(PORT) ./scripts/50_pack_and_flash.sh
 
-command-eval: ## Score Gate 3 of a command track on the board sessions: make command-eval TRACK=kws|ctc RUN=<run under ml/> (E11-T13, E11-T17)
-	cd ml && uv run --extra train python -m srpipe.tasks.command.eval $(TRACK) $(RUN)
+command-eval: ## Score Gate 3 of a command track on the board sessions: make command-eval TRACK=kws|ctc|rnnt RUN=<run under ml/> [SET=<command set file from the repo root>] (E11-T13, E11-T17)
+	cd ml && uv run --extra train python -m srpipe.tasks.command.eval $(TRACK) $(RUN) $(if $(SET),--commands $(abspath $(SET)))
 
 ns-data: screen ## Split, pools and held val/test sets of the ns branch into data/splits/ns, interim and processed (E9-T3)
 	cd ml && uv run python -m srpipe.tasks.ns.data clean && uv run python -m srpipe.tasks.ns.data split \

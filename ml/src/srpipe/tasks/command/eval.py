@@ -87,13 +87,14 @@ class Ctc:
     cfg: dict
 
 
-def load_ctc(run: Path) -> Ctc:
+def load_ctc(run: Path, commands: Path = command.COMMANDS) -> Ctc:
+    """A ctc run with every command of a command set file, default_vi.json unless another is given."""
     trained = load_run_config(run)
     stats = np.load(run / "feature_stats.npz")
     model = encoder.build(trained)
     model.load_state_dict(torch.load(run / "model.pt", map_location="cpu"))
     model.eval()
-    listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
+    listed = json.loads(commands.read_text(encoding="utf-8"))["commands"]
     lexicon = [ctc_score.variants(c["text"]) for c in listed]
     return Ctc(model, stats["mean"], stats["std"], [c["id"] for c in listed], lexicon, trained)
 
@@ -301,9 +302,12 @@ def kws_board(net: Kws, spec: dict, paths: dict) -> list[Scored]:
     return board(net.cfg, spec, paths, {cid: text for cid, text in said.items() if cid in net.names}, decided_of)
 
 
-def ctc_board(net: Ctc, spec: dict, paths: dict, heard: Callable = ctc_heard) -> list[Scored]:
-    """The board sessions decided over their command windows by heard, the ctc track's or the rnnt track's."""
-    listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
+def ctc_board(
+    net: Ctc, spec: dict, paths: dict, heard: Callable = ctc_heard, commands: Path = command.COMMANDS
+) -> list[Scored]:
+    """The board sessions decided over their command windows by heard, the ctc track's or the rnnt track's, a session
+    expecting the command of the set file commands whose text it says."""
+    listed = json.loads(commands.read_text(encoding="utf-8"))["commands"]
 
     def decided_of(clean, features, pitch, spans):
         return [heard(net, x) for x in ctc_windows(features, pitch, spans)]
@@ -384,6 +388,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("track", choices=["kws", "ctc", "rnnt"])
     parser.add_argument("run", type=Path, help="a run directory of the track's train")
+    parser.add_argument(
+        "--commands",
+        type=Path,
+        default=command.COMMANDS,
+        help="ctc, rnnt: a command set file to score in place of "
+        "default_vi.json, as the board runs the set the host gives it; the gate of KEHOACH 3.12 is the default's",
+    )
     args = parser.parse_args(argv)
     spec = load_yaml(command.CONFIG)["eval"]
     if args.track == "kws":
@@ -392,11 +403,12 @@ def main(argv: list[str] | None = None) -> int:
         print(table(kws_board(net, spec["board"], data_paths()), net.names, spec))
         return 0
     ctc_cfg = load_yaml(ctc.CONFIG)
-    net = load_ctc(args.run)
+    net = load_ctc(args.run, args.commands)
     forms = sum(len(v) for v in net.lexicon)
-    print(f"{args.run}: {len(net.names)} commands, {forms} variants, windows up to {listen.WINDOW_S} s")
+    said = f"{len(net.names)} commands of {args.commands.name}, {forms} variants"
+    print(f"{args.run}: {said}, windows up to {listen.WINDOW_S} s")
     heard = rnnt_heard if args.track == "rnnt" else ctc_heard
-    results = ctc_board(net, spec["board"], data_paths(), heard)
+    results = ctc_board(net, spec["board"], data_paths(), heard, args.commands)
     print(ctc_table(results, net.names, spec, ctc_cfg["eval"]))
     return 0
 

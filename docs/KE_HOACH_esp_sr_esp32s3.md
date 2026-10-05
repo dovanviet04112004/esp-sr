@@ -1134,7 +1134,9 @@ trên các phiên thu qua board mà split giao cho `test`, tách theo người n
 không bao giờ được đếm (§1.3). Mỗi câu `vad` tìm ra chấm một lần, trên cửa sổ lệnh của §5.4:
 `kws` trên cửa sổ 94 bước của nó, kết ở bước `vad` tắt sau câu, ngưỡng lấy từ `val` của run; `ctc` và `rnnt` từ
 `utterance.lead_s` trước bước `vad` đầu của câu tới bước `vad` tắt sau nó, tối đa `window_s`, mạng chạy từ đầu cửa sổ
-với bộ đệm rỗng như lúc học, bộ lệnh là mọi dòng của `default_vi.json` qua `lang_vi`, cả lệnh chưa học. Câu là các đoạn
+với bộ đệm rỗng như lúc học, bộ lệnh là mọi dòng của `default_vi.json` qua `lang_vi`, cả lệnh chưa học; board chạy bộ host
+đẩy xuống (`/lfs/cmd/set.json`) thì chấm thêm trên chính bộ ấy (`make command-eval SET=`) để so với board, còn số chọn
+model là số của bộ mặc định. Câu là các đoạn
 `vad` cách nhau không quá `utterance.gap_s`, bỏ câu ngắn hơn `utterance.min_s`; mọi số của luật cắt nằm ở
 `contracts/listen.yaml`. Phiên ghi xong được nối thêm lặng như board nghe tiếp sau phiên, để câu cuối cũng chốt. Board
 chưa có `wake` cắt đúng như vậy, nên quyết định của board trên tiếng nói trực tiếp là quyết định Cửa 3 đếm. Tới khi
