@@ -350,6 +350,8 @@ def main(argv: list[str] | None = None) -> int:
     if commands := spec.get("commands"):
         learned = command.learned(load_yaml(command.CONFIG))
         files[VAL_COMMANDS] = command_rows(commands | {"seed": spec["seed"]}, paths["raw"], learned)
+        index = extract.read_index(paths["raw"] / "speech" / commands["extract"])
+        seconds |= {f"speech/{commands['extract']}/{r['file']}": r["seconds"] for r in index}
     out = paths["splits"] / "command" / spec["version"]
     sessions = [r["session"] for r in board_rows(paths)] if spec.get("board") else []
     splits.write_version(out, files, notes(spec, files, dropped, seconds, sessions))
