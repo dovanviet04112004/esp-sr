@@ -485,3 +485,112 @@ Lượt ngắn là tiếng click và tiếng động; năm lượt dài là lệ
 Cửa 3 có thể cắt mất đầu câu. Ba lượt giữ mà không lời nhắc nào khớp cũng nhỏ hơn mọi câu thật: log-mel trung bình
 −12,4 so với −9,7 tới −11,8. Chúng là tiếng động, nhãn lời nhắc sai, nên `split.board.noise` bỏ chúng khỏi tập học. Câu thật mỗi phiên: 10, 11, 11, 11, 11, 10, 9, 10, 11, 11. Chấm giữa mười lời nhắc của các phiên, mạng cuối của run
 v3 nghe 36 trên 41 câu "tắt" thành "bật" cùng vật.
+
+## 12. Âm tiết đầu của lệnh: mạng nguội ở đầu cửa sổ, cao độ, mức và màu (05/10)
+
+Chung cho mục này: B1 là run `20261005_e1a544b-dirty_742d86` ở bước 44 000 (bề rộng 160, 80 dải). Các mạng thử học từ
+đầu 8 000 bước bằng cấu hình của B1, cùng seed, trên VIVOS và Common Voice của `command/v4` mô phỏng lại có giữ mẫu sạch,
+cộng 105 lượt `vad` các phiên 04/10 của chủ repo nhân sáu; `val` là `val` của `command/v4` mô phỏng lại. Cửa 3 là phiên
+28/09 (112 câu lệnh, 1 m và 3 m), float, lệnh điểm cao nhất không ngưỡng. Đo ngày 05/10 bằng script chẩn đoán chạy một lần.
+
+### 12.1 Nhầm ở đâu
+
+B1 trên Cửa 3 đúng 89/112; sai gần hết là âm tiết đầu của cặp lệnh chung âm tiết sau: "tắt đèn" → "bật đèn" 7, "tắt quạt" →
+"bật quạt" 5, "đóng cửa" → "mở cửa" 6 (4 ở 3 m). Chấm riêng từng tín hiệu của âm tiết đầu trên 22 câu "tắt" (tám âm tiết
+phụ âm {t, ɓ} × nguyên âm {ă, â} × thanh {sắc, nặng} trước âm tiết sau đã nói; một tín hiệu đúng khi tổ hợp tốt nhất có nó
+đúng hơn tổ hợp tốt nhất có nó sai):
+
+| Mạng | Phụ âm đúng | Nguyên âm đúng | Thanh đúng | Cả ba |
+|---|---|---|---|---|
+| A (cao độ như board) | 11 | 0 | 11 | 0 |
+| C (cao độ nhìn sau 0,75 s) | 14 | 0 | 13 | 0 |
+| B1 | 17 | 7 | 6 | 2 |
+
+Với 23 câu "bật", cả ba tín hiệu đúng 19–23 ở mọi mạng. Trên `val`, B1 phân biệt ă với â ở vần tắc kém sẵn: ă đúng 85,0%
+(293 âm tiết), â đúng 62,6% (270). Kho học có "bật" 1 483 lần, "tắt" 806 lần; vần ất, ật cộng 112 nghìn lần, ắt, ặt 39
+nghìn lần.
+
+### 12.2 Ngữ cảnh trước câu: mạng nguội
+
+Cửa sổ của Cửa 3 mở `lead_s` 1,25 s trước bước `vad` đầu; mạng bắt đầu từ bộ đệm rỗng, bộ dò cao độ đặt lại ở đó. Mở sớm hơn
+(B1, cả log-mel lẫn cao độ, hay chỉ một trong hai):
+
+| Mở trước câu | 0,30 s | 0,61 s | 1,25 s | 2,00 s | 3,01 s | 4,00 s |
+|---|---|---|---|---|---|---|
+| cả hai | 88 | 90 | 89 | **98** | 98 | 98 |
+| chỉ log-mel (cao độ đặt lại ở 1,25 s) | | | 89 | 95 | 96 | |
+| chỉ cao độ | | | 89 | 91 | 89 | |
+
+Ở 2,00 s: "tắt đèn" 7/11, "tắt quạt" 9/11, "đóng cửa" 8/11. A (8 000 bước) không đổi: 87 ở cả 1,25 s và 2,00 s. Trên `val`
+(242 câu có ít nhất 1,2 s trước bước `vad` đầu), cắt bớt phần trước câu, thanh đúng ở âm tiết đầu / thứ hai / sau đó:
+
+| Phần trước câu | B1 | A |
+|---|---|---|
+| như cắt, ≥ 1,2 s | 69,4 / 80,6 / 81,4% | 69,0 / 76,0 / 81,1% |
+| 0,61 s | 54,4 / 63,9 / 77,7% | 50,2 / 65,1 / 75,6% |
+| 0,30 s | 39,4 / 54,8 / 75,0% | 32,8 / 49,0 / 72,1% |
+
+Mẫu học có từ đầu mẩu tới bước `vad` đầu phân vị 5/25/50/75/95 là 0 / 0,46 / 0,86 / 1,09 / 1,47 s (`val`), 0 / 0,51 /
+0,83 / 1,10 / 1,66 s (VIVOS). Cho mạng chạy qua phần trước cửa sổ mà không chấm nó, cửa sổ chấm giữ nguyên (B1):
+
+| Chạy trước cửa sổ | Cửa 3 | Khoảng cách giữ 90% câu đúng | Câu na ná lệnh qua mức ấy | Tiếng ồn qua |
+|---|---|---|---|---|
+| 0 | 89 | 121 | 0/24 | 0/2 |
+| 0,75 s | 96 | 129 | 2/24 | 0/2 |
+| 1,74 s | 96 | 136 | 1/24 | 0/2 |
+| 2,75 s | 97 | 145 | 1/24 | 0/2 |
+| mở cửa sổ 2,00 s và chấm cả phần ấy | 98 | 144 | 3/24 | 0/2 |
+| chạy liên tục cả phiên, không đặt lại | 92 | 139 | 1/24 | 0/2 |
+
+Trường nhìn danh nghĩa của B1 khoảng 10 s (tích chập 17, 9, 5, 9 khung ở nhịp 1, 2, 4, 2 cộng bộ trộn 8 khung, sáu lớp nối
+tiếp); với bộ đệm rỗng ở đầu, khoảng 2 s đầu của mỗi cửa sổ là trạng thái mạng chưa gặp khi chạy ổn định.
+
+### 12.3 Cao độ
+
+| Mạng | UER `val` | Thanh đúng âm tiết đầu / sau | Sắc/nặng vần tắc âm tiết đầu | Cửa 3 | "tắt" / "bật" |
+|---|---|---|---|---|---|
+| A: như board | 0,420 | 70,8 / 80,4% | 81,4% | 87 | 4/22 / 21/23 |
+| C: nhìn sau 0,75 s (đường Viterbi cả câu) | 0,426 | 69,7 / 79,8% | 76,0% | 88 | 7/22 / 21/23 |
+| D: A cộng log F0 thô, 84 chiều | 0,438 | 72,7 / 80,7% | 77,8% | 78 | 5/22 / 21/23 |
+
+Giữ ba chiều cao độ ở trung bình lúc học: A còn 46,7 / 50,5%, C 35,8 / 46,8% thanh đúng; mạng dựa nhiều vào cao độ. Mức
+log F0 chuẩn hoá trung bình 15 bước đầu của âm tiết đầu, cửa sổ mở 1,25 s, bộ dò viết lại theo `normalization-right-context`
+của Kaldi (khớp Kaldi chạy dòng qua kalpy trên 12 câu VIVOS test: không khung nào lệch quá 1e-3, lệch lớn nhất 2,0e-4 POV,
+1,8e-5 log F0 chuẩn hoá):
+
+| Trái / phải | "bật" 04/10 · 28/09 1 m · 3 m | "tắt" 04/10 · 28/09 1 m · 3 m |
+|---|---|---|
+| 0,75 / 0 s (board) | +0,76 · +0,15 · +0,20 | +1,03 · +0,37 · +0,24 |
+| 0,75 / 0,4 s | +0,41 · +0,12 · +0,15 | +0,64 · +0,36 · +0,31 |
+| 0,75 / 0,75 s | +0,23 · +0,12 · +0,21 | +0,49 · +0,44 · +0,40 |
+| 0,4 / 0,4 s | +0,11 · +0,08 · +0,10 | +0,23 · +0,29 · +0,24 |
+
+NCCF của nền trước câu, trung vị mỗi câu, phân vị 10/50/90: mô phỏng `val` 0,23 / 0,34 / 0,68; 28/09 0,24–0,29 / 0,30 /
+0,33–0,47; 04/10 (có quạt) 0,53 / 0,58 / 0,61.
+
+### 12.4 Mức và màu
+
+Mỗi câu, trên các bước `vad`: mức trước `agc`, độ lợi `agc`, log-mel trung bình sau chuỗi; trung vị (phân vị 10–90):
+
+| | Mức trước `agc` | Độ lợi `agc` | log-mel sau chuỗi |
+|---|---|---|---|
+| mô phỏng `val` | −61 (−71…−49) dBFS | +21 (+6…+30) dB | −9,62 (−12,67…−8,34) |
+| 28/09, 1 m | −57 (−60…−55) | +7 (+1…+12) | −11,59 (−12,09…−10,95) |
+| 28/09, 3 m | −57 | +6 (+1…+10) | −11,87 (−12,21…−11,35) |
+| 04/10, 80 cm | −52 (−69…−49) | +5 (+3…+8) | −10,86 (−12,43…−10,30) |
+
+`agc` chỉ đổi độ lợi khi có tiếng, 3 dB/s: phiên mô phỏng toàn câu dài nối nhau nên nó leo gần đích, phiên lệnh thưa và
+chuỗi chạy mới mỗi phiên nên nó còn thấp. Dời log-mel 28/09 từng dải bằng phổ dài hạn của phiên khác, B1 "tắt" đúng /
+nguyên âm đúng: như thu 10 / 7; về phổ 04/10 (phiên trong tập học của B1): cả mức lẫn màu 17 / 20, chỉ mức 14 / 10, chỉ
+màu 14 / 15; về phổ trung bình của mô phỏng `val`: cả hai 14 / 18, chỉ mức 15 / 13, chỉ màu 1 / 4. Cùng phép dời, A và C
+phản ứng khác hẳn (A 3–5, C 11–17), nên phép dời chỉ cho thấy mạng nhạy với mức và màu. Cho `agc` xuất phát ở +12, +21,
++30 dB thay 0 dB, B1 "tắt" còn 7/22 thay 10/22. N (log-mel trừ độ lợi `agc`, 8 000 bước): UER `val` 0,411, thanh đúng
+69,4 / 81,2%, "tắt" 0/22, "bật" 21/23.
+
+### 12.5 Đọc lại
+
+- Âm tiết đầu yếu ở mọi người nói và mọi lệnh vì mạng bắt đầu mỗi cửa sổ từ bộ đệm rỗng mà trí nhớ của nó dài khoảng 2 s
+  hữu hiệu; đó là phần lớn nhất của lỗi "tắt" và "đóng cửa" trên B1.
+- Cao độ không nhìn sau làm mức âm tiết đầu dịch theo phiên tới 0,6–0,8, lớn hơn khoảng cách "tắt"–"bật"; nhìn sau bỏ
+  được độ dịch ấy nhưng ở mạng 8 000 bước chỉ thêm một câu Cửa 3.
+- Mức và màu sau chuỗi của phiên thật khác mô phỏng: `agc` theo lịch sử, đáp tuyến micro và vỏ coi là phẳng.
