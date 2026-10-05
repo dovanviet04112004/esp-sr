@@ -29,6 +29,7 @@ from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc import qat, train
 from srpipe.tasks.command.ctc.model import encoder
+from srpipe.tasks.command.ctc.postproc import ctc_score
 from srpipe.tasks.wake.data import sentence_units
 
 LADDER = "command_ctc"
@@ -126,6 +127,18 @@ def unit_error_rate(net, data: train.Sentences, picks: np.ndarray, hops: int, me
     return errors / total
 
 
+def chip_heard(net: gate.Ctc, x: np.ndarray) -> gate.Heard:
+    """One window decided as the chip decides it on net.model, an Int8Net: the int8 logits of its own frames to
+    log-probabilities by ctc_score.frame_log_probs, as ai_engine_command_ctc_log_probs takes them, with no threshold."""
+    window, frames = gate.normalised_window(net, x)
+    exponent = net.model.io.output_exponent
+    with torch.no_grad():
+        logits = net.model(window).numpy()[0, :, :frames]
+    log_probs = ctc_score.frame_log_probs(ptq_espdl.to_int8(logits, exponent), exponent)
+    per_frames = ctc_score.window_frames(net.model.front.hop_stride)
+    return gate.heard_of(net, *ctc_score.decide(log_probs, net.lexicon, ctc_score.CAP, 0, per_frames))
+
+
 def gate_row(
     net: gate.Ctc, windows: list[gate.Scored], reject: int, margin: int, heard_by: Callable = gate.ctc_heard
 ) -> dict:
@@ -193,11 +206,14 @@ def bench(cfg: dict, run: Path) -> Bench:
 
 
 def row_of(cfg: dict, b: Bench, model) -> dict:
-    """The unit error rate of model, the float net or an Int8Net, over the picked test sentences, and its Gate 3."""
+    """The unit error rate of model, the float net or an Int8Net, over the picked test sentences, and its Gate 3, an
+    Int8Net's decided as the chip decides."""
     spec, n = cfg["quant"], b.net
     errors = unit_error_rate(model, b.test, b.picks, spec["hops"], n.mean, n.std)
     heard = gate.Ctc(model, n.mean, n.std, n.names, n.lexicon, n.cfg)
-    return {"unit_error_rate": round(errors, 4), **gate_row(heard, b.windows, spec["reject"], cfg["eval"]["margin"])}
+    by = chip_heard if isinstance(model, Int8Net) else gate.ctc_heard
+    gated = gate_row(heard, b.windows, spec["reject"], cfg["eval"]["margin"], by)
+    return {"unit_error_rate": round(errors, 4), **gated}
 
 
 def int8_row(cfg: dict, b: Bench, graph, folder: Path, rungs: dict) -> dict:

@@ -1,7 +1,8 @@
 """The ctc ladder: features padded and normalised as training reads them, calibration whole spans of real hops from
-sentence starts, stacked for a batch, the Gate 3 row, the rows of every step kept in one file, the best calibration
-within the tie, a norm left unfused refused, rung 4 training a batch graph the graph of one then carries, and no deploy
-of a run cut by another listen.yaml or of a row whose input or output is not int8."""
+sentence starts, stacked for a batch, the Gate 3 row, an int8 window decided as the chip's record is, the rows of every
+step kept in one file, the best calibration within the tie, a norm left unfused refused, rung 4 training a batch graph
+the graph of one then carries, and no deploy of a run cut by another listen.yaml or of a row whose input or output is
+not int8."""
 
 from __future__ import annotations
 
@@ -205,3 +206,22 @@ def test_a_row_the_chip_cannot_read_or_give_is_not_deployed(tmp_path: Path, monk
     monkeypatch.setattr(quant.ptq_espdl, "io_bits", lambda _graph: (8, 16))
     with pytest.raises(ValueError, match="int8 at both ends"):
         quant.step_deploy(load_yaml(ctc.CONFIG), tmp_path, "row")
+
+
+def test_the_ladder_decides_an_int8_window_as_the_record_the_chip_is_held_to(tmp_path: Path) -> None:
+    cfg = load_yaml(ctc.CONFIG)
+    cfg["quant"]["hops"] = 64
+    torch.manual_seed(0)
+    model = probe.draw_norm_scales(encoder.build(cfg), *cfg["probe"]["norm_scale"]).eval()
+    rng = np.random.default_rng(8)
+    calib = [torch.from_numpy(rng.normal(size=(1, DIMS, 64)).astype(np.float32)) for _ in range(2)]
+    rungs = ptq_espdl.ladder(quant.LADDER) | {"equalization": None, "bias_correction": False, "calibration": "minmax"}
+    graph = quant.quantized(model, calib, tmp_path, rungs, cfg["esp_ppq_patches"])
+    norm = (np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32))
+    x = rng.normal(size=(50, DIMS)).astype(np.float32)
+    record = probe.command_windows(cfg, graph, model, norm, [x])
+    _, score, lead, gap = ctc_score.DECISION_RECORD.unpack(record[-ctc_score.DECISION_RECORD.size :])
+    lexicon = ctc_score.default_lexicon()
+    int8 = quant.Int8Net(graph, 64, *norm, model, cfg["esp_ppq_patches"])
+    heard = quant.chip_heard(gate.Ctc(int8, *norm, [f"c{k}" for k in range(len(lexicon))], lexicon, cfg), x)
+    assert (heard.score, heard.lead, heard.gap) == (score, lead, gap)
