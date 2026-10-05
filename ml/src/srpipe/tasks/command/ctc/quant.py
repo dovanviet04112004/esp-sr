@@ -21,6 +21,7 @@ from torch import nn
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, ptq_espdl, qat_espdl
 from srpipe.core import screen, splits
 from srpipe.core.config import apply_overrides, data_paths, load_yaml
+from srpipe.dsp.spec import pitch
 from srpipe.export import update_lock
 from srpipe.generated import listen
 from srpipe.tasks import command
@@ -34,7 +35,6 @@ LADDER = "command_ctc"
 GRAPH_FILE = "graph.native"
 # The image names a branch's entries after its backend (KEHOACH 6.3).
 BRANCH, ENTRY = "command", "command_ctc"
-FEATURES = "log_mel40_pitch3"  # meta.json's name of the 43 features a hop
 
 
 def padded(x: np.ndarray, hops: int, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
@@ -318,7 +318,10 @@ def step_deploy(cfg: dict, run: Path, row: str) -> tuple[Path, Path]:
     fields = {
         "backend": "ctc",
         "listen_hash": f"0x{listen.HASH:08x}",
-        "features": {"name": FEATURES, "dims": int(x.shape[1])},
+        "features": {
+            "name": f"log_mel{x.shape[1] - pitch.N_FEATURES}_pitch{pitch.N_FEATURES}",
+            "dims": int(x.shape[1]),
+        },
         "row": row,
         "rungs": {"calibration": rungs["calibration"], "int16_ops": rungs["int16_ops"]},
     }

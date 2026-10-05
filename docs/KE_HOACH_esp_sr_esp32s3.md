@@ -2515,7 +2515,7 @@ offset 0x400  dữ liệu, mỗi entry căn 64 B
 | Trường | Giá trị | Ai đọc |
 |---|---|---|
 | `backend` | `kws` \| `ctc` \| `rnnt` | bước đóng gói đặt tên mục trong ảnh theo nó (`command_kws`, `command_ctc`, hay `command_rnnt` cùng `rnnt_predictor` và `rnnt_joiner`), nên bản dựng của đường khác không tìm thấy model và coi ảnh là không có `command` |
-| `features` | `log_mel40` \| `log_mel40_pitch3`, kèm số chiều mỗi khung | `svc_listen`, qua độ dài khung của `ai_engine_command_step` (§4.5.5) |
+| `features` | `log_mel<n>` \| `log_mel<n>_pitch3`, `<n>` số dải mel của `listen.yaml` mà run học (80 từ ADR-0017), kèm số chiều mỗi khung | `svc_listen`, qua độ dài khung của `ai_engine_command_step` (§4.5.5) |
 | `classes` | `kws`: `id` các lệnh đã học theo thứ tự, rồi `other`, `silence`; `ctc`: không có | bước đóng gói kiểm các `id` lệnh là phần đầu của `contracts/commands/default_vi.json`, để chỉ số trả về trùng chỉ số trong bảng lệnh |
 
 Của `command` còn có `listen_hash`: run ghi băm `contracts/listen.yaml` lúc bắt đầu học, bước deploy chép nó vào
