@@ -587,7 +587,54 @@ phản ứng khác hẳn (A 3–5, C 11–17), nên phép dời chỉ cho thấy
 +30 dB thay 0 dB, B1 "tắt" còn 7/22 thay 10/22. N (log-mel trừ độ lợi `agc`, 8 000 bước): UER `val` 0,411, thanh đúng
 69,4 / 81,2%, "tắt" 0/22, "bật" 21/23.
 
-### 12.5 Đọc lại
+### 12.5 Các nhánh thử, 8 000 bước
+
+Cùng dữ liệu, seed và số bước như A (§12 đầu mục); "tắt" / "bật" là 22 / 23 câu 28/09.
+
+| Bản | Khác A ở | UER `val` | Thanh đúng âm tiết đầu / sau | Sắc/nặng vần tắc âm tiết đầu | Cửa 3 | "tắt" / "bật" |
+|---|---|---|---|---|---|---|
+| A | — | 0,420 | 70,8 / 80,4% | 81,4% | 87 | 4 / 21 |
+| C | log F0 chuẩn hoá ±0,75 s trên đường Viterbi cả câu | 0,426 | 69,7 / 79,8% | 76,0% | 88 | 7 / 21 |
+| D | thêm log F0 thô, 84 chiều | 0,438 | 72,7 / 80,7% | 77,8% | 78 | 5 / 21 |
+| N | log-mel trừ độ lợi `agc` | 0,411 | 69,4 / 81,2% | 76,6% | 80 | 0 / 21 |
+| K | màu mượt ngẫu nhiên ±4 dB mỗi câu (nút mỗi 16 dải) | 0,416 | 70,1 / 80,7% | 80,8% | 83 | 0 / 21 |
+| S | nhân theo chiều sâu 5, 3, 3, 3 và bộ trộn 2 khung: trường nhìn danh nghĩa ~2,6 s thay ~10 s | 0,411 | 72,1 / 80,7% | 79,0% | 81 | 0 / 21 |
+| G | mức ngẫu nhiên ±6 dB mỗi câu | 0,445 | 69,6 / 80,3% | 78,4% | 82 | 8 / 21 |
+
+Ở cỡ này hai lượt học cùng cấu hình khác nhau cỡ vài câu Cửa 3; không nhánh nào hơn A rõ. S cắt bớt phần trước câu
+trên `val` như §12.2: thanh âm tiết đầu 69,4 / 49,8 / 34,9% ở ≥ 1,2 / 0,61 / 0,30 s, như A: trường nhìn ngắn không
+làm mạng ấm nhanh hơn.
+
+### 12.6 Cắt như board: pilot trên `val`
+
+`val` của split `v4` qua đường mô phỏng với luật cắt của KẾ HOẠCH §1.2 bước 4 (lead 1,25 s lúc ấy) và độ lợi `agc`
+đầu phiên rút ngẫu nhiên; so với `val` cắt theo mẩu cộng 0,3 s.
+
+| | Cắt như board | Cắt theo mẩu |
+|---|---|---|
+| Mẫu / mẩu | 1 371 / 1 583: 86 cửa sổ gộp mẩu, 45 mẩu `vad` không chạm | 1 546 / 1 583 |
+| Trước bước `vad` đầu, s, phân vị 5/25/50/75/95 | 0,48 / 1,25 / 1,25 / 1,25 / 1,25 | 0 / 0,32 / 0,83 / 1,08 / 1,47 |
+| Sau bước `vad` cuối | 0,02 s | 0,19–1,62 s |
+| Độ lợi `agc` lúc có tiếng, dB | 9 / 16 / 22 / 28 / 30 | 3 / 13 / 21 / 29 / 30 |
+| Mức lời nói sau `agc`, dBFS | −58 / −44 / −36 / −31 / −28 | −64 / −46 / −36 / −31 / −28 |
+
+Phiên 28/09 qua chuỗi mới chạy cho lời nói khoảng −51 dBFS sau `agc`; board đã nghe người dùng một lúc đưa lời nói về
+đích −26 dBFS.
+
+### 12.7 Độ trễ quyết định ước từ chi phí trên board
+
+172 cửa sổ của Cửa 3 (28/09), chi phí đo trên board B của mạng bề rộng 160 (81,4 ms mỗi khối 16 bước,
+`latency.md` §18) và cao độ (1,98 ms mỗi bước, `pitch.md` §3), phép chấm 15 ms; công việc bắt đầu ở bước `vad` đầu;
+cao độ tính liên tục thì mỗi bước tới vẫn tốn 1,98 ms của nhân 0 trong lúc đuổi kịp. Chậm sau bước chốt 🔬:
+
+| Mở trước câu | Cao độ | Trung vị | p90 | Lớn nhất |
+|---|---|---|---|---|
+| 1,25 s | theo cửa sổ | 75 ms | 114 ms | 121 ms |
+| 1,25 s | liên tục | 64 ms | 96 ms | 102 ms |
+| 2,0 s | theo cửa sổ | 86 ms | 130 ms | 327 ms |
+| 2,0 s | liên tục | 61 ms | 96 ms | 143 ms |
+
+### 12.8 Đọc lại
 
 - Âm tiết đầu yếu ở mọi người nói và mọi lệnh vì mạng bắt đầu mỗi cửa sổ từ bộ đệm rỗng mà trí nhớ của nó dài khoảng 2 s
   hữu hiệu; đó là phần lớn nhất của lỗi "tắt" và "đóng cửa" trên B1.
