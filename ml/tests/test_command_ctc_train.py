@@ -118,6 +118,19 @@ def test_sentences_keep_their_units_past_the_blank_and_leave_out_the_unread_and_
         train.load_role([folder], {}, 64, "float16")
 
 
+def test_a_window_holding_clips_says_their_units_in_order_and_needs_each(tmp_path: Path) -> None:
+    folder = processed(tmp_path / "a", [40, 30, 20], np.random.default_rng(2))
+    listing = folder / "shard_00000.items.jsonl"
+    rows = [json.loads(line) for line in listing.read_text().splitlines()]
+    rows[0]["clips"], rows[1]["clips"] = ["s0", "s9"], ["s1", "s2"]
+    listing.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    units = {"s0": [0], "s1": [3], "s2": [4, 5]}
+    data = train.load_role([folder], units, 64, "float32")
+    assert data.first.tolist() == [40, 70] and [u.tolist() for u in data.units] == [[4, 5, 6], [5, 6]]
+    shard = train.shards_of([folder], units, 64)[0]
+    assert shard.first.tolist() == [40, 70] and shard.units.tolist() == [4, 5, 6, 5, 6]
+
+
 def test_a_batch_pads_to_the_chunk_and_holds_each_sentence_from_its_start(tmp_path: Path) -> None:
     data = train.load_role(
         [processed(tmp_path / "a", [10, 21], np.random.default_rng(1))], {"s0": [1], "s1": [2]}, 64, "float32"

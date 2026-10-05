@@ -70,6 +70,18 @@ class Sentences:
     units: list[np.ndarray] | Units  # lang_vi unit ids, shifted past the CTC blank
 
 
+def item_units(item: dict, units_of: dict[str, list[int]]) -> list[int] | None:
+    """The lang_vi units an item says: its clip's, or every clip's of a window that holds several, in order
+    (KEHOACH 1.2); None when a clip has none."""
+    said: list[int] = []
+    for clip in item.get("clips", [item["item"]]):
+        units = units_of.get(clip.split("@")[0])
+        if not units:
+            return None
+        said += units
+    return said
+
+
 def load_role(folders: list[Path], units_of: dict[str, list[int]], longest: int, dtype: str) -> Sentences:
     """Every sentence of the finished builds in folders that has lang_vi units and at most longest hops."""
     features, first, hops, units, offset = [], [], [], [], 0
@@ -83,7 +95,7 @@ def load_role(folders: list[Path], units_of: dict[str, list[int]], longest: int,
             features.append(np.concatenate([mel, np.load(stem + ".pitch.npy")], axis=1).astype(dtype))
             for line in (folder / name).read_text(encoding="utf-8").splitlines():
                 item = json.loads(line)
-                said = units_of.get(item["item"].split("@")[0])
+                said = item_units(item, units_of)
                 if said and item["n_frames"] <= longest:
                     first.append(offset + item["frame_offset"])
                     hops.append(item["n_frames"])
@@ -147,7 +159,7 @@ def shards_of(folders: list[Path], units_of: dict[str, list[int]], longest: int)
             for line in (folder / name).read_text(encoding="utf-8").splitlines():
                 item = json.loads(line)
                 n_hops = max(n_hops, item["frame_offset"] + item["n_frames"])
-                said = units_of.get(item["item"].split("@")[0])
+                said = item_units(item, units_of)
                 if said and item["n_frames"] <= longest:
                     first.append(item["frame_offset"])
                     hops.append(item["n_frames"])

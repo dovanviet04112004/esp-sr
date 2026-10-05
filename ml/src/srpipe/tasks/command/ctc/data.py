@@ -130,12 +130,13 @@ Dựng bằng `python -m srpipe.tasks.command.ctc.data` (`make splits`), seed {s
 
 
 def options_of(cfg: dict, split_file: Path) -> dict:
-    """How a file of the split is simulated: train at simulate.speeds and stored as simulate.train_dtype, val and
-    test at speed one and in float32."""
-    if splits.role_of(split_file.name) != "train":
-        return {"speeds": (), "dtype": "float32"}
+    """How a file of the split is simulated: every file cut as simulate.cut asks (KEHOACH 1.2), train at
+    simulate.speeds and stored as simulate.train_dtype, val and test at speed one and in float32."""
     spec = cfg["simulate"]
-    return {"speeds": tuple(spec.get("speeds", ())), "dtype": spec.get("train_dtype", "float32")}
+    cut = spec.get("cut", "pads")
+    if splits.role_of(split_file.name) != "train":
+        return {"speeds": (), "dtype": "float32", "cut": cut}
+    return {"speeds": tuple(spec.get("speeds", ())), "dtype": spec.get("train_dtype", "float32"), "cut": cut}
 
 
 def built_as(out: Path, device_cfg: dict, split_file: Path, options: dict) -> bool:
@@ -145,7 +146,9 @@ def built_as(out: Path, device_cfg: dict, split_file: Path, options: dict) -> bo
     body = yaml.safe_load((out / "manifest.yaml").read_text(encoding="utf-8"))
     same_split = body["split"]["sha256"] == splits.sha256_of(split_file)
     same_options = (
-        body.get("speeds", []) == list(options["speeds"]) and body.get("dtype", "float32") == options["dtype"]
+        body.get("speeds", []) == list(options["speeds"])
+        and body.get("dtype", "float32") == options["dtype"]
+        and body.get("cut", "pads") == options["cut"]
     )
     return body["config"] == device_cfg and same_split and same_options
 

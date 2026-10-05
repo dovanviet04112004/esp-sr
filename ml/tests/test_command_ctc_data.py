@@ -59,7 +59,9 @@ def test_an_hours_cap_draws_a_corpus_down_and_leaves_the_others_whole() -> None:
     assert capped["train_vivos.txt"] == rows["train_vivos.txt"] and data.capped(rows, seconds, spec) == capped
 
 
-def built(paths: dict, name: str, config: dict, speeds: list[float] | None = None, dtype: str = "float32") -> None:
+def built(
+    paths: dict, name: str, config: dict, speeds: list[float] | None = None, dtype: str = "float32", cut: str = "pads"
+) -> None:
     """A finished build of split file name under paths, as device.build's manifest records it."""
     split = paths["splits"] / "command" / "v9" / f"{name}.txt"
     split.parent.mkdir(parents=True, exist_ok=True)
@@ -68,6 +70,7 @@ def built(paths: dict, name: str, config: dict, speeds: list[float] | None = Non
     out.mkdir(parents=True)
     body = {"config": config, "split": {"file": split.name, "sha256": splits.sha256_of(split)}}
     body |= ({"speeds": speeds} if speeds else {}) | ({"dtype": dtype} if dtype != "float32" else {})
+    body |= {"cut": cut} if cut != "pads" else {}
     (out / "manifest.yaml").write_text(yaml.safe_dump(body), encoding="utf-8")
 
 
@@ -86,7 +89,19 @@ def test_features_simulated_otherwise_than_the_config_asks_are_named(tmp_path: P
     (paths["splits"] / "command" / "v9" / "train_z.txt").write_text("", encoding="utf-8")
     stale = [p.name for p in data.unbuilt(cfg, paths)]
     assert stale == ["test", "train_w", "train_y", "train_z"]
-    assert data.options_of(cfg, paths["splits"] / "val.txt") == {"speeds": (), "dtype": "float32"}
+    assert data.options_of(cfg, paths["splits"] / "val.txt") == {"speeds": (), "dtype": "float32", "cut": "pads"}
+
+
+def test_every_file_is_cut_as_simulate_cut_asks_and_another_cut_is_stale(tmp_path: Path) -> None:
+    cfg = {"features": "scenes/device.yaml", "split": {"version": "v9"}, "simulate": {"cut": "listen"}}
+    device_cfg = load_device(cfg["features"])
+    paths = {"splits": tmp_path / "splits", "processed": tmp_path / "processed"}
+    built(paths, "train_x", device_cfg, cut="listen")
+    built(paths, "val", device_cfg, cut="listen")
+    built(paths, "test", device_cfg)
+    assert [p.name for p in data.unbuilt(cfg, paths)] == ["test"]
+    for name in ("train_x.txt", "val.txt"):
+        assert data.options_of(cfg, paths["splits"] / name)["cut"] == "listen"
 
 
 def test_board_units_leave_out_the_runs_named_noise_and_refuse_a_name_the_cut_lacks(tmp_path: Path) -> None:
