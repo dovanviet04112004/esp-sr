@@ -73,12 +73,12 @@ def test_the_packer_takes_locked_files_and_refuses_a_changed_one(
         update_lock.Deployed(folder / "command_ctc.norm.bin", "command_ctc", "norm"),
     ]
     update_lock.record("command", run_dir(tmp_path), files, {"listen_hash": f"0x{listen.HASH:08x}"})
-    entries, listen_hash = pack_models.locked()
+    entries, listen_hash, thresholds = pack_models.locked()
     assert [(e.name, e.kind, e.data) for e in entries] == [
         ("command_ctc", "espdl", b"graph"),
         ("command_ctc", "norm", b"\0" * 8),
     ]
-    assert listen_hash == listen.HASH
+    assert listen_hash == listen.HASH and thresholds == (0, 0)
     (folder / "command_ctc.espdl").write_bytes(b"other")
     with pytest.raises(ValueError, match="differs from the sha256"):
         pack_models.locked()
@@ -94,4 +94,4 @@ def test_the_packer_refuses_rows_of_two_listen_contracts_and_takes_0_from_none(
     with pytest.raises(ValueError, match=r"2 listen\.yaml"):
         pack_models.locked()
     lock.write_text(json.dumps({"version": 1, "models": {"wake": {"files": []}}}), encoding="utf-8")
-    assert pack_models.locked() == ([], 0)
+    assert pack_models.locked() == ([], 0, (0, 0))
