@@ -160,6 +160,9 @@ def test_a_tiny_run_evaluates_saves_each_evaluated_net_and_keeps_the_last(tmp_pa
     cfg["train"] |= {"batch": 2, "steps": 4, "eval_every": 2}
     net, (mean, std), history = train.train(cfg, sets, "cpu", tmp_path / "run")
     assert [row["step"] for row in history] == [2, 4] and len(mean) == len(std) == DIMS
+    saved = np.load(tmp_path / "run" / "feature_stats.npz")
+    np.testing.assert_array_equal(saved["mean"], mean)
+    np.testing.assert_array_equal(saved["std"], std)
     assert all(row["loss"] > 0 and row["unit_error_rate"] >= 0 for row in history)
     assert all(row["rnnt_loss"] > 0 and row["rnnt_unit_error_rate"] >= 0 for row in history)
     layers = sum(s["layers"] for s in cfg["model"]["stacks"])

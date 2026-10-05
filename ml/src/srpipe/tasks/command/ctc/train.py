@@ -461,6 +461,10 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
     rng = seed_everything(spec["seed"])
     pool = sets["train"]
     mean, std = pool.stats()
+    if run is not None:
+        # Saved at the start: the checkpoints of a run stopped part way can still be scored.
+        run.mkdir(parents=True, exist_ok=True)
+        np.savez(run / "feature_stats.npz", mean=mean, std=std)
     net = encoder.build(cfg).to(device)
     optimiser = torch.optim.Adam(net.parameters(), lr=spec["learning_rate"])
     final = spec["final_learning_rate"] / spec["learning_rate"]
@@ -575,11 +579,10 @@ def main(argv: list[str] | None = None) -> int:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     run = args.resume or create_run_dir(paths["artifacts"], BRANCH, cfg, split_files)
     try:
-        net, (mean, std), history = train(cfg, sets, device, run, bool(args.resume))
+        net, _, history = train(cfg, sets, device, run, bool(args.resume))
     except KeyboardInterrupt:
         return 128 + signal.SIGINT
     torch.save(net.state_dict(), run / "model.pt")
-    np.savez(run / "feature_stats.npz", mean=mean, std=std)
     report = {"val": history[-1], "history": history}
     (run / "metrics.yaml").write_text(yaml.safe_dump(report, sort_keys=False), encoding="utf-8")
     print(f"{run}\n" + yaml.safe_dump({"val": history[-1]}, sort_keys=False))
