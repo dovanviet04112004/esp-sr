@@ -2142,7 +2142,8 @@ manifest như thu tay. Mã người nói và mã phiếu điền lúc chạy, kh
 
 Ba vai của TỔNG QUAN "gửi về máy để xem và chấm": **xem** (`live.py`), **chấm** (`score.py`), **thu**
 (`session.py` + `stream_rx.py`). `score.py` import thước đo từ `ml/`, không viết lại: `srpipe` là phần phụ
-`score` của `host/` (`uv run --extra score`), nên máy chỉ thu âm không phải cài nó. Với mọi phiên, `score.py`
+`score` của `host/`, nhóm phụ thuộc mặc định: mọi `uv run` và `uv sync` dựng đủ nó cùng các gói `ml/` cần, nên không
+lệnh nào gặp `srpipe` thiếu phụ thuộc; máy chỉ thu âm bỏ nó bằng `uv sync --no-group score`. Với mọi phiên, `score.py`
 in mức, một chiều, đỉnh và số mẫu cắt của từng kênh. Với phiên `mode 5`, nó còn chạy `srpipe.dsp.afe.chain`
 với mọi module tắt trên `ch0 ch1` rồi so với kênh `clean` của board, bỏ hai bước sau lúc mở và sau mỗi chỗ hở
 `seq`, và phán theo `contracts/golden/chain/tolerance.yaml`. Đây là phép kiểm dựng lại của app khung rỗng

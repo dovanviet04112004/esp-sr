@@ -20,6 +20,6 @@ jobs:
         run: |
           if [ ! -f host/pyproject.toml ]; then echo "host/pyproject.toml absent, nothing to test yet"; exit 0; fi
           cd host
-          uv sync --frozen --extra score
+          uv sync --frozen
           uv run ruff check .
           uv run pytest

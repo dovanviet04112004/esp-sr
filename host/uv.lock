@@ -531,15 +531,13 @@ dependencies = [
     { name = "pyserial" },
 ]
 
-[package.optional-dependencies]
-score = [
-    { name = "srpipe" },
-]
-
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
     { name = "ruff" },
+]
+score = [
+    { name = "srpipe" },
 ]
 
 [package.metadata]
@@ -547,15 +545,14 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.23" },
     { name = "paho-mqtt", specifier = ">=2.1" },
     { name = "pyserial", specifier = ">=3.5" },
-    { name = "srpipe", marker = "extra == 'score'", editable = "../ml" },
 ]
-provides-extras = ["score"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "pytest", specifier = ">=8.2" },
     { name = "ruff", specifier = ">=0.6" },
 ]
+score = [{ name = "srpipe", editable = "../ml" }]
 
 [[package]]
 name = "srpipe"

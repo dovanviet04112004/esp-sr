@@ -53,7 +53,7 @@ lint: ## check_comments + check_layers + check_purity + ruff
 test: ## Host-side tests for tools/, ml/ and host/
 	python3 -m unittest discover -s tools/tests -t .
 	@if [ -f ml/pyproject.toml ]; then cd ml && uv run pytest; fi
-	@if [ -f host/pyproject.toml ]; then cd host && uv run --extra score pytest; fi
+	@if [ -f host/pyproject.toml ]; then cd host && uv run pytest; fi
 
 # ci
 ci-status: ## Copy the GitHub Actions results of HEAD onto the same commit in Gitea
@@ -245,17 +245,17 @@ parity-board: ## Run every golden case on board B: the default chain build, then
 	cd firmware/test_apps/parity && pytest pytest_parity.py --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) --build-dir build_modules -p no:cacheprovider
 
 calib-estimate: ## Estimate balance from frontal white noise sessions: make calib-estimate SESSIONS="<dir> <dir> ..."
-	cd host && uv run --extra score python -m srhost.calib estimate $(SESSIONS)
+	cd host && uv run python -m srhost.calib estimate $(SESSIONS)
 
 calib-flash: ## Flash test_apps/calib, the console that stores NVS calib/* (E2-T6)
 	cd firmware/test_apps/calib && idf.py -p $(PORT) flash
 
 calib-write: ## Write a balance file to the board: make calib-write CSV=docs/measurements/calib/<board>_balance.csv
-	cd host && uv run --extra score python -m srhost.calib write ../$(CSV) --port $(PORT)
+	cd host && uv run python -m srhost.calib write ../$(CSV) --port $(PORT)
 
 calib-shift: ## Store NVS calib/pcm_shift through test_apps/calib: make calib-shift SHIFT=13 (E2-T5)
 	@test -n "$(SHIFT)" || { echo "usage: make calib-shift SHIFT=<8..16>"; exit 1; }
-	cd host && uv run --extra score python -m srhost.calib shift $(SHIFT) --port $(PORT)
+	cd host && uv run python -m srhost.calib shift $(SHIFT) --port $(PORT)
 
 ai-probe: ## Export the probes of E11-T10 (TCN), E11-T17 (kws), E11-T12 (ctc; CTC_RUN=<run under ml/> CTC_ROW=<row of its int8/ladder.yaml> streams that graph) and E9-T10 (ns) into ai_engine/test_apps/unit
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.wake.quant probe

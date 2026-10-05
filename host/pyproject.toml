@@ -9,11 +9,6 @@ dependencies = [
     "pyserial>=3.5",
 ]
 
-[project.optional-dependencies]
-score = [
-    "srpipe",
-]
-
 [tool.uv.sources]
 srpipe = { path = "../ml", editable = true }
 
@@ -22,6 +17,12 @@ dev = [
     "pytest>=8.2",
     "ruff>=0.6",
 ]
+score = [
+    "srpipe",
+]
+
+[tool.uv]
+default-groups = ["dev", "score"]
 
 [build-system]
 requires = ["hatchling"]

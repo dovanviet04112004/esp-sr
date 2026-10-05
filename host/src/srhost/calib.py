@@ -3,7 +3,7 @@
 estimate pools the sessions with srpipe.dsp.afe.balance, checks each placement against gains estimated from the others,
 then saves docs/measurements/calib/<board>_balance.csv. write and shift send calib/bal or calib/pcm_shift to the console
 of firmware/test_apps/calib, which stores them in NVS and reads them back, the balance as a CRC32 compared here.
-Run: python -m srhost.calib estimate <session>... | write <csv> --port <tty> | shift <n> --port <tty> (--extra score)
+Run: python -m srhost.calib estimate <session>... | write <csv> --port <tty> | shift <n> --port <tty>
 """
 
 from __future__ import annotations

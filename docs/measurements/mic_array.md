@@ -28,7 +28,7 @@ board B cào lỗ `ch0` vẫn ra `ch1` to hơn 7–8 dB, vì `ch0` nghe nhỏ h�
 **lỗ A là `ch0`, lỗ B là `ch1`** (E2-T7). Ngồi đối diện hai micro thì lỗ A ở **bên trái**, lỗ B bên phải: 0° (phía `ch1`) là tay phải người ngồi đối diện, 180° là tay trái. Dừng phiên sớm bằng Ctrl-C (hay `docker kill --signal INT sr-session`) là an toàn:
 máy nhận dừng ở ranh giới khung.
 
-Chấm: `cd host && uv run --extra score python -m srhost.score $SRPIPE_DATA_ROOT/raw/device/board_b/<phiên>`. Chênh độ
+Chấm: `cd host && uv run python -m srhost.score $SRPIPE_DATA_ROOT/raw/device/board_b/<phiên>`. Chênh độ
 nhạy là `ch1 - ch0 dB` lớn nhất về trị tuyệt đối trên các dải có độ kết hợp ≥ 0,9; chênh pha là cột `Phase after tau`
 tương ứng. SNR là độ nhạy datasheet (−26 dBFS sin = −29,0 dBFS của bảng này ở 94 dB SPL) trừ `Floor dBFS(A)`; nền đo
 trong phòng gồm cả tiếng phòng nên số ấy là **chặn dưới**.
