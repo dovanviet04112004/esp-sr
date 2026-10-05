@@ -308,9 +308,16 @@ def heard_sessions(cfg: dict, spec: dict, paths: dict) -> Iterator[tuple]:
     yield from heard_rows(cfg, [r for r in rows if counted(r, spec)], paths, rows)
 
 
-def overlapping(spans: Spans, said: Spans) -> list[bool]:
-    """Whether each (first, last) span shares a hop with one of said."""
-    return [any(first <= end and start <= last for start, end in said) for first, last in spans]
+def owners(spans: Spans, said: Spans) -> list[list[int]]:
+    """Per (first, last) span, the indices of the spans of said it shares a hop with."""
+    return [[k for k, (start, end) in enumerate(said) if first <= end and start <= last] for first, last in spans]
+
+
+def said_alone(row: dict, paths: dict, chain_cfg: ChainConfig, mel: Mel) -> Spans:
+    """The utterances the chain finds in a session run alone from a fresh start, the reference of what was said:
+    a chain used to the speaker also catches breaths and noises between them (measurements/command.md 12.9)."""
+    pcm = channels_of(paths["raw"] / "device" / row["board"] / row["session"])
+    return device.utterances(device.listen(pcm, chain_cfg, mel)[1][:, 0].astype(bool))
 
 
 def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: Callable) -> list[Scored]:
@@ -329,8 +336,7 @@ def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: 
         expected = expected_of(r["kind"], r["prompt"], command_of)
         kept = [True] * len(spans)
         if expected != REJECT:
-            pcm = channels_of(paths["raw"] / "device" / r["board"] / r["session"])
-            kept = overlapping(spans, device.utterances(device.listen(pcm, chain_cfg, mel)[1][:, 0].astype(bool)))
+            kept = [bool(o) for o in owners(spans, said_alone(r, paths, chain_cfg, mel))]
         said_right = [d for d, k in zip(decided, kept, strict=True) if k]
         results.append(Scored(r["session"], r["kind"], r["distance_cm"], r["prompt"], expected, said_right))
         if extra := [d for d, k in zip(decided, kept, strict=True) if not k]:

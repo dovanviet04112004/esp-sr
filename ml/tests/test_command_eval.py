@@ -231,4 +231,4 @@ def test_a_command_sessions_windows_its_utterances_alone_miss_are_extra_and_to_b
         ("cmd", "bat_den", [50, 250]),
         (gate.EXTRA, REJECT, [150]),
     ]
-    assert gate.overlapping([(0, 4), (5, 9)], [(4, 4)]) == [True, False]
+    assert gate.owners([(0, 4), (5, 9), (3, 12)], [(4, 4), (11, 20)]) == [[0], [], [0, 1]]

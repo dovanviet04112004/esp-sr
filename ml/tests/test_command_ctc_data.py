@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 import yaml
 
@@ -173,3 +174,28 @@ def test_val_commands_hold_clips_heard_saying_just_a_learned_command_each_at_mos
     assert {r.item for r in got} <= {f"speech/ext/bat_den/{n}.wav" for n in "acd"}
     assert all(r.spk == splits.ABSENT and r.origin == "public" for r in got)
     assert got == data.command_rows({"extract": "ext", "per_command": 2, "seed": 3}, tmp_path, learned)
+
+
+def test_the_board_cut_keeps_windows_holding_one_utterance_alone_named_by_it(tmp_path: Path, monkeypatch) -> None:
+    pytest.importorskip("torch")
+    from srpipe.tasks.command import eval as gate
+
+    row = {"session": "s1", "board": "b", "prompt": "bật đèn"}
+    on, alone = np.zeros(800, dtype=bool), np.zeros(800, dtype=bool)
+    for first, stop in ((60, 130), (200, 260), (320, 400), (460, 520), (560, 620), (700, 760)):
+        on[first:stop] = True
+    for first, stop in ((62, 128), (322, 350), (380, 398), (462, 618), (705, 755)):
+        alone[first:stop] = True
+    features, pitch = np.zeros((800, 80), np.float32), np.zeros((800, 3), np.float32)
+    monkeypatch.setattr(data, "board_rows", lambda _paths: [row])
+    monkeypatch.setattr(gate, "heard_rows", lambda *_: iter([(row, None, on, features, pitch)]))
+    monkeypatch.setattr(gate, "said_alone", lambda *_: device.utterances(alone))
+    cfg = {
+        "features": "scenes/device.yaml",
+        "split": {"board": {"min_s": 0.8, "max_s": 2.4, "repeat": 1}},
+        "simulate": {"train_dtype": "float32"},
+    }
+    said = data.cut_board(cfg, {"raw": tmp_path}, tmp_path / "board")
+    items = [json.loads(line) for line in (tmp_path / "board" / "shard_00000.items.jsonl").read_text().splitlines()]
+    assert [i["item"] for i in items] == [f"{data.BOARD}/s1#0", f"{data.BOARD}/s1#4"]
+    assert all(i["text"] == "bật đèn" for i in items) and "4 not one utterance alone" in said

@@ -12,6 +12,7 @@ import csv
 import hashlib
 import json
 import signal
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +20,8 @@ import yaml
 
 from srpipe.core import corpus, extract, screen, splits
 from srpipe.core.config import apply_overrides, data_paths, device_of, load_yaml
+from srpipe.dsp.afe.chain import ChainConfig
+from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.generated import grid, listen
 from srpipe.scenes import device
 from srpipe.tasks import command
@@ -214,25 +217,34 @@ def board_built_as(out: Path, device_cfg: dict, rows: list[dict], board: dict) -
 
 def cut_board(cfg: dict, paths: dict, out: Path) -> str:
     """The board sessions given to train as one shard in train's dtype: each utterance whose vad run lasts
-    split.board's min_s to max_s, as its Gate 3 command window of log-mel and pitch, its session's prompt its text."""
+    split.board's min_s to max_s, as its Gate 3 command window of log-mel and pitch, its session's prompt its text.
+    Only windows that hold exactly one utterance of eval.said_alone, held by no other window, are kept and named by
+    its index: the chain run over the sitting also opens windows on breaths and splits or joins utterances."""
     # Gate 3 reads a session beside the nets that score it, which need torch; only the board cut pays for that.
     from srpipe.tasks.command import eval as gate
 
     board, rows = cfg["split"]["board"], board_rows(paths)
     device_cfg = device_of(cfg)
     n_bands = device_cfg["features"]["n_bands"]
+    chain_cfg = ChainConfig(balance_gains=device.load_microphones(device_cfg["microphone"]).gains)
+    mel = Mel(MelConfig(**device_cfg["features"]))
     shortest, longest = (round(board[k] * HOPS_PER_S) for k in ("min_s", "max_s"))
-    items, mels, pitches, offset, dropped = [], [], [], 0, 0
+    items, mels, pitches, offset, dropped, unowned = [], [], [], 0, 0, 0
     for r, _clean, vad, features, pitch in gate.heard_rows(cfg, rows, paths):
         spans = device.utterances(vad)
         windows = gate.ctc_windows(features, pitch, spans) if spans else []
-        for k, ((first, last), (start, _), x) in enumerate(zip(spans, device.command_cut(spans), windows, strict=True)):
+        owned = gate.owners(spans, gate.said_alone(r, paths, chain_cfg, mel))
+        held = Counter(k for o in owned for k in o)
+        for (first, last), (start, _), x, o in zip(spans, device.command_cut(spans), windows, owned, strict=True):
+            if len(o) != 1 or held[o[0]] != 1:
+                unowned += 1
+                continue
             if not shortest <= last + 1 - first <= longest:
                 dropped += 1
                 continue
             items.append(
                 {
-                    "item": f"{BOARD}/{r['session']}#{k}",
+                    "item": f"{BOARD}/{r['session']}#{o[0]}",
                     "text": r["prompt"],
                     "frame_offset": offset,
                     "n_frames": len(x),
@@ -260,9 +272,8 @@ def cut_board(cfg: dict, paths: dict, out: Path) -> str:
         "sha256": {n: hashlib.sha256((out / n).read_bytes()).hexdigest() for n in names},
     }
     (out / "manifest.yaml").write_text(yaml.safe_dump(head, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    return (
-        f"{out}: {len(items)} utterances of {len(rows)} sessions, {dropped} outside {board['min_s']}-{board['max_s']} s"
-    )
+    held_apart = f"{dropped} outside {board['min_s']}-{board['max_s']} s, {unowned} not one utterance alone"
+    return f"{out}: {len(items)} utterances of {len(rows)} sessions, {held_apart}"
 
 
 def board_units(folder: Path, dialect: str, noise: list[str]) -> dict[str, list[int]]:
