@@ -23,7 +23,6 @@ from srpipe.generated import grid
 from srpipe.scenes import device
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc
-from srpipe.tasks.command import eval as gate
 from srpipe.tasks.wake.data import sentence_units
 
 PUBLIC = "public"
@@ -184,6 +183,9 @@ def board_built_as(out: Path, device_cfg: dict, rows: list[dict], board: dict) -
 def cut_board(cfg: dict, paths: dict, out: Path) -> str:
     """The board sessions given to train as one shard in train's dtype: each utterance whose vad run lasts
     split.board's min_s to max_s, as its Gate 3 command window of log-mel and pitch, its session's prompt its text."""
+    # Gate 3 reads a session beside the nets that score it, which need torch; only the board cut pays for that.
+    from srpipe.tasks.command import eval as gate
+
     board, rows = cfg["split"]["board"], board_rows(paths)
     device_cfg = device_of(cfg)
     n_bands = device_cfg["features"]["n_bands"]
