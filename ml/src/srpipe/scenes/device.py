@@ -32,6 +32,7 @@ from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_device
 from srpipe.dsp.afe import hpf
 from srpipe.dsp.afe.chain import PCM_FULL_SCALE, PCM_MAX, PCM_MIN, Chain, ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig, hz_to_mel, mel_to_hz
+from srpipe.dsp.spec.pitch import N_FEATURES as N_PITCH
 from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
 from srpipe.dsp.spec.stft import Stft
 from srpipe.dsp.spec.window import sqrt_hann
@@ -55,6 +56,7 @@ ROOM_STREAM, SESSION_STREAM, SPEED_STREAM = 1, 2, 3
 SPEED_DENOMINATOR = 100  # resampling ratios as small fractions: 1.1 is 10/11
 TALKER, NOISE = 0, 1
 CLEAN_ORIGINS = frozenset({"public", "synth"})
+CUTS = ("pads", "listen")  # clip plus pads, or the board's window (KEHOACH 1.2)
 ROOT_OF = {"public": "raw", "synth": "interim"}  # where a split row's item lies, by origin (KEHOACH 4.4.1)
 FLOOR_KIND = "probe"  # no gate scores a probe: a floor never leaks a test
 FLOOR_BANDS_HZ = ((50, 300), (300, 1000), (1000, 2000), (2000, 4000), (4000, 8000))
@@ -239,19 +241,62 @@ def utterances(vad: np.ndarray) -> list[tuple[int, int]]:
     return [(a, b) for a, b in runs if b - a >= least]
 
 
-def command_cut(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+def command_cut(spans: list[tuple[int, int]], longest: int | None = WINDOW_HOPS) -> list[tuple[int, int]]:
     """The first and last hop of each utterance's command window as svc_listen cuts it (KEHOACH 5.4): from listen's
     lead ahead of its first vad hop to the hop after its last, never back past the window ahead of it; a window longer
-    than listen's reaches back that far from its end instead."""
+    than longest hops, listen's window unless given, reaches back that far from its end instead, and with None never."""
     out, after = [], 0
     for first, last in spans:
         end = last + 1
         start = max(first - UTTERANCE_LEAD_HOPS, after)
-        if end + 1 - start > WINDOW_HOPS:
-            start = max(end + 1 - WINDOW_HOPS, after)
+        if longest is not None and end + 1 - start > longest:
+            start = max(end + 1 - longest, after)
         out.append((start, end))
         after = end + 1
     return out
+
+
+@dataclass(frozen=True)
+class Window:
+    """A window cut as the board cuts a command window: its first and last hop, its first and last vad hop, and the
+    clips it holds by index in their session, in order."""
+
+    start: int
+    end: int
+    first_vad: int
+    last_vad: int
+    clips: tuple[int, ...]
+
+
+def listen_windows(clip_hops: list[tuple[int, int]], vad: np.ndarray) -> tuple[list[Window], list[int]]:
+    """The windows a board cuts around the clips of a session (KEHOACH 1.2): vad into utterances as svc_listen cuts
+    it, clips that share an utterance in one window, opened as command_cut opens its first utterance's window and
+    ended where it ends its last, never cut back; clip_hops gives each clip's [first, stop) hops. Also the clips no
+    utterance reaches."""
+    spans = utterances(vad)
+    cuts = command_cut(spans, longest=None)
+    group = list(range(len(clip_hops)))
+
+    def root(k: int) -> int:
+        while group[k] != k:
+            k = group[k]
+        return k
+
+    reached: list[list[int]] = [[] for _ in clip_hops]
+    for u, (first, last) in enumerate(spans):
+        hit = [k for k, (a, stop) in enumerate(clip_hops) if first < stop and last >= a]
+        for k in hit:
+            reached[k].append(u)
+            group[root(k)] = root(hit[0])
+    members: dict[int, list[int]] = {}
+    for k, us in enumerate(reached):
+        if us:
+            members.setdefault(root(k), []).append(k)
+    windows = []
+    for ks in sorted(members.values()):
+        us = sorted({u for k in ks for u in reached[k]})
+        windows.append(Window(cuts[us[0]][0], cuts[us[-1]][1], spans[us[0]][0], spans[us[-1]][1], tuple(ks)))
+    return windows, [k for k, us in enumerate(reached) if not us]
 
 
 def build_room(cfg: dict, index: int) -> tuple[np.ndarray, dict]:
@@ -409,6 +454,26 @@ def item_frames(span: tuple[int, int], pads_s: tuple[float, float], n_hops: int)
     return first, stop, span[0] // HOP + CHAIN_LAG_HOPS - first, -(-span[1] // HOP) + CHAIN_LAG_HOPS - first
 
 
+def cut_items(
+    cut: str, spans: list[tuple[int, int]], pads_s: tuple[float, float], vad: np.ndarray
+) -> list[tuple[int, int, list[int], list[int]]]:
+    """Each item of a session as its output hops [first, stop), its clips by index and its speech's [first, stop)
+    hops within it: each clip with pads_s around it, or with cut listen the board's windows (KEHOACH 1.2)."""
+    n_hops = len(vad)
+    if cut == "pads":
+        out = []
+        for k, span in enumerate(spans):
+            first, stop, speech_first, speech_stop = item_frames(span, pads_s, n_hops)
+            out.append((first, stop, [k], [speech_first, speech_stop]))
+        return out
+    clip_hops = [(span[0] // HOP + CHAIN_LAG_HOPS, -(-span[1] // HOP) + CHAIN_LAG_HOPS) for span in spans]
+    windows, _ = listen_windows(clip_hops, vad)
+    return [
+        (w.start, min(w.end + 1, n_hops), list(w.clips), [w.first_vad - w.start, w.last_vad + 1 - w.start])
+        for w in windows
+    ]
+
+
 def item_pitch(tracker: PitchTracker, clean: np.ndarray) -> np.ndarray:
     """Pitch features (hops, 3) of an item's clean int16 samples, the tracker reset at its first hop as svc_listen
     resets it on entering LENH (KEHOACH 3.12)."""
@@ -427,13 +492,18 @@ def shard_done(out: Path, shard: int) -> Path:
     return out / f"shard_{shard:05d}.done"
 
 
+def joined(parts: list[np.ndarray], empty: tuple[int, ...], dtype: type = np.float32) -> np.ndarray:
+    """parts end to end, or an empty array of that shape when a shard keeps no item."""
+    return np.concatenate(parts) if parts else np.zeros(empty, dtype=dtype)
+
+
 def _ignore_interrupt() -> None:
     # Ctrl-C reaches every process of the terminal: the parent alone stops a build, terminating its workers.
     set_handler(SIGINT, SIG_IGN)
 
 
 def _shard(job: tuple) -> list[Path]:
-    cfg, roots, bank, out, shard, sessions, pools, pads_s, with_pitch, keep_pcm, speeds, dtype = job
+    cfg, roots, bank, out, shard, sessions, pools, pads_s, cut, with_pitch, keep_pcm, speeds, dtype = job
     mics = load_microphones(cfg["microphone"])
     floor_cfg = cfg["microphone"].get("floor")
     floor = load_floor(floor_cfg, roots["raw"], mics.pcm_shift) if floor_cfg else None
@@ -446,28 +516,33 @@ def _shard(job: tuple) -> list[Path]:
         captured, spans, draws = simulate_session(cfg, k, rows, bank, mics, pools, readers, floor, speeds)
         clean, figs, feats = listen(captured, chain_cfg, mel)
         said_at = draws.pop("speeds", [])
-        for i, (row, span) in enumerate(zip(rows, spans, strict=True)):
-            first, stop, speech_first, speech_stop = item_frames(span, pads_s, len(feats))
+        for first, stop, held, speech in cut_items(cut, spans, pads_s, figs[:, 0].astype(bool)):
             features.append(feats[first:stop])
             figures.append(figs[first:stop])
             pcm.append(clean[first * HOP : stop * HOP])
             if tracker is not None:
                 pitches.append(item_pitch(tracker, pcm[-1]))
-            where = {"frame_offset": offset, "n_frames": stop - first, "speech_frames": [speech_first, speech_stop]}
-            spoken = {"speed": said_at[i]} if said_at else {}
+            row = rows[held[0]]
+            where = {"frame_offset": offset, "n_frames": stop - first, "speech_frames": speech}
+            holding = {"clips": [rows[k].item for k in held]} if len(held) > 1 else {}
+            spoken = {"speed": said_at[held[0]]} if said_at and len(held) == 1 else {}
+            spoken |= {"speeds": [said_at[k] for k in held]} if said_at and len(held) > 1 else {}
             items.append(
-                {"item": row.item, "spk": row.spk, "room": row.room, "origin": row.origin, **where, **draws, **spoken}
+                {"item": row.item, **holding, "spk": row.spk, "room": row.room, "origin": row.origin}
+                | where
+                | draws
+                | spoken
             )
             offset += stop - first
     stem = out / f"shard_{shard:05d}"
-    np.save(stem.with_suffix(".features.npy"), np.concatenate(features).astype(dtype))
-    np.save(stem.with_suffix(".figures.npy"), np.concatenate(figures))
+    np.save(stem.with_suffix(".features.npy"), joined(features, (0, mel.cfg.n_bands)).astype(dtype))
+    np.save(stem.with_suffix(".figures.npy"), joined(figures, (0, 3), np.int8))
     if keep_pcm:
-        np.save(stem.with_suffix(".pcm.npy"), np.concatenate(pcm))
+        np.save(stem.with_suffix(".pcm.npy"), joined(pcm, (0,), np.int16))
     listing = "".join(json.dumps(i, ensure_ascii=False) + "\n" for i in items)
     stem.with_suffix(".items.jsonl").write_text(listing, encoding="utf-8")
     if tracker is not None:
-        np.save(stem.with_suffix(".pitch.npy"), np.concatenate(pitches).astype(dtype))
+        np.save(stem.with_suffix(".pitch.npy"), joined(pitches, (0, N_PITCH)).astype(dtype))
     # Written last: a shard stopped part way has no marker and is built again whole.
     shard_done(out, shard).write_text("", encoding="utf-8")
     return shard_files(out, shard, tracker is not None, keep_pcm)
@@ -486,12 +561,16 @@ def build(
     keep_pcm: bool = True,
     speeds: tuple[float, ...] = (),
     dtype: str = "float32",
+    cut: str = "pads",
 ) -> Path:
     """Every item of split_file through the simulation into out, repeats times over, each pass in sessions of their
-    own rooms, levels and noise, each item kept with pads_s before and after it (session.pad_s both sides unless
-    given), with pitch its pitch features from a reset at its first hop, its clean samples unless keep_pcm is off,
-    with speeds each item spoken at one drawn from them, features and pitch stored as dtype; then manifest.yaml.
-    Ctrl-C stops a build at once, its workers with it; run again the same way, it goes on from its finished shards."""
+    own rooms, levels and noise; an item is a clip with pads_s around it (session.pad_s unless given), or with cut
+    listen the window the board cuts around it (KEHOACH 1.2); with pitch its pitch from a reset at its first hop, its
+    clean samples unless keep_pcm is off, with speeds each clip spoken at one drawn from them, stored as dtype; then
+    manifest.yaml, counting with cut listen the clips no window holds. Ctrl-C stops a build and its workers at once;
+    the same build run again goes on from its finished shards."""
+    if cut not in CUTS or (cut == "listen" and pads_s):
+        raise ValueError(f"cut {cut!r}: one of {', '.join(CUTS)}, and the listen cut takes no pads_s")
     rows = splits.read_split(split_file)
     if foreign := sorted({row.origin for row in rows} - CLEAN_ORIGINS):
         raise ValueError(f"{split_file}: the simulation takes clean speech, not origin {', '.join(foreign)}")
@@ -521,6 +600,7 @@ def build(
         **({} if keep_pcm else {"pcm": False}),
         **({"speeds": list(speeds)} if speeds else {}),
         **({"dtype": dtype} if dtype != "float32" else {}),
+        **({"cut": cut} if cut != "pads" else {}),
         "rooms_sha256": sha256_of(bank / "rooms.yaml"),
         **({"floor_sha256": floor_sha256} if floor_sha256 else {}),
     }
@@ -530,7 +610,7 @@ def build(
     begun.write_text(yaml.safe_dump(head, allow_unicode=True, sort_keys=False), encoding="utf-8")
     roots = {"raw": raw_root, "interim": interim}
     shards = range(math.ceil(len(sessions) / per_shard))
-    options = (pools, pads, pitch, keep_pcm, speeds, dtype)
+    options = (pools, pads, cut, pitch, keep_pcm, speeds, dtype)
     jobs = [
         (cfg, roots, bank, out, j, sessions[j * per_shard : (j + 1) * per_shard], *options)
         for j in shards
@@ -548,12 +628,20 @@ def build(
     frames = sum(len(np.load(p, mmap_mode="r")) for p in written if p.name.endswith(".features.npy"))
     body = head | {
         "items": len(rows),
+        **({"unheard": len(rows) - held_clips(written)} if cut == "listen" else {}),
         "hours": round(frames * HOP / FS / 3600, 3),
         "sha256": {p.name: sha256_of(p) for p in sorted(written)},
     }
     manifest = out / "manifest.yaml"
     manifest.write_text(yaml.safe_dump(body, allow_unicode=True, sort_keys=False), encoding="utf-8")
     return manifest
+
+
+def held_clips(written: list[Path]) -> int:
+    """The clips the item listings among written hold, a window counting each clip it joins."""
+    listings = [p for p in written if p.name.endswith(".items.jsonl")]
+    items = [json.loads(line) for p in listings for line in p.read_text(encoding="utf-8").splitlines()]
+    return sum(len(item.get("clips", [item["item"]])) for item in items)
 
 
 def link_build(built: Path, out: Path) -> Path:

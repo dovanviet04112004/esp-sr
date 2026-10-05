@@ -274,6 +274,83 @@ def test_wider_pads_keep_more_hops_before_each_item(raw_root: Path, tmp_path: Pa
         )
 
 
+LEAD, LEAST = listen.UTTERANCE_LEAD_HOPS, listen.UTTERANCE_MIN_HOPS
+
+
+def vad_runs(n: int, *runs: tuple[int, int]) -> np.ndarray:
+    vad = np.zeros(n, dtype=bool)
+    for first, last in runs:
+        vad[first : last + 1] = True
+    return vad
+
+
+def test_a_clip_gets_the_window_the_board_cuts_around_its_utterance() -> None:
+    windows, unheard = device.listen_windows([(95, 150)], vad_runs(400, (100, 140)))
+    assert windows == [device.Window(100 - LEAD, 141, 100, 140, (0,))] and unheard == []
+
+
+def test_a_window_never_reaches_back_past_the_one_before() -> None:
+    windows, _ = device.listen_windows([(95, 150), (195, 250)], vad_runs(600, (100, 140), (200, 240)))
+    assert windows[1].start == windows[0].end + 1 == 142 > 200 - LEAD
+
+
+def test_clips_sharing_an_utterance_are_one_window_holding_both() -> None:
+    windows, _ = device.listen_windows([(95, 145), (146, 200)], vad_runs(600, (100, 140), (150, 190)))
+    assert windows == [device.Window(100 - LEAD, 191, 100, 190, (0, 1))]
+
+
+def test_a_clip_a_long_pause_splits_stays_one_window() -> None:
+    windows, _ = device.listen_windows([(95, 250)], vad_runs(800, (100, 140), (200, 240)))
+    assert windows == [device.Window(100 - LEAD, 241, 100, 240, (0,))]
+
+
+def test_a_clip_no_utterance_reaches_is_left_out() -> None:
+    short = vad_runs(600, (100, 140), (300, 300 + LEAST - 1))
+    windows, unheard = device.listen_windows([(95, 150), (295, 350)], short)
+    assert [w.clips for w in windows] == [(0,)] and unheard == [1]
+
+
+def test_an_utterance_no_clip_holds_is_still_a_floor_as_on_the_board() -> None:
+    vad = vad_runs(800, (100, 140), (200, 230), (300, 340))
+    windows, _ = device.listen_windows([(95, 150), (295, 350)], vad)
+    assert [w.clips for w in windows] == [(0,), (1,)] and windows[1].start == 232 > 300 - LEAD
+
+
+def test_a_window_longer_than_the_boards_is_never_cut_back() -> None:
+    long = (100, 100 + listen.WINDOW_HOPS + 50)
+    windows, _ = device.listen_windows([(95, 400)], vad_runs(1200, long))
+    assert windows[0].start == 100 - LEAD and device.command_cut([long])[0][0] > 100 - LEAD
+
+
+def test_the_listen_cut_keeps_the_boards_windows_and_counts_the_unheard(raw_root: Path, tmp_path: Path) -> None:
+    split = split_file(tmp_path / "train.txt", raw_root)
+    interim = screened(tmp_path / "interim")
+    manifest = device.build(tiny(), split, raw_root, interim, tmp_path / "cut", pitch=True, cut="listen")
+    body = yaml.safe_load(manifest.read_text())
+    items = items_of(tmp_path / "cut")
+    assert body["cut"] == "listen" and items
+    assert sum(len(i.get("clips", [i["item"]])) for i in items) + body["unheard"] == body["items"] == 5
+    cfg = PitchConfig(**tiny()["pitch"])
+    for shard in sorted((tmp_path / "cut").glob("*.items.jsonl")):
+        stem = str(shard).removesuffix(".items.jsonl")
+        figures, pcm, pitch = (np.load(f"{stem}.{kind}.npy") for kind in ("figures", "pcm", "pitch"))
+        for row in (json.loads(line) for line in shard.read_text().splitlines()):
+            at, n = row["frame_offset"], row["n_frames"]
+            first, stop = row["speech_frames"]
+            vad = figures[at : at + n, 0].astype(bool)
+            assert first <= LEAD and stop == n - 1 and vad[first] and vad[stop - 1] and not vad[stop]
+            fresh, _ = pitch_features(to_float(pcm[at * grid.HOP_SAMPLES : (at + n) * grid.HOP_SAMPLES]), cfg)
+            assert np.array_equal(pitch[at : at + n], fresh)
+
+
+def test_the_listen_cut_takes_no_pads(raw_root: Path, tmp_path: Path) -> None:
+    split = split_file(tmp_path / "train.txt", raw_root)
+    with pytest.raises(ValueError, match="cut"):
+        device.build(
+            tiny(), split, raw_root, screened(tmp_path / "interim"), tmp_path / "o", pads_s=(0.5, 0.1), cut="listen"
+        )
+
+
 def hear_as_one_formula(air: np.ndarray, mics: device.Microphones, rng: np.random.Generator) -> np.ndarray:
     """hear as one expression, the form it had while wake and command features were built from it."""
     n = air.shape[1]
