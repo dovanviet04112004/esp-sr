@@ -373,7 +373,7 @@ def test_the_listen_cut_cuts_the_boards_windows_on_the_talkers_vad(raw_root: Pat
     manifest = device.build(tiny(), split, raw_root, interim, tmp_path / "cut", pitch=True, cut="listen")
     body = yaml.safe_load(manifest.read_text())
     items = items_of(tmp_path / "cut")
-    assert body["cut"] == "listen" and body["cut_vad"] == device.LISTEN_CUT_VAD and items
+    assert {k: body.get(k) for k in device.cut_marks("listen")} == device.cut_marks("listen") and items
     assert sum(len(i.get("clips", [i["item"]])) for i in items) + body["unheard"] == body["items"] == 5
     _, spans, _, talker = session_zero(tiny(), split, raw_root, interim)
     cut = device.cut_items("listen", spans, (0.0, 0.0), talker)

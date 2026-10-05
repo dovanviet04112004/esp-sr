@@ -19,7 +19,7 @@ import yaml
 
 from srpipe.core import corpus, screen, splits
 from srpipe.core.config import apply_overrides, data_paths, device_of, load_yaml
-from srpipe.generated import grid
+from srpipe.generated import grid, listen
 from srpipe.scenes import device
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc
@@ -148,7 +148,7 @@ def built_as(out: Path, device_cfg: dict, split_file: Path, options: dict) -> bo
         body.get("speeds", []) == list(options["speeds"])
         and body.get("dtype", "float32") == options["dtype"]
         and body.get("cut", "pads") == options["cut"]
-        and body.get("cut_vad") == (device.LISTEN_CUT_VAD if options["cut"] == "listen" else None)
+        and all(body.get(k) == v for k, v in device.cut_marks(options["cut"]).items())
     )
     return body["config"] == device_cfg and same_split and same_options
 
@@ -177,7 +177,8 @@ def board_built_as(out: Path, device_cfg: dict, rows: list[dict], board: dict) -
         return False
     body = yaml.safe_load((out / "manifest.yaml").read_text(encoding="utf-8"))
     same_sessions = body["sessions"] == [r["session"] for r in rows]
-    return body["config"] == device_cfg and same_sessions and body["board"] == board_cut(board)
+    same_rule = body.get("listen_hash") == f"0x{listen.HASH:08x}"
+    return body["config"] == device_cfg and same_sessions and body["board"] == board_cut(board) and same_rule
 
 
 def cut_board(cfg: dict, paths: dict, out: Path) -> str:
@@ -222,6 +223,7 @@ def cut_board(cfg: dict, paths: dict, out: Path) -> str:
         "config": device_cfg,
         "sessions": [r["session"] for r in rows],
         "board": board_cut(board),
+        "listen_hash": f"0x{listen.HASH:08x}",
         "dtype": dtype,
         "sha256": {n: hashlib.sha256((out / n).read_bytes()).hexdigest() for n in names},
     }

@@ -67,10 +67,10 @@ def built(
     speeds: list[float] | None = None,
     dtype: str = "float32",
     cut: str = "pads",
-    cut_vad: str | None = device.LISTEN_CUT_VAD,
+    marks: dict | None = None,
 ) -> None:
-    """A finished build of split file name under paths, as device.build's manifest records it; cut_vad None as a
-    listen cut recorded before the cut said which vad it ran on."""
+    """A finished build of split file name under paths, as device.build's manifest records it; marks in place of
+    the cut's own, as a build of another vad or listen.yaml recorded them."""
     split = paths["splits"] / "command" / "v9" / f"{name}.txt"
     split.parent.mkdir(parents=True, exist_ok=True)
     split.write_text(f"speech/x/{name}.wav\tA\t-\tpublic\n", encoding="utf-8")
@@ -78,8 +78,7 @@ def built(
     out.mkdir(parents=True)
     body = {"config": config, "split": {"file": split.name, "sha256": splits.sha256_of(split)}}
     body |= ({"speeds": speeds} if speeds else {}) | ({"dtype": dtype} if dtype != "float32" else {})
-    body |= {"cut": cut} if cut != "pads" else {}
-    body |= {"cut_vad": cut_vad} if cut == "listen" and cut_vad else {}
+    body |= device.cut_marks(cut) if marks is None else marks
     (out / "manifest.yaml").write_text(yaml.safe_dump(body), encoding="utf-8")
 
 
@@ -106,10 +105,11 @@ def test_every_file_is_cut_as_simulate_cut_asks_and_another_cut_is_stale(tmp_pat
     device_cfg = load_device(cfg["features"])
     paths = {"splits": tmp_path / "splits", "processed": tmp_path / "processed"}
     built(paths, "train_x", device_cfg, cut="listen")
-    built(paths, "train_y", device_cfg, cut="listen", cut_vad=None)
+    built(paths, "train_y", device_cfg, cut="listen", marks={"cut": "listen"})
+    built(paths, "train_z", device_cfg, cut="listen", marks=device.cut_marks("listen") | {"listen_hash": "0x0"})
     built(paths, "val", device_cfg, cut="listen")
     built(paths, "test", device_cfg)
-    assert [p.name for p in data.unbuilt(cfg, paths)] == ["test", "train_y"]
+    assert [p.name for p in data.unbuilt(cfg, paths)] == ["test", "train_y", "train_z"]
     for name in ("train_x.txt", "val.txt"):
         assert data.options_of(cfg, paths["splits"] / name)["cut"] == "listen"
 
@@ -126,3 +126,13 @@ def test_board_units_leave_out_the_runs_named_noise_and_refuse_a_name_the_cut_la
     )
     with pytest.raises(ValueError, match="s1#1"):
         data.board_units(tmp_path, "north", ["s1#1"])
+
+
+def test_a_board_cut_of_another_listen_yaml_is_stale(tmp_path: Path) -> None:
+    device_cfg = load_device("scenes/device.yaml")
+    rows, board = [{"session": "s1"}], {"min_s": 0.8, "max_s": 2.4, "repeat": 75}
+    body = {"config": device_cfg, "sessions": ["s1"], "board": data.board_cut(board)}
+    for listen_hash, fresh in ((device.cut_marks("listen")["listen_hash"], True), ("0x0", False), (None, False)):
+        written = body | ({"listen_hash": listen_hash} if listen_hash else {})
+        (tmp_path / "manifest.yaml").write_text(yaml.safe_dump(written), encoding="utf-8")
+        assert data.board_built_as(tmp_path, device_cfg, rows, board) is fresh

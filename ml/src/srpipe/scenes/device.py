@@ -38,6 +38,7 @@ from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
 from srpipe.dsp.spec.stft import Stft
 from srpipe.dsp.spec.window import sqrt_hann
 from srpipe.generated import afe, array, grid
+from srpipe.generated.listen import HASH as LISTEN_HASH
 from srpipe.generated.listen import UTTERANCE_GAP_HOPS, UTTERANCE_LEAD_HOPS, UTTERANCE_MIN_HOPS, WINDOW_HOPS
 from srpipe.metrics import mic_pair
 from srpipe.scenes import room
@@ -360,6 +361,12 @@ def active_rms(x: np.ndarray, below_peak_db: float) -> float:
     return math.sqrt(float(np.mean(hops[room.active_hops(x, below_peak_db)] ** 2)))
 
 
+def cut_marks(cut: str) -> dict:
+    """What a build records of how it cut its items, so one cut another way reads as stale: nothing for pads; for
+    listen the vad it ran on and the hash of the listen.yaml whose rule and features it followed (KEHOACH 1.2)."""
+    return {} if cut == "pads" else {"cut": cut, "cut_vad": LISTEN_CUT_VAD, "listen_hash": f"0x{LISTEN_HASH:08x}"}
+
+
 def talker_vad(talker: np.ndarray, dry: np.ndarray, below_peak_db: float) -> np.ndarray:
     """The chain's vad per output hop on the talker alone at a microphone, brought to the agc's target over the dry
     track's active hops: the vad of a board that hears every word, which the listen cut runs on (KEHOACH 1.2)."""
@@ -623,8 +630,7 @@ def build(
         **({} if keep_pcm else {"pcm": False}),
         **({"speeds": list(speeds)} if speeds else {}),
         **({"dtype": dtype} if dtype != "float32" else {}),
-        **({"cut": cut} if cut != "pads" else {}),
-        **({"cut_vad": LISTEN_CUT_VAD} if cut == "listen" else {}),
+        **cut_marks(cut),
         "rooms_sha256": sha256_of(bank / "rooms.yaml"),
         **({"floor_sha256": floor_sha256} if floor_sha256 else {}),
     }
