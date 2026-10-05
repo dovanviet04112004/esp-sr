@@ -689,6 +689,8 @@ cao độ tính liên tục thì mỗi bước tới vẫn tốn 1,98 ms của n
 - Ballast của bộ dò cao độ chia NCCF theo năng lượng trung bình của dòng từ lần đặt lại. Cao độ chạy liền thì trên board
   dòng ấy là cả giờ phòng yên, lúc học và ở Cửa 3 là một phiên: cho 300 s các bước im của chính phiên chạy trước, model
   `20261004_acde692` trên Cửa 3 từ 86 xuống 82/112; log cao độ chuẩn hoá trên bước `vad` lệch p50/p90/p99 0,07 / 1,14 /
-  2,25, 42% bước lệch quá 0,1; POV lệch p90 0,07.
+  2,25, 42% bước lệch quá 0,1; POV lệch p90 0,07. Ballast trên 2,0 s gần nhất (`listen.yaml` v5): cùng model 85/112 khi
+  bộ dò đặt lại đầu phiên, 86/112 khi 300 s phòng yên chạy trước; ba chiều trên bước `vad` lệch p90 0, p99 0,10 ở log
+  cao độ, 1% bước lệch quá 0,1.
 - `vad` của board đọc mức trước `agc`, nên với người nói nhỏ hay xa nó tắt khi tiếng chưa hết: mẫu học cắt trên nó mất lời
   mà nhãn đòi, cắt trên `vad` của riêng tiếng người nói thì không (§12.6). Kéo cửa sổ board thêm sau `vad` không giúp Cửa 3.
