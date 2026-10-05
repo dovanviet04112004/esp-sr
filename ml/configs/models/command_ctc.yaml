@@ -78,6 +78,7 @@ quant:                             # python -m srpipe.tasks.command.ctc.quant pt
   thresholds:                      # python -m srpipe.tasks.command.ctc.quant thresholds <run> --row <row> (KEHOACH 3.12)
     false_accept: 0.01             # of val's windows accepted as a command they do not say: speech is easier to turn down than Gate 3's near misses
     margin_sweep: [0, 25, 50, 75, 100, 150, 200]   # δ₂ against eval.reject_sweep's δ₁, ‰
+    min_windows: 10                # val_commands windows a command needs to count as the worst: the extract has 1 of "tăng âm lượng"
   gate_tie: 5                      # commands accepted right within this of the best tie: a standard error of 112
   layerwise_sentences: 16          # rung 3: calibration sentences ESP-PPQ's per-layer error runs over
   int16_tops: [1, 2, 4]            # rung 3: a row with each count of the worst convolutions at 16 bits

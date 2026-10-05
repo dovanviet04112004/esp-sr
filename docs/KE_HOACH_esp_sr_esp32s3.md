@@ -1149,7 +1149,8 @@ Board chưa có `wake` cắt đúng như vậy, nên quyết định của board
 `δ₁`, `δ₂` chọn riêng cho dòng int8 sẽ deploy (`make ctc-thresholds`, E11-T13): mọi cửa sổ của `val_commands` (người
 thật nói đúng một lệnh đã học, §1.3) và của `val` (lời nói thường) quyết như chip quyết trên đồ thị int8 của dòng ấy,
 cắt lùi về `window_s` như `svc_listen`; quét `δ₁` của `eval.reject_sweep` với `δ₂` của `quant.thresholds.margin_sweep`,
-lấy cặp nhận đúng nhiều nhất ở lệnh kém nhất, rồi nhiều nhất trung bình, trong các cặp giữ cửa sổ `val` bị nhận thành
+lấy cặp nhận đúng nhiều nhất ở lệnh kém nhất trong các lệnh có từ `quant.thresholds.min_windows` cửa sổ (kho trích chỉ
+có vài mẩu của vài lệnh), rồi nhiều nhất trên mọi cửa sổ, trong các cặp giữ cửa sổ `val` bị nhận thành
 một lệnh mà lời nó không nói đúng lệnh ấy dưới `quant.thresholds.false_accept`; không cặp nào giữ được thì lấy cặp báo
 nhầm ít nhất và ghi là trượt. Cặp ấy đi theo model tới board (§6.3); Cửa 3 sau int8 ở chính cặp ấy ghi cùng file, là số
 kết luận đạt hay trượt. Bảng của `ctc` ghi thêm lệnh điểm cao nhất của từng câu và quét `δ₁` để thấy đánh đổi; chấm

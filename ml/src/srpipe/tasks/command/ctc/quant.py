@@ -325,31 +325,26 @@ def operating_point(
     said: dict[str, list[gate.Heard]], heard: list[gate.Heard], meant: list[bool], spec: dict, sweep: list[int]
 ) -> dict:
     """The pair of sweep x spec's margins that accepts the most of the worst command of said, its windows' Heard by
-    command id, then the most of them all, then the fewest false accepts, among those whose false accepts of heard,
-    windows of speech, an accept counting unless meant says the window says just that command, stay within spec's
-    false_accept; with every pair's row. With none within it, the pair of fewest false accepts, marked so."""
+    command id, among those with spec's min_windows, then the most of every window of said, then the fewest false
+    accepts, among the pairs whose false accepts of heard, windows of speech, an accept counting unless meant says the
+    window says just that command, stay within spec's false_accept; with every pair's row and each command's share.
+    With none within it, the pair of fewest false accepts, marked so."""
+    ranked = [c for c, hs in said.items() if len(hs) >= spec["min_windows"]]
+    total = sum(len(hs) for hs in said.values())
     rows = []
     for reject in sweep:
         for margin in spec["margin_sweep"]:
-            shares = [
-                sum(h.command == c and h.accepted(reject, margin) for h in hs) / len(hs) for c, hs in said.items()
-            ]
+            right = {c: sum(h.command == c and h.accepted(reject, margin) for h in hs) for c, hs in said.items()}
             false = sum(h.accepted(reject, margin) and not ok for h, ok in zip(heard, meant, strict=True))
-            rows.append(
-                {
-                    "reject_permille": reject,
-                    "margin_permille": margin,
-                    "worst": round(min(shares), 4),
-                    "mean": round(sum(shares) / len(shares), 4),
-                    "false_accepts": false,
-                }
-            )
+            row = {"reject_permille": reject, "margin_permille": margin}
+            row["worst"] = round(min(right[c] / len(said[c]) for c in ranked), 4)
+            row |= {"overall": round(sum(right.values()) / total, 4), "false_accepts": false}
+            rows.append(row | {"commands": {c: f"{right[c]}/{len(said[c])}" for c in said}})
     within = [r for r in rows if r["false_accepts"] <= spec["false_accept"] * len(heard)]
-    best = (
-        max(within, key=lambda r: (r["worst"], r["mean"], -r["false_accepts"]))
-        if within
-        else min(rows, key=lambda r: (r["false_accepts"], -r["worst"]))
-    )
+    if within:
+        best = max(within, key=lambda r: (r["worst"], r["overall"], -r["false_accepts"]))
+    else:
+        best = min(rows, key=lambda r: (r["false_accepts"], -r["worst"]))
     return {
         "reject_permille": best["reject_permille"],
         "margin_permille": best["margin_permille"],

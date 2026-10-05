@@ -230,20 +230,22 @@ def test_the_ladder_decides_an_int8_window_as_the_record_the_chip_is_held_to(tmp
 def test_the_operating_point_keeps_val_within_its_false_accepts_and_lifts_the_worst_command() -> None:
     a = [gate.Heard("a", 900, 80, 100), gate.Heard("a", 900, 30, 100), gate.Heard("a", 900, 80, 400)]
     b = [gate.Heard("b", 900, 60, 200), gate.Heard("a", 900, 60, 200)]
+    c = [gate.Heard("c", 900, 10, 900)]
     val = [gate.Heard("a", 900, 40, 150), gate.Heard("b", 900, 90, 50), gate.Heard("a", 900, 90, 50)]
     meant = [False, False, True]
-    spec = {"false_accept": 0.34, "margin_sweep": [25, 50]}
-    got = quant.operating_point({"a": a, "b": b}, val, meant, spec, [200, 500])
+    spec = {"false_accept": 0.34, "margin_sweep": [25, 50], "min_windows": 2}
+    got = quant.operating_point({"a": a, "b": b, "c": c}, val, meant, spec, [200, 500])
     assert (got["reject_permille"], got["margin_permille"], got["within_target"]) == (500, 50, True)
     assert got["chosen"] == {
         "reject_permille": 500,
         "margin_permille": 50,
         "worst": 0.5,
-        "mean": 0.5833,
+        "overall": 0.5,
         "false_accepts": 1,
+        "commands": {"a": "2/3", "b": "1/2", "c": "0/1"},
     }
     assert len(got["table"]) == 4
-    strict = quant.operating_point({"a": a, "b": b}, val, meant, spec | {"false_accept": 0.0}, [200, 500])
+    strict = quant.operating_point({"a": a, "b": b, "c": c}, val, meant, spec | {"false_accept": 0.0}, [200, 500])
     assert not strict["within_target"] and strict["chosen"]["false_accepts"] == 1
 
 
