@@ -720,3 +720,8 @@ Shard board của tập học (10 phiên 04/10) cắt bằng chuỗi chạy li�
 phiên, cả hai dài 0,8–2,4 s: 105 câu, đúng 105 câu thật của §11; 10 cửa sổ ngoài khoảng dài (có 5 câu §11 bỏ vì dài,
 chuỗi liền cắt ngắn lại nên chỉ xét độ dài cửa sổ thì chúng lọt vào), 2 không chứa câu nào; ba lượt tiếng động của §11
 không còn thành cửa sổ riêng.
+
+`vad` của chuỗi so với `vad` của riêng tiếng người nói (§12.6) trên 198 phiên `val` mô phỏng của `command/v5`, 1 609
+câu của người nói: chuỗi mới mỗi phiên không chạm 68 câu (4,2%); chuỗi đã nghe chính phiên ấy một lượt rồi mới chấm
+lượt thứ hai không chạm 77 câu (4,8%). Quen phòng và người nói không đưa `vad` tới câu nó bỏ sót: chỗ thiếu là mức
+(E7-T6), không phải trạng thái.
