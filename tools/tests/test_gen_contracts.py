@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -235,6 +236,30 @@ class ListenTests(unittest.TestCase):
         self.assertEqual(namespace["UTTERANCE_LEAD_HOPS"], int(printed["UTTERANCE_LEAD_HOPS"]))
         self.assertEqual(int(printed["WINDOW_HOPS"]), round(values["window_s"] * rate))
         self.assertEqual(namespace["WINDOW_HOPS"], int(printed["WINDOW_HOPS"]))
+
+    def test_the_hash_follows_every_value_of_the_contract_and_c_holds_it_as_python(self) -> None:
+        doc, grid = gen_contracts.load_yaml("listen.yaml"), gen_contracts.grid_values()
+        values = gen_contracts.listen_values(grid)
+        canonical = json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()
+        self.assertEqual(values["listen_hash"], int.from_bytes(hashlib.sha256(canonical).digest()[:4], "big"))
+        original = gen_contracts.load_yaml
+        hashes = set()
+        for changed in (
+            {**doc, "window_s": doc["window_s"] + 0.25},
+            {**doc, "utterance": {**doc["utterance"], "lead_s": doc["utterance"]["lead_s"] + 0.25}},
+            {**doc, "pitch": {**doc["pitch"], "delta_window": doc["pitch"]["delta_window"] + 1}},
+        ):
+            gen_contracts.load_yaml = lambda _, changed=changed: changed
+            try:
+                hashes.add(gen_contracts.listen_values(grid)["listen_hash"])
+            finally:
+                gen_contracts.load_yaml = original
+        self.assertEqual(len(hashes | {values["listen_hash"]}), 4)
+        header = (REPO / gen_contracts.COMMON_INC / "gen_listen.h").read_text()
+        self.assertIn(f"#define GEN_LISTEN_HASH 0x{values['listen_hash']:08x}u", header)
+        namespace: dict = {}
+        exec(gen_contracts.gen_listen_py(values), namespace)
+        self.assertEqual(namespace["HASH"], values["listen_hash"])
 
     def test_a_half_hop_rounds_to_even_as_python_does(self) -> None:
         doc, grid = gen_contracts.load_yaml("listen.yaml"), gen_contracts.grid_values()

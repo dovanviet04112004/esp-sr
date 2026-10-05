@@ -170,15 +170,18 @@ LISTEN_NUMBERS = ("features", "pitch")
 
 def listen_values(g: dict) -> dict:
     """listen.yaml, checked to hold numbers only in features and pitch; the cut and the window also in hops of the
-    grid, rounded as Python rounds them, so the board cuts where Gate 3 does."""
+    grid, rounded as Python rounds them, so the board cuts where Gate 3 does; and the contract's hash, the first four
+    bytes of sha256 of it as JSON with sorted keys, that a model image carries to be refused on another listener."""
     doc = load_yaml("listen.yaml")
     for section in LISTEN_NUMBERS:
         for name, value in doc[section].items():
             if not is_number(value):
                 raise ValueError(f"listen.yaml {section}.{name} must be a number, got {value!r}")
     rate = g["frames_per_s"]
+    canonical = json.dumps(doc, sort_keys=True, separators=(",", ":"))
     return {
         **doc,
+        "listen_hash": int.from_bytes(hashlib.sha256(canonical.encode()).digest()[:4], "big"),
         "gap_hops": round(doc["utterance"]["gap_s"] * rate),
         "min_hops": round(doc["utterance"]["min_s"] * rate),
         "lead_hops": round(doc["utterance"]["lead_s"] * rate),
@@ -196,6 +199,7 @@ def gen_listen_h(v: dict) -> str:
         banner("contracts/listen.yaml", "//"),
         "#pragma once\n",
         f"#define GEN_LISTEN_VERSION {v['version']}",
+        f"#define GEN_LISTEN_HASH 0x{v['listen_hash']:08x}u // sha256 of the sorted JSON, 4 bytes",
         f"#define GEN_LISTEN_N_BANDS {v['features']['n_bands']}",
         f"#define GEN_LISTEN_MEL_CONFIG {c_initializer(v['features'])}       // dsp_spec_mel_config_t",
         f"#define GEN_LISTEN_PITCH_CONFIG {c_initializer(v['pitch'])}       // dsp_spec_pitch_config_t",
@@ -214,6 +218,7 @@ def gen_listen_py(v: dict) -> str:
     return banner("contracts/listen.yaml", "#") + (
         "\n"
         f"VERSION = {v['version']}\n"
+        f"HASH = 0x{v['listen_hash']:08x}\n"
         f"FEATURES = {literal(v['features'])}\n"
         f"PITCH = {literal(v['pitch'])}\n"
         f"N_BANDS = {v['features']['n_bands']}\n"

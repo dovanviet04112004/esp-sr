@@ -3,6 +3,7 @@
 # Regenerate: python3 tools/gen_contracts.py
 
 VERSION = 4
+HASH = 0x37f964cd
 FEATURES = {'n_bands': 80, 'f_min_hz': 20.0, 'f_max_hz': 7600.0, 'log_floor': 1e-06}
 PITCH = {'resample_hz': 4000.0,
  'lowpass_cutoff_hz': 1000.0,
