@@ -1141,7 +1141,9 @@ model là số của bộ mặc định. Câu là các đoạn
 `contracts/listen.yaml`. Chuỗi của sản phẩm và bộ dò cao độ chạy liền, không đặt lại, qua mọi phiên của một buổi thu
 (các dòng liền nhau của manifest cùng board, firmware và `pcm_shift`), như board chạy liền giữa các câu: `agc` vào phiên
 sau với độ lợi phiên trước để lại. Phiên ghi xong được nối thêm lặng như board nghe tiếp sau phiên, để câu cuối cũng
-chốt. Board
+chốt. `vad` đã quen người nói bắt cả hơi thở và tiếng động giữa hai câu (`measurements/command.md` §12.9): trong phiên lệnh,
+cửa sổ không chồng câu nào chuỗi tìm thấy khi chạy riêng phiên ấy từ đầu là cửa sổ thừa, đếm riêng như phần phải từ chối.
+Board
 chưa có `wake` cắt đúng như vậy, nên quyết định của board trên tiếng nói trực tiếp là quyết định Cửa 3 đếm. Tới khi
 E11-T13 chỉnh `δ₁` `δ₂` trên cụm na ná lệnh, bảng của `ctc` ghi lệnh điểm cao nhất của từng câu và quét `δ₁` để thấy đánh
 đổi giữa nhận và từ chối, chưa kết luận đạt hay trượt. Chấm float để đọc nhanh; số chọn model là số sau int8 (§1.3).

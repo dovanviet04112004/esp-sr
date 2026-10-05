@@ -40,6 +40,7 @@ from srpipe.tasks.command.kws.postproc import decide
 from srpipe.tasks.command.rnnt.postproc import rnnt_search
 
 REJECT = "reject"
+EXTRA = "extra"  # a command session's window no utterance owns (board)
 HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
 SITTING_KEYS = ("board", "fw", "pcm_shift")  # a manifest row's fields one run of the board shares
 Spans = list[tuple[int, int]]
@@ -307,16 +308,33 @@ def heard_sessions(cfg: dict, spec: dict, paths: dict) -> Iterator[tuple]:
     yield from heard_rows(cfg, [r for r in rows if counted(r, spec)], paths, rows)
 
 
+def overlapping(spans: Spans, said: Spans) -> list[bool]:
+    """Whether each (first, last) span shares a hop with one of said."""
+    return [any(first <= end and start <= last for start, end in said) for first, last in spans]
+
+
 def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: Callable) -> list[Scored]:
-    """Every counted session of the board manifest found on disk, its utterances decided by decided_of(clean,
-    features, pitch, spans); a session saying the text of a command of said expects that command."""
+    """Every counted session of the board manifest, its utterances decided by decided_of(clean, features, pitch,
+    spans). A session saying the text of a command of said expects that command of each window that overlaps an
+    utterance the chain finds in the session alone from a fresh start; its other windows, a chain used to the speaker
+    catching a breath or a noise, are scored apart as kind EXTRA, to be rejected."""
     command_of = {tuple(corpus.sounds(text)): cid for cid, text in said.items()}
+    device_cfg = device_of(cfg)
+    chain_cfg = ChainConfig(balance_gains=device.load_microphones(device_cfg["microphone"]).gains)
+    mel = Mel(MelConfig(**device_cfg["features"]))
     results = []
     for r, clean, vad, features, pitch in heard_sessions(cfg, spec, paths):
         spans = device.utterances(vad)
         decided = decided_of(clean, features, pitch, spans) if spans else []
         expected = expected_of(r["kind"], r["prompt"], command_of)
-        results.append(Scored(r["session"], r["kind"], r["distance_cm"], r["prompt"], expected, decided))
+        kept = [True] * len(spans)
+        if expected != REJECT:
+            pcm = channels_of(paths["raw"] / "device" / r["board"] / r["session"])
+            kept = overlapping(spans, device.utterances(device.listen(pcm, chain_cfg, mel)[1][:, 0].astype(bool)))
+        said_right = [d for d, k in zip(decided, kept, strict=True) if k]
+        results.append(Scored(r["session"], r["kind"], r["distance_cm"], r["prompt"], expected, said_right))
+        if extra := [d for d, k in zip(decided, kept, strict=True) if not k]:
+            results.append(Scored(r["session"], EXTRA, r["distance_cm"], r["prompt"], REJECT, extra))
     return results
 
 

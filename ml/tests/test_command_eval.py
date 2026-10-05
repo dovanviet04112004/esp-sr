@@ -4,6 +4,7 @@ table scores them, and the command set a ctc run is scored on."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -209,3 +210,25 @@ def test_a_ctc_run_scores_the_command_set_it_is_given(tmp_path) -> None:
     net = gate.load_ctc(tmp_path, given)
     assert net.names == ["a", "b"] and len(net.lexicon) == 2
     assert gate.load_ctc(tmp_path).names[0] == "bat_den"
+
+
+def test_a_command_sessions_windows_its_utterances_alone_miss_are_extra_and_to_be_rejected(monkeypatch) -> None:
+    row = {"session": "s1", "kind": "cmd", "distance_cm": "100", "prompt": "bật đèn", "board": "b"}
+    on, alone = np.zeros(400, dtype=bool), np.zeros(400, dtype=bool)
+    on[50:80] = on[150:170] = on[250:290] = True
+    alone[52:78] = alone[255:285] = True
+    monkeypatch.setattr(gate, "heard_sessions", lambda *_: iter([(row, None, on, None, None)]))
+    monkeypatch.setattr(gate, "channels_of", lambda _folder: None)
+    monkeypatch.setattr(gate.device, "listen", lambda *_: (None, alone[:, None].astype(np.int8), None))
+    results = gate.board(
+        {"features": "scenes/device.yaml"},
+        {},
+        {"raw": Path("/")},
+        {"bat_den": "bật đèn"},
+        lambda clean, features, pitch, spans: [s[0] for s in spans],
+    )
+    assert [(r.kind, r.expected, r.decided) for r in results] == [
+        ("cmd", "bat_den", [50, 250]),
+        (gate.EXTRA, REJECT, [150]),
+    ]
+    assert gate.overlapping([(0, 4), (5, 9)], [(4, 4)]) == [True, False]
