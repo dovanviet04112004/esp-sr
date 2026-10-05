@@ -1,5 +1,5 @@
 /** Kaldi's pitch tracker in its own zero-latency online mode, one grid hop in, one frame out (KEHOACH 3.11).
- *  @ctx any | non-blocking | caller owns the workspace; one tracker per stream, reset at every command window
+ *  @ctx any | non-blocking | caller owns the workspace; one tracker per stream, reset only when it breaks
  */
 #pragma once
 
@@ -27,6 +27,7 @@ typedef struct {
     float penalty_factor;
     float delta_pitch; // ratio between neighbouring lags, less one
     float nccf_ballast;
+    float ballast_window_s;     // the ballast's mean square over the newest
     float normalization_left_s; // past of the log-pitch mean
     uint16_t delta_window;      // frames each side of the delta
     float pov_scale;
@@ -49,7 +50,7 @@ size_t dsp_spec_pitch_workspace_bytes(const dsp_spec_pitch_config_t *cfg);
 esp_err_t dsp_spec_pitch_init(dsp_spec_pitch_t **out, const dsp_spec_pitch_config_t *cfg, void *mem,
                               size_t bytes);
 
-/** Forget the stream, as when a command window ends.
+/** Forget the stream, as when it breaks.
  *  @ctx any | non-blocking
  */
 void dsp_spec_pitch_reset(dsp_spec_pitch_t *pitch);

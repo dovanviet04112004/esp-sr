@@ -18,7 +18,8 @@ typedef struct {
     int n_lags;
     int up_taps;
     int context;
-    int ring; // frames of traceback history kept
+    int ring;       // frames of traceback history kept
+    int stats_hops; // hops whose samples the ballast's mean square covers
     int in_cap;
     int down_cap;
 } layout_t;
@@ -45,8 +46,14 @@ struct dsp_spec_pitch_s {
     int down_len;
     int64_t down_offset;
     int64_t down_count;
-    double sum;
+    double *hop_sum;
+    double *hop_sumsq;
+    int32_t *hop_count;
+    int stats_head;
+    int stats_filled;
+    double sum; // over the hops of the stats ring
     double sumsq;
+    double count;
     uint32_t frames;
     float *forward;
     int16_t *backpointers;
@@ -72,7 +79,7 @@ static bool config_ok(const dsp_spec_pitch_config_t *cfg)
     if (cfg == NULL || !(cfg->resample_hz > 0.0f) || !(cfg->lowpass_cutoff_hz > 0.0f) ||
         cfg->lowpass_zeros == 0 || cfg->upsample_zeros == 0 || !(cfg->window_s > 0.0f) ||
         !(cfg->min_f0_hz > 0.0f) || !(cfg->max_f0_hz > cfg->min_f0_hz) || !(cfg->delta_pitch > 0.0f) ||
-        cfg->delta_window == 0 || !(cfg->normalization_left_s >= 0.0f)) {
+        cfg->delta_window == 0 || !(cfg->normalization_left_s >= 0.0f) || !(cfg->ballast_window_s > 0.0f)) {
         return false;
     }
     const double rate = cfg->resample_hz;
@@ -144,9 +151,10 @@ static bool plan_layout(const dsp_spec_pitch_config_t *cfg, layout_t *d)
     }
     d->context = (int)nearbyint((double)cfg->normalization_left_s * rate / GEN_GRID_HOP_SAMPLES);
     d->ring = (d->context > cfg->delta_window ? d->context : cfg->delta_window) + 1;
+    d->stats_hops = (int)nearbyint((double)cfg->ballast_window_s * rate / GEN_GRID_HOP_SAMPLES);
     d->in_cap = GEN_GRID_HOP_SAMPLES + 2 * d->down_taps;
     d->down_cap = d->frame_length + 2 * d->shift;
-    return d->up_taps > 0;
+    return d->up_taps > 0 && d->stats_hops > 0;
 }
 
 static size_t floats(int n)
@@ -159,6 +167,11 @@ static size_t shorts(int n)
     return spec_round_up((size_t)n * sizeof(int16_t));
 }
 
+static size_t hop_stats_bytes(int n)
+{
+    return 2 * spec_round_up((size_t)n * sizeof(double)) + spec_round_up((size_t)n * sizeof(int32_t));
+}
+
 static size_t arena_bytes(const layout_t *d, int delta_terms)
 {
     return spec_round_up(sizeof(struct dsp_spec_pitch_s)) + floats(d->down_taps) + floats(d->n_lags) +
@@ -166,7 +179,7 @@ static size_t arena_bytes(const layout_t *d, int delta_terms)
            floats(d->down_cap) + floats(d->n_lags) + shorts(d->ring * d->n_lags) +
            floats(d->ring * d->n_lags) + spec_round_up((size_t)d->ring * sizeof(traced_t)) +
            floats(d->frame_length) + 2 * floats(d->measured) + 4 * floats(d->n_lags) + floats(d->n_lags + 1) +
-           2 * shorts(d->n_lags) + shorts(d->ring);
+           2 * shorts(d->n_lags) + shorts(d->ring) + hop_stats_bytes(d->stats_hops);
 }
 
 size_t dsp_spec_pitch_workspace_bytes(const dsp_spec_pitch_config_t *cfg)
@@ -253,7 +266,10 @@ esp_err_t dsp_spec_pitch_init(dsp_spec_pitch_t **out, const dsp_spec_pitch_confi
     p->envelope_v = spec_carve(&c, (size_t)d->n_lags * sizeof(int16_t));
     p->best = spec_carve(&c, (size_t)d->n_lags * sizeof(int16_t));
     p->path = spec_carve(&c, (size_t)d->ring * sizeof(int16_t));
-    if (p->path == NULL) { return ESP_ERR_INVALID_SIZE; }
+    p->hop_sum = spec_carve(&c, (size_t)d->stats_hops * sizeof(double));
+    p->hop_sumsq = spec_carve(&c, (size_t)d->stats_hops * sizeof(double));
+    p->hop_count = spec_carve(&c, (size_t)d->stats_hops * sizeof(int32_t));
+    if (p->hop_count == NULL) { return ESP_ERR_INVALID_SIZE; }
     build_tables(p);
     dsp_spec_pitch_reset(p);
     *out = p;
@@ -268,8 +284,11 @@ void dsp_spec_pitch_reset(dsp_spec_pitch_t *pitch)
     pitch->down_len = 0;
     pitch->down_offset = 0;
     pitch->down_count = 0;
+    pitch->stats_head = 0;
+    pitch->stats_filled = 0;
     pitch->sum = 0.0;
     pitch->sumsq = 0.0;
+    pitch->count = 0.0;
     pitch->frames = 0;
     memset(pitch->forward, 0, (size_t)pitch->d.n_lags * sizeof(float));
     for (int s = 0; s < pitch->d.ring; s++) {
@@ -314,6 +333,31 @@ static int downsample(dsp_spec_pitch_t *p)
     p->in_len -= drop;
     p->in_offset = keep;
     return made;
+}
+
+// Each hop summed in float as Kaldi adds each chunk's VecVec; the ring's totals in double, oldest hop first.
+static void keep_hop_stats(dsp_spec_pitch_t *p, float sum, float sumsq, int count)
+{
+    const int cap = p->d.stats_hops;
+    int slot = p->stats_head;
+    if (p->stats_filled < cap) {
+        slot = (p->stats_head + p->stats_filled) % cap;
+        p->stats_filled++;
+    } else {
+        p->stats_head = (p->stats_head + 1) % cap;
+    }
+    p->hop_sum[slot] = (double)sum;
+    p->hop_sumsq[slot] = (double)sumsq;
+    p->hop_count[slot] = count;
+    p->sum = 0.0;
+    p->sumsq = 0.0;
+    p->count = 0.0;
+    for (int k = 0; k < p->stats_filled; k++) {
+        const int at = (p->stats_head + k) % cap;
+        p->sum += p->hop_sum[at];
+        p->sumsq += p->hop_sumsq[at];
+        p->count += (double)p->hop_count[at];
+    }
 }
 
 static void correlate(dsp_spec_pitch_t *p, const float *frame, float ballast)
@@ -396,7 +440,7 @@ static void distance_transform(dsp_spec_pitch_t *p)
 static void track_frame(dsp_spec_pitch_t *p, uint32_t f)
 {
     const layout_t *d = &p->d;
-    const double n = (double)p->down_count;
+    const double n = p->count;
     const double mean_square = p->sumsq / n - (p->sum / n) * (p->sum / n);
     const double scaled = mean_square * d->window;
     const float ballast = (float)(scaled * scaled * (double)p->cfg.nccf_ballast);
@@ -498,16 +542,16 @@ esp_err_t dsp_spec_pitch_frame(dsp_spec_pitch_t *pitch, const float *hop, float 
     p->in_len += GEN_GRID_HOP_SAMPLES;
     const int first_new = p->down_len;
     const int made = downsample(p);
+    float sum = 0.0f, sumsq = 0.0f;
     if (made > 0) {
         const float *fresh = p->down + first_new;
-        float sum = fresh[0];
+        sum = fresh[0];
         for (int i = 1; i < made; i++) {
             sum += fresh[i];
         }
-        // Each hop summed in float, the running totals in double, as Kaldi adds each chunk's VecVec.
-        p->sum += (double)sum;
-        p->sumsq += (double)seq_dot(fresh, fresh, made);
+        sumsq = seq_dot(fresh, fresh, made);
     }
+    keep_hop_stats(p, sum, sumsq, made);
     const uint32_t ready =
         p->down_count >= d->frame_length ? (uint32_t)((p->down_count - d->frame_length) / d->shift + 1) : 0;
     if (ready == p->frames) {
