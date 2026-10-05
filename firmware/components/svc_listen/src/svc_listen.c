@@ -290,11 +290,11 @@ static void extend_open(uint32_t seq)
     }
 }
 
-esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad)
+esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
 {
     if (!s.ready) { return ESP_ERR_INVALID_STATE; }
     if (pcm == NULL) { return ESP_ERR_INVALID_ARG; }
-    if (!s.started || seq != s.next_seq) {
+    if (!s.started || seq != s.next_seq || gap) {
         dsp_spec_stft_reset(s.stft);
         dsp_spec_pitch_reset(s.pitch);
         drop_open();

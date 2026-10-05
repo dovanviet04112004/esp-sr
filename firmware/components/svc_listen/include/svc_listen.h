@@ -60,11 +60,12 @@ esp_err_t svc_listen_set_commands(const svc_listen_commands_t *commands, uint8_t
 uint32_t svc_listen_commands_version(void);
 
 /** Take one clean hop into the ring with its log-mel and pitch; vad opens, extends or closes a window.
- *  A jump in seq starts afresh: STFT and pitch reset, the open window drops, no window reaches across.
+ *  A jump in seq, or gap (the chain reset ahead of this hop), starts afresh: STFT and pitch reset, the open
+ *  window drops, no window reaches across.
  *  @ctx nhan_task | non-blocking, about 2 ms of pitch | pcm holds GEN_GRID_HOP_SAMPLES samples, copied
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE no init | ESP_ERR_NO_MEM a full queue: the utterance gets no window
  */
-esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad);
+esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap);
 
 /** Whether svc_listen_work has a hop to step or a closed window to decide now.
  *  @ctx nhan_task | non-blocking

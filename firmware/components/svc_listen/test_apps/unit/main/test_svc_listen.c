@@ -43,6 +43,7 @@ _Static_assert(sizeof(listen_head_t) == 12 && sizeof(session_head_t) == 8 && siz
 #define DECIDED_MAX 64
 #define CLICK_HOPS 2          // vad hops of a click, too short to be an utterance
 #define CLICK_SEQ 0xC0000000u // past every round's sessions, so svc_listen starts afresh
+#define RESET_SEQ (CLICK_SEQ + SEQ_APART)
 
 _Static_assert(CLICK_HOPS < GEN_LISTEN_UTTERANCE_MIN_HOPS, "a click is dropped, never decided");
 
@@ -142,7 +143,7 @@ static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_
             pcm = (const int16_t *)(seg_at + sizeof(seg)) + (hop - seg.first) * GEN_GRID_HOP_SAMPLES;
         }
         const bool on = (vad[hop / 8] >> (hop % 8)) & 1;
-        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(pcm, base + hop, on));
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(pcm, base + hop, on, false));
         n = drain(decided, n, t);
     }
     TEST_ASSERT_EQUAL_MESSAGE(h.windows, n, "svc_listen cut otherwise than Gate 3");
@@ -215,7 +216,7 @@ TEST_CASE("svc_listen takes a new set after a click it began working and dropped
     size_t n = 0;
     for (uint32_t hop = 0; hop < CLICK_HOPS + GEN_LISTEN_UTTERANCE_GAP_HOPS + 1; hop++) {
         const bool on = hop < CLICK_HOPS;
-        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(on ? click : k_zeros, CLICK_SEQ + hop, on));
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(on ? click : k_zeros, CLICK_SEQ + hop, on, false));
         n = drain(decided, n, &t);
     }
     TEST_ASSERT_EQUAL_MESSAGE(0, n, "the click was decided, not dropped");
@@ -229,6 +230,23 @@ TEST_CASE("svc_listen takes a new set after a click it began working and dropped
     uint8_t unreadable = 0;
     TEST_ASSERT_EQUAL(ESP_OK, svc_listen_set_commands(&next, &unreadable));
     TEST_ASSERT_EQUAL(next.version, svc_listen_commands_version());
+    esp_partition_munmap(handle);
+}
+
+TEST_CASE("svc_listen drops the open window when the chain resets, as when seq jumps", "[svc_listen]")
+{
+    listen_head_t head;
+    named_t named;
+    esp_partition_mmap_handle_t handle;
+    read_round(&head, &named, &handle);
+    listen_on(&head, &named);
+    uint32_t hop = 0;
+    for (; hop < GEN_LISTEN_UTTERANCE_MIN_HOPS; hop++) {
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, RESET_SEQ + hop, true, false));
+    }
+    TEST_ASSERT_TRUE(svc_listen_busy());
+    TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, RESET_SEQ + hop, false, true));
+    TEST_ASSERT_FALSE_MESSAGE(svc_listen_busy(), "a window reached across the chain's reset");
     esp_partition_munmap(handle);
 }
 
