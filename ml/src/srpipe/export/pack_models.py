@@ -2,7 +2,7 @@
 
 The layout constants are read from firmware/components/sys_storage/include/storage_format.h and the slot size from
 firmware/partitions.csv, so ai_engine_load and this packer cannot disagree on either. --lock packs every file
-contracts/models.lock.json lists instead, each held to its sha256 (KEHOACH 4.5.6), with its command's listen hash.
+contracts/models.lock.json lists, each held to its sha256 (KEHOACH 4.5.6), with its command's listen hash and pair.
 Run: python -m srpipe.export.pack_models <out.bin> (--lock | <name>:<espdl|norm|units>:<file>...)
 """
 
@@ -26,7 +26,7 @@ PARTITIONS = FIRMWARE / "partitions.csv"
 UNIT_PARTITIONS = FIRMWARE / "test_apps" / "partitions_unit.csv"
 LOCK = FIRMWARE.parent / "contracts" / "models.lock.json"
 MODELS = FIRMWARE / "models"
-HEAD = struct.Struct("<IIIII44x")
+HEAD = struct.Struct("<IIIIIHH40x")
 ENTRY_TAIL = struct.Struct("<II")
 
 
@@ -78,9 +78,12 @@ def slot_bytes() -> int:
     return partition_bytes(storage_string("STORAGE_MODEL_LABEL_SLOT0"))
 
 
-def pack(entries: list[Entry], grid_hash: int = grid.GRID_HASH, listen_hash: int = 0) -> bytes:
+def pack(
+    entries: list[Entry], grid_hash: int = grid.GRID_HASH, listen_hash: int = 0, thresholds: tuple[int, int] = (0, 0)
+) -> bytes:
     """The image bytes: header, then the entries in order, each at the next ALIGN_BYTES boundary; listen_hash is the
-    GEN_LISTEN_HASH the entries' command learned on, 0 without a command."""
+    GEN_LISTEN_HASH the entries' command learned on and thresholds its delta1 and delta2 in permille, 0 without a
+    command or a chosen pair (KEHOACH 6.3)."""
     if not 0 < len(entries) <= MAX_ENTRIES:
         raise ValueError(f"{len(entries)} entries, the header holds 1..{MAX_ENTRIES}")
     body, table, at = bytearray(), [], HEADER_BYTES
@@ -92,17 +95,18 @@ def pack(entries: list[Entry], grid_hash: int = grid.GRID_HASH, listen_hash: int
         padded = e.data + bytes(-len(e.data) % ALIGN_BYTES)
         body += padded
         at += len(padded)
-    header = HEAD.pack(MAGIC, FORMAT_VER, len(entries), grid_hash, listen_hash) + b"".join(table)
+    header = HEAD.pack(MAGIC, FORMAT_VER, len(entries), grid_hash, listen_hash, *thresholds) + b"".join(table)
     image = header + bytes(HEADER_BYTES - len(header)) + bytes(body)
     if len(image) > slot_bytes():
         raise ValueError(f"image of {len(image)} bytes overflows the {slot_bytes()}-byte slot")
     return image
 
 
-def locked() -> tuple[list[Entry], int]:
-    """Every file models.lock.json lists, in its order, as the image entry it names, and the listen hash of the rows
-    that record one, 0 when none does; refused when a file under firmware/models/<branch>/ differs from its sha256
-    or two rows learned on different listen.yaml."""
+def locked() -> tuple[list[Entry], int, tuple[int, int]]:
+    """Every file models.lock.json lists, in its order, as the image entry it names, the listen hash of the rows that
+    record one, 0 when none does, and the delta1 and delta2 of the row that records them, (0, 0) when none does;
+    refused when a file under firmware/models/<branch>/ differs from its sha256, two rows learned on different
+    listen.yaml or two record thresholds."""
     rows = json.loads(LOCK.read_text(encoding="utf-8"))["models"]
     entries = []
     for branch, row in rows.items():
@@ -114,7 +118,14 @@ def locked() -> tuple[list[Entry], int]:
     listen_hashes = {int(row["listen_hash"], 16) for row in rows.values() if "listen_hash" in row}
     if len(listen_hashes) > 1:
         raise ValueError(f"rows of {LOCK.name} learned on {len(listen_hashes)} listen.yaml, the header holds one")
-    return entries, next(iter(listen_hashes), 0)
+    pairs = [
+        (r["thresholds"]["reject_permille"], r["thresholds"]["margin_permille"])
+        for r in rows.values()
+        if "thresholds" in r
+    ]
+    if len(pairs) > 1:
+        raise ValueError(f"{len(pairs)} rows of {LOCK.name} record thresholds, the header holds one pair")
+    return entries, next(iter(listen_hashes), 0), next(iter(pairs), (0, 0))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -125,14 +136,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.lock == bool(args.entries):
         parser.error("give either --lock or entries")
-    entries, listen_hash = locked() if args.lock else ([], 0)
+    entries, listen_hash, thresholds = locked() if args.lock else ([], 0, (0, 0))
     for spec in args.entries:
         name, kind, path = spec.split(":", 2)
         entries.append(Entry(name, kind, Path(path).read_bytes()))
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_bytes(pack(entries, listen_hash=listen_hash))
+    args.out.write_bytes(pack(entries, listen_hash=listen_hash, thresholds=thresholds))
     size = args.out.stat().st_size
-    print(f"{args.out}: {len(entries)} entries, {size} bytes, grid 0x{grid.GRID_HASH:08x}, listen 0x{listen_hash:08x}")
+    said = f"grid 0x{grid.GRID_HASH:08x}, listen 0x{listen_hash:08x}, delta1 {thresholds[0]}, delta2 {thresholds[1]}"
+    print(f"{args.out}: {len(entries)} entries, {size} bytes, {said}")
     return 0
 
 
