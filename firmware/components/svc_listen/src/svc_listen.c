@@ -56,7 +56,7 @@ static struct {
     float *hop;
     dsp_spec_cplx_t *bins;
     float (*log_mel)[GEN_LISTEN_N_BANDS];
-    int16_t (*pcm)[GEN_GRID_HOP_SAMPLES];
+    float (*pitch_ring)[DSP_SPEC_PITCH_FEATURES];
     table_t tables[2]; // the one in use, and a spare to read a new set into
     size_t active;
     lang_vi_dialect_t dialects;
@@ -86,7 +86,7 @@ static void release(workspaces_t *w)
     void *const blocks[] = {s.hop,
                             s.bins,
                             s.log_mel,
-                            s.pcm,
+                            s.pitch_ring,
                             s.tables[0].units,
                             s.tables[0].ids,
                             s.tables[0].lexicon,
@@ -175,11 +175,10 @@ esp_err_t svc_listen_init(const svc_listen_config_t *cfg)
     s.hop = take(GEN_GRID_HOP_SAMPLES * sizeof(float));
     s.bins = take(GEN_GRID_N_BINS * sizeof(dsp_spec_cplx_t));
     s.log_mel = take(RING_HOPS * sizeof(*s.log_mel));
-    s.pcm = take(RING_HOPS * sizeof(*s.pcm));
+    s.pitch_ring = take(RING_HOPS * sizeof(*s.pitch_ring));
     const bool tables = take_table(&s.tables[0]) && take_table(&s.tables[1]);
-    esp_err_t err = s.hop != NULL && s.bins != NULL && s.log_mel != NULL && s.pcm != NULL && tables
-                        ? front_end(&w)
-                        : ESP_ERR_NO_MEM;
+    const bool rings = s.log_mel != NULL && s.pitch_ring != NULL;
+    esp_err_t err = s.hop != NULL && s.bins != NULL && rings && tables ? front_end(&w) : ESP_ERR_NO_MEM;
     uint8_t unreadable = 0;
     s.dialects = cfg->dialects;
     if (err == ESP_OK) { err = build_lexicon(&cfg->commands, &s.tables[0], &unreadable); }
@@ -296,6 +295,7 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad)
     if (pcm == NULL) { return ESP_ERR_INVALID_ARG; }
     if (!s.started || seq != s.next_seq) {
         dsp_spec_stft_reset(s.stft);
+        dsp_spec_pitch_reset(s.pitch);
         drop_open();
         s.in_run = false;
         s.after = seq;
@@ -303,10 +303,10 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad)
     s.started = true;
     s.next_seq = seq + 1;
     const size_t slot = seq % RING_HOPS;
-    memcpy(s.pcm[slot], pcm, sizeof(s.pcm[slot]));
     to_float(pcm, s.hop);
     esp_err_t err = dsp_spec_stft_analyze(s.stft, s.hop, s.bins);
     if (err == ESP_OK) { err = dsp_spec_mel_log(s.mel, s.bins, s.log_mel[slot]); }
+    if (err == ESP_OK) { err = dsp_spec_pitch_frame(s.pitch, s.hop, s.pitch_ring[slot]); }
     if (err != ESP_OK) { return err; }
     if (s.in_run && seq - s.run_last > GEN_LISTEN_UTTERANCE_GAP_HOPS) { close_utterance(); }
     if (vad) {
@@ -390,7 +390,6 @@ bool svc_listen_work(svc_listen_decision_t *out)
             drop(w, "no command window");
             return false;
         }
-        dsp_spec_pitch_reset(s.pitch);
         s.working = true;
         s.at = w->first;
         s.work_us = 0;
@@ -399,9 +398,8 @@ bool svc_listen_work(svc_listen_decision_t *out)
         const size_t slot = s.at % RING_HOPS;
         float features[FEATURES];
         memcpy(features, s.log_mel[slot], sizeof(s.log_mel[slot]));
-        to_float(s.pcm[slot], s.hop);
-        esp_err_t err = dsp_spec_pitch_frame(s.pitch, s.hop, features + GEN_LISTEN_N_BANDS);
-        if (err == ESP_OK) { err = ai_engine_command_step(features); }
+        memcpy(features + GEN_LISTEN_N_BANDS, s.pitch_ring[slot], sizeof(s.pitch_ring[slot]));
+        const esp_err_t err = ai_engine_command_step(features);
         if (err != ESP_OK) {
             drop(w, esp_err_to_name(err));
             return false;

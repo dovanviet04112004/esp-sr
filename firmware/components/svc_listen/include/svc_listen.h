@@ -34,7 +34,7 @@ typedef struct {
     app_event_t event;          // COMMAND or REJECT; seq is the window's last hop
     uint32_t first_seq;         // the window's first hop
     uint16_t free_gap_permille; // free unit loop over the best command
-    uint32_t work_us;           // pitch, network and score of the window
+    uint32_t work_us;           // network and score of the window
     uint32_t close_us;          // from the utterance's close to the decision
 } svc_listen_decision_t;
 
@@ -59,9 +59,9 @@ esp_err_t svc_listen_set_commands(const svc_listen_commands_t *commands, uint8_t
  */
 uint32_t svc_listen_commands_version(void);
 
-/** Take one clean hop into the ring; vad opens a window on a new utterance, extends it, or closes it.
- *  A jump in seq starts afresh: the open window is dropped, and no window reaches across the jump.
- *  @ctx nhan_task | non-blocking | pcm holds GEN_GRID_HOP_SAMPLES samples, copied
+/** Take one clean hop into the ring with its log-mel and pitch; vad opens, extends or closes a window.
+ *  A jump in seq starts afresh: STFT and pitch reset, the open window drops, no window reaches across.
+ *  @ctx nhan_task | non-blocking, about 2 ms of pitch | pcm holds GEN_GRID_HOP_SAMPLES samples, copied
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE no init | ESP_ERR_NO_MEM a full queue: the utterance gets no window
  */
 esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad);
@@ -76,8 +76,8 @@ bool svc_listen_pending(void);
  */
 bool svc_listen_busy(void);
 
-/** Step one hop of the oldest window: pitch, then the network, a chunk every 16 hops; decide it once closed.
- *  @ctx nhan_task | blocks for one hop of pitch and at most one chunk of the network, or the decision
+/** Step one hop of the oldest window into the network, a chunk every 16 hops; decide it once closed.
+ *  @ctx nhan_task | blocks for at most one chunk of the network, or the decision
  *  @ret true with out filled once the window is decided; false otherwise, or on an error that drops it
  */
 bool svc_listen_work(svc_listen_decision_t *out);
