@@ -686,5 +686,9 @@ cao độ tính liên tục thì mỗi bước tới vẫn tốn 1,98 ms của n
 - Cao độ không nhìn sau làm mức âm tiết đầu dịch theo phiên tới 0,6–0,8, lớn hơn khoảng cách "tắt"–"bật"; nhìn sau bỏ
   được độ dịch ấy nhưng ở mạng 8 000 bước chỉ thêm một câu Cửa 3.
 - Mức và màu sau chuỗi của phiên thật khác mô phỏng: `agc` theo lịch sử, đáp tuyến micro và vỏ coi là phẳng.
+- Ballast của bộ dò cao độ chia NCCF theo năng lượng trung bình của dòng từ lần đặt lại. Cao độ chạy liền thì trên board
+  dòng ấy là cả giờ phòng yên, lúc học và ở Cửa 3 là một phiên: cho 300 s các bước im của chính phiên chạy trước, model
+  `20261004_acde692` trên Cửa 3 từ 86 xuống 82/112; log cao độ chuẩn hoá trên bước `vad` lệch p50/p90/p99 0,07 / 1,14 /
+  2,25, 42% bước lệch quá 0,1; POV lệch p90 0,07.
 - `vad` của board đọc mức trước `agc`, nên với người nói nhỏ hay xa nó tắt khi tiếng chưa hết: mẫu học cắt trên nó mất lời
   mà nhãn đòi, cắt trên `vad` của riêng tiếng người nói thì không (§12.6). Kéo cửa sổ board thêm sau `vad` không giúp Cửa 3.
