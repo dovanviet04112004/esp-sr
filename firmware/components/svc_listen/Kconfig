@@ -1,19 +1,21 @@
 menu "svc_listen"
 
     config SVC_LISTEN_CMD_REJECT_PERMILLE
-        int "Seed of NVS kws/cmd_reject: delta1 of the ctc command, thousandths of a nat a frame"
+        int "NVS kws/cmd_reject when the model image carries no delta1: thousandths of a nat a frame"
         range 0 65535
         default 300
         help
             The best command is turned down when the free unit loop scores better by more than this a frame
-            (KEHOACH 3.12, 6.2). 300 is the delta1 Gate 3 was counted at (docs/measurements/command.md 2).
+            (KEHOACH 3.12, 6.2). An image whose header carries the pair chosen for its command seeds that pair
+            instead (KEHOACH 6.3). 300 is the delta1 Gate 3 was counted at (docs/measurements/command.md 2).
 
     config SVC_LISTEN_CMD_MARGIN_PERMILLE
-        int "Seed of NVS kws/cmd_margin: delta2 of the ctc command, thousandths of a nat a frame"
+        int "NVS kws/cmd_margin when the model image carries no delta2: thousandths of a nat a frame"
         range 0 65535
         default 50
         help
-            The best command must lead the second by at least this a frame (KEHOACH 3.12, 6.2). 50 is the delta2
-            Gate 3 was counted at (docs/measurements/command.md 2).
+            The best command must lead the second by at least this a frame (KEHOACH 3.12, 6.2), unless the model
+            image carries the pair chosen for its command (KEHOACH 6.3). 50 is the delta2 Gate 3 was counted at
+            (docs/measurements/command.md 2).
 
 endmenu

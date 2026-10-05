@@ -63,8 +63,6 @@ static void seed_operating(void)
         {STORAGE_NS_AFE, STORAGE_KEY_NS_FLOOR_DB, SYS_STORAGE_I8, lrintf(GEN_AFE_NS_FLOOR_DB)},
         {STORAGE_NS_AFE, STORAGE_KEY_AGC_TARGET_DBFS, SYS_STORAGE_I8, lrintf(GEN_AFE_AGC_TARGET_DBFS)},
         {STORAGE_NS_AFE, STORAGE_KEY_VAD_MODE, SYS_STORAGE_U8, GEN_AFE_VAD_AGGRESSIVENESS},
-        {STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, SYS_STORAGE_U16, CONFIG_SVC_LISTEN_CMD_REJECT_PERMILLE},
-        {STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, SYS_STORAGE_U16, CONFIG_SVC_LISTEN_CMD_MARGIN_PERMILLE},
     };
     const esp_err_t err = sys_storage_seed(APP_SEED_VER, seeds, sizeof(seeds) / sizeof(seeds[0]));
     if (err != ESP_OK) {
@@ -107,6 +105,32 @@ static const dsp_afe_calib_t *load_calib(void)
     ESP_LOGI(TAG, "calib/bal version %" PRIu32 ", written at %" PRIu32 ", aec delay %" PRIu32 " samples",
              version, at, calib.aec_delay_samples);
     return &calib;
+}
+
+// The image brings the pair chosen for its command; SET_CONFIG wins until the suggested pair changes
+// (KEHOACH 6.2).
+static void seed_thresholds(void)
+{
+    uint16_t reject = CONFIG_SVC_LISTEN_CMD_REJECT_PERMILLE, margin = CONFIG_SVC_LISTEN_CMD_MARGIN_PERMILLE;
+    sys_storage_models_t models;
+    if (sys_storage_map_models(MODEL_SLOT, &models) == ESP_OK) {
+        if (models.header->cmd_reject_permille != 0) {
+            reject = models.header->cmd_reject_permille;
+            margin = models.header->cmd_margin_permille;
+        }
+        sys_storage_unmap_models(&models);
+    }
+    const uint32_t suggested = (uint32_t)reject << 16 | margin;
+    uint32_t seeded = 0;
+    if (sys_storage_get_u32(STORAGE_NS_KWS, STORAGE_KEY_CMD_SEEDED, &seeded) == ESP_OK &&
+        seeded == suggested) {
+        return;
+    }
+    esp_err_t err = sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, reject);
+    if (err == ESP_OK) { err = sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, margin); }
+    if (err == ESP_OK) { err = sys_storage_set_u32(STORAGE_NS_KWS, STORAGE_KEY_CMD_SEEDED, suggested); }
+    ESP_LOGI(TAG, "command thresholds %u, %u seeded: %s", (unsigned)reject, (unsigned)margin,
+             esp_err_to_name(err));
 }
 
 static void load_models(void)
@@ -185,6 +209,7 @@ esp_err_t app_boot(void)
     ESP_RETURN_ON_ERROR(drv_audio_init(&audio), TAG, "audio");
     log_heap("audio");
     seed_operating();
+    seed_thresholds();
     load_models();
     log_heap("models");
     const svc_front_config_t front = {
