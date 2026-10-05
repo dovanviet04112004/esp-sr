@@ -77,15 +77,15 @@ esp_err_t ai_engine_command_ctc_finish(const ai_engine_lexicon_t *lexicon, size_
                                        uint16_t margin, const void *work, float *scores,
                                        ai_engine_command_result_t *out);
 
-/** A whole window at once: prepare, begin, every frame, finish.
+/** A whole window at once: prepare for frames_cap, begin, every frame, finish; work stays prepared after.
  *  @ctx any | non-blocking, a few ms | caller owns log_probs (n_frames x n_classes), work and scores
- *  @param per_frames every score's divisor; work 4-byte aligned, of ..._work_bytes; scores n_commands
- *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_SIZE a variant longer than the units max
+ *  @param frames_cap frames ..._work_bytes sized work for, at least n_frames; per_frames the divisor
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_SIZE a variant past the units max or n_frames past cap
  */
 esp_err_t ai_engine_command_ctc_decide(const float *log_probs, size_t n_classes, size_t n_frames,
-                                       const ai_engine_lexicon_t *lexicon, size_t per_frames, uint16_t reject,
-                                       uint16_t margin, void *work, float *scores,
-                                       ai_engine_command_result_t *out);
+                                       size_t frames_cap, const ai_engine_lexicon_t *lexicon,
+                                       size_t per_frames, uint16_t reject, uint16_t margin, void *work,
+                                       float *scores, ai_engine_command_result_t *out);
 
 #ifdef __cplusplus
 }

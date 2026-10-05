@@ -102,7 +102,9 @@ bool parity_command_ctc(const char *case_name, const void *buf, size_t len)
               parity_floats(&thresholds, limits, windows * THRESHOLD_COUNT) &&
               parity_floats(&scores, want_scores, windows * commands) &&
               parity_floats(&decision, want, windows * PARITY_DECISION_COUNT) &&
-              parity_lexicon_of(&units, &n_variants, &n_units, lex, ids);
+              parity_lexicon_of(&units, &n_variants, &n_units, lex, ids) &&
+              ai_engine_command_ctc_prepare(lex, classes, longest, work) == ESP_OK;
+    // Each window streams on what the last one's whole-window decide left prepared, as command.cpp does.
     for (size_t w = 0; ok && w < windows; w++) {
         const size_t n = (size_t)lengths[w];
         float *mine = got_log_probs + w * longest * classes;
@@ -112,17 +114,17 @@ bool parity_command_ctc(const char *case_name, const void *buf, size_t len)
         ai_engine_command_result_t d, s;
         const float *limit = limits + w * THRESHOLD_COUNT;
         const uint16_t reject = (uint16_t)limit[THRESHOLD_REJECT], margin = (uint16_t)limit[THRESHOLD_MARGIN];
-        ok = ai_engine_command_ctc_log_probs(q, (int)steps[w], classes, n, mine) == ESP_OK &&
-             ai_engine_command_ctc_decide(mine, classes, n, lex, (size_t)per_frames, reject, margin, work,
-                                          got_scores + w * commands, &d) == ESP_OK &&
-             ai_engine_command_ctc_prepare(lex, classes, longest, work) == ESP_OK;
+        ok = ai_engine_command_ctc_log_probs(q, (int)steps[w], classes, n, mine) == ESP_OK;
         ai_engine_command_ctc_begin(work);
         for (size_t t = 0; ok && t < n; t += STREAM_FRAMES) {
             const size_t step = n - t < STREAM_FRAMES ? n - t : STREAM_FRAMES;
             ok = ai_engine_command_ctc_frames(mine + t * classes, step, work) == ESP_OK;
         }
-        ok = ok && ai_engine_command_ctc_finish(lex, (size_t)per_frames, reject, margin, work,
-                                                streamed_scores + w * commands, &s) == ESP_OK;
+        ok = ok &&
+             ai_engine_command_ctc_finish(lex, (size_t)per_frames, reject, margin, work,
+                                          streamed_scores + w * commands, &s) == ESP_OK &&
+             ai_engine_command_ctc_decide(mine, classes, n, longest, lex, (size_t)per_frames, reject, margin,
+                                          work, got_scores + w * commands, &d) == ESP_OK;
         parity_decision_row(&d, got + w * PARITY_DECISION_COUNT);
         parity_decision_row(&s, streamed + w * PARITY_DECISION_COUNT);
     }

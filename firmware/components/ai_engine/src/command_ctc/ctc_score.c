@@ -380,12 +380,12 @@ esp_err_t ai_engine_command_ctc_finish(const ai_engine_lexicon_t *lexicon, size_
 }
 
 esp_err_t ai_engine_command_ctc_decide(const float *log_probs, size_t n_classes, size_t n_frames,
-                                       const ai_engine_lexicon_t *lexicon, size_t per_frames, uint16_t reject,
-                                       uint16_t margin, void *work, float *scores,
-                                       ai_engine_command_result_t *out)
+                                       size_t frames_cap, const ai_engine_lexicon_t *lexicon,
+                                       size_t per_frames, uint16_t reject, uint16_t margin, void *work,
+                                       float *scores, ai_engine_command_result_t *out)
 {
     if (log_probs == NULL || out == NULL || n_frames == 0) { return ESP_ERR_INVALID_ARG; }
-    esp_err_t err = ai_engine_command_ctc_prepare(lexicon, n_classes, n_frames, work);
+    esp_err_t err = ai_engine_command_ctc_prepare(lexicon, n_classes, frames_cap, work);
     if (err == ESP_OK) { err = ai_engine_command_ctc_frames(log_probs, n_frames, work); }
     if (err != ESP_OK) { return err; }
     return ai_engine_command_ctc_finish(lexicon, per_frames, reject, margin, work, scores, out);

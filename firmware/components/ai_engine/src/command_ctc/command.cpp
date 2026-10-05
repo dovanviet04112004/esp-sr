@@ -224,8 +224,8 @@ esp_err_t ai_engine_command_score(const ai_engine_lexicon_t *lexicon, ai_engine_
     if (s.streaming && ai_engine_command_ctc_prepared_for(lexicon, s.work)) {
         return ai_engine_command_ctc_finish(lexicon, s.per_frames, s.reject, s.margin, s.work, nullptr, out);
     }
-    return ai_engine_command_ctc_decide(s.log_probs, s.classes, frames, lexicon, s.per_frames, s.reject,
-                                        s.margin, s.work, nullptr, out);
+    return ai_engine_command_ctc_decide(s.log_probs, s.classes, frames, s.frames_max, lexicon, s.per_frames,
+                                        s.reject, s.margin, s.work, nullptr, out);
 }
 
 esp_err_t ai_engine_command_abort(void)
