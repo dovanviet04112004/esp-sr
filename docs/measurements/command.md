@@ -655,6 +655,17 @@ lặp liền) ở `val` 4, VIVOS 18, FPT 28, VLSP 111 trên 11 417; mẫu dài h
 Cửa sổ trên board kéo thêm sau bước `vad` cuối, model `20261004_acde692` (bề rộng 128, học cắt theo mẩu), Cửa 3 float,
 mở 2,0 s: thêm 0 / 8 / 16 / 25 bước được 86 / 87 / 87 / 83 trên 112; ở 25 bước "đóng cửa" từ 11 xuống 8.
 
+Phiên thật trên board B. Cửa 3 (172 cửa sổ): trước bước `vad` đầu, phân vị 5/25/50/75, 1,20 / 1,52 / 1,70 / 2,00 s, đủ
+2,0 s 29%; khoảng từ bước `vad` cuối của câu tới bước đầu câu sau 1,22 / 1,48 / 1,68 / 2,00 / 2,54 s (phân vị 5/25/50/75/95).
+Phiên học 04/10 (128 cửa sổ): 0,53 / 1,26 / 1,85 / 2,00 s, đủ 39%; khoảng 0,68 / 1,30 / 1,89 / 2,22 / 2,55 s.
+
+Pilot 20 phiên đầu mỗi file split, cắt trên `vad` tham chiếu. Quãng nghỉ giữa hai mẩu 0,4–2,0 s: phần trước câu ở BUD500
+trung vị 1,06 s, đủ 2,0 s 17%, 18% cửa sổ gộp mẩu. Quãng nghỉ 1,2–3,0 s: BUD500 trung vị 1,80 s, đủ 41% (Common Voice 79%,
+FPT 58%, VIVOS 79%, VLSP 56%, `val` 85%, `test` 88%); không cửa sổ gộp, không mẩu nào không chạm, không mẫu thiếu khung CTC;
+mọi phiên dựng lại khớp từng mẫu đã lưu. Tiếng sau điểm kết quá 15 bước: `test`, BUD500 0; `val`, Common Voice, VLSP 0,6%;
+FPT 1,9%; VIVOS 7,5%, cả 11 cửa sổ chỉ ở −26,5 … −30 dB dưới đỉnh, nền bản ghi của một người nói. Một mẩu FPT to đều cả
+mẩu có 0,65 s cuối `vad` không gọi là tiếng.
+
 ### 12.7 Độ trễ quyết định ước từ chi phí trên board
 
 172 cửa sổ của Cửa 3 (28/09), chi phí đo trên board B của mạng bề rộng 160 (81,4 ms mỗi khối 16 bước,
