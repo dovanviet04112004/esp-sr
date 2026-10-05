@@ -135,9 +135,10 @@ def _limit(
 
 class Agc:
     """Slow gain towards the target speech level, frozen without speech; then a limiter whose output lags by the
-    look-ahead and never passes limit_dbfs."""
+    look-ahead and never passes limit_dbfs. start_db, for the board simulation, is the gain it starts from with a
+    speech level to match, as a board that heard speech before; None starts as the firmware does."""
 
-    def __init__(self, cfg: AgcConfig | None = None) -> None:
+    def __init__(self, cfg: AgcConfig | None = None, start_db: float | None = None) -> None:
         cfg = cfg or AgcConfig()
         if not (cfg.target_dbfs <= 0 and cfg.gain_min_db <= cfg.gain_max_db and cfg.level_tau_s > 0) or not (
             cfg.level_gate_db > 0 and cfg.level_fall_db_per_s >= 0
@@ -160,6 +161,9 @@ class Agc:
         # Start the level at the target less the most gain, so quiet speech passes the gate at once.
         self.speech_power = self.target_power / (self.gain_max * self.gain_max)
         self.gain = f32(1.0)
+        if start_db is not None:
+            self.gain = db_to_amplitude(start_db)
+            self.speech_power = self.target_power / (self.gain * self.gain)
         n = self.lookahead + 1
         # One slot more than the window: a new value lands while the one it pushes out still sits there.
         self.need = np.zeros(n + 1, dtype=np.float32)

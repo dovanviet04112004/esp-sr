@@ -34,12 +34,11 @@ FLAG_CLIPPED = 1 << 1
 
 @dataclass(frozen=True)
 class ChainConfig:
-    """What app_boot gives dsp_afe_init: the modules built, calib/bal, and the afe/* settings.
-
-    balance_gains is calib/bal, one complex gain per bin on ch1, or None for a board never calibrated, which
-    runs without balance as the firmware does. spatial is dsp_afe_config_t.spatial: none for the plain mean, gsc for
-    the canceller steered by doa, broadside while doa has no angle.
-    """
+    """What app_boot gives dsp_afe_init: the modules built, calib/bal, and the afe/* settings. balance_gains is
+    calib/bal, one complex gain per bin on ch1, or None for a board never calibrated, which runs without balance as
+    the firmware does. spatial is dsp_afe_config_t.spatial: none for the plain mean, gsc for the canceller steered by
+    doa, broadside while doa has no angle. agc_start_db, for the board simulation only, is the gain the agc starts
+    from (KEHOACH 1.2); None starts as the firmware does."""
 
     modules: tuple[str, ...] = afe.MODULES
     balance_gains: np.ndarray | None = None
@@ -47,6 +46,7 @@ class ChainConfig:
     agc_target_dbfs: float = afe.AGC_TARGET_DBFS
     vad_aggressiveness: int = afe.VAD_AGGRESSIVENESS
     spatial: str = "none"
+    agc_start_db: float | None = None
 
 
 @dataclass(frozen=True)
@@ -123,7 +123,9 @@ class Chain:
             self._ns = ns_omlsa.Omlsa()
             self._ns.set_floor(self.cfg.ns_floor_db)
         self._vad = vad.Vad(self.cfg.vad_aggressiveness) if "vad" in on else None
-        self._agc = agc.Agc(agc.AgcConfig(target_dbfs=self.cfg.agc_target_dbfs)) if "agc" in on else None
+        self._agc = (
+            agc.Agc(agc.AgcConfig(target_dbfs=self.cfg.agc_target_dbfs), self.cfg.agc_start_db) if "agc" in on else None
+        )
 
     def reset(self) -> None:
         """Forget buffered samples and every module's state after a gap; the next frame carries FLAG_GAP and seq

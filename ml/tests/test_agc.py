@@ -113,3 +113,17 @@ def test_a_new_target_moves_the_settled_level() -> None:
 def test_a_bad_configuration_is_refused(change: dict) -> None:
     with pytest.raises(ValueError):
         agc.Agc(agc.AgcConfig(**change))
+
+
+def test_a_start_gain_holds_without_speech_and_moves_with_it() -> None:
+    quiet = np.full(grid.HOP_SAMPLES, 10.0 ** (-55.0 / 20.0), dtype=np.float32)
+    held = agc.Agc(start_db=24.0)
+    for _ in range(50):
+        _, gain_db = held.process(quiet, False)
+    assert abs(float(gain_db) - 24.0) < 1e-3
+    for _ in range(50):
+        _, gain_db = held.process(quiet, True)
+    assert float(gain_db) > 24.0
+    fresh = agc.Agc()
+    _, first_db = fresh.process(quiet, False)
+    assert float(first_db) == 0.0
