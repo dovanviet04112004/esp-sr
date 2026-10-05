@@ -790,18 +790,24 @@ thanh. Model khai đặc trưng nó đọc trong `meta.json` (§6.3).
 
 **`pitch`** là bộ dò cao độ của Kaldi (Ghahremani và cộng sự, 2014; `feat/pitch-functions.cc`) ở chế độ chạy dòng
 không trễ của chính Kaldi (`max_frames_latency` 0), giữ mọi hằng số mặc định: hạ về 4 kHz qua lọc sinc cắt 1 kHz; NCCF
-trên cửa sổ 25 ms ở mọi độ trễ nguyên, một bản có "ballast" theo năng lượng trung bình từ lúc bắt đầu (khung lặng ra
-gần 0) để dò, một bản không để đo độ hữu thanh; nội suy sinc lên 417 độ trễ cấp số nhân bước 0,5% từ 1/400 đến 1/50 s;
+trên cửa sổ 25 ms ở mọi độ trễ nguyên, một bản có "ballast" theo năng lượng trung bình của `ballast_window_s` (2,0 s)
+gần nhất (khung lặng ra gần 0) để dò, một bản không để đo độ hữu thanh; nội suy sinc lên 417 độ trễ cấp số nhân bước 0,5% từ 1/400 đến 1/50 s;
 Viterbi với giá cục bộ `1 − NCCF + 10·L·NCCF` và phạt nhảy `0,1·ln²(1,005)·Δ²`, mỗi bước ra ngay trạng thái rẻ nhất.
 Ra ba chiều như Kaldi: độ hữu thanh `2·((1,0001 − c)^0,15 − 1)`; log F0 trừ trung bình có trọng số xác suất hữu thanh,
 ×2; delta ±2 khung của log F0, ×10. Chỉ khác Kaldi ở chỗ chạy dòng buộc phải khác: bước khung là bước của lưới (16 ms
 thay 10 ms); trung bình và delta chỉ dùng khung đã có, đúng như Kaldi thấy ở khung mới nhất khi chạy dòng — trên đường
 Viterbi truy ngược từ trạng thái rẻ nhất của khung ấy, nên giữ con trỏ lùi của 48 khung gần nhất; không cộng nhiễu ngẫu
-nhiên vào delta, việc ấy thuộc tăng cường lúc học; và không tính lại 500 khung đầu khi ước lượng năng lượng đổi: bộ
-dò chạy liền từ lúc luồng bắt đầu, nên chỉ 8 s đầu sau khi bật chịu phần ấy. Min của Viterbi lấy bằng biến đổi khoảng cách thay phép dò có chặn
+nhiên vào delta, việc ấy thuộc tăng cường lúc học; không tính lại 500 khung đầu khi ước lượng năng lượng đổi: bộ dò
+chạy liền từ lúc luồng bắt đầu, nên chỉ 8 s đầu sau khi bật chịu phần ấy; và năng lượng của ballast lấy trên
+`ballast_window_s` gần nhất chứ không từ lúc bắt đầu. Bộ dò chạy liền hàng giờ trên board mà mỗi phiên học chỉ vài chục
+giây, nên năng lượng từ lúc bắt đầu là cả giờ phòng yên trên board và một phiên nhiều tiếng nói lúc học: Cửa 3 từ 86
+xuống 82/112 khi phiên có 300 s phòng yên chạy trước (`measurements/command.md` §12.8). 2,0 s bằng phần trước câu của
+cửa sổ `command`, nên ở một lệnh ballast gần như của Kaldi chạy từ đầu cửa sổ, và giống hệt nhau trên board và lúc học
+(chủ repo 05/10). Min của Viterbi lấy bằng biến đổi khoảng cách thay phép dò có chặn
 của Kaldi: cùng một min, thời gian tuyến tính theo số trạng thái. Trên bài của Kaldi, cao độ và độ hữu thanh ấy hạ WER
 tiếng Việt từ 71,3% xuống 65,6%, hơn getf0 và SAcC; bản chạy dòng được đo trên VIVOS test so với chính Kaldi, qua kalpy trong image Docker của bộ căn
-mốc (`ml/afe_ref/kaldi_pitch/run.py`, gọi từ `srpipe/metrics/pitch.py`): lượt đầu chạy dòng không trễ phải trùng, bản
+mốc (`ml/afe_ref/kaldi_pitch/run.py`, gọi từ `srpipe/metrics/pitch.py`): lượt đầu chạy dòng không trễ phải trùng trong
+`ballast_window_s` đầu của mỗi câu, bản
 đọc cả tệp là đích để đo; `compute_kaldi_pitch` của torchaudio không dùng được, lớp ma trận của nó làm hỏng Viterbi
 (`docs/measurements/pitch.md`). Mọi tham số nằm ở `contracts/listen.yaml`, như của `mel`. `svc_listen` chạy bộ dò mỗi
 bước trên tín hiệu sạch ở mọi trạng thái, liền như log-mel, chỉ đặt lại khi luồng đứt, và giữ ba chiều ra trong vòng
