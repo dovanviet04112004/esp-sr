@@ -35,6 +35,7 @@ LADDER = "command_ctc"
 GRAPH_FILE = "graph.native"
 # The image names a branch's entries after its backend (KEHOACH 6.3).
 BRANCH, ENTRY = "command", "command_ctc"
+CHIP_BITS = 8  # espdl_net views int8 tensors only (KEHOACH 6.3)
 
 
 def padded(x: np.ndarray, hops: int, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
@@ -287,9 +288,10 @@ def step_qat(cfg: dict, run: Path, device: str) -> Path:
 
 
 def step_deploy(cfg: dict, run: Path, row: str) -> tuple[Path, Path]:
-    """The graph of row as firmware/models/command/ holds it: the .espdl streamed chunk_hops at a time with a test
-    sentence's first chunk stored for model->test(), as probe.py streams it, and the train statistics as the NORM
-    entry; update_lock records both with the row's rungs and the listen hash, refused for a run of another one."""
+    """The graph of row as firmware/models/command/ holds it: the .espdl streamed the run's chunk_hops at a time with a
+    test sentence's first chunk stored for model->test(), as probe.py streams it, and the train statistics as the NORM
+    entry; update_lock records both with the row's rungs and the listen hash. Refused for a run of another listen
+    hash, and for a row whose input or output is not int8, which the chip would not run."""
     net = gate.load_ctc(run)
     learnt = net.cfg.get("listen_hash")
     if learnt != listen.HASH:
@@ -298,16 +300,18 @@ def step_deploy(cfg: dict, run: Path, row: str) -> tuple[Path, Path]:
             "and would leave its command off (KEHOACH 6.3)"
         )
     graph = export_espdl.load_native(run / "int8" / row / GRAPH_FILE)
+    if (bits := ptq_espdl.io_bits(graph)) != (CHIP_BITS, CHIP_BITS):
+        raise ValueError(f"row {row} reads {bits[0]} and gives {bits[1]} bits; the chip runs int8 at both ends")
     rungs = yaml.safe_load(ladder_file(run).read_text(encoding="utf-8"))["rows"][row]
-    x = test_sentence(cfg, net)
+    x, chunk = test_sentence(cfg, net), net.cfg["chunk_hops"]
     io = ptq_espdl.io_of(graph)
     on_grid = ptq_espdl.to_int8(x, io.input_exponent).astype(np.float32) * np.float32(2.0**io.input_exponent)
     with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
         built = export_espdl.export(
             graph,
             run / "int8" / row / "deploy" / f"{ENTRY}.espdl",
-            streaming_input_shape=[1, x.shape[1], cfg["chunk_hops"]],
-            test_input=on_grid[..., : cfg["chunk_hops"]],
+            streaming_input_shape=[1, x.shape[1], chunk],
+            test_input=on_grid[..., :chunk],
         )
     folder = update_lock.MODELS / BRANCH
     folder.mkdir(parents=True, exist_ok=True)

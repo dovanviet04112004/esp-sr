@@ -1,7 +1,7 @@
 """The ctc ladder: features padded and normalised as training reads them, calibration drawn only from sentences the
 graph holds and stacked for a batch, the Gate 3 row, the rows of every step kept in one file, the best calibration
 within the tie, a norm left unfused refused, rung 4 training a batch graph the graph of one then carries, and no deploy
-of a run cut by another listen.yaml."""
+of a run cut by another listen.yaml or of a row whose input or output is not int8."""
 
 from __future__ import annotations
 
@@ -176,4 +176,26 @@ def test_a_run_without_this_listen_hash_is_not_deployed(
 ) -> None:
     monkeypatch.setattr(gate, "load_ctc", lambda _run: SimpleNamespace(cfg=recorded))
     with pytest.raises(ValueError, match="would leave its command off"):
+        quant.step_deploy(load_yaml(ctc.CONFIG), tmp_path, "row")
+
+
+def test_the_ends_of_a_graph_are_int8_unless_a_layer_there_goes_int16(tmp_path: Path) -> None:
+    cfg = load_yaml(ctc.CONFIG)
+    torch.manual_seed(0)
+    model = probe.draw_norm_scales(encoder.build(cfg), *cfg["probe"]["norm_scale"]).eval()
+    rng = np.random.default_rng(7)
+    calib = [torch.from_numpy(rng.normal(size=(1, DIMS, 64)).astype(np.float32)) for _ in range(2)]
+    rungs = ptq_espdl.ladder(quant.LADDER) | {"equalization": None, "bias_correction": False, "calibration": "minmax"}
+    graph = quant.quantized(model, calib, tmp_path / "a", rungs, cfg["esp_ppq_patches"])
+    assert ptq_espdl.io_bits(graph) == (8, 8)
+    first = next(iter(graph.inputs.values())).dest_ops[0].name
+    wide = quant.quantized(model, calib, tmp_path / "b", rungs | {"int16_ops": [first]}, cfg["esp_ppq_patches"])
+    assert ptq_espdl.io_bits(wide) == (16, 8)
+
+
+def test_a_row_the_chip_cannot_read_or_give_is_not_deployed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gate, "load_ctc", lambda _run: SimpleNamespace(cfg={"listen_hash": listen.HASH}))
+    monkeypatch.setattr(quant.export_espdl, "load_native", lambda _path: "graph")
+    monkeypatch.setattr(quant.ptq_espdl, "io_bits", lambda _graph: (8, 16))
+    with pytest.raises(ValueError, match="int8 at both ends"):
         quant.step_deploy(load_yaml(ctc.CONFIG), tmp_path, "row")

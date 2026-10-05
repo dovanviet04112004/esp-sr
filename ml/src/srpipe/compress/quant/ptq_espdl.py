@@ -133,14 +133,25 @@ def exponent_of(config) -> int:
     return exponent
 
 
-def io_of(graph) -> Io:
-    """Input and output of a single-input, single-output graph, with the exponents their int8 carry."""
+def ends_of(graph) -> tuple[str, object, str, object]:
+    """The name and quantisation config of a single-input, single-output graph's input, then of its output."""
     ((in_name, var_in),) = graph.inputs.items()
     ((out_name, var_out),) = graph.outputs.items()
     consumer, producer = var_in.dest_ops[0], var_out.source_op
     in_config = consumer.input_quant_config[consumer.inputs.index(var_in)]
-    out_config = producer.output_quant_config[producer.outputs.index(var_out)]
+    return in_name, in_config, out_name, producer.output_quant_config[producer.outputs.index(var_out)]
+
+
+def io_of(graph) -> Io:
+    """Input and output of a single-input, single-output graph, with the exponents their int8 carry."""
+    in_name, in_config, out_name, out_config = ends_of(graph)
     return Io(in_name, exponent_of(in_config), out_name, exponent_of(out_config))
+
+
+def io_bits(graph) -> tuple[int, int]:
+    """Bits of a single-input, single-output graph's input and output: 16 where a layer at either end went int16."""
+    _, in_config, _, out_config = ends_of(graph)
+    return in_config.num_of_bits, out_config.num_of_bits
 
 
 def ports_of(graph) -> tuple[list[Port], list[Port]]:
