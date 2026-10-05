@@ -12,6 +12,7 @@ import yaml
 
 from srpipe.core import corpus, splits
 from srpipe.core.config import load_device
+from srpipe.scenes import device
 from srpipe.tasks.command.ctc import data
 
 COMMANDS = {"commands": [{"id": "bat_den", "text": "bật đèn"}, {"id": "chup_anh", "text": "chụp ảnh"}]}
@@ -60,9 +61,16 @@ def test_an_hours_cap_draws_a_corpus_down_and_leaves_the_others_whole() -> None:
 
 
 def built(
-    paths: dict, name: str, config: dict, speeds: list[float] | None = None, dtype: str = "float32", cut: str = "pads"
+    paths: dict,
+    name: str,
+    config: dict,
+    speeds: list[float] | None = None,
+    dtype: str = "float32",
+    cut: str = "pads",
+    cut_vad: str | None = device.LISTEN_CUT_VAD,
 ) -> None:
-    """A finished build of split file name under paths, as device.build's manifest records it."""
+    """A finished build of split file name under paths, as device.build's manifest records it; cut_vad None as a
+    listen cut recorded before the cut said which vad it ran on."""
     split = paths["splits"] / "command" / "v9" / f"{name}.txt"
     split.parent.mkdir(parents=True, exist_ok=True)
     split.write_text(f"speech/x/{name}.wav\tA\t-\tpublic\n", encoding="utf-8")
@@ -71,6 +79,7 @@ def built(
     body = {"config": config, "split": {"file": split.name, "sha256": splits.sha256_of(split)}}
     body |= ({"speeds": speeds} if speeds else {}) | ({"dtype": dtype} if dtype != "float32" else {})
     body |= {"cut": cut} if cut != "pads" else {}
+    body |= {"cut_vad": cut_vad} if cut == "listen" and cut_vad else {}
     (out / "manifest.yaml").write_text(yaml.safe_dump(body), encoding="utf-8")
 
 
@@ -97,9 +106,10 @@ def test_every_file_is_cut_as_simulate_cut_asks_and_another_cut_is_stale(tmp_pat
     device_cfg = load_device(cfg["features"])
     paths = {"splits": tmp_path / "splits", "processed": tmp_path / "processed"}
     built(paths, "train_x", device_cfg, cut="listen")
+    built(paths, "train_y", device_cfg, cut="listen", cut_vad=None)
     built(paths, "val", device_cfg, cut="listen")
     built(paths, "test", device_cfg)
-    assert [p.name for p in data.unbuilt(cfg, paths)] == ["test"]
+    assert [p.name for p in data.unbuilt(cfg, paths)] == ["test", "train_y"]
     for name in ("train_x.txt", "val.txt"):
         assert data.options_of(cfg, paths["splits"] / name)["cut"] == "listen"
 

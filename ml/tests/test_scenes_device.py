@@ -257,13 +257,13 @@ def test_pitch_rides_along_and_changes_no_other_file(raw_root: Path, tmp_path: P
     readers = {"raw": ItemReader(raw_root), "interim": ItemReader(interim)}
     pools = device.noise_files(cfg, raw_root, set())
     bank = device.room_bank(cfg, interim, 1)
-    captured, spans, draws = device.simulate_session(cfg, 0, rows, bank, mics, pools, readers, floor)
+    captured, spans, draws, talker = device.simulate_session(cfg, 0, rows, bank, mics, pools, readers, floor)
     chain = dataclasses.replace(ChainConfig(balance_gains=mics.gains), agc_start_db=draws.get("agc_start_db"))
-    clean, figures, _ = device.listen(captured, chain, Mel(MelConfig(**cfg["features"])))
+    clean, _, _ = device.listen(captured, chain, Mel(MelConfig(**cfg["features"])))
     heard, _ = pitch_features(to_float(clean), PitchConfig(**cfg["pitch"]))
     items = [json.loads(line) for line in Path(stem + ".items.jsonl").read_text().splitlines()]
     pads = (cfg["session"]["pad_s"],) * 2
-    for item, (first, stop, _, _) in zip(items, device.cut_items("pads", spans, pads, figures[:, 0]), strict=False):
+    for item, (first, stop, _, _) in zip(items, device.cut_items("pads", spans, pads, talker), strict=False):
         at, n = item["frame_offset"], item["n_frames"]
         assert n == stop - first and np.array_equal(pitch[at : at + n], heard[first:stop])
 
@@ -357,23 +357,53 @@ def test_a_window_longer_than_the_boards_is_never_cut_back() -> None:
     assert windows[0].start == at - LEAD and device.command_cut([long])[0][0] > at - LEAD
 
 
-def test_the_listen_cut_keeps_the_boards_windows_and_counts_the_unheard(raw_root: Path, tmp_path: Path) -> None:
+def session_zero(cfg: dict, split: Path, raw_root: Path, interim: Path) -> tuple:
+    """Session 0 of a build of split under cfg simulated again: capture, spans, draws and the talker's vad."""
+    rows = splits.read_split(split)[: cfg["session"]["items"]]
+    mics = device.load_microphones(cfg["microphone"])
+    floor = device.load_floor(cfg["microphone"]["floor"], raw_root, mics.pcm_shift)
+    readers = {"raw": ItemReader(raw_root), "interim": ItemReader(interim)}
+    pools = device.noise_files(cfg, raw_root, set())
+    return device.simulate_session(cfg, 0, rows, device.room_bank(cfg, interim, 1), mics, pools, readers, floor)
+
+
+def test_the_listen_cut_cuts_the_boards_windows_on_the_talkers_vad(raw_root: Path, tmp_path: Path) -> None:
     split = split_file(tmp_path / "train.txt", raw_root)
     interim = screened(tmp_path / "interim")
     manifest = device.build(tiny(), split, raw_root, interim, tmp_path / "cut", pitch=True, cut="listen")
     body = yaml.safe_load(manifest.read_text())
     items = items_of(tmp_path / "cut")
-    assert body["cut"] == "listen" and items
+    assert body["cut"] == "listen" and body["cut_vad"] == device.LISTEN_CUT_VAD and items
     assert sum(len(i.get("clips", [i["item"]])) for i in items) + body["unheard"] == body["items"] == 5
-    for shard in sorted((tmp_path / "cut").glob("*.items.jsonl")):
-        stem = str(shard).removesuffix(".items.jsonl")
-        figures, pitch = (np.load(f"{stem}.{kind}.npy") for kind in ("figures", "pitch"))
-        assert pitch.shape == (len(figures), 3)
-        for row in (json.loads(line) for line in shard.read_text().splitlines()):
-            at, n = row["frame_offset"], row["n_frames"]
-            first, stop = row["speech_frames"]
-            vad = figures[at : at + n, 0].astype(bool)
-            assert first <= LEAD and stop == n - 1 and vad[first] and vad[stop - 1] and not vad[stop]
+    _, spans, _, talker = session_zero(tiny(), split, raw_root, interim)
+    cut = device.cut_items("listen", spans, (0.0, 0.0), talker)
+    assert [(i["n_frames"], i["speech_frames"]) for i in items if i["session"] == 0] == [
+        (stop - first, speech) for first, stop, _, speech in cut
+    ]
+    for first, stop, _, (a, b) in cut:
+        assert a <= LEAD and b == stop - first - 1
+        assert talker[first + a] and talker[first + b - 1] and not talker[first + b]
+
+
+def test_the_talkers_vad_hears_every_clip_of_a_quiet_talker_the_chains_vad_misses(
+    raw_root: Path, tmp_path: Path
+) -> None:
+    split = split_file(tmp_path / "train.txt", raw_root)
+    interim = screened(tmp_path / "interim")
+    quiet = tiny(talker={**tiny()["talker"], "spl_1m_db": [20.0, 20.0]}, noise={**tiny()["noise"], "probability": 0.0})
+    captured, spans, draws, talker = session_zero(quiet, split, raw_root, interim)
+    mics = device.load_microphones(quiet["microphone"])
+    chain = dataclasses.replace(ChainConfig(balance_gains=mics.gains), agc_start_db=draws.get("agc_start_db"))
+    _, figures, _ = device.listen(captured, chain, Mel(MelConfig(**quiet["features"])))
+    lag = device.CHAIN_LAG_HOPS
+    clip_hops = [(a // grid.HOP_SAMPLES + lag, -(-b // grid.HOP_SAMPLES) + lag) for a, b in spans]
+    _, missed = device.listen_windows(clip_hops, figures[:, 0].astype(bool))
+    windows, unheard = device.listen_windows(clip_hops, talker)
+    assert missed and not unheard
+    for w in windows:
+        for k in w.clips:
+            on = np.flatnonzero(talker[clip_hops[k][0] : clip_hops[k][1]]) + clip_hops[k][0]
+            assert w.start <= on[0] and on[-1] < w.end
 
 
 def test_the_listen_cut_takes_no_pads(raw_root: Path, tmp_path: Path) -> None:

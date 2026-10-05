@@ -149,6 +149,7 @@ def built_as(out: Path, device_cfg: dict, split_file: Path, options: dict) -> bo
         body.get("speeds", []) == list(options["speeds"])
         and body.get("dtype", "float32") == options["dtype"]
         and body.get("cut", "pads") == options["cut"]
+        and body.get("cut_vad") == (device.LISTEN_CUT_VAD if options["cut"] == "listen" else None)
     )
     return body["config"] == device_cfg and same_split and same_options
 

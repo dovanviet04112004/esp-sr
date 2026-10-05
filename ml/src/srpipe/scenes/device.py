@@ -31,6 +31,7 @@ from srpipe.core.audio_io import ItemReader, ramped, read_wav, to_float, write_w
 from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_device
 from srpipe.dsp.afe import hpf
 from srpipe.dsp.afe.chain import PCM_FULL_SCALE, PCM_MAX, PCM_MIN, Chain, ChainConfig
+from srpipe.dsp.afe.vad import Vad
 from srpipe.dsp.spec.mel import Mel, MelConfig, hz_to_mel, mel_to_hz
 from srpipe.dsp.spec.pitch import N_FEATURES as N_PITCH
 from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
@@ -57,6 +58,7 @@ SPEED_DENOMINATOR = 100  # resampling ratios as small fractions: 1.1 is 10/11
 TALKER, NOISE = 0, 1
 CLEAN_ORIGINS = frozenset({"public", "synth"})
 CUTS = ("pads", "listen")  # clip plus pads, or the board's window (KEHOACH 1.2)
+LISTEN_CUT_VAD = "talker"  # the vad the listen cut runs on (KEHOACH 1.2)
 ROOT_OF = {"public": "raw", "synth": "interim"}  # where a split row's item lies, by origin (KEHOACH 4.4.1)
 FLOOR_KIND = "probe"  # no gate scores a probe: a floor never leaks a test
 FLOOR_BANDS_HZ = ((50, 300), (300, 1000), (1000, 2000), (2000, 4000), (4000, 8000))
@@ -358,6 +360,20 @@ def active_rms(x: np.ndarray, below_peak_db: float) -> float:
     return math.sqrt(float(np.mean(hops[room.active_hops(x, below_peak_db)] ** 2)))
 
 
+def talker_vad(talker: np.ndarray, dry: np.ndarray, below_peak_db: float) -> np.ndarray:
+    """The chain's vad per output hop on the talker alone at a microphone, brought to the agc's target over the dry
+    track's active hops: the vad of a board that hears every word, which the listen cut runs on (KEHOACH 1.2)."""
+    active = room.active_hops(dry, below_peak_db)
+    power = float(np.mean(talker[: len(active) * HOP].reshape(-1, HOP)[active] ** 2))
+    level = 10.0 ** (afe.AGC_TARGET_DBFS / 20.0) / math.sqrt(power)
+    hops = (talker[: len(talker) // HOP * HOP] * level).astype(np.float32).reshape(-1, HOP)
+    detector = Vad(afe.VAD_AGGRESSIVENESS)
+    heard = np.zeros(len(hops), dtype=bool)
+    for i, hop in enumerate(hops[: len(hops) - CHAIN_LAG_HOPS]):
+        heard[i + CHAIN_LAG_HOPS] = detector.process(hop).speech
+    return heard
+
+
 def noise_files(cfg: dict, raw_root: Path, rejected: set[str]) -> list[list[str]]:
     """Per pool, its files as names under raw/, sorted, without those screening rejected (KEHOACH 1.2)."""
     pools = cfg["noise"]["pools"]
@@ -409,11 +425,11 @@ def simulate_session(
     readers: dict[str, ItemReader],
     floor: Floor | None = None,
     speeds: tuple[float, ...] = (),
-) -> tuple[np.ndarray, list[tuple[int, int]], dict]:
-    """Session k: the interleaved int16 frames board B would capture, each utterance's [start, end) in samples, and
-    the session's draws; bank_room indexes the labels of rooms.yaml, readers read raw/ and interim/ by root name.
-    With speeds, each utterance is spoken at one drawn from them, and the draws list them as speeds; with
-    session.agc_start_drawn, the gain the agc starts the session from as agc_start_db (KEHOACH 1.2)."""
+) -> tuple[np.ndarray, list[tuple[int, int]], dict, np.ndarray]:
+    """Session k: the interleaved int16 frames board B would capture, each utterance's [start, end) in samples, the
+    session's draws, and talker_vad of its talker at ch0; bank_room indexes rooms.yaml's labels, readers read raw/ and
+    interim/ by root name. With speeds, each utterance is spoken at one drawn from them, listed in draws as speeds;
+    with session.agc_start_drawn, the gain the agc starts the session from as agc_start_db (KEHOACH 1.2)."""
     rng = np.random.default_rng([cfg["seed"], SESSION_STREAM, k])
     said_at = (
         [float(v) for v in np.random.default_rng([cfg["seed"], SPEED_STREAM, k]).choice(speeds, len(rows))]
@@ -446,7 +462,8 @@ def simulate_session(
     if s.get("agc_start_drawn"):
         start_db = np.random.default_rng([cfg["seed"], AGC_STREAM, k]).uniform(0.0, afe.AGC_GAIN_MAX_DB)
         draws |= {"agc_start_db": round(float(start_db), 3)}
-    return hear(air, mics, rng, floor), spans, draws | ({"speeds": said_at} if said_at else {})
+    heard = talker_vad(talker[0], dry, t["active_below_peak_db"])
+    return hear(air, mics, rng, floor), spans, draws | ({"speeds": said_at} if said_at else {}), heard
 
 
 def item_frames(span: tuple[int, int], pads_s: tuple[float, float], n_hops: int) -> tuple[int, int, int, int]:
@@ -459,11 +476,12 @@ def item_frames(span: tuple[int, int], pads_s: tuple[float, float], n_hops: int)
 
 
 def cut_items(
-    cut: str, spans: list[tuple[int, int]], pads_s: tuple[float, float], vad: np.ndarray
+    cut: str, spans: list[tuple[int, int]], pads_s: tuple[float, float], heard: np.ndarray
 ) -> list[tuple[int, int, list[int], list[int]]]:
     """Each item of a session as its output hops [first, stop), its clips by index and its speech's [first, stop)
-    hops within it: each clip with pads_s around it, or with cut listen the board's windows (KEHOACH 1.2)."""
-    n_hops = len(vad)
+    hops within it: each clip with pads_s around it, or with cut listen the board's windows on heard, the talker's
+    vad per output hop (KEHOACH 1.2)."""
+    n_hops = len(heard)
     if cut == "pads":
         out = []
         for k, span in enumerate(spans):
@@ -471,7 +489,7 @@ def cut_items(
             out.append((first, stop, [k], [speech_first, speech_stop]))
         return out
     clip_hops = [(span[0] // HOP + CHAIN_LAG_HOPS, -(-span[1] // HOP) + CHAIN_LAG_HOPS) for span in spans]
-    windows, _ = listen_windows(clip_hops, vad)
+    windows, _ = listen_windows(clip_hops, heard)
     return [
         (w.start, min(w.end + 1, n_hops), list(w.clips), [w.first_vad - w.start, w.last_vad + 1 - w.start])
         for w in windows
@@ -517,11 +535,11 @@ def _shard(job: tuple) -> list[Path]:
     readers = {name: ItemReader(root) for name, root in roots.items()}
     features, figures, pcm, pitches, items, offset = [], [], [], [], [], 0
     for k, rows in sessions:
-        captured, spans, draws = simulate_session(cfg, k, rows, bank, mics, pools, readers, floor, speeds)
+        captured, spans, draws, heard = simulate_session(cfg, k, rows, bank, mics, pools, readers, floor, speeds)
         clean, figs, feats = listen(captured, replace(chain_cfg, agc_start_db=draws.get("agc_start_db")), mel)
         heard_pitch = stream_pitch(tracker, clean) if tracker is not None else None
         said_at = draws.pop("speeds", [])
-        for first, stop, held, speech in cut_items(cut, spans, pads_s, figs[:, 0].astype(bool)):
+        for first, stop, held, speech in cut_items(cut, spans, pads_s, heard):
             features.append(feats[first:stop])
             figures.append(figs[first:stop])
             pcm.append(clean[first * HOP : stop * HOP])
@@ -606,6 +624,7 @@ def build(
         **({"speeds": list(speeds)} if speeds else {}),
         **({"dtype": dtype} if dtype != "float32" else {}),
         **({"cut": cut} if cut != "pads" else {}),
+        **({"cut_vad": LISTEN_CUT_VAD} if cut == "listen" else {}),
         "rooms_sha256": sha256_of(bank / "rooms.yaml"),
         **({"floor_sha256": floor_sha256} if floor_sha256 else {}),
     }
