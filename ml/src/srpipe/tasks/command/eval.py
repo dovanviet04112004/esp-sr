@@ -254,17 +254,19 @@ def rnnt_heard(net: Ctc, x: np.ndarray) -> Heard:
 
 
 def heard_rows(cfg: dict, rows: list[dict], paths: dict) -> Iterator[tuple]:
-    """Each board manifest row found on disk: the row, its clean samples, vad, log-mel and pitch per hop through the
-    product's chain, pitch from one tracker over the whole session as svc_listen runs it (KEHOACH 3.11)."""
+    """Each board manifest row: the row, its clean samples, vad, log-mel and pitch per hop through the product's
+    chain, pitch from one tracker over the whole session as svc_listen runs it (KEHOACH 3.11); a row whose recording
+    is not on disk is refused."""
     device_cfg = device_of(cfg)
     mics = device.load_microphones(device_cfg["microphone"])
     chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
     tracker = PitchTracker(PitchConfig(**device_cfg["pitch"]))
-    for r in rows:
-        folder = paths["raw"] / "device" / r["board"] / r["session"]
-        if folder.exists():
-            clean, vad, features = heard(folder, chain_cfg, mel)
-            yield r, clean, vad, features, device.stream_pitch(tracker, clean)
+    folders = [paths["raw"] / "device" / r["board"] / r["session"] for r in rows]
+    if missing := [f.name for f in folders if not f.is_dir()]:
+        raise FileNotFoundError(f"{', '.join(missing)}: in the board manifest, not under {paths['raw'] / 'device'}")
+    for r, folder in zip(rows, folders, strict=True):
+        clean, vad, features = heard(folder, chain_cfg, mel)
+        yield r, clean, vad, features, device.stream_pitch(tracker, clean)
 
 
 def heard_sessions(cfg: dict, spec: dict, paths: dict) -> Iterator[tuple]:

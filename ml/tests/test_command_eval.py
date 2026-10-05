@@ -34,6 +34,13 @@ def test_only_sessions_of_the_products_shift_and_a_scored_kind_count() -> None:
     assert not gate.counted(row | {"session": "s3"}, SPEC)
 
 
+def test_a_session_of_the_manifest_missing_on_disk_is_refused_not_skipped(tmp_path) -> None:
+    (tmp_path / "device" / "board_b" / "s1").mkdir(parents=True)
+    rows = [{"board": "board_b", "session": "s1"}, {"board": "board_b", "session": "s2"}]
+    with pytest.raises(FileNotFoundError, match="s2"):
+        next(gate.heard_rows({"features": "scenes/device.yaml"}, rows, {"raw": tmp_path}))
+
+
 def test_a_command_session_expects_its_command_only_when_the_net_learned_it() -> None:
     command_of = {tuple(corpus.sounds("bật đèn")): "bat_den"}
     assert gate.expected_of("cmd", "bật đèn", command_of) == "bat_den"

@@ -1,6 +1,7 @@
 """Command split: an unseen command leaves learning but stays in test, speakers keep one role, a corpus without
 speaker ids trains whole, and train is one file per corpus; features simulated otherwise than the config asks are
-named before any training reads them, and a board cut's units leave out the runs its config names noise."""
+named before any training reads them, a board session saying an unseen command is refused, and a board cut's units
+leave out the runs its config names noise."""
 
 from __future__ import annotations
 
@@ -136,3 +137,15 @@ def test_a_board_cut_of_another_listen_yaml_is_stale(tmp_path: Path) -> None:
         written = body | ({"listen_hash": listen_hash} if listen_hash else {})
         (tmp_path / "manifest.yaml").write_text(yaml.safe_dump(written), encoding="utf-8")
         assert data.board_built_as(tmp_path, device_cfg, rows, board) is fresh
+
+
+def test_a_board_session_given_to_train_that_says_an_unseen_command_is_refused(tmp_path: Path, monkeypatch) -> None:
+    board = {"manifest": "b.csv", "pcm_shift": 13, "train": ["s1", "s2"]}
+    monkeypatch.setattr(data, "load_yaml", lambda _path: {"unseen": ["chup_anh"], "eval": {"board": board}})
+    for prompt, refused in (("mở quạt", False), ("Chụp ảnh!", True)):
+        (tmp_path / "b.csv").write_text(f"session,pcm_shift,prompt\ns1,13,bật đèn\ns2,13,{prompt}\n", encoding="utf-8")
+        if refused:
+            with pytest.raises(ValueError, match="s2"):
+                data.board_rows({"manifests": tmp_path})
+        else:
+            assert [r["session"] for r in data.board_rows({"manifests": tmp_path})] == ["s1", "s2"]

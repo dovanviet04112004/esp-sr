@@ -154,8 +154,10 @@ def built_as(out: Path, device_cfg: dict, split_file: Path, options: dict) -> bo
 
 
 def board_rows(paths: dict) -> list[dict]:
-    """The manifest rows of the board sessions Gate 3's spec gives to train (KEHOACH 1.3)."""
-    spec = load_yaml(command.CONFIG)["eval"]["board"]
+    """The manifest rows of the board sessions Gate 3's spec gives to train (KEHOACH 1.3); a session at another
+    pcm_shift than the product's, or whose prompt says an unseen command, is refused."""
+    branch = load_yaml(command.CONFIG)
+    spec = branch["eval"]["board"]
     wanted = spec.get("train", [])
     with (paths["manifests"] / spec["manifest"]).open(encoding="utf-8") as f:
         rows = [r for r in csv.DictReader(f) if r["session"] in wanted]
@@ -163,6 +165,9 @@ def board_rows(paths: dict) -> list[dict]:
         raise ValueError(f"{', '.join(missing)}: not in {spec['manifest']}")
     if shifts := sorted({r["pcm_shift"] for r in rows} - {str(spec["pcm_shift"])}):
         raise ValueError(f"train sessions at pcm_shift {shifts}; the product keeps {spec['pcm_shift']}")
+    unseen = unseen_phrases(branch["unseen"], json.loads(command.COMMANDS.read_text(encoding="utf-8"))).values()
+    if heard := [r["session"] for r in rows if any(corpus.says(corpus.words(r["prompt"]), p) for p in unseen)]:
+        raise ValueError(f"{', '.join(heard)}: say a command no learning role may hear (unseen, KEHOACH 1.3)")
     return rows
 
 
