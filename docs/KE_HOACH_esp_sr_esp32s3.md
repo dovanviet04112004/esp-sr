@@ -171,18 +171,19 @@ của một file split thành đúng thứ bộ nhận dạng thấy trên máy:
    (`measurements/mic_array.md` §4), nên cấu hình chưa khai nền nào. Cuối cùng lượng tử `pcm_shift` (dịch phải rồi bão
    hoà, như `drv_audio`).
 3. Chạy `srpipe.dsp.afe.chain` và log-mel của `srpipe.dsp.spec`. Đây là bản soi gương khớp firmware từng bit
-   (§3.14), với đúng danh sách module sản phẩm. Ra `processed/<nhánh>/<tập>/`: đặc trưng, số của chuỗi (`vad`, mức,
-   gain) và PCM sạch của từng mẫu, cộng manifest sha256. Nhánh nào khai kiểu lưu cho tập học thì đặc trưng của `train`
+   (§3.14), với đúng danh sách module sản phẩm. Cao độ, ở nhánh khai nó, tính liền cả phiên bằng một bộ dò không đặt
+   lại, như `svc_listen` tính mỗi bước trên board (§3.11); mỗi mẫu lấy phần của nó. Ra `processed/<nhánh>/<tập>/`: đặc
+   trưng, số của chuỗi (`vad`, mức, gain) và PCM sạch của từng mẫu, cộng manifest sha256. Nhánh nào khai kiểu lưu cho tập học thì đặc trưng của `train`
    lưu theo kiểu ấy (float16 ở `command`, đúng kiểu bộ nạp giữ lúc học); `val` và `test` luôn float32.
 4. Cắt mẫu. `command` `ctc` và `rnnt` cắt **đúng như board cắt cửa sổ lệnh** (§5.4), bằng chính code Cửa 3 dùng: các
    đoạn `vad` của cả phiên thành câu theo `utterance` của `contracts/listen.yaml`; các mẩu nối với nhau qua một câu chung
    thành một nhóm; mỗi nhóm là một mẫu, mở `utterance.lead_s` trước bước `vad` đầu của nhóm, không lùi qua bước sau mẫu
    trước, kết ở bước ngay sau bước `vad` cuối của nhóm; nhãn là lời các mẩu của nhóm theo thứ tự. Không cắt lùi theo
-   `window_s`, vì câu của kho dài hơn lệnh và nhãn cần cả câu. Bộ dò cao độ đặt lại ở đầu mẫu và mạng học từ bộ đệm
-   rỗng ở đó, như `svc_listen` đặt lại ở đầu cửa sổ. Mẩu không bước `vad` nào chạm tới bị bỏ: board không bao giờ chấm
-   nó; manifest đếm số ấy. Mẫu học vì thế có đúng phần trước câu, điểm đặt lại bộ dò và điểm kết như cửa sổ trên board;
-   cắt theo mẩu cộng khoảng chừa cố định thì phần trước câu dài 0–1,5 s (trung vị 0,86 s) trong khi board luôn mở
-   1,25 s, và âm tiết đầu của lệnh phụ thuộc mạnh vào phần ấy (`measurements/command.md` §12). `wake` và `kws` cắt theo
+   `window_s`, vì câu của kho dài hơn lệnh và nhãn cần cả câu. Mạng học từ bộ đệm rỗng ở đầu mẫu, như `svc_listen`
+   bắt đầu mạng ở đầu cửa sổ. Mẩu không bước `vad` nào chạm tới bị bỏ: board không bao giờ chấm nó; manifest đếm số
+   ấy. Mẫu học vì thế có đúng phần trước câu, cao độ và điểm kết như cửa sổ trên board; cắt theo mẩu cộng khoảng chừa
+   cố định thì phần trước câu dài 0–1,5 s (trung vị 0,86 s) trong khi board luôn mở `utterance.lead_s`, và âm tiết đầu
+   của lệnh phụ thuộc mạnh vào phần ấy (`measurements/command.md` §12). `wake` và `kws` cắt theo
    mẩu cộng `session.pad_s` hai bên, hay khoảng chừa nhánh khai.
 
 Phần thuần của đặc trưng lúc học vì thế trùng đặc trưng trên board, và với `command` cả cách cắt cửa sổ. Phần còn
@@ -790,13 +791,17 @@ Ra ba chiều như Kaldi: độ hữu thanh `2·((1,0001 − c)^0,15 − 1)`; lo
 ×2; delta ±2 khung của log F0, ×10. Chỉ khác Kaldi ở chỗ chạy dòng buộc phải khác: bước khung là bước của lưới (16 ms
 thay 10 ms); trung bình và delta chỉ dùng khung đã có, đúng như Kaldi thấy ở khung mới nhất khi chạy dòng — trên đường
 Viterbi truy ngược từ trạng thái rẻ nhất của khung ấy, nên giữ con trỏ lùi của 48 khung gần nhất; không cộng nhiễu ngẫu
-nhiên vào delta, việc ấy thuộc tăng cường lúc học; và không tính lại 500 khung đầu khi ước lượng năng lượng đổi, vì
-cửa sổ lệnh đặt lại bộ dò từ lâu trước khung 500. Min của Viterbi lấy bằng biến đổi khoảng cách thay phép dò có chặn
+nhiên vào delta, việc ấy thuộc tăng cường lúc học; và không tính lại 500 khung đầu khi ước lượng năng lượng đổi: bộ
+dò chạy liền từ lúc luồng bắt đầu, nên chỉ 8 s đầu sau khi bật chịu phần ấy. Min của Viterbi lấy bằng biến đổi khoảng cách thay phép dò có chặn
 của Kaldi: cùng một min, thời gian tuyến tính theo số trạng thái. Trên bài của Kaldi, cao độ và độ hữu thanh ấy hạ WER
 tiếng Việt từ 71,3% xuống 65,6%, hơn getf0 và SAcC; bản chạy dòng được đo trên VIVOS test so với chính Kaldi, qua kalpy trong image Docker của bộ căn
 mốc (`ml/afe_ref/kaldi_pitch/run.py`, gọi từ `srpipe/metrics/pitch.py`): lượt đầu chạy dòng không trễ phải trùng, bản
 đọc cả tệp là đích để đo; `compute_kaldi_pitch` của torchaudio không dùng được, lớp ma trận của nó làm hỏng Viterbi
-(`docs/measurements/pitch.md`). Mọi tham số nằm ở `contracts/listen.yaml`, như của `mel`.
+(`docs/measurements/pitch.md`). Mọi tham số nằm ở `contracts/listen.yaml`, như của `mel`. `svc_listen` chạy bộ dò mỗi
+bước trên tín hiệu sạch ở mọi trạng thái, liền như log-mel, chỉ đặt lại khi luồng đứt, và giữ ba chiều ra trong vòng
+đệm cùng log-mel: cửa sổ `command` đọc cao độ đã có thay vì tính lại từ đầu cửa sổ, nên mở cửa sổ sớm không làm chậm
+quyết định (§5.4), và nhánh khác như `wake` đọc được khi cần (chủ repo 05/10). Giá: 1,98 ms mỗi bước ở nhân 0,
+khoảng 12% (§5.6).
 
 **`wake`** — TCN tích chập giãn nở nhân quả, kernel 3, giãn 1, 2, 4, …, 32 một lượt: trường nhìn 127 khung ≈ 2 s;
 64 kênh, vì cùng việc phụ CTC dưới đây nó cho giọng thật cao nhất (`docs/measurements/wake.md` §5). Int8, chạy dòng
@@ -1099,7 +1104,7 @@ sách. Cỡ, cửa sổ và lịch học ở `configs/models/command_kws.yaml`.
 | Từ chối | lớp thắng là `other` hay `silence`; hoặc xác suất lớp thắng dưới ngưỡng; hoặc hơn lớp nhì quá ít. Hai ngưỡng ở NVS `kws/cmd_reject` và `kws/cmd_margin` (‰, §6.2), gieo từ Kconfig của `svc_listen`, chọn trên `val` |
 | Chạy | `_step` chỉ chép khung vào vòng đệm 94 bước; `_score` chạy mạng một lần rồi hậu xử lý thuần (softmax, luật từ chối), có bộ vàng ở `contracts/golden/command_kws/`. Ở `LENH` nhân 0 gần như rảnh, trừ một lần chạy mạng lúc hết câu |
 | Đổi lệnh | bộ lệnh cố định lúc học: khi chạy `kws`, `down/commands` bị từ chối bằng một mã lỗi mà `host` đổi thành câu (CLAUDE.md §3.1); lệnh chưa học không bao giờ được nhận |
-| Cao độ | **học luôn log-mel 80 cộng ba chiều cao độ** của `dsp_spec/pitch` theo thứ tự POV, log F0 chuẩn hoá, delta: 83 chiều mỗi bước (chủ repo, 30/09: không học hai lượt), vì từ chối cụm gần âm chỉ khác thanh là việc khó nhất. Bộ dò đặt lại khi vào `LENH`, nên lúc cửa sổ bắt đầu nó đã chạy ít nhất khoảng lặng trước lệnh; lúc học, mô phỏng đặt lại ở đầu mẩu và chừa trước lệnh ít nhất 0,75 s, đúng quãng trung bình log F0 nhìn lại |
+| Cao độ | **học luôn log-mel 80 cộng ba chiều cao độ** của `dsp_spec/pitch` theo thứ tự POV, log F0 chuẩn hoá, delta: 83 chiều mỗi bước (chủ repo, 30/09: không học hai lượt), vì từ chối cụm gần âm chỉ khác thanh là việc khó nhất. Bộ dò chạy liền trên board (§3.11), và lúc học mô phỏng cũng tính cao độ liền cả phiên (§1.2) |
 
 **Tiếng tổng hợp của lệnh** (E11-T7, `tasks/command/synth.py`, mục `synth` của `configs/models/command.yaml`) đi đúng
 đường của `wake` (§3.11): cùng hai bộ TTS, cùng bộ nghe kiểm PhoWhisper, bốn bước `pilot`, `positives`, `negatives`,
@@ -2251,7 +2256,7 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 |---|---|---|---|---|---|---|
 | `thu_task` | `svc_front` | 1 | 17 | 3 KB | chặn trong `drv_audio_read_frame` tới khi DMA đủ một khung | lấy khung `ch0 ch1 [ref]`, gắn `seq`, đẩy chỉ số ô vào `q_frame`; đếm tràn DMA. **Không làm gì khác** |
 | `sach_task` | `svc_front` | 1 | 16 | 6 KB | `q_frame` | `dsp_afe_feed` rồi `fetch`; khung sạch vào `q_clean`; ghi `s_afe_stats`; luồng mở thì chép khung vào `sb_stream` không chờ |
-| `nhan_task` | `svc_listen` | 0 | 10 | 8 KB | `q_clean`, `q_cmdset` | log-mel → `wake` mỗi khung; ở trạng thái `LENH` thì chạy cửa sổ `command` theo luồng thay `wake`; câu chốt → chấm → `q_dialog`; ảnh không có `wake` thì mở cửa sổ cho mọi câu `vad` tìm ra, cắt như Cửa 3 (§5.4), sự kiện → `q_event_up`; giữa hai câu nhận bộ lệnh mới từ `q_cmdset`, đổi bảng lệnh, đưa cho `ai_engine_command_prepare`, ghi `set.json` (§5.3, §6.4) |
+| `nhan_task` | `svc_listen` | 0 | 10 | 8 KB | `q_clean`, `q_cmdset` | log-mel và cao độ mỗi bước → `wake` mỗi khung; ở trạng thái `LENH` thì chạy cửa sổ `command` theo luồng thay `wake`; câu chốt → chấm → `q_dialog`; ảnh không có `wake` thì mở cửa sổ cho mọi câu `vad` tìm ra, cắt như Cửa 3 (§5.4), sự kiện → `q_event_up`; giữa hai câu nhận bộ lệnh mới từ `q_cmdset`, đổi bảng lệnh, đưa cho `ai_engine_command_prepare`, ghi `set.json` (§5.3, §6.4) |
 | `dieu_task` | `svc_dialog` | 0 | 8 | 4 KB | `q_dialog`, `q_cmd` | máy trạng thái §5.4; ra `q_speak`, `q_event_up`; báo `nhan_task` đổi chế độ |
 | `noi_task` | `svc_speak` | 0 | 5 | 8 KB | `q_speak` | dựng trọn câu vào PSRAM rồi đẩy xuống TX; giương `SPEAKING` suốt lúc phát |
 | `gui_task` | `svc_report` | 0 | 4 | 4 KB | nhịp 100 ms | lấy mẫu `s_afe_stats`, gộp 10 mẫu thành một `telemetry` mỗi giây; phát `q_event_up`; `heartbeat` mỗi 30 s |
@@ -2315,7 +2320,7 @@ nguyên tử và gọi hàm `*FromISR`. Không log, không `malloc`, không floa
 | Trạng thái | Nhân 1 | `nhan_task` | `noi_task` | Ghi chú |
 |---|---|---|---|---|
 | `NGHE` | `thu` + `sach` | `wake` mỗi khung | nghỉ | tải thường trực |
-| `LENH` | `thu` + `sach` | cửa sổ `command` theo luồng, **`wake` dừng** | nghỉ | `ctc`, `rnnt`: cao độ mỗi bước, mạng và phép chấm mỗi khối 16 bước, tối đa `window_s`; `kws`: chép khung, một lần chạy mạng lúc câu chốt (§3.12) |
+| `LENH` | `thu` + `sach` | cửa sổ `command` theo luồng, **`wake` dừng** | nghỉ | `ctc`, `rnnt`: mạng và phép chấm mỗi khối 16 bước trên log-mel và cao độ đã có, tối đa `window_s`; `kws`: chép khung, một lần chạy mạng lúc câu chốt (§3.12) |
 | `DAP` | `thu` + `sach`; `aec` tiếp tục học | nghỉ | dựng rồi phát | nói chen khi máy đang nói nằm ngoài phạm vi (§9) |
 
 Trong code và payload, ba trạng thái mang tên tiếng Anh theo CLAUDE.md §3.1: `NGHE` = `LISTEN`,
@@ -2328,27 +2333,28 @@ giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec`
 
 - câu là các đoạn `vad` cách nhau không quá `utterance.gap_s`, chốt ở bước `vad` đã tắt lâu hơn thế; câu ngắn hơn
   `utterance.min_s` bị bỏ, không chấm;
-- cửa sổ mở `utterance.lead_s` trước bước `vad` đầu của câu, không lùi qua **mốc chặn**: bước sau cửa sổ trước, hay
-  trong `LENH` bước sau quyết định của `wake`; nó kết ở bước ngay sau đoạn `vad` cuối của câu. Mẫu học của `command`
-  cắt cùng luật (§1.2), nên mạng thấy trước câu đúng như lúc học; mở 0,5 s trước câu thì Cửa 3 sau int8 mất 5 câu lệnh
-  đúng đứng đầu (`measurements/command.md` §5);
-- **cửa sổ chạy theo luồng**: ngay từ bước `vad` đầu của câu, `svc_listen` chạy cao độ và `ai_engine_command_step` cho
-  từng bước của cửa sổ đã có, đuổi kịp phần trước câu rồi đi cùng các khung mới; mạng chạy mỗi khối và phép chấm đi tiếp
-  trên khung mới, theo bộ lệnh `ai_engine_command_prepare` đã nhận. Cuối cửa sổ chỉ dời về sau, nên một bước đã qua mà
-  câu còn mở chắc chắn thuộc cửa sổ; lúc câu chốt chỉ còn khối dở cuối và phần kết của phép chấm. Trên board B quyết định
-  ra sau bước chốt 47,7 ms trung vị, 49,4 ms p95 qua 198 cửa sổ Cửa 3, gần hết là khối dở cuối của mạng
-  (`measurements/latency.md` §16), không phải sau cả cửa sổ: cao độ cộng mạng một cửa sổ tốn 0,72–0,88 s trung bình;
-- phần đuổi kịp là việc nặng nhất: 78 bước trước câu, mỗi bước khoảng 7 ms trên firmware thật, chỉ nhanh hơn thời gian
-  thực hơn hai lần. Nên nó bắt đầu từ bước `vad` đầu, không đợi câu đủ `utterance.min_s` (câu bị bỏ thì công ấy bỏ đi và cửa sổ của
-  `ai_engine` đóng bằng `ai_engine_command_abort`, để bộ lệnh mới vẫn vào được giữa hai câu), và
-  khi `q_clean` không có khung chờ, `nhan_task` chạy liền các bước của cửa sổ tới khi có khung mới, chỉ chờ một tick giữa
-  hai đợt để các task thấp hơn ở nhân 0 chạy. Chạy mỗi lần một bước và đợi đủ `utterance.min_s` thì từ ngắn chưa đuổi kịp
-  khi câu chốt: quyết định ra 220–320 ms sau bước chốt trên board B, lệnh dài hơn thì 63–73 ms (`measurements/latency.md`
-  §17);
+- cửa sổ mở `utterance.lead_s` 2,0 s trước bước `vad` đầu của câu, không lùi qua **mốc chặn**: bước sau cửa sổ trước,
+  hay trong `LENH` bước sau quyết định của `wake`; nó kết ở bước ngay sau đoạn `vad` cuối của câu. Mạng bắt đầu cửa sổ
+  từ bộ đệm rỗng, và âm tiết đầu của lệnh chỉ được nghe tốt khi mạng đã chạy chừng 2 s trước nó: mạng bề rộng 160 mở
+  2,0 s thay 1,25 s thì Cửa 3 float 89 → 98/112, mở 3 hay 4 s không hơn (`measurements/command.md` §12). Mẫu học của
+  `command` cắt cùng luật (§1.2), nên mạng thấy trước câu đúng như lúc học;
+- **cửa sổ chạy theo luồng**: ngay từ bước `vad` đầu của câu, `svc_listen` đưa log-mel và cao độ đã có của từng bước
+  của cửa sổ vào `ai_engine_command_step`, đuổi kịp phần trước câu rồi đi cùng các khung mới; mạng chạy mỗi khối và
+  phép chấm đi tiếp trên khung mới, theo bộ lệnh `ai_engine_command_prepare` đã nhận. Cuối cửa sổ chỉ dời về sau, nên
+  một bước đã qua mà câu còn mở chắc chắn thuộc cửa sổ; lúc câu chốt chỉ còn khối dở cuối và phần kết của phép chấm.
+  Với mạng bề rộng 160 và cửa sổ mở 2,0 s, quyết định ra sau bước chốt khoảng 61 ms trung vị, 96 ms p90 🔬, ước trên các
+  cửa sổ của Cửa 3 từ chi phí đo trên board B (`measurements/latency.md` §18);
+- phần đuổi kịp là việc nặng nhất: 125 bước trước câu, mỗi bước chỉ còn phần mạng, 5,1 ms với bề rộng 160
+  (`measurements/latency.md` §18), vì cao độ đã tính lúc các bước ấy tới; tính cao độ theo cửa sổ thì mỗi bước thêm
+  1,98 ms và lệnh ngắn chậm tới khoảng 330 ms 🔬. Phần ấy bắt đầu từ bước `vad` đầu, không đợi câu đủ `utterance.min_s`
+  (câu bị bỏ thì công ấy bỏ đi và cửa sổ của `ai_engine` đóng bằng `ai_engine_command_abort`, để bộ lệnh mới vẫn vào được
+  giữa hai câu), và khi `q_clean` không có khung chờ, `nhan_task` chạy liền các bước của cửa sổ tới khi có khung mới, chỉ
+  chờ một tick giữa hai đợt để các task thấp hơn ở nhân 0 chạy. Chạy mỗi lần một bước và đợi đủ `utterance.min_s` thì từ
+  ngắn chưa đuổi kịp khi câu chốt (`measurements/latency.md` §17);
 - cửa sổ dài quá `window_s` thì thôi chạy theo luồng: lúc câu chốt nó lùi từ bước cuối tối đa `window_s`, không qua mốc
-  chặn, rồi chạy cả cửa sổ, quyết định chậm 0,97–0,99 s; Cửa 3 có 2 trên 198 câu như thế;
-- `svc_listen` tính log-mel mỗi bước và giữ log-mel cùng mẫu sạch của các bước gần nhất ở PSRAM; bộ dò cao độ đặt lại ở
-  đầu cửa sổ, mạng bắt đầu từ bộ đệm rỗng như lúc học;
+  chặn, rồi chạy cả cửa sổ, quyết định chậm cỡ thời gian mạng chạy hết cửa sổ, khoảng 1,2 s 🔬;
+- `svc_listen` tính log-mel và cao độ mỗi bước ở mọi trạng thái và giữ chúng cùng mẫu sạch của các bước gần nhất ở
+  PSRAM; bộ dò chỉ đặt lại khi luồng đứt; mạng bắt đầu từ bộ đệm rỗng ở đầu cửa sổ như lúc học;
 - mỗi quyết định là một sự kiện vào `q_event_up`: `COMMAND` kèm điểm và khoảng cách nhất–nhì, hay `REJECT` kèm mã:
   `LOW_SCORE` khi lệnh tốt nhất kém vòng tự do quá `δ₁`, `LOW_MARGIN` khi hơn lệnh nhì chưa đủ `δ₂`, `PART` khi một phần
   của lệnh được điểm bằng hay hơn cả lệnh; kèm một dòng log có bước đầu, bước cuối của cửa sổ và thời gian từ bước chốt
@@ -2395,16 +2401,16 @@ trung bình ≤ 70%. Mọi ô là ước 🔬 lấy từ §3.3; `docs/measuremen
 |---|---|---|---|
 | `thu` | 50 | Wi-Fi + lwIP | 5–15% 🔬 |
 | `hpf` hai kênh | 20 | `wake`, trạng thái `NGHE` | ~22% |
-| `aec` hai micro | 1 300 | `command`, trạng thái `LENH` | 34–56% (thay `wake`) |
+| `aec` hai micro | 1 300 | mạng `command`, trạng thái `LENH` (bề rộng 160 đo, `latency.md` §18) | ~32% (thay `wake`) |
 | `stft` hai kênh | 314 | `synth`, trạng thái `DAP` | < 100% trong thời gian dựng |
 | `balance` | 10 | `gui` + `mqtt` + `luong` | 2–5% |
-| `doa` (dò mỗi hai khung khi có tiếng; đo) | 641 | | |
+| `doa` (dò mỗi hai khung khi có tiếng; đo) | 641 | log-mel và cao độ mỗi bước, mọi trạng thái (đo) | ~14% |
 | `bss` (nặng hơn `gsc`) | 400 | | |
 | `ns` mạng thay sàn trong khe: RNNoise-16k 4 809, NSNet-16k L 5 054, đo trên board B (§3.9, ADR-0014) | 4 809–5 054 | | |
 | `istft` | 196 | | |
 | `vad` + `agc` | 80 | | |
 | chép vào `sb_stream` | 20 | | |
-| **Cộng, trường hợp nặng nhất** | **~8 100 µs ≈ 51%** | **Cộng, `LENH`** | **~45–75%** |
+| **Cộng, trường hợp nặng nhất** | **~8 100 µs ≈ 51%** | **Cộng, `LENH`** | **~53–66%** |
 
 Với NSNet-16k L, nhân 1 nhỉnh hơn mục tiêu trung bình 50% ở trường hợp nặng nhất, trong đó `aec` và `bss` còn là ước: E9-T7 đo, vượt thì `ns` lùi về NSNet-16k M hay S, học cùng lượt. Nhân 0 chật ở trạng thái `LENH`. Nếu số đo xác nhận điều đó thì thứ tự cắt là:
 giảm tần suất `doa` và `telemetry` trong `LENH`, rồi thu nhỏ mạng `command` — không chuyển việc sang
