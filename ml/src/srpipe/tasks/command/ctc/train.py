@@ -167,7 +167,9 @@ def shards_of(folders: list[Path], units_of: dict[str, list[int]], longest: int)
             starts = np.cumsum([0] + [len(u) for u in units])
             flat = np.concatenate(units) if units else np.zeros(0, dtype=np.uint8)
             stem = str(folder / name).removesuffix(".items.jsonl")
-            out.append(Shard(stem, n_hops, np.array(first, dtype=np.int64), np.array(hops), flat, starts))
+            out.append(
+                Shard(stem, n_hops, np.array(first, dtype=np.int64), np.array(hops, dtype=np.int64), flat, starts)
+            )
     if not any(len(s.first) for s in out):
         raise ValueError(f"no sentence of {[f.name for f in folders]} has units within {longest} hops")
     return out

@@ -91,6 +91,15 @@ def test_a_pool_within_its_capacity_holds_train_whole_as_load_role_does(tmp_path
     np.testing.assert_allclose(std, whole.features.astype(np.float64).std(axis=0), rtol=1e-4)
 
 
+def test_a_shard_that_keeps_no_sentence_leaves_the_ring_on_whole_hops(tmp_path: Path) -> None:
+    folder = sharded(tmp_path / "t", [[40, 30], [90], [20]], np.random.default_rng(10))
+    pool = pool_of([folder], {"s0": [1], "s1": [2], "s2": [4], "s3": [3]})
+    data = pool.at(1)
+    assert len(pool.shards[1].first) == 0 and pool.shards[1].hops.dtype == data.hops.dtype == np.int64
+    _, hops, units = train.batch_of(data, np.arange(len(data.first)), 8)
+    assert hops.tolist() == [40, 30, 20] and [u.tolist() for u in units] == [[2], [3], [4]]
+
+
 def test_a_ring_smaller_than_train_goes_round_every_shard_and_is_the_same_rebuilt(tmp_path: Path) -> None:
     rng = np.random.default_rng(7)
     folder = sharded(tmp_path / "t", [[int(n) for n in rng.integers(10, 40, 3)] for _ in range(7)], rng)
