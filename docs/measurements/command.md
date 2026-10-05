@@ -712,4 +712,6 @@ Chạy liền, `agc` vào mỗi phiên lệnh với độ lợi phiên trước 
 phiên của cùng người nói cắt câu dài hơn 10–15 bước, và ở 12/30 phiên lệnh bắt thêm 1–3 đoạn ngắn 17–36 bước giữa hai
 câu (hơi thở, tiếng động) hay tách một câu làm hai: 18 cửa sổ thừa, Cửa 3 cũ tính chúng là câu lệnh. Từ đây Cửa 3 chạy
 liền, và trong phiên lệnh cửa sổ không chồng câu nào chuỗi tìm thấy khi chạy riêng phiên ấy từ đầu là cửa sổ thừa, phải
-bị từ chối như tiếng động.
+bị từ chối như tiếng động (`32d8a89`). Với nhãn ấy, cùng model: câu lệnh đúng 85/112, như chuỗi mới mỗi phiên; cả 18
+cửa sổ thừa có lệnh điểm cao nhất là "mở cửa", điểm 684–819‰, hơn lệnh nhì 12–36‰, cách vòng tự do 175–379‰, nên
+`δ₂` 50 từ chối hết ở mọi `δ₁`.
