@@ -22,11 +22,12 @@ import yaml
 from torch.nn import functional
 
 from srpipe.core import screen, splits
-from srpipe.core.config import apply_overrides, contract_front, data_paths, load_run_config, load_yaml
+from srpipe.core.config import apply_overrides, contract_front, data_paths, front_of, load_run_config, load_yaml
 from srpipe.core.logger import row_line
 from srpipe.core.run_dir import create_run_dir
 from srpipe.core.seed import seed_everything
 from srpipe.dsp.spec import pitch
+from srpipe.dsp.spec.mel import hz_to_mel, mel_to_hz
 from srpipe.generated import grid, listen
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command.ctc import data as built
@@ -62,12 +63,14 @@ class Units:
 
 @dataclass
 class Sentences:
-    """Sentences of one role end to end: features (hops, dims), and per sentence its first hop, hops and units."""
+    """Sentences of one role end to end: features (hops, dims), and per sentence its first hop, hops, units and the
+    hops its window holds ahead of its first speech hop."""
 
     features: np.ndarray
     first: np.ndarray
     hops: np.ndarray
     units: list[np.ndarray] | Units  # lang_vi unit ids, shifted past the CTC blank
+    leads: np.ndarray | None = None
 
 
 def item_units(item: dict, units_of: dict[str, list[int]]) -> list[int] | None:
@@ -84,7 +87,7 @@ def item_units(item: dict, units_of: dict[str, list[int]]) -> list[int] | None:
 
 def load_role(folders: list[Path], units_of: dict[str, list[int]], longest: int, dtype: str) -> Sentences:
     """Every sentence of the finished builds in folders that has lang_vi units and at most longest hops."""
-    features, first, hops, units, offset = [], [], [], [], 0
+    features, first, hops, units, leads, offset = [], [], [], [], [], 0
     for folder in folders:
         built = yaml.safe_load((folder / "manifest.yaml").read_text(encoding="utf-8"))
         if not built.get("pitch"):
@@ -100,10 +103,16 @@ def load_role(folders: list[Path], units_of: dict[str, list[int]], longest: int,
                     first.append(offset + item["frame_offset"])
                     hops.append(item["n_frames"])
                     units.append(np.asarray(said, dtype=np.int64) + 1)
+                    leads.append(lead_of(item))
             offset += len(mel)
     if not first:
         raise ValueError(f"no sentence of {[f.name for f in folders]} has units within {longest} hops")
-    return Sentences(np.concatenate(features), np.array(first), np.array(hops), units)
+    return Sentences(np.concatenate(features), np.array(first), np.array(hops), units, np.array(leads))
+
+
+def lead_of(item: dict) -> int:
+    """Hops an item's window holds ahead of its first speech hop; none recorded, none."""
+    return int(item.get("speech_frames", [0])[0])
 
 
 def feature_sums(features: np.ndarray, block: int = 1 << 20) -> tuple[np.ndarray, np.ndarray]:
@@ -137,6 +146,7 @@ class Shard:
     hops: np.ndarray
     units: np.ndarray
     unit_starts: np.ndarray
+    leads: np.ndarray
 
     def features(self) -> np.ndarray:
         """Its log-mel and pitch side by side (hops, dims), as stored."""
@@ -155,7 +165,7 @@ def shards_of(folders: list[Path], units_of: dict[str, list[int]], longest: int)
         if not built.get("pitch"):
             raise ValueError(f"{folder} was simulated without pitch")
         for name in sorted(n for n in built["sha256"] if n.endswith(".items.jsonl")):
-            first, hops, units, n_hops = [], [], [], 0
+            first, hops, units, leads, n_hops = [], [], [], [], 0
             for line in (folder / name).read_text(encoding="utf-8").splitlines():
                 item = json.loads(line)
                 n_hops = max(n_hops, item["frame_offset"] + item["n_frames"])
@@ -164,11 +174,20 @@ def shards_of(folders: list[Path], units_of: dict[str, list[int]], longest: int)
                     first.append(item["frame_offset"])
                     hops.append(item["n_frames"])
                     units.append(np.asarray(said, dtype=np.uint8) + 1)
+                    leads.append(lead_of(item))
             starts = np.cumsum([0] + [len(u) for u in units])
             flat = np.concatenate(units) if units else np.zeros(0, dtype=np.uint8)
             stem = str(folder / name).removesuffix(".items.jsonl")
             out.append(
-                Shard(stem, n_hops, np.array(first, dtype=np.int64), np.array(hops, dtype=np.int64), flat, starts)
+                Shard(
+                    stem,
+                    n_hops,
+                    np.array(first, dtype=np.int64),
+                    np.array(hops, dtype=np.int64),
+                    flat,
+                    starts,
+                    np.array(leads, dtype=np.int64),
+                )
             )
     if not any(len(s.first) for s in out):
         raise ValueError(f"no sentence of {[f.name for f in folders]} has units within {longest} hops")
@@ -262,7 +281,8 @@ class Pool:
         first = np.concatenate([start + self.shards[shard].first for shard, start in self.placed])
         lengths = np.concatenate([np.diff(s.unit_starts) for s in mine])
         units = Units(np.concatenate([s.units for s in mine]), np.concatenate([[0], np.cumsum(lengths)]))
-        self.view = Sentences(self.ring, first, np.concatenate([s.hops for s in mine]), units)
+        hops, leads = np.concatenate([s.hops for s in mine]), np.concatenate([s.leads for s in mine])
+        self.view = Sentences(self.ring, first, hops, units, leads)
         return self.view
 
 
@@ -300,12 +320,40 @@ def resampled(x: np.ndarray, places: np.ndarray) -> np.ndarray:
     return x[np.minimum(np.rint(places).astype(np.int64), len(x) - 1)]
 
 
+def mel_centres(features: dict) -> np.ndarray:
+    """Centre frequency in Hz of each mel band of the front end's filterbank."""
+    edges = np.linspace(hz_to_mel(features["f_min_hz"]), hz_to_mel(features["f_max_hz"]), features["n_bands"] + 2)
+    return mel_to_hz(edges)[1:-1]
+
+
+def vtlp(log_mel: np.ndarray, alpha: float, centres: np.ndarray) -> np.ndarray:
+    """log_mel (hops, bands) with each band read at its centre frequency / alpha, linear between bands: a voice whose
+    vocal tract and pitch are alpha times as high (Jaitly and Hinton's VTLP on the mel axis)."""
+    index = np.arange(len(centres), dtype=np.float64)
+    at = np.interp(centres / alpha, centres, index)
+    lo = np.floor(at).astype(np.int64)
+    hi = np.minimum(lo + 1, len(centres) - 1)
+    share = (at - lo).astype(np.float32)
+    return log_mel[:, lo] * (1 - share) + log_mel[:, hi] * share
+
+
 def augmented(
-    x: np.ndarray, units: np.ndarray, spec: dict, n_mel: int, stride: int, rng: np.random.Generator
+    x: np.ndarray,
+    units: np.ndarray,
+    spec: dict,
+    n_mel: int,
+    stride: int,
+    rng: np.random.Generator,
+    lead: int = 0,
+    centres: np.ndarray | None = None,
 ) -> np.ndarray:
-    """One sentence's raw features (hops, dims), every draw new (KEHOACH 3.12): said tempo times as fast with its pitch
-    kept, never in fewer hops than CTC's frames for its units; SpecAugment's time warp about one hop; a straight slope
-    across the mel bands."""
+    """One sentence's raw features (hops, dims), every draw new (KEHOACH 3.12): its window opened lead_s ahead of its
+    first speech hop, at most the lead it has; said tempo times as fast, pitch kept, never in fewer hops than CTC's
+    frames for its units; SpecAugment's time warp about one hop; a straight slope across the mel bands; and VTLP."""
+    if "lead_s" in spec and lead > 0:
+        least, most = (round(s * HOPS_PER_S) for s in spec["lead_s"])
+        keep = int(rng.integers(min(least, lead), min(most, lead) + 1))
+        x = x[lead - keep :]
     n = len(x)
     rate = math.exp(rng.uniform(math.log(spec["tempo"][0]), math.log(spec["tempo"][1])))
     m = max(min(n, stride * need_frames(units)), round(n / rate))
@@ -318,11 +366,21 @@ def augmented(
     y[:, n_mel + DELTA_PITCH] *= (n - 1) / max(m - 1, 1)
     tilt_db = rng.uniform(-spec["tilt_db"], spec["tilt_db"])
     y[:, :n_mel] += np.linspace(-tilt_db, tilt_db, n_mel, dtype=np.float32) * LOG_PER_DB
+    if "vtlp" in spec:
+        alpha = math.exp(rng.uniform(math.log(spec["vtlp"][0]), math.log(spec["vtlp"][1])))
+        y[:, :n_mel] = vtlp(y[:, :n_mel], alpha, centres)
     return y
 
 
 def augmented_batch(
-    data: Sentences, picks: np.ndarray, multiple: int, spec: dict, n_mel: int, stride: int, rng: np.random.Generator
+    data: Sentences,
+    picks: np.ndarray,
+    multiple: int,
+    spec: dict,
+    n_mel: int,
+    stride: int,
+    rng: np.random.Generator,
+    centres: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, list[np.ndarray]]:
     """batch_of over the picked sentences each augmented, their hops as augmented."""
     said = [
@@ -333,6 +391,8 @@ def augmented_batch(
             n_mel,
             stride,
             rng,
+            0 if data.leads is None else int(data.leads[k]),
+            centres,
         )
         for k in picks
     ]
@@ -511,6 +571,7 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
         torch.save(state | {"history": history}, checkpoint(run))
 
     n_mel, rates = pool.dims - pitch.N_FEATURES, encoder.layer_rates(net)
+    centres = mel_centres(front_of(cfg)["features"]) if "vtlp" in spec.get("augment", {}) else None
     said = f"{pool.sentences} sentences, {pool.hours:.1f} h, a ring of {len(pool.ring) / HOPS_PER_S / 3600:.1f} h"
     print(f"{said}; steps {first} to {spec['steps']} of {spec['batch']}", flush=True)
     with pause_asked() as paused:
@@ -519,7 +580,9 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
             picks = rng.integers(len(data.first), size=spec["batch"])
             if "augment" in spec:
                 stride = net.front.hop_stride
-                x, hops, units = augmented_batch(data, picks, net.chunk_multiple, spec["augment"], n_mel, stride, rng)
+                x, hops, units = augmented_batch(
+                    data, picks, net.chunk_multiple, spec["augment"], n_mel, stride, rng, centres
+                )
             else:
                 x, hops, units = batch_of(data, picks, net.chunk_multiple)
             x = (x - mean) / std

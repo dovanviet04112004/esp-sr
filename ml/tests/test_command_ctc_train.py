@@ -472,3 +472,46 @@ def test_an_augmented_batch_pads_to_its_longest_sentence() -> None:
     x, hops, units = train.augmented_batch(data, np.array([0, 1]), 16, spec, N_MEL, 2, np.random.default_rng(0))
     assert hops.tolist() == [30, 45] and x.shape == (2, 48, DIMS)
     assert np.all(x[0, 30:] == 0.0) and [u.tolist() for u in units] == [[2, 3], [4]]
+
+
+def test_the_window_opens_within_lead_s_ahead_of_its_speech_never_before_its_start() -> None:
+    lead, speech = 150, 40
+    x = ramp(lead + speech)
+    spec = STILL | {"lead_s": [0.3, 2.0]}
+    least, most = round(0.3 * train.HOPS_PER_S), round(2.0 * train.HOPS_PER_S)
+    kept = set()
+    for seed in range(40):
+        y = train.augmented(x, np.array([1]), spec, N_MEL, 2, np.random.default_rng(seed), lead=lead)
+        kept.add(len(y) - speech)
+        np.testing.assert_array_equal(y[-speech:], x[-speech:])
+    assert min(kept) >= least and max(kept) <= most and len(kept) > 10
+    short = train.augmented(x[140:], np.array([1]), spec, N_MEL, 2, np.random.default_rng(0), lead=10)
+    np.testing.assert_array_equal(short, x[140:])
+
+
+def test_vtlp_reads_each_band_at_its_centre_over_alpha() -> None:
+    centres = train.mel_centres({"n_bands": N_MEL, "f_min_hz": 20.0, "f_max_hz": 7600.0})
+    peak = np.zeros((1, N_MEL), dtype=np.float32)
+    peak[0, N_MEL // 2] = 1.0
+    np.testing.assert_allclose(train.vtlp(peak, 1.0, centres), peak, atol=1e-6)
+    assert np.argmax(train.vtlp(peak, 1.2, centres)) > N_MEL // 2
+    assert np.argmax(train.vtlp(peak, 0.8, centres)) < N_MEL // 2
+
+
+def test_vtlp_moves_the_mel_bands_only_and_draws_within_its_range() -> None:
+    x = np.random.default_rng(5).standard_normal((30, DIMS)).astype(np.float32)
+    spec = STILL | {"vtlp": [0.8, 1.2]}
+    centres = train.mel_centres({"n_bands": N_MEL, "f_min_hz": 20.0, "f_max_hz": 7600.0})
+    y = train.augmented(x, np.array([1]), spec, N_MEL, 2, np.random.default_rng(3), centres=centres)
+    np.testing.assert_array_equal(y[:, N_MEL:], x[:, N_MEL:])
+    assert not np.allclose(y[:, :N_MEL], x[:, :N_MEL])
+    assert y[:, :N_MEL].min() >= x[:, :N_MEL].min() - 1e-6 and y[:, :N_MEL].max() <= x[:, :N_MEL].max() + 1e-6
+
+
+def test_an_augmented_batch_crops_each_sentence_by_its_own_lead() -> None:
+    data = train.Sentences(
+        ramp(300), np.array([0, 150]), np.array([150, 150]), [np.array([2]), np.array([3])], np.array([130, 0])
+    )
+    spec = STILL | {"lead_s": [0.3, 0.3]}
+    _, hops, _ = train.augmented_batch(data, np.array([0, 1]), 16, spec, N_MEL, 2, np.random.default_rng(0))
+    assert hops.tolist() == [150 - 130 + round(0.3 * train.HOPS_PER_S), 150]
