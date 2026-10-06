@@ -827,3 +827,17 @@ số được nhận ở δ₁ 200 ‰, δ₂ 50 ‰:
 Không mạng nào nhận một câu "tắt" nào của chủ repo qua board khi có ngưỡng; câu sai luôn ra "bật" cùng vật. Phiên 28/09
 không phải trường hợp lẻ. v5 học chính các phiên này mà không nhận câu nào, cả "bật": biên của nó trên bản thu board
 không qua ngưỡng.
+
+Giọng chủ repo co giãn theo trục tần số (VTLP trên log-mel: mỗi dải lấy phổ ở tần số tâm chia α; ba chiều cao độ giữ vì
+là tỉ số), cửa sổ "tắt" / "bật" như Cửa 3, bộ bật/tắt; "tắt" đúng trên 28/09 (22 câu) và 04/10 (48 câu):
+
+| α | v4 (`acde692`), 28/09 / 04/10 | v5, 70 000, 28/09 / 04/10 |
+|---|---|---|
+| 0,90 | 0 / 13 | 0 / 25 |
+| 1,00 | 0 / 20 | 0 / 21 |
+| 1,10 | 3 / 34 | 1 / 22 |
+| 1,20 | 9 / 41 | 2 / 35 |
+
+"bật" giữ 21/23 và 44–45/45 ở mọi α của v4. Nâng giọng chủ repo lên phía giọng cao hơn đưa "tắt" về gần đủ ở 04/10 (20 → 41
+trên 48) mà không lấy mất "bật": giọng trầm của chủ repo nằm ở rìa các giọng mạng đã học. Tăng cường VTLP lúc học, phủ
+cả giọng trầm, là hướng sửa cho mọi người nói.
