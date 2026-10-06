@@ -286,6 +286,17 @@ class Pool:
         return self.view
 
 
+def length_groups(hops: np.ndarray, groups: int) -> list[np.ndarray]:
+    """Sentence indices sorted by hops in at most groups groups of near-equal size, shortest first, none empty."""
+    return np.array_split(np.argsort(hops, kind="stable"), min(groups, len(hops)))
+
+
+def drawn(groups: list[np.ndarray], batch: int, rng: np.random.Generator) -> np.ndarray:
+    """batch sentences drawn uniformly within one group drawn uniformly (KEHOACH 3.12)."""
+    group = groups[rng.integers(len(groups))]
+    return group[rng.integers(len(group), size=batch)]
+
+
 def batch_of(data: Sentences, picks: np.ndarray, multiple: int) -> tuple[np.ndarray, np.ndarray, list[np.ndarray]]:
     """The picked sentences zero-padded at the end to the longest, rounded up to multiple: (batch, hops, dims) float32,
     their hops and units."""
@@ -574,10 +585,16 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
     centres = mel_centres(front_of(cfg)["features"]) if "vtlp" in spec.get("augment", {}) else None
     said = f"{pool.sentences} sentences, {pool.hours:.1f} h, a ring of {len(pool.ring) / HOPS_PER_S / 3600:.1f} h"
     print(f"{said}; steps {first} to {spec['steps']} of {spec['batch']}", flush=True)
+    grouped, groups = None, []
     with pause_asked() as paused:
         for step in range(first, spec["steps"] + 1):
             data = pool.at(step)
-            picks = rng.integers(len(data.first), size=spec["batch"])
+            if "length_groups" not in spec:
+                picks = rng.integers(len(data.first), size=spec["batch"])
+            else:
+                if data is not grouped:
+                    grouped, groups = data, length_groups(data.hops, spec["length_groups"])
+                picks = drawn(groups, spec["batch"], rng)
             if "augment" in spec:
                 stride = net.front.hop_stride
                 x, hops, units = augmented_batch(

@@ -150,6 +150,25 @@ def test_a_batch_pads_to_the_chunk_and_holds_each_sentence_from_its_start(tmp_pa
     assert not x[1, 10:].any() and train.frames_of(hops, 2).tolist() == [11, 5]
 
 
+def test_length_groups_hold_every_sentence_once_in_near_equal_groups_shortest_first() -> None:
+    hops = np.random.default_rng(3).integers(20, 750, 103)
+    groups = train.length_groups(hops, 8)
+    assert sorted(np.concatenate(groups).tolist()) == list(range(103))
+    assert {len(g) for g in groups} == {12, 13}
+    assert all(hops[a].max() <= hops[b].min() for a, b in itertools.pairwise(groups))
+    assert [g.tolist() for g in train.length_groups(np.array([5, 1, 3]), 16)] == [[1], [2], [0]]
+
+
+def test_a_draw_stays_in_one_group_and_draws_every_sentence_alike() -> None:
+    groups = train.length_groups(np.arange(40), 4)
+    rng, counts = np.random.default_rng(8), np.zeros(40)
+    for _ in range(4000):
+        picks = train.drawn(groups, 6, rng)
+        assert len({int(p) // 10 for p in picks}) == 1
+        np.add.at(counts, picks, 1)
+    assert counts.min() > 0.8 * counts.mean() and counts.max() < 1.2 * counts.mean()
+
+
 def test_the_best_path_merges_repeats_and_drops_blanks() -> None:
     path = [0, 3, 3, 0, 3, 5, 5, 0]
     log_probs = np.log(np.full((7, len(path)), 0.01))

@@ -28,6 +28,7 @@ train:                             # python -m srpipe.tasks.command.ctc.train (E
   dialect: north                   # lang_vi reads every sentence so: the corpora do not record the region
   max_s: 12.0                      # a longer sentence, with its pads, is left out
   batch: 32                        # sentences a step
+  length_groups: 16                # a batch draws within one of these equal groups of the ring sorted by hops
   steps: 40000                     # about twelve draws of each train sentence of v6; v4 scored as well at 40 000 as at 100 000
   pool_gb: 4.0                     # train's features held at once, float16: v3's are about 15 GB, the machine has 10
   rotate_steps: 8                  # steps between one shard in and the oldest out: 256 sentences a shard, 32 a batch
