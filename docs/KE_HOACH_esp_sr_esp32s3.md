@@ -111,7 +111,10 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | VIVOS (AILAB, ĐHQG TP.HCM) | `command` | ~15 giờ, 65 người nói | CC BY-NC-SA 4.0 | **phi thương mại**, ràng buộc lan sang model |
 | FPT Open Speech Data | `command` | ~30 giờ 🔬 | chưa kiểm 🔬 | |
 | VLSP các năm | `command` | lớn | đăng ký, chỉ nghiên cứu 🔬 | |
-| Bud500 (VietAI) | `command` | ~500 giờ, không có mã người nói | CC BY-NC-SA 4.0, chỉ nghiên cứu | người nói ba miền; **phi thương mại**, chỉ vào tập học |
+| Bud500 (VietAI) | `command` | ~500 giờ, không có mã người nói | CC BY-NC-SA 4.0, chỉ nghiên cứu | người nói ba miền; **phi thương mại**; không vào tập học từ `command/v6`: 462 giờ của nó so với 25 giờ không đổi Cửa 3 (`measurements/command.md` §12.13) |
+| LSVSC (Large-Scale Vietnamese Speech Corpus, bản parquet trên Hugging Face) | `command` | ~100 giờ, 56 823 câu; nhãn giới, phương ngữ, tuổi, không có mã người nói | CC BY 4.0 | nam nữ gần ngang: thêm giọng trầm cho tập học (`measurements/command.md` §12.12); chỉ vào tập học |
+| Speech-MASSIVE, phần tiếng Việt | `command` | 5 122 câu ra lệnh cho trợ lý ảo, có mã người nói | CC BY 4.0 | lời cùng loại với bộ lệnh; tách theo người nói như §1.3 |
+| ViMD (Vietnamese Multi-Dialect) | `command` | ~100 giờ 🔬, 63 tỉnh, có mã người nói và giới | CC BY-NC-ND 4.0, **không phái sinh** | giọng mọi vùng; câu dài ~19 s, quá `train.max_s`: cắt lại theo mốc từ trước khi vào split |
 | **Mẩu trích theo lời** từ các kho tiếng Việt trên Hugging Face (`srpipe/core/extract.py`, `configs/common/extract.yaml`) | người thật nói đúng từ đánh thức và các lệnh của bộ lệnh, mỗi mẩu chỉ chứa cụm ấy; `wake` dương, `command` học | chỉ các câu có lời đọc ra một cụm; cắt xong câu gốc bị xoá, chỉ giữ mẩu | theo từng kho, ghi ở `DU_LIEU.md` | kho lớn (GigaSpeech2, YODAS2, PhoAudiobook, VietSpeech, viVoice…) quá cỡ ổ dữ liệu: dò lời qua mạng, chỉ kéo phần âm thanh chứa câu khớp; lệnh chưa học của E11-T13 không trích; chỉ vào tập học; kho tự ghi là tiếng tổng hợp (dolly-audio) vẫn trích nhưng mẩu mang nhãn `synth` ở `clips.tsv`, `wake` không lấy làm người thật |
 | Lệnh điều khiển nhà tự thu (repo `edge-ai-voice-control-esp32`) | `command` | ~1 300 lệnh 1 s: bật/tắt đèn, bật/tắt quạt, bật/tắt hết; nhiễu phòng | MIT | người thật nói đúng lệnh của bộ lệnh; không có mã người nói, chỉ vào tập học |
 | MUSAN | `ns`, tăng cường | ~100 giờ nhiễu, nhạc, lời nói | CC BY 4.0 phần lớn 🔬 | |
@@ -215,7 +218,7 @@ máy khác: đáp ứng của micro là một phần của miền dữ liệu.
 | Tiếng tổng hợp không vào tập thử | Nó đúng miền của TTS, không đúng miền của người thật |
 | Giọng mẫu để TTS nhân bản chỉ lấy từ vật liệu học của split chính nhánh ấy: người nói nó giao cho tập học, hoặc kho chỉ vào tập học; mẩu nhân bản vào đúng vai của người được nhân bản | Nhân bản giọng của một người ở tập thử là đưa người đó vào tập học qua đường TTS; hai nhánh chia người nói khác nhau, nên người `train` của `wake` có thể là người `val` của `command` |
 | Tập hiệu chuẩn int8 lấy từ vật liệu học (mô phỏng board, hoặc bản thu của tập học), không lấy mẩu hay người nói nào của tập thử | Tập thử không góp gì vào model, kể cả dải giá trị của lượng tử |
-| `δ₁`, `δ₂` của `command` chọn trên `val_commands` của split (§3.12): mẩu người thật nói đúng lời từng lệnh đã học, lấy từ kho trích (§1.2) mà tập học không đọc, qua đường mô phỏng board như `val`, không bao giờ vào `train` | Ngưỡng là một thông số của từng model như điểm dừng học: chọn trên dữ liệu không học, không thử, để Cửa 3 vẫn là phép đo độc lập |
+| `δ₁`, `δ₂` của `command` chọn trên `val_commands` của split (§3.12): mẩu người thật nói đúng lời từng lệnh đã học, lấy từ kho trích (§1.2) mà tập học không đọc, qua đường mô phỏng board như `val`, không bao giờ vào `train`; câu nguồn của mỗi mẩu (lời cả câu ở `clips.tsv`) cũng không vào `train` khi kho của nó nằm trong `split.corpora`, mọi câu cùng lời ấy của kho đều bỏ | Ngưỡng là một thông số của từng model như điểm dừng học: chọn trên dữ liệu không học, không thử, để Cửa 3 vẫn là phép đo độc lập |
 | Mỗi split có `SPLIT.md` ghi luật, seed, sha256, commit ở `ml/data/splits/` | Dựng lại được bằng một lệnh |
 | So hai biến thể: cùng split, cùng seed, cùng số epoch | Khác một điều kiện là bảng vô nghĩa |
 | Chọn mô hình bằng số **sau int8** trên **tập thu qua board** | Số FP32 trên tập công khai không nói gì về máy thật |
@@ -990,6 +993,10 @@ với cửa sổ khác, cả hai dài trong `split.board.min_s`–`max_s`, đặ
 vẫn vào lô giữa hàng trăm nghìn câu mô phỏng. Đặc trưng float16 của nó lớn hơn RAM máy học, nên bộ nạp giữ một vòng đệm cỡ
 `train.pool_gb`: mỗi `train.rotate_steps` bước nạp thêm một shard, đè lên shard cũ nhất. Thứ tự shard rút lại mỗi lượt
 bằng seed. Trung bình và độ lệch vẫn tính trên cả tập học, và lượt học tiếp tục dựng lại đúng vòng đệm của bước dừng.
+Lô `train.batch` câu rút trong một nhóm độ dài: câu của vòng đệm xếp theo số bước, chia `train.length_groups` nhóm bằng
+nhau; mỗi bước rút đều một nhóm rồi rút đều câu trong nhóm, nên câu nào cũng được rút đều như rút thẳng cả vòng, mà lô
+chỉ đệm tới câu dài nhất của nhóm: đệm tới câu dài nhất cả vòng thì chừng 40% khung GPU là phần đệm
+(`measurements/command.md` §12.13).
 Cỡ chọn theo chất lượng: rộng hơn hay sâu hơn MultiNet7 (bề rộng 128, feedforward 256, khoảng 2,1 MB int8 🔬) khi µs đo
 trên board còn trong ngân sách §3.3. Bề rộng 160 và feedforward 320 (ADR-0017) có 3,14 triệu tham số cho encoder và đầu
 CTC, `.espdl` 3,4 MB, chạy 10,2 ms mỗi 32 ms trên board B với trọng số ngẫu nhiên (`measurements/latency.md` §18); bộ nhớ
@@ -1672,7 +1679,7 @@ Hai câu hỏi, hai cách chia:
 ml/data/                                   # trong repo — chỉ siêu dữ liệu, ✅ commit
 ├── README.md                              # cái gì nằm ở đâu, lệnh nào sinh ra
 ├── manifests/                             # một file cho một kho, cùng bố cục với raw/
-│   ├── speech/{common_voice_vi, vivos, fpt_open, vlsp, bud500}.yaml
+│   ├── speech/{common_voice_vi, vivos, fpt_open, vlsp, bud500, lsvsc, speech_massive_vi, vimd}.yaml
 │   ├── noise/{musan, demand, dns, speech_commands}.yaml
 │   ├── rir/openslr28.yaml
 │   ├── device/board_b.csv                 # ★ mỗi phiên thu qua board một dòng
