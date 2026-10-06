@@ -841,3 +841,62 @@ là tỉ số), cửa sổ "tắt" / "bật" như Cửa 3, bộ bật/tắt; "t�
 "bật" giữ 21/23 và 44–45/45 ở mọi α của v4. Nâng giọng chủ repo lên phía giọng cao hơn đưa "tắt" về gần đủ ở 04/10 (20 → 41
 trên 48) mà không lấy mất "bật": giọng trầm của chủ repo nằm ở rìa các giọng mạng đã học. Tăng cường VTLP lúc học, phủ
 cả giọng trầm, là hướng sửa cho mọi người nói.
+
+### 12.13 Lượt `command/v6`: khoảng trước câu rút ngẫu nhiên và VTLP (06/10)
+
+Run `20261006_a16c615-dirty_20b454`: split `command/v6` (không Bud500, 102 765 câu, 171,3 giờ cùng shard board), cửa sổ
+mở ở khoảng trước câu rút đều trong 0,3–2,0 s, VTLP α rút log-đều trong 0,8–1,2, 40 000 bước; phần còn lại như v5.
+`val` trùng byte với v5 nên hai cột val so thẳng được.
+
+Bud500 trong các split: `command/v2` đặt trần 25 giờ (35 070 câu), v3, v4, v5 lấy đủ 461,97 giờ (649 010 câu). Run v2
+(`20261002_128545c`) và run `20261004_acde692` (split v3) cùng 84/112 ở Cửa 3 (§12.11): 437 giờ Bud500 thêm vào không
+đổi số câu đúng trên board.
+
+Nhịp học 3,26 bước/s, v5 4,46. Phần tăng cường mới chỉ thêm 2,2 ms mỗi lô (7,7 → 9,9 ms, đo trên một shard `train_vlsp`).
+Bước chậm hơn vì câu dài hơn: Bud500 là 86% số câu của v5, trung bình 2,56 s lời; câu của v6 trung bình 5,38 s. Trên
+shard ấy lô 32 câu rộng 747 bước, câu trung bình ~450 bước sau khi cắt khoảng trước: chừng 40% khung GPU tính là phần đệm.
+
+Một bước học trên GPU (RTX 3050 Laptop, 4 GB; lô 32 câu ngẫu nhiên, CTC cộng RNN-T, phạt luồng, Adam), theo bề rộng lô:
+
+| Bề rộng lô, bước | fp32 | bf16 cho encoder, loss fp32 |
+|---|---|---|
+| 752 | 287 ms | 260 ms |
+| 456 | 205 ms | 199 ms |
+| 304 | 128 ms | 123 ms |
+
+bf16 chỉ bớt 3–9%: torchaudio tính loss RNN-T trên fp32 hoặc fp16, mạng nhỏ. Bề rộng lô quyết định thời gian: lô gom
+câu cùng độ dài đệm tới câu dài nhất của nhóm thay cho cả vòng.
+
+Cửa 3 (float, không ngưỡng; cột cuối hai ở δ₁ 200 ‰, δ₂ 50 ‰), cạnh v2 chấm lại cùng lúc, được đúng số của §12.11:
+
+| Mạng | val loss / UER | Câu đúng | "tắt" | "bật" | "đóng cửa" | Nhận đúng có ngưỡng | Từ chối |
+|---|---|---|---|---|---|---|---|
+| v2 (`128545c`, đang khoá) | — | 84/112 | 0/22 | 21/23 | 11/11 | 56% | 117/120 |
+| v5, bước 4 000 | 3,351 / 0,952 | — | — | — | — | — | — |
+| v5, bước 12 000 | — | 13/112 | 0/22 | 0/23 | 0/11 | 0% | 120/120 |
+| v6, bước 4 000 | 2,151 / 0,630 | 54/112 | 17/22 | 7/23 | 3/11 | 0% | 120/120 |
+| v6, bước 6 000 | 1,824 / 0,558 | 92/112 | 16/22 | 21/23 | 5/11 | 27% | 119/120 |
+| v6, bước 8 000 | 1,685 / 0,507 | 86/112 | 8/22 | 21/23 | 6/11 | 36% | 117/120 |
+
+Từ bước 6 000 v6 nhận "tắt" của chủ repo trên phiên 28/09 mà vẫn giữ "bật": lần đầu một mạng tách được hai lệnh ấy
+qua board. "tắt" còn dao động giữa các checkpoint lúc tốc độ học còn cao.
+
+Run dừng ở bước 10 970 theo lời chủ repo, khi "tắt" đi xuống ba checkpoint liền. Ở bước 10 000: 88/112 câu đúng, "tắt"
+7/22, "bật" 21/23, "đóng cửa" 7/11, có ngưỡng 41%, từ chối 119/120; val 1,595 / 0,475. Từ bước 6 000 tới 10 000,
+lệnh nhất và lệnh nhì của gần mọi câu "tắt" cách nhau 0–50 ‰ (v2: "bật" hơn "tắt" 50–200 ‰): mạng đứng ở ranh giới hai
+lệnh, mỗi checkpoint lật một phần.
+
+Giọng chủ repo co giãn theo trục tần số như §12.12, v6 ở bước 10 000, bộ bật/tắt:
+
+| α | 28/09 "tắt" / "bật" | 04/10 "tắt" / "bật" |
+|---|---|---|
+| 0,90 | 9/22 / 21/23 | 45/48 / 44/45 |
+| 1,00 | 7/22 / 21/23 | 45/48 / 44/45 |
+| 1,10 | 8/22 / 21/23 | 45/48 / 44/45 |
+| 1,20 | 13/22 / 21/23 | 45/48 / 44/45 |
+| 1,30 | 11/22 / 21/23 | 45/48 / 44/45 |
+
+Phiên 04/10 nằm trong tập học (shard board); v6 nhận "tắt" ở đó ở mọi α, v5 học cùng shard chỉ đúng 21/48. Phiên 28/09,
+không học, gần như không đổi theo α: giọng trầm không còn là chỗ thiếu chính, mở rộng `train.augment.vtlp` không sửa
+được 28/09. Mạng mang giọng chủ repo của ngày, phòng, khoảng cách đã học, chưa mang sang ngày khác; ở 28/09 phiên 1 m
+và 3 m hỏng như nhau.
