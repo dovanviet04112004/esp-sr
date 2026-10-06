@@ -49,11 +49,16 @@ def vivos(root: Path, raw: Path, spec: dict) -> Iterator[Clip]:
 
 
 def parquet(root: Path, raw: Path, spec: dict) -> Iterator[Clip]:
-    """Every row of the parquet files spec matches, with its transcription; these corpora carry no speaker."""
+    """Every row of the parquet files spec matches, its text from spec's text column (transcription when it names
+    none) and its speaker from spec's speaker column, none when it names none."""
+    text, speaker = spec.get("text", TEXT_COLUMN), spec.get("speaker")
     for path in sorted(root.glob(spec["files"])):
         name = path.relative_to(raw)
-        for row, text in enumerate(pq.read_table(path, columns=[TEXT_COLUMN]).column(0).to_pylist()):
-            yield Clip(f"{name}#{row}", None, text)
+        table = pq.read_table(path, columns=[text] + ([speaker] if speaker else []))
+        texts = table.column(text).to_pylist()
+        speakers = table.column(speaker).to_pylist() if speaker else [None] * len(texts)
+        for row, (said, who) in enumerate(zip(texts, speakers, strict=True)):
+            yield Clip(f"{name}#{row}", who, said)
 
 
 def files(root: Path, raw: Path, spec: dict) -> Iterator[Clip]:

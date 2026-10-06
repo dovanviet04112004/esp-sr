@@ -68,6 +68,19 @@ def test_every_layout_names_its_clips_as_splits_do(tmp_path: Path) -> None:
     assert corpus.clips(raw, "noise", "n", {"layout": "files"}) == [corpus.Clip("noise/n/x/hum.wav")]
 
 
+def test_a_parquet_corpus_reads_the_text_and_speaker_columns_it_names(tmp_path: Path) -> None:
+    rows = [{"audio": {"bytes": b"", "path": None}, "utt": t, "speaker_id": s} for t, s in (("a", "s1"), ("b", "s2"))]
+    (tmp_path / "speech" / "m" / "data").mkdir(parents=True)
+    pq.write_table(pa.Table.from_pylist(rows), tmp_path / "speech" / "m" / "data" / "test-0.parquet")
+    spec = {"layout": "parquet", "files": "data/*.parquet", "text": "utt", "speaker": "speaker_id"}
+    assert corpus.clips(tmp_path, "speech", "m", spec) == [
+        corpus.Clip("speech/m/data/test-0.parquet#0", "s1", "a"),
+        corpus.Clip("speech/m/data/test-0.parquet#1", "s2", "b"),
+    ]
+    with pytest.raises(pa.ArrowInvalid, match="transcription"):
+        corpus.clips(tmp_path, "speech", "m", {"layout": "parquet", "files": "data/*.parquet"})
+
+
 def test_measures_see_silence_the_rail_and_noise() -> None:
     m = load_yaml(screen.CONFIG)["measure"]
     clean = screen.measure(speech(2.0, 0.5), RATE, "một hai ba", m)
