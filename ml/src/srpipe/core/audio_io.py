@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import math
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -65,32 +66,41 @@ class ItemReader:
     """Clean speech by the item name of a split file, mono float64 at the grid's rate.
 
     An item is a file under raw/ (WAV, FLAC, MP3), or <parquet under raw/>#<row> for corpora packed with an audio
-    column of encoded bytes; either may end in @<start>-<end>, that span of it in seconds. The last row group read is
-    kept, as a split lists a parquet's rows in order.
+    column of encoded bytes; either may end in @<start>-<end>, that span of it in seconds. Parquet rows stream from the
+    last one read, as a split lists a parquet's rows in order; Arrow still decodes a row group's audio pages whole.
     """
 
     def __init__(self, raw_root: Path) -> None:
         self.raw_root = raw_root
         self._path: Path | None = None
+        self._file: pq.ParquetFile | None = None
         self._starts = np.zeros(1, dtype=np.int64)
-        self._group = -1
-        self._audio = None
+        self._rows: Iterator[pa.RecordBatch] | None = None
+        self._next = 0
+        self._last: tuple[int, bytes] = (-1, b"")
 
     def _row_bytes(self, path: Path, row: int) -> bytes:
         if path != self._path:
-            meta = pq.ParquetFile(path).metadata
+            self._file = pq.ParquetFile(path)
+            meta = self._file.metadata
             self._starts = np.cumsum([0] + [meta.row_group(g).num_rows for g in range(meta.num_row_groups)])
-            self._path, self._group = path, -1
+            self._path, self._rows, self._last = path, None, (-1, b"")
         if not 0 <= row < self._starts[-1]:
             raise IndexError(f"{path}: row {row} outside 0..{self._starts[-1] - 1}")
+        if row == self._last[0]:
+            return self._last[1]
         group = int(np.searchsorted(self._starts, row, side="right")) - 1
-        if group != self._group:
-            # Drop the old group first and hand back what the read frees: mimalloc keeps ~0.4 GB a reader otherwise.
-            self._audio = None
-            self._audio = pq.ParquetFile(path).read_row_group(group, columns=[PARQUET_AUDIO_COLUMN]).column(0)
-            self._group = group
+        if self._rows is None or row < self._next or self._starts[group] > self._next:
+            groups = list(range(group, len(self._starts) - 1))
+            self._rows = None
             pa.default_memory_pool().release_unused()
-        return self._audio[row - self._starts[group]].as_py()["bytes"]
+            self._rows = self._file.iter_batches(batch_size=1, row_groups=groups, columns=[PARQUET_AUDIO_COLUMN])
+            self._next = int(self._starts[group])
+        while self._next <= row:
+            value = next(self._rows).column(0)[0].as_py()
+            self._next += 1
+        self._last = (row, value["bytes"])
+        return self._last[1]
 
     def native(self, item: str) -> tuple[np.ndarray, int]:
         """Mono float64 at the item's own rate, and that rate."""
