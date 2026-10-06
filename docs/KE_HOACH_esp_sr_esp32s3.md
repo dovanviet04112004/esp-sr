@@ -132,6 +132,13 @@ im lặng. Nên mỗi mẩu của mọi kho trong `raw/` được **đo một l�
 giọng mẫu cho TTS hay làm nhiễu để trộn. `raw/` giữ nguyên; mẩu bị loại chỉ nằm trong danh sách loại, và mọi nơi
 đọc kho bỏ qua nó. Đo là giải mã toàn bộ nên chạy một lần, chấm chỉ đọc số đo, nên đổi ngưỡng không phải đo lại.
 
+**Câu dài cắt theo mốc từ** (`srpipe/core/spans.py`, `make spans NAME=<kho>`). Kho có câu dài hơn cửa sổ học (ViMD,
+~19 s) khai layout `spans` ở `screen.yaml`: câu dài hơn `max_s` được căn từng từ bằng bộ căn của §3.11 (mục `align`
+của `configs/common/tts.yaml`), rồi cắt ở khoảng lặng giữa hai từ dài ít nhất `min_gap_s` thành đoạn dài nhất trong
+`max_s`, mỗi đoạn mang lời của chính các từ trong nó; câu ngắn hơn giữ nguyên, câu không căn được hay phần không có
+khoảng lặng nào trong `max_s` thì bỏ. Danh sách `<mục>@<đầu>-<cuối>`, người nói, lời nằm ở `interim/spans/<kho>.tsv`;
+`raw/` giữ nguyên, sàng lọc và split đọc đoạn qua danh sách ấy như đọc một mẩu.
+
 Một mẩu bị loại theo luật đầu tiên nó phạm, xét từ trên xuống:
 
 | Lý do loại | Khi nào | Áp cho |
@@ -1558,6 +1565,8 @@ ml/
 │   │   │                              #   đúng phần âm thanh, căn và cắt lấy cụm, giữ mẩu vào raw/speech/<tên>/,
 │   │   │                              #   xoá câu gốc; làm tiếp được khi bị ngắt (§1.2)
 │   │   ├── screen.py                  # ★ sàng lọc (§1.2): đo mọi mẩu một lần, chấm theo luật, danh sách loại
+│   │   ├── spans.py                   # câu dài của một kho căn từng từ, cắt ở khoảng lặng thành đoạn vừa cửa sổ
+│   │   │                              #   học; danh sách ở interim/spans/<kho>.tsv (§1.2)
 │   │   ├── phrases.py                 # dò cụm trên lời của mọi kho: dòng âm tiết, mã thành phần âm tiết, cụm cách một
 │   │   │                              #   cụm cho trước vài thành phần, cụm mở đầu bằng âm tiết đầu của nó; wake và
 │   │   │                              #   command lấy âm bản gần âm từ đây
