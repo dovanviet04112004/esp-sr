@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-thresholds ctc-deploy rnnt-ptq ai-unit-rnnt listen-unit models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit spans splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-thresholds ctc-deploy rnnt-ptq ai-unit-rnnt listen-unit models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
         fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live commands session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -83,6 +83,9 @@ screen: ## Measure every clip of every corpus once, then list what the rules rej
 
 screen-audit: screen ## Hear clips in bins of each speech measure through PhoWhisper, to place the rules (docs/measurements/data_screen.md)
 	cd ml && uv run python -m srpipe.core.screen audit
+
+spans: ## Cut a corpus's long rows at word bounds into spans a training window holds, aligner in Docker: make spans NAME=vimd (KEHOACH 1.2)
+	cd ml && uv run python -m srpipe.core.spans $(NAME)
 
 splits: screen ## Cut the wake and command splits from screened clips into ml/data/splits (KEHOACH 1.3)
 	cd ml && uv run python -m srpipe.tasks.wake.data split && uv run python -m srpipe.tasks.command.ctc.data

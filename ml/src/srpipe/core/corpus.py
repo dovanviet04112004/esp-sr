@@ -67,7 +67,14 @@ def files(root: Path, raw: Path, spec: dict) -> Iterator[Clip]:
         yield Clip(str(path.relative_to(raw)))
 
 
-LAYOUTS = {"common_voice": common_voice, "vivos": vivos, "parquet": parquet, "files": files}
+def spans(root: Path, raw: Path, spec: dict) -> Iterator[Clip]:
+    """The spans srpipe.core.spans cut from the corpus's long rows, as interim/spans/<name>.tsv lists them."""
+    with (raw.parent / "interim" / "spans" / f"{root.name}.tsv").open(encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f, delimiter="\t", quoting=csv.QUOTE_NONE):
+            yield Clip(row["item"], row["speaker"] or None, row["text"])
+
+
+LAYOUTS = {"common_voice": common_voice, "vivos": vivos, "parquet": parquet, "files": files, "spans": spans}
 
 
 def clips(raw: Path, kind: str, name: str, spec: dict) -> list[Clip]:

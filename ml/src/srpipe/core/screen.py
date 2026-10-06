@@ -104,7 +104,7 @@ def batches(raw: Path, clips: list[corpus.Clip], size: int) -> list[list[corpus.
     starts: dict[str, np.ndarray] = {}
 
     def key(k: int, clip: corpus.Clip) -> tuple[str, int]:
-        name, _, row = clip.item.partition("#")
+        name, _, row = clip.item.partition("@")[0].partition("#")
         if not row:
             return "", k // size
         if name not in starts:
@@ -251,8 +251,8 @@ def audit_picks(cfg: dict, rows: list[dict]) -> dict[tuple[str, int], tuple[int,
 
 
 def item_order(item: str) -> tuple[str, int]:
-    """Files by name, parquet rows by number, so rows of one row group sit together."""
-    name, _, row = item.partition("#")
+    """Files by name, parquet rows by number, so rows of one row group sit together; spans of a row by its number."""
+    name, _, row = item.partition("@")[0].partition("#")
     return name, int(row or 0)
 
 

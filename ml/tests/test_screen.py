@@ -14,7 +14,7 @@ import pyarrow.parquet as pq
 import pytest
 import soundfile as sf
 
-from srpipe.core import corpus, screen
+from srpipe.core import audio_io, corpus, screen, spans
 from srpipe.core.audio_io import write_wav
 from srpipe.core.config import load_yaml
 from srpipe.generated import grid
@@ -79,6 +79,53 @@ def test_a_parquet_corpus_reads_the_text_and_speaker_columns_it_names(tmp_path: 
     ]
     with pytest.raises(pa.ArrowInvalid, match="transcription"):
         corpus.clips(tmp_path, "speech", "m", {"layout": "parquet", "files": "data/*.parquet"})
+
+
+def test_runs_end_in_silences_within_max_s_and_leave_out_a_stretch_with_none() -> None:
+    times = [(0.5, 1.0), (1.05, 2.0), (2.4, 3.0), (3.1, 6.9), (7.5, 8.0)]
+    words = [{"word": w, "start": s, "end": e} for w, (s, e) in zip("abcde", times, strict=True)]
+    got = spans.runs(words, max_s=3.0, min_gap_s=0.1, margin_s=0.15, end_s=8.5)
+    assert [r[2] for r in got] == [["a", "b", "c"], ["e"]]
+    assert [r[:2] for r in got] == [pytest.approx((0.35, 3.05)), pytest.approx((7.35, 8.15))]
+
+
+def long_rows(raw: Path) -> dict:
+    """A parquet corpus vm: a short row, a long row the fake aligner aligns, one it aligns wrongly, one with no text."""
+    rows = [(2.0, "Một hai.", "s1"), (10.0, "ba bốn năm", "s2"), (10.0, "sáu bảy", "s2"), (10.0, "", "s3")]
+    table = [{"audio": {"bytes": wav_bytes(speech(s, 0.5)), "path": None}, "text": t, "spk": p} for s, t, p in rows]
+    (raw / "speech" / "vm" / "data").mkdir(parents=True)
+    pq.write_table(pa.Table.from_pylist(table), raw / "speech" / "vm" / "data" / "train-0.parquet")
+    return {"layout": "parquet", "files": "data/*.parquet", "text": "text", "speaker": "spk"}
+
+
+def fake_align(asked: list[dict], tts: dict, work: Path, cache: Path) -> dict[str, list[dict]]:
+    times = {"ba bốn năm": [("ba", 1.0, 2.0), ("bốn", 2.5, 3.5), ("năm", 8.0, 9.0)], "sáu bảy": [("sáu", 1.0, 2.0)]}
+    out = {}
+    for c in asked:
+        assert sf.info(c["wav"]).samplerate == RATE and sf.info(c["wav"]).duration == pytest.approx(10.0)
+        out[c["id"]] = [{"word": w, "start": s, "end": e} for w, s, e in times[c["text"]]]
+    return out
+
+
+def test_long_rows_are_cut_into_aligned_runs_short_ones_kept_and_a_rerun_goes_on(tmp_path: Path, monkeypatch) -> None:
+    raw, calls = tmp_path / "raw", []
+    rows_spec = long_rows(raw)
+    spec = {"layout": "spans", "rows": rows_spec, "max_s": 4.0, "min_gap_s": 0.1, "margin_s": 0.15, "align_batch": 2}
+    paths = {"raw": raw, "interim": tmp_path / "interim", "cache": tmp_path / "cache"}
+    monkeypatch.setattr(spans.engines, "align", lambda *a: calls.append(1) or fake_align(*a))
+    out = spans.cut("vm", {"corpora": {"speech": {"vm": spec}}}, {}, paths)
+    item = "speech/vm/data/train-0.parquet"
+    assert corpus.clips(raw, "speech", "vm", spec) == [
+        corpus.Clip(f"{item}#0", "s1", "một hai"),
+        corpus.Clip(f"{item}#1@0.850-3.650", "s2", "ba bốn"),
+        corpus.Clip(f"{item}#1@7.850-9.150", "s2", "năm"),
+    ]
+    assert out == tmp_path / "interim" / "spans" / "vm.tsv" and len(calls) == 2
+    assert not list((tmp_path / "cache" / "spans" / "vm").glob("wav/*"))
+    spans.cut("vm", {"corpora": {"speech": {"vm": spec}}}, {}, paths)
+    assert len(calls) == 2
+    x = audio_io.ItemReader(raw).read(f"{item}#1@0.850-3.650")
+    assert len(x) == round(2.8 * RATE)
 
 
 def test_measures_see_silence_the_rail_and_noise() -> None:
