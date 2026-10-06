@@ -799,3 +799,15 @@ câu), "bật đèn" 142 / 139 Hz (1,02); `val_commands` "tắt đèn" 239 / 193
 
 Dời log-mel từng phiên 28/09, từng dải, cho trung bình trên các bước `vad` bằng trung bình của `val` v5: v5 ở 70 000 bước
 vẫn 0/22 "tắt", 6/11 "đóng cửa", có ngưỡng 48%. Màu phổ và mức cố định của board không phải nguyên nhân.
+
+Ba cách đưa cửa sổ 28/09 vào mạng, Cửa 3 không ngưỡng / có ngưỡng δ₁ 200 ‰; "tắt" 22 câu:
+
+| Cách | v5, 70 000 | v4 (`acde692`), 100 000 |
+|---|---|---|
+| như Cửa 3 | 78 / 45%, "tắt" 0 | 84 / 62%, "tắt" 0 |
+| log F0 chuẩn hoá theo trung bình log F0 có tiếng của cả phiên (không nhân quả) | 79 / 44%, "tắt" 1 | 85 / 62%, "tắt" 0 |
+| cửa sổ mở 0,5 s trước bước `vad` đầu thay 2,0 s | 55 / 10%, "tắt" 0 | 85 / 54%, "tắt" 0 |
+
+Cao độ lấy giọng người nói làm mốc không đưa "tắt" về ở cả hai mạng. v5 học toàn cửa sổ có đủ 2,0 s trước câu nên
+phụ thuộc vào đó: còn 0,5 s nó mất 23 câu, v4 (học mẩu cộng 0,3 s) không mất câu nào; lệnh nói sát nhau trên board có
+khoảng trước câu ngắn như thế.
