@@ -941,3 +941,26 @@ nghe "tắt" của chủ repo ở phiên ấy thành "bật". Ba thứ đã th�
 chính các phiên 04/10 của chủ repo trong tập học. Cuối lượt v7 ngang v2 trên Cửa 3 (86 so với 84 câu đúng, 55% so với
 56% có ngưỡng). Nhịp học 2 000 bước mỗi ~11 phút, không nhanh hơn v6: đổi nhịp 0,8–1,6 lần sau khi gom nhóm kéo câu dài
 thêm tới 25%, lô đệm tới câu kéo dài nhất của nó, và câu của v7 dài hơn (trung bình 6,9 s so với 6,0 s).
+
+### 12.15 Mức thu của phiên 28/09 so với 04/10 (07/10)
+
+Câu "tắt"/"bật" của chủ repo, chuỗi chạy liền cả buổi thu như Cửa 3, trung vị theo câu: mức nền và mức tiếng (phân vị 90)
+của micro 0 thô, độ lợi `agc` lúc tiếng bắt đầu, và độ lợi của chuỗi ở 4 bước đầu tiếng so với bước 8–20:
+
+| Buổi | Từ | Câu | Nền thô | Tiếng thô | `agc` | Chuỗi ở đầu tiếng |
+|---|---|---|---|---|---|---|
+| 04/10, 80 cm | "bật" / "tắt" | 45 / 44 | −53 dBFS | −29 / −31 dBFS | +7 / +8 dB | −8 / −6 dB |
+| 28/09, 1 m | "bật" / "tắt" | 12 / 10 | −63 dBFS | −43 / −45 dBFS | +22 / +23 dB | −3 / −9 dB |
+| 28/09, 3 m | "bật" / "tắt" | 10 / 11 | −63 dBFS | −45 / −46 dBFS | +24 / +23 dB | −3 / −7 dB |
+
+Tiếng 28/09 ở micro nhỏ hơn 04/10 chừng 15 dB, nền nhỏ hơn 10 dB (firmware thu `368` và `868`, cùng `pcm_shift` 13).
+Đổi mức tiếng thô trước chuỗi, v7 ở bước 40 000, bộ bật/tắt, đúng (nhận ở δ₁ 200 ‰):
+
+| Buổi | Đổi mức | "tắt" | "bật" |
+|---|---|---|---|
+| 28/09 | +0 / +6 / +12 / +15 dB | 1/22 (0) ở cả bốn | 21/23 (20) ở cả bốn |
+| 04/10 | 0 / −6 / −12 / −15 dB | 45/48, 45/47, 46/46, 46/46 (44) | 44/45, 44/45, 44/46, 44/46 (44) |
+
+Mức thu không đổi quyết định: 28/09 nâng tới mức 04/10 vẫn 1/22 "tắt", 04/10 hạ tới mức 28/09 vẫn đúng. Chỗ khác của
+"tắt" 28/09 nằm ở tiếng nói hôm ấy, khoảng cách và vang (1–3 m so với 80 cm) hoặc firmware thu; dữ liệu hiện có không
+tách được ba thứ ấy.
