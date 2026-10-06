@@ -17,6 +17,7 @@ from srpipe.generated import grid
 
 INT16_SCALE = 32768.0
 PARQUET_AUDIO_COLUMN = "audio"
+SPANS_DIR = Path("interim") / "spans"  # under the data root: spans decoded once (KEHOACH 1.2)
 
 
 def to_float(pcm: np.ndarray) -> np.ndarray:
@@ -66,8 +67,8 @@ class ItemReader:
     """Clean speech by the item name of a split file, mono float64 at the grid's rate.
 
     An item is a file under raw/ (WAV, FLAC, MP3), or <parquet under raw/>#<row> for corpora packed with an audio
-    column of encoded bytes; either may end in @<start>-<end>, that span of it in seconds. Parquet rows stream from the
-    last one read, as a split lists a parquet's rows in order; Arrow still decodes a row group's audio pages whole.
+    column of encoded bytes; either may end in @<start>-<end>, that span of it in seconds. A file not under raw/ is read
+    from the data root's interim/spans/, where spans are decoded once. Parquet rows stream from the last one read.
     """
 
     def __init__(self, raw_root: Path) -> None:
@@ -107,6 +108,8 @@ class ItemReader:
         whole, _, span = item.partition("@")
         name, _, row = whole.partition("#")
         path = self.raw_root / name
+        if not row and not path.exists() and (self.raw_root.parent / SPANS_DIR / name).exists():
+            path = self.raw_root.parent / SPANS_DIR / name
         source = io.BytesIO(self._row_bytes(path, int(row))) if row else path
         x, rate = sf.read(source, dtype="float64", always_2d=True)
         x = x.mean(axis=1)

@@ -16,6 +16,7 @@ corpora:                           # raw/<kind>/<name>, in this order: a duplica
       margin_s: 0.15               # most a span reaches into the silence on each side, never past half of it
       align_batch: 600             # rows a run of the aligner, their 16 kHz WAV ~0.4 GB under cache/spans
       align_jobs: 8                # aligner processes; the build of command/v7 runs beside it on 6 workers
+      clip_processes: 4            # spans decoded to FLAC at once: each holds a ViMD row group's audio, ~1.1 GB
   noise:
     demand: {layout: files}
     musan: {layout: files}

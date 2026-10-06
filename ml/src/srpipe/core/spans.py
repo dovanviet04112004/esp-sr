@@ -1,17 +1,21 @@
 """Long rows of a corpus cut at word bounds into spans a training window holds (KEHOACH 1.2): a corpus of screen.yaml
 with layout spans names its rows' layout under rows; rows longer than max_s are aligned word by word and cut in silences
-of at least min_gap_s into the longest runs within max_s, shorter rows kept whole, the list in interim/spans/<name>.tsv.
-Batches of align_batch rows are kept under cache/spans/<name>/, so a stopped run goes on.
-Usage: python -m srpipe.core.spans <name>"""
+of at least min_gap_s into the longest runs within max_s, shorter rows kept whole; each span decoded once into a 16 kHz
+FLAC under interim/spans/, its item, speaker and text listed in interim/spans/<name>.tsv.
+Aligned batches and written clips are kept, so a stopped run goes on. Usage: python -m srpipe.core.spans <name>"""
 
 from __future__ import annotations
 
 import argparse
 import csv
+import multiprocessing
 import shutil
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+
+import soundfile as sf
 
 from srpipe.core import audio_io, corpus, screen
 from srpipe.core.config import data_paths, load_yaml
@@ -95,6 +99,30 @@ def batch_spans(batch: list[tuple[int, corpus.Clip]], spec: dict, tts: dict, wor
     return aligned(prepared(batch, spec, work / "wav", paths["raw"]), spec, tts, work, paths["cache"])
 
 
+def clip_item(item: str) -> str:
+    """The item of the FLAC a span decodes to: its parquet's path less the suffix, then <row>[_<start>-<end>].flac."""
+    whole, _, span = item.partition("@")
+    name, _, row = whole.partition("#")
+    return f"{name.removesuffix('.parquet')}/{row}{'_' + span if span else ''}.flac"
+
+
+def write_clips(task: tuple[Path, Path, list[str]]) -> int:
+    """Each item of one parquet decoded once into its FLAC under out at the grid's rate, as read gives it; how many
+    written, a clip already there left alone."""
+    raw, out, items = task
+    reader, written = audio_io.ItemReader(raw), 0
+    for item in items:
+        path = out / clip_item(item)
+        if path.exists():
+            continue
+        part = path.with_name(path.name + ".part")
+        part.parent.mkdir(parents=True, exist_ok=True)
+        sf.write(str(part), audio_io.to_int16(reader.read(item)), grid.SAMPLE_RATE_HZ, subtype="PCM_16", format="FLAC")
+        part.replace(path)
+        written += 1
+    return written
+
+
 def write_rows(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_suffix(".partial")
@@ -135,6 +163,14 @@ def cut(name: str, cfg: dict, tts: dict, paths: dict) -> Path:
             write_rows(work / "batches" / f"{first:07d}.tsv", aligned(ready, spec, tts, work, paths["cache"]))
             print(f"spans: {min(first + size, len(rows))}/{len(rows)} rows", flush=True)
     every = [row for f in firsts for row in read_rows(work / "batches" / f"{f:07d}.tsv")]
+    by_file = defaultdict(list)
+    for row in every:
+        by_file[row["item"].partition("#")[0]].append(row["item"])
+    tasks = [(paths["raw"], paths["interim"] / "spans", items) for items in by_file.values()]
+    with multiprocessing.get_context("spawn").Pool(spec["clip_processes"]) as pool:
+        for n, _ in enumerate(pool.imap_unordered(write_clips, tasks), 1):
+            print(f"spans: {n}/{len(tasks)} files decoded", flush=True)
+    every = [row | {"item": clip_item(row["item"])} for row in every]
     out = paths["interim"] / "spans" / f"{name}.tsv"
     write_rows(out, every)
     print(f"spans: {len(every)} spans of {len(rows)} rows", flush=True)
