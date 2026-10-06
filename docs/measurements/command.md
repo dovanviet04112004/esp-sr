@@ -781,3 +781,21 @@ Cùng thước, cùng phiên, mạng float của hai run cũ (B1 không còn `fe
 
 Với chuỗi chạy liền cả buổi thu như board, không mạng nào nhận "tắt" khi có "bật" trong bộ: 5–10/22 của B1 là của thước
 cũ. v5 ở bước 70 000 thua hai run đủ bước 6 câu, gần hết ở "đóng cửa" → "mở cửa".
+
+### 12.12 "tắt" trên board: mạng nghe được, bản thu thì không (06/10)
+
+Cùng Cửa 3 hiện tại, cùng bước: run `20261004_acde692` (v4) và v5 ở 40 000 bước được 84 và 83/112 câu đúng, ở 44 000
+bước 82 và 79; có ngưỡng (δ₁ 200 ‰) v4 56–58%, v5 37–39%: v5 đoán ngang v4 nhưng biên giữa lệnh nhất và nhì hẹp hơn.
+
+Giọng người thật nói lệnh qua đường mô phỏng board (`val_commands`), v5 ở 70 000 bước: "tắt đèn" 28/29, "đóng cửa" 50/52,
+"mở cửa" 56/60, "dừng lại" 60/60, "bật đèn" 6/10; âm tiết đầu của "tắt" ra thanh sắc. Trên phiên 28/09 cả v2, v4, v5 đều
+0/22 "tắt": giải tự do âm tiết đầu ra "-ặt" thanh nặng, phụ âm đầu mất hay thành "h", "v", "k".
+
+F0 bằng bộ dò YIN riêng trên micro thô ch0, trung vị âm tiết đầu / sau: 28/09 "tắt đèn" 215 / 136 Hz (tỉ số 1,57, 7
+câu), "bật đèn" 142 / 139 Hz (1,02); `val_commands` "tắt đèn" 239 / 193 Hz (1,32, 17 câu), "bật đèn" 205 / 205 Hz
+(1,13). Thanh sắc của chủ repo rõ hơn cả các giọng mạng nhận đúng. Ba chiều cao độ mạng nhận, trung bình 15 bước từ bước
+`vad` đầu: log F0 chuẩn hoá của âm tiết đầu không tách "tắt" với "bật" ở cả hai nơi (board +0,03…+0,08 so với −0,07…−0,02;
+`val_commands` +0,05 so với +0,14), vì nó so với nền ngay trước: mạng đọc thanh âm tiết đầu từ log-mel.
+
+Dời log-mel từng phiên 28/09, từng dải, cho trung bình trên các bước `vad` bằng trung bình của `val` v5: v5 ở 70 000 bước
+vẫn 0/22 "tắt", 6/11 "đóng cửa", có ngưỡng 48%. Màu phổ và mức cố định của board không phải nguyên nhân.
