@@ -111,19 +111,20 @@ def test_long_rows_are_cut_into_aligned_runs_short_ones_kept_and_a_rerun_goes_on
     raw, calls = tmp_path / "raw", []
     rows_spec = long_rows(raw)
     spec = {"layout": "spans", "rows": rows_spec, "max_s": 4.0, "min_gap_s": 0.1, "margin_s": 0.15, "align_batch": 2}
+    spec["align_jobs"], tts = 3, {"align": {"jobs": 1}}
     paths = {"raw": raw, "interim": tmp_path / "interim", "cache": tmp_path / "cache"}
-    monkeypatch.setattr(spans.engines, "align", lambda *a: calls.append(1) or fake_align(*a))
-    out = spans.cut("vm", {"corpora": {"speech": {"vm": spec}}}, {}, paths)
+    monkeypatch.setattr(spans.engines, "align", lambda *a: calls.append(a[1]["align"]["jobs"]) or fake_align(*a))
+    out = spans.cut("vm", {"corpora": {"speech": {"vm": spec}}}, tts, paths)
     item = "speech/vm/data/train-0.parquet"
     assert corpus.clips(raw, "speech", "vm", spec) == [
         corpus.Clip(f"{item}#0", "s1", "một hai"),
         corpus.Clip(f"{item}#1@0.850-3.650", "s2", "ba bốn"),
         corpus.Clip(f"{item}#1@7.850-9.150", "s2", "năm"),
     ]
-    assert out == tmp_path / "interim" / "spans" / "vm.tsv" and len(calls) == 2
-    assert not list((tmp_path / "cache" / "spans" / "vm").glob("wav/*"))
-    spans.cut("vm", {"corpora": {"speech": {"vm": spec}}}, {}, paths)
-    assert len(calls) == 2
+    assert out == tmp_path / "interim" / "spans" / "vm.tsv" and calls == [3, 3]
+    assert not list((tmp_path / "cache" / "spans" / "vm").glob("wav*"))
+    spans.cut("vm", {"corpora": {"speech": {"vm": spec}}}, tts, paths)
+    assert calls == [3, 3]
     x = audio_io.ItemReader(raw).read(f"{item}#1@0.850-3.650")
     assert len(x) == round(2.8 * RATE)
 

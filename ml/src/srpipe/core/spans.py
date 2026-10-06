@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import csv
 import shutil
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 
 from srpipe.core import audio_io, corpus, screen
@@ -42,34 +44,55 @@ def runs(words: list[dict], max_s: float, min_gap_s: float, margin_s: float, end
     return out
 
 
-def batch_spans(batch: list[tuple[int, corpus.Clip]], spec: dict, tts: dict, work: Path, paths: dict) -> list[dict]:
-    """The spans of a batch of numbered rows, in row order: whole rows within max_s, aligned runs of the longer."""
-    reader, rate = audio_io.ItemReader(paths["raw"]), grid.SAMPLE_RATE_HZ
-    out, asked, long_rows = [], [], {}
+@dataclass
+class Prepared:
+    """A batch of numbered rows read for the aligner: its rows within max_s as spans, its longer rows as WAV in wavs."""
+
+    whole: list[tuple[int, dict]]
+    asked: list[dict]
+    long_rows: dict[str, tuple[int, corpus.Clip, list[str], float]]
+    wavs: Path
+
+
+def prepared(batch: list[tuple[int, corpus.Clip]], spec: dict, wavs: Path, raw: Path) -> Prepared:
+    """batch read from raw/: rows within max_s kept whole, the longer written to wavs at the grid's rate."""
+    reader, rate = audio_io.ItemReader(raw), grid.SAMPLE_RATE_HZ
+    whole, asked, long_rows = [], [], {}
     for k, clip in batch:
         said = corpus.words(clip.text or "")
         x = reader.read(clip.item)
         if not said or not len(x):
             continue
         if len(x) <= spec["max_s"] * rate:
-            out.append((k, {"item": clip.item, "speaker": clip.speaker or "", "text": " ".join(said)}))
+            whole.append((k, {"item": clip.item, "speaker": clip.speaker or "", "text": " ".join(said)}))
             continue
         key = f"r{k:07d}"
-        audio_io.write_wav(work / "wav" / f"{key}.wav", x)
-        asked.append({"id": key, "wav": str(work / "wav" / f"{key}.wav"), "text": " ".join(said)})
+        audio_io.write_wav(wavs / f"{key}.wav", x)
+        asked.append({"id": key, "wav": str(wavs / f"{key}.wav"), "text": " ".join(said)})
         long_rows[key] = (k, clip, said, len(x) / rate)
-    times = engines.align(asked, tts, work, paths["cache"]) if asked else {}
-    for key, (k, clip, said, seconds) in long_rows.items():
+    return Prepared(whole, asked, long_rows, wavs)
+
+
+def aligned(ready: Prepared, spec: dict, tts: dict, work: Path, cache: Path) -> list[dict]:
+    """The spans of a prepared batch in row order: its whole rows and the aligned runs of its longer rows."""
+    times = engines.align(ready.asked, tts, work, cache) if ready.asked else {}
+    out = list(ready.whole)
+    for key, (k, clip, said, seconds) in ready.long_rows.items():
         words = times.get(key, [])
         if [w["word"] for w in words] != said:
             continue
         for start, end, run in runs(words, spec["max_s"], spec["min_gap_s"], spec["margin_s"], seconds):
             item = f"{clip.item}@{start:.3f}-{end:.3f}"
             out.append((k, {"item": item, "speaker": clip.speaker or "", "text": " ".join(run)}))
-    shutil.rmtree(work / "wav", ignore_errors=True)
+    shutil.rmtree(ready.wavs, ignore_errors=True)
     for folder in work.glob("align_*"):
         shutil.rmtree(folder)
     return [row for _, row in sorted(out, key=lambda kr: kr[0])]
+
+
+def batch_spans(batch: list[tuple[int, corpus.Clip]], spec: dict, tts: dict, work: Path, paths: dict) -> list[dict]:
+    """The spans of a batch of numbered rows, in row order: whole rows within max_s, aligned runs of the longer."""
+    return aligned(prepared(batch, spec, work / "wav", paths["raw"]), spec, tts, work, paths["cache"])
 
 
 def write_rows(path: Path, rows: list[dict]) -> None:
@@ -92,17 +115,29 @@ def cut(name: str, cfg: dict, tts: dict, paths: dict) -> Path:
     spec = cfg["corpora"]["speech"][name]
     if spec["layout"] != "spans":
         raise ValueError(f"speech/{name}: layout {spec['layout']}, not spans")
+    tts = tts | {"align": tts["align"] | {"jobs": spec.get("align_jobs", tts["align"]["jobs"])}}
     rows = list(enumerate(corpus.clips(paths["raw"], "speech", name, spec["rows"])))
-    work = paths["cache"] / "spans" / name
-    every = []
-    for first in range(0, len(rows), spec["align_batch"]):
-        done = work / "batches" / f"{first:07d}.tsv"
-        if not done.exists():
-            write_rows(done, batch_spans(rows[first : first + spec["align_batch"]], spec, tts, work, paths))
-        every += read_rows(done)
-        print(f"spans: {min(first + spec['align_batch'], len(rows))}/{len(rows)} rows, {len(every)} spans", flush=True)
+    work, size = paths["cache"] / "spans" / name, spec["align_batch"]
+    for stale in [*work.glob("wav*"), *work.glob("align_*")]:
+        shutil.rmtree(stale)
+    firsts = range(0, len(rows), size)
+    todo = [f for f in firsts if not (work / "batches" / f"{f:07d}.tsv").exists()]
+
+    def read(first: int) -> Prepared:
+        return prepared(rows[first : first + size], spec, work / f"wav_{first:07d}", paths["raw"])
+
+    # The next batch is read while the aligner, a Docker run this thread only waits on, works on this one.
+    with ThreadPoolExecutor(1) as reader:
+        ahead = reader.submit(read, todo[0]) if todo else None
+        for n, first in enumerate(todo):
+            ready = ahead.result()
+            ahead = reader.submit(read, todo[n + 1]) if n + 1 < len(todo) else None
+            write_rows(work / "batches" / f"{first:07d}.tsv", aligned(ready, spec, tts, work, paths["cache"]))
+            print(f"spans: {min(first + size, len(rows))}/{len(rows)} rows", flush=True)
+    every = [row for f in firsts for row in read_rows(work / "batches" / f"{f:07d}.tsv")]
     out = paths["interim"] / "spans" / f"{name}.tsv"
     write_rows(out, every)
+    print(f"spans: {len(every)} spans of {len(rows)} rows", flush=True)
     return out
 
 
