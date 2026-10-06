@@ -8,6 +8,14 @@ corpora:                           # raw/<kind>/<name>, in this order: a duplica
     vlsp: {layout: parquet, files: data/*.parquet}
     lsvsc: {layout: parquet, files: data/*.parquet}
     speech_massive_vi: {layout: parquet, files: data/*.parquet, text: utt, speaker: speaker_id}
+    vimd:                          # rows ~19 s: cut at word bounds by make spans NAME=vimd (KEHOACH 1.2)
+      layout: spans
+      rows: {layout: parquet, files: data/*.parquet, text: text, speaker: speakerID}
+      max_s: 8.0                   # of a span: with its 2 s lead and its tail a window stays within train.max_s
+      min_gap_s: 0.1               # least silence between two words a span may end in
+      margin_s: 0.15               # most a span reaches into the silence on each side, never past half of it
+      align_batch: 600             # rows a run of the aligner, their 16 kHz WAV ~0.4 GB under cache/spans
+      align_jobs: 8                # aligner processes; the build of command/v7 runs beside it on 6 workers
   noise:
     demand: {layout: files}
     musan: {layout: files}

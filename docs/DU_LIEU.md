@@ -17,7 +17,7 @@ Dữ liệu đã tải và đã xử lí — số đo trên đĩa, không phải
 | Bud500 (VietAI) | `command`, chỉ tập học: người nói ba miền, không có mã người nói | CC BY-NC-SA 4.0, chỉ nghiên cứu | 462,08 (học 451,41; kiểm 5,34; thử 5,33) | không rõ | 27/09 | sha256 LFS từng tệp (`manifests/speech/bud500.yaml`) | **xoá khỏi `raw/` ngày 06/10** theo chủ dự án: 437 giờ thêm vào không đổi Cửa 3 (`measurements/command.md` §12.13); tải lại bằng `scripts/10_prepare.sh speech/bud500`. `ns/v1`, giọng mẫu TTS của `wake` và `command`, nguồn local của `hf_extract` còn ghi tên nó: dựng lại chúng phải tải lại trước |
 | LSVSC (bản parquet trên Hugging Face, `doof-ferb/LSVSC@269de060`) | `command`, chỉ tập học: không có mã người nói | CC BY 4.0 theo bản sao | 100,66 | không rõ; nhãn giới (nam 48% trên phần Hugging Face thống kê), phương ngữ (Bắc 86%), tuổi | 06/10 | sha256 LFS từng tệp (`manifests/speech/lsvsc.yaml`) | ở `raw/speech/lsvsc`; 56 823 câu, WAV 16 kHz |
 | Speech-MASSIVE, phần tiếng Việt (`doof-ferb/Speech-MASSIVE_vie@3a47437e`) | `command`, chỉ tập học trong `command/v7` để `val`, `test` giữ như v6 | CC BY 4.0 theo bản sao | 5,44 | 44, cột `speaker_id` | 06/10 | sha256 LFS từng tệp (`manifests/speech/speech_massive_vi.yaml`) | ở `raw/speech/speech_massive_vi`; 5 122 câu ra lệnh cho trợ lý ảo, 16 kHz |
-| ViMD (`nguyendv02/ViMD_Dataset@3a5b3015`) | `command`, chỉ tập học | CC BY-NC-ND 4.0, không phái sinh | ~100 🔬 | mã người nói, giới, 63 tỉnh | 06/10 | sha256 LFS từng tệp (`manifests/speech/vimd.yaml`) | ở `raw/speech/vimd`, 59,8 GB; câu ~19 s, cắt theo mốc từ thành đoạn tới 8 s (`make spans NAME=vimd`, KẾ HOẠCH §1.2), danh sách ở `interim/spans/vimd.tsv` |
+| ViMD (`nguyendv02/ViMD_Dataset@3a5b3015`, thời sự của đài 63 tỉnh) | `command`, chỉ tập học | CC BY-NC-ND 4.0, không phái sinh | 97,16 trong 55 203 đoạn | mã người nói, giới, 63 tỉnh | 06/10 | sha256 LFS từng tệp (`manifests/speech/vimd.yaml`) | ở `raw/speech/vimd`, 59,8 GB, 18 949 câu ~19 s; cắt theo mốc từ thành đoạn tới 8 s (`make spans NAME=vimd`, KẾ HOẠCH §1.2), 32 lô 600 câu, khoảng 4,7 phút mỗi lô cạnh một lượt dựng; danh sách ở `interim/spans/vimd.tsv` |
 | Lệnh điều khiển nhà (repo `edge-ai-voice-control-esp32`, commit `ae3957e`) | `command`, chỉ tập học: không có mã người nói; 4 lệnh trùng bộ lệnh (bật/tắt đèn, bật/tắt quạt), thêm "bật hết", "tắt hết" | MIT, giữ thông báo bản quyền ở `LICENSE` | 0,37 lệnh (1 343 mẩu 1 s: 6 lệnh × 200 học + 143 thử) + 260 mẩu nhiễu phòng | không rõ, tác giả tự thu | 29/09 | cây `e25d54a3…` (`manifests/speech/kws_vi_command.yaml`) | ở `raw/speech/kws_vi_command`; chỉ đọc `dataset_1s` và `data_test/data_1s`, bản `data_cutted` trùng lời |
 | Mẩu trích theo lời `hf_extract` (`ml/configs/common/extract.yaml`): câu của 25 kho tiếng Việt trên Hugging Face và của FPT, VLSP, Bud500 có lời đọc ra một cụm, cắt lấy đúng cụm ấy (KẾ HOẠCH §1.2) | dương `wake`, học `command`; chỉ tập học: không có mã người nói | theo từng kho, ghim `revision` ở manifest | 4,49 giờ, 35 643 mẩu: dừng lại 13 801, mở cửa 11 631, đóng cửa 6 929, **trợ lý 2 032**, bật đèn 583, tắt đèn 544, giảm âm lượng 45, tăng âm lượng 42, bật quạt 31, tắt quạt 5; nhiều nhất GigaSpeech2 14 098, PhoAudiobook 4 284 | không rõ | 29–30/09 | `clips.tsv` `f61a856f…` (`manifests/speech/hf_extract.yaml`) | ở `raw/speech/hf_extract`, 574 MB; câu gốc đã xoá sau khi cắt; YODAS2 đã quét, chưa kéo (`hold`); WorldSpeech không có âm thanh, bỏ; dolly-audio (2 571 mẩu, 139 "trợ lý") tự gắn thẻ `synthetic` trên Hugging Face: mẩu mang nhãn `synth`, `wake` không lấy làm người thật (còn 1 893 "trợ lý") |
 | MUSAN | `ns`, tăng cường, nhiễu của đường mô phỏng board | CC BY 4.0 phần lớn; phần nhạc mỗi tệp một giấy phép | 109,29: nhạc 42,61 (660 tệp), nhiễu 6,23 (930), lời nói 60,45 (426) | — | 27/09 | `86d1061c…` (`manifests/noise/musan.yaml`) | ở `raw/noise/musan` |
@@ -54,6 +54,7 @@ bảng quét ở `measurements/data_screen.md`.
 | Bud500 | 15 mẩu, 0,02 h | trùng 10 | 462,06 |
 | LSVSC (06/10) | 5 mẩu, 0,01 h | nhịp lời ngoài khoảng 5 | 100,65 |
 | Speech-MASSIVE (06/10) | 111 mẩu, 0,15 h | nhịp lời ngoài khoảng 108, câm 3 | 5,29 |
+| ViMD, đoạn (06/10) | 64 đoạn, 0,10 h | trùng 45, nhịp lời ngoài khoảng 19 | 97,06 |
 | DNS Challenge | 132 mẩu, 0,36 h | câm 109, trùng 23 | 180,09 |
 | MUSAN | 1 mẩu | câm | 109,29 |
 | OpenSLR 28 | 843 mẩu, 5,91 h | `pointsource_noises` là bản chép nhiễu MUSAN: 842 trùng | 20,34 |
@@ -81,8 +82,10 @@ hình và sha256 ở `manifest.yaml` của tập. Kho phòng `interim/scenes/dev
 `pitch` và tăng giảm tốc độ, mỗi nhân chỉ dựng chừng 1,6 lần thời gian thực; profile hai phiên BUD500 (16 mẩu) cho thấy
 thời gian nằm ở các vòng lặp Python của bản soi gương: bộ giới hạn của `agc` chạy từng mẫu qua ba hàng đợi 24%, `pitch`
 20% (một nửa là biến đổi khoảng cách), `vad` 17% (bộ lọc tách băng từng mẫu), `ns_omlsa` 14%, đọc và giải mã tiếng 11%.
-Bốn vòng ấy (`agc`, biquad của `hpf`, bộ lọc tách băng của `vad`, biến đổi khoảng cách của `pitch`) biên dịch bằng numba
-(KẾ HOẠCH §4.5.1), cùng thứ tự phép float32:
+Các vòng nóng của bản soi gương biên dịch bằng numba (KẾ HOẠCH §4.5.1), cùng thứ tự phép float32: bộ giới hạn và tổng
+năng lượng của `agc`, biquad của `hpf`, cả `vad` (bộ lọc tách băng, DF-I, GMM, bộ dò mức nền), cả một bước `ns_omlsa`
+cùng các hàm dùng chung mà `gsc`, `doa`, `bss` gọi, và của `pitch` biến đổi khoảng cách, NCCF ra POV, đặc trưng đường.
+Số đo lúc chuyển bốn vòng đầu:
 
 | Đo | numpy | numba | Bit |
 |---|---|---|---|
@@ -91,8 +94,8 @@ Bốn vòng ấy (`agc`, biquad của `hpf`, bộ lọc tách băng của `vad`,
 | Một shard 32 mẩu BUD500, `agc` và `pitch` | 51,3 s | 32,3 s (1,59×) | 4/4 tệp trùng sha256 |
 | Dựng lại shard 3 của `command/v3/train_vivos`, đủ bốn vòng | 371 s (chỉ `agc`, `pitch`) | 151 s | 4/4 tệp trùng bản đã dựng |
 
-Mọi bộ vàng của `srpipe.dsp` sinh lại không đổi tệp nào. Còn bằng numpy: `ns_omlsa` (chừng một phần tư), phần GMM của
-`vad`, NCCF của `pitch`, `doa`.
+Mọi bộ vàng của `srpipe.dsp` sinh lại không đổi tệp nào. Còn Python và numpy: vòng từng khung của `pitch` (lọc hạ mẫu,
+NCCF) và phép dò của `doa` ngoài `_steer`. Chỗ chậm còn lại của một lượt dựng chưa profile 🔬.
 
 ## 4. Bản thu qua board
 
