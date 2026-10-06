@@ -6,7 +6,8 @@ corpora:                           # raw/<kind>/<name>, in this order: a duplica
     vivos: {layout: vivos, parts: [train, test]}
     fpt_open: {layout: parquet, files: data/*.parquet}
     vlsp: {layout: parquet, files: data/*.parquet}
-    bud500: {layout: parquet, files: data/*.parquet}
+    lsvsc: {layout: parquet, files: data/*.parquet}
+    speech_massive_vi: {layout: parquet, files: data/*.parquet, text: utt, speaker: speaker_id}
   noise:
     demand: {layout: files}
     musan: {layout: files}

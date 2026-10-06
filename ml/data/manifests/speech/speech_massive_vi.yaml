@@ -1,0 +1,12 @@
+name: speech_massive_vi
+source_url: https://huggingface.co/datasets/doof-ferb/Speech-MASSIVE_vie
+hf_dataset: doof-ferb/Speech-MASSIVE_vie
+revision: 3a47437e80f4f24e53a9a5c8128aeb0ec37efc75
+release: Speech-MASSIVE, the Vietnamese part as re-packed in parquet, virtual-assistant requests read aloud
+downloaded: 2026-10-06
+license: CC-BY-4.0 as the mirror states
+counts: {utterances: 5122, hours: 5.44, speakers: 44}
+consumed_by: [command]
+notes: >-
+  Fetched by ml/scripts/10_prepare.sh speech/speech_massive_vi, each parquet checked against its LFS sha256. Text in
+  column utt, speaker in speaker_id, so it splits by speaker (KEHOACH 1.3).

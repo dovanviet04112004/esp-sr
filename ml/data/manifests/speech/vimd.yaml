@@ -1,0 +1,11 @@
+name: vimd
+source_url: https://huggingface.co/datasets/nguyendv02/ViMD_Dataset
+hf_dataset: nguyendv02/ViMD_Dataset
+revision: 3a5b30157034e7eadd5c75fae1a820c6f9383398
+release: ViMD (Vietnamese Multi-Dialect), speakers of 63 provinces with region, province, speaker id and gender per row
+downloaded: 2026-10-06
+license: CC-BY-NC-ND-4.0 as the dataset card states, no derivatives
+consumed_by: [command]
+notes: >-
+  Fetched by ml/scripts/10_prepare.sh speech/vimd, each parquet checked against its LFS sha256. Rows run ~19 s, past
+  train.max_s: they are cut at word bounds before any split (KEHOACH 1.2).
