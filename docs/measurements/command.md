@@ -811,3 +811,19 @@ Ba cách đưa cửa sổ 28/09 vào mạng, Cửa 3 không ngưỡng / có ngư
 Cao độ lấy giọng người nói làm mốc không đưa "tắt" về ở cả hai mạng. v5 học toàn cửa sổ có đủ 2,0 s trước câu nên
 phụ thuộc vào đó: còn 0,5 s nó mất 23 câu, v4 (học mẩu cộng 0,3 s) không mất câu nào; lệnh nói sát nhau trên board có
 khoảng trước câu ngắn như thế.
+
+Tám phiên bật/tắt của chủ repo ngày 04/10 (80 cm, mười lần mỗi câu; v2, v4 chưa học chúng, v5 học chúng trong shard
+board), chấm như Cửa 3 với bộ mặc định cộng "bật/tắt ti vi", "bật/tắt điều hòa"; ô là top-1 đúng / cửa sổ, trong ngoặc
+số được nhận ở δ₁ 200 ‰, δ₂ 50 ‰:
+
+| Câu | v2 (`128545c`) | v4 (`acde692`) | v5, 70 000 |
+|---|---|---|---|
+| tắt đèn | 4/14 (0) | 2/14 (0) | 6/14 (0) |
+| tắt quạt | 10/12 (0) | 10/12 (0) | 3/12 (0) |
+| tắt ti vi | 6/11 (0) | 4/11 (0) | 10/11 (0) |
+| tắt điều hòa | 6/11 (0) | 4/11 (0) | 2/11 (0) |
+| bật đèn / quạt / ti vi / điều hòa | 12/12 / 12/12 / 10/11 / 10/10 (43) | 12/12 / 12/12 / 10/11 / 10/10 (42) | 12/12 / 12/12 / 8/11 / 9/10 (0) |
+
+Không mạng nào nhận một câu "tắt" nào của chủ repo qua board khi có ngưỡng; câu sai luôn ra "bật" cùng vật. Phiên 28/09
+không phải trường hợp lẻ. v5 học chính các phiên này mà không nhận câu nào, cả "bật": biên của nó trên bản thu board
+không qua ngưỡng.
