@@ -136,8 +136,11 @@ giọng mẫu cho TTS hay làm nhiễu để trộn. `raw/` giữ nguyên; mẩu
 ~19 s) khai layout `spans` ở `screen.yaml`: câu dài hơn `max_s` được căn từng từ bằng bộ căn của §3.11 (mục `align`
 của `configs/common/tts.yaml`), rồi cắt ở khoảng lặng giữa hai từ dài ít nhất `min_gap_s` thành đoạn dài nhất trong
 `max_s`, mỗi đoạn mang lời của chính các từ trong nó; câu ngắn hơn giữ nguyên, câu không căn được hay phần không có
-khoảng lặng nào trong `max_s` thì bỏ. Danh sách `<mục>@<đầu>-<cuối>`, người nói, lời nằm ở `interim/spans/<kho>.tsv`;
-`raw/` giữ nguyên, sàng lọc và split đọc đoạn qua danh sách ấy như đọc một mẩu.
+khoảng lặng nào trong `max_s` thì bỏ. Mỗi đoạn được giải mã một lần thành FLAC 16 kHz một kênh (cắt ở tần số gốc rồi
+đổi tần số, như bộ đọc đọc `<mục>@<đầu>-<cuối>`) ở `interim/spans/speech/<kho>/`, tên mục như mẩu của kho
+(`speech/<kho>/…flac`), và bộ đọc mục tìm ở `raw/` rồi ở `interim/spans/`: parquet của ViMD nén chung âm thanh cả nhóm
+~100 câu, đọc một câu phải giải nén cả nhóm, ~1 GB mỗi tiến trình, nên 12 tiến trình dựng làm máy 10 GB hết RAM.
+Danh sách mục, người nói, lời nằm ở `interim/spans/<kho>.tsv`; `raw/` giữ nguyên.
 
 Một mẩu bị loại theo luật đầu tiên nó phạm, xét từ trên xuống:
 
@@ -1566,7 +1569,7 @@ ml/
 │   │   │                              #   xoá câu gốc; làm tiếp được khi bị ngắt (§1.2)
 │   │   ├── screen.py                  # ★ sàng lọc (§1.2): đo mọi mẩu một lần, chấm theo luật, danh sách loại
 │   │   ├── spans.py                   # câu dài của một kho căn từng từ, cắt ở khoảng lặng thành đoạn vừa cửa sổ
-│   │   │                              #   học; danh sách ở interim/spans/<kho>.tsv (§1.2)
+│   │   │                              #   học, mỗi đoạn một FLAC 16 kHz ở interim/spans/ (§1.2)
 │   │   ├── phrases.py                 # dò cụm trên lời của mọi kho: dòng âm tiết, mã thành phần âm tiết, cụm cách một
 │   │   │                              #   cụm cho trước vài thành phần, cụm mở đầu bằng âm tiết đầu của nó; wake và
 │   │   │                              #   command lấy âm bản gần âm từ đây
