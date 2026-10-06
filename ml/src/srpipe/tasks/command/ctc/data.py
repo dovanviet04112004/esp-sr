@@ -99,6 +99,24 @@ def command_rows(spec: dict, raw: Path, learned: list[dict]) -> list[splits.Row]
     return rows
 
 
+def source_words(spec: dict, raw: Path, rows: list[splits.Row]) -> set[tuple[str, ...]]:
+    """The words of the whole sentence each VAL_COMMANDS row was cut from, as the extract's index records it."""
+    index = {f"speech/{spec['extract']}/{r['file']}": r for r in extract.read_index(raw / "speech" / spec["extract"])}
+    return {tuple(corpus.words(index[r.item]["text"])) for r in rows}
+
+
+def without_sources(files: dict, text_of: dict[str, str | None], held: set[tuple[str, ...]]) -> tuple[dict, int]:
+    """The files with every train row whose whole text is one of held left out, and how many left (KEHOACH 1.3)."""
+    out, left = {}, 0
+    for name, rows in files.items():
+        kept = rows
+        if name.startswith("train_"):
+            kept = [r for r in rows if tuple(corpus.words(text_of.get(r.item) or "")) not in held]
+            left += len(rows) - len(kept)
+        out[name] = kept
+    return out, left
+
+
 def capped(files: dict, seconds: dict[str, float], spec: dict) -> dict:
     """The files with each train file of a corpus under an hours cap drawn down to it, rows in a seeded order until
     their length passes the cap, then back in listing order."""
@@ -117,7 +135,9 @@ def capped(files: dict, seconds: dict[str, float], spec: dict) -> dict:
     return out
 
 
-def notes(spec: dict, files: dict, dropped: dict[str, int], seconds: dict[str, float], sessions: list[str]) -> str:
+def notes(
+    spec: dict, files: dict, dropped: dict[str, int], seconds: dict[str, float], sessions: list[str], sourced: int = 0
+) -> str:
     """SPLIT.md ahead of the checksums: rules, seed, command, the board sessions given to train and each file's size."""
     speakers = {name: len({r.spk for r in rows} - {splits.ABSENT}) for name, rows in files.items()}
     table = "\n".join(
@@ -135,7 +155,8 @@ def notes(spec: dict, files: dict, dropped: dict[str, int], seconds: dict[str, f
     )
     tuned = (
         f"- `{VAL_COMMANDS}`: tới {commands['per_command']} mẩu mỗi lệnh đã học của kho trích `{commands['extract']}`, "
-        "người thật nói đúng lời lệnh, rút theo seed; không học, chỉ để chọn δ₁, δ₂ (KẾ HOẠCH §1.3, §3.12).\n"
+        "người thật nói đúng lời lệnh, rút theo seed; không học, chỉ để chọn δ₁, δ₂ (KẾ HOẠCH §1.3, §3.12). Câu nguồn "
+        f"của các mẩu ấy, khớp theo lời cả câu, không vào `train`: bỏ {sourced} mẩu.\n"
         if (commands := spec.get("commands"))
         else ""
     )
@@ -346,16 +367,19 @@ def main(argv: list[str] | None = None) -> int:
     listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))
     unseen = unseen_phrases(load_yaml(command.CONFIG)["unseen"], listed)
     seconds = screen.lengths(screening, paths, "speech")
-    files, dropped = build(spec, screen.kept_clips(screening, paths, "speech"), unseen)
-    files = capped(files, seconds, spec)
+    clips = screen.kept_clips(screening, paths, "speech")
+    files, dropped = build(spec, clips, unseen)
+    files, sourced = capped(files, seconds, spec), 0
     if commands := spec.get("commands"):
         learned = command.learned(load_yaml(command.CONFIG))
         files[VAL_COMMANDS] = command_rows(commands | {"seed": spec["seed"]}, paths["raw"], learned)
+        held = source_words(commands, paths["raw"], files[VAL_COMMANDS])
+        files, sourced = without_sources(files, {c.item: c.text for c in clips}, held)
         index = extract.read_index(paths["raw"] / "speech" / commands["extract"])
         seconds |= {f"speech/{commands['extract']}/{r['file']}": r["seconds"] for r in index}
     out = paths["splits"] / "command" / spec["version"]
     sessions = [r["session"] for r in board_rows(paths)] if spec.get("board") else []
-    splits.write_version(out, files, notes(spec, files, dropped, seconds, sessions))
+    splits.write_version(out, files, notes(spec, files, dropped, seconds, sessions, sourced))
     problems = splits.check_version(out)
     print("\n".join(f"{name}: {len(rows)} rows, {splits.hours(rows, seconds):.2f} h" for name, rows in files.items()))
     print(f"left learning: {dropped}")

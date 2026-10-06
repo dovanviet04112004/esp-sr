@@ -181,6 +181,22 @@ def test_val_commands_hold_real_clips_heard_saying_just_a_learned_command_at_mos
     assert {r.item for r in every} == {f"speech/ext/bat_den/{n}.wav" for n in "acd"}
 
 
+def test_the_source_sentence_of_a_val_commands_clip_leaves_train_and_only_train(tmp_path: Path) -> None:
+    folder = tmp_path / "speech" / "ext"
+    folder.mkdir(parents=True)
+    head = "file\tphrase\tseconds\torigin\ttext\tsource\trevision\tkey\theard\n"
+    row = "bat_den/a.wav\tbật đèn\t0.8\tpublic\tAnh bật đèn lên nhé.\tdoof-ferb/LSVSC\t-\t-\tbật đèn\n"
+    (folder / "clips.tsv").write_text(head + row, encoding="utf-8")
+    tuned = [splits.Row("speech/ext/bat_den/a.wav", splits.ABSENT, splits.ABSENT, "public")]
+    held = data.source_words({"extract": "ext"}, tmp_path, tuned)
+    assert held == {("anh", "bật", "đèn", "lên", "nhé")}
+    rows = {k: splits.Row(f"speech/lsvsc/x.parquet#{k}", splits.ABSENT, splits.ABSENT, "public") for k in range(3)}
+    files = {"test.txt": [rows[2]], "train_lsvsc.txt": [rows[0], rows[1]], "val_commands.txt": tuned}
+    said = {rows[0].item: "anh bật đèn lên nhé", rows[1].item: "anh bật đèn", rows[2].item: "Anh bật đèn lên nhé!"}
+    kept, left = data.without_sources(files, said, held)
+    assert kept == files | {"train_lsvsc.txt": [rows[1]]} and left == 1
+
+
 def test_the_board_cut_keeps_windows_holding_one_utterance_alone_named_by_it(tmp_path: Path, monkeypatch) -> None:
     pytest.importorskip("torch")
     from srpipe.tasks.command import eval as gate
