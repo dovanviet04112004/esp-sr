@@ -964,3 +964,15 @@ Tiếng 28/09 ở micro nhỏ hơn 04/10 chừng 15 dB, nền nhỏ hơn 10 dB (
 Mức thu không đổi quyết định: 28/09 nâng tới mức 04/10 vẫn 1/22 "tắt", 04/10 hạ tới mức 28/09 vẫn đúng. Chỗ khác của
 "tắt" 28/09 nằm ở tiếng nói hôm ấy, khoảng cách và vang (1–3 m so với 80 cm) hoặc firmware thu; dữ liệu hiện có không
 tách được ba thứ ấy.
+
+Âm tiết đầu của chủ repo, micro 0 thô, mốc từ của bộ căn §3.11, F0 theo YIN (khung 40 ms, bước 10 ms), trung vị theo câu
+có ít nhất 3 khung có thanh:
+
+| Buổi | Từ | Câu | Dài | F0 | F0 / âm tiết hai |
+|---|---|---|---|---|---|
+| 04/10, 80 cm | "bật" / "tắt" | 38 / 11 | 150 / 140 ms | 169 / 222 Hz | 1,06 / 1,29 |
+| 28/09, 1 m | "bật" / "tắt" | 4 / 5 | 195 / 150 ms | 141 / 213 Hz | 1,01 / 1,52 |
+| 28/09, 3 m | "bật" / "tắt" | 3 / 5 | 200 / 130 ms | 144 / 219 Hz | 1,03 / 1,64 |
+
+"tắt" của 28/09 cao và tách khỏi âm tiết sau rõ hơn của 04/10; độ dài như nhau. Cách nói hôm ấy không làm "tắt" giống
+"bật" hơn. Còn khoảng cách và vang 1–3 m, và firmware thu `368`: chỉ phiên mới ở 1–3 m với firmware hiện tại tách được.
