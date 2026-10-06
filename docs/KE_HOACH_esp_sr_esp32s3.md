@@ -974,10 +974,14 @@ feedforward bề rộng 320, hai khối tích chập có cổng (nhân theo chi�
 cộng một hệ số chuẩn hoá và một nhánh tắt; đầu CTC. MultiNet7 không có chiều cao độ nào và bản tiếng Trung của nó bỏ
 thanh; `ctc` giữ đơn vị của ADR-0010 và đặc trưng của ADR-0017 — log-mel 80 cộng ba chiều cao độ, 44 đơn vị có nhãn thanh — và đầu ra
 31,25 khung mỗi giây cho chuỗi đơn vị có thanh 🔬. Tăng cường lúc học, mỗi lần rút mới khi câu vào lô, trước mặt nạ
-SpecAugment: đổi nhịp giữ cao độ (kéo hay nén trục bước theo hệ số rút log-đều trong `train.augment.tempo`, không bao
-giờ ít bước hơn số khung CTC cần cho chuỗi đơn vị của câu, delta cao độ nhân theo), time-warp của SpecAugment quanh
-một bước, và một độ nghiêng thẳng qua các dải mel; cộng đổi tốc độ lúc mô phỏng của §1.2, vì tập học gần như không có
-câu nói nhanh (`measurements/command.md` §4). Đổi nhịp và time-warp lấy nguyên bước gốc gần nhất cho mỗi bước mới, bỏ
+SpecAugment: cửa sổ mở ở một khoảng trước bước có tiếng đầu rút đều trong `train.augment.lead_s`, không dài hơn khoảng
+cửa sổ đã có, vì board mở 2,0 s nhưng lệnh nói sát nhau bị cửa sổ trước chặn ngắn hơn, và mạng chỉ học đúng 2,0 s thì
+dựa vào nó (`measurements/command.md` §12.12); đổi nhịp giữ cao độ (kéo hay nén trục bước theo hệ số rút log-đều trong
+`train.augment.tempo`, không bao giờ ít bước hơn số khung CTC cần cho chuỗi đơn vị của câu, delta cao độ nhân theo),
+time-warp của SpecAugment quanh một bước, một độ nghiêng thẳng qua các dải mel, và co giãn trục tần số (VTLP: mỗi dải mel
+lấy phổ ở tần số tâm của nó chia một hệ số rút log-đều trong `train.augment.vtlp`; ba chiều cao độ là tỉ số nên giữ
+nguyên), để mạng gặp cả giọng trầm và giọng cao hơn tập học (`measurements/command.md` §12.12); cộng đổi tốc độ lúc mô
+phỏng của §1.2, vì tập học gần như không có câu nói nhanh (`measurements/command.md` §4). Đổi nhịp và time-warp lấy nguyên bước gốc gần nhất cho mỗi bước mới, bỏ
 bớt hay lặp lại bước, không bao giờ trộn hai bước: board không bao giờ đưa khung trộn, và mạng học trên khung trộn
 nghe khung thật kém hơn (`measurements/command.md` §8). Tập học là **mọi mẩu tiếng nói đã sàng lọc** của các kho ở `split.corpora`,
 không trần giờ (từ split `command/v3`), cắt thành mẫu như board cắt cửa sổ (§1.2), cộng các phiên thu qua board mà `split.board` giao cho `train` (§1.3): câu cắt như Cửa 3 qua
