@@ -324,22 +324,29 @@ def board(cfg: dict, spec: dict, paths: dict, said: dict[str, str], decided_of: 
     """Every counted session of the board manifest, its utterances decided by decided_of(clean, features, pitch,
     spans). A session saying the text of a command of said expects that command of each window that overlaps an
     utterance the chain finds in the session alone from a fresh start; its other windows, a chain used to the speaker
-    catching a breath or a noise, are scored apart as kind EXTRA, to be rejected."""
+    catching a breath or a noise, are scored apart as kind EXTRA, to be rejected. A window over an utterance spec's
+    left_out_utterances names, <session>#<k> for the k-th of the session alone, is not scored."""
     command_of = {tuple(corpus.sounds(text)): cid for cid, text in said.items()}
     device_cfg = device_of(cfg)
     chain_cfg = ChainConfig(balance_gains=device.load_microphones(device_cfg["microphone"]).gains)
     mel = Mel(MelConfig(**device_cfg["features"]))
+    left: dict[str, set[int]] = {}
+    for named in spec.get("left_out_utterances", []):
+        session, _, k = named.partition("#")
+        left.setdefault(session, set()).add(int(k))
     results = []
     for r, clean, vad, features, pitch in heard_sessions(cfg, spec, paths):
         spans = device.utterances(vad)
         decided = decided_of(clean, features, pitch, spans) if spans else []
         expected = expected_of(r["kind"], r["prompt"], command_of)
-        kept = [True] * len(spans)
-        if expected != REJECT:
-            kept = [bool(o) for o in owners(spans, said_alone(r, paths, chain_cfg, mel))]
-        said_right = [d for d, k in zip(decided, kept, strict=True) if k]
+        gone = left.get(r["session"], set())
+        owned = owners(spans, said_alone(r, paths, chain_cfg, mel)) if expected != REJECT or gone else []
+        kept = [bool(o) for o in owned] if expected != REJECT else [True] * len(spans)
+        dropped = [bool(set(o) & gone) for o in owned] if gone else [False] * len(spans)
+        scored = list(zip(decided, kept, dropped, strict=True))
+        said_right = [d for d, k, x in scored if k and not x]
         results.append(Scored(r["session"], r["kind"], r["distance_cm"], r["prompt"], expected, said_right))
-        if extra := [d for d, k in zip(decided, kept, strict=True) if not k]:
+        if extra := [d for d, k, x in scored if not k and not x]:
             results.append(Scored(r["session"], EXTRA, r["distance_cm"], r["prompt"], REJECT, extra))
     return results
 

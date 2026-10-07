@@ -232,3 +232,21 @@ def test_a_command_sessions_windows_its_utterances_alone_miss_are_extra_and_to_b
         (gate.EXTRA, REJECT, [150]),
     ]
     assert gate.owners([(0, 4), (5, 9), (3, 12)], [(4, 4), (11, 20)]) == [[0], [], [0, 1]]
+
+
+def test_a_window_over_an_utterance_left_out_is_scored_neither_as_said_nor_as_extra(monkeypatch) -> None:
+    row = {"session": "s1", "kind": "cmd", "distance_cm": "100", "prompt": "bật đèn", "board": "b"}
+    on, alone = np.zeros(400, dtype=bool), np.zeros(400, dtype=bool)
+    on[50:80] = on[150:170] = on[250:290] = True
+    alone[52:78] = alone[255:285] = True
+    monkeypatch.setattr(gate, "heard_sessions", lambda *_: iter([(row, None, on, None, None)]))
+    monkeypatch.setattr(gate, "channels_of", lambda _folder: None)
+    monkeypatch.setattr(gate.device, "listen", lambda *_: (None, alone[:, None].astype(np.int8), None))
+    results = gate.board(
+        {"features": "scenes/device.yaml"},
+        {"left_out_utterances": ["s1#1", "s9#0"]},
+        {"raw": Path("/")},
+        {"bat_den": "bật đèn"},
+        lambda clean, features, pitch, spans: [s[0] for s in spans],
+    )
+    assert [(r.kind, r.expected, r.decided) for r in results] == [("cmd", "bat_den", [50]), (gate.EXTRA, REJECT, [150])]
