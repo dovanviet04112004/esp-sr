@@ -425,22 +425,47 @@ So với mạng cỡ MultiNet7 trên 40 dải (§11, 5,8 ms mỗi 32 ms), mạng
 lần của các tầng; tích chập 2D đầu chạy trên số dải gấp đôi, phần của nó chưa đo tách. Vẫn dưới ngân sách 11–18 ms mỗi
 32 ms trong cửa sổ lệnh của KẾ HOẠCH §3.3.
 
-## 19. Bộ 300 lệnh trên firmware thật: chấm không theo kịp (E11-T14)
+## 19. Bộ 300 lệnh trên firmware thật (E11-T14)
 
-Board B chạy firmware dev ở `2c07781` (bộ tới 301 lệnh, trạng thái các lượt tiến xếp liền trong một vùng chung, arena
-JSON 160 KiB), model `command/v8` hàng `percentile` nghe bằng Kaldi, độ hữu thanh gập (`contracts/models.lock.json`),
-δ₁ 100 ‰, δ₂ 0 ‰, cùng Wi-Fi, MQTT và khối lọc âm, 07/10 tối. Mỗi dòng là một quyết định trong log của `nhan_task`,
-không ai nói: cửa sổ mở trên tiếng trong phòng. "Tính" là thời gian máy chấm cả cửa sổ, "sau bước chốt" là từ bước
-chốt câu tới quyết định:
+Board B, profile `dev` (`-Og`, log `DEBUG`): số báo cáo của KẾ HOẠCH §4.5.8 lấy từ `bench`, bảng này chưa phải số ấy.
+Model `command/v8` hàng `percentile` nghe bằng Kaldi, độ hữu thanh gập (`contracts/models.lock.json`), δ₁ 100 ‰, δ₂
+0 ‰, cùng Wi-Fi, MQTT và khối lọc âm, 07/10 tối. Mỗi dòng gom các quyết định trong log của `nhan_task`, cửa sổ mở trên
+tiếng trong phòng; ở dòng cuối có thêm chủ repo nói thử trước board. "Tính" là thời gian máy chấm cả cửa sổ chia cho số
+hop của nó, "sau bước chốt" là từ bước chốt câu tới quyết định; mỗi ô là nhỏ / giữa / lớn:
 
-| Bộ lệnh | Cách đọc | Quyết định | Cửa sổ, hop: nhỏ / giữa / lớn | Tính, ms | Sau bước chốt, ms |
-|---|---|---|---|---|---|
-| 47 lệnh của chủ repo, firmware `eb7e362` | 107 | 59 | 60 / 162 / 234 | 467 / 1 287 / 1 777 | 2 / 449 / 2 322 |
-| `test300_vi.json` | 651 | 15 | 45 / 183 / 234 | 723 / 2 963 / 3 912 | 2 175 / 4 503 / 6 241 |
+| Firmware | Bộ lệnh | Cách đọc | Quyết định | Cửa sổ, hop | Tính mỗi hop, ms | Sau bước chốt, ms |
+|---|---|---|---|---|---|---|
+| `eb7e362`, chấm từng cách đọc | 47 lệnh của chủ repo | 107 | 59 | 60 / 162 / 234 | 7,4 / 7,7 / 8,4 | 2 / 449 / 2 322 |
+| `2c07781`, chấm từng cách đọc | `test300_vi.json` | 651 | 90 | 44 / 161 / 234 | 15,6 / 16,1 / 17,2 | 1 963 / 4 855 / 7 785 |
+| `913e1e5`, cây tiền tố | bộ mặc định 10 lệnh | 19 | 4 | 111 / 119 / 181 | 6,6 / 7,0 / 7,9 | 104 / 188 / 313 |
+| `913e1e5`, cây tiền tố | `test300_vi.json` | 651 | 103 | 51 / 173 / 234 | 11,0 / 11,4 / 12,6 | 1 072 / 1 334 / 3 573 |
 
-Bộ 300 lệnh nạp được và chấm đúng khuôn: `svc_listen: commands …: 300 commands, 651 readings`, PSRAM còn 1,9 MB khi
-nghe, không rơi khung (`dropped: clean 0`). Nhưng phần chấm dần của 651 cách đọc tốn cỡ thời gian thực của chính cửa sổ,
-nên quyết định tới sau khi câu chốt 2,2–6,2 s, giữa 4,5 s, so với 0,45 s của 107 cách đọc. Tính tăng 2,3 lần khi số cách
-đọc tăng 6,1 lần ở trung vị, nên phần chấm theo cách đọc chưa phải toàn bộ thời gian một bước; phần ấy cho 300 lệnh
-chưa đo tách trên chip: bài `ctc_decide` của `make ai-unit` lặp bộ mặc định tới 301 lệnh nhưng app thử hết PSRAM khi nạp
-model `ctc` (`ESP_ERR_NO_MEM`).
+Bộ 300 lệnh nạp được lúc boot và chấm đúng khuôn: `svc_listen: commands …: 300 commands, 651 readings`, PSRAM còn 1,8 MB
+khi nghe. Chấm từng cách đọc tốn mỗi hop hơn 16 ms của chính hop ấy, nên cửa sổ không bao giờ đuổi kịp: `q_clean` bỏ 49
+hop, `window … dropped: the ring moved past it`. Cây tiền tố (4 412 nút thay 8 447 đơn vị) đưa mỗi hop về 11,4 ms, phần
+của 651 cách đọc chừng 4,4 ms trên 7,0 ms của bộ mặc định; quyết định tới sau bước chốt 1,07–1,4 s khi cửa sổ đứng một
+mình, 2,5–3,6 s khi câu nối câu (p75 3 167 ms). Cửa sổ mở với 125 hop trước câu chờ chấm (`utterance.lead_s` 2,0 s) và mỗi
+hop thời gian thực chỉ đuổi được 16 / 11,4 − 1 = 0,4 hop, nên không cửa sổ nào đuổi kịp trước khi câu chốt: cửa sổ 173
+hop còn chừng 106 hop, 1,2 s, sát số đo.
+
+**Nhân 0 đói.** Với 651 cách đọc cửa sổ hầu như luôn còn việc, nên `nhan_task` (ưu tiên 10) chỉ chờ một tick giữa hai
+đợt (KẾ HOẠCH §5.4) và các task thấp hơn ở nhân 0 gần như không chạy. Với cây tiền tố, watchdog báo `gui_task`,
+`luong_task` hay `net_task` không chạy suốt 5 s 20 lần trong 15 phút; `heartbeat` lặng 76 s; `q_event_up` đầy nên 22
+sự kiện bị bỏ (`events` của `heartbeat`), tức `host` không thấy 22 quyết định. Chấm từng cách đọc bỏ 47 sự kiện trong
+372 s. Log `DEBUG` của `dev` ra UART 115 200 baud trung bình 2,7 KB/s, đỉnh 14 KB/s, quá sức đường truyền; phần lớn là
+`vfs_calls` của `select` (20 701 dòng) và `mqtt_client` (1 090 dòng).
+
+## 20. Đổi bộ lệnh lúc chạy: chuỗi làm sạch rơi khung không dứt (E11-T14)
+
+Board B, `913e1e5` profile `dev`, boot với bộ mặc định 10 lệnh rồi gửi `test300_vi.json` qua `down/commands`, 07/10
+23:21. `nhan_task` đổi bảng lệnh: `lang_vi` 312 ms, ghi `/lfs/cmd/set.json` 222 ms. Từ đó `frames` của `heartbeat`
+(khung `thu_task` bỏ vì hết ô `q_free`) tăng đều 47,6 khung/s, 76% số khung, từ 840 ở giây 35 tới 13 700 ở giây 305;
+không quyết định nào; nhân 1 không lúc nào rảnh (watchdog báo `IDLE1` mỗi 5 s). Watchdog in backtrace của nhân 1 57 lần:
+35 lần trong `init` của OM-LSA (bảng E1 `e1_smooth`, `exp_series`, cửa sổ Hann `cos_series`), 12 lần trong
+`fill_phasors` của `doa`, 10 lần trong phần xử lý khung thường.
+
+Chuỗi nhân quả: ghi flash tắt cache cả hai nhân 222 ms, `q_free` cạn, `thu_task` bỏ khung; `svc_front` thấy hở `seq` và
+gọi `dsp_afe_reset`; hàm ấy chạy lại `init` của mọi khâu, dựng lại các bảng bằng chuỗi số double giả lập, lâu hơn 8 ô
+`q_free` (128 ms), nên lại hở `seq`, lại `reset`. Từ tốc độ bỏ khung, mỗi vòng chừng 0,54 s, tức một lần `reset` chừng
+0,5 s 🔬. Boot với bộ đã nằm trong `set.json` thì không gặp (`dropped: frames 0`); bộ 64 lệnh ngày 02/10 ghi `set.json`
+92 ms, dưới 128 ms, nên không mất khung qua bảy lần đổi.
