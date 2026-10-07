@@ -457,9 +457,10 @@ hop còn chừng 106 hop, 1,2 s, sát số đo.
 `nhan_task` (ưu tiên 10) chỉ chờ một tick giữa hai đợt (KẾ HOẠCH §5.4) và các task thấp hơn ở nhân 0 gần như không
 chạy. Trên `bench`, 9 phút với 92 quyết định không có lần watchdog nào, `heartbeat` đều 30 s, `q_event_up` bỏ một sự
 kiện trong 8 s đầu sau boot rồi không bỏ nữa. Với cây tiền tố trên `dev`, watchdog báo `gui_task`,
-`luong_task` hay `net_task` không chạy suốt 5 s 20 lần trong 15 phút; `heartbeat` lặng 76 s; `q_event_up` đầy nên 22
-sự kiện bị bỏ (`events` của `heartbeat`), tức `host` không thấy 22 quyết định. Chấm từng cách đọc bỏ 47 sự kiện trong
-372 s. Log `DEBUG` của `dev` ra UART 115 200 baud trung bình 2,7 KB/s, đỉnh 14 KB/s, quá sức đường truyền; phần lớn là
+`luong_task` hay `net_task` không chạy suốt 5 s 20 lần trong 15 phút; `heartbeat` lặng 76 s; 22 sự kiện bị bỏ
+(`events` của `heartbeat`), tức `host` không thấy 22 quyết định. Bộ đếm ấy gộp hai đường: `q_event_up` đầy, và
+`gui_task` bỏ sự kiện khi phiên MQTT mất hay publish lỗi (`send_events`), nên chưa biết phần nào; `heartbeat` lặng 76 s
+cho thấy phiên có lúc không đi được. Chấm từng cách đọc bỏ 47 sự kiện trong 372 s. Log `DEBUG` của `dev` ra UART 115 200 baud trung bình 2,7 KB/s, đỉnh 14 KB/s, quá sức đường truyền; phần lớn là
 `vfs_calls` của `select` (20 701 dòng) và `mqtt_client` (1 090 dòng).
 
 ## 20. Đổi bộ lệnh lúc chạy: chuỗi làm sạch rơi khung không dứt (E11-T14)
@@ -482,3 +483,20 @@ sau `reset` trùng từng bit chuỗi vừa dựng ở cả ba bản dựng, chu
 00:00: đổi bộ lệnh lúc chạy 10 lần, bộ mặc định 10 lệnh và `test300_vi.json` xen nhau: `lang_vi` 190 ms và ghi
 `set.json` 112–168 ms với bộ 300 lệnh, 27–37 ms với bộ 10 lệnh; `frames 0`, không watchdog, lệnh vẫn nhận sau mỗi lần
 đổi. Không lần nào mở ra chỗ hở, nên đường `reset` chưa chạy trên board; chi phí một lần `reset` trên board chưa đo 🔬.
+
+## 21. Từ quyết định tới `host`: esp-mqtt giữ sự kiện tới hết vòng `select` (E11-T14)
+
+Board B, profile `bench`, bộ `test300_vi.json`, broker EMQX trên máy tính cùng Wi-Fi, 08/10 00:35. Đo không cần người
+nói: gửi một bộ lệnh có dòng "zzz" mà `lang_vi` không đọc được, `nhan_task` báo `ERROR COMMANDS_INVALID` theo đúng
+đường của `COMMAND` và `REJECT` (`send_up` → `q_event_up` → `gui_task` → `net_mqtt_publish_event` → outbox của
+esp-mqtt) và giữ bộ đang dùng. Mỗi lần đo là hiệu giữa giờ máy tính nhận dòng log `ERROR` qua cổng nối tiếp, đọc mỗi
+5 ms và in sau khi sự kiện đã vào hàng, với giờ máy tính nhận sự kiện từ broker, cùng một đồng hồ:
+
+| `MQTT_POLL_READ_TIMEOUT_MS` | Lần | Nhỏ / giữa / lớn, ms |
+|---|---|---|
+| 1000, mặc định của esp-mqtt | 10 | 972 / 978 / 1 014 |
+| 50 (KẾ HOẠCH §4.5.8) | 10 | 24 / 168 / 179 |
+
+esp-mqtt chỉ gửi tin đã xếp hàng khi vòng của nó thức, mỗi vòng một tin, và vòng ấy ngủ trong `select` tới hạn poll
+khi broker không gửi gì (`mqtt_client.c`, `esp_mqtt_task`). Với poll 50 ms, phần còn lại là nhịp 100 ms của `gui_task`
+(0–100 ms), cộng poll (0–50 ms), cộng mạng và broker.
