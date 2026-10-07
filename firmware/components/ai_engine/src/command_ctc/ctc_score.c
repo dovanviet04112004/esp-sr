@@ -18,6 +18,7 @@
 #define LN2_LO (-0x1.bd0106p-13f)
 #define LN2 0.6931471805599453
 #define PREPARED 0x53524354u // "SRCT": prepare laid the commands out
+#define NONE UINT16_MAX      // no node: a first unit's parent, a child list's end
 
 typedef struct {
     float m;   // 0, or in [1, 2)
@@ -79,17 +80,24 @@ typedef struct {
     wide_t *alpha;
 } pass_t;
 
-// The work area: every variant's pass, its states laid end to end in the three pools, the free loop's sum,
-// then the window's probabilities frame by frame.
+// The work area: the prefix tree of every variant, each node a unit after its parent's, with the state of
+// that unit and of the blank after it; the free loop's sum; then the window's probabilities frame by frame.
 typedef struct {
     uint32_t prepared;
-    uint32_t n_classes, n_commands, frames_cap, frames;
+    uint32_t n_classes, n_commands, frames_cap, frames, n_nodes;
     float free_total;
+    wide_t root; // the blank ahead of every variant
+    uint16_t root_child;
     uint8_t n_variants[AI_ENGINE_COMMANDS_MAX];
-    pass_t pass[AI_ENGINE_COMMANDS_MAX][AI_ENGINE_VARIANTS_MAX];
-    wide_t alpha[AI_ENGINE_COMMAND_CTC_STATES_MAX];
-    uint8_t labels[AI_ENGINE_COMMAND_CTC_STATES_MAX];
-    uint8_t jump[AI_ENGINE_COMMAND_CTC_STATES_MAX];
+    uint8_t n_units[AI_ENGINE_COMMANDS_MAX][AI_ENGINE_VARIANTS_MAX];
+    uint16_t leaf[AI_ENGINE_COMMANDS_MAX][AI_ENGINE_VARIANTS_MAX];
+    wide_t unit[AI_ENGINE_COMMAND_CTC_NODES_MAX];
+    wide_t blank[AI_ENGINE_COMMAND_CTC_NODES_MAX];
+    uint16_t parent[AI_ENGINE_COMMAND_CTC_NODES_MAX];
+    uint16_t first_child[AI_ENGINE_COMMAND_CTC_NODES_MAX];
+    uint16_t next_sibling[AI_ENGINE_COMMAND_CTC_NODES_MAX];
+    uint8_t label[AI_ENGINE_COMMAND_CTC_NODES_MAX];
+    uint8_t jump[AI_ENGINE_COMMAND_CTC_NODES_MAX];
     wide_t probs[];
 } stream_t;
 
@@ -141,6 +149,76 @@ static float pass_score(const pass_t *p, size_t per_frames)
     if (n > 1) { total += scaled(p->alpha[n - 2], top); }
     if (total == 0.0f) { return -INFINITY; }
     return (float)((log((double)total) + (double)top * LN2) / (double)per_frames);
+}
+
+// One state of a forward pass a frame on: itself, the state ahead of it and, when the labels allow the skip,
+// the one ahead of that, summed at their highest exponent, times the frame's probability of its label.
+static wide_t step(wide_t self, const wide_t *before, const wide_t *skip, wide_t q)
+{
+    int32_t top = self.e;
+    if (before != NULL && before->e > top) { top = before->e; }
+    if (skip != NULL && skip->e > top) { top = skip->e; }
+    float total = scaled(self, top);
+    if (before != NULL) { total += scaled(*before, top); }
+    if (skip != NULL) { total += scaled(*skip, top); }
+    return normalized(total * q.m, top + q.e);
+}
+
+static void tree_frame(stream_t *st, const wide_t *frame, bool first)
+{
+    const size_t n = st->n_nodes;
+    if (first) {
+        st->root = frame[BLANK];
+        for (size_t k = 0; k < n; k++) {
+            st->unit[k] = st->parent[k] == NONE ? frame[st->label[k]] : (wide_t){0.0f, ZERO_EXP};
+            st->blank[k] = (wide_t){0.0f, ZERO_EXP};
+        }
+        return;
+    }
+    // Children sit after their parents, so walking down reads every parent's previous frame.
+    for (size_t k = n; k-- > 0;) {
+        const uint16_t up = st->parent[k];
+        st->blank[k] = step(st->blank[k], &st->unit[k], NULL, frame[BLANK]);
+        const wide_t *before = up == NONE ? &st->root : &st->blank[up];
+        st->unit[k] = step(st->unit[k], before, st->jump[k] ? &st->unit[up] : NULL, frame[st->label[k]]);
+    }
+    st->root = step(st->root, NULL, NULL, frame[BLANK]);
+}
+
+static float tree_score(const stream_t *st, uint16_t leaf, size_t per_frames)
+{
+    const wide_t last = st->blank[leaf], unit = st->unit[leaf];
+    const int32_t top = unit.e > last.e ? unit.e : last.e;
+    float total = scaled(last, top);
+    total += scaled(unit, top);
+    if (total == 0.0f) { return -INFINITY; }
+    return (float)((log((double)total) + (double)top * LN2) / (double)per_frames);
+}
+
+static esp_err_t grow(stream_t *st, const ai_engine_seq_t *seq, uint16_t *leaf)
+{
+    uint16_t at = NONE;
+    for (size_t k = 0; k < seq->n_units; k++) {
+        const uint8_t label = (uint8_t)(seq->units[k] + 1);
+        uint16_t *head = at == NONE ? &st->root_child : &st->first_child[at];
+        uint16_t child = *head;
+        while (child != NONE && st->label[child] != label) {
+            child = st->next_sibling[child];
+        }
+        if (child == NONE) {
+            if (st->n_nodes == AI_ENGINE_COMMAND_CTC_NODES_MAX) { return ESP_ERR_INVALID_SIZE; }
+            child = (uint16_t)st->n_nodes++;
+            st->label[child] = label;
+            st->parent[child] = at;
+            st->jump[child] = at != NONE && st->label[at] != label;
+            st->first_child[child] = NONE;
+            st->next_sibling[child] = *head;
+            *head = child;
+        }
+        at = child;
+    }
+    *leaf = at;
+    return ESP_OK;
 }
 
 static float sequence_score(const wide_t *probs, size_t n_classes, size_t n_frames,
@@ -277,16 +355,14 @@ esp_err_t ai_engine_command_ctc_prepare(const ai_engine_lexicon_t *lexicon, size
     st->prepared = 0;
     const esp_err_t err = check(lexicon, n_classes);
     if (err != ESP_OK) { return err; }
-    size_t used = 0;
+    st->n_nodes = 0;
+    st->root_child = NONE;
     for (size_t c = 0; c < lexicon->n_commands; c++) {
         st->n_variants[c] = lexicon->n_variants[c];
         for (size_t v = 0; v < lexicon->n_variants[c]; v++) {
-            const size_t n = 2 * (size_t)lexicon->variants[c][v].n_units + 1;
-            if (used + n > AI_ENGINE_COMMAND_CTC_STATES_MAX) { return ESP_ERR_INVALID_SIZE; }
-            st->pass[c][v] =
-                (pass_t){.labels = st->labels + used, .jump = st->jump + used, .alpha = st->alpha + used};
-            lay_out(&st->pass[c][v], &lexicon->variants[c][v]);
-            used += n;
+            const esp_err_t grown = grow(st, &lexicon->variants[c][v], &st->leaf[c][v]);
+            if (grown != ESP_OK) { return grown; }
+            st->n_units[c][v] = lexicon->variants[c][v].n_units;
         }
     }
     st->n_classes = (uint32_t)n_classes;
@@ -307,11 +383,12 @@ bool ai_engine_command_ctc_prepared_for(const ai_engine_lexicon_t *lexicon, cons
         if (st->n_variants[c] != lexicon->n_variants[c]) { return false; }
         for (size_t v = 0; v < st->n_variants[c]; v++) {
             const ai_engine_seq_t *seq = &lexicon->variants[c][v];
-            const pass_t *p = &st->pass[c][v];
-            if (p->n_states != 2 * seq->n_units + 1) { return false; }
-            for (size_t k = 0; k < seq->n_units; k++) {
-                if (p->labels[2 * k + 1] != seq->units[k] + 1) { return false; }
+            if (st->n_units[c][v] != seq->n_units) { return false; }
+            uint16_t at = st->leaf[c][v];
+            for (size_t k = seq->n_units; k-- > 0; at = st->parent[at]) {
+                if (at == NONE || st->label[at] != seq->units[k] + 1) { return false; }
             }
+            if (at != NONE) { return false; }
         }
     }
     return true;
@@ -340,11 +417,7 @@ esp_err_t ai_engine_command_ctc_frames(const float *log_probs, size_t n_frames, 
             if (frame[c] > top) { top = frame[c]; }
         }
         st->free_total += top;
-        for (size_t c = 0; c < st->n_commands; c++) {
-            for (size_t v = 0; v < st->n_variants[c]; v++) {
-                pass_frame(&st->pass[c][v], probs, st->frames == 0);
-            }
-        }
+        tree_frame(st, probs, st->frames == 0);
         st->frames++;
     }
     return ESP_OK;
@@ -363,7 +436,7 @@ esp_err_t ai_engine_command_ctc_finish(const ai_engine_lexicon_t *lexicon, size_
     for (size_t c = 0; c < st->n_commands; c++) {
         float score = -INFINITY;
         for (size_t v = 0; st->frames > 0 && v < st->n_variants[c]; v++) {
-            const float s = pass_score(&st->pass[c][v], per_frames);
+            const float s = tree_score(st, st->leaf[c][v], per_frames);
             if (s > score) { score = s; }
         }
         if (scores != NULL) { scores[c] = score; }
