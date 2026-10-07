@@ -976,3 +976,21 @@ có ít nhất 3 khung có thanh:
 
 "tắt" của 28/09 cao và tách khỏi âm tiết sau rõ hơn của 04/10; độ dài như nhau. Cách nói hôm ấy không làm "tắt" giống
 "bật" hơn. Còn khoảng cách và vang 1–3 m, và firmware thu `368`: chỉ phiên mới ở 1–3 m với firmware hiện tại tách được.
+
+### 12.16 "tắt" ở 1 m và 3 m trên firmware thu hiện tại (07/10)
+
+Tám phiên mới của chủ repo (`20261007_home_001`–`008`, `host/plans/tat_far.tsv`): "tắt"/"bật" đèn, quạt ở 1 m và 3 m,
+cùng phòng và hướng như 28/09, firmware thu `contract-v1-1008-g62d9ab5`; phiên 6 và 8 nói đổi chỗ nhau nên đổi nhãn,
+câu đầu của phiên 8 ("bật quạt" trong phiên "bật đèn") bỏ. Chuỗi liền cả buổi như Cửa 3, bộ bật/tắt; đúng (nhận đúng ở
+δ₁ 200 ‰, δ₂ 50 ‰; nhận nhầm là lệnh khác qua ngưỡng):
+
+| Buổi | Mạng | 1 m "tắt" | 3 m "tắt" | 1 m "bật" | 3 m "bật" |
+|---|---|---|---|---|---|
+| 07/10, firmware hiện tại | v2 (`128545c`) | 2/24 (0; nhầm 5) | 0/23 (0; nhầm 6) | 26/27 (26; 0) | 23/23 (20; 0) |
+| 07/10, firmware hiện tại | v7, 40 000 | 20/24 (8; nhầm 0) | 15/23 (2; nhầm 0) | 26/27 (26; 0) | 23/23 (23; 0) |
+| 28/09, firmware `368` | v2 (`128545c`) | 0/11 (0; nhầm 4) | 0/11 (0; nhầm 5) | 11/13 (7; 0) | 10/10 (6; 0) |
+| 28/09, firmware `368` | v7, 40 000 | 1/11 (0; nhầm 0) | 0/11 (0; nhầm 5) | 11/13 (11; 0) | 10/10 (9; 0) |
+
+Cùng khoảng cách, v7 nghe đúng "tắt" 35/47 câu mới so với 1/22 của 28/09: khoảng cách không phải chỗ thiếu; khác biệt
+còn lại là firmware thu của 28/09. v2 trên bản thu mới vẫn 2/47 và nhận nhầm "tắt" thành lệnh khác 11/47 lần; v7 không
+nhận nhầm lần nào, nhưng chỉ 10/47 câu "tắt" qua ngưỡng. Mọi câu "tắt" của Cửa 3 (§12.9) là phiên 28/09.
