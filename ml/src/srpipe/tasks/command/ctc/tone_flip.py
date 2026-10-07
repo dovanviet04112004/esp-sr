@@ -682,15 +682,18 @@ def matched(hyp: list[int], ref: np.ndarray) -> list[int | None]:
     return out
 
 
-def places_check(run: Path, paths: dict) -> dict:
-    """Unit error rate and tone right at a sentence's first syllable and at its later ones over val of the run's
-    split, its best path aligned to the units, with the pitch dims as simulated and held at their mean."""
-    net = gate.load_ctc(run)
-    version, spec = net.cfg["split"]["version"], net.cfg["train"]
+def places_val(cfg: dict, paths: dict) -> train.Sentences:
+    """val of a run's split as its training reads it."""
+    version, spec = cfg["split"]["version"], cfg["train"]
     listed = {r.item for r in splits.read_split(paths["splits"] / "command" / version / "val.txt")}
     units_of = sentence_units(screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech"), listed, spec["dialect"])
     longest = round(spec["max_s"] * train.HOPS_PER_S)
-    val = train.load_role([paths["processed"] / "command" / version / "val"], units_of, longest, "float32")
+    return train.load_role([paths["processed"] / "command" / version / "val"], units_of, longest, "float32")
+
+
+def places_check(net: gate.Ctc, val: train.Sentences) -> dict:
+    """Unit error rate and tone right at a sentence's first syllable and at its later ones over val, its best path
+    aligned to the units, with the pitch dims as simulated and held at their mean."""
     tones = {g2p.UNIT_ID[t] + 1 for t in lang_vi.TONES}
     out = {}
     for name in ("simulated", "pitch held at mean"):
@@ -715,35 +718,54 @@ def places_check(run: Path, paths: dict) -> dict:
                         right[place] += h == int(r)
         out[name] = {"unit_error_rate": errors / said} | {f"tone_right_{p}": right[p] / total[p] for p in PLACES}
         out[name] |= {"syllables": dict(total)}
-    return {"run": str(run), "split": version, "sentences": len(val.first)} | out
+    return {"sentences": len(val.first)} | out
+
+
+def places_line(report: dict) -> str:
+    return "; ".join(
+        f"{name}: unit error rate {report[name]['unit_error_rate']:.3f}, tone right first"
+        f" {report[name]['tone_right_first']:.3f} later {report[name]['tone_right_later']:.3f}"
+        for name in ("simulated", "pitch held at mean")
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("check", choices=CHECKS)
     parser.add_argument("run", type=Path, help="a run directory of the ctc train")
-    parser.add_argument("--steps", help="owner: the run's checkpoints at these steps, comma separated, not its end")
+    parser.add_argument(
+        "--steps", help="owner, places: the run's checkpoints at these steps, comma separated, not its end"
+    )
     parser.add_argument(
         "--kaldi-pitch", action="store_true", help="owner: hear through the contract's Kaldi pitch, as the board does"
     )
     args = parser.parse_args(argv)
     spec, paths = load_yaml(ctc.CONFIG)["tone_flip"], data_paths()
-    if (args.steps or args.kaldi_pitch) and args.check != "owner":
-        parser.error("--steps and --kaldi-pitch go with owner")
+    if args.steps and args.check == "val":
+        parser.error("--steps goes with owner and places")
+    if args.kaldi_pitch and args.check != "owner":
+        parser.error("--kaldi-pitch goes with owner")
+    tag = "_kaldi_pitch" if args.kaldi_pitch else ""
     if args.check == "owner":
         commands = ML_ROOT.parent / spec["owner_set"]
         listed = json.loads(commands.read_text(encoding="utf-8"))["commands"]
         net = gate.load_ctc(args.run, commands)
         cfg = on_contract_pitch(net.cfg) if args.kaldi_pitch else net.cfg
         heard = owner_heard(cfg, spec, paths)
-        tag = "_kaldi_pitch" if args.kaldi_pitch else ""
+    elif args.check == "places":
+        net = gate.load_ctc(args.run)
+        val = places_val(net.cfg, paths)
     if args.steps:
         report = {}
         for step in (int(v) for v in args.steps.split(",")):
-            net = gate.load_ctc(args.run, commands, train.checkpoint(args.run, step))
-            report[step] = owner_report(net, heard, listed, spec)
-            print(f"step {step}: " + owner_line(report[step]), flush=True)
-        out = args.run / f"tone_flip_owner_steps{tag}.yaml"
+            weights = train.checkpoint(args.run, step)
+            if args.check == "owner":
+                report[step] = owner_report(gate.load_ctc(args.run, commands, weights), heard, listed, spec)
+                print(f"step {step}: " + owner_line(report[step]), flush=True)
+            else:
+                report[step] = places_check(gate.load_ctc(args.run, weights=weights), val)
+                print(f"step {step}: " + places_line(report[step]), flush=True)
+        out = args.run / f"tone_flip_{args.check}_steps{tag}.yaml"
         out.write_text(yaml.safe_dump(report, allow_unicode=True, sort_keys=False), encoding="utf-8")
         print(out)
         return 0
@@ -756,14 +778,9 @@ def main(argv: list[str] | None = None) -> int:
         report = owner_report(net, heard, listed, spec)
         print(owner_table(report))
     else:
-        report = places_check(args.run, paths)
-        for name in ("simulated", "pitch held at mean"):
-            r = report[name]
-            print(
-                f"{name}: unit error rate {r['unit_error_rate']:.3f}, tone right first {r['tone_right_first']:.3f}"
-                f" later {r['tone_right_later']:.3f}"
-            )
-    out = args.run / f"tone_flip_{args.check}{tag if args.check == 'owner' else ''}.yaml"
+        report = {"run": str(args.run), "split": net.cfg["split"]["version"]} | places_check(net, val)
+        print(places_line(report))
+    out = args.run / f"tone_flip_{args.check}{tag}.yaml"
     out.write_text(yaml.safe_dump(report, allow_unicode=True, sort_keys=False), encoding="utf-8")
     print(out)
     return 0
