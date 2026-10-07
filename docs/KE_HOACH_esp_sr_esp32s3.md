@@ -929,7 +929,11 @@ Phép thử chéo: run dùng thanh thì "tắt" 28/09 (v7: 1/22) cũng phải l�
 | D. Tệ hơn | Cửa 3 hay lỗi đơn vị `val` kém v7 | So thanh đúng theo từng thanh, từng vị trí, và phân bố ba chiều cao độ giữa mô phỏng với board; rồi học với cả ba chiều Kaldi lẫn ba chiều SwiftF0, 86 chiều |
 | E. Lỗi kỹ thuật | bản dựng dừng vì log-mel lệch bản cũ, hết RAM, hay học ra NaN | Dựng lại riêng file ấy không `simulate.mel_from`; bớt worker; học tiếp từ checkpoint cuối |
 
-**Bộ dò của board**, khi kết quả là A. Ba ứng viên, đều chạy dòng mỗi bước ở nhân 0 và ra ba chiều như hiện nay:
+**Bộ dò của board**, khi kết quả là A. Trước hết đo chính run ấy khi nghe bằng Kaldi của board thay bộ dò nó học
+(`tone_flip owner --kaldi-pitch`, `make command-eval KALDI=1`): mạng học trên SwiftF0, nhưng nếu "tắt" và Cửa 3 vẫn qua
+ba điều thì board chạy được nó với `dsp_spec/pitch` như hiện nay, không cần bộ dò mới; deploy khi ấy ghi front Kaldi
+của hợp đồng và `listen_hash` của nó cho run ấy, đúng thứ đã đo. Không qua thì chọn trong ba ứng viên, đều chạy dòng mỗi
+bước ở nhân 0 và ra ba chiều như hiện nay:
 - Kaldi của `dsp_spec/pitch` với đường Viterbi dò lại 0,4 s sau và trung bình nhìn sau 0,4 s: tách "tắt" / "bật" của
   chủ repo ở AUC 0,88–1,00 nhưng `val` chỉ 0,67 (§12.18); thêm vòng truy ngược 25 khung;
 - một bộ dò cộng hài âm kiểu SWIPE′ hay SHS ở `dsp_spec`, thuật toán thuần, một FFT mỗi octave ứng viên: trên giọng chủ
