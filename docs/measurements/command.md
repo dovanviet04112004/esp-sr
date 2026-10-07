@@ -1224,6 +1224,8 @@ câu "tắt" đúng khi giữ F0 mà thành sai khi mang khuôn F0 của "bật"
 | 16 000 | 0,438 | 194 (147) | 124/126 | 65/69 (44) / 70/73 (69) | 47/47 (32) / 18/22 (12) | 31/51 |
 | 18 000 | 0,428 | 190 (124) | 125/126 | 59/69 (27) / 70/73 (65) | | |
 | 20 000 | 0,412 | 193 (175) | 123/126 | 68/69 (65) / 69/73 (67) | 47/47 (47) / 21/22 (18) | 8/53 |
+| 22 000 | 0,398 | 198 (143) | 125/126 | 64/69 (38) / 70/73 (61) | | |
+| 24 000 | 0,389 | 192 (145) | 125/126 | 59/69 (37) / 70/73 (69) | 46/47 (33) / 13/22 (4) | 42/48 |
 | v7, 40 000 | 0,335 | 170 (119) | 124/126 | 36/69 / 70/73 | 35/47 (10) / 1/22 (0) | 27/32 |
 
 Ở mốc 12 000, mọi câu "tắt" của chủ repo quyết lại với chiều cao độ giữ ở trung bình lúc học: giữ độ hữu thanh 47/47 (45)
@@ -1238,6 +1240,11 @@ Mọi câu "tắt" khi giữ cả ba chiều cao độ, đúng (nhận), 07/10 /
 mạng bám đường nét F0 tăng từ 15 lên 31 câu lật rồi về 8: giữa lượt, các mốc đổi qua lại giữa hai đường, chưa có xu
 hướng một chiều; tốc độ học còn quá nửa mức đầu.
 
+Mốc 24 000, lượt học dừng ngay sau đó theo lời chủ repo (bước 24 083, `last.pt` giữ đủ trạng thái): giữ cả ba chiều
+44 (31) / 7 (2), giữ hai chiều F0 33 (10) / 6 (0), giữ độ hữu thanh 45 (39) / 16 (4), so với như thu 46 (33) / 13 (4); lật
+42/48. Phần log-mel giữ "tắt" 28/09 rơi từ 21 xuống 7 câu như v7 về cuối, mạng chuyển sang bám đường nét F0, và F0 của
+SwiftF0 giữ lại 13/22 so với 1/22 của v7 cuối.
+
 Cùng phép giữ trên v7 ở bước 40 000 (Kaldi), mọi câu "tắt", đúng (nhận):
 
 | v7 | 07/10, 1 m | 07/10, 3 m | 28/09, 1 m | 28/09, 3 m |
@@ -1251,3 +1258,20 @@ Cùng phép giữ trên v7 ở bước 40 000 (Kaldi), mọi câu "tắt", đún
 28/09 1 m từ 1 lên 5/11. F0 của Kaldi vẫn giúp một ít: bỏ nó, 07/10 3 m còn 11/23 và gần như không câu nào qua ngưỡng.
 Bỏ cả ba, 28/09 vẫn 4/22: ở trọng số cuối, chính phần log-mel của v7 nghe "tắt" 28/09 thành "bật", trong khi v8 ở mốc
 12 000 không cao độ vẫn đúng 47/47 và 18/22 trên cùng log-mel.
+
+`make ctc-tone-flip CHECK=owner STEPS=…` trên các checkpoint của chính v7 (Kaldi), một lượt nghe phiên cho mọi
+checkpoint; dừng sau mốc 12 000 vì đã đủ để so. Mọi câu "tắt", đúng (nhận), như thu / giữ cả ba chiều cao độ; lật là
+câu "tắt" đúng khi giữ F0 mà khuôn "bật" làm sai:
+
+| Mốc | v7 07/10 | v7 28/09 | v7 lật | v8 28/09 |
+|---|---|---|---|---|
+| 2 000 | 23 (4) / 0 (0) | 7 (0) / 1 (0) | 14/24 | |
+| 4 000 | 44 (12) / 43 (7) | 19 (4) / 21 (5) | 14/47 | 22 (21) / |
+| 6 000 | 44 (35) / 36 (19) | 8 (5) / 13 (6) | 19/42 | |
+| 8 000 | 46 (40) / 46 (40) | 9 (6) / 19 (14) | 17/44 | 22 (16) / |
+| 10 000 | 46 (27) / 45 (27) | 13 (7) / 18 (9) | 18/43 | |
+| 12 000 | 47 (27) / 47 (33) | 15 (5) / 18 (10) | 17/44 | 21 (14) / 18 (6) |
+
+Ngày 07/10 cả hai mạng đúng gần hết ở mọi mốc. Ngày 28/09, ở cùng mốc học, phần log-mel của hai mạng ngang nhau (giữ
+cả ba chiều: v7 18–19/22 từ mốc 8 000, v8 18/22 ở mốc 12 000); cao độ Kaldi kéo v7 xuống 9–15/22, cao độ SwiftF0 đưa
+v8 lên 21–22/22. Cái hơn của v8 là bộ dò đưa vào lúc chạy, không phải một nhánh log-mel tốt hơn.
