@@ -207,7 +207,11 @@ của một file split thành đúng thứ bộ nhận dạng thấy trên máy:
 
 Phần thuần của đặc trưng lúc học vì thế trùng đặc trưng trên board, và với `command` cả cách cắt cửa sổ. Phần còn
 khác là phòng thật, micro thật và giọng thật, và tập thu qua board đo đúng phần ấy. Chuỗi đổi (bật một module, chọn
-đường không gian) thì sinh lại đặc trưng bằng một lệnh.
+đường không gian) thì sinh lại đặc trưng bằng một lệnh. Nhánh khai `pitch_source` (§3.11) thì ba chiều cao độ do bộ
+dò ấy tính trên cả phiên. Khi chỉ cao độ đổi, `simulate.mel_from` cho bản dựng mới móc cứng log-mel, số của chuỗi và
+danh sách mẫu của bản dựng cùng file split ở phiên bản ấy, rồi chỉ ghi cao độ mới: mô phỏng vẫn chạy lại cả phiên, và
+log-mel tính lại phải trùng từng byte bản cũ, không thì bản dựng dừng. Ổ dữ liệu không đủ chỗ cho bản dựng thứ hai
+(`command/v8` lấy log-mel của `command/v7`, cùng mục).
 
 Nhiễu của chính phòng dùng (TỔNG QUAN V5.3.2) thu bằng `test_apps/capture` (§4.5.7), không thu bằng
 máy khác: đáp ứng của micro là một phần của miền dữ liệu.
@@ -828,6 +832,24 @@ bước trên tín hiệu sạch ở mọi trạng thái, liền như log-mel, c
 đệm cùng log-mel: cửa sổ `command` đọc cao độ đã có thay vì tính lại từ đầu cửa sổ, nên mở cửa sổ sớm không làm chậm
 quyết định (§5.4), và nhánh khác như `wake` đọc được khi cần (chủ repo 05/10). Giá: 1,98 ms mỗi bước ở nhân 0,
 khoảng 12% (§5.6).
+
+**Lượt thử bộ dò SwiftF0** (E11-T12, chủ repo duyệt 07/10). Bộ dò trên sai 16–58% khung ở âm tiết đầu của lệnh và
+0–16% ở âm tiết sau, trên đầu ra của chuỗi như trên micro thô: đường Viterbi chạy dòng nối từ nền trước câu vào âm tiết
+đầu. Thanh của âm tiết đầu vì thế không đến được mạng, và v7 bỏ qua nó: đổi riêng F0 của "tắt" xuống mức "bật" chỉ lật
+5 trên 46 quyết định (`measurements/command.md` §12.17, §12.18). Bộ dò quyết từng khung không có đường nối ấy; trong
+bốn bộ đo trên tín hiệu board, SwiftF0 (Nieradzik 2025: 95 842 tham số, STFT 1024 bước 256 ở 16 kHz; gói `swift-f0`
+MIT) giữ thanh của âm tiết đầu tốt nhất ở cả giọng chủ repo lẫn `val`, nhưng nguyên cỡ nặng gấp chục lần sức esp-dl
+trên board. Lượt thử chỉ đổi ba chiều cao độ của đường mô phỏng và của Cửa 3, rồi học `command/v8` đúng công thức v7,
+để biết mạng có dùng thanh khi thanh đến được, trước khi làm bộ dò cho chip:
+- độ hữu thanh là độ tin của SwiftF0 qua phép biến đổi Kaldi dùng cho NCCF, ×2; log F0 của khung có độ tin từ 0,5 trở
+  lên, nội suy thẳng qua khung không tiếng, trừ trung bình theo độ tin của các khung có tiếng trong 0,75 s trước và
+  0,4 s sau, ×2; delta ±2 khung, ×10: ba chiều và thang như Kaldi;
+- 0,4 s nhìn sau nằm trong 0,4 s `utterance.gap_s` board vốn chờ trước khi chốt câu, nên không thêm trễ quyết định;
+- tham số ở mục `pitch_source` của `configs/models/command_ctc.yaml`; run học với nó ghi `listen_hash` 0, nên
+  `make ctc-deploy` từ chối, vì board chưa tính được đặc trưng ấy.
+
+v8 dùng thanh khi "tắt" của Cửa 3 qua ngưỡng ngang "bật" và phép đổi F0 giữ formant lật quyết định. Khi ấy bộ dò của
+board thay bằng một mạng nhỏ học từ SwiftF0, kế hoạch riêng, ở `ai_engine` vì là mạng học; không thì giữ Kaldi.
 
 **`wake`** — TCN tích chập giãn nở nhân quả, kernel 3, giãn 1, 2, 4, …, 32 một lượt: trường nhìn 127 khung ≈ 2 s;
 64 kênh, vì cùng việc phụ CTC dưới đây nó cho giọng thật cao nhất (`docs/measurements/wake.md` §5). Int8, chạy dòng
@@ -1591,6 +1613,8 @@ ml/
 │   │   │                              #   biến thể pc_*, score chấm mọi biến thể bằng một thước → afe/compare.md
 │   │   ├── refs.py                    # gọi ml/afe_ref/<bộ>/run.py qua uv run với một lô JSON: dìm nhiễu tham
 │   │   │                              #   chiếu, DNSMOS
+│   │   ├── swift_pitch.py             # ba chiều cao độ của một phiên bằng SwiftF0, thang như Kaldi: lượt thử
+│   │   │                              #   `pitch_source` của §3.11, gói swift-f0 ở extra `swiftf0` của pyproject
 │   │   └── device.py                  # ★ đường mô phỏng board: phòng hoặc RIR thật → dàn array.yaml → chênh micro
 │   │                                  #   đã hiệu chuẩn, pcm_shift → dsp.afe.chain → log-mel; dữ liệu học (§1.2)
 │   │
