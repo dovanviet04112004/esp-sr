@@ -1328,6 +1328,7 @@ Cửa 3 bằng `make command-eval` trên trọng số cuối, δ₂ 50 ‰; "nh�
 |---|---|---|---|---|---|---|
 | SwiftF0, như lúc học | 196/209 | 74% | 46% | 125/126 | 33/35 / 30/34 | 35/37 / 35/36 |
 | Kaldi của board (`KALDI=1`) | 186/209 | 63% | 27% | 122/126 | 29/35 / 24/34 | 35/37 / 35/36 |
+| Kaldi, độ hữu thanh giữ ở trung bình (`KALDI=1 HOLD=voicing`) | 192/209 | 73% | 27% | 124/126 | 32/35 / 30/34 | 35/37 / 35/36 |
 
 `tone_flip owner --kaldi-pitch`, mọi câu "tắt", đúng (nhận):
 
@@ -1348,6 +1349,11 @@ v7 là dấu hiệu "kém v7" của dòng D; độ lệch giữa hai lượt h�
 44/47, nhận 28, đạt; (3) 186/209, từ chối 122/126, đạt đúng ngưỡng; (1) lật 26/41, dưới ba phần tư; "tắt" 28/09 9/22,
 không câu nào qua ngưỡng. Độ hữu thanh của Kaldi kéo "tắt" về "bật" như ở v7: giữ nó ở trung bình, 07/10 46/47 (35),
 28/09 16/22 (6).
+
+Cao độ của board theo luật KẾ HOẠCH §3.11, trần là v8 nghe bằng SwiftF0 (196/209, từ chối 125/126, "tắt" 07/10 47/47):
+Kaldi như hiện nay kém trần 10 câu Cửa 3, không chạm; Kaldi với độ hữu thanh giữ ở trung bình được 192/209, từ chối
+124/126, "tắt" 07/10 46/47, chạm trần. Board chạy v8 bằng `dsp_spec/pitch`, chiều độ hữu thanh là hằng số trung bình
+lúc học. Ở cả hai cách Kaldi, lệnh kém nhất nhận đúng 27% so với 46% của SwiftF0; "đóng cửa" đúng 8/11 so với 10/11.
 
 Cùng phép giữ trên v7 ở bước 40 000 (Kaldi), mọi câu "tắt", đúng (nhận):
 
