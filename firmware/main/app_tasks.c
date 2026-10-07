@@ -160,6 +160,8 @@ static void send_up(const app_wiring_t *w, const app_event_t *e)
 static void raise_decision(const app_wiring_t *w, const svc_listen_decision_t *d)
 {
     const app_event_t *e = &d->event;
+    // The event leaves first: the log line can wait on a busy UART.
+    send_up(w, e);
     ESP_LOGI(TAG,
              "%s %s score %u margin %u gap %u, hops %" PRIu32 "..%" PRIu32 ", %" PRIu32 " ms work, %" PRIu32
              " ms after the close",
@@ -167,7 +169,6 @@ static void raise_decision(const app_wiring_t *w, const svc_listen_decision_t *d
              e->kind == APP_EVT_COMMAND ? e->command_id : e->code, (unsigned)e->score_permille,
              (unsigned)e->margin_permille, (unsigned)d->free_gap_permille, d->first_seq, e->seq,
              d->work_us / US_PER_MS, d->close_us / US_PER_MS);
-    send_up(w, e);
 }
 
 static void raise_error(const app_wiring_t *w, uint32_t seq, const char *code, const char *command_id)
@@ -175,8 +176,8 @@ static void raise_error(const app_wiring_t *w, uint32_t seq, const char *code, c
     app_event_t e = {.kind = APP_EVT_ERROR, .seq = seq, .doa_deg = -1};
     strlcpy(e.code, code, sizeof(e.code));
     if (command_id != NULL) { strlcpy(e.command_id, command_id, sizeof(e.command_id)); }
-    ESP_LOGW(TAG, "ERROR %s %s at hop %" PRIu32, e.code, e.command_id, seq);
     send_up(w, &e);
+    ESP_LOGW(TAG, "ERROR %s %s at hop %" PRIu32, e.code, e.command_id, seq);
 }
 
 // Only while no window is open or waits: each utterance is decided by the set it met (KEHOACH 5.3).
