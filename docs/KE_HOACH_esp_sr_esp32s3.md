@@ -1195,7 +1195,10 @@ thái mỗi khung còn hai phép cộng, một phép nhân và chỉnh số mũ:
 79,4 ms cho 64 lệnh (`measurements/latency.md` §13), trong ngân sách ≤ 100 ms một lần chấm như `kws`. Trên máy, thuật
 toán tiến của mọi biến thể đi dần theo khối mạng của cửa sổ (Chạy `ctc` trên máy, dưới), nên lúc câu chốt chỉ còn khối
 cuối và phần của `c*`: phần kết đo 1,5 ms với bộ lệnh mặc định, 1,8 ms với 64 lệnh (`measurements/latency.md` §16). Chi
-phí chấm đi theo số biến thể, nên bộ tới 301 lệnh (§4.5.5) đo phần chấm dần mỗi khối trên board trước khi dùng. `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ header của ảnh model (§6.3).
+phí chấm đi theo số biến thể, nên bộ tới 301 lệnh (§4.5.5) đo phần chấm dần mỗi khối trên board trước khi dùng. Trạng thái của
+mọi lượt tiến nằm liền nhau trong một vùng cấp lúc nạp model, đủ `AI_ENGINE_COMMAND_CTC_STATES_MAX` 65 536 trạng thái
+(~655 KB ở PSRAM): mỗi cách đọc giữ đúng 2n + 1 trạng thái của nó, bộ `test300_vi.json` cần 17 545; bộ cần hơn thì
+`_prepare` từ chối bằng `ESP_ERR_INVALID_SIZE`. `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ header của ảnh model (§6.3).
 
 **Mọi điểm chia cho `T_W`**, số khung của một cửa sổ dài `window_s` (94 khung với 3 s), không chia cho số khung của cửa
 sổ đang chấm; đơn vị là nat mỗi khung của `window_s`. Cửa sổ lệnh dài ngắn theo câu và theo chỗ nó mở (§5.4), mà khung

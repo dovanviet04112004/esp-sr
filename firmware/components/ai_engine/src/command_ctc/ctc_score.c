@@ -74,19 +74,22 @@ static float scaled(wide_t x, int32_t top)
 
 typedef struct {
     uint8_t n_states;
-    uint8_t labels[STATES_MAX];
-    uint8_t jump[STATES_MAX];
-    wide_t alpha[STATES_MAX];
+    uint8_t *labels;
+    uint8_t *jump;
+    wide_t *alpha;
 } pass_t;
 
-// The work area: every variant's pass and the free loop's sum, then the window's probabilities frame by
-// frame.
+// The work area: every variant's pass, its states laid end to end in the three pools, the free loop's sum,
+// then the window's probabilities frame by frame.
 typedef struct {
     uint32_t prepared;
     uint32_t n_classes, n_commands, frames_cap, frames;
     float free_total;
     uint8_t n_variants[AI_ENGINE_COMMANDS_MAX];
     pass_t pass[AI_ENGINE_COMMANDS_MAX][AI_ENGINE_VARIANTS_MAX];
+    wide_t alpha[AI_ENGINE_COMMAND_CTC_STATES_MAX];
+    uint8_t labels[AI_ENGINE_COMMAND_CTC_STATES_MAX];
+    uint8_t jump[AI_ENGINE_COMMAND_CTC_STATES_MAX];
     wide_t probs[];
 } stream_t;
 
@@ -143,7 +146,9 @@ static float pass_score(const pass_t *p, size_t per_frames)
 static float sequence_score(const wide_t *probs, size_t n_classes, size_t n_frames,
                             const ai_engine_seq_t *seq, size_t per_frames)
 {
-    pass_t p;
+    uint8_t labels[STATES_MAX], jump[STATES_MAX];
+    wide_t alpha[STATES_MAX];
+    pass_t p = {.labels = labels, .jump = jump, .alpha = alpha};
     lay_out(&p, seq);
     for (size_t t = 0; t < n_frames; t++) {
         pass_frame(&p, probs + t * n_classes, t == 0);
@@ -272,10 +277,16 @@ esp_err_t ai_engine_command_ctc_prepare(const ai_engine_lexicon_t *lexicon, size
     st->prepared = 0;
     const esp_err_t err = check(lexicon, n_classes);
     if (err != ESP_OK) { return err; }
+    size_t used = 0;
     for (size_t c = 0; c < lexicon->n_commands; c++) {
         st->n_variants[c] = lexicon->n_variants[c];
         for (size_t v = 0; v < lexicon->n_variants[c]; v++) {
+            const size_t n = 2 * (size_t)lexicon->variants[c][v].n_units + 1;
+            if (used + n > AI_ENGINE_COMMAND_CTC_STATES_MAX) { return ESP_ERR_INVALID_SIZE; }
+            st->pass[c][v] =
+                (pass_t){.labels = st->labels + used, .jump = st->jump + used, .alpha = st->alpha + used};
             lay_out(&st->pass[c][v], &lexicon->variants[c][v]);
+            used += n;
         }
     }
     st->n_classes = (uint32_t)n_classes;

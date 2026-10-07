@@ -15,9 +15,10 @@ extern "C" {
 #endif
 
 #define AI_ENGINE_COMMAND_CTC_REJECTED (-1)
-#define AI_ENGINE_COMMAND_CTC_UNITS_MAX 48    // a variant's units; its forward pass keeps 2 n + 1 states
-#define AI_ENGINE_COMMAND_CTC_CLASSES_MAX 64  // a frame's classes, one exp kept on the stack each
-#define AI_ENGINE_COMMAND_CTC_FEATURES_MAX 96 // a hop's features, normalised on the stack
+#define AI_ENGINE_COMMAND_CTC_UNITS_MAX 48     // a variant's units; its forward pass keeps 2 n + 1 states
+#define AI_ENGINE_COMMAND_CTC_STATES_MAX 65536 // every variant's states of a set, end to end
+#define AI_ENGINE_COMMAND_CTC_CLASSES_MAX 64   // a frame's classes, one exp kept on the stack each
+#define AI_ENGINE_COMMAND_CTC_FEATURES_MAX 96  // a hop's features, normalised on the stack
 
 /** Log-probabilities of int8 logits worth logits * 2^exponent, frame after frame of n_classes, as
  *  ctc_score.py's frame_log_probs: largest off, exp summed over an exponent of its own, log in double.
@@ -46,7 +47,8 @@ size_t ai_engine_command_ctc_work_bytes(size_t n_classes, size_t n_frames);
 /** Lay out every variant's labels in work for the forward passes, as the next windows score them.
  *  @ctx any | non-blocking | caller owns lexicon, read and not kept, and work, 4-byte aligned
  *  @param n_frames the most frames a window holds, as ai_engine_command_ctc_work_bytes sized work
- *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_SIZE a variant longer than the units max
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_SIZE a variant longer than the units max, or more
+ *       states than AI_ENGINE_COMMAND_CTC_STATES_MAX
  */
 esp_err_t ai_engine_command_ctc_prepare(const ai_engine_lexicon_t *lexicon, size_t n_classes, size_t n_frames,
                                         void *work);
