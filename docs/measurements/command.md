@@ -1073,6 +1073,8 @@ không phải nguyên nhân.
 
 v7 ở bước 40 000 trên `val` (1 578 câu): thanh đúng ở âm tiết đầu 75,8%, ở các âm tiết sau 83,7%; giữ ba chiều cao độ ở
 trung bình thì còn 64,4% và 74,8%. Mạng dùng cao độ, và âm tiết đầu vẫn kém hơn 8 điểm như A ngày 05/10 (§12.3).
+`make ctc-tone-flip CHECK=places` cho lại đúng các số ấy, cùng lỗi đơn vị trên `val`: 0,335 như mô phỏng, 0,392 khi giữ
+cao độ ở trung bình.
 
 Bộ dò của board (Kaldi chạy dòng, `dsp_spec/pitch`) trên từng từ của chủ repo, mốc từ của bộ căn §3.11, so với YIN trên
 micro 0 thô (trung vị theo từ). Lỗi là phần khung có POV trên 0,3 mà F0 lệch quá nửa quãng tám khỏi trung vị YIN của từ;
