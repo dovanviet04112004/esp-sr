@@ -38,7 +38,7 @@ Dựng bằng `python -m srpipe.tasks.command.ctc.data` (`make splits`), seed 20
 - train_fpt_open.txt: a3d12d1ca418553ac8e70451322b6b91ce4dc84e7bfc98153e817d06cbde546f
 - train_lsvsc.txt: fe53c0c7edf5575e1e1ca1e2ccd0508316870a03d57b711978f4f10a69418f5a
 - train_speech_massive_vi.txt: f9737cb339471c43134ff9dde847a9ca780e1b62178ed93de5331da7b622bd42
-- train_vimd.txt: b271448d6fe16dd08a63df6e250084efddf095d5d26f33622926e169ea43ee8d
+- train_vimd.txt: 6386fdd5510bcf46ac18181544349b3942d93cfef231f3466a3850788774c0a7
 - train_vivos.txt: 5ef518155363071203e5928cc4aa27b19272c869e0a0e28c881a3ebd080539f7
 - train_vlsp.txt: 0a6a8226698d806e6233413b260a002f65f750f6c20b515f5d26c62128fe70b3
 - val.txt: a424db43e9ca376aaafc1efe651f6464db1c83876548154328175a0249da4e4d
