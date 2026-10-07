@@ -43,6 +43,7 @@ from srpipe.tts import engines
 
 CHECKS = ("val", "owner", "places")
 CONDITIONS = ("recorded", "same", "swap")  # owner: as recorded, F0 kept, F0 moved
+HOLDS = {"voicing": (0,), "f0": (1, 2), "pitch": (0, 1, 2)}  # pitch dims POV, log F0, delta held, by name
 PLACES = ("first", "later")
 MODES = ("same", "swap")  # resynthesised on its own contour, or on the other tone's
 OTHER_TONE = dict(zip(lang_vi.CHECKED_TONES, reversed(lang_vi.CHECKED_TONES), strict=True))
@@ -437,6 +438,15 @@ def owned_windows(spans: gate.Spans, said: gate.Spans, gone: set[int]) -> dict[i
     return {k: ws[0] for k, ws in holders.items() if len(ws) == 1 and owned[ws[0]] == [k] and k not in gone}
 
 
+def held(x: np.ndarray, dims: tuple[int, ...], mean: np.ndarray) -> np.ndarray:
+    """A window with the pitch dims at dims, counted from the first of the three, at their train mean, which the net
+    reads as nothing there."""
+    out = x.copy()
+    cols = [x.shape[1] - N_PITCH + d for d in dims]
+    out[:, cols] = mean[cols]
+    return out
+
+
 def owner_decisions(
     net: gate.Ctc,
     rows: list[dict],
@@ -445,17 +455,35 @@ def owner_decisions(
     said_of: dict[str, gate.Spans],
     gone_of: dict[str, set[int]],
     pcm_of: dict[str, np.ndarray] | None = None,
-) -> tuple[dict[tuple[str, int], gate.Heard], dict[tuple[str, int], tuple[int, int]]]:
-    """Each utterance alone of rows decided over the one window that holds it, as Gate 3 runs the sitting, and that
-    window's hops; sessions of pcm_of heard as those samples."""
+    holds: dict[str, tuple[int, ...]] | None = None,
+) -> tuple[dict, dict[tuple[str, int], tuple[int, int]], dict[str, dict]]:
+    """Each utterance alone of rows decided over the one window that holds it, as Gate 3 runs the sitting, that
+    window's hops, and per name of holds its decision with those pitch dims held; sessions of pcm_of heard as those
+    samples."""
     heard, hops = {}, {}
+    holding: dict[str, dict] = {name: {} for name in holds or {}}
     for r, _, vad, features, pitch in gate.heard_rows(net.cfg, rows, paths, manifest, pcm_of):
         spans = device.utterances(vad)
         windows = gate.ctc_windows(features, pitch, spans)
         for k, w in owned_windows(spans, said_of[r["session"]], gone_of.get(r["session"], set())).items():
-            heard[(r["session"], k)] = gate.ctc_heard(net, windows[w])
-            hops[(r["session"], k)] = spans[w]
-    return heard, hops
+            key = (r["session"], k)
+            heard[key], hops[key] = gate.ctc_heard(net, windows[w]), spans[w]
+            for name, dims in (holds or {}).items():
+                holding[name][key] = gate.ctc_heard(net, held(windows[w], dims, net.mean))
+    return heard, hops, holding
+
+
+def tally(decided: dict, row_of: dict, command_of: dict, reject: int, margin: int) -> list[dict]:
+    """Per day, distance and word, the utterances of decided, those right, and those accepted at reject and margin."""
+    every: dict[tuple, Counter] = {}
+    for (session, _), h in decided.items():
+        r = row_of[session]
+        expected = command_of[tuple(corpus.sounds(r["prompt"]))]
+        c = every.setdefault((f"{session[6:8]}/{session[4:6]}", r["distance_cm"], r["prompt"].split()[0]), Counter())
+        c["utterances"] += 1
+        c["right"] += h.command == expected
+        c["accepted"] += h.command == expected and h.accepted(reject, margin)
+    return [{"day": d, "cm": cm, "word": w} | dict(c) for (d, cm, w), c in every.items()]
 
 
 def moved_session(pcm: np.ndarray, spoken: list[Spoken], target_of: dict, rcfg: repitch.RepitchConfig) -> np.ndarray:
@@ -494,8 +522,8 @@ def owner_check(net: gate.Ctc, listed: list[dict], spec: dict, paths: dict) -> d
         session, _, k = named.partition("#")
         gone_of[session].add(int(k))
     said_of = {r["session"]: gate.said_alone(r, paths, chain_cfg, mel) for r in rows}
-    decided = {"recorded": owner_decisions(net, rows, paths, manifest, said_of, gone_of)}
-    recorded_hops = decided["recorded"][1]
+    recorded, recorded_hops, holding = owner_decisions(net, rows, paths, manifest, said_of, gone_of, holds=HOLDS)
+    decided = {"recorded": recorded}
     pcm = {s: gate.channels_of(paths["raw"] / "device" / r["board"] / s) for s, r in row_of.items()}
     work = paths["cache"] / "tone_flip" / "owner"
     before, after = spec["owner_margin_hops"]
@@ -534,7 +562,7 @@ def owner_check(net: gate.Ctc, listed: list[dict], spec: dict, paths: dict) -> d
             session: moved_session(pcm[session], [s for s in spoken if s.session == session], targets, rcfg)
             for session in {s.session for s in spoken}
         }
-        decided[condition] = owner_decisions(net, rows, paths, manifest, said_of, gone_of, moved)
+        decided[condition] = owner_decisions(net, rows, paths, manifest, said_of, gone_of, moved)[0]
     command_of = {tuple(corpus.sounds(c["text"])): c["id"] for c in listed}
     reject, margin = spec["accept_permille"]
     groups: dict[tuple, dict] = {}
@@ -542,7 +570,7 @@ def owner_check(net: gate.Ctc, listed: list[dict], spec: dict, paths: dict) -> d
     for s in spoken:
         r = row_of[s.session]
         expected = command_of[tuple(corpus.sounds(r["prompt"]))]
-        heard = {c: decided[c][0].get((s.session, s.said)) for c in CONDITIONS}
+        heard = {c: decided[c].get((s.session, s.said)) for c in CONDITIONS}
         if any(h is None for h in heard.values()):
             continue
         word = r["prompt"].split()[0]
@@ -555,17 +583,10 @@ def owner_check(net: gate.Ctc, listed: list[dict], spec: dict, paths: dict) -> d
         if heard["same"].command == expected:
             flips[word]["kept"] += 1
             flips[word]["turned"] += heard["swap"].command != expected
-    every: dict[tuple, Counter] = {}
-    for (session, _), h in decided["recorded"][0].items():
-        r = row_of[session]
-        expected = command_of[tuple(corpus.sounds(r["prompt"]))]
-        c = every.setdefault((f"{session[6:8]}/{session[4:6]}", r["distance_cm"], r["prompt"].split()[0]), Counter())
-        c["utterances"] += 1
-        c["right"] += h.command == expected
-        c["accepted"] += h.command == expected and h.accepted(reject, margin)
     return {
         "median_hz": round(median_hz, 1),
-        "recorded": [{"day": d, "cm": cm, "word": w} | dict(c) for (d, cm, w), c in every.items()],
+        "recorded": tally(decided["recorded"], row_of, command_of, reject, margin),
+        "held": {name: tally(holding[name], row_of, command_of, reject, margin) for name in HOLDS},
         "templates_st": {tone: [round(float(v), 2) for v in c] for tone, c in sorted(templates.items())},
         "groups": [
             {"day": day, "cm": cm, "word": word, "utterances": sum(g["recorded"]["heard"].values())}
@@ -588,16 +609,20 @@ def owner_table(report: dict) -> str:
             f"| {g['day']} | {g['cm']} | {g['word']} | {g['utterances']} | " + " | ".join(cells) + f" | {heard} |"
         )
     turned = "; ".join(f"{word} {c.get('turned', 0)}/{c.get('kept', 0)}" for word, c in report["flips"].items())
-    recorded = "; ".join(
-        f"{r['day']} {r['cm']} cm {r['word']} {r['right']}/{r['utterances']} ({r['accepted']})"
-        for r in report["recorded"]
-    )
+
+    def counted(rows: list[dict]) -> str:
+        return "; ".join(
+            f"{r['day']} {r['cm']} cm {r['word']} {r['right']}/{r['utterances']} ({r['accepted']})" for r in rows
+        )
+
+    held_lines = [f"every utterance, {name} held: {counted(rows)}" for name, rows in report["held"].items()]
     return "\n".join(
         [
             *lines,
             "",
             f"turned by moving F0, of those right with it kept: {turned}",
-            f"every utterance as recorded: {recorded}",
+            f"every utterance as recorded: {counted(report['recorded'])}",
+            *held_lines,
         ]
     )
 

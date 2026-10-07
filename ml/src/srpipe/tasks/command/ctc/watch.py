@@ -53,15 +53,21 @@ def gate_entry(results: list[gate.Scored], word_of: dict[str, str | None], rejec
     }
 
 
-def owner_entry(report: dict) -> dict:
-    """The owner check in figures: per word the utterances right with F0 kept that moving it turned, and per day
-    and word every utterance right and accepted as recorded."""
+def by_day(rows: list[dict]) -> dict[str, dict]:
+    """Utterances, right and accepted per day and word, the distances summed."""
     days: dict[str, Counter] = {}
-    for r in report["recorded"]:
+    for r in rows:
         c = days.setdefault(f"{r['day']} {r['word']}", Counter())
         for k in ("utterances", "right", "accepted"):
             c[k] += r[k]
-    return {"turned": report["flips"], "recorded": {key: dict(c) for key, c in days.items()}}
+    return {key: dict(c) for key, c in days.items()}
+
+
+def owner_entry(report: dict) -> dict:
+    """The owner check in figures: per word the utterances right with F0 kept that moving it turned, and per day
+    and word every utterance right and accepted as recorded and with each set of pitch dims held."""
+    held = {name: by_day(rows) for name, rows in report["held"].items()}
+    return {"turned": report["flips"], "recorded": by_day(report["recorded"]), "held": held}
 
 
 def landed(path: Path, poll_s: float, settled_s: float) -> None:

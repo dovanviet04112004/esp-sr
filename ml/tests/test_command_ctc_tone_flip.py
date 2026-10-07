@@ -166,3 +166,13 @@ def test_the_units_heard_are_matched_to_the_said_ones_by_edit_distance() -> None
     assert tone_flip.matched([1, 2, 3], np.array([1, 2, 3])) == [1, 2, 3]
     assert tone_flip.matched([1, 9, 3], np.array([1, 2, 3])) == [1, 9, 3]
     assert tone_flip.matched([1, 3], np.array([1, 2, 3])) == [1, None, 3]
+
+
+def test_a_held_pitch_dim_reads_its_train_mean_and_nothing_else_moves() -> None:
+    x = np.arange(12, dtype=np.float32).reshape(2, 6)
+    mean = np.full(6, -1.0, dtype=np.float32)
+    voicing = tone_flip.held(x, tone_flip.HOLDS["voicing"], mean)
+    assert np.all(voicing[:, 3] == -1.0) and np.array_equal(np.delete(voicing, 3, axis=1), np.delete(x, 3, axis=1))
+    f0 = tone_flip.held(x, tone_flip.HOLDS["f0"], mean)
+    assert np.all(f0[:, 4:] == -1.0) and np.array_equal(f0[:, :4], x[:, :4])
+    assert np.array_equal(tone_flip.held(x, (), mean), x) and x[0, 3] == 3.0

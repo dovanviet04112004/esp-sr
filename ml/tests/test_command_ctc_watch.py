@@ -52,9 +52,13 @@ def test_the_owner_check_sums_each_day_and_word_as_recorded() -> None:
         ],
         "flips": {"tắt": {"kept": 6, "turned": 2}},
     }
+    report["held"] = {
+        "voicing": [{"day": "07/10", "cm": "100", "word": "tắt", "utterances": 4, "right": 0, "accepted": 0}]
+    }
     got = watch.owner_entry(report)
     assert got["recorded"] == {"07/10 tắt": dict(Counter(utterances=9, right=6, accepted=2))}
     assert got["turned"] == {"tắt": {"kept": 6, "turned": 2}}
+    assert got["held"] == {"voicing": {"07/10 tắt": {"utterances": 4, "right": 0, "accepted": 0}}}
 
 
 def test_a_checkpoint_left_alone_is_taken_at_once(tmp_path: Path) -> None:
