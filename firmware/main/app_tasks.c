@@ -97,19 +97,26 @@ static void thu_task(void *arg)
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
     for (;;) {
         uint8_t slot = 0;
-        const bool have_slot = xQueueReceive(w->free_slots, &slot, 0) == pdTRUE;
+        bool have_slot = xQueueReceive(w->free_slots, &slot, 0) == pdTRUE;
         int16_t *dst = have_slot ? w->pool[slot].pcm : s_drain;
         uint32_t seq = 0;
         const esp_err_t err = drv_audio_read_frame(dst, &seq, DMA_WAIT_MS);
-        if (!have_slot) {
-            count_in_stats(w, &w->afe_stats->frames_dropped);
-        } else if (err != ESP_OK) {
-            return_slot(w, slot);
+        if (err != ESP_OK) {
+            if (have_slot) { return_slot(w, slot); }
         } else {
-            w->pool[slot].seq = seq;
-            if (xQueueSend(w->frame, &slot, 0) != pdTRUE) {
-                return_slot(w, slot);
+            if (!have_slot && xQueueReceive(w->free_slots, &slot, 0) == pdTRUE) {
+                // A slot sach_task returns while the frame is on its way still takes it.
+                memcpy(w->pool[slot].pcm, s_drain, sizeof(s_drain));
+                have_slot = true;
+            }
+            if (!have_slot) {
                 count_in_stats(w, &w->afe_stats->frames_dropped);
+            } else {
+                w->pool[slot].seq = seq;
+                if (xQueueSend(w->frame, &slot, 0) != pdTRUE) {
+                    return_slot(w, slot);
+                    count_in_stats(w, &w->afe_stats->frames_dropped);
+                }
             }
         }
         esp_task_wdt_reset();
