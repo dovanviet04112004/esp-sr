@@ -133,7 +133,7 @@ kws-train: ## Train the kws DS-CNN on processed/command_kws on the GPU into ml/a
 	cd ml && uv run --extra train python -m srpipe.tasks.command.kws.train
 
 ctc-features: ## Run each file of the command split through the board simulation with pitch into processed/command, then cut the board sessions with Gate 3's code, which needs torch; Ctrl-C pauses at once, run again it goes on from the finished shards (E11-T12)
-	cd ml && uv run --extra train python -m srpipe.tasks.command.ctc.data simulate
+	cd ml && uv run --extra train --extra swiftf0 python -m srpipe.tasks.command.ctc.data simulate
 
 ctc-train: ## Train the ctc net on processed/command on the GPU into ml/artifacts/command_ctc/runs; RESUME=<run under ml/> goes on from its last checkpoint (E11-T12)
 	cd ml && uv run --extra train python -m srpipe.tasks.command.ctc.train $(if $(RESUME),--resume $(RESUME))
@@ -160,7 +160,7 @@ models-flash: ## Pack every model of contracts/models.lock.json and write models
 	cd ml && PORT=$(PORT) ./scripts/50_pack_and_flash.sh
 
 command-eval: ## Score Gate 3 of a command track on the board sessions: make command-eval TRACK=kws|ctc|rnnt RUN=<run under ml/> [SET=<command set file from the repo root>] (E11-T13, E11-T17)
-	cd ml && uv run --extra train python -m srpipe.tasks.command.eval $(TRACK) $(RUN) $(if $(SET),--commands $(abspath $(SET)))
+	cd ml && uv run --extra train --extra swiftf0 python -m srpipe.tasks.command.eval $(TRACK) $(RUN) $(if $(SET),--commands $(abspath $(SET)))
 
 ns-data: screen ## Split, pools and held val/test sets of the ns branch into data/splits/ns, interim and processed (E9-T3)
 	cd ml && uv run python -m srpipe.tasks.ns.data clean && uv run python -m srpipe.tasks.ns.data split \

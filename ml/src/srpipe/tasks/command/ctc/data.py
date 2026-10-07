@@ -332,8 +332,9 @@ def unbuilt(cfg: dict, paths: dict) -> list[Path]:
 
 def simulate(cfg: dict, paths: dict) -> None:
     """Every file of the split into processed/command/<version>/<file>, smallest first, with pitch and without the
-    clean samples, train's items each spoken at a speed of simulate.speeds and stored as simulate.train_dtype; a file
-    stopped part way goes on from its finished shards."""
+    clean samples, train's items each spoken at a speed of simulate.speeds and stored as simulate.train_dtype; with
+    simulate.mel_from, the log-mel of that version's build of the file linked and only the pitch written anew
+    (KEHOACH 1.2). A file stopped part way goes on from its finished shards."""
     spec, version = cfg["simulate"], cfg["split"]["version"]
     device_cfg = device_of(cfg)
     folder = paths["splits"] / "command" / version
@@ -344,7 +345,11 @@ def simulate(cfg: dict, paths: dict) -> None:
             print(f"{out}: already built", flush=True)
             continue
         raw, interim, workers = paths["raw"], paths["interim"], spec["workers"]
-        print(device.build(device_cfg, split_file, raw, interim, out, workers, pitch=True, keep_pcm=False, **options))
+        reused = paths["processed"] / "command" / spec["mel_from"] / split_file.stem if spec.get("mel_from") else None
+        built = device.build(
+            device_cfg, split_file, raw, interim, out, workers, pitch=True, keep_pcm=False, mel_from=reused, **options
+        )
+        print(built, flush=True)
     if board := cfg["split"].get("board"):
         out = paths["processed"] / "command" / version / BOARD
         built = board_built_as(out, device_cfg, board_rows(paths), board)

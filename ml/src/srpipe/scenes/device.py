@@ -15,6 +15,7 @@ import json
 import math
 import multiprocessing
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
@@ -41,7 +42,7 @@ from srpipe.generated import afe, array, grid
 from srpipe.generated.listen import HASH as LISTEN_HASH
 from srpipe.generated.listen import UTTERANCE_GAP_HOPS, UTTERANCE_LEAD_HOPS, UTTERANCE_MIN_HOPS, WINDOW_HOPS
 from srpipe.metrics import mic_pair
-from srpipe.scenes import room
+from srpipe.scenes import room, swift_pitch
 
 HOP = grid.HOP_SAMPLES
 FS = grid.SAMPLE_RATE_HZ
@@ -510,6 +511,34 @@ def stream_pitch(tracker: PitchTracker, clean: np.ndarray) -> np.ndarray:
     return np.stack([tracker.step(to_float(hop)) for hop in clean.reshape(-1, HOP)])
 
 
+def pitch_of(spec: dict) -> Callable[[np.ndarray], np.ndarray]:
+    """Pitch features (hops, 3) of a stream's clean int16 samples by the tracker spec names, built once: Kaldi's
+    online tracker as stream_pitch runs it, or SwiftF0 for a pitch_source trial (KEHOACH 3.11)."""
+    if spec.get("source") == swift_pitch.SOURCE:
+        detect = swift_pitch.detector()
+        return lambda clean: swift_pitch.features(clean, spec, detect)
+    tracker = PitchTracker(PitchConfig(**spec))
+    return lambda clean: stream_pitch(tracker, clean)
+
+
+def link_reused(stem: Path, source: Path, features: np.ndarray, figures: np.ndarray, listing: str) -> None:
+    """Hard-link the log-mel, figures and items of shard source into stem once they equal what this simulation gave,
+    which leaves only its pitch to write; anything else is refused (KEHOACH 1.2)."""
+    same = (
+        np.array_equal(np.load(source.with_suffix(".features.npy")), features, equal_nan=True)
+        and np.load(source.with_suffix(".features.npy"), mmap_mode="r").dtype == features.dtype
+        and np.array_equal(np.load(source.with_suffix(".figures.npy")), figures)
+        and source.with_suffix(".items.jsonl").read_text(encoding="utf-8") == listing
+    )
+    if not same:
+        raise ValueError(
+            f"{source}: its log-mel, figures or items differ from this simulation's; build without mel_from"
+        )
+    for kind in (".features.npy", ".figures.npy", ".items.jsonl"):
+        stem.with_suffix(kind).unlink(missing_ok=True)
+        os.link(source.with_suffix(kind), stem.with_suffix(kind))
+
+
 def shard_files(out: Path, shard: int, with_pitch: bool, keep_pcm: bool) -> list[Path]:
     """The files a finished shard holds, in the order _shard writes them."""
     stem = out / f"shard_{shard:05d}"
@@ -532,19 +561,19 @@ def _ignore_interrupt() -> None:
 
 
 def _shard(job: tuple) -> list[Path]:
-    cfg, roots, bank, out, shard, sessions, pools, pads_s, cut, with_pitch, keep_pcm, speeds, dtype = job
+    cfg, roots, bank, out, shard, sessions, pools, pads_s, cut, with_pitch, keep_pcm, speeds, dtype, mel_from = job
     mics = load_microphones(cfg["microphone"])
     floor_cfg = cfg["microphone"].get("floor")
     floor = load_floor(floor_cfg, roots["raw"], mics.pcm_shift) if floor_cfg else None
     chain_cfg = ChainConfig(balance_gains=mics.gains)
     mel = Mel(MelConfig(**cfg["features"]))
-    tracker = PitchTracker(PitchConfig(**cfg["pitch"])) if with_pitch else None
+    pitch = pitch_of(cfg["pitch"]) if with_pitch else None
     readers = {name: ItemReader(root) for name, root in roots.items()}
     features, figures, pcm, pitches, items, offset = [], [], [], [], [], 0
     for k, rows in sessions:
         captured, spans, draws, heard = simulate_session(cfg, k, rows, bank, mics, pools, readers, floor, speeds)
         clean, figs, feats = listen(captured, replace(chain_cfg, agc_start_db=draws.get("agc_start_db")), mel)
-        heard_pitch = stream_pitch(tracker, clean) if tracker is not None else None
+        heard_pitch = pitch(clean) if pitch is not None else None
         said_at = draws.pop("speeds", [])
         for first, stop, held, speech in cut_items(cut, spans, pads_s, heard):
             features.append(feats[first:stop])
@@ -565,17 +594,21 @@ def _shard(job: tuple) -> list[Path]:
             )
             offset += stop - first
     stem = out / f"shard_{shard:05d}"
-    np.save(stem.with_suffix(".features.npy"), joined(features, (0, mel.cfg.n_bands)).astype(dtype))
-    np.save(stem.with_suffix(".figures.npy"), joined(figures, (0, 3), np.int8))
+    mels, figured = joined(features, (0, mel.cfg.n_bands)).astype(dtype), joined(figures, (0, 3), np.int8)
+    listing = "".join(json.dumps(i, ensure_ascii=False) + "\n" for i in items)
+    if mel_from is not None:
+        link_reused(stem, mel_from / stem.name, mels, figured, listing)
+    else:
+        np.save(stem.with_suffix(".features.npy"), mels)
+        np.save(stem.with_suffix(".figures.npy"), figured)
+        stem.with_suffix(".items.jsonl").write_text(listing, encoding="utf-8")
     if keep_pcm:
         np.save(stem.with_suffix(".pcm.npy"), joined(pcm, (0,), np.int16))
-    listing = "".join(json.dumps(i, ensure_ascii=False) + "\n" for i in items)
-    stem.with_suffix(".items.jsonl").write_text(listing, encoding="utf-8")
-    if tracker is not None:
+    if pitch is not None:
         np.save(stem.with_suffix(".pitch.npy"), joined(pitches, (0, N_PITCH)).astype(dtype))
     # Written last: a shard stopped part way has no marker and is built again whole.
     shard_done(out, shard).write_text("", encoding="utf-8")
-    return shard_files(out, shard, tracker is not None, keep_pcm)
+    return shard_files(out, shard, pitch is not None, keep_pcm)
 
 
 def build(
@@ -592,13 +625,14 @@ def build(
     speeds: tuple[float, ...] = (),
     dtype: str = "float32",
     cut: str = "pads",
+    mel_from: Path | None = None,
 ) -> Path:
     """Every item of split_file through the simulation into out, repeats times over, each pass in sessions of their
     own rooms, levels and noise; an item is a clip with pads_s around it (session.pad_s unless given), or with cut
-    listen the window the board cuts around it (KEHOACH 1.2); with pitch its pitch from a reset at its first hop, its
-    clean samples unless keep_pcm is off, with speeds each clip spoken at one drawn from them, stored as dtype; then
-    manifest.yaml, counting with cut listen the clips no window holds. Ctrl-C stops a build and its workers at once;
-    the same build run again goes on from its finished shards."""
+    listen the window the board cuts around it (KEHOACH 1.2); with pitch its pitch, its clean samples unless keep_pcm
+    is off, with speeds each clip spoken at one drawn from them, stored as dtype; with mel_from, a build of the same
+    split and config but its pitch, the log-mel, figures and items linked from it. Then manifest.yaml, counting with
+    cut listen the clips no window holds; Ctrl-C stops at once, and the same build run again goes on from its shards."""
     if cut not in CUTS or (cut == "listen" and pads_s):
         raise ValueError(f"cut {cut!r}: one of {', '.join(CUTS)}, and the listen cut takes no pads_s")
     rows = splits.read_split(split_file)
@@ -634,13 +668,24 @@ def build(
         "rooms_sha256": sha256_of(bank / "rooms.yaml"),
         **({"floor_sha256": floor_sha256} if floor_sha256 else {}),
     }
+    if mel_from is not None:
+        reused = yaml.safe_load((mel_from / "build.yaml").read_text(encoding="utf-8"))
+        unlike = {k for k in head.keys() | reused.keys() if k != "config" and head.get(k) != reused.get(k)}
+        unlike |= {
+            k for k in cfg.keys() | reused["config"].keys() if k != "pitch" and cfg.get(k) != reused["config"].get(k)
+        }
+        if unlike or keep_pcm or not (mel_from / "manifest.yaml").exists():
+            raise ValueError(
+                f"{mel_from}: unfinished, or simulated otherwise ({', '.join(sorted(unlike))}): no log-mel to link"
+            )
+        head["mel_from"] = str(mel_from)
     begun = out / "build.yaml"
     if begun.exists() and yaml.safe_load(begun.read_text(encoding="utf-8")) != head:
         raise ValueError(f"{out} holds part of a build of another config or split: delete it or build elsewhere")
     begun.write_text(yaml.safe_dump(head, allow_unicode=True, sort_keys=False), encoding="utf-8")
     roots = {"raw": raw_root, "interim": interim}
     shards = range(math.ceil(len(sessions) / per_shard))
-    options = (pools, pads, cut, pitch, keep_pcm, speeds, dtype)
+    options = (pools, pads, cut, pitch, keep_pcm, speeds, dtype, mel_from)
     jobs = [
         (cfg, roots, bank, out, j, sessions[j * per_shard : (j + 1) * per_shard], *options)
         for j in shards

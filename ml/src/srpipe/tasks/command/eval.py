@@ -27,7 +27,6 @@ from srpipe.core.audio_io import to_float
 from srpipe.core.config import data_paths, device_of, load_run_config, load_yaml
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
-from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
 from srpipe.dsp.spec.stft import Stft
 from srpipe.generated import array, grid, listen
 from srpipe.scenes import device
@@ -276,7 +275,7 @@ def heard_rows(cfg: dict, rows: list[dict], paths: dict, manifest: list[dict] | 
     device_cfg = device_of(cfg)
     mics = device.load_microphones(device_cfg["microphone"])
     chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
-    tracker = PitchTracker(PitchConfig(**device_cfg["pitch"]))
+    pitch_of = device.pitch_of(device_cfg["pitch"])
     if manifest is None:
         spec = load_yaml(command.CONFIG)["eval"]["board"]
         manifest = list(csv.DictReader((paths["manifests"] / spec["manifest"]).open(encoding="utf-8")))
@@ -295,7 +294,7 @@ def heard_rows(cfg: dict, rows: list[dict], paths: dict, manifest: list[dict] | 
         samples, vads = np.split(clean, cuts * grid.HOP_SAMPLES), np.split(figures[:, 0].astype(bool), cuts)
         parts = zip(samples, vads, np.split(features, cuts), strict=True)
         sessions = [with_silence(c, v, f, mel) for c, v, f in parts]
-        pitch = device.stream_pitch(tracker, np.concatenate([s[0] for s in sessions]))
+        pitch = pitch_of(np.concatenate([s[0] for s in sessions]))
         pitches = np.split(pitch, np.cumsum([len(s[1]) for s in sessions])[:-1])
         for r, (c, v, f), p in zip(sitting, sessions, pitches, strict=True):
             if r["session"] in asked:

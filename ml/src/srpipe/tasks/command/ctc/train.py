@@ -22,7 +22,7 @@ import yaml
 from torch.nn import functional
 
 from srpipe.core import screen, splits
-from srpipe.core.config import apply_overrides, contract_front, data_paths, front_of, load_run_config, load_yaml
+from srpipe.core.config import apply_overrides, data_paths, front_of, load_run_config, load_yaml
 from srpipe.core.logger import row_line
 from srpipe.core.run_dir import create_run_dir
 from srpipe.core.seed import seed_everything
@@ -674,12 +674,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     parser.add_argument("--resume", type=Path, metavar="RUN", help="go on from a run's last checkpoint")
     args = parser.parse_args(argv)
-    cfg = (
-        load_run_config(args.resume)
-        if args.resume
-        else apply_overrides(load_yaml(ctc.CONFIG), args.overrides)
-        | {"listen": contract_front(), "listen_hash": listen.HASH}
-    )
+    if args.resume:
+        cfg = load_run_config(args.resume)
+    else:
+        cfg = apply_overrides(load_yaml(ctc.CONFIG), args.overrides)
+        # A pitch_source run learns on features the board does not compute: listen_hash 0 keeps it off the board.
+        cfg |= {"listen": front_of(cfg), "listen_hash": 0 if cfg.get("pitch_source") else listen.HASH}
     paths = data_paths()
     split_files = sorted((paths["splits"] / "command" / cfg["split"]["version"]).glob("*.txt"))
     sets = load_sets(cfg)

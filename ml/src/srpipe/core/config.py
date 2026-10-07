@@ -14,6 +14,7 @@ from srpipe.generated import listen
 ML_ROOT = Path(__file__).resolve().parents[3]
 CONFIGS = ML_ROOT / "configs"
 DATA_ROOT_ENV = "SRPIPE_DATA_ROOT"
+PITCH_SHARED = ("min_f0_hz", "max_f0_hz", "normalization_left_s", "pov_scale", "pitch_scale", "delta_pitch_scale")
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -51,8 +52,14 @@ def contract_front() -> dict[str, Any]:
 
 
 def front_of(cfg: dict[str, Any]) -> dict[str, Any]:
-    """The front end a config learns on: the one a run recorded under listen, else the contract's."""
-    return cfg.get("listen") or contract_front()
+    """The front end a config learns on: the one a run recorded under listen, else the contract's; a config naming a
+    pitch_source tracks pitch by it, with the contract's F0 range, left context and scales (KEHOACH 3.11)."""
+    if cfg.get("listen"):
+        return cfg["listen"]
+    front = contract_front()
+    if source := cfg.get("pitch_source"):
+        front["pitch"] = {k: front["pitch"][k] for k in PITCH_SHARED} | dict(source)
+    return front
 
 
 def load_device(path: Path, front: dict[str, Any] | None = None) -> dict[str, Any]:

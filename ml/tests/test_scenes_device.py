@@ -511,6 +511,45 @@ def test_a_build_stored_in_float16_holds_the_float32_features_rounded(raw_root: 
         assert narrow.dtype == np.float16 and np.array_equal(narrow, wide.astype(np.float16))
 
 
+def test_a_build_on_another_pitch_links_the_log_mel_and_writes_only_its_pitch(raw_root: Path, tmp_path: Path) -> None:
+    split = split_file(tmp_path / "train.txt", raw_root)
+    interim, kept, out = screened(tmp_path / "interim"), tmp_path / "kept", tmp_path / "out"
+    device.build(tiny(), split, raw_root, interim, kept, pitch=True, keep_pcm=False)
+    scaled = tiny(pitch=tiny()["pitch"] | {"pitch_scale": 3.0})
+    body = yaml.safe_load(
+        device.build(scaled, split, raw_root, interim, out, pitch=True, keep_pcm=False, mel_from=kept).read_text()
+    )
+    assert body["mel_from"] == str(kept)
+    for kind in (".features.npy", ".figures.npy", ".items.jsonl"):
+        assert (out / f"shard_00000{kind}").stat().st_ino == (kept / f"shard_00000{kind}").stat().st_ino
+    old, new = (np.load(d / "shard_00000.pitch.npy") for d in (kept, out))
+    assert np.allclose(new[:, 1], old[:, 1] * 1.5, atol=1e-6) and np.array_equal(new[:, 0], old[:, 0])
+
+
+def test_a_build_links_no_log_mel_simulated_otherwise_or_changed_since(raw_root: Path, tmp_path: Path) -> None:
+    split = split_file(tmp_path / "train.txt", raw_root)
+    interim, kept = screened(tmp_path / "interim"), tmp_path / "kept"
+    device.build(tiny(), split, raw_root, interim, kept, pitch=True, keep_pcm=False)
+    scaled = tiny(pitch=tiny()["pitch"] | {"pitch_scale": 3.0})
+    with pytest.raises(ValueError, match="simulated otherwise"):
+        device.build(
+            tiny(seed=tiny()["seed"] + 1),
+            split,
+            raw_root,
+            interim,
+            tmp_path / "a",
+            pitch=True,
+            keep_pcm=False,
+            mel_from=kept,
+        )
+    with pytest.raises(ValueError, match="simulated otherwise"):
+        device.build(scaled, split, raw_root, interim, tmp_path / "b", pitch=True, mel_from=kept)
+    features = np.load(kept / "shard_00000.features.npy")
+    np.save(kept / "shard_00000.features.npy", features + np.float32(1e-3))
+    with pytest.raises(ValueError, match="differ from this simulation"):
+        device.build(scaled, split, raw_root, interim, tmp_path / "c", pitch=True, keep_pcm=False, mel_from=kept)
+
+
 def test_the_captured_floor_comes_back_sample_for_sample_wrapping_round(tmp_path: Path) -> None:
     samples = np.random.default_rng(8).integers(-300, 300, (2, 1000))
     floor_session(tmp_path, "f", "probe", 13, samples)
