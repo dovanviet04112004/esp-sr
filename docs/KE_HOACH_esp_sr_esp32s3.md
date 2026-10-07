@@ -833,15 +833,15 @@ bước trên tín hiệu sạch ở mọi trạng thái, liền như log-mel, c
 quyết định (§5.4), và nhánh khác như `wake` đọc được khi cần (chủ repo 05/10). Giá: 1,98 ms mỗi bước ở nhân 0,
 khoảng 12% (§5.6).
 
-**Lượt thử bộ dò SwiftF0** (E11-T12, chủ repo duyệt 07/10). Bộ dò trên sai 16–58% khung ở âm tiết đầu của lệnh và
-0–16% ở âm tiết sau, trên đầu ra của chuỗi như trên micro thô: đường Viterbi chạy dòng nối từ nền trước câu vào âm tiết
-đầu. Thanh của âm tiết đầu vì thế không đến được mạng, và v7 bỏ qua nó: đổi riêng F0 của "tắt" xuống mức "bật" chỉ lật
-5 trên 46 quyết định (`measurements/command.md` §12.17, §12.18). Bộ dò quyết từng khung không có đường nối ấy; trong
-bốn bộ đo trên tín hiệu board, SwiftF0 (Nieradzik 2025: 95 842 tham số, STFT 1024 bước 256 ở 16 kHz; gói `swift-f0`
-MIT) giữ thanh của âm tiết đầu tốt nhất ở cả giọng chủ repo lẫn `val`, nhưng nguyên cỡ nặng gấp chục lần sức esp-dl
-trên board. Lượt thử chỉ đổi ba chiều cao độ của đường mô phỏng và của Cửa 3, rồi học `command/v8` đúng công thức v7,
-riêng hay cùng hoán đổi thanh tuỳ phép kiểm lật F0 dưới đây, để biết mạng có dùng thanh khi thanh đến được, trước khi
-làm bộ dò cho chip:
+**Lượt thử bộ dò SwiftF0** (E11-T12, chủ repo duyệt 07/10). Bộ dò trên sai 16–58% khung ở âm tiết đầu của lệnh và 0–16%
+ở âm tiết sau, trên đầu ra của chuỗi như trên micro thô: đường Viterbi chạy dòng nối từ nền trước câu vào âm tiết đầu.
+Thanh của âm tiết đầu vì thế đến mạng sai, dù v7 có nghe đường nét của nó, cả trên giọng chủ repo: mang khuôn F0 của
+"bật", 27 trên 32 câu "tắt" đúng thành sai (`measurements/command.md` §12.18, §12.20). Bộ dò quyết từng khung không có
+đường nối ấy; trong bốn bộ đo trên tín hiệu board, SwiftF0 (Nieradzik 2025: 95 842 tham số, STFT 1024 bước 256 ở
+16 kHz; gói `swift-f0` MIT) giữ thanh của âm tiết đầu tốt nhất ở cả giọng chủ repo lẫn `val`, nhưng nguyên cỡ nặng gấp
+chục lần sức esp-dl trên board. Lượt thử chỉ đổi ba chiều cao độ của đường mô phỏng và của Cửa 3, rồi học `command/v8`
+đúng công thức v7, riêng hay cùng hoán đổi thanh tuỳ phép kiểm lật F0 dưới đây, để biết mạng có dùng thanh khi thanh
+đến được, trước khi làm bộ dò cho chip:
 - độ hữu thanh là độ tin của SwiftF0 qua phép biến đổi Kaldi dùng cho NCCF, ×2; log F0 của khung có độ tin từ 0,5 trở
   lên, nội suy thẳng qua khung không tiếng, trừ trung bình theo độ tin của các khung có tiếng trong 0,75 s trước và
   0,4 s sau, ×2; delta ±2 khung, ×10: ba chiều và thang như Kaldi;
@@ -854,9 +854,9 @@ học tiếp. Trên `val`, âm tiết đầu của v7 kém các âm tiết sau 8
 thành "bật". Còn hai cách hiểu. Hoặc bộ dò không đưa thanh tới mạng. Hoặc mạng học đoán thanh của âm tiết đầu từ âm
 đoạn và các từ theo sau, một đường tắt: ở câu đọc thanh gần như luôn suy được từ chúng, nên dữ liệu học không buộc mạng
 nghe F0. Số đã có không tách được hai cách hiểu: chênh 81,4 với 76,0% của nhánh A và C ngày 05/10 nằm trong sai số của
-166 câu; giữ ba chiều cao độ ở trung bình thì v7 mất 11 điểm thanh đúng ở âm tiết đầu; còn phép đổi F0 trên giọng chủ
-repo chỉ lật 5/46 quyết định, lẫn với lỗi của Kaldi ở âm tiết đầu trên tiếng board (`measurements/command.md` §12.3,
-§12.17, §12.18). Phép kiểm không học lại:
+166 câu; giữ ba chiều cao độ ở trung bình thì v7 mất 11 điểm thanh đúng ở âm tiết đầu; còn phép đổi riêng mức F0 trên
+giọng chủ repo chỉ lật 5/46 quyết định, lẫn với lỗi của Kaldi ở âm tiết đầu trên tiếng board (`measurements/command.md`
+§12.3, §12.17, §12.18). Phép kiểm không học lại:
 - câu `val` của split của run, cửa sổ chỉ chứa một mẩu; mốc từng âm tiết bằng bộ căn ở trên, chạy trên mẩu khô; hai vị
   trí: âm tiết đầu, và âm tiết vần tắc đầu tiên sau nó, khi âm tiết là vần tắc thanh sắc hay nặng;
 - trên mẩu khô, đường F0 của âm tiết thay bằng khuôn của thanh kia ở cùng vị trí, bằng overlap-add của Praat (giữ
@@ -877,11 +877,15 @@ Tham số ở mục `tone_flip` của `configs/models/command_ctc.yaml`. Quyết
 sau thanh đến được mạng (bộ dò sai 0–16% khung, §12.18). Hai phép so: độ dịch đặc trưng trung bình, và phần âm tiết lật
 thêm so với đối chứng:
 - đặc trưng ở âm tiết đầu dịch dưới một nửa của âm tiết sau: thanh đổi không tới mạng ở âm tiết đầu, do bộ dò hay do
-  chuẩn hoá chỉ nhìn về trước, nên phép kiểm không nói gì về mạng. Học `command/v8` riêng, rồi chạy lại phép kiểm trên v8;
+  chuẩn hoá chỉ nhìn về trước, nên phép kiểm không nói gì về mạng. Học `command/v8` riêng, rồi chạy lại phép kiểm trên
+  v8;
 - đặc trưng dịch từ một nửa trở lên, âm tiết đầu lật thêm từ một nửa của âm tiết sau trở lên: mạng dùng thanh khi thanh
   tới, lỗi trên board nằm ở bộ dò. Học `command/v8` riêng;
 - đặc trưng dịch từ một nửa trở lên, âm tiết đầu lật thêm dưới một nửa của âm tiết sau: đường tắt. Học một lượt
   `command/v8` cùng hoán đổi thanh, không học v8 riêng.
+
+Trên v7 (07/10) đặc trưng ở âm tiết đầu dịch 1,55 so với 1,09 độ lệch chuẩn của âm tiết sau, lật thêm 0,68 so với
+0,91: nhánh thứ hai, học `command/v8` riêng (`measurements/command.md` §12.20).
 
 **Hoán đổi thanh lúc học** (`core/repitch.py`), chỉ khi phép kiểm, trên v7 hay trên v8, chỉ ra đường tắt. Vần tắc chỉ
 mang sắc hoặc nặng (§3.12), và ở đó hai thanh khác nhau chủ yếu ở đường F0 (giọng chủ repo: 200 so với 131 Hz ở "tắt"
@@ -900,14 +904,15 @@ kiểm, khuôn đo trên `train`:
 
 **Chấm run của lượt thử**, v8 riêng hay cùng hoán đổi. `make ctc-watch RUN=<run>` chạy song song lượt học và ghi vào
 thư mục run. Mỗi mốc `train.eval_every`: Cửa 3 (các phiên 07/10), "tắt" và "bật" tách riêng, nhận đúng ở δ₁ 200 ‰ và
-δ₂ 50 ‰. Mỗi mốc thứ hai thêm phép đổi F0 giữ formant trên giọng chủ repo (`tone_flip owner`, §12.17), chấm cả "tắt"
+δ₂ 50 ‰. Mỗi mốc thứ hai thêm phép đổi F0 giữ formant trên giọng chủ repo (`tone_flip owner`, §12.20), chấm cả "tắt"
 và "bật" của 28/09 như thu. Cuối lượt thêm phép kiểm lật F0 trên `val`, và thanh đúng ở âm tiết đầu so với các âm tiết
 sau, với ba chiều cao độ như mô phỏng và giữ ở trung bình (`tone_flip places`, §12.18). Ba điều chốt trước khi thấy số,
 đo trên trọng số cuối như mọi run:
-- mạng dùng thanh: phép đổi F0 trên giọng chủ repo lật ít nhất 23/46 câu "tắt" (v7: 5/46), và phép kiểm lật F0 trên
-  `val` lật âm tiết đầu từ `follows_share` của âm tiết sau trở lên;
-- "tắt" khá lên: ở tám phiên `20261007_home_001`–`008` đúng ít nhất 35/47 câu "tắt" như v7, nhận đúng ít nhất 20/47
-  (v7: 10/47);
+- mạng vẫn dùng thanh: `tone_flip owner` mang khuôn "bật" lật ít nhất ba phần tư số câu "tắt" đúng khi giữ F0 (v7:
+  27/32), và `tone_flip val` lật âm tiết đầu từ `follows_share` của âm tiết sau trở lên (v7: 0,68 so với 0,91). v7 đạt
+  cả hai, nên điều này chỉ giữ cho v8 không mất thanh; chỗ v8 phải hơn v7 là hai điều sau;
+- "tắt" khá lên: ở tám phiên `20261007_home_001`–`008`, mọi câu như thu của `tone_flip owner`, đúng ít nhất 35/47 câu
+  "tắt" như v7, nhận đúng ít nhất 20/47 (v7: 10/47);
 - không hỏng chỗ khác: Cửa 3 đúng ít nhất 165/209 (v7: 170; ±5 là nhiễu đếm), từ chối ít nhất 122/126 ở δ₁ 200 ‰
   (v7: 124).
 
