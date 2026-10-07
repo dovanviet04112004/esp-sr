@@ -156,8 +156,8 @@ ctc-thresholds: ## Choose delta1 and delta2 of a ladder row on val_commands and 
 ctc-deploy: ## Export a ladder row and its chosen delta1, delta2 into firmware/models/command and lock them: make ctc-deploy RUN=<run under ml/> ROW=<row> (E11-T19)
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant deploy $(RUN) --row $(ROW)
 
-ctc-tone-flip: ## The tone checks of KEHOACH 3.11 on a ctc run into <run>/tone_flip_<check>.yaml: CHECK=val moves a checked sắc or nặng syllable of val onto the other tone by Praat, formants kept, its session simulated again; owner moves the first word of the owner's bật / tắt sessions; places reads tone right at the first and later syllables, pitch held or not; val and owner need Docker for the aligner: make ctc-tone-flip CHECK=val|owner|places RUN=<run under ml/> (E11-T23)
-	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra swiftf0 --extra praat python -m srpipe.tasks.command.ctc.tone_flip $(or $(CHECK),val) $(RUN)
+ctc-tone-flip: ## The tone checks of KEHOACH 3.11 on a ctc run into <run>/tone_flip_<check>.yaml: CHECK=val moves a checked sắc or nặng syllable of val onto the other tone by Praat, formants kept, its session simulated again; owner moves the first word of the owner's bật / tắt sessions; places reads tone right at the first and later syllables, pitch held or not; val and owner need Docker for the aligner; STEPS=2000,4000 scores those checkpoints of the run with owner: make ctc-tone-flip CHECK=val|owner|places RUN=<run under ml/> [STEPS=...] (E11-T23)
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra swiftf0 --extra praat python -m srpipe.tasks.command.ctc.tone_flip $(or $(CHECK),val) $(RUN) $(if $(STEPS),--steps $(STEPS))
 
 ctc-watch: ## Score each checkpoint of a ctc run as its training writes it, Gate 3 on each and the owner check on every second, into <run>/watch.yaml; run beside ctc-train, again it goes on from the last entry: make ctc-watch RUN=<run under ml/> (E11-T23)
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra swiftf0 --extra praat python -m srpipe.tasks.command.ctc.watch $(RUN)
