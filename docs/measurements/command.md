@@ -1061,9 +1061,11 @@ F0 đo lại sau khi đổi ra đúng × 0,65 và × 1,53 (trung vị). So với
 46 câu; nâng "bật" lên mức "tắt" không lật câu nào trên 50, chỉ hạ biên. Ở ba hàng tổng hợp lại, câu "tắt" sai đều bị
 nghe thành "bật" (3 m tổng hợp lại: 14 "bật", 9 "tắt"; hạ F0: 17 "bật", 6 "tắt"), còn "bật" sai một lần thành "mở"; bộ
 giải chỉ chấm trên bộ lệnh nên không bao giờ ra "tặt". v7 tách "tắt" với "bật" gần như chỉ bằng phổ của phụ âm đầu và
-nguyên âm, không bằng thanh, dù thanh là chỗ hai từ khác nhau nhiều nhất ở giọng chủ repo (200 so với 131 Hz). Riêng
-phép tổng hợp lại, chưa đổi F0, đã lấy 4 và 6 câu "tắt" mà không lấy câu "bật" nào: dấu hiệu mạng dùng cho "tắt" mảnh.
-Đầu vào cho thấy vì sao: ba chiều cao độ của âm tiết đầu so với nền ngay trước câu, nên không mang thanh (§12.12).
+nguyên âm, không bằng thanh, dù thanh là chỗ hai từ khác nhau nhiều nhất ở giọng chủ repo (200 so với 131 Hz). Phép đổi
+này chỉ đổi mức F0, giữ đường đi lên; đổi cả đường nét sang khuôn của "bật" thì v7 lật 27/32 câu "tắt" (§12.20), nên
+kết luận ấy sai. Riêng phép tổng hợp lại, chưa đổi F0, đã lấy 4 và 6 câu "tắt" mà không lấy câu "bật" nào: dấu hiệu
+mạng dùng cho "tắt" mảnh. Đầu vào cho thấy vì sao: ba chiều cao độ của âm tiết đầu so với nền ngay trước câu, nên không
+mang thanh (§12.12).
 
 "tắt" 28/09 hỏng vì mạng chỉ dựa vào nguyên âm, mà nguyên âm ấy hôm 28/09 ở 3 m trùng "bật" và ở 1 m bị dải trầm kéo
 xuống; thanh vẫn rõ (213–217 so với 141–144 Hz) nhưng mạng không dùng. Firmware thu, khoảng cách, mức thu và giọng trầm
@@ -1152,3 +1154,54 @@ sổ phải từ chối), nhận ở δ₁ `quant.reject` 300 ‰ và δ₂ 50 �
 QAT hạ lỗi đơn vị `val` từ 0,366 xuống 0,347 trong 2 000 bước nhưng nhận đúng ít hơn `mse` 8 câu. Theo luật chọn của
 KẾ HOẠCH §3.14 (`gate_tie` 5), `mse`, int16 1, 2 và 4 lớp hoà ở 119–122 câu; int16 2 lớp có lỗi đơn vị thấp nhất, cần
 µs trên board của hai tích chập int16 trước khi chốt.
+
+### 12.20 Phép kiểm lật F0 trên v7 (07/10)
+
+`make ctc-tone-flip CHECK=val` trên v7 ở bước 40 000 (KẾ HOẠCH §3.11). 1 102 câu `val` có âm tiết vần tắc thanh sắc hay
+nặng, ở đầu câu hay sau đó, trong cửa sổ chỉ chứa một mẩu; bộ căn đặt mốc được 1 099 câu; Praat bỏ 84 âm tiết đầu và
+436 âm tiết sau có tiếng dưới 60% khung hay dưới 50 ms. Mỗi âm tiết mang khuôn F0 của thanh kia ở cùng vị trí (trung vị
+theo nửa cung so với trung vị F0 của người nói, 10 điểm), giữ formant; đối chứng là cùng phép tổng hợp lại giữ F0;
+194 phiên mô phỏng lại, phiên đầu trùng từng byte bản dựng. Dịch là căn bậc hai trung bình bình phương độ dịch của ba
+chiều cao độ trên quãng có tiếng, theo độ lệch chuẩn lúc học; lật là phần âm tiết mà nhãn mang thanh kia được điểm CTC
+cao hơn nhãn gốc; điểm dịch là trung vị mức đổi của hiệu điểm ấy, nat:
+
+| Vị trí | Thanh gốc | Âm tiết | Dịch | Lật: đối chứng / sau đổi | Lật thêm | Điểm dịch |
+|---|---|---|---|---|---|---|
+| đầu | sắc | 32 | 1,67 | 0,00 / 0,44 | +0,44 | +5,3 |
+| đầu | nặng | 50 | 1,54 | 0,16 / 1,00 | +0,84 | +6,3 |
+| đầu | cả hai | 82 | 1,55 | 0,10 / 0,78 | +0,68 | +5,8 |
+| sau | sắc | 309 | 1,10 | 0,01 / 0,88 | +0,87 | +10,2 |
+| sau | nặng | 311 | 1,09 | 0,03 / 0,99 | +0,95 | +11,5 |
+| sau | cả hai | 620 | 1,09 | 0,02 / 0,93 | +0,91 | +10,9 |
+
+Trên tiếng mô phỏng, đặc trưng Kaldi ở âm tiết đầu dịch theo F0 không kém âm tiết sau, và v7 đổi thanh theo F0 ở 78%
+âm tiết đầu so với 93% âm tiết sau: lật thêm 0,68 so với 0,91, quá `follows_share` 0,5. Mạng không học đường tắt. Ở âm
+tiết đầu nó dựa vào F0 bằng chừng nửa ở âm tiết sau (điểm dịch 5,8 so với 10,9) và yếu nhất khi sắc mang khuôn nặng
+(0,44); còn nặng mang khuôn sắc thì lật cả 50/50, đúng chiều "tắt" cần khi nguyên âm giống "bật". Chỗ hỏng trên board vì
+thế là bộ dò: trên bản thu của chủ repo Kaldi sai 16–58% khung ở âm tiết đầu, trên `val` chỉ 14–23% (§12.18). Theo luật
+§3.11: học `command/v8` riêng, không hoán đổi thanh, rồi chạy lại phép kiểm trên v8.
+
+`make ctc-tone-flip CHECK=owner`: các phiên "bật" / "tắt" của 28/09 và 07/10, bộ `host/sets/battat_vi.json`, chuỗi chạy
+liền như Cửa 3. Từ đầu của mỗi câu, căn mốc trên micro 0 thô, mang khuôn F0 của từ kia lấy trên chính giọng chủ repo
+(trung vị theo nửa cung so với trung vị F0 của chủ repo, 10 điểm) ở cả hai micro, giữ formant; Praat bỏ những từ có tiếng
+dưới 60% khung, nhiều nhất ở "bật" thanh nặng (tiếng kẹt). Đúng (nhận đúng ở δ₁ 200 ‰, δ₂ 50 ‰):
+
+| Buổi | Từ | Câu qua lọc | Như thu | Tổng hợp lại | Mang khuôn từ kia | Nghe ra khi mang khuôn từ kia |
+|---|---|---|---|---|---|---|
+| 28/09, 1 m | "tắt" | 7 | 1 (0) | 1 (0) | 0 (0) | "bật" 7 |
+| 28/09, 3 m | "tắt" | 7 | 0 (0) | 0 (0) | 2 (0) | "bật" 5, "tắt" 2 |
+| 07/10, 1 m | "tắt" | 19 | 15 (5) | 15 (3) | 5 (0) | "bật" 14, "tắt" 5 |
+| 07/10, 3 m | "tắt" | 22 | 14 (2) | 16 (0) | 1 (0) | "bật" 21, "tắt" 1 |
+| 28/09, 1 m | "bật" | 9 | 9 (9) | 9 (7) | 9 (5) | "bật" 9 |
+| 28/09, 3 m | "bật" | 10 | 10 (9) | 10 (8) | 10 (6) | "bật" 10 |
+| 07/10, 1 m | "bật" | 23 | 23 (23) | 23 (22) | 23 (21) | "bật" 23 |
+| 07/10, 3 m | "bật" | 15 | 15 (15) | 15 (15) | 15 (11) | "bật" 15 |
+
+Mọi câu như thu, không lọc, cho lại đúng §12.16: "tắt" 07/10 20/24 (8) và 15/23 (2), 28/09 1/11 (0) và 0/11 (0); "bật"
+26/27 (26), 23/23 (23), 11/13 (11), 10/10 (9). Mang khuôn của "bật" (đi xuống, thấp), 27 trên 32 câu "tắt" đúng khi giữ
+F0 thành sai, hầu hết thành "bật"; "bật" mang khuôn "tắt" thành "bất", không có trong bộ, nên 0/57 câu đổi và chỉ hạ
+biên. Phép đổi riêng mức F0 ở §12.17 (× 0,65, giữ đường đi lên) chỉ lật 5/46: v7 nghe đường nét của thanh ở âm tiết
+đầu, cả trên giọng chủ repo, nên kết luận "v7 tách 'tắt' với 'bật' gần như chỉ bằng phụ âm và nguyên âm" của §12.17
+sai. Cùng với phép kiểm trên `val`, chỗ hỏng của "tắt" là cao độ mà bộ dò đưa vào: Kaldi sai 44–58% khung ở âm tiết đầu
+của "tắt" trên các buổi này (§12.18); ngày 28/09 nguyên âm cũng nghiêng về "bật" (§12.17), nên không còn manh mối nào
+cứu.
