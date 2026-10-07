@@ -447,30 +447,30 @@ def held(x: np.ndarray, dims: tuple[int, ...], mean: np.ndarray) -> np.ndarray:
     return out
 
 
-def owner_decisions(
-    net: gate.Ctc,
+def owner_windows(
+    cfg: dict,
     rows: list[dict],
     paths: dict,
     manifest: list[dict],
     said_of: dict[str, gate.Spans],
     gone_of: dict[str, set[int]],
     pcm_of: dict[str, np.ndarray] | None = None,
-    holds: dict[str, tuple[int, ...]] | None = None,
-) -> tuple[dict, dict[tuple[str, int], tuple[int, int]], dict[str, dict]]:
-    """Each utterance alone of rows decided over the one window that holds it, as Gate 3 runs the sitting, that
-    window's hops, and per name of holds its decision with those pitch dims held; sessions of pcm_of heard as those
-    samples."""
-    heard, hops = {}, {}
-    holding: dict[str, dict] = {name: {} for name in holds or {}}
-    for r, _, vad, features, pitch in gate.heard_rows(net.cfg, rows, paths, manifest, pcm_of):
+) -> tuple[dict[tuple[str, int], np.ndarray], dict[tuple[str, int], tuple[int, int]]]:
+    """The window of each utterance alone of rows, the one that holds it alone as Gate 3 runs the sitting for a run of
+    config cfg, and its hops; sessions of pcm_of heard as those samples. No net is needed: every checkpoint of a run
+    is decided over the same windows."""
+    windows, hops = {}, {}
+    for r, _, vad, features, pitch in gate.heard_rows(cfg, rows, paths, manifest, pcm_of):
         spans = device.utterances(vad)
-        windows = gate.ctc_windows(features, pitch, spans)
+        cut_out = gate.ctc_windows(features, pitch, spans)
         for k, w in owned_windows(spans, said_of[r["session"]], gone_of.get(r["session"], set())).items():
-            key = (r["session"], k)
-            heard[key], hops[key] = gate.ctc_heard(net, windows[w]), spans[w]
-            for name, dims in (holds or {}).items():
-                holding[name][key] = gate.ctc_heard(net, held(windows[w], dims, net.mean))
-    return heard, hops, holding
+            windows[(r["session"], k)], hops[(r["session"], k)] = cut_out[w], spans[w]
+    return windows, hops
+
+
+def decide(net: gate.Ctc, windows: dict, dims: tuple[int, ...] = ()) -> dict:
+    """Each window decided as the device decides it, with the pitch dims at dims held at their train mean."""
+    return {key: gate.ctc_heard(net, held(x, dims, net.mean) if dims else x) for key, x in windows.items()}
 
 
 def tally(decided: dict, row_of: dict, command_of: dict, reject: int, margin: int) -> list[dict]:
@@ -496,16 +496,26 @@ def moved_session(pcm: np.ndarray, spoken: list[Spoken], target_of: dict, rcfg: 
     return audio_io.to_int16(x)
 
 
-def owner_check(net: gate.Ctc, listed: list[dict], spec: dict, paths: dict) -> dict:
-    """The owner's sessions of spec's owner_sessions whose prompt opens with a checked sắc or nặng syllable, decided
-    as recorded and with every utterance's first word resynthesised on its own contour and on the other tone's median
-    contour of the owner's, both microphones: per day, distance and word, right and accepted at accept_permille and
-    what was heard; per word the utterances right with F0 kept that moving it turned; and as recorded, right and
-    accepted over every utterance, the ones creak or the aligner left out included."""
+@dataclass(frozen=True)
+class OwnerHeard:
+    """The owner's sessions heard once for a run: per condition each utterance's window, the utterances whose first
+    word moves, the session rows, the owner's median F0 and the median contour of each tone in semitones over it."""
+
+    windows: dict[str, dict[tuple[str, int], np.ndarray]]
+    spoken: list[Spoken]
+    row_of: dict[str, dict]
+    median_hz: float
+    templates: dict[str, np.ndarray]
+
+
+def owner_heard(cfg: dict, spec: dict, paths: dict) -> OwnerHeard:
+    """The owner's sessions of spec's owner_sessions whose prompt opens with a checked sắc or nặng syllable, through
+    the chain of a run of config cfg: as recorded, and with every utterance's first word resynthesised on both
+    microphones on its own contour and on the other tone's median contour of the owner's."""
     rcfg = repitch.repitch_config(spec)
     board = load_yaml(command.CONFIG)["eval"]["board"]
     manifest = list(csv.DictReader((paths["manifests"] / board["manifest"]).open(encoding="utf-8")))
-    region = lang_vi.DIALECTS.index(net.cfg["train"]["dialect"])
+    region = lang_vi.DIALECTS.index(cfg["train"]["dialect"])
     tone_of = {}
     for r in manifest:
         if r["session"] in spec["owner_sessions"]:
@@ -514,7 +524,7 @@ def owner_check(net: gate.Ctc, listed: list[dict], spec: dict, paths: dict) -> d
                 tone_of[r["session"]] = first.tone
     rows = [r for r in manifest if r["session"] in tone_of]
     row_of = {r["session"]: r for r in rows}
-    device_cfg = device_of(net.cfg)
+    device_cfg = device_of(cfg)
     chain_cfg = ChainConfig(balance_gains=device.load_microphones(device_cfg["microphone"]).gains)
     mel = Mel(MelConfig(**device_cfg["features"]))
     gone_of: dict[str, set[int]] = defaultdict(set)
@@ -522,8 +532,8 @@ def owner_check(net: gate.Ctc, listed: list[dict], spec: dict, paths: dict) -> d
         session, _, k = named.partition("#")
         gone_of[session].add(int(k))
     said_of = {r["session"]: gate.said_alone(r, paths, chain_cfg, mel) for r in rows}
-    recorded, recorded_hops, holding = owner_decisions(net, rows, paths, manifest, said_of, gone_of, holds=HOLDS)
-    decided = {"recorded": recorded}
+    recorded, recorded_hops = owner_windows(cfg, rows, paths, manifest, said_of, gone_of)
+    windows = {"recorded": recorded}
     pcm = {s: gate.channels_of(paths["raw"] / "device" / r["board"] / s) for s, r in row_of.items()}
     work = paths["cache"] / "tone_flip" / "owner"
     before, after = spec["owner_margin_hops"]
@@ -562,32 +572,42 @@ def owner_check(net: gate.Ctc, listed: list[dict], spec: dict, paths: dict) -> d
             session: moved_session(pcm[session], [s for s in spoken if s.session == session], targets, rcfg)
             for session in {s.session for s in spoken}
         }
-        decided[condition] = owner_decisions(net, rows, paths, manifest, said_of, gone_of, moved)[0]
+        windows[condition] = owner_windows(cfg, rows, paths, manifest, said_of, gone_of, moved)[0]
+    return OwnerHeard(windows, spoken, row_of, median_hz, templates)
+
+
+def owner_report(net: gate.Ctc, heard: OwnerHeard, listed: list[dict], spec: dict) -> dict:
+    """The owner's utterances decided by net: per day, distance and word, right and accepted at accept_permille and
+    what was heard in each condition; per word the utterances right with F0 kept that moving it turned; and over every
+    utterance, the ones creak or the aligner left out included, right and accepted as recorded and with each set of
+    pitch dims of HOLDS held."""
+    decided = {c: decide(net, heard.windows[c]) for c in CONDITIONS}
+    holding = {name: decide(net, heard.windows["recorded"], dims) for name, dims in HOLDS.items()}
     command_of = {tuple(corpus.sounds(c["text"])): c["id"] for c in listed}
     reject, margin = spec["accept_permille"]
     groups: dict[tuple, dict] = {}
     flips: dict[str, Counter] = defaultdict(Counter)
-    for s in spoken:
-        r = row_of[s.session]
+    for s in heard.spoken:
+        r = heard.row_of[s.session]
         expected = command_of[tuple(corpus.sounds(r["prompt"]))]
-        heard = {c: decided[c].get((s.session, s.said)) for c in CONDITIONS}
-        if any(h is None for h in heard.values()):
+        said = {c: decided[c].get((s.session, s.said)) for c in CONDITIONS}
+        if any(h is None for h in said.values()):
             continue
         word = r["prompt"].split()[0]
         key = (f"{s.session[6:8]}/{s.session[4:6]}", r["distance_cm"], word)
         group = groups.setdefault(key, {c: {"right": 0, "accepted": 0, "heard": Counter()} for c in CONDITIONS})
-        for c, h in heard.items():
+        for c, h in said.items():
             group[c]["right"] += h.command == expected
             group[c]["accepted"] += h.command == expected and h.accepted(reject, margin)
             group[c]["heard"][h.command] += 1
-        if heard["same"].command == expected:
+        if said["same"].command == expected:
             flips[word]["kept"] += 1
-            flips[word]["turned"] += heard["swap"].command != expected
+            flips[word]["turned"] += said["swap"].command != expected
     return {
-        "median_hz": round(median_hz, 1),
-        "recorded": tally(decided["recorded"], row_of, command_of, reject, margin),
-        "held": {name: tally(holding[name], row_of, command_of, reject, margin) for name in HOLDS},
-        "templates_st": {tone: [round(float(v), 2) for v in c] for tone, c in sorted(templates.items())},
+        "median_hz": round(heard.median_hz, 1),
+        "recorded": tally(decided["recorded"], heard.row_of, command_of, reject, margin),
+        "held": {name: tally(holding[name], heard.row_of, command_of, reject, margin) for name in HOLDS},
+        "templates_st": {tone: [round(float(v), 2) for v in c] for tone, c in sorted(heard.templates.items())},
         "groups": [
             {"day": day, "cm": cm, "word": word, "utterances": sum(g["recorded"]["heard"].values())}
             | {c: g[c] | {"heard": dict(g[c]["heard"])} for c in CONDITIONS}
@@ -595,6 +615,11 @@ def owner_check(net: gate.Ctc, listed: list[dict], spec: dict, paths: dict) -> d
         ],
         "flips": {word: dict(c) for word, c in flips.items()},
     }
+
+
+def owner_check(net: gate.Ctc, listed: list[dict], spec: dict, paths: dict) -> dict:
+    """owner_report of net over the owner's sessions heard for its run (KEHOACH 3.11, measurements/command.md 12.20)."""
+    return owner_report(net, owner_heard(net.cfg, spec, paths), listed, spec)
 
 
 def owner_table(report: dict) -> str:
@@ -625,6 +650,19 @@ def owner_table(report: dict) -> str:
             *held_lines,
         ]
     )
+
+
+def owner_line(report: dict) -> str:
+    """One line of the owner check: per day and word right (accepted) as recorded and with every pitch dim held, and
+    the "tắt" and "bật" right with F0 kept that the other word's contour turned."""
+    every: dict[str, list[int]] = {}
+    for name, rows in [("recorded", report["recorded"]), ("pitch held", report["held"]["pitch"])]:
+        for r in rows:
+            c = every.setdefault(f"{r['day']} {r['word']} {name}", [0, 0, 0])
+            c[0], c[1], c[2] = c[0] + r["right"], c[1] + r["utterances"], c[2] + r["accepted"]
+    cells = "; ".join(f"{key} {r}/{n} ({a})" for key, (r, n, a) in sorted(every.items()))
+    turned = "; ".join(f"{w} {c.get('turned', 0)}/{c.get('kept', 0)}" for w, c in report["flips"].items())
+    return f"{cells} | turned {turned}"
 
 
 def matched(hyp: list[int], ref: np.ndarray) -> list[int | None]:
@@ -689,8 +727,24 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("check", choices=CHECKS)
     parser.add_argument("run", type=Path, help="a run directory of the ctc train")
+    parser.add_argument("--steps", help="owner: the run's checkpoints at these steps, comma separated, not its end")
     args = parser.parse_args(argv)
     spec, paths = load_yaml(ctc.CONFIG)["tone_flip"], data_paths()
+    if args.steps and args.check != "owner":
+        parser.error("--steps goes with owner")
+    if args.steps:
+        commands = ML_ROOT.parent / spec["owner_set"]
+        listed = json.loads(commands.read_text(encoding="utf-8"))["commands"]
+        heard = owner_heard(gate.load_ctc(args.run, commands).cfg, spec, paths)
+        report = {}
+        for step in (int(v) for v in args.steps.split(",")):
+            net = gate.load_ctc(args.run, commands, train.checkpoint(args.run, step))
+            report[step] = owner_report(net, heard, listed, spec)
+            print(f"step {step}: " + owner_line(report[step]), flush=True)
+        out = args.run / "tone_flip_owner_steps.yaml"
+        out.write_text(yaml.safe_dump(report, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        print(out)
+        return 0
     if args.check == "val":
         report = flip_check(args.run, paths, spec)
         print(f"counts: {report['counts']}")

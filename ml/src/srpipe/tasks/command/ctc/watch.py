@@ -90,7 +90,7 @@ def watch(run: Path, paths: dict) -> Path:
     out = run / "watch.yaml"
     entries = (yaml.safe_load(out.read_text(encoding="utf-8")) if out.exists() else None) or []
     done = {e["step"] for e in entries}
-    eval_every = cfg["train"]["eval_every"]
+    eval_every, heard = cfg["train"]["eval_every"], None
     for n, step in enumerate(range(eval_every, cfg["train"]["steps"] + 1, eval_every), start=1):
         if step in done:
             continue
@@ -100,7 +100,9 @@ def watch(run: Path, paths: dict) -> Path:
         results = gate.ctc_board(gate.load_ctc(run, weights=weights), board, paths)
         entry["gate"] = gate_entry(results, word_of, reject, margin)
         if n % every == 0:
-            owner = tone_flip.owner_check(gate.load_ctc(run, owner_set, weights), listed, flip, paths)
+            net = gate.load_ctc(run, owner_set, weights)
+            heard = heard or tone_flip.owner_heard(net.cfg, flip, paths)
+            owner = tone_flip.owner_report(net, heard, listed, flip)
             entry["owner"] = owner_entry(owner)
         entries.append(entry)
         out.write_text(yaml.safe_dump(entries, allow_unicode=True, sort_keys=False), encoding="utf-8")

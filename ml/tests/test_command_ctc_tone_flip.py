@@ -176,3 +176,19 @@ def test_a_held_pitch_dim_reads_its_train_mean_and_nothing_else_moves() -> None:
     f0 = tone_flip.held(x, tone_flip.HOLDS["f0"], mean)
     assert np.all(f0[:, 4:] == -1.0) and np.array_equal(f0[:, :4], x[:, :4])
     assert np.array_equal(tone_flip.held(x, (), mean), x) and x[0, 3] == 3.0
+
+
+def test_each_window_is_decided_with_the_pitch_dims_asked_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = []
+
+    def heard(net: object, x: np.ndarray) -> str:
+        seen.append(x.copy())
+        return "heard"
+
+    monkeypatch.setattr(tone_flip.gate, "ctc_heard", heard)
+    net = SimpleNamespace(mean=np.full(6, -1.0, dtype=np.float32))
+    x = np.arange(12, dtype=np.float32).reshape(2, 6)
+    assert tone_flip.decide(net, {("s", 0): x}) == {("s", 0): "heard"}
+    tone_flip.decide(net, {("s", 0): x}, tone_flip.HOLDS["f0"])
+    assert np.array_equal(seen[0], x)
+    assert np.all(seen[1][:, 4:] == -1.0) and np.array_equal(seen[1][:, :4], x[:, :4])
