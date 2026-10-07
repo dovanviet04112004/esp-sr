@@ -75,14 +75,17 @@ def device_of(cfg: dict[str, Any]) -> dict[str, Any]:
 
 def load_run_config(run: Path) -> dict[str, Any]:
     """A run's resolved config with the front end it learnt on; a run without one learnt on 40 bands (ADR-0017), one
-    from before listen.yaml v5 with the pitch ballast over the whole stream (ballast_window_s 0, KEHOACH 3.11), and
-    one that gave SpecAugment's band masks in bands with their share of its mel bands."""
+    from before listen.yaml v5 with Kaldi's pitch ballast over the whole stream (ballast_window_s 0, KEHOACH 3.11), a
+    pitch_source run on its tracker's pitch as saved, and one that gave SpecAugment's band masks in bands with their
+    share of its mel bands."""
     cfg = load_yaml(run / "config.resolved.yaml")
     front = contract_front()
     before = front | {"features": front["features"] | {"n_bands": 40}, "pitch": {}}
     learnt = cfg.get("listen", before)
     pitch = learnt["pitch"] or front["pitch"] | {"ballast_window_s": 0.0}
-    cfg = cfg | {"listen": learnt | {"pitch": {"ballast_window_s": 0.0} | pitch}}
+    if "source" not in pitch:
+        pitch = {"ballast_window_s": 0.0} | pitch
+    cfg = cfg | {"listen": learnt | {"pitch": pitch}}
     masks = cfg.get("train", {}).get("masks", {})
     if "band_width" in masks:
         share = masks["band_width"] / learnt["features"]["n_bands"]
