@@ -42,6 +42,8 @@ REJECT = "reject"
 EXTRA = "extra"  # a command session's window no utterance owns (board)
 HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
 SITTING_KEYS = ("board", "fw", "pcm_shift")  # a manifest row's fields one run of the board shares
+N_PITCH = 3  # the pitch dims close every hop's features
+HOLDS = {"voicing": (0,), "f0": (1, 2), "pitch": (0, 1, 2)}  # pitch dims POV, log F0, delta held, by name
 Spans = list[tuple[int, int]]
 
 
@@ -205,6 +207,20 @@ def ctc_windows(features: np.ndarray, pitch: np.ndarray, spans: Spans) -> list[n
         np.concatenate([features[start : end + 1], pitch[start : end + 1]], axis=1).astype(np.float32)
         for start, end in device.command_cut(spans)
     ]
+
+
+def held(x: np.ndarray, dims: tuple[int, ...], mean: np.ndarray) -> np.ndarray:
+    """A window with the pitch dims at dims, counted from the first of the three, at their train mean, which the net
+    reads as nothing there."""
+    out = x.copy()
+    cols = [x.shape[1] - N_PITCH + d for d in dims]
+    out[:, cols] = mean[cols]
+    return out
+
+
+def holding(heard: Callable, dims: tuple[int, ...]) -> Callable:
+    """heard deciding each window with the pitch dims at dims held at the run's train mean."""
+    return lambda net, x: heard(net, held(x, dims, net.mean))
 
 
 def normalised_window(net: Ctc, x: np.ndarray) -> tuple[torch.Tensor, int]:
@@ -470,6 +486,11 @@ def main(argv: list[str] | None = None) -> int:
         help="ctc, rnnt: hear the sessions through the contract's Kaldi pitch, as the board runs it, in place of the "
         "pitch the run learnt on",
     )
+    parser.add_argument(
+        "--hold",
+        choices=sorted(HOLDS),
+        help="ctc, rnnt: decide every window with these pitch dims at the run's train mean, as a front holding them",
+    )
     args = parser.parse_args(argv)
     spec = load_yaml(command.CONFIG)["eval"]
     if args.track == "kws":
@@ -483,8 +504,11 @@ def main(argv: list[str] | None = None) -> int:
         net = replace(net, cfg=on_contract_pitch(net.cfg))
     forms = sum(len(v) for v in net.lexicon)
     said = f"{len(net.names)} commands of {args.commands.name}, {forms} variants"
-    print(f"{args.run}: {said}, windows up to {listen.WINDOW_S} s")
+    held_dims = f", {args.hold} held" if args.hold else ""
+    print(f"{args.run}: {said}, windows up to {listen.WINDOW_S} s{held_dims}")
     heard = rnnt_heard if args.track == "rnnt" else ctc_heard
+    if args.hold:
+        heard = holding(heard, HOLDS[args.hold])
     results = ctc_board(net, spec["board"], data_paths(), heard, args.commands)
     print(ctc_table(results, net.names, spec, ctc_cfg["eval"]))
     return 0

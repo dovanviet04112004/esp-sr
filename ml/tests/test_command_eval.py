@@ -250,3 +250,13 @@ def test_a_window_over_an_utterance_left_out_is_scored_neither_as_said_nor_as_ex
         lambda clean, features, pitch, spans: [s[0] for s in spans],
     )
     assert [(r.kind, r.expected, r.decided) for r in results] == [("cmd", "bat_den", [50]), (gate.EXTRA, REJECT, [150])]
+
+
+def test_a_held_front_decides_every_window_with_those_pitch_dims_at_the_train_mean() -> None:
+    seen = []
+    net = type("Net", (), {"mean": np.full(6, -1.0, dtype=np.float32)})()
+    x = np.arange(12, dtype=np.float32).reshape(2, 6)
+    heard = gate.holding(lambda _net, window: seen.append(window) or "heard", gate.HOLDS["voicing"])
+    assert heard(net, x) == "heard"
+    assert np.all(seen[0][:, 3] == -1.0) and np.array_equal(np.delete(seen[0], 3, axis=1), np.delete(x, 3, axis=1))
+    assert x[0, 3] == 3.0

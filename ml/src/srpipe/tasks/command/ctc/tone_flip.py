@@ -37,17 +37,16 @@ from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc import train
 from srpipe.tasks.command.ctc.postproc.ctc_score import BLANK
+from srpipe.tasks.command.eval import HOLDS, N_PITCH, held
 from srpipe.tasks.wake.data import sentence_units
 from srpipe.tts import CONFIG as TTS_CONFIG
 from srpipe.tts import engines
 
 CHECKS = ("val", "owner", "places")
 CONDITIONS = ("recorded", "same", "swap")  # owner: as recorded, F0 kept, F0 moved
-HOLDS = {"voicing": (0,), "f0": (1, 2), "pitch": (0, 1, 2)}  # pitch dims POV, log F0, delta held, by name
 PLACES = ("first", "later")
 MODES = ("same", "swap")  # resynthesised on its own contour, or on the other tone's
 OTHER_TONE = dict(zip(lang_vi.CHECKED_TONES, reversed(lang_vi.CHECKED_TONES), strict=True))
-N_PITCH = 3  # the pitch dims close every hop's features
 ALIGN_GAIN = 0.5  # headroom: a clip read at full scale may peak past int16
 FS, HOP, LAG = grid.SAMPLE_RATE_HZ, grid.HOP_SAMPLES, device.CHAIN_LAG_HOPS
 
@@ -436,15 +435,6 @@ def owned_windows(spans: gate.Spans, said: gate.Spans, gone: set[int]) -> dict[i
         for k in ks:
             holders[k].append(w)
     return {k: ws[0] for k, ws in holders.items() if len(ws) == 1 and owned[ws[0]] == [k] and k not in gone}
-
-
-def held(x: np.ndarray, dims: tuple[int, ...], mean: np.ndarray) -> np.ndarray:
-    """A window with the pitch dims at dims, counted from the first of the three, at their train mean, which the net
-    reads as nothing there."""
-    out = x.copy()
-    cols = [x.shape[1] - N_PITCH + d for d in dims]
-    out[:, cols] = mean[cols]
-    return out
 
 
 def owner_windows(
