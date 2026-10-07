@@ -903,11 +903,13 @@ kiểm, khuôn đo trên `train`:
 - chủ repo nghe vài chục cặp trước khi dựng cả kho.
 
 **Chấm run của lượt thử**, v8 riêng hay cùng hoán đổi. `make ctc-watch RUN=<run>` chạy song song lượt học và ghi vào
-thư mục run. Mỗi mốc `train.eval_every`: Cửa 3 (các phiên 07/10), "tắt" và "bật" tách riêng, nhận đúng ở δ₁ 200 ‰ và
-δ₂ 50 ‰. Mỗi mốc thứ hai thêm phép đổi F0 giữ formant trên giọng chủ repo (`tone_flip owner`, §12.20), chấm cả "tắt"
-và "bật" của 28/09 như thu. Cuối lượt thêm phép kiểm lật F0 trên `val`, và thanh đúng ở âm tiết đầu so với các âm tiết
-sau, với ba chiều cao độ như mô phỏng và giữ ở trung bình (`tone_flip places`, §12.18). Ba điều chốt trước khi thấy số,
-đo trên trọng số cuối như mọi run:
+thư mục run. Mỗi mốc `train.eval_every`: Cửa 3 (các phiên 07/10), "tắt" và "bật" tách riêng, nhận đúng ở δ₁ 200 ‰ và δ₂
+50 ‰. Mỗi mốc thứ hai thêm phép đổi F0 giữ formant trên giọng chủ repo (`tone_flip owner`, §12.20), chấm cả "tắt" và
+"bật" của 28/09 như thu. Cùng lượt nghe như thu, phép ấy quyết lại mọi câu với chiều độ hữu thanh giữ ở trung bình lúc
+học, với hai chiều F0 giữ ở trung bình, và với cả ba: phép đổi F0 chỉ đổi đường nét, nên đây là chỗ tách manh mối lúc
+bắt đầu có tiếng của phụ âm đầu ("bật" có tiếng từ /ɓ/, "tắt" lặng qua /t/) khỏi đường nét của thanh. Cuối lượt thêm
+phép kiểm lật F0 trên `val`, và thanh đúng ở âm tiết đầu so với các âm tiết sau, với ba chiều cao độ như mô phỏng và
+giữ ở trung bình (`tone_flip places`, §12.18). Ba điều chốt trước khi thấy số, đo trên trọng số cuối như mọi run:
 - mạng vẫn dùng thanh: `tone_flip owner` mang khuôn "bật" lật ít nhất ba phần tư số câu "tắt" đúng khi giữ F0 (v7:
   27/32), và `tone_flip val` lật âm tiết đầu từ `follows_share` của âm tiết sau trở lên (v7: 0,68 so với 0,91). v7 đạt
   cả hai, nên điều này chỉ giữ cho v8 không mất thanh; chỗ v8 phải hơn v7 là hai điều sau;
