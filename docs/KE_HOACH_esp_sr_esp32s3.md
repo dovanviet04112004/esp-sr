@@ -926,16 +926,23 @@ Phép thử chéo: run dùng thanh thì "tắt" 28/09 (v7: 1/22) cũng phải l�
 
 | Kết quả | Dấu hiệu | Việc tiếp |
 |---|---|---|
-| A. Đạt | cả ba điều | Làm bộ dò cho board (dưới), dựng lại đặc trưng bằng nó, học, thang int8 §3.14, deploy |
+| A. Đạt | cả ba điều | Chọn cao độ của board (dưới), thang int8 §3.14, deploy |
 | B. Một phần | "tắt" khá lên mà phép đổi F0 lật ít, hay `val` khá mà giọng chủ repo không | Thanh tới mạng mà mạng chưa dựa vào: run chưa hoán đổi thì học lại cùng hoán đổi thanh; đã hoán đổi thì xét mạng nhìn trước (dưới) |
 | C. Không đổi | ngang v7, phép đổi F0 gần như không lật | Như B, cộng kiểm chính các mẩu hoán đổi: nghe lại, và chạy phép kiểm lật F0 trên chúng |
 | D. Tệ hơn | Cửa 3 hay lỗi đơn vị `val` kém v7 | So thanh đúng theo từng thanh, từng vị trí, và phân bố ba chiều cao độ giữa mô phỏng với board; rồi học với cả ba chiều Kaldi lẫn ba chiều SwiftF0, 86 chiều |
 | E. Lỗi kỹ thuật | bản dựng dừng vì log-mel lệch bản cũ, hết RAM, hay học ra NaN | Dựng lại riêng file ấy không `simulate.mel_from`; bớt worker; học tiếp từ checkpoint cuối |
 
-**Bộ dò của board**, khi kết quả là A. Trước hết đo chính run ấy khi nghe bằng Kaldi của board thay bộ dò nó học
-(`tone_flip owner --kaldi-pitch`, `make command-eval KALDI=1`): mạng học trên SwiftF0, nhưng nếu "tắt" và Cửa 3 vẫn qua
-ba điều thì board chạy được nó với `dsp_spec/pitch` như hiện nay, không cần bộ dò mới; deploy khi ấy ghi front Kaldi
-của hợp đồng và `listen_hash` của nó cho run ấy, đúng thứ đã đo. Không qua thì chọn trong ba ứng viên, đều chạy dòng mỗi
+**Cao độ của board**, khi kết quả là A. Chủ repo chọn theo chất lượng (07/10): cách cho Cửa 3 và "tắt" tốt nhất, lấy
+số của chính run nghe bằng bộ dò nó học làm trần. Đo trên trọng số cuối của run, bằng `make command-eval` và các câu
+"tắt" như thu của `tone_flip owner --kaldi-pitch`, theo thứ tự:
+1. Kaldi của `dsp_spec/pitch` như hiện nay (`KALDI=1`);
+2. Kaldi với chiều độ hữu thanh giữ ở trung bình lúc học (`KALDI=1 HOLD=voicing`; phép `owner` đã quyết mọi câu với
+   chiều ấy giữ): độ hữu thanh của Kaldi ở âm tiết đầu neo vào nền trước câu (§12.18) và kéo "tắt" về "bật" ở cả v7
+   lẫn v8 (`measurements/command.md` §12.21); board đưa hằng số ấy vào chỗ chiều này, không thêm phép tính nào.
+
+Cách đầu tiên chạm trần thì dùng: Cửa 3 đúng kém trần không quá 5 câu (nhiễu đếm), từ chối từ 122/126 trở lên, "tắt" ở
+tám phiên 07/10 đúng kém trần không quá 3 câu. Deploy khi ấy ghi front Kaldi của hợp đồng, chiều giữ và `listen_hash`
+của nó cho run ấy, đúng thứ đã đo. Không cách nào chạm trần thì chọn trong ba ứng viên bộ dò mới, đều chạy dòng mỗi
 bước ở nhân 0 và ra ba chiều như hiện nay:
 - Kaldi của `dsp_spec/pitch` với đường Viterbi dò lại 0,4 s sau và trung bình nhìn sau 0,4 s: tách "tắt" / "bật" của
   chủ repo ở AUC 0,88–1,00 nhưng `val` chỉ 0,67 (§12.18); thêm vòng truy ngược 25 khung;
@@ -945,7 +952,7 @@ bước ở nhân 0 và ra ba chiều như hiện nay:
   esp-dl trên board (0,1–0,5 tỉ MAC/s).
 
 Chọn bằng AUC thanh của từ đầu trên `val` và trên giọng chủ repo, rồi µs đo trên board; bộ được chọn dựng lại đặc trưng
-và học một lượt để xác nhận Cửa 3. Không bộ nào đạt thì giữ Kaldi như hiện nay.
+và học một lượt để xác nhận Cửa 3. Không bộ nào hơn cách tốt nhất trong hai cách Kaldi thì dùng cách ấy.
 
 **Hướng còn lại**, theo thứ tự, khi các bước trên chưa đủ:
 - mạng nhìn trước tới 0,4 s: board vốn chờ `utterance.gap_s` 0,4 s trước khi chốt câu nên không thêm trễ quyết định,
