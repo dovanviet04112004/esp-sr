@@ -908,8 +908,8 @@ thư mục run. Mỗi mốc `train.eval_every`: Cửa 3 (các phiên 07/10), "t�
 "bật" của 28/09 như thu. Cùng lượt nghe như thu, phép ấy quyết lại mọi câu với chiều độ hữu thanh giữ ở trung bình lúc
 học, với hai chiều F0 giữ ở trung bình, và với cả ba: phép đổi F0 chỉ đổi đường nét, nên đây là chỗ tách manh mối lúc
 bắt đầu có tiếng của phụ âm đầu ("bật" có tiếng từ /ɓ/, "tắt" lặng qua /t/) khỏi đường nét của thanh. Cuối lượt thêm
-phép kiểm lật F0 trên `val`, và thanh đúng ở âm tiết đầu so với các âm tiết sau, với ba chiều cao độ như mô phỏng và
-giữ ở trung bình (`tone_flip places`, §12.18). Hai phép `owner` và `places` chấm được cả các checkpoint giữa lượt
+phép kiểm lật F0 trên `val`, và thanh đúng ở âm tiết đầu so với các âm tiết sau, mọi âm tiết và riêng âm tiết vần tắc
+như "tắt", với ba chiều cao độ như mô phỏng và giữ ở trung bình (`tone_flip places`, §12.18). Hai phép `owner` và `places` chấm được cả các checkpoint giữa lượt
 (`STEPS=`): thanh đúng khi giữ cả ba chiều cao độ, tức phần log-mel, đi qua các mốc trên `val` và trên giọng chủ repo,
 tách mạng bỏ log-mel cho F0 ở mọi tiếng khỏi log-mel chỉ thôi khớp tiếng board. Ba điều chốt trước khi thấy số, đo trên
 trọng số cuối như mọi run:
