@@ -1220,6 +1220,10 @@ câu "tắt" đúng khi giữ F0 mà thành sai khi mang khuôn F0 của "bật"
 | 8 000 | 0,503 | 197 (149) | 123/126 | 69/69 (63) / 70/73 (67) | 47/47 (47) / 22/22 (16) | 8/55 |
 | 10 000 | 0,506 | 195 (137) | 122/126 | 64/69 (45) / 70/73 (69) | | |
 | 12 000 | 0,472 | 195 (149) | 124/126 | 68/69 (59) / 69/73 (60) | 47/47 (45) / 21/22 (14) | 15/53 |
+| 14 000 | 0,470 | 197 (157) | 123/126 | 68/69 (65) / 67/73 (51) | | |
+| 16 000 | 0,438 | 194 (147) | 124/126 | 65/69 (44) / 70/73 (69) | 47/47 (32) / 18/22 (12) | 31/51 |
+| 18 000 | 0,428 | 190 (124) | 125/126 | 59/69 (27) / 70/73 (65) | | |
+| 20 000 | 0,412 | 193 (175) | 123/126 | 68/69 (65) / 69/73 (67) | 47/47 (47) / 21/22 (18) | 8/53 |
 | v7, 40 000 | 0,335 | 170 (119) | 124/126 | 36/69 / 70/73 | 35/47 (10) / 1/22 (0) | 27/32 |
 
 Ở mốc 12 000, mọi câu "tắt" của chủ repo quyết lại với chiều cao độ giữ ở trung bình lúc học: giữ độ hữu thanh 47/47 (45)
@@ -1228,6 +1232,11 @@ thanh không mang gì cho "tắt", nên giả thuyết "v8 tách 'tắt' bằng 
 độ "tắt" vẫn đúng, tức log-mel, giống hệt của v7, đủ để nhận "tắt" ở mốc này. v7 ở mốc 4 000 cũng đúng 19/22 câu "tắt"
 28/09 rồi về 1/22 ở cuối (§12.14): thông tin có trong log-mel, mạng bỏ nó khi học tiếp. Trọng số cuối của v8 cho biết
 cao độ SwiftF0 có giữ "tắt" lại khi log-mel thôi giữ không.
+
+Mọi câu "tắt" khi giữ cả ba chiều cao độ, đúng (nhận), 07/10 / 28/09: mốc 12 000 47 (39) / 18 (6); mốc 16 000 44 (14) /
+12 (1); mốc 20 000 47 (47) / 21 (19). Phần log-mel giữ "tắt" yếu đi ở mốc 16 000 rồi mạnh lại ở mốc 20 000, cùng lúc
+mạng bám đường nét F0 tăng từ 15 lên 31 câu lật rồi về 8: giữa lượt, các mốc đổi qua lại giữa hai đường, chưa có xu
+hướng một chiều; tốc độ học còn quá nửa mức đầu.
 
 Cùng phép giữ trên v7 ở bước 40 000 (Kaldi), mọi câu "tắt", đúng (nhận):
 
