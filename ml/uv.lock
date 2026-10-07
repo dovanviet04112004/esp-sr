@@ -916,6 +916,9 @@ dependencies = [
 espdl = [
     { name = "esp-ppq" },
 ]
+swiftf0 = [
+    { name = "swift-f0" },
+]
 train = [
     { name = "torch" },
     { name = "torchaudio" },
@@ -943,17 +946,31 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32" },
     { name = "scipy", specifier = ">=1.13" },
     { name = "soundfile", specifier = ">=0.12" },
+    { name = "swift-f0", marker = "extra == 'swiftf0'", specifier = "==0.3.0" },
     { name = "torch", marker = "extra == 'train'", specifier = ">=2.4" },
     { name = "torchaudio", marker = "extra == 'train'", specifier = ">=2.4" },
     { name = "zstandard", specifier = ">=0.23" },
 ]
-provides-extras = ["train", "espdl"]
+provides-extras = ["train", "espdl", "swiftf0"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "pytest", specifier = ">=8.2" },
     { name = "ruff", specifier = ">=0.6" },
     { name = "webrtcvad-wheels", specifier = ">=2.0.14" },
+]
+
+[[package]]
+name = "swift-f0"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "onnxruntime" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ee/9d/bd55c39bb34c5c2bb1277e7ec6f4a969eabbf02488fa3c1f756623fa76f4/swift_f0-0.3.0.tar.gz", hash = "sha256:e3abfc52cad6a7bb738660f8e93831f9084c22301ed59d541c2d16dac7a2c1ce", size = 119608, upload-time = "2026-09-25T15:36:27.153Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/21/ac6c76119a776e4281da61e22828f992bb2e34b74edfcd3987dca97a6180/swift_f0-0.3.0-py3-none-any.whl", hash = "sha256:d7240c7c94b1d3e8f0e0cd2701b79be89a0f23a19cd5f944895a6518ecad72f3", size = 116429, upload-time = "2026-09-25T15:36:25.761Z" },
 ]
 
 [[package]]

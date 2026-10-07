@@ -29,6 +29,10 @@ train = [
 espdl = [
     "esp-ppq==1.3.11",
 ]
+# SwiftF0 pitch for the pitch_source trial of KEHOACH 3.11: the simulation and Gate 3 of its runs only.
+swiftf0 = [
+    "swift-f0==0.3.0",
+]
 
 [dependency-groups]
 dev = [
