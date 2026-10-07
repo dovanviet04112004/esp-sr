@@ -19,7 +19,7 @@ extern "C" {
 typedef struct {
     const char *const *texts; // command lines, UTF-8; read, not kept
     const char *const *ids;   // their ids, copied
-    uint8_t n_commands;       // 1..AI_ENGINE_COMMANDS_MAX
+    uint16_t n_commands;      // 1..AI_ENGINE_COMMANDS_MAX
     uint32_t version;         // of the command set the lines come from
 } svc_listen_commands_t;
 
@@ -52,7 +52,7 @@ esp_err_t svc_listen_init(const svc_listen_config_t *cfg);
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE no init, or a window open or waiting | ESP_ERR_INVALID_ARG |
  *       APP_ERR_COMMANDS_INVALID a line lang_vi cannot read | ai_engine_command_prepare's error
  */
-esp_err_t svc_listen_set_commands(const svc_listen_commands_t *commands, uint8_t *unreadable);
+esp_err_t svc_listen_set_commands(const svc_listen_commands_t *commands, uint16_t *unreadable);
 
 /** Version of the command set in use; 0 without init.
  *  @ctx nhan_task | non-blocking

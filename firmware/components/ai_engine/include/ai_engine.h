@@ -15,7 +15,7 @@ extern "C" {
 #endif
 
 #define AI_ENGINE_VARIANTS_MAX 4
-#define AI_ENGINE_COMMANDS_MAX 64
+#define AI_ENGINE_COMMANDS_MAX 301
 
 typedef enum {
     AI_ENGINE_MODEL_NS = 0,
@@ -31,7 +31,7 @@ typedef struct {
 } ai_engine_seq_t;
 
 typedef struct {
-    uint8_t n_commands;
+    uint16_t n_commands;
     uint8_t n_variants[AI_ENGINE_COMMANDS_MAX];
     ai_engine_seq_t variants[AI_ENGINE_COMMANDS_MAX][AI_ENGINE_VARIANTS_MAX];
 } ai_engine_lexicon_t;

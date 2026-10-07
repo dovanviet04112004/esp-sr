@@ -33,7 +33,7 @@ constexpr size_t kColumnsMax = 64; // joiner columns a run at most, held on the 
 
 // The commands the tree holds, compared at each score: one other than the prepared set is searched afresh.
 struct Built {
-    uint8_t n_commands;
+    uint16_t n_commands;
     uint8_t n_variants[AI_ENGINE_COMMANDS_MAX];
     uint8_t n_units[AI_ENGINE_COMMANDS_MAX][AI_ENGINE_VARIANTS_MAX];
     uint8_t units[AI_ENGINE_COMMANDS_MAX][AI_ENGINE_VARIANTS_MAX][AI_ENGINE_COMMAND_RNNT_UNITS_MAX];

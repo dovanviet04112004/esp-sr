@@ -191,7 +191,10 @@ static void listen_on(const listen_head_t *head, const named_t *named)
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT));
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN));
     const svc_listen_config_t cfg = {
-        .commands = {.texts = named->texts, .ids = named->ids, .n_commands = (uint8_t)named->n, .version = 1},
+        .commands = {.texts = named->texts,
+                     .ids = named->ids,
+                     .n_commands = (uint16_t)named->n,
+                     .version = 1},
         .dialects = LANG_VI_DIALECT_ALL,
         .reject_permille = head->reject,
         .margin_permille = head->margin,
@@ -224,10 +227,10 @@ TEST_CASE("svc_listen takes a new set after a click it began working and dropped
     const svc_listen_commands_t next = {
         .texts = named.texts,
         .ids = named.ids,
-        .n_commands = (uint8_t)named.n,
+        .n_commands = (uint16_t)named.n,
         .version = svc_listen_commands_version() + 1,
     };
-    uint8_t unreadable = 0;
+    uint16_t unreadable = 0;
     TEST_ASSERT_EQUAL(ESP_OK, svc_listen_set_commands(&next, &unreadable));
     TEST_ASSERT_EQUAL(next.version, svc_listen_commands_version());
     esp_partition_munmap(handle);

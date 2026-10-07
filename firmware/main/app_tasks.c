@@ -195,18 +195,24 @@ static void take_commands(const app_wiring_t *w, uint32_t seq)
         ESP_LOGI(TAG, "commands v%" PRIu32 " already in use", in->set.version);
         return;
     }
-    const char *texts[AI_ENGINE_COMMANDS_MAX];
-    const char *ids[AI_ENGINE_COMMANDS_MAX];
-    const svc_listen_commands_t commands = app_boot_commands(&in->set, texts, ids);
-    uint8_t unreadable = 0;
+    // Two pointers a command outgrow what nhan_task's stack spares; svc_listen copies what it keeps of them.
+    const char **names = heap_caps_malloc(2 * AI_ENGINE_COMMANDS_MAX * sizeof(*names), MALLOC_CAP_SPIRAM);
+    if (names == NULL) {
+        raise_error(w, seq, APP_CODE_COMMANDS_REFUSED, NULL);
+        return;
+    }
+    const svc_listen_commands_t commands = app_boot_commands(&in->set, names, names + AI_ENGINE_COMMANDS_MAX);
+    uint16_t unreadable = 0;
     int64_t began_us = esp_timer_get_time();
     esp_err_t err = svc_listen_set_commands(&commands, &unreadable);
     if (err != ESP_OK) {
         const bool invalid = err == APP_ERR_COMMANDS_INVALID;
         raise_error(w, seq, invalid ? APP_CODE_COMMANDS_INVALID : APP_CODE_COMMANDS_REFUSED,
-                    invalid ? ids[unreadable] : NULL);
+                    invalid ? commands.ids[unreadable] : NULL);
+        heap_caps_free(names);
         return;
     }
+    heap_caps_free(names);
     const uint32_t read_ms = (uint32_t)((esp_timer_get_time() - began_us) / US_PER_MS);
     began_us = esp_timer_get_time();
     err = sys_storage_write_file(STORAGE_PATH_COMMANDS, in->text, in->text_bytes);

@@ -1194,7 +1194,8 @@ vùng làm việc người gọi cấp, 8 byte mỗi ô (cửa sổ 3 s: 94 × 4
 thái mỗi khung còn hai phép cộng, một phép nhân và chỉnh số mũ: board B đo 14,7 ms cho bộ lệnh mặc định (19 biến thể) và
 79,4 ms cho 64 lệnh (`measurements/latency.md` §13), trong ngân sách ≤ 100 ms một lần chấm như `kws`. Trên máy, thuật
 toán tiến của mọi biến thể đi dần theo khối mạng của cửa sổ (Chạy `ctc` trên máy, dưới), nên lúc câu chốt chỉ còn khối
-cuối và phần của `c*`: phần kết đo 1,5 ms với bộ lệnh mặc định, 1,8 ms với 64 lệnh (`measurements/latency.md` §16). `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ header của ảnh model (§6.3).
+cuối và phần của `c*`: phần kết đo 1,5 ms với bộ lệnh mặc định, 1,8 ms với 64 lệnh (`measurements/latency.md` §16). Chi
+phí chấm đi theo số biến thể, nên bộ tới 301 lệnh (§4.5.5) đo phần chấm dần mỗi khối trên board trước khi dùng. `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ header của ảnh model (§6.3).
 
 **Mọi điểm chia cho `T_W`**, số khung của một cửa sổ dài `window_s` (94 khung với 3 s), không chia cho số khung của cửa
 sổ đang chấm; đơn vị là nat mỗi khung của `window_s`. Cửa sổ lệnh dài ngắn theo câu và theo chỗ nó mở (§5.4), mà khung
@@ -2207,7 +2208,9 @@ trưng mà `_step` nhận do model khai trong `meta.json` (`features`, §6.3): 8
 (ADR-0017). `_prepare(lexicon)` nhận bộ lệnh trước mọi cửa sổ, lúc khởi động và mỗi lần đổi bộ lệnh,
 để `_step` chấm dần theo khối thay vì để cả phép chấm tới lúc câu chốt (§5.4); `_score` vẫn nhận bộ lệnh và chấm lại cả
 cửa sổ khi bộ ấy khác bộ `_prepare` đã nhận, nên thiếu `_prepare` chỉ chậm chứ không sai. `_score` trả cùng một khuôn
-`ai_engine_command_result_t`: chỉ số lệnh hoặc −1, kèm ba điểm. `_abort` đóng cửa sổ đang mở mà không chấm, không có
+`ai_engine_command_result_t`: chỉ số lệnh hoặc −1, kèm ba điểm. Bộ lệnh `ai_engine_lexicon_t` chứa tới
+`AI_ENGINE_COMMANDS_MAX` 301 lệnh (chủ repo 07/10), `n_commands` là `uint16_t`, mỗi lệnh tới `AI_ENGINE_VARIANTS_MAX`
+4 cách đọc, như `maxItems` của `command_set.schema.json`. `_abort` đóng cửa sổ đang mở mà không chấm, không có
 cửa sổ mở thì không làm gì: `svc_listen` gọi nó mỗi khi thôi chạy một cửa sổ chưa chấm (§5.4), vì `_prepare` chỉ nhận
 bộ lệnh khi không có cửa sổ mở. Với `kws`, điểm là xác suất lớp thắng, khoảng cách tới
 lớp nhì, và xác suất của `other` cộng `silence`; bảng lệnh truyền vào chỉ được kiểm là có đủ các lớp lệnh, ở `_prepare`
@@ -2505,7 +2508,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `sb_stream` | StreamBuffer ở PSRAM, **chỉ tồn tại khi** `NET_STREAM_ENABLE`; cỡ `SVC_REPORT_STREAM_BUFFER_KB` | 512 KB: ~5 s ở `mode` 5, ~8 s ở `mode` 2 | `sach_task` | `luong_task` | ghi với timeout 0; không đủ chỗ cho **cả khung** thì bỏ cả khung, đếm; không bao giờ ghi nửa khung | một người ghi, một người đọc — đúng hợp đồng của stream buffer. Đường tới máy nhận khựng 0,4–0,8 s vài lần mỗi 10 phút trên board B (`latency.md` §4), quá 64 KB |
 | `q_dialog` | Queue depth 8, `app_event_t`, bộ nhớ ở PSRAM | 8 × 80 B | `nhan_task` | `dieu_task` | chờ 20 ms rồi bỏ, log **một lần** ở cạnh đầy | `nhan_task` không được đứng chờ lâu: sau lưng nó là 1 s đệm đang đầy dần |
 | `q_cmd` | Queue depth 4, `device_cmd_t` (sinh từ `contracts/`, chở cả chữ 512 B của `SPEAK`), bộ nhớ ở PSRAM | 4 × ~600 B | task của esp-mqtt | `dieu_task` | bỏ, log | callback esp-mqtt chỉ **phân tích** rồi bỏ vào đây; chờ ở callback là chặn cả đường MQTT |
-| `q_cmdset` | Queue depth 1, con trỏ tới một trong hai ô bộ lệnh của `net_mqtt` ở PSRAM, cấp lúc boot: bộ đã phân tích, kết quả phân tích, payload nguyên văn | 4 B + 2 × ~53 KB | task của esp-mqtt | `nhan_task` | bản mới thay bản chờ: task esp-mqtt rút bản chờ về rồi gửi bản mới; ô `nhan_task` đã nhận giữ nguyên tới lần nhận sau (`FREERTOS.md` 8.10); payload rỗng, tức bản retained bị xoá, không vào hàng | `nhan_task` tự chạy `lang_vi`, đổi bảng lệnh và gọi `ai_engine_command_prepare` **giữa hai câu**: ở trạng thái `NGHE`, hay ở ảnh không có `wake` khi không có cửa sổ nào mở hay chờ chấm; bộ trùng `version` với bộ đang dùng bị bỏ qua |
+| `q_cmdset` | Queue depth 1, con trỏ tới một trong hai ô bộ lệnh của `net_mqtt` ở PSRAM, cấp lúc boot: bộ đã phân tích, kết quả phân tích, payload nguyên văn | 4 B + 2 × ~194 KB | task của esp-mqtt | `nhan_task` | bản mới thay bản chờ: task esp-mqtt rút bản chờ về rồi gửi bản mới; ô `nhan_task` đã nhận giữ nguyên tới lần nhận sau (`FREERTOS.md` 8.10); payload rỗng, tức bản retained bị xoá, không vào hàng | `nhan_task` tự chạy `lang_vi`, đổi bảng lệnh và gọi `ai_engine_command_prepare` **giữa hai câu**: ở trạng thái `NGHE`, hay ở ảnh không có `wake` khi không có cửa sổ nào mở hay chờ chấm; bộ trùng `version` với bộ đang dùng bị bỏ qua |
 | `q_speak` | Queue depth 4, `app_speak_req_t`, bộ nhớ ở PSRAM | 4 × 546 B | `dieu_task` | `noi_task` | bỏ, log | |
 | `q_event_up` | Queue depth 16, `app_event_t`, bộ nhớ ở PSRAM | 16 × 80 B | `nhan_task`, `dieu_task` | `gui_task` | bỏ, tăng `events_dropped` | **người phát sự kiện không bao giờ publish**: publish QoS 1 chờ PUBACK, và `nhan_task` đứng chờ mạng là đệm 1 s đầy dần |
 | `eg_system` | EventGroup | 4 B | mọi task | mọi task | — | bit `WIFI_OK` `MQTT_OK` `TIME_OK` `MODELS_OK` `STREAM_ON` `SPEAKING` `CALIBRATING` `OTA_RUNNING` |

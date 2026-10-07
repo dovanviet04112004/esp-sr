@@ -144,7 +144,7 @@ static void load_models(void)
 
 svc_listen_commands_t app_boot_commands(const command_set_t *set, const char **texts, const char **ids)
 {
-    for (uint8_t c = 0; c < set->commands_count; c++) {
+    for (uint16_t c = 0; c < set->commands_count; c++) {
         texts[c] = set->commands[c].text;
         ids[c] = set->commands[c].id;
     }
@@ -154,10 +154,11 @@ svc_listen_commands_t app_boot_commands(const command_set_t *set, const char **t
 
 static esp_err_t listen_to(const command_set_t *set)
 {
-    const char *texts[AI_ENGINE_COMMANDS_MAX];
-    const char *ids[AI_ENGINE_COMMANDS_MAX];
+    // Two pointers a command outgrow the main task's stack; svc_listen copies what it keeps of them.
+    const char **names = heap_caps_malloc(2 * AI_ENGINE_COMMANDS_MAX * sizeof(*names), MALLOC_CAP_SPIRAM);
+    if (names == NULL) { return ESP_ERR_NO_MEM; }
     svc_listen_config_t cfg = {
-        .commands = app_boot_commands(set, texts, ids),
+        .commands = app_boot_commands(set, names, names + AI_ENGINE_COMMANDS_MAX),
         .dialects = LANG_VI_DIALECT_ALL,
         .reject_permille = CONFIG_SVC_LISTEN_CMD_REJECT_PERMILLE,
         .margin_permille = CONFIG_SVC_LISTEN_CMD_MARGIN_PERMILLE,
@@ -165,6 +166,7 @@ static esp_err_t listen_to(const command_set_t *set)
     (void)sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, &cfg.reject_permille);
     (void)sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, &cfg.margin_permille);
     const esp_err_t err = svc_listen_init(&cfg);
+    heap_caps_free(names);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "listening: every utterance vad finds, delta1 %u, delta2 %u (KEHOACH 5.4)",
                  (unsigned)cfg.reject_permille, (unsigned)cfg.margin_permille);

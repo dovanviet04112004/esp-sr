@@ -131,11 +131,11 @@ static bool well_formed(const svc_listen_commands_t *c)
            c->n_commands <= AI_ENGINE_COMMANDS_MAX;
 }
 
-static esp_err_t build_lexicon(const svc_listen_commands_t *c, table_t *t, uint8_t *unreadable)
+static esp_err_t build_lexicon(const svc_listen_commands_t *c, table_t *t, uint16_t *unreadable)
 {
     size_t variants = 0;
     memset(t->lexicon, 0, sizeof(*t->lexicon));
-    for (uint8_t k = 0; k < c->n_commands; k++) {
+    for (uint16_t k = 0; k < c->n_commands; k++) {
         lang_vi_pron_t pron;
         const esp_err_t err = lang_vi_lexicon_entry(c->texts[k], s.dialects, &pron);
         if (err != ESP_OK) {
@@ -180,7 +180,7 @@ esp_err_t svc_listen_init(const svc_listen_config_t *cfg)
     const bool tables = take_table(&s.tables[0]) && take_table(&s.tables[1]);
     const bool rings = s.log_mel != NULL && s.pitch_ring != NULL;
     esp_err_t err = s.hop != NULL && s.bins != NULL && rings && tables ? front_end(&w) : ESP_ERR_NO_MEM;
-    uint8_t unreadable = 0;
+    uint16_t unreadable = 0;
     s.dialects = cfg->dialects;
     if (err == ESP_OK) { err = build_lexicon(&cfg->commands, &s.tables[0], &unreadable); }
     if (err == ESP_OK) { err = ai_engine_command_prepare(s.tables[0].lexicon); }
@@ -195,7 +195,7 @@ esp_err_t svc_listen_init(const svc_listen_config_t *cfg)
     return ESP_OK;
 }
 
-esp_err_t svc_listen_set_commands(const svc_listen_commands_t *commands, uint8_t *unreadable)
+esp_err_t svc_listen_set_commands(const svc_listen_commands_t *commands, uint16_t *unreadable)
 {
     if (!s.ready || svc_listen_busy()) { return ESP_ERR_INVALID_STATE; }
     if (!well_formed(commands) || unreadable == NULL) { return ESP_ERR_INVALID_ARG; }
