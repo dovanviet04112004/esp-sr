@@ -472,7 +472,8 @@ def owner_check(net: gate.Ctc, listed: list[dict], spec: dict, paths: dict) -> d
     """The owner's sessions of spec's owner_sessions whose prompt opens with a checked sắc or nặng syllable, decided
     as recorded and with every utterance's first word resynthesised on its own contour and on the other tone's median
     contour of the owner's, both microphones: per day, distance and word, right and accepted at accept_permille and
-    what was heard; per word the utterances right with F0 kept that moving it turned."""
+    what was heard; per word the utterances right with F0 kept that moving it turned; and as recorded, right and
+    accepted over every utterance, the ones creak or the aligner left out included."""
     rcfg = repitch.repitch_config(spec)
     board = load_yaml(command.CONFIG)["eval"]["board"]
     manifest = list(csv.DictReader((paths["manifests"] / board["manifest"]).open(encoding="utf-8")))
@@ -554,8 +555,17 @@ def owner_check(net: gate.Ctc, listed: list[dict], spec: dict, paths: dict) -> d
         if heard["same"].command == expected:
             flips[word]["kept"] += 1
             flips[word]["turned"] += heard["swap"].command != expected
+    every: dict[tuple, Counter] = {}
+    for (session, _), h in decided["recorded"][0].items():
+        r = row_of[session]
+        expected = command_of[tuple(corpus.sounds(r["prompt"]))]
+        c = every.setdefault((f"{session[6:8]}/{session[4:6]}", r["distance_cm"], r["prompt"].split()[0]), Counter())
+        c["utterances"] += 1
+        c["right"] += h.command == expected
+        c["accepted"] += h.command == expected and h.accepted(reject, margin)
     return {
         "median_hz": round(median_hz, 1),
+        "recorded": [{"day": d, "cm": cm, "word": w} | dict(c) for (d, cm, w), c in every.items()],
         "templates_st": {tone: [round(float(v), 2) for v in c] for tone, c in sorted(templates.items())},
         "groups": [
             {"day": day, "cm": cm, "word": word, "utterances": sum(g["recorded"]["heard"].values())}
@@ -578,7 +588,18 @@ def owner_table(report: dict) -> str:
             f"| {g['day']} | {g['cm']} | {g['word']} | {g['utterances']} | " + " | ".join(cells) + f" | {heard} |"
         )
     turned = "; ".join(f"{word} {c.get('turned', 0)}/{c.get('kept', 0)}" for word, c in report["flips"].items())
-    return "\n".join([*lines, "", f"turned by moving F0, of those right with it kept: {turned}"])
+    recorded = "; ".join(
+        f"{r['day']} {r['cm']} cm {r['word']} {r['right']}/{r['utterances']} ({r['accepted']})"
+        for r in report["recorded"]
+    )
+    return "\n".join(
+        [
+            *lines,
+            "",
+            f"turned by moving F0, of those right with it kept: {turned}",
+            f"every utterance as recorded: {recorded}",
+        ]
+    )
 
 
 def matched(hyp: list[int], ref: np.ndarray) -> list[int | None]:

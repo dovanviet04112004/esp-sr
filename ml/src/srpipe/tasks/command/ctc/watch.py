@@ -55,13 +55,12 @@ def gate_entry(results: list[gate.Scored], word_of: dict[str, str | None], rejec
 
 def owner_entry(report: dict) -> dict:
     """The owner check in figures: per word the utterances right with F0 kept that moving it turned, and per day
-    and word the utterances right and accepted as recorded."""
+    and word every utterance right and accepted as recorded."""
     days: dict[str, Counter] = {}
-    for g in report["groups"]:
-        c = days.setdefault(f"{g['day']} {g['word']}", Counter())
-        c["utterances"] += g["utterances"]
-        c["right"] += g["recorded"]["right"]
-        c["accepted"] += g["recorded"]["accepted"]
+    for r in report["recorded"]:
+        c = days.setdefault(f"{r['day']} {r['word']}", Counter())
+        for k in ("utterances", "right", "accepted"):
+            c[k] += r[k]
     return {"turned": report["flips"], "recorded": {key: dict(c) for key, c in days.items()}}
 
 

@@ -44,11 +44,11 @@ def test_gate_3_counts_commands_rejections_and_each_checked_word() -> None:
 
 
 def test_the_owner_check_sums_each_day_and_word_as_recorded() -> None:
-    group = {"recorded": {"right": 3, "accepted": 1}, "same": {}, "swap": {}}
+    every = {"right": 3, "accepted": 1}
     report = {
-        "groups": [
-            {"day": "07/10", "cm": "100", "word": "tắt", "utterances": 4} | group,
-            {"day": "07/10", "cm": "300", "word": "tắt", "utterances": 5} | group,
+        "recorded": [
+            {"day": "07/10", "cm": "100", "word": "tắt", "utterances": 4} | every,
+            {"day": "07/10", "cm": "300", "word": "tắt", "utterances": 5} | every,
         ],
         "flips": {"tắt": {"kept": 6, "turned": 2}},
     }
