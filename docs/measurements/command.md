@@ -1228,3 +1228,17 @@ thanh không mang gì cho "tắt", nên giả thuyết "v8 tách 'tắt' bằng 
 độ "tắt" vẫn đúng, tức log-mel, giống hệt của v7, đủ để nhận "tắt" ở mốc này. v7 ở mốc 4 000 cũng đúng 19/22 câu "tắt"
 28/09 rồi về 1/22 ở cuối (§12.14): thông tin có trong log-mel, mạng bỏ nó khi học tiếp. Trọng số cuối của v8 cho biết
 cao độ SwiftF0 có giữ "tắt" lại khi log-mel thôi giữ không.
+
+Cùng phép giữ trên v7 ở bước 40 000 (Kaldi), mọi câu "tắt", đúng (nhận):
+
+| v7 | 07/10, 1 m | 07/10, 3 m | 28/09, 1 m | 28/09, 3 m |
+|---|---|---|---|---|
+| như thu | 20/24 (8) | 15/23 (2) | 1/11 (0) | 0/11 (0) |
+| giữ độ hữu thanh | 18/24 (11) | 21/23 (5) | 5/11 (0) | 0/11 (0) |
+| giữ hai chiều F0 | 20/24 (3) | 11/23 (0) | 1/11 (0) | 0/11 (0) |
+| giữ cả ba | 20/24 (4) | 17/23 (2) | 4/11 (0) | 0/11 (0) |
+
+"bật" không đổi ở mọi cách. Độ hữu thanh của Kaldi ở âm tiết đầu kéo "tắt" về "bật": bỏ nó, 07/10 3 m từ 15 lên 21/23,
+28/09 1 m từ 1 lên 5/11. F0 của Kaldi vẫn giúp một ít: bỏ nó, 07/10 3 m còn 11/23 và gần như không câu nào qua ngưỡng.
+Bỏ cả ba, 28/09 vẫn 4/22: ở trọng số cuối, chính phần log-mel của v7 nghe "tắt" 28/09 thành "bật", trong khi v8 ở mốc
+12 000 không cao độ vẫn đúng 47/47 và 18/22 trên cùng log-mel.
