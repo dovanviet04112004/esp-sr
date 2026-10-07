@@ -1,0 +1,12 @@
+# E11-T20 the owner's own "tắt" and "bật" through the board, to learn from: one seat about 80 cm in front, each
+# command 10 times. Board capture at the product's shift (PCM_SHIFT=13), one speaker. Columns as in levels.tsv.
+Ngồi chính diện, cách board khoảng 80 cm, giữ nguyên chỗ cả buổi. Thấy 'board connected' thì chờ 2 s, nói "tắt đèn" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind cmd --spk {spk} --consent {consent} --distance-cm 80 --doa-deg 90 --duration-s 40 --prompt 'tắt đèn'
+Như trên, nói "bật đèn" 10 lần, mỗi lần cách 2-3 s.	--kind cmd --spk {spk} --consent {consent} --distance-cm 80 --doa-deg 90 --duration-s 40 --prompt 'bật đèn'
+Như trên, nói "tắt quạt" 10 lần, mỗi lần cách 2-3 s.	--kind cmd --spk {spk} --consent {consent} --distance-cm 80 --doa-deg 90 --duration-s 40 --prompt 'tắt quạt'
+Như trên, nói "bật quạt" 10 lần, mỗi lần cách 2-3 s.	--kind cmd --spk {spk} --consent {consent} --distance-cm 80 --doa-deg 90 --duration-s 40 --prompt 'bật quạt'
+Như trên, nói "tắt ti vi" 10 lần, mỗi lần cách 2-3 s.	--kind cmd --spk {spk} --consent {consent} --distance-cm 80 --doa-deg 90 --duration-s 40 --prompt 'tắt ti vi'
+Như trên, nói "bật ti vi" 10 lần, mỗi lần cách 2-3 s.	--kind cmd --spk {spk} --consent {consent} --distance-cm 80 --doa-deg 90 --duration-s 40 --prompt 'bật ti vi'
+Như trên, nói "tắt điều hòa" 10 lần, mỗi lần cách 2-3 s.	--kind cmd --spk {spk} --consent {consent} --distance-cm 80 --doa-deg 90 --duration-s 40 --prompt 'tắt điều hòa'
+Như trên, nói "bật điều hòa" 10 lần, mỗi lần cách 2-3 s.	--kind cmd --spk {spk} --consent {consent} --distance-cm 80 --doa-deg 90 --duration-s 40 --prompt 'bật điều hòa'
+Như trên, nói "mở đèn" 10 lần, mỗi lần cách 2-3 s.	--kind cmd --spk {spk} --consent {consent} --distance-cm 80 --doa-deg 90 --duration-s 40 --prompt 'mở đèn'
+Như trên, nói "mở quạt" 10 lần, mỗi lần cách 2-3 s.	--kind cmd --spk {spk} --consent {consent} --distance-cm 80 --doa-deg 90 --duration-s 40 --prompt 'mở quạt'
