@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-#define NET_MQTT_COMMANDS_TEXT_BYTES 32768 // command_set JSON: 64 commands of 64-character lines
+#define NET_MQTT_COMMANDS_TEXT_BYTES 154112 // command_set JSON: 301 commands of 512 bytes
 
 typedef struct {
     const char *device_id;     // copied; also the client id and default username
