@@ -994,3 +994,15 @@ câu đầu của phiên 8 ("bật quạt" trong phiên "bật đèn") bỏ. Chu
 Cùng khoảng cách, v7 nghe đúng "tắt" 35/47 câu mới so với 1/22 của 28/09: khoảng cách không phải chỗ thiếu; khác biệt
 còn lại là firmware thu của 28/09. v2 trên bản thu mới vẫn 2/47 và nhận nhầm "tắt" thành lệnh khác 11/47 lần; v7 không
 nhận nhầm lần nào, nhưng chỉ 10/47 câu "tắt" qua ngưỡng. Mọi câu "tắt" của Cửa 3 (§12.9) là phiên 28/09.
+
+Phổ dài hạn của micro 0 thô, đoạn có tiếng so với dải 500–1000 Hz: 28/09 có 100–250 Hz ở −4,3 / −8,6 dB (1 m / 3 m)
+so với −13,1 / −16,1 dB của 07/10, 250–500 Hz −8,1 / −11,0 so với −12,4 / −15,8 dB; nền hai buổi gần như nhau ở dải
+trầm, dải cao không bị cắt, hai micro lệch nhau như nhau (−9,4 … −10,0 dB): không có dấu bộ lọc của firmware, tiếng
+28/09 nặng trầm hơn 5–9 dB. Chỉnh dải trầm (kệ thấp RBJ ở 500 Hz) trước chuỗi, v7 ở bước 40 000, "tắt" đúng (nhận nhầm):
+
+| Buổi | Kệ thấp | 1 m | 3 m |
+|---|---|---|---|
+| 28/09 | 0 / −4 / −8 dB | 1/11, 3/11, 5/11 (0) | 0/11 ở cả ba (nhầm 5, 4, 3) |
+| 07/10 | +4 / +8 dB | 20/24, 21/24 (0) | 14/23, 13/23 (0) |
+
+Dải trầm của 28/09 giải thích một phần ở 1 m, không giải thích 3 m; thêm trầm cho 07/10 không làm hỏng "tắt".
