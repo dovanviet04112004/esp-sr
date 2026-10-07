@@ -2304,6 +2304,7 @@ Chung cả bốn (`sdkconfig.defaults.esp32s3`):
 | `LWIP_TCPIP_TASK_AFFINITY_CPU0` | **y** | mặc định lwIP **không ghim**, nghĩa là có thể chạy sang nhân 1 giữa hạn chót của khung |
 | `ESP_TIMER_TASK_AFFINITY_CPU0` | y | như trên |
 | `MQTT_TASK_CORE_SELECTION_ENABLED` + `MQTT_USE_CORE_0` | y | như trên |
+| `MQTT_POLL_READ_TIMEOUT_MS` | 50 | esp-mqtt chỉ gửi tin đã xếp hàng khi vòng của nó thức, và vòng ấy ngủ trong `select` tới hạn này khi broker không gửi gì: mặc định 1000 ms làm sự kiện tới `host` trễ thêm tới 1 s (`measurements/latency.md` §21) |
 | `I2S_ISR_IRAM_SAFE` | **y** | ISR của I2S phải chạy được khi cache tắt lúc ghi flash (§5.5) |
 | `ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1` | y | nhân 1 bận liên tục vẫn phải nhường IDLE |
 | `SPIRAM_FETCH_INSTRUCTIONS` / `SPIRAM_RODATA` | n | đẩy mã sang PSRAM là chậm đi |
