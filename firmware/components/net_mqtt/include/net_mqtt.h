@@ -38,7 +38,7 @@ typedef struct {
     uint32_t disconnects;
     uint32_t publish_failures; // enqueue refused or payload too large
     uint32_t json_alloc_failures;
-    uint16_t json_arena_peak; // bytes, highest of the two arenas
+    uint32_t json_arena_peak; // bytes, highest of the two arenas
 } net_mqtt_stats_t;
 
 /** Take the JSON arenas and the two command-set buffers from PSRAM and point cJSON at the arenas.

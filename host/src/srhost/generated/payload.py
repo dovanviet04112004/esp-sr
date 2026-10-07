@@ -219,7 +219,7 @@ SCHEMAS: dict[str, dict] = {
                     'eventsDropped': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
                     'streamDropped': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
                     'qCleanPeak': {'type': 'integer', 'minimum': 0, 'maximum': 65535},
-                    'jsonArenaPeak': {'type': 'integer', 'minimum': 0, 'maximum': 65535},
+                    'jsonArenaPeak': {'type': 'integer', 'minimum': 0, 'maximum': 262144},
                     'rssiDbm': {'type': 'integer', 'minimum': -127, 'maximum': 0},
                     'coreLoadPct': {'type': 'array',
                                     'maxItems': 2,

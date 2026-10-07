@@ -297,7 +297,7 @@ esp_err_t net_mqtt_publish_heartbeat(heartbeat_t *hb)
     if (hb == NULL) { return ESP_ERR_INVALID_ARG; }
     if (s_client == NULL || !s_connected) { return ESP_ERR_INVALID_STATE; }
     strlcpy(hb->device_id, s_device_id, sizeof(hb->device_id));
-    hb->json_arena_peak = (uint16_t)s_arena_peak;
+    hb->json_arena_peak = s_arena_peak;
     hb->has_json_arena_peak = true;
     return send_payload(heartbeat_to_json(hb), GEN_TOPIC_HEARTBEAT);
 }
@@ -325,5 +325,5 @@ esp_err_t net_mqtt_publish_event(event_t *ev)
 void net_mqtt_stats(net_mqtt_stats_t *out)
 {
     *out = s_stats;
-    out->json_arena_peak = (uint16_t)s_arena_peak;
+    out->json_arena_peak = s_arena_peak;
 }

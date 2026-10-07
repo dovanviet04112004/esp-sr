@@ -507,7 +507,7 @@ typedef struct {
     uint32_t events_dropped;
     uint32_t stream_dropped;
     uint16_t q_clean_peak;
-    uint16_t json_arena_peak;
+    uint32_t json_arena_peak;
     int8_t rssi_dbm;
     uint8_t core_load_pct[2];
     uint8_t core_load_pct_count;
@@ -636,8 +636,8 @@ static inline bool heartbeat_from_json(const cJSON *root, heartbeat_t *out)
     if (item == NULL) { item = NULL; }
     if (item != NULL) {
         if (!cJSON_IsNumber(item)) { return false; }
-        if (item->valuedouble < 0.0 || item->valuedouble > 65535.0) { return false; }
-        out->json_arena_peak = (uint16_t) item->valuedouble;
+        if (item->valuedouble < 0.0 || item->valuedouble > 262144.0) { return false; }
+        out->json_arena_peak = (uint32_t) item->valuedouble;
         out->has_json_arena_peak = true;
     }
     item = cJSON_GetObjectItemCaseSensitive(root, "rssiDbm");

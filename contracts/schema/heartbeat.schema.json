@@ -90,7 +90,7 @@
     "jsonArenaPeak": {
       "type": "integer",
       "minimum": 0,
-      "maximum": 65535
+      "maximum": 262144
     },
     "rssiDbm": {
       "type": "integer",
