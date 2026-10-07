@@ -36,11 +36,14 @@ def rows_of(table) -> dict[str, tuple[int, int]]:
     return {r[0]: (int(r[3], 0), int(r[4], 0)) for r in rows}
 
 
-def test_the_unit_table_is_the_products_with_ota_1_as_the_scratch_model_slot() -> None:
+def test_the_unit_table_is_the_products_with_its_app_span_split_into_a_bigger_app_and_a_scratch_model_slot() -> None:
     product, unit = rows_of(pack_models.PARTITIONS), rows_of(pack_models.UNIT_PARTITIONS)
-    assert "models_1" not in product and unit.pop("models_1") == product.pop("ota_1") == (0x320000, 0x300000)
+    app, scratch = unit.pop("ota_0"), unit.pop("models_1")
+    first, second = product.pop("ota_0"), product.pop("ota_1")
+    assert "models_1" not in product and app[0] == first[0] and app[1] > first[1] and app[0] + app[1] == scratch[0]
+    assert scratch[0] + scratch[1] == second[0] + second[1]
     assert unit == product
-    assert pack_models.partition_bytes("models_1", pack_models.UNIT_PARTITIONS) == 0x300000
+    assert pack_models.partition_bytes("models_1", pack_models.UNIT_PARTITIONS) == scratch[1]
 
 
 def test_entries_are_aligned_hashed_and_in_order() -> None:

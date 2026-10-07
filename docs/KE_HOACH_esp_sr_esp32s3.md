@@ -2666,8 +2666,9 @@ ghép mẩu nằm ở `voice` (E12-T2), không chiếm khe model; còn khoảng 
 **Slot app 3 MB** vì esp-dl chiếm ~860 KB flash khi link (số của repo face attendance, cùng chip); cộng
 Wi-Fi, MQTT, TLS, ảnh dựng cỡ 2 MB 🔬. `idf.py size` trong CI báo biên còn lại.
 
-**Unit test trên board dựng với `test_apps/partitions_unit.csv`**: bảng trên, riêng vùng 3 MB của `ota_1`, nơi test
-không bao giờ cập nhật OTA, là khe nháp `models_1`. Probe của `ai_engine`, bản ghi từng vòng của `make listen-unit` và
+**Unit test trên board dựng với `test_apps/partitions_unit.csv`**: bảng trên, riêng `ota_0` dài 3,5 MB, vì app thử
+của `ai_engine` nhúng probe của mọi khối và với một run đã học thì quá 3 MB, và 2,5 MB còn lại của vùng `ota_1`, nơi
+test không bao giờ cập nhật OTA, là khe nháp `models_1`. Probe của `ai_engine`, bản ghi từng vòng của `make listen-unit` và
 các ca tự dựng ảnh model ghi vào đó, còn `models_0` mang model như sản phẩm. Nạp lại firmware sản phẩm thì otadata trỏ
 về `ota_0`; vùng ấy chỉ còn rác cho tới lần OTA sau ghi đè.
 
