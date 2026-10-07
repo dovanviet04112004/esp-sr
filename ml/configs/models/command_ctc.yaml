@@ -118,3 +118,25 @@ probe:                             # E11-T12: one layer, then the whole net, ran
     thresholds: [1000, 50]         # reject and margin, thousandths of a nat a frame
   command:                         # E11-T19: windows through ai_engine_command_{begin,step,score} (make ai-unit)
     windows: 12                    # board windows of a trained run spread evenly, or random ones without
+tone_flip:                         # python -m srpipe.tasks.command.ctc.tone_flip <run>: the F0-flip check (KEHOACH 3.11, E11-T23)
+  points: 10                       # a tone's contour: semitones over the speaker's median F0 at even points of a voiced stretch
+  voiced_share: 0.6                # a syllable Praat calls voiced on fewer of its frames is left out: creak, no clean periods
+  min_voiced_s: 0.05               # and one voiced over less than this
+  pad_s: 0.2                       # Praat resynthesises the syllable with this much on either side
+  fade_s: 0.01                     # crossfaded back into the clip over this at both ends
+  time_step_s: 0.01                # Praat's pitch step
+  f0_range_hz: [75, 600]           # Praat's pitch floor and ceiling
+  follows_share: 0.5               # the first syllable follows when it moves and flips at least this share of a later one
+  workers: 5                       # val sessions simulated at once
+  owner_set: host/sets/battat_vi.json   # owner: decided over the default commands and the TV and air-con pairs
+  owner_sessions:                  # owner: the owner's bật / tắt sessions; 28/09 the cross-check, 07/10 Gate 3's day
+    [20260928_home_012, 20260928_home_013, 20260928_home_014, 20260928_home_015,
+     20260928_home_022, 20260928_home_023, 20260928_home_024, 20260928_home_025,
+     20261007_home_001, 20261007_home_002, 20261007_home_003, 20261007_home_004,
+     20261007_home_005, 20261007_home_006, 20261007_home_007, 20261007_home_008]
+  owner_margin_hops: [15, 10]      # owner: raw mic 0 this far before and after an utterance's window goes to the aligner
+  accept_permille: [200, 50]       # owner: δ₁ and δ₂ an utterance passes to count as accepted, thousandths of a nat
+watch:                             # python -m srpipe.tasks.command.ctc.watch <run>: checkpoints as they land (KEHOACH 3.11)
+  owner_every: 2                   # the owner check of tone_flip on every second checkpoint, Gate 3 on each
+  poll_s: 30                       # seconds between looks for the next checkpoint
+  settled_s: 5                     # a checkpoint left alone this long is written whole

@@ -89,12 +89,13 @@ class Ctc:
     cfg: dict
 
 
-def load_ctc(run: Path, commands: Path = command.COMMANDS) -> Ctc:
-    """A ctc run with every command of a command set file, default_vi.json unless another is given."""
+def load_ctc(run: Path, commands: Path = command.COMMANDS, weights: Path | None = None) -> Ctc:
+    """A ctc run with every command of a command set file, default_vi.json unless another is given; its final weights,
+    or those of weights, such as a checkpoint the run saved on the way."""
     trained = load_run_config(run)
     stats = np.load(run / "feature_stats.npz")
     model = encoder.build(trained)
-    model.load_state_dict(torch.load(run / "model.pt", map_location="cpu"))
+    model.load_state_dict(torch.load(weights or run / "model.pt", map_location="cpu"))
     model.eval()
     listed = json.loads(commands.read_text(encoding="utf-8"))["commands"]
     lexicon = [ctc_score.variants(c["text"]) for c in listed]
@@ -266,12 +267,18 @@ def rnnt_heard(net: Ctc, x: np.ndarray) -> Heard:
     return heard_of(net, *rnnt_search.decide(log_probs, frames, tree, ctc_score.CAP, 0, size, pad, per_frames))
 
 
-def heard_rows(cfg: dict, rows: list[dict], paths: dict, manifest: list[dict] | None = None) -> Iterator[tuple]:
+def heard_rows(
+    cfg: dict,
+    rows: list[dict],
+    paths: dict,
+    manifest: list[dict] | None = None,
+    pcm_of: dict[str, np.ndarray] | None = None,
+) -> Iterator[tuple]:
     """Each row in manifest order: the row, its clean samples, vad, log-mel and pitch per hop through the product's
     chain, which runs on without a reset over every session of the row's sitting in manifest, the board manifest
     unless given, as the board's chain and svc_listen's pitch run on between utterances (KEHOACH 3.11, 5.4); each
-    session followed by silence as with_silence closes it. A row outside manifest, or a sitting with a recording not
-    on disk, is refused."""
+    session followed by silence as with_silence closes it; a session of pcm_of heard as those (samples, mics) int16
+    instead of its recording. A row outside manifest, or a sitting with a recording not on disk, is refused."""
     device_cfg = device_of(cfg)
     mics = device.load_microphones(device_cfg["microphone"])
     chain_cfg, mel = ChainConfig(balance_gains=mics.gains), Mel(MelConfig(**device_cfg["features"]))
@@ -288,7 +295,8 @@ def heard_rows(cfg: dict, rows: list[dict], paths: dict, manifest: list[dict] | 
         folders = [paths["raw"] / "device" / r["board"] / r["session"] for r in sitting]
         if missing := [f.name for f in folders if not f.is_dir()]:
             raise FileNotFoundError(f"{', '.join(missing)}: in the board manifest, not under {paths['raw'] / 'device'}")
-        pcm = [channels_of(f) for f in folders]
+        pcm = [(pcm_of or {}).get(r["session"]) for r in sitting]
+        pcm = [channels_of(f) if p is None else p for f, p in zip(folders, pcm, strict=True)]
         clean, figures, features = device.listen(np.concatenate(pcm), chain_cfg, mel)
         cuts = np.cumsum([len(p) // grid.HOP_SAMPLES for p in pcm])[:-1]
         samples, vads = np.split(clean, cuts * grid.HOP_SAMPLES), np.split(figures[:, 0].astype(bool), cuts)
