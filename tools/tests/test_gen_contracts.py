@@ -110,6 +110,14 @@ class DeterminismTests(unittest.TestCase):
         self.assertEqual(gen_contracts.string_bytes({"maxLength": 64}), 256)
         self.assertEqual(gen_contracts.string_bytes({"maxLength": 32, "pattern": "^[a-z]+$"}), 32)
 
+    def test_an_array_counts_its_items_in_the_smallest_type_its_max_items_fits(self) -> None:
+        item = {"type": "integer", "minimum": 0, "maximum": 9}
+        for most, count in ((255, "uint8_t n_count;"), (256, "uint16_t n_count;"), (301, "uint16_t n_count;")):
+            emit = gen_contracts.PayloadC()
+            n = {"type": "array", "maxItems": most, "items": item}
+            emit.struct("s", {"type": "object", "properties": {"n": n}})
+            self.assertIn(f"    {count}", emit.out)
+
 
 @unittest.skipIf(find_cjson() is None or shutil.which("gcc") is None, "needs gcc and cJSON sources (set CJSON_DIR)")
 class GeneratedCTests(unittest.TestCase):

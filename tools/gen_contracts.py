@@ -918,7 +918,8 @@ class PayloadC:
             ctype, suffix = self.ctype(owner, f)
             self.out.append(f"    {ctype} {f.c_name}{suffix};")
             if f.node.get("type") == "array":
-                self.out.append(f"    uint8_t {f.c_name}_count;")
+                count = c_int_type({"minimum": 0, "maximum": f.node["maxItems"]})
+                self.out.append(f"    {count} {f.c_name}_count;")
         self.out += [f"    bool has_{f.c_name};" for f in fs if not f.required]
         self.out.append(f"}} {owner}_t;\n")
 
