@@ -299,3 +299,9 @@ def test_kaldi_hears_a_run_on_its_mel_from_build_only_if_that_is_the_contracts_f
         quant.kaldi_cfg(cfg, {})
     with pytest.raises(ValueError, match="no build holds it"):
         quant.kaldi_cfg(cfg | {"simulate": {}}, {})
+
+
+def test_a_deploy_record_names_the_hearing_its_row_was_built_on() -> None:
+    kaldi = quant.Hearing(kaldi=True, hold="voicing")
+    assert quant.hearing_of(quant.heard_head(kaldi)) == kaldi
+    assert quant.hearing_of({}) == quant.LEARNT == quant.hearing_of(quant.heard_head(quant.LEARNT))

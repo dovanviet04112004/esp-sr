@@ -205,12 +205,14 @@ def gate_windows(cfg: dict, graph, model: encoder.CtcNet, norm: tuple, windows: 
     return body
 
 
-def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | None = None) -> tuple[Path, ...]:
+def probe(
+    cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | None = None, hearing=quant.LEARNT
+) -> tuple[Path, ...]:
     """Write out/ctc_models.bin and out/ctc_streams.bin: the first stack's layer a frame a step, the net a chunk a
     step, work keeping each ONNX and .espdl; out/ctc_decide.bin, the decision of the default commands (E11-T13); and
-    out/ctc_windows.bin, windows through the command calls. With run, the net is the graph of row in its ladder,
-    streaming a test sentence, and the windows are the board's; out/ctc_gate.bin then holds every Gate 3 window and
-    out/ctc_gate.json what each should get, for the on-chip Gate 3, and without run neither is left."""
+    out/ctc_windows.bin, windows through the command calls. With run, the net is the graph of row in its ladder of
+    hearing, streaming a test sentence, and the windows are the board's; out/ctc_gate.bin then holds every Gate 3
+    window and out/ctc_gate.json what each should get, for the on-chip Gate 3, and without run neither is left."""
     if cfg["probe"]["hops"] % cfg["chunk_hops"] or cfg["quant"]["hops"] % cfg["chunk_hops"]:
         raise ValueError(f"probe and quant hops must be multiples of chunk_hops {cfg['chunk_hops']}")
     scales, p, rungs = cfg["probe"]["norm_scale"], cfg["probe"], ptq_espdl.ladder(quant.LADDER)
@@ -226,7 +228,7 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
         windows = random_windows(cfg, *norm)
         listen_hash = listen.HASH
     else:
-        trained = gate.load_ctc(run)
+        trained = hearing.net(run, data_paths())
         listen_hash = trained.cfg.get("listen_hash", 0)
         net, net_x, norm = trained.model, quant.test_sentence(cfg, trained), (trained.mean, trained.std)
         sessions = quant.board_windows(cfg, trained, data_paths())
@@ -242,7 +244,7 @@ def probe(cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | 
     if run is None:
         net_graph = quant.quantized(net, [torch.from_numpy(c) for c in net_calib], work / NET_ENTRY, rungs, fixes)
     else:
-        net_graph = export_espdl.load_native(run / "int8" / row / quant.GRAPH_FILE)
+        net_graph = export_espdl.load_native(hearing.folder(run) / row / quant.GRAPH_FILE)
     built.append((NET_ENTRY, probe_net(net_graph, NET_ENTRY, cfg["chunk_hops"], cfg, work, net_x)))
     out.mkdir(parents=True, exist_ok=True)
     image = out / MODELS_FILE
@@ -309,8 +311,9 @@ def listen_rounds(cfg: dict, out: Path) -> list[Path]:
         raise ValueError(f"the locked command learned on listen hash {learnt}, svc_listen cuts by 0x{listen.HASH:08x}")
     meta = json.loads((update_lock.MODELS / "command" / "meta.json").read_text(encoding="utf-8"))
     run = ML_ROOT / "artifacts" / "command_ctc" / "runs" / lock["run"]
-    trained = gate.load_ctc(run)
-    graph = export_espdl.load_native(run / "int8" / meta["row"] / quant.GRAPH_FILE)
+    hearing = quant.hearing_of(meta)
+    trained = hearing.net(run, data_paths())
+    graph = export_espdl.load_native(hearing.folder(run) / meta["row"] / quant.GRAPH_FILE)
     int8 = quant.Int8Net(graph, cfg["quant"]["hops"], trained.mean, trained.std, trained.model, cfg["esp_ppq_patches"])
     reject, margin = cfg["quant"]["reject"], cfg["eval"]["margin"]
     lexicon, per_frames = ctc_score.default_lexicon(), ctc_score.window_frames(trained.model.front.hop_stride)
@@ -373,6 +376,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--work", type=Path, default=ML_ROOT / "artifacts" / "command_ctc" / "probe")
     parser.add_argument("--run", type=Path, help="stream a row of this trained run's ladder instead of random weights")
     parser.add_argument("--row", help="the row of <run>/int8/ladder.yaml whose graph streams")
+    parser.add_argument("--kaldi-pitch", action="store_true", help="the row of the run's ladder on Kaldi's pitch")
+    parser.add_argument("--hold", choices=sorted(gate.HOLDS), help="the row of the ladder with these pitch dims folded")
     parser.add_argument("--gate-log", type=Path, help="count Gate 3 on the chip's decisions in this unit app log")
     parser.add_argument("--listen", action="store_true", help="write svc_listen's rounds of Gate 3 sessions instead")
     args = parser.parse_args(argv)
@@ -385,7 +390,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if (args.run is None) != (args.row is None):
         parser.error("--run and --row go together")
-    for path in probe(load_yaml(ctc.CONFIG), args.out, args.work, args.run, args.row):
+    hearing = quant.Hearing(args.kaldi_pitch, args.hold)
+    for path in probe(load_yaml(ctc.CONFIG), args.out, args.work, args.run, args.row, hearing):
         print(f"{path}: {path.stat().st_size} bytes")
     return 0
 

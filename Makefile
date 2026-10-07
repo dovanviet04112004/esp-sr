@@ -269,10 +269,10 @@ calib-shift: ## Store NVS calib/pcm_shift through test_apps/calib: make calib-sh
 	@test -n "$(SHIFT)" || { echo "usage: make calib-shift SHIFT=<8..16>"; exit 1; }
 	cd host && uv run python -m srhost.calib shift $(SHIFT) --port $(PORT)
 
-ai-probe: ## Export the probes of E11-T10 (TCN), E11-T17 (kws), E11-T12 (ctc; CTC_RUN=<run under ml/> CTC_ROW=<row of its int8/ladder.yaml> streams that graph) and E9-T10 (ns) into ai_engine/test_apps/unit
+ai-probe: ## Export the probes of E11-T10 (TCN), E11-T17 (kws), E11-T12 (ctc; CTC_RUN=<run under ml/> CTC_ROW=<row of its int8/ladder.yaml> streams that graph, CTC_KALDI=1 CTC_HOLD=voicing the row of its int8_kaldi_voicing/) and E9-T10 (ns) into ai_engine/test_apps/unit
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.wake.quant probe
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.kws.quant probe
-	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.probe $(if $(CTC_RUN),--run $(CTC_RUN) --row $(CTC_ROW))
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.probe $(if $(CTC_RUN),--run $(CTC_RUN) --row $(CTC_ROW)) $(if $(CTC_KALDI),--kaldi-pitch) $(if $(CTC_HOLD),--hold $(CTC_HOLD))
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.ns.quant probe
 
 ai-unit: ai-probe ## Run the ai_engine suite on board B at bench's compiler settings; both model slots end erased; with CTC_RUN, Gate 3 counted on the chip's decisions

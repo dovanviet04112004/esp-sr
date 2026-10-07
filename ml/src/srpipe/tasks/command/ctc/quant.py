@@ -308,6 +308,12 @@ def heard_head(hearing: Hearing) -> dict:
     return {"heard": {"pitch": "kaldi" if hearing.kaldi else "learnt", "hold": hearing.hold}}
 
 
+def hearing_of(record: dict) -> Hearing:
+    """The hearing a ladder head or a deploy record names under heard, the run's own pitch when it names none."""
+    heard = record.get("heard") or {}
+    return Hearing(heard.get("pitch") == "kaldi", heard.get("hold"))
+
+
 def step_ptq(cfg: dict, run: Path, hearing: Hearing = LEARNT) -> Path:
     """Rungs 1 and 2: the float row, then a row of the net quantised with each calibration."""
     spec, b, folder = cfg["quant"], bench(cfg, run, hearing), hearing.folder(run)
