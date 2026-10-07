@@ -259,7 +259,7 @@ def test_clips_with_the_same_bytes_are_heard_once_for_the_targets_of_both(tmp_pa
     assert len(asked) == 1
 
 
-def test_word_times_come_back_by_clip_from_the_aligner(tmp_path: Path, monkeypatch) -> None:
+def test_word_times_come_back_by_clip_from_the_aligner_once_a_set(tmp_path: Path, monkeypatch) -> None:
     calls = []
 
     def docker(cmd, check):
@@ -283,10 +283,12 @@ def test_word_times_come_back_by_clip_from_the_aligner(tmp_path: Path, monkeypat
     script = calls[0][-1]
     assert "mfa model download acoustic vi --version 3.0.0" in script and "mfa align /data/corpus vi vi" in script
     assert calls[0][calls[0].index("--user") + 1] == f"{os.getuid()}:{os.getgid()}"
+    assert engines.align(clips, tts, tmp_path / "work", tmp_path) == times
+    assert len(calls) == 1
     (tmp_path / "mfa/3.0.0/pretrained_models/acoustic").mkdir(parents=True)
     (tmp_path / "mfa/3.0.0/pretrained_models/acoustic/vi.zip").write_bytes(b"model")
-    assert engines.align(clips, tts, tmp_path / "work", tmp_path) == times
-    assert "download acoustic" not in calls[1][-1] and "download dictionary" in calls[1][-1]
+    assert set(engines.align(clips[:2], tts, tmp_path / "work", tmp_path)) == {"a", "b"}
+    assert len(calls) == 2 and "download acoustic" not in calls[1][-1] and "download dictionary" in calls[1][-1]
 
 
 def test_the_fast_checker_hears_each_distinct_clip_once(tmp_path: Path, monkeypatch) -> None:
