@@ -938,7 +938,7 @@ số của chính run nghe bằng bộ dò nó học làm trần. Đo trên tr�
 1. Kaldi của `dsp_spec/pitch` như hiện nay (`KALDI=1`);
 2. Kaldi với chiều độ hữu thanh giữ ở trung bình lúc học (`KALDI=1 HOLD=voicing`; phép `owner` đã quyết mọi câu với
    chiều ấy giữ): độ hữu thanh của Kaldi ở âm tiết đầu neo vào nền trước câu (§12.18) và kéo "tắt" về "bật" ở cả v7
-   lẫn v8 (`measurements/command.md` §12.21); board đưa hằng số ấy vào chỗ chiều này, không thêm phép tính nào.
+   lẫn v8 (`measurements/command.md` §12.21); chiều giữ gập vào trọng số trước thang int8 (§3.14), board không đổi gì.
 
 Cách đầu tiên chạm trần thì dùng: Cửa 3 đúng kém trần không quá 5 câu (nhiễu đếm), từ chối từ 122/126 trở lên, "tắt" ở
 tám phiên 07/10 đúng kém trần không quá 3 câu. Deploy khi ấy ghi front Kaldi của hợp đồng, chiều giữ và `listen_hash`
@@ -1410,6 +1410,14 @@ chuẩn tốt nhất của bậc 2 theo thước ấy. Với `command` `ctc`: đ
 `quant.reject` và `δ₂` `eval.margin`; cách nào kém cách đầu không quá `quant.gate_tie` câu, cỡ một sai số chuẩn của
 phép đếm trên 112 câu, coi như hoà, và giữa các cách hoà thì lỗi đơn vị trên 2 000 câu thử thấp nhất thắng, rồi ít câu
 nhận nhầm hơn.
+
+Run chạy trên board bằng cao độ khác cao độ nó học (§3.11): mọi bước của thang, ngưỡng và deploy nhận `KALDI=1` và
+`HOLD=<chiều>`. Mạng vào thang đã gập chiều giữ vào trọng số: cột của chiều ấy trong phép chiếu `front.proj` về 0, đúng
+bằng giữ nó ở trung bình lúc học, vì ba chiều cao độ chỉ vào mạng qua phép trung bình theo bước và phép chiếu ấy. Hiệu
+chuẩn, câu thử, `val` và `val_commands` đọc shard của bản dựng `simulate.mel_from` của run: cùng mục, cùng log-mel, cao
+độ Kaldi của hợp đồng; bản dựng có cao độ khác hợp đồng bị từ chối. QAT học trên các shard ấy với chiều giữ ở trung
+bình, nên cột ấy ở 0 suốt lượt. Thống kê chuẩn hoá vẫn là của run. Thang ấy ghi ở `<run>/int8_kaldi_<chiều>/`, tách
+khỏi thang trên cao độ lúc học; deploy ghi `listen_hash` của hợp đồng như mạng học thẳng trên Kaldi.
 
 Cấu hình thang nằm ở `configs/models/quant.yaml`, một khối mặc định và một khối ghi đè mỗi nhánh; những gì thang đem ra
 thử (các cách hiệu chuẩn, số lớp int16 mỗi dòng, bước học QAT) nằm ở mục `quant` của config nhánh. Chọn bậc bằng số
