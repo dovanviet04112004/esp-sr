@@ -71,8 +71,8 @@ static inline cJSON *command_set_commands_item_to_json(const command_set_command
 
 typedef struct {
     uint32_t version;
-    command_set_commands_item_t commands[64];
-    uint8_t commands_count;
+    command_set_commands_item_t commands[301];
+    uint16_t commands_count;
 } command_set_t;
 
 /** Fill out from a parsed command_set object, checking type, range, enum and size.
@@ -94,7 +94,7 @@ static inline bool command_set_from_json(const cJSON *root, command_set_t *out)
     item = cJSON_GetObjectItemCaseSensitive(root, "commands");
     if (item == NULL) { return false; }
     if (item != NULL) {
-        if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > 64) { return false; }
+        if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > 301) { return false; }
         if (cJSON_GetArraySize(item) < 1) { return false; }
         const cJSON *el = NULL;
         cJSON_ArrayForEach(el, item) {
