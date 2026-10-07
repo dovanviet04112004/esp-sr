@@ -1006,3 +1006,11 @@ trầm, dải cao không bị cắt, hai micro lệch nhau như nhau (−9,4 …
 | 07/10 | +4 / +8 dB | 20/24, 21/24 (0) | 14/23, 13/23 (0) |
 
 Dải trầm của 28/09 giải thích một phần ở 1 m, không giải thích 3 m; thêm trầm cho 07/10 không làm hỏng "tắt".
+
+Cửa 3 từ đây gồm các phiên 07/10 (firmware thu hiện tại), bỏ câu đầu phiên `20261007_home_008`
+(`eval.board.left_out_utterances`): 209 câu lệnh, 126 cửa sổ phải từ chối. Float, không ngưỡng; hai cột cuối ở δ₁ 200 ‰:
+
+| Mạng | Câu đúng | "tắt đèn" | "tắt quạt" | "bật đèn" / "bật quạt" | Nhận đúng có ngưỡng | Từ chối |
+|---|---|---|---|---|---|---|
+| v2 (`128545c`, đang khoá) | 135/209 | 1/35 | 1/34 | 35/37 / 35/36 | 61% | 123/126 |
+| v7, 40 000 | 170/209 | 16/35 | 20/34 | 35/37 / 35/36 | 59% | 124/126 |
