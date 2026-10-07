@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit spans splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-thresholds ctc-deploy ctc-tone-flip ctc-watch rnnt-ptq ai-unit-rnnt listen-unit models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
-        fw-dev fw-bench fw-prod flash monitor capture-flash broker-up broker-down host-live commands session session-plan
+        fw-dev fw-bench fw-bench-flash fw-prod flash monitor capture-flash broker-up broker-down host-live commands session session-plan
 
 PORT ?= /dev/ttyUSB0
 SDKCONFIG_BASE := sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.afe
@@ -203,6 +203,10 @@ fw-bench: ## Build the bench profile, the only one numbers are reported from
 	@$(call fresh_sdkconfig,firmware/build_bench/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.bench)
 	cd firmware && idf.py -B build_bench -D SDKCONFIG=build_bench/sdkconfig \
 	  -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.bench$(SECRETS)" build
+
+fw-bench-flash: fw-bench ## Flash only the bench profile's app over the CH340 port; storage, set.json among it, stays as the board has it
+	cd firmware && idf.py -B build_bench -D SDKCONFIG=build_bench/sdkconfig \
+	  -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.bench$(SECRETS)" -p $(PORT) app-flash
 
 fw-prod: ## Build the prod profile in build_prod, from its own sdkconfig
 	rm -f firmware/build_prod/sdkconfig
