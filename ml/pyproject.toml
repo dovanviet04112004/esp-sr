@@ -33,6 +33,10 @@ espdl = [
 swiftf0 = [
     "swift-f0==0.3.0",
 ]
+# Praat's overlap-add moves a syllable's F0 with its formants kept: the F0-flip check and tone swap of KEHOACH 3.11.
+praat = [
+    "praat-parselmouth==0.4.7",
+]
 
 [dependency-groups]
 dev = [
