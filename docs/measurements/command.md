@@ -1057,12 +1057,13 @@ phép tổng hợp lại; sau nó chuỗi cắt 1 m "tắt" thành 23 cửa sổ
 | "tắt" × 0,65, tới F0 của "bật" | 14/23 (0) | 6/23 (0) | 26/27 (26) | 23/23 (22) |
 | "bật" × 1,53, tới F0 của "tắt" | 16/23 (5) | 9/23 (0) | 26/27 (24) | 23/23 (17) |
 
-F0 đo lại sau khi đổi ra đúng × 0,65 và × 1,53 (trung vị). So với đối chứng, hạ F0 của "tắt" xuống mức "bật" lật 5
-trên 46 câu; nâng "bật" lên mức "tắt" không lật câu nào trên 50, chỉ hạ biên. v7 tách "tắt" với "bật" gần như chỉ bằng
-phổ của phụ âm đầu và nguyên âm, không bằng thanh, dù thanh là chỗ hai từ khác nhau nhiều nhất ở giọng chủ repo (200 so
-với 131 Hz). Riêng phép tổng hợp lại, chưa đổi F0, đã lấy 4 và 6 câu "tắt" mà không lấy câu "bật" nào: dấu hiệu mạng
-dùng cho "tắt" mảnh. Đầu vào cho thấy vì sao: ba chiều cao độ của âm tiết đầu so với nền ngay trước câu, nên không mang
-thanh (§12.12).
+F0 đo lại sau khi đổi ra đúng × 0,65 và × 1,53 (trung vị). So với đối chứng, hạ F0 của "tắt" xuống mức "bật" lật 5 trên
+46 câu; nâng "bật" lên mức "tắt" không lật câu nào trên 50, chỉ hạ biên. Ở ba hàng tổng hợp lại, câu "tắt" sai đều bị
+nghe thành "bật" (3 m tổng hợp lại: 14 "bật", 9 "tắt"; hạ F0: 17 "bật", 6 "tắt"), còn "bật" sai một lần thành "mở"; bộ
+giải chỉ chấm trên bộ lệnh nên không bao giờ ra "tặt". v7 tách "tắt" với "bật" gần như chỉ bằng phổ của phụ âm đầu và
+nguyên âm, không bằng thanh, dù thanh là chỗ hai từ khác nhau nhiều nhất ở giọng chủ repo (200 so với 131 Hz). Riêng
+phép tổng hợp lại, chưa đổi F0, đã lấy 4 và 6 câu "tắt" mà không lấy câu "bật" nào: dấu hiệu mạng dùng cho "tắt" mảnh.
+Đầu vào cho thấy vì sao: ba chiều cao độ của âm tiết đầu so với nền ngay trước câu, nên không mang thanh (§12.12).
 
 "tắt" 28/09 hỏng vì mạng chỉ dựa vào nguyên âm, mà nguyên âm ấy hôm 28/09 ở 3 m trùng "bật" và ở 1 m bị dải trầm kéo
 xuống; thanh vẫn rõ (213–217 so với 141–144 Hz) nhưng mạng không dùng. Firmware thu, khoảng cách, mức thu và giọng trầm
@@ -1120,6 +1121,8 @@ phía mốc); đặc trưng thanh là log F0 từ đầu chia từ hai. `val`: c
 | YIN | 0,01 / 0,06 | 0,77 | 0,55–1,00 | 🔬 |
 | SwiftF0 | 0,04 / 0,08 | 0,78 | 0,80–1,00 | ~9 triệu MAC mỗi khung theo cỡ các lớp, ~0,57 tỉ MAC/s 🔬 |
 | PESTO | 0,05 / 0,07 | 0,80 | 0,22–0,65, nhiều câu không khung nào đủ tin | 🔬 |
+| SWIPE′ (`pysptk`, ngưỡng 0,3) | chưa đo | chưa đo | 0,22–1,00: 1,00 / 1,00 / 0,95 / 0,83, 07/10 3 m 0,22 | một FFT mỗi octave ứng viên 🔬 |
+| SHS (Praat, nén 0,84, 15 hài) | chưa đo | chưa đo | 0,56–1,00 | một FFT 🔬 |
 
 Trên `val`, ba bộ dò từng khung (YIN, SwiftF0, PESTO) đưa thanh của từ đầu về sát mốc 0,79, Kaldi dò lại 0,4 s sau chỉ
 0,67. Với chủ repo, SwiftF0 và Kaldi dò lại 0,4 s sau tách "tắt" / "bật" ở mọi buổi (0,80–1,00), YIN hỏng ở hai buổi,
