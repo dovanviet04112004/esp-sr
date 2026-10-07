@@ -1385,3 +1385,34 @@ câu "tắt" đúng khi giữ F0 mà khuôn "bật" làm sai:
 Ngày 07/10 cả hai mạng đúng gần hết ở mọi mốc. Ngày 28/09, ở cùng mốc học, phần log-mel của hai mạng ngang nhau (giữ cả
 ba chiều, mốc 6 000–12 000: v7 13–19/22, v8 16–21/22); cao độ Kaldi kéo v7 xuống 8–15/22, cao độ SwiftF0 đưa v8 lên
 19–22/22. Cái hơn của v8 ở các mốc ấy là bộ dò đưa vào lúc chạy, không phải một nhánh log-mel tốt hơn.
+
+### 12.22 Thang int8 của `command/v8` trên cao độ của board (07/10)
+
+Run `20261007_439d763-dirty_f438bd` ở bước 40 000, nghe bằng Kaldi của board, độ hữu thanh gập vào `front.proj` ở trung
+bình lúc học (KẾ HOẠCH §3.11, §3.14): `make ctc-ptq`, `make ctc-int16`, `make ctc-qat` cùng `KALDI=1 HOLD=voicing`, thang
+ở `<run>/int8_kaldi_voicing/`. Hiệu chuẩn, 1 963 câu `test` và QAT đọc shard của v7, cùng mục và log-mel, cao độ Kaldi
+của hợp đồng; Cửa 3 gồm các phiên 07/10, nhận ở δ₁ `quant.reject` 300 ‰ và δ₂ 50 ‰, cùng thước §12.19:
+
+| Dòng | Lỗi đơn vị | Đúng nhất | Nhận đúng | Nhận nhầm |
+|---|---|---|---|---|
+| float | 0,407 | 192/209 | 151/209 | 3/126 |
+| bậc 2: `minmax` | 0,467 | 192/209 | 133/209 | 4/126 |
+| bậc 2: `percentile` | 0,430 | 194/209 | 145/209 | 3/126 |
+| bậc 2: `mse` | 0,437 | 191/209 | 131/209 | 3/126 |
+| bậc 2: `kl` | 0,430 | 193/209 | 142/209 | 3/126 |
+| bậc 3: `percentile`, int16 1 lớp | 0,427 | 193/209 | 146/209 | 3/126 |
+| bậc 3: `percentile`, int16 2 lớp | 0,427 | 193/209 | 146/209 | 3/126 |
+| bậc 3: `percentile`, int16 4 lớp | 0,424 | 195/209 | 142/209 | 3/126 |
+| bậc 4: QAT trên `percentile`, 2 000 bước | 0,391 | 184/209 | 137/209 | 3/126 |
+
+Float đúng 192/209 như `make command-eval KALDI=1 HOLD=voicing` (§12.21), nhận nhầm 3/126 so với 2: hai phép chỉ khác
+nhau ở các bước đệm cuối cửa sổ, nơi phép gập bỏ cả chiều ấy còn phép giữ trên đặc trưng thì không. Sai số từng lớp của
+ESP-PPQ trên đồ thị `percentile` xếp ba tích chập 2D của phần đầu trước (`front/convs.1` 0,0054, `convs.2` 0,0054,
+`convs.0` 0,0038), rồi tích chập theo chiều sâu đầu tiên (0,0011). Mọi dòng int8 nhận đúng hơn dòng tốt nhất của
+v7 (122/209) 9–24 câu và đúng nhất 191–195 so với 162–181. QAT hạ lỗi đơn vị `val` của đồ thị `percentile` từ
+0,390 xuống 0,361 trong 2 000 bước nhưng mất 10 câu đúng nhất và 8 câu nhận đúng so với nó, như ở v7. Theo luật của
+KẾ HOẠCH §3.14 (`gate_tie` 5), `percentile`, `kl` và ba dòng int16 hoà ở 142–146 câu; int16 4 lớp có lỗi đơn vị thấp
+nhất, cần µs trên board của bốn tích chập int16 trước khi chốt. `make ai-unit` với dòng ấy dừng lúc dựng: app thử
+3 439 KB, quá `ota_0` 3 MB của `partitions_unit.csv` 367 KB, vì các probe của run đã học nhúng vào app (cửa sổ `ctc` 701 KB,
+`kws` 647 KB, `ns` 498 KB). Mọi dòng giữ int8 ở hai đầu, kể cả int16 4 lớp. Bản demo 07/10 chạy `percentile`: hoà,
+không lớp int16 nào, nên µs là của mạng cùng cỡ đã đo (`latency.md` §18, 10,2 ms mỗi 32 ms).
