@@ -9,7 +9,6 @@ OnlineProcessPitch with no right context. The frame shift is the grid hop, and a
 from __future__ import annotations
 
 import math
-from collections import deque
 from dataclasses import dataclass, fields
 
 import numba
@@ -74,9 +73,78 @@ def log_lags(cfg: PitchConfig) -> np.ndarray:
     return np.array(lags, dtype=np.float32)
 
 
-def seq_dot(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Dot products along the last axis, summed term by term in float32 as the C loop does."""
-    return np.cumsum(np.asarray(a, np.float32) * np.asarray(b, np.float32), axis=-1, dtype=np.float32)[..., -1]
+@numba.njit
+def _downsampled(
+    samples: np.ndarray,
+    sample_offset: int,
+    first: int,
+    count: int,
+    decimation: int,
+    taps_before: int,
+    weights: np.ndarray,
+) -> np.ndarray:
+    """Outputs first to first + count of the windowed-sinc decimator, each a dot product of its taps summed term by
+    term in float32 as the C loop does; taps before the first sample read zero."""
+    out = np.empty(count, dtype=np.float32)
+    for i in range(count):
+        acc = np.float32(0.0)
+        for j in range(len(weights)):
+            tap = (first + i) * decimation + taps_before + j
+            acc += weights[j] * (samples[max(tap - sample_offset, 0)] if tap >= 0 else np.float32(0.0))
+        out[i] = acc
+    return out
+
+
+@numba.njit
+def _sum_f32(x: np.ndarray) -> np.float32:
+    acc = np.float32(0.0)
+    for v in x:
+        acc += v
+    return acc
+
+
+@numba.njit
+def _square_sum_f32(x: np.ndarray) -> np.float32:
+    acc = np.float32(0.0)
+    for v in x:
+        acc += v * v
+    return acc
+
+
+@numba.njit
+def _nccf(frame: np.ndarray, window: int, first_lag: int, last_lag: int, ballast: np.float32):
+    """The NCCF at every whole lag from first_lag to last_lag, with the ballast and without (ComputeCorrelation,
+    ComputeNccf): the frame less the mean of its first window samples, every sum term by term in float32."""
+    z = frame - _sum_f32(frame[:window]) / np.float32(window)
+    e1 = _square_sum_f32(z[:window])
+    lags = last_lag + 1 - first_lag
+    pitch = np.empty(lags, dtype=np.float32)
+    pov = np.empty(lags, dtype=np.float32)
+    for k in range(lags):
+        e2, inner = np.float32(0.0), np.float32(0.0)
+        for j in range(window):
+            v = z[first_lag + k + j]
+            e2 += v * v
+            inner += v * z[j]
+        norm = e1 * e2
+        # A float32 sqrt through double rounds the same: 53 bits hold twice 24 plus two.
+        with_ballast = np.float32(math.sqrt(np.float64(norm + ballast)))
+        without = np.float32(math.sqrt(np.float64(norm)))
+        pitch[k] = inner / with_ballast if with_ballast != 0 else np.float32(0.0)
+        pov[k] = inner / without if without != 0 else np.float32(0.0)
+    return pitch, pov
+
+
+@numba.njit
+def _at_lags(weights: np.ndarray, index: np.ndarray, values: np.ndarray) -> np.ndarray:
+    """values sinc-interpolated to the log lags: per lag its taps' weights times values at index, term by term."""
+    out = np.empty(len(weights), dtype=np.float32)
+    for i in range(len(weights)):
+        acc = np.float32(0.0)
+        for j in range(weights.shape[1]):
+            acc += weights[i, j] * values[index[i, j]]
+        out[i] = acc
+    return out
 
 
 @numba.njit
@@ -109,6 +177,31 @@ def distance_transform(prev: np.ndarray, factor: np.float32) -> tuple[np.ndarray
         best[i] = v[k]
     d = (np.arange(n) - best).astype(np.float32)
     return (d * d) * factor + prev[best], best
+
+
+@numba.njit
+def _viterbi_step(
+    forward: np.ndarray, factor: np.float32, pitch_lags: np.ndarray, soft_min: np.float32, lags: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """One Viterbi step: the best predecessor cost of every state plus its local cost 1 - NCCF + soft_min lag NCCF,
+    less their minimum, and the predecessor of each state."""
+    best, backpointer = distance_transform(forward, factor)
+    for i in range(len(best)):
+        p = pitch_lags[i]
+        best[i] = best[i] + ((np.float32(1.0) - p) + (soft_min * lags[i]) * p)
+    return best - np.min(best), backpointer
+
+
+@numba.njit
+def _ring_totals(sums: np.ndarray, sumsqs: np.ndarray, counts: np.ndarray, head: int, count: int):
+    """The totals of the ring's last count hops from head, oldest first, in double as the C adds them."""
+    total, total_sq, n = 0.0, 0.0, 0
+    for i in range(count):
+        k = (head + i) % len(sums)
+        total += sums[k]
+        total_sq += sumsqs[k]
+        n += counts[k]
+    return total, total_sq, n
 
 
 @numba.njit
@@ -248,7 +341,11 @@ class PitchTracker:
         self.down = np.zeros(0, dtype=np.float32)
         self.down_offset = 0
         self.down_count = 0
-        self.hop_stats: deque[tuple[float, float, int]] = deque(maxlen=self.stats_hops or None)
+        self.hop_sums = np.zeros(max(self.stats_hops, 1), dtype=np.float64)
+        self.hop_sumsqs = np.zeros(max(self.stats_hops, 1), dtype=np.float64)
+        self.hop_counts = np.zeros(max(self.stats_hops, 1), dtype=np.int64)
+        self.stats_head = 0
+        self.stats_count = 0
         self.sum = 0.0
         self.sumsq = 0.0
         self.count = 0
@@ -264,32 +361,21 @@ class PitchTracker:
         """Every output whose taps lie inside the samples seen (Kaldi's LinearResample, no flush); taps before the
         first sample read zero. Samples no later output needs are dropped."""
         have = self.sample_offset + len(self.samples)
-        n = np.arange(self.down_count, (have - 1 - self.down_delay) // self.decimation + 1)
-        taps = n[:, None] * self.decimation + self.taps_before + np.arange(len(self.down_weights))[None, :]
-        x = np.where(taps >= 0, self.samples[np.clip(taps - self.sample_offset, 0, None)], np.float32(0.0))
-        out = seq_dot(self.down_weights[None, :], x) if len(n) else np.zeros(0, dtype=np.float32)
-        self.down_count += len(n)
+        count = max(0, (have - 1 - self.down_delay) // self.decimation + 1 - self.down_count)
+        out = _downsampled(
+            self.samples,
+            self.sample_offset,
+            self.down_count,
+            count,
+            self.decimation,
+            self.taps_before,
+            self.down_weights,
+        )
+        self.down_count += count
         keep = max(0, self.down_count * self.decimation + self.taps_before)
         self.samples = self.samples[keep - self.sample_offset :]
         self.sample_offset = keep
-        return out.astype(np.float32)
-
-    def _nccf(self, frame: np.ndarray, ballast: np.float32) -> tuple[np.ndarray, np.ndarray]:
-        """The NCCF at every whole lag from first_lag to last_lag, with the ballast and without (ComputeCorrelation,
-        ComputeNccf): the window's mean is that of its first window samples."""
-        w = self.window
-        z = frame - np.cumsum(frame[:w], dtype=np.float32)[-1] / np.float32(w)
-        head = z[:w]
-        e1 = seq_dot(head, head)
-        shifted = np.lib.stride_tricks.sliding_window_view(z, w)[self.first_lag : self.last_lag + 1]
-        e2 = seq_dot(shifted, shifted)
-        inner = seq_dot(shifted, head[None, :])
-        norm = e1 * e2
-        with_ballast = np.sqrt(norm + ballast)
-        without = np.sqrt(norm)
-        pitch = np.where(with_ballast != 0, inner / np.where(with_ballast != 0, with_ballast, 1), 0).astype(np.float32)
-        pov = np.where(without != 0, inner / np.where(without != 0, without, 1), 0).astype(np.float32)
-        return pitch, pov
+        return out
 
     def _frame(self, f: int) -> None:
         """Track frame f: NCCFs, resampled to the log lags, one Viterbi step, the best state kept for traceback."""
@@ -297,13 +383,11 @@ class PitchTracker:
         mean_square = self.sumsq / n - (self.sum / n) ** 2
         ballast = np.float32((mean_square * self.window) ** 2 * self.cfg.nccf_ballast)
         start = f * self.shift - self.down_offset
-        nccf_pitch, nccf_pov = self._nccf(self.down[start : start + self.frame_length], ballast)
-        pitch_lags = seq_dot(self.up_weights, nccf_pitch[self.up_index])
-        pov_lags = seq_dot(self.up_weights, nccf_pov[self.up_index])
-        local = (np.float32(1.0) - pitch_lags) + (self.soft_min * self.lags) * pitch_lags
-        forward, backpointer = distance_transform(self.forward, self.factor)
-        forward = forward + local
-        self.forward = (forward - np.min(forward)).astype(np.float32)
+        frame = self.down[start : start + self.frame_length]
+        nccf_pitch, nccf_pov = _nccf(frame, self.window, self.first_lag, self.last_lag, ballast)
+        pitch_lags = _at_lags(self.up_weights, self.up_index, nccf_pitch)
+        pov_lags = _at_lags(self.up_weights, self.up_index, nccf_pov)
+        self.forward, backpointer = _viterbi_step(self.forward, self.factor, pitch_lags, self.soft_min, self.lags)
         rows = len(self.backpointers)
         if self.ring_count < rows:
             slot = (self.ring_head + self.ring_count) % rows
@@ -337,18 +421,19 @@ class PitchTracker:
         totals, oldest hop first, which the ballast reads; with ballast_window_s 0, Kaldi's totals since the reset,
         which runs before listen.yaml v5 learned on."""
         # Each hop summed in float32 as Kaldi adds each chunk's VecVec; the totals in double, in the C's order.
-        hop_sum = float(np.cumsum(new, dtype=np.float32)[-1]) if len(new) else 0.0
-        hop_sumsq = float(seq_dot(new, new)) if len(new) else 0.0
+        hop_sum, hop_sumsq = float(_sum_f32(new)), float(_square_sum_f32(new))
         if not self.stats_hops:
             self.sum, self.sumsq, self.count = self.sum + hop_sum, self.sumsq + hop_sumsq, self.count + len(new)
             return
-        self.hop_stats.append((hop_sum, hop_sumsq, len(new)))
-        self.sum = self.sumsq = 0.0
-        self.count = 0
-        for hop_sum, hop_sumsq, hop_count in self.hop_stats:
-            self.sum += hop_sum
-            self.sumsq += hop_sumsq
-            self.count += hop_count
+        slot = (self.stats_head + self.stats_count) % self.stats_hops
+        if self.stats_count < self.stats_hops:
+            self.stats_count += 1
+        else:
+            self.stats_head = (self.stats_head + 1) % self.stats_hops
+        self.hop_sums[slot], self.hop_sumsqs[slot], self.hop_counts[slot] = hop_sum, hop_sumsq, len(new)
+        self.sum, self.sumsq, self.count = _ring_totals(
+            self.hop_sums, self.hop_sumsqs, self.hop_counts, self.stats_head, self.stats_count
+        )
 
     def step(self, hop: np.ndarray) -> np.ndarray:
         """One grid hop of samples in, the three features of the frame it completes out; zeros for the first

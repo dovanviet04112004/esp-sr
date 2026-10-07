@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numba
 import numpy as np
 
 from srpipe.generated import grid
@@ -76,6 +77,18 @@ def dct_matrix(n_bands: int) -> np.ndarray:
     return basis.astype(np.float32)
 
 
+@numba.njit
+def _band_energy(filters: np.ndarray, power: np.ndarray) -> np.ndarray:
+    """Each band's filter times the power, summed bin by bin in float32 as mel.c sums."""
+    out = np.empty(filters.shape[0], dtype=np.float32)
+    for b in range(filters.shape[0]):
+        acc = np.float32(0.0)
+        for k in range(filters.shape[1]):
+            acc += filters[b, k] * power[k]
+        out[b] = acc
+    return out
+
+
 class Mel:
     """Filters and DCT built once, as dsp_spec_mel_init does; every frame is float32 arithmetic."""
 
@@ -91,7 +104,7 @@ class Mel:
             raise ValueError(f"want {grid.N_BINS} bins, got shape {bins.shape}")
         power = bins.real * bins.real + bins.imag * bins.imag
         # Summed bin by bin, as mel.c sums; a BLAS product splits the sum its own way on each CPU.
-        energy = np.cumsum(self.filters * power, axis=-1, dtype=np.float32)[:, -1]
+        energy = _band_energy(self.filters, power)
         floored = (energy + np.float32(self.cfg.log_floor)).astype(np.float64)
         return np.log(floored).astype(np.float32)
 
