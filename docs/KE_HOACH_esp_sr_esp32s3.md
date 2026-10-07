@@ -840,7 +840,8 @@ khoảng 12% (§5.6).
 bốn bộ đo trên tín hiệu board, SwiftF0 (Nieradzik 2025: 95 842 tham số, STFT 1024 bước 256 ở 16 kHz; gói `swift-f0`
 MIT) giữ thanh của âm tiết đầu tốt nhất ở cả giọng chủ repo lẫn `val`, nhưng nguyên cỡ nặng gấp chục lần sức esp-dl
 trên board. Lượt thử chỉ đổi ba chiều cao độ của đường mô phỏng và của Cửa 3, rồi học `command/v8` đúng công thức v7,
-để biết mạng có dùng thanh khi thanh đến được, trước khi làm bộ dò cho chip:
+riêng hay cùng hoán đổi thanh tuỳ phép kiểm lật F0 dưới đây, để biết mạng có dùng thanh khi thanh đến được, trước khi
+làm bộ dò cho chip:
 - độ hữu thanh là độ tin của SwiftF0 qua phép biến đổi Kaldi dùng cho NCCF, ×2; log F0 của khung có độ tin từ 0,5 trở
   lên, nội suy thẳng qua khung không tiếng, trừ trung bình theo độ tin của các khung có tiếng trong 0,75 s trước và
   0,4 s sau, ×2; delta ±2 khung, ×10: ba chiều và thang như Kaldi;
@@ -848,8 +849,109 @@ trên board. Lượt thử chỉ đổi ba chiều cao độ của đường mô
 - tham số ở mục `pitch_source` của `configs/models/command_ctc.yaml`; run học với nó ghi `listen_hash` 0, nên
   `make ctc-deploy` từ chối, vì board chưa tính được đặc trưng ấy.
 
-v8 dùng thanh khi "tắt" của Cửa 3 qua ngưỡng ngang "bật" và phép đổi F0 giữ formant lật quyết định. Khi ấy bộ dò của
-board thay bằng một mạng nhỏ học từ SwiftF0, kế hoạch riêng, ở `ai_engine` vì là mạng học; không thì giữ Kaldi.
+**Phép kiểm lật F0** (`tasks/command/ctc/tone_flip.py`, `make ctc-tone-flip`; chủ repo duyệt 07/10), trước mọi lượt
+học tiếp. Trên `val`, âm tiết đầu của v7 kém các âm tiết sau 8 điểm thanh đúng, và trên board "tắt" hỏng đều bị nghe
+thành "bật". Còn hai cách hiểu. Hoặc bộ dò không đưa thanh tới mạng. Hoặc mạng học đoán thanh của âm tiết đầu từ âm
+đoạn và các từ theo sau, một đường tắt: ở câu đọc thanh gần như luôn suy được từ chúng, nên dữ liệu học không buộc mạng
+nghe F0. Số đã có không tách được hai cách hiểu: chênh 81,4 với 76,0% của nhánh A và C ngày 05/10 nằm trong sai số của
+166 câu; giữ ba chiều cao độ ở trung bình thì v7 mất 11 điểm thanh đúng ở âm tiết đầu; còn phép đổi F0 trên giọng chủ
+repo chỉ lật 5/46 quyết định, lẫn với lỗi của Kaldi ở âm tiết đầu trên tiếng board (`measurements/command.md` §12.3,
+§12.17, §12.18). Phép kiểm không học lại:
+- câu `val` của split của run, cửa sổ chỉ chứa một mẩu; mốc từng âm tiết bằng bộ căn ở trên, chạy trên mẩu khô; hai vị
+  trí: âm tiết đầu, và âm tiết vần tắc đầu tiên sau nó, khi âm tiết là vần tắc thanh sắc hay nặng;
+- trên mẩu khô, đường F0 của âm tiết thay bằng khuôn của thanh kia ở cùng vị trí, bằng overlap-add của Praat (giữ
+  formant); khuôn là đường F0 trung vị của thanh ấy ở vị trí ấy trên chính các câu được chọn, tính bằng nửa cung so
+  với trung vị F0 của người nói, ở `points` điểm chia đều quãng có tiếng của âm tiết. Sắc đi lên, nặng đi xuống, nên
+  đổi cả đường nét chứ không chỉ mức; tính theo người nói nên giọng nào cũng ở trong dải của chính nó. Đối chứng là
+  cùng phép tổng hợp lại với F0 giữ nguyên;
+- bỏ âm tiết mà Praat gọi có tiếng dưới `voiced_share` số khung, hay có tiếng ngắn hơn `min_voiced_s`: tiếng kẹt và
+  chu kỳ không đều, những chỗ overlap-add cần chu kỳ sạch;
+- mỗi phiên `val` chứa câu được chọn mô phỏng lại như bản dựng (cùng seed, phòng, nhiễu, chuỗi và bộ dò cao độ của bản
+  dựng), mỗi vị trí, mỗi cách một lần; phiên đầu mô phỏng thêm một lần không đổi gì và phải trùng từng byte đặc trưng
+  đã dựng;
+- mỗi âm tiết hai số. Đặc trưng có theo không: ba chiều cao độ trên quãng có tiếng của âm tiết dịch bao nhiêu so với
+  đối chứng, căn bậc hai trung bình bình phương theo độ lệch chuẩn lúc học, tức đơn vị mạng đọc. Mạng có theo không:
+  điểm CTC của nhãn mang thanh kia trừ điểm của nhãn mang thanh gốc, lật khi dương.
+
+Tham số ở mục `tone_flip` của `configs/models/command_ctc.yaml`. Quyết định so âm tiết đầu với âm tiết sau, vì ở âm tiết
+sau thanh đến được mạng (bộ dò sai 0–16% khung, §12.18). Hai phép so: độ dịch đặc trưng trung bình, và phần âm tiết lật
+thêm so với đối chứng:
+- đặc trưng ở âm tiết đầu dịch dưới một nửa của âm tiết sau: thanh đổi không tới mạng ở âm tiết đầu, do bộ dò hay do
+  chuẩn hoá chỉ nhìn về trước, nên phép kiểm không nói gì về mạng. Học `command/v8` riêng, rồi chạy lại phép kiểm trên v8;
+- đặc trưng dịch từ một nửa trở lên, âm tiết đầu lật thêm từ một nửa của âm tiết sau trở lên: mạng dùng thanh khi thanh
+  tới, lỗi trên board nằm ở bộ dò. Học `command/v8` riêng;
+- đặc trưng dịch từ một nửa trở lên, âm tiết đầu lật thêm dưới một nửa của âm tiết sau: đường tắt. Học một lượt
+  `command/v8` cùng hoán đổi thanh, không học v8 riêng.
+
+**Hoán đổi thanh lúc học** (`core/repitch.py`), chỉ khi phép kiểm, trên v7 hay trên v8, chỉ ra đường tắt. Vần tắc chỉ
+mang sắc hoặc nặng (§3.12), và ở đó hai thanh khác nhau chủ yếu ở đường F0 (giọng chủ repo: 200 so với 131 Hz ở "tắt"
+và "bật"). Thanh ở vần mở khác nhau cả ở độ dài và tiếng kẹt, F0 một mình không đổi được chúng. Một tỉ lệ ở cấu hình của
+các mẩu `train` có âm tiết vần tắc thanh sắc hay nặng, mỗi mẩu sinh một bản tổng hợp lại bằng đúng phép đổi của phép
+kiểm, khuôn đo trên `train`:
+- âm tiết đổi là âm tiết đầu khi nó là vần tắc, không thì một âm tiết vần tắc rút theo seed: chỗ hỏng là âm tiết đầu;
+- nửa số bản đổi sang khuôn của thanh kia và đổi dấu thanh trong lời, nửa kia tổng hợp lại với F0 giữ nguyên và giữ
+  lời, để dấu vết của phép tổng hợp không nói gì về nhãn. Nhãn là 44 đơn vị âm vị cộng thanh, không từ điển, không mô
+  hình ngôn ngữ, nên âm tiết không nghĩa như "tặt" vẫn là nhãn đúng;
+- âm tiết bỏ như phép kiểm bỏ: thanh nặng có kẹt đổi sang sắc vẫn mang kẹt;
+- mẩu FLAC 16 kHz ở `interim/tone_swap/<kho>/`, lời mới cùng mã người nói gốc ở `interim/tone_swap/<kho>.tsv`, bộ đọc
+  mục tìm ở đó như ở `interim/spans/` (§1.2); split liệt kê chúng ở file `train_tone_swap`, chỉ trong `train`, như
+  tiếng tổng hợp (§1.3); các file split khác móc log-mel của bản dựng trước qua `simulate.mel_from`;
+- chủ repo nghe vài chục cặp trước khi dựng cả kho.
+
+**Chấm run của lượt thử**, v8 riêng hay cùng hoán đổi. `make ctc-watch RUN=<run>` chạy song song lượt học và ghi vào
+thư mục run. Mỗi mốc `train.eval_every`: Cửa 3 (các phiên 07/10), "tắt" và "bật" tách riêng, nhận đúng ở δ₁ 200 ‰ và
+δ₂ 50 ‰. Mỗi mốc thứ hai thêm phép đổi F0 giữ formant trên giọng chủ repo (`tone_flip owner`, §12.17), chấm cả "tắt"
+và "bật" của 28/09 như thu. Cuối lượt thêm phép kiểm lật F0 trên `val`, và thanh đúng ở âm tiết đầu so với các âm tiết
+sau, với ba chiều cao độ như mô phỏng và giữ ở trung bình (`tone_flip places`, §12.18). Ba điều chốt trước khi thấy số,
+đo trên trọng số cuối như mọi run:
+- mạng dùng thanh: phép đổi F0 trên giọng chủ repo lật ít nhất 23/46 câu "tắt" (v7: 5/46), và phép kiểm lật F0 trên
+  `val` lật âm tiết đầu từ `follows_share` của âm tiết sau trở lên;
+- "tắt" khá lên: ở tám phiên `20261007_home_001`–`008` đúng ít nhất 35/47 câu "tắt" như v7, nhận đúng ít nhất 20/47
+  (v7: 10/47);
+- không hỏng chỗ khác: Cửa 3 đúng ít nhất 165/209 (v7: 170; ±5 là nhiễu đếm), từ chối ít nhất 122/126 ở δ₁ 200 ‰
+  (v7: 124).
+
+Phép thử chéo: run dùng thanh thì "tắt" 28/09 (v7: 1/22) cũng phải lên, vì hôm ấy nguyên âm trùng "bật" mà thanh rõ
+(213–217 so với 141–144 Hz); không lên thì đo cao độ của bộ dò trên chính các câu ấy.
+
+| Kết quả | Dấu hiệu | Việc tiếp |
+|---|---|---|
+| A. Đạt | cả ba điều | Làm bộ dò cho board (dưới), dựng lại đặc trưng bằng nó, học, thang int8 §3.14, deploy |
+| B. Một phần | "tắt" khá lên mà phép đổi F0 lật ít, hay `val` khá mà giọng chủ repo không | Thanh tới mạng mà mạng chưa dựa vào: run chưa hoán đổi thì học lại cùng hoán đổi thanh; đã hoán đổi thì xét mạng nhìn trước (dưới) |
+| C. Không đổi | ngang v7, phép đổi F0 gần như không lật | Như B, cộng kiểm chính các mẩu hoán đổi: nghe lại, và chạy phép kiểm lật F0 trên chúng |
+| D. Tệ hơn | Cửa 3 hay lỗi đơn vị `val` kém v7 | So thanh đúng theo từng thanh, từng vị trí, và phân bố ba chiều cao độ giữa mô phỏng với board; rồi học với cả ba chiều Kaldi lẫn ba chiều SwiftF0, 86 chiều |
+| E. Lỗi kỹ thuật | bản dựng dừng vì log-mel lệch bản cũ, hết RAM, hay học ra NaN | Dựng lại riêng file ấy không `simulate.mel_from`; bớt worker; học tiếp từ checkpoint cuối |
+
+**Bộ dò của board**, khi kết quả là A. Ba ứng viên, đều chạy dòng mỗi bước ở nhân 0 và ra ba chiều như hiện nay:
+- Kaldi của `dsp_spec/pitch` với đường Viterbi dò lại 0,4 s sau và trung bình nhìn sau 0,4 s: tách "tắt" / "bật" của
+  chủ repo ở AUC 0,88–1,00 nhưng `val` chỉ 0,67 (§12.18); thêm vòng truy ngược 25 khung;
+- một bộ dò cộng hài âm kiểu SWIPE′ hay SHS ở `dsp_spec`, thuật toán thuần, một FFT mỗi octave ứng viên: trên giọng chủ
+  repo SWIPE′ 0,22–1,00, SHS 0,56–1,00; `val` chưa đo;
+- một mạng nhỏ học từ SwiftF0, ở `ai_engine` vì là mạng học: SwiftF0 nguyên cỡ cần chừng 0,57 tỉ MAC/s 🔬, quá sức
+  esp-dl trên board (0,1–0,5 tỉ MAC/s).
+
+Chọn bằng AUC thanh của từ đầu trên `val` và trên giọng chủ repo, rồi µs đo trên board; bộ được chọn dựng lại đặc trưng
+và học một lượt để xác nhận Cửa 3. Không bộ nào đạt thì giữ Kaldi như hiện nay.
+
+**Hướng còn lại**, theo thứ tự, khi các bước trên chưa đủ:
+- mạng nhìn trước tới 0,4 s: board vốn chờ `utterance.gap_s` 0,4 s trước khi chốt câu nên không thêm trễ quyết định,
+  nhưng phải đổi cách chạy dòng của encoder và `StreamingCache` (§3.12), kế hoạch riêng;
+- thu thêm người thật nói lệnh qua board ở 1–3 m, nhất là những lệnh khác nhau ở thanh và nguyên âm như "tắt" / "bật":
+  mạnh nhất vì là tiếng thật, chậm nhất vì cần người và phiếu đồng ý (E11-T2, E11-T6).
+
+**Đã thử mà không đủ** (`measurements/command.md` §12.3–§12.14): chuẩn hoá ±0,75 s trên đường Viterbi cả câu (C), thêm
+log F0 thô (D), log-mel trừ độ lợi `agc` (N), khoảng trước câu rút ngẫu nhiên cùng VTLP (v6), thêm giọng thật (v7).
+
+**Không làm:**
+- đầu phụ phân loại thanh từng âm tiết: CTC đã có một đơn vị thanh mỗi âm tiết, và đầu phụ cũng thoả được bằng chính
+  đường tắt;
+- cắt đoạn 1–3 âm tiết giữa câu làm mẫu học: giữa câu gần như không có chỗ lặng (chỉ chừng 1% chỗ nói một cụm có lặng
+  hai bên), và mép cắt mang đồng cấu âm của từ bên cạnh, kiểu khởi âm board không gặp;
+- làm mờ nguyên âm bằng dịch F1 ngẫu nhiên: hỏng luôn các cặp ă/â, ơ/ô/o mà 80 dải giữ (ADR-0017);
+- cặp tối thiểu đọc bằng TTS: chủ repo không học trên tiếng TTS, vì `wake` học bằng TTS gần như không bắt được giọng
+  thật trên board (`measurements/wake.md` §2, §5);
+- sửa ở bộ giải: bộ giải vốn chỉ chấm trên danh sách lệnh, và "tắt" hỏng đều bị nghe thành "bật", không thành "tặt"
+  (§12.17).
 
 **`wake`** — TCN tích chập giãn nở nhân quả, kernel 3, giãn 1, 2, 4, …, 32 một lượt: trường nhìn 127 khung ≈ 2 s;
 64 kênh, vì cùng việc phụ CTC dưới đây nó cho giọng thật cao nhất (`docs/measurements/wake.md` §5). Int8, chạy dòng
@@ -1592,6 +1694,8 @@ ml/
 │   │   ├── screen.py                  # ★ sàng lọc (§1.2): đo mọi mẩu một lần, chấm theo luật, danh sách loại
 │   │   ├── spans.py                   # câu dài của một kho căn từng từ, cắt ở khoảng lặng thành đoạn vừa cửa sổ
 │   │   │                              #   học, mỗi đoạn một FLAC 16 kHz ở interim/spans/ (§1.2)
+│   │   ├── repitch.py                 # đường F0 của một âm tiết thay bằng overlap-add của Praat, giữ formant; khuôn
+│   │   │                              #   thanh theo nửa cung so với trung vị F0 của người nói (§3.11); extra `praat`
 │   │   ├── phrases.py                 # dò cụm trên lời của mọi kho: dòng âm tiết, mã thành phần âm tiết, cụm cách một
 │   │   │                              #   cụm cho trước vài thành phần, cụm mở đầu bằng âm tiết đầu của nó; wake và
 │   │   │                              #   command lấy âm bản gần âm từ đây
@@ -1655,11 +1759,15 @@ ml/
 │   │   │   │                          #   srpipe/tts và core/phrases.py vào interim/command/synth_{pilot,pos,neg}/
 │   │   │   ├── kws/{model/, data.py, train.py, quant.py, postproc/}   # DS-CNN; data.py dựng split command_kws/v<n>
 │   │   │   │                          #   và đặc trưng processed/command_kws/; postproc/ ★ softmax và luật từ chối
-│   │   │   ├── ctc/{data.py, model/encoder.py, train.py, quant.py, qat.py, probe.py, postproc/ctc_score.py ★}
+│   │   │   ├── ctc/{data.py, model/encoder.py, train.py, quant.py, qat.py, probe.py, tone_flip.py, watch.py,
+│   │   │   │        postproc/ctc_score.py ★}
 │   │   │   │                          # phần chung của ctc và rnnt cộng phần giải CTC: encoder kiểu MultiNet7,
 │   │   │   │                          #   lượt học RNN-T cộng CTC; data.py dựng split command/v<n>, bỏ lệnh chưa
 │   │   │   │                          #   học khỏi tập học (§1.3); quant.py dựng thang §3.14, lệnh con ptq, int16,
-│   │   │   │                          #   qat; qat.py vòng học CTC của bậc 4; probe.py bản dò board E11-T12
+│   │   │   │                          #   qat; qat.py vòng học CTC của bậc 4; probe.py bản dò board E11-T12;
+│   │   │   │                          #   tone_flip.py ba phép kiểm thanh của §3.11 (lật F0 trên val, đổi F0 trên
+│   │   │   │                          #   giọng chủ repo, thanh đúng theo vị trí); watch.py chấm từng mốc của
+│   │   │   │                          #   lượt học khi nó vừa ghi ra
 │   │   │   └── rnnt/{model/transducer.py, quant.py, probe.py, postproc/rnnt_search.py ★}
 │   │   │                              # phần riêng của rnnt (ADR-0016): mạng dự đoán và bộ nối kiểu MultiNet7;
 │   │   │                              #   quant.py dựng thang §3.14 cho ba đồ thị: encoder kèm phép chiếu khung,
@@ -2182,7 +2290,8 @@ host/
 Bộ lệnh để demo và thử đổi lệnh nằm ở `host/sets/`: mỗi file là cả danh sách lệnh board sẽ dùng, đúng khuôn
 `command_set` của `contracts/`, nên thêm hay xoá một lệnh là sửa file rồi gửi lại bằng `make commands DEVICE=<deviceId>
 SET=host/sets/<file>.json`; `commands.py` tự đóng `version` bằng giờ gửi. Bộ mặc định nướng vào firmware vẫn chỉ ở
-`contracts/commands/default_vi.json`.
+`contracts/commands/default_vi.json`. `battat_vi.json` là bộ mặc định cộng hai cặp bật / tắt ti vi và điều hoà: bộ
+mà phép đổi F0 trên giọng chủ repo quyết trên đó (§3.11).
 
 Một buổi thu nhiều phiên đi theo một file ở `host/plans/`: `make session-plan` hiện lời dặn của từng dòng, chờ
 người thu bấm Enter rồi chạy đúng `make session` với nhãn của dòng ấy, nên mỗi phiên vẫn là một thư mục và một dòng
