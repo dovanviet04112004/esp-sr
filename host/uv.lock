@@ -581,6 +581,7 @@ requires-dist = [
     { name = "numba", specifier = "==0.68.0" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pesq", specifier = ">=0.0.4" },
+    { name = "praat-parselmouth", marker = "extra == 'praat'", specifier = "==0.4.7" },
     { name = "pyarrow", specifier = ">=25.0.1" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pyroomacoustics", specifier = ">=0.8" },
@@ -589,11 +590,12 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32" },
     { name = "scipy", specifier = ">=1.13" },
     { name = "soundfile", specifier = ">=0.12" },
+    { name = "swift-f0", marker = "extra == 'swiftf0'", specifier = "==0.3.0" },
     { name = "torch", marker = "extra == 'train'", specifier = ">=2.4" },
     { name = "torchaudio", marker = "extra == 'train'", specifier = ">=2.4" },
     { name = "zstandard", specifier = ">=0.23" },
 ]
-provides-extras = ["train", "espdl"]
+provides-extras = ["train", "espdl", "swiftf0", "praat"]
 
 [package.metadata.requires-dev]
 dev = [
