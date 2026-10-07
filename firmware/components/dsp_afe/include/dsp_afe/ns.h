@@ -14,6 +14,7 @@ extern "C" {
 typedef struct {
     size_t (*state_bytes)(void *ctx);
     esp_err_t (*init)(void *ctx, void *state, size_t bytes);
+    void (*reset)(void *ctx, void *state); // state as init leaves it, tables kept
     esp_err_t (*process)(void *ctx, void *state, const float *power, const float *echo_power, float *gain,
                          float *speech_prob);
 } dsp_afe_ns_ops_t;

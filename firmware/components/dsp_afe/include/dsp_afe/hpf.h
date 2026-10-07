@@ -35,6 +35,11 @@ esp_err_t dsp_afe_hpf_init(dsp_afe_hpf_t **out, const dsp_afe_hpf_config_t *cfg,
  */
 esp_err_t dsp_afe_hpf_process(dsp_afe_hpf_t *st, uint8_t channel, float *samples, size_t n);
 
+/** Clear the state of every channel as init leaves it; the coefficients stay.
+ *  @ctx any | non-blocking
+ */
+void dsp_afe_hpf_reset(dsp_afe_hpf_t *st);
+
 #ifdef __cplusplus
 }
 #endif

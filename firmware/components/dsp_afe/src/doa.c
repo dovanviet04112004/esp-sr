@@ -109,15 +109,20 @@ esp_err_t dsp_afe_doa_init(dsp_afe_doa_t **out, const dsp_afe_doa_config_t *cfg,
     afe_arena_t arena = afe_arena(mem, bytes);
     dsp_afe_doa_t *st = carve(&arena, &g);
     if (st == NULL) { return ESP_ERR_INVALID_SIZE; }
-    memset(st->cross, 0, g.n_bins * sizeof(*st->cross));
     fill_phasors(st, cfg);
     const double hop_s = (double)GEN_GRID_HOP_SAMPLES / GEN_GRID_SAMPLE_RATE_HZ;
     st->step_deg = cfg->grid_step_deg;
     st->keep = (float)afe_exp_series(-hop_s / (double)cfg->smooth_tau_s);
     st->take = 1.0f - st->keep;
-    st->last = (dsp_afe_doa_result_t){.angle_deg = ANGLE_UNKNOWN_DEG, .confidence = 0};
+    dsp_afe_doa_reset(st);
     *out = st;
     return ESP_OK;
+}
+
+void dsp_afe_doa_reset(dsp_afe_doa_t *st)
+{
+    memset(st->cross, 0, st->g.n_bins * sizeof(*st->cross));
+    st->last = (dsp_afe_doa_result_t){.angle_deg = ANGLE_UNKNOWN_DEG, .confidence = 0};
 }
 
 static void fold(dsp_afe_doa_t *st, const dsp_spec_cplx_t *x0, const dsp_spec_cplx_t *x1)

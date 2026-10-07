@@ -47,6 +47,11 @@ esp_err_t dsp_afe_doa_init(dsp_afe_doa_t **out, const dsp_afe_doa_config_t *cfg,
 esp_err_t dsp_afe_doa_process(dsp_afe_doa_t *st, const dsp_spec_cplx_t *x0, const dsp_spec_cplx_t *x1,
                               bool update, dsp_afe_doa_result_t *out);
 
+/** Forget the smoothed cross-spectrum and the last estimate as init leaves them; the phasor tables stay.
+ *  @ctx any | non-blocking
+ */
+void dsp_afe_doa_reset(dsp_afe_doa_t *st);
+
 #ifdef __cplusplus
 }
 #endif

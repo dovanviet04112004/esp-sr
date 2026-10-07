@@ -29,7 +29,6 @@ _Static_assert(N_MICS == 2, "the spatial stage takes exactly two microphones");
 typedef enum {
     WALK_SIZE,  // count bytes only
     WALK_BUILD, // carve and initialise every region
-    WALK_RESET, // same carving, fresh adaptive state, fft tables kept
 } walk_mode_t;
 
 typedef struct {
@@ -41,8 +40,6 @@ typedef struct {
 struct dsp_afe_s {
     dsp_afe_config_t cfg; // calib points at the copy below
     uint8_t n_channels;
-    void *hot;
-    size_t hot_bytes;
     dsp_afe_calib_t calib;
     dsp_spec_fft_t *fft;
     dsp_spec_stft_t *analysis[N_MICS];
@@ -137,9 +134,7 @@ static void walk_spec(walker_t *w, dsp_afe_t *afe)
 {
     const size_t fft_bytes = dsp_spec_fft_workspace_bytes(GEN_GRID_FFT_SIZE);
     void *mem = region(w, fft_bytes);
-    if (mem != NULL && w->mode == WALK_BUILD) {
-        fail(w, dsp_spec_fft_init(&afe->fft, GEN_GRID_FFT_SIZE, mem, fft_bytes));
-    }
+    if (mem != NULL) { fail(w, dsp_spec_fft_init(&afe->fft, GEN_GRID_FFT_SIZE, mem, fft_bytes)); }
     for (size_t m = 0; m < N_MICS; m++) {
         mem = region(w, dsp_spec_stft_workspace_bytes());
         if (mem != NULL) {
@@ -325,7 +320,7 @@ static void walk_agc(walker_t *w, const dsp_afe_config_t *cfg, dsp_afe_t *afe)
 #endif
 }
 
-// One walk sizes, builds and resets, so the three can never disagree on the layout of hot.
+// One walk sizes and builds, so the two can never disagree on the layout of hot.
 static esp_err_t walk(const dsp_afe_config_t *cfg, uint8_t n_channels, dsp_afe_t *afe, afe_arena_t *arena,
                       walk_mode_t mode)
 {
@@ -371,8 +366,6 @@ esp_err_t dsp_afe_init(dsp_afe_t **out, const dsp_afe_config_t *cfg, void *hot, 
     memset(afe, 0, sizeof(*afe));
     afe->cfg = *cfg;
     check_config(cfg, &afe->n_channels);
-    afe->hot = hot;
-    afe->hot_bytes = hot_bytes;
     if (cfg->calib != NULL) {
         afe->calib = *cfg->calib;
         afe->cfg.calib = &afe->calib;
@@ -563,12 +556,42 @@ esp_err_t dsp_afe_fetch(dsp_afe_t *afe, dsp_afe_frame_t *out)
     return ESP_OK;
 }
 
+static void reset_spatial(dsp_afe_t *afe)
+{
+    switch (afe->cfg.spatial) {
+#if CONFIG_DSP_AFE_GSC_ENABLE
+    case DSP_AFE_SPATIAL_GSC: dsp_afe_gsc_reset(afe->gsc); return;
+#endif
+#if CONFIG_DSP_AFE_BSS_ENABLE
+    case DSP_AFE_SPATIAL_BSS: dsp_afe_bss_reset(afe->bss); return;
+#endif
+    default: return;
+    }
+}
+
 void dsp_afe_reset(dsp_afe_t *afe)
 {
-    afe_arena_t arena = afe_arena(afe->hot, afe->hot_bytes);
-    afe_take(&arena, sizeof(*afe));
-    // Same configuration over the same memory that init accepted, so this walk cannot fail.
-    (void)walk(&afe->cfg, afe->n_channels, afe, &arena, WALK_RESET);
+    for (size_t m = 0; m < N_MICS; m++) {
+        dsp_spec_stft_reset(afe->analysis[m]);
+    }
+    dsp_spec_istft_reset(afe->synthesis);
+#if CONFIG_DSP_AFE_HPF_ENABLE
+    dsp_afe_hpf_reset(afe->hpf);
+#endif
+#if CONFIG_DSP_AFE_AEC_ENABLE
+    if (afe->n_channels > N_MICS) { dsp_afe_aec_reset(afe->aec); }
+#endif
+#if CONFIG_DSP_AFE_DOA_ENABLE
+    dsp_afe_doa_reset(afe->doa);
+#endif
+    reset_spatial(afe);
+    if (afe->ns != NULL) { afe->ns->reset(afe->ns_ctx, afe->ns_state); }
+#if CONFIG_DSP_AFE_VAD_ENABLE
+    dsp_afe_vad_reset(afe->vad);
+#endif
+#if CONFIG_DSP_AFE_AGC_ENABLE
+    dsp_afe_agc_reset(afe->agc);
+#endif
     afe->fifo_head = 0;
     afe->fifo_count = 0;
     afe->gap_pending = true;

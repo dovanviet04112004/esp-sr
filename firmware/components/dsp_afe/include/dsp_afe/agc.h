@@ -49,6 +49,11 @@ esp_err_t dsp_afe_agc_process(dsp_afe_agc_t *st, float *hop, bool speech, float 
  */
 void dsp_afe_agc_set_target(dsp_afe_agc_t *st, float target_dbfs);
 
+/** Return the level, gain, limiter and lookahead to where init leaves them; coefficients and target stay.
+ *  @ctx any | non-blocking
+ */
+void dsp_afe_agc_reset(dsp_afe_agc_t *st);
+
 #ifdef __cplusplus
 }
 #endif

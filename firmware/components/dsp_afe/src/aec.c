@@ -48,3 +48,8 @@ void dsp_afe_aec_stats(const dsp_afe_aec_t *st, dsp_afe_aec_stats_t *out)
 {
     *out = st->stats;
 }
+
+void dsp_afe_aec_reset(dsp_afe_aec_t *st)
+{
+    memset(&st->stats, 0, sizeof(st->stats));
+}

@@ -47,6 +47,11 @@ esp_err_t dsp_afe_vad_process(dsp_afe_vad_t *st, const float *hop, bool *speech)
  */
 void dsp_afe_vad_detail(const dsp_afe_vad_t *st, dsp_afe_vad_detail_t *out);
 
+/** Return the band models, minimum tracks and hangover to where init leaves them; thresholds stay.
+ *  @ctx any | non-blocking
+ */
+void dsp_afe_vad_reset(dsp_afe_vad_t *st);
+
 #ifdef __cplusplus
 }
 #endif

@@ -49,3 +49,8 @@ void dsp_afe_bss_directions(const dsp_afe_bss_t *st, int16_t angle_deg[2])
     angle_deg[0] = ANGLE_UNKNOWN_DEG;
     angle_deg[1] = ANGLE_UNKNOWN_DEG;
 }
+
+void dsp_afe_bss_reset(dsp_afe_bss_t *st)
+{
+    (void)st;
+}

@@ -129,15 +129,25 @@ esp_err_t dsp_afe_agc_init(dsp_afe_agc_t **out, const dsp_afe_agc_config_t *cfg,
     st->ceiling = db_to_amplitude(cfg->limit_dbfs);
     st->release_step = (float)(1.0 / ((double)cfg->release_ms * GEN_GRID_SAMPLE_RATE_HZ / MS_PER_S));
     st->target_power = db_to_power(cfg->target_dbfs);
+    st->need.n = st->lookahead + 1;
+    dsp_afe_agc_reset(st);
+    *out = st;
+    return ESP_OK;
+}
+
+void dsp_afe_agc_reset(dsp_afe_agc_t *st)
+{
     // Start the level at the target less the most gain, so quiet speech passes the gate at once.
     st->speech_power = st->target_power / (st->gain_max * st->gain_max);
     st->gain = 1.0f;
     st->last_held = 1.0f;
+    st->delay_at = 0;
     if (st->lookahead > 0) { memset(st->delay, 0, st->lookahead * sizeof(float)); }
-    st->need.n = st->lookahead + 1;
+    st->need.front = 0;
+    st->need.size = 0;
+    st->need.count = 0;
+    st->need.pushed = 0;
     box_mean_init(&st->held, st->lookahead + 1);
-    *out = st;
-    return ESP_OK;
 }
 
 static float sliding_min_push(sliding_min_t *m, float v)

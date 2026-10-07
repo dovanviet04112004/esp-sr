@@ -41,6 +41,11 @@ esp_err_t dsp_afe_gsc_init(dsp_afe_gsc_t **out, const dsp_afe_gsc_config_t *cfg,
 esp_err_t dsp_afe_gsc_process(dsp_afe_gsc_t *st, const dsp_spec_cplx_t *x0, const dsp_spec_cplx_t *x1,
                               float angle_deg, bool adapt, dsp_spec_cplx_t *out);
 
+/** Return the weights to zero as init leaves them; the steering vector of the last angle stays.
+ *  @ctx any | non-blocking
+ */
+void dsp_afe_gsc_reset(dsp_afe_gsc_t *st);
+
 #ifdef __cplusplus
 }
 #endif

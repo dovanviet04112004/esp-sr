@@ -43,6 +43,11 @@ esp_err_t dsp_afe_bss_process(dsp_afe_bss_t *st, const dsp_spec_cplx_t *x0, cons
  */
 void dsp_afe_bss_directions(const dsp_afe_bss_t *st, int16_t angle_deg[2]);
 
+/** Return the demixing matrices to where init leaves them.
+ *  @ctx any | non-blocking
+ */
+void dsp_afe_bss_reset(dsp_afe_bss_t *st);
+
 #ifdef __cplusplus
 }
 #endif

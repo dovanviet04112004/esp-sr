@@ -104,3 +104,8 @@ esp_err_t dsp_afe_gsc_process(dsp_afe_gsc_t *st, const dsp_spec_cplx_t *x0, cons
     }
     return ESP_OK;
 }
+
+void dsp_afe_gsc_reset(dsp_afe_gsc_t *st)
+{
+    memset(st->weight, 0, sizeof(st->weight));
+}

@@ -75,3 +75,8 @@ esp_err_t dsp_afe_hpf_process(dsp_afe_hpf_t *st, uint8_t channel, float *samples
     st->state[channel][1] = s1;
     return ESP_OK;
 }
+
+void dsp_afe_hpf_reset(dsp_afe_hpf_t *st)
+{
+    memset(st->state, 0, sizeof(st->state));
+}

@@ -572,6 +572,12 @@ static esp_err_t init(void *ctx, void *state, size_t bytes)
     return ESP_OK;
 }
 
+static void reset(void *ctx, void *state)
+{
+    (void)ctx;
+    reset_state(state);
+}
+
 static esp_err_t process(void *ctx, void *state, const float *power, const float *echo_power, float *gain,
                          float *speech_prob)
 {
@@ -631,6 +637,7 @@ static esp_err_t process(void *ctx, void *state, const float *power, const float
 static const dsp_afe_ns_ops_t s_ops = {
     .state_bytes = state_bytes,
     .init = init,
+    .reset = reset,
     .process = process,
 };
 

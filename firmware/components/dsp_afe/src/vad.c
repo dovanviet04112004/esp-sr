@@ -115,7 +115,7 @@ static int floor_log2(float x)
     return exponent - 1;
 }
 
-static void reset_model(dsp_afe_vad_t *st)
+void dsp_afe_vad_reset(dsp_afe_vad_t *st)
 {
     memset(&st->down, 0, sizeof(st->down));
     memset(st->split, 0, sizeof(st->split));
@@ -151,7 +151,7 @@ esp_err_t dsp_afe_vad_init(dsp_afe_vad_t **out, const dsp_afe_vad_config_t *cfg,
     st->global_threshold = kGlobalThreshold[cfg->aggressiveness];
     st->hangover_hops =
         ((uint32_t)cfg->hangover_ms * GEN_GRID_SAMPLE_RATE_HZ + MS_PER_S * HOP / 2) / (MS_PER_S * HOP);
-    reset_model(st);
+    dsp_afe_vad_reset(st);
     *out = st;
     return ESP_OK;
 }

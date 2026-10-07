@@ -72,6 +72,12 @@ static esp_err_t unit_ns_init(void *ctx, void *state, size_t bytes)
     return state != NULL && bytes >= sizeof(uint32_t) ? ESP_OK : ESP_ERR_INVALID_ARG;
 }
 
+static void unit_ns_reset(void *ctx, void *state)
+{
+    (void)ctx;
+    (void)state;
+}
+
 static esp_err_t unit_ns_process(void *ctx, void *state, const float *power, const float *echo_power,
                                  float *gain, float *speech_prob)
 {
@@ -91,6 +97,7 @@ static esp_err_t unit_ns_process(void *ctx, void *state, const float *power, con
 static const dsp_afe_ns_ops_t kUnitNs = {
     .state_bytes = unit_ns_bytes,
     .init = unit_ns_init,
+    .reset = unit_ns_reset,
     .process = unit_ns_process,
 };
 
@@ -331,6 +338,69 @@ static void check_gap_and_clip(void)
           "reset marks the next hop only, seq runs on, full-scale samples on either microphone flag a clip");
 }
 
+// Bursts of the tone over noise, ch1 at half level, so every adaptive module leaves its start.
+static void fill_varied(int16_t *interleaved, uint8_t n_channels, size_t hop, uint32_t *lcg)
+{
+    const double level = (hop / 8) % 2 == 0 ? AMPLITUDE : AMPLITUDE / 16.0;
+    for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
+        *lcg = *lcg * 1664525u + 1013904223u;
+        const double noise = ((double)(*lcg >> 16) - 32768.0) / 64.0;
+        const double s = level * sin(2.0 * M_PI * TONE_HZ * (double)(hop * GEN_GRID_HOP_SAMPLES + i) /
+                                     GEN_GRID_SAMPLE_RATE_HZ);
+        interleaved[i * n_channels] = (int16_t)lrint(s + noise);
+        interleaved[i * n_channels + 1] = (int16_t)lrint(0.5 * s - noise);
+        if (n_channels == MAX_CHANNELS) { interleaved[i * n_channels + 2] = 0; }
+    }
+}
+
+static bool same_frame(const dsp_afe_frame_t *a, const dsp_afe_frame_t *b)
+{
+    return memcmp(a->pcm, b->pcm, sizeof(a->pcm)) == 0 && a->doa_deg == b->doa_deg &&
+           a->doa_conf == b->doa_conf && a->vad == b->vad && a->level_dbfs == b->level_dbfs &&
+           a->gain_db == b->gain_db && (a->flags & ~DSP_AFE_FLAG_GAP) == (b->flags & ~DSP_AFE_FLAG_GAP);
+}
+
+static bool step(dsp_afe_t *afe, const int16_t *in, dsp_afe_frame_t *out)
+{
+    return dsp_afe_feed(afe, in, 1) == ESP_OK && dsp_afe_fetch(afe, out) == ESP_OK;
+}
+
+// The chain left unreset is the negative control: it must not match the fresh one.
+static void check_reset_is_fresh(const dsp_afe_config_t *cfg, const char *what)
+{
+    static int16_t in[GEN_GRID_HOP_SAMPLES * MAX_CHANNELS];
+    const uint8_t n_channels = channels_of(cfg);
+    dsp_afe_t *reset = make(cfg);
+    dsp_afe_t *kept = make(cfg);
+    dsp_afe_t *fresh = NULL;
+    dsp_afe_frame_t a;
+    dsp_afe_frame_t b;
+    dsp_afe_frame_t c;
+    uint32_t lcg = 777u;
+    bool ok = reset != NULL && kept != NULL;
+    for (size_t h = 0; ok && h < HOPS * 4; h++) {
+        fill_varied(in, n_channels, h, &lcg);
+        ok = step(reset, in, &a) && step(kept, in, &b);
+    }
+    if (ok) {
+        dsp_afe_reset(reset);
+        fresh = make(cfg);
+        ok = fresh != NULL;
+    }
+    bool same = true;
+    bool kept_same = true;
+    for (size_t h = 0; ok && h < HOPS * 4; h++) {
+        fill_varied(in, n_channels, HOPS * 4 + h, &lcg);
+        ok = step(reset, in, &a) && step(fresh, in, &b) && step(kept, in, &c);
+        same = same && same_frame(&a, &b);
+        kept_same = kept_same && same_frame(&c, &b);
+    }
+    char line[200];
+    snprintf(line, sizeof(line),
+             "%s: after reset the chain runs bit for bit as a fresh one, unreset it does not", what);
+    check(ok && same && !kept_same, line);
+}
+
 static void check_params(void)
 {
     dsp_afe_t *afe = make(&kPlain);
@@ -489,6 +559,9 @@ static void check_every_path(void)
     check_round_trip(&cfg, "bss path through every shell");
     cfg.input_format = "MMR";
     check_round_trip(&cfg, "MMR with aec and bss through every shell, silent reference flagged");
+    check_reset_is_fresh(&cfg, "MMR with aec and bss");
+    cfg.spatial = DSP_AFE_SPATIAL_GSC;
+    check_reset_is_fresh(&cfg, "MMR with aec and gsc");
 }
 
 static void check_balance_in_chain(void)
@@ -596,6 +669,7 @@ int main(int argc, char **argv)
     check_memory();
     check_fifo();
     check_gap_and_clip();
+    check_reset_is_fresh(&kPlain, "the chain as built");
     check_params();
 #if DSP_AFE_HOST_ALL_MODULES
     check_module_shells();

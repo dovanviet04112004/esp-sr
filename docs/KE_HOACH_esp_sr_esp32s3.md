@@ -465,7 +465,7 @@ Sáu chỗ khoá cứng của TỔNG QUAN §2.2 vẫn đúng. Ba chỗ đổi, �
 `vad` lên trước `agc`, `ns` thành một **khe** nhận sàn hay một bản mạng.
 
 **Khe `ns` là cách giữ `dsp_afe` không biết mô hình học tồn tại.** `dsp_afe` khai một bảng hàm
-`dsp_afe_ns_ops_t` (cỡ trạng thái, khởi tạo, xử lý một khung phổ công suất ra gain 257 vạch). Bản
+`dsp_afe_ns_ops_t` (cỡ trạng thái, khởi tạo, đặt lại, xử lý một khung phổ công suất ra gain 257 vạch). Bản
 OM-LSA nằm ngay trong `dsp_afe`; hai ứng viên mạng, RNNoise-16k ở `ai_engine/src/ns_rnnoise/` và NSNet-16k ở
 `ai_engine/src/ns_nsnet/`, mỗi bản phơi ra đúng bảng hàm ấy qua `ai_engine_ns_ops()`; `svc_front` chọn bản nào và cắm
 vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đi xuống, và `dsp_afe` vẫn dịch
@@ -722,7 +722,7 @@ Chung cho hai ứng viên:
 | Trần cỡ | Mốc là `nsnet2` ESP-SR trên board B: 4 182 µs mỗi bước, 395 760 B PSRAM. NSNet-16k L hơn mốc 21% về thời gian và nằm trong mốc về PSRAM; chủ repo chọn L (ADR-0014): nhân 1 tới ~51% ở trường hợp nặng nhất, nhỉnh hơn mục tiêu trung bình 50% của §5.6; §6.1 và §6.6 tính 337 KB trong slot và 394 KB PSRAM cho `ns`. E9-T7 đo trên chuỗi thật có Wi-Fi; vượt nhịp thì lùi về M hay S, không kéo trọng số về RAM nội. Lớn hơn L phải kèm ADR mới |
 | Chạy | GRU int8 của `esp-dl`. GRU ấy bắt đầu mỗi lần chạy từ `initial_h` hay từ 0, nên trạng thái ẩn của từng GRU là một cặp tensor vào và ra của mạng, chép lại sau mỗi bước; chạy dòng kiểm như `wake` (E11-T10): nhiều bước khớp từng bit mô phỏng cả chuỗi. Probe có trạng thái chạy trên board với trọng số ngẫu nhiên trong lúc học (E9-T10), trước khi lượng tử bản đã học. Phương án lùi: lớp dày và GRU int8 viết tay bằng C, như mã suy luận của RNNoise |
 | Tiền và hậu xử lý | C thuần trong thư mục của ứng viên, soi gương `srpipe.tasks.ns`, bộ vàng có đối chứng âm (§3.14). Mạng ra logit, sigmoid tính ở hậu xử lý bằng float, vì int8 không biểu diễn được gain 1 |
-| Trạng thái | trạng thái GRU và lịch sử đặc trưng nằm trong vùng trạng thái của khe, nên `dsp_afe_reset` xoá được chúng; trọng số và tensor của esp-dl nằm ở PSRAM của `ai_engine` |
+| Trạng thái | trạng thái GRU và lịch sử đặc trưng nằm trong vùng trạng thái của khe; `reset` của khe xoá chúng và giữ mọi thứ `init` dựng từ cấu hình, nên `dsp_afe_reset` sau một chỗ hở `seq` không dựng lại gì (§4.5.5); trọng số và tensor của esp-dl nằm ở PSRAM của `ai_engine` |
 | Chỗ đặt trọng số | bị chạm **mỗi khung**, nằm ở PSRAM như mọi model (§6.5); E9-T7 đo độ trễ đỉnh một khung của từng ứng viên |
 | Vọng dư | bản đầu không đọc `echo_power`: chưa có loa thì chưa có vọng để học (E10). Sàn cộng vọng dư vào ước lượng nhiễu, nên chuỗi `"MMR"` chạy sàn tới khi bản được giữ học với phổ vọng dư |
 | Dựng và cắm | Kconfig `AI_ENGINE_NS_BACKEND` đưa tối đa một ứng viên vào bản dựng (§4.5.2); `meta.json` của ảnh model khai ứng viên (§6.3). `svc_front` cắm `ai_engine_ns_ops()` khi hàm ấy khác `NULL` và luật vọng dư ở trên cho phép, không thì để khe trống và chuỗi chạy sàn |
@@ -2067,7 +2067,7 @@ components/dsp_afe/
 ├── idf_component.yml       # chỉ khi component có phụ thuộc registry
 ├── Kconfig                 # chỉ công tắc DSP_AFE_<MODULE>_ENABLE; số của module ở contracts/afe.yaml
 ├── include/
-│   ├── dsp_afe.h           # ★ mặt tiền: workspace_bytes / init / feed / fetch
+│   ├── dsp_afe.h           # ★ mặt tiền: workspace_bytes / init / feed / fetch / reset
 │   └── dsp_afe/            # header riêng từng module, để kiểm độc lập
 │       ├── hpf.h  ├── balance.h  ├── aec.h  ├── doa.h  ├── gsc.h
 │       ├── bss.h  ├── ns.h       ├── vad.h  └── agc.h
@@ -2175,6 +2175,7 @@ esp_err_t dsp_afe_init(dsp_afe_t **out, const dsp_afe_config_t *cfg,
                        void *cold_mem, size_t cold_bytes);   // lớn, ít chạm → PSRAM
 esp_err_t dsp_afe_feed(dsp_afe_t *afe, const int16_t *interleaved, size_t frames);
 esp_err_t dsp_afe_fetch(dsp_afe_t *afe, dsp_afe_frame_t *out);   // ESP_ERR_NOT_FOUND khi chưa đủ
+void      dsp_afe_reset(dsp_afe_t *afe);                         // sau chỗ hở seq: xoá trạng thái, giữ bảng
 
 typedef struct {
     int16_t  pcm[GEN_GRID_HOP_SAMPLES];    // một kênh đã làm sạch
@@ -2222,8 +2223,14 @@ lớp nhì, và xác suất của `other` cộng `silence`; bảng lệnh truy�
 cũng như ở `_score`.
 
 **`ai_engine_ns_ops()` và khe `dsp_afe_ns_ops_t` giữ nguyên cho cả hai ứng viên của `ns`** (§3.9): khe nhận công suất
-257 vạch cùng phổ vọng dư khi có, trả 257 gain trong 0..1 và `speech_prob`. Đặc trưng, dải, chuẩn hoá và trạng thái GRU
-nằm sau khe, trong thư mục của ứng viên, nên đổi ứng viên không chạm `dsp_afe` hay `svc_front`.
+257 vạch cùng phổ vọng dư khi có, trả 257 gain trong 0..1 và `speech_prob`. Khe có bốn hàm: cỡ trạng thái, `init` dựng
+mọi thứ suy từ cấu hình rồi xoá trạng thái, `reset` chỉ xoá trạng thái, và xử lý một khung. Đặc trưng, dải, chuẩn hoá và
+trạng thái GRU nằm sau khe, trong thư mục của ứng viên, nên đổi ứng viên không chạm `dsp_afe` hay `svc_front`.
+
+**`dsp_afe_reset` chỉ xoá trạng thái.** `svc_front` gọi nó trên `sach_task` mỗi khi `seq` hở. Mỗi khâu có hàm `reset`
+đưa trạng thái thích nghi về đúng như sau `init`, giữ cửa sổ, bảng và hệ số `init` đã dựng, khe `ns` cũng vậy, nên chuỗi
+sau `reset` ra từng bit như một chuỗi vừa `init`. `reset` dựng lại bảng thì lâu hơn 8 ô của `q_free` (§5.3), và một chỗ
+hở sinh ra chỗ hở sau, mãi: ghi `set.json` 222 ms làm board bỏ 76% khung không dứt (`measurements/latency.md` §20).
 
 #### 4.5.6 Model vào flash bằng cách nào
 

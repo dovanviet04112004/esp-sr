@@ -51,6 +51,11 @@ esp_err_t dsp_afe_aec_process(dsp_afe_aec_t *st, float *const *mic, const float 
  */
 void dsp_afe_aec_stats(const dsp_afe_aec_t *st, dsp_afe_aec_stats_t *out);
 
+/** Return the weights and figures of merit to where init leaves them.
+ *  @ctx any | non-blocking
+ */
+void dsp_afe_aec_reset(dsp_afe_aec_t *st);
+
 #ifdef __cplusplus
 }
 #endif
