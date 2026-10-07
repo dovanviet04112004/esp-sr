@@ -25,7 +25,7 @@ from torch.nn import functional
 
 from srpipe.core import audio_io, corpus, repitch, screen, splits
 from srpipe.core.audio_io import ItemReader
-from srpipe.core.config import ML_ROOT, data_paths, device_of, load_yaml
+from srpipe.core.config import ML_ROOT, data_paths, device_of, load_yaml, on_contract_pitch
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.generated import grid, lang_vi
@@ -617,11 +617,6 @@ def owner_report(net: gate.Ctc, heard: OwnerHeard, listed: list[dict], spec: dic
     }
 
 
-def owner_check(net: gate.Ctc, listed: list[dict], spec: dict, paths: dict) -> dict:
-    """owner_report of net over the owner's sessions heard for its run (KEHOACH 3.11, measurements/command.md 12.20)."""
-    return owner_report(net, owner_heard(net.cfg, spec, paths), listed, spec)
-
-
 def owner_table(report: dict) -> str:
     lines = [
         "| day | cm | word | utterances | recorded: right (accepted) | same | swap | swap heard |",
@@ -728,20 +723,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("check", choices=CHECKS)
     parser.add_argument("run", type=Path, help="a run directory of the ctc train")
     parser.add_argument("--steps", help="owner: the run's checkpoints at these steps, comma separated, not its end")
+    parser.add_argument(
+        "--kaldi-pitch", action="store_true", help="owner: hear through the contract's Kaldi pitch, as the board does"
+    )
     args = parser.parse_args(argv)
     spec, paths = load_yaml(ctc.CONFIG)["tone_flip"], data_paths()
-    if args.steps and args.check != "owner":
-        parser.error("--steps goes with owner")
-    if args.steps:
+    if (args.steps or args.kaldi_pitch) and args.check != "owner":
+        parser.error("--steps and --kaldi-pitch go with owner")
+    if args.check == "owner":
         commands = ML_ROOT.parent / spec["owner_set"]
         listed = json.loads(commands.read_text(encoding="utf-8"))["commands"]
-        heard = owner_heard(gate.load_ctc(args.run, commands).cfg, spec, paths)
+        net = gate.load_ctc(args.run, commands)
+        cfg = on_contract_pitch(net.cfg) if args.kaldi_pitch else net.cfg
+        heard = owner_heard(cfg, spec, paths)
+        tag = "_kaldi_pitch" if args.kaldi_pitch else ""
+    if args.steps:
         report = {}
         for step in (int(v) for v in args.steps.split(",")):
             net = gate.load_ctc(args.run, commands, train.checkpoint(args.run, step))
             report[step] = owner_report(net, heard, listed, spec)
             print(f"step {step}: " + owner_line(report[step]), flush=True)
-        out = args.run / "tone_flip_owner_steps.yaml"
+        out = args.run / f"tone_flip_owner_steps{tag}.yaml"
         out.write_text(yaml.safe_dump(report, allow_unicode=True, sort_keys=False), encoding="utf-8")
         print(out)
         return 0
@@ -751,9 +753,7 @@ def main(argv: list[str] | None = None) -> int:
         print(table(report["summary"]))
         print(f"KEHOACH 3.11: {report['branch']}")
     elif args.check == "owner":
-        commands = ML_ROOT.parent / spec["owner_set"]
-        listed = json.loads(commands.read_text(encoding="utf-8"))["commands"]
-        report = owner_check(gate.load_ctc(args.run, commands), listed, spec, paths)
+        report = owner_report(net, heard, listed, spec)
         print(owner_table(report))
     else:
         report = places_check(args.run, paths)
@@ -763,7 +763,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"{name}: unit error rate {r['unit_error_rate']:.3f}, tone right first {r['tone_right_first']:.3f}"
                 f" later {r['tone_right_later']:.3f}"
             )
-    out = args.run / f"tone_flip_{args.check}.yaml"
+    out = args.run / f"tone_flip_{args.check}{tag if args.check == 'owner' else ''}.yaml"
     out.write_text(yaml.safe_dump(report, allow_unicode=True, sort_keys=False), encoding="utf-8")
     print(out)
     return 0

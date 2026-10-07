@@ -13,7 +13,7 @@ import csv
 import json
 import sys
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -24,7 +24,7 @@ import yaml
 
 from srpipe.core import corpus
 from srpipe.core.audio_io import to_float
-from srpipe.core.config import data_paths, device_of, load_run_config, load_yaml
+from srpipe.core.config import data_paths, device_of, load_run_config, load_yaml, on_contract_pitch
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.stft import Stft
@@ -464,6 +464,12 @@ def main(argv: list[str] | None = None) -> int:
         help="ctc, rnnt: a command set file to score in place of "
         "default_vi.json, as the board runs the set the host gives it; the gate of KEHOACH 3.12 is the default's",
     )
+    parser.add_argument(
+        "--kaldi-pitch",
+        action="store_true",
+        help="ctc, rnnt: hear the sessions through the contract's Kaldi pitch, as the board runs it, in place of the "
+        "pitch the run learnt on",
+    )
     args = parser.parse_args(argv)
     spec = load_yaml(command.CONFIG)["eval"]
     if args.track == "kws":
@@ -473,6 +479,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     ctc_cfg = load_yaml(ctc.CONFIG)
     net = load_ctc(args.run, args.commands)
+    if args.kaldi_pitch:
+        net = replace(net, cfg=on_contract_pitch(net.cfg))
     forms = sum(len(v) for v in net.lexicon)
     said = f"{len(net.names)} commands of {args.commands.name}, {forms} variants"
     print(f"{args.run}: {said}, windows up to {listen.WINDOW_S} s")

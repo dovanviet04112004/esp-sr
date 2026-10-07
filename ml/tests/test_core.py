@@ -145,3 +145,12 @@ def test_a_ramp_fades_both_edges_and_leaves_the_middle() -> None:
     np.testing.assert_array_equal(y[n:-n], 1.0)
     assert np.array_equal(audio_io.ramped(x, 0.0), x) and np.all(x == 1.0)
     assert audio_io.ramped(np.ones(10), 0.01).max() <= 1.0
+
+
+def test_a_pitch_source_run_can_be_heard_through_the_boards_kaldi_pitch() -> None:
+    front = config.contract_front()
+    swift = {"listen": front | {"pitch": {"source": "swiftf0", "pitch_scale": 2.0}}, "train": {"steps": 1}}
+    heard = config.on_contract_pitch(swift)
+    assert heard["listen"]["pitch"] == front["pitch"] and heard["listen"]["features"] == front["features"]
+    assert heard["train"] == swift["train"] and swift["listen"]["pitch"]["source"] == "swiftf0"
+    assert config.on_contract_pitch({"pitch_source": {"source": "swiftf0"}})["listen"]["pitch"] == front["pitch"]

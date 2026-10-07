@@ -51,6 +51,12 @@ def contract_front() -> dict[str, Any]:
     return {"features": dict(listen.FEATURES), "pitch": dict(listen.PITCH)}
 
 
+def on_contract_pitch(cfg: dict[str, Any]) -> dict[str, Any]:
+    """cfg heard through the contract's pitch, Kaldi's tracker as the board runs it, in place of the pitch its front
+    learnt on: how a pitch_source run would do on the board as it is (KEHOACH 3.11)."""
+    return cfg | {"listen": front_of(cfg) | {"pitch": contract_front()["pitch"]}}
+
+
 def front_of(cfg: dict[str, Any]) -> dict[str, Any]:
     """The front end a config learns on: the one a run recorded under listen, else the contract's; a config naming a
     pitch_source tracks pitch by it, with the contract's F0 range, left context and scales (KEHOACH 3.11)."""

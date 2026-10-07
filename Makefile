@@ -156,8 +156,8 @@ ctc-thresholds: ## Choose delta1 and delta2 of a ladder row on val_commands and 
 ctc-deploy: ## Export a ladder row and its chosen delta1, delta2 into firmware/models/command and lock them: make ctc-deploy RUN=<run under ml/> ROW=<row> (E11-T19)
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant deploy $(RUN) --row $(ROW)
 
-ctc-tone-flip: ## The tone checks of KEHOACH 3.11 on a ctc run into <run>/tone_flip_<check>.yaml: CHECK=val moves a checked sắc or nặng syllable of val onto the other tone by Praat, formants kept, its session simulated again; owner moves the first word of the owner's bật / tắt sessions; places reads tone right at the first and later syllables, pitch held or not; val and owner need Docker for the aligner; STEPS=2000,4000 scores those checkpoints of the run with owner: make ctc-tone-flip CHECK=val|owner|places RUN=<run under ml/> [STEPS=...] (E11-T23)
-	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra swiftf0 --extra praat python -m srpipe.tasks.command.ctc.tone_flip $(or $(CHECK),val) $(RUN) $(if $(STEPS),--steps $(STEPS))
+ctc-tone-flip: ## The tone checks of KEHOACH 3.11 on a ctc run into <run>/tone_flip_<check>.yaml: CHECK=val moves a checked sắc or nặng syllable of val onto the other tone by Praat, formants kept, its session simulated again; owner moves the first word of the owner's bật / tắt sessions; places reads tone right at the first and later syllables, pitch held or not; val and owner need Docker for the aligner; STEPS=2000,4000 scores those checkpoints of the run with owner, KALDI=1 hears through the board's Kaldi pitch: make ctc-tone-flip CHECK=val|owner|places RUN=<run under ml/> [STEPS=...] [KALDI=1] (E11-T23)
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra swiftf0 --extra praat python -m srpipe.tasks.command.ctc.tone_flip $(or $(CHECK),val) $(RUN) $(if $(STEPS),--steps $(STEPS)) $(if $(KALDI),--kaldi-pitch)
 
 ctc-watch: ## Score each checkpoint of a ctc run as its training writes it, Gate 3 on each and the owner check on every second, into <run>/watch.yaml; run beside ctc-train, again it goes on from the last entry: make ctc-watch RUN=<run under ml/> (E11-T23)
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra swiftf0 --extra praat python -m srpipe.tasks.command.ctc.watch $(RUN)
@@ -165,8 +165,8 @@ ctc-watch: ## Score each checkpoint of a ctc run as its training writes it, Gate
 models-flash: ## Pack every model of contracts/models.lock.json and write models_0 of board B (KEHOACH 4.5.6, 6.1)
 	cd ml && PORT=$(PORT) ./scripts/50_pack_and_flash.sh
 
-command-eval: ## Score Gate 3 of a command track on the board sessions: make command-eval TRACK=kws|ctc|rnnt RUN=<run under ml/> [SET=<command set file from the repo root>] (E11-T13, E11-T17)
-	cd ml && uv run --extra train --extra swiftf0 python -m srpipe.tasks.command.eval $(TRACK) $(RUN) $(if $(SET),--commands $(abspath $(SET)))
+command-eval: ## Score Gate 3 of a command track on the board sessions: make command-eval TRACK=kws|ctc|rnnt RUN=<run under ml/> [SET=<command set file from the repo root>] [KALDI=1, a pitch_source run heard through the board's Kaldi pitch] (E11-T13, E11-T17)
+	cd ml && uv run --extra train --extra swiftf0 python -m srpipe.tasks.command.eval $(TRACK) $(RUN) $(if $(SET),--commands $(abspath $(SET))) $(if $(KALDI),--kaldi-pitch)
 
 ns-data: screen ## Split, pools and held val/test sets of the ns branch into data/splits/ns, interim and processed (E9-T3)
 	cd ml && uv run python -m srpipe.tasks.ns.data clean && uv run python -m srpipe.tasks.ns.data split \
