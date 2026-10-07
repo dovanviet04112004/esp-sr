@@ -55,7 +55,9 @@ esp_err_t svc_front_step(const int16_t *interleaved, uint32_t seq, dsp_afe_frame
     // One hop in and straight out again, so the inner fifo never holds more than this one.
     const esp_err_t fed = dsp_afe_feed(s_front.afe, interleaved, 1);
     if (fed != ESP_OK) { return fed; }
-    return dsp_afe_fetch(s_front.afe, out);
+    const esp_err_t fetched = dsp_afe_fetch(s_front.afe, out);
+    if (fetched == ESP_OK) { out->seq = seq; }
+    return fetched;
 }
 
 void svc_front_stats(dsp_afe_stats_t *out)

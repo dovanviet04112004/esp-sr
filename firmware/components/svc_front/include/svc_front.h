@@ -28,6 +28,7 @@ typedef struct {
 esp_err_t svc_front_init(const svc_front_config_t *cfg);
 
 /** Run one hop of interleaved samples; a jump in seq resets dsp_afe first, so the frame carries the gap flag.
+ *  out->seq is the capture seq the raw stream carries, so a logged window cuts out of it again (KEHOACH 5.4).
  *  @ctx sach_task | non-blocking | interleaved holds GEN_GRID_HOP_SAMPLES samples of n_channels each
  *  @ret ESP_OK with a clean frame in out | ESP_ERR_NOT_FOUND nothing ready | ESP_ERR_INVALID_STATE no init
  * yet
