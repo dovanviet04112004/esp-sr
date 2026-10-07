@@ -39,6 +39,21 @@ def test_a_sentence_offers_its_checked_sac_or_nang_syllables(text: str, places: 
     assert tone_flip.checked_places(said(text)) == places
 
 
+@pytest.mark.parametrize(
+    ("text", "places"),
+    [
+        ("tắt đèn", [("first", True), ("later", False)]),
+        ("bật quạt", [("first", True), ("later", True)]),
+        ("mở cửa đẹp", [("first", False), ("later", False), ("later", True)]),
+    ],
+)
+def test_each_tone_is_placed_and_checked_by_the_stop_next_to_it(text: str, places: list) -> None:
+    units, tone_at = tone_flip.unit_ids(said(text))
+    got = tone_flip.tone_places(units)
+    assert [k for k, _, _ in got] == list(tone_at)
+    assert [(place, checked) for _, place, checked in got] == places
+
+
 def test_units_are_trainings_with_each_syllables_tone_found() -> None:
     syllables = said("bật đèn phòng khách")
     units, tone_at = tone_flip.unit_ids(syllables)

@@ -691,10 +691,20 @@ def places_val(cfg: dict, paths: dict) -> train.Sentences:
     return train.load_role([paths["processed"] / "command" / version / "val"], units_of, longest, "float32")
 
 
-def places_check(net: gate.Ctc, val: train.Sentences) -> dict:
-    """Unit error rate and tone right at a sentence's first syllable and at its later ones over val, its best path
-    aligned to the units, with the pitch dims as simulated and held at their mean."""
+def tone_places(units: np.ndarray) -> list[tuple[int, str, bool]]:
+    """Each tone unit of a sentence's units: its index, first or later syllable, and whether its syllable is checked."""
     tones = {g2p.UNIT_ID[t] + 1 for t in lang_vi.TONES}
+    codas = {g2p.UNIT_ID[c] + 1 for c in lang_vi.CHECKED_CODAS}
+    at = [k for k, u in enumerate(units) if int(u) in tones]
+    # A syllable's units end with its coda, then its tone: a stop coda next to the tone makes the syllable checked.
+    return [(k, PLACES[min(n, 1)], int(units[k - 1]) in codas) for n, k in enumerate(at)]
+
+
+def places_check(net: gate.Ctc, val: train.Sentences) -> dict:
+    """Unit error rate and tone right at a sentence's first syllable and at its later ones over val, all syllables
+    and the checked ones alone, its best path aligned to the units, with the pitch dims as simulated and held at
+    their mean."""
+    keys = [*PLACES, *(f"{p}_checked" for p in PLACES)]
     out = {}
     for name in ("simulated", "pitch held at mean"):
         right, total, errors, said = Counter(), Counter(), 0, 0
@@ -709,24 +719,25 @@ def places_check(net: gate.Ctc, val: train.Sentences) -> dict:
             for row, n in enumerate(train.frames_of(hops, net.model.front.hop_stride)):
                 hyp, ref = train.best_path(log_probs.numpy()[row, :, :n]), units[row]
                 errors, said = errors + train.edit_distance(hyp, ref), said + len(ref)
-                seen = False
-                for r, h in zip(ref, matched(hyp, ref), strict=True):
-                    if int(r) in tones:
-                        place = "later" if seen else "first"
-                        seen = True
-                        total[place] += 1
-                        right[place] += h == int(r)
-        out[name] = {"unit_error_rate": errors / said} | {f"tone_right_{p}": right[p] / total[p] for p in PLACES}
+                hit = matched(hyp, ref)
+                for k, place, checked in tone_places(ref):
+                    for key in (place, f"{place}_checked") if checked else (place,):
+                        total[key] += 1
+                        right[key] += hit[k] == int(ref[k])
+        out[name] = {"unit_error_rate": errors / said} | {f"tone_right_{p}": right[p] / total[p] for p in keys}
         out[name] |= {"syllables": dict(total)}
     return {"sentences": len(val.first)} | out
 
 
 def places_line(report: dict) -> str:
-    return "; ".join(
-        f"{name}: unit error rate {report[name]['unit_error_rate']:.3f}, tone right first"
-        f" {report[name]['tone_right_first']:.3f} later {report[name]['tone_right_later']:.3f}"
-        for name in ("simulated", "pitch held at mean")
-    )
+    def line(r: dict) -> str:
+        return (
+            f"unit error rate {r['unit_error_rate']:.3f}, tone right first {r['tone_right_first']:.3f} later"
+            f" {r['tone_right_later']:.3f}, checked first {r['tone_right_first_checked']:.3f} later"
+            f" {r['tone_right_later_checked']:.3f}"
+        )
+
+    return "; ".join(f"{name}: {line(report[name])}" for name in ("simulated", "pitch held at mean"))
 
 
 def main(argv: list[str] | None = None) -> int:
