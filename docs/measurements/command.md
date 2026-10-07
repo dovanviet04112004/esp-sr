@@ -962,8 +962,8 @@ Tiếng 28/09 ở micro nhỏ hơn 04/10 chừng 15 dB, nền nhỏ hơn 10 dB (
 | 04/10 | 0 / −6 / −12 / −15 dB | 45/48, 45/47, 46/46, 46/46 (44) | 44/45, 44/45, 44/46, 44/46 (44) |
 
 Mức thu không đổi quyết định: 28/09 nâng tới mức 04/10 vẫn 1/22 "tắt", 04/10 hạ tới mức 28/09 vẫn đúng. Chỗ khác của
-"tắt" 28/09 nằm ở tiếng nói hôm ấy, khoảng cách và vang (1–3 m so với 80 cm) hoặc firmware thu; dữ liệu hiện có không
-tách được ba thứ ấy.
+"tắt" 28/09 nằm ở tiếng nói hôm ấy, khoảng cách và vang (1–3 m so với 80 cm) hoặc firmware thu; §12.16 và §12.17 tách
+ba thứ ấy.
 
 Âm tiết đầu của chủ repo, micro 0 thô, mốc từ của bộ căn §3.11, F0 theo YIN (khung 40 ms, bước 10 ms), trung vị theo câu
 có ít nhất 3 khung có thanh:
@@ -974,8 +974,8 @@ có ít nhất 3 khung có thanh:
 | 28/09, 1 m | "bật" / "tắt" | 4 / 5 | 195 / 150 ms | 141 / 213 Hz | 1,01 / 1,52 |
 | 28/09, 3 m | "bật" / "tắt" | 3 / 5 | 200 / 130 ms | 144 / 219 Hz | 1,03 / 1,64 |
 
-"tắt" của 28/09 cao và tách khỏi âm tiết sau rõ hơn của 04/10; độ dài như nhau. Cách nói hôm ấy không làm "tắt" giống
-"bật" hơn. Còn khoảng cách và vang 1–3 m, và firmware thu `368`: chỉ phiên mới ở 1–3 m với firmware hiện tại tách được.
+"tắt" của 28/09 cao và tách khỏi âm tiết sau rõ hơn của 04/10; độ dài như nhau. Cao độ và độ dài hôm ấy không làm
+"tắt" giống "bật" hơn; nguyên âm của nó ở §12.17.
 
 ### 12.16 "tắt" ở 1 m và 3 m trên firmware thu hiện tại (07/10)
 
@@ -991,8 +991,8 @@ câu đầu của phiên 8 ("bật quạt" trong phiên "bật đèn") bỏ. Chu
 | 28/09, firmware `368` | v2 (`128545c`) | 0/11 (0; nhầm 4) | 0/11 (0; nhầm 5) | 11/13 (7; 0) | 10/10 (6; 0) |
 | 28/09, firmware `368` | v7, 40 000 | 1/11 (0; nhầm 0) | 0/11 (0; nhầm 5) | 11/13 (11; 0) | 10/10 (9; 0) |
 
-Cùng khoảng cách, v7 nghe đúng "tắt" 35/47 câu mới so với 1/22 của 28/09: khoảng cách không phải chỗ thiếu; khác biệt
-còn lại là firmware thu của 28/09. v2 trên bản thu mới vẫn 2/47 và nhận nhầm "tắt" thành lệnh khác 11/47 lần; v7 không
+Cùng khoảng cách, v7 nghe đúng "tắt" 35/47 câu mới so với 1/22 của 28/09: khoảng cách không phải chỗ thiếu; chỗ khác
+còn lại nằm trong bản thu 28/09 (§12.17). v2 trên bản thu mới vẫn 2/47 và nhận nhầm "tắt" thành lệnh khác 11/47 lần; v7 không
 nhận nhầm lần nào, nhưng chỉ 10/47 câu "tắt" qua ngưỡng. Mọi câu "tắt" của Cửa 3 (§12.9) là phiên 28/09.
 
 Phổ dài hạn của micro 0 thô, đoạn có tiếng so với dải 500–1000 Hz: 28/09 có 100–250 Hz ở −4,3 / −8,6 dB (1 m / 3 m)
@@ -1014,3 +1014,136 @@ Cửa 3 từ đây gồm các phiên 07/10 (firmware thu hiện tại), bỏ câ
 |---|---|---|---|---|---|---|
 | v2 (`128545c`, đang khoá) | 135/209 | 1/35 | 1/34 | 35/37 / 35/36 | 61% | 123/126 |
 | v7, 40 000 | 170/209 | 16/35 | 20/34 | 35/37 / 35/36 | 59% | 124/126 |
+
+### 12.17 "tắt" của chủ repo: firmware thu, nguyên âm và thanh (07/10)
+
+Firmware thu của 28/09 (`contract-v1-368-gc786e8f`) và 07/10 (`contract-v1-1008-g62d9ab5`) có cùng đường mẫu:
+`git diff c786e8f 62d9ab5` không đổi dòng nào ở `drv_audio`, `bsp_board`, `firmware/test_apps/capture/main` và
+`sdkconfig.defaults` của app thu; IDF 6.0.2 ở cả hai; khoá phụ thuộc chỉ thêm `esp-dl` và `esp_new_jpeg`, app thu không
+gọi. Chỗ khác của 28/09 nằm trong bản thu hôm ấy.
+
+Âm tiết đầu của chủ repo, micro 0 thô, mốc từ của bộ căn §3.11. Nhân là các khung 10 ms trong 6 dB của khung to nhất
+của từ đầu; mức là năng lượng trung bình của nhân; F0 theo YIN như §12.15; F1 theo LPC bậc 12 ở 10 kHz, khung 25 ms mỗi
+5 ms, cực trên 200 Hz có băng dưới 400 Hz; trung vị theo câu. F1 đo cả sau kệ thấp RBJ 500 Hz −8 và +8 dB, vì tiếng
+28/09 nặng trầm hơn 5–9 dB (§12.16):
+
+| Buổi | Từ | Câu | Mức nhân | F0 âm tiết đầu / hai | F1, kệ −8 / 0 / +8 dB |
+|---|---|---|---|---|---|
+| 28/09, 1 m | "bật" | 13 | −41,1 dBFS | 141 / 140 Hz | 701 / 688 / 697 Hz |
+| 28/09, 1 m | "tắt" | 11 | −40,3 dBFS | 213 / 139 Hz | 758 / 725 / 706 Hz |
+| 28/09, 3 m | "bật" | 10 | −43,0 dBFS | 144 / 137 Hz | 695 / 685 / 682 Hz |
+| 28/09, 3 m | "tắt" | 11 | −41,3 dBFS | 217 / 135 Hz | 694 / 680 / 657 Hz |
+| 04/10, 80 cm | "bật" | 45 | −23,7 dBFS | 169 / 138 Hz | 715 / 709 / 706 Hz |
+| 04/10, 80 cm | "tắt" | 48 | −26,9 dBFS | 222 / 148 Hz | 792 / 773 / 753 Hz |
+| 07/10, 1 m | "bật" | 27 | −38,1 dBFS | 131 / 126 Hz | 709 / 696 / 681 Hz |
+| 07/10, 1 m | "tắt" | 24 | −36,0 dBFS | 200 / 126 Hz | 777 / 766 / 756 Hz |
+| 07/10, 3 m | "bật" | 23 | −37,4 dBFS | 131 / 130 Hz | 713 / 699 / 682 Hz |
+| 07/10, 3 m | "tắt" | 23 | −34,6 dBFS | 198 / 129 Hz | 775 / 769 / 756 Hz |
+
+Ở 04/10 và 07/10, F1 của "tắt" cao hơn "bật" 60–80 Hz (ă mở hơn â): dấu hiệu phổ duy nhất của nguyên âm, và nhỏ. Cùng
+dải trầm (28/09 qua kệ −8 dB, 07/10 như thu), F1 của "tắt" 1 m ngày 28/09 là 758 so với 766 Hz: ở 1 m chỗ khác là dải
+trầm, khớp với kệ −8 dB cứu 5/11 câu (§12.16). Ở 3 m F1 của "tắt" 28/09 là 694 Hz, bằng "bật" (695): hôm ấy ở 3 m chủ
+repo nói "tắt" với nguyên âm của "bật", và kệ không cứu câu nào. Tiếng 28/09 nhỏ hơn 07/10 3–6 dB ở cùng khoảng cách;
+giọng 07/10 còn trầm hơn 28/09 mà vẫn được nhận.
+
+v7 có nghe thanh của âm tiết đầu không: các phiên 07/10, từ đầu của mọi câu được đếm đổi F0 bằng overlap-add của Praat
+(giữ formant) trên cả hai kênh thô, rồi chạy như Cửa 3, bộ bật/tắt, v7 ở bước 40 000. Hệ số 1 là đối chứng của chính
+phép tổng hợp lại; sau nó chuỗi cắt 1 m "tắt" thành 23 cửa sổ thay 24. Đúng / cửa sổ (nhận đúng ở δ₁ 200 ‰, δ₂ 50 ‰):
+
+| F0 từ đầu | 1 m "tắt" | 3 m "tắt" | 1 m "bật" | 3 m "bật" |
+|---|---|---|---|---|
+| như thu (§12.16) | 20/24 (8) | 15/23 (2) | 26/27 (26) | 23/23 (23) |
+| tổng hợp lại, × 1 | 16/23 (5) | 9/23 (0) | 26/27 (26) | 23/23 (22) |
+| "tắt" × 0,65, tới F0 của "bật" | 14/23 (0) | 6/23 (0) | 26/27 (26) | 23/23 (22) |
+| "bật" × 1,53, tới F0 của "tắt" | 16/23 (5) | 9/23 (0) | 26/27 (24) | 23/23 (17) |
+
+F0 đo lại sau khi đổi ra đúng × 0,65 và × 1,53 (trung vị). So với đối chứng, hạ F0 của "tắt" xuống mức "bật" lật 5
+trên 46 câu; nâng "bật" lên mức "tắt" không lật câu nào trên 50, chỉ hạ biên. v7 tách "tắt" với "bật" gần như chỉ bằng
+phổ của phụ âm đầu và nguyên âm, không bằng thanh, dù thanh là chỗ hai từ khác nhau nhiều nhất ở giọng chủ repo (200 so
+với 131 Hz). Riêng phép tổng hợp lại, chưa đổi F0, đã lấy 4 và 6 câu "tắt" mà không lấy câu "bật" nào: dấu hiệu mạng
+dùng cho "tắt" mảnh. Đầu vào cho thấy vì sao: ba chiều cao độ của âm tiết đầu so với nền ngay trước câu, nên không mang
+thanh (§12.12).
+
+"tắt" 28/09 hỏng vì mạng chỉ dựa vào nguyên âm, mà nguyên âm ấy hôm 28/09 ở 3 m trùng "bật" và ở 1 m bị dải trầm kéo
+xuống; thanh vẫn rõ (213–217 so với 141–144 Hz) nhưng mạng không dùng. Firmware thu, khoảng cách, mức thu và giọng trầm
+không phải nguyên nhân.
+
+### 12.18 Cao độ của âm tiết đầu trên board (07/10)
+
+v7 ở bước 40 000 trên `val` (1 578 câu): thanh đúng ở âm tiết đầu 75,8%, ở các âm tiết sau 83,7%; giữ ba chiều cao độ ở
+trung bình thì còn 64,4% và 74,8%. Mạng dùng cao độ, và âm tiết đầu vẫn kém hơn 8 điểm như A ngày 05/10 (§12.3).
+
+Bộ dò của board (Kaldi chạy dòng, `dsp_spec/pitch`) trên từng từ của chủ repo, mốc từ của bộ căn §3.11, so với YIN trên
+micro 0 thô (trung vị theo từ). Lỗi là phần khung có POV trên 0,3 mà F0 lệch quá nửa quãng tám khỏi trung vị YIN của từ;
+"+0,4 s" là F0 của khung ấy trên đường Viterbi dò lại 0,4 s sau; "thô" là cùng bộ dò chạy trên micro 0 thô:
+
+| Buổi | Từ | YIN âm tiết đầu / hai | Lỗi âm tiết đầu: chuỗi / +0,4 s / thô | Lỗi âm tiết hai | POV âm tiết đầu / hai |
+|---|---|---|---|---|---|
+| 28/09, 1 m | "bật" | 141 / 138 Hz | 0,05 / 0,00 / 0,10 | 0,05 | 0,43 / 0,61 |
+| 28/09, 1 m | "tắt" | 213 / 140 Hz | 0,45 / 0,12 / 0,43 | 0,16 | 0,34 / 0,54 |
+| 28/09, 3 m | "bật" | 144 / 137 Hz | 0,50 / 0,40 / 0,50 | 0,12 | 0,51 / 0,63 |
+| 28/09, 3 m | "tắt" | 216 / 136 Hz | 0,55 / 0,00 / 0,28 | 0,03 | 0,36 / 0,51 |
+| 04/10, 80 cm | "bật" | 162 / 140 Hz | 0,52 / 0,47 / 0,51 | 0,07 | 0,49 / 0,61 |
+| 04/10, 80 cm | "tắt" | 221 / 151 Hz | 0,16 / 0,11 / 0,24 | 0,02 | 0,44 / 0,62 |
+| 07/10, 1 m | "bật" | 131 / 126 Hz | 0,43 / 0,35 / 0,29 | 0,00 | 0,38 / 0,61 |
+| 07/10, 1 m | "tắt" | 200 / 128 Hz | 0,58 / 0,57 / 0,54 | 0,03 | 0,35 / 0,50 |
+| 07/10, 3 m | "bật" | 130 / 130 Hz | 0,23 / 0,09 / 0,16 | 0,02 | 0,38 / 0,62 |
+| 07/10, 3 m | "tắt" | 198 / 129 Hz | 0,44 / 0,39 / 0,44 | 0,16 | 0,43 / 0,44 |
+
+Bộ dò sai 16–58% khung ở âm tiết đầu và 0–16% ở âm tiết hai; trên micro thô sai như trên đầu ra của chuỗi, nên lỗi nằm
+ở bộ dò, không ở chuỗi. Đường Viterbi chạy dòng nối từ nền trước câu (nền phiên `20261007_home_001` dò ra quanh 100 Hz)
+vào âm tiết đầu, và "tắt" 200 Hz hay bị dò thành nửa tần số; dò lại 0,4 s sau bớt lỗi ở vài phiên, không phải mọi phiên. Trên `val` (mô
+phỏng, nhiều giọng) POV của từ đầu cũng thấp hơn từ hai ở mọi thanh (trung vị 0,40–0,66 so với 0,49–0,76).
+
+Log F0 chuẩn hoá của từ đầu, trung bình theo POV trên các bước của từ, tách hai nhóm được tới đâu (AUC; 0,5 là đoán).
+Mốc như board: trung bình theo POV 0,75 s trước; C: 0,75 s trước và sau; "`vad`": chỉ các bước `vad` của chuỗi vào
+mốc, đường dò lại ở cuối cửa sổ:
+
+| Nhóm | Như board | C 0,75 / 0,75 s | `vad` 0,75 / 0 s | `vad` 0,75 / 0,4 s | `vad` 0,75 / 0,75 s |
+|---|---|---|---|---|---|
+| `val`, sắc / nặng vần tắc (82 / 84 câu) | 0,61 | 0,78 | 0,60 | 0,70 | 0,77 |
+| chủ repo, "tắt" / "bật", theo buổi | 0,56–0,73 | 0,58–0,82 | 0,53–0,92 | 0,42–0,72 | 0,56–0,89 |
+
+Đổi mốc chỉ nâng `val` từ 0,61 lên chừng 0,78, đúng chỗ C đã đổi ngày 05/10 mà mạng học không khá hơn (§12.3); với
+giọng chủ repo không mốc nào tách được, vì giá trị F0 bộ dò đưa vào đã sai. Thanh của âm tiết đầu không đến được mạng
+từ bộ dò hiện tại.
+
+Bốn bộ dò trên đầu ra của chuỗi, từng từ theo mốc của bộ căn: F0 của từ là trung vị trên các khung bộ dò ấy gọi là có
+tiếng (Kaldi POV trên 0,3; SwiftF0 0.3.0 và PESTO 2.0.1 `mir-1k_g7` độ tin trên 0,5); lỗi thô là F0 của từ lệch quá nửa
+quãng tám khỏi mốc (YIN trên micro 0 thô với chủ repo, YIN trên clip gốc trước mô phỏng với `val`, nên cột YIN nghiêng về
+phía mốc); đặc trưng thanh là log F0 từ đầu chia từ hai. `val`: các câu có từ đầu vần tắc thanh sắc (74) hay nặng (80):
+
+| Bộ dò | Lỗi thô từ đầu, `val` nặng / sắc | AUC sắc / nặng, `val` (mốc 0,79) | AUC "tắt" / "bật", chủ repo, 5 buổi | Chi phí |
+|---|---|---|---|---|
+| Kaldi như board | 0,14 / 0,23 | 0,64 | 0,56–0,97 | 2,0 ms mỗi bước trên board |
+| Kaldi, đường dò lại 0,4 s sau | 0,04 / 0,16 | 0,67 | 0,88–1,00 | như trên, vòng 25 khung thêm 🔬 |
+| YIN | 0,01 / 0,06 | 0,77 | 0,55–1,00 | 🔬 |
+| SwiftF0 | 0,04 / 0,08 | 0,78 | 0,80–1,00 | ~9 triệu MAC mỗi khung theo cỡ các lớp, ~0,57 tỉ MAC/s 🔬 |
+| PESTO | 0,05 / 0,07 | 0,80 | 0,22–0,65, nhiều câu không khung nào đủ tin | 🔬 |
+
+Trên `val`, ba bộ dò từng khung (YIN, SwiftF0, PESTO) đưa thanh của từ đầu về sát mốc 0,79, Kaldi dò lại 0,4 s sau chỉ
+0,67. Với chủ repo, SwiftF0 và Kaldi dò lại 0,4 s sau tách "tắt" / "bật" ở mọi buổi (0,80–1,00), YIN hỏng ở hai buổi,
+PESTO hỏng trên tiếng board. Mốc của chủ repo ở buổi 04/10 chỉ 0,57: YIN trên micro thô cũng sai ở "bật" thanh nặng (tiếng
+kẹt). esp-dl trên board chạy 0,1–0,5 tỉ MAC/s (`latency.md` §10), nên SwiftF0 nguyên cỡ không vừa chip.
+
+### 12.19 Thang int8 của `command/v7` (07/10)
+
+Run `20261007_d625146-dirty_21fd14` ở bước 40 000, `make ctc-ptq`, `make ctc-qat`, `make ctc-int16` (KẾ HOẠCH §3.14: float
+chưa đạt Cửa 3 nên đo đủ bốn bậc). Lỗi đơn vị trên 1 963 câu `test`; Cửa 3 gồm các phiên 07/10 (209 câu lệnh, 126 cửa
+sổ phải từ chối), nhận ở δ₁ `quant.reject` 300 ‰ và δ₂ 50 ‰:
+
+| Dòng | Lỗi đơn vị | Đúng nhất | Nhận đúng | Nhận nhầm |
+|---|---|---|---|---|
+| float | 0,367 | 170/209 | 119/209 | 4/126 |
+| bậc 2: `minmax` | 0,450 | 172/209 | 109/209 | 2/126 |
+| bậc 2: `percentile` | 0,385 | 165/209 | 115/209 | 4/126 |
+| bậc 2: `mse` | 0,402 | 176/209 | 122/209 | 2/126 |
+| bậc 2: `kl` | 0,395 | 177/209 | 112/209 | 3/126 |
+| bậc 4: QAT trên `mse`, 2 000 bước | 0,376 | 162/209 | 114/209 | 2/126 |
+| bậc 3: `mse`, int16 1 lớp | 0,402 | 181/209 | 119/209 | 3/126 |
+| bậc 3: `mse`, int16 2 lớp | 0,400 | 181/209 | 122/209 | 4/126 |
+| bậc 3: `mse`, int16 4 lớp | 0,401 | 176/209 | 119/209 | 3/126 |
+
+QAT hạ lỗi đơn vị `val` từ 0,366 xuống 0,347 trong 2 000 bước nhưng nhận đúng ít hơn `mse` 8 câu. Theo luật chọn của
+KẾ HOẠCH §3.14 (`gate_tie` 5), `mse`, int16 1, 2 và 4 lớp hoà ở 119–122 câu; int16 2 lớp có lỗi đơn vị thấp nhất, cần
+µs trên board của hai tích chập int16 trước khi chốt.
