@@ -424,3 +424,23 @@ PSRAM 3 881 KB; nạp qua bảng mới ánh xạ cả `models_0` 6 MB mà không
 So với mạng cỡ MultiNet7 trên 40 dải (§11, 5,8 ms mỗi 32 ms), mạng này chậm hơn 1,75 lần, nhiều hơn tỉ lệ tham số 1,56
 lần của các tầng; tích chập 2D đầu chạy trên số dải gấp đôi, phần của nó chưa đo tách. Vẫn dưới ngân sách 11–18 ms mỗi
 32 ms trong cửa sổ lệnh của KẾ HOẠCH §3.3.
+
+## 19. Bộ 300 lệnh trên firmware thật: chấm không theo kịp (E11-T14)
+
+Board B chạy firmware dev ở `2c07781` (bộ tới 301 lệnh, trạng thái các lượt tiến xếp liền trong một vùng chung, arena
+JSON 160 KiB), model `command/v8` hàng `percentile` nghe bằng Kaldi, độ hữu thanh gập (`contracts/models.lock.json`),
+δ₁ 100 ‰, δ₂ 0 ‰, cùng Wi-Fi, MQTT và khối lọc âm, 07/10 tối. Mỗi dòng là một quyết định trong log của `nhan_task`,
+không ai nói: cửa sổ mở trên tiếng trong phòng. "Tính" là thời gian máy chấm cả cửa sổ, "sau bước chốt" là từ bước
+chốt câu tới quyết định:
+
+| Bộ lệnh | Cách đọc | Quyết định | Cửa sổ, hop: nhỏ / giữa / lớn | Tính, ms | Sau bước chốt, ms |
+|---|---|---|---|---|---|
+| 47 lệnh của chủ repo, firmware `eb7e362` | 107 | 59 | 60 / 162 / 234 | 467 / 1 287 / 1 777 | 2 / 449 / 2 322 |
+| `test300_vi.json` | 651 | 15 | 45 / 183 / 234 | 723 / 2 963 / 3 912 | 2 175 / 4 503 / 6 241 |
+
+Bộ 300 lệnh nạp được và chấm đúng khuôn: `svc_listen: commands …: 300 commands, 651 readings`, PSRAM còn 1,9 MB khi
+nghe, không rơi khung (`dropped: clean 0`). Nhưng phần chấm dần của 651 cách đọc tốn cỡ thời gian thực của chính cửa sổ,
+nên quyết định tới sau khi câu chốt 2,2–6,2 s, giữa 4,5 s, so với 0,45 s của 107 cách đọc. Tính tăng 2,3 lần khi số cách
+đọc tăng 6,1 lần ở trung vị, nên phần chấm theo cách đọc chưa phải toàn bộ thời gian một bước; phần ấy cho 300 lệnh
+chưa đo tách trên chip: bài `ctc_decide` của `make ai-unit` lặp bộ mặc định tới 301 lệnh nhưng app thử hết PSRAM khi nạp
+model `ctc` (`ESP_ERR_NO_MEM`).
