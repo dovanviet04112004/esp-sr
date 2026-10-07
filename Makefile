@@ -138,23 +138,26 @@ ctc-features: ## Run each file of the command split through the board simulation
 ctc-train: ## Train the ctc net on processed/command on the GPU into ml/artifacts/command_ctc/runs; RESUME=<run under ml/> goes on from its last checkpoint (E11-T12)
 	cd ml && uv run --extra train python -m srpipe.tasks.command.ctc.train $(if $(RESUME),--resume $(RESUME))
 
-ctc-ptq: ## Rungs 1 and 2 of KEHOACH 3.14 on a trained ctc run, a row of each calibration beside float: make ctc-ptq RUN=<run under ml/> (E11-T12)
-	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant ptq $(RUN)
+# A ctc ladder heard on the board's Kaldi pitch with a pitch dim folded at its train mean (KEHOACH 3.14).
+CTC_HEARD = $(if $(KALDI),--kaldi-pitch) $(if $(HOLD),--hold $(HOLD))
+
+ctc-ptq: ## Rungs 1 and 2 of KEHOACH 3.14 on a trained ctc run, a row of each calibration beside float; KALDI=1 HOLD=voicing hears it on the board's Kaldi pitch with that dim folded at its mean, into <run>/int8_kaldi_voicing/, as every ladder step: make ctc-ptq RUN=<run under ml/> [KALDI=1] [HOLD=voicing|f0|pitch] (E11-T12)
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant ptq $(RUN) $(CTC_HEARD)
 
 rnnt-ptq: ## Rung 2 of the rnnt track on a trained run: its three graphs with each calibration, Gate 3 after int8 beside float, rows rnnt_* in the run's ladder: make rnnt-ptq RUN=<run under ml/> (E11-T20)
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.rnnt.quant ptq $(RUN)
 
-ctc-int16: ## Rung 3: the convolutions ESP-PPQ ranks worst at 16 bits, on the best calibration of ctc-ptq: make ctc-int16 RUN=<run under ml/> (E11-T12)
-	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant int16 $(RUN)
+ctc-int16: ## Rung 3: the convolutions ESP-PPQ ranks worst at 16 bits, on the best calibration of ctc-ptq: make ctc-int16 RUN=<run under ml/> [KALDI=1] [HOLD=...] (E11-T12)
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant int16 $(RUN) $(CTC_HEARD)
 
-ctc-qat: ## Rung 4: QAT on the GPU from the best calibration of ctc-ptq: make ctc-qat RUN=<run under ml/> (E11-T12)
-	cd ml && uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant qat $(RUN)
+ctc-qat: ## Rung 4: QAT on the GPU from the best calibration of ctc-ptq: make ctc-qat RUN=<run under ml/> [KALDI=1] [HOLD=...] (E11-T12)
+	cd ml && uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant qat $(RUN) $(CTC_HEARD)
 
-ctc-thresholds: ## Choose delta1 and delta2 of a ladder row on val_commands and val, decided as the chip decides: make ctc-thresholds RUN=<run under ml/> ROW=<row> (E11-T13)
-	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant thresholds $(RUN) --row $(ROW)
+ctc-thresholds: ## Choose delta1 and delta2 of a ladder row on val_commands and val, decided as the chip decides: make ctc-thresholds RUN=<run under ml/> ROW=<row> [KALDI=1] [HOLD=...] (E11-T13)
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant thresholds $(RUN) --row $(ROW) $(CTC_HEARD)
 
-ctc-deploy: ## Export a ladder row and its chosen delta1, delta2 into firmware/models/command and lock them: make ctc-deploy RUN=<run under ml/> ROW=<row> (E11-T19)
-	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant deploy $(RUN) --row $(ROW)
+ctc-deploy: ## Export a ladder row and its chosen delta1, delta2 into firmware/models/command and lock them: make ctc-deploy RUN=<run under ml/> ROW=<row> [KALDI=1] [HOLD=...] (E11-T19)
+	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant deploy $(RUN) --row $(ROW) $(CTC_HEARD)
 
 ctc-tone-flip: ## The tone checks of KEHOACH 3.11 on a ctc run into <run>/tone_flip_<check>.yaml: CHECK=val moves a checked sắc or nặng syllable of val onto the other tone by Praat, formants kept, its session simulated again; owner moves the first word of the owner's bật / tắt sessions; places reads tone right at the first and later syllables, pitch held or not; val and owner need Docker for the aligner; STEPS=2000,4000 scores those checkpoints of the run with owner or places, KALDI=1 hears through the board's Kaldi pitch: make ctc-tone-flip CHECK=val|owner|places RUN=<run under ml/> [STEPS=...] [KALDI=1] (E11-T23)
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra swiftf0 --extra praat python -m srpipe.tasks.command.ctc.tone_flip $(or $(CHECK),val) $(RUN) $(if $(STEPS),--steps $(STEPS)) $(if $(KALDI),--kaldi-pitch)

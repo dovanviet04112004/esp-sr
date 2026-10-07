@@ -1,17 +1,17 @@
 """The quantisation ladder of the ctc net (KEHOACH 3.14, ADR-0013). Run: python -m srpipe.tasks.command.ctc.quant
-ptq|int16|qat <run> | thresholds|deploy <run> --row <row>: rungs 1 and 2, rung 3, rung 4, the last two on the
-calibration of rung 2 that Gate 3 rates best. Each adds rows to <run>/int8/ladder.yaml, the test set's unit error rate
-and Gate 3 on the board sessions after int8 beside float, and keeps each row's graph under <run>/int8/<row>/ for
-probe.py. thresholds chooses a row's delta1 and delta2; deploy puts the row's graph and pair into
-firmware/models/command/ and records them with update_lock (E11-T19).
-"""
+ptq|int16|qat <run> | thresholds|deploy <run> --row <row> [--kaldi-pitch] [--hold <dim>]: rungs 1 to 4, the last two on
+rung 2's calibration Gate 3 rates best, each adding to <run>/int8/ladder.yaml the test set's unit error rate and Gate 3
+after int8 beside float, each row's graph under <run>/int8/<row>/ for probe.py; heard on the board's Kaldi pitch with a
+dim folded at its mean, under <run>/int8_kaldi_<dim>/. thresholds picks a row's delta1 and delta2; deploy puts graph
+and pair into firmware/models/command/ and records them with update_lock (E11-T19)."""
 
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -21,7 +21,7 @@ from torch import nn
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, ptq_espdl, qat_espdl
 from srpipe.core import corpus, extract, screen, splits
-from srpipe.core.config import apply_overrides, data_paths, load_yaml
+from srpipe.core.config import apply_overrides, data_paths, load_yaml, on_contract_pitch
 from srpipe.dsp.spec import pitch
 from srpipe.export import update_lock
 from srpipe.generated import listen
@@ -38,6 +38,52 @@ GRAPH_FILE = "graph.native"
 # The image names a branch's entries after its backend (KEHOACH 6.3).
 BRANCH, ENTRY = "command", "command_ctc"
 CHIP_BITS = 8  # espdl_net views int8 tensors only (KEHOACH 6.3)
+
+
+def kaldi_cfg(cfg: dict, paths: dict) -> dict:
+    """cfg on the contract's Kaldi pitch, its sentences read from its simulate.mel_from build, which holds the same
+    items and log-mel on that pitch; refused unless that build is what the contract's front makes of the split."""
+    source = cfg.get("simulate", {}).get("mel_from")
+    if source is None:
+        raise ValueError("the run's build tracked its pitch over its own log-mel: no build holds it on Kaldi's pitch")
+    heard = on_contract_pitch(cfg) | {"split": cfg["split"] | {"version": source}, "listen_hash": listen.HASH}
+    if stale := data.unbuilt(heard, paths):
+        raise ValueError(f"{', '.join(str(p) for p in stale)}: not the contract's front over the split, as {source}")
+    return heard
+
+
+def folded(net: gate.Ctc, dims: tuple[int, ...]) -> gate.Ctc:
+    """net with the pitch dims at dims held at their train mean inside it: their columns of the front's projection,
+    the one way the hop-averaged pitch dims reach the net, at zero (KEHOACH 3.14)."""
+    model = copy.deepcopy(net.model)
+    proj = model.front.proj
+    with torch.no_grad():
+        proj.weight[:, [proj.in_channels - gate.N_PITCH + d for d in dims]] = 0.0
+    return replace(net, model=model)
+
+
+@dataclass(frozen=True)
+class Hearing:
+    """The pitch a ladder hears its run on: the one the run learnt, or the contract's Kaldi pitch as the board gives
+    it, with the pitch dims gate.HOLDS names under hold folded at their train mean (KEHOACH 3.14)."""
+
+    kaldi: bool = False
+    hold: str | None = None
+
+    def folder(self, run: Path) -> Path:
+        return run / "_".join(["int8", *(["kaldi"] if self.kaldi else []), *([self.hold] if self.hold else [])])
+
+    def net(self, run: Path, paths: dict) -> gate.Ctc:
+        net = gate.load_ctc(run)
+        if self.kaldi:
+            net = replace(net, cfg=kaldi_cfg(net.cfg, paths))
+        return folded(net, gate.HOLDS[self.hold]) if self.hold else net
+
+    def held(self) -> tuple[int, ...]:
+        return gate.HOLDS[self.hold] if self.hold else ()
+
+
+LEARNT = Hearing()
 
 
 def padded(x: np.ndarray, hops: int, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
@@ -189,11 +235,11 @@ def board_windows(cfg: dict, net: gate.Ctc, paths: dict) -> list[gate.Scored]:
     return gate.board(net.cfg, load_yaml(command.CONFIG)["eval"]["board"], paths, said, window_of)
 
 
-def bench(cfg: dict, run: Path) -> Bench:
-    """The run's net, its calibration, quant.test_sentences test sentences drawn with the seed, and the board
-    windows."""
+def bench(cfg: dict, run: Path, hearing: Hearing = LEARNT) -> Bench:
+    """The run's net as hearing hears it, its calibration, quant.test_sentences test sentences drawn with the seed,
+    and the board windows."""
     spec, paths = cfg["quant"], data_paths()
-    net = gate.load_ctc(run)
+    net = hearing.net(run, paths)
     version = net.cfg["split"]["version"]
     root = paths["processed"] / "command" / version
     listed = {r.item for r in splits.read_split(paths["splits"] / "command" / version / "test.txt")}
@@ -224,15 +270,16 @@ def int8_row(cfg: dict, b: Bench, graph, folder: Path, rungs: dict) -> dict:
     return {"calibration": rungs["calibration"], "int16_ops": rungs["int16_ops"], **row_of(cfg, b, int8)}
 
 
-def ladder_file(run: Path) -> Path:
-    return run / "int8" / "ladder.yaml"
+def ladder_file(run: Path, hearing: Hearing = LEARNT) -> Path:
+    return hearing.folder(run) / "ladder.yaml"
 
 
-def recorded(run: Path, head: dict, rows: dict) -> Path:
-    """head and rows merged into the run's ladder.yaml, rows of the other steps kept; each row printed."""
+def recorded(run: Path, head: dict, rows: dict, hearing: Hearing = LEARNT) -> Path:
+    """head and rows merged into the ladder.yaml of the run as hearing hears it, rows of the other steps kept; each
+    row printed."""
     for name, row in rows.items():
         print(f"{name}: {row}", flush=True)
-    out = ladder_file(run)
+    out = ladder_file(run, hearing)
     kept = yaml.safe_load(out.read_text(encoding="utf-8")) if out.is_file() else {}
     merged = kept | head | {"rows": kept.get("rows", {}) | rows}
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -244,67 +291,75 @@ def counted(share: str) -> int:
     return int(share.split("/")[0])
 
 
-def best_calibration(run: Path, calibrations: list[str], tie: int) -> str:
+def best_calibration(run: Path, calibrations: list[str], tie: int, hearing: Hearing = LEARNT) -> str:
     """The calibration of rung 2 rated best (KEHOACH 3.14): among those within tie commands accepted right of the
     most, the lowest unit error rate on the test set, then the fewest false accepts."""
-    rows = yaml.safe_load(ladder_file(run).read_text(encoding="utf-8"))["rows"] if ladder_file(run).is_file() else {}
+    out = ladder_file(run, hearing)
+    rows = yaml.safe_load(out.read_text(encoding="utf-8"))["rows"] if out.is_file() else {}
     missing = [c for c in calibrations if c not in rows]
     if missing:
-        raise ValueError(f"{ladder_file(run)} has no row of {missing}: run the ptq step first")
+        raise ValueError(f"{out} has no row of {missing}: run the ptq step first")
     most = max(counted(rows[c]["accepted_right"]) for c in calibrations)
     tied = [c for c in calibrations if counted(rows[c]["accepted_right"]) >= most - tie]
     return min(tied, key=lambda c: (rows[c]["unit_error_rate"], counted(rows[c]["false_accepts"])))
 
 
-def step_ptq(cfg: dict, run: Path) -> Path:
+def heard_head(hearing: Hearing) -> dict:
+    return {"heard": {"pitch": "kaldi" if hearing.kaldi else "learnt", "hold": hearing.hold}}
+
+
+def step_ptq(cfg: dict, run: Path, hearing: Hearing = LEARNT) -> Path:
     """Rungs 1 and 2: the float row, then a row of the net quantised with each calibration."""
-    spec, b = cfg["quant"], bench(cfg, run)
-    head = {"rungs": ptq_espdl.ladder(LADDER), "quant": spec, "test_sentences": len(b.picks)}
-    out = recorded(run, head, {"float": row_of(cfg, b, b.net.model)})
+    spec, b, folder = cfg["quant"], bench(cfg, run, hearing), hearing.folder(run)
+    head = {"rungs": ptq_espdl.ladder(LADDER), "quant": spec, "test_sentences": len(b.picks)} | heard_head(hearing)
+    out = recorded(run, head, {"float": row_of(cfg, b, b.net.model)}, hearing)
     for name in spec["calibrations"]:
         rungs = ptq_espdl.ladder(LADDER) | {"calibration": name}
-        graph = quantized(b.net.model, b.calib, run / "int8" / name, rungs, cfg["esp_ppq_patches"])
-        out = recorded(run, head, {name: int8_row(cfg, b, graph, run / "int8" / name, rungs)})
+        graph = quantized(b.net.model, b.calib, folder / name, rungs, cfg["esp_ppq_patches"])
+        out = recorded(run, head, {name: int8_row(cfg, b, graph, folder / name, rungs)}, hearing)
     return out
 
 
-def step_int16(cfg: dict, run: Path) -> Path:
+def step_int16(cfg: dict, run: Path, hearing: Hearing = LEARNT) -> Path:
     """Rung 3 on the best calibration: ESP-PPQ's per-layer error ranks the convolutions, and each row puts the worst
     of them at 16 bits."""
-    spec, b = cfg["quant"], bench(cfg, run)
-    rungs = ptq_espdl.ladder(LADDER) | {"calibration": best_calibration(run, spec["calibrations"], spec["gate_tie"])}
-    base = quantized(b.net.model, b.calib, run / "int8" / "int16_base", rungs, cfg["esp_ppq_patches"])
+    spec, b, folder = cfg["quant"], bench(cfg, run, hearing), hearing.folder(run)
+    best = best_calibration(run, spec["calibrations"], spec["gate_tie"], hearing)
+    rungs = ptq_espdl.ladder(LADDER) | {"calibration": best}
+    base = quantized(b.net.model, b.calib, folder / "int16_base", rungs, cfg["esp_ppq_patches"])
     with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
         ranked = mixed_espdl.ranked_layers(base, b.calib[: spec["layerwise_sentences"]])
     layers = [{"op": name, "noise_to_signal": round(error, 6)} for name, error in ranked]
     head = {"int16_base": rungs["calibration"], "layerwise": layers}
-    out = recorded(run, head, {})
+    out = recorded(run, head, {}, hearing)
     for name, ops in mixed_espdl.int16_rows(ranked, spec["int16_tops"]).items():
         wide = rungs | {"int16_ops": ops}
-        graph = quantized(b.net.model, b.calib, run / "int8" / name, wide, cfg["esp_ppq_patches"])
-        out = recorded(run, head, {name: int8_row(cfg, b, graph, run / "int8" / name, wide)})
+        graph = quantized(b.net.model, b.calib, folder / name, wide, cfg["esp_ppq_patches"])
+        out = recorded(run, head, {name: int8_row(cfg, b, graph, folder / name, wide)}, hearing)
     return out
 
 
-def step_qat(cfg: dict, run: Path, device: str) -> Path:
-    """Rung 4 on the best calibration: the graph built for quant.qat.batch learns with CTC, then what it learnt moves
-    onto the graph of one, which the row measures; the val rows go to <run>/int8/qat/history.yaml."""
-    spec, b = cfg["quant"], bench(cfg, run)
-    rungs = ptq_espdl.ladder(LADDER) | {"calibration": best_calibration(run, spec["calibrations"], spec["gate_tie"])}
-    folder, patches = run / "int8" / "qat", cfg["esp_ppq_patches"]
+def step_qat(cfg: dict, run: Path, device: str, hearing: Hearing = LEARNT) -> Path:
+    """Rung 4 on the best calibration: the graph built for quant.qat.batch learns with CTC, the held pitch dims at
+    their train mean, then what it learnt moves onto the graph of one, which the row measures; the val rows go to
+    qat/history.yaml of the ladder."""
+    spec, b = cfg["quant"], bench(cfg, run, hearing)
+    best = best_calibration(run, spec["calibrations"], spec["gate_tie"], hearing)
+    rungs = ptq_espdl.ladder(LADDER) | {"calibration": best}
+    folder, patches = hearing.folder(run) / "qat", cfg["esp_ppq_patches"]
     wide = quantized(b.net.model, batched(b.calib, spec["qat"]["batch"]), folder / "batch", rungs, patches)
-    stats = (b.net.mean, b.net.std)
+    stats, sets = (b.net.mean, b.net.std), train.load_sets(b.net.cfg)
     with esp_ppq_patches.applied(patches):
-        history = qat.fit(wide, train.load_sets(b.net.cfg), stats, cfg, b.net.cfg, b.net.model, device)
+        history = qat.fit(wide, sets, stats, cfg, b.net.cfg, b.net.model, device, hearing.held())
     (folder / "history.yaml").write_text(yaml.safe_dump(history, sort_keys=False), encoding="utf-8")
     graph = quantized(b.net.model, b.calib, folder, rungs, patches)
     with esp_ppq_patches.applied(patches):
         qat_espdl.carry(wide, graph, b.calib[0].numpy())
-    return recorded(run, {"qat": spec["qat"]}, {"qat": int8_row(cfg, b, graph, folder, rungs)})
+    return recorded(run, {"qat": spec["qat"]}, {"qat": int8_row(cfg, b, graph, folder, rungs)}, hearing)
 
 
-def thresholds_file(run: Path, row: str) -> Path:
-    return run / "int8" / row / "thresholds.yaml"
+def thresholds_file(run: Path, row: str, hearing: Hearing = LEARNT) -> Path:
+    return hearing.folder(run) / row / "thresholds.yaml"
 
 
 def built_windows(folder: Path) -> list[tuple[list[str], np.ndarray]]:
@@ -354,13 +409,14 @@ def operating_point(
     }
 
 
-def step_thresholds(cfg: dict, run: Path, row: str) -> Path:
+def step_thresholds(cfg: dict, run: Path, row: str, hearing: Hearing = LEARNT) -> Path:
     """delta1 and delta2 for row (KEHOACH 3.12): every window of val_commands, real voices saying one learned command,
     and of val, speech that says none, decided as the chip decides on the row's int8 graph, each cut back to
     window_s as svc_listen cuts it; operating_point over eval.reject_sweep and quant.thresholds, written with its
     table and Gate 3 at the pair to <run>/int8/<row>/thresholds.yaml for deploy."""
-    net, paths = gate.load_ctc(run), data_paths()
-    graph = export_espdl.load_native(run / "int8" / row / GRAPH_FILE)
+    paths = data_paths()
+    net = hearing.net(run, paths)
+    graph = export_espdl.load_native(hearing.folder(run) / row / GRAPH_FILE)
     int8 = Int8Net(graph, cfg["quant"]["hops"], net.mean, net.std, net.model, cfg["esp_ppq_patches"])
     chip = gate.Ctc(int8, net.mean, net.std, net.names, net.lexicon, net.cfg)
     root = paths["processed"] / "command" / net.cfg["split"]["version"]
@@ -386,7 +442,7 @@ def step_thresholds(cfg: dict, run: Path, row: str) -> Path:
     chosen = operating_point(said, heard, meant, cfg["quant"]["thresholds"], cfg["eval"]["reject_sweep"])
     pair = chosen["reject_permille"], chosen["margin_permille"]
     gate3 = gate_row(chip, board_windows(cfg, net, paths), *pair, chip_heard)
-    out = thresholds_file(run, row)
+    out = thresholds_file(run, row, hearing)
     counts = {"val_commands": {c: len(hs) for c, hs in said.items()}, "val": len(heard)}
     body = chosen | {"gate3": gate3, "windows": counts}
     out.write_text(yaml.safe_dump(body, allow_unicode=True, sort_keys=False), encoding="utf-8")
@@ -394,32 +450,32 @@ def step_thresholds(cfg: dict, run: Path, row: str) -> Path:
     return out
 
 
-def step_deploy(cfg: dict, run: Path, row: str) -> tuple[Path, Path]:
+def step_deploy(cfg: dict, run: Path, row: str, hearing: Hearing = LEARNT) -> tuple[Path, Path]:
     """The graph of row as firmware/models/command/ holds it: the .espdl streamed the run's chunk_hops at a time with a
     test sentence's first chunk stored for model->test(), as probe.py streams it, and the train statistics as the NORM
     entry; update_lock records both with the row's rungs and the listen hash. Refused for a run of another listen
     hash, and for a row whose input or output is not int8, which the chip would not run."""
-    net = gate.load_ctc(run)
+    net = hearing.net(run, data_paths())
     learnt = net.cfg.get("listen_hash")
     if learnt != listen.HASH:
         raise ValueError(
             f"{run.name} learned on listen hash {learnt and hex(learnt)}, the firmware cuts by {hex(listen.HASH)} "
             "and would leave its command off (KEHOACH 6.3)"
         )
-    graph = export_espdl.load_native(run / "int8" / row / GRAPH_FILE)
+    graph = export_espdl.load_native(hearing.folder(run) / row / GRAPH_FILE)
     if (bits := ptq_espdl.io_bits(graph)) != (CHIP_BITS, CHIP_BITS):
         raise ValueError(f"row {row} reads {bits[0]} and gives {bits[1]} bits; the chip runs int8 at both ends")
-    rungs = yaml.safe_load(ladder_file(run).read_text(encoding="utf-8"))["rows"][row]
-    if not thresholds_file(run, row).is_file():
+    rungs = yaml.safe_load(ladder_file(run, hearing).read_text(encoding="utf-8"))["rows"][row]
+    if not thresholds_file(run, row, hearing).is_file():
         raise ValueError(f"row {row} has no delta1, delta2 chosen: make ctc-thresholds RUN={run} ROW={row} first")
-    chosen = yaml.safe_load(thresholds_file(run, row).read_text(encoding="utf-8"))
+    chosen = yaml.safe_load(thresholds_file(run, row, hearing).read_text(encoding="utf-8"))
     x, chunk = test_sentence(cfg, net), net.cfg["chunk_hops"]
     io = ptq_espdl.io_of(graph)
     on_grid = ptq_espdl.to_int8(x, io.input_exponent).astype(np.float32) * np.float32(2.0**io.input_exponent)
     with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
         built = export_espdl.export(
             graph,
-            run / "int8" / row / "deploy" / f"{ENTRY}.espdl",
+            hearing.folder(run) / row / "deploy" / f"{ENTRY}.espdl",
             streaming_input_shape=[1, x.shape[1], chunk],
             test_input=on_grid[..., :chunk],
         )
@@ -440,6 +496,8 @@ def step_deploy(cfg: dict, run: Path, row: str) -> tuple[Path, Path]:
         "rungs": {"calibration": rungs["calibration"], "int16_ops": rungs["int16_ops"]},
         "thresholds": {k: chosen[k] for k in ("reject_permille", "margin_permille")},
     }
+    if hearing != LEARNT:
+        fields |= heard_head(hearing)
     return update_lock.record(BRANCH, run, files, fields)
 
 
@@ -449,19 +507,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.command.ctc.train")
     parser.add_argument("--row", help="thresholds, deploy: the row of <run>/int8/ladder.yaml")
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
+    parser.add_argument(
+        "--kaldi-pitch", action="store_true", help="hear the run on the contract's Kaldi pitch, as the board gives it"
+    )
+    parser.add_argument("--hold", choices=sorted(gate.HOLDS), help="pitch dims folded at the run's train mean")
     args = parser.parse_args(argv)
     cfg = apply_overrides(load_yaml(ctc.CONFIG), args.overrides)
+    hearing = Hearing(args.kaldi_pitch, args.hold)
     if args.step in ("thresholds", "deploy") and args.row is None:
         parser.error(f"{args.step} needs --row")
     if args.step == "thresholds":
-        print(step_thresholds(cfg, args.run, args.row))
+        print(step_thresholds(cfg, args.run, args.row, hearing))
     elif args.step == "deploy":
-        for path in step_deploy(cfg, args.run, args.row):
+        for path in step_deploy(cfg, args.run, args.row, hearing):
             print(path)
     elif args.step == "qat":
-        print(step_qat(cfg, args.run, "cuda" if torch.cuda.is_available() else "cpu"))
+        print(step_qat(cfg, args.run, "cuda" if torch.cuda.is_available() else "cpu", hearing))
     else:
-        print({"ptq": step_ptq, "int16": step_int16}[args.step](cfg, args.run))
+        print({"ptq": step_ptq, "int16": step_int16}[args.step](cfg, args.run, hearing))
     return 0
 
 

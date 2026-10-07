@@ -17,21 +17,30 @@ from srpipe.tasks.command.ctc import train
 from srpipe.tasks.command.ctc.model import encoder
 
 
+def held_at_mean(x: np.ndarray, hold: tuple[int, ...]) -> np.ndarray:
+    """Normalised sentences (batch, hops, dims) with the pitch dims at hold, counted from the first of the three, at
+    zero, their train mean."""
+    x[..., [x.shape[2] - pitch.N_FEATURES + d for d in hold]] = 0.0
+    return x
+
+
 def as_input(x: np.ndarray, device: str) -> torch.Tensor:
     """Normalised sentences (batch, hops, dims) as the graph reads them, (batch, dims, hops)."""
     return torch.from_numpy(np.ascontiguousarray(x.transpose(0, 2, 1))).to(device)
 
 
-def evaluate(net: qat_espdl.Trainable, data: train.Sentences, stats: tuple, model: encoder.CtcNet, device: str) -> dict:
+def evaluate(
+    net: qat_espdl.Trainable, data: train.Sentences, stats: tuple, model: encoder.CtcNet, device: str, hold=()
+) -> dict:
     """Mean CTC loss of val and the unit error rate of the best path, in batches of the graph's batch, the last one
-    filled up by repeating its own sentences, which are counted once."""
+    filled up by repeating its own sentences, which are counted once; the pitch dims at hold at their train mean."""
     mean, std = stats
     batch, stride = qat_espdl.batch_of(net.graph), model.front.hop_stride
     losses, errors, total = [], 0, 0
     for k in range(0, len(data.first), batch):
         real = np.arange(k, min(k + batch, len(data.first)))
         x, hops, units = train.batch_of(data, np.resize(real, batch), model.chunk_multiple)
-        log_probs = net.infer(as_input((x - mean) / std, device)).log_softmax(1)
+        log_probs = net.infer(as_input(held_at_mean((x - mean) / std, hold), device)).log_softmax(1)
         frames, n = train.frames_of(hops, stride), len(real)
         losses.append(float(train.ctc_loss(log_probs[:n], frames[:n], units[:n])) * n)
         heard = log_probs.cpu().numpy()
@@ -41,9 +50,10 @@ def evaluate(net: qat_espdl.Trainable, data: train.Sentences, stats: tuple, mode
     return {"loss": sum(losses) / len(data.first), "unit_error_rate": errors / total}
 
 
-def fit(graph, sets: dict, stats: tuple, cfg: dict, trained: dict, model, device: str) -> list:
+def fit(graph, sets: dict, stats: tuple, cfg: dict, trained: dict, model, device: str, hold=()) -> list:
     """graph trained quant.qat.steps steps of its batch at a cosine-decayed learning rate on train.load_sets' sets,
-    drawn from its pool, masked and clipped as the run trained (trained, its config); the val rows."""
+    drawn from its pool, masked and clipped as the run trained (trained, its config), the pitch dims at hold at their
+    train mean, so a column folded to zero gets no gradient; the val rows."""
     spec = cfg["quant"]["qat"]
     mean, std = stats
     net = qat_espdl.Trainable(graph, device)
@@ -55,13 +65,13 @@ def fit(graph, sets: dict, stats: tuple, cfg: dict, trained: dict, model, device
     rng = seed_everything(cfg["quant"]["seed"])
     pool, batch = sets["train"], qat_espdl.batch_of(graph)
     n_mel = pool.dims - pitch.N_FEATURES
-    history = [{"step": 0} | evaluate(net, sets["val"], stats, model, device)]
+    history = [{"step": 0} | evaluate(net, sets["val"], stats, model, device, hold)]
     print(history[0], flush=True)
     losses = []
     for step in range(1, spec["steps"] + 1):
         data = pool.at(step)
         x, hops, units = train.batch_of(data, rng.integers(len(data.first), size=batch), model.chunk_multiple)
-        x = (x - mean) / std
+        x = held_at_mean((x - mean) / std, hold)
         train.mask(x, hops, trained["train"]["masks"], n_mel, rng)
         log_probs = net(as_input(x, device)).log_softmax(1)
         loss = train.ctc_loss(log_probs, train.frames_of(hops, model.front.hop_stride), units)
@@ -73,7 +83,7 @@ def fit(graph, sets: dict, stats: tuple, cfg: dict, trained: dict, model, device
         losses.append(loss.item())
         if step % spec["eval_every"] == 0 or step == spec["steps"]:
             row = {"step": step, "train_loss": float(np.mean(losses)), "lr": schedule.get_last_lr()[0]}
-            history.append(row | evaluate(net, sets["val"], stats, model, device))
+            history.append(row | evaluate(net, sets["val"], stats, model, device, hold))
             print(row_line(history[-1]), flush=True)
             losses = []
     net.freeze()

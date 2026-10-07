@@ -2,7 +2,8 @@
 sentence starts, stacked for a batch, the Gate 3 row, an int8 window decided as the chip's record is, the rows of every
 step kept in one file, the best calibration within the tie, a norm left unfused refused, rung 4 training a batch graph
 the graph of one then carries, and no deploy of a run cut by another listen.yaml or of a row whose input or output is
-not int8."""
+not int8; a pitch dim folded into the front reads as held at its mean and stays folded through rung 4, and a ladder
+heard on Kaldi keeps its own folder and reads its mel_from build only when that is the contract's front."""
 
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ import yaml
 torch = pytest.importorskip("torch")
 
 from srpipe.compress.quant import esp_ppq_patches, ptq_espdl, qat_espdl  # noqa: E402
-from srpipe.core.config import load_yaml  # noqa: E402
+from srpipe.core.config import contract_front, load_yaml  # noqa: E402
 from srpipe.generated import listen  # noqa: E402
 from srpipe.tasks.command import ctc  # noqa: E402
 from srpipe.tasks.command import eval as gate  # noqa: E402
@@ -133,20 +134,25 @@ def pooled(folder: Path, rng: np.random.Generator, hops: list[int]) -> train.Poo
     return train.Pool(train.shards_of([folder], units, 64), DIMS, 1 << 20, 1, 0)
 
 
-def test_rung_4_trains_a_batch_graph_and_the_graph_of_one_carries_it(tmp_path: Path) -> None:
+@pytest.mark.parametrize("hold", [(), (0,)])
+def test_rung_4_trains_a_batch_graph_and_the_graph_of_one_carries_it(tmp_path: Path, hold: tuple) -> None:
     cfg = load_yaml(ctc.CONFIG)
     cfg["quant"]["qat"] |= {"steps": 2, "eval_every": 1}
     torch.manual_seed(0)
     model = probe.draw_norm_scales(encoder.build(cfg), *cfg["probe"]["norm_scale"]).eval()
+    stats = (np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32))
+    model = quant.folded(gate.Ctc(model, *stats, [], [], cfg), hold).model
     rng = np.random.default_rng(4)
     calib = [torch.from_numpy(rng.normal(size=(1, DIMS, 64)).astype(np.float32)) for _ in range(4)]
     rungs = ptq_espdl.ladder(quant.LADDER) | {"equalization": None, "bias_correction": False, "calibration": "minmax"}
     wide = quant.quantized(model, quant.batched(calib, 2), tmp_path / "b", rungs, cfg["esp_ppq_patches"])
     sets = {"train": pooled(tmp_path / "t", rng, [48, 40, 56, 32]), "val": sentences(rng, [40, 48, 32])}
-    stats = (np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32))
     with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
-        history = qat.fit(wide, sets, stats, cfg, cfg, model, "cpu")
+        history = qat.fit(wide, sets, stats, cfg, cfg, model, "cpu", hold)
     assert [row["step"] for row in history] == [0, 1, 2] and all(row["unit_error_rate"] >= 0 for row in history)
+    weight = next(op for name, op in wide.operations.items() if "front/proj" in name).inputs[1].value
+    held = weight[:, [weight.shape[1] - 3 + d for d in hold]]
+    assert torch.all(held == 0) and bool(torch.any(weight[:, weight.shape[1] - 3 :] != 0))
     one = quant.quantized(model, calib, tmp_path / "1", rungs, cfg["esp_ppq_patches"])
     with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
         qat_espdl.carry(wide, one, calib[0].numpy())
@@ -256,3 +262,40 @@ def test_a_row_without_its_chosen_thresholds_is_not_deployed(tmp_path: Path, mon
     quant.recorded(tmp_path, {}, {"row": gate_of(80, 0.3) | {"calibration": "kl", "int16_ops": []}})
     with pytest.raises(ValueError, match="no delta1, delta2 chosen"):
         quant.step_deploy(load_yaml(ctc.CONFIG), tmp_path, "row")
+
+
+def test_a_pitch_dim_folded_into_the_front_reads_as_held_at_its_train_mean() -> None:
+    cfg = load_yaml(ctc.CONFIG)
+    torch.manual_seed(0)
+    model = probe.draw_norm_scales(encoder.build(cfg), *cfg["probe"]["norm_scale"]).eval()
+    net = gate.Ctc(model, np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32), [], [], cfg)
+    x = torch.randn(1, DIMS, 64)
+    held = x.clone()
+    held[:, DIMS - 3] = 0.0
+    folded = quant.folded(net, (0,))
+    with torch.no_grad():
+        assert torch.allclose(folded.model(x), model(held), atol=1e-5)
+        assert not torch.allclose(model(x), model(held), atol=1e-5)
+    assert bool(torch.all(model.front.proj.weight[:, -3] != 0))
+
+
+def test_a_ladder_heard_on_kaldi_with_a_dim_held_keeps_its_own_folder(tmp_path: Path) -> None:
+    kaldi = quant.Hearing(kaldi=True, hold="voicing")
+    assert quant.LEARNT.folder(tmp_path) == tmp_path / "int8"
+    assert kaldi.folder(tmp_path) == tmp_path / "int8_kaldi_voicing" and kaldi.held() == gate.HOLDS["voicing"]
+    quant.recorded(tmp_path, {}, {"a": gate_of(70, 0.3)}, kaldi)
+    assert quant.ladder_file(tmp_path, kaldi).is_file() and not quant.ladder_file(tmp_path).exists()
+
+
+def test_kaldi_hears_a_run_on_its_mel_from_build_only_if_that_is_the_contracts_front(monkeypatch) -> None:
+    learnt = contract_front() | {"pitch": {"source": "swiftf0"}}
+    cfg = {"simulate": {"mel_from": "v7"}, "split": {"version": "v8"}, "listen": learnt, "listen_hash": 0}
+    monkeypatch.setattr(quant.data, "unbuilt", lambda _cfg, _paths: [])
+    heard = quant.kaldi_cfg(cfg, {})
+    assert heard["split"]["version"] == "v7" and heard["listen"]["pitch"] == contract_front()["pitch"]
+    assert heard["listen_hash"] == listen.HASH and cfg["split"]["version"] == "v8"
+    monkeypatch.setattr(quant.data, "unbuilt", lambda _cfg, _paths: [Path("v7/test")])
+    with pytest.raises(ValueError, match="not the contract's front"):
+        quant.kaldi_cfg(cfg, {})
+    with pytest.raises(ValueError, match="no build holds it"):
+        quant.kaldi_cfg(cfg | {"simulate": {}}, {})
