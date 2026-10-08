@@ -107,8 +107,8 @@ static const dsp_afe_calib_t *load_calib(void)
     return &calib;
 }
 
-// The image brings the pair chosen for its command; SET_CONFIG wins until the suggested pair changes
-// (KEHOACH 6.2).
+// The image brings the pair chosen for its command; SET_CONFIG wins until the suggested pair changes or a
+// key is gone (KEHOACH 6.2).
 static void seed_thresholds(void)
 {
     uint16_t reject = CONFIG_SVC_LISTEN_CMD_REJECT_PERMILLE, margin = CONFIG_SVC_LISTEN_CMD_MARGIN_PERMILLE;
@@ -122,7 +122,10 @@ static void seed_thresholds(void)
     }
     const uint32_t suggested = (uint32_t)reject << 16 | margin;
     uint32_t seeded = 0;
-    if (sys_storage_get_u32(STORAGE_NS_KWS, STORAGE_KEY_CMD_SEEDED, &seeded) == ESP_OK &&
+    uint16_t held = 0;
+    const bool both_held = sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, &held) == ESP_OK &&
+                           sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, &held) == ESP_OK;
+    if (both_held && sys_storage_get_u32(STORAGE_NS_KWS, STORAGE_KEY_CMD_SEEDED, &seeded) == ESP_OK &&
         seeded == suggested) {
         return;
     }
