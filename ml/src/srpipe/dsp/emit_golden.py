@@ -36,6 +36,8 @@ BALANCE_HOPS = 16
 VAD_HOPS = 160
 AGC_LONG_HOPS = 128
 AGC_HOPS = 48
+AGC_DECAY_HOP = 8
+AGC_DECAY_SAMPLES = 160
 # ns cases outlive two minimum windows of IMCRA (2 x 64 hops), what a rise of the noise takes to follow.
 NS_HOPS = 200
 NS_RISE_HOPS = 240
@@ -556,8 +558,19 @@ def agc_case(
     }
 
 
+def _agc_slow_decay(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, float]:
+    """Speech with one slow decay above the limit, every sample a little under the one before: far more rising
+    wanted gains in a row than the look-ahead holds, which the sliding minimum must still follow."""
+    n = AGC_HOPS * grid.HOP_SAMPLES
+    x = speechlike(rng, n, 0.05)
+    start = AGC_DECAY_HOP * grid.HOP_SAMPLES + 17
+    x[start : start + AGC_DECAY_SAMPLES] = np.linspace(0.99, 0.75, AGC_DECAY_SAMPLES)
+    return _pcm(x), np.ones(AGC_HOPS, dtype=np.uint8), afe.AGC_TARGET_DBFS
+
+
 def emit_agc(root: Path) -> list[Path]:
-    """Three cases, then a negative control computed as if every hop were silence, so the gain never moves."""
+    """Four cases, the last a slow decay above the limit, then a negative control computed as if every hop were
+    silence, so the gain never moves."""
     rng = np.random.default_rng(SEED + 6)
     written = []
     for index, (pcm, speech, target) in enumerate(_agc_inputs(rng)):
@@ -570,6 +583,9 @@ def emit_agc(root: Path) -> list[Path]:
     )
     path = root / "agc" / "case_neg_000.gold"
     write_gold(path, negative)
+    written.append(path)
+    path = root / "agc" / "case_003.gold"
+    write_gold(path, agc_case(*_agc_slow_decay(np.random.default_rng(SEED + 10))))
     written.append(path)
     return written
 
