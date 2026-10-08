@@ -959,8 +959,8 @@ Chọn bằng AUC thanh của từ đầu trên `val` và trên giọng chủ re
 và học một lượt để xác nhận Cửa 3. Không bộ nào hơn cách tốt nhất trong ba cách trên thì dùng cách ấy.
 
 **Hướng còn lại**, theo thứ tự, khi các bước trên chưa đủ:
-- mạng nhìn trước tới 0,4 s: board vốn chờ `utterance.gap_s` 0,4 s trước khi chốt câu nên không thêm trễ quyết định,
-  nhưng phải đổi cách chạy dòng của encoder và `StreamingCache` (§3.12), kế hoạch riêng;
+- mạng nhìn trước tới 0,4 s: board vốn chờ `utterance.gap_s` 0,4 s trước khi chốt câu nên không thêm trễ quyết định;
+  lượt thử với một lớp nhìn trước trên đỉnh encoder ở §3.12;
 - thu thêm người thật nói lệnh qua board ở 1–3 m, nhất là những lệnh khác nhau ở thanh và nguyên âm như "tắt" / "bật":
   mạnh nhất vì là tiếng thật, chậm nhất vì cần người và phiếu đồng ý (E11-T2, E11-T6).
 
@@ -1156,6 +1156,26 @@ Lô `train.batch` câu rút trong một nhóm độ dài: câu của vòng đệ
 nhau; mỗi bước rút đều một nhóm rồi rút đều câu trong nhóm, nên câu nào cũng được rút đều như rút thẳng cả vòng, mà lô
 chỉ đệm tới câu dài nhất của nhóm: đệm tới câu dài nhất cả vòng thì chừng 40% khung GPU là phần đệm
 (`measurements/command.md` §12.13).
+
+**Nhìn trước** (`model.lookahead_frames`). Encoder nhân quả chỉ thấy tiếng đã qua, nên đơn vị của âm tiết đầu ra khi
+mạng chưa nghe phần sau của chính âm tiết ấy và âm tiết kế tiếp: thanh đúng ở âm tiết đầu kém các âm tiết sau 8–10
+điểm ở mọi cách nghe cao độ (`measurements/command.md` §12.25). Lớp nhìn trước là một tích chập theo chiều sâu nhân
+`lookahead_frames` + 1 trên trạng thái encoder ngay trước đầu CTC, như row convolution của DeepSpeech2 (Amodei và cộng
+sự, 2016): khung t đọc trạng thái t … t + `lookahead_frames`; trọng số khởi đầu là phép đồng nhất, 1 ở khung t và 0 ở
+các khung sau, nên mạng mới ra đúng mạng nó khởi từ. 12 khung CTC là 0,384 s, trong 0,4 s `utterance.gap_s` board vốn
+chờ trước khi chốt câu (§5.4), nên quyết định không trễ thêm. Luật cắt cửa sổ không đổi: sau bước cuối của cửa sổ nối
+`hop_stride × lookahead_frames` bước đặc trưng bằng trung bình lúc học, tức 0 sau chuẩn hoá, để các khung cuối có
+tương lai, ở lúc học, lúc chấm và trên chip như nhau. Trên chip lớp ấy là tích chập nhân quả thường mà `StreamingCache`
+giữ được, đầu ra trễ `lookahead_frames` khung; `ai_engine` đẩy thêm các bước trung bình ấy khi câu chốt và `meta.json`
+khai `lookahead_frames` (§6.3), phần firmware làm khi lượt thử dưới đây thắng.
+
+**Học tinh chỉnh** (`train.init`, `train.hold`). Lượt học bắt đầu từ trọng số cuối và trung bình, độ lệch của run
+`train.init`, với bộ tối ưu và lịch tốc độ học mới; `train.hold` giữ các chiều cao độ nó nêu ở trung bình lúc học trong
+mọi lô và mọi lần chấm, nên cột của chúng trong `front.proj` không nhận gradient và deploy gập chúng (§3.14) ra đúng mạng
+đã học. Lượt thử nhìn trước (chủ repo duyệt 08/10) là hai lượt tinh chỉnh từ v8, cùng seed, split và số bước, cả hai
+giữ ba chiều cao độ như board chạy v8 (§3.11): (A) không nhìn trước, làm đối chứng; (B) `lookahead_frames` 12. Chấm cả
+hai bằng Cửa 3 ở δ₁, δ₂ của board, `tone_flip places` và `tone_flip owner`. B thắng khi Cửa 3 nhận đúng hơn A quá 5 câu
+(nhiễu đếm) mà từ chối không kém, hoặc thanh âm tiết đầu trên `val` hơn A quá 2 điểm mà Cửa 3 không kém.
 Cỡ chọn theo chất lượng: rộng hơn hay sâu hơn MultiNet7 (bề rộng 128, feedforward 256, khoảng 2,1 MB int8 🔬) khi µs đo
 trên board còn trong ngân sách §3.3. Bề rộng 160 và feedforward 320 (ADR-0017) có 3,14 triệu tham số cho encoder và đầu
 CTC, `.espdl` 3,4 MB, chạy 10,2 ms mỗi 32 ms trên board B với trọng số ngẫu nhiên (`measurements/latency.md` §18); bộ nhớ
