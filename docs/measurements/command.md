@@ -1677,3 +1677,33 @@ trước, chạy sau. Lỗi đơn vị `val` của C, nghe SwiftF0, theo mốc 2
 (v8: 0,375, 71,5%, 79,0%); nghe SwiftF0: 0,329, 73,9%, 83,8%. `tone_flip owner`, cả ba chiều giữ: "tắt" đúng nhất 61/69
 (48 qua ngưỡng của phép kiểm), v8 62/69 (48). Học tinh chỉnh với cao độ như lúc học giữ "tắt" của chủ repo, khác A và B
 (§12.29); C hơn v8 5 câu nhận đúng ở δ₁ 100 ‰ và kém 3 câu đúng nhất, trong nhiễu đếm.
+
+### 12.31 Vì sao học tinh chỉnh với cao độ giữ làm mất "tắt" của chủ repo (09/10)
+
+Các câu "tắt" (69) và "bật" (74) của chủ repo trong các phiên Cửa 3 28/09 và 07/10, cửa sổ gán như Cửa 3, float, cả ba
+chiều cao độ giữ như board chạy. Mỗi cửa sổ chấm lệnh nó nói ("t a t T5 …", "b_< @ t T6 …") so với cùng lệnh đổi một đơn
+vị sang của từ kia (phụ âm đầu `t`↔`b_<`, nguyên âm `a`↔`@`, thanh `T5`↔`T6`); mỗi ô là trung vị của hiệu điểm, ‰ của
+T_W, và tỉ lệ câu mạng ưa đơn vị đúng; "đúng" là lệnh nói hơn ba lệnh kia. Dòng "không dải thấp" đặt 12 dải mel có cạnh
+trên ≤ 500 Hz ở trung bình lúc học, nơi có hoạ âm của giọng (chủ repo: 200 Hz ở "tắt", 131 Hz ở "bật", KẾ HOẠCH §3.11).
+Đo bằng script chẩn đoán chạy một lần:
+
+| Câu nói | Run | Phổ | Đúng | Phụ âm đầu | Nguyên âm | Thanh |
+|---|---|---|---|---|---|---|
+| tắt | v8 | đủ | 62/69 | 32 (88%) | 24 (90%) | 33 (87%) |
+| tắt | C | đủ | 61/69 | 37 (88%) | 28 (91%) | 34 (88%) |
+| tắt | B | đủ | 50/69 | 8 (77%) | 5 (62%) | 13 (70%) |
+| tắt | A | đủ | 38/69 | 6 (74%) | −3 (36%) | 5 (61%) |
+| tắt | v8 | không dải thấp | 64/69 | 33 (93%) | 33 (97%) | 42 (93%) |
+| tắt | A | không dải thấp | 32/69 | −6 (39%) | −7 (28%) | 10 (68%) |
+| bật | v8 | đủ | 71/74 | 55 (96%) | 15 (95%) | 41 (93%) |
+| bật | A | đủ | 70/74 | 54 (96%) | 17 (93%) | 50 (96%) |
+| bật | v8 | không dải thấp | 59/74 | 29 (93%) | −1 (47%) | 1 (57%) |
+| bật | C | không dải thấp | 59/74 | 27 (95%) | 0 (53%) | 3 (55%) |
+| bật | A | không dải thấp | 70/74 | 33 (96%) | 11 (92%) | 19 (88%) |
+| bật | B | không dải thấp | 70/74 | 30 (96%) | 8 (84%) | 23 (89%) |
+
+A và B mất "tắt" ở cả ba đơn vị cùng lúc, không riêng thanh: cả âm tiết trôi về "bật", nguyên âm của A còn ngả hẳn về `â`.
+v8 và C tách "bật" khỏi "tắt" một phần bằng các dải dưới 500 Hz: bỏ chúng thì "bật" của cả hai tụt 71 → 59 và 70 → 59,
+nguyên âm và thanh về quanh 0, tức hai mạng đọc độ cao giọng ngầm từ hoạ âm trong log-mel. A và B không dùng các dải ấy
+cho "bật" (70/74 có hay không). Học tinh chỉnh với cao độ giữ đổi manh mối tách hai từ sang các dải cao hơn, học từ
+giọng của kho; với chủ repo, `ă` và `â` gần trùng nhau (§12.17), nên các manh mối ấy chỉ về "bật".
