@@ -17,7 +17,9 @@ import resource
 import signal
 import time
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -96,22 +98,25 @@ def batch_of(examples: Iterable[data.Example], count: int, gains: np.ndarray) ->
 
 
 class TrainBatches(Dataset):
-    """Step k's batch of recipes, drawn and read in a loader worker from the train pools for gpu_mix.Render to filter;
-    the Mixer opens there, never in the parent."""
+    """Step k's batch of recipes, drawn and read in a loader worker from the train pools on train.read_threads threads,
+    for gpu_mix.Render to filter; the Mixer and the threads start there, never in the parent."""
 
     def __init__(self, cfg: dict, dev: dict, paths: dict, steps: Plan) -> None:
         self.cfg, self.dev, self.paths, self.steps = cfg, dev, paths, steps
         self.mixer: data.Mixer | None = None
+        self.readers: ThreadPoolExecutor | None = None
 
     def __len__(self) -> int:
         return self.steps.steps
 
     def __getitem__(self, step: int) -> dict[str, Tensor]:
-        if self.mixer is None:
+        if self.mixer is None or self.readers is None:
             self.mixer = data.Mixer(self.cfg, self.dev, self.paths, "train", self.cfg["mix"]["seed"])
+            self.readers = ThreadPoolExecutor(self.cfg["train"]["read_threads"])
         epoch, first = self.steps.where(step)
-        recipes = [self.mixer.recipe(epoch, j) for j in range(first, first + self.steps.batch)]
-        return gpu_mix.collate(recipes, self.mixer.n)
+        self.mixer.kinds(epoch)
+        js = range(first, first + self.steps.batch)
+        return gpu_mix.collate(list(self.readers.map(partial(self.mixer.recipe, epoch), js)), self.mixer.n)
 
 
 class HeldBatches(Dataset):

@@ -134,6 +134,12 @@ def test_a_batch_is_a_pure_function_of_its_step(world: tuple[dict, dict, dict]) 
     hops = round(cfg["mix"]["example_s"] * FS) // grid.HOP_SAMPLES
     assert a["power"].shape == (2, hops, grid.N_BINS) and a["vad"].shape == (2, hops)
     assert not torch.equal(a["power"], render(train.TrainBatches(cfg, dev, paths, steps)[4])["power"])
+    alone = copy.deepcopy(cfg)
+    alone["train"]["read_threads"] = 1
+    read_alone = train.TrainBatches(alone, dev, paths, steps)[3]
+    threaded = train.TrainBatches(cfg, dev, paths, steps)[3]
+    assert cfg["train"]["read_threads"] > 1 and read_alone.keys() == threaded.keys()
+    assert all(read_alone[k].numpy().tobytes() == threaded[k].numpy().tobytes() for k in threaded)
 
 
 def test_a_tiny_run_trains_every_candidate_on_the_same_batches_keeps_its_last_weights_and_is_scored(

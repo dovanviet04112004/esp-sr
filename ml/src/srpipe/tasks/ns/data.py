@@ -15,6 +15,7 @@ import json
 import math
 import multiprocessing
 import re
+import threading
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -572,7 +573,8 @@ def forget_old(cache: dict[int, object]) -> None:
 class Mixer:
     """Examples of one role (KEHOACH 3.9): every speech sample once an epoch in windows of mix.example_s, plus
     windows without a talker, each in a room of the role, with a foreground source, the room's tone, board B's
-    microphones and a global gain; example (epoch, j) is a pure function of its seed, its recipe through mixed."""
+    microphones and a global gain; example (epoch, j) is a pure function of its seed, its recipe through mixed.
+    Several threads may take recipes of an epoch at once once kinds(epoch) has filled that epoch's caches."""
 
     def __init__(self, cfg: dict, dev: dict, paths: dict, role: str, seed: int) -> None:
         self.cfg, self.dev, self.role, self.seed = cfg, dev, role, seed
@@ -585,6 +587,8 @@ class Mixer:
         for r in read_tsv(folder / "noise_index.tsv"):
             self.noise[r["pool"]].append((r["item"], float(r["seconds"])))
         self.reader = ItemReader(paths["raw"])
+        # ItemReader streams parquet rows from where it stopped: one caller at a time.
+        self._reader_lock = threading.Lock()
         self._frames: dict[str, tuple[int, int]] = {}
         self.bank = device.room_bank(dev, paths["interim"], 1)
         self.mics = device.load_microphones(dev["microphone"])
@@ -695,7 +699,8 @@ class Mixer:
                 start = int(rng.integers(max(1, frames - count)))
                 x = sf.read(str(path), start=start, stop=min(frames, start + count), dtype="float64", always_2d=True)[0]
                 return np.resize(x.mean(axis=1), count)
-        y = self.reader.read(item)
+        with self._reader_lock:
+            y = self.reader.read(item)
         start = int(rng.integers(max(1, len(y) - count)))
         return np.resize(y[start:], count)
 
