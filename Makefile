@@ -155,10 +155,10 @@ ctc-int16: ## Rung 3: the convolutions ESP-PPQ ranks worst at 16 bits, on the be
 ctc-qat: ## Rung 4: QAT on the GPU from the best calibration of ctc-ptq: make ctc-qat RUN=<run under ml/> [KALDI=1] [HOLD=...] (E11-T12)
 	cd ml && uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant qat $(RUN) $(CTC_HEARD)
 
-ctc-thresholds: ## Choose delta1 and delta2 of a ladder row on val_commands and val, decided as the chip decides: make ctc-thresholds RUN=<run under ml/> ROW=<row> [KALDI=1] [HOLD=...] (E11-T13)
+ctc-thresholds: ## Choose delta1, delta2 and delta3 of a ladder row on val_commands and val, decided as the chip decides: make ctc-thresholds RUN=<run under ml/> ROW=<row> [KALDI=1] [HOLD=...] (E11-T13)
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant thresholds $(RUN) --row $(ROW) $(CTC_HEARD)
 
-ctc-deploy: ## Export a ladder row and its chosen delta1, delta2 into firmware/models/command and lock them: make ctc-deploy RUN=<run under ml/> ROW=<row> [KALDI=1] [HOLD=...] (E11-T19)
+ctc-deploy: ## Export a ladder row and its chosen thresholds into firmware/models/command and lock them: make ctc-deploy RUN=<run under ml/> ROW=<row> [KALDI=1] [HOLD=...] (E11-T19)
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant deploy $(RUN) --row $(ROW) $(CTC_HEARD)
 
 ctc-tone-flip: ## The tone checks of KEHOACH 3.11 on a ctc run into <run>/tone_flip_<check>.yaml: CHECK=val moves a checked sắc or nặng syllable of val onto the other tone by Praat, formants kept, its session simulated again; owner moves the first word of the owner's bật / tắt sessions; places reads tone right at the first and later syllables, pitch held or not; val and owner need Docker for the aligner; STEPS=2000,4000 scores those checkpoints of the run with owner or places, KALDI=1 hears through the board's Kaldi pitch: make ctc-tone-flip CHECK=val|owner|places RUN=<run under ml/> [STEPS=...] [KALDI=1] (E11-T23)
