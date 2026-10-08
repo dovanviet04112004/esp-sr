@@ -14,6 +14,7 @@ typedef struct {
     uint32_t *index;
     float *value;
     uint32_t n;
+    uint32_t ring; // n + 1: a value lands as the one it evicts sits
     uint32_t front;
     uint32_t size;
     uint32_t count;  // pushes so far, wrapping; ages are taken modulo 2^32
@@ -79,8 +80,8 @@ static size_t layout(const dsp_afe_agc_config_t *cfg, afe_arena_t *arena, dsp_af
     const uint32_t lookahead = lookahead_samples(cfg);
     *st = afe_take(arena, sizeof(struct dsp_afe_agc_s));
     float *delay = afe_take(arena, lookahead * sizeof(float));
-    uint32_t *need_index = afe_take(arena, (lookahead + 1) * sizeof(uint32_t));
-    float *need_value = afe_take(arena, (lookahead + 1) * sizeof(float));
+    uint32_t *need_index = afe_take(arena, (lookahead + 2) * sizeof(uint32_t));
+    float *need_value = afe_take(arena, (lookahead + 2) * sizeof(float));
     float *held = afe_take(arena, (lookahead + 1) * sizeof(float));
     if (*st != NULL && need_index != NULL && need_value != NULL && held != NULL) {
         memset(*st, 0, sizeof(**st));
@@ -130,6 +131,7 @@ esp_err_t dsp_afe_agc_init(dsp_afe_agc_t **out, const dsp_afe_agc_config_t *cfg,
     st->release_step = (float)(1.0 / ((double)cfg->release_ms * GEN_GRID_SAMPLE_RATE_HZ / MS_PER_S));
     st->target_power = db_to_power(cfg->target_dbfs);
     st->need.n = st->lookahead + 1;
+    st->need.ring = st->lookahead + 2;
     dsp_afe_agc_reset(st);
     *out = st;
     return ESP_OK;
@@ -157,15 +159,15 @@ void dsp_afe_agc_flush(dsp_afe_agc_t *st)
 
 static float sliding_min_push(sliding_min_t *m, float v)
 {
-    while (m->size > 0 && m->value[(m->front + m->size - 1) % m->n] >= v) {
+    while (m->size > 0 && m->value[(m->front + m->size - 1) % m->ring] >= v) {
         m->size--;
     }
-    const uint32_t back = (m->front + m->size) % m->n;
+    const uint32_t back = (m->front + m->size) % m->ring;
     m->index[back] = m->count;
     m->value[back] = v;
     m->size++;
     if (m->count - m->index[m->front] >= m->n) {
-        m->front = m->front + 1 == m->n ? 0 : m->front + 1;
+        m->front = m->front + 1 == m->ring ? 0 : m->front + 1;
         m->size--;
     }
     m->count++;
