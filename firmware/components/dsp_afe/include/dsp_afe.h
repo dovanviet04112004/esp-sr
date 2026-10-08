@@ -102,11 +102,17 @@ esp_err_t dsp_afe_feed(dsp_afe_t *afe, const int16_t *interleaved, size_t frames
 esp_err_t dsp_afe_fetch(dsp_afe_t *afe, dsp_afe_frame_t *out);
 
 /** Drop buffered hops and adaptive state after a gap; the next frame carries DSP_AFE_FLAG_GAP.
- *  Every module returns to the state its init leaves and keeps the tables init built, so the chain then
- *  runs bit for bit as a freshly built one without rebuilding a table (KEHOACH 4.5.5).
+ *  Every module returns to the state its init leaves and keeps the tables init built; seq runs on, so only
+ *  doa's every-second-hop search may keep another phase than a freshly built chain (KEHOACH 4.5.5).
  *  @ctx task | non-blocking
  */
 void dsp_afe_reset(dsp_afe_t *afe);
+
+/** After a short gap, drop buffered hops and the samples older than the gap, keeping every estimate
+ *  the modules have learnt; the next frame carries DSP_AFE_FLAG_GAP (KEHOACH 4.5.5).
+ *  @ctx task | non-blocking
+ */
+void dsp_afe_resume(dsp_afe_t *afe);
 
 /** Change one runtime parameter, as SET_CONFIG asks.
  *  @ctx task | non-blocking | same task as dsp_afe_feed

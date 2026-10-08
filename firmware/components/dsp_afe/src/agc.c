@@ -140,6 +140,11 @@ void dsp_afe_agc_reset(dsp_afe_agc_t *st)
     // Start the level at the target less the most gain, so quiet speech passes the gate at once.
     st->speech_power = st->target_power / (st->gain_max * st->gain_max);
     st->gain = 1.0f;
+    dsp_afe_agc_flush(st);
+}
+
+void dsp_afe_agc_flush(dsp_afe_agc_t *st)
+{
     st->last_held = 1.0f;
     st->delay_at = 0;
     if (st->lookahead > 0) { memset(st->delay, 0, st->lookahead * sizeof(float)); }

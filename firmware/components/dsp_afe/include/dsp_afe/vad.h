@@ -52,6 +52,12 @@ void dsp_afe_vad_detail(const dsp_afe_vad_t *st, dsp_afe_vad_detail_t *out);
  */
 void dsp_afe_vad_reset(dsp_afe_vad_t *st);
 
+/** Clear the band-split filters, the only state that holds samples, as after a short gap; models,
+ *  minimum tracks and hangover stay (KEHOACH 4.5.5).
+ *  @ctx any | non-blocking
+ */
+void dsp_afe_vad_flush(dsp_afe_vad_t *st);
+
 #ifdef __cplusplus
 }
 #endif

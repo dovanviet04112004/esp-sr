@@ -54,6 +54,12 @@ void dsp_afe_agc_set_target(dsp_afe_agc_t *st, float target_dbfs);
  */
 void dsp_afe_agc_reset(dsp_afe_agc_t *st);
 
+/** Empty the lookahead and release the limiter, the state that holds samples, as after a short gap; the slow
+ *  gain and the speech level stay (KEHOACH 4.5.5).
+ *  @ctx any | non-blocking
+ */
+void dsp_afe_agc_flush(dsp_afe_agc_t *st);
+
 #ifdef __cplusplus
 }
 #endif

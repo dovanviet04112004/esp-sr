@@ -18,6 +18,12 @@ typedef enum {
     FIELD_COUNT,
 } field_t;
 
+// The reset tensor per hop, from srpipe.dsp.emit_golden: 0 runs on, else what to call ahead of it.
+typedef enum {
+    GAP_RESET = 1,
+    GAP_RESUME = 2,
+} gap_t;
+
 static const char *const kFields[FIELD_COUNT] = {
     "pcm", "seq", "doa_deg", "doa_conf", "vad", "level_dbfs", "gain_db", "flags",
 };
@@ -88,7 +94,8 @@ static bool run_frames(const dsp_afe_config_t *cfg, const gold_tensor_t *input, 
     const int16_t *in = input->data;
     const uint8_t *resets = reset->data;
     for (size_t h = 0; ok && h < input->dims[0]; h++) {
-        if (resets[h] != 0) { dsp_afe_reset(afe); }
+        if (resets[h] == GAP_RESET) { dsp_afe_reset(afe); }
+        if (resets[h] == GAP_RESUME) { dsp_afe_resume(afe); }
         ok = dsp_afe_feed(afe, in + h * GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS, 1) == ESP_OK &&
              dsp_afe_fetch(afe, &frames[h]) == ESP_OK;
     }

@@ -115,11 +115,16 @@ static int floor_log2(float x)
     return exponent - 1;
 }
 
-void dsp_afe_vad_reset(dsp_afe_vad_t *st)
+void dsp_afe_vad_flush(dsp_afe_vad_t *st)
 {
     memset(&st->down, 0, sizeof(st->down));
     memset(st->split, 0, sizeof(st->split));
     memset(&st->low_band, 0, sizeof(st->low_band));
+}
+
+void dsp_afe_vad_reset(dsp_afe_vad_t *st)
+{
+    dsp_afe_vad_flush(st);
     memcpy(st->noise_means, kNoiseMeans, sizeof(kNoiseMeans));
     memcpy(st->speech_means, kSpeechMeans, sizeof(kSpeechMeans));
     memcpy(st->noise_stds, kNoiseStds, sizeof(kNoiseStds));

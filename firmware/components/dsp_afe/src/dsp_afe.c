@@ -569,7 +569,7 @@ static void reset_spatial(dsp_afe_t *afe)
     }
 }
 
-void dsp_afe_reset(dsp_afe_t *afe)
+static void drop_samples(dsp_afe_t *afe)
 {
     for (size_t m = 0; m < N_MICS; m++) {
         dsp_spec_stft_reset(afe->analysis[m]);
@@ -578,6 +578,15 @@ void dsp_afe_reset(dsp_afe_t *afe)
 #if CONFIG_DSP_AFE_HPF_ENABLE
     dsp_afe_hpf_reset(afe->hpf);
 #endif
+    afe->fifo_head = 0;
+    afe->fifo_count = 0;
+    afe->gap_pending = true;
+    afe->stats.gaps++;
+}
+
+void dsp_afe_reset(dsp_afe_t *afe)
+{
+    drop_samples(afe);
 #if CONFIG_DSP_AFE_AEC_ENABLE
     if (afe->n_channels > N_MICS) { dsp_afe_aec_reset(afe->aec); }
 #endif
@@ -592,12 +601,19 @@ void dsp_afe_reset(dsp_afe_t *afe)
 #if CONFIG_DSP_AFE_AGC_ENABLE
     dsp_afe_agc_reset(afe->agc);
 #endif
-    afe->fifo_head = 0;
-    afe->fifo_count = 0;
-    afe->gap_pending = true;
     afe->last_vad = false;
     afe->doa_result = (dsp_afe_doa_result_t){.angle_deg = ANGLE_UNKNOWN_DEG, .confidence = 0};
-    afe->stats.gaps++;
+}
+
+void dsp_afe_resume(dsp_afe_t *afe)
+{
+    drop_samples(afe);
+#if CONFIG_DSP_AFE_VAD_ENABLE
+    dsp_afe_vad_flush(afe->vad);
+#endif
+#if CONFIG_DSP_AFE_AGC_ENABLE
+    dsp_afe_agc_flush(afe->agc);
+#endif
 }
 
 esp_err_t dsp_afe_set_param(dsp_afe_t *afe, dsp_afe_param_t param, float value)
