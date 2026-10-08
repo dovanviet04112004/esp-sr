@@ -2,1216 +2,1220 @@
   "version": 1,
   "commands": [
     {
-      "id": "bat_den",
+      "id": "001_bat_den",
       "text": "bật đèn",
       "response": "da_bat_den"
     },
     {
-      "id": "tat_den",
+      "id": "002_tat_den",
       "text": "tắt đèn",
       "response": "da_tat_den"
     },
     {
-      "id": "bat_quat",
+      "id": "003_bat_quat",
       "text": "bật quạt",
       "response": "da_bat_quat"
     },
     {
-      "id": "tat_quat",
+      "id": "004_tat_quat",
       "text": "tắt quạt",
       "response": "da_tat_quat"
     },
     {
-      "id": "mo_cua",
+      "id": "005_mo_cua",
       "text": "mở cửa",
       "response": "da_mo_cua"
     },
     {
-      "id": "dong_cua",
+      "id": "006_dong_cua",
       "text": "đóng cửa",
       "response": "da_dong_cua"
     },
     {
-      "id": "tang_am_luong",
+      "id": "007_tang_am_luong",
       "text": "tăng âm lượng",
       "response": "da_tang"
     },
     {
-      "id": "giam_am_luong",
+      "id": "008_giam_am_luong",
       "text": "giảm âm lượng",
       "response": "da_giam"
     },
     {
-      "id": "dung_lai",
+      "id": "009_dung_lai",
       "text": "dừng lại",
       "response": "da_dung"
     },
     {
-      "id": "chup_anh",
+      "id": "010_chup_anh",
       "text": "chụp ảnh",
       "response": "da_chup_anh"
     },
     {
-      "id": "mo_den",
+      "id": "011_mo_den",
       "text": "mở đèn",
       "response": "da_bat_den"
     },
     {
-      "id": "mo_quat",
+      "id": "012_mo_quat",
       "text": "mở quạt",
       "response": "da_bat_quat"
     },
     {
-      "id": "mo_ti_vi",
+      "id": "013_mo_ti_vi",
       "text": "mở ti vi"
     },
     {
-      "id": "tat_ti_vi",
+      "id": "014_tat_ti_vi",
       "text": "tắt ti vi"
     },
     {
-      "id": "quay_trai",
+      "id": "015_quay_trai",
       "text": "quay trái"
     },
     {
-      "id": "quay_phai",
+      "id": "016_quay_phai",
       "text": "quay phải"
     },
     {
-      "id": "tang_toc_do",
+      "id": "017_tang_toc_do",
       "text": "tăng tốc độ"
     },
     {
-      "id": "giam_toc_do",
+      "id": "018_giam_toc_do",
       "text": "giảm tốc độ"
     },
     {
-      "id": "quay_trai_45_do",
+      "id": "019_quay_trai_45_do",
       "text": "quay trái 45 độ"
     },
     {
-      "id": "quay_phai_45_do",
+      "id": "020_quay_phai_45_do",
       "text": "quay phải 45 độ"
     },
     {
-      "id": "quay_trai_90_do",
+      "id": "021_quay_trai_90_do",
       "text": "quay trái 90 độ"
     },
     {
-      "id": "quay_phai_90_do",
+      "id": "022_quay_phai_90_do",
       "text": "quay phải 90 độ"
     },
     {
-      "id": "quay_trai_180_do",
+      "id": "023_quay_trai_180_do",
       "text": "trái 180 độ"
     },
     {
-      "id": "quay_phai_180_do",
+      "id": "024_quay_phai_180_do",
       "text": "phải 180 độ"
     },
     {
-      "id": "ban_be",
+      "id": "025_ban_be",
       "text": "bạn bè"
     },
     {
-      "id": "gia_dinh",
+      "id": "026_gia_dinh",
       "text": "gia đình"
     },
     {
-      "id": "cong_viec",
+      "id": "027_cong_viec",
       "text": "công việc"
     },
     {
-      "id": "hoc_tap",
+      "id": "028_hoc_tap",
       "text": "học tập"
     },
     {
-      "id": "giai_tri",
+      "id": "029_giai_tri",
       "text": "giải trí"
     },
     {
-      "id": "the_thao",
+      "id": "030_the_thao",
       "text": "thể thao"
     },
     {
-      "id": "am_nhac",
+      "id": "031_am_nhac",
       "text": "âm nhạc"
     },
     {
-      "id": "phim_anh",
+      "id": "032_phim_anh",
       "text": "phim ảnh"
     },
     {
-      "id": "du_lich",
+      "id": "033_du_lich",
       "text": "du lịch"
     },
     {
-      "id": "suc_khoe",
+      "id": "034_suc_khoe",
       "text": "sức khỏe"
     },
     {
-      "id": "thoi_tiet",
+      "id": "035_thoi_tiet",
       "text": "thời tiết"
     },
     {
-      "id": "tin_tuc",
+      "id": "036_tin_tuc",
       "text": "tin tức"
     },
     {
-      "id": "giao_thong",
+      "id": "037_giao_thong",
       "text": "giao thông"
     },
     {
-      "id": "kinh_doanh",
+      "id": "038_kinh_doanh",
       "text": "kinh doanh"
     },
     {
-      "id": "vao_phong_102",
+      "id": "039_vao_phong_102",
       "text": "vào phòng một không hai"
     },
     {
-      "id": "vao_phong_103",
+      "id": "040_vao_phong_103",
       "text": "vào phòng một không ba"
     },
     {
-      "id": "vao_phong_104",
+      "id": "041_vao_phong_104",
       "text": "vào phòng một không bốn"
     },
     {
-      "id": "vao_phong_105",
+      "id": "042_vao_phong_105",
       "text": "vào phòng một không năm"
     },
     {
-      "id": "vao_phong_106",
+      "id": "043_vao_phong_106",
       "text": "vào phòng một không sáu"
     },
     {
-      "id": "vao_phong_107",
+      "id": "044_vao_phong_107",
       "text": "vào phòng một không bảy"
     },
     {
-      "id": "vao_phong_108",
+      "id": "045_vao_phong_108",
       "text": "vào phòng một không tám"
     },
     {
-      "id": "vao_phong_109",
+      "id": "046_vao_phong_109",
       "text": "vào phòng một không chín"
     },
     {
-      "id": "vao_phong_111",
+      "id": "047_vao_phong_111",
       "text": "vào phòng một một một"
     },
     {
-      "id": "vao_phong_1404",
+      "id": "048_vao_phong_1404",
       "text": "vào phòng một bốn không bốn"
     },
     {
-      "id": "nay_chu_di_phat_co",
+      "id": "049_nay_chu_di_phat_co",
       "text": "phát cỏ"
     },
     {
-      "id": "bat_den_phong_khach",
+      "id": "050_bat_den_phong_khach",
       "text": "bật đèn phòng khách"
     },
     {
-      "id": "tat_den_phong_khach",
+      "id": "051_tat_den_phong_khach",
       "text": "tắt đèn phòng khách"
     },
     {
-      "id": "bat_den_phong_ngu",
+      "id": "052_bat_den_phong_ngu",
       "text": "bật đèn phòng ngủ"
     },
     {
-      "id": "tat_den_phong_ngu",
+      "id": "053_tat_den_phong_ngu",
       "text": "tắt đèn phòng ngủ"
     },
     {
-      "id": "bat_den_phong_bep",
+      "id": "054_bat_den_phong_bep",
       "text": "bật đèn phòng bếp"
     },
     {
-      "id": "tat_den_phong_bep",
+      "id": "055_tat_den_phong_bep",
       "text": "tắt đèn phòng bếp"
     },
     {
-      "id": "bat_den_nha_tam",
+      "id": "056_bat_den_nha_tam",
       "text": "bật đèn nhà tắm"
     },
     {
-      "id": "tat_den_nha_tam",
+      "id": "057_tat_den_nha_tam",
       "text": "tắt đèn nhà tắm"
     },
     {
-      "id": "bat_den_hanh_lang",
+      "id": "058_bat_den_hanh_lang",
       "text": "bật đèn hành lang"
     },
     {
-      "id": "tat_den_hanh_lang",
+      "id": "059_tat_den_hanh_lang",
       "text": "tắt đèn hành lang"
     },
     {
-      "id": "bat_den_ban_cong",
+      "id": "060_bat_den_ban_cong",
       "text": "bật đèn ban công"
     },
     {
-      "id": "tat_den_ban_cong",
+      "id": "061_tat_den_ban_cong",
       "text": "tắt đèn ban công"
     },
     {
-      "id": "bat_den_cau_thang",
+      "id": "062_bat_den_cau_thang",
       "text": "bật đèn cầu thang"
     },
     {
-      "id": "tat_den_cau_thang",
+      "id": "063_tat_den_cau_thang",
       "text": "tắt đèn cầu thang"
     },
     {
-      "id": "bat_den_san_vuon",
+      "id": "064_bat_den_san_vuon",
       "text": "bật đèn sân vườn"
     },
     {
-      "id": "tat_den_san_vuon",
+      "id": "065_tat_den_san_vuon",
       "text": "tắt đèn sân vườn"
     },
     {
-      "id": "bat_den_phong_lam_viec",
+      "id": "066_bat_den_phong_lam_viec",
       "text": "bật đèn phòng làm việc"
     },
     {
-      "id": "tat_den_phong_lam_viec",
+      "id": "067_tat_den_phong_lam_viec",
       "text": "tắt đèn phòng làm việc"
     },
     {
-      "id": "bat_den_nha_ve_sinh",
+      "id": "068_bat_den_nha_ve_sinh",
       "text": "bật đèn nhà vệ sinh"
     },
     {
-      "id": "tat_den_nha_ve_sinh",
+      "id": "069_tat_den_nha_ve_sinh",
       "text": "tắt đèn nhà vệ sinh"
     },
     {
-      "id": "bat_tat_ca_den",
+      "id": "070_bat_tat_ca_den",
       "text": "bật tất cả đèn"
     },
     {
-      "id": "tat_tat_ca_den",
+      "id": "071_tat_tat_ca_den",
       "text": "tắt tất cả đèn"
     },
     {
-      "id": "bat_den_ngu",
+      "id": "072_bat_den_ngu",
       "text": "bật đèn ngủ"
     },
     {
-      "id": "tat_den_ngu",
+      "id": "073_tat_den_ngu",
       "text": "tắt đèn ngủ"
     },
     {
-      "id": "den_sang_hon",
+      "id": "074_den_sang_hon",
       "text": "đèn sáng hơn"
     },
     {
-      "id": "den_toi_hon",
+      "id": "075_den_toi_hon",
       "text": "đèn tối hơn"
     },
     {
-      "id": "tang_do_sang",
+      "id": "076_tang_do_sang",
       "text": "tăng độ sáng"
     },
     {
-      "id": "giam_do_sang",
+      "id": "077_giam_do_sang",
       "text": "giảm độ sáng"
     },
     {
-      "id": "den_mau_do",
+      "id": "078_den_mau_do",
       "text": "đèn màu đỏ"
     },
     {
-      "id": "den_mau_xanh_la",
+      "id": "079_den_mau_xanh_la",
       "text": "đèn màu xanh lá"
     },
     {
-      "id": "den_mau_xanh_duong",
+      "id": "080_den_mau_xanh_duong",
       "text": "đèn màu xanh dương"
     },
     {
-      "id": "den_mau_vang",
+      "id": "081_den_mau_vang",
       "text": "đèn màu vàng"
     },
     {
-      "id": "den_mau_trang",
+      "id": "082_den_mau_trang",
       "text": "đèn màu trắng"
     },
     {
-      "id": "den_mau_tim",
+      "id": "083_den_mau_tim",
       "text": "đèn màu tím"
     },
     {
-      "id": "den_anh_sang_am",
+      "id": "084_den_anh_sang_am",
       "text": "đèn ánh sáng ấm"
     },
     {
-      "id": "den_anh_sang_lanh",
+      "id": "085_den_anh_sang_lanh",
       "text": "đèn ánh sáng lạnh"
     },
     {
-      "id": "den_nhap_nhay",
+      "id": "086_den_nhap_nhay",
       "text": "bật đèn nhấp nháy"
     },
     {
-      "id": "bat_dieu_hoa",
+      "id": "087_bat_dieu_hoa",
       "text": "bật điều hòa"
     },
     {
-      "id": "tat_dieu_hoa",
+      "id": "088_tat_dieu_hoa",
       "text": "tắt điều hòa"
     },
     {
-      "id": "che_do_lam_lanh",
+      "id": "089_che_do_lam_lanh",
       "text": "chế độ làm lạnh"
     },
     {
-      "id": "che_do_suoi_am",
+      "id": "090_che_do_suoi_am",
       "text": "chế độ sưởi ấm"
     },
     {
-      "id": "che_do_hut_am",
+      "id": "091_che_do_hut_am",
       "text": "chế độ hút ẩm"
     },
     {
-      "id": "che_do_quat_gio",
+      "id": "092_che_do_quat_gio",
       "text": "chế độ quạt gió"
     },
     {
-      "id": "che_do_tu_dong",
+      "id": "093_che_do_tu_dong",
       "text": "chế độ tự động"
     },
     {
-      "id": "che_do_ngu_dem",
+      "id": "094_che_do_ngu_dem",
       "text": "chế độ ngủ đêm"
     },
     {
-      "id": "dieu_hoa_16_do",
+      "id": "095_dieu_hoa_16_do",
       "text": "điều hòa mười sáu độ"
     },
     {
-      "id": "dieu_hoa_17_do",
+      "id": "096_dieu_hoa_17_do",
       "text": "điều hòa mười bảy độ"
     },
     {
-      "id": "dieu_hoa_18_do",
+      "id": "097_dieu_hoa_18_do",
       "text": "điều hòa mười tám độ"
     },
     {
-      "id": "dieu_hoa_19_do",
+      "id": "098_dieu_hoa_19_do",
       "text": "điều hòa mười chín độ"
     },
     {
-      "id": "dieu_hoa_20_do",
+      "id": "099_dieu_hoa_20_do",
       "text": "điều hòa hai mươi độ"
     },
     {
-      "id": "dieu_hoa_21_do",
+      "id": "100_dieu_hoa_21_do",
       "text": "điều hòa hai mốt độ"
     },
     {
-      "id": "dieu_hoa_22_do",
+      "id": "101_dieu_hoa_22_do",
       "text": "điều hòa hai hai độ"
     },
     {
-      "id": "dieu_hoa_23_do",
+      "id": "102_dieu_hoa_23_do",
       "text": "điều hòa hai ba độ"
     },
     {
-      "id": "dieu_hoa_24_do",
+      "id": "103_dieu_hoa_24_do",
       "text": "điều hòa hai tư độ"
     },
     {
-      "id": "dieu_hoa_25_do",
+      "id": "104_dieu_hoa_25_do",
       "text": "điều hòa hai lăm độ"
     },
     {
-      "id": "dieu_hoa_26_do",
+      "id": "105_dieu_hoa_26_do",
       "text": "điều hòa hai sáu độ"
     },
     {
-      "id": "dieu_hoa_27_do",
+      "id": "106_dieu_hoa_27_do",
       "text": "điều hòa hai bảy độ"
     },
     {
-      "id": "dieu_hoa_28_do",
+      "id": "107_dieu_hoa_28_do",
       "text": "điều hòa hai tám độ"
     },
     {
-      "id": "dieu_hoa_29_do",
+      "id": "108_dieu_hoa_29_do",
       "text": "điều hòa hai chín độ"
     },
     {
-      "id": "dieu_hoa_30_do",
+      "id": "109_dieu_hoa_30_do",
       "text": "điều hòa ba mươi độ"
     },
     {
-      "id": "tang_nhiet_do",
+      "id": "110_tang_nhiet_do",
       "text": "tăng nhiệt độ"
     },
     {
-      "id": "giam_nhiet_do",
+      "id": "111_giam_nhiet_do",
       "text": "giảm nhiệt độ"
     },
     {
-      "id": "tang_mot_do",
+      "id": "112_tang_mot_do",
       "text": "tăng một độ"
     },
     {
-      "id": "giam_mot_do",
+      "id": "113_giam_mot_do",
       "text": "giảm một độ"
     },
     {
-      "id": "gio_manh",
+      "id": "114_gio_manh",
       "text": "gió mạnh"
     },
     {
-      "id": "gio_vua",
+      "id": "115_gio_vua",
       "text": "gió vừa"
     },
     {
-      "id": "gio_nhe",
+      "id": "116_gio_nhe",
       "text": "gió nhẹ"
     },
     {
-      "id": "gio_tu_dong",
+      "id": "117_gio_tu_dong",
       "text": "gió tự động"
     },
     {
-      "id": "dao_gio",
+      "id": "118_dao_gio",
       "text": "đảo gió"
     },
     {
-      "id": "dung_dao_gio",
+      "id": "119_dung_dao_gio",
       "text": "dừng đảo gió"
     },
     {
-      "id": "lanh_qua",
+      "id": "120_lanh_qua",
       "text": "lạnh quá"
     },
     {
-      "id": "nong_qua",
+      "id": "121_nong_qua",
       "text": "nóng quá"
     },
     {
-      "id": "quat_so_mot",
+      "id": "122_quat_so_mot",
       "text": "quạt số một"
     },
     {
-      "id": "quat_so_hai",
+      "id": "123_quat_so_hai",
       "text": "quạt số hai"
     },
     {
-      "id": "quat_so_ba",
+      "id": "124_quat_so_ba",
       "text": "quạt số ba"
     },
     {
-      "id": "quat_quay",
+      "id": "125_quat_quay",
       "text": "quạt quay"
     },
     {
-      "id": "quat_dung_quay",
+      "id": "126_quat_dung_quay",
       "text": "quạt dừng quay"
     },
     {
-      "id": "quat_che_do_ngu",
+      "id": "127_quat_che_do_ngu",
       "text": "quạt chế độ ngủ"
     },
     {
-      "id": "tang_toc_quat",
+      "id": "128_tang_toc_quat",
       "text": "tăng tốc quạt"
     },
     {
-      "id": "giam_toc_quat",
+      "id": "129_giam_toc_quat",
       "text": "giảm tốc quạt"
     },
     {
-      "id": "bat_quat_tran",
+      "id": "130_bat_quat_tran",
       "text": "bật quạt trần"
     },
     {
-      "id": "tat_quat_tran",
+      "id": "131_tat_quat_tran",
       "text": "tắt quạt trần"
     },
     {
-      "id": "bat_ti_vi",
+      "id": "132_bat_ti_vi",
       "text": "bật ti vi"
     },
     {
-      "id": "chuyen_kenh",
+      "id": "133_chuyen_kenh",
       "text": "chuyển kênh"
     },
     {
-      "id": "kenh_tiep_theo",
+      "id": "134_kenh_tiep_theo",
       "text": "kênh tiếp theo"
     },
     {
-      "id": "kenh_truoc",
+      "id": "135_kenh_truoc",
       "text": "kênh trước"
     },
     {
-      "id": "kenh_1",
+      "id": "136_kenh_1",
       "text": "kênh một"
     },
     {
-      "id": "kenh_2",
+      "id": "137_kenh_2",
       "text": "kênh hai"
     },
     {
-      "id": "kenh_3",
+      "id": "138_kenh_3",
       "text": "kênh ba"
     },
     {
-      "id": "kenh_4",
+      "id": "139_kenh_4",
       "text": "kênh bốn"
     },
     {
-      "id": "kenh_5",
+      "id": "140_kenh_5",
       "text": "kênh năm"
     },
     {
-      "id": "kenh_6",
+      "id": "141_kenh_6",
       "text": "kênh sáu"
     },
     {
-      "id": "kenh_7",
+      "id": "142_kenh_7",
       "text": "kênh bảy"
     },
     {
-      "id": "kenh_8",
+      "id": "143_kenh_8",
       "text": "kênh tám"
     },
     {
-      "id": "kenh_9",
+      "id": "144_kenh_9",
       "text": "kênh chín"
     },
     {
-      "id": "tat_tieng",
+      "id": "145_tat_tieng",
       "text": "tắt tiếng"
     },
     {
-      "id": "bat_tieng",
+      "id": "146_bat_tieng",
       "text": "bật tiếng"
     },
     {
-      "id": "phat_nhac",
+      "id": "147_phat_nhac",
       "text": "phát nhạc"
     },
     {
-      "id": "tam_dung",
+      "id": "148_tam_dung",
       "text": "tạm dừng"
     },
     {
-      "id": "tiep_tuc_phat",
+      "id": "149_tiep_tuc_phat",
       "text": "tiếp tục phát"
     },
     {
-      "id": "bai_tiep_theo",
+      "id": "150_bai_tiep_theo",
       "text": "bài tiếp theo"
     },
     {
-      "id": "bai_truoc",
+      "id": "151_bai_truoc",
       "text": "bài trước"
     },
     {
-      "id": "phat_lai_tu_dau",
+      "id": "152_phat_lai_tu_dau",
       "text": "phát lại từ đầu"
     },
     {
-      "id": "tua_nhanh",
+      "id": "153_tua_nhanh",
       "text": "tua nhanh"
     },
     {
-      "id": "tua_lai",
+      "id": "154_tua_lai",
       "text": "tua lại"
     },
     {
-      "id": "phat_nhac_nhe",
+      "id": "155_phat_nhac_nhe",
       "text": "phát nhạc nhẹ"
     },
     {
-      "id": "phat_nhac_vang",
+      "id": "156_phat_nhac_vang",
       "text": "phát nhạc vàng"
     },
     {
-      "id": "phat_nhac_tre",
+      "id": "157_phat_nhac_tre",
       "text": "phát nhạc trẻ"
     },
     {
-      "id": "ke_chuyen_cuoi",
+      "id": "158_ke_chuyen_cuoi",
       "text": "kể chuyện cười"
     },
     {
-      "id": "hat_mot_bai",
+      "id": "159_hat_mot_bai",
       "text": "hát một bài"
     },
     {
-      "id": "am_luong_lon_nhat",
+      "id": "160_am_luong_lon_nhat",
       "text": "âm lượng lớn nhất"
     },
     {
-      "id": "am_luong_nho_nhat",
+      "id": "161_am_luong_nho_nhat",
       "text": "âm lượng nhỏ nhất"
     },
     {
-      "id": "am_luong_vua_phai",
+      "id": "162_am_luong_vua_phai",
       "text": "âm lượng vừa phải"
     },
     {
-      "id": "mo_rem",
+      "id": "163_mo_rem",
       "text": "mở rèm"
     },
     {
-      "id": "dong_rem",
+      "id": "164_dong_rem",
       "text": "đóng rèm"
     },
     {
-      "id": "mo_cua_so",
+      "id": "165_mo_cua_so",
       "text": "mở cửa sổ"
     },
     {
-      "id": "dong_cua_so",
+      "id": "166_dong_cua_so",
       "text": "đóng cửa sổ"
     },
     {
-      "id": "mo_cong",
+      "id": "167_mo_cong",
       "text": "mở cổng"
     },
     {
-      "id": "dong_cong",
+      "id": "168_dong_cong",
       "text": "đóng cổng"
     },
     {
-      "id": "khoa_cua",
+      "id": "169_khoa_cua",
       "text": "khóa cửa"
     },
     {
-      "id": "mo_khoa_cua",
+      "id": "170_mo_khoa_cua",
       "text": "mở khóa cửa"
     },
     {
-      "id": "mo_cua_ga_ra",
+      "id": "171_mo_cua_ga_ra",
       "text": "mở cửa ga ra"
     },
     {
-      "id": "dong_cua_ga_ra",
+      "id": "172_dong_cua_ga_ra",
       "text": "đóng cửa ga ra"
     },
     {
-      "id": "mo_rem_mot_nua",
+      "id": "173_mo_rem_mot_nua",
       "text": "mở rèm một nửa"
     },
     {
-      "id": "keo_rem_len",
+      "id": "174_keo_rem_len",
       "text": "kéo rèm lên"
     },
     {
-      "id": "ha_rem_xuong",
+      "id": "175_ha_rem_xuong",
       "text": "hạ rèm xuống"
     },
     {
-      "id": "bat_dau_quet_nha",
+      "id": "176_bat_dau_quet_nha",
       "text": "bắt đầu quét nhà"
     },
     {
-      "id": "dung_quet_nha",
+      "id": "177_dung_quet_nha",
       "text": "dừng quét nhà"
     },
     {
-      "id": "ro_bot_ve_sac",
+      "id": "178_ro_bot_ve_sac",
       "text": "rô bốt về sạc"
     },
     {
-      "id": "lau_nha",
+      "id": "179_lau_nha",
       "text": "lau nhà"
     },
     {
-      "id": "hut_bui_phong_khach",
+      "id": "180_hut_bui_phong_khach",
       "text": "hút bụi phòng khách"
     },
     {
-      "id": "hut_bui_phong_ngu",
+      "id": "181_hut_bui_phong_ngu",
       "text": "hút bụi phòng ngủ"
     },
     {
-      "id": "tien_len",
+      "id": "182_tien_len",
       "text": "tiến lên"
     },
     {
-      "id": "lui_lai",
+      "id": "183_lui_lai",
       "text": "lùi lại"
     },
     {
-      "id": "di_thang",
+      "id": "184_di_thang",
       "text": "đi thẳng"
     },
     {
-      "id": "re_trai",
+      "id": "185_re_trai",
       "text": "rẽ trái"
     },
     {
-      "id": "re_phai",
+      "id": "186_re_phai",
       "text": "rẽ phải"
     },
     {
-      "id": "quay_dau",
+      "id": "187_quay_dau",
       "text": "quay đầu"
     },
     {
-      "id": "tien_len_mot_met",
+      "id": "188_tien_len_mot_met",
       "text": "tiến lên một mét"
     },
     {
-      "id": "lui_lai_mot_met",
+      "id": "189_lui_lai_mot_met",
       "text": "lùi lại một mét"
     },
     {
-      "id": "dung_yen",
+      "id": "190_dung_yen",
       "text": "đứng yên"
     },
     {
-      "id": "di_cham_lai",
+      "id": "191_di_cham_lai",
       "text": "đi chậm lại"
     },
     {
-      "id": "di_nhanh_len",
+      "id": "192_di_nhanh_len",
       "text": "đi nhanh lên"
     },
     {
-      "id": "ve_vi_tri_ban_dau",
+      "id": "193_ve_vi_tri_ban_dau",
       "text": "về vị trí ban đầu"
     },
     {
-      "id": "di_theo_toi",
+      "id": "194_di_theo_toi",
       "text": "đi theo tôi"
     },
     {
-      "id": "di_vao_bep",
+      "id": "195_di_vao_bep",
       "text": "đi vào bếp"
     },
     {
-      "id": "bat_may_giat",
+      "id": "196_bat_may_giat",
       "text": "bật máy giặt"
     },
     {
-      "id": "tat_may_giat",
+      "id": "197_tat_may_giat",
       "text": "tắt máy giặt"
     },
     {
-      "id": "bat_dau_giat",
+      "id": "198_bat_dau_giat",
       "text": "bắt đầu giặt"
     },
     {
-      "id": "bat_noi_com",
+      "id": "199_bat_noi_com",
       "text": "bật nồi cơm"
     },
     {
-      "id": "nau_com",
+      "id": "200_nau_com",
       "text": "nấu cơm"
     },
     {
-      "id": "bat_lo_vi_song",
+      "id": "201_bat_lo_vi_song",
       "text": "bật lò vi sóng"
     },
     {
-      "id": "tat_lo_vi_song",
+      "id": "202_tat_lo_vi_song",
       "text": "tắt lò vi sóng"
     },
     {
-      "id": "bat_may_loc_khong_khi",
+      "id": "203_bat_may_loc_khong_khi",
       "text": "bật máy lọc không khí"
     },
     {
-      "id": "tat_may_loc_khong_khi",
+      "id": "204_tat_may_loc_khong_khi",
       "text": "tắt máy lọc không khí"
     },
     {
-      "id": "bat_binh_nong_lanh",
+      "id": "205_bat_binh_nong_lanh",
       "text": "bật bình nóng lạnh"
     },
     {
-      "id": "tat_binh_nong_lanh",
+      "id": "206_tat_binh_nong_lanh",
       "text": "tắt bình nóng lạnh"
     },
     {
-      "id": "bat_may_hut_am",
+      "id": "207_bat_may_hut_am",
       "text": "bật máy hút ẩm"
     },
     {
-      "id": "tat_may_hut_am",
+      "id": "208_tat_may_hut_am",
       "text": "tắt máy hút ẩm"
     },
     {
-      "id": "bat_may_pha_ca_phe",
+      "id": "209_bat_may_pha_ca_phe",
       "text": "bật máy pha cà phê"
     },
     {
-      "id": "pha_mot_coc_ca_phe",
+      "id": "210_pha_mot_coc_ca_phe",
       "text": "pha một cốc cà phê"
     },
     {
-      "id": "pha_tra",
+      "id": "211_pha_tra",
       "text": "pha trà"
     },
     {
-      "id": "dun_nuoc",
+      "id": "212_dun_nuoc",
       "text": "đun nước"
     },
     {
-      "id": "lam_da_nhanh",
+      "id": "213_lam_da_nhanh",
       "text": "làm đá nhanh"
     },
     {
-      "id": "bat_may_rua_bat",
+      "id": "214_bat_may_rua_bat",
       "text": "bật máy rửa bát"
     },
     {
-      "id": "tat_may_rua_bat",
+      "id": "215_tat_may_rua_bat",
       "text": "tắt máy rửa bát"
     },
     {
-      "id": "hen_gio_5_phut",
+      "id": "216_hen_gio_5_phut",
       "text": "hẹn giờ năm phút"
     },
     {
-      "id": "hen_gio_10_phut",
+      "id": "217_hen_gio_10_phut",
       "text": "hẹn giờ mười phút"
     },
     {
-      "id": "hen_gio_15_phut",
+      "id": "218_hen_gio_15_phut",
       "text": "hẹn giờ mười lăm phút"
     },
     {
-      "id": "hen_gio_30_phut",
+      "id": "219_hen_gio_30_phut",
       "text": "hẹn giờ ba mươi phút"
     },
     {
-      "id": "hen_gio_mot_tieng",
+      "id": "220_hen_gio_mot_tieng",
       "text": "hẹn giờ một tiếng"
     },
     {
-      "id": "huy_hen_gio",
+      "id": "221_huy_hen_gio",
       "text": "hủy hẹn giờ"
     },
     {
-      "id": "bao_thuc_6_gio",
+      "id": "222_bao_thuc_6_gio",
       "text": "đặt báo thức sáu giờ"
     },
     {
-      "id": "bao_thuc_6_gio_ruoi",
+      "id": "223_bao_thuc_6_gio_ruoi",
       "text": "đặt báo thức sáu giờ rưỡi"
     },
     {
-      "id": "bao_thuc_7_gio",
+      "id": "224_bao_thuc_7_gio",
       "text": "đặt báo thức bảy giờ"
     },
     {
-      "id": "tat_bao_thuc",
+      "id": "225_tat_bao_thuc",
       "text": "tắt báo thức"
     },
     {
-      "id": "bao_thuc_lai_sau_5_phut",
+      "id": "226_bao_thuc_lai_sau_5_phut",
       "text": "báo thức lại sau năm phút"
     },
     {
-      "id": "may_gio_roi",
+      "id": "227_may_gio_roi",
       "text": "mấy giờ rồi"
     },
     {
-      "id": "hom_nay_thu_may",
+      "id": "228_hom_nay_thu_may",
       "text": "hôm nay thứ mấy"
     },
     {
-      "id": "hom_nay_ngay_bao_nhieu",
+      "id": "229_hom_nay_ngay_bao_nhieu",
       "text": "hôm nay ngày bao nhiêu"
     },
     {
-      "id": "nhac_uong_thuoc",
+      "id": "230_nhac_uong_thuoc",
       "text": "nhắc tôi uống thuốc"
     },
     {
-      "id": "nhac_uong_nuoc",
+      "id": "231_nhac_uong_nuoc",
       "text": "nhắc tôi uống nước"
     },
     {
-      "id": "thoi_tiet_hom_nay",
+      "id": "232_thoi_tiet_hom_nay",
       "text": "thời tiết hôm nay"
     },
     {
-      "id": "thoi_tiet_ngay_mai",
+      "id": "233_thoi_tiet_ngay_mai",
       "text": "thời tiết ngày mai"
     },
     {
-      "id": "troi_co_mua_khong",
+      "id": "234_troi_co_mua_khong",
       "text": "trời có mưa không"
     },
     {
-      "id": "nhiet_do_ngoai_troi",
+      "id": "235_nhiet_do_ngoai_troi",
       "text": "nhiệt độ ngoài trời"
     },
     {
-      "id": "doc_tin_tuc",
+      "id": "236_doc_tin_tuc",
       "text": "đọc tin tức"
     },
     {
-      "id": "tin_the_thao",
+      "id": "237_tin_the_thao",
       "text": "tin thể thao"
     },
     {
-      "id": "gia_vang_hom_nay",
+      "id": "238_gia_vang_hom_nay",
       "text": "giá vàng hôm nay"
     },
     {
-      "id": "ty_gia_do_la",
+      "id": "239_ty_gia_do_la",
       "text": "tỷ giá đô la"
     },
     {
-      "id": "ket_qua_xo_so",
+      "id": "240_ket_qua_xo_so",
       "text": "kết quả xổ số"
     },
     {
-      "id": "lich_am_hom_nay",
+      "id": "241_lich_am_hom_nay",
       "text": "lịch âm hôm nay"
     },
     {
-      "id": "chat_luong_khong_khi",
+      "id": "242_chat_luong_khong_khi",
       "text": "chất lượng không khí"
     },
     {
-      "id": "co_bao_khong",
+      "id": "243_co_bao_khong",
       "text": "có bão không"
     },
     {
-      "id": "goi_cho_me",
+      "id": "244_goi_cho_me",
       "text": "gọi cho mẹ"
     },
     {
-      "id": "goi_cho_bo",
+      "id": "245_goi_cho_bo",
       "text": "gọi cho bố"
     },
     {
-      "id": "goi_cho_vo",
+      "id": "246_goi_cho_vo",
       "text": "gọi cho vợ"
     },
     {
-      "id": "goi_cho_chong",
+      "id": "247_goi_cho_chong",
       "text": "gọi cho chồng"
     },
     {
-      "id": "goi_cho_anh_trai",
+      "id": "248_goi_cho_anh_trai",
       "text": "gọi cho anh trai"
     },
     {
-      "id": "goi_cho_chi_gai",
+      "id": "249_goi_cho_chi_gai",
       "text": "gọi cho chị gái"
     },
     {
-      "id": "goi_cap_cuu",
+      "id": "250_goi_cap_cuu",
       "text": "gọi cấp cứu"
     },
     {
-      "id": "goi_le_tan",
+      "id": "251_goi_le_tan",
       "text": "gọi lễ tân"
     },
     {
-      "id": "nghe_may",
+      "id": "252_nghe_may",
       "text": "nghe máy"
     },
     {
-      "id": "tu_choi_cuoc_goi",
+      "id": "253_tu_choi_cuoc_goi",
       "text": "từ chối cuộc gọi"
     },
     {
-      "id": "tat_may",
+      "id": "254_tat_may",
       "text": "tắt máy"
     },
     {
-      "id": "gui_tin_nhan",
+      "id": "255_gui_tin_nhan",
       "text": "gửi tin nhắn"
     },
     {
-      "id": "che_do_xem_phim",
+      "id": "256_che_do_xem_phim",
       "text": "chế độ xem phim"
     },
     {
-      "id": "che_do_di_ngu",
+      "id": "257_che_do_di_ngu",
       "text": "chế độ đi ngủ"
     },
     {
-      "id": "che_do_ra_khoi_nha",
+      "id": "258_che_do_ra_khoi_nha",
       "text": "chế độ ra khỏi nhà"
     },
     {
-      "id": "che_do_ve_nha",
+      "id": "259_che_do_ve_nha",
       "text": "chế độ về nhà"
     },
     {
-      "id": "che_do_tiep_khach",
+      "id": "260_che_do_tiep_khach",
       "text": "chế độ tiếp khách"
     },
     {
-      "id": "che_do_doc_sach",
+      "id": "261_che_do_doc_sach",
       "text": "chế độ đọc sách"
     },
     {
-      "id": "che_do_tiet_kiem_dien",
+      "id": "262_che_do_tiet_kiem_dien",
       "text": "chế độ tiết kiệm điện"
     },
     {
-      "id": "che_do_an_ninh",
+      "id": "263_che_do_an_ninh",
       "text": "chế độ an ninh"
     },
     {
-      "id": "tat_che_do_an_ninh",
+      "id": "264_tat_che_do_an_ninh",
       "text": "tắt chế độ an ninh"
     },
     {
-      "id": "chuc_ngu_ngon",
+      "id": "265_chuc_ngu_ngon",
       "text": "chúc ngủ ngon"
     },
     {
-      "id": "chao_buoi_sang",
+      "id": "266_chao_buoi_sang",
       "text": "chào buổi sáng"
     },
     {
-      "id": "toi_di_lam_day",
+      "id": "267_toi_di_lam_day",
       "text": "tôi đi làm đây"
     },
     {
-      "id": "toi_ve_roi",
+      "id": "268_toi_ve_roi",
       "text": "tôi về rồi"
     },
     {
-      "id": "bat_may_quay",
+      "id": "269_bat_may_quay",
       "text": "bật máy quay"
     },
     {
-      "id": "tat_may_quay",
+      "id": "270_tat_may_quay",
       "text": "tắt máy quay"
     },
     {
-      "id": "xem_may_quay_cong",
+      "id": "271_xem_may_quay_cong",
       "text": "xem máy quay cổng"
     },
     {
-      "id": "bat_chuong_bao_dong",
+      "id": "272_bat_chuong_bao_dong",
       "text": "bật chuông báo động"
     },
     {
-      "id": "tat_chuong_bao_dong",
+      "id": "273_tat_chuong_bao_dong",
       "text": "tắt chuông báo động"
     },
     {
-      "id": "kiem_tra_cua_da_khoa",
+      "id": "274_kiem_tra_cua_da_khoa",
       "text": "kiểm tra cửa đã khóa chưa"
     },
     {
-      "id": "bat_bep",
+      "id": "275_bat_bep",
       "text": "bật bếp"
     },
     {
-      "id": "tat_bep",
+      "id": "276_tat_bep",
       "text": "tắt bếp"
     },
     {
-      "id": "bat_voi_nuoc",
+      "id": "277_bat_voi_nuoc",
       "text": "bật vòi nước"
     },
     {
-      "id": "tat_voi_nuoc",
+      "id": "278_tat_voi_nuoc",
       "text": "tắt vòi nước"
     },
     {
-      "id": "mo_voi_sen",
+      "id": "279_mo_voi_sen",
       "text": "mở vòi sen"
     },
     {
-      "id": "tat_voi_sen",
+      "id": "280_tat_voi_sen",
       "text": "tắt vòi sen"
     },
     {
-      "id": "bat_may_bom",
+      "id": "281_bat_may_bom",
       "text": "bật máy bơm"
     },
     {
-      "id": "tat_may_bom",
+      "id": "282_tat_may_bom",
       "text": "tắt máy bơm"
     },
     {
-      "id": "bat_may_suoi",
+      "id": "283_bat_may_suoi",
       "text": "bật máy sưởi"
     },
     {
-      "id": "tat_may_suoi",
+      "id": "284_tat_may_suoi",
       "text": "tắt máy sưởi"
     },
     {
-      "id": "bat_den_ban",
+      "id": "285_bat_den_ban",
       "text": "bật đèn bàn"
     },
     {
-      "id": "tat_den_ban",
+      "id": "286_tat_den_ban",
       "text": "tắt đèn bàn"
     },
     {
-      "id": "bat_loa",
+      "id": "287_bat_loa",
       "text": "bật loa"
     },
     {
-      "id": "tat_loa",
+      "id": "288_tat_loa",
       "text": "tắt loa"
     },
     {
-      "id": "xin_chao",
+      "id": "289_xin_chao",
       "text": "xin chào"
     },
     {
-      "id": "cam_on",
+      "id": "290_cam_on",
       "text": "cảm ơn"
     },
     {
-      "id": "tam_biet",
+      "id": "291_tam_biet",
       "text": "tạm biệt"
     },
     {
-      "id": "giup_toi_voi",
+      "id": "292_giup_toi_voi",
       "text": "giúp tôi với"
     },
     {
-      "id": "huy_lenh",
+      "id": "293_huy_lenh",
       "text": "hủy lệnh"
     },
     {
-      "id": "nhac_lai",
+      "id": "294_nhac_lai",
       "text": "nhắc lại"
     },
     {
-      "id": "noi_to_hon",
+      "id": "295_noi_to_hon",
       "text": "nói to hơn"
     },
     {
-      "id": "noi_nho_thoi",
+      "id": "296_noi_nho_thoi",
       "text": "nói nhỏ thôi"
     },
     {
-      "id": "im_lang",
+      "id": "297_im_lang",
       "text": "im lặng"
     },
     {
-      "id": "ke_chuyen_co_tich",
+      "id": "298_ke_chuyen_co_tich",
       "text": "kể chuyện cổ tích"
     },
     {
-      "id": "doc_tho",
+      "id": "299_doc_tho",
       "text": "đọc thơ"
     },
     {
-      "id": "bat_den_trang_tri",
+      "id": "300_bat_den_trang_tri",
       "text": "bật đèn trang trí"
+    },
+    {
+      "id": "301_tat_den_trang_tri",
+      "text": "tắt đèn trang trí"
     }
   ]
 }
