@@ -1638,17 +1638,25 @@ thêm 1. `out_of_set_accept` đặt 0,08, đúng mức câu ngoài bộ của c�
 (lệnh kém nhất của `val_commands` 0,5, cả bộ 75,0%). So với board B lúc 21:11 (δ₁ 200 ‰, δ₂ 25 ‰), bộ ba ấy mất 7 câu
 nhận đúng của Cửa 3 mà "bật" lọt từ 42 xuống 11/80 và câu lạ nhận từ 5 xuống 0/126. Đo bằng script chẩn đoán chạy một lần.
 
-### 12.29 Lượt thử nhìn trước: lượt B (08/10)
+### 12.29 Lượt thử nhìn trước: lượt A và B, cả ba chiều cao độ giữ (08/10)
 
-KẾ HOẠCH §3.12, lượt B: v8 học tinh chỉnh 10 000 bước, lr 3·10⁻⁴, cả ba chiều cao độ giữ ở trung bình lúc học, một lớp
-nhìn trước 12 khung (0,384 s), run `20261008_818da00-dirty_2f0bcb`, 21:09–22:12 trên GPU. Lỗi đơn vị `val` theo mốc:
-0,369 (2 000), 0,359 (4 000), 0,357 (6 000), 0,347 (8 000), 0,343 (10 000); v8 nghe SwiftF0 0,343, v8 giữ cả ba chiều
+KẾ HOẠCH §3.12, hai lượt học tinh chỉnh từ v8, mỗi lượt 10 000 bước, lr 3·10⁻⁴, cả ba chiều cao độ giữ ở trung bình
+lúc học, cùng seed và split: A không nhìn trước (run `20261008_fd6fe76-dirty_dd5966`, 22:12–23:16), B một lớp nhìn
+trước 12 khung, 0,384 s (run `20261008_818da00-dirty_2f0bcb`, 21:09–22:12). Lỗi đơn vị `val` theo mốc 2 000 … 10 000:
+A 0,374, 0,368, 0,361, 0,354, 0,350; B 0,369, 0,359, 0,357, 0,347, 0,343; v8 nghe SwiftF0 0,343, v8 giữ cả ba chiều
 không học lại 0,375 (§12.25). Cửa 3 float, Kaldi, cả ba chiều giữ, δ₂ 25 ‰, chưa xét luật phần:
 
 | Run | Đúng nhất | Nhận đúng δ₁ 100 ‰ | Nhận đúng δ₁ 200 ‰ | Câu lạ nhận δ₁ 100 / 200 ‰ | "tắt đèn" đúng nhất | "tắt quạt" đúng nhất |
 |---|---|---|---|---|---|---|
 | v8 (board B) | 194/209 | 172/209 | 181/209 | 0 / 7 | 32/35 | 30/34 |
+| A | 170/209 | 137/209 | 149/209 | 0 / 4 | 17/35 | 21/34 |
 | B | 181/209 | 149/209 | 161/209 | 0 / 6 | 23/35 | 27/34 |
 
-`val` khá lên mà "tắt" của chủ repo tụt, như v6 ở §12.13. Lượt A (cùng học tinh chỉnh, không lớp nhìn trước) chạy từ
-22:12; luật thắng thua của §3.12 chấm khi A xong.
+`tone_flip places` trên `val`, cả ba chiều giữ: thanh đúng âm tiết đầu A 72,7%, B 73,2%, âm tiết sau 81,8% và 82,0%; riêng
+vần tắc, âm tiết đầu 76,0% và 79,6% (v8 không học lại: 71,5% và 79,0% cho âm tiết đầu và sau, §12.25). `tone_flip owner`
+cả ba chiều giữ, "tắt" đúng nhất (qua ngưỡng của phép kiểm) trên 69 câu của 28/09 và 07/10: v8 62 (48), B 50 (21), A 38
+(9); "bật" 70/73 ở cả ba.
+
+Theo luật của §3.12, B thắng A: Cửa 3 nhận đúng hơn 12 câu ở δ₁ 100 ‰, từ chối bằng nhau; thanh âm tiết đầu trên `val`
+chỉ hơn 0,5 điểm. Nhưng cả hai kém v8: học tinh chỉnh với cả ba chiều giữ kéo "tắt" của chủ repo xuống dù `val` khá lên,
+như v6 ở §12.13, nên không lượt nào thay v8. Lượt thử chạy tiếp với cao độ SwiftF0 như v8 học (C, D của §3.12).
