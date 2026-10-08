@@ -1549,3 +1549,25 @@ Cùng phép chấm của §12.23 (bộ `battat_vi.json`, δ₁ 100 ‰, δ₂ 25
 | giảm âm lượng | 1/11 | 5/11 |
 
 Gap của các câu "giảm" hạ: nhận ở 73–95 ‰, ba câu từ chối ở 101–102 ‰ và hai ở 149, 157 ‰.
+
+### 12.26 v8 giữ cả ba chiều cao độ trên board B, δ₁ 200 ‰ (08/10)
+
+`make ctc-deploy ROW=percentile KALDI=1 HOLD=pitch` (thang `int8_kaldi_pitch/`: `percentile` nhận đúng 163/209 ở δ₁
+300 ‰, δ₂ 50 ‰ của thang, so với 145/209 của dòng giữ độ hữu thanh; `make ctc-thresholds` chọn δ₁ 100 ‰, δ₂ 0 ‰, ở đó
+Cửa 3 nhận đúng 184/209, nhận nhầm 1/126), rồi `make models-flash` 20:43–20:47. Board B khởi động: ảnh 3 370 KB ở PSRAM,
+mạng dựng 347 ms, NVS giữ δ₁ 100 ‰, δ₂ 25 ‰ của chủ repo.
+
+Chủ repo thử ngay trên bộ 301 lệnh rồi bộ 47 lệnh: nhiều câu bị từ chối `LOW_SCORE` với gap 103–153 ‰, "chụp ảnh" không
+qua. Trên bản thu 28/09, đồ thị int8 mới nhận "chụp ảnh" 10/11 so với 9/11 của đồ thị cũ ở bộ battat, 9/11 so với 8/11 ở
+bộ 301 lệnh, gap 55–89 ‰; ở bộ 301 lệnh, "tăng âm lượng" và "giảm âm lượng" 1 m chỉ qua 2/8 và 1/5 ở cả hai đồ thị, vì
+"tăng một độ", "giảm một độ" chỉ kém 0–21 ‰ (`LOW_MARGIN`). Đánh đổi của δ₁ ở δ₂ 25 ‰ trên bảng chọn ngưỡng của dòng
+mới (`val_commands`, câu `val` nhận nhầm) và trên Cửa 3 float giữ cả ba chiều (δ₂ 50 ‰):
+
+| δ₁ | `val_commands` nhận đúng | `val` nhận nhầm | Cửa 3 nhận đúng | Cửa 3 từ chối |
+|---|---|---|---|---|
+| 100 ‰ | 75,0% | 2 | 73% | 126/126 |
+| 200 ‰ | 78,2% | 11 | 78% | 124/126 |
+| 300 ‰ | 78,2% | 46 | 78% | 123/126 |
+
+δ₁ 200 ‰ lấy hết phần nhận thêm; 300 ‰ chỉ thêm nhận nhầm. Đặt `kws/cmd_reject` 200 qua console lúc 20:56 (`nvs set kws
+cmd_reject 200 -t u16`), khởi động lại: `listening: … delta1 200, delta2 25`.
