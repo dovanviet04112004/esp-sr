@@ -194,9 +194,26 @@ chờ dữ liệu 77–81% thời gian; 7 worker 0,86 bước/s; 12 worker tràn
 24 ví dụ của epoch 0): chập RIR ~96 ms, phổ ở khe ~70 ms, đáp ứng micro ~60 ms, đọc nhiễu từ `raw/` ~71 ms, trong đó mở
 file 19 ms. Ba phép lọc chiếm ~2/3; vòng Python không đáng kể.
 
-Lọc trên GPU (`gpu_mix`, `9a6ba64`), cũng 10 worker, lượt `20261008_9a6ba64-dirty_f04a9b`: **3,5–3,7 bước/s**, 114–119
-ví dụ/s, GPU chờ dữ liệu 15–19%, gấp ~2,9 lần; GPU giờ là chỗ nghẽn. Một batch 32 ví dụ lọc trên GPU 83 ms, đỉnh 809 MB
-(FFT ~32 ms, nhân và chép bộ nhớ ~40 ms, đều theo băng thông); worker còn ~25 ms một ví dụ cộng phần đọc, batch công thức
-~70 MB trong RAM chia sẻ. So với đường numpy float64 trên hai batch thật, công suất khe của hỗn hợp lệch trong −81 dB, của
-tiếng trong −119 dB. Hai lượt học trên cùng batch cho loss gần trùng: bước 1–100 RNNoise-16k 0,16327 (CPU) và 0,16258
-(GPU), ba cỡ NSNet-16k lệch dưới 0,5%; bước 201–300 lệch dưới 2%.
+Lọc trên GPU (`gpu_mix`), so với đường numpy trên hai batch 32 ví dụ thật (ví dụ 0–31 và 5 000–5 031 của epoch 0, không
+nhiễu tự thân để hai đường khỏi rút khác nhau), loss với gain phẳng −20 dB và với gain lý tưởng của đích numpy chặn ở −40 dB:
+
+| Phần tiếng nói trên GPU | Công suất hỗn hợp / tiếng lệch | Loss, gain −20 dB | Loss, gain lý tưởng | Một batch |
+|---|---|---|---|---|
+| float32 hết (`9a6ba64`) | −81…−86 / −119 dB | −0,44% | −1,7% | 83 ms |
+| float64, phổ RIR float64 | −115 / −137 dB | +0,031…+0,039% | +0,12…+0,25% | 153 ms |
+| float64, phổ RIR float32 như `scipy` (`86e715f`) | −115…−117 / −131…−133 dB | **+0,003…+0,005%** | **+0,013…+0,033%** | 140 ms |
+
+Hàm mất mát nén công suất mũ 0,15, nên nền nằm ~120 dB dưới đỉnh tiếng cũng đổi đích: 30% ô của ví dụ có người nói nằm sâu hơn
+thế. Lọc phần tiếng bằng float32 trên cả ví dụ 10 s để lại nền làm tròn ở đó, đích nén cao hơn ~19%. Bản numpy lại có nền
+riêng: `scipy.signal.fftconvolve` biến đổi RIR float32 của kho ở độ chính xác đơn (đoạn im lặng của ví dụ 3: numpy
+1,6·10⁻¹⁰ so với đỉnh 1,6·10⁻², GPU float64 5·10⁻¹⁹). Làm đúng như `scipy` thì hai đường khớp; STFT float32 và `dry` float32
+không đổi loss. Lượt `9a6ba64` vì thế học trên đích lệch: loss trung bình bước 1–100 thấp hơn lượt CPU 0,42–0,46% ở cả
+bốn ứng viên; bỏ lượt ấy.
+
+Đọc: mỗi lần đọc E: qua 9P phải chờ, worker đọc lần lượt thì GPU chờ dữ liệu 30–53%. Đọc 8 luồng mỗi worker trên ví dụ chưa
+lượt nào đọc: 28–37 ms một ví dụ, so với 110–165 ms đọc lần lượt. Mỗi luồng một vùng cấp phát glibc thì worker giữ thêm
+362 MB sau 40 batch, `MALLOC_ARENA_MAX=2` còn 143 MB và đọc một batch 0,35 s thay vì 0,52 s.
+
+Lượt `20261008_dd911af-dirty_1ea86b` (6 worker, 8 luồng đọc, 2 vùng cấp phát): **3,75–3,81 bước/s**, GPU chờ dữ liệu 0–1%,
+GPU bận 87–94%: **gấp ~3,1 lần** đường CPU. Loss trung bình bước 1–100 lệch lượt CPU −0,02%, +0,01%, 0,00%, +0,08%
+(RNNoise-16k, NSNet-16k S, M, L); từ bước 300 hai lượt tản ±2% theo cả hai chiều như mọi lượt học GRU.
