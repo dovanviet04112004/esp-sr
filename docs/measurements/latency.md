@@ -500,3 +500,22 @@ esp-mqtt) và giữ bộ đang dùng. Mỗi lần đo là hiệu giữa giờ m�
 esp-mqtt chỉ gửi tin đã xếp hàng khi vòng của nó thức, mỗi vòng một tin, và vòng ấy ngủ trong `select` tới hạn poll
 khi broker không gửi gì (`mqtt_client.c`, `esp_mqtt_task`). Với poll 50 ms, phần còn lại là nhịp 100 ms của `gui_task`
 (0–100 ms), cộng poll (0–50 ms), cộng mạng và broker.
+
+## 22. `svc_listen` trên chip với `command/v8`: quyết định trùng, điểm lệch vài ‰ (E11-T14)
+
+Board B, `make listen-unit` ở `1a50f2a` (cây tiền tố, mục 2 và 4 của chủ repo), model khoá `command/v8` hàng
+`percentile` nghe bằng Kaldi, độ hữu thanh gập; mọi phiên Cửa 3 hiện có, bảy lượt nạp; ngưỡng của bản dựng phiên
+(δ₁ 300 ‰, δ₂ 50 ‰), 08/10 08:44–09:18. Mỗi cửa sổ so với mô phỏng int8 của Python từng trường:
+
+| Đo | Kết quả |
+|---|---|
+| Cửa sổ trùng Python từng trường | 304/319 |
+| Cửa sổ khác loại quyết định hay khác lệnh | 0: 8 `COMMAND` cùng lệnh, 6 `REJECT`, một dòng log hỏng giữa đường nối tiếp |
+| Lệch ở 15 cửa sổ ấy, score / margin / gap | tới 15 / 13 / 22 ‰, phần lớn 1–9 ‰ |
+| Ca `FRAME_GAP` (câu đang mở gặp chỗ hở) và ca click | qua cả bảy lượt |
+| Quyết định sau bước chốt, giữa / đỉnh mỗi lượt | 79–114 ms / 86 ms, tới 1,27 s ở cửa sổ cắt lùi |
+
+Lần trước (`make listen-unit` 03/10, model cũ, chấm từng cách đọc) trùng 198/198. Lần này cây tiền tố trùng từng bit
+với chấm từng cách đọc và với Python trên máy (bộ vàng `ctc`), nên chỗ lệch nằm ở phần trước phép chấm: mạng int8 của
+v8 trên esp-dl so với mô phỏng ESP-PPQ, hay đặc trưng. Chưa tách được: app thử `ai_engine` so mạng trên chip với mô
+phỏng hết PSRAM khi nạp model `ctc` từ 07/10.
