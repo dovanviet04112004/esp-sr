@@ -1,14 +1,18 @@
 #include "svc_front.h"
 
+#include <math.h>
 #include <stdbool.h>
 #include <string.h>
 
 #include "esp_heap_caps.h"
+#include "gen_afe.h"
 #include "gen_array.h"
+#include "gen_grid.h"
 
 static struct {
     dsp_afe_t *afe;
     uint32_t next_seq;
+    uint32_t keep_hops; // longest gap dsp_afe resumes over
     bool started;
 } s_front;
 
@@ -43,13 +47,23 @@ esp_err_t svc_front_init(const svc_front_config_t *cfg)
         heap_caps_free(hot);
         heap_caps_free(cold);
     }
+    const float keep_hops = GEN_AFE_CHAIN_GAP_KEEP_S * GEN_GRID_SAMPLE_RATE_HZ / GEN_GRID_HOP_SAMPLES;
+    s_front.keep_hops = (uint32_t)lrintf(keep_hops);
     return err;
 }
 
 esp_err_t svc_front_step(const int16_t *interleaved, uint32_t seq, dsp_afe_frame_t *out)
 {
     if (s_front.afe == NULL) { return ESP_ERR_INVALID_STATE; }
-    if (s_front.started && seq != s_front.next_seq) { dsp_afe_reset(s_front.afe); }
+    if (s_front.started && seq != s_front.next_seq) {
+        // Unsigned: a seq that steps back reads as a gap longer than any kept, so it resets.
+        const uint32_t missed = seq - s_front.next_seq;
+        if (missed <= s_front.keep_hops) {
+            dsp_afe_resume(s_front.afe);
+        } else {
+            dsp_afe_reset(s_front.afe);
+        }
+    }
     s_front.started = true;
     s_front.next_seq = seq + 1;
     // One hop in and straight out again, so the inner fifo never holds more than this one.
