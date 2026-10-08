@@ -46,6 +46,7 @@
 #define PITCH_HARMONICS 5
 #define BENCH_STEER_DEG 60.0f
 #define GSC_ANGLES 91 // the doa grid, 0..180 deg
+#define ROW_NAME_BYTES 64
 #if CONFIG_DSP_AFE_DOA_ENABLE
 #define CHAIN_ROW "dsp_afe chuỗi (hpf + stft x2 + balance + doa + trộn + ns + istft + vad + agc)"
 #else
@@ -388,7 +389,9 @@ static void bench_chain(void)
 static void bench_mel(void)
 {
     const dsp_spec_mel_config_t cfg = GEN_LISTEN_MEL_CONFIG;
-    row_t row = {.module = "dsp_spec log-mel (40 dải)", .core = CORE_NHAN, .in_total = true};
+    char name[ROW_NAME_BYTES];
+    snprintf(name, sizeof(name), "dsp_spec log-mel (%u dải)", (unsigned)cfg.n_bands);
+    row_t row = {.module = name, .core = CORE_NHAN, .in_total = true};
     row.hot_bytes = dsp_spec_mel_workspace_bytes(&cfg);
     void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
     const size_t before = heap_free();
