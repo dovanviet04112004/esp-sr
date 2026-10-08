@@ -1610,3 +1610,45 @@ các phiên nói lệnh có trong bộ, kể cả hơi thở và tiếng động
 | 200 ‰ | 50 ‰ | 102/154 | 0/80 | 0/25 |
 
 Luật trần âm tiết đổi cách quyết của KẾ HOẠCH §3.12, nên chưa làm; chủ repo để sau.
+
+### 12.28 Trần âm tiết kém nhất `δ₃` cho đồ thị int8 của board B (08/10)
+
+Luật `δ₃` của KẾ HOẠCH §3.12 trên dòng `percentile` của v8 giữ cả ba chiều cao độ (`int8_kaldi_pitch/`), quyết như chip.
+`make ctc-thresholds` quyết mỗi cửa sổ `val_commands` (216 cửa sổ, tám lệnh) thêm một lần trên các lệnh đã học trừ chính
+lệnh nó nói, thành câu bộ lệnh không có. Mục tiêu đầu `out_of_set_accept` 0,05 chọn δ₁ 100 ‰, δ₂ 0 ‰, δ₃ 50 ‰: câu ngoài
+bộ bị nhận 8/216, nhưng Cửa 3 nhận đúng chỉ 152/209 so với 184/209 không trần, nên chưa deploy. Cửa 3 trên lưới ba
+ngưỡng, cùng đồ thị; "nhận sai lệnh" là câu lệnh trong bộ nhận thành lệnh khác, "câu lạ" là 126 cửa sổ phải từ chối,
+"bật" lọt là 80 cửa sổ "bật đèn", "bật quạt" của các phiên Cửa 3 quyết trên bộ 47 lệnh của chủ repo (§12.27):
+
+| δ₁ | δ₂ | δ₃ | Cửa 3 nhận đúng | Nhận sai lệnh | Câu lạ nhận | `val_commands` nhận đúng | `val` nhận nhầm | Ngoài bộ nhận | "bật" lọt |
+|---|---|---|---|---|---|---|---|---|---|
+| 100 ‰ | 25 ‰ | — | 172/209 | 5 | 0/126 | 75,0% | 2 | 17/216 | 23/80 |
+| 100 ‰ | 0 ‰ | 50 ‰ | 152/209 | chưa đo | 0/126 | 65,3% | 2 | 8/216 | 0/80 |
+| 100 ‰ | 0 ‰ | 60 ‰ | 172/209 | 6 | 0/126 | 74,1% | 3 | 16/216 | 11/80 |
+| 200 ‰ | 0 ‰ | 60 ‰ | 175/209 | 6 | 0/126 | 75,0% | 4 | 17/216 | 11/80 |
+| 200 ‰ | 0 ‰ | 70 ‰ | 179/209 | 6 | 1/126 | 78,2% | 5 | 23/216 | 15/80 |
+| 200 ‰ | 0 ‰ | 80 ‰ | 184/209 | 7 | 1/126 | 80,6% | 10 | 29/216 | 22/80 |
+| 200 ‰ | 25 ‰ | 60 ‰ | 163/209 | 5 | 0/126 | 71,3% | 1 | 10/216 | 8/80 |
+| 200 ‰ | 25 ‰ | — | 182/209 | 5 | 5/126 | 78,2% | 11 | 49/216 | 42/80 |
+| 200 ‰ | 0 ‰ | — | 194/209 | 7 | 6/126 | 84,3% | 45 | 72/216 | 66/80 |
+
+Dòng δ₁ 200 ‰, δ₂ 25 ‰ không trần là board B lúc 21:11. Trần thay được phần việc của δ₂ với câu na ná: ở δ₂ 0 ‰ và δ₃ 60 ‰,
+Cửa 3 nhận đúng hơn δ₁ 100 ‰, δ₂ 25 ‰ không trần 3 câu, câu ngoài bộ bằng (17/216), "bật" lọt 11 so với 23, nhận sai lệnh
+thêm 1. `out_of_set_accept` đặt 0,08, đúng mức câu ngoài bộ của cặp không trần ấy: luật chọn ra δ₁ 200 ‰, δ₂ 0 ‰, δ₃ 60 ‰
+(lệnh kém nhất của `val_commands` 0,5, cả bộ 75,0%). So với board B lúc 21:11 (δ₁ 200 ‰, δ₂ 25 ‰), bộ ba ấy mất 7 câu
+nhận đúng của Cửa 3 mà "bật" lọt từ 42 xuống 11/80 và câu lạ nhận từ 5 xuống 0/126. Đo bằng script chẩn đoán chạy một lần.
+
+### 12.29 Lượt thử nhìn trước: lượt B (08/10)
+
+KẾ HOẠCH §3.12, lượt B: v8 học tinh chỉnh 10 000 bước, lr 3·10⁻⁴, cả ba chiều cao độ giữ ở trung bình lúc học, một lớp
+nhìn trước 12 khung (0,384 s), run `20261008_818da00-dirty_2f0bcb`, 21:09–22:12 trên GPU. Lỗi đơn vị `val` theo mốc:
+0,369 (2 000), 0,359 (4 000), 0,357 (6 000), 0,347 (8 000), 0,343 (10 000); v8 nghe SwiftF0 0,343, v8 giữ cả ba chiều
+không học lại 0,375 (§12.25). Cửa 3 float, Kaldi, cả ba chiều giữ, δ₂ 25 ‰, chưa xét luật phần:
+
+| Run | Đúng nhất | Nhận đúng δ₁ 100 ‰ | Nhận đúng δ₁ 200 ‰ | Câu lạ nhận δ₁ 100 / 200 ‰ | "tắt đèn" đúng nhất | "tắt quạt" đúng nhất |
+|---|---|---|---|---|---|---|
+| v8 (board B) | 194/209 | 172/209 | 181/209 | 0 / 7 | 32/35 | 30/34 |
+| B | 181/209 | 149/209 | 161/209 | 0 / 6 | 23/35 | 27/34 |
+
+`val` khá lên mà "tắt" của chủ repo tụt, như v6 ở §12.13. Lượt A (cùng học tinh chỉnh, không lớp nhìn trước) chạy từ
+22:12; luật thắng thua của §3.12 chấm khi A xong.
