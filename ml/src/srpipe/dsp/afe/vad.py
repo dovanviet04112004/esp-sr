@@ -348,10 +348,15 @@ class Vad:
         self.hangover_hops = hangover_hops(hangover_ms, frame_samples)
         self.reset()
 
-    def reset(self) -> None:
+    def flush(self) -> None:
+        """Clear the band-split filters, the only state that holds samples, as after a short gap; the models, the
+        minimum tracks and the hangover stay (KEHOACH 4.5.5)."""
         self.downsample = _HalfBand(afe.VAD_DOWNSAMPLE_ALLPASS)
         self.splits = [_HalfBand(afe.VAD_SPLIT_ALLPASS) for _ in range(SPLIT_STAGES)]
         self.low_band_hpf = _LowBandHighPass()
+
+    def reset(self) -> None:
+        self.flush()
         self.tracker = (
             np.full((BANDS, MIN_TRACK_VALUES), MIN_TRACK_EMPTY_DB, dtype=np.float32),
             np.zeros((BANDS, MIN_TRACK_VALUES), dtype=np.int32),

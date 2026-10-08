@@ -126,6 +126,26 @@ def test_reset_starts_every_module_again() -> None:
     assert [(a.vad, a.gain_db, a.level_dbfs) for a in again] == [(b.vad, b.gain_db, b.level_dbfs) for b in fresh]
 
 
+def test_resume_keeps_every_estimate_and_clears_only_what_holds_samples() -> None:
+    rng = np.random.default_rng(5)
+    x = np.rint(32768 * speechlike(rng, 2 * HOPS * grid.HOP_SAMPLES, 0.01)).astype(np.int16)
+    hops = interleave(x, x)
+    ch = chain.Chain()
+    run(ch, hops[:HOPS])
+    agc, vad = ch._agc, ch._vad
+    kept = (agc.gain, agc.speech_power, vad.hops_modelled, [m.copy() for m in vad.models], ch._ns.lambda_d.copy())
+    ch.resume()
+    assert (agc.gain, agc.speech_power, vad.hops_modelled) == kept[:3]
+    assert all(np.array_equal(a, b) for a, b in zip(vad.models, kept[3], strict=True))
+    assert np.array_equal(ch._ns.lambda_d, kept[4])
+    assert not agc.delay.any() and not ch._hpf.state.any()
+    after = run(ch, hops[HOPS:])
+    fresh = run(chain.Chain(), hops[HOPS:])
+    assert after[0].flags == chain.FLAG_GAP and after[1].flags == 0
+    assert kept[0] != np.float32(1.0), "the speech before the gap never moved agc, so nothing shows it kept"
+    assert any(a.gain_db != b.gain_db for a, b in zip(after, fresh, strict=True))
+
+
 def test_gsc_steered_at_broadside_passes_identical_microphones_as_the_mean() -> None:
     x = tone(HOPS * grid.HOP_SAMPLES)
     hops = interleave(x, x)

@@ -128,12 +128,27 @@ class Chain:
         )
 
     def reset(self) -> None:
-        """Forget buffered samples and every module's state after a gap; the next frame carries FLAG_GAP and seq
+        """Forget buffered samples and every module's state after a long gap; the next frame carries FLAG_GAP and seq
         runs on."""
         for st in self._analysis:
             st.reset()
         self._synthesis.reset()
         self._start_modules()
+        self._gap = True
+
+    def resume(self) -> None:
+        """Forget only what holds samples from before a short gap, the STFT and iSTFT buffers, hpf's memory, vad's
+        band filters and agc's look-ahead, and keep every estimate; the next frame carries FLAG_GAP and seq runs on
+        (KEHOACH 4.5.5)."""
+        for st in self._analysis:
+            st.reset()
+        self._synthesis.reset()
+        if self._hpf is not None:
+            self._hpf.reset()
+        if self._vad is not None:
+            self._vad.flush()
+        if self._agc is not None:
+            self._agc.flush()
         self._gap = True
 
     def process(self, interleaved: np.ndarray) -> Frame:

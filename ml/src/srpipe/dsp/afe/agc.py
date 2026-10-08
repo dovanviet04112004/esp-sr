@@ -164,6 +164,11 @@ class Agc:
         if start_db is not None:
             self.gain = db_to_amplitude(start_db)
             self.speech_power = self.target_power / (self.gain * self.gain)
+        self.flush()
+
+    def flush(self) -> None:
+        """Empty the look-ahead and release the limiter, the state that holds samples, as after a short gap; the slow
+        gain and the speech level stay (KEHOACH 4.5.5)."""
         n = self.lookahead + 1
         # One slot more than the window: a new value lands while the one it pushes out still sits there.
         self.need = np.zeros(n + 1, dtype=np.float32)

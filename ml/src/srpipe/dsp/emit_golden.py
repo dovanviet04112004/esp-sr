@@ -26,6 +26,10 @@ MEL_FRAMES = 8
 CHAIN_HOPS = 16
 CHAIN_RESET_HOP = 8
 CHAIN_MODULES_HOPS = 192
+# The reset column of a chain case, per hop: 0 runs on, 1 resets ahead of the hop, 2 resumes (KEHOACH 4.5.5).
+CHAIN_RESET = 1
+CHAIN_RESUME = 2
+CHAIN_RESUME_HOPS = (72, 108)
 HPF_HOPS = 16
 BALANCE_HOPS = 16
 # Every vad case outlives the 100-hop window of the minimum tracker.
@@ -217,16 +221,19 @@ def _chain_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray
 
 
 def chain_case(ch0: np.ndarray, ch1: np.ndarray, reset: np.ndarray, cfg: chain.ChainConfig) -> dict[str, np.ndarray]:
-    """Interleaved int16 input, the hops to reset before, the afe/* settings (ns floor dB, agc target dBFS, vad
-    mode), calib/bal as re, im pairs when the case has one, and every field of the frames the chain gives."""
+    """Interleaved int16 input, per hop CHAIN_RESET or CHAIN_RESUME before it or 0, the afe/* settings (ns floor dB,
+    agc target dBFS, vad mode), calib/bal as re, im pairs when the case has one, and every field of the frames the
+    chain gives."""
     pcm_min, pcm_max = np.iinfo(np.int16).min, np.iinfo(np.int16).max
     mics = np.stack([ch0, ch1], axis=-1)
     interleaved = np.clip(np.rint(mics), pcm_min, pcm_max).astype(np.int16).reshape(reset.size, -1)
     ch = chain.Chain("MM", cfg)
     frames = []
     for hop, flag in zip(interleaved, reset, strict=True):
-        if flag:
+        if flag == CHAIN_RESET:
             ch.reset()
+        elif flag == CHAIN_RESUME:
+            ch.resume()
         frames.append(ch.process(hop))
     settings = [cfg.ns_floor_db, cfg.agc_target_dbfs, cfg.vad_aggressiveness]
     calib = {} if cfg.balance_gains is None else {"gains": _pairs(cfg.balance_gains)}
@@ -305,9 +312,24 @@ def _chain_modules_inputs(
     ]
 
 
+def _chain_resume_case(rng: np.random.Generator) -> dict[str, np.ndarray]:
+    """Speech with pauses on a calibrated board, resumed after a short gap once in speech and once in a pause, so
+    every estimate the resume keeps has moved away from its start."""
+    n = CHAIN_MODULES_HOPS * grid.HOP_SAMPLES
+    pauses = np.repeat(np.arange(CHAIN_MODULES_HOPS) % 64 < 40, grid.HOP_SAMPLES)
+    voice = speechlike(rng, n, 0.1) * pauses
+    floor = 3e-4 * rng.standard_normal((2, n))
+    resumes = np.zeros(CHAIN_MODULES_HOPS, dtype=np.uint8)
+    resumes[list(CHAIN_RESUME_HOPS)] = CHAIN_RESUME
+    ch1_down = 10 ** (-11.0 / 20.0)
+    board = chain.ChainConfig(balance_gains=board_like_gains())
+    return chain_case(32768 * (voice + floor[0]), 32768 * (ch1_down * voice + floor[1]), resumes, board)
+
+
 def emit_chain_modules(root: Path) -> list[Path]:
-    """Four cases through the facade with the product's modules, then a negative control that carries calib/bal
-    but was computed without it."""
+    """Five cases through the facade with the product's modules, the last resumed after two short gaps; then a
+    negative control that carries calib/bal but was computed without it, and one that resets where its frames
+    were computed resuming."""
     rng = np.random.default_rng(SEED + 7)
     written = []
     for index, inputs in enumerate(_chain_modules_inputs(rng)):
@@ -321,6 +343,14 @@ def emit_chain_modules(root: Path) -> list[Path]:
     negative["gains"] = _pairs(board_like_gains())
     path = root / "chain_modules" / "case_neg_000.gold"
     write_gold(path, negative)
+    written.append(path)
+    resumed = _chain_resume_case(np.random.default_rng(SEED + 9))
+    path = root / "chain_modules" / "case_004.gold"
+    write_gold(path, resumed)
+    written.append(path)
+    resumed["reset"] = np.where(resumed["reset"] == CHAIN_RESUME, CHAIN_RESET, 0).astype(np.uint8)
+    path = root / "chain_modules" / "case_neg_001.gold"
+    write_gold(path, resumed)
     written.append(path)
     return written
 
