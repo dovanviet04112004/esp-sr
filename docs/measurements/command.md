@@ -1490,3 +1490,39 @@ B tối 08/10. v2 là run `20261002_128545c-dirty_64e7a4`, không có chiều ca
 của v2 cũng chỉ qua 5/13 và 3/11 ở δ₁ 100 ‰; ở δ₁ 300 ‰, δ₂ 50 ‰ của buổi 02/10, v2 nhận 7/13 và 9/11. "Đóng cửa"
 kém đi vì cao độ của Kaldi: ba câu nghe bằng Kaldi chuyển sang "mở cửa" với khoảng cách nhất nhì 2–21 ‰, giữ cả ba
 chiều thì trả lại 10/11 như SwiftF0. Giữ cả ba chiều, phần cao độ không vào mạng nữa, nên cách ấy không theo bộ dò nào.
+
+### 12.25 Cao độ với v8: thanh theo từng cách nghe, trên `val` và trên lệnh của chủ repo (08/10)
+
+Mạng float của v8 ở bước 40 000, năm cách đưa ba chiều cao độ vào: SwiftF0 như lúc học; Kaldi như board dò; Kaldi với độ
+hữu thanh giữ ở trung bình, như board B chạy v8; Kaldi với hai chiều F0 giữ; không cao độ, cả ba chiều giữ. Thanh đúng là
+thanh của vòng tự do, căn theo khoảng cách sửa với đơn vị của câu, như `tone_flip places`; đo bằng script chẩn đoán
+chạy một lần. Trên `val` (1 578 câu), bản dựng v8 cho SwiftF0 và bản dựng v7 cho Kaldi: cùng mục, log-mel trùng từng
+byte, chỉ cao độ khác:
+
+| Cách nghe | Lỗi đơn vị | Âm tiết đầu | ngang | huyền | ngã | hỏi | sắc | nặng | Âm tiết sau | ngang | huyền | ngã | hỏi | sắc | nặng |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| SwiftF0 | 0,343 | 73,5% | 82,0 | 69,9 | 52,6 | 42,7 | 92,7 | 53,5 | 83,1% | 88,3 | 86,9 | 49,0 | 70,4 | 92,7 | 72,8 |
+| Kaldi | 0,392 | 63,4% | 82,8 | 61,2 | 34,7 | 14,5 | 79,0 | 34,8 | 77,3% | 86,5 | 87,8 | 45,8 | 46,4 | 82,6 | 67,9 |
+| Kaldi, giữ độ hữu thanh | 0,372 | 69,9% | 78,9 | 66,3 | 49,5 | 34,7 | 92,4 | 44,9 | 79,9% | 82,3 | 87,3 | 45,3 | 63,4 | 92,1 | 69,2 |
+| Kaldi, giữ hai chiều F0 | 0,411 | 64,1% | 87,4 | 68,1 | 30,5 | 10,5 | 65,9 | 44,4 | 69,8% | 89,7 | 69,8 | 37,0 | 38,3 | 75,2 | 53,9 |
+| không cao độ | 0,375 | 71,5% | 78,5 | 71,6 | 45,3 | 33,1 | 92,7 | 52,4 | 79,0% | 82,8 | 85,6 | 43,1 | 61,7 | 92,0 | 66,4 |
+| Số âm tiết | | 1 578 | 494 | 335 | 95 | 124 | 343 | 187 | 15 100 | 4 331 | 2 863 | 775 | 1 420 | 3 501 | 2 210 |
+
+Trên 209 câu lệnh của Cửa 3 qua board B, cửa sổ gán như Cửa 3; thanh so với cách đọc miền Bắc của lệnh:
+
+| Cách nghe | Đúng nhất | Thanh âm tiết đầu | Thanh các âm tiết sau |
+|---|---|---|---|
+| SwiftF0 | 196/209 | 167/209 (80%) | 179/233 (77%) |
+| Kaldi | 186/209 | 141/209 (67%) | 150/233 (64%) |
+| Kaldi, giữ độ hữu thanh | 192/209 | 160/209 (77%) | 153/233 (66%) |
+| Kaldi, giữ hai chiều F0 | 170/209 | 130/209 (62%) | 148/233 (64%) |
+| không cao độ | 194/209 | 166/209 (79%) | 153/233 (66%) |
+
+So với cách board chạy v8, bỏ cao độ ngang ngửa: trên `val` âm tiết đầu hơn 1,6 điểm (nặng hơn 7,5 điểm, vì Kaldi dò
+sai âm tiết đầu như §12.18), âm tiết sau kém 0,9 điểm; trên lệnh của chủ repo đúng nhất 194 so với 192, thanh âm tiết
+đầu 79% so với 77%, âm tiết sau bằng nhau. So với SwiftF0 thì kém 2–4 điểm trên `val`, dồn ở hỏi, nặng, ngã, và 11
+điểm ở thanh các âm tiết sau của chủ repo ("quạt" 20 so với 28/36, "đèn" 22 so với 29/35); quyết định của bộ mười lệnh
+gần như không đổi, vì các lệnh còn khác nhau ở phụ âm và vần. Độ hữu thanh của Kaldi hại cả hai nơi: giữ riêng hai
+chiều F0, để độ hữu thanh vào, thì "tắt" chỉ còn 17/35 và 18/34. Cặp âm lượng không theo cao độ: ở cả SwiftF0, thanh
+các âm tiết sau của nó chỉ đúng 11/26 và 15/22. Hỏi và ngã yếu ở cả SwiftF0, Kaldi giữ độ hữu thanh lẫn không cao độ: âm tiết đầu 33–53%, hỏi
+hay thành sắc.
