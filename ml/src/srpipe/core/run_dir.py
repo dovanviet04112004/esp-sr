@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import platform
+import signal
 import subprocess
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import date
 from importlib import metadata
 from pathlib import Path
@@ -62,3 +65,16 @@ def create_run_dir(
     (run / "split.lock").write_text(split_lock(split_files or []), "utf-8")
     (run / "env.txt").write_text(environment_text(), "utf-8")
     return run
+
+
+@contextmanager
+def pause_asked() -> Iterator[Callable[[], bool]]:
+    """Whether Ctrl-C or SIGTERM came since entering: a loop inside pauses at its next step, not part way through
+    one; the handlers before are back on leaving."""
+    asked = []
+    before = {s: signal.signal(s, lambda signum, frame: asked.append(signum)) for s in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        yield lambda: bool(asked)
+    finally:
+        for s, handler in before.items():
+            signal.signal(s, handler)

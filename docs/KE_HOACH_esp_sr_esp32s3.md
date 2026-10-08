@@ -1734,7 +1734,7 @@ ml/
 ├── src/srpipe/
 │   ├── core/                          # ── HẠ TẦNG: không chứa tên khối nào ──
 │   │   ├── config.py                  # pydantic + gộp YAML + ghi đè CLI
-│   │   ├── run_dir.py                 # ★ thư mục run: config.resolved + env + split.lock
+│   │   ├── run_dir.py                 # ★ thư mục run: config.resolved + env + split.lock; Ctrl-C dừng êm sau bước đang chạy
 │   │   ├── audio_io.py  ├── seed.py  ├── logger.py
 │   │   ├── corpus.py                  # mọi mẩu của một kho trong raw/: tên mục như split, người nói nếu kho có, lời
 │   │   ├── extract.py                 # câu của kho trên Hugging Face có lời đọc ra một cụm: dò lời qua mạng, kéo

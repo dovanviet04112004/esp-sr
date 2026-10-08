@@ -11,8 +11,6 @@ import argparse
 import json
 import math
 import signal
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,7 +22,7 @@ from torch.nn import functional
 from srpipe.core import screen, splits
 from srpipe.core.config import apply_overrides, data_paths, front_of, load_run_config, load_yaml
 from srpipe.core.logger import row_line
-from srpipe.core.run_dir import create_run_dir
+from srpipe.core.run_dir import create_run_dir, pause_asked
 from srpipe.core.seed import seed_everything
 from srpipe.dsp.spec import pitch
 from srpipe.dsp.spec.mel import hz_to_mel, mel_to_hz
@@ -526,19 +524,6 @@ def evaluate(net: encoder.CtcNet, data: Sentences, stats: tuple, device: str, ce
 def checkpoint(run: Path, step: int | None = None) -> Path:
     """An evaluated step's weights, or with no step the last state a resumed run goes on from."""
     return run / "checkpoints" / ("last.pt" if step is None else f"step_{step:06d}.pt")
-
-
-@contextmanager
-def pause_asked() -> Iterator[Callable[[], bool]]:
-    """Whether Ctrl-C or SIGTERM came since entering: a loop inside pauses at its next step, not part way through
-    one; the handlers before are back on leaving."""
-    asked = []
-    before = {s: signal.signal(s, lambda signum, frame: asked.append(signum)) for s in (signal.SIGINT, signal.SIGTERM)}
-    try:
-        yield lambda: bool(asked)
-    finally:
-        for s, handler in before.items():
-            signal.signal(s, handler)
 
 
 def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: bool = False) -> tuple:
