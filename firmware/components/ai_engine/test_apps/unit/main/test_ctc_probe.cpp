@@ -58,9 +58,9 @@ struct __attribute__((packed)) WindowsHead {
 };
 struct __attribute__((packed)) Decision {
     int16_t command;
-    uint16_t score, margin, gap;
+    uint16_t score, margin, gap, syllable;
 };
-static_assert(sizeof(WindowsHead) == 16 && sizeof(Decision) == 8, "ctc_windows.bin layout");
+static_assert(sizeof(WindowsHead) == 16 && sizeof(Decision) == 10, "ctc_windows.bin layout");
 
 // Layout of a round of the probe's gate_rounds: this head, mean and std a feature, the packed lexicon, then a
 // window's hops, int8 input padded to four bytes and Decision.
@@ -135,7 +135,8 @@ bool decide_window(size_t n_features, size_t chunk_hops, uint32_t hops, const ui
     t->score_peak_us = took_us > t->score_peak_us ? took_us : t->score_peak_us;
     t->scores++;
     return got->command == want.command && got->score_permille == want.score &&
-           got->margin_permille == want.margin && got->free_gap_permille == want.gap;
+           got->margin_permille == want.margin && got->free_gap_permille == want.gap &&
+           got->syllable_gap_permille == want.syllable;
 }
 
 void print_timing(const char *what, uint16_t windows, size_t differ, const Timing &t, uint8_t chunk_hops)
@@ -148,12 +149,13 @@ void print_timing(const char *what, uint16_t windows, size_t differ, const Timin
            t.score_us / (int64_t)(t.scores ? t.scores : 1), t.score_peak_us);
 }
 
-// The command branch loaded from slot 0 with reject and margin seeded into NVS, which it waits for.
+// The command branch loaded from slot 0 with reject and margin seeded into NVS, which it waits for, and no
+// syllable cap, as the probe's records are decided.
 void load_command(uint16_t reject, uint16_t margin)
 {
     const esp_err_t init = sys_storage_init();
     TEST_ASSERT_TRUE(init == ESP_OK || init == ESP_ERR_INVALID_STATE);
-    for (const char *key : {STORAGE_KEY_CMD_REJECT, STORAGE_KEY_CMD_MARGIN}) {
+    for (const char *key : {STORAGE_KEY_CMD_REJECT, STORAGE_KEY_CMD_MARGIN, STORAGE_KEY_CMD_SYLLABLE}) {
         const esp_err_t gone = sys_storage_erase(STORAGE_NS_KWS, key);
         TEST_ASSERT_TRUE(gone == ESP_OK || gone == ESP_ERR_NOT_FOUND);
     }
@@ -162,6 +164,7 @@ void load_command(uint16_t reject, uint16_t margin)
                               "the branch must wait for its NVS keys");
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, reject));
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, margin));
+    TEST_ASSERT_EQUAL(ESP_OK, sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_SYLLABLE, UINT16_MAX));
     TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, ai_engine_load(0), "models_0 lacks ctc_models.bin: run make ai-unit");
     TEST_ASSERT_TRUE(ai_engine_has(AI_ENGINE_MODEL_COMMAND));
 }
@@ -259,9 +262,9 @@ TEST_CASE("the ctc command calls decide raw feature windows as Python decides th
         memcpy(&want, features + hops * head.features * sizeof(float), sizeof(want));
         ai_engine_command_result_t got;
         differ += decide_window(head.features, head.chunk_hops, hops, features, want, &t, &got) ? 0 : 1;
-        printf("ctc window of %" PRIu32 " hops: board %d %u %u %u, python %d %u %u %u\n", hops, got.command,
-               got.score_permille, got.margin_permille, got.free_gap_permille, want.command, want.score,
-               want.margin, want.gap);
+        printf("ctc window of %" PRIu32 " hops: board %d %u %u %u %u, python %d %u %u %u %u\n", hops,
+               got.command, got.score_permille, got.margin_permille, got.free_gap_permille,
+               got.syllable_gap_permille, want.command, want.score, want.margin, want.gap, want.syllable);
         at = features + hops * head.features * sizeof(float) + sizeof(want);
     }
     print_timing("ctc command", head.windows, differ, t, head.chunk_hops);
@@ -281,6 +284,7 @@ TEST_CASE("the ctc command calls decide raw feature windows as Python decides th
 
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT));
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN));
+    TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_SYLLABLE));
 }
 
 // Gate 3 on the chip: each window of the round in voice, rebuilt from its int8 input (KEHOACH 3.12).
@@ -330,9 +334,9 @@ TEST_CASE("the ctc command decides every Gate 3 window of the voice partition as
         ai_engine_command_result_t got;
         const uint8_t *features = reinterpret_cast<const uint8_t *>(raw);
         differ += decide_window(head.features, head.chunk_hops, hops, features, want, &t, &got) ? 0 : 1;
-        printf("gate window %u: board %d %u %u %u, python %d %u %u %u\n", (unsigned)(head.first + w),
-               got.command, got.score_permille, got.margin_permille, got.free_gap_permille, want.command,
-               want.score, want.margin, want.gap);
+        printf("gate window %u: board %d %u %u %u %u, python %d %u %u %u %u\n", (unsigned)(head.first + w),
+               got.command, got.score_permille, got.margin_permille, got.free_gap_permille,
+               got.syllable_gap_permille, want.command, want.score, want.margin, want.gap, want.syllable);
         at += sizeof(hops) + input_bytes + sizeof(want);
     }
     print_timing("ctc gate 3", head.windows, differ, t, head.chunk_hops);
@@ -340,6 +344,7 @@ TEST_CASE("the ctc command decides every Gate 3 window of the voice partition as
     esp_partition_munmap(handle);
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT));
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN));
+    TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_SYLLABLE));
     TEST_ASSERT_EQUAL(0, differ);
 }
 

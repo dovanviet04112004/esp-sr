@@ -80,8 +80,8 @@ typedef struct {
     wide_t *alpha;
 } pass_t;
 
-// The work area: the prefix tree of every variant, each node a unit after its parent's, with the state of
-// that unit and of the blank after it; the free loop's sum; then the window's probabilities frame by frame.
+// The work area: every variant's prefix tree, a node a unit with its state and its blank's; the free loop's
+// sum; then frame by frame the probabilities, the log-probabilities, and one Viterbi path's back-pointers.
 typedef struct {
     uint32_t prepared;
     uint32_t n_classes, n_commands, frames_cap, frames, n_nodes;
@@ -100,6 +100,16 @@ typedef struct {
     uint8_t jump[AI_ENGINE_COMMAND_CTC_NODES_MAX];
     wide_t probs[];
 } stream_t;
+
+static float *log_probs_of(stream_t *st)
+{
+    return (float *)(st->probs + (size_t)st->frames_cap * st->n_classes);
+}
+
+static uint8_t *back_of(stream_t *st)
+{
+    return (uint8_t *)(log_probs_of(st) + (size_t)st->frames_cap * st->n_classes);
+}
 
 static void lay_out(pass_t *p, const ai_engine_seq_t *seq)
 {
@@ -267,6 +277,78 @@ static bool outscored_by_a_part(const wide_t *probs, size_t n_classes, size_t n_
     return false;
 }
 
+// The worst syllable of seq below the free loop on its Viterbi path, a stay winning a tie over a step over a
+// skip and the last blank ending one; a blank's frames count to the unit after it (KEHOACH 3.12).
+static float syllable_gap(stream_t *st, const ai_engine_seq_t *seq, size_t per_frames)
+{
+    uint8_t labels[STATES_MAX], jump[STATES_MAX], syllable_of[AI_ENGINE_COMMAND_CTC_UNITS_MAX];
+    float v[STATES_MAX], sums[AI_ENGINE_COMMAND_CTC_UNITS_MAX];
+    size_t n = 0, syllables = 0;
+    labels[n++] = BLANK;
+    for (size_t k = 0; k < seq->n_units; k++) {
+        labels[n++] = (uint8_t)(seq->units[k] + 1);
+        labels[n++] = BLANK;
+        syllable_of[k] = (uint8_t)syllables;
+        if (ends_syllable(seq->units[k])) { syllables++; }
+        sums[k] = 0.0f;
+    }
+    const float *lp = log_probs_of(st);
+    uint8_t *back = back_of(st);
+    const size_t classes = st->n_classes, frames = st->frames;
+    for (size_t s = 0; s < n; s++) {
+        jump[s] = s >= 2 && labels[s] != BLANK && labels[s] != labels[s - 2];
+        v[s] = s < 2 ? lp[labels[s]] : -INFINITY;
+    }
+    for (size_t t = 1; t < frames; t++) {
+        const float *frame = lp + t * classes;
+        // Down from the last state, so each update still reads the previous frame.
+        for (size_t s = n; s-- > 0;) {
+            float best = v[s];
+            uint8_t by = 0;
+            if (s >= 1 && v[s - 1] > best) {
+                best = v[s - 1];
+                by = 1;
+            }
+            if (jump[s] && v[s - 2] > best) {
+                best = v[s - 2];
+                by = 2;
+            }
+            v[s] = best + frame[labels[s]];
+            back[t * n + s] = by;
+        }
+    }
+    // Back along the path, each frame's row keeps the state it took in its first byte once read.
+    size_t s = v[n - 1] >= v[n - 2] ? n - 1 : n - 2;
+    for (size_t t = frames; t-- > 0;) {
+        const uint8_t by = t > 0 ? back[t * n + s] : 0;
+        back[t * n] = (uint8_t)s;
+        s -= by;
+    }
+    for (size_t t = 0; t < frames; t++) {
+        const float *frame = lp + t * classes;
+        float top = frame[0];
+        for (size_t c = 1; c < classes; c++) {
+            if (frame[c] > top) { top = frame[c]; }
+        }
+        const size_t state = back[t * n];
+        const size_t unit = state / 2 < seq->n_units ? state / 2 : seq->n_units - 1u;
+        sums[syllable_of[unit]] += top - frame[labels[state]];
+    }
+    float worst = sums[0];
+    for (size_t a = 1; a <= syllable_of[seq->n_units - 1u]; a++) {
+        if (sums[a] > worst) { worst = sums[a]; }
+    }
+    return worst / (float)per_frames;
+}
+
+static bool one_syllable(const ai_engine_seq_t *seq)
+{
+    for (size_t k = 0; k + 1 < seq->n_units; k++) {
+        if (ends_syllable(seq->units[k])) { return false; }
+    }
+    return true;
+}
+
 static uint16_t milli(float x)
 {
     const float scaled_x = x * MILLI;
@@ -341,7 +423,7 @@ uint16_t ai_engine_command_ctc_milli(float x)
 
 size_t ai_engine_command_ctc_work_bytes(size_t n_classes, size_t n_frames)
 {
-    return sizeof(stream_t) + n_classes * n_frames * sizeof(wide_t);
+    return sizeof(stream_t) + n_classes * n_frames * (sizeof(wide_t) + sizeof(float)) + n_frames * STATES_MAX;
 }
 
 esp_err_t ai_engine_command_ctc_prepare(const ai_engine_lexicon_t *lexicon, size_t n_classes, size_t n_frames,
@@ -411,9 +493,11 @@ esp_err_t ai_engine_command_ctc_frames(const float *log_probs, size_t n_frames, 
     for (size_t t = 0; t < n_frames; t++) {
         const float *frame = log_probs + t * classes;
         wide_t *probs = st->probs + (size_t)st->frames * classes;
+        float *kept = log_probs_of(st) + (size_t)st->frames * classes;
         float top = frame[0];
         for (size_t c = 0; c < classes; c++) {
             probs[c] = exp_wide(frame[c]);
+            kept[c] = frame[c];
             if (frame[c] > top) { top = frame[c]; }
         }
         st->free_total += top;
@@ -424,26 +508,31 @@ esp_err_t ai_engine_command_ctc_frames(const float *log_probs, size_t n_frames, 
 }
 
 esp_err_t ai_engine_command_ctc_finish(const ai_engine_lexicon_t *lexicon, size_t per_frames, uint16_t reject,
-                                       uint16_t margin, const void *work, float *scores,
+                                       uint16_t margin, uint16_t syllable, void *work, float *scores,
                                        ai_engine_command_result_t *out)
 {
     if (lexicon == NULL || work == NULL || out == NULL || per_frames == 0) { return ESP_ERR_INVALID_ARG; }
-    const stream_t *st = work;
+    stream_t *st = work;
     if (st->prepared != PREPARED) { return ESP_ERR_INVALID_STATE; }
     if (lexicon->n_commands != st->n_commands) { return ESP_ERR_INVALID_ARG; }
-    size_t best = 0;
+    size_t best = 0, best_variant = 0;
     float best_score = -INFINITY, second = -INFINITY;
     for (size_t c = 0; c < st->n_commands; c++) {
         float score = -INFINITY;
+        size_t variant = 0;
         for (size_t v = 0; st->frames > 0 && v < st->n_variants[c]; v++) {
             const float s = tree_score(st, st->leaf[c][v], per_frames);
-            if (s > score) { score = s; }
+            if (s > score) {
+                score = s;
+                variant = v;
+            }
         }
         if (scores != NULL) { scores[c] = score; }
         if (score > best_score) {
             second = best_score;
             best_score = score;
             best = c;
+            best_variant = variant;
         } else if (score > second) {
             second = score;
         }
@@ -451,7 +540,10 @@ esp_err_t ai_engine_command_ctc_finish(const ai_engine_lexicon_t *lexicon, size_
     const bool reached = best_score > -INFINITY;
     const uint16_t gap = reached ? milli(st->free_total / (float)per_frames - best_score) : FIELD_MAX;
     const uint16_t lead = second > -INFINITY ? milli(best_score - second) : FIELD_MAX;
-    const bool accepted = reached && gap <= reject && lead >= margin &&
+    const ai_engine_seq_t *own = &lexicon->variants[best][best_variant];
+    uint16_t short_gap = FIELD_MAX;
+    if (reached) { short_gap = one_syllable(own) ? 0 : milli(syllable_gap(st, own, per_frames)); }
+    const bool accepted = reached && gap <= reject && lead >= margin && short_gap <= syllable &&
                           !outscored_by_a_part(st->probs, st->n_classes, st->frames, lexicon->variants[best],
                                                lexicon->n_variants[best], best_score, per_frames);
     *out = (ai_engine_command_result_t){
@@ -459,18 +551,19 @@ esp_err_t ai_engine_command_ctc_finish(const ai_engine_lexicon_t *lexicon, size_
         .score_permille = reached ? milli((float)exp((double)best_score)) : 0,
         .margin_permille = lead,
         .free_gap_permille = gap,
+        .syllable_gap_permille = short_gap,
     };
     return ESP_OK;
 }
 
 esp_err_t ai_engine_command_ctc_decide(const float *log_probs, size_t n_classes, size_t n_frames,
                                        size_t frames_cap, const ai_engine_lexicon_t *lexicon,
-                                       size_t per_frames, uint16_t reject, uint16_t margin, void *work,
-                                       float *scores, ai_engine_command_result_t *out)
+                                       size_t per_frames, uint16_t reject, uint16_t margin, uint16_t syllable,
+                                       void *work, float *scores, ai_engine_command_result_t *out)
 {
     if (log_probs == NULL || out == NULL || n_frames == 0) { return ESP_ERR_INVALID_ARG; }
     esp_err_t err = ai_engine_command_ctc_prepare(lexicon, n_classes, frames_cap, work);
     if (err == ESP_OK) { err = ai_engine_command_ctc_frames(log_probs, n_frames, work); }
     if (err != ESP_OK) { return err; }
-    return ai_engine_command_ctc_finish(lexicon, per_frames, reject, margin, work, scores, out);
+    return ai_engine_command_ctc_finish(lexicon, per_frames, reject, margin, syllable, work, scores, out);
 }

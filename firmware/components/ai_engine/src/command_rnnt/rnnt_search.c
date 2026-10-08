@@ -369,7 +369,7 @@ esp_err_t ai_engine_command_rnnt_finish(const ai_engine_lexicon_t *lexicon, cons
         if (best_of[c] > best_of[best]) { best = c; }
     }
     if (!(best_of[best] > -INFINITY)) {
-        *out = (ai_engine_command_result_t){AI_ENGINE_COMMAND_CTC_REJECTED, 0, FIELD_MAX, FIELD_MAX};
+        *out = (ai_engine_command_result_t){AI_ENGINE_COMMAND_CTC_REJECTED, 0, FIELD_MAX, FIELD_MAX, 0};
         return ESP_OK;
     }
     float second = -INFINITY;
@@ -386,6 +386,7 @@ esp_err_t ai_engine_command_rnnt_finish(const ai_engine_lexicon_t *lexicon, cons
         .score_permille = ai_engine_command_ctc_milli((float)exp((double)best_of[best])),
         .margin_permille = lead,
         .free_gap_permille = gap,
+        .syllable_gap_permille = 0,
     };
     return ESP_OK;
 }

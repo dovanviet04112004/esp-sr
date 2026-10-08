@@ -14,10 +14,11 @@ enum {
     PARITY_DECISION_SCORE,
     PARITY_DECISION_MARGIN,
     PARITY_DECISION_GAP,
+    PARITY_DECISION_SYLLABLE,
     PARITY_DECISION_COUNT
 };
 
-/** A command decision as the four floats a golden decision row holds, in DECISION's order.
+/** A command decision as the five floats a golden decision row holds, in DECISION's order.
  *  @ctx any | non-blocking
  */
 void parity_decision_row(const ai_engine_command_result_t *d, float *row);

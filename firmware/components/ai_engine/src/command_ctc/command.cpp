@@ -32,7 +32,7 @@ struct Window {
     float inverse_step;            // 2^-exponent of the input
     size_t features, chunk_hops, chunk_frames, classes, hops_max, frames_max, per_frames;
     size_t hops, pending, frames, scored;
-    uint16_t reject, margin;
+    uint16_t reject, margin, syllable;
 };
 
 ai::EspdlNet s_net;
@@ -98,11 +98,12 @@ esp_err_t command_load() noexcept
     const Blob graph = image_find(kEntry, STORAGE_MODEL_KIND_ESPDL);
     const Blob norm = image_find(kEntry, STORAGE_MODEL_KIND_NORM);
     if (graph.data == nullptr || norm.data == nullptr || !image_listens_as_built(kEntry)) { return ESP_OK; }
-    uint16_t reject = 0, margin = 0;
+    uint16_t reject = 0, margin = 0, syllable = 0;
     if (sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, &reject) != ESP_OK ||
-        sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, &margin) != ESP_OK) {
-        ESP_LOGE(TAG, "%s: NVS %s/%s or %s/%s absent, command off until seeded", kEntry, STORAGE_NS_KWS,
-                 STORAGE_KEY_CMD_REJECT, STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN);
+        sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, &margin) != ESP_OK ||
+        sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_SYLLABLE, &syllable) != ESP_OK) {
+        ESP_LOGE(TAG, "%s: NVS %s/%s, %s or %s absent, command off until seeded", kEntry, STORAGE_NS_KWS,
+                 STORAGE_KEY_CMD_REJECT, STORAGE_KEY_CMD_MARGIN, STORAGE_KEY_CMD_SYLLABLE);
         return ESP_OK;
     }
     const esp_err_t err = s_net.build(graph, kEntry);
@@ -149,6 +150,7 @@ esp_err_t command_load() noexcept
     }
     s.reject = reject;
     s.margin = margin;
+    s.syllable = syllable;
     s.ready = true;
     ESP_LOGI(TAG, "%s: %u features, %u hops a chunk, %u frames of %u classes, %u hops at most", kEntry,
              (unsigned)s.features, (unsigned)s.chunk_hops, (unsigned)s.chunk_frames, (unsigned)s.classes,
@@ -220,15 +222,17 @@ esp_err_t ai_engine_command_score(const ai_engine_lexicon_t *lexicon, ai_engine_
         *out = ai_engine_command_result_t{.command = AI_ENGINE_COMMAND_CTC_REJECTED,
                                           .score_permille = 0,
                                           .margin_permille = kFieldMax,
-                                          .free_gap_permille = kFieldMax};
+                                          .free_gap_permille = kFieldMax,
+                                          .syllable_gap_permille = kFieldMax};
         return ESP_OK;
     }
     score_to(frames);
     if (s.streaming && ai_engine_command_ctc_prepared_for(lexicon, s.work)) {
-        return ai_engine_command_ctc_finish(lexicon, s.per_frames, s.reject, s.margin, s.work, nullptr, out);
+        return ai_engine_command_ctc_finish(lexicon, s.per_frames, s.reject, s.margin, s.syllable, s.work,
+                                            nullptr, out);
     }
     return ai_engine_command_ctc_decide(s.log_probs, s.classes, frames, s.frames_max, lexicon, s.per_frames,
-                                        s.reject, s.margin, s.work, nullptr, out);
+                                        s.reject, s.margin, s.syllable, s.work, nullptr, out);
 }
 
 esp_err_t ai_engine_command_abort(void)

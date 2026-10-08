@@ -39,8 +39,9 @@ typedef struct {
 typedef struct {
     int16_t command; // index into the lexicon, -1 when rejected
     uint16_t score_permille;
-    uint16_t margin_permille;   // best over second best
-    uint16_t free_gap_permille; // free unit loop over best
+    uint16_t margin_permille;       // best over second best
+    uint16_t free_gap_permille;     // free unit loop over best
+    uint16_t syllable_gap_permille; // free loop over best's worst syllable
 } ai_engine_command_result_t;
 
 /** Map the model slot, verify sha256 and grid hash, copy every model into PSRAM, then unmap (KEHOACH 6.5).

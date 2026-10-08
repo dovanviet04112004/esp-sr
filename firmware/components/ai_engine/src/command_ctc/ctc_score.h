@@ -39,7 +39,8 @@ float ai_engine_command_ctc_exp(float x, int32_t *exponent);
  */
 uint16_t ai_engine_command_ctc_milli(float x);
 
-/** Bytes of the work area of a window of up to n_frames: every forward pass, then the probabilities.
+/** Bytes of the work area of a window of up to n_frames: every forward pass, the probabilities, the
+ *  log-probabilities, and the back-pointers of the winner's Viterbi path.
  *  @ctx any | non-blocking
  */
 size_t ai_engine_command_ctc_work_bytes(size_t n_classes, size_t n_frames);
@@ -71,12 +72,13 @@ void ai_engine_command_ctc_begin(void *work);
 esp_err_t ai_engine_command_ctc_frames(const float *log_probs, size_t n_frames, void *work);
 
 /** Take the command whose best variant scores highest over the frames so far, or reject (KEHOACH 3.12).
- *  @ctx any | non-blocking | caller owns lexicon, the prepared one, work and scores (n_commands or NULL)
- *  @param per_frames every score's divisor, a window_s window's frames; reject, margin in thousandths of it
+ *  @ctx any | non-blocking | caller owns lexicon, the prepared one, work, its path rewritten, and scores
+ *  @param per_frames every score's divisor, a window_s window's frames; reject, margin, syllable in
+ * thousandths of it; scores n_commands or NULL
  *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_STATE no prepare
  */
 esp_err_t ai_engine_command_ctc_finish(const ai_engine_lexicon_t *lexicon, size_t per_frames, uint16_t reject,
-                                       uint16_t margin, const void *work, float *scores,
+                                       uint16_t margin, uint16_t syllable, void *work, float *scores,
                                        ai_engine_command_result_t *out);
 
 /** A whole window at once: prepare for frames_cap, begin, every frame, finish; work stays prepared after.
@@ -86,8 +88,8 @@ esp_err_t ai_engine_command_ctc_finish(const ai_engine_lexicon_t *lexicon, size_
  */
 esp_err_t ai_engine_command_ctc_decide(const float *log_probs, size_t n_classes, size_t n_frames,
                                        size_t frames_cap, const ai_engine_lexicon_t *lexicon,
-                                       size_t per_frames, uint16_t reject, uint16_t margin, void *work,
-                                       float *scores, ai_engine_command_result_t *out);
+                                       size_t per_frames, uint16_t reject, uint16_t margin, uint16_t syllable,
+                                       void *work, float *scores, ai_engine_command_result_t *out);
 
 #ifdef __cplusplus
 }

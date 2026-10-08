@@ -2288,12 +2288,13 @@ trưng mà `_step` nhận do model khai trong `meta.json` (`features`, §6.3): 8
 (ADR-0017). `_prepare(lexicon)` nhận bộ lệnh trước mọi cửa sổ, lúc khởi động và mỗi lần đổi bộ lệnh,
 để `_step` chấm dần theo khối thay vì để cả phép chấm tới lúc câu chốt (§5.4); `_score` vẫn nhận bộ lệnh và chấm lại cả
 cửa sổ khi bộ ấy khác bộ `_prepare` đã nhận, nên thiếu `_prepare` chỉ chậm chứ không sai. `_score` trả cùng một khuôn
-`ai_engine_command_result_t`: chỉ số lệnh hoặc −1, kèm ba điểm. Bộ lệnh `ai_engine_lexicon_t` chứa tới
+`ai_engine_command_result_t`: chỉ số lệnh hoặc −1, kèm bốn điểm, điểm thứ tư là âm tiết kém nhất của lệnh dưới vòng tự
+do (§3.12), 0 ở đường không căn âm tiết. Bộ lệnh `ai_engine_lexicon_t` chứa tới
 `AI_ENGINE_COMMANDS_MAX` 301 lệnh (chủ repo 07/10), `n_commands` là `uint16_t`, mỗi lệnh tới `AI_ENGINE_VARIANTS_MAX`
 4 cách đọc, như `maxItems` của `command_set.schema.json`. `_abort` đóng cửa sổ đang mở mà không chấm, không có
 cửa sổ mở thì không làm gì: `svc_listen` gọi nó mỗi khi thôi chạy một cửa sổ chưa chấm (§5.4), vì `_prepare` chỉ nhận
 bộ lệnh khi không có cửa sổ mở. Với `kws`, điểm là xác suất lớp thắng, khoảng cách tới
-lớp nhì, và xác suất của `other` cộng `silence`; bảng lệnh truyền vào chỉ được kiểm là có đủ các lớp lệnh, ở `_prepare`
+lớp nhì, xác suất của `other` cộng `silence`, và 0; bảng lệnh truyền vào chỉ được kiểm là có đủ các lớp lệnh, ở `_prepare`
 cũng như ở `_score`.
 
 **`ai_engine_ns_ops()` và khe `dsp_afe_ns_ops_t` giữ nguyên cho cả hai ứng viên của `ns`** (§3.9): khe nhận công suất

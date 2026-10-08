@@ -15,12 +15,12 @@ typedef struct __attribute__((packed)) {
     char magic[4];
     uint16_t n_classes, n_frames;
     uint8_t n_commands, variants_max, units_max, runs;
-    uint16_t reject, margin;
+    uint16_t reject, margin, syllable;
 } decide_head_t;
 
 typedef struct __attribute__((packed)) {
     int16_t command;
-    uint16_t score, margin, gap;
+    uint16_t score, margin, gap, syllable;
 } decide_want_t;
 
 static ai_engine_lexicon_t s_lexicon, s_most;
@@ -31,16 +31,17 @@ static void time_decide(const decide_head_t *head, const float *log_probs, const
     int64_t total_us = 0, peak_us = 0, finish_us = 0;
     for (uint8_t r = 0; r < head->runs; r++) {
         const int64_t started_us = esp_timer_get_time();
-        const esp_err_t err =
-            ai_engine_command_ctc_decide(log_probs, head->n_classes, head->n_frames, head->n_frames, lexicon,
-                                         head->n_frames, head->reject, head->margin, work, scores, out);
+        const esp_err_t err = ai_engine_command_ctc_decide(
+            log_probs, head->n_classes, head->n_frames, head->n_frames, lexicon, head->n_frames, head->reject,
+            head->margin, head->syllable, work, scores, out);
         const int64_t took_us = esp_timer_get_time() - started_us;
         TEST_ASSERT_EQUAL(ESP_OK, err);
         total_us += took_us;
         peak_us = took_us > peak_us ? took_us : peak_us;
         const int64_t finish_from_us = esp_timer_get_time();
-        TEST_ASSERT_EQUAL(ESP_OK, ai_engine_command_ctc_finish(lexicon, head->n_frames, head->reject,
-                                                               head->margin, work, scores, out));
+        TEST_ASSERT_EQUAL(ESP_OK,
+                          ai_engine_command_ctc_finish(lexicon, head->n_frames, head->reject, head->margin,
+                                                       head->syllable, work, scores, out));
         finish_us += esp_timer_get_time() - finish_from_us;
     }
     size_t forms = 0;
@@ -93,9 +94,10 @@ TEST_CASE(
         }
     }
     ai_engine_command_result_t out;
-    TEST_ASSERT_EQUAL(ESP_OK, ai_engine_command_ctc_decide(log_probs, head.n_classes, head.n_frames,
-                                                           head.n_frames, &s_lexicon, head.n_frames,
-                                                           head.reject, head.margin, work, got_scores, &out));
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      ai_engine_command_ctc_decide(log_probs, head.n_classes, head.n_frames, head.n_frames,
+                                                   &s_lexicon, head.n_frames, head.reject, head.margin,
+                                                   head.syllable, work, got_scores, &out));
     time_decide(&head, log_probs, &s_lexicon, work, got_scores, &out);
     s_most.n_commands = AI_ENGINE_COMMANDS_MAX;
     for (size_t c = 0; c < AI_ENGINE_COMMANDS_MAX; c++) {
@@ -111,5 +113,6 @@ TEST_CASE(
     TEST_ASSERT_EQUAL_UINT16(want.score, out.score_permille);
     TEST_ASSERT_EQUAL_UINT16(want.margin, out.margin_permille);
     TEST_ASSERT_EQUAL_UINT16(want.gap, out.free_gap_permille);
+    TEST_ASSERT_EQUAL_UINT16(want.syllable, out.syllable_gap_permille);
     TEST_ASSERT_EQUAL_MEMORY(want_scores, got_scores, head.n_commands * sizeof(float));
 }

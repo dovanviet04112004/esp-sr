@@ -48,8 +48,11 @@ esp_err_t ai_engine_command_score(const ai_engine_lexicon_t *lexicon, ai_engine_
     if (lexicon == nullptr || out == nullptr) { return ESP_ERR_INVALID_ARG; }
     if (!s_window_open) { return ESP_ERR_INVALID_STATE; }
     s_window_open = false;
-    *out = ai_engine_command_result_t{
-        .command = -1, .score_permille = 0, .margin_permille = 0, .free_gap_permille = 0};
+    *out = ai_engine_command_result_t{.command = -1,
+                                      .score_permille = 0,
+                                      .margin_permille = 0,
+                                      .free_gap_permille = 0,
+                                      .syllable_gap_permille = 0};
     return ESP_OK;
 }
 

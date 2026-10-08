@@ -73,9 +73,9 @@ struct __attribute__((packed)) WindowsHead {
 };
 struct __attribute__((packed)) Decision {
     int16_t command;
-    uint16_t score, margin, gap;
+    uint16_t score, margin, gap, syllable;
 };
-static_assert(sizeof(WindowsHead) == 16 && sizeof(Decision) == 8, "rnnt_windows.bin layout");
+static_assert(sizeof(WindowsHead) == 16 && sizeof(Decision) == 10, "rnnt_windows.bin layout");
 
 // Layout of the ctc probe's GATE_HEAD, which rnnt/probe.py's gate_windows writes too.
 struct __attribute__((packed)) GateHead {
@@ -368,7 +368,8 @@ TEST_CASE("the rnnt command decides every Gate 3 window of the voice partition a
         score_total_us += took_us;
         score_peak_us = took_us > score_peak_us ? took_us : score_peak_us;
         const bool same = got.command == want.command && got.score_permille == want.score &&
-                          got.margin_permille == want.margin && got.free_gap_permille == want.gap;
+                          got.margin_permille == want.margin && got.free_gap_permille == want.gap &&
+                          got.syllable_gap_permille == want.syllable;
         differ += same ? 0 : 1;
         printf("gate window %u: board %d %u %u %u, python %d %u %u %u, score %" PRId64 " us\n", w,
                got.command, got.score_permille, got.margin_permille, got.free_gap_permille, want.command,
@@ -424,7 +425,8 @@ TEST_CASE("the rnnt command calls decide raw feature windows as Python decides t
         score_peak_us = took_us > score_peak_us ? took_us : score_peak_us;
         frames_total += frames;
         const bool same = got.command == want.command && got.score_permille == want.score &&
-                          got.margin_permille == want.margin && got.free_gap_permille == want.gap;
+                          got.margin_permille == want.margin && got.free_gap_permille == want.gap &&
+                          got.syllable_gap_permille == want.syllable;
         differ += same ? 0 : 1;
         printf("rnnt window of %" PRIu32 " hops, %" PRIu32
                " frames: board %d %u %u %u, python %d %u %u %u, score %" PRId64 " us\n",
