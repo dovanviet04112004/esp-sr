@@ -217,3 +217,24 @@ lượt nào đọc: 28–37 ms một ví dụ, so với 110–165 ms đọc l�
 Lượt `20261008_dd911af-dirty_1ea86b` (6 worker, 8 luồng đọc, 2 vùng cấp phát): **3,75–3,81 bước/s**, GPU chờ dữ liệu 0–1%,
 GPU bận 87–94%: **gấp ~3,1 lần** đường CPU. Loss trung bình bước 1–100 lệch lượt CPU −0,02%, +0,01%, 0,00%, +0,08%
 (RNNoise-16k, NSNet-16k S, M, L); từ bước 300 hai lượt tản ±2% theo cả hai chiều như mọi lượt học GRU.
+
+## 8. Đích trên bản thu qua board (08/10)
+
+Bốn mục trộn của bàn so (KẾ HOẠCH §3.16): đoạn đọc `20260928_home_005` với quạt `…_008` hay nhạc không lời `…_010`, thu
+riêng qua board B, cộng ở SNR 0 và 5 dB. Thước của `eval.py bench`: nhiễu giảm trên mọi bước, tiếng mất trên bước có lời,
+SNR tăng, sau 3 s đầu. Gain lý tưởng của hàm mất mát là tỉ lệ biên độ tiếng / hỗn hợp từng vạch (§5), chặn ở 1.
+
+| Gain | Nhạc SNR 0 | Nhạc SNR 5 | Quạt SNR 0 | Quạt SNR 5 |
+|---|---|---|---|---|
+| lý tưởng, không sàn | 12,1 / 0,70 / +9,5 | 9,0 / 0,39 / +7,0 | 10,8 / 0,45 / +8,7 | 7,7 / 0,28 / +6,3 |
+| lý tưởng, sàn −20 dB | 11,7 / 0,70 / +9,3 | 8,8 / 0,39 / +6,9 | 10,8 / 0,45 / +8,6 | 7,6 / 0,28 / +6,3 |
+| lý tưởng, sàn −12 dB | 9,6 / 0,69 / +7,9 | 7,8 / 0,38 / +6,3 | 9,1 / 0,45 / +7,5 | 7,3 / 0,28 / +6,1 |
+| OM-LSA | 1,1 / 0,5 / 0,0 | 1,1 / 0,3 / +0,2 | 9,6 / 0,9 / +7,8 | 8,8 / 0,5 / +7,1 |
+| NSNet-16k L, epoch 2, không sàn | 6,8 / 2,2 / +2,4 | 5,5 / 1,4 / +2,1 | 13,0 / 3,0 / +7,7 | 10,0 / 1,4 / +6,3 |
+
+Ô: nhiễu giảm dB / tiếng mất dB / SNR tăng dB.
+
+Đoạn đọc gần như liền, nên phần lớn số bước là bước có lời: ở đó vạch nào tiếng lấn thì gain lý tưởng giữ, kéo theo nhạc
+cùng vạch, nên cả gain lý tưởng cũng chỉ dìm nhạc 9–12 dB trên cả đoạn, với tiếng mất dưới 1 dB. Trên nhạc, NSNet-16k L ở
+epoch 2 lấy được khoảng một phần tư SNR tăng lý tưởng và làm mất tiếng gấp ba; trên quạt nó dìm sâu hơn gain lý tưởng và
+trả bằng tiếng.
