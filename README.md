@@ -27,7 +27,8 @@ Trạng thái: đang lập kế hoạch, chưa mở Cửa 0. Đích trước m�
 ## Board
 
 ESP32-S3-WROOM-1, 16 MB flash, 8 MB PSRAM, hai micro INMP441 ở GPIO 19/20/16, chưa có loa; nạp qua CH340
-(`/dev/ttyUSB0`). GPIO 19/20 trùng USB của chip nên console chỉ qua UART — xem KẾ HOẠCH §2.2.
+(`/dev/ttyUSB0`, `make board-attach` gắn nó vào WSL qua usbipd, `make board-detach` trả về Windows). GPIO 19/20 trùng
+USB của chip nên console chỉ qua UART — xem KẾ HOẠCH §2.2.
 
 ## Cài một lần trên máy phát triển
 

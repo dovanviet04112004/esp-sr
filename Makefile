@@ -1,8 +1,10 @@
 .DEFAULT_GOAL := help
 .PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit spans splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-thresholds ctc-deploy ctc-tone-flip ctc-watch rnnt-ptq ai-unit-rnnt listen-unit models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval ns-bench espsr-compare parity-host \
-        fw-dev fw-bench fw-bench-flash fw-prod flash monitor capture-flash broker-up broker-down host-live commands session session-plan
+        fw-dev fw-bench fw-bench-flash fw-prod board-attach board-detach flash monitor capture-flash broker-up broker-down \
+        host-live commands session session-plan
 
 PORT ?= /dev/ttyUSB0
+BOARD_USB_ID ?= 1a86:7523
 SDKCONFIG_BASE := sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.afe
 # The bench broker password rides in only when the builder holds it (KEHOACH 4.5.2).
 SECRETS := $(if $(wildcard firmware/sdkconfig.secrets),;sdkconfig.secrets)
@@ -226,6 +228,23 @@ fw-prod: ## Build the prod profile in build_prod, from its own sdkconfig
 	rm -f firmware/build_prod/sdkconfig
 	cd firmware && idf.py -B build_prod -D SDKCONFIG=build_prod/sdkconfig \
 	  -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.prod$(SECRETS)" build
+
+board-attach: ## Attach board B's CH340 to WSL through usbipd and wait for its serial port; a USB port Windows has not shared yet asks once for admin (KEHOACH 2.1)
+	@for i in $$(seq 10); do row=$$(usbipd.exe list | tr -d '\r' | grep " $(BOARD_USB_ID) ") && break; sleep 1; done; \
+	case "$$row" in \
+	  "") echo "no $(BOARD_USB_ID) on the USB of Windows: plug board B in"; exit 1;; \
+	  *Attached) echo "board B is attached already";; \
+	  *"Not shared") powershell.exe -NoProfile -Command \
+	      "Start-Process usbipd -Verb RunAs -Wait -ArgumentList 'bind','--hardware-id','$(BOARD_USB_ID)'" \
+	    && usbipd.exe attach --wsl --hardware-id $(BOARD_USB_ID);; \
+	  *) usbipd.exe attach --wsl --hardware-id $(BOARD_USB_ID);; \
+	esac
+	@for i in $$(seq 10); do [ -e $(PORT) ] && { echo "board B on $(PORT)"; exit 0; }; sleep 1; done; \
+	  echo "$(PORT) did not appear"; exit 1
+
+board-detach: ## Hand board B's CH340 back to Windows
+	usbipd.exe detach --hardware-id $(BOARD_USB_ID)
+	@for i in $$(seq 10); do [ -e $(PORT) ] || exit 0; sleep 1; done; echo "$(PORT) is still there"; exit 1
 
 flash: ## Flash and monitor the dev profile over the CH340 port
 	@$(call fresh_sdkconfig,firmware/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.dev)
