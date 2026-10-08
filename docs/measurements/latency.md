@@ -533,3 +533,28 @@ Log-mel trên chip khác bản soi gương ở ba chỗ (parity.md: lệch tới
 Model cũ đọc 40 dải trên bước 1/8, v8 đọc 80 dải trên bước 1/16. Số phần tử sát ranh vì thế gấp chừng bốn lần (ước lượng
 từ hai tỉ số), nên lần 198/198 trước là may, không phải khớp từng bit. `make ai-unit` với v8 dừng trước bài thử:
 `ctc_gate.bin` (83 chiều, 336 cửa sổ) lớn hơn phân vùng `voice` 2 MB.
+
+## 23. FFT viết tay khớp bản soi gương từng bit, so với `dl_fft` (E6-T8, ADR-0020)
+
+Board B, `dsp_spec/test_apps/unit` dựng `-O2`, 240 MHz, IDF 6.0.2, thư mục build mới từ `sdkconfig.defaults` của ngày
+08/10. Cùng app, cùng lớp bọc, chạy liền nhau trên một board: `dl_fft` 0.7.0 từ `335859c`, FFT viết tay từ cây làm việc
+sau đó. Trung bình 1000 lượt sau một lượt làm nóng.
+
+| Đo | `dl_fft` 0.7.0 | Viết tay cơ số 2 | **Viết tay cơ số 4** |
+|---|---|---|---|
+| Thuận / nghịch, 256 điểm | 56,2 / 67,2 µs | 87,9 / 95,1 µs | **55,5 / 58,7 µs** |
+| Thuận / nghịch, 512 điểm | 118,2 / 135,9 µs | 189,0 / 203,1 µs | **116,9 / 123,0 µs** |
+| Thuận / nghịch, 1024 điểm | 259,6 / 297,2 µs | 404,8 / 432,9 µs | **257,1 / 269,1 µs** |
+| STFT / iSTFT một bước | 143,3 / 164,7 µs | 214,1 / 238,3 µs | **142,0 / 158,3 µs** |
+| Log-mel 40 dải một bước | 61,6 µs (`logf`) | 59,2 µs | **59,2 µs** |
+| Sai số lớn nhất so với DFT double, 512 điểm | 2,13e-6 trên đỉnh 17,35 | 1,92e-6 | **1,69e-6** |
+| Dựng lại STFT | 136,3 dB | 135,9 dB | **136,6 dB** |
+| Bộ nhớ, 512 điểm | vùng làm việc 2 080 B + bảng thư viện 6 244 B ở RAM nội | vùng làm việc 4 656 B | **vùng làm việc 5 680 B**, bảng nằm trong đó |
+
+Một khung của chuỗi (§3.1: hai phân tích, một tổng hợp) tốn 2 × 142,0 + 158,3 = **442 µs** với bản cơ số 4, so với
+451 µs của `dl_fft`. Cơ số 4 gộp hai tầng cơ số 2 vào một lượt: ba phép nhân phức cho bốn điểm thay vì bốn, mỗi điểm đọc
+và ghi một lần cho hai tầng; bướm có hệ số xoay bằng 1 không nhân; vạch k và n/2 − k tách cùng lúc. Chiều nghịch ghép vạch
+rồi chạy đúng các lượt của chiều thuận qua phép liên hợp, nên nhanh hơn `dl_fft` 13 µs.
+
+Trên máy tính (`make parity-host`), bản C khớp Python từng bit ở mọi ca vàng: `stft` (phổ và tín hiệu dựng lại), `mel`
+(log-mel và MFCC), và cả PCM của `chain`, `chain_modules`, trước đây lệch 1 LSB; mọi đối chứng âm vẫn đỏ.
