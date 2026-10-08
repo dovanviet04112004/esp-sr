@@ -1526,3 +1526,15 @@ gần như không đổi, vì các lệnh còn khác nhau ở phụ âm và vầ
 chiều F0, để độ hữu thanh vào, thì "tắt" chỉ còn 17/35 và 18/34. Cặp âm lượng không theo cao độ: ở cả SwiftF0, thanh
 các âm tiết sau của nó chỉ đúng 11/26 và 15/22. Hỏi và ngã yếu ở cả SwiftF0, Kaldi giữ độ hữu thanh lẫn không cao độ: âm tiết đầu 33–53%, hỏi
 hay thành sắc.
+
+Ứng viên đầu của KẾ HOẠCH §3.11 trên cùng 209 câu: Kaldi của board với trạng thái của khung t lấy trên đường Viterbi
+truy ngược từ khung t + 25 (0,4 s), log F0 trừ trung bình theo POV từ 0,75 s trước tới 0,4 s sau, delta hai khung mỗi
+phía; bản thử dựng trên lớp bộ dò của bản soi gương, vòng con trỏ lùi nới đủ, đo bằng script chẩn đoán chạy một lần:
+
+| Cách nghe | Đúng nhất | Thanh âm tiết đầu | Thanh các âm tiết sau | "đóng cửa": đúng nhất / thanh âm tiết đầu |
+|---|---|---|---|---|
+| Kaldi dò lại 0,4 s | 188/209 | 150/209 (72%) | 164/233 (70%) | 9/11 / 2/11 |
+| Kaldi dò lại 0,4 s, giữ độ hữu thanh | 192/209 | 160/209 (77%) | 159/233 (68%) | 8/11 / 2/11 |
+
+Dò lại nâng Kaldi 2–6 điểm thanh nhưng không tới SwiftF0 (196/209, 80%, 77%) và không hơn không cao độ (194/209):
+mạng học trên SwiftF0 chỉ lấy được lợi của cao độ từ chính bộ dò ấy. Thanh của "đóng" còn kém đi ở cả hai cách.
