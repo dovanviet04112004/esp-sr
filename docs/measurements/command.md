@@ -1538,3 +1538,14 @@ phía; bản thử dựng trên lớp bộ dò của bản soi gương, vòng co
 
 Dò lại nâng Kaldi 2–6 điểm thanh nhưng không tới SwiftF0 (196/209, 80%, 77%) và không hơn không cao độ (194/209):
 mạng học trên SwiftF0 chỉ lấy được lợi của cao độ từ chính bộ dò ấy. Thanh của "đóng" còn kém đi ở cả hai cách.
+
+Cùng phép chấm của §12.23 (bộ `battat_vi.json`, δ₁ 100 ‰, δ₂ 25 ‰, quyết như chip, câu gán như Cửa 3) trên đồ thị int8
+`percentile` của thang giữ cả ba chiều cao độ (`int8_kaldi_pitch/`), phiên 28/09, nhận đúng / câu:
+
+| Lệnh | giữ độ hữu thanh (board 08/10) | giữ cả ba chiều |
+|---|---|---|
+| bật đèn | 9/12 | 10/12 |
+| tăng âm lượng | 8/13 | 8/13 |
+| giảm âm lượng | 1/11 | 5/11 |
+
+Gap của các câu "giảm" hạ: nhận ở 73–95 ‰, ba câu từ chối ở 101–102 ‰ và hai ở 149, 157 ‰.
