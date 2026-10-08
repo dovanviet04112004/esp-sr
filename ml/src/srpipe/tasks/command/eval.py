@@ -224,12 +224,15 @@ def holding(heard: Callable, dims: tuple[int, ...]) -> Callable:
 
 
 def normalised_window(net: Ctc, x: np.ndarray) -> tuple[torch.Tensor, int]:
-    """A window as the device runs it, zero-padded to the net's chunk as in training and normalised: (1, dims, hops);
-    and the frames of its own hops."""
+    """A window as the device runs it, zero-padded to the net's chunk as in training and normalised, with the hops a
+    lookahead reads past its last at the train mean: (1, dims, hops); and the frames of its own hops."""
     multiple, hops = net.model.chunk_multiple, len(x)
-    padded = np.zeros((-(-hops // multiple) * multiple, x.shape[1]), dtype=np.float32)
+    tail = getattr(net.model, "lookahead_frames", 0) * net.model.front.hop_stride
+    padded = np.zeros((-(-(hops + tail) // multiple) * multiple, x.shape[1]), dtype=np.float32)
     padded[:hops] = x
-    return torch.from_numpy((padded - net.mean) / net.std).T[None], -(-hops // net.model.front.hop_stride)
+    normalised = (padded - net.mean) / net.std
+    normalised[hops : hops + tail] = 0.0
+    return torch.from_numpy(normalised).T[None], -(-hops // net.model.front.hop_stride)
 
 
 def heard_of(net: Ctc, decision: np.ndarray, scores: np.ndarray) -> Heard:

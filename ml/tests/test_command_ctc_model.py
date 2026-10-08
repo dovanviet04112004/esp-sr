@@ -1,6 +1,7 @@
 """The ctc net is MultiNet7's encoder frame, of its size at its widths, and never reads a later chunk, the premise of
-streaming it by chunks; its transducer is MultiNet7's predictor and joiner on our classes, and a prefix never reads a
-later unit."""
+streaming it by chunks; a lookahead starts as the identity, reads its frames ahead and none further, and streams as a
+causal convolution that many frames late; its transducer is MultiNet7's predictor and joiner on our classes, and a
+prefix never reads a later unit."""
 
 from __future__ import annotations
 
@@ -111,3 +112,55 @@ def test_a_prefix_never_reads_a_later_unit_and_starts_as_greedy_decoding_does(ne
         assert torch.equal(predictor(units)[:, :3], predictor(later)[:, :3])
         first = predictor(torch.tensor([[ctc_score.BLANK]]))[:, 0]
         assert torch.equal(first, predictor(torch.tensor([[predictor.pad, ctc_score.BLANK]]))[:, -1])
+
+
+def lookahead_cfg(cfg: dict, frames: int) -> dict:
+    ahead = copy.deepcopy(cfg)
+    ahead["model"]["lookahead_frames"] = frames
+    return ahead
+
+
+def test_a_net_given_a_lookahead_starts_as_the_net_without_one(cfg, net) -> None:
+    ahead = encoder.build(lookahead_cfg(cfg, 12)).eval()
+    fit = ahead.load_state_dict(net.state_dict(), strict=False)
+    assert fit.missing_keys == ["lookahead.conv.weight"] and not fit.unexpected_keys
+    x = torch.randn(1, encoder.n_dims(cfg), 8 * cfg["chunk_hops"])
+    with torch.no_grad():
+        assert torch.equal(ahead(x), net(x))
+
+
+def test_the_lookahead_reads_its_frames_ahead_and_none_further() -> None:
+    torch.manual_seed(2)
+    ahead = encoder.Lookahead(4, 3)
+    torch.nn.init.normal_(ahead.conv.weight)
+    x = torch.randn(1, 4, 20)
+    near, far = x.clone(), x.clone()
+    near[..., 10 + 3] += 1.0
+    far[..., 10 + 4] += 1.0
+    with torch.no_grad():
+        assert not torch.equal(ahead(near)[..., 10], ahead(x)[..., 10])
+        assert torch.equal(ahead(far)[..., : 10 + 1], ahead(x)[..., : 10 + 1])
+
+
+def test_a_causal_convolution_with_the_lookahead_weights_gives_its_frames_that_many_late() -> None:
+    torch.manual_seed(3)
+    ahead = encoder.Lookahead(4, 3)
+    torch.nn.init.normal_(ahead.conv.weight)
+    late = encoder.CausalConv(4, 4, 4, groups=4, bias=False)
+    late.conv.weight.data.copy_(ahead.conv.weight.data)
+    x = torch.randn(1, 4, 20)
+    with torch.no_grad():
+        torch.testing.assert_close(late(x)[..., 3:], ahead(x)[..., :-3])
+
+
+def test_the_encoder_under_a_lookahead_still_never_reads_a_later_chunk(cfg) -> None:
+    torch.manual_seed(1)
+    ahead = encoder.build(lookahead_cfg(cfg, 12)).eval()
+    torch.nn.init.normal_(ahead.lookahead.conv.weight)
+    x = torch.randn(1, encoder.n_dims(cfg), 8 * cfg["chunk_hops"])
+    later = x.clone()
+    later[..., 4 * cfg["chunk_hops"] :] += 5.0
+    frames = 4 * cfg["chunk_hops"] // ahead.front.hop_stride
+    with torch.no_grad():
+        assert torch.equal(ahead.encode(x)[..., :frames], ahead.encode(later)[..., :frames])
+        assert not torch.equal(ahead(x)[..., :frames], ahead(later)[..., :frames])

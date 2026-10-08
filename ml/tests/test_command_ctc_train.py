@@ -1,8 +1,8 @@
-"""ctc training: sentences load with their units and nothing too long, batches pad to the net's chunk, the best path
-merges repeats and drops blanks, the RNN-T loss sums every alignment whatever chunk of sentences builds its lattice,
-greedy RNN-T paths of a batch are those of each sentence, a ring smaller than train goes round every shard and is the
-same rebuilt for a resume, a tiny run evaluates, saves each evaluated net, keeps the last, and paused or stopped then
-resumed ends as an unbroken one, and each layer's stream is kept after every block and costs only above its cap."""
+"""ctc training: sentences load with their units, batches pad to the chunk, the best path merges repeats and drops
+blanks, the RNN-T loss and greedy paths hold whatever chunk of sentences builds them, a ring smaller than train goes
+round every shard and rebuilds for a resume, a tiny run evaluates, saves each net and ends paused or stopped as an
+unbroken one, each layer's stream costs only above its cap, a lookahead's tail is the train mean after each sentence,
+and a run from init reads its statistics and weights, refuses another net's and keeps held pitch dims' weights."""
 
 from __future__ import annotations
 
@@ -534,3 +534,54 @@ def test_an_augmented_batch_crops_each_sentence_by_its_own_lead() -> None:
     spec = STILL | {"lead_s": [0.3, 0.3]}
     _, hops, _ = train.augmented_batch(data, np.array([0, 1]), 16, spec, N_MEL, 2, np.random.default_rng(0))
     assert hops.tolist() == [150 - 130 + round(0.3 * train.HOPS_PER_S), 150]
+
+
+def test_a_tail_puts_the_train_mean_after_each_sentence_and_widens_the_batch_on_the_chunk() -> None:
+    x = np.ones((2, 16, 4), dtype=np.float32)
+    tailed = train.with_tail(x, np.array([10, 14]), 4, 8)
+    assert tailed.shape == (2, 24, 4)
+    assert not tailed[0, 10:14].any() and not tailed[1, 14:18].any()
+    assert tailed[0, :10].all() and tailed[0, 14:16].all() and tailed[1, :14].all()
+    assert train.with_tail(x, np.array([10, 14]), 0, 8) is x
+
+
+def test_a_run_from_init_reads_its_statistics_and_weights_and_holds_the_pitch_dims(tmp_path: Path, monkeypatch) -> None:
+    rng = np.random.default_rng(4)
+    units = {f"s{k}": [k % 5, (k + 1) % 5] for k in range(6)}
+    sets = {
+        "train": pool_of([processed(tmp_path / "t", [48, 40, 56, 32, 48, 40], rng)], units),
+        "val": train.load_role([processed(tmp_path / "v", [40, 48], rng)], units, 64, "float32"),
+    }
+    cfg = load_yaml(ctc.CONFIG)
+    cfg["train"] |= {"batch": 2, "steps": 2, "eval_every": 2}
+    first, _, _ = train.train(cfg, sets, "cpu", tmp_path / "first")
+    torch.save(first.state_dict(), tmp_path / "first" / "model.pt")
+    monkeypatch.setattr(train.Pool, "stats", lambda _pool: pytest.fail("a run from init computed its statistics"))
+    cfg["train"] |= {"init": str(tmp_path / "first"), "hold": "pitch"}
+    cfg["model"]["lookahead_frames"] = 2
+    second, (mean, std), history = train.train(cfg, sets, "cpu", tmp_path / "second")
+    with np.load(tmp_path / "first" / "feature_stats.npz") as stats:
+        np.testing.assert_array_equal(mean, stats["mean"])
+        np.testing.assert_array_equal(std, stats["std"])
+    pitch_columns = slice(-3, None)
+    assert torch.equal(second.front.proj.weight[:, pitch_columns], first.front.proj.weight[:, pitch_columns])
+    assert not torch.equal(second.front.proj.weight[:, :-3], first.front.proj.weight[:, :-3])
+    assert second.lookahead is not None and [row["step"] for row in history] == [2]
+
+
+def test_init_refuses_the_weights_of_another_net(tmp_path: Path) -> None:
+    rng = np.random.default_rng(5)
+    units = {f"s{k}": [k % 5, (k + 1) % 5] for k in range(4)}
+    sets = {
+        "train": pool_of([processed(tmp_path / "t", [48, 40, 56, 32], rng)], units),
+        "val": train.load_role([processed(tmp_path / "v", [40], rng)], units, 64, "float32"),
+    }
+    cfg = load_yaml(ctc.CONFIG)
+    cfg["train"] |= {"batch": 2, "steps": 2, "eval_every": 2}
+    first, _, _ = train.train(cfg, sets, "cpu", tmp_path / "first")
+    weights = first.state_dict()
+    weights["stray.weight"] = torch.zeros(1)
+    torch.save(weights, tmp_path / "first" / "model.pt")
+    cfg["train"]["init"] = str(tmp_path / "first")
+    with pytest.raises(ValueError, match="do not fit"):
+        train.train(cfg, sets, "cpu", tmp_path / "second")

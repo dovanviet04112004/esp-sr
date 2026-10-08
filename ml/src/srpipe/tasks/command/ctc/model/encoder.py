@@ -2,7 +2,8 @@
 
 Convolutions pad the past only; pools and repeats stay inside a chunk whose hops are a multiple of chunk_multiple, so
 the outputs of a chunk never read a later chunk and esp-dl streams the net a chunk at a time, a StreamingCache ahead
-of each convolution (srpipe.compress.quant.ptq_espdl).
+of each convolution (srpipe.compress.quant.ptq_espdl). The one exception is the lookahead ahead of the CTC head, which
+reads frames ahead and so streams as a causal convolution whose output comes that many frames late.
 """
 
 from __future__ import annotations
@@ -168,16 +169,41 @@ class Front(nn.Module):
         return self.proj(torch.cat([mel, pitched], dim=1))
 
 
+class Lookahead(nn.Module):
+    """A depthwise convolution over each frame and the frames after it, DeepSpeech2's row convolution (KEHOACH 3.12);
+    it starts as the identity, so a net it joins gives what it gave before."""
+
+    def __init__(self, width: int, frames: int) -> None:
+        super().__init__()
+        self.frames = frames
+        self.conv = nn.Conv1d(width, width, frames + 1, groups=width, bias=False)
+        with torch.no_grad():
+            self.conv.weight.zero_()
+            self.conv.weight[:, 0, 0] = 1.0
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.conv(functional.pad(x, (0, self.frames)))
+
+
 class CtcNet(nn.Module):
     """Features (batch, n_mel + n_pitch, hops) to CTC logits (batch, n_classes, hops / hop_stride); with a transducer,
-    also the predictor and joiner the rnnt track decodes the same frames with (ADR-0016)."""
+    also the predictor and joiner the rnnt track decodes the same frames with (ADR-0016); with lookahead frames, the
+    CTC head reads that many encoder frames ahead."""
 
     def __init__(
-        self, front: Front, stacks: list[Stack], width: int, classes: int, rnnt: transducer.Transducer | None = None
+        self,
+        front: Front,
+        stacks: list[Stack],
+        width: int,
+        classes: int,
+        rnnt: transducer.Transducer | None = None,
+        lookahead_frames: int = 0,
     ) -> None:
         super().__init__()
         self.front = front
         self.stacks = nn.Sequential(*stacks)
+        self.lookahead_frames = lookahead_frames
+        self.lookahead = Lookahead(width, lookahead_frames) if lookahead_frames else None
         self.head = nn.Conv1d(width, classes, 1)
         self.transducer = rnnt
         self.chunk_multiple = front.hop_stride * max(s.rate for s in stacks)
@@ -186,8 +212,12 @@ class CtcNet(nn.Module):
         """The frames every head reads, (batch, width, hops / hop_stride)."""
         return self.stacks(self.front(x))
 
+    def logits(self, encoded: Tensor) -> Tensor:
+        """The CTC head's logits of encoder frames, through the lookahead when the net has one."""
+        return self.head(encoded if self.lookahead is None else self.lookahead(encoded))
+
     def forward(self, x: Tensor) -> Tensor:
-        return self.head(self.encode(x))
+        return self.logits(self.encode(x))
 
 
 def frame_mean_square(x: Tensor) -> Tensor:
@@ -240,7 +270,7 @@ def build(cfg: dict) -> CtcNet:
     ]
     r = cfg.get("rnnt")
     rnnt = transducer.Transducer(m["width"], n_classes(), r["width"], r["context"]) if r else None
-    net = CtcNet(front, stacks, m["width"], n_classes(), rnnt)
+    net = CtcNet(front, stacks, m["width"], n_classes(), rnnt, m.get("lookahead_frames", 0))
     if cfg["chunk_hops"] % net.chunk_multiple:
         raise ValueError(f"chunk_hops {cfg['chunk_hops']} is not a multiple of {net.chunk_multiple}")
     return net

@@ -28,6 +28,7 @@ from srpipe.dsp.spec import pitch
 from srpipe.dsp.spec.mel import hz_to_mel, mel_to_hz
 from srpipe.generated import grid, listen
 from srpipe.tasks.command import ctc
+from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc import data as built
 from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc.ctc_score import BLANK
@@ -417,11 +418,35 @@ def frames_of(hops: np.ndarray, stride: int) -> np.ndarray:
     return -(-hops // stride)
 
 
+def tail_hops(net: encoder.CtcNet) -> int:
+    """Hops past a window's last that its lookahead reads (KEHOACH 3.12)."""
+    return net.lookahead_frames * net.front.hop_stride
+
+
+def with_tail(x: np.ndarray, hops: np.ndarray, tail: int, multiple: int) -> np.ndarray:
+    """Normalised sentences (batch, hops, dims) with the tail hops after each one's last at the train mean, 0 once
+    normalised, widened on the chunk to hold them: the future a lookahead reads past a window, as on the chip."""
+    if not tail:
+        return x
+    width = -(-(int(hops.max()) + tail) // multiple) * multiple
+    if width > x.shape[1]:
+        x = np.concatenate([x, np.zeros((x.shape[0], width - x.shape[1], x.shape[2]), dtype=x.dtype)], axis=1)
+    for row, n in enumerate(hops):
+        x[row, n : n + tail] = 0.0
+    return x
+
+
+def held_columns(cfg: dict, dims: int) -> list[int]:
+    """The feature columns of the pitch dims train.hold names, held at the train mean through a run (KEHOACH 3.12)."""
+    hold = cfg["train"].get("hold")
+    return [dims - pitch.N_FEATURES + d for d in gate.HOLDS[hold]] if hold else []
+
+
 def encoded_of(net: encoder.CtcNet, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """The encoder's frames (batch, width, frames) of normalised sentences (batch, hops, dims), and the CTC head's
     per-frame log-probabilities (batch, classes, frames) of them."""
     encoded = net.encode(x.transpose(1, 2))
-    return encoded, net.head(encoded).log_softmax(1)
+    return encoded, net.logits(encoded).log_softmax(1)
 
 
 def loss_of(net: encoder.CtcNet, cfg: dict, x: torch.Tensor, frames: np.ndarray, units: list[np.ndarray]):
@@ -483,11 +508,13 @@ def edit_distance(a: list[int], b: list[int] | np.ndarray) -> int:
     return row[-1]
 
 
-def evaluate(net: encoder.CtcNet, data: Sentences, stats: tuple, device: str, cells: int | None = None) -> dict:
+def evaluate(
+    net: encoder.CtcNet, data: Sentences, stats: tuple, device: str, cells: int | None = None, held: list[int] = ()
+) -> dict:
     """Mean CTC loss of val and the unit error rate of the best path over every val sentence, and the root mean square
     of the loudest real frame of any layer's stream with that layer, counted through the stacks; with a transducer,
     also its mean RNN-T loss per unit, its lattice built at most cells cells at a time, and the unit error rate of its
-    greedy path."""
+    greedy path. The held feature columns stay at the train mean, and a lookahead reads its tail past each sentence."""
     mean, std = stats
     stride, rates = net.front.hop_stride, encoder.layer_rates(net)
     losses, rnnt_losses, errors, rnnt_errors, total, peaks = [], [], 0, 0, 0, []
@@ -495,7 +522,9 @@ def evaluate(net: encoder.CtcNet, data: Sentences, stats: tuple, device: str, ce
         for k in range(0, len(data.first), VAL_BATCH):
             picks = np.arange(k, min(k + VAL_BATCH, len(data.first)))
             x, hops, units = batch_of(data, picks, net.chunk_multiple)
-            encoded, log_probs = encoded_of(net, torch.from_numpy((x - mean) / std).to(device))
+            x = with_tail((x - mean) / std, hops, tail_hops(net), net.chunk_multiple)
+            x[..., list(held)] = 0.0
+            encoded, log_probs = encoded_of(net, torch.from_numpy(x).to(device))
             frames = frames_of(hops, stride)
             real = stream_frames(kept, frames, rates)
             loudest = [torch.stack([ms[m].max() for ms in layer]).max() for layer, m in zip(kept, real, strict=True)]
@@ -536,16 +565,26 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
     rng = seed_everything(spec["seed"])
     pool = sets["train"]
     saved = None if run is None else run / "feature_stats.npz"
+    init = None if resume else spec.get("init")
     if resume and saved.exists():
         with np.load(saved) as stats:
             mean, std = stats["mean"], stats["std"]
     else:
-        mean, std = pool.stats()
+        if init:
+            # The weights of init only fit the features normalised as it learnt them.
+            with np.load(Path(init) / "feature_stats.npz") as stats:
+                mean, std = stats["mean"], stats["std"]
+        else:
+            mean, std = pool.stats()
         if saved is not None:
             # Saved at the start: the checkpoints of a run stopped part way can still be scored.
             run.mkdir(parents=True, exist_ok=True)
             np.savez(saved, mean=mean, std=std)
     net = encoder.build(cfg).to(device)
+    if init:
+        fit = net.load_state_dict(torch.load(Path(init) / "model.pt", map_location=device), strict=False)
+        if fit.unexpected_keys or any(not k.startswith("lookahead.") for k in fit.missing_keys):
+            raise ValueError(f"{init}: its weights do not fit this net, a new lookahead aside: {fit}")
     optimiser = torch.optim.Adam(net.parameters(), lr=spec["learning_rate"])
     final = spec["final_learning_rate"] / spec["learning_rate"]
     schedule = torch.optim.lr_scheduler.LambdaLR(
@@ -567,6 +606,7 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
         torch.save(state | {"history": history}, checkpoint(run))
 
     n_mel, rates = pool.dims - pitch.N_FEATURES, encoder.layer_rates(net)
+    held, tail = held_columns(cfg, pool.dims), tail_hops(net)
     centres = mel_centres(front_of(cfg)["features"]) if "vtlp" in spec.get("augment", {}) else None
     said = f"{pool.sentences} sentences, {pool.hours:.1f} h, a ring of {len(pool.ring) / HOPS_PER_S / 3600:.1f} h"
     print(f"{said}; steps {first} to {spec['steps']} of {spec['batch']}", flush=True)
@@ -587,7 +627,8 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
                 )
             else:
                 x, hops, units = batch_of(data, picks, net.chunk_multiple)
-            x = (x - mean) / std
+            x = with_tail((x - mean) / std, hops, tail, net.chunk_multiple)
+            x[..., held] = 0.0
             mask(x, hops, spec["masks"], n_mel, rng)
             frames = frames_of(hops, net.front.hop_stride)
             with encoder.streams_kept(net) as kept:
@@ -606,7 +647,8 @@ def train(cfg: dict, sets: dict, device: str, run: Path | None = None, resume: b
                 net.eval()
                 row = {"step": step, "train_loss": float(np.mean(losses)), "stream_penalty": float(np.mean(penalties))}
                 row |= {"lr": schedule.get_last_lr()[0]}
-                row |= evaluate(net, sets["val"], (mean, std), device, (cfg.get("rnnt") or {}).get("lattice_cells"))
+                cells = (cfg.get("rnnt") or {}).get("lattice_cells")
+                row |= evaluate(net, sets["val"], (mean, std), device, cells, held)
                 net.train()
                 losses, penalties = [], []
                 history.append(row)

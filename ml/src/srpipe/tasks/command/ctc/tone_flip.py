@@ -701,7 +701,7 @@ def places_check(net: gate.Ctc, val: train.Sentences) -> dict:
         for k in range(0, len(val.first), train.VAL_BATCH):
             picks = np.arange(k, min(k + train.VAL_BATCH, len(val.first)))
             x, hops, units = train.batch_of(val, picks, net.model.chunk_multiple)
-            x = (x - net.mean) / net.std
+            x = train.with_tail((x - net.mean) / net.std, hops, train.tail_hops(net.model), net.model.chunk_multiple)
             if name != "simulated":
                 x[..., -N_PITCH:] = 0.0
             with torch.no_grad():

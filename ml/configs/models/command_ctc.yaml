@@ -54,6 +54,8 @@ train:                             # python -m srpipe.tasks.command.ctc.train (E
     lead_s: [0.3, 2.0]             # the window opened this far ahead of its first speech hop, uniform, at most the lead it has
     vtlp: [0.8, 1.2]               # mel axis read at centre / alpha, log-uniform: low voices as well as high (measurements/command.md 12.12)
   eval_every: 2000                 # steps between val passes, each net saved beside the run
+  init: null                       # a run under ml/ whose last weights and statistics this one starts from (KEHOACH 3.12)
+  hold: null                       # pitch dims at the train mean in every batch: voicing, f0 or pitch (KEHOACH 3.12)
 model:                             # MultiNet7's encoder frame (ADR-0013), widened by ADR-0017
   front:                           # three conv2d over (hops, mel bands); pitch skips them and joins the projection
     channels: [8, 32, 48]
@@ -68,6 +70,7 @@ model:                             # MultiNet7's encoder frame (ADR-0013), widen
     - {layers: 2, rate: 4, kernel: 5}
     - {layers: 1, rate: 2, kernel: 9}
   mixer_frames: 8                  # the causal mean the mixer projects, in frames of its stack
+  lookahead_frames: 0              # encoder frames the CTC head reads ahead; 12 is 0.384 s, within the board's 0.4 s wait (KEHOACH 3.12)
   norm_eps: 1.0e-5
   bypass_init: 0.5                 # share of a layer's or a stack's output over its input at the start
 rnnt:                              # the rnnt track (KEHOACH 3.12, ADR-0016): MultiNet7's predictor and joiner on the encoder
