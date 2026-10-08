@@ -1,9 +1,9 @@
-"""Score a run's ns candidates against the OM-LSA floor on a held set (E9-T4, KEHOACH 3.9, 3.15).
+"""Score a run's ns candidates against the OM-LSA floor on a held set, or on the bench's recorded mixtures (E9-T4).
 
 Each variant's gains, from the capture's slot power, go onto the talker alone and the rest alone through the grid's
 iSTFT, as scenes.ns scores OM-LSA: noise and speech taken down, SNR and SI-SDR gained after settle_s, the cold start
-apart, by foreground class, SNR, speech level and corpus. Recorded, never deciding (KEHOACH 3.15).
-Run: python -m srpipe.tasks.ns.eval score [--run RUN] [--set val|test]"""
+apart, by foreground class, SNR, speech level, corpus or bench item. Recorded, never deciding (KEHOACH 3.15, 3.16).
+Run: python -m srpipe.tasks.ns.eval {score [--set val|test], bench [--epoch E]} [--run RUN]"""
 
 from __future__ import annotations
 
@@ -25,11 +25,11 @@ from srpipe.core.config import data_paths, load_device, load_yaml
 from srpipe.dsp.afe import ns_omlsa
 from srpipe.dsp.spec import fft
 from srpipe.dsp.spec.window import sqrt_hann
-from srpipe.generated import grid
+from srpipe.generated import array, grid
 from srpipe.metrics.sisdr import si_sdr_db
-from srpipe.scenes import device
+from srpipe.scenes import compare, device
 from srpipe.scenes import vad as vad_scenes
-from srpipe.tasks.ns import data, model
+from srpipe.tasks.ns import data, model, train
 from srpipe.tasks.ns.postproc import bins as slot_gains
 
 HOP = grid.HOP_SAMPLES
@@ -48,12 +48,13 @@ def last_run(paths: dict) -> Path:
     return done[-1].parent
 
 
-def load_nets(run: Path, cfg: dict) -> None:
-    """The run's candidates on the CPU, once per worker process."""
+def load_nets(run: Path, cfg: dict, epoch: int | None = None) -> None:
+    """The run's candidates on the CPU, once per worker process: their last weights, or those at the end of epoch."""
     torch.set_num_threads(1)
     for name in cfg["train"]["candidates"]:
         net = model.build(cfg, name)
-        net.load_state_dict(torch.load(run / name / "model.pt", map_location="cpu"))
+        weights = run / name / "model.pt" if epoch is None else train.checkpoint(run, name, epoch)
+        net.load_state_dict(torch.load(weights, map_location="cpu"))
         _nets[name] = net.eval()
 
 
@@ -241,15 +242,67 @@ def score(run: Path, cfg: dict, dev: dict, paths: dict, role: str, workers: int)
     return summary
 
 
+def speech_hops(spans_s: list[list[float]], hops: int) -> np.ndarray:
+    """Per hop whether one of the bench's speech segments reaches into it."""
+    out = np.zeros(hops, dtype=bool)
+    for start_s, end_s in spans_s:
+        out[round(start_s * grid.SAMPLE_RATE_HZ) // HOP : -(-round(end_s * grid.SAMPLE_RATE_HZ) // HOP)] = True
+    return out
+
+
+def bench_rows(folder: Path, balance: np.ndarray, spec: dict) -> list[dict]:
+    """Every variant's figures on one bench mixture: gains from its capture's slot power onto the speech and the rest
+    of it that board B recorded apart, as _score_shard does on a held example."""
+    meta = json.loads((folder / "item.json").read_text(encoding="utf-8"))
+    capture, clean = (
+        compare.read_pcm(folder / f"{part}.wav", array.N_MICS).astype(np.float64) / INT16_SCALE
+        for part in ("input", "clean")
+    )
+    n = len(capture) // HOP * HOP
+    x, s = device.slot_bins(capture[:n].T, balance), device.slot_bins(clean[:n].T, balance)
+    noise_bins = x - s
+    refs = {"speech_ref": synthesis(s), "noise_ref": synthesis(noise_bins)}
+    labels = speech_hops(meta["segments"]["speech_s"], len(x))
+    settled = np.arange(len(x)) >= round(spec["settle_s"] * grid.SAMPLE_RATE_HZ / HOP)
+    slices = {"class": meta["name"], "snr": f"{meta['source']['mix']['snr_db']:g}", "level": None, "corpus": None}
+    rows = []
+    for name, g in variants((np.abs(x) ** 2).astype(np.float32), spec["floors_db"]).items():
+        parts = refs | {"speech": synthesis(g * s), "noise": synthesis(g * noise_bins)}
+        for window, within in zip(WINDOWS, (settled, ~settled), strict=True):
+            rows.append({"variant": name, "window": window, **slices, **window_figures(parts, labels, within)})
+    return rows
+
+
+def bench(run: Path, cfg: dict, dev: dict, paths: dict, epoch: int | None) -> dict:
+    """OM-LSA and the run's candidates, at the end of epoch or as kept, on the KEHOACH 3.16 bench's mixtures whose
+    speech and noise board B recorded apart; written to <run>/eval/bench.yaml or bench_epoch_<epoch>.yaml."""
+    spec = load_yaml(compare.CONFIG)
+    root = paths["interim"] / "scenes" / spec["name"]
+    balance = device.load_microphones(dev["microphone"]).gains
+    load_nets(run, cfg, epoch)
+    items = [item["name"] for item in spec["items"] if "mix" in item]
+    summary = summarise([r for item in items for r in bench_rows(root / item, balance, cfg["eval"])])
+    out = run / "eval" / ("bench.yaml" if epoch is None else f"bench_epoch_{epoch:02d}.yaml")
+    out.parent.mkdir(exist_ok=True)
+    out.write_text(yaml.safe_dump(summary, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return summary
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("what", choices=["score"])
+    parser.add_argument("what", choices=["score", "bench"])
     parser.add_argument("--run", type=Path, help="a run under artifacts/ns/runs; the last finished one by default")
     parser.add_argument("--set", dest="role", choices=data.HELD, default="val")
+    parser.add_argument("--epoch", type=int, help="bench: the weights at the end of this epoch; the last by default")
     args = parser.parse_args(argv)
     paths = data_paths()
     run = args.run or last_run(paths)
     cfg = load_yaml(run / "config.resolved.yaml")
+    if args.what == "bench":
+        summary = bench(run, cfg, load_device(cfg["device"]), paths, args.epoch)
+        for key in ("all", "class"):
+            print(f"\nbench, {key}\n\n{table(summary, key)}")
+        return 0
     summary = score(run, cfg, load_device(cfg["device"]), paths, args.role, cfg["eval"]["workers"])
     for key in ("all", *SLICES):
         print(f"\n{args.role}, {key}\n\n{table(summary, key)}")

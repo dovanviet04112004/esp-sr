@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit spans splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-thresholds ctc-deploy ctc-tone-flip ctc-watch rnnt-ptq ai-unit-rnnt listen-unit models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval espsr-compare parity-host \
+.PHONY: help gen check lint test golden measure report ci-status eval-vad eval-agc eval-ns eval-doa eval-pitch screen screen-audit spans splits wake-features wake-train eval-tts wake-synth extract-pilot extract-recut command-synth-pilot command-synth command-synth-make kws-split kws-features kws-train ctc-features ctc-train ctc-ptq ctc-int16 ctc-qat ctc-thresholds ctc-deploy ctc-tone-flip ctc-watch rnnt-ptq ai-unit-rnnt listen-unit models-flash command-eval ns-data ns-pilot ns-smoke ns-train ns-eval ns-bench espsr-compare parity-host \
         fw-dev fw-bench fw-bench-flash fw-prod flash monitor capture-flash broker-up broker-down host-live commands session session-plan
 
 PORT ?= /dev/ttyUSB0
@@ -198,6 +198,9 @@ ns-resume: ## Go on with the latest paused ns run from the state it saved (E9-T4
 ns-eval: ## Score the last ns run against the OM-LSA floor on the held val and test sets into its eval/ (E9-T4)
 	cd ml && uv run --extra train python -m srpipe.tasks.ns.eval score --set val \
 	  && uv run --extra train python -m srpipe.tasks.ns.eval score --set test
+
+ns-bench: ## Score OM-LSA and an ns run's candidates on the afe bench's mixtures of fan and music recorded on board B; RUN=<run under ml/> EPOCH=<e> (E9-T4)
+	cd ml && uv run --extra train python -m srpipe.tasks.ns.eval bench $(if $(RUN),--run $(RUN)) $(if $(EPOCH),--epoch $(EPOCH))
 
 measure: ## Merge bench CSVs into docs/measurements/budget.md
 	python3 -m tools.budget

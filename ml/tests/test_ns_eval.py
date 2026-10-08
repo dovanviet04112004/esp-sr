@@ -1,21 +1,29 @@
-"""srpipe.tasks.ns.eval: the whole-sequence iSTFT against the streaming one, the figures of known gains, and the
-spans the slices name."""
+"""srpipe.tasks.ns.eval: the whole-sequence iSTFT against the streaming one, the figures of known gains, the spans
+the slices name, and the bench's recorded mixtures scored for the floor and every candidate at an epoch."""
 
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
 
+from srpipe.core.audio_io import write_wav
+from srpipe.core.config import load_device, load_yaml
 from srpipe.dsp.spec.stft import Istft
 from srpipe.generated import grid
+from srpipe.scenes import compare
+from srpipe.tasks import ns
 
-pytest.importorskip("torch")
+torch = pytest.importorskip("torch")
 
-from srpipe.tasks.ns import eval as ns_eval
+from srpipe.tasks.ns import eval as ns_eval  # noqa: E402
+from srpipe.tasks.ns import model, train  # noqa: E402
 
 HOP = grid.HOP_SAMPLES
+FS = grid.SAMPLE_RATE_HZ
 
 
 def test_the_whole_sequence_istft_equals_the_streaming_one() -> None:
@@ -52,3 +60,31 @@ def test_buckets_name_the_span_that_holds_a_value() -> None:
     assert ns_eval.bucket(4.9, edges) == "[0, 5)"
     assert ns_eval.bucket(5.0, edges) == ">= 5"
     assert ns_eval.bucket(None, edges) is None
+
+
+def test_the_bench_scores_the_floor_and_every_candidate_at_an_epoch_on_each_recorded_mixture(tmp_path: Path) -> None:
+    paths = {"interim": tmp_path / "interim"}
+    root = paths["interim"] / "scenes" / load_yaml(compare.CONFIG)["name"]
+    mixes = [item["name"] for item in load_yaml(compare.CONFIG)["items"] if "mix" in item]
+    rng = np.random.default_rng(2)
+    t = np.arange(6 * FS) / FS
+    voiced = (t % 1.5 > 0.5) * 0.2 * np.sin(2 * np.pi * 180 * t)
+    for name in mixes:
+        clean = np.stack([voiced, voiced], axis=1)
+        write_wav(root / name / "clean.wav", clean)
+        write_wav(root / name / "input.wav", clean + 0.02 * rng.standard_normal(clean.shape))
+        spans = [[k + 0.5, k + 1.5] for k in np.arange(0.0, 6.0, 1.5).tolist()]
+        meta = {"name": name, "source": {"mix": {"snr_db": 5.0}}, "segments": {"speech_s": spans}}
+        (root / name / "item.json").write_text(json.dumps(meta), encoding="utf-8")
+    cfg = load_yaml(ns.CONFIG)
+    cfg["train"]["candidates"] = model.names(cfg)
+    run = tmp_path / "run"
+    for name in model.names(cfg):
+        train.checkpoint(run, name, 3).parent.mkdir(parents=True)
+        torch.save(model.build(cfg, name).state_dict(), train.checkpoint(run, name, 3))
+    summary = ns_eval.bench(run, cfg, load_device(cfg["device"]), paths, 3)
+    floors = [ns_eval.floor_name(f) for f in cfg["eval"]["floors_db"]]
+    assert set(summary) == {ns_eval.OMLSA} | {f"{n}@{f}" for n in model.names(cfg) for f in floors}
+    omlsa = summary[ns_eval.OMLSA]["settled"]["class"]
+    assert set(omlsa) == set(mixes) and all(omlsa[name]["noise_down_db"] > 3.0 for name in mixes)
+    assert (run / "eval" / "bench_epoch_03.yaml").exists()
