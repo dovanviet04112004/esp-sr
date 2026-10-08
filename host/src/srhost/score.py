@@ -42,6 +42,8 @@ ENDFIRE_COS_MIN = 0.9
 SIGN_COS_MIN = 0.5
 # vad and agc carry state across a stream gap, so only a build without modules rebuilds from a session.
 PLAIN = ChainConfig(modules=())
+# The longest seq gap svc_front resumes dsp_afe over; a longer one resets it (KEHOACH 4.5.5).
+KEEP_HOPS = round(afe.CHAIN_GAP_KEEP_S * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES)
 # agc does not change the level it is handed, so the level is measured without it.
 INTO_AGC_MODULES = tuple(m for m in afe.MODULES if m != "agc")
 NS_MODULE = "ns_omlsa"
@@ -115,12 +117,30 @@ def read_wav(path: Path) -> np.ndarray:
         return np.frombuffer(wav.readframes(wav.getnframes()), dtype="<i2")
 
 
-def read_gap_offsets(session: Path) -> list[int]:
+@dataclass(frozen=True)
+class Gap:
+    """A seq gap of the stream: where it falls in the session's samples and how many hops it lost."""
+
+    offset_samples: int
+    missed_hops: int
+
+
+def read_gaps(session: Path) -> list[Gap]:
     path = session / GAPS_FILE
     if not path.exists():
         return []
-    rows = path.read_text(encoding="utf-8").splitlines()[1:]
-    return [int(row.split("\t")[0]) for row in rows if row.strip()]
+    rows = [row.split("\t") for row in path.read_text(encoding="utf-8").splitlines()[1:] if row.strip()]
+    return [Gap(int(offset), int(got) - int(expected)) for offset, expected, got in rows]
+
+
+def bridge(chain: Chain, gap: Gap) -> None:
+    """Carry the mirror over a gap as svc_front carries dsp_afe over a capture gap: resumed when short, reset when
+    long or when seq stepped back. A gap of the stream alone, where the board's chain ran on, is bridged the same way:
+    gaps.txt does not tell the two apart."""
+    if 0 <= gap.missed_hops <= KEEP_HOPS:
+        chain.resume()
+    else:
+        chain.reset()
 
 
 def channel_figures(name: str, pcm: np.ndarray, floor_a_dbfs: float) -> ChannelFigures:
@@ -139,16 +159,19 @@ def chain_tolerance_lsb() -> float:
     return float(yaml.safe_load(CHAIN_TOLERANCE.read_text(encoding="utf-8"))["tensors"]["pcm"]["max_abs"])
 
 
-def chain_parity(ch0: np.ndarray, ch1: np.ndarray, clean: np.ndarray, gap_offsets: list[int]) -> ParityFigures:
-    """Run the mirror over each stretch between gaps, fresh at every stretch, and compare hop by hop."""
+def chain_parity(ch0: np.ndarray, ch1: np.ndarray, clean: np.ndarray, gaps: list[Gap]) -> ParityFigures:
+    """Run the mirror over the stretches between gaps, each gap bridged as the board bridges it, and compare hop by
+    hop past the warm-up of every stretch."""
     hop = grid.HOP_SAMPLES
-    bounds = [0, *gap_offsets, len(clean)]
+    bounds = [0, *(g.offset_samples for g in gaps), len(clean)]
     tolerance = chain_tolerance_lsb()
     compared = skipped = over = 0
     max_abs = 0
     signal_power = error_power = 0.0
-    for start, end in pairwise(bounds):
-        chain = Chain(cfg=PLAIN)
+    chain = Chain(cfg=PLAIN)
+    for stretch, (start, end) in enumerate(pairwise(bounds)):
+        if stretch > 0:
+            bridge(chain, gaps[stretch - 1])
         for k, at in enumerate(range(start, end - hop + 1, hop)):
             mics = np.column_stack([ch0[at : at + hop], ch1[at : at + hop]]).reshape(-1)
             mirror = chain.process(mics).pcm.astype(np.int32)
@@ -167,16 +190,18 @@ def chain_parity(ch0: np.ndarray, ch1: np.ndarray, clean: np.ndarray, gap_offset
 
 
 def chain_hops(
-    ch0: np.ndarray, ch1: np.ndarray, gap_offsets: list[int], gains: np.ndarray | None, modules: tuple[str, ...]
+    ch0: np.ndarray, ch1: np.ndarray, gaps: list[Gap], gains: np.ndarray | None, modules: tuple[str, ...]
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """level_dbfs, vad and doa_deg of every hop past the warm-up, the chain restarted after each gap as the board
-    does."""
+    """level_dbfs, vad and doa_deg of every hop past the warm-up of each stretch, each gap bridged as the board
+    bridges it."""
     hop = grid.HOP_SAMPLES
-    bounds = [0, *gap_offsets, min(len(ch0), len(ch1))]
+    bounds = [0, *(g.offset_samples for g in gaps), min(len(ch0), len(ch1))]
     cfg = ChainConfig(modules=modules, balance_gains=gains)
     levels, speech, angles = [], [], []
-    for start, end in pairwise(bounds):
-        chain = Chain(cfg=cfg)
+    chain = Chain(cfg=cfg)
+    for stretch, (start, end) in enumerate(pairwise(bounds)):
+        if stretch > 0:
+            bridge(chain, gaps[stretch - 1])
         for k, at in enumerate(range(start, end - hop + 1, hop)):
             frame = chain.process(np.column_stack([ch0[at : at + hop], ch1[at : at + hop]]).reshape(-1))
             if k >= WARMUP_HOPS:
@@ -191,14 +216,14 @@ def chain_hops(
 def front_level(
     ch0: np.ndarray,
     ch1: np.ndarray,
-    gap_offsets: list[int],
+    gaps: list[Gap],
     gains: np.ndarray | None,
     modules: tuple[str, ...] = INTO_AGC_MODULES,
     doa_label_deg: int | None = None,
 ) -> FrontLevel:
-    """Run the product chain up to agc over each stretch between gaps, as the board restarts it, skipping warm-up;
-    doa is read on the speech hops, as a talker's direction."""
-    levels, speech, angles = chain_hops(ch0, ch1, gap_offsets, gains, modules)
+    """Run the product chain up to agc over the session, each gap bridged as the board bridges it, skipping
+    warm-up; doa is read on the speech hops, as a talker's direction."""
+    levels, speech, angles = chain_hops(ch0, ch1, gaps, gains, modules)
     percentiles = tuple(round(float(np.percentile(levels, q))) for q in LEVEL_PERCENTILES)
     front = FrontLevel(gains is not None, percentiles, float(np.mean(speech)))
     heard = angles[speech & (angles != ANGLE_UNKNOWN_DEG)]
@@ -211,11 +236,11 @@ def front_level(
     return replace(front, doa_percentiles_deg=doa_deg, doa_hops=int(heard.size), doa_within_pct=within)
 
 
-def ns_effect(ch0: np.ndarray, ch1: np.ndarray, gap_offsets: list[int], gains: np.ndarray | None) -> NsEffect:
+def ns_effect(ch0: np.ndarray, ch1: np.ndarray, gaps: list[Gap], gains: np.ndarray | None) -> NsEffect:
     """What ns takes off the level into agc, per hop the chain with it against the chain without, split by the vad
     of the chain with it: the noise it removes in pauses and the speech it loses (E9-T1)."""
-    with_ns, speech, _ = chain_hops(ch0, ch1, gap_offsets, gains, INTO_AGC_MODULES)
-    without, _, _ = chain_hops(ch0, ch1, gap_offsets, gains, tuple(m for m in INTO_AGC_MODULES if m != NS_MODULE))
+    with_ns, speech, _ = chain_hops(ch0, ch1, gaps, gains, INTO_AGC_MODULES)
+    without, _, _ = chain_hops(ch0, ch1, gaps, gains, tuple(m for m in INTO_AGC_MODULES if m != NS_MODULE))
     taken = without - with_ns
 
     def median(mask: np.ndarray) -> float | None:
@@ -290,13 +315,14 @@ def score(session: Path, shift: int | None = None) -> Score:
     channels = [channel_figures(name, samples, floors[name]) for name, samples in pcm.items()]
     parity = None
     if shift is None and all(name in pcm for name in PARITY_CHANNELS):
-        parity = chain_parity(pcm["ch0"], pcm["ch1"], pcm["clean"], read_gap_offsets(session))
+        parity = chain_parity(pcm["ch0"], pcm["ch1"], pcm["clean"], read_gaps(session))
     pair = None
     front = ns = None
     if stats is not None:
         gains = board_gains(meta["board"])
-        front = front_level(pcm["ch0"], pcm["ch1"], read_gap_offsets(session), gains, doa_label_deg=meta.get("doa_deg"))
-        ns = ns_effect(pcm["ch0"], pcm["ch1"], read_gap_offsets(session), gains)
+        gaps = read_gaps(session)
+        front = front_level(pcm["ch0"], pcm["ch1"], gaps, gains, doa_label_deg=meta.get("doa_deg"))
+        ns = ns_effect(pcm["ch0"], pcm["ch1"], gaps, gains)
         if meta.get("doa_deg") is not None:
             pair = pair_figures(stats, int(meta["doa_deg"]))
     return Score(meta, channels, parity, pair, trimmed, front, ns)

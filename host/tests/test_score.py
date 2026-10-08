@@ -73,6 +73,28 @@ def test_hops_after_a_gap_are_skipped_and_the_rest_still_match(tmp_path: Path) -
     assert (parity.hops_compared, parity.hops_skipped, parity.max_abs_lsb) == (33, 4, 0)
 
 
+class _Bridged:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def resume(self) -> None:
+        self.calls.append("resume")
+
+    def reset(self) -> None:
+        self.calls.append("reset")
+
+
+def test_a_gap_up_to_the_kept_length_resumes_and_a_longer_or_backward_one_resets(tmp_path: Path) -> None:
+    rows = f"0\t100\t{100 + score.KEEP_HOPS}\n0\t100\t{101 + score.KEEP_HOPS}\n0\t100\t90\n"
+    (tmp_path / "gaps.txt").write_text("offset_samples\texpected_seq\tgot_seq\n" + rows, encoding="utf-8")
+    gaps = score.read_gaps(tmp_path)
+    chain = _Bridged()
+    for gap in gaps:
+        score.bridge(chain, gap)
+    assert [g.missed_hops for g in gaps] == [score.KEEP_HOPS, score.KEEP_HOPS + 1, -10]
+    assert chain.calls == ["resume", "reset", "reset"]
+
+
 def test_one_sample_off_by_more_than_the_tolerance_is_caught(tmp_path: Path) -> None:
     session, channels = board_session(tmp_path)
     channels["clean"][20 * HOP + 5] += 5
