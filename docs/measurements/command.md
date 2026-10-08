@@ -1463,3 +1463,30 @@ Không âm tiết nào gánh cả gap: ba âm tiết mỗi cái hụt 20–50 �
 lệnh âm lượng chưa có phiên board nào trong tập học. Nới δ₁ không gỡ được: bảng chọn ngưỡng của dòng ấy
 (`int8_kaldi_voicing/percentile/thresholds.yaml`) cho δ₁ 200 ‰ nhận 83,3% thay 80,6% câu `val_commands` mà nhận nhầm
 49 thay 2 (δ₂ 0), 13 thay 1 (δ₂ 25).
+
+### 12.24 v2 và v8 theo từng lệnh, bốn cách nghe cao độ (08/10)
+
+Chủ repo thấy "đóng cửa", "mở cửa", "chụp ảnh" và cặp âm lượng trên board kém bản v2 của buổi demo 02/10. `make
+command-eval` trên trọng số float, 209 câu lệnh và 126 cửa sổ phải từ chối của Cửa 3; nhận ở δ₁ 100 ‰, δ₂ 25 ‰ như board
+B tối 08/10. v2 là run `20261002_128545c-dirty_64e7a4`, không có chiều cao độ; bản deploy 02/10 của nó không mang δ₁ trong
+ảnh model nên board chạy mặc định của `Kconfig` `svc_listen`, δ₁ 300 ‰, δ₂ 50 ‰. Đúng nhất / nhận đúng:
+
+| Lệnh | v2 | v8, SwiftF0 như lúc học | v8, Kaldi, giữ độ hữu thanh (board) | v8, Kaldi, giữ cả ba chiều |
+|---|---|---|---|---|
+| bật đèn | 35 / 29 | 35 / 35 | 35 / 34 | 35 / 35 |
+| tắt đèn | 1 / 0 | 33 / 27 | 32 / 29 | 32 / 26 |
+| bật quạt | 35 / 35 | 35 / 34 | 35 / 35 | 35 / 35 |
+| tắt quạt | 1 / 0 | 30 / 25 | 30 / 25 | 30 / 25 |
+| mở cửa | 10 / 10 | 10 / 10 | 10 / 10 | 10 / 10 |
+| đóng cửa | 11 / 10 | 10 / 8 | 8 / 6 | 10 / 8 |
+| tăng âm lượng | 10 / 5 | 10 / 8 | 10 / 8 | 10 / 7 |
+| giảm âm lượng | 11 / 3 | 11 / 6 | 11 / 5 | 11 / 6 |
+| dừng lại | 10 / 9 | 11 / 10 | 10 / 9 | 10 / 10 |
+| chụp ảnh (chưa học) | 11 / 9 | 11 / 10 | 11 / 10 | 11 / 10 |
+| **Cả bộ** | **135 / 110** | **196 / 173** | **192 / 171** | **194 / 172** |
+| Nhận nhầm / 126 | 1 | 1 | 1 | 0 |
+
+Ở δ₂ 50 ‰ nhận đúng là 101, 160, 147 và 161 câu. Ở cùng ngưỡng, v8 nhận hơn v2 ở mọi lệnh trừ "đóng cửa". Cặp âm lượng
+của v2 cũng chỉ qua 5/13 và 3/11 ở δ₁ 100 ‰; ở δ₁ 300 ‰, δ₂ 50 ‰ của buổi 02/10, v2 nhận 7/13 và 9/11. "Đóng cửa"
+kém đi vì cao độ của Kaldi: ba câu nghe bằng Kaldi chuyển sang "mở cửa" với khoảng cách nhất nhì 2–21 ‰, giữ cả ba
+chiều thì trả lại 10/11 như SwiftF0. Giữ cả ba chiều, phần cao độ không vào mạng nữa, nên cách ấy không theo bộ dò nào.
