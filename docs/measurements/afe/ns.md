@@ -183,3 +183,13 @@ Với model `command` đang khoá, học trên đúng chuỗi này (`command.md`
 | tắt `ns_omlsa` | 83/111 | 54/111 | 3/22 |
 
 Lọc ồn không phải chỗ "tắt" trượt: phụ âm đầu có trong đặc trưng mà model không đọc ra (`command.md` §6).
+
+## 7. Bộ nạp của lượt học (08/10)
+
+Lượt học lại của E9-T4 (`20261008_03de192-dirty_f04a9b`) trên máy học: RTX 3050 Laptop 4 GB, 20 luồng CPU, WSL 9 GB RAM,
+dữ liệu ở E: đọc qua 9P. Mỗi bước là batch 32 ví dụ 10 s trộn lúc học (KẾ HOẠCH §3.9), bốn ứng viên học trên cùng batch.
+
+Lọc trên CPU (`data.Mixer.example` rồi `data.slot_powers`, numpy float64), 10 worker: 1,1–1,3 bước/s, 35–42 ví dụ/s, GPU
+chờ dữ liệu 77–81% thời gian; 7 worker 0,86 bước/s; 12 worker tràn RAM. Một ví dụ trên một tiến trình mất 336 ms (cProfile
+24 ví dụ của epoch 0): chập RIR ~96 ms, phổ ở khe ~70 ms, đáp ứng micro ~60 ms, đọc nhiễu từ `raw/` ~71 ms, trong đó mở
+file 19 ms. Ba phép lọc chiếm ~2/3; vòng Python không đáng kể.
