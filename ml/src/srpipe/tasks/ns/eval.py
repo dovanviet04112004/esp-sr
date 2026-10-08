@@ -216,8 +216,14 @@ def table(summary: dict, key: str) -> str:
     return "\n".join(lines)
 
 
-def score(run: Path, cfg: dict, dev: dict, paths: dict, role: str, workers: int) -> dict:
-    """The run's variants on a stored held set, mixed as its manifest records, written to <run>/eval/<role>.yaml."""
+def eval_file(run: Path, name: str, epoch: int | None) -> Path:
+    """<run>/eval/<name>.yaml, or <name>_epoch_<epoch>.yaml for the weights of an epoch."""
+    return run / "eval" / (f"{name}.yaml" if epoch is None else f"{name}_epoch_{epoch:02d}.yaml")
+
+
+def score(run: Path, cfg: dict, dev: dict, paths: dict, role: str, workers: int, epoch: int | None = None) -> dict:
+    """The run's variants, at the end of epoch or as kept, on a stored held set mixed as its manifest records; written
+    to <run>/eval/<role>.yaml or <role>_epoch_<epoch>.yaml."""
     folder = data.set_dir(paths, cfg, role)
     manifest = yaml.safe_load((folder / "manifest.yaml").read_text(encoding="utf-8"))
     held_cfg = cfg | {key: manifest["config"][key] for key in ("mix", "sets")}
@@ -233,10 +239,10 @@ def score(run: Path, cfg: dict, dev: dict, paths: dict, role: str, workers: int)
     # Spawned workers read these as they load numpy: one BLAS thread each, not one a core in each of them.
     os.environ.update(dict.fromkeys(("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"), "1"))
     spawn = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(workers, mp_context=spawn, initializer=load_nets, initargs=(run, cfg)) as pool:
+    with ProcessPoolExecutor(workers, mp_context=spawn, initializer=load_nets, initargs=(run, cfg, epoch)) as pool:
         rows = [r for shard in pool.map(_score_shard, tasks) for r in shard]
     summary = summarise(rows)
-    out = run / "eval" / f"{role}.yaml"
+    out = eval_file(run, role, epoch)
     out.parent.mkdir(exist_ok=True)
     out.write_text(yaml.safe_dump(summary, allow_unicode=True, sort_keys=False), encoding="utf-8")
     return summary
@@ -282,7 +288,7 @@ def bench(run: Path, cfg: dict, dev: dict, paths: dict, epoch: int | None) -> di
     load_nets(run, cfg, epoch)
     items = [item["name"] for item in spec["items"] if "mix" in item]
     summary = summarise([r for item in items for r in bench_rows(root / item, balance, cfg["eval"])])
-    out = run / "eval" / ("bench.yaml" if epoch is None else f"bench_epoch_{epoch:02d}.yaml")
+    out = eval_file(run, "bench", epoch)
     out.parent.mkdir(exist_ok=True)
     out.write_text(yaml.safe_dump(summary, allow_unicode=True, sort_keys=False), encoding="utf-8")
     return summary
@@ -293,7 +299,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("what", choices=["score", "bench"])
     parser.add_argument("--run", type=Path, help="a run under artifacts/ns/runs; the last finished one by default")
     parser.add_argument("--set", dest="role", choices=data.HELD, default="val")
-    parser.add_argument("--epoch", type=int, help="bench: the weights at the end of this epoch; the last by default")
+    parser.add_argument("--epoch", type=int, help="the weights at the end of this epoch; the last by default")
+    parser.add_argument("--workers", type=int, help="score: processes, eval.workers of the run's config by default")
     args = parser.parse_args(argv)
     paths = data_paths()
     run = args.run or last_run(paths)
@@ -303,10 +310,11 @@ def main(argv: list[str] | None = None) -> int:
         for key in ("all", "class"):
             print(f"\nbench, {key}\n\n{table(summary, key)}")
         return 0
-    summary = score(run, cfg, load_device(cfg["device"]), paths, args.role, cfg["eval"]["workers"])
+    workers = args.workers or cfg["eval"]["workers"]
+    summary = score(run, cfg, load_device(cfg["device"]), paths, args.role, workers, args.epoch)
     for key in ("all", *SLICES):
         print(f"\n{args.role}, {key}\n\n{table(summary, key)}")
-    print(f"\n{run / 'eval' / f'{args.role}.yaml'}")
+    print(f"\n{eval_file(run, args.role, args.epoch)}")
     return 0
 
 
