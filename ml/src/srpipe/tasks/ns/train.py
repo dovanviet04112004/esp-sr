@@ -156,6 +156,8 @@ def worker_start(_: int) -> None:
 
 
 def loader(dataset: Dataset, spec: dict, workers: int, pin: bool, steps: range, persistent: bool) -> DataLoader:
+    # Spawned workers read this as glibc starts in them: their read threads share a few arenas.
+    os.environ["MALLOC_ARENA_MAX"] = str(spec["malloc_arenas"])
     return DataLoader(
         dataset,
         batch_size=None,

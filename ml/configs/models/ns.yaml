@@ -115,9 +115,10 @@ train:                             # python -m srpipe.tasks.ns.train; the GPU wh
   final_learning_rate: 5.0e-5      # cosine decay to this by the last step, as wake
   grad_clip_norm: 1.0              # GRUs trained through 625 hops
   norm_batches: 64                 # the first batches of the stream give each feature's mean and deviation
-  workers: 8                       # loader processes, ~600 MB each with torch; on read_threads they outpace the GPU
-  prefetch: 1                      # batches each worker keeps ready: 10 of ~70 MB of recipes in shared memory at most
-  read_threads: 8                  # recipes a worker reads at once: hides the latency of E: over 9P (afe/ns.md 7)
+  workers: 6                       # loader processes, ~550 MB each: ~0.4 s a batch, well ahead of the GPU (afe/ns.md 7)
+  prefetch: 1                      # batches each worker keeps ready: 6 of ~70 MB of recipes in shared memory at most
+  read_threads: 8                  # recipes a worker reads at once: hides the latency of E: over 9P
+  malloc_arenas: 2                 # glibc arenas a worker's threads share: +143 MB a worker after 40 batches, not +362
   val_workers: 4                   # loader processes of each epoch's val pass, started for it alone
   val_floor_db: null               # the epoch's val figures without a floor: E9-T12 picks the net's (KEHOACH 3.9)
   divergence_ratio: 3.0            # a val loss this many times epoch 0's stops the run; a safety, never a stop rule
