@@ -111,6 +111,7 @@ TEST_CASE("an ESP-PPQ network streamed hop by hop matches its whole-sequence sim
     TEST_ASSERT_GREATER_THAN(kToleranceSteps, stale);
     net.reset();
     TEST_ASSERT_LESS_OR_EQUAL(kToleranceSteps, stream(net, head, x, y, head.hops, &mean_us, &peak_us));
+    net.release();
 
     TEST_ASSERT_EQUAL(ESP_OK, esp_partition_erase_range(part, 0, kSectorBytes));
 }

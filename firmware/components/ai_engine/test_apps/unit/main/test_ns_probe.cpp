@@ -201,6 +201,7 @@ TEST_CASE("every ns candidate streams with its GRU states fed back as its ESP-PP
         const int8_t *y = x + rec.hops * rec.dims;
         const int8_t *states = y + rec.hops * rec.outputs;
         check_net(nets[n], rec, x, y, states);
+        nets[n].release();
         const size_t data = rec.hops * (rec.dims + rec.outputs + rec.state_values);
         at += sizeof(rec) + (data + 3) / 4 * 4;
     }

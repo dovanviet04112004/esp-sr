@@ -361,6 +361,7 @@ TEST_CASE("the ctc net and one of its layers stream as their ESP-PPQ simulation 
         const int8_t *x = reinterpret_cast<const int8_t *>(at + sizeof(rec));
         const int8_t *y = x + rec.steps * rec.step_hops * rec.dims;
         check_net(nets[n], rec, x, y);
+        nets[n].release();
         const size_t data = rec.steps * (rec.step_hops * rec.dims + rec.outputs);
         at += sizeof(rec) + (data + 3) / 4 * 4;
     }

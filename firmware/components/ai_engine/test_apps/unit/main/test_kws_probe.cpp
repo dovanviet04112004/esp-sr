@@ -110,6 +110,7 @@ TEST_CASE("every kws DS-CNN size runs one window as its ESP-PPQ simulation does,
         const int8_t *x = reinterpret_cast<const int8_t *>(at + sizeof(rec));
         const int8_t *y = x + rec.hops * rec.dims;
         check_size(nets[s], rec, x, y, head.runs);
+        nets[s].release();
         const size_t data = rec.hops * rec.dims + rec.classes;
         at += sizeof(rec) + (data + 3) / 4 * 4;
     }
