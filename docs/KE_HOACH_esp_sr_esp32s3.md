@@ -1167,15 +1167,18 @@ chờ trước khi chốt câu (§5.4), nên quyết định không trễ thêm.
 `hop_stride × lookahead_frames` bước đặc trưng bằng trung bình lúc học, tức 0 sau chuẩn hoá, để các khung cuối có
 tương lai, ở lúc học, lúc chấm và trên chip như nhau. Trên chip lớp ấy là tích chập nhân quả thường mà `StreamingCache`
 giữ được, đầu ra trễ `lookahead_frames` khung; `ai_engine` đẩy thêm các bước trung bình ấy khi câu chốt và `meta.json`
-khai `lookahead_frames` (§6.3), phần firmware làm khi lượt thử dưới đây thắng.
+khai `lookahead_frames` (§6.3), phần firmware làm khi lượt thử dưới đây thắng và thay được v8.
 
 **Học tinh chỉnh** (`train.init`, `train.hold`). Lượt học bắt đầu từ trọng số cuối và trung bình, độ lệch của run
 `train.init`, với bộ tối ưu và lịch tốc độ học mới; `train.hold` giữ các chiều cao độ nó nêu ở trung bình lúc học trong
 mọi lô và mọi lần chấm, nên cột của chúng trong `front.proj` không nhận gradient và deploy gập chúng (§3.14) ra đúng mạng
-đã học. Lượt thử nhìn trước (chủ repo duyệt 08/10) là hai lượt tinh chỉnh từ v8, cùng seed, split và số bước, cả hai
-giữ ba chiều cao độ như board chạy v8 (§3.11): (A) không nhìn trước, làm đối chứng; (B) `lookahead_frames` 12. Chấm cả
-hai bằng Cửa 3 ở δ₁, δ₂ của board, `tone_flip places` và `tone_flip owner`. B thắng khi Cửa 3 nhận đúng hơn A quá 5 câu
-(nhiễu đếm) mà từ chối không kém, hoặc thanh âm tiết đầu trên `val` hơn A quá 2 điểm mà Cửa 3 không kém.
+đã học. Học tinh chỉnh với cả ba chiều giữ làm "tắt" của chủ repo tụt: từ v8, không nhìn trước, Cửa 3 đúng nhất 170/209
+so với 194/209 của v8, "tắt đèn" 17/35 so với 32/35 (`measurements/command.md` §12.29). Nên lượt thử nhìn trước (chủ repo
+duyệt 08/10) học tinh chỉnh từ v8 với cao độ SwiftF0 như v8 học, không giữ chiều nào, rồi chấm như board nghe, cả ba
+chiều giữ ở trung bình: hai lượt cùng seed, split và số bước, (D) không nhìn trước, làm đối chứng; (C)
+`lookahead_frames` 12. Chấm cả hai bằng Cửa 3 ở δ₁ 100 ‰, δ₂ 25 ‰, `tone_flip places` và `tone_flip owner`. C thắng khi
+Cửa 3 nhận đúng hơn D quá 5 câu (nhiễu đếm) mà từ chối không kém, hoặc thanh âm tiết đầu trên `val` hơn D quá 2 điểm mà
+Cửa 3 không kém; C chỉ thay v8 trên board khi Cửa 3 nhận đúng của nó không kém v8.
 Cỡ chọn theo chất lượng: rộng hơn hay sâu hơn MultiNet7 (bề rộng 128, feedforward 256, khoảng 2,1 MB int8 🔬) khi µs đo
 trên board còn trong ngân sách §3.3. Bề rộng 160 và feedforward 320 (ADR-0017) có 3,14 triệu tham số cho encoder và đầu
 CTC, `.espdl` 3,4 MB, chạy 10,2 ms mỗi 32 ms trên board B với trọng số ngẫu nhiên (`measurements/latency.md` §18); bộ nhớ
