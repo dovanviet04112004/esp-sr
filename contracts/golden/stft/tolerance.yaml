@@ -1,10 +1,11 @@
-# C dsp_spec against srpipe.dsp.spec for STFT analysis and synthesis (KEHOACH 3.14, E6-T4).
-# Both sides are float32; the C side measured 137.2 dB on bins and 137.4 dB on rebuilt at
-# e0ed592, so each floor keeps about 20 dB of margin. case_neg_* must fall outside these limits.
+# C dsp_spec against srpipe.dsp.spec for STFT analysis and synthesis (KEHOACH 3.14, E6-T4, E6-T8).
+# Both sides run the same float32 operations in the same order (ADR-0020), so they match bit for bit with the
+# default FFT, Kconfig DSP_SPEC_FFT_RADIX4; dl_fft does not.
+# case_neg_* must fall outside these limits.
 tensors:
   bins:
-    max_abs: 1.0e-4
-    min_snr_db: 115.0
+    max_abs: 0.0
+    min_snr_db: 0.0
   rebuilt:
-    max_abs: 1.0e-5
-    min_snr_db: 115.0
+    max_abs: 0.0
+    min_snr_db: 0.0
