@@ -1549,6 +1549,11 @@ Trọng số tải vào `cache/` theo commit ghim và sha256, không commit (CLA
 
 Ô nào mục thiếu thứ thước cần thì để trống, không suy.
 
+Lúc học `ns` (E9-T4), sau mỗi epoch, sàn OM-LSA và trọng số epoch ấy của mọi ứng viên được chấm trên bốn mục trộn (quạt,
+nhạc ở SNR 5 và 0 dB), ở đúng lối vào của khe `ns` trong đường mô phỏng (`hpf`, `balance`, trung bình hai micro), bằng
+thước của tập giữ lại: nhiễu giảm, tiếng mất, SNR tăng sau `settle_s` (`tasks/ns/eval.py bench`). Số ấy cho thấy mạng làm
+gì với nhiễu thu thật; nó không chọn epoch hay bản, luật chọn vẫn ở §3.9.
+
 **App `espsr_compare`** (§4.5.1, §4.5.7) là chỗ duy nhất link `espressif/esp-sr`, ghim bản chính xác trong
 `idf_component.yml` của chính nó. Bảng phân vùng riêng: `nvs` và `storage` đúng chỗ của sản phẩm để app đọc được
 `wifi/*` qua `sys_storage`, app `factory`, và phân vùng model của ESP-SR, ghi bằng `esptool write_flash`. **Tiếng vào và
@@ -1796,7 +1801,8 @@ ml/
 │   │   │                              #   gpu_mix.py lọc cả batch học trên GPU, float32; postproc: dải của
 │   │   │                              #   RNNoise-16k, log công suất và gain từng vạch của NSNet-16k; eval.py
 │   │   │                              #   chấm sàn và các ứng viên trên cùng vật liệu, mạng vào khe ns của
-│   │   │                              #   dsp.afe.chain như một hàm, dsp/ không biết nó
+│   │   │                              #   dsp.afe.chain như một hàm, dsp/ không biết nó; bench chấm từng epoch
+│   │   │                              #   trên các mục trộn thu qua board của bàn so §3.16
 │   │   ├── wake/                      # TCN; postproc/smooth.py ★; candidates.py chấm từ đánh thức trên kho (E11-T5)
 │   │   │                              #   bằng core/phrases.py; synth.py chọn chữ, giọng, seed, tốc độ cho dương và
 │   │   │                              #   âm bản gần âm (cụm của core/phrases.py) rồi sinh qua srpipe/tts vào
