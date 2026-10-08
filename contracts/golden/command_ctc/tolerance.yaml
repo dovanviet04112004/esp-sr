@@ -1,9 +1,9 @@
-# C command_ctc postprocessing against srpipe.tasks.command.ctc.postproc.ctc_score (KEHOACH 3.12, 3.14, E11-T19).
-# Same float32 steps in the same order, exp by one polynomial without fused multiply-add, each log in double rounded
-# to float, every score divided by per_frames: log-probabilities and scores match to the bit, decisions exactly, and
-# streamed_* feeds the frames three at a time; a command no window reaches scores -inf on both sides. case_003 says one
-# syllable of each command alone. case_neg_000 forbids moving from a unit straight to the next; case_neg_001 leaves
-# the largest logit on; case_neg_002 scores no part; case_neg_003 divides by each window's own frames.
+# C command_ctc postprocessing against srpipe.tasks.command.ctc.postproc.ctc_score (KEHOACH 3.12, 3.14, E11-T19): the
+# same float32 steps in the same order, exp by one polynomial without fused multiply-add, each log in double rounded to
+# float, scores divided by per_frames; streamed_* feeds frames three at a time; unreached commands score -inf on both
+# sides. Windows carry reject, margin and a syllable cap; a decision's fifth field is the winner's worst syllable gap.
+# case_003 says one syllable alone. Negatives: 000 no unit-to-unit move, 001 largest logit left on, 002 no part
+# scored, 003 each window's own frames as divisor, 004 a blank's frames counted to the preceding unit.
 tensors:
   log_probs:
     max_abs: 0.0
