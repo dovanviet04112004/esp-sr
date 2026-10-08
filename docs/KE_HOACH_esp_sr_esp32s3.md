@@ -476,7 +476,7 @@ vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đ
 | Khối | Loại | Chỗ nằm | Thuật toán chốt | Tham số khởi đầu | Chi phí ước mỗi khung 🔬 | Cửa |
 |---|---|---|---|---|---|---|
 | `fft` `window` `stft` | thuần | `dsp_spec` | FFT thực viết tay cơ số 4, khớp bản soi gương từng bit; `dl_fft` chọn được bằng Kconfig (ADR-0020); căn Hann, chồng 50% | §3.1 | **442 µs đo** cả chuỗi | E6-T4, E6-T8 |
-| `mel` | thuần | `dsp_spec` | log-mel với log float32 của module, MFCC giữ làm đối chiếu | 80 dải, 20–7 600 Hz | **~235 µs** 🔬 (`rfft` 117 đo; 40 dải đo 59, 80 dải ~118 🔬) | E6-T5, E6-T8 |
+| `mel` | thuần | `dsp_spec` | log-mel với log float32 của module, MFCC giữ làm đối chiếu | 80 dải, 20–7 600 Hz | **~230 µs đo** (STFT một kênh 142, log-mel 80 dải 87,5; `budget.md`) | E6-T5, E6-T8 |
 | `pitch` | thuần | `dsp_spec` | bộ dò cao độ của Kaldi chạy dòng: NCCF ở 4 kHz, Viterbi, ra độ hữu thanh + log F0 trừ trung bình + delta (§3.11) | 50–400 Hz | **1,98 ms đo** mỗi bước ở nhân 0, vùng làm việc trong PSRAM (`measurements/pitch.md`); dựng cho `command` (ADR-0010) | E11-T8 |
 | `hpf` | thuần | `dsp_afe` | IIR bậc hai Butterworth, dạng II chuyển vị viết tay (ADR-0004) | 80 Hz | ~41 µs hai kênh | E7-T1 |
 | `balance` | thuần | `dsp_afe` | nhân hệ số phức hiệu chuẩn mỗi vạch cho `ch1`, vòng viết tay (ADR-0005) | từ NVS `calib/bal` | ~18 µs | E7-T2 |

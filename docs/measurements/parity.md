@@ -8,14 +8,14 @@ lại trong thư mục build, qua `python3 pytest_parity.py --report <file>`.
 
 | Khối | Số ca | Sai số tuyệt đối lớn nhất | SNR nhỏ nhất dB | Ngưỡng | Đối chứng âm đỏ | Commit | Ngày |
 |---|---|---|---|---|---|---|---|
-| `stft` — phổ phân tích | 4 | 7,6e-6 | 137,2 | ≤ 1e-4, ≥ 115 dB | — | a934a6a | 27/09 |
-| `stft` — tổng hợp từ phổ vàng | 4 | 3,0e-7 | 137,8 | ≤ 1e-5, ≥ 115 dB | lệch một mẫu: 0,96, −3,1 dB → đỏ | a934a6a | 27/09 |
-| `mel` — log-mel, ba cấu hình (40, 80, 24 dải) | 3 | 9,5e-7 | 143,1 | ≤ 1e-4, ≥ 115 dB | lệch một dải: 2,24, 3,0 dB → đỏ | a934a6a | 27/09 |
-| `mel` — MFCC (13, 20, 24 hệ số) | 3 | 1,5e-5 | 136,0 | ≤ 1e-3, ≥ 110 dB | — | a934a6a | 27/09 |
-| `chain` — `pcm` ra của mặt tiền `dsp_afe`, mọi module tắt (int16) | 4 | 1 LSB | 77,8 | ≤ 1 LSB, ≥ 60 dB | lệch một mẫu: 15 090 LSB, −2,9 dB → đỏ | a934a6a | 27/09 |
-| `chain` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | — | a934a6a | 27/09 |
-| `chain_modules` — `pcm` ra với `hpf`, `balance`, `ns_omlsa`, `vad`, `agc` của `sdkconfig.afe`, hiệu chuẩn và số gieo của ca (int16); máy tính và board B | 4 | 1 LSB | 70,5 | ≤ 1 LSB, ≥ 60 dB | bỏ qua `calib/bal`: 473 LSB, 16,4 dB → đỏ | 5636ed9 | 27/09 |
-| `chain_modules` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | cùng ca: `level_dbfs` 2 → đỏ | 5636ed9 | 27/09 |
+| `stft` — phổ phân tích, FFT cơ số 4 mặc định (ADR-0020); máy tính và board B | 4 | 0 | — | khớp tuyệt đối | — | f277696 | 08/10 |
+| `stft` — tổng hợp từ phổ vàng; máy tính và board B | 4 | 0 | — | khớp tuyệt đối | lệch một mẫu: 0,958, −3,1 dB → đỏ | f277696 | 08/10 |
+| `mel` — log-mel, ba cấu hình (40, 80, 24 dải); máy tính và board B | 3 | 0 | — | khớp tuyệt đối | lệch một dải: 2,24, 3,0 dB → đỏ | f277696 | 08/10 |
+| `mel` — MFCC (13, 20, 24 hệ số); máy tính và board B | 3 | 0 | — | khớp tuyệt đối | — | f277696 | 08/10 |
+| `chain` — `pcm` ra của mặt tiền `dsp_afe`, mọi module tắt (int16); máy tính và board B | 4 | 0 | — | ≤ 1 LSB, ≥ 60 dB | lệch một mẫu: 15 090 LSB, −2,9 dB → đỏ | f277696 | 08/10 |
+| `chain` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 4 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | — | f277696 | 08/10 |
+| `chain_modules` — `pcm` ra với `hpf`, `balance`, `ns_omlsa`, `vad`, `agc` của `sdkconfig.afe`, hiệu chuẩn và số gieo của ca (int16); máy tính và board B | 5 | 0 | — | ≤ 1 LSB, ≥ 60 dB | bỏ qua `calib/bal`: 473 LSB, 16,4 dB → đỏ | f277696 | 08/10 |
+| `chain_modules` — `seq`, `doa_deg`, `doa_conf`, `vad`, `level_dbfs`, `gain_db`, `flags` | 5 | 0 | — | khớp tuyệt đối (`level_dbfs` ≤ 1) | cùng ca: `level_dbfs` 2 → đỏ | f277696 | 08/10 |
 | `hpf` — biquad dạng II chuyển vị viết tay (ADR-0004), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | trễ một mẫu: 0,996, −3,1 dB → đỏ | a934a6a | 27/09 |
 | `balance` — nhân phức viết tay (ADR-0005), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | hệ số liên hợp: 26,0, −3,5 dB → đỏ | a934a6a | 27/09 |
 | `vad` — mức sáu dải, quyết định thô, `speech` sau kéo dài; máy tính và board B | 4 | 0 | — | mức ≤ 1e-6, ≥ 120 dB; quyết định khớp tuyệt đối | `speech` trễ một bước: 1 → đỏ | a934a6a | 27/09 |
@@ -132,6 +132,16 @@ Workflow `ml` tại `1c460d2` thấy bộ `agc` đã commit khác bản máy ch�
 (tổng qua BLAS, `log` float32), chưa đỏ chỉ vì máy ấy tình cờ ra cùng số. Từ `a934a6a` bản soi gương theo luật mới của
 KẾ HOẠCH §3.14: hàm siêu việt tính ở double rồi làm tròn một lần, tổng float32 cộng theo thứ tự của bản C. `log_mel` nhờ
 đó sát C hơn: 9,5e-7 (143,1 dB) trên board, 4,8e-7 (163 dB) trên máy tính.
+
+## `dsp_spec` khớp từng bit (E6-T8, ADR-0020)
+
+Phần lệch còn lại của `stft` và `mel` đến từ ba chỗ: FFT `dl_fft` (hợp ngữ S3 gộp nhân-cộng, bảng `cosf`/`sinf` của
+newlib), `mel.c` dựng không có `-ffp-contract=off`, và `logf`. Đủ để lưới int8 của `command/v8` lật một ô ở 14/319 cửa sổ
+của `make listen-unit` (`latency.md` §22). Với FFT cơ số 4 viết tay mặc định, cả component dựng `-ffp-contract=off` và log
+float32 của module, `make parity-host` và `make parity-board` (08/10, `f277696`, hai bản dựng) ra `max_abs 0` ở mọi ca
+của `stft`, `mel`, `chain`, `chain_modules`; PCM của `chain` và `chain_modules` thôi lệch 1 LSB. `agc` `gain_db` vẫn
+4,8e-7 vì `log10f`, trong ngưỡng của nó. Chọn Kconfig `DSP_SPEC_FFT_DL_FFT` thì `stft`, `mel` không còn qua ngưỡng
+tuyệt đối.
 
 ## Đường nối tiếp
 
