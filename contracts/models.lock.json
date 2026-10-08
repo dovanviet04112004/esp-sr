@@ -9,7 +9,7 @@
           "file": "command_ctc.espdl",
           "entry": "command_ctc",
           "kind": "espdl",
-          "sha256": "85887364c7a3bb920de269ecbb9a8fc6d73287fa0867374136f0be0c81d7c602"
+          "sha256": "207601ee5197157326bf04def5139b7146e0ca509e0c69eb02fc86c19e03ff0f"
         },
         {
           "file": "command_ctc.norm.bin",
@@ -68,7 +68,7 @@
       },
       "heard": {
         "pitch": "kaldi",
-        "hold": "voicing"
+        "hold": "pitch"
       }
     }
   }
