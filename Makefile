@@ -137,8 +137,8 @@ kws-train: ## Train the kws DS-CNN on processed/command_kws on the GPU into ml/a
 ctc-features: ## Run each file of the command split through the board simulation with pitch into processed/command, then cut the board sessions with Gate 3's code, which needs torch; Ctrl-C pauses at once, run again it goes on from the finished shards (E11-T12)
 	cd ml && uv run --extra train --extra swiftf0 python -m srpipe.tasks.command.ctc.data simulate
 
-ctc-train: ## Train the ctc net on processed/command on the GPU into ml/artifacts/command_ctc/runs; RESUME=<run under ml/> goes on from its last checkpoint (E11-T12)
-	cd ml && uv run --extra train python -m srpipe.tasks.command.ctc.train $(if $(RESUME),--resume $(RESUME))
+ctc-train: ## Train the ctc net on processed/command on the GPU into ml/artifacts/command_ctc/runs; RESUME=<run under ml/> goes on from its last checkpoint; SET="key=value ..." overrides command_ctc.yaml, such as train.init (E11-T12, E11-T23)
+	cd ml && uv run --extra train python -m srpipe.tasks.command.ctc.train $(if $(RESUME),--resume $(RESUME)) $(foreach s,$(SET),--set $(s))
 
 # A ctc ladder heard on the board's Kaldi pitch with a pitch dim folded at its train mean (KEHOACH 3.14).
 CTC_HEARD = $(if $(KALDI),--kaldi-pitch) $(if $(HOLD),--hold $(HOLD))
