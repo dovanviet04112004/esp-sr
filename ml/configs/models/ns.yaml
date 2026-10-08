@@ -121,6 +121,7 @@ train:                             # python -m srpipe.tasks.ns.train; the GPU wh
   val_floor_db: null               # the epoch's val figures without a floor: E9-T12 picks the net's (KEHOACH 3.9)
   divergence_ratio: 3.0            # a val loss this many times epoch 0's stops the run; a safety, never a stop rule
   log_every: 100                   # steps between log lines: losses, rate, data wait
+  checkpoint_every: 250            # steps between saves of the state a resumed run goes on from, a few minutes
   smoke: {epochs: 1, steps: 20, batch: 4, workers: 2, val_workers: 2, example_s: 4.0, val_examples: 16,
           log_every: 5}            # make ns-smoke
 eval:

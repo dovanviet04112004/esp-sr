@@ -181,8 +181,19 @@ ns-pilot: ## Write ns training examples and a DNSMOS report of the targets to ca
 ns-smoke: ## Train every ns candidate a few small steps on the CPU through the real loader, to time it (E9-T4)
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train python -m srpipe.tasks.ns.train --smoke
 
-ns-train: ## Train RNNoise-16k and NSNet-16k S/M/L on identical batches on the GPU; RESUME=<run under ml/> goes on from its last epoch (E9-T4)
+ns-train: ## Train RNNoise-16k and NSNet-16k S/M/L on identical batches on the GPU; RESUME=<run under ml/> goes on from its last state; Ctrl-C or make ns-pause pauses after the step under way (E9-T4)
 	cd ml && uv run --extra train python -m srpipe.tasks.ns.train $(if $(RESUME),--resume $(RESUME))
+
+ns-pause: ## Pause the running ns training: it saves its state after the step under way and stops; make ns-resume goes on (E9-T4)
+	@for f in ml/artifacts/ns/runs/*/train.pid; do \
+	  pid=$$(cat $$f 2>/dev/null); \
+	  if [ -n "$$pid" ] && grep -aq srpipe.tasks.ns.train /proc/$$pid/cmdline 2>/dev/null; then \
+	    kill -INT $$pid && echo "$$(dirname $$f): pauses after the step under way"; exit 0; \
+	  fi; \
+	done; echo "no ns training is running"
+
+ns-resume: ## Go on with the latest paused ns run from the state it saved (E9-T4)
+	cd ml && uv run --extra train python -m srpipe.tasks.ns.train --resume
 
 ns-eval: ## Score the last ns run against the OM-LSA floor on the held val and test sets into its eval/ (E9-T4)
 	cd ml && uv run --extra train python -m srpipe.tasks.ns.eval score --set val \

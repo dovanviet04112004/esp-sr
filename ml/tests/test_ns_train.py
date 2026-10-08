@@ -1,11 +1,13 @@
 """srpipe.tasks.ns.train: the loss's optimum, a batch that is a pure function of its step, a tiny run of every
-candidate on the CPU that keeps its last weights and that eval scores, and a resumed run that ends where an unbroken
-one ends."""
+candidate on the CPU that keeps its last weights and that eval scores, and runs stopped at an epoch's end, paused part
+way through one, or killed between saves, each of which resumed ends where an unbroken one ends."""
 
 from __future__ import annotations
 
 import copy
 import math
+import os
+import signal
 from pathlib import Path
 
 import numpy as np
@@ -186,3 +188,87 @@ def test_a_resumed_run_ends_where_an_unbroken_one_ends(
     for name in cfg["train"]["candidates"]:
         a, b = torch.load(unbroken / name / "model.pt"), torch.load(broken / name / "model.pt")
         assert all(torch.equal(a[k], b[k]) for k in a)
+
+
+def two_candidates(world: tuple[dict, dict, dict], every: int | None = None) -> tuple[dict, dict, dict, train.Plan]:
+    cfg, dev, paths = world
+    cfg = copy.deepcopy(cfg)
+    cfg["train"]["candidates"] = [model.RNNOISE, model.names(cfg)[1]]
+    if every is not None:
+        cfg["train"]["checkpoint_every"] = every
+    return cfg, dev, paths, train.plan(cfg, data.Mixer(cfg, dev, paths, "train", cfg["mix"]["seed"]))
+
+
+def same_weights(a: Path, b: Path, names: list[str]) -> bool:
+    return all(
+        all(torch.equal(x[k], y[k]) for k in x)
+        for x, y in ((torch.load(a / n / "model.pt"), torch.load(b / n / "model.pt")) for n in names)
+    )
+
+
+def test_a_pause_part_way_through_an_epoch_goes_on_where_an_unbroken_run_ends(
+    world: tuple[dict, dict, dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg, dev, paths, steps = two_candidates(world)
+    stop, names = steps.firsts[1] // 2, cfg["train"]["candidates"]
+    assert 0 < stop < steps.firsts[1] - 1
+    unbroken, paused = tmp_path / "unbroken", tmp_path / "paused"
+    unbroken.mkdir(), paused.mkdir()
+    train.train(cfg, dev, paths, unbroken, "cpu", resume=False)
+    losses, calls = train.loss_of, []
+
+    def ctrl_c_on_step(*args: object) -> object:
+        calls.append(1)
+        if len(calls) == stop * len(names):
+            os.kill(os.getpid(), signal.SIGINT)
+        return losses(*args)
+
+    monkeypatch.setattr(train, "loss_of", ctrl_c_on_step)
+    with pytest.raises(KeyboardInterrupt):
+        train.train(cfg, dev, paths, paused, "cpu", resume=False)
+    monkeypatch.undo()
+    state = torch.load(train.resume_state(paused), weights_only=False)
+    assert state["step"] == stop - 1 and state["history"] == []
+    train.train(cfg, dev, paths, paused, "cpu", resume=True)
+    assert same_weights(unbroken, paused, names)
+
+
+def test_a_run_killed_between_saves_goes_on_from_its_last_periodic_state(
+    world: tuple[dict, dict, dict], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg, dev, paths, steps = two_candidates(world, every=2)
+    names = cfg["train"]["candidates"]
+    assert steps.firsts[1] > 4
+    unbroken, killed = tmp_path / "unbroken", tmp_path / "killed"
+    unbroken.mkdir(), killed.mkdir()
+    train.train(cfg, dev, paths, unbroken, "cpu", resume=False)
+    losses, calls = train.loss_of, []
+
+    def killed_in_step_three(*args: object) -> object:
+        calls.append(1)
+        if len(calls) > 3 * len(names):
+            raise RuntimeError("killed")
+        return losses(*args)
+
+    monkeypatch.setattr(train, "loss_of", killed_in_step_three)
+    with pytest.raises(RuntimeError, match="killed"):
+        train.train(cfg, dev, paths, killed, "cpu", resume=False)
+    monkeypatch.undo()
+    assert torch.load(train.resume_state(killed), weights_only=False)["step"] == 1
+    assert not train.resume_state(killed).with_name("last.pt.part").exists()
+    train.train(cfg, dev, paths, killed, "cpu", resume=True)
+    assert same_weights(unbroken, killed, names)
+
+
+def test_resume_alone_takes_the_latest_paused_run(tmp_path: Path) -> None:
+    runs = tmp_path / "ns" / "runs"
+    for name, finished, saved_at in (("a", False, 100), ("b", True, 300), ("c", False, 200)):
+        state = train.resume_state(runs / name)
+        state.parent.mkdir(parents=True)
+        state.write_bytes(b"state")
+        os.utime(state, (saved_at, saved_at))
+        if finished:
+            (runs / name / "metrics.yaml").write_text("{}\n", encoding="utf-8")
+    assert train.paused_run({"artifacts": tmp_path}) == runs / "c"
+    with pytest.raises(FileNotFoundError, match="no paused ns run"):
+        train.paused_run({"artifacts": tmp_path / "elsewhere"})

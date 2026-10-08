@@ -1,9 +1,9 @@
 """Train RNNoise-16k and NSNet-16k S/M/L on identical batches (E9-T4, KEHOACH 3.9, ADR-0014) into a run directory.
 
-Step k's batch is a pure function of the config, the pools and k: train examples of the Mixer at the slot, as the power
-of the capture, of the talker alone and of the rest. Every candidate learns the same loss on the 257 gains the slot
-applies; each epoch scores val and checkpoints; the last weights are kept.
-Run: python -m srpipe.tasks.ns.train [--smoke] [--only NAME ...] [--resume RUN] [--set KEY=VALUE ...]"""
+Step k's batch is a pure function of the config, the pools and k. Every candidate learns the same loss on the 257
+gains the slot applies; each epoch scores val and keeps its weights. The state a resumed run goes on from is saved at
+each epoch's end and every train.checkpoint_every steps; Ctrl-C or SIGTERM saves it after the step under way and pauses.
+Run: python -m srpipe.tasks.ns.train [--smoke] [--only NAME ...] [--resume [RUN]] [--set KEY=VALUE ...]"""
 
 from __future__ import annotations
 
@@ -12,7 +12,9 @@ import bisect
 import copy
 import hashlib
 import math
+import os
 import resource
+import signal
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -28,7 +30,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from srpipe.core.config import apply_overrides, data_paths, load_device, load_yaml
 from srpipe.core.logger import get_logger
-from srpipe.core.run_dir import create_run_dir
+from srpipe.core.run_dir import create_run_dir, pause_asked
 from srpipe.core.seed import seed_everything
 from srpipe.generated import grid
 from srpipe.tasks import ns
@@ -36,6 +38,8 @@ from srpipe.tasks.ns import data, model
 
 PARTS = ("power", "speech", "noise")
 KIB = 1024
+PID_FILE = "train.pid"  # the running trainer's process, which make ns-pause signals
+LATEST = "latest"  # what a bare --resume stands for: the latest paused run
 
 
 def smoke_config(cfg: dict) -> dict:
@@ -139,8 +143,10 @@ class HeldBatches(Dataset):
         return batch_of(examples, hi - lo, self.gains)
 
 
-def single_thread(_: int) -> None:
+def worker_start(_: int) -> None:
+    """A loader worker: one thread, and deaf to Ctrl-C, which only the parent turns into a pause."""
     torch.set_num_threads(1)
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 def loader(dataset: Dataset, spec: dict, workers: int, pin: bool, steps: range, persistent: bool) -> DataLoader:
@@ -153,7 +159,7 @@ def loader(dataset: Dataset, spec: dict, workers: int, pin: bool, steps: range, 
         prefetch_factor=spec["prefetch"] if workers else None,
         persistent_workers=persistent and workers > 0,
         pin_memory=pin,
-        worker_init_fn=single_thread,
+        worker_init_fn=worker_start,
     )
 
 
@@ -261,30 +267,52 @@ def candidates(cfg: dict, names: list[str], device: str, steps: int) -> dict[str
     return out
 
 
-def checkpoint(run: Path, name: str, epoch: int | None = None) -> Path:
-    """An epoch's weights, or with no epoch the last state a resumed run continues from."""
-    return run / "checkpoints" / name / ("last.pt" if epoch is None else f"epoch_{epoch:02d}.pt")
+def checkpoint(run: Path, name: str, epoch: int) -> Path:
+    """A candidate's weights at the end of an epoch."""
+    return run / "checkpoints" / name / f"epoch_{epoch:02d}.pt"
 
 
-def save(run: Path, name: str, c: Candidate, epoch: int, step: int) -> None:
-    checkpoint(run, name).parent.mkdir(parents=True, exist_ok=True)
-    torch.save(c.net.state_dict(), checkpoint(run, name, epoch))
-    state = {"model": c.net.state_dict(), "optimiser": c.optimiser.state_dict(), "schedule": c.schedule.state_dict()}
-    torch.save(state | {"epoch": epoch, "step": step}, checkpoint(run, name))
+def resume_state(run: Path) -> Path:
+    """The state a resumed run goes on from, every candidate at one step."""
+    return run / "checkpoints" / "last.pt"
 
 
-def restore(run: Path, found: dict[str, Candidate], device: str) -> int:
-    """Each candidate's last state; the step the run goes on from, the same for all."""
-    steps = set()
+def save_state(run: Path, found: dict[str, Candidate], step: int, history: list) -> None:
+    """Every candidate's weights, optimiser and schedule after step, the RNG and the history; written beside, then
+    put in place, so a stop part way leaves the last state whole."""
+    path = resume_state(run)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    parts = {name: {"model": c.net.state_dict(), "optimiser": c.optimiser.state_dict()} for name, c in found.items()}
     for name, c in found.items():
-        state = torch.load(checkpoint(run, name), map_location=device)
-        c.net.load_state_dict(state["model"])
-        c.optimiser.load_state_dict(state["optimiser"])
-        c.schedule.load_state_dict(state["schedule"])
-        steps.add(state["step"])
-    if len(steps) != 1:
-        raise ValueError(f"{run}: the candidates stopped at different steps {sorted(steps)}")
-    return steps.pop() + 1
+        parts[name]["schedule"] = c.schedule.state_dict()
+    cuda = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else []
+    state = {"step": step, "history": history, "candidates": parts, "rng": torch.get_rng_state(), "cuda_rng": cuda}
+    written = path.with_name(path.name + ".part")
+    torch.save(state, written)
+    os.replace(written, path)
+
+
+def restore(run: Path, found: dict[str, Candidate], device: str) -> tuple[int, list]:
+    """Every candidate's state as save_state left it; the step the run goes on from and the history so far."""
+    state = torch.load(resume_state(run), map_location=device, weights_only=False)
+    for name, c in found.items():
+        part = state["candidates"][name]
+        c.net.load_state_dict(part["model"])
+        c.optimiser.load_state_dict(part["optimiser"])
+        c.schedule.load_state_dict(part["schedule"])
+    torch.set_rng_state(state["rng"].cpu())
+    if state["cuda_rng"] and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all([r.cpu() for r in state["cuda_rng"]])
+    return state["step"] + 1, state["history"]
+
+
+def paused_run(paths: dict) -> Path:
+    """The latest run that saved a state and has not finished: the one make ns-resume goes on with."""
+    runs = [r for r in (paths["artifacts"] / "ns" / "runs").glob("*") if resume_state(r).exists()]
+    paused = [r for r in runs if not (r / "metrics.yaml").exists()]
+    if not paused:
+        raise FileNotFoundError("no paused ns run: make ns-train starts one")
+    return max(paused, key=lambda r: resume_state(r).stat().st_mtime)
 
 
 def pools_lock(cfg: dict, paths: dict) -> str:
@@ -294,77 +322,95 @@ def pools_lock(cfg: dict, paths: dict) -> str:
     return "".join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p}\n" for p in manifests)
 
 
+def paused_at(run: Path, found: dict[str, Candidate], step: int, history: list, log, total: int) -> None:
+    """Save the state after step and stop the run with KeyboardInterrupt, which make ns-resume undoes."""
+    save_state(run, found, step, history)
+    log.info(f"paused after step {step + 1}/{total}; make ns-resume goes on")
+    raise KeyboardInterrupt
+
+
 def train(cfg: dict, dev: dict, paths: dict, run: Path, device: str, resume: bool) -> dict[str, dict]:
-    """Train the run's candidates to the end of the plan; the last epoch's val figures per candidate."""
+    """Train the run's candidates to the end of the plan; the last epoch's val figures per candidate. Ctrl-C or
+    SIGTERM saves the state after the step under way and raises KeyboardInterrupt; resumed, the run ends as an
+    unbroken one would."""
     spec, log = cfg["train"], get_logger("ns.train", run)
     mixer = data.Mixer(cfg, dev, paths, "train", cfg["mix"]["seed"])
     steps = plan(cfg, mixer)
     found = candidates(cfg, spec["candidates"], device, steps.steps)
     nets = {name: c.net for name, c in found.items()}
     pin = device == "cuda"
-    history = yaml.safe_load((run / "history.yaml").read_text(encoding="utf-8")) if resume else []
-    first = restore(run, found, device) if resume else 0
+    first, history = restore(run, found, device) if resume else (0, [])
     log.info(f"{list(found)} on {device}: {steps.steps} steps of {steps.batch}, epochs from step {steps.firsts}")
-    if not resume:
-        norm = range(min(spec["norm_batches"], steps.steps))
-        batches = loader(TrainBatches(cfg, dev, paths, steps), spec, spec["workers"], pin, norm, persistent=False)
-        for name, (mean, std) in feature_stats(nets, batches, device).items():
-            nets[name].mean.copy_(mean)
-            nets[name].std.copy_(std)
-            (run / name).mkdir(exist_ok=True)
-            np.savez(run / name / "norm.npz", mean=mean.cpu().numpy(), std=std.cpu().numpy())
-        log.info(f"feature statistics over the first {len(norm)} batches")
-    held = HeldBatches(data.set_dir(paths, cfg, "val"), mixer.mics.gains, spec["batch"], spec.get("val_examples"))
-    batches = loader(
-        TrainBatches(cfg, dev, paths, steps), spec, spec["workers"], pin, range(first, steps.steps), persistent=True
-    )
-    running, waited, begun, count = dict.fromkeys(found, 0.0), 0.0, time.monotonic(), 0
-    clock = begun
-    for step, batch in zip(range(first, steps.steps), batches, strict=True):
-        waited += time.monotonic() - clock
-        b = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
-        for name, c in found.items():
-            loss = loss_of(*c.net(b["power"]), b, cfg)
-            if not torch.isfinite(loss):
-                raise FloatingPointError(f"{name}: loss {loss.item()} at step {step}")
-            c.optimiser.zero_grad(set_to_none=True)
-            loss.backward()
-            nn.utils.clip_grad_norm_(c.net.parameters(), spec["grad_clip_norm"])
-            c.optimiser.step()
-            c.schedule.step()
-            running[name] += loss.item()
-        count += 1
-        clock = time.monotonic()
-        if (step + 1) % spec["log_every"] == 0 or step + 1 == steps.steps:
-            elapsed = clock - begun
-            losses = " ".join(f"{name} {total / count:.5f}" for name, total in running.items())
-            lr = next(iter(found.values())).schedule.get_last_lr()[0]
-            log.info(
-                f"step {step + 1}/{steps.steps} {losses} lr {lr:.2e} {count / elapsed:.2f} steps/s "
-                f"{count * steps.batch / elapsed:.1f} examples/s data wait {waited / elapsed:.0%}"
-            )
-            running, waited, begun, count = dict.fromkeys(found, 0.0), 0.0, clock, 0
-        if steps.ends_epoch(step):
-            epoch = steps.where(step)[0]
-            val = loader(held, spec, spec["val_workers"], pin, range(len(held)), persistent=False)
-            for net in nets.values():
-                net.eval()
-            row = {"epoch": epoch, "step": step + 1, "val": score(nets, val, cfg, device)}
-            for net in nets.values():
-                net.train()
-            history.append(row)
-            (run / "history.yaml").write_text(yaml.safe_dump(history, sort_keys=False), encoding="utf-8")
+    log.info(f"{run}: from step {first}; Ctrl-C or make ns-pause pauses, make ns-resume goes on")
+    with pause_asked() as paused:
+        if not resume:
+            norm = range(min(spec["norm_batches"], steps.steps))
+            batches = loader(TrainBatches(cfg, dev, paths, steps), spec, spec["workers"], pin, norm, persistent=False)
+            for name, (mean, std) in feature_stats(nets, batches, device).items():
+                nets[name].mean.copy_(mean)
+                nets[name].std.copy_(std)
+                (run / name).mkdir(exist_ok=True)
+                np.savez(run / name / "norm.npz", mean=mean.cpu().numpy(), std=std.cpu().numpy())
+            log.info(f"feature statistics over the first {len(norm)} batches")
+            if paused():
+                paused_at(run, found, first - 1, history, log, steps.steps)
+        held = HeldBatches(data.set_dir(paths, cfg, "val"), mixer.mics.gains, spec["batch"], spec.get("val_examples"))
+        batches = loader(
+            TrainBatches(cfg, dev, paths, steps), spec, spec["workers"], pin, range(first, steps.steps), persistent=True
+        )
+        running, waited, begun, count = dict.fromkeys(found, 0.0), 0.0, time.monotonic(), 0
+        clock = begun
+        for step, batch in zip(range(first, steps.steps), batches, strict=True):
+            waited += time.monotonic() - clock
+            b = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
             for name, c in found.items():
-                save(run, name, c, epoch, step)
-                figures = " ".join(f"{k} {v:.3f}" for k, v in row["val"][name].items())
-                log.info(f"epoch {epoch} val {name}: {figures}")
-                loss = row["val"][name]["loss"]
-                if loss > spec["divergence_ratio"] * history[0]["val"][name]["loss"]:
-                    raise FloatingPointError(f"{name}: val loss {loss:.4g} diverged at epoch {epoch}")
-            # The val pass is timed apart: the next log line's rates and data wait cover training steps only.
-            now = time.monotonic()
-            begun, clock = begun + now - clock, now
-    del batches
+                loss = loss_of(*c.net(b["power"]), b, cfg)
+                if not torch.isfinite(loss):
+                    raise FloatingPointError(f"{name}: loss {loss.item()} at step {step}")
+                c.optimiser.zero_grad(set_to_none=True)
+                loss.backward()
+                nn.utils.clip_grad_norm_(c.net.parameters(), spec["grad_clip_norm"])
+                c.optimiser.step()
+                c.schedule.step()
+                running[name] += loss.item()
+            count += 1
+            clock = time.monotonic()
+            if (step + 1) % spec["log_every"] == 0 or step + 1 == steps.steps:
+                elapsed = clock - begun
+                losses = " ".join(f"{name} {total / count:.5f}" for name, total in running.items())
+                lr = next(iter(found.values())).schedule.get_last_lr()[0]
+                log.info(
+                    f"step {step + 1}/{steps.steps} {losses} lr {lr:.2e} {count / elapsed:.2f} steps/s "
+                    f"{count * steps.batch / elapsed:.1f} examples/s data wait {waited / elapsed:.0%}"
+                )
+                running, waited, begun, count = dict.fromkeys(found, 0.0), 0.0, clock, 0
+            if steps.ends_epoch(step):
+                epoch = steps.where(step)[0]
+                val = loader(held, spec, spec["val_workers"], pin, range(len(held)), persistent=False)
+                for net in nets.values():
+                    net.eval()
+                row = {"epoch": epoch, "step": step + 1, "val": score(nets, val, cfg, device)}
+                for net in nets.values():
+                    net.train()
+                history.append(row)
+                (run / "history.yaml").write_text(yaml.safe_dump(history, sort_keys=False), encoding="utf-8")
+                for name, c in found.items():
+                    checkpoint(run, name, epoch).parent.mkdir(parents=True, exist_ok=True)
+                    torch.save(c.net.state_dict(), checkpoint(run, name, epoch))
+                    figures = " ".join(f"{k} {v:.3f}" for k, v in row["val"][name].items())
+                    log.info(f"epoch {epoch} val {name}: {figures}")
+                    loss = row["val"][name]["loss"]
+                    if loss > spec["divergence_ratio"] * history[0]["val"][name]["loss"]:
+                        raise FloatingPointError(f"{name}: val loss {loss:.4g} diverged at epoch {epoch}")
+                save_state(run, found, step, history)
+                # The val pass is timed apart: the next log line's rates and data wait cover training steps only.
+                now = time.monotonic()
+                begun, clock = begun + now - clock, now
+            elif (step + 1) % spec["checkpoint_every"] == 0:
+                save_state(run, found, step, history)
+            if paused():
+                paused_at(run, found, step, history, log, steps.steps)
+        del batches
     peak_mb = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / KIB
     gpu_mb = torch.cuda.max_memory_allocated() / KIB / KIB if device == "cuda" else 0.0
     log.info(f"peak RSS of a loader worker {peak_mb:.0f} MB, of the GPU {gpu_mb:.0f} MB")
@@ -378,14 +424,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--smoke", action="store_true", help="train.smoke: a few small steps, to time the loader")
     parser.add_argument("--only", nargs="+", metavar="NAME", help="train these candidates only, on the same batches")
-    parser.add_argument("--resume", type=Path, metavar="RUN", help="go on from a run's last checkpoints")
+    parser.add_argument(
+        "--resume",
+        nargs="?",
+        const=LATEST,
+        metavar="RUN",
+        help="go on from a run's last state; alone, the latest paused",
+    )
     parser.add_argument(
         "--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE", help="a dotted override of ns.yaml"
     )
     args = parser.parse_args(argv)
     paths = data_paths()
     if args.resume:
-        run, cfg = args.resume, load_yaml(args.resume / "config.resolved.yaml")
+        run = paused_run(paths) if args.resume == LATEST else Path(args.resume)
+        cfg = load_yaml(run / "config.resolved.yaml")
     else:
         cfg = apply_overrides(load_yaml(ns.CONFIG), args.overrides)
         cfg = smoke_config(cfg) if args.smoke else cfg
@@ -397,7 +450,14 @@ def main(argv: list[str] | None = None) -> int:
     seed_everything(cfg["train"]["seed"])
     torch.backends.cudnn.deterministic, torch.backends.cudnn.benchmark = True, False
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    val = train(cfg, load_device(cfg["device"]), paths, run, device, bool(args.resume))
+    pid = run / PID_FILE
+    pid.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    try:
+        val = train(cfg, load_device(cfg["device"]), paths, run, device, bool(args.resume))
+    except KeyboardInterrupt:
+        return 128 + signal.SIGINT
+    finally:
+        pid.unlink(missing_ok=True)
     (run / "metrics.yaml").write_text(yaml.safe_dump({"val": val}, sort_keys=False), encoding="utf-8")
     print(f"{run}\n" + yaml.safe_dump(val, sort_keys=False))
     return 0
