@@ -60,8 +60,8 @@ esp_err_t svc_listen_set_commands(const svc_listen_commands_t *commands, uint16_
 uint32_t svc_listen_commands_version(void);
 
 /** Take one clean hop into the ring with its log-mel and pitch; vad opens, extends or closes a window.
- *  A jump in seq, or gap (the chain reset ahead of this hop), starts afresh: STFT and pitch reset, the open
- *  window drops, no window reaches across.
+ *  A jump in seq, or gap (the chain broke ahead of this hop), starts afresh: STFT and pitch reset, no window
+ *  reaches across, and the open window, its audio holed, is decided REJECT FRAME_GAP unscored (KEHOACH 5.4).
  *  @ctx nhan_task | non-blocking, about 2 ms of pitch | pcm holds GEN_GRID_HOP_SAMPLES samples, copied
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE no init | ESP_ERR_NO_MEM a full queue: the utterance gets no window
  */

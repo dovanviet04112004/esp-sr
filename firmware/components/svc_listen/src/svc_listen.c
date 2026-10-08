@@ -33,6 +33,7 @@ typedef struct {
     uint32_t floor;       // no window reaches back past this hop
     bool open;            // its utterance still runs
     bool cut_back;        // outgrew WINDOW_HOPS: worked from its end once closed
+    bool holed;           // seq broke while open: decided FRAME_GAP, never scored
     int64_t closed_us;
 } window_t;
 
@@ -249,6 +250,18 @@ static void drop_open(void)
     s.has_open = false;
 }
 
+// A holed window keeps its place in the queue, so its FRAME_GAP leaves in order among the decisions.
+static void hole_open(void)
+{
+    window_t *w = open_window();
+    if (w == NULL) { return; }
+    stop_working(w);
+    w->open = false;
+    w->holed = true;
+    w->closed_us = esp_timer_get_time();
+    s.has_open = false;
+}
+
 static esp_err_t open_utterance(uint32_t seq)
 {
     s.run_first = seq;
@@ -297,7 +310,7 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
     if (!s.started || seq != s.next_seq || gap) {
         dsp_spec_stft_reset(s.stft);
         dsp_spec_pitch_reset(s.pitch);
-        drop_open();
+        hole_open();
         s.in_run = false;
         s.after = seq;
     }
@@ -377,10 +390,26 @@ static void decide(const window_t *w, const ai_engine_command_result_t *r, svc_l
     out->close_us = (uint32_t)(esp_timer_get_time() - w->closed_us);
 }
 
+static void decide_holed(const window_t *w, svc_listen_decision_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->event.kind = APP_EVT_REJECT;
+    out->event.seq = w->last;
+    out->event.doa_deg = -1;
+    strlcpy(out->event.code, APP_CODE_FRAME_GAP, sizeof(out->event.code));
+    out->first_seq = w->first;
+    out->close_us = (uint32_t)(esp_timer_get_time() - w->closed_us);
+}
+
 bool svc_listen_work(svc_listen_decision_t *out)
 {
     if (!svc_listen_pending() || out == NULL) { return false; }
     const window_t *w = &s.queue[s.head];
+    if (w->holed) {
+        decide_holed(w, out);
+        done();
+        return true;
+    }
     const int64_t from_us = esp_timer_get_time();
     if (s.next_seq - (s.working ? s.at : w->first) > RING_HOPS) {
         drop(w, "the ring moved past it");

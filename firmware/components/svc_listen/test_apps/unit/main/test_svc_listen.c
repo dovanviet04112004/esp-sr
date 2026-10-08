@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "ai_engine.h"
+#include "app_err.h"
 #include "app_events.h"
 #include "esp_partition.h"
 #include "esp_timer.h"
@@ -236,7 +237,7 @@ TEST_CASE("svc_listen takes a new set after a click it began working and dropped
     esp_partition_munmap(handle);
 }
 
-TEST_CASE("svc_listen drops the open window when the chain resets, as when seq jumps", "[svc_listen]")
+TEST_CASE("svc_listen decides the open window FRAME_GAP when the chain breaks", "[svc_listen]")
 {
     listen_head_t head;
     named_t named;
@@ -249,7 +250,17 @@ TEST_CASE("svc_listen drops the open window when the chain resets, as when seq j
     }
     TEST_ASSERT_TRUE(svc_listen_busy());
     TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, RESET_SEQ + hop, false, true));
-    TEST_ASSERT_FALSE_MESSAGE(svc_listen_busy(), "a window reached across the chain's reset");
+    svc_listen_decision_t d;
+    bool decided = false;
+    while (!decided && svc_listen_pending()) {
+        decided = svc_listen_work(&d);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(decided, "the holed window gave no decision");
+    TEST_ASSERT_EQUAL(APP_EVT_REJECT, d.event.kind);
+    TEST_ASSERT_EQUAL_STRING(APP_CODE_FRAME_GAP, d.event.code);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(RESET_SEQ + hop - 1, d.event.seq,
+                                     "the decision ends on the window's last hop");
+    TEST_ASSERT_FALSE_MESSAGE(svc_listen_busy(), "a window reached across the chain's break");
     esp_partition_munmap(handle);
 }
 

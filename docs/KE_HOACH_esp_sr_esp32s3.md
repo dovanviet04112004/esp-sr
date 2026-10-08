@@ -2526,7 +2526,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 |---|---|---|---|---|---|---|
 | `q_frame` | Queue depth 8, chỉ số ô `uint8_t` + pool 8 khung `int16` ở **RAM nội** | 8 × 1,5 KB | `thu_task` | `sach_task` | không bao giờ đầy: chỉ ô lấy được từ `q_free` mới được gửi | không chép dữ liệu hai lần; pool cấp lúc boot |
 | `q_free` | Queue depth 8, chỉ số ô `uint8_t`, nạp sẵn cả 8 ô lúc boot | 8 B | `sach_task` trả ô đã xử lý xong | `thu_task` lấy ô trước khi đọc DMA | `thu_task` **không chờ**: hết ô thì bỏ khung, tăng `frames_dropped` — con số của Cửa 5 | một ô chỉ có một chủ tại một lúc; thiếu hàng này thì `thu_task` ghi đè ô `sach_task` đang đọc ngay khi `q_frame` vừa có chỗ |
-| `q_clean` | Queue depth **64** (~1 s), `dsp_afe_frame_t` ~530 B, bộ nhớ ở **PSRAM** | ~34 KB | `sach_task` | `nhan_task` | `sach_task` không chờ: bỏ khung, tăng `clean_dropped`; `nhan_task` thấy hở `seq` thì đặt lại trạng thái `wake` | đây là chỗ "nạp và lấy không cùng nhịp" của TỔNG QUAN §4.3; điểm cao nhất xuất ra `heartbeat` |
+| `q_clean` | Queue depth **64** (~1 s), `dsp_afe_frame_t` ~530 B, bộ nhớ ở **PSRAM** | ~34 KB | `sach_task` | `nhan_task` | `sach_task` không chờ: bỏ khung, tăng `clean_dropped`; `nhan_task` thấy hở `seq` thì đặt lại STFT và bộ dò cao độ của `svc_listen` (cả trạng thái `wake` khi có), câu đang mở thành `REJECT FRAME_GAP` (§5.4) | đây là chỗ "nạp và lấy không cùng nhịp" của TỔNG QUAN §4.3; điểm cao nhất xuất ra `heartbeat` |
 | `s_afe_stats` | `portMUX_TYPE` + một struct (mức, hướng, cờ, gain, bộ đếm) | ~64 B | `sach_task` | `gui_task` | — ghi đè | số liệu là **mức**, không phải chuỗi sự kiện: `gui_task` chỉ cần giá trị mới nhất mỗi 100 ms. Chép dưới spinlock, vài chục byte, không gọi gì bên trong |
 | `sb_stream` | StreamBuffer ở PSRAM, **chỉ tồn tại khi** `NET_STREAM_ENABLE`; cỡ `SVC_REPORT_STREAM_BUFFER_KB` | 512 KB: ~5 s ở `mode` 5, ~8 s ở `mode` 2 | `sach_task` | `luong_task` | ghi với timeout 0; không đủ chỗ cho **cả khung** thì bỏ cả khung, đếm; không bao giờ ghi nửa khung | một người ghi, một người đọc — đúng hợp đồng của stream buffer. Đường tới máy nhận khựng 0,4–0,8 s vài lần mỗi 10 phút trên board B (`latency.md` §4), quá 64 KB |
 | `q_dialog` | Queue depth 8, `app_event_t`, bộ nhớ ở PSRAM | 8 × 80 B | `nhan_task` | `dieu_task` | chờ 20 ms rồi bỏ, log **một lần** ở cạnh đầy | `nhan_task` không được đứng chờ lâu: sau lưng nó là 1 s đệm đang đầy dần |
@@ -2598,9 +2598,13 @@ giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec`
   chỉ đặt lại khi luồng đứt; mạng bắt đầu từ bộ đệm rỗng ở đầu cửa sổ như lúc học;
 - mỗi quyết định là một sự kiện vào `q_event_up`: `COMMAND` kèm điểm và khoảng cách nhất–nhì, hay `REJECT` kèm mã:
   `LOW_SCORE` khi lệnh tốt nhất kém vòng tự do quá `δ₁`, `LOW_MARGIN` khi hơn lệnh nhì chưa đủ `δ₂`, `PART` khi một phần
-  của lệnh được điểm bằng hay hơn cả lệnh; kèm một dòng log có bước đầu, bước cuối của cửa sổ và thời gian từ bước chốt
-  tới quyết định, để máy tính dựng lại đúng cửa sổ ấy từ luồng tiếng (`mode` 5 mang mẫu sạch) và so quyết định của board
-  với Python.
+  của lệnh được điểm bằng hay hơn cả lệnh, `FRAME_GAP` khi câu gặp chỗ hở (điểm và khoảng cách là 0); kèm một dòng log
+  có bước đầu, bước cuối của cửa sổ và thời gian từ bước chốt tới quyết định, để máy tính dựng lại đúng cửa sổ ấy từ
+  luồng tiếng (`mode` 5 mang mẫu sạch) và so quyết định của board với Python.
+- luồng đứt (`seq` hở hay khung mang `DSP_AFE_FLAG_GAP`) giữa một câu đang mở thì cửa sổ của câu ấy không được chấm:
+  phần tiếng đã mất không lấy lại được, và chấm một câu thủng là có thể nhận nhầm. Cửa sổ ấy vẫn ra một quyết định đúng
+  lượt của nó, `REJECT` mã `FRAME_GAP`, bước cuối là bước cuối của cửa sổ lúc hở, để `host` biết câu mất vì đâu thay vì
+  không thấy gì. Lúc hở chưa biết câu đang mở là câu thật hay một tiếng click, nên click trùng chỗ hở cũng ra `FRAME_GAP`;
 
 **Ảnh model không có `wake`** (trước khi `wake` qua Cửa 2, hay khi chỉ demo `command`): không có gì đưa máy vào `LENH`,
 nên `nhan_task` mở cửa sổ cho mọi câu `vad` tìm ra, mốc chặn là bước sau cửa sổ trước.
