@@ -1,6 +1,7 @@
 """The ctc decision: the forward pass equals the sum over every alignment, also when alignments drift apart past the
-range of float32, the best command wins, a window the free loop explains better, two commands too close or a part of
-the winner said alone are rejected, and every score is divided by the frames the decision is told, not the window's."""
+range of float32, the best command wins, a window the free loop explains better, two commands too close, a winner of two
+syllables or more whose worst falls too far below the free loop on its Viterbi path, or a part of the winner said alone
+are rejected, and every score is divided by the frames the decision is told, not the window's."""
 
 from __future__ import annotations
 
@@ -95,7 +96,29 @@ def test_the_said_command_wins_and_the_rest_are_rejected_by_their_rules() -> Non
     tie = decide_own(window([0, 1], 6), close, reject=1000, margin=1)
     assert tie[0] == ctc_score.REJECTED and tie[2] == 0
     short = decide_own(window([0], 6, 1), [[np.array([0, 1, 2, 3], np.uint8)]], reject=1000, margin=0)
-    assert short.tolist() == [ctc_score.REJECTED, 0, ctc_score.CAP, ctc_score.CAP]
+    assert short.tolist() == [ctc_score.REJECTED, 0, ctc_score.CAP, ctc_score.CAP, ctc_score.CAP]
+
+
+def test_the_worst_syllable_is_its_viterbi_shortfall_with_a_blank_counted_to_the_unit_after_it() -> None:
+    tone = sorted(ctc_score.TONE_UNITS)
+    units = np.array([0, tone[0], 1, tone[1]], np.uint8)
+    said = window([5, tone[0], 7, 1, tone[1]], ctc_score.n_classes())
+    miss, frames = float(np.log(50.0)), said.shape[1]
+    assert np.isclose(ctc_score.syllable_gap(said, units, frames), 3 * miss / frames, atol=1e-5)
+    assert np.isclose(ctc_score.syllable_gap(said, units, frames, blanks_ahead=False), 6 * miss / frames, atol=1e-5)
+
+
+def test_a_winner_of_two_syllables_is_turned_down_past_the_cap_and_one_of_one_syllable_never() -> None:
+    tone = sorted(ctc_score.TONE_UNITS)
+    two = np.array([0, tone[0], 1, tone[1]], np.uint8)
+    said = window([0, tone[0], 2, tone[1]], ctc_score.n_classes())
+    field = int(decide_own(said, [[two]], ctc_score.CAP, 0)[4])
+    assert field == ctc_score.milli(ctc_score.syllable_gap(said, two, said.shape[1])) and field > 0
+    assert decide_own(said, [[two]], ctc_score.CAP, 0, syllable=field)[0] == 0
+    assert decide_own(said, [[two]], ctc_score.CAP, 0, syllable=field - 1)[0] == ctc_score.REJECTED
+    one = np.array([0, 2, tone[0]], np.uint8)
+    alone = decide_own(window([0, 3, tone[0]], ctc_score.n_classes()), [[one]], ctc_score.CAP, 0, syllable=0)
+    assert alone[0] == 0 and alone[4] == 0
 
 
 def test_silence_around_a_command_leaves_its_gaps_alone_when_scores_divide_by_the_longest_window() -> None:
@@ -152,15 +175,19 @@ def test_a_command_reads_once_per_distinct_dialect_form() -> None:
 
 def test_the_golden_set_holds_its_edges_and_its_negative_control_differs(tmp_path: Path) -> None:
     written = ctc_score.emit(tmp_path)
-    names = ["case_000", "case_001", "case_002", "case_003"] + [f"case_neg_00{k}" for k in range(4)]
+    names = ["case_000", "case_001", "case_002", "case_003"] + [f"case_neg_00{k}" for k in range(5)]
     names = [f"{name}.gold" for name in names]
     assert [p.name for p in written] == names
     cases = {p.stem: read_gold(p) for p in written}
     edge = cases["case_002"]["decision"]
     assert edge[0, 0] == 0 and edge[2, 0] == ctc_score.REJECTED and edge[2, 2] == 0
-    assert edge[3].tolist() == [ctc_score.REJECTED, 0, ctc_score.CAP, ctc_score.CAP]
-    assert edge[4, 0] == 0 and edge[4, 3] == cases["case_002"]["thresholds"][4, 0]
-    assert edge[5, 0] == 0 and edge[5, 2] == cases["case_002"]["thresholds"][5, 1]
+    assert edge[3].tolist() == [ctc_score.REJECTED, 0, ctc_score.CAP, ctc_score.CAP, ctc_score.CAP]
+    limits = cases["case_002"]["thresholds"]
+    assert edge[4, 0] == 0 and edge[4, 3] == limits[4, 0]
+    assert edge[5, 0] == 0 and edge[5, 2] == limits[5, 1]
+    assert edge[6, 0] == 3 and edge[6, 4] == limits[6, 2] > 0
+    assert edge[7, 0] == ctc_score.REJECTED and edge[7, 4] == limits[7, 2] + 1
+    assert edge[8, 0] == 0 and edge[8, 4] == 0 == limits[8, 2]
     assert (cases["case_000"]["decision"][:, 0] != ctc_score.REJECTED).any()
     assert not np.array_equal(cases["case_000"]["scores"], cases["case_neg_000"]["scores"])
     assert np.array_equal(cases["case_000"]["log_probs"], cases["case_neg_000"]["log_probs"])
@@ -173,6 +200,8 @@ def test_the_golden_set_holds_its_edges_and_its_negative_control_differs(tmp_pat
     assert (own["per_frames"] == ctc_score.FRAMES).all() and (cases["case_000"]["per_frames"] == ctc_score.FRAMES).all()
     shorter = cases["case_000"]["frames"] < ctc_score.FRAMES
     assert shorter.any() and not np.array_equal(cases["case_000"]["scores"][shorter], own["scores"][shorter])
+    behind = cases["case_neg_004"]["decision"]
+    assert not np.array_equal(cases["case_000"]["decision"][:, 4], behind[:, 4])
 
 
 def test_frame_log_probs_are_a_softmax_of_the_int8_logits_and_the_largest_comes_off_first() -> None:

@@ -188,9 +188,9 @@ def greedy(log_probs: LogProbs, frames: int, size: int, pad: int) -> tuple[tuple
 
 
 def finish(s: Search, tree: Tree, reject: int, margin: int, per_frames: int, own_parts: bool = True):
-    """The decision of the search's frames, int32 in the order of ctc_score.DECISION, and each command's best variant
-    score over per_frames, T_W on the device (-inf with no frame). The winner is the first of the best; own_parts off
-    ignores its parts."""
+    """The decision of the search's frames, int32 in the order of ctc_score.DECISION, its syllable field 0 as no
+    syllable is aligned here, and each command's best variant score over per_frames, T_W on the device (-inf with no
+    frame). The winner is the first of the best; own_parts off ignores its parts."""
     n_commands = len(tree.variants)
     scores = np.full(n_commands, -np.inf, dtype=np.float32)
     part = np.full(n_commands, -np.inf, dtype=np.float32)
@@ -202,7 +202,7 @@ def finish(s: Search, tree: Tree, reject: int, margin: int, per_frames: int, own
                 part[c] = max(part[c], np.float32(s.alpha[n] / np.float32(per_frames)))
     best = int(np.argmax(scores))
     if not scores[best] > -np.inf:
-        return np.array([REJECTED, 0, CAP, CAP], dtype=np.int32), scores
+        return np.array([REJECTED, 0, CAP, CAP, 0], dtype=np.int32), scores
     second = max((v for k, v in enumerate(scores) if k != best), default=np.float32(-np.inf))
     free = np.float32(s.total / np.float32(per_frames))
     gap = milli(np.float32(free - scores[best]))
@@ -210,7 +210,7 @@ def finish(s: Search, tree: Tree, reject: int, margin: int, per_frames: int, own
     whole = not own_parts or bool(part[best] < scores[best])
     accepted = gap <= reject and lead >= margin and whole
     score = milli(ctc_score.exp32(scores[best]))
-    return np.array([best if accepted else REJECTED, score, lead, gap], dtype=np.int32), scores
+    return np.array([best if accepted else REJECTED, score, lead, gap, 0], dtype=np.int32), scores
 
 
 def decide(

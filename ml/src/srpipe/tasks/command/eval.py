@@ -65,17 +65,24 @@ class Scored:
 
 class Heard(NamedTuple):
     """One utterance of the ctc track: the command scoring best, unless no command fits the window, with the figures
-    of KEHOACH 3.12 in permille: its score, its lead over the second and the free loop's gap over it; whole is false
-    when a part of the command scores no lower than it, which rejects it at any threshold."""
+    of KEHOACH 3.12 in permille: its score, its lead over the second, the free loop's gap over it and over its worst
+    syllable; whole is false when a part of the command scores no lower than it, which rejects it at any threshold."""
 
     command: str
     score: int
     lead: int
     gap: int
     whole: bool = True
+    syllable: int = 0
 
-    def accepted(self, reject: int, margin: int) -> bool:
-        return self.command != REJECT and self.whole and self.gap <= reject and self.lead >= margin
+    def accepted(self, reject: int, margin: int, syllable: int = ctc_score.CAP) -> bool:
+        return (
+            self.command != REJECT
+            and self.whole
+            and self.gap <= reject
+            and self.lead >= margin
+            and self.syllable <= syllable
+        )
 
 
 @dataclass(frozen=True)
@@ -238,11 +245,11 @@ def normalised_window(net: Ctc, x: np.ndarray) -> tuple[torch.Tensor, int]:
 def heard_of(net: Ctc, decision: np.ndarray, scores: np.ndarray) -> Heard:
     """A decision taken with no threshold as Heard: the best command, unless none fits, and whether a part of it
     turned it down, the only rejection left at such thresholds."""
-    k, score, lead, gap = (int(v) for v in decision)
+    k, score, lead, gap, syllable = (int(v) for v in decision)
     best = int(np.argmax(scores))
     if scores[best] == -np.inf:
-        return Heard(REJECT, score, lead, gap)
-    return Heard(net.names[best], score, lead, gap, whole=k != ctc_score.REJECTED)
+        return Heard(REJECT, score, lead, gap, syllable=syllable)
+    return Heard(net.names[best], score, lead, gap, whole=k != ctc_score.REJECTED, syllable=syllable)
 
 
 def ctc_heard(net: Ctc, x: np.ndarray) -> Heard:

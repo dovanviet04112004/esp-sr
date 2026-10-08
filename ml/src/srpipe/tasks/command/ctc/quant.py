@@ -187,18 +187,21 @@ def chip_heard(net: gate.Ctc, x: np.ndarray) -> gate.Heard:
 
 
 def gate_row(
-    net: gate.Ctc, windows: list[gate.Scored], reject: int, margin: int, heard_by: Callable = gate.ctc_heard
+    net: gate.Ctc,
+    windows: list[gate.Scored],
+    thresholds: tuple[int, int, int],
+    heard_by: Callable = gate.ctc_heard,
 ) -> dict:
     """Gate 3 of net on the board windows, each decided by heard_by(net, window): utterances whose best command is
-    right, those accepted right at reject and margin, and the false accepts among the rest."""
+    right, those accepted right at thresholds, reject, margin and syllable, and the false accepts among the rest."""
     heard = [(s.expected, heard_by(net, x)) for s in windows for x in s.decided]
     commands = [(e, h) for e, h in heard if e != gate.REJECT]
     others = [h for e, h in heard if e == gate.REJECT]
-    accepted = [(e, h) for e, h in commands if h.accepted(reject, margin)]
+    accepted = [(e, h) for e, h in commands if h.accepted(*thresholds)]
     return {
         "best_right": f"{sum(h.command == e for e, h in commands)}/{len(commands)}",
         "accepted_right": f"{sum(h.command == e for e, h in accepted)}/{len(commands)}",
-        "false_accepts": f"{sum(h.accepted(reject, margin) for h in others)}/{len(others)}",
+        "false_accepts": f"{sum(h.accepted(*thresholds) for h in others)}/{len(others)}",
     }
 
 
@@ -259,7 +262,7 @@ def row_of(cfg: dict, b: Bench, model) -> dict:
     errors = unit_error_rate(model, b.test, b.picks, spec["hops"], n.mean, n.std)
     heard = gate.Ctc(model, n.mean, n.std, n.names, n.lexicon, n.cfg)
     by = chip_heard if isinstance(model, Int8Net) else gate.ctc_heard
-    gated = gate_row(heard, b.windows, spec["reject"], cfg["eval"]["margin"], by)
+    gated = gate_row(heard, b.windows, (spec["reject"], cfg["eval"]["margin"], ctc_score.CAP), by)
     return {"unit_error_rate": round(errors, 4), **gated}
 
 
@@ -364,6 +367,9 @@ def step_qat(cfg: dict, run: Path, device: str, hearing: Hearing = LEARNT) -> Pa
     return recorded(run, {"qat": spec["qat"]}, {"qat": int8_row(cfg, b, graph, folder, rungs)}, hearing)
 
 
+THRESHOLD_KEYS = ("reject_permille", "margin_permille", "syllable_permille")
+
+
 def thresholds_file(run: Path, row: str, hearing: Hearing = LEARNT) -> Path:
     return hearing.folder(run) / row / "thresholds.yaml"
 
@@ -383,32 +389,45 @@ def built_windows(folder: Path) -> list[tuple[list[str], np.ndarray]]:
 
 
 def operating_point(
-    said: dict[str, list[gate.Heard]], heard: list[gate.Heard], meant: list[bool], spec: dict, sweep: list[int]
+    said: dict[str, list[gate.Heard]],
+    heard: list[gate.Heard],
+    meant: list[bool],
+    outside: list[gate.Heard],
+    spec: dict,
+    sweep: list[int],
 ) -> dict:
-    """The pair of sweep x spec's margins that accepts the most of the worst command of said, its windows' Heard by
-    command id, among those with spec's min_windows, then the most of every window of said, then the fewest false
-    accepts, among the pairs whose false accepts of heard, windows of speech, an accept counting unless meant says the
-    window says just that command, stay within spec's false_accept; with every pair's row and each command's share.
-    With none within it, the pair of fewest false accepts, marked so."""
+    """The triple of sweep x spec's margins x spec's syllable caps accepting the most of the worst command of said, its
+    windows' Heard by id, among those with spec's min_windows, then the most of said, then the fewest false accepts, of
+    the triples keeping false accepts of heard, speech windows, an accept counting unless meant says it says just that
+    command, within spec's false_accept and accepts of outside, said's windows decided over the set without their own
+    command, within its out_of_set_accept; with every row. With none within both, the fewest accepts of outside among
+    those within false_accept, or else the fewest false accepts, marked so."""
     ranked = [c for c, hs in said.items() if len(hs) >= spec["min_windows"]]
     total = sum(len(hs) for hs in said.values())
     rows = []
     for reject in sweep:
         for margin in spec["margin_sweep"]:
-            right = {c: sum(h.command == c and h.accepted(reject, margin) for h in hs) for c, hs in said.items()}
-            false = sum(h.accepted(reject, margin) and not ok for h, ok in zip(heard, meant, strict=True))
-            row = {"reject_permille": reject, "margin_permille": margin}
-            row["worst"] = round(min(right[c] / len(said[c]) for c in ranked), 4)
-            row |= {"overall": round(sum(right.values()) / total, 4), "false_accepts": false}
-            rows.append(row | {"commands": {c: f"{right[c]}/{len(said[c])}" for c in said}})
-    within = [r for r in rows if r["false_accepts"] <= spec["false_accept"] * len(heard)]
+            for syllable in spec["syllable_sweep"]:
+                limits = (reject, margin, syllable)
+                right = {c: sum(h.command == c and h.accepted(*limits) for h in hs) for c, hs in said.items()}
+                false = sum(h.accepted(*limits) and not ok for h, ok in zip(heard, meant, strict=True))
+                row = {"reject_permille": reject, "margin_permille": margin, "syllable_permille": syllable}
+                row["worst"] = round(min(right[c] / len(said[c]) for c in ranked), 4)
+                row |= {"overall": round(sum(right.values()) / total, 4), "false_accepts": false}
+                row["out_of_set_accepts"] = sum(h.accepted(*limits) for h in outside)
+                rows.append(row | {"commands": {c: f"{right[c]}/{len(said[c])}" for c in said}})
+    clean = [r for r in rows if r["false_accepts"] <= spec["false_accept"] * len(heard)]
+    within = [r for r in clean if r["out_of_set_accepts"] <= spec["out_of_set_accept"] * len(outside)]
     if within:
-        best = max(within, key=lambda r: (r["worst"], r["overall"], -r["false_accepts"]))
+        best = max(within, key=lambda r: (r["worst"], r["overall"], -r["false_accepts"], -r["out_of_set_accepts"]))
+    elif clean:
+        best = min(clean, key=lambda r: (r["out_of_set_accepts"], -r["worst"], -r["overall"]))
     else:
         best = min(rows, key=lambda r: (r["false_accepts"], -r["worst"]))
     return {
         "reject_permille": best["reject_permille"],
         "margin_permille": best["margin_permille"],
+        "syllable_permille": best["syllable_permille"],
         "within_target": bool(within),
         "chosen": best,
         "table": rows,
@@ -416,10 +435,11 @@ def operating_point(
 
 
 def step_thresholds(cfg: dict, run: Path, row: str, hearing: Hearing = LEARNT) -> Path:
-    """delta1 and delta2 for row (KEHOACH 3.12): every window of val_commands, real voices saying one learned command,
-    and of val, speech that says none, decided as the chip decides on the row's int8 graph, each cut back to
+    """delta1, delta2 and delta3 for row (KEHOACH 3.12): every window of val_commands, real voices saying one learned
+    command, decided over the learned set and again over it without that command, a phrase the set lacks, and every
+    window of val, speech that says none, decided as the chip decides on the row's int8 graph, each cut back to
     window_s as svc_listen cuts it; operating_point over eval.reject_sweep and quant.thresholds, written with its
-    table and Gate 3 at the pair to <run>/int8/<row>/thresholds.yaml for deploy."""
+    table and Gate 3 at the triple to <run>/int8/<row>/thresholds.yaml for deploy."""
     paths = data_paths()
     net = hearing.net(run, paths)
     graph = export_espdl.load_native(hearing.folder(run) / row / GRAPH_FILE)
@@ -432,10 +452,21 @@ def step_thresholds(cfg: dict, run: Path, row: str, hearing: Hearing = LEARNT) -
         for r in extract.read_index(paths["raw"] / "speech" / spec["extract"])
     }
     id_of = {c["text"]: c["id"] for c in command.learned(load_yaml(command.CONFIG))}
+    lacking = {
+        c: replace(
+            chip,
+            names=[n for n in chip.names if n != c],
+            lexicon=[f for n, f in zip(chip.names, chip.lexicon, strict=True) if n != c],
+        )
+        for c in id_of.values()
+    }
     said: dict[str, list[gate.Heard]] = {}
+    outside: list[gate.Heard] = []
     for items, x in built_windows(root / data.VAL_COMMANDS.removesuffix(".txt")):
         if len(items) == 1:
-            said.setdefault(id_of[phrase_of[items[0]]], []).append(chip_heard(chip, x[-listen.WINDOW_HOPS :]))
+            c, window = id_of[phrase_of[items[0]]], x[-listen.WINDOW_HOPS :]
+            said.setdefault(c, []).append(chip_heard(chip, window))
+            outside.append(chip_heard(lacking[c], window))
     text_of = {c.item: corpus.words(c.text or "") for c in screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")}
     texts = {
         c["id"]: corpus.words(c["text"]) for c in json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
@@ -445,14 +476,14 @@ def step_thresholds(cfg: dict, run: Path, row: str, hearing: Hearing = LEARNT) -
         h = chip_heard(chip, x[-listen.WINDOW_HOPS :])
         heard.append(h)
         meant.append(h.command != gate.REJECT and [w for i in items for w in text_of[i]] == texts[h.command])
-    chosen = operating_point(said, heard, meant, cfg["quant"]["thresholds"], cfg["eval"]["reject_sweep"])
-    pair = chosen["reject_permille"], chosen["margin_permille"]
-    gate3 = gate_row(chip, board_windows(cfg, net, paths), *pair, chip_heard)
+    chosen = operating_point(said, heard, meant, outside, cfg["quant"]["thresholds"], cfg["eval"]["reject_sweep"])
+    triple = tuple(chosen[k] for k in THRESHOLD_KEYS)
+    gate3 = gate_row(chip, board_windows(cfg, net, paths), triple, chip_heard)
     out = thresholds_file(run, row, hearing)
     counts = {"val_commands": {c: len(hs) for c, hs in said.items()}, "val": len(heard)}
     body = chosen | {"gate3": gate3, "windows": counts}
     out.write_text(yaml.safe_dump(body, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    print(f"{row}: delta1 {pair[0]}, delta2 {pair[1]}: {chosen['chosen']}; Gate 3 at them {gate3}", flush=True)
+    print(f"{row}: delta1..3 {', '.join(map(str, triple))}: {chosen['chosen']}; Gate 3 at them {gate3}", flush=True)
     return out
 
 
@@ -473,7 +504,7 @@ def step_deploy(cfg: dict, run: Path, row: str, hearing: Hearing = LEARNT) -> tu
         raise ValueError(f"row {row} reads {bits[0]} and gives {bits[1]} bits; the chip runs int8 at both ends")
     rungs = yaml.safe_load(ladder_file(run, hearing).read_text(encoding="utf-8"))["rows"][row]
     if not thresholds_file(run, row, hearing).is_file():
-        raise ValueError(f"row {row} has no delta1, delta2 chosen: make ctc-thresholds RUN={run} ROW={row} first")
+        raise ValueError(f"row {row} has no thresholds chosen: make ctc-thresholds RUN={run} ROW={row} first")
     chosen = yaml.safe_load(thresholds_file(run, row, hearing).read_text(encoding="utf-8"))
     x, chunk = test_sentence(cfg, net), net.cfg["chunk_hops"]
     io = ptq_espdl.io_of(graph)
@@ -500,7 +531,7 @@ def step_deploy(cfg: dict, run: Path, row: str, hearing: Hearing = LEARNT) -> tu
         },
         "row": row,
         "rungs": {"calibration": rungs["calibration"], "int16_ops": rungs["int16_ops"]},
-        "thresholds": {k: chosen[k] for k in ("reject_permille", "margin_permille")},
+        "thresholds": {k: chosen[k] for k in THRESHOLD_KEYS},
     }
     if hearing != LEARNT:
         fields |= heard_head(hearing)

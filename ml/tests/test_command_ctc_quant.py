@@ -81,7 +81,7 @@ def test_the_gate_row_counts_best_accepted_and_false_accepts() -> None:
         gate.Scored("a", "cmd", "100", "bật đèn", "bat_den", [0, 1, 2, 5]),
         gate.Scored("b", "neg", "100", "bật điện", gate.REJECT, [3, 4]),
     ]
-    row = quant.gate_row(None, windows, 300, 50, heard_by=lambda net, x: next(heard))
+    row = quant.gate_row(None, windows, (300, 50, ctc_score.CAP), heard_by=lambda net, x: next(heard))
     assert row == {"best_right": "3/4", "accepted_right": "1/4", "false_accepts": "1/2"}
 
 
@@ -226,32 +226,47 @@ def test_the_ladder_decides_an_int8_window_as_the_record_the_chip_is_held_to(tmp
     norm = (np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32))
     x = rng.normal(size=(50, DIMS)).astype(np.float32)
     record = probe.command_windows(cfg, graph, model, norm, [x])
-    _, score, lead, gap = ctc_score.DECISION_RECORD.unpack(record[-ctc_score.DECISION_RECORD.size :])
+    _, score, lead, gap, syllable = ctc_score.DECISION_RECORD.unpack(record[-ctc_score.DECISION_RECORD.size :])
     lexicon = ctc_score.default_lexicon()
     int8 = quant.Int8Net(graph, 64, *norm, model, cfg["esp_ppq_patches"])
     heard = quant.chip_heard(gate.Ctc(int8, *norm, [f"c{k}" for k in range(len(lexicon))], lexicon, cfg), x)
-    assert (heard.score, heard.lead, heard.gap) == (score, lead, gap)
+    assert (heard.score, heard.lead, heard.gap, heard.syllable) == (score, lead, gap, syllable)
 
 
-def test_the_operating_point_keeps_val_within_its_false_accepts_and_lifts_the_worst_command() -> None:
-    a = [gate.Heard("a", 900, 80, 100), gate.Heard("a", 900, 30, 100), gate.Heard("a", 900, 80, 400)]
-    b = [gate.Heard("b", 900, 60, 200), gate.Heard("a", 900, 60, 200)]
+def test_the_operating_point_keeps_val_and_phrases_the_set_lacks_within_bounds_and_lifts_the_worst_command() -> None:
+    a = [gate.Heard("a", 900, 80, 100, syllable=120), gate.Heard("a", 900, 30, 100), gate.Heard("a", 900, 80, 400)]
+    b = [gate.Heard("b", 900, 60, 200, syllable=50), gate.Heard("a", 900, 60, 200)]
     c = [gate.Heard("c", 900, 10, 900)]
     val = [gate.Heard("a", 900, 40, 150), gate.Heard("b", 900, 90, 50), gate.Heard("a", 900, 90, 50)]
     meant = [False, False, True]
-    spec = {"false_accept": 0.34, "margin_sweep": [25, 50], "min_windows": 2}
-    got = quant.operating_point({"a": a, "b": b, "c": c}, val, meant, spec, [200, 500])
-    assert (got["reject_permille"], got["margin_permille"], got["within_target"]) == (500, 50, True)
+    outside = [gate.Heard("b", 900, 80, 100, syllable=120), gate.Heard("a", 900, 80, 150, syllable=90)]
+    spec = {
+        "false_accept": 0.34,
+        "margin_sweep": [25, 50],
+        "syllable_sweep": [100, ctc_score.CAP],
+        "out_of_set_accept": 0.5,
+        "min_windows": 2,
+    }
+    said = {"a": a, "b": b, "c": c}
+    got = quant.operating_point(said, val, meant, outside, spec, [200, 500])
+    assert [got[k] for k in quant.THRESHOLD_KEYS] + [got["within_target"]] == [500, 50, 100, True]
     assert got["chosen"] == {
         "reject_permille": 500,
         "margin_permille": 50,
-        "worst": 0.5,
-        "overall": 0.5,
+        "syllable_permille": 100,
+        "worst": 0.3333,
+        "overall": 0.3333,
         "false_accepts": 1,
-        "commands": {"a": "2/3", "b": "1/2", "c": "0/1"},
+        "out_of_set_accepts": 1,
+        "commands": {"a": "1/3", "b": "1/2", "c": "0/1"},
     }
-    assert len(got["table"]) == 4
-    strict = quant.operating_point({"a": a, "b": b, "c": c}, val, meant, spec | {"false_accept": 0.0}, [200, 500])
+    assert len(got["table"]) == 8
+    uncapped = max(got["table"], key=lambda r: (r["worst"], r["overall"]))
+    assert uncapped["syllable_permille"] == ctc_score.CAP and uncapped["out_of_set_accepts"] == 2
+    lacking = quant.operating_point(said, val, meant, outside, spec | {"out_of_set_accept": 0.0}, [200, 500])
+    assert not lacking["within_target"] and lacking["chosen"]["out_of_set_accepts"] == 1
+    assert lacking["chosen"]["false_accepts"] == 1
+    strict = quant.operating_point(said, val, meant, outside, spec | {"false_accept": 0.0}, [200, 500])
     assert not strict["within_target"] and strict["chosen"]["false_accepts"] == 1
 
 
@@ -260,7 +275,7 @@ def test_a_row_without_its_chosen_thresholds_is_not_deployed(tmp_path: Path, mon
     monkeypatch.setattr(quant.export_espdl, "load_native", lambda _path: "graph")
     monkeypatch.setattr(quant.ptq_espdl, "io_bits", lambda _graph: (8, 8))
     quant.recorded(tmp_path, {}, {"row": gate_of(80, 0.3) | {"calibration": "kl", "int16_ops": []}})
-    with pytest.raises(ValueError, match="no delta1, delta2 chosen"):
+    with pytest.raises(ValueError, match="no thresholds chosen"):
         quant.step_deploy(load_yaml(ctc.CONFIG), tmp_path, "row")
 
 

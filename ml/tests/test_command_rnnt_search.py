@@ -159,7 +159,7 @@ def test_a_command_said_whole_is_taken_slow_or_fast_and_a_part_of_it_turned_down
 def test_the_free_path_ahead_or_no_frame_turns_the_window_down() -> None:
     off = decided(one_a_frame([5, 6, 5, 6, 5, 6]), 8, reject=100)
     assert off[0] == ctc_score.REJECTED and off[3] > 100
-    assert decided([], 0).tolist() == [ctc_score.REJECTED, 0, ctc_score.CAP, ctc_score.CAP]
+    assert decided([], 0).tolist() == [ctc_score.REJECTED, 0, ctc_score.CAP, ctc_score.CAP, 0]
 
 
 def test_the_greedy_path_moves_on_through_blank_after_its_last_unit_of_a_frame() -> None:
@@ -177,7 +177,8 @@ def test_the_golden_set_holds_its_edges_and_each_negative_control_differs(tmp_pa
     assert [p.name for p in written] == [f"{n}.gold" for n in names]
     cases = {p.stem: read_gold(p) for p in written}
     edge = cases["case_002"]["decision"]
-    assert edge[0].tolist() == [ctc_score.REJECTED, 0, ctc_score.CAP, ctc_score.CAP]
+    assert edge[0].tolist() == [ctc_score.REJECTED, 0, ctc_score.CAP, ctc_score.CAP, 0]
+    assert (cases["case_000"]["decision"][:, 4] == 0).all()
     assert edge[2, 0] == 0 and edge[3, 0] == ctc_score.REJECTED
     assert cases["case_neg_000"]["decision"][3, 0] == 0
     assert not np.array_equal(cases["case_002"]["scores"], cases["case_neg_001"]["scores"])

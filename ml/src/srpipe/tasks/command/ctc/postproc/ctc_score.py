@@ -1,8 +1,8 @@
 """The ctc postprocessing that ai_engine/src/command_ctc/ mirrors (KEHOACH 3.12): int8 logits to log-probabilities,
-each variant of each command scored by the CTC forward pass, each state a float32 mantissa with an exponent of its
-own; the best command is rejected when the free unit loop beats it by more than reject, the second best trails it by
-less than margin, both in thousandths of a nat a frame of a window_s window, or a run of its own syllables short of it
-scores no lower. emit writes contracts/golden/command_ctc/, which the C matches bit for bit.
+each variant of each command scored by the CTC forward pass, each state a float32 mantissa with its own exponent; the
+best command is rejected when the free unit loop beats it by more than reject, the second trails it by less than
+margin, its worst syllable falls short of the free loop by more than syllable, all in thousandths of a nat a frame of
+a window_s window, or a run of its own syllables scores no lower. emit writes contracts/golden/command_ctc/.
 Run: python -m srpipe.tasks.command.ctc.postproc.ctc_score [--out <golden root>]
 """
 
@@ -28,15 +28,15 @@ BLOCK = "command_ctc"
 REJECTED = -1
 MILLI = np.float32(1000.0)
 CAP = 65535  # the uint16 fields of ai_engine_command_result_t
-DECISION = ("command", "score_permille", "margin_permille", "free_gap_permille")
+DECISION = ("command", "score_permille", "margin_permille", "free_gap_permille", "syllable_gap_permille")
 SEED = 20261001
 WINDOWS, FRAMES = 12, 48  # a case's windows and their longest, in frames
 SPREAD = (0.5, 6.0)
 LOGIT_EXPONENTS = (-4, -3, -2)  # int8 steps 2^e of the golden logits
-# Magic, classes, frames, commands, most variants, most units, timed runs, reject and margin.
-DECIDE_HEAD = struct.Struct("<4sHHBBBBHH")
+# Magic, classes, frames, commands, most variants, most units, timed runs, reject, margin and syllable.
+DECIDE_HEAD = struct.Struct("<4sHHBBBBHHH")
 DECIDE_MAGIC = b"SRCD"
-DECISION_RECORD = struct.Struct("<hHHH")
+DECISION_RECORD = struct.Struct("<hHHHH")
 ZERO_EXP = -(1 << 30)  # the exponent of a zero, below any a live value reaches
 BLANK = 0  # a frame's CTC blank; a lang_vi unit takes its id plus one
 TONE_UNITS = frozenset(lang_vi.UNITS.index(t) for t in lang_vi.TONES)  # one ends each syllable
@@ -191,6 +191,43 @@ def parts(forms: list[np.ndarray]) -> list[np.ndarray]:
     return out
 
 
+def syllable_gap(log_probs: np.ndarray, units: np.ndarray, per_frames: int, blanks_ahead: bool = True) -> np.float32:
+    """s_syl of KEHOACH 3.12 for units over (classes, frames) log-probabilities, float32 in the C's order: on the
+    Viterbi path by the forward pass's moves, a stay winning a tie over a step and a step over a skip, ending on the
+    last blank on a tie, each frame's shortfall below its likeliest class goes to the unit of its state, a blank's to
+    the unit after it and one past the last unit to the last; summed per syllable in frame order, the worst over
+    per_frames. blanks_ahead off counts a blank's frames to the unit before it, a negative control of the golden set."""
+    x = np.asarray(log_probs, dtype=np.float32)
+    labels = np.array([BLANK] + [c for u in units for c in (int(u) + 1, BLANK)])
+    n, frames = len(labels), x.shape[1]
+    jump = np.zeros(n, dtype=bool)
+    jump[2:] = (labels[2:] != BLANK) & (labels[2:] != labels[:-2])
+    none = np.float32(-np.inf)
+    v = np.full(n, none, dtype=np.float32)
+    v[:2] = x[labels[:2], 0]
+    back = np.zeros((frames, n), dtype=np.int64)
+    for t in range(1, frames):
+        best, came = v.copy(), np.zeros(n, dtype=np.int64)
+        for by in (1, 2):
+            ahead = np.concatenate([np.full(by, none, np.float32), v[:-by]])
+            took = (ahead > best) & (jump if by == 2 else True)
+            best, came = np.where(took, ahead, best), np.where(took, by, came)
+        v = (best + x[labels, t]).astype(np.float32)
+        back[t] = came
+    path = np.empty(frames, dtype=np.int64)
+    path[-1] = n - 1 if v[n - 1] >= v[n - 2] else n - 2
+    for t in range(frames - 1, 0, -1):
+        path[t - 1] = path[t] - back[t, path[t]]
+    unit_of = np.minimum((path if blanks_ahead else np.maximum(path - 1, 0)) // 2, len(units) - 1)
+    syllable_of = np.cumsum([0] + [int(u) in TONE_UNITS for u in units[:-1]])
+    sums = [np.float32(0.0)] * int(syllable_of[-1] + 1)
+    top = x.max(axis=0)
+    for t in range(frames):
+        k = syllable_of[unit_of[t]]
+        sums[k] = np.float32(sums[k] + np.float32(top[t] - x[labels[path[t]], t]))
+    return np.float32(max(sums) / np.float32(per_frames))
+
+
 def decide(
     log_probs: np.ndarray,
     lexicon: list[list[np.ndarray]],
@@ -199,11 +236,15 @@ def decide(
     per_frames: int,
     skip: bool = True,
     own_parts: bool = True,
+    syllable: int = CAP,
+    blanks_ahead: bool = True,
 ):
     """The decision of one window of (classes, frames) log-probabilities, int32 in the order of DECISION, every score
     divided by per_frames, T_W on the device; the score field is e to the winner's score in permille. The winner is
-    also rejected when a part of its own scores no lower than it (KEHOACH 3.12). The first of equal scores wins.
-    own_parts off never scores the winner's parts, a negative control of the golden set."""
+    also rejected when its best variant, the first of equal scores, has two syllables or more and the worst of them
+    falls short of the free loop by more than syllable, the field 0 for one syllable; or when a part of its own scores
+    no lower than it (KEHOACH 3.12). The first of equal scores wins. own_parts off never scores the winner's parts and
+    blanks_ahead off counts a blank's frames back, negative controls of the golden set."""
     table = exp_wide(log_probs)
     scores = command_scores(table, lexicon, per_frames, skip)
     best = int(np.argmax(scores))
@@ -214,9 +255,14 @@ def decide(
     whole = not own_parts or all(
         sequence_score(table, p, per_frames, skip) < scores[best] for p in parts(lexicon[best])
     )
-    accepted = reached and gap <= reject and lead >= margin and whole
+    short = CAP
+    if reached:
+        forms = lexicon[best]
+        own = forms[int(np.argmax([sequence_score(table, v, per_frames, skip) for v in forms]))]
+        short = milli(syllable_gap(log_probs, own, per_frames, blanks_ahead)) if len(syllables(own)) > 1 else 0
+    accepted = reached and gap <= reject and lead >= margin and short <= syllable and whole
     score = milli(exp32(scores[best])) if reached else 0
-    return np.array([best if accepted else REJECTED, score, lead, gap], dtype=np.int32), scores
+    return np.array([best if accepted else REJECTED, score, lead, gap, short], dtype=np.int32), scores
 
 
 def default_lexicon() -> list[list[np.ndarray]]:
@@ -261,11 +307,12 @@ def case(
     center: bool = True,
     own_parts: bool = True,
     by_own_frames: bool = False,
+    blanks_ahead: bool = True,
 ):
     """One golden case: windows of int8 logits (classes, frames) and their exponents, logits and log-probabilities
-    laid frame by frame and padded to FRAMES, the lexicon padded, each window's thresholds, FRAMES as the scores'
-    divisor, and the command scores and decision of each; by_own_frames divides by each window's own frames instead
-    while the case still says FRAMES, a negative control."""
+    laid frame by frame and padded to FRAMES, the lexicon padded, each window's reject, margin and syllable, FRAMES as
+    the scores' divisor, and the command scores and decision of each; by_own_frames divides by each window's own frames
+    instead while the case still says FRAMES, a negative control."""
     longest = max(len(u) for forms in lexicon for u in forms)
     most = max(len(forms) for forms in lexicon)
     units = np.zeros((len(lexicon), most, longest), dtype=np.int32)
@@ -281,7 +328,8 @@ def case(
         logits[w, : q.shape[1]] = q.T
         grid[w, : x.shape[1]] = x.T
         per_frames = q.shape[1] if by_own_frames else FRAMES
-        decision, row = decide(x, lexicon, int(limits[0]), int(limits[1]), per_frames, skip, own_parts)
+        reject, margin, syllable = (int(v) for v in limits)
+        decision, row = decide(x, lexicon, reject, margin, per_frames, skip, own_parts, syllable, blanks_ahead)
         decisions.append(decision)
         scores.append(row)
     return {
@@ -312,22 +360,29 @@ def random_case(rng: np.random.Generator, lexicon: list[list[np.ndarray]]):
             spread = np.float32(rng.uniform(*SPREAD))
             logits = rng.standard_normal((n_classes(), frames)).astype(np.float32) * spread
             windows.append((quantised(logits, exponent), exponent))
-    thresholds = np.stack([rng.integers(0, 3001, WINDOWS), rng.integers(0, 501, WINDOWS)], axis=1)
-    return case(windows, lexicon, thresholds)
+    limits = (rng.integers(0, 3001, WINDOWS), rng.integers(0, 501, WINDOWS), rng.integers(0, 1001, WINDOWS))
+    return case(windows, lexicon, np.stack(limits, axis=1))
 
 
 def edge_case(rng: np.random.Generator):
-    """A command of a repeated unit said and said once, two equal commands, a window too short for any command,
-    and a winner exactly on the reject threshold and one exactly on the margin."""
-    lexicon = [[np.array([3, 3], np.uint8)], [np.array([0, 1], np.uint8)], [np.array([0, 1], np.uint8)]]
+    """A command of a repeated unit said and said once, two equal commands, a window too short for any command, a
+    winner exactly on the reject threshold and one exactly on the margin; then a command of two syllables said with
+    its second syllable wrong, its worst syllable exactly on the syllable threshold and one over it, and a winner of
+    one syllable that no syllable threshold turns down."""
+    first, second = sorted(TONE_UNITS)[:2]
+    two = np.array([5, first, 7, second], np.uint8)
+    lexicon = [[np.array([3, 3], np.uint8)], [np.array([0, 1], np.uint8)], [np.array([0, 1], np.uint8)], [two]]
     e = LOGIT_EXPONENTS[1]
-    said_units = ([3, 3], [3], [0, 1], [3], [3, 3], [3, 3])
-    lengths = (24, 24, 24, 1, 30, 36)
+    said_units = ([3, 3], [3], [0, 1], [3], [3, 3], [3, 3], [5, first, 8, second], [5, first, 8, second], [3, 3])
+    lengths = (24, 24, 24, 1, 30, 36, 30, 30, 24)
     windows = [(said(rng, np.array(u, np.uint8), frames, e), e) for u, frames in zip(said_units, lengths, strict=True)]
-    thresholds = np.full((len(windows), 2), (1000, 50), dtype=np.int32)
+    thresholds = np.full((len(windows), 3), (1000, 50, CAP), dtype=np.int32)
     thresholds[2, 1] = 1
     thresholds[4, 0] = decide(frame_log_probs(*windows[4]), lexicon, 0, 0, FRAMES)[0][3]
-    thresholds[5] = (CAP, decide(frame_log_probs(*windows[5]), lexicon, 0, 0, FRAMES)[0][2])
+    thresholds[5, :2] = (CAP, decide(frame_log_probs(*windows[5]), lexicon, 0, 0, FRAMES)[0][2])
+    worst = [int(decide(frame_log_probs(*windows[k]), lexicon, CAP, 0, FRAMES)[0][4]) for k in (6, 7)]
+    thresholds[6:8] = ((CAP, 0, worst[0]), (CAP, 0, worst[1] - 1))
+    thresholds[8] = (CAP, 0, 0)
     return case(windows, lexicon, thresholds)
 
 
@@ -339,7 +394,7 @@ def partial_windows(rng: np.random.Generator, lexicon: list[list[np.ndarray]]) -
     for c in sorted({longest, len(lexicon) - 1}):
         cut = syllables(lexicon[c][0])
         windows += [(said(rng, units, FRAMES, e), e) for units in (cut[0], cut[-1], lexicon[c][0])]
-    return windows, np.tile(np.array([CAP, 0], dtype=np.int32), (len(windows), 1))
+    return windows, np.tile(np.array([CAP, 0, CAP], dtype=np.int32), (len(windows), 1))
 
 
 def packed_lexicon(lexicon: list[list[np.ndarray]]) -> tuple[tuple[int, int, int], bytes]:
@@ -363,10 +418,11 @@ def probe_record(cfg: dict) -> bytes:
     frames = math.ceil(listen.WINDOW_HOPS / stride)
     rng, lexicon, e = np.random.default_rng(SEED), default_lexicon(), LOGIT_EXPONENTS[1]
     window = frame_log_probs(said(rng, lexicon[0][0], frames, e), e)
-    decision, scores = decide(window, lexicon, *spec["thresholds"], frames)
+    reject, margin, syllable = spec["thresholds"]
+    decision, scores = decide(window, lexicon, reject, margin, frames, syllable=syllable)
     (commands, most, longest), packed = packed_lexicon(lexicon)
     head = DECIDE_HEAD.pack(
-        DECIDE_MAGIC, n_classes(), frames, commands, most, longest, spec["runs"], *spec["thresholds"]
+        DECIDE_MAGIC, n_classes(), frames, commands, most, longest, spec["runs"], reject, margin, syllable
     )
     body = head + packed
     body += b"\0" * (-len(body) % 4) + np.ascontiguousarray(window.T, dtype="<f4").tobytes()
@@ -375,9 +431,9 @@ def probe_record(cfg: dict) -> bytes:
 
 def emit(root: Path) -> list[Path]:
     """Random windows over the default commands and over a small set, the edge windows, parts of commands said alone,
-    and four negative controls: a forward pass that never moves from one unit straight to the next, log-probabilities
-    with no largest taken off, a winner whose parts are left out of its rivals, and scores divided by each window's own
-    frames."""
+    and five negative controls: a forward pass that never moves from one unit straight to the next, log-probabilities
+    with no largest taken off, a winner whose parts are left out of its rivals, scores divided by each window's own
+    frames, and a blank's frames counted to the unit before it."""
     rng = np.random.default_rng(SEED)
     lexicon = default_lexicon()
     cases = {
@@ -396,6 +452,7 @@ def emit(root: Path) -> list[Path]:
     cases["case_neg_001"] = case(windows, lexicon, first["thresholds"], center=False)
     cases["case_neg_002"] = case(partial, lexicon, limits, own_parts=False)
     cases["case_neg_003"] = case(windows, lexicon, first["thresholds"], by_own_frames=True)
+    cases["case_neg_004"] = case(windows, lexicon, first["thresholds"], blanks_ahead=False)
     written = []
     for name, tensors in cases.items():
         path = root / BLOCK / f"{name}.gold"

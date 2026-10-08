@@ -244,13 +244,14 @@ def step_ptq(cfg: dict, run: Path) -> Path:
     """Rung 2 of the rnnt track (KEHOACH 3.14): the float row, then a row of the three graphs quantised with each
     calibration; Gate 3 of each at quant.reject and eval.margin, as the ctc track's rows."""
     spec, b = cfg["quant"], ctc_quant.bench(cfg, run)
-    net, patches, thresholds = b.net, cfg["esp_ppq_patches"], (spec["reject"], cfg["eval"]["margin"])
+    net, patches = b.net, cfg["esp_ppq_patches"]
+    thresholds = (spec["reject"], cfg["eval"]["margin"], ctc_score.CAP)
     if net.model.transducer is None:
         raise ValueError(f"{run} learnt no transducer: its config has no rnnt section")
     tree = rnnt_search.command_tree(net.lexicon)
     contexts = tree_contexts(tree, net.cfg["rnnt"]["context"], net.model.transducer.predictor.pad)
     head = {"rungs": ptq_espdl.ladder(ctc_quant.LADDER), "quant": spec}
-    float_row = ctc_quant.gate_row(net, b.windows, *thresholds, gate.rnnt_heard)
+    float_row = ctc_quant.gate_row(net, b.windows, thresholds, gate.rnnt_heard)
     out = ctc_quant.recorded(run, head, {f"{ROW_PREFIX}float": float_row})
     for name in spec["calibrations"]:
         rungs = ptq_espdl.ladder(ctc_quant.LADDER) | {"calibration": name}
@@ -261,7 +262,7 @@ def step_ptq(cfg: dict, run: Path) -> Path:
         )
         saved(graphs, folder)
         sim = Int8Rnnt(graphs, spec["hops"], net, patches)
-        row = ctc_quant.gate_row(net, b.windows, *thresholds, functools.partial(int8_heard, sim))
+        row = ctc_quant.gate_row(net, b.windows, thresholds, functools.partial(int8_heard, sim))
         out = ctc_quant.recorded(run, head, {f"{ROW_PREFIX}{name}": {"calibration": name, **row}})
     return out
 

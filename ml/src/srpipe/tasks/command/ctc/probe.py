@@ -64,7 +64,7 @@ LISTEN_HEAD = struct.Struct("<4sHHHH")
 LISTEN_MAGIC = b"SRLS"
 SESSION_HEAD = struct.Struct("<IHH")  # hops, segments, windows
 SEGMENT_HEAD = struct.Struct("<II")  # first hop, hops; their int16 samples follow
-WINDOW_RECORD = struct.Struct("<IIhHHH")  # first and last hop, then the decision's four fields
+WINDOW_RECORD = struct.Struct("<IIhHHHH")  # first and last hop, then the decision's five fields
 
 
 def stored_test(espdl: Path) -> tuple[tuple[tuple[int, ...], bytes], tuple[tuple[int, ...], bytes]]:
