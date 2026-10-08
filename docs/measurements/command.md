@@ -1418,3 +1418,48 @@ nhất, cần µs trên board của bốn tích chập int16 trước khi chốt
 3 439 KB, quá `ota_0` 3 MB của `partitions_unit.csv` 367 KB, vì các probe của run đã học nhúng vào app (cửa sổ `ctc` 701 KB,
 `kws` 647 KB, `ns` 498 KB). Mọi dòng giữ int8 ở hai đầu, kể cả int16 4 lớp. Bản demo 07/10 chạy `percentile`: hoà,
 không lớp int16 nào, nên µs là của mạng cùng cỡ đã đo (`latency.md` §18, 10,2 ms mỗi 32 ms).
+
+### 12.23 "Tăng/giảm âm lượng" trên board B với `command/v8` (08/10)
+
+Tối 08/10 chủ repo thấy board hay bỏ qua "tăng âm lượng" và "giảm âm lượng". Board B chạy bản demo với dòng `percentile`
+của v8 nghe bằng cao độ Kaldi, độ hữu thanh gập (§12.22), δ₁ 100 ‰ (gap 96 nhận, 104 từ chối), δ₂ 25 ‰ ở NVS, một bộ
+14 lệnh như `host/sets/battat_vi.json`. Log UART 19:25–19:30 lúc chủ repo nói thử: "bật đèn" nhận 6/6 với gap 0, các
+lệnh khác nhận với gap 15–97 ‰; hai lệnh âm lượng nhận 8 lần (tăng 6, giảm 2), khoảng 20 lượt `REJECT LOW_SCORE` với
+gap 104–190 ‰.
+
+Phát lại các phiên 28/09 qua chuỗi sản phẩm và đồ thị int8 ấy, quyết như chip trên `battat_vi.json` ở cùng δ₁, δ₂, câu
+gán như Cửa 3; đo bằng script chẩn đoán chạy một lần, nhận đúng / câu:
+
+| Lệnh | 1 m | 3 m |
+|---|---|---|
+| bật đèn | 5/7 | 4/5 |
+| tăng âm lượng | 5/8 | 3/5 |
+| giảm âm lượng | 1/5 | 0/6 |
+
+Bản thu cho đúng tỉ lệ của board, và chip trùng Python 336/336 cửa sổ (`latency.md` §22): chỗ yếu ở mạng, không ở
+firmware. Mạng vẫn xếp đúng lệnh đầu ở 11/11 câu "giảm" và 10/13 câu "tăng", như v5 float ở §12.11; câu bị bỏ là vì gap
+vượt δ₁. Vòng tự do mạng nghe, so với cách đọc của `lang_vi`: "giảm âm lượng" `z a: m T4 @ m T1 l M@ N T6`, "tăng"
+`t a N T1`:
+
+| Câu | Mạng nghe |
+|---|---|
+| giảm âm lượng, 1 m | `s a: T3 b_< O N T1 n M@ T5` · `z a: T3 b_< o N T1 n M@ T6` · `d_< a: T4 m o N T1 n M@ T6` |
+| giảm âm lượng, 3 m | `d_< a: T3 o N T1 n M@ T5` · `z a: T3 h o m T1 n M@ k T5` · `d_< a: T4 o m T1 v @: T5` |
+| tăng âm lượng, 1 m | `t a N T1 o n T1 n M@ T5` · `t a N T1 o T1 n M@ k T6` · `a N T1 h o N T1 n M@ T6` |
+
+Ba chỗ lệch lặp lại: "âm" mở bằng nguyên âm nên mạng gắn cho nó phụ âm đầu (`b_<`, `m`, `h`, `v`), nghe `o` thay `@` và
+cuối `N` hay `n` thay `m`; "lượng" nghe `n` thay `l` sau `m` của "âm", mất `N` cuối hay thành `k`, thanh nặng `T6`
+thành sắc `T5` ở gần nửa số câu; "giảm" nghe thanh ngã `T3` thay hỏi `T4` ở 5/11 câu và mất `m` cuối. Đường Viterbi
+của cách đọc tốt nhất kém vòng tự do trên từng âm tiết, ‰ của T_W, trung bình trên 11 câu mạng nghe ra tiếng mỗi lệnh:
+
+| Lệnh | Gap trung bình | Âm tiết 1 | Âm tiết 2 | Âm tiết 3 |
+|---|---|---|---|---|
+| bật đèn | 48 | 12 | 39 | — |
+| tăng âm lượng | 82 | 21 | 36 | 27 |
+| giảm âm lượng | 126 | 39 | 37 | 51 |
+
+Không âm tiết nào gánh cả gap: ba âm tiết mỗi cái hụt 20–50 ‰, cộng lại quá δ₁. Mười phiên board của tập học (§11,
+`eval.board.train`) chỉ có bật, tắt, mở đèn, quạt, ti vi, điều hoà, đúng các lệnh board nhận với gap 0–45 ‰ tối 08/10;
+lệnh âm lượng chưa có phiên board nào trong tập học. Nới δ₁ không gỡ được: bảng chọn ngưỡng của dòng ấy
+(`int8_kaldi_voicing/percentile/thresholds.yaml`) cho δ₁ 200 ‰ nhận 83,3% thay 80,6% câu `val_commands` mà nhận nhầm
+49 thay 2 (δ₂ 0), 13 thay 1 (δ₂ 25).
