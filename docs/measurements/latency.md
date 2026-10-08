@@ -569,3 +569,24 @@ rồi chạy đúng các lượt của chiều thuận qua phép liên hợp, n�
 
 Trên máy tính (`make parity-host`), bản C khớp Python từng bit ở mọi ca vàng: `stft` (phổ và tín hiệu dựng lại), `mel`
 (log-mel và MFCC), và cả PCM của `chain`, `chain_modules`, trước đây lệch 1 LSB; mọi đối chứng âm vẫn đỏ.
+
+## 24. `command/v8` qua `ai_engine` trên chip: Cửa 3 theo lượt (E11-T14)
+
+Board B, `ai_engine/test_apps/unit` với cờ trình biên dịch của `sdkconfig.bench` (`-O2`, 240 MHz), IDF 6.0.2, `d183cf2`,
+08/10. Mạng là dòng `percentile` của `command/v8` nghe bằng Kaldi, độ hữu thanh gập (`make ai-unit CTC_RUN=… CTC_ROW=percentile
+CTC_KALDI=1 CTC_HOLD=voicing`); ngưỡng δ₁ 300 ‰, δ₂ 50 ‰ của config. Bản ghi Cửa 3 (335 cửa sổ, 4,4 MB) chia ba lượt vừa
+phân vùng `voice`; hai lượt sau chạy riêng ca Cửa 3 trước cả bộ.
+
+| Đo | Kết quả |
+|---|---|
+| Dựng mạng | 346 ms; PSRAM 309 KB, RAM nội 0 B |
+| 48 bước 16 hop, so mô phỏng cả chuỗi | chênh int8 lớn nhất **0**; 82,0 ms trung bình một bước |
+| `ctc_lay`, 256 bước một hop | chênh int8 lớn nhất **0**; 7,0 ms một bước |
+| `_prepare`, 10 lệnh | 296 µs |
+| `_step` | 56 µs ở hop chỉ đệm; 84,2 ms trung bình, 84,3 ms đỉnh ở hop đủ khối 16 hop, tức **10,5 ms mỗi 32 ms** |
+| `_score` | 79,7 ms trung bình, 89,1 ms đỉnh trên Cửa 3; 84,6 ms trung bình trên 12 cửa sổ đặc trưng thô |
+| 12 cửa sổ đặc trưng thô qua `_begin`, `_step`, `_score` | 12/12 trùng Python từng trường |
+| Cửa 3 trên chip, ba lượt 158, 18, 159 cửa sổ | **335/335** trùng Python từng trường; đếm trên quyết định của chip: nhận đúng **146/209**, nhận nhầm **3/126** |
+
+Cả bộ 8/8 bài thử qua. Lượt trước cùng ngày dừng trước bài thử: `ctc_gate.bin` lớn hơn phân vùng `voice`, và các ca `kws`,
+`ns`, chạy dòng giữ mạng của mình trong PSRAM tới hết bộ, nên ca `ctc` hết PSRAM khi nạp (`4a09a16`).
