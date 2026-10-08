@@ -254,6 +254,7 @@ static void nhan_task(void *arg)
             vTaskPrioritySet(NULL, NHAN_WORK_PRIORITY);
             do {
                 if (svc_listen_work(&decision)) { raise_decision(w, &decision); }
+                esp_task_wdt_reset();
             } while (svc_listen_pending() && uxQueueMessagesWaiting(w->clean) == 0);
             vTaskPrioritySet(NULL, NHAN_PRIORITY);
         }
