@@ -1243,7 +1243,9 @@ trường của kết quả chấm phải bằng quyết định Python lấy tr
 và mỗi lần chấm. **Cửa 3 đo trên chip**: mọi cửa sổ của Cửa 3 (§3.12, Thước) đi qua chip, và Cửa 3 đếm trên chính quyết
 định của chip. Bản ghi giữ đầu vào int8 của từng cửa sổ, tức đặc trưng đã chuẩn hoá trên lưới số mũ đầu vào, vì chip
 lượng tử về đúng lưới ấy; test dựng lại đặc trưng thô từ đó bằng `NORM` rồi gọi `_step`, nên chip thấy đúng các số int8
-của bản thu, và cả bộ vừa phân vùng `voice` (§6.1) mà app unit không dùng.
+của bản thu. Bản ghi nằm ở phân vùng `voice` (§6.1) mà app unit không dùng, chia theo lượt cho vừa phân vùng ấy như
+`make listen-unit`: mỗi lượt mang chỉ số cửa sổ đầu của nó, các lượt sau lượt đầu chỉ chạy Cửa 3 và chạy trước cả bộ, vì
+ca chạy dòng của cả bộ xoá khe model 0 khi xong.
 
 Với `ctc`, thêm lệnh là thêm một dòng chữ (TỔNG QUAN §3.1): dòng mới đi qua `lang_vi` **ngay trên máy** lúc nạp
 bộ lệnh, qua MQTT `down/commands` hoặc từ `storage/cmd/set.json` (§6.4). Phép kiểm chứng minh của
