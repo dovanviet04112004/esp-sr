@@ -31,7 +31,7 @@ constexpr int kToleranceSteps = 1; // one int8 step, as model->test() allows (KE
 constexpr size_t kNetsMax = 2;
 constexpr int64_t kUsPerMs = 1000;
 constexpr size_t kFeaturesMax = GEN_LISTEN_N_BANDS + DSP_SPEC_PITCH_FEATURES;
-constexpr const char *kGateLabel = "voice"; // partitions.csv: ctc_gate.bin goes there
+constexpr const char *kGateLabel = "voice"; // partitions_unit.csv: a round of Gate 3 goes there
 
 // Layout written by srpipe.tasks.command.ctc.probe; each record's int8 data is padded to four bytes.
 struct StreamsHead {
@@ -62,14 +62,15 @@ struct __attribute__((packed)) Decision {
 };
 static_assert(sizeof(WindowsHead) == 16 && sizeof(Decision) == 8, "ctc_windows.bin layout");
 
-// Layout of the probe's gate_windows: this head, mean and std a feature, the packed lexicon, then a window's
-// hops, int8 input padded to four bytes and Decision.
+// Layout of a round of the probe's gate_rounds: this head, mean and std a feature, the packed lexicon, then a
+// window's hops, int8 input padded to four bytes and Decision.
 struct __attribute__((packed)) GateHead {
     char magic[4];
     uint16_t features, windows, reject, margin;
     uint8_t commands, variants_max, units_max, chunk_hops;
     int8_t input_exponent;
-    uint8_t pad[3];
+    uint8_t pad;
+    uint16_t first; // index of the round's first window in ctc_gate.json
 };
 static_assert(sizeof(GateHead) == 20, "ctc_gate.bin layout");
 
@@ -282,9 +283,9 @@ TEST_CASE("the ctc command calls decide raw feature windows as Python decides th
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN));
 }
 
-// Gate 3 on the chip: every window of the voice partition, rebuilt from its int8 input (KEHOACH 3.12).
+// Gate 3 on the chip: each window of the round in voice, rebuilt from its int8 input (KEHOACH 3.12).
 TEST_CASE("the ctc command decides every Gate 3 window of the voice partition as Python decides it, timed",
-          "[ai_engine]")
+          "[ai_engine][ctc_gate]")
 {
     const esp_partition_t *part =
         esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, kGateLabel);
@@ -329,8 +330,9 @@ TEST_CASE("the ctc command decides every Gate 3 window of the voice partition as
         ai_engine_command_result_t got;
         const uint8_t *features = reinterpret_cast<const uint8_t *>(raw);
         differ += decide_window(head.features, head.chunk_hops, hops, features, want, &t, &got) ? 0 : 1;
-        printf("gate window %u: board %d %u %u %u, python %d %u %u %u\n", w, got.command, got.score_permille,
-               got.margin_permille, got.free_gap_permille, want.command, want.score, want.margin, want.gap);
+        printf("gate window %u: board %d %u %u %u, python %d %u %u %u\n", (unsigned)(head.first + w),
+               got.command, got.score_permille, got.margin_permille, got.free_gap_permille, want.command,
+               want.score, want.margin, want.gap);
         at += sizeof(hops) + input_bytes + sizeof(want);
     }
     print_timing("ctc gate 3", head.windows, differ, t, head.chunk_hops);
@@ -339,6 +341,16 @@ TEST_CASE("the ctc command decides every Gate 3 window of the voice partition as
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT));
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN));
     TEST_ASSERT_EQUAL(0, differ);
+}
+
+// A later round of Gate 3 waits in voice: the suite then runs that case alone, model slot 0 still whole.
+extern "C" bool ctc_gate_round_only(void)
+{
+    const esp_partition_t *part =
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, kGateLabel);
+    GateHead head;
+    return part != nullptr && esp_partition_read(part, 0, &head, sizeof(head)) == ESP_OK &&
+           memcmp(head.magic, "SRCG", 4) == 0 && head.first > 0;
 }
 
 TEST_CASE("the ctc net and one of its layers stream as their ESP-PPQ simulation does, timed", "[ai_engine]")

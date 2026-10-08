@@ -96,7 +96,7 @@ def gate_windows(cfg: dict, sim: quant.Int8Rnnt, norm: tuple, windows: list[np.n
     (commands, most, longest), packed = ctc_score.packed_lexicon(lexicon)
     e = sim.frames.io.input_exponent
     sizes = (commands, most, longest, cfg["chunk_hops"])
-    body = ctc_probe.GATE_HEAD.pack(GATE_MAGIC, len(mean), len(windows), reject, margin, *sizes, e)
+    body = ctc_probe.GATE_HEAD.pack(GATE_MAGIC, len(mean), len(windows), reject, margin, *sizes, e, 0)
     body += np.concatenate([mean, std]).astype("<f4").tobytes() + packed
     body += b"\0" * (-len(body) % 4)
     for x in windows:

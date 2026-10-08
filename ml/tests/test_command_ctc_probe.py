@@ -90,10 +90,10 @@ def test_the_gate_record_reads_back_each_window_as_its_int8_input_and_python_dec
     rng = np.random.default_rng(2)
     windows = [rng.normal(size=(n, DIMS)).astype(np.float32) for n in (188, 3, 37)]
     mean, std = rng.normal(size=DIMS).astype(np.float32), rng.uniform(0.5, 2.0, DIMS).astype(np.float32)
-    body = probe.gate_windows(cfg, None, model, (mean, std), windows)
+    (body,) = probe.gate_rounds(cfg, None, model, (mean, std), windows, 1 << 30)
 
-    magic, features, count, reject, margin, *sizes, exponent = probe.GATE_HEAD.unpack_from(body)
-    assert (magic, features, count, exponent) == (probe.GATE_MAGIC, DIMS, len(windows), INPUT_EXPONENT)
+    magic, features, count, reject, margin, *sizes, exponent, first = probe.GATE_HEAD.unpack_from(body)
+    assert (magic, features, count, exponent, first) == (probe.GATE_MAGIC, DIMS, len(windows), INPUT_EXPONENT, 0)
     at = probe.GATE_HEAD.size
     stats = np.frombuffer(body, "<f4", 2 * DIMS, at)
     assert np.array_equal(stats, np.concatenate([mean, std]))
@@ -115,6 +115,25 @@ def test_the_gate_record_reads_back_each_window_as_its_int8_input_and_python_dec
         assert list(ctc_score.DECISION_RECORD.unpack_from(body, at)) == decision.tolist()
         at += ctc_score.DECISION_RECORD.size
     assert at == len(body)
+
+
+def test_gate_rounds_split_the_windows_in_order_into_records_the_partition_takes(monkeypatch) -> None:
+    cfg = load_yaml(ctc.CONFIG)
+    monkeypatch.setattr(quant, "Int8Net", DrawnLogits)
+    model = SimpleNamespace(front=SimpleNamespace(hop_stride=2))
+    rng = np.random.default_rng(3)
+    windows = [rng.normal(size=(n, DIMS)).astype(np.float32) for n in (40, 40, 40, 40, 40)]
+    mean, std = rng.normal(size=DIMS).astype(np.float32), rng.uniform(0.5, 2.0, DIMS).astype(np.float32)
+    (whole,) = probe.gate_rounds(cfg, None, model, (mean, std), windows, 1 << 30)
+    (one,) = probe.gate_rounds(cfg, None, model, (mean, std), windows[:1], 1 << 30)
+    room = len(whole) - 3 * (len(whole) - len(one)) // (len(windows) - 1)
+
+    rounds = probe.gate_rounds(cfg, None, model, (mean, std), windows, room)
+    heads = [probe.GATE_HEAD.unpack_from(body) for body in rounds]
+    assert [(h[2], h[-1]) for h in heads] == [(2, 0), (2, 2), (1, 4)]
+    assert all(len(body) <= room for body in rounds)
+    with pytest.raises(ValueError, match="alone does not fit"):
+        probe.gate_rounds(cfg, None, model, (mean, std), windows, probe.GATE_HEAD.size + 64)
 
 
 def test_gate_3_counts_the_chips_decisions_and_refuses_a_log_missing_a_window(tmp_path) -> None:

@@ -279,7 +279,7 @@ ai-probe: ## Export the probes of E11-T10 (TCN), E11-T17 (kws), E11-T12 (ctc; CT
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.command.ctc.probe $(if $(CTC_RUN),--run $(CTC_RUN) --row $(CTC_ROW)) $(if $(CTC_KALDI),--kaldi-pitch) $(if $(CTC_HOLD),--hold $(CTC_HOLD))
 	cd ml && CUDA_VISIBLE_DEVICES= uv run --extra train --extra espdl python -m srpipe.tasks.ns.quant probe
 
-ai-unit: ai-probe ## Run the ai_engine suite on board B at bench's compiler settings; both model slots end erased; with CTC_RUN, Gate 3 counted on the chip's decisions
+ai-unit: ai-probe ## Run the ai_engine suite on board B at bench's compiler settings; both model slots end erased; with CTC_RUN, Gate 3 counted on the chip's decisions, round by round as the voice partition holds them
 	@$(call fresh_sdkconfig,$(UNIT_APP)/sdkconfig,firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.bench \
 	  $(UNIT_APP)/sdkconfig.defaults $(UNIT_APP)/CMakeLists.txt)
 	cd $(UNIT_APP) && idf.py build && \
@@ -289,16 +289,25 @@ ai-unit: ai-probe ## Run the ai_engine suite on board B at bench's compiler sett
 	  python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
 	    --partition-table-file ../../../../test_apps/partitions_unit.csv write_partition --partition-name models_1 \
 	    --input main/probe/ns_models.bin && \
-	  if [ -f main/probe/ctc_gate.bin ]; then \
+	  : > build/unit.log && skip=n && \
+	  for gate in $$(ls main/probe/ctc_gate_*.bin 2>/dev/null | sort -V | sed 1d); do \
 	    python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
 	      --partition-table-file ../../../../test_apps/partitions_unit.csv write_partition --partition-name voice \
-	      --input main/probe/ctc_gate.bin; \
+	      --input $$gate || exit 1; \
+	    { pytest pytest_unit.py --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) -s \
+	        -p no:cacheprovider --skip-autoflash $$skip; echo $$? > build/unit.status; } 2>&1 | tee -a build/unit.log; \
+	    [ $$(cat build/unit.status) -eq 0 ] || exit 1; skip=y; \
+	  done && \
+	  if [ -f main/probe/ctc_gate_0.bin ]; then \
+	    python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
+	      --partition-table-file ../../../../test_apps/partitions_unit.csv write_partition --partition-name voice \
+	      --input main/probe/ctc_gate_0.bin; \
 	  else \
 	    python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) \
 	      --partition-table-file ../../../../test_apps/partitions_unit.csv erase_partition --partition-name voice; \
 	  fi && \
 	  { pytest pytest_unit.py --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) -s \
-	      -p no:cacheprovider; echo $$? > build/unit.status; } 2>&1 | tee build/unit.log; \
+	      -p no:cacheprovider --skip-autoflash $$skip; echo $$? > build/unit.status; } 2>&1 | tee -a build/unit.log; \
 	  exit $$(cat build/unit.status)
 	@if [ -f $(UNIT_APP)/main/probe/ctc_gate.json ]; then \
 	  cd ml && uv run --extra train python -m srpipe.tasks.command.ctc.probe --gate-log ../$(UNIT_APP)/build/unit.log; \

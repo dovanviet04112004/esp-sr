@@ -48,10 +48,11 @@ RECORD = struct.Struct("<16sIIIIii")
 # packed lexicon; then from a four-byte boundary each window's hops, its raw features and its DECISION_RECORD.
 WINDOWS_HEAD = struct.Struct("<4sHHHHBBBB")
 WINDOWS_MAGIC = b"SRCW"
-GATE_FILE, GATE_LABELS = "ctc_gate.bin", "ctc_gate.json"
-# WINDOWS_HEAD's fields and the input exponent; the mean then the std of each feature; the packed lexicon; then from a
-# four-byte boundary each window's hops, its int8 input (hops, features) padded to four bytes, and its DECISION_RECORD.
-GATE_HEAD = struct.Struct("<4sHHHHBBBBb3x")
+GATE_FILE, GATE_LABELS = "ctc_gate_{}.bin", "ctc_gate.json"
+GATE_PARTITION = "voice"  # a round's record, sized by partitions_unit.csv
+# WINDOWS_HEAD's fields, the input exponent and the index of the record's first window; the mean then the std of each
+# feature; the lexicon; then from a four-byte boundary each window's hops, int8 input padded to four, DECISION_RECORD.
+GATE_HEAD = struct.Struct("<4sHHHHBBBBbxH")
 GATE_MAGIC = b"SRCG"
 # ESP-PPQ's helper.save heads an .espdl with "EDL2", the encryption flag, the length and four pad bytes.
 ESPDL_HEAD_BYTES = 16
@@ -177,10 +178,13 @@ def command_windows(cfg: dict, graph, model: encoder.CtcNet, norm: tuple, window
     return body
 
 
-def gate_windows(cfg: dict, graph, model: encoder.CtcNet, norm: tuple, windows: list[np.ndarray]) -> bytes:
+def gate_rounds(
+    cfg: dict, graph, model: encoder.CtcNet, norm: tuple, windows: list[np.ndarray], room: int
+) -> list[bytes]:
     """Every Gate 3 window as its int8 input, the normalised features on the graph's input grid that _step quantises
-    raw features to, each with the decision Python takes on the int8 simulation, laid out as GATE_HEAD says; the test
-    rebuilds raw features from it with the mean and std the record carries, so the chip sees the same int8."""
+    raw features to, each with the decision Python takes on the int8 simulation; in order, packed into records of at
+    most room bytes, each laid out as GATE_HEAD says with the index of its first window. The test rebuilds raw
+    features with the mean and std each record carries, so the chip sees the same int8."""
     mean, std = norm
     reject, margin = cfg["quant"]["reject"], cfg["eval"]["margin"]
     lexicon = ctc_score.default_lexicon()
@@ -188,10 +192,8 @@ def gate_windows(cfg: dict, graph, model: encoder.CtcNet, norm: tuple, windows: 
     int8 = quant.Int8Net(graph, cfg["quant"]["hops"], mean, std, model, cfg["esp_ppq_patches"])
     e = int8.io.input_exponent
     sizes = (commands, most, longest, cfg["chunk_hops"])
-    body = GATE_HEAD.pack(GATE_MAGIC, len(mean), len(windows), reject, margin, *sizes, e)
-    body += np.concatenate([mean, std]).astype("<f4").tobytes() + packed
-    body += b"\0" * (-len(body) % 4)
     per_frames = ctc_score.window_frames(model.front.hop_stride)
+    records = []
     for x in windows:
         normalised = ((x - mean) / std).T[None].astype(np.float32)
         logits = int8(torch.from_numpy(normalised)).numpy()[0]
@@ -200,9 +202,22 @@ def gate_windows(cfg: dict, graph, model: encoder.CtcNet, norm: tuple, windows: 
         log_probs = ctc_score.frame_log_probs(q, int8.io.output_exponent)
         decision, _ = ctc_score.decide(log_probs, lexicon, reject, margin, per_frames)
         hops = np.ascontiguousarray(ptq_espdl.to_int8(normalised, e)[0].T).tobytes()
-        body += struct.pack("<I", len(x)) + hops + b"\0" * (-len(hops) % 4)
-        body += ctc_score.DECISION_RECORD.pack(*decision.tolist())
-    return body
+        record = struct.pack("<I", len(x)) + hops + b"\0" * (-len(hops) % 4)
+        records.append(record + ctc_score.DECISION_RECORD.pack(*decision.tolist()))
+    common = np.concatenate([mean, std]).astype("<f4").tobytes() + packed
+    common += b"\0" * (-(GATE_HEAD.size + len(common)) % 4)
+    rounds, at = [], 0
+    while at < len(records):
+        taken, used = [], GATE_HEAD.size + len(common)
+        while at + len(taken) < len(records) and used + len(records[at + len(taken)]) <= room:
+            used += len(records[at + len(taken)])
+            taken.append(records[at + len(taken)])
+        if not taken:
+            raise ValueError(f"gate window {at} alone does not fit {room} bytes")
+        head = GATE_HEAD.pack(GATE_MAGIC, len(mean), len(taken), reject, margin, *sizes, e, at)
+        rounds.append(head + common + b"".join(taken))
+        at += len(taken)
+    return rounds
 
 
 def probe(
@@ -211,8 +226,9 @@ def probe(
     """Write out/ctc_models.bin and out/ctc_streams.bin: the first stack's layer a frame a step, the net a chunk a
     step, work keeping each ONNX and .espdl; out/ctc_decide.bin, the decision of the default commands (E11-T13); and
     out/ctc_windows.bin, windows through the command calls. With run, the net is the graph of row in its ladder of
-    hearing, streaming a test sentence, and the windows are the board's; out/ctc_gate.bin then holds every Gate 3
-    window and out/ctc_gate.json what each should get, for the on-chip Gate 3, and without run neither is left."""
+    hearing, streaming a test sentence, and the windows are the board's; out/ctc_gate_<round>.bin then hold every
+    Gate 3 window, a round the voice partition takes, and out/ctc_gate.json what each should get, for the on-chip
+    Gate 3; without run none is left."""
     if cfg["probe"]["hops"] % cfg["chunk_hops"] or cfg["quant"]["hops"] % cfg["chunk_hops"]:
         raise ValueError(f"probe and quant hops must be multiples of chunk_hops {cfg['chunk_hops']}")
     scales, p, rungs = cfg["probe"]["norm_scale"], cfg["probe"], ptq_espdl.ladder(quant.LADDER)
@@ -259,14 +275,19 @@ def probe(
     decide.write_bytes(ctc_score.probe_record(cfg))
     command = out / WINDOWS_FILE
     command.write_bytes(command_windows(cfg, net_graph, net, norm, windows))
-    every, labels = out / GATE_FILE, out / GATE_LABELS
+    labels = out / GATE_LABELS
+    for stale in out.glob(GATE_FILE.format("*")):
+        stale.unlink()
     if run is None:
-        every.unlink(missing_ok=True)
         labels.unlink(missing_ok=True)
         return image, streams, decide, command
-    every.write_bytes(gate_windows(cfg, net_graph, net, norm, board))
+    room = pack_models.partition_bytes(GATE_PARTITION, pack_models.UNIT_PARTITIONS)
+    rounds = []
+    for k, body in enumerate(gate_rounds(cfg, net_graph, net, norm, board, room)):
+        rounds.append(out / GATE_FILE.format(k))
+        rounds[-1].write_bytes(body)
     labels.write_text(json.dumps({"names": names, "windows": expected}, ensure_ascii=False), encoding="utf-8")
-    return image, streams, decide, command, every, labels
+    return image, streams, decide, command, *rounds, labels
 
 
 def listen_session(clean: np.ndarray, vad: np.ndarray, decided_of: Callable, tracker, mel: Mel) -> bytes:
@@ -355,7 +376,7 @@ def listen_rounds(cfg: dict, out: Path) -> list[Path]:
 
 
 def gate_on_chip(log: Path, labels: Path) -> dict:
-    """Gate 3 counted on the chip's own decisions, as the unit app prints one for each window of ctc_gate.bin."""
+    """Gate 3 counted on the chip's own decisions, as the unit app prints one for each window of the gate rounds."""
     meta = json.loads(labels.read_text(encoding="utf-8"))
     decided = {
         int(w): int(c) for w, c in re.findall(r"gate window (\d+): board (-?\d+)", log.read_text(errors="replace"))

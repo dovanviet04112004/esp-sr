@@ -113,12 +113,18 @@ TEST_CASE("a model slot loads only when its grid and every sha256 match", "[ai_e
     TEST_ASSERT_EQUAL(psram_free, heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }
 
+bool ctc_gate_round_only(void);
+
 void app_main(void)
 {
     ESP_ERROR_CHECK(sys_storage_init());
     UNITY_BEGIN();
-    // The ns probe reads models_1 as make ai-unit wrote it; every other case rewrites that slot.
-    unity_run_tests_by_tag("[ns_probe]", false);
-    unity_run_tests_by_tag("[ns_probe]", true);
+    if (ctc_gate_round_only()) {
+        unity_run_tests_by_tag("[ctc_gate]", false);
+    } else {
+        // The ns probe reads models_1 as make ai-unit wrote it; every other case rewrites that slot.
+        unity_run_tests_by_tag("[ns_probe]", false);
+        unity_run_tests_by_tag("[ns_probe]", true);
+    }
     UNITY_END();
 }
