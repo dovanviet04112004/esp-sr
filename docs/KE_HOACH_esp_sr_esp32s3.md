@@ -1200,7 +1200,7 @@ của bộ lệnh chấm trên một cây tiền tố: mỗi nút là một đơ
 chung cho mọi cách đọc mở đầu như nhau; mỗi khung cập nhật mỗi nút một lần, con trước cha, bằng đúng phép cộng nhân của
 lượt tiến từng cách đọc, nên điểm của mỗi cách đọc trùng từng bit với chấm riêng nó và bản soi gương không đổi. Cây nằm
 trong vùng cấp lúc nạp model, đủ `AI_ENGINE_COMMAND_CTC_NODES_MAX` 32 768 nút (~790 KB ở PSRAM); `test300_vi.json`
-dựng 4 412 nút từ 8 447 đơn vị; bộ cần hơn thì `_prepare` từ chối bằng `ESP_ERR_INVALID_SIZE`. `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ header của ảnh model (§6.3).
+dựng 4 426 nút từ 8 477 đơn vị; bộ cần hơn thì `_prepare` từ chối bằng `ESP_ERR_INVALID_SIZE`. `δ₁`, `δ₂` ở NVS `kws/cmd_reject` và `kws/cmd_margin` (§6.2), gieo từ header của ảnh model (§6.3).
 
 **Mọi điểm chia cho `T_W`**, số khung của một cửa sổ dài `window_s` (94 khung với 3 s), không chia cho số khung của cửa
 sổ đang chấm; đơn vị là nat mỗi khung của `window_s`. Cửa sổ lệnh dài ngắn theo câu và theo chỗ nó mở (§5.4), mà khung
@@ -2367,9 +2367,11 @@ Bộ lệnh để demo và thử đổi lệnh nằm ở `host/sets/`: mỗi fil
 `command_set` của `contracts/`, nên thêm hay xoá một lệnh là sửa file rồi gửi lại bằng `make commands DEVICE=<deviceId>
 SET=host/sets/<file>.json`; `commands.py` tự đóng `version` bằng giờ gửi. Bộ mặc định nướng vào firmware vẫn chỉ ở
 `contracts/commands/default_vi.json`. `battat_vi.json` là bộ mặc định cộng hai cặp bật / tắt ti vi và điều hoà: bộ
-mà phép đổi F0 trên giọng chủ repo quyết trên đó (§3.11). `test300_vi.json` là bộ 300 lệnh để thử bộ lớn nhất (§4.5.5): bộ mặc định, các lệnh
-demo của chủ repo, và lệnh của nhiều việc trong nhà — đèn từng phòng, điều hoà theo độ, ti vi, nhạc, rèm, cửa, rô bốt,
-đồ điện, hẹn giờ, hỏi tin, gọi điện, cảnh — gồm các cặp chỉ khác thanh, các lệnh chung phần đầu dài và số đọc bằng chữ.
+mà phép đổi F0 trên giọng chủ repo quyết trên đó (§3.11). `test300_vi.json` là bộ 301 lệnh, đúng cỡ bộ lớn nhất (§4.5.5);
+`id` mỗi lệnh mở đầu bằng số thứ tự của nó (`001_bat_den` … `301_tat_den_trang_tri`), nên sự kiện board gửi lên nói luôn
+lệnh thứ mấy. Bộ gồm bộ mặc định, các lệnh demo của chủ repo, và lệnh của nhiều việc trong nhà — đèn từng phòng, điều
+hoà theo độ, ti vi, nhạc, rèm, cửa, rô bốt, đồ điện, hẹn giờ, hỏi tin, gọi điện, cảnh — gồm các cặp chỉ khác thanh, các
+lệnh chung phần đầu dài và số đọc bằng chữ.
 
 Một buổi thu nhiều phiên đi theo một file ở `host/plans/`: `make session-plan` hiện lời dặn của từng dòng, chờ
 người thu bấm Enter rồi chạy đúng `make session` với nhãn của dòng ấy, nên mỗi phiên vẫn là một thư mục và một dòng
