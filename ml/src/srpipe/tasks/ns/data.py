@@ -2,8 +2,8 @@
 
 clean decodes every speech candidate once for its bandwidth; split writes data/splits/ns/<version>; pool decodes each
 role's speech, tone and babble into interim/ns/<version>/<role>/ and indexes its noise, read in place from raw/; sets
-mixes val and test once into processed/ns/<version>/; pilot writes examples to hear. Mixer builds an example alike
-for training and the held sets. Run: python -m srpipe.tasks.ns.data {clean,split,pool,sets,pilot}
+mixes val and test once into processed/ns/<version>/; pilot writes examples to hear. Mixer draws, reads and filters
+examples alike; gpu_mix filters training batches. Run: python -m srpipe.tasks.ns.data {clean,split,pool,sets,pilot}
 """
 
 from __future__ import annotations
@@ -524,6 +524,35 @@ class Example:
 
 
 @dataclass(frozen=True)
+class Recipe:
+    """Example (epoch, j) before any filter, what the Mixer drew and read: the room's RIRs (source, mic, taps); the
+    talker's dry track at its level from lead samples ahead of the window, None with no active hop, and its active hops;
+    a foreground source the noise RIRs carry (n + taps), or an int16 pair for a diffuse field, at snr_db over the
+    talker or at fg_dbfs with none; the room tone's int16 pair; the stream's state at the self noise, its last draw."""
+
+    rirs: np.ndarray
+    lead: int
+    dry: np.ndarray | None
+    active: np.ndarray
+    source: np.ndarray | None
+    pair: np.ndarray | None
+    snr_db: float | None
+    fg_dbfs: float | None
+    tone: np.ndarray
+    tone_dbfs: float
+    gain_db: float
+    draws: dict
+    noise_state: dict
+
+
+def stream_at(state: dict) -> np.random.Generator:
+    """A generator that goes on from a bit generator's saved state."""
+    rng = np.random.default_rng()
+    rng.bit_generator.state = state
+    return rng
+
+
+@dataclass(frozen=True)
 class Stream:
     """An epoch's speech: utterances in a shuffled order, each at its start in samples, with its level, then the
     silence after it."""
@@ -543,7 +572,7 @@ def forget_old(cache: dict[int, object]) -> None:
 class Mixer:
     """Examples of one role (KEHOACH 3.9): every speech sample once an epoch in windows of mix.example_s, plus
     windows without a talker, each in a room of the role, with a foreground source, the room's tone, board B's
-    microphones and a global gain; example (epoch, j) is a pure function of its seed."""
+    microphones and a global gain; example (epoch, j) is a pure function of its seed, its recipe through mixed."""
 
     def __init__(self, cfg: dict, dev: dict, paths: dict, role: str, seed: int) -> None:
         self.cfg, self.dev, self.role, self.seed = cfg, dev, role, seed
@@ -621,7 +650,8 @@ class Mixer:
         """RMS of a channel of respond's output on the chain's scale."""
         return math.sqrt(float(np.mean(responded[channel] ** 2))) * device.chain_scale(self.mics)
 
-    def foreground(self, rng: np.random.Generator, rirs: np.ndarray, taps: int) -> tuple[np.ndarray, dict]:
+    def foreground(self, rng: np.random.Generator, taps: int) -> tuple[np.ndarray | None, np.ndarray | None, dict]:
+        """A foreground's source of n + taps samples for the noise RIRs, or an int16 pair of babble, and its draws."""
         classes = self.cfg["noise"]["classes"]
         names = list(classes)
         shares = np.array([classes[c]["share"] for c in names])
@@ -636,8 +666,8 @@ class Mixer:
             segs = []
             for k in picks:
                 start = int(offset[k]) + int(rng.integers(max(1, int(length[k]) - n)))
-                segs.append(np.resize(np.asarray(track[start : start + n], dtype=np.float64) / INT16_SCALE, n))
-            return device.diffuse_pair(*segs), {"class": cls, "pool": pool["name"]}
+                segs.append(np.resize(np.asarray(track[start : start + n]), n))
+            return None, np.stack(segs), {"class": cls, "pool": pool["name"]}
         if "synthetic" in pool:
             slope = float(rng.uniform(*pool["synthetic"]["slope_db_per_octave"]))
             spectrum = np.fft.rfft(rng.standard_normal(n + taps))
@@ -650,8 +680,7 @@ class Mixer:
             seconds = np.array([s for _, s in files])
             item = files[int(rng.choice(len(files), p=seconds / seconds.sum()))][0]
             source, draws = self.noise_stretch(rng, item, n + taps), {"file": item}
-        noise = np.stack([signal.fftconvolve(source, rirs[device.NOISE, m])[taps : taps + n] for m in range(2)])
-        return noise, {"class": cls, "pool": pool["name"], **draws}
+        return source, None, {"class": cls, "pool": pool["name"], **draws}
 
     def noise_stretch(self, rng: np.random.Generator, item: str, count: int) -> np.ndarray:
         """count samples of a noise file from a start drawn over its length, tiled when the file is shorter; a file at
@@ -676,6 +705,7 @@ class Mixer:
         return "synthetic" in pool or bool(self.noise.get(pool["name"]))
 
     def room_tone(self, rng: np.random.Generator) -> tuple[np.ndarray, dict]:
+        """Two int16 stretches of the room tone for a diffuse field, and the pool drawn."""
         tone, offset, length, label = self.tone
         names = [p["name"] for p in self.cfg["tone"]["pools"]]
         have = sorted(set(label.tolist()))
@@ -693,10 +723,10 @@ class Mixer:
         else:
             other = int(files[int(rng.integers(len(files)))])
             spans = [(int(offset[f]) + int(rng.integers(max(1, int(length[f]) - n))), n) for f in (k, other)]
-        segs = [np.resize(np.asarray(tone[s : s + m], dtype=np.float64) / INT16_SCALE, n) for s, m in spans]
-        return device.diffuse_pair(*segs), {"tone_pool": names[pick]}
+        return np.stack([np.resize(np.asarray(tone[s : s + m]), n) for s, m in spans]), {"tone_pool": names[pick]}
 
-    def example(self, epoch: int, j: int) -> Example:
+    def recipe(self, epoch: int, j: int) -> Recipe:
+        """Every draw and every read of example (epoch, j), from its one stream in a fixed order, self noise last."""
         mix, t = self.cfg["mix"], self.dev["talker"]
         rng = np.random.default_rng([self.seed, EXAMPLE_STREAM, epoch, j])
         low, high = mix["rooms"][self.role]
@@ -705,8 +735,7 @@ class Mixer:
         taps, n = rirs.shape[-1], self.n
         window = int(self.kinds(epoch)[j])
         draws: dict = {"epoch": epoch, "example": j, "window": window, "room": entry}
-        talker = np.zeros((2, n))
-        active = np.zeros(n // HOP, dtype=bool)
+        dry, lead, active = None, 0, np.zeros(n // HOP, dtype=bool)
         if window >= 0:
             # A lead-in of whole hops ahead of the window carries the reverberant tail of earlier speech.
             lead = -(-taps // HOP) * HOP
@@ -714,40 +743,76 @@ class Mixer:
             spl_db = float(rng.uniform(*t["spl_1m_db"]))
             level = self.mics.sensitivity_dbfs + spl_db - device.SENSITIVITY_SPL_DB
             dry *= device.TALKER_REFERENCE_M * 10.0 ** (level / 20.0)
-            talker = np.stack([signal.fftconvolve(dry, rirs[device.TALKER, m])[lead : lead + n] for m in range(2)])
             active = active[lead // HOP :]
             draws["spl_1m_db"] = spl_db
         talking = bool(active.any())
-        responded = self.respond(talker) if talking else np.zeros((2, n))
-        total = responded.copy()
+        source = pair = snr_db = fg_dbfs = None
         if rng.random() < mix["foreground"]:
-            fg, fg_draws = self.foreground(rng, rirs, taps)
-            fg_resp = self.respond(fg)
-            if not self.level_of(fg_resp, 0) > 0:
-                raise ValueError(f"a silent foreground: {fg_draws}")
+            source, pair, fg_draws = self.foreground(rng, taps)
             if talking:
-                cls = self.cfg["noise"]["classes"][fg_draws["class"]]
-                snr_db = float(rng.uniform(*cls["snr_db"]))
-                power = float(np.mean(talker[0].reshape(-1, HOP)[active] ** 2))
-                gain = math.sqrt(power / 10.0 ** (snr_db / 10.0) / float(np.mean(fg[0] ** 2)))
+                snr_db = float(rng.uniform(*self.cfg["noise"]["classes"][fg_draws["class"]]["snr_db"]))
                 fg_draws["snr_db"] = snr_db
             else:
-                level_dbfs = float(rng.uniform(*mix["noise_only_dbfs"]))
-                gain = 10.0 ** (level_dbfs / 20.0) / self.level_of(fg_resp, 0)
-                fg_draws["level_dbfs"] = level_dbfs
-            total += gain * fg_resp
+                fg_dbfs = float(rng.uniform(*mix["noise_only_dbfs"]))
+                fg_draws["level_dbfs"] = fg_dbfs
             draws |= fg_draws
         tone, tone_draws = self.room_tone(rng)
-        tone_resp = self.respond(tone)
         tone_dbfs = float(rng.uniform(*self.cfg["tone"]["level_dbfs"]))
-        total += tone_resp * 10.0 ** (tone_dbfs / 20.0) / self.level_of(tone_resp, 1)
         gain_db = float(rng.uniform(*mix["global_gain_db"]))
-        g = 10.0 ** (gain_db / 20.0)
-        capture = device.digitise(g * total, self.mics, rng)
-        linear = (g * device.chain_scale(self.mics) * responded).astype(np.float32)
-        vad = active | np.concatenate([[False], active[:-1]])
         draws |= tone_draws | {"tone_dbfs": tone_dbfs, "gain_db": gain_db, "talker": talking}
-        return Example(capture, linear, vad.astype(np.uint8), draws)
+        talker = dry if talking else None
+        return Recipe(
+            rirs,
+            lead,
+            talker,
+            active,
+            source,
+            pair,
+            snr_db,
+            fg_dbfs,
+            tone,
+            tone_dbfs,
+            gain_db,
+            draws,
+            rng.bit_generator.state,
+        )
+
+    def mixed(self, r: Recipe) -> Example:
+        """The example a recipe makes through the board simulation's filters, numpy in float64."""
+        n, taps = self.n, r.rirs.shape[-1]
+        talker = np.zeros((2, n))
+        if r.dry is not None:
+            talker = np.stack(
+                [signal.fftconvolve(r.dry, r.rirs[device.TALKER, m])[r.lead : r.lead + n] for m in range(2)]
+            )
+        responded = self.respond(talker) if r.dry is not None else np.zeros((2, n))
+        total = responded.copy()
+        if r.source is not None or r.pair is not None:
+            if r.source is not None:
+                fg = np.stack(
+                    [signal.fftconvolve(r.source, r.rirs[device.NOISE, m])[taps : taps + n] for m in range(2)]
+                )
+            else:
+                fg = device.diffuse_pair(*(r.pair / INT16_SCALE))
+            fg_resp = self.respond(fg)
+            if not self.level_of(fg_resp, 0) > 0:
+                raise ValueError(f"a silent foreground: {r.draws}")
+            if r.snr_db is not None:
+                power = float(np.mean(talker[0].reshape(-1, HOP)[r.active] ** 2))
+                gain = math.sqrt(power / 10.0 ** (r.snr_db / 10.0) / float(np.mean(fg[0] ** 2)))
+            else:
+                gain = 10.0 ** (r.fg_dbfs / 20.0) / self.level_of(fg_resp, 0)
+            total += gain * fg_resp
+        tone_resp = self.respond(device.diffuse_pair(*(r.tone / INT16_SCALE)))
+        total += tone_resp * 10.0 ** (r.tone_dbfs / 20.0) / self.level_of(tone_resp, 1)
+        g = 10.0 ** (r.gain_db / 20.0)
+        capture = device.digitise(g * total, self.mics, stream_at(r.noise_state))
+        linear = (g * device.chain_scale(self.mics) * responded).astype(np.float32)
+        vad = r.active | np.concatenate([[False], r.active[:-1]])
+        return Example(capture, linear, vad.astype(np.uint8), r.draws)
+
+    def example(self, epoch: int, j: int) -> Example:
+        return self.mixed(self.recipe(epoch, j))
 
 
 def slot_powers(example: Example, gains: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
