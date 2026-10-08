@@ -8,9 +8,14 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "gen_grid.h"
+#include "sdkconfig.h"
 #include "unity.h"
 
+#if CONFIG_DSP_SPEC_FFT_DL_FFT
 #define BACKEND "dl_fft"
+#else
+#define BACKEND "radix4"
+#endif
 
 #define MAX_POINTS 2048
 #define HOPS 64

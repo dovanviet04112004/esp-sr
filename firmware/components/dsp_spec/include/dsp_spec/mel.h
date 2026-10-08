@@ -37,6 +37,7 @@ size_t dsp_spec_mel_workspace_bytes(const dsp_spec_mel_config_t *cfg);
 esp_err_t dsp_spec_mel_init(dsp_spec_mel_t **out, const dsp_spec_mel_config_t *cfg, void *mem, size_t bytes);
 
 /** Natural log of each band's power from GEN_GRID_N_BINS bins; writes n_bands floats.
+ *  The log is the module's float32 one, within 2e-6 of ln, as srpipe.dsp.spec.mel takes it (KEHOACH 3.14).
  *  @ctx any | non-blocking
  */
 esp_err_t dsp_spec_mel_log(const dsp_spec_mel_t *mel, const dsp_spec_cplx_t *bins, float *out);

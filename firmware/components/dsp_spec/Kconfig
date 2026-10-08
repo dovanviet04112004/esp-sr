@@ -1,0 +1,23 @@
+menu "dsp_spec"
+
+    choice DSP_SPEC_FFT_BACKEND
+        prompt "FFT under the STFT, log-mel and aec (KEHOACH 3.1, ADR-0020)"
+        default DSP_SPEC_FFT_RADIX4
+        help
+            Picks the one source file of the real FFT that goes into the build.
+
+        config DSP_SPEC_FFT_RADIX4
+            bool "hand-written radix 4, bit for bit with srpipe.dsp.spec.fft"
+            help
+                Adds src/fft.c, its tables in the caller's memory. The stft and mel goldens and Gate 3 on the
+                chip match Python exactly only with this FFT (KEHOACH 3.14).
+
+        config DSP_SPEC_FFT_DL_FFT
+            bool "dl_fft 0.7.0"
+            help
+                Adds src/fft_dl.c. dl_fft allocates its own tables in internal RAM at init (KEHOACH 4.5.3
+                rule 7); on the S3 it runs fused multiply-adds and newlib's cosf and sinf, so the features no
+                longer match the Python mirror bit for bit. Kept to compare against.
+    endchoice
+
+endmenu

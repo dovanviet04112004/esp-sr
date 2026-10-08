@@ -9,6 +9,22 @@
 #define SLANEY_KNEE_HZ 1000.0
 #define SLANEY_KNEE_MEL (SLANEY_KNEE_HZ / SLANEY_LINEAR_HZ_PER_MEL)
 #define MAX_WEIGHTS (2 * GEN_GRID_N_BINS) // a bin feeds at most two bands
+#define LN_2 0.69314718055994530942
+#define SQRT_HALF 0.70710678118654752440
+#define FLOAT_EXP_SHIFT 23
+#define FLOAT_EXP_FIELD 0xffu
+#define FLOAT_MANTISSA_MASK 0x007fffffu
+#define FLOAT_HALF_BITS 0x3f000000u // 0.5: a mantissa in [0.5, 1)
+#define FLOAT_HALF_FIELD 126        // exponent field of 0.5
+
+typedef union {
+    float f;
+    uint32_t u;
+} float_bits_t;
+
+// 2 atanh t = ln((1 + t) / (1 - t)): odd powers 1 .. 9, |t| <= 0.172 on [sqrt(1/2), sqrt(2)).
+static const float LN_COEFFS[] = {(float)(2.0 / 1), (float)(2.0 / 3), (float)(2.0 / 5), (float)(2.0 / 7),
+                                  (float)(2.0 / 9)};
 
 struct dsp_spec_mel_s {
     uint16_t n_bands;
@@ -96,6 +112,23 @@ esp_err_t dsp_spec_mel_init(dsp_spec_mel_t **out, const dsp_spec_mel_config_t *c
     return ESP_OK;
 }
 
+// ln x of a positive normal x: exponent off the bits, mantissa in [sqrt(1/2), sqrt(2)) by the series.
+static float ln_f32(float x)
+{
+    const uint32_t b = ((float_bits_t){.f = x}).u;
+    int exponent = (int)((b >> FLOAT_EXP_SHIFT) & FLOAT_EXP_FIELD) - FLOAT_HALF_FIELD;
+    float mantissa = ((float_bits_t){.u = (b & FLOAT_MANTISSA_MASK) | FLOAT_HALF_BITS}).f;
+    if (mantissa < (float)SQRT_HALF) {
+        mantissa = mantissa * 2.0f;
+        exponent--;
+    }
+    const float t = (mantissa - 1.0f) / (mantissa + 1.0f);
+    const float t2 = t * t;
+    const float *c = LN_COEFFS;
+    const float series = t * (c[0] + t2 * (c[1] + t2 * (c[2] + t2 * (c[3] + t2 * c[4]))));
+    return (float)exponent * (float)LN_2 + series;
+}
+
 esp_err_t dsp_spec_mel_log(const dsp_spec_mel_t *mel, const dsp_spec_cplx_t *bins, float *out)
 {
     if (mel == NULL || bins == NULL || out == NULL) { return ESP_ERR_INVALID_ARG; }
@@ -107,7 +140,7 @@ esp_err_t dsp_spec_mel_log(const dsp_spec_mel_t *mel, const dsp_spec_cplx_t *bin
             energy += w[i] * (x[i].re * x[i].re + x[i].im * x[i].im);
         }
         w += mel->n_weights[b];
-        out[b] = logf(energy + mel->log_floor);
+        out[b] = ln_f32(energy + mel->log_floor);
     }
     return ESP_OK;
 }

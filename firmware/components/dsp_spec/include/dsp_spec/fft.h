@@ -1,4 +1,5 @@
-/** Real FFT and inverse on dl_fft, the backend ADR-0002 chose (KEHOACH 3.1).
+/** Real FFT and inverse: the hand-written radix 4 that matches srpipe.dsp.spec.fft bit for bit, or dl_fft
+ *  when Kconfig DSP_SPEC_FFT_BACKEND picks it (KEHOACH 3.1, 3.14, ADR-0020).
  *  @ctx any | non-blocking | one instance is used by one task at a time
  */
 #pragma once
@@ -18,15 +19,15 @@ typedef struct {
 
 typedef struct dsp_spec_fft_s dsp_spec_fft_t;
 
-/** Bytes the caller provides for an FFT of n_points; the backend keeps its own tables (KEHOACH 4.5.3).
+/** Bytes the caller provides for an FFT of n_points; dl_fft keeps its tables apart (KEHOACH 4.5.3 rule 7).
  *  @ctx any | non-blocking
  *  @ret 0 when n_points is not a power of two between 64 and 2048
  */
 size_t dsp_spec_fft_workspace_bytes(size_t n_points);
 
-/** Build an FFT of n_points inside mem; the backend allocates its tables once here, in internal RAM.
- *  @ctx task | non-blocking, allocates once | init only; caller owns mem of dsp_spec_fft_workspace_bytes
- *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_SIZE short mem | ESP_ERR_NO_MEM no room for tables
+/** Build an FFT of n_points inside mem, its tables computed once here; dl_fft puts them in internal RAM.
+ *  @ctx task | non-blocking, dl_fft allocates once | init only; caller owns mem of the workspace bytes
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_SIZE short mem | ESP_ERR_NO_MEM no room for dl_fft
  */
 esp_err_t dsp_spec_fft_init(dsp_spec_fft_t **out, size_t n_points, void *mem, size_t bytes);
 
