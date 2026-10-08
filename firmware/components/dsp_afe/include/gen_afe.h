@@ -5,6 +5,7 @@
 #pragma once
 
 #define GEN_AFE_VERSION 1
+#define GEN_AFE_CHAIN_GAP_KEEP_S 1.0f
 #define GEN_AFE_HPF_CUTOFF_HZ 80.0f
 #define GEN_AFE_AEC_PARTITIONS 8
 #define GEN_AFE_DOA_BAND_MIN_HZ 2000.0f

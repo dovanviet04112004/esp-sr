@@ -3,6 +3,9 @@
 version: 1
 # The modules the product turns on; firmware/sdkconfig.afe and srpipe.generated.afe.MODULES come from it.
 modules: [hpf, balance, doa, ns_omlsa, vad, agc]
+chain:
+  # A seq gap this short resumes: only what holds samples is cleared, every estimate stays (KEHOACH 4.5.5).
+  gap_keep_s: 1.0
 hpf:
   cutoff_hz: 80.0
 aec:

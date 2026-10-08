@@ -3,6 +3,7 @@
 # Regenerate: python3 tools/gen_contracts.py
 
 VERSION = 1
+CHAIN_GAP_KEEP_S = 1.0
 HPF_CUTOFF_HZ = 80.0
 AEC_PARTITIONS = 8
 DOA_BAND_MIN_HZ = 2000.0
