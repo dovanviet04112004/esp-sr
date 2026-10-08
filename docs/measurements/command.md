@@ -1571,3 +1571,42 @@ mới (`val_commands`, câu `val` nhận nhầm) và trên Cửa 3 float giữ c
 
 δ₁ 200 ‰ lấy hết phần nhận thêm; 300 ‰ chỉ thêm nhận nhầm. Đặt `kws/cmd_reject` 200 qua console lúc 20:56 (`nvs set kws
 cmd_reject 200 -t u16`), khởi động lại: `listening: … delta1 200, delta2 25`.
+
+### 12.27 Câu ngoài bộ: "bật đèn" trên bộ 47 lệnh của chủ repo (08/10)
+
+Board B chạy v8 giữ cả ba chiều cao độ ở δ₁ 200 ‰, δ₂ 25 ‰ (§12.26) với bộ 47 lệnh của chủ repo, có "mở đèn", "tắt
+đèn", "bạn bè" mà không có "bật đèn". 21:11 chủ repo nói "bật đèn": log UART nhận `ban_be` (gap 51, lead 38) rồi `tat_den`
+(gap 138, lead 42); cửa sổ ngay trước mỗi câu bị từ chối (`LOW_SCORE` gap 347, `LOW_MARGIN` gap 132). Ở δ₁ 100 ‰
+`tat_den` đã bị từ chối, `ban_be` thì không; "bạn bè" cùng thanh với "bật đèn" (nặng, huyền).
+
+Phát lại các phiên của Cửa 3 qua `make command-eval SET=host/sets/demo_vi.json` (float, bước 40 000), ba cách nghe cao
+độ. Cửa sổ của các phiên "bật đèn" và "bật quạt", lệnh không có trong bộ, nhận thành "tắt …" ở δ₂ 25 ‰, tính từ
+score/lead/gap của từng cửa sổ, chưa xét luật phần; cột cuối là 14 câu na ná của `20260928_home_032` lọt thành lệnh:
+
+| Cách nghe | "bật" → "tắt", δ₁ 100 ‰ | δ₁ 200 ‰ | "tắt đèn", "tắt quạt" nhận đúng, δ₁ 100 ‰ | Câu na ná lọt, δ₁ 100 / 200 ‰ |
+|---|---|---|---|---|
+| SwiftF0 như lúc học | 16/79 | 35/79 | 68/69 | 0 / 5 |
+| Kaldi, giữ độ hữu thanh | 24/79 | 38/79 | 67/69 | 0 / 4 |
+| giữ cả ba chiều (board B) | 15/79 | 36/79 | 67/69 | 0 / 4 |
+
+Bỏ cao độ không làm "bật" lọt thành "tắt" nhiều hơn SwiftF0; δ₁ 200 ‰ làm lọt gấp đôi ở mọi cách nghe. Chọn δ₁ 200 ‰ ở
+§12.26 đã đọc cột từ chối của Cửa 3 ở δ₂ 50 ‰, không phải δ₂ 25 ‰ board chạy: trên bộ 10 lệnh của Cửa 3, float giữ cả
+ba chiều, 14 câu na ná lọt 0 ở δ₁ 100 ‰ và 5 ở δ₁ 200 ‰.
+
+Trên đồ thị int8 `percentile` của board B, cùng bộ 47 lệnh, mọi cửa sổ của các phiên đếm của Cửa 3, quyết như chip;
+đo bằng script chẩn đoán chạy một lần. Ở 63/80 cửa sổ "bật", lệnh điểm cao nhất là "tắt …", mà vòng tự do vẫn nghe
+`b_<` đầu ở 57/63 và thanh nặng ở âm tiết đầu ở 58/63: mạng nghe ra "bật", mà âm tiết kém nhất của đường "tắt" chỉ kém
+vòng tự do 51–162 ‰ (trung vị 98). Ở cửa sổ có lệnh đúng điểm cao nhất, âm tiết kém nhất kém vòng tự do 0–201 ‰,
+trung vị 28, phân vị 90 là 60. Thêm một trần cho âm tiết kém nhất của lệnh thắng, δ₂ 25 ‰; cột đầu tính mọi cửa sổ của
+các phiên nói lệnh có trong bộ, kể cả hơi thở và tiếng động:
+
+| δ₁ | Trần âm tiết kém nhất | Lệnh trong bộ nhận đúng | "bật" lọt | Câu na ná, nói tự do lọt |
+|---|---|---|---|---|
+| 100 ‰ | — | 116/154 | 23/80 | 0/25 |
+| 100 ‰ | 60 ‰ | 114/154 | 8/80 | 0/25 |
+| 200 ‰ | — | 122/154 | 42/80 | 3/25 |
+| 200 ‰ | 70 ‰ | 120/154 | 12/80 | 0/25 |
+| 200 ‰ | 60 ‰ | 117/154 | 8/80 | 0/25 |
+| 200 ‰ | 50 ‰ | 102/154 | 0/80 | 0/25 |
+
+Luật trần âm tiết đổi cách quyết của KẾ HOẠCH §3.12, nên chưa làm; chủ repo để sau.
