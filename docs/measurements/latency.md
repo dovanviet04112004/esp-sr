@@ -501,7 +501,7 @@ esp-mqtt chỉ gửi tin đã xếp hàng khi vòng của nó thức, mỗi vòn
 khi broker không gửi gì (`mqtt_client.c`, `esp_mqtt_task`). Với poll 50 ms, phần còn lại là nhịp 100 ms của `gui_task`
 (0–100 ms), cộng poll (0–50 ms), cộng mạng và broker.
 
-## 22. `svc_listen` trên chip với `command/v8`: quyết định trùng, điểm lệch vài ‰ (E11-T14)
+## 22. `svc_listen` trên chip với `command/v8`: lệch vài ‰ vì log-mel, trùng 336/336 khi `dsp_spec` khớp từng bit (E11-T14, E6-T8)
 
 Board B, `make listen-unit` ở `1a50f2a` (cây tiền tố, mục 2 và 4 của chủ repo), model khoá `command/v8` hàng
 `percentile` nghe bằng Kaldi, độ hữu thanh gập; mọi phiên Cửa 3 hiện có, bảy lượt nạp; ngưỡng của bản dựng phiên
@@ -533,6 +533,17 @@ Log-mel trên chip khác bản soi gương ở ba chỗ (parity.md: lệch tới
 Model cũ đọc 40 dải trên bước 1/8, v8 đọc 80 dải trên bước 1/16. Số phần tử sát ranh vì thế gấp chừng bốn lần (ước lượng
 từ hai tỉ số), nên lần 198/198 trước là may, không phải khớp từng bit. `make ai-unit` với v8 dừng trước bài thử:
 `ctc_gate.bin` (83 chiều, 336 cửa sổ) lớn hơn phân vùng `voice` 2 MB.
+
+**Sau khi `dsp_spec` khớp bản soi gương từng bit** (E6-T8, `aeef82a`, FFT cơ số 4 mặc định), `make listen-unit` lại trên
+board B, 08/10 10:59–11:33, cùng model, cùng ngưỡng, bảy lượt sinh lại từ bản soi gương mới. Đếm trên log đủ của
+pytest-embedded; bản `tee` của `make` rơi các dòng cuối mỗi lượt.
+
+| Đo | Kết quả |
+|---|---|
+| Cửa sổ trùng Python từng trường | **336/336**, mọi lượt `0 decided otherwise than python` (55, 50, 54, 58, 41, 38, 40 cửa sổ) |
+| Ca `FRAME_GAP` và ca click | qua cả bảy lượt, 3/3 bài thử mỗi lượt |
+| Quyết định sau bước chốt, trung bình mỗi lượt | 76–114 ms; đỉnh 86–88 ms ở lượt không có cửa sổ cắt lùi, tới 1,28 s ở cửa sổ cắt lùi |
+| Việc của một cửa sổ, trung bình / đỉnh mỗi lượt | 775–949 ms / tới 1,27 s |
 
 ## 23. FFT viết tay khớp bản soi gương từng bit, so với `dl_fft` (E6-T8, ADR-0020)
 
