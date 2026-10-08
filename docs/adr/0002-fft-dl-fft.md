@@ -1,6 +1,6 @@
 # ADR-0002 — `dsp_spec` chạy FFT bằng `dl_fft`, bỏ backend `esp-dsp`
 
-- **Trạng thái**: Chấp nhận
+- **Trạng thái**: Thay bởi ADR-0020: `dl_fft` thôi là FFT mặc định, còn chọn được bằng Kconfig
 - **Ngày**: 2026-09-26
 - **Liên quan**: KẾ HOẠCH §3.1, §3.3, §4.5.1, §4.5.3 luật 7; TASKS E6-T2, E6-T3; `docs/measurements/latency.md` §1
 

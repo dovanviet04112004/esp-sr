@@ -1,6 +1,6 @@
 # ADR-0006 — `dsp_afe` dựng với `-ffp-contract=off`; parity dựng như bản chạy thật
 
-- **Trạng thái**: Chấp nhận
+- **Trạng thái**: Chấp nhận; ADR-0020 đưa `dsp_spec` vào cùng luật
 - **Ngày**: 2026-09-27
 - **Liên quan**: KẾ HOẠCH §3.3, §3.14, §4.5.7, §4.5.8; TASKS E7-T1, E7-T2; ADR-0004, ADR-0005; `docs/measurements/latency.md` §6, `parity.md`
 

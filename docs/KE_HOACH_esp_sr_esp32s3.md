@@ -33,7 +33,7 @@ Ký hiệu: 🔬 là số ước hoặc số của tài liệu ngoài, **chưa �
 |---|---|
 | Việc | chuỗi tiếng nói đầy đủ trên board hai micro, từ thu tới nói lại, bằng mã đọc được |
 | Ngôn ngữ đích | tiếng Việt cho từ đánh thức, lệnh và tiếng nói ra |
-| Nền | `dl_fft`, `esp-dl` — hai thư viện mã mở của Espressif; `esp-dsp` được đo và loại ba lần: FFT ở ADR-0002, biquad của `hpf` ở ADR-0004, nhân phức của `balance` ở ADR-0005. **Không** link bất kỳ `.a` nào của ESP-SR vào sản phẩm (TỔNG QUAN §1); chỗ duy nhất được link là app đo `test_apps/espsr_compare` (§3.16, §4.5.1) |
+| Nền | `esp-dl`, `dl_fft` — hai thư viện mã mở của Espressif: `esp-dl` cho mọi mạng học; `dl_fft` là FFT chọn được bằng Kconfig, không mặc định vì không khớp bản soi gương từng bit (ADR-0020). `esp-dsp` được đo và loại ba lần: FFT ở ADR-0002, biquad của `hpf` ở ADR-0004, nhân phức của `balance` ở ADR-0005. **Không** link bất kỳ `.a` nào của ESP-SR vào sản phẩm (TỔNG QUAN §1); chỗ duy nhất được link là app đo `test_apps/espsr_compare` (§3.16, §4.5.1) |
 | Chip | ESP32-S3, hai nhân Xtensa LX7 240 MHz, flash 16 MB, PSRAM 8 MB octal |
 | Đường về máy tính | MQTT cho trạng thái, số liệu, sự kiện; TCP cho tiếng khi bật tay |
 | XONG khi | mọi khối đạt cửa riêng; chạy đồng thời trong một bản dựng; liền 30 phút **0 khung mất**, heap không trôi; mọi con số dựng lại được bằng **một lệnh** `make` |
@@ -411,24 +411,24 @@ hằng số Python, sinh lại toàn bộ golden, sửa mục này — **trong c
 |---|---|---|
 | Tần số lấy mẫu | 16 000 Hz | băng tiếng nói tới 8 kHz; mọi mô hình huấn luyện ở đây; phát và thu cùng tần số (§2.4) |
 | Mẫu vào `dsp_afe` | `int16`, xen kẽ kênh | dạng `drv_audio` giao, khỏi một lần chép |
-| Khung (bước) | **256 mẫu = 16 ms** | luỹ thừa 2 cho `dl_fft`; khớp đúng khối 256 của AEC MDF (§3.5) |
+| Khung (bước) | **256 mẫu = 16 ms** | luỹ thừa 2 cho FFT của `dsp_spec`; khớp đúng khối 256 của AEC MDF (§3.5) |
 | Cửa sổ và FFT | **512 mẫu = 32 ms**, căn Hann tuần hoàn cho cả phân tích lẫn tổng hợp | chồng 50%; tích hai cửa sổ là Hann, cộng dồn bằng hằng, nên không xử lý gì thì dựng lại đúng sóng gốc |
 | Số vạch | 257, cách nhau 31,25 Hz | |
 | Nhịp khung | 62,5 khung/s | mọi hằng số làm trơn lấy từ bài báo phải quy đổi theo nhịp này |
 | Trễ thuật toán của STFT | một cửa sổ, 32 ms 🔬 xác nhận ở E6-T4 | |
 
-**Vì sao không 10 ms như RNNoise và phần lớn bài báo.** 160 mẫu không phải luỹ thừa 2; `dl_fft` chỉ
-nhận luỹ thừa 2 (`dl_fft.h`: *"must be power of two"*). Đệm 320 lên 512 thì phần tổng hợp không còn
-cộng dồn bằng hằng.
+**Vì sao không 10 ms như RNNoise và phần lớn bài báo.** 160 mẫu không phải luỹ thừa 2, mà FFT của `dsp_spec` chỉ
+nhận luỹ thừa 2. Đệm 320 lên 512 thì phần tổng hợp không còn cộng dồn bằng hằng.
 
 **Hằng số thời gian khai bằng giây, quy ra hệ số lúc khởi tạo.** Cấu hình ghi `tau_s`, code tính
 `alpha = exp(−hop / (tau_s · fs))`. Viết thẳng `alpha = 0.98` là gắn chết hành vi vào một nhịp khung:
 đổi lưới thì mọi bộ làm trơn chậm đi hoặc nhanh lên mà không ai thấy.
 
-**Chi phí STFT, đo ở E6-T3** (`latency.md` §1, ADR-0002). Mỗi khung hai phân tích và một tổng hợp; với
-`dl_fft` 0.7.0 ở `-O2` trên board B, phân tích một bước mất 143 µs, tổng hợp 165 µs → **451 µs mỗi khung,
-~2,8% một nhân**. Bản `int16` nhanh gấp tám nhưng SNR chỉ ~58 dB ở 512 điểm — không đủ cho AEC và NS,
-nên không dùng.
+**Chi phí STFT, đo ở E6-T8** (`latency.md` §23, ADR-0020). Mỗi khung hai phân tích và một tổng hợp. Kconfig
+`DSP_SPEC_FFT_BACKEND` chọn FFT thực của `dsp_spec`: mặc định là bản cơ số 4 viết tay, khớp bản soi gương từng bit
+(§3.14); ở `-O2` trên board B, phân tích một bước mất 142 µs, tổng hợp 158 µs → **442 µs mỗi khung, ~2,8% một nhân**.
+Bản kia là `dl_fft` 0.7.0, đo cùng ngày 451 µs, giữ để so. FFT `int16` nhanh gấp tám nhưng SNR chỉ ~58 dB ở 512 điểm,
+không đủ cho AEC và NS, nên không dùng.
 
 ### 3.2 Chuỗi đã chốt
 
@@ -475,8 +475,8 @@ vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đ
 
 | Khối | Loại | Chỗ nằm | Thuật toán chốt | Tham số khởi đầu | Chi phí ước mỗi khung 🔬 | Cửa |
 |---|---|---|---|---|---|---|
-| `fft` `window` `stft` | thuần | `dsp_spec` | FFT thực (`dl_fft`), căn Hann, chồng 50% | §3.1 | **451 µs đo** cả chuỗi | E6-T4 |
-| `mel` | thuần | `dsp_spec` | log-mel, MFCC giữ làm đối chiếu | 80 dải, 20–7 600 Hz | **~240 µs** 🔬 (`rfft` 118 đo; 40 dải đo 62, 80 dải ~124 🔬) | E6-T5 |
+| `fft` `window` `stft` | thuần | `dsp_spec` | FFT thực viết tay cơ số 4, khớp bản soi gương từng bit; `dl_fft` chọn được bằng Kconfig (ADR-0020); căn Hann, chồng 50% | §3.1 | **442 µs đo** cả chuỗi | E6-T4, E6-T8 |
+| `mel` | thuần | `dsp_spec` | log-mel với log float32 của module, MFCC giữ làm đối chiếu | 80 dải, 20–7 600 Hz | **~235 µs** 🔬 (`rfft` 117 đo; 40 dải đo 59, 80 dải ~118 🔬) | E6-T5, E6-T8 |
 | `pitch` | thuần | `dsp_spec` | bộ dò cao độ của Kaldi chạy dòng: NCCF ở 4 kHz, Viterbi, ra độ hữu thanh + log F0 trừ trung bình + delta (§3.11) | 50–400 Hz | **1,98 ms đo** mỗi bước ở nhân 0, vùng làm việc trong PSRAM (`measurements/pitch.md`); dựng cho `command` (ADR-0010) | E11-T8 |
 | `hpf` | thuần | `dsp_afe` | IIR bậc hai Butterworth, dạng II chuyển vị viết tay (ADR-0004) | 80 Hz | ~41 µs hai kênh | E7-T1 |
 | `balance` | thuần | `dsp_afe` | nhân hệ số phức hiệu chuẩn mỗi vạch cho `ch1`, vòng viết tay (ADR-0005) | từ NVS `calib/bal` | ~18 µs | E7-T2 |
@@ -553,7 +553,7 @@ phát dưới 200 Hz; ở đó nguồn là chính tiếng phòng, vốn kết h�
 
 | Thành phần | Chốt | Vì sao |
 |---|---|---|
-| Khung | chồng-lưu, cửa sổ chữ nhật | phép chập tuyến tính cần chồng-lưu; cửa sổ căn Hann của STFT không cho phép chập tuyến tính, nên AEC có phép biến đổi riêng — chạy trên **cùng** bộ FFT 512 điểm của chuỗi mà `dsp_afe_aec_init` nhận vào, để bảng `dl_fft` chỉ cấp một lần trong `sach_task` (luật 7 §4.5.3) |
+| Khung | chồng-lưu, cửa sổ chữ nhật | phép chập tuyến tính cần chồng-lưu; cửa sổ căn Hann của STFT không cho phép chập tuyến tính, nên AEC có phép biến đổi riêng — chạy trên **cùng** bộ FFT 512 điểm của chuỗi mà `dsp_afe_aec_init` nhận vào, để bảng xoay pha chỉ dựng một lần trong `sach_task` |
 | Ràng buộc gradient | luân phiên: mỗi khối ràng buộc **một** phân đoạn | ràng buộc đủ cả 8 là 16 FFT mỗi khối mỗi micro; luân phiên giữ hội tụ với 2 FFT |
 | Bước học | tự chỉnh theo ước lượng vọng dư (Valin, 2007) | cho phép bỏ bộ dò hai bên cùng nói, thứ hay dò sai nhất |
 | Khử vọng dư | ước phổ vọng dư mỗi vạch, **chuyển cho khe `ns`** cộng vào phổ nhiễu | loa nhỏ mở to méo phi tuyến; bộ lọc tuyến tính dừng ở cỡ 15–25 dB 🔬 |
@@ -1359,21 +1359,33 @@ thực** như TỔNG QUAN đòi, và độ trễ nghe thấy là thời gian d�
 
 | Loại khối | Số học | Kiểm khớp Python ↔ C bằng |
 |---|---|---|
-| Thuần, liên tục (`dsp_spec`, `dsp_afe`) | float32 cả hai bên | golden, sai số tuyệt đối và SNR tối thiểu khai trong `contracts/golden/<module>/tolerance.yaml` |
+| Thuần, liên tục, cấp đặc trưng cho mạng (`dsp_spec`) | float32 cả hai bên, từng phép theo thứ tự của bản C | golden **khớp tuyệt đối** với FFT mặc định; riêng `pitch` giữ ngưỡng nới cho bảng `sin`, `cos` lấy từ libm, dù đo trùng từng bit trên máy tính và board B |
+| Thuần, liên tục (`dsp_afe`) | float32 cả hai bên | golden, sai số tuyệt đối và SNR tối thiểu khai trong `contracts/golden/<module>/tolerance.yaml` |
 | Thuần, rời rạc (`lang_vi`, chọn lệnh trong `command`) | số nguyên và chuỗi | golden, **khớp tuyệt đối** |
 | Mô hình (`ai_engine`) | int8 qua esp-dl | `model->test()` so với mô phỏng ESP-PPQ, trong một bước int8 mỗi phần tử |
 
 Python viết bằng **float32**, không float64: so float64 với float32 thì sai số của phép so che mất sai
 số của thuật toán. Ngưỡng khớp là dữ liệu của golden, không phải hằng số trong code kiểm (§4.9).
 
+**Vì sao `dsp_spec` phải khớp từng bit.** Đặc trưng của nó đi thẳng vào lưới int8 của mạng. Một phần tử lệch ở bit cuối
+mà nằm sát ranh làm tròn thì sang ô bên cạnh, và quyết định của chip thôi bằng quyết định Python từng trường (§3.12).
+`command/v8` đọc 80 dải log-mel trên bước 1/16 độ lệch chuẩn và lệch điểm ở 14/319 cửa sổ của `make listen-unit`, mỗi
+cửa sổ vì đúng một phần tử log-mel như thế (`measurements/latency.md` §22). Nên mọi phép trên đường mỗi bước của
+`dsp_spec` là mã của repo, hai bên viết theo cùng thứ tự. FFT thực mặc định là bản cơ số 4 viết tay, nhanh ngang
+`dl_fft` (ADR-0020). Kconfig `DSP_SPEC_FFT_BACKEND` đổi sang `dl_fft` được, để so; khi ấy bộ vàng `stft`, `mel` và Cửa 3
+trên chip thôi khớp từng bit, vì hợp ngữ S3 của nó gộp nhân-cộng và bảng của nó lấy `cosf`, `sinf` của newlib. Log của
+mel là hàm float32 của module: số mũ đọc từ bit, phần định trị qua chuỗi atanh, như `ns_omlsa`.
+
 Bộ vàng sinh ra phải **giống nhau từng byte trên mọi máy**: CI sinh lại và so với bản đã commit. Hai thứ của numpy đổi
 theo CPU nên bản soi gương không dùng: hàm siêu việt float32 (`log10`, `log`, `sin`, …, đi đường SIMD khác trên máy
 AVX-512) và tổng qua BLAS (`@`, `dot`, tự chia tổng). Hàm siêu việt tính ở double rồi làm tròn một lần sang float32, tức
-bản float làm tròn đúng; tổng float32 cộng lần lượt theo đúng thứ tự bản C (`np.cumsum` hay vòng lặp).
+bản float làm tròn đúng, ở cả hai bên; vậy là đủ cho các bảng dựng một lần lúc khởi tạo (xoay pha của FFT, cửa sổ căn
+Hann, trọng số mel). Tổng float32 cộng lần lượt theo đúng thứ tự bản C (`np.cumsum` hay vòng lặp).
 
-`dsp_afe` dựng với **`-ffp-contract=off`** (ADR-0006): trình biên dịch không gộp `a · b + c` thành một lệnh làm tròn một
-lần, nên mỗi phép float32 làm tròn như numpy và bản C khớp bản soi gương từng bit ở mọi profile, trên mọi máy. Parity
-trên board dựng bằng cờ trình biên dịch của `bench`, cũng là của `prod` (§4.5.8), để kiểm đúng mã chạy thật.
+`dsp_afe` và `dsp_spec` dựng với **`-ffp-contract=off`** (ADR-0006, ADR-0020): trình biên dịch không gộp `a · b + c`
+thành một lệnh làm tròn một lần, nên mỗi phép float32 làm tròn như numpy và bản C khớp bản soi gương từng bit ở mọi
+profile, trên mọi máy. Parity trên board dựng bằng cờ trình biên dịch của `bench`, cũng là của `prod` (§4.5.8), để kiểm
+đúng mã chạy thật.
 
 **Mỗi bộ vàng có đối chứng âm** (TỔNG QUAN §5.3 bước 2): một ca cố ý sai một chỗ — đảo dấu một hệ số,
 lệch một mẫu — và phép kiểm phải đỏ ở ca đó. Bộ vàng không bắt được lỗi cố ý là bộ vàng không kiểm gì.
@@ -1951,7 +1963,7 @@ chứng âm cố ý vi phạm:
 
 | Phụ thuộc | Khai ở | Ghim |
 |---|---|---|
-| `espressif/dl_fft` | `dsp_spec` | `==0.7.0`, bản đo ở E6-T3 (ADR-0002) |
+| `espressif/dl_fft` | `dsp_spec` | `==0.7.0`, bản đo ở E6-T3 (ADR-0002); FFT chọn được bằng Kconfig, không mặc định (ADR-0020); ghim này cũng giữ bản `dl_fft` riêng của `esp-dl` |
 | `espressif/esp-dl` | `ai_engine` | `==3.3.11`, cặp với ESP-PPQ `==1.3.11` ở `ml/pyproject.toml`; chạy dòng khớp mô phỏng từng bit ở E11-T10 |
 | `espressif/mqtt`, `espressif/cjson` | `net_mqtt` | `^`; IDF v6 đã đưa cả hai ra khỏi lõi, `REQUIRES mqtt` trơ fail ở bước giải phụ thuộc |
 | `joltwallet/littlefs` | `sys_storage` | `^` |
@@ -1996,7 +2008,8 @@ firmware/
 ├── components/                       # ── 100% CODE TỰ VIẾT ──
 │   ├── common/        [C]   L0  # header thuần: app_err.h, app_events.h, gen_grid.h, gen_array.h, gen_stream.h, gen_units.h,
 │   │                            #   gen_listen.h
-│   ├── dsp_spec/      [C]   L1  # fft, window, stft, mel, pitch — thuật toán thuần
+│   ├── dsp_spec/      [C]   L1  # fft, window, stft, mel, pitch — thuật toán thuần; Kconfig DSP_SPEC_FFT_BACKEND
+│   │                            #   chọn src/fft.c (viết tay, mặc định) hay src/fft_dl.c (dl_fft) vào danh sách nguồn
 │   ├── lang_vi/       [C]   L1  # normalize, g2p, lexicon — luật ngôn ngữ thuần
 │   ├── bsp_board/     [C]   L1  # include/app_config.h: MỌI chân GPIO, một file duy nhất
 │   ├── dsp_afe/       [C]   L2  # hpf balance aec doa gsc bss ns_omlsa vad agc + khe ns
@@ -2090,7 +2103,7 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | 4 | Mọi hàm công khai có doc comment theo khuôn CLAUDE.md §2.7, **bắt buộc `@ctx`** | Người gọi biết được gọi từ đâu, có chặn không, ai giữ bộ nhớ |
 | 5 | Tắt một module là **đổi danh sách nguồn**: `if(CONFIG_DSP_AFE_GSC_ENABLE) list(APPEND srcs src/gsc.c) endif()`. `REQUIRES` **không** đặt trong điều kiện | Bọc lệnh rẽ nhánh vẫn nạp mã và bộ nhớ của khối đã tắt (TỔNG QUAN §4.3). CMake giải phụ thuộc trước khi đọc Kconfig, nên `REQUIRES` có điều kiện không hoạt động |
 | 6 | Không hàm nghiệm thu nào trong `src/` hay header công khai; nghiệm thu nằm ở `test_apps/` của chính component | Để trong thư viện thì nó thành API vĩnh viễn và mỗi lần boot phải trả giá cho thứ chỉ dùng lúc cắm dây |
-| 7 | **Người gọi cấp bộ nhớ.** Mỗi module có `_workspace_bytes(cfg)` và `_init(cfg, mem, bytes)`; bên trong không `malloc`, không `heap_caps_*`. **Ngoại lệ duy nhất:** bảng của `dl_fft` — thư viện tự cấp bảng trong hàm init và không có đường nhận bộ nhớ ngoài; `dsp_spec_fft_init` để nó cấp **một lần** lúc khởi tạo, ép RAM nội, `workspace_bytes` chỉ tính phần của `dsp_spec`, và `check_purity.py` miễn đúng file bọc `dsp_spec/src/fft_dl.c` | Chỗ đặt (RAM nội hay PSRAM) là quyết định của người gọi và đo được; kiểm trên máy tính dùng `malloc` thường. Đây là câu hỏi "ai cấp phát bộ đệm" mà TỔNG QUAN §5.2 đòi chốt trước |
+| 7 | **Người gọi cấp bộ nhớ.** Mỗi module có `_workspace_bytes(cfg)` và `_init(cfg, mem, bytes)`; bên trong không `malloc`, không `heap_caps_*`; bảng xoay pha của FFT mặc định cũng nằm trong vùng `dsp_spec_fft_init` nhận. **Ngoại lệ duy nhất:** khi Kconfig chọn `dl_fft`, bảng của nó — thư viện tự cấp bảng trong hàm init và không có đường nhận bộ nhớ ngoài; `dsp_spec_fft_init` để nó cấp **một lần** lúc khởi tạo, ép RAM nội, `workspace_bytes` chỉ tính phần của `dsp_spec`, và `check_purity.py` miễn đúng file bọc `dsp_spec/src/fft_dl.c` | Chỗ đặt (RAM nội hay PSRAM) là quyết định của người gọi và đo được; kiểm trên máy tính dùng `malloc` thường. Đây là câu hỏi "ai cấp phát bộ đệm" mà TỔNG QUAN §5.2 đòi chốt trước |
 | 8 | Không FreeRTOS, không driver, không `esp_timer`, không log trong đường nóng. `tools/check_purity.py` quét `#include` | Dịch được trên máy tính, và một lời log trong vòng khung là một lần chặn trên khoá log của IDF |
 | 9 | Không trạng thái toàn cục thay đổi được; mỗi thể hiện chỉ một task dùng một lúc; không khoá bên trong | Hai thể hiện chạy song song an toàn; khoá thuộc về tầng dùng, nơi biết ai chạm vào |
 | 10 | Không chặn, không chờ. Lỗi trả `esp_err_t`; sự cố trong đường nóng ghi vào **bộ đếm** trong struct thống kê | Hàm thuần chạy trong hạn chót của khung; bộ đếm đọc được từ `svc_report` mà không tốn gì |
@@ -2255,7 +2268,7 @@ sinh ra chỗ hở sau, mãi: ghi `set.json` 222 ms làm board bỏ 76% khung kh
 | Loại | Nằm ở | Chạy bằng |
 |---|---|---|
 | Unit trên board | `components/<c>/test_apps/unit/` | `idf.py build flash` + `pytest_*.py` (pytest-embedded) |
-| Unit trên máy tính | `components/<c>/test_apps/host/` | **CMake thường + lớp đệm** `test_apps/host/shim/` (`esp_err.h`, `esp_heap_caps.h`, `esp_log.h`, …), `dl_fft` dựng từ bản C thuần; chạy thêm cả `contracts/golden/` qua bộ so của `test_apps/parity` ở ba bản dựng (mọi module tắt với `chain`, mọi module bật với bộ vàng từng module, đúng các module của `firmware/sdkconfig.afe` với `chain_modules`), phán bằng `pytest_parity.py`; một lệnh `make parity-host`, workflow `firmware` gọi nó mỗi lần push (chốt ở E6-T6). Target `linux` của IDF bị loại: đòi `libbsd-dev` trên máy và kéo cả cổng FreeRTOS vào một component thuần |
+| Unit trên máy tính | `components/<c>/test_apps/host/` | **CMake thường + lớp đệm** `test_apps/host/shim/` (`esp_err.h`, `esp_heap_caps.h`, `esp_log.h`, …), `dsp_spec` với FFT mặc định; chạy thêm cả `contracts/golden/` qua bộ so của `test_apps/parity` ở ba bản dựng (mọi module tắt với `chain`, mọi module bật với bộ vàng từng module, đúng các module của `firmware/sdkconfig.afe` với `chain_modules`), phán bằng `pytest_parity.py`; một lệnh `make parity-host`, workflow `firmware` gọi nó mỗi lần push (chốt ở E6-T6). Target `linux` của IDF bị loại: đòi `libbsd-dev` trên máy và kéo cả cổng FreeRTOS vào một component thuần |
 | Parity C ↔ Python | `test_apps/parity/` | đọc `contracts/golden/` trong LittleFS, so theo `tolerance.yaml`; dựng bằng cờ trình biên dịch của `bench` (§3.14), hai lần: mọi module tắt với bộ vàng `chain`, và profile `modules` (đúng `firmware/sdkconfig.afe`) với bộ vàng của từng module thật và `chain_modules`, chuỗi với các module ấy, hiệu chuẩn `balance` và số gieo `afe/*` |
 | Chi phí | `test_apps/bench_afe`, `bench_kws`, `bench_mem` | in CSV → lưu ở `docs/measurements/bench/` → `tools/budget.py` → `docs/measurements/budget.md` |
 | Chạy dài | `test_apps/soak/` | 30 phút cho Cửa 5, 8 giờ trước khi báo cáo |
