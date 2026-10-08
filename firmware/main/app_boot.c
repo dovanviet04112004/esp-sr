@@ -175,14 +175,17 @@ static esp_err_t listen_to(const command_set_t *set)
         .dialects = LANG_VI_DIALECT_ALL,
         .reject_permille = CONFIG_SVC_LISTEN_CMD_REJECT_PERMILLE,
         .margin_permille = CONFIG_SVC_LISTEN_CMD_MARGIN_PERMILLE,
+        .syllable_permille = CONFIG_SVC_LISTEN_CMD_SYLLABLE_PERMILLE,
     };
     (void)sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, &cfg.reject_permille);
     (void)sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, &cfg.margin_permille);
+    (void)sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_SYLLABLE, &cfg.syllable_permille);
     const esp_err_t err = svc_listen_init(&cfg);
     heap_caps_free(names);
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "listening: every utterance vad finds, delta1 %u, delta2 %u (KEHOACH 5.4)",
-                 (unsigned)cfg.reject_permille, (unsigned)cfg.margin_permille);
+        ESP_LOGI(TAG, "listening: every utterance vad finds, delta1 %u, delta2 %u, delta3 %u (KEHOACH 5.4)",
+                 (unsigned)cfg.reject_permille, (unsigned)cfg.margin_permille,
+                 (unsigned)cfg.syllable_permille);
     }
     return err;
 }

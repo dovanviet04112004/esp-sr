@@ -28,14 +28,16 @@ typedef struct {
     lang_vi_dialect_t dialects; // readings the lexicon holds
     uint16_t reject_permille;   // delta1 ai_engine decides with
     uint16_t margin_permille;   // delta2 ai_engine decides with
+    uint16_t syllable_permille; // delta3 ai_engine decides with
 } svc_listen_config_t;
 
 typedef struct {
-    app_event_t event;          // COMMAND or REJECT; seq is the window's last hop
-    uint32_t first_seq;         // the window's first hop
-    uint16_t free_gap_permille; // free unit loop over the best command
-    uint32_t work_us;           // network and score of the window
-    uint32_t close_us;          // from the utterance's close to the decision
+    app_event_t event;              // COMMAND or REJECT; seq is the window's last hop
+    uint32_t first_seq;             // the window's first hop
+    uint16_t free_gap_permille;     // free unit loop over the best command
+    uint16_t syllable_gap_permille; // free loop over its worst syllable
+    uint32_t work_us;               // network and score of the window
+    uint32_t close_us;              // from the utterance's close to the decision
 } svc_listen_decision_t;
 
 /** Read the commands through lang_vi and prepare ai_engine on them; take the front end, rings and tables.

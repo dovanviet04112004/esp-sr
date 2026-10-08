@@ -31,10 +31,10 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
     uint32_t first, last;
     int16_t command;
-    uint16_t score, margin, gap;
+    uint16_t score, margin, gap, syllable;
 } window_t;
 _Static_assert(sizeof(listen_head_t) == 12 && sizeof(session_head_t) == 8 && sizeof(segment_head_t) == 8 &&
-                   sizeof(window_t) == 16,
+                   sizeof(window_t) == 18,
                "listen record layout");
 
 #define PERMILLE_MAX 1000  // event.schema's cap of score and margin
@@ -109,8 +109,8 @@ static bool same(const window_t *want, const svc_listen_decision_t *got, const n
     const uint16_t score = want->score < PERMILLE_MAX ? want->score : PERMILLE_MAX;
     const uint16_t margin = want->margin < PERMILLE_MAX ? want->margin : PERMILLE_MAX;
     return command && e->score_permille == score && e->margin_permille == margin &&
-           got->free_gap_permille == want->gap && got->first_seq == base + want->first &&
-           e->seq == base + want->last;
+           got->free_gap_permille == want->gap && got->syllable_gap_permille == want->syllable &&
+           got->first_seq == base + want->first && e->seq == base + want->last;
 }
 
 // One session and the silence after it, hop by hop through svc_listen, zeros where no window reads, each
@@ -152,12 +152,12 @@ static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_
         const bool ok = same(&want[w], &decided[w], named, base);
         t->differ += ok ? 0 : 1;
         const app_event_t *e = &decided[w].event;
-        printf("listen window %" PRIu32 "..%" PRIu32 ": board %s %s %u %u %u, python %d %u %u %u%s; %" PRIu32
-               " us after the close\n",
+        printf("listen window %" PRIu32 "..%" PRIu32
+               ": board %s %s %u %u %u %u, python %d %u %u %u %u%s; %" PRIu32 " us after the close\n",
                decided[w].first_seq - base, e->seq - base, e->kind == APP_EVT_COMMAND ? "command" : "reject",
                e->kind == APP_EVT_COMMAND ? e->command_id : e->code, e->score_permille, e->margin_permille,
-               decided[w].free_gap_permille, want[w].command, want[w].score, want[w].margin, want[w].gap,
-               ok ? "" : " DIFFERS", decided[w].close_us);
+               decided[w].free_gap_permille, decided[w].syllable_gap_permille, want[w].command, want[w].score,
+               want[w].margin, want[w].gap, want[w].syllable, ok ? "" : " DIFFERS", decided[w].close_us);
     }
     t->windows += n;
     return p + h.windows * sizeof(window_t);
@@ -186,11 +186,14 @@ static void listen_on(const listen_head_t *head, const named_t *named)
     TEST_ASSERT_TRUE(init == ESP_OK || init == ESP_ERR_INVALID_STATE);
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, head->reject));
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, head->margin));
+    // The rounds are decided uncapped, as probe.py's listen_rounds decide them.
+    TEST_ASSERT_EQUAL(ESP_OK, sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_SYLLABLE, UINT16_MAX));
     TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, ai_engine_load(0),
                               "models_0 lacks the locked models: make listen-unit");
     TEST_ASSERT_TRUE(ai_engine_has(AI_ENGINE_MODEL_COMMAND));
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT));
     TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN));
+    TEST_ASSERT_EQUAL(ESP_OK, sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_SYLLABLE));
     const svc_listen_config_t cfg = {
         .commands = {.texts = named->texts,
                      .ids = named->ids,
@@ -199,6 +202,7 @@ static void listen_on(const listen_head_t *head, const named_t *named)
         .dialects = LANG_VI_DIALECT_ALL,
         .reject_permille = head->reject,
         .margin_permille = head->margin,
+        .syllable_permille = UINT16_MAX,
     };
     TEST_ASSERT_EQUAL(ESP_OK, svc_listen_init(&cfg));
     listening = true;

@@ -17,7 +17,8 @@ extern "C" {
 
 #define APP_CODE_LOW_SCORE "LOW_SCORE"
 #define APP_CODE_LOW_MARGIN "LOW_MARGIN"
-#define APP_CODE_PART "PART" // a part of the best command scored at least as well
+#define APP_CODE_LOW_SYLLABLE "LOW_SYLLABLE" // the best command's worst syllable fell past delta3
+#define APP_CODE_PART "PART"                 // a part of the best command scored at least as well
 #define APP_CODE_TIMEOUT "TIMEOUT"
 #define APP_CODE_FRAME_GAP "FRAME_GAP"
 #define APP_CODE_GRID_MISMATCH "GRID_MISMATCH"

@@ -171,12 +171,12 @@ static void raise_decision(const app_wiring_t *w, const svc_listen_decision_t *d
     // The event leaves first: the log line can wait on a busy UART.
     send_up(w, e);
     ESP_LOGI(TAG,
-             "%s %s score %u margin %u gap %u, hops %" PRIu32 "..%" PRIu32 ", %" PRIu32 " ms work, %" PRIu32
-             " ms after the close",
+             "%s %s score %u margin %u gap %u syllable %u, hops %" PRIu32 "..%" PRIu32 ", %" PRIu32
+             " ms work, %" PRIu32 " ms after the close",
              e->kind == APP_EVT_COMMAND ? "COMMAND" : "REJECT",
              e->kind == APP_EVT_COMMAND ? e->command_id : e->code, (unsigned)e->score_permille,
-             (unsigned)e->margin_permille, (unsigned)d->free_gap_permille, d->first_seq, e->seq,
-             d->work_us / US_PER_MS, d->close_us / US_PER_MS);
+             (unsigned)e->margin_permille, (unsigned)d->free_gap_permille, (unsigned)d->syllable_gap_permille,
+             d->first_seq, e->seq, d->work_us / US_PER_MS, d->close_us / US_PER_MS);
 }
 
 static void raise_error(const app_wiring_t *w, uint32_t seq, const char *code, const char *command_id)

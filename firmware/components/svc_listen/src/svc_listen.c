@@ -62,7 +62,7 @@ static struct {
     table_t tables[2]; // the one in use, and a spare to read a new set into
     size_t active;
     lang_vi_dialect_t dialects;
-    uint16_t reject, margin;
+    uint16_t reject, margin, syllable;
     bool started, in_run, has_open, working;
     uint32_t next_seq, after, run_first, run_last, at;
     window_t queue[WINDOWS_MAX];
@@ -192,6 +192,7 @@ esp_err_t svc_listen_init(const svc_listen_config_t *cfg)
     s.active = 0;
     s.reject = cfg->reject_permille;
     s.margin = cfg->margin_permille;
+    s.syllable = cfg->syllable_permille;
     s.ready = true;
     return ESP_OK;
 }
@@ -378,14 +379,16 @@ static void decide(const window_t *w, const ai_engine_command_result_t *r, svc_l
         strlcpy(e->command_id, s.tables[s.active].ids[r->command], sizeof(e->command_id));
     } else {
         e->kind = APP_EVT_REJECT;
-        // ctc_score.c's order: far from the free loop, then too close to the second, then a part.
-        const char *code = r->free_gap_permille > s.reject ? APP_CODE_LOW_SCORE
-                           : r->margin_permille < s.margin ? APP_CODE_LOW_MARGIN
-                                                           : APP_CODE_PART;
+        // KEHOACH 5.4's order: far from the free loop, too close to the second, a syllable too far, a part.
+        const char *code = r->free_gap_permille > s.reject         ? APP_CODE_LOW_SCORE
+                           : r->margin_permille < s.margin         ? APP_CODE_LOW_MARGIN
+                           : r->syllable_gap_permille > s.syllable ? APP_CODE_LOW_SYLLABLE
+                                                                   : APP_CODE_PART;
         strlcpy(e->code, code, sizeof(e->code));
     }
     out->first_seq = w->first;
     out->free_gap_permille = r->free_gap_permille;
+    out->syllable_gap_permille = r->syllable_gap_permille;
     out->work_us = (uint32_t)s.work_us;
     out->close_us = (uint32_t)(esp_timer_get_time() - w->closed_us);
 }
