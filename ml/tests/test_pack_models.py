@@ -60,31 +60,35 @@ def test_entries_are_aligned_hashed_and_in_order() -> None:
 
 def test_the_header_carries_its_commands_listen_hash_and_thresholds_and_0_without_them() -> None:
     entries = [pack_models.Entry("command_ctc", "espdl", b"g" * 10)]
-    command = pack_models.pack(entries, listen_hash=listen.HASH, thresholds=(420, 35))
-    assert pack_models.HEAD.unpack_from(command, 0)[4:] == (listen.HASH, 420, 35)
+    command = pack_models.pack(entries, listen_hash=listen.HASH, thresholds=(420, 35, 60))
+    assert pack_models.HEAD.unpack_from(command, 0)[4:] == (listen.HASH, 420, 35, 60)
     assert pack_models.HEAD.unpack_from(pack_models.pack([pack_models.Entry("wake", "espdl", b"w")]), 0)[4:] == (
+        0,
         0,
         0,
         0,
     )
 
 
-def test_the_lock_gives_its_command_rows_thresholds_and_refuses_two_pairs(tmp_path, monkeypatch) -> None:
+def test_the_lock_gives_its_command_rows_thresholds_0_for_one_it_lacks_and_refuses_two(tmp_path, monkeypatch) -> None:
     (tmp_path / "command").mkdir()
     (tmp_path / "command" / "net.espdl").write_bytes(b"n")
     files = [{"file": "net.espdl", "entry": "command_ctc", "kind": "espdl", "sha256": hashlib.sha256(b"n").hexdigest()}]
     row = {
         "files": files,
         "listen_hash": f"0x{listen.HASH:08x}",
-        "thresholds": {"reject_permille": 420, "margin_permille": 35},
+        "thresholds": {"reject_permille": 420, "margin_permille": 35, "syllable_permille": 60},
     }
     lock = tmp_path / "models.lock.json"
     monkeypatch.setattr(pack_models, "LOCK", lock)
     monkeypatch.setattr(pack_models, "MODELS", tmp_path)
     lock.write_text(json.dumps({"models": {"command": row}}), encoding="utf-8")
-    assert pack_models.locked()[1:] == (listen.HASH, (420, 35))
+    assert pack_models.locked()[1:] == (listen.HASH, (420, 35, 60))
+    pair = row | {"thresholds": {"reject_permille": 420, "margin_permille": 35}}
+    lock.write_text(json.dumps({"models": {"command": pair}}), encoding="utf-8")
+    assert pack_models.locked()[2] == (420, 35, 0)
     lock.write_text(json.dumps({"models": {"command": row, "other": row | {"files": []}}}), encoding="utf-8")
-    with pytest.raises(ValueError, match="one pair"):
+    with pytest.raises(ValueError, match="one command's"):
         pack_models.locked()
 
 

@@ -2790,7 +2790,7 @@ Bảng phân vùng không đi qua OTA được: đổi bảng là nạp lại qu
 | `device` | `serial`, `mqtt_uri`, `mqtt_user`, `mqtt_pass`, `stream_host`, `stream_port`, `sntp_host`, `tz` | str / u16 | vắng `serial` thì dựng từ eFuse MAC: `sr-` + 12 hex thường (board B: `sr-3485188f7a70`); `mqtt_uri` mang cả scheme; vắng thì lùi về `Kconfig` của `net_mqtt` |
 | `calib` | `bal` (blob 257 × 2 float), `bal_ver` (u32), `bal_at` (u32 epoch), `aec_delay` (u32, mẫu), `pcm_shift` (u8) | | kết quả của `test_apps/calib`; **đo trên từng board**, không phải hằng số |
 | `afe` | `ns_floor_db` (i8), `agc_target_dbfs` (i8), `vad_mode` (u8) | | gieo từ `contracts/afe.yaml`, đổi bằng `SET_CONFIG` |
-| `kws` | `wake_th` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16), `cmd_seeded` (u32) | | `wake_th` gieo từ `Kconfig` của `svc_listen`; hai khoá lệnh mang nghĩa của đường đang dựng (§3.12): `δ₁`, `δ₂` của `ctc` theo phần nghìn nat mỗi khung, hay xác suất thấp nhất và khoảng nhất–nhì của `kws`, ‰. Chúng gieo từ header của ảnh ở `models_0` (§6.3), ảnh không mang thì từ `Kconfig`; `cmd_seeded` giữ cặp đã gieo, `δ₁` ở 16 bit cao: lúc boot, cặp gợi ý khác nó, hay một trong hai khoá vắng, thì ghi lại cả hai, nên model mới mang ngưỡng chọn cho nó tới board, khoá bị xoá (app thử `svc_listen` xoá chúng) không rơi về `Kconfig`, còn giá trị `SET_CONFIG` ghi giữ tới khi cặp gợi ý đổi |
+| `kws` | `wake_th` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16), `cmd_syllable` (u16), `cmd_seeds` (blob 3 × u16) | | `wake_th` gieo từ `Kconfig` của `svc_listen`; ba khoá lệnh mang nghĩa của đường đang dựng (§3.12): `δ₁`, `δ₂`, `δ₃` của `ctc` theo phần nghìn nat mỗi khung, hay xác suất thấp nhất và khoảng nhất–nhì của `kws`, ‰, đường không dùng `δ₃`. Chúng gieo từ header của ảnh ở `models_0` (§6.3), ảnh không mang thì từ `Kconfig` (`δ₃` 65 535 là không trần); `cmd_seeds` giữ bộ ba đã gieo: lúc boot, bộ gợi ý khác nó, hay một trong ba khoá vắng, thì ghi lại cả ba, nên model mới mang ngưỡng chọn cho nó tới board, khoá bị xoá (app thử `svc_listen` xoá chúng) không rơi về `Kconfig`, còn giá trị `SET_CONFIG` ghi giữ tới khi bộ gợi ý đổi |
 | `model` | `version` (str), `sha256` (blob 32 B) | | ảnh đang nằm ở `models_0` (§6.1) |
 | `sys` | `boot_count` (u32), `seed_ver` (u32), `last_ota_result` (u8), `fw_valid` (u8) | | |
 
@@ -2817,6 +2817,7 @@ offset 0x000  header 1 KB
    +0x010 listen_hash u32 — băm của contracts/listen.yaml mà model command học theo; 0 khi ảnh không có command
    +0x014 cmd_reject_permille u16 — δ₁ chọn cho model command của ảnh; 0 khi ảnh không mang ngưỡng
    +0x016 cmd_margin_permille u16 — δ₂, cùng đơn vị
+   +0x018 cmd_syllable_permille u16 — δ₃, cùng đơn vị; 0 khi ảnh không mang
    +0x040 entry[8] × 64 B:
           name[16]  offset u32  size u32  sha256[32]  kind u32  flags u32
 offset 0x400  dữ liệu, mỗi entry căn 64 B
@@ -2836,9 +2837,10 @@ offset 0x400  dữ liệu, mỗi entry căn 64 B
 
 Của `command` còn có `listen_hash`: run ghi băm `contracts/listen.yaml` lúc bắt đầu học, bước deploy chép nó vào
 `meta.json` và `models.lock.json`, và từ chối run không ghi băm hay ghi băm khác `listen.yaml` hiện tại; bước đóng gói
-ghi nó vào header. Và `thresholds` (`reject_permille`, `margin_permille`): `δ₁`, `δ₂` chọn cho đúng dòng thang int8 được
-deploy (§3.12), vì điểm của hai model khác nhau không cùng thang; deploy từ chối dòng chưa chọn ngưỡng, bước đóng gói
-ghi cặp ấy vào header, và lúc boot board gieo NVS từ đó (§6.2).
+ghi nó vào header. Và `thresholds` (`reject_permille`, `margin_permille`, `syllable_permille`): `δ₁`, `δ₂`, `δ₃` chọn
+cho đúng dòng thang int8 được deploy (§3.12), vì điểm của hai model khác nhau không cùng thang; deploy từ chối dòng chưa
+chọn ngưỡng, bước đóng gói ghi bộ ấy vào header, 0 cho `δ₃` khi dòng chọn trước khi có nó, và lúc boot board gieo NVS
+từ đó (§6.2).
 
 Của `ns` có thêm trường `backend` (`rnnoise` | `nsnet`, §3.9): bước đóng gói đặt tên mục trong ảnh theo nó (`ns_rnnoise`
 hay `ns_nsnet`), nên bản dựng của ứng viên kia không tìm thấy model, `ai_engine_ns_ops()` trả `NULL` và chuỗi chạy sàn.

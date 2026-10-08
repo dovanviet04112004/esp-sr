@@ -18,4 +18,13 @@ menu "svc_listen"
             image carries the pair chosen for its command (KEHOACH 6.3). 50 is the delta2 Gate 3 was counted at
             (docs/measurements/command.md 2).
 
+    config SVC_LISTEN_CMD_SYLLABLE_PERMILLE
+        int "NVS kws/cmd_syllable when the model image carries no delta3: thousandths of a nat a frame"
+        range 1 65535
+        default 65535
+        help
+            A command of two syllables or more is turned down when its worst syllable falls short of the free
+            unit loop by more than this a frame (KEHOACH 3.12, 6.2), unless the model image carries the delta3
+            chosen for its command (KEHOACH 6.3). 65535 caps nothing, as a model chosen without delta3 decides.
+
 endmenu

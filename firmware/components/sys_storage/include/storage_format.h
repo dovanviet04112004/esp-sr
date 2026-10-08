@@ -38,7 +38,8 @@
 #define STORAGE_KEY_WAKE_TH "wake_th"                 // u16, permille
 #define STORAGE_KEY_CMD_REJECT "cmd_reject"           // u16
 #define STORAGE_KEY_CMD_MARGIN "cmd_margin"           // u16
-#define STORAGE_KEY_CMD_SEEDED "cmd_seeded"           // u32, reject << 16 | margin last seeded
+#define STORAGE_KEY_CMD_SYLLABLE "cmd_syllable"       // u16
+#define STORAGE_KEY_CMD_SEEDS "cmd_seeds"             // blob of 3 u16: the triple last seeded
 #define STORAGE_KEY_MODEL_VERSION "version"           // str
 #define STORAGE_KEY_MODEL_SHA256 "sha256"             // blob 32 B
 #define STORAGE_KEY_BOOT_COUNT "boot_count"           // u32
@@ -47,16 +48,14 @@
 #define STORAGE_KEY_FW_VALID "fw_valid"               // u8
 
 #define STORAGE_NVS_NAME_FITS(name) (sizeof(name) <= STORAGE_NVS_NAME_MAX_BYTES)
-_Static_assert(STORAGE_NVS_NAME_FITS(STORAGE_KEY_AGC_TARGET_DBFS) &&
-                   STORAGE_NVS_NAME_FITS(STORAGE_KEY_LAST_OTA_RESULT) &&
-                   STORAGE_NVS_NAME_FITS(STORAGE_KEY_STREAM_HOST) &&
-                   STORAGE_NVS_NAME_FITS(STORAGE_KEY_STREAM_PORT) &&
-                   STORAGE_NVS_NAME_FITS(STORAGE_KEY_NS_FLOOR_DB) &&
-                   STORAGE_NVS_NAME_FITS(STORAGE_KEY_BOOT_COUNT) &&
-                   STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_REJECT) &&
-                   STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_MARGIN) &&
-                   STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_SEEDED),
-               "an NVS name holds at most 15 characters");
+_Static_assert(
+    STORAGE_NVS_NAME_FITS(STORAGE_KEY_AGC_TARGET_DBFS) &&
+        STORAGE_NVS_NAME_FITS(STORAGE_KEY_LAST_OTA_RESULT) &&
+        STORAGE_NVS_NAME_FITS(STORAGE_KEY_STREAM_HOST) && STORAGE_NVS_NAME_FITS(STORAGE_KEY_STREAM_PORT) &&
+        STORAGE_NVS_NAME_FITS(STORAGE_KEY_NS_FLOOR_DB) && STORAGE_NVS_NAME_FITS(STORAGE_KEY_BOOT_COUNT) &&
+        STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_REJECT) && STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_MARGIN) &&
+        STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_SYLLABLE) && STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_SEEDS),
+    "an NVS name holds at most 15 characters");
 
 #define STORAGE_CALIB_BAL_VERSION 1
 #define STORAGE_CALIB_BAL_BYTES (GEN_GRID_N_BINS * 2 * (int)sizeof(float)) // re, im per bin
@@ -68,7 +67,7 @@ _Static_assert(STORAGE_NVS_NAME_FITS(STORAGE_KEY_AGC_TARGET_DBFS) &&
 #define STORAGE_PATH_RESPONSES "/lfs/resp/vi.json"
 
 #define STORAGE_MODEL_MAGIC 0x444d5253u // "SRMD" little-endian
-#define STORAGE_MODEL_FORMAT_VER 3
+#define STORAGE_MODEL_FORMAT_VER 4
 #define STORAGE_MODEL_MAX_ENTRIES 8
 #define STORAGE_MODEL_NAME_BYTES 16
 #define STORAGE_MODEL_HEADER_BYTES 1024
@@ -95,11 +94,12 @@ typedef struct {
     uint32_t magic;
     uint32_t format_ver;
     uint32_t count;
-    uint32_t grid_hash;           // GEN_GRID_HASH of the grid the models learned on
-    uint32_t listen_hash;         // GEN_LISTEN_HASH the command learned on; 0 without one
-    uint16_t cmd_reject_permille; // delta1 chosen for the command; 0 without one
-    uint16_t cmd_margin_permille; // delta2 chosen for the command
-    uint8_t reserved[40];
+    uint32_t grid_hash;             // GEN_GRID_HASH of the grid the models learned on
+    uint32_t listen_hash;           // GEN_LISTEN_HASH the command learned on; 0 without one
+    uint16_t cmd_reject_permille;   // delta1 chosen for the command; 0 without one
+    uint16_t cmd_margin_permille;   // delta2 chosen for the command
+    uint16_t cmd_syllable_permille; // delta3 chosen for the command; 0 without one
+    uint8_t reserved[38];
     storage_model_entry_t entry[STORAGE_MODEL_MAX_ENTRIES];
     uint8_t pad[STORAGE_MODEL_HEADER_BYTES - 64 - STORAGE_MODEL_MAX_ENTRIES * 64];
 } storage_model_header_t;

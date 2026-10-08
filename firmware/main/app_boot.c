@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "ai_engine.h"
 #include "app_wiring.h"
@@ -107,33 +108,42 @@ static const dsp_afe_calib_t *load_calib(void)
     return &calib;
 }
 
-// The image brings the pair chosen for its command; SET_CONFIG wins until the suggested pair changes or a
+// The image brings the triple chosen for its command; SET_CONFIG wins until the suggested triple changes or a
 // key is gone (KEHOACH 6.2).
 static void seed_thresholds(void)
 {
-    uint16_t reject = CONFIG_SVC_LISTEN_CMD_REJECT_PERMILLE, margin = CONFIG_SVC_LISTEN_CMD_MARGIN_PERMILLE;
+    static const char *const keys[] = {STORAGE_KEY_CMD_REJECT, STORAGE_KEY_CMD_MARGIN,
+                                       STORAGE_KEY_CMD_SYLLABLE};
+    uint16_t suggested[] = {CONFIG_SVC_LISTEN_CMD_REJECT_PERMILLE, CONFIG_SVC_LISTEN_CMD_MARGIN_PERMILLE,
+                            CONFIG_SVC_LISTEN_CMD_SYLLABLE_PERMILLE};
     sys_storage_models_t models;
     if (sys_storage_map_models(MODEL_SLOT, &models) == ESP_OK) {
         if (models.header->cmd_reject_permille != 0) {
-            reject = models.header->cmd_reject_permille;
-            margin = models.header->cmd_margin_permille;
+            suggested[0] = models.header->cmd_reject_permille;
+            suggested[1] = models.header->cmd_margin_permille;
+        }
+        if (models.header->cmd_syllable_permille != 0) {
+            suggested[2] = models.header->cmd_syllable_permille;
         }
         sys_storage_unmap_models(&models);
     }
-    const uint32_t suggested = (uint32_t)reject << 16 | margin;
-    uint32_t seeded = 0;
-    uint16_t held = 0;
-    const bool both_held = sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, &held) == ESP_OK &&
-                           sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, &held) == ESP_OK;
-    if (both_held && sys_storage_get_u32(STORAGE_NS_KWS, STORAGE_KEY_CMD_SEEDED, &seeded) == ESP_OK &&
-        seeded == suggested) {
-        return;
+    uint16_t seeded[3] = {0}, held = 0;
+    bool kept =
+        sys_storage_get_blob(STORAGE_NS_KWS, STORAGE_KEY_CMD_SEEDS, seeded, sizeof(seeded)) == ESP_OK &&
+        memcmp(seeded, suggested, sizeof(seeded)) == 0;
+    for (size_t k = 0; kept && k < 3; k++) {
+        kept = sys_storage_get_u16(STORAGE_NS_KWS, keys[k], &held) == ESP_OK;
     }
-    esp_err_t err = sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, reject);
-    if (err == ESP_OK) { err = sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, margin); }
-    if (err == ESP_OK) { err = sys_storage_set_u32(STORAGE_NS_KWS, STORAGE_KEY_CMD_SEEDED, suggested); }
-    ESP_LOGI(TAG, "command thresholds %u, %u seeded: %s", (unsigned)reject, (unsigned)margin,
-             esp_err_to_name(err));
+    if (kept) { return; }
+    esp_err_t err = ESP_OK;
+    for (size_t k = 0; err == ESP_OK && k < 3; k++) {
+        err = sys_storage_set_u16(STORAGE_NS_KWS, keys[k], suggested[k]);
+    }
+    if (err == ESP_OK) {
+        err = sys_storage_set_blob(STORAGE_NS_KWS, STORAGE_KEY_CMD_SEEDS, suggested, sizeof(suggested));
+    }
+    ESP_LOGI(TAG, "command thresholds %u, %u, %u seeded: %s", (unsigned)suggested[0], (unsigned)suggested[1],
+             (unsigned)suggested[2], esp_err_to_name(err));
 }
 
 static void load_models(void)
