@@ -1,8 +1,8 @@
 """Train RNNoise-16k and NSNet-16k S/M/L on identical batches (E9-T4, KEHOACH 3.9, ADR-0014) into a run directory.
 
-Step k's batch is a pure function of the config, the pools and k. Every candidate learns the same loss on the 257
-gains the slot applies; each epoch scores val and keeps its weights. The state a resumed run goes on from is saved at
-each epoch's end and every train.checkpoint_every steps; Ctrl-C or SIGTERM saves it after the step under way and pauses.
+Step k's batch, drawn and read in a loader worker and filtered on the device (gpu_mix), is a pure function of k there;
+every candidate learns one loss on the slot's 257 gains; each epoch scores val and keeps its weights. The resumable
+state is saved at each epoch's end, every train.checkpoint_every steps, and on Ctrl-C or SIGTERM, which pauses.
 Run: python -m srpipe.tasks.ns.train [--smoke] [--only NAME ...] [--resume [RUN]] [--set KEY=VALUE ...]"""
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from srpipe.core.run_dir import create_run_dir, pause_asked
 from srpipe.core.seed import seed_everything
 from srpipe.generated import grid
 from srpipe.tasks import ns
-from srpipe.tasks.ns import data, model
+from srpipe.tasks.ns import data, gpu_mix, model
 
 PARTS = ("power", "speech", "noise")
 KIB = 1024
@@ -96,7 +96,8 @@ def batch_of(examples: Iterable[data.Example], count: int, gains: np.ndarray) ->
 
 
 class TrainBatches(Dataset):
-    """Step k's batch, built in a loader worker from the train pools; the Mixer opens there, never in the parent."""
+    """Step k's batch of recipes, drawn and read in a loader worker from the train pools for gpu_mix.Render to filter;
+    the Mixer opens there, never in the parent."""
 
     def __init__(self, cfg: dict, dev: dict, paths: dict, steps: Plan) -> None:
         self.cfg, self.dev, self.paths, self.steps = cfg, dev, paths, steps
@@ -109,8 +110,8 @@ class TrainBatches(Dataset):
         if self.mixer is None:
             self.mixer = data.Mixer(self.cfg, self.dev, self.paths, "train", self.cfg["mix"]["seed"])
         epoch, first = self.steps.where(step)
-        examples = (self.mixer.example(epoch, j) for j in range(first, first + self.steps.batch))
-        return batch_of(examples, self.steps.batch, self.mixer.mics.gains)
+        recipes = [self.mixer.recipe(epoch, j) for j in range(first, first + self.steps.batch)]
+        return gpu_mix.collate(recipes, self.mixer.n)
 
 
 class HeldBatches(Dataset):
@@ -163,7 +164,9 @@ def loader(dataset: Dataset, spec: dict, workers: int, pin: bool, steps: range, 
     )
 
 
-def feature_stats(nets: dict[str, nn.Module], batches: DataLoader, device: str) -> dict[str, tuple[Tensor, Tensor]]:
+def feature_stats(
+    nets: dict[str, nn.Module], batches: Iterable[dict[str, Tensor]], device: str
+) -> dict[str, tuple[Tensor, Tensor]]:
     """Each candidate's feature mean and deviation over the batches, summed in float64."""
     sums: dict[str, list] = {name: [0.0, 0.0, 0] for name in nets}
     with torch.no_grad():
@@ -336,6 +339,7 @@ def train(cfg: dict, dev: dict, paths: dict, run: Path, device: str, resume: boo
     spec, log = cfg["train"], get_logger("ns.train", run)
     mixer = data.Mixer(cfg, dev, paths, "train", cfg["mix"]["seed"])
     steps = plan(cfg, mixer)
+    render = gpu_mix.Render(mixer.mics, mixer.n, device)
     found = candidates(cfg, spec["candidates"], device, steps.steps)
     nets = {name: c.net for name, c in found.items()}
     pin = device == "cuda"
@@ -346,7 +350,7 @@ def train(cfg: dict, dev: dict, paths: dict, run: Path, device: str, resume: boo
         if not resume:
             norm = range(min(spec["norm_batches"], steps.steps))
             batches = loader(TrainBatches(cfg, dev, paths, steps), spec, spec["workers"], pin, norm, persistent=False)
-            for name, (mean, std) in feature_stats(nets, batches, device).items():
+            for name, (mean, std) in feature_stats(nets, map(render, batches), device).items():
                 nets[name].mean.copy_(mean)
                 nets[name].std.copy_(std)
                 (run / name).mkdir(exist_ok=True)
@@ -362,7 +366,7 @@ def train(cfg: dict, dev: dict, paths: dict, run: Path, device: str, resume: boo
         clock = begun
         for step, batch in zip(range(first, steps.steps), batches, strict=True):
             waited += time.monotonic() - clock
-            b = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
+            b = render(batch)
             for name, c in found.items():
                 loss = loss_of(*c.net(b["power"]), b, cfg)
                 if not torch.isfinite(loss):

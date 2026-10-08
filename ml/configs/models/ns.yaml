@@ -116,7 +116,7 @@ train:                             # python -m srpipe.tasks.ns.train; the GPU wh
   grad_clip_norm: 1.0              # GRUs trained through 625 hops
   norm_batches: 64                 # the first batches of the stream give each feature's mean and deviation
   workers: 10                      # loader processes, ~470 MB each with torch and a batch in hand; 12 swapped 5 GB
-  prefetch: 1                      # batches each worker keeps ready: 10 of ~62 MB in shared memory at most
+  prefetch: 1                      # batches each worker keeps ready: 10 of ~70 MB of recipes in shared memory at most
   val_workers: 4                   # loader processes of each epoch's val pass, started for it alone
   val_floor_db: null               # the epoch's val figures without a floor: E9-T12 picks the net's (KEHOACH 3.9)
   divergence_ratio: 3.0            # a val loss this many times epoch 0's stops the run; a safety, never a stop rule

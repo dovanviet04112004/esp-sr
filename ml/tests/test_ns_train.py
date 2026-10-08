@@ -24,7 +24,7 @@ from srpipe.tasks.ns import data
 torch = pytest.importorskip("torch")
 
 from srpipe.tasks.ns import eval as ns_eval  # noqa: E402
-from srpipe.tasks.ns import model, train  # noqa: E402
+from srpipe.tasks.ns import gpu_mix, model, train  # noqa: E402
 
 FS = grid.SAMPLE_RATE_HZ
 UTTERANCES = 12
@@ -124,14 +124,16 @@ def test_residual_noise_keeps_pulling_the_gain_down_far_under_the_speech() -> No
 
 def test_a_batch_is_a_pure_function_of_its_step(world: tuple[dict, dict, dict]) -> None:
     cfg, dev, paths = world
-    steps = train.plan(cfg, data.Mixer(cfg, dev, paths, "train", cfg["mix"]["seed"]))
+    mixer = data.Mixer(cfg, dev, paths, "train", cfg["mix"]["seed"])
+    steps = train.plan(cfg, mixer)
     assert steps.firsts[0] == 0 and steps.firsts[1] < steps.steps and steps.ends_epoch(steps.firsts[1] - 1)
-    a = train.TrainBatches(cfg, dev, paths, steps)[3]
-    b = train.TrainBatches(cfg, dev, paths, steps)[3]
+    render = gpu_mix.Render(mixer.mics, mixer.n, "cpu")
+    a = render(train.TrainBatches(cfg, dev, paths, steps)[3])
+    b = render(train.TrainBatches(cfg, dev, paths, steps)[3])
     assert a.keys() == b.keys() and all(torch.equal(a[k], b[k]) for k in a)
     hops = round(cfg["mix"]["example_s"] * FS) // grid.HOP_SAMPLES
     assert a["power"].shape == (2, hops, grid.N_BINS) and a["vad"].shape == (2, hops)
-    assert not torch.equal(a["power"], train.TrainBatches(cfg, dev, paths, steps)[4]["power"])
+    assert not torch.equal(a["power"], render(train.TrainBatches(cfg, dev, paths, steps)[4])["power"])
 
 
 def test_a_tiny_run_trains_every_candidate_on_the_same_batches_keeps_its_last_weights_and_is_scored(
