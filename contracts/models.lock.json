@@ -63,8 +63,9 @@
         "int16_ops": []
       },
       "thresholds": {
-        "reject_permille": 100,
-        "margin_permille": 0
+        "reject_permille": 200,
+        "margin_permille": 0,
+        "syllable_permille": 60
       },
       "heard": {
         "pitch": "kaldi",
