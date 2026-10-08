@@ -92,7 +92,7 @@ quant:                             # python -m srpipe.tasks.command.ctc.quant pt
     false_accept: 0.01             # of val's windows accepted as a command they do not say: speech is easier to turn down than Gate 3's near misses
     margin_sweep: [0, 25, 50, 75, 100, 150, 200]   # δ₂ against eval.reject_sweep's δ₁, ‰
     syllable_sweep: [40, 50, 60, 70, 80, 100, 150, 65535]   # δ₃, the worst syllable's cap, ‰; 65535 caps nothing
-    out_of_set_accept: 0.05        # of val_commands windows accepted over the set without their own command: "bật đèn" when the set lacks it (measurements/command.md 12.27)
+    out_of_set_accept: 0.08        # of val_commands windows accepted over the set without their own command, "bật đèn" when the set lacks it: δ₁ 100 ‰, δ₂ 25 ‰ uncapped let 17/216 through (measurements/command.md 12.28)
     min_windows: 10                # val_commands windows a command needs to count as the worst: the extract has 1 of "tăng âm lượng"
   gate_tie: 5                      # commands accepted right within this of the best tie: a standard error of 112
   layerwise_sentences: 16          # rung 3: calibration sentences ESP-PPQ's per-layer error runs over
