@@ -1673,5 +1673,7 @@ trước, chạy sau. Lỗi đơn vị `val` của C, nghe SwiftF0, theo mốc 2
 | v8 (board B) | 194/209 | 172/209 | 181/209 | 0 / 7 | 32/35 | 30/34 |
 | C | 191/209 | 177/209 | 183/209 | 0 / 5 | 31/35 | 30/34 |
 
-Học tinh chỉnh với cao độ như lúc học giữ "tắt" của chủ repo, khác A và B (§12.29); C hơn v8 5 câu nhận đúng ở δ₁ 100 ‰
-và kém 3 câu đúng nhất, trong nhiễu đếm.
+`tone_flip places` của C trên `val`, cả ba chiều giữ: lỗi đơn vị 0,364, thanh đúng âm tiết đầu 71,5%, âm tiết sau 79,4%
+(v8: 0,375, 71,5%, 79,0%); nghe SwiftF0: 0,329, 73,9%, 83,8%. `tone_flip owner`, cả ba chiều giữ: "tắt" đúng nhất 61/69
+(48 qua ngưỡng của phép kiểm), v8 62/69 (48). Học tinh chỉnh với cao độ như lúc học giữ "tắt" của chủ repo, khác A và B
+(§12.29); C hơn v8 5 câu nhận đúng ở δ₁ 100 ‰ và kém 3 câu đúng nhất, trong nhiễu đếm.
