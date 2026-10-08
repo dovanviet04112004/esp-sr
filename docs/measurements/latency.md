@@ -515,7 +515,21 @@ Board B, `make listen-unit` ở `1a50f2a` (cây tiền tố, mục 2 và 4 của
 | Ca `FRAME_GAP` (câu đang mở gặp chỗ hở) và ca click | qua cả bảy lượt |
 | Quyết định sau bước chốt, giữa / đỉnh mỗi lượt | 79–114 ms / 86 ms, tới 1,27 s ở cửa sổ cắt lùi |
 
-Lần trước (`make listen-unit` 03/10, model cũ, chấm từng cách đọc) trùng 198/198. Lần này cây tiền tố trùng từng bit
-với chấm từng cách đọc và với Python trên máy (bộ vàng `ctc`), nên chỗ lệch nằm ở phần trước phép chấm: mạng int8 của
-v8 trên esp-dl so với mô phỏng ESP-PPQ, hay đặc trưng. Chưa tách được: app thử `ai_engine` so mạng trên chip với mô
-phỏng hết PSRAM khi nạp model `ctc` từ 07/10.
+Lần trước (`make listen-unit` 03/10, model cũ, chấm từng cách đọc) trùng 198/198.
+
+**Chỗ lệch nằm ở log-mel, không ở mạng esp-dl hay phép chấm** (08/10). Python dựng lại cả 336 cửa sổ của bảy lượt như
+`probe.listen_rounds`; quyết định của nó trùng bản ghi chip in ra ở cả 316 dòng đọc được (20 dòng rơi trên đường nối
+tiếp). Mỗi cửa sổ trong 14 cửa sổ lệch có một phần tử log-mel nằm sát ranh làm tròn của lưới vào int8 (bước 1/16 độ lệch
+chuẩn), cách ranh 2,5e-7 tới 8,5e-6. Lật đúng phần tử ấy sang ô bên cạnh, Python ra đúng điểm, margin và gap của chip ở
+**14/14** cửa sổ, và không cửa sổ nào cần lật một chiều cao độ. Có ít nhất một phần tử log-mel cách ranh dưới 1e-5 ở 14/14
+cửa sổ lệch, so với 235/302 cửa sổ trùng.
+
+Log-mel trên chip khác bản soi gương ở ba chỗ (parity.md: lệch tới 9,5e-7 trên board):
+- `mel.c` dựng không có `-ffp-contract=off`, chỉ `pitch.c` có. Mã máy của `build_bench` gộp `re·re + im·im` và
+  `energy + w·power` thành `madd.s`, mỗi phép chỉ làm tròn một lần.
+- Log là `logf` của newlib, còn Python lấy log double rồi làm tròn một lần.
+- FFT là `dl_fft` (hợp ngữ S3 có `madd.s`, bảng `cosf`/`sinf` của newlib), còn Python dùng `np.fft.rfft`.
+
+Model cũ đọc 40 dải trên bước 1/8, v8 đọc 80 dải trên bước 1/16. Số phần tử sát ranh vì thế gấp chừng bốn lần (ước lượng
+từ hai tỉ số), nên lần 198/198 trước là may, không phải khớp từng bit. `make ai-unit` với v8 dừng trước bài thử:
+`ctc_gate.bin` (83 chiều, 336 cửa sổ) lớn hơn phân vùng `voice` 2 MB.
