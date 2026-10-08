@@ -1661,22 +1661,26 @@ Theo luật của §3.12, B thắng A: Cửa 3 nhận đúng hơn 12 câu ở δ
 chỉ hơn 0,5 điểm. Nhưng cả hai kém v8: học tinh chỉnh với cả ba chiều giữ kéo "tắt" của chủ repo xuống dù `val` khá lên,
 như v6 ở §12.13, nên không lượt nào thay v8. Lượt thử chạy tiếp với cao độ SwiftF0 như v8 học (C, D của §3.12).
 
-### 12.30 Lượt thử nhìn trước với cao độ SwiftF0: lượt C (09/10)
+### 12.30 Lượt thử nhìn trước với cao độ SwiftF0: lượt C và D (09/10)
 
 KẾ HOẠCH §3.12 sau §12.29: học tinh chỉnh từ v8 10 000 bước, lr 3·10⁻⁴, cao độ SwiftF0 như v8 học, không giữ chiều nào.
 Lượt C có lớp nhìn trước 12 khung (run `20261008_d1c4974-dirty_ff7794`, 23:26–00:30); lượt D, đối chứng không nhìn
-trước, chạy sau. Lỗi đơn vị `val` của C, nghe SwiftF0, theo mốc 2 000 … 10 000: 0,353, 0,344, 0,340, 0,332, 0,329 (v8:
-0,343). Cửa 3 float như board nghe, Kaldi, cả ba chiều giữ, δ₂ 25 ‰, chưa xét luật phần:
+trước (run `20261009_346b687-dirty_96faa0`, 00:31–01:32). Lỗi đơn vị `val`, nghe SwiftF0, theo mốc 2 000 … 10 000: C
+0,353, 0,344, 0,340, 0,332, 0,329; D 0,357, 0,349, 0,346, 0,339, 0,335 (v8: 0,343). Cửa 3 float như board nghe, Kaldi,
+cả ba chiều giữ, δ₂ 25 ‰, chưa xét luật phần:
 
 | Run | Đúng nhất | Nhận đúng δ₁ 100 ‰ | Nhận đúng δ₁ 200 ‰ | Câu lạ nhận δ₁ 100 / 200 ‰ | "tắt đèn" đúng nhất | "tắt quạt" đúng nhất |
 |---|---|---|---|---|---|---|
 | v8 (board B) | 194/209 | 172/209 | 181/209 | 0 / 7 | 32/35 | 30/34 |
 | C | 191/209 | 177/209 | 183/209 | 0 / 5 | 31/35 | 30/34 |
+| D | 191/209 | 173/209 | 181/209 | 0 / 7 | 33/35 | 29/34 |
 
-`tone_flip places` của C trên `val`, cả ba chiều giữ: lỗi đơn vị 0,364, thanh đúng âm tiết đầu 71,5%, âm tiết sau 79,4%
-(v8: 0,375, 71,5%, 79,0%); nghe SwiftF0: 0,329, 73,9%, 83,8%. `tone_flip owner`, cả ba chiều giữ: "tắt" đúng nhất 61/69
-(48 qua ngưỡng của phép kiểm), v8 62/69 (48). Học tinh chỉnh với cao độ như lúc học giữ "tắt" của chủ repo, khác A và B
-(§12.29); C hơn v8 5 câu nhận đúng ở δ₁ 100 ‰ và kém 3 câu đúng nhất, trong nhiễu đếm.
+`tone_flip places` trên `val`, cả ba chiều giữ: lỗi đơn vị C 0,364, D 0,370, thanh đúng âm tiết đầu 71,5% và 71,8%, âm
+tiết sau 79,4% và 79,3% (v8: 0,375, 71,5%, 79,0%); nghe SwiftF0, C 0,329, 73,9%, 83,8%. `tone_flip owner`, cả ba chiều
+giữ: "tắt" đúng nhất C 61/69 (48 qua ngưỡng của phép kiểm), D 62/69 (45), v8 62/69 (48). Học tinh chỉnh với cao độ như
+lúc học giữ "tắt" của chủ repo, khác A và B (§12.29). Theo luật của KẾ HOẠCH §3.12, C không thắng D: Cửa 3 nhận đúng
+chỉ hơn 4 câu, thanh âm tiết đầu trên `val` kém 0,3 điểm; cả C lẫn D đều trong nhiễu đếm của v8. Lớp nhìn trước không
+đổi được Cửa 3 của chủ repo khi học với cao độ, nên không làm phần firmware của nó và giữ v8.
 
 ### 12.31 Vì sao học tinh chỉnh với cao độ giữ làm mất "tắt" của chủ repo (09/10)
 
