@@ -1,7 +1,11 @@
-"""Log-mel filterbank and MFCC of dsp_spec/mel.h: Slaney mel scale, area-normalised triangles (KEHOACH 3.11)."""
+"""Log-mel filterbank and MFCC of dsp_spec/mel.h: Slaney mel scale, area-normalised triangles (KEHOACH 3.11).
+
+The log is the module's own float32 function, as mel.c computes it, so the C matches bit for bit (KEHOACH 3.14).
+"""
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numba
@@ -14,6 +18,10 @@ _SLANEY_LINEAR_HZ_PER_MEL = 200.0 / 3.0
 _SLANEY_KNEE_HZ = 1000.0
 _SLANEY_KNEE_MEL = _SLANEY_KNEE_HZ / _SLANEY_LINEAR_HZ_PER_MEL
 _SLANEY_LOG_STEP = np.log(6.4) / 27.0
+_LN_2 = np.float32(math.log(2.0))
+_SQRT_HALF = np.float32(math.sqrt(0.5))
+# ln((1 + t) / (1 - t)) = 2 atanh t: odd powers 1 .. 9, |t| <= 0.172 on [sqrt(1/2), sqrt(2)).
+_LN_COEFFS = np.array([2.0 / k for k in (1, 3, 5, 7, 9)], dtype=np.float32)
 
 
 @dataclass(frozen=True)
@@ -68,13 +76,21 @@ def filterbank(cfg: MelConfig) -> np.ndarray:
     return (triangles * (2.0 / (upper - lower))).astype(np.float32)
 
 
-def dct_matrix(n_bands: int) -> np.ndarray:
-    """Orthonormal DCT-II as an (n_bands, n_bands) float32 matrix, row k being coefficient k."""
-    k = np.arange(n_bands, dtype=np.float64)[:, None]
-    n = np.arange(n_bands, dtype=np.float64)[None, :]
-    basis = np.sqrt(2.0 / n_bands) * np.cos(np.pi * k * (2.0 * n + 1.0) / (2.0 * n_bands))
-    basis[0] /= np.sqrt(2.0)
-    return basis.astype(np.float32)
+def cos_table(n_bands: int) -> np.ndarray:
+    """cos(pi m / (2 n_bands)) for m < 4 n_bands, one period of the DCT-II kernel, each in double rounded once."""
+    return np.array([math.cos(math.pi * m / (2.0 * n_bands)) for m in range(4 * n_bands)], dtype=np.float32)
+
+
+@numba.njit
+def _mfcc(table: np.ndarray, log_mel: np.ndarray, n_ceps: int, first: np.float32, rest: np.float32) -> np.ndarray:
+    n = len(log_mel)
+    out = np.empty(n_ceps, dtype=np.float32)
+    for k in range(n_ceps):
+        acc = np.float32(0.0)
+        for i in range(n):
+            acc += table[(k * (2 * i + 1)) % (4 * n)] * log_mel[i]
+        out[k] = (first if k == 0 else rest) * acc
+    return out
 
 
 @numba.njit
@@ -89,13 +105,40 @@ def _band_energy(filters: np.ndarray, power: np.ndarray) -> np.ndarray:
     return out
 
 
+@numba.njit
+def _ln(x: np.ndarray) -> np.ndarray:
+    out = np.empty(len(x), dtype=np.float32)
+    one, two = np.float32(1.0), np.float32(2.0)
+    for k in range(len(x)):
+        m, exponent = math.frexp(x[k])
+        mantissa = np.float32(m)
+        if mantissa < _SQRT_HALF:
+            mantissa = mantissa * two
+            exponent -= 1
+        t = (mantissa - one) / (mantissa + one)
+        t2 = t * t
+        c = _LN_COEFFS
+        series = t * (c[0] + t2 * (c[1] + t2 * (c[2] + t2 * (c[3] + t2 * c[4]))))
+        out[k] = np.float32(exponent) * _LN_2 + series
+    return out
+
+
+def ln_f32(x: np.ndarray) -> np.ndarray:
+    """Natural log of positive normal float32 values as mel.c takes it: exponent and mantissa by frexp, the mantissa
+    by an atanh series; error under 2e-6 absolute."""
+    a = np.asarray(x, dtype=np.float32)
+    return _ln(np.ascontiguousarray(a).reshape(-1)).reshape(a.shape)
+
+
 class Mel:
     """Filters and DCT built once, as dsp_spec_mel_init does; every frame is float32 arithmetic."""
 
     def __init__(self, cfg: MelConfig) -> None:
         self.cfg = cfg
         self.filters = filterbank(cfg)
-        self._dct = dct_matrix(cfg.n_bands)
+        self._cos = cos_table(cfg.n_bands)
+        n = np.float32(cfg.n_bands)
+        self._first, self._rest = np.sqrt(np.float32(1.0) / n), np.sqrt(np.float32(2.0) / n)
 
     def log(self, bins: np.ndarray) -> np.ndarray:
         """Natural log of each band's power, plus log_floor inside the log, from N_BINS complex bins."""
@@ -105,12 +148,11 @@ class Mel:
         power = bins.real * bins.real + bins.imag * bins.imag
         # Summed bin by bin, as mel.c sums; a BLAS product splits the sum its own way on each CPU.
         energy = _band_energy(self.filters, power)
-        floored = (energy + np.float32(self.cfg.log_floor)).astype(np.float64)
-        return np.log(floored).astype(np.float32)
+        return _ln(energy + np.float32(self.cfg.log_floor))
 
     def mfcc(self, log_mel: np.ndarray, n_ceps: int) -> np.ndarray:
-        """First n_ceps orthonormal DCT-II coefficients of n_bands log energies."""
+        """First n_ceps orthonormal DCT-II coefficients of n_bands log energies, summed and scaled as mel.c does."""
         if not 1 <= n_ceps <= self.cfg.n_bands:
             raise ValueError(f"n_ceps {n_ceps} outside 1..{self.cfg.n_bands}")
-        terms = self._dct[:n_ceps] * np.asarray(log_mel, dtype=np.float32)
-        return np.cumsum(terms, axis=-1, dtype=np.float32)[:, -1]
+        x = np.ascontiguousarray(log_mel, dtype=np.float32)
+        return _mfcc(self._cos, x, n_ceps, self._first, self._rest)
