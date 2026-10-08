@@ -1707,3 +1707,24 @@ v8 và C tách "bật" khỏi "tắt" một phần bằng các dải dưới 500
 nguyên âm và thanh về quanh 0, tức hai mạng đọc độ cao giọng ngầm từ hoạ âm trong log-mel. A và B không dùng các dải ấy
 cho "bật" (70/74 có hay không). Học tinh chỉnh với cao độ giữ đổi manh mối tách hai từ sang các dải cao hơn, học từ
 giọng của kho; với chủ repo, `ă` và `â` gần trùng nhau (§12.17), nên các manh mối ấy chỉ về "bật".
+
+### 12.32 Phần mở trước câu: mạng nguội trên board B khi chủ repo nói trực tiếp (09/10)
+
+Log UART của board B ngày 08/10 (3 192 cửa sổ, mọi bộ lệnh và ngưỡng của ngày) theo độ dài cửa sổ: dưới 1,5 s nhận 8/484,
+1,5–2,5 s 57/1 094, 2,5–3,5 s 205/1 032, từ 3,5 s 36/582. 1 446 cửa sổ (45%) mở ngay sau cửa sổ trước, phần mở trước câu
+bị chặn dưới 2 s theo luật cắt (§5.4), nhận 6,8%; 1 746 cửa sổ đủ phần ấy nhận 11,9%.
+
+Trên các câu lệnh của Cửa 3 (210 câu), v8 float, cả ba chiều cao độ giữ, bộ 10 lệnh, δ₁ 200 ‰, δ₂ 25 ‰; "nguội": cửa sổ
+mở trước câu đúng chừng ấy, mạng bắt đầu từ bộ đệm rỗng như board; "ấm": mạng chạy qua đủ 2 s trước câu, chỉ các khung từ
+chỗ mở ngắn hơn được chấm. Đo bằng script chẩn đoán chạy một lần:
+
+| Mở trước câu | Nguội: đúng nhất | Nguội: nhận đúng | Ấm: đúng nhất | Ấm: nhận đúng |
+|---|---|---|---|---|
+| 0 s | 139 | 9 | 197 | 172 |
+| 0,25 s | 193 | 160 | 197 | 172 |
+| 0,5 s | 193 | 173 | 197 | 172 |
+| 1 s | 195 | 171 | 197 | 172 |
+| 2 s | 196 | 174 | 196 | 174 |
+
+v8 cần chừng 0,5 s trước câu; `vad` gộp hai đoạn cách nhau dưới `utterance.gap_s` 0,4 s, nên cửa sổ bị chặn vẫn còn chừng
+0,4 s trước câu và chỉ mất vài câu. Mạng nguội không giải thích được tỉ lệ nhận thấp khi nói trực tiếp.
