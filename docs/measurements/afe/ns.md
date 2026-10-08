@@ -193,3 +193,10 @@ Lọc trên CPU (`data.Mixer.example` rồi `data.slot_powers`, numpy float64), 
 chờ dữ liệu 77–81% thời gian; 7 worker 0,86 bước/s; 12 worker tràn RAM. Một ví dụ trên một tiến trình mất 336 ms (cProfile
 24 ví dụ của epoch 0): chập RIR ~96 ms, phổ ở khe ~70 ms, đáp ứng micro ~60 ms, đọc nhiễu từ `raw/` ~71 ms, trong đó mở
 file 19 ms. Ba phép lọc chiếm ~2/3; vòng Python không đáng kể.
+
+Lọc trên GPU (`gpu_mix`, `9a6ba64`), cũng 10 worker, lượt `20261008_9a6ba64-dirty_f04a9b`: **3,5–3,7 bước/s**, 114–119
+ví dụ/s, GPU chờ dữ liệu 15–19%, gấp ~2,9 lần; GPU giờ là chỗ nghẽn. Một batch 32 ví dụ lọc trên GPU 83 ms, đỉnh 809 MB
+(FFT ~32 ms, nhân và chép bộ nhớ ~40 ms, đều theo băng thông); worker còn ~25 ms một ví dụ cộng phần đọc, batch công thức
+~70 MB trong RAM chia sẻ. So với đường numpy float64 trên hai batch thật, công suất khe của hỗn hợp lệch trong −81 dB, của
+tiếng trong −119 dB. Hai lượt học trên cùng batch cho loss gần trùng: bước 1–100 RNNoise-16k 0,16327 (CPU) và 0,16258
+(GPU), ba cỡ NSNet-16k lệch dưới 0,5%; bước 201–300 lệch dưới 2%.
