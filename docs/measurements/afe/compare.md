@@ -62,3 +62,35 @@ nhiễu và tiếng nói đo trên đoạn chỉ nhiễu và đoạn có lời, 
 - Cả ba kênh chạy trước lối vào: kênh 2 sớm 2048 mẫu, kênh 0 và 1 sớm 1024 mẫu. Lúc đo, app nạp tới nửa ring của AFE
   trước lần `fetch` đầu và AFE bỏ hai khối 1024 mẫu đầu ("Ringbuffer of AFE(FEED) is full" hai lần mỗi lượt). Thước
   canh trễ bằng tương quan chéo nên số trên không lệch.
+
+## Dìm nhiễu trên cùng lối vào gsc (08/10)
+
+Bốn mục trộn: đoạn đọc `20260928_home_005` với quạt `…_008` hay nhạc không lời `…_010`, thu riêng qua board B, ở SNR 0 và
+5 dB. Thước `compare.measure`: nhiễu giảm trên đoạn chỉ nhiễu, mức giảm trên đoạn có lời (tiếng cộng phần nhiễu trong đoạn
+ấy), SNR tăng, STOI so với `ch0` của phần sạch. Các biến thể là tệp của bàn so trên đĩa; các ứng viên `ns` đang học (E9-T4,
+lượt `20261008_dd911af-dirty_1ea86b`, trọng số cuối epoch 1, không sàn) chạy trên lối vào của khe `ns` (trung bình hai micro
+sau `hpf`, `balance`), không qua `gsc`. Đo một lần bằng script gọi `scenes.compare.measure`.
+
+| Biến thể | `mix_fan_snr0` | `mix_fan_snr5` | `mix_music_snr0` | `mix_music_snr5` |
+|---|---|---|---|---|
+| `pc_mean` | 5,0 / 2,4 / +2,6 / 0,41 | 5,0 / 1,3 / +3,7 / 0,48 | 1,2 / 0,9 / +0,3 / 0,47 | 1,7 / 0,7 / +1,1 / 0,62 |
+| `pc_mean_omlsa` | 16,4 / 4,8 / +11,7 / 0,45 | 16,4 / 2,2 / +14,3 / 0,51 | 3,4 / 1,4 / +2,0 / 0,49 | 5,0 / 1,0 / +4,0 / 0,62 |
+| `pc_gsc` | 7,6 / 2,8 / +4,8 / 0,43 | 10,1 / 1,5 / +8,6 / 0,49 | 3,7 / 1,6 / +2,1 / 0,46 | 4,2 / 1,3 / +2,9 / 0,54 |
+| `pc_gsc_omlsa` | 9,8 / 3,6 / +6,1 / 0,42 | 18,6 / 2,3 / +16,3 / 0,51 | 3,8 / −0,3 / +4,1 / 0,47 | 6,4 / 1,6 / +4,8 / 0,55 |
+| `pc_gsc_nsnet2` | 41,8 / 8,6 / +33,2 / 0,48 | 40,0 / 5,7 / +34,3 / 0,52 | 34,1 / 9,8 / +24,2 / 0,49 | 37,4 / 6,9 / +30,4 / 0,54 |
+| `pc_gsc_rnnoise` | 20,0 / 7,5 / +12,5 / 0,45 | 57,9 / 4,5 / +53,5 / 0,51 | 27,7 / 8,1 / +19,5 / 0,49 | 47,3 / 4,9 / +42,4 / 0,52 |
+| `board_gsc_espsr_nsnet2` | 23,9 / 6,7 / +17,2 / 0,48 | 26,7 / 3,9 / +22,9 / 0,52 | 14,1 / 6,9 / +7,2 / 0,50 | 21,0 / 4,6 / +16,4 / 0,54 |
+| `board_gsc_espsr_webrtc_aggressive` | 14,5 / 5,2 / +9,3 / 0,44 | 21,4 / 2,4 / +18,9 / 0,50 | 7,0 / 2,9 / +4,1 / 0,45 | 11,7 / 2,8 / +8,9 / 0,51 |
+| RNNoise-16k, epoch 1 | 47,9 / 7,0 / +41,0 / 0,45 | 55,5 / 3,3 / +52,2 / 0,50 | 33,5 / 13,0 / +20,5 / 0,37 | 41,0 / 4,2 / +36,8 / 0,57 |
+| NSNet-16k S, epoch 1 | 47,0 / 5,5 / +41,5 / 0,44 | 41,1 / 2,6 / +38,5 / 0,50 | 35,2 / 3,2 / +32,0 / 0,48 | 41,8 / 2,1 / +39,7 / 0,57 |
+| NSNet-16k M, epoch 1 | 44,3 / 5,8 / +38,5 / 0,45 | 53,0 / 2,8 / +50,2 / 0,51 | 31,3 / 3,2 / +28,1 / 0,49 | 20,7 / 2,1 / +18,6 / 0,57 |
+| NSNet-16k L, epoch 1 | 46,2 / 6,3 / +39,9 / 0,46 | 45,0 / 2,9 / +42,2 / 0,50 | 26,6 / 3,1 / +23,4 / 0,48 | 17,9 / 1,8 / +16,1 / 0,57 |
+
+Ô: nhiễu giảm dB / mức đoạn có lời giảm dB / SNR tăng dB / STOI.
+
+- NSNet2 và RNNoise công bố, sau `gsc`, dìm quãng nghỉ 20–58 dB và hạ đoạn có lời 4,5–9,8 dB; OM-LSA dìm quạt 16 dB nhưng
+  nhạc chỉ 3–5 dB. STOI của mọi bộ dìm nhiễu nằm trong ±0,05 của lối vào không dìm, trừ RNNoise-16k ở nhạc SNR 0.
+- Ứng viên NSNet-16k sau epoch 1 dìm quãng nghỉ ngang NSNet2 công bố, trên lối vào chưa có phần lọc không gian, và hạ đoạn
+  có lời ít hơn (1,8–6,3 dB); RNNoise-16k còn lấy cả tiếng ở nhạc SNR 0 (13 dB).
+- `board_gsc_espsr_nsnet3` ra tín hiệu hỏng ở cả bốn mục (STOI 0,10, đoạn có lời giảm 43–45 dB): không đưa vào bảng, chưa
+  rõ vì sao.
