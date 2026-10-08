@@ -18,7 +18,7 @@ from srpipe.tasks.ns import data
 
 torch = pytest.importorskip("torch")
 
-from srpipe.tasks.ns import gpu_mix  # noqa: E402
+from srpipe.tasks.ns import gpu_mix, train  # noqa: E402
 
 FS = grid.SAMPLE_RATE_HZ
 UTTERANCES = 12
@@ -101,13 +101,18 @@ def every_part(world: tuple[dict, dict, dict]) -> tuple[data.Mixer, list[data.Re
     return mixer, recipes
 
 
-def test_a_batch_filtered_in_torch_is_the_numpy_examples_at_the_slot(world: tuple[dict, dict, dict]) -> None:
+def test_a_batch_filtered_in_torch_is_the_numpy_examples_at_the_slot_and_under_the_loss(
+    world: tuple[dict, dict, dict],
+) -> None:
     mixer, recipes = every_part(world)
     got = gpu_mix.Render(mixer.mics, mixer.n, "cpu")(gpu_mix.collate(recipes, mixer.n))
     worst = {"power": -math.inf, "speech": -math.inf}
+    want: dict[str, list[np.ndarray]] = {"power": [], "speech": []}
     for i, r in enumerate(recipes):
         e = mixer.mixed(r)
         power, speech, _ = data.slot_powers(e, mixer.mics.gains)
+        want["power"].append(power)
+        want["speech"].append(speech)
         worst["power"] = max(worst["power"], error_db(got["power"][i], power))
         if r.dry is None:
             assert not got["speech"][i].any()
@@ -116,12 +121,23 @@ def test_a_batch_filtered_in_torch_is_the_numpy_examples_at_the_slot(world: tupl
         np.testing.assert_array_equal(got["vad"][i].numpy(), e.vad)
     # The capture differs where a sample sits within float32 rounding of an int16 step: one step, now and then.
     assert worst["power"] < -60.0 and worst["speech"] < -100.0
+    # The loss lifts powers to 0.15: rounding far under a talker's peak would lift its target there.
+    cfg = world[0]
+    gains = torch.full_like(got["power"], 0.1)
+    numpy_loss, torch_loss = (
+        float(train.gain_loss(gains, speech, power, cfg["loss"], cfg["power_floor"]))
+        for power, speech in (
+            (torch.from_numpy(np.stack(want["power"])), torch.from_numpy(np.stack(want["speech"]))),
+            (got["power"], got["speech"]),
+        )
+    )
+    assert abs(torch_loss / numpy_loss - 1.0) < 1e-4
 
 
 def test_a_slot_without_its_hpf_is_caught(world: tuple[dict, dict, dict]) -> None:
     mixer, recipes = every_part(world)
     render = gpu_mix.Render(mixer.mics, mixer.n, "cpu")
-    render.hpf = torch.ones_like(render.hpf)
+    render.hpf = {dtype: torch.ones_like(spectrum) for dtype, spectrum in render.hpf.items()}
     got = render(gpu_mix.collate(recipes, mixer.n))
     errors = [
         error_db(got["power"][i], data.slot_powers(mixer.mixed(r), mixer.mics.gains)[0]) for i, r in enumerate(recipes)

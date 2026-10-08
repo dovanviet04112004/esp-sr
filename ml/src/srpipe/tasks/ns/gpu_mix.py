@@ -1,9 +1,9 @@
 """The Mixer's filters in torch, a whole batch at a time on the trainer's device (E9-T4, KEHOACH 3.9).
 
 A loader worker draws and reads each example (data.Mixer.recipe) and collates the batch; Render filters it where the
-nets learn: the RIRs, the microphones, the diffuse fields, the chain's digitising, then the slot's hpf and STFT. That
-is data.Mixer.mixed and data.slot_powers in float32, their float64 output to rounding, but for the self noise, drawn on
-the device from a seed the example's own stream gives (tests/test_ns_gpu_mix.py).
+nets learn: the RIRs, the microphones, the diffuse fields, the chain's digitising, then the slot's hpf and STFT. It is
+data.Mixer.mixed and data.slot_powers at the precision scipy gives each, to rounding but for the self noise, drawn on
+the device from a seed the example's own stream gives: the ns loss of a batch within 0.01% (tests/test_ns_gpu_mix.py).
 """
 
 from __future__ import annotations
@@ -74,15 +74,17 @@ def collate(recipes: Sequence[data.Recipe], n: int) -> dict[str, Tensor]:
 
 
 def carried(tracks: Tensor, rirs: Tensor, span: int, n: int) -> Tensor:
-    """Tracks (examples, sources, n + span) through their RIRs (examples, sources, mics, span): the n samples after
-    span of the full convolution, where the Mixer cuts each example after its own lead or taps."""
+    """Tracks (examples, n + span) through each example's RIRs (examples, mics, span), in their precision: the n
+    samples after span of the full convolution, where the Mixer cuts each example after its own lead or taps."""
     size = sfft.next_fast_len(tracks.shape[-1] + span - 1, real=True)
-    full = torch.fft.irfft(torch.fft.rfft(tracks, size)[..., None, :] * torch.fft.rfft(rirs, size), size)
+    full = torch.fft.irfft(torch.fft.rfft(tracks, size)[:, None] * torch.fft.rfft(rirs, size), size)
     return full[..., span : span + n]
 
 
 class Render:
-    """data.Mixer.mixed and data.slot_powers for collated batches of examples of n samples, on one device."""
+    """data.Mixer.mixed and data.slot_powers for collated batches of examples of n samples, on one device. The
+    talker's filters over a whole example run in float64, as float32 FFTs there leave it a floor ~120 dB under its
+    peak that the loss's compression lifts (tests/test_ns_gpu_mix.py); the capture's floor sits far above float32's."""
 
     def __init__(self, mics: device.Microphones, n: int, where: str | torch.device) -> None:
         self.n, self.where = n, torch.device(where)
@@ -93,7 +95,7 @@ class Render:
         freqs = np.fft.rfftfreq(self.respond_size, 1.0 / FS)
         level = np.interp(freqs, mics.freqs_hz, mics.level_db)
         response = 10.0 ** (level / 20.0) * np.exp(1j * np.interp(freqs, mics.freqs_hz, mics.phase_rad))
-        self.response = self.put(response.astype(np.complex64))
+        self.response = self.both(response)
         self.pair_size = sfft.next_fast_len(n)
         across = 2.0 * np.fft.rfftfreq(self.pair_size, 1.0 / FS) * array.SPACING_M / array.SPEED_OF_SOUND_M_S
         coherence = np.sinc(across)
@@ -104,16 +106,21 @@ class Render:
         impulse[0] = 1.0
         taps = signal.lfilter(coef[:3], np.concatenate([[1.0], coef[3:]]), impulse)
         self.hpf_size = sfft.next_fast_len(n + HPF_TAPS - 1, real=True)
-        self.hpf = self.put(np.fft.rfft(taps, self.hpf_size).astype(np.complex64))
+        self.hpf = self.both(np.fft.rfft(taps, self.hpf_size))
         self.window = self.put(sqrt_hann(FFT_SIZE))
         self.balance = self.put(np.asarray(mics.gains, dtype=np.complex64))
 
     def put(self, x: np.ndarray) -> Tensor:
         return torch.from_numpy(x).to(self.where)
 
+    def both(self, spectrum: np.ndarray) -> dict[torch.dtype, Tensor]:
+        """A complex spectrum to multiply float32 and float64 signals' spectra by."""
+        return {torch.float32: self.put(spectrum.astype(np.complex64)), torch.float64: self.put(spectrum)}
+
     def respond(self, air: Tensor) -> Tensor:
-        """device.respond for every example (examples, mics, n)."""
-        ch0 = torch.fft.irfft(torch.fft.rfft(air[:, 0], self.respond_size) * self.response, self.respond_size)
+        """device.respond for every example (examples, mics, n), in air's precision."""
+        spectrum = torch.fft.rfft(air[:, 0], self.respond_size) * self.response[air.dtype]
+        ch0 = torch.fft.irfft(spectrum, self.respond_size)
         return torch.stack([ch0[:, : self.n], air[:, 1]], dim=1) / self.louder
 
     def diffuse(self, pairs: Tensor) -> Tensor:
@@ -134,9 +141,10 @@ class Render:
         return out * self.self_noise_rms
 
     def slot(self, x: Tensor) -> Tensor:
-        """device.slot_bins for every example (examples, mics, n): (examples, hops, N_BINS)."""
-        y = torch.fft.irfft(torch.fft.rfft(x, self.hpf_size) * self.hpf, self.hpf_size)[..., : self.n]
-        frames = functional.pad(y, (FFT_SIZE - HOP, 0)).unfold(-1, FFT_SIZE, HOP)
+        """device.slot_bins for every example (examples, mics, n): (examples, hops, N_BINS); the hpf over the whole
+        example in x's precision, the STFT in float32, whose rounding stays within each frame."""
+        y = torch.fft.irfft(torch.fft.rfft(x, self.hpf_size) * self.hpf[x.dtype], self.hpf_size)[..., : self.n]
+        frames = functional.pad(y.float(), (FFT_SIZE - HOP, 0)).unfold(-1, FFT_SIZE, HOP)
         bins = torch.fft.rfft(frames * self.window, dim=-1)
         return 0.5 * (bins[:, 0] + bins[:, 1] * self.balance)
 
@@ -146,32 +154,37 @@ class Render:
         return out
 
     def mixed(self, b: dict[str, Tensor], seeds: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-        """The capture's int16 values and the talker alone on the chain's scale (examples, mics, n), and which examples
-        have a talker; every FFT runs over the whole batch, rows without the part at zero."""
+        """The capture's int16 values and the talker alone on the chain's scale in float32 as Mixer.mixed rounds it
+        (examples, mics, n), and which examples have a talker; every FFT runs over the whole batch, rows without the
+        part at zero."""
         count, span = len(b["gain_db"]), b["rirs"].shape[-1]
-        tracks = torch.zeros((count, 2, self.n + span), device=self.where)
-        tracks[b["dry_rows"], device.TALKER] = b["dry"]
-        tracks[b["source_rows"], device.NOISE] = b["source"]
-        air = carried(tracks, b["rirs"], span, self.n)
+        dry = torch.zeros((count, self.n + span), dtype=torch.float64, device=self.where)
+        dry[b["dry_rows"]] = b["dry"].double()
+        # The RIRs stay float32 as the bank holds them, which scipy's fftconvolve transforms in single precision.
+        talker = carried(dry, b["rirs"][:, device.TALKER], span, self.n)
+        source = torch.zeros((count, self.n + span), device=self.where)
+        source[b["source_rows"]] = b["source"]
+        noise = carried(source, b["rirs"][:, device.NOISE], span, self.n)
         pairs = torch.zeros_like(b["tone"])
         pairs[b["pair_rows"]] = b["pair"]
         tone, babble = self.diffuse(torch.cat([b["tone"], pairs])).split(count)
         talking, diffuse = self.marked(b["dry_rows"], count), self.marked(b["pair_rows"], count)
         heard = diffuse | self.marked(b["source_rows"], count)
-        talker, fg = air[:, device.TALKER], torch.where(diffuse[:, None, None], babble, air[:, device.NOISE])
-        responded, fg_resp, tone = self.respond(torch.cat([talker, fg, tone])).split(count)
+        fg = torch.where(diffuse[:, None, None], babble, noise)
+        responded = self.respond(talker)
+        fg_resp, tone = self.respond(torch.cat([fg, tone])).split(count)
         fg_level = self.level(fg_resp[:, 0])
         if torch.any(heard & ~(fg_level > 0)):
             raise ValueError("a silent foreground")
-        hops = talker[:, 0].double().square().reshape(count, -1, HOP).sum(-1)
+        hops = talker[:, 0].square().reshape(count, -1, HOP).sum(-1)
         power = (hops * b["active"]).sum(-1) / (b["active"].sum(-1) * HOP)
         snr_gain = torch.sqrt(power / 10.0 ** (b["snr_db"] / 10.0) / fg[:, 0].double().square().mean(-1))
         gain = torch.where(heard, torch.where(talking, snr_gain, 10.0 ** (b["fg_dbfs"] / 20.0) / fg_level), 0.0)
         tone_gain = 10.0 ** (b["tone_dbfs"] / 20.0) / self.level(tone[:, 1])
-        total = responded + gain.float()[:, None, None] * fg_resp + tone_gain.float()[:, None, None] * tone
-        g = (10.0 ** (b["gain_db"] / 20.0)).float()[:, None, None]
-        pcm = torch.floor((g * total + self.self_noise(seeds)) * self.pcm_scale).clamp(PCM_MIN, PCM_MAX)
-        return pcm, g * self.chain_scale * responded, talking
+        total = responded.float() + gain.float()[:, None, None] * fg_resp + tone_gain.float()[:, None, None] * tone
+        g = 10.0 ** (b["gain_db"] / 20.0)[:, None, None]
+        pcm = torch.floor((g.float() * total + self.self_noise(seeds)) * self.pcm_scale).clamp(PCM_MIN, PCM_MAX)
+        return pcm, (g * self.chain_scale * responded).float(), talking
 
     def __call__(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
         """power and speech (examples, hops, N_BINS) at the slot, of the capture and of the talker alone, and vad
@@ -179,8 +192,8 @@ class Render:
         b = {k: v.to(self.where, non_blocking=True) for k, v in batch.items() if k != "seed"}
         pcm, linear, talking = self.mixed(b, batch["seed"])
         power = self.slot(pcm / INT16_SCALE).abs().square()
-        # cuFFT pairs a batch's real rows, so a silent row holds float32 rounding of its neighbour's talker.
-        speech = torch.where(talking[:, None, None], self.slot(linear).abs().square(), 0.0)
+        # cuFFT pairs a batch's real rows, so a silent row holds rounding of its neighbour's talker.
+        speech = torch.where(talking[:, None, None], self.slot(linear.double()).abs().square(), 0.0)
         active = b["active"]
         vad = active | torch.cat([torch.zeros_like(active[:, :1]), active[:, :-1]], dim=1)
         return {"power": power, "speech": speech, "vad": vad.float()}
