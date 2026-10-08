@@ -136,8 +136,11 @@ esp_err_t command_load() noexcept
     s.zero = static_cast<int8_t *>(heap_caps_malloc(s.features, MALLOC_CAP_SPIRAM));
     s.log_probs =
         static_cast<float *>(heap_caps_malloc(frames_max * s.classes * sizeof(float), MALLOC_CAP_SPIRAM));
-    s.work = heap_caps_calloc(1, ai_engine_command_ctc_work_bytes(s.classes, frames_max), MALLOC_CAP_SPIRAM);
+    const size_t work_bytes = ai_engine_command_ctc_work_bytes(s.classes, frames_max);
+    s.work = heap_caps_calloc(1, work_bytes, MALLOC_CAP_SPIRAM);
     if (s.zero == nullptr || s.log_probs == nullptr || s.work == nullptr) {
+        ESP_LOGE(TAG, "%s: no PSRAM for %u B of scoring work, largest free block %u B", kEntry,
+                 (unsigned)work_bytes, (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
         command_drop();
         return ESP_ERR_NO_MEM;
     }
