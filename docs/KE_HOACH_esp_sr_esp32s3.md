@@ -2497,7 +2497,7 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 |---|---|---|---|---|---|---|
 | `thu_task` | `svc_front` | 1 | 17 | 3 KB | chặn trong `drv_audio_read_frame` tới khi DMA đủ một khung | lấy khung `ch0 ch1 [ref]`, gắn `seq`, đẩy chỉ số ô vào `q_frame`; đếm tràn DMA. **Không làm gì khác** |
 | `sach_task` | `svc_front` | 1 | 16 | 6 KB | `q_frame` | `dsp_afe_feed` rồi `fetch`; khung sạch vào `q_clean`; ghi `s_afe_stats`; luồng mở thì chép khung vào `sb_stream` không chờ |
-| `nhan_task` | `svc_listen` | 0 | 10 | 8 KB | `q_clean`, `q_cmdset` | log-mel và cao độ mỗi bước → `wake` mỗi khung; ở trạng thái `LENH` thì chạy cửa sổ `command` theo luồng thay `wake`; câu chốt → chấm → `q_dialog`; ảnh không có `wake` thì mở cửa sổ cho mọi câu `vad` tìm ra, cắt như Cửa 3 (§5.4), sự kiện → `q_event_up`; giữa hai câu nhận bộ lệnh mới từ `q_cmdset`, đổi bảng lệnh, đưa cho `ai_engine_command_prepare`, ghi `set.json` (§5.3, §6.4) |
+| `nhan_task` | `svc_listen` | 0 | 10; 2 khi chạy việc cửa sổ | 8 KB | `q_clean`, `q_cmdset` | log-mel và cao độ mỗi bước → `wake` mỗi khung; ở trạng thái `LENH` thì chạy cửa sổ `command` theo luồng thay `wake`; câu chốt → chấm → `q_dialog`; ảnh không có `wake` thì mở cửa sổ cho mọi câu `vad` tìm ra, cắt như Cửa 3 (§5.4), sự kiện → `q_event_up`; giữa hai câu nhận bộ lệnh mới từ `q_cmdset`, đổi bảng lệnh, đưa cho `ai_engine_command_prepare`, ghi `set.json` (§5.3, §6.4) |
 | `dieu_task` | `svc_dialog` | 0 | 8 | 4 KB | `q_dialog`, `q_cmd` | máy trạng thái §5.4; ra `q_speak`, `q_event_up`; báo `nhan_task` đổi chế độ |
 | `noi_task` | `svc_speak` | 0 | 5 | 8 KB | `q_speak` | dựng trọn câu vào PSRAM rồi đẩy xuống TX; giương `SPEAKING` suốt lúc phát |
 | `gui_task` | `svc_report` | 0 | 4 | 4 KB | nhịp 100 ms | lấy mẫu `s_afe_stats`, gộp 10 mẫu thành một `telemetry` mỗi giây; phát `q_event_up`; `heartbeat` mỗi 30 s |
@@ -2515,7 +2515,10 @@ Gộp làm một thì một khung đỉnh của AEC là một lần tràn DMA, v
 
 **Luật ưu tiên:** mọi task ứng dụng dưới 18 để không chèn Wi-Fi. Xếp theo **độ gấp của hạn chót**,
 không theo độ quan trọng: `thu` > `sach` (nhân 1); `nhan` > `dieu` > `mqtt` = `noi` > `gui` > `luong`
-= `net` (nhân 0).
+= `net` > việc cửa sổ của `nhan` (nhân 0). `nhan_task` có hai phần với hai hạn chót: nạp khung từ `q_clean`
+(log-mel, cao độ, mở và cắt câu) phải theo kịp nhịp khung nên chạy ở 10; việc cửa sổ (mạng và phép chấm) đuổi kịp
+liền cả giây mỗi khi câu mở, nên chạy ở 2, ngang console và dưới mọi task ứng dụng khác của nhân 0. Các task ấy chỉ dùng vài phần trăm
+CPU, còn nhịp 100 ms của `gui_task`, keepalive và sự kiện của esp-mqtt không chờ được tới hết một đợt đuổi.
 
 ### 5.3 Hàng đợi, đệm, khoá, cờ
 
@@ -2589,22 +2592,24 @@ giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec`
   (`measurements/latency.md` §18), vì cao độ đã tính lúc các bước ấy tới; tính cao độ theo cửa sổ thì mỗi bước thêm
   1,98 ms và lệnh ngắn chậm tới khoảng 330 ms 🔬. Phần ấy bắt đầu từ bước `vad` đầu, không đợi câu đủ `utterance.min_s`
   (câu bị bỏ thì công ấy bỏ đi và cửa sổ của `ai_engine` đóng bằng `ai_engine_command_abort`, để bộ lệnh mới vẫn vào được
-  giữa hai câu), và khi `q_clean` không có khung chờ, `nhan_task` chạy liền các bước của cửa sổ tới khi có khung mới, chỉ
-  chờ một tick giữa hai đợt để các task thấp hơn ở nhân 0 chạy. Chạy mỗi lần một bước và đợi đủ `utterance.min_s` thì từ
-  ngắn chưa đuổi kịp khi câu chốt (`measurements/latency.md` §17);
+  giữa hai câu), và khi `q_clean` không có khung chờ, `nhan_task` chạy liền các bước của cửa sổ tới khi có khung mới,
+  ở ưu tiên 2 để mọi task ứng dụng khác của nhân 0 chen vào ngay khi có việc (§5.2), và chờ một tick giữa hai đợt để
+  IDLE0 chạy. Trong đợt ấy khung mới chỉ được nhận khi xong bước đang chạy và các task 3–9 của nhân 0 nhả CPU, nên
+  không task nào trong số ấy được giữ CPU lâu; `q_clean` 1 s là biên. Chạy mỗi lần một bước và đợi đủ `utterance.min_s` thì từ ngắn chưa đuổi kịp khi câu chốt
+  (`measurements/latency.md` §17);
 - cửa sổ dài quá `window_s` thì thôi chạy theo luồng: lúc câu chốt nó lùi từ bước cuối tối đa `window_s`, không qua mốc
   chặn, rồi chạy cả cửa sổ, quyết định chậm cỡ thời gian mạng chạy hết cửa sổ, khoảng 1,2 s 🔬;
 - `svc_listen` tính log-mel và cao độ mỗi bước ở mọi trạng thái và giữ chúng cho các bước gần nhất ở PSRAM; bộ dò
   chỉ đặt lại khi luồng đứt; mạng bắt đầu từ bộ đệm rỗng ở đầu cửa sổ như lúc học;
+- luồng đứt (`seq` hở hay khung mang `DSP_AFE_FLAG_GAP`) giữa một câu đang mở thì cửa sổ của câu ấy không được chấm:
+  phần tiếng đã mất không lấy lại được, và chấm một câu thủng là có thể nhận nhầm. Cửa sổ ấy vẫn ra một quyết định đúng
+  lượt của nó, `REJECT` mã `FRAME_GAP`, bước cuối là bước cuối của cửa sổ lúc hở, để `host` biết câu mất vì đâu thay vì
+  không thấy gì. Lúc hở chưa biết câu đang mở là câu thật hay một tiếng click, nên click trùng chỗ hở cũng ra `FRAME_GAP`;
 - mỗi quyết định là một sự kiện vào `q_event_up`: `COMMAND` kèm điểm và khoảng cách nhất–nhì, hay `REJECT` kèm mã:
   `LOW_SCORE` khi lệnh tốt nhất kém vòng tự do quá `δ₁`, `LOW_MARGIN` khi hơn lệnh nhì chưa đủ `δ₂`, `PART` khi một phần
   của lệnh được điểm bằng hay hơn cả lệnh, `FRAME_GAP` khi câu gặp chỗ hở (điểm và khoảng cách là 0); kèm một dòng log
   có bước đầu, bước cuối của cửa sổ và thời gian từ bước chốt tới quyết định, để máy tính dựng lại đúng cửa sổ ấy từ
   luồng tiếng (`mode` 5 mang mẫu sạch) và so quyết định của board với Python.
-- luồng đứt (`seq` hở hay khung mang `DSP_AFE_FLAG_GAP`) giữa một câu đang mở thì cửa sổ của câu ấy không được chấm:
-  phần tiếng đã mất không lấy lại được, và chấm một câu thủng là có thể nhận nhầm. Cửa sổ ấy vẫn ra một quyết định đúng
-  lượt của nó, `REJECT` mã `FRAME_GAP`, bước cuối là bước cuối của cửa sổ lúc hở, để `host` biết câu mất vì đâu thay vì
-  không thấy gì. Lúc hở chưa biết câu đang mở là câu thật hay một tiếng click, nên click trùng chỗ hở cũng ra `FRAME_GAP`;
 
 **Ảnh model không có `wake`** (trước khi `wake` qua Cửa 2, hay khi chỉ demo `command`): không có gì đưa máy vào `LENH`,
 nên `nhan_task` mở cửa sổ cho mọi câu `vad` tìm ra, mốc chặn là bước sau cửa sổ trước.

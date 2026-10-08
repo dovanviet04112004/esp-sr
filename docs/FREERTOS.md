@@ -39,7 +39,7 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 |---|---|---|---|---|
 | 2.1 | Bỏ đói: task không bao giờ Blocked → IDLE đói → watchdog `IDLE1` | mỗi vòng lặp có một chỗ chặn; `sach_task` chặn trên `q_frame` | tìm `for(;;)` không có lời gọi chặn | ⏳ |
 | 2.2 | `vTaskDelay(0)` không đưa vào Blocked | không dùng | `grep "vTaskDelay(0)"` | ⏳ |
-| 2.3 | Xếp ưu tiên theo độ quan trọng thay vì độ gấp của hạn chót | `thu` 17 > `sach` 16; `nhan` 10 > `dieu` 8 > `mqtt` = `noi` 5 > `gui` 4 > `luong` = `net` 3 | đối chiếu KẾ HOẠCH §5.2 | ⏳ |
+| 2.3 | Xếp ưu tiên theo độ quan trọng thay vì độ gấp của hạn chót | `thu` 17 > `sach` 16; `nhan` 10 > `dieu` 8 > `mqtt` = `noi` 5 > `gui` 4 > `luong` = `net` 3 > việc cửa sổ của `nhan` 2, ngang console | đối chiếu KẾ HOẠCH §5.2 | ⏳ |
 | 2.4 | Task ứng dụng chèn Wi-Fi | mọi task ứng dụng dưới 18 | đọc bảng `kTasks[]` | ⏳ |
 | 2.5 | Task IDF không ghim chạy sang nhân 1 | `LWIP_TCPIP_TASK_AFFINITY_CPU0`, `ESP_TIMER_TASK_AFFINITY_CPU0`, `MQTT_USE_CORE_0` | `grep` ba khoá trong `sdkconfig.defaults.esp32s3`; ở `bench` in `vTaskGetInfo` từng task lúc boot | ⏳ |
 | 2.6 | Khoá log của IDF lấy bằng `portMAX_DELAY` — một `ESP_LOGx` có thể chặn sau lưng | không log trong vòng khung của nhân 1, không log trong vùng khoá, không log trong ISR | `grep ESP_LOG` trong `svc_front/src` chỉ ra đường khởi tạo và lỗi hiếm | ⏳ |
@@ -52,7 +52,7 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 |---|---|---|
 | Một khung DMA | `drv_audio_read_frame` (bên trong `i2s_channel_read`) | một khung cộng biên; hết hạn là lỗi phần cứng, log và đếm |
 | Khung thô | `xQueueReceive(q_frame)` | 100 ms; hết hạn thì nạp watchdog và đếm |
-| Khung sạch | `xQueueReceive(q_clean)` | 100 ms; 1 tick khi `svc_listen` có bước của cửa sổ đang chạy theo luồng hay cửa sổ đã chốt chờ chấm. Hết tick mà không có khung, `nhan_task` chạy liền các bước của cửa sổ (cao độ, rồi một khối mạng, khoảng 84 ms với mạng bề rộng 160 theo `measurements/latency.md` §18) tới khi `q_clean` có khung chờ hay hết việc; tick chờ giữa hai đợt là lúc `mqtt_task`, `gui_task`, `luong_task` ở nhân 0 chạy, nên khi cửa sổ đang đuổi kịp, chừng một giây, chúng chạy thưa hơn (KẾ HOẠCH §5.4) |
+| Khung sạch | `xQueueReceive(q_clean)` | 100 ms; 1 tick khi `svc_listen` có bước của cửa sổ đang chạy theo luồng hay cửa sổ đã chốt chờ chấm. Hết tick mà không có khung, `nhan_task` chạy liền các bước của cửa sổ (cao độ, rồi một khối mạng, khoảng 84 ms với mạng bề rộng 160 theo `measurements/latency.md` §18) tới khi `q_clean` có khung chờ hay hết việc; các bước ấy chạy ở ưu tiên 2 nên `mqtt_task`, `gui_task`, `luong_task` chen vào ngay khi có việc, và tick chờ giữa hai đợt là lượt của IDLE0 (KẾ HOẠCH §5.2, §5.4) |
 | Sự kiện, lệnh | `xQueueReceive(q_dialog / q_cmd / q_speak)` | 1 s, rồi nạp watchdog |
 | Nhịp `gui_task` | `vTaskDelayUntil` 100 ms | — |
 

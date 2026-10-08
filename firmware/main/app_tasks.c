@@ -45,6 +45,7 @@
 #define THU_PRIORITY 17
 #define SACH_PRIORITY 16
 #define NHAN_PRIORITY 10
+#define NHAN_WORK_PRIORITY 2 // window work, with the console (KEHOACH 5.2)
 #define DIEU_PRIORITY 8
 #define NOI_PRIORITY 5
 #define GUI_PRIORITY 4
@@ -238,7 +239,7 @@ static void nhan_task(void *arg)
     for (;;) {
         dsp_afe_frame_t frame;
         take_commands(w, seq);
-        // With window work left a frame is awaited a tick only, core 0's lower tasks' turn (KEHOACH 5.4).
+        // With window work left a frame is awaited a tick only: IDLE0's turn between bursts (KEHOACH 5.4).
         const TickType_t wait = svc_listen_pending() ? 1 : pdMS_TO_TICKS(CLEAN_WAIT_MS);
         svc_listen_decision_t decision;
         if (xQueueReceive(w->clean, &frame, wait) == pdTRUE) {
@@ -249,10 +250,12 @@ static void nhan_task(void *arg)
                          frame.seq);
             }
         } else {
-            // Back to back while no frame waits, so a window catches up with a short word (KEHOACH 5.4).
+            // Back to back while no frame waits, but under core 0's other app tasks (KEHOACH 5.2, 5.4).
+            vTaskPrioritySet(NULL, NHAN_WORK_PRIORITY);
             do {
                 if (svc_listen_work(&decision)) { raise_decision(w, &decision); }
             } while (svc_listen_pending() && uxQueueMessagesWaiting(w->clean) == 0);
+            vTaskPrioritySet(NULL, NHAN_PRIORITY);
         }
         esp_task_wdt_reset();
     }
