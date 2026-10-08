@@ -1,7 +1,0 @@
-/** The IDF version dl_fft checks, pinned to the one the firmware builds with.
- *  @ctx any | non-blocking
- */
-#pragma once
-
-#define ESP_IDF_VERSION_VAL(major, minor, patch) (((major) << 16) | ((minor) << 8) | (patch))
-#define ESP_IDF_VERSION ESP_IDF_VERSION_VAL(6, 0, 2)

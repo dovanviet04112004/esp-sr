@@ -1,8 +1,0 @@
-/** Placement attributes are meaningless on the host.
- *  @ctx any | non-blocking
- */
-#pragma once
-
-#define IRAM_ATTR
-#define DRAM_ATTR
-#define EXT_RAM_BSS_ATTR
