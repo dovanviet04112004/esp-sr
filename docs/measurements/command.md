@@ -1712,6 +1712,13 @@ nguyên âm và thanh về quanh 0, tức hai mạng đọc độ cao giọng ng
 cho "bật" (70/74 có hay không). Học tinh chỉnh với cao độ giữ đổi manh mối tách hai từ sang các dải cao hơn, học từ
 giọng của kho; với chủ repo, `ă` và `â` gần trùng nhau (§12.17), nên các manh mối ấy chỉ về "bật".
 
+Khi giữ cả ba chiều, phần log-mel của A đổi nhiều hơn của D: lỗi đơn vị `val` 0,375 ở v8, 0,350 ở A, 0,370 ở D; thanh
+âm tiết sau 79,0%, 81,8% và 79,3% (§12.29, §12.30). Học tiếp với cao độ SwiftF0 không làm phần log-mel khá hơn trên
+`val`; nó giữ phần ấy gần như v8, cùng cách đọc dải thấp mà "tắt" của chủ repo cần. Ở mốc 6 000–12 000, log-mel của v7 và
+v8 nghe "tắt" 28/09 ngang nhau (§12.21); ở mốc cuối v7 còn 4/22, v8 16/22 (giữa chừng 7–21/22). Chưa đo các dải thấp ở
+các mốc ấy và chưa có lượt học từ đầu không cao độ theo công thức v8, nên chưa biết cao độ lúc học tạo ra cách đọc dải
+thấp hay chỉ giữ nó.
+
 ### 12.32 Phần mở trước câu: mạng nguội trên board B khi chủ repo nói trực tiếp (09/10)
 
 Log UART của board B ngày 08/10 (3 192 cửa sổ, mọi bộ lệnh và ngưỡng của ngày) theo độ dài cửa sổ: dưới 1,5 s nhận 8/484,
