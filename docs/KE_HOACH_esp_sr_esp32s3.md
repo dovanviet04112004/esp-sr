@@ -1179,6 +1179,15 @@ chiều giữ ở trung bình: hai lượt cùng seed, split và số bước, (
 `lookahead_frames` 12. Chấm cả hai bằng Cửa 3 ở δ₁ 100 ‰, δ₂ 25 ‰, `tone_flip places` và `tone_flip owner`. C thắng khi
 Cửa 3 nhận đúng hơn D quá 5 câu (nhiễu đếm) mà từ chối không kém, hoặc thanh âm tiết đầu trên `val` hơn D quá 2 điểm mà
 Cửa 3 không kém; C chỉ thay v8 trên board khi Cửa 3 nhận đúng của nó không kém v8.
+
+**Học từ đầu không cao độ, rồi nhìn trước từ đầu** (chủ repo duyệt 09/10). Lượt nhanh E học đúng công thức v8, cùng seed
+và split, với `train.hold` `pitch` từ bước 0, dừng ở bước 10 000 của lịch 40 000 bước; đối chứng là checkpoint 10 000
+của v8, nên hai mạng chỉ khác ở cao độ lúc học. Chấm cả hai như board nghe, cả ba chiều giữ: Cửa 3 ở δ₁ 100 ‰, δ₂ 25 ‰,
+`tone_flip owner` và `tone_flip places`. E đạt khi Cửa 3 nhận đúng không kém v8 ở cùng bước quá 5 câu và "tắt" của chủ
+repo không kém quá 5 câu. Sau đó một lượt đủ 40 000 bước, `lookahead_frames` 12, cùng seed và split: không cao độ nếu E
+đạt, cao độ SwiftF0 như v8 nếu không; chấm như trên, và nó thay v8 khi Cửa 3 nhận đúng hơn v8 quá 5 câu mà từ chối không
+kém, rồi mới làm phần firmware của lớp nhìn trước.
+
 Cỡ chọn theo chất lượng: rộng hơn hay sâu hơn MultiNet7 (bề rộng 128, feedforward 256, khoảng 2,1 MB int8 🔬) khi µs đo
 trên board còn trong ngân sách §3.3. Bề rộng 160 và feedforward 320 (ADR-0017) có 3,14 triệu tham số cho encoder và đầu
 CTC, `.espdl` 3,4 MB, chạy 10,2 ms mỗi 32 ms trên board B với trọng số ngẫu nhiên (`measurements/latency.md` §18); bộ nhớ
