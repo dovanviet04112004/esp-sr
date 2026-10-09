@@ -21,8 +21,9 @@ từ 2/69 câu đúng lên 62/69. Bộ dò cao độ Kaldi trên chip dò sai â
 độ giữ hằng số; cao độ lúc học thì vẫn phải có, vì học không có nó thì "tắt" hỏng ngay từ những bước đầu. Phần quyết
 định có thêm ngưỡng thứ ba δ₃ cho âm tiết kém nhất của lệnh, chặn câu ngoài bộ lệnh; δ₃ đi đủ từ Python tới chip và
 khớp từng bit. Chip trùng Python 336/336 cửa sổ sau khi FFT viết tay khớp bản Python từng bit. Hai mạng giảm nhiễu học
-tới epoch 17 nhưng trên bản thu qua board chưa hơn OM-LSA với tiếng quạt, và chỉ hơn 1,5–2,8 dB với nhạc. Đang chạy lượt
-học lớp nhìn trước 0,4 s từ đầu: ở bước 10 000 nó đã xếp đúng 198/209.
+tới epoch 17 nhưng trên bản thu qua board chưa hơn OM-LSA với tiếng quạt, và chỉ hơn 1,5–2,8 dB với nhạc. Lượt học có lớp
+nhìn trước 0,4 s, học từ đầu, dẫn v8 ở bước 10 000 nhưng bản cuối chỉ nhận đúng 150/209, kém v8 22 câu, nên v8 vẫn chạy
+trên board.
 
 Cửa 3 là thước quyết định của dự án: 209 câu lệnh của bộ 10 lệnh mặc định trong các phiên chủ dự án nói qua board B,
 cộng 126 cửa sổ phải từ chối (tiếng động, câu gần âm, nói tự do), chạy qua đúng chuỗi xử lý của board. "Xếp đúng" là lệnh
@@ -282,7 +283,7 @@ Chưa có lý do thay OM-LSA. Dự án chọn khối giảm nhiễu bằng độ
 
 | Hướng | Trạng thái 09/10 | Điều kiện hay kỳ vọng |
 |---|---|---|
-| Lớp nhìn trước 0,4 s, học từ đầu với SwiftF0 | đang học, xong khoảng 15:30; ở bước 10 000: xếp đúng 198/209, nhận đúng 146, "tắt" 66/69 (v8 cùng bước: 187, 145, 60) | thay v8 khi bản cuối nhận đúng hơn v8 quá 5 câu (trên 177/209) mà từ chối không kém; thắng thì làm phần firmware của lớp ấy rồi mới nạp |
+| Lớp nhìn trước 0,4 s, học từ đầu với SwiftF0 | xong 09/10 15:48; dẫn v8 ở bước 10 000 (xếp đúng 198 so với 187), rồi tụt: bản cuối nhận đúng 150/209 so với 172, "tắt" được nhận 28/69 so với 51; từ bước 30 000 mạng nghe nguyên âm `ă` của "tắt" thành `â` | không đạt luật (cần trên 177): giữ v8, không làm phần firmware của lớp nhìn trước |
 | Board bỏ câu khi nói trực tiếp | trên bản thu board nhận đúng 172/209; lúc chủ dự án nói trực tiếp, phần lớn cửa sổ bị từ chối LOW_SCORE (mục 4.4), log chỉ có điểm | cho board truyền tiếng về máy lúc thử, chỉ để chẩn đoán, rồi chấm lại đúng từng câu bị bỏ |
 | Bộ dò cao độ trên chip khớp lúc học | SwiftF0 nguyên cỡ không vừa chip | Kaldi dò lại 0,4 s rồi học lại trên chính nó, hoặc một bộ dò cỡ nhỏ; lợi ước 2–4 điểm thanh ở thanh hỏi, ngã, nặng |
 | "Tăng/giảm âm lượng" | mạng gắn phụ âm đầu cho "âm", nghe thanh nặng của "lượng" thành sắc ở gần nửa số câu; hai lệnh chưa có phiên board nào trong dữ liệu học | thêm mẩu người thật có sẵn trong kho của hai lệnh vào dữ liệu học |
@@ -292,7 +293,6 @@ Chưa có lý do thay OM-LSA. Dự án chọn khối giảm nhiễu bằng độ
 
 | Việc | Kết quả mong đợi | Ưu tiên |
 |---|---|---|
-| Chốt lượt nhìn trước: chấm bản cuối trên Cửa 3, nếu thắng thì thang int8, phần firmware của lớp nhìn trước, nạp board | nhận đúng trên 177/209 trên chip, chip trùng Python | cao |
 | Chẩn đoán câu nói trực tiếp bằng tiếng truyền về | biết board bỏ câu vì mạng, vì ngưỡng hay vì câu ngoài bộ | cao |
 | "Tăng/giảm âm lượng" | nhận đúng hai lệnh trên Cửa 3 từ 7/13 và 6/11 lên mức Cửa 3 đòi, 90% mỗi lệnh | trung bình |
 | Thước độ đúng nhận lệnh cho khe giảm nhiễu | chọn giữa OM-LSA và hai mạng bằng Cửa 3 có nhiễu | trung bình |
