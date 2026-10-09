@@ -1817,3 +1817,12 @@ phụ âm đầu yếu đi, thanh vẫn đúng ở chừng bốn phần năm s�
 v8. `tone_flip owner`, cả ba chiều giữ: "tắt" 07/10 41/47 (12 qua ngưỡng của phép kiểm), 28/09 9/22 (0); v8 46/47 (42) và
 16/22 (6). Không đạt luật §3.12: Cửa 3 nhận đúng 150 so với 172 của v8. Giữ v8, không làm phần firmware của lớp nhìn
 trước.
+
+Lớp nhìn trước có đọc chữ sau không: cùng 143 câu, chấm riêng âm tiết đầu trên các khung tới hai khung sau lần phát đầu
+tiên của đơn vị đầu âm tiết hai trên đường Viterbi của v8, cả cửa sổ và khi mọi bước từ khung ấy đặt ở trung bình lúc
+học. Biên phụ âm đầu / nguyên âm / thanh của "tắt" (‰, phần câu ưa đơn vị đúng): v8 32 (88%) / 24 (90%) / 33 (87%) ở cả
+hai; nhìn trước cuối 9 (75%) / −3 (30%) / 18 (78%) cả cửa sổ, 9 (75%) / −4 (30%) / 17 (78%) khi che; ở bước 10 000
+12 (91%) / 4 (78%) / 42 (97%) ở cả hai. Che chữ thứ hai không đổi quyết định của âm tiết đầu. Trọng số lớp nhìn trước,
+trung bình trị tuyệt đối theo nhịp t … t + 12: 0,855, 0,365, 0,322, 0,275, 0,153, rồi dưới 0,11; nó đọc chừng ba tới năm
+khung kế tiếp, tức phần cuối của chính âm tiết. Nguyên âm của "tắt" hỏng từ bên trong âm tiết, không do chữ sau; ở bước
+10 000 biên nguyên âm đã chỉ 4 ‰ so với 24 ‰ của v8. Đo bằng script chẩn đoán chạy một lần.
