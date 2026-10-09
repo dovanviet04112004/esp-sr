@@ -1780,3 +1780,40 @@ nhiều nhất vì log không ghi luật phần của chúng:
 
 Log không mang tiếng nên không biết cửa sổ nào là lệnh chủ repo nói. δ₃ 60 ‰ nhận ít hơn ngưỡng cũ, δ₃ 80 ‰ cùng δ₂ 0 ‰
 nhận nhiều hơn; ở mọi quãng phần lớn cửa sổ bị từ chối `LOW_SCORE`, lệnh tốt nhất kém vòng tự do quá 200 ‰.
+
+### 12.35 Lượt nhìn trước học từ đầu với cao độ SwiftF0 (09/10)
+
+KẾ HOẠCH §3.12 sau §12.33: run `20261009_f8797b7-dirty_728829`, công thức, seed và split của v8, `model.lookahead_frames`
+12, cao độ SwiftF0 như v8 học, 40 000 bước (11:27–15:48). Lỗi đơn vị `val` nghe SwiftF0 ở các mốc 10 000, 20 000,
+30 000, 40 000: 0,483, 0,400, 0,357, 0,338 (v8: 0,506, 0,412, 0,358, 0,343); `tone_flip places` trên trọng số cuối, cả
+ba chiều giữ: 0,367, thanh đúng âm tiết đầu 72,5%, âm tiết sau 79,0% (v8: 0,375, 71,5%, 79,0%). Cửa 3 float, Kaldi, cả
+ba chiều giữ, δ₁ 100 ‰, δ₂ 25 ‰, checkpoint hai run ở cùng bước; đo bằng script chẩn đoán chạy một lần:
+
+| Bước | Đúng nhất nhìn trước / v8 | Nhận đúng nhìn trước / v8 | Câu lạ từ chối nhìn trước / v8 | "tắt" đúng nhất (nhận) nhìn trước / v8 |
+|---|---|---|---|---|
+| 10 000 | 198 / 187 | 146 / 145 | 125 / 124 | 66 (52) / 60 (48) |
+| 20 000 | 190 / 194 | 154 / 179 | 125 / 123 | 57 (41) / 68 (66) |
+| 30 000 | 190 / 195 | 168 / 175 | 126 / 125 | 57 (47) / 63 (57) |
+| 36 000 | 183 / 195 | 152 / 174 | 126 / 126 | 50 (31) / 62 (52) |
+| 40 000 | 183 / 194 | 150 / 172 | 126 / 126 | 50 (28) / 62 (51) |
+
+"bật" đúng nhất 70/73 ở mọi mốc của cả hai run. Nới δ₁ tới 200 ‰ trên trọng số cuối: nhận đúng 155, câu lạ từ chối
+122/126, "tắt" nhận vẫn 28.
+
+Câu "tắt" (69) và "bật" (74) của chủ repo, cùng phép đo của §12.31, cả ba chiều giữ; dòng v8 cuối ở §12.31:
+
+| Câu nói | Mạng | Phổ | Đúng | Phụ âm đầu | Nguyên âm | Thanh |
+|---|---|---|---|---|---|---|
+| tắt | v8, bước 36 000 | đủ | 62/69 | 27 (86%) | 22 (93%) | 30 (84%) |
+| tắt | nhìn trước, bước 30 000 | đủ | 57/69 | 11 (78%) | 3 (58%) | 30 (80%) |
+| tắt | nhìn trước, bước 36 000 | đủ | 50/69 | 9 (72%) | −2 (42%) | 18 (78%) |
+| tắt | nhìn trước, cuối | đủ | 50/69 | 9 (75%) | −3 (30%) | 18 (78%) |
+| tắt | nhìn trước, cuối | không dải thấp | 51/69 | 2 (54%) | −2 (32%) | 20 (84%) |
+| bật | nhìn trước, cuối | đủ | 71/74 | 55 (97%) | 7 (88%) | 24 (93%) |
+| bật | nhìn trước, cuối | không dải thấp | 68/74 | 24 (96%) | 5 (81%) | 2 (58%) |
+
+Lượt nhìn trước mất "tắt" ở nguyên âm: từ bước 30 000 số câu "tắt" nó ưa `ă` hơn `â` giảm dần, còn 30% ở trọng số cuối,
+phụ âm đầu yếu đi, thanh vẫn đúng ở chừng bốn phần năm số câu. Ở "bật" nguyên âm cũng chỉ lệch 5–7 ‰, so với 13–15 ‰ của
+v8. `tone_flip owner`, cả ba chiều giữ: "tắt" 07/10 41/47 (12 qua ngưỡng của phép kiểm), 28/09 9/22 (0); v8 46/47 (42) và
+16/22 (6). Không đạt luật §3.12: Cửa 3 nhận đúng 150 so với 172 của v8. Giữ v8, không làm phần firmware của lớp nhìn
+trước.
