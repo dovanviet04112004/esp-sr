@@ -1740,3 +1740,26 @@ chỗ mở ngắn hơn được chấm. Đo bằng script chẩn đoán chạy m
 
 v8 cần chừng 0,5 s trước câu; `vad` gộp hai đoạn cách nhau dưới `utterance.gap_s` 0,4 s, nên cửa sổ bị chặn vẫn còn chừng
 0,4 s trước câu và chỉ mất vài câu. Mạng nguội không giải thích được tỉ lệ nhận thấp khi nói trực tiếp.
+
+### 12.33 Học từ đầu không cao độ: lượt E (09/10)
+
+KẾ HOẠCH §3.12: run `20261009_f8797b7-dirty_640f88`, công thức, seed và split của v8, `train.hold` `pitch` từ bước 0,
+lịch 40 000 bước, dừng sau bước 10 193 (10:17–11:25). Lỗi đơn vị `val` của E theo mốc 2 000 … 10 000: 0,936, 0,705,
+0,620, 0,549, 0,515; của v8 ở cùng mốc khi giữ cả ba chiều (§12.21): 0,880, 0,677, 0,610, 0,546, 0,539. Cửa 3 float,
+Kaldi, cả ba chiều giữ, δ₁ 100 ‰, δ₂ 25 ‰, checkpoint hai run ở cùng bước; đo bằng script chẩn đoán chạy một lần:
+
+| Bước | Đúng nhất v8 / E | Nhận đúng v8 / E | Câu lạ từ chối v8 / E | "tắt" đúng nhất (nhận) v8 / E | "bật" đúng nhất (nhận) v8 / E |
+|---|---|---|---|---|---|
+| 2 000 | 121 / 110 | 0 / 0 | 126 / 126 | 35 (0) / 65 (0) | 65 (0) / 30 (0) |
+| 4 000 | 182 / 128 | 135 / 3 | 126 / 126 | 69 (63) / 65 (0) | 69 (64) / 42 (3) |
+| 6 000 | 183 / 149 | 144 / 37 | 122 / 125 | 67 (61) / 39 (3) | 70 (69) / 70 (30) |
+| 8 000 | 193 / 185 | 151 / 41 | 122 / 126 | 68 (67) / 66 (6) | 70 (70) / 70 (25) |
+| 10 000 | 187 / 177 | 145 / 74 | 124 / 126 | 60 (48) / 53 (1) | 70 (70) / 70 (61) |
+| v8 cuối | 194 | 172 | 126 | 62 (51) | 70 (70) |
+
+Nới δ₁ tới 300 ‰ không đổi gì đáng kể: E nhận đúng 46 ở bước 8 000 và 75 ở bước 10 000, "tắt" 6 và 1; v8 155 và 145.
+
+Trên `val` E theo kịp v8 giữ cao độ từ bước 6 000 và hơn ở bước 10 000, mà trên bản thu qua board E kém ở mọi mốc từ
+4 000: phần log-mel học không cao độ tách "tắt" với "bật" của chủ repo kém hẳn ngay từ đầu, không chỉ về cuối như v7
+(§12.21). v7 và v8 ngang nhau ở các mốc đầu vì cả hai học có cao độ. E không đạt luật §3.12; lượt nhìn trước đủ 40 000
+bước chạy với cao độ SwiftF0 (run `20261009_f8797b7-dirty_728829`, từ 11:27).
