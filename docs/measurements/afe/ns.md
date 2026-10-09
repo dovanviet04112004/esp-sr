@@ -270,5 +270,6 @@ Cùng thước trên `val` mô phỏng (`eval.py score --set val`), theo lớp n
 Trên `val` nhạc không phải lớp khó: NSNet-16k L ở epoch 17 kém `stationary` 0,4 dB và hơn OM-LSA 2,4 dB; khó nhất là
 `babble`. Trên bản thu, cùng mạng vẫn hơn OM-LSA 1,9 dB trên nhạc, gần bằng phần hơn trên `val`, nhưng nhạc kém quạt
 5,7 dB, và OM-LSA lấy 0,0 dB so với +2,0 dB trên nhạc `val`: đoạn nhạc thu qua board khó hơn nhạc mô phỏng với mọi cách.
-Từ epoch 1 tới 17 lớp nhạc `val` của L lên 1,1 dB, đoạn thu thì không (+2,4 dB ở epoch 2, +1,9 dB ở epoch 17). Bàn so chỉ
-có một đoạn nhạc, nên chưa tách được đoạn ấy khó vì đi qua loa, phòng và micro của board hay vì chính bản nhạc.
+Tới epoch 17, lớp nhạc `val` của L lên 1,1 dB so với epoch 1 mà đoạn thu của nó xuống (+2,4 dB ở epoch 2, +1,9 dB ở
+epoch 17); của M lên ở cả hai (`val` +0,8 dB, đoạn thu +1,9 → +2,8 dB). Bàn so chỉ có một đoạn nhạc, nên chưa nói được
+phần học thêm có sang bản thu không, và đoạn ấy khó vì đi qua loa, phòng và micro của board hay vì chính bản nhạc.
