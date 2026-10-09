@@ -1763,3 +1763,20 @@ Trên `val` E theo kịp v8 giữ cao độ từ bước 6 000 và hơn ở bư�
 4 000: phần log-mel học không cao độ tách "tắt" với "bật" của chủ repo kém hẳn ngay từ đầu, không chỉ về cuối như v7
 (§12.21). v7 và v8 ngang nhau ở các mốc đầu vì cả hai học có cao độ. E không đạt luật §3.12; lượt nhìn trước đủ 40 000
 bước chạy với cao độ SwiftF0 (run `20261009_f8797b7-dirty_728829`, từ 11:27).
+
+### 12.34 Trần âm tiết trên board B khi chủ repo nói trực tiếp (08–09/10)
+
+Ảnh model và firmware bench có luật `LOW_SYLLABLE` (`6f9ea2b`): board B khởi động 23:04 và 23:07 với δ₁ 200 ‰, δ₂ 0 ‰,
+δ₃ 60 ‰ của ảnh, bộ 301 lệnh `host/sets/test300_vi.json`; chủ repo nói thử, 23:25 đặt `kws/cmd_syllable` 80, 00:23 về
+δ₁ 200 ‰, δ₂ 25 ‰, δ₃ 65 535 (không trần) qua NVS. Log UART theo quãng; cột cuối là số cửa sổ ngưỡng cũ (δ₁ 200 ‰, δ₂
+25 ‰, không trần) cũng nhận: cửa sổ đã nhận có gap ≤ 200 và margin ≥ 25, cộng cửa sổ `LOW_SYLLABLE` như thế, là số
+nhiều nhất vì log không ghi luật phần của chúng:
+
+| Quãng | Nhận | `LOW_SCORE` | `LOW_MARGIN` | `LOW_SYLLABLE` | `PART` | Ngưỡng cũ nhận |
+|---|---|---|---|---|---|---|
+| δ₂ 0 ‰, δ₃ 60 ‰, 23:07–23:25 | 8 | 130 | — | 72 | 22 | ≤ 23 |
+| δ₂ 0 ‰, δ₃ 80 ‰, 23:25–00:23 | 77 | 269 | — | 207 | 134 | ≤ 50 |
+| δ₂ 25 ‰, không trần, 00:23–07:24 | 45 | 854 | 294 | — | 15 | 45 |
+
+Log không mang tiếng nên không biết cửa sổ nào là lệnh chủ repo nói. δ₃ 60 ‰ nhận ít hơn ngưỡng cũ, δ₃ 80 ‰ cùng δ₂ 0 ‰
+nhận nhiều hơn; ở mọi quãng phần lớn cửa sổ bị từ chối `LOW_SCORE`, lệnh tốt nhất kém vòng tự do quá 200 ‰.
