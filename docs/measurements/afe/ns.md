@@ -253,6 +253,22 @@ Cùng bốn mục theo epoch của lượt `20261008_dd911af-dirty_1ea86b`, khô
 
 Từ epoch 2 tới 17, loss `val` hạ (NSNet-16k L 0,045 → 0,043) mà số trên bản thu gần như đứng: trên quạt không bản nào
 hơn OM-LSA, vốn đã sát gain lý tưởng, và mọi bản mất tiếng nhiều hơn; trên nhạc các bản lấy +1,5 … +2,8 dB của +9,5 dB lý
-tưởng, RNNoise +4,0 dB với 5,7 dB tiếng mất. Trên `val` mô phỏng ở epoch 1, lớp nhạc của NSNet-16k L cũng chỉ +3,3 dB
-(lời hát +3,6 dB), dù nhạc và lời hát chiếm 30% mẫu học: chỗ yếu là tách nhạc, không phải lệch giữa mô phỏng và board.
-Lượt học dừng ở bước 46 412/61 891 (09/10 07:20), `make ns-resume` đi tiếp.
+tưởng, RNNoise +4,0 dB với 5,7 dB tiếng mất. Lượt học dừng ở bước 46 412/61 891 (09/10 07:20), `make ns-resume` đi tiếp.
+
+Cùng thước trên `val` mô phỏng (`eval.py score --set val`), theo lớp nhiễu, sau 3 s đầu; ô: SNR tăng dB / tiếng mất dB:
+
+| Biến thể | Epoch | `music` | `music_vocals` | `stationary` | `nonstationary` | `babble` | `tone_only` |
+|---|---|---|---|---|---|---|---|
+| OM-LSA | — | +2,0 / 0,2 | +2,3 / 0,1 | +4,2 / 0,4 | +2,6 / 0,2 | +1,2 / 0,2 | +4,8 / 0,1 |
+| NSNet-16k L | 1 | +3,3 / 2,4 | +3,6 / 2,1 | +4,1 / 2,9 | +3,9 / 2,2 | +1,9 / 3,6 | +4,3 / 0,8 |
+| NSNet-16k L | 17 | +4,4 / 2,1 | +4,3 / 1,5 | +4,8 / 2,1 | +5,1 / 1,5 | +2,6 / 2,8 | +4,8 / 0,4 |
+| NSNet-16k M | 1 | +3,6 / 2,8 | +3,6 / 2,3 | +4,2 / 3,3 | +4,4 / 2,5 | +2,0 / 4,2 | +4,4 / 0,9 |
+| NSNet-16k M | 17 | +4,4 / 2,0 | +4,3 / 1,3 | +4,8 / 1,9 | +5,0 / 1,4 | +2,5 / 2,4 | +4,8 / 0,5 |
+| RNNoise-16k | 1 | +3,8 / 1,8 | +3,9 / 1,7 | +4,1 / 2,2 | +4,1 / 1,6 | +2,4 / 3,7 | +4,3 / 0,5 |
+| RNNoise-16k | 17 | +4,1 / 1,3 | +4,2 / 1,4 | +4,5 / 1,8 | +4,6 / 1,3 | +2,7 / 2,7 | +4,5 / 0,4 |
+
+Trên `val` nhạc không phải lớp khó: NSNet-16k L ở epoch 17 kém `stationary` 0,4 dB và hơn OM-LSA 2,4 dB; khó nhất là
+`babble`. Trên bản thu, cùng mạng vẫn hơn OM-LSA 1,9 dB trên nhạc, gần bằng phần hơn trên `val`, nhưng nhạc kém quạt
+5,7 dB, và OM-LSA lấy 0,0 dB so với +2,0 dB trên nhạc `val`: đoạn nhạc thu qua board khó hơn nhạc mô phỏng với mọi cách.
+Từ epoch 1 tới 17 lớp nhạc `val` của L lên 1,1 dB, đoạn thu thì không (+2,4 dB ở epoch 2, +1,9 dB ở epoch 17). Bàn so chỉ
+có một đoạn nhạc, nên chưa tách được đoạn ấy khó vì đi qua loa, phòng và micro của board hay vì chính bản nhạc.
