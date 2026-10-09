@@ -238,3 +238,21 @@ SNR tăng, sau 3 s đầu. Gain lý tưởng của hàm mất mát là tỉ lệ
 cùng vạch, nên cả gain lý tưởng cũng chỉ dìm nhạc 9–12 dB trên cả đoạn, với tiếng mất dưới 1 dB. Trên nhạc, NSNet-16k L ở
 epoch 2 lấy được khoảng một phần tư SNR tăng lý tưởng và làm mất tiếng gấp ba; trên quạt nó dìm sâu hơn gain lý tưởng và
 trả bằng tiếng.
+
+Cùng bốn mục theo epoch của lượt `20261008_dd911af-dirty_1ea86b`, không sàn, sau 3 s đầu; ô: SNR tăng dB / tiếng mất dB:
+
+| Biến thể | Epoch | Quạt SNR 0 | Quạt SNR 5 | Nhạc SNR 0 | Nhạc SNR 5 |
+|---|---|---|---|---|---|
+| OM-LSA | — | +7,8 / 0,9 | +7,1 / 0,5 | 0,0 / 0,5 | +0,2 / 0,3 |
+| NSNet-16k L | 2 | +7,7 / 3,0 | +6,3 / 1,4 | +2,4 / 2,2 | +2,1 / 1,4 |
+| NSNet-16k L | 10 | +7,6 / 1,9 | +5,9 / 0,8 | +1,5 / 1,4 | +1,4 / 0,8 |
+| NSNet-16k L | 17 | +7,6 / 1,7 | +6,2 / 0,7 | +1,9 / 1,6 | +1,7 / 0,9 |
+| NSNet-16k M | 17 | +7,5 / 2,4 | +5,9 / 0,9 | +2,8 / 3,0 | +2,4 / 1,6 |
+| NSNet-16k S | 17 | +7,6 / 2,4 | +6,3 / 1,1 | +1,5 / 1,9 | +1,3 / 1,0 |
+| RNNoise-16k | 17 | +7,1 / 1,7 | +6,1 / 0,9 | +4,0 / 5,7 | +2,3 / 1,2 |
+
+Từ epoch 2 tới 17, loss `val` hạ (NSNet-16k L 0,045 → 0,043) mà số trên bản thu gần như đứng: trên quạt không bản nào
+hơn OM-LSA, vốn đã sát gain lý tưởng, và mọi bản mất tiếng nhiều hơn; trên nhạc các bản lấy +1,5 … +2,8 dB của +9,5 dB lý
+tưởng, RNNoise +4,0 dB với 5,7 dB tiếng mất. Trên `val` mô phỏng ở epoch 1, lớp nhạc của NSNet-16k L cũng chỉ +3,3 dB
+(lời hát +3,6 dB), dù nhạc và lời hát chiếm 30% mẫu học: chỗ yếu là tách nhạc, không phải lệch giữa mô phỏng và board.
+Lượt học dừng ở bước 46 412/61 891 (09/10 07:20), `make ns-resume` đi tiếp.
