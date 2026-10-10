@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from srpipe.compress.quant import espdl_shapes
 from srpipe.compress.quant.ptq_espdl import BITS, TARGET
 
 # Of ESP-PPQ's passive ops, esp-dl rescales only in these; the others copy integers whatever the exponents.
@@ -71,7 +72,7 @@ def export(
     """Write out as .espdl, with StreamingCache ahead of every causal convolution when streaming_input_shape gives
     the one-hop input; test_input, of that shape, or a tuple of one array an input, is stored for model->test(). The
     exporter works on its own copy, so graph stays the whole-sequence one the Simulator runs. A graph whose passive
-    ops rescale is refused (KEHOACH 3.14)."""
+    ops rescale, or whose shapes esp-dl would build otherwise (espdl_shapes), is refused (KEHOACH 3.14)."""
     import esp_ppq.lib as ppq_lib
     from esp_ppq.api.espdl_interface import generate_test_value, get_target_platform
 
@@ -91,6 +92,7 @@ def export(
         streaming_input_shape=streaming_input_shape,
         streaming_custom_passes=[cache_each_causal_conv] if streaming_input_shape is not None else None,
     )
+    espdl_shapes.check(out.with_suffix(".info"))
     return out
 
 
