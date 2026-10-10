@@ -670,7 +670,11 @@ Ba bước tối ưu tiếp, mỗi bước đo trên board B với bản lượn
 | Bỏ `Upsample` hệ số 1 cuối stage 0 và 1 (`unit_upsamples`) | 1233 ms | 76 ms, 29 |
 | 12 bản sao đầu stem bằng Add với 0 phát sóng, không Concat và Transpose (`copies_by_broadcast`) | 1212 ms | 43 ms, 28 |
 | Tách Conv của lớp gộp chuyển sang bước xuất (`cache_sized_convolutions`), không đổi int8 | 1211,5 ms | 43 ms, 28 |
-| Attention tính khoá trước: điểm số khoá × truy vấn, softmax theo trục khoá, Vᵀ × trọng số (`KeysFirstAttention`) | **1178 ms** | 45 ms, 27 |
+| Attention tính khoá trước: điểm số khoá × truy vấn, softmax theo trục khoá, Vᵀ × trọng số (`KeysFirstAttention`) | 1178 ms | 45 ms, 27 |
+| Bỏ Conv nhân 1 của tổng một đầu vào ở stage 0 (`identity_convolutions_dropped`) | 1176 ms | 33 ms, 27 |
+| Bình phương trong lớp gộp đọc bản NWC sẵn có, bỏ một Transpose (`lean_transposes`) | 1163 ms | 33 ms, 25 |
+| Cả nhánh ngữ cảnh của lớp gộp (trung bình, độ lệch theo thời gian) chạy trên bản NWC (`sink_layouts`) | 1155 ms | 19 ms, 25 |
+| Lớp gộp đọc kênh theo băng trước, đúng thứ tự bộ nhớ của chip, trọng số hoán vị theo | **1142 ms** | 8 ms, 24 |
 
 - **Conv đầu stem** từ 110 ms xuống 12 ms, nhưng bản ghép 12 bản sao nằm theo kênh trước nên ESP-PPQ chèn thêm một
   Transpose 33,6 ms trước conv depthwise.
@@ -688,4 +692,5 @@ Ba bước tối ưu tiếp, mỗi bước đo trên board B với bản lượn
   xuất; các viết lại khác ở mức mạng (`unit_upsamples`, bình phương bằng phép nhân, attention khoá trước) cho int8
   giống hệt dưới thang ấy.
 - Còn lại: gộp đầu ra các stage (`weigth1d`) ~200 ms, sát băng thông PSRAM; Conv depthwise 3×3 24 kênh của stage 0–2
-  ~154 ms, nhân unaligned; LayerNorm đầu stem 65 ms; ReLU sau phép cộng dư 52 ms; Transpose của lớp gộp 37 ms.
+  ~154 ms, nhân unaligned; LayerNorm đầu stem 65 ms, nhân float của esp-dl; Softmax và QuantizeLinear sau nó ~70 ms,
+  cũng float; ReLU sau phép cộng dư 52 ms.
