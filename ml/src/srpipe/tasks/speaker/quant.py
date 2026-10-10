@@ -2,7 +2,7 @@
 model.pt with its network's code; ptq rewrites it for esp-dl without changing what it computes, from its log-mel
 features to the embedding, quantises it with each calibration of rung 2 (3.14) into <run>/int8/<calibration>/, and
 rows each beside float in <run>/int8/ladder.yaml on the survey's material, keeping the board probe's window.
-Run: python -m srpipe.tasks.speaker.quant import | ptq <run> [--workers N]"""
+Run: python -m srpipe.tasks.speaker.quant import | ptq <run> [--workers N] | timing <run> | same-int8 <run>"""
 
 from __future__ import annotations
 
@@ -34,6 +34,7 @@ INT8_DIR = "int8"
 GRAPH_FILE = "graph.native"
 LADDER_FILE = "ladder.yaml"
 WINDOW_FILE = "board_window.npy"  # float log-mel (1, 1, mels, frames) the probe runs
+TIMING_ROW = "timing"
 ASTP_FLOOR = 1e-7  # poolings.py ASTP's variance floor, at the pin
 
 
@@ -435,6 +436,66 @@ def recorded(run: Path, head: dict, rows: dict, fresh: bool = False) -> dict:
     return merged
 
 
+def drawn(q: dict, impostors: list) -> tuple[list[int], int]:
+    """The impostor windows the ladder calibrates on and the one the board probe runs, drawn with quant.seed."""
+    picks = np.random.default_rng(q["seed"]).choice(len(impostors), q["calib_windows"] + 1, replace=False)
+    return [int(i) for i in picks[:-1]], int(picks[-1])
+
+
+def timing(cfg: dict, run: Path, paths: dict, workers: int) -> Path:
+    """<run>/int8/timing/graph.native: the run's model quantised under quant.yaml's timing rungs on the ladder's
+    calibration windows, quick to make, its time on the chip the ladder's own (KEHOACH 3.14 step 2.1)."""
+    survey_cfg, n_samples = load_yaml(CONFIGS / cfg["source"]["survey"]), round(cfg["window_s"] * grid.SAMPLE_RATE_HZ)
+    wrap, impostors = load_wrap(run), survey.impostor_windows(survey_cfg, paths, workers)
+    picks, board = drawn(cfg["quant"], impostors)
+    calib = [features(wrap, impostors[i].samples, n_samples) for i in picks]
+    folder = run / INT8_DIR / TIMING_ROW
+    with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
+        graph = ptq_espdl.quantize(Embed(wrap).eval(), calib, folder, ptq_espdl.timing_rungs(LADDER))
+    np.save(run / INT8_DIR / WINDOW_FILE, features(wrap, impostors[board].samples, n_samples).numpy())
+    return export_espdl.save_native(graph, folder / GRAPH_FILE)
+
+
+def at_commit(against: str):
+    """This module as it stands at commit against, imported under its own name; None when it reads as it does now."""
+    import importlib.util
+    import subprocess
+    import tempfile
+
+    here = Path(__file__).resolve()
+    repo = ML_ROOT.resolve().parent
+    shown = subprocess.run(["git", "show", f"{against}:{here.relative_to(repo)}"], cwd=repo, capture_output=True)
+    if shown.returncode != 0:
+        raise ValueError(f"{against}: {shown.stderr.decode().strip()}")
+    if shown.stdout == here.read_bytes():
+        return None
+    with tempfile.TemporaryDirectory() as folder:
+        path = Path(folder) / "quant_at_commit.py"
+        path.write_bytes(shown.stdout)
+        spec = importlib.util.spec_from_file_location(f"{__name__}_at_{against}", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    return module
+
+
+def same_int8(cfg: dict, run: Path, paths: dict, workers: int, against: str, calibration: str | None) -> tuple:
+    """(off, worst) of ptq_espdl.same_integers for Embed as built here and as built at commit against, quantised under
+    the ladder's rungs on quant.check_windows of its calibration windows and compared on as many owner windows;
+    None when the network code is the commit's (KEHOACH 3.14 step 2.4)."""
+    old = at_commit(against)
+    if old is None:
+        return None
+    q, survey_cfg = cfg["quant"], load_yaml(CONFIGS / cfg["source"]["survey"])
+    n_samples, wrap = round(cfg["window_s"] * grid.SAMPLE_RATE_HZ), load_wrap(run)
+    owner, impostors = survey.owner_windows(survey_cfg, paths), survey.impostor_windows(survey_cfg, paths, workers)
+    picks, _ = drawn(q, impostors)
+    calib = [features(wrap, impostors[i].samples, n_samples) for i in picks[: q["check_windows"]]]
+    inputs = [features(wrap, w.samples, n_samples).numpy() for w in owner[: q["check_windows"]]]
+    rungs = ptq_espdl.ladder(LADDER) | ({"calibration": calibration} if calibration else {})
+    nets = [old.Embed(wrap).eval(), Embed(wrap).eval()]
+    return ptq_espdl.same_integers(nets, calib, inputs, rungs, cfg["esp_ppq_patches"])
+
+
 def ptq(cfg: dict, run: Path, paths: dict, workers: int, calibrations: list[str] | None = None) -> dict:
     """Rungs 1 and 2 of the run's model under cfg, the branch's config as ctc's ladder reads its own: each of
     calibrations, by default all of quant.calibrations, kept at <run>/int8/<calibration>/graph.native and rowed in the
@@ -449,16 +510,15 @@ def ptq(cfg: dict, run: Path, paths: dict, workers: int, calibrations: list[str]
     wrap = load_wrap(run)
     net = Embed(wrap).eval()
     owner, impostors = survey.owner_windows(survey_cfg, paths), survey.impostor_windows(survey_cfg, paths, workers)
-    drawn = np.random.default_rng(q["seed"]).choice(len(impostors), q["calib_windows"] + 1, replace=False)
-    calib = [impostors[int(i)].samples for i in drawn[:-1]]
-    left_out = set(drawn[:-1].tolist())
-    scored = owner + [w for i, w in enumerate(impostors) if i not in left_out]
+    picks, board = drawn(q, impostors)
+    calib = [impostors[i].samples for i in picks]
+    scored = owner + [w for i, w in enumerate(impostors) if i not in set(picks)]
     rewrite_gap = check_rewrite(net, wrap, calib, n_samples, q["rewrite_rtol"])
     feats = [features(wrap, w.samples, n_samples) for w in scored]
     with torch.no_grad():
         fl = np.stack([net(f).numpy().ravel() for f in feats])
     (run / INT8_DIR).mkdir(parents=True, exist_ok=True)
-    np.save(run / INT8_DIR / WINDOW_FILE, features(wrap, impostors[int(drawn[-1])].samples, n_samples).numpy())
+    np.save(run / INT8_DIR / WINDOW_FILE, features(wrap, impostors[board].samples, n_samples).numpy())
     head = {"window_s": cfg["window_s"], "windows": len(scored), "rewrite_gap": rewrite_gap}
     ladder = recorded(run, head | {"float": figures(fl, scored, survey_cfg, q)}, {}, fresh=calibrations is None)
     calib_feats = [features(wrap, samples, n_samples) for samples in calib]
@@ -491,12 +551,30 @@ def main(argv: list[str] | None = None) -> int:
     ladder.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.speaker.quant import")
     ladder.add_argument("--workers", type=int, default=8, help="processes simulating the impostors' sessions")
     ladder.add_argument("--calibrations", nargs="+", help="only these of quant.calibrations: a stopped ladder goes on")
+    quick = sub.add_parser("timing", help="the timing row: a quick graph that times the chip as the ladder's rows")
+    quick.add_argument("run", type=Path)
+    quick.add_argument("--workers", type=int, default=8)
+    check = sub.add_parser("same-int8", help="whether a rewrite of the network keeps every integer under the rungs")
+    check.add_argument("run", type=Path)
+    check.add_argument("--against", default="HEAD", help="the commit whose network code the edited one is held to")
+    check.add_argument("--calibration", help="one of quant.calibrations; the ladder's default otherwise")
+    check.add_argument("--workers", type=int, default=8)
     args = parser.parse_args(argv)
+    cfg = load_yaml(CONFIG)
     if args.command == "import":
-        print(import_run(load_yaml(CONFIG), data_paths()))
-        return 0
-    ptq(load_yaml(CONFIG), args.run, data_paths(), args.workers, args.calibrations)
-    print(args.run / INT8_DIR / LADDER_FILE)
+        print(import_run(cfg, data_paths()))
+    elif args.command == "timing":
+        print(timing(cfg, args.run, data_paths(), args.workers))
+    elif args.command == "same-int8":
+        found = same_int8(cfg, args.run, data_paths(), args.workers, args.against, args.calibration)
+        if found is None:
+            print(f"the network code is {args.against}'s: nothing to check")
+        else:
+            print(f"{found[0]} values off between {args.against} and now, {found[1]} at most")
+            return int(found[0] > 0)
+    else:
+        ptq(cfg, args.run, data_paths(), args.workers, args.calibrations)
+        print(args.run / INT8_DIR / LADDER_FILE)
     return 0
 
 

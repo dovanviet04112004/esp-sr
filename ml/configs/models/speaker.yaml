@@ -9,6 +9,7 @@ quant:                             # python -m srpipe.tasks.speaker.quant ptq <r
   calib_windows: 64                # impostor windows ESP-PPQ calibrates on, drawn with the seed, left out of the rows
   calibrations: [kl, percentile, minmax, mse]   # rung 2, one row each, in this order
   rewrite_rtol: 1.0e-4             # largest gap of the rewritten graph to the extractor, as a share of its largest value
+  check_windows: 8                 # calibration and owner windows of same-int8 (KEHOACH 3.14 step 2.4)
   count: 10                        # enrolment windows of the figures
   shares: [0.01, 0.05]             # impostors passing at which the accepted windows kept are given per group
 esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches around this branch's quantisation and export
