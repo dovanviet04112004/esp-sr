@@ -264,6 +264,39 @@ class To2d(nn.Module):
         return x.reshape(x.shape[0], self.bands, self.channels, x.shape[2]).permute(0, 2, 3, 1)
 
 
+class KeysFirstAttention(nn.Module):
+    """redimnet2's MultiHeadAttention with each head's weights laid (keys, queries) and its output (features, queries):
+    the same sums, where esp-dl's int8 MatMul takes its output columns 16 at a time and the weights times the values
+    had only a head's few features as columns."""
+
+    def __init__(self, attention: nn.Module) -> None:
+        super().__init__()
+        if attention.qk_norm or attention.qk_rope:
+            raise ValueError("KeysFirstAttention runs plain scaled dot-product heads")
+        self.attention = attention
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        a, (n, t, _) = self.attention, x.shape
+        heads, width = a.num_heads, a.head_dim
+
+        def features_first(proj: nn.Linear) -> torch.Tensor:
+            return proj(x).view(n, t, heads, width).permute(0, 2, 3, 1).reshape(n * heads, width, t)
+
+        keys = a.k_proj(x).view(n, t, heads, width).transpose(1, 2).reshape(n * heads, t, width)
+        weights = torch.softmax(torch.bmm(keys, features_first(a.q_proj)) * a.scaling, dim=1)
+        out = torch.bmm(features_first(a.v_proj), weights).view(n, heads, width, t)
+        return a.out_proj(out.permute(0, 3, 1, 2).reshape(n, t, heads * width))
+
+
+def keys_first_attention(model: nn.Module) -> nn.Module:
+    """model with each of redimnet2's MultiHeadAttention as KeysFirstAttention."""
+    for parent in list(model.modules()):
+        for name, m in list(parent.named_children()):
+            if type(m).__name__ == "MultiHeadAttention":
+                setattr(parent, name, KeysFirstAttention(m))
+    return model
+
+
 def time_major(model: nn.Module) -> nn.Module:
     """model's 2-d maps laid (b, c, frames, bands): each Conv2d swapped, to1d and to2d as To1d and To2d. On the chip a
     map is then (frames, bands, c), so going to and from 1-d (frames, bands x c) moves no data once lean_transposes
@@ -292,7 +325,7 @@ class Embed(nn.Module):
         if b.is_subnet or b.agg_gnorm or any(b._stage_has_dual):
             raise ValueError("Embed runs one plain stage after another")
         rewritten = stage_sums(channel_norms(ungrouped(explicit_padding(copy.deepcopy(b)))))
-        self.backbone = time_major(one_channel_inputs(unit_upsamples(rewritten)))
+        self.backbone = time_major(one_channel_inputs(unit_upsamples(keys_first_attention(rewritten))))
         self.pool = ContextPool(wrap.pool)
         self.head = folded_head(wrap.bn, wrap.linear)
 

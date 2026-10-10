@@ -147,6 +147,37 @@ def test_unit_upsamples_drop_the_upsamples_by_one_and_keep_the_others() -> None:
     torch.testing.assert_close(model(x), want, rtol=0.0, atol=0.0)
 
 
+class HeadsAttention(nn.Module):
+    """redimnet2/layers/attention.py MultiHeadAttention at the pin, plain scaled dot-product heads."""
+
+    def __init__(self, width: int, heads: int) -> None:
+        super().__init__()
+        self.embed_dim, self.num_heads, self.head_dim = width, heads, width // heads
+        self.scaling, self.qk_norm, self.qk_rope = self.head_dim**-0.5, False, False
+        self.k_proj, self.v_proj = nn.Linear(width, width), nn.Linear(width, width)
+        self.q_proj, self.out_proj = nn.Linear(width, width), nn.Linear(width, width)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        n, t, _ = x.shape
+
+        def heads(y: torch.Tensor) -> torch.Tensor:
+            return y.view(n, t, self.num_heads, self.head_dim).transpose(1, 2).reshape(-1, t, self.head_dim)
+
+        weights = torch.softmax(
+            torch.bmm(heads(self.q_proj(x)), heads(self.k_proj(x)).transpose(1, 2)) * self.scaling, -1
+        )
+        out = torch.bmm(weights, heads(self.v_proj(x))).view(n, self.num_heads, t, self.head_dim).transpose(1, 2)
+        return self.out_proj(out.reshape(n, t, self.embed_dim))
+
+
+def test_keys_first_attention_gives_what_the_heads_give() -> None:
+    torch.manual_seed(9)
+    attention = HeadsAttention(CHANNELS * 4, 4).eval()
+    x = torch.randn(1, FRAMES, CHANNELS * 4)
+    with torch.no_grad():
+        torch.testing.assert_close(quant.KeysFirstAttention(attention)(x), attention(x))
+
+
 def test_explicit_pads_give_what_same_gives() -> None:
     torch.manual_seed(0)
     model = nn.Sequential(
