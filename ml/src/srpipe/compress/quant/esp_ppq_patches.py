@@ -400,18 +400,10 @@ def chain_as_one(shape: list[int], first: list[int], target: list[int], second: 
     return None
 
 
-def same_grid(a, b) -> bool:
-    """Transposes a and b write their output at one scale and width, or are not quantised."""
-    from esp_ppq.IR.quantize import QuantableOperation
-
-    if not isinstance(a, QuantableOperation) or not isinstance(b, QuantableOperation):
-        return not isinstance(a, QuantableOperation) and not isinstance(b, QuantableOperation)
-    ca, cb = a.output_quant_config[0], b.output_quant_config[0]
-    return ca.num_of_bits == cb.num_of_bits and bool((ca.scale == cb.scale).all())
-
-
 def share_transposes(graph) -> int:
-    """Merge the Transposes reading one variable by one perm at one grid into the first; how many went."""
+    """Merge the Transposes reading one variable by one perm into the first; how many went. Each inserted Transpose
+    carries its reader's grid, but moves values without rescaling them: the export requantises a reader after the
+    shared one where its grid differs."""
     gone = 0
     for var in list(graph.variables.values()):
         kept = {}
@@ -420,7 +412,7 @@ def share_transposes(graph) -> int:
                 continue
             first = kept.setdefault(tuple(op.attributes["perm"]), op)
             twin = op.outputs[0]
-            if first is op or twin.name in graph.outputs or not same_grid(first, op):
+            if first is op or twin.name in graph.outputs:
                 continue
             for reader in list(twin.dest_ops):
                 reader.inputs[:] = [first.outputs[0] if v is twin else v for v in reader.inputs]
