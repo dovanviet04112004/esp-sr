@@ -1485,7 +1485,10 @@ Một mạng đi từ torch tới chip qua các file của `srpipe/compress/quan
 4. `export_espdl.py`: ghi `.espdl`, chạy dòng thì đặt `StreamingCache` trước từng tích chập nhân quả, kèm mẫu thử cho
    `model->test()`; ghi cả đồ thị native để bước sau đọc lại mà không lượng tử lại. Phép thụ động của ESP-PPQ (`Slice`,
    `Transpose`, `Reshape`, `Pad`, `MaxPool`…) phải ra cùng số mũ với đầu vào, vì module esp-dl của chúng chỉ chép số
-   nguyên; đồ thị trái điều này bị từ chối ngay lúc xuất, mọi nhánh.
+   nguyên; đồ thị trái điều này bị từ chối ngay lúc xuất, mọi nhánh. `espdl_shapes.py` phát lại `get_output_shape`
+   của từng module esp-dl trên `.info` vừa xuất. Chiều không dương, phép phát sóng mà ONNX từ chối (esp-dl lấy cỡ lớn
+   hơn của từng trục mà không kiểm) hay `Reshape` lệch kích thước thì bị từ chối ngay trên máy tính, trước khi ghi
+   flash; op nó chưa biết thì để hình dạng là chưa biết, không chặn.
 
 `esp_ppq_patches.py` sửa lỗi của ESP-PPQ 1.3.11, chỉ cho nhánh khai nó trong config, ở mọi chỗ nhánh ấy dùng ESP-PPQ:
 lượng tử, QAT, mô phỏng và xuất; mỗi lỗi ghi triệu chứng trên board và test ghim nó. Mô phỏng phải tính từng phép như
@@ -2005,6 +2008,7 @@ ml/
 │   │   ├── mixed_espdl.py             # bậc 3: xếp tích chập theo sai số từng lớp, chọn lớp int16
 │   │   ├── qat_espdl.py               # bậc 4: học tiếp đồ thị qua lượng tử giả, chép sang đồ thị lô 1
 │   │   ├── export_espdl.py            # ghi .espdl (chạy dòng, mẫu thử) và đồ thị native
+│   │   ├── espdl_shapes.py            # phát lại hình dạng esp-dl dựng trên .info vừa xuất, chặn đồ thị chip không dựng nổi
 │   │   └── esp_ppq_patches.py         # vá lỗi ESP-PPQ 1.3.11, mỗi bản vá một hàm ghi lỗi, triệu chứng trên board
 │   │                                  #   và test ghim nó; chỉ nhánh khai `esp_ppq_patches` trong config mới bật
 │   └── export/{pack_models.py, update_lock.py}
