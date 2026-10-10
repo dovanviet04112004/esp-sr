@@ -599,6 +599,36 @@ def test_identity_convolutions_dropped_gives_the_sums_reader_its_input(tmp_path:
     assert nodes["/back/Conv"][1][0] == plain["/sum/Conv"][1][0]
 
 
+class SquareBeside(nn.Module):
+    """A 2-d map flattened to 1-d, read by a convolution and squared, the square times the convolution's output, as
+    ReDimNet2's pool does with its input."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv2d, self.conv1d = nn.Conv2d(1, 4, 3, padding=1), nn.Conv1d(4 * 6, 4 * 6, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        flat = self.conv2d(x).reshape(1, 4 * 6, HOPS)
+        return self.conv1d(flat) * (flat * flat)
+
+
+def test_lean_transposes_squares_the_channels_last_map_the_convolution_reads(tmp_path: Path) -> None:
+    torch.manual_seed(7)
+    rng = np.random.default_rng(20)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 1, 6, HOPS)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(SquareBeside().eval(), calib, tmp_path, RUNGS)
+
+    from esp_ppq.parser.espdl.FlatBuffers.Dl import Model
+
+    with esp_ppq_patches.applied(["lean_transposes"]):
+        path = export_espdl.export(graph, tmp_path / "lean.espdl")
+    nodes, flat = espdl_graph(path)[0], Model.Model.GetRootAs(path.read_bytes()[16:], 0).Graph()
+    made = {flat.Node(i).Name().decode(): flat.Node(i).Output(0).decode() for i in range(flat.NodeLength())}
+    (square,) = [name for name, (op, ins) in nodes.items() if op == "Mul" and ins[0] == ins[1]]
+    assert nodes[square][1][0] == nodes["/conv1d/Conv"][1][0]
+    assert not [op for op, ins in nodes.values() if op == "Transpose" and made[square] in ins]
+
+
 def test_an_unknown_patch_is_refused() -> None:
     with pytest.raises(ValueError, match="unknown ESP-PPQ patches"), esp_ppq_patches.applied(["no_such_patch"]):
         pass

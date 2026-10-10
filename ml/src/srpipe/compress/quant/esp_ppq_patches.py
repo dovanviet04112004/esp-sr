@@ -426,6 +426,33 @@ def share_transposes(graph) -> int:
     return gone
 
 
+def sink_transposes(graph) -> int:
+    """Each Transpose whose input only it reads, made by an Add, Sub or Mul of one variable alone that another
+    Transpose by the same perm reads: the op moved after that other Transpose, and this one dropped; how many."""
+    gone = 0
+    for second in [op for op in graph.topological_sort() if op.type == "Transpose"]:
+        made = second.inputs[0]
+        op = made.source_op
+        if op is None or op.type not in ("Add", "Sub", "Mul") or len(made.dest_ops) != 1 or made.name in graph.outputs:
+            continue
+        source, perm = op.inputs[0], second.attributes["perm"]
+        if any(v is not source for v in op.inputs):
+            continue
+        first = next((t for t in source.dest_ops if t.type == "Transpose" and t.attributes["perm"] == perm), None)
+        if first is None:
+            continue
+        laid, out = first.outputs[0], second.outputs[0]
+        for _ in op.inputs:
+            source.dest_ops.remove(op)
+            laid.dest_ops.append(op)
+        op.inputs[:] = [laid] * len(op.inputs)
+        graph.remove_operation(second)
+        op.outputs[0], out.source_op, made.source_op = out, op, None
+        graph.remove_variable(made)
+        gone += 1
+    return gone
+
+
 def fold_transpose_chains(graph) -> int:
     """Fold each Transpose, Reshape, Transpose whose middle values nothing else reads into one Transpose and the
     Reshape, or the Reshape alone when the chain moves nothing; how many folded."""
@@ -469,10 +496,10 @@ def fold_transpose_chains(graph) -> int:
 
 @contextlib.contextmanager
 def lean_transposes() -> Iterator[None]:
-    """ESP-PPQ's export lays tensors channels last and puts a Transpose wherever an op needs the ONNX layout, one for
-    each reader, and only merges Transposes that stand next to each other: a variable read by seven ops got seven equal
-    Transposes, and every Transpose, Reshape, Transpose chain between 2-d and 1-d maps kept both. After its layout pass
-    this merges equal Transposes of one variable and folds those chains into the one Transpose, or none, that moves the
+    """ESP-PPQ's export puts a Transpose before each reader that needs another layout and merges only adjacent ones: a
+    variable read by seven ops got seven equal Transposes, every Transpose, Reshape, Transpose chain kept both. After
+    its layout pass this merges equal Transposes of one variable (share_transposes), moves elementwise ops of one
+    variable after its Transpose (sink_transposes) and folds each chain into the one Transpose, or none, moving the
     same values. ReDimNet2 b0 (KEHOACH 3.17) on board B: 50 inserted Transposes took 0.55 s of 2.5 s a window.
     """
     from esp_ppq.parser import espdl_exporter
@@ -483,6 +510,7 @@ def lean_transposes() -> Iterator[None]:
     def leaner(graph):
         reset(graph)
         share_transposes(graph)
+        sink_transposes(graph)
         fold_transpose_chains(graph)
         pattern = FuseTransposePattern()
         for op in graph.topological_sort():
