@@ -1503,6 +1503,18 @@ nhân esp-dl của S3, đến từng lần làm tròn float32, vì quyết đị
 nhân số nguyên với `1/sqrtf` của bình phương trung bình đã nhân tỉ lệ hai lưới, nhân trọng số float rồi làm tròn nửa
 lên; bản vá tính đúng chuỗi ấy, gradient của QAT đi qua bản float.
 
+
+Tăng tốc một nhánh trên chip đi theo một quy trình, nhánh nào cũng vậy:
+1. Đo trên board thời gian từng module bằng `profile_module` của esp-dl, trong lượt `model->test()` của bản dò nhánh.
+2. `espdl_profile.py` đọc bảng ấy trong log cùng `.espdl` đã chạy (`make ai-profile`): thời gian theo loại op, module
+   chậm nhất, chu kỳ trên mỗi phép nhân-cộng của từng tích chập. Nó gắn nhãn các đường chậm của esp-dl trên S3, mỗi nhãn
+   kèm bản vá xử lý nó: số kênh không chia hết cho 16 (nhân unaligned), trọng số tích chập lớn hơn cache dữ liệu 64 KB,
+   MatMul ra ít hơn 16 cột (vòng C), op chạy float, Transpose và QuantizeLinear do bước xuất chèn.
+3. Bật bản vá ở bước xuất trong config của nhánh, nạp board: `model->test()` phải khớp mô phỏng từng bit ở mọi bản cắt;
+   đo lại.
+4. Viết lại mạng khi không bản vá nào xử lý được, kèm phép so số nguyên dưới các bậc của thang như trên.
+5. Ghi mỗi bước vào `docs/measurements/latency.md`.
+
 Mỗi nhánh dựng thang của mình ở `tasks/<nhánh>/quant.py`: mỗi bậc một lệnh con, mỗi dòng so với float bằng thước của
 nhánh sau int8, ghi vào `<run>/int8/ladder.yaml`, đồ thị của dòng ở `<run>/int8/<dòng>/`. Bậc 3 và 4 dựng trên cách hiệu
 chuẩn tốt nhất của bậc 2 theo thước ấy. Với `command` `ctc`: đếm câu lệnh được nhận đúng trên phiên board ở `δ₁`
@@ -2015,6 +2027,7 @@ ml/
 │   │   ├── qat_espdl.py               # bậc 4: học tiếp đồ thị qua lượng tử giả, chép sang đồ thị lô 1
 │   │   ├── export_espdl.py            # ghi .espdl (chạy dòng, mẫu thử) và đồ thị native
 │   │   ├── espdl_shapes.py            # phát lại hình dạng esp-dl dựng trên .info vừa xuất, chặn đồ thị chip không dựng nổi
+│   │   ├── espdl_profile.py           # xếp module theo thời gian đo trên board, gắn nhãn đường chậm của esp-dl S3
 │   │   └── esp_ppq_patches.py         # vá lỗi ESP-PPQ 1.3.11, mỗi bản vá một hàm ghi lỗi, triệu chứng trên board
 │   │                                  #   và test ghim nó; chỉ nhánh khai `esp_ppq_patches` trong config mới bật
 │   └── export/{pack_models.py, update_lock.py}
