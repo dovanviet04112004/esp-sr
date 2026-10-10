@@ -1492,9 +1492,12 @@ Một mạng đi từ torch tới chip qua các file của `srpipe/compress/quan
 
 `esp_ppq_patches.py` sửa lỗi của ESP-PPQ 1.3.11, chỉ cho nhánh khai nó trong config, ở mọi chỗ nhánh ấy dùng ESP-PPQ:
 lượng tử, QAT, mô phỏng và xuất; mỗi lỗi ghi triệu chứng trên board và test ghim nó. Bản vá ở bước xuất còn bỏ việc
-thừa ESP-PPQ để lại cho chip mà không đổi một số nguyên nào của đồ thị: Transpose và QuantizeLinear trùng nhau, và tích
-chập 1×1 có số kênh không chia hết cho 16, chạy lại trên đường vector của esp-dl bằng cách gộp các cột kề nhau vào kênh;
-test so số nguyên của bản xuất có và không có bản vá. Mô phỏng phải tính từng phép như
+thừa ESP-PPQ để lại cho chip mà không đổi một số nguyên nào của đồ thị: Transpose và QuantizeLinear trùng nhau, tích
+chập có số kênh không chia hết cho 16 chạy lại trên đường vector của esp-dl bằng cách gộp các cột kề nhau vào kênh, tích
+chập có trọng số lớn hơn cache dữ liệu tách theo kênh ra; test so số nguyên của bản xuất có và không có bản vá. Viết lại
+mạng trước khi lượng tử để chip chạy nhanh hơn thì phải ra cùng số nguyên với bản chưa viết lại khi lượng tử bằng chính
+các bậc của thang: bias correction của ESP-PPQ hiệu chỉnh theo khối op, nên thêm hay bớt op có thể đổi số nguyên dù phép
+tính không đổi. Viết lại nào không qua được phép so ấy thì làm ở bước xuất. Mô phỏng phải tính từng phép như
 nhân esp-dl của S3, đến từng lần làm tròn float32, vì quyết định của chip phải bằng quyết định Python từng trường
 (§3.12). `RMSNormalization` là một chỗ ESP-PPQ tính khác: nó chia cho căn rồi làm tròn ở lượng tử đầu ra, còn esp-dl
 nhân số nguyên với `1/sqrtf` của bình phương trung bình đã nhân tỉ lệ hai lưới, nhân trọng số float rồi làm tròn nửa
