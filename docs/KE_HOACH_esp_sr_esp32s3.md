@@ -1703,12 +1703,25 @@ người lạ lọt.
 
 **Đường chip: ReDimNet2 b0.** Trọng số `b0-vox2-lm` học sẵn, 1,1 M tham số, ~0,27 tỉ MAC cho 1,5 s lời; chạy trong
 `ai_engine`, int8 của esp-dl, ở nhân 0 sau khi `command` nhận lệnh.
+- **Đi đúng đường của `command_ctc`:** b0 nhập thành một run ở `artifacts/speaker/runs/` (`make speaker-import`):
+  `model.pt` cùng mã mạng ở bản ghim. Thang int8 vào `<run>/int8/` (`make speaker-ptq`), bản dò board đọc một hàng
+  của thang (`make ai-unit-speaker`). Đồ thị chạy từ log-mel của chính b0 tới embedding; khâu đặc trưng của nó ở
+  ngoài đồ thị.
 - **Bước đầu là bản dò** như E9-T10: xuất qua ESP-PPQ, `model->test()`, thời gian một lần chạy và PSRAM trên board B,
   độ lệch int8 so với mô phỏng, chất lượng sau int8 trên vật liệu của khảo sát.
 - **Cắm vào chuỗi** chỉ khi bản dò đạt hai điều: một lần chạy ≤ 1 s trên cửa sổ 1,5 s; sau int8 giữ ≥ 95% lệnh được nhận
   ở cả 1 m và 3 m, với ≤ 5% người lạ lọt.
 - **Chốt ở KẾ HOẠCH lúc cắm:** thư mục trong `ai_engine/src/`, chỗ đệm PCM của cửa sổ, chỗ mẫu giọng nằm trên flash
-  (`storage_format.h`, §6.2). Nếu int8 kéo chất lượng xuống, học lại b0 trên dữ liệu nhiều ngôn ngữ cộng tiếng Việt
+  (`storage_format.h`, §6.2). Hàng int8 được chọn vào `firmware/models/speaker/` và `models.lock.json` bằng một lệnh
+  `deploy`, như `ctc-deploy`.
+- **Hai phần thuần có bộ vàng, làm lúc cắm** (bốn bước của TỔNG QUAN §5.3, như mọi khối): mạng chỉ cần
+  `model->test()` và khớp mô phỏng ESP-PPQ (§3.14); hai phần dưới là C thuần nên cần bản soi gương float32 và
+  `contracts/golden/` có đối chứng âm.
+  - Khâu đặc trưng của b0, khác lưới §3.1: chuẩn hoá cả cửa sổ, tiền nhấn 0,97, khung Hamming 400 mẫu, bước 160,
+    FFT 512, 72 mel 20–7600 Hz, log, trừ trung bình từng băng. Nằm ở `dsp_spec`; hoặc học lại b0 trên đặc trưng của
+    hợp đồng.
+  - Hậu xử lý: chuẩn hoá embedding, cosine với mẫu giọng, ngưỡng, mẫu giọng là trung bình 10 lần đăng ký. Nằm ở
+    `ai_engine/src/<thư mục của speaker>/`, bản soi gương ở `tasks/speaker/postproc/`. Nếu int8 kéo chất lượng xuống, học lại b0 trên dữ liệu nhiều ngôn ngữ cộng tiếng Việt
   (VieSpeaker, CC BY-NC 4.0) là bước sau.
 
 ---
@@ -1875,11 +1888,13 @@ ml/
 │   ├── scenes/standard.yaml           # bộ cảnh có nhãn chuẩn của E4-T4: phòng, RT60, góc, SNR, seed
 │   ├── scenes/speaker.yaml            # khảo sát §3.17: bộ trích ghim bản, phiên đăng ký và thử, người lạ, k, seed
 │   ├── scenes/device.yaml             # đường mô phỏng board của E4-T8: kho phòng, mức nói, nhiễu, micro, log-mel
-│   └── models/{ns.yaml, wake.yaml, command.yaml, command_kws.yaml, command_ctc.yaml, synth.yaml, quant.yaml}
+│   └── models/{ns.yaml, wake.yaml, command.yaml, command_kws.yaml, command_ctc.yaml, speaker.yaml, synth.yaml,
+│                quant.yaml}
 │                                      #   ns.yaml: split, bộ trộn, hai ứng viên và lịch học chung của khe ns
 │                                      #   (§3.9); command.yaml: đường sản phẩm (backend), đặc trưng;
 │                                      #   command_kws.yaml, command_ctc.yaml: split, mạng, lịch học của từng
-│                                      #   đường; quant.yaml: thang §3.14
+│                                      #   đường; speaker.yaml: đường chip §3.17, bộ trích nhập thành run, thang
+│                                      #   int8, bản dò; quant.yaml: thang §3.14
 │
 ├── src/srpipe/
 │   ├── core/                          # ── HẠ TẦNG: không chứa tên khối nào ──
@@ -1977,8 +1992,10 @@ ml/
 │   │   │                              #   quant.py dựng thang §3.14 cho ba đồ thị: encoder kèm phép chiếu khung,
 │   │   │                              #   mạng dự đoán đọc ngữ cảnh one-hot, bộ nối hai đầu vào; probe.py bản dò
 │   │   │                              #   board của ba đồ thị và của quyết định; chấm chính xác trên cây lệnh
-│   │   ├── speaker/quant.py           # bản dò int8 của ReDimNet2 b0 (§3.17): mã mạng nạp từ cache/spk_ref theo bản
-│   │   │                              #   ghim, xuất qua compress/quant như các nhánh khác
+│   │   ├── speaker/{quant.py, probe.py, postproc/ ★}   # đường chip §3.17, đi như ctc: quant.py lệnh con import
+│   │   │                              #   nhập ReDimNet2 b0 học sẵn của khảo sát theo bản ghim thành một run
+│   │   │                              #   (model.pt cùng mã mạng), lệnh con ptq dựng thang §3.14 vào <run>/int8/;
+│   │   │                              #   probe.py bản dò board của một hàng; postproc/ cosine và ngưỡng, lúc cắm
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
 │   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py, pitch.py}
@@ -2016,7 +2033,8 @@ ml/
 **Bản soi gương viết trước bản C** (TỔNG QUAN §5.3 bước 1). Bản C khớp bản Python, không phải ngược lại.
 
 Mỗi lần huấn luyện ghi vào `artifacts/<nhánh>/runs/<ngày>_<gitsha>_<cfghash>/` kèm
-`config.resolved.yaml`, `split.lock`, `env.txt`, như repo face attendance.
+`config.resolved.yaml`, `split.lock`, `env.txt`, như repo face attendance. Model học sẵn đưa xuống chip vào đúng chỗ
+ấy, nhập thành một run với `split.lock` rỗng vì không học ở đây (`speaker`, §3.17).
 
 #### 4.4.1 `ml/data/` — dữ liệu
 
