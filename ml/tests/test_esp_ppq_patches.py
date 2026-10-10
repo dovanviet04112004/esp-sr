@@ -495,28 +495,31 @@ def filters(stored: np.ndarray) -> np.ndarray:
 
 
 class NarrowPointwise(nn.Module):
-    """A 24-channel map through a pointwise convolution and a ReLU, a depthwise pointwise one and one to 12 channels."""
+    """A 1-d map of 8 bands of 12 channels laid out as a 2-d one, as ReDimNet2's to2d does, through narrow
+    convolutions: a pointwise one and a ReLU, a depthwise pointwise one, one over each 2 bands, one to 12 channels."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.front = nn.Conv2d(1, 24, 3, padding=1)
-        self.pointwise = nn.Conv2d(24, 24, 1)
+        self.pointwise = nn.Conv2d(12, 24, 1)
         self.depthwise = nn.Conv2d(24, 24, 1, groups=24)
+        self.pairs = nn.Conv2d(24, 24, (1, 2), stride=(1, 2))
         self.narrow = nn.Conv2d(24, 12, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.narrow(self.depthwise(torch.relu(self.pointwise(self.front(x)))))
+        n, _, t = x.shape
+        y = torch.relu(self.pointwise(x.reshape(n, 8, 12, t).permute(0, 2, 3, 1)))
+        return self.narrow(self.pairs(self.depthwise(y)))
 
 
 def test_aligned_pointwise_runs_narrow_convolutions_block_diagonal_over_merged_columns(tmp_path: Path) -> None:
     torch.manual_seed(3)
     rng = np.random.default_rng(16)
-    calib = [torch.from_numpy(rng.normal(0, 1, (1, 1, 6, 8)).astype(np.float32)) for _ in range(2)]
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 96, 6)).astype(np.float32)) for _ in range(2)]
     graph = ptq_espdl.quantize(NarrowPointwise().eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
     plain = espdl_graph(export_espdl.export(graph, tmp_path / "plain.espdl"))
     with esp_ppq_patches.applied(["aligned_pointwise"]):
         aligned = espdl_graph(export_espdl.export(graph, tmp_path / "aligned.espdl"))
-    for name, k in {"/pointwise/Conv": 2, "/depthwise/Conv": 2, "/narrow/Conv": 4}.items():
+    for name, k in {"/pointwise/Conv": 4, "/depthwise/Conv": 2, "/pairs/Conv": 2, "/narrow/Conv": 4}.items():
         (_, (_, w, b)), (_, (_, w_k, b_k)) = plain[0][name], aligned[0][name]
         weights, merged = plain[1][w], aligned[1][w_k]
         if weights.shape[-1] == 1:
@@ -526,7 +529,7 @@ def test_aligned_pointwise_runs_narrow_convolutions_block_diagonal_over_merged_c
             assert np.array_equal(filters(merged), want)
         assert np.array_equal(aligned[1][b_k], np.tile(plain[1][b], k))
     reshapes = [sum(op == "Reshape" for op, _ in nodes.values()) for nodes in (plain[0], aligned[0])]
-    assert reshapes[1] - reshapes[0] == 6
+    assert reshapes[1] - reshapes[0] == 8
 
 
 def test_an_unknown_patch_is_refused() -> None:

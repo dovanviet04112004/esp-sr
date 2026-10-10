@@ -495,56 +495,59 @@ def lean_transposes() -> Iterator[None]:
         espdl_exporter.reset_graph_layout = reset
 
 
-def column_merge(op, info) -> int | None:
-    """How many neighbouring columns of op, a pointwise convolution on a channels-last map whose channels esp-dl's S3
-    kernels cannot align, to lay as channels so they align, its block-diagonal weights within the data cache; None
-    when op is no such convolution or no count does."""
+def laid_shape(var, info) -> list[int]:
+    """var's shape as the export lays it in the chip's memory."""
+    perm = info.get_var_permute(var.name)
+    return [var.shape[i] for i in perm] if perm else list(var.shape)
+
+
+def column_merge(op, info) -> tuple[int, int] | None:
+    """(s, k) for op, a convolution whose channels esp-dl's S3 kernels cannot align and whose kernel spans s columns
+    at a stride of s and one of all else: s columns laid as channels make it pointwise, and k of those laid together
+    align it, its block-diagonal weights within the data cache; None when op is no such convolution or no k does."""
     from esp_ppq.IR.quantize import QuantableOperation
 
     if op.type != "Conv" or not isinstance(op, QuantableOperation) or len(op.inputs[0].shape or []) < 3:
         return None
-    x, y = op.inputs[0], op.outputs[0]
-    last = [0, *range(2, len(x.shape)), 1]
-    if info.get_var_permute(x.name) != last or info.get_var_permute(y.name) != last:
+    (x, w), y, group = op.inputs[:2], op.outputs[0], op.attributes.get("group", 1)
+    (px, py), kernel = (laid_shape(x, info), laid_shape(y, info)), op.attributes["kernel_shape"]
+    s, rest = kernel[-1], [*kernel[:-1], *op.attributes.get("dilations", [])]
+    (c_in, c_out), strides = (px[-1], py[-1]), op.attributes.get("strides", [1] * len(kernel))
+    if strides != [1] * (len(kernel) - 1) + [s] or any(v != 1 for v in rest) or any(op.attributes.get("pads", [])):
         return None
-    spans = op.attributes["kernel_shape"] + op.attributes.get("strides", []) + op.attributes.get("dilations", [])
-    group, (c_in, c_out) = op.attributes.get("group", 1), (x.shape[1], y.shape[1])
-    if any(v != 1 for v in spans) or any(op.attributes.get("pads", [])) or group not in (1, c_in):
+    if w.value.shape[0] != c_out or w.value.shape[1] * group != c_in or px[-2] != s * py[-2]:
         return None
-    if (group != 1 and c_in != c_out) or not (c_in % CHANNEL_STEP or c_out % CHANNEL_STEP):
+    if (group != 1 and (group != c_in or c_in != c_out or s != 1)) or not (c_in % CHANNEL_STEP or c_out % CHANNEL_STEP):
         return None
-    for k in (2, 4, 8, CHANNEL_STEP):
-        weights = k * c_out * (1 if group != 1 else k * c_in)
-        if x.shape[-1] % k == 0 and not (k * c_in % CHANNEL_STEP or k * c_out % CHANNEL_STEP):
-            return k if weights <= DATA_CACHE_BYTES else None
+    for k in (1, 2, 4, 8, CHANNEL_STEP):
+        weights = k * c_out * (1 if group != 1 else k * s * c_in)
+        if py[-2] % k == 0 and not (k * s * c_in % CHANNEL_STEP or k * c_out % CHANNEL_STEP):
+            return (s, k) if weights <= DATA_CACHE_BYTES else None
     return None
 
 
-def merge_columns(graph, op, k: int, info) -> None:
-    """op over its map with each k neighbouring columns laid as k times the channels: block-diagonal weights between
-    two Reshapes, which move nothing in channels-last memory and share their input's buffer on the chip."""
+def merge_columns(graph, op, s: int, k: int, info) -> None:
+    """op, as column_merge gives s and k for it, as a pointwise convolution over its map with each s times k
+    neighbouring input columns and k output ones laid as channels: block-diagonal weights between two Reshapes, which
+    move nothing in channels-last memory and share their input's buffer on the chip."""
     import torch
     from esp_ppq.core import DataType, OperationQuantizationConfig, QuantizationStates
     from esp_ppq.IR.quantize import QuantableOperation
-    from esp_ppq.parser.espdl.espdl_graph_utils import insert_reshape_node
+    from esp_ppq.parser.espdl.espdl_graph_utils import get_default_perm, insert_reshape_node
 
     x, y, group = op.inputs[0], op.outputs[0], op.attributes.get("group", 1)
-    last = [0, *range(2, len(x.shape)), 1]
-
-    def merged(shape: list[int]) -> list[int]:
-        return [shape[0], k * shape[1], *shape[2:-1], shape[-1] // k]
-
-    def laid(shape: list[int]) -> list[int]:
-        return [shape[i] for i in last]
-
+    px, py = laid_shape(x, info), laid_shape(y, info)
     w = op.inputs[1].value
     if group == 1:
+        w = w.movedim(-1, 1).reshape(w.shape[0], -1, *[1] * (w.dim() - 2))
         value = torch.zeros(k * w.shape[0], k * w.shape[1], *w.shape[2:], dtype=w.dtype)
         for p in range(k):
             value[p * w.shape[0] : (p + 1) * w.shape[0], p * w.shape[1] : (p + 1) * w.shape[1]] = w
     else:
         value = w.repeat(k, *[1] * (w.dim() - 1))
         op.attributes["group"] = k * group
+    op.attributes["kernel_shape"] = [1] * len(op.attributes["kernel_shape"])
+    op.attributes["strides"] = [1] * len(op.attributes["kernel_shape"])
     values = [value] + [p.value.repeat(k) for p in op.inputs[2:]]
     for i, v in enumerate(values, start=1):
         config = op.input_quant_config[i].copy()
@@ -557,9 +560,8 @@ def merge_columns(graph, op, k: int, info) -> None:
         graph.remove_variable(old)
         op.inputs[i], op.config.input_quantization_config[i] = param, config
 
-    gathered = insert_reshape_node(graph, x, op, laid(merged(x.shape))).outputs[0]
-    gathered.shape = merged(x.shape)
-    info.add_var_permute(gathered.name, last)
+    gathered = insert_reshape_node(graph, x, op, [*px[:-2], px[-2] // (s * k), s * k * px[-1]]).outputs[0]
+    info.add_var_permute(gathered.name, get_default_perm(gathered))
 
     out_config = op.output_quant_config[0]
     shape_config = out_config.copy()
@@ -570,22 +572,22 @@ def merge_columns(graph, op, k: int, info) -> None:
     )
     graph.operations[spread.name] = spread
     graph.insert_op_after(A=spread, B=op)
-    op.outputs[0].shape, op.outputs[0].dtype = merged(y.shape), y.dtype
-    info.add_var_permute(op.outputs[0].name, last)
-    target = graph.create_variable(value=torch.tensor(laid(y.shape), dtype=torch.int64), is_parameter=True)
+    op.outputs[0].shape, op.outputs[0].dtype = [*py[:-2], py[-2] // k, k * py[-1]], y.dtype
+    info.add_var_permute(op.outputs[0].name, get_default_perm(op.outputs[0]))
+    target = graph.create_variable(value=torch.tensor(py, dtype=torch.int64), is_parameter=True)
     target.dtype, target.dest_ops[:] = DataType.INT64, [spread]
     spread.inputs.append(target)
 
 
 def align_pointwise(graph) -> int:
-    """Each pointwise convolution column_merge finds a count for, merged by merge_columns; how many."""
+    """Each convolution column_merge finds s and k for, merged by merge_columns; how many."""
     from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
 
     info, done = ExporterPatternInfo(), 0
     for op in list(graph.topological_sort()):
-        k = column_merge(op, info)
-        if k is not None:
-            merge_columns(graph, op, k, info)
+        found = column_merge(op, info)
+        if found is not None:
+            merge_columns(graph, op, *found, info)
             done += 1
     return done
 
