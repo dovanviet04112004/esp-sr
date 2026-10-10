@@ -665,7 +665,12 @@ Ba bước tối ưu tiếp, mỗi bước đo trên board B với bản lượn
 | Một Transpose chung cho mọi op đọc cùng biến, kể cả op khác lưới lượng tử (`lean_transposes`) | 1787 ms | 76 ms, 29 |
 | Hai Conv theo khung của lớp gộp tách theo kênh ra, mỗi phần ≤ 36 KB trọng số (`output_slices`) | 1635 ms | 76 ms, 29 |
 | Bình phương trong lớp gộp bằng phép nhân int8, không qua Pow chạy float | 1588 ms | 76 ms, 29 |
-| Một QuantizeLinear cho mọi op đọc cùng biến trên cùng lưới (`lean_quantizers`); Conv 1×1 12 và 24 kênh gộp cột kề nhau vào kênh (`aligned_pointwise`) | **1288 ms** | 76 ms, 29 |
+| Một QuantizeLinear cho mọi op đọc cùng biến trên cùng lưới (`lean_quantizers`); Conv 1×1 12 và 24 kênh gộp cột kề nhau vào kênh (`aligned_pointwise`) | 1288 ms | 76 ms, 29 |
+| Gộp cột cả cho Conv đọc biến do Transpose chèn và Conv (1, 2) bước 2 (`stage0.2`, `stage1.2`) | 1248 ms | 76 ms, 29 |
+| Bỏ `Upsample` hệ số 1 cuối stage 0 và 1 (`unit_upsamples`) | 1233 ms | 76 ms, 29 |
+| 12 bản sao đầu stem bằng Add với 0 phát sóng, không Concat và Transpose (`copies_by_broadcast`) | 1212 ms | 43 ms, 28 |
+| Tách Conv của lớp gộp chuyển sang bước xuất (`cache_sized_convolutions`), không đổi int8 | 1211,5 ms | 43 ms, 28 |
+| Attention tính khoá trước: điểm số khoá × truy vấn, softmax theo trục khoá, Vᵀ × trọng số (`KeysFirstAttention`) | **1178 ms** | 45 ms, 27 |
 
 - **Conv đầu stem** từ 110 ms xuống 12 ms, nhưng bản ghép 12 bản sao nằm theo kênh trước nên ESP-PPQ chèn thêm một
   Transpose 33,6 ms trước conv depthwise.
@@ -675,5 +680,12 @@ Ba bước tối ưu tiếp, mỗi bước đo trên board B với bản lượn
 - **Conv 1×1 của stage 0–2** có 12 hoặc 24 kênh, nên esp-dl chạy nhân "unaligned": 1,4 chu kỳ một phép nhân-cộng, so với
   0,15 ở Conv có số kênh chia hết cho 16. Gộp 2 (hay 4) cột kề nhau vào kênh là Reshape không dời dữ liệu; trọng số khối
   chéo cho đúng từng số nguyên cũ, nhiều gấp 2 (hay 4) phép nhân-cộng nhưng chạy đường vector: bớt 300 ms.
-- Còn lại: Conv 646 ms (198 op), Add 158 ms, LayerNorm 81 ms (riêng LayerNorm đầu stem 65 ms), Transpose 76 ms, MatMul
-  74 ms, Relu 52 ms, Softmax 33 ms. Conv depthwise 3×3 của stage 0–2 vẫn 24 kênh, chạy nhân unaligned.
+- **Attention:** đầu ra mỗi head chỉ 6 đặc trưng, mà MatMul int8 của esp-dl chạy vector theo 16 cột ra, ít hơn thì chạy
+  vòng C: trọng số × giá trị mất 19,3 ms ở stage 0 và 1. Tính chuyển vị (Vᵀ × trọng số, 148 cột ra) còn 2,85 ms; softmax
+  theo trục khoá chạy bước nhảy nên 14,8 ms thay 11,3.
+- **Tách Conv mức mạng làm đổi int8:** cùng phép tính float, nhưng bias correction của ESP-PPQ hiệu chỉnh theo khối op,
+  nên 551/768 giá trị int8 lệch tới một bước dưới thang thật (kl, equalization, bias correction). Đã chuyển sang bước
+  xuất; các viết lại khác ở mức mạng (`unit_upsamples`, bình phương bằng phép nhân, attention khoá trước) cho int8
+  giống hệt dưới thang ấy.
+- Còn lại: gộp đầu ra các stage (`weigth1d`) ~200 ms, sát băng thông PSRAM; Conv depthwise 3×3 24 kênh của stage 0–2
+  ~154 ms, nhân unaligned; LayerNorm đầu stem 65 ms; ReLU sau phép cộng dư 52 ms; Transpose của lớp gộp 37 ms.
