@@ -57,6 +57,21 @@ def test_explicit_pads_refuse_a_same_pad_that_cannot_split_evenly() -> None:
         quant.explicit_padding(nn.Conv1d(2, 2, 4, padding="same"))
 
 
+def test_ungrouped_gives_what_the_grouped_convolutions_give_and_keeps_depthwise_ones() -> None:
+    torch.manual_seed(3)
+    model = nn.Sequential(
+        nn.Conv2d(3, 6, (2, 1), stride=(2, 1), groups=3), nn.Conv2d(6, 6, 3, padding=1, groups=6), nn.Conv1d(4, 4, 1)
+    ).eval()
+    grouped = nn.Sequential(model[0], model[1]).eval()
+    x = torch.randn(1, 3, 8, FRAMES)
+    with torch.no_grad():
+        want = grouped(x)
+        quant.ungrouped(model)
+        got = nn.Sequential(model[0], model[1])(x)
+    assert [m.groups for m in model] == [1, 6, 1]
+    torch.testing.assert_close(got, want)
+
+
 def test_the_folded_head_gives_the_norm_then_the_linear() -> None:
     torch.manual_seed(1)
     bn, linear = nn.BatchNorm1d(2 * CHANNELS), nn.Linear(2 * CHANNELS, 5)

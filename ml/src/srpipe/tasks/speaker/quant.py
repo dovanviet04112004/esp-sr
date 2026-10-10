@@ -46,6 +46,39 @@ def explicit_padding(model: nn.Module) -> nn.Module:
     return model
 
 
+def block_diagonal(conv: nn.Conv1d | nn.Conv2d) -> nn.Conv1d | nn.Conv2d:
+    """conv as one ungrouped convolution whose weights are zero across groups: the same outputs."""
+    full = type(conv)(
+        conv.in_channels,
+        conv.out_channels,
+        conv.kernel_size,
+        stride=conv.stride,
+        padding=conv.padding,
+        dilation=conv.dilation,
+        bias=conv.bias is not None,
+        padding_mode=conv.padding_mode,
+    )
+    ins, outs = conv.in_channels // conv.groups, conv.out_channels // conv.groups
+    with torch.no_grad():
+        full.weight.zero_()
+        for g in range(conv.groups):
+            full.weight[g * outs : (g + 1) * outs, g * ins : (g + 1) * ins] = conv.weight[g * outs : (g + 1) * outs]
+        if conv.bias is not None:
+            full.bias.copy_(conv.bias)
+    return full
+
+
+def ungrouped(model: nn.Module) -> nn.Module:
+    """model with each grouped convolution but depthwise ones made block_diagonal: esp-dl runs a grouped convolution
+    only as depthwise, its output channels taken as its input channels."""
+    for parent in list(model.modules()):
+        for name, m in list(parent.named_children()):
+            grouped = isinstance(m, nn.Conv1d | nn.Conv2d) and m.groups > 1
+            if grouped and not m.groups == m.in_channels == m.out_channels:
+                setattr(parent, name, block_diagonal(m))
+    return model
+
+
 def folded_head(bn: nn.BatchNorm1d, linear: nn.Linear) -> nn.Linear:
     """linear after bn in eval as one Linear; ESP-PPQ runs a BatchNorm only over 3-d or 4-d tensors."""
     scale = bn.weight / torch.sqrt(bn.running_var + bn.eps)
@@ -91,7 +124,7 @@ class Embed(nn.Module):
             raise ValueError("the extractor pads, offsets or norms where Embed does not")
         if not wrap.pool.global_context_att or wrap.return_all_outputs:
             raise ValueError("Embed reads a pool with global context and one backbone output")
-        self.backbone = explicit_padding(wrap.backbone)
+        self.backbone = ungrouped(explicit_padding(wrap.backbone))
         self.pool = ContextPool(wrap.pool)
         self.head = folded_head(wrap.bn, wrap.linear)
 
