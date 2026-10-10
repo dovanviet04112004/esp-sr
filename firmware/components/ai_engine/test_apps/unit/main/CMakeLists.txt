@@ -1,5 +1,10 @@
-# The probes are exported by ml, never committed: make ai-probe, or make ai-unit-rnnt for the rnnt build, writes them.
-if(CONFIG_AI_ENGINE_COMMAND_BACKEND_RNNT)
+# The probes are exported by ml, never committed: make ai-probe, or make ai-unit-rnnt and make ai-unit-speaker for the
+# rnnt and speaker builds, writes them.
+if(UNIT_PROFILE STREQUAL "speaker")
+    set(tests "test_speaker_probe.cpp")
+    set(embedded "probe/speaker_windows.bin")
+    set(flashed "probe/speaker_models.bin")
+elseif(CONFIG_AI_ENGINE_COMMAND_BACKEND_RNNT)
     set(tests "test_rnnt_probe.cpp")
     set(embedded "probe/rnnt_streams.bin" "probe/rnnt_vectors.bin" "probe/rnnt_windows.bin")
     set(flashed "probe/rnnt_models.bin")
@@ -12,7 +17,7 @@ else()
 endif()
 foreach(probe ${embedded} ${flashed})
     if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/${probe}")
-        message(FATAL_ERROR "main/${probe} is missing: run make ai-probe, or make ai-unit-rnnt for the rnnt build")
+        message(FATAL_ERROR "main/${probe} is missing: run make ai-probe, or make ai-unit-rnnt or ai-unit-speaker")
     endif()
 endforeach()
 
