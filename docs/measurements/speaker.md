@@ -140,7 +140,7 @@ Theo độ dài: 206 trong 209 cửa sổ dài từ 1,5 s trở lên. Ba cửa s
   - ReDimNet2 b1: 0,8–4 s;
   - ReDimNet M: 9–45 s.
 - **ESP32-P4:** chưa đo; nếu nhanh hơn S3 2–4 lần thì ReDimNet M vẫn mất 2,5–25 s.
-- **Phép toán:** ReDimNet2 có attention và LayerNorm; esp-dl có lượng tử hoá và chạy được chúng không thì chưa thử.
+- **Phép toán:** ReDimNet2 b0 đã qua ESP-PPQ và esp-dl sau ba chỗ viết lại và hai bản vá ESP-PPQ (§6).
 
 **Trên máy tính, một cửa sổ:**
 
@@ -175,3 +175,64 @@ Trên CPU, ReDimNet2 b6 chậm hơn ReDimNet b6 ~14 lần dù ít MAC hơn. Vì 
   - người lạ đi qua mô phỏng, chủ repo qua board thật.
 
   Trước khi làm thật cần người lạ thu qua board, nói chính các lệnh (KẾ HOẠCH §3.17, cần phiếu đồng ý).
+
+## 6. Đường chip: ReDimNet2 b0 int8 (E11-T25)
+
+Đo ngày 10/10. b0 nhập thành run `ml/artifacts/speaker/runs/20261010_5a45475-dirty_94e5a9` (`make speaker-import`);
+thang int8 bằng `make speaker-ptq` theo `ml/configs/models/speaker.yaml`.
+- **Đồ thị:** b0 từ log-mel của chính nó tới embedding 192 chiều. Đầu vào là 72 băng × 149 khung của 1,5 s cuối cửa
+  sổ lệnh, cửa sổ ngắn hơn thì đệm 0 phía trước. Khâu đặc trưng nằm ngoài đồ thị.
+- **Viết lại cho esp-dl**, không đổi phép tính:
+  - pad 'same' thành pad tường minh;
+  - BatchNorm sau lớp gộp gộp vào lớp cuối;
+  - ngữ cảnh toàn cửa sổ của ASTP cộng theo kênh, thay cho Expand mà esp-dl không có.
+
+  Đồ thị viết lại lệch bộ trích tối đa 1,3·10⁻⁶ giá trị lớn nhất, trên 64 cửa sổ hiệu chỉnh.
+- **Vật liệu:** 209 cửa sổ của chủ repo và 777 cửa sổ người lạ, tức 841 cửa sổ trừ 64 cửa sổ dùng để hiệu chỉnh int8;
+  k = 10, 20 lần rút, như §3.
+
+### 6.1 Float và int8
+
+Lệnh được nhận giữ bao nhiêu, ở hai mức người lạ lọt:
+
+| Đồ thị | Người lạ lọt | EER | Giữ, cả bốn phiên | 28/09 1 m | 28/09 3 m | 07/10 1 m | 07/10 3 m |
+|---|---|---|---|---|---|---|---|
+| float | 1% | 4,00% | 92,0% | 94,3% | 93,9% | 89,4% | 89,1% |
+| float | 5% | 4,00% | 98,5% | 100% | 100% | 96,8% | 98,9% |
+| int8 kl, GELU qua Erf | 1% | 4,99% | 86,8% | 97,7% | 90,9% | 86,2% | 75,0% |
+| int8 kl, GELU qua Erf | 5% | 4,99% | 97,6% | 100% | 93,9% | 97,9% | 96,7% |
+| int8 kl, đồ thị sửa đủ ba chỗ (§6.2) | 1% | 4,58% | 90,9% | 100% | 93,9% | 93,6% | 80,4% |
+| int8 kl, đồ thị sửa đủ ba chỗ (§6.2) | 5% | 4,58% | 97,3% | 100% | 93,9% | 97,9% | 96,7% |
+
+- **Float ở cửa sổ 1,5 s đạt điều kiện cắm của KẾ HOẠCH §3.17:** ≥ 95% ở mọi phiên khi 5% người lạ lọt.
+- **Hàng "GELU qua Erf" không nạp được lên chip** (§6.2), nhưng cho thấy mức nhạy với int8: cosine giữa embedding
+  int8 và float trên từng cửa sổ có trung vị 0,52, phân vị 10 là 0,38.
+- **Hàng kl của đồ thị chạy được trên chip** chưa đạt điều kiện cắm: phiên 28/09 3 m còn 93,9% khi 5% người lạ lọt,
+  dưới 95%. Cosine int8 với float có trung vị 0,48, phân vị 10 là 0,33. Ba cách hiệu chỉnh còn lại của bậc 2 chưa
+  chạy trên đồ thị này.
+
+### 6.2 Trên board B
+
+- **Lần đầu, GELU còn là chuỗi Div, Erf, Add, Mul, Mul:** esp-dl 3.3.11 không nạp model, báo "Do not support Erf,
+  please implement and register it first". Bản vá `fuse_erf_gelu` gộp chuỗi ấy thành một `Gelu` bằng hàm của chính
+  ESP-PPQ; esp-dl chạy `Gelu` bằng bảng tra int8 của hàm đúng, nên chỉ làm tròn một lần thay vì năm lần.
+- **Lần hai, GELU đã gộp:** board khởi động lại liên tục. Một `assert` trong `Reshape::get_output_shape` của esp-dl
+  hỏng lúc dựng model, vì có tensor mang chiều không dương.
+  - Gốc lỗi: esp-dl chỉ chạy conv nhóm theo kiểu depthwise, lấy số kênh ra bằng số kênh vào. b0 có 4 conv nhóm nhân
+    đôi kênh (12→24 ở 1×1, và ba phép hạ mẫu 12→24, 24→48, 48→96), nên mọi hình dạng phía sau lệch.
+  - Cách tìm: phát lại `get_output_shape` của esp-dl trên `.info` xuất ra rồi so với hình dạng ESP-PPQ ghi; chỗ lệch
+    đầu tiên là `stage0.2`, conv 1×1 với groups = 12.
+  - Cách sửa: mỗi conv như vậy thành một conv thường có trọng số khối chéo, phép tính không đổi; thêm 23,5 triệu MAC
+    vào 0,27 tỉ.
+- **Lỗi thứ ba, tìm ra trên PC trước khi lên board:** phát lại cách esp-dl suy hình dạng, kèm kiểm luật phát sóng của
+  ONNX, cho thấy 7 LayerNorm kiểu channels-first của ReDimNet2 (ở stem và các `red_dim_conv`) nhân weight sai trục.
+  - Gốc lỗi: ESP-PPQ chuyển dữ liệu sang kênh cuối nhưng để nguyên weight hình (C, 1) hay (C, 1, 1); esp-dl phát sóng
+    bằng max từng chiều, không kiểm tương thích. Ở stage 4, 48 kênh nhiều hơn 37 khung nên hình dạng cũng sai.
+  - Cách sửa: mỗi LayerNorm như vậy thành `layer_norm` trên trục kênh đã dời ra cuối. Phép tính y hệt, xuất ra một
+    `LayerNormalization` int8; Pow và Sqrt F32 của chúng mất theo. Còn 10 op F32 (Pow, Sqrt trong GELU bản tanh và
+    trong lớp gộp), esp-dl chạy được ở float.
+  - Sau sửa, phát lại qua hết đồ thị: mọi chiều dương, mọi phép phát sóng hợp lệ, đầu ra [1, 192].
+- **Lần ba, đồ thị sửa đủ ba chỗ:** model nạp, dựng và chạy hết trên chip; ảnh model 1722 KB trong PSRAM, `.espdl`
+  1,76 MB. `model->test()` báo đầu ra lệch mô phỏng ESP-PPQ: phần tử đầu là 20, mô phỏng là 10 (int8). esp-dl chỉ
+  báo chỗ lệch đầu tiên, nên chưa biết lệch từ op nào. Từ lúc nạp ảnh tới lúc báo lỗi mất ~4 s, gồm chép model vào
+  PSRAM, dựng và một lần chạy; đây là chặn trên thô, chưa phải thời gian một lần chạy.
