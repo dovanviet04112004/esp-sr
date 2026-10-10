@@ -1505,14 +1505,18 @@ lên; bản vá tính đúng chuỗi ấy, gradient của QAT đi qua bản floa
 
 
 Tăng tốc một nhánh trên chip đi theo một quy trình, nhánh nào cũng vậy:
-1. Đo trên board thời gian từng module bằng `profile_module` của esp-dl, trong lượt `model->test()` của bản dò nhánh.
+1. Lượng tử nhanh một hàng `timing` (`quant.yaml` `timing`: minmax, không equalization, không bias correction), vì giờ
+   chạy trên chip chỉ phụ thuộc cấu trúc đồ thị. Đo trên board thời gian từng module bằng `profile_module` của esp-dl,
+   trong lượt `model->test()` của bản dò nhánh.
 2. `espdl_profile.py` đọc bảng ấy trong log cùng `.espdl` đã chạy (`make ai-profile`): thời gian theo loại op, module
    chậm nhất, chu kỳ trên mỗi phép nhân-cộng của từng tích chập. Nó gắn nhãn các đường chậm của esp-dl trên S3, mỗi nhãn
    kèm bản vá xử lý nó: số kênh không chia hết cho 16 (nhân unaligned), trọng số tích chập lớn hơn cache dữ liệu 64 KB,
    MatMul ra ít hơn 16 cột (vòng C), op chạy float, Transpose và QuantizeLinear do bước xuất chèn.
 3. Bật bản vá ở bước xuất trong config của nhánh, nạp board: `model->test()` phải khớp mô phỏng từng bit ở mọi bản cắt;
    đo lại.
-4. Viết lại mạng khi không bản vá nào xử lý được, kèm phép so số nguyên dưới các bậc của thang như trên.
+4. Viết lại mạng khi không bản vá nào xử lý được. Lệnh `same-int8` của nhánh lượng tử bản đang sửa và bản ở một commit
+   (mặc định HEAD) bằng chính các bậc của thang, cùng dữ liệu hiệu chỉnh, rồi so mô phỏng trên vài cửa sổ: phải không
+   lệch số nào (`ptq_espdl.same_integers`).
 5. Ghi mỗi bước vào `docs/measurements/latency.md`.
 
 Mỗi nhánh dựng thang của mình ở `tasks/<nhánh>/quant.py`: mỗi bậc một lệnh con, mỗi dòng so với float bằng thước của
