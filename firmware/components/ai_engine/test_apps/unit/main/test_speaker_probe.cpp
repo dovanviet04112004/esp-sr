@@ -22,7 +22,7 @@ extern const uint8_t speaker_windows_start[] asm("_binary_speaker_windows_bin_st
 namespace {
 
 constexpr size_t kSectorBytes = 4096;
-constexpr int kToleranceSteps = 1; // one int8 step, as model->test() allows (KEHOACH 3.14)
+constexpr int kToleranceSteps = 0; // bit for bit, as model->test() asks of int8 (KEHOACH 3.14)
 constexpr uint32_t kShownValues = 8;
 constexpr int kCutsMax = 16;
 
