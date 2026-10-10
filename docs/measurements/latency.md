@@ -717,3 +717,9 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
   - Cả bốn khớp mô phỏng không cần vá.
 - **Các hàng của thang** (kl, percentile, minmax, mse) lượng tử trước bản sửa. Bias correction của chúng chạy trên mô
   phỏng cũ, nên phải chạy lại thang.
+- **Chuỗi `make speed BRANCH=speaker` chạy trọn bốn bước** sau bản sửa:
+  - so số nguyên báo không có gì phải so, vì mã mạng là của HEAD;
+  - lượng tử hàng `timing`;
+  - bản dò khớp từng bit, 1139,3 ms;
+  - bảng xếp hạng: 677 module, 1118,7 ms. Chỉ còn nhãn không có bản vá: LayerNorm đầu stem 62 ms và Softmax ~15 ms
+    mỗi cái (nhân float), Conv 3×3 24 kênh (nhân unaligned), QuantizeLinear sau Softmax ~9 ms mỗi cái.
