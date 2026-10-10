@@ -254,7 +254,7 @@ ctc-tone-flip: ## The tone checks of KEHOACH 3.11 into <run>/tone_flip_<check>.y
 CTC_HEARD = $(if $(KALDI),--kaldi-pitch) $(if $(HOLD),--hold $(HOLD))
 CTC_QUANT = $(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant
 
-.PHONY: ctc-ptq ctc-int16 ctc-qat ctc-thresholds ctc-deploy
+.PHONY: ctc-ptq ctc-int16 ctc-qat ctc-thresholds ctc-deploy ctc-timing ctc-same-int8
 ctc-ptq: ## Rungs 1 and 2: each calibration beside float: RUN=<run> [KALDI=1] [HOLD=voicing|f0|pitch] (E11-T12)
 	$(CTC_QUANT) ptq $(RUN) $(CTC_HEARD)
 
@@ -269,6 +269,15 @@ ctc-thresholds: ## Choose delta1..3 of a ladder row on val_commands and val, as 
 
 ctc-deploy: ## Export a ladder row and its thresholds into firmware/models/command and lock them: RUN=<run> ROW=<row> (E11-T19)
 	$(CTC_QUANT) deploy $(RUN) --row $(ROW) $(CTC_HEARD)
+
+ctc-timing: ## Step 2.1 of KEHOACH 3.14's procedure: the timing row beside the ladder's rows: RUN=<run> [KALDI=1] [HOLD=]
+	$(CTC_QUANT) timing $(RUN) $(CTC_HEARD)
+
+ctc-same-int8: ## Step 2.4: the net as quant.py hears it now and at AGAINST, same integers: RUN=<run> [AGAINST=HEAD] [CALIB=] [KALDI=1] [HOLD=]
+	$(CTC_QUANT) same-int8 $(RUN) --against $(or $(AGAINST),HEAD) $(if $(CALIB),--calibration $(CALIB)) $(CTC_HEARD)
+
+SPEED_LOG_ctc = $(UNIT_APP)/build_ctc/unit.log
+SPEED_ESPDL_ctc = ml/artifacts/command_ctc/probe/command_ctc/command_ctc.espdl
 
 ##@ Command: rnnt track (E11-T20)
 
@@ -407,7 +416,7 @@ calib-shift: ## Store NVS calib/pcm_shift through test_apps/calib: SHIFT=13
 # Where srpipe.scenes.compare prepare wrote the items, read from ml/ only when a recipe needs it.
 COMPARE_ITEMS = $(shell $(ML) --quiet python -c "from srpipe.core.config import data_paths; print(data_paths()['interim'] / 'scenes' / 'afe_compare')")
 
-.PHONY: bench-board espsr-compare ai-probe ai-unit ai-unit-rnnt ai-unit-speaker ai-profile listen-unit
+.PHONY: bench-board espsr-compare ai-probe ai-unit ai-unit-rnnt ai-unit-speaker ai-unit-ctc ai-profile listen-unit
 bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/bench, then rebuild budget.md
 	@$(call fresh_sdkconfig,$(BENCH_APP)/sdkconfig,$(call app_defaults,$(BENCH_APP)) firmware/sdkconfig.afe)
 	cd $(BENCH_APP) && idf.py build
@@ -473,6 +482,18 @@ ai-unit-rnnt: ## Run the rnnt build of the ai_engine suite on board B [RNNT_RUN=
 	@if [ -f $(UNIT_APP)/main/probe/rnnt_gate.json ]; then \
 	  cd ml && uv run --extra train python -m srpipe.tasks.command.rnnt.probe --gate-log ../$(UNIT_APP)/build_rnnt/unit.log; \
 	fi
+
+# A row of the ctc ladder goes to model slot 0 with one of its layers; each streams a chunk a step, checked against
+# Python bit for bit and timed module by module; slot 0 ends erased.
+ai-unit-ctc: ## Run the ctc build of the ai_engine suite on board B: RUN=<run> ROW=<row of its ladder> [KALDI=1] [HOLD=] (E11-T30)
+	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.command.ctc.probe --run $(RUN) --row $(ROW) --net-only \
+	  $(CTC_HEARD)
+	@$(call fresh_sdkconfig,$(UNIT_APP)/build_ctc/sdkconfig,$(call app_defaults,$(UNIT_APP)))
+	cd $(UNIT_APP) && idf.py -B build_ctc -D SDKCONFIG=build_ctc/sdkconfig -D UNIT_PROFILE=ctc build && \
+	  $(WRITE_PART) models_0 --input main/probe/ctc_models.bin && \
+	  { pytest pytest_unit.py $(ON_BOARD) --build-dir build_ctc -s; echo $$? > build_ctc/unit.status; } 2>&1 \
+	    | tee build_ctc/unit.log; \
+	  exit $$(cat build_ctc/unit.status)
 
 # A row of speaker-ptq's ladder goes to model slot 0, its window is checked against Python and timed; slot 0 ends
 # erased.
