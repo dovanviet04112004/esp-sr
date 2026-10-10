@@ -155,7 +155,7 @@ eval-speaker: ## EER of the pretrained extractors, and the owner's windows kept 
 
 SPEAKER_QUANT = $(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.speaker.quant
 
-.PHONY: speaker-import speaker-ptq
+.PHONY: speaker-import speaker-ptq speaker-timing speaker-same-int8 speed
 speaker-import: ## Import the survey's pretrained ReDimNet2 b0 as a run into ml/artifacts/speaker/runs
 	$(SPEAKER_QUANT) import
 
@@ -163,6 +163,24 @@ speaker-import: ## Import the survey's pretrained ReDimNet2 b0 as a run into ml/
 # simulate the impostors' sessions, about 0.5 GB each.
 speaker-ptq: ## Rungs 1 and 2: each calibration beside float on the survey's material, into <run>/int8/: RUN=<run> [WORKERS=8] [CALIB="mse kl"]
 	$(SPEAKER_QUANT) ptq $(RUN) $(if $(WORKERS),--workers $(WORKERS)) $(if $(CALIB),--calibrations $(CALIB))
+
+speaker-timing: ## Step 2.1 of KEHOACH 3.14's procedure: the timing row into <run>/int8/timing/: RUN=<run> [WORKERS=8]
+	$(SPEAKER_QUANT) timing $(RUN) $(if $(WORKERS),--workers $(WORKERS))
+
+speaker-same-int8: ## Step 2.4: b0 as quant.py builds it now and at AGAINST, quantised alike, same integers: RUN=<run> [AGAINST=HEAD] [CALIB=kl]
+	$(SPEAKER_QUANT) same-int8 $(RUN) --against $(or $(AGAINST),HEAD) $(if $(CALIB),--calibration $(CALIB)) \
+	  $(if $(WORKERS),--workers $(WORKERS))
+
+SPEED_LOG_speaker = $(UNIT_APP)/build_speaker/unit.log
+SPEED_ESPDL_speaker = ml/$(RUN)/int8/timing/speaker.espdl
+
+# Phase 2 of KEHOACH 3.14's procedure in one chain, stopping at the first step that fails; source IDF's export.sh first,
+# the board runs in it. A branch joins with <branch>-timing, <branch>-same-int8, ai-unit-<branch> and SPEED_LOG_<branch>.
+speed: ## Same integers, timing row, board probe, profile report: BRANCH=<branch> RUN=<run> [AGAINST=HEAD] (E11-T30)
+	$(MAKE) $(BRANCH)-same-int8 RUN=$(RUN) AGAINST=$(or $(AGAINST),HEAD)
+	$(MAKE) $(BRANCH)-timing RUN=$(RUN)
+	$(MAKE) ai-unit-$(BRANCH) RUN=$(RUN) ROW=timing
+	$(MAKE) ai-profile LOG=$(SPEED_LOG_$(BRANCH)) ESPDL=$(SPEED_ESPDL_$(BRANCH))
 
 ##@ Wake
 
@@ -467,7 +485,7 @@ ai-unit-speaker: ## Run the speaker build of the ai_engine suite on board B: RUN
 	    | tee build_speaker/unit.log; \
 	  exit $$(cat build_speaker/unit.status)
 
-# Step 2 of KEHOACH 3.14's speed procedure, any branch: LOG holds esp-dl's profile_module table of a board run, ESPDL
+# Step 2.2 of KEHOACH 3.14's procedure, any branch: LOG holds esp-dl's profile_module table of a board run, ESPDL
 # the model that ran, its .info beside it (make ai-unit-speaker leaves build_speaker/unit.log and <run>/int8/<row>/).
 ai-profile: ## Rank a board run's modules by time, each slow esp-dl path tagged with its patch: LOG=<log> ESPDL=<model> [TOP=40] (E11-T29)
 	$(ML) --extra espdl python -m srpipe.compress.quant.espdl_profile --log $(abspath $(LOG)) --espdl $(abspath $(ESPDL)) \
