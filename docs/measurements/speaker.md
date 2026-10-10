@@ -203,13 +203,25 @@ Lệnh được nhận giữ bao nhiêu, ở hai mức người lạ lọt:
 | int8 kl, GELU qua Erf | 5% | 4,99% | 97,6% | 100% | 93,9% | 97,9% | 96,7% |
 | int8 kl, đồ thị sửa đủ ba chỗ (§6.2) | 1% | 4,58% | 90,9% | 100% | 93,9% | 93,6% | 80,4% |
 | int8 kl, đồ thị sửa đủ ba chỗ (§6.2) | 5% | 4,58% | 97,3% | 100% | 93,9% | 97,9% | 96,7% |
+| int8 kl, đồ thị 1,14 s trên chip (`latency.md` §25) | 1% | 4,00% | 95,3% | 100% | 90,9% | 97,9% | 91,3% |
+| int8 kl, đồ thị 1,14 s trên chip (`latency.md` §25) | 5% | 4,00% | 98,2% | 100% | 93,9% | 97,9% | 100% |
 
 - **Float ở cửa sổ 1,5 s đạt điều kiện cắm của KẾ HOẠCH §3.17:** ≥ 95% ở mọi phiên khi 5% người lạ lọt.
 - **Hàng "GELU qua Erf" không nạp được lên chip** (§6.2), nhưng cho thấy mức nhạy với int8: cosine giữa embedding
   int8 và float trên từng cửa sổ có trung vị 0,52, phân vị 10 là 0,38.
 - **Hàng kl của đồ thị chạy được trên chip** chưa đạt điều kiện cắm: phiên 28/09 3 m còn 93,9% khi 5% người lạ lọt,
-  dưới 95%. Cosine int8 với float có trung vị 0,48, phân vị 10 là 0,33. Ba cách hiệu chỉnh còn lại của bậc 2 chưa
-  chạy trên đồ thị này.
+  dưới 95%. Cosine int8 với float có trung vị 0,48, phân vị 10 là 0,33.
+- **Hàng kl của đồ thị 1,14 s** (mọi bước tối ưu, chip khớp mô phỏng từng bit, `latency.md` §25): EER 4,00% như
+  float, giữ 95,3% ở 1% người lạ lọt. Phiên 28/09 3 m vẫn 93,9% ở 5%, dưới 95%. Cosine int8 với float có trung vị
+  0,51, phân vị 10 là 0,36. Các viết lại ở mức mạng cho int8 giống hệt bản không viết lại dưới chính thang này
+  (KẾ HOẠCH §3.14), nên không bước tối ưu nào đổi chất lượng.
+- **Sai số int8 đến từ đâu**, phân tích của ESP-PPQ trên 6 cửa sổ của chủ repo:
+  - Từng op lượng tử riêng (`layerwise_error_analyse`, nhiễu trên tín hiệu ở đầu ra): lớn nhất là các BatchNorm sau
+    ReLU trong khối 2-D (`bn1`): stage2.3 0,22, stage1.4 0,18, stage3.7 0,17, stage3.6 0,12; kế đến conv depthwise
+    đầu khối 1-D của stage 0 (0,09). Phép nhân trọng số attention với giá trị riêng nó chỉ 0,005.
+  - Tích luỹ qua đồ thị (`graphwise_error_analyse`): tới stage 1 nhiễu đã 0,2–0,6 công suất tín hiệu, lên quá 1 sau
+    attention của stage 1 và 2. Hệ số BN của `bn1` chỉ chênh 5–56 lần giữa các kênh, nên lỗi không nằm ở trọng số
+    int8 một thang mà ở lưới int8 của hoạt hoá quanh chúng 🔬.
 
 ### 6.2 Trên board B
 
