@@ -321,8 +321,9 @@ fw-bench: ## Build the bench profile, the only one numbers are reported from
 	@$(call fresh_sdkconfig,firmware/build_bench/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.bench)
 	cd firmware && $(IDF_BENCH) build
 
-fw-bench-flash: fw-bench ## Flash only the bench app over the CH340; storage, set.json among it, stays as the board has it
-	cd firmware && $(IDF_BENCH) -p $(PORT) app-flash
+# A test app leaves its own partition table on the board, so the product's goes back with the app.
+fw-bench-flash: fw-bench ## Flash the bench app, its bootloader and partition table over the CH340; storage, set.json among it, stays
+	cd firmware && $(IDF_BENCH) -p $(PORT) bootloader-flash partition-table-flash app-flash
 
 fw-prod: ## Build the prod profile in build_prod, from its own sdkconfig
 	rm -f firmware/build_prod/sdkconfig
