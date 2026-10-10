@@ -1,0 +1,18 @@
+# The chip path of KEHOACH 3.17, as command_ctc goes: the survey's pretrained ReDimNet2 b0 imported as a run of this
+# branch, the ladder of 3.14 into <run>/int8/, the board probe of one row. python -m srpipe.tasks.speaker.quant
+source:                            # imported as <run>/model.pt with its network's code (make speaker-import)
+  survey: scenes/speaker.yaml      # under configs/: the pins, and the material the int8 rows are scored on
+  extractor: redimnet2_b0
+window_s: 1.5                      # the last 1.5 s of a command window, zeros ahead of a shorter one
+quant:                             # python -m srpipe.tasks.speaker.quant ptq <run> (E11-T25, KEHOACH 3.14)
+  seed: 20261010
+  calib_windows: 64                # impostor windows ESP-PPQ calibrates on, drawn with the seed, left out of the rows
+  calibrations: [kl, percentile, minmax, mse]   # rung 2, one row each, in this order
+  rewrite_rtol: 1.0e-4             # largest gap of the rewritten graph to the extractor, as a share of its largest value
+  count: 10                        # enrolment windows of the figures
+  shares: [0.01, 0.05]             # impostors passing at which the accepted windows kept are given per group
+esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches around this branch's quantisation and export
+  - simplify_without_bn_fusion     # onnxsim's fuse_bn breaks the shapes of b0's graph
+  - fuse_erf_gelu                  # esp-dl has no Erf; b0's GELU runs as one Gelu table
+probe:                             # E11-T25: one row's graph on board B (make ai-unit-speaker)
+  runs: 10                         # timed runs on the board, after one untimed

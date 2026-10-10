@@ -10,3 +10,4 @@ branches:
   wake: {}
   command_kws: {}
   command_ctc: {calibration: percentile}   # ADR-0015: QAT on it ships, int8 alone
+  speaker: {}                      # ReDimNet2 b0 (KEHOACH 3.17): rung 1 as the default, measured in measurements/speaker.md
