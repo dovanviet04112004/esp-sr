@@ -651,3 +651,15 @@ mô phỏng từng bit: 0/192 giá trị lệch, `model->test()` qua.
 Thử đặt bản đồ 2-D theo (khung, băng, kênh) để đổi sang 1-D chỉ còn Reshape, không dời dữ liệu (`to1d_tfopt` của
 ReDimNet2): vẫn khớp từng bit, nhưng **2588 ms**, Transpose 738 ms, 50 cái do ESP-PPQ chèn. ESP-PPQ chèn Transpose sau
 mỗi Reshape đi vào Conv, bất kể dữ liệu đã đúng thứ tự trong bộ nhớ; nên bỏ, giữ bố cục cũ.
+
+Ba bước tối ưu tiếp, mỗi bước đo trên board B với bản lượng tử nhanh của đồ thị, cả ba vẫn khớp mô phỏng từng bit
+(mọi bản cắt và cả đồ thị qua `model->test()`, 0/192 giá trị lệch):
+
+| Bước | Một lần chạy | Transpose |
+|---|---|---|
+| Hai bản vá mô phỏng (LayerNorm, Softmax) | 2560 ms | 691 ms, 93 |
+| GELU bản tanh thành một bảng int8 (`fuse_tanh_gelu`) | 2501 ms | 702 ms, 94 |
+| Bỏ Transpose trùng, gộp chuỗi Transpose–Reshape–Transpose khi xuất (`lean_transposes`) | 2307 ms | 510 ms, 61 |
+| Bản đồ 2-D theo (khung, băng), đổi sang 1-D không dời dữ liệu | **1934 ms** | 128 ms, 39 |
+
+Còn lại: Conv 1204 ms (200 op), Add 158 ms, Transpose 128 ms, MatMul 94 ms, LayerNorm 80 ms.
