@@ -129,6 +129,12 @@ def impostor_jobs(cfg: dict, paths: dict) -> list[tuple]:
     return jobs
 
 
+def impostor_windows(cfg: dict, paths: dict, workers: int) -> list[Window]:
+    """The windows of every session of impostor_jobs, simulated by workers processes."""
+    with multiprocessing.get_context("spawn").Pool(workers) as pool:
+        return [w for part in pool.map(_impostor_session, impostor_jobs(cfg, paths)) for w in part]
+
+
 def language_windows(cfg: dict, paths: dict) -> list[Window]:
     """Every utterance of the baseline corpus, whole, its speaker from its folder."""
     out = []
@@ -306,9 +312,7 @@ def report(results: dict, windows: list[Window], cfg: dict) -> str:
 
 def survey(cfg: dict, paths: dict, workers: int) -> tuple[dict, list[Window]]:
     """Every extractor's figures, and the owner's and impostors' windows they came from."""
-    owner = owner_windows(cfg, paths)
-    with multiprocessing.get_context("spawn").Pool(workers) as pool:
-        impostors = [w for part in pool.map(_impostor_session, impostor_jobs(cfg, paths)) for w in part]
+    owner, impostors = owner_windows(cfg, paths), impostor_windows(cfg, paths, workers)
     language = language_windows(cfg, paths)
     board_windows = owner + impostors
     results = {}

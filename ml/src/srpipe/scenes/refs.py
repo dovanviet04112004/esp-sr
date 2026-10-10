@@ -102,14 +102,20 @@ def embedding_key(audio: np.ndarray, bounds: np.ndarray, spec: dict) -> str:
     return digest.hexdigest()
 
 
+def speaker_files(name: str, spec: dict, cache: Path) -> Path:
+    """cache/spk_ref/<name>/ with every file of the extractor's spec at its path there, fetched as fetch does."""
+    folder = cache / "spk_ref" / name
+    for path, pin in spec["files"].items():
+        fetch(pin, folder / path)
+    return folder
+
+
 def embed(name: str, spec: dict, windows: list[np.ndarray], cache: Path, work: Path) -> np.ndarray:
     """Speaker embeddings (windows, dims) of float 16 kHz windows by extractor name: every file of spec's files fetched
     into cache/spk_ref/<name>/ at its path there, then run.py of ml/spk_ref/<spec's project, else name>/ with spec's
     args after the weights folder, the npz of windows it reads under work and the npy it writes. The npy is kept with
     embedding_key beside it and given back while the key holds."""
-    folder = cache / "spk_ref" / name
-    for path, pin in spec["files"].items():
-        fetch(pin, folder / path)
+    folder = speaker_files(name, spec, cache)
     work.mkdir(parents=True, exist_ok=True)
     listing, out, keyed = (work / f"{name}_{part}" for part in ("windows.npz", "embeddings.npy", "embeddings.key"))
     audio, bounds = np.concatenate(windows).astype(np.float32), np.cumsum([0, *(len(w) for w in windows)])
