@@ -36,3 +36,26 @@ def test_pair_eer_on_two_clean_clusters_is_zero() -> None:
         [a + 0.05 * rng.standard_normal(3) for _ in range(5)] + [b + 0.05 * rng.standard_normal(3) for _ in range(5)]
     )
     assert speaker.pair_eer(x, ["a"] * 5 + ["b"] * 5) == 0.0
+
+
+def test_owner_figures_pool_a_distance_s_sessions_as_the_gate_reads_them() -> None:
+    """At 3 m one session keeps 2 of its 4 accepted windows and the other 4 of 6: per distance that is 6 of 10, not
+    the mean of the two shares nor the worse one."""
+    toward, away, aside = np.eye(3)[0], -np.eye(3)[0], np.eye(3)[1]
+
+    def owner(group: str, e: np.ndarray) -> tuple:
+        return speaker.Window("me", group, np.zeros(16, np.float32), accepted=True), e
+
+    rows = [owner("d1 100", toward), owner("d1 100", toward)]
+    rows += [owner("d1 300", e) for e in (toward, toward, away, away)]
+    rows += [owner("d2 300", e) for e in (toward,) * 4 + (away,) * 2]
+    rows += [(speaker.Window(f"them{k}", "d1 100", np.zeros(16, np.float32)), aside) for k in range(20)]
+    cfg = {
+        "seed": 1,
+        "owner": {"spk": "me", "enrol": {"date": "d1", "distance_cm": "100"}, "counts": [1], "draws": 1},
+        "rule": {"impostors_passing": 0.05, "curve": [0.05]},
+    }
+    figures = speaker.owner_figures(np.array([e for _, e in rows]), [w for w, _ in rows], cfg, [1.0])[1]
+    assert figures["kept accepted d1 300"] == 0.5
+    assert figures["kept accepted d2 300"] == pytest.approx(4 / 6)
+    assert figures["kept accepted 300 cm"] == pytest.approx(6 / 10)

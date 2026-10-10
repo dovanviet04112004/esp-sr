@@ -181,8 +181,9 @@ def owner_figures(
     embeddings: np.ndarray, windows: list[Window], cfg: dict, edges_s: list[float]
 ) -> dict[int, dict[str, float]]:
     """Per enrolment count, the median over the draws of: EER of the owner's other windows against the impostors',
-    the share of them kept at the rule's threshold in all, per group and per window length, the impostors passing in
-    each group, and the accepted windows kept at each share of rule.curve."""
+    the share of them kept at the rule's threshold in all, per group and per window length, the accepted ones kept per
+    group and per distance with its groups pooled (KEHOACH 3.17's gate), the impostors passing in each group, and the
+    accepted windows kept at each share of rule.curve."""
     owner = cfg["owner"]
     enrol_group = f"{owner['enrol']['date']} {owner['enrol']['distance_cm']}"
     mine = [i for i, w in enumerate(windows) if w.spk == owner["spk"]]
@@ -207,6 +208,10 @@ def owner_figures(
                 rows[f"kept {group}"].append(float(np.mean(target[held] > threshold)))
                 acted = [k for k in held if windows[tested[k]].accepted]
                 rows[f"kept accepted {group}"].append(float(np.mean(target[acted] > threshold)))
+            for distance in sorted({windows[i].group.split()[-1] for i in tested}):
+                held = [k for k, i in enumerate(tested) if windows[i].group.split()[-1] == distance]
+                acted = [k for k in held if windows[tested[k]].accepted]
+                rows[f"kept accepted {distance} cm"].append(float(np.mean(target[acted] > threshold)))
             acted = [k for k, i in enumerate(tested) if windows[i].accepted]
             rows["kept accepted"].append(float(np.mean(target[acted] > threshold)))
             for share in cfg["rule"]["curve"]:
