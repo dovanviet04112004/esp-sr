@@ -150,6 +150,15 @@ def test_output_slices_give_what_the_convolution_gives_from_cache_sized_parts() 
     assert isinstance(quant.output_slices(nn.Conv1d(576, 24, 1), 1024), nn.Conv1d)
 
 
+def test_unit_upsamples_drop_the_upsamples_by_one_and_keep_the_others() -> None:
+    model = nn.Sequential(nn.Upsample(scale_factor=1.0, mode="nearest"), nn.Upsample(scale_factor=2.0, mode="nearest"))
+    x = torch.randn(1, CHANNELS, FRAMES)
+    want = model(x)
+    quant.unit_upsamples(model)
+    assert isinstance(model[0], nn.Identity) and isinstance(model[1], nn.Upsample)
+    torch.testing.assert_close(model(x), want, rtol=0.0, atol=0.0)
+
+
 def test_explicit_pads_give_what_same_gives() -> None:
     torch.manual_seed(0)
     model = nn.Sequential(

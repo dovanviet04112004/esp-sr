@@ -270,6 +270,16 @@ def swapped(conv: nn.Conv2d) -> nn.Conv2d:
     return out
 
 
+def unit_upsamples(model: nn.Module) -> nn.Module:
+    """model without its nearest Upsamples by 1, which give their input back and export as a Resize copying it."""
+    for parent in list(model.modules()):
+        for name, m in list(parent.named_children()):
+            factors = m.scale_factor if isinstance(m, nn.Upsample) else None
+            if factors is not None and m.mode == "nearest" and set(np.atleast_1d(factors).tolist()) == {1.0}:
+                setattr(parent, name, nn.Identity())
+    return model
+
+
 class To1d(nn.Module):
     """redimnet2's to1d from time-major maps: (b, c, frames, bands) to (b, bands x c, frames), the same order."""
 
@@ -317,7 +327,7 @@ class Embed(nn.Module):
         if b.is_subnet or b.agg_gnorm or any(b._stage_has_dual):
             raise ValueError("Embed runs one plain stage after another")
         rewritten = stage_sums(channel_norms(ungrouped(explicit_padding(copy.deepcopy(b)))))
-        self.backbone = time_major(one_channel_inputs(rewritten))
+        self.backbone = time_major(one_channel_inputs(unit_upsamples(rewritten)))
         self.pool = ContextPool(wrap.pool, weight_bytes_max)
         self.head = folded_head(wrap.bn, wrap.linear)
 
