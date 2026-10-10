@@ -175,8 +175,8 @@ def owner_figures(
     embeddings: np.ndarray, windows: list[Window], cfg: dict, edges_s: list[float]
 ) -> dict[int, dict[str, float]]:
     """Per enrolment count, the median over the draws of: EER of the owner's other windows against the impostors',
-    the share of them kept at the rule's threshold in all, per group and per window length, and the impostors
-    passing in each group."""
+    the share of them kept at the rule's threshold in all, per group and per window length, the impostors passing in
+    each group, and the accepted windows kept at each share of rule.curve."""
     owner = cfg["owner"]
     enrol_group = f"{owner['enrol']['date']} {owner['enrol']['distance_cm']}"
     mine = [i for i, w in enumerate(windows) if w.spk == owner["spk"]]
@@ -203,6 +203,8 @@ def owner_figures(
                 rows[f"kept accepted {group}"].append(float(np.mean(target[acted] > threshold)))
             acted = [k for k, i in enumerate(tested) if windows[i].accepted]
             rows["kept accepted"].append(float(np.mean(target[acted] > threshold)))
+            for share in cfg["rule"]["curve"]:
+                rows[f"kept accepted at {share}"].append(float(np.mean(target[acted] > threshold_at(nontarget, share))))
             seconds = np.array([len(windows[i].samples) / grid.SAMPLE_RATE_HZ for i in tested])
             bins = np.digitize(seconds, edges_s)
             for b in range(len(edges_s) + 1):
@@ -272,6 +274,18 @@ def report(results: dict, windows: list[Window], cfg: dict) -> str:
         for count, f in r["owner"].items():
             kept = " | ".join(f"{100 * f.get(f'kept accepted {g}', math.nan):.1f}%" for g in groups)
             lines.append(f"| {name} | {count} | {100 * f['kept accepted']:.1f}% | {kept} |")
+    curve = cfg["rule"]["curve"]
+    lines += [
+        "",
+        "Owner windows the command run accepts, kept at each share of impostors passing, median:",
+        "",
+        f"| extractor | k | {' | '.join(f'{100 * c:g}%' for c in curve)} |",
+        "|---" * (2 + len(curve)) + "|",
+    ]
+    for name, r in results.items():
+        for count, f in r["owner"].items():
+            kept = " | ".join(f"{100 * f[f'kept accepted at {c}']:.1f}%" for c in curve)
+            lines.append(f"| {name} | {count} | {kept} |")
     names = length_names(cfg["window_s"])
     lines += [
         "",
