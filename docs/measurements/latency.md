@@ -694,3 +694,26 @@ Ba bước tối ưu tiếp, mỗi bước đo trên board B với bản lượn
 - Còn lại: gộp đầu ra các stage (`weigth1d`) ~200 ms, sát băng thông PSRAM; Conv depthwise 3×3 24 kênh của stage 0–2
   ~154 ms, nhân unaligned; LayerNorm đầu stem 65 ms, nhân float của esp-dl; Softmax và QuantizeLinear sau nó ~70 ms,
   cũng float; ReLU sau phép cộng dư 52 ms.
+
+**Khớp từng bit trên lưới hiệu chuẩn bằng tiếng thật** (10/10, chuỗi `make speed`). Hàng `fast` ở mọi bước trên được
+hiệu chuẩn bằng 4 cửa sổ nhiễu Gauss, nên "khớp từng bit" ở bảng trên chỉ đúng cho lưới ấy. Hàng `timing` của chuỗi
+hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bản cắt và cả đồ thị lệch mô phỏng. Chia đôi bằng
+`CUT_RANGE`: conv đầu stem khớp, LayerNorm đầu stem lệch.
+
+- **Gốc lỗi:** esp-dl dựng với `-ffast-math -O3` (`CMakeLists.txt` của component). Trong mã máy của LayerNorm,
+  trung bình tính qua nghịch đảo `1.0 / n` kiểu double. Tổng bình phương cộng dồn bằng `madd.s`, làm tròn một lần.
+  Phương sai nhân với `(1.0f / n)·s²` gộp với epsilon. Gamma nhân với độ lệch nghịch đảo trước, rồi mới nhân giá trị
+  đã trừ trung bình. Softmax nhân với nghịch đảo của tổng thay vì chia. Hai bản vá mô phỏng chép theo mã C nên lệch
+  1 ulp ở vài giá trị; giá trị nào sát nửa bước thì ra số nguyên khác.
+- **Sửa:** `layernorm_as_espdl` và `softmax_as_espdl` chép đúng chuỗi lệnh máy, `madd.s` mô phỏng bằng `fma32`, làm
+  tròn một lần.
+- **Sau sửa,** hàng `timing` khớp từng bit: 4/4 bản cắt, 0/192 giá trị lệch, lệch lớn nhất 0. Một lần chạy **1140,0 ms**
+  (10 lần), PSRAM cho tensor 2 136 796 B.
+- **Các nhân float khác của b0:**
+  - Sqrt (F32) gọi `sqrtf` IEEE của FPU, làm tròn đúng.
+  - ReduceMean chia thật rồi mới nhân tỉ lệ.
+  - Div của lớp gộp chia cho hằng 74, nên thương không bao giờ sát nửa bước.
+  - Gelu, Tanh là bảng dựng lúc xuất.
+  - Cả bốn khớp mô phỏng không cần vá.
+- **Các hàng của thang** (kl, percentile, minmax, mse) lượng tử trước bản sửa. Bias correction của chúng chạy trên mô
+  phỏng cũ, nên phải chạy lại thang.
