@@ -34,7 +34,6 @@ INT8_DIR = "int8"
 GRAPH_FILE = "graph.native"
 LADDER_FILE = "ladder.yaml"
 WINDOW_FILE = "board_window.npy"  # float log-mel (1, 1, mels, frames) the probe runs
-TIMING_ROW = "timing"
 ASTP_FLOOR = 1e-7  # poolings.py ASTP's variance floor, at the pin
 
 
@@ -449,40 +448,18 @@ def timing(cfg: dict, run: Path, paths: dict, workers: int) -> Path:
     wrap, impostors = load_wrap(run), survey.impostor_windows(survey_cfg, paths, workers)
     picks, board = drawn(cfg["quant"], impostors)
     calib = [features(wrap, impostors[i].samples, n_samples) for i in picks]
-    folder = run / INT8_DIR / TIMING_ROW
+    folder = run / INT8_DIR / ptq_espdl.TIMING_ROW
     with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
         graph = ptq_espdl.quantize(Embed(wrap).eval(), calib, folder, ptq_espdl.timing_rungs(LADDER))
     np.save(run / INT8_DIR / WINDOW_FILE, features(wrap, impostors[board].samples, n_samples).numpy())
     return export_espdl.save_native(graph, folder / GRAPH_FILE)
 
 
-def at_commit(against: str):
-    """This module as it stands at commit against, imported under its own name; None when it reads as it does now."""
-    import importlib.util
-    import subprocess
-    import tempfile
-
-    here = Path(__file__).resolve()
-    repo = ML_ROOT.resolve().parent
-    shown = subprocess.run(["git", "show", f"{against}:{here.relative_to(repo)}"], cwd=repo, capture_output=True)
-    if shown.returncode != 0:
-        raise ValueError(f"{against}: {shown.stderr.decode().strip()}")
-    if shown.stdout == here.read_bytes():
-        return None
-    with tempfile.TemporaryDirectory() as folder:
-        path = Path(folder) / "quant_at_commit.py"
-        path.write_bytes(shown.stdout)
-        spec = importlib.util.spec_from_file_location(f"{__name__}_at_{against}", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-    return module
-
-
 def same_int8(cfg: dict, run: Path, paths: dict, workers: int, against: str, calibration: str | None) -> tuple:
     """(off, worst) of ptq_espdl.same_integers for Embed as built here and as built at commit against, quantised under
     the ladder's rungs on quant.check_windows of its calibration windows and compared on as many owner windows;
     None when the network code is the commit's (KEHOACH 3.14 step 2.4)."""
-    old = at_commit(against)
+    old = ptq_espdl.at_commit(Path(__file__), __name__, against)
     if old is None:
         return None
     q, survey_cfg = cfg["quant"], load_yaml(CONFIGS / cfg["source"]["survey"])
@@ -567,11 +544,7 @@ def main(argv: list[str] | None = None) -> int:
         print(timing(cfg, args.run, data_paths(), args.workers))
     elif args.command == "same-int8":
         found = same_int8(cfg, args.run, data_paths(), args.workers, args.against, args.calibration)
-        if found is None:
-            print(f"the network code is {args.against}'s: nothing to check")
-        else:
-            print(f"{found[0]} values off between {args.against} and now, {found[1]} at most")
-            return int(found[0] > 0)
+        return ptq_espdl.same_int8_verdict(found, args.against)
     else:
         ptq(cfg, args.run, data_paths(), args.workers, args.calibrations)
         print(args.run / INT8_DIR / LADDER_FILE)

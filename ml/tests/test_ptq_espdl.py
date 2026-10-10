@@ -89,3 +89,39 @@ def test_same_integers_finds_a_rewrite_that_keeps_them_and_one_that_does_not(tmp
         product.back.weight.mul_(1.5)
     off, worst = ptq_espdl.same_integers([power, product], calib(np.random.default_rng(2)), inputs, RUNGS, [])
     assert off > 0 and worst > 0
+
+
+HELD = """from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Held:
+    kaldi: bool = False
+
+
+SCALE = {scale}
+"""
+
+
+def test_at_commit_imports_a_changed_module_with_its_dataclasses_and_nothing_for_an_unchanged_one(
+    tmp_path: Path,
+) -> None:
+    import subprocess
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=tmp_path, check=True)
+
+    module = tmp_path / "held.py"
+    module.write_text(HELD.format(scale=1), encoding="utf-8")
+    git("init", "-q")
+    git("add", "held.py")
+    git("commit", "-q", "-m", "held")
+    assert ptq_espdl.at_commit(module, "held", "HEAD") is None
+    module.write_text(HELD.format(scale=2), encoding="utf-8")
+    old = ptq_espdl.at_commit(module, "held", "HEAD")
+    assert old.SCALE == 1
+    assert old.Held(kaldi=True).kaldi
+    assert ptq_espdl.same_int8_verdict(None, "HEAD") == 0
+    assert ptq_espdl.same_int8_verdict((3, 1.0), "HEAD") == 1

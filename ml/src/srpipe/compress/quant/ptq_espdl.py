@@ -24,6 +24,7 @@ BITS = 8
 WIDE_BITS = 16
 INT8_MIN, INT8_MAX = -128, 127
 LADDER = CONFIGS / "models" / "quant.yaml"
+TIMING_ROW = "timing"  # the row of a branch's ladder that make speed times
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,42 @@ def timing_rungs(branch: str) -> dict:
     """The branch's rungs with quant.yaml's timing over them: a graph quick to quantise, whose time on the chip is the
     rungs' own since it depends on the graph's structure alone (KEHOACH 3.14)."""
     return ladder(branch) | load_yaml(LADDER)["timing"]
+
+
+def at_commit(path: Path, name: str, against: str):
+    """The module at path, named name, as it stands at commit against, imported anew beside the one in use; None when
+    it reads as it does now, so a branch's same-int8 has nothing to check (KEHOACH 3.14 step 2.4)."""
+    import importlib.util
+    import subprocess
+    import sys
+    import tempfile
+
+    here = path.resolve()
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=here.parent, capture_output=True, text=True)
+    repo = Path(top.stdout.strip()).resolve()
+    shown = subprocess.run(["git", "show", f"{against}:{here.relative_to(repo)}"], cwd=repo, capture_output=True)
+    if shown.returncode != 0:
+        raise ValueError(f"{against}: {shown.stderr.decode().strip()}")
+    if shown.stdout == here.read_bytes():
+        return None
+    with tempfile.TemporaryDirectory() as folder:
+        copy = Path(folder) / f"{here.stem}_at_commit.py"
+        copy.write_bytes(shown.stdout)
+        spec = importlib.util.spec_from_file_location(f"{name}_at_{against}", copy)
+        module = importlib.util.module_from_spec(spec)
+        # dataclasses look a class's string annotations up in sys.modules under its module's name.
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+    return module
+
+
+def same_int8_verdict(found: tuple[int, float] | None, against: str) -> int:
+    """Print what a branch's same-int8 found against commit against; the exit status, 1 when a value is off."""
+    if found is None:
+        print(f"the network code is {against}'s: nothing to check")
+        return 0
+    print(f"{found[0]} values off between {against} and now, {found[1]} at most")
+    return int(found[0] > 0)
 
 
 def setting_of(rungs: dict):
