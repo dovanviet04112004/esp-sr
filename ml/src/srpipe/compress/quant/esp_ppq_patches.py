@@ -17,6 +17,22 @@ CONV_TIME_AXIS = 1
 SQRT_NEWTON_STOP = 1e-5  # dl_math.hpp EN, esp-dl 3.3.11
 CHANNEL_STEP = 16  # dl_base_conv2d.cpp: S3 vector path, 16 channels a step
 DATA_CACHE_BYTES = 0x10000  # CONFIG_ESP32S3_DATA_CACHE_SIZE of the firmware apps
+ELEMENTWISE_OPS = frozenset(
+    {
+        "Add",
+        "Sub",
+        "Mul",
+        "Div",
+        "Sqrt",
+        "Relu",
+        "Tanh",
+        "Sigmoid",
+        "QuantizeLinear",
+        "DequantizeLinear",
+        "RequantizeLinear",
+    }
+)
+REDUCE_OPS = frozenset({"ReduceMean", "ReduceSum", "ReduceMax", "ReduceMin"})
 
 
 def requantise_graph_input_readers(op, graph) -> None:
@@ -426,31 +442,86 @@ def share_transposes(graph) -> int:
     return gone
 
 
-def sink_transposes(graph) -> int:
-    """Each Transpose whose input only it reads, made by an Add, Sub or Mul of one variable alone that another
-    Transpose by the same perm reads: the op moved after that other Transpose, and this one dropped; how many."""
-    gone = 0
-    for second in [op for op in graph.topological_sort() if op.type == "Transpose"]:
-        made = second.inputs[0]
-        op = made.source_op
-        if op is None or op.type not in ("Add", "Sub", "Mul") or len(made.dest_ops) != 1 or made.name in graph.outputs:
+def is_turn(op, perm: list[int]) -> bool:
+    return op.type == "Transpose" and list(op.attributes["perm"]) == list(perm)
+
+
+def layout_region(source, perm: list[int], graph, info):
+    """(ops, ends) when every op reading source but its Transposes by perm, and in turn every op reading theirs,
+    computes per element, per kept axis or per joined axis until Transposes by perm, all in source's own layout:
+    those ops and those Transposes; None when one does not."""
+    from esp_ppq.parser.espdl.espdl_graph_utils import get_default_perm
+
+    ops, ends, todo = [], [], [op for op in source.dest_ops if not is_turn(op, perm)]
+    while todo:
+        op = todo.pop()
+        if op in ops or op in ends:
             continue
-        source, perm = op.inputs[0], second.attributes["perm"]
-        if any(v is not source for v in op.inputs):
+        if is_turn(op, perm):
+            ends.append(op)
             continue
-        first = next((t for t in source.dest_ops if t.type == "Transpose" and t.attributes["perm"] == perm), None)
-        if first is None:
+        keeps = op.type in REDUCE_OPS and op.attributes.get("keepdims", 1) == 1
+        if op.type not in ELEMENTWISE_OPS and not keeps and op.type != "Concat":
+            return None
+        for i, v in enumerate(op.inputs):
+            axes = keeps and i == 1
+            if v.is_parameter and not axes and (v.value is None or v.value.numel() > 1):
+                return None
+        for out in op.outputs:
+            if out.name in graph.outputs or info.get_var_permute(out.name) not in (None, [], get_default_perm(out)):
+                return None
+            todo.extend(out.dest_ops)
+        ops.append(op)
+    made = {id(source)} | {id(out) for op in ops for out in op.outputs}
+    if any(not v.is_parameter and id(v) not in made for op in ops for v in op.inputs):
+        return None
+    return ops, ends
+
+
+def sink_layouts(graph) -> int:
+    """Each variable a Transpose reads beside ops that layout_region takes: those ops moved after the Transpose, their
+    axes moved with it and the Transposes ending the region dropped, so the variable feeds the Transpose alone; how
+    many."""
+    import torch
+    from esp_ppq.parser.espdl.espdl_graph_utils import get_default_perm
+    from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
+
+    info, done = ExporterPatternInfo(), 0
+    for first in [op for op in graph.topological_sort() if op.type == "Transpose"]:
+        if first.name not in graph.operations:
             continue
-        laid, out = first.outputs[0], second.outputs[0]
-        for _ in op.inputs:
-            source.dest_ops.remove(op)
-            laid.dest_ops.append(op)
-        op.inputs[:] = [laid] * len(op.inputs)
-        graph.remove_operation(second)
-        op.outputs[0], out.source_op, made.source_op = out, op, None
-        graph.remove_variable(made)
-        gone += 1
-    return gone
+        source, perm = first.inputs[0], list(first.attributes["perm"])
+        if len(source.dest_ops) < 2:
+            continue
+        if info.get_var_permute(source.name) not in (None, [], get_default_perm(source)):
+            continue
+        found = layout_region(source, perm, graph, info)
+        if found is None:
+            continue
+        (ops, ends), laid, rank = found, first.outputs[0], len(perm)
+        for op in ops:
+            for _ in [v for v in op.inputs if v is source]:
+                source.dest_ops.remove(op)
+                laid.dest_ops.append(op)
+            op.inputs[:] = [laid if v is source else v for v in op.inputs]
+            for out in op.outputs:
+                out.shape = [out.shape[i] for i in perm]
+                info.add_var_permute(out.name, get_default_perm(out))
+            if op.type in REDUCE_OPS:
+                axes = op.inputs[1].value
+                op.inputs[1].value = torch.tensor([perm.index(int(a) % rank) for a in axes.flatten()], dtype=axes.dtype)
+            elif op.type == "Concat":
+                op.attributes["axis"] = perm.index(op.attributes["axis"] % rank)
+        for end in ends:
+            kept, dropped = end.inputs[0], end.outputs[0]
+            for reader in list(dropped.dest_ops):
+                reader.inputs[:] = [kept if v is dropped else v for v in reader.inputs]
+                kept.dest_ops.append(reader)
+            dropped.dest_ops.clear()
+            graph.remove_operation(end)
+            graph.remove_variable(dropped)
+        done += 1
+    return done
 
 
 def fold_transpose_chains(graph) -> int:
@@ -499,7 +570,7 @@ def lean_transposes() -> Iterator[None]:
     """ESP-PPQ's export puts a Transpose before each reader that needs another layout and merges only adjacent ones: a
     variable read by seven ops got seven equal Transposes, every Transpose, Reshape, Transpose chain kept both. After
     its layout pass this merges equal Transposes of one variable (share_transposes), moves elementwise ops of one
-    variable after its Transpose (sink_transposes) and folds each chain into the one Transpose, or none, moving the
+    variable after its Transpose (sink_layouts) and folds each chain into the one Transpose, or none, moving the
     same values. ReDimNet2 b0 (KEHOACH 3.17) on board B: 50 inserted Transposes took 0.55 s of 2.5 s a window.
     """
     from esp_ppq.parser import espdl_exporter
@@ -510,7 +581,7 @@ def lean_transposes() -> Iterator[None]:
     def leaner(graph):
         reset(graph)
         share_transposes(graph)
-        sink_transposes(graph)
+        sink_layouts(graph)
         fold_transpose_chains(graph)
         pattern = FuseTransposePattern()
         for op in graph.topological_sort():

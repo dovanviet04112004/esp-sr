@@ -474,7 +474,7 @@ def espdl_graph(path: Path) -> tuple[dict, dict]:
             node.OpType().decode(),
             [node.Input(j).decode() for j in range(node.InputLength())],
         )
-    dtypes, tensors = {3: np.int8, 6: np.int32, 7: np.int64}, {}
+    dtypes, tensors = {1: np.float32, 3: np.int8, 6: np.int32, 7: np.int64}, {}
     for i in range(graph.InitializerLength()):
         t = graph.Initializer(i)
         dims = [int(d) for d in t.DimsAsNumpy()]
@@ -627,6 +627,35 @@ def test_lean_transposes_squares_the_channels_last_map_the_convolution_reads(tmp
     (square,) = [name for name, (op, ins) in nodes.items() if op == "Mul" and ins[0] == ins[1]]
     assert nodes[square][1][0] == nodes["/conv1d/Conv"][1][0]
     assert not [op for op, ins in nodes.values() if op == "Transpose" and made[square] in ins]
+
+
+class ContextBranch(nn.Module):
+    """A 2-d map flattened to 1-d, projected per frame, and its mean and spread over time projected and added, as
+    ReDimNet2's pool takes its context."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv2d = nn.Conv2d(1, 4, 3, padding=1)
+        self.frames, self.context = nn.Conv1d(4 * 6, 8, 1), nn.Conv1d(2 * 4 * 6, 8, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        flat = self.conv2d(x).reshape(1, 4 * 6, HOPS)
+        mean = flat.mean(dim=-1, keepdim=True)
+        spread = ((flat - mean) * (flat - mean)).mean(dim=-1, keepdim=True)
+        return self.frames(flat) + self.context(torch.cat([mean, spread], dim=1))
+
+
+def test_lean_transposes_take_the_context_over_time_on_the_channels_last_map(tmp_path: Path) -> None:
+    torch.manual_seed(8)
+    rng = np.random.default_rng(21)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 1, 6, HOPS)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(ContextBranch().eval(), calib, tmp_path, RUNGS)
+    with esp_ppq_patches.applied(["lean_transposes"]):
+        nodes = espdl_graph(export_espdl.export(graph, tmp_path / "lean.espdl"))[0]
+    means = [ins[0] for op, ins in nodes.values() if op == "ReduceMean"]
+    assert means and means[0] == nodes["/frames/Conv"][1][0]
+    assert sum(op == "Transpose" for op, _ in nodes.values()) <= 1
+    assert nodes["/context/Conv"][1][0] in {name + "_output_0" for name, (op, _) in nodes.items() if op == "Concat"}
 
 
 def test_an_unknown_patch_is_refused() -> None:
