@@ -7,6 +7,7 @@ Run: python -m srpipe.tasks.speaker.quant import | ptq <run> [--workers N]"""
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib
 import shutil
 import sys
@@ -182,7 +183,7 @@ class Embed(nn.Module):
             raise ValueError("the extractor pads, offsets or norms where Embed does not")
         if not wrap.pool.global_context_att or wrap.return_all_outputs:
             raise ValueError("Embed reads a pool with global context and one backbone output")
-        self.backbone = stage_sums(channel_norms(ungrouped(explicit_padding(wrap.backbone))))
+        self.backbone = stage_sums(channel_norms(ungrouped(explicit_padding(copy.deepcopy(wrap.backbone)))))
         self.pool = ContextPool(wrap.pool)
         self.head = folded_head(wrap.bn, wrap.linear)
 
