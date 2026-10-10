@@ -247,6 +247,10 @@ cá nhân 2025, hiệu lực 01/01/2026 🔬 kiểm điều khoản áp dụng �
 3. **Bản thu không vào git** (CLAUDE.md §6). Chỉ `ml/data/manifests/` và `ml/data/splits/` vào git (§4.4.1).
 4. **Xoá được theo yêu cầu.** Mã người nói trỏ được tới mọi file của người đó, nên xoá là một lệnh.
 
+Embedding giọng của một người là **dữ liệu sinh trắc**, loại dữ liệu cá nhân nhạy cảm 🔬 (kiểm ở E11-T2). Chỉ tính khi
+phiếu đồng ý của người ấy ghi mục đích nhận diện người nói; chỉ nằm ở `cache/`, không vào git; xoá cùng bản thu theo
+mã người nói (§3.17).
+
 Giấy phép **lan sang mô hình**: model huấn luyện trên VIVOS mang ràng buộc phi thương mại của VIVOS.
 `docs/DU_LIEU.md` ghi giấy phép của từng nguồn, và `contracts/models.lock.json` ghi model nào đã học
 từ nguồn nào.
@@ -1629,6 +1633,46 @@ lối ra còn là nguồn của biến thể sau (`board_gsc`, `espsr_bss`). Khu
 `main/job_format.h`; `items.py` phía máy tính đọc hằng số từ đó, như `pack_models` đọc `storage_format.h`. App cũng in chi
 phí của mỗi biến thể qua `test_report`. Biến thể `board_*` dựng `dsp_afe` với `gsc` bật, dù sản phẩm hiện tắt nó.
 
+### 3.17 Nhận diện người nói — khảo sát trên máy tính
+
+Câu hỏi: embedding người nói học sẵn có tách được giọng chủ nhà khỏi người khác, trên tiếng đã qua board, đủ để chỉ chủ
+nhà ra lệnh được không. Đây chỉ là **khảo sát** (chủ repo chốt 10/10): không firmware, không hợp đồng, không `host/`. Tiếng
+vẫn không rời board ở chế độ thường (§7.5), và sản phẩm chưa có khối này (§9).
+
+**Bộ trích tham chiếu**, mỗi bộ một dự án uv ghim bản ở `ml/spk_ref/<tên>/` như `ml/afe_ref/` (§3.16); `srpipe.scenes.refs`
+gọi `run.py` của chúng với một lô JSON. Trọng số tải vào `cache/` theo bản ghim và sha256; giấy phép trọng số kiểm và ghi
+`DU_LIEU.md` trước khi tải 🔬.
+
+| Tên | Là gì | Học trên |
+|---|---|---|
+| `ecapa` | ECAPA-TDNN của SpeechBrain, `speechbrain/spkrec-ecapa-voxceleb` | VoxCeleb 1 và 2, phần lớn tiếng Anh |
+| `campplus` | CAM++ của 3D-Speaker, `iic/speech_campplus_sv_zh-cn_16k-common`, 7,2 M tham số | 200 000 người nói tiếng Trung |
+
+Chưa thấy bộ học trên tiếng Việt nào công bố trọng số. Đội nhất bài nhận diện người nói của VLSP 2021 (EER 1,755%) cũng đi
+từ mô hình học trên tiếng Anh 🔬.
+
+**Vật liệu.** Bộ trích nghe lối ra `clean` của chuỗi (§3.2), trên đúng cửa sổ mà `command` cắt như board: thứ máy chủ sẽ
+nhận nếu sau này làm trên máy chủ.
+
+| Vai | Nguồn |
+|---|---|
+| Đăng ký | k câu lệnh của chủ repo (`spk_001`) ở phiên Cửa 3 ngày 28/09, 1 m; k = 3, 5, 10 |
+| Đích | mọi câu lệnh còn lại của chủ repo trong các phiên Cửa 3: 28/09 3 m, 07/10 1 m và 3 m |
+| Người lạ | người nói `test` của `command/v1` (VIVOS, Common Voice) qua đường mô phỏng board (`scenes/device.py`), cửa sổ cắt cùng luật, tách gần 1 m và gần 3 m |
+| Mốc ngôn ngữ | người nói VIVOS `test` không qua board, cặp cùng người và khác người: EER của bộ trích trên giọng Việt ở kênh sạch |
+
+Board B mới thu một người, nên người lạ chỉ có qua mô phỏng. Thêm người lạ thu thật cần phiếu đồng ý (§1.4) và chủ repo
+duyệt riêng.
+
+**Thước** (`srpipe.scenes.speaker`, `docs/measurements/speaker.md`): EER, và phần cửa sổ của chủ repo được giữ ở ngưỡng cho
+≤ 1% cửa sổ người lạ qua; tách theo bộ trích, k, khoảng cách và độ dài cửa sổ.
+
+**Luật đi tiếp.** Chỉ khi một bộ trích giữ ≥ 95% cửa sổ của chủ repo ở cả 1 m và 3 m, với ≤ 1% người lạ qua, mới đề xuất
+làm thật theo CLAUDE.md §1.2: trên máy chủ (sửa §7.5, §9, `contracts/`, `host/`) hay trên chip (§3, §5, §6). Không đạt thì
+ghi số và dừng; học tiếp trên tiếng Việt (Vietnam-Celeb, dữ liệu VLSP) chỉ xét khi giấy phép của chúng cho phép.
+
+Embedding của chủ repo là dữ liệu sinh trắc, theo luật của §1.4.
+
 ---
 ## 4. Cấu trúc repo
 
@@ -1661,7 +1705,7 @@ esp-sr/
     ├── adr/                             # quyết định có bảng đối chứng
     ├── bao_cao/                         # báo cáo tuần gửi mentor, một file tuan_<nn>.md mỗi tuần
     └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md, tts_engines.md, data_screen.md, wake.md,
-                                  speech_commands.md, command.md}
+                                  speech_commands.md, command.md, speaker.md}
                       ├ bench/           # CSV thô của bench_*, commit cùng bảng nó sinh ra
                       ├ calib/           # hệ số hiệu chuẩn từng board (balance), bản đã ghi xuống NVS
                       └ {afe,kws,tts}/   # số 🔬 theo khối
@@ -1791,6 +1835,7 @@ ml/
 │   ├── afe/{hpf.yaml, aec.yaml, doa.yaml, gsc.yaml, bss.yaml, ns_omlsa.yaml, vad.yaml, agc.yaml}  # chỉ ghi đè cho thí nghiệm; mặc định là contracts/afe.yaml
 │   ├── afe/compare.yaml               # bàn so §3.16: mục, lời, đoạn, phép trộn, seed, biến thể, luật dò đoạn
 │   ├── scenes/standard.yaml           # bộ cảnh có nhãn chuẩn của E4-T4: phòng, RT60, góc, SNR, seed
+│   ├── scenes/speaker.yaml            # khảo sát §3.17: bộ trích ghim bản, phiên đăng ký và thử, người lạ, k, seed
 │   ├── scenes/device.yaml             # đường mô phỏng board của E4-T8: kho phòng, mức nói, nhiễu, micro, log-mel
 │   └── models/{ns.yaml, wake.yaml, command.yaml, command_kws.yaml, command_ctc.yaml, synth.yaml, quant.yaml}
 │                                      #   ns.yaml: split, bộ trộn, hai ứng viên và lịch học chung của khe ns
@@ -1831,8 +1876,10 @@ ml/
 │   │   │                              #   RT60, vùng góc; SIR, SDR (§3.6–3.8)
 │   │   ├── compare.py                 # bàn so §3.16: prepare dựng mục vào interim/scenes/afe_compare/, render dựng
 │   │   │                              #   biến thể pc_*, score chấm mọi biến thể bằng một thước → afe/compare.md
-│   │   ├── refs.py                    # gọi ml/afe_ref/<bộ>/run.py qua uv run với một lô JSON: dìm nhiễu tham
-│   │   │                              #   chiếu, DNSMOS
+│   │   ├── refs.py                    # gọi ml/afe_ref/<bộ>/run.py và ml/spk_ref/<bộ>/run.py qua uv run với một
+│   │   │                              #   lô JSON: dìm nhiễu tham chiếu, DNSMOS, embedding người nói
+│   │   ├── speaker.py                 # khảo sát §3.17: cửa sổ lệnh của chủ repo và của người lạ mô phỏng qua
+│   │   │                              #   bộ trích tham chiếu; EER, phần chủ repo giữ ở 1% người lạ qua
 │   │   ├── swift_pitch.py             # ba chiều cao độ của một phiên bằng SwiftF0, thang như Kaldi: lượt thử
 │   │   │                              #   `pitch_source` của §3.11, gói swift-f0 ở extra `swiftf0` của pyproject
 │   │   └── device.py                  # ★ đường mô phỏng board: phòng hoặc RIR thật → dàn array.yaml → chênh micro
@@ -1910,6 +1957,8 @@ ml/
 ├── afe_ref/<bộ>/{pyproject.toml, uv.lock, run.py}   # nsnet2, rnnoise, dnsmos (§3.16), kaldi_pitch (§3.11,
 │                                      #   chỉ run.py, chạy trong image của bộ căn mốc vì cần Kaldi gốc): như
 │                                      #   tts/; trọng số tải vào cache/ theo commit ghim và sha256
+├── spk_ref/<bộ>/{pyproject.toml, uv.lock, run.py}   # ecapa, campplus: bộ trích embedding người nói của khảo
+│                                      #   sát §3.17, cùng khuôn afe_ref/
 ├── scripts/                           # đánh số theo thứ tự chạy; mỗi script một việc
 │   ├── 10_prepare.sh  ├── 11_scenes.sh
 │   ├── 20_train_ns.sh ├── 21_train_wake.sh ├── 22_train_command.sh ├── 23_train_synth.sh
@@ -3123,7 +3172,7 @@ thêm bốn mục:
 |---|---|
 | **Nói chen khi máy đang nói** | cần `wake` chạy trong `DAP` trên tín hiệu đã khử vọng, tức Cửa của `aec` phải đạt trước; mở như tuỳ chọn ở E14 nếu còn thời gian |
 | **Thu xa hơn 3 m** | vang quyết định tầm thu, và chuỗi này không có khối khử vang (TỔNG QUAN §9.1). Tầm thu thật đo và ghi thành một con số ở E14-T8 |
-| **Phân biệt người nói** | nhận ra *ai* nói là bài toán sinh trắc, kéo theo nghĩa vụ pháp lý khác hẳn (§1.4) |
+| **Phân biệt người nói** trong sản phẩm | nhận ra *ai* nói là bài toán sinh trắc, kéo theo nghĩa vụ pháp lý khác hẳn (§1.4); §3.17 chỉ khảo sát trên máy tính xem có đáng làm không |
 | **Nhận dạng trên máy chủ** | toàn bộ chuỗi chạy trên board; máy tính chỉ xem, chấm, thu |
 
 ---
