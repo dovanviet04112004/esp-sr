@@ -273,3 +273,93 @@ Trên `val` nhạc không phải lớp khó: NSNet-16k L ở epoch 17 kém `stat
 Tới epoch 17, lớp nhạc `val` của L lên 1,1 dB so với epoch 1 mà đoạn thu của nó xuống (+2,4 dB ở epoch 2, +1,9 dB ở
 epoch 17); của M lên ở cả hai (`val` +0,8 dB, đoạn thu +1,9 → +2,8 dB). Bàn so chỉ có một đoạn nhạc, nên chưa nói được
 phần học thêm có sang bản thu không, và đoạn ấy khó vì đi qua loa, phòng và micro của board hay vì chính bản nhạc.
+
+## 9. Lượt `20261008_dd911af-dirty_1ea86b`: mạng xa gain lý tưởng vì đâu (10/10)
+
+Trọng số cuối epoch 17, float, trên GPU, đo bằng script chẩn đoán chạy một lần. Ví dụ học mới là epoch 40 của bộ trộn
+`train`, lượt học chưa rút epoch ấy; mỗi tập 640 ví dụ, trải đều trên epoch; `val` là 640 ví dụ đầu của bộ đã lưu. Hàng
+"tiếng / nhiễu / phòng / nền phòng của `val`" là bộ trộn `train` có đúng phần ấy lấy từ bể `val`.
+
+| Tập | RNNoise-16k | NSNet-16k S | M | L | gain lý tưởng | gain 1 |
+|---|---|---|---|---|---|---|
+| `val` đã lưu | 0,0608 | 0,0450 | 0,0439 | 0,0428 | 0,0011 | 0,400 |
+| `val` trộn lại bằng đường GPU hiện tại | 0,0604 | 0,0435 | 0,0422 | 0,0415 | 0,0010 | 0,446 |
+| học, epoch 40 | 0,0478 | 0,0309 | 0,0295 | 0,0292 | 0,0009 | 0,503 |
+| học, epoch 0 | 0,0473 | 0,0309 | 0,0296 | 0,0297 | 0,0010 | 0,489 |
+| học, tiếng của `val` | 0,0549 | 0,0354 | 0,0344 | 0,0338 | 0,0009 | 0,460 |
+| học, nhiễu của `val` | 0,0538 | 0,0375 | 0,0363 | 0,0356 | 0,0010 | 0,502 |
+| học, phòng của `val` | 0,0481 | 0,0314 | 0,0298 | 0,0297 | 0,0010 | 0,493 |
+| học, nền phòng của `val` | 0,0468 | 0,0306 | 0,0294 | 0,0289 | 0,0009 | 0,503 |
+
+Loss của NSNet-16k L theo lớp, cùng các tập:
+
+| Tập, epoch | `stationary` | `nonstationary` | `music` | `music_vocals` | `babble` | `tone_only` | không người nói |
+|---|---|---|---|---|---|---|---|
+| học, 17 | 0,0266 | 0,0311 | 0,0292 | 0,0336 | 0,0432 | 0,0226 | 0,0134 |
+| học, nhiễu của `val`, 17 | 0,0297 | 0,0317 | 0,0291 | 0,0359 | 0,0487 | 0,0226 | 0,0592 |
+| học, tiếng của `val`, 17 | 0,0315 | 0,0359 | 0,0363 | 0,0358 | 0,0476 | 0,0279 | 0,0134 |
+| `val` đã lưu, 17 | 0,0398 | 0,0383 | 0,0438 | 0,0448 | 0,0645 | 0,0275 | 0,0361 |
+| học, 0 / 2 / 17 | | | | | | | 0,0715 / 0,0294 / 0,0134 |
+| học, nhiễu của `val`, 0 / 2 / 17 | | | | | | | 0,0958 / 0,0616 / 0,0592 |
+
+- Loss `val` cao hơn loss học ~42% (L: 0,0415 so với 0,0292) vì vật liệu, không vì học thuộc: chênh đã có ở epoch 0
+  (0,0638 so với 0,0483), phòng và nền phòng không góp, tiếng và nhiễu của `val` cộng lại gần đủ phần chênh.
+- Phần của nhiễu nằm ~3/4 ở ví dụ không người nói. Ở đó loss là trung bình `g^0,6` có trọng số: 0,0134 là dìm tương
+  đương −62 dB, 0,0592 là −41 dB, cả hai sâu quá mức nhận dạng cần. Có người nói thì nhiễu chưa gặp chỉ đổi `babble` và
+  `stationary`; nhạc chưa gặp không đổi gì (0,0291 so với 0,0292).
+- Phần của tiếng tăng đều mọi lớp, cả `tone_only`. Tiếng `val` là VIVOS và Common Voice, khoảng động trung vị 41,7 dB; 76%
+  giờ học là bud500, 48,8 dB. Hàm nén công suất mũ 0,15 tính nền của chính bản thu là tiếng.
+- Bộ `val` lưu ngày 01/10 không còn trùng bộ trộn hiện tại: ví dụ 0–3 khác lớp, mức nói, file nhiễu. Loss trên bộ trộn lại
+  lệch 3% nên không đổi kết luận nào ở đây; dựng lại `data sets` trước lượt học sau.
+
+Thước của `eval.py score` trên 980 ví dụ `val` đã lưu, sau 3 s đầu, không sàn; ô: nhiễu giảm dB / tiếng mất dB / SNR tăng dB:
+
+| Lớp | Gain lý tưởng | NSNet-16k L | RNNoise-16k | OM-LSA |
+|---|---|---|---|---|
+| `music` | 9,8 / 0,19 / +7,1 | 8,9 / 2,09 / +4,4 | 7,9 / 1,31 / +4,1 | 2,5 / 0,15 / +2,0 |
+| `music_vocals` | 12,2 / 0,17 / +7,2 | 8,4 / 1,46 / +4,3 | 8,0 / 1,37 / +4,2 | 2,8 / 0,14 / +2,3 |
+| `nonstationary` | 10,3 / 0,18 / +7,7 | 8,6 / 1,47 / +5,1 | 7,9 / 1,29 / +4,6 | 3,3 / 0,17 / +2,6 |
+| `stationary` | 9,9 / 0,31 / +6,8 | 8,9 / 2,14 / +4,8 | 8,4 / 1,83 / +4,5 | 5,6 / 0,42 / +4,2 |
+| `babble` | 9,5 / 0,32 / +6,8 | 7,0 / 2,85 / +2,6 | 7,0 / 2,72 / +2,7 | 1,7 / 0,23 / +1,2 |
+| `tone_only` | 8,3 / 0,06 / +5,1 | 8,5 / 0,42 / +4,8 | 8,3 / 0,41 / +4,5 | 6,5 / 0,07 / +4,8 |
+| có người nói, SNR 0–5 dB | 12,7 / 0,47 / +9,5 | 11,5 / 4,89 / +5,2 | 10,1 / 3,77 / +4,8 | 2,6 / 0,47 / +2,0 |
+
+Cùng thước, có thêm NSNet2 bản PC của §3.16 (`nsnet2-20ms-baseline.onnx`, khung 20 ms, bước 10 ms): gain của nó tính
+trên hỗn hợp ở khe, đưa về −30 dBFS như dữ liệu DNS nó học, rồi áp riêng lên phần tiếng và phần nhiễu bằng STFT của nó.
+Bàn so: bốn mục trộn của §8; `val`: 40 ví dụ đầu mỗi lớp.
+
+| Tập | Ví dụ | Gain lý tưởng | NSNet-16k L | NSNet2 PC |
+|---|---|---|---|---|
+| bàn so, quạt SNR 0 và 5 | 2 | 9,3 / 0,37 / +7,5 | 10,3 / 1,21 / +6,9 | 15,0 / 4,21 / +8,4 |
+| bàn so, nhạc SNR 0 và 5 | 2 | 10,6 / 0,54 / +8,2 | 5,1 / 1,27 / +1,8 | 12,1 / 5,50 / +4,4 |
+| `val` `music` | 40 | 9,1 / 0,18 / +6,6 | 9,5 / 3,34 / +4,0 | 13,1 / 4,84 / +6,3 |
+| `val` `music_vocals` | 40 | 9,7 / 0,19 / +7,3 | 8,1 / 1,92 / +4,1 | 12,6 / 5,61 / +5,6 |
+| `val` `nonstationary` | 40 | 10,3 / 0,17 / +7,6 | 9,5 / 1,69 / +5,4 | 14,4 / 4,56 / +7,5 |
+| `val` `stationary` | 40 | 10,1 / 0,48 / +6,4 | 9,5 / 3,78 / +4,8 | 14,4 / 5,22 / +7,1 |
+| `val` `babble` | 40 | 9,9 / 0,38 / +6,9 | 7,8 / 4,22 / +2,9 | 11,7 / 8,53 / +3,1 |
+
+Gain của L trên bước có lời của 640 ví dụ `val`, nhóm theo chính gain ấy:
+
+| Gain của L | Phần vạch | `g^0,3` trung bình của L | `(S/X)^0,3` trung bình | `S/X` trung bình | Phần công suất tiếng | Công suất tiếng bị cắt |
+|---|---|---|---|---|---|---|
+| dưới −30 dB | 22,4% | 0,206 | 0,457 | −16,6 dB | 1,3% | 1,3% |
+| −30 … −20 dB | 18,6% | 0,430 | 0,516 | −14,5 dB | 0,9% | 0,9% |
+| −20 … −10 dB | 24,4% | 0,599 | 0,638 | −9,7 dB | 2,3% | 2,2% |
+| −10 … −6 dB | 9,7% | 0,759 | 0,761 | −5,9 dB | 3,1% | 2,5% |
+| −6 … −3 dB | 8,3% | 0,858 | 0,839 | −3,8 dB | 6,9% | 4,2% |
+| −3 … −1 dB | 8,5% | 0,937 | 0,911 | −2,1 dB | 17,6% | 5,7% |
+| −1 … 0 dB | 8,1% | 0,983 | 0,968 | −0,8 dB | 67,9% | 4,9% |
+
+Đọc:
+
+- Mạng làm đúng điều hàm mất mát đòi. Ở các nhóm mang 96% công suất tiếng (gain −10 … 0 dB), `g^0,3` của L bằng trung bình
+  `(S/X)^0,3` trong 0,03: đó là đáp án tốt nhất của sai số bình phương trên phổ nén khi mạng không phân biệt được các vạch
+  trong nhóm. Phần thiếu so với gain lý tưởng là phần mạng không đoán ra từ những gì nó nghe, không phải lỗi học.
+- To hơn trong họ này không lợi: S, M, L chênh 6% loss (0,0309 / 0,0295 / 0,0292). NSNet2 PC lấy thêm ~2 dB SNR trên
+  `val` nhưng cắt tiếng 4,6–8,5 dB, gấp 1,5–3 lần L: chỗ đứng khác trên cùng đường đánh đổi, không phải bản tốt hơn hẳn.
+- Trên bàn so, quạt không còn gì để lấy: L +6,9 dB so với lý tưởng +7,5 dB, và OM-LSA đã sát lý tưởng (§8). Nhạc thu qua
+  board kém nhạc `val` ~2 dB ở cả L (+4,0 → +1,8 dB) lẫn NSNet2 PC (+6,3 → +4,4 dB): đoạn nhạc ấy khó với mọi mạng, không
+  riêng lượt này. Bàn so chỉ có một đoạn nhạc.
+- Một phần ba loss của L, trên `val` lẫn ví dụ học, nằm ở vạch có gain lý tưởng dưới −30 dB mà mạng chưa đủ sâu, dù trung
+  vị gain của mạng ở đó đã là −64 dB. Hàm nén công suất mũ 0,15 vẫn trả công cho việc dìm thêm dưới mức mà sàn của E9-T12
+  (−12 … −30 dB) sẽ cắt đi.
