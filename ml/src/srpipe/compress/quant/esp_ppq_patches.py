@@ -133,6 +133,18 @@ def fuse_passive_ops_on_graph_inputs() -> Iterator[None]:
         QuantizeFusionPass.optimize = optimize
 
 
+def rms_like_espdl(sum_sq, n: int, s_in, s_out, eps: float):
+    """1 / sqrt(mean square + eps) times the input step over the output step, from a row's integer sum of squares over
+    n values, as the S3 build of esp-dl's RMSNormalization takes it under -ffast-math: the mean square through
+    (1.0f / n) * s_in^2 and fused with eps by madd.s, then sqrtf and a float32 division."""
+    import torch
+
+    # Tensor by tensor: torch divides a CUDA tensor by a Python number through its reciprocal.
+    per_value = torch.ones_like(s_in) / torch.full_like(s_in, n) * (s_in * s_in)
+    root = torch.sqrt(fma32(sum_sq, per_value, torch.full_like(sum_sq, eps)))
+    return torch.ones_like(sum_sq) / root * (s_in / s_out)
+
+
 def rmsnorm_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platforms: frozenset, **kwargs):
     """op's output as esp-dl's S3 kernel computes it once op, on one of platforms, has its input and output quantised,
     each float32 step in the kernel's order; simulate's float output otherwise. The gradient is simulate's."""
@@ -152,10 +164,8 @@ def rmsnorm_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platfo
         axes = list(range(x.ndim - weight.ndim, x.ndim))
         q = x / s_in
         sum_sq = (q.double() ** 2).sum(axes, keepdim=True).float()
-        # Tensor by tensor: torch divides a CUDA tensor by a Python number through its reciprocal.
-        mean_sq = sum_sq * (s_in * s_in) / torch.full_like(sum_sq, math.prod(x.shape[a] for a in axes))
-        eps = torch.full_like(mean_sq, op.attributes.get("epsilon", 1e-5))
-        rms = torch.ones_like(mean_sq) / torch.sqrt(mean_sq + eps) * (s_in / s_out)
+        n = math.prod(x.shape[a] for a in axes)
+        rms = rms_like_espdl(sum_sq, n, s_in, s_out, op.attributes.get("epsilon", 1e-5))
         y = torch.clamp(torch.floor(q * rms * weight + 0.5), out.quant_min, out.quant_max) * s_out
     return floating - floating.detach() + y
 
@@ -164,7 +174,8 @@ def rmsnorm_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platfo
 def rmsnorm_as_espdl() -> Iterator[None]:
     """ESP-PPQ simulates RMSNormalization as x / sqrt(mean(x^2) + eps) * scale rounded at its output; esp-dl's S3 kernel
     multiplies the integers by 1 / sqrtf of the mean square, already scaled between the grids, then by the float scale,
-    and rounds half up. Board B, command_ctc qat: 2 of 198 Gate 3 windows scored a step off the simulation.
+    and rounds half up, its mean square fused with eps under -ffast-math. Board B, command_ctc qat: 2 of 198 Gate 3
+    windows scored a step off the simulation.
     """
     from esp_ppq.api.espdl_interface import get_target_platform
     from esp_ppq.executor.base import OPERATION_FORWARD_TABLE

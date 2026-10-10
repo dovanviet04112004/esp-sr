@@ -167,13 +167,34 @@ def norm_graph(tmp_path: Path):
 
 
 def espdl_rmsnorm(q: np.ndarray, scale: np.ndarray, e_in: int, e_out: int) -> np.ndarray:
-    """esp-dl's S3 int8 RMSNormalization of q over its last axis, each float32 step as dl_module_rms_normalization.hpp
-    and dl_tie728_rmsnorm_s8 take it."""
+    """esp-dl's S3 int8 RMSNormalization of q over its last axis as the S3 build runs it (-ffast-math): the row's
+    scale as espdl_rms has it, then each value as dl_tie728_rmsnorm_s8 takes it."""
     s_in, s_out = np.float32(2.0**e_in), np.float32(2.0**e_out)
     sum_sq = (q.astype(np.int64) ** 2).sum(-1, keepdims=True).astype(np.float32)
-    mean_sq = sum_sq * (s_in * s_in) / np.float32(q.shape[-1])
-    rms = np.float32(1.0) / np.sqrt(mean_sq + np.float32(NORM_EPS)) * (s_in / s_out)
+    rms = espdl_rms(sum_sq, q.shape[-1], s_in, s_out)
     return np.clip(np.floor(q.astype(np.float32) * rms * scale + np.float32(0.5)), -128, 127)
+
+
+def espdl_rms(sum_sq: np.ndarray, n: int, s_in: np.float32, s_out: np.float32) -> np.ndarray:
+    """A row's scale as the S3 build of dl_module_rms_normalization.hpp computes it: madd.s of the sum of squares,
+    (1.0f / n) * s_in^2 and eps, then 1 / sqrtf times the steps' ratio."""
+    f = np.float32
+    per_value = (f(1) / f(n)) * (s_in * s_in)
+    fused_sum = fused(sum_sq, np.full_like(sum_sq, per_value), np.full_like(sum_sq, f(NORM_EPS)))
+    return f(1) / np.sqrt(fused_sum) * (s_in / s_out)
+
+
+def test_rms_like_espdl_fuses_the_mean_square_with_eps_as_madd_s_does() -> None:
+    """Over 160 values, ctc's width, 1/160 is not a float32: the fused scale is not the one of a division and a sum."""
+    rng = np.random.default_rng(3)
+    sum_sq = rng.integers(0, 160 * 128 * 128, (20000, 1)).astype(np.float32)
+    s_in, s_out = np.float32(2.0**-5), np.float32(2.0**-4)
+    got = esp_ppq_patches.rms_like_espdl(
+        torch.from_numpy(sum_sq), 160, torch.tensor(s_in), torch.tensor(s_out), NORM_EPS
+    ).numpy()
+    assert np.array_equal(got, espdl_rms(sum_sq, 160, s_in, s_out))
+    divided = np.float32(1) / np.sqrt(sum_sq * (s_in * s_in) / np.float32(160) + np.float32(NORM_EPS)) * (s_in / s_out)
+    assert not np.array_equal(got, divided)
 
 
 def test_rmsnorm_as_espdl_simulates_each_norm_as_the_chip_rounds_it(tmp_path: Path) -> None:
