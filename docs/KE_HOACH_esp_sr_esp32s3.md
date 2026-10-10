@@ -1519,6 +1519,14 @@ Tăng tốc một nhánh trên chip đi theo một quy trình, nhánh nào cũng
    lệch số nào (`ptq_espdl.same_integers`).
 5. Ghi mỗi bước vào `docs/measurements/latency.md`.
 
+`make speed BRANCH=<nhánh> RUN=<run> [AGAINST=<commit>]` chạy bước 4, 1, 3 rồi 2 thành một chuỗi, dừng ở bước đầu tiên
+không qua: phép so số nguyên khi mã mạng của nhánh khác `AGAINST` (mặc định HEAD), hàng `timing`, bản dò trên board
+với hàng ấy, bảng xếp hạng. Một nhánh vào chuỗi khi có đủ ba móc: lệnh `<nhánh>-timing` và `<nhánh>-same-int8` gọi các
+lệnh con cùng tên của `tasks/<nhánh>/quant.py`, và `ai-unit-<nhánh>` nhận `RUN`, `ROW`, chạy `model->test()` của bản dò
+với `profile_module` bật, để log ở chỗ `SPEED_LOG_<nhánh>` khai. Bản vá mới vào `esp_ppq_patches.py` và danh sách của
+config nhánh, nhãn đường chậm mới vào `espdl_profile.py`; chuỗi không đổi. Khi thôi tối ưu, chạy cả thang một lần
+(`make <nhánh>-ptq`) và ghi chất lượng.
+
 Mỗi nhánh dựng thang của mình ở `tasks/<nhánh>/quant.py`: mỗi bậc một lệnh con, mỗi dòng so với float bằng thước của
 nhánh sau int8, ghi vào `<run>/int8/ladder.yaml`, đồ thị của dòng ở `<run>/int8/<dòng>/`. Bậc 3 và 4 dựng trên cách hiệu
 chuẩn tốt nhất của bậc 2 theo thước ấy. Với `command` `ctc`: đếm câu lệnh được nhận đúng trên phiên board ở `δ₁`
