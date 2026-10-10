@@ -450,7 +450,8 @@ def fold_transpose_chains(graph) -> int:
         flat = reshape.outputs[0]
         if len(flat.dest_ops) != 1 or flat.dest_ops[0].type != "Transpose" or flat.name in graph.outputs:
             continue
-        second, shape = flat.dest_ops[0], list(first.inputs[0].shape)
+        second, laid = flat.dest_ops[0], ExporterPatternInfo().get_var_permute(first.inputs[0].name)
+        shape = [first.inputs[0].shape[i] for i in laid] if laid else list(first.inputs[0].shape)
         target = [int(v) for v in reshape.inputs[1].value.flatten().tolist()]
         moved = [shape[i] for i in first.attributes["perm"]]
         target = [moved[i] if d == 0 else d for i, d in enumerate(target)]
