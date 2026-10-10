@@ -1434,7 +1434,7 @@ thực** như TỔNG QUAN đòi, và độ trễ nghe thấy là thời gian d�
 | Thuần, liên tục, cấp đặc trưng cho mạng (`dsp_spec`) | float32 cả hai bên, từng phép theo thứ tự của bản C | golden **khớp tuyệt đối** với FFT mặc định; riêng `pitch` giữ ngưỡng nới cho bảng `sin`, `cos` lấy từ libm, dù đo trùng từng bit trên máy tính và board B |
 | Thuần, liên tục (`dsp_afe`) | float32 cả hai bên | golden, sai số tuyệt đối và SNR tối thiểu khai trong `contracts/golden/<module>/tolerance.yaml` |
 | Thuần, rời rạc (`lang_vi`, chọn lệnh trong `command`) | số nguyên và chuỗi | golden, **khớp tuyệt đối** |
-| Mô hình (`ai_engine`) | int8 qua esp-dl | `model->test()` so với mô phỏng ESP-PPQ, trong một bước int8 mỗi phần tử |
+| Mô hình (`ai_engine`) | int8 qua esp-dl | `model->test()` và bản dò của nhánh so với mô phỏng ESP-PPQ, **khớp từng bit** ở int8; op int16 lệch tới một bước, như `model->test()` của esp-dl cho phép |
 
 Python viết bằng **float32**, không float64: so float64 với float32 thì sai số của phép so che mất sai
 số của thuật toán. Ngưỡng khớp là dữ liệu của golden, không phải hằng số trong code kiểm (§4.9).
