@@ -161,8 +161,8 @@ speaker-import: ## Import the survey's pretrained ReDimNet2 b0 as a run into ml/
 
 # Each calibration of configs/models/speaker.yaml quantises for tens of minutes on the CPU: run it in tmux. WORKERS
 # simulate the impostors' sessions, about 0.5 GB each.
-speaker-ptq: ## Rungs 1 and 2: each calibration beside float on the survey's material, into <run>/int8/: RUN=<run> [WORKERS=8]
-	$(SPEAKER_QUANT) ptq $(RUN) $(if $(WORKERS),--workers $(WORKERS))
+speaker-ptq: ## Rungs 1 and 2: each calibration beside float on the survey's material, into <run>/int8/: RUN=<run> [WORKERS=8] [CALIB="mse kl"]
+	$(SPEAKER_QUANT) ptq $(RUN) $(if $(WORKERS),--workers $(WORKERS)) $(if $(CALIB),--calibrations $(CALIB))
 
 ##@ Wake
 

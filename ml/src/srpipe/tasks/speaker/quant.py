@@ -239,21 +239,25 @@ def table(ladder: dict) -> str:
     return "\n".join(lines)
 
 
-def recorded(run: Path, head: dict, rows: dict) -> dict:
-    """head and rows merged into <run>/int8/ladder.yaml, the rows already there kept."""
+def recorded(run: Path, head: dict, rows: dict, fresh: bool = False) -> dict:
+    """head and rows merged into <run>/int8/ladder.yaml, the rows already there kept unless fresh."""
     out = run / INT8_DIR / LADDER_FILE
-    kept = yaml.safe_load(out.read_text(encoding="utf-8")) if out.is_file() else {}
+    kept = yaml.safe_load(out.read_text(encoding="utf-8")) if out.is_file() and not fresh else {}
     merged = kept | head | {"rows": kept.get("rows", {}) | rows}
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(yaml.safe_dump(merged, sort_keys=False), encoding="utf-8")
     return merged
 
 
-def ptq(cfg: dict, run: Path, paths: dict, workers: int) -> dict:
-    """Rungs 1 and 2 of the run's model under cfg, the branch's config as ctc's ladder reads its own: each
-    calibration's graph kept at <run>/int8/<calibration>/graph.native and rowed in the ladder beside float, on the
-    owner's windows and the impostors' less the calibration ones."""
+def ptq(cfg: dict, run: Path, paths: dict, workers: int, calibrations: list[str] | None = None) -> dict:
+    """Rungs 1 and 2 of the run's model under cfg, the branch's config as ctc's ladder reads its own: each of
+    calibrations, by default all of quant.calibrations, kept at <run>/int8/<calibration>/graph.native and rowed in the
+    ladder beside float, on the owner's windows and the impostors' less the calibration ones; the whole ladder starts
+    afresh, named calibrations keep the other rows."""
     q, patches = cfg["quant"], cfg["esp_ppq_patches"]
+    unknown = sorted(set(calibrations or []) - set(q["calibrations"]))
+    if unknown:
+        raise ValueError(f"{unknown} are not among quant.calibrations {q['calibrations']}")
     survey_cfg = load_yaml(CONFIGS / cfg["source"]["survey"])
     n_samples = round(cfg["window_s"] * grid.SAMPLE_RATE_HZ)
     wrap = load_wrap(run)
@@ -270,9 +274,9 @@ def ptq(cfg: dict, run: Path, paths: dict, workers: int) -> dict:
     (run / INT8_DIR).mkdir(parents=True, exist_ok=True)
     np.save(run / INT8_DIR / WINDOW_FILE, features(wrap, impostors[int(drawn[-1])].samples, n_samples).numpy())
     head = {"window_s": cfg["window_s"], "windows": len(scored), "rewrite_gap": rewrite_gap}
-    ladder = recorded(run, head | {"float": figures(fl, scored, survey_cfg, q)}, {})
+    ladder = recorded(run, head | {"float": figures(fl, scored, survey_cfg, q)}, {}, fresh=calibrations is None)
     calib_feats = [features(wrap, samples, n_samples) for samples in calib]
-    for calibration in q["calibrations"]:
+    for calibration in calibrations or q["calibrations"]:
         folder = run / INT8_DIR / calibration
         with esp_ppq_patches.applied(patches):
             graph = ptq_espdl.quantize(
@@ -300,11 +304,12 @@ def main(argv: list[str] | None = None) -> int:
     ladder = sub.add_parser("ptq", help="rungs 1 and 2: each calibration beside float into <run>/int8/")
     ladder.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.speaker.quant import")
     ladder.add_argument("--workers", type=int, default=8, help="processes simulating the impostors' sessions")
+    ladder.add_argument("--calibrations", nargs="+", help="only these of quant.calibrations: a stopped ladder goes on")
     args = parser.parse_args(argv)
     if args.command == "import":
         print(import_run(load_yaml(CONFIG), data_paths()))
         return 0
-    ptq(load_yaml(CONFIG), args.run, data_paths(), args.workers)
+    ptq(load_yaml(CONFIG), args.run, data_paths(), args.workers, args.calibrations)
     print(args.run / INT8_DIR / LADDER_FILE)
     return 0
 
