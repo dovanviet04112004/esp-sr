@@ -19,6 +19,7 @@ esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches aroun
   - softmax_as_espdl               # attention's exp table and row sum as the chip takes them
   - fuse_tanh_gelu                 # feed-forward GELU (tanh form) as one table, not a float Pow
   - lean_transposes                # one Transpose per variable and perm, chains folded at export
+  - lean_quantizers                # one QuantizeLinear per variable and grid, the Softmax's float output quantised once
 probe:                             # E11-T25: one row's graph on board B (make ai-unit-speaker)
   runs: 10                         # timed runs on the board, after one untimed
   cuts: 4                          # copies of the graph cut at tensors spread over its ops, each model->test()ed

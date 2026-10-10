@@ -494,6 +494,70 @@ def lean_transposes() -> Iterator[None]:
         espdl_exporter.reset_graph_layout = reset
 
 
+def same_quantizer(a, b, info) -> bool:
+    """a and b, quantise nodes of one variable, give the same integers on the same grid, laid the same way."""
+    import torch
+
+    outs = a.outputs[0], b.outputs[0]
+    return (
+        a.type == b.type
+        and outs[0].dtype == outs[1].dtype
+        and all(torch.equal(p.value, q.value) for p, q in zip(a.inputs[1:], b.inputs[1:], strict=True))
+        and info.get_var_exponents(outs[0].name) == info.get_var_exponents(outs[1].name)
+        and info.get_var_permute(outs[0].name) == info.get_var_permute(outs[1].name)
+    )
+
+
+def share_quantizers(graph) -> int:
+    """Merge the QuantizeLinear, RequantizeLinear and DequantizeLinear nodes that read one variable onto one grid into
+    the first; how many went."""
+    from esp_ppq.parser.espdl.espdl_typedef import QUANT_OP_SET, ExporterPatternInfo
+
+    info, gone = ExporterPatternInfo(), 0
+    for var in list(graph.variables.values()):
+        kept = []
+        for op in list(dict.fromkeys(var.dest_ops)):
+            if op.type not in QUANT_OP_SET or op.name not in graph.operations or op.inputs[0] is not var:
+                continue
+            twin = op.outputs[0]
+            first = next((k for k in kept if same_quantizer(k, op, info)), None)
+            if first is None or twin.name in graph.outputs:
+                kept.append(op)
+                continue
+            for reader in list(twin.dest_ops):
+                reader.inputs[:] = [first.outputs[0] if v is twin else v for v in reader.inputs]
+                first.outputs[0].dest_ops.append(reader)
+            twin.dest_ops.clear()
+            graph.remove_operation(op)
+            graph.remove_variable(twin)
+            gone += 1
+    return gone
+
+
+@contextlib.contextmanager
+def lean_quantizers() -> Iterator[None]:
+    """ESP-PPQ's export puts a QuantizeLinear, or a RequantizeLinear, before each reader that takes a variable on
+    another grid than it was made on, one per reader even when several share that grid. esp-dl's int8 Softmax gives
+    float32, so each reader of one quantises the whole of it again. After the export's passes this merges the equal
+    ones of each variable. ReDimNet2 b0 (KEHOACH 3.17) on board B: its pool's two readers of the attention weights took
+    two equal QuantizeLinear, 9 ms each, of 1.59 s a window.
+    """
+    from esp_ppq.parser.espdl_exporter import EspdlExporter
+
+    prepare = EspdlExporter.prepare_graph
+
+    def leaner(self, graph, *args, **kwargs):
+        graph = prepare(self, graph, *args, **kwargs)
+        share_quantizers(graph)
+        return graph
+
+    EspdlExporter.prepare_graph = leaner
+    try:
+        yield
+    finally:
+        EspdlExporter.prepare_graph = prepare
+
+
 @contextlib.contextmanager
 def simplify_without_bn_fusion() -> Iterator[None]:
     """espdl_quantize_onnx simplifies the ONNX with onnxsim's defaults, whose fuse_bn pass leaves a tensor whose stored
@@ -546,6 +610,7 @@ PATCHES = {
     "softmax_as_espdl": softmax_as_espdl,
     "fuse_tanh_gelu": fuse_tanh_gelu,
     "lean_transposes": lean_transposes,
+    "lean_quantizers": lean_quantizers,
 }
 
 

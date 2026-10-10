@@ -317,17 +317,21 @@ def test_every_patch_is_undone_when_its_block_ends() -> None:
 
     pattern, add, fuse = espdl_exporter.InsertRequantNodePattern, StreamingTable.add, QuantizeFusionPass.optimize
     simplify, formatted = espdl_interface.simplify, interface.format_graph
+    prepare, reset = espdl_exporter.EspdlExporter.prepare_graph, espdl_exporter.reset_graph_layout
     norms = {platform: table.get("RMSNormalization") for platform, table in OPERATION_FORWARD_TABLE.items()}
     gelus = {platform: table.get("Gelu") for platform, table in OPERATION_FORWARD_TABLE.items()}
     with esp_ppq_patches.applied(list(esp_ppq_patches.PATCHES)):
         assert espdl_exporter.InsertRequantNodePattern is not pattern and StreamingTable.add is not add
         assert QuantizeFusionPass.optimize is not fuse and espdl_interface.simplify is not simplify
         assert interface.format_graph is not formatted
+        assert espdl_exporter.EspdlExporter.prepare_graph is not prepare
+        assert espdl_exporter.reset_graph_layout is not reset
         s3 = [p for p in OPERATION_FORWARD_TABLE if p.name in ("ESPDL_S3_INT8", "ESPDL_S3_INT16")]
         assert len(s3) == 2 and all(OPERATION_FORWARD_TABLE[p]["RMSNormalization"] is not norms[p] for p in s3)
     assert espdl_exporter.InsertRequantNodePattern is pattern and StreamingTable.add is add
     assert QuantizeFusionPass.optimize is fuse and espdl_interface.simplify is simplify
     assert interface.format_graph is formatted
+    assert espdl_exporter.EspdlExporter.prepare_graph is prepare and espdl_exporter.reset_graph_layout is reset
     assert all(table.get("RMSNormalization") is norms[p] for p, table in OPERATION_FORWARD_TABLE.items())
     assert all(table.get("Gelu") is gelus[p] for p, table in OPERATION_FORWARD_TABLE.items())
 
@@ -428,6 +432,33 @@ def test_lean_transposes_exports_fewer_transposes_and_simulates_as_before(tmp_pa
     before = ptq_espdl.Simulator(graph)(x)
     assert transposes(["lean_transposes"], "lean") < transposes([], "as_is")
     assert np.array_equal(ptq_espdl.Simulator(graph)(x), before)
+
+
+class SoftmaxReadTwice(nn.Module):
+    """Attention weights read by two products, as ReDimNet2's pool reads them."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.linear = nn.Linear(BANDS, BANDS)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.linear(x)
+        alpha = torch.softmax(y, dim=-1)
+        return torch.cat([alpha * y, alpha * (y * y)], dim=-1)
+
+
+def test_lean_quantizers_exports_one_quantize_node_per_grid(tmp_path: Path) -> None:
+    torch.manual_seed(2)
+    rng = np.random.default_rng(15)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, HOPS, BANDS)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(SoftmaxReadTwice().eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+
+    def quantizers(patches: list[str], name: str) -> int:
+        info = export_info(graph, tmp_path / f"{name}.espdl", patches)
+        return len(re.findall(r"= QuantizeLinear\[.*Softmax", info))
+
+    assert quantizers([], "as_is") == 2
+    assert quantizers(["lean_quantizers"], "lean") == 1
 
 
 def test_an_unknown_patch_is_refused() -> None:
