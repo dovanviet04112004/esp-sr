@@ -82,7 +82,30 @@ Ba nhóm theo dữ liệu học. Các cột EER đo trên mọi cặp, cùng ng�
 | CAM++ zh-en | 3 | 4,30% | 89,1% (69,4%) | 90,9% | 98,0% | 89,4% | 95,7% | 84,8% |
 | CAM++ zh-en | 5 | 3,47% | 92,2% (73,0%) | 93,6% | 98,9% | 89,4% | 98,9% | 89,1% |
 
-### 3.3 Cửa sổ bộ nào cũng chặn
+### 3.3 Nới ngưỡng: lệnh được nhận giữ bao nhiêu khi người lạ lọt nhiều hơn
+
+Trên 178 cửa sổ mà `command/v8` nhận; ngưỡng đặt để người lạ lọt đúng tỉ lệ ở đầu cột, trung vị của 20 lần rút.
+
+| Bộ trích | k | 0,5% | 1% | 2% | 5% | 10% |
+|---|---|---|---|---|---|---|
+| ReDimNet2 b0 (VoxCeleb2) | 3 | 70,1% | 80,3% | 87,7% | 95,4% | 98,3% |
+| ReDimNet2 b0 (VoxCeleb2) | 10 | 85,0% | 92,0% | 94,4% | **98,2%** | 100% |
+| ReDimNet2 b1 (VoxCeleb2) | 10 | 71,8% | 81,1% | 89,6% | 97,0% | 98,8% |
+| CAM++ zh-en | 10 | 93,0% | 96,7% | 98,8% | 99,1% | 100% |
+| ReDimNet S | 10 | 93,2% | 95,9% | 98,8% | 100% | 100% |
+| ReDimNet2 b3 nhiều ngôn ngữ | 10 | 93,8% | 95,6% | 97,9% | 99,4% | 99,4% |
+| ReDimNet2 b6 nhiều ngôn ngữ | 10 | 95,0% | 96,5% | 98,8% | 100% | 100% |
+| ReDimNet M | 3 | 95,2% | 97,4% | 99,7% | 100% | 100% |
+| ReDimNet M | 10 | 98,5% | 99,4% | 100% | 100% | 100% |
+
+ReDimNet2 b0 với k = 10 theo phiên, 28/09 1 m / 28/09 3 m / 07/10 1 m / 07/10 3 m:
+- ở 1% người lạ lọt: 91 / 94 / 93 / 89%;
+- ở 5%: 98 / 100 / 98 / 98%.
+
+"Người lạ lọt" là phần cửa sổ của người lạ vượt ngưỡng giọng. Trong sản phẩm, người lạ còn phải nói một lệnh mà `command`
+nhận trước khi tới bước này.
+
+### 3.4 Cửa sổ bộ nào cũng chặn
 
 Trên mọi cửa sổ, ô 28/09 1 m dừng ở 92,0% với hầu hết các bộ dẫn đầu. Đo trên CAM++ zh-en và ReDimNet M với k = 10, các cửa sổ bị chặn ở quá nửa số lần rút:
 - **#41, #42 (28/09 1 m) và #160 (07/10 1 m):** mức to nhất (p95) chỉ −48 đến −55 dBFS, không bước nào cao hơn trung vị 15 dB. Cửa sổ thường đạt −22 dBFS, nên ba cửa sổ này gần như không có lời.
@@ -143,6 +166,8 @@ Trên CPU, ReDimNet2 b6 chậm hơn ReDimNet b6 ~14 lần dù ít MAC hơn. Vì 
   - **Chi phí:** 5 tỉ MAC cho cửa sổ 1,5 s, quá sức cả ESP32-S3 lẫn P4 theo ước trên.
 
   Bản nhẹ nhất học trên VoxCeleb2, ReDimNet2 b0 (0,27 tỉ MAC), giữ 92,0% lệnh được nhận. Cùng kiến trúc mà thêm dữ liệu nhiều ngôn ngữ thì được ~20 điểm ở b3 và b6. Vì thế học lại một cỡ nhỏ trên dữ liệu nhiều ngôn ngữ cộng tiếng Việt là hướng có căn cứ; dữ liệu tiếng Việt có giấy phép CC BY-NC 4.0 là VieSpeaker, 4 715 người nói 🔬.
+- **ReDimNet2 b0, bản nhẹ nhất, chỉ cách luật 3 điểm trên giọng chủ repo.** Học trên VoxCeleb2, k = 10, nó giữ 92,0%
+  lệnh được nhận ở 1% người lạ lọt, và 98,2% (từ 98% trở lên ở cả bốn phiên) nếu nới tới 5%. Với k = 3 thì ở 1% chỉ giữ 80,3%.
 - **Câu đăng ký vẫn quyết định nhiều.** Lần rút tệ nhất với k = 10 giữ 80,4% (ReDimNet M) đến 93,0% (ReDimNet2 b6 nhiều ngôn ngữ).
 - **Ba lệch của vật liệu đều nghiêng về phía dễ tách** 🔬. Đây là suy luận, chưa đo:
   - người lạ nói ~3,7 s lời, chủ repo nói lệnh ~1 s;
