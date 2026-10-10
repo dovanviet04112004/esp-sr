@@ -433,11 +433,13 @@ def simulate_session(
     readers: dict[str, ItemReader],
     floor: Floor | None = None,
     speeds: tuple[float, ...] = (),
+    room: int | None = None,
 ) -> tuple[np.ndarray, list[tuple[int, int]], dict, np.ndarray]:
     """Session k: the interleaved int16 frames board B would capture, each utterance's [start, end) in samples, the
     session's draws, and talker_vad of its talker at ch0; bank_room indexes rooms.yaml's labels, readers read raw/ and
     interim/ by root name. With speeds, each utterance is spoken at one drawn from them, listed in draws as speeds;
-    with session.agc_start_drawn, the gain the agc starts the session from as agc_start_db (KEHOACH 1.2)."""
+    with session.agc_start_drawn, the gain the agc starts the session from as agc_start_db (KEHOACH 1.2). room puts
+    the session in that room of the bank instead of the drawn one, every other draw the same."""
     rng = np.random.default_rng([cfg["seed"], SESSION_STREAM, k])
     said_at = (
         [float(v) for v in np.random.default_rng([cfg["seed"], SPEED_STREAM, k]).choice(speeds, len(rows))]
@@ -445,7 +447,8 @@ def simulate_session(
         else []
     )
     s, t = cfg["session"], cfg["talker"]
-    entry = int(rng.integers(cfg["rooms"]["count"]))
+    drawn = int(rng.integers(cfg["rooms"]["count"]))
+    entry = drawn if room is None else room
     rirs = np.load(bank / f"room_{entry:04d}.npy")
     spl_db = float(rng.uniform(*t["spl_1m_db"]))
     tilt_db = float(rng.uniform(*t["tilt_db_per_octave"]))
