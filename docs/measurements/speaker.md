@@ -229,7 +229,27 @@ Lệnh được nhận giữ bao nhiêu, ở hai mức người lạ lọt:
   - Cosine với float không báo trước chất lượng: kl thấp nhất (trung vị 0,51) mà EER tốt nhất; percentile 0,84 mà EER
     7,47%.
 - **Cửa của KẾ HOẠCH §3.17** đòi giữ ≥ 95% ở cả 1 m và 3 m, gộp các phiên của một khoảng cách. Bảng trên tách từng
-  phiên, chặt hơn câu chữ ấy. Số gộp theo khoảng cách ra cùng bậc 3 (`make speaker-int16`).
+  phiên, chặt hơn câu chữ ấy.
+
+**Bậc 3** (`make speaker-int16`, 11/10): trên kl, ESP-PPQ xếp hạng 254 op theo nhiễu trên tín hiệu khi lượng tử riêng
+từng op, trên 8 cửa sổ hiệu chuẩn. Đứng đầu là năm `bn1`: stage1.4 0,26, stage2.3 0,20, stage3.7 0,18, stage3.6 0,14,
+stage0.3 0,10. Mỗi hàng đưa N op đầu bảng lên int16. Số giữ được gộp theo khoảng cách:
+
+| Hàng | Op int16 | Cosine với float | EER | Giữ ở 1% | 1 m ở 5% | 3 m ở 5% |
+|---|---|---|---|---|---|---|
+| float | — | 1 | 4,00% | 92,0% | 97,8% | 99,4% |
+| **kl** (`int16_top0`) | 0 | 0,51 | **4,00%** | **95,8%** | **98,9%** | **97,5%** |
+| `int16_top2` | 2 | 0,60 | 5,02% | 90,3% | 97,8% | 96,2% |
+| `int16_top4` | 4 | 0,63 | 5,53% | 85,5% | 98,9% | 93,7% |
+| `int16_top8` | 8 | 0,63 | 6,55% | 84,3% | 96,1% | 94,9% |
+| `int16_top16` | 16 | 0,72 | 5,47% | 85,2% | 97,8% | 94,9% |
+
+- **kl qua cửa chất lượng của §3.17:** gộp theo khoảng cách, ở 5% người lạ lọt, giữ 98,9% ở 1 m và 97,5% ở 3 m.
+  So với float, nó hơn 1,1 điểm ở 1 m, kém 1,9 điểm ở 3 m (hai cửa sổ của phiên 28/09), EER bằng nhau.
+- **Bậc 3 làm kém đi:** embedding gần float hơn (cosine tới 0,72) nhưng EER lên 5,0–6,6%, và giữ ở 1% xuống
+  84–90%. Đưa vài op lên int16 đổi lưới và bias correction của các op int8 quanh chúng, mà phép đo cuối mới là thước.
+  Hàng `int16_top0` cho lại đúng từng số của hàng kl, nên lượng tử lặp lại y hệt.
+- **Chọn kl, int8 thuần** (ADR-0021). Bậc 4 (QAT) không cần cho cửa, và cần chủ repo cho học.
 - **Sai số int8 đến từ đâu**, phân tích của ESP-PPQ trên 6 cửa sổ của chủ repo:
   - Từng op lượng tử riêng (`layerwise_error_analyse`, nhiễu trên tín hiệu ở đầu ra): lớn nhất là các BatchNorm sau
     ReLU trong khối 2-D (`bn1`): stage2.3 0,22, stage1.4 0,18, stage3.7 0,17, stage3.6 0,12; kế đến conv depthwise
