@@ -662,8 +662,18 @@ Ba bước tối ưu tiếp, mỗi bước đo trên board B với bản lượn
 | Bỏ Transpose trùng, gộp chuỗi Transpose–Reshape–Transpose khi xuất (`lean_transposes`) | 2307 ms | 510 ms, 61 |
 | Bản đồ 2-D theo (khung, băng), đổi sang 1-D không dời dữ liệu | 1934 ms | 128 ms, 39 |
 | Conv 3×3 đầu stem một kênh vào thành 12 bản sao rồi conv depthwise (`one_channel_inputs`) | 1877 ms | 148 ms, 39 |
-| Một Transpose chung cho mọi op đọc cùng biến, kể cả op khác lưới lượng tử (`lean_transposes`) | **1787 ms** | 76 ms, 29 |
+| Một Transpose chung cho mọi op đọc cùng biến, kể cả op khác lưới lượng tử (`lean_transposes`) | 1787 ms | 76 ms, 29 |
+| Hai Conv theo khung của lớp gộp tách theo kênh ra, mỗi phần ≤ 36 KB trọng số (`output_slices`) | 1635 ms | 76 ms, 29 |
+| Bình phương trong lớp gộp bằng phép nhân int8, không qua Pow chạy float | 1588 ms | 76 ms, 29 |
+| Một QuantizeLinear cho mọi op đọc cùng biến trên cùng lưới (`lean_quantizers`); Conv 1×1 12 và 24 kênh gộp cột kề nhau vào kênh (`aligned_pointwise`) | **1288 ms** | 76 ms, 29 |
 
-Conv đầu stem từ 110 ms xuống 12 ms, nhưng bản ghép 12 bản sao nằm theo kênh trước nên ESP-PPQ chèn thêm một Transpose
-33,6 ms trước conv depthwise. Còn lại: Conv 1089 ms (202 op), Add 159 ms, MatMul 92 ms, LayerNorm 81 ms (riêng LayerNorm
-đầu stem 65 ms), Transpose 76 ms, `/pool/Pow` chạy float 32 ms.
+- **Conv đầu stem** từ 110 ms xuống 12 ms, nhưng bản ghép 12 bản sao nằm theo kênh trước nên ESP-PPQ chèn thêm một
+  Transpose 33,6 ms trước conv depthwise.
+- **Hai Conv của lớp gộp** (576 → 128 và 128 → 576 kênh) mỗi cái 72 KB trọng số int8, lớn hơn cache dữ liệu 64 KB. Nhân
+  1×1 của esp-dl đọc lại toàn bộ trọng số ở mỗi khung, nên 148 khung đều đọc từ PSRAM: 94 ms và 77 ms, 2 chu kỳ một
+  phép nhân-cộng. Tách mỗi cái thành hai phần 36 KB: 15 ms cả hai.
+- **Conv 1×1 của stage 0–2** có 12 hoặc 24 kênh, nên esp-dl chạy nhân "unaligned": 1,4 chu kỳ một phép nhân-cộng, so với
+  0,15 ở Conv có số kênh chia hết cho 16. Gộp 2 (hay 4) cột kề nhau vào kênh là Reshape không dời dữ liệu; trọng số khối
+  chéo cho đúng từng số nguyên cũ, nhiều gấp 2 (hay 4) phép nhân-cộng nhưng chạy đường vector: bớt 300 ms.
+- Còn lại: Conv 646 ms (198 op), Add 158 ms, LayerNorm 81 ms (riêng LayerNorm đầu stem 65 ms), Transpose 76 ms, MatMul
+  74 ms, Relu 52 ms, Softmax 33 ms. Conv depthwise 3×3 của stage 0–2 vẫn 24 kênh, chạy nhân unaligned.
