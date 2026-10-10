@@ -146,10 +146,10 @@ eval-pitch: ## Measure the pitch mirror against Kaldi itself on VIVOS test, on t
 ##@ Speaker verification survey on the PC (KEHOACH 3.17, E11-T24)
 
 .PHONY: eval-speaker
-# The owner's command windows of Gate 3 and the command split's test speakers through the board simulation, each
-# extractor of ml/spk_ref in its own uv project; embeddings stay under cache/spk_ref (KEHOACH 1.4).
+# The owner's command windows of Gate 3 and the command split's test speakers through the board simulation, every
+# extractor of configs/scenes/speaker.yaml through its uv project under ml/spk_ref; embeddings stay in cache (KEHOACH 1.4).
 eval-speaker: ## EER of the pretrained extractors, and the owner's windows kept at 1% of impostors passing
-	$(ML_CPU) --extra train python -m srpipe.scenes.speaker
+	$(ML) --extra train python -m srpipe.scenes.speaker
 
 ##@ Wake
 

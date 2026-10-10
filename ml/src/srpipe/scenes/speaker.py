@@ -1,8 +1,8 @@
 """The speaker verification survey of KEHOACH 3.17 on the PC: extractors of ml/spk_ref embed the owner's Gate 3 command
 windows through board B, the command split's test speakers through the board simulation near 1 m and 3 m with no
 noise source, and whole VIVOS test utterances with no board. The owner's model is the mean of k enrolment windows.
-Figures: EER, and the owner's windows kept where at most rule.impostors_passing of the impostors' pass.
-Run: python -m srpipe.scenes.speaker [--workers N]"""
+Figures: EER, and the owner's windows kept where at most rule.impostors_passing of the impostors' pass, in all and
+on those the locked command run accepts as the command said. Run: python -m srpipe.scenes.speaker [--workers N]"""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ import yaml
 
 from srpipe.core import corpus, splits
 from srpipe.core.audio_io import ItemReader, to_float
-from srpipe.core.config import CONFIGS, data_paths, device_of, load_yaml
+from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, device_of, load_yaml, on_contract_pitch
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.generated import grid
@@ -37,11 +37,13 @@ LANGUAGE = "vivos"
 
 @dataclass(frozen=True)
 class Window:
-    """One window of float samples at the grid's rate, its speaker and the group it is reported in."""
+    """One window of float samples at the grid's rate, its speaker, the group it is reported in, and for the owner's
+    whether the command run accepts it as the command said."""
 
     spk: str
     group: str
     samples: np.ndarray
+    accepted: bool = False
 
 
 def board_cfg(cfg: dict) -> dict:
@@ -56,24 +58,33 @@ def window_of(clean: np.ndarray, start: int, end: int) -> np.ndarray:
 
 def owner_windows(cfg: dict, paths: dict) -> list[Window]:
     """Every command window Gate 3 scores of the owner's sessions, grouped by session date and distance: a session
-    saying a listed command, a window over an utterance the chain finds in the session alone, not left out."""
+    saying a listed command, a window over an utterance the chain finds in the session alone, not left out; each
+    decided by owner.command's run as board B decides it, its pitch dims held, at that NVS's thresholds."""
     spec = load_yaml(command.CONFIG)["eval"]["board"]
+    decide = cfg["owner"]["command"]
+    net = gate.load_ctc(ML_ROOT / decide["run"])
+    heard = gate.holding(gate.ctc_heard, gate.HOLDS[decide["hold"]])
+    run_cfg = on_contract_pitch(net.cfg)
     listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
     command_of = {tuple(corpus.sounds(c["text"])): c["id"] for c in listed}
-    dev = device_of(board_cfg(cfg))
+    dev = device_of(run_cfg)
     chain_cfg = ChainConfig(balance_gains=device.load_microphones(dev["microphone"]).gains)
     mel = Mel(MelConfig(**dev["features"]))
     left = {(s, int(k)) for s, _, k in (n.partition("#") for n in spec.get("left_out_utterances", []))}
     out = []
-    for r, clean, vad, _features, _pitch in gate.heard_sessions(board_cfg(cfg), spec, paths):
-        if r["spk"] != cfg["owner"]["spk"] or gate.expected_of(r["kind"], r["prompt"], command_of) == gate.REJECT:
+    for r, clean, vad, features, pitch in gate.heard_sessions(run_cfg, spec, paths):
+        expected = gate.expected_of(r["kind"], r["prompt"], command_of)
+        if r["spk"] != cfg["owner"]["spk"] or expected == gate.REJECT:
             continue
         spans = device.utterances(vad)
         owned = gate.owners(spans, gate.said_alone(r, paths, chain_cfg, mel))
         group = f"{r['session'][:8]} {r['distance_cm']}"
-        for (start, end), said in zip(device.command_cut(spans), owned, strict=True):
+        cuts = zip(device.command_cut(spans), owned, gate.ctc_windows(features, pitch, spans), strict=True)
+        for (start, end), said, x in cuts:
             if said and not any((r["session"], k) in left for k in said):
-                out.append(Window(r["spk"], group, window_of(clean, start, end)))
+                h = heard(net, x)
+                acted = h.command == expected and h.accepted(decide["reject_permille"], decide["margin_permille"])
+                out.append(Window(r["spk"], group, window_of(clean, start, end), acted))
     return out
 
 
@@ -188,6 +199,10 @@ def owner_figures(
             for group in sorted({windows[i].group for i in tested}):
                 held = [k for k, i in enumerate(tested) if windows[i].group == group]
                 rows[f"kept {group}"].append(float(np.mean(target[held] > threshold)))
+                acted = [k for k in held if windows[tested[k]].accepted]
+                rows[f"kept accepted {group}"].append(float(np.mean(target[acted] > threshold)))
+            acted = [k for k, i in enumerate(tested) if windows[i].accepted]
+            rows["kept accepted"].append(float(np.mean(target[acted] > threshold)))
             seconds = np.array([len(windows[i].samples) / grid.SAMPLE_RATE_HZ for i in tested])
             bins = np.digitize(seconds, edges_s)
             for b in range(len(edges_s) + 1):
@@ -216,8 +231,11 @@ def report(results: dict, windows: list[Window], cfg: dict) -> str:
     for w in windows:
         counts[(w.spk == owner["spk"], w.group)] += 1
     speakers = len({w.spk for w in windows if w.spk != owner["spk"]})
+    accepted = {g: sum(w.accepted for w in windows if w.spk == owner["spk"] and w.group == g) for g in groups}
     lines = [
-        f"owner windows: {', '.join(f'{g} cm {counts[(True, g)]}' for g in groups)}; impostor windows of {speakers} "
+        "owner windows (accepted by the command run): "
+        f"{', '.join(f'{g} cm {counts[(True, g)]} ({accepted[g]})' for g in groups)}; "
+        f"impostor windows of {speakers} "
         f"speakers: {', '.join(f'{g} {counts[(False, g)]}' for g in impostor_groups)}",
         "",
         "| extractor | VIVOS test, no board, EER | test speakers through the simulation, windows, EER |",
@@ -243,6 +261,17 @@ def report(results: dict, windows: list[Window], cfg: dict) -> str:
                 f"| {name} | {count} | {100 * f['eer']:.2f}% | {100 * f['kept']:.1f}% ({100 * f['kept min']:.1f}%) "
                 f"| {kept} | {passed} |"
             )
+    lines += [
+        "",
+        f"Owner windows the command run accepts, kept at <= {passing:g}% of impostors passing, median:",
+        "",
+        f"| extractor | k | kept | {' | '.join(f'{g} cm' for g in groups)} |",
+        "|---" * (3 + len(groups)) + "|",
+    ]
+    for name, r in results.items():
+        for count, f in r["owner"].items():
+            kept = " | ".join(f"{100 * f.get(f'kept accepted {g}', math.nan):.1f}%" for g in groups)
+            lines.append(f"| {name} | {count} | {100 * f['kept accepted']:.1f}% | {kept} |")
     names = length_names(cfg["window_s"])
     lines += [
         "",

@@ -2,6 +2,71 @@
 # board B and on impostors through the board simulation, never a product step. python -m srpipe.scenes.speaker
 features: scenes/device.yaml       # the board simulation and the contract's front end, as Gate 3 hears the sessions
 seed: 20261010
+redimnet_code: &redimnet_code           # IDRnD/ReDimNet's package at its pinned commit, code MIT
+  redimnet/__init__.py:
+    url: https://raw.githubusercontent.com/IDRnD/ReDimNet/ce039a624cb99fe127702ceb94c6080090e5032f/redimnet/__init__.py
+    sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  redimnet/model.py:
+    url: https://raw.githubusercontent.com/IDRnD/ReDimNet/ce039a624cb99fe127702ceb94c6080090e5032f/redimnet/model.py
+    sha256: 1377db4aad1e024526cf9335ef93674005dfafa0e70aa064a5db4ea8de81af15
+  redimnet/layers/attention.py:
+    url: https://raw.githubusercontent.com/IDRnD/ReDimNet/ce039a624cb99fe127702ceb94c6080090e5032f/redimnet/layers/attention.py
+    sha256: dcfb82870e66af8ca3c33dcf6d7d5c8aa5d6596d5f71f2543b8868308618f67f
+  redimnet/layers/convnext.py:
+    url: https://raw.githubusercontent.com/IDRnD/ReDimNet/ce039a624cb99fe127702ceb94c6080090e5032f/redimnet/layers/convnext.py
+    sha256: beaf94aa2c3661951b0b1ef1e6d65f77901f35fa7e19bd30469eee716496c5e1
+  redimnet/layers/features.py:
+    url: https://raw.githubusercontent.com/IDRnD/ReDimNet/ce039a624cb99fe127702ceb94c6080090e5032f/redimnet/layers/features.py
+    sha256: 5ef8dfb33c3330bddb3c65f693bfe0df597056a287ced99450550e4f5ba34979
+  redimnet/layers/features_tf.py:
+    url: https://raw.githubusercontent.com/IDRnD/ReDimNet/ce039a624cb99fe127702ceb94c6080090e5032f/redimnet/layers/features_tf.py
+    sha256: bf5e3736c288b9582f2ff405ab6344237bc0b2ba647450f74b4002b3ce13d0a1
+  redimnet/layers/layernorm.py:
+    url: https://raw.githubusercontent.com/IDRnD/ReDimNet/ce039a624cb99fe127702ceb94c6080090e5032f/redimnet/layers/layernorm.py
+    sha256: 23900399027f6cae34b260e5778e076e0942ef886204b401221fe7c0c21bcabc
+  redimnet/layers/poolings.py:
+    url: https://raw.githubusercontent.com/IDRnD/ReDimNet/ce039a624cb99fe127702ceb94c6080090e5032f/redimnet/layers/poolings.py
+    sha256: f03849e5944e9fa6a7392b60cf3722e3e537a3e5cfd2988bd992c92ffc39a6a6
+  redimnet/layers/redim_structural.py:
+    url: https://raw.githubusercontent.com/IDRnD/ReDimNet/ce039a624cb99fe127702ceb94c6080090e5032f/redimnet/layers/redim_structural.py
+    sha256: 93bae419bfdf11868c9e52dfb95578762b9c0a81e27a32ce930adcaefe457738
+  redimnet/layers/resblocks.py:
+    url: https://raw.githubusercontent.com/IDRnD/ReDimNet/ce039a624cb99fe127702ceb94c6080090e5032f/redimnet/layers/resblocks.py
+    sha256: f79fbc2c7a6d88e9aa5efc4f5764ad137eafe1f5481b33ff7ed8811ee6a80778
+redimnet2_code: &redimnet2_code         # PalabraAI/redimnet2's package at its pinned commit, code MIT
+  redimnet2/__init__.py:
+    url: https://raw.githubusercontent.com/PalabraAI/redimnet2/c5bbe0b76e37df698c403f8844e41304ceab6307/redimnet2/__init__.py
+    sha256: a1035c35f9707dfc1b943252b2627e367c92eb2ace06bbdb1a0e39000494753b
+  redimnet2/redimnet2.py:
+    url: https://raw.githubusercontent.com/PalabraAI/redimnet2/c5bbe0b76e37df698c403f8844e41304ceab6307/redimnet2/redimnet2.py
+    sha256: 3b6bb2b9e8a5766d1286ea18b76f94cfacdd6e895cf4b996efbaf5c5f146dc5b
+  redimnet2/layers/attention.py:
+    url: https://raw.githubusercontent.com/PalabraAI/redimnet2/c5bbe0b76e37df698c403f8844e41304ceab6307/redimnet2/layers/attention.py
+    sha256: 979627de7cb100102ab02b40d97c5d4a6c26db3f386220c873bb887937de7e21
+  redimnet2/layers/blocks.py:
+    url: https://raw.githubusercontent.com/PalabraAI/redimnet2/c5bbe0b76e37df698c403f8844e41304ceab6307/redimnet2/layers/blocks.py
+    sha256: 27d7b3dd4f184b28a33232d9877e33492ba2b3ab9ab5140b5157310dfb74f872
+  redimnet2/layers/convnext.py:
+    url: https://raw.githubusercontent.com/PalabraAI/redimnet2/c5bbe0b76e37df698c403f8844e41304ceab6307/redimnet2/layers/convnext.py
+    sha256: 0d82c2c448e5dcaed5311462b5a6f694126b56ed6d8f7dfa99bcf73469a7445d
+  redimnet2/layers/features.py:
+    url: https://raw.githubusercontent.com/PalabraAI/redimnet2/c5bbe0b76e37df698c403f8844e41304ceab6307/redimnet2/layers/features.py
+    sha256: 5ef8dfb33c3330bddb3c65f693bfe0df597056a287ced99450550e4f5ba34979
+  redimnet2/layers/features_tf.py:
+    url: https://raw.githubusercontent.com/PalabraAI/redimnet2/c5bbe0b76e37df698c403f8844e41304ceab6307/redimnet2/layers/features_tf.py
+    sha256: cef93647e5a4241c76dd00328200dc2fa5bf428b168f75d23284697a27983498
+  redimnet2/layers/layernorm.py:
+    url: https://raw.githubusercontent.com/PalabraAI/redimnet2/c5bbe0b76e37df698c403f8844e41304ceab6307/redimnet2/layers/layernorm.py
+    sha256: 23900399027f6cae34b260e5778e076e0942ef886204b401221fe7c0c21bcabc
+  redimnet2/layers/poolings.py:
+    url: https://raw.githubusercontent.com/PalabraAI/redimnet2/c5bbe0b76e37df698c403f8844e41304ceab6307/redimnet2/layers/poolings.py
+    sha256: f03849e5944e9fa6a7392b60cf3722e3e537a3e5cfd2988bd992c92ffc39a6a6
+  redimnet2/layers/redim_structural.py:
+    url: https://raw.githubusercontent.com/PalabraAI/redimnet2/c5bbe0b76e37df698c403f8844e41304ceab6307/redimnet2/layers/redim_structural.py
+    sha256: 93bae419bfdf11868c9e52dfb95578762b9c0a81e27a32ce930adcaefe457738
+  redimnet2/layers/resblocks.py:
+    url: https://raw.githubusercontent.com/PalabraAI/redimnet2/c5bbe0b76e37df698c403f8844e41304ceab6307/redimnet2/layers/resblocks.py
+    sha256: f79fbc2c7a6d88e9aa5efc4f5764ad137eafe1f5481b33ff7ed8811ee6a80778
 extractors:                        # ml/spk_ref/<name>/run.py; each file fetched into cache/spk_ref/<name>/<path>
   ecapa:                           # speechbrain/spkrec-ecapa-voxceleb at its commit of 2025-02-18, Apache-2.0
     files:
@@ -21,6 +86,8 @@ extractors:                        # ml/spk_ref/<name>/run.py; each file fetched
         url: https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/0f99f2d0ebe89ac095bcc5903c4dd8f72b367286/label_encoder.txt
         sha256: e13c3a167bb4112685670ee896d20e2b565af16b3a4ceeaa8689fa4d22adb8b9
   campplus:                        # iic/speech_campplus_sv_zh-cn_16k-common v1.0.0 and modelscope/3D-Speaker, Apache-2.0
+    project: speakerlab
+    args: [campplus, campplus_cn_common.bin]
     files:
       campplus_cn_common.bin:
         url: https://modelscope.cn/api/v1/models/iic/speech_campplus_sv_zh-cn_16k-common/repo?Revision=v1.0.0&FilePath=campplus_cn_common.bin
@@ -31,11 +98,141 @@ extractors:                        # ml/spk_ref/<name>/run.py; each file fetched
       speakerlab/models/campplus/layers.py:
         url: https://raw.githubusercontent.com/modelscope/3D-Speaker/065629c313eaf1a01c65c640c46d77e61e9607b4/speakerlab/models/campplus/layers.py
         sha256: b3d28ad94d14b30fcd20c96d1d83516d4e44de733959460b358e90d97476adb8
+  campplus_zh_en:                  # iic/speech_campplus_sv_zh_en_16k-common_advanced v1.0.0: Mandarin and English, Apache-2.0
+    project: speakerlab
+    args: [campplus, campplus_cn_en_common.pt]
+    files:
+      campplus_cn_en_common.pt:
+        url: https://modelscope.cn/api/v1/models/iic/speech_campplus_sv_zh_en_16k-common_advanced/repo?Revision=v1.0.0&FilePath=campplus_cn_en_common.pt
+        sha256: 92f29b94e6948786a26778c9e302525d185bb08c8b9f5252ed98776902840199
+      speakerlab/models/campplus/DTDNN.py:
+        url: https://raw.githubusercontent.com/modelscope/3D-Speaker/065629c313eaf1a01c65c640c46d77e61e9607b4/speakerlab/models/campplus/DTDNN.py
+        sha256: 52272359361ef9f03a8b4198f50139301ce712833e777396940a5b437177cd34
+      speakerlab/models/campplus/layers.py:
+        url: https://raw.githubusercontent.com/modelscope/3D-Speaker/065629c313eaf1a01c65c640c46d77e61e9607b4/speakerlab/models/campplus/layers.py
+        sha256: b3d28ad94d14b30fcd20c96d1d83516d4e44de733959460b358e90d97476adb8
+  eres2netv2:                      # iic/speech_eres2netv2_sv_zh-cn_16k-common v1.0.1: 200k Mandarin speakers, Apache-2.0
+    project: speakerlab
+    args: [eres2netv2, pretrained_eres2netv2.ckpt]
+    files:
+      pretrained_eres2netv2.ckpt:
+        url: https://modelscope.cn/api/v1/models/iic/speech_eres2netv2_sv_zh-cn_16k-common/repo?Revision=v1.0.1&FilePath=pretrained_eres2netv2.ckpt
+        sha256: 0eb4057106b2573dd7b132cf0c36273ab29afd192c1610f80baa9c556dbb963c
+      speakerlab/models/eres2net/ERes2NetV2.py:
+        url: https://raw.githubusercontent.com/modelscope/3D-Speaker/065629c313eaf1a01c65c640c46d77e61e9607b4/speakerlab/models/eres2net/ERes2NetV2.py
+        sha256: 1f7713af4981efea38c70de11ae470a7b31fdd295204f10ca655abf4494eb821
+      speakerlab/models/eres2net/pooling_layers.py:
+        url: https://raw.githubusercontent.com/modelscope/3D-Speaker/065629c313eaf1a01c65c640c46d77e61e9607b4/speakerlab/models/eres2net/pooling_layers.py
+        sha256: 46c6b480ffdd284af90da90ac1bbf9a0e00bd46229e567c0828d7ebe0e178a0a
+      speakerlab/models/eres2net/fusion.py:
+        url: https://raw.githubusercontent.com/modelscope/3D-Speaker/065629c313eaf1a01c65c640c46d77e61e9607b4/speakerlab/models/eres2net/fusion.py
+        sha256: b76cfbf8adb99336f10ea43953e90228bda85a56de97cda122d9c436a4c94c53
+  redimnet_m:                     # ReDimNet M of IDRnD, VoxBlink2, VoxCeleb2, CN-Celeb; weights unlicensed
+    project: redimnet
+    args: [M-vb2+vox2+cnc-ft_mix.pt, redimnet]
+    files:
+      <<: *redimnet_code
+      M-vb2+vox2+cnc-ft_mix.pt:
+        url: https://github.com/IDRnD/ReDimNet/releases/download/latest/M-vb2+vox2+cnc-ft_mix.pt
+        sha256: 1e0716c2f351e79df054554f17c525b899045d2d05e4c839208b975e87d94e6a
+  redimnet_s:                     # ReDimNet S of IDRnD, VoxBlink2, VoxCeleb2, CN-Celeb; weights unlicensed
+    project: redimnet
+    args: [S-vb2+vox2+cnc-ft_mix.pt, redimnet]
+    files:
+      <<: *redimnet_code
+      S-vb2+vox2+cnc-ft_mix.pt:
+        url: https://github.com/IDRnD/ReDimNet/releases/download/latest/S-vb2+vox2+cnc-ft_mix.pt
+        sha256: 76fa264eb8e0e07b143fb16b4eac5aa59ac480d63de4cd9691abf798cbe47fb3
+  redimnet_b6:                    # ReDimNet b6 of IDRnD, VoxCeleb2, large-margin fine-tuned; weights unlicensed
+    project: redimnet
+    args: [b6-vox2-ft_lm.pt, redimnet]
+    files:
+      <<: *redimnet_code
+      b6-vox2-ft_lm.pt:
+        url: https://github.com/IDRnD/ReDimNet/releases/download/latest/b6-vox2-ft_lm.pt
+        sha256: e0f3034320c9cceaa8ed7c917a36e0affb501a922631d55c1007660eb1bbedea
+  redimnet2_b0:                   # ReDimNet2 of PalabraAI, VoxCeleb2, large-margin; weights unlicensed
+    project: redimnet
+    args: [b0-vox2-lm.pt, redimnet2]
+    files:
+      <<: *redimnet2_code
+      b0-vox2-lm.pt:
+        url: https://github.com/PalabraAI/redimnet2/releases/download/v1.0.0/b0-vox2-lm.pt
+        sha256: 4b5a8c00f813ab0d92fc81ea7c504475d8201bed608fb2c6aaba65be723e9c61
+  redimnet2_b1:                   # the same, b1
+    project: redimnet
+    args: [b1-vox2-lm.pt, redimnet2]
+    files:
+      <<: *redimnet2_code
+      b1-vox2-lm.pt:
+        url: https://github.com/PalabraAI/redimnet2/releases/download/v1.0.0/b1-vox2-lm.pt
+        sha256: 9f5b2364524c3ce42f4852b8d9e6c8eb0c14a5a8878dba27f0c93ca500ee37f3
+  redimnet2_b2:                   # the same, b2
+    project: redimnet
+    args: [b2-vox2-lm.pt, redimnet2]
+    files:
+      <<: *redimnet2_code
+      b2-vox2-lm.pt:
+        url: https://github.com/PalabraAI/redimnet2/releases/download/v1.0.0/b2-vox2-lm.pt
+        sha256: 0545a29679a87fe1c662d2bbd05e3b3fe0d1b392832729abaa135e4079a2f77a
+  redimnet2_b3:                   # the same, b3
+    project: redimnet
+    args: [b3-vox2-lm.pt, redimnet2]
+    files:
+      <<: *redimnet2_code
+      b3-vox2-lm.pt:
+        url: https://github.com/PalabraAI/redimnet2/releases/download/v1.0.0/b3-vox2-lm.pt
+        sha256: 02d14efdc184573873b5c3f62bea847fcdb6919fbba19a8da7af7c1ba36b76a2
+  redimnet2_b4:                   # the same, b4
+    project: redimnet
+    args: [b4-vox2-lm.pt, redimnet2]
+    files:
+      <<: *redimnet2_code
+      b4-vox2-lm.pt:
+        url: https://github.com/PalabraAI/redimnet2/releases/download/v1.0.0/b4-vox2-lm.pt
+        sha256: 4f0b1e8bc6bcc10406705996b41a8ed0c71bfcfb7af6fbccd751c2d6a226ef6a
+  redimnet2_b5:                   # the same, b5
+    project: redimnet
+    args: [b5-vox2-lm.pt, redimnet2]
+    files:
+      <<: *redimnet2_code
+      b5-vox2-lm.pt:
+        url: https://github.com/PalabraAI/redimnet2/releases/download/v1.0.0/b5-vox2-lm.pt
+        sha256: 65d478edc0ad9c386401a52d80d8a46ee1984625525fdfb2ee82ed069aa67359
+  redimnet2_b6_vox2:              # the same, b6
+    project: redimnet
+    args: [b6-vox2-lm.pt, redimnet2]
+    files:
+      <<: *redimnet2_code
+      b6-vox2-lm.pt:
+        url: https://github.com/PalabraAI/redimnet2/releases/download/v1.0.0/b6-vox2-lm.pt
+        sha256: bc45f032099f3c9f0fb6ad756bca23daeeba456d00c515056e388824ef36f41b
+  redimnet2_b3_mix:               # ReDimNet2 b3 of PalabraAI, VoxBlink2, VoxCeleb2, CN-Celeb2, large-margin
+    project: redimnet
+    args: [b3-vb2+vox2+cnc2_v0-lm.pt, redimnet2]
+    files:
+      <<: *redimnet2_code
+      b3-vb2+vox2+cnc2_v0-lm.pt:
+        url: https://github.com/PalabraAI/redimnet2/releases/download/v1.0.0/b3-vb2+vox2+cnc2_v0-lm.pt
+        sha256: b64989536ef8822447d72517ad9019b870a951e85a3f176f0ed42d2a4c3d811d
+  redimnet2_b6:                   # ReDimNet2 b6 of PalabraAI, VoxBlink2, VoxCeleb2, CN-Celeb2, large-margin
+    project: redimnet
+    args: [b6-vb2+vox2+cnc2_v0-lm.pt, redimnet2]
+    files:
+      <<: *redimnet2_code
+      b6-vb2+vox2+cnc2_v0-lm.pt:
+        url: https://github.com/PalabraAI/redimnet2/releases/download/v1.0.0/b6-vb2+vox2+cnc2_v0-lm.pt
+        sha256: 287365f6f485b19e65e5176554f8f7123bfa8d85185f3d2c040eab51acec9868
 owner:                             # the command windows of Gate 3's sessions (command.yaml eval.board) of this speaker
   spk: spk_001
   enrol: {date: "20260928", distance_cm: "100"}   # the sessions whose windows enrolment draws from
   counts: [3, 5, 10]               # windows averaged into the owner's model
   draws: 20                        # enrolment sets drawn for each count; figures are their median
+  command:                         # which windows the product would act on, as board B decides them
+    run: artifacts/command_ctc/runs/20261007_439d763-dirty_f438bd   # under ml/: the run models.lock.json locks
+    hold: pitch                    # every pitch dim at the run's train mean, as board B runs it
+    reject_permille: 200           # board B's NVS
+    margin_permille: 25
 impostors:                         # the split's test speakers through the board simulation, no noise source
   split: command/v1/test.txt       # under data/splits
   min_utterances: 4                # a speaker with fewer is left out
