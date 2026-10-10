@@ -239,3 +239,23 @@ def test_the_context_pool_gives_what_astp_gives_with_no_expand_in_its_onnx(tmp_p
 
     assert "Expand" in ops_of(astp, "astp.onnx")
     assert "Expand" not in ops_of(pool, "pool.onnx")
+
+
+def kept(eer: float, groups: dict[str, float]) -> dict:
+    """One share's figures of a ladder row: its EER, the kept accepted overall and per group, a share curve point."""
+    return {"eer": eer, "kept accepted": 0.9, "kept accepted at 0.01": 0.5} | {
+        f"kept accepted {g}": v for g, v in groups.items()
+    }
+
+
+def test_rung_2_s_best_keeps_the_most_in_its_worst_group_then_the_lowest_eer() -> None:
+    rows = {
+        "kl": {"figures": {0.05: kept(0.04, {"near": 1.0, "far": 0.93})}},
+        "mse": {"figures": {0.05: kept(0.09, {"near": 0.96, "far": 0.95})}},
+        "minmax": {"figures": {0.05: kept(0.08, {"near": 0.95, "far": 0.99})}},
+    }
+    assert quant.best_calibration({"rows": rows}, ["kl", "mse", "minmax"], 0.05) == "minmax"
+    rows["mse"]["figures"][0.05]["kept accepted near"] = 0.99
+    assert quant.best_calibration({"rows": rows}, ["kl", "mse", "minmax"], 0.05) == "minmax"
+    with pytest.raises(ValueError, match="percentile"):
+        quant.best_calibration({"rows": rows}, ["kl", "percentile"], 0.05)

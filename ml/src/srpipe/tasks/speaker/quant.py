@@ -1,8 +1,8 @@
 """ReDimNet2 b0, the chip path of KEHOACH 3.17, along command_ctc's path: import writes the survey's pinned b0 as a run,
 model.pt with its network's code; ptq rewrites it for esp-dl without changing what it computes, from its log-mel
 features to the embedding, quantises it with each calibration of rung 2 (3.14) into <run>/int8/<calibration>/, and
-rows each beside float in <run>/int8/ladder.yaml on the survey's material, keeping the board probe's window.
-Run: python -m srpipe.tasks.speaker.quant import | ptq <run> [--workers N] | timing <run> | same-int8 <run>"""
+rows each beside float in <run>/int8/ladder.yaml on the survey's material, keeping the board probe's window; int16 adds
+rung 3's rows on rung 2's best. Run: python -m srpipe.tasks.speaker.quant import | ptq|int16|timing|same-int8 <run>"""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import copy
 import importlib
 import shutil
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +20,7 @@ import yaml
 from torch import nn
 from torch.nn import functional
 
-from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
+from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, ptq_espdl
 from srpipe.core import run_dir
 from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml
 from srpipe.generated import grid
@@ -420,7 +421,7 @@ def table(ladder: dict) -> str:
     for name, by_share in graphs.items():
         for share, f in by_share.items():
             cells = [f"{100 * f['eer']:.2f}%", f"{100 * f['kept accepted']:.1f}%"]
-            cells += [f"{100 * f[f'kept accepted {g}']:.1f}%" for g in groups]
+            cells += [f"{100 * f[f'kept accepted {g}']:.1f}%" if f"kept accepted {g}" in f else "—" for g in groups]
             lines.append(f"| {name} | {100 * share:g}% | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
@@ -473,16 +474,24 @@ def same_int8(cfg: dict, run: Path, paths: dict, workers: int, against: str, cal
     return ptq_espdl.same_integers(nets, calib, inputs, rungs, cfg["esp_ppq_patches"])
 
 
-def ptq(cfg: dict, run: Path, paths: dict, workers: int, calibrations: list[str] | None = None) -> dict:
-    """Rungs 1 and 2 of the run's model under cfg, the branch's config as ctc's ladder reads its own: each of
-    calibrations, by default all of quant.calibrations, kept at <run>/int8/<calibration>/graph.native and rowed in the
-    ladder beside float, on the owner's windows and the impostors' less the calibration ones; the whole ladder starts
-    afresh, named calibrations keep the other rows."""
-    q, patches = cfg["quant"], cfg["esp_ppq_patches"]
-    unknown = sorted(set(calibrations or []) - set(q["calibrations"]))
-    if unknown:
-        raise ValueError(f"{unknown} are not among quant.calibrations {q['calibrations']}")
-    survey_cfg = load_yaml(CONFIGS / cfg["source"]["survey"])
+@dataclass
+class Bench:
+    """What every row of the ladder is measured on: the rewritten net and its gap to the extractor, the calibration
+    windows' features, the scored windows (the owner's, the impostors' less the calibration ones), their features
+    and float embeddings."""
+
+    net: Embed
+    rewrite_gap: float
+    survey_cfg: dict
+    calib: list[torch.Tensor]
+    scored: list
+    feats: list[torch.Tensor]
+    fl: np.ndarray
+
+
+def bench(cfg: dict, run: Path, paths: dict, workers: int) -> Bench:
+    """The run's Bench under cfg, the branch's config, with the board probe's window saved beside the ladder."""
+    q, survey_cfg = cfg["quant"], load_yaml(CONFIGS / cfg["source"]["survey"])
     n_samples = round(cfg["window_s"] * grid.SAMPLE_RATE_HZ)
     wrap = load_wrap(run)
     net = Embed(wrap).eval()
@@ -496,26 +505,88 @@ def ptq(cfg: dict, run: Path, paths: dict, workers: int, calibrations: list[str]
         fl = np.stack([net(f).numpy().ravel() for f in feats])
     (run / INT8_DIR).mkdir(parents=True, exist_ok=True)
     np.save(run / INT8_DIR / WINDOW_FILE, features(wrap, impostors[board].samples, n_samples).numpy())
-    head = {"window_s": cfg["window_s"], "windows": len(scored), "rewrite_gap": rewrite_gap}
-    ladder = recorded(run, head | {"float": figures(fl, scored, survey_cfg, q)}, {}, fresh=calibrations is None)
     calib_feats = [features(wrap, samples, n_samples) for samples in calib]
+    return Bench(net, rewrite_gap, survey_cfg, calib_feats, scored, feats, fl)
+
+
+def quantized(cfg: dict, b: Bench, folder: Path, rungs: dict):
+    """b's net quantised under rungs with the branch's patches, kept at folder/graph.native for the probe."""
+    with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
+        graph = ptq_espdl.quantize(b.net, b.calib, folder, rungs)
+    export_espdl.save_native(graph, folder / GRAPH_FILE)
+    return graph
+
+
+def int8_row(cfg: dict, b: Bench, graph, rungs: dict) -> dict:
+    """graph's row: the rungs it was built on, the cosine of its simulated embeddings to float, and its figures."""
+    sim = ptq_espdl.Simulator(graph, cfg["esp_ppq_patches"])
+    q8 = np.stack([sim(f.numpy()).ravel() for f in b.feats])
+    cosine = (survey.unit(b.fl) * survey.unit(q8)).sum(axis=1)
+    return {
+        "calibration": rungs["calibration"],
+        "int16_ops": rungs["int16_ops"],
+        "cosine_median": float(np.median(cosine)),
+        "cosine_p10": float(np.percentile(cosine, 10)),
+        "figures": figures(q8, b.scored, b.survey_cfg, cfg["quant"]),
+    }
+
+
+def worst_kept(at_share: dict) -> float:
+    """The accepted windows kept in the worst group of one share's figures."""
+    return min(v for k, v in at_share.items() if k.startswith("kept accepted ") and " at " not in k)
+
+
+def best_calibration(ladder: dict, calibrations: list[str], share: float) -> str:
+    """The calibration of rung 2 that keeps the most accepted windows in its worst group at the impostor share of
+    KEHOACH 3.17's gate, then the lowest EER there."""
+    rows = ladder.get("rows", {})
+    missing = [c for c in calibrations if c not in rows]
+    if missing:
+        raise ValueError(f"the ladder has no row of {missing}: run make speaker-ptq first")
+    return min(calibrations, key=lambda c: (-worst_kept(rows[c]["figures"][share]), rows[c]["figures"][share]["eer"]))
+
+
+def ptq(cfg: dict, run: Path, paths: dict, workers: int, calibrations: list[str] | None = None) -> dict:
+    """Rungs 1 and 2 of the run's model under cfg, the branch's config as ctc's ladder reads its own: each of
+    calibrations, by default all of quant.calibrations, kept at <run>/int8/<calibration>/graph.native and rowed in the
+    ladder beside float, on the owner's windows and the impostors' less the calibration ones; the whole ladder starts
+    afresh, named calibrations keep the other rows."""
+    q = cfg["quant"]
+    unknown = sorted(set(calibrations or []) - set(q["calibrations"]))
+    if unknown:
+        raise ValueError(f"{unknown} are not among quant.calibrations {q['calibrations']}")
+    b = bench(cfg, run, paths, workers)
+    head = {"window_s": cfg["window_s"], "windows": len(b.scored), "rewrite_gap": b.rewrite_gap}
+    ladder = recorded(run, head | {"float": figures(b.fl, b.scored, b.survey_cfg, q)}, {}, fresh=calibrations is None)
     for calibration in calibrations or q["calibrations"]:
-        folder = run / INT8_DIR / calibration
-        with esp_ppq_patches.applied(patches):
-            graph = ptq_espdl.quantize(
-                net, calib_feats, folder, ptq_espdl.ladder(LADDER) | {"calibration": calibration}
-            )
-        export_espdl.save_native(graph, folder / GRAPH_FILE)
-        sim = ptq_espdl.Simulator(graph, patches)
-        q8 = np.stack([sim(f.numpy()).ravel() for f in feats])
-        cosine = (survey.unit(fl) * survey.unit(q8)).sum(axis=1)
-        row = {
-            "calibration": calibration,
-            "cosine_median": float(np.median(cosine)),
-            "cosine_p10": float(np.percentile(cosine, 10)),
-            "figures": figures(q8, scored, survey_cfg, q),
-        }
-        ladder = recorded(run, {}, {calibration: row})
+        rungs = ptq_espdl.ladder(LADDER) | {"calibration": calibration}
+        graph = quantized(cfg, b, run / INT8_DIR / calibration, rungs)
+        ladder = recorded(run, {}, {calibration: int8_row(cfg, b, graph, rungs)})
+        print(table(ladder), flush=True)
+    return ladder
+
+
+def int16(cfg: dict, run: Path, paths: dict, workers: int) -> dict:
+    """Rung 3 on rung 2's best calibration: ESP-PPQ's per-layer error over quant.layerwise_windows calibration windows
+    ranks the graph's operations, and a row for each count of quant.int16_tops puts the worst of them at 16 bits."""
+    q = cfg["quant"]
+    path = run / INT8_DIR / LADDER_FILE
+    best = best_calibration(
+        yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else {}, q["calibrations"], q["gate_share"]
+    )
+    b = bench(cfg, run, paths, workers)
+    rungs = ptq_espdl.ladder(LADDER) | {"calibration": best}
+    base = quantized(cfg, b, run / INT8_DIR / "int16_base", rungs)
+    with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
+        ranked = mixed_espdl.ranked_layers(base, b.calib[: q["layerwise_windows"]])
+    layers = [{"op": name, "noise_to_signal": round(error, 6)} for name, error in ranked]
+    head = {"float": figures(b.fl, b.scored, b.survey_cfg, q), "int16_base": best, "layerwise": layers}
+    ladder = recorded(run, head, {"int16_top0": int8_row(cfg, b, base, rungs)})
+    print(table(ladder), flush=True)
+    for name, ops in mixed_espdl.int16_rows(ranked, q["int16_tops"]).items():
+        wide = rungs | {"int16_ops": ops}
+        graph = quantized(cfg, b, run / INT8_DIR / name, wide)
+        ladder = recorded(run, {}, {name: int8_row(cfg, b, graph, wide)})
         print(table(ladder), flush=True)
     return ladder
 
@@ -528,6 +599,9 @@ def main(argv: list[str] | None = None) -> int:
     ladder.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.speaker.quant import")
     ladder.add_argument("--workers", type=int, default=8, help="processes simulating the impostors' sessions")
     ladder.add_argument("--calibrations", nargs="+", help="only these of quant.calibrations: a stopped ladder goes on")
+    wide = sub.add_parser("int16", help="rung 3: rows with the worst operations at 16 bits, on rung 2's best")
+    wide.add_argument("run", type=Path)
+    wide.add_argument("--workers", type=int, default=8)
     quick = sub.add_parser("timing", help="the timing row: a quick graph that times the chip as the ladder's rows")
     quick.add_argument("run", type=Path)
     quick.add_argument("--workers", type=int, default=8)
@@ -540,6 +614,9 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_yaml(CONFIG)
     if args.command == "import":
         print(import_run(cfg, data_paths()))
+    elif args.command == "int16":
+        int16(cfg, args.run, data_paths(), args.workers)
+        print(args.run / INT8_DIR / LADDER_FILE)
     elif args.command == "timing":
         print(timing(cfg, args.run, data_paths(), args.workers))
     elif args.command == "same-int8":

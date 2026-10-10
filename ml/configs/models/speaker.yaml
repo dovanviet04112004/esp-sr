@@ -10,6 +10,9 @@ quant:                             # python -m srpipe.tasks.speaker.quant ptq <r
   calibrations: [kl, percentile, minmax, mse]   # rung 2, one row each, in this order
   rewrite_rtol: 1.0e-4             # largest gap of the rewritten graph to the extractor, as a share of its largest value
   check_windows: 8                 # calibration and owner windows of same-int8 (KEHOACH 3.14 step 2.4)
+  gate_share: 0.05                 # 3.17's gate share: rung 2's best keeps the most in its worst group here
+  layerwise_windows: 8             # rung 3: calibration windows ESP-PPQ's per-layer error runs over
+  int16_tops: [2, 4, 8, 16]        # rung 3: a row with each count of the worst operations at 16 bits
   count: 10                        # enrolment windows of the figures
   shares: [0.01, 0.05]             # impostors passing at which the accepted windows kept are given per group
 esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches around this branch's quantisation and export
