@@ -577,12 +577,13 @@ def int16(cfg: dict, run: Path, paths: dict, workers: int) -> dict:
     b = bench(cfg, run, paths, workers)
     rungs = ptq_espdl.ladder(LADDER) | {"calibration": best}
     base = quantized(cfg, b, run / INT8_DIR / "int16_base", rungs)
+    head = {"float": figures(b.fl, b.scored, b.survey_cfg, q), "int16_base": best}
+    ladder = recorded(run, head, {"int16_top0": int8_row(cfg, b, base, rungs)})
+    print(table(ladder), flush=True)
     with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
         ranked = mixed_espdl.ranked_layers(base, b.calib[: q["layerwise_windows"]])
     layers = [{"op": name, "noise_to_signal": round(error, 6)} for name, error in ranked]
-    head = {"float": figures(b.fl, b.scored, b.survey_cfg, q), "int16_base": best, "layerwise": layers}
-    ladder = recorded(run, head, {"int16_top0": int8_row(cfg, b, base, rungs)})
-    print(table(ladder), flush=True)
+    ladder = recorded(run, {"layerwise": layers}, {})
     for name, ops in mixed_espdl.int16_rows(ranked, q["int16_tops"]).items():
         wide = rungs | {"int16_ops": ops}
         graph = quantized(cfg, b, run / INT8_DIR / name, wide)
