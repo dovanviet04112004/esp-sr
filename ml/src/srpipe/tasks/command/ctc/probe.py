@@ -1,8 +1,8 @@
 """The board probe of the ctc net (E11-T12, E11-T19). Run: python -m srpipe.tasks.command.ctc.probe [--run <run>
---row <row>]. It writes what ai_engine/test_apps/unit runs on board B: the first stack's layer and the net, seeded
-random or the graph of a row of a trained run's ladder (quant.py), with each step's int8 input and output from the
-whole-sequence simulation; the decision of the default commands (E11-T13); and windows of raw features through the
-command calls, each with the decision Python takes on its int8 simulation.
+--row <row>] [--net-only]. It writes what ai_engine/test_apps/unit runs on board B: the first stack's layer and the
+net, seeded random or the graph of a row of a trained run's ladder (quant.py), with each step's int8 input and output
+from the whole-sequence simulation; the decision of the default commands (E11-T13); and windows of raw features
+through the command calls, each with the decision Python takes on its int8 simulation.
 """
 
 from __future__ import annotations
@@ -221,14 +221,20 @@ def gate_rounds(
 
 
 def probe(
-    cfg: dict, out: Path, work: Path, run: Path | None = None, row: str | None = None, hearing=quant.LEARNT
+    cfg: dict,
+    out: Path,
+    work: Path,
+    run: Path | None = None,
+    row: str | None = None,
+    hearing=quant.LEARNT,
+    net_only: bool = False,
 ) -> tuple[Path, ...]:
     """Write out/ctc_models.bin and out/ctc_streams.bin: the first stack's layer a frame a step, the net a chunk a
     step, work keeping each ONNX and .espdl; out/ctc_decide.bin, the decision of the default commands (E11-T13); and
     out/ctc_windows.bin, windows through the command calls. With run, the net is the graph of row in its ladder of
     hearing, streaming a test sentence, and the windows are the board's; out/ctc_gate_<round>.bin then hold every
     Gate 3 window, a round the voice partition takes, and out/ctc_gate.json what each should get, for the on-chip
-    Gate 3; without run none is left."""
+    Gate 3; without run none is left. net_only writes the first two alone, all make ai-unit-ctc runs."""
     if cfg["probe"]["hops"] % cfg["chunk_hops"] or cfg["quant"]["hops"] % cfg["chunk_hops"]:
         raise ValueError(f"probe and quant hops must be multiples of chunk_hops {cfg['chunk_hops']}")
     scales, p, rungs = cfg["probe"]["norm_scale"], cfg["probe"], ptq_espdl.ladder(quant.LADDER)
@@ -247,11 +253,12 @@ def probe(
         trained = hearing.net(run, data_paths())
         listen_hash = trained.cfg.get("listen_hash", 0)
         net, net_x, norm = trained.model, quant.test_sentence(cfg, trained), (trained.mean, trained.std)
-        sessions = quant.board_windows(cfg, trained, data_paths())
-        board = [x for scored in sessions for x in scored.decided]
-        expected = [{"session": s.session, "expected": s.expected} for s in sessions for _ in s.decided]
-        names = trained.names
-        windows = board[:: max(1, len(board) // p["command"]["windows"])][: p["command"]["windows"]]
+        if not net_only:
+            sessions = quant.board_windows(cfg, trained, data_paths())
+            board = [x for scored in sessions for x in scored.decided]
+            expected = [{"session": s.session, "expected": s.expected} for s in sessions for _ in s.decided]
+            names = trained.names
+            windows = board[:: max(1, len(board) // p["command"]["windows"])][: p["command"]["windows"]]
     fixes = cfg["esp_ppq_patches"]
     layer_graph = quant.quantized(
         one_layer, [torch.from_numpy(c) for c in layer_calib], work / LAYER_ENTRY, rungs, fixes
@@ -271,6 +278,8 @@ def probe(
     streams.write_bytes(STREAMS_HEAD.pack(STREAMS_MAGIC, len(built)) + b"".join(record for _, (_, record) in built))
     for name, (espdl, _) in built:
         print(f"{name}: {len(espdl)} bytes of .espdl")
+    if net_only:
+        return image, streams
     decide = out / DECIDE_FILE
     decide.write_bytes(ctc_score.probe_record(cfg))
     command = out / WINDOWS_FILE
@@ -401,6 +410,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--hold", choices=sorted(gate.HOLDS), help="the row of the ladder with these pitch dims folded")
     parser.add_argument("--gate-log", type=Path, help="count Gate 3 on the chip's decisions in this unit app log")
     parser.add_argument("--listen", action="store_true", help="write svc_listen's rounds of Gate 3 sessions instead")
+    parser.add_argument("--net-only", action="store_true", help="only the streamed nets, as make ai-unit-ctc runs them")
     args = parser.parse_args(argv)
     if args.gate_log:
         print(gate_on_chip(args.gate_log, args.out / GATE_LABELS))
@@ -412,7 +422,7 @@ def main(argv: list[str] | None = None) -> int:
     if (args.run is None) != (args.row is None):
         parser.error("--run and --row go together")
     hearing = quant.Hearing(args.kaldi_pitch, args.hold)
-    for path in probe(load_yaml(ctc.CONFIG), args.out, args.work, args.run, args.row, hearing):
+    for path in probe(load_yaml(ctc.CONFIG), args.out, args.work, args.run, args.row, hearing, args.net_only):
         print(f"{path}: {path.stat().st_size} bytes")
     return 0
 

@@ -1,9 +1,9 @@
 """The quantisation ladder of the ctc net (KEHOACH 3.14, ADR-0013). Run: python -m srpipe.tasks.command.ctc.quant
-ptq|int16|qat <run> | thresholds|deploy <run> --row <row> [--kaldi-pitch] [--hold <dim>]: rungs 1 to 4, the last two on
-rung 2's calibration Gate 3 rates best, each adding to <run>/int8/ladder.yaml the test set's unit error rate and Gate 3
-after int8 beside float, each row's graph under <run>/int8/<row>/ for probe.py; heard on the board's Kaldi pitch with a
-dim folded at its mean, under <run>/int8_kaldi_<dim>/. thresholds picks a row's delta1 and delta2; deploy puts graph
-and pair into firmware/models/command/ and records them with update_lock (E11-T19)."""
+ptq|int16|qat|timing <run> | same-int8 <run> [--against <commit>] | thresholds|deploy <run> --row <row> [--kaldi-pitch]
+[--hold <dim>]: rungs 1 to 4, each row's unit error rate and Gate 3 after int8 beside float in <run>/int8/ladder.yaml,
+its graph under <run>/int8/<row>/ for probe.py as the timing row's (3.14 step 2.1); heard on the board's Kaldi pitch,
+a dim folded at its mean, under <run>/int8_kaldi_<dim>/. same-int8 holds the net to a commit's (step 2.4); thresholds
+picks a row's deltas; deploy puts graph and pair into firmware/models/command/ and locks them (E11-T19)."""
 
 from __future__ import annotations
 
@@ -348,6 +348,36 @@ def step_int16(cfg: dict, run: Path, hearing: Hearing = LEARNT) -> Path:
     return out
 
 
+def step_timing(cfg: dict, run: Path, hearing: Hearing = LEARNT) -> Path:
+    """The timing row (KEHOACH 3.14 step 2.1): the net as hearing hears it, quantised under the timing rungs on the
+    ladder's calibration spans, its graph kept as a row of the ladder for probe.py; quick to make, its time on the chip
+    the ladder's own."""
+    paths = data_paths()
+    net = hearing.net(run, paths)
+    root = paths["processed"] / "command" / net.cfg["split"]["version"]
+    folder = hearing.folder(run) / ptq_espdl.TIMING_ROW
+    calib = calibration(cfg["quant"], net.mean, net.std, root)
+    graph = quantized(net.model, calib, folder, ptq_espdl.timing_rungs(LADDER), cfg["esp_ppq_patches"])
+    return export_espdl.save_native(graph, folder / GRAPH_FILE)
+
+
+def same_int8(cfg: dict, run: Path, against: str, method: str | None, hearing: Hearing = LEARNT):
+    """(off, worst) of ptq_espdl.same_integers for the net as this module hears the run now and as it did at commit
+    against, quantised under the ladder's rungs, calibration method if given, on quant.check_sentences of its
+    calibration spans and compared on as many more; None when the module is the commit's (KEHOACH 3.14 step 2.4)."""
+    old = ptq_espdl.at_commit(Path(__file__), __name__, against)
+    if old is None:
+        return None
+    paths, n = data_paths(), cfg["quant"]["check_sentences"]
+    net = hearing.net(run, paths)
+    root = paths["processed"] / "command" / net.cfg["split"]["version"]
+    spans = calibration(cfg["quant"], net.mean, net.std, root)
+    rungs = ptq_espdl.ladder(LADDER) | ({"calibration": method} if method else {})
+    nets = [old.Hearing(hearing.kaldi, hearing.hold).net(run, paths).model, net.model]
+    inputs = [s.numpy() for s in spans[n : 2 * n]]
+    return ptq_espdl.same_integers(nets, spans[:n], inputs, rungs, cfg["esp_ppq_patches"])
+
+
 def step_qat(cfg: dict, run: Path, device: str, hearing: Hearing = LEARNT) -> Path:
     """Rung 4 on the best calibration: the graph built for quant.qat.batch learns with CTC, the held pitch dims at
     their train mean, then what it learnt moves onto the graph of one, which the row measures; the val rows go to
@@ -540,9 +570,11 @@ def step_deploy(cfg: dict, run: Path, row: str, hearing: Hearing = LEARNT) -> tu
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("step", choices=["ptq", "int16", "qat", "thresholds", "deploy"])
+    parser.add_argument("step", choices=["ptq", "int16", "qat", "timing", "same-int8", "thresholds", "deploy"])
     parser.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.command.ctc.train")
     parser.add_argument("--row", help="thresholds, deploy: the row of <run>/int8/ladder.yaml")
+    parser.add_argument("--against", default="HEAD", help="same-int8: the commit whose network code is held to")
+    parser.add_argument("--calibration", help="same-int8: one of quant.calibrations; the ladder's default otherwise")
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     parser.add_argument(
         "--kaldi-pitch", action="store_true", help="hear the run on the contract's Kaldi pitch, as the board gives it"
@@ -560,6 +592,12 @@ def main(argv: list[str] | None = None) -> int:
             print(path)
     elif args.step == "qat":
         print(step_qat(cfg, args.run, "cuda" if torch.cuda.is_available() else "cpu", hearing))
+    elif args.step == "timing":
+        print(step_timing(cfg, args.run, hearing))
+    elif args.step == "same-int8":
+        return ptq_espdl.same_int8_verdict(
+            same_int8(cfg, args.run, args.against, args.calibration, hearing), args.against
+        )
     else:
         print({"ptq": step_ptq, "int16": step_int16}[args.step](cfg, args.run, hearing))
     return 0
