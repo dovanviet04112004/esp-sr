@@ -138,6 +138,18 @@ def test_a_one_channel_convolution_gives_what_copies_and_a_depthwise_one_give() 
     torch.testing.assert_close(got, want)
 
 
+def test_output_slices_give_what_the_convolution_gives_from_cache_sized_parts() -> None:
+    torch.manual_seed(8)
+    conv = nn.Conv1d(576, 128, 1).eval()
+    x = torch.randn(1, 576, FRAMES)
+    sliced = quant.output_slices(conv, 36864).eval()
+    with torch.no_grad():
+        torch.testing.assert_close(sliced(x), conv(x))
+    sizes = [part.out_channels for part in sliced.parts]
+    assert sizes == [64, 64] and all(part.weight.numel() <= 36864 for part in sliced.parts)
+    assert isinstance(quant.output_slices(nn.Conv1d(576, 24, 1), 1024), nn.Conv1d)
+
+
 def test_explicit_pads_give_what_same_gives() -> None:
     torch.manual_seed(0)
     model = nn.Sequential(
@@ -187,7 +199,7 @@ def test_the_folded_head_gives_the_norm_then_the_linear() -> None:
 def test_the_context_pool_gives_what_astp_gives_with_no_expand_in_its_onnx(tmp_path: Path) -> None:
     torch.manual_seed(2)
     astp = ContextAstp().eval()
-    pool = quant.ContextPool(astp).eval()
+    pool = quant.ContextPool(astp, 1 << 16).eval()
     x = torch.randn(1, CHANNELS, FRAMES)
     with torch.no_grad():
         torch.testing.assert_close(pool(x), astp(x))

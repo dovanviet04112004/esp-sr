@@ -15,6 +15,7 @@ from collections.abc import Callable, Iterator, Sequence
 # esp-dl runs convolutions channels last, so time, the first spatial axis of every conv streamed here, is axis 1.
 CONV_TIME_AXIS = 1
 SQRT_NEWTON_STOP = 1e-5  # dl_math.hpp EN, esp-dl 3.3.11
+CHANNEL_STEP = 16  # dl_base_conv2d.cpp: S3 vector path, 16 channels a step
 
 
 def requantise_graph_input_readers(op, graph) -> None:

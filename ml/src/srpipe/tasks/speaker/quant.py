@@ -149,20 +149,56 @@ def folded_head(bn: nn.BatchNorm1d, linear: nn.Linear) -> nn.Linear:
     return head
 
 
+class OutputSlices(nn.Module):
+    """Convolutions over consecutive slices of one convolution's outputs, concatenated: that convolution's outputs."""
+
+    def __init__(self, conv: nn.Conv1d, sizes: list[int]) -> None:
+        super().__init__()
+        self.parts = nn.ModuleList()
+        start = 0
+        for size in sizes:
+            part = nn.Conv1d(conv.in_channels, size, conv.kernel_size, bias=conv.bias is not None)
+            with torch.no_grad():
+                part.weight.copy_(conv.weight[start : start + size])
+                if conv.bias is not None:
+                    part.bias.copy_(conv.bias[start : start + size])
+            self.parts.append(part)
+            start += size
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.cat([part(x) for part in self.parts], dim=1)
+
+
+def output_slices(conv: nn.Conv1d, weight_bytes_max: int) -> nn.Module:
+    """conv, pointwise, as OutputSlices of at most weight_bytes_max int8 weights each, every slice a multiple of the
+    channels esp-dl's vector path takes at a step: esp-dl reads all of a convolution's weights again at each frame,
+    from PSRAM once they outgrow the data cache."""
+    if conv.kernel_size != (1,) or conv.groups != 1:
+        raise ValueError(f"{conv}: only an ungrouped pointwise convolution slices along its outputs alone")
+    lanes, outputs = esp_ppq_patches.CHANNEL_STEP, conv.out_channels
+    step = max(weight_bytes_max // conv.in_channels // lanes, 1) * lanes
+    if outputs % lanes or outputs <= step:
+        return conv
+    size = -(-outputs // -(-outputs // step) // lanes) * lanes
+    return OutputSlices(conv, [size] * (outputs // size) + ([outputs % size] if outputs % size else []))
+
+
 class ContextPool(nn.Module):
     """ASTP with global context as esp-dl can run it: the context's part of the attention's first projection is added
-    per channel, where ASTP concatenates the context expanded over time, an Expand esp-dl lacks."""
+    per channel, where ASTP concatenates the context expanded over time, an Expand esp-dl lacks; the projections run
+    over each frame as output_slices."""
 
-    def __init__(self, astp: nn.Module) -> None:
+    def __init__(self, astp: nn.Module, weight_bytes_max: int) -> None:
         super().__init__()
         n, w = astp.in_dim, astp.linear1.weight
-        self.frames = nn.Conv1d(n, w.shape[0], 1, bias=False)
+        frames = nn.Conv1d(n, w.shape[0], 1, bias=False)
         self.context = nn.Conv1d(2 * n, w.shape[0], 1)
         with torch.no_grad():
-            self.frames.weight.copy_(w[:, :n])
+            frames.weight.copy_(w[:, :n])
             self.context.weight.copy_(w[:, n:])
             self.context.bias.copy_(astp.linear1.bias)
-        self.linear2 = astp.linear2
+        self.frames = output_slices(frames, weight_bytes_max)
+        self.linear2 = output_slices(astp.linear2, weight_bytes_max)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         mean = torch.mean(x, dim=-1, keepdim=True)
@@ -271,7 +307,7 @@ def time_major(model: nn.Module) -> nn.Module:
 class Embed(nn.Module):
     """b0 from log-mel features (1, 1, frames, mels) to the embedding the extractor gives (KEHOACH 3.17)."""
 
-    def __init__(self, wrap: nn.Module) -> None:
+    def __init__(self, wrap: nn.Module, weight_bytes_max: int) -> None:
         super().__init__()
         if wrap.pad_right_samples is not None or wrap.before_pool_offset is not None or wrap.bn2 is not None:
             raise ValueError("the extractor pads, offsets or norms where Embed does not")
@@ -282,7 +318,7 @@ class Embed(nn.Module):
             raise ValueError("Embed runs one plain stage after another")
         rewritten = stage_sums(channel_norms(ungrouped(explicit_padding(copy.deepcopy(b)))))
         self.backbone = time_major(one_channel_inputs(rewritten))
-        self.pool = ContextPool(wrap.pool)
+        self.pool = ContextPool(wrap.pool, weight_bytes_max)
         self.head = folded_head(wrap.bn, wrap.linear)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -398,7 +434,7 @@ def ptq(cfg: dict, run: Path, paths: dict, workers: int, calibrations: list[str]
     survey_cfg = load_yaml(CONFIGS / cfg["source"]["survey"])
     n_samples = round(cfg["window_s"] * grid.SAMPLE_RATE_HZ)
     wrap = load_wrap(run)
-    net = Embed(wrap).eval()
+    net = Embed(wrap, q["conv_weight_bytes_max"]).eval()
     owner, impostors = survey.owner_windows(survey_cfg, paths), survey.impostor_windows(survey_cfg, paths, workers)
     drawn = np.random.default_rng(q["seed"]).choice(len(impostors), q["calib_windows"] + 1, replace=False)
     calib = [impostors[int(i)].samples for i in drawn[:-1]]
