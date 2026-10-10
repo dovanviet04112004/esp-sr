@@ -73,6 +73,43 @@ def test_channel_norms_give_what_the_channels_first_norm_gives_as_one_layer_norm
     assert "Pow" in {n.op_type for n in plain}
 
 
+class StackedSum(nn.Module):
+    """redimnet2/layers/redim_structural.py weigth1d, not sequential, at the pin."""
+
+    def __init__(self, inputs: int) -> None:
+        super().__init__()
+        self.w = nn.Parameter(torch.randn(1, inputs, CHANNELS, 1))
+        self.sequential = False
+
+    def forward(self, xs: list[torch.Tensor]) -> torch.Tensor:
+        w = torch.softmax(self.w, dim=1)
+        return (w * torch.cat([t.unsqueeze(1) for t in xs], dim=1)).sum(dim=1)
+
+
+def test_stage_sums_give_what_the_stacked_sum_gives_with_no_reduce_sum_in_the_onnx(tmp_path: Path) -> None:
+    torch.manual_seed(5)
+    stacked = StackedSum(3).eval()
+    xs = [torch.randn(1, CHANNELS, FRAMES) for _ in range(3)]
+    summed = quant.StageSum(stacked).eval()
+    with torch.no_grad():
+        torch.testing.assert_close(summed(xs), stacked(xs))
+
+    class Three(nn.Module):
+        def __init__(self, inner: nn.Module) -> None:
+            super().__init__()
+            self.inner = inner
+
+        def forward(self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor) -> torch.Tensor:
+            return self.inner([a, b, c])
+
+    def ops_of(model: nn.Module, name: str) -> set[str]:
+        path = onnx_export.checked(Three(model), tuple(x.numpy() for x in xs), tmp_path / name, 1e-4)
+        return {node.op_type for node in onnx.load(path).graph.node}
+
+    assert "ReduceSum" in ops_of(stacked, "stacked.onnx")
+    assert "ReduceSum" not in ops_of(summed, "summed.onnx")
+
+
 def test_explicit_pads_give_what_same_gives() -> None:
     torch.manual_seed(0)
     model = nn.Sequential(

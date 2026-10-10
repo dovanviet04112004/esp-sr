@@ -104,6 +104,39 @@ def channel_norms(model: nn.Module) -> nn.Module:
     return model
 
 
+class StageSum(nn.Module):
+    """redimnet2's weigth1d as one depthwise 1x1 convolution an input, kernels its softmaxed weights, the outputs added:
+    the same sum, where weigth1d stacks its inputs and sums over the stack, an axis esp-dl sums slowly
+    (measurements/latency.md 25)."""
+
+    def __init__(self, stage: nn.Module) -> None:
+        super().__init__()
+        if stage.sequential:
+            raise ValueError("StageSum reads weigth1d's stacked form")
+        w = torch.softmax(stage.w.detach(), dim=1)[0, :, :, 0]
+        self.scales = nn.ModuleList()
+        for row in w:
+            conv = nn.Conv1d(len(row), len(row), 1, groups=len(row), bias=False)
+            with torch.no_grad():
+                conv.weight.copy_(row[:, None, None])
+            self.scales.append(conv)
+
+    def forward(self, xs: list[torch.Tensor]) -> torch.Tensor:
+        out = self.scales[0](xs[0])
+        for scale, x in zip(self.scales[1:], xs[1:], strict=True):
+            out = out + scale(x)
+        return out
+
+
+def stage_sums(model: nn.Module) -> nn.Module:
+    """model with each weigth1d of redimnet2 as a StageSum."""
+    for parent in list(model.modules()):
+        for name, m in list(parent.named_children()):
+            if type(m).__name__ == "weigth1d":
+                setattr(parent, name, StageSum(m))
+    return model
+
+
 def folded_head(bn: nn.BatchNorm1d, linear: nn.Linear) -> nn.Linear:
     """linear after bn in eval as one Linear; ESP-PPQ runs a BatchNorm only over 3-d or 4-d tensors."""
     scale = bn.weight / torch.sqrt(bn.running_var + bn.eps)
@@ -149,7 +182,7 @@ class Embed(nn.Module):
             raise ValueError("the extractor pads, offsets or norms where Embed does not")
         if not wrap.pool.global_context_att or wrap.return_all_outputs:
             raise ValueError("Embed reads a pool with global context and one backbone output")
-        self.backbone = channel_norms(ungrouped(explicit_padding(wrap.backbone)))
+        self.backbone = stage_sums(channel_norms(ungrouped(explicit_padding(wrap.backbone))))
         self.pool = ContextPool(wrap.pool)
         self.head = folded_head(wrap.bn, wrap.linear)
 
