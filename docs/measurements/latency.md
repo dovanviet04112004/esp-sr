@@ -628,3 +628,19 @@ Thời gian từng module, đo bằng `model->profile_module()` của esp-dl tro
   1,15 triệu MAC. Kế đến là hai conv 1×1 của lớp gộp, 78 ms và 79 ms.
 - **Đọc:** viết lại đồ thị chỉ đưa b0 về cỡ 2 s 🔬, chưa tới ≤ 1 s. Muốn đạt thì cần mạng nhỏ hơn, cửa sổ ngắn hơn
   hay chip nhanh hơn.
+
+Sau khi viết lại phép gộp đầu ra các stage thành conv depthwise 1×1 cộng nhau (`StageSum`, `772b795`), đo trên một bản
+lượng tử nhanh của cùng đồ thị: minmax, không equalization, không bias correction, hàng `fast` của run. Thời gian chỉ
+phụ thuộc cấu trúc đồ thị:
+
+| Đo | Trước | Sau |
+|---|---|---|
+| Một lần chạy | 3039 ms | **2567 ms** |
+| PSRAM cho tensor | 3 277 280 B | 2 124 004 B |
+| Conv | 1086 ms, 175 op | 1212 ms, 203 op |
+| Transpose | 534 ms, 81 op | 691 ms, 93 op |
+| ReduceSum, Concat | 706 ms | 0 |
+| Giá trị lệch mô phỏng | 158/192, lớn nhất 18 | 160/192, lớn nhất 24 |
+
+- 28 conv depthwise và 12 Transpose mới ăn lại khoảng 0,28 s trong 0,7 s tiết kiệm được.
+- Điểm nóng kế tiếp: Transpose 27%; conv 3×3 đầu stem 110 ms; hai conv 1×1 của lớp gộp 87 ms và 78 ms.
