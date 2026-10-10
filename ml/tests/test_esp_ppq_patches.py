@@ -532,6 +532,31 @@ def test_aligned_pointwise_runs_narrow_convolutions_block_diagonal_over_merged_c
     assert reshapes[1] - reshapes[0] == 8
 
 
+class CopiedStem(nn.Module):
+    """A one-channel map copied into 12 channels, as ReDimNet2 b0's stem is rewritten, then a depthwise convolution."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.depthwise = nn.Conv2d(12, 12, 3, padding=1, groups=12)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.depthwise(torch.cat([x] * 12, dim=1))
+
+
+def test_copies_by_broadcast_writes_the_copies_as_an_add_of_zeros(tmp_path: Path) -> None:
+    torch.manual_seed(4)
+    rng = np.random.default_rng(17)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 1, 6, 8)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(CopiedStem().eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    plain = espdl_graph(export_espdl.export(graph, tmp_path / "plain.espdl"))
+    with esp_ppq_patches.applied(["copies_by_broadcast"]):
+        nodes, tensors = espdl_graph(export_espdl.export(graph, tmp_path / "broadcast.espdl"))
+    assert {"Concat", "Transpose"} <= {op for op, _ in plain[0].values()}
+    assert not {"Concat", "Transpose"} & {op for op, _ in nodes.values()}
+    ((_, (_, zeros)),) = [node for node in nodes.values() if node[0] == "Add"]
+    assert tensors[zeros].shape == (1, 1, 1, 12) and not tensors[zeros].any()
+
+
 def test_an_unknown_patch_is_refused() -> None:
     with pytest.raises(ValueError, match="unknown ESP-PPQ patches"), esp_ppq_patches.applied(["no_such_patch"]):
         pass

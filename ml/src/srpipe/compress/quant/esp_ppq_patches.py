@@ -615,6 +615,87 @@ def aligned_pointwise() -> Iterator[None]:
         espdl_exporter.reset_graph_layout = reset
 
 
+def linked(graph, op, inputs: list, outputs: list):
+    """op, quantised and with no variables yet, registered in graph and linked to inputs and outputs."""
+    graph.operations[op.name] = op
+    for var in inputs:
+        op.inputs.append(var)
+        var.dest_ops.append(op)
+    for var in outputs:
+        op.outputs.append(var)
+        var.source_op = op
+    return op
+
+
+def broadcast_copies(graph) -> int:
+    """Each Concat of copies of one variable, of size 1 along the joined axis, read only by a Transpose, as an Add of
+    that variable laid as the Transpose lays it, which moves nothing, and zeros along the copies; how many."""
+    import torch
+    from esp_ppq.core import DataType, OperationQuantizationConfig, QuantizationStates
+    from esp_ppq.IR.quantize import QuantableOperation
+    from esp_ppq.parser.espdl.espdl_graph_utils import get_default_perm
+    from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
+
+    info, done = ExporterPatternInfo(), 0
+    for concat in [op for op in graph.topological_sort() if op.type == "Concat"]:
+        (source, *_), joined = concat.inputs, concat.outputs[0]
+        if not isinstance(concat, QuantableOperation) or any(v is not source for v in concat.inputs):
+            continue
+        if len(joined.dest_ops) != 1 or joined.dest_ops[0].type != "Transpose" or joined.name in graph.outputs:
+            continue
+        turn, laid = joined.dest_ops[0], laid_shape(source, info)
+        axis, perm, count = concat.attributes["axis"] % len(laid), turn.attributes["perm"], len(concat.inputs)
+        if laid[axis] != 1 or laid_shape(joined, info) != [count if i == axis else d for i, d in enumerate(laid)]:
+            continue
+        if laid_shape(turn.outputs[0], info) != [count if p == axis else laid[p] for p in perm]:
+            continue
+        y, platform = turn.outputs[0], concat.platform
+        x_config, y_config = concat.input_quant_config[0], turn.output_quant_config[0]
+        graph.remove_operation(turn)
+        graph.remove_operation(concat)
+        graph.remove_variable(joined)
+        target = [laid[i] for i in perm]
+        shape_config, zeros_config = x_config.copy(), x_config.copy()
+        shape_config.state, zeros_config.state = QuantizationStates.FP32, QuantizationStates.ACTIVATED
+        relaid = graph.create_variable()
+        relaid.shape, relaid.dtype = target, source.dtype
+        info.add_var_permute(relaid.name, get_default_perm(relaid))
+        shape = graph.create_variable(value=torch.tensor(target, dtype=torch.int64), is_parameter=True)
+        shape.dtype = DataType.INT64
+        reshape = graph.create_operation(op_type="Reshape", attributes={"allowzero": 0})
+        config = OperationQuantizationConfig([x_config, shape_config], [x_config])
+        linked(graph, QuantableOperation(reshape, config, platform), [source, shape], [relaid])
+        zeros = graph.create_variable(value=torch.zeros([count if p == axis else 1 for p in perm]), is_parameter=True)
+        add = graph.create_operation(op_type="Add")
+        config = OperationQuantizationConfig([x_config, zeros_config], [y_config])
+        linked(graph, QuantableOperation(add, config, platform), [relaid, zeros], [y])
+        done += 1
+    return done
+
+
+@contextlib.contextmanager
+def copies_by_broadcast() -> Iterator[None]:
+    """A one-channel map repeated into several channels concatenates channels first, so ESP-PPQ's export follows the
+    Concat with a Transpose to channels last, a generic copy of every value. After the export's layout pass this
+    writes the copies by broadcast_copies instead: an Add of zeros on the input's own grid, the same integers.
+    ReDimNet2 b0 (KEHOACH 3.17) on board B: its stem's twelve copies of the log-mel took 2.5 ms to join and 33.6 ms
+    to transpose.
+    """
+    from esp_ppq.parser import espdl_exporter
+
+    reset = espdl_exporter.reset_graph_layout
+
+    def broadcast(graph):
+        reset(graph)
+        broadcast_copies(graph)
+
+    espdl_exporter.reset_graph_layout = broadcast
+    try:
+        yield
+    finally:
+        espdl_exporter.reset_graph_layout = reset
+
+
 def same_quantizer(a, b, info) -> bool:
     """a and b, quantise nodes of one variable, give the same integers on the same grid, laid the same way."""
     import torch
@@ -733,6 +814,7 @@ PATCHES = {
     "lean_transposes": lean_transposes,
     "lean_quantizers": lean_quantizers,
     "aligned_pointwise": aligned_pointwise,
+    "copies_by_broadcast": copies_by_broadcast,
 }
 
 
