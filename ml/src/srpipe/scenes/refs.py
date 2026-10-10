@@ -1,7 +1,8 @@
-"""The reference engines of KEHOACH 3.16 on the PC, each a pinned uv project ml/afe_ref/<name>/ run through its run.py
-as srpipe.tts runs the TTS engines, since their dependencies clash with srpipe's. Weights come to cache/afe_ref/<name>/
-from the pinned URL in compare.yaml's refs and must match its sha256. dnsmos scores clips, kept by the clip's bytes in
-cache/afe_ref/dnsmos/scores.jsonl so a clip is scored once; nsnet2 and rnnoise clean clips into new files."""
+"""The reference engines of KEHOACH 3.16 and 3.17 on the PC, each a pinned uv project ml/afe_ref/<name>/ or
+ml/spk_ref/<name>/ run through its run.py as srpipe.tts runs the TTS engines, since their dependencies clash with
+srpipe's. Weights come to cache/afe_ref/<name>/ or cache/spk_ref/<name>/ from pinned URLs and must match their sha256.
+dnsmos scores clips, kept by the clip's bytes in cache/afe_ref/dnsmos/scores.jsonl so a clip is scored once; nsnet2 and
+rnnoise clean clips into new files; a speaker extractor embeds windows of samples."""
 
 from __future__ import annotations
 
@@ -12,11 +13,13 @@ import subprocess
 import urllib.parse
 from pathlib import Path
 
+import numpy as np
 import requests
 
 from srpipe.core.config import ML_ROOT
 
 PROJECTS = ML_ROOT / "afe_ref"
+SPEAKER_PROJECTS = ML_ROOT / "spk_ref"
 CHUNK_BYTES = 1 << 20
 TIMEOUT_S = 120
 
@@ -25,10 +28,8 @@ def sha256_of(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def weights(name: str, spec: dict, cache: Path) -> Path:
-    """The engine's weights under cache/afe_ref/<name>/, fetched from spec's URL when absent; refuse a file whose
-    sha256 is not spec's."""
-    path = cache / "afe_ref" / name / Path(urllib.parse.urlsplit(spec["url"]).path).name
+def fetch(spec: dict, path: Path) -> Path:
+    """path, fetched from spec's URL when absent; refuse a file whose sha256 is not spec's."""
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         part = path.with_suffix(path.suffix + ".part")
@@ -43,10 +44,15 @@ def weights(name: str, spec: dict, cache: Path) -> Path:
     return path
 
 
-def run(name: str, *args: str) -> None:
-    """ml/afe_ref/<name>/run.py in that project's environment, not srpipe's."""
+def weights(name: str, spec: dict, cache: Path) -> Path:
+    """The engine's weights under cache/afe_ref/<name>/, fetched as fetch does."""
+    return fetch(spec, cache / "afe_ref" / name / Path(urllib.parse.urlsplit(spec["url"]).path).name)
+
+
+def run(name: str, *args: str, projects: Path = PROJECTS) -> None:
+    """<projects>/<name>/run.py in that project's environment, not srpipe's."""
     env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
-    project = PROJECTS / name
+    project = projects / name
     subprocess.run(
         ["uv", "run", "--project", str(project), "python", str(project / "run.py"), *args], env=env, check=True
     )
@@ -86,3 +92,17 @@ def enhance(name: str, jobs: list[tuple[Path, Path]], spec: dict | None, cache: 
     listing = work / f"{name}_jobs.jsonl"
     listing.write_text("".join(json.dumps({"in": str(a), "out": str(b)}) + "\n" for a, b in jobs), "utf-8")
     run(name, *([str(weights(name, spec, cache))] if spec else []), str(listing))
+
+
+def embed(name: str, spec: dict, windows: list[np.ndarray], cache: Path, work: Path) -> np.ndarray:
+    """Speaker embeddings (windows, dims) of float 16 kHz windows by the extractor ml/spk_ref/<name>/, every file of
+    spec's files fetched into cache/spk_ref/<name>/ at its path there; the windows go in one npz under work."""
+    folder = cache / "spk_ref" / name
+    for path, pin in spec["files"].items():
+        fetch(pin, folder / path)
+    work.mkdir(parents=True, exist_ok=True)
+    listing, out = work / f"{name}_windows.npz", work / f"{name}_embeddings.npy"
+    bounds = np.cumsum([0, *(len(w) for w in windows)])
+    np.savez(listing, audio=np.concatenate(windows).astype(np.float32), bounds=bounds)
+    run(name, str(folder), str(listing), str(out), projects=SPEAKER_PROJECTS)
+    return np.load(out)

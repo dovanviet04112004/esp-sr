@@ -1,0 +1,14 @@
+[project]
+name = "spk-ref-ecapa"
+version = "0.1.0"
+description = "ECAPA-TDNN of SpeechBrain on VoxCeleb (Apache 2.0) behind run.py: speaker embeddings of 16 kHz windows, on the CPU"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "speechbrain==1.1.1",
+    "torch==2.14.0",
+    "torchaudio==2.11.0",
+    "numpy==2.5.3",
+]
+
+[tool.uv]
+package = false

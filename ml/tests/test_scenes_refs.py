@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from srpipe.scenes import refs
@@ -57,3 +58,31 @@ def test_enhance_lists_every_pair_once_and_passes_weights_only_when_pinned(tmp_p
     assert listing == [{"in": str(a), "out": str(b)} for a, b in pairs]
     with pytest.raises(FileNotFoundError, match="1 inputs missing"):
         refs.enhance("rnnoise", [*pairs, (tmp_path / "gone.wav", tmp_path / "x.wav")], None, cache, tmp_path / "w")
+
+
+def test_embed_fetches_every_file_and_hands_the_windows_over_in_one_npz(tmp_path: Path, monkeypatch) -> None:
+    cache = tmp_path / "cache"
+    files = {"w.bin": b"weights", "pkg/mod.py": b"code"}
+    for path, body in files.items():
+        (cache / "spk_ref" / "x" / path).parent.mkdir(parents=True, exist_ok=True)
+        (cache / "spk_ref" / "x" / path).write_bytes(body)
+    spec = {
+        "files": {
+            p: {"url": "https://example.org/" + p, "sha256": hashlib.sha256(b).hexdigest()} for p, b in files.items()
+        }
+    }
+    seen = {}
+
+    def fake_run(name: str, folder: str, listing: str, out: str, projects: Path) -> None:
+        with np.load(listing) as f:
+            seen["bounds"], seen["audio"] = f["bounds"].tolist(), f["audio"]
+        seen["projects"] = projects
+        np.save(out, np.ones((len(seen["bounds"]) - 1, 4), dtype=np.float32))
+
+    monkeypatch.setattr(refs, "run", fake_run)
+    windows = [np.zeros(3, dtype=np.float32), np.ones(5, dtype=np.float32)]
+    got = refs.embed("x", spec, windows, cache, tmp_path / "work")
+    assert got.shape == (2, 4) and seen["bounds"] == [0, 3, 8] and seen["audio"][3:].tolist() == [1.0] * 5
+    assert seen["projects"] == refs.SPEAKER_PROJECTS
+    with pytest.raises(ValueError, match="sha256"):
+        refs.embed("x", {"files": {"w.bin": spec["files"]["w.bin"] | {"sha256": "0" * 64}}}, windows, cache, tmp_path)
