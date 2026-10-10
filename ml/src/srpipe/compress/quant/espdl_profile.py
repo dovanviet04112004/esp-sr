@@ -1,4 +1,4 @@
-"""Step 2 of KEHOACH 3.14's procedure for a faster branch on the chip: esp-dl's per-module profile from a board log,
+"""Step 2.2 of KEHOACH 3.14's procedure for a faster branch on the chip: esp-dl's per-module profile from a board log,
 joined to the .espdl that ran and the .info written beside it, each module's time ranked and each slow path of esp-dl's
 S3 kernels tagged with the export patch of esp_ppq_patches that handles it.
 Run: python -m srpipe.compress.quant.espdl_profile --log <board log> --espdl <model.espdl> [--top N]"""

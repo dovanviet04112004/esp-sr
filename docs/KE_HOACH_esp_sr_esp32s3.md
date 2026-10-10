@@ -1504,28 +1504,51 @@ nhân số nguyên với `1/sqrtf` của bình phương trung bình đã nhân t
 lên; bản vá tính đúng chuỗi ấy, gradient của QAT đi qua bản float.
 
 
-Tăng tốc một nhánh trên chip đi theo một quy trình, nhánh nào cũng vậy:
-1. Lượng tử nhanh một hàng `timing` (`quant.yaml` `timing`: minmax, không equalization, không bias correction), vì giờ
-   chạy trên chip chỉ phụ thuộc cấu trúc đồ thị. Đo trên board thời gian từng module bằng `profile_module` của esp-dl,
-   trong lượt `model->test()` của bản dò nhánh.
-2. `espdl_profile.py` đọc bảng ấy trong log cùng `.espdl` đã chạy (`make ai-profile`): thời gian theo loại op, module
-   chậm nhất, chu kỳ trên mỗi phép nhân-cộng của từng tích chập. Nó gắn nhãn các đường chậm của esp-dl trên S3, mỗi nhãn
-   kèm bản vá xử lý nó: số kênh không chia hết cho 16 (nhân unaligned), trọng số tích chập lớn hơn cache dữ liệu 64 KB,
-   MatMul ra ít hơn 16 cột (vòng C), op chạy float, Transpose và QuantizeLinear do bước xuất chèn.
-3. Bật bản vá ở bước xuất trong config của nhánh, nạp board: `model->test()` phải khớp mô phỏng từng bit ở mọi bản cắt;
-   đo lại.
-4. Viết lại mạng khi không bản vá nào xử lý được. Lệnh `same-int8` của nhánh lượng tử bản đang sửa và bản ở một commit
-   (mặc định HEAD) bằng chính các bậc của thang, cùng dữ liệu hiệu chỉnh, rồi so mô phỏng trên vài cửa sổ: phải không
-   lệch số nào (`ptq_espdl.same_integers`).
-5. Ghi mỗi bước vào `docs/measurements/latency.md`.
+**Quy trình đưa một model lên chip**, nhánh nào cũng vậy. Mỗi bước là một lệnh make, có điều kiện qua; chưa qua thì
+không sang bước sau. Mọi số đo ghi ngay vào `docs/measurements/` (`latency.md` cho giờ, `<nhánh>.md` cho chất lượng),
+mỗi bước một commit.
 
-`make speed BRANCH=<nhánh> RUN=<run> [AGAINST=<commit>]` chạy bước 4, 1, 3 rồi 2 thành một chuỗi, dừng ở bước đầu tiên
-không qua: phép so số nguyên khi mã mạng của nhánh khác `AGAINST` (mặc định HEAD), hàng `timing`, bản dò trên board
-với hàng ấy, bảng xếp hạng. Một nhánh vào chuỗi khi có đủ ba móc: lệnh `<nhánh>-timing` và `<nhánh>-same-int8` gọi các
-lệnh con cùng tên của `tasks/<nhánh>/quant.py`, và `ai-unit-<nhánh>` nhận `RUN`, `ROW`, chạy `model->test()` của bản dò
-với `profile_module` bật, để log ở chỗ `SPEED_LOG_<nhánh>` khai. Bản vá mới vào `esp_ppq_patches.py` và danh sách của
-config nhánh, nhãn đường chậm mới vào `espdl_profile.py`; chuỗi không đổi. Khi thôi tối ưu, chạy cả thang một lần
-(`make <nhánh>-ptq`) và ghi chất lượng.
+1. **Đúng: chip tính như mô phỏng.**
+   1. Viết lại mạng cho esp-dl trong `quant.py` của nhánh, không đổi phép tính float: lệch mạng gốc không quá
+      `quant.rewrite_rtol`. Những gì esp-dl thiếu hay dựng khác ONNX thì viết thành phép nó có: pad `same` của tích chập
+      1-D thành pad tường minh, tích chập nhóm nhân kênh thành tích chập thường khối chéo, LayerNorm kiểu channels-first
+      thành `layer_norm` trên trục kênh đã dời ra cuối, `Expand` thành phép cộng theo kênh.
+   2. `make <nhánh>-timing RUN=<run>`, rồi `make ai-unit-<nhánh> RUN=<run> ROW=timing`. Qua khi model nạp được và
+      `model->test()` khớp mô phỏng từng bit ở cả đồ thị lẫn mọi bản cắt (`probe.cuts`). `espdl_shapes.py` đã chặn trên
+      máy tính mọi đồ thị esp-dl dựng sai hình dạng. Lệch thì chia đôi bằng các bản cắt (`CUT_RANGE`) tới op đầu tiên
+      lệch: op mà esp-dl tính khác ESP-PPQ thì sửa mô phỏng trong `esp_ppq_patches.py` (như `layernorm_as_espdl`,
+      `softmax_as_espdl`), op esp-dl không có thì viết lại ở bước 1.1. Bản vá mô phỏng chép theo **mã máy** của nhân
+      (`xtensa-esp32s3-elf-objdump` trên ELF của bản dò), không theo mã C. esp-dl dựng với `-ffast-math -O3`, nên
+      trình biên dịch đổi thứ tự các phép float, gộp nhân-cộng thành `madd.s` và đổi phép chia thành nhân nghịch đảo.
+2. **Nhanh: lặp `make speed BRANCH=<nhánh> RUN=<run>`.** Chuỗi ấy so số nguyên khi mã mạng đổi, lượng tử hàng `timing`,
+   chạy bản dò trên board và in bảng xếp hạng, dừng ở bước đầu tiên không qua:
+   1. Hàng `timing` (`quant.yaml` `timing`: minmax, không equalization, không bias correction) lượng tử nhanh. Giờ chạy
+      trên chip chỉ phụ thuộc cấu trúc đồ thị, nên đo bằng nó là đủ. Bản dò đo thời gian từng module bằng
+      `profile_module` của esp-dl. Hàng ấy hiệu chuẩn trên chính các cửa sổ thật của thang. Lưới hiệu chuẩn bằng nhiễu
+      có thể không chạm giá trị nào sát nửa bước, nên che mất lỗi mô phỏng mà dữ liệu thật làm lộ ra.
+   2. `espdl_profile.py` (`make ai-profile`) đọc bảng ấy cùng `.espdl` đã chạy: thời gian theo loại op, module chậm
+      nhất, chu kỳ trên mỗi phép nhân-cộng của từng tích chập. Nó gắn nhãn các đường chậm của esp-dl trên S3, mỗi nhãn
+      kèm bản vá xử lý nó: số kênh không chia hết cho 16 (nhân unaligned), trọng số tích chập lớn hơn cache dữ liệu
+      64 KB, MatMul ra ít hơn 16 cột (vòng C), op chạy float, Transpose và QuantizeLinear do bước xuất chèn.
+   3. Bật bản vá xuất của nhãn trong `esp_ppq_patches` của config nhánh, chạy lại chuỗi. Qua khi bản dò vẫn khớp từng
+      bit; giữ bản vá khi giờ giảm.
+   4. Nhãn không có bản vá thì viết lại mạng. Lệnh `<nhánh>-same-int8` lượng tử mạng đang sửa và mạng ở commit `AGAINST`
+      (mặc định HEAD) bằng chính các bậc của thang, cùng dữ liệu hiệu chuẩn, rồi so mô phỏng trên vài cửa sổ. Qua khi
+      không lệch số nào (`ptq_espdl.same_integers`), vì bias correction của ESP-PPQ hiệu chỉnh theo khối op nên thêm hay
+      bớt op có thể đổi số nguyên dù phép tính không đổi. Viết lại không qua được thì làm ở bước xuất.
+   5. Dừng khi bảng xếp hạng chỉ còn nhãn không có bản vá và các op còn lại đã chạy ở băng thông PSRAM.
+3. **Chất lượng.** `make <nhánh>-ptq RUN=<run>` chạy đủ các cách hiệu chuẩn của bậc 2. Chọn cách tốt nhất theo thước của
+   nhánh, ghi vào `<nhánh>.md` cạnh float. Còn trượt cửa thì bậc 3, rồi bậc 4 (QAT, cần chủ repo cho học), như bảng
+   trên.
+4. **Chốt.** Bản dò chạy trên hàng đã chọn (`ROW=<cách hiệu chuẩn>`, không phải `timing`): khớp từng bit, giờ và PSRAM
+   ghi vào `latency.md`. ADR ghi bậc đã chọn. Bản dò ghi đè firmware sản phẩm trên board, nên cuối đợt chạy
+   `make fw-bench-flash && make models-flash` một lần.
+
+Một nhánh vào quy trình khi có đủ các móc: lệnh `<nhánh>-timing`, `<nhánh>-same-int8` và `<nhánh>-ptq` gọi lệnh con cùng
+tên của `quant.py` của nhánh (`tasks/speaker/quant.py`, `tasks/command/ctc/quant.py`); `ai-unit-<nhánh>` nhận `RUN`,
+`ROW`, `CUT_RANGE`, chạy `model->test()` của bản dò với
+`profile_module` bật. Makefile khai `SPEED_LOG_<nhánh>` là log của bản dò và `SPEED_ESPDL_<nhánh>` là `.espdl` của hàng
+`timing`. Bản vá mới vào `esp_ppq_patches.py`, nhãn đường chậm mới vào `espdl_profile.py`; quy trình không đổi.
 
 Mỗi nhánh dựng thang của mình ở `tasks/<nhánh>/quant.py`: mỗi bậc một lệnh con, mỗi dòng so với float bằng thước của
 nhánh sau int8, ghi vào `<run>/int8/ladder.yaml`, đồ thị của dòng ở `<run>/int8/<dòng>/`. Bậc 3 và 4 dựng trên cách hiệu
