@@ -73,16 +73,21 @@ def test_embed_fetches_every_file_and_hands_the_windows_over_in_one_npz(tmp_path
     }
     seen = {}
 
-    def fake_run(name: str, folder: str, listing: str, out: str, projects: Path) -> None:
+    def fake_run(project: str, folder: str, listing: str, out: str, *args: str, projects: Path) -> None:
         with np.load(listing) as f:
             seen["bounds"], seen["audio"] = f["bounds"].tolist(), f["audio"]
-        seen["projects"] = projects
+        seen["projects"], seen["project"], seen["args"] = projects, project, args
         np.save(out, np.ones((len(seen["bounds"]) - 1, 4), dtype=np.float32))
 
     monkeypatch.setattr(refs, "run", fake_run)
     windows = [np.zeros(3, dtype=np.float32), np.ones(5, dtype=np.float32)]
     got = refs.embed("x", spec, windows, cache, tmp_path / "work")
     assert got.shape == (2, 4) and seen["bounds"] == [0, 3, 8] and seen["audio"][3:].tolist() == [1.0] * 5
-    assert seen["projects"] == refs.SPEAKER_PROJECTS
+    assert seen["projects"] == refs.SPEAKER_PROJECTS and seen["project"] == "x" and seen["args"] == ()
+    seen.clear()
+    refs.embed("x", spec, windows, cache, tmp_path / "work")
+    assert not seen
+    refs.embed("x", spec | {"project": "shared", "args": ["arch", "w.bin"]}, windows, cache, tmp_path / "work")
+    assert seen["project"] == "shared" and seen["args"] == ("arch", "w.bin")
     with pytest.raises(ValueError, match="sha256"):
         refs.embed("x", {"files": {"w.bin": spec["files"]["w.bin"] | {"sha256": "0" * 64}}}, windows, cache, tmp_path)

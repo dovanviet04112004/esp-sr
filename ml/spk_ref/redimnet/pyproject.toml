@@ -1,12 +1,13 @@
 [project]
-name = "spk-ref-speakerlab"
+name = "spk-ref-redimnet"
 version = "0.1.0"
-description = "3D-Speaker's CAM++ and ERes2NetV2 (Apache 2.0) behind run.py: speaker embeddings of 16 kHz windows, on the CPU"
+description = "ReDimNet of IDRnD (code MIT) behind run.py: speaker embeddings of 16 kHz windows, on the GPU when present"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "torch==2.14.0",
     "torchaudio==2.11.0",
     "numpy==2.5.3",
+    "scipy==1.18.1",
 ]
 
 [tool.uv]

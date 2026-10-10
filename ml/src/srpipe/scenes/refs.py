@@ -94,15 +94,32 @@ def enhance(name: str, jobs: list[tuple[Path, Path]], spec: dict | None, cache: 
     run(name, *([str(weights(name, spec, cache))] if spec else []), str(listing))
 
 
+def embedding_key(audio: np.ndarray, bounds: np.ndarray, spec: dict) -> str:
+    """sha256 of the windows and of the extractor's pins and arguments: equal keys give equal embeddings."""
+    digest = hashlib.sha256(audio.tobytes())
+    digest.update(bounds.astype(np.int64).tobytes())
+    digest.update(json.dumps(spec, sort_keys=True).encode("utf-8"))
+    return digest.hexdigest()
+
+
 def embed(name: str, spec: dict, windows: list[np.ndarray], cache: Path, work: Path) -> np.ndarray:
-    """Speaker embeddings (windows, dims) of float 16 kHz windows by the extractor ml/spk_ref/<name>/, every file of
-    spec's files fetched into cache/spk_ref/<name>/ at its path there; the windows go in one npz under work."""
+    """Speaker embeddings (windows, dims) of float 16 kHz windows by extractor name: every file of spec's files fetched
+    into cache/spk_ref/<name>/ at its path there, then run.py of ml/spk_ref/<spec's project, else name>/ with spec's
+    args after the weights folder, the npz of windows it reads under work and the npy it writes. The npy is kept with
+    embedding_key beside it and given back while the key holds."""
     folder = cache / "spk_ref" / name
     for path, pin in spec["files"].items():
         fetch(pin, folder / path)
     work.mkdir(parents=True, exist_ok=True)
-    listing, out = work / f"{name}_windows.npz", work / f"{name}_embeddings.npy"
-    bounds = np.cumsum([0, *(len(w) for w in windows)])
-    np.savez(listing, audio=np.concatenate(windows).astype(np.float32), bounds=bounds)
-    run(name, str(folder), str(listing), str(out), projects=SPEAKER_PROJECTS)
+    listing, out, keyed = (work / f"{name}_{part}" for part in ("windows.npz", "embeddings.npy", "embeddings.key"))
+    audio, bounds = np.concatenate(windows).astype(np.float32), np.cumsum([0, *(len(w) for w in windows)])
+    key = embedding_key(audio, bounds, spec)
+    if out.exists() and keyed.exists() and keyed.read_text(encoding="utf-8") == key:
+        return np.load(out)
+    keyed.unlink(missing_ok=True)
+    np.savez(listing, audio=audio, bounds=bounds)
+    run(
+        spec.get("project", name), str(folder), str(listing), str(out), *spec.get("args", []), projects=SPEAKER_PROJECTS
+    )
+    keyed.write_text(key, encoding="utf-8")
     return np.load(out)
