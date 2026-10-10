@@ -209,23 +209,50 @@ def layernorm_graph(tmp_path: Path):
     return graph, op
 
 
+def fused(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> np.ndarray:
+    """madd.s on float32 arrays: a * b + c to float32 with one rounding. The float64 sum of the exact product rounds
+    as the exact value does unless it lands on a float32 half step; then the sum's error picks the side."""
+    product, addend = a.astype(np.float64) * b.astype(np.float64), np.asarray(c, np.float64)
+    total = product + addend
+    back = total - product
+    error = (product - (total - back)) + (addend - back)
+    near = total.astype(np.float32)
+    low = np.where(near.astype(np.float64) > total, np.nextafter(near, np.float32(-np.inf)), near)
+    high = np.where(near.astype(np.float64) < total, np.nextafter(near, np.float32(np.inf)), near)
+    halfway = (low != high) & ((low.astype(np.float64) + high.astype(np.float64)) / 2 == total)
+    return np.where(halfway & (error > 0), high, np.where(halfway & (error < 0), low, near))
+
+
 def espdl_layernorm(q: np.ndarray, gamma: np.ndarray, beta: np.ndarray, s_in, s_out, eps) -> np.ndarray:
-    """esp-dl's int8 LayerNormalization of q over its last axis, each float32 step as dl_module_layer_normalization.hpp
-    takes it, sqrt_newton as dl_math.hpp has it."""
-    f = np.float32
-    mean = (q.astype(np.float64).sum(-1, keepdims=True) / q.shape[-1]).astype(f)
-    variance = np.zeros_like(mean)
-    for j in range(q.shape[-1]):
-        variance = variance + (q[..., j : j + 1].astype(f) - mean) ** 2
-    variance = variance * (f(s_in) * f(s_in)) / f(q.shape[-1])
-    x = variance + f(eps)
+    """esp-dl's int8 LayerNormalization of q over its last axis as the S3 build runs it (-ffast-math -O3): the mean
+    through a double reciprocal, squares summed by madd.s, 1.0f / n times the squared input step fused with eps,
+    sqrt_newton as dl_math.hpp has it, then gamma times the inverse deviation times the centred value, plus beta."""
+    f, n = np.float32, q.shape[-1]
+    mean = (q.astype(np.float64).sum(-1, keepdims=True) * (1.0 / n)).astype(f)
+    squares = np.zeros_like(mean)
+    for j in range(n):
+        squares = fused(q[..., j : j + 1].astype(f) - mean, q[..., j : j + 1].astype(f) - mean, squares)
+    x = fused(np.full_like(squares, (f(1.0) / f(n)) * (f(s_in) * f(s_in))), squares, np.full_like(squares, eps))
     root, moving = x.copy(), np.ones(x.shape, dtype=bool)
     while moving.any():
         step = (root + x / root) * f(0.5)
         root, moving = np.where(moving, step, root), moving & (np.abs(step - root) > f(1e-5))
-    inv_std = f(1.0) / root
-    result = (q.astype(f) * f(s_in) - mean * f(s_in)) * inv_std * gamma + beta
+    result = gamma * ((f(1.0) / root) * f(s_in)) * (q.astype(f) - mean) + beta
     return np.clip(np.floor(result * (f(1.0) / f(s_out)) + f(0.5)), -128, 127)
+
+
+def test_fma32_rounds_a_product_and_its_sum_once() -> None:
+    """(1 + 2^-12)^2 - 1 keeps the product's 2^-24 that a rounded product drops; 1 + 2^-23 - 2^-24 + 2^-70 rounds up,
+    though its float64 sum sits on the float32 half step between 1 and 1 + 2^-23 and would round to even."""
+    f = np.float32
+    cases = [
+        ((f(1 + 2**-12), f(1 + 2**-12), f(-1)), f(2**-11 + 2**-24), f(f(1 + 2**-12) * f(1 + 2**-12)) + f(-1)),
+        ((f(2**-12 * (1 + 2**-23)), f(-(2**-12) * (1 - 2**-23)), f(1 + 2**-23)), f(1 + 2**-23), f(1)),
+    ]
+    for (a, b, c), want, unfused in cases:
+        args = [np.array([v]) for v in (a, b, c)]
+        assert fused(*args)[0] == want != unfused
+        assert esp_ppq_patches.fma32(*(torch.from_numpy(v) for v in args))[0].item() == want
 
 
 def test_layernorm_as_espdl_simulates_each_norm_as_the_chip_rounds_it(tmp_path: Path) -> None:
@@ -254,14 +281,14 @@ SOFTMAX_ROWS, SOFTMAX_WIDTH = 512, 148
 
 
 def espdl_softmax(q: np.ndarray, s_in: float) -> np.ndarray:
-    """esp-dl's int8 Softmax of q over its last axis as dl_module_softmax.hpp's forward_lut takes it: exp from a table
-    of the input's grid, the row summed one value after another in float32, each value divided by the sum."""
+    """esp-dl's int8 Softmax of q over its last axis as the S3 build runs forward_lut (-ffast-math): exp from a table
+    of the input's grid, the row summed one value after another in float32, each value times the sum's reciprocal."""
     table = np.exp(np.arange(-128, 128, dtype=np.float64) * s_in).astype(np.float32)
     e = table[q.astype(np.int64) + 128]
     total = np.zeros((*e.shape[:-1], 1), np.float32)
     for i in range(e.shape[-1]):
         total = total + e[..., i : i + 1]
-    return e / total
+    return e * (np.float32(1) / total)
 
 
 def test_softmax_as_espdl_simulates_each_row_as_the_chip_sums_it(tmp_path: Path) -> None:

@@ -196,9 +196,24 @@ def sqrt_newton(x):
     return root
 
 
+def fma32(a, b, c):
+    """a * b + c on float32 tensors rounded once to float32, as the S3's madd.s gives it: the exact product summed in
+    float64 and rounded to odd there, which the one rounding to float32 then leaves as the fused result."""
+    import torch
+
+    product, addend = a.double() * b.double(), c.double()
+    total = product + addend
+    back = total - product
+    error = (product - (total - back)) + (addend - back)
+    toward = torch.where(error > 0, torch.full_like(total, math.inf), torch.full_like(total, -math.inf))
+    even = (total.view(torch.int64) & 1) == 0
+    return torch.where((error != 0) & even, torch.nextafter(total, toward), total).float()
+
+
 def layernorm_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platforms: frozenset, **kwargs):
-    """op's output as esp-dl's int8 LayerNormalization computes it once op, on one of platforms, has its input and
-    output quantised, each float32 step in dl_module_layer_normalization.hpp's order; simulate's output otherwise."""
+    """op's output as esp-dl's LayerNormalization computes it once op, on one of platforms, has its input and output
+    quantised: each float32 step as GCC builds forward_template for the S3 under esp-dl's -ffast-math -O3, which
+    reorders the source's steps and fuses its multiply-adds into madd.s; simulate's output otherwise."""
     import torch
     from esp_ppq.core import QuantizationStates
     from esp_ppq.IR.quantize import QuantableOperation
@@ -211,28 +226,29 @@ def layernorm_like_espdl(op, values: list, ctx=None, *, simulate: Callable, plat
         return floating
     with torch.no_grad():
         x, gamma = values[0].to(floating.device), values[1].to(floating.device)
-        beta = values[2].to(floating.device) if len(values) > 2 else torch.zeros_like(gamma)
         s_in, s_out = given.scale.to(floating.device).float(), out.scale.to(floating.device).float()
         q = torch.round(x / s_in)
         n = q.shape[-1]
-        mean = (q.double().sum(-1, keepdim=True) / n).float()
-        variance = torch.zeros_like(mean)
+        mean = (q.double().sum(-1, keepdim=True) * (1.0 / n)).float()
+        squares = torch.zeros_like(mean)
         for j in range(n):
-            variance = variance + (q[..., j : j + 1] - mean) ** 2
-        variance = variance * (s_in * s_in) / n
-        eps = torch.full_like(variance, op.attributes.get("epsilon", 1e-5))
-        inv_std = torch.ones_like(variance) / sqrt_newton(variance + eps)
-        result = (q * s_in - mean * s_in) * inv_std * gamma + beta
+            squares = fma32(q[..., j : j + 1] - mean, q[..., j : j + 1] - mean, squares)
+        per_value = torch.ones_like(s_in) / torch.full_like(s_in, n) * (s_in * s_in)
+        eps = torch.full_like(squares, op.attributes.get("epsilon", 1e-5))
+        inv_std = torch.ones_like(squares) / sqrt_newton(fma32(per_value, squares, eps))
+        result = gamma * (inv_std * s_in) * (q - mean)
+        if len(values) > 2:
+            result = result + values[2].to(floating.device)
         y = torch.clamp(torch.floor(result * (torch.ones_like(s_out) / s_out) + 0.5), out.quant_min, out.quant_max)
     return floating - floating.detach() + y * s_out
 
 
 @contextlib.contextmanager
 def layernorm_as_espdl() -> Iterator[None]:
-    """ESP-PPQ simulates LayerNormalization with torch's layer_norm rounded at its output; esp-dl's int8 kernel sums the
-    integers, accumulates the variance in float32 one channel after another and takes 1 / sqrt_newton of it, so an
-    output on a half step can round the other way. ReDimNet2 b0 (KEHOACH 3.17) on board B: 2.5 in stage0's first norm
-    became 3 on the chip and 2 in the simulation, and 160 of 192 embedding values left it.
+    """ESP-PPQ simulates LayerNormalization with torch's layer_norm rounded at its output; esp-dl's kernel, built with
+    -ffast-math, takes the mean through a reciprocal, sums the squares with fused multiply-adds and scales by gamma
+    before the centred value, so an output on a half step can round the other way. ReDimNet2 b0 (KEHOACH 3.17) on board
+    B: the stem's norm left the simulation on speech-calibrated grids, as stage0's first did without the patch.
     """
     from esp_ppq.api.espdl_interface import get_target_platform
     from esp_ppq.executor.base import OPERATION_FORWARD_TABLE
@@ -254,8 +270,8 @@ def layernorm_as_espdl() -> Iterator[None]:
 
 def softmax_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platforms: frozenset, **kwargs):
     """op's output as esp-dl's Softmax computes it from an int8 input on one of platforms: each step's exp from a
-    256-entry float32 table, the row summed in float32 one value after another, each divided by that sum; simulate's
-    output otherwise."""
+    256-entry float32 table, the row summed in float32 one value after another, each multiplied by the float32
+    reciprocal of that sum, as -ffast-math builds the source's division; simulate's output otherwise."""
     import torch
     from esp_ppq.core import QuantizationStates
     from esp_ppq.IR.quantize import QuantableOperation
@@ -275,7 +291,7 @@ def softmax_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platfo
         total = torch.zeros_like(e[..., :1])
         for i in range(e.shape[-1]):
             total = total + e[..., i : i + 1]
-        p = (e / total).movedim(-1, axis)
+        p = (e * (torch.ones_like(total) / total)).movedim(-1, axis)
     return floating - floating.detach() + p
 
 
