@@ -1765,8 +1765,9 @@ người lạ lọt.
   ngoài đồ thị.
 - **Bước đầu là bản dò** như E9-T10: xuất qua ESP-PPQ, `model->test()`, thời gian một lần chạy và PSRAM trên board B,
   độ lệch int8 so với mô phỏng, chất lượng sau int8 trên vật liệu của khảo sát.
-- **Cắm vào chuỗi** chỉ khi bản dò đạt hai điều: một lần chạy ≤ 1 s trên cửa sổ 1,5 s; sau int8 giữ ≥ 95% lệnh được nhận
-  ở cả 1 m và 3 m, với ≤ 5% người lạ lọt.
+- **Cắm vào chuỗi** khi bản dò đạt hai điều: một lần chạy quanh 1 s trên cửa sổ 1,5 s; sau int8 giữ ≥ 95% lệnh được
+  nhận ở cả 1 m và 3 m, gộp các phiên của mỗi khoảng cách, với ≤ 5% người lạ lọt. Hàng kl int8 của b0 chạy 1128,5 ms
+  và giữ 98,9% ở 1 m, 97,5% ở 3 m; chủ repo nhận và cho cắm (ADR-0021).
 - **Chốt ở KẾ HOẠCH lúc cắm:** thư mục trong `ai_engine/src/`, chỗ đệm PCM của cửa sổ, chỗ mẫu giọng nằm trên flash
   (`storage_format.h`, §6.2). Hàng int8 được chọn vào `firmware/models/speaker/` và `models.lock.json` bằng một lệnh
   `deploy`, như `ctc-deploy`.
