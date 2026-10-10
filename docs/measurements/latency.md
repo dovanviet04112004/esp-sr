@@ -590,3 +590,20 @@ phân vùng `voice`; hai lượt sau chạy riêng ca Cửa 3 trước cả bộ
 
 Cả bộ 8/8 bài thử qua. Lượt trước cùng ngày dừng trước bài thử: `ctc_gate.bin` lớn hơn phân vùng `voice`, và các ca `kws`,
 `ns`, chạy dòng giữ mạng của mình trong PSRAM tới hết bộ, nên ca `ctc` hết PSRAM khi nạp (`4a09a16`).
+
+## 25. ReDimNet2 b0 int8 trên esp-dl: 3,04 s một cửa sổ 1,5 s (E11-T25)
+
+Đo ngày 10/10 trên board B bằng `make ai-unit-speaker RUN=artifacts/speaker/runs/20261010_5a45475-dirty_94e5a9 ROW=kl`.
+Đồ thị là b0 viết lại cho esp-dl (`speaker.md` §6.2), hiệu chỉnh kl, đầu vào 72 mel × 149 khung.
+
+| Đo | Kết quả |
+|---|---|
+| Ảnh model trong PSRAM | 1722 KB |
+| Dựng mạng, gồm một lần chạy thử | 3668 ms; PSRAM 3 277 280 B cho tensor, RAM nội 192 B |
+| Một lần chạy | **3039 ms** trung bình, 3039 ms đỉnh, qua 10 lần sau một lần không đo |
+| So mô phỏng ESP-PPQ | 158/192 giá trị lệch quá một bước int8, lệch lớn nhất 18; `model->test()` báo không khớp |
+
+- **Gấp 3 lần ngưỡng cắm** ≤ 1 s của KẾ HOẠCH §3.17. Ước theo MAC là 0,55–2,7 s 🔬; số đo nằm trên khoảng ấy.
+- **Dạng lệch:** các cặp board/mô phỏng cùng dấu và cùng cỡ (20/10, −10/−14, 111/109, −35/−43), không phải ×2 đều
+  khắp. Đó là sai số tích luỹ, chưa biết bắt đầu ở op nào.
+- **Watchdog:** nhân 0 bận liền 3–4 s khi dựng và chạy, nên task watchdog cảnh báo; test vẫn chạy hết.

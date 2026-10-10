@@ -234,5 +234,9 @@ Lệnh được nhận giữ bao nhiêu, ở hai mức người lạ lọt:
   - Sau sửa, phát lại qua hết đồ thị: mọi chiều dương, mọi phép phát sóng hợp lệ, đầu ra [1, 192].
 - **Lần ba, đồ thị sửa đủ ba chỗ:** model nạp, dựng và chạy hết trên chip; ảnh model 1722 KB trong PSRAM, `.espdl`
   1,76 MB. `model->test()` báo đầu ra lệch mô phỏng ESP-PPQ: phần tử đầu là 20, mô phỏng là 10 (int8). esp-dl chỉ
-  báo chỗ lệch đầu tiên, nên chưa biết lệch từ op nào. Từ lúc nạp ảnh tới lúc báo lỗi mất ~4 s, gồm chép model vào
-  PSRAM, dựng và một lần chạy; đây là chặn trên thô, chưa phải thời gian một lần chạy.
+  báo chỗ lệch đầu tiên, nên chưa biết lệch từ op nào.
+- **Lần bốn, đo giờ trước khi so:** một lần chạy mất **3,04 s**, gấp 3 lần ngưỡng cắm ≤ 1 s; tensor chiếm 3,28 MB
+  PSRAM (`latency.md` §25). 158/192 giá trị lệch mô phỏng quá một bước, lệch lớn nhất 18, cùng dấu và cùng cỡ.
+- **Đọc:** b0 int8 trên ESP32-S3 không đạt điều kiện cắm về thời gian, kể cả khi sửa xong chỗ lệch. Trước khi dò chỗ
+  lệch cần biết 3 s nằm ở đâu: đo từng lớp bằng `model->profile()` của esp-dl. Nếu vài loại op (Pow F32, Transpose,
+  conv sâu nhân 59, attention) chiếm phần lớn thì còn đường viết lại; nếu chia đều thì b0 không hợp với S3.
