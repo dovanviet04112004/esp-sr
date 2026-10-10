@@ -23,6 +23,7 @@ namespace {
 
 constexpr size_t kSectorBytes = 4096;
 constexpr int kToleranceSteps = 1; // one int8 step, as model->test() allows (KEHOACH 3.14)
+constexpr uint32_t kShownValues = 8;
 
 // Layout written by srpipe.tasks.speaker.probe; the record's int8 data is padded to four bytes.
 struct WindowsHead {
@@ -39,11 +40,11 @@ struct WindowRecord {
 };
 static_assert(sizeof(WindowsHead) == 8 && sizeof(WindowRecord) == 36, "speaker_windows.bin layout");
 
-void run_test_of(const char *entry, const ai::Blob &blob)
+esp_err_t test_of(const ai::Blob &blob)
 {
     dl::Model model(reinterpret_cast<const char *>(blob.data), fbs::MODEL_LOCATION_IN_FLASH_RODATA, 0,
                     dl::MEMORY_MANAGER_GREEDY, nullptr, false);
-    TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, model.test(), entry);
+    return model.test();
 }
 
 } // namespace
@@ -63,7 +64,6 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
 
     const ai::Blob blob = ai::image_find(rec.entry, STORAGE_MODEL_KIND_ESPDL);
     TEST_ASSERT_NOT_NULL_MESSAGE(blob.data, rec.entry);
-    run_test_of(rec.entry, blob);
     static ai::EspdlNet net;
     const size_t psram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     TEST_ASSERT_EQUAL(ESP_OK, net.build(blob, rec.entry));
@@ -76,6 +76,7 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
     TEST_ASSERT_EQUAL(rec.output_exponent, out.exponent);
 
     int worst = 0;
+    uint32_t off = 0;
     int64_t total_us = 0;
     int64_t peak_us = 0;
     for (uint32_t r = 0; r <= head.runs; r++) {
@@ -86,6 +87,7 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
         for (uint32_t k = 0; k < rec.dims; k++) {
             const int diff = abs(out.data[k] - y[k]);
             worst = diff > worst ? diff : worst;
+            off += r == 0 && diff > kToleranceSteps;
         }
         // The first run is untimed: it pays the caches' first fill.
         if (r > 0) {
@@ -98,11 +100,19 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
            " us mean, %" PRId64 " us peak a window over %" PRIu32 " runs, psram %u B with its tensors\n",
            rec.entry, rec.mels, rec.frames, worst, total_us / head.runs, peak_us, head.runs,
            (unsigned)psram_bytes);
+    printf("%s: %" PRIu32 " of %" PRIu32 " values off the simulation; first board/simulation:", rec.entry,
+           off, rec.dims);
+    for (uint32_t k = 0; k < rec.dims && k < kShownValues; k++) {
+        printf(" %d/%d", out.data[k], y[k]);
+    }
+    printf("\n");
     net.release();
+    const esp_err_t tested = test_of(blob);
     const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY,
                                                            STORAGE_MODEL_LABEL_SLOT0);
     TEST_ASSERT_NOT_NULL(part);
     TEST_ASSERT_EQUAL(ESP_OK, esp_partition_erase_range(part, 0, kSectorBytes));
+    TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, tested, rec.entry);
     TEST_ASSERT_LESS_OR_EQUAL(kToleranceSteps, worst);
 }
 
