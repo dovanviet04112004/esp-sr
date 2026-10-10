@@ -717,6 +717,9 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
   - Cả bốn khớp mô phỏng không cần vá.
 - **Các hàng của thang** (kl, percentile, minmax, mse) lượng tử trước bản sửa. Bias correction của chúng chạy trên mô
   phỏng cũ, nên phải chạy lại thang.
+- **Hàng kl của thang chạy lại** (equalization, bias correction, mô phỏng đã sửa; 11/10), `make ai-unit-speaker
+  ROW=kl`, test board đã siết về khớp từng bit: 4/4 bản cắt, 0/192 giá trị lệch, lệch lớn nhất 0. Một lần chạy
+  **1128,5 ms** (10 lần), PSRAM cho tensor 2 135 040 B.
 - **Chuỗi `make speed BRANCH=speaker` chạy trọn bốn bước** sau bản sửa:
   - so số nguyên báo không có gì phải so, vì mã mạng là của HEAD;
   - lượng tử hàng `timing`;
