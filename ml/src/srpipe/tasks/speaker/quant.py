@@ -174,8 +174,62 @@ class ContextPool(nn.Module):
         return torch.cat([mean, torch.sqrt(var.clamp(min=ASTP_FLOOR))], dim=1)
 
 
+def swapped(conv: nn.Conv2d) -> nn.Conv2d:
+    """conv over (..., frames, bands) where it ran over (..., bands, frames): its kernel, stride, pads and dilation
+    transposed."""
+    out = nn.Conv2d(
+        conv.in_channels,
+        conv.out_channels,
+        conv.kernel_size[::-1],
+        stride=conv.stride[::-1],
+        padding=conv.padding[::-1],
+        dilation=conv.dilation[::-1],
+        groups=conv.groups,
+        bias=conv.bias is not None,
+    )
+    with torch.no_grad():
+        out.weight.copy_(conv.weight.transpose(2, 3))
+        if conv.bias is not None:
+            out.bias.copy_(conv.bias)
+    return out
+
+
+class To1d(nn.Module):
+    """redimnet2's to1d from time-major maps: (b, c, frames, bands) to (b, bands x c, frames), the same order."""
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, c, t, f = x.shape
+        return x.permute(0, 3, 1, 2).reshape(b, f * c, t)
+
+
+class To2d(nn.Module):
+    """redimnet2's to2d into time-major maps: (b, bands x c, frames) to (b, c, frames, bands)."""
+
+    def __init__(self, bands: int, channels: int) -> None:
+        super().__init__()
+        self.bands, self.channels = bands, channels
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.reshape(x.shape[0], self.bands, self.channels, x.shape[2]).permute(0, 2, 3, 1)
+
+
+def time_major(model: nn.Module) -> nn.Module:
+    """model's 2-d maps laid (b, c, frames, bands): each Conv2d swapped, to1d and to2d as To1d and To2d. On the chip a
+    map is then (frames, bands, c), so going to and from 1-d (frames, bands x c) moves no data once lean_transposes
+    folds the export's Transposes around it (measurements/latency.md 25)."""
+    for parent in list(model.modules()):
+        for name, m in list(parent.named_children()):
+            if isinstance(m, nn.Conv2d):
+                setattr(parent, name, swapped(m))
+            elif type(m).__name__ == "to1d":
+                setattr(parent, name, To1d())
+            elif type(m).__name__ == "to2d":
+                setattr(parent, name, To2d(m.f, m.c))
+    return model
+
+
 class Embed(nn.Module):
-    """b0 from log-mel features (1, 1, mels, frames) to the embedding the extractor gives (KEHOACH 3.17)."""
+    """b0 from log-mel features (1, 1, frames, mels) to the embedding the extractor gives (KEHOACH 3.17)."""
 
     def __init__(self, wrap: nn.Module) -> None:
         super().__init__()
@@ -183,14 +237,22 @@ class Embed(nn.Module):
             raise ValueError("the extractor pads, offsets or norms where Embed does not")
         if not wrap.pool.global_context_att or wrap.return_all_outputs:
             raise ValueError("Embed reads a pool with global context and one backbone output")
-        self.backbone = stage_sums(channel_norms(ungrouped(explicit_padding(copy.deepcopy(wrap.backbone)))))
+        b = wrap.backbone
+        if b.is_subnet or b.agg_gnorm or any(b._stage_has_dual):
+            raise ValueError("Embed runs one plain stage after another")
+        self.backbone = time_major(stage_sums(channel_norms(ungrouped(explicit_padding(copy.deepcopy(b))))))
         self.pool = ContextPool(wrap.pool)
         self.head = folded_head(wrap.bn, wrap.linear)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.backbone(x)
-        b, c, f, t = out.shape
-        return self.head(self.pool(out.reshape(b, c * f, t)))
+        b = self.backbone
+        x = x[:, :, : x.shape[2] // b.time_stride * b.time_stride, :]
+        outs = [b.stem(x)]
+        for stage in range(b.num_stages):
+            outs.extend(b.run_stage(outs, stage))
+        out = b.head(b.fin_to2d(b.fin_wght1d(outs)))
+        n, c, t, f = out.shape
+        return self.head(self.pool(out.permute(0, 1, 3, 2).reshape(n, c * f, t)))
 
 
 def import_run(cfg: dict, paths: dict) -> Path:
@@ -229,9 +291,9 @@ def tail_of(samples: np.ndarray, n_samples: int) -> torch.Tensor:
 
 
 def features(wrap: nn.Module, samples: np.ndarray, n_samples: int) -> torch.Tensor:
-    """The extractor's own log-mel features (1, 1, mels, frames) of the window's tail."""
+    """The extractor's own log-mel features of the window's tail, frame after frame: (1, 1, frames, mels)."""
     with torch.no_grad():
-        return wrap.spec(tail_of(samples, n_samples)).unsqueeze(1)
+        return wrap.spec(tail_of(samples, n_samples)).unsqueeze(1).transpose(2, 3).contiguous()
 
 
 def check_rewrite(net: Embed, wrap: nn.Module, windows: list[np.ndarray], n_samples: int, rtol: float) -> float:

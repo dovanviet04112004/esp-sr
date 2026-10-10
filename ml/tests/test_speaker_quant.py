@@ -110,6 +110,21 @@ def test_stage_sums_give_what_the_stacked_sum_gives_with_no_reduce_sum_in_the_on
     assert "ReduceSum" not in ops_of(summed, "summed.onnx")
 
 
+def test_a_swapped_convolution_on_time_major_maps_gives_the_transposed_output() -> None:
+    torch.manual_seed(6)
+    conv = nn.Conv2d(3, 5, (3, 1), stride=(2, 1), padding=(1, 0), groups=1).eval()
+    x = torch.randn(1, 3, 8, FRAMES)
+    with torch.no_grad():
+        torch.testing.assert_close(quant.swapped(conv)(x.transpose(2, 3)), conv(x).transpose(2, 3))
+
+
+def test_time_major_to1d_and_to2d_give_the_bands_major_ones() -> None:
+    x = torch.randn(1, 4, 6, FRAMES)
+    flat = x.permute(0, 2, 1, 3).reshape(1, 6 * 4, FRAMES)
+    torch.testing.assert_close(quant.To1d()(x.transpose(2, 3)), flat)
+    torch.testing.assert_close(quant.To2d(6, 4)(flat), x.transpose(2, 3))
+
+
 def test_explicit_pads_give_what_same_gives() -> None:
     torch.manual_seed(0)
     model = nn.Sequential(

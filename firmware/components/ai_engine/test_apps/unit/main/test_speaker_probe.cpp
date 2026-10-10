@@ -33,8 +33,8 @@ struct WindowsHead {
 };
 struct WindowRecord {
     char entry[STORAGE_MODEL_NAME_BYTES];
-    uint32_t mels;
     uint32_t frames;
+    uint32_t mels;
     uint32_t dims;
     int32_t input_exponent;
     int32_t output_exponent;
@@ -62,7 +62,7 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
     WindowRecord rec;
     memcpy(&rec, speaker_windows_start + sizeof(head), sizeof(rec));
     const int8_t *x = reinterpret_cast<const int8_t *>(speaker_windows_start + sizeof(head) + sizeof(rec));
-    const int8_t *y = x + rec.mels * rec.frames;
+    const int8_t *y = x + rec.frames * rec.mels;
 
     const ai::Blob blob = ai::image_find(rec.entry, STORAGE_MODEL_KIND_ESPDL);
     TEST_ASSERT_NOT_NULL_MESSAGE(blob.data, rec.entry);
@@ -72,7 +72,7 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
     const size_t psram_bytes = psram_before - heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     const ai::Int8Tensor in = net.input();
     const ai::Int8Tensor out = net.output();
-    TEST_ASSERT_EQUAL(rec.mels * rec.frames, in.elements);
+    TEST_ASSERT_EQUAL(rec.frames * rec.mels, in.elements);
     TEST_ASSERT_EQUAL(rec.dims, out.elements);
     TEST_ASSERT_EQUAL(rec.input_exponent, in.exponent);
     TEST_ASSERT_EQUAL(rec.output_exponent, out.exponent);
@@ -98,9 +98,9 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
         }
         vTaskDelay(1);
     }
-    printf("%s: %" PRIu32 " mels x %" PRIu32 " frames: worst |board - simulation| %d, %" PRId64
+    printf("%s: %" PRIu32 " frames x %" PRIu32 " mels: worst |board - simulation| %d, %" PRId64
            " us mean, %" PRId64 " us peak a window over %" PRIu32 " runs, psram %u B with its tensors\n",
-           rec.entry, rec.mels, rec.frames, worst, total_us / head.runs, peak_us, head.runs,
+           rec.entry, rec.frames, rec.mels, worst, total_us / head.runs, peak_us, head.runs,
            (unsigned)psram_bytes);
     printf("%s: %" PRIu32 " of %" PRIu32 " values off the simulation; first board/simulation:", rec.entry,
            off, rec.dims);

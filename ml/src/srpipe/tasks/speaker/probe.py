@@ -21,8 +21,8 @@ PROBE_DIR = ML_ROOT.parent / "firmware" / "components" / "ai_engine" / "test_app
 MODELS_FILE, WINDOWS_FILE = "speaker_models.bin", "speaker_windows.bin"
 ENTRY = "speaker"
 CUT_ENTRY = "speaker_c{}"
-# Timed runs; then entry name, mels, frames, embedding dims, input and output exponents, then the int8 features
-# (mels x frames) and the int8 embedding, padded to four bytes.
+# Timed runs; then entry name, frames, mels, embedding dims, input and output exponents, then the int8 features
+# (frames x mels) and the int8 embedding, padded to four bytes.
 WINDOWS_HEAD = struct.Struct("<4sI")
 WINDOWS_MAGIC = b"SRSV"
 RECORD = struct.Struct("<16sIIIii")
