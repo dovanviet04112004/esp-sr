@@ -242,3 +242,14 @@ Lệnh được nhận giữ bao nhiêu, ở hai mức người lạ lọt:
   - Riêng Conv đã vượt 1 s, nên viết lại phép gộp và bớt Transpose chỉ đưa b0 về cỡ 2 s 🔬.
   - Đường chip cần mạng nhỏ hơn b0 (học trên lưới của hợp đồng), cửa sổ ngắn hơn, hay chip nhanh hơn (P4). Đây là
     quyết định của KẾ HOẠCH §3.17, chưa chốt.
+- **Lần năm, sửa xong chỗ lệch:** chip và mô phỏng ESP-PPQ khớp từng bit. Mọi bản cắt và cả đồ thị qua
+  `model->test()`; 0/192 giá trị embedding lệch, lệch lớn nhất 0. `make ai-unit-speaker` báo "2 Tests 0 Failures".
+  - Cách tìm: bản dò cắt đồ thị tại các tensor rải đều (`probe.cuts`, `CUT_RANGE`), mỗi bản mang giá trị mô phỏng tại
+    đó; năm lượt board chia đôi tới đúng op.
+  - Op lệch đầu tiên là LayerNormalization của `stage0.7/red_dim_conv.1`: kết quả ra đúng 2,5 ở (t=62, kênh 15); chip
+    làm tròn thành 3, mô phỏng thành 2. Kernel int8 của esp-dl cộng phương sai float32 theo từng kênh và lấy
+    `1/sqrt_newton`, khác thứ tự phép tính của torch. Bản vá `layernorm_as_espdl` (`3a164af`).
+  - Op lệch kế tiếp là Softmax trong attention của `stage1.7`: esp-dl tra `exp` trong bảng 256 giá trị float32 và
+    cộng hàng theo thứ tự, không trừ giá trị lớn nhất như torch; 6/87 616 xác suất lệch một bước sau lượng tử. Bản vá
+    `softmax_as_espdl` (`be128b3`).
+  - Mỗi lệch chỉ một bước ở một chỗ, nhưng b0 khuếch đại thành ~160/192 giá trị lệch ở đầu ra.

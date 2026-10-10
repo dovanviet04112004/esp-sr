@@ -644,3 +644,6 @@ phụ thuộc cấu trúc đồ thị:
 
 - 28 conv depthwise và 12 Transpose mới ăn lại khoảng 0,28 s trong 0,7 s tiết kiệm được.
 - Điểm nóng kế tiếp: Transpose 27%; conv 3×3 đầu stem 110 ms; hai conv 1×1 của lớp gộp 87 ms và 78 ms.
+
+Sau hai bản vá mô phỏng (`layernorm_as_espdl`, `softmax_as_espdl`), cùng đồ thị chạy **2560 ms** một cửa sổ và khớp
+mô phỏng từng bit: 0/192 giá trị lệch, `model->test()` qua.
