@@ -39,6 +39,40 @@ class ContextAstp(nn.Module):
         return torch.cat([mean, torch.sqrt(var.clamp(min=1e-7))], dim=1)
 
 
+class ChannelsFirstNorm(nn.Module):
+    """redimnet2/layers/layernorm.py LayerNorm with data_format channels_first, at the pin."""
+
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.rand(channels) + 0.5)
+        self.bias = nn.Parameter(torch.rand(channels) - 0.5)
+        self.eps = 1e-6
+        self.data_format = "channels_first"
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        u = x.mean(1, keepdim=True)
+        s = (x - u).pow(2).mean(1, keepdim=True)
+        x = (x - u) / torch.sqrt(s + self.eps)
+        w, b = self.weight, self.bias
+        for _ in range(x.ndim - 2):
+            w, b = w.unsqueeze(-1), b.unsqueeze(-1)
+        return w * x + b
+
+
+def test_channel_norms_give_what_the_channels_first_norm_gives_as_one_layer_norm(tmp_path: Path) -> None:
+    torch.manual_seed(4)
+    for shape in ((1, CHANNELS, FRAMES), (1, CHANNELS, 5, FRAMES)):
+        norm = ChannelsFirstNorm(CHANNELS).eval()
+        x = torch.randn(*shape)
+        model = quant.channel_norms(nn.Sequential(norm)).eval()
+        with torch.no_grad():
+            torch.testing.assert_close(model(x), norm(x))
+    ops = {n.op_type for n in onnx.load(onnx_export.checked(model, (x.numpy(),), tmp_path / "n.onnx", 1e-4)).graph.node}
+    plain = onnx.load(onnx_export.checked(norm, (x.numpy(),), tmp_path / "f.onnx", 1e-4)).graph.node
+    assert "LayerNormalization" in ops and "Pow" not in ops
+    assert "Pow" in {n.op_type for n in plain}
+
+
 def test_explicit_pads_give_what_same_gives() -> None:
     torch.manual_seed(0)
     model = nn.Sequential(

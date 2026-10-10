@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import yaml
 from torch import nn
+from torch.nn import functional
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
 from srpipe.core import run_dir
@@ -79,6 +80,30 @@ def ungrouped(model: nn.Module) -> nn.Module:
     return model
 
 
+class ChannelNorm(nn.Module):
+    """redimnet2's channels_first LayerNorm as layer_norm over the channels moved last: the same norm, its weights one
+    vector over the last axis, where the original multiplies by weights shaped (C, 1, ...) that ESP-PPQ leaves in that
+    shape over channels-last data, broadcast along the wrong axis on the chip."""
+
+    def __init__(self, norm: nn.Module) -> None:
+        super().__init__()
+        self.weight, self.bias, self.eps = norm.weight, norm.bias, norm.eps
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        last = x.ndim - 1
+        moved = x.movedim(1, last)
+        return functional.layer_norm(moved, (moved.shape[-1],), self.weight, self.bias, self.eps).movedim(last, 1)
+
+
+def channel_norms(model: nn.Module) -> nn.Module:
+    """model with each channels_first LayerNorm of redimnet2 as a ChannelNorm."""
+    for parent in list(model.modules()):
+        for name, m in list(parent.named_children()):
+            if getattr(m, "data_format", None) == "channels_first":
+                setattr(parent, name, ChannelNorm(m))
+    return model
+
+
 def folded_head(bn: nn.BatchNorm1d, linear: nn.Linear) -> nn.Linear:
     """linear after bn in eval as one Linear; ESP-PPQ runs a BatchNorm only over 3-d or 4-d tensors."""
     scale = bn.weight / torch.sqrt(bn.running_var + bn.eps)
@@ -124,7 +149,7 @@ class Embed(nn.Module):
             raise ValueError("the extractor pads, offsets or norms where Embed does not")
         if not wrap.pool.global_context_att or wrap.return_all_outputs:
             raise ValueError("Embed reads a pool with global context and one backbone output")
-        self.backbone = ungrouped(explicit_padding(wrap.backbone))
+        self.backbone = channel_norms(ungrouped(explicit_padding(wrap.backbone)))
         self.pool = ContextPool(wrap.pool)
         self.head = folded_head(wrap.bn, wrap.linear)
 
