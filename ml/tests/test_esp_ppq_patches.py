@@ -4,6 +4,7 @@ is."""
 
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 
@@ -317,6 +318,7 @@ def test_every_patch_is_undone_when_its_block_ends() -> None:
     pattern, add, fuse = espdl_exporter.InsertRequantNodePattern, StreamingTable.add, QuantizeFusionPass.optimize
     simplify, formatted = espdl_interface.simplify, interface.format_graph
     norms = {platform: table.get("RMSNormalization") for platform, table in OPERATION_FORWARD_TABLE.items()}
+    gelus = {platform: table.get("Gelu") for platform, table in OPERATION_FORWARD_TABLE.items()}
     with esp_ppq_patches.applied(list(esp_ppq_patches.PATCHES)):
         assert espdl_exporter.InsertRequantNodePattern is not pattern and StreamingTable.add is not add
         assert QuantizeFusionPass.optimize is not fuse and espdl_interface.simplify is not simplify
@@ -327,6 +329,7 @@ def test_every_patch_is_undone_when_its_block_ends() -> None:
     assert QuantizeFusionPass.optimize is fuse and espdl_interface.simplify is simplify
     assert interface.format_graph is formatted
     assert all(table.get("RMSNormalization") is norms[p] for p, table in OPERATION_FORWARD_TABLE.items())
+    assert all(table.get("Gelu") is gelus[p] for p, table in OPERATION_FORWARD_TABLE.items())
 
 
 def test_simplify_without_bn_fusion_hands_onnxsim_skip_fuse_bn(monkeypatch) -> None:
@@ -354,6 +357,40 @@ def test_fuse_erf_gelu_loads_torch_gelu_as_one_gelu(tmp_path: Path) -> None:
         fused = {op.type for op in load_onnx_graph(path).operations.values()}
     assert "Erf" in plain and "Gelu" not in plain
     assert "Gelu" in fused and "Erf" not in fused
+
+
+class TanhGelu(nn.Module):
+    """A linear layer, then GELU in its tanh form written as transformers' NewGELUActivation writes it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.linear = nn.Linear(BANDS, BANDS)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.linear(x)
+        return 0.5 * y * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (y + 0.044715 * torch.pow(y, 3.0))))
+
+
+def test_fuse_tanh_gelu_loads_the_chain_as_one_gelu_of_the_same_function(tmp_path: Path) -> None:
+    from esp_ppq.api.interface import load_onnx_graph
+    from esp_ppq.executor.torch import TorchExecutor
+
+    from srpipe.compress.quant import onnx_export
+
+    torch.manual_seed(0)
+    model = TanhGelu().eval()
+    x = np.random.default_rng(0).normal(0, 2, (1, HOPS, BANDS)).astype(np.float32)
+    path = str(onnx_export.checked(model, (x,), tmp_path / "gelu.onnx", RUNGS["onnx_rtol"]))
+    plain = {op.type for op in load_onnx_graph(path).operations.values()}
+    with esp_ppq_patches.applied(["fuse_tanh_gelu"]):
+        graph = load_onnx_graph(path)
+        fused = [op for op in graph.operations.values() if op.type == "Gelu"]
+        got = TorchExecutor(graph, device="cpu").forward(inputs=[torch.from_numpy(x)])[0].numpy()
+    assert {"Tanh", "Pow"} <= plain and "Gelu" not in plain
+    assert not {"Tanh", "Pow"} & {op.type for op in graph.operations.values()}
+    assert [op.attributes["approximate"] for op in fused] == ["tanh"]
+    with torch.no_grad():
+        np.testing.assert_allclose(got, model(torch.from_numpy(x)).numpy(), rtol=1e-5, atol=1e-6)
 
 
 def test_an_unknown_patch_is_refused() -> None:
