@@ -1,6 +1,6 @@
 # ADR-0021 — `speaker` ReDimNet2 b0 lên chip: int8 thuần, hiệu chuẩn kl
 
-- **Trạng thái**: Đề xuất
+- **Trạng thái**: Chấp nhận
 - **Ngày**: 2026-10-11
 - **Liên quan**: KẾ HOẠCH §3.14, §3.17; TASKS E11-T25, E11-T26; `docs/measurements/speaker.md` §6;
   `docs/measurements/latency.md` §25
@@ -37,15 +37,16 @@ lạ, k = 10, 20 lần rút (`speaker.md` §6). Mô phỏng ESP-PPQ dưới các
 b0 trên chip là hàng `kl` của thang: hiệu chuẩn kl, cân bằng lớp và sửa bias của bậc 1, không op nào int16, đồ thị ở
 `<run>/int8/kl/graph.native`. Hàng ấy qua cửa chất lượng của §3.17.
 
-b0 **không** qua cửa thời gian: 1128,5 ms một cửa sổ, trên ngưỡng 1 s. Đã tối ưu hết cách không đổi số nguyên
-(`latency.md` §25), còn lại là các nhân float của esp-dl và vòng lặp theo vị trí của conv depthwise. Nên chưa cắm b0 vào
-chuỗi; E11-T26 chờ.
+Về thời gian, hàng ấy chạy 1128,5 ms một cửa sổ, nhỉnh hơn 1 s. Đã tối ưu hết cách không đổi số nguyên (`latency.md`
+§25); phần còn lại là các nhân float của esp-dl và vòng lặp theo vị trí của conv depthwise. Chủ repo nhận mức ấy ngày
+11/10, nên b0 cắm vào chuỗi (E11-T26).
 
 ## Hệ quả
 
 - `quant.yaml` không đổi: nhánh `speaker` dùng hiệu chuẩn mặc định kl.
 - Bậc 3 không vào sản phẩm. Bậc 4 chỉ chạy khi chủ repo cho, và chỉ khi cần lấy lại phần 3 m.
-- Muốn qua cửa thời gian, chủ repo chọn một trong ba hướng của §3.17: mạng nhỏ hơn b0 học trên lưới của hợp đồng, cửa
-  sổ ngắn hơn 1,5 s, hay chip nhanh hơn (P4). Hướng nào cũng phải đi lại thang và bản dò.
+- E11-T26 cắm hàng kl: khâu đặc trưng của b0 và hậu xử lý theo bốn bước, mẫu giọng trên flash, lệnh `deploy`.
+- Muốn nhanh hơn nữa thì phải đổi mạng (nhỏ hơn b0, học trên lưới của hợp đồng), cửa sổ (ngắn hơn 1,5 s) hay chip
+  (P4); hướng nào cũng phải đi lại thang và bản dò.
 - Xét lại khi: ngưỡng thời gian của §3.17 đổi; esp-dl có nhân int8 cho LayerNorm hay Softmax; hay b0 được học lại trên
   dữ liệu của board.
