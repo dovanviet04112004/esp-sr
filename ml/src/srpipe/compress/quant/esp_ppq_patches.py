@@ -384,6 +384,122 @@ def fuse_tanh_gelu() -> Iterator[None]:
             table["Gelu"] = simulate
 
 
+def chain_as_one(shape: list[int], first: list[int], target: list[int], second: list[int]):
+    """(q, out) such that transposing an array of shape by q and reshaping it to out lays its values as transposing it
+    by first, reshaping to target and transposing by second does; q the identity when the chain moves nothing, None
+    when no single transpose does it."""
+    import itertools
+
+    import numpy as np
+
+    index = np.arange(math.prod(shape)).reshape(shape)
+    out = index.transpose(first).reshape(target).transpose(second)
+    for q in itertools.permutations(range(len(shape))):
+        if np.array_equal(index.transpose(q).reshape(-1), out.reshape(-1)):
+            return list(q), list(out.shape)
+    return None
+
+
+def same_grid(a, b) -> bool:
+    """Transposes a and b write their output at one scale and width, or are not quantised."""
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    if not isinstance(a, QuantableOperation) or not isinstance(b, QuantableOperation):
+        return not isinstance(a, QuantableOperation) and not isinstance(b, QuantableOperation)
+    ca, cb = a.output_quant_config[0], b.output_quant_config[0]
+    return ca.num_of_bits == cb.num_of_bits and bool((ca.scale == cb.scale).all())
+
+
+def share_transposes(graph) -> int:
+    """Merge the Transposes reading one variable by one perm at one grid into the first; how many went."""
+    gone = 0
+    for var in list(graph.variables.values()):
+        kept = {}
+        for op in list(var.dest_ops):
+            if op.type != "Transpose" or op.name not in graph.operations:
+                continue
+            first = kept.setdefault(tuple(op.attributes["perm"]), op)
+            twin = op.outputs[0]
+            if first is op or twin.name in graph.outputs or not same_grid(first, op):
+                continue
+            for reader in list(twin.dest_ops):
+                reader.inputs[:] = [first.outputs[0] if v is twin else v for v in reader.inputs]
+                first.outputs[0].dest_ops.append(reader)
+            twin.dest_ops.clear()
+            graph.remove_operation(op)
+            graph.remove_variable(twin)
+            gone += 1
+    return gone
+
+
+def fold_transpose_chains(graph) -> int:
+    """Fold each Transpose, Reshape, Transpose whose middle values nothing else reads into one Transpose and the
+    Reshape, or the Reshape alone when the chain moves nothing; how many folded."""
+    import torch
+    from esp_ppq.parser.espdl.espdl_graph_utils import fuse_downstream_operation, get_default_perm
+    from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
+
+    folded = 0
+    for first in [op for op in graph.topological_sort() if op.type == "Transpose"]:
+        if first.name not in graph.operations:
+            continue
+        middle = first.outputs[0]
+        if len(middle.dest_ops) != 1 or middle.dest_ops[0].type != "Reshape" or middle.name in graph.outputs:
+            continue
+        reshape = middle.dest_ops[0]
+        flat = reshape.outputs[0]
+        if len(flat.dest_ops) != 1 or flat.dest_ops[0].type != "Transpose" or flat.name in graph.outputs:
+            continue
+        second, shape = flat.dest_ops[0], list(first.inputs[0].shape)
+        target = [int(v) for v in reshape.inputs[1].value.flatten().tolist()]
+        moved = [shape[i] for i in first.attributes["perm"]]
+        target = [moved[i] if d == 0 else d for i, d in enumerate(target)]
+        if -1 in target:
+            target[target.index(-1)] = math.prod(moved) // -math.prod(target)
+        found = chain_as_one(shape, first.attributes["perm"], target, second.attributes["perm"])
+        if found is None or found[1] != list(second.outputs[0].shape):
+            continue
+        q, out = found
+        reshape.inputs[1].value = torch.tensor(out, dtype=torch.int64)
+        fuse_downstream_operation(graph, second, keep_coherence=True)
+        if q == list(range(len(q))):
+            graph.remove_operation(first, keep_coherence=True)
+        else:
+            first.attributes["perm"] = q
+            middle.shape = [shape[i] for i in q]
+            ExporterPatternInfo().add_var_permute(middle.name, get_default_perm(middle))
+        folded += 1
+    return folded
+
+
+@contextlib.contextmanager
+def lean_transposes() -> Iterator[None]:
+    """ESP-PPQ's export lays tensors channels last and puts a Transpose wherever an op needs the ONNX layout, one for
+    each reader, and only merges Transposes that stand next to each other: a variable read by seven ops got seven equal
+    Transposes, and every Transpose, Reshape, Transpose chain between 2-d and 1-d maps kept both. After its layout pass
+    this merges equal Transposes of one variable and folds those chains into the one Transpose, or none, that moves the
+    same values. ReDimNet2 b0 (KEHOACH 3.17) on board B: 50 inserted Transposes took 0.55 s of 2.5 s a window.
+    """
+    from esp_ppq.parser import espdl_exporter
+    from esp_ppq.parser.espdl.layout_patterns import FuseTransposePattern
+
+    reset = espdl_exporter.reset_graph_layout
+
+    def leaner(graph):
+        reset(graph)
+        share_transposes(graph)
+        fold_transpose_chains(graph)
+        pattern = FuseTransposePattern()
+        for op in graph.topological_sort():
+            pattern.export(op, graph)
+
+    espdl_exporter.reset_graph_layout = leaner
+    try:
+        yield
+    finally:
+        espdl_exporter.reset_graph_layout = reset
+
+
 @contextlib.contextmanager
 def simplify_without_bn_fusion() -> Iterator[None]:
     """espdl_quantize_onnx simplifies the ONNX with onnxsim's defaults, whose fuse_bn pass leaves a tensor whose stored
@@ -435,6 +551,7 @@ PATCHES = {
     "layernorm_as_espdl": layernorm_as_espdl,
     "softmax_as_espdl": softmax_as_espdl,
     "fuse_tanh_gelu": fuse_tanh_gelu,
+    "lean_transposes": lean_transposes,
 }
 
 

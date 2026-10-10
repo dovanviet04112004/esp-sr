@@ -393,6 +393,43 @@ def test_fuse_tanh_gelu_loads_the_chain_as_one_gelu_of_the_same_function(tmp_pat
         np.testing.assert_allclose(got, model(torch.from_numpy(x)).numpy(), rtol=1e-5, atol=1e-6)
 
 
+def test_chain_as_one_finds_the_one_transpose_a_chain_moves_values_by() -> None:
+    assert esp_ppq_patches.chain_as_one([2, 3, 4], [0, 2, 1], [2, 4, 3], [0, 2, 1]) == ([0, 1, 2], [2, 3, 4])
+    assert esp_ppq_patches.chain_as_one([2, 3, 4, 5], [0, 1, 3, 2], [2, 3, 20], [0, 2, 1]) == ([0, 3, 2, 1], [2, 20, 3])
+    assert esp_ppq_patches.chain_as_one([2, 6], [1, 0], [3, 4], [1, 0]) is None
+
+
+class MapsTo1d(nn.Module):
+    """A 2-d convolution, its map flattened to 1-d as ReDimNet2's to1d does, then two 1-d convolutions on it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv2d = nn.Conv2d(1, 4, 3, padding=1)
+        self.a, self.b = nn.Conv1d(4 * 6, 8, 1), nn.Conv1d(4 * 6, 8, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.conv2d(x)
+        n, c, f, t = y.shape
+        flat = y.permute(0, 2, 1, 3).reshape(n, f * c, t)
+        return self.a(flat) + self.b(flat)
+
+
+def test_lean_transposes_exports_fewer_transposes_and_simulates_as_before(tmp_path: Path) -> None:
+    torch.manual_seed(1)
+    rng = np.random.default_rng(14)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 1, 6, HOPS)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(MapsTo1d().eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    x = calib[0].numpy()
+
+    def transposes(patches: list[str], name: str) -> int:
+        info = export_info(graph, tmp_path / f"{name}.espdl", patches)
+        return len(re.findall(r"^  %\S+ = Transpose\[", info, re.MULTILINE))
+
+    before = ptq_espdl.Simulator(graph)(x)
+    assert transposes(["lean_transposes"], "lean") < transposes([], "as_is")
+    assert np.array_equal(ptq_espdl.Simulator(graph)(x), before)
+
+
 def test_an_unknown_patch_is_refused() -> None:
     with pytest.raises(ValueError, match="unknown ESP-PPQ patches"), esp_ppq_patches.applied(["no_such_patch"]):
         pass
