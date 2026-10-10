@@ -227,10 +227,11 @@ def test_the_folded_head_gives_the_norm_then_the_linear() -> None:
 def test_the_context_pool_gives_what_astp_gives_with_no_expand_in_its_onnx(tmp_path: Path) -> None:
     torch.manual_seed(2)
     astp = ContextAstp().eval()
-    pool = quant.ContextPool(astp).eval()
+    order = torch.randperm(CHANNELS)
+    pool = quant.ContextPool(astp, order).eval()
     x = torch.randn(1, CHANNELS, FRAMES)
     with torch.no_grad():
-        torch.testing.assert_close(pool(x), astp(x))
+        torch.testing.assert_close(pool(x[:, order]), astp(x)[:, torch.cat([order, order + CHANNELS])])
 
     def ops_of(model: nn.Module, name: str) -> set[str]:
         path = onnx_export.checked(model, (x.numpy(),), tmp_path / name, 1e-4)

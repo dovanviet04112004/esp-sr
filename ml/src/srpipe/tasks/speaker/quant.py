@@ -152,18 +152,20 @@ def folded_head(bn: nn.BatchNorm1d, linear: nn.Linear) -> nn.Linear:
 class ContextPool(nn.Module):
     """ASTP with global context as esp-dl can run it: the context's part of the attention's first projection is added
     per channel, where ASTP concatenates the context expanded over time, an Expand esp-dl lacks; squares are products,
-    since esp-dl runs Pow in float."""
+    since esp-dl runs Pow in float. Its j-th channel is ASTP's channel order[j], in and out."""
 
-    def __init__(self, astp: nn.Module) -> None:
+    def __init__(self, astp: nn.Module, order: torch.Tensor) -> None:
         super().__init__()
         n, w = astp.in_dim, astp.linear1.weight
         self.frames = nn.Conv1d(n, w.shape[0], 1, bias=False)
         self.context = nn.Conv1d(2 * n, w.shape[0], 1)
+        self.linear2 = nn.Conv1d(astp.linear2.in_channels, n, 1)
         with torch.no_grad():
-            self.frames.weight.copy_(w[:, :n])
-            self.context.weight.copy_(w[:, n:])
+            self.frames.weight.copy_(w[:, :n][:, order])
+            self.context.weight.copy_(torch.cat([w[:, n : 2 * n][:, order], w[:, 2 * n :][:, order]], dim=1))
             self.context.bias.copy_(astp.linear1.bias)
-        self.linear2 = astp.linear2
+            self.linear2.weight.copy_(astp.linear2.weight[order])
+            self.linear2.bias.copy_(astp.linear2.bias[order])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         mean = torch.mean(x, dim=-1, keepdim=True)
@@ -326,8 +328,13 @@ class Embed(nn.Module):
             raise ValueError("Embed runs one plain stage after another")
         rewritten = stage_sums(channel_norms(ungrouped(explicit_padding(copy.deepcopy(b)))))
         self.backbone = time_major(one_channel_inputs(unit_upsamples(keys_first_attention(rewritten))))
-        self.pool = ContextPool(wrap.pool)
+        to2d, head = self.backbone.fin_to2d, self.backbone.head
+        channels, bands = head.out_channels if isinstance(head, nn.Conv2d) else to2d.channels, to2d.bands
+        order = torch.arange(channels * bands).reshape(channels, bands).t().reshape(-1)
+        self.pool = ContextPool(wrap.pool, order)
         self.head = folded_head(wrap.bn, wrap.linear)
+        with torch.no_grad():
+            self.head.weight.copy_(self.head.weight[:, torch.cat([order, order + channels * bands])])
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b = self.backbone
@@ -335,9 +342,7 @@ class Embed(nn.Module):
         outs = [b.stem(x)]
         for stage in range(b.num_stages):
             outs.extend(b.run_stage(outs, stage))
-        out = b.head(b.fin_to2d(b.fin_wght1d(outs)))
-        n, c, t, f = out.shape
-        return self.head(self.pool(out.permute(0, 1, 3, 2).reshape(n, c * f, t)))
+        return self.head(self.pool(To1d()(b.head(b.fin_to2d(b.fin_wght1d(outs))))))
 
 
 def import_run(cfg: dict, paths: dict) -> Path:
