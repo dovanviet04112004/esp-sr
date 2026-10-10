@@ -44,6 +44,7 @@ esp_err_t test_of(const ai::Blob &blob)
 {
     dl::Model model(reinterpret_cast<const char *>(blob.data), fbs::MODEL_LOCATION_IN_FLASH_RODATA, 0,
                     dl::MEMORY_MANAGER_GREEDY, nullptr, false);
+    model.profile_module(true);
     return model.test();
 }
 
