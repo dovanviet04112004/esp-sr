@@ -458,8 +458,8 @@ ai-unit-rnnt: ## Run the rnnt build of the ai_engine suite on board B [RNNT_RUN=
 
 # A row of speaker-ptq's ladder goes to model slot 0, its window is checked against Python and timed; slot 0 ends
 # erased.
-ai-unit-speaker: ## Run the speaker build of the ai_engine suite on board B: RUN=<run> ROW=<row of its int8/ladder.yaml> (E11-T25)
-	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.speaker.probe --run $(RUN) --row $(ROW)
+ai-unit-speaker: ## Run the speaker build of the ai_engine suite on board B: RUN=<run> ROW=<row of its int8/ladder.yaml> [CUT_RANGE="<first op> <last op>"] (E11-T25)
+	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.speaker.probe --run $(RUN) --row $(ROW) $(if $(CUT_RANGE),--cut-range $(CUT_RANGE))
 	@$(call fresh_sdkconfig,$(UNIT_APP)/build_speaker/sdkconfig,$(call app_defaults,$(UNIT_APP)))
 	cd $(UNIT_APP) && idf.py -B build_speaker -D SDKCONFIG=build_speaker/sdkconfig -D UNIT_PROFILE=speaker build && \
 	  $(WRITE_PART) models_0 --input main/probe/speaker_models.bin && \
