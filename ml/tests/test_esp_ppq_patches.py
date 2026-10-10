@@ -574,6 +574,31 @@ def test_cache_sized_convolutions_slice_a_wide_projection_along_its_outputs(tmp_
     assert np.array_equal(np.concatenate([tensors[ins[2]] for ins in parts]), plain[1][b])
 
 
+class OneWeightSum(nn.Module):
+    """A convolution, a weighted sum of its output alone as ReDimNet2's stage sums give it, a depthwise convolution
+    by 1, and another convolution; equalisation scales a sum between convolutions, not b0's after a LayerNorm."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.front, self.back = nn.Conv1d(BANDS, BANDS, 3, padding=1), nn.Conv1d(BANDS, BANDS, 1)
+        self.sum = nn.Conv1d(BANDS, BANDS, 1, groups=BANDS, bias=False)
+        nn.init.constant_(self.sum.weight, 1.0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.back(self.sum(self.front(x)))
+
+
+def test_identity_convolutions_dropped_gives_the_sums_reader_its_input(tmp_path: Path) -> None:
+    torch.manual_seed(6)
+    rungs = RUNGS | {"equalization": None, "calibration": "minmax"}
+    graph = ptq_espdl.quantize(OneWeightSum().eval(), calib(np.random.default_rng(19)), tmp_path, rungs)
+    plain = espdl_graph(export_espdl.export(graph, tmp_path / "plain.espdl"))[0]
+    with esp_ppq_patches.applied(["identity_convolutions_dropped"]):
+        nodes = espdl_graph(export_espdl.export(graph, tmp_path / "dropped.espdl"))[0]
+    assert "/sum/Conv" in plain and "/sum/Conv" not in nodes
+    assert nodes["/back/Conv"][1][0] == plain["/sum/Conv"][1][0]
+
+
 def test_an_unknown_patch_is_refused() -> None:
     with pytest.raises(ValueError, match="unknown ESP-PPQ patches"), esp_ppq_patches.applied(["no_such_patch"]):
         pass

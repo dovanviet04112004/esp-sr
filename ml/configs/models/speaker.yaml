@@ -22,6 +22,7 @@ esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches aroun
   - aligned_pointwise              # 12- and 24-channel 1x1 convolutions over merged columns, on the vector path
   - copies_by_broadcast            # the stem's copies of the log-mel as an Add of zeros, not a Concat and Transpose
   - cache_sized_convolutions       # the pool's 72 KB projections as slices whose weights stay in the data cache
+  - identity_convolutions_dropped  # stage 0's sum of the stem output alone, a convolution by 1, removed
 probe:                             # E11-T25: one row's graph on board B (make ai-unit-speaker)
   runs: 10                         # timed runs on the board, after one untimed
   cuts: 4                          # copies of the graph cut at tensors spread over its ops, each model->test()ed

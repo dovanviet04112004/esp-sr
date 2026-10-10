@@ -702,6 +702,73 @@ def cache_sized_convolutions() -> Iterator[None]:
         espdl_exporter.reset_graph_layout = reset
 
 
+def gives_input_back(op, info) -> bool:
+    """op is a depthwise pointwise convolution without bias or activation whose weights are all 1, held exactly on
+    their grid, from one grid and layout to the same: on the chip it shifts each input up and back down."""
+    import torch
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    if op.type != "Conv" or not isinstance(op, QuantableOperation) or len(op.inputs) != 2:
+        return False
+    (x, w), y, (given, held), made = op.inputs, op.outputs[0], op.input_quant_config, op.output_quant_config[0]
+    spans = op.attributes["kernel_shape"] + op.attributes.get("strides", []) + op.attributes.get("dilations", [])
+    if (
+        any(v != 1 for v in spans)
+        or any(op.attributes.get("pads", []))
+        or op.attributes.get("activation", "Linear") != "Linear"
+    ):
+        return False
+    if op.attributes.get("group", 1) != laid_shape(x, info)[-1] or laid_shape(x, info) != laid_shape(y, info):
+        return False
+    if given.scale is None or made.scale is None or held.scale is None or held.scale.numel() != 1:
+        return False
+    return (
+        bool(torch.all(w.value == 1))
+        and float(1 / held.scale) <= held.quant_max
+        and torch.equal(given.scale, made.scale)
+    )
+
+
+def drop_identities(graph) -> int:
+    """Each convolution gives_input_back finds, removed and its readers given its input; how many."""
+    from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
+
+    info, done = ExporterPatternInfo(), 0
+    for op in list(graph.topological_sort()):
+        if not gives_input_back(op, info) or op.outputs[0].name in graph.outputs:
+            continue
+        x, y = op.inputs[0], op.outputs[0]
+        for reader in list(y.dest_ops):
+            reader.inputs[:] = [x if v is y else v for v in reader.inputs]
+            x.dest_ops.append(reader)
+        y.dest_ops.clear()
+        graph.remove_operation(op)
+        graph.remove_variable(y)
+        done += 1
+    return done
+
+
+@contextlib.contextmanager
+def identity_convolutions_dropped() -> Iterator[None]:
+    """A weighted sum of one input has the weight 1, which ESP-PPQ quantises to a depthwise convolution that gives
+    its input back on the same grid. After the export's layout pass this removes such convolutions (drop_identities),
+    the same integers. ReDimNet2 b0 (KEHOACH 3.17) on board B: stage 0's sum of the stem output alone took 4.5 ms.
+    """
+    from esp_ppq.parser import espdl_exporter
+
+    reset = espdl_exporter.reset_graph_layout
+
+    def dropped(graph):
+        reset(graph)
+        drop_identities(graph)
+
+    espdl_exporter.reset_graph_layout = dropped
+    try:
+        yield
+    finally:
+        espdl_exporter.reset_graph_layout = reset
+
+
 def linked(graph, op, inputs: list, outputs: list):
     """op, quantised and with no variables yet, registered in graph and linked to inputs and outputs."""
     graph.operations[op.name] = op
@@ -903,6 +970,7 @@ PATCHES = {
     "aligned_pointwise": aligned_pointwise,
     "copies_by_broadcast": copies_by_broadcast,
     "cache_sized_convolutions": cache_sized_convolutions,
+    "identity_convolutions_dropped": identity_convolutions_dropped,
 }
 
 
