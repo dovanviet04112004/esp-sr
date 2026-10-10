@@ -205,16 +205,31 @@ Lệnh được nhận giữ bao nhiêu, ở hai mức người lạ lọt:
 | int8 kl, đồ thị sửa đủ ba chỗ (§6.2) | 5% | 4,58% | 97,3% | 100% | 93,9% | 97,9% | 96,7% |
 | int8 kl, đồ thị 1,14 s trên chip (`latency.md` §25) | 1% | 4,00% | 95,3% | 100% | 90,9% | 97,9% | 91,3% |
 | int8 kl, đồ thị 1,14 s trên chip (`latency.md` §25) | 5% | 4,00% | 98,2% | 100% | 93,9% | 97,9% | 100% |
+| int8 kl, mô phỏng LayerNorm, Softmax theo mã máy (11/10) | 1% | 4,00% | 95,8% | 97,7% | 93,9% | 97,9% | 95,7% |
+| int8 kl, mô phỏng LayerNorm, Softmax theo mã máy (11/10) | 5% | 4,00% | 98,2% | 100% | 93,9% | 97,9% | 100% |
+| int8 percentile, như trên | 5% | 7,47% | 92,6% | 92,2% | 86,4% | 93,6% | 96,7% |
+| int8 minmax, như trên | 5% | 8,01% | 89,3% | 86,2% | 81,8% | 93,6% | 91,3% |
+| int8 mse, như trên | 5% | 8,55% | 87,2% | 86,5% | 78,8% | 93,6% | 87,0% |
 
 - **Float ở cửa sổ 1,5 s đạt điều kiện cắm của KẾ HOẠCH §3.17:** ≥ 95% ở mọi phiên khi 5% người lạ lọt.
 - **Hàng "GELU qua Erf" không nạp được lên chip** (§6.2), nhưng cho thấy mức nhạy với int8: cosine giữa embedding
   int8 và float trên từng cửa sổ có trung vị 0,52, phân vị 10 là 0,38.
 - **Hàng kl của đồ thị chạy được trên chip** chưa đạt điều kiện cắm: phiên 28/09 3 m còn 93,9% khi 5% người lạ lọt,
   dưới 95%. Cosine int8 với float có trung vị 0,48, phân vị 10 là 0,33.
-- **Hàng kl của đồ thị 1,14 s** (mọi bước tối ưu, chip khớp mô phỏng từng bit, `latency.md` §25): EER 4,00% như
-  float, giữ 95,3% ở 1% người lạ lọt. Phiên 28/09 3 m vẫn 93,9% ở 5%, dưới 95%. Cosine int8 với float có trung vị
-  0,51, phân vị 10 là 0,36. Các viết lại ở mức mạng cho int8 giống hệt bản không viết lại dưới chính thang này
-  (KẾ HOẠCH §3.14), nên không bước tối ưu nào đổi chất lượng.
+- **Hàng kl của đồ thị 1,14 s** (mọi bước tối ưu, `latency.md` §25): EER 4,00% như float, giữ 95,3% ở 1% người lạ
+  lọt. Phiên 28/09 3 m vẫn 93,9% ở 5%, dưới 95%. Cosine int8 với float có trung vị 0,51, phân vị 10 là 0,36. Các viết
+  lại ở mức mạng cho int8 giống hệt bản không viết lại dưới chính thang này (KẾ HOẠCH §3.14), nên không bước tối ưu
+  nào đổi chất lượng. Khi ấy chip mới được thấy khớp mô phỏng trên một bản lượng tử hiệu chuẩn bằng nhiễu.
+- **Thang chạy lại sau khi mô phỏng LayerNorm và Softmax theo mã máy của esp-dl** (11/10, `latency.md` §25): bias
+  correction đổi theo mô phỏng, nên số nguyên đổi chút ít.
+  - kl vẫn EER 4,00% như float. Ở 1% người lạ lọt giữ 95,8%, nhích từ 95,3%. Phiên 28/09 3 m vẫn 93,9% ở 5%: 31 trên
+    33 cửa sổ, float giữ đủ 33.
+  - Hàng kl này chạy trên board B khớp mô phỏng từng bit ở mọi bản cắt và cả đồ thị, 1128,5 ms.
+  - percentile, minmax, mse kém hẳn: EER 7,47%, 8,01%, 8,55%. Thứ tự giữ nguyên như lượt cũ.
+  - Cosine với float không báo trước chất lượng: kl thấp nhất (trung vị 0,51) mà EER tốt nhất; percentile 0,84 mà EER
+    7,47%.
+- **Cửa của KẾ HOẠCH §3.17** đòi giữ ≥ 95% ở cả 1 m và 3 m, gộp các phiên của một khoảng cách. Bảng trên tách từng
+  phiên, chặt hơn câu chữ ấy. Số gộp theo khoảng cách ra cùng bậc 3 (`make speaker-int16`).
 - **Sai số int8 đến từ đâu**, phân tích của ESP-PPQ trên 6 cửa sổ của chủ repo:
   - Từng op lượng tử riêng (`layerwise_error_analyse`, nhiễu trên tín hiệu ở đầu ra): lớn nhất là các BatchNorm sau
     ReLU trong khối 2-D (`bn1`): stage2.3 0,22, stage1.4 0,18, stage3.7 0,17, stage3.6 0,12; kế đến conv depthwise
