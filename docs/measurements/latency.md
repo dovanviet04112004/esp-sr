@@ -760,3 +760,6 @@ trung bình). Bản dò chạy hàng `timing` của run, dựng `UNIT_PROFILE=ct
   38 MB/s.
 - **Lỗi của bảng:** cột chu kỳ trên phép nhân-cộng của bảng xếp hạng sai với mạng chạy dòng. Nó lấy hình dạng trong
   `.info`, ghi cho cả chuỗi 768 hop, không phải bước 16 hop.
+- **RMSNorm theo mã máy (11/10):** bản dựng S3 của esp-dl tính `mean_sq + eps` bằng một `madd.s`, với hằng
+  `(1.0f / n)·s²` tính sẵn. Bản vá cũ chia thật cho n rồi mới cộng, mà 1/160 không biểu diễn đúng ở float32. Sau khi
+  `rmsnorm_as_espdl` chép đúng mã máy, chuỗi chạy lại vẫn khớp từng bit: `command_ctc` lệch 0, 82,2 ms một bước.
