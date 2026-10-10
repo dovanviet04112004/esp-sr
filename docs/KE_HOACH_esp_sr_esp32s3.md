@@ -75,7 +75,8 @@ có cột ánh xạ về mã `V5.x.y`.
 
 ### 1.1 Bảng mô hình
 
-Chỉ bốn khối dùng mô hình học. Mọi khối khác là công thức, không cần dữ liệu huấn luyện.
+Năm khối dùng mô hình học; khối thứ năm, `speaker`, là khối nghiên cứu của §3.17. Mọi khối khác là công thức, không cần
+dữ liệu huấn luyện.
 
 | Nhánh | Chỗ chạy | Kiến trúc | Vào | Ra | Cỡ mục tiêu | Khởi đầu từ |
 |---|---|---|---|---|---|---|
@@ -86,8 +87,10 @@ Chỉ bốn khối dùng mô hình học. Mọi khối khác là công thức, k
 | `command` `ctc` | `ai_engine/src/command_ctc/` | encoder chạy dòng theo bộ khung MultiNet7 của Espressif (ADR-0013): ba tích chập 2D giảm khung, 6 lớp chia 4 tầng tốc độ khung, mỗi lớp khối feedforward, khối tích chập có cổng và khối trộn thay attention; đầu CTC trên đơn vị của §3.12; lùi về TCN nếu một lớp của nó qua esp-dl không đạt trên board | log-mel 80 + ba chiều cao độ | xác suất đơn vị mỗi khung | **theo chất lượng**, từ cỡ MultiNet7 ~2,1 MB int8 🔬 trở lên; trần là µs trên board (§3.3), bộ nhớ nới theo §6.1, §6.6 (ADR-0013) | tự huấn luyện trên kho tiếng Việt |
 | `command` `rnnt` | `ai_engine/src/command_rnnt/` | encoder của `ctc` cộng mạng dự đoán không trạng thái và bộ nối như MultiNet7 (ADR-0016): nhúng 45 lớp thành 384 chiều, tích chập ngữ cảnh 2, bộ nối 384 chiều; chấm chính xác mọi lệnh trên cây lệnh (§3.12) | log-mel 80 + ba chiều cao độ | xác suất đơn vị mỗi khung × ngữ cảnh của cây | encoder như `ctc` cộng ~0,23 MB int8 🔬 | cùng lượt học với `ctc` (RNN-T cộng CTC) |
 | `synth` | `ai_engine/src/synth/` | chốt ở E12-T1: mạng chưng cất kiểu sanoTTS (trường độ → âm học → iSTFT) | chuỗi đơn vị + trường độ | PCM 16 kHz | ≤ 1 MB | tuỳ phương án; phương án không mạng nằm ở `svc_speak` (§3.13) |
+| `speaker` máy chủ | `host/` (`srhost.speaker`), qua `ml/spk_ref/redimnet` | **ReDimNet M** của IDRnD, `M-vb2+vox2+cnc-ft_mix` (§3.17) | PCM 16 kHz của cửa sổ lệnh | embedding 192 chiều, cosine với mẫu giọng | 4,8 M tham số, float trên máy chủ | học sẵn, không học lại |
+| `speaker` chip | `ai_engine`, thư mục chốt khi cắm (§3.17) | **ReDimNet2 b0** của PalabraAI, `b0-vox2-lm` | PCM 16 kHz của cửa sổ lệnh | embedding 192 chiều, cosine với mẫu giọng | 1,1 M tham số, ~1,1 MB int8 🔬 | học sẵn; học lại trên dữ liệu nhiều ngôn ngữ cộng tiếng Việt nếu int8 kéo chất lượng xuống |
 
-Runtime của cả bốn là `esp-dl`, ghim bản chính xác (§4.5.1). `esp-dl` có sẵn GRU int8
+Runtime của mọi khối chạy trên chip là `esp-dl`, ghim bản chính xác (§4.5.1). `esp-dl` có sẵn GRU int8
 (`dl_module_gru.hpp`) cho `ns` và mô-đun `StreamingCache` (`dl_module_streaming_cache.hpp`) cho mạng
 tích chập chạy dòng, nên `wake` không phải tính lại cả cửa sổ mỗi khung. E11-T10 đã chứng minh đường ấy
 trên board B: TCN kiểu `wake` xuất qua ESP-PPQ, đẩy từng bước, ra int8 **trùng từng bit** với mô phỏng cả chuỗi
@@ -247,9 +250,10 @@ cá nhân 2025, hiệu lực 01/01/2026 🔬 kiểm điều khoản áp dụng �
 3. **Bản thu không vào git** (CLAUDE.md §6). Chỉ `ml/data/manifests/` và `ml/data/splits/` vào git (§4.4.1).
 4. **Xoá được theo yêu cầu.** Mã người nói trỏ được tới mọi file của người đó, nên xoá là một lệnh.
 
-Embedding giọng của một người là **dữ liệu sinh trắc**, loại dữ liệu cá nhân nhạy cảm 🔬 (kiểm ở E11-T2). Chỉ tính khi
-phiếu đồng ý của người ấy ghi mục đích nhận diện người nói; chỉ nằm ở `cache/`, không vào git; xoá cùng bản thu theo
-mã người nói (§3.17).
+Embedding giọng và mẫu giọng của một người là **dữ liệu sinh trắc**, loại dữ liệu cá nhân nhạy cảm 🔬 (kiểm ở E11-T2).
+Chỉ tính khi phiếu đồng ý của người ấy ghi mục đích nhận diện người nói; không bao giờ vào git; xoá cùng bản thu theo mã
+người nói. Embedding của khảo sát nằm ở `cache/`; mẫu giọng của đường máy chủ ở thư mục dữ liệu ngoài repo của host, của
+đường chip trên flash của board (§3.17).
 
 Giấy phép **lan sang mô hình**: model huấn luyện trên VIVOS mang ràng buộc phi thương mại của VIVOS.
 `docs/DU_LIEU.md` ghi giấy phép của từng nguồn, và `contracts/models.lock.json` ghi model nào đã học
@@ -1633,55 +1637,79 @@ lối ra còn là nguồn của biến thể sau (`board_gsc`, `espsr_bss`). Khu
 `main/job_format.h`; `items.py` phía máy tính đọc hằng số từ đó, như `pack_models` đọc `storage_format.h`. App cũng in chi
 phí của mỗi biến thể qua `test_report`. Biến thể `board_*` dựng `dsp_afe` với `gsc` bật, dù sản phẩm hiện tắt nó.
 
-### 3.17 Nhận diện người nói — khảo sát trên máy tính
+### 3.17 Nhận diện người nói
 
-Câu hỏi: embedding người nói học sẵn có tách được giọng chủ nhà khỏi người khác, trên tiếng đã qua board, đủ để chỉ chủ
-nhà ra lệnh được không. Đây chỉ là **khảo sát** (chủ repo chốt 10/10): không firmware, không hợp đồng, không `host/`. Tiếng
-vẫn không rời board ở chế độ thường (§7.5), và sản phẩm chưa có khối này (§9).
+Chỉ giọng đã đăng ký được ra lệnh. Khối nghiên cứu, hai đường (chủ repo chốt 10/10): **máy chủ** chạy ReDimNet M
+nguyên bản học sẵn, **chip** chạy ReDimNet2 b0. Trọng số của cả hai không ghi giấy phép và học trên kho chỉ cho nghiên
+cứu (`DU_LIEU.md`), nên khối này chỉ dùng trong khuôn khổ nghiên cứu của dự án, như mọi model mang ràng buộc của VIVOS
+(§1.4).
 
-**Bộ trích tham chiếu**, mỗi họ một dự án uv ghim bản ở `ml/spk_ref/<họ>/` như `ml/afe_ref/` (§3.16): `ecapa`,
-`speakerlab` (3D-Speaker), `redimnet` (ReDimNet và ReDimNet2). `srpipe.scenes.refs` đưa cửa sổ cho `run.py` của chúng trong một tệp npz. Trọng số
-và các tệp mã mạng tải vào `cache/spk_ref/<bộ>/` theo bản ghim và sha256; giấy phép trọng số kiểm và ghi `DU_LIEU.md`
-trước khi tải. Trọng số không ghi giấy phép chỉ dùng cho khảo sát này, không bao giờ vào sản phẩm.
+**Khảo sát** (E11-T24, `docs/measurements/speaker.md`): 16 bộ trích học sẵn trên cửa sổ lệnh của chủ repo thu qua board B
+và trên người lạ qua đường mô phỏng board.
+- Dữ liệu học quyết định nhiều hơn cỡ mạng. Cùng ReDimNet2, thêm VoxBlink2 và CN-Celeb2 vào dữ liệu học nâng phần giữ
+  của chủ repo ~20 điểm; trong thang chỉ học VoxCeleb2, mạng càng to càng kém.
+- ReDimNet M đạt luật đi tiếp dưới đây trên các lệnh mà `command` nhận.
+- ReDimNet2 b0, mạng nhẹ nhất, cách luật vài điểm ở 1% người lạ lọt và đạt khi nới tới 5%.
+
+Bộ trích tham chiếu, mỗi họ một dự án uv ghim bản ở `ml/spk_ref/<họ>/`, như `ml/afe_ref/` (§3.16): `ecapa`, `speakerlab`
+(3D-Speaker), `redimnet` (ReDimNet và ReDimNet2, trên GPU khi có). `srpipe.scenes.refs` đưa cửa sổ cho `run.py` của
+chúng trong một tệp npz. Trọng số và các tệp mã mạng tải vào `cache/spk_ref/<bộ>/` theo bản ghim và sha256. Embedding
+giữ ở `cache/` theo khoá sha256 của cửa sổ và bản ghim, nên thêm một bộ trích không chạy lại các bộ cũ.
 
 | Tên | Là gì | Học trên |
 |---|---|---|
 | `ecapa` | ECAPA-TDNN của SpeechBrain, `speechbrain/spkrec-ecapa-voxceleb` | VoxCeleb 1 và 2, phần lớn tiếng Anh |
-| `campplus` | CAM++ của 3D-Speaker, `iic/speech_campplus_sv_zh-cn_16k-common`, 7,2 M tham số | 200 000 người nói tiếng Trung |
-| `campplus_zh_en` | CAM++ của 3D-Speaker, `iic/speech_campplus_sv_zh_en_16k-common_advanced` | kho lớn tiếng Trung và tiếng Anh |
+| `campplus`, `campplus_zh_en` | CAM++ của 3D-Speaker, `iic/speech_campplus_sv_zh-cn_16k-common` và `…_zh_en_16k-common_advanced`, 7,2 M tham số | 200 000 người nói tiếng Trung; kho lớn tiếng Trung và tiếng Anh |
 | `eres2netv2` | ERes2NetV2 của 3D-Speaker, `iic/speech_eres2netv2_sv_zh-cn_16k-common`, 17,8 M tham số | 200 000 người nói tiếng Trung |
 | `redimnet_m`, `redimnet_s` | ReDimNet M và S của IDRnD, `{M,S}-vb2+vox2+cnc-ft_mix` | VoxBlink2 (nhiều ngôn ngữ), VoxCeleb2, CN-Celeb |
-| `redimnet_b6` | ReDimNet b6 của IDRnD, `b6-vox2-ft_lm`; EER 0,40% trên Vox1-O theo tác giả 🔬 | VoxCeleb2 |
+| `redimnet_b6` | ReDimNet b6 của IDRnD, `b6-vox2-ft_lm` | VoxCeleb2 |
 | `redimnet2_b0` … `redimnet2_b5`, `redimnet2_b6_vox2` | ReDimNet2 b0–b6 của PalabraAI, `b<n>-vox2-lm`, 1,1–12,3 M tham số | VoxCeleb2 |
-| `redimnet2_b3_mix`, `redimnet2_b6` | ReDimNet2 b3 và b6, `b<n>-vb2+vox2+cnc2_v0-lm`; EER 4,78% và 3,59% trên CN-Celeb theo tác giả 🔬 | VoxBlink2, VoxCeleb2, CN-Celeb2 |
+| `redimnet2_b3_mix`, `redimnet2_b6` | ReDimNet2 b3 và b6, `b<n>-vb2+vox2+cnc2_v0-lm` | VoxBlink2, VoxCeleb2, CN-Celeb2 |
 
-Chưa thấy bộ học trên tiếng Việt nào công bố trọng số. Đội nhất bài nhận diện người nói của VLSP 2021 (EER 1,755%) cũng đi
-từ mô hình học trên tiếng Anh 🔬.
-
-**Vật liệu.** Bộ trích nghe lối ra `clean` của chuỗi (§3.2), trên đúng cửa sổ mà `command` cắt như board: thứ máy chủ sẽ
-nhận nếu sau này làm trên máy chủ.
+Vật liệu của khảo sát (`srpipe.scenes.speaker`, `make eval-speaker`):
 
 | Vai | Nguồn |
 |---|---|
 | Đăng ký | k câu lệnh của chủ repo (`spk_001`) ở phiên Cửa 3 ngày 28/09, 1 m; k = 3, 5, 10 |
-| Đích | mọi câu lệnh còn lại của chủ repo trong các phiên Cửa 3: 28/09 3 m, 07/10 1 m và 3 m |
+| Đích | mọi câu lệnh còn lại của chủ repo trong các phiên Cửa 3: 28/09 3 m, 07/10 1 m và 3 m; tính trên mọi cửa sổ, và riêng trên các cửa sổ mà model `command` đang khoá nhận đúng lệnh như board B quyết |
 | Người lạ | người nói `test` của `command/v1` (VIVOS, Common Voice) qua đường mô phỏng board (`scenes/device.py`), cửa sổ cắt cùng luật, tách gần 1 m và gần 3 m |
-| Mốc ngôn ngữ | người nói VIVOS `test` không qua board, cặp cùng người và khác người: EER của bộ trích trên giọng Việt ở kênh sạch |
+| Mốc ngôn ngữ | người nói VIVOS `test` không qua board, cặp cùng người và khác người |
 
-Board B mới thu một người, nên người lạ chỉ có qua mô phỏng. Thêm người lạ thu thật cần phiếu đồng ý (§1.4) và chủ repo
-duyệt riêng.
+**Thước:** EER, và phần cửa sổ của chủ repo được giữ ở ngưỡng cho một tỉ lệ người lạ lọt (0,5 / 1 / 2 / 5 / 10%), tách
+theo bộ trích, k, khoảng cách và độ dài cửa sổ. **Luật đi tiếp:** giữ ≥ 95% lệnh được nhận ở cả 1 m và 3 m, với ≤ 1%
+người lạ lọt.
 
-**Thước** (`srpipe.scenes.speaker`, `docs/measurements/speaker.md`): EER, và phần cửa sổ của chủ repo được giữ ở ngưỡng cho
-≤ 1% cửa sổ người lạ qua; tách theo bộ trích, k, khoảng cách và độ dài cửa sổ. Phần giữ tính trên mọi cửa sổ, và riêng
-trên các cửa sổ mà model `command` đang khoá nhận đúng lệnh như board B quyết (cao độ giữ ở trung bình, ngưỡng của NVS):
-xác minh giọng chỉ chạy sau khi lệnh đã được nhận. Embedding giữ ở `cache/` theo khoá sha256 của cửa sổ và bản ghim, nên
-thêm một bộ trích không chạy lại các bộ cũ.
+**Luật chung của hai đường**
 
-**Luật đi tiếp.** Chỉ khi một bộ trích giữ ≥ 95% cửa sổ của chủ repo ở cả 1 m và 3 m, với ≤ 1% người lạ qua, mới đề xuất
-làm thật theo CLAUDE.md §1.2: trên máy chủ (sửa §7.5, §9, `contracts/`, `host/`) hay trên chip (§3, §5, §6). Không đạt thì
-ghi số và dừng; học tiếp trên tiếng Việt (Vietnam-Celeb, dữ liệu VLSP) chỉ xét khi giấy phép của chúng cho phép.
+| Điểm | Chốt |
+|---|---|
+| Chỗ trong luồng | sau khi `command` nhận một lệnh, trên đúng cửa sổ lệnh ấy: lối ra `clean` của chuỗi (§3.2), cắt như `svc_listen` (§5.4); không chạy trên `wake`, không chạy mỗi khung |
+| Đăng ký | mẫu giọng là trung bình các embedding đã chuẩn hoá của 10 câu lệnh người dùng nói qua chính board; điểm là cosine với mẫu giọng |
+| Ngưỡng | đặt trên vật liệu của khảo sát ở 1% người lạ lọt; nới tới 5% chỉ khi đo được lệnh của người dùng bị chặn quá 5% ở 1% |
+| Bị chặn | lệnh không được thi hành, sự kiện ghi lý do `SPEAKER` (`contracts/`) |
+| Bật tắt | cờ NVS theo đường, tắt mặc định; tắt thì luồng lệnh như chưa có khối này |
+| Dữ liệu cá nhân | mẫu giọng là dữ liệu sinh trắc (§1.4): chỉ của người có phiếu ghi mục đích nhận diện người nói, xoá theo mã người nói |
+| Trước khi bật mặc định | người lạ thu thật qua board, nói chính các lệnh, có phiếu đồng ý; ngưỡng đặt lại trên họ |
 
-Embedding của chủ repo là dữ liệu sinh trắc, theo luật của §1.4.
+**Đường máy chủ: ReDimNet M.** Trọng số `M-vb2+vox2+cnc-ft_mix` học sẵn, dùng nguyên, không học lại.
+- **Board:** khi cờ NVS `speaker/server` bật, mỗi lệnh `command` nhận gửi thêm PCM int16 của cửa sổ lệnh (≤ 234 bước,
+  ≤ 120 KB) lên topic `sr/{deviceId}/up/voice`, kèm `seq` của sự kiện. Đó là chỗ duy nhất tiếng rời board ở chế độ
+  thường (§7.5). Board không chờ kết quả.
+- **Host:** `srhost.speaker` ghép tiếng với sự kiện cùng `seq`. Nó chạy ReDimNet M qua `ml/spk_ref/redimnet`, dự án uv
+  riêng có torch, nên `host/` không kéo torch (§4.6). Rồi nó so với mẫu giọng và ghi kết quả vào sự kiện mà host thi hành
+  hay hiện ra.
+- **Mẫu giọng:** nằm ở thư mục dữ liệu ngoài repo của host, đăng ký bằng `make speaker-enrol` từ một phiên thu 10 lệnh
+  qua board.
+
+**Đường chip: ReDimNet2 b0.** Trọng số `b0-vox2-lm` học sẵn, 1,1 M tham số, ~0,27 tỉ MAC cho 1,5 s lời; chạy trong
+`ai_engine`, int8 của esp-dl, ở nhân 0 sau khi `command` nhận lệnh.
+- **Bước đầu là bản dò** như E9-T10: xuất qua ESP-PPQ, `model->test()`, thời gian một lần chạy và PSRAM trên board B,
+  độ lệch int8 so với mô phỏng, chất lượng sau int8 trên vật liệu của khảo sát.
+- **Cắm vào chuỗi** chỉ khi bản dò đạt hai điều: một lần chạy ≤ 1 s trên cửa sổ 1,5 s; sau int8 giữ ≥ 95% lệnh được nhận
+  ở cả 1 m và 3 m, với ≤ 5% người lạ lọt.
+- **Chốt ở KẾ HOẠCH lúc cắm:** thư mục trong `ai_engine/src/`, chỗ đệm PCM của cửa sổ, chỗ mẫu giọng nằm trên flash
+  (`storage_format.h`, §6.2). Nếu int8 kéo chất lượng xuống, học lại b0 trên dữ liệu nhiều ngôn ngữ cộng tiếng Việt
+  (VieSpeaker, CC BY-NC 4.0) là bước sau.
 
 ---
 ## 4. Cấu trúc repo
@@ -1949,6 +1977,8 @@ ml/
 │   │   │                              #   quant.py dựng thang §3.14 cho ba đồ thị: encoder kèm phép chiếu khung,
 │   │   │                              #   mạng dự đoán đọc ngữ cảnh one-hot, bộ nối hai đầu vào; probe.py bản dò
 │   │   │                              #   board của ba đồ thị và của quyết định; chấm chính xác trên cây lệnh
+│   │   ├── speaker/quant.py           # bản dò int8 của ReDimNet2 b0 (§3.17): mã mạng nạp từ cache/spk_ref theo bản
+│   │   │                              #   ghim, xuất qua compress/quant như các nhánh khác
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
 │   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py, pitch.py}
@@ -2478,8 +2508,10 @@ host/
 │   ├── commands.py                # gửi bộ lệnh xuống down/commands của một board, in lỗi COMMANDS_* board báo về
 │   ├── session.py                 # phiên thu có nhãn: danh sách câu nhắc, mã người nói, mã phiếu đồng ý
 │   ├── score.py                   # chấm một phiên đã thu theo nhãn, gọi ml/src/srpipe/metrics
-│   └── calib.py                   # ước balance từ phiên ồn trắng (srpipe), kiểm chéo; ghi calib/bal và calib/pcm_shift
-│                                  #   xuống test_apps/calib
+│   ├── calib.py                   # ước balance từ phiên ồn trắng (srpipe), kiểm chéo; ghi calib/bal và calib/pcm_shift
+│   │                              #   xuống test_apps/calib
+│   └── speaker.py                 # §3.17 đường máy chủ: ghép up/voice với sự kiện cùng seq, embedding ReDimNet M qua
+│                                  #   ml/spk_ref/redimnet, cosine với mẫu giọng; đăng ký mẫu giọng từ một phiên thu
 ├── plans/                         # kịch bản một buổi thu: mỗi dòng một lời dặn và nhãn một phiên
 ├── sets/                          # bộ lệnh để gửi bằng make commands, mỗi file một bộ đầy đủ theo command_set
 └── tests/
@@ -3041,6 +3073,7 @@ Topic, QoS, retained và schema khai ở `contracts/mqtt_topics.yaml`; bảng d�
 | `sr/{deviceId}/up/event` | lên | 1 | không | `event` | khi có: thức, lệnh, từ chối, lỗi |
 | `sr/{deviceId}/down/cmd` | xuống | 1 | không | `device_cmd` | khi cần: `SET_CONFIG`, `SET_STREAM`, `SPEAK`, `CALIBRATE`, `REBOOT` |
 | `sr/{deviceId}/down/commands` | xuống | 1 | **có** | `command_set` | khi đổi bộ lệnh; retained nên máy nối lại là có bản mới nhất |
+| `sr/{deviceId}/up/voice` | lên | 1 | không | `voice` | khi cờ `speaker/server` bật: một lần mỗi lệnh `command` nhận (§3.17) |
 | `sr/{deviceId}/down/ota` | xuống | 1 | không | `ota_manifest` | E13 |
 
 | Payload | Nội dung | Cỡ ước |
@@ -3050,7 +3083,8 @@ Topic, QoS, retained và schema khai ở `contracts/mqtt_topics.yaml`; bảng d�
 | `event` | loại, `seq` khung, điểm, lệnh, khoảng cách với lệnh thứ hai, lý do từ chối; khi đổi bộ lệnh hỏng, `ERROR` với `COMMANDS_INVALID` (kèm `commandId` của dòng `lang_vi` không đọc được), `COMMANDS_REFUSED` hay `COMMANDS_NOT_SAVED` | ~150 B |
 
 Tổng ở chế độ thường: ~350 B/s telemetry + ~13 B/s heartbeat + sự kiện thưa → **dưới 1 KB/s**, đạt
-TỔNG QUAN V5.7.4, **không gửi tiếng**.
+TỔNG QUAN V5.7.4, **không gửi tiếng**. Khi đường máy chủ của §3.17 bật, mỗi lệnh được nhận gửi thêm một lần cửa sổ
+lệnh, ≤ 120 KB, trên `up/voice`.
 
 Callback của esp-mqtt chỉ phân tích payload rồi bỏ vào `q_cmd` hoặc `q_cmdset` (§5.3); không làm việc
 dài, không ghi flash trong callback.
@@ -3092,7 +3126,7 @@ phiên nền ồn "Wi-Fi tắt" của E2-T4, cùng khuôn và cùng đường ch
 |---|---|
 | Board ↔ broker | bàn thử `mqtt://` trong LAN **có mật khẩu** (bảng user nội bộ của EMQX, §4.7); `prod` chỉ nhận `mqtts://` (`NET_MQTT_REQUIRE_TLS`), cert CA nhúng trong firmware; username là `deviceId`, mật khẩu ở NVS `device/mqtt_pass` |
 | Bí mật trên máy | NVS; `prod` mã hoá NVS. `sdkconfig.secrets` gitignore |
-| Tiếng người | **không rời máy** ở chế độ thường; luồng tiếng chỉ mở bằng lệnh có chủ đích, **LED sáng suốt lúc mở**, tự tắt sau 10 phút nếu không gia hạn; `prod` không biên dịch luồng tiếng |
+| Tiếng người | **không rời máy** ở chế độ thường, trừ cửa sổ của lệnh đã nhận gửi trên `up/voice` khi cờ NVS `speaker/server` bật (§3.17, tắt mặc định); luồng tiếng chỉ mở bằng lệnh có chủ đích, **LED sáng suốt lúc mở**, tự tắt sau 10 phút nếu không gia hạn; `prod` không biên dịch luồng tiếng |
 | Bản thu để huấn luyện | theo §1.4: phiếu đồng ý, mã người nói, lưu ngoài repo, xoá được |
 | Console | Kconfig tắt ở `prod`, vì console ghi được mọi khoá NVS |
 | ACL broker | mỗi `deviceId` chỉ ghi `sr/{chính nó}/up/#` và đọc `sr/{chính nó}/down/#` |
@@ -3176,14 +3210,13 @@ Không cửa nào cho phép "gần đạt thì đi tiếp" (TỔNG QUAN §8).
 ## 9. Ngoài phạm vi
 
 Giữ nguyên TỔNG QUAN §9 — nhận dạng tự do, nhiều hơn hai micro, hai người nói đè nhau, khử vang — và
-thêm bốn mục:
+thêm ba mục:
 
 | Mục | Vì sao |
 |---|---|
 | **Nói chen khi máy đang nói** | cần `wake` chạy trong `DAP` trên tín hiệu đã khử vọng, tức Cửa của `aec` phải đạt trước; mở như tuỳ chọn ở E14 nếu còn thời gian |
 | **Thu xa hơn 3 m** | vang quyết định tầm thu, và chuỗi này không có khối khử vang (TỔNG QUAN §9.1). Tầm thu thật đo và ghi thành một con số ở E14-T8 |
-| **Phân biệt người nói** trong sản phẩm | nhận ra *ai* nói là bài toán sinh trắc, kéo theo nghĩa vụ pháp lý khác hẳn (§1.4); §3.17 chỉ khảo sát trên máy tính xem có đáng làm không |
-| **Nhận dạng trên máy chủ** | toàn bộ chuỗi chạy trên board; máy tính chỉ xem, chấm, thu |
+| **Nhận dạng lời trên máy chủ** | toàn bộ chuỗi nhận dạng chạy trên board; máy tính xem, chấm, thu, và chỉ kiểm giọng của lệnh board đã nhận (§3.17) |
 
 ---
 
