@@ -174,6 +174,46 @@ class ContextPool(nn.Module):
         return torch.cat([mean, torch.sqrt(var.clamp(min=ASTP_FLOOR))], dim=1)
 
 
+class Copies(nn.Module):
+    """A one-channel map repeated into count channels."""
+
+    def __init__(self, count: int) -> None:
+        super().__init__()
+        self.count = count
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.cat([x] * self.count, dim=1)
+
+
+def per_channel(conv: nn.Conv2d) -> nn.Sequential:
+    """conv, one input channel to many, as that channel copied to each output and a depthwise convolution of conv's
+    kernels: the same sums, where esp-dl runs a one-channel input at a tenth of a depthwise one's rate."""
+    depthwise = nn.Conv2d(
+        conv.out_channels,
+        conv.out_channels,
+        conv.kernel_size,
+        stride=conv.stride,
+        padding=conv.padding,
+        dilation=conv.dilation,
+        groups=conv.out_channels,
+        bias=conv.bias is not None,
+    )
+    with torch.no_grad():
+        depthwise.weight.copy_(conv.weight)
+        if conv.bias is not None:
+            depthwise.bias.copy_(conv.bias)
+    return nn.Sequential(Copies(conv.out_channels), depthwise)
+
+
+def one_channel_inputs(model: nn.Module) -> nn.Module:
+    """model with each Conv2d of one input channel and several outputs as per_channel."""
+    for parent in list(model.modules()):
+        for name, m in list(parent.named_children()):
+            if isinstance(m, nn.Conv2d) and m.in_channels == 1 and m.out_channels > 1 and m.groups == 1:
+                setattr(parent, name, per_channel(m))
+    return model
+
+
 def swapped(conv: nn.Conv2d) -> nn.Conv2d:
     """conv over (..., frames, bands) where it ran over (..., bands, frames): its kernel, stride, pads and dilation
     transposed."""
@@ -240,7 +280,8 @@ class Embed(nn.Module):
         b = wrap.backbone
         if b.is_subnet or b.agg_gnorm or any(b._stage_has_dual):
             raise ValueError("Embed runs one plain stage after another")
-        self.backbone = time_major(stage_sums(channel_norms(ungrouped(explicit_padding(copy.deepcopy(b))))))
+        rewritten = stage_sums(channel_norms(ungrouped(explicit_padding(copy.deepcopy(b)))))
+        self.backbone = time_major(one_channel_inputs(rewritten))
         self.pool = ContextPool(wrap.pool)
         self.head = folded_head(wrap.bn, wrap.linear)
 

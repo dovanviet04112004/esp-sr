@@ -125,6 +125,19 @@ def test_time_major_to1d_and_to2d_give_the_bands_major_ones() -> None:
     torch.testing.assert_close(quant.To2d(6, 4)(flat), x.transpose(2, 3))
 
 
+def test_a_one_channel_convolution_gives_what_copies_and_a_depthwise_one_give() -> None:
+    torch.manual_seed(7)
+    model = nn.Sequential(nn.Conv2d(1, 12, 3, padding=1), nn.Conv2d(12, 12, 1)).eval()
+    x = torch.randn(1, 1, 8, FRAMES)
+    with torch.no_grad():
+        want = model(x)
+        quant.one_channel_inputs(model)
+        got = model(x)
+    assert isinstance(model[0], nn.Sequential) and model[0][1].groups == 12
+    assert isinstance(model[1], nn.Conv2d) and model[1].groups == 1
+    torch.testing.assert_close(got, want)
+
+
 def test_explicit_pads_give_what_same_gives() -> None:
     torch.manual_seed(0)
     model = nn.Sequential(
