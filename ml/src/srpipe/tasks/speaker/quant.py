@@ -186,7 +186,7 @@ def output_slices(conv: nn.Conv1d, weight_bytes_max: int) -> nn.Module:
 class ContextPool(nn.Module):
     """ASTP with global context as esp-dl can run it: the context's part of the attention's first projection is added
     per channel, where ASTP concatenates the context expanded over time, an Expand esp-dl lacks; the projections run
-    over each frame as output_slices."""
+    over each frame as output_slices, and squares are products, since esp-dl runs Pow in float."""
 
     def __init__(self, astp: nn.Module, weight_bytes_max: int) -> None:
         super().__init__()
@@ -206,7 +206,7 @@ class ContextPool(nn.Module):
         alpha = torch.tanh(self.frames(x) + self.context(torch.cat((mean, std), dim=1)))
         alpha = torch.softmax(self.linear2(alpha), dim=2)
         mean = torch.sum(alpha * x, dim=2)
-        var = torch.sum(alpha * (x**2), dim=2) - mean**2
+        var = torch.sum(alpha * (x * x), dim=2) - mean * mean
         return torch.cat([mean, torch.sqrt(var.clamp(min=ASTP_FLOOR))], dim=1)
 
 
