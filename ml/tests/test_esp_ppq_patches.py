@@ -1,5 +1,6 @@
-"""The ESP-PPQ fixes the ctc branch opts into: quantised and exported as ESP-PPQ does, each graph shows the bug
-board B hit, and fixed it does not; every fix is undone when its block ends, so other branches run ESP-PPQ as is."""
+"""The ESP-PPQ fixes the ctc and speaker branches opt into: quantised and exported as ESP-PPQ does, each graph shows
+the bug board B hit, and fixed it does not; every fix is undone when its block ends, so other branches run ESP-PPQ as
+is."""
 
 from __future__ import annotations
 
@@ -212,21 +213,52 @@ def test_rmsnorm_as_espdl_passes_the_gradient_of_the_float_norm(tmp_path: Path) 
 
 
 def test_every_patch_is_undone_when_its_block_ends() -> None:
+    from esp_ppq.api import espdl_interface, interface
     from esp_ppq.executor.base import OPERATION_FORWARD_TABLE
     from esp_ppq.parser import espdl_exporter
     from esp_ppq.parser.espdl.espdl_streaming import StreamingTable
     from esp_ppq.quantization.optim import QuantizeFusionPass
 
     pattern, add, fuse = espdl_exporter.InsertRequantNodePattern, StreamingTable.add, QuantizeFusionPass.optimize
+    simplify, formatted = espdl_interface.simplify, interface.format_graph
     norms = {platform: table.get("RMSNormalization") for platform, table in OPERATION_FORWARD_TABLE.items()}
     with esp_ppq_patches.applied(list(esp_ppq_patches.PATCHES)):
         assert espdl_exporter.InsertRequantNodePattern is not pattern and StreamingTable.add is not add
-        assert QuantizeFusionPass.optimize is not fuse
+        assert QuantizeFusionPass.optimize is not fuse and espdl_interface.simplify is not simplify
+        assert interface.format_graph is not formatted
         s3 = [p for p in OPERATION_FORWARD_TABLE if p.name in ("ESPDL_S3_INT8", "ESPDL_S3_INT16")]
         assert len(s3) == 2 and all(OPERATION_FORWARD_TABLE[p]["RMSNormalization"] is not norms[p] for p in s3)
     assert espdl_exporter.InsertRequantNodePattern is pattern and StreamingTable.add is add
-    assert QuantizeFusionPass.optimize is fuse
+    assert QuantizeFusionPass.optimize is fuse and espdl_interface.simplify is simplify
+    assert interface.format_graph is formatted
     assert all(table.get("RMSNormalization") is norms[p] for p, table in OPERATION_FORWARD_TABLE.items())
+
+
+def test_simplify_without_bn_fusion_hands_onnxsim_skip_fuse_bn(monkeypatch) -> None:
+    from esp_ppq.api import espdl_interface
+
+    seen = []
+    monkeypatch.setattr(espdl_interface, "simplify", lambda model, **kwargs: seen.append(kwargs) or (model, True))
+    with esp_ppq_patches.applied(["simplify_without_bn_fusion"]):
+        espdl_interface.simplify("graph")
+    espdl_interface.simplify("graph")
+    assert seen == [{"skip_fuse_bn": True}, {}]
+
+
+def test_fuse_erf_gelu_loads_torch_gelu_as_one_gelu(tmp_path: Path) -> None:
+    from esp_ppq.api.interface import load_onnx_graph
+
+    from srpipe.compress.quant import onnx_export
+
+    torch.manual_seed(0)
+    model = nn.Sequential(nn.Conv1d(BANDS, BANDS, 1), nn.GELU()).eval()
+    x = np.random.default_rng(0).normal(0, 1, (1, BANDS, HOPS)).astype(np.float32)
+    path = str(onnx_export.checked(model, (x,), tmp_path / "gelu.onnx", RUNGS["onnx_rtol"]))
+    plain = {op.type for op in load_onnx_graph(path).operations.values()}
+    with esp_ppq_patches.applied(["fuse_erf_gelu"]):
+        fused = {op.type for op in load_onnx_graph(path).operations.values()}
+    assert "Erf" in plain and "Gelu" not in plain
+    assert "Gelu" in fused and "Erf" not in fused
 
 
 def test_an_unknown_patch_is_refused() -> None:

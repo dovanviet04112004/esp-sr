@@ -165,11 +165,54 @@ def rmsnorm_as_espdl() -> Iterator[None]:
             table["RMSNormalization"] = simulate
 
 
+@contextlib.contextmanager
+def simplify_without_bn_fusion() -> Iterator[None]:
+    """espdl_quantize_onnx simplifies the ONNX with onnxsim's defaults, whose fuse_bn pass leaves a tensor whose stored
+    shape differs in rank from the one inferred after it; this runs onnxsim without that pass, ESP-PPQ fusing the
+    norms itself. ReDimNet2 b0 (KEHOACH 3.17): "[ShapeInferenceError] Inferred shape and existing shape differ in rank:
+    (3) vs (2)" before quantisation starts, on the PC.
+    """
+    from esp_ppq.api import espdl_interface
+
+    simplify = espdl_interface.simplify
+    espdl_interface.simplify = functools.partial(simplify, skip_fuse_bn=True)
+    try:
+        yield
+    finally:
+        espdl_interface.simplify = simplify
+
+
+@contextlib.contextmanager
+def fuse_erf_gelu() -> Iterator[None]:
+    """ESP-PPQ formats an ONNX graph without fusing GELU, so torch's Div, Erf, Add, Mul, Mul stay, and esp-dl has no
+    Erf; this fuses them into one Gelu by ESP-PPQ's own GraphMerger.fuse_gelu, which esp-dl runs as an int8 table
+    of the exact function. ReDimNet2 b0 (KEHOACH 3.17) on board B: "Do not support Erf, please implement and register
+    it first", the model never loads.
+    """
+    from esp_ppq.api import interface
+    from esp_ppq.IR.morph import GraphMerger
+
+    format_graph = interface.format_graph
+
+    def formatted(graph):
+        graph = format_graph(graph)
+        GraphMerger(graph).fuse_gelu()
+        return graph
+
+    interface.format_graph = formatted
+    try:
+        yield
+    finally:
+        interface.format_graph = format_graph
+
+
 PATCHES = {
     "requantise_graph_inputs": requantise_graph_inputs,
     "conv_caches_along_time": conv_caches_along_time,
     "fuse_passive_ops_on_graph_inputs": fuse_passive_ops_on_graph_inputs,
     "rmsnorm_as_espdl": rmsnorm_as_espdl,
+    "simplify_without_bn_fusion": simplify_without_bn_fusion,
+    "fuse_erf_gelu": fuse_erf_gelu,
 }
 
 
