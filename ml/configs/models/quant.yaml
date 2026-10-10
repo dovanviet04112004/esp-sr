@@ -5,6 +5,10 @@ default:
   calibration: kl                  # minmax, percentile, mse or kl
   int16_ops: []                    # rung 3: ESP-PPQ operation names whose weights and activations go to 16 bits
   onnx_rtol: 1.0e-4                # largest onnxruntime − torch gap allowed, as a share of an output's largest magnitude
+timing:                            # step 2.1 of 3.14's procedure: a quick graph that only times the chip
+  equalization: null
+  bias_correction: false
+  calibration: minmax
 branches:
   ns: {}
   wake: {}

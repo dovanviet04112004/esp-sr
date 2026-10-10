@@ -50,6 +50,12 @@ def ladder(branch: str) -> dict:
     return deep_merge(cfg["default"], cfg["branches"][branch])
 
 
+def timing_rungs(branch: str) -> dict:
+    """The branch's rungs with quant.yaml's timing over them: a graph quick to quantise, whose time on the chip is the
+    rungs' own since it depends on the graph's structure alone (KEHOACH 3.14)."""
+    return ladder(branch) | load_yaml(LADDER)["timing"]
+
+
 def setting_of(rungs: dict):
     """The ESP-PPQ setting for esp-dl that rungs describe: equalization, bias correction, calibration, int16 layers."""
     from esp_ppq.api.espdl_interface import get_target_platform
@@ -192,3 +198,22 @@ class Simulator:
         with esp_ppq_patches.applied(self.patches):
             outs = self.executor.forward(inputs=tensors)
         return [out.detach().cpu().numpy() for out in outs]
+
+
+def same_integers(
+    nets: Sequence[nn.Module], calib: list[torch.Tensor], inputs: list[np.ndarray], rungs: dict, patches: Sequence[str]
+) -> tuple[int, float]:
+    """How many of the simulated outputs of nets, each quantised under rungs and patches on calib, differ from the
+    first net's on inputs, and by how much at most: (0, 0.0) when a rewrite between them keeps every integer, the
+    check step 2.4 of KEHOACH 3.14's procedure asks of a rewrite of the network."""
+    import tempfile
+
+    outs = []
+    for net in nets:
+        with esp_ppq_patches.applied(patches), tempfile.TemporaryDirectory() as work:
+            graph = quantize(net, calib, Path(work), rungs)
+        sim = Simulator(graph, patches)
+        outs.append(np.stack([sim(x).ravel() for x in inputs]))
+    first, rest = outs[0], outs[1:]
+    off = sum(int((first != other).sum()) for other in rest)
+    return off, max((float(np.abs(first - other).max()) for other in rest), default=0.0)
