@@ -660,6 +660,10 @@ Ba bước tối ưu tiếp, mỗi bước đo trên board B với bản lượn
 | Hai bản vá mô phỏng (LayerNorm, Softmax) | 2560 ms | 691 ms, 93 |
 | GELU bản tanh thành một bảng int8 (`fuse_tanh_gelu`) | 2501 ms | 702 ms, 94 |
 | Bỏ Transpose trùng, gộp chuỗi Transpose–Reshape–Transpose khi xuất (`lean_transposes`) | 2307 ms | 510 ms, 61 |
-| Bản đồ 2-D theo (khung, băng), đổi sang 1-D không dời dữ liệu | **1934 ms** | 128 ms, 39 |
+| Bản đồ 2-D theo (khung, băng), đổi sang 1-D không dời dữ liệu | 1934 ms | 128 ms, 39 |
+| Conv 3×3 đầu stem một kênh vào thành 12 bản sao rồi conv depthwise (`one_channel_inputs`) | 1877 ms | 148 ms, 39 |
+| Một Transpose chung cho mọi op đọc cùng biến, kể cả op khác lưới lượng tử (`lean_transposes`) | **1787 ms** | 76 ms, 29 |
 
-Còn lại: Conv 1204 ms (200 op), Add 158 ms, Transpose 128 ms, MatMul 94 ms, LayerNorm 80 ms.
+Conv đầu stem từ 110 ms xuống 12 ms, nhưng bản ghép 12 bản sao nằm theo kênh trước nên ESP-PPQ chèn thêm một Transpose
+33,6 ms trước conv depthwise. Còn lại: Conv 1089 ms (202 op), Add 159 ms, MatMul 92 ms, LayerNorm 81 ms (riêng LayerNorm
+đầu stem 65 ms), Transpose 76 ms, `/pool/Pow` chạy float 32 ms.
