@@ -67,3 +67,34 @@ def test_report_tags_each_slow_path_and_leaves_an_aligned_convolution_alone(tmp_
 def test_profile_keeps_the_last_time_each_module_was_printed() -> None:
     log = "| /a/Conv | Conv | 5us |\n| /a/Conv | Conv | 7us |\n| /b/Add | Add | 3us |"
     assert espdl_profile.profile(log) == {"/a/Conv": ("Conv", 7), "/b/Add": ("Add", 3)}
+
+
+class Causal(nn.Module):
+    """A causal convolution over three steps and a pointwise one: a streamed export caches the first."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.taps, self.mix = nn.Conv1d(8, 16, 3), nn.Conv1d(16, 16, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.mix(torch.relu(self.taps(x)))
+
+
+def test_report_leaves_out_a_garbled_row_and_gives_no_cycles_for_a_streamed_graph(tmp_path: Path) -> None:
+    """A row whose name lost characters on the serial line into another node's name, with the op it had, keeps that
+    node's own row; the streamed graph's .info holds the whole sequence, so no cycles a multiply-add are given."""
+    torch.manual_seed(0)
+    rng = np.random.default_rng(0)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 8, 34)).astype(np.float32)) for _ in range(2)]
+    rungs = ptq_espdl.ladder("speaker") | {"equalization": None, "bias_correction": False, "calibration": "minmax"}
+    graph = ptq_espdl.quantize(Causal().eval(), calib, tmp_path, rungs)
+    io = ptq_espdl.io_of(graph)
+    x = ptq_espdl.to_int8(calib[0].numpy(), io.input_exponent).astype(np.float32) * np.float32(2.0**io.input_exponent)
+    espdl = export_espdl.export(graph, tmp_path / "s.espdl", streaming_input_shape=[1, 8, 4], test_input=x[..., :4])
+    ops = espdl_profile.nodes(espdl)
+    log = "\n".join(f"| {name} | {op} | {100 + i}us |" for i, (name, (op, *_)) in enumerate(ops.items()))
+    other = next(name for name, (op, *_) in ops.items() if op != "Conv")
+    report = espdl_profile.report(f"{log}\n| {other} | Conv | 9us |", espdl, top=50)
+    assert "1 rows of the log left out" in report
+    assert "streamed" in report and "c/MAC" not in report
+    assert other in tagged(report)

@@ -36,9 +36,12 @@ class Module:
     attrs: str
 
 
-def profile(text: str) -> dict[str, tuple[str, int]]:
-    """Each module's (op, µs) in the last profile esp-dl's profile_module printed into text."""
-    return {m["name"]: (m["op"], int(m["us"])) for m in PROFILE_ROW.finditer(text)}
+def profile(text: str, graph: dict | None = None) -> dict[str, tuple[str, int]]:
+    """Each module's (op, µs) in the last profile esp-dl's profile_module printed into text. With graph, nodes(), only
+    rows naming one of its nodes with that node's op count: the serial line can drop a row's characters, and what is
+    left of its name may be another node's."""
+    rows = ((m["name"], m["op"], int(m["us"])) for m in PROFILE_ROW.finditer(text))
+    return {name: (op, us) for name, op, us in rows if graph is None or graph.get(name, ("",))[0] == op}
 
 
 def nodes(espdl: Path) -> dict[str, tuple[str, list[str], list[str]]]:
@@ -113,9 +116,12 @@ def tags_of(
 def report(log_text: str, espdl: Path, top: int) -> str:
     """The profile in log_text of the model espdl as text: time by op type, the slowest modules with their tags."""
     info_text = espdl.with_suffix(".info").read_text(encoding="utf-8")
-    graph, timed = nodes(espdl), profile(log_text)
-    laid = shapes(info_text, espdl_shapes.parse(info_text))
-    attrs = {outs[0]: a for _, a, _, outs in espdl_shapes.parse(info_text).nodes}
+    graph, info = nodes(espdl), espdl_shapes.parse(info_text)
+    timed, rows = profile(log_text, graph), len(PROFILE_ROW.findall(log_text))
+    laid = shapes(info_text, info)
+    attrs = {outs[0]: a for _, a, _, outs in info.nodes}
+    # A streamed export declares its input as one step, while its value infos keep the whole sequence quantised.
+    streamed = any(op == "StreamingCache" for op, *_ in info.nodes)
     readers = defaultdict(list)
     for op, ins, _ in graph.values():
         for name in ins:
@@ -123,20 +129,24 @@ def report(log_text: str, espdl: Path, top: int) -> str:
     modules = [
         Module(name, op, us, graph[name][1], graph[name][2], attrs.get(graph[name][2][0], ""))
         for name, (op, us) in timed.items()
-        if name in graph
     ]
     by_op = defaultdict(lambda: [0, 0])
     for m in modules:
         by_op[m.op][0] += 1
         by_op[m.op][1] += m.us
-    lines = [f"{sum(m.us for m in modules) / 1000:.1f} ms over {len(modules)} modules of {espdl.name}", "by op type:"]
+    lines = [f"{sum(m.us for m in modules) / 1000:.1f} ms over {len(modules)} modules of {espdl.name}"]
+    if rows > len(modules):
+        lines.append(f"{rows - len(modules)} rows of the log left out: another model's, garbled, or printed again")
+    if streamed:
+        lines.append("streamed: the .info holds the whole sequence's shapes, so no cycles a multiply-add")
+    lines.append("by op type:")
     lines += [
         f"  {op:22s} {n:4d} {us / 1000:8.1f} ms" for op, (n, us) in sorted(by_op.items(), key=lambda kv: -kv[1][1])
     ]
     lines.append(f"slowest {top} modules:")
     for m in sorted(modules, key=lambda m: -m.us)[:top]:
         tags, rate = tags_of(m, laid, readers)
-        cycles = f"{rate:5.2f} c/MAC " if rate is not None else ""
+        cycles = f"{rate:5.2f} c/MAC " if rate is not None and not streamed else ""
         lines.append(f"  {m.us / 1000:7.1f} ms {m.op:18s} {cycles}{m.name}" + "".join(f"\n      - {t}" for t in tags))
     return "\n".join(lines)
 
