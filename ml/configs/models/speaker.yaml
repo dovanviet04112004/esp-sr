@@ -14,5 +14,7 @@ quant:                             # python -m srpipe.tasks.speaker.quant ptq <r
 esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches around this branch's quantisation and export
   - simplify_without_bn_fusion     # onnxsim's fuse_bn breaks the shapes of b0's graph
   - fuse_erf_gelu                  # esp-dl has no Erf; b0's GELU runs as one Gelu table
+  - layernorm_as_espdl             # its float32 steps, or a half step rounds unlike the chip
 probe:                             # E11-T25: one row's graph on board B (make ai-unit-speaker)
   runs: 10                         # timed runs on the board, after one untimed
+  cuts: 4                          # copies of the graph cut at tensors spread over its ops, each model->test()ed

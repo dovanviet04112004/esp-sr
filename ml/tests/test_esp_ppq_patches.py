@@ -192,6 +192,62 @@ def test_rmsnorm_as_espdl_simulates_each_norm_as_the_chip_rounds_it(tmp_path: Pa
     assert flips > 0
 
 
+LN_HOPS, LN_WIDTH = 2048, 24
+
+
+def layernorm_graph(tmp_path: Path):
+    norm = nn.LayerNorm(LN_WIDTH)
+    with torch.no_grad():
+        norm.weight.copy_(torch.linspace(0.02, 1.5, LN_WIDTH))
+        norm.bias.copy_(torch.linspace(-0.9, 0.6, LN_WIDTH))
+    rng = np.random.default_rng(9)
+    calib = [torch.from_numpy(rng.normal(0, 4, (1, LN_HOPS, LN_WIDTH)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(norm.eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    (op,) = [op for op in graph.operations.values() if op.type == "LayerNormalization"]
+    return graph, op
+
+
+def espdl_layernorm(q: np.ndarray, gamma: np.ndarray, beta: np.ndarray, s_in, s_out, eps) -> np.ndarray:
+    """esp-dl's int8 LayerNormalization of q over its last axis, each float32 step as dl_module_layer_normalization.hpp
+    takes it, sqrt_newton as dl_math.hpp has it."""
+    f = np.float32
+    mean = (q.astype(np.float64).sum(-1, keepdims=True) / q.shape[-1]).astype(f)
+    variance = np.zeros_like(mean)
+    for j in range(q.shape[-1]):
+        variance = variance + (q[..., j : j + 1].astype(f) - mean) ** 2
+    variance = variance * (f(s_in) * f(s_in)) / f(q.shape[-1])
+    x = variance + f(eps)
+    root, moving = x.copy(), np.ones(x.shape, dtype=bool)
+    while moving.any():
+        step = (root + x / root) * f(0.5)
+        root, moving = np.where(moving, step, root), moving & (np.abs(step - root) > f(1e-5))
+    inv_std = f(1.0) / root
+    result = (q.astype(f) * f(s_in) - mean * f(s_in)) * inv_std * gamma + beta
+    return np.clip(np.floor(result * (f(1.0) / f(s_out)) + f(0.5)), -128, 127)
+
+
+def test_layernorm_as_espdl_simulates_each_norm_as_the_chip_rounds_it(tmp_path: Path) -> None:
+    """ESP-PPQ as is rounds a half step now and then the other way from the chip; this seed holds such outputs."""
+    graph, op = layernorm_graph(tmp_path)
+    s_in, s_out = (float(c.scale) for c in (op.input_quant_config[0], op.output_quant_config[0]))
+    gamma, beta = (op.inputs[i].value.detach().numpy().astype(np.float32) for i in (1, 2))
+    gamma = np.clip(np.floor(gamma / float(op.input_quant_config[1].scale) + 0.5), -128, 127)
+    gamma = (gamma * float(op.input_quant_config[1].scale)).astype(np.float32)
+    beta = np.clip(np.floor(beta / float(op.input_quant_config[2].scale) + 0.5), -128, 127)
+    beta = (beta * float(op.input_quant_config[2].scale)).astype(np.float32)
+    patched, as_is = ptq_espdl.Simulator(graph, ["layernorm_as_espdl"]), ptq_espdl.Simulator(graph)
+    rng, flips = np.random.default_rng(12), 0
+    for _ in range(4):
+        q = rng.normal(0, 30, (1, LN_HOPS, LN_WIDTH)).round().clip(-128, 127)
+        x = q.astype(np.float32) * np.float32(s_in)
+        want = espdl_layernorm(q, gamma, beta, s_in, s_out, op.attributes.get("epsilon", 1e-5))
+        assert np.array_equal(patched(x) / np.float32(s_out), want)
+        off = as_is(x) / np.float32(s_out) - want
+        assert np.abs(off).max() <= 1
+        flips += np.count_nonzero(off)
+    assert flips > 0
+
+
 def test_rmsnorm_as_espdl_passes_the_gradient_of_the_float_norm(tmp_path: Path) -> None:
     from esp_ppq.executor.op.torch.default import RMSNormalization_forward
 
