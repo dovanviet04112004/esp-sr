@@ -723,6 +723,13 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
   - bản dò khớp từng bit, 1139,3 ms;
   - bảng xếp hạng: 677 module, 1118,7 ms. Chỉ còn nhãn không có bản vá: LayerNorm đầu stem 62 ms và Softmax ~15 ms
     mỗi cái (nhân float), Conv 3×3 24 kênh (nhân unaligned), QuantizeLinear sau Softmax ~9 ms mỗi cái.
+- **Conv depthwise 3×3 không lợi gì khi đệm kênh lên bội 16.** Bảng xếp hạng đủ 677 module cho chu kỳ trên một phép
+  nhân-cộng:
+  - stage 0–1, 24 kênh, nhân unaligned: 1,70–1,86;
+  - stage 2, 48 kênh, đường aligned: 1,66–1,87;
+  - stage 3–5, 96 kênh trở lên: 0,55–0,97.
+
+  Phí nằm ở vòng lặp theo vị trí, không ở số kênh. Đệm 24 → 32 kênh chỉ thêm 33% phép tính, nên bỏ.
 
 ## 26. `command_ctc` qua chuỗi tăng tốc (E11-T30)
 
