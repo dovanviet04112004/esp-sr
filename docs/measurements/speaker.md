@@ -237,6 +237,8 @@ Lệnh được nhận giữ bao nhiêu, ở hai mức người lạ lọt:
   báo chỗ lệch đầu tiên, nên chưa biết lệch từ op nào.
 - **Lần bốn, đo giờ trước khi so:** một lần chạy mất **3,04 s**, gấp 3 lần ngưỡng cắm ≤ 1 s; tensor chiếm 3,28 MB
   PSRAM (`latency.md` §25). 158/192 giá trị lệch mô phỏng quá một bước, lệch lớn nhất 18, cùng dấu và cùng cỡ.
-- **Đọc:** b0 int8 trên ESP32-S3 không đạt điều kiện cắm về thời gian, kể cả khi sửa xong chỗ lệch. Trước khi dò chỗ
-  lệch cần biết 3 s nằm ở đâu: đo từng lớp bằng `model->profile()` của esp-dl. Nếu vài loại op (Pow F32, Transpose,
-  conv sâu nhân 59, attention) chiếm phần lớn thì còn đường viết lại; nếu chia đều thì b0 không hợp với S3.
+- **Đọc:** b0 int8 trên ESP32-S3 không đạt điều kiện cắm về thời gian, kể cả khi sửa xong chỗ lệch.
+  - Đo từng lớp (`latency.md` §25): Conv 1,09 s, ReduceSum của phép gộp đầu ra các stage 0,60 s, Transpose 0,53 s.
+  - Riêng Conv đã vượt 1 s, nên viết lại phép gộp và bớt Transpose chỉ đưa b0 về cỡ 2 s 🔬.
+  - Đường chip cần mạng nhỏ hơn b0 (học trên lưới của hợp đồng), cửa sổ ngắn hơn, hay chip nhanh hơn (P4). Đây là
+    quyết định của KẾ HOẠCH §3.17, chưa chốt.

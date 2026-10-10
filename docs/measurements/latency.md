@@ -607,3 +607,24 @@ Cả bộ 8/8 bài thử qua. Lượt trước cùng ngày dừng trước bài 
 - **Dạng lệch:** các cặp board/mô phỏng cùng dấu và cùng cỡ (20/10, −10/−14, 111/109, −35/−43), không phải ×2 đều
   khắp. Đó là sai số tích luỹ, chưa biết bắt đầu ở op nào.
 - **Watchdog:** nhân 0 bận liền 3–4 s khi dựng và chạy, nên task watchdog cảnh báo; test vẫn chạy hết.
+
+Thời gian từng module, đo bằng `model->profile_module()` của esp-dl trong cùng ca test, 700 module, tổng 3022 ms:
+
+| Loại op | Số op | Thời gian | Phần |
+|---|---|---|---|
+| Conv | 175 | 1086 ms | 36% |
+| ReduceSum | 9 | 596 ms | 20% |
+| Transpose | 81 | 534 ms | 18% |
+| Mul | 40 | 133 ms | 4% |
+| Concat | 8 | 110 ms | 4% |
+| MatMul | 46 | 93 ms | 3% |
+| LayerNormalization | 19 | 81 ms | 3% |
+| Pow (F32) | 8 | 72 ms | 2% |
+
+- **ReduceSum và Concat** là phép gộp có trọng số đầu ra các stage của ReDimNet2 (`weigth1d`): xếp chồng các đầu ra
+  rồi cộng theo trục 1. Mỗi ReduceSum mất 70–102 ms, vì esp-dl cộng chậm theo trục không nằm trong cùng. Viết thành
+  tổng tường minh Σ wᵢ·xᵢ thì bớt được cỡ 0,7 s 🔬.
+- **Conv** riêng phần mình đã 1,09 s, vượt ngưỡng 1 s. Chậm nhất là conv 3×3 đầu stem chỉ có 1 kênh vào: 110 ms cho
+  1,15 triệu MAC. Kế đến là hai conv 1×1 của lớp gộp, 78 ms và 79 ms.
+- **Đọc:** viết lại đồ thị chỉ đưa b0 về cỡ 2 s 🔬, chưa tới ≤ 1 s. Muốn đạt thì cần mạng nhỏ hơn, cửa sổ ngắn hơn
+  hay chip nhanh hơn.
