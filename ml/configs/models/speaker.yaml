@@ -9,7 +9,6 @@ quant:                             # python -m srpipe.tasks.speaker.quant ptq <r
   calib_windows: 64                # impostor windows ESP-PPQ calibrates on, drawn with the seed, left out of the rows
   calibrations: [kl, percentile, minmax, mse]   # rung 2, one row each, in this order
   rewrite_rtol: 1.0e-4             # largest gap of the rewritten graph to the extractor, as a share of its largest value
-  conv_weight_bytes_max: 36864     # int8 weights of each slice of a per-frame convolution, held in the 64 KB data cache
   count: 10                        # enrolment windows of the figures
   shares: [0.01, 0.05]             # impostors passing at which the accepted windows kept are given per group
 esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches around this branch's quantisation and export
@@ -22,6 +21,7 @@ esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches aroun
   - lean_quantizers                # one QuantizeLinear per variable and grid, the Softmax's float output quantised once
   - aligned_pointwise              # 12- and 24-channel 1x1 convolutions over merged columns, on the vector path
   - copies_by_broadcast            # the stem's copies of the log-mel as an Add of zeros, not a Concat and Transpose
+  - cache_sized_convolutions       # the pool's 72 KB projections as slices whose weights stay in the data cache
 probe:                             # E11-T25: one row's graph on board B (make ai-unit-speaker)
   runs: 10                         # timed runs on the board, after one untimed
   cuts: 4                          # copies of the graph cut at tensors spread over its ops, each model->test()ed

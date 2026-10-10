@@ -615,6 +615,93 @@ def aligned_pointwise() -> Iterator[None]:
         espdl_exporter.reset_graph_layout = reset
 
 
+def output_sizes(outputs: int, weight_bytes: int, weight_bytes_max: int) -> list[int]:
+    """Slices of outputs, each a multiple of CHANNEL_STEP and holding at most weight_bytes_max of the convolution's
+    weight_bytes, as even as that allows; one slice when it holds them all."""
+    per_output = weight_bytes // outputs
+    step = max(weight_bytes_max // per_output // CHANNEL_STEP, 1) * CHANNEL_STEP
+    if outputs % CHANNEL_STEP or outputs <= step:
+        return [outputs]
+    size = -(-outputs // -(-outputs // step) // CHANNEL_STEP) * CHANNEL_STEP
+    return [size] * (outputs // size) + ([outputs % size] if outputs % size else [])
+
+
+def slice_outputs(graph, op, sizes: list[int], info) -> None:
+    """op, an ungrouped pointwise convolution, as one convolution per slice of its outputs, each on its own slice of
+    the weights and bias and on op's grids, concatenated along the channels into op's output."""
+    from esp_ppq.core import OperationQuantizationConfig
+    from esp_ppq.IR.quantize import QuantableOperation
+    from esp_ppq.parser.espdl.espdl_graph_utils import get_default_perm
+
+    (x, *params), y, platform = op.inputs, op.outputs[0], op.platform
+    configs, out_config, laid = op.input_quant_config, op.output_quant_config[0], laid_shape(y, info)
+    values = [p.value for p in params]
+    attributes = dict(op.attributes)
+    graph.remove_operation(op)
+    parts, start = [], 0
+    for size in sizes:
+        sliced = []
+        for value, config in zip(values, configs[1:], strict=True):
+            param = graph.create_variable(value=value[start : start + size].clone(), is_parameter=True)
+            config = config.copy()
+            if config.scale is not None and config.scale.dim() > 0:
+                config.scale, config.offset = config.scale[start : start + size], config.offset[start : start + size]
+            sliced.append((param, config))
+        part = graph.create_variable()
+        part.shape, part.dtype = [*laid[:-1], size], y.dtype
+        info.add_var_permute(part.name, get_default_perm(part))
+        conv = graph.create_operation(op_type="Conv", attributes=dict(attributes))
+        config = OperationQuantizationConfig([configs[0], *(c for _, c in sliced)], [out_config])
+        linked(graph, QuantableOperation(conv, config, platform), [x, *(p for p, _ in sliced)], [part])
+        parts.append(part)
+        start += size
+    concat = graph.create_operation(op_type="Concat", attributes={"axis": len(laid) - 1})
+    config = OperationQuantizationConfig([out_config] * len(parts), [out_config])
+    linked(graph, QuantableOperation(concat, config, platform), parts, [y])
+
+
+def slice_wide_convolutions(graph) -> int:
+    """Each ungrouped pointwise convolution over more than one position whose int8 weights outgrow the data cache, as
+    slice_outputs lays it by output_sizes into slices of at most half of it; how many."""
+    from esp_ppq.IR.quantize import QuantableOperation
+    from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
+
+    info, done = ExporterPatternInfo(), 0
+    for op in list(graph.topological_sort()):
+        if op.type != "Conv" or not isinstance(op, QuantableOperation) or op.attributes.get("group", 1) != 1:
+            continue
+        w, laid = op.inputs[1].value, laid_shape(op.outputs[0], info)
+        if any(k != 1 for k in op.attributes["kernel_shape"]) or math.prod(laid[:-1]) < 2:
+            continue
+        if w.numel() > DATA_CACHE_BYTES:
+            slice_outputs(graph, op, output_sizes(laid[-1], w.numel(), DATA_CACHE_BYTES // 2), info)
+            done += 1
+    return done
+
+
+@contextlib.contextmanager
+def cache_sized_convolutions() -> Iterator[None]:
+    """esp-dl's pointwise convolution kernel reads all of its weights again at every output position, so weights
+    larger than the S3's data cache come from PSRAM at each one. After the export's layout pass this runs each such
+    convolution as slices of its outputs, each slice's weights within half the data cache, concatenated: the same
+    integers. ReDimNet2 b0 (KEHOACH 3.17) on board B: its pool's two per-frame projections, 72 KB of weights each,
+    took 94 and 77 ms of a 1.79 s window, two cycles a multiply-add against 0.15 for cached weights.
+    """
+    from esp_ppq.parser import espdl_exporter
+
+    reset = espdl_exporter.reset_graph_layout
+
+    def sliced(graph):
+        reset(graph)
+        slice_wide_convolutions(graph)
+
+    espdl_exporter.reset_graph_layout = sliced
+    try:
+        yield
+    finally:
+        espdl_exporter.reset_graph_layout = reset
+
+
 def linked(graph, op, inputs: list, outputs: list):
     """op, quantised and with no variables yet, registered in graph and linked to inputs and outputs."""
     graph.operations[op.name] = op
@@ -815,6 +902,7 @@ PATCHES = {
     "lean_quantizers": lean_quantizers,
     "aligned_pointwise": aligned_pointwise,
     "copies_by_broadcast": copies_by_broadcast,
+    "cache_sized_convolutions": cache_sized_convolutions,
 }
 
 

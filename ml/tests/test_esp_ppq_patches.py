@@ -557,6 +557,23 @@ def test_copies_by_broadcast_writes_the_copies_as_an_add_of_zeros(tmp_path: Path
     assert tensors[zeros].shape == (1, 1, 1, 12) and not tensors[zeros].any()
 
 
+def test_cache_sized_convolutions_slice_a_wide_projection_along_its_outputs(tmp_path: Path) -> None:
+    torch.manual_seed(5)
+    rng = np.random.default_rng(18)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 576, 6)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(nn.Conv1d(576, 128, 1).eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    plain = espdl_graph(export_espdl.export(graph, tmp_path / "plain.espdl"))
+    with esp_ppq_patches.applied(["cache_sized_convolutions"]):
+        nodes, tensors = espdl_graph(export_espdl.export(graph, tmp_path / "sliced.espdl"))
+    ((_, (_, w, b)),) = [node for node in plain[0].values() if node[0] == "Conv"]
+    parts = [ins for op, ins in nodes.values() if op == "Conv"]
+    assert [tensors[ins[1]].shape[-1] for ins in parts] == [48, 48, 32]
+    assert [op for op, _ in nodes.values()].count("Concat") == 1
+    weights = np.concatenate([filters(tensors[ins[1]]) for ins in parts])
+    assert np.array_equal(weights, filters(plain[1][w]))
+    assert np.array_equal(np.concatenate([tensors[ins[2]] for ins in parts]), plain[1][b])
+
+
 def test_an_unknown_patch_is_refused() -> None:
     with pytest.raises(ValueError, match="unknown ESP-PPQ patches"), esp_ppq_patches.applied(["no_such_patch"]):
         pass
