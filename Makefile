@@ -151,6 +151,19 @@ eval-pitch: ## Measure the pitch mirror against Kaldi itself on VIVOS test, on t
 eval-speaker: ## EER of the pretrained extractors, and the owner's windows kept at 1% of impostors passing
 	$(ML) --extra train python -m srpipe.scenes.speaker
 
+##@ Speaker: chip path, as command_ctc goes (KEHOACH 3.17, E11-T25)
+
+SPEAKER_QUANT = $(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.speaker.quant
+
+.PHONY: speaker-import speaker-ptq
+speaker-import: ## Import the survey's pretrained ReDimNet2 b0 as a run into ml/artifacts/speaker/runs
+	$(SPEAKER_QUANT) import
+
+# Each calibration of configs/models/speaker.yaml quantises for tens of minutes on the CPU: run it in tmux. WORKERS
+# simulate the impostors' sessions, about 0.5 GB each.
+speaker-ptq: ## Rungs 1 and 2: each calibration beside float on the survey's material, into <run>/int8/: RUN=<run> [WORKERS=8]
+	$(SPEAKER_QUANT) ptq $(RUN) $(if $(WORKERS),--workers $(WORKERS))
+
 ##@ Wake
 
 .PHONY: wake-features wake-train eval-tts wake-synth
@@ -375,7 +388,7 @@ calib-shift: ## Store NVS calib/pcm_shift through test_apps/calib: SHIFT=13
 # Where srpipe.scenes.compare prepare wrote the items, read from ml/ only when a recipe needs it.
 COMPARE_ITEMS = $(shell $(ML) --quiet python -c "from srpipe.core.config import data_paths; print(data_paths()['interim'] / 'scenes' / 'afe_compare')")
 
-.PHONY: bench-board espsr-compare ai-probe ai-unit ai-unit-rnnt listen-unit
+.PHONY: bench-board espsr-compare ai-probe ai-unit ai-unit-rnnt ai-unit-speaker listen-unit
 bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/bench, then rebuild budget.md
 	@$(call fresh_sdkconfig,$(BENCH_APP)/sdkconfig,$(call app_defaults,$(BENCH_APP)) firmware/sdkconfig.afe)
 	cd $(BENCH_APP) && idf.py build
@@ -441,6 +454,17 @@ ai-unit-rnnt: ## Run the rnnt build of the ai_engine suite on board B [RNNT_RUN=
 	@if [ -f $(UNIT_APP)/main/probe/rnnt_gate.json ]; then \
 	  cd ml && uv run --extra train python -m srpipe.tasks.command.rnnt.probe --gate-log ../$(UNIT_APP)/build_rnnt/unit.log; \
 	fi
+
+# A row of speaker-ptq's ladder goes to model slot 0, its window is checked against Python and timed; slot 0 ends
+# erased.
+ai-unit-speaker: ## Run the speaker build of the ai_engine suite on board B: RUN=<run> ROW=<row of its int8/ladder.yaml> (E11-T25)
+	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.speaker.probe --run $(RUN) --row $(ROW)
+	@$(call fresh_sdkconfig,$(UNIT_APP)/build_speaker/sdkconfig,$(call app_defaults,$(UNIT_APP)))
+	cd $(UNIT_APP) && idf.py -B build_speaker -D SDKCONFIG=build_speaker/sdkconfig -D UNIT_PROFILE=speaker build && \
+	  $(WRITE_PART) models_0 --input main/probe/speaker_models.bin && \
+	  { pytest pytest_unit.py $(ON_BOARD) --build-dir build_speaker -s; echo $$? > build_speaker/unit.status; } 2>&1 \
+	    | tee build_speaker/unit.log; \
+	  exit $$(cat build_speaker/unit.status)
 
 # The locked models go to model slot 0; each window is decided as Python decides its int8 simulation, field by field.
 listen-unit: ## Run svc_listen on board B over every Gate 3 session, round by round (E11-T14)
