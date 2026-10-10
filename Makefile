@@ -155,7 +155,7 @@ eval-speaker: ## EER of the pretrained extractors, and the owner's windows kept 
 
 SPEAKER_QUANT = $(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.speaker.quant
 
-.PHONY: speaker-import speaker-ptq speaker-timing speaker-same-int8 speed
+.PHONY: speaker-import speaker-ptq speaker-int16 speaker-timing speaker-same-int8 speed
 speaker-import: ## Import the survey's pretrained ReDimNet2 b0 as a run into ml/artifacts/speaker/runs
 	$(SPEAKER_QUANT) import
 
@@ -163,6 +163,9 @@ speaker-import: ## Import the survey's pretrained ReDimNet2 b0 as a run into ml/
 # simulate the impostors' sessions, about 0.5 GB each.
 speaker-ptq: ## Rungs 1 and 2: each calibration beside float on the survey's material, into <run>/int8/: RUN=<run> [WORKERS=8] [CALIB="mse kl"]
 	$(SPEAKER_QUANT) ptq $(RUN) $(if $(WORKERS),--workers $(WORKERS)) $(if $(CALIB),--calibrations $(CALIB))
+
+speaker-int16: ## Rung 3: the operations ESP-PPQ ranks worst at 16 bits, on speaker-ptq's best calibration: RUN=<run> [WORKERS=8]
+	$(SPEAKER_QUANT) int16 $(RUN) $(if $(WORKERS),--workers $(WORKERS))
 
 speaker-timing: ## Step 2.1 of KEHOACH 3.14's procedure: the timing row into <run>/int8/timing/: RUN=<run> [WORKERS=8]
 	$(SPEAKER_QUANT) timing $(RUN) $(if $(WORKERS),--workers $(WORKERS))
