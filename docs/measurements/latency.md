@@ -647,3 +647,7 @@ phụ thuộc cấu trúc đồ thị:
 
 Sau hai bản vá mô phỏng (`layernorm_as_espdl`, `softmax_as_espdl`), cùng đồ thị chạy **2560 ms** một cửa sổ và khớp
 mô phỏng từng bit: 0/192 giá trị lệch, `model->test()` qua.
+
+Thử đặt bản đồ 2-D theo (khung, băng, kênh) để đổi sang 1-D chỉ còn Reshape, không dời dữ liệu (`to1d_tfopt` của
+ReDimNet2): vẫn khớp từng bit, nhưng **2588 ms**, Transpose 738 ms, 50 cái do ESP-PPQ chèn. ESP-PPQ chèn Transpose sau
+mỗi Reshape đi vào Conv, bất kể dữ liệu đã đúng thứ tự trong bộ nhớ; nên bỏ, giữ bố cục cũ.
