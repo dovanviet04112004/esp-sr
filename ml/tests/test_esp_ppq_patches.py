@@ -658,6 +658,30 @@ def test_lean_transposes_take_the_context_over_time_on_the_channels_last_map(tmp
     assert nodes["/context/Conv"][1][0] in {name + "_output_0" for name, (op, _) in nodes.items() if op == "Concat"}
 
 
+class WeightedChannels(nn.Module):
+    """A convolution, its channels weighted as ReDimNet2's stage sums weigh an earlier stage's, another convolution."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.front, self.back = nn.Conv1d(BANDS, BANDS, 3, padding=1), nn.Conv1d(BANDS, BANDS, 1)
+        self.weigh = nn.Conv1d(BANDS, BANDS, 1, groups=BANDS, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.back(self.weigh(self.front(x)))
+
+
+def test_channel_scales_as_mul_weighs_the_channels_by_the_same_integers(tmp_path: Path) -> None:
+    torch.manual_seed(9)
+    graph = ptq_espdl.quantize(WeightedChannels().eval(), calib(np.random.default_rng(22)), tmp_path, RUNGS)
+    plain = espdl_graph(export_espdl.export(graph, tmp_path / "plain.espdl"))
+    with esp_ppq_patches.applied(["channel_scales_as_mul"]):
+        nodes, tensors = espdl_graph(export_espdl.export(graph, tmp_path / "mul.espdl"))
+    assert "/weigh/Conv" in plain[0] and "/weigh/Conv" not in nodes
+    ((_, (_, weights)),) = [node for node in nodes.values() if node[0] == "Mul"]
+    assert tensors[weights].shape == (1, 1, BANDS)
+    assert np.array_equal(tensors[weights].ravel(), plain[1][plain[0]["/weigh/Conv"][1][1]].ravel())
+
+
 def test_an_unknown_patch_is_refused() -> None:
     with pytest.raises(ValueError, match="unknown ESP-PPQ patches"), esp_ppq_patches.applied(["no_such_patch"]):
         pass

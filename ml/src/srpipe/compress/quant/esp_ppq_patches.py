@@ -801,6 +801,72 @@ def cache_sized_convolutions() -> Iterator[None]:
         espdl_exporter.reset_graph_layout = reset
 
 
+def scales_channels(op, info) -> bool:
+    """op is a depthwise pointwise convolution on a channels-last map without bias or activation: one product per
+    value, shifted to its output grid, as a Mul by the weights broadcast along the channels computes it."""
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    if op.type != "Conv" or not isinstance(op, QuantableOperation) or len(op.inputs) != 2:
+        return False
+    spans = op.attributes["kernel_shape"] + op.attributes.get("strides", []) + op.attributes.get("dilations", [])
+    if any(v != 1 for v in spans) or any(op.attributes.get("pads", [])):
+        return False
+    laid = laid_shape(op.inputs[0], info)
+    held = op.input_quant_config[1].scale
+    return (
+        op.attributes.get("activation", "Linear") == "Linear"
+        and op.attributes.get("group", 1) == laid[-1] > 1
+        and laid == laid_shape(op.outputs[0], info)
+        and held is not None
+        and held.numel() == 1
+    )
+
+
+def scales_as_muls(graph) -> int:
+    """Each convolution scales_channels finds as a Mul of its input by its weights laid along the last axis, on the
+    convolution's grids; how many."""
+    from esp_ppq.core import OperationQuantizationConfig
+    from esp_ppq.IR.quantize import QuantableOperation
+    from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
+
+    info, done = ExporterPatternInfo(), 0
+    for op in list(graph.topological_sort()):
+        if not scales_channels(op, info):
+            continue
+        (x, w), y, platform = op.inputs, op.outputs[0], op.platform
+        configs, out_config = list(op.input_quant_config), op.output_quant_config[0]
+        weights = w.value.reshape([1] * (len(laid_shape(x, info)) - 1) + [-1]).clone()
+        graph.remove_operation(op)
+        param = graph.create_variable(value=weights, is_parameter=True)
+        mul = graph.create_operation(op_type="Mul")
+        config = OperationQuantizationConfig([configs[0], configs[1].copy()], [out_config])
+        linked(graph, QuantableOperation(mul, config, platform), [x, param], [y])
+        done += 1
+    return done
+
+
+@contextlib.contextmanager
+def channel_scales_as_mul() -> Iterator[None]:
+    """ESP-PPQ quantises a per-channel scaling, a weighted sum's weights say, to a depthwise convolution by one value
+    per channel. After the export's layout pass this runs each one without bias as a Mul by those values broadcast
+    along the channels (scales_as_muls): the same product, shift and rounding. ReDimNet2 b0 (KEHOACH 3.17) on board
+    B: its stage sums' 27 Muls run as fast as their convolutions, at the PSRAM's rate; the window is 7 ms faster.
+    """
+    from esp_ppq.parser import espdl_exporter
+
+    reset = espdl_exporter.reset_graph_layout
+
+    def multiplied(graph):
+        reset(graph)
+        scales_as_muls(graph)
+
+    espdl_exporter.reset_graph_layout = multiplied
+    try:
+        yield
+    finally:
+        espdl_exporter.reset_graph_layout = reset
+
+
 def gives_input_back(op, info) -> bool:
     """op is a depthwise pointwise convolution without bias or activation whose weights are all 1, held exactly on
     their grid, from one grid and layout to the same: on the chip it shifts each input up and back down."""
@@ -1070,6 +1136,7 @@ PATCHES = {
     "copies_by_broadcast": copies_by_broadcast,
     "cache_sized_convolutions": cache_sized_convolutions,
     "identity_convolutions_dropped": identity_convolutions_dropped,
+    "channel_scales_as_mul": channel_scales_as_mul,
 }
 
 
