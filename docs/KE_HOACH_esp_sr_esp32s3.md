@@ -1639,14 +1639,21 @@ Câu hỏi: embedding người nói học sẵn có tách được giọng chủ
 nhà ra lệnh được không. Đây chỉ là **khảo sát** (chủ repo chốt 10/10): không firmware, không hợp đồng, không `host/`. Tiếng
 vẫn không rời board ở chế độ thường (§7.5), và sản phẩm chưa có khối này (§9).
 
-**Bộ trích tham chiếu**, mỗi bộ một dự án uv ghim bản ở `ml/spk_ref/<tên>/` như `ml/afe_ref/` (§3.16); `srpipe.scenes.refs`
-gọi `run.py` của chúng với một lô JSON. Trọng số tải vào `cache/` theo bản ghim và sha256; giấy phép trọng số kiểm và ghi
-`DU_LIEU.md` trước khi tải 🔬.
+**Bộ trích tham chiếu**, mỗi họ một dự án uv ghim bản ở `ml/spk_ref/<họ>/` như `ml/afe_ref/` (§3.16): `ecapa`,
+`speakerlab` (3D-Speaker), `redimnet` (ReDimNet và ReDimNet2). `srpipe.scenes.refs` đưa cửa sổ cho `run.py` của chúng trong một tệp npz. Trọng số
+và các tệp mã mạng tải vào `cache/spk_ref/<bộ>/` theo bản ghim và sha256; giấy phép trọng số kiểm và ghi `DU_LIEU.md`
+trước khi tải. Trọng số không ghi giấy phép chỉ dùng cho khảo sát này, không bao giờ vào sản phẩm.
 
 | Tên | Là gì | Học trên |
 |---|---|---|
 | `ecapa` | ECAPA-TDNN của SpeechBrain, `speechbrain/spkrec-ecapa-voxceleb` | VoxCeleb 1 và 2, phần lớn tiếng Anh |
 | `campplus` | CAM++ của 3D-Speaker, `iic/speech_campplus_sv_zh-cn_16k-common`, 7,2 M tham số | 200 000 người nói tiếng Trung |
+| `campplus_zh_en` | CAM++ của 3D-Speaker, `iic/speech_campplus_sv_zh_en_16k-common_advanced` | kho lớn tiếng Trung và tiếng Anh |
+| `eres2netv2` | ERes2NetV2 của 3D-Speaker, `iic/speech_eres2netv2_sv_zh-cn_16k-common`, 17,8 M tham số | 200 000 người nói tiếng Trung |
+| `redimnet_m`, `redimnet_s` | ReDimNet M và S của IDRnD, `{M,S}-vb2+vox2+cnc-ft_mix` | VoxBlink2 (nhiều ngôn ngữ), VoxCeleb2, CN-Celeb |
+| `redimnet_b6` | ReDimNet b6 của IDRnD, `b6-vox2-ft_lm`; EER 0,40% trên Vox1-O theo tác giả 🔬 | VoxCeleb2 |
+| `redimnet2_b0` … `redimnet2_b5`, `redimnet2_b6_vox2` | ReDimNet2 b0–b6 của PalabraAI, `b<n>-vox2-lm`, 1,1–12,3 M tham số | VoxCeleb2 |
+| `redimnet2_b3_mix`, `redimnet2_b6` | ReDimNet2 b3 và b6, `b<n>-vb2+vox2+cnc2_v0-lm`; EER 4,78% và 3,59% trên CN-Celeb theo tác giả 🔬 | VoxBlink2, VoxCeleb2, CN-Celeb2 |
 
 Chưa thấy bộ học trên tiếng Việt nào công bố trọng số. Đội nhất bài nhận diện người nói của VLSP 2021 (EER 1,755%) cũng đi
 từ mô hình học trên tiếng Anh 🔬.
@@ -1665,7 +1672,10 @@ Board B mới thu một người, nên người lạ chỉ có qua mô phỏng. 
 duyệt riêng.
 
 **Thước** (`srpipe.scenes.speaker`, `docs/measurements/speaker.md`): EER, và phần cửa sổ của chủ repo được giữ ở ngưỡng cho
-≤ 1% cửa sổ người lạ qua; tách theo bộ trích, k, khoảng cách và độ dài cửa sổ.
+≤ 1% cửa sổ người lạ qua; tách theo bộ trích, k, khoảng cách và độ dài cửa sổ. Phần giữ tính trên mọi cửa sổ, và riêng
+trên các cửa sổ mà model `command` đang khoá nhận đúng lệnh như board B quyết (cao độ giữ ở trung bình, ngưỡng của NVS):
+xác minh giọng chỉ chạy sau khi lệnh đã được nhận. Embedding giữ ở `cache/` theo khoá sha256 của cửa sổ và bản ghim, nên
+thêm một bộ trích không chạy lại các bộ cũ.
 
 **Luật đi tiếp.** Chỉ khi một bộ trích giữ ≥ 95% cửa sổ của chủ repo ở cả 1 m và 3 m, với ≤ 1% người lạ qua, mới đề xuất
 làm thật theo CLAUDE.md §1.2: trên máy chủ (sửa §7.5, §9, `contracts/`, `host/`) hay trên chip (§3, §5, §6). Không đạt thì
@@ -1957,8 +1967,8 @@ ml/
 ├── afe_ref/<bộ>/{pyproject.toml, uv.lock, run.py}   # nsnet2, rnnoise, dnsmos (§3.16), kaldi_pitch (§3.11,
 │                                      #   chỉ run.py, chạy trong image của bộ căn mốc vì cần Kaldi gốc): như
 │                                      #   tts/; trọng số tải vào cache/ theo commit ghim và sha256
-├── spk_ref/<bộ>/{pyproject.toml, uv.lock, run.py}   # ecapa, campplus: bộ trích embedding người nói của khảo
-│                                      #   sát §3.17, cùng khuôn afe_ref/
+├── spk_ref/<họ>/{pyproject.toml, uv.lock, run.py}   # ecapa, speakerlab, redimnet: bộ trích embedding người
+│                                      #   nói của khảo sát §3.17, cùng khuôn afe_ref/
 ├── scripts/                           # đánh số theo thứ tự chạy; mỗi script một việc
 │   ├── 10_prepare.sh  ├── 11_scenes.sh
 │   ├── 20_train_ns.sh ├── 21_train_wake.sh ├── 22_train_command.sh ├── 23_train_synth.sh
