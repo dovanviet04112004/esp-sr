@@ -389,7 +389,7 @@ calib-shift: ## Store NVS calib/pcm_shift through test_apps/calib: SHIFT=13
 # Where srpipe.scenes.compare prepare wrote the items, read from ml/ only when a recipe needs it.
 COMPARE_ITEMS = $(shell $(ML) --quiet python -c "from srpipe.core.config import data_paths; print(data_paths()['interim'] / 'scenes' / 'afe_compare')")
 
-.PHONY: bench-board espsr-compare ai-probe ai-unit ai-unit-rnnt ai-unit-speaker listen-unit
+.PHONY: bench-board espsr-compare ai-probe ai-unit ai-unit-rnnt ai-unit-speaker ai-profile listen-unit
 bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/bench, then rebuild budget.md
 	@$(call fresh_sdkconfig,$(BENCH_APP)/sdkconfig,$(call app_defaults,$(BENCH_APP)) firmware/sdkconfig.afe)
 	cd $(BENCH_APP) && idf.py build
@@ -466,6 +466,12 @@ ai-unit-speaker: ## Run the speaker build of the ai_engine suite on board B: RUN
 	  { pytest pytest_unit.py $(ON_BOARD) --build-dir build_speaker -s; echo $$? > build_speaker/unit.status; } 2>&1 \
 	    | tee build_speaker/unit.log; \
 	  exit $$(cat build_speaker/unit.status)
+
+# Step 2 of KEHOACH 3.14's speed procedure, any branch: LOG holds esp-dl's profile_module table of a board run, ESPDL
+# the model that ran, its .info beside it (make ai-unit-speaker leaves build_speaker/unit.log and <run>/int8/<row>/).
+ai-profile: ## Rank a board run's modules by time, each slow esp-dl path tagged with its patch: LOG=<log> ESPDL=<model> [TOP=40] (E11-T29)
+	$(ML) --extra espdl python -m srpipe.compress.quant.espdl_profile --log $(abspath $(LOG)) --espdl $(abspath $(ESPDL)) \
+	  $(if $(TOP),--top $(TOP))
 
 # The locked models go to model slot 0; each window is decided as Python decides its int8 simulation, field by field.
 listen-unit: ## Run svc_listen on board B over every Gate 3 session, round by round (E11-T14)
