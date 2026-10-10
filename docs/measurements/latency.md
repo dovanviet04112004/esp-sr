@@ -723,3 +723,30 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
   - bản dò khớp từng bit, 1139,3 ms;
   - bảng xếp hạng: 677 module, 1118,7 ms. Chỉ còn nhãn không có bản vá: LayerNorm đầu stem 62 ms và Softmax ~15 ms
     mỗi cái (nhân float), Conv 3×3 24 kênh (nhân unaligned), QuantizeLinear sau Softmax ~9 ms mỗi cái.
+
+## 26. `command_ctc` qua chuỗi tăng tốc (E11-T30)
+
+Đo ngày 10/10 trên board B bằng `make speed BRANCH=ctc RUN=artifacts/command_ctc/runs/20261007_439d763-dirty_f438bd
+KALDI=1 HOLD=pitch`. Đây là run đang nằm trong firmware (hàng `percentile`, nghe trên pitch Kaldi, chiều `pitch` gập về
+trung bình). Bản dò chạy hàng `timing` của run, dựng `UNIT_PROFILE=ctc`.
+
+| Bước | Kết quả |
+|---|---|
+| So số nguyên với HEAD | 0 giá trị lệch |
+| `model->test()` | qua |
+| `ctc_lay`, 256 bước 1 hop | lệch 0; 7043 µs trung bình, 7162 µs đỉnh |
+| `command_ctc`, 48 bước 16 hop (256 ms âm thanh) | lệch 0; **81,2 ms** trung bình, 81,5 ms đỉnh; PSRAM 310 552 B |
+| Bảng xếp hạng | 328 module, 82,4 ms một bước |
+
+- **Khớp từng bit:** phép kiểm luồng của mạng ctc nay đòi lệch 0. Trước đây nó cho lệch một bước. Lần đo ngày 08/10 cũng
+  đã ra 0.
+- **Theo loại op:** Conv 68,0 ms trên 89 op; còn lại mỗi loại dưới 3,3 ms.
+- **Chậm nhất:**
+  - `/front/proj`, Conv 1×1 963 → 160 kênh, 14,5 ms. Hai nhãn: 963 không chia hết cho 16, nên chạy nhân unaligned; và
+    150 KB trọng số vượt cache dữ liệu.
+  - `/front/convs.0`, Conv 3×3 1 → 8 kênh, 9,1 ms, nhân unaligned.
+  - Hai Transpose do bước xuất chèn, 2,1 ms.
+- **Các conv còn lại** mỗi cái 0,7–1,3 ms, sát băng thông PSRAM. Mỗi bước 16 hop đọc lại toàn bộ 3,1 MB trọng số, cỡ
+  38 MB/s.
+- **Lỗi của bảng:** cột chu kỳ trên phép nhân-cộng của bảng xếp hạng sai với mạng chạy dòng. Nó lấy hình dạng trong
+  `.info`, ghi cho cả chuỗi 768 hop, không phải bước 16 hop.
