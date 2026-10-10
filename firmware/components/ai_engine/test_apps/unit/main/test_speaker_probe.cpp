@@ -24,6 +24,7 @@ namespace {
 constexpr size_t kSectorBytes = 4096;
 constexpr int kToleranceSteps = 1; // one int8 step, as model->test() allows (KEHOACH 3.14)
 constexpr uint32_t kShownValues = 8;
+constexpr int kCutsMax = 16;
 
 // Layout written by srpipe.tasks.speaker.probe; the record's int8 data is padded to four bytes.
 struct WindowsHead {
@@ -40,11 +41,11 @@ struct WindowRecord {
 };
 static_assert(sizeof(WindowsHead) == 8 && sizeof(WindowRecord) == 36, "speaker_windows.bin layout");
 
-esp_err_t test_of(const ai::Blob &blob)
+esp_err_t test_of(const ai::Blob &blob, bool profiled)
 {
     dl::Model model(reinterpret_cast<const char *>(blob.data), fbs::MODEL_LOCATION_IN_FLASH_RODATA, 0,
                     dl::MEMORY_MANAGER_GREEDY, nullptr, false);
-    model.profile_module(true);
+    if (profiled) { model.profile_module(true); }
     return model.test();
 }
 
@@ -108,7 +109,7 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
     }
     printf("\n");
     net.release();
-    const esp_err_t tested = test_of(blob);
+    const esp_err_t tested = test_of(blob, true);
     const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY,
                                                            STORAGE_MODEL_LABEL_SLOT0);
     TEST_ASSERT_NOT_NULL(part);
@@ -117,10 +118,29 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
     TEST_ASSERT_LESS_OR_EQUAL(kToleranceSteps, worst);
 }
 
+TEST_CASE("each cut of the speaker graph runs as its ESP-PPQ simulation does", "[ai_engine][speaker_cuts]")
+{
+    TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, ai_engine_load(0),
+                              "models_0 lacks speaker_models.bin: run make ai-unit-speaker");
+    int differing = 0;
+    for (int i = 0; i < kCutsMax; i++) {
+        char entry[STORAGE_MODEL_NAME_BYTES];
+        snprintf(entry, sizeof(entry), "speaker_c%d", i);
+        const ai::Blob blob = ai::image_find(entry, STORAGE_MODEL_KIND_ESPDL);
+        if (blob.data == nullptr) { break; }
+        const bool matches = test_of(blob, false) == ESP_OK;
+        printf("%s: model->test() %s the simulation\n", entry, matches ? "matches" : "differs from");
+        differing += !matches;
+    }
+    TEST_ASSERT_EQUAL(0, differing);
+}
+
 extern "C" void app_main(void)
 {
     ESP_ERROR_CHECK(sys_storage_init());
     UNITY_BEGIN();
+    // The whole-graph case erases model slot 0 when it ends, so the cuts run first.
+    unity_run_tests_by_tag("[speaker_cuts]", false);
     unity_run_tests_by_tag("[speaker]", false);
     UNITY_END();
 }
