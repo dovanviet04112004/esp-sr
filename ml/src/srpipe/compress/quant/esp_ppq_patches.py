@@ -234,6 +234,58 @@ def layernorm_as_espdl() -> Iterator[None]:
             table["LayerNormalization"] = simulate
 
 
+def softmax_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platforms: frozenset, **kwargs):
+    """op's output as esp-dl's Softmax computes it from an int8 input on one of platforms: each step's exp from a
+    256-entry float32 table, the row summed in float32 one value after another, each divided by that sum; simulate's
+    output otherwise."""
+    import torch
+    from esp_ppq.core import QuantizationStates
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    floating = simulate(op, values, ctx, **kwargs)
+    if not isinstance(op, QuantableOperation) or op.platform not in platforms:
+        return floating
+    given = op.input_quant_config[0]
+    if not QuantizationStates.is_activated(given.dominated_by.state) or given.num_of_bits != 8:
+        return floating
+    axis = op.attributes.get("axis", -1)
+    with torch.no_grad():
+        x, s = values[0].to(floating.device), given.scale.to(floating.device)
+        q = torch.clamp(torch.round(x / s), -128, 127).long()
+        steps = torch.arange(-128, 128, dtype=torch.float64, device=floating.device)
+        e = torch.exp(steps * s.double()).float()[q + 128].movedim(axis, -1)
+        total = torch.zeros_like(e[..., :1])
+        for i in range(e.shape[-1]):
+            total = total + e[..., i : i + 1]
+        p = (e / total).movedim(-1, axis)
+    return floating - floating.detach() + p
+
+
+@contextlib.contextmanager
+def softmax_as_espdl() -> Iterator[None]:
+    """ESP-PPQ simulates Softmax as torch's, the maximum taken out before exp; esp-dl's int8 kernel looks exp up in a
+    table built at the input's exponent and sums the row in order, so a probability near a half step of the next op's
+    grid can round the other way. ReDimNet2 b0 (KEHOACH 3.17) on board B: after layernorm_as_espdl, stage1's attention
+    was the first op off the simulation, 6 of 87 616 probabilities a step apart.
+    """
+    from esp_ppq.api.espdl_interface import get_target_platform
+    from esp_ppq.executor.base import OPERATION_FORWARD_TABLE
+
+    from srpipe.compress.quant.ptq_espdl import BITS, TARGET, WIDE_BITS
+
+    platforms = frozenset(get_target_platform(TARGET, bits) for bits in (BITS, WIDE_BITS))
+    # Every esp-dl platform shares one table, so the patched forward checks the platform itself.
+    tables = list({id(t): t for t in (OPERATION_FORWARD_TABLE[p] for p in platforms)}.values())
+    simulated = [table["Softmax"] for table in tables]
+    for table, simulate in zip(tables, simulated, strict=True):
+        table["Softmax"] = functools.partial(softmax_like_espdl, simulate=simulate, platforms=platforms)
+    try:
+        yield
+    finally:
+        for table, simulate in zip(tables, simulated, strict=True):
+            table["Softmax"] = simulate
+
+
 @contextlib.contextmanager
 def simplify_without_bn_fusion() -> Iterator[None]:
     """espdl_quantize_onnx simplifies the ONNX with onnxsim's defaults, whose fuse_bn pass leaves a tensor whose stored
@@ -283,6 +335,7 @@ PATCHES = {
     "simplify_without_bn_fusion": simplify_without_bn_fusion,
     "fuse_erf_gelu": fuse_erf_gelu,
     "layernorm_as_espdl": layernorm_as_espdl,
+    "softmax_as_espdl": softmax_as_espdl,
 }
 
 

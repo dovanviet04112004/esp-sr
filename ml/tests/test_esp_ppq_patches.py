@@ -13,6 +13,7 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("esp_ppq")
 
+from esp_ppq.executor.torch import TorchExecutor  # noqa: E402
 from torch import nn  # noqa: E402
 from torch.nn import functional  # noqa: E402
 
@@ -246,6 +247,44 @@ def test_layernorm_as_espdl_simulates_each_norm_as_the_chip_rounds_it(tmp_path: 
         assert np.abs(off).max() <= 1
         flips += np.count_nonzero(off)
     assert flips > 0
+
+
+SOFTMAX_ROWS, SOFTMAX_WIDTH = 512, 148
+
+
+def espdl_softmax(q: np.ndarray, s_in: float) -> np.ndarray:
+    """esp-dl's int8 Softmax of q over its last axis as dl_module_softmax.hpp's forward_lut takes it: exp from a table
+    of the input's grid, the row summed one value after another in float32, each value divided by the sum."""
+    table = np.exp(np.arange(-128, 128, dtype=np.float64) * s_in).astype(np.float32)
+    e = table[q.astype(np.int64) + 128]
+    total = np.zeros((*e.shape[:-1], 1), np.float32)
+    for i in range(e.shape[-1]):
+        total = total + e[..., i : i + 1]
+    return e / total
+
+
+def test_softmax_as_espdl_simulates_each_row_as_the_chip_sums_it(tmp_path: Path) -> None:
+    """ESP-PPQ as is takes the row's maximum out before exp and sums otherwise, so its float probabilities are not the
+    chip's; quantised at the next op's grid they stay within a step, apart only on a half step."""
+    net = nn.Sequential(nn.Linear(SOFTMAX_WIDTH, SOFTMAX_WIDTH), nn.Softmax(dim=-1), nn.Linear(SOFTMAX_WIDTH, 8))
+    rng = np.random.default_rng(13)
+    calib = [torch.from_numpy(rng.normal(0, 2, (1, SOFTMAX_ROWS, SOFTMAX_WIDTH)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(net.eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    (op,) = [op for op in graph.operations.values() if op.type == "Softmax"]
+    (reader,) = op.outputs[0].dest_ops
+    s_in, s_next = float(op.input_quant_config[0].scale), np.float32(reader.input_quant_config[0].scale)
+    executor, name = TorchExecutor(graph, device="cpu"), op.outputs[0].name
+    for _ in range(4):
+        x = torch.from_numpy(rng.normal(0, 2, (1, SOFTMAX_ROWS, SOFTMAX_WIDTH)).astype(np.float32))
+        q = np.round(executor.forward(inputs=[x], output_names=[op.inputs[0].name])[0].numpy() / s_in)
+        want = espdl_softmax(q, s_in)
+        with esp_ppq_patches.applied(["softmax_as_espdl"]):
+            patched = executor.forward(inputs=[x], output_names=[name])[0].numpy()
+        as_is = executor.forward(inputs=[x], output_names=[name])[0].numpy()
+        assert np.array_equal(patched, want)
+        assert not np.array_equal(as_is, want)
+        steps = [np.floor(p * (np.float32(1) / s_next) + np.float32(0.5)) for p in (as_is, want)]
+        assert np.abs(steps[0] - steps[1]).max() <= 1
 
 
 def test_rmsnorm_as_espdl_passes_the_gradient_of_the_float_norm(tmp_path: Path) -> None:
