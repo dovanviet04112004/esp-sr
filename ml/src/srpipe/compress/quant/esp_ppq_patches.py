@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterator, Sequence
 CONV_TIME_AXIS = 1
 SQRT_NEWTON_STOP = 1e-5  # dl_math.hpp EN, esp-dl 3.3.11
 CHANNEL_STEP = 16  # dl_base_conv2d.cpp: S3 vector path, 16 channels a step
+DATA_CACHE_BYTES = 0x10000  # CONFIG_ESP32S3_DATA_CACHE_SIZE of the firmware apps
 
 
 def requantise_graph_input_readers(op, graph) -> None:
@@ -494,6 +495,124 @@ def lean_transposes() -> Iterator[None]:
         espdl_exporter.reset_graph_layout = reset
 
 
+def column_merge(op, info) -> int | None:
+    """How many neighbouring columns of op, a pointwise convolution on a channels-last map whose channels esp-dl's S3
+    kernels cannot align, to lay as channels so they align, its block-diagonal weights within the data cache; None
+    when op is no such convolution or no count does."""
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    if op.type != "Conv" or not isinstance(op, QuantableOperation) or len(op.inputs[0].shape or []) < 3:
+        return None
+    x, y = op.inputs[0], op.outputs[0]
+    last = [0, *range(2, len(x.shape)), 1]
+    if info.get_var_permute(x.name) != last or info.get_var_permute(y.name) != last:
+        return None
+    spans = op.attributes["kernel_shape"] + op.attributes.get("strides", []) + op.attributes.get("dilations", [])
+    group, (c_in, c_out) = op.attributes.get("group", 1), (x.shape[1], y.shape[1])
+    if any(v != 1 for v in spans) or any(op.attributes.get("pads", [])) or group not in (1, c_in):
+        return None
+    if (group != 1 and c_in != c_out) or not (c_in % CHANNEL_STEP or c_out % CHANNEL_STEP):
+        return None
+    for k in (2, 4, 8, CHANNEL_STEP):
+        weights = k * c_out * (1 if group != 1 else k * c_in)
+        if x.shape[-1] % k == 0 and not (k * c_in % CHANNEL_STEP or k * c_out % CHANNEL_STEP):
+            return k if weights <= DATA_CACHE_BYTES else None
+    return None
+
+
+def merge_columns(graph, op, k: int, info) -> None:
+    """op over its map with each k neighbouring columns laid as k times the channels: block-diagonal weights between
+    two Reshapes, which move nothing in channels-last memory and share their input's buffer on the chip."""
+    import torch
+    from esp_ppq.core import DataType, OperationQuantizationConfig, QuantizationStates
+    from esp_ppq.IR.quantize import QuantableOperation
+    from esp_ppq.parser.espdl.espdl_graph_utils import insert_reshape_node
+
+    x, y, group = op.inputs[0], op.outputs[0], op.attributes.get("group", 1)
+    last = [0, *range(2, len(x.shape)), 1]
+
+    def merged(shape: list[int]) -> list[int]:
+        return [shape[0], k * shape[1], *shape[2:-1], shape[-1] // k]
+
+    def laid(shape: list[int]) -> list[int]:
+        return [shape[i] for i in last]
+
+    w = op.inputs[1].value
+    if group == 1:
+        value = torch.zeros(k * w.shape[0], k * w.shape[1], *w.shape[2:], dtype=w.dtype)
+        for p in range(k):
+            value[p * w.shape[0] : (p + 1) * w.shape[0], p * w.shape[1] : (p + 1) * w.shape[1]] = w
+    else:
+        value = w.repeat(k, *[1] * (w.dim() - 1))
+        op.attributes["group"] = k * group
+    values = [value] + [p.value.repeat(k) for p in op.inputs[2:]]
+    for i, v in enumerate(values, start=1):
+        config = op.input_quant_config[i].copy()
+        if config.scale is not None and config.scale.dim() > 0:
+            config.scale, config.offset = config.scale.repeat(k), config.offset.repeat(k)
+        old = op.inputs[i]
+        param = graph.create_variable(value=v, is_parameter=True)
+        param.dtype, param.dest_ops[:] = old.dtype, [op]
+        old.dest_ops.clear()
+        graph.remove_variable(old)
+        op.inputs[i], op.config.input_quantization_config[i] = param, config
+
+    gathered = insert_reshape_node(graph, x, op, laid(merged(x.shape))).outputs[0]
+    gathered.shape = merged(x.shape)
+    info.add_var_permute(gathered.name, last)
+
+    out_config = op.output_quant_config[0]
+    shape_config = out_config.copy()
+    shape_config.state = QuantizationStates.FP32
+    spread = graph.create_operation(op_type="Reshape", attributes={"allowzero": 0})
+    spread = QuantableOperation(
+        spread, OperationQuantizationConfig([out_config, shape_config], [out_config]), op.platform
+    )
+    graph.operations[spread.name] = spread
+    graph.insert_op_after(A=spread, B=op)
+    op.outputs[0].shape, op.outputs[0].dtype = merged(y.shape), y.dtype
+    info.add_var_permute(op.outputs[0].name, last)
+    target = graph.create_variable(value=torch.tensor(laid(y.shape), dtype=torch.int64), is_parameter=True)
+    target.dtype, target.dest_ops[:] = DataType.INT64, [spread]
+    spread.inputs.append(target)
+
+
+def align_pointwise(graph) -> int:
+    """Each pointwise convolution column_merge finds a count for, merged by merge_columns; how many."""
+    from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
+
+    info, done = ExporterPatternInfo(), 0
+    for op in list(graph.topological_sort()):
+        k = column_merge(op, info)
+        if k is not None:
+            merge_columns(graph, op, k, info)
+            done += 1
+    return done
+
+
+@contextlib.contextmanager
+def aligned_pointwise() -> Iterator[None]:
+    """esp-dl's S3 convolution kernels take their vector path only when both channel counts are multiples of 16, and
+    run 12 or 24 channels about ten times slower a multiply-add. After the export's layout pass this lays each such
+    pointwise convolution over neighbouring columns merged into channels (merge_columns): the same integers, from
+    twice or four times the multiply-adds at the vector rate. ReDimNet2 b0 (KEHOACH 3.17) on board B: 1x1 convolutions
+    of 24 channels ran at 1.4 cycles a multiply-add against 0.15 for aligned ones, 0.32 s of 1.59 s a window.
+    """
+    from esp_ppq.parser import espdl_exporter
+
+    reset = espdl_exporter.reset_graph_layout
+
+    def aligned(graph):
+        reset(graph)
+        align_pointwise(graph)
+
+    espdl_exporter.reset_graph_layout = aligned
+    try:
+        yield
+    finally:
+        espdl_exporter.reset_graph_layout = reset
+
+
 def same_quantizer(a, b, info) -> bool:
     """a and b, quantise nodes of one variable, give the same integers on the same grid, laid the same way."""
     import torch
@@ -611,6 +730,7 @@ PATCHES = {
     "fuse_tanh_gelu": fuse_tanh_gelu,
     "lean_transposes": lean_transposes,
     "lean_quantizers": lean_quantizers,
+    "aligned_pointwise": aligned_pointwise,
 }
 
 

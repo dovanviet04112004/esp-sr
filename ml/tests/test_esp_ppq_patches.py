@@ -461,6 +461,74 @@ def test_lean_quantizers_exports_one_quantize_node_per_grid(tmp_path: Path) -> N
     assert quantizers(["lean_quantizers"], "lean") == 1
 
 
+def espdl_graph(path: Path) -> tuple[dict, dict]:
+    """An .espdl's nodes by name as (op, inputs), and its initializers by name as arrays."""
+    import flatbuffers
+    from esp_ppq.parser.espdl.FlatBuffers.Dl import Model
+
+    graph = Model.Model.GetRootAs(path.read_bytes()[16:], 0).Graph()
+    nodes = {}
+    for i in range(graph.NodeLength()):
+        node = graph.Node(i)
+        nodes[node.Name().decode()] = (
+            node.OpType().decode(),
+            [node.Input(j).decode() for j in range(node.InputLength())],
+        )
+    dtypes, tensors = {3: np.int8, 6: np.int32, 7: np.int64}, {}
+    for i in range(graph.InitializerLength()):
+        t = graph.Initializer(i)
+        dims = [int(d) for d in t.DimsAsNumpy()]
+        start = t._tab.Vector(flatbuffers.number_types.UOffsetTFlags.py_type(t._tab.Offset(20)))
+        raw = bytes(t._tab.Bytes[start : start + 16 * t.RawDataLength()])
+        tensors[t.Name().decode()] = np.frombuffer(raw, dtypes[t.DataType()])[: math.prod(dims)].reshape(dims)
+    return nodes, tensors
+
+
+def filters(stored: np.ndarray) -> np.ndarray:
+    """A pointwise convolution's (outputs, inputs) weights from ESP-PPQ's S3 layout of them, each 16 outputs
+    interleaved innermost and the rest as they are (ResetParamLayoutPattern)."""
+    n = stored.shape[-1]
+    flat, aligned = stored.reshape(-1), n // 16 * 16
+    per = flat.size // n
+    head = flat[: aligned * per].reshape(n // 16, per, 16).transpose(0, 2, 1).reshape(aligned, per)
+    return np.concatenate([head, flat[aligned * per :].reshape(n - aligned, per)])
+
+
+class NarrowPointwise(nn.Module):
+    """A 24-channel map through a pointwise convolution and a ReLU, a depthwise pointwise one and one to 12 channels."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.front = nn.Conv2d(1, 24, 3, padding=1)
+        self.pointwise = nn.Conv2d(24, 24, 1)
+        self.depthwise = nn.Conv2d(24, 24, 1, groups=24)
+        self.narrow = nn.Conv2d(24, 12, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.narrow(self.depthwise(torch.relu(self.pointwise(self.front(x)))))
+
+
+def test_aligned_pointwise_runs_narrow_convolutions_block_diagonal_over_merged_columns(tmp_path: Path) -> None:
+    torch.manual_seed(3)
+    rng = np.random.default_rng(16)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 1, 6, 8)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(NarrowPointwise().eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    plain = espdl_graph(export_espdl.export(graph, tmp_path / "plain.espdl"))
+    with esp_ppq_patches.applied(["aligned_pointwise"]):
+        aligned = espdl_graph(export_espdl.export(graph, tmp_path / "aligned.espdl"))
+    for name, k in {"/pointwise/Conv": 2, "/depthwise/Conv": 2, "/narrow/Conv": 4}.items():
+        (_, (_, w, b)), (_, (_, w_k, b_k)) = plain[0][name], aligned[0][name]
+        weights, merged = plain[1][w], aligned[1][w_k]
+        if weights.shape[-1] == 1:
+            assert np.array_equal(merged, np.tile(weights, (1, 1, k, 1)))
+        else:
+            want = np.kron(np.eye(k, dtype=np.int8), filters(weights))
+            assert np.array_equal(filters(merged), want)
+        assert np.array_equal(aligned[1][b_k], np.tile(plain[1][b], k))
+    reshapes = [sum(op == "Reshape" for op, _ in nodes.values()) for nodes in (plain[0], aligned[0])]
+    assert reshapes[1] - reshapes[0] == 6
+
+
 def test_an_unknown_patch_is_refused() -> None:
     with pytest.raises(ValueError, match="unknown ESP-PPQ patches"), esp_ppq_patches.applied(["no_such_patch"]):
         pass
