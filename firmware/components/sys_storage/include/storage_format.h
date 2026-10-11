@@ -52,6 +52,8 @@
 #define STORAGE_KEY_SPK_SERVER "server"               // u8, server path's on
 #define STORAGE_KEY_SPK_TPL "tpl"                     // blob, voiceprint: float32 a dim
 #define STORAGE_KEY_SPK_TPL_MODEL "tpl_model"         // u32, id of the speaker entry at enrolment
+#define STORAGE_KEY_SPK_ROSTER "roster"               // blob storage_speaker_roster_t
+#define STORAGE_KEY_SPK_TPL_PREFIX "tpl"              // + slot digit: blob, float32 a dim, unit length
 
 #define STORAGE_NVS_NAME_FITS(name) (sizeof(name) <= STORAGE_NVS_NAME_MAX_BYTES)
 _Static_assert(
@@ -67,6 +69,26 @@ _Static_assert(
 #define STORAGE_CALIB_BAL_VERSION 1
 #define STORAGE_CALIB_BAL_BYTES (GEN_GRID_N_BINS * 2 * (int)sizeof(float)) // re, im per bin
 #define STORAGE_MODEL_SHA256_BYTES 32
+
+#define STORAGE_SPEAKER_ROSTER_FORMAT 1
+
+typedef struct {
+    char id[APP_SPEAKER_ID_BYTES];     // spk_NNN; "" while the slot is free
+    char name[APP_SPEAKER_NAME_BYTES]; // UTF-8
+    uint8_t reserved[3];
+    uint32_t model_id; // speaker entry's id at enrolment; 0 without a voiceprint
+} storage_speaker_slot_t;
+
+typedef struct {
+    uint32_t format;  // STORAGE_SPEAKER_ROSTER_FORMAT
+    uint32_t version; // of the speaker_set it holds; 0 without one
+    storage_speaker_slot_t slot[APP_SPEAKERS_MAX];
+} storage_speaker_roster_t;
+
+_Static_assert(APP_SPEAKERS_MAX <= 10, "a slot is one digit of its tpl key (KEHOACH 6.2)");
+_Static_assert(sizeof(storage_speaker_slot_t) == 140, "speaker slot is 140 bytes (KEHOACH 6.2)");
+_Static_assert(sizeof(storage_speaker_roster_t) == 8 + APP_SPEAKERS_MAX * 140,
+               "speaker roster is 1128 bytes (KEHOACH 6.2)");
 
 #define STORAGE_LFS_MOUNT "/lfs"
 #define STORAGE_LFS_LABEL "storage"
