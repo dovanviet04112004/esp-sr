@@ -726,6 +726,10 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
   - bản dò khớp từng bit, 1139,3 ms;
   - bảng xếp hạng: 677 module, 1118,7 ms. Chỉ còn nhãn không có bản vá: LayerNorm đầu stem 62 ms và Softmax ~15 ms
     mỗi cái (nhân float), Conv 3×3 24 kênh (nhân unaligned), QuantizeLinear sau Softmax ~9 ms mỗi cái.
+- **b0 với trọng số để ở flash** (11/10, E11-T26). Một ca thử tạm của bản dò, không commit, mmap `models_0` rồi
+  dựng `dl::Model` ngay trên mục `speaker` với `param_copy` tắt. Hàng kl khớp từng bit: `model->test()` qua, lệch 0.
+  Một lần chạy **1171,9 ms**, chậm hơn 1128,6 ms khi trọng số ở PSRAM 43 ms (3,8%). PSRAM chỉ còn vùng tensor,
+  1 976 404 B, thay 1,72 MB ảnh cộng 2 135 040 B. Với tối đa 64 lệnh (`ram.md` §4) b0 vừa PSRAM, dư cỡ 1,0 MB.
 - **Conv depthwise 3×3 không lợi gì khi đệm kênh lên bội 16.** Bảng xếp hạng đủ 677 module cho chu kỳ trên một phép
   nhân-cộng:
   - stage 0–1, 24 kênh, nhân unaligned: 1,70–1,86;
