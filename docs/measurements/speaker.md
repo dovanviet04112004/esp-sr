@@ -470,3 +470,29 @@ Bảng của §6.5 chỉ đo lệnh của chủ repo. Ở đây đo thêm lệnh
   người. b0 tách kém những người cùng kênh (EER 19,3%, §6.4). Chủ repo được giữ cao vì khác kênh với người lạ mô phỏng.
 - **Dòng AS-norm của ADR-0022 không tái tạo được:** script cho ra dòng ấy không còn. Bản một phía, 50 điểm cao nhất ở
   phía mẫu giọng, cho 98,2 / 95,3% ở 4 người và 97,4 / 93,4% ở 8 người, khác 98,0 / 94,1% và 95,8 / 90,0% mà ADR ghi.
+
+### 6.7 AS-norm trên đường chip (ADR-0023, 11/10)
+
+`make speaker-deploy RUN=artifacts/speaker/runs/20261010_5a45475-dirty_94e5a9 ROW=kl` ở `bddf1dd`, khoá ở `990fe70`.
+Nhóm chuẩn như §6.5, K = 100. Mỗi số người có 20 lần rút; người đăng ký thêm lấy từ nửa người lạ ngoài nhóm chuẩn.
+Cột "đúng người" là phần lệnh mà mẫu cho điểm cao nhất là mẫu của chính người nói.
+
+| Người có mẫu | Ngưỡng 1% (‰ z) | Chủ repo giữ 1 m / 3 m | Người đăng ký thêm giữ | Ngưỡng 5% | Chủ repo giữ 1 m / 3 m | Người đăng ký thêm giữ | Đúng người: chủ repo / người đăng ký thêm |
+|---|---|---|---|---|---|---|---|
+| 1 | **2964** | 98,0 / 97,4% | — | 1486 | 98,9 / 97,5% | — | 100% / — |
+| 2 | **3119** | 97,8 / 97,3% | 20,1% | 2100 | 98,7 / 97,5% | 44,8% | 99,7 / 92,5% |
+| 3 | **3417** | 97,3 / 96,9% | 31,7% | 2430 | 98,5 / 97,5% | 58,8% | 99,3 / 87,8% |
+| 4 | **3521** | 96,9 / 96,8% | 21,1% | 2640 | 98,3 / 97,4% | 43,0% | 99,0 / 83,0% |
+| 5 | **3560** | 96,8 / 96,5% | 20,5% | 2691 | 98,3 / 97,4% | 43,8% | 98,8 / 83,1% |
+| 6 | **3736** | 96,5 / 95,3% | 20,6% | 2846 | 98,2 / 97,4% | 39,3% | 98,6 / 80,5% |
+| 7 | **3795** | 96,3 / 95,1% | 18,1% | 2882 | 98,2 / 97,4% | 37,9% | 98,5 / 73,4% |
+| 8 | **3795** | 96,3 / 95,2% | 19,1% | 3020 | 98,0 / 97,3% | 36,3% | 98,2 / 77,7% |
+
+- **Bảng chọn 1% cho mọi số người.** Luật của KẾ HOẠCH §3.17 chỉ nới tới 5% khi lệnh của chủ repo bị chặn quá 5% ở
+  1%. Với AS-norm, chủ repo vẫn giữ ≥ 95,1% ở cả hai khoảng cách tới 8 người.
+- **So với Z-norm ở 8 người** (§6.5, 5% người lạ lọt):
+  - người lạ lọt 1% thay vì 5%;
+  - chủ repo ở 3 m giữ 95,2% thay vì 91,6%.
+- **Người đăng ký thêm** giữ 18–32% ở 1%, 36–59% ở 5%: b0 tách kém những người cùng kênh (§6.4, §6.6). Con số thật
+  cần bản thu qua board (E11-T27).
+- Cột 5% trùng §6.6. Vậy script tạm của §6.6 và `speaker-deploy` cho cùng số.
