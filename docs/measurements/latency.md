@@ -764,6 +764,11 @@ trung bình). Bản dò chạy hàng `timing` của run, dựng `UNIT_PROFILE=ct
   `lean_quantizers`. `command_ctc` từ 82,2 xuống **69,7 ms** một bước, vẫn lệch 0. `/front/proj` 963 → 160 kênh tách
   thành các lát vừa cache dữ liệu, ra khỏi đầu bảng. Đầu bảng giờ là `/front/convs.0`, Conv 3×3 1 → 8 kênh, 9,1 ms,
   không bản vá nào xử lý được.
+- **Viết lại `front` (11/10), bước 2.4:** Conv 3×3 đầu tiên 1 → 8 kênh thành 8 bản sao của kênh mel đặt trước phần
+  đệm nhân quả, rồi một conv depthwise (`CopiedFront`). `ctc-same-int8` báo 0 giá trị lệch so với bản chưa viết lại.
+  Đặt bản sao sau phần đệm, như cách của b0, thì Pad nằm lẻ giữa đồ thị chạy dòng và esp-dl assert trong
+  `Concat::get_output_shape` lúc dựng. Đặt trước thì Pad vẫn sát conv, ESP-PPQ gộp nó rồi đổi thành cache.
+  `/front/first` từ 9,1 xuống 1,3 ms; `command_ctc` **63,9 ms** một bước, lệch 0.
 - **RMSNorm theo mã máy (11/10):** bản dựng S3 của esp-dl tính `mean_sq + eps` bằng một `madd.s`, với hằng
   `(1.0f / n)·s²` tính sẵn. Bản vá cũ chia thật cho n rồi mới cộng, mà 1/160 không biểu diễn đúng ở float32. Sau khi
   `rmsnorm_as_espdl` chép đúng mã máy, chuỗi chạy lại vẫn khớp từng bit: `command_ctc` lệch 0, 82,2 ms một bước.
