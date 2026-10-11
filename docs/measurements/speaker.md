@@ -496,3 +496,18 @@ Cột "đúng người" là phần lệnh mà mẫu cho điểm cao nhất là m
 - **Người đăng ký thêm** giữ 18–32% ở 1%, 36–59% ở 5%: b0 tách kém những người cùng kênh (§6.4, §6.6). Con số thật
   cần bản thu qua board (E11-T27).
 - Cột 5% trùng §6.6. Vậy script tạm của §6.6 và `speaker-deploy` cho cùng số.
+
+### 6.8 Đăng ký bằng 10 lệnh liền nhau (E11-T31, 11/10)
+
+`make listen-unit SPEAKER=1` đăng ký trên 10 lệnh đầu của phiên 28/09 1 m (`latency.md` §27). Kịch bản phiên ấy lặp mỗi
+câu liền nhau, nên 10 lệnh chỉ có 3 câu: "bật đèn" 5 lần, "tắt đèn" 4 lần, "bật quạt" 1 lần.
+
+| Mẫu giọng của chủ repo, AS-norm, 1 người, ngưỡng 2964 | Giữ, mọi khoảng cách | 1 m | 3 m |
+|---|---|---|---|
+| 10 cửa sổ đầu của phiên 28/09 1 m | 94,6% | 95,5% | 93,7% |
+| 20 lần rút ngẫu nhiên trong phiên ấy | 97,0–98,2%, trung vị 97,6% | | |
+| Trên board, lượt phát lại | 93,8% (150/160) | | |
+
+- Mẫu lệch về ba câu nên khớp kém với các lệnh khác, và kém mọi lần rút ngẫu nhiên.
+- Khi đăng ký thật nên nói 10 lệnh khác nhau. Đăng ký hiện lấy 10 lệnh kế tiếp bất kỳ (KẾ HOẠCH §3.17), nên điều ấy
+  chỉ nằm ở lời dặn người dùng.

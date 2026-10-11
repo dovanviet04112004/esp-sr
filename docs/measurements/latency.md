@@ -968,3 +968,21 @@ ngay sau đó, nên lượt này chỉ còn là bằng chứng cho phần danh s
 - Như Z-norm ở ca 17:31: chủ repo qua 6/6, người lạ 0/6, thành viên 1/7 và 2/7 đúng người. Ngưỡng nay đặt ở 1% người lạ
   lọt thay vì 5%.
 - Ca này chưa đo riêng phần chấm, tức μ, σ của cửa sổ trên 380 hàng cùng 8 điểm.
+
+**Cờ bật, AS-norm, `make listen-unit SPEAKER=1`** (E11-T26, E11-T31, 11/10 18:39–19:15). Firmware dựng từ `67b1c69`,
+ảnh khuôn 8 như ca chuỗi 18:27.
+
+| Đo | Kết quả |
+|---|---|
+| Cửa sổ trùng Python từng trường, kể cả điểm, mẫu khớp nhất và quyết định của người nói | **336/336**, 43 phiên, bảy lượt |
+| Đăng ký | lượt 0 xoá mẫu, lấy 10 lệnh đầu của phiên 28/09 1 m thành mẫu của `spk_001`; sáu lượt sau đọc mẫu từ NVS |
+| Quyết định của board | **150** lệnh được nhận, đều mang `spk_001`; 10 `SPEAKER_ENROLLING`; **10 `SPEAKER`**, cosine 562–798 ‰ |
+| Quyết định sau bước chốt, trung bình mỗi lượt / đỉnh | 61–91 ms / 1,01 s, như cờ tắt |
+
+- **Như Z-norm ở ngưỡng 5%:** cũng 150 lệnh được nhận, 10 lệnh bị chặn, và 8 trong 10 lệnh bị chặn trùng nhau. Vậy
+  AS-norm giữ lệnh của chủ repo như Z-norm, với 1% người lạ lọt thay vì 5%.
+- **Vì sao 93,8% chứ không ~97,6% như bảng `speaker.md` §6.7:**
+  - 10 lệnh đăng ký của lượt phát lại chỉ có 3 câu: "bật đèn" 5 lần, "tắt đèn" 4 lần, "bật quạt" 1 lần. Kịch bản phiên
+    thu lặp mỗi câu liền nhau.
+  - Trên vật liệu của khảo sát, mẫu từ 10 cửa sổ ấy giữ 94,6% (95,5% ở 1 m, 93,7% ở 3 m), kém mọi lần trong 20 lần
+    rút ngẫu nhiên (97,0–98,2%, trung vị 97,6%). Đó là chỗ lệch, không phải ở chip.
