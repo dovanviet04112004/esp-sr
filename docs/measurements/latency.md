@@ -921,3 +921,24 @@ lượt, kể cả 10 lệnh đăng ký và mẫu giọng giữ qua khởi độ
 
 - Các số cùng khoảng với lượt 10:59 ở trên. Vậy khi cờ tắt, danh sách người nói và ba hàng đợi của nó không đổi Cửa 3.
 - Cả bảy lượt in đủ dòng tổng kết: qua cầu RFC 2217, log không mất byte nào.
+
+**Ca chuỗi với 8 mẫu giọng, chấm bằng Z-norm** (E11-T31, ADR-0022, 11/10 17:31). Firmware dựng từ `7c77692`.
+- Ảnh khuôn 7 mang nhóm chuẩn 380 hàng ở flash, cùng bảng ngưỡng theo ‰ z của `speaker.md` §6.5. Ngưỡng cho 8 người là
+  2034.
+- Cửa sổ và thành viên như ca 15:13 ở trên. Thành viên và người lạ nằm ngoài nhóm chuẩn.
+
+| Đo | Kết quả |
+|---|---|
+| So Python | 0/29 embedding lệch, 8/8 mẫu giọng trùng từng bit, 0/8 cặp μ, σ lệch, 0/19 quyết định lệch (điểm z, mẫu cho điểm ấy, cosine của mẫu ấy) |
+| Qua ở 2034 ‰ z | chủ repo **6/6**, điểm 2695–3200; thành viên 1/7; người lạ 0/6, cao nhất 1564 |
+| Mẫu cho điểm cao nhất là mẫu của chính người nói | chủ repo 6/6; thành viên 2/7 |
+| Một lần xác minh, `ai_engine_speaker_embed` | **1256,7 ms** trung bình, 1257,9 ms đỉnh; lần đầu sau nạp 1298,2 ms |
+| trong đó `spk_fbank` | 79,3 ms trung bình |
+| Lần xác minh đầu sau nạp giữ lại | 0 B RAM nội, 0 B PSRAM |
+
+- So với điểm thô ở 853 ‰ (ca 15:13): chủ repo qua 3/6 → 6/6. Người lạ vẫn lọt 0/6, thành viên vẫn qua 1/7.
+- Chấm theo z không làm lần xác minh chậm đi: 1256,7 ms so với 1257,0 ms. μ, σ của mỗi mẫu tính một lần, lúc nạp và
+  khi đăng ký xong.
+- Mẫu cho điểm cao nhất đúng là mẫu của thành viên 2/7, khi chấm bằng cosine là 5/7. Thành viên là người lạ qua đường
+  mô phỏng, cùng kênh với nhau, mà giữa những người cùng kênh b0 tách kém (EER 19,3%, `speaker.md` §6.4). Z-norm đổi
+  thứ tự giữa các mẫu: cửa sổ của thành viên thứ ba cho z cao nhất với mẫu của chủ repo, 931, dưới ngưỡng.
