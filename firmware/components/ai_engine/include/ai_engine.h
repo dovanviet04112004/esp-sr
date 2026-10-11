@@ -1,4 +1,4 @@
-/** Every learned model: ns, wake, command, synth, run on esp-dl from the model slot (KEHOACH 4.5.4).
+/** Every learned model: ns, wake, command, speaker, synth, run on esp-dl from the model slot (KEHOACH 4.5.4).
  *  Models are process-wide singletons, loaded once at boot; each step belongs to one task (KEHOACH 5.2).
  */
 #pragma once
@@ -16,12 +16,14 @@ extern "C" {
 
 #define AI_ENGINE_VARIANTS_MAX 4
 #define AI_ENGINE_COMMANDS_MAX 64
+#define AI_ENGINE_SPEAKER_DIMS_MAX 256 // the speaker embedding's dimensions
 
 typedef enum {
     AI_ENGINE_MODEL_NS = 0,
     AI_ENGINE_MODEL_WAKE,
     AI_ENGINE_MODEL_COMMAND,
     AI_ENGINE_MODEL_SYNTH,
+    AI_ENGINE_MODEL_SPEAKER,
     AI_ENGINE_MODEL_COUNT,
 } ai_engine_model_t;
 
@@ -108,6 +110,39 @@ esp_err_t ai_engine_command_abort(void);
  *  @ret the count, or 0 without a command model or with a backend that does not read it
  */
 size_t ai_engine_command_features(void);
+
+/** Embed the last GEN_SPEAKER_WINDOW_SAMPLES of a command window: b0's front end, one run, unit length
+ * (KEHOACH 3.17).
+ *  @ctx xac_task | blocking, about 1.2 s of core 0 | pcm read; unit gets ai_engine_speaker_dims() floats
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_STATE no speaker in the image
+ */
+esp_err_t ai_engine_speaker_embed(const int16_t *pcm, float *unit);
+
+/** Dimensions of the speaker embedding; 0 without speaker.
+ *  @ctx any | non-blocking
+ */
+size_t ai_engine_speaker_dims(void);
+
+/** Score of a unit embedding against a voiceprint: the permille of their dot product, within +-1000.
+ *  @ctx any | non-blocking | both hold ai_engine_speaker_dims() floats
+ */
+int16_t ai_engine_speaker_score(const float *unit, const float *voiceprint);
+
+/** The voiceprint of n unit embeddings, rows of ai_engine_speaker_dims() floats: their sum at unit length.
+ *  @ctx any | non-blocking | caller owns units and voiceprint
+ */
+void ai_engine_speaker_voiceprint(const float *units, size_t n, float *voiceprint);
+
+/** Whether a score reaches the threshold of the image's speaker row (KEHOACH 6.3).
+ *  @ctx any | non-blocking
+ */
+bool ai_engine_speaker_passes(int16_t score_permille);
+
+/** The id of the loaded speaker entry, the first four bytes of its sha256, that a voiceprint belongs to.
+ *  @ctx any | non-blocking
+ *  @ret the id, or 0 without speaker
+ */
+uint32_t ai_engine_speaker_model_id(void);
 
 /** Render units to 16 kHz PCM; n_samples gets the count written.
  *  @ctx noi_task | non-blocking, runs slower than real time is allowed | caller owns pcm

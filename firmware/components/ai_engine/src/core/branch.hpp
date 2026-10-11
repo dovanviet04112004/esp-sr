@@ -20,4 +20,16 @@ esp_err_t command_load() noexcept;
 /** Whether command_load found the branch's entries and everything they need. */
 bool command_ready() noexcept;
 
+/** Free whatever the speaker branch built over the image about to be dropped. */
+void speaker_drop() noexcept;
+
+/** Build the speaker branch over the loaded image; ESP_OK also when the image carries no speaker, or one
+ * imported on another speaker.yaml (KEHOACH 3.17).
+ *  @ret ESP_OK | ESP_ERR_NO_MEM | ESP_ERR_NOT_SUPPORTED esp-dl refused the graph | ESP_ERR_INVALID_SIZE
+ */
+esp_err_t speaker_load() noexcept;
+
+/** Whether speaker_load built the branch. */
+bool speaker_ready() noexcept;
+
 } // namespace ai

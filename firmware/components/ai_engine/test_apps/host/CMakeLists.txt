@@ -27,7 +27,7 @@ if(AI_ENGINE_HOST_PARITY_ONLY)
 endif()
 
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
-add_executable(ai_engine_host main/test_ai_engine_host.c main/fake_storage.c main/image_probe.cpp
+add_executable(ai_engine_host main/test_ai_engine_host.c main/fake_storage.c main/image_probe.cpp main/speaker_stub.cpp
     "${ENGINE}/src/core/engine.cpp" "${ENGINE}/src/core/model_image.cpp" "${ENGINE}/src/ns/ns.cpp"
     "${ENGINE}/src/wake/wake.cpp" "${ENGINE}/src/command/command.cpp" "${ENGINE}/src/synth/synth.cpp")
 target_include_directories(ai_engine_host PRIVATE
