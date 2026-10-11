@@ -33,8 +33,9 @@ size_t image_bytes() noexcept;
  * none. */
 uint32_t image_entry_id(const char *name, storage_model_kind_t kind) noexcept;
 
-/** The threshold of the image's speaker row, permille of a cosine (KEHOACH 6.3). */
-int16_t image_speaker_threshold_permille() noexcept;
+/** The threshold of the image's speaker row with that many voiceprints held, permille of a cosine; 0 outside
+ * 1..APP_SPEAKERS_MAX (KEHOACH 3.17, 6.3). */
+int16_t image_speaker_threshold_permille(size_t prints) noexcept;
 
 /** Whether the loaded image's speaker came with the speaker.yaml this build runs (KEHOACH 3.17); logs
  * both hashes under name when not. */

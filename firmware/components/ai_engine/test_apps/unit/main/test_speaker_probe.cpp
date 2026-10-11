@@ -255,7 +255,7 @@ TEST_CASE("the speaker chain embeds, enrols and scores every window as Python do
         ChainWindow want;
         memcpy(&want, at + i * record, sizeof(want));
         const int16_t score = ai_engine_speaker_score(units + i * dims, print);
-        const bool passes = ai_engine_speaker_passes(score);
+        const bool passes = ai_engine_speaker_passes(score, 1);
         off += score != want.score_permille || passes != (want.passes != 0);
         owners += want.kind == kOwner;
         owners_passed += want.kind == kOwner && passes;

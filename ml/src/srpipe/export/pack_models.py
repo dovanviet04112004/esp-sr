@@ -1,9 +1,9 @@
 """The model slot image of KEHOACH 6.3: a 1 KB header, then each entry 64-byte aligned with its sha256.
-
 Layout constants come from sys_storage/include/storage_format.h and the slot size from firmware/partitions.csv, so
 ai_engine_load and this packer cannot disagree. --lock packs every file of contracts/models.lock.json held to its sha256
-(KEHOACH 4.5.6), the command's listen hash and thresholds, the speaker's hash and threshold, and flags in flash the
-graphs of a row deployed so. Run: python -m srpipe.export.pack_models <out.bin> (--lock | <name>:<kind>:<file>...)"""
+(KEHOACH 4.5.6), the command's listen hash and thresholds, the speaker's hash and a threshold for each count of
+voiceprints, and flags in flash a row's graphs deployed so.
+Run: python -m srpipe.export.pack_models <out.bin> (--lock | <name>:<kind>:<file>...)"""
 
 from __future__ import annotations
 
@@ -21,20 +21,21 @@ from srpipe.generated import grid
 
 FIRMWARE = ML_ROOT.parent / "firmware"
 FORMAT_HEADER = FIRMWARE / "components" / "sys_storage" / "include" / "storage_format.h"
+APP_EVENTS = FIRMWARE / "components" / "common" / "include" / "app_events.h"
 PARTITIONS = FIRMWARE / "partitions.csv"
 UNIT_PARTITIONS = FIRMWARE / "test_apps" / "partitions_unit.csv"
 LOCK = FIRMWARE.parent / "contracts" / "models.lock.json"
 MODELS = FIRMWARE / "models"
-HEAD = struct.Struct("<IIIIIHHHhI32x")
 ENTRY_TAIL = struct.Struct("<II")
+FIELDS_BYTES = 64  # storage_model_header_t ahead of its entries
 
 
-def storage_define(name: str) -> int:
-    """The integer a #define or enumerator of storage_format.h gives name."""
-    text = FORMAT_HEADER.read_text(encoding="utf-8")
+def storage_define(name: str, header: Path = FORMAT_HEADER) -> int:
+    """The integer a #define or enumerator of storage_format.h, or of header, gives name."""
+    text = header.read_text(encoding="utf-8")
     match = re.search(rf"^\s*(?:#define\s+{name}\s+|{name}\s*=\s*)(0x[0-9a-fA-F]+|\d+)u?\b", text, flags=re.MULTILINE)
     if match is None:
-        raise KeyError(f"{name} is not in {FORMAT_HEADER.name}")
+        raise KeyError(f"{name} is not in {header.name}")
     return int(match.group(1), 0)
 
 
@@ -47,7 +48,10 @@ ALIGN_BYTES = storage_define("STORAGE_MODEL_ALIGN_BYTES")
 SHA256_BYTES = storage_define("STORAGE_MODEL_SHA256_BYTES")
 KINDS = {kind: storage_define(f"STORAGE_MODEL_KIND_{kind.upper()}") for kind in ("espdl", "norm", "units")}
 IN_FLASH = storage_define("STORAGE_MODEL_FLAG_IN_FLASH")
+SPEAKERS = storage_define("APP_SPEAKERS_MAX", APP_EVENTS)
 ENTRY = struct.Struct(f"<{NAME_BYTES}sII{SHA256_BYTES}sII")
+_FIELDS = f"<IIIIIHHHHI{SPEAKERS}h"
+HEAD = struct.Struct(f"{_FIELDS}{FIELDS_BYTES - struct.calcsize(_FIELDS)}x")
 
 
 @dataclass(frozen=True)
@@ -66,7 +70,7 @@ class Locked:
     listen_hash: int = 0
     thresholds: tuple[int, int, int] = (0, 0, 0)
     speaker_hash: int = 0
-    speaker_permille: int = 0
+    speaker_permilles: tuple[int, ...] = ()
 
 
 def storage_string(name: str) -> str:
@@ -96,14 +100,16 @@ def pack(
     listen_hash: int = 0,
     thresholds: tuple[int, int, int] = (0, 0, 0),
     speaker_hash: int = 0,
-    speaker_permille: int = 0,
+    speaker_permilles: tuple[int, ...] = (),
 ) -> bytes:
     """The image bytes: header, then the entries in order, each at the next ALIGN_BYTES boundary; listen_hash is the
     GEN_LISTEN_HASH the entries' command learned on and thresholds its delta1, delta2 and delta3 in permille, 0
     without a command or a chosen value; speaker_hash is the GEN_SPEAKER_HASH the speaker was imported on and
-    speaker_permille its threshold, 0 without one (KEHOACH 6.3)."""
+    speaker_permilles its threshold with 1, 2 ... SPEAKERS voiceprints held, 0 for each it lacks (KEHOACH 6.3)."""
     if not 0 < len(entries) <= MAX_ENTRIES:
         raise ValueError(f"{len(entries)} entries, the header holds 1..{MAX_ENTRIES}")
+    if len(speaker_permilles) > SPEAKERS:
+        raise ValueError(f"{len(speaker_permilles)} speaker thresholds, the header holds {SPEAKERS}")
     body, table, at = bytearray(), [], HEADER_BYTES
     for e in entries:
         name = e.name.encode("ascii")
@@ -113,9 +119,8 @@ def pack(
         padded = e.data + bytes(-len(e.data) % ALIGN_BYTES)
         body += padded
         at += len(padded)
-    head = HEAD.pack(
-        MAGIC, FORMAT_VER, len(entries), grid_hash, listen_hash, *thresholds, speaker_permille, speaker_hash
-    )
+    table_of = (*speaker_permilles, *[0] * (SPEAKERS - len(speaker_permilles)))
+    head = HEAD.pack(MAGIC, FORMAT_VER, len(entries), grid_hash, listen_hash, *thresholds, 0, speaker_hash, *table_of)
     header = head + b"".join(table)
     image = header + bytes(HEADER_BYTES - len(header)) + bytes(body)
     if len(image) > slot_bytes():
@@ -126,9 +131,10 @@ def pack(
 def locked() -> Locked:
     """Every file models.lock.json lists, in its order, as the image entry it names, a row's graphs flagged to stay in
     flash when it was deployed so; the listen hash of the rows that record one, 0 when none does, and the delta1,
-    delta2 and delta3 of the row that records them, 0 for each it does not; the speaker hash and threshold of the row
-    that records them. Refused when a file under firmware/models/<branch>/ differs from its sha256, two rows learned on
-    different listen.yaml, or two record thresholds or a speaker."""
+    delta2 and delta3 of the row that records them, 0 for each it does not; the speaker hash and the thresholds for 1 to
+    SPEAKERS voiceprints of the row that records them. Refused when a file under firmware/models/<branch>/ differs from
+    its sha256, two rows learned on different listen.yaml, two record thresholds or a speaker, or the speaker's row
+    holds other than SPEAKERS thresholds."""
     rows = json.loads(LOCK.read_text(encoding="utf-8"))["models"]
     entries = []
     for branch, row in rows.items():
@@ -148,13 +154,17 @@ def locked() -> Locked:
     ]
     if len(triples) > 1:
         raise ValueError(f"{len(triples)} rows of {LOCK.name} record thresholds, the header holds one command's")
-    speakers = [
-        (int(r["speaker_hash"], 16), int(r["threshold"]["permille"])) for r in rows.values() if "speaker_hash" in r
-    ]
+    speakers = [(int(r["speaker_hash"], 16), r["threshold"]["permille"]) for r in rows.values() if "speaker_hash" in r]
     if len(speakers) > 1:
         raise ValueError(f"{len(speakers)} rows of {LOCK.name} record a speaker, the header holds one")
-    speaker_hash, speaker_permille = next(iter(speakers), (0, 0))
-    return Locked(entries, next(iter(listen_hashes), 0), next(iter(triples), (0, 0, 0)), speaker_hash, speaker_permille)
+    speaker_hash, table = next(iter(speakers), (0, []))
+    if speaker_hash and not (isinstance(table, list) and len(table) == SPEAKERS):
+        raise ValueError(
+            f"the speaker of {LOCK.name} holds threshold {table!r}, the header one for each of 1..{SPEAKERS}"
+            " voiceprints: make speaker-deploy again"
+        )
+    triple = next(iter(triples), (0, 0, 0))
+    return Locked(entries, next(iter(listen_hashes), 0), triple, speaker_hash, tuple(int(t) for t in table))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -177,13 +187,13 @@ def main(argv: list[str] | None = None) -> int:
             listen_hash=lock.listen_hash,
             thresholds=lock.thresholds,
             speaker_hash=lock.speaker_hash,
-            speaker_permille=lock.speaker_permille,
+            speaker_permilles=lock.speaker_permilles,
         )
     )
     size = args.out.stat().st_size
     deltas = ", ".join(map(str, lock.thresholds))
     said = f"grid 0x{grid.GRID_HASH:08x}, listen 0x{lock.listen_hash:08x}, delta1..3 {deltas}"
-    said += f", speaker 0x{lock.speaker_hash:08x} at {lock.speaker_permille}"
+    said += f", speaker 0x{lock.speaker_hash:08x} at {', '.join(map(str, lock.speaker_permilles)) or 0}"
     print(f"{args.out}: {len(entries)} entries, {size} bytes, {said}")
     return 0
 

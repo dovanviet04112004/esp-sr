@@ -5,6 +5,7 @@
 
 #include <stdint.h>
 
+#include "app_events.h"
 #include "gen_grid.h"
 
 #define STORAGE_NVS_NAME_MAX_BYTES 16 // NVS_KEY_NAME_MAX_SIZE, terminator included
@@ -73,7 +74,7 @@ _Static_assert(
 #define STORAGE_PATH_RESPONSES "/lfs/resp/vi.json"
 
 #define STORAGE_MODEL_MAGIC 0x444d5253u // "SRMD" little-endian
-#define STORAGE_MODEL_FORMAT_VER 5
+#define STORAGE_MODEL_FORMAT_VER 6
 #define STORAGE_MODEL_MAX_ENTRIES 8
 #define STORAGE_MODEL_NAME_BYTES 16
 #define STORAGE_MODEL_HEADER_BYTES 1024
@@ -107,9 +108,10 @@ typedef struct {
     uint16_t cmd_reject_permille;   // delta1 chosen for the command; 0 without one
     uint16_t cmd_margin_permille;   // delta2 chosen for the command
     uint16_t cmd_syllable_permille; // delta3 chosen for the command; 0 without one
-    int16_t spk_accept_permille;    // speaker threshold, permille of a cosine
-    uint32_t speaker_hash;          // GEN_SPEAKER_HASH of its speaker; 0 without one
-    uint8_t reserved[32];
+    uint16_t reserved0;
+    uint32_t speaker_hash;                         // GEN_SPEAKER_HASH of its speaker; 0 without one
+    int16_t spk_accept_permille[APP_SPEAKERS_MAX]; // with 1 + index voiceprints held
+    uint8_t reserved[16];
     storage_model_entry_t entry[STORAGE_MODEL_MAX_ENTRIES];
     uint8_t pad[STORAGE_MODEL_HEADER_BYTES - 64 - STORAGE_MODEL_MAX_ENTRIES * 64];
 } storage_model_header_t;

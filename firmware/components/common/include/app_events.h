@@ -13,6 +13,7 @@ extern "C" {
 #define APP_EVT_ID_MAX_BYTES 33
 #define APP_EVT_CODE_MAX_BYTES 33
 #define APP_SPEAK_TEXT_MAX_BYTES 513
+#define APP_SPEAKERS_MAX 8 // speaker_set.schema.json's maxItems
 
 typedef enum {
     APP_BIT_WIFI_OK = 1u << 0,

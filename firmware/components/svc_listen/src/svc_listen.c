@@ -606,7 +606,7 @@ void svc_listen_verify(uint8_t slot, svc_listen_decision_t *out)
     }
     out->event.speaker_permille = ai_engine_speaker_score(unit, k->voiceprint);
     out->event.has_speaker = true;
-    if (!ai_engine_speaker_passes(out->event.speaker_permille)) { reject_as(out, APP_CODE_SPEAKER); }
+    if (!ai_engine_speaker_passes(out->event.speaker_permille, 1)) { reject_as(out, APP_CODE_SPEAKER); }
 }
 
 esp_err_t svc_listen_speaker(svc_listen_speaker_ctl_t ctl)

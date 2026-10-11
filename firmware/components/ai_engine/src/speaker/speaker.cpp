@@ -26,7 +26,7 @@ struct Speaker {
     void *fbank_mem;
     float *features;    // frames x bands, frame after frame, PSRAM
     float inverse_step; // 2^-exponent of the input
-    int16_t threshold_permille;
+    int16_t thresholds[APP_SPEAKERS_MAX];
     uint32_t model_id;
 };
 
@@ -79,12 +79,16 @@ esp_err_t speaker_load() noexcept
         return ESP_ERR_NO_MEM;
     }
     s.inverse_step = ldexpf(1.0f, -s.in.exponent);
-    s.threshold_permille = image_speaker_threshold_permille();
+    for (size_t n = 1; n <= APP_SPEAKERS_MAX; n++) {
+        s.thresholds[n - 1] = image_speaker_threshold_permille(n);
+    }
     s.model_id = image_entry_id(kEntry, STORAGE_MODEL_KIND_ESPDL);
     s.ready = true;
-    ESP_LOGI(TAG, "%s: %u frames x %u bands to %u dims, threshold %d permille, model %08x", kEntry,
-             (unsigned)GEN_SPEAKER_N_FRAMES, (unsigned)GEN_SPEAKER_N_BANDS, (unsigned)s.out.elements,
-             s.threshold_permille, (unsigned)s.model_id);
+    ESP_LOGI(TAG,
+             "%s: %u frames x %u bands to %u dims, threshold %d to %d permille for 1 to %d voiceprints, "
+             "model %08x",
+             kEntry, (unsigned)GEN_SPEAKER_N_FRAMES, (unsigned)GEN_SPEAKER_N_BANDS, (unsigned)s.out.elements,
+             s.thresholds[0], s.thresholds[APP_SPEAKERS_MAX - 1], APP_SPEAKERS_MAX, (unsigned)s.model_id);
     return ESP_OK;
 }
 
@@ -130,9 +134,10 @@ void ai_engine_speaker_voiceprint(const float *units, size_t n, float *voiceprin
     ai_engine_speaker_fold(units, n, s.out.elements, voiceprint);
 }
 
-bool ai_engine_speaker_passes(int16_t score_permille)
+bool ai_engine_speaker_passes(int16_t score_permille, size_t prints)
 {
-    return ai_engine_speaker_accepts(score_permille, s.threshold_permille);
+    if (prints == 0 || prints > APP_SPEAKERS_MAX) { return false; }
+    return ai_engine_speaker_accepts(score_permille, s.thresholds[prints - 1]);
 }
 
 uint32_t ai_engine_speaker_model_id(void)

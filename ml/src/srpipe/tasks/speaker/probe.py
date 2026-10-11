@@ -172,8 +172,8 @@ def chain_windows(survey_cfg: dict, q: dict, paths: dict, workers: int) -> list[
 def chain(cfg: dict, run: Path, row: str, out: Path, workers: int) -> tuple[Path, Path]:
     """Write out/speaker_models.bin with the deployed speaker.espdl left in flash beside the row's cuts, and
     out/speaker_chain.bin: every window of chain_windows as the chip should take it, the voiceprint of the enrolment
-    ones, and each test window's score and decision at the lock's threshold. Refused when the lock deploys another
-    row or run."""
+    ones, and each test window's score and decision at the lock's threshold for one voiceprint. Refused when the lock
+    deploys another row or run."""
     lock = json.loads(pack_models.LOCK.read_text(encoding="utf-8"))["models"][quant.BRANCH]
     if (lock["run"], lock["row"]) != (run.name, row):
         raise ValueError(f"the lock deploys {lock['run']} row {lock['row']}, not {run.name} row {row}")
@@ -183,8 +183,9 @@ def chain(cfg: dict, run: Path, row: str, out: Path, workers: int) -> tuple[Path
     for k in range(cfg["probe"]["cuts"]):
         cut = run / quant.INT8_DIR / row / f"{CUT_ENTRY.format(k)}.espdl"
         entries.append(pack_models.Entry(CUT_ENTRY.format(k), "espdl", cut.read_bytes()))
-    threshold = int(lock["threshold"]["permille"])
-    image.write_bytes(pack_models.pack(entries, speaker_hash=speaker.HASH, speaker_permille=threshold))
+    table = tuple(int(t) for t in lock["threshold"]["permille"])
+    image.write_bytes(pack_models.pack(entries, speaker_hash=speaker.HASH, speaker_permilles=table))
+    threshold = table[0]
     survey_cfg, paths = load_yaml(CONFIGS / cfg["source"]["survey"]), data_paths()
     picked = chain_windows(survey_cfg, cfg["quant"], paths, workers)
     graph = export_espdl.load_native(run / quant.INT8_DIR / row / quant.GRAPH_FILE)

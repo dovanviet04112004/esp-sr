@@ -230,7 +230,7 @@ def test_speaker_checks_leave_rejects_unchecked_enrol_from_the_session_and_score
     tmp_path, monkeypatch
 ) -> None:
     lock = tmp_path / "models.lock.json"
-    locked = {"speaker": {"run": "r", "row": "kl", "threshold": {"permille": 600}}}
+    locked = {"speaker": {"run": "r", "row": "kl", "threshold": {"permille": [600, 700, 750]}}}
     lock.write_text(json.dumps({"models": locked}), encoding="utf-8")
     monkeypatch.setattr(probe.update_lock, "LOCK", lock)
     monkeypatch.setattr(probe.export_espdl, "load_native", lambda path: None)

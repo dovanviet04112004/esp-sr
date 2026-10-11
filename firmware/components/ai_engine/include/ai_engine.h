@@ -140,10 +140,12 @@ void ai_engine_speaker_voiceprint(const float *units, size_t n, float *voiceprin
  */
 int16_t ai_engine_speaker_best(const float *unit, const float *prints, size_t n, size_t *index);
 
-/** Whether a score reaches the threshold of the image's speaker row (KEHOACH 6.3).
+/** Whether a best score over prints voiceprints reaches the image's threshold for that many
+ * (KEHOACH 3.17, 6.3).
  *  @ctx any | non-blocking
+ *  @ret false with no voiceprint, or more than APP_SPEAKERS_MAX
  */
-bool ai_engine_speaker_passes(int16_t score_permille);
+bool ai_engine_speaker_passes(int16_t score_permille, size_t prints);
 
 /** The id of the loaded speaker entry, the first four bytes of its sha256, that a voiceprint belongs to.
  *  @ctx any | non-blocking

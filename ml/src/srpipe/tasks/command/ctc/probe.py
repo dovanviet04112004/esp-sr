@@ -398,7 +398,7 @@ def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> l
     lock = json.loads(update_lock.LOCK.read_text(encoding="utf-8"))["models"][spk.BRANCH]
     run = ML_ROOT / "artifacts" / spk.BRANCH / "runs" / lock["run"]
     graph = export_espdl.load_native(run / spk.INT8_DIR / lock["row"] / spk.GRAPH_FILE)
-    patches, threshold = load_yaml(spk.CONFIG)["esp_ppq_patches"], int(lock["threshold"]["permille"])
+    patches, threshold = load_yaml(spk.CONFIG)["esp_ppq_patches"], int(lock["threshold"]["permille"][0])
     front = spk_fbank.SpkFbank(spk_fbank.contract_config())
     checked = [(k, w) for k in range(enrol_at, len(sessions)) for w in accepted_of(laid[k])]
     found = [survey.Window("board", "", survey.window_of(sessions[k][1], *laid[k][1][w])) for k, w in checked]
