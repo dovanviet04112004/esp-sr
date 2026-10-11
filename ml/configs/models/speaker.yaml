@@ -28,6 +28,10 @@ esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches aroun
   - cache_sized_convolutions       # the pool's 72 KB projections as slices whose weights stay in the data cache
   - identity_convolutions_dropped  # stage 0's sum of the stem output alone, a convolution by 1, removed
   - channel_scales_as_mul          # the stage sums' per-channel weights as Muls, not depthwise convolutions
+deploy:                            # make speaker-deploy RUN= ROW= (E11-T26, KEHOACH 3.17)
+  weights_in_flash: true           # the image entry stays in flash; PSRAM holds the tensors only (KEHOACH 6.6)
+  shares: [0.01, 0.05]             # impostors passing: the first, unless a distance then keeps under keep_min
+  keep_min: 0.95                   # accepted commands kept at each distance, its sessions pooled
 probe:                             # E11-T25: one row's graph on board B (make ai-unit-speaker)
   runs: 10                         # timed runs on the board, after one untimed
   cuts: 4                          # copies of the graph cut at tensors spread over its ops, each model->test()ed

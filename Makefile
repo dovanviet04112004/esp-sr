@@ -155,7 +155,7 @@ eval-speaker: ## EER of the pretrained extractors, and the owner's windows kept 
 
 SPEAKER_QUANT = $(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.speaker.quant
 
-.PHONY: speaker-import speaker-ptq speaker-int16 speaker-timing speaker-same-int8 speed
+.PHONY: speaker-import speaker-ptq speaker-int16 speaker-timing speaker-same-int8 speaker-deploy speed
 speaker-import: ## Import the survey's pretrained ReDimNet2 b0 as a run into ml/artifacts/speaker/runs
 	$(SPEAKER_QUANT) import
 
@@ -173,6 +173,10 @@ speaker-timing: ## Step 2.1 of KEHOACH 3.14's procedure: the timing row into <ru
 speaker-same-int8: ## Step 2.4: b0 as quant.py builds it now and at AGAINST, quantised alike, same integers: RUN=<run> [AGAINST=HEAD] [CALIB=kl]
 	$(SPEAKER_QUANT) same-int8 $(RUN) --against $(or $(AGAINST),HEAD) $(if $(CALIB),--calibration $(CALIB)) \
 	  $(if $(WORKERS),--workers $(WORKERS))
+
+# The survey's material through the chip's own path, about 900 windows of b0's int8 simulation: run it in tmux.
+speaker-deploy: ## Lock a ladder row into firmware/models/speaker with its threshold set on the chip's path: RUN=<run> ROW=<row> [WORKERS=6] (E11-T26)
+	$(SPEAKER_QUANT) deploy $(RUN) --row $(ROW) $(if $(WORKERS),--workers $(WORKERS))
 
 SPEED_LOG_speaker = $(UNIT_APP)/build_speaker/unit.log
 SPEED_ESPDL_speaker = ml/$(RUN)/int8/timing/speaker.espdl

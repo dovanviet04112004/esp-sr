@@ -35,8 +35,13 @@ def sha256(path: Path) -> str:
 
 
 def learnt_from(run: Path) -> dict:
-    """The run's split and the train files of its split.lock, each with its sha256."""
+    """The run's split and the train files of its split.lock, each with its sha256; for a run imported pretrained,
+    which learnt nothing here, the extractor and the pin of its weights (KEHOACH 4.4)."""
     cfg = yaml.safe_load((run / "config.resolved.yaml").read_text(encoding="utf-8"))
+    if "split" not in cfg:
+        source = cfg["source"]
+        weights = source["pins"]["args"][0]
+        return {"pretrained": source["extractor"], "weights": {"file": weights} | source["pins"]["files"][weights]}
     rows = [line.split(maxsplit=1) for line in (run / "split.lock").read_text(encoding="utf-8").splitlines() if line]
     return {
         "split": cfg["split"]["version"],

@@ -259,3 +259,51 @@ def test_rung_2_s_best_keeps_the_most_in_its_worst_group_then_the_lowest_eer() -
     assert quant.best_calibration({"rows": rows}, ["kl", "mse", "minmax"], 0.05) == "minmax"
     with pytest.raises(ValueError, match="percentile"):
         quant.best_calibration({"rows": rows}, ["kl", "percentile"], 0.05)
+
+
+def threshold_material(rng, owner_scores: list[float], impostors: int) -> tuple[list, list, dict]:
+    """Unit embeddings whose scores against the owner's direction sit near owner_scores, the owner's windows split over
+    an enrolment session at 1 m and a test session at 3 m, every owner window accepted, and impostors around zero."""
+    import numpy as np
+
+    from srpipe.scenes import speaker as survey
+
+    dims = 16
+    axis = np.zeros(dims, dtype=np.float32)
+    axis[0] = 1.0
+
+    def at(cosine: float) -> np.ndarray:
+        v = np.zeros(dims, dtype=np.float32)
+        v[0], v[1 + rng.integers(dims - 1)] = cosine, np.sqrt(1.0 - cosine**2)
+        return v
+
+    enrol = [survey.Window("owner", "20260928 100", np.zeros(1), True) for _ in range(12)]
+    tests = [survey.Window("owner", "20261007 300", np.zeros(1), True) for _ in owner_scores]
+    others = [survey.Window(f"s{k}", "near", np.zeros(1)) for k in range(impostors)]
+    units = [axis] * len(enrol) + [at(c) for c in owner_scores] + [at(c) for c in rng.uniform(-0.2, 0.6, impostors)]
+    cfg = {"seed": 1, "owner": {"spk": "owner", "enrol": {"date": "20260928", "distance_cm": "100"}, "draws": 3}}
+    return units, enrol + tests + others, cfg
+
+
+def test_the_threshold_lets_at_most_its_share_of_impostors_through_and_keeps_the_rule() -> None:
+    import numpy as np
+
+    rng = np.random.default_rng(7)
+    units, windows, cfg = threshold_material(rng, [0.9] * 30, 400)
+    dq = {"shares": [0.01, 0.05], "keep_min": 0.95}
+    chosen = quant.threshold_of(units, windows, cfg, dq)
+    assert chosen["chosen"] == 0.01
+    for share, row in chosen["shares"].items():
+        assert row["impostors passing"] <= share
+        assert row["kept accepted"] == {"100 cm": 1.0, "300 cm": 1.0}
+
+
+def test_a_distance_kept_under_the_floor_at_one_percent_moves_the_threshold_to_five() -> None:
+    import numpy as np
+
+    rng = np.random.default_rng(8)
+    units, windows, cfg = threshold_material(rng, [0.9] * 26 + [0.57] * 4, 400)
+    chosen = quant.threshold_of(units, windows, cfg, {"shares": [0.01, 0.05], "keep_min": 0.95})
+    assert chosen["shares"][0.01]["kept accepted"]["300 cm"] < 0.95
+    assert chosen["chosen"] == 0.05
+    assert chosen["shares"][0.05]["permille"] < chosen["shares"][0.01]["permille"]

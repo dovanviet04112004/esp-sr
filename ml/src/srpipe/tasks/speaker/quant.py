@@ -2,13 +2,15 @@
 model.pt with its network's code; ptq rewrites it for esp-dl without changing what it computes, from its log-mel
 features to the embedding, quantises it with each calibration of rung 2 (3.14) into <run>/int8/<calibration>/, and
 rows each beside float in <run>/int8/ladder.yaml on the survey's material, keeping the board probe's window; int16 adds
-rung 3's rows on rung 2's best. Run: python -m srpipe.tasks.speaker.quant import | ptq|int16|timing|same-int8 <run>"""
+rung 3's rows on rung 2's best; deploy locks a row with its threshold into firmware/models/speaker/.
+Run: python -m srpipe.tasks.speaker.quant import | ptq|int16|timing|same-int8|deploy <run>"""
 
 from __future__ import annotations
 
 import argparse
 import copy
 import importlib
+import math
 import shutil
 import sys
 from dataclasses import dataclass
@@ -23,9 +25,12 @@ from torch.nn import functional
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, ptq_espdl
 from srpipe.core import run_dir
 from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml
-from srpipe.generated import grid
+from srpipe.dsp.spec import spk_fbank
+from srpipe.export import update_lock
+from srpipe.generated import grid, speaker
 from srpipe.scenes import refs
 from srpipe.scenes import speaker as survey
+from srpipe.tasks.speaker.postproc import score
 
 CONFIG = CONFIGS / "models" / "speaker.yaml"
 BRANCH = LADDER = "speaker"
@@ -35,7 +40,10 @@ INT8_DIR = "int8"
 GRAPH_FILE = "graph.native"
 LADDER_FILE = "ladder.yaml"
 WINDOW_FILE = "board_window.npy"  # float log-mel (1, 1, mels, frames) the probe runs
+DEPLOY_FILE = "deploy.yaml"  # in <run>/int8/<row>/: the threshold, its figures
 ASTP_FLOOR = 1e-7  # poolings.py ASTP's variance floor, at the pin
+CHIP_BITS = 8
+PCM_FULL_SCALE = 32768.0
 
 
 def explicit_padding(model: nn.Module) -> nn.Module:
@@ -552,6 +560,148 @@ def int16(cfg: dict, run: Path, paths: dict, workers: int) -> dict:
     return ladder
 
 
+def front_end_gaps(wrap: nn.Module) -> list[str]:
+    """Where the run's TFMelBanks differs from contracts/speaker.yaml's front end: its numbers, then its tables."""
+    normalize, emphasis, spectral = wrap.spec.torchfbank
+    cfg = spk_fbank.contract_config()
+    found = {
+        "normalised": type(normalize).__name__ == "NormalizeAudio" and float(normalize.eps) == cfg.eps,
+        "frame_samples": spectral.length,
+        "hop_samples": spectral.shift,
+        "fft_size": spectral.nfft,
+        "n_bands": spectral.num_bins,
+        "f_min_hz": float(spectral.low_freq),
+        "f_max_hz": float(spectral.high_freq),
+        "preemphasis": float(emphasis.coef),
+        "eps": float(spectral.eps),
+        "log eps": float(wrap.spec.eps),
+    }
+    want = {"normalised": True, "log eps": cfg.eps} | {k: getattr(cfg, k) for k in found if hasattr(cfg, k)}
+    gaps = [f"{k} {found[k]} against {want[k]}" for k in found if found[k] != want[k]]
+    front = spk_fbank.SpkFbank(cfg)
+    if not np.array_equal(spectral.window, front.window):
+        gaps.append("the window")
+    if not np.array_equal(spectral.melbanks_pt.numpy()[:, :, 0].T, front.weights):
+        gaps.append("the mel weights")
+    return gaps
+
+
+def chip_units(
+    graph, patches: list[str], windows: list, front: spk_fbank.SpkFbank, wrap: nn.Module
+) -> tuple[list[np.ndarray], dict]:
+    """Each window's unit embedding as the chip computes it: the tail's features by the mirror of spk_fbank, put on the
+    graph's int8 input grid, the ESP-PPQ simulation, the mirror of the scoring's unit length. Beside them, how far the
+    mirror's features sit from the extractor's own and how many int8 inputs that moves (KEHOACH 3.17)."""
+    io, sim = ptq_espdl.io_of(graph), ptq_espdl.Simulator(graph, patches)
+    n = front.cfg.window_samples
+    out, worst, gaps, moved, inputs = [], 0.0, [], 0, 0
+    for w in windows:
+        pcm = spk_fbank.tail(np.rint(w.samples * PCM_FULL_SCALE).astype(np.int16), n)
+        mirror = front.run(pcm)[None, None]
+        extractor = features(wrap, pcm.astype(np.float32) / np.float32(PCM_FULL_SCALE), n).numpy()
+        gap = np.abs(mirror - extractor)
+        worst, gaps = max(worst, float(gap.max())), [*gaps, float(gap.mean())]
+        x = ptq_espdl.to_int8(mirror, io.input_exponent)
+        moved += int(np.count_nonzero(x != ptq_espdl.to_int8(extractor, io.input_exponent)))
+        inputs += x.size
+        y = sim(x.astype(np.float32) * np.float32(2.0**io.input_exponent))
+        out.append(score.unit(ptq_espdl.to_int8(y, io.output_exponent).ravel(), io.output_exponent))
+    gap = {"max_abs": worst, "mean_abs": float(np.mean(gaps)), "int8_inputs_moved": moved, "int8_inputs": inputs}
+    return out, gap
+
+
+def threshold_of(units: list[np.ndarray], windows: list, survey_cfg: dict, dq: dict) -> dict:
+    """The chip's threshold over the survey's material. Enrolment draws of speaker.ENROL_COMMANDS windows as the survey
+    draws them; every impostor score of every draw pooled. At each share of deploy.shares, the lowest permille that
+    lets at most that share through, and the accepted commands it keeps per distance, sessions pooled. The first share
+    whose every distance keeps deploy.keep_min is chosen, else the last (KEHOACH 3.17)."""
+    owner = survey_cfg["owner"]
+    enrol_group = f"{owner['enrol']['date']} {owner['enrol']['distance_cm']}"
+    mine = [i for i, w in enumerate(windows) if w.spk == owner["spk"]]
+    pool = [i for i in mine if windows[i].group == enrol_group]
+    others = [i for i, w in enumerate(windows) if w.spk != owner["spk"]]
+    rng = np.random.default_rng([survey_cfg["seed"], survey.ENROL_STREAM, speaker.ENROL_COMMANDS])
+    targets: list[tuple[int, str]] = []
+    impostors: list[int] = []
+    for _ in range(owner["draws"]):
+        enrolled = set(rng.choice(pool, speaker.ENROL_COMMANDS, replace=False).tolist())
+        print_ = score.voiceprint([units[i] for i in sorted(enrolled)])
+        tested = [i for i in mine if i not in enrolled and windows[i].accepted]
+        targets += [(score.score_permille(units[i], print_), windows[i].group.split()[-1]) for i in tested]
+        impostors += [score.score_permille(units[i], print_) for i in others]
+    ranked = sorted(impostors, reverse=True)
+    rows = {}
+    for share in dq["shares"]:
+        allowed = math.floor(share * len(ranked))
+        permille = min(ranked[allowed] + 1, score.SCORE_LIMIT) if allowed < len(ranked) else -score.SCORE_LIMIT
+        kept = {
+            f"{d} cm": float(np.mean([s >= permille for s, at in targets if at == d]))
+            for d in sorted({at for _, at in targets})
+        }
+        passing = float(np.mean([s >= permille for s in impostors]))
+        rows[share] = {"permille": int(permille), "impostors passing": passing, "kept accepted": kept}
+    fits = [s for s in dq["shares"] if min(rows[s]["kept accepted"].values()) >= dq["keep_min"]]
+    return {
+        "enrol_commands": speaker.ENROL_COMMANDS,
+        "draws": owner["draws"],
+        "owner windows": len(mine),
+        "impostor windows": len(others),
+        "shares": rows,
+        "chosen": fits[0] if fits else dq["shares"][-1],
+    }
+
+
+def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[Path, Path]:
+    """The graph of row as firmware/models/speaker/ holds it: the .espdl with the board probe's window for
+    model->test(), the threshold set on the survey's material through the chip's own path, and the lock (KEHOACH 3.17).
+    <run>/int8/<row>/deploy.yaml keeps the threshold's figures, the front end's gap to the extractor and the survey's
+    figures on that path, beside the ladder's. Refused for a run whose window or front end is not
+    contracts/speaker.yaml's, and for a row not int8 at both ends."""
+    if cfg["window_s"] != speaker.WINDOW_S:
+        raise ValueError(f"window_s {cfg['window_s']} s; contracts/speaker.yaml cuts {speaker.WINDOW_S} s")
+    wrap = load_wrap(run)
+    if gaps := front_end_gaps(wrap):
+        raise ValueError(f"{run.name}: its front end is not contracts/speaker.yaml's: {'; '.join(gaps)}")
+    folder = run / INT8_DIR / row
+    graph = export_espdl.load_native(folder / GRAPH_FILE)
+    if (bits := ptq_espdl.io_bits(graph)) != (CHIP_BITS, CHIP_BITS):
+        raise ValueError(f"row {row} reads {bits[0]} and gives {bits[1]} bits; the chip runs int8 at both ends")
+    survey_cfg, dq = load_yaml(CONFIGS / cfg["source"]["survey"]), cfg["deploy"]
+    owner, impostors = survey.owner_windows(survey_cfg, paths), survey.impostor_windows(survey_cfg, paths, workers)
+    picks, board = drawn(cfg["quant"], impostors)
+    scored = owner + [w for i, w in enumerate(impostors) if i not in set(picks)]
+    front = spk_fbank.SpkFbank(spk_fbank.contract_config())
+    units, gap = chip_units(graph, cfg["esp_ppq_patches"], scored, front, wrap)
+    chosen = threshold_of(units, scored, survey_cfg, dq)
+    survey_figures = figures(np.stack(units), scored, survey_cfg, cfg["quant"])
+    kept = chosen | {"front_end": gap, "figures": survey_figures}
+    (folder / DEPLOY_FILE).write_text(yaml.safe_dump(kept, sort_keys=False), encoding="utf-8")
+    io = ptq_espdl.io_of(graph)
+    pcm = spk_fbank.tail(np.rint(impostors[board].samples * PCM_FULL_SCALE).astype(np.int16), front.cfg.window_samples)
+    x = ptq_espdl.to_int8(front.run(pcm)[None, None], io.input_exponent)
+    with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
+        built = export_espdl.export(
+            graph,
+            folder / "deploy" / f"{BRANCH}.espdl",
+            test_input=x.astype(np.float32) * np.float32(2.0**io.input_exponent),
+        )
+    target = update_lock.MODELS / BRANCH
+    target.mkdir(parents=True, exist_ok=True)
+    espdl = target / f"{BRANCH}.espdl"
+    espdl.write_bytes(built.read_bytes())
+    rungs = yaml.safe_load((run / INT8_DIR / LADDER_FILE).read_text(encoding="utf-8"))["rows"][row]
+    share = chosen["chosen"]
+    fields = {
+        "speaker_hash": f"0x{speaker.HASH:08x}",
+        "features": {"name": f"tf_mel{speaker.N_BANDS}", "frames": speaker.N_FRAMES, "bands": speaker.N_BANDS},
+        "row": row,
+        "rungs": {"calibration": rungs["calibration"], "int16_ops": rungs["int16_ops"]},
+        "threshold": {"permille": chosen["shares"][share]["permille"], "impostors_passing": share},
+        "weights_in_flash": dq["weights_in_flash"],
+    }
+    return update_lock.record(BRANCH, run, [update_lock.Deployed(espdl, BRANCH, "espdl")], fields)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -571,10 +721,17 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("--against", default="HEAD", help="the commit whose network code the edited one is held to")
     check.add_argument("--calibration", help="one of quant.calibrations; the ladder's default otherwise")
     check.add_argument("--workers", type=int, default=8)
+    lock = sub.add_parser("deploy", help="a row with its threshold into firmware/models/speaker/ and the lock")
+    lock.add_argument("run", type=Path)
+    lock.add_argument("--row", required=True, help="a row of <run>/int8/ladder.yaml")
+    lock.add_argument("--workers", type=int, default=8)
     args = parser.parse_args(argv)
     cfg = load_yaml(CONFIG)
     if args.command == "import":
         print(import_run(cfg, data_paths()))
+    elif args.command == "deploy":
+        for path in deploy(cfg, args.run, args.row, data_paths(), args.workers):
+            print(path)
     elif args.command == "int16":
         int16(cfg, args.run, data_paths(), args.workers)
         print(args.run / INT8_DIR / LADDER_FILE)

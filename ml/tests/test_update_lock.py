@@ -47,6 +47,16 @@ def test_a_branch_records_its_files_grid_run_and_sources(tmp_path: Path, monkeyp
     assert json.loads(meta.read_text(encoding="utf-8")) == {"branch": "command"} | row["command"]
 
 
+def test_an_imported_run_records_the_pin_of_its_weights(tmp_path: Path) -> None:
+    run = tmp_path / "runs" / "20261010_abc_123"
+    run.mkdir(parents=True)
+    pin = {"url": "https://example.org/b0.pt", "sha256": "ab" * 32}
+    source = {"extractor": "redimnet2_b0", "pins": {"args": ["b0.pt", "redimnet2"], "files": {"b0.pt": pin}}}
+    (run / "config.resolved.yaml").write_text(yaml.safe_dump({"source": source}), encoding="utf-8")
+    (run / "split.lock").write_text("", encoding="utf-8")
+    assert update_lock.learnt_from(run) == {"pretrained": "redimnet2_b0", "weights": {"file": "b0.pt"} | pin}
+
+
 def test_a_file_outside_the_branch_folder_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(update_lock, "MODELS", tmp_path / "models")
     (tmp_path / "stray.espdl").write_bytes(b"graph")
