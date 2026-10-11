@@ -1,0 +1,273 @@
+{
+  "version": 1,
+  "commands": [
+    {
+      "id": "001_bat_den",
+      "text": "bật đèn",
+      "response": "da_bat_den"
+    },
+    {
+      "id": "002_tat_den",
+      "text": "tắt đèn",
+      "response": "da_tat_den"
+    },
+    {
+      "id": "003_bat_quat",
+      "text": "bật quạt",
+      "response": "da_bat_quat"
+    },
+    {
+      "id": "004_tat_quat",
+      "text": "tắt quạt",
+      "response": "da_tat_quat"
+    },
+    {
+      "id": "005_mo_cua",
+      "text": "mở cửa",
+      "response": "da_mo_cua"
+    },
+    {
+      "id": "006_dong_cua",
+      "text": "đóng cửa",
+      "response": "da_dong_cua"
+    },
+    {
+      "id": "007_tang_am_luong",
+      "text": "tăng âm lượng",
+      "response": "da_tang"
+    },
+    {
+      "id": "008_giam_am_luong",
+      "text": "giảm âm lượng",
+      "response": "da_giam"
+    },
+    {
+      "id": "009_dung_lai",
+      "text": "dừng lại",
+      "response": "da_dung"
+    },
+    {
+      "id": "010_chup_anh",
+      "text": "chụp ảnh",
+      "response": "da_chup_anh"
+    },
+    {
+      "id": "011_mo_den",
+      "text": "mở đèn",
+      "response": "da_bat_den"
+    },
+    {
+      "id": "012_mo_quat",
+      "text": "mở quạt",
+      "response": "da_bat_quat"
+    },
+    {
+      "id": "013_mo_ti_vi",
+      "text": "mở ti vi"
+    },
+    {
+      "id": "014_tat_ti_vi",
+      "text": "tắt ti vi"
+    },
+    {
+      "id": "015_quay_trai",
+      "text": "quay trái"
+    },
+    {
+      "id": "016_quay_phai",
+      "text": "quay phải"
+    },
+    {
+      "id": "017_tang_toc_do",
+      "text": "tăng tốc độ"
+    },
+    {
+      "id": "018_giam_toc_do",
+      "text": "giảm tốc độ"
+    },
+    {
+      "id": "019_quay_trai_45_do",
+      "text": "quay trái 45 độ"
+    },
+    {
+      "id": "020_quay_phai_45_do",
+      "text": "quay phải 45 độ"
+    },
+    {
+      "id": "021_quay_trai_90_do",
+      "text": "quay trái 90 độ"
+    },
+    {
+      "id": "022_quay_phai_90_do",
+      "text": "quay phải 90 độ"
+    },
+    {
+      "id": "023_quay_trai_180_do",
+      "text": "trái 180 độ"
+    },
+    {
+      "id": "024_quay_phai_180_do",
+      "text": "phải 180 độ"
+    },
+    {
+      "id": "025_ban_be",
+      "text": "bạn bè"
+    },
+    {
+      "id": "026_gia_dinh",
+      "text": "gia đình"
+    },
+    {
+      "id": "027_cong_viec",
+      "text": "công việc"
+    },
+    {
+      "id": "028_hoc_tap",
+      "text": "học tập"
+    },
+    {
+      "id": "029_giai_tri",
+      "text": "giải trí"
+    },
+    {
+      "id": "030_the_thao",
+      "text": "thể thao"
+    },
+    {
+      "id": "031_am_nhac",
+      "text": "âm nhạc"
+    },
+    {
+      "id": "032_phim_anh",
+      "text": "phim ảnh"
+    },
+    {
+      "id": "033_du_lich",
+      "text": "du lịch"
+    },
+    {
+      "id": "034_suc_khoe",
+      "text": "sức khỏe"
+    },
+    {
+      "id": "035_thoi_tiet",
+      "text": "thời tiết"
+    },
+    {
+      "id": "036_tin_tuc",
+      "text": "tin tức"
+    },
+    {
+      "id": "037_giao_thong",
+      "text": "giao thông"
+    },
+    {
+      "id": "038_kinh_doanh",
+      "text": "kinh doanh"
+    },
+    {
+      "id": "039_vao_phong_102",
+      "text": "vào phòng một không hai"
+    },
+    {
+      "id": "040_vao_phong_103",
+      "text": "vào phòng một không ba"
+    },
+    {
+      "id": "041_vao_phong_104",
+      "text": "vào phòng một không bốn"
+    },
+    {
+      "id": "042_vao_phong_105",
+      "text": "vào phòng một không năm"
+    },
+    {
+      "id": "043_vao_phong_106",
+      "text": "vào phòng một không sáu"
+    },
+    {
+      "id": "044_vao_phong_107",
+      "text": "vào phòng một không bảy"
+    },
+    {
+      "id": "045_vao_phong_108",
+      "text": "vào phòng một không tám"
+    },
+    {
+      "id": "046_vao_phong_109",
+      "text": "vào phòng một không chín"
+    },
+    {
+      "id": "047_vao_phong_111",
+      "text": "vào phòng một một một"
+    },
+    {
+      "id": "048_vao_phong_1404",
+      "text": "vào phòng một bốn không bốn"
+    },
+    {
+      "id": "049_nay_chu_di_phat_co",
+      "text": "phát cỏ"
+    },
+    {
+      "id": "050_bat_den_phong_khach",
+      "text": "bật đèn phòng khách"
+    },
+    {
+      "id": "051_tat_den_phong_khach",
+      "text": "tắt đèn phòng khách"
+    },
+    {
+      "id": "052_bat_den_phong_ngu",
+      "text": "bật đèn phòng ngủ"
+    },
+    {
+      "id": "053_tat_den_phong_ngu",
+      "text": "tắt đèn phòng ngủ"
+    },
+    {
+      "id": "054_bat_den_phong_bep",
+      "text": "bật đèn phòng bếp"
+    },
+    {
+      "id": "055_tat_den_phong_bep",
+      "text": "tắt đèn phòng bếp"
+    },
+    {
+      "id": "056_bat_den_nha_tam",
+      "text": "bật đèn nhà tắm"
+    },
+    {
+      "id": "057_tat_den_nha_tam",
+      "text": "tắt đèn nhà tắm"
+    },
+    {
+      "id": "058_bat_den_hanh_lang",
+      "text": "bật đèn hành lang"
+    },
+    {
+      "id": "059_tat_den_hanh_lang",
+      "text": "tắt đèn hành lang"
+    },
+    {
+      "id": "060_bat_den_ban_cong",
+      "text": "bật đèn ban công"
+    },
+    {
+      "id": "061_tat_den_ban_cong",
+      "text": "tắt đèn ban công"
+    },
+    {
+      "id": "062_bat_den_cau_thang",
+      "text": "bật đèn cầu thang"
+    },
+    {
+      "id": "063_tat_den_cau_thang",
+      "text": "tắt đèn cầu thang"
+    },
+    {
+      "id": "064_bat_den_san_vuon",
+      "text": "bật đèn sân vườn"
+    }
+  ]
+}

@@ -2599,11 +2599,10 @@ Bộ lệnh để demo và thử đổi lệnh nằm ở `host/sets/`: mỗi fil
 `command_set` của `contracts/`, nên thêm hay xoá một lệnh là sửa file rồi gửi lại bằng `make commands DEVICE=<deviceId>
 SET=host/sets/<file>.json`; `commands.py` tự đóng `version` bằng giờ gửi. Bộ mặc định nướng vào firmware vẫn chỉ ở
 `contracts/commands/default_vi.json`. `battat_vi.json` là bộ mặc định cộng hai cặp bật / tắt ti vi và điều hoà: bộ
-mà phép đổi F0 trên giọng chủ repo quyết trên đó (§3.11). `test300_vi.json` là bộ 301 lệnh, đúng cỡ bộ lớn nhất (§4.5.5);
-`id` mỗi lệnh mở đầu bằng số thứ tự của nó (`001_bat_den` … `301_tat_den_trang_tri`), nên sự kiện board gửi lên nói luôn
-lệnh thứ mấy. Bộ gồm bộ mặc định, các lệnh demo của chủ repo, và lệnh của nhiều việc trong nhà — đèn từng phòng, điều
-hoà theo độ, ti vi, nhạc, rèm, cửa, rô bốt, đồ điện, hẹn giờ, hỏi tin, gọi điện, cảnh — gồm các cặp chỉ khác thanh, các
-lệnh chung phần đầu dài và số đọc bằng chữ.
+mà phép đổi F0 trên giọng chủ repo quyết trên đó (§3.11). `test64_vi.json` là bộ 64 lệnh, đúng cỡ bộ lớn nhất (§4.5.5);
+`id` mỗi lệnh mở đầu bằng số thứ tự của nó (`001_bat_den` … `064_bat_den_san_vuon`), nên sự kiện board gửi lên nói luôn
+lệnh thứ mấy. Bộ gồm bộ mặc định, các lệnh demo của chủ repo và đèn từng phòng: số đọc bằng chữ lẫn viết bằng chữ số,
+các lệnh chung phần đầu dài, các cặp bật / tắt.
 
 Một buổi thu nhiều phiên đi theo một file ở `host/plans/`: `make session-plan` hiện lời dặn của từng dòng, chờ
 người thu bấm Enter rồi chạy đúng `make session` với nhãn của dòng ấy, nên mỗi phiên vẫn là một thư mục và một dòng
