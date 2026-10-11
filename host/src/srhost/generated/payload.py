@@ -16,7 +16,7 @@ class CommandSet(TypedDict):
     version: int
     commands: list[CommandSetCommandsItem]
 
-DeviceCmdOp = Literal['SET_CONFIG', 'SET_STREAM', 'SPEAK', 'CALIBRATE', 'REBOOT', 'SPEAKER_ENROL']
+DeviceCmdOp = Literal['SET_CONFIG', 'SET_STREAM', 'SPEAK', 'CALIBRATE', 'REBOOT', 'SPEAKER_ENROL', 'SPEAKER_ENROL_CANCEL']
 
 
 class DeviceCmdStream(TypedDict):
@@ -186,7 +186,13 @@ SCHEMAS: dict[str, dict] = {
      'type': 'object',
      'additionalProperties': False,
      'required': ['op'],
-     'properties': {'op': {'enum': ['SET_CONFIG', 'SET_STREAM', 'SPEAK', 'CALIBRATE', 'REBOOT', 'SPEAKER_ENROL']},
+     'properties': {'op': {'enum': ['SET_CONFIG',
+                                    'SET_STREAM',
+                                    'SPEAK',
+                                    'CALIBRATE',
+                                    'REBOOT',
+                                    'SPEAKER_ENROL',
+                                    'SPEAKER_ENROL_CANCEL']},
                     'requestId': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,16}$', 'maxLength': 16},
                     'key': {'type': 'string', 'pattern': '^[a-z0-9_]{1,15}/[a-z0-9_]{1,15}$', 'maxLength': 31},
                     'value': {'type': 'integer', 'minimum': -2147483648, 'maximum': 2147483647},

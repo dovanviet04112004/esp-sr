@@ -16,7 +16,8 @@
         "SPEAK",
         "CALIBRATE",
         "REBOOT",
-        "SPEAKER_ENROL"
+        "SPEAKER_ENROL",
+        "SPEAKER_ENROL_CANCEL"
       ]
     },
     "requestId": {

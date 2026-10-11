@@ -129,7 +129,8 @@ typedef enum {
     DEVICE_CMD_OP_CALIBRATE = 3,
     DEVICE_CMD_OP_REBOOT = 4,
     DEVICE_CMD_OP_SPEAKER_ENROL = 5,
-    DEVICE_CMD_OP_COUNT = 6,
+    DEVICE_CMD_OP_SPEAKER_ENROL_CANCEL = 6,
+    DEVICE_CMD_OP_COUNT = 7,
 } device_cmd_op_t;
 
 /** Contract spelling of a value; "" when it is out of range.
@@ -144,6 +145,7 @@ static inline const char *device_cmd_op_str(device_cmd_op_t v)
     case DEVICE_CMD_OP_CALIBRATE: return "CALIBRATE";
     case DEVICE_CMD_OP_REBOOT: return "REBOOT";
     case DEVICE_CMD_OP_SPEAKER_ENROL: return "SPEAKER_ENROL";
+    case DEVICE_CMD_OP_SPEAKER_ENROL_CANCEL: return "SPEAKER_ENROL_CANCEL";
     default: return "";
     }
 }
@@ -161,6 +163,7 @@ static inline bool device_cmd_op_parse(const char *s, device_cmd_op_t *out)
     if (strcmp(s, "CALIBRATE") == 0) { *out = DEVICE_CMD_OP_CALIBRATE; return true; }
     if (strcmp(s, "REBOOT") == 0) { *out = DEVICE_CMD_OP_REBOOT; return true; }
     if (strcmp(s, "SPEAKER_ENROL") == 0) { *out = DEVICE_CMD_OP_SPEAKER_ENROL; return true; }
+    if (strcmp(s, "SPEAKER_ENROL_CANCEL") == 0) { *out = DEVICE_CMD_OP_SPEAKER_ENROL_CANCEL; return true; }
     return false;
 }
 
