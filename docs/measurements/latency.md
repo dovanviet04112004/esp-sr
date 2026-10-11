@@ -986,3 +986,15 @@ ngay sau đó, nên lượt này chỉ còn là bằng chứng cho phần danh s
     thu lặp mỗi câu liền nhau.
   - Trên vật liệu của khảo sát, mẫu từ 10 cửa sổ ấy giữ 94,6% (95,5% ở 1 m, 93,7% ở 3 m), kém mọi lần trong 20 lần
     rút ngẫu nhiên (97,0–98,2%, trung vị 97,6%). Đó là chỗ lệch, không phải ở chip.
+
+**Cờ tắt, AS-norm, `make listen-unit`** (E11-T26, 11/10 19:25–19:57). Firmware dựng từ `6521d03`, ảnh khuôn 8.
+
+| Đo | Kết quả |
+|---|---|
+| Cửa sổ trùng Python từng trường | **336/336**, 43 phiên, bảy lượt đều `0 decided otherwise than python` |
+| Ca `FRAME_GAP` và ca click | qua cả bảy lượt |
+| Quyết định sau bước chốt, trung bình mỗi lượt / đỉnh | 61–91 ms / 1,01 s, như các lượt trước |
+
+- Như lượt 16:51 trên `db5ed04`. Vậy khi cờ tắt, AS-norm không đổi Cửa 3.
+- Lượt 3: log in ra màn hình mất 6 cửa sổ cuối cùng dòng tổng kết, lúc pytest đóng phiên. `dut.log` của pytest-embedded
+  có đủ 58/58 cửa sổ và `0 decided otherwise than python`; số của lượt ấy lấy từ đó.
