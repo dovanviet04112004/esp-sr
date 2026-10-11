@@ -15,7 +15,7 @@ extern "C" {
 #endif
 
 #define AI_ENGINE_VARIANTS_MAX 4
-#define AI_ENGINE_COMMANDS_MAX 301
+#define AI_ENGINE_COMMANDS_MAX 64
 
 typedef enum {
     AI_ENGINE_MODEL_NS = 0,

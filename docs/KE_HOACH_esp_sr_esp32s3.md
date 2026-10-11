@@ -1258,7 +1258,7 @@ thái mỗi khung còn hai phép cộng, một phép nhân và chỉnh số mũ:
 79,4 ms cho 64 lệnh (`measurements/latency.md` §13), trong ngân sách ≤ 100 ms một lần chấm như `kws`. Trên máy, thuật
 toán tiến của mọi biến thể đi dần theo khối mạng của cửa sổ (Chạy `ctc` trên máy, dưới), nên lúc câu chốt chỉ còn khối
 cuối và phần của `c*`: phần kết đo 1,5 ms với bộ lệnh mặc định, 1,8 ms với 64 lệnh (`measurements/latency.md` §16). Chi
-phí chấm đi theo số biến thể, nên bộ tới 301 lệnh (§4.5.5) đo phần chấm dần mỗi khối trên board trước khi dùng. Mọi cách đọc
+phí chấm đi theo số biến thể, nên bộ tới 64 lệnh (§4.5.5) đo phần chấm dần mỗi khối trên board trước khi dùng. Mọi cách đọc
 của bộ lệnh chấm trên một cây tiền tố: mỗi nút là một đơn vị, giữ trạng thái của đơn vị ấy và trạng thái blank sau nó,
 chung cho mọi cách đọc mở đầu như nhau; mỗi khung cập nhật mỗi nút một lần, con trước cha, bằng đúng phép cộng nhân của
 lượt tiến từng cách đọc, nên điểm của mỗi cách đọc trùng từng bit với chấm riêng nó và bản soi gương không đổi. Cây nằm
@@ -2468,7 +2468,8 @@ trưng mà `_step` nhận do model khai trong `meta.json` (`features`, §6.3): 8
 cửa sổ khi bộ ấy khác bộ `_prepare` đã nhận, nên thiếu `_prepare` chỉ chậm chứ không sai. `_score` trả cùng một khuôn
 `ai_engine_command_result_t`: chỉ số lệnh hoặc −1, kèm bốn điểm, điểm thứ tư là âm tiết kém nhất của lệnh dưới vòng tự
 do (§3.12), 0 ở đường không căn âm tiết. Bộ lệnh `ai_engine_lexicon_t` chứa tới
-`AI_ENGINE_COMMANDS_MAX` 301 lệnh (chủ repo 07/10), `n_commands` là `uint16_t`, mỗi lệnh tới `AI_ENGINE_VARIANTS_MAX`
+`AI_ENGINE_COMMANDS_MAX` 64 lệnh (chủ repo 11/10, nhường PSRAM cho b0 của §3.17; `measurements/ram.md` §4),
+`n_commands` là `uint16_t`, mỗi lệnh tới `AI_ENGINE_VARIANTS_MAX`
 4 cách đọc, như `maxItems` của `command_set.schema.json`. `_abort` đóng cửa sổ đang mở mà không chấm, không có
 cửa sổ mở thì không làm gì: `svc_listen` gọi nó mỗi khi thôi chạy một cửa sổ chưa chấm (§5.4), vì `_prepare` chỉ nhận
 bộ lệnh khi không có cửa sổ mở. Với `kws`, điểm là xác suất lớp thắng, khoảng cách tới

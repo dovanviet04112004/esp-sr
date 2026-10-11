@@ -32,6 +32,9 @@
 
 _Static_assert(sizeof(((dsp_afe_calib_t *)0)->balance) == STORAGE_CALIB_BAL_BYTES,
                "calib/bal is the balance table");
+_Static_assert(sizeof(((command_set_t *)0)->commands) / sizeof(((command_set_t *)0)->commands[0]) <=
+                   AI_ENGINE_COMMANDS_MAX,
+               "a parsed set's names fit the arrays app_boot_commands fills (KEHOACH 4.5.5)");
 
 #if CONFIG_APP_SPEAKER_ENABLE
 #define SPEAKER_FITTED true
