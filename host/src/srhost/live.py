@@ -56,18 +56,25 @@ def doa_track(doa_deg: int, width: int = BAR_WIDTH) -> str:
     return "·" * at + "|" + "·" * (width - 1 - at)
 
 
-def describe_speaker(event: dict) -> str:
-    """The speaker part of an event: who an enrolment counts for and how far it is, or the closest voiceprint's
-    person with its cosine; empty without one."""
+def roster_names(roster: dict | None) -> dict[str, str]:
+    return {p["id"]: p["name"] for p in roster["speakers"]} if roster else {}
+
+
+def describe_speaker(event: dict, names: dict[str, str] | None = None) -> str:
+    """The speaker part of an event, named as the board's roster names them: who an enrolment counts for and how far
+    it is, or the closest voiceprint's person with its cosine; empty without one."""
     if "speakerId" not in event:
         return ""
+    who = event["speakerId"]
+    if names and who in names:
+        who += f" {names[who]}"
     if "enrolCount" in event:
-        return f" · speaker {event['speakerId']} enrolment {event['enrolCount']}/{ENROL_COMMANDS}"
+        return f" · enrolling {who} {event['enrolCount']}/{ENROL_COMMANDS}"
     cosine = f" {event['speakerPermille'] / PERMILLE:.2f}" if "speakerPermille" in event else ""
-    return f" · speaker {event['speakerId']}{cosine}"
+    return f" · speaker {who}{cosine}"
 
 
-def describe_event(message: Message) -> str:
+def describe_event(message: Message, names: dict[str, str] | None = None) -> str:
     event = message.payload or {}
     kind = event.get("kind")
     clock = message.rx_utc[11:19]
@@ -82,7 +89,7 @@ def describe_event(message: Message) -> str:
         text = f"{kind} {event.get('code', '')}"
         if event.get("commandId"):
             text += f" {event['commandId']}"
-    text += describe_speaker(event)
+    text += describe_speaker(event, names)
     if event.get("doaDeg", -1) >= 0:
         text += f" at {event['doaDeg']}°"
     return f"{clock} {text}"
@@ -172,19 +179,25 @@ class View:
                     lines.append(f"  front   {describe_sample(board.telemetry)}")
                 if board.roster:
                     lines.append(f"  speakers {describe_roster(board.roster)}")
-                lines.extend(f"  event   {describe_event(e)}" for e in reversed(board.events))
+                names = roster_names(board.roster)
+                lines.extend(f"  event   {describe_event(e, names)}" for e in reversed(board.events))
                 if board.rejected:
                     lines.append(f"  REJECTED {board.rejected} payloads, last: {board.last_error}")
             if self.stray:
                 lines.append(f"{self.stray} messages on topics outside the contract")
             return lines
 
+    def names(self, device: str | None) -> dict[str, str]:
+        with self._lock:
+            board = self._boards.get(device) if device else None
+            return roster_names(board.roster if board else None)
 
-def one_line(message: Message) -> str:
+
+def one_line(message: Message, names: dict[str, str] | None = None) -> str:
     if message.rejected:
         return f"{message.rx_utc} {message.topic} REJECTED {message.error}"
     if message.kind == "event":
-        return f"{message.device} event {describe_event(message)}"
+        return f"{message.device} event {describe_event(message, names)}"
     if message.kind == "heartbeat":
         return f"{message.device} health {describe_heartbeat(message.payload)}"
     if message.kind == "telemetry":
@@ -214,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
         if sink:
             sink(message)
         if not redraw:
-            print(one_line(message), flush=True)
+            print(one_line(message, view.names(message.device)), flush=True)
 
     receiver = Receiver(cfg, on_message, args.device)
     receiver.start()

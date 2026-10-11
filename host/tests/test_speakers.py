@@ -110,6 +110,60 @@ def test_an_enrolment_ends_once_the_roster_shows_the_person_enrolled_and_none_un
     assert done(answer)
 
 
+def kept(count: int) -> mqtt_rx.Message:
+    payload = {"seq": 9, "kind": "REJECT", "code": "SPEAKER_ENROLLING", "speakerId": "spk_001", "enrolCount": count}
+    return message("event", payload)
+
+
+def test_an_enrolment_the_board_ends_short_is_over_and_reported_cancelled() -> None:
+    done = speakers.enrolment_done("spk_001")
+    answer = speakers.Answer()
+    answer.take(board_roster(7, False, {"enrollingId": "spk_001", "enrolCount": 0}))
+    answer.take(kept(4))
+    assert not done(answer)
+    answer.take(board_roster(7, False))
+    assert done(answer)
+    assert f"4 of {speakers.ENROL_COMMANDS} commands" in speakers.enrol_report(DEVICE, "spk_001", answer)[0]
+
+
+class Board:
+    """Stands in for exchange: records each down/cmd payload, then answers as the board did, or is interrupted."""
+
+    def __init__(self, answer: speakers.Answer | None = None, interrupt: bool = False) -> None:
+        self.answer, self.interrupt, self.sent = answer or speakers.Answer(), interrupt, []
+
+    def __call__(self, _cfg, _device, sends, _wait_s, _done, _watch=None) -> speakers.Answer:
+        self.sent += [json.loads(payload)["op"] for topic, payload in sends if topic == "cmd"]
+        if self.interrupt and len(self.sent) == 1:
+            raise KeyboardInterrupt
+        return self.answer
+
+
+def answered(*counts: int) -> speakers.Answer:
+    answer = speakers.Answer(online=True)
+    for count in counts:
+        answer.take(kept(count))
+    return answer
+
+
+@pytest.mark.parametrize(
+    ("board", "code", "sent"),
+    [
+        (Board(answered(*range(1, speakers.ENROL_COMMANDS + 1))), 0, ["SPEAKER_ENROL"]),
+        (Board(answered(1, 2, 3, 4)), 1, ["SPEAKER_ENROL", "SPEAKER_ENROL_CANCEL"]),
+        (Board(answered()), 1, ["SPEAKER_ENROL", "SPEAKER_ENROL_CANCEL"]),
+        (Board(interrupt=True), 130, ["SPEAKER_ENROL", "SPEAKER_ENROL_CANCEL"]),
+    ],
+    ids=["finished", "short", "nothing", "ctrl_c"],
+)
+def test_make_speaker_enrol_cancels_any_enrolment_it_leaves_unfinished(
+    monkeypatch: pytest.MonkeyPatch, board: Board, code: int, sent: list[str]
+) -> None:
+    monkeypatch.setattr(speakers, "exchange", board)
+    assert speakers.enrol(None, DEVICE, "spk_001", speakers.DEFAULT_SET) == code
+    assert board.sent == sent
+
+
 def test_the_report_waits_for_the_version_sent_and_lists_each_person() -> None:
     roster = speakers.stamped(speakers.load_roster(EXAMPLE), NOW_S)
     answer = speakers.Answer(online=True)

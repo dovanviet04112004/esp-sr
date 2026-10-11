@@ -26,7 +26,7 @@ from srhost.generated.payload import SCHEMAS
 from srhost.mqtt_rx import KEEPALIVE_S, Message, parse, schema_error
 
 ANSWER_WAIT_S = 5.0
-ENROL_WAIT_S = 180.0
+ENROL_WAIT_S = 180.0  # the board's CONFIG_SVC_LISTEN_ENROL_WINDOW_S
 BROKER_WAIT_S = 5.0
 POLL_S = 0.2
 VERSION_MAX = SCHEMAS["speaker_set"]["properties"]["version"]["maximum"]
@@ -226,15 +226,16 @@ def sent_report(device: str, roster: dict, answer: Answer) -> list[str]:
     return roster_lines(answer.roster)
 
 
-def enrol_report(device: str, answer: Answer) -> list[str]:
-    """Refusals, else the roster once the enrolment ended, else what the board did not show."""
+def enrol_report(device: str, person: str, answer: Answer) -> list[str]:
+    """Refusals, else the roster once the enrolment finished, else how far it got before it was cancelled."""
     if answer.refusals:
         return refusal_lines(device, answer.refusals)
-    if not answer.enrolled:
-        return [f"{device} enrolled no command within {ENROL_WAIT_S:.0f} s: is it online, and its check on the chip?"]
-    if answer.roster is None:
-        return [f"{device} enrolled {len(answer.enrolled)} commands and showed no roster"]
-    return roster_lines(answer.roster)
+    kept = kept_of(answer)
+    if kept >= ENROL_COMMANDS:
+        return roster_lines(answer.roster) if answer.roster else [f"{device} enrolled {person}, showed no roster"]
+    if not kept:
+        return [f"{device} enrolled no command of {person}: is it online, and its check on the chip? Cancelled"]
+    return [f"{person}: {kept} of {ENROL_COMMANDS} commands in {ENROL_WAIT_S:.0f} s, cancelled; run it again"]
 
 
 def set_texts(path: Path) -> dict[str, str]:
@@ -273,17 +274,47 @@ class Prompter:
 
 
 def enrolment_done(person: str) -> Callable[[Answer], bool]:
-    """Whether the board refused the enrolment, or its roster shows person enrolled with no enrolment under way, after
-    the first command of it."""
+    """Whether the enrolment of person is over: the board refused it, or its roster showed it under way and no longer
+    does, finished or ended by the board."""
+    seen = False
 
     def done(answer: Answer) -> bool:
+        nonlocal seen
         if answer.refusals:
             return True
-        if not answer.enrolled or answer.roster is None or "enrollingId" in answer.roster:
-            return False
-        return any(p["id"] == person and p["enrolled"] for p in answer.roster["speakers"])
+        under_way = answer.roster is not None and answer.roster.get("enrollingId") == person
+        seen = seen or under_way
+        return seen and not under_way
 
     return done
+
+
+def kept_of(answer: Answer) -> int:
+    return max((e["enrolCount"] for e in answer.enrolled), default=0)
+
+
+def cancel_enrolment(cfg: MqttConfig, device: str) -> None:
+    exchange(cfg, device, [("cmd", body({"op": "SPEAKER_ENROL_CANCEL"}))], 0.0, lambda _: True)
+
+
+def enrol(cfg: MqttConfig, device: str, person: str, set_path: Path) -> int:
+    """make speaker-enrol: prompt the commands while the board enrols person, and cancel the enrolment on the board
+    unless it finishes, Ctrl+C included, so none outlives this call (KEHOACH 3.17)."""
+    prompter = Prompter(set_texts(set_path), out=lambda line: print(line, flush=True))
+    cmd = body({"op": "SPEAKER_ENROL", "speakerId": person})
+    print(f"{person}: about 1 m from {device}, say each command when it is shown")
+    prompter.prompt()
+    try:
+        answer = exchange(cfg, device, [("cmd", cmd)], ENROL_WAIT_S, enrolment_done(person), prompter)
+    except KeyboardInterrupt:
+        cancel_enrolment(cfg, device)
+        print(f"\nenrolment of {person} cancelled on {device}; its voiceprint stays as it was")
+        return 130
+    finished = kept_of(answer) >= ENROL_COMMANDS
+    if not finished:
+        cancel_enrolment(cfg, device)
+    print("\n".join(enrol_report(device, person, answer)))
+    return 0 if finished else 1
 
 
 def send(cfg: MqttConfig, device: str, roster: dict) -> Answer:
@@ -331,13 +362,7 @@ def main(argv: list[str] | None = None) -> int:
             print("\n".join(roster_lines(answer.roster)) if answer.roster else f"{args.device} shows no roster")
             return 0
         if args.enrol is not None:
-            prompter = Prompter(set_texts(args.set), out=lambda line: print(line, flush=True))
-            cmd = body({"op": "SPEAKER_ENROL", "speakerId": args.enrol})
-            print(f"{args.enrol}: about 1 m from {args.device}, say each command when it is shown")
-            prompter.prompt()
-            answer = exchange(cfg, args.device, [("cmd", cmd)], ENROL_WAIT_S, enrolment_done(args.enrol), prompter)
-            print("\n".join(enrol_report(args.device, answer)))
-            return 1 if answer.refusals else 0
+            return enrol(cfg, args.device, args.enrol, args.set)
         path = Path(args.roster)
         if args.rename is not None:
             edited = renamed(read_roster(path), args.rename, args.name, args.consent)

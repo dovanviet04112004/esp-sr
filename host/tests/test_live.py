@@ -103,9 +103,12 @@ def test_each_checked_command_shows_its_speaker_and_each_refusal_or_enrolment_it
     assert live.describe_event(passed).endswith("COMMAND bat_den score 0.98 margin 0.13 · speaker spk_001 0.85")
     assert live.describe_event(stopped).endswith("REJECT SPEAKER tat_den · speaker spk_001 0.74")
     assert live.describe_event(enrolling).endswith(
-        f"REJECT SPEAKER_ENROLLING mo_cua · speaker spk_001 enrolment 3/{ENROL_COMMANDS}"
+        f"REJECT SPEAKER_ENROLLING mo_cua · enrolling spk_001 3/{ENROL_COMMANDS}"
     )
     assert live.describe_event(plain).endswith("REJECT LOW_SCORE")
+    names = {"spk_001": "Chủ nhà"}
+    assert live.describe_event(passed, names).endswith("· speaker spk_001 Chủ nhà 0.85")
+    assert live.describe_event(enrolling, names).endswith(f"· enrolling spk_001 Chủ nhà 3/{ENROL_COMMANDS}")
 
 
 def test_the_roster_a_board_keeps_gets_its_own_line() -> None:
@@ -121,3 +124,24 @@ def test_the_roster_a_board_keeps_gets_its_own_line() -> None:
     )
     enrolling = {**roster, "enrollingId": "spk_003", "enrolCount": 4}
     assert live.one_line(message("speakers", enrolling)).endswith(f"; enrolling spk_003 4/{ENROL_COMMANDS}")
+
+
+def test_each_event_names_its_speaker_from_the_boards_roster() -> None:
+    view = live.View()
+    people = [{"id": "spk_001", "name": "Chủ nhà", "enrolled": True}]
+    view.update(message("speakers", {"deviceId": DEVICE, "version": 7, "check": True, "speakers": people}))
+    passed = event(
+        {
+            "seq": 30,
+            "kind": "COMMAND",
+            "commandId": "bat_den",
+            "scorePermille": 978,
+            "marginPermille": 130,
+            "speakerId": "spk_001",
+            "speakerPermille": 846,
+        }
+    )
+    view.update(passed)
+    assert any(line.endswith("· speaker spk_001 Chủ nhà 0.85") for line in view.render(now_monotonic=0.0))
+    assert live.one_line(passed, view.names(DEVICE)).endswith("· speaker spk_001 Chủ nhà 0.85")
+    assert view.names("sr-unknown") == {}
