@@ -39,7 +39,8 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 |---|---|---|---|---|
 | 2.1 | Bỏ đói: task không bao giờ Blocked → IDLE đói → watchdog `IDLE1` | mỗi vòng lặp có một chỗ chặn; `sach_task` chặn trên `q_frame` | tìm `for(;;)` không có lời gọi chặn | ⏳ |
 | 2.2 | `vTaskDelay(0)` không đưa vào Blocked | không dùng | `grep "vTaskDelay(0)"` | ⏳ |
-| 2.3 | Xếp ưu tiên theo độ quan trọng thay vì độ gấp của hạn chót | `thu` 17 > `sach` 16; `nhan` 10 > `dieu` 8 > `mqtt` = `noi` 5 > `gui` 4 > `luong` = `net` 3 > việc cửa sổ của `nhan` 2, ngang console | đối chiếu KẾ HOẠCH §5.2 | ⏳ |
+| 2.3 | Xếp ưu tiên theo độ quan trọng thay vì độ gấp của hạn chót | `thu` 17 > `sach` 16; `nhan` 10 > `dieu` 8 > `mqtt` = `noi` 5 > `gui` 4 > `luong` = `net` = `xac` 3 > việc cửa sổ của `nhan` 2, ngang console | đối chiếu KẾ HOẠCH §5.2 | ⏳ |
+| 2.7 | Một đợt dài ở ưu tiên 3 bỏ đói mọi task từ 3 trở xuống | `xac_task` chạy b0 liền ~1,2 s mỗi lệnh: việc cửa sổ của `nhan`, console và IDLE0 chờ hết đợt, còn `nhan` nạp khung ở 10 vẫn chạy; `luong` và `net` cùng mức hầu như luôn chặn (KẾ HOẠCH §5.2) | log của `raise_decision` in thời gian xác minh; `heartbeat` không thấy `clean_dropped` tăng qua một lệnh được xác minh | ⏳ |
 | 2.4 | Task ứng dụng chèn Wi-Fi | mọi task ứng dụng dưới 18 | đọc bảng `kTasks[]` | ⏳ |
 | 2.5 | Task IDF không ghim chạy sang nhân 1 | `LWIP_TCPIP_TASK_AFFINITY_CPU0`, `ESP_TIMER_TASK_AFFINITY_CPU0`, `MQTT_USE_CORE_0` | `grep` ba khoá trong `sdkconfig.defaults.esp32s3`; ở `bench` in `vTaskGetInfo` từng task lúc boot | ⏳ |
 | 2.6 | Khoá log của IDF lấy bằng `portMAX_DELAY` — một `ESP_LOGx` có thể chặn sau lưng | không log trong vòng khung của nhân 1, không log trong vùng khoá, không log trong ISR | `grep ESP_LOG` trong `svc_front/src` chỉ ra đường khởi tạo và lỗi hiếm | ⏳ |
@@ -54,6 +55,7 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 | Khung thô | `xQueueReceive(q_frame)` | 100 ms; hết hạn thì nạp watchdog và đếm |
 | Khung sạch | `xQueueReceive(q_clean)` | 100 ms; 1 tick khi `svc_listen` có bước của cửa sổ đang chạy theo luồng hay cửa sổ đã chốt chờ chấm. Hết tick mà không có khung, `nhan_task` chạy liền các bước của cửa sổ (cao độ, rồi một khối mạng, khoảng 84 ms với mạng bề rộng 160 theo `measurements/latency.md` §18) tới khi `q_clean` có khung chờ hay hết việc; các bước ấy chạy ở ưu tiên 2 nên `mqtt_task`, `gui_task`, `luong_task` chen vào ngay khi có việc, và tick chờ giữa hai đợt là lượt của IDLE0 (KẾ HOẠCH §5.2, §5.4) |
 | Sự kiện, lệnh | `xQueueReceive(q_dialog / q_cmd / q_speak)` | 1 s, rồi nạp watchdog |
+| Lệnh chờ xác minh người nói | `xQueueReceive(q_verify)`, rồi `q_spk` không chờ | 100 ms, rồi nạp watchdog; một lần chạy b0 giữ `xac_task` ~1,2 s giữa hai lần nạp (KẾ HOẠCH §3.17) |
 | Nhịp `gui_task` | `vTaskDelayUntil` 100 ms | — |
 
 ## 4. Thời gian và tick
@@ -71,7 +73,7 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 | 5.1 | Tràn ngăn xếp im lặng, lần chạy xanh che lần panic | `dev` bật `COMPILER_STACK_CHECK_MODE_NORM` và canary | `bench_mem` in watermark từng task sau 10 phút tải thật | ⏳ |
 | 5.2 | Mảng lớn trên ngăn xếp trong đường xử lý khung | vùng làm việc của `dsp_*` do người gọi cấp từ heap lúc boot, không đặt trên ngăn xếp | `-Wstack-usage=1024` cho `dsp_*`, `lang_*` | ⏳ |
 | 5.3 | Nhầm đơn vị watermark | nhân `sizeof(StackType_t)` | đọc code | ⏳ |
-| 5.4 | Ngăn xếp ở PSRAM bị chạm khi cache tắt | chỉ `mqtt_task` có ngăn xếp ở PSRAM; không task nào của nhân 1 | đọc `sdkconfig` và bảng task | ⏳ |
+| 5.4 | Ngăn xếp ở PSRAM bị chạm khi cache tắt | chỉ `mqtt_task` có ngăn xếp ở PSRAM; không task nào của nhân 1; `xac_task` ghi NVS nên ngăn xếp của nó ở RAM nội | đọc `sdkconfig` và bảng task | ⏳ |
 
 ## 6. Heap
 
@@ -89,7 +91,8 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 | 7.1 | ISR chạm PSRAM hoặc mã trong flash khi cache tắt | ISR của I2S ở IRAM (`I2S_ISR_IRAM_SAFE`), chỉ chạm bộ đếm trong RAM nội | đọc callback trong `drv_audio` | ⏳ |
 | 7.2 | **Ghi flash đóng băng `thu_task` quá chiều sâu DMA** | DMA RX 8 × 256 mẫu = 128 ms; chỉ ghi flash khi đổi cấu hình, đổi bộ lệnh, hiệu chuẩn | E14-T7: ghi NVS liên tục 10 phút, đếm khung mất | ⏳ |
 | 7.3 | Đệm DMA ở PSRAM | đệm DMA luôn `MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL` | đọc `drv_audio` | ⏳ |
-| 7.4 | Tranh chấp băng thông MSPI giữa flash, PSRAM và Wi-Fi làm chậm `sach_task` | trọng số `command` đọc từ PSRAM chỉ trong `LENH` | E14-T6 đo µs đỉnh của `sach_task` trong `LENH` so với `NGHE` | ⏳ |
+| 7.4 | Tranh chấp băng thông MSPI giữa flash, PSRAM và Wi-Fi làm chậm `sach_task` | trọng số `command` đọc từ PSRAM chỉ trong `LENH`; b0 của `speaker` đọc trọng số từ flash và tensor ở PSRAM liền ~1,2 s sau mỗi lệnh khi kiểm người nói bật | E14-T6 đo µs đỉnh của `sach_task` trong `LENH` so với `NGHE`, và trong một lần chạy b0 | ⏳ |
+| 7.6 | `xac_task` ghi flash giữa chuỗi nghe | chỉ theo lệnh console: đăng ký xong (mẫu giọng ~768 B) và `spk on`, `off`, `clear`; không ghi theo nhịp | đọc `svc_listen_verify` và `svc_listen_speaker`; `frames_dropped` không tăng qua một lần đăng ký | ⏳ |
 | 7.5 | `nhan_task` ghi `set.json` hay chạy `ai_engine_command_prepare` lâu quá 1 s đệm của `q_clean` | ghi một lần mỗi bộ lệnh mới, sau khi `lang_vi` đọc được mọi dòng và `prepare` nhận bộ ấy; bộ trùng `version` với bộ đang dùng (bản retained gửi lại mỗi lần nối) không ghi; `ctc` chỉ chép nhãn, còn `rnnt` chạy mạng dự đoán một lần cho mỗi ngữ cảnh chưa gặp, bộ lệnh lớn có thể chạm 1 s 🔬 | log in thời gian `lang_vi` và thời gian ghi; trên board B `clean_dropped` và `frames_dropped` của `heartbeat` không tăng qua một lần đổi bộ lệnh | ⏳ |
 
 ## 8. Hàng đợi và đệm
@@ -106,6 +109,8 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 | 8.7 | Hở `seq` không ai xử lý | `sach_task`: hở không quá `chain.gap_keep_s` thì `dsp_afe_resume`, dài hơn thì `dsp_afe_reset` (KẾ HOẠCH §4.5.5); `nhan_task` thấy hở thì đặt lại STFT và bộ dò cao độ, câu đang mở thành `REJECT FRAME_GAP` (KẾ HOẠCH §5.4); `host` ghi hở vào json | phép kiểm chặn mạng 5 s ở E5-T10 | ⏳ |
 | 8.8 | Callback esp-mqtt làm việc dài | callback chỉ phân tích rồi bỏ vào `q_cmd` / `q_cmdset` | đọc `app_wiring.c` | ⏳ |
 | 8.10 | Bản mới từ `down/commands` ghi đè bộ lệnh `nhan_task` đang đọc | hai ô bộ lệnh của `net_mqtt`, cấp lúc boot; task esp-mqtt chỉ ghi vào ô nó đang điền dở, ô nó rút lại được khỏi `q_cmdset` (bản chờ), hoặc, khi `q_cmdset` rỗng, ô không phải ô gửi sau cùng: `nhan_task` nhận theo thứ tự gửi và xong ô trước rồi mới nhận ô sau, nên ô ấy đã xong. Bản mới thay bản chờ bằng `xQueueOverwrite` | đọc `commands_slot` trong `net_mqtt.c`; trên board B gửi ba bộ lệnh liền nhau trong lúc `nhan_task` đang ghi `set.json`: bộ cuối được dùng, không bộ nào lẫn dòng của bộ khác | ⏳ |
+| 8.11 | Hai task cùng giữ một ô xác minh | một ô chỉ đi qua đúng một vòng `q_verify_free` → `nhan_task` (`svc_listen_hold`) → `q_verify` → `xac_task` (`svc_listen_verify`) → `q_verify_free`; `nhan_task` lấy ô với timeout 0, hết ô thì lệnh thành `REJECT SPEAKER_BUSY` (KẾ HOẠCH §5.3) | đọc `hand_over` và `xac_task` trong `app_tasks.c` | ⏳ |
+| 8.12 | Cờ dùng chung đọc không khoá | `s_diverting` là `atomic_bool` một người ghi (`xac_task`) một người đọc (`nhan_task`); đọc lệch đúng lúc bật hay tắt chỉ cho một lệnh qua không xác minh, hay đưa một lệnh qua `xac_task` để nó thả đi | đọc `svc_listen.c` | ⏳ |
 
 ## 9. Khoá
 
@@ -128,7 +133,7 @@ Ký hiệu: ✅ đã kiểm và sạch · ⚠ có phát hiện, xem §14 · ⏳ 
 
 | # | Kiểu hỏng | Luật | Trạng thái |
 |---|---|---|---|
-| 11.1 | Task có vòng lặp mà không đăng ký watchdog | mọi task trong bảng §5.2 đăng ký và nạp mỗi vòng | ⏳ |
+| 11.1 | Task có vòng lặp mà không đăng ký watchdog | mọi task trong bảng §5.2 đăng ký và nạp mỗi vòng; giữa hai lần nạp của `xac_task` có một lần chạy b0 ~1,2 s, dưới 5 s của task watchdog, và IDLE0 đói đúng chừng ấy | ⏳ |
 | 11.2 | Task có watchdog chặn vô hạn → watchdog kêu nhầm tên | mọi chỗ chờ có hạn (§3), hết hạn thì nạp rồi chờ tiếp | ⏳ |
 | 11.3 | IDLE1 không bao giờ chạy | `sach_task` chặn trên `q_frame` giữa hai khung; ở tải tới ~51% (NSNet-16k L, KẾ HOẠCH §5.6) IDLE1 luôn có lượt | ⏳ |
 

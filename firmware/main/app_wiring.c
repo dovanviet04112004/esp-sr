@@ -9,6 +9,7 @@
 #include "gen_payload.h"
 #include "net_mqtt.h"
 #include "sdkconfig.h"
+#include "svc_listen.h"
 
 #define CLEAN_DEPTH 64 // about one second of hops
 #define DIALOG_DEPTH 8
@@ -16,6 +17,7 @@
 #define CMDSET_DEPTH 1
 #define SPEAK_DEPTH 4
 #define EVENT_UP_DEPTH 16
+#define SPEAKER_CTL_DEPTH 2
 #define STREAM_BUFFER_BYTES (CONFIG_SVC_REPORT_STREAM_BUFFER_KB * 1024)
 
 static const char *TAG = "app_wiring";
@@ -28,7 +30,11 @@ static app_frame_slot_t s_pool[APP_FRAME_SLOTS];
 static uint8_t s_frame_items[APP_FRAME_SLOTS];
 static uint8_t s_free_items[APP_FRAME_SLOTS];
 static uint8_t s_cmdset_items[CMDSET_DEPTH * sizeof(const net_mqtt_commands_t *)];
+static uint8_t s_verify_items[SVC_LISTEN_VERIFY_SLOTS];
+static uint8_t s_verify_free_items[SVC_LISTEN_VERIFY_SLOTS];
+static uint8_t s_speaker_ctl_items[SPEAKER_CTL_DEPTH * sizeof(svc_listen_speaker_ctl_t)];
 static StaticQueue_t s_frame_q, s_free_q, s_clean_q, s_dialog_q, s_cmd_q, s_cmdset_q, s_event_up_q;
+static StaticQueue_t s_verify_q, s_verify_free_q, s_speaker_ctl_q;
 #if CONFIG_APP_SPEAKER_ENABLE
 static StaticQueue_t s_speak_q;
 #endif
@@ -59,6 +65,12 @@ esp_err_t app_wiring_init(void)
     s_wiring.cmdset =
         xQueueCreateStatic(CMDSET_DEPTH, sizeof(const net_mqtt_commands_t *), s_cmdset_items, &s_cmdset_q);
     s_wiring.event_up = psram_queue(EVENT_UP_DEPTH, sizeof(app_event_t), &s_event_up_q);
+    s_wiring.verify =
+        xQueueCreateStatic(SVC_LISTEN_VERIFY_SLOTS, sizeof(uint8_t), s_verify_items, &s_verify_q);
+    s_wiring.verify_free =
+        xQueueCreateStatic(SVC_LISTEN_VERIFY_SLOTS, sizeof(uint8_t), s_verify_free_items, &s_verify_free_q);
+    s_wiring.speaker_ctl = xQueueCreateStatic(SPEAKER_CTL_DEPTH, sizeof(svc_listen_speaker_ctl_t),
+                                              s_speaker_ctl_items, &s_speaker_ctl_q);
     s_wiring.system = xEventGroupCreateStatic(&s_system_eg);
     s_wiring.afe_stats = &s_afe_stats;
     s_wiring.afe_stats_lock = &s_afe_stats_lock;
@@ -80,6 +92,9 @@ esp_err_t app_wiring_init(void)
     }
     for (uint8_t slot = 0; slot < APP_FRAME_SLOTS; slot++) {
         if (xQueueSend(s_wiring.free_slots, &slot, 0) != pdTRUE) { return ESP_ERR_INVALID_STATE; }
+    }
+    for (uint8_t slot = 0; slot < SVC_LISTEN_VERIFY_SLOTS; slot++) {
+        if (xQueueSend(s_wiring.verify_free, &slot, 0) != pdTRUE) { return ESP_ERR_INVALID_STATE; }
     }
     s_ready = true;
     ESP_LOGI(TAG, "pool %u x %u B internal, queues %u B in PSRAM", (unsigned)APP_FRAME_SLOTS,

@@ -36,6 +36,7 @@
 #define THU_STACK_BYTES 3072
 #define SACH_STACK_BYTES 6144
 #define NHAN_STACK_BYTES 8192
+#define XAC_STACK_BYTES 8192
 #define DIEU_STACK_BYTES 4096
 #define NOI_STACK_BYTES 8192
 #define GUI_STACK_BYTES 4096
@@ -46,6 +47,7 @@
 #define SACH_PRIORITY 16
 #define NHAN_PRIORITY 10
 #define NHAN_WORK_PRIORITY 2 // window work, with the console (KEHOACH 5.2)
+#define XAC_PRIORITY 3       // a heard command waits on it (KEHOACH 5.2)
 #define DIEU_PRIORITY 8
 #define NOI_PRIORITY 5
 #define GUI_PRIORITY 4
@@ -55,6 +57,7 @@
 #define DMA_WAIT_MS (2 * GEN_GRID_HOP_US / 1000)
 #define FRAME_WAIT_MS 100
 #define CLEAN_WAIT_MS 100
+#define VERIFY_WAIT_MS 100
 #define DIEU_WAIT_MS 100
 #define SPEAK_WAIT_MS 1000
 #define GUI_PERIOD_MS 100
@@ -172,11 +175,34 @@ static void raise_decision(const app_wiring_t *w, const svc_listen_decision_t *d
     send_up(w, e);
     ESP_LOGI(TAG,
              "%s %s score %u margin %u gap %u syllable %u, hops %" PRIu32 "..%" PRIu32 ", %" PRIu32
-             " ms work, %" PRIu32 " ms after the close",
+             " ms work, %" PRIu32 " ms after the close, speaker %d in %" PRIu32 " ms",
              e->kind == APP_EVT_COMMAND ? "COMMAND" : "REJECT",
              e->kind == APP_EVT_COMMAND ? e->command_id : e->code, (unsigned)e->score_permille,
              (unsigned)e->margin_permille, (unsigned)d->free_gap_permille, (unsigned)d->syllable_gap_permille,
-             d->first_seq, e->seq, d->work_us / US_PER_MS, d->close_us / US_PER_MS);
+             d->first_seq, e->seq, d->work_us / US_PER_MS, d->close_us / US_PER_MS,
+             e->has_speaker ? e->speaker_permille : 0, d->verify_us / US_PER_MS);
+}
+
+// A heard command waits for xac_task's speaker check; with no slot free, or its audio gone, it leaves
+// rejected.
+static void hand_over(const app_wiring_t *w, svc_listen_decision_t *d)
+{
+    if (d->event.kind != APP_EVT_COMMAND || !svc_listen_verifies()) {
+        raise_decision(w, d);
+        return;
+    }
+    uint8_t slot = 0;
+    const bool held = xQueueReceive(w->verify_free, &slot, 0) == pdTRUE;
+    if (held && svc_listen_hold(d, slot) == ESP_OK) {
+        // q_verify is as deep as the slots, so a held slot always fits (KEHOACH 5.3).
+        const BaseType_t sent = xQueueSend(w->verify, &slot, 0);
+        configASSERT(sent == pdTRUE);
+        (void)sent;
+        return;
+    }
+    if (held) { xQueueSend(w->verify_free, &slot, 0); }
+    svc_listen_busy_reject(d);
+    raise_decision(w, d);
 }
 
 static void raise_error(const app_wiring_t *w, uint32_t seq, const char *code, const char *command_id)
@@ -253,10 +279,33 @@ static void nhan_task(void *arg)
             // Back to back while no frame waits, but under core 0's other app tasks (KEHOACH 5.2, 5.4).
             vTaskPrioritySet(NULL, NHAN_WORK_PRIORITY);
             do {
-                if (svc_listen_work(&decision)) { raise_decision(w, &decision); }
+                if (svc_listen_work(&decision)) { hand_over(w, &decision); }
                 esp_task_wdt_reset();
             } while (svc_listen_pending() && uxQueueMessagesWaiting(w->clean) == 0);
             vTaskPrioritySet(NULL, NHAN_PRIORITY);
+        }
+        esp_task_wdt_reset();
+    }
+}
+
+static void xac_task(void *arg)
+{
+    const app_wiring_t *w = arg;
+    ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
+    for (;;) {
+        uint8_t slot = 0;
+        if (xQueueReceive(w->verify, &slot, pdMS_TO_TICKS(VERIFY_WAIT_MS)) == pdTRUE) {
+            svc_listen_decision_t decision;
+            svc_listen_verify(slot, &decision);
+            const BaseType_t back = xQueueSend(w->verify_free, &slot, 0);
+            configASSERT(back == pdTRUE);
+            (void)back;
+            raise_decision(w, &decision);
+        }
+        svc_listen_speaker_ctl_t ctl;
+        while (xQueueReceive(w->speaker_ctl, &ctl, 0) == pdTRUE) {
+            const esp_err_t err = svc_listen_speaker(ctl);
+            if (err != ESP_OK) { ESP_LOGW(TAG, "speaker request %d: %s", (int)ctl, esp_err_to_name(err)); }
         }
         esp_task_wdt_reset();
     }
@@ -348,6 +397,8 @@ static void event_payload(const app_event_t *e, event_t *out)
     out->has_code = e->code[0] != '\0';
     out->doa_deg = e->doa_deg;
     out->has_doa_deg = e->doa_deg >= 0;
+    out->speaker_permille = e->speaker_permille;
+    out->has_speaker_permille = e->has_speaker;
 }
 
 static void send_events(const app_wiring_t *w, bool online)
@@ -394,6 +445,7 @@ static void net_task(void *arg);
 static StackType_t s_thu_stack[THU_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 static StackType_t s_sach_stack[SACH_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 static StackType_t s_nhan_stack[NHAN_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
+static StackType_t s_xac_stack[XAC_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 static StackType_t s_dieu_stack[DIEU_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 static StackType_t s_gui_stack[GUI_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 static StackType_t s_net_stack[NET_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
@@ -408,6 +460,7 @@ static const task_spec_t kTasks[] = {
     {thu_task, "thu_task", s_thu_stack, THU_STACK_BYTES, THU_PRIORITY, CORE_FRAME},
     {sach_task, "sach_task", s_sach_stack, SACH_STACK_BYTES, SACH_PRIORITY, CORE_FRAME},
     {nhan_task, "nhan_task", s_nhan_stack, NHAN_STACK_BYTES, NHAN_PRIORITY, CORE_BUFFERED},
+    {xac_task, "xac_task", s_xac_stack, XAC_STACK_BYTES, XAC_PRIORITY, CORE_BUFFERED},
     {dieu_task, "dieu_task", s_dieu_stack, DIEU_STACK_BYTES, DIEU_PRIORITY, CORE_BUFFERED},
 #if CONFIG_APP_SPEAKER_ENABLE
     {noi_task, "noi_task", s_noi_stack, NOI_STACK_BYTES, NOI_PRIORITY, CORE_BUFFERED},

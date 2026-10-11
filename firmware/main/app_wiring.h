@@ -50,13 +50,16 @@ typedef struct {
     QueueHandle_t cmdset;        // q_cmdset: const net_mqtt_commands_t *
     QueueHandle_t speak;         // q_speak: app_speak_req_t, PSRAM; NULL without a speaker
     QueueHandle_t event_up;      // q_event_up: app_event_t, PSRAM
+    QueueHandle_t verify;        // q_verify: verify slot index, nhan_task -> xac_task
+    QueueHandle_t verify_free;   // q_verify_free: verify slot index, xac_task -> nhan_task
+    QueueHandle_t speaker_ctl;   // q_spk: svc_listen_speaker_ctl_t, console -> xac_task
     StreamBufferHandle_t stream; // sb_stream, PSRAM; NULL without NET_STREAM_ENABLE
     EventGroupHandle_t system;   // eg_system: app_system_bit_t
     app_afe_stats_t *afe_stats;  // s_afe_stats, copied under afe_stats_lock only
     portMUX_TYPE *afe_stats_lock;
 } app_wiring_t;
 
-/** Create every queue, fill q_free with all slots, and clear the stats.
+/** Create every queue, fill q_free and q_verify_free with all their slots, and clear the stats.
  *  @ctx task | blocking | once in app_boot, ahead of app_tasks_start
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE on a second call | ESP_ERR_NO_MEM PSRAM refused a queue
  */

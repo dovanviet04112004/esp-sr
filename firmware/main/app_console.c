@@ -7,12 +7,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "app_wiring.h"
 #include "argtable3/argtable3.h"
 #include "esp_check.h"
 #include "esp_console.h"
 #include "esp_log.h"
 #include "esp_wifi_types.h"
 #include "sdkconfig.h"
+#include "svc_listen.h"
 #include "svc_report.h"
 #include "sys_storage.h"
 
@@ -293,6 +295,40 @@ static esp_err_t register_stream(void)
 }
 #endif
 
+static struct {
+    struct arg_str *action;
+    struct arg_end *end;
+} s_spk_args;
+
+static int spk_cmd(int argc, char **argv)
+{
+    if (arg_parse(argc, argv, (void **)&s_spk_args) != 0) {
+        arg_print_errors(stdout, s_spk_args.end, argv[0]);
+        return 1;
+    }
+    static const struct {
+        const char *name;
+        svc_listen_speaker_ctl_t ctl;
+    } kActions[] = {
+        {"enrol", SVC_LISTEN_SPEAKER_ENROL},
+        {"on", SVC_LISTEN_SPEAKER_ON},
+        {"off", SVC_LISTEN_SPEAKER_OFF},
+        {"clear", SVC_LISTEN_SPEAKER_CLEAR},
+    };
+    const char *action = s_spk_args.action->sval[0];
+    for (size_t i = 0; i < sizeof(kActions) / sizeof(kActions[0]); i++) {
+        if (strcmp(action, kActions[i].name) != 0) { continue; }
+        const app_wiring_t *w = app_wiring();
+        // Zero timeout: a b0 run holds xac_task about a second, and the console says so rather than wait.
+        const bool sent = w != NULL && xQueueSend(w->speaker_ctl, &kActions[i].ctl, 0) == pdTRUE;
+        printf("spk %s: %s\n", action,
+               sent ? "sent to xac_task, its log tells the outcome" : "busy, again later");
+        return sent ? 0 : 1;
+    }
+    printf("spk enrol | on | off | clear\n");
+    return 1;
+}
+
 static esp_err_t register_commands(void)
 {
     s_wifi_args.action = arg_str1(NULL, NULL, "set", "the only action");
@@ -322,6 +358,17 @@ static esp_err_t register_commands(void)
         .argtable = &s_nvs_args,
     };
     ESP_RETURN_ON_ERROR(esp_console_cmd_register(&nvs), TAG, "nvs");
+
+    s_spk_args.action = arg_str1(NULL, NULL, "<enrol|on|off|clear>",
+                                 "enrol the next commands, check on or off, erase the voiceprint");
+    s_spk_args.end = arg_end(1);
+    const esp_console_cmd_t spk = {
+        .command = "spk",
+        .help = "Speaker check of the chip path: enrolment, on, off, voiceprint erased (KEHOACH 3.17)",
+        .func = spk_cmd,
+        .argtable = &s_spk_args,
+    };
+    ESP_RETURN_ON_ERROR(esp_console_cmd_register(&spk), TAG, "spk");
     return register_stream();
 }
 

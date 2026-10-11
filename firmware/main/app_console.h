@@ -1,4 +1,5 @@
-/** Development console on UART0: Wi-Fi credentials, NVS keys and the audio stream (KEHOACH 7.2, 7.4).
+/** Development console on UART0: Wi-Fi credentials, NVS keys, the speaker check and the audio stream
+ *  (KEHOACH 3.17, 7.2, 7.4).
  *  @ctx task | non-blocking | built only with APP_CONSOLE; prod carries no symbol of it
  */
 #pragma once
@@ -11,7 +12,7 @@ extern "C" {
 #endif
 
 #if CONFIG_APP_CONSOLE
-/** Register wifi, nvs and stream, then start the REPL task pinned to core 0.
+/** Register wifi, nvs, spk and stream, then start the REPL task pinned to core 0.
  *  @ctx task | non-blocking | once, after app_boot; the REPL runs until reboot
  *  @ret ESP_OK | an esp_console error
  */
