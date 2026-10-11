@@ -444,7 +444,7 @@ ai-probe: ## Export the probes of E11-T10 (TCN), E11-T17 (kws), E11-T12 (ctc) an
 # partition holds them.
 ai-unit: ai-probe ## Run the ai_engine suite on board B at bench's compiler settings [CTC_RUN= CTC_ROW=]
 	@$(call fresh_sdkconfig,$(UNIT_APP)/sdkconfig,$(call app_defaults,$(UNIT_APP)))
-	cd $(UNIT_APP) && idf.py build && \
+	cd $(UNIT_APP) && rm -f build/unit.status && idf.py build && \
 	  $(WRITE_PART) models_0 --input main/probe/ctc_models.bin && \
 	  $(WRITE_PART) models_1 --input main/probe/ns_models.bin && \
 	  : > build/unit.log && skip=n && \
@@ -461,7 +461,7 @@ ai-unit: ai-probe ## Run the ai_engine suite on board B at bench's compiler sett
 	  fi && \
 	  { pytest pytest_unit.py $(ON_BOARD) -s --skip-autoflash $$skip; echo $$? > build/unit.status; } 2>&1 \
 	    | tee -a build/unit.log; \
-	  exit $$(cat build/unit.status)
+	  exit $$(cat build/unit.status 2>/dev/null || echo 1)
 	@if [ -f $(UNIT_APP)/main/probe/ctc_gate.json ]; then \
 	  cd ml && uv run --extra train python -m srpipe.tasks.command.ctc.probe --gate-log ../$(UNIT_APP)/build/unit.log; \
 	fi
@@ -472,7 +472,7 @@ ai-unit-rnnt: ## Run the rnnt build of the ai_engine suite on board B [RNNT_RUN=
 	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.command.rnnt.probe \
 	  $(if $(RNNT_RUN),--run $(RNNT_RUN) --row $(RNNT_ROW))
 	@$(call fresh_sdkconfig,$(UNIT_APP)/build_rnnt/sdkconfig,$(call app_defaults,$(UNIT_APP)))
-	cd $(UNIT_APP) && idf.py -B build_rnnt -D SDKCONFIG=build_rnnt/sdkconfig -D UNIT_PROFILE=rnnt build && \
+	cd $(UNIT_APP) && rm -f build_rnnt/unit.status && idf.py -B build_rnnt -D SDKCONFIG=build_rnnt/sdkconfig -D UNIT_PROFILE=rnnt build && \
 	  $(WRITE_PART) models_0 --input main/probe/rnnt_models.bin && \
 	  if [ -f main/probe/rnnt_gate.bin ]; then \
 	    $(WRITE_PART) voice --input main/probe/rnnt_gate.bin; \
@@ -481,7 +481,7 @@ ai-unit-rnnt: ## Run the rnnt build of the ai_engine suite on board B [RNNT_RUN=
 	  fi && \
 	  { pytest pytest_unit.py $(ON_BOARD) --build-dir build_rnnt -s; echo $$? > build_rnnt/unit.status; } 2>&1 \
 	    | tee build_rnnt/unit.log; \
-	  exit $$(cat build_rnnt/unit.status)
+	  exit $$(cat build_rnnt/unit.status 2>/dev/null || echo 1)
 	@if [ -f $(UNIT_APP)/main/probe/rnnt_gate.json ]; then \
 	  cd ml && uv run --extra train python -m srpipe.tasks.command.rnnt.probe --gate-log ../$(UNIT_APP)/build_rnnt/unit.log; \
 	fi
@@ -492,22 +492,22 @@ ai-unit-ctc: ## Run the ctc build of the ai_engine suite on board B: RUN=<run> R
 	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.command.ctc.probe --run $(RUN) --row $(ROW) --net-only \
 	  $(CTC_HEARD)
 	@$(call fresh_sdkconfig,$(UNIT_APP)/build_ctc/sdkconfig,$(call app_defaults,$(UNIT_APP)))
-	cd $(UNIT_APP) && idf.py -B build_ctc -D SDKCONFIG=build_ctc/sdkconfig -D UNIT_PROFILE=ctc build && \
+	cd $(UNIT_APP) && rm -f build_ctc/unit.status && idf.py -B build_ctc -D SDKCONFIG=build_ctc/sdkconfig -D UNIT_PROFILE=ctc build && \
 	  $(WRITE_PART) models_0 --input main/probe/ctc_models.bin && \
 	  { pytest pytest_unit.py $(ON_BOARD) --build-dir build_ctc -s; echo $$? > build_ctc/unit.status; } 2>&1 \
 	    | tee build_ctc/unit.log; \
-	  exit $$(cat build_ctc/unit.status)
+	  exit $$(cat build_ctc/unit.status 2>/dev/null || echo 1)
 
 # A row of speaker-ptq's ladder goes to model slot 0, its window is checked against Python and timed; slot 0 ends
 # erased.
 ai-unit-speaker: ## Run the speaker build of the ai_engine suite on board B: RUN=<run> ROW=<row of its int8/ladder.yaml> [CUT_RANGE="<first op> <last op>"] (E11-T25)
 	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.speaker.probe --run $(RUN) --row $(ROW) $(if $(CUT_RANGE),--cut-range $(CUT_RANGE))
 	@$(call fresh_sdkconfig,$(UNIT_APP)/build_speaker/sdkconfig,$(call app_defaults,$(UNIT_APP)))
-	cd $(UNIT_APP) && idf.py -B build_speaker -D SDKCONFIG=build_speaker/sdkconfig -D UNIT_PROFILE=speaker build && \
+	cd $(UNIT_APP) && rm -f build_speaker/unit.status && idf.py -B build_speaker -D SDKCONFIG=build_speaker/sdkconfig -D UNIT_PROFILE=speaker build && \
 	  $(WRITE_PART) models_0 --input main/probe/speaker_models.bin && \
 	  { pytest pytest_unit.py $(ON_BOARD) --build-dir build_speaker -s; echo $$? > build_speaker/unit.status; } 2>&1 \
 	    | tee build_speaker/unit.log; \
-	  exit $$(cat build_speaker/unit.status)
+	  exit $$(cat build_speaker/unit.status 2>/dev/null || echo 1)
 
 # Step 2.2 of KEHOACH 3.14's procedure, any branch: LOG holds esp-dl's profile_module table of a board run, ESPDL
 # the model that ran, its .info beside it (make ai-unit-speaker leaves build_speaker/unit.log and <run>/int8/<row>/).
