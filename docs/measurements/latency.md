@@ -782,3 +782,26 @@ trung bình). Bản dò chạy hàng `timing` của run, dựng `UNIT_PROFILE=ct
 - **RMSNorm theo mã máy (11/10):** bản dựng S3 của esp-dl tính `mean_sq + eps` bằng một `madd.s`, với hằng
   `(1.0f / n)·s²` tính sẵn. Bản vá cũ chia thật cho n rồi mới cộng, mà 1/160 không biểu diễn đúng ở float32. Sau khi
   `rmsnorm_as_espdl` chép đúng mã máy, chuỗi chạy lại vẫn khớp từng bit: `command_ctc` lệch 0, 82,2 ms một bước.
+- **Cả chuỗi nghe trên chip với mạng đã tăng tốc** (11/10, `make listen-unit`, bảy lượt, 08:45–09:21). Ảnh model là
+  hàng `percentile` của run đã deploy lại sau bước 2.4 (`command_ctc.espdl` sha256 `1e57538e…`), cùng ngưỡng của ảnh.
+  So với lần đo ngày 08/10 ở §22, cùng 336 cửa sổ:
+
+  | Đo | 08/10, 82,2 ms một bước | **11/10, 63,9 ms một bước** |
+  |---|---|---|
+  | Cửa sổ trùng Python từng trường | 336/336 | **336/336**, mọi lượt `0 decided otherwise than python` |
+  | Ca `FRAME_GAP` và ca click | qua cả bảy lượt | qua cả bảy lượt, 3/3 bài thử mỗi lượt |
+  | Quyết định sau bước chốt, trung bình mỗi lượt | 76–114 ms | **61–91 ms** |
+  | Đỉnh ở lượt không có cửa sổ cắt lùi | 86–88 ms | **68–71 ms** |
+  | Đỉnh ở cửa sổ cắt lùi | tới 1,28 s | **tới 1,01 s** |
+  | Việc của một cửa sổ, trung bình mỗi lượt / đỉnh | 775–949 ms / 1,27 s | **614–752 ms / 1,01 s** |
+
+  - Mạng nhanh hơn 22% thì phần sau bước chốt bớt 15–23 ms trung bình, vì lúc câu chốt chỉ còn khối dở cuối.
+  - Cửa sổ cắt lùi chạy lại cả cửa sổ sau khi câu chốt, nên bớt gần đúng tỉ lệ ấy: 1,28 → 1,01 s.
+  - Watchdog kêu tên IDLE0 khi bài thử phát lại các phiên liền nhau trên task chính. Đó là app thử, không phải firmware
+    sản phẩm.
+- **`make ai-unit` cùng ngày, cùng ảnh model** (CTC_ROW=percentile, KALDI, HOLD=pitch; 09:21–09:49). App thử dựng
+  được với `<initializer_list>`. Lượt Cửa 3 đầu, 158 cửa sổ trên phân vùng `voice`, **0 quyết định khác Python**,
+  56 µs một hop. Ngay sau đó board ngừng in giữa dòng tổng kết của lượt ấy (ký tự thứ ~70 của ~210), pytest chờ đủ
+  900 s rồi báo hết hạn; các lượt còn lại không chạy. Console in theo kiểu chờ FIFO, nên CPU dừng giữa `printf`, hoặc
+  đường USB/IP ngừng chuyển; dmesg không có lỗi `vhci_hcd` lúc ấy, và esptool nối lại được ngay sau đó. Cùng đoạn mã
+  qua ở lần đo 08/10. Chưa rõ gốc, chưa coi là qua (TASKS E11-T30).
