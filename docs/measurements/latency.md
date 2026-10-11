@@ -907,3 +907,17 @@ lượt, kể cả 10 lệnh đăng ký và mẫu giọng giữ qua khởi độ
     nội mà lần xác minh đầu giữ khi bỏ lần chạy thử lúc dựng.
   - Đường USB/IP còn làm mất dòng kết quả của vài bản cắt và dòng tổng kết. pytest khi ấy chờ tới hết giờ (TASKS
     E11-T30).
+
+**Cờ tắt, firmware có danh sách người nói** (E11-T26, E11-T31, 11/10 16:51–17:22). Firmware dựng lúc 16:42 từ
+`db5ed04`, trước Z-norm. Chạy `make listen-unit` qua cầu RFC 2217 (TASKS E11-T30).
+
+| Đo | Kết quả |
+|---|---|
+| Cửa sổ trùng Python từng trường | **336/336**, 43 phiên, bảy lượt đều `0 decided otherwise than python` |
+| Ca `FRAME_GAP` và ca click | qua cả bảy lượt |
+| Quyết định sau bước chốt, trung bình mỗi lượt | 61–91 ms |
+| Đỉnh ở lượt không có cửa sổ cắt lùi / ở cửa sổ cắt lùi | 69–71 ms / 1,01 s |
+| Việc của một cửa sổ, trung bình mỗi lượt / đỉnh | 613–751 ms / 1,01 s |
+
+- Các số cùng khoảng với lượt 10:59 ở trên. Vậy khi cờ tắt, danh sách người nói và ba hàng đợi của nó không đổi Cửa 3.
+- Cả bảy lượt in đủ dòng tổng kết: qua cầu RFC 2217, log không mất byte nào.
