@@ -41,6 +41,30 @@ def test_a_score_on_the_threshold_passes() -> None:
     assert score.accepts(420, 420) and not score.accepts(419, 420)
 
 
+def test_best_takes_the_highest_score_and_the_lowest_voiceprint_on_a_tie() -> None:
+    u = score.unit(RNG.integers(-128, 128, score.GOLDEN_DIMS).astype(np.int8), -5)
+    other = score.unit(RNG.integers(-128, 128, score.GOLDEN_DIMS).astype(np.int8), -5)
+    assert score.best(u, [other, u, u]) == (1000, 1)
+    assert score.best(u, [-u]) == (-1000, 0)
+    assert score.best(u, []) == (-score.SCORE_LIMIT, 0)
+
+
+def test_each_person_of_a_household_case_matches_their_own_voiceprint_best() -> None:
+    for name, people in (("case_003", 3), ("case_004", 8)):
+        case = read_gold(score.GOLDEN_ROOT / score.BLOCK / f"{name}.gold")
+        assert case["people"][0] == people and case["voiceprint"].shape == (people, score.GOLDEN_DIMS)
+        np.testing.assert_array_equal(case["decision"][: 2 * people, 2], np.repeat(np.arange(people), 2))
+        assert (case["decision"][:, 0] == case["threshold"][0]).any()
+
+
+def test_two_people_enrolled_alike_tie_on_every_test_to_the_first() -> None:
+    twins = read_gold(score.GOLDEN_ROOT / score.BLOCK / "case_005.gold")
+    single = read_gold(score.GOLDEN_ROOT / score.BLOCK / "case_000.gold")
+    np.testing.assert_array_equal(twins["voiceprint"][0], twins["voiceprint"][1])
+    assert not twins["decision"][:, 2].any()
+    np.testing.assert_array_equal(twins["decision"][:, :2], single["decision"][:, :2])
+
+
 def test_committed_cases_match_a_fresh_emit(tmp_path: Path) -> None:
     for path in score.emit(tmp_path):
         committed = score.GOLDEN_ROOT / path.relative_to(tmp_path)
@@ -62,3 +86,7 @@ def test_each_negative_control_differs_from_its_reference_in_its_one_place() -> 
     np.testing.assert_array_equal(strict["voiceprint"], right["voiceprint"])
     np.testing.assert_array_equal(strict["decision"][:, 0], right["decision"][:, 0])
     assert (strict["decision"][:, 1] != right["decision"][:, 1]).sum() == 1
+    household = read_gold(score.GOLDEN_ROOT / score.BLOCK / "case_003.gold")
+    first = read_gold(score.GOLDEN_ROOT / score.BLOCK / "case_neg_002.gold")
+    np.testing.assert_array_equal(first["voiceprint"], household["voiceprint"])
+    assert (first["decision"][:, 2] != household["decision"][:, 2]).any()
