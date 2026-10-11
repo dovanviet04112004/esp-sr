@@ -861,3 +861,29 @@ sổ vẫn khớp Python từng bit, chủ repo qua 6/6, người lạ lọt 0/6
   - Nhưng lần xác minh đầu khi ấy giữ 1 232 B RAM nội và 55 360 B PSRAM: esp-dl cấp phát ở lần chạy đầu của đồ thị,
     ngoài `ExternalMallocGuard`.
   - Vì vậy giữ lần chạy thử. Ca chuỗi đo heap quanh lần xác minh đầu, giữ một byte là đỏ.
+
+**Lệch hiếm của b0: bảng `exp` của Softmax** (11/10, `c659b67`). Lượt `make listen-unit SPEAKER=1` đầu tiên khớp hai
+lượt, kể cả 10 lệnh đăng ký và mẫu giọng giữ qua khởi động lại. Ở lượt 2, cửa sổ 326..500 của phiên thứ ba trên
+`models_1` có điểm board 829 ‰, Python 844 ‰; quyết định vẫn là qua, mọi cửa sổ khác trùng.
+
+- **Khoanh vùng:**
+  - tiếng board giữ là đúng 24 000 mẫu cuối của cửa sổ;
+  - `spk_fbank` bằng C trên đúng cửa sổ ấy khớp bản soi gương từng bit;
+  - bản dò board trên cửa sổ ấy (`make ai-unit-speaker PCM=…`, `77b8880`), chia đôi bằng `CUT_RANGE`, cho b0 khớp
+    tới phép nhân tỉ lệ sau MatMul QK trong attention của `stage1.7/tcm.4`, và lệch ở MatMul sau Softmax.
+- **Gốc lỗi:**
+  - Softmax int8 của esp-dl dựng bảng 256 ô ở lần chạy đầu bằng `tool::gen_lut_8bit(table, exponent, expf)`;
+  - chip liên kết `expf` của picolibc: thuật toán float32 của fdlibm, `libm/math/sf_exp.c`, mỗi bước làm tròn một
+    lần, không gộp `madd.s`, phép chia là `__divsf3`;
+  - bản vá `softmax_as_espdl` lấy `exp` kiểu double rồi làm tròn về float32, lệch 1 ulp ở 16–33 trên 256 ô của mỗi
+    số mũ từ −9 tới 0;
+  - một ulp chỉ thỉnh thoảng đẩy một xác suất qua nửa bước lưới của op sau, nên các ca trước đều khớp.
+- **Sửa:** `expf_s3` chép đúng mã máy ấy, `exp_table_s3` dựng bảng như `gen_lut_8bit`.
+- **Sau sửa:**
+  - bản dò của cửa sổ ấy khớp ở mọi bản cắt và cả đồ thị: 0/192 giá trị lệch, lệch lớn nhất 0;
+  - `make speaker-deploy` chạy lại cho ngưỡng 744 ‰ như cũ và `speaker.espdl` giống từng byte.
+- **Cũng thấy ở đây:**
+  - Lần chạy đầu cấp phát bảng `exp` (1 KB RAM nội mỗi Softmax, `MALLOC_CAP_DEFAULT`). Đó là phần lớn của 1 232 B RAM
+    nội mà lần xác minh đầu giữ khi bỏ lần chạy thử lúc dựng.
+  - Đường USB/IP còn làm mất dòng kết quả của vài bản cắt và dòng tổng kết. pytest khi ấy chờ tới hết giờ (TASKS
+    E11-T30).
