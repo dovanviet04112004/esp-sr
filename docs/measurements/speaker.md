@@ -424,3 +424,49 @@ repo:
 - Mỗi số người rút riêng, nên bảng không tăng đều: 5 người thấp hơn 4 người 5 ‰ z.
 - Z-norm không làm b0 tách người tốt hơn (EER 19,3% giữa người lạ cùng kênh, §6.4 vẫn đúng). Nhóm chuẩn và người lạ thử
   đều là mô phỏng; ở nhà thật, nhóm chuẩn phải thu qua board B (E11-T27, chủ repo chưa cho thu 11/10).
+
+### 6.6 Người đăng ký thêm và việc gắn đúng tên: cosine, Z-norm, S-norm, AS-norm (E11-T31, 11/10)
+
+Bảng của §6.5 chỉ đo lệnh của chủ repo. Ở đây đo thêm lệnh của những người đăng ký thêm, và mẫu cho điểm cao nhất có
+đúng là mẫu của người nói không, tức `speakerId` của sự kiện.
+- **Vật liệu:** embedding đường chip của `speaker-deploy` (khoá `be39219`), cùng nhóm chuẩn, 20 lần rút đăng ký và
+  người đăng ký thêm như §6.5.
+- **Ngưỡng:** mỗi cách đặt ngưỡng riêng, ở 5% người lạ lọt, trên nửa người lạ không thuộc nhóm chuẩn. Cột Z-norm trùng
+  §6.5, nên các cột so được với nhau.
+- **Người đăng ký thêm:** người lạ qua đường mô phỏng, cùng kênh với người lạ thử. Như người trong nhà nói qua cùng một
+  board.
+- Đo bằng script tạm, chưa có trong `speaker-deploy`.
+- **Các cách chấm:**
+  - S-norm: trung bình của hai z, z của mẫu giọng và z của chính cửa sổ lệnh, đều trên nhóm chuẩn.
+  - AS-norm K: như S-norm, nhưng μ và σ mỗi phía chỉ lấy K điểm cao nhất trên nhóm chuẩn.
+
+| Người có mẫu | Cách chấm | Chủ repo giữ 1 m / 3 m | Người đăng ký thêm giữ | Mẫu cao nhất đúng người, người đăng ký thêm |
+|---|---|---|---|---|
+| 2 | cosine | 81,9 / 63,1% | 40,3% | 99,3% |
+| 2 | Z-norm | 98,6 / 96,5% | 21,6% | 88,1% |
+| 2 | S-norm | 98,8 / 97,6% | 45,5% | 93,3% |
+| 2 | AS-norm 100 | 98,7 / 97,5% | 44,8% | 92,5% |
+| 4 | cosine | 62,5 / 41,1% | 41,1% | 88,5% |
+| 4 | Z-norm | 97,8 / 94,0% | 27,7% | 76,2% |
+| 4 | S-norm | 98,2 / 97,4% | 38,9% | 84,4% |
+| 4 | AS-norm 100 | 98,3 / 97,4% | 43,0% | 83,3% |
+| 8 | cosine | 52,7 / 30,6% | 32,2% | 78,7% |
+| 8 | Z-norm | 96,8 / 91,6% | 23,0% | 70,4% |
+| 8 | S-norm | 97,7 / 97,4% | 32,2% | 77,1% |
+| 8 | AS-norm 100 | 98,0 / 97,3% | 36,3% | 77,7% |
+
+- **Z-norm:**
+  - Giữ lệnh của chủ repo gần bằng S-norm, trừ ở 3 m từ 4 người.
+  - Lệnh của người đăng ký thêm được giữ ít hơn cả cosine: 23,0% so với 32,2% ở 8 người.
+  - Gắn tên kém nhất: 70,4% ở 8 người.
+- **S-norm và AS-norm:**
+  - Hơn Z-norm ở mọi dòng.
+  - Ở 3 m, chủ repo được giữ ≥ 97,3% tới 8 người, nên luật "giữ ≥ 95% ở cả hai khoảng cách" đạt đủ 8.
+  - AS-norm giữ người đăng ký thêm nhiều nhất từ 3 người trở lên.
+  - K từ 50 tới 200 cho số gần nhau. Ở 8 người: 37,3%, 36,3% và 36,2% người đăng ký thêm được giữ.
+- **Gắn đúng tên:** cosine vẫn nhỉnh nhất, 78,7% so với 77,7% của AS-norm ở 8 người.
+- Lệnh của chủ repo rơi đúng mẫu của mình 97,2–98,5% ở 8 người với cả bốn cách.
+- **Giới hạn không đổi:** với cách tốt nhất, AS-norm 100, người đăng ký thêm cũng chỉ được giữ 36–59% từ 2 tới 8
+  người. b0 tách kém những người cùng kênh (EER 19,3%, §6.4). Chủ repo được giữ cao vì khác kênh với người lạ mô phỏng.
+- **Dòng AS-norm của ADR-0022 không tái tạo được:** script cho ra dòng ấy không còn. Bản một phía, 50 điểm cao nhất ở
+  phía mẫu giọng, cho 98,2 / 95,3% ở 4 người và 97,4 / 93,4% ở 8 người, khác 98,0 / 94,1% và 95,8 / 90,0% mà ADR ghi.
