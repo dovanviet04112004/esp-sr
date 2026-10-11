@@ -133,6 +133,13 @@ int16_t ai_engine_speaker_score(const float *unit, const float *voiceprint);
  */
 void ai_engine_speaker_voiceprint(const float *units, size_t n, float *voiceprint);
 
+/** The highest score of unit over n voiceprints, rows of ai_engine_speaker_dims() floats, and in index the
+ * one that gave it, the lowest on a tie (KEHOACH 3.17).
+ *  @ctx any | non-blocking | caller owns unit, prints and index
+ *  @ret the score in permille; -1000 and index 0 when n is 0
+ */
+int16_t ai_engine_speaker_best(const float *unit, const float *prints, size_t n, size_t *index);
+
 /** Whether a score reaches the threshold of the image's speaker row (KEHOACH 6.3).
  *  @ctx any | non-blocking
  */

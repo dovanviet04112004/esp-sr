@@ -49,6 +49,21 @@ int16_t ai_engine_speaker_score_permille(const float *unit, const float *voicepr
     return (int16_t)(permille < -AI_ENGINE_SPEAKER_SCORE_LIMIT ? -AI_ENGINE_SPEAKER_SCORE_LIMIT : permille);
 }
 
+int16_t ai_engine_speaker_best_permille(const float *unit, const float *prints, size_t n, size_t dims,
+                                        size_t *index)
+{
+    int16_t top = -AI_ENGINE_SPEAKER_SCORE_LIMIT;
+    *index = 0;
+    for (size_t k = 0; k < n; k++) {
+        const int16_t s = ai_engine_speaker_score_permille(unit, prints + k * dims, dims);
+        if (k == 0 || s > top) {
+            top = s;
+            *index = k;
+        }
+    }
+    return top;
+}
+
 bool ai_engine_speaker_accepts(int16_t score_permille, int16_t threshold_permille)
 {
     return score_permille >= threshold_permille;

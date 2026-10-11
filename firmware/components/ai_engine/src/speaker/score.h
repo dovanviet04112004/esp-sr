@@ -28,6 +28,13 @@ void ai_engine_speaker_fold(const float *units, size_t n, size_t dims, float *vo
  */
 int16_t ai_engine_speaker_score_permille(const float *unit, const float *voiceprint, size_t dims);
 
+/** The highest score of unit over n voiceprints, rows of dims, and in index the row that gave it, the lowest
+ * on a tie; n 0 gives -AI_ENGINE_SPEAKER_SCORE_LIMIT and index 0.
+ *  @ctx any | non-blocking | caller owns unit, prints and index
+ */
+int16_t ai_engine_speaker_best_permille(const float *unit, const float *prints, size_t n, size_t dims,
+                                        size_t *index);
+
 /** Whether a score reaches the deployed threshold.
  *  @ctx any | non-blocking
  */

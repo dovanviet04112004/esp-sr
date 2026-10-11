@@ -120,6 +120,11 @@ int16_t ai_engine_speaker_score(const float *unit, const float *voiceprint)
     return ai_engine_speaker_score_permille(unit, voiceprint, s.out.elements);
 }
 
+int16_t ai_engine_speaker_best(const float *unit, const float *prints, size_t n, size_t *index)
+{
+    return ai_engine_speaker_best_permille(unit, prints, n, s.out.elements, index);
+}
+
 void ai_engine_speaker_voiceprint(const float *units, size_t n, float *voiceprint)
 {
     ai_engine_speaker_fold(units, n, s.out.elements, voiceprint);
