@@ -61,6 +61,40 @@ typedef struct {
     char text[APP_SPEAK_TEXT_MAX_BYTES];    // UTF-8, from SPEAK
 } app_speak_req_t;
 
+typedef struct {
+    char id[APP_SPEAKER_ID_BYTES];
+    char name[APP_SPEAKER_NAME_BYTES];
+} app_speaker_t;
+
+typedef struct {
+    uint32_t version; // newest wins: one not above the held version is ignored
+    bool check;
+    uint8_t count;
+    app_speaker_t speakers[APP_SPEAKERS_MAX];
+} app_speaker_set_t;
+
+typedef enum {
+    APP_SPEAKER_SET = 0, // the whole roster
+    APP_SPEAKER_ENROL,   // the next commands become id's voiceprint
+} app_speaker_op_t;
+
+typedef struct {
+    app_speaker_op_t op;
+    char id[APP_SPEAKER_ID_BYTES]; // ENROL
+    app_speaker_set_t set;         // SET
+} app_speaker_request_t;
+
+typedef struct {
+    uint32_t serial; // rises with each change
+    uint32_t version;
+    bool check;
+    uint8_t count;
+    app_speaker_t speakers[APP_SPEAKERS_MAX]; // in slot order
+    bool enrolled[APP_SPEAKERS_MAX];          // a voiceprint of the loaded speaker entry
+    char enrolling[APP_SPEAKER_ID_BYTES];     // "" without an enrolment
+    uint8_t enrol_count;                      // its commands so far
+} app_speaker_state_t;
+
 #ifdef __cplusplus
 }
 #endif

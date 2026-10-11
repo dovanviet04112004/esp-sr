@@ -10,10 +10,13 @@ extern "C" {
 #endif
 
 #define APP_ERR_BASE 0x70000
-#define APP_ERR_GRID_MISMATCH (APP_ERR_BASE + 1)    // model trained on another grid
-#define APP_ERR_CALIB_MISSING (APP_ERR_BASE + 2)    // NVS calib/* absent
-#define APP_ERR_FRAME_GAP (APP_ERR_BASE + 3)        // seq jumped between two hops
-#define APP_ERR_COMMANDS_INVALID (APP_ERR_BASE + 4) // not a command set, or lang_vi cannot read a line
+#define APP_ERR_GRID_MISMATCH (APP_ERR_BASE + 1)      // model trained on another grid
+#define APP_ERR_CALIB_MISSING (APP_ERR_BASE + 2)      // NVS calib/* absent
+#define APP_ERR_FRAME_GAP (APP_ERR_BASE + 3)          // seq jumped between two hops
+#define APP_ERR_COMMANDS_INVALID (APP_ERR_BASE + 4)   // not a command set, or lang_vi cannot read a line
+#define APP_ERR_SPEAKERS_INVALID (APP_ERR_BASE + 5)   // not a roster: an id twice or malformed, a bad name
+#define APP_ERR_SPEAKER_UNKNOWN (APP_ERR_BASE + 6)    // the id is not on the roster
+#define APP_ERR_SPEAKERS_NOT_SAVED (APP_ERR_BASE + 7) // the roster is in use, NVS not written
 
 #define APP_CODE_LOW_SCORE "LOW_SCORE"
 #define APP_CODE_LOW_MARGIN "LOW_MARGIN"
@@ -29,6 +32,10 @@ extern "C" {
 #define APP_CODE_SPEAKER_BUSY "SPEAKER_BUSY"             // no verify slot free, or the audio left the ring
 #define APP_CODE_SPEAKER_UNENROLLED "SPEAKER_UNENROLLED" // checking on, no voiceprint of this model
 #define APP_CODE_SPEAKER_ENROLLING "SPEAKER_ENROLLING"   // the command enrolled, not executed
+#define APP_CODE_SPEAKERS_INVALID "SPEAKERS_INVALID"     // the roster sent is not one, the held one stays
+#define APP_CODE_SPEAKERS_REFUSED "SPEAKERS_REFUSED"     // no speaker in the image, or q_spk full
+#define APP_CODE_SPEAKERS_NOT_SAVED "SPEAKERS_NOT_SAVED" // in use until reboot, NVS old
+#define APP_CODE_SPEAKER_UNKNOWN "SPEAKER_UNKNOWN"       // ENROL of an id not on the roster
 
 #ifdef __cplusplus
 }
