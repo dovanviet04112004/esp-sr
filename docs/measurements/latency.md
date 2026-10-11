@@ -844,3 +844,20 @@ giữ gì.
 - Lượt 1 mất byte ở hai dòng in dồn cuối phiên, trong đó có dòng tổng kết, trên đường USB/IP (TASKS E11-T30). Dòng
   `PASS` và `3 Tests 0 Failures` của lượt ấy vẫn nguyên.
 - `spk_fbank_init` tính `log10` kiểu double mềm cho mỗi cặp băng và vạch, 72 × 255 lần.
+
+**`spk_fbank` nhanh hơn** (`4e68ac5`, `6e9b719`). Đo lại bằng ca `[speaker_chain]` (`8cc541f`, 11/10 12:01): 22 cửa
+sổ vẫn khớp Python từng bit, chủ repo qua 6/6, người lạ lọt 0/6.
+
+| Đo | Trước | Sau |
+|---|---|---|
+| `spk_fbank` một cửa sổ | 96,3 ms | **79,3 ms** |
+| Một lần xác minh | 1273,0 ms | **1256,0 ms** trung bình, 1256,4 ms đỉnh |
+| Từ dòng dựng b0 tới dòng sẵn sàng của nhánh, gần hết là `spk_fbank_init` | ~490 ms (app `svc_listen`) | ~141 ms |
+
+- Lần xác minh đầu sau khi nạp mất 1305,0 ms, vì đọc trọng số khi cache flash còn nguội. Lần ấy không giữ byte heap
+  nào.
+- **Không bỏ được lần chạy thử lúc dựng b0.**
+  - Bỏ thì dựng chỉ còn 0,60 s thay vì 1,78 s.
+  - Nhưng lần xác minh đầu khi ấy giữ 1 232 B RAM nội và 55 360 B PSRAM: esp-dl cấp phát ở lần chạy đầu của đồ thị,
+    ngoài `ExternalMallocGuard`.
+  - Vì vậy giữ lần chạy thử. Ca chuỗi đo heap quanh lần xác minh đầu, giữ một byte là đỏ.

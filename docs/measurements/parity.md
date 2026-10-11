@@ -24,7 +24,7 @@ lại trong thư mục build, qua `python3 pytest_parity.py --report <file>`.
 | `g2p` — mã trả về và đơn vị của 16 742 âm tiết hợp lệ và 38 cụm từ, mỗi vùng một lượt; máy tính và board B | 29 | 0 | — | khớp tuyệt đối | `d` giọng Nam đọc z: 1 → đỏ | d259771 | 27/09 |
 | `normalize` — mã trả về và từng byte ra của 64 đầu vào; máy tính và board B | 1 | 0 | — | khớp tuyệt đối | 105 đọc giọng Nam: 120 → đỏ | d259771 | 27/09 |
 | `lexicon` — mã trả về và mọi trường `lang_vi_pron_t` của 27 dòng; máy tính và board B | 1 | 0 | — | khớp tuyệt đối | giọng Nam giữ ngã của nguyễn: 1 → đỏ | d259771 | 27/09 |
-| `spk_fbank` — đặc trưng của b0 (§3.17): hai cửa sổ 24 000 mẫu của `speaker.yaml`, một cấu hình nhỏ trên im lặng và nhiễu; máy tính và board B | 4 | 0 | — | khớp tuyệt đối | Hamming tuần hoàn 0,18 (37,5 dB), vạch ở tần số của chính nó 3,8, để nguyên trung bình theo thời gian 8,0 → đỏ | c060dfa | 11/10 |
+| `spk_fbank` — đặc trưng của b0 (§3.17): hai cửa sổ 24 000 mẫu của `speaker.yaml`, một cấu hình nhỏ trên im lặng và nhiễu; máy tính và board B | 4 | 0 | — | khớp tuyệt đối | Hamming tuần hoàn 0,18 (37,5 dB), vạch ở tần số của chính nó 3,8, để nguyên trung bình theo thời gian 8,0 → đỏ | c060dfa, 6e9b719 | 11/10 |
 | `speaker` — embedding đơn vị, mẫu giọng, điểm và quyết định (§3.17); máy tính và board B | 3 | 0 | — | khớp tuyệt đối | mẫu giọng cộng trước khi chuẩn hoá; điểm phải vượt hẳn ngưỡng: quyết định lệch 1 → đỏ | 7549ecd | 11/10 |
 
 ## Bản tham chiếu Python: STFT phân tích rồi tổng hợp (E6-T1)
