@@ -46,6 +46,8 @@ Về thời gian, hàng ấy chạy 1128,5 ms một cửa sổ, nhỉnh hơn 1 s
 - `quant.yaml` không đổi: nhánh `speaker` dùng hiệu chuẩn mặc định kl.
 - Bậc 3 không vào sản phẩm. Bậc 4 chỉ chạy khi chủ repo cho, và chỉ khi cần lấy lại phần 3 m.
 - E11-T26 cắm hàng kl: khâu đặc trưng của b0 và hậu xử lý theo bốn bước, mẫu giọng trên flash, lệnh `deploy`.
+  Nó vướng PSRAM: b0 cần thêm ~3,9 MB (ảnh 1,8 MB, vùng tensor 2,14 MB) mà khi nghe với ctc chỉ còn 1,8 MB. Chủ
+  repo gác E11-T26 ngày 11/10.
 - Muốn nhanh hơn nữa thì phải đổi mạng (nhỏ hơn b0, học trên lưới của hợp đồng), cửa sổ (ngắn hơn 1,5 s) hay chip
   (P4); hướng nào cũng phải đi lại thang và bản dò.
 - Xét lại khi: ngưỡng thời gian của §3.17 đổi; esp-dl có nhân int8 cho LayerNorm hay Softmax; hay b0 được học lại trên
