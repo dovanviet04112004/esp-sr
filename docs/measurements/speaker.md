@@ -330,3 +330,65 @@ khoảng cách.
   vào `firmware/models/speaker/meta.json` và `models.lock.json`, bước đóng gói đưa vào header ảnh.
 - Người lạ ở đây là người nói `test` của `command/v1` qua đường mô phỏng board. Trước khi bật mặc định, ngưỡng đặt lại
   trên người lạ thu thật qua board (E11-T27).
+
+### 6.4 Ngưỡng theo số người có mẫu giọng (E11-T31, 11/10)
+
+`make speaker-deploy RUN=artifacts/speaker/runs/20261010_5a45475-dirty_94e5a9 ROW=kl`, cùng vật liệu và đường chip của
+§6.3, đặt một ngưỡng cho mỗi số người có mẫu giọng, 1 tới 8 (KẾ HOẠCH §3.17).
+- Mỗi lần rút 10 cửa sổ đăng ký của chủ repo, như §6.3, dùng cho mọi số người. Với n người, rút thêm n − 1 người lạ có
+  ít nhất 10 cửa sổ (46 người đủ) làm người đã đăng ký; mẫu giọng mỗi người từ 10 cửa sổ của chính họ.
+- Điểm của mọi cửa sổ là điểm lớn nhất qua n mẫu. Người lạ là mọi người lạ không được rút.
+- Luật 1%, nới tới 5% xét riêng từng số người.
+
+| Người có mẫu | Ngưỡng 1% | Giữ 1 m | Giữ 3 m | Ngưỡng chọn (5%) | Người lạ lọt | Giữ 1 m | Giữ 3 m |
+|---|---|---|---|---|---|---|---|
+| 1 | 781‰ | 97,2% | 92,2% | **744‰** | 4,9% | 98,7% | 97,5% |
+| 2 | 856‰ | 41,6% | 20,4% | **823‰** | 4,9% | 75,7% | 54,8% |
+| 3 | 856‰ | 41,6% | 20,4% | **828‰** | 4,9% | 70,4% | 49,4% |
+| 4 | 862‰ | 35,3% | 16,2% | **835‰** | 4,9% | 63,1% | 41,6% |
+| 5 | 866‰ | 31,2% | 13,4% | **841‰** | 4,9% | 57,2% | 35,5% |
+| 6 | 873‰ | 25,4% | 9,4% | **849‰** | 4,9% | 49,0% | 27,3% |
+| 7 | 873‰ | 25,4% | 9,4% | **852‰** | 4,8% | 46,0% | 24,4% |
+| 8 | 878‰ | 21,7% | 7,3% | **853‰** | 4,9% | 45,1% | 23,4% |
+
+- Từ 2 người, không mức nào giữ được 95% lệnh của chủ repo, nên luật lùi về 5% cho mọi số người. Bảng ấy vào
+  `meta.json`, `models.lock.json` và header ảnh (khuôn 6). `speaker.espdl` giữ nguyên từng byte.
+- Ngưỡng 1 người vẫn 744‰. Bảng đúng luật của KẾ HOẠCH §3.17, nhưng nhà có từ 2 người thì lệnh của chủ repo bị chặn
+  từ một phần tư tới ba phần tư.
+
+**Vì sao ngưỡng leo khi thêm người.** Đo lại trên chính các embedding đường chip ấy, bằng một script tạm, chưa vào
+repo:
+
+| Cặp so | EER | Ghi chú |
+|---|---|---|
+| Chủ repo (thu thật qua board B) với người lạ (qua đường mô phỏng) | 2,4% | điểm cùng người: trung vị 840‰. Người lạ: trung vị 631‰, p95 739‰ |
+| Người lạ với người lạ: mỗi người đăng ký trên 10 cửa sổ của mình, thử trên cửa sổ còn lại | 19,3% | điểm cùng người: trung vị 819‰, p5 679‰. Khác người: trung vị 699‰, p95 817‰ |
+| Như trên, trong cùng nhóm khoảng cách | 25,0% xa, 33,3% gần | |
+| Cửa sổ của chủ repo với mẫu giọng của người lạ | — | trung vị 630‰, p95 748‰ |
+
+- b0 tách chủ repo khỏi người lạ chủ yếu nhờ khác kênh thu (board thật với mô phỏng) và nhờ câu lệnh lặp lại. Giữa
+  những người cùng kênh, nói câu khác nhau trong 1,5 s, nó gần như không tách được.
+- Người đã đăng ký mà thủ tục rút thêm đều cùng kênh với người lạ, nên người lạ giống họ, và ngưỡng phải leo.
+- Ở nhà thật, mọi người nói qua cùng một board. Vậy chỗ đứng gần thực tế hơn là hàng người lạ với người lạ, kể cả với
+  1 người: ngưỡng 744‰ có thể quá lỏng với người lạ thu thật. Chỉ bản thu người lạ thật qua board B (E11-T27) trả lời
+  được.
+
+**Chuẩn hoá điểm theo từng mẫu giọng, thử trên PC.**
+- Cách làm:
+  - một nửa số người lạ làm nhóm chuẩn;
+  - mỗi mẫu giọng lấy trung bình μ và độ lệch σ của điểm nó với nhóm chuẩn;
+  - điểm thành (cos − μ)/σ, lấy lớn nhất qua các mẫu;
+  - nửa người lạ còn lại làm người đăng ký thêm và người lạ thử.
+- Giữ lệnh của chủ repo ở 5% người lạ lọt, 1 m / 3 m:
+
+| Người có mẫu | Điểm thô | Z-norm | AS-norm (top 50) |
+|---|---|---|---|
+| 1 | 98,8% / 97,5% | 98,8% / 97,2% | 98,8% / 97,2% |
+| 2 | 80,3% / 60,4% | 98,6% / 96,3% | 98,5% / 96,1% |
+| 4 | 66,8% / 44,1% | 98,2% / 94,7% | 98,0% / 94,1% |
+| 8 | 48,9% / 27,3% | 97,6% / 93,0% | 95,8% / 90,0% |
+
+- Trên vật liệu này, Z-norm gần như xoá sụt giảm theo số người, và không thêm lần chạy b0 nào: μ, σ tính một lần lúc
+  đăng ký.
+- Nhóm chuẩn ở đây cùng kênh mô phỏng với người lạ thử. Ở nhà thật, nhóm chuẩn phải thu qua board như người dùng, không
+  thì điểm của người lạ thật lệch như hàng chủ repo ở trên. Đổi cách chấm là đổi KẾ HOẠCH §3.17, cần chủ repo duyệt.
