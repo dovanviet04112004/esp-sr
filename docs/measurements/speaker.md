@@ -392,3 +392,35 @@ repo:
   đăng ký.
 - Nhóm chuẩn ở đây cùng kênh mô phỏng với người lạ thử. Ở nhà thật, nhóm chuẩn phải thu qua board như người dùng, không
   thì điểm của người lạ thật lệch như hàng chủ repo ở trên. Đổi cách chấm là đổi KẾ HOẠCH §3.17, cần chủ repo duyệt.
+
+### 6.5 Z-norm theo từng mẫu giọng trên đường chip (ADR-0022, 11/10)
+
+`make speaker-deploy RUN=artifacts/speaker/runs/20261010_5a45475-dirty_94e5a9 ROW=kl` ở `ca8e476`, khoá ở `be39219`.
+- **Nhóm chuẩn:** 27 trên 55 người lạ, rút bằng seed của khảo sát ở luồng 3. 380 cửa sổ của họ, tính trên đường chip,
+  thành `cohort.bin`, mục `speaker_cohort` của ảnh.
+- **Đặt bảng:** 397 cửa sổ người lạ còn lại (23 người đủ 10 cửa sổ để làm người đăng ký thêm). Điểm của mỗi mẫu giọng
+  là (cos − μ)/σ theo μ, σ của mẫu ấy trên nhóm chuẩn, phần nghìn.
+
+| Người có mẫu | Ngưỡng 1% (‰ z) | Giữ 1 m | Giữ 3 m | Ngưỡng chọn, 5% | Người lạ lọt | Giữ 1 m | Giữ 3 m |
+|---|---|---|---|---|---|---|---|
+| 1 | 2165 | 95,0% | 87,3% | **1656** | 5,0% | 98,6% | 96,8% |
+| 2 | 2170 | 94,8% | 87,3% | **1722** | 5,0% | 98,6% | 96,5% |
+| 3 | 2289 | 91,0% | 80,3% | **1815** | 5,0% | 98,2% | 95,3% |
+| 4 | 2456 | 84,9% | 70,1% | **1911** | 5,0% | 97,8% | 94,0% |
+| 5 | 2415 | 86,6% | 72,7% | **1906** | 5,0% | 97,8% | 94,0% |
+| 6 | 2427 | 86,0% | 72,0% | **1961** | 5,0% | 97,6% | 93,2% |
+| 7 | 2487 | 83,0% | 67,5% | **2019** | 4,9% | 97,0% | 92,0% |
+| 8 | 2506 | 82,0% | 66,5% | **2034** | 5,0% | 96,8% | 91,6% |
+
+- So với điểm thô của §6.4 ở 5%:
+  - 2 người: 75,7% / 54,8% → **98,6% / 96,5%**;
+  - 4 người: 63,1% / 41,6% → **97,8% / 94,0%**;
+  - 8 người: 45,1% / 23,4% → **96,8% / 91,6%**.
+
+  Phần sụt theo số người đã hết.
+- Luật "giữ ≥ 95% ở cả hai khoảng cách" đạt tới 3 người. Từ 4 người, 3 m hụt: 94,0% xuống 91,6%.
+- Người lạ ở đây không trùng hẳn với §6.4, vì một nửa nay là nhóm chuẩn. Vậy so hai bảng là so gần, không phải so
+  từng điểm.
+- Mỗi số người rút riêng, nên bảng không tăng đều: 5 người thấp hơn 4 người 5 ‰ z.
+- Z-norm không làm b0 tách người tốt hơn (EER 19,3% giữa người lạ cùng kênh, §6.4 vẫn đúng). Nhóm chuẩn và người lạ thử
+  đều là mô phỏng; ở nhà thật, nhóm chuẩn phải thu qua board B (E11-T27, chủ repo chưa cho thu 11/10).
