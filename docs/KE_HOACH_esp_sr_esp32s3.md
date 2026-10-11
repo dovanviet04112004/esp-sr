@@ -271,7 +271,7 @@ Dự án chạy trên **board B** — board duy nhất đã có micro, nên mọ
 |---|---|
 | Module | ESP32-S3-WROOM-1, revision v0.1 |
 | Flash / PSRAM | 16 MB / 8 MB (AP_3v3, octal) |
-| Cầu nạp | CH340 (`1a86:7523`) → `/dev/ttyUSB0`; console là **UART0** |
+| Cầu nạp | CH340 (`1a86:7523`); Windows giữ cổng COM, WSL tới nó qua cầu RFC 2217 (dưới đây); console là **UART0** |
 | MAC cơ sở | `34:85:18:8f:7a:70` → `deviceId` mặc định `sr-3485188f7a70` (§6.2) |
 | Micro | **2 × INMP441, đã lắp**, chung một dây dữ liệu I2S |
 | Loa, ampli | **chưa lắp**. Mốc demo (§8) chỉ gửi kết quả lên server qua MQTT nên chưa cần; cần từ `aec` (E10) và `synth` (E12) |
@@ -292,6 +292,19 @@ ES7210 lấy một kênh từ đầu ra DAC) chỉ xét lại nếu E10 chứng 
 
 **16 MB flash và 8 MB PSRAM là đủ**: bảng phân vùng §6.1 cần 16 MB, `command` và `synth` cần PSRAM.
 Đổi lại, chân 33–37 bị PSRAM octal chiếm.
+
+**WSL tới board qua cầu RFC 2217 chạy trên Windows, không qua usbipd.** Từ 11/10, mọi luồng dài từ board qua USB/IP
+vào WSL đều rơi byte ở mọi baud: FIFO 32 byte của CH340 chỉ đỡ 2,8 ms ở 115 200 baud, ngắn hơn một vòng khứ hồi của
+USB/IP, còn đọc thẳng cổng COM trên Windows thì nguyên vẹn (TASKS E11-T30). Vì vậy Windows giữ cổng COM, và
+`host/src/srhost/bridge.py` chạy bằng Python của Windows, chỉ cần pyserial đặt cạnh nó. Mỗi lần có máy nối tới, cầu tìm
+cổng COM theo `1a86:7523` rồi mở, nên cắm board sang cổng USB khác vẫn chạy. RFC 2217 không giữ được nhịp DTR/RTS của
+esptool, nên cầu bắt đầu chuỗi reset ấy rồi tự phát cả chuỗi với đúng nhịp, như `esp_rfc2217_server` của esptool.
+`make board-attach` trả board khỏi usbipd nếu đang gắn, chép script cùng pyserial của `host/` sang thư mục tạm của
+Windows, bật cầu trong phiên tmux `board-bridge` rồi chờ cổng TCP nghe; cầu đang chạy thì lệnh không làm gì. Cầu chỉ
+nghe ở địa chỉ phía Windows của mạng NAT của WSL (gateway mặc định của WSL), cổng 4011, nên máy khác trong LAN không nạp
+được board. Mọi đích make mặc định `PORT=rfc2217://<địa chỉ ấy>:4011?ign_set_control`: thiếu `ign_set_control` thì
+client chờ cầu xác nhận từng lệnh DTR/RTS mà cầu đã nuốt, và mở cổng hết giờ. Mở cổng là reset chip. `make
+board-detach` tắt cầu, trả cổng COM cho chương trình Windows.
 
 ### 2.2 Bảng chân
 
@@ -2650,6 +2663,7 @@ host/
 │   ├── score.py                   # chấm một phiên đã thu theo nhãn, gọi ml/src/srpipe/metrics
 │   ├── calib.py                   # ước balance từ phiên ồn trắng (srpipe), kiểm chéo; ghi calib/bal và calib/pcm_shift
 │   │                              #   xuống test_apps/calib
+│   ├── bridge.py                  # cầu RFC 2217 tới cổng COM của board B, chạy bằng Python của Windows (§2.1)
 │   └── speaker.py                 # §3.17 đường máy chủ: ghép up/voice với sự kiện cùng seq, embedding ReDimNet M qua
 │                                  #   ml/spk_ref/redimnet, cosine với mẫu giọng; đăng ký mẫu giọng từ một phiên thu
 ├── plans/                         # kịch bản một buổi thu: mỗi dòng một lời dặn và nhãn một phiên
