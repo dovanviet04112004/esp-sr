@@ -1,6 +1,6 @@
 # ADR-0022 — `speaker` trên chip: chuẩn hoá điểm theo từng mẫu giọng (Z-norm)
 
-- **Trạng thái**: Chấp nhận (chủ repo, 2026-10-11)
+- **Trạng thái**: Thay bằng ADR-0023 (chủ repo, 2026-10-11)
 - **Ngày**: 2026-10-11
 - **Liên quan**: KẾ HOẠCH §3.17, §4.5.5, §6.3; TASKS E11-T27, E11-T31; ADR-0021; `docs/measurements/speaker.md` §6.4
 
