@@ -21,19 +21,23 @@ from torch import nn
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
 from srpipe.core.audio_io import to_float
-from srpipe.core.config import ML_ROOT, data_paths, device_of, load_yaml
+from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, device_of, load_yaml
+from srpipe.dsp.spec import spk_fbank
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
 from srpipe.dsp.spec.stft import Stft
 from srpipe.export import pack_models, update_lock
-from srpipe.generated import grid, listen
+from srpipe.generated import grid, listen, speaker
 from srpipe.scenes import device
+from srpipe.scenes import speaker as survey
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc import quant
 from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc import ctc_score
+from srpipe.tasks.speaker import quant as spk
+from srpipe.tasks.speaker.postproc import score
 
 PROBE_DIR = ML_ROOT.parent / "firmware" / "components" / "ai_engine" / "test_apps" / "unit" / "main" / "probe"
 MODELS_FILE, STREAMS_FILE, DECIDE_FILE = "ctc_models.bin", "ctc_streams.bin", "ctc_decide.bin"
@@ -58,13 +62,15 @@ GATE_MAGIC = b"SRCG"
 ESPDL_HEAD_BYTES = 16
 LISTEN_DIR = ML_ROOT.parent / "firmware" / "components" / "svc_listen" / "test_apps" / "unit" / "main" / "probe"
 LISTEN_PARTITIONS = ("models_1", "voice")  # a round's records, sized by partitions_unit.csv
-# Magic, sessions, commands, reject, margin; each command's id and text NUL-ended, padded to four bytes; then a
-# session: SESSION_HEAD, vad a bit a hop padded to four bytes, its segments of clean samples, its windows.
-LISTEN_HEAD = struct.Struct("<4sHHHH")
+# Magic, sessions, commands, reject, margin, speaker flags; each command's id and text NUL-ended, padded to four
+# bytes; then a session: SESSION_HEAD, vad a bit a hop padded to four bytes, its segments of clean samples, its windows.
+LISTEN_HEAD = struct.Struct("<4sHHHHHxx")
 LISTEN_MAGIC = b"SRLS"
-SESSION_HEAD = struct.Struct("<IHH")  # hops, segments, windows
+SPEAKER_ON, SPEAKER_AFRESH = 1, 2  # check on; voiceprint erased first (KEHOACH 3.17)
+SESSION_HEAD = struct.Struct("<IHHHxx")  # hops, segments, windows, an enrolment starting ahead of it
 SEGMENT_HEAD = struct.Struct("<II")  # first hop, hops; their int16 samples follow
-WINDOW_RECORD = struct.Struct("<IIhHHHH")  # first and last hop, then the decision's five fields
+WINDOW_RECORD = struct.Struct("<IIhHHHHhH")  # hops first, last; the decision, the speaker
+NO_CHECK, PASSED, STOPPED, UNENROLLED, ENROLLING = range(5)  # a window's speaker code
 
 
 def stored_test(espdl: Path) -> tuple[tuple[tuple[int, ...], bytes], tuple[tuple[int, ...], bytes]]:
@@ -299,12 +305,14 @@ def probe(
     return image, streams, decide, command, *rounds, labels
 
 
-def listen_session(clean: np.ndarray, vad: np.ndarray, decided_of: Callable, tracker, mel: Mel) -> bytes:
-    """A board session with the silence eval.heard_rows puts after it, as svc_listen's test feeds it: its vad, the clean
-    samples of every hop a command window reads and the hop ahead of it, which the STFT of the window's first hop
-    overlaps, and each window with the decision decided_of(window) takes; hops outside the segments are fed as zeros,
-    which no window's log-mel reads. The windows' log-mel and pitch are computed afresh over that fed stream, as
-    svc_listen does after the jump in seq the test puts between sessions."""
+def listen_session(
+    clean: np.ndarray, vad: np.ndarray, decided_of: Callable, tracker, mel: Mel
+) -> tuple[list[list[int]], list[tuple[int, int]], list[list[int]]]:
+    """A board session with the silence eval.heard_rows puts after it, as svc_listen's test feeds it: the segments of
+    every hop a command window reads and the hop ahead of it, which the STFT of the window's first hop overlaps, and
+    each window with the decision decided_of(window) takes; hops outside the segments are fed as zeros, which no
+    window's log-mel reads. The windows' log-mel and pitch are computed afresh over that fed stream, as svc_listen
+    does after the jump in seq the test puts between sessions."""
     hop, spans = grid.HOP_SAMPLES, device.utterances(vad)
     ranges = device.command_cut(spans)
     segments: list[list[int]] = []
@@ -320,22 +328,105 @@ def listen_session(clean: np.ndarray, vad: np.ndarray, decided_of: Callable, tra
     stft = Stft()
     features = np.stack([mel.log(stft.analyze(to_float(h))) for h in fed.reshape(-1, hop)]).astype(np.float32)
     windows = gate.ctc_windows(features, device.stream_pitch(tracker, fed), spans)
-    body = SESSION_HEAD.pack(len(vad), len(segments), len(ranges))
+    return segments, ranges, [list(decided_of(x)) for x in windows]
+
+
+def session_body(
+    clean: np.ndarray,
+    vad: np.ndarray,
+    laid: tuple[list[list[int]], list[tuple[int, int]], list[list[int]]],
+    speaker_of: list[tuple[int, int]],
+    enrol: bool,
+) -> bytes:
+    """The session's record as svc_listen's test reads it: SESSION_HEAD, vad, segments, then each window with its
+    decision and the speaker check's permille and code (KEHOACH 3.17)."""
+    segments, ranges, decisions = laid
+    hop = grid.HOP_SAMPLES
+    body = SESSION_HEAD.pack(len(vad), len(segments), len(ranges), int(enrol))
     body += np.packbits(vad.astype(np.uint8), bitorder="little").tobytes()
     body += b"\0" * (-len(body) % 4)
     for first, last in segments:
         samples = clean[first * hop : (last + 1) * hop].astype("<i2")
         body += SEGMENT_HEAD.pack(first, last + 1 - first) + samples.tobytes()
-    for (start, end), x in zip(ranges, windows, strict=True):
-        body += WINDOW_RECORD.pack(start, end, *decided_of(x))
+    for (start, end), decided, checked in zip(ranges, decisions, speaker_of, strict=True):
+        body += WINDOW_RECORD.pack(start, end, *decided, *checked)
     return body
 
 
-def listen_rounds(cfg: dict, out: Path) -> list[Path]:
+def round_layout(sizes: list[int], rooms: list[int]) -> list[list[list[int]]]:
+    """Per round, per partition of rooms bytes, the indices of the session bodies of sizes it holds: each partition
+    takes the next sessions while they fit. Refused when a session fits no partition."""
+    rounds, at = [], 0
+    while at < len(sizes):
+        parts, start = [], at
+        for room in rooms:
+            taken: list[int] = []
+            while at < len(sizes) and sum(sizes[i] for i in taken) + sizes[at] <= room:
+                taken.append(at)
+                at += 1
+            parts.append(taken)
+        if at == start:
+            raise ValueError(f"session {at} takes {sizes[at]} bytes, more than any partition holds")
+        rounds.append(parts)
+    return rounds
+
+
+def accepted_of(laid: tuple) -> list[int]:
+    """The windows of a laid-out session its decision takes as a command, the ones the speaker check sees."""
+    return [w for w, decided in enumerate(laid[2]) if decided[0] != ctc_score.REJECTED]
+
+
+def enrolment_session(sessions: list[tuple], laid: list[tuple], rounds: list[list[list[int]]]) -> int:
+    """The first session of the survey's owner in its enrolment group whose round, from it on, holds
+    speaker.ENROL_COMMANDS commands: the board starts every round afresh, an enrolment left open with it."""
+    owner = load_yaml(CONFIGS / load_yaml(spk.CONFIG)["source"]["survey"])["owner"]
+    group = f"{owner['enrol']['date']} {owner['enrol']['distance_cm']}"
+    for held in ([k for part in parts for k in part] for parts in rounds):
+        for n, k in enumerate(held):
+            row = sessions[k][0]
+            if row["spk"] != owner["spk"] or f"{row['session'][:8]} {row['distance_cm']}" != group:
+                continue
+            if sum(len(accepted_of(laid[j])) for j in held[n:]) >= speaker.ENROL_COMMANDS:
+                return k
+    raise ValueError(f"no session of {owner['spk']} in {group} has {speaker.ENROL_COMMANDS} commands left in its round")
+
+
+def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> list[list[tuple[int, int]]]:
+    """Each window's (permille, code) as svc_listen checks it with the check on from the replay's start, its voiceprint
+    erased: a command ahead of session enrol_at is UNENROLLED, the first speaker.ENROL_COMMANDS from it on enrol, every
+    later one scores against their voiceprint at the lock's threshold, on the chip's path (KEHOACH 3.17)."""
+    lock = json.loads(update_lock.LOCK.read_text(encoding="utf-8"))["models"][spk.BRANCH]
+    run = ML_ROOT / "artifacts" / spk.BRANCH / "runs" / lock["run"]
+    graph = export_espdl.load_native(run / spk.INT8_DIR / lock["row"] / spk.GRAPH_FILE)
+    patches, threshold = load_yaml(spk.CONFIG)["esp_ppq_patches"], int(lock["threshold"]["permille"])
+    front = spk_fbank.SpkFbank(spk_fbank.contract_config())
+    checked = [(k, w) for k in range(enrol_at, len(sessions)) for w in accepted_of(laid[k])]
+    found = [survey.Window("board", "", survey.window_of(sessions[k][1], *laid[k][1][w])) for k, w in checked]
+    units, _ = spk.chip_units(graph, patches, found, front, spk.load_wrap(run))
+    unit_of = dict(zip(checked, units, strict=True))
+    enrolling = checked[: speaker.ENROL_COMMANDS]
+    voiceprint = score.voiceprint([unit_of[x] for x in enrolling])
+    out = []
+    for k, layout in enumerate(laid):
+        codes = [(0, NO_CHECK)] * len(layout[1])
+        for w in accepted_of(layout):
+            if k < enrol_at:
+                codes[w] = (0, UNENROLLED)
+            elif (k, w) in enrolling:
+                codes[w] = (0, ENROLLING)
+            else:
+                s = score.score_permille(unit_of[(k, w)], voiceprint)
+                codes[w] = (s, PASSED if score.accepts(s, threshold) else STOPPED)
+        out.append(codes)
+    return out
+
+
+def listen_rounds(cfg: dict, out: Path, speaker_on: bool = False) -> list[Path]:
     """Every Gate 3 session through svc_listen as listen_session lays it out, decided by the locked command model's
     int8 simulation at quant.reject and eval.margin; sessions grouped into rounds, a round one record each in the
-    partitions of LISTEN_PARTITIONS, as listen_<round>_<partition>.bin. Refused while the lock holds a model of
-    another listen.yaml, which ai_engine leaves off (KEHOACH 6.3)."""
+    partitions of LISTEN_PARTITIONS, as listen_<round>_<partition>.bin. speaker_on turns the speaker check on from the
+    first round, its voiceprint erased, and enrols ahead of enrolment_session's session (speaker_checks). Refused while
+    the lock holds a model of another listen.yaml, which ai_engine leaves off (KEHOACH 6.3)."""
     lock = json.loads(update_lock.LOCK.read_text(encoding="utf-8"))["models"]["command"]
     if (learnt := lock.get("listen_hash")) != f"0x{listen.HASH:08x}":
         raise ValueError(f"the locked command learned on listen hash {learnt}, svc_listen cuts by 0x{listen.HASH:08x}")
@@ -361,26 +452,36 @@ def listen_rounds(cfg: dict, out: Path) -> list[Path]:
     listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
     named = b"".join(c["id"].encode() + b"\0" + c["text"].encode() + b"\0" for c in listed)
     named += b"\0" * (-(LISTEN_HEAD.size + len(named)) % 4)
+    sessions = [(row, clean, vad) for row, clean, vad, _f, _p in gate.heard_sessions(trained.cfg, spec, data_paths())]
+    laid = [listen_session(clean, vad, decided_of, tracker, mel) for _, clean, vad in sessions]
+    checks = [[(0, NO_CHECK)] * len(layout[1]) for layout in laid]
     bodies = [
-        listen_session(clean, vad, decided_of, tracker, mel)
-        for _, clean, vad, _features, _pitch in gate.heard_sessions(trained.cfg, spec, data_paths())
+        session_body(clean, vad, layout, checked, False)
+        for (_, clean, vad), layout, checked in zip(sessions, laid, checks, strict=True)
     ]
+    rooms = [
+        pack_models.partition_bytes(p, pack_models.UNIT_PARTITIONS) - LISTEN_HEAD.size - len(named)
+        for p in LISTEN_PARTITIONS
+    ]
+    rounds = round_layout([len(b) for b in bodies], rooms)
+    if speaker_on:
+        enrol_at = enrolment_session(sessions, laid, rounds)
+        checks = speaker_checks(sessions, laid, enrol_at)
+        bodies = [
+            session_body(clean, vad, layout, checked, k == enrol_at)
+            for k, ((_, clean, vad), layout, checked) in enumerate(zip(sessions, laid, checks, strict=True))
+        ]
     out.mkdir(parents=True, exist_ok=True)
     for stale in out.glob("listen_*.bin"):
         stale.unlink()
-    written, at, k = [], 0, 0
-    while at < len(bodies):
-        for label in LISTEN_PARTITIONS:
-            room = pack_models.partition_bytes(label, pack_models.UNIT_PARTITIONS) - LISTEN_HEAD.size - len(named)
-            taken = []
-            while at < len(bodies) and sum(map(len, taken)) + len(bodies[at]) <= room:
-                taken.append(bodies[at])
-                at += 1
-            head = LISTEN_HEAD.pack(LISTEN_MAGIC, len(taken), len(listed), reject, margin)
+    written = []
+    for k, parts in enumerate(rounds):
+        flags = (SPEAKER_ON | (SPEAKER_AFRESH if k == 0 else 0)) if speaker_on else 0
+        for label, held in zip(LISTEN_PARTITIONS, parts, strict=True):
+            head = LISTEN_HEAD.pack(LISTEN_MAGIC, len(held), len(listed), reject, margin, flags)
             path = out / f"listen_{k}_{label}.bin"
-            path.write_bytes(head + named + b"".join(taken))
+            path.write_bytes(head + named + b"".join(bodies[i] for i in held))
             written.append(path)
-        k += 1
     return written
 
 
@@ -410,13 +511,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--hold", choices=sorted(gate.HOLDS), help="the row of the ladder with these pitch dims folded")
     parser.add_argument("--gate-log", type=Path, help="count Gate 3 on the chip's decisions in this unit app log")
     parser.add_argument("--listen", action="store_true", help="write svc_listen's rounds of Gate 3 sessions instead")
+    parser.add_argument("--speaker", action="store_true", help="with --listen, the rounds with the speaker check on")
     parser.add_argument("--net-only", action="store_true", help="only the streamed nets, as make ai-unit-ctc runs them")
     args = parser.parse_args(argv)
     if args.gate_log:
         print(gate_on_chip(args.gate_log, args.out / GATE_LABELS))
         return 0
     if args.listen:
-        for path in listen_rounds(load_yaml(ctc.CONFIG), LISTEN_DIR):
+        for path in listen_rounds(load_yaml(ctc.CONFIG), LISTEN_DIR, args.speaker):
             print(f"{path}: {path.stat().st_size} bytes")
         return 0
     if (args.run is None) != (args.row is None):

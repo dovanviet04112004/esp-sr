@@ -522,8 +522,8 @@ ai-profile: ## Rank a board run's modules by time, each slow esp-dl path tagged 
 	  $(if $(TOP),--top $(TOP))
 
 # The locked models go to model slot 0; each window is decided as Python decides its int8 simulation, field by field.
-listen-unit: ## Run svc_listen on board B over every Gate 3 session, round by round (E11-T14)
-	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.command.ctc.probe --listen
+listen-unit: ## Run svc_listen on board B over every Gate 3 session, round by round [SPEAKER=1: the speaker check on] (E11-T14, E11-T26)
+	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.command.ctc.probe --listen $(if $(SPEAKER),--speaker)
 	$(ML) python -m srpipe.export.pack_models artifacts/models.bin --lock
 	@$(call fresh_sdkconfig,$(LISTEN_APP)/sdkconfig,$(call app_defaults,$(LISTEN_APP)))
 	cd $(LISTEN_APP) && idf.py build

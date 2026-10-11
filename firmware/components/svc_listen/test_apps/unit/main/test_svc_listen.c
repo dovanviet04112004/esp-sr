@@ -20,10 +20,14 @@
 typedef struct __attribute__((packed)) {
     char magic[4];
     uint16_t sessions, commands, reject, margin;
+    uint16_t speaker; // LISTEN_SPEAKER_* flags
+    uint16_t pad;
 } listen_head_t;
 typedef struct __attribute__((packed)) {
     uint32_t hops;
     uint16_t segments, windows;
+    uint16_t enrol; // spk enrol ahead of this session
+    uint16_t pad;
 } session_head_t;
 typedef struct __attribute__((packed)) {
     uint32_t first, hops;
@@ -32,10 +36,15 @@ typedef struct __attribute__((packed)) {
     uint32_t first, last;
     int16_t command;
     uint16_t score, margin, gap, syllable;
+    int16_t speaker;       // the speaker check's permille
+    uint16_t speaker_code; // CHECK_*
 } window_t;
-_Static_assert(sizeof(listen_head_t) == 12 && sizeof(session_head_t) == 8 && sizeof(segment_head_t) == 8 &&
-                   sizeof(window_t) == 18,
+_Static_assert(sizeof(listen_head_t) == 16 && sizeof(session_head_t) == 12 && sizeof(segment_head_t) == 8 &&
+                   sizeof(window_t) == 22,
                "listen record layout");
+
+enum { LISTEN_SPEAKER_ON = 1, LISTEN_SPEAKER_AFRESH = 2 };
+enum { CHECK_NONE = 0, CHECK_PASSED, CHECK_STOPPED, CHECK_UNENROLLED, CHECK_ENROLLING };
 
 #define PERMILLE_MAX 1000  // event.schema's cap of score and margin
 #define SEQ_APART 1000000u // sessions apart in seq: each starts afresh
@@ -45,6 +54,8 @@ _Static_assert(sizeof(listen_head_t) == 12 && sizeof(session_head_t) == 8 && siz
 #define CLICK_HOPS 2          // vad hops of a click, too short to be an utterance
 #define CLICK_SEQ 0xC0000000u // past every round's sessions, so svc_listen starts afresh
 #define RESET_SEQ (CLICK_SEQ + SEQ_APART)
+
+#define VERIFY_SLOT 0 // one task stands for nhan_task and xac_task here
 
 _Static_assert(CLICK_HOPS < GEN_LISTEN_UTTERANCE_MIN_HOPS, "a click is dropped, never decided");
 
@@ -82,11 +93,20 @@ static const uint8_t *read_named(const uint8_t *base, uint16_t commands, named_t
     return base + padded4((size_t)((const uint8_t *)at - base));
 }
 
+// A COMMAND goes through the speaker check as nhan_task hands it to xac_task, when the check is on.
+static void check_speaker(svc_listen_decision_t *d)
+{
+    if (d->event.kind != APP_EVT_COMMAND || !svc_listen_verifies()) { return; }
+    TEST_ASSERT_EQUAL(ESP_OK, svc_listen_hold(d, VERIFY_SLOT));
+    svc_listen_verify(VERIFY_SLOT, d);
+}
+
 static size_t drain(svc_listen_decision_t *decided, size_t n, tally_t *t)
 {
     size_t hops = 0;
     while (svc_listen_pending()) {
         if (svc_listen_work(&decided[n])) {
+            check_speaker(&decided[n]);
             t->work_us += decided[n].work_us;
             t->work_peak_us = decided[n].work_us > t->work_peak_us ? decided[n].work_us : t->work_peak_us;
             t->close_us += decided[n].close_us;
@@ -100,15 +120,36 @@ static size_t drain(svc_listen_decision_t *decided, size_t n, tally_t *t)
     return n;
 }
 
+// The speaker check's part of the decision: none, or COMMAND with its score, or a REJECT of the block's code.
+static bool same_speaker(const window_t *want, const app_event_t *e)
+{
+    static const char *const k_codes[] = {[CHECK_STOPPED] = APP_CODE_SPEAKER,
+                                          [CHECK_UNENROLLED] = APP_CODE_SPEAKER_UNENROLLED,
+                                          [CHECK_ENROLLING] = APP_CODE_SPEAKER_ENROLLING};
+    switch (want->speaker_code) {
+    case CHECK_NONE: return !e->has_speaker;
+    case CHECK_PASSED:
+        return e->kind == APP_EVT_COMMAND && e->has_speaker && e->speaker_permille == want->speaker;
+    case CHECK_STOPPED:
+        return e->kind == APP_EVT_REJECT && strcmp(e->code, k_codes[CHECK_STOPPED]) == 0 && e->has_speaker &&
+               e->speaker_permille == want->speaker;
+    default:
+        return e->kind == APP_EVT_REJECT && strcmp(e->code, k_codes[want->speaker_code]) == 0 &&
+               !e->has_speaker;
+    }
+}
+
 static bool same(const window_t *want, const svc_listen_decision_t *got, const named_t *named, uint32_t base)
 {
     const app_event_t *e = &got->event;
-    const bool command = want->command >= 0 ? e->kind == APP_EVT_COMMAND &&
-                                                  strcmp(e->command_id, named->ids[want->command]) == 0
-                                            : e->kind == APP_EVT_REJECT;
+    const bool checked = want->speaker_code != CHECK_NONE && want->speaker_code != CHECK_PASSED;
+    const bool command = checked              ? strcmp(e->command_id, named->ids[want->command]) == 0
+                         : want->command >= 0 ? e->kind == APP_EVT_COMMAND &&
+                                                    strcmp(e->command_id, named->ids[want->command]) == 0
+                                              : e->kind == APP_EVT_REJECT;
     const uint16_t score = want->score < PERMILLE_MAX ? want->score : PERMILLE_MAX;
     const uint16_t margin = want->margin < PERMILLE_MAX ? want->margin : PERMILLE_MAX;
-    return command && e->score_permille == score && e->margin_permille == margin &&
+    return command && same_speaker(want, e) && e->score_permille == score && e->margin_permille == margin &&
            got->free_gap_permille == want->gap && got->syllable_gap_permille == want->syllable &&
            got->first_seq == base + want->first && e->seq == base + want->last;
 }
@@ -128,6 +169,7 @@ static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_
         p += sizeof(seg) + seg.hops * GEN_GRID_HOP_SAMPLES * sizeof(int16_t);
     }
     const window_t *want = (const window_t *)p;
+    if (h.enrol) { TEST_ASSERT_EQUAL(ESP_OK, svc_listen_speaker(SVC_LISTEN_SPEAKER_ENROL)); }
     static svc_listen_decision_t decided[DECIDED_MAX];
     size_t n = 0;
     const uint8_t *seg_at = segments;
@@ -153,11 +195,14 @@ static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_
         t->differ += ok ? 0 : 1;
         const app_event_t *e = &decided[w].event;
         printf("listen window %" PRIu32 "..%" PRIu32
-               ": board %s %s %u %u %u %u, python %d %u %u %u %u%s; %" PRIu32 " us after the close\n",
+               ": board %s %s %u %u %u %u speaker %d, python %d %u %u %u %u speaker %d/%u%s; %" PRIu32
+               " us after the close\n",
                decided[w].first_seq - base, e->seq - base, e->kind == APP_EVT_COMMAND ? "command" : "reject",
                e->kind == APP_EVT_COMMAND ? e->command_id : e->code, e->score_permille, e->margin_permille,
-               decided[w].free_gap_permille, decided[w].syllable_gap_permille, want[w].command, want[w].score,
-               want[w].margin, want[w].gap, want[w].syllable, ok ? "" : " DIFFERS", decided[w].close_us);
+               decided[w].free_gap_permille, decided[w].syllable_gap_permille,
+               e->has_speaker ? e->speaker_permille : 0, want[w].command, want[w].score, want[w].margin,
+               want[w].gap, want[w].syllable, want[w].speaker, want[w].speaker_code, ok ? "" : " DIFFERS",
+               decided[w].close_us);
     }
     t->windows += n;
     return p + h.windows * sizeof(window_t);
@@ -277,6 +322,14 @@ TEST_CASE("svc_listen decides every Gate 3 session of the round as Python decide
     read_round(&head, &named, &handle);
     listen_on(&head, &named);
     esp_partition_munmap(handle);
+    // A round without the check turns it off, whatever NVS kept of an earlier run (KEHOACH 3.17).
+    if (ai_engine_has(AI_ENGINE_MODEL_SPEAKER)) {
+        if (head.speaker & LISTEN_SPEAKER_AFRESH) {
+            TEST_ASSERT_EQUAL(ESP_OK, svc_listen_speaker(SVC_LISTEN_SPEAKER_CLEAR));
+        }
+        const bool on = (head.speaker & LISTEN_SPEAKER_ON) != 0;
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_speaker(on ? SVC_LISTEN_SPEAKER_ON : SVC_LISTEN_SPEAKER_OFF));
+    }
 
     const void *mapped = NULL;
     tally_t t = {0};

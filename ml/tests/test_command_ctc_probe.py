@@ -1,7 +1,8 @@
 """The ctc probe's command windows: random windows of the lengths the board must handle, and records whose head,
 lexicon and windows read back, each window's decision the one ctc_score takes on its int8 logits; the Gate 3 record
 keeps each window's int8 input, Gate 3 is counted on the decisions the chip prints, and no listen round is made of a
-locked command of another listen.yaml."""
+locked command of another listen.yaml; listen rounds fill their partitions in order, the enrolment starts where its
+round lets it finish, and each window's speaker check is the one svc_listen takes in that order."""
 
 from __future__ import annotations
 
@@ -16,13 +17,14 @@ pytest.importorskip("torch")
 
 import torch
 
-from srpipe.core.config import load_yaml
-from srpipe.generated import grid, listen
+from srpipe.core.config import CONFIGS, load_yaml
+from srpipe.generated import grid, listen, speaker
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc import probe, quant
 from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc import ctc_score
+from srpipe.tasks.speaker import quant as spk_quant
 
 DIMS = encoder.n_dims(load_yaml(ctc.CONFIG))
 EXPONENT = -3
@@ -150,6 +152,12 @@ def test_gate_3_counts_the_chips_decisions_and_refuses_a_log_missing_a_window(tm
         probe.gate_on_chip(log, labels)
 
 
+def unchecked_body(clean: np.ndarray, vad: np.ndarray, tracker, mel) -> bytes:
+    """A session's record as listen_rounds writes it with the speaker check off, each window decided by its length."""
+    laid = probe.listen_session(clean, vad, lambda x: [len(x), 1, 2, 3, 4], tracker, mel)
+    return probe.session_body(clean, vad, laid, [(0, probe.NO_CHECK)] * len(laid[1]), False)
+
+
 def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read() -> None:
     hop, rng, lead = grid.HOP_SAMPLES, np.random.default_rng(5), listen.UTTERANCE_LEAD_HOPS
     second = 120 + lead
@@ -160,9 +168,9 @@ def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read(
     features = rng.normal(size=(total, listen.N_BANDS)).astype(np.float32)
     tracker = SimpleNamespace(reset=lambda: None, step=lambda x: np.zeros(3, dtype=np.float32))
     mel = SimpleNamespace(log=lambda bins: np.zeros(listen.N_BANDS, dtype=np.float32))
-    body = probe.listen_session(clean, vad, lambda x: [len(x), 1, 2, 3, 4], tracker, mel)
-    hops, n_segments, n_windows = probe.SESSION_HEAD.unpack_from(body)
-    assert hops == total and n_windows == 2
+    body = unchecked_body(clean, vad, tracker, mel)
+    hops, n_segments, n_windows, enrol = probe.SESSION_HEAD.unpack_from(body)
+    assert hops == total and n_windows == 2 and enrol == 0
     at = probe.SESSION_HEAD.size
     bits = np.unpackbits(np.frombuffer(body[at : at + total // 8], np.uint8), bitorder="little").astype(bool)
     assert np.array_equal(bits, vad)
@@ -178,14 +186,75 @@ def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read(
     windows = [probe.WINDOW_RECORD.unpack_from(body, at + k * probe.WINDOW_RECORD.size) for k in range(n_windows)]
     assert [w[:2] for w in windows] == [(0, 80), (second - lead, second + 50)]
     assert [w[2] for w in windows] == [81, 51 + lead] and segments == [(0, 80), (second - 1 - lead, second + 50)]
+    assert all(w[-2:] == (0, probe.NO_CHECK) for w in windows)
     assert at + n_windows * probe.WINDOW_RECORD.size == len(body)
     vad[total - 20 : total] = True
     session = gate.with_silence(clean, vad, features, mel)
-    body = probe.listen_session(session[0], session[1], lambda x: [len(x), 1, 2, 3, 4], tracker, mel)
-    hops, _, n_windows = probe.SESSION_HEAD.unpack_from(body)
+    body = unchecked_body(session[0], session[1], tracker, mel)
+    hops, _, n_windows, _ = probe.SESSION_HEAD.unpack_from(body)
     last = probe.WINDOW_RECORD.unpack_from(body, len(body) - probe.WINDOW_RECORD.size)
     assert hops == total + listen.UTTERANCE_GAP_HOPS + 1 and n_windows == 3
     assert last[:3] == (total - 20 - lead, total, 21 + lead)
+
+
+def test_rounds_fill_each_partition_in_order_and_refuse_a_session_no_partition_holds() -> None:
+    assert probe.round_layout([5, 5, 5, 9, 2], [10, 9]) == [[[0, 1], [2]], [[3], [4]]]
+    with pytest.raises(ValueError, match="session 1 takes 12 bytes"):
+        probe.round_layout([5, 12], [10, 9])
+
+
+def commands_laid(n: int, rejected: int = 0) -> tuple:
+    """A laid-out session of n windows decided as commands, then rejected ones, each window one hop."""
+    decisions = [[0, 900, 100, 0, 0]] * n + [[ctc_score.REJECTED, 0, 0, 0, 0]] * rejected
+    return [], [(i, i) for i in range(n + rejected)], decisions
+
+
+def survey_owner() -> dict:
+    return load_yaml(CONFIGS / load_yaml(spk_quant.CONFIG)["source"]["survey"])["owner"]
+
+
+def test_enrolment_starts_at_the_first_owner_session_its_round_lets_finish() -> None:
+    owner = survey_owner()
+    date, cm = owner["enrol"]["date"], owner["enrol"]["distance_cm"]
+    rows = [(owner["spk"], cm), ("spk_other", cm), (owner["spk"], "300"), (owner["spk"], cm), (owner["spk"], cm)]
+    sessions = [
+        ({"spk": spk, "session": f"{date}_{k}", "distance_cm": d}, None, None) for k, (spk, d) in enumerate(rows)
+    ]
+    laid = [commands_laid(4, 2), commands_laid(2), commands_laid(9), commands_laid(7, 1), commands_laid(5)]
+    assert probe.enrolment_session(sessions, laid, [[[0, 1], []], [[2, 3], [4]]]) == 3
+    with pytest.raises(ValueError, match="commands left in its round"):
+        probe.enrolment_session(sessions, laid, [[[0], [1]], [[2], [3]], [[4], []]])
+
+
+def test_speaker_checks_leave_rejects_unchecked_enrol_from_the_session_and_score_the_rest(
+    tmp_path, monkeypatch
+) -> None:
+    lock = tmp_path / "models.lock.json"
+    locked = {"speaker": {"run": "r", "row": "kl", "threshold": {"permille": 600}}}
+    lock.write_text(json.dumps({"models": locked}), encoding="utf-8")
+    monkeypatch.setattr(probe.update_lock, "LOCK", lock)
+    monkeypatch.setattr(probe.export_espdl, "load_native", lambda path: None)
+    monkeypatch.setattr(probe.spk, "load_wrap", lambda run: None)
+    owner, stranger, near = np.eye(4, dtype=np.float32)[0], np.eye(4, dtype=np.float32)[1], np.zeros(4, np.float32)
+    near[:2] = 0.6, 0.8
+    units = [owner] * speaker.ENROL_COMMANDS + [owner, stranger, near]
+    seen = []
+
+    def chip_units(graph, patches, windows, front, wrap) -> tuple[list, dict]:
+        seen.extend(windows)
+        return units, {}
+
+    monkeypatch.setattr(probe.spk, "chip_units", chip_units)
+    clean = np.zeros(8 * grid.HOP_SAMPLES, np.int16)
+    sessions = [(None, clean, None)] * 4
+    laid = [commands_laid(2, 1), commands_laid(6), commands_laid(4, 1), commands_laid(3)]
+
+    checks = probe.speaker_checks(sessions, laid, 1)
+    assert len(seen) == len(units)
+    assert checks[0] == [(0, probe.UNENROLLED)] * 2 + [(0, probe.NO_CHECK)]
+    assert checks[1] == [(0, probe.ENROLLING)] * 6
+    assert checks[2] == [(0, probe.ENROLLING)] * 4 + [(0, probe.NO_CHECK)]
+    assert checks[3] == [(1000, probe.PASSED), (0, probe.STOPPED), (600, probe.PASSED)]
 
 
 @pytest.mark.parametrize("locked", [{}, {"listen_hash": f"0x{listen.HASH ^ 1:08x}"}])
