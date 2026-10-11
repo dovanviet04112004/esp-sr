@@ -233,6 +233,54 @@ def gen_listen_py(v: dict) -> str:
     )
 
 
+def speaker_values(g: dict) -> dict:
+    """speaker.yaml, checked to hold numbers only in features; the window in samples of the grid's rate, the frames
+    the front end makes of it, and the contract's hash, as listen_values takes it."""
+    doc = load_yaml("speaker.yaml")
+    for name, value in doc["features"].items():
+        if not is_number(value):
+            raise ValueError(f"speaker.yaml features.{name} must be a number, got {value!r}")
+    f = doc["features"]
+    window_samples = round(doc["window_s"] * g["sample_rate_hz"])
+    canonical = json.dumps(doc, sort_keys=True, separators=(",", ":"))
+    return {
+        **doc,
+        "speaker_hash": int.from_bytes(hashlib.sha256(canonical.encode()).digest()[:4], "big"),
+        "window_samples": window_samples,
+        "n_frames": 1 + (window_samples + 2 * (f["hop_samples"] // 2) - f["frame_samples"]) // f["hop_samples"],
+    }
+
+
+def gen_speaker_h(v: dict) -> str:
+    fbank = {"window_samples": v["window_samples"], **v["features"]}
+    lines = [
+        banner("contracts/speaker.yaml", "//"),
+        "#pragma once\n",
+        f"#define GEN_SPEAKER_VERSION {v['version']}",
+        f"#define GEN_SPEAKER_HASH 0x{v['speaker_hash']:08x}u // sha256 of the sorted JSON, 4 bytes",
+        f"#define GEN_SPEAKER_WINDOW_SAMPLES {v['window_samples']}",
+        f"#define GEN_SPEAKER_ENROL_COMMANDS {v['enrol_commands']}",
+        f"#define GEN_SPEAKER_N_FRAMES {v['n_frames']}",
+        f"#define GEN_SPEAKER_N_BANDS {v['features']['n_bands']}",
+        f"#define GEN_SPEAKER_FBANK_CONFIG {c_initializer(fbank)}       // dsp_spec_spk_fbank_config_t",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def gen_speaker_py(v: dict) -> str:
+    return banner("contracts/speaker.yaml", "#") + (
+        "\n"
+        f"VERSION = {v['version']}\n"
+        f"HASH = 0x{v['speaker_hash']:08x}\n"
+        f"WINDOW_S = {v['window_s']!r}\n"
+        f"WINDOW_SAMPLES = {v['window_samples']}\n"
+        f"ENROL_COMMANDS = {v['enrol_commands']}\n"
+        f"N_FRAMES = {v['n_frames']}\n"
+        f"N_BANDS = {v['features']['n_bands']}\n"
+        f"FEATURES = {pprint.pformat(v['features'], width=112, sort_dicts=False)}\n"
+    )
+
+
 AfeValue = int | float | tuple[int | float, ...]
 
 
@@ -1112,6 +1160,7 @@ def outputs() -> dict[str, str]:
     modules = afe_modules()
     lang = lang_vi_values()
     listen = listen_values(g)
+    speaker = speaker_values(g)
     init = banner("contracts/", "#")
     return {
         f"{COMMON_INC}/gen_grid.h": gen_grid_h(g),
@@ -1119,6 +1168,7 @@ def outputs() -> dict[str, str]:
         f"{COMMON_INC}/gen_stream.h": gen_stream_h(s),
         f"{COMMON_INC}/gen_units.h": gen_units_h(lang),
         f"{COMMON_INC}/gen_listen.h": gen_listen_h(listen),
+        f"{COMMON_INC}/gen_speaker.h": gen_speaker_h(speaker),
         f"{MQTT_INC}/gen_topics.h": gen_topics_h(t),
         f"{MQTT_INC}/gen_payload.h": gen_payload_h(),
         f"{AFE_INC}/gen_afe.h": gen_afe_h(afe),
@@ -1130,6 +1180,7 @@ def outputs() -> dict[str, str]:
         f"{ML_GEN}/afe.py": gen_afe_py(afe, modules),
         f"{ML_GEN}/lang_vi.py": gen_lang_vi_py(lang),
         f"{ML_GEN}/listen.py": gen_listen_py(listen),
+        f"{ML_GEN}/speaker.py": gen_speaker_py(speaker),
         f"{HOST_GEN}/__init__.py": init,
         f"{HOST_GEN}/grid.py": gen_grid_py(g),
         f"{HOST_GEN}/stream.py": gen_stream_py(s),
