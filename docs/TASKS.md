@@ -53,6 +53,7 @@ không bỏ task nào: E8, E9-T5, E9-T11, E9-T12, E10, E12 vẫn nằm nguyên v
 | E1-T7 | CI trên GitHub Actions của bản sao private `dovanviet04112004/esp-sr` (remote `github`); kết quả gắn ngược lên commit trên Gitea bằng `make ci-status`. Runner Docker ở máy đã bỏ (ổ C: đầy 93%, Docker Desktop lỗi đĩa), Actions của Gitea đã tắt | push lên `github` là bốn workflow chạy; `make ci-status` gắn tích xanh hoặc đỏ lên đúng commit trên Gitea | E1-T4, E1-T6 | — |
 | ~~E1-T8~~ | **Xong 26/09.** `docs/DU_LIEU.md` (nguồn, split, phiên thu theo mã người nói), `docs/measurements/{budget,latency,ram,parity,mic_array}.md` có sẵn cột, mẫu `docs/adr/0000-mau.md` | file tồn tại, bảng có cột đúng với task sẽ điền; pre-commit sạch | E1-T1 | — |
 | E1-T9 | Sửa TỔNG QUAN theo KẾ HOẠCH §0.2 rồi xoá bảng §0.2 | hai file không còn chỗ lệch; `grep "mica_"` trong `docs/` ra rỗng | — | — |
+| ~~E1-T10~~ | **Xong 11/10.** Cầu RFC 2217 tới board B theo KẾ HOẠCH §2.1, chủ repo đặt 11/10: `host/src/srhost/bridge.py` chạy bằng Python của Windows, tìm cổng COM theo `1a86:7523` và mở lại cho mỗi máy nối tới; `make board-attach` bật nó trong tmux `board-bridge`, `PORT` mặc định là URL của cầu, `make board-detach` tắt cầu; `srhost.calib` mở được URL (`8ef05e0`, `785c415`) | `make board-attach` bật cầu trong 2,2 s, chạy lại thì báo đã có; qua cầu, esptool đọc 256 KB ở 921 600 ba lần cùng sha256 và console thấy đủ log khởi động của sản phẩm; mã USB sai thì sau 10 s báo thiếu board; `make board-detach` nhả cổng 4011; `test_bridge.py` 6/6 | E11-T30 | — |
 
 ---
 
