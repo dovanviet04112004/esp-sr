@@ -300,3 +300,33 @@ stage0.3 0,10. Mỗi hàng đưa N op đầu bảng lên int16. Số giữ đư�
     cộng hàng theo thứ tự, không trừ giá trị lớn nhất như torch; 6/87 616 xác suất lệch một bước sau lượng tử. Bản vá
     `softmax_as_espdl` (`be128b3`).
   - Mỗi lệch chỉ một bước ở một chỗ, nhưng b0 khuếch đại thành ~160/192 giá trị lệch ở đầu ra.
+
+### 6.3 Ngưỡng trên đường chip (E11-T26, 11/10)
+
+`make speaker-deploy RUN=artifacts/speaker/runs/20261010_5a45475-dirty_94e5a9 ROW=kl`: cùng vật liệu của §6.1 (209 cửa
+sổ chủ repo, 777 cửa sổ người lạ ngoài 64 cửa sổ hiệu chỉnh), mỗi cửa sổ chạy đúng như chip tính. Đặc trưng là của
+`srpipe.dsp.spec.spk_fbank` (bản soi gương của `dsp_spec/spk_fbank`, khớp C từng bit), đặt lên lưới int8 đầu vào của
+đồ thị, mô phỏng ESP-PPQ của hàng kl, rồi hậu xử lý bản soi gương. Chạy hai lần, ra y hệt.
+
+| Đo | Kết quả |
+|---|---|
+| Đặc trưng bản soi gương so với `TFMelBanks` bằng torch | lệch tới 4,5e-3, trung bình 7,3e-7 |
+| Giá trị đầu vào int8 bị đổi ô vì độ lệch ấy | 43 trên 10 577 808 |
+| Bộ số kiểu khảo sát trên đường chip, 1% người lạ lọt | EER 4,00%; giữ 95,9% lệnh được nhận; 1 m 97,8%, 3 m 94,3% |
+| Như trên, 5% người lạ lọt | giữ 98,2%; 1 m 98,9%, 3 m 97,5% |
+
+Bộ số trùng hàng kl của §6.1, nên khâu đặc trưng viết lại không đổi chất lượng.
+
+**Ngưỡng một số cho mọi mẫu giọng.** Lấy 20 lần rút 10 cửa sổ đăng ký như khảo sát, gộp điểm của mọi người lạ qua mọi
+lần rút, rồi lấy phần nghìn thấp nhất để chỉ một tỉ lệ người lạ lọt qua. Phần lệnh được nhận giữ lại tính gộp theo
+khoảng cách.
+
+| Người lạ lọt | Ngưỡng | Người lạ lọt thật | Giữ ở 1 m | Giữ ở 3 m |
+|---|---|---|---|---|
+| 1% | 781‰ | 0,98% | 97,2% | **92,2%** |
+| 5% | **744‰** | 4,86% | 98,7% | 97,5% |
+
+- Ở 1%, 3 m bị chặn 7,8% lệnh được nhận, quá 5%. Luật của KẾ HOẠCH §3.17 vì thế nới tới 5%: ngưỡng **744‰**, ghi
+  vào `firmware/models/speaker/meta.json` và `models.lock.json`, bước đóng gói đưa vào header ảnh.
+- Người lạ ở đây là người nói `test` của `command/v1` qua đường mô phỏng board. Trước khi bật mặc định, ngưỡng đặt lại
+  trên người lạ thu thật qua board (E11-T27).
