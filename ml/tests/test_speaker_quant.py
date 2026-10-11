@@ -13,7 +13,7 @@ pytest.importorskip("onnxruntime")
 
 from torch import nn  # noqa: E402
 
-from srpipe.compress.quant import onnx_export  # noqa: E402
+from srpipe.compress.quant import onnx_export, ptq_espdl  # noqa: E402
 from srpipe.tasks.speaker import quant  # noqa: E402
 
 CHANNELS, BOTTLENECK, FRAMES = 6, 4, 19
@@ -131,7 +131,7 @@ def test_a_one_channel_convolution_gives_what_copies_and_a_depthwise_one_give() 
     x = torch.randn(1, 1, 8, FRAMES)
     with torch.no_grad():
         want = model(x)
-        quant.one_channel_inputs(model)
+        ptq_espdl.one_channel_inputs(model)
         got = model(x)
     assert isinstance(model[0], nn.Sequential) and model[0][1].groups == 12
     assert isinstance(model[1], nn.Conv2d) and model[1].groups == 1

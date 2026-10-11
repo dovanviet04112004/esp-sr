@@ -93,6 +93,46 @@ def same_int8_verdict(found: tuple[int, float] | None, against: str) -> int:
     return int(found[0] > 0)
 
 
+class Copies(nn.Module):
+    """A one-channel map repeated into count channels."""
+
+    def __init__(self, count: int) -> None:
+        super().__init__()
+        self.count = count
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.cat([x] * self.count, dim=1)
+
+
+def per_channel(conv: nn.Conv2d) -> nn.Sequential:
+    """conv, one input channel to many, as that channel copied to each output and a depthwise convolution of conv's
+    kernels: the same sums, where esp-dl runs a one-channel input at a tenth of a depthwise one's rate."""
+    depthwise = nn.Conv2d(
+        conv.out_channels,
+        conv.out_channels,
+        conv.kernel_size,
+        stride=conv.stride,
+        padding=conv.padding,
+        dilation=conv.dilation,
+        groups=conv.out_channels,
+        bias=conv.bias is not None,
+    )
+    with torch.no_grad():
+        depthwise.weight.copy_(conv.weight)
+        if conv.bias is not None:
+            depthwise.bias.copy_(conv.bias)
+    return nn.Sequential(Copies(conv.out_channels), depthwise)
+
+
+def one_channel_inputs(model: nn.Module) -> nn.Module:
+    """model with each Conv2d of one input channel and several outputs as per_channel."""
+    for parent in list(model.modules()):
+        for name, m in list(parent.named_children()):
+            if isinstance(m, nn.Conv2d) and m.in_channels == 1 and m.out_channels > 1 and m.groups == 1:
+                setattr(parent, name, per_channel(m))
+    return model
+
+
 def setting_of(rungs: dict):
     """The ESP-PPQ setting for esp-dl that rungs describe: equalization, bias correction, calibration, int16 layers."""
     from esp_ppq.api.espdl_interface import get_target_platform
