@@ -21,10 +21,18 @@ struct dsp_spec_spk_fbank_s {
     uint16_t first_bin[DSP_SPEC_SPK_FBANK_MAX_BANDS];
     uint16_t n_weights[DSP_SPEC_SPK_FBANK_MAX_BANDS];
     float *weights; // band after band, from each band's first bin
+    float *span;    // the frame's pre-emphasised samples, 0 off the window
     float *frame;
     dsp_spec_cplx_t *bins;
     float *power;
 };
+
+typedef struct {
+    const int16_t *pcm;
+    float mean, denom, preemphasis;
+    long next; // prior is the normalised sample ahead of this one
+    float prior;
+} emphasis_t;
 
 static bool config_ok(const dsp_spec_spk_fbank_config_t *c)
 {
@@ -49,7 +57,7 @@ size_t dsp_spec_spk_fbank_workspace_bytes(const dsp_spec_spk_fbank_config_t *cfg
     const size_t n_bins = cfg->fft_size / 2u;
     return SPEC_ALIGN_BYTES + spec_round_up(sizeof(struct dsp_spec_spk_fbank_s)) +
            spec_round_up(dsp_spec_fft_workspace_bytes(cfg->fft_size)) +
-           spec_round_up(cfg->frame_samples * sizeof(float)) +
+           2 * spec_round_up(cfg->frame_samples * sizeof(float)) +
            spec_round_up(WEIGHTS_PER_BIN * n_bins * sizeof(float)) +
            spec_round_up(cfg->fft_size * sizeof(float)) +
            spec_round_up((n_bins + 1) * sizeof(dsp_spec_cplx_t)) + spec_round_up(n_bins * sizeof(float));
@@ -121,6 +129,7 @@ esp_err_t dsp_spec_spk_fbank_init(dsp_spec_spk_fbank_t **out, const dsp_spec_spk
     void *fft_mem = spec_carve(&c, fft_bytes);
     fb->window = spec_carve(&c, cfg->frame_samples * sizeof(float));
     fb->weights = spec_carve(&c, WEIGHTS_PER_BIN * n_bins * sizeof(float));
+    fb->span = spec_carve(&c, cfg->frame_samples * sizeof(float));
     fb->frame = spec_carve(&c, cfg->fft_size * sizeof(float));
     fb->bins = spec_carve(&c, (n_bins + 1) * sizeof(dsp_spec_cplx_t));
     fb->power = spec_carve(&c, n_bins * sizeof(float));
@@ -133,28 +142,37 @@ esp_err_t dsp_spec_spk_fbank_init(dsp_spec_spk_fbank_t **out, const dsp_spec_spk
     return ESP_OK;
 }
 
-static float normalised(const int16_t *pcm, size_t j, float mean, float denom)
+static float normalised(const emphasis_t *e, size_t j)
 {
-    return ((float)pcm[j] / PCM_FULL_SCALE - mean) / denom;
+    return ((float)e->pcm[j] / PCM_FULL_SCALE - e->mean) / e->denom;
 }
 
-// Each sample less the coefficient times the previous one; the first reads the second, the reflected pad.
-static void fill_frame(dsp_spec_spk_fbank_t *fb, const int16_t *pcm, size_t t, float mean, float denom)
+// Sample j less the coefficient times sample j - 1; sample 0 reads sample 1, the reflected pad.
+static float emphasised(emphasis_t *e, long j)
+{
+    if (j != e->next) { e->prior = normalised(e, j == 0 ? 1 : (size_t)j - 1); }
+    const float x = normalised(e, (size_t)j);
+    const float y = x - e->preemphasis * e->prior;
+    e->prior = x;
+    e->next = j + 1;
+    return y;
+}
+
+// The span moves on a hop and emphasises only the samples new to it, so each sample is divided once.
+static void fill_frame(dsp_spec_spk_fbank_t *fb, emphasis_t *e, size_t t)
 {
     const dsp_spec_spk_fbank_config_t *c = &fb->cfg;
     const long start = (long)(t * c->hop_samples) - (long)(c->hop_samples / 2u);
-    memset(fb->frame, 0, c->fft_size * sizeof(float));
-    float before = 0.0f;
-    bool have_before = false;
-    for (size_t n = 0; n < c->frame_samples; n++) {
+    const size_t kept = t > 0 && c->hop_samples < c->frame_samples ? c->frame_samples - c->hop_samples : 0;
+    memmove(fb->span, fb->span + (c->frame_samples - kept), kept * sizeof(float));
+    for (size_t n = kept; n < c->frame_samples; n++) {
         const long j = start + (long)n;
-        if (j < 0 || j >= (long)c->window_samples) { continue; }
-        const float x = normalised(pcm, (size_t)j, mean, denom);
-        if (j == 0 || !have_before) { before = normalised(pcm, j == 0 ? 1 : (size_t)j - 1, mean, denom); }
-        fb->frame[n] = (x - c->preemphasis * before) * fb->window[n];
-        before = x;
-        have_before = true;
+        fb->span[n] = j < 0 || j >= (long)c->window_samples ? 0.0f : emphasised(e, j);
     }
+    for (size_t n = 0; n < c->frame_samples; n++) {
+        fb->frame[n] = fb->span[n] * fb->window[n];
+    }
+    memset(fb->frame + c->frame_samples, 0, (c->fft_size - c->frame_samples) * sizeof(float));
 }
 
 static float clipped(float x, float lo, float hi)
@@ -186,21 +204,24 @@ esp_err_t dsp_spec_spk_fbank_run(dsp_spec_spk_fbank_t *fb, const int16_t *pcm, f
 {
     if (fb == NULL || pcm == NULL || features == NULL) { return ESP_ERR_INVALID_ARG; }
     const size_t n = fb->cfg.window_samples;
-    // Summed in double: in float32 the mean of 24000 samples drifts off torch's (KEHOACH 3.17).
-    double total = 0.0;
+    // An integer sum of int16 is exact, so it is the double sum of the samples to the bit (KEHOACH 3.17).
+    int64_t total = 0;
     for (size_t i = 0; i < n; i++) {
-        total += (double)((float)pcm[i] / PCM_FULL_SCALE);
+        total += pcm[i];
     }
-    const double mean = total / (double)n;
+    const double mean = (double)total / PCM_FULL_SCALE / (double)n;
+    // Summed in double: in float32 the variance of 24000 samples drifts off torch's (KEHOACH 3.17).
     double squares = 0.0;
     for (size_t i = 0; i < n; i++) {
         const double d = (double)((float)pcm[i] / PCM_FULL_SCALE) - mean;
         squares += d * d;
     }
     const float denom = sqrtf((float)(squares / (double)n)) + fb->cfg.eps;
+    emphasis_t e = {
+        .pcm = pcm, .mean = (float)mean, .denom = denom, .preemphasis = fb->cfg.preemphasis, .next = -1};
     const size_t bands = fb->cfg.n_bands;
     for (size_t t = 0; t < fb->n_frames; t++) {
-        fill_frame(fb, pcm, t, (float)mean, denom);
+        fill_frame(fb, &e, t);
         const esp_err_t err = dsp_spec_fft_forward(fb->fft, fb->frame, fb->bins);
         if (err != ESP_OK) { return err; }
         log_bands(fb, features + t * bands);
