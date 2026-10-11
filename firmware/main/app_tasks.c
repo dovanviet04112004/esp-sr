@@ -76,9 +76,20 @@ typedef struct {
     BaseType_t core;
 } task_spec_t;
 
+// The roster's copies, about 1.1 KB each: in PSRAM from app_tasks_start, each field one task's alone.
+typedef struct {
+    app_speaker_state_t written;      // xac_task
+    net_mqtt_speakers_t set_in;       // xac_task
+    app_speaker_request_t request_in; // xac_task
+    app_speaker_request_t enrol;      // dieu_task
+    app_speaker_state_t published;    // gui_task
+    speaker_roster_t payload;         // gui_task
+} roster_copies_t;
+
 static const char *TAG = "app_tasks";
 
 static int16_t s_drain[APP_FRAME_MAX_SAMPLES];
+static roster_copies_t *s_copies;
 
 static void count_in_stats(const app_wiring_t *w, uint32_t *field)
 {
@@ -292,12 +303,12 @@ static void nhan_task(void *arg)
 // Only after a change: gui_task publishes each state it finds new (KEHOACH 5.3).
 static void write_roster(const app_wiring_t *w)
 {
-    static app_speaker_state_t state;
     static uint32_t written;
     static bool any;
-    if (svc_listen_speaker_state(&state) != ESP_OK || (any && state.serial == written)) { return; }
-    xQueueOverwrite(w->roster, &state);
-    written = state.serial;
+    app_speaker_state_t *state = &s_copies->written;
+    if (svc_listen_speaker_state(state) != ESP_OK || (any && state->serial == written)) { return; }
+    xQueueOverwrite(w->roster, state);
+    written = state->serial;
     any = true;
 }
 
@@ -314,14 +325,14 @@ static void speaker_error(const app_wiring_t *w, esp_err_t err)
 // (KEHOACH 3.17).
 static void take_speakers(const app_wiring_t *w)
 {
-    static net_mqtt_speakers_t set;
-    static app_speaker_request_t request;
-    if (xQueueReceive(w->speaker_sets, &set, 0) == pdTRUE) {
-        speaker_error(w, set.parsed == ESP_OK ? svc_listen_speaker_set(&set.set) : set.parsed);
+    net_mqtt_speakers_t *set = &s_copies->set_in;
+    app_speaker_request_t *request = &s_copies->request_in;
+    if (xQueueReceive(w->speaker_sets, set, 0) == pdTRUE) {
+        speaker_error(w, set->parsed == ESP_OK ? svc_listen_speaker_set(&set->set) : set->parsed);
     }
-    while (xQueueReceive(w->speaker_requests, &request, 0) == pdTRUE) {
-        speaker_error(w, request.op == APP_SPEAKER_SET ? svc_listen_speaker_set(&request.set)
-                                                       : svc_listen_speaker_enrol(request.id));
+    while (xQueueReceive(w->speaker_requests, request, 0) == pdTRUE) {
+        speaker_error(w, request->op == APP_SPEAKER_SET ? svc_listen_speaker_set(&request->set)
+                                                        : svc_listen_speaker_enrol(request->id));
     }
     write_roster(w);
 }
@@ -350,11 +361,11 @@ static void xac_task(void *arg)
 // Zero timeout: a full q_spk refuses the enrolment, never stalls the dialog (KEHOACH 5.3).
 static void enrol_from(const app_wiring_t *w, const device_cmd_t *cmd)
 {
-    static app_speaker_request_t request;
-    memset(&request, 0, sizeof(request));
-    request.op = APP_SPEAKER_ENROL;
-    strlcpy(request.id, cmd->has_speaker_id ? cmd->speaker_id : "", sizeof(request.id));
-    if (xQueueSend(w->speaker_requests, &request, 0) != pdTRUE) {
+    app_speaker_request_t *request = &s_copies->enrol;
+    memset(request, 0, sizeof(*request));
+    request->op = APP_SPEAKER_ENROL;
+    strlcpy(request->id, cmd->has_speaker_id ? cmd->speaker_id : "", sizeof(request->id));
+    if (xQueueSend(w->speaker_requests, request, 0) != pdTRUE) {
         raise_error(w, 0, APP_CODE_SPEAKERS_REFUSED, NULL);
     }
 }
@@ -484,15 +495,14 @@ static void roster_payload(const app_speaker_state_t *state, speaker_roster_t *o
 // Retained, so a state is published again only when it changes or the session comes back (KEHOACH 7.3).
 static void send_roster(const app_wiring_t *w, bool reconnected)
 {
-    static app_speaker_state_t state;
-    static speaker_roster_t payload;
     static uint32_t sent;
     static bool due = true;
+    app_speaker_state_t *state = &s_copies->published;
     due = due || reconnected;
-    if (xQueuePeek(w->roster, &state, 0) != pdTRUE || (!due && state.serial == sent)) { return; }
-    roster_payload(&state, &payload);
-    if (net_mqtt_publish_roster(&payload) == ESP_OK) {
-        sent = state.serial;
+    if (xQueuePeek(w->roster, state, 0) != pdTRUE || (!due && state->serial == sent)) { return; }
+    roster_payload(state, &s_copies->payload);
+    if (net_mqtt_publish_roster(&s_copies->payload) == ESP_OK) {
+        sent = state->serial;
         due = false;
     }
 }
@@ -629,6 +639,8 @@ esp_err_t app_tasks_start(void)
 {
     const app_wiring_t *w = app_wiring();
     if (w == NULL || s_handle[0] != NULL) { return ESP_ERR_INVALID_STATE; }
+    s_copies = heap_caps_calloc(1, sizeof(*s_copies), MALLOC_CAP_SPIRAM);
+    if (s_copies == NULL) { return ESP_ERR_NO_MEM; }
     uint32_t total_bytes = 0;
     for (size_t i = 0; i < TASK_COUNT; i++) {
         const task_spec_t *t = &kTasks[i];

@@ -12,6 +12,7 @@
 #include "argtable3/argtable3.h"
 #include "esp_check.h"
 #include "esp_console.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_wifi_types.h"
 #include "sdkconfig.h"
@@ -303,8 +304,9 @@ static struct {
     struct arg_end *end;
 } s_spk_args;
 
-static app_speaker_state_t s_spk_state;     // the console task's alone
-static app_speaker_request_t s_spk_request; // the console task's alone
+// The console task's copies of the roster, about 1.1 KB each: in PSRAM from app_console_start.
+static app_speaker_state_t *s_spk_state;
+static app_speaker_request_t *s_spk_request;
 
 static void spk_list(const app_speaker_state_t *st)
 {
@@ -330,9 +332,9 @@ static int listed_at(const app_speaker_state_t *st, const char *id)
 // The roster as it stands, its version one above, for a change made on top of it (KEHOACH 3.17).
 static app_speaker_set_t *set_from(const app_speaker_state_t *st)
 {
-    memset(&s_spk_request, 0, sizeof(s_spk_request));
-    s_spk_request.op = APP_SPEAKER_SET;
-    app_speaker_set_t *set = &s_spk_request.set;
+    memset(s_spk_request, 0, sizeof(*s_spk_request));
+    s_spk_request->op = APP_SPEAKER_SET;
+    app_speaker_set_t *set = &s_spk_request->set;
     set->version = st->version + 1;
     set->check = st->check;
     set->count = st->count;
@@ -356,14 +358,14 @@ static bool spk_name(char *out)
 // Builds s_spk_request from the latest roster; returns false with the reason printed.
 static bool spk_request(const char *action, const char *id)
 {
-    const int at = listed_at(&s_spk_state, id);
+    const int at = listed_at(s_spk_state, id);
     if (strcmp(action, "enrol") == 0) {
-        memset(&s_spk_request, 0, sizeof(s_spk_request));
-        s_spk_request.op = APP_SPEAKER_ENROL;
-        strlcpy(s_spk_request.id, id, sizeof(s_spk_request.id));
+        memset(s_spk_request, 0, sizeof(*s_spk_request));
+        s_spk_request->op = APP_SPEAKER_ENROL;
+        strlcpy(s_spk_request->id, id, sizeof(s_spk_request->id));
         return true;
     }
-    app_speaker_set_t *set = set_from(&s_spk_state);
+    app_speaker_set_t *set = set_from(s_spk_state);
     if (strcmp(action, "on") == 0 || strcmp(action, "off") == 0) {
         set->check = strcmp(action, "on") == 0;
         return true;
@@ -381,7 +383,7 @@ static bool spk_request(const char *action, const char *id)
     }
     printf("spk add <id> <name> [-x] | name <id> <name> [-x] | del <id> | enrol <id> | on | off | list:\n"
            "%s is %s, the roster holds %u of %d\n",
-           id, at >= 0 ? "on the roster" : "not on the roster", (unsigned)s_spk_state.count,
+           id, at >= 0 ? "on the roster" : "not on the roster", (unsigned)s_spk_state->count,
            APP_SPEAKERS_MAX);
     return false;
 }
@@ -393,19 +395,19 @@ static int spk_cmd(int argc, char **argv)
         return 1;
     }
     const app_wiring_t *w = app_wiring();
-    if (w == NULL || xQueuePeek(w->roster, &s_spk_state, 0) != pdTRUE) {
+    if (w == NULL || xQueuePeek(w->roster, s_spk_state, 0) != pdTRUE) {
         printf("no speaker check here: the image has no speaker\n");
         return 1;
     }
     const char *action = s_spk_args.action->sval[0];
     const char *id = s_spk_args.id->count > 0 ? s_spk_args.id->sval[0] : "";
     if (strcmp(action, "list") == 0) {
-        spk_list(&s_spk_state);
+        spk_list(s_spk_state);
         return 0;
     }
     if (!spk_request(action, id)) { return 1; }
     // Zero timeout: a b0 run holds xac_task about a second, and the console says so rather than wait.
-    const bool sent = xQueueSend(w->speaker_requests, &s_spk_request, 0) == pdTRUE;
+    const bool sent = xQueueSend(w->speaker_requests, s_spk_request, 0) == pdTRUE;
     printf("spk %s %s: %s\n", action, id,
            sent ? "sent to xac_task, spk list shows the outcome" : "busy, again later");
     return sent ? 0 : 1;
@@ -459,6 +461,9 @@ static esp_err_t register_commands(void)
 
 esp_err_t app_console_start(void)
 {
+    s_spk_state = heap_caps_calloc(1, sizeof(*s_spk_state), MALLOC_CAP_SPIRAM);
+    s_spk_request = heap_caps_calloc(1, sizeof(*s_spk_request), MALLOC_CAP_SPIRAM);
+    if (s_spk_state == NULL || s_spk_request == NULL) { return ESP_ERR_NO_MEM; }
     esp_console_repl_config_t config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     config.prompt = PROMPT;
     config.max_cmdline_length = CMDLINE_BYTES;
