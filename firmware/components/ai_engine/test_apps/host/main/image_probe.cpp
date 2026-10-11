@@ -26,7 +26,7 @@ extern "C" bool image_probe_speaks(const char *name)
 
 extern "C" int16_t image_probe_speaker_threshold(size_t prints)
 {
-    return ai::image_speaker_threshold_permille(prints);
+    return ai::image_speaker_threshold_milli_z(prints);
 }
 
 extern "C" uint32_t image_probe_id(const char *name, uint32_t kind)

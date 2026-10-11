@@ -3082,7 +3082,7 @@ nào khai lại struct.
 ```
 offset 0x000  header 1 KB
    +0x000 magic       'SRMD'
-   +0x004 format_ver  u32
+   +0x004 format_ver  u32, 7 cho khuôn này
    +0x008 count       u32, ≤ 8
    +0x00C grid_hash   u32 — băm của contracts/grid.yaml lúc huấn luyện
    +0x010 listen_hash u32 — băm của contracts/listen.yaml mà model command học theo; 0 khi ảnh không có command

@@ -15,7 +15,7 @@
 #define NET_BYTES 100
 #define NORM_BYTES 40
 #define NORM_OFFSET (STORAGE_MODEL_HEADER_BYTES + 2 * STORAGE_MODEL_ALIGN_BYTES)
-#define THRESHOLD_PERMILLE (-37)
+#define THRESHOLD_MILLI_Z (-37)
 #define THRESHOLD_STEP 10 // per voiceprint more, so each count reads its own
 
 static unsigned s_failures;
@@ -111,7 +111,7 @@ static void check_in_flash(void)
     header->entry[1].flags = STORAGE_MODEL_FLAG_IN_FLASH;
     header->speaker_hash = GEN_SPEAKER_HASH;
     for (size_t n = 0; n < APP_SPEAKERS_MAX; n++) {
-        header->spk_accept_permille[n] = (int16_t)(THRESHOLD_PERMILLE + THRESHOLD_STEP * (int)n);
+        header->spk_accept_milli_z[n] = (int16_t)(THRESHOLD_MILLI_Z + THRESHOLD_STEP * (int)n);
     }
     const unsigned unmaps = fake_storage_unmaps();
     size_t bytes = 0;
@@ -120,9 +120,9 @@ static void check_in_flash(void)
     check(image_probe_find("wake", STORAGE_MODEL_KIND_NORM, &bytes) == &s_image[NORM_OFFSET] &&
               bytes == NORM_BYTES && fake_storage_unmaps() == unmaps,
           "it is read in place, the mapping held while it is loaded");
-    check(image_probe_speaks("speaker") && image_probe_speaker_threshold(1) == THRESHOLD_PERMILLE &&
+    check(image_probe_speaks("speaker") && image_probe_speaker_threshold(1) == THRESHOLD_MILLI_Z &&
               image_probe_speaker_threshold(APP_SPEAKERS_MAX) ==
-                  THRESHOLD_PERMILLE + THRESHOLD_STEP * (APP_SPEAKERS_MAX - 1) &&
+                  THRESHOLD_MILLI_Z + THRESHOLD_STEP * (APP_SPEAKERS_MAX - 1) &&
               image_probe_speaker_threshold(0) == 0 &&
               image_probe_speaker_threshold(APP_SPEAKERS_MAX + 1) == 0 &&
               image_probe_id("wake", STORAGE_MODEL_KIND_NORM) == id_of(header->entry[1].sha256),

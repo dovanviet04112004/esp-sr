@@ -96,7 +96,7 @@ _Static_assert(sizeof(storage_speaker_roster_t) == 8 + APP_SPEAKERS_MAX * 140,
 #define STORAGE_PATH_RESPONSES "/lfs/resp/vi.json"
 
 #define STORAGE_MODEL_MAGIC 0x444d5253u // "SRMD" little-endian
-#define STORAGE_MODEL_FORMAT_VER 6
+#define STORAGE_MODEL_FORMAT_VER 7
 #define STORAGE_MODEL_MAX_ENTRIES 8
 #define STORAGE_MODEL_NAME_BYTES 16
 #define STORAGE_MODEL_HEADER_BYTES 1024
@@ -108,6 +108,7 @@ typedef enum {
     STORAGE_MODEL_KIND_ESPDL = 1,
     STORAGE_MODEL_KIND_NORM = 2,
     STORAGE_MODEL_KIND_UNITS = 3,
+    STORAGE_MODEL_KIND_COHORT = 4, // speaker's cohort: unit embeddings, float32 rows of dims
 } storage_model_kind_t;
 
 #define STORAGE_MODEL_FLAG_IN_FLASH 1u // read in place through the mapping, never copied to PSRAM
@@ -131,8 +132,8 @@ typedef struct {
     uint16_t cmd_margin_permille;   // delta2 chosen for the command
     uint16_t cmd_syllable_permille; // delta3 chosen for the command; 0 without one
     uint16_t reserved0;
-    uint32_t speaker_hash;                         // GEN_SPEAKER_HASH of its speaker; 0 without one
-    int16_t spk_accept_permille[APP_SPEAKERS_MAX]; // with 1 + index voiceprints held
+    uint32_t speaker_hash;                        // GEN_SPEAKER_HASH of its speaker; 0 without one
+    int16_t spk_accept_milli_z[APP_SPEAKERS_MAX]; // with 1 + index voiceprints (ADR-0022) held
     uint8_t reserved[16];
     storage_model_entry_t entry[STORAGE_MODEL_MAX_ENTRIES];
     uint8_t pad[STORAGE_MODEL_HEADER_BYTES - 64 - STORAGE_MODEL_MAX_ENTRIES * 64];

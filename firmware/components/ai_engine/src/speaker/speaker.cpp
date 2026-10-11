@@ -80,7 +80,7 @@ esp_err_t speaker_load() noexcept
     }
     s.inverse_step = ldexpf(1.0f, -s.in.exponent);
     for (size_t n = 1; n <= APP_SPEAKERS_MAX; n++) {
-        s.thresholds[n - 1] = image_speaker_threshold_permille(n);
+        s.thresholds[n - 1] = image_speaker_threshold_milli_z(n);
     }
     s.model_id = image_entry_id(kEntry, STORAGE_MODEL_KIND_ESPDL);
     s.ready = true;

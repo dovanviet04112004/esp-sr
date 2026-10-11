@@ -104,7 +104,7 @@ esp_err_t image_load(uint8_t slot) noexcept
         err = copy_entries(models);
         s_listen_hash = models.header->listen_hash;
         s_speaker_hash = models.header->speaker_hash;
-        memcpy(s_speaker_thresholds, models.header->spk_accept_permille, sizeof(s_speaker_thresholds));
+        memcpy(s_speaker_thresholds, models.header->spk_accept_milli_z, sizeof(s_speaker_thresholds));
     }
     bool held = false;
     for (size_t i = 0; i < s_count; ++i) {
@@ -153,7 +153,7 @@ uint32_t image_entry_id(const char *name, storage_model_kind_t kind) noexcept
     return 0;
 }
 
-int16_t image_speaker_threshold_permille(size_t prints) noexcept
+int16_t image_speaker_threshold_milli_z(size_t prints) noexcept
 {
     return prints >= 1 && prints <= APP_SPEAKERS_MAX ? s_speaker_thresholds[prints - 1] : 0;
 }
