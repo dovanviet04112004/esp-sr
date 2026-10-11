@@ -18,6 +18,7 @@ import numpy as np
 import torch
 import yaml
 from torch import nn
+from torch.nn import functional
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, ptq_espdl, qat_espdl
 from srpipe.core import corpus, extract, screen, splits
@@ -62,10 +63,34 @@ def folded(net: gate.Ctc, dims: tuple[int, ...]) -> gate.Ctc:
     return replace(net, model=model)
 
 
+class CopiedFront(nn.Module):
+    """encoder.Front with its first convolution, the one mel channel to several, as that channel copied to each
+    output ahead of the causal pad and a depthwise convolution: the same sums at a depthwise rate, and the pad still
+    beside its convolution, where ESP-PPQ folds it in and the streamed export makes it a cache."""
+
+    def __init__(self, front: encoder.Front) -> None:
+        super().__init__()
+        self.front, self.hop_stride = front, front.hop_stride
+        self.copies, self.first = ptq_espdl.per_channel(front.convs[0])
+
+    @property
+    def proj(self) -> nn.Conv1d:
+        return self.front.proj
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        f = self.front
+        mel = self.copies(x[:, : f.n_mel].transpose(1, 2).unsqueeze(1))
+        for k, conv in enumerate(f.convs):
+            mel = functional.silu((self.first if k == 0 else conv)(functional.pad(mel, (0, 0, f.past_hops, 0))))
+        mel = mel.permute(0, 1, 3, 2).reshape(mel.shape[0], mel.shape[1] * f.bands_out, -1)
+        return f.proj(torch.cat([mel, functional.avg_pool1d(x[:, f.n_mel :], f.hop_stride, f.hop_stride)], dim=1))
+
+
 @dataclass(frozen=True)
 class Hearing:
     """The pitch a ladder hears its run on: the one the run learnt, or the contract's Kaldi pitch as the board gives
-    it, with the pitch dims gate.HOLDS names under hold folded at their train mean (KEHOACH 3.14)."""
+    it, with the pitch dims gate.HOLDS names under hold folded at their train mean; its front a CopiedFront, the
+    rewrite for esp-dl that changes no sum (KEHOACH 3.14)."""
 
     kaldi: bool = False
     hold: str | None = None
@@ -77,7 +102,9 @@ class Hearing:
         net = gate.load_ctc(run)
         if self.kaldi:
             net = replace(net, cfg=kaldi_cfg(net.cfg, paths))
-        return folded(net, gate.HOLDS[self.hold]) if self.hold else net
+        net = folded(net, gate.HOLDS[self.hold]) if self.hold else net
+        net.model.front = CopiedFront(net.model.front)
+        return net
 
     def held(self) -> tuple[int, ...]:
         return gate.HOLDS[self.hold] if self.hold else ()

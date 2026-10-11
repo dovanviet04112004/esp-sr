@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -183,11 +182,16 @@ def test_a_net_whose_norms_stay_an_int8_chain_is_refused(tmp_path: Path) -> None
         quant.quantized(encoder.build(cfg).eval(), calib, tmp_path, rungs, cfg["esp_ppq_patches"])
 
 
+def trained(cfg: dict) -> gate.Ctc:
+    """A run's net as gate.load_ctc gives it, with cfg and no layer: the deploy step's refusals read only cfg."""
+    return gate.Ctc(torch.nn.Sequential(), np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32), [], [], cfg)
+
+
 @pytest.mark.parametrize("recorded", [{}, {"listen_hash": listen.HASH ^ 1}])
 def test_a_run_without_this_listen_hash_is_not_deployed(
     recorded: dict, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(gate, "load_ctc", lambda _run: SimpleNamespace(cfg=recorded))
+    monkeypatch.setattr(gate, "load_ctc", lambda _run: trained(recorded))
     with pytest.raises(ValueError, match="would leave its command off"):
         quant.step_deploy(load_yaml(ctc.CONFIG), tmp_path, "row")
 
@@ -207,7 +211,7 @@ def test_the_ends_of_a_graph_are_int8_unless_a_layer_there_goes_int16(tmp_path: 
 
 
 def test_a_row_the_chip_cannot_read_or_give_is_not_deployed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gate, "load_ctc", lambda _run: SimpleNamespace(cfg={"listen_hash": listen.HASH}))
+    monkeypatch.setattr(gate, "load_ctc", lambda _run: trained({"listen_hash": listen.HASH}))
     monkeypatch.setattr(quant.export_espdl, "load_native", lambda _path: "graph")
     monkeypatch.setattr(quant.ptq_espdl, "io_bits", lambda _graph: (8, 16))
     with pytest.raises(ValueError, match="int8 at both ends"):
@@ -271,7 +275,7 @@ def test_the_operating_point_keeps_val_and_phrases_the_set_lacks_within_bounds_a
 
 
 def test_a_row_without_its_chosen_thresholds_is_not_deployed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gate, "load_ctc", lambda _run: SimpleNamespace(cfg={"listen_hash": listen.HASH}))
+    monkeypatch.setattr(gate, "load_ctc", lambda _run: trained({"listen_hash": listen.HASH}))
     monkeypatch.setattr(quant.export_espdl, "load_native", lambda _path: "graph")
     monkeypatch.setattr(quant.ptq_espdl, "io_bits", lambda _graph: (8, 8))
     quant.recorded(tmp_path, {}, {"row": gate_of(80, 0.3) | {"calibration": "kl", "int16_ops": []}})
@@ -320,3 +324,13 @@ def test_a_deploy_record_names_the_hearing_its_row_was_built_on() -> None:
     kaldi = quant.Hearing(kaldi=True, hold="voicing")
     assert quant.hearing_of(quant.heard_head(kaldi)) == kaldi
     assert quant.hearing_of({}) == quant.LEARNT == quant.hearing_of(quant.heard_head(quant.LEARNT))
+
+
+def test_the_copied_front_gives_what_the_front_gives() -> None:
+    """The one mel channel copied ahead of the causal pad into a depthwise convolution: the same sums."""
+    cfg = load_yaml(ctc.CONFIG)
+    torch.manual_seed(0)
+    front = encoder.build(cfg).front.eval()
+    x = torch.randn(1, DIMS, 48)
+    with torch.no_grad():
+        assert torch.allclose(quant.CopiedFront(front)(x), front(x), atol=1e-5)
