@@ -3082,7 +3082,7 @@ nào khai lại struct.
 ```
 offset 0x000  header 1 KB
    +0x000 magic       'SRMD'
-   +0x004 format_ver  u32, 7 cho khuôn này
+   +0x004 format_ver  u32, 8 cho khuôn này
    +0x008 count       u32, ≤ 8
    +0x00C grid_hash   u32 — băm của contracts/grid.yaml lúc huấn luyện
    +0x010 listen_hash u32 — băm của contracts/listen.yaml mà model command học theo; 0 khi ảnh không có command
@@ -3091,8 +3091,9 @@ offset 0x000  header 1 KB
    +0x018 cmd_syllable_permille u16 — δ₃, cùng đơn vị; 0 khi ảnh không mang
    +0x01A dự trữ u16
    +0x01C speaker_hash u32 — băm của contracts/speaker.yaml mà speaker được nhập theo; 0 khi ảnh không có speaker
-   +0x020 spk_accept_milli_z i16[8] — ngưỡng điểm của speaker khi n = 1…8 người có mẫu giọng, phần nghìn của z (ADR-0022)
-   +0x030 dự trữ 16 B
+   +0x020 spk_accept_milli_z i16[8] — ngưỡng điểm của speaker khi n = 1…8 người có mẫu giọng, phần nghìn của điểm AS-norm (ADR-0023)
+   +0x030 spk_cohort_top u16 — K, số hàng cao nhất của nhóm chuẩn mà AS-norm lấy μ, σ; 0 khi ảnh không có speaker
+   +0x032 dự trữ 14 B
    +0x040 entry[8] × 64 B:
           name[16]  offset u32  size u32  sha256[32]  kind u32  flags u32
 offset 0x400  dữ liệu, mỗi entry căn 64 B
@@ -3120,11 +3121,12 @@ chọn ngưỡng, bước đóng gói ghi bộ ấy vào header, 0 cho `δ₃` k
 từ đó (§6.2).
 
 Của `speaker` có `speaker_hash`, `threshold`, `cohort` và `weights_in_flash` (§3.17). `threshold` mang bảng 8
-ngưỡng `milli_z` theo số người có mẫu giọng, cùng người lạ lọt và lệnh của chủ repo giữ được ở mỗi mức. `cohort` ghi
-seed, số người và số hàng của nhóm chuẩn; tệp `cohort.bin` nằm cạnh `speaker.espdl` và vào ảnh thành mục
-`speaker_cohort`. Bước đóng gói ghi băm và bảng vào header, đặt cờ `IN_FLASH` cho đồ thị và nhóm chuẩn; `ai_engine`
-từ chối dựng nhánh khi băm khác `gen_speaker.h`, như `listen_hash` với `command`, và khi ảnh có `speaker` mà thiếu nhóm
-chuẩn.
+ngưỡng `milli_z` theo số người có mẫu giọng, phần nghìn của điểm AS-norm, cùng người lạ lọt và lệnh của chủ repo giữ
+được ở mỗi mức. `cohort` ghi seed, số người, số hàng và `top` (K) của nhóm chuẩn; tệp `cohort.bin` nằm cạnh
+`speaker.espdl` và vào ảnh thành mục `speaker_cohort`. Bước đóng gói ghi băm, bảng và K vào header, đặt cờ `IN_FLASH`
+cho đồ thị và nhóm chuẩn, và từ chối dòng `speaker` thiếu K. `ai_engine` từ chối dựng nhánh khi băm khác
+`gen_speaker.h`, như `listen_hash` với `command`, khi ảnh có `speaker` mà thiếu nhóm chuẩn, và khi K ngoài 1…số hàng
+của nhóm chuẩn.
 
 Của `ns` có thêm trường `backend` (`rnnoise` | `nsnet`, §3.9): bước đóng gói đặt tên mục trong ảnh theo nó (`ns_rnnoise`
 hay `ns_nsnet`), nên bản dựng của ứng viên kia không tìm thấy model, `ai_engine_ns_ops()` trả `NULL` và chuỗi chạy sàn.

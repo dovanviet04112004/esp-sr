@@ -50,7 +50,7 @@ KINDS = {kind: storage_define(f"STORAGE_MODEL_KIND_{kind.upper()}") for kind in 
 IN_FLASH = storage_define("STORAGE_MODEL_FLAG_IN_FLASH")
 SPEAKERS = storage_define("APP_SPEAKERS_MAX", APP_EVENTS)
 ENTRY = struct.Struct(f"<{NAME_BYTES}sII{SHA256_BYTES}sII")
-_FIELDS = f"<IIIIIHHHHI{SPEAKERS}h"
+_FIELDS = f"<IIIIIHHHHI{SPEAKERS}hH"
 HEAD = struct.Struct(f"{_FIELDS}{FIELDS_BYTES - struct.calcsize(_FIELDS)}x")
 
 
@@ -71,6 +71,7 @@ class Locked:
     thresholds: tuple[int, int, int] = (0, 0, 0)
     speaker_hash: int = 0
     speaker_milli_z: tuple[int, ...] = ()
+    speaker_cohort_top: int = 0
 
 
 def storage_string(name: str) -> str:
@@ -101,16 +102,19 @@ def pack(
     thresholds: tuple[int, int, int] = (0, 0, 0),
     speaker_hash: int = 0,
     speaker_milli_z: tuple[int, ...] = (),
+    speaker_cohort_top: int = 0,
 ) -> bytes:
     """The image bytes: header, then the entries in order, each at the next ALIGN_BYTES boundary; listen_hash is the
     GEN_LISTEN_HASH the entries' command learned on and thresholds its delta1, delta2 and delta3 in permille, 0
-    without a command or a chosen value; speaker_hash is the GEN_SPEAKER_HASH the speaker was imported on and
-    speaker_milli_z its threshold in thousandths of z with 1, 2 ... SPEAKERS voiceprints held, 0 for each it lacks
-    (KEHOACH 6.3, ADR-0022)."""
+    without a command or a chosen value; speaker_hash is the GEN_SPEAKER_HASH the speaker was imported on,
+    speaker_milli_z its threshold in thousandths of the AS-norm score with 1, 2 ... SPEAKERS voiceprints held, 0 for
+    each it lacks, and speaker_cohort_top the cohort rows AS-norm averages over (KEHOACH 6.3, ADR-0023)."""
     if not 0 < len(entries) <= MAX_ENTRIES:
         raise ValueError(f"{len(entries)} entries, the header holds 1..{MAX_ENTRIES}")
     if len(speaker_milli_z) > SPEAKERS:
         raise ValueError(f"{len(speaker_milli_z)} speaker thresholds, the header holds {SPEAKERS}")
+    if not 0 <= speaker_cohort_top <= 0xFFFF:
+        raise ValueError(f"cohort top {speaker_cohort_top}, the header holds a u16")
     body, table, at = bytearray(), [], HEADER_BYTES
     for e in entries:
         name = e.name.encode("ascii")
@@ -121,7 +125,18 @@ def pack(
         body += padded
         at += len(padded)
     table_of = (*speaker_milli_z, *[0] * (SPEAKERS - len(speaker_milli_z)))
-    head = HEAD.pack(MAGIC, FORMAT_VER, len(entries), grid_hash, listen_hash, *thresholds, 0, speaker_hash, *table_of)
+    head = HEAD.pack(
+        MAGIC,
+        FORMAT_VER,
+        len(entries),
+        grid_hash,
+        listen_hash,
+        *thresholds,
+        0,
+        speaker_hash,
+        *table_of,
+        speaker_cohort_top,
+    )
     header = head + b"".join(table)
     image = header + bytes(HEADER_BYTES - len(header)) + bytes(body)
     if len(image) > slot_bytes():
@@ -132,10 +147,10 @@ def pack(
 def locked() -> Locked:
     """Every file models.lock.json lists, in its order, as the image entry it names, a row's graphs flagged to stay in
     flash when it was deployed so; the listen hash of the rows that record one, 0 when none does, and the delta1,
-    delta2 and delta3 of the row that records them, 0 for each it does not; the speaker hash and the thresholds for 1 to
-    SPEAKERS voiceprints of the row that records them. Refused when a file under firmware/models/<branch>/ differs from
-    its sha256, two rows learned on different listen.yaml, two record thresholds or a speaker, or the speaker's row
-    holds other than SPEAKERS thresholds."""
+    delta2 and delta3 of the row that records them, 0 for each it does not; the speaker hash, the thresholds for 1 to
+    SPEAKERS voiceprints and the cohort's top of the row that records them. Refused when a file under
+    firmware/models/<branch>/ differs from its sha256, two rows learned on different listen.yaml, two record thresholds
+    or a speaker, or the speaker's row holds other than SPEAKERS thresholds or no cohort top."""
     rows = json.loads(LOCK.read_text(encoding="utf-8"))["models"]
     entries = []
     for branch, row in rows.items():
@@ -157,18 +172,22 @@ def locked() -> Locked:
     if len(triples) > 1:
         raise ValueError(f"{len(triples)} rows of {LOCK.name} record thresholds, the header holds one command's")
     speakers = [
-        (int(r["speaker_hash"], 16), r["threshold"].get("milli_z")) for r in rows.values() if "speaker_hash" in r
+        (int(r["speaker_hash"], 16), r["threshold"].get("milli_z"), r.get("cohort", {}).get("top"))
+        for r in rows.values()
+        if "speaker_hash" in r
     ]
     if len(speakers) > 1:
         raise ValueError(f"{len(speakers)} rows of {LOCK.name} record a speaker, the header holds one")
-    speaker_hash, table = next(iter(speakers), (0, []))
-    if speaker_hash and not (isinstance(table, list) and len(table) == SPEAKERS):
+    speaker_hash, table, top = next(iter(speakers), (0, [], 0))
+    if speaker_hash and not (isinstance(table, list) and len(table) == SPEAKERS and isinstance(top, int) and top > 0):
         raise ValueError(
-            f"the speaker of {LOCK.name} holds threshold {table!r}, the header one in thousandths of z for each of"
-            f" 1..{SPEAKERS} voiceprints: make speaker-deploy again"
+            f"the speaker of {LOCK.name} holds threshold {table!r} and cohort top {top!r}, the header one in"
+            f" thousandths of the AS-norm score for each of 1..{SPEAKERS} voiceprints and a top: make speaker-deploy"
+            " again"
         )
     triple = next(iter(triples), (0, 0, 0))
-    return Locked(entries, next(iter(listen_hashes), 0), triple, speaker_hash, tuple(int(t) for t in table))
+    thresholds = tuple(int(t) for t in table)
+    return Locked(entries, next(iter(listen_hashes), 0), triple, speaker_hash, thresholds, int(top or 0))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -192,12 +211,14 @@ def main(argv: list[str] | None = None) -> int:
             thresholds=lock.thresholds,
             speaker_hash=lock.speaker_hash,
             speaker_milli_z=lock.speaker_milli_z,
+            speaker_cohort_top=lock.speaker_cohort_top,
         )
     )
     size = args.out.stat().st_size
     deltas = ", ".join(map(str, lock.thresholds))
     said = f"grid 0x{grid.GRID_HASH:08x}, listen 0x{lock.listen_hash:08x}, delta1..3 {deltas}"
     said += f", speaker 0x{lock.speaker_hash:08x} at {', '.join(map(str, lock.speaker_milli_z)) or 0} milli-z"
+    said += f" over the cohort's top {lock.speaker_cohort_top}"
     print(f"{args.out}: {len(entries)} entries, {size} bytes, {said}")
     return 0
 

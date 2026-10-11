@@ -66,14 +66,16 @@ def test_the_header_carries_its_commands_listen_hash_and_thresholds_and_0_withou
     assert not any(pack_models.HEAD.unpack_from(bare, 0)[4:])
 
 
-def test_the_header_carries_its_speakers_hash_a_threshold_a_count_and_an_entry_its_flags() -> None:
+def test_the_header_carries_its_speakers_hash_a_threshold_a_count_its_cohorts_top_and_an_entry_its_flags() -> None:
     entries = [pack_models.Entry("speaker", "espdl", b"s" * 10, pack_models.IN_FLASH)]
     table = tuple(-37 + 10 * n for n in range(pack_models.SPEAKERS))
-    image = pack_models.pack(entries, speaker_hash=speaker.HASH, speaker_milli_z=table)
-    assert pack_models.HEAD.unpack_from(image, 0)[9:] == (speaker.HASH, *table)
+    image = pack_models.pack(entries, speaker_hash=speaker.HASH, speaker_milli_z=table, speaker_cohort_top=100)
+    assert pack_models.HEAD.unpack_from(image, 0)[9:] == (speaker.HASH, *table, 100)
     assert pack_models.ENTRY.unpack_from(image, pack_models.HEAD.size)[5] == pack_models.IN_FLASH
     with pytest.raises(ValueError, match="speaker thresholds"):
         pack_models.pack(entries, speaker_milli_z=(*table, 0))
+    with pytest.raises(ValueError, match="cohort top"):
+        pack_models.pack(entries, speaker_cohort_top=0x10000)
 
 
 def test_the_lock_gives_its_command_rows_thresholds_0_for_one_it_lacks_and_refuses_two(tmp_path, monkeypatch) -> None:
@@ -116,6 +118,7 @@ def test_the_lock_flags_a_speaker_left_in_flash_and_gives_its_hash_and_threshold
         "files": files,
         "speaker_hash": f"0x{speaker.HASH:08x}",
         "threshold": {"milli_z": [412 + n for n in range(pack_models.SPEAKERS)], "impostors_passing": [0.01] * 8},
+        "cohort": {"seed": 1, "stream": 3, "speakers": 27, "rows": 380, "top": 100},
         "weights_in_flash": True,
     }
     lock = tmp_path / "models.lock.json"
@@ -124,6 +127,7 @@ def test_the_lock_flags_a_speaker_left_in_flash_and_gives_its_hash_and_threshold
     lock.write_text(json.dumps({"models": {"speaker": row}}), encoding="utf-8")
     got = pack_models.locked()
     assert (got.speaker_hash, got.speaker_milli_z) == (speaker.HASH, tuple(412 + n for n in range(8)))
+    assert got.speaker_cohort_top == 100
     assert [e.flags for e in got.entries] == [pack_models.IN_FLASH, pack_models.IN_FLASH]
     lock.write_text(json.dumps({"models": {"speaker": row | {"weights_in_flash": False}}}), encoding="utf-8")
     assert [e.flags for e in pack_models.locked().entries] == [0, pack_models.IN_FLASH]
@@ -136,7 +140,11 @@ def test_the_lock_flags_a_speaker_left_in_flash_and_gives_its_hash_and_threshold
         pack_models.locked()
     cosine = row | {"threshold": {"permille": [412] * pack_models.SPEAKERS, "impostors_passing": [0.01] * 8}}
     lock.write_text(json.dumps({"models": {"speaker": cosine}}), encoding="utf-8")
-    with pytest.raises(ValueError, match="thousandths of z"):
+    with pytest.raises(ValueError, match="AS-norm score"):
+        pack_models.locked()
+    z_norm = row | {"cohort": {"seed": 1, "stream": 3, "speakers": 27, "rows": 380}}
+    lock.write_text(json.dumps({"models": {"speaker": z_norm}}), encoding="utf-8")
+    with pytest.raises(ValueError, match="cohort top None"):
         pack_models.locked()
 
 

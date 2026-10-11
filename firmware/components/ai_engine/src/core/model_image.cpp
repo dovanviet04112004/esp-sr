@@ -33,6 +33,7 @@ size_t s_count;
 uint32_t s_listen_hash;
 uint32_t s_speaker_hash;
 int16_t s_speaker_thresholds[APP_SPEAKERS_MAX];
+uint16_t s_speaker_cohort_top;
 sys_storage_models_t s_mapping; // held while an entry stays in flash
 
 void release() noexcept
@@ -47,6 +48,7 @@ void release() noexcept
     s_listen_hash = 0;
     s_speaker_hash = 0;
     memset(s_speaker_thresholds, 0, sizeof(s_speaker_thresholds));
+    s_speaker_cohort_top = 0;
 }
 
 uint32_t id_of(const uint8_t *sha256) noexcept
@@ -105,6 +107,7 @@ esp_err_t image_load(uint8_t slot) noexcept
         s_listen_hash = models.header->listen_hash;
         s_speaker_hash = models.header->speaker_hash;
         memcpy(s_speaker_thresholds, models.header->spk_accept_milli_z, sizeof(s_speaker_thresholds));
+        s_speaker_cohort_top = models.header->spk_cohort_top;
     }
     bool held = false;
     for (size_t i = 0; i < s_count; ++i) {
@@ -156,6 +159,11 @@ uint32_t image_entry_id(const char *name, storage_model_kind_t kind) noexcept
 int16_t image_speaker_threshold_milli_z(size_t prints) noexcept
 {
     return prints >= 1 && prints <= APP_SPEAKERS_MAX ? s_speaker_thresholds[prints - 1] : 0;
+}
+
+uint16_t image_speaker_cohort_top() noexcept
+{
+    return s_speaker_cohort_top;
 }
 
 bool image_speaks_as_built(const char *name) noexcept

@@ -17,6 +17,7 @@
 #define NORM_OFFSET (STORAGE_MODEL_HEADER_BYTES + 2 * STORAGE_MODEL_ALIGN_BYTES)
 #define THRESHOLD_MILLI_Z (-37)
 #define THRESHOLD_STEP 10 // per voiceprint more, so each count reads its own
+#define COHORT_TOP 100
 
 static unsigned s_failures;
 static _Alignas(STORAGE_MODEL_ALIGN_BYTES)
@@ -113,6 +114,7 @@ static void check_in_flash(void)
     for (size_t n = 0; n < APP_SPEAKERS_MAX; n++) {
         header->spk_accept_milli_z[n] = (int16_t)(THRESHOLD_MILLI_Z + THRESHOLD_STEP * (int)n);
     }
+    header->spk_cohort_top = COHORT_TOP;
     const unsigned unmaps = fake_storage_unmaps();
     size_t bytes = 0;
     check(ai_engine_load(1) == ESP_OK && image_probe_bytes() == NET_BYTES,
@@ -125,9 +127,10 @@ static void check_in_flash(void)
                   THRESHOLD_MILLI_Z + THRESHOLD_STEP * (APP_SPEAKERS_MAX - 1) &&
               image_probe_speaker_threshold(0) == 0 &&
               image_probe_speaker_threshold(APP_SPEAKERS_MAX + 1) == 0 &&
+              image_probe_cohort_top() == COHORT_TOP &&
               image_probe_id("wake", STORAGE_MODEL_KIND_NORM) == id_of(header->entry[1].sha256),
-          "the header's speaker hash, its threshold for each count of voiceprints and an entry's id come "
-          "through");
+          "the header's speaker hash, its threshold for each count of voiceprints, its cohort's top and an "
+          "entry's id come through");
     header->speaker_hash = GEN_SPEAKER_HASH ^ 1u;
     check(ai_engine_load(1) == ESP_OK && !image_probe_speaks("speaker") &&
               fake_storage_unmaps() == unmaps + 1,

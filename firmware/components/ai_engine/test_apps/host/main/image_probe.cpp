@@ -29,6 +29,11 @@ extern "C" int16_t image_probe_speaker_threshold(size_t prints)
     return ai::image_speaker_threshold_milli_z(prints);
 }
 
+extern "C" uint16_t image_probe_cohort_top(void)
+{
+    return ai::image_speaker_cohort_top();
+}
+
 extern "C" uint32_t image_probe_id(const char *name, uint32_t kind)
 {
     return ai::image_entry_id(name, static_cast<storage_model_kind_t>(kind));

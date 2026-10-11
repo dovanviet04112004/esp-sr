@@ -96,7 +96,7 @@ _Static_assert(sizeof(storage_speaker_roster_t) == 8 + APP_SPEAKERS_MAX * 140,
 #define STORAGE_PATH_RESPONSES "/lfs/resp/vi.json"
 
 #define STORAGE_MODEL_MAGIC 0x444d5253u // "SRMD" little-endian
-#define STORAGE_MODEL_FORMAT_VER 7
+#define STORAGE_MODEL_FORMAT_VER 8
 #define STORAGE_MODEL_MAX_ENTRIES 8
 #define STORAGE_MODEL_NAME_BYTES 16
 #define STORAGE_MODEL_HEADER_BYTES 1024
@@ -133,8 +133,9 @@ typedef struct {
     uint16_t cmd_syllable_permille; // delta3 chosen for the command; 0 without one
     uint16_t reserved0;
     uint32_t speaker_hash;                        // GEN_SPEAKER_HASH of its speaker; 0 without one
-    int16_t spk_accept_milli_z[APP_SPEAKERS_MAX]; // with 1 + index voiceprints (ADR-0022) held
-    uint8_t reserved[16];
+    int16_t spk_accept_milli_z[APP_SPEAKERS_MAX]; // with 1 + index voiceprints held, AS-norm (ADR-0023)
+    uint16_t spk_cohort_top;                      // cohort rows AS-norm averages over; 0 without one
+    uint8_t reserved[14];
     storage_model_entry_t entry[STORAGE_MODEL_MAX_ENTRIES];
     uint8_t pad[STORAGE_MODEL_HEADER_BYTES - 64 - STORAGE_MODEL_MAX_ENTRIES * 64];
 } storage_model_header_t;
