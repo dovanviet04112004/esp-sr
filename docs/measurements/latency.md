@@ -942,3 +942,13 @@ lượt, kể cả 10 lệnh đăng ký và mẫu giọng giữ qua khởi độ
 - Mẫu cho điểm cao nhất đúng là mẫu của thành viên 2/7, khi chấm bằng cosine là 5/7. Thành viên là người lạ qua đường
   mô phỏng, cùng kênh với nhau, mà giữa những người cùng kênh b0 tách kém (EER 19,3%, `speaker.md` §6.4). Z-norm đổi
   thứ tự giữa các mẫu: cửa sổ của thành viên thứ ba cho z cao nhất với mẫu của chủ repo, 931, dưới ngưỡng.
+
+**Cờ bật, Z-norm, `make listen-unit SPEAKER=1`** (11/10 17:43–18:19). Firmware dựng từ `c0a2a5c`; ADR-0023 thay Z-norm
+ngay sau đó, nên lượt này chỉ còn là bằng chứng cho phần danh sách và đăng ký.
+
+| Đo | Kết quả |
+|---|---|
+| Cửa sổ trùng Python từng trường, kể cả điểm, mẫu khớp nhất và quyết định của người nói | **336/336**, 43 phiên, bảy lượt |
+| Đăng ký | lượt 0 xoá mẫu, lấy 10 lệnh đầu thành mẫu của `spk_001`; sáu lượt sau khởi động lại với 1 mẫu đọc từ NVS |
+| Quyết định của board | 150 lệnh được nhận, đều mang `spk_001`; 10 `SPEAKER_ENROLLING`; 10 `SPEAKER`, điểm −581 tới 1593, dưới ngưỡng 1656 |
+| Quyết định sau bước chốt, trung bình mỗi lượt / đỉnh | 61–91 ms / 1,01 s, như cờ tắt |
