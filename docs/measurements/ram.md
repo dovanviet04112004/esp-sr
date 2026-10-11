@@ -92,3 +92,33 @@ và 256 B là đệm chuẩn hoá; `nhan_task` cấp 8 192 B.
 Đọc từ log `heap_init` của board B qua CH340. Đây là **trần** cho mọi thứ ở KẾ HOẠCH §6.5 cộng lại, trước khi Wi-Fi và lwIP lấy phần của chúng; nó khớp khoảng ước 300–340 KB của §6.5.
 
 Wi-Fi, lwIP và esp-mqtt lấy khoảng **119 KB** RAM nội (258 415 → 139 183 B), vượt khoảng ước 50–90 KB của KẾ HOẠCH §6.5 với cấu hình đệm mặc định của IDF (32 đệm RX động, 32 TX động, 10 RX tĩnh × 1600 B). Đây là số đo cho hàng "Wi-Fi + lwIP" của §6.5; đường lùi của §6.5 là giảm đệm Wi-Fi.
+
+## 4. PSRAM theo bước khởi động và theo cỡ bộ lệnh tối đa (11/10)
+
+Board B, firmware `bench` @ `8bf4ccb`, ảnh model khoá trong `contracts/models.lock.json` (`command_ctc` và bảng
+chuẩn hoá, 3370 KB), `set.json` là bộ 301 lệnh, 653 cách đọc. Đọc từ dòng `app_boot` của log khởi động qua CH340.
+
+| Bước | PSRAM còn B | Dùng thêm | Gồm |
+|---|---|---|---|
+| `storage` | 8 384 752 | — | NVS, LittleFS |
+| `wiring` | 7 805 724 | 579 KB | hàng đợi, `q_clean`, `sb_stream` 512 KB |
+| `audio` | 6 970 132 | 836 KB | `net_mqtt`: hai vùng JSON 2 × 160 KB, hai ô bộ lệnh mỗi ô chứa JSON 154 KB và bộ đã phân tích |
+| `models` | 2 314 468 | 4 656 KB | ảnh 3370 KB, tensor `command_ctc` 314 KB, vùng chấm ctc (cây tiền tố tối đa 32 768 nút) |
+| `front` | 2 314 468 | 0 | `dsp_afe` ở RAM nội |
+| `listen` | **1 811 988** | 502 KB | `svc_listen`: vòng 512 bước, hai bảng lexicon 152 KB |
+
+Cùng board, một bản dựng tạm, không commit, hạ tối đa xuống 64 lệnh:
+`AI_ENGINE_COMMANDS_MAX` 65, `NET_MQTT_COMMANDS_TEXT_BYTES` 65 × 512, cây tiền tố 8 192 nút, vùng JSON 40 KB. Bộ 301
+lệnh không còn vừa nên máy không nghe; phần `svc_listen` tính từ code, 258 B mỗi lệnh tối đa ở mỗi bảng.
+
+| Khoản | 301 lệnh | 64 lệnh | Giữ lại |
+|---|---|---|---|
+| `net_mqtt` (bước `audio`) | 836 KB | 344 KB | **480 KB** đo |
+| vùng chấm ctc (phần của bước `models` ngoài ảnh và tensor) | ~890 KB | ~314 KB | **576 KB** đo |
+| bảng lexicon `svc_listen` | 152 KB | 33 KB | ~119 KB tính |
+| **Cộng** | | | **≈ 1,2 MB** |
+
+- PSRAM còn khi nghe lên khoảng 3,0 MB với tối đa 64 lệnh. Bộ demo `host/sets/demo_vi.json` có 47 lệnh, bộ mặc định 10.
+- KẾ HOẠCH §6.6 ghi `net_mqtt` khoảng 0,2 MB (vùng JSON 2 × 48 KB, ô bộ lệnh 2 × 53 KB); số đo là 836 KB.
+- b0 của `speaker` cần thêm ~3,86 MB (ảnh 1,72 MB, tensor 2,14 MB; E11-T26). Với tối đa 64 lệnh vẫn thiếu ~0,85 MB.
+  Để trọng số b0 ở flash thì b0 chỉ cần 2,14 MB và còn dư ~0,87 MB.
