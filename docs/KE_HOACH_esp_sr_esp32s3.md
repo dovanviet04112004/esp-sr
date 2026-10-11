@@ -1262,8 +1262,8 @@ phí chấm đi theo số biến thể, nên bộ tới 64 lệnh (§4.5.5) đo 
 của bộ lệnh chấm trên một cây tiền tố: mỗi nút là một đơn vị, giữ trạng thái của đơn vị ấy và trạng thái blank sau nó,
 chung cho mọi cách đọc mở đầu như nhau; mỗi khung cập nhật mỗi nút một lần, con trước cha, bằng đúng phép cộng nhân của
 lượt tiến từng cách đọc, nên điểm của mỗi cách đọc trùng từng bit với chấm riêng nó và bản soi gương không đổi. Cây nằm
-trong vùng cấp lúc nạp model, đủ `AI_ENGINE_COMMAND_CTC_NODES_MAX` 32 768 nút (~790 KB ở PSRAM); `test300_vi.json`
-dựng 4 426 nút từ 8 477 đơn vị; bộ cần hơn thì `_prepare` từ chối bằng `ESP_ERR_INVALID_SIZE`. `δ₁`, `δ₂`, `δ₃` ở NVS
+trong vùng cấp lúc nạp model, đủ `AI_ENGINE_COMMAND_CTC_NODES_MAX` 8 192 nút (`measurements/ram.md` §4);
+`test64_vi.json` dựng 1 015 nút từ 2 041 đơn vị; bộ cần hơn thì `_prepare` từ chối bằng `ESP_ERR_INVALID_SIZE`. `δ₁`, `δ₂`, `δ₃` ở NVS
 `kws/cmd_reject`, `kws/cmd_margin` và `kws/cmd_syllable` (§6.2), gieo từ header của ảnh model (§6.3).
 
 **Mọi điểm chia cho `T_W`**, số khung của một cửa sổ dài `window_s` (94 khung với 3 s), không chia cho số khung của cửa

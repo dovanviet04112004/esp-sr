@@ -16,7 +16,7 @@ extern "C" {
 
 #define AI_ENGINE_COMMAND_CTC_REJECTED (-1)
 #define AI_ENGINE_COMMAND_CTC_UNITS_MAX 48    // a variant's units; its forward pass keeps 2 n + 1 states
-#define AI_ENGINE_COMMAND_CTC_NODES_MAX 32768 // prefix tree of a set: a node a distinct unit prefix
+#define AI_ENGINE_COMMAND_CTC_NODES_MAX 8192  // prefix tree of a set: a node a distinct unit prefix
 #define AI_ENGINE_COMMAND_CTC_CLASSES_MAX 64  // a frame's classes, one exp kept on the stack each
 #define AI_ENGINE_COMMAND_CTC_FEATURES_MAX 96 // a hop's features, normalised on the stack
 
