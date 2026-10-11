@@ -1778,15 +1778,16 @@ người lạ lọt.
 | Cửa sổ | 1,5 s cuối của cửa sổ `command` vừa chấm, 24 000 mẫu `clean`, số 0 phía trước khi cửa sổ ngắn hơn; `window_s` của `contracts/speaker.yaml`, đúng như vật liệu của khảo sát cắt |
 | Đặc trưng | `dsp_spec/spk_fbank` (dưới), số của `contracts/speaker.yaml` qua `gen_speaker.h`; bản soi gương `srpipe.dsp.spec.spk_fbank`, khớp từng bit |
 | Mạng | mục `speaker` của ảnh, trọng số đọc thẳng từ flash (`param_copy` tắt), vùng tensor ~1,98 MB ở PSRAM; đầu vào lượng tử `lrintf(x · 2^−e)` kẹp vào int8, như mô phỏng ESP-PPQ |
-| Hậu xử lý | `ai_engine/src/speaker/`, bản soi gương `tasks/speaker/postproc/`: embedding int8 nhân 2^e thành float32, chia cho độ dài L2; điểm là tích vô hướng với mẫu giọng, phần nghìn. Có nhiều mẫu giọng thì lấy điểm lớn nhất, bằng nhau thì người ở ô thấp hơn; nhận khi điểm ≥ ngưỡng của số người đang có mẫu giọng |
-| Mẫu giọng | mỗi người một mẫu: tổng 10 embedding đã chuẩn hoá, cộng theo thứ tự đăng ký, chia cho độ dài L2 của tổng; 192 float32 ở NVS `speaker/tpl<k>` theo ô `k` của người ấy (§6.2), kèm 4 byte đầu sha256 của mục `speaker` lúc đăng ký: ảnh mang mục khác thì mẫu ấy không dùng |
-| Ngưỡng | một ngưỡng cho mỗi số người có mẫu giọng, 1…8: người lạ được so với mọi mẫu, nên càng nhiều người càng dễ lọt. `speaker-deploy` đặt bảng trên vật liệu của khảo sát chạy qua đúng đường chip mô phỏng: đặc trưng bản soi gương, mô phỏng ESP-PPQ của hàng deploy, hậu xử lý bản soi gương. Với n người, mỗi lần rút lấy chủ repo cùng n − 1 người của tập người lạ làm người đã đăng ký, mẫu giọng mỗi người từ 10 cửa sổ của chính họ; người lạ là những người còn lại, điểm của họ là điểm lớn nhất qua n mẫu. Luật 1%, nới tới 5% của bảng trên xét trên lệnh của chủ repo theo từng khoảng cách, gộp phiên; ghi vào `meta.json` và header ảnh (§6.3) |
+| Hậu xử lý | `ai_engine/src/speaker/`, bản soi gương `tasks/speaker/postproc/`: embedding int8 nhân 2^e thành float32, chia cho độ dài L2. Với mỗi mẫu giọng: d là tích vô hướng với embedding, điểm là z = (d − μ)/σ theo μ, σ của mẫu ấy (dưới), đổi ra phần nghìn bằng `lrintf`, trong ±32 767 (ADR-0022). Lấy điểm lớn nhất, bằng nhau thì người ở ô thấp hơn; nhận khi điểm ≥ ngưỡng của số người đang có mẫu giọng. Mọi tổng là float32 cộng theo thứ tự, không phép nhân cộng gộp |
+| Mẫu giọng | mỗi người một mẫu: tổng 10 embedding đã chuẩn hoá, cộng theo thứ tự đăng ký, chia cho độ dài L2 của tổng; 192 float32 ở NVS `speaker/tpl<k>` theo ô `k` của người ấy (§6.2), kèm 4 byte đầu sha256 của mục `speaker` lúc đăng ký: ảnh mang mục khác thì mẫu ấy không dùng. μ và σ của mẫu không lưu: tính lại lúc khởi động và lúc đăng ký xong, chừng vài trăm nghìn phép nhân |
+| Nhóm chuẩn | các embedding đơn vị đường chip của mọi cửa sổ của một nửa số người lạ của khảo sát, rút theo seed của khảo sát; mục `speaker_cohort` của ảnh, loại `COHORT`, float32 từng hàng `dims`, để ở flash (§6.3), ~0,3 MB. Với mỗi mẫu giọng p: s_i là tích vô hướng của p với hàng i; μ là tổng các s_i chia cho số hàng; σ là căn của tổng (s_i − μ)² chia cho số hàng, σ = 0 thì lấy 1. Nhóm chuẩn hiện cùng kênh mô phỏng với người lạ thử; có bản thu người lạ qua board (E11-T27) thì thay |
+| Ngưỡng | một ngưỡng cho mỗi số người có mẫu giọng, 1…8, theo phần nghìn của z: người lạ được so với mọi mẫu, nên càng nhiều người càng dễ lọt. `speaker-deploy` đặt bảng trên vật liệu của khảo sát chạy qua đúng đường chip mô phỏng: đặc trưng bản soi gương, mô phỏng ESP-PPQ của hàng deploy, hậu xử lý bản soi gương. Người lạ của nhóm chuẩn không dự phần này. Với n người, mỗi lần rút lấy chủ repo cùng n − 1 người lạ ngoài nhóm chuẩn làm người đã đăng ký, mẫu giọng mỗi người từ 10 cửa sổ của chính họ; người lạ là những người ngoài nhóm chuẩn còn lại, điểm của họ là điểm lớn nhất qua n mẫu. Luật 1%, nới tới 5% của bảng trên xét trên lệnh của chủ repo theo từng khoảng cách, gộp phiên; ghi vào `meta.json` và header ảnh (§6.3) |
 | Task | `xac_task` ở nhân 0, ưu tiên 3 (§5.2). `nhan_task` không chờ nó: lệnh nhận được thì `svc_listen` chép 24 000 mẫu vào một trong hai ô ở PSRAM, rồi gửi chỉ số ô qua `q_verify` (§5.3) |
-| Quyết định | `COMMAND` kèm `speakerPermille` và `speakerId` của người khớp nhất khi qua. `REJECT` mã `SPEAKER` khi dưới ngưỡng, kèm hai trường ấy; `SPEAKER_BUSY` khi cả hai ô đang bận hay đuôi tiếng của cửa sổ đã trôi khỏi vòng PCM; `SPEAKER_UNENROLLED` khi cờ bật mà chưa ai có mẫu giọng của ảnh này; `SPEAKER_ENROLLING` trong lúc đăng ký, kèm `speakerId` và `enrolCount` 1…10. Mọi `REJECT` của khối giữ `commandId` của lệnh đã nhận |
+| Quyết định | `COMMAND` kèm `speakerPermille` và `speakerId` của người khớp nhất khi qua; `speakerPermille` là cosine của người ấy, phần nghìn, còn quyết định dựa trên z. `REJECT` mã `SPEAKER` khi dưới ngưỡng, kèm hai trường ấy; `SPEAKER_BUSY` khi cả hai ô đang bận hay đuôi tiếng của cửa sổ đã trôi khỏi vòng PCM; `SPEAKER_UNENROLLED` khi cờ bật mà chưa ai có mẫu giọng của ảnh này; `SPEAKER_ENROLLING` trong lúc đăng ký, kèm `speakerId` và `enrolCount` 1…10. Mọi `REJECT` của khối giữ `commandId` của lệnh đã nhận |
 | Bật tắt | trường `check` của danh sách người nói (dưới), lưu ở NVS `speaker/chip`. Tắt thì `nhan_task` đưa lệnh lên như chưa có khối này: không chép, không chạy mạng |
 | Người nói | tối đa 8 người; thêm, xoá, sửa và đăng ký giọng đi như đổi bộ lệnh (dưới) |
 | Trễ | lệnh rời board sau khi xác minh xong: thêm một lần chạy b0 ~1,17 s cộng phần nhân 0 nhường cho `nhan_task` 🔬. Vì thế `REJECT` của câu sau có thể rời board trước `COMMAND` của câu trước; `seq` cho thứ tự |
-| Bộ nhớ | ~2,4 MB PSRAM khi ảnh có `speaker` (§6.6), gồm 8 mẫu giọng 6 KB, cấp lúc boot kể cả khi cờ tắt (§5.5 luật 6). Vừa nhờ tối đa 64 lệnh (§4.5.5) và trọng số để ở flash |
+| Bộ nhớ | ~2,4 MB PSRAM khi ảnh có `speaker` (§6.6), gồm 8 mẫu giọng 6 KB, cấp lúc boot kể cả khi cờ tắt (§5.5 luật 6). Vừa nhờ tối đa 64 lệnh (§4.5.5) và trọng số để ở flash; nhóm chuẩn cũng đọc thẳng từ flash |
 
 **Danh sách người nói** (E11-T31) đi như bộ lệnh (§4.6, §6.4): host giữ danh sách, board giữ mẫu giọng. Mọi lối vào
 gửi cùng hai yêu cầu, nên màn hình của board sau này chỉ là thêm một lối vào.
@@ -1828,8 +1829,8 @@ phỏng ESP-PPQ (§3.14). Cả chuỗi kiểm trên board B:
   so với cùng chuỗi trên Python, đo từng phần;
 - `make listen-unit` phát lại các phiên Cửa 3 với khối bật, đăng ký trên 10 lệnh đầu của phiên 28/09 1 m; với khối tắt
   thì mọi quyết định giữ nguyên;
-- ca chuỗi của `ai_engine` đăng ký đủ 8 người (chủ repo và 7 người lạ của khảo sát) và chấm mỗi cửa sổ thử với cả 8
-  mẫu như Python, kể cả người khớp nhất.
+- ca chuỗi của `ai_engine` đăng ký đủ 8 người (chủ repo và 7 người lạ ngoài nhóm chuẩn), tính μ, σ của cả 8 mẫu trên
+  nhóm chuẩn của ảnh và chấm mỗi cửa sổ thử với cả 8 mẫu như Python, kể cả người khớp nhất.
 
 **Bước sau, nếu cần:** học lại b0 trên dữ liệu nhiều ngôn ngữ cộng tiếng Việt (VieSpeaker, CC BY-NC 4.0), hay trên đặc
 trưng của hợp đồng.
@@ -2516,7 +2517,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 |---|---|---|
 | `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame`, `spk_fbank_run` (khâu đặc trưng của b0, §3.17) | any, không chặn, người gọi giữ bộ nhớ |
 | `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_entry`, `lang_vi_unit_name` | any, không chặn |
-| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,score,best,voiceprint,passes,model_id}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,2 s, chỉ ở `xac_task` |
+| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,voiceprint,norm,best,passes,model_id}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,2 s, chỉ ở `xac_task` |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |
 | `svc_*` | `svc_<x>_init`, `svc_<x>_step` | task, gọi từ đúng task của bảng §5.2 |
 
@@ -3090,7 +3091,7 @@ offset 0x000  header 1 KB
    +0x018 cmd_syllable_permille u16 — δ₃, cùng đơn vị; 0 khi ảnh không mang
    +0x01A dự trữ u16
    +0x01C speaker_hash u32 — băm của contracts/speaker.yaml mà speaker được nhập theo; 0 khi ảnh không có speaker
-   +0x020 spk_accept_permille i16[8] — ngưỡng điểm của speaker khi n = 1…8 người có mẫu giọng, phần nghìn của cosine
+   +0x020 spk_accept_milli_z i16[8] — ngưỡng điểm của speaker khi n = 1…8 người có mẫu giọng, phần nghìn của z (ADR-0022)
    +0x030 dự trữ 16 B
    +0x040 entry[8] × 64 B:
           name[16]  offset u32  size u32  sha256[32]  kind u32  flags u32
@@ -3098,8 +3099,9 @@ offset 0x400  dữ liệu, mỗi entry căn 64 B
 ```
 
 `kind`: `ESPDL` (một file `.espdl`), `NORM` (thống kê chuẩn hoá của một model, float32), `UNITS`
-(bảng đơn vị của `command` `ctc`). `flags`: bit 0 `IN_FLASH`, mục đọc tại chỗ qua mmap, không chép lên PSRAM (§6.5);
-bước đóng gói đặt nó cho đồ thị của hàng deploy có `weights_in_flash`, hiện là `speaker` (§3.17).
+(bảng đơn vị của `command` `ctc`), `COHORT` (nhóm chuẩn của `speaker`: embedding đơn vị float32, từng hàng
+`dims`). `flags`: bit 0 `IN_FLASH`, mục đọc tại chỗ qua mmap, không chép lên PSRAM (§6.5); bước đóng gói đặt nó cho đồ
+thị của hàng deploy có `weights_in_flash`, hiện là `speaker` (§3.17), và cho nhóm chuẩn, chỉ đọc lúc tính μ, σ.
 
 **`firmware/models/<nhánh>/meta.json`** đi cùng mỗi `.espdl` và được commit (§4.3): `grid_hash`, nguồn dữ liệu đã học
 (CLAUDE.md §4.3), run sinh ra nó. Của `command` có thêm ba trường (ADR-0012):
@@ -3117,10 +3119,12 @@ cho đúng dòng thang int8 được deploy (§3.12), vì điểm của hai mode
 chọn ngưỡng, bước đóng gói ghi bộ ấy vào header, 0 cho `δ₃` khi dòng chọn trước khi có nó, và lúc boot board gieo NVS
 từ đó (§6.2).
 
-Của `speaker` có `speaker_hash`, `threshold` và `weights_in_flash` (§3.17). `threshold` mang bảng 8 ngưỡng
-`permille` theo số người có mẫu giọng, cùng người lạ lọt và lệnh của chủ repo giữ được ở mỗi mức. Bước đóng gói ghi
-băm và bảng vào header, đặt cờ `IN_FLASH` cho đồ thị; `ai_engine` từ chối dựng nhánh khi băm khác `gen_speaker.h`,
-như `listen_hash` với `command`.
+Của `speaker` có `speaker_hash`, `threshold`, `cohort` và `weights_in_flash` (§3.17). `threshold` mang bảng 8
+ngưỡng `milli_z` theo số người có mẫu giọng, cùng người lạ lọt và lệnh của chủ repo giữ được ở mỗi mức. `cohort` ghi
+seed, số người và số hàng của nhóm chuẩn; tệp `cohort.bin` nằm cạnh `speaker.espdl` và vào ảnh thành mục
+`speaker_cohort`. Bước đóng gói ghi băm và bảng vào header, đặt cờ `IN_FLASH` cho đồ thị và nhóm chuẩn; `ai_engine`
+từ chối dựng nhánh khi băm khác `gen_speaker.h`, như `listen_hash` với `command`, và khi ảnh có `speaker` mà thiếu nhóm
+chuẩn.
 
 Của `ns` có thêm trường `backend` (`rnnoise` | `nsnet`, §3.9): bước đóng gói đặt tên mục trong ảnh theo nó (`ns_rnnoise`
 hay `ns_nsnet`), nên bản dựng của ứng viên kia không tìm thấy model, `ai_engine_ns_ops()` trả `NULL` và chuỗi chạy sàn.
