@@ -695,7 +695,7 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
         "speaker_hash": f"0x{speaker.HASH:08x}",
         "features": {"name": f"tf_mel{speaker.N_BANDS}", "frames": speaker.N_FRAMES, "bands": speaker.N_BANDS},
         "row": row,
-        "rungs": {"calibration": rungs["calibration"], "int16_ops": rungs["int16_ops"]},
+        "rungs": {"calibration": rungs["calibration"], "int16_ops": rungs.get("int16_ops", [])},
         "threshold": {"permille": chosen["shares"][share]["permille"], "impostors_passing": share},
         "weights_in_flash": dq["weights_in_flash"],
     }
