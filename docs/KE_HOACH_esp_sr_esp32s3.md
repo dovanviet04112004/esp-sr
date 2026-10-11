@@ -1778,15 +1778,27 @@ người lạ lọt.
 | Cửa sổ | 1,5 s cuối của cửa sổ `command` vừa chấm, 24 000 mẫu `clean`, số 0 phía trước khi cửa sổ ngắn hơn; `window_s` của `contracts/speaker.yaml`, đúng như vật liệu của khảo sát cắt |
 | Đặc trưng | `dsp_spec/spk_fbank` (dưới), số của `contracts/speaker.yaml` qua `gen_speaker.h`; bản soi gương `srpipe.dsp.spec.spk_fbank`, khớp từng bit |
 | Mạng | mục `speaker` của ảnh, trọng số đọc thẳng từ flash (`param_copy` tắt), vùng tensor ~1,98 MB ở PSRAM; đầu vào lượng tử `lrintf(x · 2^−e)` kẹp vào int8, như mô phỏng ESP-PPQ |
-| Hậu xử lý | `ai_engine/src/speaker/`, bản soi gương `tasks/speaker/postproc/`: embedding int8 nhân 2^e thành float32, chia cho độ dài L2; điểm là tích vô hướng với mẫu giọng, phần nghìn; nhận khi điểm ≥ ngưỡng |
-| Mẫu giọng | tổng 10 embedding đã chuẩn hoá, cộng theo thứ tự đăng ký, chia cho độ dài L2 của tổng; 192 float32 ở NVS `speaker/tpl` (§6.2), kèm 4 byte đầu sha256 của mục `speaker` lúc đăng ký: ảnh mang mục khác thì mẫu ấy không dùng |
-| Ngưỡng | `speaker-deploy` đặt trên vật liệu của khảo sát chạy qua đúng đường chip mô phỏng: đặc trưng bản soi gương, mô phỏng ESP-PPQ của hàng deploy, hậu xử lý bản soi gương; luật 1%, nới tới 5% của bảng trên xét trên từng khoảng cách, gộp phiên; ghi vào `meta.json` và header ảnh |
+| Hậu xử lý | `ai_engine/src/speaker/`, bản soi gương `tasks/speaker/postproc/`: embedding int8 nhân 2^e thành float32, chia cho độ dài L2; điểm là tích vô hướng với mẫu giọng, phần nghìn. Có nhiều mẫu giọng thì lấy điểm lớn nhất, bằng nhau thì người ở ô thấp hơn; nhận khi điểm ≥ ngưỡng của số người đang có mẫu giọng |
+| Mẫu giọng | mỗi người một mẫu: tổng 10 embedding đã chuẩn hoá, cộng theo thứ tự đăng ký, chia cho độ dài L2 của tổng; 192 float32 ở NVS `speaker/tpl<k>` theo ô `k` của người ấy (§6.2), kèm 4 byte đầu sha256 của mục `speaker` lúc đăng ký: ảnh mang mục khác thì mẫu ấy không dùng |
+| Ngưỡng | một ngưỡng cho mỗi số người có mẫu giọng, 1…8: người lạ được so với mọi mẫu, nên càng nhiều người càng dễ lọt. `speaker-deploy` đặt bảng trên vật liệu của khảo sát chạy qua đúng đường chip mô phỏng: đặc trưng bản soi gương, mô phỏng ESP-PPQ của hàng deploy, hậu xử lý bản soi gương. Với n người, mỗi lần rút lấy chủ repo cùng n − 1 người của tập người lạ làm người đã đăng ký, mẫu giọng mỗi người từ 10 cửa sổ của chính họ; người lạ là những người còn lại, điểm của họ là điểm lớn nhất qua n mẫu. Luật 1%, nới tới 5% của bảng trên xét trên lệnh của chủ repo theo từng khoảng cách, gộp phiên; ghi vào `meta.json` và header ảnh (§6.3) |
 | Task | `xac_task` ở nhân 0, ưu tiên 3 (§5.2). `nhan_task` không chờ nó: lệnh nhận được thì `svc_listen` chép 24 000 mẫu vào một trong hai ô ở PSRAM, rồi gửi chỉ số ô qua `q_verify` (§5.3) |
-| Quyết định | `COMMAND` kèm `speakerPermille` khi qua. `REJECT` mã `SPEAKER` khi dưới ngưỡng, `SPEAKER_BUSY` khi cả hai ô đang bận hay đuôi tiếng của cửa sổ đã trôi khỏi vòng PCM, `SPEAKER_UNENROLLED` khi cờ bật mà không có mẫu giọng của ảnh này, `SPEAKER_ENROLLING` trong lúc đăng ký. Mọi `REJECT` của khối giữ `commandId` của lệnh đã nhận |
-| Bật tắt | NVS `speaker/chip`. Tắt thì `nhan_task` đưa lệnh lên như chưa có khối này: không chép, không chạy mạng |
-| Đăng ký | console `spk enrol`: 10 lệnh kế tiếp `command` nhận thành mẫu giọng, mỗi lệnh ra `REJECT SPEAKER_ENROLLING` thay vì được thi hành. `spk on`, `spk off`; `spk clear` xoá mẫu giọng (§1.4). Lệnh console tới `xac_task` qua `q_spk`, vì chỉ task ấy chạm trạng thái của khối. Console chỉ có ở `dev` và `bench`, nên `prod` chưa có đường đăng ký: khối là của nghiên cứu (đầu mục này) |
+| Quyết định | `COMMAND` kèm `speakerPermille` và `speakerId` của người khớp nhất khi qua. `REJECT` mã `SPEAKER` khi dưới ngưỡng, kèm hai trường ấy; `SPEAKER_BUSY` khi cả hai ô đang bận hay đuôi tiếng của cửa sổ đã trôi khỏi vòng PCM; `SPEAKER_UNENROLLED` khi cờ bật mà chưa ai có mẫu giọng của ảnh này; `SPEAKER_ENROLLING` trong lúc đăng ký, kèm `speakerId` và `enrolCount` 1…10. Mọi `REJECT` của khối giữ `commandId` của lệnh đã nhận |
+| Bật tắt | trường `check` của danh sách người nói (dưới), lưu ở NVS `speaker/chip`. Tắt thì `nhan_task` đưa lệnh lên như chưa có khối này: không chép, không chạy mạng |
+| Người nói | tối đa 8 người; thêm, xoá, sửa và đăng ký giọng đi như đổi bộ lệnh (dưới) |
 | Trễ | lệnh rời board sau khi xác minh xong: thêm một lần chạy b0 ~1,17 s cộng phần nhân 0 nhường cho `nhan_task` 🔬. Vì thế `REJECT` của câu sau có thể rời board trước `COMMAND` của câu trước; `seq` cho thứ tự |
-| Bộ nhớ | ~2,4 MB PSRAM khi ảnh có `speaker` (§6.6), cấp lúc boot kể cả khi cờ tắt (§5.5 luật 6). Vừa nhờ tối đa 64 lệnh (§4.5.5) và trọng số để ở flash |
+| Bộ nhớ | ~2,4 MB PSRAM khi ảnh có `speaker` (§6.6), gồm 8 mẫu giọng 6 KB, cấp lúc boot kể cả khi cờ tắt (§5.5 luật 6). Vừa nhờ tối đa 64 lệnh (§4.5.5) và trọng số để ở flash |
+
+**Danh sách người nói** (E11-T31) đi như bộ lệnh (§4.6, §6.4): host giữ danh sách, board giữ mẫu giọng. Mọi lối vào
+gửi cùng hai yêu cầu, nên màn hình của board sau này chỉ là thêm một lối vào.
+
+| Điểm | Chốt |
+|---|---|
+| Danh sách | tối đa 8 người: `id` là mã người nói `spk_NNN` (§1.4), `name` để hiện, tối đa 31 ký tự; cờ `check` của khối. Khuôn `contracts/schema/speaker_set.schema.json`; `version` là giờ Unix lúc gửi |
+| Đổi danh sách | yêu cầu `SET` mang cả danh sách. `id` mới thì thêm, chưa có mẫu giọng; `id` vắng thì xoá mẫu giọng của người ấy ngay (§1.4); tên khác thì sửa. Mỗi người giữ ô `k` của mình tới khi bị xoá, ô trống thấp nhất cho người mới. `version` không lớn hơn bản đang giữ thì bỏ qua, nên bản retained cũ tới lại lúc nối lại không lật một thay đổi sau nó |
+| Đăng ký | yêu cầu `ENROL` mang `id` của một người trong danh sách: 10 lệnh kế tiếp `command` nhận thành mẫu giọng của người ấy, mỗi lệnh ra `REJECT SPEAKER_ENROLLING` thay vì được thi hành. Xong thì mẫu mới thay mẫu cũ, nên đăng ký lại là sửa giọng. Một `ENROL` khác, một `SET` bỏ người đang đăng ký, hay khởi động lại thì huỷ lần đang dở; mẫu cũ còn nguyên |
+| Lối vào | yêu cầu `app_speaker_request_t` (`common/include/app_events.h`, như mọi kiểu đi qua hàng đợi) vào `q_spk`, danh sách từ MQTT vào `q_spkset` (§5.3); chỉ `xac_task` đổi trạng thái của khối. MQTT: `down/speakers` (retained, `speaker_set`) và `down/cmd` op `SPEAKER_ENROL` (§7.3). Console ở `dev`, `bench`: `spk list`, `spk add <id> <tên>`, `spk del <id>`, `spk name <id> <tên>`, `spk enrol <id>`, `spk on`, `spk off`; mỗi lệnh dựng yêu cầu từ bản trạng thái mới nhất, `version` bằng bản ấy cộng 1 |
+| Lối ra | sau mỗi thay đổi, `xac_task` ghi bản trạng thái vào `q_roster`; `gui_task` đăng `up/speakers` (retained, `speaker_roster`): `version`, `check`, mỗi người `id`, `name`, có mẫu giọng chưa; người đang đăng ký và số lệnh đã thu. Lỗi lên `ERROR`: `SPEAKERS_INVALID` (sai khuôn, trùng `id`), `SPEAKERS_REFUSED` (ảnh không có `speaker`, hay hàng đợi đầy), `SPEAKERS_NOT_SAVED` (ghi NVS hỏng), `SPEAKER_UNKNOWN` (`ENROL` một `id` không có trong danh sách) |
+| Host | `make speakers DEVICE=… SET=<file>`: file theo khuôn `speaker_set`, mỗi người thêm `consent` là mã phiếu đồng ý; `srhost.speakers` từ chối người thiếu phiếu, bỏ `consent`, đóng `version`, gửi retained rồi in `up/speakers`. `make speaker-enrol DEVICE=… ID=spk_NNN` gửi `SPEAKER_ENROL` rồi in tiến độ từ `up/event`. File danh sách mang tên người nên nằm ngoài git, trừ `host/speakers/example_vi.json` |
 
 **`contracts/speaker.yaml`** định cửa sổ và khâu đặc trưng của b0, như `listen.yaml` định của `command`. `speaker_hash`
 là 4 byte đầu sha256 của tệp ấy viết thành JSON khoá xếp thứ tự. `speaker-import` và `speaker-deploy` từ chối run có
@@ -1815,7 +1827,9 @@ phỏng ESP-PPQ (§3.14). Cả chuỗi kiểm trên board B:
 - app thử của `ai_engine` chạy PCM → đặc trưng bằng C → mạng → điểm trên cửa sổ của chủ repo và người lạ của khảo sát,
   so với cùng chuỗi trên Python, đo từng phần;
 - `make listen-unit` phát lại các phiên Cửa 3 với khối bật, đăng ký trên 10 lệnh đầu của phiên 28/09 1 m; với khối tắt
-  thì mọi quyết định giữ nguyên.
+  thì mọi quyết định giữ nguyên;
+- ca chuỗi của `ai_engine` đăng ký đủ 8 người (chủ repo và 7 người lạ của khảo sát) và chấm mỗi cửa sổ thử với cả 8
+  mẫu như Python, kể cả người khớp nhất.
 
 **Bước sau, nếu cần:** học lại b0 trên dữ liệu nhiều ngôn ngữ cộng tiếng Việt (VieSpeaker, CC BY-NC 4.0), hay trên đặc
 trưng của hợp đồng.
@@ -1906,6 +1920,8 @@ contracts/
 │   ├── event.schema.json
 │   ├── device_cmd.schema.json
 │   ├── command_set.schema.json
+│   ├── speaker_set.schema.json    #   danh sách người nói gửi xuống board (§3.17)
+│   ├── speaker_roster.schema.json #   danh sách và trạng thái đăng ký board đăng lên
 │   ├── ota_manifest.schema.json
 │   └── responses.schema.json      #   khuôn của responses/vi.json — không phải payload MQTT
 ├── mqtt_topics.yaml               # topic + QoS + retained + chiều + schema
@@ -2500,7 +2516,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 |---|---|---|
 | `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame`, `spk_fbank_run` (khâu đặc trưng của b0, §3.17) | any, không chặn, người gọi giữ bộ nhớ |
 | `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_entry`, `lang_vi_unit_name` | any, không chặn |
-| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,score,voiceprint,passes,model_id}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,2 s, chỉ ở `xac_task` |
+| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,score,best,voiceprint,passes,model_id}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,2 s, chỉ ở `xac_task` |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |
 | `svc_*` | `svc_<x>_init`, `svc_<x>_step` | task, gọi từ đúng task của bảng §5.2 |
 
@@ -2628,6 +2644,7 @@ host/
 │   ├── stream_rx.py               # máy chủ TCP: nhận khung, phát hiện hở seq, ghi WAV từng kênh + json kèm
 │   ├── live.py                    # xem trực tiếp: hướng, cờ tiếng nói, mức, sự kiện
 │   ├── commands.py                # gửi bộ lệnh xuống down/commands của một board, in lỗi COMMANDS_* board báo về
+│   ├── speakers.py                # gửi danh sách người nói xuống down/speakers, đăng ký giọng, in up/speakers
 │   ├── session.py                 # phiên thu có nhãn: danh sách câu nhắc, mã người nói, mã phiếu đồng ý
 │   ├── score.py                   # chấm một phiên đã thu theo nhãn, gọi ml/src/srpipe/metrics
 │   ├── calib.py                   # ước balance từ phiên ồn trắng (srpipe), kiểm chéo; ghi calib/bal và calib/pcm_shift
@@ -2636,6 +2653,7 @@ host/
 │                                  #   ml/spk_ref/redimnet, cosine với mẫu giọng; đăng ký mẫu giọng từ một phiên thu
 ├── plans/                         # kịch bản một buổi thu: mỗi dòng một lời dặn và nhãn một phiên
 ├── sets/                          # bộ lệnh để gửi bằng make commands, mỗi file một bộ đầy đủ theo command_set
+├── speakers/                      # danh sách người nói cho make speakers; mang tên người nên ngoài git, trừ example_vi.json
 └── tests/
 ```
 
@@ -2703,6 +2721,15 @@ retained gửi lại lúc board nối lại thì trùng `version` với bộ đa
 `up/status` và `up/event` của board 5 s: board offline thì báo bộ lệnh sẽ tới lúc board nối lại; sự kiện `ERROR` mã
 `COMMANDS_*` thì in mã và lệnh hỏng nếu có `commandId`. Board không gửi xác nhận thành công: bằng chứng là log của
 board và sự kiện `COMMAND` mang `id` mới. `CLEAR=1` xoá bản retained; board giữ bộ đang dùng.
+
+`speakers.py` đi như `commands.py` cho danh sách người nói của §3.17. `make speakers DEVICE=<deviceId> SET=<file.json>`
+đọc file theo khuôn `speaker_set`, mỗi người kèm `consent` là mã phiếu đồng ý ghi mục đích nhận diện người nói (§1.4):
+thiếu phiếu, trùng `id` hay quá 8 người thì từ chối. Nó bỏ `consent`, đóng `version` bằng giờ gửi, gửi retained xuống
+`down/speakers`, rồi nghe `up/speakers` và `up/event` 5 s: in danh sách board giữ, ai đã có mẫu giọng, và lỗi
+`SPEAKERS_*`. `make speaker-enrol DEVICE=<deviceId> ID=spk_NNN` gửi `SPEAKER_ENROL` rồi in tiến độ đăng ký từ
+`up/event` tới khi đủ 10 lệnh hay hết giờ; người ấy nói 10 lệnh với board trong lúc đó. `make speakers DEVICE=… LIST=1`
+chỉ in `up/speakers`. File danh sách mang tên người thật nên để ngoài git (`host/speakers/` chỉ giữ
+`example_vi.json` với người giả).
 
 ### 4.7 `deploy/`
 
@@ -2800,14 +2827,14 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 | `thu_task` | `svc_front` | 1 | 17 | 3 KB | chặn trong `drv_audio_read_frame` tới khi DMA đủ một khung | lấy khung `ch0 ch1 [ref]`, gắn `seq`, đẩy chỉ số ô vào `q_frame`; đếm tràn DMA. **Không làm gì khác** |
 | `sach_task` | `svc_front` | 1 | 16 | 6 KB | `q_frame` | `dsp_afe_feed` rồi `fetch`; khung sạch vào `q_clean`; ghi `s_afe_stats`; luồng mở thì chép khung vào `sb_stream` không chờ |
 | `nhan_task` | `svc_listen` | 0 | 10; 2 khi chạy việc cửa sổ | 8 KB | `q_clean`, `q_cmdset` | log-mel và cao độ mỗi bước → `wake` mỗi khung; ở trạng thái `LENH` thì chạy cửa sổ `command` theo luồng thay `wake`; câu chốt → chấm → `q_dialog`; ảnh không có `wake` thì mở cửa sổ cho mọi câu `vad` tìm ra, cắt như Cửa 3 (§5.4), sự kiện → `q_event_up`; khi khối nhận diện người nói bật, lệnh nhận được đi sang `q_verify` thay vì lên thẳng (§3.17); giữa hai câu nhận bộ lệnh mới từ `q_cmdset`, đổi bảng lệnh, đưa cho `ai_engine_command_prepare`, ghi `set.json` (§5.3, §6.4) |
-| `xac_task` | `svc_listen` | 0 | 3 | 8 KB | `q_verify`, `q_spk` | xác minh người nói của đường chip (§3.17): đặc trưng b0, mạng, điểm với mẫu giọng → `COMMAND` hay `REJECT` vào `q_event_up`, trả ô qua `q_verify_free`; đăng ký, bật tắt, xoá mẫu giọng theo `q_spk`, ghi NVS qua `sys_storage`. Ngăn xếp ở RAM nội vì nó ghi flash |
-| `dieu_task` | `svc_dialog` | 0 | 8 | 4 KB | `q_dialog`, `q_cmd` | máy trạng thái §5.4; ra `q_speak`, `q_event_up`; báo `nhan_task` đổi chế độ |
+| `xac_task` | `svc_listen` | 0 | 3 | 8 KB | `q_verify`, `q_spk`, `q_spkset` | xác minh người nói của đường chip (§3.17): đặc trưng b0, mạng, điểm với mọi mẫu giọng → `COMMAND` hay `REJECT` vào `q_event_up`, trả ô qua `q_verify_free`; đổi danh sách người nói và đăng ký theo `q_spkset`, `q_spk`, ghi NVS qua `sys_storage`, ghi bản trạng thái vào `q_roster`. Ngăn xếp ở RAM nội vì nó ghi flash |
+| `dieu_task` | `svc_dialog` | 0 | 8 | 4 KB | `q_dialog`, `q_cmd` | máy trạng thái §5.4; ra `q_speak`, `q_event_up`; báo `nhan_task` đổi chế độ; `SPEAKER_ENROL` của `q_cmd` thành yêu cầu `ENROL` vào `q_spk` |
 | `noi_task` | `svc_speak` | 0 | 5 | 8 KB | `q_speak` | dựng trọn câu vào PSRAM rồi đẩy xuống TX; giương `SPEAKING` suốt lúc phát |
-| `gui_task` | `svc_report` | 0 | 4 | 4 KB | nhịp 100 ms | lấy mẫu `s_afe_stats`, gộp 10 mẫu thành một `telemetry` mỗi giây; phát `q_event_up`; `heartbeat` mỗi 30 s |
+| `gui_task` | `svc_report` | 0 | 4 | 4 KB | nhịp 100 ms | lấy mẫu `s_afe_stats`, gộp 10 mẫu thành một `telemetry` mỗi giây; phát `q_event_up`; `heartbeat` mỗi 30 s; đăng `up/speakers` khi `q_roster` có bản mới hay khi MQTT nối lại |
 | `luong_task` | `svc_report` | 0 | 3 | 4 KB | `sb_stream` | đẩy khung qua `net_stream`; TCP nghẽn thì bỏ khung, đếm; không bao giờ chặn người ghi |
 | `net_task` | `net_wifi` | 0 | 3 | 4 KB | một lần lúc boot | chờ link **tới khi có**, rồi nối MQTT, mở SNTP; xong thì tự xoá |
 | `mqtt_task` | esp-mqtt | 0 | 5 | 6 KB **ở PSRAM** | esp-mqtt tự tạo | gửi nhận, TLS ở `prod` |
-| `console` | `esp_console` (REPL) | 0 | 2 | 4 KB | `esp_console` tự tạo, **chỉ khi** `APP_CONSOLE` — không có ở `prod` | đọc dòng lệnh trên UART0, ghi NVS qua `sys_storage`; lệnh `spk` gửi `q_spk`; không lưu lịch sử xuống flash |
+| `console` | `esp_console` (REPL) | 0 | 2 | 4 KB | `esp_console` tự tạo, **chỉ khi** `APP_CONSOLE` — không có ở `prod` | đọc dòng lệnh trên UART0, ghi NVS qua `sys_storage`; lệnh `spk` đọc `q_roster`, gửi `q_spk`; không lưu lịch sử xuống flash |
 | `wifi`, `tcpip`, `esp_timer`, `sys_evt` | IDF | 0 | 18–23 | — | — | IDF quản lý; ghim nhân 0 bằng Kconfig, `sys_evt` tự ghim nhân 0; `net_wifi` nối lại trong callback của `sys_evt` và `esp_timer`, không có task riêng |
 | `ipc0`, `ipc1` | IDF | mỗi nhân một | 24 | — | — | IDF quản lý |
 
@@ -2846,7 +2873,9 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `q_event_up` | Queue depth 16, `app_event_t`, bộ nhớ ở PSRAM | 16 × 80 B | `nhan_task`, `xac_task`, `dieu_task` | `gui_task` | bỏ, tăng `events_dropped` | **người phát sự kiện không bao giờ publish**: publish QoS 1 chờ PUBACK, và `nhan_task` đứng chờ mạng là đệm 1 s đầy dần |
 | `q_verify` | Queue depth 2, chỉ số ô `uint8_t`; hai ô của `svc_listen` ở PSRAM, mỗi ô 24 000 mẫu `int16` cùng quyết định `COMMAND`, cấp lúc boot khi ảnh có `speaker` | 2 × ~47 KB | `nhan_task` | `xac_task` | không bao giờ đầy: chỉ ô lấy được từ `q_verify_free` mới được gửi | không chép tiếng hai lần; một ô chỉ có một chủ tại một lúc, như `q_frame` |
 | `q_verify_free` | Queue depth 2, chỉ số ô, nạp sẵn cả hai lúc boot | 2 B | `xac_task` trả ô đã xác minh xong | `nhan_task` lấy ô trước khi chép, timeout 0 | hết ô thì lệnh thành `REJECT SPEAKER_BUSY` ngay, không chờ | `nhan_task` không bao giờ đứng chờ một lần chạy b0 |
-| `q_spk` | Queue depth 2, `svc_listen_speaker_ctl_t` (đăng ký, bật, tắt, xoá) | 2 B | console | `xac_task` | console báo bận, không chờ | trạng thái của khối (mẫu giọng, cờ, tổng đang đăng ký) chỉ một task chạm, nên không cần khoá |
+| `q_spk` | Queue depth 2, `app_speaker_request_t`: `SET` cả danh sách hay `ENROL` một `id` (§3.17), ở PSRAM | 2 × ~400 B | console, `dieu_task` | `xac_task` | không chờ: console báo bận, `dieu_task` ra `ERROR SPEAKERS_REFUSED` | trạng thái của khối (danh sách, mẫu giọng, cờ, tổng đang đăng ký) chỉ một task chạm, nên không cần khoá |
+| `q_spkset` | Queue depth 1, `app_speaker_set_t` từ `down/speakers`, ở PSRAM | ~400 B | task esp-mqtt | `xac_task` | ghi đè: bản mới thay bản chờ | như `q_cmdset`: danh sách retained tới lúc nối lại không chen hàng với yêu cầu của console |
+| `q_roster` | Queue depth 1, `app_speaker_state_t`, ở PSRAM | ~420 B | `xac_task`, ghi đè | `gui_task`, console, `xQueuePeek` | ghi đè | bản trạng thái mới nhất của danh sách người nói; người đọc chỉ nhìn, không lấy đi, không ai chờ trên nó |
 | `s_diverting` | `atomic_bool` trong `svc_listen` | 1 B | `xac_task` | `nhan_task` | — ghi đè | kiểm người nói bật hay đang đăng ký: không thì `nhan_task` không chép, không gửi; một người ghi, một người đọc, một byte |
 | `eg_system` | EventGroup | 4 B | mọi task | mọi task | — | bit `WIFI_OK` `MQTT_OK` `TIME_OK` `MODELS_OK` `STREAM_ON` `SPEAKING` `CALIBRATING` `OTA_RUNNING` |
 | `m_storage` | Mutex, nội bộ `sys_storage` | — | mọi đường ghi NVS và LittleFS | — | chờ có hạn 200 ms | khoá lá, không lấy khoá nào khác bên trong |
@@ -3032,7 +3061,7 @@ Bảng phân vùng không đi qua OTA được: đổi bảng là nạp lại qu
 | `afe` | `ns_floor_db` (i8), `agc_target_dbfs` (i8), `vad_mode` (u8) | | gieo từ `contracts/afe.yaml`, đổi bằng `SET_CONFIG` |
 | `kws` | `wake_th` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16), `cmd_syllable` (u16), `cmd_seeds` (blob 3 × u16) | | `wake_th` gieo từ `Kconfig` của `svc_listen`; ba khoá lệnh mang nghĩa của đường đang dựng (§3.12): `δ₁`, `δ₂`, `δ₃` của `ctc` theo phần nghìn nat mỗi khung, hay xác suất thấp nhất và khoảng nhất–nhì của `kws`, ‰, đường không dùng `δ₃`. Chúng gieo từ header của ảnh ở `models_0` (§6.3), ảnh không mang thì từ `Kconfig` (`δ₃` 65 535 là không trần); `cmd_seeds` giữ bộ ba đã gieo: lúc boot, bộ gợi ý khác nó, hay một trong ba khoá vắng, thì ghi lại cả ba, nên model mới mang ngưỡng chọn cho nó tới board, khoá bị xoá (app thử `svc_listen` xoá chúng) không rơi về `Kconfig`, còn giá trị `SET_CONFIG` ghi giữ tới khi bộ gợi ý đổi |
 | `model` | `version` (str), `sha256` (blob 32 B) | | ảnh đang nằm ở `models_0` (§6.1) |
-| `speaker` | `chip`, `server` (u8), `tpl` (blob, 4 B một chiều của embedding), `tpl_model` (u32) | | `chip`, `server`: cờ kiểm người nói của hai đường (§3.17), vắng là tắt; `tpl`: mẫu giọng của đường chip, độ dài 1; `tpl_model`: 4 byte đầu sha256 của mục `speaker` lúc đăng ký, khác mục đang nạp thì mẫu không dùng; `spk clear` xoá `tpl` và `tpl_model` (§1.4) |
+| `speaker` | `chip`, `server` (u8), `roster` (blob `storage_speaker_roster_t`), `tpl0` … `tpl7` (blob, 4 B một chiều của embedding) | | `chip`, `server`: cờ kiểm người nói của hai đường (§3.17), vắng là tắt; `roster`: danh sách người nói của đường chip, `version` của nó, mỗi ô `id`, `name` và 4 byte đầu sha256 của mục `speaker` lúc người ấy đăng ký (0 khi chưa có mẫu; khác mục đang nạp thì mẫu không dùng), khuôn có số hiệu riêng; `tpl<k>`: mẫu giọng của người ở ô `k`, độ dài 1; xoá người là xoá luôn `tpl<k>` của họ (§1.4). Khoá `tpl`, `tpl_model` của khuôn một người bị xoá lúc khởi động |
 | `sys` | `boot_count` (u32), `seed_ver` (u32), `last_ota_result` (u8), `fw_valid` (u8) | | |
 
 **`pcm_shift`** là số bit dịch khi đổi mẫu 24 bit của micro sang `int16` (E2-T5). Cắt thẳng 8 bit thấp
@@ -3059,8 +3088,10 @@ offset 0x000  header 1 KB
    +0x014 cmd_reject_permille u16 — δ₁ chọn cho model command của ảnh; 0 khi ảnh không mang ngưỡng
    +0x016 cmd_margin_permille u16 — δ₂, cùng đơn vị
    +0x018 cmd_syllable_permille u16 — δ₃, cùng đơn vị; 0 khi ảnh không mang
-   +0x01A spk_accept_permille i16 — ngưỡng điểm của speaker, phần nghìn của cosine; có nghĩa khi ảnh có speaker
+   +0x01A dự trữ u16
    +0x01C speaker_hash u32 — băm của contracts/speaker.yaml mà speaker được nhập theo; 0 khi ảnh không có speaker
+   +0x020 spk_accept_permille i16[8] — ngưỡng điểm của speaker khi n = 1…8 người có mẫu giọng, phần nghìn của cosine
+   +0x030 dự trữ 16 B
    +0x040 entry[8] × 64 B:
           name[16]  offset u32  size u32  sha256[32]  kind u32  flags u32
 offset 0x400  dữ liệu, mỗi entry căn 64 B
@@ -3086,9 +3117,10 @@ cho đúng dòng thang int8 được deploy (§3.12), vì điểm của hai mode
 chọn ngưỡng, bước đóng gói ghi bộ ấy vào header, 0 cho `δ₃` khi dòng chọn trước khi có nó, và lúc boot board gieo NVS
 từ đó (§6.2).
 
-Của `speaker` có `speaker_hash`, `threshold` (`permille`, `impostors_passing`) và `weights_in_flash` (§3.17): bước
-đóng gói ghi băm và ngưỡng vào header, đặt cờ `IN_FLASH` cho đồ thị; `ai_engine` từ chối dựng nhánh khi băm khác
-`gen_speaker.h`, như `listen_hash` với `command`.
+Của `speaker` có `speaker_hash`, `threshold` và `weights_in_flash` (§3.17). `threshold` mang bảng 8 ngưỡng
+`permille` theo số người có mẫu giọng, cùng người lạ lọt và lệnh của chủ repo giữ được ở mỗi mức. Bước đóng gói ghi
+băm và bảng vào header, đặt cờ `IN_FLASH` cho đồ thị; `ai_engine` từ chối dựng nhánh khi băm khác `gen_speaker.h`,
+như `listen_hash` với `command`.
 
 Của `ns` có thêm trường `backend` (`rnnoise` | `nsnet`, §3.9): bước đóng gói đặt tên mục trong ảnh theo nó (`ns_rnnoise`
 hay `ns_nsnet`), nên bản dựng của ứng viên kia không tìm thấy model, `ai_engine_ns_ops()` trả `NULL` và chuỗi chạy sàn.
@@ -3225,8 +3257,10 @@ Topic, QoS, retained và schema khai ở `contracts/mqtt_topics.yaml`; bảng d�
 | `sr/{deviceId}/up/heartbeat` | lên | 0 | không | `heartbeat` | 30 s |
 | `sr/{deviceId}/up/telemetry` | lên | 0 | không | `telemetry` | 1 s, mỗi bản 10 mẫu 100 ms |
 | `sr/{deviceId}/up/event` | lên | 1 | không | `event` | khi có: thức, lệnh, từ chối, lỗi |
-| `sr/{deviceId}/down/cmd` | xuống | 1 | không | `device_cmd` | khi cần: `SET_CONFIG`, `SET_STREAM`, `SPEAK`, `CALIBRATE`, `REBOOT` |
+| `sr/{deviceId}/down/cmd` | xuống | 1 | không | `device_cmd` | khi cần: `SET_CONFIG`, `SET_STREAM`, `SPEAK`, `CALIBRATE`, `REBOOT`, `SPEAKER_ENROL` |
 | `sr/{deviceId}/down/commands` | xuống | 1 | **có** | `command_set` | khi đổi bộ lệnh; retained nên máy nối lại là có bản mới nhất |
+| `sr/{deviceId}/down/speakers` | xuống | 1 | **có** | `speaker_set` | khi đổi danh sách người nói (§3.17) |
+| `sr/{deviceId}/up/speakers` | lên | 1 | **có** | `speaker_roster` | lúc nối và sau mỗi thay đổi của danh sách hay của một lần đăng ký |
 | `sr/{deviceId}/up/voice` | lên | 1 | không | `voice` | khi cờ `speaker/server` bật: một lần mỗi lệnh `command` nhận (§3.17) |
 | `sr/{deviceId}/down/ota` | xuống | 1 | không | `ota_manifest` | E13 |
 
@@ -3234,13 +3268,14 @@ Topic, QoS, retained và schema khai ở `contracts/mqtt_topics.yaml`; bảng d�
 |---|---|---|
 | `heartbeat` | uptime, heap nội và PSRAM còn / thấp nhất, `frames_dropped`, `clean_dropped`, `events_dropped`, điểm cao nhất `q_clean`, điểm cao nhất vùng nhớ JSON của `net_mqtt` (`FREERTOS.md` §14 P1), tải từng nhân (ở `bench`), RSSI, phiên bản firmware và model | ~420 B |
 | `telemetry` | 10 × {hướng, độ tin, cờ tiếng nói, mức, gain}, trạng thái hội thoại | ~350 B |
-| `event` | loại, `seq` khung, điểm, lệnh, khoảng cách với lệnh thứ hai, lý do từ chối; khi đổi bộ lệnh hỏng, `ERROR` với `COMMANDS_INVALID` (kèm `commandId` của dòng `lang_vi` không đọc được), `COMMANDS_REFUSED` hay `COMMANDS_NOT_SAVED` | ~150 B |
+| `event` | loại, `seq` khung, điểm, lệnh, khoảng cách với lệnh thứ hai, lý do từ chối; khi kiểm người nói, `speakerPermille`, `speakerId`, lúc đăng ký `enrolCount`; khi đổi bộ lệnh hỏng, `ERROR` với `COMMANDS_INVALID` (kèm `commandId` của dòng `lang_vi` không đọc được), `COMMANDS_REFUSED` hay `COMMANDS_NOT_SAVED`; khi đổi danh sách người nói hỏng, `ERROR` mã `SPEAKERS_*` hay `SPEAKER_UNKNOWN` (§3.17) | ~180 B |
+| `speaker_roster` | `version`, `check`, tới 8 × {`id`, `name`, có mẫu giọng}, người đang đăng ký và số lệnh đã thu | ~600 B |
 
 Tổng ở chế độ thường: ~350 B/s telemetry + ~13 B/s heartbeat + sự kiện thưa → **dưới 1 KB/s**, đạt
 TỔNG QUAN V5.7.4, **không gửi tiếng**. Khi đường máy chủ của §3.17 bật, mỗi lệnh được nhận gửi thêm một lần cửa sổ
 lệnh, ≤ 120 KB, trên `up/voice`.
 
-Callback của esp-mqtt chỉ phân tích payload rồi bỏ vào `q_cmd` hoặc `q_cmdset` (§5.3); không làm việc
+Callback của esp-mqtt chỉ phân tích payload rồi bỏ vào `q_cmd`, `q_cmdset` hoặc `q_spkset` (§5.3); không làm việc
 dài, không ghi flash trong callback.
 
 ### 7.4 Luồng tiếng TCP
