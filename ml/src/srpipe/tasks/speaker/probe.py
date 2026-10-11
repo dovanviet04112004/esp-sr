@@ -35,10 +35,10 @@ WINDOWS_MAGIC = b"SRSV"
 RECORD = struct.Struct("<16sIIIii")
 CHAIN_FILE = "speaker_chain.bin"
 # PCM windows, dims, voiceprints, windows a voiceprint; then the voiceprints, their means and deviations over the
-# cohort, the members' enrolment units, and per PCM window its decision, PCM and unit embedding.
+# cohort's top, the members' enrolment units, and per PCM window CHAIN_WINDOW, PCM and unit embedding.
 CHAIN_HEAD = struct.Struct("<4sIIII")
-CHAIN_MAGIC = b"SRSZ"
-CHAIN_WINDOW = struct.Struct("<Iiiii")  # kind, milli-z, voiceprint, passes, cosine
+CHAIN_MAGIC = b"SRSA"
+CHAIN_WINDOW = struct.Struct("<Iiiiiff")  # kind, score, voiceprint, passes, cosine, mean, deviation
 ENROL, OWNER, IMPOSTOR, MEMBER = 0, 1, 2, 3
 CHAIN_TESTS = 6  # owner windows of other sessions, and as many impostors
 
@@ -184,10 +184,10 @@ def chain_windows(
 def chain(cfg: dict, run: Path, row: str, out: Path, workers: int) -> tuple[Path, Path]:
     """Write out/speaker_models.bin with the deployed speaker.espdl left in flash beside the row's cuts, and
     out/speaker_chain.bin: a roster of pack_models.SPEAKERS voiceprints, the owner's of the enrolment windows and each
-    member's of their units, each one's mean and deviation over the deployed cohort, then every other window of
-    chain_windows as the chip should take it, with its best normalised score over the roster, the voiceprint giving it,
-    the decision at the lock's threshold for a full roster and that voiceprint's cosine. Refused when the lock deploys
-    another row or run."""
+    member's of their units, each one's mean and deviation over the deployed cohort's top, then every other window of
+    chain_windows as the chip should take it, with its best AS-norm score over the roster, the voiceprint giving it,
+    the decision at the lock's threshold for a full roster, that voiceprint's cosine and the window's own mean and
+    deviation (ADR-0023). Refused when the lock deploys another row or run."""
     lock = json.loads(pack_models.LOCK.read_text(encoding="utf-8"))["models"][quant.BRANCH]
     if (lock["run"], lock["row"]) != (run.name, row):
         raise ValueError(f"the lock deploys {lock['run']} row {lock['row']}, not {run.name} row {row}")
@@ -201,7 +201,10 @@ def chain(cfg: dict, run: Path, row: str, out: Path, workers: int) -> tuple[Path
         cut = run / quant.INT8_DIR / row / f"{CUT_ENTRY.format(k)}.espdl"
         entries.append(pack_models.Entry(CUT_ENTRY.format(k), "espdl", cut.read_bytes()))
     table = tuple(int(t) for t in lock["threshold"]["milli_z"])
-    image.write_bytes(pack_models.pack(entries, speaker_hash=speaker.HASH, speaker_milli_z=table))
+    top = quant.deployed_top(lock)
+    image.write_bytes(
+        pack_models.pack(entries, speaker_hash=speaker.HASH, speaker_milli_z=table, speaker_cohort_top=top)
+    )
     threshold = table[pack_models.SPEAKERS - 1]
     survey_cfg, paths = load_yaml(CONFIGS / cfg["source"]["survey"]), data_paths()
     picked, enrolments = chain_windows(survey_cfg, cfg["quant"], paths, workers, pack_models.SPEAKERS - 1)
@@ -214,15 +217,16 @@ def chain(cfg: dict, run: Path, row: str, out: Path, workers: int) -> tuple[Path
     for k in range(len(enrolments)):
         prints.append(score.voiceprint(members[k * speaker.ENROL_COMMANDS : (k + 1) * speaker.ENROL_COMMANDS]))
     cohort = quant.deployed_cohort(lock, len(prints[0]))
-    norms = [score.norm(p, cohort) for p in prints]
+    norms = [score.norm(p, cohort, top) for p in prints]
     body = bytearray(CHAIN_HEAD.pack(CHAIN_MAGIC, len(picked), len(prints[0]), len(prints), speaker.ENROL_COMMANDS))
     body += np.stack(prints).astype("<f4").tobytes() + np.array(norms, dtype="<f4").tobytes()
     body += np.stack(members).astype("<f4").tobytes()
     for (kind, w), u in zip(picked, units, strict=True):
         pcm = spk_fbank.tail(np.rint(w.samples * quant.PCM_FULL_SCALE).astype(np.int16), front.cfg.window_samples)
-        z, best, cosine = score.best(u, prints, norms)
+        unit_norm = score.norm(u, cohort, top)
+        z, best, cosine = score.best(u, prints, norms, unit_norm)
         passes = score.accepts(z, threshold)
-        body += CHAIN_WINDOW.pack(kind, z, best, int(passes), cosine) + pcm.astype("<i2").tobytes()
+        body += CHAIN_WINDOW.pack(kind, z, best, int(passes), cosine, *unit_norm) + pcm.astype("<i2").tobytes()
         body += u.astype("<f4").tobytes()
         verdict = "passes" if passes else "stopped"
         print(

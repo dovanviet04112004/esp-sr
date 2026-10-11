@@ -70,7 +70,7 @@ LISTEN_MAGIC = b"SRLS"
 SPEAKER_ON, SPEAKER_AFRESH = 1, 2  # check on; voiceprint erased first (KEHOACH 3.17)
 SESSION_HEAD = struct.Struct("<IHHHxx")  # hops, segments, windows, an enrolment starting ahead of it
 SEGMENT_HEAD = struct.Struct("<II")  # first hop, hops; their int16 samples follow
-WINDOW_RECORD = struct.Struct("<IIhHHHHhhH")  # hops, decision, milli-z or count, cosine, code
+WINDOW_RECORD = struct.Struct("<IIhHHHHhhH")  # hops, decision, AS-norm milli or count, cosine, code
 NO_CHECK, PASSED, STOPPED, UNENROLLED, ENROLLING = range(5)  # a window's speaker code
 
 
@@ -396,8 +396,8 @@ def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> l
     """Each window's (value, cosine, code) as svc_listen checks it with the check on from the replay's start and the
     owner alone on the roster, their voiceprint erased: a command ahead of session enrol_at is UNENROLLED, the first
     speaker.ENROL_COMMANDS from it on enrol, the value counting them, every later one is scored with the best over the
-    one voiceprint normalised by the deployed cohort, the value its thousandths of z, at the lock's threshold for one,
-    on the chip's path (KEHOACH 3.17, ADR-0022)."""
+    one voiceprint by AS-norm over the deployed cohort's top, the value its thousandths, at the lock's threshold for
+    one, on the chip's path (KEHOACH 3.17, ADR-0023)."""
     lock = json.loads(update_lock.LOCK.read_text(encoding="utf-8"))["models"][spk.BRANCH]
     run = ML_ROOT / "artifacts" / spk.BRANCH / "runs" / lock["run"]
     graph = export_espdl.load_native(run / spk.INT8_DIR / lock["row"] / spk.GRAPH_FILE)
@@ -409,7 +409,8 @@ def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> l
     unit_of = dict(zip(checked, units, strict=True))
     enrolling = checked[: speaker.ENROL_COMMANDS]
     voiceprint = score.voiceprint([unit_of[x] for x in enrolling])
-    norms = [score.norm(voiceprint, spk.deployed_cohort(lock, len(voiceprint)))]
+    cohort, top = spk.deployed_cohort(lock, len(voiceprint)), spk.deployed_top(lock)
+    norms = [score.norm(voiceprint, cohort, top)]
     out = []
     for k, layout in enumerate(laid):
         codes = [(0, 0, NO_CHECK)] * len(layout[1])
@@ -419,7 +420,8 @@ def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> l
             elif (k, w) in enrolling:
                 codes[w] = (enrolling.index((k, w)) + 1, 0, ENROLLING)
             else:
-                z, _, cosine = score.best(unit_of[(k, w)], [voiceprint], norms)
+                u = unit_of[(k, w)]
+                z, _, cosine = score.best(u, [voiceprint], norms, score.norm(u, cohort, top))
                 codes[w] = (z, cosine, PASSED if score.accepts(z, threshold) else STOPPED)
         out.append(codes)
     return out

@@ -229,7 +229,7 @@ def test_enrolment_starts_at_the_first_owner_session_its_round_lets_finish() -> 
 
 def test_speaker_checks_leave_rejects_unchecked_count_the_enrolment_and_score_the_rest(tmp_path, monkeypatch) -> None:
     lock = tmp_path / "models.lock.json"
-    locked = {"speaker": {"run": "r", "row": "kl", "threshold": {"milli_z": [600, 700, 750]}}}
+    locked = {"speaker": {"run": "r", "row": "kl", "threshold": {"milli_z": [600, 700, 750]}, "cohort": {"top": 2}}}
     lock.write_text(json.dumps({"models": locked}), encoding="utf-8")
     monkeypatch.setattr(probe.update_lock, "LOCK", lock)
     monkeypatch.setattr(probe.export_espdl, "load_native", lambda path: None)
@@ -256,8 +256,8 @@ def test_speaker_checks_leave_rejects_unchecked_count_the_enrolment_and_score_th
     assert checks[0] == [(0, 0, probe.UNENROLLED)] * 2 + [(0, 0, probe.NO_CHECK)]
     assert checks[1] == [(n, 0, probe.ENROLLING) for n in range(1, 7)]
     assert checks[2] == [(n, 0, probe.ENROLLING) for n in range(7, 11)] + [(0, 0, probe.NO_CHECK)]
-    norms = [score.norm(owner, cohort)]
-    want = [score.best(u, [owner], norms) for u in (owner, stranger, near)]
+    norms = [score.norm(owner, cohort, 2)]
+    want = [score.best(u, [owner], norms, score.norm(u, cohort, 2)) for u in (owner, stranger, near)]
     assert [(z, c) for z, _, c in want] == [(z, c) for z, c, _ in checks[3]]
     assert [code for _, _, code in checks[3]] == [
         probe.PASSED if score.accepts(z, 600) else probe.STOPPED for z, _, _ in want

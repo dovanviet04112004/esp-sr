@@ -1,9 +1,9 @@
-# C ai_engine/src/speaker/score.c against srpipe.tasks.speaker.postproc.score (KEHOACH 3.17, ADR-0022): same float32
-# steps in the same order, no fused multiply-add, sqrtf and lrintf rounded alike: bit for bit. norms holds each
-# voiceprint's mean and deviation over the cohort; decision each test's best score in thousandths of z, whether it
-# reaches the threshold, the voiceprint that gave it and its cosine in thousandths. Negatives: 000 the voiceprint summed
-# raw, 001 a score that must pass rather than reach the threshold, 002 the first voiceprint alone, 003 the deviation over
-# one row fewer, 004 the voiceprint of the highest cosine in place of the highest normalised score.
+# C ai_engine/src/speaker/score.c against srpipe.tasks.speaker.postproc.score (KEHOACH 3.17, ADR-0023), bit for bit:
+# same float32 steps in order, no fused multiply-add. norms: each voiceprint's mean and deviation over the cohort's top,
+# unit_norms each test's; decision: best AS-norm score in thousandths, passes, its voiceprint, its cosine in thousandths.
+# Negatives: 000 voiceprint summed raw, 001 a score that must pass the threshold, 002 the first voiceprint alone,
+# 003 deviations over one row fewer, 004 the voiceprint of the highest cosine, 005 each voiceprint's z alone,
+# 006 every cohort row in place of the stated top.
 tensors:
   units:
     max_abs: 0.0
@@ -12,6 +12,9 @@ tensors:
     max_abs: 0.0
     min_snr_db: 0.0
   norms:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  unit_norms:
     max_abs: 0.0
     min_snr_db: 0.0
   decision:

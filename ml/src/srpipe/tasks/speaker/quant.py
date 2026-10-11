@@ -612,10 +612,13 @@ def chip_units(
     return out, gap
 
 
-def rule_rows(targets: list[tuple[int, str]], impostors: list[int], dq: dict) -> tuple[dict, float]:
-    """At each share of deploy.shares, the lowest score in thousandths of z that lets at most that share of the
-    impostor scores through, with the share of target scores, each at a distance, it keeps per distance; and the first
-    share whose every distance keeps deploy.keep_min, else the last (KEHOACH 3.17)."""
+def rule_rows(
+    targets: list[tuple[int, str]], impostors: list[int], dq: dict, members: list[int] | None = None
+) -> tuple[dict, float]:
+    """At each share of deploy.shares, the lowest score in thousandths of the AS-norm score that lets at most that share
+    of the impostor scores through, with the share of target scores, each at a distance, it keeps per distance, and of
+    the members' scores when there are members; and the first share whose every distance keeps deploy.keep_min, else
+    the last (KEHOACH 3.17)."""
     ranked = sorted(impostors, reverse=True)
     rows = {}
     for share in dq["shares"]:
@@ -627,6 +630,8 @@ def rule_rows(targets: list[tuple[int, str]], impostors: list[int], dq: dict) ->
         }
         passing = float(np.mean([s >= milli_z for s in impostors]))
         rows[share] = {"milli_z": int(milli_z), "impostors passing": passing, "kept accepted": kept}
+        if members:
+            rows[share]["members kept"] = float(np.mean([s >= milli_z for s in members]))
     fits = [s for s in dq["shares"] if min(rows[s]["kept accepted"].values()) >= dq["keep_min"]]
     return rows, fits[0] if fits else dq["shares"][-1]
 
@@ -656,19 +661,36 @@ def deployed_cohort(lock_row: dict, dims: int) -> np.ndarray:
     return np.frombuffer(data, dtype="<f4").reshape(-1, dims).astype(np.float32)
 
 
+def deployed_top(lock_row: dict) -> int:
+    """The cohort rows AS-norm averages over at each side, as the lock's speaker row deployed them (ADR-0023)."""
+    top = lock_row.get("cohort", {}).get("top")
+    if not isinstance(top, int) or top < 1:
+        raise ValueError("the speaker row of the lock holds no cohort top: make speaker-deploy again")
+    return top
+
+
 def threshold_table(
     units: list[np.ndarray], windows: list, survey_cfg: dict, dq: dict, most: int, cohort: set[str]
 ) -> dict:
-    """The chip's threshold over the survey's material for 1 to most people holding a voiceprint, each voiceprint
-    normalised over the windows of the cohort's speakers, who take no other part. Each of the survey's enrolment draws
-    of speaker.ENROL_COMMANDS owner windows serves every count; with n people, n - 1 other strangers who have that many
-    windows are drawn too and enrol from their own. The owner's accepted windows and the windows of every other
-    stranger not drawn are scored with the best over the n voiceprints, all draws pooled, under rule_rows."""
+    """The chip's threshold for 1 to most people holding a voiceprint, scored by AS-norm over the deploy.cohort_top rows
+    of the cohort's speakers, who take no other part (ADR-0023). Each of the survey's enrolment draws of owner windows
+    serves every count; with n people, n - 1 strangers with enough windows are drawn as members and enrol from their
+    own. The owner's accepted windows, the members' other windows and every other stranger's not drawn are scored with
+    the best over the n voiceprints, all draws pooled, under rule_rows; beside them, how often the best voiceprint is
+    the speaker's own, for the owner and for the members."""
     owner = survey_cfg["owner"]
     enrol_group = f"{owner['enrol']['date']} {owner['enrol']['distance_cm']}"
     mine = [i for i, w in enumerate(windows) if w.spk == owner["spk"]]
     pool = [i for i in mine if windows[i].group == enrol_group]
     rows_of_cohort = cohort_rows(units, windows, cohort)
+    top = dq["cohort_top"]
+    unit_norms: dict[int, tuple[np.float32, np.float32]] = {}
+
+    def scored(i: int, prints: list[np.ndarray], norms: list) -> tuple[int, int, int]:
+        if i not in unit_norms:
+            unit_norms[i] = score.norm(units[i], rows_of_cohort, top)
+        return score.best(units[i], prints, norms, unit_norms[i])
+
     by_spk: dict[str, list[int]] = {}
     for i, w in enumerate(windows):
         if w.spk != owner["spk"] and w.spk not in cohort:
@@ -681,27 +703,36 @@ def threshold_table(
         members_rng = np.random.default_rng([survey_cfg["seed"], survey.ENROL_STREAM, speaker.ENROL_COMMANDS, n])
         targets: list[tuple[int, str]] = []
         impostors: list[int] = []
+        theirs_scores: list[int] = []
+        named: dict[str, list[bool]] = {"owner": [], "members": []}
         for enrolled in draws:
             members = members_rng.choice(enrollable, n - 1, replace=False).tolist() if n > 1 else []
             prints = [score.voiceprint([units[i] for i in enrolled])]
-            for m in members:
+            member_tests: list[tuple[int, int]] = []
+            for k, m in enumerate(members, start=1):
                 theirs = sorted(members_rng.choice(by_spk[m], speaker.ENROL_COMMANDS, replace=False).tolist())
                 prints.append(score.voiceprint([units[i] for i in theirs]))
-            norms = [score.norm(p, rows_of_cohort) for p in prints]
-            tested = [i for i in mine if i not in set(enrolled) and windows[i].accepted]
-            targets += [(score.best(units[i], prints, norms)[0], windows[i].group.split()[-1]) for i in tested]
-            impostors += [
-                score.best(units[i], prints, norms)[0] for s, rows in by_spk.items() if s not in members for i in rows
-            ]
-        rows, chosen = rule_rows(targets, impostors, dq)
-        counts.append({"people": n, "shares": rows, "chosen": chosen})
+                member_tests += [(i, k) for i in by_spk[m] if i not in set(theirs)]
+            norms = [score.norm(p, rows_of_cohort, top) for p in prints]
+            for i in (i for i in mine if i not in set(enrolled) and windows[i].accepted):
+                s, index, _ = scored(i, prints, norms)
+                targets.append((s, windows[i].group.split()[-1]))
+                named["owner"].append(index == 0)
+            for i, k in member_tests:
+                s, index, _ = scored(i, prints, norms)
+                theirs_scores.append(s)
+                named["members"].append(index == k)
+            impostors += [scored(i, prints, norms)[0] for s, rows in by_spk.items() if s not in members for i in rows]
+        rows, chosen = rule_rows(targets, impostors, dq, theirs_scores)
+        right = {who: float(np.mean(found)) for who, found in named.items() if found}
+        counts.append({"people": n, "shares": rows, "chosen": chosen, "named right": right})
     return {
         "enrol_commands": speaker.ENROL_COMMANDS,
         "draws": owner["draws"],
         "owner windows": len(mine),
         "impostor windows": sum(len(rows) for rows in by_spk.values()),
         "impostors enrollable": len(enrollable),
-        "cohort": {"speakers": len(cohort), "rows": len(rows_of_cohort)},
+        "cohort": {"speakers": len(cohort), "rows": len(rows_of_cohort), "top": top},
         "counts": counts,
     }
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from srpipe.golden.gold import read_gold
 from srpipe.tasks.speaker.postproc import score
@@ -45,24 +46,41 @@ def test_best_takes_the_highest_score_and_the_lowest_voiceprint_on_a_tie() -> No
     u = score.unit(RNG.integers(-128, 128, score.GOLDEN_DIMS).astype(np.int8), -5)
     other = score.unit(RNG.integers(-128, 128, score.GOLDEN_DIMS).astype(np.int8), -5)
     plain = (np.float32(0.0), np.float32(1.0))
-    assert score.best(u, [other, u, u], [plain] * 3) == (1000, 1, 1000)
-    assert score.best(u, [-u], [plain]) == (-1000, 0, -1000)
-    assert score.best(u, [], []) == (-score.Z_LIMIT, 0, -score.SCORE_LIMIT)
+    assert score.best(u, [other, u, u], [plain] * 3, plain) == (1000, 1, 1000)
+    assert score.best(u, [-u], [plain], plain) == (-1000, 0, -1000)
+    assert score.best(u, [], [], plain) == (-score.Z_LIMIT, 0, -score.SCORE_LIMIT)
 
 
-def test_norm_is_the_float64_mean_and_deviation_over_the_cohort_and_one_without_spread() -> None:
+def test_the_top_rows_are_the_highest_scores_a_tie_to_the_earlier_row_in_row_order() -> None:
+    scores = [np.float32(x) for x in (1.0, 3.0, 3.0, 2.0)]
+    assert score.top_rows(scores, 2) == [1, 2]
+    assert score.top_rows(scores, 1) == [1]
+    assert score.top_rows(scores, 3) == [1, 2, 3]
+    assert score.top_rows([np.float32(0.0), np.float32(-0.0)], 1) == [0]
+    assert score.top_rows([np.float32(-0.0), np.float32(0.0)], 1) == [0]
+
+
+def test_norm_is_the_float64_mean_and_deviation_over_the_top_rows_and_one_without_spread() -> None:
     cohort = np.stack([score.unit(RNG.integers(-128, 128, score.GOLDEN_DIMS).astype(np.int8), -5) for _ in range(40)])
     print_ = score.unit(RNG.integers(-128, 128, score.GOLDEN_DIMS).astype(np.int8), -5)
-    mean, std = score.norm(print_, cohort)
     dots = cohort.astype(np.float64) @ print_.astype(np.float64)
-    assert abs(mean - dots.mean()) < 1e-6 and abs(std - dots.std()) < 1e-6
-    assert score.norm(print_, cohort[:1])[1] == 1.0
+    for top in (1, 10, 40):
+        mean, std = score.norm(print_, cohort, top)
+        highest = np.sort(dots)[::-1][:top]
+        assert abs(mean - highest.mean()) < 1e-6
+        assert abs(std - (highest.std() if top > 1 else 1.0)) < 1e-6
+    assert score.norm(print_, cohort[:1], 1)[1] == 1.0
+    for top in (0, 41):
+        with pytest.raises(ValueError, match="top"):
+            score.norm(print_, cohort, top)
 
 
-def test_a_normalised_score_is_the_thousandths_of_z_within_int16() -> None:
-    assert score.milli_z(np.float32(0.5), np.float32(0.1), np.float32(0.2)) == 2000
-    assert score.milli_z(np.float32(1.0), np.float32(-1.0), np.float32(1e-6)) == score.Z_LIMIT
-    assert score.milli_z(np.float32(-1.0), np.float32(1.0), np.float32(1e-6)) == -score.Z_LIMIT
+def test_an_as_norm_score_is_the_thousandths_of_the_mean_of_both_z_within_int16() -> None:
+    d, tight = np.float32(0.5), (np.float32(-1.0), np.float32(1e-6))
+    assert score.milli_score(d, (np.float32(0.1), np.float32(0.2)), (np.float32(0.1), np.float32(0.2))) == 2000
+    assert score.milli_score(d, (np.float32(0.1), np.float32(0.2)), (np.float32(0.3), np.float32(0.2))) == 1500
+    assert score.milli_score(np.float32(1.0), tight, tight) == score.Z_LIMIT
+    assert score.milli_score(np.float32(-1.0), (np.float32(1.0), np.float32(1e-6)), tight) == -score.Z_LIMIT
 
 
 def test_each_person_of_a_household_case_matches_their_own_voiceprint_best() -> None:
@@ -112,6 +130,12 @@ def test_each_negative_control_differs_from_its_reference_in_its_one_place() -> 
     cosine = read_gold(score.GOLDEN_ROOT / score.BLOCK / "case_neg_004.gold")
     np.testing.assert_array_equal(cosine["norms"], household["norms"])
     assert (cosine["decision"][:, 2] != household["decision"][:, 2]).any()
+    z_only = read_gold(score.GOLDEN_ROOT / score.BLOCK / "case_neg_005.gold")
+    np.testing.assert_array_equal(z_only["unit_norms"], household["unit_norms"])
+    assert (z_only["decision"][:, 0] != household["decision"][:, 0]).all()
+    every = read_gold(score.GOLDEN_ROOT / score.BLOCK / "case_neg_006.gold")
+    np.testing.assert_array_equal(every["top"], right["top"])
+    assert (every["norms"] != right["norms"]).all() and (every["unit_norms"] != right["unit_norms"]).all()
 
 
 def test_a_cohort_leaning_towards_a_person_ranks_them_below_their_cosine() -> None:
@@ -121,4 +145,13 @@ def test_a_cohort_leaning_towards_a_person_ranks_them_below_their_cosine() -> No
 
 def test_a_cohort_of_one_row_keeps_a_deviation_of_one() -> None:
     lone = read_gold(score.GOLDEN_ROOT / score.BLOCK / "case_006.gold")
-    assert lone["cohort"].shape[0] == 1 and lone["norms"][0, 1] == 1.0
+    assert lone["cohort"].shape[0] == 1 and lone["top"][0] == 1
+    assert lone["norms"][0, 1] == 1.0 and (lone["unit_norms"][:, 1] == 1.0).all()
+
+
+def test_the_cases_take_a_quarter_of_the_cohort_and_one_case_every_row() -> None:
+    tops = {
+        name: read_gold(score.GOLDEN_ROOT / score.BLOCK / f"{name}.gold")["top"][0]
+        for name in ("case_000", "case_001", "case_004")
+    }
+    assert tops == {"case_000": score.GOLDEN_TOP, "case_001": score.COHORT_ROWS, "case_004": 2 * score.GOLDEN_TOP}

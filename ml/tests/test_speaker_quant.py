@@ -306,11 +306,14 @@ def test_no_cohort_speaker_is_drawn_or_scored_as_an_impostor() -> None:
 
     units, windows, cfg = threshold_material(np.random.default_rng(5), [0.9] * 30, 400)
     cohort = cohort_of(windows)
-    table = quant.threshold_table(units, windows, cfg, {"shares": [0.01], "keep_min": 0.95}, 1, cohort)
-    assert table["cohort"] == {"speakers": 200, "rows": 200}
+    dq = {"shares": [0.01], "keep_min": 0.95, "cohort_top": 50}
+    table = quant.threshold_table(units, windows, cfg, dq, 1, cohort)
+    assert table["cohort"] == {"speakers": 200, "rows": 200, "top": 50}
     assert table["impostor windows"] == 200
     with pytest.raises(ValueError, match="no window"):
-        quant.threshold_table(units, windows, cfg, {"shares": [0.01], "keep_min": 0.95}, 1, set())
+        quant.threshold_table(units, windows, cfg, dq, 1, set())
+    with pytest.raises(ValueError, match="top 201"):
+        quant.threshold_table(units, windows, cfg, dq | {"cohort_top": 201}, 1, cohort)
 
 
 def test_the_threshold_lets_at_most_its_share_of_impostors_through_and_keeps_the_rule() -> None:
@@ -318,7 +321,7 @@ def test_the_threshold_lets_at_most_its_share_of_impostors_through_and_keeps_the
 
     rng = np.random.default_rng(7)
     units, windows, cfg = threshold_material(rng, [0.9] * 30, 400)
-    dq = {"shares": [0.01, 0.05], "keep_min": 0.95}
+    dq = {"shares": [0.01, 0.05], "keep_min": 0.95, "cohort_top": 50}
     chosen = quant.threshold_table(units, windows, cfg, dq, 1, cohort_of(windows))["counts"][0]
     assert chosen["chosen"] == 0.01
     for share, row in chosen["shares"].items():
@@ -327,15 +330,14 @@ def test_the_threshold_lets_at_most_its_share_of_impostors_through_and_keeps_the
 
 
 def test_a_distance_kept_under_the_floor_at_one_percent_moves_the_threshold_to_five() -> None:
-    import numpy as np
-
-    rng = np.random.default_rng(8)
-    units, windows, cfg = threshold_material(rng, [0.9] * 26 + [0.57] * 4, 400)
-    dq = {"shares": [0.01, 0.05], "keep_min": 0.95}
-    chosen = quant.threshold_table(units, windows, cfg, dq, 1, cohort_of(windows))["counts"][0]
-    assert chosen["shares"][0.01]["kept accepted"]["300 cm"] < 0.95
-    assert chosen["chosen"] == 0.05
-    assert chosen["shares"][0.05]["milli_z"] < chosen["shares"][0.01]["milli_z"]
+    impostors = list(range(1000))
+    targets = [(2000, "100")] * 30 + [(2000, "300")] * 26 + [(985, "300")] * 4
+    rows, chosen = quant.rule_rows(targets, impostors, {"shares": [0.01, 0.05], "keep_min": 0.95})
+    assert rows[0.01]["milli_z"] == 990 and rows[0.01]["impostors passing"] == 0.01
+    assert rows[0.01]["kept accepted"] == {"100 cm": 1.0, "300 cm": 26 / 30}
+    assert chosen == 0.05 and rows[0.05]["milli_z"] == 950 and rows[0.05]["kept accepted"]["300 cm"] == 1.0
+    with_members, _ = quant.rule_rows(targets, impostors, {"shares": [0.05], "keep_min": 0.95}, [940, 960])
+    assert with_members[0.05]["members kept"] == 0.5 and "members kept" not in rows[0.01]
 
 
 def test_more_people_enrolled_raise_the_threshold_and_keep_their_own_windows_out_of_the_impostors() -> None:
@@ -351,10 +353,32 @@ def test_more_people_enrolled_raise_the_threshold_and_keep_their_own_windows_out
         direction[2 + k] = 1.0
         windows += [survey.Window(f"guest{k}", "near", np.zeros(1)) for _ in range(12)]
         units += [direction] * 12
-    dq = {"shares": [0.01, 0.05], "keep_min": 0.95}
+    dq = {"shares": [0.01, 0.05], "keep_min": 0.95, "cohort_top": 50}
     table = quant.threshold_table(units, windows, cfg, dq, 4, cohort_of(windows))
     assert [c["people"] for c in table["counts"]] == [1, 2, 3, 4] and table["impostors enrollable"] == 3
     thresholds = [c["shares"][0.01]["milli_z"] for c in table["counts"]]
     assert thresholds == sorted(thresholds)
     for count in table["counts"]:
         assert count["shares"][0.01]["impostors passing"] <= 0.01
+
+
+def test_members_windows_are_kept_and_named_as_their_own_beside_the_owners() -> None:
+    import numpy as np
+
+    from srpipe.scenes import speaker as survey
+
+    rng = np.random.default_rng(10)
+    units, windows, cfg = threshold_material(rng, [0.9] * 30, 400)
+    dims = len(units[0])
+    for k in range(2):
+        direction = np.zeros(dims, dtype=np.float32)
+        direction[2 + k] = 1.0
+        windows += [survey.Window(f"guest{k}", "near", np.zeros(1)) for _ in range(12)]
+        units += [direction] * 12
+    dq = {"shares": [0.01, 0.05], "keep_min": 0.95, "cohort_top": 50}
+    alone, pair, trio = quant.threshold_table(units, windows, cfg, dq, 3, cohort_of(windows))["counts"]
+    assert alone["named right"] == {"owner": 1.0} and "members kept" not in alone["shares"][0.01]
+    for count in (pair, trio):
+        assert count["named right"] == {"owner": 1.0, "members": 1.0}
+        kept = [count["shares"][share]["members kept"] for share in (0.01, 0.05)]
+        assert 0.0 <= kept[0] <= kept[1] <= 1.0
