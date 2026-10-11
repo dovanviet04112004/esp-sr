@@ -132,7 +132,7 @@ SCHEMAS: dict[str, dict] = {
      'properties': {'version': {'type': 'integer', 'minimum': 1, 'maximum': 2147483647},
                     'commands': {'type': 'array',
                                  'minItems': 1,
-                                 'maxItems': 301,
+                                 'maxItems': 64,
                                  'items': {'type': 'object',
                                            'additionalProperties': False,
                                            'required': ['id', 'text'],
