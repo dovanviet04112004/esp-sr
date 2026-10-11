@@ -139,7 +139,11 @@ def command(port: serial.Serial, line: str) -> str:
 
 def open_console(port_name: str) -> serial.Serial:
     """The console of test_apps/calib at a fresh prompt, whether or not opening the port reset the board."""
-    port = serial.Serial(port_name, BAUD, timeout=0.1)
+    port = serial.serial_for_url(port_name, BAUD, timeout=0.1, do_not_open=True)
+    # Lines released: over the RFC 2217 bridge a raised DTR is esptool's cue for the bootloader (KEHOACH 2.1).
+    port.dtr = False
+    port.rts = False
+    port.open()
     try:
         # A board that did not reset has printed its prompt already; an empty line makes it print another.
         port.write(b"\r\n")
@@ -227,10 +231,10 @@ def main(argv: list[str] | None = None) -> int:
     est.add_argument("--out", type=Path, help="balance file; docs/measurements/calib/<board>_balance.csv otherwise")
     wr = sub.add_parser("write", help="send a balance file to test_apps/calib and verify it")
     wr.add_argument("csv", type=Path)
-    wr.add_argument("--port", required=True, help="serial port of the board, e.g. /dev/ttyUSB0")
+    wr.add_argument("--port", required=True, help="serial port of the board: a device or a URL")
     sh = sub.add_parser("shift", help="store calib/pcm_shift on the board through test_apps/calib (E2-T5)")
     sh.add_argument("shift", type=int, help="right shift of each 32-bit slot, as drv_audio applies it")
-    sh.add_argument("--port", required=True, help="serial port of the board, e.g. /dev/ttyUSB0")
+    sh.add_argument("--port", required=True, help="serial port of the board: a device or a URL")
     args = parser.parse_args(argv)
     actions = {"estimate": estimate_main, "write": write_main, "shift": shift_main}
     try:

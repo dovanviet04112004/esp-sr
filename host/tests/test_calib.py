@@ -84,6 +84,11 @@ class FakeBoard:
         self.values: dict[int, tuple[float, float]] = {}
         self.stored: bytes | None = None
         self.shift: int | None = None
+        self.dtr = self.rts = True
+        self.opened_with: tuple[bool, bool] | None = None
+
+    def open(self) -> None:
+        self.opened_with = (self.dtr, self.rts)
 
     def read(self, n: int) -> bytes:
         out, self.pending = bytes(self.pending[:n]), self.pending[n:]
@@ -126,7 +131,7 @@ class FakeBoard:
 
 def test_writing_sends_every_bin_and_the_crc_comes_back(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     board = FakeBoard()
-    monkeypatch.setattr(calib.serial, "Serial", lambda *a, **k: board)
+    monkeypatch.setattr(calib.serial, "serial_for_url", lambda *a, **k: board)
     est = calib.balance.Balance(gains(3), 0.0, 0.0, 1)
     path = tmp_path / "b.csv"
     calib.write_csv(path, est, ["x", "y"])
@@ -148,13 +153,14 @@ def test_the_console_is_reached_whether_or_not_opening_resets_the_board(
     monkeypatch: pytest.MonkeyPatch, reset_on_open: bool
 ) -> None:
     board = FakeBoard(reset_on_open)
-    monkeypatch.setattr(calib.serial, "Serial", lambda *a, **k: board)
-    assert calib.main(["shift", "13", "--port", "/dev/null"]) == 0
+    monkeypatch.setattr(calib.serial, "serial_for_url", lambda *a, **k: board)
+    assert calib.main(["shift", "13", "--port", "rfc2217://127.0.0.1:4011?ign_set_control"]) == 0
     assert board.shift == 13
+    assert board.opened_with == (False, False)
 
 
 def test_a_shift_the_board_refuses_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
     board = FakeBoard()
-    monkeypatch.setattr(calib.serial, "Serial", lambda *a, **k: board)
+    monkeypatch.setattr(calib.serial, "serial_for_url", lambda *a, **k: board)
     assert calib.main(["shift", "7", "--port", "/dev/null"]) == 2
     assert board.shift is None
