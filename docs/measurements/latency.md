@@ -952,3 +952,19 @@ ngay sau đó, nên lượt này chỉ còn là bằng chứng cho phần danh s
 | Đăng ký | lượt 0 xoá mẫu, lấy 10 lệnh đầu thành mẫu của `spk_001`; sáu lượt sau khởi động lại với 1 mẫu đọc từ NVS |
 | Quyết định của board | 150 lệnh được nhận, đều mang `spk_001`; 10 `SPEAKER_ENROLLING`; 10 `SPEAKER`, điểm −581 tới 1593, dưới ngưỡng 1656 |
 | Quyết định sau bước chốt, trung bình mỗi lượt / đỉnh | 61–91 ms / 1,01 s, như cờ tắt |
+
+**Ca chuỗi với 8 mẫu giọng, chấm bằng AS-norm** (E11-T31, ADR-0023, 11/10 18:27). Firmware dựng từ `67b1c69`.
+- Ảnh khuôn 8: nhóm chuẩn 380 hàng, K = 100, bảng ngưỡng của `speaker.md` §6.7. Ngưỡng cho 8 người là 3795.
+- Cửa sổ và thành viên như ca 15:13.
+
+| Đo | Kết quả |
+|---|---|
+| So Python | 0/29 embedding lệch, 8/8 mẫu giọng trùng từng bit; 0/8 cặp μ, σ của mẫu giọng, 0/19 cặp μ, σ của cửa sổ và 0/19 quyết định lệch |
+| Qua ở 3795 | chủ repo **6/6**; thành viên 1/7; người lạ 0/6, cao nhất 1874 |
+| Mẫu cho điểm cao nhất là mẫu của chính người nói | chủ repo 6/6; thành viên 2/7 |
+| Một lần chạy `ai_engine_speaker_embed` | 1257,0 ms trung bình, 1258,3 ms đỉnh; lần đầu sau nạp 1306,1 ms; `spk_fbank` 79,3 ms |
+| Lần xác minh đầu sau nạp giữ lại | 0 B RAM nội, 0 B PSRAM: chỗ chấm trên nhóm chuẩn cấp lúc nạp |
+
+- Như Z-norm ở ca 17:31: chủ repo qua 6/6, người lạ 0/6, thành viên 1/7 và 2/7 đúng người. Ngưỡng nay đặt ở 1% người lạ
+  lọt thay vì 5%.
+- Ca này chưa đo riêng phần chấm, tức μ, σ của cửa sổ trên 380 hàng cùng 8 điểm.
