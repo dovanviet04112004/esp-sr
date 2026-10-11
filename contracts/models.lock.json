@@ -9,7 +9,7 @@
           "file": "command_ctc.espdl",
           "entry": "command_ctc",
           "kind": "espdl",
-          "sha256": "207601ee5197157326bf04def5139b7146e0ca509e0c69eb02fc86c19e03ff0f"
+          "sha256": "1e57538ec65d3bad665b92ba84e282850099669932011909c7cac72efe9d15c9"
         },
         {
           "file": "command_ctc.norm.bin",
