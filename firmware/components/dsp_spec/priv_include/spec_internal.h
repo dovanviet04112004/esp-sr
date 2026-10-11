@@ -42,3 +42,6 @@ static inline void *spec_carve(spec_carver_t *c, size_t bytes)
 }
 
 size_t spec_fft_points(const dsp_spec_fft_t *fft);
+
+// The module's float32 ln, within 2e-6 of ln, as srpipe.dsp.spec.mel.ln_f32 takes it (ADR-0020).
+float spec_ln_f32(float x);

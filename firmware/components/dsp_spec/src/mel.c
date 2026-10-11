@@ -113,7 +113,7 @@ esp_err_t dsp_spec_mel_init(dsp_spec_mel_t **out, const dsp_spec_mel_config_t *c
 }
 
 // ln x of a positive normal x: exponent off the bits, mantissa in [sqrt(1/2), sqrt(2)) by the series.
-static float ln_f32(float x)
+float spec_ln_f32(float x)
 {
     const uint32_t b = ((float_bits_t){.f = x}).u;
     int exponent = (int)((b >> FLOAT_EXP_SHIFT) & FLOAT_EXP_FIELD) - FLOAT_HALF_FIELD;
@@ -140,7 +140,7 @@ esp_err_t dsp_spec_mel_log(const dsp_spec_mel_t *mel, const dsp_spec_cplx_t *bin
             energy += w[i] * (x[i].re * x[i].re + x[i].im * x[i].im);
         }
         w += mel->n_weights[b];
-        out[b] = ln_f32(energy + mel->log_floor);
+        out[b] = spec_ln_f32(energy + mel->log_floor);
     }
     return ESP_OK;
 }
