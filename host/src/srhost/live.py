@@ -18,6 +18,7 @@ from pathlib import Path
 
 from srhost.config import ConfigError, mqtt_config
 from srhost.mqtt_rx import JsonlLog, Message, Receiver
+from srhost.speakers import ENROL_COMMANDS
 
 REFRESH_S = 0.2
 EVENTS_SHOWN = 8
@@ -61,7 +62,7 @@ def describe_speaker(event: dict) -> str:
     if "speakerId" not in event:
         return ""
     if "enrolCount" in event:
-        return f" · speaker {event['speakerId']} enrolment {event['enrolCount']}"
+        return f" · speaker {event['speakerId']} enrolment {event['enrolCount']}/{ENROL_COMMANDS}"
     cosine = f" {event['speakerPermille'] / PERMILLE:.2f}" if "speakerPermille" in event else ""
     return f" · speaker {event['speakerId']}{cosine}"
 
@@ -94,7 +95,7 @@ def describe_roster(roster: dict) -> str:
     )
     text = f"v{roster['version']} check {'on' if roster['check'] else 'off'}: {people or 'nobody'}"
     if "enrollingId" in roster:
-        text += f"; enrolling {roster['enrollingId']} {roster.get('enrolCount', 0)}"
+        text += f"; enrolling {roster['enrollingId']} {roster.get('enrolCount', 0)}/{ENROL_COMMANDS}"
     return text
 
 

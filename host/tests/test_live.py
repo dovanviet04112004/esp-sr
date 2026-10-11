@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from srhost import live, mqtt_rx
+from srhost.speakers import ENROL_COMMANDS
 from test_mqtt_rx import DEVICE, HEARTBEAT, TELEMETRY
 
 
@@ -101,7 +102,9 @@ def test_each_checked_command_shows_its_speaker_and_each_refusal_or_enrolment_it
     plain = event({"seq": 33, "kind": "REJECT", "code": "LOW_SCORE", "scorePermille": 700, "marginPermille": 20})
     assert live.describe_event(passed).endswith("COMMAND bat_den score 0.98 margin 0.13 · speaker spk_001 0.85")
     assert live.describe_event(stopped).endswith("REJECT SPEAKER tat_den · speaker spk_001 0.74")
-    assert live.describe_event(enrolling).endswith("REJECT SPEAKER_ENROLLING mo_cua · speaker spk_001 enrolment 3")
+    assert live.describe_event(enrolling).endswith(
+        f"REJECT SPEAKER_ENROLLING mo_cua · speaker spk_001 enrolment 3/{ENROL_COMMANDS}"
+    )
     assert live.describe_event(plain).endswith("REJECT LOW_SCORE")
 
 
@@ -117,4 +120,4 @@ def test_the_roster_a_board_keeps_gets_its_own_line() -> None:
         now_monotonic=0.0
     )
     enrolling = {**roster, "enrollingId": "spk_003", "enrolCount": 4}
-    assert live.one_line(message("speakers", enrolling)).endswith("; enrolling spk_003 4")
+    assert live.one_line(message("speakers", enrolling)).endswith(f"; enrolling spk_003 4/{ENROL_COMMANDS}")
