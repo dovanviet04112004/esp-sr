@@ -4,7 +4,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 port="${PORT:-/dev/ttyUSB0}"
+baud="${BAUD:-921600}"
 image=artifacts/models.bin
 uv run python -m srpipe.export.pack_models "$image" --lock
-python "$IDF_PATH/components/partition_table/parttool.py" --port "$port" \
+python "$IDF_PATH/components/partition_table/parttool.py" --port "$port" --baud "$baud" \
   --partition-table-file ../firmware/partitions.csv write_partition --partition-name models_0 --input "$image"

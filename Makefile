@@ -1,8 +1,10 @@
 .DEFAULT_GOAL := help
 
-# Board B on the CH340 that usbipd hands to WSL (KEHOACH 2.1).
+# Board B on the CH340 that usbipd hands to WSL (KEHOACH 2.1). It holds 921600 baud, as pytest-embedded flashes;
+# esptool left alone writes a partition at 115200, ~11 KB/s.
 PORT ?= /dev/ttyUSB0
 BOARD_USB_ID ?= 1a86:7523
+FLASH_BAUD ?= 921600
 
 # The ml environment: every ml/ target runs there, the CPU-only ones with no GPU visible.
 ML := cd ml && uv run
@@ -33,7 +35,8 @@ UNIT_APP := firmware/components/ai_engine/test_apps/unit
 LISTEN_APP := firmware/components/svc_listen/test_apps/unit
 ON_BOARD = --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) -p no:cacheprovider
 UNIT_PARTITIONS := $(CURDIR)/firmware/test_apps/partitions_unit.csv
-PARTTOOL = python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --partition-table-file $(UNIT_PARTITIONS)
+PARTTOOL = python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --baud $(FLASH_BAUD) \
+  --partition-table-file $(UNIT_PARTITIONS)
 WRITE_PART = $(PARTTOOL) write_partition --partition-name
 ERASE_PART = $(PARTTOOL) erase_partition --partition-name
 
@@ -393,7 +396,7 @@ monitor: ## Open the serial monitor on the CH340
 	cd firmware && idf.py -p $(PORT) monitor
 
 models-flash: ## Pack every model of contracts/models.lock.json and write models_0 of board B (KEHOACH 4.5.6, 6.1)
-	cd ml && PORT=$(PORT) ./scripts/50_pack_and_flash.sh
+	cd ml && PORT=$(PORT) BAUD=$(FLASH_BAUD) ./scripts/50_pack_and_flash.sh
 
 capture-flash: ## Flash test_apps/capture, the raw-only recorder (E5-T12)
 	cd $(CAPTURE_APP) && idf.py -p $(PORT) flash
