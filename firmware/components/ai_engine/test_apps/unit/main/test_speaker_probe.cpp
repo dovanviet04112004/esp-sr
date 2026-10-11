@@ -158,10 +158,18 @@ TEST_CASE("each cut of the speaker graph runs as its ESP-PPQ simulation does", "
 namespace {
 
 struct ChainTiming {
-    int64_t embed_us = 0;
+    int64_t first_us = 0;
+    int64_t first_internal_bytes = 0; // heap the first check after load keeps
+    int64_t first_psram_bytes = 0;
+    int64_t embed_us = 0; // the windows after the first
     int64_t embed_peak_us = 0;
     int64_t front_us = 0;
 };
+
+int64_t free_bytes(uint32_t caps)
+{
+    return static_cast<int64_t>(heap_caps_get_free_size(caps));
+}
 
 // Every window's unit embedding from its PCM, as xac_task gets it; the front end alone is timed beside.
 uint32_t embed_all(const uint8_t *at, const ChainHead &head, size_t dims, float *units, ChainTiming &t)
@@ -184,11 +192,19 @@ uint32_t embed_all(const uint8_t *at, const ChainHead &head, size_t dims, float 
         int64_t from_us = esp_timer_get_time();
         TEST_ASSERT_EQUAL(ESP_OK, dsp_spec_spk_fbank_run(fb, pcm, features));
         t.front_us += esp_timer_get_time() - from_us;
+        const int64_t internal_before = free_bytes(MALLOC_CAP_INTERNAL);
+        const int64_t psram_before = free_bytes(MALLOC_CAP_SPIRAM);
         from_us = esp_timer_get_time();
         TEST_ASSERT_EQUAL(ESP_OK, ai_engine_speaker_embed(pcm, units + i * dims));
         const int64_t took_us = esp_timer_get_time() - from_us;
-        t.embed_us += took_us;
-        t.embed_peak_us = took_us > t.embed_peak_us ? took_us : t.embed_peak_us;
+        if (i == 0) {
+            t.first_us = took_us;
+            t.first_internal_bytes = internal_before - free_bytes(MALLOC_CAP_INTERNAL);
+            t.first_psram_bytes = psram_before - free_bytes(MALLOC_CAP_SPIRAM);
+        } else {
+            t.embed_us += took_us;
+            t.embed_peak_us = took_us > t.embed_peak_us ? took_us : t.embed_peak_us;
+        }
         const uint8_t *want = w + sizeof(ChainWindow) + GEN_SPEAKER_WINDOW_SAMPLES * sizeof(int16_t);
         off += memcmp(units + i * dims, want, dims * sizeof(float)) != 0;
         vTaskDelay(1);
@@ -251,16 +267,20 @@ TEST_CASE("the speaker chain embeds, enrols and scores every window as Python do
     printf("speaker chain: %" PRIu32 " windows, %" PRIu32 " units and %" PRIu32
            " scores off python, voiceprint %s; owner %" PRIu32 "/%" PRIu32 " and impostor %" PRIu32
            "/%" PRIu32 " passed at %" PRId32 " permille; embed %" PRId64 " us mean, %" PRId64
-           " us peak; front end %" PRId64 " us mean\n",
+           " us peak after the first, %" PRId64 " us; front end %" PRId64 " us mean\n",
            head.windows, units_off, off, print_same ? "same" : "differs", owners_passed, owners,
-           impostors_passed, impostors, head.threshold_permille, t.embed_us / head.windows, t.embed_peak_us,
-           t.front_us / head.windows);
+           impostors_passed, impostors, head.threshold_permille, t.embed_us / (head.windows - 1),
+           t.embed_peak_us, t.first_us, t.front_us / head.windows);
+    printf("speaker chain: the first check after load kept %" PRId64 " B internal and %" PRId64 " B PSRAM\n",
+           t.first_internal_bytes, t.first_psram_bytes);
     heap_caps_free(units);
     heap_caps_free(print);
     esp_partition_munmap(handle);
     TEST_ASSERT_EQUAL(0, units_off);
     TEST_ASSERT_TRUE(print_same);
     TEST_ASSERT_EQUAL(0, off);
+    TEST_ASSERT_EQUAL_MESSAGE(0, (int)t.first_internal_bytes, "a check allocates after load (CLAUDE.md 4.1)");
+    TEST_ASSERT_EQUAL_MESSAGE(0, (int)t.first_psram_bytes, "a check allocates after load (CLAUDE.md 4.1)");
 }
 
 extern "C" void app_main(void)
