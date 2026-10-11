@@ -175,12 +175,13 @@ static void raise_decision(const app_wiring_t *w, const svc_listen_decision_t *d
     send_up(w, e);
     ESP_LOGI(TAG,
              "%s %s score %u margin %u gap %u syllable %u, hops %" PRIu32 "..%" PRIu32 ", %" PRIu32
-             " ms work, %" PRIu32 " ms after the close, speaker %d in %" PRIu32 " ms",
+             " ms work, %" PRIu32 " ms after the close, speaker %d %s %u in %" PRIu32 " ms",
              e->kind == APP_EVT_COMMAND ? "COMMAND" : "REJECT",
              e->kind == APP_EVT_COMMAND ? e->command_id : e->code, (unsigned)e->score_permille,
              (unsigned)e->margin_permille, (unsigned)d->free_gap_permille, (unsigned)d->syllable_gap_permille,
              d->first_seq, e->seq, d->work_us / US_PER_MS, d->close_us / US_PER_MS,
-             e->has_speaker ? e->speaker_permille : 0, d->verify_us / US_PER_MS);
+             e->has_speaker ? e->speaker_permille : 0, e->speaker_id[0] != '\0' ? e->speaker_id : "-",
+             (unsigned)e->enrol_count, d->verify_us / US_PER_MS);
 }
 
 // A heard command waits for xac_task's speaker check; with no slot free, or its audio gone, it leaves
@@ -288,26 +289,73 @@ static void nhan_task(void *arg)
     }
 }
 
+// Only after a change: gui_task publishes each state it finds new (KEHOACH 5.3).
+static void write_roster(const app_wiring_t *w)
+{
+    static app_speaker_state_t state;
+    static uint32_t written;
+    static bool any;
+    if (svc_listen_speaker_state(&state) != ESP_OK || (any && state.serial == written)) { return; }
+    xQueueOverwrite(w->roster, &state);
+    written = state.serial;
+    any = true;
+}
+
+static void speaker_error(const app_wiring_t *w, esp_err_t err)
+{
+    const char *code = err == APP_ERR_SPEAKERS_INVALID     ? APP_CODE_SPEAKERS_INVALID
+                       : err == APP_ERR_SPEAKER_UNKNOWN    ? APP_CODE_SPEAKER_UNKNOWN
+                       : err == APP_ERR_SPEAKERS_NOT_SAVED ? APP_CODE_SPEAKERS_NOT_SAVED
+                                                           : APP_CODE_SPEAKERS_REFUSED;
+    if (err != ESP_OK) { raise_error(w, 0, code, NULL); }
+}
+
+// Every way in lands here: a roster from MQTT, and the requests of the console and of dieu_task
+// (KEHOACH 3.17).
+static void take_speakers(const app_wiring_t *w)
+{
+    static net_mqtt_speakers_t set;
+    static app_speaker_request_t request;
+    if (xQueueReceive(w->speaker_sets, &set, 0) == pdTRUE) {
+        speaker_error(w, set.parsed == ESP_OK ? svc_listen_speaker_set(&set.set) : set.parsed);
+    }
+    while (xQueueReceive(w->speaker_requests, &request, 0) == pdTRUE) {
+        speaker_error(w, request.op == APP_SPEAKER_SET ? svc_listen_speaker_set(&request.set)
+                                                       : svc_listen_speaker_enrol(request.id));
+    }
+    write_roster(w);
+}
+
 static void xac_task(void *arg)
 {
     const app_wiring_t *w = arg;
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
+    write_roster(w);
     for (;;) {
         uint8_t slot = 0;
         if (xQueueReceive(w->verify, &slot, pdMS_TO_TICKS(VERIFY_WAIT_MS)) == pdTRUE) {
             svc_listen_decision_t decision;
-            svc_listen_verify(slot, &decision);
+            const esp_err_t saved = svc_listen_verify(slot, &decision);
             const BaseType_t back = xQueueSend(w->verify_free, &slot, 0);
             configASSERT(back == pdTRUE);
             (void)back;
             raise_decision(w, &decision);
+            speaker_error(w, saved);
         }
-        svc_listen_speaker_ctl_t ctl;
-        while (xQueueReceive(w->speaker_ctl, &ctl, 0) == pdTRUE) {
-            const esp_err_t err = svc_listen_speaker(ctl);
-            if (err != ESP_OK) { ESP_LOGW(TAG, "speaker request %d: %s", (int)ctl, esp_err_to_name(err)); }
-        }
+        take_speakers(w);
         esp_task_wdt_reset();
+    }
+}
+
+// Zero timeout: a full q_spk refuses the enrolment, never stalls the dialog (KEHOACH 5.3).
+static void enrol_from(const app_wiring_t *w, const device_cmd_t *cmd)
+{
+    static app_speaker_request_t request;
+    memset(&request, 0, sizeof(request));
+    request.op = APP_SPEAKER_ENROL;
+    strlcpy(request.id, cmd->has_speaker_id ? cmd->speaker_id : "", sizeof(request.id));
+    if (xQueueSend(w->speaker_requests, &request, 0) != pdTRUE) {
+        raise_error(w, 0, APP_CODE_SPEAKERS_REFUSED, NULL);
     }
 }
 
@@ -320,7 +368,7 @@ static void dieu_task(void *arg)
         if (xQueueReceive(w->dialog, &event, pdMS_TO_TICKS(DIEU_WAIT_MS)) == pdTRUE) { (void)event; }
         device_cmd_t cmd;
         while (xQueueReceive(w->cmd, &cmd, 0) == pdTRUE) {
-            (void)cmd;
+            if (cmd.op == DEVICE_CMD_OP_SPEAKER_ENROL) { enrol_from(w, &cmd); }
         }
         esp_task_wdt_reset();
     }
@@ -399,6 +447,10 @@ static void event_payload(const app_event_t *e, event_t *out)
     out->has_doa_deg = e->doa_deg >= 0;
     out->speaker_permille = e->speaker_permille;
     out->has_speaker_permille = e->has_speaker;
+    strlcpy(out->speaker_id, e->speaker_id, sizeof(out->speaker_id));
+    out->has_speaker_id = e->speaker_id[0] != '\0';
+    out->enrol_count = e->enrol_count;
+    out->has_enrol_count = e->enrol_count > 0;
 }
 
 static void send_events(const app_wiring_t *w, bool online)
@@ -410,6 +462,38 @@ static void send_events(const app_wiring_t *w, bool online)
         if (!online || net_mqtt_publish_event(&payload) != ESP_OK) {
             count_in_stats(w, &w->afe_stats->events_dropped);
         }
+    }
+}
+
+static void roster_payload(const app_speaker_state_t *state, speaker_roster_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->version = state->version;
+    out->check = state->check;
+    out->speakers_count = state->count;
+    for (uint8_t i = 0; i < state->count; i++) {
+        strlcpy(out->speakers[i].id, state->speakers[i].id, sizeof(out->speakers[i].id));
+        strlcpy(out->speakers[i].name, state->speakers[i].name, sizeof(out->speakers[i].name));
+        out->speakers[i].enrolled = state->enrolled[i];
+    }
+    strlcpy(out->enrolling_id, state->enrolling, sizeof(out->enrolling_id));
+    out->has_enrolling_id = out->has_enrol_count = state->enrolling[0] != '\0';
+    out->enrol_count = state->enrol_count;
+}
+
+// Retained, so a state is published again only when it changes or the session comes back (KEHOACH 7.3).
+static void send_roster(const app_wiring_t *w, bool reconnected)
+{
+    static app_speaker_state_t state;
+    static speaker_roster_t payload;
+    static uint32_t sent;
+    static bool due = true;
+    due = due || reconnected;
+    if (xQueuePeek(w->roster, &state, 0) != pdTRUE || (!due && state.serial == sent)) { return; }
+    roster_payload(&state, &payload);
+    if (net_mqtt_publish_roster(&payload) == ESP_OK) {
+        sent = state.serial;
+        due = false;
     }
 }
 
@@ -428,6 +512,7 @@ static void gui_task(void *arg)
         taskEXIT_CRITICAL(w->afe_stats_lock);
         const bool online = (xEventGroupGetBits(w->system) & APP_BIT_MQTT_OK) != 0;
         send_events(w, online);
+        if (online) { send_roster(w, !was_online); }
         since_heartbeat++;
         if (online && (!was_online || since_heartbeat >= HEARTBEAT_TICKS)) {
             heartbeat_t hb;
@@ -522,7 +607,9 @@ static void net_task(void *arg)
     const net_mqtt_config_t mqtt = {.device_id = device_id,
                                     .fw_version = esp_app_get_description()->version,
                                     .system = w->system,
-                                    .cmdset = w->cmdset};
+                                    .cmdset = w->cmdset,
+                                    .cmd = w->cmd,
+                                    .spkset = w->speaker_sets};
     told = false;
     for (err = err == ESP_OK && named ? net_mqtt_start(&mqtt) : ESP_ERR_INVALID_STATE;
          err == ESP_ERR_NOT_FOUND; err = net_mqtt_start(&mqtt)) {

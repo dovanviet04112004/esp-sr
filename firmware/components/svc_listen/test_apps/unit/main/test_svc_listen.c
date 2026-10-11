@@ -22,6 +22,7 @@ typedef struct __attribute__((packed)) {
     uint16_t sessions, commands, reject, margin;
     uint16_t speaker; // LISTEN_SPEAKER_* flags
     uint16_t pad;
+    char owner[APP_SPEAKER_ID_BYTES]; // the roster's one person, enrolled ahead of a session
 } listen_head_t;
 typedef struct __attribute__((packed)) {
     uint32_t hops;
@@ -36,10 +37,10 @@ typedef struct __attribute__((packed)) {
     uint32_t first, last;
     int16_t command;
     uint16_t score, margin, gap, syllable;
-    int16_t speaker;       // the speaker check's permille
+    int16_t speaker;       // the check's permille, or commands enrolled
     uint16_t speaker_code; // CHECK_*
 } window_t;
-_Static_assert(sizeof(listen_head_t) == 16 && sizeof(session_head_t) == 12 && sizeof(segment_head_t) == 8 &&
+_Static_assert(sizeof(listen_head_t) == 24 && sizeof(session_head_t) == 12 && sizeof(segment_head_t) == 8 &&
                    sizeof(window_t) == 22,
                "listen record layout");
 
@@ -56,6 +57,7 @@ enum { CHECK_NONE = 0, CHECK_PASSED, CHECK_STOPPED, CHECK_UNENROLLED, CHECK_ENRO
 #define RESET_SEQ (CLICK_SEQ + SEQ_APART)
 
 #define VERIFY_SLOT 0 // one task stands for nhan_task and xac_task here
+#define OWNER_NAME "owner"
 
 _Static_assert(CLICK_HOPS < GEN_LISTEN_UTTERANCE_MIN_HOPS, "a click is dropped, never decided");
 
@@ -98,7 +100,7 @@ static void check_speaker(svc_listen_decision_t *d)
 {
     if (d->event.kind != APP_EVT_COMMAND || !svc_listen_verifies()) { return; }
     TEST_ASSERT_EQUAL(ESP_OK, svc_listen_hold(d, VERIFY_SLOT));
-    svc_listen_verify(VERIFY_SLOT, d);
+    TEST_ASSERT_EQUAL(ESP_OK, svc_listen_verify(VERIFY_SLOT, d));
 }
 
 static size_t drain(svc_listen_decision_t *decided, size_t n, tally_t *t)
@@ -120,26 +122,28 @@ static size_t drain(svc_listen_decision_t *decided, size_t n, tally_t *t)
     return n;
 }
 
-// The speaker check's part of the decision: none, or COMMAND with its score, or a REJECT of the block's code.
-static bool same_speaker(const window_t *want, const app_event_t *e)
+// The speaker check's part: none, the owner's score, the enrolment's count, or a code of the block alone.
+static bool same_speaker(const window_t *want, const app_event_t *e, const char *owner)
 {
-    static const char *const k_codes[] = {[CHECK_STOPPED] = APP_CODE_SPEAKER,
-                                          [CHECK_UNENROLLED] = APP_CODE_SPEAKER_UNENROLLED,
-                                          [CHECK_ENROLLING] = APP_CODE_SPEAKER_ENROLLING};
+    const bool theirs = strcmp(e->speaker_id, owner) == 0;
     switch (want->speaker_code) {
-    case CHECK_NONE: return !e->has_speaker;
+    case CHECK_NONE: return !e->has_speaker && e->speaker_id[0] == '\0' && e->enrol_count == 0;
     case CHECK_PASSED:
-        return e->kind == APP_EVT_COMMAND && e->has_speaker && e->speaker_permille == want->speaker;
+        return e->kind == APP_EVT_COMMAND && e->has_speaker && e->speaker_permille == want->speaker && theirs;
     case CHECK_STOPPED:
-        return e->kind == APP_EVT_REJECT && strcmp(e->code, k_codes[CHECK_STOPPED]) == 0 && e->has_speaker &&
-               e->speaker_permille == want->speaker;
+        return e->kind == APP_EVT_REJECT && strcmp(e->code, APP_CODE_SPEAKER) == 0 && e->has_speaker &&
+               e->speaker_permille == want->speaker && theirs;
+    case CHECK_ENROLLING:
+        return e->kind == APP_EVT_REJECT && strcmp(e->code, APP_CODE_SPEAKER_ENROLLING) == 0 &&
+               !e->has_speaker && e->enrol_count == want->speaker && theirs;
     default:
-        return e->kind == APP_EVT_REJECT && strcmp(e->code, k_codes[want->speaker_code]) == 0 &&
-               !e->has_speaker;
+        return e->kind == APP_EVT_REJECT && strcmp(e->code, APP_CODE_SPEAKER_UNENROLLED) == 0 &&
+               !e->has_speaker && e->speaker_id[0] == '\0';
     }
 }
 
-static bool same(const window_t *want, const svc_listen_decision_t *got, const named_t *named, uint32_t base)
+static bool same(const window_t *want, const svc_listen_decision_t *got, const named_t *named, uint32_t base,
+                 const char *owner)
 {
     const app_event_t *e = &got->event;
     const bool checked = want->speaker_code != CHECK_NONE && want->speaker_code != CHECK_PASSED;
@@ -149,14 +153,16 @@ static bool same(const window_t *want, const svc_listen_decision_t *got, const n
                                               : e->kind == APP_EVT_REJECT;
     const uint16_t score = want->score < PERMILLE_MAX ? want->score : PERMILLE_MAX;
     const uint16_t margin = want->margin < PERMILLE_MAX ? want->margin : PERMILLE_MAX;
-    return command && same_speaker(want, e) && e->score_permille == score && e->margin_permille == margin &&
-           got->free_gap_permille == want->gap && got->syllable_gap_permille == want->syllable &&
-           got->first_seq == base + want->first && e->seq == base + want->last;
+    return command && same_speaker(want, e, owner) && e->score_permille == score &&
+           e->margin_permille == margin && got->free_gap_permille == want->gap &&
+           got->syllable_gap_permille == want->syllable && got->first_seq == base + want->first &&
+           e->seq == base + want->last;
 }
 
 // One session and the silence after it, hop by hop through svc_listen, zeros where no window reads, each
 // window decided compared with Python's. Returns where the next session starts.
-static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_t *named, tally_t *t)
+static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_t *named, const char *owner,
+                                  tally_t *t)
 {
     session_head_t h;
     memcpy(&h, at, sizeof(h));
@@ -169,7 +175,7 @@ static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_
         p += sizeof(seg) + seg.hops * GEN_GRID_HOP_SAMPLES * sizeof(int16_t);
     }
     const window_t *want = (const window_t *)p;
-    if (h.enrol) { TEST_ASSERT_EQUAL(ESP_OK, svc_listen_speaker(SVC_LISTEN_SPEAKER_ENROL)); }
+    if (h.enrol) { TEST_ASSERT_EQUAL(ESP_OK, svc_listen_speaker_enrol(owner)); }
     static svc_listen_decision_t decided[DECIDED_MAX];
     size_t n = 0;
     const uint8_t *seg_at = segments;
@@ -191,18 +197,18 @@ static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_
     }
     TEST_ASSERT_EQUAL_MESSAGE(h.windows, n, "svc_listen cut otherwise than Gate 3");
     for (size_t w = 0; w < n; w++) {
-        const bool ok = same(&want[w], &decided[w], named, base);
+        const bool ok = same(&want[w], &decided[w], named, base, owner);
         t->differ += ok ? 0 : 1;
         const app_event_t *e = &decided[w].event;
         printf("listen window %" PRIu32 "..%" PRIu32
-               ": board %s %s %u %u %u %u speaker %d, python %d %u %u %u %u speaker %d/%u%s; %" PRIu32
+               ": board %s %s %u %u %u %u speaker %d %s %u, python %d %u %u %u %u speaker %d/%u%s; %" PRIu32
                " us after the close\n",
                decided[w].first_seq - base, e->seq - base, e->kind == APP_EVT_COMMAND ? "command" : "reject",
                e->kind == APP_EVT_COMMAND ? e->command_id : e->code, e->score_permille, e->margin_permille,
                decided[w].free_gap_permille, decided[w].syllable_gap_permille,
-               e->has_speaker ? e->speaker_permille : 0, want[w].command, want[w].score, want[w].margin,
-               want[w].gap, want[w].syllable, want[w].speaker, want[w].speaker_code, ok ? "" : " DIFFERS",
-               decided[w].close_us);
+               e->has_speaker ? e->speaker_permille : 0, e->speaker_id[0] != '\0' ? e->speaker_id : "-",
+               e->enrol_count, want[w].command, want[w].score, want[w].margin, want[w].gap, want[w].syllable,
+               want[w].speaker, want[w].speaker_code, ok ? "" : " DIFFERS", decided[w].close_us);
     }
     t->windows += n;
     return p + h.windows * sizeof(window_t);
@@ -313,6 +319,28 @@ TEST_CASE("svc_listen decides the open window FRAME_GAP when the chain breaks", 
     esp_partition_munmap(handle);
 }
 
+// The round's roster, its owner alone, as a host sends it; afresh, everyone and every voiceprint goes first.
+static void take_roster(const listen_head_t *head)
+{
+    static app_speaker_state_t state;
+    static app_speaker_set_t set;
+    TEST_ASSERT_EQUAL(ESP_OK, svc_listen_speaker_state(&state));
+    memset(&set, 0, sizeof(set));
+    set.version = state.version + 1;
+    if (head->speaker & LISTEN_SPEAKER_AFRESH) {
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_speaker_set(&set));
+        set.version++;
+    }
+    set.check = (head->speaker & LISTEN_SPEAKER_ON) != 0;
+    set.count = 1;
+    strlcpy(set.speakers[0].id, head->owner, sizeof(set.speakers[0].id));
+    strlcpy(set.speakers[0].name, OWNER_NAME, sizeof(set.speakers[0].name));
+    TEST_ASSERT_EQUAL(ESP_OK, svc_listen_speaker_set(&set));
+    TEST_ASSERT_EQUAL(ESP_OK, svc_listen_speaker_state(&state));
+    TEST_ASSERT_EQUAL(set.version, state.version);
+    TEST_ASSERT_EQUAL(1, state.count);
+}
+
 TEST_CASE("svc_listen decides every Gate 3 session of the round as Python decides it, field by field",
           "[svc_listen]")
 {
@@ -323,13 +351,7 @@ TEST_CASE("svc_listen decides every Gate 3 session of the round as Python decide
     listen_on(&head, &named);
     esp_partition_munmap(handle);
     // A round without the check turns it off, whatever NVS kept of an earlier run (KEHOACH 3.17).
-    if (ai_engine_has(AI_ENGINE_MODEL_SPEAKER)) {
-        if (head.speaker & LISTEN_SPEAKER_AFRESH) {
-            TEST_ASSERT_EQUAL(ESP_OK, svc_listen_speaker(SVC_LISTEN_SPEAKER_CLEAR));
-        }
-        const bool on = (head.speaker & LISTEN_SPEAKER_ON) != 0;
-        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_speaker(on ? SVC_LISTEN_SPEAKER_ON : SVC_LISTEN_SPEAKER_OFF));
-    }
+    if (ai_engine_has(AI_ENGINE_MODEL_SPEAKER)) { take_roster(&head); }
 
     const void *mapped = NULL;
     tally_t t = {0};
@@ -346,7 +368,7 @@ TEST_CASE("svc_listen decides every Gate 3 session of the round as Python decide
         TEST_ASSERT_EQUAL_MEMORY(head.magic, h.magic, 4);
         const uint8_t *at = read_named(mapped, h.commands, &named);
         for (uint16_t s = 0; s < h.sessions; s++) {
-            at = run_session(at, base, &named, &t);
+            at = run_session(at, base, &named, head.owner, &t);
             base += SEQ_APART;
             sessions++;
         }

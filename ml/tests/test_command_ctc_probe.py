@@ -226,9 +226,7 @@ def test_enrolment_starts_at_the_first_owner_session_its_round_lets_finish() -> 
         probe.enrolment_session(sessions, laid, [[[0], [1]], [[2], [3]], [[4], []]])
 
 
-def test_speaker_checks_leave_rejects_unchecked_enrol_from_the_session_and_score_the_rest(
-    tmp_path, monkeypatch
-) -> None:
+def test_speaker_checks_leave_rejects_unchecked_count_the_enrolment_and_score_the_rest(tmp_path, monkeypatch) -> None:
     lock = tmp_path / "models.lock.json"
     locked = {"speaker": {"run": "r", "row": "kl", "threshold": {"permille": [600, 700, 750]}}}
     lock.write_text(json.dumps({"models": locked}), encoding="utf-8")
@@ -252,8 +250,8 @@ def test_speaker_checks_leave_rejects_unchecked_enrol_from_the_session_and_score
     checks = probe.speaker_checks(sessions, laid, 1)
     assert len(seen) == len(units)
     assert checks[0] == [(0, probe.UNENROLLED)] * 2 + [(0, probe.NO_CHECK)]
-    assert checks[1] == [(0, probe.ENROLLING)] * 6
-    assert checks[2] == [(0, probe.ENROLLING)] * 4 + [(0, probe.NO_CHECK)]
+    assert checks[1] == [(n, probe.ENROLLING) for n in range(1, 7)]
+    assert checks[2] == [(n, probe.ENROLLING) for n in range(7, 11)] + [(0, probe.NO_CHECK)]
     assert checks[3] == [(1000, probe.PASSED), (0, probe.STOPPED), (600, probe.PASSED)]
 
 

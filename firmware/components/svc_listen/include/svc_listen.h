@@ -44,15 +44,8 @@ typedef struct {
     uint32_t verify_us;             // the speaker check, 0 without one
 } svc_listen_decision_t;
 
-typedef enum {
-    SVC_LISTEN_SPEAKER_ENROL = 0, // the next commands become the voiceprint
-    SVC_LISTEN_SPEAKER_ON,
-    SVC_LISTEN_SPEAKER_OFF,
-    SVC_LISTEN_SPEAKER_CLEAR, // erase the voiceprint (KEHOACH 1.4)
-} svc_listen_speaker_ctl_t;
-
 /** Read the commands, prepare ai_engine, take the rings and tables, and with speaker the PCM ring, the verify
- *  slots and NVS speaker/ (KEHOACH 3.17).
+ *  slots, the voiceprints and the roster of NVS speaker/ (KEHOACH 3.17, 6.2).
  *  @ctx task | blocking, allocates in PSRAM | once at boot after ai_engine_load, ahead of every task
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE | ESP_ERR_NOT_SUPPORTED no command | ESP_ERR_INVALID_SIZE bands |
  *       ESP_ERR_INVALID_ARG | ESP_ERR_NO_MEM | APP_ERR_COMMANDS_INVALID | ai_engine_command_prepare's error
@@ -112,18 +105,33 @@ esp_err_t svc_listen_hold(const svc_listen_decision_t *decision, uint8_t slot);
  */
 void svc_listen_busy_reject(svc_listen_decision_t *decision);
 
-/** Check the speaker of the slot's COMMAND: one run of b0, the score against the voiceprint, the decision;
- * during an enrolment the command enrols instead and is decided REJECT SPEAKER_ENROLLING (KEHOACH 3.17).
+/** Check the speaker of the slot's COMMAND: one run of b0, the best score over the voiceprints, the decision
+ * with the best one's id; during an enrolment the command enrols instead, REJECT SPEAKER_ENROLLING
+ * (KEHOACH 3.17).
  *  @ctx xac_task | blocking about 1.2 s of core 0; writes NVS when an enrolment ends | the caller holds slot
+ *  @ret ESP_OK, out filled | ESP_ERR_INVALID_ARG | APP_ERR_SPEAKERS_NOT_SAVED a voiceprint in use, not in NVS
  */
-void svc_listen_verify(uint8_t slot, svc_listen_decision_t *out);
+esp_err_t svc_listen_verify(uint8_t slot, svc_listen_decision_t *out);
 
-/** Act on a console request: enrol the next commands, check on or off, erase the voiceprint; NVS keeps the
- * flag.
+/** Take a roster as KEHOACH 3.17 lays out SET: one not above the held version changes nothing; an id dropped
+ * loses its voiceprint and its enrolment at once; a new id takes the lowest free slot; NVS as KEHOACH 6.2.
  *  @ctx xac_task | blocking on flash
- *  @ret ESP_OK | ESP_ERR_NOT_SUPPORTED no speaker in the image | ESP_ERR_INVALID_ARG | sys_storage's error
+ *  @ret ESP_OK, ignored or in use | ESP_ERR_NOT_SUPPORTED no speaker | ESP_ERR_INVALID_ARG |
+ *       APP_ERR_SPEAKERS_INVALID the held one stays | APP_ERR_SPEAKERS_NOT_SAVED in use, NVS not written
  */
-esp_err_t svc_listen_speaker(svc_listen_speaker_ctl_t ctl);
+esp_err_t svc_listen_speaker_set(const app_speaker_set_t *set);
+
+/** Enrol id: its next GEN_SPEAKER_ENROL_COMMANDS commands become its voiceprint; another enrolment ends.
+ *  @ctx xac_task | non-blocking
+ *  @ret ESP_OK | ESP_ERR_NOT_SUPPORTED no speaker | ESP_ERR_INVALID_ARG | APP_ERR_SPEAKER_UNKNOWN not listed
+ */
+esp_err_t svc_listen_speaker_enrol(const char *id);
+
+/** The roster as it stands, for q_roster; serial rises with each change.
+ *  @ctx xac_task | non-blocking
+ *  @ret ESP_OK | ESP_ERR_NOT_SUPPORTED no speaker in the image | ESP_ERR_INVALID_ARG
+ */
+esp_err_t svc_listen_speaker_state(app_speaker_state_t *out);
 
 #ifdef __cplusplus
 }

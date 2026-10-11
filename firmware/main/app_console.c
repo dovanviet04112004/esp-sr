@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "app_events.h"
 #include "app_wiring.h"
 #include "argtable3/argtable3.h"
 #include "esp_check.h"
@@ -14,7 +15,6 @@
 #include "esp_log.h"
 #include "esp_wifi_types.h"
 #include "sdkconfig.h"
-#include "svc_listen.h"
 #include "svc_report.h"
 #include "sys_storage.h"
 
@@ -297,8 +297,94 @@ static esp_err_t register_stream(void)
 
 static struct {
     struct arg_str *action;
+    struct arg_str *id;
+    struct arg_str *name;
+    struct arg_lit *hex;
     struct arg_end *end;
 } s_spk_args;
+
+static app_speaker_state_t s_spk_state;     // the console task's alone
+static app_speaker_request_t s_spk_request; // the console task's alone
+
+static void spk_list(const app_speaker_state_t *st)
+{
+    printf("roster v%" PRIu32 ", check %s, %u people\n", st->version, st->check ? "on" : "off",
+           (unsigned)st->count);
+    for (uint8_t i = 0; i < st->count; i++) {
+        printf("  %s %s: %s\n", st->speakers[i].id, st->speakers[i].name,
+               st->enrolled[i] ? "enrolled" : "no voiceprint");
+    }
+    if (st->enrolling[0] != '\0') {
+        printf("  enrolling %s: %u commands so far\n", st->enrolling, (unsigned)st->enrol_count);
+    }
+}
+
+static int listed_at(const app_speaker_state_t *st, const char *id)
+{
+    for (int i = 0; i < st->count; i++) {
+        if (strcmp(st->speakers[i].id, id) == 0) { return i; }
+    }
+    return -1;
+}
+
+// The roster as it stands, its version one above, for a change made on top of it (KEHOACH 3.17).
+static app_speaker_set_t *set_from(const app_speaker_state_t *st)
+{
+    memset(&s_spk_request, 0, sizeof(s_spk_request));
+    s_spk_request.op = APP_SPEAKER_SET;
+    app_speaker_set_t *set = &s_spk_request.set;
+    set->version = st->version + 1;
+    set->check = st->check;
+    set->count = st->count;
+    memcpy(set->speakers, st->speakers, sizeof(set->speakers));
+    return set;
+}
+
+static bool spk_name(char *out)
+{
+    const char *typed = s_spk_args.name->count > 0 ? s_spk_args.name->sval[0] : "";
+    const bool hex = s_spk_args.hex->count > 0;
+    const bool fits =
+        hex ? from_hex(typed, out, APP_SPEAKER_NAME_BYTES)
+            : typed[0] != '\0' && strlcpy(out, typed, APP_SPEAKER_NAME_BYTES) < APP_SPEAKER_NAME_BYTES;
+    if (!fits) {
+        printf("the name is 1..%d characters%s\n", APP_SPEAKER_NAME_MAX_CHARS, hex ? ", in hex" : "");
+    }
+    return fits;
+}
+
+// Builds s_spk_request from the latest roster; returns false with the reason printed.
+static bool spk_request(const char *action, const char *id)
+{
+    const int at = listed_at(&s_spk_state, id);
+    if (strcmp(action, "enrol") == 0) {
+        memset(&s_spk_request, 0, sizeof(s_spk_request));
+        s_spk_request.op = APP_SPEAKER_ENROL;
+        strlcpy(s_spk_request.id, id, sizeof(s_spk_request.id));
+        return true;
+    }
+    app_speaker_set_t *set = set_from(&s_spk_state);
+    if (strcmp(action, "on") == 0 || strcmp(action, "off") == 0) {
+        set->check = strcmp(action, "on") == 0;
+        return true;
+    }
+    if (strcmp(action, "add") == 0 && at < 0 && set->count < APP_SPEAKERS_MAX) {
+        strlcpy(set->speakers[set->count].id, id, sizeof(set->speakers[set->count].id));
+        return spk_name(set->speakers[set->count++].name);
+    }
+    if (strcmp(action, "name") == 0 && at >= 0) { return spk_name(set->speakers[at].name); }
+    if (strcmp(action, "del") == 0 && at >= 0) {
+        memmove(&set->speakers[at], &set->speakers[at + 1],
+                (size_t)(set->count - at - 1) * sizeof(set->speakers[0]));
+        set->count--;
+        return true;
+    }
+    printf("spk add <id> <name> [-x] | name <id> <name> [-x] | del <id> | enrol <id> | on | off | list:\n"
+           "%s is %s, the roster holds %u of %d\n",
+           id, at >= 0 ? "on the roster" : "not on the roster", (unsigned)s_spk_state.count,
+           APP_SPEAKERS_MAX);
+    return false;
+}
 
 static int spk_cmd(int argc, char **argv)
 {
@@ -306,27 +392,23 @@ static int spk_cmd(int argc, char **argv)
         arg_print_errors(stdout, s_spk_args.end, argv[0]);
         return 1;
     }
-    static const struct {
-        const char *name;
-        svc_listen_speaker_ctl_t ctl;
-    } kActions[] = {
-        {"enrol", SVC_LISTEN_SPEAKER_ENROL},
-        {"on", SVC_LISTEN_SPEAKER_ON},
-        {"off", SVC_LISTEN_SPEAKER_OFF},
-        {"clear", SVC_LISTEN_SPEAKER_CLEAR},
-    };
-    const char *action = s_spk_args.action->sval[0];
-    for (size_t i = 0; i < sizeof(kActions) / sizeof(kActions[0]); i++) {
-        if (strcmp(action, kActions[i].name) != 0) { continue; }
-        const app_wiring_t *w = app_wiring();
-        // Zero timeout: a b0 run holds xac_task about a second, and the console says so rather than wait.
-        const bool sent = w != NULL && xQueueSend(w->speaker_ctl, &kActions[i].ctl, 0) == pdTRUE;
-        printf("spk %s: %s\n", action,
-               sent ? "sent to xac_task, its log tells the outcome" : "busy, again later");
-        return sent ? 0 : 1;
+    const app_wiring_t *w = app_wiring();
+    if (w == NULL || xQueuePeek(w->roster, &s_spk_state, 0) != pdTRUE) {
+        printf("no speaker check here: the image has no speaker\n");
+        return 1;
     }
-    printf("spk enrol | on | off | clear\n");
-    return 1;
+    const char *action = s_spk_args.action->sval[0];
+    const char *id = s_spk_args.id->count > 0 ? s_spk_args.id->sval[0] : "";
+    if (strcmp(action, "list") == 0) {
+        spk_list(&s_spk_state);
+        return 0;
+    }
+    if (!spk_request(action, id)) { return 1; }
+    // Zero timeout: a b0 run holds xac_task about a second, and the console says so rather than wait.
+    const bool sent = xQueueSend(w->speaker_requests, &s_spk_request, 0) == pdTRUE;
+    printf("spk %s %s: %s\n", action, id,
+           sent ? "sent to xac_task, spk list shows the outcome" : "busy, again later");
+    return sent ? 0 : 1;
 }
 
 static esp_err_t register_commands(void)
@@ -359,12 +441,15 @@ static esp_err_t register_commands(void)
     };
     ESP_RETURN_ON_ERROR(esp_console_cmd_register(&nvs), TAG, "nvs");
 
-    s_spk_args.action = arg_str1(NULL, NULL, "<enrol|on|off|clear>",
-                                 "enrol the next commands, check on or off, erase the voiceprint");
-    s_spk_args.end = arg_end(1);
+    s_spk_args.action =
+        arg_str1(NULL, NULL, "<list|add|name|del|enrol|on|off>", "what to do with the roster");
+    s_spk_args.id = arg_str0(NULL, NULL, "<id>", "spk_NNN, for add, name, del and enrol");
+    s_spk_args.name = arg_str0(NULL, NULL, "<name>", "1..31 characters, for add and name");
+    s_spk_args.hex = arg_lit0("x", "hex", "<name> is its UTF-8 bytes in hex, for letters the console drops");
+    s_spk_args.end = arg_end(4);
     const esp_console_cmd_t spk = {
         .command = "spk",
-        .help = "Speaker check of the chip path: enrolment, on, off, voiceprint erased (KEHOACH 3.17)",
+        .help = "The chip path's speakers: the roster, its check, an enrolment (KEHOACH 3.17)",
         .func = spk_cmd,
         .argtable = &s_spk_args,
     };

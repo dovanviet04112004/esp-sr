@@ -62,14 +62,15 @@ GATE_MAGIC = b"SRCG"
 ESPDL_HEAD_BYTES = 16
 LISTEN_DIR = ML_ROOT.parent / "firmware" / "components" / "svc_listen" / "test_apps" / "unit" / "main" / "probe"
 LISTEN_PARTITIONS = ("models_1", "voice")  # a round's records, sized by partitions_unit.csv
-# Magic, sessions, commands, reject, margin, speaker flags; each command's id and text NUL-ended, padded to four
-# bytes; then a session: SESSION_HEAD, vad a bit a hop padded to four bytes, its segments of clean samples, its windows.
-LISTEN_HEAD = struct.Struct("<4sHHHHHxx")
+# Magic, sessions, commands, reject, margin, speaker flags, the roster's one id; each command's id and text NUL-ended,
+# padded to four; then a session: SESSION_HEAD, vad a bit a hop padded to four, its segments of samples, its windows.
+SPEAKER_ID_BYTES = 8  # spk_NNN, NUL: APP_SPEAKER_ID_BYTES
+LISTEN_HEAD = struct.Struct(f"<4sHHHHHxx{SPEAKER_ID_BYTES}s")
 LISTEN_MAGIC = b"SRLS"
 SPEAKER_ON, SPEAKER_AFRESH = 1, 2  # check on; voiceprint erased first (KEHOACH 3.17)
 SESSION_HEAD = struct.Struct("<IHHHxx")  # hops, segments, windows, an enrolment starting ahead of it
 SEGMENT_HEAD = struct.Struct("<II")  # first hop, hops; their int16 samples follow
-WINDOW_RECORD = struct.Struct("<IIhHHHHhH")  # hops first, last; the decision, the speaker
+WINDOW_RECORD = struct.Struct("<IIhHHHHhH")  # hops, decision, permille or count, code
 NO_CHECK, PASSED, STOPPED, UNENROLLED, ENROLLING = range(5)  # a window's speaker code
 
 
@@ -392,9 +393,10 @@ def enrolment_session(sessions: list[tuple], laid: list[tuple], rounds: list[lis
 
 
 def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> list[list[tuple[int, int]]]:
-    """Each window's (permille, code) as svc_listen checks it with the check on from the replay's start, its voiceprint
-    erased: a command ahead of session enrol_at is UNENROLLED, the first speaker.ENROL_COMMANDS from it on enrol, every
-    later one scores against their voiceprint at the lock's threshold, on the chip's path (KEHOACH 3.17)."""
+    """Each window's (value, code) as svc_listen checks it with the check on from the replay's start and the owner
+    alone on the roster, their voiceprint erased: a command ahead of session enrol_at is UNENROLLED, the first
+    speaker.ENROL_COMMANDS from it on enrol, the value counting them, every later one is scored with the best over the
+    one voiceprint at the lock's threshold for one, on the chip's path (KEHOACH 3.17)."""
     lock = json.loads(update_lock.LOCK.read_text(encoding="utf-8"))["models"][spk.BRANCH]
     run = ML_ROOT / "artifacts" / spk.BRANCH / "runs" / lock["run"]
     graph = export_espdl.load_native(run / spk.INT8_DIR / lock["row"] / spk.GRAPH_FILE)
@@ -413,9 +415,9 @@ def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> l
             if k < enrol_at:
                 codes[w] = (0, UNENROLLED)
             elif (k, w) in enrolling:
-                codes[w] = (0, ENROLLING)
+                codes[w] = (enrolling.index((k, w)) + 1, ENROLLING)
             else:
-                s = score.score_permille(unit_of[(k, w)], voiceprint)
+                s = score.best(unit_of[(k, w)], [voiceprint])[0]
                 codes[w] = (s, PASSED if score.accepts(s, threshold) else STOPPED)
         out.append(codes)
     return out
@@ -449,6 +451,9 @@ def listen_rounds(cfg: dict, out: Path, speaker_on: bool = False) -> list[Path]:
         return ctc_score.decide(log_probs, lexicon, reject, margin, per_frames)[0]
 
     spec = load_yaml(command.CONFIG)["eval"]["board"]
+    owner = load_yaml(CONFIGS / load_yaml(spk.CONFIG)["source"]["survey"])["owner"]["spk"]
+    if len(owner.encode()) >= SPEAKER_ID_BYTES:
+        raise ValueError(f"speaker id {owner!r} does not fit svc_listen's {SPEAKER_ID_BYTES} bytes")
     listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
     named = b"".join(c["id"].encode() + b"\0" + c["text"].encode() + b"\0" for c in listed)
     named += b"\0" * (-(LISTEN_HEAD.size + len(named)) % 4)
@@ -478,7 +483,7 @@ def listen_rounds(cfg: dict, out: Path, speaker_on: bool = False) -> list[Path]:
     for k, parts in enumerate(rounds):
         flags = (SPEAKER_ON | (SPEAKER_AFRESH if k == 0 else 0)) if speaker_on else 0
         for label, held in zip(LISTEN_PARTITIONS, parts, strict=True):
-            head = LISTEN_HEAD.pack(LISTEN_MAGIC, len(held), len(listed), reject, margin, flags)
+            head = LISTEN_HEAD.pack(LISTEN_MAGIC, len(held), len(listed), reject, margin, flags, owner.encode())
             path = out / f"listen_{k}_{label}.bin"
             path.write_bytes(head + named + b"".join(bodies[i] for i in held))
             written.append(path)

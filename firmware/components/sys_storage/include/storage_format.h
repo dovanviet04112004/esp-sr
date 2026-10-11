@@ -50,8 +50,8 @@
 #define STORAGE_KEY_FW_VALID "fw_valid"               // u8
 #define STORAGE_KEY_SPK_CHIP "chip"                   // u8, chip path's speaker check on
 #define STORAGE_KEY_SPK_SERVER "server"               // u8, server path's on
-#define STORAGE_KEY_SPK_TPL "tpl"                     // blob, voiceprint: float32 a dim
-#define STORAGE_KEY_SPK_TPL_MODEL "tpl_model"         // u32, id of the speaker entry at enrolment
+#define STORAGE_KEY_SPK_TPL "tpl"                     // blob, the one-person layout: erased at boot
+#define STORAGE_KEY_SPK_TPL_MODEL "tpl_model"         // u32, the one-person layout: erased at boot
 #define STORAGE_KEY_SPK_ROSTER "roster"               // blob storage_speaker_roster_t
 #define STORAGE_KEY_SPK_TPL_PREFIX "tpl"              // + slot digit: blob, float32 a dim, unit length
 

@@ -2,6 +2,7 @@
 
 #include <inttypes.h>
 #include <stdatomic.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "ai_engine.h"
@@ -29,6 +30,7 @@
 #define PERMILLE_MAX 1000       // event.schema caps score and margin here
 #define MEM_ALIGN 16
 #define TAIL_HOPS ((GEN_SPEAKER_WINDOW_SAMPLES + GEN_GRID_HOP_SAMPLES - 1) / GEN_GRID_HOP_SAMPLES)
+#define NO_SLOT (-1)
 
 _Static_assert(AI_ENGINE_VARIANTS_MAX == LANG_VI_VARIANTS_MAX, "one command's readings fit one lexicon row");
 _Static_assert(RING_HOPS >= 2 * WINDOW_HOPS, "the ring holds the window worked and the next one whole");
@@ -53,12 +55,15 @@ typedef struct {
 } verify_slot_t;
 
 typedef struct {
-    bool on;          // NVS speaker/chip
-    bool has_print;   // a voiceprint of the loaded speaker entry
-    bool enrolling;   // the next commands enrol
-    uint8_t enrolled; // of GEN_SPEAKER_ENROL_COMMANDS
+    bool on;                              // the roster's check, NVS speaker/chip
+    int8_t enrolling;                     // slot whose next commands enrol, NO_SLOT without
+    uint8_t enrolled;                     // of GEN_SPEAKER_ENROL_COMMANDS
+    uint8_t n_prints;                     // voiceprints of the loaded speaker entry, rows of prints
+    uint8_t print_slot[APP_SPEAKERS_MAX]; // slot of each row, rising
+    uint32_t serial;
     size_t dims;
-    float *unit, *voiceprint, *enrol_units;
+    storage_speaker_roster_t *roster; // as NVS speaker/roster keeps it
+    float *unit, *prints, *enrol_units;
 } speaker_t;
 
 typedef struct {
@@ -114,35 +119,74 @@ static bool take_speaker(void)
     s.spk.dims = ai_engine_speaker_dims();
     s.pcm_ring = take(RING_HOPS * sizeof(*s.pcm_ring));
     s.slots = take(SVC_LISTEN_VERIFY_SLOTS * sizeof(*s.slots));
+    s.spk.roster = take(sizeof(*s.spk.roster));
     s.spk.unit = take(s.spk.dims * sizeof(float));
-    s.spk.voiceprint = take(s.spk.dims * sizeof(float));
+    s.spk.prints = take(APP_SPEAKERS_MAX * s.spk.dims * sizeof(float));
     s.spk.enrol_units = take(GEN_SPEAKER_ENROL_COMMANDS * s.spk.dims * sizeof(float));
-    return s.pcm_ring != NULL && s.slots != NULL && s.spk.unit != NULL && s.spk.voiceprint != NULL &&
-           s.spk.enrol_units != NULL;
+    return s.pcm_ring != NULL && s.slots != NULL && s.spk.roster != NULL && s.spk.unit != NULL &&
+           s.spk.prints != NULL && s.spk.enrol_units != NULL;
+}
+
+static void tpl_key(size_t slot, char key[STORAGE_NVS_NAME_MAX_BYTES])
+{
+    snprintf(key, STORAGE_NVS_NAME_MAX_BYTES, STORAGE_KEY_SPK_TPL_PREFIX "%u", (unsigned)slot);
+}
+
+static void divert(void)
+{
+    atomic_store(&s_diverting, s.spk.on || s.spk.enrolling != NO_SLOT);
 }
 
 // A voiceprint enrolled on another speaker entry lies in another space, so it stays unused (KEHOACH 3.17).
+static void load_prints(uint32_t model)
+{
+    speaker_t *k = &s.spk;
+    for (size_t slot = 0; slot < APP_SPEAKERS_MAX; slot++) {
+        char key[STORAGE_NVS_NAME_MAX_BYTES];
+        tpl_key(slot, key);
+        const storage_speaker_slot_t *who = &k->roster->slot[slot];
+        if (who->id[0] == '\0' || who->model_id != model || model == 0) { continue; }
+        if (sys_storage_get_blob(STORAGE_NS_SPEAKER, key, k->prints + k->n_prints * k->dims,
+                                 k->dims * sizeof(float)) == ESP_OK) {
+            k->print_slot[k->n_prints++] = (uint8_t)slot;
+        }
+    }
+}
+
+// Only a roster read whole, or surely absent, lets free slots lose their voiceprints (KEHOACH 6.2).
 static void load_speaker(void)
 {
     speaker_t *k = &s.spk;
     uint8_t on = 0;
-    uint32_t model = 0;
     k->on = sys_storage_get_u8(STORAGE_NS_SPEAKER, STORAGE_KEY_SPK_CHIP, &on) == ESP_OK && on != 0;
-    k->has_print = sys_storage_get_u32(STORAGE_NS_SPEAKER, STORAGE_KEY_SPK_TPL_MODEL, &model) == ESP_OK &&
-                   model == ai_engine_speaker_model_id() &&
-                   sys_storage_get_blob(STORAGE_NS_SPEAKER, STORAGE_KEY_SPK_TPL, k->voiceprint,
-                                        k->dims * sizeof(float)) == ESP_OK;
-    atomic_store(&s_diverting, k->on);
-    ESP_LOGI(TAG, "speaker check %s, voiceprint %s", k->on ? "on" : "off",
-             k->has_print ? "of this model" : "none of this model");
+    k->enrolling = NO_SLOT;
+    const esp_err_t read =
+        sys_storage_get_blob(STORAGE_NS_SPEAKER, STORAGE_KEY_SPK_ROSTER, k->roster, sizeof(*k->roster));
+    const bool sure = read == ESP_OK || read == ESP_ERR_NOT_FOUND || read == ESP_ERR_INVALID_SIZE;
+    if (read != ESP_OK || k->roster->format != STORAGE_SPEAKER_ROSTER_FORMAT) {
+        memset(k->roster, 0, sizeof(*k->roster));
+        k->roster->format = STORAGE_SPEAKER_ROSTER_FORMAT;
+    }
+    for (size_t slot = 0; sure && slot < APP_SPEAKERS_MAX; slot++) {
+        char key[STORAGE_NVS_NAME_MAX_BYTES];
+        tpl_key(slot, key);
+        if (k->roster->slot[slot].id[0] == '\0') { (void)sys_storage_erase(STORAGE_NS_SPEAKER, key); }
+    }
+    (void)sys_storage_erase(STORAGE_NS_SPEAKER, STORAGE_KEY_SPK_TPL);
+    (void)sys_storage_erase(STORAGE_NS_SPEAKER, STORAGE_KEY_SPK_TPL_MODEL);
+    load_prints(ai_engine_speaker_model_id());
+    divert();
+    ESP_LOGI(TAG, "speaker check %s, roster v%" PRIu32 " (%s), %u voiceprints of this model",
+             k->on ? "on" : "off", k->roster->version, esp_err_to_name(read), (unsigned)k->n_prints);
 }
 
 static void release(workspaces_t *w)
 {
     void *const blocks[] = {s.pcm_ring,
                             s.slots,
+                            s.spk.roster,
                             s.spk.unit,
-                            s.spk.voiceprint,
+                            s.spk.prints,
                             s.spk.enrol_units,
                             s.hop,
                             s.bins,
@@ -560,79 +604,272 @@ void svc_listen_busy_reject(svc_listen_decision_t *decision)
     if (decision != NULL) { reject_as(decision, APP_CODE_SPEAKER_BUSY); }
 }
 
-static void enrol(svc_listen_decision_t *out)
+// Rows stay in slot order, so the lowest row on a tie of scores is the lowest slot (KEHOACH 3.17).
+static float *print_row(uint8_t slot)
 {
     speaker_t *k = &s.spk;
-    reject_as(out, APP_CODE_SPEAKER_ENROLLING);
-    if (++k->enrolled < GEN_SPEAKER_ENROL_COMMANDS) { return; }
-    ai_engine_speaker_voiceprint(k->enrol_units, k->enrolled, k->voiceprint);
-    k->enrolling = false;
-    k->enrolled = 0;
-    k->has_print = true;
-    esp_err_t err =
-        sys_storage_set_blob(STORAGE_NS_SPEAKER, STORAGE_KEY_SPK_TPL, k->voiceprint, k->dims * sizeof(float));
-    if (err == ESP_OK) {
-        err =
-            sys_storage_set_u32(STORAGE_NS_SPEAKER, STORAGE_KEY_SPK_TPL_MODEL, ai_engine_speaker_model_id());
+    size_t row = 0;
+    while (row < k->n_prints && k->print_slot[row] < slot) {
+        row++;
     }
-    atomic_store(&s_diverting, k->on);
-    ESP_LOGI(TAG, "voiceprint of %d commands enrolled, saved: %s", GEN_SPEAKER_ENROL_COMMANDS,
-             esp_err_to_name(err));
+    if (row == k->n_prints || k->print_slot[row] != slot) {
+        const size_t after = k->n_prints - row;
+        memmove(k->prints + (row + 1) * k->dims, k->prints + row * k->dims, after * k->dims * sizeof(float));
+        memmove(&k->print_slot[row + 1], &k->print_slot[row], after);
+        k->print_slot[row] = slot;
+        k->n_prints++;
+    }
+    return k->prints + row * k->dims;
 }
 
-void svc_listen_verify(uint8_t slot, svc_listen_decision_t *out)
+static void drop_print(uint8_t slot)
 {
-    if (out == NULL || !s.ready || s.pcm_ring == NULL || slot >= SVC_LISTEN_VERIFY_SLOTS) { return; }
-    const verify_slot_t *v = &s.slots[slot];
     speaker_t *k = &s.spk;
-    *out = v->decision;
-    if (!k->enrolling && !k->on) { return; }
-    if (!k->enrolling && !k->has_print) {
-        reject_as(out, APP_CODE_SPEAKER_UNENROLLED);
+    for (size_t row = 0; row < k->n_prints; row++) {
+        if (k->print_slot[row] != slot) { continue; }
+        const size_t after = k->n_prints - row - 1;
+        memmove(k->prints + row * k->dims, k->prints + (row + 1) * k->dims, after * k->dims * sizeof(float));
+        memmove(&k->print_slot[row], &k->print_slot[row + 1], after);
+        k->n_prints--;
         return;
     }
+}
+
+static esp_err_t save_roster(void)
+{
+    return sys_storage_set_blob(STORAGE_NS_SPEAKER, STORAGE_KEY_SPK_ROSTER, s.spk.roster,
+                                sizeof(*s.spk.roster));
+}
+
+// The voiceprint goes to NVS ahead of the roster naming its model, so a cut leaves the old one unused.
+static esp_err_t enrol(svc_listen_decision_t *out)
+{
+    speaker_t *k = &s.spk;
+    const uint8_t slot = (uint8_t)k->enrolling;
+    reject_as(out, APP_CODE_SPEAKER_ENROLLING);
+    strlcpy(out->event.speaker_id, k->roster->slot[slot].id, sizeof(out->event.speaker_id));
+    out->event.enrol_count = ++k->enrolled;
+    k->serial++;
+    if (k->enrolled < GEN_SPEAKER_ENROL_COMMANDS) { return ESP_OK; }
+    float *print = print_row(slot);
+    ai_engine_speaker_voiceprint(k->enrol_units, k->enrolled, print);
+    k->roster->slot[slot].model_id = ai_engine_speaker_model_id();
+    k->enrolling = NO_SLOT;
+    k->enrolled = 0;
+    divert();
+    char key[STORAGE_NVS_NAME_MAX_BYTES];
+    tpl_key(slot, key);
+    esp_err_t err = sys_storage_set_blob(STORAGE_NS_SPEAKER, key, print, k->dims * sizeof(float));
+    if (err == ESP_OK) { err = save_roster(); }
+    ESP_LOGI(TAG, "voiceprint of %s from %d commands, slot %u, saved: %s", k->roster->slot[slot].id,
+             GEN_SPEAKER_ENROL_COMMANDS, (unsigned)slot, esp_err_to_name(err));
+    return err == ESP_OK ? ESP_OK : APP_ERR_SPEAKERS_NOT_SAVED;
+}
+
+esp_err_t svc_listen_verify(uint8_t slot, svc_listen_decision_t *out)
+{
+    if (out == NULL || !s.ready || s.pcm_ring == NULL || slot >= SVC_LISTEN_VERIFY_SLOTS) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const verify_slot_t *v = &s.slots[slot];
+    speaker_t *k = &s.spk;
+    const bool enrolling = k->enrolling != NO_SLOT;
+    *out = v->decision;
+    if (!enrolling && !k->on) { return ESP_OK; }
+    if (!enrolling && k->n_prints == 0) {
+        reject_as(out, APP_CODE_SPEAKER_UNENROLLED);
+        return ESP_OK;
+    }
     const int64_t from_us = esp_timer_get_time();
-    float *unit = k->enrolling ? k->enrol_units + (size_t)k->enrolled * k->dims : k->unit;
+    float *unit = enrolling ? k->enrol_units + (size_t)k->enrolled * k->dims : k->unit;
     const esp_err_t err = ai_engine_speaker_embed(v->pcm, unit);
     out->verify_us = (uint32_t)(esp_timer_get_time() - from_us);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "speaker check of hop %" PRIu32 ": %s", out->event.seq, esp_err_to_name(err));
         reject_as(out, APP_CODE_SPEAKER_BUSY);
-        return;
+        return ESP_OK;
     }
-    if (k->enrolling) {
-        enrol(out);
-        return;
-    }
-    out->event.speaker_permille = ai_engine_speaker_score(unit, k->voiceprint);
+    if (enrolling) { return enrol(out); }
+    size_t best = 0;
+    out->event.speaker_permille = ai_engine_speaker_best(unit, k->prints, k->n_prints, &best);
     out->event.has_speaker = true;
-    if (!ai_engine_speaker_passes(out->event.speaker_permille, 1)) { reject_as(out, APP_CODE_SPEAKER); }
+    strlcpy(out->event.speaker_id, k->roster->slot[k->print_slot[best]].id, sizeof(out->event.speaker_id));
+    if (!ai_engine_speaker_passes(out->event.speaker_permille, k->n_prints)) {
+        reject_as(out, APP_CODE_SPEAKER);
+    }
+    return ESP_OK;
 }
 
-esp_err_t svc_listen_speaker(svc_listen_speaker_ctl_t ctl)
+static bool is_speaker_id(const char *id)
+{
+    const size_t prefix = sizeof(APP_SPEAKER_ID_PREFIX) - 1;
+    if (memchr(id, '\0', APP_SPEAKER_ID_BYTES) == NULL || strlen(id) != APP_SPEAKER_ID_BYTES - 1 ||
+        strncmp(id, APP_SPEAKER_ID_PREFIX, prefix) != 0) {
+        return false;
+    }
+    for (size_t i = prefix; i < APP_SPEAKER_ID_BYTES - 1; i++) {
+        if (id[i] < '0' || id[i] > '9') { return false; }
+    }
+    return true;
+}
+
+static size_t utf8_bytes(uint8_t lead)
+{
+    if (lead < 0x80) { return 1; }
+    if ((lead & 0xE0) == 0xC0) { return 2; }
+    if ((lead & 0xF0) == 0xE0) { return 3; }
+    return (lead & 0xF8) == 0xF0 ? 4 : 0;
+}
+
+// Well-formed UTF-8 of 1 to APP_SPEAKER_NAME_MAX_CHARS characters, as speaker_set.schema.json's name.
+static bool is_speaker_name(const char *name)
+{
+    if (memchr(name, '\0', APP_SPEAKER_NAME_BYTES) == NULL) { return false; }
+    size_t chars = 0;
+    for (const uint8_t *p = (const uint8_t *)name; *p != 0; chars++) {
+        const size_t len = utf8_bytes(*p);
+        if (len == 0) { return false; }
+        for (size_t i = 1; i < len; i++) {
+            if ((p[i] & 0xC0) != 0x80) { return false; }
+        }
+        p += len;
+    }
+    return chars >= 1 && chars <= APP_SPEAKER_NAME_MAX_CHARS;
+}
+
+static bool is_roster(const app_speaker_set_t *set)
+{
+    if (set->count > APP_SPEAKERS_MAX) { return false; }
+    for (size_t i = 0; i < set->count; i++) {
+        if (!is_speaker_id(set->speakers[i].id) || !is_speaker_name(set->speakers[i].name)) { return false; }
+        for (size_t j = 0; j < i; j++) {
+            if (strcmp(set->speakers[i].id, set->speakers[j].id) == 0) { return false; }
+        }
+    }
+    return true;
+}
+
+static int slot_of(const char *id)
+{
+    for (int slot = 0; slot < APP_SPEAKERS_MAX; slot++) {
+        const char *held = s.spk.roster->slot[slot].id;
+        if (held[0] != '\0' && strncmp(held, id, APP_SPEAKER_ID_BYTES) == 0) { return slot; }
+    }
+    return NO_SLOT;
+}
+
+static bool listed(const app_speaker_set_t *set, const char *id)
+{
+    for (size_t i = 0; i < set->count; i++) {
+        if (strncmp(set->speakers[i].id, id, APP_SPEAKER_ID_BYTES) == 0) { return true; }
+    }
+    return false;
+}
+
+// One dropped loses its voiceprint in NVS first: a cut then leaves the roster naming them, never their print
+// alone.
+static esp_err_t drop_speaker(uint8_t slot)
+{
+    speaker_t *k = &s.spk;
+    char key[STORAGE_NVS_NAME_MAX_BYTES];
+    tpl_key(slot, key);
+    const esp_err_t err = sys_storage_erase(STORAGE_NS_SPEAKER, key);
+    drop_print(slot);
+    if (k->enrolling == slot) {
+        k->enrolling = NO_SLOT;
+        k->enrolled = 0;
+    }
+    ESP_LOGI(TAG, "%s dropped from slot %u, voiceprint erased: %s", k->roster->slot[slot].id, (unsigned)slot,
+             esp_err_to_name(err));
+    memset(&k->roster->slot[slot], 0, sizeof(k->roster->slot[slot]));
+    return err;
+}
+
+static void take_speaker_into(const app_speaker_t *who)
+{
+    storage_speaker_slot_t *slots = s.spk.roster->slot;
+    int slot = slot_of(who->id);
+    for (int free = 0; slot == NO_SLOT && free < APP_SPEAKERS_MAX; free++) {
+        if (slots[free].id[0] == '\0') { slot = free; }
+    }
+    if (slot == NO_SLOT) { return; }
+    if (slots[slot].id[0] == '\0') { strlcpy(slots[slot].id, who->id, sizeof(slots[slot].id)); }
+    strlcpy(slots[slot].name, who->name, sizeof(slots[slot].name));
+}
+
+esp_err_t svc_listen_speaker_set(const app_speaker_set_t *set)
 {
     if (!s.ready || s.pcm_ring == NULL) { return ESP_ERR_NOT_SUPPORTED; }
+    if (set == NULL) { return ESP_ERR_INVALID_ARG; }
+    if (!is_roster(set)) { return APP_ERR_SPEAKERS_INVALID; }
     speaker_t *k = &s.spk;
-    esp_err_t err = ESP_OK;
-    switch (ctl) {
-    case SVC_LISTEN_SPEAKER_ENROL:
-        k->enrolling = true;
-        k->enrolled = 0;
-        break;
-    case SVC_LISTEN_SPEAKER_ON:
-    case SVC_LISTEN_SPEAKER_OFF:
-        k->on = ctl == SVC_LISTEN_SPEAKER_ON;
-        err = sys_storage_set_u8(STORAGE_NS_SPEAKER, STORAGE_KEY_SPK_CHIP, k->on ? 1 : 0);
-        break;
-    case SVC_LISTEN_SPEAKER_CLEAR:
-        k->has_print = false;
-        err = sys_storage_erase(STORAGE_NS_SPEAKER, STORAGE_KEY_SPK_TPL);
-        if (err == ESP_OK) { err = sys_storage_erase(STORAGE_NS_SPEAKER, STORAGE_KEY_SPK_TPL_MODEL); }
-        break;
-    default: return ESP_ERR_INVALID_ARG;
+    if (set->version <= k->roster->version) {
+        ESP_LOGI(TAG, "roster v%" PRIu32 " not above v%" PRIu32 ", ignored", set->version,
+                 k->roster->version);
+        return ESP_OK;
     }
-    atomic_store(&s_diverting, k->on || k->enrolling);
-    ESP_LOGI(TAG, "speaker check %s%s, voiceprint %s: %s", k->on ? "on" : "off",
-             k->enrolling ? ", enrolling" : "", k->has_print ? "kept" : "none", esp_err_to_name(err));
-    return err;
+    esp_err_t err = ESP_OK;
+    for (uint8_t slot = 0; slot < APP_SPEAKERS_MAX; slot++) {
+        const char *held = k->roster->slot[slot].id;
+        if (held[0] != '\0' && !listed(set, held)) {
+            const esp_err_t dropped = drop_speaker(slot);
+            err = err == ESP_OK ? dropped : err;
+        }
+    }
+    for (size_t i = 0; i < set->count; i++) {
+        take_speaker_into(&set->speakers[i]);
+    }
+    if (k->on != set->check) {
+        k->on = set->check;
+        const esp_err_t flag = sys_storage_set_u8(STORAGE_NS_SPEAKER, STORAGE_KEY_SPK_CHIP, k->on ? 1 : 0);
+        err = err == ESP_OK ? flag : err;
+    }
+    k->roster->version = set->version;
+    const esp_err_t saved = save_roster();
+    err = err == ESP_OK ? saved : err;
+    k->serial++;
+    divert();
+    ESP_LOGI(TAG, "roster v%" PRIu32 ": %u people, check %s, %u voiceprints, saved: %s", set->version,
+             (unsigned)set->count, k->on ? "on" : "off", (unsigned)k->n_prints, esp_err_to_name(err));
+    return err == ESP_OK ? ESP_OK : APP_ERR_SPEAKERS_NOT_SAVED;
+}
+
+esp_err_t svc_listen_speaker_enrol(const char *id)
+{
+    if (!s.ready || s.pcm_ring == NULL) { return ESP_ERR_NOT_SUPPORTED; }
+    if (id == NULL) { return ESP_ERR_INVALID_ARG; }
+    const int slot = slot_of(id);
+    if (slot == NO_SLOT) { return APP_ERR_SPEAKER_UNKNOWN; }
+    speaker_t *k = &s.spk;
+    k->enrolling = (int8_t)slot;
+    k->enrolled = 0;
+    k->serial++;
+    divert();
+    ESP_LOGI(TAG, "enrolling %s, slot %d: the next %d commands", k->roster->slot[slot].id, slot,
+             GEN_SPEAKER_ENROL_COMMANDS);
+    return ESP_OK;
+}
+
+esp_err_t svc_listen_speaker_state(app_speaker_state_t *out)
+{
+    if (out == NULL) { return ESP_ERR_INVALID_ARG; }
+    if (!s.ready || s.pcm_ring == NULL) { return ESP_ERR_NOT_SUPPORTED; }
+    const speaker_t *k = &s.spk;
+    memset(out, 0, sizeof(*out));
+    out->serial = k->serial;
+    out->version = k->roster->version;
+    out->check = k->on;
+    for (uint8_t slot = 0; slot < APP_SPEAKERS_MAX; slot++) {
+        const storage_speaker_slot_t *who = &k->roster->slot[slot];
+        if (who->id[0] == '\0') { continue; }
+        strlcpy(out->speakers[out->count].id, who->id, sizeof(out->speakers[out->count].id));
+        strlcpy(out->speakers[out->count].name, who->name, sizeof(out->speakers[out->count].name));
+        out->enrolled[out->count] = memchr(k->print_slot, slot, k->n_prints) != NULL;
+        out->count++;
+    }
+    if (k->enrolling != NO_SLOT) {
+        strlcpy(out->enrolling, k->roster->slot[k->enrolling].id, sizeof(out->enrolling));
+        out->enrol_count = k->enrolled;
+    }
+    return ESP_OK;
 }

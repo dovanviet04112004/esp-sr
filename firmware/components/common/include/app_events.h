@@ -52,8 +52,10 @@ typedef struct {
     int16_t doa_deg;          // -1 when unknown
     int16_t speaker_permille; // the speaker check's score, valid with has_speaker
     bool has_speaker;
+    uint8_t enrol_count; // commands enrolled so far; 0 outside an enrolment
     char command_id[APP_EVT_ID_MAX_BYTES];
-    char code[APP_EVT_CODE_MAX_BYTES]; // upper-case code, e.g. LOW_MARGIN
+    char code[APP_EVT_CODE_MAX_BYTES];     // upper-case code, e.g. LOW_MARGIN
+    char speaker_id[APP_SPEAKER_ID_BYTES]; // best match or the one enrolling; "" when none
 } app_event_t;
 
 typedef struct {
