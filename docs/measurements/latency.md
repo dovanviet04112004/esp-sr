@@ -769,6 +769,12 @@ trung bình). Bản dò chạy hàng `timing` của run, dựng `UNIT_PROFILE=ct
   Đặt bản sao sau phần đệm, như cách của b0, thì Pad nằm lẻ giữa đồ thị chạy dòng và esp-dl assert trong
   `Concat::get_output_shape` lúc dựng. Đặt trước thì Pad vẫn sát conv, ESP-PPQ gộp nó rồi đổi thành cache.
   `/front/first` từ 9,1 xuống 1,3 ms; `command_ctc` **63,9 ms** một bước, lệch 0.
+- **`copies_by_broadcast` không bật cho ctc:** bản vá ghi cứng hình dạng của cả chuỗi vào Reshape, nên với đồ thị
+  chạy dòng nó đổi `[1, 1, 16, 80]` thành `[1, 768, 80, 1]`. `espdl_shapes` chặn ngay trên máy tính, trước khi nạp
+  board. Bản vá chỉ bỏ được một Transpose cỡ 1 ms một bước.
+- **Dừng giai đoạn tăng tốc của ctc ở 63,9 ms một bước**, từ 82,2. Các conv của stack mỗi cái cỡ 1 ms, sát băng
+  thông PSRAM, vì mỗi bước đọc lại 3,1 MB trọng số. `/front/first` và `/front/convs.1` 1,3 ms mỗi cái, kênh 8 không
+  bản vá nào xử lý. Hai Transpose đổi bố cục ở đầu mạng.
 - **RMSNorm theo mã máy (11/10):** bản dựng S3 của esp-dl tính `mean_sq + eps` bằng một `madd.s`, với hằng
   `(1.0f / n)·s²` tính sẵn. Bản vá cũ chia thật cho n rồi mới cộng, mà 1/160 không biểu diễn đúng ở float32. Sau khi
   `rmsnorm_as_espdl` chép đúng mã máy, chuỗi chạy lại vẫn khớp từng bit: `command_ctc` lệch 0, 82,2 ms một bước.
