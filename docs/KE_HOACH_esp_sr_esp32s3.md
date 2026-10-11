@@ -2498,7 +2498,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 
 | Component | Hàm chính | `@ctx` |
 |---|---|---|
-| `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame` | any, không chặn, người gọi giữ bộ nhớ |
+| `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame`, `spk_fbank_run` (khâu đặc trưng của b0, §3.17) | any, không chặn, người gọi giữ bộ nhớ |
 | `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_entry`, `lang_vi_unit_name` | any, không chặn |
 | `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |

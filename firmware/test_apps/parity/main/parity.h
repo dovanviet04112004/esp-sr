@@ -47,6 +47,12 @@ bool parity_stft(const char *case_name, const void *buf, size_t len);
  */
 bool parity_mel(const char *case_name, const void *buf, size_t len);
 
+/** Run one spk_fbank case with the configuration it carries over its int16 window; compare the features.
+ *  @ctx task | blocking
+ *  @ret false for a missing tensor, a wrong shape, a bad configuration or no memory
+ */
+bool parity_spk_fbank(const char *case_name, const void *buf, size_t len);
+
 /** Run one pitch case with the configuration it carries, one hop at a time, resetting where it says; compare
  * the features and the newest frame's NCCF and F0 after every hop.
  *  @ctx task | blocking

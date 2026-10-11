@@ -1,4 +1,4 @@
-set(srcs "src/window.c" "src/stft.c" "src/mel.c" "src/pitch.c")
+set(srcs "src/window.c" "src/stft.c" "src/mel.c" "src/pitch.c" "src/spk_fbank.c")
 if(CONFIG_DSP_SPEC_FFT_DL_FFT)
     list(APPEND srcs "src/fft_dl.c")
 else()
