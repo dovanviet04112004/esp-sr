@@ -8,6 +8,12 @@
       "entry": "speaker",
       "kind": "espdl",
       "sha256": "c3373e4ec45fecd1c23b60f7889d1273ba755a12787dc5a28859002f1c30a24f"
+    },
+    {
+      "file": "cohort.bin",
+      "entry": "speaker_cohort",
+      "kind": "cohort",
+      "sha256": "9ed21501071e2f4cca9656f4ccde17e5bdd313078d89894d68aa597798b59288"
     }
   ],
   "learnt_from": {
@@ -30,15 +36,15 @@
     "int16_ops": []
   },
   "threshold": {
-    "permille": [
-      744,
-      823,
-      828,
-      835,
-      841,
-      849,
-      852,
-      853
+    "milli_z": [
+      1656,
+      1722,
+      1815,
+      1911,
+      1906,
+      1961,
+      2019,
+      2034
     ],
     "impostors_passing": [
       0.05,
@@ -50,6 +56,12 @@
       0.05,
       0.05
     ]
+  },
+  "cohort": {
+    "seed": 20261010,
+    "stream": 3,
+    "speakers": 27,
+    "rows": 380
   },
   "weights_in_flash": true
 }
