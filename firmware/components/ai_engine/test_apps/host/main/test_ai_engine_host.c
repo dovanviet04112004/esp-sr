@@ -7,12 +7,15 @@
 #include "fake_storage.h"
 #include "gen_grid.h"
 #include "gen_listen.h"
+#include "gen_speaker.h"
 #include "image_probe.h"
 #include "sha/sha_core.h"
 #include "storage_format.h"
 
 #define NET_BYTES 100
 #define NORM_BYTES 40
+#define NORM_OFFSET (STORAGE_MODEL_HEADER_BYTES + 2 * STORAGE_MODEL_ALIGN_BYTES)
+#define THRESHOLD_PERMILLE (-37)
 
 static unsigned s_failures;
 static _Alignas(STORAGE_MODEL_ALIGN_BYTES)
@@ -95,6 +98,41 @@ static void check_loader(void)
           "loading again drops the image held and its listen hash, even when the new slot is empty");
 }
 
+static uint32_t id_of(const uint8_t *sha256)
+{
+    return (uint32_t)sha256[0] << 24 | (uint32_t)sha256[1] << 16 | (uint32_t)sha256[2] << 8 | sha256[3];
+}
+
+static void check_in_flash(void)
+{
+    build_image(GEN_GRID_HASH, GEN_LISTEN_HASH);
+    storage_model_header_t *header = (storage_model_header_t *)s_image;
+    header->entry[1].flags = STORAGE_MODEL_FLAG_IN_FLASH;
+    header->speaker_hash = GEN_SPEAKER_HASH;
+    header->spk_accept_permille = THRESHOLD_PERMILLE;
+    const unsigned unmaps = fake_storage_unmaps();
+    size_t bytes = 0;
+    check(ai_engine_load(1) == ESP_OK && image_probe_bytes() == NET_BYTES,
+          "an entry flagged to stay in flash holds no PSRAM");
+    check(image_probe_find("wake", STORAGE_MODEL_KIND_NORM, &bytes) == &s_image[NORM_OFFSET] &&
+              bytes == NORM_BYTES && fake_storage_unmaps() == unmaps,
+          "it is read in place, the mapping held while it is loaded");
+    check(image_probe_speaks("speaker") && image_probe_speaker_threshold() == THRESHOLD_PERMILLE &&
+              image_probe_id("wake", STORAGE_MODEL_KIND_NORM) == id_of(header->entry[1].sha256),
+          "the header's speaker hash and threshold and an entry's id come through");
+    header->speaker_hash = GEN_SPEAKER_HASH ^ 1u;
+    check(ai_engine_load(1) == ESP_OK && !image_probe_speaks("speaker") &&
+              fake_storage_unmaps() == unmaps + 1,
+          "an image of another speaker.yaml loads, its speaker refused, the old mapping let go");
+    s_image[NORM_OFFSET + 3] ^= 0x01;
+    check(ai_engine_load(1) == ESP_ERR_INVALID_CRC && image_probe_bytes() == 0 &&
+              fake_storage_unmaps() == unmaps + 3,
+          "a flipped bit of an entry in flash fails its sha256 and the mapping goes");
+    fake_storage_set_image(NULL, 0);
+    check(ai_engine_load(0) == ESP_ERR_NOT_FOUND && fake_storage_unmaps() == unmaps + 3,
+          "an empty slot holds no mapping");
+}
+
 static void check_shells(void)
 {
     static const float log_mel[40];
@@ -128,6 +166,7 @@ static void check_shells(void)
 int main(void)
 {
     check_loader();
+    check_in_flash();
     check_shells();
     printf("HOST %u failure(s)\n", s_failures);
     return s_failures == 0 ? 0 : 1;

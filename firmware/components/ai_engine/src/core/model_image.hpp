@@ -13,7 +13,7 @@
 namespace ai {
 
 struct Blob {
-    const uint8_t *data; // PSRAM, 16-byte aligned, valid until the next image_load
+    const uint8_t *data; // 16-byte aligned in PSRAM or flash, until the next load
     size_t size;
 };
 
@@ -26,8 +26,19 @@ esp_err_t image_load(uint8_t slot) noexcept;
 /** The loaded entry of that name and kind; data is nullptr when the image has none. */
 Blob image_find(const char *name, storage_model_kind_t kind) noexcept;
 
-/** PSRAM bytes the loaded entries hold. */
+/** PSRAM bytes the loaded entries hold; an entry left in flash holds none. */
 size_t image_bytes() noexcept;
+
+/** The first four bytes of the sha256 of the entry of that name and kind, big-endian; 0 when the image has
+ * none. */
+uint32_t image_entry_id(const char *name, storage_model_kind_t kind) noexcept;
+
+/** The threshold of the image's speaker row, permille of a cosine (KEHOACH 6.3). */
+int16_t image_speaker_threshold_permille() noexcept;
+
+/** Whether the loaded image's speaker came with the speaker.yaml this build runs (KEHOACH 3.17); logs
+ * both hashes under name when not. */
+bool image_speaks_as_built(const char *name) noexcept;
 
 /** Whether the loaded image's command learned on the listen.yaml this build cuts windows by (KEHOACH 6.3);
  * logs both hashes under name when not. */

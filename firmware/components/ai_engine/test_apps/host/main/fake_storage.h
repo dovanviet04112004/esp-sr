@@ -6,3 +6,6 @@
 #include <stddef.h>
 
 void fake_storage_set_image(const void *image, size_t bytes);
+
+// Mappings let go so far, to see one held while an entry stays in flash.
+unsigned fake_storage_unmaps(void);

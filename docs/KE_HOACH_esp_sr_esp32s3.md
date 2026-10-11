@@ -3032,6 +3032,7 @@ Bảng phân vùng không đi qua OTA được: đổi bảng là nạp lại qu
 | `afe` | `ns_floor_db` (i8), `agc_target_dbfs` (i8), `vad_mode` (u8) | | gieo từ `contracts/afe.yaml`, đổi bằng `SET_CONFIG` |
 | `kws` | `wake_th` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16), `cmd_syllable` (u16), `cmd_seeds` (blob 3 × u16) | | `wake_th` gieo từ `Kconfig` của `svc_listen`; ba khoá lệnh mang nghĩa của đường đang dựng (§3.12): `δ₁`, `δ₂`, `δ₃` của `ctc` theo phần nghìn nat mỗi khung, hay xác suất thấp nhất và khoảng nhất–nhì của `kws`, ‰, đường không dùng `δ₃`. Chúng gieo từ header của ảnh ở `models_0` (§6.3), ảnh không mang thì từ `Kconfig` (`δ₃` 65 535 là không trần); `cmd_seeds` giữ bộ ba đã gieo: lúc boot, bộ gợi ý khác nó, hay một trong ba khoá vắng, thì ghi lại cả ba, nên model mới mang ngưỡng chọn cho nó tới board, khoá bị xoá (app thử `svc_listen` xoá chúng) không rơi về `Kconfig`, còn giá trị `SET_CONFIG` ghi giữ tới khi bộ gợi ý đổi |
 | `model` | `version` (str), `sha256` (blob 32 B) | | ảnh đang nằm ở `models_0` (§6.1) |
+| `speaker` | `chip`, `server` (u8), `tpl` (blob, 4 B một chiều của embedding), `tpl_model` (u32) | | `chip`, `server`: cờ kiểm người nói của hai đường (§3.17), vắng là tắt; `tpl`: mẫu giọng của đường chip, độ dài 1; `tpl_model`: 4 byte đầu sha256 của mục `speaker` lúc đăng ký, khác mục đang nạp thì mẫu không dùng; `spk clear` xoá `tpl` và `tpl_model` (§1.4) |
 | `sys` | `boot_count` (u32), `seed_ver` (u32), `last_ota_result` (u8), `fw_valid` (u8) | | |
 
 **`pcm_shift`** là số bit dịch khi đổi mẫu 24 bit của micro sang `int16` (E2-T5). Cắt thẳng 8 bit thấp
@@ -3058,13 +3059,16 @@ offset 0x000  header 1 KB
    +0x014 cmd_reject_permille u16 — δ₁ chọn cho model command của ảnh; 0 khi ảnh không mang ngưỡng
    +0x016 cmd_margin_permille u16 — δ₂, cùng đơn vị
    +0x018 cmd_syllable_permille u16 — δ₃, cùng đơn vị; 0 khi ảnh không mang
+   +0x01A spk_accept_permille i16 — ngưỡng điểm của speaker, phần nghìn của cosine; có nghĩa khi ảnh có speaker
+   +0x01C speaker_hash u32 — băm của contracts/speaker.yaml mà speaker được nhập theo; 0 khi ảnh không có speaker
    +0x040 entry[8] × 64 B:
           name[16]  offset u32  size u32  sha256[32]  kind u32  flags u32
 offset 0x400  dữ liệu, mỗi entry căn 64 B
 ```
 
 `kind`: `ESPDL` (một file `.espdl`), `NORM` (thống kê chuẩn hoá của một model, float32), `UNITS`
-(bảng đơn vị của `command` `ctc`).
+(bảng đơn vị của `command` `ctc`). `flags`: bit 0 `IN_FLASH`, mục đọc tại chỗ qua mmap, không chép lên PSRAM (§6.5);
+bước đóng gói đặt nó cho đồ thị của hàng deploy có `weights_in_flash`, hiện là `speaker` (§3.17).
 
 **`firmware/models/<nhánh>/meta.json`** đi cùng mỗi `.espdl` và được commit (§4.3): `grid_hash`, nguồn dữ liệu đã học
 (CLAUDE.md §4.3), run sinh ra nó. Của `command` có thêm ba trường (ADR-0012):
@@ -3081,6 +3085,10 @@ ghi nó vào header. Và `thresholds` (`reject_permille`, `margin_permille`, `sy
 cho đúng dòng thang int8 được deploy (§3.12), vì điểm của hai model khác nhau không cùng thang; deploy từ chối dòng chưa
 chọn ngưỡng, bước đóng gói ghi bộ ấy vào header, 0 cho `δ₃` khi dòng chọn trước khi có nó, và lúc boot board gieo NVS
 từ đó (§6.2).
+
+Của `speaker` có `speaker_hash`, `threshold` (`permille`, `impostors_passing`) và `weights_in_flash` (§3.17): bước
+đóng gói ghi băm và ngưỡng vào header, đặt cờ `IN_FLASH` cho đồ thị; `ai_engine` từ chối dựng nhánh khi băm khác
+`gen_speaker.h`, như `listen_hash` với `command`.
 
 Của `ns` có thêm trường `backend` (`rnnoise` | `nsnet`, §3.9): bước đóng gói đặt tên mục trong ảnh theo nó (`ns_rnnoise`
 hay `ns_nsnet`), nên bản dựng của ứng viên kia không tìm thấy model, `ai_engine_ns_ops()` trả `NULL` và chuỗi chạy sàn.
@@ -3128,7 +3136,9 @@ TỔNG QUAN §7 ước ~97 KB và thiếu bốn khoản. Bảng ước lại �
 
 **Mọi model nằm ở PSRAM — trọng số lẫn vùng làm việc.** `ai_engine_load` mmap slot model qua
 `sys_storage`, kiểm sha256 và `grid_hash`, **chép trọng số từng model lên PSRAM**, rồi nhả mmap: lúc chạy
-không model nào đọc thẳng từ flash, và không model nào chiếm RAM nội. Kéo trọng số `ns` (104 KB với RNNoise-16k,
+không model nào chiếm RAM nội. Ngoại lệ duy nhất là mục mang cờ `IN_FLASH` (§6.3), hiện là b0 của `speaker`:
+`ai_engine_load` kiểm sha256 ngay trên mmap và giữ mmap ấy, b0 đọc trọng số tại chỗ, chậm 3,8% để đổi 1,72 MB PSRAM
+(`measurements/latency.md` §25, chủ repo 11/10). Kéo trọng số `ns` (104 KB với RNNoise-16k,
 337 KB với NSNet-16k L) và `wake` (~100 KB) về RAM nội như luật "chỉ giữ thứ bị chạm mỗi khung" của TỔNG QUAN
 thì cộng lên ~440–720 KB,
 vượt phần còn cấp được; RAM nội để dành cho đệm DMA, trạng thái khung của `dsp_afe`, ngăn xếp và Wi-Fi.

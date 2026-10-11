@@ -9,7 +9,7 @@ import json
 import pytest
 
 from srpipe.export import pack_models
-from srpipe.generated import grid, listen
+from srpipe.generated import grid, listen, speaker
 
 
 def entries_of(image: bytes) -> list[tuple[bytes, int, int, bytes, int]]:
@@ -61,13 +61,16 @@ def test_entries_are_aligned_hashed_and_in_order() -> None:
 def test_the_header_carries_its_commands_listen_hash_and_thresholds_and_0_without_them() -> None:
     entries = [pack_models.Entry("command_ctc", "espdl", b"g" * 10)]
     command = pack_models.pack(entries, listen_hash=listen.HASH, thresholds=(420, 35, 60))
-    assert pack_models.HEAD.unpack_from(command, 0)[4:] == (listen.HASH, 420, 35, 60)
-    assert pack_models.HEAD.unpack_from(pack_models.pack([pack_models.Entry("wake", "espdl", b"w")]), 0)[4:] == (
-        0,
-        0,
-        0,
-        0,
-    )
+    assert pack_models.HEAD.unpack_from(command, 0)[4:] == (listen.HASH, 420, 35, 60, 0, 0)
+    bare = pack_models.pack([pack_models.Entry("wake", "espdl", b"w")])
+    assert pack_models.HEAD.unpack_from(bare, 0)[4:] == (0, 0, 0, 0, 0, 0)
+
+
+def test_the_header_carries_its_speakers_hash_and_threshold_and_an_entry_its_flags() -> None:
+    entries = [pack_models.Entry("speaker", "espdl", b"s" * 10, pack_models.IN_FLASH)]
+    image = pack_models.pack(entries, speaker_hash=speaker.HASH, speaker_permille=-37)
+    assert pack_models.HEAD.unpack_from(image, 0)[8:] == (-37, speaker.HASH)
+    assert pack_models.ENTRY.unpack_from(image, pack_models.HEAD.size)[5] == pack_models.IN_FLASH
 
 
 def test_the_lock_gives_its_command_rows_thresholds_0_for_one_it_lacks_and_refuses_two(tmp_path, monkeypatch) -> None:
@@ -83,12 +86,38 @@ def test_the_lock_gives_its_command_rows_thresholds_0_for_one_it_lacks_and_refus
     monkeypatch.setattr(pack_models, "LOCK", lock)
     monkeypatch.setattr(pack_models, "MODELS", tmp_path)
     lock.write_text(json.dumps({"models": {"command": row}}), encoding="utf-8")
-    assert pack_models.locked()[1:] == (listen.HASH, (420, 35, 60))
+    got = pack_models.locked()
+    assert (got.listen_hash, got.thresholds, got.speaker_hash) == (listen.HASH, (420, 35, 60), 0)
     pair = row | {"thresholds": {"reject_permille": 420, "margin_permille": 35}}
     lock.write_text(json.dumps({"models": {"command": pair}}), encoding="utf-8")
-    assert pack_models.locked()[2] == (420, 35, 0)
+    assert pack_models.locked().thresholds == (420, 35, 0)
     lock.write_text(json.dumps({"models": {"command": row, "other": row | {"files": []}}}), encoding="utf-8")
     with pytest.raises(ValueError, match="one command's"):
+        pack_models.locked()
+
+
+def test_the_lock_flags_a_speaker_left_in_flash_and_gives_its_hash_and_threshold(tmp_path, monkeypatch) -> None:
+    (tmp_path / "speaker").mkdir()
+    (tmp_path / "speaker" / "speaker.espdl").write_bytes(b"b0")
+    digest = hashlib.sha256(b"b0").hexdigest()
+    files = [{"file": "speaker.espdl", "entry": "speaker", "kind": "espdl", "sha256": digest}]
+    row = {
+        "files": files,
+        "speaker_hash": f"0x{speaker.HASH:08x}",
+        "threshold": {"permille": 412, "impostors_passing": 0.01},
+        "weights_in_flash": True,
+    }
+    lock = tmp_path / "models.lock.json"
+    monkeypatch.setattr(pack_models, "LOCK", lock)
+    monkeypatch.setattr(pack_models, "MODELS", tmp_path)
+    lock.write_text(json.dumps({"models": {"speaker": row}}), encoding="utf-8")
+    got = pack_models.locked()
+    assert (got.speaker_hash, got.speaker_permille) == (speaker.HASH, 412)
+    assert [e.flags for e in got.entries] == [pack_models.IN_FLASH]
+    lock.write_text(json.dumps({"models": {"speaker": row | {"weights_in_flash": False}}}), encoding="utf-8")
+    assert [e.flags for e in pack_models.locked().entries] == [0]
+    lock.write_text(json.dumps({"models": {"speaker": row, "other": row | {"files": []}}}), encoding="utf-8")
+    with pytest.raises(ValueError, match="a speaker"):
         pack_models.locked()
 
 

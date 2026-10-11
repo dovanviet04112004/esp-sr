@@ -16,6 +16,7 @@
 #define STORAGE_NS_KWS "kws"
 #define STORAGE_NS_MODEL "model"
 #define STORAGE_NS_SYS "sys"
+#define STORAGE_NS_SPEAKER "speaker"
 
 #define STORAGE_KEY_SSID "ssid"                       // str
 #define STORAGE_KEY_PASS "pass"                       // str
@@ -46,6 +47,10 @@
 #define STORAGE_KEY_SEED_VER "seed_ver"               // u32
 #define STORAGE_KEY_LAST_OTA_RESULT "last_ota_result" // u8
 #define STORAGE_KEY_FW_VALID "fw_valid"               // u8
+#define STORAGE_KEY_SPK_CHIP "chip"                   // u8, chip path's speaker check on
+#define STORAGE_KEY_SPK_SERVER "server"               // u8, server path's on
+#define STORAGE_KEY_SPK_TPL "tpl"                     // blob, voiceprint: float32 a dim
+#define STORAGE_KEY_SPK_TPL_MODEL "tpl_model"         // u32, id of the speaker entry at enrolment
 
 #define STORAGE_NVS_NAME_FITS(name) (sizeof(name) <= STORAGE_NVS_NAME_MAX_BYTES)
 _Static_assert(
@@ -54,7 +59,8 @@ _Static_assert(
         STORAGE_NVS_NAME_FITS(STORAGE_KEY_STREAM_HOST) && STORAGE_NVS_NAME_FITS(STORAGE_KEY_STREAM_PORT) &&
         STORAGE_NVS_NAME_FITS(STORAGE_KEY_NS_FLOOR_DB) && STORAGE_NVS_NAME_FITS(STORAGE_KEY_BOOT_COUNT) &&
         STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_REJECT) && STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_MARGIN) &&
-        STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_SYLLABLE) && STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_SEEDS),
+        STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_SYLLABLE) && STORAGE_NVS_NAME_FITS(STORAGE_KEY_CMD_SEEDS) &&
+        STORAGE_NVS_NAME_FITS(STORAGE_KEY_SPK_TPL_MODEL),
     "an NVS name holds at most 15 characters");
 
 #define STORAGE_CALIB_BAL_VERSION 1
@@ -67,7 +73,7 @@ _Static_assert(
 #define STORAGE_PATH_RESPONSES "/lfs/resp/vi.json"
 
 #define STORAGE_MODEL_MAGIC 0x444d5253u // "SRMD" little-endian
-#define STORAGE_MODEL_FORMAT_VER 4
+#define STORAGE_MODEL_FORMAT_VER 5
 #define STORAGE_MODEL_MAX_ENTRIES 8
 #define STORAGE_MODEL_NAME_BYTES 16
 #define STORAGE_MODEL_HEADER_BYTES 1024
@@ -81,13 +87,15 @@ typedef enum {
     STORAGE_MODEL_KIND_UNITS = 3,
 } storage_model_kind_t;
 
+#define STORAGE_MODEL_FLAG_IN_FLASH 1u // read in place through the mapping, never copied to PSRAM
+
 typedef struct {
     char name[STORAGE_MODEL_NAME_BYTES];
     uint32_t offset; // from the partition start, 64-byte aligned
     uint32_t size;
     uint8_t sha256[STORAGE_MODEL_SHA256_BYTES];
-    uint32_t kind; // storage_model_kind_t
-    uint32_t flags;
+    uint32_t kind;  // storage_model_kind_t
+    uint32_t flags; // STORAGE_MODEL_FLAG_*
 } storage_model_entry_t;
 
 typedef struct {
@@ -99,7 +107,9 @@ typedef struct {
     uint16_t cmd_reject_permille;   // delta1 chosen for the command; 0 without one
     uint16_t cmd_margin_permille;   // delta2 chosen for the command
     uint16_t cmd_syllable_permille; // delta3 chosen for the command; 0 without one
-    uint8_t reserved[38];
+    int16_t spk_accept_permille;    // speaker threshold, permille of a cosine
+    uint32_t speaker_hash;          // GEN_SPEAKER_HASH of its speaker; 0 without one
+    uint8_t reserved[32];
     storage_model_entry_t entry[STORAGE_MODEL_MAX_ENTRIES];
     uint8_t pad[STORAGE_MODEL_HEADER_BYTES - 64 - STORAGE_MODEL_MAX_ENTRIES * 64];
 } storage_model_header_t;

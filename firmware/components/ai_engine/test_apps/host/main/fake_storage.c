@@ -4,6 +4,7 @@
 
 static const storage_model_header_t *s_image;
 static size_t s_bytes;
+static unsigned s_unmaps;
 
 void fake_storage_set_image(const void *image, size_t bytes)
 {
@@ -24,4 +25,10 @@ esp_err_t sys_storage_map_models(uint8_t slot, sys_storage_models_t *out)
 void sys_storage_unmap_models(sys_storage_models_t *models)
 {
     models->header = NULL;
+    s_unmaps++;
+}
+
+unsigned fake_storage_unmaps(void)
+{
+    return s_unmaps;
 }
