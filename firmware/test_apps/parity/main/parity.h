@@ -147,6 +147,12 @@ bool parity_command_kws(const char *case_name, const void *buf, size_t len);
  */
 bool parity_command_rnnt(const char *case_name, const void *buf, size_t len);
 
+/** Run one speaker case: the enrolment folded into a voiceprint, each test's unit, score and decision.
+ *  @ctx task | blocking
+ *  @ret false when the case lacks a tensor, has the wrong shape or memory runs out
+ */
+bool parity_speaker(const char *case_name, const void *buf, size_t len);
+
 /** Run one command_ctc case window by window over the lexicon it carries, with each window's thresholds;
  * compare every command's best score and the decision.
  *  @ctx any | non-blocking
