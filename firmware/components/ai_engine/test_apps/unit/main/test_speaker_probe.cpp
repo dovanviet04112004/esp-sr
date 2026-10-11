@@ -266,8 +266,11 @@ TEST_CASE("the speaker chain enrols a full roster and scores every window agains
     const bool prints_same = memcmp(prints, python_prints, head.prints * dims * sizeof(float)) == 0;
     float means[APP_SPEAKERS_MAX], stds[APP_SPEAKERS_MAX];
     uint32_t norms_off = 0;
+    int64_t norm_us = 0, score_us = 0, score_peak_us = 0;
     for (uint32_t k = 0; k < head.prints; k++) {
+        const int64_t from_us = esp_timer_get_time();
         TEST_ASSERT_EQUAL(ESP_OK, ai_engine_speaker_norm(prints + k * dims, &means[k], &stds[k]));
+        norm_us += esp_timer_get_time() - from_us;
         norms_off += memcmp(&means[k], &python_norms[2 * k], sizeof(float)) != 0 ||
                      memcmp(&stds[k], &python_norms[2 * k + 1], sizeof(float)) != 0;
     }
@@ -284,8 +287,12 @@ TEST_CASE("the speaker chain enrols a full roster and scores every window agains
             memcmp(&mean, &want.mean, sizeof(float)) != 0 || memcmp(&std, &want.std, sizeof(float)) != 0;
         size_t best = 0;
         int16_t cosine = 0;
+        const int64_t from_us = esp_timer_get_time();
         const int16_t score =
             ai_engine_speaker_best(units + i * dims, prints, means, stds, head.prints, &best, &cosine);
+        const int64_t took_us = esp_timer_get_time() - from_us;
+        score_us += took_us;
+        score_peak_us = took_us > score_peak_us ? took_us : score_peak_us;
         const bool passes = ai_engine_speaker_passes(score, head.prints);
         off += score != want.milli_z || (int32_t)best != want.best || passes != (want.passes != 0) ||
                cosine != want.cosine_permille;
@@ -313,6 +320,10 @@ TEST_CASE("the speaker chain enrols a full roster and scores every window agains
            t.front_us / head.windows);
     printf("speaker chain: the first check after load kept %" PRId64 " B internal and %" PRId64 " B PSRAM\n",
            t.first_internal_bytes, t.first_psram_bytes);
+    const uint32_t scored = tried[kOwner] + tried[kImpostor] + tried[kMember];
+    printf("speaker chain: a voiceprint's norm %" PRId64 " us mean; a window's score over %" PRIu32
+           " voiceprints %" PRId64 " us mean, %" PRId64 " us peak\n",
+           norm_us / head.prints, head.prints, score_us / scored, score_peak_us);
     heap_caps_free(units);
     heap_caps_free(prints);
     esp_partition_munmap(handle);
