@@ -1,0 +1,37 @@
+{
+  "branch": "speaker",
+  "run": "20261010_5a45475-dirty_94e5a9",
+  "grid_hash": "0x9c914b61",
+  "files": [
+    {
+      "file": "speaker.espdl",
+      "entry": "speaker",
+      "kind": "espdl",
+      "sha256": "c3373e4ec45fecd1c23b60f7889d1273ba755a12787dc5a28859002f1c30a24f"
+    }
+  ],
+  "learnt_from": {
+    "pretrained": "redimnet2_b0",
+    "weights": {
+      "file": "b0-vox2-lm.pt",
+      "sha256": "4b5a8c00f813ab0d92fc81ea7c504475d8201bed608fb2c6aaba65be723e9c61",
+      "url": "https://github.com/PalabraAI/redimnet2/releases/download/v1.0.0/b0-vox2-lm.pt"
+    }
+  },
+  "speaker_hash": "0xd94df25c",
+  "features": {
+    "name": "tf_mel72",
+    "frames": 149,
+    "bands": 72
+  },
+  "row": "kl",
+  "rungs": {
+    "calibration": "kl",
+    "int16_ops": []
+  },
+  "threshold": {
+    "permille": 744,
+    "impostors_passing": 0.05
+  },
+  "weights_in_flash": true
+}
