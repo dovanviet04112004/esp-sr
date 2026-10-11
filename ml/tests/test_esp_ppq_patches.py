@@ -302,14 +302,29 @@ SOFTMAX_ROWS, SOFTMAX_WIDTH = 512, 148
 
 
 def espdl_softmax(q: np.ndarray, s_in: float) -> np.ndarray:
-    """esp-dl's int8 Softmax of q over its last axis as the S3 build runs forward_lut (-ffast-math): exp from a table
-    of the input's grid, the row summed one value after another in float32, each value times the sum's reciprocal."""
-    table = np.exp(np.arange(-128, 128, dtype=np.float64) * s_in).astype(np.float32)
+    """esp-dl's int8 Softmax of q over its last axis as the S3 build runs forward_lut (-ffast-math): exp from the S3's
+    table of the input's grid, the row summed one value after another in float32, each value times the sum's
+    reciprocal."""
+    table = esp_ppq_patches.exp_table_s3(s_in)
     e = table[q.astype(np.int64) + 128]
     total = np.zeros((*e.shape[:-1], 1), np.float32)
     for i in range(e.shape[-1]):
         total = total + e[..., i : i + 1]
     return e * (np.float32(1) / total)
+
+
+def test_expf_s3_keeps_the_s3s_own_roundings_within_an_ulp_of_exp() -> None:
+    """picolibc's float32 expf, which board B's Softmax tables are built with, rounds these grid points the other way
+    from the correctly rounded exp (KEHOACH 3.17), and stays within an ulp of it everywhere else."""
+    pinned = {-6.375: 0x3ADF4BFE, -5.875: 0x3B3813C0, -5.75: 0x3B509634, -5.1875: 0x3BB70A62}
+    for x, word in pinned.items():
+        got = esp_ppq_patches.word_of(esp_ppq_patches.expf_s3(x))
+        assert got == word and got != esp_ppq_patches.word_of(np.float32(math.exp(x)))
+    xs = np.random.default_rng(3).uniform(-100.0, 88.0, 4000).astype(np.float32)
+    exact = np.exp(xs.astype(np.float64)).astype(np.float32)
+    got = np.array([esp_ppq_patches.expf_s3(x) for x in xs], dtype=np.float32)
+    assert np.abs(got.view(np.int32).astype(np.int64) - exact.view(np.int32).astype(np.int64)).max() <= 1
+    assert esp_ppq_patches.expf_s3(np.inf) == np.inf and esp_ppq_patches.expf_s3(-np.inf) == 0
 
 
 def test_softmax_as_espdl_simulates_each_row_as_the_chip_sums_it(tmp_path: Path) -> None:

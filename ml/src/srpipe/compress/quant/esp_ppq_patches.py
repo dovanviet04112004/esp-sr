@@ -12,6 +12,8 @@ import functools
 import math
 from collections.abc import Callable, Iterator, Sequence
 
+import numpy as np
+
 # esp-dl runs convolutions channels last, so time, the first spatial axis of every conv streamed here, is axis 1.
 CONV_TIME_AXIS = 1
 SQRT_NEWTON_STOP = 1e-5  # dl_math.hpp EN, esp-dl 3.3.11
@@ -279,10 +281,73 @@ def layernorm_as_espdl() -> Iterator[None]:
             table["LayerNormalization"] = simulate
 
 
+def float_of(word: int) -> np.float32:
+    return np.array([word], dtype=np.uint32).view(np.float32)[0]
+
+
+def word_of(x: np.float32) -> int:
+    return int(np.array([x], dtype=np.float32).view(np.int32)[0])
+
+
+# The constants of picolibc's sf_exp.c as its object for the S3 holds them; P2 and P4 stored positive, subtracted.
+EXPF_LN2_HI = (float_of(0x3F317180), float_of(0xBF317180))
+EXPF_LN2_LO = (float_of(0x3717F7D1), float_of(0xB717F7D1))
+EXPF_HALF = (np.float32(0.5), np.float32(-0.5))
+EXPF_INVLN2, EXPF_HUGE, EXPF_TWOM100 = float_of(0x3FB8AA3B), float_of(0x7149F2CA), float_of(0x0D800000)
+EXPF_P1, EXPF_P2, EXPF_P3 = float_of(0x3E2AAAAB), float_of(0x3B360B61), float_of(0x388AB355)
+EXPF_P4, EXPF_P5 = float_of(0x35DDEA0E), float_of(0x3331BB4C)
+
+
+def expf_s3(x: float) -> np.float32:
+    """expf as the S3 runs it: picolibc's libm/math/sf_exp.c, fdlibm's algorithm, read off its machine code. Every
+    step is one float32 operation rounded once, none fused, the division __divsf3's; it can differ from the correctly
+    rounded exp by an ulp."""
+    one, two = np.float32(1.0), np.float32(2.0)
+    x = np.float32(x)
+    sx = word_of(x)
+    xsb, hx = int(sx < 0), sx & 0x7FFFFFFF
+    if hx > 0x7F800000:
+        return x + x
+    if hx == 0x7F800000:
+        return np.float32(0.0) if xsb else x
+    if sx > 0x42B17217:
+        return np.float32(np.inf)
+    if xsb and hx > 0x42CFF1B5:
+        return np.float32(0.0)
+    k, hi, lo = 0, np.float32(0.0), np.float32(0.0)
+    if hx > 0x3EB17218:
+        if hx <= 0x3F851591:
+            hi, lo, k = x - EXPF_LN2_HI[xsb], EXPF_LN2_LO[xsb], 1 - xsb - xsb
+        else:
+            k = int(x * EXPF_INVLN2 + EXPF_HALF[xsb])
+            t = np.float32(k)
+            hi, lo = x - t * EXPF_LN2_HI[0], t * EXPF_LN2_LO[0]
+        x = hi - lo
+    elif hx <= 0x33FFFFFF and EXPF_HUGE + x > one:
+        return one + x
+    t = x * x
+    c = x - ((((t * EXPF_P5 - EXPF_P4) * t + EXPF_P3) * t - EXPF_P2) * t + EXPF_P1) * t
+    xc = x * c
+    if k == 0:
+        return one - (xc / (c - two) - x)
+    y = word_of(one - ((lo - xc / (two - c)) - hi))
+    if k >= -125:
+        return np.array([y + (k << 23)], dtype=np.int32).view(np.float32)[0]
+    return np.array([y + ((k + 100) << 23)], dtype=np.int32).view(np.float32)[0] * EXPF_TWOM100
+
+
+@functools.lru_cache(maxsize=64)
+def exp_table_s3(scale: float) -> np.ndarray:
+    """esp-dl's Softmax table at an input scale, as tool::gen_lut_8bit fills it on the S3: entry i is the S3's expf of
+    scale times i - 128, a float32 product that is exact for esp-dl's power-of-two scales."""
+    s = np.float32(scale)
+    return np.array([expf_s3(s * np.float32(i - 128)) for i in range(256)], dtype=np.float32)
+
+
 def softmax_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platforms: frozenset, **kwargs):
-    """op's output as esp-dl's Softmax computes it from an int8 input on one of platforms: each step's exp from a
-    256-entry float32 table, the row summed in float32 one value after another, each multiplied by the float32
-    reciprocal of that sum, as -ffast-math builds the source's division; simulate's output otherwise."""
+    """op's output as esp-dl's Softmax computes it from an int8 input on one of platforms: each step's exp from its
+    256-entry float32 table of the S3's expf, the row summed in float32 one value after another, each multiplied by
+    the float32 reciprocal of that sum, as -ffast-math builds the source's division; simulate's output otherwise."""
     import torch
     from esp_ppq.core import QuantizationStates
     from esp_ppq.IR.quantize import QuantableOperation
@@ -297,8 +362,8 @@ def softmax_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platfo
     with torch.no_grad():
         x, s = values[0].to(floating.device), given.scale.to(floating.device)
         q = torch.clamp(torch.round(x / s), -128, 127).long()
-        steps = torch.arange(-128, 128, dtype=torch.float64, device=floating.device)
-        e = torch.exp(steps * s.double()).float()[q + 128].movedim(axis, -1)
+        table = torch.from_numpy(exp_table_s3(float(s.flatten()[0]))).to(floating.device)
+        e = table[q + 128].movedim(axis, -1)
         total = torch.zeros_like(e[..., :1])
         for i in range(e.shape[-1]):
             total = total + e[..., i : i + 1]
