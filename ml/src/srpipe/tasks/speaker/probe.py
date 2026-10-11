@@ -1,9 +1,9 @@
 """The board probe of the speaker branch (E11-T25, E11-T26): a row of <run>/int8/ladder.yaml as ai_engine/test_apps/unit
-runs it on board B, its graph and probe.cuts cuts of it in a model image, the window ptq kept with its simulated
-embedding. --chain puts the deployed speaker.espdl in its place, left in flash with the lock's hash and threshold, and
-writes the chain's windows for the voice partition: enrolment and test windows of PCM with the unit embeddings, the
-voiceprint, the scores and decisions Python gives on the chip's path (KEHOACH 3.17).
-Run: python -m srpipe.tasks.speaker.probe --run <run> --row <row> [--cut-range <first> <last>] [--chain] [--out <d>]"""
+runs it on board B, its graph and probe.cuts cuts in a model image, the run's window or --pcm's with its simulated
+embedding. --chain puts the deployed speaker.espdl in its place, in flash with the lock's hash and threshold, and writes
+the chain's windows for the voice partition: PCM of enrolment and test windows, their unit embeddings, the voiceprint,
+the scores and decisions Python gives on the chip's path (KEHOACH 3.17).
+Run: python -m srpipe.tasks.speaker.probe --run <run> --row <row> [--cut-range <a> <b>] [--chain | --pcm <npy>]"""
 
 from __future__ import annotations
 
@@ -46,12 +46,7 @@ CHAIN_TESTS = 6  # owner windows of other sessions, and as many impostors
 def truncated(graph, name: str):
     """A copy of graph that computes only the variable name, made its one output."""
     cut = graph.copy()
-    needed, stack = set(), [cut.variables[name].source_op]
-    while stack:
-        op = stack.pop()
-        if op is not None and op.name not in needed:
-            needed.add(op.name)
-            stack.extend(v.source_op for v in op.inputs)
+    needed = ancestors(cut.variables[name].source_op)
     for op in [op for op in cut.operations.values() if op.name not in needed]:
         cut.remove_operation(op, remove_unlinked_variable=True)
     cut.outputs.clear()
@@ -59,38 +54,71 @@ def truncated(graph, name: str):
     return cut
 
 
+def ancestors(op) -> set[str]:
+    """The names of op and of every op it reads from, as truncated keeps them."""
+    needed, stack = set(), [op]
+    while stack:
+        top = stack.pop()
+        if top is not None and top.name not in needed:
+            needed.add(top.name)
+            stack.extend(v.source_op for v in top.inputs)
+    return needed
+
+
 def cut_points(graph, count: int, span: tuple[int, int] | None = None) -> list[tuple[int, str]]:
     """count (topological index, variable) pairs spread evenly inside span of the graph's ops, by default all of them,
-    each the int8 output of a quantised op that is not a graph output."""
+    each the int8 output of a quantised op that is not a graph output, whose cut keeps the op owning every config the
+    kept ops follow: a config dominated from a dropped op cannot be copied for export."""
     from esp_ppq.core import QuantizationStates
     from esp_ppq.IR.quantize import QuantableOperation
 
     ops = graph.topological_sort()
     first, last = span or (0, len(ops))
+    owner = {}
+    for op in ops:
+        if isinstance(op, QuantableOperation):
+            for config in [*op.input_quant_config, *op.output_quant_config]:
+                owner.setdefault(id(config), op.name)
 
-    def int8_out(op) -> bool:
+    def cuttable(op) -> bool:
         if not isinstance(op, QuantableOperation) or op.outputs[0].name in graph.outputs:
             return False
-        return QuantizationStates.is_activated(op.output_quant_config[0].dominated_by.state)
+        if not QuantizationStates.is_activated(op.output_quant_config[0].dominated_by.state):
+            return False
+        kept = ancestors(op)
+        configs = [
+            c
+            for name in kept
+            if isinstance(graph.operations[name], QuantableOperation)
+            for c in [*graph.operations[name].input_quant_config, *graph.operations[name].output_quant_config]
+        ]
+        return all(owner.get(id(c.dominated_by), op.name) in kept for c in configs)
 
     picks = []
     for k in range(1, count + 1):
         i = first + (last - first) * k // (count + 1)
-        while i < last and not int8_out(ops[i]):
+        while i < last and not cuttable(ops[i]):
             i += 1
         if i < last and (not picks or picks[-1][0] != i):
             picks.append((i, ops[i].outputs[0].name))
     return picks
 
 
-def probe(cfg: dict, run: Path, row: str, out: Path, span: tuple[int, int] | None = None) -> tuple[Path, Path]:
+def probe(
+    cfg: dict, run: Path, row: str, out: Path, span: tuple[int, int] | None = None, pcm: Path | None = None
+) -> tuple[Path, Path]:
     """Write out/speaker_models.bin and out/speaker_windows.bin of the run's row under cfg, the branch's config, the
-    cuts of probe.cuts within span among the image's entries; the .espdl files stay beside the row's graph."""
+    cuts of probe.cuts within span among the image's entries; the .espdl files stay beside the row's graph. The window
+    is the run's probe window, or the int16 samples saved in pcm through the chip's front end."""
     patches = cfg["esp_ppq_patches"]
     folder = run / quant.INT8_DIR
     graph = export_espdl.load_native(folder / row / quant.GRAPH_FILE)
     io = ptq_espdl.io_of(graph)
-    window = np.load(folder / quant.WINDOW_FILE)
+    if pcm is None:
+        window = np.load(folder / quant.WINDOW_FILE)
+    else:
+        front = spk_fbank.SpkFbank(spk_fbank.contract_config())
+        window = front.run(spk_fbank.tail(np.load(pcm).astype(np.int16), front.cfg.window_samples))[None, None]
     if window.shape[:2] != (1, 1):
         raise ValueError(f"{window.shape}: the board copies one channel as it lies, esp-dl laying channels last")
     x_int8 = ptq_espdl.to_int8(window, io.input_exponent)
@@ -183,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--row", required=True, help="the row of <run>/int8/ladder.yaml whose graph the board runs")
     parser.add_argument("--cut-range", type=int, nargs=2, help="topological op indices the cuts are spread between")
     parser.add_argument("--chain", action="store_true", help="the deployed speaker and the chain's windows")
+    parser.add_argument("--pcm", type=Path, help="a .npy of int16 samples to probe instead of the run's window")
     parser.add_argument("--workers", type=int, default=6, help="processes simulating the impostors' sessions")
     parser.add_argument("--out", type=Path, default=PROBE_DIR)
     args = parser.parse_args(argv)
@@ -191,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.chain:
         paths = chain(cfg, args.run, args.row, args.out, args.workers)
     else:
-        paths = probe(cfg, args.run, args.row, args.out, span)
+        paths = probe(cfg, args.run, args.row, args.out, span, args.pcm)
     for path in paths:
         print(f"{path}: {path.stat().st_size} bytes")
     return 0
