@@ -1787,7 +1787,7 @@ người lạ lọt.
 | Bật tắt | trường `check` của danh sách người nói (dưới), lưu ở NVS `speaker/chip`. Tắt thì `nhan_task` đưa lệnh lên như chưa có khối này: không chép, không chạy mạng |
 | Người nói | tối đa 8 người; thêm, xoá, sửa và đăng ký giọng đi như đổi bộ lệnh (dưới) |
 | Trễ | lệnh rời board sau khi xác minh xong: thêm một lần chạy b0 ~1,17 s cộng phần nhân 0 nhường cho `nhan_task` 🔬. Vì thế `REJECT` của câu sau có thể rời board trước `COMMAND` của câu trước; `seq` cho thứ tự |
-| Bộ nhớ | ~2,4 MB PSRAM khi ảnh có `speaker` (§6.6), gồm 8 mẫu giọng 6 KB và chỗ chấm trên nhóm chuẩn, 6 B mỗi hàng, cấp lúc boot kể cả khi cờ tắt (§5.5 luật 6). Vừa nhờ tối đa 64 lệnh (§4.5.5) và trọng số để ở flash; nhóm chuẩn cũng đọc thẳng từ flash |
+| Bộ nhớ | ~2,6 MB PSRAM khi ảnh có `speaker` (§6.6), gồm 8 mẫu giọng 6 KB và chỗ chấm trên nhóm chuẩn, 6 B mỗi hàng, cấp lúc boot kể cả khi cờ tắt (§5.5 luật 6). Vừa nhờ tối đa 64 lệnh (§4.5.5) và trọng số để ở flash; nhóm chuẩn cũng đọc thẳng từ flash |
 
 **Danh sách người nói** (E11-T31) đi như bộ lệnh (§4.6, §6.4): host giữ danh sách, board giữ mẫu giọng. Mọi lối vào
 gửi cùng hai yêu cầu, nên màn hình của board sau này chỉ là thêm một lối vào.
@@ -3198,19 +3198,19 @@ Board B, profile `bench`, lúc đã nghe (`measurements/ram.md` §4). Số đo l
 
 | Khoản | PSRAM |
 |---|---|
-| Hàng đợi (§5.3), `q_clean`, `sb_stream` 512 KB (chỉ khi `NET_STREAM_ENABLE`, không có ở `prod`) | 579 KB đo |
+| Hàng đợi (§5.3), `q_clean` 2 s, `sb_stream` 512 KB (chỉ khi `NET_STREAM_ENABLE`, không có ở `prod`) | 603 KB đo |
 | `net_mqtt`: hai vùng JSON 2 × 40 KB, hai ô bộ lệnh của `q_cmdset` 2 × ~53 KB | ~0,19 MB tính 🔬; đo 344 KB khi `command_set.schema.json` còn 301 mục |
 | Ảnh model chép vào PSRAM: `command_ctc` và bảng chuẩn hoá | 3 370 KB đo |
 | Tensor `command_ctc`, vùng chấm ctc (cây tiền tố tới 8 192 nút) | ~628 KB đo |
 | `svc_listen`: vòng 512 bước log-mel và cao độ, hai bảng lexicon | ~383 KB, đo 502 KB với 301 lệnh |
-| `speaker` (§3.17): tensor b0 1 976 KB đo, vòng PCM 512 bước 256 KB, hai ô xác minh 94 KB, đặc trưng 42 KB, `spk_fbank` ~12 KB | ~2,4 MB 🔬 |
-| **Còn trống khi nghe** | **~0,75 MB** 🔬 |
+| `speaker` (§3.17): tensor b0 2 135 KB đo, vòng PCM 512 bước 256 KB, hai ô xác minh 94 KB, đặc trưng 42 KB, `spk_fbank` 58 KB đo, chỗ chấm trên nhóm chuẩn 2 KB | ~2,6 MB |
+| **Còn trống khi nghe** | **538 004 B đo** (0,51 MB; `measurements/ram.md` §4) |
 | Chưa có trong firmware: `ns` + `wake` | 187 KB (RNNoise-16k) tới 394 KB (NSNet-16k L), đo ở E9-T10, + ~100 KB |
 | Chưa có: đệm dựng câu của `noi_task`, 5 s × 16 kHz × 2 B | 160 KB |
 | Chưa có: `synth` nếu là mạng | ≤ 1 MB + ~0,3 MB |
 | Chưa có: vùng TLS của `prod` | ~50 KB |
 
-**Phần chưa có không vừa 0,75 MB còn lại khi `speaker` nằm trong ảnh.** Khi tới lượt chúng, thứ tự gỡ là: bỏ
+**Phần chưa có không vừa 0,51 MB còn lại khi `speaker` nằm trong ảnh.** Khi tới lượt chúng, thứ tự gỡ là: bỏ
 `speaker` khỏi ảnh của bản dựng không cần nó; `prod` không có `sb_stream` (512 KB); để trọng số `command_ctc` ở flash
 như b0 (~3,4 MB), sau khi đo bước mạng chậm đi bao nhiêu trên board B 🔬 — b0 chậm 3,8% (`measurements/latency.md`
 §25).
