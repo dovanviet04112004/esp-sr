@@ -25,6 +25,7 @@ from srpipe.tasks.command.ctc import probe, quant
 from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc import ctc_score
 from srpipe.tasks.speaker import quant as spk_quant
+from srpipe.tasks.speaker.postproc import score
 
 DIMS = encoder.n_dims(load_yaml(ctc.CONFIG))
 EXPONENT = -3
@@ -155,7 +156,7 @@ def test_gate_3_counts_the_chips_decisions_and_refuses_a_log_missing_a_window(tm
 def unchecked_body(clean: np.ndarray, vad: np.ndarray, tracker, mel) -> bytes:
     """A session's record as listen_rounds writes it with the speaker check off, each window decided by its length."""
     laid = probe.listen_session(clean, vad, lambda x: [len(x), 1, 2, 3, 4], tracker, mel)
-    return probe.session_body(clean, vad, laid, [(0, probe.NO_CHECK)] * len(laid[1]), False)
+    return probe.session_body(clean, vad, laid, [(0, 0, probe.NO_CHECK)] * len(laid[1]), False)
 
 
 def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read() -> None:
@@ -228,13 +229,16 @@ def test_enrolment_starts_at_the_first_owner_session_its_round_lets_finish() -> 
 
 def test_speaker_checks_leave_rejects_unchecked_count_the_enrolment_and_score_the_rest(tmp_path, monkeypatch) -> None:
     lock = tmp_path / "models.lock.json"
-    locked = {"speaker": {"run": "r", "row": "kl", "threshold": {"permille": [600, 700, 750]}}}
+    locked = {"speaker": {"run": "r", "row": "kl", "threshold": {"milli_z": [600, 700, 750]}}}
     lock.write_text(json.dumps({"models": locked}), encoding="utf-8")
     monkeypatch.setattr(probe.update_lock, "LOCK", lock)
     monkeypatch.setattr(probe.export_espdl, "load_native", lambda path: None)
     monkeypatch.setattr(probe.spk, "load_wrap", lambda run: None)
-    owner, stranger, near = np.eye(4, dtype=np.float32)[0], np.eye(4, dtype=np.float32)[1], np.zeros(4, np.float32)
+    eye = np.eye(4, dtype=np.float32)
+    owner, stranger, near = eye[0], eye[1], np.zeros(4, np.float32)
     near[:2] = 0.6, 0.8
+    cohort = np.stack([eye[1], eye[2], eye[3], near])
+    monkeypatch.setattr(probe.spk, "deployed_cohort", lambda row, dims: cohort)
     units = [owner] * speaker.ENROL_COMMANDS + [owner, stranger, near]
     seen = []
 
@@ -249,10 +253,16 @@ def test_speaker_checks_leave_rejects_unchecked_count_the_enrolment_and_score_th
 
     checks = probe.speaker_checks(sessions, laid, 1)
     assert len(seen) == len(units)
-    assert checks[0] == [(0, probe.UNENROLLED)] * 2 + [(0, probe.NO_CHECK)]
-    assert checks[1] == [(n, probe.ENROLLING) for n in range(1, 7)]
-    assert checks[2] == [(n, probe.ENROLLING) for n in range(7, 11)] + [(0, probe.NO_CHECK)]
-    assert checks[3] == [(1000, probe.PASSED), (0, probe.STOPPED), (600, probe.PASSED)]
+    assert checks[0] == [(0, 0, probe.UNENROLLED)] * 2 + [(0, 0, probe.NO_CHECK)]
+    assert checks[1] == [(n, 0, probe.ENROLLING) for n in range(1, 7)]
+    assert checks[2] == [(n, 0, probe.ENROLLING) for n in range(7, 11)] + [(0, 0, probe.NO_CHECK)]
+    norms = [score.norm(owner, cohort)]
+    want = [score.best(u, [owner], norms) for u in (owner, stranger, near)]
+    assert [(z, c) for z, _, c in want] == [(z, c) for z, c, _ in checks[3]]
+    assert [code for _, _, code in checks[3]] == [
+        probe.PASSED if score.accepts(z, 600) else probe.STOPPED for z, _, _ in want
+    ]
+    assert {code for _, _, code in checks[3]} == {probe.PASSED, probe.STOPPED}
 
 
 @pytest.mark.parametrize("locked", [{}, {"listen_hash": f"0x{listen.HASH ^ 1:08x}"}])

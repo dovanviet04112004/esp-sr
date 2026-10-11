@@ -70,7 +70,7 @@ LISTEN_MAGIC = b"SRLS"
 SPEAKER_ON, SPEAKER_AFRESH = 1, 2  # check on; voiceprint erased first (KEHOACH 3.17)
 SESSION_HEAD = struct.Struct("<IHHHxx")  # hops, segments, windows, an enrolment starting ahead of it
 SEGMENT_HEAD = struct.Struct("<II")  # first hop, hops; their int16 samples follow
-WINDOW_RECORD = struct.Struct("<IIhHHHHhH")  # hops, decision, permille or count, code
+WINDOW_RECORD = struct.Struct("<IIhHHHHhhH")  # hops, decision, milli-z or count, cosine, code
 NO_CHECK, PASSED, STOPPED, UNENROLLED, ENROLLING = range(5)  # a window's speaker code
 
 
@@ -392,15 +392,16 @@ def enrolment_session(sessions: list[tuple], laid: list[tuple], rounds: list[lis
     raise ValueError(f"no session of {owner['spk']} in {group} has {speaker.ENROL_COMMANDS} commands left in its round")
 
 
-def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> list[list[tuple[int, int]]]:
-    """Each window's (value, code) as svc_listen checks it with the check on from the replay's start and the owner
-    alone on the roster, their voiceprint erased: a command ahead of session enrol_at is UNENROLLED, the first
+def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> list[list[tuple[int, int, int]]]:
+    """Each window's (value, cosine, code) as svc_listen checks it with the check on from the replay's start and the
+    owner alone on the roster, their voiceprint erased: a command ahead of session enrol_at is UNENROLLED, the first
     speaker.ENROL_COMMANDS from it on enrol, the value counting them, every later one is scored with the best over the
-    one voiceprint at the lock's threshold for one, on the chip's path (KEHOACH 3.17)."""
+    one voiceprint normalised by the deployed cohort, the value its thousandths of z, at the lock's threshold for one,
+    on the chip's path (KEHOACH 3.17, ADR-0022)."""
     lock = json.loads(update_lock.LOCK.read_text(encoding="utf-8"))["models"][spk.BRANCH]
     run = ML_ROOT / "artifacts" / spk.BRANCH / "runs" / lock["run"]
     graph = export_espdl.load_native(run / spk.INT8_DIR / lock["row"] / spk.GRAPH_FILE)
-    patches, threshold = load_yaml(spk.CONFIG)["esp_ppq_patches"], int(lock["threshold"]["permille"][0])
+    patches, threshold = load_yaml(spk.CONFIG)["esp_ppq_patches"], int(lock["threshold"]["milli_z"][0])
     front = spk_fbank.SpkFbank(spk_fbank.contract_config())
     checked = [(k, w) for k in range(enrol_at, len(sessions)) for w in accepted_of(laid[k])]
     found = [survey.Window("board", "", survey.window_of(sessions[k][1], *laid[k][1][w])) for k, w in checked]
@@ -408,17 +409,18 @@ def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> l
     unit_of = dict(zip(checked, units, strict=True))
     enrolling = checked[: speaker.ENROL_COMMANDS]
     voiceprint = score.voiceprint([unit_of[x] for x in enrolling])
+    norms = [score.norm(voiceprint, spk.deployed_cohort(lock, len(voiceprint)))]
     out = []
     for k, layout in enumerate(laid):
-        codes = [(0, NO_CHECK)] * len(layout[1])
+        codes = [(0, 0, NO_CHECK)] * len(layout[1])
         for w in accepted_of(layout):
             if k < enrol_at:
-                codes[w] = (0, UNENROLLED)
+                codes[w] = (0, 0, UNENROLLED)
             elif (k, w) in enrolling:
-                codes[w] = (enrolling.index((k, w)) + 1, ENROLLING)
+                codes[w] = (enrolling.index((k, w)) + 1, 0, ENROLLING)
             else:
-                s = score.best(unit_of[(k, w)], [voiceprint])[0]
-                codes[w] = (s, PASSED if score.accepts(s, threshold) else STOPPED)
+                z, _, cosine = score.best(unit_of[(k, w)], [voiceprint], norms)
+                codes[w] = (z, cosine, PASSED if score.accepts(z, threshold) else STOPPED)
         out.append(codes)
     return out
 
@@ -459,7 +461,7 @@ def listen_rounds(cfg: dict, out: Path, speaker_on: bool = False) -> list[Path]:
     named += b"\0" * (-(LISTEN_HEAD.size + len(named)) % 4)
     sessions = [(row, clean, vad) for row, clean, vad, _f, _p in gate.heard_sessions(trained.cfg, spec, data_paths())]
     laid = [listen_session(clean, vad, decided_of, tracker, mel) for _, clean, vad in sessions]
-    checks = [[(0, NO_CHECK)] * len(layout[1]) for layout in laid]
+    checks = [[(0, 0, NO_CHECK)] * len(layout[1]) for layout in laid]
     bodies = [
         session_body(clean, vad, layout, checked, False)
         for (_, clean, vad), layout, checked in zip(sessions, laid, checks, strict=True)

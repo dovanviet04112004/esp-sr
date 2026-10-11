@@ -285,13 +285,41 @@ def threshold_material(rng, owner_scores: list[float], impostors: int) -> tuple[
     return units, enrol + tests + others, cfg
 
 
+def cohort_of(windows: list) -> set[str]:
+    """The first half of threshold_material's strangers, by name."""
+    strangers = sorted({w.spk for w in windows if w.spk.startswith("s")}, key=lambda s: int(s[1:]))
+    return set(strangers[: len(strangers) // 2])
+
+
+def test_the_cohort_is_half_the_strangers_drawn_by_the_seed_and_never_the_owner() -> None:
+    import numpy as np
+
+    _, windows, cfg = threshold_material(np.random.default_rng(6), [0.9] * 4, 40)
+    cohort = quant.cohort_speakers(windows, cfg)
+    assert len(cohort) == 20 and "owner" not in cohort
+    assert cohort == quant.cohort_speakers(windows, cfg)
+    assert cohort != quant.cohort_speakers(windows, cfg | {"seed": 2})
+
+
+def test_no_cohort_speaker_is_drawn_or_scored_as_an_impostor() -> None:
+    import numpy as np
+
+    units, windows, cfg = threshold_material(np.random.default_rng(5), [0.9] * 30, 400)
+    cohort = cohort_of(windows)
+    table = quant.threshold_table(units, windows, cfg, {"shares": [0.01], "keep_min": 0.95}, 1, cohort)
+    assert table["cohort"] == {"speakers": 200, "rows": 200}
+    assert table["impostor windows"] == 200
+    with pytest.raises(ValueError, match="no window"):
+        quant.threshold_table(units, windows, cfg, {"shares": [0.01], "keep_min": 0.95}, 1, set())
+
+
 def test_the_threshold_lets_at_most_its_share_of_impostors_through_and_keeps_the_rule() -> None:
     import numpy as np
 
     rng = np.random.default_rng(7)
     units, windows, cfg = threshold_material(rng, [0.9] * 30, 400)
     dq = {"shares": [0.01, 0.05], "keep_min": 0.95}
-    chosen = quant.threshold_table(units, windows, cfg, dq, 1)["counts"][0]
+    chosen = quant.threshold_table(units, windows, cfg, dq, 1, cohort_of(windows))["counts"][0]
     assert chosen["chosen"] == 0.01
     for share, row in chosen["shares"].items():
         assert row["impostors passing"] <= share
@@ -303,10 +331,11 @@ def test_a_distance_kept_under_the_floor_at_one_percent_moves_the_threshold_to_f
 
     rng = np.random.default_rng(8)
     units, windows, cfg = threshold_material(rng, [0.9] * 26 + [0.57] * 4, 400)
-    chosen = quant.threshold_table(units, windows, cfg, {"shares": [0.01, 0.05], "keep_min": 0.95}, 1)["counts"][0]
+    dq = {"shares": [0.01, 0.05], "keep_min": 0.95}
+    chosen = quant.threshold_table(units, windows, cfg, dq, 1, cohort_of(windows))["counts"][0]
     assert chosen["shares"][0.01]["kept accepted"]["300 cm"] < 0.95
     assert chosen["chosen"] == 0.05
-    assert chosen["shares"][0.05]["permille"] < chosen["shares"][0.01]["permille"]
+    assert chosen["shares"][0.05]["milli_z"] < chosen["shares"][0.01]["milli_z"]
 
 
 def test_more_people_enrolled_raise_the_threshold_and_keep_their_own_windows_out_of_the_impostors() -> None:
@@ -322,9 +351,10 @@ def test_more_people_enrolled_raise_the_threshold_and_keep_their_own_windows_out
         direction[2 + k] = 1.0
         windows += [survey.Window(f"guest{k}", "near", np.zeros(1)) for _ in range(12)]
         units += [direction] * 12
-    table = quant.threshold_table(units, windows, cfg, {"shares": [0.01, 0.05], "keep_min": 0.95}, 4)
+    dq = {"shares": [0.01, 0.05], "keep_min": 0.95}
+    table = quant.threshold_table(units, windows, cfg, dq, 4, cohort_of(windows))
     assert [c["people"] for c in table["counts"]] == [1, 2, 3, 4] and table["impostors enrollable"] == 3
-    permilles = [c["shares"][0.01]["permille"] for c in table["counts"]]
-    assert permilles == sorted(permilles)
+    thresholds = [c["shares"][0.01]["milli_z"] for c in table["counts"]]
+    assert thresholds == sorted(thresholds)
     for count in table["counts"]:
         assert count["shares"][0.01]["impostors passing"] <= 0.01

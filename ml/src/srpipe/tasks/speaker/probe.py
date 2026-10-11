@@ -34,11 +34,11 @@ WINDOWS_HEAD = struct.Struct("<4sI")
 WINDOWS_MAGIC = b"SRSV"
 RECORD = struct.Struct("<16sIIIii")
 CHAIN_FILE = "speaker_chain.bin"
-# PCM windows, dims, voiceprints, windows a voiceprint; then the voiceprints, the members' enrolment units, and per PCM
-# window its kind, best score, its voiceprint, decision, PCM and unit embedding.
+# PCM windows, dims, voiceprints, windows a voiceprint; then the voiceprints, their means and deviations over the
+# cohort, the members' enrolment units, and per PCM window its decision, PCM and unit embedding.
 CHAIN_HEAD = struct.Struct("<4sIIII")
-CHAIN_MAGIC = b"SRS8"
-CHAIN_WINDOW = struct.Struct("<Iiii")  # kind, best permille, its voiceprint, passes
+CHAIN_MAGIC = b"SRSZ"
+CHAIN_WINDOW = struct.Struct("<Iiiii")  # kind, milli-z, voiceprint, passes, cosine
 ENROL, OWNER, IMPOSTOR, MEMBER = 0, 1, 2, 3
 CHAIN_TESTS = 6  # owner windows of other sessions, and as many impostors
 
@@ -155,8 +155,8 @@ def chain_windows(
     """The roster's windows: the first speaker.ENROL_COMMANDS accepted windows of the survey's enrolment session,
     CHAIN_TESTS accepted owner windows taken in turn from the other sessions; members impostors in speaker order, each
     with speaker.ENROL_COMMANDS windows to enrol and one more to test; the first window of each of CHAIN_TESTS other
-    impostors. Impostor windows come from outside the calibration windows. Returns the PCM windows with their kinds,
-    and each member's enrolment windows."""
+    impostors. Impostor windows come from outside the calibration windows and the deploy's cohort. Returns the PCM
+    windows with their kinds, and each member's enrolment windows."""
     owner_cfg = survey_cfg["owner"]
     enrol_group = f"{owner_cfg['enrol']['date']} {owner_cfg['enrol']['distance_cm']}"
     owner = [w for w in survey.owner_windows(survey_cfg, paths) if w.accepted]
@@ -165,9 +165,11 @@ def chain_windows(
     tests = [w for turn in itertools.zip_longest(*sessions) for w in turn if w is not None][:CHAIN_TESTS]
     impostors = survey.impostor_windows(survey_cfg, paths, workers)
     calibration = set(quant.drawn(q, impostors)[0])
+    kept = [w for i, w in enumerate(impostors) if i not in calibration]
+    cohort = quant.cohort_speakers(kept, survey_cfg)
     by_spk: dict[str, list[survey.Window]] = {}
-    for i, w in enumerate(impostors):
-        if i not in calibration:
+    for w in kept:
+        if w.spk not in cohort:
             by_spk.setdefault(w.spk, []).append(w)
     enough = [s for s in sorted(by_spk) if len(by_spk[s]) > speaker.ENROL_COMMANDS][:members]
     if len(enough) < members:
@@ -182,20 +184,24 @@ def chain_windows(
 def chain(cfg: dict, run: Path, row: str, out: Path, workers: int) -> tuple[Path, Path]:
     """Write out/speaker_models.bin with the deployed speaker.espdl left in flash beside the row's cuts, and
     out/speaker_chain.bin: a roster of pack_models.SPEAKERS voiceprints, the owner's of the enrolment windows and each
-    member's of their units, then every other window of chain_windows as the chip should take it, with its best score
-    over the roster, the voiceprint giving it and the decision at the lock's threshold for a full roster. Refused when
-    the lock deploys another row or run."""
+    member's of their units, each one's mean and deviation over the deployed cohort, then every other window of
+    chain_windows as the chip should take it, with its best normalised score over the roster, the voiceprint giving it,
+    the decision at the lock's threshold for a full roster and that voiceprint's cosine. Refused when the lock deploys
+    another row or run."""
     lock = json.loads(pack_models.LOCK.read_text(encoding="utf-8"))["models"][quant.BRANCH]
     if (lock["run"], lock["row"]) != (run.name, row):
         raise ValueError(f"the lock deploys {lock['run']} row {lock['row']}, not {run.name} row {row}")
     image, _ = probe(cfg, run, row, out)
-    deployed = (pack_models.MODELS / quant.BRANCH / lock["files"][0]["file"]).read_bytes()
-    entries = [pack_models.Entry(ENTRY, "espdl", deployed, pack_models.IN_FLASH)]
+    by_kind = {f["kind"]: (pack_models.MODELS / quant.BRANCH / f["file"]).read_bytes() for f in lock["files"]}
+    entries = [
+        pack_models.Entry(ENTRY, "espdl", by_kind["espdl"], pack_models.IN_FLASH),
+        pack_models.Entry(quant.COHORT_ENTRY, "cohort", by_kind["cohort"], pack_models.IN_FLASH),
+    ]
     for k in range(cfg["probe"]["cuts"]):
         cut = run / quant.INT8_DIR / row / f"{CUT_ENTRY.format(k)}.espdl"
         entries.append(pack_models.Entry(CUT_ENTRY.format(k), "espdl", cut.read_bytes()))
-    table = tuple(int(t) for t in lock["threshold"]["permille"])
-    image.write_bytes(pack_models.pack(entries, speaker_hash=speaker.HASH, speaker_permilles=table))
+    table = tuple(int(t) for t in lock["threshold"]["milli_z"])
+    image.write_bytes(pack_models.pack(entries, speaker_hash=speaker.HASH, speaker_milli_z=table))
     threshold = table[pack_models.SPEAKERS - 1]
     survey_cfg, paths = load_yaml(CONFIGS / cfg["source"]["survey"]), data_paths()
     picked, enrolments = chain_windows(survey_cfg, cfg["quant"], paths, workers, pack_models.SPEAKERS - 1)
@@ -207,16 +213,21 @@ def chain(cfg: dict, run: Path, row: str, out: Path, workers: int) -> tuple[Path
     prints = [score.voiceprint([u for (kind, _), u in zip(picked, units, strict=True) if kind == ENROL])]
     for k in range(len(enrolments)):
         prints.append(score.voiceprint(members[k * speaker.ENROL_COMMANDS : (k + 1) * speaker.ENROL_COMMANDS]))
+    cohort = quant.deployed_cohort(lock, len(prints[0]))
+    norms = [score.norm(p, cohort) for p in prints]
     body = bytearray(CHAIN_HEAD.pack(CHAIN_MAGIC, len(picked), len(prints[0]), len(prints), speaker.ENROL_COMMANDS))
-    body += np.stack(prints).astype("<f4").tobytes() + np.stack(members).astype("<f4").tobytes()
+    body += np.stack(prints).astype("<f4").tobytes() + np.array(norms, dtype="<f4").tobytes()
+    body += np.stack(members).astype("<f4").tobytes()
     for (kind, w), u in zip(picked, units, strict=True):
         pcm = spk_fbank.tail(np.rint(w.samples * quant.PCM_FULL_SCALE).astype(np.int16), front.cfg.window_samples)
-        s, best = score.best(u, prints)
-        passes = score.accepts(s, threshold)
-        body += CHAIN_WINDOW.pack(kind, s, best, int(passes)) + pcm.astype("<i2").tobytes()
+        z, best, cosine = score.best(u, prints, norms)
+        passes = score.accepts(z, threshold)
+        body += CHAIN_WINDOW.pack(kind, z, best, int(passes), cosine) + pcm.astype("<i2").tobytes()
         body += u.astype("<f4").tobytes()
         verdict = "passes" if passes else "stopped"
-        print(f"chain window {kind}: {w.spk} {w.group}, best {s} of voiceprint {best}, {verdict}")
+        print(
+            f"chain window {kind}: {w.spk} {w.group}, best {z} milli-z of voiceprint {best}, cosine {cosine}, {verdict}"
+        )
     path = out / CHAIN_FILE
     path.write_bytes(bytes(body))
     return image, path

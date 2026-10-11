@@ -41,6 +41,8 @@ GRAPH_FILE = "graph.native"
 LADDER_FILE = "ladder.yaml"
 WINDOW_FILE = "board_window.npy"  # float log-mel (1, 1, mels, frames) the probe runs
 DEPLOY_FILE = "deploy.yaml"  # in <run>/int8/<row>/: the threshold, its figures
+COHORT_FILE, COHORT_ENTRY = "cohort.bin", "speaker_cohort"  # float32 rows of dims
+COHORT_STREAM = 3  # rng stream of the cohort, beside the survey's
 ASTP_FLOOR = 1e-7  # poolings.py ASTP's variance floor, at the pin
 CHIP_BITS = 8
 PCM_FULL_SCALE = 32768.0
@@ -611,36 +613,65 @@ def chip_units(
 
 
 def rule_rows(targets: list[tuple[int, str]], impostors: list[int], dq: dict) -> tuple[dict, float]:
-    """At each share of deploy.shares, the lowest permille that lets at most that share of the impostor scores through,
-    with the share of target scores, each at a distance, it keeps per distance; and the first share whose every
-    distance keeps deploy.keep_min, else the last (KEHOACH 3.17)."""
+    """At each share of deploy.shares, the lowest score in thousandths of z that lets at most that share of the
+    impostor scores through, with the share of target scores, each at a distance, it keeps per distance; and the first
+    share whose every distance keeps deploy.keep_min, else the last (KEHOACH 3.17)."""
     ranked = sorted(impostors, reverse=True)
     rows = {}
     for share in dq["shares"]:
         allowed = math.floor(share * len(ranked))
-        permille = min(ranked[allowed] + 1, score.SCORE_LIMIT) if allowed < len(ranked) else -score.SCORE_LIMIT
+        milli_z = min(ranked[allowed] + 1, score.Z_LIMIT) if allowed < len(ranked) else -score.Z_LIMIT
         kept = {
-            f"{d} cm": float(np.mean([s >= permille for s, at in targets if at == d]))
+            f"{d} cm": float(np.mean([s >= milli_z for s, at in targets if at == d]))
             for d in sorted({at for _, at in targets})
         }
-        passing = float(np.mean([s >= permille for s in impostors]))
-        rows[share] = {"permille": int(permille), "impostors passing": passing, "kept accepted": kept}
+        passing = float(np.mean([s >= milli_z for s in impostors]))
+        rows[share] = {"milli_z": int(milli_z), "impostors passing": passing, "kept accepted": kept}
     fits = [s for s in dq["shares"] if min(rows[s]["kept accepted"].values()) >= dq["keep_min"]]
     return rows, fits[0] if fits else dq["shares"][-1]
 
 
-def threshold_table(units: list[np.ndarray], windows: list, survey_cfg: dict, dq: dict, most: int) -> dict:
-    """The chip's threshold over the survey's material for 1 to most people holding a voiceprint. Each of the survey's
-    enrolment draws of speaker.ENROL_COMMANDS owner windows serves every count; with n people, n - 1 impostors who
-    have that many windows are drawn too and enrol from their own. The owner's accepted windows and the windows of
-    every impostor not drawn are scored with the best over the n voiceprints, all draws pooled, under rule_rows."""
+def cohort_speakers(windows: list, survey_cfg: dict) -> set[str]:
+    """Half the survey's strangers, drawn by its seed on a stream of their own: every window of theirs is the cohort,
+    and none of them takes part in the threshold's draws (ADR-0022)."""
+    strangers = sorted({w.spk for w in windows if w.spk != survey_cfg["owner"]["spk"]})
+    rng = np.random.default_rng([survey_cfg["seed"], COHORT_STREAM])
+    return set(rng.choice(strangers, len(strangers) // 2, replace=False).tolist())
+
+
+def cohort_rows(units: list[np.ndarray], windows: list, cohort: set[str]) -> np.ndarray:
+    """The unit embeddings of the cohort's windows, in window order, float32 rows."""
+    rows = [units[i] for i, w in enumerate(windows) if w.spk in cohort]
+    if not rows:
+        raise ValueError("the cohort holds no window")
+    return np.stack(rows).astype(np.float32)
+
+
+def deployed_cohort(lock_row: dict, dims: int) -> np.ndarray:
+    """The cohort the lock's speaker row deployed, float32 rows of dims, as the image's speaker_cohort carries it."""
+    found = [f for f in lock_row["files"] if f["kind"] == "cohort"]
+    if len(found) != 1:
+        raise ValueError(f"the speaker row of the lock deploys {len(found)} cohorts: make speaker-deploy again")
+    data = (update_lock.MODELS / BRANCH / found[0]["file"]).read_bytes()
+    return np.frombuffer(data, dtype="<f4").reshape(-1, dims).astype(np.float32)
+
+
+def threshold_table(
+    units: list[np.ndarray], windows: list, survey_cfg: dict, dq: dict, most: int, cohort: set[str]
+) -> dict:
+    """The chip's threshold over the survey's material for 1 to most people holding a voiceprint, each voiceprint
+    normalised over the windows of the cohort's speakers, who take no other part. Each of the survey's enrolment draws
+    of speaker.ENROL_COMMANDS owner windows serves every count; with n people, n - 1 other strangers who have that many
+    windows are drawn too and enrol from their own. The owner's accepted windows and the windows of every other
+    stranger not drawn are scored with the best over the n voiceprints, all draws pooled, under rule_rows."""
     owner = survey_cfg["owner"]
     enrol_group = f"{owner['enrol']['date']} {owner['enrol']['distance_cm']}"
     mine = [i for i, w in enumerate(windows) if w.spk == owner["spk"]]
     pool = [i for i in mine if windows[i].group == enrol_group]
+    rows_of_cohort = cohort_rows(units, windows, cohort)
     by_spk: dict[str, list[int]] = {}
     for i, w in enumerate(windows):
-        if w.spk != owner["spk"]:
+        if w.spk != owner["spk"] and w.spk not in cohort:
             by_spk.setdefault(w.spk, []).append(i)
     enrollable = sorted(s for s, rows in by_spk.items() if len(rows) >= speaker.ENROL_COMMANDS)
     rng = np.random.default_rng([survey_cfg["seed"], survey.ENROL_STREAM, speaker.ENROL_COMMANDS])
@@ -656,10 +687,11 @@ def threshold_table(units: list[np.ndarray], windows: list, survey_cfg: dict, dq
             for m in members:
                 theirs = sorted(members_rng.choice(by_spk[m], speaker.ENROL_COMMANDS, replace=False).tolist())
                 prints.append(score.voiceprint([units[i] for i in theirs]))
+            norms = [score.norm(p, rows_of_cohort) for p in prints]
             tested = [i for i in mine if i not in set(enrolled) and windows[i].accepted]
-            targets += [(score.best(units[i], prints)[0], windows[i].group.split()[-1]) for i in tested]
+            targets += [(score.best(units[i], prints, norms)[0], windows[i].group.split()[-1]) for i in tested]
             impostors += [
-                score.best(units[i], prints)[0] for s, rows in by_spk.items() if s not in members for i in rows
+                score.best(units[i], prints, norms)[0] for s, rows in by_spk.items() if s not in members for i in rows
             ]
         rows, chosen = rule_rows(targets, impostors, dq)
         counts.append({"people": n, "shares": rows, "chosen": chosen})
@@ -669,13 +701,15 @@ def threshold_table(units: list[np.ndarray], windows: list, survey_cfg: dict, dq
         "owner windows": len(mine),
         "impostor windows": sum(len(rows) for rows in by_spk.values()),
         "impostors enrollable": len(enrollable),
+        "cohort": {"speakers": len(cohort), "rows": len(rows_of_cohort)},
         "counts": counts,
     }
 
 
 def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[Path, Path]:
     """The graph of row as firmware/models/speaker/ holds it: the .espdl with the board probe's window for
-    model->test(), the threshold set on the survey's material through the chip's own path, and the lock (KEHOACH 3.17).
+    model->test(), the cohort of strangers as cohort.bin, the threshold set on the survey's material through the chip's
+    own path, and the lock (KEHOACH 3.17, ADR-0022).
     <run>/int8/<row>/deploy.yaml keeps the threshold's figures, the front end's gap to the extractor and the survey's
     figures on that path, beside the ladder's. Refused for a run whose window or front end is not
     contracts/speaker.yaml's, and for a row not int8 at both ends."""
@@ -694,7 +728,8 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
     scored = owner + [w for i, w in enumerate(impostors) if i not in set(picks)]
     front = spk_fbank.SpkFbank(spk_fbank.contract_config())
     units, gap = chip_units(graph, cfg["esp_ppq_patches"], scored, front, wrap)
-    table = threshold_table(units, scored, survey_cfg, dq, pack_models.SPEAKERS)
+    cohort = cohort_speakers(scored, survey_cfg)
+    table = threshold_table(units, scored, survey_cfg, dq, pack_models.SPEAKERS, cohort)
     survey_figures = figures(np.stack(units), scored, survey_cfg, cfg["quant"])
     kept = table | {"front_end": gap, "figures": survey_figures}
     (folder / DEPLOY_FILE).write_text(yaml.safe_dump(kept, sort_keys=False), encoding="utf-8")
@@ -711,6 +746,8 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
     target.mkdir(parents=True, exist_ok=True)
     espdl = target / f"{BRANCH}.espdl"
     espdl.write_bytes(built.read_bytes())
+    cohort_file = target / COHORT_FILE
+    cohort_file.write_bytes(cohort_rows(units, scored, cohort).astype("<f4").tobytes())
     rungs = yaml.safe_load((run / INT8_DIR / LADDER_FILE).read_text(encoding="utf-8"))["rows"][row]
     fields = {
         "speaker_hash": f"0x{speaker.HASH:08x}",
@@ -718,12 +755,14 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
         "row": row,
         "rungs": {"calibration": rungs["calibration"], "int16_ops": rungs.get("int16_ops", [])},
         "threshold": {
-            "permille": [c["shares"][c["chosen"]]["permille"] for c in table["counts"]],
+            "milli_z": [c["shares"][c["chosen"]]["milli_z"] for c in table["counts"]],
             "impostors_passing": [c["chosen"] for c in table["counts"]],
         },
+        "cohort": {"seed": survey_cfg["seed"], "stream": COHORT_STREAM} | table["cohort"],
         "weights_in_flash": dq["weights_in_flash"],
     }
-    return update_lock.record(BRANCH, run, [update_lock.Deployed(espdl, BRANCH, "espdl")], fields)
+    files = [update_lock.Deployed(espdl, BRANCH, "espdl"), update_lock.Deployed(cohort_file, COHORT_ENTRY, "cohort")]
+    return update_lock.record(BRANCH, run, files, fields)
 
 
 def main(argv: list[str] | None = None) -> int:
