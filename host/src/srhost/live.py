@@ -1,4 +1,5 @@
-"""Watch the boards live: state, health, direction, voice flag, level and events as they arrive (KEHOACH 4.6, 7.7).
+"""Watch the boards live: state, health, direction, voice flag, level, the speakers a board keeps, and events as they
+arrive with the speaker each command was checked against (KEHOACH 3.17, 4.6, 7.7).
 
 On a terminal the screen is redrawn several times a second; piped, one line is printed per message.
 Run: uv run python -m srhost.live [--device <deviceId>] [--jsonl <file>]
@@ -35,6 +36,7 @@ class Board:
     status: dict | None = None
     heartbeat: dict | None = None
     telemetry: dict | None = None
+    roster: dict | None = None
     events: deque[Message] = field(default_factory=lambda: deque(maxlen=EVENTS_SHOWN))
     rejected: int = 0
     last_error: str | None = None
@@ -53,6 +55,17 @@ def doa_track(doa_deg: int, width: int = BAR_WIDTH) -> str:
     return "·" * at + "|" + "·" * (width - 1 - at)
 
 
+def describe_speaker(event: dict) -> str:
+    """The speaker part of an event: who an enrolment counts for and how far it is, or the closest voiceprint's
+    person with its cosine; empty without one."""
+    if "speakerId" not in event:
+        return ""
+    if "enrolCount" in event:
+        return f" · speaker {event['speakerId']} enrolment {event['enrolCount']}"
+    cosine = f" {event['speakerPermille'] / PERMILLE:.2f}" if "speakerPermille" in event else ""
+    return f" · speaker {event['speakerId']}{cosine}"
+
+
 def describe_event(message: Message) -> str:
     event = message.payload or {}
     kind = event.get("kind")
@@ -66,9 +79,23 @@ def describe_event(message: Message) -> str:
         )
     else:
         text = f"{kind} {event.get('code', '')}"
+        if event.get("commandId"):
+            text += f" {event['commandId']}"
+    text += describe_speaker(event)
     if event.get("doaDeg", -1) >= 0:
         text += f" at {event['doaDeg']}°"
     return f"{clock} {text}"
+
+
+def describe_roster(roster: dict) -> str:
+    """The speakers a board keeps, whether each has a voiceprint, and the enrolment under way."""
+    people = ", ".join(
+        f"{p['id']} {p['name']} ({'enrolled' if p['enrolled'] else 'no voiceprint'})" for p in roster["speakers"]
+    )
+    text = f"v{roster['version']} check {'on' if roster['check'] else 'off'}: {people or 'nobody'}"
+    if "enrollingId" in roster:
+        text += f"; enrolling {roster['enrollingId']} {roster.get('enrolCount', 0)}"
+    return text
 
 
 def describe_heartbeat(hb: dict) -> str:
@@ -121,6 +148,8 @@ class View:
                 board.last_error = message.error
             elif message.kind == "event":
                 board.events.append(message)
+            elif message.kind == "roster":
+                board.roster = message.payload
             elif message.kind in ("status", "heartbeat", "telemetry"):
                 setattr(board, message.kind, message.payload)
 
@@ -140,6 +169,8 @@ class View:
                     lines.append(f"  health  {describe_heartbeat(board.heartbeat)}")
                 if board.telemetry:
                     lines.append(f"  front   {describe_sample(board.telemetry)}")
+                if board.roster:
+                    lines.append(f"  speakers {describe_roster(board.roster)}")
                 lines.extend(f"  event   {describe_event(e)}" for e in reversed(board.events))
                 if board.rejected:
                     lines.append(f"  REJECTED {board.rejected} payloads, last: {board.last_error}")
@@ -157,6 +188,8 @@ def one_line(message: Message) -> str:
         return f"{message.device} health {describe_heartbeat(message.payload)}"
     if message.kind == "telemetry":
         return f"{message.device} front {describe_sample(message.payload)}"
+    if message.kind == "roster":
+        return f"{message.device} speakers {describe_roster(message.payload)}"
     return f"{message.device} {message.kind} {message.payload}"
 
 

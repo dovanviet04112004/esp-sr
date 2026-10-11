@@ -60,3 +60,61 @@ def test_the_doa_marker_moves_across_the_track_and_hides_without_a_direction() -
 def test_the_level_bar_is_clamped() -> None:
     assert live.bar(-200, -90, 0) == "░" * live.BAR_WIDTH
     assert live.bar(10, -90, 0) == "█" * live.BAR_WIDTH
+
+
+def event(payload: dict) -> mqtt_rx.Message:
+    return message("event", {"deviceId": DEVICE, **payload})
+
+
+def test_each_checked_command_shows_its_speaker_and_each_refusal_or_enrolment_its_own() -> None:
+    passed = event(
+        {
+            "seq": 30,
+            "kind": "COMMAND",
+            "commandId": "bat_den",
+            "scorePermille": 978,
+            "marginPermille": 130,
+            "speakerId": "spk_001",
+            "speakerPermille": 846,
+        }
+    )
+    stopped = event(
+        {
+            "seq": 31,
+            "kind": "REJECT",
+            "code": "SPEAKER",
+            "commandId": "tat_den",
+            "speakerId": "spk_001",
+            "speakerPermille": 743,
+        }
+    )
+    enrolling = event(
+        {
+            "seq": 32,
+            "kind": "REJECT",
+            "code": "SPEAKER_ENROLLING",
+            "commandId": "mo_cua",
+            "speakerId": "spk_001",
+            "enrolCount": 3,
+        }
+    )
+    plain = event({"seq": 33, "kind": "REJECT", "code": "LOW_SCORE", "scorePermille": 700, "marginPermille": 20})
+    assert live.describe_event(passed).endswith("COMMAND bat_den score 0.98 margin 0.13 · speaker spk_001 0.85")
+    assert live.describe_event(stopped).endswith("REJECT SPEAKER tat_den · speaker spk_001 0.74")
+    assert live.describe_event(enrolling).endswith("REJECT SPEAKER_ENROLLING mo_cua · speaker spk_001 enrolment 3")
+    assert live.describe_event(plain).endswith("REJECT LOW_SCORE")
+
+
+def test_the_roster_a_board_keeps_gets_its_own_line() -> None:
+    view = live.View()
+    people = [
+        {"id": "spk_001", "name": "Chủ nhà", "enrolled": True},
+        {"id": "spk_003", "name": "Bé Na", "enrolled": False},
+    ]
+    roster = {"deviceId": DEVICE, "version": 7, "check": True, "speakers": people}
+    view.update(message("speakers", roster))
+    assert "  speakers v7 check on: spk_001 Chủ nhà (enrolled), spk_003 Bé Na (no voiceprint)" in view.render(
+        now_monotonic=0.0
+    )
+    enrolling = {**roster, "enrollingId": "spk_003", "enrolCount": 4}
+    assert live.one_line(message("speakers", enrolling)).endswith("; enrolling spk_003 4")
