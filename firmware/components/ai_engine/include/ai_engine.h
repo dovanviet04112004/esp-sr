@@ -123,29 +123,33 @@ esp_err_t ai_engine_speaker_embed(const int16_t *pcm, float *unit);
  */
 size_t ai_engine_speaker_dims(void);
 
-/** Score of a unit embedding against a voiceprint: the permille of their dot product, within +-1000.
- *  @ctx any | non-blocking | both hold ai_engine_speaker_dims() floats
- */
-int16_t ai_engine_speaker_score(const float *unit, const float *voiceprint);
-
 /** The voiceprint of n unit embeddings, rows of ai_engine_speaker_dims() floats: their sum at unit length.
  *  @ctx any | non-blocking | caller owns units and voiceprint
  */
 void ai_engine_speaker_voiceprint(const float *units, size_t n, float *voiceprint);
 
-/** The highest score of unit over n voiceprints, rows of ai_engine_speaker_dims() floats, and in index the
- * one that gave it, the lowest on a tie (KEHOACH 3.17).
- *  @ctx any | non-blocking | caller owns unit, prints and index
- *  @ret the score in permille; -1000 and index 0 when n is 0
+/** A voiceprint's mean and deviation over the image's cohort of strangers, which ai_engine_speaker_best
+ * scores it by (ADR-0022).
+ *  @ctx task | blocking: reads the cohort in place from flash | caller owns voiceprint, mean and std
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_STATE no speaker in the image
  */
-int16_t ai_engine_speaker_best(const float *unit, const float *prints, size_t n, size_t *index);
+esp_err_t ai_engine_speaker_norm(const float *voiceprint, float *mean, float *std);
 
-/** Whether a best score over prints voiceprints reaches the image's threshold for that many
- * (KEHOACH 3.17, 6.3).
+/** The highest normalised score of unit over n voiceprints, rows of ai_engine_speaker_dims() floats with the
+ * means and deviations ai_engine_speaker_norm gave them: thousandths of z, in index the row that gave it, the
+ * lowest on a tie, in cosine_permille that row's cosine (KEHOACH 3.17).
+ *  @ctx any | non-blocking | caller owns every pointer
+ *  @ret the score; -32767 with index 0 and cosine -1000 when n is 0
+ */
+int16_t ai_engine_speaker_best(const float *unit, const float *prints, const float *means, const float *stds,
+                               size_t n, size_t *index, int16_t *cosine_permille);
+
+/** Whether a best score over prints voiceprints, thousandths of z, reaches the image's threshold for that
+ * many (KEHOACH 3.17, 6.3).
  *  @ctx any | non-blocking
  *  @ret false with no voiceprint, or more than APP_SPEAKERS_MAX
  */
-bool ai_engine_speaker_passes(int16_t score_permille, size_t prints);
+bool ai_engine_speaker_passes(int16_t milli_z, size_t prints);
 
 /** The id of the loaded speaker entry, the first four bytes of its sha256, that a voiceprint belongs to.
  *  @ctx any | non-blocking

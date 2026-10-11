@@ -37,11 +37,12 @@ typedef struct __attribute__((packed)) {
     uint32_t first, last;
     int16_t command;
     uint16_t score, margin, gap, syllable;
-    int16_t speaker;       // the check's permille, or commands enrolled
+    int16_t speaker;       // the check's thousandths of z, or commands enrolled
+    int16_t cosine;        // of the voiceprint giving that score
     uint16_t speaker_code; // CHECK_*
 } window_t;
 _Static_assert(sizeof(listen_head_t) == 24 && sizeof(session_head_t) == 12 && sizeof(segment_head_t) == 8 &&
-                   sizeof(window_t) == 22,
+                   sizeof(window_t) == 24,
                "listen record layout");
 
 enum { LISTEN_SPEAKER_ON = 1, LISTEN_SPEAKER_AFRESH = 2 };
@@ -122,17 +123,19 @@ static size_t drain(svc_listen_decision_t *decided, size_t n, tally_t *t)
     return n;
 }
 
-// The speaker check's part: none, the owner's score, the enrolment's count, or a code of the block alone.
-static bool same_speaker(const window_t *want, const app_event_t *e, const char *owner)
+// The speaker check's part: none, the owner's score and cosine, the enrolment's count, or a code of the block
+// alone.
+static bool same_speaker(const window_t *want, const svc_listen_decision_t *got, const char *owner)
 {
+    const app_event_t *e = &got->event;
     const bool theirs = strcmp(e->speaker_id, owner) == 0;
+    const bool scored =
+        e->has_speaker && got->speaker_milli_z == want->speaker && e->speaker_permille == want->cosine;
     switch (want->speaker_code) {
     case CHECK_NONE: return !e->has_speaker && e->speaker_id[0] == '\0' && e->enrol_count == 0;
-    case CHECK_PASSED:
-        return e->kind == APP_EVT_COMMAND && e->has_speaker && e->speaker_permille == want->speaker && theirs;
+    case CHECK_PASSED: return e->kind == APP_EVT_COMMAND && scored && theirs;
     case CHECK_STOPPED:
-        return e->kind == APP_EVT_REJECT && strcmp(e->code, APP_CODE_SPEAKER) == 0 && e->has_speaker &&
-               e->speaker_permille == want->speaker && theirs;
+        return e->kind == APP_EVT_REJECT && strcmp(e->code, APP_CODE_SPEAKER) == 0 && scored && theirs;
     case CHECK_ENROLLING:
         return e->kind == APP_EVT_REJECT && strcmp(e->code, APP_CODE_SPEAKER_ENROLLING) == 0 &&
                !e->has_speaker && e->enrol_count == want->speaker && theirs;
@@ -153,7 +156,7 @@ static bool same(const window_t *want, const svc_listen_decision_t *got, const n
                                               : e->kind == APP_EVT_REJECT;
     const uint16_t score = want->score < PERMILLE_MAX ? want->score : PERMILLE_MAX;
     const uint16_t margin = want->margin < PERMILLE_MAX ? want->margin : PERMILLE_MAX;
-    return command && same_speaker(want, e, owner) && e->score_permille == score &&
+    return command && same_speaker(want, got, owner) && e->score_permille == score &&
            e->margin_permille == margin && got->free_gap_permille == want->gap &&
            got->syllable_gap_permille == want->syllable && got->first_seq == base + want->first &&
            e->seq == base + want->last;
@@ -200,15 +203,15 @@ static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_
         const bool ok = same(&want[w], &decided[w], named, base, owner);
         t->differ += ok ? 0 : 1;
         const app_event_t *e = &decided[w].event;
-        printf("listen window %" PRIu32 "..%" PRIu32
-               ": board %s %s %u %u %u %u speaker %d %s %u, python %d %u %u %u %u speaker %d/%u%s; %" PRIu32
-               " us after the close\n",
+        printf("listen window %" PRIu32 "..%" PRIu32 ": board %s %s %u %u %u %u speaker %d %d %s %u, python "
+               "%d %u %u %u %u speaker %d %d/%u%s; %" PRIu32 " us after the close\n",
                decided[w].first_seq - base, e->seq - base, e->kind == APP_EVT_COMMAND ? "command" : "reject",
                e->kind == APP_EVT_COMMAND ? e->command_id : e->code, e->score_permille, e->margin_permille,
                decided[w].free_gap_permille, decided[w].syllable_gap_permille,
-               e->has_speaker ? e->speaker_permille : 0, e->speaker_id[0] != '\0' ? e->speaker_id : "-",
-               e->enrol_count, want[w].command, want[w].score, want[w].margin, want[w].gap, want[w].syllable,
-               want[w].speaker, want[w].speaker_code, ok ? "" : " DIFFERS", decided[w].close_us);
+               e->has_speaker ? decided[w].speaker_milli_z : 0, e->has_speaker ? e->speaker_permille : 0,
+               e->speaker_id[0] != '\0' ? e->speaker_id : "-", e->enrol_count, want[w].command, want[w].score,
+               want[w].margin, want[w].gap, want[w].syllable, want[w].speaker, want[w].cosine,
+               want[w].speaker_code, ok ? "" : " DIFFERS", decided[w].close_us);
     }
     t->windows += n;
     return p + h.windows * sizeof(window_t);

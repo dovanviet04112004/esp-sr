@@ -60,6 +60,8 @@ typedef struct {
     uint8_t enrolled;                     // of GEN_SPEAKER_ENROL_COMMANDS
     uint8_t n_prints;                     // voiceprints of the loaded speaker entry, rows of prints
     uint8_t print_slot[APP_SPEAKERS_MAX]; // slot of each row, rising
+    float means[APP_SPEAKERS_MAX];        // each row's over the cohort
+    float stds[APP_SPEAKERS_MAX];
     uint32_t serial;
     size_t dims;
     storage_speaker_roster_t *roster; // as NVS speaker/roster keeps it
@@ -146,8 +148,9 @@ static void load_prints(uint32_t model)
         tpl_key(slot, key);
         const storage_speaker_slot_t *who = &k->roster->slot[slot];
         if (who->id[0] == '\0' || who->model_id != model || model == 0) { continue; }
-        if (sys_storage_get_blob(STORAGE_NS_SPEAKER, key, k->prints + k->n_prints * k->dims,
-                                 k->dims * sizeof(float)) == ESP_OK) {
+        float *row = k->prints + k->n_prints * k->dims;
+        if (sys_storage_get_blob(STORAGE_NS_SPEAKER, key, row, k->dims * sizeof(float)) == ESP_OK &&
+            ai_engine_speaker_norm(row, &k->means[k->n_prints], &k->stds[k->n_prints]) == ESP_OK) {
             k->print_slot[k->n_prints++] = (uint8_t)slot;
         }
     }
@@ -605,7 +608,7 @@ void svc_listen_busy_reject(svc_listen_decision_t *decision)
 }
 
 // Rows stay in slot order, so the lowest row on a tie of scores is the lowest slot (KEHOACH 3.17).
-static float *print_row(uint8_t slot)
+static size_t print_row(uint8_t slot)
 {
     speaker_t *k = &s.spk;
     size_t row = 0;
@@ -616,10 +619,12 @@ static float *print_row(uint8_t slot)
         const size_t after = k->n_prints - row;
         memmove(k->prints + (row + 1) * k->dims, k->prints + row * k->dims, after * k->dims * sizeof(float));
         memmove(&k->print_slot[row + 1], &k->print_slot[row], after);
+        memmove(&k->means[row + 1], &k->means[row], after * sizeof(float));
+        memmove(&k->stds[row + 1], &k->stds[row], after * sizeof(float));
         k->print_slot[row] = slot;
         k->n_prints++;
     }
-    return k->prints + row * k->dims;
+    return row;
 }
 
 static void drop_print(uint8_t slot)
@@ -630,6 +635,8 @@ static void drop_print(uint8_t slot)
         const size_t after = k->n_prints - row - 1;
         memmove(k->prints + row * k->dims, k->prints + (row + 1) * k->dims, after * k->dims * sizeof(float));
         memmove(&k->print_slot[row], &k->print_slot[row + 1], after);
+        memmove(&k->means[row], &k->means[row + 1], after * sizeof(float));
+        memmove(&k->stds[row], &k->stds[row + 1], after * sizeof(float));
         k->n_prints--;
         return;
     }
@@ -651,8 +658,10 @@ static esp_err_t enrol(svc_listen_decision_t *out)
     out->event.enrol_count = ++k->enrolled;
     k->serial++;
     if (k->enrolled < GEN_SPEAKER_ENROL_COMMANDS) { return ESP_OK; }
-    float *print = print_row(slot);
+    const size_t row = print_row(slot);
+    float *print = k->prints + row * k->dims;
     ai_engine_speaker_voiceprint(k->enrol_units, k->enrolled, print);
+    ai_engine_speaker_norm(print, &k->means[row], &k->stds[row]);
     k->roster->slot[slot].model_id = ai_engine_speaker_model_id();
     k->enrolling = NO_SLOT;
     k->enrolled = 0;
@@ -691,12 +700,11 @@ esp_err_t svc_listen_verify(uint8_t slot, svc_listen_decision_t *out)
     }
     if (enrolling) { return enrol(out); }
     size_t best = 0;
-    out->event.speaker_permille = ai_engine_speaker_best(unit, k->prints, k->n_prints, &best);
+    out->speaker_milli_z = ai_engine_speaker_best(unit, k->prints, k->means, k->stds, k->n_prints, &best,
+                                                  &out->event.speaker_permille);
     out->event.has_speaker = true;
     strlcpy(out->event.speaker_id, k->roster->slot[k->print_slot[best]].id, sizeof(out->event.speaker_id));
-    if (!ai_engine_speaker_passes(out->event.speaker_permille, k->n_prints)) {
-        reject_as(out, APP_CODE_SPEAKER);
-    }
+    if (!ai_engine_speaker_passes(out->speaker_milli_z, k->n_prints)) { reject_as(out, APP_CODE_SPEAKER); }
     return ESP_OK;
 }
 

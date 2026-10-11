@@ -42,6 +42,7 @@ typedef struct {
     uint32_t work_us;               // network and score of the window
     uint32_t close_us;              // from the utterance's close to the decision
     uint32_t verify_us;             // the speaker check, 0 without one
+    int16_t speaker_milli_z;        // the best voiceprint's score, with has_speaker
 } svc_listen_decision_t;
 
 /** Read the commands, prepare ai_engine, take the rings and tables, and with speaker the PCM ring, the verify
@@ -105,9 +106,9 @@ esp_err_t svc_listen_hold(const svc_listen_decision_t *decision, uint8_t slot);
  */
 void svc_listen_busy_reject(svc_listen_decision_t *decision);
 
-/** Check the speaker of the slot's COMMAND: one run of b0, the best score over the voiceprints, the decision
- * with the best one's id; during an enrolment the command enrols instead, REJECT SPEAKER_ENROLLING
- * (KEHOACH 3.17).
+/** Check the speaker of the slot's COMMAND: one run of b0, the best Z-norm score over the voiceprints, the
+ * decision with the best one's id and cosine; an enrolment takes the command instead, REJECT
+ * SPEAKER_ENROLLING (KEHOACH 3.17, ADR-0022).
  *  @ctx xac_task | blocking about 1.2 s of core 0; writes NVS when an enrolment ends | the caller holds slot
  *  @ret ESP_OK, out filled | ESP_ERR_INVALID_ARG | APP_ERR_SPEAKERS_NOT_SAVED a voiceprint in use, not in NVS
  */

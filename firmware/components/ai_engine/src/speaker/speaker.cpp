@@ -15,6 +15,7 @@ namespace {
 
 const char *const TAG = "ai_speaker";
 constexpr const char *kEntry = "speaker";
+constexpr const char *kCohortEntry = "speaker_cohort";
 constexpr int kInt8Min = -128;
 constexpr int kInt8Max = 127;
 constexpr size_t kFeatures = GEN_SPEAKER_N_FRAMES * GEN_SPEAKER_N_BANDS;
@@ -24,8 +25,10 @@ struct Speaker {
     ai::Int8Tensor in, out;
     dsp_spec_spk_fbank_t *fbank;
     void *fbank_mem;
-    float *features;    // frames x bands, frame after frame, PSRAM
-    float inverse_step; // 2^-exponent of the input
+    float *features;     // frames x bands, frame after frame, PSRAM
+    float inverse_step;  // 2^-exponent of the input
+    const float *cohort; // in place in the mapped image, rows of the output's dims
+    size_t cohort_rows;
     int16_t thresholds[APP_SPEAKERS_MAX];
     uint32_t model_id;
 };
@@ -67,6 +70,18 @@ esp_err_t speaker_load() noexcept
         speaker_drop();
         return ESP_ERR_INVALID_SIZE;
     }
+    // Without its cohort no voiceprint can be scored, so the branch stays off as with a foreign hash
+    // (ADR-0022).
+    const Blob cohort = image_find(kCohortEntry, STORAGE_MODEL_KIND_COHORT);
+    const size_t row_bytes = s.out.elements * sizeof(float);
+    if (cohort.data == nullptr || cohort.size == 0 || cohort.size % row_bytes != 0) {
+        ESP_LOGE(TAG, "%s: no cohort of %u-float rows in the image, %u bytes found", kEntry,
+                 (unsigned)s.out.elements, (unsigned)cohort.size);
+        speaker_drop();
+        return ESP_OK;
+    }
+    s.cohort = reinterpret_cast<const float *>(cohort.data);
+    s.cohort_rows = cohort.size / row_bytes;
     const dsp_spec_spk_fbank_config_t cfg = GEN_SPEAKER_FBANK_CONFIG;
     const size_t bytes = dsp_spec_spk_fbank_workspace_bytes(&cfg);
     s.fbank_mem = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
@@ -85,10 +100,11 @@ esp_err_t speaker_load() noexcept
     s.model_id = image_entry_id(kEntry, STORAGE_MODEL_KIND_ESPDL);
     s.ready = true;
     ESP_LOGI(TAG,
-             "%s: %u frames x %u bands to %u dims, threshold %d to %d permille for 1 to %d voiceprints, "
-             "model %08x",
+             "%s: %u frames x %u bands to %u dims, cohort of %u, threshold %d to %d milli-z for 1 to %d "
+             "voiceprints, model %08x",
              kEntry, (unsigned)GEN_SPEAKER_N_FRAMES, (unsigned)GEN_SPEAKER_N_BANDS, (unsigned)s.out.elements,
-             s.thresholds[0], s.thresholds[APP_SPEAKERS_MAX - 1], APP_SPEAKERS_MAX, (unsigned)s.model_id);
+             (unsigned)s.cohort_rows, s.thresholds[0], s.thresholds[APP_SPEAKERS_MAX - 1], APP_SPEAKERS_MAX,
+             (unsigned)s.model_id);
     return ESP_OK;
 }
 
@@ -119,14 +135,18 @@ size_t ai_engine_speaker_dims(void)
     return s.ready ? s.out.elements : 0;
 }
 
-int16_t ai_engine_speaker_score(const float *unit, const float *voiceprint)
+esp_err_t ai_engine_speaker_norm(const float *voiceprint, float *mean, float *std)
 {
-    return ai_engine_speaker_score_permille(unit, voiceprint, s.out.elements);
+    if (voiceprint == nullptr || mean == nullptr || std == nullptr) { return ESP_ERR_INVALID_ARG; }
+    if (!s.ready) { return ESP_ERR_INVALID_STATE; }
+    ai_engine_speaker_norm_of(voiceprint, s.cohort, s.cohort_rows, s.out.elements, mean, std);
+    return ESP_OK;
 }
 
-int16_t ai_engine_speaker_best(const float *unit, const float *prints, size_t n, size_t *index)
+int16_t ai_engine_speaker_best(const float *unit, const float *prints, const float *means, const float *stds,
+                               size_t n, size_t *index, int16_t *cosine_permille)
 {
-    return ai_engine_speaker_best_permille(unit, prints, n, s.out.elements, index);
+    return ai_engine_speaker_best_z(unit, prints, means, stds, n, s.out.elements, index, cosine_permille);
 }
 
 void ai_engine_speaker_voiceprint(const float *units, size_t n, float *voiceprint)
@@ -134,10 +154,10 @@ void ai_engine_speaker_voiceprint(const float *units, size_t n, float *voiceprin
     ai_engine_speaker_fold(units, n, s.out.elements, voiceprint);
 }
 
-bool ai_engine_speaker_passes(int16_t score_permille, size_t prints)
+bool ai_engine_speaker_passes(int16_t milli_z, size_t prints)
 {
     if (prints == 0 || prints > APP_SPEAKERS_MAX) { return false; }
-    return ai_engine_speaker_accepts(score_permille, s.thresholds[prints - 1]);
+    return ai_engine_speaker_accepts(milli_z, s.thresholds[prints - 1]);
 }
 
 uint32_t ai_engine_speaker_model_id(void)

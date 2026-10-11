@@ -45,8 +45,8 @@ struct WindowRecord {
 };
 static_assert(sizeof(WindowsHead) == 8 && sizeof(WindowRecord) == 36, "speaker_windows.bin layout");
 
-// Layout written by srpipe.tasks.speaker.probe --chain: the head, the voiceprints, the members' enrolment
-// units, then each window.
+// Layout written by srpipe.tasks.speaker.probe --chain: the head, the voiceprints, their means and
+// deviations, the members' enrolment units, then each window.
 struct ChainHead {
     char magic[4];
     uint32_t windows; // with PCM
@@ -56,11 +56,12 @@ struct ChainHead {
 };
 struct ChainWindow {
     uint32_t kind; // ChainKind
-    int32_t score_permille;
+    int32_t milli_z;
     int32_t best; // the voiceprint giving the score
     int32_t passes;
+    int32_t cosine_permille; // of that voiceprint
 };
-static_assert(sizeof(ChainHead) == 20 && sizeof(ChainWindow) == 16, "speaker_chain.bin layout");
+static_assert(sizeof(ChainHead) == 20 && sizeof(ChainWindow) == 20, "speaker_chain.bin layout");
 enum ChainKind : uint32_t { kEnrol = 0, kOwner, kImpostor, kMember };
 
 esp_err_t test_of(const ai::Blob &blob, bool profiled)
@@ -232,7 +233,7 @@ TEST_CASE("the speaker chain enrols a full roster and scores every window agains
     const auto *bytes = static_cast<const uint8_t *>(mapped);
     ChainHead head;
     memcpy(&head, bytes, sizeof(head));
-    if (memcmp(head.magic, "SRS8", sizeof(head.magic)) != 0) {
+    if (memcmp(head.magic, "SRSZ", sizeof(head.magic)) != 0) {
         esp_partition_munmap(handle);
         TEST_IGNORE_MESSAGE(
             "voice holds no speaker roster chain: make ai-unit-speaker RUN=<run> ROW=<row> CHAIN=1");
@@ -249,7 +250,8 @@ TEST_CASE("the speaker chain enrols a full roster and scores every window agains
     TEST_ASSERT_NOT_NULL(units);
     TEST_ASSERT_NOT_NULL(prints);
     const auto *python_prints = reinterpret_cast<const float *>(bytes + sizeof(head));
-    const auto *member_units = python_prints + head.prints * dims;
+    const auto *python_norms = python_prints + head.prints * dims;
+    const auto *member_units = python_norms + 2 * head.prints;
     const uint8_t *at =
         reinterpret_cast<const uint8_t *>(member_units + (head.prints - 1) * head.enrolled * dims);
     ChainTiming t;
@@ -260,6 +262,13 @@ TEST_CASE("the speaker chain enrols a full roster and scores every window agains
                                      prints + k * dims);
     }
     const bool prints_same = memcmp(prints, python_prints, head.prints * dims * sizeof(float)) == 0;
+    float means[APP_SPEAKERS_MAX], stds[APP_SPEAKERS_MAX];
+    uint32_t norms_off = 0;
+    for (uint32_t k = 0; k < head.prints; k++) {
+        TEST_ASSERT_EQUAL(ESP_OK, ai_engine_speaker_norm(prints + k * dims, &means[k], &stds[k]));
+        norms_off += memcmp(&means[k], &python_norms[2 * k], sizeof(float)) != 0 ||
+                     memcmp(&stds[k], &python_norms[2 * k + 1], sizeof(float)) != 0;
+    }
     const size_t record =
         sizeof(ChainWindow) + GEN_SPEAKER_WINDOW_SAMPLES * sizeof(int16_t) + dims * sizeof(float);
     uint32_t off = 0, tried[4] = {0}, passed[4] = {0}, theirs = 0;
@@ -268,24 +277,28 @@ TEST_CASE("the speaker chain enrols a full roster and scores every window agains
         memcpy(&want, at + i * record, sizeof(want));
         if (want.kind == kEnrol) { continue; }
         size_t best = 0;
-        const int16_t score = ai_engine_speaker_best(units + i * dims, prints, head.prints, &best);
+        int16_t cosine = 0;
+        const int16_t score =
+            ai_engine_speaker_best(units + i * dims, prints, means, stds, head.prints, &best, &cosine);
         const bool passes = ai_engine_speaker_passes(score, head.prints);
-        off += score != want.score_permille || (int32_t)best != want.best || passes != (want.passes != 0);
+        off += score != want.milli_z || (int32_t)best != want.best || passes != (want.passes != 0) ||
+               cosine != want.cosine_permille;
         tried[want.kind]++;
         passed[want.kind] += passes;
         theirs += want.kind == kOwner ? best == 0 : 0;
-        printf("speaker chain window %" PRIu32 ", kind %" PRIu32 ": best %d of voiceprint %u, python %" PRId32
-               " of %" PRId32 ", %s\n",
-               i, want.kind, score, (unsigned)best, want.score_permille, want.best,
+        printf("speaker chain window %" PRIu32 ", kind %" PRIu32
+               ": best %d milli-z of voiceprint %u, cosine %d, "
+               "python %" PRId32 " of %" PRId32 ", cosine %" PRId32 ", %s\n",
+               i, want.kind, score, (unsigned)best, cosine, want.milli_z, want.best, want.cosine_permille,
                passes ? "passes" : "stopped");
     }
-    printf("speaker chain: %" PRIu32 " windows, %" PRIu32 " units and %" PRIu32
-           " decisions off python, %" PRIu32 " voiceprints %s; at %d permille owner %" PRIu32 "/%" PRIu32
+    printf("speaker chain: %" PRIu32 " windows, %" PRIu32 " units, %" PRIu32 " norms and %" PRIu32
+           " decisions off python, %" PRIu32 " voiceprints %s; at %d milli-z owner %" PRIu32 "/%" PRIu32
            " (%" PRIu32 " best on their own), member %" PRIu32 "/%" PRIu32 ", impostor %" PRIu32 "/%" PRIu32
            " passed; embed %" PRId64 " us mean, %" PRId64 " us peak after the first, %" PRId64
            " us; front end %" PRId64 " us mean\n",
-           head.windows, units_off, off, head.prints, prints_same ? "same" : "differ",
-           ai::image_speaker_threshold_permille(head.prints), passed[kOwner], tried[kOwner], theirs,
+           head.windows, units_off, norms_off, off, head.prints, prints_same ? "same" : "differ",
+           ai::image_speaker_threshold_milli_z(head.prints), passed[kOwner], tried[kOwner], theirs,
            passed[kMember], tried[kMember], passed[kImpostor], tried[kImpostor],
            t.embed_us / (head.windows - 1), t.embed_peak_us, t.first_us, t.front_us / head.windows);
     printf("speaker chain: the first check after load kept %" PRId64 " B internal and %" PRId64 " B PSRAM\n",
@@ -295,6 +308,7 @@ TEST_CASE("the speaker chain enrols a full roster and scores every window agains
     esp_partition_munmap(handle);
     TEST_ASSERT_EQUAL(0, units_off);
     TEST_ASSERT_TRUE(prints_same);
+    TEST_ASSERT_EQUAL(0, norms_off);
     TEST_ASSERT_EQUAL(0, off);
     TEST_ASSERT_EQUAL_MESSAGE(0, (int)t.first_internal_bytes, "a check allocates after load (CLAUDE.md 4.1)");
     TEST_ASSERT_EQUAL_MESSAGE(0, (int)t.first_psram_bytes, "a check allocates after load (CLAUDE.md 4.1)");
