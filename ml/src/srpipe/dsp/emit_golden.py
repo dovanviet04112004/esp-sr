@@ -11,9 +11,10 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import scipy.signal
 
 from srpipe.dsp.afe import agc, balance, chain, doa, gsc, hpf, ns_omlsa, vad
-from srpipe.dsp.spec import mel, pitch, stft
+from srpipe.dsp.spec import mel, pitch, spk_fbank, stft
 from srpipe.generated import afe, array, grid, listen
 from srpipe.golden.gold import write_gold
 
@@ -57,6 +58,30 @@ MEL_CASES = (
     (mel.MelConfig(n_bands=40, f_min_hz=20.0, f_max_hz=7600.0, log_floor=1e-6), 13),
     (mel.MelConfig(n_bands=80, f_min_hz=0.0, f_max_hz=8000.0, log_floor=1e-10), 20),
     (mel.MelConfig(n_bands=24, f_min_hz=100.0, f_max_hz=4000.0, log_floor=1e-3), 24),
+)
+SPK_FBANK_SHORT_SAMPLES = 9000  # speech behind zeros: a short command window
+# Values float32 holds exactly, so the C, reading them as float32, builds the same tables.
+SPK_FBANK_OTHER = spk_fbank.SpkFbankConfig(
+    window_samples=4000,
+    frame_samples=256,
+    hop_samples=128,
+    fft_size=256,
+    n_bands=40,
+    f_min_hz=0.0,
+    f_max_hz=8000.0,
+    preemphasis=0.9375,
+    eps=2.0**-20,
+)
+SPK_FBANK_FIELDS = (
+    "window_samples",
+    "frame_samples",
+    "hop_samples",
+    "fft_size",
+    "n_bands",
+    "f_min_hz",
+    "f_max_hz",
+    "preemphasis",
+    "eps",
 )
 
 
@@ -131,6 +156,62 @@ def emit_mel(root: Path) -> list[Path]:
     path = root / "mel" / "case_neg_000.gold"
     write_gold(path, negative)
     written.append(path)
+    return written
+
+
+def _voice(rng: np.random.Generator, n: int) -> np.ndarray:
+    """Harmonics of a pitch gliding around 145 Hz under two formant bumps, at syllable rate, a little noise: int16."""
+    t = np.arange(n) / grid.SAMPLE_RATE_HZ
+    phase = 2 * np.pi * np.cumsum(145.0 + 35.0 * np.sin(2 * np.pi * 0.7 * t)) / grid.SAMPLE_RATE_HZ
+    x = np.zeros(n)
+    for h in range(1, 40):
+        f = 145.0 * h
+        x += (np.exp(-(((f - 700.0) / 300.0) ** 2)) + 0.5 * np.exp(-(((f - 2200.0) / 500.0) ** 2)) + 0.05) * np.sin(
+            h * phase
+        )
+    x = x * (0.55 + 0.45 * np.sin(2 * np.pi * 3.0 * t)) + 0.02 * rng.standard_normal(n)
+    return np.round(x / np.max(np.abs(x)) * 12000.0).astype(np.int16)
+
+
+def spk_fbank_case(
+    cfg: spk_fbank.SpkFbankConfig, pcm: np.ndarray, front: spk_fbank.SpkFbank | None = None, centred: bool = True
+) -> dict[str, np.ndarray]:
+    """The configuration as floats, the window's int16 samples and the features front gives: the reference itself
+    unless a negative control passes its own; centred off keeps the time mean."""
+    front = front or spk_fbank.SpkFbank(cfg)
+    return {
+        "config": np.array([getattr(cfg, f) for f in SPK_FBANK_FIELDS], dtype=np.float32),
+        "pcm": pcm.astype(np.int16),
+        "features": front.run(pcm) if centred else front.log_bands(pcm),
+    }
+
+
+def emit_spk_fbank(root: Path) -> list[Path]:
+    """b0's front end of speaker.yaml on a voice and on a short voice behind zeros; a smaller
+    configuration on silence and on noise; then three negative controls on that noise: a periodic Hamming, mel weights
+    at each bin's own frequency, and the bands' time mean left on. The parity partition holds them all (KEHOACH 4.2)."""
+    rng = np.random.default_rng(SEED + 17)
+    cfg = spk_fbank.contract_config()
+    other = SPK_FBANK_OTHER
+    noise = np.round(rng.uniform(-9000.0, 9000.0, other.window_samples)).astype(np.int16)
+    cases = {
+        "case_000": spk_fbank_case(cfg, _voice(rng, cfg.window_samples)),
+        "case_001": spk_fbank_case(cfg, spk_fbank.tail(_voice(rng, SPK_FBANK_SHORT_SAMPLES), cfg.window_samples)),
+        "case_002": spk_fbank_case(other, np.zeros(other.window_samples, dtype=np.int16)),
+        "case_003": spk_fbank_case(other, noise),
+    }
+    periodic = spk_fbank.SpkFbank(other)
+    periodic.window = scipy.signal.windows.hamming(other.frame_samples, sym=False).astype(np.float32)
+    own_bins = spk_fbank.SpkFbank(other)
+    own_bins.weights = spk_fbank.tf_mel_weights(other, tf_spacing=False)
+    cases["case_neg_000"] = spk_fbank_case(other, noise, periodic)
+    cases["case_neg_001"] = spk_fbank_case(other, noise, own_bins)
+    cases["case_neg_002"] = spk_fbank_case(other, noise, centred=False)
+    written = []
+    for name, tensors in cases.items():
+        path = root / "spk_fbank" / f"{name}.gold"
+        write_gold(path, tensors)
+        written.append(path)
     return written
 
 
@@ -820,7 +901,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
-    emitted = emit_stft(args.out) + emit_mel(args.out) + emit_chain(args.out) + emit_chain_modules(args.out)
+    emitted = emit_stft(args.out) + emit_mel(args.out) + emit_spk_fbank(args.out)
+    emitted += emit_chain(args.out) + emit_chain_modules(args.out)
     emitted += emit_hpf(args.out) + emit_balance(args.out) + emit_vad(args.out) + emit_agc(args.out)
     emitted += emit_doa(args.out) + emit_gsc(args.out) + emit_pitch(args.out, pitch_config())
     for path in emitted + emit_ns_omlsa(args.out):

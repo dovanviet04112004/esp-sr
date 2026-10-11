@@ -9,7 +9,7 @@ import yaml
 
 from srpipe.dsp import emit_golden
 from srpipe.dsp.afe import balance, chain, doa, gsc, ns_omlsa
-from srpipe.dsp.spec import mel, pitch, stft
+from srpipe.dsp.spec import mel, pitch, spk_fbank, stft
 from srpipe.generated import afe, grid
 from srpipe.golden.gold import read_gold
 
@@ -49,6 +49,28 @@ def test_the_mel_negative_control_is_one_band_off() -> None:
     bank = mel.Mel(cfg)
     right = np.stack([bank.log(b[:, 0] + 1j * b[:, 1]) for b in case["bins"]])
     np.testing.assert_array_equal(case["log_mel"], np.roll(right, -1, axis=1))
+
+
+def test_committed_spk_fbank_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_spk_fbank(tmp_path):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
+
+
+def test_spk_fbank_cases_carry_the_contracts_front_end() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "spk_fbank" / "case_000.gold")
+    cfg = spk_fbank.contract_config()
+    np.testing.assert_array_equal(case["config"][:5], [cfg.window_samples, 400, 160, 512, 72])
+    np.testing.assert_array_equal(case["features"], spk_fbank.SpkFbank(cfg).run(case["pcm"]))
+
+
+def test_each_spk_fbank_negative_control_differs_from_the_reference_in_its_one_place() -> None:
+    front = spk_fbank.SpkFbank(emit_golden.SPK_FBANK_OTHER)
+    for name in ("case_neg_000", "case_neg_001", "case_neg_002"):
+        case = read_gold(emit_golden.GOLDEN_ROOT / "spk_fbank" / f"{name}.gold")
+        assert np.max(np.abs(case["features"] - front.run(case["pcm"]))) > 1e-3, name
+    uncentred = read_gold(emit_golden.GOLDEN_ROOT / "spk_fbank" / "case_neg_002.gold")
+    np.testing.assert_array_equal(uncentred["features"], front.log_bands(uncentred["pcm"]))
 
 
 def test_committed_chain_cases_match_a_fresh_emit(tmp_path: Path) -> None:

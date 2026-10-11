@@ -1,0 +1,9 @@
+# C dsp_spec/spk_fbank against srpipe.dsp.spec.spk_fbank, the front end of the speaker network (KEHOACH 3.17, 3.14).
+# Both sides run the same float32 operations in the same order with the module's own log, the window's mean and
+# variance summed in double, so they match bit for bit with the default FFT, Kconfig DSP_SPEC_FFT_RADIX4; dl_fft does
+# not. The window and mel tables, built in double with the C library's cos and log10 and rounded once, show through
+# the features. case_neg_* must fall outside these limits.
+tensors:
+  features:
+    max_abs: 0.0
+    min_snr_db: 0.0
