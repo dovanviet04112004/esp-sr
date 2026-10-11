@@ -760,6 +760,10 @@ trung bình). Bản dò chạy hàng `timing` của run, dựng `UNIT_PROFILE=ct
   38 MB/s.
 - **Lỗi của bảng:** cột chu kỳ trên phép nhân-cộng của bảng xếp hạng sai với mạng chạy dòng. Nó lấy hình dạng trong
   `.info`, ghi cho cả chuỗi 768 hop, không phải bước 16 hop.
+- **Bản vá xuất cho ctc (11/10), bước 2.3 của quy trình:** bật `cache_sized_convolutions`, `lean_transposes`,
+  `lean_quantizers`. `command_ctc` từ 82,2 xuống **69,7 ms** một bước, vẫn lệch 0. `/front/proj` 963 → 160 kênh tách
+  thành các lát vừa cache dữ liệu, ra khỏi đầu bảng. Đầu bảng giờ là `/front/convs.0`, Conv 3×3 1 → 8 kênh, 9,1 ms,
+  không bản vá nào xử lý được.
 - **RMSNorm theo mã máy (11/10):** bản dựng S3 của esp-dl tính `mean_sq + eps` bằng một `madd.s`, với hằng
   `(1.0f / n)·s²` tính sẵn. Bản vá cũ chia thật cho n rồi mới cộng, mà 1/160 không biểu diễn đúng ở float32. Sau khi
   `rmsnorm_as_espdl` chép đúng mã máy, chuỗi chạy lại vẫn khớp từng bit: `command_ctc` lệch 0, 82,2 ms một bước.
