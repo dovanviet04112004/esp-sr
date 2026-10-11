@@ -31,6 +31,7 @@
 #define MEM_ALIGN 16
 #define TAIL_HOPS ((GEN_SPEAKER_WINDOW_SAMPLES + GEN_GRID_HOP_SAMPLES - 1) / GEN_GRID_HOP_SAMPLES)
 #define NO_SLOT (-1)
+#define US_PER_S 1000000
 
 _Static_assert(AI_ENGINE_VARIANTS_MAX == LANG_VI_VARIANTS_MAX, "one command's readings fit one lexicon row");
 _Static_assert(RING_HOPS >= 2 * WINDOW_HOPS, "the ring holds the window worked and the next one whole");
@@ -58,6 +59,8 @@ typedef struct {
     bool on;                              // the roster's check, NVS speaker/chip
     int8_t enrolling;                     // slot whose next commands enrol, NO_SLOT without
     uint8_t enrolled;                     // of GEN_SPEAKER_ENROL_COMMANDS
+    int64_t enrol_window_us;              // svc_listen_config_t's enrol_window_s
+    int64_t enrol_until_us;               // when an unfinished enrolment ends
     uint8_t n_prints;                     // voiceprints of the loaded speaker entry, rows of prints
     uint8_t print_slot[APP_SPEAKERS_MAX]; // slot of each row, rising
     float means[APP_SPEAKERS_MAX];        // each row's over the cohort
@@ -271,7 +274,9 @@ static esp_err_t build_lexicon(const svc_listen_commands_t *c, table_t *t, uint1
 esp_err_t svc_listen_init(const svc_listen_config_t *cfg)
 {
     if (s.ready) { return ESP_ERR_INVALID_STATE; }
-    if (cfg == NULL || !well_formed(&cfg->commands)) { return ESP_ERR_INVALID_ARG; }
+    if (cfg == NULL || !well_formed(&cfg->commands) || cfg->enrol_window_s == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
     if (!ai_engine_has(AI_ENGINE_MODEL_COMMAND)) { return ESP_ERR_NOT_SUPPORTED; }
     // A model of another band count reads every frame wrong (ADR-0017).
     const size_t takes = ai_engine_command_features();
@@ -303,6 +308,7 @@ esp_err_t svc_listen_init(const svc_listen_config_t *cfg)
     s.reject = cfg->reject_permille;
     s.margin = cfg->margin_permille;
     s.syllable = cfg->syllable_permille;
+    s.spk.enrol_window_us = (int64_t)cfg->enrol_window_s * US_PER_S;
     s.ready = true;
     return ESP_OK;
 }
@@ -682,6 +688,7 @@ esp_err_t svc_listen_verify(uint8_t slot, svc_listen_decision_t *out)
     }
     const verify_slot_t *v = &s.slots[slot];
     speaker_t *k = &s.spk;
+    svc_listen_speaker_expire();
     const bool enrolling = k->enrolling != NO_SLOT;
     *out = v->decision;
     if (!enrolling && !k->on) { return ESP_OK; }
@@ -851,11 +858,39 @@ esp_err_t svc_listen_speaker_enrol(const char *id)
     speaker_t *k = &s.spk;
     k->enrolling = (int8_t)slot;
     k->enrolled = 0;
+    k->enrol_until_us = esp_timer_get_time() + k->enrol_window_us;
     k->serial++;
     divert();
-    ESP_LOGI(TAG, "enrolling %s, slot %d: the next %d commands", k->roster->slot[slot].id, slot,
-             GEN_SPEAKER_ENROL_COMMANDS);
+    ESP_LOGI(TAG, "enrolling %s, slot %d: the next %d commands within %d s", k->roster->slot[slot].id, slot,
+             GEN_SPEAKER_ENROL_COMMANDS, (int)(k->enrol_window_us / US_PER_S));
     return ESP_OK;
+}
+
+static void end_enrolment(const char *how)
+{
+    speaker_t *k = &s.spk;
+    ESP_LOGI(TAG, "enrolment of %s %s after %u of %d commands", k->roster->slot[k->enrolling].id, how,
+             (unsigned)k->enrolled, GEN_SPEAKER_ENROL_COMMANDS);
+    k->enrolling = NO_SLOT;
+    k->enrolled = 0;
+    k->serial++;
+    divert();
+}
+
+esp_err_t svc_listen_speaker_enrol_cancel(void)
+{
+    if (!s.ready || s.pcm_ring == NULL) { return ESP_ERR_NOT_SUPPORTED; }
+    if (s.spk.enrolling != NO_SLOT) { end_enrolment("cancelled"); }
+    return ESP_OK;
+}
+
+void svc_listen_speaker_expire(void)
+{
+    const speaker_t *k = &s.spk;
+    if (s.ready && s.pcm_ring != NULL && k->enrolling != NO_SLOT &&
+        esp_timer_get_time() >= k->enrol_until_us) {
+        end_enrolment("timed out");
+    }
 }
 
 esp_err_t svc_listen_speaker_state(app_speaker_state_t *out)

@@ -27,4 +27,13 @@ menu "svc_listen"
             unit loop by more than this a frame (KEHOACH 3.12, 6.2), unless the model image carries the delta3
             chosen for its command (KEHOACH 6.3). 65535 caps nothing, as a model chosen without delta3 decides.
 
+    config SVC_LISTEN_ENROL_WINDOW_S
+        int "Seconds a speaker enrolment stays open for its commands"
+        range 30 3600
+        default 180
+        help
+            An enrolment that has not taken its commands this long after its ENROL ends, so one left behind
+            neither swallows later commands nor makes anyone's voice the enrolling person's (KEHOACH 3.17).
+            make speaker-enrol waits as long, then cancels.
+
 endmenu

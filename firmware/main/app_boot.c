@@ -179,6 +179,7 @@ static esp_err_t listen_to(const command_set_t *set)
         .reject_permille = CONFIG_SVC_LISTEN_CMD_REJECT_PERMILLE,
         .margin_permille = CONFIG_SVC_LISTEN_CMD_MARGIN_PERMILLE,
         .syllable_permille = CONFIG_SVC_LISTEN_CMD_SYLLABLE_PERMILLE,
+        .enrol_window_s = CONFIG_SVC_LISTEN_ENROL_WINDOW_S,
     };
     (void)sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, &cfg.reject_permille);
     (void)sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, &cfg.margin_permille);

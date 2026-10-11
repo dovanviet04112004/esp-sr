@@ -257,6 +257,7 @@ static void listen_on(const listen_head_t *head, const named_t *named)
         .reject_permille = head->reject,
         .margin_permille = head->margin,
         .syllable_permille = UINT16_MAX,
+        .enrol_window_s = CONFIG_SVC_LISTEN_ENROL_WINDOW_S,
     };
     TEST_ASSERT_EQUAL(ESP_OK, svc_listen_init(&cfg));
     listening = true;

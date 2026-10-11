@@ -78,6 +78,7 @@ typedef struct {
 typedef enum {
     APP_SPEAKER_SET = 0, // the whole roster
     APP_SPEAKER_ENROL,   // the next commands become id's voiceprint
+    APP_SPEAKER_ENROL_CANCEL,
 } app_speaker_op_t;
 
 typedef struct {

@@ -32,6 +32,7 @@ typedef struct {
     uint16_t reject_permille;   // delta1 ai_engine decides with
     uint16_t margin_permille;   // delta2 ai_engine decides with
     uint16_t syllable_permille; // delta3 ai_engine decides with
+    uint16_t enrol_window_s;    // an unfinished enrolment ends this long after ENROL
 } svc_listen_config_t;
 
 typedef struct {
@@ -122,11 +123,23 @@ esp_err_t svc_listen_verify(uint8_t slot, svc_listen_decision_t *out);
  */
 esp_err_t svc_listen_speaker_set(const app_speaker_set_t *set);
 
-/** Enrol id: its next GEN_SPEAKER_ENROL_COMMANDS commands become its voiceprint; another enrolment ends.
+/** Enrol id: its next GEN_SPEAKER_ENROL_COMMANDS commands within enrol_window_s become its voiceprint;
+ * another enrolment ends.
  *  @ctx xac_task | non-blocking
  *  @ret ESP_OK | ESP_ERR_NOT_SUPPORTED no speaker | ESP_ERR_INVALID_ARG | APP_ERR_SPEAKER_UNKNOWN not listed
  */
 esp_err_t svc_listen_speaker_enrol(const char *id);
+
+/** End the enrolment under way, if any; every voiceprint stays as it is (KEHOACH 3.17).
+ *  @ctx xac_task | non-blocking
+ *  @ret ESP_OK, also with none under way | ESP_ERR_NOT_SUPPORTED no speaker
+ */
+esp_err_t svc_listen_speaker_enrol_cancel(void);
+
+/** End an enrolment enrol_window_s old that still lacks commands (KEHOACH 3.17).
+ *  @ctx xac_task | non-blocking
+ */
+void svc_listen_speaker_expire(void);
 
 /** The roster as it stands, for q_roster; serial rises with each change.
  *  @ctx xac_task | non-blocking

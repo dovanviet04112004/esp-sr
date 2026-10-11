@@ -332,9 +332,11 @@ static void take_speakers(const app_wiring_t *w)
         speaker_error(w, set->parsed == ESP_OK ? svc_listen_speaker_set(&set->set) : set->parsed);
     }
     while (xQueueReceive(w->speaker_requests, request, 0) == pdTRUE) {
-        speaker_error(w, request->op == APP_SPEAKER_SET ? svc_listen_speaker_set(&request->set)
-                                                        : svc_listen_speaker_enrol(request->id));
+        speaker_error(w, request->op == APP_SPEAKER_SET     ? svc_listen_speaker_set(&request->set)
+                         : request->op == APP_SPEAKER_ENROL ? svc_listen_speaker_enrol(request->id)
+                                                            : svc_listen_speaker_enrol_cancel());
     }
+    svc_listen_speaker_expire();
     write_roster(w);
 }
 
@@ -364,7 +366,7 @@ static void enrol_from(const app_wiring_t *w, const device_cmd_t *cmd)
 {
     app_speaker_request_t *request = &s_copies->enrol;
     memset(request, 0, sizeof(*request));
-    request->op = APP_SPEAKER_ENROL;
+    request->op = cmd->op == DEVICE_CMD_OP_SPEAKER_ENROL ? APP_SPEAKER_ENROL : APP_SPEAKER_ENROL_CANCEL;
     strlcpy(request->id, cmd->has_speaker_id ? cmd->speaker_id : "", sizeof(request->id));
     if (xQueueSend(w->speaker_requests, request, 0) != pdTRUE) {
         raise_error(w, 0, APP_CODE_SPEAKERS_REFUSED, NULL);
@@ -380,7 +382,9 @@ static void dieu_task(void *arg)
         if (xQueueReceive(w->dialog, &event, pdMS_TO_TICKS(DIEU_WAIT_MS)) == pdTRUE) { (void)event; }
         device_cmd_t cmd;
         while (xQueueReceive(w->cmd, &cmd, 0) == pdTRUE) {
-            if (cmd.op == DEVICE_CMD_OP_SPEAKER_ENROL) { enrol_from(w, &cmd); }
+            if (cmd.op == DEVICE_CMD_OP_SPEAKER_ENROL || cmd.op == DEVICE_CMD_OP_SPEAKER_ENROL_CANCEL) {
+                enrol_from(w, &cmd);
+            }
         }
         esp_task_wdt_reset();
     }
