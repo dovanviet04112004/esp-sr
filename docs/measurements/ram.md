@@ -121,4 +121,22 @@ lệnh không còn vừa nên máy không nghe; phần `svc_listen` tính từ c
 - PSRAM còn khi nghe lên khoảng 3,0 MB với tối đa 64 lệnh. Bộ demo `host/sets/demo_vi.json` có 47 lệnh, bộ mặc định 10.
 - KẾ HOẠCH §6.6 ghi `net_mqtt` khoảng 0,2 MB (vùng JSON 2 × 48 KB, ô bộ lệnh 2 × 53 KB); số đo là 836 KB.
 - b0 của `speaker` cần thêm ~3,86 MB (ảnh 1,72 MB, tensor 2,14 MB; E11-T26). Với tối đa 64 lệnh vẫn thiếu ~0,85 MB.
-  Để trọng số b0 ở flash thì b0 chỉ cần 2,14 MB và còn dư ~0,87 MB.
+  Để trọng số b0 ở flash thì b0 chỉ cần 2,14 MB. Số đo trên firmware có `speaker` ở bảng dưới: còn 0,51 MB lúc nghe,
+  không phải ~0,87 MB như ước.
+
+Firmware `bench` @ `ab23bce` có `speaker`, đo tối 11/10 qua cầu RFC 2217:
+- ảnh khuôn 8 của `990fe70`: `command_ctc`, bảng chuẩn hoá, `speaker` và nhóm chuẩn, hai mục sau để ở flash;
+- tối đa 64 lệnh, `set.json` là bộ mặc định 10 lệnh, 19 cách đọc;
+- `q_clean` 128 bước.
+
+| Bước | PSRAM còn B | Dùng thêm | Gồm |
+|---|---|---|---|
+| `storage` | 8 384 752 | — | NVS, LittleFS |
+| `wiring` | 7 767 184 | 603 KB | hàng đợi, kể cả ba hàng của danh sách người nói; `q_clean` 2 s, `sb_stream` 512 KB |
+| `audio` | 7 570 772 | 192 KB | `net_mqtt`: vùng JSON và ô bộ lệnh cho tối đa 64 lệnh, đệm `down/speakers` |
+| `models` | 1 292 308 | 6 131 KB | phần ảnh chép vào PSRAM, tensor `command_ctc` 326 KB, tensor b0 2 135 KB, vùng làm việc `spk_fbank` 58 KB, vùng chấm ctc |
+| `front` | 1 292 308 | 0 | `dsp_afe` ở RAM nội |
+| `listen` | **538 004** | 737 KB | `svc_listen`: vòng 512 bước, bảng lexicon, vòng PCM và hai ô xác minh của `speaker`, 8 mẫu giọng |
+
+- Trước khi `q_clean` lên 128 bước, bước `listen` còn 571 796 B. 64 bước thêm tốn đúng 33 792 B.
+- RAM nội còn 96 023 B lúc nghe, mảnh liền lớn nhất 55 296 B.

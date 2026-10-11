@@ -998,3 +998,57 @@ ngay sau đó, nên lượt này chỉ còn là bằng chứng cho phần danh s
 - Như lượt 16:51 trên `db5ed04`. Vậy khi cờ tắt, AS-norm không đổi Cửa 3.
 - Lượt 3: log in ra màn hình mất 6 cửa sổ cuối cùng dòng tổng kết, lúc pytest đóng phiên. `dut.log` của pytest-embedded
   có đủ 58/58 cửa sổ và `0 decided otherwise than python`; số của lượt ấy lấy từ đó.
+
+## 28. `speaker` trên firmware sản phẩm: danh sách, đăng ký, xác minh (E11-T26, E11-T31)
+
+Đo ngày 11/10 trên board B, profile `bench`, ảnh khuôn 8 của `990fe70`, qua cầu RFC 2217. Broker EMQX ở máy tính,
+`make host-live` ghi mọi tin `up/` vào một tệp jsonl.
+
+**Trả board về sản phẩm.**
+- `make fw-bench-flash` và `make models-flash` không ghi phân vùng `storage`, mà LittleFS lúc ấy không còn `set.json`.
+  Board khởi động nhưng không nghe (`/lfs/cmd/set.json: not listening`). Ghi lại `storage.bin` dựng cùng `fw-bench`
+  thì board nghe bộ 10 lệnh mặc định.
+- App thử `svc_listen` xoá `kws/cmd_reject`, `cmd_margin`, `cmd_syllable`, nên firmware gieo lại bộ của ảnh: δ1 200,
+  δ2 0, δ3 60. Ngưỡng cũ của board vẫn đọc được trong NVS, ở các mục đã xoá: 300, 50, 65535 (δ3 tắt).
+  - Với bộ của ảnh, 168 câu nói thử liền không câu nào được nhận: 110 `LOW_SCORE`, 55 `LOW_SYLLABLE`, 3 `PART`.
+  - Chủ repo bảo đặt lại như cũ; đặt qua console `nvs set`, board nghe ở 300 / 50 / 65535.
+
+**Danh sách người nói qua `make speakers`.**
+
+| Bước | `up/speakers` đọc lại |
+|---|---|
+| Danh sách chỉ có `spk_002`, bỏ `spk_001` đang có mẫu giọng (app thử để lại) | 1 người, `spk_002` chưa có mẫu |
+| `host/speakers/bench_1_add.json` | 2 người: `spk_002` "Khách", `spk_001` "Chủ nhà" |
+| `bench_2_edit.json` | 3 người: `spk_002` thành "Khách quen", thêm `spk_003` "Bé Na" |
+| `bench_3_delete.json` | 2 người: `spk_001`, `spk_003` |
+| Danh sách trùng `id`, rồi danh sách có `id` ngoài khuôn, gửi không retained | `ERROR SPEAKERS_INVALID` cả hai lần; danh sách giữ nguyên |
+| `make speaker-enrol ID=spk_009` | `ERROR SPEAKER_UNKNOWN` |
+
+- **Xoá người là xoá mẫu giọng.** NVS đọc bằng `parttool` ngay sau khi gửi danh sách, trước khi app khởi động lại:
+  - trước: `speaker/tpl0` ở trạng thái Written, 768 B;
+  - sau: cả hai mục của `tpl0` là Erased, không còn khoá `tpl` nào Written.
+- NVS chỉ đánh dấu xoá: 768 B ấy còn nằm trên trang flash tới khi NVS dọn trang.
+
+**Đăng ký và xác minh.**
+- `make speaker-enrol DEVICE=sr-3485188f7a70 ID=spk_001`: chủ repo nói 10 lệnh khác nhau, board giữ đủ 10 và
+  `spk_001` thành `enrolled`. Mẫu giọng còn sau mỗi lần khởi động lại.
+- **Rơi khung sau mỗi lần chạy b0** (`FREERTOS.md` 2.7):
+  - qua 10 lệnh đăng ký, `clean_dropped` lên 0 → 192 → 290, và hai cửa sổ ra `REJECT FRAME_GAP`;
+  - lệnh tới `xac_task` từ giữa đợt việc cửa sổ, lúc `nhan_task` còn ở ưu tiên 2. Vậy suốt 1,26 s của b0, `nhan_task`
+    không lấy khung, mà `q_clean` 64 bước chỉ chứa ~1 s;
+  - sửa ở `ab23bce`: `q_clean` 128 bước (KẾ HOẠCH §5.3).
+- **Sau khi sửa,** chủ repo nói hai lượt lệnh, có cặp nói liền nhau:
+
+| Đo | Kết quả |
+|---|---|
+| Lệnh được nhận và qua kiểm người nói | 9/9 mang `spk_001`, cosine 809–882 ‰; 3 lệnh có log console cho điểm AS-norm 5654–6571 (ngưỡng 1 người 2964) |
+| `clean_dropped`, `frames_dropped`, `dma_overflows` qua 9 lần chạy b0 | **0**, không còn `FRAME_GAP` |
+| Một lần xác minh `svc_listen_verify` trên firmware, log của `app_tasks` | **1340–1343 ms**; lần đầu sau khởi động 1399 ms |
+| PSRAM còn khi nghe | 538 004 B (`ram.md` §4) |
+
+- **Xác minh trên firmware chậm hơn ca chuỗi.** 1340 ms so với 1257 ms của `ai_engine_speaker_embed` không tải ở §27:
+  - trong khi b0 chạy, `nhan_task` vẫn nạp khung ở ưu tiên 10 trên cùng nhân 0;
+  - thêm phần chấm AS-norm trên 380 hàng nhóm chuẩn, chưa tách riêng 🔬.
+- **Các lệnh không được nhận đều do khâu nhận lệnh, không do khâu người nói.**
+  - "mở cửa" rồi ngay "đóng cửa" thành một câu, chỉ "đóng cửa" được nhận.
+  - "tăng âm lượng", "giảm âm lượng", "dừng lại" bị `LOW_MARGIN` hay `PART` ở δ2 50.
