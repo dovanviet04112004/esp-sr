@@ -90,6 +90,11 @@ static esp_err_t build_weights(dsp_spec_spk_fbank_t *fb)
     const size_t points = (size_t)c->n_bands + 2;
     const double lo = htk_mel(c->f_min_hz);
     const double hi = htk_mel(c->f_max_hz);
+    // The frame buffer is free until the first run: each bin's mel goes there, one log10 a bin.
+    double *bin_mel = (double *)(void *)fb->frame;
+    for (size_t k = 1; k < fb->n_bins; k++) {
+        bin_mel[k] = htk_mel(linspace_at(0.0, GEN_GRID_SAMPLE_RATE_HZ / 2, fb->n_bins, k));
+    }
     size_t used = 0;
     for (size_t b = 0; b < c->n_bands; b++) {
         const double lower = linspace_at(lo, hi, points, b);
@@ -98,7 +103,7 @@ static esp_err_t build_weights(dsp_spec_spk_fbank_t *fb)
         fb->first_bin[b] = 0;
         fb->n_weights[b] = 0;
         for (size_t k = 1; k < fb->n_bins; k++) {
-            const double mel = htk_mel(linspace_at(0.0, GEN_GRID_SAMPLE_RATE_HZ / 2, fb->n_bins, k));
+            const double mel = bin_mel[k];
             const double rising = (mel - lower) / (centre - lower);
             const double falling = (upper - mel) / (upper - centre);
             const double w = fmax(0.0, fmin(rising, falling));
