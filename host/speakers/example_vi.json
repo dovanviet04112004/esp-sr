@@ -1,0 +1,7 @@
+{
+  "check": true,
+  "speakers": [
+    {"id": "spk_001", "name": "Chủ nhà", "consent": "C001"},
+    {"id": "spk_002", "name": "Khách", "consent": "C002"}
+  ]
+}

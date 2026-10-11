@@ -542,7 +542,7 @@ listen-unit: ## Run svc_listen on board B over every Gate 3 session, round by ro
 
 ##@ Broker and host
 
-.PHONY: broker-up broker-down host-live commands
+.PHONY: broker-up broker-down host-live commands speakers speaker-enrol
 broker-up: ## Start the bench MQTT broker (needs deploy/.env and deploy/emqx/users.csv)
 	@test -f deploy/.env || { echo "copy deploy/.env.example to deploy/.env and fill it"; exit 1; }
 	@test -f deploy/emqx/users.csv || { echo "copy deploy/emqx/users.csv.example to deploy/emqx/users.csv and fill it"; exit 1; }
@@ -556,6 +556,13 @@ host-live: ## Show wake and command events live
 
 commands: ## Send a command set to one board, retained, and show its answer: DEVICE=<deviceId> SET=<file.json> [CLEAR=1]
 	cd host && uv run python -m srhost.commands --device "$(DEVICE)" $(if $(CLEAR),--clear,"$(abspath $(SET))")
+
+speakers: ## Send a speaker roster to one board, retained, and show what it keeps: DEVICE=<deviceId> SET=<roster.json> | LIST=1 | CLEAR=1 (E11-T31)
+	cd host && uv run python -m srhost.speakers --device "$(DEVICE)" \
+	  $(if $(LIST),--list,$(if $(CLEAR),--clear,"$(abspath $(SET))"))
+
+speaker-enrol: ## Enrol one person of the board's roster from the commands they say next: DEVICE=<deviceId> ID=spk_NNN (E11-T31)
+	cd host && uv run python -m srhost.speakers --device "$(DEVICE)" --enrol "$(ID)"
 
 ##@ Recording sessions (KEHOACH 4.6)
 

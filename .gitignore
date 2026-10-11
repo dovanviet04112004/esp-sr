@@ -58,6 +58,10 @@ firmware/components/ai_engine/test_apps/unit/main/probe/
 # ── host: phiên thu nằm ngoài repo ──
 /host/sessions/
 
+# ── host: danh sách người nói mang tên người thật (KE HOACH §1.4, §3.17) ──
+/host/speakers/*
+!/host/speakers/example_vi.json
+
 # ── Bí mật ──
 .env
 .env.*
