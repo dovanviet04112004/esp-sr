@@ -374,12 +374,14 @@ typedef struct {
     char command_id[33];
     char code[33];
     int16_t doa_deg;
+    int16_t speaker_permille;
     uint32_t ts;
     bool has_score_permille;
     bool has_margin_permille;
     bool has_command_id;
     bool has_code;
     bool has_doa_deg;
+    bool has_speaker_permille;
     bool has_ts;
 } event_t;
 
@@ -448,6 +450,14 @@ static inline bool event_from_json(const cJSON *root, event_t *out)
         out->doa_deg = (int16_t) item->valuedouble;
         out->has_doa_deg = true;
     }
+    item = cJSON_GetObjectItemCaseSensitive(root, "speakerPermille");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < -1000.0 || item->valuedouble > 1000.0) { return false; }
+        out->speaker_permille = (int16_t) item->valuedouble;
+        out->has_speaker_permille = true;
+    }
     item = cJSON_GetObjectItemCaseSensitive(root, "ts");
     if (item == NULL) { item = NULL; }
     if (item != NULL) {
@@ -485,6 +495,9 @@ static inline cJSON *event_to_json(const event_t *in)
     }
     if (in->has_doa_deg) {
         cJSON_AddNumberToObject(root, "doaDeg", (double) in->doa_deg);
+    }
+    if (in->has_speaker_permille) {
+        cJSON_AddNumberToObject(root, "speakerPermille", (double) in->speaker_permille);
     }
     if (in->has_ts) {
         cJSON_AddNumberToObject(root, "ts", (double) in->ts);

@@ -47,6 +47,7 @@ class Event(TypedDict):
     commandId: NotRequired[str]
     code: NotRequired[str]
     doaDeg: NotRequired[int]
+    speakerPermille: NotRequired[int]
     ts: NotRequired[int]
 
 
@@ -184,6 +185,7 @@ SCHEMAS: dict[str, dict] = {
                     'commandId': {'type': 'string', 'pattern': '^[a-z0-9_]{1,32}$', 'maxLength': 32},
                     'code': {'type': 'string', 'pattern': '^[A-Z0-9_]{1,32}$', 'maxLength': 32},
                     'doaDeg': {'type': 'integer', 'minimum': -1, 'maximum': 180},
+                    'speakerPermille': {'type': 'integer', 'minimum': -1000, 'maximum': 1000},
                     'ts': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295}},
      'allOf': [{'if': {'properties': {'kind': {'const': 'WAKE'}}}, 'then': {'required': ['scorePermille']}},
                {'if': {'properties': {'kind': {'const': 'COMMAND'}}},
