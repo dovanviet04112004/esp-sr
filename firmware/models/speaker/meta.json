@@ -30,8 +30,26 @@
     "int16_ops": []
   },
   "threshold": {
-    "permille": 744,
-    "impostors_passing": 0.05
+    "permille": [
+      744,
+      823,
+      828,
+      835,
+      841,
+      849,
+      852,
+      853
+    ],
+    "impostors_passing": [
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05,
+      0.05
+    ]
   },
   "weights_in_flash": true
 }

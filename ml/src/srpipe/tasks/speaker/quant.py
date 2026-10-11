@@ -26,7 +26,7 @@ from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, pt
 from srpipe.core import run_dir
 from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml
 from srpipe.dsp.spec import spk_fbank
-from srpipe.export import update_lock
+from srpipe.export import pack_models, update_lock
 from srpipe.generated import grid, speaker
 from srpipe.scenes import refs
 from srpipe.scenes import speaker as survey
@@ -610,25 +610,10 @@ def chip_units(
     return out, gap
 
 
-def threshold_of(units: list[np.ndarray], windows: list, survey_cfg: dict, dq: dict) -> dict:
-    """The chip's threshold over the survey's material. Enrolment draws of speaker.ENROL_COMMANDS windows as the survey
-    draws them; every impostor score of every draw pooled. At each share of deploy.shares, the lowest permille that
-    lets at most that share through, and the accepted commands it keeps per distance, sessions pooled. The first share
-    whose every distance keeps deploy.keep_min is chosen, else the last (KEHOACH 3.17)."""
-    owner = survey_cfg["owner"]
-    enrol_group = f"{owner['enrol']['date']} {owner['enrol']['distance_cm']}"
-    mine = [i for i, w in enumerate(windows) if w.spk == owner["spk"]]
-    pool = [i for i in mine if windows[i].group == enrol_group]
-    others = [i for i, w in enumerate(windows) if w.spk != owner["spk"]]
-    rng = np.random.default_rng([survey_cfg["seed"], survey.ENROL_STREAM, speaker.ENROL_COMMANDS])
-    targets: list[tuple[int, str]] = []
-    impostors: list[int] = []
-    for _ in range(owner["draws"]):
-        enrolled = set(rng.choice(pool, speaker.ENROL_COMMANDS, replace=False).tolist())
-        print_ = score.voiceprint([units[i] for i in sorted(enrolled)])
-        tested = [i for i in mine if i not in enrolled and windows[i].accepted]
-        targets += [(score.score_permille(units[i], print_), windows[i].group.split()[-1]) for i in tested]
-        impostors += [score.score_permille(units[i], print_) for i in others]
+def rule_rows(targets: list[tuple[int, str]], impostors: list[int], dq: dict) -> tuple[dict, float]:
+    """At each share of deploy.shares, the lowest permille that lets at most that share of the impostor scores through,
+    with the share of target scores, each at a distance, it keeps per distance; and the first share whose every
+    distance keeps deploy.keep_min, else the last (KEHOACH 3.17)."""
     ranked = sorted(impostors, reverse=True)
     rows = {}
     for share in dq["shares"]:
@@ -641,13 +626,50 @@ def threshold_of(units: list[np.ndarray], windows: list, survey_cfg: dict, dq: d
         passing = float(np.mean([s >= permille for s in impostors]))
         rows[share] = {"permille": int(permille), "impostors passing": passing, "kept accepted": kept}
     fits = [s for s in dq["shares"] if min(rows[s]["kept accepted"].values()) >= dq["keep_min"]]
+    return rows, fits[0] if fits else dq["shares"][-1]
+
+
+def threshold_table(units: list[np.ndarray], windows: list, survey_cfg: dict, dq: dict, most: int) -> dict:
+    """The chip's threshold over the survey's material for 1 to most people holding a voiceprint. Each of the survey's
+    enrolment draws of speaker.ENROL_COMMANDS owner windows serves every count; with n people, n - 1 impostors who
+    have that many windows are drawn too and enrol from their own. The owner's accepted windows and the windows of
+    every impostor not drawn are scored with the best over the n voiceprints, all draws pooled, under rule_rows."""
+    owner = survey_cfg["owner"]
+    enrol_group = f"{owner['enrol']['date']} {owner['enrol']['distance_cm']}"
+    mine = [i for i, w in enumerate(windows) if w.spk == owner["spk"]]
+    pool = [i for i in mine if windows[i].group == enrol_group]
+    by_spk: dict[str, list[int]] = {}
+    for i, w in enumerate(windows):
+        if w.spk != owner["spk"]:
+            by_spk.setdefault(w.spk, []).append(i)
+    enrollable = sorted(s for s, rows in by_spk.items() if len(rows) >= speaker.ENROL_COMMANDS)
+    rng = np.random.default_rng([survey_cfg["seed"], survey.ENROL_STREAM, speaker.ENROL_COMMANDS])
+    draws = [sorted(rng.choice(pool, speaker.ENROL_COMMANDS, replace=False).tolist()) for _ in range(owner["draws"])]
+    counts = []
+    for n in range(1, most + 1):
+        members_rng = np.random.default_rng([survey_cfg["seed"], survey.ENROL_STREAM, speaker.ENROL_COMMANDS, n])
+        targets: list[tuple[int, str]] = []
+        impostors: list[int] = []
+        for enrolled in draws:
+            members = members_rng.choice(enrollable, n - 1, replace=False).tolist() if n > 1 else []
+            prints = [score.voiceprint([units[i] for i in enrolled])]
+            for m in members:
+                theirs = sorted(members_rng.choice(by_spk[m], speaker.ENROL_COMMANDS, replace=False).tolist())
+                prints.append(score.voiceprint([units[i] for i in theirs]))
+            tested = [i for i in mine if i not in set(enrolled) and windows[i].accepted]
+            targets += [(score.best(units[i], prints)[0], windows[i].group.split()[-1]) for i in tested]
+            impostors += [
+                score.best(units[i], prints)[0] for s, rows in by_spk.items() if s not in members for i in rows
+            ]
+        rows, chosen = rule_rows(targets, impostors, dq)
+        counts.append({"people": n, "shares": rows, "chosen": chosen})
     return {
         "enrol_commands": speaker.ENROL_COMMANDS,
         "draws": owner["draws"],
         "owner windows": len(mine),
-        "impostor windows": len(others),
-        "shares": rows,
-        "chosen": fits[0] if fits else dq["shares"][-1],
+        "impostor windows": sum(len(rows) for rows in by_spk.values()),
+        "impostors enrollable": len(enrollable),
+        "counts": counts,
     }
 
 
@@ -672,9 +694,9 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
     scored = owner + [w for i, w in enumerate(impostors) if i not in set(picks)]
     front = spk_fbank.SpkFbank(spk_fbank.contract_config())
     units, gap = chip_units(graph, cfg["esp_ppq_patches"], scored, front, wrap)
-    chosen = threshold_of(units, scored, survey_cfg, dq)
+    table = threshold_table(units, scored, survey_cfg, dq, pack_models.SPEAKERS)
     survey_figures = figures(np.stack(units), scored, survey_cfg, cfg["quant"])
-    kept = chosen | {"front_end": gap, "figures": survey_figures}
+    kept = table | {"front_end": gap, "figures": survey_figures}
     (folder / DEPLOY_FILE).write_text(yaml.safe_dump(kept, sort_keys=False), encoding="utf-8")
     io = ptq_espdl.io_of(graph)
     pcm = spk_fbank.tail(np.rint(impostors[board].samples * PCM_FULL_SCALE).astype(np.int16), front.cfg.window_samples)
@@ -690,13 +712,15 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
     espdl = target / f"{BRANCH}.espdl"
     espdl.write_bytes(built.read_bytes())
     rungs = yaml.safe_load((run / INT8_DIR / LADDER_FILE).read_text(encoding="utf-8"))["rows"][row]
-    share = chosen["chosen"]
     fields = {
         "speaker_hash": f"0x{speaker.HASH:08x}",
         "features": {"name": f"tf_mel{speaker.N_BANDS}", "frames": speaker.N_FRAMES, "bands": speaker.N_BANDS},
         "row": row,
         "rungs": {"calibration": rungs["calibration"], "int16_ops": rungs.get("int16_ops", [])},
-        "threshold": {"permille": chosen["shares"][share]["permille"], "impostors_passing": share},
+        "threshold": {
+            "permille": [c["shares"][c["chosen"]]["permille"] for c in table["counts"]],
+            "impostors_passing": [c["chosen"] for c in table["counts"]],
+        },
         "weights_in_flash": dq["weights_in_flash"],
     }
     return update_lock.record(BRANCH, run, [update_lock.Deployed(espdl, BRANCH, "espdl")], fields)

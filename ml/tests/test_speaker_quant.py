@@ -291,7 +291,7 @@ def test_the_threshold_lets_at_most_its_share_of_impostors_through_and_keeps_the
     rng = np.random.default_rng(7)
     units, windows, cfg = threshold_material(rng, [0.9] * 30, 400)
     dq = {"shares": [0.01, 0.05], "keep_min": 0.95}
-    chosen = quant.threshold_of(units, windows, cfg, dq)
+    chosen = quant.threshold_table(units, windows, cfg, dq, 1)["counts"][0]
     assert chosen["chosen"] == 0.01
     for share, row in chosen["shares"].items():
         assert row["impostors passing"] <= share
@@ -303,7 +303,28 @@ def test_a_distance_kept_under_the_floor_at_one_percent_moves_the_threshold_to_f
 
     rng = np.random.default_rng(8)
     units, windows, cfg = threshold_material(rng, [0.9] * 26 + [0.57] * 4, 400)
-    chosen = quant.threshold_of(units, windows, cfg, {"shares": [0.01, 0.05], "keep_min": 0.95})
+    chosen = quant.threshold_table(units, windows, cfg, {"shares": [0.01, 0.05], "keep_min": 0.95}, 1)["counts"][0]
     assert chosen["shares"][0.01]["kept accepted"]["300 cm"] < 0.95
     assert chosen["chosen"] == 0.05
     assert chosen["shares"][0.05]["permille"] < chosen["shares"][0.01]["permille"]
+
+
+def test_more_people_enrolled_raise_the_threshold_and_keep_their_own_windows_out_of_the_impostors() -> None:
+    import numpy as np
+
+    from srpipe.scenes import speaker as survey
+
+    rng = np.random.default_rng(9)
+    units, windows, cfg = threshold_material(rng, [0.9] * 30, 400)
+    dims = len(units[0])
+    for k in range(3):
+        direction = np.zeros(dims, dtype=np.float32)
+        direction[2 + k] = 1.0
+        windows += [survey.Window(f"guest{k}", "near", np.zeros(1)) for _ in range(12)]
+        units += [direction] * 12
+    table = quant.threshold_table(units, windows, cfg, {"shares": [0.01, 0.05], "keep_min": 0.95}, 4)
+    assert [c["people"] for c in table["counts"]] == [1, 2, 3, 4] and table["impostors enrollable"] == 3
+    permilles = [c["shares"][0.01]["permille"] for c in table["counts"]]
+    assert permilles == sorted(permilles)
+    for count in table["counts"]:
+        assert count["shares"][0.01]["impostors passing"] <= 0.01
