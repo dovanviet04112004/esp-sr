@@ -7,12 +7,14 @@
 #include "core/espdl_net.hpp"
 #include "core/model_image.hpp"
 #include "dl_model_base.hpp"
+#include "dsp_spec/spk_fbank.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_partition.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "gen_speaker.h"
 #include "storage_format.h"
 #include "sys_storage.h"
 #include "unity.h"
@@ -25,6 +27,7 @@ constexpr size_t kSectorBytes = 4096;
 constexpr int kToleranceSteps = 0; // bit for bit, as model->test() asks of int8 (KEHOACH 3.14)
 constexpr uint32_t kShownValues = 8;
 constexpr int kCutsMax = 16;
+constexpr const char *kChainLabel = "voice"; // make ai-unit-speaker CHAIN=1 writes it
 
 // Layout written by srpipe.tasks.speaker.probe; the record's int8 data is padded to four bytes.
 struct WindowsHead {
@@ -40,6 +43,23 @@ struct WindowRecord {
     int32_t output_exponent;
 };
 static_assert(sizeof(WindowsHead) == 8 && sizeof(WindowRecord) == 36, "speaker_windows.bin layout");
+
+// Layout written by srpipe.tasks.speaker.probe --chain: the head, the voiceprint, then each window.
+struct ChainHead {
+    char magic[4];
+    uint32_t windows;
+    uint32_t dims;
+    int32_t threshold_permille;
+    uint32_t enrolled; // the first windows, folded into the voiceprint
+};
+struct ChainWindow {
+    uint32_t kind; // 0 enrolment, 1 owner, 2 impostor
+    int32_t score_permille;
+    int32_t passes;
+};
+static_assert(sizeof(ChainHead) == 20 && sizeof(ChainWindow) == 12, "speaker_chain.bin layout");
+constexpr uint32_t kOwner = 1;
+constexpr uint32_t kImpostor = 2;
 
 esp_err_t test_of(const ai::Blob &blob, bool profiled)
 {
@@ -135,12 +155,121 @@ TEST_CASE("each cut of the speaker graph runs as its ESP-PPQ simulation does", "
     TEST_ASSERT_EQUAL(0, differing);
 }
 
+namespace {
+
+struct ChainTiming {
+    int64_t embed_us = 0;
+    int64_t embed_peak_us = 0;
+    int64_t front_us = 0;
+};
+
+// Every window's unit embedding from its PCM, as xac_task gets it; the front end alone is timed beside.
+uint32_t embed_all(const uint8_t *at, const ChainHead &head, size_t dims, float *units, ChainTiming &t)
+{
+    const dsp_spec_spk_fbank_config_t cfg = GEN_SPEAKER_FBANK_CONFIG;
+    const size_t fb_bytes = dsp_spec_spk_fbank_workspace_bytes(&cfg);
+    void *fb_mem = heap_caps_malloc(fb_bytes, MALLOC_CAP_SPIRAM);
+    auto *features = static_cast<float *>(
+        heap_caps_malloc(GEN_SPEAKER_N_FRAMES * GEN_SPEAKER_N_BANDS * sizeof(float), MALLOC_CAP_SPIRAM));
+    auto *pcm = static_cast<int16_t *>(
+        heap_caps_malloc(GEN_SPEAKER_WINDOW_SAMPLES * sizeof(int16_t), MALLOC_CAP_SPIRAM));
+    dsp_spec_spk_fbank_t *fb = nullptr;
+    TEST_ASSERT_EQUAL(ESP_OK, dsp_spec_spk_fbank_init(&fb, &cfg, fb_mem, fb_bytes));
+    const size_t record =
+        sizeof(ChainWindow) + GEN_SPEAKER_WINDOW_SAMPLES * sizeof(int16_t) + dims * sizeof(float);
+    uint32_t off = 0;
+    for (uint32_t i = 0; i < head.windows; i++) {
+        const uint8_t *w = at + i * record;
+        memcpy(pcm, w + sizeof(ChainWindow), GEN_SPEAKER_WINDOW_SAMPLES * sizeof(int16_t));
+        int64_t from_us = esp_timer_get_time();
+        TEST_ASSERT_EQUAL(ESP_OK, dsp_spec_spk_fbank_run(fb, pcm, features));
+        t.front_us += esp_timer_get_time() - from_us;
+        from_us = esp_timer_get_time();
+        TEST_ASSERT_EQUAL(ESP_OK, ai_engine_speaker_embed(pcm, units + i * dims));
+        const int64_t took_us = esp_timer_get_time() - from_us;
+        t.embed_us += took_us;
+        t.embed_peak_us = took_us > t.embed_peak_us ? took_us : t.embed_peak_us;
+        const uint8_t *want = w + sizeof(ChainWindow) + GEN_SPEAKER_WINDOW_SAMPLES * sizeof(int16_t);
+        off += memcmp(units + i * dims, want, dims * sizeof(float)) != 0;
+        vTaskDelay(1);
+    }
+    heap_caps_free(fb_mem);
+    heap_caps_free(features);
+    heap_caps_free(pcm);
+    return off;
+}
+
+} // namespace
+
+TEST_CASE("the speaker chain embeds, enrols and scores every window as Python does, timed",
+          "[ai_engine][speaker_chain]")
+{
+    const esp_partition_t *part =
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, kChainLabel);
+    TEST_ASSERT_NOT_NULL(part);
+    const void *mapped = nullptr;
+    esp_partition_mmap_handle_t handle;
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      esp_partition_mmap(part, 0, part->size, ESP_PARTITION_MMAP_DATA, &mapped, &handle));
+    const auto *bytes = static_cast<const uint8_t *>(mapped);
+    ChainHead head;
+    memcpy(&head, bytes, sizeof(head));
+    if (memcmp(head.magic, "SRSC", sizeof(head.magic)) != 0) {
+        esp_partition_munmap(handle);
+        TEST_IGNORE_MESSAGE("voice holds no speaker chain: make ai-unit-speaker RUN=<run> ROW=<row> CHAIN=1");
+    }
+    TEST_ASSERT_EQUAL(ESP_OK, ai_engine_load(0));
+    TEST_ASSERT_TRUE(ai_engine_has(AI_ENGINE_MODEL_SPEAKER));
+    const size_t dims = ai_engine_speaker_dims();
+    TEST_ASSERT_EQUAL(head.dims, dims);
+    auto *units =
+        static_cast<float *>(heap_caps_malloc(head.windows * dims * sizeof(float), MALLOC_CAP_SPIRAM));
+    auto *print = static_cast<float *>(heap_caps_malloc(dims * sizeof(float), MALLOC_CAP_SPIRAM));
+    TEST_ASSERT_NOT_NULL(units);
+    TEST_ASSERT_NOT_NULL(print);
+    const uint8_t *at = bytes + sizeof(head) + dims * sizeof(float);
+    ChainTiming t;
+    const uint32_t units_off = embed_all(at, head, dims, units, t);
+    ai_engine_speaker_voiceprint(units, head.enrolled, print);
+    const bool print_same = memcmp(print, bytes + sizeof(head), dims * sizeof(float)) == 0;
+    const size_t record =
+        sizeof(ChainWindow) + GEN_SPEAKER_WINDOW_SAMPLES * sizeof(int16_t) + dims * sizeof(float);
+    uint32_t off = 0, owners = 0, owners_passed = 0, impostors = 0, impostors_passed = 0;
+    for (uint32_t i = 0; i < head.windows; i++) {
+        ChainWindow want;
+        memcpy(&want, at + i * record, sizeof(want));
+        const int16_t score = ai_engine_speaker_score(units + i * dims, print);
+        const bool passes = ai_engine_speaker_passes(score);
+        off += score != want.score_permille || passes != (want.passes != 0);
+        owners += want.kind == kOwner;
+        owners_passed += want.kind == kOwner && passes;
+        impostors += want.kind == kImpostor;
+        impostors_passed += want.kind == kImpostor && passes;
+        printf("speaker chain window %" PRIu32 ", kind %" PRIu32 ": score %d, python %" PRId32 ", %s\n", i,
+               want.kind, score, want.score_permille, passes ? "passes" : "stopped");
+    }
+    printf("speaker chain: %" PRIu32 " windows, %" PRIu32 " units and %" PRIu32
+           " scores off python, voiceprint %s; owner %" PRIu32 "/%" PRIu32 " and impostor %" PRIu32
+           "/%" PRIu32 " passed at %" PRId32 " permille; embed %" PRId64 " us mean, %" PRId64
+           " us peak; front end %" PRId64 " us mean\n",
+           head.windows, units_off, off, print_same ? "same" : "differs", owners_passed, owners,
+           impostors_passed, impostors, head.threshold_permille, t.embed_us / head.windows, t.embed_peak_us,
+           t.front_us / head.windows);
+    heap_caps_free(units);
+    heap_caps_free(print);
+    esp_partition_munmap(handle);
+    TEST_ASSERT_EQUAL(0, units_off);
+    TEST_ASSERT_TRUE(print_same);
+    TEST_ASSERT_EQUAL(0, off);
+}
+
 extern "C" void app_main(void)
 {
     ESP_ERROR_CHECK(sys_storage_init());
     UNITY_BEGIN();
     // The whole-graph case erases model slot 0 when it ends, so the cuts run first.
     unity_run_tests_by_tag("[speaker_cuts]", false);
+    unity_run_tests_by_tag("[speaker_chain]", false);
     unity_run_tests_by_tag("[speaker]", false);
     UNITY_END();
 }
