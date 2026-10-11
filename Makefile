@@ -507,9 +507,9 @@ ai-unit-ctc: ## Run the ctc build of the ai_engine suite on board B: RUN=<run> R
 
 # A row of speaker-ptq's ladder goes to model slot 0, its window is checked against Python and timed; slot 0 ends
 # erased. CHAIN=1 puts the deployed speaker there instead and the chain's windows in voice, run from PCM to decision.
-ai-unit-speaker: ## Run the speaker build of the ai_engine suite on board B: RUN=<run> ROW=<row of its int8/ladder.yaml> [CUT_RANGE="<first op> <last op>"] [CHAIN=1 | PCM=<int16 .npy>] (E11-T25, E11-T26)
+ai-unit-speaker: ## Run the speaker build of the ai_engine suite on board B: RUN=<run> ROW=<row of its int8/ladder.yaml> [CUT_RANGE="<first op> <last op>"] [CHAIN=1 [WORKERS=6] | PCM=<int16 .npy>] (E11-T25, E11-T26, E11-T31)
 	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.speaker.probe --run $(RUN) --row $(ROW) $(if $(CUT_RANGE),--cut-range $(CUT_RANGE)) \
-	  $(if $(CHAIN),--chain) $(if $(PCM),--pcm $(abspath $(PCM)))
+	  $(if $(CHAIN),--chain) $(if $(PCM),--pcm $(abspath $(PCM))) $(if $(WORKERS),--workers $(WORKERS))
 	@$(call fresh_sdkconfig,$(UNIT_APP)/build_speaker/sdkconfig,$(call app_defaults,$(UNIT_APP)))
 	cd $(UNIT_APP) && rm -f build_speaker/unit.status && idf.py -B build_speaker -D SDKCONFIG=build_speaker/sdkconfig -D UNIT_PROFILE=speaker build && \
 	  $(WRITE_PART) models_0 --input main/probe/speaker_models.bin && \

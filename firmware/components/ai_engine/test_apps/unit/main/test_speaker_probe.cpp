@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "ai_engine.h"
+#include "app_events.h"
 #include "core/espdl_net.hpp"
 #include "core/model_image.hpp"
 #include "dl_model_base.hpp"
@@ -44,22 +45,23 @@ struct WindowRecord {
 };
 static_assert(sizeof(WindowsHead) == 8 && sizeof(WindowRecord) == 36, "speaker_windows.bin layout");
 
-// Layout written by srpipe.tasks.speaker.probe --chain: the head, the voiceprint, then each window.
+// Layout written by srpipe.tasks.speaker.probe --chain: the head, the voiceprints, the members' enrolment
+// units, then each window.
 struct ChainHead {
     char magic[4];
-    uint32_t windows;
+    uint32_t windows; // with PCM
     uint32_t dims;
-    int32_t threshold_permille;
-    uint32_t enrolled; // the first windows, folded into the voiceprint
+    uint32_t prints;   // the owner's, then a member's each
+    uint32_t enrolled; // windows a voiceprint; the owner's are the first ones
 };
 struct ChainWindow {
-    uint32_t kind; // 0 enrolment, 1 owner, 2 impostor
+    uint32_t kind; // ChainKind
     int32_t score_permille;
+    int32_t best; // the voiceprint giving the score
     int32_t passes;
 };
-static_assert(sizeof(ChainHead) == 20 && sizeof(ChainWindow) == 12, "speaker_chain.bin layout");
-constexpr uint32_t kOwner = 1;
-constexpr uint32_t kImpostor = 2;
+static_assert(sizeof(ChainHead) == 20 && sizeof(ChainWindow) == 16, "speaker_chain.bin layout");
+enum ChainKind : uint32_t { kEnrol = 0, kOwner, kImpostor, kMember };
 
 esp_err_t test_of(const ai::Blob &blob, bool profiled)
 {
@@ -217,7 +219,7 @@ uint32_t embed_all(const uint8_t *at, const ChainHead &head, size_t dims, float 
 
 } // namespace
 
-TEST_CASE("the speaker chain embeds, enrols and scores every window as Python does, timed",
+TEST_CASE("the speaker chain enrols a full roster and scores every window against it as Python does, timed",
           "[ai_engine][speaker_chain]")
 {
     const esp_partition_t *part =
@@ -230,54 +232,69 @@ TEST_CASE("the speaker chain embeds, enrols and scores every window as Python do
     const auto *bytes = static_cast<const uint8_t *>(mapped);
     ChainHead head;
     memcpy(&head, bytes, sizeof(head));
-    if (memcmp(head.magic, "SRSC", sizeof(head.magic)) != 0) {
+    if (memcmp(head.magic, "SRS8", sizeof(head.magic)) != 0) {
         esp_partition_munmap(handle);
-        TEST_IGNORE_MESSAGE("voice holds no speaker chain: make ai-unit-speaker RUN=<run> ROW=<row> CHAIN=1");
+        TEST_IGNORE_MESSAGE(
+            "voice holds no speaker roster chain: make ai-unit-speaker RUN=<run> ROW=<row> CHAIN=1");
     }
     TEST_ASSERT_EQUAL(ESP_OK, ai_engine_load(0));
     TEST_ASSERT_TRUE(ai_engine_has(AI_ENGINE_MODEL_SPEAKER));
     const size_t dims = ai_engine_speaker_dims();
     TEST_ASSERT_EQUAL(head.dims, dims);
+    TEST_ASSERT_EQUAL(APP_SPEAKERS_MAX, head.prints);
     auto *units =
         static_cast<float *>(heap_caps_malloc(head.windows * dims * sizeof(float), MALLOC_CAP_SPIRAM));
-    auto *print = static_cast<float *>(heap_caps_malloc(dims * sizeof(float), MALLOC_CAP_SPIRAM));
+    auto *prints =
+        static_cast<float *>(heap_caps_malloc(head.prints * dims * sizeof(float), MALLOC_CAP_SPIRAM));
     TEST_ASSERT_NOT_NULL(units);
-    TEST_ASSERT_NOT_NULL(print);
-    const uint8_t *at = bytes + sizeof(head) + dims * sizeof(float);
+    TEST_ASSERT_NOT_NULL(prints);
+    const auto *python_prints = reinterpret_cast<const float *>(bytes + sizeof(head));
+    const auto *member_units = python_prints + head.prints * dims;
+    const uint8_t *at =
+        reinterpret_cast<const uint8_t *>(member_units + (head.prints - 1) * head.enrolled * dims);
     ChainTiming t;
     const uint32_t units_off = embed_all(at, head, dims, units, t);
-    ai_engine_speaker_voiceprint(units, head.enrolled, print);
-    const bool print_same = memcmp(print, bytes + sizeof(head), dims * sizeof(float)) == 0;
+    ai_engine_speaker_voiceprint(units, head.enrolled, prints);
+    for (uint32_t k = 1; k < head.prints; k++) {
+        ai_engine_speaker_voiceprint(member_units + (k - 1) * head.enrolled * dims, head.enrolled,
+                                     prints + k * dims);
+    }
+    const bool prints_same = memcmp(prints, python_prints, head.prints * dims * sizeof(float)) == 0;
     const size_t record =
         sizeof(ChainWindow) + GEN_SPEAKER_WINDOW_SAMPLES * sizeof(int16_t) + dims * sizeof(float);
-    uint32_t off = 0, owners = 0, owners_passed = 0, impostors = 0, impostors_passed = 0;
+    uint32_t off = 0, tried[4] = {0}, passed[4] = {0}, theirs = 0;
     for (uint32_t i = 0; i < head.windows; i++) {
         ChainWindow want;
         memcpy(&want, at + i * record, sizeof(want));
-        const int16_t score = ai_engine_speaker_score(units + i * dims, print);
-        const bool passes = ai_engine_speaker_passes(score, 1);
-        off += score != want.score_permille || passes != (want.passes != 0);
-        owners += want.kind == kOwner;
-        owners_passed += want.kind == kOwner && passes;
-        impostors += want.kind == kImpostor;
-        impostors_passed += want.kind == kImpostor && passes;
-        printf("speaker chain window %" PRIu32 ", kind %" PRIu32 ": score %d, python %" PRId32 ", %s\n", i,
-               want.kind, score, want.score_permille, passes ? "passes" : "stopped");
+        if (want.kind == kEnrol) { continue; }
+        size_t best = 0;
+        const int16_t score = ai_engine_speaker_best(units + i * dims, prints, head.prints, &best);
+        const bool passes = ai_engine_speaker_passes(score, head.prints);
+        off += score != want.score_permille || (int32_t)best != want.best || passes != (want.passes != 0);
+        tried[want.kind]++;
+        passed[want.kind] += passes;
+        theirs += want.kind == kOwner ? best == 0 : 0;
+        printf("speaker chain window %" PRIu32 ", kind %" PRIu32 ": best %d of voiceprint %u, python %" PRId32
+               " of %" PRId32 ", %s\n",
+               i, want.kind, score, (unsigned)best, want.score_permille, want.best,
+               passes ? "passes" : "stopped");
     }
     printf("speaker chain: %" PRIu32 " windows, %" PRIu32 " units and %" PRIu32
-           " scores off python, voiceprint %s; owner %" PRIu32 "/%" PRIu32 " and impostor %" PRIu32
-           "/%" PRIu32 " passed at %" PRId32 " permille; embed %" PRId64 " us mean, %" PRId64
-           " us peak after the first, %" PRId64 " us; front end %" PRId64 " us mean\n",
-           head.windows, units_off, off, print_same ? "same" : "differs", owners_passed, owners,
-           impostors_passed, impostors, head.threshold_permille, t.embed_us / (head.windows - 1),
-           t.embed_peak_us, t.first_us, t.front_us / head.windows);
+           " decisions off python, %" PRIu32 " voiceprints %s; at %d permille owner %" PRIu32 "/%" PRIu32
+           " (%" PRIu32 " best on their own), member %" PRIu32 "/%" PRIu32 ", impostor %" PRIu32 "/%" PRIu32
+           " passed; embed %" PRId64 " us mean, %" PRId64 " us peak after the first, %" PRId64
+           " us; front end %" PRId64 " us mean\n",
+           head.windows, units_off, off, head.prints, prints_same ? "same" : "differ",
+           ai::image_speaker_threshold_permille(head.prints), passed[kOwner], tried[kOwner], theirs,
+           passed[kMember], tried[kMember], passed[kImpostor], tried[kImpostor],
+           t.embed_us / (head.windows - 1), t.embed_peak_us, t.first_us, t.front_us / head.windows);
     printf("speaker chain: the first check after load kept %" PRId64 " B internal and %" PRId64 " B PSRAM\n",
            t.first_internal_bytes, t.first_psram_bytes);
     heap_caps_free(units);
-    heap_caps_free(print);
+    heap_caps_free(prints);
     esp_partition_munmap(handle);
     TEST_ASSERT_EQUAL(0, units_off);
-    TEST_ASSERT_TRUE(print_same);
+    TEST_ASSERT_TRUE(prints_same);
     TEST_ASSERT_EQUAL(0, off);
     TEST_ASSERT_EQUAL_MESSAGE(0, (int)t.first_internal_bytes, "a check allocates after load (CLAUDE.md 4.1)");
     TEST_ASSERT_EQUAL_MESSAGE(0, (int)t.first_psram_bytes, "a check allocates after load (CLAUDE.md 4.1)");
