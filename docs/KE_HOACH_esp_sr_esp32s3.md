@@ -2810,7 +2810,7 @@ chính nó tính tải liên tục là 66–81% một nhân và kết luận "m�
 ms mỗi 32 ms (34–56%) vào đó là nhân 1 quá 100% đúng lúc người dùng đang ra lệnh. Đặt `nhan` ở nhân 0
 thì nhân 1 còn ~27% với sàn, tới ~51% với NSNet-16k L (§5.6), và mọi dao động của phần nhận dạng không chạm được vào hạn chót của khung.
 
-Cái giá: `nhan_task` chung nhân với Wi-Fi. Hàng đợi `q_clean` sâu 1 s là thứ trả giá ấy, và điểm cao
+Cái giá: `nhan_task` chung nhân với Wi-Fi. Hàng đợi `q_clean` sâu 2 s là thứ trả giá ấy, và điểm cao
 nhất của nó là con số phải đo ở E14-T6 (TỔNG QUAN V5.7.6). Cao hơn nửa độ sâu thì nới hàng đợi hoặc
 giảm việc trên nhân 0, **không** kéo `nhan` về nhân 1.
 
@@ -2853,7 +2853,9 @@ CPU, còn nhịp 100 ms của `gui_task`, keepalive và sự kiện của esp-mq
 `xac_task` cũng chạy liền ~1,2 s mỗi lệnh, nên đứng dưới mọi task theo nhịp khung hay theo mạng; nó đứng trên việc
 cửa sổ vì lệnh nó xác minh đã được nhận và người dùng đang chờ lệnh ấy, còn câu sau chưa xong. `luong_task` và
 `net_task` cùng mức 3 hầu như luôn chặn, nên không tranh lát thời gian với nó. Một lần chạy b0 giữ IDLE0 ~1,2 s, dưới
-5 s của task watchdog.
+5 s của task watchdog. Nó cũng giữ chính `nhan_task`: lệnh tới `xac_task` từ giữa một đợt việc cửa sổ, lúc `nhan_task`
+còn ở ưu tiên 2, nên `nhan_task` chỉ nạp khung lại khi lần chạy ấy xong. Vì thế `q_clean` sâu 2 s, chứa trọn một lần
+chạy b0 cùng phần khung đang chờ (§5.3).
 
 ### 5.3 Hàng đợi, đệm, khoá, cờ
 
@@ -2864,7 +2866,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 |---|---|---|---|---|---|---|
 | `q_frame` | Queue depth 8, chỉ số ô `uint8_t` + pool 8 khung `int16` ở **RAM nội** | 8 × 1,5 KB | `thu_task` | `sach_task` | không bao giờ đầy: chỉ ô lấy được từ `q_free` mới được gửi | không chép dữ liệu hai lần; pool cấp lúc boot |
 | `q_free` | Queue depth 8, chỉ số ô `uint8_t`, nạp sẵn cả 8 ô lúc boot | 8 B | `sach_task` trả ô đã xử lý xong | `thu_task` lấy ô trước khi đọc DMA | `thu_task` **không chờ**: hết ô thì bỏ khung, tăng `frames_dropped` — con số của Cửa 5 | một ô chỉ có một chủ tại một lúc; thiếu hàng này thì `thu_task` ghi đè ô `sach_task` đang đọc ngay khi `q_frame` vừa có chỗ |
-| `q_clean` | Queue depth **64** (~1 s), `dsp_afe_frame_t` ~530 B, bộ nhớ ở **PSRAM** | ~34 KB | `sach_task` | `nhan_task` | `sach_task` không chờ: bỏ khung, tăng `clean_dropped`; `nhan_task` thấy hở `seq` thì đặt lại STFT và bộ dò cao độ của `svc_listen` (cả trạng thái `wake` khi có), câu đang mở thành `REJECT FRAME_GAP` (§5.4) | đây là chỗ "nạp và lấy không cùng nhịp" của TỔNG QUAN §4.3; điểm cao nhất xuất ra `heartbeat` |
+| `q_clean` | Queue depth **128** (~2 s), `dsp_afe_frame_t` ~530 B, bộ nhớ ở **PSRAM** | ~68 KB | `sach_task` | `nhan_task` | `sach_task` không chờ: bỏ khung, tăng `clean_dropped`; `nhan_task` thấy hở `seq` thì đặt lại STFT và bộ dò cao độ của `svc_listen` (cả trạng thái `wake` khi có), câu đang mở thành `REJECT FRAME_GAP` (§5.4) | đây là chỗ "nạp và lấy không cùng nhịp" của TỔNG QUAN §4.3; điểm cao nhất xuất ra `heartbeat` |
 | `s_afe_stats` | `portMUX_TYPE` + một struct (mức, hướng, cờ, gain, bộ đếm) | ~64 B | `sach_task` | `gui_task` | — ghi đè | số liệu là **mức**, không phải chuỗi sự kiện: `gui_task` chỉ cần giá trị mới nhất mỗi 100 ms. Chép dưới spinlock, vài chục byte, không gọi gì bên trong |
 | `sb_stream` | StreamBuffer ở PSRAM, **chỉ tồn tại khi** `NET_STREAM_ENABLE`; cỡ `SVC_REPORT_STREAM_BUFFER_KB` | 512 KB: ~5 s ở `mode` 5, ~8 s ở `mode` 2 | `sach_task` | `luong_task` | ghi với timeout 0; không đủ chỗ cho **cả khung** thì bỏ cả khung, đếm; không bao giờ ghi nửa khung | một người ghi, một người đọc — đúng hợp đồng của stream buffer. Đường tới máy nhận khựng 0,4–0,8 s vài lần mỗi 10 phút trên board B (`latency.md` §4), quá 64 KB |
 | `q_dialog` | Queue depth 8, `app_event_t`, bộ nhớ ở PSRAM | 8 × 92 B | `nhan_task` | `dieu_task` | chờ 20 ms rồi bỏ, log **một lần** ở cạnh đầy | `nhan_task` không được đứng chờ lâu: sau lưng nó là 1 s đệm đang đầy dần |
@@ -2936,7 +2938,7 @@ giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec`
   giữa hai câu), và khi `q_clean` không có khung chờ, `nhan_task` chạy liền các bước của cửa sổ tới khi có khung mới,
   ở ưu tiên 2 để mọi task ứng dụng khác của nhân 0 chen vào ngay khi có việc (§5.2), và chờ một tick giữa hai đợt để
   IDLE0 chạy. Trong đợt ấy khung mới chỉ được nhận khi xong bước đang chạy và các task 3–9 của nhân 0 nhả CPU, nên
-  không task nào trong số ấy được giữ CPU lâu; `q_clean` 1 s là biên. Chạy mỗi lần một bước và đợi đủ `utterance.min_s` thì từ ngắn chưa đuổi kịp khi câu chốt
+  không task nào trong số ấy được giữ CPU lâu, trừ `xac_task` với một lần chạy b0; `q_clean` 2 s là biên. Chạy mỗi lần một bước và đợi đủ `utterance.min_s` thì từ ngắn chưa đuổi kịp khi câu chốt
   (`measurements/latency.md` §17);
 - cửa sổ dài quá `window_s` thì thôi chạy theo luồng: lúc câu chốt nó lùi từ bước cuối tối đa `window_s`, không qua mốc
   chặn, rồi chạy cả cửa sổ, quyết định chậm cỡ thời gian mạng chạy hết cửa sổ, khoảng 1,2 s 🔬;
