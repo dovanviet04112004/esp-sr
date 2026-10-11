@@ -11,7 +11,7 @@
 #include "sdkconfig.h"
 #include "svc_listen.h"
 
-#define CLEAN_DEPTH 64 // about one second of hops
+#define CLEAN_DEPTH 128 // about 2 s of hops: one b0 run fits (KEHOACH 5.3)
 #define DIALOG_DEPTH 8
 #define CMD_DEPTH 4
 #define CMDSET_DEPTH 1
