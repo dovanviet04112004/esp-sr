@@ -15,6 +15,7 @@
 #include "dsp_spec/fft.h"
 #include "dsp_spec/mel.h"
 #include "dsp_spec/pitch.h"
+#include "dsp_spec/spk_fbank.h"
 #include "dsp_spec/stft.h"
 #include "esp_app_desc.h"
 #include "esp_cpu.h"
@@ -26,6 +27,7 @@
 #include "gen_array.h"
 #include "gen_grid.h"
 #include "gen_listen.h"
+#include "gen_speaker.h"
 #include "lang_vi.h"
 #include "test_report.h"
 
@@ -36,6 +38,9 @@
 #define BENCH_PRIORITY 20
 #define CORE_SACH 1 // sach_task runs dsp_afe (KEHOACH 5.2)
 #define CORE_NHAN 0 // nhan_task computes log-mel (KEHOACH 5.2)
+#define CORE_XAC 0
+#define SPK_WARMUP_WINDOWS 1
+#define SPK_TIMED_WINDOWS 20 // a window is ~0.1 s of work, not a hop's
 #define PCM_FULL_SCALE 32768.0f
 #define REPORT_LINES_MAX 64
 #define NS_LEVEL_HOPS 40 // quiet and loud stretches reach every branch
@@ -67,6 +72,7 @@ typedef struct {
 typedef struct {
     uint64_t sum_cycles;
     uint32_t peak_cycles;
+    uint32_t runs;
 } timing_t;
 
 static float s_hop[GEN_ARRAY_N_MICS][GEN_GRID_HOP_SAMPLES];
@@ -113,6 +119,7 @@ static void timing_add(timing_t *t, uint32_t start)
     const uint32_t cycles = esp_cpu_get_cycle_count() - start;
     t->sum_cycles += cycles;
     t->peak_cycles = cycles > t->peak_cycles ? cycles : t->peak_cycles;
+    t->runs++;
 }
 
 // Past the warm-up, add this hop's cycles; now and then give the core's idle task a tick, outside the timing.
@@ -127,7 +134,7 @@ static void report(const row_t *row, const timing_t *t)
     const float per_us = (float)esp_rom_get_cpu_ticks_per_us();
     test_report_line("csv %s,%d,%u,%u,%u,%.1f,%.1f,%d,%s", row->module, row->core,
                      (unsigned)row->static_bytes, (unsigned)row->hot_bytes, (unsigned)row->cold_bytes,
-                     (double)(t->sum_cycles / (float)TIMED_HOPS / per_us), (double)(t->peak_cycles / per_us),
+                     (double)(t->sum_cycles / (float)t->runs / per_us), (double)(t->peak_cycles / per_us),
                      row->in_total ? 1 : 0, esp_app_get_description()->version);
 }
 
@@ -443,6 +450,41 @@ static void bench_pitch(void)
     heap_caps_free(mem);
 }
 
+// fill_voice's tone as one window; workspace, features and PCM in PSRAM, as xac_task keeps them.
+static void bench_spk_fbank(void)
+{
+    const dsp_spec_spk_fbank_config_t cfg = GEN_SPEAKER_FBANK_CONFIG;
+    char name[ROW_NAME_BYTES];
+    snprintf(name, sizeof(name), "dsp_spec spk_fbank (%u băng) một cửa sổ speaker", (unsigned)cfg.n_bands);
+    row_t row = {.module = name, .core = CORE_XAC};
+    const size_t work_bytes = dsp_spec_spk_fbank_workspace_bytes(&cfg);
+    const size_t features_bytes = dsp_spec_spk_fbank_frames(&cfg) * cfg.n_bands * sizeof(float);
+    row.cold_bytes = work_bytes + features_bytes;
+    void *mem = heap_caps_malloc(work_bytes, MALLOC_CAP_SPIRAM);
+    float *features = heap_caps_malloc(features_bytes, MALLOC_CAP_SPIRAM);
+    int16_t *pcm = heap_caps_malloc(cfg.window_samples * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+    const size_t before = heap_free();
+    dsp_spec_spk_fbank_t *fb = NULL;
+    ESP_ERROR_CHECK(dsp_spec_spk_fbank_init(&fb, &cfg, mem, work_bytes));
+    row.static_bytes = before - heap_free();
+    fill_voice();
+    for (size_t i = 0; i < cfg.window_samples; i++) {
+        const float x = s_voice[(i / GEN_GRID_HOP_SAMPLES) % PITCH_VOICE_HOPS][i % GEN_GRID_HOP_SAMPLES];
+        pcm[i] = (int16_t)lrintf(x * PCM_FULL_SCALE);
+    }
+    timing_t t = {0};
+    for (int w = 0; w < SPK_WARMUP_WINDOWS + SPK_TIMED_WINDOWS; w++) {
+        const uint32_t start = esp_cpu_get_cycle_count();
+        ESP_ERROR_CHECK(dsp_spec_spk_fbank_run(fb, pcm, features));
+        if (w >= SPK_WARMUP_WINDOWS) { timing_add(&t, start); }
+        vTaskDelay(1);
+    }
+    report(&row, &t);
+    heap_caps_free(mem);
+    heap_caps_free(features);
+    heap_caps_free(pcm);
+}
+
 // A tick between benches lets the idle task of the core feed the task watchdog.
 // The chain goes first: dl_fft keeps its tables once made, so the first user of them pays their RAM.
 static void core1_benches(void *done)
@@ -501,6 +543,8 @@ static void core0_benches(void *done)
     bench_mel();
     vTaskDelay(1);
     bench_pitch();
+    vTaskDelay(1);
+    bench_spk_fbank();
     xTaskNotifyGive((TaskHandle_t)done);
     vTaskDelete(NULL);
 }
