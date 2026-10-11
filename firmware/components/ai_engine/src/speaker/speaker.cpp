@@ -29,6 +29,9 @@ struct Speaker {
     float inverse_step;  // 2^-exponent of the input
     const float *cohort; // in place in the mapped image, rows of the output's dims
     size_t cohort_rows;
+    size_t cohort_top;
+    float *cohort_scores;   // a vector's dot product with each row, PSRAM
+    uint16_t *cohort_order; // its rows ranked, PSRAM
     int16_t thresholds[APP_SPEAKERS_MAX];
     uint32_t model_id;
 };
@@ -51,6 +54,8 @@ void speaker_drop() noexcept
     s_net.release();
     heap_caps_free(s.fbank_mem);
     heap_caps_free(s.features);
+    heap_caps_free(s.cohort_scores);
+    heap_caps_free(s.cohort_order);
     s = Speaker{};
 }
 
@@ -70,26 +75,32 @@ esp_err_t speaker_load() noexcept
         speaker_drop();
         return ESP_ERR_INVALID_SIZE;
     }
-    // Without its cohort no voiceprint can be scored, so the branch stays off as with a foreign hash
-    // (ADR-0022).
+    // Without its cohort, or a top within it, no voiceprint can be scored, so the branch stays off as with a
+    // foreign hash (ADR-0023).
     const Blob cohort = image_find(kCohortEntry, STORAGE_MODEL_KIND_COHORT);
     const size_t row_bytes = s.out.elements * sizeof(float);
-    if (cohort.data == nullptr || cohort.size == 0 || cohort.size % row_bytes != 0) {
-        ESP_LOGE(TAG, "%s: no cohort of %u-float rows in the image, %u bytes found", kEntry,
-                 (unsigned)s.out.elements, (unsigned)cohort.size);
+    const size_t rows = cohort.size / row_bytes;
+    const size_t top = image_speaker_cohort_top();
+    if (cohort.data == nullptr || rows == 0 || cohort.size % row_bytes != 0 || rows > UINT16_MAX ||
+        top == 0 || top > rows) {
+        ESP_LOGE(TAG, "%s: no cohort of %u-float rows with a top in it: %u bytes, top %u", kEntry,
+                 (unsigned)s.out.elements, (unsigned)cohort.size, (unsigned)top);
         speaker_drop();
         return ESP_OK;
     }
     s.cohort = reinterpret_cast<const float *>(cohort.data);
-    s.cohort_rows = cohort.size / row_bytes;
+    s.cohort_rows = rows;
+    s.cohort_top = top;
     const dsp_spec_spk_fbank_config_t cfg = GEN_SPEAKER_FBANK_CONFIG;
     const size_t bytes = dsp_spec_spk_fbank_workspace_bytes(&cfg);
     s.fbank_mem = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
     s.features = static_cast<float *>(heap_caps_malloc(kFeatures * sizeof(float), MALLOC_CAP_SPIRAM));
-    if (s.fbank_mem == nullptr || s.features == nullptr ||
-        dsp_spec_spk_fbank_init(&s.fbank, &cfg, s.fbank_mem, bytes) != ESP_OK) {
+    s.cohort_scores = static_cast<float *>(heap_caps_malloc(rows * sizeof(float), MALLOC_CAP_SPIRAM));
+    s.cohort_order = static_cast<uint16_t *>(heap_caps_malloc(rows * sizeof(uint16_t), MALLOC_CAP_SPIRAM));
+    if (s.fbank_mem == nullptr || s.features == nullptr || s.cohort_scores == nullptr ||
+        s.cohort_order == nullptr || dsp_spec_spk_fbank_init(&s.fbank, &cfg, s.fbank_mem, bytes) != ESP_OK) {
         ESP_LOGE(TAG, "%s: no front end, %u B of PSRAM asked", kEntry,
-                 (unsigned)(bytes + kFeatures * sizeof(float)));
+                 (unsigned)(bytes + kFeatures * sizeof(float) + rows * (sizeof(float) + sizeof(uint16_t))));
         speaker_drop();
         return ESP_ERR_NO_MEM;
     }
@@ -99,12 +110,13 @@ esp_err_t speaker_load() noexcept
     }
     s.model_id = image_entry_id(kEntry, STORAGE_MODEL_KIND_ESPDL);
     s.ready = true;
-    ESP_LOGI(TAG,
-             "%s: %u frames x %u bands to %u dims, cohort of %u, threshold %d to %d milli-z for 1 to %d "
-             "voiceprints, model %08x",
-             kEntry, (unsigned)GEN_SPEAKER_N_FRAMES, (unsigned)GEN_SPEAKER_N_BANDS, (unsigned)s.out.elements,
-             (unsigned)s.cohort_rows, s.thresholds[0], s.thresholds[APP_SPEAKERS_MAX - 1], APP_SPEAKERS_MAX,
-             (unsigned)s.model_id);
+    ESP_LOGI(
+        TAG,
+        "%s: %u frames x %u bands to %u dims, cohort of %u, top %u, threshold %d to %d thousandths for 1 "
+        "to %d voiceprints, model %08x",
+        kEntry, (unsigned)GEN_SPEAKER_N_FRAMES, (unsigned)GEN_SPEAKER_N_BANDS, (unsigned)s.out.elements,
+        (unsigned)s.cohort_rows, (unsigned)s.cohort_top, s.thresholds[0], s.thresholds[APP_SPEAKERS_MAX - 1],
+        APP_SPEAKERS_MAX, (unsigned)s.model_id);
     return ESP_OK;
 }
 
@@ -139,14 +151,20 @@ esp_err_t ai_engine_speaker_norm(const float *voiceprint, float *mean, float *st
 {
     if (voiceprint == nullptr || mean == nullptr || std == nullptr) { return ESP_ERR_INVALID_ARG; }
     if (!s.ready) { return ESP_ERR_INVALID_STATE; }
-    ai_engine_speaker_norm_of(voiceprint, s.cohort, s.cohort_rows, s.out.elements, mean, std);
+    ai_engine_speaker_norm_of(voiceprint, s.cohort, s.cohort_rows, s.out.elements, s.cohort_top,
+                              s.cohort_scores, s.cohort_order, mean, std);
     return ESP_OK;
 }
 
 int16_t ai_engine_speaker_best(const float *unit, const float *prints, const float *means, const float *stds,
                                size_t n, size_t *index, int16_t *cosine_permille)
 {
-    return ai_engine_speaker_best_z(unit, prints, means, stds, n, s.out.elements, index, cosine_permille);
+    if (!s.ready) { n = 0; }
+    float unit_mean = 0.0f;
+    float unit_std = 1.0f;
+    if (n > 0) { ai_engine_speaker_norm(unit, &unit_mean, &unit_std); }
+    return ai_engine_speaker_best_as(unit, prints, means, stds, n, s.out.elements, unit_mean, unit_std, index,
+                                     cosine_permille);
 }
 
 void ai_engine_speaker_voiceprint(const float *units, size_t n, float *voiceprint)

@@ -128,24 +128,24 @@ size_t ai_engine_speaker_dims(void);
  */
 void ai_engine_speaker_voiceprint(const float *units, size_t n, float *voiceprint);
 
-/** A voiceprint's mean and deviation over the image's cohort of strangers, which ai_engine_speaker_best
- * scores it by (ADR-0022).
- *  @ctx task | blocking: reads the cohort in place from flash | caller owns voiceprint, mean and std
+/** A voiceprint's or an embedding's mean and deviation over the top rows of the image's cohort of strangers,
+ * which ai_engine_speaker_best scores by (ADR-0023).
+ *  @ctx task | blocking: reads the cohort in place from flash | one task, the scratch is shared with best
  *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_STATE no speaker in the image
  */
 esp_err_t ai_engine_speaker_norm(const float *voiceprint, float *mean, float *std);
 
-/** The highest normalised score of unit over n voiceprints, rows of ai_engine_speaker_dims() floats with the
- * means and deviations ai_engine_speaker_norm gave them: thousandths of z, in index the row that gave it, the
- * lowest on a tie, in cosine_permille that row's cosine (KEHOACH 3.17).
- *  @ctx any | non-blocking | caller owns every pointer
- *  @ret the score; -32767 with index 0 and cosine -1000 when n is 0
+/** The highest AS-norm score of unit over n voiceprints, rows of ai_engine_speaker_dims() floats with the
+ * means and deviations ai_engine_speaker_norm gave them, in thousandths; in index the row that gave it, the
+ * lowest on a tie, in cosine_permille that row's cosine (KEHOACH 3.17, ADR-0023).
+ *  @ctx task | blocking: reads the cohort for unit's own | the task that calls ai_engine_speaker_norm
+ *  @ret the score; -32767 with index 0 and cosine -1000 when n is 0 or there is no speaker
  */
 int16_t ai_engine_speaker_best(const float *unit, const float *prints, const float *means, const float *stds,
                                size_t n, size_t *index, int16_t *cosine_permille);
 
-/** Whether a best score over prints voiceprints, thousandths of z, reaches the image's threshold for that
- * many (KEHOACH 3.17, 6.3).
+/** Whether a best score over prints voiceprints, thousandths of the AS-norm score, reaches the image's
+ * threshold for that many (KEHOACH 3.17, 6.3).
  *  @ctx any | non-blocking
  *  @ret false with no voiceprint, or more than APP_SPEAKERS_MAX
  */

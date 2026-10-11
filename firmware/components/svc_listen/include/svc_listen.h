@@ -106,9 +106,9 @@ esp_err_t svc_listen_hold(const svc_listen_decision_t *decision, uint8_t slot);
  */
 void svc_listen_busy_reject(svc_listen_decision_t *decision);
 
-/** Check the speaker of the slot's COMMAND: one run of b0, the best Z-norm score over the voiceprints, the
+/** Check the speaker of the slot's COMMAND: one run of b0, the best AS-norm score over the voiceprints, the
  * decision with the best one's id and cosine; an enrolment takes the command instead, REJECT
- * SPEAKER_ENROLLING (KEHOACH 3.17, ADR-0022).
+ * SPEAKER_ENROLLING (KEHOACH 3.17, ADR-0023).
  *  @ctx xac_task | blocking about 1.2 s of core 0; writes NVS when an enrolment ends | the caller holds slot
  *  @ret ESP_OK, out filled | ESP_ERR_INVALID_ARG | APP_ERR_SPEAKERS_NOT_SAVED a voiceprint in use, not in NVS
  */

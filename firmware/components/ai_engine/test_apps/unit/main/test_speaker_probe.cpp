@@ -60,8 +60,10 @@ struct ChainWindow {
     int32_t best; // the voiceprint giving the score
     int32_t passes;
     int32_t cosine_permille; // of that voiceprint
+    float mean;              // the window's own over the cohort's top
+    float std;
 };
-static_assert(sizeof(ChainHead) == 20 && sizeof(ChainWindow) == 20, "speaker_chain.bin layout");
+static_assert(sizeof(ChainHead) == 20 && sizeof(ChainWindow) == 28, "speaker_chain.bin layout");
 enum ChainKind : uint32_t { kEnrol = 0, kOwner, kImpostor, kMember };
 
 esp_err_t test_of(const ai::Blob &blob, bool profiled)
@@ -233,7 +235,7 @@ TEST_CASE("the speaker chain enrols a full roster and scores every window agains
     const auto *bytes = static_cast<const uint8_t *>(mapped);
     ChainHead head;
     memcpy(&head, bytes, sizeof(head));
-    if (memcmp(head.magic, "SRSZ", sizeof(head.magic)) != 0) {
+    if (memcmp(head.magic, "SRSA", sizeof(head.magic)) != 0) {
         esp_partition_munmap(handle);
         TEST_IGNORE_MESSAGE(
             "voice holds no speaker roster chain: make ai-unit-speaker RUN=<run> ROW=<row> CHAIN=1");
@@ -271,11 +273,15 @@ TEST_CASE("the speaker chain enrols a full roster and scores every window agains
     }
     const size_t record =
         sizeof(ChainWindow) + GEN_SPEAKER_WINDOW_SAMPLES * sizeof(int16_t) + dims * sizeof(float);
-    uint32_t off = 0, tried[4] = {0}, passed[4] = {0}, theirs = 0;
+    uint32_t off = 0, tried[4] = {0}, passed[4] = {0}, theirs[4] = {0}, own_norms_off = 0;
     for (uint32_t i = 0; i < head.windows; i++) {
         ChainWindow want;
         memcpy(&want, at + i * record, sizeof(want));
         if (want.kind == kEnrol) { continue; }
+        float mean = 0.0f, std = 0.0f;
+        TEST_ASSERT_EQUAL(ESP_OK, ai_engine_speaker_norm(units + i * dims, &mean, &std));
+        own_norms_off +=
+            memcmp(&mean, &want.mean, sizeof(float)) != 0 || memcmp(&std, &want.std, sizeof(float)) != 0;
         size_t best = 0;
         int16_t cosine = 0;
         const int16_t score =
@@ -285,22 +291,26 @@ TEST_CASE("the speaker chain enrols a full roster and scores every window agains
                cosine != want.cosine_permille;
         tried[want.kind]++;
         passed[want.kind] += passes;
-        theirs += want.kind == kOwner ? best == 0 : 0;
+        // Members test in roster order, so the n-th member's window belongs to voiceprint n.
+        const uint32_t own = want.kind == kMember ? tried[kMember] : 0;
+        theirs[want.kind] += (want.kind == kOwner || want.kind == kMember) && best == own;
         printf("speaker chain window %" PRIu32 ", kind %" PRIu32
                ": best %d milli-z of voiceprint %u, cosine %d, "
                "python %" PRId32 " of %" PRId32 ", cosine %" PRId32 ", %s\n",
                i, want.kind, score, (unsigned)best, cosine, want.milli_z, want.best, want.cosine_permille,
                passes ? "passes" : "stopped");
     }
-    printf("speaker chain: %" PRIu32 " windows, %" PRIu32 " units, %" PRIu32 " norms and %" PRIu32
-           " decisions off python, %" PRIu32 " voiceprints %s; at %d milli-z owner %" PRIu32 "/%" PRIu32
-           " (%" PRIu32 " best on their own), member %" PRIu32 "/%" PRIu32 ", impostor %" PRIu32 "/%" PRIu32
-           " passed; embed %" PRId64 " us mean, %" PRId64 " us peak after the first, %" PRId64
-           " us; front end %" PRId64 " us mean\n",
-           head.windows, units_off, norms_off, off, head.prints, prints_same ? "same" : "differ",
-           ai::image_speaker_threshold_milli_z(head.prints), passed[kOwner], tried[kOwner], theirs,
-           passed[kMember], tried[kMember], passed[kImpostor], tried[kImpostor],
-           t.embed_us / (head.windows - 1), t.embed_peak_us, t.first_us, t.front_us / head.windows);
+    printf("speaker chain: %" PRIu32 " windows, %" PRIu32 " units, %" PRIu32 " voiceprint norms, %" PRIu32
+           " window norms and %" PRIu32 " decisions off python, %" PRIu32
+           " voiceprints %s; at %d milli-z owner %" PRIu32 "/%" PRIu32 " (%" PRIu32
+           " best on their own), member %" PRIu32 "/%" PRIu32 " (%" PRIu32
+           " best on their own), impostor %" PRIu32 "/%" PRIu32 " passed; embed %" PRId64 " us mean, %" PRId64
+           " us peak after the first, %" PRId64 " us; front end %" PRId64 " us mean\n",
+           head.windows, units_off, norms_off, own_norms_off, off, head.prints,
+           prints_same ? "same" : "differ", ai::image_speaker_threshold_milli_z(head.prints), passed[kOwner],
+           tried[kOwner], theirs[kOwner], passed[kMember], tried[kMember], theirs[kMember], passed[kImpostor],
+           tried[kImpostor], t.embed_us / (head.windows - 1), t.embed_peak_us, t.first_us,
+           t.front_us / head.windows);
     printf("speaker chain: the first check after load kept %" PRId64 " B internal and %" PRId64 " B PSRAM\n",
            t.first_internal_bytes, t.first_psram_bytes);
     heap_caps_free(units);
@@ -309,6 +319,7 @@ TEST_CASE("the speaker chain enrols a full roster and scores every window agains
     TEST_ASSERT_EQUAL(0, units_off);
     TEST_ASSERT_TRUE(prints_same);
     TEST_ASSERT_EQUAL(0, norms_off);
+    TEST_ASSERT_EQUAL(0, own_norms_off);
     TEST_ASSERT_EQUAL(0, off);
     TEST_ASSERT_EQUAL_MESSAGE(0, (int)t.first_internal_bytes, "a check allocates after load (CLAUDE.md 4.1)");
     TEST_ASSERT_EQUAL_MESSAGE(0, (int)t.first_psram_bytes, "a check allocates after load (CLAUDE.md 4.1)");

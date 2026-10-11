@@ -37,7 +37,7 @@ typedef struct __attribute__((packed)) {
     uint32_t first, last;
     int16_t command;
     uint16_t score, margin, gap, syllable;
-    int16_t speaker;       // the check's thousandths of z, or commands enrolled
+    int16_t speaker;       // the check's AS-norm milli-z, or commands enrolled
     int16_t cosine;        // of the voiceprint giving that score
     uint16_t speaker_code; // CHECK_*
 } window_t;
