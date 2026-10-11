@@ -25,6 +25,10 @@ extern "C" {
 #define APP_CODE_COMMANDS_INVALID "COMMANDS_INVALID"     // with commandId: the line lang_vi cannot read
 #define APP_CODE_COMMANDS_REFUSED "COMMANDS_REFUSED"     // this image cannot take a new set
 #define APP_CODE_COMMANDS_NOT_SAVED "COMMANDS_NOT_SAVED" // in use until reboot, set.json old
+#define APP_CODE_SPEAKER "SPEAKER"                       // the speaker scored under the threshold
+#define APP_CODE_SPEAKER_BUSY "SPEAKER_BUSY"             // no verify slot free, or the audio left the ring
+#define APP_CODE_SPEAKER_UNENROLLED "SPEAKER_UNENROLLED" // checking on, no voiceprint of this model
+#define APP_CODE_SPEAKER_ENROLLING "SPEAKER_ENROLLING"   // the command enrolled, not executed
 
 #ifdef __cplusplus
 }

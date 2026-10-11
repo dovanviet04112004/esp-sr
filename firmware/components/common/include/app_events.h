@@ -43,7 +43,9 @@ typedef struct {
     uint32_t seq; // frame seq the decision rests on
     uint16_t score_permille;
     uint16_t margin_permille;
-    int16_t doa_deg; // -1 when unknown
+    int16_t doa_deg;          // -1 when unknown
+    int16_t speaker_permille; // the speaker check's score, valid with has_speaker
+    bool has_speaker;
     char command_id[APP_EVT_ID_MAX_BYTES];
     char code[APP_EVT_CODE_MAX_BYTES]; // upper-case code, e.g. LOW_MARGIN
 } app_event_t;

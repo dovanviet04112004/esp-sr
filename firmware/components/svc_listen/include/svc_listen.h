@@ -1,7 +1,8 @@
 /** The nhan half of the listener (KEHOACH 3.12, 5.2, 5.4): log-mel of every clean hop and, on an image
  * without wake, a command window for each utterance vad finds, cut as Gate 3 cuts it, stepped through
- * ai_engine while the utterance runs and decided once it closes. Memory is taken once in init; every
- * other call belongs to nhan_task.
+ * ai_engine while the utterance runs and decided once it closes. With speaker in the image, xac_task checks
+ * the speaker of each command through the verify calls (KEHOACH 3.17). Memory is taken once in init; every
+ * other call belongs to nhan_task, the verify and speaker calls to xac_task.
  */
 #pragma once
 
@@ -15,6 +16,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#define SVC_LISTEN_VERIFY_SLOTS 2 // windows waiting for xac_task, in PSRAM (KEHOACH 5.3)
 
 typedef struct {
     const char *const *texts; // command lines, UTF-8; read, not kept
@@ -38,13 +41,21 @@ typedef struct {
     uint16_t syllable_gap_permille; // free loop over its worst syllable
     uint32_t work_us;               // network and score of the window
     uint32_t close_us;              // from the utterance's close to the decision
+    uint32_t verify_us;             // the speaker check, 0 without one
 } svc_listen_decision_t;
 
-/** Read the commands through lang_vi and prepare ai_engine on them; take the front end, rings and tables.
- *  @ctx task | blocking, allocates in PSRAM | once at boot after ai_engine_load, ahead of nhan_task
- *  @ret ESP_OK | ESP_ERR_INVALID_STATE second call | ESP_ERR_NOT_SUPPORTED no command in the image |
- *       ESP_ERR_INVALID_SIZE a model of other bands than listen.yaml | ESP_ERR_INVALID_ARG | ESP_ERR_NO_MEM |
- *       APP_ERR_COMMANDS_INVALID a line lang_vi cannot read | ai_engine_command_prepare's error
+typedef enum {
+    SVC_LISTEN_SPEAKER_ENROL = 0, // the next commands become the voiceprint
+    SVC_LISTEN_SPEAKER_ON,
+    SVC_LISTEN_SPEAKER_OFF,
+    SVC_LISTEN_SPEAKER_CLEAR, // erase the voiceprint (KEHOACH 1.4)
+} svc_listen_speaker_ctl_t;
+
+/** Read the commands, prepare ai_engine, take the rings and tables, and with speaker the PCM ring, the verify
+ *  slots and NVS speaker/ (KEHOACH 3.17).
+ *  @ctx task | blocking, allocates in PSRAM | once at boot after ai_engine_load, ahead of every task
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE | ESP_ERR_NOT_SUPPORTED no command | ESP_ERR_INVALID_SIZE bands |
+ *       ESP_ERR_INVALID_ARG | ESP_ERR_NO_MEM | APP_ERR_COMMANDS_INVALID | ai_engine_command_prepare's error
  */
 esp_err_t svc_listen_init(const svc_listen_config_t *cfg);
 
@@ -61,7 +72,7 @@ esp_err_t svc_listen_set_commands(const svc_listen_commands_t *commands, uint16_
  */
 uint32_t svc_listen_commands_version(void);
 
-/** Take one clean hop into the ring with its log-mel and pitch; vad opens, extends or closes a window.
+/** Take one clean hop into the rings with its log-mel and pitch; vad opens, extends or closes a window.
  *  A jump in seq, or gap (the chain broke ahead of this hop), starts afresh: STFT and pitch reset, no window
  *  reaches across, and the open window, its audio holed, is decided REJECT FRAME_GAP unscored (KEHOACH 5.4).
  *  @ctx nhan_task | non-blocking, about 2 ms of pitch | pcm holds GEN_GRID_HOP_SAMPLES samples, copied
@@ -84,6 +95,35 @@ bool svc_listen_busy(void);
  *  @ret true with out filled once the window is decided; false otherwise, or on an error that drops it
  */
 bool svc_listen_work(svc_listen_decision_t *out);
+
+/** Whether a COMMAND goes to xac_task: speaker in the image, and checking on or an enrolment running.
+ *  @ctx nhan_task | non-blocking | reads a flag xac_task writes
+ */
+bool svc_listen_verifies(void);
+
+/** Copy a COMMAND and the last GEN_SPEAKER_WINDOW_SAMPLES of its window's clean PCM into a verify slot.
+ *  @ctx nhan_task | non-blocking | the caller holds slot, taken from q_verify_free, and hands it to q_verify
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_NOT_FOUND the ring moved past the window's tail
+ */
+esp_err_t svc_listen_hold(const svc_listen_decision_t *decision, uint8_t slot);
+
+/** Turn a COMMAND no slot could take into REJECT SPEAKER_BUSY, its command id kept.
+ *  @ctx nhan_task | non-blocking
+ */
+void svc_listen_busy_reject(svc_listen_decision_t *decision);
+
+/** Check the speaker of the slot's COMMAND: one run of b0, the score against the voiceprint, the decision;
+ * during an enrolment the command enrols instead and is decided REJECT SPEAKER_ENROLLING (KEHOACH 3.17).
+ *  @ctx xac_task | blocking about 1.2 s of core 0; writes NVS when an enrolment ends | the caller holds slot
+ */
+void svc_listen_verify(uint8_t slot, svc_listen_decision_t *out);
+
+/** Act on a console request: enrol the next commands, check on or off, erase the voiceprint; NVS keeps the
+ * flag.
+ *  @ctx xac_task | blocking on flash
+ *  @ret ESP_OK | ESP_ERR_NOT_SUPPORTED no speaker in the image | ESP_ERR_INVALID_ARG | sys_storage's error
+ */
+esp_err_t svc_listen_speaker(svc_listen_speaker_ctl_t ctl);
 
 #ifdef __cplusplus
 }
