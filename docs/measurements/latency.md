@@ -805,3 +805,42 @@ trung bình). Bản dò chạy hàng `timing` của run, dựng `UNIT_PROFILE=ct
   900 s rồi báo hết hạn; các lượt còn lại không chạy. Console in theo kiểu chờ FIFO, nên CPU dừng giữa `printf`, hoặc
   đường USB/IP ngừng chuyển; dmesg không có lỗi `vhci_hcd` lúc ấy, và esptool nối lại được ngay sau đó. Cùng đoạn mã
   qua ở lần đo 08/10. Chưa rõ gốc, chưa coi là qua (TASKS E11-T30).
+
+## 27. `speaker` trên chip trong chuỗi: từ PCM tới quyết định (E11-T26)
+
+Đo ngày 11/10 trên board B bằng `make ai-unit-speaker RUN=artifacts/speaker/runs/20261010_5a45475-dirty_94e5a9 ROW=kl
+CHAIN=1` (`1fb1725`). Ảnh model xếp như `pack_models --lock`: mục `speaker` là `speaker.espdl` đã deploy (sha256
+`c3373e4e…`), cờ để ở flash; header mang `speaker_hash` `0xd94df25c` và ngưỡng 744 ‰. Ca `[speaker_chain]` đi đúng
+đường của `xac_task`: 24 000 mẫu PCM → `spk_fbank` → lưới int8 của đầu vào → b0 → độ dài đơn vị → mẫu giọng → điểm.
+
+| Đo | Kết quả |
+|---|---|
+| Cửa sổ | 22: 10 cửa sổ đăng ký (phiên 28/09, 1 m); 6 cửa sổ của chủ repo lấy lần lượt từ ba phiên còn lại; 6 người lạ khác nhau, mỗi người một cửa sổ ngoài bộ hiệu chuẩn |
+| So Python trên đường chip | 0/22 embedding lệch, mẫu giọng trùng từng bit, 0/12 điểm và quyết định lệch |
+| Chủ repo qua | 6/6, điểm 839–882 ‰ |
+| Người lạ lọt | 0/6, điểm 582–728 ‰ |
+| Một lần xác minh, `ai_engine_speaker_embed` | **1273,0 ms** trung bình, 1273,4 ms đỉnh |
+| trong đó `spk_fbank` | 96,3 ms trung bình |
+| Riêng mạng b0, ca `[speaker]`, trọng số ở flash, 10 lần | 1174,6 ms; PSRAM cho tensor 2 134 920 B |
+
+- Ngoài mạng và `spk_fbank`, phần còn lại là lượng tử đầu vào và độ dài đơn vị, cỡ 2 ms.
+- Người lạ gần ngưỡng nhất ở 728 ‰, dưới ngưỡng 16 ‰.
+
+**Cờ tắt, `make listen-unit`** (11/10 10:59–11:46, `46592aa`). Ảnh model do `pack_models --lock` ghi, có cả mục
+`speaker`: 5,25 MB, trong đó 3373 KB chép vào PSRAM, còn `speaker` để ở flash. Mỗi lượt tự tắt cờ, bất kể NVS đang
+giữ gì.
+
+| Đo | Kết quả |
+|---|---|
+| Cửa sổ trùng Python từng trường | **336/336**, bảy lượt đều `0 decided otherwise than python` |
+| Ca `FRAME_GAP` và ca click | qua cả bảy lượt |
+| Quyết định sau bước chốt, trung bình mỗi lượt | 61–91 ms |
+| Đỉnh ở lượt không có cửa sổ cắt lùi / ở cửa sổ cắt lùi | 69 ms / 1,01 s |
+| Việc của một cửa sổ, trung bình mỗi lượt / đỉnh | 614–753 ms / 1,00 s |
+| Lúc nạp: dựng b0, gồm một lần chạy thử | 1784 ms, PSRAM 2 134 924 B |
+| Lúc nạp: `spk_fbank_init` | ~490 ms |
+
+- Mọi con số trùng §26. Vậy có `speaker` trong ảnh mà cờ tắt thì Cửa 3 không đổi.
+- Lượt 1 mất byte ở hai dòng in dồn cuối phiên, trong đó có dòng tổng kết, trên đường USB/IP (TASKS E11-T30). Dòng
+  `PASS` và `3 Tests 0 Failures` của lượt ấy vẫn nguyên.
+- `spk_fbank_init` tính `log10` kiểu double mềm cho mỗi cặp băng và vạch, 72 × 255 lần.
