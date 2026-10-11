@@ -84,5 +84,11 @@ def test_the_log_keeps_one_line_per_message_and_counts_rejects(tmp_path: Path) -
 
 def test_filters_cover_every_up_topic_and_no_down_topic() -> None:
     every = mqtt_rx.up_filters(None)
-    assert [f for f, _ in every] == ["sr/+/up/status", "sr/+/up/heartbeat", "sr/+/up/telemetry", "sr/+/up/event"]
+    assert [f for f, _ in every] == [
+        "sr/+/up/status",
+        "sr/+/up/heartbeat",
+        "sr/+/up/telemetry",
+        "sr/+/up/event",
+        "sr/+/up/speakers",
+    ]
     assert all(f.startswith(f"sr/{DEVICE}/up/") for f, _ in mqtt_rx.up_filters(DEVICE))

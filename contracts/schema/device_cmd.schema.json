@@ -15,7 +15,8 @@
         "SET_STREAM",
         "SPEAK",
         "CALIBRATE",
-        "REBOOT"
+        "REBOOT",
+        "SPEAKER_ENROL"
       ]
     },
     "requestId": {
@@ -66,6 +67,11 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 128
+    },
+    "speakerId": {
+      "type": "string",
+      "pattern": "^spk_[0-9]{3}$",
+      "maxLength": 7
     }
   },
   "allOf": [
@@ -109,6 +115,20 @@
       "then": {
         "required": [
           "text"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "op": {
+            "const": "SPEAKER_ENROL"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "speakerId"
         ]
       }
     }

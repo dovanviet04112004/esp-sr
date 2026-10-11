@@ -16,6 +16,8 @@
     "code": {"type": "string", "pattern": "^[A-Z0-9_]{1,32}$", "maxLength": 32},
     "doaDeg": {"type": "integer", "minimum": -1, "maximum": 180},
     "speakerPermille": {"type": "integer", "minimum": -1000, "maximum": 1000},
+    "speakerId": {"type": "string", "pattern": "^spk_[0-9]{3}$", "maxLength": 7},
+    "enrolCount": {"type": "integer", "minimum": 1, "maximum": 255},
     "ts": {"type": "integer", "minimum": 0, "maximum": 4294967295}
   },
   "allOf": [

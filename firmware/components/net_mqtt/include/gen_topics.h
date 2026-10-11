@@ -26,8 +26,10 @@ typedef enum {
     GEN_TOPIC_EVENT = 3,
     GEN_TOPIC_CMD = 4,
     GEN_TOPIC_COMMANDS = 5,
-    GEN_TOPIC_OTA = 6,
-    GEN_TOPIC_COUNT = 7,
+    GEN_TOPIC_SPEAKERS = 6,
+    GEN_TOPIC_ROSTER = 7,
+    GEN_TOPIC_OTA = 8,
+    GEN_TOPIC_COUNT = 9,
     GEN_TOPIC_NONE = GEN_TOPIC_COUNT,
 } gen_topic_id_t;
 
@@ -47,6 +49,8 @@ static const gen_topic_info_t GEN_TOPIC_INFO[GEN_TOPIC_COUNT] = {
     [GEN_TOPIC_EVENT] = {"sr/", "/up/event", 1, false, true, false},
     [GEN_TOPIC_CMD] = {"sr/", "/down/cmd", 1, false, false, false},
     [GEN_TOPIC_COMMANDS] = {"sr/", "/down/commands", 1, true, false, false},
+    [GEN_TOPIC_SPEAKERS] = {"sr/", "/down/speakers", 1, true, false, false},
+    [GEN_TOPIC_ROSTER] = {"sr/", "/up/speakers", 1, true, true, false},
     [GEN_TOPIC_OTA] = {"sr/", "/down/ota", 1, false, false, false},
 };
 
@@ -133,6 +137,22 @@ static inline bool gen_topic_cmd(const char *device_id, char *out, size_t cap)
 static inline bool gen_topic_commands(const char *device_id, char *out, size_t cap)
 {
     return gen_topic_build(GEN_TOPIC_COMMANDS, device_id, out, cap);
+}
+
+/** gen_topic_build fixed to GEN_TOPIC_SPEAKERS.
+ *  @ctx any | non-blocking | caller owns out
+ */
+static inline bool gen_topic_speakers(const char *device_id, char *out, size_t cap)
+{
+    return gen_topic_build(GEN_TOPIC_SPEAKERS, device_id, out, cap);
+}
+
+/** gen_topic_build fixed to GEN_TOPIC_ROSTER.
+ *  @ctx any | non-blocking | caller owns out
+ */
+static inline bool gen_topic_roster(const char *device_id, char *out, size_t cap)
+{
+    return gen_topic_build(GEN_TOPIC_ROSTER, device_id, out, cap);
 }
 
 /** gen_topic_build fixed to GEN_TOPIC_OTA.

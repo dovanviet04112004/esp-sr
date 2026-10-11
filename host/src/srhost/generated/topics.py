@@ -31,6 +31,8 @@ TOPICS = (
     Topic("event", "sr/{deviceId}/up/event", "up", 1, False, "event", False),
     Topic("cmd", "sr/{deviceId}/down/cmd", "down", 1, False, "device_cmd", False),
     Topic("commands", "sr/{deviceId}/down/commands", "down", 1, True, "command_set", False),
+    Topic("speakers", "sr/{deviceId}/down/speakers", "down", 1, True, "speaker_set", False),
+    Topic("roster", "sr/{deviceId}/up/speakers", "up", 1, True, "speaker_roster", False),
     Topic("ota", "sr/{deviceId}/down/ota", "down", 1, False, "ota_manifest", False),
 )
 BY_ID = {t.id: t for t in TOPICS}

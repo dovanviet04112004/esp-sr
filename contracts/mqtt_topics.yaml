@@ -12,4 +12,6 @@ topics:
   - {id: event, path: "sr/{deviceId}/up/event", direction: up, qos: 1, retain: false, schema: event}
   - {id: cmd, path: "sr/{deviceId}/down/cmd", direction: down, qos: 1, retain: false, schema: device_cmd}
   - {id: commands, path: "sr/{deviceId}/down/commands", direction: down, qos: 1, retain: true, schema: command_set}
+  - {id: speakers, path: "sr/{deviceId}/down/speakers", direction: down, qos: 1, retain: true, schema: speaker_set}
+  - {id: roster, path: "sr/{deviceId}/up/speakers", direction: up, qos: 1, retain: true, schema: speaker_roster}
   - {id: ota, path: "sr/{deviceId}/down/ota", direction: down, qos: 1, retain: false, schema: ota_manifest}

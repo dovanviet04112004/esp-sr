@@ -128,7 +128,8 @@ typedef enum {
     DEVICE_CMD_OP_SPEAK = 2,
     DEVICE_CMD_OP_CALIBRATE = 3,
     DEVICE_CMD_OP_REBOOT = 4,
-    DEVICE_CMD_OP_COUNT = 5,
+    DEVICE_CMD_OP_SPEAKER_ENROL = 5,
+    DEVICE_CMD_OP_COUNT = 6,
 } device_cmd_op_t;
 
 /** Contract spelling of a value; "" when it is out of range.
@@ -142,6 +143,7 @@ static inline const char *device_cmd_op_str(device_cmd_op_t v)
     case DEVICE_CMD_OP_SPEAK: return "SPEAK";
     case DEVICE_CMD_OP_CALIBRATE: return "CALIBRATE";
     case DEVICE_CMD_OP_REBOOT: return "REBOOT";
+    case DEVICE_CMD_OP_SPEAKER_ENROL: return "SPEAKER_ENROL";
     default: return "";
     }
 }
@@ -158,6 +160,7 @@ static inline bool device_cmd_op_parse(const char *s, device_cmd_op_t *out)
     if (strcmp(s, "SPEAK") == 0) { *out = DEVICE_CMD_OP_SPEAK; return true; }
     if (strcmp(s, "CALIBRATE") == 0) { *out = DEVICE_CMD_OP_CALIBRATE; return true; }
     if (strcmp(s, "REBOOT") == 0) { *out = DEVICE_CMD_OP_REBOOT; return true; }
+    if (strcmp(s, "SPEAKER_ENROL") == 0) { *out = DEVICE_CMD_OP_SPEAKER_ENROL; return true; }
     return false;
 }
 
@@ -242,11 +245,13 @@ typedef struct {
     int32_t value;
     device_cmd_stream_t stream;
     char text[513];
+    char speaker_id[8];
     bool has_request_id;
     bool has_key;
     bool has_value;
     bool has_stream;
     bool has_text;
+    bool has_speaker_id;
 } device_cmd_t;
 
 /** Fill out from a parsed device_cmd object, checking type, range, enum and size.
@@ -298,6 +303,13 @@ static inline bool device_cmd_from_json(const cJSON *root, device_cmd_t *out)
         strcpy(out->text, item->valuestring);
         out->has_text = true;
     }
+    item = cJSON_GetObjectItemCaseSensitive(root, "speakerId");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->speaker_id)) { return false; }
+        strcpy(out->speaker_id, item->valuestring);
+        out->has_speaker_id = true;
+    }
     return true;
 }
 
@@ -325,6 +337,9 @@ static inline cJSON *device_cmd_to_json(const device_cmd_t *in)
     }
     if (in->has_text) {
         cJSON_AddStringToObject(root, "text", in->text);
+    }
+    if (in->has_speaker_id) {
+        cJSON_AddStringToObject(root, "speakerId", in->speaker_id);
     }
     return root;
 }
@@ -375,6 +390,8 @@ typedef struct {
     char code[33];
     int16_t doa_deg;
     int16_t speaker_permille;
+    char speaker_id[8];
+    uint8_t enrol_count;
     uint32_t ts;
     bool has_score_permille;
     bool has_margin_permille;
@@ -382,6 +399,8 @@ typedef struct {
     bool has_code;
     bool has_doa_deg;
     bool has_speaker_permille;
+    bool has_speaker_id;
+    bool has_enrol_count;
     bool has_ts;
 } event_t;
 
@@ -458,6 +477,21 @@ static inline bool event_from_json(const cJSON *root, event_t *out)
         out->speaker_permille = (int16_t) item->valuedouble;
         out->has_speaker_permille = true;
     }
+    item = cJSON_GetObjectItemCaseSensitive(root, "speakerId");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->speaker_id)) { return false; }
+        strcpy(out->speaker_id, item->valuestring);
+        out->has_speaker_id = true;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "enrolCount");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 1.0 || item->valuedouble > 255.0) { return false; }
+        out->enrol_count = (uint8_t) item->valuedouble;
+        out->has_enrol_count = true;
+    }
     item = cJSON_GetObjectItemCaseSensitive(root, "ts");
     if (item == NULL) { item = NULL; }
     if (item != NULL) {
@@ -498,6 +532,12 @@ static inline cJSON *event_to_json(const event_t *in)
     }
     if (in->has_speaker_permille) {
         cJSON_AddNumberToObject(root, "speakerPermille", (double) in->speaker_permille);
+    }
+    if (in->has_speaker_id) {
+        cJSON_AddStringToObject(root, "speakerId", in->speaker_id);
+    }
+    if (in->has_enrol_count) {
+        cJSON_AddNumberToObject(root, "enrolCount", (double) in->enrol_count);
     }
     if (in->has_ts) {
         cJSON_AddNumberToObject(root, "ts", (double) in->ts);
@@ -926,6 +966,255 @@ static inline cJSON *responses_to_json(const responses_t *in)
     cJSON *responses_arr = cJSON_AddArrayToObject(root, "responses");
     for (int i = 0; responses_arr != NULL && i < in->responses_count; i++) {
         cJSON_AddItemToArray(responses_arr, responses_responses_item_to_json(&in->responses[i]));
+    }
+    return root;
+}
+
+typedef struct {
+    char id[8];
+    char name[125];
+    bool enrolled;
+} speaker_roster_speakers_item_t;
+
+/** Fill out from a parsed speaker_roster_speakers object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool speaker_roster_speakers_item_from_json(const cJSON *root, speaker_roster_speakers_item_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "id");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->id)) { return false; }
+        strcpy(out->id, item->valuestring);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "name");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->name)) { return false; }
+        strcpy(out->name, item->valuestring);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "enrolled");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsBool(item)) { return false; }
+        out->enrolled = cJSON_IsTrue(item);
+    }
+    return true;
+}
+
+/** Build the JSON object of one speaker_roster_speakers for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *speaker_roster_speakers_item_to_json(const speaker_roster_speakers_item_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddStringToObject(root, "id", in->id);
+    cJSON_AddStringToObject(root, "name", in->name);
+    cJSON_AddBoolToObject(root, "enrolled", in->enrolled);
+    return root;
+}
+
+typedef struct {
+    char device_id[33];
+    uint32_t version;
+    bool check;
+    speaker_roster_speakers_item_t speakers[8];
+    uint8_t speakers_count;
+    char enrolling_id[8];
+    uint8_t enrol_count;
+    bool has_enrolling_id;
+    bool has_enrol_count;
+} speaker_roster_t;
+
+/** Fill out from a parsed speaker_roster object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool speaker_roster_from_json(const cJSON *root, speaker_roster_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "deviceId");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->device_id)) { return false; }
+        strcpy(out->device_id, item->valuestring);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "version");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 2147483647.0) { return false; }
+        out->version = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "check");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsBool(item)) { return false; }
+        out->check = cJSON_IsTrue(item);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "speakers");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > 8) { return false; }
+        if (cJSON_GetArraySize(item) < 0) { return false; }
+        const cJSON *el = NULL;
+        cJSON_ArrayForEach(el, item) {
+            if (!speaker_roster_speakers_item_from_json(el, &out->speakers[out->speakers_count])) { return false; }
+            out->speakers_count++;
+        }
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "enrollingId");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->enrolling_id)) { return false; }
+        strcpy(out->enrolling_id, item->valuestring);
+        out->has_enrolling_id = true;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "enrolCount");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 255.0) { return false; }
+        out->enrol_count = (uint8_t) item->valuedouble;
+        out->has_enrol_count = true;
+    }
+    return true;
+}
+
+/** Build the JSON object of one speaker_roster for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *speaker_roster_to_json(const speaker_roster_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddStringToObject(root, "deviceId", in->device_id);
+    cJSON_AddNumberToObject(root, "version", (double) in->version);
+    cJSON_AddBoolToObject(root, "check", in->check);
+    cJSON *speakers_arr = cJSON_AddArrayToObject(root, "speakers");
+    for (int i = 0; speakers_arr != NULL && i < in->speakers_count; i++) {
+        cJSON_AddItemToArray(speakers_arr, speaker_roster_speakers_item_to_json(&in->speakers[i]));
+    }
+    if (in->has_enrolling_id) {
+        cJSON_AddStringToObject(root, "enrollingId", in->enrolling_id);
+    }
+    if (in->has_enrol_count) {
+        cJSON_AddNumberToObject(root, "enrolCount", (double) in->enrol_count);
+    }
+    return root;
+}
+
+typedef struct {
+    char id[8];
+    char name[125];
+} speaker_set_speakers_item_t;
+
+/** Fill out from a parsed speaker_set_speakers object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool speaker_set_speakers_item_from_json(const cJSON *root, speaker_set_speakers_item_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "id");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->id)) { return false; }
+        strcpy(out->id, item->valuestring);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "name");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->name)) { return false; }
+        strcpy(out->name, item->valuestring);
+    }
+    return true;
+}
+
+/** Build the JSON object of one speaker_set_speakers for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *speaker_set_speakers_item_to_json(const speaker_set_speakers_item_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddStringToObject(root, "id", in->id);
+    cJSON_AddStringToObject(root, "name", in->name);
+    return root;
+}
+
+typedef struct {
+    uint32_t version;
+    bool check;
+    speaker_set_speakers_item_t speakers[8];
+    uint8_t speakers_count;
+} speaker_set_t;
+
+/** Fill out from a parsed speaker_set object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool speaker_set_from_json(const cJSON *root, speaker_set_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "version");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 1.0 || item->valuedouble > 2147483647.0) { return false; }
+        out->version = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "check");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsBool(item)) { return false; }
+        out->check = cJSON_IsTrue(item);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "speakers");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > 8) { return false; }
+        if (cJSON_GetArraySize(item) < 0) { return false; }
+        const cJSON *el = NULL;
+        cJSON_ArrayForEach(el, item) {
+            if (!speaker_set_speakers_item_from_json(el, &out->speakers[out->speakers_count])) { return false; }
+            out->speakers_count++;
+        }
+    }
+    return true;
+}
+
+/** Build the JSON object of one speaker_set for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *speaker_set_to_json(const speaker_set_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddNumberToObject(root, "version", (double) in->version);
+    cJSON_AddBoolToObject(root, "check", in->check);
+    cJSON *speakers_arr = cJSON_AddArrayToObject(root, "speakers");
+    for (int i = 0; speakers_arr != NULL && i < in->speakers_count; i++) {
+        cJSON_AddItemToArray(speakers_arr, speaker_set_speakers_item_to_json(&in->speakers[i]));
     }
     return root;
 }

@@ -16,7 +16,7 @@ class CommandSet(TypedDict):
     version: int
     commands: list[CommandSetCommandsItem]
 
-DeviceCmdOp = Literal['SET_CONFIG', 'SET_STREAM', 'SPEAK', 'CALIBRATE', 'REBOOT']
+DeviceCmdOp = Literal['SET_CONFIG', 'SET_STREAM', 'SPEAK', 'CALIBRATE', 'REBOOT', 'SPEAKER_ENROL']
 
 
 class DeviceCmdStream(TypedDict):
@@ -34,6 +34,7 @@ class DeviceCmd(TypedDict):
     value: NotRequired[int]
     stream: NotRequired[DeviceCmdStream]
     text: NotRequired[str]
+    speakerId: NotRequired[str]
 
 EventKind = Literal['WAKE', 'COMMAND', 'REJECT', 'ERROR']
 
@@ -48,6 +49,8 @@ class Event(TypedDict):
     code: NotRequired[str]
     doaDeg: NotRequired[int]
     speakerPermille: NotRequired[int]
+    speakerId: NotRequired[str]
+    enrolCount: NotRequired[int]
     ts: NotRequired[int]
 
 
@@ -93,6 +96,36 @@ class ResponsesResponsesItem(TypedDict):
 class Responses(TypedDict):
     version: int
     responses: list[ResponsesResponsesItem]
+
+
+
+class SpeakerRosterSpeakersItem(TypedDict):
+    id: str
+    name: str
+    enrolled: bool
+
+
+
+class SpeakerRoster(TypedDict):
+    deviceId: str
+    version: int
+    check: bool
+    speakers: list[SpeakerRosterSpeakersItem]
+    enrollingId: NotRequired[str]
+    enrolCount: NotRequired[int]
+
+
+
+class SpeakerSetSpeakersItem(TypedDict):
+    id: str
+    name: str
+
+
+
+class SpeakerSet(TypedDict):
+    version: int
+    check: bool
+    speakers: list[SpeakerSetSpeakersItem]
 
 StatusState = Literal['ONLINE', 'OFFLINE']
 
@@ -153,7 +186,7 @@ SCHEMAS: dict[str, dict] = {
      'type': 'object',
      'additionalProperties': False,
      'required': ['op'],
-     'properties': {'op': {'enum': ['SET_CONFIG', 'SET_STREAM', 'SPEAK', 'CALIBRATE', 'REBOOT']},
+     'properties': {'op': {'enum': ['SET_CONFIG', 'SET_STREAM', 'SPEAK', 'CALIBRATE', 'REBOOT', 'SPEAKER_ENROL']},
                     'requestId': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,16}$', 'maxLength': 16},
                     'key': {'type': 'string', 'pattern': '^[a-z0-9_]{1,15}/[a-z0-9_]{1,15}$', 'maxLength': 31},
                     'value': {'type': 'integer', 'minimum': -2147483648, 'maximum': 2147483647},
@@ -166,10 +199,12 @@ SCHEMAS: dict[str, dict] = {
                                                        'maxLength': 64},
                                               'port': {'type': 'integer', 'minimum': 1, 'maximum': 65535},
                                               'durationS': {'type': 'integer', 'minimum': 1, 'maximum': 3600}}},
-                    'text': {'type': 'string', 'minLength': 1, 'maxLength': 128}},
+                    'text': {'type': 'string', 'minLength': 1, 'maxLength': 128},
+                    'speakerId': {'type': 'string', 'pattern': '^spk_[0-9]{3}$', 'maxLength': 7}},
      'allOf': [{'if': {'properties': {'op': {'const': 'SET_CONFIG'}}}, 'then': {'required': ['key', 'value']}},
                {'if': {'properties': {'op': {'const': 'SET_STREAM'}}}, 'then': {'required': ['stream']}},
-               {'if': {'properties': {'op': {'const': 'SPEAK'}}}, 'then': {'required': ['text']}}]},
+               {'if': {'properties': {'op': {'const': 'SPEAK'}}}, 'then': {'required': ['text']}},
+               {'if': {'properties': {'op': {'const': 'SPEAKER_ENROL'}}}, 'then': {'required': ['speakerId']}}]},
     'event': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
      '$id': 'sr/event',
      'title': 'event',
@@ -186,6 +221,8 @@ SCHEMAS: dict[str, dict] = {
                     'code': {'type': 'string', 'pattern': '^[A-Z0-9_]{1,32}$', 'maxLength': 32},
                     'doaDeg': {'type': 'integer', 'minimum': -1, 'maximum': 180},
                     'speakerPermille': {'type': 'integer', 'minimum': -1000, 'maximum': 1000},
+                    'speakerId': {'type': 'string', 'pattern': '^spk_[0-9]{3}$', 'maxLength': 7},
+                    'enrolCount': {'type': 'integer', 'minimum': 1, 'maximum': 255},
                     'ts': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295}},
      'allOf': [{'if': {'properties': {'kind': {'const': 'WAKE'}}}, 'then': {'required': ['scorePermille']}},
                {'if': {'properties': {'kind': {'const': 'COMMAND'}}},
@@ -259,6 +296,53 @@ SCHEMAS: dict[str, dict] = {
                                                            'text': {'type': 'string',
                                                                     'minLength': 1,
                                                                     'maxLength': 128}}}}}},
+    'speaker_roster': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+     '$id': 'sr/speaker_roster',
+     'title': 'speaker_roster',
+     'description': 'Retained copy of the speakers a board holds: who has a voiceprint, and an enrolment under '
+                    'way.',
+     'type': 'object',
+     'additionalProperties': False,
+     'required': ['deviceId', 'version', 'check', 'speakers'],
+     'properties': {'deviceId': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{4,32}$', 'maxLength': 32},
+                    'version': {'type': 'integer', 'minimum': 0, 'maximum': 2147483647},
+                    'check': {'type': 'boolean'},
+                    'speakers': {'type': 'array',
+                                 'minItems': 0,
+                                 'maxItems': 8,
+                                 'items': {'type': 'object',
+                                           'additionalProperties': False,
+                                           'required': ['id', 'name', 'enrolled'],
+                                           'properties': {'id': {'type': 'string',
+                                                                 'pattern': '^spk_[0-9]{3}$',
+                                                                 'maxLength': 7},
+                                                          'name': {'type': 'string',
+                                                                   'minLength': 1,
+                                                                   'maxLength': 31},
+                                                          'enrolled': {'type': 'boolean'}}}},
+                    'enrollingId': {'type': 'string', 'pattern': '^spk_[0-9]{3}$', 'maxLength': 7},
+                    'enrolCount': {'type': 'integer', 'minimum': 0, 'maximum': 255}}},
+    'speaker_set': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+     '$id': 'sr/speaker_set',
+     'title': 'speaker_set',
+     'description': "The people a board checks a command's voice against on the chip path, and whether it checks.",
+     'type': 'object',
+     'additionalProperties': False,
+     'required': ['version', 'check', 'speakers'],
+     'properties': {'version': {'type': 'integer', 'minimum': 1, 'maximum': 2147483647},
+                    'check': {'type': 'boolean'},
+                    'speakers': {'type': 'array',
+                                 'minItems': 0,
+                                 'maxItems': 8,
+                                 'items': {'type': 'object',
+                                           'additionalProperties': False,
+                                           'required': ['id', 'name'],
+                                           'properties': {'id': {'type': 'string',
+                                                                 'pattern': '^spk_[0-9]{3}$',
+                                                                 'maxLength': 7},
+                                                          'name': {'type': 'string',
+                                                                   'minLength': 1,
+                                                                   'maxLength': 31}}}}}},
     'status': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
      '$id': 'sr/status',
      'title': 'status',
