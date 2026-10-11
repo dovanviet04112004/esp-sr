@@ -561,8 +561,8 @@ speakers: ## Send a speaker roster to one board, retained, and show what it keep
 	cd host && uv run python -m srhost.speakers --device "$(DEVICE)" \
 	  $(if $(LIST),--list,$(if $(CLEAR),--clear,"$(abspath $(SET))"))
 
-speaker-enrol: ## Enrol one person of the board's roster from the commands they say next: DEVICE=<deviceId> ID=spk_NNN (E11-T31)
-	cd host && uv run python -m srhost.speakers --device "$(DEVICE)" --enrol "$(ID)"
+speaker-enrol: ## Enrol one person of the board's roster, prompting the commands to say: DEVICE=<deviceId> ID=spk_NNN [SET=<command set>] (E11-T31)
+	cd host && uv run python -m srhost.speakers --device "$(DEVICE)" --enrol "$(ID)" $(if $(SET),--set "$(abspath $(SET))")
 
 ##@ Recording sessions (KEHOACH 4.6)
 

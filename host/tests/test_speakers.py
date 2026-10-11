@@ -118,3 +118,33 @@ def test_the_report_waits_for_the_version_sent_and_lists_each_person() -> None:
     answer.take(board_roster(roster["version"], True))
     lines = speakers.sent_report(DEVICE, roster, answer)
     assert lines[0].startswith(f"v{roster['version']}, check on, 1 people") and "spk_001 Chủ nhà: enrolled" in lines[1]
+
+
+def test_the_prompter_asks_each_command_in_turn_and_again_after_a_refusal() -> None:
+    lines: list[str] = []
+    prompter = speakers.Prompter({"bat_den": "bật đèn", "tat_den": "tắt đèn"}, total=3, out=lines.append)
+    prompter.prompt()
+    prompter({"kind": "REJECT", "code": "LOW_SCORE"})
+    prompter({"kind": "REJECT", "code": speakers.ENROLLING, "enrolCount": 1, "commandId": "bat_den"})
+    prompter({"kind": "REJECT", "code": speakers.ENROLLING, "enrolCount": 2, "commandId": "bat_den"})
+    prompter({"kind": "REJECT", "code": speakers.ENROLLING, "enrolCount": 3, "commandId": "tat_den"})
+    assert lines == [
+        "  1/3 say: bật đèn",
+        "  not taken (LOW_SCORE), say again: bật đèn",
+        "  kept 1/3: heard bật đèn",
+        "  2/3 say: tắt đèn",
+        "  kept 2/3: heard bật đèn",
+        "  3/3 say: bật đèn",
+        "  kept 3/3: heard tắt đèn",
+    ]
+
+
+def test_the_default_prompts_are_the_baked_set_and_the_count_is_speaker_yamls() -> None:
+    texts = speakers.set_texts(speakers.DEFAULT_SET)
+    assert next(iter(texts.values())) == "bật đèn" and len(texts) == 10
+    assert speakers.ENROL_COMMANDS == 10
+
+
+def test_a_file_that_is_no_command_set_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(speakers.RosterError, match="not a command set"):
+        speakers.set_texts(written(tmp_path, {"speakers": []}))

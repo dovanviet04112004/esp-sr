@@ -1,8 +1,9 @@
 """Manage the speakers a board checks a command's voice against on the chip path (KEHOACH 3.17, 4.6): send a roster
-retained on down/speakers, start an enrolment with SPEAKER_ENROL on down/cmd, print the roster the board keeps on
-up/speakers. Each person of a roster file carries consent, the code of their consent form (KEHOACH 1.4); the tool
-refuses one without it and drops it before sending. version is the Unix time of the send. Success is printed.
-Run: uv run python -m srhost.speakers --device <deviceId> (<roster.json> | --enrol spk_NNN | --list | --clear)
+retained on down/speakers, start an enrolment with SPEAKER_ENROL on down/cmd and prompt the commands to say, print the
+roster the board keeps on up/speakers. Each person of a roster file carries consent, the code of their consent form
+(KEHOACH 1.4); the tool refuses one without it and drops it before sending. version is the Unix time of the send.
+Run: uv run python -m srhost.speakers --device <deviceId> (<roster.json> | --enrol spk_NNN [--set <file>] | --list |
+--clear)
 """
 
 from __future__ import annotations
@@ -18,8 +19,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import paho.mqtt.client as mqtt
+import yaml
 
-from srhost.config import ConfigError, MqttConfig, mqtt_config
+from srhost.config import REPO_ROOT, ConfigError, MqttConfig, mqtt_config
 from srhost.generated import topics
 from srhost.generated.payload import SCHEMAS
 from srhost.mqtt_rx import KEEPALIVE_S, Message, parse, schema_error
@@ -33,6 +35,10 @@ DEVICE_ID = re.compile(SCHEMAS["status"]["properties"]["deviceId"]["pattern"])
 SPEAKER_ID = re.compile(SCHEMAS["speaker_set"]["properties"]["speakers"]["items"]["properties"]["id"]["pattern"])
 CONSENT = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 ENROLLING = "SPEAKER_ENROLLING"
+DEFAULT_SET = REPO_ROOT / "contracts" / "commands" / "default_vi.json"
+ENROL_COMMANDS = yaml.safe_load((REPO_ROOT / "contracts" / "speaker.yaml").read_text(encoding="utf-8"))[
+    "enrol_commands"
+]
 MEANINGS = {
     "SPEAKERS_INVALID": "not a roster the board can hold",
     "SPEAKERS_REFUSED": "this image has no speaker branch, or the board's queue was full",
@@ -102,8 +108,9 @@ class Answer:
             self.roster = payload
         elif message.kind == "event" and payload["kind"] == "ERROR" and payload["code"] in MEANINGS:
             self.refusals.append(payload)
-        elif message.kind == "event" and payload["kind"] == "REJECT" and payload["code"] == ENROLLING:
-            self.enrolled.append(payload)
+        elif message.kind == "event" and payload["kind"] == "REJECT":
+            if payload["code"] == ENROLLING:
+                self.enrolled.append(payload)
             if self.watch is not None:
                 self.watch(payload)
 
@@ -192,8 +199,39 @@ def enrol_report(device: str, answer: Answer) -> list[str]:
     return roster_lines(answer.roster)
 
 
-def progress(event: dict) -> None:
-    print(f"  {event.get('speakerId', '?')}: {event.get('enrolCount', '?')} commands enrolled", flush=True)
+def set_texts(path: Path) -> dict[str, str]:
+    """The id and text of every command of a command set file, in its order."""
+    try:
+        listed = json.loads(path.read_text(encoding="utf-8"))["commands"]
+        return {c["id"]: c["text"] for c in listed}
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as err:
+        raise RosterError(f"{path}: not a command set: {err}") from err
+
+
+class Prompter:
+    """Prompts the commands of a set in turn, one for each command an enrolment still needs; follows the board's
+    REJECT events: one it keeps prints the count and the command it heard, then the next prompt, any other repeats the
+    prompt."""
+
+    def __init__(self, texts: dict[str, str], total: int = ENROL_COMMANDS, out: Callable[[str], None] = print) -> None:
+        self.texts, self.total, self.out, self.kept = texts, total, out, 0
+
+    def wanted(self) -> str:
+        listed = list(self.texts.values())
+        return listed[self.kept % len(listed)]
+
+    def prompt(self) -> None:
+        self.out(f"  {self.kept + 1}/{self.total} say: {self.wanted()}")
+
+    def __call__(self, event: dict) -> None:
+        if event["code"] != ENROLLING:
+            self.out(f"  not taken ({event['code']}), say again: {self.wanted()}")
+            return
+        self.kept = event.get("enrolCount", self.kept + 1)
+        heard = self.texts.get(event.get("commandId", ""), event.get("commandId", "?"))
+        self.out(f"  kept {self.kept}/{self.total}: heard {heard}")
+        if self.kept < self.total:
+            self.prompt()
 
 
 def enrolment_done(person: str) -> Callable[[Answer], bool]:
@@ -215,6 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", required=True, help="deviceId of the board, as its boot log prints it")
     parser.add_argument("roster", nargs="?", default="", help="roster file, laid out as host/speakers/example_vi.json")
     parser.add_argument("--enrol", help="the id of a person on the roster: their next commands become their voiceprint")
+    parser.add_argument("--set", type=Path, default=DEFAULT_SET, help="command set whose commands --enrol prompts")
     parser.add_argument("--list", action="store_true", help="print the roster the board keeps")
     parser.add_argument("--clear", action="store_true", help="drop the retained roster; the board keeps the one it has")
     args = parser.parse_args(argv)
@@ -235,9 +274,11 @@ def main(argv: list[str] | None = None) -> int:
             print("\n".join(roster_lines(answer.roster)) if answer.roster else f"{args.device} shows no roster")
             return 0
         if args.enrol is not None:
+            prompter = Prompter(set_texts(args.set), out=lambda line: print(line, flush=True))
             cmd = body({"op": "SPEAKER_ENROL", "speakerId": args.enrol})
-            print(f"{args.enrol}: say commands to {args.device} now; it keeps the next ones it hears as the voiceprint")
-            answer = exchange(cfg, args.device, [("cmd", cmd)], ENROL_WAIT_S, enrolment_done(args.enrol), progress)
+            print(f"{args.enrol}: about 1 m from {args.device}, say each command when it is shown")
+            prompter.prompt()
+            answer = exchange(cfg, args.device, [("cmd", cmd)], ENROL_WAIT_S, enrolment_done(args.enrol), prompter)
             print("\n".join(enrol_report(args.device, answer)))
             return 1 if answer.refusals else 0
         roster = stamped(load_roster(Path(args.roster)), time.time())
