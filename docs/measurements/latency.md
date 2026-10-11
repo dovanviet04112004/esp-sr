@@ -862,6 +862,26 @@ sổ vẫn khớp Python từng bit, chủ repo qua 6/6, người lạ lọt 0/6
     ngoài `ExternalMallocGuard`.
   - Vì vậy giữ lần chạy thử. Ca chuỗi đo heap quanh lần xác minh đầu, giữ một byte là đỏ.
 
+**Ca chuỗi với đủ 8 mẫu giọng** (E11-T31, 11/10 15:13, `ec612f9`). `make ai-unit-speaker RUN=… ROW=kl CHAIN=1`.
+- Ảnh mang bảng 8 ngưỡng của `speaker.md` §6.4.
+- Mẫu giọng của chủ repo gập từ PCM của 10 cửa sổ đăng ký.
+- 7 thành viên là 7 người lạ đầu tiên theo mã người nói, có 11 cửa sổ ngoài bộ hiệu chuẩn. Mỗi người gập từ embedding
+  của 10 cửa sổ, Python tính trên đường chip.
+- Cửa sổ thử: 6 của chủ repo, 1 cửa sổ nữa của mỗi thành viên, 6 người lạ khác.
+
+| Đo | Kết quả |
+|---|---|
+| So Python | 0/29 embedding lệch, 8/8 mẫu giọng trùng từng bit, 0/19 điểm lớn nhất, mẫu cho điểm ấy và quyết định lệch |
+| Mẫu khớp nhất | chủ repo 6/6 rơi vào mẫu của mình; thành viên 5/7 |
+| Qua ở 853 ‰, ngưỡng cho 8 người | chủ repo 3/6, điểm 839–882 ‰; thành viên 1/7; người lạ 0/6, cao nhất 842 ‰ |
+| Một lần xác minh, `ai_engine_speaker_embed` | **1257,0 ms** trung bình, 1257,5 ms đỉnh; lần đầu sau nạp 1306,1 ms |
+| trong đó `spk_fbank` | 79,3 ms trung bình |
+| Lần xác minh đầu sau nạp giữ lại | 0 B RAM nội, 0 B PSRAM |
+
+- 1257,0 ms so với 1256,0 ms khi chấm với 1 mẫu. Thêm 7 tích vô hướng 192 chiều chỉ cỡ chục µs, nên 1 ms là dao
+  động giữa hai bản dựng.
+- Chủ repo bị chặn 3/6 ở ngưỡng 8 người, đúng như bảng của `speaker.md` §6.4 báo trước.
+
 **Lệch hiếm của b0: bảng `exp` của Softmax** (11/10, `c659b67`). Lượt `make listen-unit SPEAKER=1` đầu tiên khớp hai
 lượt, kể cả 10 lệnh đăng ký và mẫu giọng giữ qua khởi động lại. Ở lượt 2, cửa sổ 326..500 của phiên thứ ba trên
 `models_1` có điểm board 829 ‰, Python 844 ‰; quyết định vẫn là qua, mọi cửa sổ khác trùng.

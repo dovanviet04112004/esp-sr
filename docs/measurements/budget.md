@@ -24,3 +24,19 @@ Chỉ số từ profile `bench`; số từ `dev` không vào bảng này.
 
 Tổng nhân 1: trung bình 16,3%, đỉnh cộng dồn 20,5% một khung (mục tiêu KẾ HOẠCH §5.6: trung bình ≤ 50%, đỉnh một khung ≤ 80%); gồm dsp_afe chuỗi (hpf + stft x2 + balance + doa + trộn + ns + istft + vad + agc).
 Tổng nhân 0: trung bình 13,7%, đỉnh cộng dồn 14,4% một khung (mục tiêu KẾ HOẠCH §5.6: trung bình ≤ 70%); gồm dsp_spec log-mel (80 dải), dsp_spec pitch Kaldi (vùng làm việc PSRAM).
+
+## Việc theo lệnh, không theo khung
+
+Việc chạy một lần mỗi lệnh hay lúc nạp, không nằm trong nhịp 16 ms nên không vào bảng trên. Số đo trên board B,
+profile `bench`, ghi tay từ `measurements/latency.md` §27.
+
+| Việc | Nhân | Khi nào | Thời gian | RAM nội | PSRAM | Commit | Ngày |
+|---|---|---|---|---|---|---|---|
+| `speaker`: một lần xác minh, `spk_fbank` + b0 + chấm với 8 mẫu giọng (`xac_task`) | 0 | mỗi lệnh được nhận, khi kiểm người nói bật | 1257,0 ms trung bình, 1257,5 ms đỉnh | 0 B thêm | 0 B thêm | `ec612f9` | 2026-10-11 |
+| trong đó `spk_fbank` một cửa sổ 1,5 s | 0 | như trên | 79,3 ms | 0 B thêm | 0 B thêm | `ec612f9` | 2026-10-11 |
+| trong đó mạng b0, trọng số đọc thẳng từ flash | 0 | như trên | 1174,6 ms | 0 B thêm | 0 B thêm | `1fb1725` | 2026-10-11 |
+| `speaker` lúc nạp: dựng b0 cùng một lần chạy thử | 0 | lúc boot | 1784 ms | ~1,2 KB, bảng `exp` của Softmax | 2 134 924 B tensor | `46592aa` | 2026-10-11 |
+| `speaker` lúc nạp: `spk_fbank_init` | 0 | lúc boot | ~141 ms | 0 | ~12 KB vùng làm việc 🔬 | `6e9b719` | 2026-10-11 |
+
+- "0 B thêm" là heap còn trống trước và sau lần xác minh đầu tiên sau nạp; ca chuỗi đỏ nếu lệch một byte.
+- Một lần chạy b0 giữ nhân 0 ~1,26 s, ở ưu tiên 3 dưới mọi task theo nhịp khung và theo mạng (KẾ HOẠCH §5.2).
