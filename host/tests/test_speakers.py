@@ -148,3 +148,31 @@ def test_the_default_prompts_are_the_baked_set_and_the_count_is_speaker_yamls() 
 def test_a_file_that_is_no_command_set_is_refused(tmp_path: Path) -> None:
     with pytest.raises(speakers.RosterError, match="not a command set"):
         speakers.set_texts(written(tmp_path, {"speakers": []}))
+
+
+def test_renaming_keeps_a_listed_persons_consent_and_adding_one_takes_a_code() -> None:
+    roster = {"check": True, "speakers": [person("spk_001", "Chủ nhà"), person("spk_002", "Người 2", "C002")]}
+    named = speakers.renamed(roster, "spk_002", "Vợ", None)
+    assert named["speakers"][1] == {"id": "spk_002", "name": "Vợ", "consent": "C002"}
+    assert roster["speakers"][1]["name"] == "Người 2"
+    added = speakers.renamed(roster, "spk_003", "Con", "C103")
+    assert added["speakers"][-1] == {"id": "spk_003", "name": "Con", "consent": "C103"}
+    with pytest.raises(speakers.RosterError, match="give a consent code"):
+        speakers.renamed(roster, "spk_003", "Con", None)
+
+
+def test_forgetting_sends_the_roster_without_the_person_and_refuses_one_not_listed() -> None:
+    roster = speakers.load_roster(EXAMPLE)
+    assert [p["id"] for p in speakers.without(roster, "spk_002")["speakers"]] == ["spk_001"]
+    with pytest.raises(speakers.RosterError, match="spk_009 is not on the roster"):
+        speakers.without(roster, "spk_009")
+
+
+def test_a_written_roster_file_reads_back_whole_one_person_a_line(tmp_path: Path) -> None:
+    roster = {"check": True, "speakers": [person("spk_001", "Chủ nhà"), person("spk_002", "Người 2", "C002")]}
+    path = tmp_path / "home_vi.json"
+    speakers.write_roster(path, roster)
+    assert speakers.read_roster(path) == roster
+    assert (
+        '    {"id": "spk_002", "name": "Người 2", "consent": "C002"}' in path.read_text(encoding="utf-8").splitlines()
+    )

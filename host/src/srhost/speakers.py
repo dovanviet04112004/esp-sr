@@ -1,10 +1,9 @@
-"""Manage the speakers a board checks a command's voice against on the chip path (KEHOACH 3.17, 4.6): send a roster
-retained on down/speakers, start an enrolment with SPEAKER_ENROL on down/cmd and prompt the commands to say, print the
-roster the board keeps on up/speakers. Each person of a roster file carries consent, the code of their consent form
-(KEHOACH 1.4); the tool refuses one without it and drops it before sending. version is the Unix time of the send.
-Run: uv run python -m srhost.speakers --device <deviceId> (<roster.json> | --enrol spk_NNN [--set <file>] | --list |
---clear)
-"""
+"""Manage the speakers a board checks a command's voice against (KEHOACH 3.17, 4.6): send a roster retained on
+down/speakers, rename or add one person of a roster file, have the board drop one voiceprint, enrol with SPEAKER_ENROL
+prompting the commands to say, print the roster on up/speakers. Each person of a file carries consent, their consent
+form's code (KEHOACH 1.4), refused if missing and dropped before sending; version is the Unix time of the send.
+Run: uv run python -m srhost.speakers --device <deviceId> (<roster.json> [--rename spk_NNN --name <name> [--consent
+<code>] | --forget spk_NNN] | --enrol spk_NNN [--set <file>] | --list | --clear)"""
 
 from __future__ import annotations
 
@@ -51,13 +50,29 @@ class RosterError(ValueError):
     """The file is not a roster this tool sends; the message says what to fix."""
 
 
+def read_roster(path: Path) -> dict:
+    """The roster file as written, consent codes and all."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as err:
+        raise RosterError(f"{path}: {err}") from err
+
+
+def write_roster(path: Path, roster: dict) -> None:
+    """The roster file as host/speakers keeps one: check, then one person a line, consent codes included."""
+    people = ",\n".join(f"    {json.dumps(p, ensure_ascii=False)}" for p in roster["speakers"])
+    check = json.dumps(roster.get("check", False))
+    path.write_text(f'{{\n  "check": {check},\n  "speakers": [\n{people}\n  ]\n}}\n', encoding="utf-8")
+
+
 def load_roster(path: Path) -> dict:
     """The roster in path as speaker_set lays it out: every person with a consent code and an id of their own, the
     consent codes dropped, version left for stamped."""
-    try:
-        roster = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as err:
-        raise RosterError(f"{path}: {err}") from err
+    return checked_roster(read_roster(path), path)
+
+
+def checked_roster(roster: dict, path: Path) -> dict:
+    """load_roster on a roster file's content, path naming it in the errors."""
     people = roster.get("speakers") if isinstance(roster, dict) else None
     if not isinstance(people, list):
         raise RosterError(f"{path}: no speakers list")
@@ -77,6 +92,29 @@ def load_roster(path: Path) -> dict:
     if error is not None:
         raise RosterError(f"{path}: {error}")
     return sent
+
+
+def renamed(roster: dict, person: str, name: str, consent: str | None) -> dict:
+    """A roster file's content with person named name, and their consent code set when given; a person it lacks is
+    added at the end, which takes a consent code (KEHOACH 1.4)."""
+    people = [dict(p) for p in roster.get("speakers", [])]
+    listed = [p for p in people if p.get("id") == person]
+    if listed:
+        listed[0]["name"] = name
+        if consent is not None:
+            listed[0]["consent"] = consent
+    elif consent is None:
+        raise RosterError(f"{person} is not on the roster: give a consent code to add them (KEHOACH 1.4)")
+    else:
+        people.append({"id": person, "name": name, "consent": consent})
+    return {**roster, "speakers": people}
+
+
+def without(roster: dict, person: str) -> dict:
+    """A roster to send with person left out, so the board drops their voiceprint (KEHOACH 3.17)."""
+    if person not in {p["id"] for p in roster["speakers"]}:
+        raise RosterError(f"{person} is not on the roster")
+    return {**roster, "speakers": [p for p in roster["speakers"] if p["id"] != person]}
 
 
 def stamped(roster: dict, now_s: float) -> dict:
@@ -248,10 +286,23 @@ def enrolment_done(person: str) -> Callable[[Answer], bool]:
     return done
 
 
+def send(cfg: MqttConfig, device: str, roster: dict) -> Answer:
+    """Send roster retained and wait until the board's roster shows its version, or ANSWER_WAIT_S passes."""
+
+    def shows_it(answer: Answer) -> bool:
+        return answer.roster is not None and answer.roster["version"] == roster["version"]
+
+    return exchange(cfg, device, [("speakers", body(roster))], ANSWER_WAIT_S, shows_it)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--device", required=True, help="deviceId of the board, as its boot log prints it")
     parser.add_argument("roster", nargs="?", default="", help="roster file, laid out as host/speakers/example_vi.json")
+    parser.add_argument("--rename", help="the id of a person of the roster file to rename, or to add with --consent")
+    parser.add_argument("--name", help="the name --rename gives")
+    parser.add_argument("--consent", help="the consent code --rename sets, needed for a person the file lacks")
+    parser.add_argument("--forget", help="the id of a person of the roster file whose voiceprint the board drops")
     parser.add_argument("--enrol", help="the id of a person on the roster: their next commands become their voiceprint")
     parser.add_argument("--set", type=Path, default=DEFAULT_SET, help="command set whose commands --enrol prompts")
     parser.add_argument("--list", action="store_true", help="print the roster the board keeps")
@@ -259,10 +310,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not DEVICE_ID.fullmatch(args.device):
         parser.error(f"--device {args.device!r} is not a deviceId")
+    edits = sum(x is not None for x in (args.rename, args.forget))
+    if edits > 1 or (edits and not args.roster):
+        parser.error("--rename and --forget each edit a roster file: give the file and one of them")
     if sum((bool(args.roster), args.enrol is not None, args.list, args.clear)) != 1:
         parser.error("give one of a roster file, --enrol, --list or --clear")
-    if args.enrol is not None and not SPEAKER_ID.fullmatch(args.enrol):
-        parser.error(f"--enrol {args.enrol!r} is not a speaker id")
+    if args.rename is not None and not args.name:
+        parser.error("--rename needs --name")
+    for flag, person in (("--enrol", args.enrol), ("--rename", args.rename), ("--forget", args.forget)):
+        if person is not None and not SPEAKER_ID.fullmatch(person):
+            parser.error(f"{flag} {person!r} is not a speaker id")
     try:
         cfg = mqtt_config()
         if args.clear:
@@ -281,12 +338,21 @@ def main(argv: list[str] | None = None) -> int:
             answer = exchange(cfg, args.device, [("cmd", cmd)], ENROL_WAIT_S, enrolment_done(args.enrol), prompter)
             print("\n".join(enrol_report(args.device, answer)))
             return 1 if answer.refusals else 0
-        roster = stamped(load_roster(Path(args.roster)), time.time())
-
-        def shows_it(answer: Answer) -> bool:
-            return answer.roster is not None and answer.roster["version"] == roster["version"]
-
-        answer = exchange(cfg, args.device, [("speakers", body(roster))], ANSWER_WAIT_S, shows_it)
+        path = Path(args.roster)
+        if args.rename is not None:
+            edited = renamed(read_roster(path), args.rename, args.name, args.consent)
+            roster = stamped(checked_roster(edited, path), time.time())
+            write_roster(path, edited)
+        else:
+            roster = stamped(load_roster(path), time.time())
+        if args.forget is not None:
+            dropped = {**without(roster, args.forget), "version": roster["version"]}
+            answer = send(cfg, args.device, dropped)
+            if answer.refusals or answer.roster is None or answer.roster["version"] != dropped["version"]:
+                print("\n".join(sent_report(args.device, dropped, answer)))
+                return 1
+            roster = {**roster, "version": min(roster["version"] + 1, VERSION_MAX)}
+        answer = send(cfg, args.device, roster)
     except (ConfigError, RosterError, OSError) as err:
         print(f"speakers: {err}", file=sys.stderr)
         return 2

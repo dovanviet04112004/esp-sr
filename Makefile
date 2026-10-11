@@ -542,7 +542,7 @@ listen-unit: ## Run svc_listen on board B over every Gate 3 session, round by ro
 
 ##@ Broker and host
 
-.PHONY: broker-up broker-down host-live commands speakers speaker-enrol
+.PHONY: broker-up broker-down host-live commands speakers speaker-enrol speaker-name speaker-forget
 broker-up: ## Start the bench MQTT broker (needs deploy/.env and deploy/emqx/users.csv)
 	@test -f deploy/.env || { echo "copy deploy/.env.example to deploy/.env and fill it"; exit 1; }
 	@test -f deploy/emqx/users.csv || { echo "copy deploy/emqx/users.csv.example to deploy/emqx/users.csv and fill it"; exit 1; }
@@ -563,6 +563,15 @@ speakers: ## Send a speaker roster to one board, retained, and show what it keep
 
 speaker-enrol: ## Enrol one person of the board's roster, prompting the commands to say: DEVICE=<deviceId> ID=spk_NNN [SET=<command set>] (E11-T31)
 	cd host && uv run python -m srhost.speakers --device "$(DEVICE)" --enrol "$(ID)" $(if $(SET),--set "$(abspath $(SET))")
+
+ROSTER ?= host/speakers/home_vi.json
+
+speaker-name: ## Rename one person of the roster file, or add them with CONSENT=, and send it: DEVICE=<deviceId> ID=spk_NNN NAME="<name>" [CONSENT=<code>] [ROSTER=<file>] (E11-T31)
+	cd host && uv run python -m srhost.speakers --device "$(DEVICE)" "$(abspath $(ROSTER))" --rename "$(ID)" \
+	  --name "$(NAME)" $(if $(CONSENT),--consent "$(CONSENT)")
+
+speaker-forget: ## Have the board drop one person's voiceprint and keep them on the roster: DEVICE=<deviceId> ID=spk_NNN [ROSTER=<file>] (E11-T31)
+	cd host && uv run python -m srhost.speakers --device "$(DEVICE)" "$(abspath $(ROSTER))" --forget "$(ID)"
 
 ##@ Recording sessions (KEHOACH 4.6)
 
