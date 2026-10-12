@@ -160,7 +160,7 @@ eval-speaker: ## EER of the pretrained extractors, and the owner's windows kept 
 
 SPEAKER_QUANT = $(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.speaker.quant
 
-.PHONY: speaker-import speaker-ptq speaker-int16 speaker-timing speaker-same-int8 speaker-deploy speed
+.PHONY: speaker-import speaker-ptq speaker-int16 speaker-timing speaker-same-int8 speaker-deploy speaker-music speed
 speaker-import: ## Import the survey's pretrained ReDimNet2 b0 as a run into ml/artifacts/speaker/runs
 	$(SPEAKER_QUANT) import
 
@@ -182,6 +182,11 @@ speaker-same-int8: ## Step 2.4: b0 as quant.py builds it now and at AGAINST, qua
 # The survey's material through the chip's own path, about 900 windows of b0's int8 simulation: run it in tmux.
 speaker-deploy: ## Lock a ladder row into firmware/models/speaker with its threshold set on the chip's path: RUN=<run> ROW=<row> [WORKERS=6] (E11-T26)
 	$(SPEAKER_QUANT) deploy $(RUN) --row $(ROW) $(if $(WORKERS),--workers $(WORKERS))
+
+# The survey's material quiet and at each music level, all through the chip's path: about four deploys' work, run it
+# in tmux.
+speaker-music: ## The locked row with music in the room: owner kept, strangers passing, into <run>/int8/<row>/music.yaml: RUN=<run> [WORKERS=6] (E11-T33)
+	$(SPEAKER_QUANT) music $(RUN) $(if $(WORKERS),--workers $(WORKERS))
 
 SPEED_LOG_speaker = $(UNIT_APP)/build_speaker/unit.log
 SPEED_ESPDL_speaker = ml/$(RUN)/int8/timing/speaker.espdl

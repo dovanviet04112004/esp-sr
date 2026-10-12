@@ -1,12 +1,13 @@
 """The speaker survey's figures: EER at the crossing, a threshold that lets at most the asked share of non-targets
-through, and EER over the pairs of a set of windows."""
+through, and EER over the pairs of a set of windows; music lands on a recording at the SNR asked."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from srpipe.scenes import speaker
+from srpipe.generated import grid
+from srpipe.scenes import device, speaker
 
 
 def test_eer_is_zero_when_apart_and_a_half_when_the_same() -> None:
@@ -59,3 +60,47 @@ def test_owner_figures_pool_a_distance_s_sessions_as_the_gate_reads_them() -> No
     assert figures["kept accepted d1 300"] == 0.5
     assert figures["kept accepted d2 300"] == pytest.approx(4 / 6)
     assert figures["kept accepted 300 cm"] == pytest.approx(6 / 10)
+
+
+def flat_pair() -> device.Microphones:
+    """Board B's pair with no difference between its microphones and no self noise."""
+    n = grid.N_BINS
+    return device.Microphones(
+        np.ones(n, dtype=np.complex64), np.linspace(0.0, grid.SAMPLE_RATE_HZ / 2, n), np.zeros(n), np.zeros(n), 0, 0, 0
+    )
+
+
+def recording(rng: np.random.Generator, hops: int, talk: np.ndarray) -> np.ndarray:
+    """A floor on both channels everywhere and a louder talker on the hops of talk, (samples, mics) int16."""
+    floor = 30.0 * rng.standard_normal((hops * speaker.HOP, 2))
+    voice = np.repeat(talk, speaker.HOP)[:, None] * 2000.0 * rng.standard_normal((hops * speaker.HOP, 1))
+    return np.clip(np.rint(floor + voice), -32768, 32767).astype(np.int16)
+
+
+def test_music_lands_at_the_snr_asked_over_the_talker_with_the_floor_taken_out() -> None:
+    rng, hops = np.random.default_rng(3), 200
+    talk = np.zeros(hops, dtype=bool)
+    talk[50:120] = True
+    pcm = recording(rng, hops, talk)
+    rirs = np.zeros((2, 2, 4), dtype=np.float32)
+    rirs[device.NOISE, :, 0] = 1.0
+    out = speaker.with_music(pcm, talk, rirs, rng.standard_normal(len(pcm)), 10.0, flat_pair())
+    added = out.astype(np.float64) - pcm
+    power = np.mean(pcm[:, 0].astype(np.float64).reshape(-1, speaker.HOP) ** 2, axis=1)
+    talker = power[talk].mean() - power[~talk].mean()
+    assert 10 * np.log10(talker / np.mean(added[:, 0] ** 2)) == pytest.approx(10.0, abs=0.05)
+    assert np.max(np.abs(added[:, 0] - added[:, 1])) <= 1.0
+
+
+def test_music_saturates_as_the_board_does_and_needs_speech_and_silence() -> None:
+    rng, hops = np.random.default_rng(4), 100
+    talk = np.zeros(hops, dtype=bool)
+    talk[20:60] = True
+    pcm = recording(rng, hops, talk)
+    rirs = np.zeros((2, 2, 1), dtype=np.float32)
+    rirs[device.NOISE, :, 0] = 1.0
+    music = rng.standard_normal(len(pcm))
+    loud = speaker.with_music(pcm, talk, rirs, music, -40.0, flat_pair())
+    assert loud.dtype == np.int16 and loud.max() == 32767 and loud.min() == -32768
+    with pytest.raises(ValueError, match="speech and hops without"):
+        speaker.with_music(pcm, np.zeros(hops, dtype=bool), rirs, music, 10.0, flat_pair())

@@ -2,14 +2,15 @@
 model.pt with its network's code; ptq rewrites it for esp-dl without changing what it computes, from its log-mel
 features to the embedding, quantises it with each calibration of rung 2 (3.14) into <run>/int8/<calibration>/, and
 rows each beside float in <run>/int8/ladder.yaml on the survey's material, keeping the board probe's window; int16 adds
-rung 3's rows on rung 2's best; deploy locks a row with its threshold into firmware/models/speaker/.
-Run: python -m srpipe.tasks.speaker.quant import | ptq|int16|timing|same-int8|deploy <run>"""
+rung 3's rows on rung 2's best; deploy locks a row with its threshold into firmware/models/speaker/; music scores the
+locked row with music in the room. Run: python -m srpipe.tasks.speaker.quant import | <command> <run>"""
 
 from __future__ import annotations
 
 import argparse
 import copy
 import importlib
+import json
 import math
 import shutil
 import sys
@@ -41,6 +42,7 @@ GRAPH_FILE = "graph.native"
 LADDER_FILE = "ladder.yaml"
 WINDOW_FILE = "board_window.npy"  # float log-mel (1, 1, mels, frames) the probe runs
 DEPLOY_FILE = "deploy.yaml"  # in <run>/int8/<row>/: the threshold, its figures
+MUSIC_FILE = "music.yaml"  # in <run>/int8/<row>/: its figures with music in the room
 COHORT_FILE, COHORT_ENTRY = "cohort.bin", "speaker_cohort"  # float32 rows of dims
 COHORT_STREAM = 3  # rng stream of the cohort, beside the survey's
 ASTP_FLOOR = 1e-7  # poolings.py ASTP's variance floor, at the pin
@@ -796,6 +798,147 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
     return update_lock.record(BRANCH, run, files, fields)
 
 
+def music_prints(
+    units: dict[str, list[np.ndarray]],
+    windows: dict[str, list],
+    survey_cfg: dict,
+    cohort_rows_: np.ndarray,
+    top: int,
+    swap: tuple[str, int],
+) -> dict[str, list[tuple]]:
+    """For each of threshold_table's enrolment draws of the owner's quiet windows, the voiceprint, its AS-norm mean and
+    deviation and the utterances it heard: as drawn ("quiet"), and with swap[1] of its windows swapped for windows of
+    condition swap[0] from the same enrolment group, none hearing an utterance the kept ones heard ("mixed")."""
+    owner = survey_cfg["owner"]
+    enrol_group = f"{owner['enrol']['date']} {owner['enrol']['distance_cm']}"
+    quiet = windows["quiet"]
+    pool = [i for i, w in enumerate(quiet) if w.spk == owner["spk"] and w.group == enrol_group]
+    rng = np.random.default_rng([survey_cfg["seed"], survey.ENROL_STREAM, speaker.ENROL_COMMANDS])
+    draws = [sorted(rng.choice(pool, speaker.ENROL_COMMANDS, replace=False).tolist()) for _ in range(owner["draws"])]
+    name, count = swap
+    other = windows[name]
+    swap_pool = [i for i, w in enumerate(other) if w.spk == owner["spk"] and w.group == enrol_group]
+    swap_rng = np.random.default_rng([survey_cfg["seed"], survey.MUSIC_STREAM])
+    prints: dict[str, list[tuple]] = {"quiet": [], "mixed": []}
+    for enrolled in draws:
+        heard = {k for i in enrolled for k in quiet[i].said}
+        made = score.voiceprint([units["quiet"][i] for i in enrolled])
+        prints["quiet"].append((made, score.norm(made, cohort_rows_, top), heard))
+        kept = enrolled[: speaker.ENROL_COMMANDS - count]
+        heard = {k for i in kept for k in quiet[i].said}
+        free = [j for j in swap_pool if not heard & set(other[j].said)]
+        swapped = sorted(swap_rng.choice(free, count, replace=False).tolist())
+        made = score.voiceprint([units["quiet"][i] for i in kept] + [units[name][j] for j in swapped])
+        heard |= {k for j in swapped for k in other[j].said}
+        prints["mixed"].append((made, score.norm(made, cohort_rows_, top), heard))
+    return prints
+
+
+def music_rows(
+    units: dict[str, list[np.ndarray]],
+    windows: dict[str, list],
+    survey_cfg: dict,
+    cohort: set[str],
+    prints: dict[str, list[tuple]],
+    cohort_rows_: np.ndarray,
+    top: int,
+    milli_z: int,
+) -> dict:
+    """Per condition, for each kind of prints: the owner's accepted windows kept at milli_z per distance, every print
+    against the windows that share no utterance with it, and the windows of the strangers outside the cohort passing,
+    with the owner's median score and the strangers' 99th percentile, both in thousandths (ADR-0023)."""
+    spk = survey_cfg["owner"]["spk"]
+    out = {}
+    for name, ws in windows.items():
+        u = units[name]
+        mine = [i for i, w in enumerate(ws) if w.spk == spk and w.accepted]
+        strangers = [i for i, w in enumerate(ws) if w.spk != spk and w.spk not in cohort]
+        unit_norms = {i: score.norm(u[i], cohort_rows_, top) for i in mine + strangers}
+        row: dict = {
+            "owner windows": sum(w.spk == spk for w in ws),
+            "accepted": len(mine),
+            "stranger windows": len(strangers),
+        }
+        for kind, made in prints.items():
+            targets: list[tuple[int, str]] = []
+            passing: list[int] = []
+            for p, norm, heard in made:
+                for i in mine:
+                    if not heard & set(ws[i].said):
+                        targets.append((score.best(u[i], [p], [norm], unit_norms[i])[0], ws[i].group.split()[-1]))
+                passing += [score.best(u[i], [p], [norm], unit_norms[i])[0] for i in strangers]
+            kept = {
+                f"{d} cm": float(np.mean([s >= milli_z for s, at in targets if at == d]))
+                for d in sorted({at for _, at in targets})
+            }
+            row[kind] = {
+                "kept accepted": kept,
+                "strangers passing": float(np.mean([s >= milli_z for s in passing])),
+                "owner median milli_z": int(np.median([s for s, _ in targets])),
+                "stranger p99 milli_z": int(np.percentile(passing, 99)),
+            }
+        out[name] = row
+    return out
+
+
+def music_table(body: dict) -> str:
+    """music.yaml's figures as a markdown table, percentages."""
+    lines = [
+        f"Threshold {body['milli_z']} thousandths, one person; voiceprint quiet / mixed:",
+        "",
+        "| condition | accepted | kept 1 m | kept 3 m | strangers passing | owner median | stranger p99 |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for name, row in body["conditions"].items():
+        q, m = row["quiet"], row["mixed"]
+        cells = [
+            f"{row['accepted']}/{row['owner windows']}",
+            *(
+                f"{100 * q['kept accepted'].get(d, math.nan):.1f}% / {100 * m['kept accepted'].get(d, math.nan):.1f}%"
+                for d in ("100 cm", "300 cm")
+            ),
+            f"{100 * q['strangers passing']:.2f}% / {100 * m['strangers passing']:.2f}%",
+            f"{q['owner median milli_z']} / {m['owner median milli_z']}",
+            f"{q['stranger p99 milli_z']} / {m['stranger p99 milli_z']}",
+        ]
+        lines.append(f"| {name} | {' | '.join(cells)} |")
+    return "\n".join(lines)
+
+
+def music(cfg: dict, run: Path, paths: dict, workers: int) -> dict:
+    """The locked row with music in the room (E11-T33): the survey's material quiet, then at each SNR of
+    music.snr_db the owner's sessions with music from a room of the bank and the strangers' with a file of the same
+    pool, every window through the chip's path; scored by music_rows with the lock's cohort and one person's threshold,
+    into <run>/int8/<row>/music.yaml. Refused for a run the lock does not deploy."""
+    lock = json.loads(pack_models.LOCK.read_text(encoding="utf-8"))["models"][BRANCH]
+    if lock["run"] != run.name:
+        raise ValueError(f"the lock deploys {lock['run']}, not {run.name}")
+    folder = run / INT8_DIR / lock["row"]
+    graph = export_espdl.load_native(folder / GRAPH_FILE)
+    wrap, front = load_wrap(run), spk_fbank.SpkFbank(spk_fbank.contract_config())
+    survey_cfg, m = load_yaml(CONFIGS / cfg["source"]["survey"]), cfg["music"]
+    vads: dict = {}
+    owner = survey.owner_windows(survey_cfg, paths, vads=vads)
+    windows = {"quiet": owner + survey.impostor_windows(survey_cfg, paths, workers)}
+    for snr in m["snr_db"]:
+        pcm_of = survey.MusicPcm(survey_cfg, vads, snr, m["pool"], paths, cfg["quant"]["seed"])
+        owner = survey.owner_windows(survey_cfg, paths, pcm_of=pcm_of)
+        windows[f"{snr:g} dB"] = owner + survey.impostor_windows(survey_cfg, paths, workers, (m["pool"], snr))
+    units = {}
+    for name, ws in windows.items():
+        units[name] = chip_units(graph, cfg["esp_ppq_patches"], ws, front, wrap)[0]
+        print(f"{name}: {len(ws)} windows through the chip's path", flush=True)
+    cohort_rows_, top = deployed_cohort(lock, len(units["quiet"][0])), deployed_top(lock)
+    milli_z = int(lock["threshold"]["milli_z"][0])
+    swap = (f"{m['mixed_snr_db']:g} dB", m["mixed_windows"])
+    prints = music_prints(units, windows, survey_cfg, cohort_rows_, top, swap)
+    cohort = cohort_speakers(windows["quiet"], survey_cfg)
+    rows = music_rows(units, windows, survey_cfg, cohort, prints, cohort_rows_, top, milli_z)
+    body = {"run": run.name, "row": lock["row"], "milli_z": milli_z, "music": m, "conditions": rows}
+    (folder / MUSIC_FILE).write_text(yaml.safe_dump(body, sort_keys=False), encoding="utf-8")
+    return body
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -819,10 +962,17 @@ def main(argv: list[str] | None = None) -> int:
     lock.add_argument("run", type=Path)
     lock.add_argument("--row", required=True, help="a row of <run>/int8/ladder.yaml")
     lock.add_argument("--workers", type=int, default=8)
+    noisy = sub.add_parser("music", help="the locked row with music in the room at each SNR of music.snr_db")
+    noisy.add_argument("run", type=Path)
+    noisy.add_argument("--workers", type=int, default=8)
     args = parser.parse_args(argv)
     cfg = load_yaml(CONFIG)
     if args.command == "import":
         print(import_run(cfg, data_paths()))
+    elif args.command == "music":
+        body = music(cfg, args.run, data_paths(), args.workers)
+        print(music_table(body))
+        print(args.run / INT8_DIR / body["row"] / MUSIC_FILE)
     elif args.command == "deploy":
         for path in deploy(cfg, args.run, args.row, data_paths(), args.workers):
             print(path)

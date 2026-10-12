@@ -382,3 +382,57 @@ def test_members_windows_are_kept_and_named_as_their_own_beside_the_owners() -> 
         assert count["named right"] == {"owner": 1.0, "members": 1.0}
         kept = [count["shares"][share]["members kept"] for share in (0.01, 0.05)]
         assert 0.0 <= kept[0] <= kept[1] <= 1.0
+
+
+def music_material(rng) -> tuple[dict, dict, dict, set]:
+    """Two conditions of one owner and 60 strangers: the owner's enrolment session at 1 m and a test session at 3 m,
+    each window hearing its own utterance, alike in both; with music, the owner's units pulled towards a direction of
+    their own. The first half of the strangers is the cohort."""
+    import numpy as np
+
+    from srpipe.scenes import speaker as survey
+
+    dims = 16
+    axis, music_axis = np.eye(dims, dtype=np.float32)[:2]
+
+    def around(v: np.ndarray, spread: float) -> np.ndarray:
+        x = v + spread * rng.standard_normal(dims).astype(np.float32)
+        return (x / np.linalg.norm(x)).astype(np.float32)
+
+    strangers = [around(np.zeros(dims, dtype=np.float32), 1.0) for _ in range(60)]
+    windows, units = {}, {}
+    for name, pull in (("quiet", 0.0), ("10 dB", 0.8)):
+        owner = [survey.Window("owner", "20260928 100", np.zeros(1), True, (f"a#{k}",)) for k in range(16)]
+        owner += [survey.Window("owner", "20261007 300", np.zeros(1), True, (f"b#{k}",)) for k in range(12)]
+        others = [survey.Window(f"s{k}", "near", np.zeros(1)) for k in range(60)]
+        windows[name] = owner + others
+        units[name] = [around((1.0 - pull) * axis + pull * music_axis, 0.15) for _ in owner] + strangers
+    cfg = {"seed": 1, "owner": {"spk": "owner", "enrol": {"date": "20260928", "distance_cm": "100"}, "draws": 4}}
+    return units, windows, cfg, {f"s{k}" for k in range(30)}
+
+
+def test_music_prints_swap_windows_for_ones_of_other_utterances_and_keep_the_quiet_draws() -> None:
+    import numpy as np
+
+    units, windows, cfg, cohort = music_material(np.random.default_rng(8))
+    rows = np.stack([units["quiet"][i] for i, w in enumerate(windows["quiet"]) if w.spk in cohort])
+    prints = quant.music_prints(units, windows, cfg, rows, 20, ("10 dB", 5))
+    assert [len(p) for p in prints.values()] == [4, 4]
+    for (_, _, quiet_heard), (_, _, mixed_heard) in zip(prints["quiet"], prints["mixed"], strict=True):
+        assert len(quiet_heard) == len(mixed_heard) == 10
+        assert len(quiet_heard & mixed_heard) >= 5
+
+
+def test_music_moves_the_owner_under_the_threshold_and_a_mixed_voiceprint_brings_some_back() -> None:
+    import numpy as np
+
+    units, windows, cfg, cohort = music_material(np.random.default_rng(9))
+    rows = np.stack([units["quiet"][i] for i, w in enumerate(windows["quiet"]) if w.spk in cohort])
+    prints = quant.music_prints(units, windows, cfg, rows, 20, ("10 dB", 5))
+    table = quant.music_rows(units, windows, cfg, cohort, prints, rows, 20, 2000)
+    quiet, music = table["quiet"], table["10 dB"]
+    assert quiet["stranger windows"] == 30 and quiet["accepted"] == 28
+    assert quiet["quiet"]["kept accepted"]["300 cm"] == 1.0
+    assert music["quiet"]["kept accepted"]["300 cm"] < 0.5 < music["mixed"]["kept accepted"]["300 cm"]
+    assert music["quiet"]["owner median milli_z"] < quiet["quiet"]["owner median milli_z"]
+    assert music["quiet"]["strangers passing"] == quiet["quiet"]["strangers passing"]

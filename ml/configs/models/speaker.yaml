@@ -33,6 +33,11 @@ deploy:                            # make speaker-deploy RUN= ROW= (E11-T26, KEH
   shares: [0.01, 0.05]             # impostors passing: the first, unless a distance then keeps under keep_min
   keep_min: 0.95                   # accepted commands kept at each distance, its sessions pooled
   cohort_top: 100                  # cohort rows AS-norm averages over at each side (ADR-0023)
+music:                             # make speaker-music RUN=: the locked row with music in the room (E11-T33)
+  pool: {dir: noise/musan/musan/music, glob: "**/*.wav", weight: 1}   # under raw/, as scenes/device.yaml lists it
+  snr_db: [20, 10, 5]              # the talker's speech hops over the whole music at ch0
+  mixed_snr_db: 10                 # the condition the mixed voiceprint takes its music windows from
+  mixed_windows: 5                 # of the 10 enrolment windows, those swapped for windows with music
 probe:                             # E11-T25: one row's graph on board B (make ai-unit-speaker)
   runs: 10                         # timed runs on the board, after one untimed
   cuts: 4                          # copies of the graph cut at tensors spread over its ops, each model->test()ed
