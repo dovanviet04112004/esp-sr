@@ -17,6 +17,7 @@ extern "C" {
 #define AI_ENGINE_VARIANTS_MAX 4
 #define AI_ENGINE_COMMANDS_MAX 64
 #define AI_ENGINE_SPEAKER_DIMS_MAX 256 // the speaker embedding's dimensions
+#define AI_ENGINE_SPEAKER_NOISE_BINS 4 // the last the quietest (ADR-0024)
 
 typedef enum {
     AI_ENGINE_MODEL_NS = 0,
@@ -144,12 +145,20 @@ esp_err_t ai_engine_speaker_norm(const float *voiceprint, float *mean, float *st
 int16_t ai_engine_speaker_best(const float *unit, const float *prints, const float *means, const float *stds,
                                size_t n, size_t *index, int16_t *cosine_permille);
 
-/** Whether a best score over prints voiceprints, thousandths of the AS-norm score, reaches the image's
- * threshold for that many (KEHOACH 3.17, 6.3).
+/** A command window's noise bin from its int16 samples summed squared over the lead ahead of its utterance
+ * and over the utterance, against the image's edges (ADR-0024): 0 the noisiest; the quietest,
+ * AI_ENGINE_SPEAKER_NOISE_BINS - 1, with no lead, a silent one, no utterance or no speaker.
  *  @ctx any | non-blocking
- *  @ret false with no voiceprint, or more than APP_SPEAKERS_MAX
  */
-bool ai_engine_speaker_passes(int16_t milli_z, size_t prints);
+uint8_t ai_engine_speaker_noise_bin(uint64_t lead_energy, uint32_t lead_samples, uint64_t speech_energy,
+                                    uint32_t speech_samples);
+
+/** Whether a best score over prints voiceprints, thousandths of the AS-norm score, reaches the image's
+ * threshold for that many in that noise bin (KEHOACH 3.17, 6.3, ADR-0024).
+ *  @ctx any | non-blocking
+ *  @ret false with no voiceprint, more than APP_SPEAKERS_MAX, or a bin past the quietest
+ */
+bool ai_engine_speaker_passes(int16_t milli_z, size_t prints, uint8_t noise_bin);
 
 /** The id of the loaded speaker entry, the first four bytes of its sha256, that a voiceprint belongs to.
  *  @ctx any | non-blocking

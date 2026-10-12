@@ -186,13 +186,14 @@ static void raise_decision(const app_wiring_t *w, const svc_listen_decision_t *d
     send_up(w, e);
     ESP_LOGI(TAG,
              "%s %s score %u margin %u gap %u syllable %u, hops %" PRIu32 "..%" PRIu32 ", %" PRIu32
-             " ms work, %" PRIu32 " ms after the close, speaker %d milli-z %d %s %u in %" PRIu32 " ms",
+             " ms work, %" PRIu32 " ms after the close, speaker %d milli-z %d %s %u noise %u in %" PRIu32
+             " ms",
              e->kind == APP_EVT_COMMAND ? "COMMAND" : "REJECT",
              e->kind == APP_EVT_COMMAND ? e->command_id : e->code, (unsigned)e->score_permille,
              (unsigned)e->margin_permille, (unsigned)d->free_gap_permille, (unsigned)d->syllable_gap_permille,
              d->first_seq, e->seq, d->work_us / US_PER_MS, d->close_us / US_PER_MS,
              e->has_speaker ? d->speaker_milli_z : 0, e->has_speaker ? e->speaker_permille : 0,
-             e->speaker_id[0] != '\0' ? e->speaker_id : "-", (unsigned)e->enrol_count,
+             e->speaker_id[0] != '\0' ? e->speaker_id : "-", (unsigned)e->enrol_count, (unsigned)d->noise_bin,
              d->verify_us / US_PER_MS);
 }
 

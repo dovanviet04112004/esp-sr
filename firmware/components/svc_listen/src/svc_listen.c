@@ -39,6 +39,7 @@ _Static_assert(RING_HOPS > TAIL_HOPS, "the PCM ring holds a speaker window");
 
 typedef struct {
     uint32_t first, last; // hops, both in; last moves on while it is open
+    uint32_t speech;      // the utterance's first vad hop
     uint32_t floor;       // no window reaches back past this hop
     bool open;            // its utterance still runs
     bool cut_back;        // outgrew WINDOW_HOPS: worked from its end once closed
@@ -53,6 +54,8 @@ typedef struct {
 typedef struct {
     int16_t pcm[GEN_SPEAKER_WINDOW_SAMPLES];
     svc_listen_decision_t decision;
+    uint64_t lead_energy, speech_energy; // int16 squared: its lead, its utterance
+    uint32_t lead_samples, speech_samples;
 } verify_slot_t;
 
 typedef struct {
@@ -384,8 +387,8 @@ static esp_err_t open_utterance(uint32_t seq)
     s.run_first = seq;
     if (s.count == WINDOWS_MAX) { return ESP_ERR_NO_MEM; }
     const uint32_t lead = seq >= LEAD_HOPS ? seq - LEAD_HOPS : 0;
-    s.queue[(s.head + s.count) % WINDOWS_MAX] =
-        (window_t){.first = lead > s.after ? lead : s.after, .last = seq, .floor = s.after, .open = true};
+    s.queue[(s.head + s.count) % WINDOWS_MAX] = (window_t){
+        .first = lead > s.after ? lead : s.after, .last = seq, .speech = seq, .floor = s.after, .open = true};
     s.count++;
     s.has_open = true;
     return ESP_OK;
@@ -504,6 +507,7 @@ static void decide(const window_t *w, const ai_engine_command_result_t *r, svc_l
         strlcpy(e->code, code, sizeof(e->code));
     }
     out->first_seq = w->first;
+    out->speech_seq = w->speech;
     out->free_gap_permille = r->free_gap_permille;
     out->syllable_gap_permille = r->syllable_gap_permille;
     out->work_us = (uint32_t)s.work_us;
@@ -575,6 +579,33 @@ bool svc_listen_verifies(void)
     return s.ready && s.pcm_ring != NULL && atomic_load(&s_diverting);
 }
 
+static uint64_t energy_of(uint32_t from, uint32_t to)
+{
+    uint64_t total = 0;
+    for (uint32_t h = from; h != to; h++) {
+        const int16_t *x = s.pcm_ring[h % RING_HOPS];
+        for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
+            total += (uint64_t)((int32_t)x[i] * x[i]);
+        }
+    }
+    return total;
+}
+
+// A lead the ring has passed leaves the sums empty: the noise bin is then the quietest (ADR-0024).
+static void weigh_noise(const svc_listen_decision_t *decision, verify_slot_t *v)
+{
+    const uint32_t first = decision->first_seq;
+    const uint32_t last = decision->event.seq;
+    const uint32_t speech = decision->speech_seq > first ? decision->speech_seq : first;
+    v->lead_energy = v->speech_energy = 0;
+    v->lead_samples = v->speech_samples = 0;
+    if (s.next_seq - first > RING_HOPS || speech > last) { return; }
+    v->lead_energy = energy_of(first, speech);
+    v->lead_samples = (speech - first) * GEN_GRID_HOP_SAMPLES;
+    v->speech_energy = energy_of(speech, last + 1);
+    v->speech_samples = (last + 1 - speech) * GEN_GRID_HOP_SAMPLES;
+}
+
 // The window's last TAIL_HOPS hops, less the oldest samples past a speaker window, zeros ahead of a shorter
 // one.
 esp_err_t svc_listen_hold(const svc_listen_decision_t *decision, uint8_t slot)
@@ -599,6 +630,7 @@ esp_err_t svc_listen_hold(const svc_listen_decision_t *decision, uint8_t slot)
         skip -= off;
     }
     v->decision = *decision;
+    weigh_noise(decision, v);
     return ESP_OK;
 }
 
@@ -711,7 +743,11 @@ esp_err_t svc_listen_verify(uint8_t slot, svc_listen_decision_t *out)
                                                   &out->event.speaker_permille);
     out->event.has_speaker = true;
     strlcpy(out->event.speaker_id, k->roster->slot[k->print_slot[best]].id, sizeof(out->event.speaker_id));
-    if (!ai_engine_speaker_passes(out->speaker_milli_z, k->n_prints)) { reject_as(out, APP_CODE_SPEAKER); }
+    out->noise_bin =
+        ai_engine_speaker_noise_bin(v->lead_energy, v->lead_samples, v->speech_energy, v->speech_samples);
+    if (!ai_engine_speaker_passes(out->speaker_milli_z, k->n_prints, out->noise_bin)) {
+        reject_as(out, APP_CODE_SPEAKER);
+    }
     return ESP_OK;
 }
 

@@ -20,6 +20,8 @@ constexpr int kInt8Min = -128;
 constexpr int kInt8Max = 127;
 constexpr size_t kFeatures = GEN_SPEAKER_N_FRAMES * GEN_SPEAKER_N_BANDS;
 static_assert(STORAGE_SPK_NOISE_EDGES == 3, "the refusal names three edges");
+static_assert(AI_ENGINE_SPEAKER_NOISE_BINS == STORAGE_SPK_NOISE_EDGES + 1,
+              "a bin past each edge, and one below");
 
 struct Speaker {
     bool ready;
@@ -31,9 +33,11 @@ struct Speaker {
     const float *cohort; // in place in the mapped image, rows of the output's dims
     size_t cohort_rows;
     size_t cohort_top;
-    float *cohort_scores;   // a vector's dot product with each row, PSRAM
-    uint16_t *cohort_order; // its rows ranked, PSRAM
-    int16_t thresholds[APP_SPEAKERS_MAX];
+    float *cohort_scores;                 // a vector's dot product with each row, PSRAM
+    uint16_t *cohort_order;               // its rows ranked, PSRAM
+    int16_t thresholds[APP_SPEAKERS_MAX]; // the quietest bin's
+    float noise_edges[STORAGE_SPK_NOISE_EDGES];
+    int16_t noisy[APP_SPEAKERS_MAX * STORAGE_SPK_NOISE_EDGES]; // per count, the noisier bins
     uint32_t model_id;
 };
 
@@ -125,6 +129,8 @@ esp_err_t speaker_load() noexcept
     for (size_t n = 1; n <= APP_SPEAKERS_MAX; n++) {
         s.thresholds[n - 1] = image_speaker_threshold_milli_z(n);
     }
+    memcpy(s.noise_edges, image_speaker_noise_edges(), sizeof(s.noise_edges));
+    memcpy(s.noisy, image_speaker_noisy_milli_z(), sizeof(s.noisy));
     s.model_id = image_entry_id(kEntry, STORAGE_MODEL_KIND_ESPDL);
     s.ready = true;
     ESP_LOGI(
@@ -134,6 +140,9 @@ esp_err_t speaker_load() noexcept
         kEntry, (unsigned)GEN_SPEAKER_N_FRAMES, (unsigned)GEN_SPEAKER_N_BANDS, (unsigned)s.out.elements,
         (unsigned)s.cohort_rows, (unsigned)s.cohort_top, s.thresholds[0], s.thresholds[APP_SPEAKERS_MAX - 1],
         APP_SPEAKERS_MAX, (unsigned)s.model_id);
+    ESP_LOGI(TAG, "%s: noise edges %g, %g, %g; one voiceprint's thresholds %d, %d, %d by noisiest bin",
+             kEntry, (double)s.noise_edges[0], (double)s.noise_edges[1], (double)s.noise_edges[2], s.noisy[0],
+             s.noisy[1], s.noisy[2]);
     return ESP_OK;
 }
 
@@ -189,10 +198,22 @@ void ai_engine_speaker_voiceprint(const float *units, size_t n, float *voiceprin
     ai_engine_speaker_fold(units, n, s.out.elements, voiceprint);
 }
 
-bool ai_engine_speaker_passes(int16_t milli_z, size_t prints)
+uint8_t ai_engine_speaker_noise_bin(uint64_t lead_energy, uint32_t lead_samples, uint64_t speech_energy,
+                                    uint32_t speech_samples)
 {
-    if (prints == 0 || prints > APP_SPEAKERS_MAX) { return false; }
-    return ai_engine_speaker_accepts(milli_z, s.thresholds[prints - 1]);
+    if (!s.ready) { return AI_ENGINE_SPEAKER_NOISE_BINS - 1; }
+    return ai_engine_speaker_noise_bin_of(lead_energy, lead_samples, speech_energy, speech_samples,
+                                          s.noise_edges, STORAGE_SPK_NOISE_EDGES);
+}
+
+bool ai_engine_speaker_passes(int16_t milli_z, size_t prints, uint8_t noise_bin)
+{
+    if (prints == 0 || prints > APP_SPEAKERS_MAX || noise_bin >= AI_ENGINE_SPEAKER_NOISE_BINS) {
+        return false;
+    }
+    return ai_engine_speaker_accepts(
+        milli_z,
+        ai_engine_speaker_threshold_of(s.thresholds, s.noisy, STORAGE_SPK_NOISE_EDGES, prints, noise_bin));
 }
 
 uint32_t ai_engine_speaker_model_id(void)

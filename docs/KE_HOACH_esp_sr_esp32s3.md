@@ -2531,7 +2531,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 |---|---|---|
 | `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame`, `spk_fbank_run` (khâu đặc trưng của b0, §3.17) | any, không chặn, người gọi giữ bộ nhớ |
 | `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_entry`, `lang_vi_unit_name` | any, không chặn |
-| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,voiceprint,norm,best,passes,model_id}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,2 s, chỉ ở `xac_task` |
+| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,voiceprint,norm,best,noise_bin,passes,model_id}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,2 s, chỉ ở `xac_task` |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |
 | `svc_*` | `svc_<x>_init`, `svc_<x>_step` | task, gọi từ đúng task của bảng §5.2 |
 
@@ -2550,6 +2550,11 @@ cửa sổ mở thì không làm gì: `svc_listen` gọi nó mỗi khi thôi ch�
 bộ lệnh khi không có cửa sổ mở. Với `kws`, điểm là xác suất lớp thắng, khoảng cách tới
 lớp nhì, xác suất của `other` cộng `silence`, và 0; bảng lệnh truyền vào chỉ được kiểm là có đủ các lớp lệnh, ở `_prepare`
 cũng như ở `_score`.
+
+**`ai_engine_speaker_passes` nhận dải độ ồn của cửa sổ** (ADR-0024). `ai_engine_speaker_noise_bin` nhận hai tổng bình
+phương mẫu int16 của cửa sổ lệnh, một trên đoạn trước lời và một trên đoạn lời, cùng số mẫu mỗi đoạn, rồi trả dải
+0…`AI_ENGINE_SPEAKER_NOISE_BINS` − 1 theo biên của ảnh (§3.17). `passes(milli_z, prints, noise_bin)` so điểm với ngưỡng
+của số người ấy ở dải ấy. Ảnh không mang biên thì mọi cửa sổ vào dải yên nhất, nên chấm như ADR-0023.
 
 **`ai_engine_ns_ops()` và khe `dsp_afe_ns_ops_t` giữ nguyên cho cả hai ứng viên của `ns`** (§3.9): khe nhận công suất
 257 vạch cùng phổ vọng dư khi có, trả 257 gain trong 0..1 và `speech_prob`. Khe có bốn hàm: cỡ trạng thái, `init` dựng

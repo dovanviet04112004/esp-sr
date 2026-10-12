@@ -38,12 +38,14 @@ typedef struct {
 typedef struct {
     app_event_t event;              // COMMAND or REJECT; seq is the window's last hop
     uint32_t first_seq;             // the window's first hop
+    uint32_t speech_seq;            // its utterance's first vad hop
     uint16_t free_gap_permille;     // free unit loop over the best command
     uint16_t syllable_gap_permille; // free loop over its worst syllable
     uint32_t work_us;               // network and score of the window
     uint32_t close_us;              // from the utterance's close to the decision
     uint32_t verify_us;             // the speaker check, 0 without one
     int16_t speaker_milli_z;        // the best voiceprint's score, with has_speaker
+    uint8_t noise_bin;              // of the speaker check, ADR-0024
 } svc_listen_decision_t;
 
 /** Read the commands, prepare ai_engine, take the rings and tables, and with speaker the PCM ring, the verify

@@ -293,7 +293,7 @@ TEST_CASE("the speaker chain enrols a full roster and scores every window agains
         const int64_t took_us = esp_timer_get_time() - from_us;
         score_us += took_us;
         score_peak_us = took_us > score_peak_us ? took_us : score_peak_us;
-        const bool passes = ai_engine_speaker_passes(score, head.prints);
+        const bool passes = ai_engine_speaker_passes(score, head.prints, AI_ENGINE_SPEAKER_NOISE_BINS - 1);
         off += score != want.milli_z || (int32_t)best != want.best || passes != (want.passes != 0) ||
                cosine != want.cosine_permille;
         tried[want.kind]++;
