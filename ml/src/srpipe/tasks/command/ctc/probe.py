@@ -70,7 +70,7 @@ LISTEN_MAGIC = b"SRLS"
 SPEAKER_ON, SPEAKER_AFRESH = 1, 2  # check on; voiceprint erased first (KEHOACH 3.17)
 SESSION_HEAD = struct.Struct("<IHHHxx")  # hops, segments, windows, an enrolment starting ahead of it
 SEGMENT_HEAD = struct.Struct("<II")  # first hop, hops; their int16 samples follow
-WINDOW_RECORD = struct.Struct("<IIhHHHHhhH")  # hops, decision, AS-norm milli or count, cosine, code
+WINDOW_RECORD = struct.Struct("<IIhHHHHhhBB")  # hops, decision, milli-z or count, cosine, code, noise bin
 NO_CHECK, PASSED, STOPPED, UNENROLLED, ENROLLING = range(5)  # a window's speaker code
 
 
@@ -308,12 +308,12 @@ def probe(
 
 def listen_session(
     clean: np.ndarray, vad: np.ndarray, decided_of: Callable, tracker, mel: Mel
-) -> tuple[list[list[int]], list[tuple[int, int]], list[list[int]]]:
+) -> tuple[list[list[int]], list[tuple[int, int]], list[list[int]], list[int]]:
     """A board session with the silence eval.heard_rows puts after it, as svc_listen's test feeds it: the segments of
-    every hop a command window reads and the hop ahead of it, which the STFT of the window's first hop overlaps, and
-    each window with the decision decided_of(window) takes; hops outside the segments are fed as zeros, which no
-    window's log-mel reads. The windows' log-mel and pitch are computed afresh over that fed stream, as svc_listen
-    does after the jump in seq the test puts between sessions."""
+    every hop a command window reads and the hop ahead of it, which the STFT of the window's first hop overlaps, each
+    window with the decision decided_of(window) takes, and its utterance's first vad hop; hops outside the segments
+    are fed as zeros, which no window's log-mel reads. The windows' log-mel and pitch are computed afresh over that fed
+    stream, as svc_listen does after the jump in seq the test puts between sessions."""
     hop, spans = grid.HOP_SAMPLES, device.utterances(vad)
     ranges = device.command_cut(spans)
     segments: list[list[int]] = []
@@ -329,19 +329,19 @@ def listen_session(
     stft = Stft()
     features = np.stack([mel.log(stft.analyze(to_float(h))) for h in fed.reshape(-1, hop)]).astype(np.float32)
     windows = gate.ctc_windows(features, device.stream_pitch(tracker, fed), spans)
-    return segments, ranges, [list(decided_of(x)) for x in windows]
+    return segments, ranges, [list(decided_of(x)) for x in windows], [first for first, _ in spans]
 
 
 def session_body(
     clean: np.ndarray,
     vad: np.ndarray,
-    laid: tuple[list[list[int]], list[tuple[int, int]], list[list[int]]],
-    speaker_of: list[tuple[int, int]],
+    laid: tuple[list[list[int]], list[tuple[int, int]], list[list[int]], list[int]],
+    speaker_of: list[tuple[int, int, int, int]],
     enrol: bool,
 ) -> bytes:
     """The session's record as svc_listen's test reads it: SESSION_HEAD, vad, segments, then each window with its
-    decision and the speaker check's permille and code (KEHOACH 3.17)."""
-    segments, ranges, decisions = laid
+    decision and the speaker check's value, cosine, code and noise bin (KEHOACH 3.17, ADR-0024)."""
+    segments, ranges, decisions, _ = laid
     hop = grid.HOP_SAMPLES
     body = SESSION_HEAD.pack(len(vad), len(segments), len(ranges), int(enrol))
     body += np.packbits(vad.astype(np.uint8), bitorder="little").tobytes()
@@ -392,16 +392,27 @@ def enrolment_session(sessions: list[tuple], laid: list[tuple], rounds: list[lis
     raise ValueError(f"no session of {owner['spk']} in {group} has {speaker.ENROL_COMMANDS} commands left in its round")
 
 
-def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> list[list[tuple[int, int, int]]]:
-    """Each window's (value, cosine, code) as svc_listen checks it with the check on from the replay's start and the
-    owner alone on the roster, their voiceprint erased: a command ahead of session enrol_at is UNENROLLED, the first
-    speaker.ENROL_COMMANDS from it on enrol, the value counting them, every later one is scored with the best over the
-    one voiceprint by AS-norm over the deployed cohort's top, the value its thousandths, at the lock's threshold for
-    one, on the chip's path (KEHOACH 3.17, ADR-0023)."""
+def noise_bin_of(clean: np.ndarray, layout: tuple, w: int, edges: list[np.float32]) -> int:
+    """The noise bin svc_listen gives window w of a laid-out session: its samples summed squared over the lead ahead of
+    its utterance's first vad hop and over the rest, against edges (ADR-0024)."""
+    (start, end), first = layout[1][w], layout[3][w]
+    pcm = clean[start * grid.HOP_SAMPLES : (end + 1) * grid.HOP_SAMPLES]
+    return score.noise_bin(*score.noise_energies(pcm, max(0, first - start)), edges)
+
+
+def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> list[list[tuple[int, int, int, int]]]:
+    """Each window's (value, cosine, code, noise bin) as svc_listen checks it with the check on from the replay's start
+    and the owner alone on the roster, their voiceprint erased: a command ahead of session enrol_at is UNENROLLED, the
+    first speaker.ENROL_COMMANDS from it on enrol, the value counting them; every later one is scored with the best
+    over the one voiceprint by AS-norm over the deployed cohort's top, the value its thousandths, at the lock's
+    threshold for one in the window's noise bin, on the chip's path (KEHOACH 3.17, ADR-0023, ADR-0024)."""
     lock = json.loads(update_lock.LOCK.read_text(encoding="utf-8"))["models"][spk.BRANCH]
     run = ML_ROOT / "artifacts" / spk.BRANCH / "runs" / lock["run"]
     graph = export_espdl.load_native(run / spk.INT8_DIR / lock["row"] / spk.GRAPH_FILE)
-    patches, threshold = load_yaml(spk.CONFIG)["esp_ppq_patches"], int(lock["threshold"]["milli_z"][0])
+    patches, quiet = load_yaml(spk.CONFIG)["esp_ppq_patches"], [int(t) for t in lock["threshold"]["milli_z"]]
+    noise = lock["threshold"].get("noise", {})
+    edges = [np.float32(e) for e in noise.get("edges", [0.0] * pack_models.NOISE_EDGES)]
+    noisy = noise.get("milli_z", [[0] * pack_models.NOISE_EDGES] * pack_models.SPEAKERS)
     front = spk_fbank.SpkFbank(spk_fbank.contract_config())
     checked = [(k, w) for k in range(enrol_at, len(sessions)) for w in accepted_of(laid[k])]
     found = [survey.Window("board", "", survey.window_of(sessions[k][1], *laid[k][1][w])) for k, w in checked]
@@ -413,16 +424,18 @@ def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> l
     norms = [score.norm(voiceprint, cohort, top)]
     out = []
     for k, layout in enumerate(laid):
-        codes = [(0, 0, NO_CHECK)] * len(layout[1])
+        codes = [(0, 0, NO_CHECK, 0)] * len(layout[1])
         for w in accepted_of(layout):
             if k < enrol_at:
-                codes[w] = (0, 0, UNENROLLED)
+                codes[w] = (0, 0, UNENROLLED, 0)
             elif (k, w) in enrolling:
-                codes[w] = (enrolling.index((k, w)) + 1, 0, ENROLLING)
+                codes[w] = (enrolling.index((k, w)) + 1, 0, ENROLLING, 0)
             else:
                 u = unit_of[(k, w)]
                 z, _, cosine = score.best(u, [voiceprint], norms, score.norm(u, cohort, top))
-                codes[w] = (z, cosine, PASSED if score.accepts(z, threshold) else STOPPED)
+                b = noise_bin_of(sessions[k][1], layout, w, edges)
+                passes = score.accepts(z, score.threshold_of(quiet, noisy, 1, b))
+                codes[w] = (z, cosine, PASSED if passes else STOPPED, b)
         out.append(codes)
     return out
 
@@ -463,7 +476,7 @@ def listen_rounds(cfg: dict, out: Path, speaker_on: bool = False) -> list[Path]:
     named += b"\0" * (-(LISTEN_HEAD.size + len(named)) % 4)
     sessions = [(row, clean, vad) for row, clean, vad, _f, _p in gate.heard_sessions(trained.cfg, spec, data_paths())]
     laid = [listen_session(clean, vad, decided_of, tracker, mel) for _, clean, vad in sessions]
-    checks = [[(0, 0, NO_CHECK)] * len(layout[1]) for layout in laid]
+    checks = [[(0, 0, NO_CHECK, 0)] * len(layout[1]) for layout in laid]
     bodies = [
         session_body(clean, vad, layout, checked, False)
         for (_, clean, vad), layout, checked in zip(sessions, laid, checks, strict=True)

@@ -156,7 +156,7 @@ def test_gate_3_counts_the_chips_decisions_and_refuses_a_log_missing_a_window(tm
 def unchecked_body(clean: np.ndarray, vad: np.ndarray, tracker, mel) -> bytes:
     """A session's record as listen_rounds writes it with the speaker check off, each window decided by its length."""
     laid = probe.listen_session(clean, vad, lambda x: [len(x), 1, 2, 3, 4], tracker, mel)
-    return probe.session_body(clean, vad, laid, [(0, 0, probe.NO_CHECK)] * len(laid[1]), False)
+    return probe.session_body(clean, vad, laid, [(0, 0, probe.NO_CHECK, 0)] * len(laid[1]), False)
 
 
 def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read() -> None:
@@ -187,7 +187,7 @@ def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read(
     windows = [probe.WINDOW_RECORD.unpack_from(body, at + k * probe.WINDOW_RECORD.size) for k in range(n_windows)]
     assert [w[:2] for w in windows] == [(0, 80), (second - lead, second + 50)]
     assert [w[2] for w in windows] == [81, 51 + lead] and segments == [(0, 80), (second - 1 - lead, second + 50)]
-    assert all(w[-2:] == (0, probe.NO_CHECK) for w in windows)
+    assert all(w[-3:] == (0, probe.NO_CHECK, 0) for w in windows)
     assert at + n_windows * probe.WINDOW_RECORD.size == len(body)
     vad[total - 20 : total] = True
     session = gate.with_silence(clean, vad, features, mel)
@@ -205,9 +205,10 @@ def test_rounds_fill_each_partition_in_order_and_refuse_a_session_no_partition_h
 
 
 def commands_laid(n: int, rejected: int = 0) -> tuple:
-    """A laid-out session of n windows decided as commands, then rejected ones, each window one hop."""
+    """A laid-out session of n windows decided as commands, then rejected ones, each window one hop, its own
+    utterance."""
     decisions = [[0, 900, 100, 0, 0]] * n + [[ctc_score.REJECTED, 0, 0, 0, 0]] * rejected
-    return [], [(i, i) for i in range(n + rejected)], decisions
+    return [], [(i, i) for i in range(n + rejected)], decisions, list(range(n + rejected))
 
 
 def survey_owner() -> dict:
@@ -253,16 +254,17 @@ def test_speaker_checks_leave_rejects_unchecked_count_the_enrolment_and_score_th
 
     checks = probe.speaker_checks(sessions, laid, 1)
     assert len(seen) == len(units)
-    assert checks[0] == [(0, 0, probe.UNENROLLED)] * 2 + [(0, 0, probe.NO_CHECK)]
-    assert checks[1] == [(n, 0, probe.ENROLLING) for n in range(1, 7)]
-    assert checks[2] == [(n, 0, probe.ENROLLING) for n in range(7, 11)] + [(0, 0, probe.NO_CHECK)]
+    assert checks[0] == [(0, 0, probe.UNENROLLED, 0)] * 2 + [(0, 0, probe.NO_CHECK, 0)]
+    assert checks[1] == [(n, 0, probe.ENROLLING, 0) for n in range(1, 7)]
+    assert checks[2] == [(n, 0, probe.ENROLLING, 0) for n in range(7, 11)] + [(0, 0, probe.NO_CHECK, 0)]
     norms = [score.norm(owner, cohort, 2)]
     want = [score.best(u, [owner], norms, score.norm(u, cohort, 2)) for u in (owner, stranger, near)]
-    assert [(z, c) for z, _, c in want] == [(z, c) for z, c, _ in checks[3]]
-    assert [code for _, _, code in checks[3]] == [
+    assert [(z, c) for z, _, c in want] == [(z, c) for z, c, _, _ in checks[3]]
+    assert [code for _, _, code, _ in checks[3]] == [
         probe.PASSED if score.accepts(z, 600) else probe.STOPPED for z, _, _ in want
     ]
-    assert {code for _, _, code in checks[3]} == {probe.PASSED, probe.STOPPED}
+    assert {code for _, _, code, _ in checks[3]} == {probe.PASSED, probe.STOPPED}
+    assert {b for _, _, _, b in checks[3]} == {probe.pack_models.NOISE_EDGES}
 
 
 @pytest.mark.parametrize("locked", [{}, {"listen_hash": f"0x{listen.HASH ^ 1:08x}"}])

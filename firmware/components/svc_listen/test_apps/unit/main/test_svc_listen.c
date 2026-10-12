@@ -37,9 +37,10 @@ typedef struct __attribute__((packed)) {
     uint32_t first, last;
     int16_t command;
     uint16_t score, margin, gap, syllable;
-    int16_t speaker;       // the check's AS-norm milli-z, or commands enrolled
-    int16_t cosine;        // of the voiceprint giving that score
-    uint16_t speaker_code; // CHECK_*
+    int16_t speaker;      // the check's AS-norm milli-z, or commands enrolled
+    int16_t cosine;       // of the voiceprint giving that score
+    uint8_t speaker_code; // CHECK_*
+    uint8_t noise_bin;    // of a scored check, ADR-0024
 } window_t;
 _Static_assert(sizeof(listen_head_t) == 24 && sizeof(session_head_t) == 12 && sizeof(segment_head_t) == 8 &&
                    sizeof(window_t) == 24,
@@ -129,8 +130,8 @@ static bool same_speaker(const window_t *want, const svc_listen_decision_t *got,
 {
     const app_event_t *e = &got->event;
     const bool theirs = strcmp(e->speaker_id, owner) == 0;
-    const bool scored =
-        e->has_speaker && got->speaker_milli_z == want->speaker && e->speaker_permille == want->cosine;
+    const bool scored = e->has_speaker && got->speaker_milli_z == want->speaker &&
+                        e->speaker_permille == want->cosine && got->noise_bin == want->noise_bin;
     switch (want->speaker_code) {
     case CHECK_NONE: return !e->has_speaker && e->speaker_id[0] == '\0' && e->enrol_count == 0;
     case CHECK_PASSED: return e->kind == APP_EVT_COMMAND && scored && theirs;
@@ -203,15 +204,17 @@ static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_
         const bool ok = same(&want[w], &decided[w], named, base, owner);
         t->differ += ok ? 0 : 1;
         const app_event_t *e = &decided[w].event;
-        printf("listen window %" PRIu32 "..%" PRIu32 ": board %s %s %u %u %u %u speaker %d %d %s %u, python "
-               "%d %u %u %u %u speaker %d %d/%u%s; %" PRIu32 " us after the close\n",
+        printf("listen window %" PRIu32 "..%" PRIu32
+               ": board %s %s %u %u %u %u speaker %d %d %s %u noise %u, "
+               "python %d %u %u %u %u speaker %d %d/%u noise %u%s; %" PRIu32 " us after the close\n",
                decided[w].first_seq - base, e->seq - base, e->kind == APP_EVT_COMMAND ? "command" : "reject",
                e->kind == APP_EVT_COMMAND ? e->command_id : e->code, e->score_permille, e->margin_permille,
                decided[w].free_gap_permille, decided[w].syllable_gap_permille,
                e->has_speaker ? decided[w].speaker_milli_z : 0, e->has_speaker ? e->speaker_permille : 0,
-               e->speaker_id[0] != '\0' ? e->speaker_id : "-", e->enrol_count, want[w].command, want[w].score,
-               want[w].margin, want[w].gap, want[w].syllable, want[w].speaker, want[w].cosine,
-               want[w].speaker_code, ok ? "" : " DIFFERS", decided[w].close_us);
+               e->speaker_id[0] != '\0' ? e->speaker_id : "-", e->enrol_count, decided[w].noise_bin,
+               want[w].command, want[w].score, want[w].margin, want[w].gap, want[w].syllable, want[w].speaker,
+               want[w].cosine, want[w].speaker_code, want[w].noise_bin, ok ? "" : " DIFFERS",
+               decided[w].close_us);
     }
     t->windows += n;
     return p + h.windows * sizeof(window_t);
