@@ -413,6 +413,23 @@ monitor: ## Open the serial monitor on the CH340
 models-flash: ## Pack every model of contracts/models.lock.json and write models_0 of board B (KEHOACH 4.5.6, 6.1)
 	cd ml && PORT=$(PORT) BAUD=$(FLASH_BAUD) ./scripts/50_pack_and_flash.sh
 
+PRODUCT_PARTS = python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --baud $(FLASH_BAUD) \
+  --partition-table-file firmware/partitions.csv
+
+.PHONY: nvs-save nvs-restore storage-flash
+# NVS holds the roster, its voiceprints and the owner's thresholds; a test app that writes NVS runs between these
+# two. The copy holds voiceprints, a person's data (KEHOACH 1.4), so it never lands in the repo.
+nvs-save: ## Copy board B's NVS partition to FILE, a path outside the repo
+	@case "$(abspath $(FILE))" in "" | $(CURDIR)/*) echo "usage: make nvs-save FILE=<path outside the repo>"; exit 1;; esac
+	$(PRODUCT_PARTS) read_partition --partition-name nvs --output "$(abspath $(FILE))"
+
+nvs-restore: ## Write FILE, a copy nvs-save made, back to board B's NVS partition
+	@test -f "$(FILE)" || { echo "usage: make nvs-restore FILE=<a copy nvs-save made>"; exit 1; }
+	$(PRODUCT_PARTS) write_partition --partition-name nvs --input "$(abspath $(FILE))"
+
+storage-flash: fw-bench ## Write the bench build's LittleFS image, set.json among it, to board B's storage partition
+	$(PRODUCT_PARTS) write_partition --partition-name storage --input firmware/build_bench/storage.bin
+
 capture-flash: ## Flash test_apps/capture, the raw-only recorder (E5-T12)
 	cd $(CAPTURE_APP) && idf.py -p $(PORT) flash
 
