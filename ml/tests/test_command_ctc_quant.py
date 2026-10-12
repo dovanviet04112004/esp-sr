@@ -183,8 +183,10 @@ def test_a_net_whose_norms_stay_an_int8_chain_is_refused(tmp_path: Path) -> None
 
 
 def trained(cfg: dict) -> gate.Ctc:
-    """A run's net as gate.load_ctc gives it, with cfg and no layer: the deploy step's refusals read only cfg."""
-    return gate.Ctc(torch.nn.Sequential(), np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32), [], [], cfg)
+    """A run's net as gate.load_ctc gives it, an untrained model of ctc.CONFIG with cfg as its run's config: the deploy
+    step rewrites the model's front, then its refusals read only cfg."""
+    model = encoder.build(load_yaml(ctc.CONFIG)).eval()
+    return gate.Ctc(model, np.zeros(DIMS, np.float32), np.ones(DIMS, np.float32), [], [], cfg)
 
 
 @pytest.mark.parametrize("recorded", [{}, {"listen_hash": listen.HASH ^ 1}])
