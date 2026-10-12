@@ -555,3 +555,34 @@ Mỗi ô ghi mẫu "yên" / mẫu "trộn":
 - **Hướng đáng đo tiếp:** người lạ cũng tụt điểm khi có nhạc. Vì vậy một ngưỡng đặt trên vật liệu có nhạc, hay chọn
   theo SNR mà board đo được trên cửa sổ, sẽ giữ được nhiều lệnh của chủ repo hơn ở cùng mốc 1% người lạ. Cắt cửa sổ
   của b0 theo VAD thì bỏ được đoạn chỉ có nhạc trước lời. Cả hai chưa đo.
+
+**Đợt 2: hai cách sửa** (`make speaker-music` ở `702f104`, 34 phút, cùng vật liệu và cùng lần rút). Mỗi lệnh được chấm
+dưới ba ngưỡng:
+- **Cố định:** 2964, như board đang dùng.
+- **Theo mức nhạc:** ngưỡng để 1% người lạ của đúng mức nhạc ấy lọt. Chỉ board biết trước mức nhạc mới đặt được, nên
+  đây là cận trên.
+- **Theo SNR:** board ước SNR trên chính cửa sổ, là công suất lời trên công suất 2 s trước lời trong mẫu `clean`. SNR
+  ước chia 4 dải bằng số cửa sổ người lạ, mỗi dải một ngưỡng để 1% người lạ của dải ấy lọt. Biên 5,7 / 12,5 / 22,4 dB,
+  ngưỡng 1703 / 1733 / 2449 / 2669. SNR ước trung vị của lệnh chủ repo là 30,1 dB khi yên, 24,0 / 14,4 / 9,3 dB ở 20 /
+  10 / 5 dB nhạc.
+
+Cửa sổ như board đang cắt, mẫu "yên"; giữ 1 m / 3 m:
+
+| Điều kiện | Cố định | Theo mức nhạc (cận trên) | Theo SNR | Người lạ lọt: cố định / theo SNR |
+|---|---|---|---|---|
+| Không nhạc | 98,0 / 97,4% | 98,2 / 97,4% | 98,3 / 97,4% | 0,92 / 1,48% |
+| Nhạc 20 dB | 91,8 / 92,0% | 95,0 / 97,2% | 93,9 / 95,4% | 0,20 / 0,77% |
+| Nhạc 10 dB | 67,6 / 71,9% | 79,0 / 83,2% | 79,9 / 81,9% | 0,37 / 0,72% |
+| Nhạc 5 dB | 57,1 / 68,8% | 66,2 / 71,6% | 67,8 / 71,8% | 0,08 / 1,00% |
+
+- **Ngưỡng theo SNR lấy lại ~12 điểm ở 10 dB** và gần chạm cận trên ở mọi mức nhạc. Người lạ lọt ≤ 1% ở mọi mức có
+  nhạc.
+- **Dải trên cùng phải giữ ngưỡng của phòng yên.** Ngưỡng 2669 của dải ấy gộp cả người lạ ở 20 dB, nên lúc yên để lọt
+  1,48%. Giữ 2964 cho dải trên cùng thì lúc yên trở lại 0,92%.
+- **Mẫu "trộn" cộng thêm 2–3 điểm** khi dùng ngưỡng theo SNR: 82,4 / 85,3% ở 10 dB.
+- **Cửa sổ chỉ lời làm tệ hơn ở mọi mức.** b0 chỉ nghe từ bước VAD đầu tiên của lời, với nhóm chuẩn và ngưỡng 1% riêng
+  (1636).
+  - Khi yên chỉ giữ 87,7 / 82,5%; ở 10 dB còn 37,8 / 43,0%. Trung vị chủ repo 2078, so với 5978 của cửa sổ đầy đủ.
+  - Lời lệnh ngắn hơn 1,5 s, nên b0 nghe số 0 ở phía trước, và mất đoạn mở đầu của lời mà VAD bắt muộn.
+  - Hướng này loại. Cột "theo SNR" của nó không có số: cửa sổ đã cắt không còn đoạn trước lời để ước SNR.
+- **Phần còn lại là bộ nhận lệnh:** ở 10 dB chỉ 61% cửa sổ được nhận. Ngưỡng theo SNR không chạm tới phần đó.
