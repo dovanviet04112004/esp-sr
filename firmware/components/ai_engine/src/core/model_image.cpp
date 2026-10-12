@@ -34,6 +34,8 @@ uint32_t s_listen_hash;
 uint32_t s_speaker_hash;
 int16_t s_speaker_thresholds[APP_SPEAKERS_MAX];
 uint16_t s_speaker_cohort_top;
+float s_noise_edges[STORAGE_SPK_NOISE_EDGES];
+int16_t s_noisy_thresholds[APP_SPEAKERS_MAX][STORAGE_SPK_NOISE_EDGES];
 sys_storage_models_t s_mapping; // held while an entry stays in flash
 
 void release() noexcept
@@ -49,6 +51,8 @@ void release() noexcept
     s_speaker_hash = 0;
     memset(s_speaker_thresholds, 0, sizeof(s_speaker_thresholds));
     s_speaker_cohort_top = 0;
+    memset(s_noise_edges, 0, sizeof(s_noise_edges));
+    memset(s_noisy_thresholds, 0, sizeof(s_noisy_thresholds));
 }
 
 uint32_t id_of(const uint8_t *sha256) noexcept
@@ -108,6 +112,8 @@ esp_err_t image_load(uint8_t slot) noexcept
         s_speaker_hash = models.header->speaker_hash;
         memcpy(s_speaker_thresholds, models.header->spk_accept_milli_z, sizeof(s_speaker_thresholds));
         s_speaker_cohort_top = models.header->spk_cohort_top;
+        memcpy(s_noise_edges, models.header->spk_noise_edges, sizeof(s_noise_edges));
+        memcpy(s_noisy_thresholds, models.header->spk_noisy_milli_z, sizeof(s_noisy_thresholds));
     }
     bool held = false;
     for (size_t i = 0; i < s_count; ++i) {
@@ -164,6 +170,16 @@ int16_t image_speaker_threshold_milli_z(size_t prints) noexcept
 uint16_t image_speaker_cohort_top() noexcept
 {
     return s_speaker_cohort_top;
+}
+
+const float *image_speaker_noise_edges() noexcept
+{
+    return s_noise_edges;
+}
+
+const int16_t *image_speaker_noisy_milli_z() noexcept
+{
+    return &s_noisy_thresholds[0][0];
 }
 
 bool image_speaks_as_built(const char *name) noexcept

@@ -19,6 +19,7 @@ constexpr const char *kCohortEntry = "speaker_cohort";
 constexpr int kInt8Min = -128;
 constexpr int kInt8Max = 127;
 constexpr size_t kFeatures = GEN_SPEAKER_N_FRAMES * GEN_SPEAKER_N_BANDS;
+static_assert(STORAGE_SPK_NOISE_EDGES == 3, "the refusal names three edges");
 
 struct Speaker {
     bool ready;
@@ -43,6 +44,14 @@ int8_t on_grid(float x, float inverse_step)
 {
     const long q = lrintf(x * inverse_step);
     return static_cast<int8_t>(q < kInt8Min ? kInt8Min : (q > kInt8Max ? kInt8Max : q));
+}
+
+bool edges_hold(const float *edges)
+{
+    for (size_t k = 0; k < STORAGE_SPK_NOISE_EDGES; k++) {
+        if (!isfinite(edges[k]) || edges[k] < 0.0f || (k > 0 && edges[k] < edges[k - 1])) { return false; }
+    }
+    return true;
 }
 
 } // namespace
@@ -85,6 +94,14 @@ esp_err_t speaker_load() noexcept
         top == 0 || top > rows) {
         ESP_LOGE(TAG, "%s: no cohort of %u-float rows with a top in it: %u bytes, top %u", kEntry,
                  (unsigned)s.out.elements, (unsigned)cohort.size, (unsigned)top);
+        speaker_drop();
+        return ESP_OK;
+    }
+    // Edges the chip would misread could pick a noisier bin's lower threshold, so they turn the branch away.
+    const float *edges = image_speaker_noise_edges();
+    if (!edges_hold(edges)) {
+        ESP_LOGE(TAG, "%s: noise edges %g, %g, %g are not finite, at least 0 and rising (ADR-0024)", kEntry,
+                 (double)edges[0], (double)edges[1], (double)edges[2]);
         speaker_drop();
         return ESP_OK;
     }

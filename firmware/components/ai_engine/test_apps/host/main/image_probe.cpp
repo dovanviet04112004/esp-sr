@@ -34,6 +34,16 @@ extern "C" uint16_t image_probe_cohort_top(void)
     return ai::image_speaker_cohort_top();
 }
 
+extern "C" float image_probe_noise_edge(size_t k)
+{
+    return ai::image_speaker_noise_edges()[k];
+}
+
+extern "C" int16_t image_probe_noisy_threshold(size_t prints, size_t bin)
+{
+    return ai::image_speaker_noisy_milli_z()[(prints - 1) * STORAGE_SPK_NOISE_EDGES + bin];
+}
+
 extern "C" uint32_t image_probe_id(const char *name, uint32_t kind)
 {
     return ai::image_entry_id(name, static_cast<storage_model_kind_t>(kind));

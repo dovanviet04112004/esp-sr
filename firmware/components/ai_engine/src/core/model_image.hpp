@@ -40,6 +40,14 @@ int16_t image_speaker_threshold_milli_z(size_t prints) noexcept;
 /** The cohort rows AS-norm averages over at each side, as the image's header gives it; 0 without one. */
 uint16_t image_speaker_cohort_top() noexcept;
 
+/** The image's STORAGE_SPK_NOISE_EDGES noise edges, rising utterance-over-lead power ratios, 0 without them
+ * (ADR-0024). */
+const float *image_speaker_noise_edges() noexcept;
+
+/** The image's thresholds in the noisier bins: APP_SPEAKERS_MAX rows, by voiceprints held, of
+ * STORAGE_SPK_NOISE_EDGES, thousandths of the AS-norm score (ADR-0024). */
+const int16_t *image_speaker_noisy_milli_z() noexcept;
+
 /** Whether the loaded image's speaker came with the speaker.yaml this build runs (KEHOACH 3.17); logs
  * both hashes under name when not. */
 bool image_speaks_as_built(const char *name) noexcept;

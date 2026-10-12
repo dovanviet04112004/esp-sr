@@ -78,6 +78,40 @@ def test_the_header_carries_its_speakers_hash_a_threshold_a_count_its_cohorts_to
         pack_models.pack(entries, speaker_cohort_top=0x10000)
 
 
+NOISE_AT = pack_models.FIELDS_BYTES + pack_models.MAX_ENTRIES * pack_models.ENTRY.size
+EDGES = (3.75, 17.5, 174.0)
+NOISY = tuple(tuple(1700 + 40 * n + 300 * b for b in range(len(EDGES))) for n in range(pack_models.SPEAKERS))
+
+
+def test_the_header_carries_the_noise_edges_and_thresholds_after_every_entry_and_0_without() -> None:
+    entries = [pack_models.Entry("speaker", "espdl", b"s" * 10)]
+    image = pack_models.pack(entries, speaker_noise_edges=EDGES, speaker_noisy_milli_z=NOISY)
+    assert NOISE_AT == 0x240
+    got = pack_models.NOISE.unpack_from(image, NOISE_AT)
+    assert got[: len(EDGES)] == EDGES and got[len(EDGES) :] == tuple(t for row in NOISY for t in row)
+    bare = pack_models.pack(entries)
+    assert not any(pack_models.NOISE.unpack_from(bare, NOISE_AT))
+
+
+@pytest.mark.parametrize(
+    ("edges", "noisy", "why"),
+    [
+        (EDGES, (), "together"),
+        (EDGES[:2], NOISY, "rising"),
+        ((17.5, 3.75, 174.0), NOISY, "rising"),
+        ((-1.0, 3.75, 174.0), NOISY, "rising"),
+        ((float("nan"), 3.75, 174.0), NOISY, "rising"),
+        (EDGES, NOISY[:-1], "rows"),
+        (EDGES, ((40000, 0, 0), *NOISY[1:]), "int16"),
+    ],
+)
+def test_noise_fields_the_chip_would_misread_are_refused(edges, noisy, why) -> None:
+    with pytest.raises(ValueError, match=why):
+        pack_models.pack(
+            [pack_models.Entry("speaker", "espdl", b"s")], speaker_noise_edges=edges, speaker_noisy_milli_z=noisy
+        )
+
+
 def test_the_lock_gives_its_command_rows_thresholds_0_for_one_it_lacks_and_refuses_two(tmp_path, monkeypatch) -> None:
     (tmp_path / "command").mkdir()
     (tmp_path / "command" / "net.espdl").write_bytes(b"n")
@@ -128,6 +162,13 @@ def test_the_lock_flags_a_speaker_left_in_flash_and_gives_its_hash_and_threshold
     got = pack_models.locked()
     assert (got.speaker_hash, got.speaker_milli_z) == (speaker.HASH, tuple(412 + n for n in range(8)))
     assert got.speaker_cohort_top == 100
+    assert (got.speaker_noise_edges, got.speaker_noisy_milli_z) == ((), ())
+    noisy = {"edges": list(EDGES), "milli_z": [list(r) for r in NOISY]}
+    with_noise = row | {"threshold": row["threshold"] | {"noise": noisy}}
+    lock.write_text(json.dumps({"models": {"speaker": with_noise}}), encoding="utf-8")
+    got_noise = pack_models.locked()
+    assert (got_noise.speaker_noise_edges, got_noise.speaker_noisy_milli_z) == (EDGES, NOISY)
+    lock.write_text(json.dumps({"models": {"speaker": row}}), encoding="utf-8")
     assert [e.flags for e in got.entries] == [pack_models.IN_FLASH, pack_models.IN_FLASH]
     lock.write_text(json.dumps({"models": {"speaker": row | {"weights_in_flash": False}}}), encoding="utf-8")
     assert [e.flags for e in pack_models.locked().entries] == [0, pack_models.IN_FLASH]

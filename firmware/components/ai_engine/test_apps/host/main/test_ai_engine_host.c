@@ -18,6 +18,8 @@
 #define THRESHOLD_MILLI_Z (-37)
 #define THRESHOLD_STEP 10 // per voiceprint more, so each count reads its own
 #define COHORT_TOP 100
+#define NOISE_EDGE 3.5f // the first edge; each next one doubles it
+#define NOISY_MILLI_Z 1700
 
 static unsigned s_failures;
 static _Alignas(STORAGE_MODEL_ALIGN_BYTES)
@@ -115,6 +117,12 @@ static void check_in_flash(void)
         header->spk_accept_milli_z[n] = (int16_t)(THRESHOLD_MILLI_Z + THRESHOLD_STEP * (int)n);
     }
     header->spk_cohort_top = COHORT_TOP;
+    for (size_t k = 0; k < STORAGE_SPK_NOISE_EDGES; k++) {
+        header->spk_noise_edges[k] = NOISE_EDGE * (float)(1u << k);
+        for (size_t n = 0; n < APP_SPEAKERS_MAX; n++) {
+            header->spk_noisy_milli_z[n][k] = (int16_t)(NOISY_MILLI_Z + THRESHOLD_STEP * (int)(n * 4 + k));
+        }
+    }
     const unsigned unmaps = fake_storage_unmaps();
     size_t bytes = 0;
     check(ai_engine_load(1) == ESP_OK && image_probe_bytes() == NET_BYTES,
@@ -131,6 +139,15 @@ static void check_in_flash(void)
               image_probe_id("wake", STORAGE_MODEL_KIND_NORM) == id_of(header->entry[1].sha256),
           "the header's speaker hash, its threshold for each count of voiceprints, its cohort's top and an "
           "entry's id come through");
+    check(image_probe_noise_edge(0) == NOISE_EDGE &&
+              image_probe_noise_edge(STORAGE_SPK_NOISE_EDGES - 1) ==
+                  NOISE_EDGE * (float)(1u << (STORAGE_SPK_NOISE_EDGES - 1)) &&
+              image_probe_noisy_threshold(1, 0) == NOISY_MILLI_Z &&
+              image_probe_noisy_threshold(APP_SPEAKERS_MAX, STORAGE_SPK_NOISE_EDGES - 1) ==
+                  NOISY_MILLI_Z +
+                      THRESHOLD_STEP * (int)((APP_SPEAKERS_MAX - 1) * 4 + STORAGE_SPK_NOISE_EDGES - 1),
+          "the header's noise edges and its threshold for each count of voiceprints in each noisier bin come "
+          "through (ADR-0024)");
     header->speaker_hash = GEN_SPEAKER_HASH ^ 1u;
     check(ai_engine_load(1) == ESP_OK && !image_probe_speaks("speaker") &&
               fake_storage_unmaps() == unmaps + 1,

@@ -1,8 +1,8 @@
 """The model slot image of KEHOACH 6.3: a 1 KB header, then each entry 64-byte aligned with its sha256.
 Layout constants come from sys_storage/include/storage_format.h and the slot size from firmware/partitions.csv, so
 ai_engine_load and this packer cannot disagree. --lock packs every file of contracts/models.lock.json held to its sha256
-(KEHOACH 4.5.6), the command's listen hash and thresholds, the speaker's hash and a threshold for each count of
-voiceprints, and flags in flash a row's graphs deployed so.
+(KEHOACH 4.5.6), the command's listen hash and thresholds, the speaker's hash, a threshold for each count of
+voiceprints and its noise edges and noisier bins' thresholds, and flags in flash a row's graphs deployed so.
 Run: python -m srpipe.export.pack_models <out.bin> (--lock | <name>:<kind>:<file>...)"""
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import re
 import struct
 from dataclasses import dataclass
@@ -49,9 +50,12 @@ SHA256_BYTES = storage_define("STORAGE_MODEL_SHA256_BYTES")
 KINDS = {kind: storage_define(f"STORAGE_MODEL_KIND_{kind.upper()}") for kind in ("espdl", "norm", "units", "cohort")}
 IN_FLASH = storage_define("STORAGE_MODEL_FLAG_IN_FLASH")
 SPEAKERS = storage_define("APP_SPEAKERS_MAX", APP_EVENTS)
+NOISE_EDGES = storage_define("STORAGE_SPK_NOISE_EDGES")
 ENTRY = struct.Struct(f"<{NAME_BYTES}sII{SHA256_BYTES}sII")
 _FIELDS = f"<IIIIIHHHHI{SPEAKERS}hH"
 HEAD = struct.Struct(f"{_FIELDS}{FIELDS_BYTES - struct.calcsize(_FIELDS)}x")
+NOISE = struct.Struct(f"<{NOISE_EDGES}f{SPEAKERS * NOISE_EDGES}h")  # after the entries (ADR-0024)
+INT16_MIN, INT16_MAX = -32768, 32767
 
 
 @dataclass(frozen=True)
@@ -72,6 +76,8 @@ class Locked:
     speaker_hash: int = 0
     speaker_milli_z: tuple[int, ...] = ()
     speaker_cohort_top: int = 0
+    speaker_noise_edges: tuple[float, ...] = ()
+    speaker_noisy_milli_z: tuple[tuple[int, ...], ...] = ()
 
 
 def storage_string(name: str) -> str:
@@ -95,6 +101,21 @@ def slot_bytes() -> int:
     return partition_bytes(storage_string("STORAGE_MODEL_LABEL_SLOT0"))
 
 
+def checked_noise(edges: tuple[float, ...], noisy: tuple[tuple[int, ...], ...]) -> None:
+    """Refuse noise edges and thresholds the header cannot hold or the chip would misread: both or neither, as many
+    as the header has, edges finite, at least 0 and rising, thresholds in int16 (ADR-0024)."""
+    if bool(edges) != bool(noisy):
+        raise ValueError("noise edges and noisy thresholds come together, or neither does")
+    if not edges:
+        return
+    if len(edges) != NOISE_EDGES or any(not math.isfinite(e) or e < 0 for e in edges) or list(edges) != sorted(edges):
+        raise ValueError(f"noise edges {edges}: the header holds {NOISE_EDGES} finite, at least 0 and rising")
+    if len(noisy) != SPEAKERS or any(len(row) != NOISE_EDGES for row in noisy):
+        raise ValueError(f"noisy thresholds {noisy}: the header holds {SPEAKERS} rows of {NOISE_EDGES}")
+    if any(not INT16_MIN <= t <= INT16_MAX for row in noisy for t in row):
+        raise ValueError(f"noisy thresholds {noisy}: each an int16")
+
+
 def pack(
     entries: list[Entry],
     grid_hash: int = grid.GRID_HASH,
@@ -103,18 +124,22 @@ def pack(
     speaker_hash: int = 0,
     speaker_milli_z: tuple[int, ...] = (),
     speaker_cohort_top: int = 0,
+    speaker_noise_edges: tuple[float, ...] = (),
+    speaker_noisy_milli_z: tuple[tuple[int, ...], ...] = (),
 ) -> bytes:
     """The image bytes: header, then the entries in order, each at the next ALIGN_BYTES boundary; listen_hash is the
     GEN_LISTEN_HASH the entries' command learned on and thresholds its delta1, delta2 and delta3 in permille, 0
     without a command or a chosen value; speaker_hash is the GEN_SPEAKER_HASH the speaker was imported on,
     speaker_milli_z its threshold in thousandths of the AS-norm score with 1, 2 ... SPEAKERS voiceprints held, 0 for
-    each it lacks, and speaker_cohort_top the cohort rows AS-norm averages over (KEHOACH 6.3, ADR-0023)."""
+    each it lacks, speaker_cohort_top the cohort rows AS-norm averages over, and the noise edges and thresholds of
+    the noisier bins, 0 without them, so every window takes the quiet table (KEHOACH 6.3, ADR-0023, ADR-0024)."""
     if not 0 < len(entries) <= MAX_ENTRIES:
         raise ValueError(f"{len(entries)} entries, the header holds 1..{MAX_ENTRIES}")
     if len(speaker_milli_z) > SPEAKERS:
         raise ValueError(f"{len(speaker_milli_z)} speaker thresholds, the header holds {SPEAKERS}")
     if not 0 <= speaker_cohort_top <= 0xFFFF:
         raise ValueError(f"cohort top {speaker_cohort_top}, the header holds a u16")
+    checked_noise(speaker_noise_edges, speaker_noisy_milli_z)
     body, table, at = bytearray(), [], HEADER_BYTES
     for e in entries:
         name = e.name.encode("ascii")
@@ -137,7 +162,9 @@ def pack(
         *table_of,
         speaker_cohort_top,
     )
-    header = head + b"".join(table)
+    edges = speaker_noise_edges or (0.0,) * NOISE_EDGES
+    noisy = [t for row in speaker_noisy_milli_z for t in row] or [0] * (SPEAKERS * NOISE_EDGES)
+    header = head + b"".join(table) + bytes((MAX_ENTRIES - len(table)) * ENTRY.size) + NOISE.pack(*edges, *noisy)
     image = header + bytes(HEADER_BYTES - len(header)) + bytes(body)
     if len(image) > slot_bytes():
         raise ValueError(f"image of {len(image)} bytes overflows the {slot_bytes()}-byte slot")
@@ -146,11 +173,10 @@ def pack(
 
 def locked() -> Locked:
     """Every file models.lock.json lists, in its order, as the image entry it names, a row's graphs flagged to stay in
-    flash when it was deployed so; the listen hash of the rows that record one, 0 when none does, and the delta1,
-    delta2 and delta3 of the row that records them, 0 for each it does not; the speaker hash, the thresholds for 1 to
-    SPEAKERS voiceprints and the cohort's top of the row that records them. Refused when a file under
-    firmware/models/<branch>/ differs from its sha256, two rows learned on different listen.yaml, two record thresholds
-    or a speaker, or the speaker's row holds other than SPEAKERS thresholds or no cohort top."""
+    flash when it was deployed so; the listen hash and delta1..3 of the rows that record them, 0 otherwise; the
+    speaker's hash, thresholds for 1 to SPEAKERS voiceprints, cohort top and noise fields, none without them. Refused
+    when a file differs from its sha256, rows learned on two listen.yaml, two record thresholds or a speaker, or the
+    speaker's row lacks SPEAKERS thresholds or a cohort top, or holds noise fields checked_noise refuses."""
     rows = json.loads(LOCK.read_text(encoding="utf-8"))["models"]
     entries = []
     for branch, row in rows.items():
@@ -178,6 +204,10 @@ def locked() -> Locked:
     ]
     if len(speakers) > 1:
         raise ValueError(f"{len(speakers)} rows of {LOCK.name} record a speaker, the header holds one")
+    noise = next((r["threshold"].get("noise", {}) for r in rows.values() if "speaker_hash" in r), {})
+    edges = tuple(float(e) for e in noise.get("edges", []))
+    noisy = tuple(tuple(int(t) for t in row) for row in noise.get("milli_z", []))
+    checked_noise(edges, noisy)
     speaker_hash, table, top = next(iter(speakers), (0, [], 0))
     if speaker_hash and not (isinstance(table, list) and len(table) == SPEAKERS and isinstance(top, int) and top > 0):
         raise ValueError(
@@ -187,7 +217,7 @@ def locked() -> Locked:
         )
     triple = next(iter(triples), (0, 0, 0))
     thresholds = tuple(int(t) for t in table)
-    return Locked(entries, next(iter(listen_hashes), 0), triple, speaker_hash, thresholds, int(top or 0))
+    return Locked(entries, next(iter(listen_hashes), 0), triple, speaker_hash, thresholds, int(top or 0), edges, noisy)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -212,6 +242,8 @@ def main(argv: list[str] | None = None) -> int:
             speaker_hash=lock.speaker_hash,
             speaker_milli_z=lock.speaker_milli_z,
             speaker_cohort_top=lock.speaker_cohort_top,
+            speaker_noise_edges=lock.speaker_noise_edges,
+            speaker_noisy_milli_z=lock.speaker_noisy_milli_z,
         )
     )
     size = args.out.stat().st_size
@@ -219,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
     said = f"grid 0x{grid.GRID_HASH:08x}, listen 0x{lock.listen_hash:08x}, delta1..3 {deltas}"
     said += f", speaker 0x{lock.speaker_hash:08x} at {', '.join(map(str, lock.speaker_milli_z)) or 0} milli-z"
     said += f" over the cohort's top {lock.speaker_cohort_top}"
+    said += f", noise edges {', '.join(f'{e:g}' for e in lock.speaker_noise_edges) or 'none'}"
     print(f"{args.out}: {len(entries)} entries, {size} bytes, {said}")
     return 0
 

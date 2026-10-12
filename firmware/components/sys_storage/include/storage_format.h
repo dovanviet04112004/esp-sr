@@ -3,6 +3,7 @@
  */
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "app_events.h"
@@ -96,8 +97,9 @@ _Static_assert(sizeof(storage_speaker_roster_t) == 8 + APP_SPEAKERS_MAX * 140,
 #define STORAGE_PATH_RESPONSES "/lfs/resp/vi.json"
 
 #define STORAGE_MODEL_MAGIC 0x444d5253u // "SRMD" little-endian
-#define STORAGE_MODEL_FORMAT_VER 8
+#define STORAGE_MODEL_FORMAT_VER 9
 #define STORAGE_MODEL_MAX_ENTRIES 8
+#define STORAGE_SPK_NOISE_EDGES 3 // noise bins are one more, the last the quietest
 #define STORAGE_MODEL_NAME_BYTES 16
 #define STORAGE_MODEL_HEADER_BYTES 1024
 #define STORAGE_MODEL_ALIGN_BYTES 64
@@ -137,9 +139,16 @@ typedef struct {
     uint16_t spk_cohort_top;                      // cohort rows AS-norm averages over; 0 without one
     uint8_t reserved[14];
     storage_model_entry_t entry[STORAGE_MODEL_MAX_ENTRIES];
-    uint8_t pad[STORAGE_MODEL_HEADER_BYTES - 64 - STORAGE_MODEL_MAX_ENTRIES * 64];
+    float spk_noise_edges[STORAGE_SPK_NOISE_EDGES]; // rising utterance-over-lead power; 0 without
+    int16_t spk_noisy_milli_z[APP_SPEAKERS_MAX][STORAGE_SPK_NOISE_EDGES]; // per count, noisiest bin first
+    uint8_t pad[STORAGE_MODEL_HEADER_BYTES - 64 - STORAGE_MODEL_MAX_ENTRIES * 64 -
+                STORAGE_SPK_NOISE_EDGES * 4 - APP_SPEAKERS_MAX * STORAGE_SPK_NOISE_EDGES * 2];
 } storage_model_header_t;
 
 _Static_assert(sizeof(storage_model_entry_t) == 64, "model entry is 64 bytes (KEHOACH 6.3)");
 _Static_assert(sizeof(storage_model_header_t) == STORAGE_MODEL_HEADER_BYTES,
                "model header is 1 KB (KEHOACH 6.3)");
+_Static_assert(offsetof(storage_model_header_t, spk_noise_edges) == 0x240,
+               "the noise edges follow the entries (KEHOACH 6.3)");
+_Static_assert(offsetof(storage_model_header_t, spk_noisy_milli_z) == 0x24c,
+               "the noisy thresholds follow the edges (KEHOACH 6.3)");
