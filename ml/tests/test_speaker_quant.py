@@ -508,6 +508,48 @@ def test_each_noisier_bin_takes_its_own_threshold_and_the_quietest_keeps_the_qui
     assert quant.noise_bins(heard, {"quiet": [(10, 3)]}, 2964, 0.01, 3)["quiet"] == 2964
 
 
+def gate_figures(quiet_passing: float, noisy_passing: float, kept_100: float) -> dict:
+    """Noise figures of one count: strangers passing quiet and at 10 dB, the owner's quiet commands kept."""
+    return {
+        "kept accepted": {"quiet": {"100 cm": kept_100, "300 cm": 0.97}},
+        "strangers passing": {"quiet": quiet_passing, "10 dB": noisy_passing},
+    }
+
+
+def gate_count(people: int, bins: dict, one: dict) -> dict:
+    """A threshold_table count whose rule chose 2964, its bins' figures bins and one threshold's one."""
+    noise = {"milli_z": [1700, 1800, 2500], "quiet": 2974} | bins | {"one threshold": one}
+    return {"people": people, "shares": {0.01: {"milli_z": 2964}}, "chosen": 0.01, "noise": noise}
+
+
+def test_the_bins_are_held_back_by_a_quiet_leak_a_quiet_loss_or_a_noisy_leak() -> None:
+    one = gate_figures(0.0099, 0.006, 0.98)
+    assert quant.bins_held_back([gate_count(1, gate_figures(0.0099, 0.0100, 0.98), one)], 0.01) == []
+    leak = quant.bins_held_back([gate_count(3, gate_figures(0.0124, 0.0100, 0.98), one)], 0.01)
+    assert leak == ["people 3, quiet: strangers passing 0.0124 > 0.0099"]
+    lost = quant.bins_held_back([gate_count(1, gate_figures(0.0099, 0.006, 0.977), one)], 0.01)
+    assert lost == ["people 1, quiet 100 cm: owner kept 0.9770 < 0.9800"]
+    noisy = quant.bins_held_back([gate_count(1, gate_figures(0.0099, 0.0115, 0.98), one)], 0.01)
+    assert noisy == ["people 1, 10 dB: strangers passing 0.0115 > 0.0100"]
+    leaky_alone = gate_figures(0.0099, 0.0130, 0.98)
+    assert quant.bins_held_back([gate_count(1, gate_figures(0.0099, 0.0125, 0.98), leaky_alone)], 0.01) == []
+
+
+def test_the_lock_takes_the_bins_only_when_nothing_holds_them_back() -> None:
+    one = gate_figures(0.0099, 0.006, 0.98)
+    table = {"counts": [gate_count(1, gate_figures(0.0099, 0.01, 0.98), one)], "noise": {"edges": [8.7, 62.5, 572.5]}}
+    assert quant.locked_threshold(table, []) == {
+        "milli_z": [2974],
+        "impostors_passing": [0.01],
+        "noise": {"edges": [8.7, 62.5, 572.5], "milli_z": [[1700, 1800, 2500]]},
+    }
+    assert quant.locked_threshold(table, ["people 1, quiet: strangers passing 0.0124 > 0.0099"]) == {
+        "milli_z": [2964],
+        "impostors_passing": [0.01],
+        "noise": {"edges": [0.0, 0.0, 0.0], "milli_z": [[2964, 2964, 2964]]},
+    }
+
+
 def test_the_threshold_table_sets_noise_bins_only_when_given_noisy_material() -> None:
     import numpy as np
 

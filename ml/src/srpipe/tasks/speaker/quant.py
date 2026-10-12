@@ -849,6 +849,41 @@ def noise_bins(
     return {"milli_z": noisier, "quiet": quiet} | by_bin | {"one threshold": one}
 
 
+def bins_held_back(counts: list[dict], share: float) -> list[str]:
+    """What keeps the noise bins out of the image (KEHOACH 3.17): a count whose bins, against one threshold, let more
+    of the quiet material's strangers through or keep fewer of the owner's quiet commands at a distance, or let more
+    of a noise level's strangers through than share, or than one threshold where that already lets more through."""
+    held = []
+    for c in counts:
+        bins, one = c["noise"], c["noise"]["one threshold"]
+        for name, passed in bins["strangers passing"].items():
+            cap = one["strangers passing"][name] if name == "quiet" else max(share, one["strangers passing"][name])
+            if passed > cap:
+                held.append(f"people {c['people']}, {name}: strangers passing {passed:.4f} > {cap:.4f}")
+        for at, kept in bins["kept accepted"]["quiet"].items():
+            if kept < (floor := one["kept accepted"]["quiet"][at]):
+                held.append(f"people {c['people']}, quiet {at}: owner kept {kept:.4f} < {floor:.4f}")
+    return held
+
+
+def locked_threshold(table: dict, held: list[str]) -> dict:
+    """The lock's threshold from a threshold_table with noise: the bins' edges and tables when nothing held them back,
+    else each count's quiet threshold in every bin behind edges of 0, which put every window in the quietest bin as
+    ADR-0023 scores it."""
+    counts = table["counts"]
+    if held:
+        quiet = [c["shares"][c["chosen"]]["milli_z"] for c in counts]
+        edges, noisier = [0.0] * pack_models.NOISE_EDGES, [[q] * pack_models.NOISE_EDGES for q in quiet]
+    else:
+        quiet = [c["noise"]["quiet"] for c in counts]
+        edges, noisier = table["noise"]["edges"], [c["noise"]["milli_z"] for c in counts]
+    return {
+        "milli_z": quiet,
+        "impostors_passing": [c["chosen"] for c in counts],
+        "noise": {"edges": edges, "milli_z": noisier},
+    }
+
+
 def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[Path, Path]:
     """The graph of row as firmware/models/speaker/ holds it: the .espdl with the board probe's window for
     model->test(), the cohort of strangers as cohort.bin, the threshold set on the survey's material through the chip's
@@ -882,6 +917,7 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
         ws += survey.impostor_windows(survey_cfg, paths, workers, (pools, snr))
         noisy[f"{snr:g} dB"] = (chip_units(graph, cfg["esp_ppq_patches"], ws, front, wrap)[0], ws)
     table = threshold_table(units, scored, survey_cfg, dq, pack_models.SPEAKERS, cohort, noisy)
+    table["noise"]["held back"] = bins_held_back(table["counts"], dq["shares"][0])
     survey_figures = figures(np.stack(units), scored, survey_cfg, cfg["quant"])
     kept = table | {"front_end": gap, "figures": survey_figures}
     (folder / DEPLOY_FILE).write_text(yaml.safe_dump(kept, sort_keys=False), encoding="utf-8")
@@ -906,11 +942,7 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
         "features": {"name": f"tf_mel{speaker.N_BANDS}", "frames": speaker.N_FRAMES, "bands": speaker.N_BANDS},
         "row": row,
         "rungs": {"calibration": rungs["calibration"], "int16_ops": rungs.get("int16_ops", [])},
-        "threshold": {
-            "milli_z": [c["noise"]["quiet"] for c in table["counts"]],
-            "impostors_passing": [c["chosen"] for c in table["counts"]],
-            "noise": {"edges": table["noise"]["edges"], "milli_z": [c["noise"]["milli_z"] for c in table["counts"]]},
-        },
+        "threshold": locked_threshold(table, table["noise"]["held back"]),
         "cohort": {"seed": survey_cfg["seed"], "stream": COHORT_STREAM} | table["cohort"],
         "weights_in_flash": dq["weights_in_flash"],
     }
