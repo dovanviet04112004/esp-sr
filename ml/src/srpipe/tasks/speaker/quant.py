@@ -14,6 +14,8 @@ import json
 import math
 import shutil
 import sys
+from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -834,7 +836,7 @@ def music_prints(
     return prints
 
 
-def music_rows(
+def music_scores(
     units: dict[str, list[np.ndarray]],
     windows: dict[str, list],
     survey_cfg: dict,
@@ -842,11 +844,10 @@ def music_rows(
     prints: dict[str, list[tuple]],
     cohort_rows_: np.ndarray,
     top: int,
-    milli_z: int,
 ) -> dict:
-    """Per condition, for each kind of prints: the owner's accepted windows kept at milli_z per distance, every print
-    against the windows that share no utterance with it, and the windows of the strangers outside the cohort passing,
-    with the owner's median score and the strangers' 99th percentile, both in thousandths (ADR-0023)."""
+    """Per condition and kind of prints, every AS-norm score in thousandths beside survey.snr_db of its window: the
+    owner's accepted windows with their distance, each print against those sharing no utterance with it ("targets"),
+    and every print against the windows of the strangers outside the cohort ("strangers") (ADR-0023)."""
     spk = survey_cfg["owner"]["spk"]
     out = {}
     for name, ws in windows.items():
@@ -854,62 +855,128 @@ def music_rows(
         mine = [i for i, w in enumerate(ws) if w.spk == spk and w.accepted]
         strangers = [i for i, w in enumerate(ws) if w.spk != spk and w.spk not in cohort]
         unit_norms = {i: score.norm(u[i], cohort_rows_, top) for i in mine + strangers}
-        row: dict = {
-            "owner windows": sum(w.spk == spk for w in ws),
-            "accepted": len(mine),
-            "stranger windows": len(strangers),
-        }
+        snr = {i: survey.snr_db(ws[i]) for i in mine + strangers}
+        row: dict = {"owner windows": sum(w.spk == spk for w in ws), "accepted": len(mine)}
+        row["stranger windows"] = len(strangers)
         for kind, made in prints.items():
-            targets: list[tuple[int, str]] = []
-            passing: list[int] = []
+            targets: list[tuple[int, str, float]] = []
+            passing: list[tuple[int, float]] = []
             for p, norm, heard in made:
                 for i in mine:
                     if not heard & set(ws[i].said):
-                        targets.append((score.best(u[i], [p], [norm], unit_norms[i])[0], ws[i].group.split()[-1]))
-                passing += [score.best(u[i], [p], [norm], unit_norms[i])[0] for i in strangers]
-            kept = {
-                f"{d} cm": float(np.mean([s >= milli_z for s, at in targets if at == d]))
-                for d in sorted({at for _, at in targets})
-            }
-            row[kind] = {
-                "kept accepted": kept,
-                "strangers passing": float(np.mean([s >= milli_z for s in passing])),
-                "owner median milli_z": int(np.median([s for s, _ in targets])),
-                "stranger p99 milli_z": int(np.percentile(passing, 99)),
-            }
+                        s = score.best(u[i], [p], [norm], unit_norms[i])[0]
+                        targets.append((s, ws[i].group.split()[-1], snr[i]))
+                passing += [(score.best(u[i], [p], [norm], unit_norms[i])[0], snr[i]) for i in strangers]
+            row[kind] = {"targets": targets, "strangers": passing}
         out[name] = row
     return out
 
 
+def at_share(scores: list[int], share: float) -> int:
+    """The lowest score in thousandths that lets at most share of scores through, as rule_rows sets it."""
+    ranked = sorted(scores, reverse=True)
+    allowed = math.floor(share * len(ranked))
+    return min(ranked[allowed] + 1, score.Z_LIMIT) if allowed < len(ranked) else -score.Z_LIMIT
+
+
+def snr_edges(snrs: list[float], bins: int) -> list[float]:
+    """Edges in dB that split the SNRs a board can tell into bins of equal counts; none when it can tell none."""
+    told = np.array([s for s in snrs if not math.isnan(s)])
+    return [round(float(q), 2) for q in np.quantile(told, np.arange(1, bins) / bins)] if len(told) else []
+
+
+def snr_bin(snr: float, edges_db: list[float]) -> int:
+    """The bin of edges_db an SNR falls in; one the board cannot tell counts as the quietest."""
+    return len(edges_db) if math.isnan(snr) else int(np.searchsorted(edges_db, snr, side="right"))
+
+
+def judged(targets: list[tuple], strangers: list[tuple], threshold_of: Callable[[float], int]) -> dict:
+    """The targets kept per distance and the strangers passing when each window's threshold is threshold_of its SNR."""
+    kept = {
+        f"{d} cm": float(np.mean([s >= threshold_of(snr) for s, at, snr in targets if at == d]))
+        for d in sorted({at for _, at, _ in targets})
+    }
+    return {
+        "kept accepted": kept,
+        "strangers passing": float(np.mean([s >= threshold_of(snr) for s, snr in strangers])),
+    }
+
+
+def constant(milli_z: int) -> Callable[[float], int]:
+    return lambda _snr: milli_z
+
+
+def by_bin(thresholds: dict[int, int], edges_db: list[float], otherwise: int) -> Callable[[float], int]:
+    return lambda snr: thresholds.get(snr_bin(snr, edges_db), otherwise)
+
+
+def music_figures(scores: dict, fixed: int, share: float, bins: int) -> dict:
+    """Per kind of prints, then per condition: the owner's accepted windows kept per distance and the strangers passing
+    under three thresholds. "fixed" is fixed. "condition" lets share of that condition's strangers through, which only a
+    board told the music's level could set. "by snr" splits the strangers' SNRs of every condition into bins of equal
+    counts and lets share of each bin through, which a board can set from the window alone."""
+    out: dict = {}
+    for kind in ("quiet", "mixed"):
+        pooled = [st for row in scores.values() for st in row[kind]["strangers"]]
+        edges = snr_edges([snr for _, snr in pooled], bins)
+        binned: dict[int, list[int]] = defaultdict(list)
+        for s, snr in pooled:
+            binned[snr_bin(snr, edges)].append(s)
+        thresholds = {b: at_share(v, share) for b, v in binned.items()}
+        out[kind] = {"by snr": {"edges_db": edges, "milli_z": [thresholds.get(b) for b in range(bins)]}}
+        for name, row in scores.items():
+            targets, strangers = row[kind]["targets"], row[kind]["strangers"]
+            own = at_share([s for s, _ in strangers], share)
+            out[kind][name] = {k: row[k] for k in ("owner windows", "accepted", "stranger windows")} | {
+                "fixed": judged(targets, strangers, constant(fixed)),
+                "condition": judged(targets, strangers, constant(own)) | {"milli_z": own},
+                "by snr": judged(targets, strangers, by_bin(thresholds, edges, fixed)),
+                "owner median milli_z": int(np.median([s for s, _, _ in targets])),
+                "owner median snr db": median_told([snr for _, _, snr in targets]),
+            }
+    return out
+
+
+def median_told(snrs: list[float]) -> float | None:
+    told = [s for s in snrs if not math.isnan(s)]
+    return round(float(np.median(told)), 2) if told else None
+
+
 def music_table(body: dict) -> str:
-    """music.yaml's figures as a markdown table, percentages."""
-    lines = [
-        f"Threshold {body['milli_z']} thousandths, one person; voiceprint quiet / mixed:",
-        "",
-        "| condition | accepted | kept 1 m | kept 3 m | strangers passing | owner median | stranger p99 |",
-        "|---|---|---|---|---|---|---|",
-    ]
-    for name, row in body["conditions"].items():
-        q, m = row["quiet"], row["mixed"]
-        cells = [
-            f"{row['accepted']}/{row['owner windows']}",
-            *(
-                f"{100 * q['kept accepted'].get(d, math.nan):.1f}% / {100 * m['kept accepted'].get(d, math.nan):.1f}%"
-                for d in ("100 cm", "300 cm")
-            ),
-            f"{100 * q['strangers passing']:.2f}% / {100 * m['strangers passing']:.2f}%",
-            f"{q['owner median milli_z']} / {m['owner median milli_z']}",
-            f"{q['stranger p99 milli_z']} / {m['stranger p99 milli_z']}",
+    """music.yaml's figures as markdown tables, percentages: per cut, the voiceprint quiet / mixed in each cell."""
+    lines = []
+    for cut, figures in body["cuts"].items():
+        lines += [
+            "",
+            f"{cut}: fixed threshold {figures['milli_z']}; cells voiceprint quiet / mixed",
+            "",
+            "| condition | threshold | accepted | kept 1 m | kept 3 m | strangers passing | median | snr |",
+            "|---|---|---|---|---|---|---|---|",
         ]
-        lines.append(f"| {name} | {' | '.join(cells)} |")
+        quiet, mixed = figures["quiet"], figures["mixed"]
+        for name in (n for n in quiet if n != "by snr"):
+            for policy in ("fixed", "condition", "by snr"):
+                q, m = quiet[name][policy], mixed[name][policy]
+                kept = [
+                    " / ".join(f"{100 * x['kept accepted'].get(d, math.nan):.1f}%" for x in (q, m))
+                    for d in ("100 cm", "300 cm")
+                ]
+                lines.append(
+                    f"| {name} | {policy} | {quiet[name]['accepted']}/{quiet[name]['owner windows']} | "
+                    f"{' | '.join(kept)} | "
+                    f"{100 * q['strangers passing']:.2f}% / {100 * m['strangers passing']:.2f}% | "
+                    f"{quiet[name]['owner median milli_z']} | {quiet[name]['owner median snr db']} |"
+                )
+        lines.append(f"\nby snr, quiet prints: {quiet['by snr']}")
     return "\n".join(lines)
 
 
 def music(cfg: dict, run: Path, paths: dict, workers: int) -> dict:
     """The locked row with music in the room (E11-T33): the survey's material quiet, then at each SNR of
     music.snr_db the owner's sessions with music from a room of the bank and the strangers' with a file of the same
-    pool, every window through the chip's path; scored by music_rows with the lock's cohort and one person's threshold,
-    into <run>/int8/<row>/music.yaml. Refused for a run the lock does not deploy."""
+    pool. Two cuts go through the chip's path: the window b0 hears now ("full") and the same from its utterance's
+    first vad hop ("speech"), on a cohort and a threshold of its own set alike. Figures of music_figures go to
+    <run>/int8/<row>/music.yaml. Refused for a run the lock does not deploy."""
     lock = json.loads(pack_models.LOCK.read_text(encoding="utf-8"))["models"][BRANCH]
     if lock["run"] != run.name:
         raise ValueError(f"the lock deploys {lock['run']}, not {run.name}")
@@ -919,22 +986,32 @@ def music(cfg: dict, run: Path, paths: dict, workers: int) -> dict:
     survey_cfg, m = load_yaml(CONFIGS / cfg["source"]["survey"]), cfg["music"]
     vads: dict = {}
     owner = survey.owner_windows(survey_cfg, paths, vads=vads)
-    windows = {"quiet": owner + survey.impostor_windows(survey_cfg, paths, workers)}
+    full = {"quiet": owner + survey.impostor_windows(survey_cfg, paths, workers)}
     for snr in m["snr_db"]:
         pcm_of = survey.MusicPcm(survey_cfg, vads, snr, m["pool"], paths, cfg["quant"]["seed"])
-        owner = survey.owner_windows(survey_cfg, paths, pcm_of=pcm_of)
-        windows[f"{snr:g} dB"] = owner + survey.impostor_windows(survey_cfg, paths, workers, (m["pool"], snr))
-    units = {}
-    for name, ws in windows.items():
-        units[name] = chip_units(graph, cfg["esp_ppq_patches"], ws, front, wrap)[0]
-        print(f"{name}: {len(ws)} windows through the chip's path", flush=True)
-    cohort_rows_, top = deployed_cohort(lock, len(units["quiet"][0])), deployed_top(lock)
-    milli_z = int(lock["threshold"]["milli_z"][0])
+        heard = survey.owner_windows(survey_cfg, paths, pcm_of=pcm_of)
+        full[f"{snr:g} dB"] = heard + survey.impostor_windows(survey_cfg, paths, workers, (m["pool"], snr))
+    cuts = {"full": full, "speech": {name: [survey.speech_of(w) for w in ws] for name, ws in full.items()}}
+    cohort = cohort_speakers(full["quiet"], survey_cfg)
+    top, share = deployed_top(lock), cfg["deploy"]["shares"][0]
     swap = (f"{m['mixed_snr_db']:g} dB", m["mixed_windows"])
-    prints = music_prints(units, windows, survey_cfg, cohort_rows_, top, swap)
-    cohort = cohort_speakers(windows["quiet"], survey_cfg)
-    rows = music_rows(units, windows, survey_cfg, cohort, prints, cohort_rows_, top, milli_z)
-    body = {"run": run.name, "row": lock["row"], "milli_z": milli_z, "music": m, "conditions": rows}
+    body: dict = {"run": run.name, "row": lock["row"], "music": m, "cuts": {}}
+    for cut, windows in cuts.items():
+        units = {}
+        for name, ws in windows.items():
+            units[name] = chip_units(graph, cfg["esp_ppq_patches"], ws, front, wrap)[0]
+            print(f"{cut}, {name}: {len(ws)} windows through the chip's path", flush=True)
+        if cut == "full":
+            rows_ = deployed_cohort(lock, len(units["quiet"][0]))
+        else:
+            rows_ = cohort_rows(units["quiet"], windows["quiet"], cohort)
+        prints = music_prints(units, windows, survey_cfg, rows_, top, swap)
+        scores = music_scores(units, windows, survey_cfg, cohort, prints, rows_, top)
+        own = at_share([s for s, _ in scores["quiet"]["quiet"]["strangers"]], share)
+        fixed = int(lock["threshold"]["milli_z"][0]) if cut == "full" else own
+        body["cuts"][cut] = {"milli_z": fixed, "quiet milli_z": own} | music_figures(
+            scores, fixed, share, m["snr_bins"]
+        )
     (folder / MUSIC_FILE).write_text(yaml.safe_dump(body, sort_keys=False), encoding="utf-8")
     return body
 

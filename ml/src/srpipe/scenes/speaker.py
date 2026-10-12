@@ -12,7 +12,7 @@ import json
 import math
 import multiprocessing
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import pairwise
 
 import numpy as np
@@ -41,13 +41,15 @@ LANGUAGE = "vivos"
 @dataclass(frozen=True)
 class Window:
     """One window of float samples at the grid's rate, its speaker, the group it is reported in, and for the owner's
-    whether the command run accepts it as the command said and the utterances, <session>#<k>, it covers."""
+    whether the command run accepts it as the command said and the utterances, <session>#<k>, it covers; lead_hops of
+    its hops come ahead of its utterance's first vad hop."""
 
     spk: str
     group: str
     samples: np.ndarray
     accepted: bool = False
     said: tuple[str, ...] = ()
+    lead_hops: int = 0
 
 
 def board_cfg(cfg: dict) -> dict:
@@ -88,14 +90,30 @@ def owner_windows(cfg: dict, paths: dict, pcm_of: MusicPcm | None = None, vads: 
         spans = device.utterances(vad)
         owned = gate.owners(spans, gate.said_alone(r, paths, chain_cfg, mel))
         group = f"{r['session'][:8]} {r['distance_cm']}"
-        cuts = zip(device.command_cut(spans), owned, gate.ctc_windows(features, pitch, spans), strict=True)
-        for (start, end), said, x in cuts:
+        cut = device.command_cut(spans)
+        cuts = zip(cut, spans, owned, gate.ctc_windows(features, pitch, spans), strict=True)
+        for (start, end), (first, _), said, x in cuts:
             if said and not any((r["session"], k) in left for k in said):
                 h = heard(net, x)
                 acted = h.command == expected and h.accepted(decide["reject_permille"], decide["margin_permille"])
                 keys = tuple(f"{r['session']}#{k}" for k in said)
-                out.append(Window(r["spk"], group, window_of(clean, start, end), acted, keys))
+                out.append(Window(r["spk"], group, window_of(clean, start, end), acted, keys, max(0, first - start)))
     return out
+
+
+def speech_of(w: Window) -> Window:
+    """w from its utterance's first vad hop: what b0 hears when the window's lead is cut away."""
+    return replace(w, samples=w.samples[w.lead_hops * HOP :], lead_hops=0)
+
+
+def snr_db(w: Window) -> float:
+    """What the board can tell of a window's noise: the power of its utterance over that of its lead, the clean
+    samples ahead of the first vad hop, in dB; NaN without a lead or with a silent one."""
+    lead, speech = w.samples[: w.lead_hops * HOP], w.samples[w.lead_hops * HOP :]
+    floor = float(np.mean(np.square(lead, dtype=np.float64))) if len(lead) else 0.0
+    if not floor > 0 or not len(speech):
+        return math.nan
+    return 10.0 * math.log10(float(np.mean(np.square(speech, dtype=np.float64))) / floor)
 
 
 def with_music(
@@ -159,7 +177,7 @@ def _impostor_session(job: tuple) -> list[Window]:
     said = [(s // HOP + device.CHAIN_LAG_HOPS, -(-e // HOP) + device.CHAIN_LAG_HOPS) for s, e in spans]
     utterances = device.utterances(figures[:, 0].astype(bool))
     return [
-        Window(rows[0].spk, group, window_of(clean, start, end))
+        Window(rows[0].spk, group, window_of(clean, start, end), lead_hops=max(0, first - start))
         for (start, end), (first, last) in zip(device.command_cut(utterances), utterances, strict=True)
         if any(first < stop and begin <= last for begin, stop in said)
     ]

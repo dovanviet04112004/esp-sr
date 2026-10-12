@@ -104,3 +104,12 @@ def test_music_saturates_as_the_board_does_and_needs_speech_and_silence() -> Non
     assert loud.dtype == np.int16 and loud.max() == 32767 and loud.min() == -32768
     with pytest.raises(ValueError, match="speech and hops without"):
         speaker.with_music(pcm, np.zeros(hops, dtype=bool), rirs, music, 10.0, flat_pair())
+
+
+def test_a_window_from_its_first_vad_hop_and_its_snr_over_its_lead() -> None:
+    lead = np.full(3 * speaker.HOP, 0.01, dtype=np.float32)
+    talk = np.full(2 * speaker.HOP, 0.1, dtype=np.float32)
+    w = speaker.Window("owner", "x", np.concatenate([lead, talk]), True, ("s#0",), 3)
+    assert speaker.speech_of(w).samples.tolist() == talk.tolist() and speaker.speech_of(w).lead_hops == 0
+    assert speaker.snr_db(w) == pytest.approx(20.0)
+    assert np.isnan(speaker.snr_db(speaker.speech_of(w)))

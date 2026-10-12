@@ -429,10 +429,41 @@ def test_music_moves_the_owner_under_the_threshold_and_a_mixed_voiceprint_brings
     units, windows, cfg, cohort = music_material(np.random.default_rng(9))
     rows = np.stack([units["quiet"][i] for i, w in enumerate(windows["quiet"]) if w.spk in cohort])
     prints = quant.music_prints(units, windows, cfg, rows, 20, ("10 dB", 5))
-    table = quant.music_rows(units, windows, cfg, cohort, prints, rows, 20, 2000)
-    quiet, music = table["quiet"], table["10 dB"]
+    scores = quant.music_scores(units, windows, cfg, cohort, prints, rows, 20)
+    figures = quant.music_figures(scores, 2000, 0.05, 2)
+    quiet, music = figures["quiet"]["quiet"], figures["quiet"]["10 dB"]
+    mixed = figures["mixed"]["10 dB"]
     assert quiet["stranger windows"] == 30 and quiet["accepted"] == 28
-    assert quiet["quiet"]["kept accepted"]["300 cm"] == 1.0
-    assert music["quiet"]["kept accepted"]["300 cm"] < 0.5 < music["mixed"]["kept accepted"]["300 cm"]
-    assert music["quiet"]["owner median milli_z"] < quiet["quiet"]["owner median milli_z"]
-    assert music["quiet"]["strangers passing"] == quiet["quiet"]["strangers passing"]
+    assert quiet["fixed"]["kept accepted"]["300 cm"] == 1.0
+    assert music["fixed"]["kept accepted"]["300 cm"] < 0.5 < mixed["fixed"]["kept accepted"]["300 cm"]
+    assert music["owner median milli_z"] < quiet["owner median milli_z"]
+    assert music["fixed"]["strangers passing"] == quiet["fixed"]["strangers passing"]
+    assert music["condition"]["strangers passing"] <= 0.05
+
+
+def test_the_share_threshold_lets_at_most_its_share_through() -> None:
+    scores = list(range(100))
+    assert quant.at_share(scores, 0.01) == 99
+    assert sum(s >= quant.at_share(scores, 0.05) for s in scores) == 5
+    assert quant.at_share(scores, 1.0) == -quant.score.Z_LIMIT
+
+
+def test_a_window_the_board_cannot_tell_counts_as_the_quietest_bin() -> None:
+    import math
+
+    edges = quant.snr_edges([1.0, 2.0, 3.0, 4.0, math.nan], 2)
+    assert edges == [2.5]
+    assert [quant.snr_bin(v, edges) for v in (0.0, 2.5, 9.0, math.nan)] == [0, 1, 1, 1]
+
+
+def test_by_snr_sets_one_threshold_per_bin_from_the_strangers_of_every_condition() -> None:
+    def row(strangers: list[tuple[int, float]]) -> dict:
+        kind = {"targets": [(5000, "100", 20.0), (1000, "100", 5.0)], "strangers": strangers}
+        return {"owner windows": 2, "accepted": 2, "stranger windows": len(strangers), "quiet": kind, "mixed": kind}
+
+    loud = [(k, 5.0) for k in range(100)]
+    quiet = [(3000 + k, 30.0) for k in range(100)]
+    figures = quant.music_figures({"quiet": row(quiet), "5 dB": row(loud)}, 4000, 0.01, 2)
+    assert figures["quiet"]["by snr"]["milli_z"] == [99, 3099]
+    assert figures["quiet"]["5 dB"]["by snr"]["kept accepted"]["100 cm"] == 1.0
+    assert figures["quiet"]["5 dB"]["fixed"]["kept accepted"]["100 cm"] == 0.5
