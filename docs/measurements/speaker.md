@@ -511,3 +511,47 @@ câu liền nhau, nên 10 lệnh chỉ có 3 câu: "bật đèn" 5 lần, "tắt
 - Mẫu lệch về ba câu nên khớp kém với các lệnh khác, và kém mọi lần rút ngẫu nhiên.
 - Khi đăng ký thật nên nói 10 lệnh khác nhau. Đăng ký hiện lấy 10 lệnh kế tiếp bất kỳ (KẾ HOẠCH §3.17), nên điều ấy
   chỉ nằm ở lời dặn người dùng.
+
+### 6.9 Nhạc nền trong phòng (E11-T33, 12/10)
+
+Chủ repo thấy lệnh của mình qua kiểm người nói khi phòng yên, nhưng có chút nhạc nền thì điểm tụt dưới ngưỡng. Vật
+liệu của §6.3–6.7 không có nguồn nhiễu nào, nên đây là điều kiện chưa từng đo.
+
+`make speaker-music RUN=artifacts/speaker/runs/20261010_5a45475-dirty_94e5a9` ở `ba2ff0b`, 21 phút. Đo trên máy tính
+bằng đường chip (b0 int8 hàng `kl`, nhóm chuẩn và K = 100 của bản khoá, ngưỡng 1 người 2964), chưa đo trên board.
+- **Phiên của chủ repo:** các phiên Cửa 3 cộng một file nhạc MUSAN phát từ một phòng của kho mô phỏng, qua đáp ứng của
+  cặp micro. SNR là công suất lời ở ch0 trên các bước có lời theo VAD của lượt không nhạc, trừ công suất nền, chia cho
+  công suất cả file nhạc ở ch0. Nền của bản thu vẫn còn: lời chỉ cao hơn nền ~20 dB, nên luật "40 dB dưới đỉnh" của mô
+  phỏng sẽ coi mọi bước là lời.
+- **Người lạ:** cùng các phiên của §6.3, thêm một file nhạc cùng kho qua nguồn nhiễu của mô phỏng, cùng SNR.
+- **Lệnh được nhận:** bộ nhận lệnh cũng nghe có nhạc, nên số cửa sổ được nhận đổi theo SNR. Kiểm người nói chỉ chạy
+  trên lệnh được nhận, như trên board.
+- **Hai mẫu giọng:**
+  - "yên" là 20 lần rút như §6.7;
+  - "trộn" là cùng lần rút, đổi 5/10 cửa sổ lấy cửa sổ có nhạc 10 dB của cùng phiên đăng ký, khác câu.
+  - Không mẫu nào chấm cửa sổ của câu nó đã nghe.
+
+Mỗi ô ghi mẫu "yên" / mẫu "trộn":
+
+| Điều kiện | Lệnh được nhận / cửa sổ | Giữ 1 m | Giữ 3 m | Người lạ lọt | Trung vị chủ repo (‰ z) | Người lạ, phân vị 99 |
+|---|---|---|---|---|---|---|
+| Không nhạc | 178/209 | 98,0 / 98,0% | 97,4 / 96,6% | 0,92 / 1,12% | 5978 / 5486 | 2864 / 3127 |
+| Nhạc 20 dB | 170/207 | 91,8 / 93,5% | 92,0 / 92,1% | 0,20 / 0,34% | 5386 / 5182 | 2220 / 2519 |
+| Nhạc 10 dB | 118/194 | 67,6 / 73,8% | 71,9 / 81,7% | 0,37 / 0,49% | 4231 / 4447 | 2146 / 2427 |
+| Nhạc 5 dB | 61/141 | 57,1 / 61,9% | 68,8 / 70,2% | 0,08 / 0,35% | 4331 / 4335 | 2041 / 2575 |
+
+- **Mốc:** hàng "không nhạc" với mẫu "yên" ra lại §6.7 (98,0 / 97,4%). Người lạ lọt 0,92% thay vì 0,99% vì ở đây 64
+  cửa sổ hiệu chuẩn của ESP-PPQ cũng được chấm.
+- **Nhạc kéo điểm của mọi người xuống.**
+  - Trung vị của chủ repo: 5978 khi yên, 4231 ở 10 dB.
+  - Phân vị 99 của người lạ: 2864 khi yên, 2146 ở 10 dB.
+  - Ngưỡng đặt lúc yên vì thế chặn ~30% lệnh được nhận của chủ repo ở 10 dB. Trong khi đó người lạ lại lọt ít hơn lúc
+    yên.
+- **Nhận lệnh cũng tụt:** lệnh được nhận là 85% số cửa sổ khi yên, 61% ở 10 dB, 43% ở 5 dB. Ở 10 dB, một lệnh của chủ
+  repo vừa được nhận vừa qua kiểm người nói chỉ còn ~42% (61% × ~70%).
+- **Đăng ký có nhạc giúp ít:**
+  - được 6–10 điểm ở 10 dB, ~2 điểm ở 20 dB;
+  - đổi lại, lúc yên ở 3 m mất 0,8 điểm, và người lạ lọt 1,12%, quá mốc 1%.
+- **Hướng đáng đo tiếp:** người lạ cũng tụt điểm khi có nhạc. Vì vậy một ngưỡng đặt trên vật liệu có nhạc, hay chọn
+  theo SNR mà board đo được trên cửa sổ, sẽ giữ được nhiều lệnh của chủ repo hơn ở cùng mốc 1% người lạ. Cắt cửa sổ
+  của b0 theo VAD thì bỏ được đoạn chỉ có nhạc trước lời. Cả hai chưa đo.
