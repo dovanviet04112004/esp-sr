@@ -27,7 +27,7 @@ from torch.nn import functional
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, ptq_espdl
 from srpipe.core import run_dir
-from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_yaml
+from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, device_of, load_yaml
 from srpipe.dsp.spec import spk_fbank
 from srpipe.export import pack_models, update_lock
 from srpipe.generated import grid, speaker
@@ -673,27 +673,52 @@ def deployed_top(lock_row: dict) -> int:
     return top
 
 
+def window_energies(w) -> tuple[int, int, int, int]:
+    """A window's sums of squares over its lead and its utterance, as svc_listen takes them (ADR-0024)."""
+    return score.noise_energies(np.rint(w.samples * PCM_FULL_SCALE).astype(np.int16), w.lead_hops)
+
+
+def noise_edges(windows: list, bins: int) -> list[np.float32]:
+    """Edges that split the windows' utterance-over-lead power ratios the board can judge into bins of equal counts,
+    float32 as the image holds them; 0 for each when it can judge none (ADR-0024)."""
+    ratios = []
+    for w in windows:
+        lead_energy, lead_samples, speech_energy, speech_samples = window_energies(w)
+        if lead_samples and lead_energy and speech_samples:
+            ratios.append((float(speech_energy) * float(lead_samples)) / (float(lead_energy) * float(speech_samples)))
+    if not ratios:
+        return [np.float32(0.0)] * (bins - 1)
+    return [np.float32(q) for q in np.quantile(np.array(ratios), np.arange(1, bins) / bins)]
+
+
 def threshold_table(
-    units: list[np.ndarray], windows: list, survey_cfg: dict, dq: dict, most: int, cohort: set[str]
+    units: list[np.ndarray],
+    windows: list,
+    survey_cfg: dict,
+    dq: dict,
+    most: int,
+    cohort: set[str],
+    noisy: dict[str, tuple[list[np.ndarray], list]] | None = None,
 ) -> dict:
     """The chip's threshold for 1 to most people holding a voiceprint, scored by AS-norm over the deploy.cohort_top rows
-    of the cohort's speakers, who take no other part (ADR-0023). Each of the survey's enrolment draws of owner windows
-    serves every count; with n people, n - 1 strangers with enough windows are drawn as members and enrol from their
-    own. The owner's accepted windows, the members' other windows and every other stranger's not drawn are scored with
-    the best over the n voiceprints, all draws pooled, under rule_rows; beside them, how often the best voiceprint is
-    the speaker's own, for the owner and for the members."""
+    of the cohort's speakers, who take no other part (ADR-0023). Each enrolment draw serves every count; with n people,
+    n - 1 strangers with enough windows enrol from their own. The owner's accepted windows, the members' other windows
+    and every other stranger's are scored with the best over the n voiceprints, all draws pooled, under rule_rows.
+    Given noisy conditions, (units, windows) by name, noise_bins sets each count's thresholds per bin (ADR-0024)."""
     owner = survey_cfg["owner"]
     enrol_group = f"{owner['enrol']['date']} {owner['enrol']['distance_cm']}"
     mine = [i for i, w in enumerate(windows) if w.spk == owner["spk"]]
     pool = [i for i in mine if windows[i].group == enrol_group]
     rows_of_cohort = cohort_rows(units, windows, cohort)
     top = dq["cohort_top"]
-    unit_norms: dict[int, tuple[np.float32, np.float32]] = {}
+    unit_norms: dict[tuple[str, int], tuple[np.float32, np.float32]] = {}
+    conditions = {"quiet": (units, windows)} | (noisy or {})
 
-    def scored(i: int, prints: list[np.ndarray], norms: list) -> tuple[int, int, int]:
-        if i not in unit_norms:
-            unit_norms[i] = score.norm(units[i], rows_of_cohort, top)
-        return score.best(units[i], prints, norms, unit_norms[i])
+    def scored(i: int, prints: list[np.ndarray], norms: list, name: str = "quiet") -> tuple[int, int, int]:
+        u = conditions[name][0][i]
+        if (name, i) not in unit_norms:
+            unit_norms[(name, i)] = score.norm(u, rows_of_cohort, top)
+        return score.best(u, prints, norms, unit_norms[(name, i)])
 
     by_spk: dict[str, list[int]] = {}
     for i, w in enumerate(windows):
@@ -702,6 +727,14 @@ def threshold_table(
     enrollable = sorted(s for s, rows in by_spk.items() if len(rows) >= speaker.ENROL_COMMANDS)
     rng = np.random.default_rng([survey_cfg["seed"], survey.ENROL_STREAM, speaker.ENROL_COMMANDS])
     draws = [sorted(rng.choice(pool, speaker.ENROL_COMMANDS, replace=False).tolist()) for _ in range(owner["draws"])]
+    strangers = {
+        name: [i for i, w in enumerate(ws) if w.spk != owner["spk"] and w.spk not in cohort]
+        for name, (_, ws) in conditions.items()
+    }
+    edges = noise_edges(
+        [ws[i] for name, (_, ws) in conditions.items() for i in strangers[name]], pack_models.NOISE_EDGES + 1
+    )
+    bin_of = {name: [score.noise_bin(*window_energies(w), edges) for w in ws] for name, (_, ws) in conditions.items()}
     counts = []
     for n in range(1, most + 1):
         members_rng = np.random.default_rng([survey_cfg["seed"], survey.ENROL_STREAM, speaker.ENROL_COMMANDS, n])
@@ -709,6 +742,8 @@ def threshold_table(
         impostors: list[int] = []
         theirs_scores: list[int] = []
         named: dict[str, list[bool]] = {"owner": [], "members": []}
+        heard: dict[str, list[tuple[int, str, int]]] = {name: [] for name in conditions}
+        passing: dict[str, list[tuple[int, int]]] = {name: [] for name in conditions}
         for enrolled in draws:
             members = members_rng.choice(enrollable, n - 1, replace=False).tolist() if n > 1 else []
             prints = [score.voiceprint([units[i] for i in enrolled])]
@@ -727,10 +762,24 @@ def threshold_table(
                 theirs_scores.append(s)
                 named["members"].append(index == k)
             impostors += [scored(i, prints, norms)[0] for s, rows in by_spk.items() if s not in members for i in rows]
+            if noisy is None:
+                continue
+            said = {k for i in enrolled for k in windows[i].said}
+            for name, (_, ws) in conditions.items():
+                for i, w in enumerate(ws):
+                    if w.spk == owner["spk"] and w.accepted and not said & set(w.said):
+                        heard[name].append((scored(i, prints, norms, name)[0], w.group.split()[-1], bin_of[name][i]))
+                passing[name] += [
+                    (scored(i, prints, norms, name)[0], bin_of[name][i])
+                    for i in strangers[name]
+                    if ws[i].spk not in members
+                ]
         rows, chosen = rule_rows(targets, impostors, dq, theirs_scores)
         right = {who: float(np.mean(found)) for who, found in named.items() if found}
         counts.append({"people": n, "shares": rows, "chosen": chosen, "named right": right})
-    return {
+        if noisy is not None:
+            counts[-1]["noise"] = noise_bins(heard, passing, rows[chosen]["milli_z"], dq["shares"][0], len(edges))
+    table = {
         "enrol_commands": speaker.ENROL_COMMANDS,
         "draws": owner["draws"],
         "owner windows": len(mine),
@@ -739,6 +788,39 @@ def threshold_table(
         "cohort": {"speakers": len(cohort), "rows": len(rows_of_cohort), "top": top},
         "counts": counts,
     }
+    if noisy is not None:
+        windows_of = {name: len(ws) for name, (_, ws) in conditions.items()}
+        table["noise"] = {"edges": [float(e) for e in edges], "windows": windows_of}
+    return table
+
+
+def noise_bins(
+    heard: dict[str, list[tuple[int, str, int]]],
+    passing: dict[str, list[tuple[int, int]]],
+    quiet_milli_z: int,
+    share: float,
+    n_edges: int,
+) -> dict:
+    """One count's thresholds per noise bin (ADR-0024) from the strangers' (score, bin) of every condition: in each
+    noisier bin the one letting share of that bin's strangers through, the quiet table's where a bin has none; the
+    quietest keeps quiet_milli_z unless that lets more than share of its strangers through. With them, the owner's
+    accepted windows kept per distance and the strangers passing, per condition."""
+    pooled: dict[int, list[int]] = defaultdict(list)
+    for found in passing.values():
+        for s, b in found:
+            pooled[b].append(s)
+    quiet = max(quiet_milli_z, at_share(pooled[n_edges], share)) if pooled[n_edges] else quiet_milli_z
+    noisier = [at_share(pooled[b], share) if pooled[b] else quiet for b in range(n_edges)]
+    thresholds = [*noisier, quiet]
+    kept = {
+        name: {
+            f"{d} cm": float(np.mean([s >= thresholds[b] for s, at, b in found if at == d]))
+            for d in sorted({at for _, at, _ in found})
+        }
+        for name, found in heard.items()
+    }
+    passed = {name: float(np.mean([s >= thresholds[b] for s, b in found])) for name, found in passing.items() if found}
+    return {"milli_z": noisier, "quiet": quiet, "kept accepted": kept, "strangers passing": passed}
 
 
 def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[Path, Path]:
@@ -758,13 +840,22 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
     if (bits := ptq_espdl.io_bits(graph)) != (CHIP_BITS, CHIP_BITS):
         raise ValueError(f"row {row} reads {bits[0]} and gives {bits[1]} bits; the chip runs int8 at both ends")
     survey_cfg, dq = load_yaml(CONFIGS / cfg["source"]["survey"]), cfg["deploy"]
-    owner, impostors = survey.owner_windows(survey_cfg, paths), survey.impostor_windows(survey_cfg, paths, workers)
+    vads: dict = {}
+    owner = survey.owner_windows(survey_cfg, paths, vads=vads)
+    impostors = survey.impostor_windows(survey_cfg, paths, workers)
     picks, board = drawn(cfg["quant"], impostors)
     scored = owner + [w for i, w in enumerate(impostors) if i not in set(picks)]
     front = spk_fbank.SpkFbank(spk_fbank.contract_config())
     units, gap = chip_units(graph, cfg["esp_ppq_patches"], scored, front, wrap)
     cohort = cohort_speakers(scored, survey_cfg)
-    table = threshold_table(units, scored, survey_cfg, dq, pack_models.SPEAKERS, cohort)
+    pools = device_of(survey.board_cfg(survey_cfg))["noise"]["pools"]
+    noisy = {}
+    for snr in dq["noise"]["snr_db"]:
+        pcm_of = survey.NoisyPcm(survey_cfg, vads, snr, pools, paths, survey_cfg["seed"])
+        ws = survey.owner_windows(survey_cfg, paths, pcm_of=pcm_of)
+        ws += survey.impostor_windows(survey_cfg, paths, workers, (pools, snr))
+        noisy[f"{snr:g} dB"] = (chip_units(graph, cfg["esp_ppq_patches"], ws, front, wrap)[0], ws)
+    table = threshold_table(units, scored, survey_cfg, dq, pack_models.SPEAKERS, cohort, noisy)
     survey_figures = figures(np.stack(units), scored, survey_cfg, cfg["quant"])
     kept = table | {"front_end": gap, "figures": survey_figures}
     (folder / DEPLOY_FILE).write_text(yaml.safe_dump(kept, sort_keys=False), encoding="utf-8")
@@ -790,8 +881,9 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
         "row": row,
         "rungs": {"calibration": rungs["calibration"], "int16_ops": rungs.get("int16_ops", [])},
         "threshold": {
-            "milli_z": [c["shares"][c["chosen"]]["milli_z"] for c in table["counts"]],
+            "milli_z": [c["noise"]["quiet"] for c in table["counts"]],
             "impostors_passing": [c["chosen"] for c in table["counts"]],
+            "noise": {"edges": table["noise"]["edges"], "milli_z": [c["noise"]["milli_z"] for c in table["counts"]]},
         },
         "cohort": {"seed": survey_cfg["seed"], "stream": COHORT_STREAM} | table["cohort"],
         "weights_in_flash": dq["weights_in_flash"],

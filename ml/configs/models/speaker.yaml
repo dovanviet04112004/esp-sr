@@ -33,6 +33,8 @@ deploy:                            # make speaker-deploy RUN= ROW= (E11-T26, KEH
   shares: [0.01, 0.05]             # impostors passing: the first, unless a distance then keeps under keep_min
   keep_min: 0.95                   # accepted commands kept at each distance, its sessions pooled
   cohort_top: 100                  # cohort rows AS-norm averages over at each side (ADR-0023)
+  noise:                           # the noisier bins' material (ADR-0024): scenes/device.yaml's pools
+    snr_db: [20, 10, 5]            # the talker's speech hops over the whole noise at ch0
 music:                             # make speaker-music RUN=: the locked row with music in the room (E11-T33)
   pool: {dir: noise/musan/musan/music, glob: "**/*.wav", weight: 1}   # under raw/, as scenes/device.yaml lists it
   snr_db: [20, 10, 5]              # the talker's speech hops over the whole music at ch0

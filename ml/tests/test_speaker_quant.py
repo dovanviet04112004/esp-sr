@@ -467,3 +467,57 @@ def test_by_snr_sets_one_threshold_per_bin_from_the_strangers_of_every_condition
     assert figures["quiet"]["by snr"]["milli_z"] == [99, 3099]
     assert figures["quiet"]["5 dB"]["by snr"]["kept accepted"]["100 cm"] == 1.0
     assert figures["quiet"]["5 dB"]["fixed"]["kept accepted"]["100 cm"] == 0.5
+
+
+def noisy_window(rng, spk: str, lead_hops: int, lead_level: float, accepted: bool = False, said: tuple = ()):
+    """A window of int16-exact float samples: lead_hops of noise at lead_level, then 20 hops of speech at 3000."""
+    import numpy as np
+
+    from srpipe.scenes import speaker as survey
+
+    hop = 256
+    raw = np.concatenate([rng.normal(0.0, lead_level, lead_hops * hop), rng.normal(0.0, 3000.0, 20 * hop)])
+    samples = (np.clip(np.rint(raw), -32768, 32767) / 32768.0).astype(np.float32)
+    return survey.Window(spk, "20261007 300" if spk == "owner" else "near", samples, accepted, said, lead_hops)
+
+
+def test_noise_edges_split_the_judged_ratios_into_equal_counts_and_skip_a_window_with_no_lead() -> None:
+    import numpy as np
+
+    rng = np.random.default_rng(3)
+    windows = [noisy_window(rng, "s1", 10, level) for level in (30.0, 100.0, 300.0, 1000.0, 3000.0)]
+    windows.append(noisy_window(rng, "s1", 0, 0.0))
+    edges = quant.noise_edges(windows, 4)
+    ratios = sorted((float(e[2]) * e[1]) / (float(e[0]) * e[3]) for e in map(quant.window_energies, windows[:5]))
+    assert len(edges) == 3 and all(isinstance(e, np.float32) for e in edges)
+    assert edges == [np.float32(q) for q in np.quantile(ratios, [0.25, 0.5, 0.75])]
+    assert quant.noise_edges(windows[5:], 4) == [np.float32(0.0)] * 3
+
+
+def test_each_noisier_bin_takes_its_own_threshold_and_the_quietest_keeps_the_quiet_one_unless_it_leaks() -> None:
+    passing = {"quiet": [(3000 + k, 3) for k in range(100)], "5 dB": [(k, 0) for k in range(100)]}
+    heard = {"quiet": [(5000, "100", 3)], "5 dB": [(5000, "100", 0), (50, "100", 0)]}
+    got = quant.noise_bins(heard, passing, 2964, 0.01, 3)
+    assert got["milli_z"] == [99, 3099, 3099] and got["quiet"] == 3099
+    assert got["kept accepted"] == {"quiet": {"100 cm": 1.0}, "5 dB": {"100 cm": 0.5}}
+    assert got["strangers passing"] == {"quiet": 0.01, "5 dB": 0.01}
+    assert quant.noise_bins(heard, {"quiet": [(10, 3)]}, 2964, 0.01, 3)["quiet"] == 2964
+
+
+def test_the_threshold_table_sets_noise_bins_only_when_given_noisy_material() -> None:
+    import numpy as np
+
+    rng = np.random.default_rng(11)
+    units, windows, cfg = threshold_material(rng, [0.9] * 6, 60)
+    cohort = cohort_of(windows)
+    dq = {"shares": [0.01, 0.05], "keep_min": 0.95, "cohort_top": 10}
+    plain = quant.threshold_table(units, windows, cfg, dq, 1, cohort)
+    assert "noise" not in plain and all("noise" not in c for c in plain["counts"])
+    loud = [noisy_window(rng, w.spk, 8, float(rng.uniform(300.0, 3000.0)), w.accepted) for w in windows]
+    noisy = quant.threshold_table(units, windows, cfg, dq, 1, cohort, {"5 dB": (units, loud)})
+    assert [c["shares"] for c in noisy["counts"]] == [c["shares"] for c in plain["counts"]]
+    assert len(noisy["noise"]["edges"]) == 3
+    assert noisy["noise"]["windows"] == {"quiet": len(windows), "5 dB": len(windows)}
+    for count, quiet in zip(noisy["counts"], plain["counts"], strict=True):
+        assert len(count["noise"]["milli_z"]) == 3
+        assert count["noise"]["quiet"] >= quiet["shares"][quiet["chosen"]]["milli_z"]
