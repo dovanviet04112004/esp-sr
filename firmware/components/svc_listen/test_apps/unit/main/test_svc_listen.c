@@ -72,8 +72,8 @@ typedef struct {
 } named_t;
 
 typedef struct {
-    size_t windows, differ, decisions;
-    int64_t work_us, work_peak_us, close_us, close_peak_us;
+    size_t windows, differ, decisions, held;
+    int64_t work_us, work_peak_us, close_us, close_peak_us, hold_us, hold_peak_us;
 } tally_t;
 
 static const int16_t k_zeros[GEN_GRID_HOP_SAMPLES];
@@ -98,10 +98,15 @@ static const uint8_t *read_named(const uint8_t *base, uint16_t commands, named_t
 }
 
 // A COMMAND goes through the speaker check as nhan_task hands it to xac_task, when the check is on.
-static void check_speaker(svc_listen_decision_t *d)
+static void check_speaker(svc_listen_decision_t *d, tally_t *t)
 {
     if (d->event.kind != APP_EVT_COMMAND || !svc_listen_verifies()) { return; }
+    const int64_t from_us = esp_timer_get_time();
     TEST_ASSERT_EQUAL(ESP_OK, svc_listen_hold(d, VERIFY_SLOT));
+    const int64_t took_us = esp_timer_get_time() - from_us;
+    t->held++;
+    t->hold_us += took_us;
+    t->hold_peak_us = took_us > t->hold_peak_us ? took_us : t->hold_peak_us;
     TEST_ASSERT_EQUAL(ESP_OK, svc_listen_verify(VERIFY_SLOT, d));
 }
 
@@ -110,7 +115,7 @@ static size_t drain(svc_listen_decision_t *decided, size_t n, tally_t *t)
     size_t hops = 0;
     while (svc_listen_pending()) {
         if (svc_listen_work(&decided[n])) {
-            check_speaker(&decided[n]);
+            check_speaker(&decided[n], t);
             t->work_us += decided[n].work_us;
             t->work_peak_us = decided[n].work_us > t->work_peak_us ? decided[n].work_us : t->work_peak_us;
             t->close_us += decided[n].close_us;
@@ -387,6 +392,9 @@ TEST_CASE("svc_listen decides every Gate 3 session of the round as Python decide
            (unsigned)sessions, (unsigned)t.windows, (unsigned)t.differ,
            t.windows ? t.work_us / (int64_t)t.windows : 0, t.work_peak_us,
            t.windows ? t.close_us / (int64_t)t.windows : 0, t.close_peak_us);
+    printf("svc_listen: %u held for the speaker check, tail and noise sums %" PRId64 " us mean, %" PRId64
+           " us peak\n",
+           (unsigned)t.held, t.held ? t.hold_us / (int64_t)t.held : 0, t.hold_peak_us);
     TEST_ASSERT_EQUAL(0, t.differ);
 }
 
