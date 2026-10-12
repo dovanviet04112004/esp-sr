@@ -586,3 +586,47 @@ Cửa sổ như board đang cắt, mẫu "yên"; giữ 1 m / 3 m:
   - Lời lệnh ngắn hơn 1,5 s, nên b0 nghe số 0 ở phía trước, và mất đoạn mở đầu của lời mà VAD bắt muộn.
   - Hướng này loại. Cột "theo SNR" của nó không có số: cửa sổ đã cắt không còn đoạn trước lời để ước SNR.
 - **Phần còn lại là bộ nhận lệnh:** ở 10 dB chỉ 61% cửa sổ được nhận. Ngưỡng theo SNR không chạm tới phần đó.
+
+**Đợt 3: `speaker-deploy` theo ADR-0024** (`9c0dbc2`, 23 phút). Cùng vật liệu, nhưng ồn rút từ cả bốn kho của
+`scenes/device.yaml` theo trọng số (ồn 3, nhạc 1, tiếng người 1, DEMAND 2), ở 20, 10, 5 dB.
+- Dải tính đúng như chip: biên 8,7 / 62,5 / 572 (tỉ số công suất).
+- Ngưỡng 1 người: 1728 / 1752 / 3302 cho ba dải ồn, 2964 cho dải yên nhất.
+- Mỗi lệnh được chấm dưới ngưỡng theo dải và dưới một ngưỡng, là bảng của ADR-0023.
+- Cột "ngưỡng riêng từng mức" đặt ngưỡng ở 1% người lạ của chính mức ồn ấy. Board không biết mức ồn, nên đây là cận
+  trên.
+
+Một người có mẫu giọng; giữ 1 m / 3 m:
+
+| Điều kiện | Theo dải | Một ngưỡng | Ngưỡng riêng từng mức | Người lạ lọt: theo dải / một ngưỡng |
+|---|---|---|---|---|
+| Không ồn | 97,7 / 97,3% | 98,0 / 97,4% | — | 1,01 / 0,99% |
+| Ồn 20 dB | 96,0 / 90,8% | 96,8 / 91,9% | 97,4 / 94,7% | 0,56 / 0,38% |
+| Ồn 10 dB | 83,5 / 73,0% | 82,3 / 74,7% | 84,3 / 75,8% | 1,15 / 0,69% |
+| Ồn 5 dB | 95,2 / 70,7% | 96,7 / 59,1% | 97,9 / 61,6% | 0,56 / 0,62% |
+
+- **Theo dải không hơn một ngưỡng:**
+  - lúc yên mất 0,3 điểm, ở 20 dB mất ~1 điểm;
+  - chỉ được ở 5 dB, 3 m;
+  - ở 10 dB để lọt 1,15% người lạ.
+  - Với 3–8 người có mẫu giọng, lúc yên người lạ lọt 1,16–1,36% thay vì ~1%.
+  - Bảng dải này vì thế chưa nạp lên board.
+- **Cận trên chỉ 1–3 điểm,** với 1, 2 hay 3 người.
+  - Dưới một ngưỡng, người lạ ở các mức ồn lọt 0,4–0,7%: hỗn hợp này gần như không kéo điểm người lạ xuống, nên không
+    có chỗ hạ ngưỡng.
+  - Nhạc thì kéo xuống mạnh (đợt 1), nhưng board không phân biệt được nhạc với các kho khác.
+- **Tỉ số "lời trên đoạn trước lời" không tách được mức ồn của người lạ mô phỏng.**
+  - Bốn dải chứa 13,6 / 16,1 / 21,2 / 49,1% cửa sổ người lạ lúc yên, và 29,4 / 20,6 / 15,0 / 35,0% ở 5 dB.
+  - Người lạ đọc câu dài, nối sát nhau:
+    - 11–26% cửa sổ của họ không có đoạn trước lời, vì câu dài hơn 1,75 s, nên rơi vào dải yên nhất ở mọi mức;
+    - 8 bước ngay trước bước VAD đầu có p10 chỉ 2 dB dưới lời: VAD bắt muộn, lời đã nằm trong đoạn trước lời.
+  - Lời trên đoạn trước lời (p10 / trung vị / p90) lúc yên:
+    - chủ repo 27 / 30 / 32 dB;
+    - người lạ 5 / 25 / 39 dB.
+  - Khử ồn của `dsp_afe` nén SNR danh định: lệnh chủ repo ở 5 dB đo ra trung vị 20,6 dB trên mẫu `clean`.
+- **Mỗi ô (mức ồn × dải) chỉ có 50–200 cửa sổ người lạ khác nhau.** 1% của ô do 1–2 cửa sổ quyết định, nên ngưỡng
+  dải nhảy: dải 2 ra 3302, cao hơn dải yên nhất.
+- **Năm cách ước nền khác,** chấm lại trên cùng cửa sổ và cùng điểm:
+  - trung vị, p25, min của năng lượng từng bước trong đoạn trước lời;
+  - p10, p20 trên cả cửa sổ.
+  - Không cách nào vừa giữ người lạ lúc yên ở mức của một ngưỡng, vừa được hơn ~3 điểm ở một mức ồn.
+  - p20 cả cửa sổ được 3,5 / 3,1 điểm ở 10 dB, nhưng lúc yên để lọt 1,17% người lạ.
