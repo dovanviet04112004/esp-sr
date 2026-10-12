@@ -1,6 +1,6 @@
 # ADR-0024 — `speaker` trên chip: ngưỡng theo độ ồn board ước trên cửa sổ
 
-- **Trạng thái**: Chấp nhận (chủ repo, 2026-10-12)
+- **Trạng thái**: Chấp nhận, kèm cổng chất lượng (chủ repo, 2026-10-12)
 - **Ngày**: 2026-10-12
 - **Liên quan**: KẾ HOẠCH §3.17, §4.5.5, §6.3; TASKS E11-T33; ADR-0023; `docs/measurements/speaker.md` §6.9
 
@@ -54,6 +54,12 @@ Chi tiết ở KẾ HOẠCH §3.17.
   theo trọng số của nó: ồn, nhạc, tiếng người, DEMAND.
   - Phiên của chủ repo trộn ồn phát từ một phòng của kho mô phỏng. Người lạ nghe ồn qua nguồn ồn của mô phỏng.
   - Biên là ba điểm tứ phân vị của độ ồn trên cửa sổ người lạ ở cả bốn mức.
+- **Cổng:** cùng các cửa sổ ấy được chấm thêm dưới một ngưỡng như ADR-0023. Bảng dải chỉ vào ảnh khi, ở mọi số
+  người:
+  - lúc yên nó không để lọt nhiều người lạ hơn, và không giữ ít lệnh của chủ repo hơn ở khoảng cách nào;
+  - ở mỗi mức ồn nó để lọt không quá 1% người lạ, hay không quá một ngưỡng nếu một ngưỡng đã quá 1%.
+
+  Không qua thì ba biên là 0: mọi cửa sổ vào dải yên nhất, và board chấm như ADR-0023.
 
 ## Hệ quả
 
@@ -65,6 +71,13 @@ Chi tiết ở KẾ HOẠCH §3.17.
   mẫu, chừng dưới 1 ms 🔬.
 - **`speaker-deploy` chạy lâu gấp ~4 lần,** cỡ một giờ, nên chạy trong tmux.
 - **Không ồn thì như ADR-0023:** cửa sổ yên rơi vào dải yên nhất, dùng đúng bảng cũ.
+- **Với các kho ồn của board, bảng dải không qua cổng** (`speaker.md` §6.9, đợt 3), nên ảnh mang biên 0:
+  - lúc yên nó mất 0,3 điểm, và với 3–8 người để lọt 1,16–1,36% người lạ;
+  - cận trên, biết đúng mức ồn, chỉ được 1–3 điểm: hỗn hợp ấy gần như không kéo điểm người lạ xuống, khác với nhạc;
+  - người lạ mô phỏng đọc câu dài nối sát nhau, nên độ ồn đo trên đoạn trước lời của họ gần như không theo mức ồn.
+
+  Bảng dải chỉ có thể có lợi khi có vật liệu hiệu chỉnh tốt hơn, là người lạ thật nói lệnh qua board lúc có ồn
+  (E11-T27).
 - **Giới hạn:**
   - ồn và nhạc là mô phỏng trộn vào bản thu thật, người lạ là người mô phỏng; số thật cần thu qua board (E11-T27);
   - ngưỡng theo độ ồn chỉ giúp bước kiểm người nói. Ở 10 dB nhạc, bộ nhận lệnh chỉ nhận 61% cửa sổ, so với 85% lúc yên;
