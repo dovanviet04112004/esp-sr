@@ -501,6 +501,10 @@ def test_each_noisier_bin_takes_its_own_threshold_and_the_quietest_keeps_the_qui
     assert got["milli_z"] == [99, 3099, 3099] and got["quiet"] == 3099
     assert got["kept accepted"] == {"quiet": {"100 cm": 1.0}, "5 dB": {"100 cm": 0.5}}
     assert got["strangers passing"] == {"quiet": 0.01, "5 dB": 0.01}
+    assert got["one threshold"] == {
+        "kept accepted": {"quiet": {"100 cm": 1.0}, "5 dB": {"100 cm": 0.5}},
+        "strangers passing": {"quiet": 1.0, "5 dB": 0.0},
+    }
     assert quant.noise_bins(heard, {"quiet": [(10, 3)]}, 2964, 0.01, 3)["quiet"] == 2964
 
 
@@ -518,6 +522,10 @@ def test_the_threshold_table_sets_noise_bins_only_when_given_noisy_material() ->
     assert [c["shares"] for c in noisy["counts"]] == [c["shares"] for c in plain["counts"]]
     assert len(noisy["noise"]["edges"]) == 3
     assert noisy["noise"]["windows"] == {"quiet": len(windows), "5 dB": len(windows)}
+    for who in ("owner by bin", "strangers by bin"):
+        assert set(noisy["noise"][who]) == {"quiet", "5 dB"}
+        assert all(len(s) == 4 and abs(sum(s) - 1.0) < 1e-9 for s in noisy["noise"][who].values())
+    assert noisy["noise"]["strangers by bin"]["quiet"] == [0.0, 0.0, 0.0, 1.0]
     for count, quiet in zip(noisy["counts"], plain["counts"], strict=True):
         assert len(count["noise"]["milli_z"]) == 3
         assert count["noise"]["quiet"] >= quiet["shares"][quiet["chosen"]]["milli_z"]

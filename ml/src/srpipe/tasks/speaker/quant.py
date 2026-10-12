@@ -789,9 +789,42 @@ def threshold_table(
         "counts": counts,
     }
     if noisy is not None:
+        n_bins = len(edges) + 1
         windows_of = {name: len(ws) for name, (_, ws) in conditions.items()}
-        table["noise"] = {"edges": [float(e) for e in edges], "windows": windows_of}
+        heard_of = {
+            name: [i for i, w in enumerate(ws) if w.spk == owner["spk"] and w.accepted]
+            for name, (_, ws) in conditions.items()
+        }
+        owner_bins = {name: bin_shares([bin_of[name][i] for i in heard_of[name]], n_bins) for name in conditions}
+        stranger_bins = {name: bin_shares([bin_of[name][i] for i in strangers[name]], n_bins) for name in conditions}
+        table["noise"] = {
+            "edges": [float(e) for e in edges],
+            "windows": windows_of,
+            "owner by bin": owner_bins,
+            "strangers by bin": stranger_bins,
+        }
     return table
+
+
+def bin_shares(bins: list[int], n_bins: int) -> list[float]:
+    """The share of bins falling in each of n_bins noise bins, the noisiest first."""
+    return (np.bincount(np.asarray(bins, dtype=np.int64), minlength=n_bins) / max(1, len(bins))).tolist()
+
+
+def under_thresholds(
+    heard: dict[str, list[tuple[int, str, int]]], passing: dict[str, list[tuple[int, int]]], thresholds: list[int]
+) -> dict:
+    """The owner's accepted windows kept per distance and the strangers passing, per condition, each window under its
+    noise bin's threshold."""
+    kept = {
+        name: {
+            f"{d} cm": float(np.mean([s >= thresholds[b] for s, at, b in found if at == d]))
+            for d in sorted({at for _, at, _ in found})
+        }
+        for name, found in heard.items()
+    }
+    passed = {name: float(np.mean([s >= thresholds[b] for s, b in found])) for name, found in passing.items() if found}
+    return {"kept accepted": kept, "strangers passing": passed}
 
 
 def noise_bins(
@@ -803,24 +836,17 @@ def noise_bins(
 ) -> dict:
     """One count's thresholds per noise bin (ADR-0024) from the strangers' (score, bin) of every condition: in each
     noisier bin the one letting share of that bin's strangers through, the quiet table's where a bin has none; the
-    quietest keeps quiet_milli_z unless that lets more than share of its strangers through. With them, the owner's
-    accepted windows kept per distance and the strangers passing, per condition."""
+    quietest keeps quiet_milli_z unless that lets more than share of its strangers through. With them, and with
+    quiet_milli_z alone in every bin as ADR-0023 has it, the figures of under_thresholds."""
     pooled: dict[int, list[int]] = defaultdict(list)
     for found in passing.values():
         for s, b in found:
             pooled[b].append(s)
     quiet = max(quiet_milli_z, at_share(pooled[n_edges], share)) if pooled[n_edges] else quiet_milli_z
     noisier = [at_share(pooled[b], share) if pooled[b] else quiet for b in range(n_edges)]
-    thresholds = [*noisier, quiet]
-    kept = {
-        name: {
-            f"{d} cm": float(np.mean([s >= thresholds[b] for s, at, b in found if at == d]))
-            for d in sorted({at for _, at, _ in found})
-        }
-        for name, found in heard.items()
-    }
-    passed = {name: float(np.mean([s >= thresholds[b] for s, b in found])) for name, found in passing.items() if found}
-    return {"milli_z": noisier, "quiet": quiet, "kept accepted": kept, "strangers passing": passed}
+    by_bin = under_thresholds(heard, passing, [*noisier, quiet])
+    one = under_thresholds(heard, passing, [quiet_milli_z] * (n_edges + 1))
+    return {"milli_z": noisier, "quiet": quiet} | by_bin | {"one threshold": one}
 
 
 def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[Path, Path]:
