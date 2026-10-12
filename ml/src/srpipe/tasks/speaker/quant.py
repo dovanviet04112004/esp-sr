@@ -820,7 +820,7 @@ def music_prints(
     name, count = swap
     other = windows[name]
     swap_pool = [i for i, w in enumerate(other) if w.spk == owner["spk"] and w.group == enrol_group]
-    swap_rng = np.random.default_rng([survey_cfg["seed"], survey.MUSIC_STREAM])
+    swap_rng = np.random.default_rng([survey_cfg["seed"], survey.NOISE_STREAM])
     prints: dict[str, list[tuple]] = {"quiet": [], "mixed": []}
     for enrolled in draws:
         heard = {k for i in enrolled for k in quiet[i].said}
@@ -988,9 +988,9 @@ def music(cfg: dict, run: Path, paths: dict, workers: int) -> dict:
     owner = survey.owner_windows(survey_cfg, paths, vads=vads)
     full = {"quiet": owner + survey.impostor_windows(survey_cfg, paths, workers)}
     for snr in m["snr_db"]:
-        pcm_of = survey.MusicPcm(survey_cfg, vads, snr, m["pool"], paths, cfg["quant"]["seed"])
+        pcm_of = survey.NoisyPcm(survey_cfg, vads, snr, [m["pool"]], paths, cfg["quant"]["seed"])
         heard = survey.owner_windows(survey_cfg, paths, pcm_of=pcm_of)
-        full[f"{snr:g} dB"] = heard + survey.impostor_windows(survey_cfg, paths, workers, (m["pool"], snr))
+        full[f"{snr:g} dB"] = heard + survey.impostor_windows(survey_cfg, paths, workers, ([m["pool"]], snr))
     cuts = {"full": full, "speech": {name: [survey.speech_of(w) for w in ws] for name, ws in full.items()}}
     cohort = cohort_speakers(full["quiet"], survey_cfg)
     top, share = deployed_top(lock), cfg["deploy"]["shares"][0]

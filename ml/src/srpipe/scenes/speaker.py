@@ -34,7 +34,7 @@ CONFIG = CONFIGS / "scenes" / "speaker.yaml"
 HOP = grid.HOP_SAMPLES
 SESSION_STREAM = 1  # the impostors' sessions: speakers' utterances and rooms
 ENROL_STREAM = 2  # the owner's enrolment sets
-MUSIC_STREAM = 4  # each owner session's room, music file and start
+NOISE_STREAM = 4  # each owner session's room, noise file and start
 LANGUAGE = "vivos"
 
 
@@ -62,7 +62,7 @@ def window_of(clean: np.ndarray, start: int, end: int) -> np.ndarray:
     return to_float(clean[start * HOP : (end + 1) * HOP]).astype(np.float32)
 
 
-def owner_windows(cfg: dict, paths: dict, pcm_of: MusicPcm | None = None, vads: dict | None = None) -> list[Window]:
+def owner_windows(cfg: dict, paths: dict, pcm_of: NoisyPcm | None = None, vads: dict | None = None) -> list[Window]:
     """Every command window Gate 3 scores of the owner's sessions, grouped by session date and distance: a session
     saying a listed command, a window over an utterance the chain finds in the session alone, not left out; each
     decided by owner.command's run as board B decides it, its pitch dims held, at that NVS's thresholds. A session
@@ -116,33 +116,33 @@ def snr_db(w: Window) -> float:
     return 10.0 * math.log10(float(np.mean(np.square(speech, dtype=np.float64))) / floor)
 
 
-def with_music(
-    pcm: np.ndarray, speech: np.ndarray, rirs: np.ndarray, music: np.ndarray, snr_db: float, mics: device.Microphones
+def with_noise(
+    pcm: np.ndarray, speech: np.ndarray, rirs: np.ndarray, noise: np.ndarray, snr_db: float, mics: device.Microphones
 ) -> np.ndarray:
-    """A recording (samples, mics) int16 with music from the room's noise source, through the pair's response, at
+    """A recording (samples, mics) int16 with noise from the room's noise source, through the pair's response, at
     snr_db: the talker's power at ch0 over the speech hops, the floor's power over the others taken out, over the
-    music's whole at ch0; floored and saturated as drv_audio's shift does (KEHOACH 1.2)."""
+    noise's whole at ch0; floored and saturated as drv_audio's shift does (KEHOACH 1.2)."""
     x = pcm.astype(np.float64)
     n = len(x)
-    air = np.stack([signal.fftconvolve(music[:n], rirs[device.NOISE, m])[:n] for m in range(array.N_MICS)])
-    noise = device.respond(air, mics)
+    air = np.stack([signal.fftconvolve(noise[:n], rirs[device.NOISE, m])[:n] for m in range(array.N_MICS)])
+    heard = device.respond(air, mics)
     power = np.mean(x[: n // HOP * HOP, 0].reshape(-1, HOP) ** 2, axis=1)
     speech = speech[: len(power)]
     if not speech.any() or speech.all():
-        raise ValueError("a recording needs hops with speech and hops without to set the music's level")
+        raise ValueError("a recording needs hops with speech and hops without to set the noise's level")
     talker = float(power[speech].mean() - power[~speech].mean())
     if not talker > 0:
         raise ValueError("the speech hops are no louder than the others")
-    noise *= math.sqrt(talker / 10.0 ** (snr_db / 10.0) / float(np.mean(noise[0] ** 2)))
-    return np.clip(np.floor(x + noise.T), PCM_MIN, PCM_MAX).astype(np.int16)
+    heard *= math.sqrt(talker / 10.0 ** (snr_db / 10.0) / float(np.mean(heard[0] ** 2)))
+    return np.clip(np.floor(x + heard.T), PCM_MIN, PCM_MAX).astype(np.int16)
 
 
-class MusicPcm:
-    """The owner's sessions with music, made as gate.heard_rows asks for them: each session of vads draws a room of
-    the board simulation's bank, a music file of pool and its start from seed and its place in vads, alike at every
-    SNR; a session vads lacks is heard as recorded."""
+class NoisyPcm:
+    """The owner's sessions with noise, made as gate.heard_rows asks for them: each session of vads draws a room of
+    the board simulation's bank, a pool of pools by weight when there is more than one, a file of it and its start,
+    from seed and its place in vads, alike at every SNR; a session vads lacks is heard as recorded."""
 
-    def __init__(self, cfg: dict, vads: dict, snr_db: float, pool: dict, paths: dict, seed: int) -> None:
+    def __init__(self, cfg: dict, vads: dict, snr_db: float, pools: list[dict], paths: dict, seed: int) -> None:
         self.dev = device_of(board_cfg(cfg))
         self.vads, self.snr_db, self.seed = vads, snr_db, seed
         self.order = {session: k for k, session in enumerate(sorted(vads))}
@@ -151,20 +151,23 @@ class MusicPcm:
         self.folders = {r["session"]: paths["raw"] / "device" / r["board"] / r["session"] for r in manifest}
         self.bank = device.room_bank(self.dev, paths["interim"], 1)
         self.mics = device.load_microphones(self.dev["microphone"])
-        music_dev = self.dev | {"noise": self.dev["noise"] | {"pools": [pool]}}
-        self.files = device.noise_files(music_dev, paths["raw"], set(screen.rejected(paths["interim"])))[0]
+        noisy_dev = self.dev | {"noise": self.dev["noise"] | {"pools": pools}}
+        self.files = device.noise_files(noisy_dev, paths["raw"], set(screen.rejected(paths["interim"])))
+        weights = np.array([pool["weight"] for pool in pools], dtype=np.float64)
+        self.weights = weights / weights.sum()
         self.raw = ItemReader(paths["raw"])
 
     def get(self, session: str) -> np.ndarray | None:
         if session not in self.vads:
             return None
-        rng = np.random.default_rng([self.seed, MUSIC_STREAM, self.order[session]])
+        rng = np.random.default_rng([self.seed, NOISE_STREAM, self.order[session]])
         rirs = np.load(self.bank / f"room_{int(rng.integers(self.dev['rooms']['count'])):04d}.npy")
-        y = self.raw.read(self.files[int(rng.integers(len(self.files)))])
+        files = self.files[0 if len(self.files) == 1 else int(rng.choice(len(self.files), p=self.weights))]
+        y = self.raw.read(files[int(rng.integers(len(files)))])
         pcm = gate.channels_of(self.folders[session])
         start = int(rng.integers(max(1, len(y) - len(pcm))))
         speech = self.vads[session][device.CHAIN_LAG_HOPS :].astype(bool)
-        return with_music(pcm, speech, rirs, np.resize(y[start:], len(pcm)), self.snr_db, self.mics)
+        return with_noise(pcm, speech, rirs, np.resize(y[start:], len(pcm)), self.snr_db, self.mics)
 
 
 def _impostor_session(job: tuple) -> list[Window]:
@@ -183,10 +186,10 @@ def _impostor_session(job: tuple) -> list[Window]:
     ]
 
 
-def impostor_jobs(cfg: dict, paths: dict, music: tuple[dict, float] | None = None) -> list[tuple]:
+def impostor_jobs(cfg: dict, paths: dict, noise: tuple[list[dict], float] | None = None) -> list[tuple]:
     """One session of per_speaker utterances in a room of each distance group for every test speaker with enough
-    utterances, drawn from the survey's seed; the simulation's own noise source off, or with music, a (pool, SNR in
-    dB), a file of that pool from it at that SNR, every other draw alike."""
+    utterances, drawn from the survey's seed; the simulation's own noise source off, or with noise, (pools, SNR in
+    dB), a file of those pools by their weights from it at that SNR, every other draw alike."""
     spec = cfg["impostors"]
     dev = device_of(board_cfg(cfg))
     bank = device.room_bank(dev, paths["interim"], 1)
@@ -197,12 +200,12 @@ def impostor_jobs(cfg: dict, paths: dict, music: tuple[dict, float] | None = Non
     for row in splits.read_split(paths["splits"] / spec["split"]):
         by[row.spk].append(row)
     speakers = sorted(s for s, rows in by.items() if len(rows) >= spec["min_utterances"])
-    if music is None:
+    if noise is None:
         sim = dev | {"seed": cfg["seed"], "noise": dev["noise"] | {"probability": 0.0}}
         pools = []
     else:
-        noise = {"probability": 1.0, "snr_db": [music[1], music[1]], "pools": [music[0]]}
-        sim = dev | {"seed": cfg["seed"], "noise": dev["noise"] | noise}
+        drawn = {"probability": 1.0, "snr_db": [noise[1], noise[1]], "pools": noise[0]}
+        sim = dev | {"seed": cfg["seed"], "noise": dev["noise"] | drawn}
         pools = device.noise_files(sim, paths["raw"], set(screen.rejected(paths["interim"])))
     roots = {"raw": paths["raw"], "interim": paths["interim"]}
     rng = np.random.default_rng([cfg["seed"], SESSION_STREAM])
@@ -215,10 +218,12 @@ def impostor_jobs(cfg: dict, paths: dict, music: tuple[dict, float] | None = Non
     return jobs
 
 
-def impostor_windows(cfg: dict, paths: dict, workers: int, music: tuple[dict, float] | None = None) -> list[Window]:
+def impostor_windows(
+    cfg: dict, paths: dict, workers: int, noise: tuple[list[dict], float] | None = None
+) -> list[Window]:
     """The windows of every session of impostor_jobs, simulated by workers processes."""
     with multiprocessing.get_context("spawn").Pool(workers) as pool:
-        return [w for part in pool.map(_impostor_session, impostor_jobs(cfg, paths, music)) for w in part]
+        return [w for part in pool.map(_impostor_session, impostor_jobs(cfg, paths, noise)) for w in part]
 
 
 def language_windows(cfg: dict, paths: dict) -> list[Window]:

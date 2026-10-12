@@ -1,5 +1,5 @@
 """The speaker survey's figures: EER at the crossing, a threshold that lets at most the asked share of non-targets
-through, and EER over the pairs of a set of windows; music lands on a recording at the SNR asked."""
+through, and EER over the pairs of a set of windows; noise lands on a recording at the SNR asked."""
 
 from __future__ import annotations
 
@@ -77,14 +77,14 @@ def recording(rng: np.random.Generator, hops: int, talk: np.ndarray) -> np.ndarr
     return np.clip(np.rint(floor + voice), -32768, 32767).astype(np.int16)
 
 
-def test_music_lands_at_the_snr_asked_over_the_talker_with_the_floor_taken_out() -> None:
+def test_noise_lands_at_the_snr_asked_over_the_talker_with_the_floor_taken_out() -> None:
     rng, hops = np.random.default_rng(3), 200
     talk = np.zeros(hops, dtype=bool)
     talk[50:120] = True
     pcm = recording(rng, hops, talk)
     rirs = np.zeros((2, 2, 4), dtype=np.float32)
     rirs[device.NOISE, :, 0] = 1.0
-    out = speaker.with_music(pcm, talk, rirs, rng.standard_normal(len(pcm)), 10.0, flat_pair())
+    out = speaker.with_noise(pcm, talk, rirs, rng.standard_normal(len(pcm)), 10.0, flat_pair())
     added = out.astype(np.float64) - pcm
     power = np.mean(pcm[:, 0].astype(np.float64).reshape(-1, speaker.HOP) ** 2, axis=1)
     talker = power[talk].mean() - power[~talk].mean()
@@ -92,7 +92,7 @@ def test_music_lands_at_the_snr_asked_over_the_talker_with_the_floor_taken_out()
     assert np.max(np.abs(added[:, 0] - added[:, 1])) <= 1.0
 
 
-def test_music_saturates_as_the_board_does_and_needs_speech_and_silence() -> None:
+def test_noise_saturates_as_the_board_does_and_needs_speech_and_silence() -> None:
     rng, hops = np.random.default_rng(4), 100
     talk = np.zeros(hops, dtype=bool)
     talk[20:60] = True
@@ -100,10 +100,10 @@ def test_music_saturates_as_the_board_does_and_needs_speech_and_silence() -> Non
     rirs = np.zeros((2, 2, 1), dtype=np.float32)
     rirs[device.NOISE, :, 0] = 1.0
     music = rng.standard_normal(len(pcm))
-    loud = speaker.with_music(pcm, talk, rirs, music, -40.0, flat_pair())
+    loud = speaker.with_noise(pcm, talk, rirs, music, -40.0, flat_pair())
     assert loud.dtype == np.int16 and loud.max() == 32767 and loud.min() == -32768
     with pytest.raises(ValueError, match="speech and hops without"):
-        speaker.with_music(pcm, np.zeros(hops, dtype=bool), rirs, music, 10.0, flat_pair())
+        speaker.with_noise(pcm, np.zeros(hops, dtype=bool), rirs, music, 10.0, flat_pair())
 
 
 def test_a_window_from_its_first_vad_hop_and_its_snr_over_its_lead() -> None:
