@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from srpipe.core.config import ML_ROOT
-from srpipe.generated import speaker
+from srpipe.generated import grid, speaker
 from srpipe.golden.gold import write_gold
 
 GOLDEN_ROOT = ML_ROOT.parent / "contracts" / "golden"
@@ -172,6 +172,32 @@ def print_side_only(
 def accepts(score: int, threshold_permille: int) -> bool:
     """A command passes when its score reaches the threshold."""
     return score >= threshold_permille
+
+
+def noise_energies(pcm: np.ndarray, lead_hops: int) -> tuple[int, int, int, int]:
+    """A command window's int16 samples summed squared in int64, as svc_listen sums them (ADR-0024): over its first
+    lead_hops hops, the lead ahead of the utterance's first vad hop, then over the rest; each with its sample count."""
+    x = np.asarray(pcm, dtype=np.int64)
+    cut = lead_hops * grid.HOP_SAMPLES
+    return int(np.sum(x[:cut] * x[:cut])), cut, int(np.sum(x[cut:] * x[cut:])), len(x) - cut
+
+
+def noise_bin(
+    lead_energy: int, lead_samples: int, speech_energy: int, speech_samples: int, edges: Sequence[np.float32]
+) -> int:
+    """The noise bin of a window (ADR-0024): its utterance's mean power over its lead's, (E_s * n_t) / (E_t * n_s)
+    in double in that order, against the image's rising float32 edges, the count of edges it reaches; the quietest,
+    len(edges), with no lead, a silent one or no utterance."""
+    if lead_samples == 0 or lead_energy == 0 or speech_samples == 0:
+        return len(edges)
+    ratio = (float(speech_energy) * float(lead_samples)) / (float(lead_energy) * float(speech_samples))
+    return sum(ratio >= float(np.float32(e)) for e in edges)
+
+
+def threshold_of(quiet: Sequence[int], noisy: Sequence[Sequence[int]], prints: int, bin_: int) -> int:
+    """The image's threshold for prints voiceprints in a noise bin: the quiet table's in the quietest bin, the count
+    of edges, else the row of the noisy table (ADR-0024)."""
+    return quiet[prints - 1] if bin_ == len(noisy[prints - 1]) else noisy[prints - 1][bin_]
 
 
 def case(
@@ -332,10 +358,140 @@ def emit(root: Path) -> list[Path]:
     return written
 
 
+NOISE_BLOCK = "speaker_noise"
+NOISE_EDGES = (3.74, 17.8, 174.2)  # 5.7, 12.5, 22.4 dB, speech.md 6.9
+NOISE_RANDOM = 64  # random windows, lead and utterance at own levels
+LOW_WORD = 1 << 32
+
+
+def split64(value: int) -> tuple[int, int]:
+    """A sum of squares as the two int32 a .gold carries it in: its high word, then its low word's bits."""
+    return value >> 32, int(np.uint32(value & (LOW_WORD - 1)).view(np.int32))
+
+
+def float32_bin(
+    lead_energy: int, lead_samples: int, speech_energy: int, speech_samples: int, edges: Sequence[np.float32]
+) -> int:
+    """noise_bin with the ratio in float32: a negative control."""
+    if lead_samples == 0 or lead_energy == 0 or speech_samples == 0:
+        return len(edges)
+    ratio = np.float32(np.float32(speech_energy) * np.float32(lead_samples)) / np.float32(
+        np.float32(lead_energy) * np.float32(speech_samples)
+    )
+    return sum(ratio >= np.float32(e) for e in edges)
+
+
+def above_edges(
+    lead_energy: int, lead_samples: int, speech_energy: int, speech_samples: int, edges: Sequence[np.float32]
+) -> int:
+    """noise_bin with a ratio required to pass an edge rather than reach it: a negative control."""
+    if lead_samples == 0 or lead_energy == 0 or speech_samples == 0:
+        return len(edges)
+    ratio = (float(speech_energy) * float(lead_samples)) / (float(lead_energy) * float(speech_samples))
+    return sum(ratio > float(np.float32(e)) for e in edges)
+
+
+def loudest_without_lead(
+    lead_energy: int, lead_samples: int, speech_energy: int, speech_samples: int, edges: Sequence[np.float32]
+) -> int:
+    """noise_bin with a window it cannot judge put in the noisiest bin: a negative control."""
+    if lead_samples == 0 or lead_energy == 0 or speech_samples == 0:
+        return 0
+    return noise_bin(lead_energy, lead_samples, speech_energy, speech_samples, edges)
+
+
+def quiet_always(quiet: Sequence[int], noisy: Sequence[Sequence[int]], prints: int, bin_: int) -> int:
+    """threshold_of with the quiet table in every bin: a negative control."""
+    return quiet[prints - 1]
+
+
+def noise_windows(rng: np.random.Generator, edges: Sequence[np.float32]) -> list[tuple[int, int, int, int]]:
+    """Sums of squares that sit on each edge exactly, one below it and one above it; windows with no lead, a silent
+    lead and no utterance; sums near 2^46, the largest a 234-hop window holds, where float32 and double part; and
+    NOISE_RANDOM windows of random int16 noise with lead and utterance at their own levels."""
+    out = []
+    for e in edges:
+        on = int(np.float64(np.float32(e)) * 2**30)
+        out += [(2**30, 256, on + d, 256) for d in (-1, 0, 1)]
+    out += [(0, 0, 10**9, 2560), (0, 512, 10**9, 2560), (10**9, 512, 0, 0)]
+    big = 2**46 - 12345
+    for e in edges:
+        below = int(np.float64(np.float32(e)) * big / 7) - 1
+        out.append((big // 7, 59_904, below, 59_904))
+    for _ in range(NOISE_RANDOM):
+        lead_hops, speech_hops = int(rng.integers(0, 126)), int(rng.integers(1, 120))
+        lead = rng.normal(0.0, 10.0 ** rng.uniform(1.0, 3.5), lead_hops * grid.HOP_SAMPLES)
+        speech = rng.normal(0.0, 10.0 ** rng.uniform(2.0, 4.0), speech_hops * grid.HOP_SAMPLES)
+        pcm = np.clip(np.rint(np.concatenate([lead, speech])), -32768, 32767).astype(np.int16)
+        out.append(noise_energies(pcm, lead_hops))
+    return out
+
+
+def noise_case(
+    windows: list[tuple[int, int, int, int]],
+    edges: Sequence[np.float32],
+    quiet: Sequence[int],
+    noisy: Sequence[Sequence[int]],
+    queries: list[tuple[int, int, int]],
+    bin_rule=noise_bin,
+    threshold_rule=threshold_of,
+) -> dict[str, np.ndarray]:
+    """One golden case of the noise bins (ADR-0024): each window's sums, split in int32 words, with its bin by bin_rule
+    against edges; the quiet and noisy threshold tables; and per query, a score, a count of voiceprints and a bin,
+    its threshold by threshold_rule and whether the score reaches it."""
+    energies = [[*split64(le), ln, *split64(se), sn] for le, ln, se, sn in windows]
+    decisions = []
+    for s, prints, b in queries:
+        threshold = threshold_rule(quiet, noisy, prints, b)
+        decisions.append([threshold, int(accepts(s, threshold))])
+    return {
+        "energies": np.array(energies, dtype=np.int32),
+        "edges": np.array(edges, dtype=np.float32),
+        "bins": np.array([bin_rule(*w, edges) for w in windows], dtype=np.int32),
+        "quiet": np.array(quiet, dtype=np.int32),
+        "noisy": np.array(noisy, dtype=np.int32),
+        "queries": np.array(queries, dtype=np.int32),
+        "decision": np.array(decisions, dtype=np.int32),
+    }
+
+
+def emit_noise(root: Path) -> list[Path]:
+    """The noise bins' cases: realistic edges over edge, extreme and random windows with threshold queries over every
+    count and bin, each at its threshold, one under it and one over it; edges of 0, an image packed without them, where
+    every window falls in the quietest bin; and four negative controls: an edge passed rather than reached, the ratio
+    in float32, a window it cannot judge put in the noisiest bin, and the quiet table in every bin."""
+    rng = np.random.default_rng(SEED + 1)
+    edges = [np.float32(e) for e in NOISE_EDGES]
+    windows = noise_windows(rng, edges)
+    quiet = [2964 + 30 * k for k in range(len(NOISE_EDGES) + 5)]
+    noisy = [[1700 + 40 * k + 300 * b for b in range(len(NOISE_EDGES))] for k in range(len(quiet))]
+    queries = []
+    for prints in range(1, len(quiet) + 1):
+        for b in range(len(NOISE_EDGES) + 1):
+            t = threshold_of(quiet, noisy, prints, b)
+            queries += [(t + d, prints, b) for d in (-1, 0, 1)]
+    zeros = [np.float32(0.0)] * len(NOISE_EDGES)
+    cases = {
+        "case_000": noise_case(windows, edges, quiet, noisy, queries),
+        "case_001": noise_case(windows, zeros, quiet, noisy, queries),
+        "case_neg_000": noise_case(windows, edges, quiet, noisy, queries, bin_rule=above_edges),
+        "case_neg_001": noise_case(windows, edges, quiet, noisy, queries, bin_rule=float32_bin),
+        "case_neg_002": noise_case(windows, edges, quiet, noisy, queries, bin_rule=loudest_without_lead),
+        "case_neg_003": noise_case(windows, edges, quiet, noisy, queries, threshold_rule=quiet_always),
+    }
+    written = []
+    for name, tensors in cases.items():
+        path = root / NOISE_BLOCK / f"{name}.gold"
+        write_gold(path, tensors)
+        written.append(path)
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
-    for path in emit(parser.parse_args().out):
+    out = parser.parse_args().out
+    for path in emit(out) + emit_noise(out):
         print(path)
     return 0
 

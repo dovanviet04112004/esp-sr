@@ -1,0 +1,11 @@
+# C ai_engine/src/speaker/score.c against srpipe.tasks.speaker.postproc.score (KEHOACH 3.17, ADR-0024), exactly:
+# bins: each window's noise bin from its sums of squares and the edges; decision: per query, the threshold of its
+# count and bin, and whether its score reaches it. Negatives: 000 an edge passed rather than reached, 001 the ratio
+# in float32, 002 a window it cannot judge in the noisiest bin, 003 the quiet table in every bin.
+tensors:
+  bins:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  decision:
+    max_abs: 0.0
+    min_snr_db: 0.0

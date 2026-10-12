@@ -155,3 +155,56 @@ def test_the_cases_take_a_quarter_of_the_cohort_and_one_case_every_row() -> None
         for name in ("case_000", "case_001", "case_004")
     }
     assert tops == {"case_000": score.GOLDEN_TOP, "case_001": score.COHORT_ROWS, "case_004": 2 * score.GOLDEN_TOP}
+
+
+EDGES = [np.float32(e) for e in score.NOISE_EDGES]
+
+
+def test_noise_energies_sum_each_part_exactly_in_int64() -> None:
+    hop = score.grid.HOP_SAMPLES
+    pcm = np.full(3 * hop, -32768, dtype=np.int16)
+    pcm[:hop] = 3
+    assert score.noise_energies(pcm, 1) == (9 * hop, hop, 2 * hop * 2**30, 2 * hop)
+    assert score.noise_energies(pcm, 0) == (0, 0, 9 * hop + 2 * hop * 2**30, 3 * hop)
+
+
+def test_a_ratio_on_an_edge_reaches_it_and_one_under_does_not() -> None:
+    for k, e in enumerate(EDGES):
+        on = int(np.float64(e) * 2**30)
+        assert score.noise_bin(2**30, 256, on, 256, EDGES) == k + 1
+        assert score.noise_bin(2**30, 256, on - 1, 256, EDGES) == k
+
+
+def test_a_window_it_cannot_judge_is_quiet() -> None:
+    quietest = len(EDGES)
+    assert score.noise_bin(0, 0, 10**9, 2560, EDGES) == quietest
+    assert score.noise_bin(0, 512, 10**9, 2560, EDGES) == quietest
+    assert score.noise_bin(10**9, 512, 0, 0, EDGES) == quietest
+    assert score.noise_bin(10**9, 512, 10**3, 2560, [np.float32(0.0)] * 3) == quietest
+
+
+def test_the_threshold_of_a_bin_is_its_row_and_the_quiet_table_s_in_the_quietest() -> None:
+    quiet, noisy = [10, 20], [[1, 2, 3], [4, 5, 6]]
+    assert [score.threshold_of(quiet, noisy, 2, b) for b in range(4)] == [4, 5, 6, 20]
+    assert score.threshold_of(quiet, noisy, 1, 3) == 10
+
+
+def test_committed_noise_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in score.emit_noise(tmp_path):
+        committed = score.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun the emit"
+
+
+def test_each_noise_negative_control_differs_from_the_reference() -> None:
+    block = score.GOLDEN_ROOT / score.NOISE_BLOCK
+    right = read_gold(block / "case_000.gold")
+    assert set(right["bins"].tolist()) == {0, 1, 2, 3}
+    assert set(right["decision"][:, 1].tolist()) == {0, 1}
+    assert (read_gold(block / "case_001.gold")["bins"] == 3).all()
+    for name in ("case_neg_000", "case_neg_001", "case_neg_002"):
+        negative = read_gold(block / f"{name}.gold")
+        assert (negative["bins"] != right["bins"]).any(), name
+        np.testing.assert_array_equal(negative["decision"], right["decision"])
+    quiet = read_gold(block / "case_neg_003.gold")
+    np.testing.assert_array_equal(quiet["bins"], right["bins"])
+    assert (quiet["decision"][:, 0] != right["decision"][:, 0]).any()
