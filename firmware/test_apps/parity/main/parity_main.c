@@ -27,6 +27,7 @@ static const struct {
     {"command_ctc", parity_command_ctc},
     {"command_rnnt", parity_command_rnnt},
     {"speaker", parity_speaker},
+    {"speaker_noise", parity_speaker_noise},
 #if PARITY_CHAIN_MODULES
     {"chain_modules", parity_chain_modules},
 #else

@@ -146,3 +146,23 @@ bool ai_engine_speaker_accepts(int16_t milli_z, int16_t threshold_milli_z)
 {
     return milli_z >= threshold_milli_z;
 }
+
+uint8_t ai_engine_speaker_noise_bin_of(uint64_t lead_energy, uint32_t lead_samples, uint64_t speech_energy,
+                                       uint32_t speech_samples, const float *edges, size_t n_edges)
+{
+    if (lead_samples == 0 || lead_energy == 0 || speech_samples == 0) { return (uint8_t)n_edges; }
+    // Sums stay under 2^53, so each converts exactly; the products round as the mirror's double does.
+    const double ratio =
+        ((double)speech_energy * (double)lead_samples) / ((double)lead_energy * (double)speech_samples);
+    uint8_t bin = 0;
+    for (size_t k = 0; k < n_edges; k++) {
+        if (ratio >= (double)edges[k]) { bin++; }
+    }
+    return bin;
+}
+
+int16_t ai_engine_speaker_threshold_of(const int16_t *quiet, const int16_t *noisy, size_t n_edges,
+                                       size_t prints, uint8_t bin)
+{
+    return bin == n_edges ? quiet[prints - 1] : noisy[(prints - 1) * n_edges + bin];
+}

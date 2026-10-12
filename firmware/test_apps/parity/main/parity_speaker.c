@@ -100,3 +100,82 @@ bool parity_speaker(const char *case_name, const void *buf, size_t len)
     free(want_decision);
     return ok;
 }
+
+enum {
+    ENERGY_LEAD = 0,
+    ENERGY_LEAD_SAMPLES = 2,
+    ENERGY_SPEECH = 3,
+    ENERGY_SPEECH_SAMPLES = 5,
+    ENERGY_FIELDS
+};
+enum { QUERY_SCORE = 0, QUERY_PRINTS, QUERY_BIN, QUERY_FIELDS };
+enum { NOISE_THRESHOLD = 0, NOISE_ACCEPTED, NOISE_FIELDS };
+
+// A sum of squares the .gold carries as its high int32 word, then its low word's bits.
+static uint64_t joined(const int32_t *words)
+{
+    return ((uint64_t)(uint32_t)words[0] << 32) | (uint32_t)words[1];
+}
+
+bool parity_speaker_noise(const char *case_name, const void *buf, size_t len)
+{
+    gold_tensor_t energies, edges, bins, quiet, noisy, queries, decision;
+    if (!parity_tensor(buf, len, "energies", &energies) || energies.dtype != GOLD_I32 ||
+        !parity_tensor(buf, len, "edges", &edges) || edges.dtype != GOLD_F32 ||
+        !parity_tensor(buf, len, "bins", &bins) || !parity_tensor(buf, len, "quiet", &quiet) ||
+        quiet.dtype != GOLD_I32 || !parity_tensor(buf, len, "noisy", &noisy) || noisy.dtype != GOLD_I32 ||
+        !parity_tensor(buf, len, "queries", &queries) || queries.dtype != GOLD_I32 ||
+        !parity_tensor(buf, len, "decision", &decision)) {
+        return false;
+    }
+    const size_t n_windows = energies.dims[0];
+    const size_t n_edges = edges.dims[0];
+    const size_t counts = quiet.dims[0];
+    const size_t n_queries = queries.dims[0];
+    if (energies.dims[1] != ENERGY_FIELDS || bins.dims[0] != n_windows || noisy.dims[0] != counts ||
+        noisy.dims[1] != n_edges || queries.dims[1] != QUERY_FIELDS || decision.dims[0] != n_queries ||
+        decision.dims[1] != NOISE_FIELDS || n_edges > UINT8_MAX) {
+        return false;
+    }
+    int16_t *quiet16 = malloc(counts * sizeof(int16_t));
+    int16_t *noisy16 = malloc(counts * n_edges * sizeof(int16_t));
+    float *got_bins = malloc(n_windows * sizeof(float));
+    float *want_bins = malloc(n_windows * sizeof(float));
+    float *got_decision = malloc(n_queries * NOISE_FIELDS * sizeof(float));
+    float *want_decision = malloc(n_queries * NOISE_FIELDS * sizeof(float));
+    bool ok = quiet16 != NULL && noisy16 != NULL && got_bins != NULL && want_bins != NULL &&
+              got_decision != NULL && want_decision != NULL && parity_floats(&bins, want_bins, n_windows) &&
+              parity_floats(&decision, want_decision, n_queries * NOISE_FIELDS);
+    if (ok) {
+        for (size_t k = 0; k < counts; k++) {
+            quiet16[k] = (int16_t)((const int32_t *)quiet.data)[k];
+        }
+        for (size_t k = 0; k < counts * n_edges; k++) {
+            noisy16[k] = (int16_t)((const int32_t *)noisy.data)[k];
+        }
+        for (size_t w = 0; w < n_windows; w++) {
+            const int32_t *e = (const int32_t *)energies.data + w * ENERGY_FIELDS;
+            got_bins[w] = ai_engine_speaker_noise_bin_of(
+                joined(e + ENERGY_LEAD), (uint32_t)e[ENERGY_LEAD_SAMPLES], joined(e + ENERGY_SPEECH),
+                (uint32_t)e[ENERGY_SPEECH_SAMPLES], edges.data, n_edges);
+        }
+        for (size_t q = 0; q < n_queries; q++) {
+            const int32_t *query = (const int32_t *)queries.data + q * QUERY_FIELDS;
+            const int16_t threshold = ai_engine_speaker_threshold_of(
+                quiet16, noisy16, n_edges, (size_t)query[QUERY_PRINTS], (uint8_t)query[QUERY_BIN]);
+            got_decision[q * NOISE_FIELDS + NOISE_THRESHOLD] = threshold;
+            got_decision[q * NOISE_FIELDS + NOISE_ACCEPTED] =
+                ai_engine_speaker_accepts((int16_t)query[QUERY_SCORE], threshold) ? 1.0f : 0.0f;
+        }
+        parity_report("speaker_noise", case_name, "bins", want_bins, got_bins, n_windows);
+        parity_report("speaker_noise", case_name, "decision", want_decision, got_decision,
+                      n_queries * NOISE_FIELDS);
+    }
+    free(quiet16);
+    free(noisy16);
+    free(got_bins);
+    free(want_bins);
+    free(got_decision);
+    free(want_decision);
+    return ok;
+}

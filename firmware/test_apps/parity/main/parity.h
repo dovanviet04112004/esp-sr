@@ -159,6 +159,12 @@ bool parity_command_rnnt(const char *case_name, const void *buf, size_t len);
  */
 bool parity_speaker(const char *case_name, const void *buf, size_t len);
 
+/** Run one speaker_noise case: each window's noise bin from its sums, each query's threshold and decision.
+ *  @ctx task | blocking
+ *  @ret false when the case lacks a tensor, has the wrong shape or memory runs out
+ */
+bool parity_speaker_noise(const char *case_name, const void *buf, size_t len);
+
 /** Run one command_ctc case window by window over the lexicon it carries, with each window's thresholds;
  * compare every command's best score and the decision.
  *  @ctx any | non-blocking

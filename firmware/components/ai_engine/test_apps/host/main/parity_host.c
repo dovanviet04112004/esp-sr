@@ -33,6 +33,8 @@ int main(int argc, char **argv)
     cases +=
         parity_run_block(argv[1], "command_rnnt", parity_command_rnnt, read_case, buf, sizeof(buf), &errors);
     cases += parity_run_block(argv[1], "speaker", parity_speaker, read_case, buf, sizeof(buf), &errors);
+    cases += parity_run_block(argv[1], "speaker_noise", parity_speaker_noise, read_case, buf, sizeof(buf),
+                              &errors);
     test_report_line("done %u cases", cases);
     test_report_serve();
     printf("HOST %u failure(s)\n", errors);

@@ -50,6 +50,20 @@ int16_t ai_engine_speaker_best_as(const float *unit, const float *prints, const 
  */
 bool ai_engine_speaker_accepts(int16_t milli_z, int16_t threshold_milli_z);
 
+/** A command window's noise bin (ADR-0024): its utterance's mean power over its lead's, as
+ * (speech_energy * lead_samples) / (lead_energy * speech_samples) in double in that order, against rising
+ * edges, the count it reaches; n_edges, the quietest, with no lead, a silent one or no utterance.
+ *  @ctx any | non-blocking | caller owns edges, n_edges of them
+ */
+uint8_t ai_engine_speaker_noise_bin_of(uint64_t lead_energy, uint32_t lead_samples, uint64_t speech_energy,
+                                       uint32_t speech_samples, const float *edges, size_t n_edges);
+
+/** The threshold for prints voiceprints in a noise bin: quiet's in the quietest bin, n_edges, else noisy's.
+ *  @ctx any | non-blocking | quiet holds prints entries or more, noisy as many rows of n_edges; prints >= 1
+ */
+int16_t ai_engine_speaker_threshold_of(const int16_t *quiet, const int16_t *noisy, size_t n_edges,
+                                       size_t prints, uint8_t bin);
+
 #ifdef __cplusplus
 }
 #endif
