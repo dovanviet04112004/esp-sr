@@ -339,3 +339,32 @@ thêm quãng lặng ≥ 80 ms mỗi bên, "giữ" là mẩu PhoWhisper nghe ra �
 Cột "lặng" có chỗ lớn hơn "cách" vì bản ghi chia đều số đếm cho các cụm cùng câu. Các cụm hầu như luôn nằm giữa câu,
 nên luật giờ chỉ bắt lặng ở mép sau (KẾ HOẠCH §3.11). Audio của các câu Hugging Face đã xóa sau lần cắt ấy, nên chỉ kho
 trên đĩa cắt lại được ngay.
+
+## 7. Phễu cắt "trợ lý" của `hf_extract` (13/10)
+
+Đếm trên bản ghi cắt của `hf_extract` (`cache/extract/hf_extract/cut/`, mỗi câu một bản ghi). Chỉ tính câu nói mỗi
+"trợ lý", luật `sides: after`.
+
+| Bước | Câu | Rơi ở đâu |
+|---|---|---|
+| Khớp chữ khi quét | 3 336 | |
+| Đã tải và đưa vào bộ căn | 2 149 | YODAS2 939 (đang hoãn, 2,1 TB), ba kho đã bỏ khỏi cấu hình 248 |
+| Bộ căn tìm thấy cụm | 2 145 | |
+| Từ sau cách mốc cuối ≥ 80 ms | 129 | 59 bản ghi cũ hơn không có trường này |
+| Có quãng lặng thật sau cụm | 41 | |
+| Giữ | 40 | `cut.hear` tắt |
+
+Theo chữ đứng sau "trợ lý" trong lời của câu:
+
+| Sau cụm | Câu | Cách ≥ 80 ms | Lặng | Giữ |
+|---|---|---|---|---|
+| Từ khác nói liền | 1 990 | 84 | 37 | 36 |
+| Hết câu | 116 | 41 | 1 | 1 |
+| Dấu câu | 38 | 4 | 3 | 3 |
+
+- **94% chỗ nói "trợ lý" nằm trong cụm danh từ dài hơn:** "của" theo sau 385 lần, "ảo" 128, "cho" 79, "tổng" 45,
+  "phó" 45, "bộ" 44, "ngoại" 36. Luật ngắt hơi loại chúng, đúng như luật định.
+- **Câu kết thúc bằng "trợ lý" gần như mất hết.** Phép thử mức cần 80 ms lặng sau khoảng đệm 30 ms, mà audio của các
+  kho thường dừng sát sau từ cuối.
+- **Dấu phẩy sau "trợ lý" hiếm khi thành khoảng cách ở bộ căn:** 4 trong 38 câu.
+- Từ đây, kho `hf_wake` cắt mọi chỗ bộ căn tìm thấy cụm và ghi mẩu nào có quãng lặng (KẾ HOẠCH §3.11).
