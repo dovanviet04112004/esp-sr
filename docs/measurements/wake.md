@@ -458,3 +458,5 @@ Mẩu bắt đầu và kết thúc giữa quãng ấy.
 - Từ sau mở bằng "c": 7/20 chỗ có quãng khép miệng đủ 30 ms ở mức 30 dB.
 - **Mốc đầu có khi sớm hơn chỗ khép miệng của "tr" 50 ms.** Cửa sổ chỉ tới 60 ms sau mốc đầu thì ở một câu bắt nhầm
   chỗ khép miệng của "c" trong "có" đứng trước, và PhoWhisper nghe ra "có trợ lý". Nới tới 100 ms là hết.
+- **Chủ repo nghe ba mức:** 20 dB và 25 dB tệ. Ở 30 dB chỉ vài mẩu nghe tạm ổn, còn lại vẫn tệ. Cắt ở chỗ khép miệng
+  không cứu được cụm nói liền trong câu.
