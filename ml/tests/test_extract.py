@@ -248,6 +248,16 @@ def test_a_budget_fetches_the_yodas_shards_with_the_most_matches_per_byte(tmp_pa
     assert [p for _, p, _, _ in some] == ["data/vi000/audio/a.tar.gz", "data/vi000/audio/c.tar.gz"]
 
 
+def test_a_phrase_dropped_from_the_config_is_neither_fetched_nor_cut(tmp_path: Path) -> None:
+    job = job_for(tmp_path, [], FakeHttp({}))
+    matches = [
+        {"key": "a", "phrases": ["trợ lý", "vừng ơi"]},
+        {"key": "b", "phrases": ["vừng ơi"]},
+        {"key": "c", "phrases": ["mở cửa"]},
+    ]
+    assert job.saying(matches) == [{"key": "a", "phrases": ["trợ lý"]}, {"key": "c", "phrases": ["mở cửa"]}]
+
+
 def test_a_phrase_has_its_aligned_gaps_to_the_words_on_each_side() -> None:
     sounds = extract.Phrases(["bật đèn"]).sounds[0]
     words = [

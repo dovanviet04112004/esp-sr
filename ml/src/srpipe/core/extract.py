@@ -21,7 +21,7 @@ import time
 import unicodedata
 import urllib.parse
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from pathlib import Path
@@ -273,6 +273,12 @@ class Job:
     def settings(self, section: str) -> dict:
         """A section of the config, cut or pilot, with the keys this extract sets over it."""
         return self.cfg[section] | self.spec.get(section, {})
+
+    def saying(self, matches: Iterable[dict]) -> list[dict]:
+        """The matches that say a phrase the config still lists, each with only those phrases: a phrase dropped from
+        the config after its scan is neither fetched nor cut."""
+        listed = set(self.phrases.phrases)
+        return [m | {"phrases": said} for m in matches if (said := [p for p in m["phrases"] if p in listed])]
 
     def pins(self) -> dict[str, dict]:
         """Each source's revision and licence, the first read of an unpinned one fixing it in pins.json."""
@@ -632,7 +638,7 @@ def fetch_parts(job: Job, pins: dict) -> list[tuple[dict, str, list[dict], dict]
         found = (
             [job.scan_file(s, part) for part in own] if own else (job.state / "scan" / slug(s["repo"])).glob("*.jsonl")
         )
-        matches = [m for f in sorted(f for f in found if f.exists()) for m in read_jsonl(f)]
+        matches = job.saying(m for f in sorted(f for f in found if f.exists()) for m in read_jsonl(f))
         if s["kind"] == "manifest_tar":
             shards = job.files(s, pins[s["repo"]]["revision"], ".tar.zst")
             parts += [(s, f["path"], matches, f) for f in shards if matches]
@@ -885,7 +891,7 @@ def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cach
         ]
         times = engines.align(asked, tts, work, cache)
         found = []
-        for m in batch:
+        for m in job.saying(batch):
             x = sf.read(str(job.whole(m["key"])), dtype="float64")[0]
             for p in m["phrases"]:
                 for n, (start, end, before_s, after_s) in enumerate(phrase_spans(times.get(m["key"], []), sounds[p])):

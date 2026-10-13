@@ -95,11 +95,10 @@ extracts:
         repo: anhtunguyen98/vi-asr-youtube-1582h
         manifest: manifest.jsonl.zst
         shards: shard-*.tar.zst
-  hf_wake:                         # the wake word and a candidate, counted on hf_extract's sources
-    pilot: {per_phrase: 200, listen_per_phrase: 40}   # 2 to 7% of matches pause (wake.md 7): a dozen to hear
+  hf_wake:                         # the wake word, on hf_extract's sources
+    pilot: {per_phrase: 200, per_source: 20, listen_per_phrase: 40}   # 2 to 7% pause (wake.md 7): a dozen to hear
     phrases:
-      - trợ lý
-      - vừng ơi
+      - trợ lý                     # "vừng ơi" left out: 16 sentences of real voices (wake.md 7)
     sources:                       # hf_extract's less nampdn-ai/vietspeech and LanguaMan/vieneu-tts-140h-dataset, whose
                                    #   .arrow (476 and 20 GB) stream whole to give their text, and bud500, deleted
       - {kind: parquet, repo: thivux/phoaudiobook, revision: e716faf3780d89cdd630b3a778476bb9e1ad316d}

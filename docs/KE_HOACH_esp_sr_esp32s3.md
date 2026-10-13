@@ -1011,9 +1011,9 @@ siết báo nhầm để sau, khi có dữ liệu thu thật.
 
 **Dữ liệu dương** gồm tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, và **người thật nói
 "trợ lý"**: mọi câu có lời đọc ra từ ấy, của kho học lẫn của những kho tiếng Việt lớn trên Hugging Face, trích theo
-lời (§1.2), vào hai kho: `hf_wake` giữ từ đánh thức và cụm ứng viên "vừng ơi", và `wake` lấy mẩu người thật chỉ từ
-kho ấy; `hf_extract` giữ các lệnh của `kws`. Cả hai chỉ lấy **chỗ người nói ngắt hơi sau cụm**: nhãn của `wake` và cuối
-cửa sổ của `kws` đều neo ở đó, còn tiếng nói ngay trước cụm là chuyện thường khi gọi thiết bị ("ơi trợ lý", "này bật
+lời (§1.2), vào hai kho: `hf_wake` giữ từ đánh thức, và `wake` lấy mẩu người thật chỉ từ kho ấy; `hf_extract` giữ các
+lệnh của `kws`. Cả hai chỉ lấy **chỗ người nói ngắt hơi sau cụm**: nhãn của `wake` và cuối cửa sổ của `kws` đều neo ở
+đó, còn tiếng nói ngay trước cụm là chuyện thường khi gọi thiết bị ("ơi trợ lý", "này bật
 đèn"). Cắt giữa câu thì mép nào cũng nằm giữa một nguyên âm, vì người nói không ngừng ở ranh giới từ. Ngày 13/10 có hai
 lần cắt thử như thế: lần đầu mép rộng, lần sau nhiều cách cắt cho bộ nghe chọn. Chủ repo nghe cả hai lần ra tiếng bị
 chặt (`measurements/wake.md` §7). Mốc từ lấy bằng **căn cưỡng bức** (Montreal Forced Aligner, mô hình tiếng Việt,
