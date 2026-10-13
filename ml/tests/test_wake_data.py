@@ -148,9 +148,9 @@ def test_the_extracts_clips_of_the_word_join_the_train_positives(tmp_path: Path)
     clip[5 * hop : 20 * hop] = 0.5 * np.sin(np.arange(15 * hop) * 0.3)
     write_wav(folder / "tro_ly" / "a__0.wav", clip)
     rows = [
-        ["tro_ly/a__0.wav", "trợ lí", "0.52", "public", "nhờ trợ lí", "o/d", "rev0", "a", "Trợ lí."],
-        ["tro_ly/c__0.wav", "trợ lý", "0.5", "synth", "gọi trợ lý", "t/s", "rev0", "c", "Trợ lý."],
-        ["mo_cua/b__0.wav", "mở cửa", "0.4", "public", "mở cửa ra", "o/d", "rev0", "b", "Mở cửa."],
+        ["tro_ly/a__0.wav", "trợ lí", "0.52", "public", "nhờ trợ lí", "o/d", "rev0", "a", "Trợ lí.", "yes"],
+        ["tro_ly/c__0.wav", "trợ lý", "0.5", "synth", "gọi trợ lý", "t/s", "rev0", "c", "Trợ lý.", "no"],
+        ["mo_cua/b__0.wav", "mở cửa", "0.4", "public", "mở cửa ra", "o/d", "rev0", "b", "Mở cửa.", "yes"],
     ]
     lines = [extract.INDEX_FIELDS, *rows]
     (folder / "clips.tsv").write_text("".join("\t".join(r) + "\n" for r in lines), encoding="utf-8")

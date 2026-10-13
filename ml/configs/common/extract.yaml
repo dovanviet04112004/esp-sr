@@ -23,8 +23,9 @@ pilot:                             # fetch --pilot, cut, listen: a sample of eve
   listen_per_phrase: 8             # kept clips copied to cache/listen/<extract>/, taken from source after source
   level_dbfs: -26.0                # the copies match this over the frames within cut.quiet_below_peak_db of the peak
   seed: 20261001
-cut:                               # only a phrase said with a pause after it is cut (KEHOACH 3.11)
-  sides: after                     # sides that must pause: after, or both; both kept 1% of phrases (wake.md 6)
+cut:                               # a phrase said with a pause after it is cut, or with sides none every one (KEHOACH 3.11)
+  sides: after                     # sides that must pause: after, or both; both kept 1% of phrases (wake.md 6);
+                                   #   none cuts every aligned phrase, each clip marked paused or not (KEHOACH 3.11)
   hear: false                      # PhoWhisper keeps a cut it hears as the phrase alone; off, text and aligner vouch
   frame_s: 0.01                    # level frames of the pause test
   guard_s: 0.03                    # next to each aligned bound, out of the test: the aligner's error, a consonant's breath
@@ -33,6 +34,7 @@ cut:                               # only a phrase said with a pause after it is
   quiet_below_peak_db: 20.0        # every frame of a pause at least this far under the phrase's loudest frame
   min_word_gap_s: 0.08             # least aligned gap to a pausing side's word: a weak onset passes the level test
   align_batch: 1500                # sentences per aligner run; its peak memory grows with it
+  edge_s: 0.05                     # sides none, a phrase run into its neighbours: its clip reaches this past each bound
 extracts:
   hf_extract:
     phrases:                       # matched by their northern reading, so "trợ lí" is "trợ lý"; chụp ảnh stays out,
@@ -91,6 +93,53 @@ extracts:
         hold: true                   # scanned; its 2.1 TB of shards for a quarter of the matches wait for a later fetch
         languages: [vi000, vi100, vi101]
       - kind: manifest_tar           # one zstd JSONL manifest of {audio_filepath, text}; tar.zst shards of the files
+        repo: anhtunguyen98/vi-asr-youtube-1582h
+        manifest: manifest.jsonl.zst
+        shards: shard-*.tar.zst
+  hf_wake:                         # the wake word and a candidate, counted on hf_extract's sources
+    cut: {sides: none}             # every place the aligner finds them (KEHOACH 3.11)
+    pilot: {listen_per_phrase: 40} # every pilot clip, for the owner to hear before the whole run
+    phrases:
+      - trợ lý
+      - vừng ơi
+    sources:                       # hf_extract's less nampdn-ai/vietspeech and LanguaMan/vieneu-tts-140h-dataset, whose
+                                   #   .arrow (476 and 20 GB) stream whole to give their text, and bud500, deleted
+      - {kind: parquet, repo: thivux/phoaudiobook, revision: e716faf3780d89cdd630b3a778476bb9e1ad316d}
+      - {kind: parquet, repo: NhutP/VietSpeech, revision: 35f7d6081b8de7cafa593d741a74068e7d40822c}
+      - {kind: parquet, repo: capleaf/viVoice, revision: cb55a42ab775fbff4f78849679b14b6e8934176d}
+      - {kind: parquet, repo: linhtran92/viet_youtube_asr_corpus_v2, revision: ecde94a62130e6eb4a67845375f18f6787e60b66}
+      - {kind: parquet, repo: doof-ferb/LSVSC, revision: 416b1ef54953db4a1c72f1566b2295c029859d10}
+      - kind: parquet
+        repo: dolly-vn/dolly-audio-1000h-vietnamese
+        revision: 1614861fb753346812a8d0654c96b72e4a85609c
+        synthetic: true
+      - {kind: parquet, repo: doof-ferb/vais1000, revision: 35051e3e3547cac75ceae39c017445bd86b9b359}
+      - {kind: parquet, repo: doof-ferb/infore1_25hours, revision: 7f60edb0aa03a6e22de091ff10749e21b33c8a8a}
+      - {kind: parquet, repo: doof-ferb/infore2_audiobooks, revision: 8d1895fe7c2b65abe5a9c47e9e7b6d2efc1f940c}
+      - {kind: parquet, repo: doof-ferb/VietMed_labeled, revision: 6dcd684b24cefafbfdf647b00cdf3ac13b5f7159}
+      - {kind: parquet, repo: doof-ferb/Speech-MASSIVE_vie, revision: 094a186ca0e9246fc7302f169bc8760930175201}
+      - {kind: parquet, repo: PhongGoldFish/youtube-center-vietnamese-asr}
+      - {kind: parquet, repo: qhuy242/VNAVC}
+      - {kind: parquet, repo: doduy1911/voiceNam}
+      - {kind: parquet, repo: leduckhai/MultiMed, config: Vietnamese}
+      - {kind: parquet, repo: TrangLe2108/DNU-ViSpeech}
+      - {kind: parquet, repo: nguyendv02/ViMD_Dataset, own: true}
+      - {kind: parquet, repo: google/fleurs, config: vi_vn}
+      - {kind: parquet, repo: doof-ferb/BibleMMS_vie}
+      - {kind: parquet, repo: thangnzt/NgocHuyenViVoice}
+      - {kind: parquet, repo: HieuNguyen203/Vietnamese_Medical_Consultation}
+      - {kind: parquet, repo: tensorxt/ViMedCSS}
+      - {kind: parquet, repo: Cets/audio-logs-vie}
+      - {kind: local, repo: local, corpora: [speech/fpt_open/, speech/vlsp/]}
+      - kind: tsv_tar
+        repo: speechcolab/gigaspeech2
+        revision: 8dc0d0e502b7e6d5649a13cd4b677cf10c0b21e3
+        transcripts: data/vi/train_refined.tsv
+        shards: data/vi/train/{shard}.tar.gz
+      - {kind: tsv_tar, repo: speechcolab/gigaspeech2, transcripts: data/vi/dev.tsv, shards: data/vi/dev.tar.gz}
+      - {kind: tsv_tar, repo: speechcolab/gigaspeech2, transcripts: data/vi/test.tsv, shards: data/vi/test.tar.gz}
+      - {kind: yodas, repo: espnet/yodas2, hold: true, languages: [vi000, vi100, vi101]}
+      - kind: manifest_tar
         repo: anhtunguyen98/vi-asr-youtube-1582h
         manifest: manifest.jsonl.zst
         shards: shard-*.tar.zst

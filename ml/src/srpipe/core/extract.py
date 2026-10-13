@@ -56,9 +56,9 @@ TEXT_COLUMNS = (
 )
 RETRY_CODES = (429, 500, 502, 503, 504)
 STROKED_D = str.maketrans("đĐ", "dD")
-INDEX_FIELDS = ("file", "phrase", "seconds", "origin", "text", "source", "revision", "key", "heard")
+INDEX_FIELDS = ("file", "phrase", "seconds", "origin", "text", "source", "revision", "key", "heard", "paused")
 LEVEL_FLOOR = 1e-12  # -120 dB: digital silence counts as quiet
-SIDES = ("after", "both")
+SIDES = ("after", "both", "none")
 
 
 class Http:
@@ -269,6 +269,10 @@ class Job:
         self.manifest = paths["manifests"] / "speech" / f"{name}.yaml"
         self.hub, self.read_ahead = cfg["http"]["hub"], cfg["http"]["read_ahead_bytes"]
         self.paths, self.lock, self.kept = paths, threading.Lock(), None
+
+    def settings(self, section: str) -> dict:
+        """A section of the config, cut or pilot, with the keys this extract sets over it."""
+        return self.cfg[section] | self.spec.get(section, {})
 
     def pins(self) -> dict[str, dict]:
         """Each source's revision and licence, the first read of an unpinned one fixing it in pins.json."""
@@ -659,7 +663,7 @@ def pilot_parts(
 ) -> list[tuple[dict, str, list[dict], dict]]:
     """The pilot's parts and matches: for each phrase, pilot.per_source matches next to each other, from a seeded start,
     in the part of each source that says it most, sources in config order, until pilot.per_phrase."""
-    spec = job.cfg["pilot"]
+    spec = job.settings("pilot")
     rng = np.random.default_rng(spec["seed"])
     order = [s["repo"] for s in job.spec["sources"]]
     chosen: dict[tuple[str, str], tuple[dict, str, dict, dict]] = {}
@@ -823,14 +827,19 @@ def pause_bounds(x: np.ndarray, span: tuple[float, float], spec: dict) -> tuple[
     return round(start * frame_s, 3), round(stop * frame_s, 3)
 
 
-def heard_alone(
-    job: Job, found: list[dict], paused: list[int], sounds: dict, play: tuple, run: tuple
-) -> dict[int, str]:
+def edge_bounds(x: np.ndarray, span: tuple[float, float], spec: dict) -> tuple[float, float]:
+    """Seconds to cut a phrase run into its neighbours out of its sentence x: edge_s past each aligned bound, inside x
+    (KEHOACH 3.11)."""
+    length_s = len(x) / grid.SAMPLE_RATE_HZ
+    return round(max(0.0, span[0] - spec["edge_s"]), 3), round(min(length_s, span[1] + spec["edge_s"]), 3)
+
+
+def heard_alone(job: Job, found: list[dict], cuts: list[int], sounds: dict, play: tuple, run: tuple) -> dict[int, str]:
     """The cuts the checker hears as their phrase alone, played as the simulation plays them, with what it heard."""
     pad, ramp_s = play
     tts, work, cache = run
     tries = []
-    for i in paused:
+    for i in cuts:
         wav = work / "tries" / f"{i}.wav"
         write_wav(
             wav, np.concatenate([pad, ramped(segment(job.whole(found[i]["key"]), *found[i]["cut"]), ramp_s), pad])
@@ -838,14 +847,15 @@ def heard_alone(
         tries.append({"id": str(i), "wav": str(wav)})
     heard = engines.hear_text(tries, tts, work, cache) if tries else {}
     shutil.rmtree(work / "tries", ignore_errors=True)
-    return {i: heard[str(i)] for i in paused if corpus.sounds(heard[str(i)]) == sounds[found[i]["phrase"]]}
+    return {i: heard[str(i)] for i in cuts if corpus.sounds(heard[str(i)]) == sounds[found[i]["phrase"]]}
 
 
 def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cache: Path) -> None:
     """Align the sentences in batches, cut each phrase said with a pause on the sides cut.sides names, where the aligner
-    also sets it apart from its neighbours, keep every cut or, with cut.hear, those the checker hears as the phrase
-    alone, then delete the sentences and every try."""
-    spec, rate = job.cfg["cut"], grid.SAMPLE_RATE_HZ
+    also sets it apart from its neighbours, and with sides none every other phrase too by edge_bounds, each clip marked
+    paused or not; keep every cut or, with cut.hear, those the checker hears as the phrase alone, then delete the
+    sentences and every try."""
+    spec, rate = job.settings("cut"), grid.SAMPLE_RATE_HZ
     if spec["sides"] not in SIDES:
         raise ValueError(f"cut: sides is {spec['sides']!r}, none of {', '.join(SIDES)}")
     if spec["guard_s"] + spec["min_pause_s"] > spec["margin_s"]:
@@ -866,15 +876,17 @@ def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cach
             for p in m["phrases"]:
                 for n, (start, end, before_s, after_s) in enumerate(phrase_spans(times.get(m["key"], []), sounds[p])):
                     apart = (min(before_s, after_s) if spec["sides"] == "both" else after_s) >= spec["min_word_gap_s"]
-                    cut_s = pause_bounds(x, (start, end), spec) if apart else None
+                    paused = pause_bounds(x, (start, end), spec) if apart else None
+                    cut_s = paused or (edge_bounds(x, (start, end), spec) if spec["sides"] == "none" else None)
                     found.append(
                         {"key": m["key"], "n": n, "phrase": p, "span": (start, end), "apart": apart, "cut": cut_s}
+                        | {"paused": paused is not None}
                     )
-        paused = [i for i, o in enumerate(found) if o["cut"]]
+        cuts = [i for i, o in enumerate(found) if o["cut"]]
         if spec["hear"]:
-            kept = heard_alone(job, found, paused, sounds, (pad, ramp_s), (tts, work, cache))
+            kept = heard_alone(job, found, cuts, sounds, (pad, ramp_s), (tts, work, cache))
         else:
-            kept = dict.fromkeys(paused, "")
+            kept = dict.fromkeys(cuts, "")
         by_key = defaultdict(list)
         for i, o in enumerate(found):
             by_key[o["key"]].append((i, o))
@@ -887,6 +899,7 @@ def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cach
                 write_wav(job.out / name, ramped(segment(job.whole(m["key"]), *o["cut"]), ramp_s))
                 clips.append(
                     {"file": name, "phrase": o["phrase"], "span_s": o["span"], "cut_s": o["cut"], "heard": kept[i]}
+                    | {"paused": o["paused"]}
                 )
             mine = by_key.get(m["key"], [])
             apart = sum(o["apart"] for _, o in mine)
@@ -894,7 +907,7 @@ def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cach
                 "clips": clips,
                 "found": len(mine),
                 "apart": apart,
-                "paused": sum(o["cut"] is not None for _, o in mine),
+                "paused": sum(o["paused"] for _, o in mine),
             }
             done_write(job.state / "cut" / f"{m['key']}.jsonl", [record])
             job.whole(m["key"]).unlink()
@@ -904,8 +917,8 @@ def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cach
         write_index(job)
         done = min(first + spec["align_batch"], len(sentences))
         print(
-            f"cut: {done}/{len(sentences)} sentences, {len(paused)} of {len(found)} phrases said with a pause,"
-            f" {len(kept)} kept",
+            f"cut: {done}/{len(sentences)} sentences, {sum(o['paused'] for o in found)} of {len(found)} phrases said"
+            f" with a pause, {len(kept)} kept",
             flush=True,
         )
 
@@ -929,6 +942,8 @@ def write_index(job: Job) -> None:
             pins[source]["revision"],
             m["key"],
             c["heard"],
+            # A clip lacking the field comes from sides after or both, so from a pause.
+            "yes" if c.get("paused", True) else "no",
         )
         lines.append("\t".join(str(v).replace("\t", " ").replace("\n", " ") for v in values))
     index = job.out / "clips.tsv"
@@ -1005,7 +1020,7 @@ def listen(job: Job) -> str:
     """Copies of the kept clips for the owner to hear, pilot.listen_per_phrase of each phrase taken from source after
     source and matched to pilot.level_dbfs, into cache/listen/<name>/, with index.tsv; and per phrase the sentences
     cut, the clips kept, their sources, lengths, and the quiet each clip keeps before and after its phrase."""
-    spec, rule = job.cfg["pilot"], job.cfg["cut"]
+    spec, rule = job.settings("pilot"), job.settings("cut")
     rng = np.random.default_rng(spec["seed"])
     repo_of = {slug(s["repo"]): s["repo"] for s in job.spec["sources"]}
     records = [m for f in sorted((job.state / "cut").glob("*.jsonl")) for m in read_jsonl(f)]
@@ -1047,8 +1062,9 @@ def listen(job: Job) -> str:
             lead_ms = round(1000 * (c["span_s"][0] - c["cut_s"][0]))
             tail_ms = round(1000 * (c["cut_s"][1] - c["span_s"][1]))
             length = f"{c['cut_s'][1] - c['cut_s'][0]:.2f}"
-            rows.append([name, p, repo, length, c["heard"], lead_ms, tail_ms, m["text"]])
-    fields = ["file", "phrase", "source", "seconds", "heard", "quiet_before_ms", "quiet_after_ms", "text"]
+            paused = "yes" if c.get("paused", True) else "no"
+            rows.append([name, p, repo, length, c["heard"], paused, lead_ms, tail_ms, m["text"]])
+    fields = ["file", "phrase", "source", "seconds", "heard", "paused", "quiet_before_ms", "quiet_after_ms", "text"]
     out.mkdir(parents=True, exist_ok=True)
     body = "\n".join("\t".join(str(v).replace("\t", " ") for v in r) for r in [fields, *rows])
     (out / "index.tsv").write_text(body + "\n", encoding="utf-8")
