@@ -1014,8 +1014,10 @@ siết báo nhầm để sau, khi có dữ liệu thu thật.
 lời (§1.2). Kho `hf_wake` giữ từ đánh thức và cụm ứng viên "vừng ơi"; `wake` lấy mẩu người thật chỉ từ kho ấy. Nó cắt
 **mọi chỗ bộ căn tìm thấy cụm**, như kho từ khoá MSWC:
 - có quãng lặng sau cụm theo hai phép thử dưới đây thì cắt như `hf_extract`, và mẩu ghi `paused`;
-- không có thì mẩu chạy từ mốc đầu lùi `edge_s` tới mốc cuối cộng `edge_s` (cấu hình), làm mềm mép, có thể mang đầu
-  âm của từ sau;
+- không có thì thử lần lượt các cách cắt `trims_s` quanh mốc của bộ căn (cấu hình), từ rộng tới hẹp. Bộ nghe lại
+  (dưới), bật ở `hf_wake`, giữ cách đầu tiên nó nghe ra đúng cụm, không thừa tiếng; chỗ không cách nào qua thì bỏ. Lần
+  cắt thử đầu, mép rộng 50 ms mà không có bộ nghe: PhoWhisper nghe 18/40 mẩu mang đuôi từ trước, 5 mẩu mang đầu từ sau,
+  5 mẩu lệch hẳn (`measurements/wake.md` §7);
 - chỉ ~6% chỗ nói "trợ lý" trong các kho có quãng lặng sau cụm, nên luật ngắt hơi để lại 40 mẩu từ 3 336 câu
   (`measurements/wake.md` §7). Chủ repo chọn số lượng ngày 13/10; `wake` chọn được chỉ mẩu `paused` hay mọi mẩu.
 

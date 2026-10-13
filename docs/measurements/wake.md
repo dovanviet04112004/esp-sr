@@ -381,3 +381,13 @@ Theo chữ đứng sau "trợ lý" trong lời của câu:
 
 - "vừng ơi" gần như chỉ có trong "Vừng ơi mở ra" của truyện Alibaba, tên nhà hàng "Vừng Ơi", hay "muối vừng". Cắt hết
   cũng chỉ ~16 mẩu giọng thật, không đủ học một từ đánh thức.
+
+**Cắt thử `hf_wake`, mép rộng 50 ms, không có bộ nghe** (13/10): 44 câu, mọi chỗ bộ căn thấy cụm đều cắt. PhoWhisper
+(`asr_fast`) nghe lại từng mẩu, đệm lặng hai đầu:
+- "trợ lý" trơn: 15/40;
+- mang đuôi từ trước: 18/40, như "cô trợ lý", "chị trợ lý", "phó trợ lý", "hỗ trợ lý";
+- mang đầu từ sau: 5/40, như "trợ lý giáo", "trợ lý do";
+- bộ căn lệch hẳn: 5/40, như "ly", "chợ ly", "tới chợ lấy".
+
+Chủ repo nghe và bác cả lô. Giữa câu, từ trước chạy sát vào "trợ", nên 50 ms trước mốc đầu đã có tiếng của nó. Cách cắt
+đổi sang thử nhiều mép quanh mốc, giữ mép đầu tiên bộ nghe nghe ra đúng cụm (KẾ HOẠCH §3.11).
