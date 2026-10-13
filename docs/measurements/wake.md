@@ -391,3 +391,19 @@ Theo chữ đứng sau "trợ lý" trong lời của câu:
 
 Chủ repo nghe và bác cả lô. Giữa câu, từ trước chạy sát vào "trợ", nên 50 ms trước mốc đầu đã có tiếng của nó. Cách cắt
 đổi sang thử nhiều mép quanh mốc, giữ mép đầu tiên bộ nghe nghe ra đúng cụm (KẾ HOẠCH §3.11).
+
+**Cắt thử lần 2, nhiều cách cắt và bộ nghe** (13/10, `86038f5`), trên đúng các câu ấy:
+- bộ nghe giữ 36/40 mẩu "trợ lý";
+- 18 mẩu rộng thêm 30 ms mỗi bên, 10 mẩu cắt sát mốc đầu, 6 mẩu ăn vào trong mốc đầu 30 ms, 4 mẩu ở quãng lặng thật.
+- Chủ repo nghe và vẫn bác.
+- Mức 10–30 ms sát mép, dưới đỉnh của mẩu (trung vị; mẩu to nhất):
+
+| Mẩu | Mép đầu | Mép cuối |
+|---|---|---|
+| Ở quãng lặng thật (4) | −64 dB; −35 dB | −42 dB; −29 dB |
+| Cắt giữa câu (32) | −21 dB; −2 dB | −13 dB; −0,7 dB |
+
+- **Giữa câu, mép nằm giữa tiếng nói:** người nói không ngừng ở ranh giới từ, nên cắt ở đâu mẩu cũng mở và đóng giữa
+  một nguyên âm, nghe như bị chặt.
+- **Bộ nghe không thấy lỗi này:** PhoWhisper vẫn đoán ra cụm nhờ ngữ cảnh.
+- Mẩu nghe được chỉ có ở chỗ người nói ngắt hơi, đúng như luật của `hf_extract`.
