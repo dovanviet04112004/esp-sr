@@ -1011,25 +1011,22 @@ siết báo nhầm để sau, khi có dữ liệu thu thật.
 
 **Dữ liệu dương** gồm tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, và **người thật nói
 "trợ lý"**: mọi câu có lời đọc ra từ ấy, của kho học lẫn của những kho tiếng Việt lớn trên Hugging Face, trích theo
-lời (§1.2). Kho `hf_wake` giữ từ đánh thức và cụm ứng viên "vừng ơi"; `wake` lấy mẩu người thật chỉ từ kho ấy. Nó cắt
-**mọi chỗ bộ căn tìm thấy cụm**, như kho từ khoá MSWC:
-- có quãng lặng sau cụm theo hai phép thử dưới đây thì cắt như `hf_extract`, và mẩu ghi `paused`;
-- không có thì thử lần lượt các cách cắt `trims_s` quanh mốc của bộ căn (cấu hình), từ rộng tới hẹp. Bộ nghe lại
-  (dưới), bật ở `hf_wake`, giữ cách đầu tiên nó nghe ra đúng cụm, không thừa tiếng; chỗ không cách nào qua thì bỏ. Lần
-  cắt thử đầu, mép rộng 50 ms mà không có bộ nghe: PhoWhisper nghe 18/40 mẩu mang đuôi từ trước, 5 mẩu mang đầu từ sau,
-  5 mẩu lệch hẳn (`measurements/wake.md` §7);
-- chỉ ~6% chỗ nói "trợ lý" trong các kho có quãng lặng sau cụm, nên luật ngắt hơi để lại 40 mẩu từ 3 336 câu
-  (`measurements/wake.md` §7). Chủ repo chọn số lượng ngày 13/10; `wake` chọn được chỉ mẩu `paused` hay mọi mẩu.
-
-Kho `hf_extract` giữ các lệnh của `kws` và chỉ lấy **chỗ người nói ngắt hơi sau cụm**: cuối cửa sổ của `kws` neo ở đó,
-còn tiếng nói ngay trước cụm là chuyện thường khi gọi thiết bị ("này bật đèn"). Mốc từ lấy bằng **căn cưỡng bức**
-(Montreal Forced Aligner, mô hình tiếng Việt, chạy trong Docker) trên lời của câu; ngay sau mốc cuối, qua một khoảng
-đệm cho sai số của bộ căn và cho hơi của phụ âm, phải có một quãng lặng đủ dài mà mọi khung đều thấp hơn khung to nhất của cụm một ngưỡng, **và** bộ căn
-phải đặt từ đứng sau cách mốc cuối ít nhất một khoảng (bốn số ở cấu hình). Hai phép thử bù nhau: phụ âm xát mở đầu từ
+lời (§1.2), vào hai kho: `hf_wake` giữ từ đánh thức và cụm ứng viên "vừng ơi", và `wake` lấy mẩu người thật chỉ từ
+kho ấy; `hf_extract` giữ các lệnh của `kws`. Cả hai chỉ lấy **chỗ người nói ngắt hơi sau cụm**: nhãn của `wake` và cuối
+cửa sổ của `kws` đều neo ở đó, còn tiếng nói ngay trước cụm là chuyện thường khi gọi thiết bị ("ơi trợ lý", "này bật
+đèn"). Cắt giữa câu thì mép nào cũng nằm giữa một nguyên âm, vì người nói không ngừng ở ranh giới từ. Ngày 13/10 có hai
+lần cắt thử như thế: lần đầu mép rộng, lần sau nhiều cách cắt cho bộ nghe chọn. Chủ repo nghe cả hai lần ra tiếng bị
+chặt (`measurements/wake.md` §7). Mốc từ lấy bằng **căn cưỡng bức** (Montreal Forced Aligner, mô hình tiếng Việt,
+chạy trong Docker) trên lời của câu; ngay sau mốc cuối, qua một khoảng đệm cho sai số của bộ căn và cho hơi của phụ âm,
+phải có một quãng lặng đủ dài mà mọi khung đều thấp hơn khung to nhất của cụm một ngưỡng, **và** bộ căn phải đặt từ
+đứng sau cách mốc cuối ít nhất một khoảng (bốn số ở cấu hình). Hai phép thử bù nhau: phụ âm xát mở đầu từ
 sau ("x", "s", "kh") nhỏ hơn khung to nhất quá ngưỡng nên lọt phép thử mức, như "bật đèn" trong "bật đèn xanh" của lần
 cắt thử 30/09, còn bộ căn biết từ ấy đã bắt đầu; mốc của bộ căn lệch vài chục ms nên một mình nó không đủ. Mép trước cắt
-vào giữa quãng lặng khi có, không thì ở mốc đầu lùi một khoảng đệm. Bắt lặng cả hai bên thì chỉ chừng 1% chỗ nói một cụm
-qua luật, vì "trợ lý" và các lệnh hầu như luôn nằm giữa câu (`docs/measurements/wake.md` §6). Mẩu giữ tối đa một khoảng
+vào giữa quãng lặng khi có, không thì ở mốc đầu lùi một khoảng đệm. Cụm là từ cuối của câu thì cuối file cũng là
+quãng lặng: các kho thường cắt audio sát sau từ cuối, nên phần còn lại sau khoảng đệm chỉ cần lặng một khoảng ngắn hơn
+(`end_quiet_s`) tới hết file; file dừng ngay trong khoảng đệm thì bỏ, vì đuôi từ có thể đã bị cắt. Bắt lặng cả hai bên
+thì chỉ chừng 1% chỗ nói một cụm qua luật, vì "trợ lý" và các lệnh hầu như luôn nằm giữa câu
+(`docs/measurements/wake.md` §6). Mẩu giữ tối đa một khoảng
 lặng ở mỗi đầu (cấu hình) và được làm mềm mép. Bộ nghe lại (PhoWhisper nghe mẩu như lúc mô phỏng phát, giữ mẩu nó
 nghe ra đúng cụm, không thừa tiếng) là tuỳ chọn `cut.hear` ở cấu hình; chủ repo tắt nó ngày 01/10, vì lời của câu và
 bộ căn đã bảo đảm cụm có mặt, còn bộ nghe giữ GPU mà TTS và học đang cần; mẩu vì thế có thể còn mảnh của từ trước ở
