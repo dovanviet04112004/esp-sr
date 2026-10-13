@@ -368,3 +368,16 @@ Theo chữ đứng sau "trợ lý" trong lời của câu:
   kho thường dừng sát sau từ cuối.
 - **Dấu phẩy sau "trợ lý" hiếm khi thành khoảng cách ở bộ căn:** 4 trong 38 câu.
 - Từ đây, kho `hf_wake` cắt mọi chỗ bộ căn tìm thấy cụm và ghi mẩu nào có quãng lặng (KẾ HOẠCH §3.11).
+
+**Đếm trên `hf_wake`** (13/10, `scan` 64 phút trên 26 kho, 5 782 phần văn bản):
+- các kho của `hf_extract`, trừ `nampdn-ai/vietspeech` và `LanguaMan/vieneu-tts-140h-dataset`: `.arrow` của chúng (476 và
+  20 GB) phải tải trọn mới có lời;
+- trừ cả `bud500`, đã xoá.
+
+| Cụm | Câu | Giọng thật | Trong YODAS2 (audio 2,1 TB, đang hoãn) | Ngoài YODAS2 |
+|---|---|---|---|---|
+| "trợ lý" | 2 898 | 2 754 | 939 | 1 959 |
+| "vừng ơi" | 17 | 16 | 8 | 9 |
+
+- "vừng ơi" gần như chỉ có trong "Vừng ơi mở ra" của truyện Alibaba, tên nhà hàng "Vừng Ơi", hay "muối vừng". Cắt hết
+  cũng chỉ ~16 mẩu giọng thật, không đủ học một từ đánh thức.
