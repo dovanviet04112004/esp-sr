@@ -1052,3 +1052,39 @@ ngay sau đó, nên lượt này chỉ còn là bằng chứng cho phần danh s
 - **Các lệnh không được nhận đều do khâu nhận lệnh, không do khâu người nói.**
   - "mở cửa" rồi ngay "đóng cửa" thành một câu, chỉ "đóng cửa" được nhận.
   - "tăng âm lượng", "giảm âm lượng", "dừng lại" bị `LOW_MARGIN` hay `PART` ở δ2 50.
+
+## 29. `speaker` theo độ ồn trên chip: dải, cổng và bước giữ tiếng (E11-T33)
+
+Đo ngày 12–13/10 trên board B, qua cầu RFC 2217.
+
+**Dải độ ồn trên chip, `make parity-board`** (12/10, `9a4539d`):
+- cả hai bản dựng, chuỗi mặc định và chuỗi có module;
+- khối `speaker_noise`: dải và quyết định của `case_000`, `case_001` lệch 0;
+- bốn đối chứng âm đều đỏ: dải lệch 1, 1, 3, và quyết định lệch 1264 ‰.
+
+**Cửa sổ lệnh với ảnh của khoá `898a1ba`, `make listen-unit SPEAKER=1`** (13/10, 08:03–08:50):
+- khuôn 9; cổng của `speaker-deploy` chặn bảng dải, nên biên là 0;
+- 7 lượt, 336 cửa sổ, 150 lệnh được nhận;
+- điểm AS-norm, cosine và dải của từng cửa sổ trùng bản soi gương. Mọi cửa sổ ở dải 3, dải yên nhất.
+
+**Bước giữ tiếng**, `svc_listen_hold` ở `nhan_task`, nhân 0:
+- chép 1,5 s cuối cửa sổ sang ô xác minh;
+- cộng hai tổng bình phương trên cả cửa sổ lệnh, đọc từ vòng PCM ở PSRAM.
+
+| Lượt | 0 | 1 | 2 | 3 | 4 | 5 | 6 | Cả 7 lượt |
+|---|---|---|---|---|---|---|---|---|
+| Số lần giữ | 26 | 35 | 21 | 2 | 20 | 33 | 33 | 170 |
+| Trung bình, µs | 3512 | 3551 | 3612 | 2977 | 3721 | 3757 | 3848 | **3663** |
+| Đỉnh, µs | 3908 | 4363 | 4441 | 3151 | 3891 | 4467 | 4156 | **4467** |
+
+- **Số đo gồm cả phần chép đuôi.** ADR-0024 ước "dưới 1 ms" cho riêng hai tổng, và chưa đo tách hai phần.
+- **Không chạm nhân khung.** `nhan_task` ở nhân 0, `q_clean` 128 bước đỡ ~2 s, nên 4,5 ms mỗi lệnh không làm rơi
+  khung.
+- **Với biên 0, hai tổng không đổi quyết định nào,** nhưng vẫn được tính.
+
+**Trả board về sản phẩm** (13/10, 08:51–08:59): `fw-bench-flash`, `models-flash`, `storage-flash`, rồi `nvs-restore`
+từ bản `nvs-save` ngày 12/10. Log boot:
+- `noise edges 0, 0, 0`, và một mẫu giọng có ngưỡng 2964 ở cả ba dải ồn;
+- ngưỡng 2964–3795 cho 1–8 mẫu giọng, model `c3373e4e`;
+- roster có 1 mẫu giọng, kiểm người nói bật;
+- δ1 300, δ2 50, δ3 65535, bộ 10 lệnh của `set.json`.

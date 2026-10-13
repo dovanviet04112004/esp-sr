@@ -609,7 +609,9 @@ Một người có mẫu giọng; giữ 1 m / 3 m:
   - chỉ được ở 5 dB, 3 m;
   - ở 10 dB để lọt 1,15% người lạ.
   - Với 3–8 người có mẫu giọng, lúc yên người lạ lọt 1,16–1,36% thay vì ~1%.
-  - Bảng dải này vì thế chưa nạp lên board.
+  - Cổng của `speaker-deploy` (`a489aff`, KẾ HOẠCH §3.17) chặn bảng dải ở cả 8 số người, với 18 điều không qua. Bản
+    khoá `898a1ba` mang biên 0, nên board chấm như ADR-0023. Trên board, phép tính dải khớp bản soi gương, và bản khoá
+    ấy qua `listen-unit` (`latency.md` §29).
 - **Cận trên chỉ 1–3 điểm,** với 1, 2 hay 3 người.
   - Dưới một ngưỡng, người lạ ở các mức ồn lọt 0,4–0,7%: hỗn hợp này gần như không kéo điểm người lạ xuống, nên không
     có chỗ hạ ngưỡng.

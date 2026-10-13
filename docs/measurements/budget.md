@@ -38,6 +38,7 @@ profile `bench`, ghi tay từ `measurements/latency.md` §27.
 | trong đó mạng b0, trọng số đọc thẳng từ flash | 0 | như trên | 1173,7 ms | 0 B thêm | 0 B thêm | `7c77692` | 2026-10-11 |
 | `speaker` lúc nạp: dựng b0 cùng một lần chạy thử | 0 | lúc boot | 1783 ms | 0 | 2 134 920 B: tensor, bảng `exp` của Softmax | `7c77692` | 2026-10-11 |
 | `speaker` lúc nạp: `spk_fbank_init` | 0 | lúc boot | ~141 ms | 0 | 59 568 B vùng làm việc, đo bằng `bench_afe` | `6521d03` | 2026-10-11 |
+| `svc_listen_hold`: chép 1,5 s cuối cửa sổ sang ô xác minh, cộng hai tổng bình phương của cửa sổ lệnh (`nhan_task`) | 0 | mỗi lệnh được nhận, khi kiểm người nói bật | 3,66 ms trung bình, 4,47 ms đỉnh, 170 lần | 0 B thêm | 0 B thêm | `898a1ba` | 2026-10-13 |
 
 - "0 B thêm" là heap còn trống trước và sau lần xác minh đầu tiên sau nạp; ca chuỗi đỏ nếu lệch một byte.
 - Một lần chạy b0 giữ nhân 0 ~1,26 s, ở ưu tiên 3 dưới mọi task theo nhịp khung và theo mạng (KẾ HOẠCH §5.2).

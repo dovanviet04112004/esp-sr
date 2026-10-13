@@ -67,8 +67,9 @@ Chi tiết ở KẾ HOẠCH §3.17.
 - **Hợp đồng gọi của `ai_engine` đổi** (§4.5.5):
   - thêm `ai_engine_speaker_noise_bin`;
   - `ai_engine_speaker_passes` nhận thêm dải.
-- **`svc_listen` cộng hai tổng bình phương** lúc chép tiếng sang ô xác minh. Cửa sổ dài nhất là 234 bước, tức 60 000
-  mẫu, chừng dưới 1 ms 🔬.
+- **`svc_listen` cộng hai tổng bình phương** lúc chép tiếng sang ô xác minh, trên cửa sổ lệnh dài tới 234 bước, tức
+  60 000 mẫu. Đo trên board, cả bước giữ tiếng (chép đuôi và hai tổng) mất 3,66 ms trung bình, 4,47 ms đỉnh, ở
+  `nhan_task` trên nhân 0 (`latency.md` §29).
 - **`speaker-deploy` chạy lâu gấp ~4 lần,** cỡ một giờ, nên chạy trong tmux.
 - **Không ồn thì như ADR-0023:** cửa sổ yên rơi vào dải yên nhất, dùng đúng bảng cũ.
 - **Với các kho ồn của board, bảng dải không qua cổng** (`speaker.md` §6.9, đợt 3), nên ảnh mang biên 0:
