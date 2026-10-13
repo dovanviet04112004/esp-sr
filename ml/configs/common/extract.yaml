@@ -34,7 +34,17 @@ cut:                               # a phrase said with a pause after it is cut,
   quiet_below_peak_db: 20.0        # every frame of a pause at least this far under the phrase's loudest frame
   min_word_gap_s: 0.08             # least aligned gap to a pausing side's word: a weak onset passes the level test
   align_batch: 1500                # sentences per aligner run; its peak memory grows with it
-  edge_s: 0.05                     # sides none, a phrase run into its neighbours: its clip reaches this past each bound
+  trims_s:                         # sides none: seconds added to the aligned start and end, a cut each, tried in order
+    - [-0.03, 0.03]                #   with the checker, widest first: a neighbour's edge in a clip is heard
+    - [0.0, 0.03]
+    - [-0.03, 0.0]
+    - [0.0, 0.0]
+    - [0.03, 0.03]
+    - [0.03, 0.0]
+    - [0.0, -0.03]
+    - [0.06, 0.0]
+    - [0.03, -0.03]
+    - [0.06, -0.03]
 extracts:
   hf_extract:
     phrases:                       # matched by their northern reading, so "trợ lí" is "trợ lý"; chụp ảnh stays out,
@@ -97,7 +107,7 @@ extracts:
         manifest: manifest.jsonl.zst
         shards: shard-*.tar.zst
   hf_wake:                         # the wake word and a candidate, counted on hf_extract's sources
-    cut: {sides: none}             # every place the aligner finds them (KEHOACH 3.11)
+    cut: {sides: none, hear: true} # every place the aligner finds them, heard alone (KEHOACH 3.11)
     pilot: {listen_per_phrase: 40} # every pilot clip, for the owner to hear before the whole run
     phrases:
       - trợ lý

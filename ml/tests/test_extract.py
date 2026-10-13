@@ -225,27 +225,52 @@ def test_without_the_checker_every_cut_is_kept(tmp_path: Path, monkeypatch) -> N
     assert row["phrase"] == "trợ lý" and row["heard"] == ""
 
 
-def test_with_sides_none_a_phrase_run_into_its_neighbour_is_cut_at_its_edges(tmp_path: Path, monkeypatch) -> None:
+RUN_ON = {
+    "s_g__1": [("nhờ", 0.1, 0.4), ("trợ", 0.6, 0.8), ("lý", 0.8, 1.0), ("nhé", 1.3, 1.6)],
+    "s_g__2": [("nhờ", 0.1, 0.4), ("trợ", 0.4, 0.6), ("lý", 0.6, 0.8), ("của", 0.8, 1.1)],
+}
+
+
+def cut_run_on(tmp_path: Path, monkeypatch, cut: dict, keys: list[str]) -> extract.Job:
+    """Cut the RUN_ON sentences of keys with these cut keys over the shared ones."""
     job = job_for(tmp_path, [{"kind": "tsv_tar", "repo": "s/g", "revision": "rev0"}], FakeHttp({}))
-    job.spec["cut"] = {"sides": "none", "hear": False}
-    words = {
-        "s_g__1": [("nhờ", 0.1, 0.4), ("trợ", 0.6, 0.8), ("lý", 0.8, 1.0), ("nhé", 1.3, 1.6)],
-        "s_g__2": [("nhờ", 0.1, 0.4), ("trợ", 0.4, 0.6), ("lý", 0.6, 0.8), ("của", 0.8, 1.1)],
-    }
-    for key, said in words.items():
-        text = " ".join(w for w, _, _ in said)
-        match = {"key": key, "text": text, "phrases": ["trợ lý"]}
+    job.spec["cut"] = cut
+    for key in keys:
+        said = RUN_ON[key]
+        match = {"key": key, "text": " ".join(w for w, _, _ in said), "phrases": ["trợ lý"]}
         job.save_whole(key, spoken(2.0, [(a, b) for _, a, b in said]), match)
-    aligned = {k: [{"word": w, "start": a, "end": b} for w, a, b in v] for k, v in words.items()}
+    aligned = {k: [{"word": w, "start": a, "end": b} for w, a, b in v] for k, v in RUN_ON.items()}
     monkeypatch.setattr(extract.engines, "align", lambda clips, *a: {c["id"]: aligned[c["id"]] for c in clips})
     extract.cut(job, {}, load_device(extract.CONFIGS / "scenes" / "device.yaml"), tmp_path, False)
+    return job
+
+
+def test_with_sides_none_a_phrase_run_into_its_neighbour_takes_its_first_trim(tmp_path: Path, monkeypatch) -> None:
+    job = cut_run_on(tmp_path, monkeypatch, {"sides": "none", "hear": False}, ["s_g__1", "s_g__2"])
     rows = {r["key"]: r for r in extract.read_index(tmp_path / "raw/speech/t")}
     assert (rows["s_g__1"]["paused"], rows["s_g__2"]["paused"]) == ("yes", "no")
-    edge = job.settings("cut")["edge_s"]
-    assert abs(rows["s_g__2"]["seconds"] - (0.8 - 0.4 + 2 * edge)) < 1e-6
-    assert extract.edge_bounds(np.zeros(grid.SAMPLE_RATE_HZ), (0.02, 0.99), {"edge_s": edge}) == (0.0, 1.0)
+    lead_s, tail_s = job.settings("cut")["trims_s"][0]
+    assert abs(rows["s_g__2"]["seconds"] - (0.8 + tail_s - (0.4 + lead_s))) < 1e-6
     records = {f.stem: extract.read_jsonl(f)[0] for f in (tmp_path / "cache/extract/t/cut").glob("*.jsonl")}
     assert (records["s_g__1"]["paused"], records["s_g__2"]["paused"]) == (1, 0)
+    edges = extract.trim_bounds(np.zeros(grid.SAMPLE_RATE_HZ), (0.0, 0.99), {"trims_s": [[-0.03, 0.03], [0.0, 0.03]]})
+    assert edges == [(0.0, 1.0)]
+
+
+def test_with_the_checker_a_phrase_keeps_its_first_trim_heard_alone(tmp_path: Path, monkeypatch) -> None:
+    pad_s = load_device(extract.CONFIGS / "scenes" / "device.yaml")["session"]["pad_s"]
+    asked = []
+
+    def hear(clips, *a):
+        asked.extend(clips)
+        seconds = {c["id"]: sf.info(c["wav"]).duration - 2 * pad_s for c in clips}
+        return {i: "trợ lý" if s < 0.405 else "cô trợ lý" for i, s in seconds.items()}
+
+    monkeypatch.setattr(extract.engines, "hear_text", hear)
+    cut_run_on(tmp_path, monkeypatch, {"sides": "none", "hear": True}, ["s_g__2"])
+    (row,) = extract.read_index(tmp_path / "raw/speech/t")
+    assert (row["paused"], row["heard"]) == ("no", "trợ lý") and abs(row["seconds"] - 0.4) < 1e-6
+    assert len(asked) == 4
 
 
 def test_a_phrase_has_its_aligned_gaps_to_the_words_on_each_side() -> None:
