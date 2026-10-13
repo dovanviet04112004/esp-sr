@@ -225,6 +225,29 @@ def test_without_the_checker_every_cut_is_kept(tmp_path: Path, monkeypatch) -> N
     assert row["phrase"] == "trợ lý" and row["heard"] == ""
 
 
+def test_the_end_of_its_sentence_is_the_pause_after_a_last_phrase() -> None:
+    spec = load_yaml(extract.CONFIG)["cut"]
+    ending = spoken(1.1, [(0.1, 0.4), (0.6, 1.0)])
+    assert extract.pause_bounds(ending, (0.6, 1.0), spec) is not None
+    cut_inside_the_guard = spoken(1.02, [(0.1, 0.4), (0.6, 1.0)])
+    assert extract.pause_bounds(cut_inside_the_guard, (0.6, 1.0), spec) is None
+    loud_to_the_end = spoken(1.1, [(0.1, 0.4), (0.6, 1.0), (1.05, 1.1)])
+    assert extract.pause_bounds(loud_to_the_end, (0.6, 1.0), spec) is None
+
+
+def test_a_budget_fetches_the_yodas_shards_with_the_most_matches_per_byte(tmp_path: Path) -> None:
+    sizes = {"a": 100, "b": 400, "c": 50}
+    http = FakeHttp({f"data/vi000/audio/{k}.tar.gz": b"x" * n for k, n in sizes.items()})
+    source = {"kind": "yodas", "repo": "y/s", "languages": ["vi000"]}
+    job = job_for(tmp_path, [source], http)
+    by_part = {f"data/vi000/audio/{k}.tar.gz": [{"key": k}] * n for k, n in {"a": 3, "b": 4, "c": 1}.items()}
+    pins = {"y/s": {"revision": "rev0"}}
+    every = [p for _, p, _, _ in extract.richest_shards(job, source, pins, by_part)]
+    assert every == [f"data/vi000/audio/{k}.tar.gz" for k in "acb"]
+    some = extract.richest_shards(job, source | {"fetch_gb": 160e-9}, pins, by_part)
+    assert [p for _, p, _, _ in some] == ["data/vi000/audio/a.tar.gz", "data/vi000/audio/c.tar.gz"]
+
+
 def test_a_phrase_has_its_aligned_gaps_to_the_words_on_each_side() -> None:
     sounds = extract.Phrases(["bật đèn"]).sounds[0]
     words = [

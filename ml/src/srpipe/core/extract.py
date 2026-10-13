@@ -270,6 +270,10 @@ class Job:
         self.hub, self.read_ahead = cfg["http"]["hub"], cfg["http"]["read_ahead_bytes"]
         self.paths, self.lock, self.kept = paths, threading.Lock(), None
 
+    def settings(self, section: str) -> dict:
+        """A section of the config, cut or pilot, with the keys this extract sets over it."""
+        return self.cfg[section] | self.spec.get(section, {})
+
     def pins(self) -> dict[str, dict]:
         """Each source's revision and licence, the first read of an unpinned one fixing it in pins.json."""
         path = self.state / "pins.json"
@@ -636,6 +640,9 @@ def fetch_parts(job: Job, pins: dict) -> list[tuple[dict, str, list[dict], dict]
         by_part = defaultdict(list)
         for m in matches:
             by_part[m["fetch"]].append(m)
+        if s["kind"] == "yodas":
+            parts += richest_shards(job, s, pins, by_part)
+            continue
         sizes = (
             {f["path"]: f for f in job.files(s, pins[s["repo"]]["revision"], ".parquet", s.get("config", ""))}
             if s["kind"] == "parquet"
@@ -643,6 +650,21 @@ def fetch_parts(job: Job, pins: dict) -> list[tuple[dict, str, list[dict], dict]
         )
         parts += [(s, part, ms, sizes.get(part, {})) for part, ms in by_part.items()]
     return sorted(parts, key=lambda p: -len(p[2]))
+
+
+def richest_shards(job: Job, source: dict, pins: dict, by_part: dict) -> list[tuple[dict, str, list[dict], dict]]:
+    """The YODAS shards of by_part holding the most matches per byte, as many as fit in the source's fetch_gb, every
+    one without it."""
+    revision = pins[source["repo"]]["revision"]
+    listed = (job.files(source, revision, ".tar.gz", f"data/{lang}/audio") for lang in source["languages"])
+    sizes = {f["path"]: f for files in listed for f in files}
+    budget, taken, picked = source.get("fetch_gb", math.inf) * 1e9, 0, []
+    for part in sorted(by_part, key=lambda p: -len(by_part[p]) / sizes[p]["size"]):
+        if taken + sizes[part]["size"] > budget:
+            break
+        taken += sizes[part]["size"]
+        picked.append((source, part, by_part[part], sizes[part]))
+    return picked
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -659,7 +681,7 @@ def pilot_parts(
 ) -> list[tuple[dict, str, list[dict], dict]]:
     """The pilot's parts and matches: for each phrase, pilot.per_source matches next to each other, from a seeded start,
     in the part of each source that says it most, sources in config order, until pilot.per_phrase."""
-    spec = job.cfg["pilot"]
+    spec = job.settings("pilot")
     rng = np.random.default_rng(spec["seed"])
     order = [s["repo"] for s in job.spec["sources"]]
     chosen: dict[tuple[str, str], tuple[dict, str, dict, dict]] = {}
@@ -802,7 +824,8 @@ def quiet_run(quiet: np.ndarray, frame: int, step: int, most: int) -> int:
 def pause_bounds(x: np.ndarray, span: tuple[float, float], spec: dict) -> tuple[float, float] | None:
     """Seconds to cut a phrase aligned at span out of its sentence x: into the pause on each side past guard_s, at most
     margin_s past the aligned bound, or guard_s before the start where speech runs into it. None where a side that
-    cut.sides names lacks min_pause_s of frames all quiet_below_peak_db under the phrase's loudest (KEHOACH 3.11)."""
+    cut.sides names lacks min_pause_s of frames all quiet_below_peak_db under the phrase's loudest; after a phrase whose
+    quiet runs to the end of x, end_quiet_s of it is enough (KEHOACH 3.11)."""
     frame_s = spec["frame_s"]
     hop = round(frame_s * grid.SAMPLE_RATE_HZ)
     n = len(x) // hop
@@ -815,7 +838,8 @@ def pause_bounds(x: np.ndarray, span: tuple[float, float], spec: dict) -> tuple[
     reach = most - guard
     before = quiet_run(quiet, first - guard - 1, -1, reach)
     after = quiet_run(quiet, last + guard, 1, reach)
-    if (min(before, after) if spec["sides"] == "both" else after) < need:
+    need_after = round(spec["end_quiet_s"] / frame_s) if last + guard + after >= n else need
+    if after < need_after or (spec["sides"] == "both" and before < need):
         return None
     # soundfile reads a negative start from the end of the file: a phrase opening its sentence starts at 0.
     start = max(0, first - guard - (before if before == reach else before // 2))
@@ -845,7 +869,7 @@ def cut_sentences(job: Job, sentences: list[Path], tts: dict, device: dict, cach
     """Align the sentences in batches, cut each phrase said with a pause on the sides cut.sides names, where the aligner
     also sets it apart from its neighbours, keep every cut or, with cut.hear, those the checker hears as the phrase
     alone, then delete the sentences and every try."""
-    spec, rate = job.cfg["cut"], grid.SAMPLE_RATE_HZ
+    spec, rate = job.settings("cut"), grid.SAMPLE_RATE_HZ
     if spec["sides"] not in SIDES:
         raise ValueError(f"cut: sides is {spec['sides']!r}, none of {', '.join(SIDES)}")
     if spec["guard_s"] + spec["min_pause_s"] > spec["margin_s"]:
@@ -1005,7 +1029,7 @@ def listen(job: Job) -> str:
     """Copies of the kept clips for the owner to hear, pilot.listen_per_phrase of each phrase taken from source after
     source and matched to pilot.level_dbfs, into cache/listen/<name>/, with index.tsv; and per phrase the sentences
     cut, the clips kept, their sources, lengths, and the quiet each clip keeps before and after its phrase."""
-    spec, rule = job.cfg["pilot"], job.cfg["cut"]
+    spec, rule = job.settings("pilot"), job.settings("cut")
     rng = np.random.default_rng(spec["seed"])
     repo_of = {slug(s["repo"]): s["repo"] for s in job.spec["sources"]}
     records = [m for f in sorted((job.state / "cut").glob("*.jsonl")) for m in read_jsonl(f)]

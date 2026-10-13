@@ -23,9 +23,8 @@ pilot:                             # fetch --pilot, cut, listen: a sample of eve
   listen_per_phrase: 8             # kept clips copied to cache/listen/<extract>/, taken from source after source
   level_dbfs: -26.0                # the copies match this over the frames within cut.quiet_below_peak_db of the peak
   seed: 20261001
-cut:                               # a phrase said with a pause after it is cut, or with sides none every one (KEHOACH 3.11)
-  sides: after                     # sides that must pause: after, or both; both kept 1% of phrases (wake.md 6);
-                                   #   none cuts every aligned phrase, each clip marked paused or not (KEHOACH 3.11)
+cut:                               # only a phrase said with a pause after it is cut (KEHOACH 3.11)
+  sides: after                     # sides that must pause: after, or both; both kept 1% of phrases (wake.md 6)
   hear: false                      # PhoWhisper keeps a cut it hears as the phrase alone; off, text and aligner vouch
   frame_s: 0.01                    # level frames of the pause test
   guard_s: 0.03                    # next to each aligned bound, out of the test: the aligner's error, a consonant's breath
@@ -33,18 +32,8 @@ cut:                               # a phrase said with a pause after it is cut,
   margin_s: 0.15                   # most a clip keeps past each aligned bound; a shorter pause is cut in its middle
   quiet_below_peak_db: 20.0        # every frame of a pause at least this far under the phrase's loudest frame
   min_word_gap_s: 0.08             # least aligned gap to a pausing side's word: a weak onset passes the level test
+  end_quiet_s: 0.02                # quiet past the guard enough after a phrase ending its sentence: its file stops soon
   align_batch: 1500                # sentences per aligner run; its peak memory grows with it
-  trims_s:                         # sides none: seconds added to the aligned start and end, a cut each, tried in order
-    - [-0.03, 0.03]                #   with the checker, widest first: a neighbour's edge in a clip is heard
-    - [0.0, 0.03]
-    - [-0.03, 0.0]
-    - [0.0, 0.0]
-    - [0.03, 0.03]
-    - [0.03, 0.0]
-    - [0.0, -0.03]
-    - [0.06, 0.0]
-    - [0.03, -0.03]
-    - [0.06, -0.03]
 extracts:
   hf_extract:
     phrases:                       # matched by their northern reading, so "trợ lí" is "trợ lý"; chụp ảnh stays out,
@@ -107,8 +96,7 @@ extracts:
         manifest: manifest.jsonl.zst
         shards: shard-*.tar.zst
   hf_wake:                         # the wake word and a candidate, counted on hf_extract's sources
-    cut: {sides: none, hear: true} # every place the aligner finds them, heard alone (KEHOACH 3.11)
-    pilot: {listen_per_phrase: 40} # every pilot clip, for the owner to hear before the whole run
+    pilot: {per_phrase: 200, listen_per_phrase: 40}   # 2 to 7% of matches pause (wake.md 7): a dozen to hear
     phrases:
       - trợ lý
       - vừng ơi
@@ -148,7 +136,7 @@ extracts:
         shards: data/vi/train/{shard}.tar.gz
       - {kind: tsv_tar, repo: speechcolab/gigaspeech2, transcripts: data/vi/dev.tsv, shards: data/vi/dev.tar.gz}
       - {kind: tsv_tar, repo: speechcolab/gigaspeech2, transcripts: data/vi/test.tsv, shards: data/vi/test.tar.gz}
-      - {kind: yodas, repo: espnet/yodas2, hold: true, languages: [vi000, vi100, vi101]}
+      - {kind: yodas, repo: espnet/yodas2, fetch_gb: 100, languages: [vi000, vi100, vi101]}   # 369 of 947 matches
       - kind: manifest_tar
         repo: anhtunguyen98/vi-asr-youtube-1582h
         manifest: manifest.jsonl.zst
