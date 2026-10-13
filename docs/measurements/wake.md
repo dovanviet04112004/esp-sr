@@ -423,3 +423,38 @@ từ 19 kho, 25 phút cả tải, căn và cắt:
 - Chỗ của 13 mẩu: 5 ở cuối câu, 3 trước dấu câu, 5 giữa câu nhưng người đọc ngắt hơi thật. 2 mẩu cuối câu, lặng sau
   50 và 70 ms, chỉ qua được nhờ luật hết câu.
 - **Ước cho cả kho, nếu giữ tỉ lệ 7%:** 1 959 câu ngoài YODAS2 và 369 câu trong 100 GB YODAS2 cho chừng 160 mẩu.
+
+Chủ repo nghe 13 mẩu: chỉ 3 mẩu `thivux/phoaudiobook` nghe ổn, 10 mẩu kia nghe như chỉ có "lý". PhoWhisper nghe lại
+từng mẩu, đệm lặng hai đầu:
+
+| Mẩu | Lặng trước mốc đầu | 30–60 ms đầu mẩu, dưới đỉnh | PhoWhisper nghe |
+|---|---|---|---|
+| 3 mẩu `thivux` | 150–160 ms | −60 dB | "trợ lý" ×3 |
+| 10 mẩu kia | 30–70 ms | 0 đến −10 dB | đuôi từ trước + "trợ lý" ×5 ("có", "cám", "cổ", "bạn", "các đoàn"), "chợ lý", "xử lý", "trợ lý" ×3 |
+
+- **`sides: after` để mép đầu rơi vào đuôi từ trước:** không có quãng nghỉ trước cụm thì mẩu bắt đầu 30 ms trước mốc đầu
+  bộ căn đặt. Ở hai mẩu soi kỹ, mốc ấy còn sớm hơn chỗ khép miệng của "tr" 20–30 ms.
+- Mẩu nghe được là mẩu có lặng thật ở **cả hai** phía.
+
+**Cận trên của cắt vào chỗ khép miệng** (13/10). Tải lại đúng 191 câu ấy, căn lại (192 chỗ "trợ lý"). Mỗi mép cần một
+quãng ≥ 30 ms toàn khung dưới đỉnh cụm Q dB. Quãng trước cụm kết thúc trong khoảng 80 ms trước tới 100 ms sau mốc đầu;
+quãng sau cụm bắt đầu trong khoảng 20 ms trước tới 80 ms sau mốc cuối. Quãng ấy có thể là:
+- chỗ ngắt hơi;
+- chỗ khép miệng của "tr", hay của phụ âm tắc mở đầu từ sau;
+- đầu, cuối file.
+
+Mẩu bắt đầu và kết thúc giữa quãng ấy.
+
+| Hai mép | Mẩu | Kho | PhoWhisper nghe khác "trợ lý" |
+|---|---|---|---|
+| Ngắt hơi ≥ 80 ms cả hai phía (như 3 mẩu `thivux`) | 3 (1,6%) | 1 | 0 |
+| Q = 30 dB | 18 (9%) | 8 | 3: "chợ lý" / "chợ lí", cùng một kho |
+| 25 dB ≤ Q < 30 dB | 16 (8%) | 8 | 2: "chợ liệ", "chịu nghị" |
+| 20 dB ≤ Q < 25 dB | 20 (10%) | 10 | 5: "chợ liếc", "chợ ly", "chuyện ly", "triệu lý", "xử lý" |
+
+- **Nền ồn chặn phần lớn:** nền của câu (p5 mức khung) dưới đỉnh cụm 73 / 37 / 21 dB (p10 / p50 / p90). Ở câu ồn,
+  chỗ khép miệng không bao giờ xuống tới 25–30 dB.
+- 18 trong 192 chỗ "trợ lý" đứng đầu file; 7 trong số đó có quãng lặng trước đủ 30 ms ở mức 30 dB.
+- Từ sau mở bằng "c": 7/20 chỗ có quãng khép miệng đủ 30 ms ở mức 30 dB.
+- **Mốc đầu có khi sớm hơn chỗ khép miệng của "tr" 50 ms.** Cửa sổ chỉ tới 60 ms sau mốc đầu thì ở một câu bắt nhầm
+  chỗ khép miệng của "c" trong "có" đứng trước, và PhoWhisper nghe ra "có trợ lý". Nới tới 100 ms là hết.
