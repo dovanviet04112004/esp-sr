@@ -460,3 +460,17 @@ Mẩu bắt đầu và kết thúc giữa quãng ấy.
   chỗ khép miệng của "c" trong "có" đứng trước, và PhoWhisper nghe ra "có trợ lý". Nới tới 100 ms là hết.
 - **Chủ repo nghe ba mức:** 20 dB và 25 dB tệ. Ở 30 dB chỉ vài mẩu nghe tạm ổn, còn lại vẫn tệ. Cắt ở chỗ khép miệng
   không cứu được cụm nói liền trong câu.
+
+**Trần của kho Hugging Face theo luật sạch** (13/10): ngắt hơi thật ở cả hai phía, như 3 mẩu `thivux` nghe ổn.
+
+| Kho | "trợ lý" khi quét | Trong lần thử 3 | Ngắt hơi cả hai phía |
+|---|---|---|---|
+| `thivux/phoaudiobook` (sách nói, nhân vật gọi "Trợ lý, …") | 317 | 17 | 3 |
+| YODAS2, `gigaspeech2`, ba kho YouTube | 1 788 | 53 | 0 |
+| 14 kho còn lại | 793 | 122 | 0 |
+
+- Cả kho cho tối đa chừng 50 mẩu sạch, gần hết của một kho sách nói. Không đủ để học từ đánh thức.
+- Chủ repo dừng việc trích "trợ lý" từ Hugging Face ngày 13/10.
+- Bốn cách cắt giữa câu đều bị bác: mép rộng, bộ nghe chọn mép, chỉ ngắt hơi sau cụm, mép ở chỗ khép miệng.
+  Ở các kho này người nói hầu như không bao giờ ngắt hơi quanh "trợ lý". Đây là giới hạn của dữ liệu, không phải của
+  luật cắt.
