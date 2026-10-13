@@ -407,3 +407,19 @@ Chủ repo nghe và bác cả lô. Giữa câu, từ trước chạy sát vào "
   một nguyên âm, nghe như bị chặt.
 - **Bộ nghe không thấy lỗi này:** PhoWhisper vẫn đoán ra cụm nhờ ngữ cảnh.
 - Mẩu nghe được chỉ có ở chỗ người nói ngắt hơi, đúng như luật của `hf_extract`.
+
+**Cắt thử lần 3, luật ngắt hơi, hết câu tính là quãng nghỉ** (13/10, `affc8b1`, chỉ "trợ lý" từ `c7a977c`). 191 câu
+từ 19 kho, 25 phút cả tải, căn và cắt:
+
+| Bước | Chỗ "trợ lý" |
+|---|---|
+| Bộ căn tìm thấy | 192 |
+| Từ sau cách mốc cuối ≥ 80 ms | 32 |
+| Có quãng lặng sau cụm, hoặc lặng tới hết câu | 13 |
+| Giữ (`cut.hear` tắt) | 13 (7%), từ 5 kho |
+
+- Mẩu dài 0,56 / 0,65 / 0,88 s (p5 / p50 / p95).
+- Lặng giữ lại trước cụm 30 / 40 ms (p5 / p50), sau cụm 62 / 150 ms.
+- Chỗ của 13 mẩu: 5 ở cuối câu, 3 trước dấu câu, 5 giữa câu nhưng người đọc ngắt hơi thật. 2 mẩu cuối câu, lặng sau
+  50 và 70 ms, chỉ qua được nhờ luật hết câu.
+- **Ước cho cả kho, nếu giữ tỉ lệ 7%:** 1 959 câu ngoài YODAS2 và 369 câu trong 100 GB YODAS2 cho chừng 160 mẩu.
