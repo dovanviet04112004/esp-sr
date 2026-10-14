@@ -656,3 +656,6 @@ dùng được.
 - **Ngưỡng đổi ra cosine** với mẫu gần nhất, ước trên 24 cửa sổ của chủ repo qua chuỗi chip ngày 11/10: điểm z tăng
   ~400 ‰ mỗi 0,01 cosine. 2 người cần cosine ~0,78, 8 người ~0,80, thay vì ~0,80 và ~0,82 ở 1%. Lệnh của chủ repo
   thường 0,86–0,94, người lạ quanh 0,72.
+- **Nạp lên board B** (`make models-flash`, 14/10). Log khởi động in `threshold 1486 to 3020 thousandths for 1 to 8
+  voiceprints, model c3373e4e` và `2 voiceprints of this model`, nên hai mẫu đã đăng ký vẫn dùng được. Lần nạp ấy gieo
+  lại ngưỡng lệnh của ảnh, 200 / 0 / 60; ngưỡng của chủ repo đặt lại qua console thành 300 / 30 / 65535.
