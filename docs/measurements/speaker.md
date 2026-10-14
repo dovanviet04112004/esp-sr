@@ -632,3 +632,27 @@ Một người có mẫu giọng; giữ 1 m / 3 m:
   - p10, p20 trên cả cửa sổ.
   - Không cách nào vừa giữ người lạ lúc yên ở mức của một ngưỡng, vừa được hơn ~3 điểm ở một mức ồn.
   - p20 cả cửa sổ được 3,5 / 3,1 điểm ở 10 dB, nhưng lúc yên để lọt 1,17% người lạ.
+
+### 6.10 Ngưỡng ở 5% người lạ lọt (E11-T26, 14/10)
+
+Chủ repo chọn 5% thay 1% (KẾ HOẠCH §3.17). `make speaker-deploy RUN=artifacts/speaker/runs/20261010_5a45475-dirty_94e5a9
+ROW=kl` với `deploy.shares: [0.05]`, 23 phút trên CPU. `speaker.espdl` giữ nguyên từng byte, nên mẫu giọng đã đăng ký vẫn
+dùng được.
+
+| Người có mẫu | Ngưỡng (‰ z) | Chủ repo giữ 1 m / 3 m | Người đăng ký thêm giữ | Đúng người: chủ repo / người đăng ký thêm |
+|---|---|---|---|---|
+| 1 | 1486 | 98,9 / 97,5% | — | 100% / — |
+| 2 | 2100 | 98,7 / 97,5% | 44,8% | 99,7 / 92,5% |
+| 3 | 2430 | 98,5 / 97,5% | 58,8% | 99,3 / 87,8% |
+| 4 | 2640 | 98,3 / 97,4% | 43,0% | 99,0 / 83,0% |
+| 5 | 2691 | 98,3 / 97,4% | 43,8% | 98,8 / 83,1% |
+| 6 | 2846 | 98,2 / 97,4% | 39,3% | 98,6 / 80,5% |
+| 7 | 2882 | 98,2 / 97,4% | 37,9% | 98,5 / 73,4% |
+| 8 | 3020 | 98,0 / 97,3% | 36,3% | 98,2 / 77,7% |
+
+- Trùng cột 5% của §6.7.
+- **Cổng của ADR-0024 vẫn chặn dải ồn:** ở mọi số người, dải lúc yên để lọt 5,4–6,1% người lạ, quá 5%. Board dùng
+  một ngưỡng cho mọi mức ồn, như ở 1%.
+- **Ngưỡng đổi ra cosine** với mẫu gần nhất, ước trên 24 cửa sổ của chủ repo qua chuỗi chip ngày 11/10: điểm z tăng
+  ~400 ‰ mỗi 0,01 cosine. 2 người cần cosine ~0,78, 8 người ~0,80, thay vì ~0,80 và ~0,82 ở 1%. Lệnh của chủ repo
+  thường 0,86–0,94, người lạ quanh 0,72.
