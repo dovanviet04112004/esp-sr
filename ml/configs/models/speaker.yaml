@@ -30,7 +30,7 @@ esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches aroun
   - channel_scales_as_mul          # the stage sums' per-channel weights as Muls, not depthwise convolutions
 deploy:                            # make speaker-deploy RUN= ROW= (E11-T26, KEHOACH 3.17)
   weights_in_flash: true           # the image entry stays in flash; PSRAM holds the tensors only (KEHOACH 6.6)
-  shares: [0.01, 0.05]             # impostors passing: the first, unless a distance then keeps under keep_min
+  shares: [0.05]                   # impostors passing: the first, unless a distance then keeps under keep_min (KEHOACH 3.17)
   keep_min: 0.95                   # accepted commands kept at each distance, its sessions pooled
   cohort_top: 100                  # cohort rows AS-norm averages over at each side (ADR-0023)
   noise:                           # the noisier bins' material (ADR-0024): scenes/device.yaml's pools
