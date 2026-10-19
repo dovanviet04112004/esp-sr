@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import scipy.signal
 
-from srpipe.dsp.afe import agc, balance, chain, doa, gsc, hpf, ns_omlsa, vad
+from srpipe.dsp.afe import agc, balance, bss, chain, doa, gsc, hpf, ns_omlsa, vad
 from srpipe.dsp.spec import mel, pitch, spk_fbank, stft
 from srpipe.generated import afe, array, grid, listen
 from srpipe.golden.gold import write_gold
@@ -50,6 +50,7 @@ DOA_HOPS = 64
 DOA_SILENT_HOPS = 16
 GSC_HOPS = 64
 GSC_LEARN_HOPS = 16
+BSS_JITTER_STEPS = 2  # doa's grid steps an angle wanders off its talker
 PITCH_HOPS = 96
 PITCH_WINDOW_HOPS = 300  # past ballast_window_s: the ring of the ballast turns
 PITCH_RESET_HOP = 60
@@ -892,6 +893,127 @@ def emit_gsc(root: Path) -> list[Path]:
     return written
 
 
+BSS_FIELDS = (
+    "mode",
+    "keep_rule",
+    "keep_deg",
+    "gate_slope",
+    "conf_min",
+    "seats_max",
+    "decision_s",
+    "recheck_s",
+    "first_speech_s",
+    "kmeans_rounds",
+    "confirm",
+    "occupancy_min",
+    "valley_max",
+    "valley_width",
+    "min_gap",
+    "boundary_share_min",
+    "boundary_follow",
+    "track_tau_s",
+    "track_gate",
+    "seat_forget_s",
+    "update_every_hops",
+    "spacing_m",
+    "speed_of_sound_m_s",
+)
+
+
+def bss_config(**over) -> bss.BssConfig:
+    """The contract's bss with windows short enough for a few hundred hops, every float as float32 holds it."""
+    short = {"decision_s": 2.0, "recheck_s": 0.25, "first_speech_s": 0.5, "seat_forget_s": 3.0} | over
+    cfg = replace(bss.BssConfig(), **short)
+    return replace(
+        cfg, **{f: float(np.float32(getattr(cfg, f))) for f in BSS_FIELDS if isinstance(getattr(cfg, f), float)}
+    )
+
+
+def bss_track(rng: np.random.Generator, plan: list[tuple[int, float | None]], conf_low: int = 20):
+    """doa as the chain runs it, per hop: (angle, confidence, searched) over segments of a talker at an angle, or of
+    silence, None, where doa neither searches nor moves; it searches every other hop and reads -1 until it has."""
+    angle, conf, searched = [], [], []
+    held, held_conf = -1, 0
+    step = int(afe.DOA_GRID_STEP_DEG)
+    for hops, base in plan:
+        for _ in range(hops):
+            h = len(angle)
+            look = base is not None and h % afe.DOA_UPDATE_EVERY_HOPS == 0
+            if look:
+                wander = int(rng.integers(-BSS_JITTER_STEPS, BSS_JITTER_STEPS + 1)) * step
+                held = int(np.clip(round(base / step) * step + wander, 0, 180))
+                held_conf = int(rng.integers(conf_low, 201))
+            angle.append(held)
+            conf.append(held_conf)
+            searched.append(look)
+    return np.array(angle, dtype=np.int32), np.array(conf, dtype=np.uint8), np.array(searched, dtype=bool)
+
+
+def bss_case(x0: np.ndarray, x1: np.ndarray, track: tuple, cfg: bss.BssConfig) -> dict[str, np.ndarray]:
+    """One pair of bins every hop, doa per hop and the configuration; the gate, seats and directions after each hop,
+    and both outputs of the last."""
+    angle, conf, searched = track
+    separator = bss.Bss(cfg)
+    gate, seats, dirs = [], [], []
+    for h in range(len(angle)):
+        y0, y1 = separator.process(x0, x1, int(angle[h]), int(conf[h]), bool(searched[h]))
+        gate.append(separator.gate)
+        seats.append(separator.seats)
+        dirs.append(separator.directions())
+    return {
+        "config": np.array([getattr(cfg, f) for f in BSS_FIELDS], dtype=np.float32),
+        "bins0": _pairs(x0[None]),
+        "bins1": _pairs(x1[None]),
+        "angle": angle,
+        "confidence": conf,
+        "searched": searched.astype(np.uint8),
+        "gate": np.array(gate, dtype=np.float32),
+        "seats": np.array(seats, dtype=np.uint8),
+        "directions": np.array(dirs, dtype=np.int32),
+        "out0": _pairs(y0[None]),
+        "out1": _pairs(y1[None]),
+    }
+
+
+def _bss_inputs(rng: np.random.Generator) -> list[tuple[tuple, bss.BssConfig]]:
+    """(doa per hop, configuration): split at broadside with talkers at 48 and 130 deg; learnt seats for the same two;
+    three seats kept by most updates, two of them falling silent until forgotten; two talkers on one side, 40 and 76
+    deg, kept at 76, low confidences left out."""
+    turns = [(10, None), (100, 48.0), (100, 130.0), (100, 48.0), (100, 130.0)]
+    return [
+        (bss_track(rng, [(10, None), (80, 48.0), (80, 130.0), (60, None), (80, 48.0)]), bss_config()),
+        (bss_track(rng, turns), bss_config(mode=bss.MODE_LEARN)),
+        (
+            bss_track(rng, [(80, 30.0), (80, 90.0), (80, 150.0), (60, 30.0), (60, 90.0), (260, 150.0)]),
+            bss_config(mode=bss.MODE_LEARN, seats_max=3, keep_rule=bss.KEEP_MOST),
+        ),
+        (
+            bss_track(rng, [(100, 40.0), (100, 76.0), (100, 40.0), (100, 76.0)]),
+            bss_config(mode=bss.MODE_LEARN, keep_deg=76.0, conf_min=60),
+        ),
+    ]
+
+
+def emit_bss(root: Path) -> list[Path]:
+    """Four cases, then a negative control: the one-side case's gates as the broadside split gives them."""
+    rng = np.random.default_rng(SEED + 12)
+    x0 = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
+    x1 = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
+    written = []
+    cases = _bss_inputs(rng)
+    for index, (track, cfg) in enumerate(cases):
+        path = root / "bss" / f"case_{index:03d}.gold"
+        write_gold(path, bss_case(x0, x1, track, cfg))
+        written.append(path)
+    track, cfg = cases[3]
+    negative = bss_case(x0, x1, track, cfg)
+    negative["gate"] = bss_case(x0, x1, track, replace(cfg, mode=bss.MODE_FIXED))["gate"]
+    path = root / "bss" / "case_neg_000.gold"
+    write_gold(path, negative)
+    written.append(path)
+    return written
+
+
 def pitch_config() -> pitch.PitchConfig:
     """The pitch settings the models read, from the features config (KEHOACH 3.11)."""
     return pitch.PitchConfig(**listen.PITCH)
@@ -904,7 +1026,7 @@ def main() -> int:
     emitted = emit_stft(args.out) + emit_mel(args.out) + emit_spk_fbank(args.out)
     emitted += emit_chain(args.out) + emit_chain_modules(args.out)
     emitted += emit_hpf(args.out) + emit_balance(args.out) + emit_vad(args.out) + emit_agc(args.out)
-    emitted += emit_doa(args.out) + emit_gsc(args.out) + emit_pitch(args.out, pitch_config())
+    emitted += emit_doa(args.out) + emit_gsc(args.out) + emit_bss(args.out) + emit_pitch(args.out, pitch_config())
     for path in emitted + emit_ns_omlsa(args.out):
         print(path.relative_to(args.out) if path.is_relative_to(args.out) else path)
     return 0

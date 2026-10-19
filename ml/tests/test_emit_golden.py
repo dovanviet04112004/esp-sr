@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import yaml
 
 from srpipe.dsp import emit_golden
-from srpipe.dsp.afe import balance, chain, doa, gsc, ns_omlsa
+from srpipe.dsp.afe import balance, bss, chain, doa, gsc, ns_omlsa
 from srpipe.dsp.spec import mel, pitch, spk_fbank, stft
 from srpipe.generated import afe, grid
 from srpipe.golden.gold import read_gold
@@ -248,6 +249,31 @@ def test_the_gsc_negative_control_comes_from_weights_that_never_learn() -> None:
 
     np.testing.assert_array_equal(case["out"], output(learn=False))
     assert np.abs(case["out"] - output(learn=True)).max() > 1.0
+
+
+def test_committed_bss_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_bss(tmp_path):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
+
+
+def test_the_bss_negative_control_has_the_broadside_split_gates() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "bss" / "case_neg_000.gold")
+    cfg = bss.BssConfig(
+        **{f: type(getattr(bss.BssConfig(), f))(v) for f, v in zip(emit_golden.BSS_FIELDS, case["config"], strict=True)}
+    )
+    x = [case[f"bins{m}"][0, :, 0] + 1j * case[f"bins{m}"][0, :, 1] for m in range(2)]
+
+    def gates(mode: int) -> np.ndarray:
+        separator = bss.Bss(replace(cfg, mode=mode))
+        out = []
+        for a, c, s in zip(case["angle"], case["confidence"], case["searched"], strict=True):
+            separator.process(x[0], x[1], int(a), int(c), bool(s))
+            out.append(separator.gate)
+        return np.array(out, dtype=np.float32)
+
+    np.testing.assert_array_equal(case["gate"], gates(bss.MODE_FIXED))
+    assert np.abs(case["gate"] - gates(bss.MODE_LEARN)).max() == 1.0
 
 
 def test_committed_pitch_cases_match_a_fresh_emit(tmp_path: Path) -> None:

@@ -1,0 +1,19 @@
+# C dsp_afe bss against srpipe.dsp.afe.bss (KEHOACH 3.8, E8-T3). Both count, cluster, follow and gate in float32 in the
+# same order; delays and gates come from double series of basic arithmetic (ADR-0006): the gate, the seats and the
+# directions match after every hop, and both outputs of the last. case_neg_* has the broadside split's gates.
+tensors:
+  gate:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  seats:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  directions:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  out0:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  out1:
+    max_abs: 0.0
+    min_snr_db: 0.0
