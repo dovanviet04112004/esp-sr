@@ -6,12 +6,13 @@ set(COMPONENTS main dsp_spec dsp_afe lang_vi sys_storage test_report)
 # One board: test apps take clock, cache, PSRAM and console settings from the firmware's own file.
 # Parity checks the code as it ships, so the compiler settings are those of bench, which are prod's (KEHOACH 3.14).
 set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/../../sdkconfig.defaults.esp32s3"
-                       "${CMAKE_CURRENT_LIST_DIR}/../../sdkconfig.bench"
-                       "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults")
+                       "${CMAKE_CURRENT_LIST_DIR}/../../sdkconfig.bench")
 # idf.py -D PARITY_PROFILE=modules turns on the modules the product turns on (firmware/sdkconfig.afe).
 if(PARITY_PROFILE STREQUAL "modules")
     list(APPEND SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/../../sdkconfig.afe")
 endif()
+# The app's own defaults go last, so the modules it adds (bss) are not switched off by sdkconfig.afe.
+list(APPEND SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(parity)
