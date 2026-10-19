@@ -1,14 +1,15 @@
 """The spatial stage scored on the labelled scenes of room.py (KEHOACH 3.6-3.8, 3.15).
 
-doa: searched after the talker's labelled speech, and through the chain's own vad; scored against the talker's angle by
-condition, RT60 and region. gsc: steered by the label, by doa, or by the label off by a set error, learning after the
-talker's silent hops; both sources' images pass the same weights, so SIR gained and talker loss are exact.
+doa against the talker's angle by condition, RT60 and region; gsc's SIR gained and talker loss, exact as both
+images pass the same weights; bss on two talkers in turns, the scenes' talker then interferer and board B's talkers
+A and B, exact as the gate is one factor a hop.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor
@@ -19,7 +20,7 @@ import numpy as np
 
 from srpipe.core.audio_io import read_wav
 from srpipe.core.config import data_paths, load_config
-from srpipe.dsp.afe import doa, gsc, hpf
+from srpipe.dsp.afe import bss, doa, gsc, hpf
 from srpipe.dsp.afe.chain import PCM_FULL_SCALE, PCM_MAX, PCM_MIN, Chain, ChainConfig
 from srpipe.dsp.spec.stft import Stft
 from srpipe.generated import afe, array, grid
@@ -227,9 +228,127 @@ def gsc_tables(scenes: list[SceneGsc]) -> str:
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class TurnsBss:
+    """Per run of one item in turns: the kept talker's level, the other talker's leak overall and from settle_s after
+    each change of talker, all in dB against their own input, and the seconds LEARN took to split, None if never."""
+
+    item: str
+    group: tuple
+    runs: dict[str, tuple[float, float, float, float | None]]
+
+
+def turn_gates(pcm: np.ndarray, cfg: bss.BssConfig) -> tuple[np.ndarray, float | None]:
+    """The gate bss keeps per hop in the chain with bss as its spatial stage, and when its seats first split."""
+    chain = Chain("MM", ChainConfig(modules=CHAIN_MODULES, spatial="bss", bss=cfg))
+    n_hops = len(pcm) // HOP
+    gates, split = np.empty(n_hops), None
+    for h in range(n_hops):
+        chain.process(pcm[h * HOP : (h + 1) * HOP].reshape(-1))
+        gates[h] = chain.separator.gate
+        if split is None and chain.separator.seats >= 2:
+            split = h * HOP / grid.SAMPLE_RATE_HZ
+    return gates, split
+
+
+def kept_db(gates: np.ndarray, bins: list[np.ndarray], hops: np.ndarray) -> float:
+    """dB of a talker's plain mean that the gates pass over the hops selected."""
+    power = np.sum(np.abs(0.5 * (bins[0][hops] + bins[1][hops])) ** 2, axis=1, dtype=np.float64)
+    return 10 * math.log10(max(float(np.sum(gates[hops] ** 2 * power)), 1e-30) / max(float(power.sum()), 1e-30))
+
+
+def turns_runs(parts: list[np.ndarray], owner: list[int], kept: int, keep_deg: float, variants: dict, settle_s: float):
+    """Each run over talkers taking turns: part i of parts, spoken by owner[i]; talker kept is kept, at keep_deg."""
+    starts = np.cumsum([0] + [len(p) // HOP for p in parts])
+    n_hops = int(starts[-1])
+    total = np.concatenate([p[: (len(p) // HOP) * HOP] for p in parts])
+    talker_of = np.concatenate([np.full(len(p) // HOP, o) for p, o in zip(parts, owner, strict=True)])
+    since = np.concatenate([np.arange(len(p) // HOP) for p in parts]) * HOP / grid.SAMPLE_RATE_HZ
+    pcm = np.clip(np.rint(total * PCM_FULL_SCALE), PCM_MIN, PCM_MAX).astype(np.int16)
+    comps = {}
+    for who in set(owner):
+        alone = np.concatenate([p if o == who else np.zeros_like(p) for p, o in zip(parts, owner, strict=True)])
+        comps[who] = component_bins(alone, n_hops)
+    other = [o for o in comps if o != kept]
+    runs = {}
+    for name, cfg in variants.items():
+        gates, split = turn_gates(pcm, replace(cfg, keep_deg=keep_deg))
+        mine, theirs = talker_of == kept, np.isin(talker_of, other)
+        leak = [kept_db(gates, comps[o], theirs & (talker_of == o)) for o in other]
+        settled = [kept_db(gates, comps[o], (talker_of == o) & (since >= settle_s)) for o in other]
+        runs[name] = (kept_db(gates, comps[kept], mine), max(leak), max(settled), split)
+    return runs
+
+
+def scene_bss(job: tuple[Path, dict, float]) -> TurnsBss | None:
+    """A scene whose interferer talks: its talker's image, then its interferer's, the talker kept at its label."""
+    folder, variants, settle_s = job
+    labels = json.loads((folder / "labels.json").read_text(encoding="utf-8"))
+    if (labels.get("interferer") or {}).get("kind") != "talker":
+        return None
+    talker, _ = read_wav(folder / "talker.wav")
+    interferer, _ = read_wav(folder / "interferer.wav")
+    a, b = labels["talker"]["angle_deg"], labels["interferer"]["angle_deg"]
+    side = "two sides" if (a - 90.0) * (b - 90.0) < 0 else "one side"
+    runs = turns_runs([talker, interferer], [0, 1], 0, a, variants, settle_s)
+    return TurnsBss(folder.name, (labels["rt60_target_s"], side), runs)
+
+
+def tinyai_bss(raw: Path, spec: dict, variants: dict) -> list[TurnsBss]:
+    """Board B's talker A and talker B alone, cut into turns of turn_s, each kept in turn at the side it sits on."""
+    a, _ = read_wav(raw / spec["tinyai"] / "A_trai_1.wav")
+    b, _ = read_wav(raw / spec["tinyai"] / "B_phai_1.wav")
+    turn = int(spec["turn_s"] * grid.SAMPLE_RATE_HZ)
+    parts, owner = [], []
+    for k in range(min(len(a), len(b)) // turn):
+        parts += [a[k * turn : (k + 1) * turn], b[k * turn : (k + 1) * turn]]
+        owner += [0, 1]
+    sides = {0: ("talker A kept", 45.0), 1: ("talker B kept", 135.0)}
+    return [
+        TurnsBss(name, (name,), turns_runs(parts, owner, kept, deg, variants, spec["settle_s"]))
+        for kept, (name, deg) in sides.items()
+    ]
+
+
+def bss_tables(tinyai: list[TurnsBss], scenes: list[TurnsBss], settle_s: float) -> str:
+    """Kept / leaked / leaked after settle_s in dB, and LEARN's split: board B's turns, then scenes by RT60, side."""
+    runs = list(tinyai[0].runs)
+    head = f"kept dB / other leaked dB / leaked from {settle_s:g} s after a change dB / split s"
+    lines = ["", "Board B, talkers A and B in turns: " + head, "| Item | " + " | ".join(runs) + " |"]
+    lines.append("|---|" + "---|" * len(runs))
+
+    def cell(values: list[tuple]) -> str:
+        splits = [v[3] for v in values if v[3] is not None]
+        split = f"{np.median(splits):.1f} ({len(splits)}/{len(values)})" if splits else "—"
+        return (
+            f"{np.mean([v[0] for v in values]):+.2f} / {np.mean([v[1] for v in values]):+.1f} / "
+            f"{np.mean([v[2] for v in values]):+.1f} / {split}"
+        )
+
+    for t in tinyai:
+        lines.append(f"| {t.item} | " + " | ".join(cell([t.runs[r]]) for r in runs) + " |")
+    groups = defaultdict(list)
+    for s in scenes:
+        groups[s.group].append(s)
+    lines += [
+        "",
+        "Scenes, talker then interferer, mean over scenes: " + head,
+        "| RT60, sides | " + " | ".join(runs) + " |",
+    ]
+    lines.append("|---|" + "---|" * len(runs))
+    for key in sorted(groups):
+        group = groups[key]
+        lines.append(
+            f"| {key[0]:g} s, {key[1]} ({len(group)}) | "
+            + " | ".join(cell([s.runs[r] for s in group]) for r in runs)
+            + " |"
+        )
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("block", choices=["doa", "gsc"])
+    parser.add_argument("block", choices=["doa", "gsc", "bss"])
     parser.add_argument("--workers", type=int, default=12)
     parser.add_argument("overrides", nargs="*", help="a.b=value overrides of configs/afe/<block>.yaml")
     args = parser.parse_args(argv)
@@ -241,6 +360,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.block == "doa":
             variants = doa_variants(spec)
             print(doa_tables(list(pool.map(score_scene, [(f, variants, scene_cfg) for f in folders])), spec))
+        elif args.block == "bss":
+            variants = {name: replace(bss.BssConfig(), **o) for name, o in spec["variants"].items()}
+            jobs = [(f, variants, spec["settle_s"]) for f in folders]
+            scenes = [s for s in pool.map(scene_bss, jobs) if s is not None]
+            print(bss_tables(tinyai_bss(data_paths()["raw"], spec, variants), scenes, spec["settle_s"]))
         else:
             variants = {PRODUCT: gsc.GscConfig()} | {
                 name: replace(gsc.GscConfig(), **o) for name, o in spec["variants"].items()

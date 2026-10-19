@@ -145,6 +145,9 @@ eval-ns: ## Score the ns floor on VIVOS scenes: noise and speech lost, SNR gaine
 eval-doa: ## Score doa on the labelled standard scenes by band, condition and region
 	$(ML) python -m srpipe.scenes.spatial doa --workers 16
 
+eval-bss: ## Score bss on board B's talkers and the standard scenes' talkers in turns, by RT60 and side (E8-T3)
+	$(ML) python -m srpipe.scenes.spatial bss --workers 16
+
 eval-pitch: ## Measure the pitch mirror against Kaldi itself on VIVOS test, on the CPU
 	$(ML_CPU) python -m srpipe.metrics.pitch
 
