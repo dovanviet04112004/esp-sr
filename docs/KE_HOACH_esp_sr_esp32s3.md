@@ -127,7 +127,7 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | Cảnh dựng bằng `pyroomacoustics` | `doa` `gsc` `bss` `ns`, đường mô phỏng board | không giới hạn | của dự án | vật liệu **có nhãn** cho mọi khối không gian (§4.4) |
 | Tiếng tổng hợp bằng TTS trên máy tính (`srpipe/tts/`, §4.4) | **`wake` dương — nguồn chính**, cụm gần âm cho âm bản; dương, cụm gần âm và nửa lệnh của `command` (§3.12); **tiếng nguồn của `synth`** (§3.13) | không giới hạn, nhiều giọng | theo giấy phép mô hình TTS dùng, ghi ở `DU_LIEU.md` | **không bao giờ** vào tập thử |
 | Thu qua chính board | tập thử của `wake` và `command`, âm bản gần âm; nhiễu phòng; tập học khi cần tiếng thật | vài người nói, ≥ 2 phòng (E11-T6) | của dự án, có phiếu đồng ý (§1.4) | nguồn **duy nhất** đúng miền thiết bị |
-| Bản thu hai kênh của repo `tinyai-signal`, dự án trước của chủ dự án, trên cùng board B | bàn so làm sạch (§3.16), **không vào split nào** | 6 tệp, ~1,5 phút: hai người nói luân phiên, đè nhau, từng người một mình, giọng cùng loa nhạc, và đầu ra chuỗi lọc của dự án ấy | của chủ dự án; tiếng người, không vào git | chép tay một lần vào `raw/device/tinyai/`, manifest có sha256 |
+| Bản thu hai kênh của repo `tinyai-signal`, dự án trước của chủ dự án, trên cùng board B | bàn so làm sạch (§3.16) và thước của `bss` (§3.8), **không vào split nào** | 6 tệp, ~1,5 phút: hai người nói luân phiên, đè nhau, từng người một mình, giọng cùng loa nhạc, và đầu ra chuỗi lọc của dự án ấy | của chủ dự án; tiếng người, không vào git | chép tay một lần vào `raw/device/tinyai/`, manifest có sha256 |
 
 **Sàng lọc trước mọi lần dùng** (`srpipe/core/screen.py`, luật ở `configs/common/screen.yaml`, `make screen`). Kho
 công khai có mẩu hỏng: FPT có hàng trăm mẩu câm hoàn toàn mà vẫn kèm lời, và một mẩu như thế dạy mô hình gắn chữ vào
@@ -463,7 +463,7 @@ flowchart TB
     F["<b>doa</b><br/>GCC-PHAT, dò lưới góc"] --> G
     E --> G
     G{"Kconfig<br/>DSP_AFE_SPATIAL"} -->|"gsc"| H1["<b>gsc</b><br/>lái theo DOA"]
-    G -->|"bss"| H2["<b>bss</b><br/>AuxIVA online 2×2"]
+    G -->|"bss"| H2["<b>bss</b><br/>cổng hướng theo ghế"]
     G -->|"none"| H3["<b>trộn trần</b><br/>trung bình hai kênh"]
     H1 --> I
     H2 --> I
@@ -504,7 +504,7 @@ vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đ
 | `aec` | thuần | `dsp_afe` | MDF chồng-lưu, bước học tự chỉnh, khử vọng dư | 8 phân đoạn × 256 = 128 ms đuôi | ~1,3 ms hai micro | E10-T4 |
 | `doa` | thuần | `dsp_afe` | GCC-PHAT trên phổ chéo đã làm trơn, dò lưới 2°, xoay pha dồn viết tay (ADR-0008) | dải 2–8 kHz | **641 µs đo** ở bước dò, 22 µs các bước khác | E8-T1 |
 | `gsc` | thuần | `dsp_afe` | chùm trễ và cộng, ma trận chặn, NLMS rò có điều khiển thích nghi, vòng viết tay (ADR-0009) | μ 0,05, rò 1e-4, trần 16 | **141 µs đo**; 485 µs ở bước đổi góc lái | E8-T2 |
-| `bss` | thuần | `dsp_afe` | AuxIVA online, cập nhật IP2 kín cho 2×2, chiếu ngược | quên α ứng τ 1 s | ~400 µs | E8-T3 |
+| `bss` | thuần | `dsp_afe` | cổng hướng theo ghế trên góc của `doa`: FIXED ranh giới 90°, LEARN phân cụm (`micarray` của `tinyai-signal`) | độ dốc 20 mỗi mẫu trễ, tối đa 2 ghế | vài chục µs 🔬 | E8-T3 |
 | `ns` sàn | thuần | `dsp_afe` | OM-LSA + IMCRA | gain sàn −12 dB | **1,69 ms đo** (đỉnh 1,88); FPU của S3 tốn 4–6 chu kỳ mỗi lệnh float, không chạy chồng | E9-T1 |
 | `ns` mạng `rnnoise` | **mô hình** | `ai_engine/src/ns_rnnoise/` | RNNoise-16k: RNNoise dựng lại cho 16 kHz | 18–22 dải | 4,8 ms int8 đo trên board B (E9-T10) | E9-T12 |
 | `ns` mạng `nsnet` | **mô hình** | `ai_engine/src/ns_nsnet/` | NSNet-16k: mạng theo vạch họ NSNet2, một gain sigmoid mỗi vạch | 256 vạch, GRU 2 × 144 (cỡ L) | 5,1 ms int8 đo trên board B (E9-T10), hơn `nsnet2` của ESP-SR 21%; chủ repo chọn L (ADR-0014) | E9-T12 |
@@ -658,35 +658,70 @@ của người nói; **cộng phép kiểm cố ý cho DOA sai ±20° và ±45°
 
 ### 3.8 `bss`
 
-**AuxIVA online (Taniguchi và cộng sự, 2014), cập nhật IP2 dạng kín cho trường hợp 2×2 (Ono, 2012),
-chiếu ngược về `ch0`.**
+**Cổng hướng theo ghế: mỗi bước, cả khung của trộn trần được giữ hay dìm theo hướng `doa` vừa dò, theo cách tách hai
+người của `micarray` trong `tinyai-signal` (module `separation`, commit `642e6e4`), dựng lại theo luật của repo này.**
+
+Hai micro cách 4,5 cm không tách được hai người **nói cùng lúc** theo từng vạch. `tinyai-signal` đo pha theo từng ô thời
+gian–tần số trên board B và ra kết quả âm. AuxIVA online, phương án trước của mục này, trên bản ghép hai người nói luân
+phiên của board B chỉ dìm người kia 1,4–2,1 dB: mỗi lúc chỉ có một nguồn nên ma trận hiệp phương sai suy biến
+(`measurements/afe/bss.md`). Cái hai micro biết chắc là **khung này đến từ hướng nào**, nên khối này nhân cả khung với
+một hệ số theo hướng ấy: người ở ghế giữ đi qua, người ở ghế khác bị dìm, phổ không méo.
 
 | Chốt | Giá trị | Vì sao |
 |---|---|---|
-| Bản online | ma trận hiệp phương sai có trọng số cập nhật mỗi khung với hệ số quên α, τ ≈ 1 s | AuxIVA gốc (Ono, 2011) lặp trên cả đoạn thu, không chạy dòng được |
-| Cập nhật | IP2: bài toán trị riêng tổng quát 2×2 giải kín, cập nhật cả hai hàng của ma trận tách một lượt | nhanh và hội tụ nhanh hơn IP1 ở đúng trường hợp hai nguồn hai micro, không cần bước học |
-| Mô hình nguồn | cầu Laplace, trọng số `1 / ‖yᵢ‖` trên mọi vạch | chính mô hình nối mọi vạch với nhau này là thứ **khử hoán vị giữa các dải** |
-| Chiếu ngược | nhân đường chéo của `W⁻¹` (nguyên lý méo tối thiểu) | tách mù không xác định được biên độ từng vạch; bỏ bước này là ra tiếng bị nhuộm màu |
-| Chọn luồng ra | **chốt bằng đo ở E8-T4**, ba ứng viên: (a) hướng của cột `W⁻¹` khớp `doa`; (b) chạy `wake` trên cả hai luồng; (c) luồng có xác suất `vad` cao hơn | (b) nhân đôi chi phí `wake`; (a) rẻ nhưng cần `doa` đúng |
+| Hướng | góc của `doa` (§3.6) ở mỗi bước nó dò lại, đổi ra trễ giữa hai micro `τ = τ_max·cos θ` mẫu, τ_max = d·fs/c = 2,10; lần dò có độ tin dưới `conf_min` thì bỏ; giữa hai lần dò cổng giữ nguyên | `doa` đã chạy trong chuỗi và chỉ dò khi có tiếng nói, nên hướng là của người nói. Trên bản thu board B, dải 2–8 kHz của nó cho hai người ở hai phía trễ ±1,4 mẫu, tách hẳn; bộ ước trễ riêng của `tinyai-signal` (300–3 800 Hz, cửa sổ 0,4 s) chỉ ra −0,8 / +0,6 mẫu và chồng lên nhau |
+| Cổng | ghế j, đánh số theo τ tăng dần, nhận `σ(2s(τ − b_{j−1})) − σ(2s(τ − b_j))`: σ là hàm logistic, `s` là `gate_slope` 20 mỗi mẫu trễ, `b` các ranh giới, hai đầu ±∞ | các cổng cộng lại đúng 1 nên hai lối ra bù nhau; 20 mỗi mẫu là độ dốc của `tinyai-signal`, cách ranh giới 0,1 mẫu đã qua 98% |
+| Lối ra | lối ra 0 là trộn trần (trung bình hai kênh) nhân cổng của ghế giữ, lối ra 1 là trộn trần nhân phần còn lại | trộn trần là đường gốc của §3.2, nên E8-T4 đo đúng phần cổng thêm vào |
+| FIXED, `mode` 0 (mặc định) | hai ghế, ranh giới b = 0 (90°, trục vuông góc của cặp micro); ghế giữ là phía chứa `keep_deg` | biết trước người ra lệnh ngồi phía nào thì tách ngay từ lần dò đầu |
+| LEARN, `mode` 1 | ghế phân cụm từ chính các lần dò, tối đa `seats_max` ghế; ghế giữ theo `keep_rule`: 0 là ghế có tâm gần `keep_deg` nhất, 1 là ghế có nhiều lần dò nhất trong cửa sổ | hai người ngồi cùng một phía của board, hay không biết trước ai ngồi đâu |
 
-**Chỗ TỔNG QUAN chưa đúng.** Hoán vị giữa các dải là điểm yếu của ICA từng vạch; IVA sinh ra để giải
-đúng nó. Cái IVA còn lại là **hoán vị toàn cục** — luồng số 1 là người hay nhiễu — và đó là lý do có
-dòng "chọn luồng ra" ở bảng trên.
+**LEARN** giữ histogram số lần dò rơi vào mỗi độ 0…180 trong `decision_s` giây tiếng nói gần nhất: vòng đệm các góc,
+góc vào thì cộng một, góc rời thì trừ một. Trên histogram ấy:
 
-**Giới hạn phải ghi:** tách miền tần số kém dần khi thời gian vang của phòng dài hơn nhiều so với
-cửa sổ (Araki và cộng sự, 2003). Cửa sổ 32 ms trong phòng RT60 300–600 ms là đúng vùng kém ấy. Hai
-micro cũng chỉ tách được hai nguồn điểm; nhiễu khuếch tán không phải nguồn điểm.
+- **Phân cụm** mỗi `recheck_s`, lần đầu ngay khi các lần dò phủ `first_speech_s` giây tiếng nói. K-means một chiều trên
+  τ, mỗi độ nặng bằng số đếm của nó, `kmeans_rounds` vòng, hạt giống ở các phân vị đều của histogram. Đi từ k = 2 lên
+  `seats_max`; nhận k khi mọi ghế giữ ít nhất `occupancy_min` số lần dò, mọi cặp kề cách nhau ít nhất `min_gap` mẫu, và
+  độ trũng giữa chúng dưới `valley_max`. Độ trũng là số lần dò trong ±`valley_width` khoảng cách quanh trung điểm, chia
+  trung bình hai số ấy quanh hai tâm. Dừng ở k đầu tiên hỏng.
+- **Nhận số ghế** lớn hơn số đang có khi `confirm` lần phân cụm liên tiếp cùng ra số ấy, và lấy luôn các tâm mới. Số ghế
+  **không giảm** theo phân cụm: một ghế chỉ bị bỏ khi `seat_forget_s` giây không có lần dò nào gán vào nó.
+- **Ranh giới** giữa hai ghế kề lệch khỏi trung điểm theo độ trải của hai cụm: cụm rộng đẩy ranh giới về phía cụm hẹp,
+  và mỗi ghế giữ ít nhất `boundary_share_min` khoảng cách. Khi đã tách, độ lệch ấy đi `boundary_follow` quãng mỗi lần
+  phân cụm lại.
+- **Theo vết**: mỗi lần dò gán cho ghế gần nhất nếu cách nó không quá `track_gate` mẫu; tâm ghế ấy dời về phía nó với
+  hằng thời gian `track_tau_s`, và hai tâm không gần nhau quá `min_gap`.
+- Trước khi có hai ghế, LEARN cắt như FIXED.
 
-Chi phí mỗi khung: 257 vạch × (hai ma trận 2×2 Hermit + trị riêng 2×2 + nhân tách) ≈ 40 k FLOP, cỡ
-400 µs 🔬.
+Ba chỗ hỏng `tinyai-signal` đo được ở chế độ học (báo cáo tuần 8 của nó), và cách khối này tránh:
 
-**Thước** (TỔNG QUAN V5.2.3): khớp bản tham chiếu `pyroomacoustics.bss.auxiva` trên cảnh dựng, có đối
-chứng âm; SIR, SDR theo RT60.
+| Chỗ hỏng ở `tinyai-signal` | Ở đây |
+|---|---|
+| chờ khoá nhanh nhất 10,4 s, bản thu người thật 22,4–37,4 s | cắt như FIXED tới khi có hai ghế; phân cụm lần đầu sau `first_speech_s` thay vì đợi đầy cửa sổ |
+| một người giữ lời quá 8 s là rớt về một người, phần còn lại của phiên không tách (0,0 dB) | số ghế không giảm theo phân cụm; ghế chỉ mất khi bỏ trống `seat_forget_s` |
+| hai người lệch mức 12 dB thì cổng mức loại hết khung của người nhỏ tiếng | không có cổng mức: mọi lần dò của `doa` đều tính, vì nó chỉ dò khi `vad` báo có tiếng |
 
-**So hai đường** (TỔNG QUAN V5.2.4) chạy cả `gsc`, `bss` và trộn trần trên **cùng vật liệu**, cùng
-thước, và thước quyết định là tỉ lệ bắt `wake` và đúng `command` trên tập thu qua board có nhiễu,
-không phải SI-SDR (§3.15). Thắng thì đường ấy thành mặc định của Kconfig; không đường nào hơn trộn
-trần thì giữ trộn trần và ghi đúng như vậy (Cửa 1).
+Phân cụm trên histogram 181 ô nên không tốn theo độ dài cửa sổ; `tinyai-signal` phân cụm cả vòng đệm 800 khung mỗi
+giây, và đỉnh một nhịp lên 2,9 ms.
+
+**Giới hạn phải ghi:**
+- hai người **nói đè** thì không tách (`tinyai-signal` đo kém trộn 5,45 dB trên khung đè);
+- nhạc, TV phát cùng lúc với lời chỉ bị dìm ở những khung nó lấn tiếng người;
+- hai người nối lời không nghỉ thì đầu mỗi lượt còn rò cỡ 0,5 s, vì `doa` làm trơn 0,2 s;
+- hai người cùng một phía thì FIXED không tách được.
+
+**Chi phí:** không thêm FFT hay dò lưới. Mỗi bước nhân 257 vạch với một hệ số; mỗi lần dò cập nhật histogram, theo vết
+và tính lại cổng; mỗi `recheck_s` phân cụm trên 181 ô. Hàm logistic tính bằng chuỗi lũy thừa trong double như bảng của
+các khối khác, nên C khớp bản soi gương từng bit; FIXED dựng sẵn bảng 181 góc lúc init. Cỡ vài chục µs mỗi bước 🔬, đo ở
+`bench_afe`.
+
+**Thước** (TỔNG QUAN V5.2.3): rò của người kia vào luồng của mình và phần mất của chính mình, cả bài và từ 0,5 s sau mỗi
+lần đổi người nói, trên hai vật liệu: bản ghép luân phiên từ bản thu một người của board B (`raw/device/tinyai`), và cảnh
+dựng `standard` có người gây nhiễu, ghép luân phiên ảnh của hai người, theo RT60. Kèm thời điểm LEARN tách, và bộ vàng có
+đối chứng âm cho C khớp bản soi gương từng bit.
+
+**So ba đường** (TỔNG QUAN V5.2.4) chạy cả `gsc`, `bss` và trộn trần trên **cùng vật liệu**, cùng thước, và thước quyết
+định là tỉ lệ bắt `wake` và đúng `command` trên tập thu qua board có nhiễu, không phải SI-SDR (§3.15). Thắng thì đường ấy
+thành mặc định của Kconfig; không đường nào hơn trộn trần thì giữ trộn trần và ghi đúng như vậy (Cửa 1).
 
 ### 3.9 `ns`
 
@@ -1597,7 +1632,8 @@ của `quant.yaml`. Mạng mẫu của E11-T10 dùng cùng cấu hình, vì nó 
 | `balance` | chênh biên độ và pha sau bù theo tần số |
 | `aec` | ERLE một bên nói; mức dìm tiếng người gần khi hai bên cùng nói |
 | `doa` | sai số góc trung bình; % khung trong ±10° |
-| `gsc` `bss` | cải thiện SIR, SDR, SI-SDR; méo người nói |
+| `gsc` | cải thiện SIR, SDR, SI-SDR; méo người nói |
+| `bss` | rò của người kia vào luồng của mình, phần mất của chính mình; thời điểm LEARN tách |
 | `ns` | SI-SDR, STOI, PESQ (giấy phép của bản cài ghi rõ trong `ml/`); điểm tự động không cần tiếng sạch |
 | `vad` | F1, tỉ lệ bỏ sót, tỉ lệ báo nhầm mức khung |
 | `agc` | phân bố mức ra, số lần cắt đỉnh |
@@ -3031,14 +3067,14 @@ trung bình ≤ 70%. Mọi ô là ước 🔬 lấy từ §3.3; `docs/measuremen
 | | | `speaker` b0 sau mỗi lệnh nhận được, khi đường chip bật (§3.17) | 100% trong ~1,2 s mỗi lệnh |
 | `balance` | 10 | `gui` + `mqtt` + `luong` | 2–5% |
 | `doa` (dò mỗi hai khung khi có tiếng; đo) | 641 | log-mel và cao độ mỗi bước, mọi trạng thái (đo) | ~14% |
-| `bss` (nặng hơn `gsc`) | 400 | | |
+| `gsc` (nặng hơn `bss`; đo, ở bước đổi góc lái) | 485 | | |
 | `ns` mạng thay sàn trong khe: RNNoise-16k 4 809, NSNet-16k L 5 054, đo trên board B (§3.9, ADR-0014) | 4 809–5 054 | | |
 | `istft` | 196 | | |
 | `vad` + `agc` | 80 | | |
 | chép vào `sb_stream` | 20 | | |
-| **Cộng, trường hợp nặng nhất** | **~8 100 µs ≈ 51%** | **Cộng, `LENH`** | **~53–66%** |
+| **Cộng, trường hợp nặng nhất** | **~8 200 µs ≈ 51%** | **Cộng, `LENH`** | **~53–66%** |
 
-Với NSNet-16k L, nhân 1 nhỉnh hơn mục tiêu trung bình 50% ở trường hợp nặng nhất, trong đó `aec` và `bss` còn là ước: E9-T7 đo, vượt thì `ns` lùi về NSNet-16k M hay S, học cùng lượt. Nhân 0 chật ở trạng thái `LENH`. Nếu số đo xác nhận điều đó thì thứ tự cắt là:
+Với NSNet-16k L, nhân 1 nhỉnh hơn mục tiêu trung bình 50% ở trường hợp nặng nhất, trong đó `aec` còn là ước: E9-T7 đo, vượt thì `ns` lùi về NSNet-16k M hay S, học cùng lượt. Nhân 0 chật ở trạng thái `LENH`. Nếu số đo xác nhận điều đó thì thứ tự cắt là:
 giảm tần suất `doa` và `telemetry` trong `LENH`, rồi thu nhỏ mạng `command` — không chuyển việc sang
 nhân 1.
 
@@ -3201,7 +3237,7 @@ TỔNG QUAN §7 ước ~97 KB và thiếu bốn khoản. Bảng ước lại �
 | Đệm DMA I2S RX: 8 khối × 256 mẫu × 2 khe × 4 B | 16 KB | 128 ms phủ một lần ghi flash (§5.5) |
 | Đệm DMA I2S TX: cùng khuôn | 16 KB | RX và TX căn theo khối |
 | Pool `q_frame`: 8 × 1,5 KB | 12 KB | |
-| `dsp_spec` + `dsp_afe` trừ `aec`: STFT hai kênh, `doa`, `bss`, `ns` sàn, `vad`, `agc` | ~50 KB | riêng `bss`: 257 vạch × hai ma trận trọng số 2×2 phức + ma trận tách ≈ 25 KB |
+| `dsp_spec` + `dsp_afe` trừ `aec`: STFT hai kênh, `doa`, `bss`, `ns` sàn, `vad`, `agc` | ~28 KB | riêng `bss`: vòng đệm góc, histogram 181 ô, bảng trễ và cổng 181 góc ≈ 3 KB |
 | `aec`: trọng số 2 × 8 × 257 phức + phổ tham chiếu 8 × 257 phức + đệm | ~55 KB | §3.5 |
 | Ngăn xếp task ứng dụng (§5.2, trừ `mqtt_task`) | ~41 KB | |
 | Wi-Fi + lwIP | 50–90 KB | tuỳ số đệm RX/TX trong sdkconfig |
