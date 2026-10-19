@@ -22,8 +22,27 @@ gsc:
   leakage: 0.0001
   weight_max: 16.0                  # norm cap of each bin's weight: past 16 the scenes gain < 0.1 dB (KEHOACH 3.7)
   power_floor: 1.0e-10              # added to the block's power before the NLMS division
-bss:
-  forget_tau_s: 1.0
+bss:                                # direction gate on doa's angle (KEHOACH 3.8), after tinyai-signal's micarray
+  mode: 0                           # 0 FIXED: two seats split at broadside; 1 LEARN: seats clustered from doa
+  keep_deg: 135.0                   # the kept talker: FIXED keeps the side of broadside holding it; LEARN, keep_rule 0
+  keep_rule: 0                      # LEARN: 0 the seat nearest keep_deg, 1 the seat that has had the most updates
+  gate_slope: 20.0                  # per sample of delay: the logistic gate's steepness at a boundary (tinyai-signal)
+  conf_min: 0                       # least doa confidence, 0..255, an update needs to count
+  seats_max: 2                      # LEARN: most seats told apart; tinyai-signal held 2 on 15/15 sessions, 3 on 10/15
+  decision_s: 8.0                   # LEARN: seconds of speech whose doa updates are clustered
+  recheck_s: 1.0                    # LEARN: between two clusterings
+  first_speech_s: 1.5               # LEARN: speech the updates cover before the first clustering
+  kmeans_rounds: 12
+  confirm: 2                        # LEARN: clusterings in a row agreeing on a larger seat count before it is taken
+  occupancy_min: 0.05               # LEARN: least share of the window's updates each seat holds
+  valley_max: 0.10                  # LEARN: count midway between two seats over their mean count at the centres
+  valley_width: 0.15                # LEARN: half-width of those counts, as a share of the two seats' gap
+  min_gap: 0.5                      # LEARN: least delay between two seats, samples
+  boundary_share_min: 0.2           # LEARN: least share of the gap the spread-weighted boundary leaves a seat
+  boundary_follow: 0.25             # LEARN: share of the way a split's boundary offset moves at each clustering
+  track_tau_s: 0.2                  # LEARN: a seat's centre follows its updates with this time constant
+  track_gate: 0.9                   # LEARN: an update farther than this from every seat, samples, moves none
+  seat_forget_s: 60.0               # LEARN: a seat no update has reached this long is dropped
 ns:
   floor_db: -12.0                     # seed of NVS afe/ns_floor_db: G_min of OM-LSA
   # OM-LSA with IMCRA (KEHOACH 3.9) as the author's omlsa.m of 2003: 'medium' non-stationarity, broadband decision,
