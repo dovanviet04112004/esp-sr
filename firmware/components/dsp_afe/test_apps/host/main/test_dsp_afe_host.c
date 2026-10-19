@@ -209,6 +209,8 @@ static void check_round_trip(const dsp_afe_config_t *cfg, const char *what)
 #endif
     const uint8_t n_channels = channels_of(cfg);
     const uint16_t want_flags = n_channels == MAX_CHANNELS ? DSP_AFE_FLAG_NO_REF : 0u;
+    // The twin channels sit at broadside, where bss's gate holds the mean at one half (KEHOACH 3.8).
+    const float spatial_gain = cfg->spatial == DSP_AFE_SPATIAL_BSS ? 0.5f : 1.0f;
     dsp_afe_config_t unit_ns = *cfg;
     unit_ns.ns = &kUnitNs;
     dsp_afe_t *afe = make(&unit_ns);
@@ -229,6 +231,9 @@ static void check_round_trip(const dsp_afe_config_t *cfg, const char *what)
             worst = err > worst ? err : worst;
         }
         expected_tone(hpf_mem, &hpf, h, previous);
+        for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
+            previous[i] *= spatial_gain;
+        }
     }
     char line[160];
     snprintf(line, sizeof(line),
@@ -493,16 +498,46 @@ static void check_module_shells(void)
     check(gsc_first && gsc_learnt,
           "gsc: zero weights give the steered mean, a learning hop changes the next; refuses a zero cap");
 
-    const dsp_afe_bss_config_t bss_cfg = {1.0f, GEN_ARRAY_SPACING_M, GEN_ARRAY_SPEED_OF_SOUND_M_S};
+    const dsp_afe_bss_config_t bss_cfg = {.mode = DSP_AFE_BSS_FIXED,
+                                          .keep_rule = DSP_AFE_BSS_KEEP_ANGLE,
+                                          .keep_deg = 135.0f,
+                                          .gate_slope = 20.0f,
+                                          .conf_min = 0,
+                                          .seats_max = 2,
+                                          .decision_s = 8.0f,
+                                          .recheck_s = 1.0f,
+                                          .first_speech_s = 1.5f,
+                                          .kmeans_rounds = 12,
+                                          .confirm = 2,
+                                          .occupancy_min = 0.05f,
+                                          .valley_max = 0.1f,
+                                          .valley_width = 0.15f,
+                                          .min_gap = 0.5f,
+                                          .boundary_share_min = 0.2f,
+                                          .boundary_follow = 0.25f,
+                                          .track_tau_s = 0.2f,
+                                          .track_gate = 0.9f,
+                                          .seat_forget_s = 60.0f,
+                                          .update_every_hops = 2,
+                                          .spacing_m = GEN_ARRAY_SPACING_M,
+                                          .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S};
+    dsp_afe_bss_config_t bss_bad = bss_cfg;
+    bss_bad.seats_max = 1;
     dsp_afe_bss_t *bss = NULL;
     int16_t angles[2] = {0, 0};
     bytes = dsp_afe_bss_workspace_bytes(&bss_cfg);
-    const bool bss_ok = dsp_afe_bss_init(&bss, &bss_cfg, region(bytes), bytes) == ESP_OK &&
-                        dsp_afe_bss_process(bss, x0, x1, y0, y1) == ESP_OK &&
-                        memcmp(y0, x0, sizeof(y0)) == 0 && memcmp(y1, x1, sizeof(y1)) == 0;
-    if (bss_ok) { dsp_afe_bss_directions(bss, angles); }
-    check(bss_ok && angles[0] == -1 && angles[1] == -1,
-          "bss shell: copies each microphone, directions unknown");
+    const bool bss_half = dsp_afe_bss_workspace_bytes(&bss_bad) == 0 &&
+                          dsp_afe_bss_init(&bss, &bss_cfg, region(bytes), bytes) == ESP_OK &&
+                          dsp_afe_bss_process(bss, x0, x1, 150, 200, false, y0, y1) == ESP_OK &&
+                          y0[7].re == 1.0f && y1[7].re == 1.0f;
+    const bool bss_kept = dsp_afe_bss_process(bss, x0, x1, 150, 200, true, y0, y1) == ESP_OK &&
+                          y0[7].re == 2.0f && y1[7].re == 0.0f;
+    const bool bss_gated = dsp_afe_bss_process(bss, x0, x1, 30, 200, true, y0, y1) == ESP_OK &&
+                           y0[7].re == 0.0f && y1[7].re == 2.0f;
+    if (bss_half) { dsp_afe_bss_directions(bss, angles); }
+    check(bss_half && bss_kept && bss_gated && angles[0] == -1 && angles[1] == -1,
+          "bss: half the mean until doa searches, keeps 150 deg and gates 30 deg for keep_deg 135, refuses "
+          "one seat");
 
     dsp_afe_ns_omlsa_config_t ns_cfg = {.floor_db = -12.0f};
     const dsp_afe_ns_ops_t *ns = dsp_afe_ns_omlsa_ops();

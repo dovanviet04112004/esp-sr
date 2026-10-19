@@ -63,6 +63,13 @@ struct dsp_afe_s {
 #if CONFIG_DSP_AFE_BSS_ENABLE
     dsp_afe_bss_t *bss;
 #endif
+#if CONFIG_DSP_AFE_BSS_ENABLE && CONFIG_DSP_AFE_VAD_ENABLE
+    dsp_afe_vad_t *vad_in; // on the microphones' mean, for doa under bss
+    void *vad_in_mem;
+    size_t vad_in_bytes;
+    float mics_mean[GEN_GRID_HOP_SAMPLES];
+    bool heard; // vad_in's raw decision of the last hop
+#endif
 #if CONFIG_DSP_AFE_VAD_ENABLE
     dsp_afe_vad_t *vad;
     void *vad_mem;
@@ -199,6 +206,37 @@ static void walk_doa(walker_t *w, dsp_afe_t *afe)
 #endif
 }
 
+#if CONFIG_DSP_AFE_BSS_ENABLE
+static dsp_afe_bss_config_t bss_config(void)
+{
+    return (dsp_afe_bss_config_t){
+        .mode = (dsp_afe_bss_mode_t)GEN_AFE_BSS_MODE,
+        .keep_rule = (dsp_afe_bss_keep_t)GEN_AFE_BSS_KEEP_RULE,
+        .keep_deg = GEN_AFE_BSS_KEEP_DEG,
+        .gate_slope = GEN_AFE_BSS_GATE_SLOPE,
+        .conf_min = GEN_AFE_BSS_CONF_MIN,
+        .seats_max = GEN_AFE_BSS_SEATS_MAX,
+        .decision_s = GEN_AFE_BSS_DECISION_S,
+        .recheck_s = GEN_AFE_BSS_RECHECK_S,
+        .first_speech_s = GEN_AFE_BSS_FIRST_SPEECH_S,
+        .kmeans_rounds = GEN_AFE_BSS_KMEANS_ROUNDS,
+        .confirm = GEN_AFE_BSS_CONFIRM,
+        .occupancy_min = GEN_AFE_BSS_OCCUPANCY_MIN,
+        .valley_max = GEN_AFE_BSS_VALLEY_MAX,
+        .valley_width = GEN_AFE_BSS_VALLEY_WIDTH,
+        .min_gap = GEN_AFE_BSS_MIN_GAP,
+        .boundary_share_min = GEN_AFE_BSS_BOUNDARY_SHARE_MIN,
+        .boundary_follow = GEN_AFE_BSS_BOUNDARY_FOLLOW,
+        .track_tau_s = GEN_AFE_BSS_TRACK_TAU_S,
+        .track_gate = GEN_AFE_BSS_TRACK_GATE,
+        .seat_forget_s = GEN_AFE_BSS_SEAT_FORGET_S,
+        .update_every_hops = GEN_AFE_DOA_UPDATE_EVERY_HOPS,
+        .spacing_m = GEN_ARRAY_SPACING_M,
+        .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
+    };
+}
+#endif
+
 static void walk_spatial(walker_t *w, dsp_afe_spatial_t spatial, dsp_afe_t *afe)
 {
     switch (spatial) {
@@ -221,12 +259,8 @@ static void walk_spatial(walker_t *w, dsp_afe_spatial_t spatial, dsp_afe_t *afe)
         return;
     }
     case DSP_AFE_SPATIAL_BSS: {
-#if CONFIG_DSP_AFE_BSS_ENABLE
-        const dsp_afe_bss_config_t cfg = {
-            .forget_tau_s = GEN_AFE_BSS_FORGET_TAU_S,
-            .spacing_m = GEN_ARRAY_SPACING_M,
-            .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
-        };
+#if CONFIG_DSP_AFE_BSS_ENABLE && CONFIG_DSP_AFE_DOA_ENABLE && CONFIG_DSP_AFE_VAD_ENABLE
+        const dsp_afe_bss_config_t cfg = bss_config();
         const size_t bytes = dsp_afe_bss_workspace_bytes(&cfg);
         void *mem = region(w, bytes);
         if (mem != NULL) { fail(w, dsp_afe_bss_init(&afe->bss, &cfg, mem, bytes)); }
@@ -287,6 +321,15 @@ static void walk_vad(walker_t *w, const dsp_afe_config_t *cfg, dsp_afe_t *afe)
         afe->vad_bytes = bytes;
         fail(w, dsp_afe_vad_init(&afe->vad, &vad, mem, bytes));
     }
+#if CONFIG_DSP_AFE_BSS_ENABLE
+    if (cfg->spatial != DSP_AFE_SPATIAL_BSS) { return; }
+    mem = region(w, bytes);
+    if (mem != NULL) {
+        afe->vad_in_mem = mem;
+        afe->vad_in_bytes = bytes;
+        fail(w, dsp_afe_vad_init(&afe->vad_in, &vad, mem, bytes));
+    }
+#endif
 #else
     (void)w;
     (void)cfg;
@@ -414,6 +457,35 @@ static void run_echo_stage(dsp_afe_t *afe, uint16_t *flags)
 #endif
 }
 
+#if CONFIG_DSP_AFE_DOA_ENABLE
+// Under bss, doa searches on a raw vad of the microphones' mean: the gate silences the other seat at vad
+// (KEHOACH 3.8).
+static bool heard_last(const dsp_afe_t *afe)
+{
+#if CONFIG_DSP_AFE_BSS_ENABLE && CONFIG_DSP_AFE_VAD_ENABLE
+    if (afe->cfg.spatial == DSP_AFE_SPATIAL_BSS) { return afe->heard; }
+#endif
+    return afe->last_vad;
+}
+
+static void hear_mics(dsp_afe_t *afe)
+{
+#if CONFIG_DSP_AFE_BSS_ENABLE && CONFIG_DSP_AFE_VAD_ENABLE
+    if (afe->cfg.spatial != DSP_AFE_SPATIAL_BSS) { return; }
+    for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
+        afe->mics_mean[i] = 0.5f * (afe->pcm[0][i] + afe->pcm[1][i]);
+    }
+    bool speech = false;
+    dsp_afe_vad_process(afe->vad_in, afe->mics_mean, &speech);
+    dsp_afe_vad_detail_t detail;
+    dsp_afe_vad_detail(afe->vad_in, &detail);
+    afe->heard = detail.raw;
+#else
+    (void)afe;
+#endif
+}
+#endif
+
 static dsp_spec_cplx_t *run_spatial_stage(dsp_afe_t *afe)
 {
     const dsp_spec_cplx_t *x0 = afe->bins[0];
@@ -423,7 +495,8 @@ static dsp_spec_cplx_t *run_spatial_stage(dsp_afe_t *afe)
     if (afe->cfg.calib != NULL) { dsp_afe_balance_apply(afe->calib.balance, afe->bins[1]); }
 #endif
 #if CONFIG_DSP_AFE_DOA_ENABLE
-    const bool update = afe->last_vad && afe->seq % GEN_AFE_DOA_UPDATE_EVERY_HOPS == 0;
+    const bool update = heard_last(afe) && afe->seq % GEN_AFE_DOA_UPDATE_EVERY_HOPS == 0;
+    hear_mics(afe);
     dsp_afe_doa_process(afe->doa, x0, x1, update, &afe->doa_result);
 #endif
     switch (afe->cfg.spatial) {
@@ -435,10 +508,10 @@ static dsp_spec_cplx_t *run_spatial_stage(dsp_afe_t *afe)
         return y;
     }
 #endif
-#if CONFIG_DSP_AFE_BSS_ENABLE
+#if CONFIG_DSP_AFE_BSS_ENABLE && CONFIG_DSP_AFE_DOA_ENABLE && CONFIG_DSP_AFE_VAD_ENABLE
     case DSP_AFE_SPATIAL_BSS:
-        // Output 0 stands in until E8-T4 chooses the talker's stream (KEHOACH 3.8).
-        dsp_afe_bss_process(afe->bss, x0, x1, y, afe->beam[1]);
+        dsp_afe_bss_process(afe->bss, x0, x1, afe->doa_result.angle_deg, afe->doa_result.confidence, update,
+                            y, afe->beam[1]);
         return y;
 #endif
     default:
@@ -602,6 +675,10 @@ void dsp_afe_reset(dsp_afe_t *afe)
     dsp_afe_agc_reset(afe->agc);
 #endif
     afe->last_vad = false;
+#if CONFIG_DSP_AFE_BSS_ENABLE && CONFIG_DSP_AFE_VAD_ENABLE
+    if (afe->vad_in != NULL) { dsp_afe_vad_reset(afe->vad_in); }
+    afe->heard = false;
+#endif
     afe->doa_result = (dsp_afe_doa_result_t){.angle_deg = ANGLE_UNKNOWN_DEG, .confidence = 0};
 }
 
@@ -610,6 +687,9 @@ void dsp_afe_resume(dsp_afe_t *afe)
     drop_samples(afe);
 #if CONFIG_DSP_AFE_VAD_ENABLE
     dsp_afe_vad_flush(afe->vad);
+#endif
+#if CONFIG_DSP_AFE_BSS_ENABLE && CONFIG_DSP_AFE_VAD_ENABLE
+    if (afe->vad_in != NULL) { dsp_afe_vad_flush(afe->vad_in); }
 #endif
 #if CONFIG_DSP_AFE_AGC_ENABLE
     dsp_afe_agc_flush(afe->agc);
@@ -633,7 +713,13 @@ esp_err_t dsp_afe_set_param(dsp_afe_t *afe, dsp_afe_param_t param, float value)
         afe->cfg.vad_aggressiveness = (uint8_t)value;
 #if CONFIG_DSP_AFE_VAD_ENABLE
         const dsp_afe_vad_config_t vad = vad_config(&afe->cfg);
-        return dsp_afe_vad_init(&afe->vad, &vad, afe->vad_mem, afe->vad_bytes);
+        esp_err_t err = dsp_afe_vad_init(&afe->vad, &vad, afe->vad_mem, afe->vad_bytes);
+#if CONFIG_DSP_AFE_BSS_ENABLE
+        if (err == ESP_OK && afe->vad_in != NULL) {
+            err = dsp_afe_vad_init(&afe->vad_in, &vad, afe->vad_in_mem, afe->vad_in_bytes);
+        }
+#endif
+        return err;
 #else
         return ESP_OK;
 #endif

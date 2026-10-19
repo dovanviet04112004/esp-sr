@@ -33,11 +33,12 @@ menu "dsp_afe"
             The file is a neutral shell until E8-T2.
 
     config DSP_AFE_BSS_ENABLE
-        bool "bss: online AuxIVA for two sources (KEHOACH 3.8)"
+        bool "bss: gate on doa's direction, seats split at broadside or clustered (KEHOACH 3.8)"
         default n
+        depends on DSP_AFE_DOA_ENABLE && DSP_AFE_VAD_ENABLE
         help
-            Adds src/bss.c to the build, for dsp_afe_config_t.spatial = DSP_AFE_SPATIAL_BSS.
-            The file is a neutral shell until E8-T3.
+            Adds src/bss.c to the build, for dsp_afe_config_t.spatial = DSP_AFE_SPATIAL_BSS. It gates on doa's
+            angle, and doa then searches on a second vad, of the microphones' mean, so both must be built.
 
     config DSP_AFE_NS_OMLSA_ENABLE
         bool "ns_omlsa: OM-LSA plus IMCRA floor of the ns slot (KEHOACH 3.9)"
