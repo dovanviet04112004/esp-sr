@@ -613,7 +613,7 @@ R(θ)  = Σₖ Re{ Φ[k]/|Φ[k]| · exp(j·ωₖ·d·cosθ / c) }   với k tron
 |---|---|---|
 | Dải dùng | **2–8 kHz** (193 vạch), chốt bằng đo ở E8-T1 (`afe/doa.md`) | dưới vài kHz trường vang khuếch tán giữa hai micro 4,5 cm còn kết hợp cao (sinc(kd) ≈ 0,9 ở 1 kHz) với pha 0, nên kéo góc về chính diện: dải 200 Hz – c/2d cho 4–12% khung trong ±10° ở hai đầu dàn trên cảnh dựng và lệch 35–75° trên bản thu board; trên tần số gập tiếng vang mất kết hợp, đỉnh ma của từng vạch không trùng nhau nên tổng trên dải vẫn một đỉnh. 2–8 kHz ngang hoặc hơn 200 Hz – 8 kHz ở mọi ô và rẻ hơn 23% |
 | Pha xoay | tính dồn: `exp(jωₖτ) = exp(jω₁τ)^k`, mỗi vạch một phép nhân phức; góc θ và 180° − θ chung một lượt vì trễ ngược dấu: `R(θ) = Σaₖcₖ − Σbₖsₖ`, `R(180°−θ) = Σaₖcₖ + Σbₖsₖ` | bảng cos/sin nửa lưới trên dải dùng (46 × 193 phức) là 71 KB RAM nội để gọi tích vô hướng của `esp-dsp`, chỉ nhanh hơn 1,7 lần ở bước dò; ở PSRAM thì trượt cache (ADR-0008) |
-| Khi nào cập nhật | khung trước có `vad = 1`, mỗi hai khung một lần | ngoài lúc nói, đỉnh là hướng của nhiễu |
+| Khi nào cập nhật | khung trước có `vad = 1`, mỗi hai khung một lần; khi `bss` là khối không gian, `vad` ấy là quyết định thô của `vad` thứ hai trên trung bình hai micro (§3.8) | ngoài lúc nói, đỉnh là hướng của nhiễu |
 | Ra | góc 0–180°; độ tin `255·(1 − trung bình/đỉnh)` của đáp ứng nâng về 0…1, tức `(R + K)/2K` với `K` số vạch có công suất | trước và sau không phân biệt được (§2.3); độ tin là một hàm tăng của tỉ số đỉnh trên trung bình, nằm sẵn trong 0…255 nên không cần thang riêng |
 
 Chi phí đo trên board B (`budget.md`): 91 góc × 193 vạch, **641 µs** mỗi lần dò, 22 µs gộp phổ chéo ở các bước khác; trạng
@@ -669,11 +669,11 @@ một hệ số theo hướng ấy: người ở ghế giữ đi qua, người �
 
 | Chốt | Giá trị | Vì sao |
 |---|---|---|
-| Hướng | góc của `doa` (§3.6) ở mỗi bước nó dò lại, đổi ra trễ giữa hai micro `τ = τ_max·cos θ` mẫu, τ_max = d·fs/c = 2,10; lần dò có độ tin dưới `conf_min` thì bỏ; giữa hai lần dò cổng giữ nguyên | `doa` đã chạy trong chuỗi và chỉ dò khi có tiếng nói, nên hướng là của người nói. Trên bản thu board B, dải 2–8 kHz của nó cho hai người ở hai phía trễ ±1,4 mẫu, tách hẳn; bộ ước trễ riêng của `tinyai-signal` (300–3 800 Hz, cửa sổ 0,4 s) chỉ ra −0,8 / +0,6 mẫu và chồng lên nhau |
+| Hướng | góc của `doa` (§3.6) ở mỗi bước nó dò lại, đổi ra trễ giữa hai micro `τ = τ_max·cos θ` mẫu, τ_max = d·fs/c = 2,10; lần dò có độ tin dưới `conf_min` thì bỏ; giữa hai lần dò cổng giữ nguyên. Dưới `bss`, `doa` dò theo **quyết định thô của một `vad` thứ hai trên trung bình hai micro sau `hpf`**, không theo `vad` của lối ra | `doa` đã chạy trong chuỗi và chỉ dò khi có tiếng nói, nên hướng là của người nói. Trên bản thu board B, dải 2–8 kHz của nó cho hai người ở hai phía trễ ±1,4 mẫu, tách hẳn; bộ ước trễ riêng của `tinyai-signal` (300–3 800 Hz, cửa sổ 0,4 s) chỉ ra −0,8 / +0,6 mẫu và chồng lên nhau. `vad` của lối ra nghe tiếng đã qua cổng: cổng dìm ghế kia là `vad` tắt, `doa` thôi dò, cổng kẹt, và bản ghép A/B không tách được gì. Quyết định thô, không phần kéo dài, vì lúc khởi động phần kéo dài báo có tiếng 0,26 s trên nhiễu điện chung của hai micro, mà `doa` đọc ra 88° với độ tin 112–125 |
 | Cổng | ghế j, đánh số theo τ tăng dần, nhận `σ(2s(τ − b_{j−1})) − σ(2s(τ − b_j))`: σ là hàm logistic, `s` là `gate_slope` 20 mỗi mẫu trễ, `b` các ranh giới, hai đầu ±∞ | các cổng cộng lại đúng 1 nên hai lối ra bù nhau; 20 mỗi mẫu là độ dốc của `tinyai-signal`, cách ranh giới 0,1 mẫu đã qua 98% |
 | Lối ra | lối ra 0 là trộn trần (trung bình hai kênh) nhân cổng của ghế giữ, lối ra 1 là trộn trần nhân phần còn lại | trộn trần là đường gốc của §3.2, nên E8-T4 đo đúng phần cổng thêm vào |
 | FIXED, `mode` 0 (mặc định) | hai ghế, ranh giới b = 0 (90°, trục vuông góc của cặp micro); ghế giữ là phía chứa `keep_deg` | biết trước người ra lệnh ngồi phía nào thì tách ngay từ lần dò đầu |
-| LEARN, `mode` 1 | ghế phân cụm từ chính các lần dò, tối đa `seats_max` ghế; ghế giữ theo `keep_rule`: 0 là ghế có tâm gần `keep_deg` nhất, 1 là ghế có nhiều lần dò nhất trong cửa sổ | hai người ngồi cùng một phía của board, hay không biết trước ai ngồi đâu |
+| LEARN, `mode` 1 | ghế phân cụm từ chính các lần dò, tối đa `seats_max` ghế; ghế giữ theo `keep_rule`: 0 là ghế có tâm gần `keep_deg` nhất, 1 là ghế được gán nhiều lần dò nhất kể từ lúc nhận, bắt đầu từ số đếm trong cửa sổ; trước khi có hai ghế, ghế giữ là phía của `keep_deg` | hai người ngồi cùng một phía của board, hay không biết trước ai ngồi đâu |
 
 **LEARN** giữ histogram số lần dò rơi vào mỗi độ 0…180 trong `decision_s` giây tiếng nói gần nhất: vòng đệm các góc,
 góc vào thì cộng một, góc rời thì trừ một. Trên histogram ấy:
@@ -845,6 +845,10 @@ nền ồn to hơn cỡ −40 dBFS bị coi là lời nói; ở mức 0, nền �
 nghi trên nhiễu. Đo trên cảnh VIVOS, τ 0,5 s để gain bám cả chênh mức giữa các câu, lệch đích tới 4–7 dB; τ 2 s với
 `vad` mức 2 giữ mọi mức vào −50 … −10 dBFS trong ±3 dB (`docs/measurements/afe/agc.md`). Vì thế mức mặc định gieo cho
 NVS `afe/vad_mode` là **2**, ở `vad.aggressiveness` của `contracts/afe.yaml`.
+
+Khi `bss` là khối không gian (§3.8), một thể hiện `vad` thứ hai, cùng mức, chạy trên trung bình hai micro sau `hpf`
+ngay trong miền thời gian, chỉ để `doa` biết lúc có tiếng; nó không vào `agc` hay khung ra. `resume` xoá bộ lọc tách
+dải của nó, `reset` đưa nó về như sau `init`, như thể hiện chính.
 
 ### 3.11 Đặc trưng và `wake`
 
