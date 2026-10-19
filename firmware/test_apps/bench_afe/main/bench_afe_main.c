@@ -7,6 +7,7 @@
 #include "dsp_afe.h"
 #include "dsp_afe/agc.h"
 #include "dsp_afe/balance.h"
+#include "dsp_afe/bss.h"
 #include "dsp_afe/doa.h"
 #include "dsp_afe/gsc.h"
 #include "dsp_afe/hpf.h"
@@ -50,7 +51,10 @@
 #define PITCH_GLIDE_HZ 60.0f
 #define PITCH_HARMONICS 5
 #define BENCH_STEER_DEG 60.0f
-#define GSC_ANGLES 91 // the doa grid, 0..180 deg
+#define GSC_ANGLES 91       // the doa grid, 0..180 deg
+#define BSS_TALKER_A_DEG 48 // board B's talkers of raw/device/tinyai
+#define BSS_TALKER_B_DEG 130
+#define BSS_TURN_HOPS 156 // 2.5 s turns: LEARN splits, then reclusters
 #define ROW_NAME_BYTES 64
 #if CONFIG_DSP_AFE_DOA_ENABLE
 #define CHAIN_ROW "dsp_afe chuỗi (hpf + stft x2 + balance + doa + trộn + ns + istft + vad + agc)"
@@ -287,6 +291,59 @@ static void bench_gsc(bool turning)
 }
 #endif
 
+#if CONFIG_DSP_AFE_BSS_ENABLE
+static dsp_spec_cplx_t s_rest[GEN_GRID_N_BINS];
+
+// learn: the two talkers trade turns, so the peak hop is one where the seats are clustered again.
+static void bench_bss(bool learn)
+{
+    const dsp_afe_bss_config_t cfg = {
+        .mode = learn ? DSP_AFE_BSS_LEARN : DSP_AFE_BSS_FIXED,
+        .keep_rule = (dsp_afe_bss_keep_t)GEN_AFE_BSS_KEEP_RULE,
+        .keep_deg = GEN_AFE_BSS_KEEP_DEG,
+        .gate_slope = GEN_AFE_BSS_GATE_SLOPE,
+        .conf_min = GEN_AFE_BSS_CONF_MIN,
+        .seats_max = GEN_AFE_BSS_SEATS_MAX,
+        .decision_s = GEN_AFE_BSS_DECISION_S,
+        .recheck_s = GEN_AFE_BSS_RECHECK_S,
+        .first_speech_s = GEN_AFE_BSS_FIRST_SPEECH_S,
+        .kmeans_rounds = GEN_AFE_BSS_KMEANS_ROUNDS,
+        .confirm = GEN_AFE_BSS_CONFIRM,
+        .occupancy_min = GEN_AFE_BSS_OCCUPANCY_MIN,
+        .valley_max = GEN_AFE_BSS_VALLEY_MAX,
+        .valley_width = GEN_AFE_BSS_VALLEY_WIDTH,
+        .min_gap = GEN_AFE_BSS_MIN_GAP,
+        .boundary_share_min = GEN_AFE_BSS_BOUNDARY_SHARE_MIN,
+        .boundary_follow = GEN_AFE_BSS_BOUNDARY_FOLLOW,
+        .track_tau_s = GEN_AFE_BSS_TRACK_TAU_S,
+        .track_gate = GEN_AFE_BSS_TRACK_GATE,
+        .seat_forget_s = GEN_AFE_BSS_SEAT_FORGET_S,
+        .update_every_hops = GEN_AFE_DOA_UPDATE_EVERY_HOPS,
+        .spacing_m = GEN_ARRAY_SPACING_M,
+        .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
+    };
+    row_t row = {.module = learn ? "dsp_afe bss LEARN, hai người đổi lượt" : "dsp_afe bss chia ở chính diện",
+                 .core = CORE_SACH};
+    row.hot_bytes = dsp_afe_bss_workspace_bytes(&cfg);
+    void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
+    const size_t before = heap_free();
+    dsp_afe_bss_t *bss = NULL;
+    ESP_ERROR_CHECK(dsp_afe_bss_init(&bss, &cfg, mem, row.hot_bytes));
+    row.static_bytes = before - heap_free();
+    timing_t t = {0};
+    for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
+        const int16_t talker = (h / BSS_TURN_HOPS) % 2 == 0 ? BSS_TALKER_A_DEG : BSS_TALKER_B_DEG;
+        const int16_t angle = (int16_t)(talker + 2 * (h % 3 - 1));
+        const bool searched = h % GEN_AFE_DOA_UPDATE_EVERY_HOPS == 0;
+        const uint32_t start = esp_cpu_get_cycle_count();
+        ESP_ERROR_CHECK(
+            dsp_afe_bss_process(bss, s_bins[0], s_bins[1], angle, UINT8_MAX, searched, s_work, s_rest));
+        hop_done(&t, h, start);
+    }
+    report(&row, &t);
+}
+#endif
+
 static void bench_vad(void)
 {
     const dsp_afe_vad_config_t cfg = {.aggressiveness = 0, .hangover_ms = GEN_AFE_VAD_HANGOVER_MS};
@@ -503,6 +560,12 @@ static void core1_benches(void *done)
     bench_gsc(false);
     vTaskDelay(1);
     bench_gsc(true);
+    vTaskDelay(1);
+#endif
+#if CONFIG_DSP_AFE_BSS_ENABLE
+    bench_bss(false);
+    vTaskDelay(1);
+    bench_bss(true);
     vTaskDelay(1);
 #endif
 #if CONFIG_DSP_AFE_DOA_ENABLE
