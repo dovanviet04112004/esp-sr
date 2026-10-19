@@ -1,0 +1,119 @@
+"""bss against answers known without a room: doa's angles per hop are given, so each rule of KEHOACH 3.8 shows alone,
+the three failures tinyai-signal measured in its learning mode among them."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+
+import numpy as np
+import pytest
+
+from srpipe.dsp.afe import bss
+from srpipe.generated import grid
+
+SHORT = {"decision_s": 2.0, "recheck_s": 0.25, "first_speech_s": 0.5, "seat_forget_s": 3.0}
+
+
+def separator(**over) -> bss.Bss:
+    return bss.Bss(replace(bss.BssConfig(), **(SHORT | over)))
+
+
+def bins(seed: int = 7) -> tuple[np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    x = rng.standard_normal((2, grid.N_BINS)) + 1j * rng.standard_normal((2, grid.N_BINS))
+    return x[0].astype(np.complex64), x[1].astype(np.complex64)
+
+
+def speak(b: bss.Bss, plan: list[tuple[int, int | None]], seed: int = 3) -> list[tuple[float, int]]:
+    """Hops of talkers at whole angles or of silence, None, as doa reads them: a search every other hop, the angle
+    wandering a grid step either side; the gate and seats after each hop."""
+    rng = np.random.default_rng(seed)
+    x0, x1 = bins()
+    out, hop = [], 0
+    for hops, angle in plan:
+        for _ in range(hops):
+            searched = angle is not None and hop % 2 == 0
+            reading = int(np.clip(angle + 2 * rng.integers(-1, 2), 0, 180)) if angle is not None else -1
+            b.process(x0, x1, reading, 120, searched)
+            out.append((float(b.gate), b.seats))
+            hop += 1
+    return out
+
+
+def test_the_outputs_are_the_gate_and_its_rest_of_the_mean() -> None:
+    b = separator()
+    x0, x1 = bins()
+    y0, y1 = b.process(x0, x1, 150, 120, True)
+    mean = (np.float32(0.5) * (x0 + x1)).astype(np.complex64)
+    np.testing.assert_array_equal(y0, (mean * b.gate).astype(np.complex64))
+    np.testing.assert_allclose(y0 + y1, mean, rtol=1e-6)
+
+
+def test_broadside_keeps_keep_degs_side_from_the_first_search() -> None:
+    b = separator(keep_deg=135.0)
+    first = speak(b, [(1, None)])
+    kept = speak(b, [(40, 140)])
+    gated = speak(b, [(40, 40)])
+    assert first[0][0] == 0.5
+    assert all(g == 1.0 for g, _ in kept[1:]) and all(g == 0.0 for g, _ in gated[2:])
+    assert all(s == 0 for _, s in kept + gated)
+
+
+def test_learn_splits_two_talkers_on_one_side_that_broadside_cannot() -> None:
+    plan = [(120, 40), (120, 76), (120, 40), (120, 76)]
+    learnt = speak(separator(mode=bss.MODE_LEARN, keep_deg=76.0), plan)
+    broadside = speak(separator(keep_deg=76.0), plan)
+    last_turn = slice(-100, None)
+    assert learnt[-1][1] == 2
+    assert np.mean([g for g, _ in learnt[-220:-120]]) < 0.05 and np.mean([g for g, _ in learnt[last_turn]]) > 0.95
+    assert min(g for g, _ in broadside[120:]) > 0.9
+
+
+def test_one_talker_alone_never_makes_two_seats() -> None:
+    assert max(s for _, s in speak(separator(mode=bss.MODE_LEARN), [(600, 48)])) == 0
+
+
+def test_a_talker_holding_the_floor_past_the_window_keeps_both_seats() -> None:
+    out = speak(separator(mode=bss.MODE_LEARN, seat_forget_s=60.0), [(100, 48), (100, 130), (150, 130)])
+    split = next(i for i, (_, s) in enumerate(out) if s == 2)
+    assert split < 200 and all(s == 2 for _, s in out[split:])
+
+
+def test_a_seat_no_update_reaches_for_seat_forget_s_goes() -> None:
+    out = speak(separator(mode=bss.MODE_LEARN), [(100, 48), (100, 130), (250, 130)])
+    assert max(s for _, s in out) == 2 and out[-1][1] == 0
+
+
+def test_a_quiet_talker_is_still_a_seat() -> None:
+    """No level gate: tinyai-signal lost the quieter of two talkers 12 dB apart; here the level never enters."""
+    b = separator(mode=bss.MODE_LEARN)
+    speak(b, [(100, 48), (100, 130)])
+    assert b.seats == 2
+
+
+def test_keep_most_keeps_the_seat_with_the_most_updates() -> None:
+    b = separator(mode=bss.MODE_LEARN, keep_rule=bss.KEEP_MOST, keep_deg=130.0, seat_forget_s=60.0)
+    out = speak(b, [(60, 130), (300, 48)])
+    assert out[-1][1] == 2 and out[-1][0] == 1.0 and abs(b.directions()[0] - 48) <= 2
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"seats_max": 1},
+        {"seats_max": bss.SEATS_CAP + 1},
+        {"keep_deg": 200.0},
+        {"first_speech_s": 9.0},
+        {"track_tau_s": 0.001},
+    ],
+)
+def test_a_configuration_the_c_side_refuses_is_refused(over: dict) -> None:
+    with pytest.raises(ValueError):
+        separator(**over)
+
+
+def test_reset_is_where_init_leaves_it() -> None:
+    b = separator(mode=bss.MODE_LEARN)
+    speak(b, [(100, 48), (100, 130)])
+    b.reset()
+    assert (b.gate, b.seats, b.filled, b.directions()) == (0.5, 0, 0, (-1, -1))

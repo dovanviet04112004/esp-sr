@@ -15,13 +15,13 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from srpipe.dsp.afe import agc, balance, doa, gsc, hpf, ns_omlsa, vad
+from srpipe.dsp.afe import agc, balance, bss, doa, gsc, hpf, ns_omlsa, vad
 from srpipe.dsp.spec.stft import Istft, Stft
 from srpipe.generated import afe, array, grid
 
 FORMATS = {"MM": array.N_MICS, "MMR": array.N_MICS + 1}
 MODULES_BUILT = ("hpf", "balance", "doa", "ns_omlsa", "vad", "agc")
-SPATIALS = ("none", "gsc")
+SPATIALS = ("none", "gsc", "bss")
 BROADSIDE_DEG = np.float32(sum(array.DOA_RANGE_DEG) / 2.0)
 PCM_FULL_SCALE = np.float32(32768.0)
 PCM_MIN, PCM_MAX = -32768, 32767
@@ -37,7 +37,8 @@ class ChainConfig:
     """What app_boot gives dsp_afe_init: the modules built, calib/bal, and the afe/* settings. balance_gains is
     calib/bal, one complex gain per bin on ch1, or None for a board never calibrated, which runs without balance as
     the firmware does. spatial is dsp_afe_config_t.spatial: none for the plain mean, gsc for the canceller steered by
-    doa, broadside while doa has no angle. agc_start_db, for the board simulation only, is the gain the agc starts
+    doa, broadside while doa has no angle, bss for the gate on doa's angle with the settings bss gives, None
+    for contracts/afe.yaml's. agc_start_db, for the board simulation only, is the gain the agc starts
     from (KEHOACH 1.2); None starts as the firmware does."""
 
     modules: tuple[str, ...] = afe.MODULES
@@ -46,6 +47,7 @@ class ChainConfig:
     agc_target_dbfs: float = afe.AGC_TARGET_DBFS
     vad_aggressiveness: int = afe.VAD_AGGRESSIVENESS
     spatial: str = "none"
+    bss: bss.BssConfig | None = None
     agc_start_db: float | None = None
 
 
@@ -101,6 +103,8 @@ class Chain:
             raise NotImplementedError(f"no Python reference yet for {', '.join(missing)}")
         if cfg.spatial not in SPATIALS:
             raise NotImplementedError(f"spatial {cfg.spatial!r} is none of {', '.join(SPATIALS)}")
+        if cfg.spatial == "bss" and "doa" not in cfg.modules:
+            raise ValueError("spatial bss gates on doa's angle, and doa is off")
         self.cfg = cfg
         self.n_channels = FORMATS[input_format]
         self._analysis = [Stft() for _ in range(array.N_MICS)]
@@ -117,6 +121,10 @@ class Chain:
         self._hpf = hpf.Hpf() if "hpf" in on else None
         self._doa = doa.Doa() if "doa" in on else None
         self._gsc = gsc.Gsc() if self.cfg.spatial == "gsc" else None
+        self._bss = bss.Bss(self.cfg.bss) if self.cfg.spatial == "bss" else None
+        # bss's gate silences the other seat at vad, so doa searches on a raw vad of the mics' mean (KEHOACH 3.8).
+        self._vad_in = vad.Vad(self.cfg.vad_aggressiveness) if self._bss is not None else None
+        self._last_heard = False
         self._last_vad = False
         self._ns = None
         if "ns_omlsa" in on:
@@ -126,6 +134,11 @@ class Chain:
         self._agc = (
             agc.Agc(agc.AgcConfig(target_dbfs=self.cfg.agc_target_dbfs), self.cfg.agc_start_db) if "agc" in on else None
         )
+
+    @property
+    def separator(self) -> bss.Bss | None:
+        """The bss of a chain whose spatial stage is bss, for reading its gate and seats; None otherwise."""
+        return self._bss
 
     def reset(self) -> None:
         """Forget buffered samples and every module's state after a long gap; the next frame carries FLAG_GAP and seq
@@ -147,6 +160,8 @@ class Chain:
             self._hpf.reset()
         if self._vad is not None:
             self._vad.flush()
+        if self._vad_in is not None:
+            self._vad_in.flush()
         if self._agc is not None:
             self._agc.flush()
         self._gap = True
@@ -163,12 +178,17 @@ class Chain:
         if self._gains is not None:
             bins[1] = balance.apply(bins[1], self._gains)
         direction = doa.DoaResult(doa.ANGLE_UNKNOWN_DEG, 0)
+        heard = self._last_heard if self._vad_in is not None else self._last_vad
+        update = heard and self._seq % afe.DOA_UPDATE_EVERY_HOPS == 0
+        if self._vad_in is not None:
+            self._last_heard = self._vad_in.process(np.float32(0.5) * (samples[:, 0] + samples[:, 1])).raw
         if self._doa is not None:
-            update = self._last_vad and self._seq % afe.DOA_UPDATE_EVERY_HOPS == 0
             direction = self._doa.process(bins[0], bins[1], update)
         if self._gsc is not None:
             angle_deg = direction.angle_deg if direction.angle_deg >= 0 else BROADSIDE_DEG
             mixed = self._gsc.process(bins[0], bins[1], angle_deg, not self._last_vad)
+        elif self._bss is not None:
+            mixed, _ = self._bss.process(bins[0], bins[1], direction.angle_deg, direction.confidence, update)
         else:
             mixed = np.float32(0.5) * (bins[0] + bins[1])
         if self._ns is not None:
