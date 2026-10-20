@@ -510,8 +510,12 @@ bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/ben
 	python3 -m tools.budget
 
 # The board and this PC share a network (make wifi); Docker Desktop publishes the receiver's port on it.
+# Docker Desktop still starting after WSL restarts leaves docker, and so the receiver, hanging without a word.
+DOCKER_ANSWER_S := 20
 bss: ## Separate live talkers on board B, one WAV per seat: asks mode, seats, ns, seconds, delay [MODE= SEATS= NS= SECONDS= DELAY=]
 	@test -f host/.env || { echo "copy host/.env.example to host/.env and fill it"; exit 1; }
+	@timeout $(DOCKER_ANSWER_S) docker info >/dev/null 2>&1 || \
+	  { echo "Docker Desktop does not answer: start it, wait until it runs, then make bss again"; exit 1; }
 	@$(call fresh_sdkconfig,$(BSS_LIVE_APP)/sdkconfig,$(call app_defaults,$(BSS_LIVE_APP)) firmware/sdkconfig.afe)
 	cd $(BSS_LIVE_APP) && idf.py build
 	cd $(BSS_LIVE_APP) && BSS_LIVE_DATA_ROOT="$(DATA_ROOT)" BSS_LIVE_STREAM_PORT="$(STREAM_PORT)" \

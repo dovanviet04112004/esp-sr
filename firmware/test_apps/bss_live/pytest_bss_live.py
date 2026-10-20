@@ -223,6 +223,7 @@ def test_bss_live(dut) -> None:
     out = Path(os.environ["BSS_LIVE_DATA_ROOT"]) / "cache" / "bss_live" / name
     out.mkdir(parents=True)
     (out / "job.json").write_text(json.dumps(job, indent=2) + "\n", encoding="utf-8")
+    print(f"starting srhost.stream_rx in Docker, up to {LISTEN_TIMEOUT_S} s")
     with receiver(out, port, int(job["seconds"])):
         print(f"talk for {job['seconds']} s, one at a time, from different directions around board B; Enter stops")
         if job["delay"] != "0":
