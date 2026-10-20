@@ -57,7 +57,8 @@ CALIB_APP := firmware/test_apps/calib
 BSS_LIVE_APP := firmware/test_apps/bss_live
 UNIT_APP := firmware/components/ai_engine/test_apps/unit
 LISTEN_APP := firmware/components/svc_listen/test_apps/unit
-ON_BOARD = --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) -p no:cacheprovider
+ON_BOARD = --rootdir . --confcutdir $(CURDIR)/firmware --embedded-services esp,idf --target esp32s3 --port $(PORT) \
+  -p no:cacheprovider
 UNIT_PARTITIONS := $(CURDIR)/firmware/test_apps/partitions_unit.csv
 PARTTOOL = python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --baud $(FLASH_BAUD) \
   --partition-table-file $(UNIT_PARTITIONS)

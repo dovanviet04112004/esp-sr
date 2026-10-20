@@ -208,13 +208,6 @@ def stop_on_enter(dut) -> None:
         print("stopping: board B lets out what it heard, then closes the stream")
 
 
-@pytest.fixture
-def app(app):
-    """pytest-embedded's app; esptool writes only images whose MD5 on board B differs, so a rerun skips the flash."""
-    app.flash_args["write_flash_args"].append("--skip-flashed")
-    return app
-
-
 @pytest.mark.esp32s3
 def test_bss_live(dut) -> None:
     board_line(dut, "app ")
