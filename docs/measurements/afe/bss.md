@@ -185,6 +185,18 @@ Kết quả:
 
   Trên board B, `doa` chỉ dò khi `vad` thô báo có tiếng, nên ca này cần tiếng ồn không hướng làm `vad` thô bật. Chưa đo
   board B có ra chuỗi như vậy không 🔬 (TASKS E8-T8).
+- **Người vắng quá `seat_forget_s` rồi quay lại.** Script tạm trên bản soi gương: một người vắng 90 s (88 s ở ca ba
+  ghế) trong lúc người khác vẫn nói, rồi quay lại; 3 hạt giống, lạc 0%, 3% và 6%:
+  - lạc 3% và 6%: không ghế nào bị quên, vì lần dò lạc rơi vào vùng ghế vắng làm mới đồng hồ của nó; người quay lại vào
+    ngay ghế cũ, cùng số;
+  - lạc 0%, hai ghế ở hai phía (48° và 130°): ghế vắng bị bỏ ở giây 60, về 0 ghế, cắt như FIXED. Số theo phía trùng số
+    cũ, nên người quay lại vào ngay đúng số; ghế dựng lại sau 2,3 s;
+  - lạc 0%, hai ghế cùng một phía (40° và 76°): bỏ ở giây 58, về 0 ghế, và người còn nói (76°) chuyển từ số 0 sang số 1,
+    số của phía chứa cả hai, tới khi người kia quay lại; ghế dựng lại sau 2,3 s và 76° về số 0;
+  - lạc 0%, ba ghế (30°, 90°, 150°): ghế 150° bị bỏ ở giây 60, hai ghế kia giữ số; người quay lại có 2,4 s đầu vào ghế
+    90°, rồi lấy lại đúng số cũ.
+
+  Tỉ lệ lạc của `doa` trên board B lúc có người nói chưa đo 🔬, nên chưa biết board rơi vào cột nào (TASKS E8-T8).
 
 ## 7. Khớp với bản C
 
