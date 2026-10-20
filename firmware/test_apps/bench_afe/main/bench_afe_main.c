@@ -321,6 +321,7 @@ static void bench_bss(bool learn)
         .update_every_hops = GEN_AFE_DOA_UPDATE_EVERY_HOPS,
         .spacing_m = GEN_ARRAY_SPACING_M,
         .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
+        .history_s = GEN_AFE_BSS_HISTORY_S,
     };
     row_t row = {.module = learn ? "dsp_afe bss LEARN, hai người đổi lượt" : "dsp_afe bss chia ở chính diện",
                  .core = CORE_SACH};
