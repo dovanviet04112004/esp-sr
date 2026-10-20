@@ -1,5 +1,23 @@
 .DEFAULT_GOAL := help
 
+# idf.py and the python that drives board B come from IDF's export.sh. In a terminal that has not sourced it, a goal
+# that needs them runs make once more under it, about 5 s; IDF_LOADED stops a second round if export.sh fails.
+IDF_EXPORT ?= $(HOME)/esp/esp-idf/export.sh
+IDF_GOALS := ai-unit ai-unit-ctc ai-unit-rnnt ai-unit-speaker bench-board bss calib-flash capture-flash \
+  capture-radio-off-flash espsr-compare flash fw-bench fw-bench-flash fw-dev fw-prod listen-unit models-flash monitor \
+  nvs-restore nvs-save parity-board product session session-plan storage-flash
+ifneq ($(and $(filter $(IDF_GOALS),$(MAKECMDGOALS)),$(if $(IDF_LOADED)$(shell command -v idf.py),,no idf.py)),)
+.PHONY: $(MAKECMDGOALS)
+$(firstword $(MAKECMDGOALS)):
+	@test -f "$(IDF_EXPORT)" || { echo "no $(IDF_EXPORT): point IDF_EXPORT at ESP-IDF's export.sh"; exit 1; }
+	@echo "loading ESP-IDF for $(MAKECMDGOALS) ($(IDF_EXPORT))"
+	@bash -c '. "$(IDF_EXPORT)" >/dev/null 2>&1 && exec "$(MAKE)" --no-print-directory IDF_LOADED=1 $(MAKECMDGOALS)'
+ifneq ($(word 2,$(MAKECMDGOALS)),)
+$(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS)):
+	@:
+endif
+else
+
 # Board B's CH340 stays with Windows, served to WSL over RFC 2217 by make board-attach (KEHOACH 2.1). It holds
 # 921600 baud, as pytest-embedded flashes; esptool left alone writes a partition at 115200, ~11 KB/s.
 BOARD_USB_ID ?= 1a86:7523
@@ -661,3 +679,4 @@ session-plan: ## Record a script of host/plans in turn: PLAN=host/plans/<x>.tsv 
 	  $(MAKE) --no-print-directory session \
 	    ARGS="--room $(ROOM) --fw $(PLAN_FW) --pcm-shift $(PCM_SHIFT) $$args" < /dev/tty || exit 1; \
 	done
+endif
