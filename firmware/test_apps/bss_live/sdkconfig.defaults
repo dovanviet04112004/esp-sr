@@ -8,3 +8,5 @@ CONFIG_DSP_AFE_BSS_ENABLE=y
 CONFIG_SVC_REPORT_STREAM_CHANNELS_MAX=6
 CONFIG_SVC_REPORT_STREAM_MAX_S=660
 CONFIG_SVC_REPORT_STREAM_BUFFER_KB=1024
+# A stalled send waits 4 s before the link drops: the 1 MB buffer holds 5.4 s of mode 8, the task watchdog bites at 5 s.
+CONFIG_NET_STREAM_SEND_TIMEOUT_MS=4000

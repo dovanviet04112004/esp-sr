@@ -1,12 +1,13 @@
 """Live bss on board B, one WAV per seat (E8-T5, KEHOACH 3.8, 7.4): make bss builds and flashes the app, then runs this.
 
-Asks mode, seats, ns, seconds and delay from the limits the board prints (BSS_LIVE_MODE, _SEATS, _NS, _SECONDS, _DELAY
-answer ahead), starts srhost.stream_rx in Docker, sends the job and shows the board's status each second, seconds left
-first; Enter stops early and the receiver ends between frames. WAVs land in $SRPIPE_DATA_ROOT/cache/bss_live/<run>/.
+Puts the board on this PC's network if it is not, as make wifi asks; then asks mode, seats, ns, seconds and delay
+(BSS_LIVE_MODE, _SEATS, _NS, _SECONDS, _DELAY answer ahead), starts srhost.stream_rx in Docker, sends the job and shows
+the status each second, seconds left first; Enter stops early. WAVs land in $SRPIPE_DATA_ROOT/cache/bss_live/<run>/.
 """
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import queue
@@ -23,6 +24,8 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "host" / "src"))
+from srhost import wifi as host_wifi
 from test_report import collect
 
 REPO = Path(__file__).resolve().parents[3]
@@ -32,12 +35,14 @@ IMAGE = "python:3.12-slim"
 DEFAULTS = {"mode": "learn", "seats": "2", "ns": "mean", "seconds": "30", "delay": "4"}
 NS_HELP = {"off": "no noise suppression", "mean": "once on the mean, before the gates", "each": "on each seat"}
 BOOT_TIMEOUT_S = 90
+WIFI_TRIES = 3
 LISTEN_TIMEOUT_S = 180
 RECEIVER_GRACE_S = 10  # after the board's last line, for the last frames
 DELAY_STEPS_PER_S = 2  # the menu offers the delay in 0.5 s steps
 SUMMARY_FILE = "stream.json"  # what srhost.stream_rx writes beside the WAVs
 LINE = rf"{TAG} \d+ ([^\r\n]*?) crc=[0-9a-f]{{8}}"
 IPV4 = re.compile(r"IPv4[^:\r\n]*:\s*(\d+\.\d+\.\d+\.\d+)")
+ADDRESS = re.compile(r"\d+\.\d+\.\d+\.\d+")
 SUMMARY = re.compile(r"summary hops (\d+) .* dropped (\d+) dma_overflows (\d+)")
 
 
@@ -104,15 +109,55 @@ def choose(limits: dict[str, list[str]]) -> dict[str, str]:
 
 
 def pc_address(board_ip: str) -> str:
-    """This PC's address on the board's /24, as Windows reports it; the receiver listens there through Docker."""
+    """This PC's address on the board's /24, as Windows reports it, or ""; the receiver listens there through Docker."""
     if os.environ.get("BSS_LIVE_HOST"):
         return os.environ["BSS_LIVE_HOST"]
     ipconfig = subprocess.run(["ipconfig.exe"], capture_output=True, check=False).stdout.decode(errors="replace")
     prefix = board_ip.rsplit(".", 1)[0] + "."
-    found = [ip for ip in IPV4.findall(ipconfig) if ip.startswith(prefix)]
-    if not found:
-        pytest.fail(f"board B is on {board_ip}, this PC has no address in {prefix}0/24: run make wifi first")
-    return found[0]
+    return next((ip for ip in IPV4.findall(ipconfig) if ip.startswith(prefix)), "")
+
+
+def wifi_line() -> str:
+    """The console line that puts board B on a network, asked as make wifi asks; the key is never shown."""
+    if sys.stdin is None or not sys.stdin.isatty():
+        pytest.fail("board B is not on this PC's network: run make bss in a terminal to give it one")
+    heard = host_wifi.scan_bands(host_wifi.windows("netsh.exe", "wlan", "show", "networks", "mode=bssid"))
+    default = host_wifi.current_ssid(host_wifi.windows("netsh.exe", "wlan", "show", "interfaces"))
+    if host_wifi.BAND_24 not in heard.get(default, {host_wifi.BAND_24}):
+        default = ""
+    while True:
+        ssid = input(f"Wi-Fi network for board B [{default}]: ").strip() or default
+        try:
+            if not ssid:
+                raise host_wifi.BoardError("no network: type a 2.4 GHz one")
+            host_wifi.check_band(ssid, heard)
+            key = getpass.getpass(f"key for {ssid} (Enter: the key Windows saved for it): ")
+            if not key:
+                profile = host_wifi.windows("netsh.exe", "wlan", "show", "profile", f"name={ssid}", "key=clear")
+                key = host_wifi.saved_key(profile)
+                print(f"using the key Windows saved for {ssid}" if key else f"no key saved for {ssid}: an open network")
+            host_wifi.check_key(key)
+        except host_wifi.BoardError as err:
+            print(f"  {err}")
+            continue
+        return " ".join(["wifi", ssid.encode().hex()] + ([key.encode().hex()] if key else []))
+
+
+def on_network(dut) -> tuple[str, str]:
+    """Board B's address on this PC's network and its ready line, a network given to it first if need be."""
+    text = board_line(dut, "wifi ")
+    for _ in range(WIFI_TRIES):
+        board_ip = text if ADDRESS.fullmatch(text) else ""
+        ready = board_line(dut, "ready ") if board_ip else ""
+        if board_ip and pc_address(board_ip):
+            return board_ip, ready
+        print(f"\nboard B: wifi {text}; it has to join this PC's network")
+        dut.write(wifi_line() + "\n")
+        stored = board_line(dut, "wifi set ")
+        if not stored.endswith("ESP_OK"):
+            pytest.fail(f"board B: wifi set {stored}")
+        text = board_line(dut, "wifi ")
+    pytest.fail(f"board B did not reach this PC's network in {WIFI_TRIES} tries")
 
 
 @contextmanager
@@ -166,10 +211,8 @@ def stop_on_enter(dut) -> None:
 @pytest.mark.esp32s3
 def test_bss_live(dut) -> None:
     board_line(dut, "app ")
-    board_ip = board_line(dut, "wifi ")
-    if not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", board_ip):
-        pytest.fail(f"board B: wifi {board_ip}; make wifi puts it on this PC's network")
-    limits = limits_of(board_line(dut, "ready "))
+    board_ip, ready = on_network(dut)
+    limits = limits_of(ready)
     host = pc_address(board_ip)
     port = int(os.environ["BSS_LIVE_STREAM_PORT"])
     print(f"\nboard B on {board_ip}, receiver on {host}:{port}; Enter keeps [the default]")

@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <inttypes.h>
 #include <math.h>
 #include <stdatomic.h>
@@ -69,11 +70,17 @@
 #define JOB_BYTES 224
 #define HOST_BYTES 64
 #define DEVICE_ID_BYTES 33 // deviceId of KEHOACH 6.2: at most 32 characters
-#define IP_BYTES 16
 #define UART_RX_BYTES 1024
 #define REPORT_SPARE_LINES 16
 #define PORT_MAX 65535
 #define STOP_LINE "stop"
+#define WIFI_LINE "wifi "
+#define JOB_LINE "job "
+#define SSID_MAX_BYTES 32 // wifi_sta_config_t.ssid less its terminator
+#define KEY_MIN_BYTES 8   // WPA2 passphrase, as wifi set of main checks it
+#define KEY_MAX_BYTES 63
+#define HEX_DIGITS_PER_BYTE 2
+#define HEX_BASE 16
 
 typedef enum {
     NS_OFF = 0,
@@ -253,8 +260,83 @@ static bool parse_job(char *line, job_t *job)
     return seen == FIELDS && (job->mode == DSP_AFE_BSS_LEARN || job->seats == SEATS_MIN);
 }
 
-// The console keeps a UART driver from the job to the run's end, for stop; test_report_serve reinstalls it.
-static void read_job(job_t *job)
+// Two hex digits a byte into out; false on an odd length, a non-hex digit, a zero byte or no room.
+static bool from_hex(const char *hex, char *out, size_t cap)
+{
+    const size_t len = strlen(hex);
+    if (len % HEX_DIGITS_PER_BYTE != 0 || len / HEX_DIGITS_PER_BYTE >= cap) { return false; }
+    for (size_t i = 0; i < len / HEX_DIGITS_PER_BYTE; i++) {
+        const char pair[] = {hex[HEX_DIGITS_PER_BYTE * i], hex[HEX_DIGITS_PER_BYTE * i + 1], '\0'};
+        if (!isxdigit((unsigned char)pair[0]) || !isxdigit((unsigned char)pair[1])) { return false; }
+        out[i] = (char)strtoul(pair, NULL, HEX_BASE);
+        if (out[i] == '\0') { return false; }
+    }
+    out[len / HEX_DIGITS_PER_BYTE] = '\0';
+    return true;
+}
+
+// "wifi <ssid hex> [<key hex>]" into NVS as wifi set of main stores it; the key is never printed.
+static bool store_wifi(char *line)
+{
+    char *save = NULL;
+    strtok_r(line, " \r\n", &save);
+    const char *ssid_hex = strtok_r(NULL, " \r\n", &save);
+    const char *key_hex = strtok_r(NULL, " \r\n", &save);
+    char ssid[SSID_MAX_BYTES + 1];
+    char key[KEY_MAX_BYTES + 1] = "";
+    const bool parsed = ssid_hex != NULL && from_hex(ssid_hex, ssid, sizeof(ssid)) &&
+                        (key_hex == NULL || from_hex(key_hex, key, sizeof(key))) &&
+                        strtok_r(NULL, " \r\n", &save) == NULL;
+    const size_t key_len = strlen(key);
+    if (!parsed || (key_len > 0 && key_len < KEY_MIN_BYTES)) {
+        memset(key, 0, sizeof(key));
+        test_report_line("refused: wifi takes an ssid of 1..%d bytes and a key of 0 or %d..%d, in hex",
+                         SSID_MAX_BYTES, KEY_MIN_BYTES, KEY_MAX_BYTES);
+        return false;
+    }
+    esp_err_t err = sys_storage_set_str(STORAGE_NS_WIFI, STORAGE_KEY_SSID, ssid);
+    if (err == ESP_OK) {
+        err = key_len > 0 ? sys_storage_set_str(STORAGE_NS_WIFI, STORAGE_KEY_PASS, key)
+                          : sys_storage_erase(STORAGE_NS_WIFI, STORAGE_KEY_PASS);
+    }
+    memset(key, 0, sizeof(key));
+    test_report_line("wifi set %s, key %u chars: %s", ssid, (unsigned)key_len, esp_err_to_name(err));
+    return err == ESP_OK;
+}
+
+// Join the network NVS holds and wait for an address; the line says which, or why not.
+static bool join_wifi(EventGroupHandle_t system)
+{
+    // Cleared ahead so a rejoin waits for the new link, not the old one's address.
+    xEventGroupClearBits(system, APP_BIT_WIFI_OK);
+    const esp_err_t err = net_wifi_apply();
+    if (err != ESP_OK) {
+        test_report_line("wifi down: %s, make bss sets the network", esp_err_to_name(err));
+        return false;
+    }
+    for (int s = 0; s < CONFIG_BSS_LIVE_WIFI_WAIT_S; s++) {
+        if ((xEventGroupWaitBits(system, APP_BIT_WIFI_OK, pdFALSE, pdTRUE, pdMS_TO_TICKS(LINK_WAIT_MS)) &
+             APP_BIT_WIFI_OK) != 0) {
+            esp_netif_ip_info_t info = {0};
+            ESP_ERROR_CHECK(esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &info));
+            test_report_line("wifi " IPSTR, IP2STR(&info.ip));
+            return true;
+        }
+    }
+    test_report_line("wifi down: no link in %d s", CONFIG_BSS_LIVE_WIFI_WAIT_S);
+    return false;
+}
+
+static void print_ready(void)
+{
+    test_report_line("ready modes %s,%s ns %s,%s,%s seats %d-%d seconds %d-%d delay 0-%d",
+                     MODE_NAMES[DSP_AFE_BSS_LEARN], MODE_NAMES[DSP_AFE_BSS_FIXED], NS_NAMES[NS_OFF],
+                     NS_NAMES[NS_MEAN], NS_NAMES[NS_EACH], SEATS_MIN, SEATS_MAX, SECONDS_MIN,
+                     CONFIG_BSS_LIVE_SECONDS_MAX, CONFIG_BSS_LIVE_DELAY_MAX_S);
+}
+
+// Console lines until a job starts the run; the UART driver stays to the run's end, for stop.
+static void read_commands(EventGroupHandle_t system, bool linked, job_t *job)
 {
     ESP_ERROR_CHECK(uart_driver_install(CONFIG_ESP_CONSOLE_UART_NUM, UART_RX_BYTES, 0, 0, NULL, 0));
     uart_vfs_dev_use_driver(CONFIG_ESP_CONSOLE_UART_NUM);
@@ -264,8 +346,19 @@ static void read_job(job_t *job)
             vTaskDelay(1);
             continue;
         }
-        if (strncmp(line, "job ", strlen("job ")) != 0) { continue; }
-        if (parse_job(line, job)) { break; }
+        if (strncmp(line, WIFI_LINE, strlen(WIFI_LINE)) == 0) {
+            const bool stored = store_wifi(line);
+            memset(line, 0, sizeof(line));
+            if (stored) { linked = join_wifi(system); }
+            if (stored && linked) { print_ready(); }
+            continue;
+        }
+        if (strncmp(line, JOB_LINE, strlen(JOB_LINE)) != 0) { continue; }
+        if (!linked) {
+            test_report_line("refused: no wifi yet, send a network first");
+            continue;
+        }
+        if (parse_job(line, job)) { return; }
         test_report_line("refused: a job names mode, seats, ns, seconds, delay_ms, host and port once each");
     }
 }
@@ -292,27 +385,6 @@ static bool stop_typed(void)
         used = 0;
         if (stop) { return true; }
     }
-    return false;
-}
-
-static bool join_wifi(EventGroupHandle_t system, const char *device_id, char *ip, size_t cap)
-{
-    ESP_ERROR_CHECK(net_wifi_init(system, device_id));
-    const esp_err_t err = net_wifi_apply();
-    if (err != ESP_OK) {
-        test_report_line("wifi down: %s, set wifi/ssid from the console of main", esp_err_to_name(err));
-        return false;
-    }
-    for (int s = 0; s < CONFIG_BSS_LIVE_WIFI_WAIT_S; s++) {
-        if ((xEventGroupWaitBits(system, APP_BIT_WIFI_OK, pdFALSE, pdTRUE, pdMS_TO_TICKS(LINK_WAIT_MS)) &
-             APP_BIT_WIFI_OK) != 0) {
-            esp_netif_ip_info_t info = {0};
-            ESP_ERROR_CHECK(esp_netif_get_ip_info(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"), &info));
-            snprintf(ip, cap, IPSTR, IP2STR(&info.ip));
-            return true;
-        }
-    }
-    test_report_line("wifi down: no link in %d s", CONFIG_BSS_LIVE_WIFI_WAIT_S);
     return false;
 }
 
@@ -720,32 +792,27 @@ void app_main(void)
     test_report_line("app esp-sr %s, grid 0x%08x, pcm_shift %u", esp_app_get_description()->version,
                      (unsigned)GEN_GRID_HASH, (unsigned)audio.pcm_shift);
     char device_id[DEVICE_ID_BYTES];
-    char ip[IP_BYTES];
     ESP_ERROR_CHECK(sys_storage_device_id(device_id, sizeof(device_id)));
     EventGroupHandle_t system = xEventGroupCreate();
-    if (join_wifi(system, device_id, ip, sizeof(ip))) {
-        test_report_line("wifi %s", ip);
-        test_report_line("ready modes %s,%s ns %s,%s,%s seats %d-%d seconds %d-%d delay 0-%d",
-                         MODE_NAMES[DSP_AFE_BSS_LEARN], MODE_NAMES[DSP_AFE_BSS_FIXED], NS_NAMES[NS_OFF],
-                         NS_NAMES[NS_MEAN], NS_NAMES[NS_EACH], SEATS_MIN, SEATS_MAX, SECONDS_MIN,
-                         CONFIG_BSS_LIVE_SECONDS_MAX, CONFIG_BSS_LIVE_DELAY_MAX_S);
-        read_job(&s_chain.job);
-        const esp_err_t err = start_run(system);
-        if (err == ESP_OK) {
-            while (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(STATUS_PERIOD_MS)) == 0) {
-                print_status();
-                if (!atomic_load(&s_stop_asked) && stop_typed()) {
-                    atomic_store(&s_stop_asked, true);
-                    test_report_line("stop asked: the delayed output flushes, then the stream closes");
-                }
-            }
+    ESP_ERROR_CHECK(net_wifi_init(system, device_id));
+    const bool linked = join_wifi(system);
+    if (linked) { print_ready(); }
+    read_commands(system, linked, &s_chain.job);
+    const esp_err_t err = start_run(system);
+    if (err == ESP_OK) {
+        while (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(STATUS_PERIOD_MS)) == 0) {
             print_status();
-            drain();
-        } else {
-            test_report_line("run refused: %s", esp_err_to_name(err));
+            if (!atomic_load(&s_stop_asked) && stop_typed()) {
+                atomic_store(&s_stop_asked, true);
+                test_report_line("stop asked: the delayed output flushes, then the stream closes");
+            }
         }
-        release_console();
+        print_status();
+        drain();
+    } else {
+        test_report_line("run refused: %s", esp_err_to_name(err));
     }
+    release_console();
     summarise();
     test_report_line("done");
     test_report_serve();
