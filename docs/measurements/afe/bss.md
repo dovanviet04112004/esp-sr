@@ -302,3 +302,22 @@ có lối ra. Mỗi ô: mất / rò cả bài / rò trong 0,5 s đầu mỗi lư
 - mỗi bước làm đúng phần `bss_live` thêm vào: cổng của bước cũ, trung bình và hai kênh thô ra vào vòng đệm;
 - 287,4 µs trung bình, đỉnh 457,0 µs (1,8% khung), hơn LEARN không trễ 201 µs;
 - vùng `hot` 4 768 B, thêm góc giữ của 244 bước; PSRAM 770 000 B.
+
+## 10. Lượt `make bss` của chủ repo, 20/10 chiều
+
+LEARN, 2 ghế, `ns` mean, D 4 s. Tiếng thô `ch0` và `ch1` của từng lượt chạy lại qua chuỗi của bản soi gương (script tạm):
+
+| Lượt | Dài | Trên nền +6 dB | Trên nền +10 dB | `vad` thô nghe | Lần dò của `doa` | Ghế |
+|---|---|---|---|---|---|---|
+| 16:13 | 30 s | 1,6 s | 0,7 s | 1,0 s | — | 0 |
+| 16:23 | 10 s | 1,6 s | 1,0 s | 1,2 s | — | 0 |
+| 16:27 | 10 s | 0,5 s | 0,3 s | 0,5 s | 15, ở 94–104° | 0 |
+| 16:36 | 10 s | 1,2 s | 0,7 s | 0,9 s | 33: 50°, 78–90°, 20 lần ở 176–180° độ tin trung vị 36 | 0 |
+
+- Không lượt nào có đủ tiếng: `vad` thô nghe 0,5–1,2 s, trong khi LEARN cần các lần dò phủ `first_speech_s` 1,5 s tiếng
+  nói mới dò đỉnh lần đầu, rồi hai lần kiểm lại khớp nhau. Board ra `seats 0` suốt, bản soi gương cũng vậy. `vad` nghe
+  khớp với thời gian tiếng vượt nền 6 dB, nên `vad` không bỏ sót: bản thu thiếu tiếng nói.
+- `ch1` to hơn `ch0` 9,2–10,5 dB ở mọi lượt, cả lúc chỉ có nền, đúng mức lệch của `mic_array.md` §1; `calib/bal` của
+  board bù mức này trong chuỗi (dòng `job` ghi `balance calib/bal`).
+- Lượt 17:33 (60 s) không ra tệp nào: WSL vừa khởi động lại và Docker Desktop chưa lên, nên `srhost.stream_rx` không
+  chạy, và `make bss` chờ dòng `listening on` 180 s mà không in gì.
