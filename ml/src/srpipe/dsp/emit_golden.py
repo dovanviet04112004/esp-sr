@@ -951,13 +951,20 @@ def bss_track(rng: np.random.Generator, plan: list[tuple[int, float | None]], co
 
 
 def bss_case(
-    x0: np.ndarray, x1: np.ndarray, track: tuple, cfg: bss.BssConfig, by_rank: bool = False, back: int | None = None
+    x0: np.ndarray,
+    x1: np.ndarray,
+    track: tuple,
+    cfg: bss.BssConfig,
+    by_rank: bool = False,
+    back: int | None = None,
+    separator_type: type = bss.Bss,
 ) -> dict[str, np.ndarray]:
     """One pair of bins every hop, doa per hop and the configuration; the gate, seats, directions, every seat number's
     gate and degrees, and the delayed gates of the hop history_s back after each hop, and both outputs of the last.
-    by_rank numbers the seats by rising delay and back looks fewer hops back, as negative controls."""
+    by_rank numbers the seats by rising delay, back looks fewer hops back and separator_type swaps the separator, as
+    negative controls."""
     angle, conf, searched = track
-    separator = bss.Bss(cfg)
+    separator = separator_type(cfg)
     gate, seats, dirs, number_gate, number_deg, back_gate, back_kept = [], [], [], [], [], [], []
     for h in range(len(angle)):
         y0, y1 = separator.process(x0, x1, int(angle[h]), int(conf[h]), bool(searched[h]))
@@ -996,9 +1003,10 @@ def bss_case(
 
 def _bss_inputs(rng: np.random.Generator) -> list[tuple[tuple, bss.BssConfig]]:
     """(doa per hop, configuration): split at broadside with talkers at 48 and 130 deg; learnt seats for the same two;
-    three seats kept by most updates, two of them falling silent until forgotten; two talkers on one side, 40 and 76
-    deg, kept at 76, low confidences left out; three talkers, then a fourth at 60 deg joining with one of them; a talker
-    at 75 deg settling at 54 beside one at 140, seated once the split is plain, then 140 leaving and 100 coming."""
+    three seats kept by most updates, two of them falling silent, one forgotten and the last two kept; two talkers on
+    one side, 40 and 76 deg, kept at 76, low confidences left out; three talkers, then a fourth at 60 deg joining with
+    one of them; a talker at 75 deg settling at 54 beside one at 140, seated once the split is plain, then 140 leaving
+    and 100 coming; three seats through a silence past seat_forget_s, then 90 deg alone until the other two go."""
     turns = [(10, None), (100, 48.0), (100, 130.0), (100, 48.0), (100, 130.0)]
     return [
         (bss_track(rng, [(10, None), (80, 48.0), (80, 130.0), (60, None), (80, 48.0)]), bss_config()),
@@ -1024,13 +1032,34 @@ def _bss_inputs(rng: np.random.Generator) -> list[tuple[tuple, bss.BssConfig]]:
             ),
             bss_config(mode=bss.MODE_LEARN, first_speech_s=1.5),
         ),
+        (
+            bss_track(
+                rng,
+                [(60, 30.0), (60, 90.0), (60, 150.0)] * 2
+                + [(250, None)]
+                + [(60, 30.0), (60, 90.0), (60, 150.0), (300, 90.0), (60, 30.0), (60, 150.0)],
+            ),
+            bss_config(mode=bss.MODE_LEARN, seats_max=3),
+        ),
     ]
 
 
+class _ForgetsOnHops(bss.Bss):
+    """LEARN whose seats age on every hop, silence included: the negative control of seat_forget_s's speech clock."""
+
+    def __init__(self, cfg: bss.BssConfig) -> None:
+        super().__init__(cfg)
+        self.forget = bss.rounded(float(np.float32(cfg.seat_forget_s)) * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES)
+
+    def process(self, x0, x1, angle_deg, confidence, update):
+        self.heard = self.hop
+        return super().process(x0, x1, angle_deg, confidence, update)
+
+
 def emit_bss(root: Path) -> list[Path]:
-    """Six cases, then four negative controls: the one-side case's gates as the broadside split gives them, the
-    three-seat case with its seats numbered by rising delay, the learnt case's delayed gates taken a hop back, and the
-    late talker's case seated without waiting for confirm."""
+    """Seven cases, then five negative controls: the one-side case's gates as the broadside split gives them, the
+    three-seat case with its seats numbered by rising delay, the learnt case's delayed gates taken a hop back, the late
+    talker's case seated without waiting for confirm, and the silent case's seats aged on hops."""
     rng = np.random.default_rng(SEED + 12)
     x0 = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
     x1 = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
@@ -1063,6 +1092,10 @@ def emit_bss(root: Path) -> list[Path]:
     hasty["config"] = np.array([getattr(cfg, f) for f in BSS_FIELDS], dtype=np.float32)
     path = root / "bss" / "case_neg_003.gold"
     write_gold(path, hasty)
+    written.append(path)
+    track, cfg = cases[6]
+    path = root / "bss" / "case_neg_004.gold"
+    write_gold(path, bss_case(x0, x1, track, cfg, separator_type=_ForgetsOnHops))
     written.append(path)
     return written
 

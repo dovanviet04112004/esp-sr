@@ -257,6 +257,15 @@ def test_committed_bss_cases_match_a_fresh_emit(tmp_path: Path) -> None:
         assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
 
 
+def test_the_bss_hop_clock_negative_control_drops_a_seat_the_silence_keeps() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "bss" / "case_006.gold")
+    negative = read_gold(emit_golden.GOLDEN_ROOT / "bss" / "case_neg_004.gold")
+    three = int(np.argmax(case["seats"] == 3))
+    alone = 360 + 250 + 180  # two rounds, silence, a round: then 90 deg alone
+    assert (case["seats"][three:alone] == 3).all()
+    assert (negative["seats"][three:alone] < 3).any()
+
+
 def test_the_bss_negative_control_has_the_broadside_split_gates() -> None:
     case = read_gold(emit_golden.GOLDEN_ROOT / "bss" / "case_neg_000.gold")
     cfg = bss.BssConfig(
