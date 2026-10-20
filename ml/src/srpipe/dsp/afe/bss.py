@@ -20,6 +20,7 @@ f32 = np.float32
 ANGLES = 181  # every whole degree doa reports, 0 .. 180
 SEATS_CAP = 4  # seats one separator holds; seats_max may not pass it
 BINS_PER_GAP_CAP = 64  # finer bins than this buy nothing at doa's 2 deg grid
+DENSITY_BINS_CAP = 1024  # parts whole degrees past 6 deg off endfire
 MODE_FIXED, MODE_LEARN = 0, 1
 KEEP_ANGLE, KEEP_MOST = 0, 1
 LOGISTIC_REACH = 40.0  # past this the logistic is 0 or 1 in float32
@@ -63,6 +64,17 @@ def update_s(cfg: BssConfig) -> float:
     return grid.HOP_SAMPLES / grid.SAMPLE_RATE_HZ * cfg.update_every_hops
 
 
+def tau_max_of(cfg: BssConfig) -> float:
+    """Samples of delay between the microphones at endfire, in double."""
+    return float(f32(cfg.spacing_m)) * grid.SAMPLE_RATE_HZ / float(f32(cfg.speed_of_sound_m_s))
+
+
+def density_bins(cfg: BssConfig) -> int:
+    """Bins of LEARN's density: the delays of 0 .. 180 deg cut into bins min_gap / bins_per_gap wide."""
+    delay0 = f32(tau_max_of(cfg) * cos_series(0.0))
+    return math.floor(2.0 * float(delay0) / (float(f32(cfg.min_gap)) / cfg.bins_per_gap)) + 1
+
+
 def check(cfg: BssConfig) -> None:
     """Raise unless dsp_afe_bss_workspace_bytes would accept cfg."""
     c = {k: float(f32(v)) if isinstance(v, float) else v for k, v in cfg.__dict__.items()}
@@ -91,6 +103,7 @@ def check(cfg: BssConfig) -> None:
         and c["spacing_m"] > 0.0
         and c["speed_of_sound_m_s"] > 0.0
         and c["history_s"] >= 0.0
+        and density_bins(cfg) <= DENSITY_BINS_CAP
     )
     if not ok:
         raise ValueError(f"bad bss configuration {cfg}")
@@ -135,7 +148,7 @@ class Bss:
         check(self.cfg)
         c = self.cfg
         self.learn = c.mode == MODE_LEARN
-        tau_max = float(f32(c.spacing_m)) * grid.SAMPLE_RATE_HZ / float(f32(c.speed_of_sound_m_s))
+        tau_max = tau_max_of(c)
         self.delay = [f32(tau_max * cos_series(d * PI / 180.0)) for d in range(ANGLES)]
         self.keep_delay = f32(tau_max * cos_series(float(f32(c.keep_deg)) * PI / 180.0))
         self.slope = float(f32(c.gate_slope))
@@ -156,7 +169,7 @@ class Bss:
         self.prominence = f32(c.prominence)
         self.width = float(self.min_gap) / c.bins_per_gap
         self.lo = -float(self.delay[0])
-        self.n_bins = math.floor(2.0 * float(self.delay[0]) / self.width) + 1
+        self.n_bins = density_bins(c)
         self.bin_of = [
             max(0, min(self.n_bins - 1, math.floor((float(self.delay[d]) - self.lo) / self.width)))
             for d in range(ANGLES)

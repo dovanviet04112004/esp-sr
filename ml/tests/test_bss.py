@@ -112,6 +112,7 @@ def test_keep_most_keeps_the_seat_with_the_most_updates() -> None:
         {"smooth_bins": 9},
         {"prominence": 0.0},
         {"core_share": 0.6},
+        {"min_gap": 0.002},
     ],
 )
 def test_a_configuration_the_c_side_refuses_is_refused(over: dict) -> None:
