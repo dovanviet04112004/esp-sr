@@ -504,7 +504,7 @@ vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đ
 | `aec` | thuần | `dsp_afe` | MDF chồng-lưu, bước học tự chỉnh, khử vọng dư | 8 phân đoạn × 256 = 128 ms đuôi | ~1,3 ms hai micro | E10-T4 |
 | `doa` | thuần | `dsp_afe` | GCC-PHAT trên phổ chéo đã làm trơn, dò lưới 2°, xoay pha dồn viết tay (ADR-0008) | dải 2–8 kHz | **641 µs đo** ở bước dò, 22 µs các bước khác | E8-T1 |
 | `gsc` | thuần | `dsp_afe` | chùm trễ và cộng, ma trận chặn, NLMS rò có điều khiển thích nghi, vòng viết tay (ADR-0009) | μ 0,05, rò 1e-4, trần 16 | **141 µs đo**; 485 µs ở bước đổi góc lái | E8-T2 |
-| `bss` | thuần | `dsp_afe` | cổng hướng theo ghế trên góc của `doa`: FIXED ranh giới 90°, LEARN phân cụm (`micarray` của `tinyai-signal`) | độ dốc 20 mỗi mẫu trễ, tối đa 2 ghế | vài chục µs 🔬 | E8-T3 |
+| `bss` | thuần | `dsp_afe` | cổng hướng theo ghế trên góc của `doa`: FIXED ranh giới 90°, LEARN phân cụm (`micarray` của `tinyai-signal`) | độ dốc 20 mỗi mẫu trễ, tối đa 2 ghế | **25 µs đo** chia ở chính diện; LEARN 87 µs, 317 µs ở bước phân cụm; `vad` thứ hai thêm 138 µs | E8-T3 |
 | `ns` sàn | thuần | `dsp_afe` | OM-LSA + IMCRA | gain sàn −12 dB | **1,69 ms đo** (đỉnh 1,88); FPU của S3 tốn 4–6 chu kỳ mỗi lệnh float, không chạy chồng | E9-T1 |
 | `ns` mạng `rnnoise` | **mô hình** | `ai_engine/src/ns_rnnoise/` | RNNoise-16k: RNNoise dựng lại cho 16 kHz | 18–22 dải | 4,8 ms int8 đo trên board B (E9-T10) | E9-T12 |
 | `ns` mạng `nsnet` | **mô hình** | `ai_engine/src/ns_nsnet/` | NSNet-16k: mạng theo vạch họ NSNet2, một gain sigmoid mỗi vạch | 256 vạch, GRU 2 × 144 (cỡ L) | 5,1 ms int8 đo trên board B (E9-T10), hơn `nsnet2` của ESP-SR 21%; chủ repo chọn L (ADR-0014) | E9-T12 |
@@ -711,8 +711,9 @@ giây, và đỉnh một nhịp lên 2,9 ms.
 
 **Chi phí:** không thêm FFT hay dò lưới. Mỗi bước nhân 257 vạch với một hệ số; mỗi lần dò cập nhật histogram, theo vết
 và tính lại cổng; mỗi `recheck_s` phân cụm trên 181 ô. Hàm logistic tính bằng chuỗi lũy thừa trong double như bảng của
-các khối khác, nên C khớp bản soi gương từng bit; FIXED dựng sẵn bảng 181 góc lúc init. Cỡ vài chục µs mỗi bước 🔬, đo ở
-`bench_afe`.
+các khối khác, nên C khớp bản soi gương từng bit; FIXED dựng sẵn bảng 181 góc lúc init. Đo trên board B
+(`measurements/afe/bss.md` §7): **25 µs** mỗi bước khi chia ở chính diện; LEARN 87 µs trung bình, 317 µs ở bước phân
+cụm; `vad` thứ hai thêm 138 µs.
 
 **Thước** (TỔNG QUAN V5.2.3): rò của người kia vào luồng của mình và phần mất của chính mình, cả bài và từ 0,5 s sau mỗi
 lần đổi người nói, trên hai vật liệu: bản ghép luân phiên từ bản thu một người của board B (`raw/device/tinyai`), và cảnh
@@ -3071,7 +3072,7 @@ trung bình ≤ 70%. Mọi ô là ước 🔬 lấy từ §3.3; `docs/measuremen
 | | | `speaker` b0 sau mỗi lệnh nhận được, khi đường chip bật (§3.17) | 100% trong ~1,2 s mỗi lệnh |
 | `balance` | 10 | `gui` + `mqtt` + `luong` | 2–5% |
 | `doa` (dò mỗi hai khung khi có tiếng; đo) | 641 | log-mel và cao độ mỗi bước, mọi trạng thái (đo) | ~14% |
-| `gsc` (nặng hơn `bss`; đo, ở bước đổi góc lái) | 485 | | |
+| `gsc` (đo, ở bước đổi góc lái; `bss` cùng `vad` thứ hai của nó đo 163–225 µs) | 485 | | |
 | `ns` mạng thay sàn trong khe: RNNoise-16k 4 809, NSNet-16k L 5 054, đo trên board B (§3.9, ADR-0014) | 4 809–5 054 | | |
 | `istft` | 196 | | |
 | `vad` + `agc` | 80 | | |
@@ -3241,7 +3242,7 @@ TỔNG QUAN §7 ước ~97 KB và thiếu bốn khoản. Bảng ước lại �
 | Đệm DMA I2S RX: 8 khối × 256 mẫu × 2 khe × 4 B | 16 KB | 128 ms phủ một lần ghi flash (§5.5) |
 | Đệm DMA I2S TX: cùng khuôn | 16 KB | RX và TX căn theo khối |
 | Pool `q_frame`: 8 × 1,5 KB | 12 KB | |
-| `dsp_spec` + `dsp_afe` trừ `aec`: STFT hai kênh, `doa`, `bss`, `ns` sàn, `vad`, `agc` | ~28 KB | riêng `bss`: vòng đệm góc, histogram 181 ô, bảng trễ và cổng 181 góc ≈ 3 KB |
+| `dsp_spec` + `dsp_afe` trừ `aec`: STFT hai kênh, `doa`, `bss`, `ns` sàn, `vad`, `agc` | ~28 KB | riêng `bss`: vòng đệm góc, histogram 181 ô, bảng trễ và cổng 181 góc, 2 928 B đo; `vad` thứ hai 2 640 B và đệm trung bình hai micro 1 KB |
 | `aec`: trọng số 2 × 8 × 257 phức + phổ tham chiếu 8 × 257 phức + đệm | ~55 KB | §3.5 |
 | Ngăn xếp task ứng dụng (§5.2, trừ `mqtt_task`) | ~41 KB | |
 | Wi-Fi + lwIP | 50–90 KB | tuỳ số đệm RX/TX trong sdkconfig |
