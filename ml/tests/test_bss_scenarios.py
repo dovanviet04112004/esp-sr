@@ -1,6 +1,6 @@
 """bss LEARN over scenarios of doa as it behaves on board B (KEHOACH 3.8): readings sweep from one talker to the
 next after each change, a few stray anywhere, and talkers drift, overlap or fall silent. Each scenario names the seats
-it ends with and the talkers that hold one; a talker's settled readings must land in its own seat."""
+it ends with and the talkers that hold one; a talker's settled readings must land in its own seat, under one number."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ CONFIDENCE = 120
 NEAR_DEG = 6  # a seat this close to a talker is theirs
 OWN_SHARE_MIN = 0.9
 SEEDS = (0, 1, 2)
-STRAYS = (0.03, 0.06)
+STRAYS = (0.0, 0.03, 0.06)
 
 
 @dataclass(frozen=True)
@@ -72,7 +72,19 @@ def own_share(gates: list, degrees: list, owner: list, talker: float, after: int
     return hits / total if total else 1.0
 
 
+def number_share(gates: list, degrees: list, owner: list, talker: float, after: int) -> float:
+    """Share of the talker's settled hops from after on whose largest gate is the number that holds them most; hops
+    where seats are held but none near the talker, a newcomer's wait for a seat, are left out."""
+    picks = []
+    for h in range(after, len(owner)):
+        held = [d for d in degrees[h] if d >= 0]
+        if owner[h] == talker and not (held and all(abs(d - talker) > NEAR_DEG for d in held)):
+            picks.append(int(np.argmax(gates[h])))
+    return int(np.bincount(picks).max()) / len(picks) if picks else 1.0
+
+
 S = Turn
+AWAY = 45  # turns of 2 s: 90 s, past seat_forget_s
 SCENARIOS = {
     "one talker drifting": ([S(1250, 48, 58)], {}, 0, []),
     "two sides": ([S(TURN, 48), S(TURN, 130)] * 6, {}, 2, [48, 130]),
@@ -104,7 +116,7 @@ SCENARIOS = {
     "a talker drifts": ([S(TURN, 48), S(TURN, 130, 118), S(TURN, 48), S(TURN, 118, 106)] * 3, {}, 2, [48]),
     "overlaps": ([S(TURN, 48), S(TURN, 130), S(TURN, 48, overlap=130)] * 5, {}, 2, [48, 130]),
     "long pauses": ([S(TURN, 48), S(400, None), S(TURN, 130), S(400, None)] * 4, {}, 2, [48, 130]),
-    "strays only": ([S(1250, None)], {}, 0, []),
+    "silence": ([S(1250, None)], {}, 0, []),
     "turns of 0.5 s": ([S(31, 48), S(31, 130)] * 24, {}, 2, [48, 130]),
     "leaves, comes back": (
         [S(TURN, 48), S(TURN, 130)] * 4 + [S(TURN, 48), S(TURN, 90)] * 20 + [S(TURN, 130), S(TURN, 48)] * 4,
@@ -114,6 +126,20 @@ SCENARIOS = {
     ),
     "three seats, four talk": ([S(TURN, 30), S(TURN, 60), S(TURN, 90), S(TURN, 150)] * 5, {"seats_max": 3}, 3, []),
     "music and a talker": ([S(TURN, 130, overlap=12), S(TURN, 12)] * 6, {}, 2, [12]),
+    "one side, one away long": (
+        [S(TURN, 40), S(TURN, 76)] * 4 + [S(TURN, 76)] * AWAY + [S(TURN, 40), S(TURN, 76)] * 3,
+        {},
+        2,
+        [40, 76],
+    ),
+    "four, all silent long": (
+        [S(TURN, 30), S(TURN, 60), S(TURN, 90), S(TURN, 150)] * 3
+        + [S(TURN * AWAY, None)]
+        + [S(TURN, 30), S(TURN, 60), S(TURN, 90), S(TURN, 150)] * 2,
+        {"seats_max": 4},
+        4,
+        [30, 60, 90, 150],
+    ),
 }
 
 
@@ -140,3 +166,4 @@ def test_learn_seats_every_talker_and_no_one_else(name: str, seed: int, stray: f
         assert any(abs(d - talker) <= NEAR_DEG for d in held), f"no seat near {talker}: {held}"
         seated = next(h for h in range(len(seats)) if seats[h] == seats_want)
         assert own_share(gates, degrees, owner, talker, seated) >= OWN_SHARE_MIN
+        assert number_share(gates, degrees, owner, talker, seated) >= OWN_SHARE_MIN, f"{talker} changes number"

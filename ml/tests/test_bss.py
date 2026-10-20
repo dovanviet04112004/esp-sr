@@ -83,9 +83,21 @@ def test_a_talker_holding_the_floor_past_the_window_keeps_both_seats() -> None:
     assert split < 200 and all(s == 2 for _, s in out[split:])
 
 
-def test_a_seat_no_update_reaches_for_seat_forget_s_goes() -> None:
-    out = speak(separator(mode=bss.MODE_LEARN), [(100, 48), (100, 130), (250, 130)])
-    assert max(s for _, s in out) == 2 and out[-1][1] == 0
+def test_the_last_two_seats_stay_while_one_talker_holds_the_floor() -> None:
+    seen: list = []
+    out = speak(separator(mode=bss.MODE_LEARN), [(100, 48), (100, 130), (250, 130)], numbered=seen)
+    split = next(i for i, (_, s) in enumerate(out) if s == 2)
+    assert all(s == 2 for _, s in out[split:])
+    assert near(seen[-1][1][0], 130) and near(seen[-1][1][1], 48)
+
+
+def test_silence_ages_no_seat() -> None:
+    seen: list = []
+    plan = [(60, 90), (60, 30), (60, 150)] * 2 + [(250, None)] + [(60, 90), (60, 30), (60, 150)]
+    out = speak(separator(mode=bss.MODE_LEARN, seats_max=3), plan, numbered=seen)
+    three = next(i for i, (_, s) in enumerate(out) if s == 3)
+    assert all(s == 3 for _, s in out[three:])
+    assert all(near(a, b) for a, b in zip(seen[-1][1][:3], seen[three][1][:3], strict=True))
 
 
 def test_a_quiet_talker_is_still_a_seat() -> None:
