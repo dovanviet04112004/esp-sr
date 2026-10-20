@@ -43,6 +43,8 @@ bss:                                # direction gate on doa's angle (KEHOACH 3.8
   track_tau_s: 0.2                  # LEARN: a seat's centre follows its updates with this time constant
   track_gate: 0.9                   # LEARN: an update farther than this from every seat, samples, moves none
   seat_forget_s: 60.0               # LEARN: a seat no update has reached this long is dropped
+  history_s: 0.0                    # delayed output: seconds of held angles kept for old hops; product 0
+  lookahead_s: 0.2                  # delayed output: an old hop's gate takes the angle held this long after it
 ns:
   floor_db: -12.0                     # seed of NVS afe/ns_floor_db: G_min of OM-LSA
   # OM-LSA with IMCRA (KEHOACH 3.9) as the author's omlsa.m of 2003: 'medium' non-stationarity, broadband decision,
