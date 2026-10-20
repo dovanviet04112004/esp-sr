@@ -504,7 +504,7 @@ vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đ
 | `aec` | thuần | `dsp_afe` | MDF chồng-lưu, bước học tự chỉnh, khử vọng dư | 8 phân đoạn × 256 = 128 ms đuôi | ~1,3 ms hai micro | E10-T4 |
 | `doa` | thuần | `dsp_afe` | GCC-PHAT trên phổ chéo đã làm trơn, dò lưới 2°, xoay pha dồn viết tay (ADR-0008) | dải 2–8 kHz | **641 µs đo** ở bước dò, 22 µs các bước khác | E8-T1 |
 | `gsc` | thuần | `dsp_afe` | chùm trễ và cộng, ma trận chặn, NLMS rò có điều khiển thích nghi, vòng viết tay (ADR-0009) | μ 0,05, rò 1e-4, trần 16 | **141 µs đo**; 485 µs ở bước đổi góc lái | E8-T2 |
-| `bss` | thuần | `dsp_afe` | cổng hướng theo ghế trên góc của `doa`: FIXED ranh giới 90°, LEARN phân cụm (`micarray` của `tinyai-signal`) | độ dốc 20 mỗi mẫu trễ, tối đa 2 ghế | **25 µs đo** chia ở chính diện; LEARN 87 µs, 317 µs ở bước phân cụm; `vad` thứ hai thêm 138 µs | E8-T3 |
+| `bss` | thuần | `dsp_afe` | cổng hướng theo ghế trên góc của `doa`: FIXED ranh giới 90°, LEARN phân cụm (`micarray` của `tinyai-signal`) | độ dốc 20 mỗi mẫu trễ, tối đa 2 ghế | **25 µs đo** chia ở chính diện; LEARN 🔬; `vad` thứ hai thêm 138 µs | E8-T3 |
 | `ns` sàn | thuần | `dsp_afe` | OM-LSA + IMCRA | gain sàn −12 dB | **1,69 ms đo** (đỉnh 1,88); FPU của S3 tốn 4–6 chu kỳ mỗi lệnh float, không chạy chồng | E9-T1 |
 | `ns` mạng `rnnoise` | **mô hình** | `ai_engine/src/ns_rnnoise/` | RNNoise-16k: RNNoise dựng lại cho 16 kHz | 18–22 dải | 4,8 ms int8 đo trên board B (E9-T10) | E9-T12 |
 | `ns` mạng `nsnet` | **mô hình** | `ai_engine/src/ns_nsnet/` | NSNet-16k: mạng theo vạch họ NSNet2, một gain sigmoid mỗi vạch | 256 vạch, GRU 2 × 144 (cỡ L) | 5,1 ms int8 đo trên board B (E9-T10), hơn `nsnet2` của ESP-SR 21%; chủ repo chọn L (ADR-0014) | E9-T12 |
@@ -675,23 +675,31 @@ một hệ số theo hướng ấy: người ở ghế giữ đi qua, người �
 | Số ghế | mỗi ghế giữ một số 0…`seats_max`−1 từ lúc được nhận tới lúc bị quên. Lần phân cụm nhận thêm ghế ghép từng ghế cũ, theo τ tăng dần, với tâm mới gần nó nhất chưa ghế nào lấy; ghế mới lấy số nhỏ nhất còn trống, theo τ tăng dần. Khi chưa có hai ghế, và ở FIXED, số 0 là phía τ < 0 (trên 90°), số 1 là phía τ > 0. Cổng của từng số đặt ở mỗi lần dò và giữ nguyên giữa hai lần dò, như cổng của ghế giữ; module trả cổng và hướng của mọi số | lối ra theo từng ghế (`test_apps/bss_live`) nghe được một người qua cả buổi, kể cả khi LEARN nhận thêm ghế xen giữa hai ghế cũ |
 | Lối ra trễ | chỉ `test_apps/bss_live`, D giây chọn lúc chạy, 0 là tắt: bước t ra ở bước t + D, cổng của nó tính bằng ghế đang giữ ở t + D và góc đã giữ ở t + `lookahead_s`. Module giữ góc của `history_s` giây gần nhất (sản phẩm 0) và trả cổng của mọi số cho một góc cũ dưới các ghế hiện tại; app giữ trộn trần và hai kênh thô của D giây trong PSRAM, ~3 KB mỗi bước | khi D dài hơn thời gian LEARN chờ tách (2–4 s), đoạn người mới nói trước khi có ghế vẫn vào đúng ghế; `doa` làm trơn 0,2 s nên góc đi sau người nói, nhìn trước `lookahead_s` thì đầu mỗi lượt không còn theo hướng người trước. Sản phẩm không dùng: mỗi lệnh sẽ chậm thêm D giây |
 | FIXED, `mode` 0 (mặc định) | hai ghế, ranh giới b = 0 (90°, trục vuông góc của cặp micro); ghế giữ là phía chứa `keep_deg` | biết trước người ra lệnh ngồi phía nào thì tách ngay từ lần dò đầu |
-| LEARN, `mode` 1 | ghế phân cụm từ chính các lần dò, tối đa `seats_max` ghế; ghế giữ theo `keep_rule`: 0 là ghế có tâm gần `keep_deg` nhất, 1 là ghế được gán nhiều lần dò nhất kể từ lúc nhận, bắt đầu từ số đếm trong cửa sổ; trước khi có hai ghế, ghế giữ là phía của `keep_deg` | hai người ngồi cùng một phía của board, hay không biết trước ai ngồi đâu |
+| LEARN, `mode` 1 | ghế là các đỉnh của mật độ các lần dò, tối đa `seats_max` ghế; ghế giữ theo `keep_rule`: 0 là ghế có tâm gần `keep_deg` nhất, 1 là ghế được gán nhiều lần dò nhất kể từ lúc nhận, bắt đầu từ số đếm trong cửa sổ; trước khi có hai ghế, ghế giữ là phía của `keep_deg` | hai người ngồi cùng một phía của board, hay không biết trước ai ngồi đâu |
 
 **LEARN** giữ histogram số lần dò rơi vào mỗi độ 0…180 trong `decision_s` giây tiếng nói gần nhất: vòng đệm các góc,
-góc vào thì cộng một, góc rời thì trừ một. Trên histogram ấy:
+góc vào thì cộng một, góc rời thì trừ một. Mỗi `recheck_s`, lần đầu ngay khi các lần dò phủ `first_speech_s` giây tiếng
+nói, nó tìm **đỉnh** của histogram ấy:
 
-- **Phân cụm** mỗi `recheck_s`, lần đầu ngay khi các lần dò phủ `first_speech_s` giây tiếng nói. K-means một chiều trên
-  τ, mỗi độ nặng bằng số đếm của nó, `kmeans_rounds` vòng, hạt giống ở các phân vị đều của histogram. Đi từ k = 2 lên
-  `seats_max`; nhận k khi mọi ghế giữ ít nhất `occupancy_min` số lần dò, mọi cặp kề cách nhau ít nhất `min_gap` mẫu, và
-  độ trũng giữa chúng dưới `valley_max`. Độ trũng là số lần dò trong ±`valley_width` khoảng cách quanh trung điểm, chia
-  trung bình hai số ấy quanh hai tâm. Dừng ở k đầu tiên hỏng.
-- **Nhận số ghế** lớn hơn số đang có khi `confirm` lần phân cụm liên tiếp cùng ra số ấy, và lấy luôn các tâm mới. Số ghế
-  **không giảm** theo phân cụm: một ghế chỉ bị bỏ khi `seat_forget_s` giây không có lần dò nào gán vào nó.
-- **Ranh giới** giữa hai ghế kề lệch khỏi trung điểm theo độ trải của hai cụm: cụm rộng đẩy ranh giới về phía cụm hẹp,
-  và mỗi ghế giữ ít nhất `boundary_share_min` khoảng cách. Khi đã tách, độ lệch ấy đi `boundary_follow` quãng mỗi lần
-  phân cụm lại.
-- **Theo vết**: mỗi lần dò gán cho ghế gần nhất nếu cách nó không quá `track_gate` mẫu; tâm ghế ấy dời về phía nó với
-  hằng thời gian `track_tau_s`, và hai tâm không gần nhau quá `min_gap`.
+- **Mật độ theo độ trễ.** Số đếm dồn vào các ô đều theo τ, mỗi `min_gap` chia `bins_per_gap` ô, rồi làm trơn bằng nhân
+  tam giác nửa rộng `smooth_bins` ô, trọng số nguyên, nên C và bản soi gương ra cùng số nguyên.
+- **Đỉnh nổi rõ.** Một cực đại là ứng viên khi chỗ trũng cao hơn trong hai chỗ trũng ngăn nó với đỉnh cao hơn mỗi bên
+  thấp hơn (1 − `prominence`) chiều cao của nó; hai ứng viên gần nhau dưới `min_gap` thì giữ cái cao hơn.
+- **Lõi.** Các lần dò trong ±`core_share` × `min_gap` mẫu quanh ô đỉnh là lõi; ứng viên chỉ được giữ khi lõi chiếm ít
+  nhất `occupancy_min` số lần dò của cửa sổ, và tâm của nó là trung bình có trọng số của lõi. Người nói dồn lần dò vào
+  lõi; lần dò lạc và lúc `doa` quét từ người này sang người kia trải mỏng, không đủ khối lượng ở lõi nào.
+- **Tách lần đầu.** Chưa có ghế mà `confirm` lần liên tiếp cùng ra từ hai ứng viên trở lên, cùng số, mỗi tâm lệch dưới
+  nửa `min_gap` so với lần trước: các ứng viên thành ghế, giữ những đỉnh cao nhất nếu quá `seats_max`, đánh số theo τ tăng
+  dần.
+- **Thêm ghế.** Ứng viên cách mọi ghế đang giữ từ `min_gap` trở lên là người mới; có mặt `confirm` lần liên tiếp, tâm lệch
+  dưới nửa `min_gap`, thì thành ghế mới, lấy số nhỏ nhất còn trống. Ghế đang giữ không bị thay, dời hay đổi số vì chuyện
+  này, kể cả ghế đang vắng mặt trong cửa sổ. Đủ `seats_max` thì người mới vào ghế có vùng chứa họ.
+- **Theo ghế.** Ứng viên trong `min_gap` của một ghế là người ngồi ghế ấy (mỗi ghế lấy ứng viên gần nhất): tâm ghế đi
+  `seat_follow` quãng về tâm ứng viên mỗi lần, rồi các ghế giữ thứ tự và cách nhau ít nhất `min_gap`.
+- **Ranh giới** giữa hai ghế kề nhau, khi cả hai có mặt trong cửa sổ, là chỗ trũng thấp nhất của mật độ giữa hai đỉnh, giữ
+  cho mỗi ghế ít nhất `boundary_share_min` khoảng cách, và đi `boundary_follow` quãng mỗi lần; thiếu một bên thì giữ nguyên.
+- **Còn người.** Mỗi lần dò được tính cho ghế có vùng chứa nó; ghế `seat_forget_s` giây không được tính lần nào thì bị
+  bỏ, còn dưới hai ghế thì về 0 ghế.
 - Trước khi có hai ghế, LEARN cắt như FIXED.
 
 Ba chỗ hỏng `tinyai-signal` đo được ở chế độ học (báo cáo tuần 8 của nó), và cách khối này tránh:
@@ -702,20 +710,25 @@ Ba chỗ hỏng `tinyai-signal` đo được ở chế độ học (báo cáo tu
 | một người giữ lời quá 8 s là rớt về một người, phần còn lại của phiên không tách (0,0 dB) | số ghế không giảm theo phân cụm; ghế chỉ mất khi bỏ trống `seat_forget_s` |
 | hai người lệch mức 12 dB thì cổng mức loại hết khung của người nhỏ tiếng | không có cổng mức: mọi lần dò của `doa` đều tính, vì nó chỉ dò khi `vad` báo có tiếng |
 
-Phân cụm trên histogram 181 ô nên không tốn theo độ dài cửa sổ; `tinyai-signal` phân cụm cả vòng đệm 800 khung mỗi
-giây, và đỉnh một nhịp lên 2,9 ms.
+Dò đỉnh trên histogram 181 độ và vài chục ô độ trễ nên không tốn theo độ dài cửa sổ; `tinyai-signal` phân cụm cả vòng
+đệm 800 khung mỗi giây, và đỉnh một nhịp lên 2,9 ms. Bộ kịch bản LEARN (`ml/tests/test_bss_scenarios.py`) dựng `doa` có
+quét chuyển và lần dò lạc: một người, hai người hai phía hay cùng phía, ba và bốn người, người thứ tư vào muộn khi cả
+ba còn nói, khi chỉ một người còn nói hay khi một mình, người vắng quá `seat_forget_s` rồi quay lại, đủ trần ghế, người
+nói 10%, hai người sát `min_gap`, người xê dịch, nói đè, nhạc, lượt 0,5 s.
 
 **Giới hạn phải ghi:**
 - hai người **nói đè** thì không tách (`tinyai-signal` đo kém trộn 5,45 dB trên khung đè);
 - nhạc, TV phát cùng lúc với lời chỉ bị dìm ở những khung nó lấn tiếng người;
 - hai người nối lời không nghỉ thì đầu mỗi lượt còn rò cỡ 0,5 s, vì `doa` làm trơn 0,2 s;
-- hai người cùng một phía thì FIXED không tách được.
+- hai người cùng một phía thì FIXED không tách được;
+- người có mỗi câu chỉ chừng nửa giây, khi `doa` quét chuyển lâu cỡ 0,3 s, không đủ khối lượng ở lõi để có ghế;
+- hai người lệch nhau dưới `min_gap` mẫu trễ (14° quanh chính diện, 27° quanh 30° và 150°) là một ghế;
+- mỗi bước trao cho một ghế, hai micro không phân biệt trước sau (θ và −θ là một ghế).
 
-**Chi phí:** không thêm FFT hay dò lưới. Mỗi bước nhân 257 vạch với một hệ số; mỗi lần dò cập nhật histogram, theo vết
-và tính lại cổng; mỗi `recheck_s` phân cụm trên 181 ô. Hàm logistic tính bằng chuỗi lũy thừa trong double như bảng của
+**Chi phí:** không thêm FFT hay dò lưới. Mỗi bước nhân 257 vạch với một hệ số; mỗi lần dò cập nhật histogram, tính cho
+ghế của vùng chứa nó và tính lại cổng; mỗi `recheck_s` dò đỉnh, toàn phép số nguyên trên vài chục ô. Hàm logistic tính bằng chuỗi lũy thừa trong double như bảng của
 các khối khác, nên C khớp bản soi gương từng bit; FIXED dựng sẵn bảng 181 góc lúc init. Đo trên board B
-(`measurements/afe/bss.md` §7): **25 µs** mỗi bước khi chia ở chính diện; LEARN 87 µs trung bình, 317 µs ở bước phân
-cụm; `vad` thứ hai thêm 138 µs.
+(`measurements/afe/bss.md` §7): **25 µs** mỗi bước khi chia ở chính diện; LEARN 🔬; `vad` thứ hai thêm 138 µs.
 
 **Thước** (TỔNG QUAN V5.2.3): rò của người kia vào luồng của mình và phần mất của chính mình, cả bài và từ 0,5 s sau mỗi
 lần đổi người nói, trên hai vật liệu: bản ghép luân phiên từ bản thu một người của board B (`raw/device/tinyai`), và cảnh
@@ -3078,7 +3091,7 @@ trung bình ≤ 70%. Mọi ô là ước 🔬 lấy từ §3.3; `docs/measuremen
 | | | `speaker` b0 sau mỗi lệnh nhận được, khi đường chip bật (§3.17) | 100% trong ~1,2 s mỗi lệnh |
 | `balance` | 10 | `gui` + `mqtt` + `luong` | 2–5% |
 | `doa` (dò mỗi hai khung khi có tiếng; đo) | 641 | log-mel và cao độ mỗi bước, mọi trạng thái (đo) | ~14% |
-| `gsc` (đo, ở bước đổi góc lái; `bss` cùng `vad` thứ hai của nó đo 163–225 µs) | 485 | | |
+| `gsc` (đo, ở bước đổi góc lái; `bss` cùng `vad` thứ hai của nó đo 163 µs khi chia ở chính diện, LEARN 🔬) | 485 | | |
 | `ns` mạng thay sàn trong khe: RNNoise-16k 4 809, NSNet-16k L 5 054, đo trên board B (§3.9, ADR-0014) | 4 809–5 054 | | |
 | `istft` | 196 | | |
 | `vad` + `agc` | 80 | | |
