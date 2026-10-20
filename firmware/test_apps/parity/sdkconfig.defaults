@@ -3,5 +3,6 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
-# bss needs doa and vad, so only the modules build, on sdkconfig.afe, compiles it and runs its cases.
+# Spatial modules outside the product run their own cases; bss needs doa and vad, so only the modules build has it.
+CONFIG_DSP_AFE_GSC_ENABLE=y
 CONFIG_DSP_AFE_BSS_ENABLE=y
