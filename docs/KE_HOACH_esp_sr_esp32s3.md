@@ -689,11 +689,15 @@ nói, nó tìm **đỉnh** của histogram ấy:
   nhất `occupancy_min` số lần dò của cửa sổ, và tâm của nó là trung bình có trọng số của lõi. Người nói dồn lần dò vào
   lõi; lần dò lạc và lúc `doa` quét từ người này sang người kia trải mỏng, không đủ khối lượng ở lõi nào.
 - **Tách lần đầu.** Chưa có ghế mà `confirm` lần liên tiếp cùng ra từ hai ứng viên trở lên, cùng số, mỗi tâm lệch dưới
-  nửa `min_gap` so với lần trước: các ứng viên thành ghế, giữ những đỉnh cao nhất nếu quá `seats_max`, đánh số theo τ tăng
-  dần.
+  nửa `min_gap` so với lần trước: các ứng viên thành ghế, đánh số theo τ tăng dần. Quá `seats_max` thì giữ những đỉnh cao
+  nhất, nhưng chỉ khi đỉnh bị bỏ thấp hơn (1 − `prominence`) đỉnh thấp nhất được giữ; không thì đợi, vì trong lúc đợi
+  LEARN cắt như FIXED. Trên bản thu hai người luân phiên của board B, người thứ hai nói vài câu đầu ở 75° rồi ngồi yên
+  54°, hai đỉnh cao 38 và 34: chọn ngay thì ghế khoá ở 75°.
 - **Thêm ghế.** Ứng viên cách mọi ghế đang giữ từ `min_gap` trở lên là người mới; có mặt `confirm` lần liên tiếp, tâm lệch
   dưới nửa `min_gap`, thì thành ghế mới, lấy số nhỏ nhất còn trống. Ghế đang giữ không bị thay, dời hay đổi số vì chuyện
-  này, kể cả ghế đang vắng mặt trong cửa sổ. Đủ `seats_max` thì người mới vào ghế có vùng chứa họ.
+  này, kể cả ghế đang vắng mặt trong cửa sổ. Đủ `seats_max` mà có ghế không có ứng viên nào trong `min_gap` của nó, thì
+  ứng viên mới, có mặt `confirm` lần, dời ghế gần nhất trong số ấy về mình, giữ số: ghế đặt lệch người của nó, hay người
+  ngồi đó đã đi và người khác tới. Mọi ghế đều có người thì người thừa vào ghế có vùng chứa họ.
 - **Theo ghế.** Ứng viên trong `min_gap` của một ghế là người ngồi ghế ấy (mỗi ghế lấy ứng viên gần nhất): tâm ghế đi
   `seat_follow` quãng về tâm ứng viên mỗi lần, rồi các ghế giữ thứ tự và cách nhau ít nhất `min_gap`.
 - **Ranh giới** giữa hai ghế kề nhau, khi cả hai có mặt trong cửa sổ, là chỗ trũng thấp nhất của mật độ giữa hai đỉnh, giữ
