@@ -310,6 +310,33 @@ def tinyai_bss(raw: Path, spec: dict, variants: dict) -> list[TurnsBss]:
     ]
 
 
+def learnt_seats(pcm: np.ndarray, cfg: bss.BssConfig) -> tuple[float | None, list[int]]:
+    """When LEARN first holds two seats in the chain, and the degrees of the seats it holds at the end."""
+    chain = Chain("MM", ChainConfig(modules=CHAIN_MODULES, spatial="bss", bss=cfg))
+    split = None
+    for h in range(len(pcm) // HOP):
+        chain.process(pcm[h * HOP : (h + 1) * HOP].reshape(-1))
+        if split is None and chain.separator.seats >= 2:
+            split = h * HOP / grid.SAMPLE_RATE_HZ
+    return split, sorted(d for d in chain.separator.numbered()[1] if d >= 0)
+
+
+def recordings_bss(raw: Path, spec: dict, variants: dict) -> str:
+    """Board B's own recordings without labels: when each LEARN variant splits and where its seats end."""
+    learn = {name: cfg for name, cfg in variants.items() if cfg.mode == bss.MODE_LEARN}
+    lines = ["", "Board B recordings, no labels: split s / seats deg", "| Recording | " + " | ".join(learn) + " |"]
+    lines.append("|---|" + "---|" * len(learn))
+    for name in spec["recordings"]:
+        audio, _ = read_wav(raw / spec["tinyai"] / f"{name}.wav")
+        pcm = np.clip(np.rint(audio * PCM_FULL_SCALE), PCM_MIN, PCM_MAX).astype(np.int16)
+        cells = []
+        for cfg in learn.values():
+            split, seats = learnt_seats(pcm, cfg)
+            cells.append(f"{'—' if split is None else f'{split:.1f}'} / {', '.join(str(d) for d in seats) or '—'}")
+        lines.append(f"| {name} | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
 def bss_tables(tinyai: list[TurnsBss], scenes: list[TurnsBss], settle_s: float) -> str:
     """Kept / leaked / leaked after settle_s in dB, and LEARN's split: board B's turns, then scenes by RT60, side."""
     runs = list(tinyai[0].runs)
@@ -365,6 +392,7 @@ def main(argv: list[str] | None = None) -> int:
             jobs = [(f, variants, spec["settle_s"]) for f in folders]
             scenes = [s for s in pool.map(scene_bss, jobs) if s is not None]
             print(bss_tables(tinyai_bss(data_paths()["raw"], spec, variants), scenes, spec["settle_s"]))
+            print(recordings_bss(data_paths()["raw"], spec, variants))
         else:
             variants = {PRODUCT: gsc.GscConfig()} | {
                 name: replace(gsc.GscConfig(), **o) for name, o in spec["variants"].items()

@@ -5,6 +5,10 @@ eval:
   settle_s: 0.5                     # leakage is counted again from this long after each change of talker
   tinyai: device/tinyai             # under raw/: talker A alone and talker B alone on board B, in turns of turn_s
   turn_s: 5.0
+  recordings:                       # under raw/<tinyai>/: two talkers in turns, two overlapping, a voice over music
+    - hai_nguoi_30s_luanphien
+    - hai_nguoi_10s_10chongnhau
+    - truoc_loc
   variants:                         # keep_deg comes from each scene's label, or the kept talker of the tinyai turns
     fixed: {mode: 0}
     learn: {mode: 1}
