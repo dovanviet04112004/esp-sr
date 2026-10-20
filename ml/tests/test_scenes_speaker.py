@@ -7,7 +7,11 @@ import numpy as np
 import pytest
 
 from srpipe.generated import grid
-from srpipe.scenes import device, speaker
+from srpipe.scenes import device
+
+pytest.importorskip("torch")
+
+from srpipe.scenes import speaker
 
 
 def test_eer_is_zero_when_apart_and_a_half_when_the_same() -> None:

@@ -2,6 +2,9 @@ import numpy as np
 import pytest
 
 from srpipe.generated import speaker
+
+pytest.importorskip("torch")
+
 from srpipe.scenes import speaker as survey
 from srpipe.tasks.speaker import probe
 
