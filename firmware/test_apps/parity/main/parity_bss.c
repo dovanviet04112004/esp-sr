@@ -7,6 +7,7 @@
 #define FLOATS_PER_BIN 2
 #define CONFIG_VALUES 23 // in the order of srpipe.dsp.emit_golden.BSS_FIELDS
 #define DIRECTIONS 2
+#define NUMBERS DSP_AFE_BSS_SEATS_MAX
 
 static dsp_afe_bss_config_t config_of(const float *v)
 {
@@ -35,7 +36,8 @@ static dsp_afe_bss_config_t config_of(const float *v)
                                   .speed_of_sound_m_s = v[22]};
 }
 
-// got holds the gates, the seats and the directions of every hop; last both outputs of the last hop.
+// got holds the gate, seats, directions and every number's gate and degrees of each hop; last the last
+// outputs.
 static bool run_hops(const float *config, const float *bins, const float *angle, const float *confidence,
                      const float *searched, size_t hops, float *got, float *last)
 {
@@ -51,11 +53,16 @@ static bool run_hops(const float *config, const float *bins, const float *angle,
                                  (dsp_spec_cplx_t *)last, (dsp_spec_cplx_t *)(last + stride)) == ESP_OK;
         uint8_t seats = 0;
         int16_t dirs[DIRECTIONS];
+        int16_t number_deg[NUMBERS];
         dsp_afe_bss_state(bss, &seats, &got[h]);
         dsp_afe_bss_directions(bss, dirs);
+        dsp_afe_bss_numbered(bss, &got[(2 + DIRECTIONS) * hops + NUMBERS * h], number_deg);
         got[hops + h] = (float)seats;
         got[2 * hops + DIRECTIONS * h] = (float)dirs[0];
         got[2 * hops + DIRECTIONS * h + 1] = (float)dirs[1];
+        for (size_t j = 0; j < NUMBERS; j++) {
+            got[(2 + DIRECTIONS + NUMBERS) * hops + NUMBERS * h + j] = (float)number_deg[j];
+        }
     }
     free(mem);
     return ok;
@@ -63,20 +70,24 @@ static bool run_hops(const float *config, const float *bins, const float *angle,
 
 bool parity_bss(const char *case_name, const void *buf, size_t len)
 {
-    gold_tensor_t config, bins0, bins1, angle, confidence, searched, gate, seats, directions, out0, out1;
+    gold_tensor_t config, bins0, bins1, angle, confidence, searched, gate, seats, directions, number_gate,
+        number_deg, out0, out1;
     if (!parity_tensor(buf, len, "config", &config) || !parity_tensor(buf, len, "bins0", &bins0) ||
         !parity_tensor(buf, len, "bins1", &bins1) || !parity_tensor(buf, len, "angle", &angle) ||
         !parity_tensor(buf, len, "confidence", &confidence) ||
         !parity_tensor(buf, len, "searched", &searched) || !parity_tensor(buf, len, "gate", &gate) ||
         !parity_tensor(buf, len, "seats", &seats) || !parity_tensor(buf, len, "directions", &directions) ||
-        !parity_tensor(buf, len, "out0", &out0) || !parity_tensor(buf, len, "out1", &out1) ||
-        bins0.ndim != 3 || bins0.dims[0] != 1 || bins0.dims[1] != GEN_GRID_N_BINS ||
-        bins0.dims[2] != FLOATS_PER_BIN || angle.ndim != 1) {
+        !parity_tensor(buf, len, "number_gate", &number_gate) ||
+        !parity_tensor(buf, len, "number_deg", &number_deg) || !parity_tensor(buf, len, "out0", &out0) ||
+        !parity_tensor(buf, len, "out1", &out1) || bins0.ndim != 3 || bins0.dims[0] != 1 ||
+        bins0.dims[1] != GEN_GRID_N_BINS || bins0.dims[2] != FLOATS_PER_BIN || angle.ndim != 1) {
         return false;
     }
     const size_t hops = angle.dims[0];
     const size_t n = GEN_GRID_N_BINS * FLOATS_PER_BIN;
-    const size_t per_hop = 2 + DIRECTIONS;
+    const size_t per_hop = 2 + DIRECTIONS + 2 * NUMBERS;
+    const size_t gates_at = (2 + DIRECTIONS) * hops;
+    const size_t degs_at = (2 + DIRECTIONS + NUMBERS) * hops;
     float cfg[CONFIG_VALUES];
     float *in = malloc((2 * n + 3 * hops) * sizeof(float));
     float *want = malloc((per_hop * hops + 2 * n) * sizeof(float));
@@ -88,6 +99,8 @@ bool parity_bss(const char *case_name, const void *buf, size_t len)
                     parity_floats(&searched, in + 2 * n + 2 * hops, hops) &&
                     parity_floats(&gate, want, hops) && parity_floats(&seats, want + hops, hops) &&
                     parity_floats(&directions, want + 2 * hops, DIRECTIONS * hops) &&
+                    parity_floats(&number_gate, want + gates_at, NUMBERS * hops) &&
+                    parity_floats(&number_deg, want + degs_at, NUMBERS * hops) &&
                     parity_floats(&out0, want + per_hop * hops, n) &&
                     parity_floats(&out1, want + per_hop * hops + n, n) &&
                     run_hops(cfg, in, in + 2 * n, in + 2 * n + hops, in + 2 * n + 2 * hops, hops, got,
@@ -96,6 +109,8 @@ bool parity_bss(const char *case_name, const void *buf, size_t len)
         parity_report("bss", case_name, "gate", want, got, hops);
         parity_report("bss", case_name, "seats", want + hops, got + hops, hops);
         parity_report("bss", case_name, "directions", want + 2 * hops, got + 2 * hops, DIRECTIONS * hops);
+        parity_report("bss", case_name, "number_gate", want + gates_at, got + gates_at, NUMBERS * hops);
+        parity_report("bss", case_name, "number_deg", want + degs_at, got + degs_at, NUMBERS * hops);
         parity_report("bss", case_name, "out0", want + per_hop * hops, got + per_hop * hops, n);
         parity_report("bss", case_name, "out1", want + per_hop * hops + n, got + per_hop * hops + n, n);
     }
