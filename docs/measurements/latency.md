@@ -1128,3 +1128,18 @@ Trong khoảng đó esptool dò chip flash bằng vài chục lệnh thanh ghi.
 
 `ota_data` được ghi lại ở mọi lượt vì app cập nhật nó lúc boot. Sau mỗi commit, chuỗi phiên bản nhúng trong app đổi,
 nên lượt đầu tiên ghi lại app.
+
+**Mọi đích chạm board, sau khi sửa** (cùng ngày; `tools/board_link`, `firmware/conftest.py`, `--skip-flashed`):
+
+| Đích | Trước | Sau |
+|---|---|---|
+| `make bench-board`, pha nạp | 54 s | 8 s khi ghi bootloader, bảng và app 230 KB; 9 s khi bỏ qua cả ba |
+| `make bench-board`, từ lệnh tới dòng báo cáo đầu | — | 23,5 s; chạy lại 10,2 s |
+| `make parity-board`, lượt `build` (pytest, cả bộ vàng) | 369 s | 196 s, trong đó ghi ảnh vàng 16 MB mất 134,9 s |
+| `make parity-board`, lượt `build_modules` | 380 s | 63 s: ảnh vàng trùng lượt trước, bỏ qua |
+| `make product` sau một ngày app thử | khoảng 8 phút (13/10, gồm `nvs-restore`) | 148 s: model 5,5 MB 55,3 s, storage, bootloader, app 2 MB 15,8 s; bảng phân vùng bỏ qua |
+| `make product` chạy lại | — | 59 s: chỉ ghi lại storage, vì sản phẩm đã lưu bộ lệnh retained vào LittleFS |
+| `make espsr-compare`, pha nạp | — | 24 s: bootloader, bảng và app 1,39 MB (14,7 s); ảnh model ESP-SR của biến thể đầu sau đó 1,27 MB trong 12,6 s |
+
+Cả hai lượt parity đều qua. Mọi lượt không còn bốn cảnh báo cuối pytest, cũng không còn cảnh báo `hard_reset` của
+esptool. Dòng `Failed to get VID/PID` vẫn còn: esptool in nó mỗi lần nối, vì cổng qua mạng không có mã USB.
