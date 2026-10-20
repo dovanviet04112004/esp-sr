@@ -25,6 +25,9 @@ BRIDGE_HOST ?= $(shell ip route show default 2>/dev/null | awk '{print $$3; exit
 BRIDGE_TCP_PORT ?= 4011
 PORT ?= rfc2217://$(BRIDGE_HOST):$(BRIDGE_TCP_PORT)?ign_set_control
 FLASH_BAUD ?= 921600
+# Every Python a goal on board B starts loads tools/board_link first: RFC 2217 read timeouts stay on this side.
+BOARD_GOALS := $(IDF_GOALS) wifi calib-write calib-shift
+$(BOARD_GOALS): export PYTHONPATH := $(CURDIR)/tools/board_link$(if $(PYTHONPATH),:$(PYTHONPATH))
 
 # The ml environment: every ml/ target runs there, the CPU-only ones with no GPU visible.
 ML := cd ml && uv run

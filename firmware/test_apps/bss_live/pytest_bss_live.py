@@ -22,7 +22,6 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-import serial.rfc2217
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "host" / "src"))
@@ -45,15 +44,6 @@ LINE = rf"{TAG} \d+ ([^\r\n]*?) crc=[0-9a-f]{{8}}"
 IPV4 = re.compile(r"IPv4[^:\r\n]*:\s*(\d+\.\d+\.\d+\.\d+)")
 ADDRESS = re.compile(r"\d+\.\d+\.\d+\.\d+")
 SUMMARY = re.compile(r"summary hops (\d+) .* dropped (\d+) dma_overflows (\d+)")
-
-
-def local_timeout(port: serial.rfc2217.Serial, timeout: float | None) -> None:
-    """Set the read timeout on this side only: RFC 2217 has no such setting for the bridge to take."""
-    port._timeout = timeout
-
-
-# pyserial renegotiates the whole port on each timeout change: 300 ms per esptool command over the bridge.
-serial.rfc2217.Serial.timeout = property(serial.rfc2217.Serial.timeout.fget, local_timeout)
 
 
 def board_line(dut, prefix: str) -> str:
