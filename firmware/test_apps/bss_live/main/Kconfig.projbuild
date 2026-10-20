@@ -16,6 +16,14 @@ menu "bss_live"
             Each second keeps one status line of test_report in RAM, and the
             stream stays open SVC_REPORT_STREAM_MAX_S at most.
 
+    config BSS_LIVE_DELAY_MAX_S
+        int "Longest delay of the output a job may ask for, in seconds"
+        range 1 8
+        default 8
+        help
+            The delayed output keeps the mean spectrum and both raw channels
+            of this many seconds in PSRAM, about 190 KB a second (KEHOACH 3.8).
+
     config BSS_LIVE_WIFI_WAIT_S
         int "Seconds to wait for Wi-Fi before reporting it down"
         range 5 120

@@ -480,12 +480,13 @@ bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/ben
 	python3 -m tools.budget
 
 # The board and this PC share a network (make wifi); Docker Desktop publishes the receiver's port on it.
-bss: ## Separate live talkers on board B, one WAV per seat: asks mode, seats, ns, seconds [MODE= SEATS= NS= SECONDS=]
+bss: ## Separate live talkers on board B, one WAV per seat: asks mode, seats, ns, seconds, delay [MODE= SEATS= NS= SECONDS= DELAY=]
 	@test -f host/.env || { echo "copy host/.env.example to host/.env and fill it"; exit 1; }
 	@$(call fresh_sdkconfig,$(BSS_LIVE_APP)/sdkconfig,$(call app_defaults,$(BSS_LIVE_APP)) firmware/sdkconfig.afe)
 	cd $(BSS_LIVE_APP) && idf.py build
 	cd $(BSS_LIVE_APP) && BSS_LIVE_DATA_ROOT="$(DATA_ROOT)" BSS_LIVE_STREAM_PORT="$(STREAM_PORT)" \
 	  BSS_LIVE_MODE="$(MODE)" BSS_LIVE_SEATS="$(SEATS)" BSS_LIVE_NS="$(NS)" BSS_LIVE_SECONDS="$(SECONDS)" \
+	  BSS_LIVE_DELAY="$(DELAY)" \
 	  pytest pytest_bss_live.py $(ON_BOARD) -s
 
 espsr-compare: ## Run every board variant of KEHOACH 3.16 on board B into interim/scenes/afe_compare [ONLY="<item> ..."]

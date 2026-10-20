@@ -64,7 +64,9 @@
 #define STREAM_SLACK_S 30
 #define SECONDS_MIN 5
 #define SEATS_MIN 2 // bss holds two seats at least
-#define JOB_BYTES 192
+#define MS_PER_S 1000
+#define BYTES_PER_KB 1024
+#define JOB_BYTES 224
 #define HOST_BYTES 64
 #define DEVICE_ID_BYTES 33 // deviceId of KEHOACH 6.2: at most 32 characters
 #define IP_BYTES 16
@@ -86,6 +88,7 @@ typedef struct {
     uint8_t seats;
     ns_place_t ns;
     uint32_t seconds;
+    uint32_t delay_ms; // the output trails its input by this much, 0 for live
     char host[HOST_BYTES];
     uint16_t port;
 } job_t;
@@ -99,6 +102,10 @@ static struct {
     uint8_t out_channels;
     uint32_t hops_total;
     uint32_t hop;
+    uint32_t delay_hops;
+    uint32_t back_hops;                            // the delay less the lookahead
+    dsp_spec_cplx_t (*late_mean)[GEN_GRID_N_BINS]; // PSRAM ring, slot hop % delay_hops
+    int16_t (*late_raw)[GEN_GRID_HOP_SAMPLES * N_MICS];
     bool heard; // raw decision of vad_in on the last hop
     bool in_psram;
     const dsp_afe_calib_t *calib;
@@ -210,6 +217,9 @@ static bool parse_field(job_t *job, const char *key, const char *value, uint32_t
     } else if (strcmp(key, "seconds") == 0 &&
                parse_u32(value, SECONDS_MIN, CONFIG_BSS_LIVE_SECONDS_MAX, &number)) {
         job->seconds = number;
+    } else if (strcmp(key, "delay_ms") == 0 &&
+               parse_u32(value, 0, CONFIG_BSS_LIVE_DELAY_MAX_S * MS_PER_S, &number)) {
+        job->delay_ms = number;
     } else if (strcmp(key, "host") == 0 && value[0] != '\0' && strlen(value) < HOST_BYTES) {
         strlcpy(job->host, value, sizeof(job->host));
     } else if (strcmp(key, "port") == 0 && parse_u32(value, 1, PORT_MAX, &number)) {
@@ -221,10 +231,10 @@ static bool parse_field(job_t *job, const char *key, const char *value, uint32_t
     return true;
 }
 
-// "job mode=<broadside|learn> seats=<n> ns=<off|mean|each> seconds=<n> host=<ip> port=<n>", each once.
+// "job mode=<broadside|learn> seats=<n> ns=<off|mean|each> seconds=<n> delay_ms=<n> host=<ip> port=<n>"
 static bool parse_job(char *line, job_t *job)
 {
-    static const uint32_t FIELDS = 6;
+    static const uint32_t FIELDS = 7;
     char *save = NULL;
     const char *verb = strtok_r(line, " \r\n", &save);
     if (verb == NULL || strcmp(verb, "job") != 0) { return false; }
@@ -251,7 +261,7 @@ static void read_job(job_t *job)
         }
         if (strncmp(line, "job ", strlen("job ")) != 0) { continue; }
         if (parse_job(line, job)) { break; }
-        test_report_line("refused: a job names mode, seats, ns, seconds, host and port once each");
+        test_report_line("refused: a job names mode, seats, ns, seconds, delay_ms, host and port once each");
     }
     uart_vfs_dev_use_nonblocking(CONFIG_ESP_CONSOLE_UART_NUM);
     ESP_ERROR_CHECK(uart_driver_delete(CONFIG_ESP_CONSOLE_UART_NUM));
@@ -309,6 +319,20 @@ static esp_err_t build_spec(void)
     return err;
 }
 
+static uint32_t hops_of_ms(uint32_t ms)
+{
+    return (uint32_t)lrintf((float)ms * GEN_GRID_SAMPLE_RATE_HZ / ((float)MS_PER_S * GEN_GRID_HOP_SAMPLES));
+}
+
+// A delayed hop takes the angle held lookahead_s after it: the gate looks this far back (KEHOACH 3.8).
+static uint32_t back_hops_of(const job_t *job)
+{
+    const uint32_t delay = hops_of_ms(job->delay_ms);
+    const uint32_t ahead =
+        (uint32_t)lrintf(GEN_AFE_BSS_LOOKAHEAD_S * GEN_GRID_SAMPLE_RATE_HZ / GEN_GRID_HOP_SAMPLES);
+    return delay - (ahead < delay ? ahead : delay);
+}
+
 static dsp_afe_bss_config_t bss_config(const job_t *job)
 {
     return (dsp_afe_bss_config_t){
@@ -335,6 +359,7 @@ static dsp_afe_bss_config_t bss_config(const job_t *job)
         .update_every_hops = GEN_AFE_DOA_UPDATE_EVERY_HOPS,
         .spacing_m = GEN_ARRAY_SPACING_M,
         .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
+        .history_s = (float)back_hops_of(job) * GEN_GRID_HOP_SAMPLES / GEN_GRID_SAMPLE_RATE_HZ,
     };
 }
 
@@ -406,8 +431,51 @@ static void to_pcm(const float *hop, int16_t *pcm, size_t stride)
     }
 }
 
+// The microphones of raw, stride channels a sample, then every seat of mean under its gate, into out.
+static void emit(const int16_t *raw, size_t stride, const dsp_spec_cplx_t *mean, const float *gate)
+{
+    const uint8_t out_n = s_chain.out_channels;
+    for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
+        for (size_t m = 0; m < N_MICS; m++) {
+            s_chain.out[i * out_n + m] = raw[i * stride + m];
+        }
+    }
+    for (size_t j = 0; j < s_chain.job.seats; j++) {
+        for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
+            s_chain.seat[k] = (dsp_spec_cplx_t){mean[k].re * gate[j], mean[k].im * gate[j]};
+        }
+        if (s_chain.job.ns == NS_EACH) { apply_ns(s_chain.ns_state[j], s_chain.seat); }
+        dsp_spec_istft_synthesize(s_chain.synthesis[j], s_chain.seat, s_chain.synth);
+        to_pcm(s_chain.synth, &s_chain.out[N_MICS + j], out_n);
+    }
+}
+
+// Live, this hop; delayed, the hop delay_hops back under the seats held now. False while none is due.
+static bool emit_due(const float *gate)
+{
+    if (s_chain.delay_hops == 0) {
+        emit(s_chain.raw, s_chain.raw_channels, s_chain.mean, gate);
+        return true;
+    }
+    const uint32_t slot = s_chain.hop % s_chain.delay_hops;
+    const bool due = s_chain.hop >= s_chain.delay_hops;
+    if (due) {
+        float late[SEATS_MAX];
+        uint8_t kept = 0;
+        ESP_ERROR_CHECK(dsp_afe_bss_numbered_back(s_chain.bss, s_chain.back_hops, late, &kept));
+        emit(s_chain.late_raw[slot], N_MICS, s_chain.late_mean[slot], late);
+    }
+    memcpy(s_chain.late_mean[slot], s_chain.mean, sizeof(s_chain.mean));
+    for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
+        for (size_t m = 0; m < N_MICS; m++) {
+            s_chain.late_raw[slot][i * N_MICS + m] = s_chain.raw[i * s_chain.raw_channels + m];
+        }
+    }
+    return due;
+}
+
 // dsp_afe's order under bss: hpf, stft, balance, doa on the mics' raw vad, then the gates (KEHOACH 3.8).
-static void run_hop(float gate[SEATS_MAX], int16_t angle_deg[SEATS_MAX], uint8_t *seats)
+static bool run_hop(float gate[SEATS_MAX], int16_t angle_deg[SEATS_MAX], uint8_t *seats)
 {
     const uint8_t n = s_chain.raw_channels;
     for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
@@ -441,21 +509,9 @@ static void run_hop(float gate[SEATS_MAX], int16_t angle_deg[SEATS_MAX], uint8_t
                                             0.5f * (s_chain.bins[0][k].im + s_chain.bins[1][k].im)};
     }
     if (s_chain.job.ns == NS_MEAN) { apply_ns(s_chain.ns_state[0], s_chain.mean); }
-    const uint8_t out_n = s_chain.out_channels;
-    for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
-        for (size_t m = 0; m < N_MICS; m++) {
-            s_chain.out[i * out_n + m] = s_chain.raw[i * n + m];
-        }
-    }
-    for (size_t j = 0; j < s_chain.job.seats; j++) {
-        for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
-            s_chain.seat[k] = (dsp_spec_cplx_t){s_chain.mean[k].re * gate[j], s_chain.mean[k].im * gate[j]};
-        }
-        if (s_chain.job.ns == NS_EACH) { apply_ns(s_chain.ns_state[j], s_chain.seat); }
-        dsp_spec_istft_synthesize(s_chain.synthesis[j], s_chain.seat, s_chain.synth);
-        to_pcm(s_chain.synth, &s_chain.out[N_MICS + j], out_n);
-    }
+    const bool due = emit_due(gate);
     s_chain.hop++;
+    return due;
 }
 
 static void account(uint32_t cycles, const float *gate, const int16_t *angle_deg, uint8_t seats)
@@ -485,9 +541,9 @@ static void sach_task(void *arg)
             int16_t angle_deg[SEATS_MAX];
             uint8_t seats = 0;
             const uint32_t start = esp_cpu_get_cycle_count();
-            run_hop(gate, angle_deg, &seats);
+            const bool due = run_hop(gate, angle_deg, &seats);
             const uint32_t cycles = esp_cpu_get_cycle_count() - start;
-            svc_report_stream_push(seq, s_chain.out, NULL);
+            if (due) { svc_report_stream_push(seq, s_chain.out, NULL); }
             account(cycles, gate, angle_deg, seats);
             if (s_chain.hop >= s_chain.hops_total) {
                 atomic_store(&s_running, false);
@@ -569,22 +625,35 @@ static esp_err_t start_run(EventGroupHandle_t system)
 {
     const job_t *job = &s_chain.job;
     s_chain.out_channels = (uint8_t)(N_MICS + job->seats);
-    s_chain.hops_total =
-        (uint32_t)lrintf((float)job->seconds * GEN_GRID_SAMPLE_RATE_HZ / GEN_GRID_HOP_SAMPLES);
+    s_chain.delay_hops = hops_of_ms(job->delay_ms);
+    s_chain.back_hops = back_hops_of(job);
+    // The run hears delay_hops more so its last hop has an output too.
+    s_chain.hops_total = hops_of_ms(job->seconds * MS_PER_S) + s_chain.delay_hops;
     s_chain.calib = load_calib();
     ESP_RETURN_ON_ERROR(build_chain(), TAG, "chain");
+    const size_t ring_bytes = s_chain.delay_hops * (sizeof(*s_chain.late_mean) + sizeof(*s_chain.late_raw));
+    if (s_chain.delay_hops > 0) {
+        s_chain.late_mean =
+            heap_caps_malloc(s_chain.delay_hops * sizeof(*s_chain.late_mean), MALLOC_CAP_SPIRAM);
+        s_chain.late_raw =
+            heap_caps_malloc(s_chain.delay_hops * sizeof(*s_chain.late_raw), MALLOC_CAP_SPIRAM);
+        if (s_chain.late_mean == NULL || s_chain.late_raw == NULL) { return ESP_ERR_NO_MEM; }
+    }
     s_sb = xStreamBufferCreateWithCaps(CONFIG_SVC_REPORT_STREAM_BUFFER_KB * 1024, 1, MALLOC_CAP_SPIRAM);
     if (s_sb == NULL) { return ESP_ERR_NO_MEM; }
     const svc_report_stream_config_t stream = {
         .sb = s_sb, .system = system, .raw_channels = s_chain.out_channels};
     ESP_RETURN_ON_ERROR(svc_report_stream_init(&stream), TAG, "stream");
-    ESP_RETURN_ON_ERROR(
-        svc_report_stream_start(stream_mode(job->seats), job->host, job->port, job->seconds + STREAM_SLACK_S),
-        TAG, "stream start");
-    test_report_line("job mode %s seats %u ns %s seconds %" PRIu32 " to %s:%u, balance %s, chain in %s",
-                     MODE_NAMES[job->mode], (unsigned)job->seats, NS_NAMES[job->ns], job->seconds, job->host,
-                     (unsigned)job->port, s_chain.calib != NULL ? "calib/bal" : "none",
-                     s_chain.in_psram ? "psram, slower" : "internal ram");
+    const uint32_t stream_s = job->seconds + STREAM_SLACK_S + (job->delay_ms + MS_PER_S - 1) / MS_PER_S;
+    ESP_RETURN_ON_ERROR(svc_report_stream_start(stream_mode(job->seats), job->host, job->port, stream_s), TAG,
+                        "stream start");
+    test_report_line(
+        "job mode %s seats %u ns %s seconds %" PRIu32 " delay %.1f s to %s:%u, balance %s, chain in "
+        "%s, delay ring %u KB psram",
+        MODE_NAMES[job->mode], (unsigned)job->seats, NS_NAMES[job->ns], job->seconds,
+        (double)((float)job->delay_ms / MS_PER_S), job->host, (unsigned)job->port,
+        s_chain.calib != NULL ? "calib/bal" : "none", s_chain.in_psram ? "psram, slower" : "internal ram",
+        (unsigned)(ring_bytes / BYTES_PER_KB));
     xTaskCreatePinnedToCore(luong_task, "luong_task", LUONG_STACK_BYTES, NULL, LUONG_PRIORITY, NULL,
                             LUONG_CORE);
     s_waiter = xTaskGetCurrentTaskHandle();
@@ -611,10 +680,10 @@ void app_main(void)
     EventGroupHandle_t system = xEventGroupCreate();
     if (join_wifi(system, device_id, ip, sizeof(ip))) {
         test_report_line("wifi %s", ip);
-        test_report_line("ready modes %s,%s ns %s,%s,%s seats %d-%d seconds %d-%d",
+        test_report_line("ready modes %s,%s ns %s,%s,%s seats %d-%d seconds %d-%d delay 0-%d",
                          MODE_NAMES[DSP_AFE_BSS_LEARN], MODE_NAMES[DSP_AFE_BSS_FIXED], NS_NAMES[NS_OFF],
                          NS_NAMES[NS_MEAN], NS_NAMES[NS_EACH], SEATS_MIN, SEATS_MAX, SECONDS_MIN,
-                         CONFIG_BSS_LIVE_SECONDS_MAX);
+                         CONFIG_BSS_LIVE_SECONDS_MAX, CONFIG_BSS_LIVE_DELAY_MAX_S);
         read_job(&s_chain.job);
         const esp_err_t err = start_run(system);
         if (err == ESP_OK) {

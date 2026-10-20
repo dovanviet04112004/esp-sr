@@ -1,8 +1,9 @@
 """Live bss on board B, one WAV per seat (E8-T5, KEHOACH 3.8, 7.4): make bss builds and flashes the app, then runs this.
 
-Once the board is on Wi-Fi it asks mode, seats, ns and seconds, from the limits the board prints (BSS_LIVE_MODE, _SEATS,
-_NS, _SECONDS answer ahead), starts srhost.stream_rx in Docker, sends the job and shows the board's status each second.
-WAVs, status.txt and job.json land in $SRPIPE_DATA_ROOT/cache/bss_live/<time>_<mode>_<seats>_<ns>/, never in the repo.
+Once the board is on Wi-Fi it asks mode, seats, ns, seconds and the output's delay, from the limits the board prints
+(BSS_LIVE_MODE, _SEATS, _NS, _SECONDS, _DELAY answer ahead), starts srhost.stream_rx in Docker, sends the job and shows
+the board's status each second. WAVs, status.txt and job.json land in
+$SRPIPE_DATA_ROOT/cache/bss_live/<time>_<mode>_<seats>_<ns>_d<delay>/, never in the repo.
 """
 
 from __future__ import annotations
@@ -29,11 +30,12 @@ REPO = Path(__file__).resolve().parents[3]
 TAG = "BSSLIVE"
 CONTAINER = "sr-bss-live"
 IMAGE = "python:3.12-slim"
-DEFAULTS = {"mode": "learn", "seats": "2", "ns": "mean", "seconds": "30"}
+DEFAULTS = {"mode": "learn", "seats": "2", "ns": "mean", "seconds": "30", "delay": "4"}
 NS_HELP = {"off": "no noise suppression", "mean": "once on the mean, before the gates", "each": "on each seat"}
 BOOT_TIMEOUT_S = 90
 LISTEN_TIMEOUT_S = 180
 RECEIVER_SLACK_S = 60
+DELAY_STEPS_PER_S = 2  # the menu offers the delay in 0.5 s steps
 SUMMARY_FILE = "stream.json"  # what srhost.stream_rx writes beside the WAVs
 LINE = rf"{TAG} \d+ ([^\r\n]*?) crc=[0-9a-f]{{8}}"
 IPV4 = re.compile(r"IPv4[^:\r\n]*:\s*(\d+\.\d+\.\d+\.\d+)")
@@ -49,26 +51,35 @@ def board_line(dut, prefix: str) -> str:
 
 
 def limits_of(ready: str) -> dict[str, list[str]]:
-    """'modes a,b ns x,y,z seats 2-4 seconds 5-600' as lists of allowed answers."""
+    """'modes a,b ns x,y,z seats 2-4 seconds 5-600 delay 0-8' as lists of allowed answers, the delay in 0.5 s steps."""
     words = ready.split()
     pairs = dict(zip(words[::2], words[1::2], strict=True))
     spans = {}
     for key in ("seats", "seconds"):
         low, high = (int(n) for n in pairs[key].split("-"))
         spans[key] = [str(n) for n in range(low, high + 1)]
+    low, high = (int(n) for n in pairs["delay"].split("-"))
+    spans["delay"] = [
+        f"{k / DELAY_STEPS_PER_S:g}" for k in range(low * DELAY_STEPS_PER_S, high * DELAY_STEPS_PER_S + 1)
+    ]
     return {"mode": pairs["modes"].split(","), "ns": pairs["ns"].split(","), **spans}
 
 
+def plain(answer: str, allowed: list[str]) -> str:
+    """answer as allowed spells it: a number picks a named choice, and 4.0 is 4."""
+    if answer.isdigit() and not allowed[0].isdigit() and 1 <= int(answer) <= len(allowed):
+        return allowed[int(answer) - 1]
+    return f"{float(answer):g}" if re.fullmatch(r"\d+(\.\d*)?", answer) else answer
+
+
 def ask(name: str, allowed: list[str], default: str, preset: str, show: str) -> str:
-    """preset when allowed, else a question until the answer is allowed; a number picks a named choice."""
+    """preset when allowed, else a question until the answer is allowed."""
     if preset:
-        if preset not in allowed:
+        if plain(preset, allowed) not in allowed:
             pytest.fail(f"{name}={preset} is not one of {', '.join(allowed)}")
-        return preset
+        return plain(preset, allowed)
     while True:
-        answer = input(f"{name} {show} [{default}]: ").strip() or default
-        if answer.isdigit() and not allowed[0].isdigit() and 1 <= int(answer) <= len(allowed):
-            answer = allowed[int(answer) - 1]
+        answer = plain(input(f"{name} {show} [{default}]: ").strip() or default, allowed)
         if answer in allowed:
             return answer
         print(f"  one of {', '.join(allowed)}")
@@ -82,6 +93,7 @@ def choose(limits: dict[str, list[str]]) -> dict[str, str]:
         "seats": f"{limits['seats'][0]}-{limits['seats'][-1]}",
         "ns": " / ".join(f"{i + 1} {n} ({NS_HELP.get(n, n)})" for i, n in enumerate(limits["ns"])),
         "seconds": f"{limits['seconds'][0]}-{limits['seconds'][-1]}",
+        "delay": f"{limits['delay'][0]}-{limits['delay'][-1]} s by 0.5, 0 live",
     }
     job = {}
     for key in DEFAULTS:
@@ -149,13 +161,18 @@ def test_bss_live(dut) -> None:
     port = int(os.environ["BSS_LIVE_STREAM_PORT"])
     print(f"\nboard B on {board_ip}, receiver on {host}:{port}; Enter keeps [the default]")
     job = choose(limits)
-    name = "_".join([datetime.now().strftime("%Y%m%d_%H%M%S"), job["mode"], job["seats"], job["ns"]])
+    name = "_".join(
+        [datetime.now().strftime("%Y%m%d_%H%M%S"), job["mode"], job["seats"], job["ns"], f"d{job['delay']}"]
+    )
     out = Path(os.environ["BSS_LIVE_DATA_ROOT"]) / "cache" / "bss_live" / name
     out.mkdir(parents=True)
     (out / "job.json").write_text(json.dumps(job, indent=2) + "\n", encoding="utf-8")
     with receiver(out, port, int(job["seconds"])):
         print(f"talk for {job['seconds']} s, one at a time, from different directions around board B")
-        fields = {**job, "host": host, "port": port}
+        if job["delay"] != "0":
+            print(f"the WAVs trail the room by {job['delay']} s: board B listens that much longer")
+        delay = {"delay_ms": round(float(job["delay"]) * 1000)}
+        fields = {**{k: v for k, v in job.items() if k != "delay"}, **delay, "host": host, "port": port}
         dut.write("job " + " ".join(f"{k}={v}" for k, v in fields.items()) + "\n")
         texts = collect(dut, TAG)
     (out / "status.txt").write_text("\n".join(texts) + "\n", encoding="utf-8")
