@@ -55,6 +55,7 @@ class BssConfig:
     update_every_hops: int = afe.DOA_UPDATE_EVERY_HOPS
     spacing_m: float = array.SPACING_M
     speed_of_sound_m_s: float = array.SPEED_OF_SOUND_M_S
+    history_s: float = afe.BSS_HISTORY_S
 
 
 def update_s(cfg: BssConfig) -> float:
@@ -89,6 +90,7 @@ def check(cfg: BssConfig) -> None:
         and c["update_every_hops"] >= 1
         and c["spacing_m"] > 0.0
         and c["speed_of_sound_m_s"] > 0.0
+        and c["history_s"] >= 0.0
     )
     if not ok or update_s(cfg) / c["track_tau_s"] > EXP_SERIES_REACH:
         raise ValueError(f"bad bss configuration {cfg}")
@@ -157,6 +159,7 @@ class Bss:
         self.first = min(self.window, rounded(float(f32(c.first_speech_s)) / speech_s))
         self.recheck_hops = rounded(float(f32(c.recheck_s)) / hop_s)
         self.forget_hops = rounded(float(f32(c.seat_forget_s)) / hop_s)
+        self.history = math.floor(float(f32(c.history_s)) / hop_s + 0.5)
         self.rate = f32(1.0 - exp_series(-speech_s / float(f32(c.track_tau_s))))
         self.occupancy, self.valley_max, self.valley_width = (
             f32(c.occupancy_min),
@@ -184,6 +187,8 @@ class Bss:
         self.pending = self.agree = 0
         self.gate = GATE_START
         self.shares = [GATE_START, GATE_START] + [f32(0.0)] * (SEATS_CAP - 2)
+        self.last_angle = -1
+        self.held = [-1] * (self.history + 1)
 
     def process(
         self, x0: np.ndarray, x1: np.ndarray, angle_deg: int, confidence: int, update: bool
@@ -202,6 +207,8 @@ class Bss:
                 self._cluster()
         if counted:
             self.gate, self.shares = self._gates(angle_deg)
+            self.last_angle = angle_deg
+        self.held[self.hop % len(self.held)] = self.last_angle
         self.hop += 1
         mean = (f32(0.5) * (np.asarray(x0, dtype=np.complex64) + np.asarray(x1, dtype=np.complex64))).astype(
             np.complex64
@@ -227,6 +234,18 @@ class Bss:
             for j in range(self.seats):
                 angles[self.number[j]] = nearest(self.centres[j], self.delay)
         return list(self.shares), angles
+
+    def numbered_back(self, back: int) -> tuple[list, int]:
+        """Gate of every seat number for the angle held back hops ago under the seats held now, and the kept seat's
+        number: the delayed output's gates; before any angle, the gates a separator starts with."""
+        if not 0 <= back <= self.history:
+            raise ValueError(f"back {back} is past the {self.history} hops of history kept")
+        at = self.hop - 1 - back
+        angle = self.held[at % len(self.held)] if at >= 0 else -1
+        kept = self.number[self._keep_seat()] if self.seats >= 2 else self.side
+        if angle < 0:
+            return [GATE_START, GATE_START] + [f32(0.0)] * (SEATS_CAP - 2), kept
+        return self._gates(angle)[1], kept
 
     def _count(self, angle: int) -> None:
         if self.filled == self.window:

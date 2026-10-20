@@ -152,3 +152,43 @@ def test_held_seats_keep_their_numbers_when_seats_are_taken_or_forgotten() -> No
     assert out[-1][1] == 2 and after[0] == -1 and near(after[1], 30) and near(after[2], 150)
     assert all(abs(sum(float(g) for g in gates) - 1.0) < 1e-6 for gates, _ in seen)
     assert all(np.float32(gate) in gates for (gate, _), (gates, _) in zip(out, seen, strict=True))
+
+
+def delayed_kept(b: bss.Bss, plan: list[tuple[int, int | None]], back: int) -> np.ndarray:
+    """The kept seat's gate each hop gets when it leaves back hops late, as test_apps/bss_live sends it."""
+    seen: list = []
+    hops = sum(n for n, _ in plan)
+    x0, x1 = bins()
+    rng = np.random.default_rng(3)
+    hop = 0
+    for n, angle in plan:
+        for _ in range(n):
+            searched = angle is not None and hop % 2 == 0
+            reading = int(np.clip(angle + 2 * rng.integers(-1, 2), 0, 180)) if angle is not None else -1
+            b.process(x0, x1, reading, 120, searched)
+            if hop >= back:
+                gates, kept = b.numbered_back(back)
+                seen.append(float(gates[kept]))
+            hop += 1
+    assert len(seen) == hops - back
+    return np.array(seen)
+
+
+def test_back_zero_is_the_last_search_under_the_seats_held_now() -> None:
+    b = separator(mode=bss.MODE_LEARN, history_s=1.0)
+    gates, _ = b.numbered_back(0)
+    assert gates == b.numbered()[0]
+    speak(b, [(120, 40), (120, 140)])
+    assert b.numbered_back(0)[0] == b.numbered()[0]
+    with pytest.raises(ValueError):
+        b.numbered_back(b.history + 1)
+
+
+def test_delay_puts_both_first_turns_on_one_side_into_their_own_seats() -> None:
+    plan = [(120, 40), (120, 76), (120, 40), (120, 76)]
+    live = [g for g, _ in speak(separator(mode=bss.MODE_LEARN, keep_deg=76.0), plan)]
+    back = 250
+    late = delayed_kept(separator(mode=bss.MODE_LEARN, keep_deg=76.0, history_s=back * 0.016), plan, back)
+    first_a, first_b = slice(20, 120), slice(140, 240)
+    assert np.mean(live[first_a]) > 0.9
+    assert np.mean(late[first_a]) < 0.05 and np.mean(late[first_b]) > 0.95
