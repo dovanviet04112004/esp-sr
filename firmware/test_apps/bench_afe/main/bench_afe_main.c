@@ -136,7 +136,7 @@ static void hop_done(timing_t *t, int hop, uint32_t start)
 static void report(const row_t *row, const timing_t *t)
 {
     const float per_us = (float)esp_rom_get_cpu_ticks_per_us();
-    test_report_line("csv %s,%d,%u,%u,%u,%.1f,%.1f,%d,%s", row->module, row->core,
+    test_report_line("csv \"%s\",%d,%u,%u,%u,%.1f,%.1f,%d,%s", row->module, row->core,
                      (unsigned)row->static_bytes, (unsigned)row->hot_bytes, (unsigned)row->cold_bytes,
                      (double)(t->sum_cycles / (float)t->runs / per_us), (double)(t->peak_cycles / per_us),
                      row->in_total ? 1 : 0, esp_app_get_description()->version);
