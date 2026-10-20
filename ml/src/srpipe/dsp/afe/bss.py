@@ -158,7 +158,8 @@ class Bss:
         self.lo = -float(self.delay[0])
         self.n_bins = math.floor(2.0 * float(self.delay[0]) / self.width) + 1
         self.bin_of = [
-            min(self.n_bins - 1, math.floor((float(self.delay[d]) - self.lo) / self.width)) for d in range(ANGLES)
+            max(0, min(self.n_bins - 1, math.floor((float(self.delay[d]) - self.lo) / self.width)))
+            for d in range(ANGLES)
         ]
         self.core = float(self.min_gap) * float(f32(c.core_share))
         self.reset()
