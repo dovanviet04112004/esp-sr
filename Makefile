@@ -423,7 +423,7 @@ models-flash: ## Pack every model of contracts/models.lock.json and write models
 PRODUCT_PARTS = python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --baud $(FLASH_BAUD) \
   --partition-table-file firmware/partitions.csv
 
-.PHONY: nvs-save nvs-restore storage-flash
+.PHONY: nvs-save nvs-restore storage-flash product
 # NVS holds the roster, its voiceprints and the owner's thresholds; a test app that writes NVS runs between these
 # two. The copy holds voiceprints, a person's data (KEHOACH 1.4), so it never lands in the repo.
 nvs-save: ## Copy board B's NVS partition to FILE, a path outside the repo
@@ -436,6 +436,13 @@ nvs-restore: ## Write FILE, a copy nvs-save made, back to board B's NVS partitio
 
 storage-flash: fw-bench ## Write the bench build's LittleFS image, set.json among it, to board B's storage partition
 	$(PRODUCT_PARTS) write_partition --partition-name storage --input firmware/build_bench/storage.bin
+
+# Models and storage go first: the product's first boot then finds its models and keeps the thresholds in NVS.
+product: ## Put the product back on board B after test apps: models, storage, then firmware, and show its boot
+	$(MAKE) --no-print-directory models-flash
+	$(MAKE) --no-print-directory storage-flash
+	$(MAKE) --no-print-directory fw-bench-flash
+	cd host && uv run python -m srhost.boot --port "$(PORT)"
 
 capture-flash: ## Flash test_apps/capture, the raw-only recorder (E5-T12)
 	cd $(CAPTURE_APP) && idf.py -p $(PORT) flash
