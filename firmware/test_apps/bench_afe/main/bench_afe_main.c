@@ -54,7 +54,7 @@
 #define GSC_ANGLES 91       // the doa grid, 0..180 deg
 #define BSS_TALKER_A_DEG 48 // board B's talkers of raw/device/tinyai
 #define BSS_TALKER_B_DEG 130
-#define BSS_TURN_HOPS 156 // 2.5 s turns: LEARN splits, then reclusters
+#define BSS_TURN_HOPS 156 // 2.5 s turns: LEARN splits, then rechecks
 #define ROW_NAME_BYTES 64
 #if CONFIG_DSP_AFE_DOA_ENABLE
 #define CHAIN_ROW "dsp_afe chuỗi (hpf + stft x2 + balance + doa + trộn + ns + istft + vad + agc)"
@@ -294,7 +294,7 @@ static void bench_gsc(bool turning)
 #if CONFIG_DSP_AFE_BSS_ENABLE
 static dsp_spec_cplx_t s_rest[GEN_GRID_N_BINS];
 
-// learn: the two talkers trade turns, so the peak hop is one where the seats are clustered again.
+// learn: the two talkers trade turns, so the peak hop is a recheck searching the density for peaks.
 static void bench_bss(bool learn)
 {
     const dsp_afe_bss_config_t cfg = {
@@ -307,16 +307,16 @@ static void bench_bss(bool learn)
         .decision_s = GEN_AFE_BSS_DECISION_S,
         .recheck_s = GEN_AFE_BSS_RECHECK_S,
         .first_speech_s = GEN_AFE_BSS_FIRST_SPEECH_S,
-        .kmeans_rounds = GEN_AFE_BSS_KMEANS_ROUNDS,
         .confirm = GEN_AFE_BSS_CONFIRM,
         .occupancy_min = GEN_AFE_BSS_OCCUPANCY_MIN,
-        .valley_max = GEN_AFE_BSS_VALLEY_MAX,
-        .valley_width = GEN_AFE_BSS_VALLEY_WIDTH,
         .min_gap = GEN_AFE_BSS_MIN_GAP,
+        .bins_per_gap = GEN_AFE_BSS_BINS_PER_GAP,
+        .smooth_bins = GEN_AFE_BSS_SMOOTH_BINS,
+        .prominence = GEN_AFE_BSS_PROMINENCE,
+        .core_share = GEN_AFE_BSS_CORE_SHARE,
+        .seat_follow = GEN_AFE_BSS_SEAT_FOLLOW,
         .boundary_share_min = GEN_AFE_BSS_BOUNDARY_SHARE_MIN,
         .boundary_follow = GEN_AFE_BSS_BOUNDARY_FOLLOW,
-        .track_tau_s = GEN_AFE_BSS_TRACK_TAU_S,
-        .track_gate = GEN_AFE_BSS_TRACK_GATE,
         .seat_forget_s = GEN_AFE_BSS_SEAT_FORGET_S,
         .update_every_hops = GEN_AFE_DOA_UPDATE_EVERY_HOPS,
         .spacing_m = GEN_ARRAY_SPACING_M,

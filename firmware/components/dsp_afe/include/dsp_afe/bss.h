@@ -1,5 +1,5 @@
-/** Gate on doa's direction over the mean of both microphones: two seats split at broadside, or seats
- * clustered from doa's angles, the kept seat's share on one output and the rest on the other (KEHOACH 3.8).
+/** Gate on doa's direction over the mean of both microphones: two seats split at broadside, or seats at
+ * peaks of doa's delay density, the kept seat's share on one output, the rest on the other (KEHOACH 3.8).
  *  @ctx any | non-blocking | one instance per task
  */
 #pragma once
@@ -19,7 +19,7 @@ extern "C" {
 
 typedef enum {
     DSP_AFE_BSS_FIXED = 0, // two seats split at broadside
-    DSP_AFE_BSS_LEARN = 1, // seats clustered from doa's angles
+    DSP_AFE_BSS_LEARN = 1, // seats at the peaks of doa's delay density
 } dsp_afe_bss_mode_t;
 
 typedef enum {
@@ -34,19 +34,19 @@ typedef struct {
     float gate_slope;             // per sample of delay at a boundary
     uint8_t conf_min;             // least doa confidence an update needs
     uint8_t seats_max;            // 2..DSP_AFE_BSS_SEATS_MAX
-    float decision_s;             // speech whose updates are clustered
-    float recheck_s;              // between two clusterings
-    float first_speech_s;         // speech ahead of the first clustering
-    uint8_t kmeans_rounds;
-    uint8_t confirm; // agreeing clusterings to take more seats
-    float occupancy_min;
-    float valley_max;
-    float valley_width;       // share of two seats' gap
-    float min_gap;            // samples of delay
-    float boundary_share_min; // share of the gap each seat keeps
+    float decision_s;             // speech whose updates make the density
+    float recheck_s;              // between two searches for its peaks
+    float first_speech_s;         // speech ahead of the first search
+    uint8_t confirm;              // agreeing rechecks to take or move seats
+    float occupancy_min;          // share of the window a peak's core holds
+    float min_gap;                // samples of delay
+    uint8_t bins_per_gap;         // density bins in one min_gap, 1..64
+    uint8_t smooth_bins;          // kernel half-width, bins
+    float prominence;             // share of a peak above its higher saddle
+    float core_share;             // share of min_gap either side of a peak
+    float seat_follow;            // share of the way a seat moves per recheck
+    float boundary_share_min;     // share of the gap each seat keeps
     float boundary_follow;
-    float track_tau_s;
-    float track_gate; // samples of delay
     float seat_forget_s;
     uint8_t update_every_hops; // doa's search period
     float spacing_m;
@@ -86,7 +86,7 @@ void dsp_afe_bss_directions(const dsp_afe_bss_t *st, int16_t angle_deg[2]);
  */
 void dsp_afe_bss_state(const dsp_afe_bss_t *st, uint8_t *seats, float *gate);
 
-/** Gate and whole degrees of every seat number: a seat holds its number from the clustering that takes it
+/** Gate and whole degrees of every seat number: a seat holds its number from the recheck that takes it
  * until it is forgotten; below two seats, 0 is the side past 90 deg and 1 the other (KEHOACH 3.8).
  *  @ctx any | non-blocking
  *  @param gate the gates the last search set, summing to 1; angle_deg -1 for a number no seat holds
