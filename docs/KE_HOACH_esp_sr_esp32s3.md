@@ -3247,7 +3247,7 @@ TỔNG QUAN §7 ước ~97 KB và thiếu bốn khoản. Bảng ước lại �
 | Đệm DMA I2S RX: 8 khối × 256 mẫu × 2 khe × 4 B | 16 KB | 128 ms phủ một lần ghi flash (§5.5) |
 | Đệm DMA I2S TX: cùng khuôn | 16 KB | RX và TX căn theo khối |
 | Pool `q_frame`: 8 × 1,5 KB | 12 KB | |
-| `dsp_spec` + `dsp_afe` trừ `aec`: STFT hai kênh, `doa`, `bss`, `ns` sàn, `vad`, `agc` | ~28 KB | riêng `bss`: vòng đệm góc, histogram 181 ô, bảng trễ và cổng 181 góc, 2 928 B đo; `vad` thứ hai 2 640 B và đệm trung bình hai micro 1 KB |
+| `dsp_spec` + `dsp_afe` trừ `aec`: STFT hai kênh, `doa`, `bss`, `ns` sàn, `vad`, `agc` | ~28 KB | riêng `bss`: vòng đệm góc, histogram 181 ô, bảng trễ và cổng 181 góc, 2 944 B đo; `vad` thứ hai 2 640 B và đệm trung bình hai micro 1 KB |
 | `aec`: trọng số 2 × 8 × 257 phức + phổ tham chiếu 8 × 257 phức + đệm | ~55 KB | §3.5 |
 | Ngăn xếp task ứng dụng (§5.2, trừ `mqtt_task`) | ~41 KB | |
 | Wi-Fi + lwIP | 50–90 KB | tuỳ số đệm RX/TX trong sdkconfig |
