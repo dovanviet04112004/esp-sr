@@ -129,19 +129,21 @@ hai giọng trong cùng một bước (KẾ HOẠCH §3.8, giới hạn).
 
 ## 6. Khớp với bản C
 
-`make parity-host`, và `make parity-board` ở bản dựng `modules` ngày 20/10 (`67793ce`), bộ vàng `contracts/golden/bss/`;
+`make parity-host`, và `make parity-board` ở bản dựng `modules` ngày 20/10 (`8e1f927`), bộ vàng `contracts/golden/bss/`;
 máy tính và board B ra cùng số:
-- 4 ca khớp từng bit: cổng, số ghế, hướng sau mọi bước, và hai lối ra của bước cuối, đều `max_abs 0`;
-- ca đối chứng âm mang cổng của chế độ chia ở chính diện và báo đỏ: cổng lệch tới 1, SNR 5,9 dB.
+- 4 ca khớp từng bit: cổng, số ghế, hướng, cổng và hướng của mọi số ghế sau mọi bước, và hai lối ra của bước cuối,
+  đều `max_abs 0`;
+- đối chứng âm 000 mang cổng của chế độ chia ở chính diện và báo đỏ: cổng lệch tới 1, SNR 5,9 dB;
+- đối chứng âm 001 đánh số ghế theo độ trễ thay vì giữ số và báo đỏ: hướng lệch tới 79°, cổng tới 1.
 
 ## 7. Chi phí
 
-`make bench-board` ngày 20/10 (`9da99f5`, profile `bench`), nhân 1, số mặc định của `contracts/afe.yaml`:
+`make bench-board` ngày 20/10 (`8e1f927`, profile `bench`), nhân 1, số mặc định của `contracts/afe.yaml`:
 
 | Đường | µs trung bình | µs đỉnh | % khung 16 ms | Vùng `hot` |
 |---|---|---|---|---|
-| Chia ở chính diện | 25,2 | 29,5 | 0,2 | 2 928 B |
-| LEARN, hai người ở 48° và 130° đổi lượt mỗi 2,5 s | 87,3 | 316,6 | 0,5 | 2 928 B |
+| Chia ở chính diện | 25,3 | 29,8 | 0,2 | 2 944 B |
+| LEARN, hai người ở 48° và 130° đổi lượt mỗi 2,5 s | 87,5 | 317,2 | 0,5 | 2 944 B |
 | `vad` thứ hai trên trung bình hai micro, chỉ có khi `bss` là khối không gian | 138,0 | 175,3 | 0,9 | 2 640 B |
 
 - Đỉnh của LEARN là bước phân cụm, mỗi `recheck_s` một lần: k-means trên histogram 181 ô cho từng số ghế thử.
