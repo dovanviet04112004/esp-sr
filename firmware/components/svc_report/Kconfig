@@ -9,6 +9,16 @@ menu "svc_report"
             Ten minutes unless opened again (KEHOACH 7.5). test_apps/capture
             raises it for its 30-minute sessions.
 
+    config SVC_REPORT_STREAM_CHANNELS_MAX
+        int "Widest stream frame this build sends, in channels"
+        depends on NET_STREAM_ENABLE
+        range 2 6
+        default 4
+        help
+            Sizes the two frame buffers of the stream. Four covers modes 1-5;
+            test_apps/bss_live raises it to 6 for mode 8, ch0 ch1 and four seats
+            (KEHOACH 7.4). A mode wider than this is refused at start.
+
     config SVC_REPORT_STREAM_BUFFER_KB
         int "Size of sb_stream in PSRAM (KB)"
         depends on NET_STREAM_ENABLE

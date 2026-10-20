@@ -17,7 +17,7 @@ extern "C" {
 typedef struct {
     StreamBufferHandle_t sb;   // sb_stream: sach_task writes, luong_task reads
     EventGroupHandle_t system; // eg_system; APP_BIT_STREAM_ON mirrors an open stream
-    uint8_t raw_channels;      // drv_audio_channels(): 2, or 3 with the speaker reference
+    uint8_t raw_channels;      // channels of a pushed hop: mics, then ref or seats
 } svc_report_stream_config_t;
 
 /** Take the handles the stream half works on.
@@ -28,7 +28,8 @@ esp_err_t svc_report_stream_init(const svc_report_stream_config_t *cfg);
 
 /** Open, or open again with a new deadline, a stream of mode to host:port for duration_s (0: the maximum).
  *  @ctx any task on core 0 | non-blocking | host is copied
- *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_NOT_SUPPORTED mode needs the reference and there is none
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_NOT_SUPPORTED the hop lacks the mode's channels, or the mode
+ * is wider than CONFIG_SVC_REPORT_STREAM_CHANNELS_MAX
  */
 esp_err_t svc_report_stream_start(uint8_t mode, const char *host, uint16_t port, uint32_t duration_s);
 

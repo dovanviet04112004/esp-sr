@@ -15,9 +15,8 @@
 #include "sdkconfig.h"
 #include "svc_report.h"
 
-#define STREAM_CHANNELS_MAX 4
 #define FRAME_MAX_BYTES                                                                                      \
-    (GEN_STREAM_HEADER_BYTES + GEN_GRID_HOP_SAMPLES * STREAM_CHANNELS_MAX * sizeof(int16_t))
+    (GEN_STREAM_HEADER_BYTES + GEN_GRID_HOP_SAMPLES * CONFIG_SVC_REPORT_STREAM_CHANNELS_MAX * sizeof(int16_t))
 #define HOST_BYTES 64
 #define IDLE_WAIT_MS 500
 #define RECEIVE_WAIT_MS 100
@@ -79,7 +78,10 @@ esp_err_t svc_report_stream_start(uint8_t mode, const char *host, uint16_t port,
         strlen(host) >= HOST_BYTES || port == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (raw_needed(mode) > s_stream.raw_channels) { return ESP_ERR_NOT_SUPPORTED; }
+    if (raw_needed(mode) > s_stream.raw_channels ||
+        gen_stream_mode_channels((gen_stream_mode_t)mode) > CONFIG_SVC_REPORT_STREAM_CHANNELS_MAX) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     const uint32_t seconds = duration_s == 0 || duration_s > CONFIG_SVC_REPORT_STREAM_MAX_S
                                  ? CONFIG_SVC_REPORT_STREAM_MAX_S
                                  : duration_s;
