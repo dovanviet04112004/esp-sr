@@ -70,6 +70,14 @@ Desktop, cổng 7700 publish trên Windows như broker. Chặn bằng `docker pa
 | 60 s, đóng băng máy nhận 30 s | `dev` @ `253ddf7` | 3185 / 566 (6 chỗ hở) | 564 | 0 · 0 | gửi hỏng sau ~12 s, nối lại mỗi giây; 2 khung mất lúc đóng socket |
 | 600 s `mode 5`, `sb_stream` 64 KB, không chặn — hai lượt (E5-T11) | `dev` trước `8653c9b` | — / 74 và — / 150 | 74 · 150 | 0 · 0 | đường tới máy nhận khựng 0,4–0,8 s vài lần; 64 KB chỉ giữ 0,67 s `mode 5`; tắt tiết kiệm điện radio không hết khựng |
 | 600 s `mode 5`, `sb_stream` 512 KB, không chặn (E5-T11) | `dev` @ `3d3335d` | 37 500 / 0 | 0 | 0 · 0 | 512 KB giữ ~5 s `mode 5`; `cleanDropped` 0; RSSI −56 … −58 dBm; phiên `20260926_home_002` |
+| `bss_live` 15 s `mode 6` (128 KB/s), hotspot `esp` đặt gần board, hai lượt (E8-T5) | `bss_live` @ `5518509`, `9a6453b` | 938 / 0 cả hai | 0 | — · 0 | sống và lối ra trễ 4 s |
+| `bss_live` `mode 6`, `TPLINK24G` (2,4 GHz, kênh 1), board −73 dBm, máy tính cũng ở 2,4 GHz kênh 1 (E8-T5) | `bss_live` @ `1741128` | 1 374 / 3 (1 chỗ hở) | 0 | — · 0 | một lần gửi khựng quá hạn 1 s; nối lại mất 3 khung còn trong socket |
+| như trên, −72 dBm, hai lượt liền nhau, hạn gửi 4 s (E8-T5) | `bss_live` @ `2555e56` | 938 / 0, rồi 289 / — | 0, rồi 193 | — · 0 | lượt hai gửi chỉ được ~1/3 nhịp thật: `sb_stream` 1 MB đầy sau 10 s, kết nối không đứt mà chậm |
+
+Trên `TPLINK24G`, board B ở −72 dBm và máy tính cùng ở 2,4 GHz kênh 1, nên mỗi khung đi trên không hai lần trên cùng một
+kênh của một văn phòng có 35 mạng. Ba lượt cho một lượt sạch, một lượt khựng quá 1 s, một lượt chỉ được một phần ba nhịp
+thật; hotspot `esp` đặt gần board sạch cả hai lượt. Cùng router, máy tính ở `TPLINK5G` (5 GHz, cùng mạng 192.168.40.0/24)
+thì đường board → router mới dùng 2,4 GHz 🔬.
 
 Chỗ hở chỉ xuất hiện khi bộ đệm trên đường đi (proxy Windows, TCP của lwIP, 64 KB `sb_stream` ≈ 1 s) đầy; board không
 chậm khung nào ở mọi phép thử. Phép "chặn mạng 5 s" thật ở phía Wi-Fi của board làm cùng lúc với E5-T8 (tắt hotspot).
