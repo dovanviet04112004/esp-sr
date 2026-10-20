@@ -28,6 +28,10 @@ FLASH_BAUD ?= 921600
 # Every Python a goal on board B starts loads tools/board_link first: RFC 2217 read timeouts stay on this side.
 BOARD_GOALS := $(IDF_GOALS) wifi calib-write calib-shift
 $(BOARD_GOALS): export PYTHONPATH := $(CURDIR)/tools/board_link$(if $(PYTHONPATH),:$(PYTHONPATH))
+# idf.py takes its flash baud from here; on its command line -b would set the monitor's baud too.
+$(BOARD_GOALS): export ESPBAUD := $(FLASH_BAUD)
+# esptool writes an image only where its MD5 on board B differs (KEHOACH 2.1).
+ONLY_CHANGED := --extra-args=--skip-flashed
 
 # The ml environment: every ml/ target runs there, the CPU-only ones with no GPU visible.
 ML := cd ml && uv run
@@ -393,7 +397,8 @@ fw-bench: ## Build the bench profile, the only one numbers are reported from
 
 # A test app leaves its own partition table on the board, so the product's goes back with the app.
 fw-bench-flash: fw-bench ## Flash the bench app, its bootloader and partition table over the CH340; storage, set.json among it, stays
-	cd firmware && $(IDF_BENCH) -p $(PORT) bootloader-flash partition-table-flash app-flash
+	cd firmware && $(IDF_BENCH) -p $(PORT) bootloader-flash $(ONLY_CHANGED) partition-table-flash $(ONLY_CHANGED) \
+	  app-flash $(ONLY_CHANGED)
 
 fw-prod: ## Build the prod profile in build_prod, from its own sdkconfig
 	rm -f firmware/build_prod/sdkconfig
@@ -431,7 +436,7 @@ board-detach: ## Stop board B's bridge, which hands its COM port back to Windows
 
 flash: ## Flash and monitor the dev profile over the CH340
 	@$(call fresh_sdkconfig,firmware/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.dev)
-	cd firmware && $(IDF_DEV) -p $(PORT) flash monitor
+	cd firmware && $(IDF_DEV) -p $(PORT) flash $(ONLY_CHANGED) monitor
 
 monitor: ## Open the serial monitor on the CH340
 	cd firmware && idf.py -p $(PORT) monitor
@@ -444,6 +449,9 @@ models-flash: ## Pack every model of contracts/models.lock.json and write models
 
 PRODUCT_PARTS = python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --baud $(FLASH_BAUD) \
   --partition-table-file firmware/partitions.csv
+# Writes FILE $(2) at partition $(1) where board B's flash differs, without erasing the partition first (KEHOACH 2.1).
+write_at = python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD) write-flash --skip-flashed \
+  $$($(PRODUCT_PARTS) get_partition_info --partition-name $(1) --info offset) $(2)
 
 .PHONY: nvs-save nvs-restore storage-flash product
 # NVS holds the roster, its voiceprints and the owner's thresholds; a test app that writes NVS runs between these
@@ -457,7 +465,7 @@ nvs-restore: ## Write FILE, a copy nvs-save made, back to board B's NVS partitio
 	$(PRODUCT_PARTS) write_partition --partition-name nvs --input "$(abspath $(FILE))"
 
 storage-flash: fw-bench ## Write the bench build's LittleFS image, set.json among it, to board B's storage partition
-	$(PRODUCT_PARTS) write_partition --partition-name storage --input firmware/build_bench/storage.bin
+	$(call write_at,storage,firmware/build_bench/storage.bin)
 
 # Models and storage go first: the product's first boot then finds its models and keeps the thresholds in NVS.
 product: ## Put the product back on board B after test apps: models, storage, then firmware, and show its boot
@@ -467,17 +475,17 @@ product: ## Put the product back on board B after test apps: models, storage, th
 	cd host && uv run python -m srhost.boot --port "$(PORT)"
 
 capture-flash: ## Flash test_apps/capture, the raw-only recorder (E5-T12)
-	cd $(CAPTURE_APP) && idf.py -p $(PORT) flash
+	cd $(CAPTURE_APP) && idf.py -p $(PORT) flash $(ONLY_CHANGED)
 
 capture-radio-off-flash: ## Flash capture that records 60 s with the radio off, then sends: the Wi-Fi off floor (E2-T4)
 	cd $(CAPTURE_APP) && idf.py -B build_radio_off -D SDKCONFIG=build_radio_off/sdkconfig \
-	  -D CAPTURE_PROFILE=radio_off -p $(PORT) flash
+	  -D CAPTURE_PROFILE=radio_off -p $(PORT) flash $(ONLY_CHANGED)
 
 ##@ Board B: calibration (E2-T5, E2-T6)
 
 .PHONY: calib-flash calib-estimate calib-write calib-shift
 calib-flash: ## Flash test_apps/calib, the console that stores NVS calib/*
-	cd $(CALIB_APP) && idf.py -p $(PORT) flash
+	cd $(CALIB_APP) && idf.py -p $(PORT) flash $(ONLY_CHANGED)
 
 calib-estimate: ## Estimate balance from frontal white noise sessions: SESSIONS="<dir> <dir> ..."
 	cd host && uv run python -m srhost.calib estimate $(SESSIONS)

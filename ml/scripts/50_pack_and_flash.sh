@@ -7,5 +7,7 @@ port="${PORT:-/dev/ttyUSB0}"
 baud="${BAUD:-921600}"
 image=artifacts/models.bin
 uv run python -m srpipe.export.pack_models "$image" --lock
-python "$IDF_PATH/components/partition_table/parttool.py" --port "$port" --baud "$baud" \
-  --partition-table-file ../firmware/partitions.csv write_partition --partition-name models_0 --input "$image"
+offset=$(python "$IDF_PATH/components/partition_table/parttool.py" --partition-table-file ../firmware/partitions.csv \
+  get_partition_info --partition-name models_0 --info offset)
+# Written where the flash differs, the rest kept: the image's header gives every model's size (KEHOACH 2.1, 6.3).
+python -m esptool --chip esp32s3 --port "$port" --baud "$baud" write-flash --skip-flashed "$offset" "$image"
