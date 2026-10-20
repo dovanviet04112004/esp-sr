@@ -23,7 +23,7 @@ lại trong thư mục build, qua `python3 pytest_parity.py --report <file>`.
 | `agc` — mọi mẫu ra, `gain_db` mỗi bước; máy tính và board B | 3 | 0 (ra), 4,8e-7 dB (`gain_db`) | 143,2 (`gain_db`) | ra ≤ 1e-6, ≥ 120 dB; `gain_db` ≤ 1e-5 | bỏ qua cờ nói: 1,5e-3, 19,4 dB → đỏ | a934a6a | 27/09 |
 | `doa` — góc và độ tin sau mỗi bước (§3.6); máy tính và board B | 4 | 0 | — | khớp tuyệt đối | mọi góc lệch một bước lưới: 2, 29,8 dB → đỏ | 67793ce | 20/10 |
 | `gsc` — các vạch ra (§3.7); máy tính và board B, cả hai bản dựng | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | trọng số không bao giờ học: 11,3, 4,6 dB → đỏ | 67793ce | 20/10 |
-| `bss` — cổng, số ghế, hai hướng, cổng và hướng của mọi số ghế sau mỗi bước, hai lối ra của bước cuối (§3.8); máy tính và board B | 4 | 0 | — | khớp tuyệt đối | cổng của chế độ chia ở chính diện: cổng lệch 1, 5,9 dB → đỏ; ghế đánh số theo độ trễ: 79°, cổng lệch 1 → đỏ | 8e1f927 | 20/10 |
+| `bss` — cổng, số ghế, hai hướng, cổng và hướng của mọi số ghế, cổng trễ và số ghế giữ sau mỗi bước, hai lối ra của bước cuối (§3.8); máy tính và board B | 6 | 0 | — | khớp tuyệt đối | cổng của chế độ chia ở chính diện: cổng lệch 1, 5,9 dB → đỏ; ghế đánh số theo độ trễ: 150°, cổng lệch 1 → đỏ; cổng trễ lùi một bước: 1 → đỏ; người thứ tư nhận ghế không chờ `confirm`: số ghế lệch 2, 94° → đỏ | 5137faf | 20/10 |
 | `ns_omlsa` — gain mỗi vạch và xác suất có tiếng nói mỗi bước; máy tính và board B | 5 | 0 | — | ≤ 1e-6, ≥ 120 dB | hệ số làm trơn không bình phương ở bước 16 ms: 0,75, 13,1 dB → đỏ | 5636ed9 | 27/09 |
 | `g2p` — mã trả về và đơn vị của 16 742 âm tiết hợp lệ và 38 cụm từ, mỗi vùng một lượt; máy tính và board B | 29 | 0 | — | khớp tuyệt đối | `d` giọng Nam đọc z: 1 → đỏ | d259771 | 27/09 |
 | `normalize` — mã trả về và từng byte ra của 64 đầu vào; máy tính và board B | 1 | 0 | — | khớp tuyệt đối | 105 đọc giọng Nam: 120 → đỏ | d259771 | 27/09 |
@@ -103,14 +103,27 @@ một giọng ở 150° dưới nhiễu từ 20° với bước học lớn; im 
 này chạy trên board B lần đầu ngày 20/10: trước đó cả hai bản dựng tắt `gsc`, và bộ chấm chỉ xét khối có trong `plan`
 của board.
 
-## `bss` (E8-T3)
+## `bss` (E8-T3, E8-T7)
 
-Bốn ca, mỗi ca phổ hai kênh cố định cùng góc, độ tin và cờ dò của `doa` cho mỗi bước: chế độ chia ở chính diện với hai
-người ở 48° và 130°; LEARN tách ở bước 136; LEARN ba ghế giữ theo số lần dò, số ghế đi 0 → 2 → 3 → 2 → 0 khi ghế bị
-quên; hai người cùng một phía (40° và 76°) với `conf_min` 60. Cửa sổ ngắn hơn mặc định để mọi nhánh, kể cả quên ghế,
-rơi vào vài trăm bước. Máy tính và board B khớp **từng bit** cả bảy tensor, kể cả cổng và hướng của mọi số ghế. Đối chứng âm 000 mang cổng
-của chế độ chia ở chính diện trên ca cùng một phía: cổng lệch 1, đỏ. Đối chứng âm 001 là ca ba ghế đánh số theo độ
-trễ thay vì giữ số: khi ghế 150° vào trước hai ghế cũ, số lệch tới 79°, đỏ.
+Sáu ca, mỗi ca phổ hai kênh cố định cùng góc, độ tin và cờ dò của `doa` cho mỗi bước:
+- chế độ chia ở chính diện với hai người ở 48° và 130°;
+- LEARN hai người đổi lượt, tách ở bước 136;
+- LEARN ba ghế giữ theo số lần dò, số ghế đi 0 → 2 → 3 → 2 → 0 khi ghế bị quên;
+- hai người cùng một phía (40° và 76°) với `conf_min` 60;
+- ba người, rồi người thứ tư ở 60° vào (`seats_max` 4): số ghế đi 0 → 2 → 3 → 4, rồi 3 → 2 khi hai người im bị quên;
+- một người ở 75° dừng ở 54° cạnh người ở 140°: tách ở bước 268, khi đỉnh 54° đã rõ; rồi 140° rời đi, 100° đến và
+  dời ghế trống về mình.
+
+Cửa sổ ngắn hơn mặc định để mọi nhánh, kể cả quên ghế và dời ghế, rơi vào vài trăm bước. Máy tính và board B khớp
+**từng bit** cả chín tensor, kể cả cổng và hướng của mọi số ghế và cổng của lối ra trễ.
+
+Đối chứng âm:
+- 000 mang cổng của chế độ chia ở chính diện trên ca cùng một phía: cổng lệch 1, đỏ.
+- 001 là ca ba ghế đánh số theo độ trễ thay vì giữ số: hướng của số ghế lệch tới 150°, đỏ.
+- 002 lấy cổng trễ lùi một bước thay vì `history_s`: cổng lệch 1, đỏ.
+- 003 là ca người thứ tư với `confirm` 1, ghế nhận ngay lần kiểm lại đầu: số ghế lệch 2, hướng lệch 94°, đỏ.
+
+Thêm 600 ca ngẫu nhiên sinh từ bản soi gương cũng khớp từng bit trên máy tính (`measurements/afe/bss.md` §7).
 
 ## `ns_omlsa` (E9-T1)
 

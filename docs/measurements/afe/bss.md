@@ -1,7 +1,8 @@
-# `bss` (E8-T3)
+# `bss` (E8-T3, E8-T7)
 
 `bss` là cổng hướng theo ghế của KẾ HOẠCH §3.8, dựng theo module `separation` của `micarray` trong `tinyai-signal`
-(commit `642e6e4`). Số của §1–5 đo ngày 19/10 trên bản Python soi gương; §6 và §7 đo trên board B ngày 20/10.
+(commit `642e6e4`). Số của §1–3 đo ngày 19/10 trên bản Python soi gương; §4–6 đo ngày 20/10 trên bản soi gương ở
+`5137faf`, LEARN dò đỉnh của mật độ độ trễ (E8-T7); §7 và §8 đo trên board B ngày 20/10.
 
 **Thước** của mục này:
 - **mất**: phần năng lượng của người được giữ mà cổng làm mất;
@@ -79,15 +80,15 @@ từ lúc nhận ghế thì hết.
 
 ## 4. Kết quả
 
-`make eval-bss` ở `dc92e9d`, 40 s trên 8 tiến trình. Mỗi ô: mất / rò cả bài / rò từ 0,5 s sau đổi lượt / thời điểm
-LEARN tách (giây, và số mục tách được trên số mục).
+`make eval-bss` ở `5137faf`. Mỗi ô: mất / rò cả bài / rò từ 0,5 s sau đổi lượt / thời điểm LEARN tách (giây, và số mục
+tách được trên số mục).
 
 **Bản ghép A/B của board B**, mỗi người được giữ một lượt:
 
 | Giữ | Chia ở chính diện | LEARN |
 |---|---|---|
-| A (~48°) | −0,03 / −14,8 / −332 dB / — | −0,03 / −14,8 / −325 dB / 9,7 s (1/1) |
-| B (~130°) | −0,17 / −23,3 / −126 dB / — | −0,17 / −23,3 / −126 dB / 9,7 s (1/1) |
+| A (~48°) | −0,03 / −14,8 / −332 dB / — | −0,03 / −14,8 / −299 dB / 6,7 s (1/1) |
+| B (~130°) | −0,17 / −23,3 / −126 dB / — | −0,17 / −23,3 / −126 dB / 6,7 s (1/1) |
 
 **Cảnh dựng `standard`**:
 - lấy 96 cảnh có người gây nhiễu là người nói;
@@ -96,9 +97,9 @@ LEARN tách (giây, và số mục tách được trên số mục).
 
 | RT60, vị trí hai người | Chia ở chính diện | LEARN |
 |---|---|---|
-| 0,2 s, hai phía (31) | 0,00 / −26,1 / −176 dB / — | 0,00 / −26,1 / −171 dB / 10,1 s (31/31) |
-| 0,4 s, hai phía (31) | 0,00 / −26,1 / −148 dB / — | −0,01 / −25,5 / −133 dB / 10,1 s (31/31) |
-| 0,6 s, hai phía (29) | −0,02 / −27,0 / −150 dB / — | −0,02 / −27,0 / −151 dB / 10,2 s (29/29) |
+| 0,2 s, hai phía (31) | 0,00 / −26,1 / −176 dB / — | 0,00 / −26,1 / −175 dB / 10,2 s (31/31) |
+| 0,4 s, hai phía (31) | 0,00 / −26,1 / −148 dB / — | −0,01 / −25,5 / −138 dB / 10,1 s (31/31) |
+| 0,6 s, hai phía (29) | −0,02 / −27,0 / −150 dB / — | −0,02 / −27,0 / −150 dB / 10,4 s (29/29) |
 | 0,2 s, một phía (1) | 0,00 / −0,1 / −0,1 dB / — | 0,00 / −2,2 / −2,2 dB / 10,4 s |
 | 0,4 s, một phía (1) | −0,01 / 0,0 / 0,0 dB / — | −0,01 / −3,2 / −3,4 dB / 11,0 s |
 | 0,6 s, một phía (3) | 0,00 / −0,2 / −0,1 dB / — | 0,00 / −5,0 / −5,0 dB / 10,8 s (3/3) |
@@ -106,50 +107,118 @@ LEARN tách (giây, và số mục tách được trên số mục).
 - **Hai người ở hai phía:** cổng gần như không làm mất gì của người được giữ. Rò sau 0,5 s từ lúc đổi lượt dưới
   −125 dB ở mọi RT60, tức người kia bị chặn hết. Rò cả bài −15 đến −27 dB nằm ở đầu mỗi lượt (§2).
 - **Hai người cùng một phía:** chia ở chính diện không tách được, đúng như KẾ HOẠCH đã ghi. LEARN tách được, nhưng chỉ sau
-  khi người thứ hai nói khoảng 2–3 s: người gây nhiễu bắt đầu ở giây 8, ghế thứ hai có ở giây 10,4–11,0. Trước đó người
-  ấy lọt qua, nên số cả bài chỉ còn −2 đến −5 dB.
-- Ở mọi cảnh, LEARN tách khoảng 2 s sau khi người thứ hai mở lời. `tinyai-signal` cần 10,4 s trên bộ dựng của nó, 22,4–37,4 s
-  trên bản thu người thật.
-- Trên bản ghép A/B, LEARN tách muộn hơn, ở giây 9,7. Hai người nối lời không nghỉ, nên lúc `doa` quét từ 48° sang
-  130° có những lần dò rơi vào giữa, làm phép kiểm độ trũng chưa qua ngay. Trong lúc chờ, LEARN cắt như chế độ chia ở
-  chính diện.
+  khi người thứ hai nói khoảng 2,4–3 s: người gây nhiễu bắt đầu ở giây 8, ghế thứ hai có ở giây 10,4–11,0. Đỉnh của người
+  ấy phải giữ 5% cửa sổ trong lõi, rồi hai lần kiểm lại liên tiếp phải thấy cùng các đỉnh. Trước đó người ấy lọt qua, nên
+  số cả bài chỉ còn −2 đến −5 dB.
+- Trên bản ghép A/B, LEARN tách 1,7 s sau khi B mở lời ở giây 5. `tinyai-signal` cần 10,4 s trên bộ dựng của nó,
+  22,4–37,4 s trên bản thu người thật.
+
+So với LEARN k-means đo ngày 19/10 ở `dc92e9d` trên cùng vật liệu:
+- mất và rò cả bài như nhau ở mọi dòng, rò sau 0,5 s của hai phía vẫn dưới −125 dB;
+- bản ghép A/B tách sớm hơn 3 s (6,7 thay vì 9,7 s): k-means chờ phép kiểm độ trũng giữa hai cụm, mà `doa` quét chuyển
+  rải lần dò vào giữa;
+- cảnh dựng tách lệch nhau không quá 0,2 s.
 
 ## 5. Bản thu thật, không nhãn
 
-LEARN, mặc định của `contracts/afe.yaml`:
+LEARN, mặc định của `contracts/afe.yaml`. Cột "đỉnh của `doa`" là histogram mọi lần dò được đếm trên cả bản thu:
 
-| Bản thu | Tách sau | Hai ghế cuối cùng |
+| Bản thu | Đỉnh của `doa` | Tách sau | Ghế cuối cùng | LEARN k-means (19/10): tách, ghế |
+|---|---|---|---|---|
+| Hai người luân phiên 30 s | 54° và 144–146° | 5,8 s | 54° và 146° | 2,8 s; 63° và 137° |
+| Hai người nói đè 10 s | 50–60° và 130–142° | 3,1 s | 54° và 136° | 4,1 s; 57° và 135° |
+| Giọng cùng loa nhạc 9,6 s | giọng 124–134°, nhạc rải 0–40° | 3,6 s | 127° (giọng) và 31° (nhạc) | 3,6 s; 134° và 12° |
+
+Ghế nằm trên đỉnh của bản đồ góc. Lúc nói đè, mỗi bước cổng giữ một phía, không tách được hai giọng trong cùng một bước
+(KẾ HOẠCH §3.8, giới hạn).
+
+**Bản thu luân phiên tách ở 5,8 s.** B mở lời ở giây 2,0 khi A chưa dứt, và trong 0,75 s nói đè `doa` đọc B ở 74–76°.
+Từ giây 3,25, B nói một mình và `doa` đọc 52–62°. Hai cụm của B cách nhau hơn `min_gap` nên là hai đỉnh. Với
+`seats_max` 2, có ba đỉnh thì LEARN chờ đến khi đỉnh bị bỏ thấp hơn nửa đỉnh thấp nhất được giữ (KẾ HOẠCH §3.8):
+
+| Lần kiểm lại | Đỉnh (độ cao) | Việc |
 |---|---|---|
-| Hai người luân phiên 30 s | 2,8 s | 137° và 63° |
-| Hai người nói đè 10 s | 4,1 s | 135° và 57° |
-| Giọng cùng loa nhạc 9,6 s | 3,6 s | 134° (giọng) và 12° (nhạc) |
+| 2,8 s | 144° (134), 75° (38) | khác lần trước quá nửa `min_gap`, đếm lại từ 1 |
+| 3,8 s | 144° (134), 75° (38), 54° (37) | ba đỉnh ngang nhau, chờ |
+| 4,8 s | 144° (134), 57° (77), 75° (38) | 75° dưới nửa 57°, đếm 1 |
+| 5,8 s | 144° (134), 56° (119), 75° (38) | khớp lần trước, tách ở 56° và 144° |
 
-Ghế khớp với bản đồ góc của `doa` trên chính các bản thu ấy. Lúc nói đè, mỗi bước cổng giữ một phía, không tách được
-hai giọng trong cùng một bước (KẾ HOẠCH §3.8, giới hạn).
+LEARN k-means tách ở 2,8 s nhưng đặt ghế B ở 63°, giữa hai cụm của B. Hai người ở hai phía chính diện, nên trước lúc
+tách cổng chia ở chính diện đã đưa A và B ra hai luồng: tách muộn ở bản thu này không làm mất hay rò thêm gì. Ca vàng 005
+(§7) dựng đúng tình huống này.
 
-## 6. Khớp với bản C
+## 6. Bộ kịch bản
 
-`make parity-host`, và `make parity-board` ở bản dựng `modules` ngày 20/10 (`8e1f927`), bộ vàng `contracts/golden/bss/`;
-máy tính và board B ra cùng số:
-- 4 ca khớp từng bit: cổng, số ghế, hướng, cổng và hướng của mọi số ghế sau mọi bước, và hai lối ra của bước cuối,
-  đều `max_abs 0`;
-- đối chứng âm 000 mang cổng của chế độ chia ở chính diện và báo đỏ: cổng lệch tới 1, SNR 5,9 dB;
-- đối chứng âm 001 đánh số ghế theo độ trễ thay vì giữ số và báo đỏ: hướng lệch tới 79°, cổng tới 1.
+`ml/tests/test_bss_scenarios.py` dựng lần dò của `doa` như trên board B: sau mỗi lần đổi người, `doa` quét chuyển 12 bước
+(làm trơn 0,2 s); mỗi lần dò rung ±2°; một phần lần dò lạc ngẫu nhiên khắp 0–180°. Mỗi kịch bản ghi số ghế phải có ở
+cuối và những người phải có ghế. Ít nhất 90% bước nói ổn định của mỗi người phải có cổng lớn nhất ở ghế gần họ nhất.
 
-## 7. Chi phí
+Hai mươi kịch bản:
+- một người trôi chậm 48 → 58° (không ghế);
+- hai phía; một phía; ba người; bốn người;
+- người thứ tư vào muộn, khi cả ba còn nói, khi chỉ một người còn nói, và khi nói một mình;
+- hai ghế mà ba người nói;
+- một người nói 90%;
+- hai người gần nhau (80° và 100°);
+- hai người gần hơn `min_gap` (86° và 94°, một ghế);
+- một người trôi dần;
+- nói đè; nghỉ dài; chỉ có lần dò lạc;
+- lượt 0,5 s;
+- một người rời đi, người khác đến, rồi người cũ quay lại;
+- ba ghế mà bốn người nói;
+- nhạc rải và một người.
 
-`make bench-board` ngày 20/10 (`8e1f927`, profile `bench`), nhân 1, số mặc định của `contracts/afe.yaml`:
+Kết quả:
+- 120 lượt (20 kịch bản × 3 hạt giống × lạc 3% và 6%) qua hết trong 32 s.
+- 10 hạt giống (0–9) ở cả hai mức lạc, 400 lượt, ở `5137faf`: qua hết.
+- LEARN k-means trượt 9 trên 15 kịch bản đầu. Nó dừng ở số ghế đầu tiên trượt phép kiểm, thay mọi ghế khi một số ghế lớn
+  hơn qua, kéo tâm ghế về giữa đường quét, và để lần dò lạc kéo ghế đi.
+- Giới hạn còn lại: một người chỉ nói 10% thời gian với câu 0,5 s, khi `doa` quét chuyển tới 20 bước, không đủ khối
+  lượng ở lõi để có ghế (KẾ HOẠCH §3.8).
+
+## 7. Khớp với bản C
+
+`make parity-host`, và `make parity-board` ở bản dựng `modules` ngày 20/10 (`5137faf`), bộ vàng `contracts/golden/bss/`.
+Máy tính và board B ra cùng số.
+
+Sáu ca khớp từng bit, mọi tensor `max_abs 0` (cổng, số ghế, hướng, cổng và hướng của mọi số ghế, cổng trễ và số ghế giữ
+của lối ra trễ sau mọi bước, hai lối ra của bước cuối):
+- chia ở chính diện;
+- LEARN hai người;
+- ba ghế giữ theo số lần dò, hai ghế im đến lúc bị quên;
+- hai người một phía, `conf_min` 60;
+- ba người, rồi người thứ tư ở 60° vào (`seats_max` 4);
+- một người ở 75° dừng ở 54°, cạnh người ở 140°, tách khi đã rõ, rồi 140° rời đi và 100° đến (dời ghế trống).
+
+Bốn đối chứng âm đều đỏ:
+- 000: cổng của chế độ chia ở chính diện trên ca một phía. Cổng lệch 1, hướng của số ghế lệch 79°.
+- 001: ca ba ghế đánh số theo độ trễ thay vì giữ số. Hướng lệch 150°, cổng lệch 1.
+- 002: cổng trễ lấy góc lùi một bước. Cổng lệch 1.
+- 003: ca người thứ tư với `confirm` 1. Số ghế lệch 2, hướng lệch 94°.
+
+Thêm 600 ca ngẫu nhiên, sinh từ bản soi gương bằng một script tạm:
+- cấu hình khắp dải `check()` nhận, 2–4 ghế;
+- lần dò có quét chuyển, lạc tới 10%, nói đè, người mới vào và khoảng lặng.
+
+Binary của `make parity-host` khớp từng bit cả 600 ca. Các ca này đi qua 15 557 lần kiểm lại chưa tách, 475 lần thêm
+ghế và 394 lần dời ghế trống.
+
+## 8. Chi phí
+
+`make bench-board` ngày 20/10 (`5137faf`, profile `bench`), nhân 1, số mặc định của `contracts/afe.yaml`:
 
 | Đường | µs trung bình | µs đỉnh | % khung 16 ms | Vùng `hot` |
 |---|---|---|---|---|
-| Chia ở chính diện | 25,3 | 29,8 | 0,2 | 2 944 B |
-| LEARN, hai người ở 48° và 130° đổi lượt mỗi 2,5 s | 87,5 | 317,2 | 0,5 | 2 944 B |
+| Chia ở chính diện | 25,4 | 30,2 | 0,2 | 4 288 B |
+| LEARN, hai người ở 48° và 130° đổi lượt mỗi 2,5 s | 86,4 | 255,5 | 0,5 | 4 288 B |
 | `vad` thứ hai trên trung bình hai micro, chỉ có khi `bss` là khối không gian | 138,0 | 175,3 | 0,9 | 2 640 B |
 
-- Đỉnh của LEARN là bước phân cụm, mỗi `recheck_s` một lần: k-means trên histogram 181 ô cho từng số ghế thử.
-  `tinyai-signal` phân cụm cả vòng đệm, đỉnh một nhịp lên 2,9 ms.
-- Trong chuỗi, `bss` cộng `vad` thứ hai tốn 163 µs mỗi bước khi chia ở chính diện, 225 µs với LEARN. `gsc` tốn 141 µs
+- Đỉnh của LEARN là bước kiểm lại, mỗi `recheck_s` một lần: dồn histogram vào 68 ô độ trễ, làm trơn, dò đỉnh, tính khối
+  lượng lõi. Đỉnh 255,5 µs, LEARN k-means lên 317,2 µs ở bước phân cụm. `tinyai-signal` phân cụm cả vòng đệm, đỉnh một
+  nhịp lên 2,9 ms.
+- Vùng `hot` 4 288 B, hơn LEARN k-means 1 344 B: mật độ 68 ô, bảng ô của 181 độ và các danh sách đỉnh, cỡ theo cấu hình.
+- Trong chuỗi, `bss` cộng `vad` thứ hai tốn 163 µs mỗi bước khi chia ở chính diện, 224 µs với LEARN. `gsc` tốn 141 µs
   khi góc lái đứng yên, 485 µs khi góc lái đổi mỗi bước.
-- Bench dựng kèm `bss`, nên dòng chuỗi của `budget.md` lên 86 464 B, hơn 1 040 B so với 11/10: đệm trung bình hai micro
+- Bench dựng kèm `bss`, nên dòng chuỗi của `budget.md` là 86 464 B, hơn 1 040 B so với 11/10: đệm trung bình hai micro
   1 KB và các con trỏ của `vad` thứ hai nằm trong struct của mặt tiền khi `bss` được dựng. Sản phẩm không dựng `bss` nên
   không mang phần này.
