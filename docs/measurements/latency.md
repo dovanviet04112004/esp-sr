@@ -1096,3 +1096,35 @@ từ bản `nvs-save` ngày 12/10. Log boot:
 - ngưỡng 2964–3795 cho 1–8 mẫu giọng, model `c3373e4e`;
 - roster có 1 mẫu giọng, kiểm người nói bật;
 - δ1 300, δ2 50, δ3 65535, bộ 10 lệnh của `set.json`.
+
+## 30. Nạp qua cầu RFC 2217: timeout đọc và ảnh không đổi (E1-T13)
+
+Đo ngày 20/10 trên board B qua cầu RFC 2217 của KẾ HOẠCH §2.1, với esptool 5.4.0, pyserial 3.5, pytest-embedded 2.9.3
+của ESP-IDF v6.0.2.
+
+pyserial phía WSL coi mỗi lần timeout đọc đổi là đổi cấu hình cổng. Nó gửi lại baud, số bit, parity, stop bit sang
+cầu rồi ngủ ít nhất 50 ms chờ trả lời. esptool đặt timeout của từng lệnh rồi trả lại giá trị cũ:
+- pytest-embedded để cổng ở 0,05 s, lệnh thường của esptool dùng 3 s, nên mỗi lệnh đổi timeout hai lần;
+- esptool chạy từ dòng lệnh (`idf.py flash`, parttool) mở cổng không có timeout, nên cũng đổi hai lần mỗi lệnh.
+
+| Phép đo | Timeout đổi qua cầu | Timeout chỉ ở phía WSL |
+|---|---|---|
+| `read_reg` qua stub, cổng ở 0,05 s, trung bình 20 lần | 305 ms | 3,9 ms |
+| `read_reg` khi cổng đã ở 3 s | — | 3,9 ms |
+| `esptool flash-id` từ dòng lệnh, gồm cả kết nối | 34,3 s | 4,2 s |
+
+Mọi log nạp qua cầu từ 11/10 có một khoảng 21–39 s không in gì, giữa dòng đổi baud và dòng `Configuring flash size`.
+Trong khoảng đó esptool dò chip flash bằng vài chục lệnh thanh ghi.
+
+**`make bss`**, tính từ lúc pytest mở cổng tới lúc reset sau khi nạp:
+
+| Lượt | Ảnh ghi | Pha nạp | Tới menu |
+|---|---|---|---|
+| như cũ, hai lượt | cả bốn ảnh; app 21,5–23,2 s | 71 s | — |
+| chỉ ghi ảnh khác (`--skip-flashed`) | app, sau một lượt nạp bị ngắt; 21,2 s | 67 s | 66,4 s |
+| chỉ ghi ảnh khác | `ota_data` 8 KB | 49 s | 51,3 s |
+| thêm timeout ở phía WSL | `ota_data` và app; app 7,6 s | 15 s | 39,2 s |
+| thêm timeout ở phía WSL | `ota_data` | 6 s | 15,6 s |
+
+`ota_data` được ghi lại ở mọi lượt vì app cập nhật nó lúc boot. Sau mỗi commit, chuỗi phiên bản nhúng trong app đổi,
+nên lượt đầu tiên ghi lại app.
