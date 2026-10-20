@@ -1,7 +1,7 @@
 # `bss` (E8-T3)
 
 `bss` là cổng hướng theo ghế của KẾ HOẠCH §3.8, dựng theo module `separation` của `micarray` trong `tinyai-signal`
-(commit `642e6e4`). Mọi số dưới đây đo ngày 19/10 trên bản Python soi gương.
+(commit `642e6e4`). Số của §1–5 đo ngày 19/10 trên bản Python soi gương; §6 và §7 đo trên board B ngày 20/10.
 
 **Thước** của mục này:
 - **mất**: phần năng lượng của người được giữ mà cổng làm mất;
@@ -129,13 +129,25 @@ hai giọng trong cùng một bước (KẾ HOẠCH §3.8, giới hạn).
 
 ## 6. Khớp với bản C
 
-`make parity-host`, bộ vàng `contracts/golden/bss/`:
+`make parity-host`, và `make parity-board` ở bản dựng `modules` ngày 20/10 (`67793ce`), bộ vàng `contracts/golden/bss/`;
+máy tính và board B ra cùng số:
 - 4 ca khớp từng bit: cổng, số ghế, hướng sau mọi bước, và hai lối ra của bước cuối, đều `max_abs 0`;
 - ca đối chứng âm mang cổng của chế độ chia ở chính diện và báo đỏ: cổng lệch tới 1, SNR 5,9 dB.
 
-Trên board B: chưa chạy 🔬.
-
 ## 7. Chi phí
 
-Chưa đo trên board 🔬. Mỗi bước chỉ nhân 257 vạch với một hệ số; `vad` thứ hai cùng giá với `vad` chính. Mỗi
-`recheck_s`, LEARN phân cụm trên histogram 181 ô.
+`make bench-board` ngày 20/10 (`9da99f5`, profile `bench`), nhân 1, số mặc định của `contracts/afe.yaml`:
+
+| Đường | µs trung bình | µs đỉnh | % khung 16 ms | Vùng `hot` |
+|---|---|---|---|---|
+| Chia ở chính diện | 25,2 | 29,5 | 0,2 | 2 928 B |
+| LEARN, hai người ở 48° và 130° đổi lượt mỗi 2,5 s | 87,3 | 316,6 | 0,5 | 2 928 B |
+| `vad` thứ hai trên trung bình hai micro, chỉ có khi `bss` là khối không gian | 138,0 | 175,3 | 0,9 | 2 640 B |
+
+- Đỉnh của LEARN là bước phân cụm, mỗi `recheck_s` một lần: k-means trên histogram 181 ô cho từng số ghế thử.
+  `tinyai-signal` phân cụm cả vòng đệm, đỉnh một nhịp lên 2,9 ms.
+- Trong chuỗi, `bss` cộng `vad` thứ hai tốn 163 µs mỗi bước khi chia ở chính diện, 225 µs với LEARN. `gsc` tốn 141 µs
+  khi góc lái đứng yên, 485 µs khi góc lái đổi mỗi bước.
+- Bench dựng kèm `bss`, nên dòng chuỗi của `budget.md` lên 86 464 B, hơn 1 040 B so với 11/10: đệm trung bình hai micro
+  1 KB và các con trỏ của `vad` thứ hai nằm trong struct của mặt tiền khi `bss` được dựng. Sản phẩm không dựng `bss` nên
+  không mang phần này.

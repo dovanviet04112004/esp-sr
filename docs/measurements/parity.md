@@ -3,6 +3,7 @@
 Kết quả `test_apps/parity` trên board, đọc `contracts/golden/`. Ngưỡng lấy từ `tolerance.yaml` của từng khối.
 App dựng bằng cờ trình biên dịch của `bench`, cũng là của `prod` (`-O2`, KẾ HOẠCH §3.14), hai lần: mọi module tắt với bộ
 vàng `chain`, và profile `modules` (đúng `firmware/sdkconfig.afe`) với bộ vàng của từng module thật và `chain_modules`.
+Hai khối không gian sản phẩm chưa bật cũng được dựng: `gsc` ở cả hai lần, `bss` (cần `doa` và `vad`) chỉ ở `modules`.
 Chạy: `make parity-board`; trên máy tính: `make parity-host`. Số trong bảng lấy từ `parity_report.txt` mà lượt board để
 lại trong thư mục build, qua `python3 pytest_parity.py --report <file>`.
 
@@ -20,6 +21,9 @@ lại trong thư mục build, qua `python3 pytest_parity.py --report <file>`.
 | `balance` — nhân phức viết tay (ADR-0005), máy tính và board B | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | hệ số liên hợp: 26,0, −3,5 dB → đỏ | a934a6a | 27/09 |
 | `vad` — mức sáu dải, quyết định thô, `speech` sau kéo dài; máy tính và board B | 4 | 0 | — | mức ≤ 1e-6, ≥ 120 dB; quyết định khớp tuyệt đối | `speech` trễ một bước: 1 → đỏ | a934a6a | 27/09 |
 | `agc` — mọi mẫu ra, `gain_db` mỗi bước; máy tính và board B | 3 | 0 (ra), 4,8e-7 dB (`gain_db`) | 143,2 (`gain_db`) | ra ≤ 1e-6, ≥ 120 dB; `gain_db` ≤ 1e-5 | bỏ qua cờ nói: 1,5e-3, 19,4 dB → đỏ | a934a6a | 27/09 |
+| `doa` — góc và độ tin sau mỗi bước (§3.6); máy tính và board B | 4 | 0 | — | khớp tuyệt đối | mọi góc lệch một bước lưới: 2, 29,8 dB → đỏ | 67793ce | 20/10 |
+| `gsc` — các vạch ra (§3.7); máy tính và board B, cả hai bản dựng | 4 | 0 | — | ≤ 1e-6, ≥ 120 dB | trọng số không bao giờ học: 11,3, 4,6 dB → đỏ | 67793ce | 20/10 |
+| `bss` — cổng, số ghế, hai hướng sau mỗi bước, hai lối ra của bước cuối (§3.8); máy tính và board B | 4 | 0 | — | khớp tuyệt đối | cổng của chế độ chia ở chính diện: cổng lệch 1, 5,9 dB → đỏ | 67793ce | 20/10 |
 | `ns_omlsa` — gain mỗi vạch và xác suất có tiếng nói mỗi bước; máy tính và board B | 5 | 0 | — | ≤ 1e-6, ≥ 120 dB | hệ số làm trơn không bình phương ở bước 16 ms: 0,75, 13,1 dB → đỏ | 5636ed9 | 27/09 |
 | `g2p` — mã trả về và đơn vị của 16 742 âm tiết hợp lệ và 38 cụm từ, mỗi vùng một lượt; máy tính và board B | 29 | 0 | — | khớp tuyệt đối | `d` giọng Nam đọc z: 1 → đỏ | d259771 | 27/09 |
 | `normalize` — mã trả về và từng byte ra của 64 đầu vào; máy tính và board B | 1 | 0 | — | khớp tuyệt đối | 105 đọc giọng Nam: 120 → đỏ | d259771 | 27/09 |
@@ -91,6 +95,22 @@ cả ba ca. `gain_db` là số báo: Python lấy `log10` ở double rồi làm 
 lẫn newlib lệch giá trị làm tròn đúng ấy tới một bit cuối (4,8e-7 dB). Đối chứng âm bỏ qua cờ nói nên gain không nhúc
 nhích: đỏ.
 
+## `gsc` (E8-T2)
+
+Bốn ca: một giọng ở 90° dưới nhiễu từ 30°, trọng số học lúc giọng nghỉ; góc lái quét 60 → 120° với trần 1,0 và rò lớn;
+một giọng ở 150° dưới nhiễu từ 20° với bước học lớn; im rồi nhiễu, học suốt. Máy tính và board B, ở cả hai bản dựng của
+`make parity-board`, khớp **từng bit** mọi vạch ra. Đối chứng âm lấy lối ra của trọng số không bao giờ học: đỏ. Bộ vàng
+này chạy trên board B lần đầu ngày 20/10: trước đó cả hai bản dựng tắt `gsc`, và bộ chấm chỉ xét khối có trong `plan`
+của board.
+
+## `bss` (E8-T3)
+
+Bốn ca, mỗi ca phổ hai kênh cố định cùng góc, độ tin và cờ dò của `doa` cho mỗi bước: chế độ chia ở chính diện với hai
+người ở 48° và 130°; LEARN tách ở bước 136; LEARN ba ghế giữ theo số lần dò, số ghế đi 0 → 2 → 3 → 2 → 0 khi ghế bị
+quên; hai người cùng một phía (40° và 76°) với `conf_min` 60. Cửa sổ ngắn hơn mặc định để mọi nhánh, kể cả quên ghế,
+rơi vào vài trăm bước. Máy tính và board B khớp **từng bit** cả năm tensor. Đối chứng âm mang cổng của chế độ chia ở chính
+diện trên ca cùng một phía, chỗ hai chế độ khác nhau: cổng lệch 1, đỏ.
+
 ## `ns_omlsa` (E9-T1)
 
 Năm ca công suất mỗi bước, mỗi ca quá hai cửa sổ cực tiểu của IMCRA: tiếng nói từng cụm trên ồn trắng; tiếng nhỏ trên ồn
@@ -123,9 +143,9 @@ nhỏ (tín hiệu ra chỉ khoảng −60 dBFS), mọi trường số nguyên k
 
 ## Chỗ chứa bộ vàng
 
-App parity có bảng phân vùng riêng (KẾ HOẠCH §4.3) với `storage` 8 MB. Bộ vàng hiện 6 624 992 B, 6 848 512 B tính theo
-khối 4 KB của LittleFS, 82% phân vùng; ba khối của `lang_vi` thêm 538 756 B. Mọi ca giữ đủ độ dài và đủ mẫu, ca lớn nhất
-483 KB (`ns_omlsa`, 240 bước công suất và gain) trong bộ đệm đọc 512 KB.
+App parity có bảng phân vùng riêng (KẾ HOẠCH §4.3) với `storage` 0xF40000 (15 990 784 B). Ngày 20/10 bộ vàng có 173 tệp,
+14 367 133 B, 14 790 656 B tính theo khối 4 KB của LittleFS, 92,5% phân vùng. Mọi ca giữ đủ độ dài và đủ mẫu, ca lớn
+nhất 483 KB (`ns_omlsa`, 240 bước công suất và gain) trong bộ đệm đọc 512 KB.
 
 ## Bộ vàng không phụ thuộc máy
 
