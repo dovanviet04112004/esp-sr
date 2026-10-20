@@ -55,6 +55,7 @@
 #define BSS_TALKER_A_DEG 48 // board B's talkers of raw/device/tinyai
 #define BSS_TALKER_B_DEG 130
 #define BSS_TURN_HOPS 156 // 2.5 s turns: LEARN splits, then rechecks
+#define BSS_LATE_S 4      // bss_live's default delay of the output (KEHOACH 3.8)
 #define ROW_NAME_BYTES 64
 #if CONFIG_DSP_AFE_DOA_ENABLE
 #define CHAIN_ROW "dsp_afe chuỗi (hpf + stft x2 + balance + doa + trộn + ns + istft + vad + agc)"
@@ -293,10 +294,41 @@ static void bench_gsc(bool turning)
 
 #if CONFIG_DSP_AFE_BSS_ENABLE
 static dsp_spec_cplx_t s_rest[GEN_GRID_N_BINS];
+static int16_t s_late_raw[GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS];
+
+typedef struct {
+    dsp_spec_cplx_t (*mean)[GEN_GRID_N_BINS];
+    int16_t (*raw)[GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS];
+    uint32_t hops;
+    uint32_t back_hops;
+} late_ring_t;
+
+// bss_live's delayed output: an old hop's gates, its mean and raw out of the PSRAM ring, this hop's in.
+static void late_hop(const dsp_afe_bss_t *bss, const late_ring_t *ring, int hop)
+{
+    const uint32_t slot = (uint32_t)hop % ring->hops;
+    float gate[DSP_AFE_BSS_SEATS_MAX];
+    uint8_t kept = 0;
+    ESP_ERROR_CHECK(dsp_afe_bss_numbered_back(bss, ring->back_hops, gate, &kept));
+    for (size_t j = 0; j < GEN_AFE_BSS_SEATS_MAX; j++) {
+        for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
+            s_rest[k] = (dsp_spec_cplx_t){ring->mean[slot][k].re * gate[j], ring->mean[slot][k].im * gate[j]};
+        }
+    }
+    memcpy(s_late_raw, ring->raw[slot], sizeof(s_late_raw));
+    memcpy(ring->mean[slot], s_work, sizeof(s_work));
+    memcpy(ring->raw[slot], s_interleaved, sizeof(s_interleaved));
+}
 
 // learn: the two talkers trade turns, so the peak hop is a recheck searching the density for peaks.
-static void bench_bss(bool learn)
+static void bench_bss(bool learn, bool late)
 {
+    const uint32_t ahead =
+        (uint32_t)lrintf(GEN_AFE_BSS_LOOKAHEAD_S * GEN_GRID_SAMPLE_RATE_HZ / GEN_GRID_HOP_SAMPLES);
+    late_ring_t ring = {
+        .hops =
+            late ? (uint32_t)lrintf((float)BSS_LATE_S * GEN_GRID_SAMPLE_RATE_HZ / GEN_GRID_HOP_SAMPLES) : 0};
+    ring.back_hops = ring.hops > ahead ? ring.hops - ahead : 0;
     const dsp_afe_bss_config_t cfg = {
         .mode = learn ? DSP_AFE_BSS_LEARN : DSP_AFE_BSS_FIXED,
         .keep_rule = (dsp_afe_bss_keep_t)GEN_AFE_BSS_KEEP_RULE,
@@ -321,11 +353,20 @@ static void bench_bss(bool learn)
         .update_every_hops = GEN_AFE_DOA_UPDATE_EVERY_HOPS,
         .spacing_m = GEN_ARRAY_SPACING_M,
         .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
-        .history_s = GEN_AFE_BSS_HISTORY_S,
+        .history_s = late ? (float)ring.back_hops * GEN_GRID_HOP_SAMPLES / GEN_GRID_SAMPLE_RATE_HZ
+                          : GEN_AFE_BSS_HISTORY_S,
     };
-    row_t row = {.module = learn ? "dsp_afe bss LEARN, hai người đổi lượt" : "dsp_afe bss chia ở chính diện",
+    row_t row = {.module = late    ? "dsp_afe bss LEARN và lối ra trễ 4 s của bss_live"
+                           : learn ? "dsp_afe bss LEARN, hai người đổi lượt"
+                                   : "dsp_afe bss chia ở chính diện",
                  .core = CORE_SACH};
     row.hot_bytes = dsp_afe_bss_workspace_bytes(&cfg);
+    if (late) {
+        ring.mean = heap_caps_calloc(ring.hops, sizeof(*ring.mean), MALLOC_CAP_SPIRAM);
+        ring.raw = heap_caps_calloc(ring.hops, sizeof(*ring.raw), MALLOC_CAP_SPIRAM);
+        ESP_ERROR_CHECK(ring.mean != NULL && ring.raw != NULL ? ESP_OK : ESP_ERR_NO_MEM);
+        row.cold_bytes = ring.hops * (sizeof(*ring.mean) + sizeof(*ring.raw));
+    }
     void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
     const size_t before = heap_free();
     dsp_afe_bss_t *bss = NULL;
@@ -339,9 +380,12 @@ static void bench_bss(bool learn)
         const uint32_t start = esp_cpu_get_cycle_count();
         ESP_ERROR_CHECK(
             dsp_afe_bss_process(bss, s_bins[0], s_bins[1], angle, UINT8_MAX, searched, s_work, s_rest));
+        if (late) { late_hop(bss, &ring, h); }
         hop_done(&t, h, start);
     }
     report(&row, &t);
+    heap_caps_free(ring.mean);
+    heap_caps_free(ring.raw);
 }
 #endif
 
@@ -564,9 +608,11 @@ static void core1_benches(void *done)
     vTaskDelay(1);
 #endif
 #if CONFIG_DSP_AFE_BSS_ENABLE
-    bench_bss(false);
+    bench_bss(false, false);
     vTaskDelay(1);
-    bench_bss(true);
+    bench_bss(true, false);
+    vTaskDelay(1);
+    bench_bss(true, true);
     vTaskDelay(1);
 #endif
 #if CONFIG_DSP_AFE_DOA_ENABLE
