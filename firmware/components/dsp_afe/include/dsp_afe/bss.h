@@ -47,7 +47,7 @@ typedef struct {
     float seat_follow;            // share of the way a seat moves per recheck
     float boundary_share_min;     // share of the gap each seat keeps
     float boundary_follow;
-    float seat_forget_s;
+    float seat_forget_s;       // speech a seat may go without an update
     uint8_t update_every_hops; // doa's search period
     float spacing_m;
     float speed_of_sound_m_s;
@@ -87,7 +87,8 @@ void dsp_afe_bss_directions(const dsp_afe_bss_t *st, int16_t angle_deg[2]);
 void dsp_afe_bss_state(const dsp_afe_bss_t *st, uint8_t *seats, float *gate);
 
 /** Gate and whole degrees of every seat number: a seat holds its number from the recheck that takes it
- * until it is forgotten; below two seats, 0 is the side past 90 deg and 1 the other (KEHOACH 3.8).
+ * until it is forgotten, and the last two never are; until the first split, 0 is the side past 90 deg and 1
+ * the other (KEHOACH 3.8).
  *  @ctx any | non-blocking
  *  @param gate the gates the last search set, summing to 1; angle_deg -1 for a number no seat holds
  */

@@ -20,7 +20,7 @@ typedef struct {
     size_t window; // updates the ring holds
     size_t first;  // updates ahead of the first search
     uint32_t recheck_hops;
-    uint32_t forget_hops;
+    uint32_t forget;  // updates of speech a seat may go unreached
     uint32_t history; // hops of held angles numbered_back reaches
     size_t n_bins;    // delay bins of the density
     size_t standing;  // most peaks it holds: never two in adjacent bins
@@ -62,12 +62,13 @@ struct dsp_afe_bss_s {
     size_t n_prev;
     uint32_t hist[ANGLES];
     uint32_t hop;
+    uint32_t heard; // updates counted so far: the clock of seat_forget_s
     uint32_t since;
     uint8_t seats;
     uint8_t agree;
     float centres[DSP_AFE_BSS_SEATS_MAX]; // samples of delay, rising
     float offsets[DSP_AFE_BSS_SEATS_MAX - 1];
-    uint32_t seen[DSP_AFE_BSS_SEATS_MAX]; // hop of each seat's last reading
+    uint32_t seen[DSP_AFE_BSS_SEATS_MAX]; // heard at each seat's last reading
     uint32_t votes[DSP_AFE_BSS_SEATS_MAX];
     uint8_t number[DSP_AFE_BSS_SEATS_MAX];
     float gate;
@@ -133,7 +134,7 @@ static span_t span_of(const dsp_afe_bss_config_t *cfg)
         .window = rounded((double)cfg->decision_s / per_update),
         .first = rounded((double)cfg->first_speech_s / per_update),
         .recheck_hops = (uint32_t)rounded((double)cfg->recheck_s / hop_s),
-        .forget_hops = (uint32_t)rounded((double)cfg->seat_forget_s / hop_s),
+        .forget = (uint32_t)rounded((double)cfg->seat_forget_s / per_update),
         .history = (uint32_t)floor((double)cfg->history_s / hop_s + 0.5),
         .n_bins = n_bins,
         .standing = (n_bins - 1u) / 2u + 1u,
@@ -213,6 +214,7 @@ void dsp_afe_bss_reset(dsp_afe_bss_t *st)
     st->filled = 0;
     memset(st->hist, 0, sizeof(st->hist));
     st->hop = 0;
+    st->heard = 0;
     st->since = 0;
     st->seats = 0;
     st->agree = 0;
@@ -290,7 +292,7 @@ static void mark(dsp_afe_bss_t *st, float delay)
     for (size_t i = 0; i + 1 < st->seats; i++) {
         if (delay > 0.5f * (c[i] + c[i + 1]) + st->offsets[i]) { j = i + 1; }
     }
-    st->seen[j] = st->hop;
+    st->seen[j] = st->heard;
     st->votes[j]++;
 }
 
@@ -298,8 +300,8 @@ static void mark(dsp_afe_bss_t *st, float delay)
 static void forget(dsp_afe_bss_t *st)
 {
     size_t i = 0;
-    while (i < st->seats && st->seats >= 2) {
-        if (st->hop - st->seen[i] < st->span.forget_hops) {
+    while (i < st->seats && st->seats > 2) {
+        if (st->heard - st->seen[i] < st->span.forget) {
             i++;
             continue;
         }
@@ -316,7 +318,6 @@ static void forget(dsp_afe_bss_t *st)
         }
         st->seats--;
     }
-    if (st->seats < 2) { st->seats = 0; }
 }
 
 static void smooth_density(dsp_afe_bss_t *st)
@@ -575,7 +576,7 @@ static void first_split(dsp_afe_bss_t *st, size_t found)
     for (size_t j = 0; j < found; j++) {
         st->centres[j] = c[j];
         st->number[j] = (uint8_t)j;
-        st->seen[j] = st->hop;
+        st->seen[j] = st->heard;
     }
     window_votes(st);
     for (size_t j = 0; j + 1 < found; j++) {
@@ -644,7 +645,7 @@ static void take(dsp_afe_bss_t *st, size_t n_new, const int32_t *bins)
             number++;
         }
         rows[n++] =
-            (seat_row_t){st->buf.fresh_centre[k], number, st->hop, 0, st->buf.cand_bin[st->buf.fresh[k]]};
+            (seat_row_t){st->buf.fresh_centre[k], number, st->heard, 0, st->buf.cand_bin[st->buf.fresh[k]]};
         number++;
     }
     sort_rows(rows, n);
@@ -673,7 +674,7 @@ static void move_vacant(dsp_afe_bss_t *st, size_t n_fresh, const int32_t *match_
         if (at == st->seats) { break; }
         vacant[at] = false;
         st->centres[at] = c;
-        st->seen[at] = st->hop;
+        st->seen[at] = st->heard;
         bins[at] = st->buf.cand_bin[st->buf.fresh[k]];
     }
     seat_row_t rows[DSP_AFE_BSS_SEATS_MAX];
@@ -794,10 +795,11 @@ esp_err_t dsp_afe_bss_process(dsp_afe_bss_t *st, const dsp_spec_cplx_t *x0, cons
     const bool counted = searched && angle_deg >= 0 && angle_deg < ANGLES && confidence >= st->cfg.conf_min;
     if (st->cfg.mode == DSP_AFE_BSS_LEARN) {
         if (counted) {
+            st->heard++;
             count(st, angle_deg);
             if (st->seats >= 2) { mark(st, st->delay[angle_deg]); }
+            forget(st);
         }
-        forget(st);
         st->since++;
         if (st->since >= st->span.recheck_hops && st->filled >= st->span.first) {
             st->since = 0;
