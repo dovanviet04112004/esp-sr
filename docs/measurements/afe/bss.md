@@ -152,9 +152,10 @@ tách cổng chia ở chính diện đã đưa A và B ra hai luồng: tách mu�
 
 `ml/tests/test_bss_scenarios.py` dựng lần dò của `doa` như trên board B: sau mỗi lần đổi người, `doa` quét chuyển 12 bước
 (làm trơn 0,2 s); mỗi lần dò rung ±2°; một phần lần dò lạc ngẫu nhiên khắp 0–180°. Mỗi kịch bản ghi số ghế phải có ở
-cuối và những người phải có ghế. Ít nhất 90% bước nói ổn định của mỗi người phải có cổng lớn nhất ở ghế gần họ nhất.
+cuối và những người phải có ghế. Từ lúc đủ số ghế, ít nhất 90% bước nói ổn định của mỗi người phải có cổng lớn nhất ở
+ghế gần họ nhất, và ở cùng một số ghế; lúc một người mới còn chờ ghế thì không tính.
 
-Hai mươi kịch bản:
+Hai mươi hai kịch bản:
 - một người trôi chậm 48 → 58° (không ghế);
 - hai phía; một phía; ba người; bốn người;
 - người thứ tư vào muộn, khi cả ba còn nói, khi chỉ một người còn nói, và khi nói một mình;
@@ -163,62 +164,69 @@ Hai mươi kịch bản:
 - hai người gần nhau (80° và 100°);
 - hai người gần hơn `min_gap` (86° và 94°: một hướng, không ghế);
 - một người trôi dần;
-- nói đè; nghỉ dài; 20 s không ai nói (kịch bản `strays only`: `track` chỉ dò khi có người nói, nên kịch bản này
-  không có lần dò nào, kể cả lần lạc);
+- nói đè; nghỉ dài; 20 s im lặng, không lần dò nào;
 - lượt 0,5 s;
 - một người rời đi, người khác đến, rồi người cũ quay lại;
 - ba ghế mà bốn người nói;
-- nhạc rải và một người.
+- nhạc rải và một người;
+- một trong hai người cùng phía vắng 90 s trong lúc người kia nói;
+- bốn người, rồi cả phòng im 90 s.
 
 Kết quả:
-- 120 lượt (20 kịch bản × 3 hạt giống × lạc 3% và 6%) qua hết trong 32 s.
-- 10 hạt giống (0–9) ở cả hai mức lạc, 400 lượt, ở `5137faf`: qua hết.
+- Ở `3f8d35d`: 198 lượt (22 kịch bản × 3 hạt giống × lạc 0%, 3% và 6%) qua hết.
+- Luật ở `f8d0a6e` (`seat_forget_s` đếm theo bước, dưới hai ghế thì về 0 ghế) trượt hai kịch bản mới: người còn nói đổi
+  số khi một trong hai người cùng phía vắng lâu (lạc 0%, 3/3 hạt giống), và cả bốn người bị đánh số lại sau quãng im
+  (lạc 3% và 6%, 6/6).
+- 10 hạt giống (0–9), 20 kịch bản đầu ở lạc 3% và 6%, 400 lượt, ở `5137faf`: qua hết.
 - LEARN k-means trượt 9 trên 15 kịch bản đầu. Nó dừng ở số ghế đầu tiên trượt phép kiểm, thay mọi ghế khi một số ghế lớn
   hơn qua, kéo tâm ghế về giữa đường quét, và để lần dò lạc kéo ghế đi.
 - Giới hạn còn lại: một người chỉ nói 10% thời gian với câu 0,5 s, khi `doa` quét chuyển tới 20 bước, không đủ khối
   lượng ở lõi để có ghế (KẾ HOẠCH §3.8).
-- **Chỉ có lần dò lạc thì LEARN lập ghế ma.** Script tạm chạy bản soi gương, mà C khớp từng bit (§7), trên 20 s toàn lần
-  dò lạc, hai bước một lần như lúc có tiếng, 5 hạt giống:
+- **Người vắng quá `seat_forget_s` rồi quay lại.** Script tạm trên bản soi gương ở `3f8d35d`: một người vắng 90 s (88 s
+  ở ca ba ghế) trong lúc người khác vẫn nói, rồi quay lại; 3 hạt giống, lạc 0%, 3% và 6%:
+  - hai ghế, ở hai phía (48° và 130°) hay cùng một phía (40° và 76°): ghế giữ nguyên ở mọi mức lạc, người còn nói không
+    đổi số, người quay lại vào ngay số cũ;
+  - ba ghế (30°, 90°, 150°), lạc 0%: ghế 150° bị bỏ sau 60 s tiếng nói của hai người kia, hai ghế còn lại giữ số; người
+    quay lại có 2,4 s đầu vào ghế 90° trong lúc chờ ghế, rồi lấy lại đúng số cũ. Lạc 3% và 6%: lần dò lạc rơi vào vùng
+    ghế vắng nên ghế không bị bỏ.
+
+  Với luật ở `f8d0a6e`, lạc 0%: hai ghế cùng phía về 0 ghế ở giây 58 và người còn nói (76°) chuyển từ số 0 sang số 1,
+  số của phía chứa cả hai, tới khi người kia quay lại.
+- **Lần dò lạc của `doa` trên board B**, qua chuỗi của bản soi gương, lần dò cách đỉnh gần nhất quá 20° là lạc: một người
+  nói rõ (`A_trai_1`, `B_phai_1`) 0–0,5%; hai người luân phiên hay nói đè 0,9–3,2%, chủ yếu là đoạn quét chuyển ở
+  khoảng 80°, thành chuỗi 6–7 lần liền. Độ tin của lần lạc không thấp hơn lần dò của người nói (trung vị 52–64 so với
+  44–50), nên `conf_min` không lọc được lạc.
+- **Chỉ có lần dò lạc thì LEARN lập ghế ma.** Script tạm chạy bản soi gương trên 20 s toàn lần dò lạc, hai bước một lần
+  như lúc có tiếng, 5 hạt giống:
   - lạc đều theo góc, như phần lạc của bộ kịch bản: 5/5 ra hai ghế ở 12–15° và 165–167°, sau 3,5–9,5 s. Đều theo góc thì
     dồn về hai đầu trục độ trễ (τ = τ_max·cos θ), nên hai đầu thành hai đỉnh nổi rõ, lõi giữ trên 5% cửa sổ;
   - lạc đều theo độ trễ: 4/5 ra hai ghế ở chỗ ngẫu nhiên, sau 6,5–17,6 s.
 
-  Trên board B, `doa` chỉ dò khi `vad` thô báo có tiếng, nên ca này cần tiếng ồn không hướng làm `vad` thô bật. Chưa đo
-  board B có ra chuỗi như vậy không 🔬 (TASKS E8-T8).
-- **Người vắng quá `seat_forget_s` rồi quay lại.** Script tạm trên bản soi gương: một người vắng 90 s (88 s ở ca ba
-  ghế) trong lúc người khác vẫn nói, rồi quay lại; 3 hạt giống, lạc 0%, 3% và 6%:
-  - lạc 3% và 6%: không ghế nào bị quên, vì lần dò lạc rơi vào vùng ghế vắng làm mới đồng hồ của nó; người quay lại vào
-    ngay ghế cũ, cùng số;
-  - lạc 0%, hai ghế ở hai phía (48° và 130°): ghế vắng bị bỏ ở giây 60, về 0 ghế, cắt như FIXED. Số theo phía trùng số
-    cũ, nên người quay lại vào ngay đúng số; ghế dựng lại sau 2,3 s;
-  - lạc 0%, hai ghế cùng một phía (40° và 76°): bỏ ở giây 58, về 0 ghế, và người còn nói (76°) chuyển từ số 0 sang số 1,
-    số của phía chứa cả hai, tới khi người kia quay lại; ghế dựng lại sau 2,3 s và 76° về số 0;
-  - lạc 0%, ba ghế (30°, 90°, 150°): ghế 150° bị bỏ ở giây 60, hai ghế kia giữ số; người quay lại có 2,4 s đầu vào ghế
-    90°, rồi lấy lại đúng số cũ.
-
-  Tỉ lệ lạc của `doa` trên board B lúc có người nói chưa đo 🔬, nên chưa biết board rơi vào cột nào (TASKS E8-T8).
+  Tiếng phòng thật trên board B ở §11.
 
 ## 7. Khớp với bản C
 
-`make parity-host`, và `make parity-board` ở bản dựng `modules` ngày 20/10 (`5137faf`), bộ vàng `contracts/golden/bss/`.
+`make parity-host`, và `make parity-board` cả hai bản dựng ngày 20/10 (`d708e4e`), bộ vàng `contracts/golden/bss/`.
 Máy tính và board B ra cùng số.
 
-Sáu ca khớp từng bit, mọi tensor `max_abs 0` (cổng, số ghế, hướng, cổng và hướng của mọi số ghế, cổng trễ và số ghế giữ
+Bảy ca khớp từng bit, mọi tensor `max_abs 0` (cổng, số ghế, hướng, cổng và hướng của mọi số ghế, cổng trễ và số ghế giữ
 của lối ra trễ sau mọi bước, hai lối ra của bước cuối):
 - chia ở chính diện;
 - LEARN hai người;
-- ba ghế giữ theo số lần dò, hai ghế im đến lúc bị quên;
+- ba ghế giữ theo số lần dò, hai ghế im: một ghế bị quên, hai ghế cuối ở lại;
 - hai người một phía, `conf_min` 60;
 - ba người, rồi người thứ tư ở 60° vào (`seats_max` 4);
-- một người ở 75° dừng ở 54°, cạnh người ở 140°, tách khi đã rõ, rồi 140° rời đi và 100° đến (dời ghế trống).
+- một người ở 75° dừng ở 54°, cạnh người ở 140°, tách khi đã rõ, rồi 140° rời đi và 100° đến (dời ghế trống);
+- ba ghế qua một quãng im dài hơn `seat_forget_s`, rồi 90° nói một mình tới khi một trong hai ghế kia bị quên.
 
-Bốn đối chứng âm đều đỏ:
+Năm đối chứng âm đều đỏ:
 - 000: cổng của chế độ chia ở chính diện trên ca một phía. Cổng lệch 1, hướng của số ghế lệch 79°.
 - 001: ca ba ghế đánh số theo độ trễ thay vì giữ số. Hướng lệch 150°, cổng lệch 1.
 - 002: cổng trễ lấy góc lùi một bước. Cổng lệch 1.
 - 003: ca người thứ tư với `confirm` 1. Số ghế lệch 2, hướng lệch 94°.
+- 004: ca thứ bảy với ghế già theo bước, cả lúc im. Số ghế lệch 1, hướng của số ghế lệch 151°, cổng lệch 1.
 
-Thêm 600 ca ngẫu nhiên, sinh từ bản soi gương bằng một script tạm:
+Ở `5137faf`, với luật quên theo bước, thêm 600 ca ngẫu nhiên, sinh từ bản soi gương bằng một script tạm:
 - cấu hình khắp dải `check()` nhận, 2–4 ghế;
 - lần dò có quét chuyển, lạc tới 10%, nói đè, người mới vào và khoảng lặng.
 
@@ -227,16 +235,16 @@ ghế và 394 lần dời ghế trống.
 
 ## 8. Chi phí
 
-`make bench-board` ngày 20/10 (`5137faf`, profile `bench`), nhân 1, số mặc định của `contracts/afe.yaml`:
+`make bench-board` ngày 20/10 (`d708e4e`, profile `bench`), nhân 1, số mặc định của `contracts/afe.yaml`:
 
 | Đường | µs trung bình | µs đỉnh | % khung 16 ms | Vùng `hot` |
 |---|---|---|---|---|
-| Chia ở chính diện | 25,4 | 30,2 | 0,2 | 4 288 B |
-| LEARN, hai người ở 48° và 130° đổi lượt mỗi 2,5 s | 86,4 | 255,5 | 0,5 | 4 288 B |
-| `vad` thứ hai trên trung bình hai micro, chỉ có khi `bss` là khối không gian | 138,0 | 175,3 | 0,9 | 2 640 B |
+| Chia ở chính diện | 25,4 | 30,0 | 0,2 | 4 288 B |
+| LEARN, hai người ở 48° và 130° đổi lượt mỗi 2,5 s | 86,1 | 254,8 | 0,5 | 4 288 B |
+| `vad` thứ hai trên trung bình hai micro, chỉ có khi `bss` là khối không gian | 138,0 | 175,2 | 0,9 | 2 640 B |
 
 - Đỉnh của LEARN là bước kiểm lại, mỗi `recheck_s` một lần: dồn histogram vào 68 ô độ trễ, làm trơn, dò đỉnh, tính khối
-  lượng lõi. Đỉnh 255,5 µs, LEARN k-means lên 317,2 µs ở bước phân cụm. `tinyai-signal` phân cụm cả vòng đệm, đỉnh một
+  lượng lõi. Đỉnh 254,8 µs, LEARN k-means lên 317,2 µs ở bước phân cụm. `tinyai-signal` phân cụm cả vòng đệm, đỉnh một
   nhịp lên 2,9 ms.
 - Vùng `hot` 4 288 B, hơn LEARN k-means 1 344 B: mật độ 68 ô, bảng ô của 181 độ và các danh sách đỉnh, cỡ theo cấu hình.
 - Trong chuỗi, `bss` cộng `vad` thứ hai tốn 163 µs mỗi bước khi chia ở chính diện, 224 µs với LEARN. `gsc` tốn 141 µs
@@ -298,9 +306,9 @@ có lối ra. Mỗi ô: mất / rò cả bài / rò trong 0,5 s đầu mỗi lư
 - vòng đệm 751 KB trong PSRAM;
 - mỗi bước tốn 3,25 ms khi đang xuất, đỉnh 4,09 ms trên khung 16 ms; lối ra sống tốn 3,15 ms, đỉnh 3,59 ms.
 
-`make bench-board` (profile `bench`), dòng `bss` LEARN kèm lối ra trễ 4 s:
+`make bench-board` (`d708e4e`, profile `bench`), dòng `bss` LEARN kèm lối ra trễ 4 s:
 - mỗi bước làm đúng phần `bss_live` thêm vào: cổng của bước cũ, trung bình và hai kênh thô ra vào vòng đệm;
-- 287,4 µs trung bình, đỉnh 457,0 µs (1,8% khung), hơn LEARN không trễ 201 µs;
+- 287,1 µs trung bình, đỉnh 456,8 µs (1,8% khung), hơn LEARN không trễ 201 µs;
 - vùng `hot` 4 768 B, thêm góc giữ của 244 bước; PSRAM 770 000 B.
 
 ## 10. Lượt `make bss` của chủ repo, 20/10 chiều
@@ -321,3 +329,31 @@ LEARN, 2 ghế, `ns` mean, D 4 s. Tiếng thô `ch0` và `ch1` của từng lư�
   board bù mức này trong chuỗi (dòng `job` ghi `balance calib/bal`).
 - Lượt 17:33 (60 s) không ra tệp nào: WSL vừa khởi động lại và Docker Desktop chưa lên, nên `srhost.stream_rx` không
   chạy, và `make bss` chờ dòng `listening on` 180 s mà không in gì.
+
+## 11. Tiếng phòng 5 phút và ghế ma
+
+`make bss` 20/10 lúc 17:53, LEARN, 2 ghế, `ns` mean, D 4 s, 300 s, không ai được mời nói: board ra `seats 0` suốt lượt,
+18 750 khung không rơi khung nào, không tràn DMA, 3 241 µs trung bình và 4 345 µs đỉnh mỗi bước.
+
+Tiếng thô chạy lại qua chuỗi của bản soi gương:
+- `vad` thô nghe 12,7 s; 397 lần dò thành 113 đợt, phần lớn dài 0–0,7 s, đỉnh 2–34 dB trên nền.
+- Góc: 178 lần ở 30–60° (các đợt quanh 48° lên 25–33 dB trên nền), 78 lần ở 80–110°, 68 lần ở 150–180°, còn lại rải.
+- LEARN 2 ghế không lập ghế: cả 141 lần dò đỉnh đều thấy 3–4 ứng viên ngang nhau (174°, 95°, 69°, 48°), nên tách lần đầu
+  chờ mãi. 3 ghế thì lập ghế ở 48°, 95°, 174° từ giây 159; 4 ghế thì ở 48°, 69°, 95°, 174°.
+- Độ hữu thanh của bước có lần dò (đỉnh tự tương quan ở cao độ 80–400 Hz): người nói thật trên board B trung vị
+  0,59–0,80 và 48–76% lần dò trên 0,6; lượt này trung vị 0,42 và 12%, ở mọi dải góc thấp như nhau.
+
+Ba cách sửa đã thử trên bản soi gương, không cách nào được giữ:
+
+| Cách | Tiếng phòng, 2 ghế | Tiếng phòng, 4 ghế | Ba bản thu người thật, tách sau |
+|---|---|---|---|
+| như hiện nay | không ghế | 4 ghế từ 159 s | 3,1–5,8 s |
+| cửa sổ quên lần dò cũ hơn 20 s | 2 ghế ở 42°, 174° từ 187 s | 4 ghế từ 167 s | như cũ |
+| cửa sổ quên lần dò cũ hơn 40 s | 2 ghế ở 42°, 69° từ 206 s | 4 ghế từ 166 s | như cũ |
+| chỉ học từ bước hữu thanh, ngưỡng 0,6 | 2 ghế ở 51°, 92° từ 226 s | 4 ghế từ 226 s | 3,2–3,7 s |
+| `vad` thô ở mức 3 | không ghế | 4 ghế từ 251 s | 3,1–3,7 s, lần dò của người nói bớt 3–20% |
+
+Lần dò lạc đều theo góc, 3 hay 10 lần mỗi giây trong 300 s, vẫn ra 4 ghế với cả hai mức quên của cửa sổ. Các đợt quanh 48°
+và 92° có phần hữu thanh và to tới 33 dB trên nền: nhiều khả năng là tiếng người hay tiếng động thật trong nhà lúc thu,
+và LEARN không có cách nào biết đó không phải người nói. Chưa đổi luật khi chưa có bản thu phòng trống biết rõ nguồn
+tiếng (TASKS E8-T8). Tới lúc đó: phòng có tiếng động thì `make bss` nên chọn 2 ghế.
