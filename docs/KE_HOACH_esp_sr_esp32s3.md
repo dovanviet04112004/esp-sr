@@ -2644,7 +2644,7 @@ sinh ra chỗ hở sau, mãi: ghi `set.json` 222 ms làm board bỏ 76% khung kh
 | Chạy dài | `test_apps/soak/` | 30 phút cho Cửa 5, 8 giờ trước khi báo cáo |
 | Thu dữ liệu | `test_apps/capture/` | đẩy thô về `host/` |
 | Hiệu chuẩn | `test_apps/calib/` | ghi NVS `calib/*` |
-| Tách trực tiếp | `test_apps/bss_live/` | `make bss-live`: board thu hai micro và chạy chuỗi `bss` từng bước như `dsp_afe`, chế độ, số ghế, luật giữ và chỗ đặt `ns` nhận lúc chạy; luồng `mode` 6–8 về `srhost.stream_rx`, mỗi ghế một WAV, dòng trạng thái mỗi giây qua `test_report` |
+| Tách trực tiếp | `test_apps/bss_live/` | `make bss`: board vào Wi-Fi và in giới hạn của nó; máy tính hỏi chế độ, số ghế, chỗ đặt `ns` và số giây (`MODE=` `SEATS=` `NS=` `SECONDS=` trả lời trước), mở `srhost.stream_rx` trong Docker và gửi việc kèm địa chỉ của mình; board chạy chuỗi `bss` từng bước như `dsp_afe`, luồng `mode` 6–8, mỗi ghế một WAV, dòng trạng thái mỗi giây qua `test_report` |
 | So với ESP-SR | `test_apps/espsr_compare/` | `make espsr-compare`: `esptool write_flash` ảnh model của ESP-SR, board nối Wi-Fi và mở cổng TCP, máy tính gửi từng mục của bàn so §3.16 và nhận lối ra của mọi biến thể kèm CRC32 thành `<biến thể>.wav`, app in chi phí qua `test_report`; số vào `docs/measurements/afe/compare.md` |
 
 Case cần người đứng nói gắn tag `[manual]`; vòng tự động bỏ qua, như repo face attendance.
@@ -2721,6 +2721,7 @@ host/
 │   ├── calib.py                   # ước balance từ phiên ồn trắng (srpipe), kiểm chéo; ghi calib/bal và calib/pcm_shift
 │   │                              #   xuống test_apps/calib
 │   ├── bridge.py                  # cầu RFC 2217 tới cổng COM của board B, chạy bằng Python của Windows (§2.1)
+│   ├── wifi.py                    # make wifi: Wi-Fi của board qua console, broker và luồng trỏ về máy tính (§7.2)
 │   └── speaker.py                 # §3.17 đường máy chủ: ghép up/voice với sự kiện cùng seq, embedding ReDimNet M qua
 │                                  #   ml/spk_ref/redimnet, cosine với mẫu giọng; đăng ký mẫu giọng từ một phiên thu
 ├── plans/                         # kịch bản một buổi thu: mỗi dòng một lời dặn và nhãn một phiên
@@ -3328,7 +3329,7 @@ số mỗi khúc chạy dòng thì không, và `ns` NSNet-16k L đọc 337 KB tr
 | Mục | Chốt | Vì sao |
 |---|---|---|
 | Chế độ | station | máy nối vào mạng có sẵn |
-| Cấp thông tin | `dev`/`bench`: console qua CH340 (`wifi set`); sau này: SoftAP bằng `espressif/network_provisioning` (E13) | không dùng BLE: bật Bluetooth tốn RAM nội mà §6.5 không còn |
+| Cấp thông tin | `dev`/`bench`: console qua CH340 (`wifi set`), gọi bằng `make wifi` (`srhost.wifi`): mặc định mạng Windows đang dùng và khoá Windows đã lưu cho mạng ấy, khoá hỏi không hiện chữ; xong thì trỏ `device/mqtt_uri` và `device/stream_host` về địa chỉ của máy tính trên mạng ấy. Khoá không ra màn hình, file hay log. Sau này: SoftAP bằng `espressif/network_provisioning` (E13) | không dùng BLE: bật Bluetooth tốn RAM nội mà §6.5 không còn. Đổi mạng là đổi cả địa chỉ của broker và máy nhận luồng, nên một lệnh làm cả hai |
 | Nối lại | lùi dần 1 → 30 s, **không bỏ cuộc** | máy đặt trong phòng phải tự về khi router khởi động lại |
 | Tiết kiệm điện | `WIFI_PS_MIN_MODEM` mặc định; `WIFI_PS_NONE` khi luồng tiếng mở | luồng tiếng cần thông lượng đều; số liệu thì không |
 | Nhiễu nguồn | đo nền ồn của micro khi Wi-Fi phát và khi tắt (E2-T4) | cụm phát của Wi-Fi làm gợn nguồn; micro số chịu tốt hơn micro analog nhưng vẫn phải đo |
