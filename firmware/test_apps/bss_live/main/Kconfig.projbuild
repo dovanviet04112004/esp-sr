@@ -1,0 +1,24 @@
+menu "bss_live"
+
+    config BSS_LIVE_PCM_SHIFT_FALLBACK
+        int "Microphone right shift until calib/pcm_shift is measured"
+        range 8 16
+        default 16
+        help
+            Same meaning as APP_PCM_SHIFT_FALLBACK of main: drv_audio keeps the
+            top 32 - shift bits of each INMP441 slot. NVS calib/pcm_shift wins.
+
+    config BSS_LIVE_SECONDS_MAX
+        int "Longest run a job may ask for, in seconds"
+        range 10 600
+        default 600
+        help
+            Each second keeps one status line of test_report in RAM, and the
+            stream stays open SVC_REPORT_STREAM_MAX_S at most.
+
+    config BSS_LIVE_WIFI_WAIT_S
+        int "Seconds to wait for Wi-Fi before reporting it down"
+        range 5 120
+        default 30
+
+endmenu

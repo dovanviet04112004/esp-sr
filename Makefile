@@ -33,6 +33,7 @@ PARITY_APP := firmware/test_apps/parity
 ESPSR_APP := firmware/test_apps/espsr_compare
 CAPTURE_APP := firmware/test_apps/capture
 CALIB_APP := firmware/test_apps/calib
+BSS_LIVE_APP := firmware/test_apps/bss_live
 UNIT_APP := firmware/components/ai_engine/test_apps/unit
 LISTEN_APP := firmware/components/svc_listen/test_apps/unit
 ON_BOARD = --rootdir . --embedded-services esp,idf --target esp32s3 --port $(PORT) -p no:cacheprovider
@@ -464,12 +465,21 @@ calib-shift: ## Store NVS calib/pcm_shift through test_apps/calib: SHIFT=13
 # Where srpipe.scenes.compare prepare wrote the items, read from ml/ only when a recipe needs it.
 COMPARE_ITEMS = $(shell $(ML) --quiet python -c "from srpipe.core.config import data_paths; print(data_paths()['interim'] / 'scenes' / 'afe_compare')")
 
-.PHONY: bench-board espsr-compare ai-probe ai-unit ai-unit-rnnt ai-unit-speaker ai-unit-ctc ai-profile listen-unit
+.PHONY: bench-board bss espsr-compare ai-probe ai-unit ai-unit-rnnt ai-unit-speaker ai-unit-ctc ai-profile listen-unit
 bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/bench, then rebuild budget.md
 	@$(call fresh_sdkconfig,$(BENCH_APP)/sdkconfig,$(call app_defaults,$(BENCH_APP)) firmware/sdkconfig.afe)
 	cd $(BENCH_APP) && idf.py build
 	cd $(BENCH_APP) && pytest pytest_bench_afe.py $(ON_BOARD) -s
 	python3 -m tools.budget
+
+# The board and this PC share a network (make wifi); Docker Desktop publishes the receiver's port on it.
+bss: ## Separate live talkers on board B, one WAV per seat: asks mode, seats, ns, seconds [MODE= SEATS= NS= SECONDS=]
+	@test -f host/.env || { echo "copy host/.env.example to host/.env and fill it"; exit 1; }
+	@$(call fresh_sdkconfig,$(BSS_LIVE_APP)/sdkconfig,$(call app_defaults,$(BSS_LIVE_APP)) firmware/sdkconfig.afe)
+	cd $(BSS_LIVE_APP) && idf.py build
+	cd $(BSS_LIVE_APP) && BSS_LIVE_DATA_ROOT="$(DATA_ROOT)" BSS_LIVE_STREAM_PORT="$(STREAM_PORT)" \
+	  BSS_LIVE_MODE="$(MODE)" BSS_LIVE_SEATS="$(SEATS)" BSS_LIVE_NS="$(NS)" BSS_LIVE_SECONDS="$(SECONDS)" \
+	  pytest pytest_bss_live.py $(ON_BOARD) -s
 
 espsr-compare: ## Run every board variant of KEHOACH 3.16 on board B into interim/scenes/afe_compare [ONLY="<item> ..."]
 	@$(call fresh_sdkconfig,$(ESPSR_APP)/sdkconfig,$(call app_defaults,$(ESPSR_APP)))
