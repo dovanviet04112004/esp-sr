@@ -236,8 +236,10 @@ void svc_report_luong_step(void)
     }
     if (!net_stream_is_connected() && !connect_when_due(mode)) { return; }
     const size_t len = receive_frame();
-    if (len > 0 && net_stream_send(s_stream.in.bytes, len, CONFIG_NET_STREAM_SEND_TIMEOUT_MS) != ESP_OK) {
-        ESP_LOGW(TAG, "stream send failed, reconnecting");
+    const esp_err_t err =
+        len > 0 ? net_stream_send(s_stream.in.bytes, len, CONFIG_NET_STREAM_SEND_TIMEOUT_MS) : ESP_OK;
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "stream send failed: %s, reconnecting", esp_err_to_name(err));
         s_stream.next_connect_us = esp_timer_get_time() + RECONNECT_BACKOFF_US;
     }
 }
