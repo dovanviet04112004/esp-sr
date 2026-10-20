@@ -917,12 +917,13 @@ BSS_FIELDS = (
     "update_every_hops",
     "spacing_m",
     "speed_of_sound_m_s",
+    "history_s",
 )
 
 
 def bss_config(**over) -> bss.BssConfig:
     """The contract's bss with windows short enough for a few hundred hops, every float as float32 holds it."""
-    short = {"decision_s": 2.0, "recheck_s": 0.25, "first_speech_s": 0.5, "seat_forget_s": 3.0} | over
+    short = {"decision_s": 2.0, "recheck_s": 0.25, "first_speech_s": 0.5, "seat_forget_s": 3.0, "history_s": 1.0} | over
     cfg = replace(bss.BssConfig(), **short)
     return replace(
         cfg, **{f: float(np.float32(getattr(cfg, f))) for f in BSS_FIELDS if isinstance(getattr(cfg, f), float)}
@@ -950,14 +951,14 @@ def bss_track(rng: np.random.Generator, plan: list[tuple[int, float | None]], co
 
 
 def bss_case(
-    x0: np.ndarray, x1: np.ndarray, track: tuple, cfg: bss.BssConfig, by_rank: bool = False
+    x0: np.ndarray, x1: np.ndarray, track: tuple, cfg: bss.BssConfig, by_rank: bool = False, back: int | None = None
 ) -> dict[str, np.ndarray]:
-    """One pair of bins every hop, doa per hop and the configuration; the gate, seats, directions and every seat
-    number's gate and degrees after each hop, and both outputs of the last. by_rank numbers the seats by rising delay
-    instead of keeping them, as a negative control."""
+    """One pair of bins every hop, doa per hop and the configuration; the gate, seats, directions, every seat number's
+    gate and degrees, and the delayed gates of the hop history_s back after each hop, and both outputs of the last.
+    by_rank numbers the seats by rising delay and back looks fewer hops back, as negative controls."""
     angle, conf, searched = track
     separator = bss.Bss(cfg)
-    gate, seats, dirs, number_gate, number_deg = [], [], [], [], []
+    gate, seats, dirs, number_gate, number_deg, back_gate, back_kept = [], [], [], [], [], [], []
     for h in range(len(angle)):
         y0, y1 = separator.process(x0, x1, int(angle[h]), int(conf[h]), bool(searched[h]))
         gate.append(separator.gate)
@@ -971,6 +972,9 @@ def bss_case(
             degrees = [degrees[n] for n in held] + [-1] * spare
         number_gate.append(gates)
         number_deg.append(degrees)
+        late, kept = separator.numbered_back(separator.history if back is None else back)
+        back_gate.append(late)
+        back_kept.append(kept)
     return {
         "config": np.array([getattr(cfg, f) for f in BSS_FIELDS], dtype=np.float32),
         "bins0": _pairs(x0[None]),
@@ -983,6 +987,8 @@ def bss_case(
         "directions": np.array(dirs, dtype=np.int32),
         "number_gate": np.array(number_gate, dtype=np.float32),
         "number_deg": np.array(number_deg, dtype=np.int32),
+        "back_gate": np.array(back_gate, dtype=np.float32),
+        "back_kept": np.array(back_kept, dtype=np.uint8),
         "out0": _pairs(y0[None]),
         "out1": _pairs(y1[None]),
     }
@@ -1008,8 +1014,8 @@ def _bss_inputs(rng: np.random.Generator) -> list[tuple[tuple, bss.BssConfig]]:
 
 
 def emit_bss(root: Path) -> list[Path]:
-    """Four cases, then two negative controls: the one-side case's gates as the broadside split gives them, and the
-    three-seat case with its seats numbered by rising delay."""
+    """Four cases, then three negative controls: the one-side case's gates as the broadside split gives them, the
+    three-seat case with its seats numbered by rising delay, and the learnt case's delayed gates taken a hop back."""
     rng = np.random.default_rng(SEED + 12)
     x0 = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
     x1 = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
@@ -1030,6 +1036,12 @@ def emit_bss(root: Path) -> list[Path]:
     track, cfg = cases[2]
     path = root / "bss" / "case_neg_001.gold"
     write_gold(path, bss_case(x0, x1, track, cfg, by_rank=True))
+    written.append(path)
+    track, cfg = cases[1]
+    late = bss_case(x0, x1, track, cfg)
+    late["back_gate"] = bss_case(x0, x1, track, cfg, back=1)["back_gate"]
+    path = root / "bss" / "case_neg_002.gold"
+    write_gold(path, late)
     written.append(path)
     return written
 
