@@ -295,6 +295,13 @@ def test_the_third_bss_negative_control_differs_only_in_its_delayed_gates() -> N
     assert np.abs(negative["back_gate"] - case["back_gate"]).max() > 0.5
 
 
+def test_the_fourth_bss_negative_control_seats_without_waiting_for_confirm() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "bss" / "case_004.gold")
+    negative = read_gold(emit_golden.GOLDEN_ROOT / "bss" / "case_neg_003.gold")
+    np.testing.assert_array_equal(negative["config"], case["config"])
+    assert int(np.argmax(negative["seats"] >= 2)) < int(np.argmax(case["seats"] >= 2))
+
+
 def test_committed_pitch_cases_match_a_fresh_emit(tmp_path: Path) -> None:
     for path in emit_golden.emit_pitch(tmp_path, emit_golden.pitch_config()):
         committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)

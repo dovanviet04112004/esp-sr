@@ -903,16 +903,16 @@ BSS_FIELDS = (
     "decision_s",
     "recheck_s",
     "first_speech_s",
-    "kmeans_rounds",
     "confirm",
     "occupancy_min",
-    "valley_max",
-    "valley_width",
     "min_gap",
+    "bins_per_gap",
+    "smooth_bins",
+    "prominence",
+    "core_share",
+    "seat_follow",
     "boundary_share_min",
     "boundary_follow",
-    "track_tau_s",
-    "track_gate",
     "seat_forget_s",
     "update_every_hops",
     "spacing_m",
@@ -997,7 +997,8 @@ def bss_case(
 def _bss_inputs(rng: np.random.Generator) -> list[tuple[tuple, bss.BssConfig]]:
     """(doa per hop, configuration): split at broadside with talkers at 48 and 130 deg; learnt seats for the same two;
     three seats kept by most updates, two of them falling silent until forgotten; two talkers on one side, 40 and 76
-    deg, kept at 76, low confidences left out."""
+    deg, kept at 76, low confidences left out; three talkers, then a fourth at 60 deg joining with one of them; a talker
+    at 75 deg settling at 54 beside one at 140, seated once the split is plain, then 140 leaving and 100 coming."""
     turns = [(10, None), (100, 48.0), (100, 130.0), (100, 48.0), (100, 130.0)]
     return [
         (bss_track(rng, [(10, None), (80, 48.0), (80, 130.0), (60, None), (80, 48.0)]), bss_config()),
@@ -1010,12 +1011,26 @@ def _bss_inputs(rng: np.random.Generator) -> list[tuple[tuple, bss.BssConfig]]:
             bss_track(rng, [(100, 40.0), (100, 76.0), (100, 40.0), (100, 76.0)]),
             bss_config(mode=bss.MODE_LEARN, keep_deg=76.0, conf_min=60),
         ),
+        (
+            bss_track(rng, [(60, 30.0), (60, 90.0), (60, 150.0)] * 2 + [(60, 60.0), (60, 150.0)] * 3),
+            bss_config(mode=bss.MODE_LEARN, seats_max=4),
+        ),
+        (
+            bss_track(
+                rng,
+                [(30, 140.0), (30, 75.0), (30, 54.0)] * 2
+                + [(60, 140.0), (100, 54.0)] * 2
+                + [(80, 54.0), (80, 100.0)] * 3,
+            ),
+            bss_config(mode=bss.MODE_LEARN, first_speech_s=1.5),
+        ),
     ]
 
 
 def emit_bss(root: Path) -> list[Path]:
-    """Four cases, then three negative controls: the one-side case's gates as the broadside split gives them, the
-    three-seat case with its seats numbered by rising delay, and the learnt case's delayed gates taken a hop back."""
+    """Six cases, then four negative controls: the one-side case's gates as the broadside split gives them, the
+    three-seat case with its seats numbered by rising delay, the learnt case's delayed gates taken a hop back, and the
+    late talker's case seated without waiting for confirm."""
     rng = np.random.default_rng(SEED + 12)
     x0 = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
     x1 = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
@@ -1042,6 +1057,12 @@ def emit_bss(root: Path) -> list[Path]:
     late["back_gate"] = bss_case(x0, x1, track, cfg, back=1)["back_gate"]
     path = root / "bss" / "case_neg_002.gold"
     write_gold(path, late)
+    written.append(path)
+    track, cfg = cases[4]
+    hasty = bss_case(x0, x1, track, replace(cfg, confirm=1))
+    hasty["config"] = np.array([getattr(cfg, f) for f in BSS_FIELDS], dtype=np.float32)
+    path = root / "bss" / "case_neg_003.gold"
+    write_gold(path, hasty)
     written.append(path)
     return written
 

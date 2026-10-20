@@ -2,7 +2,7 @@
 # same order; delays and gates come from double series of basic arithmetic (ADR-0006): the gate, the seats, the
 # directions, every seat number's gate and degrees and the delayed gates match after every hop, and both outputs of
 # the last. case_neg_000 has the broadside split's gates; case_neg_001 numbers the seats by rising delay;
-# case_neg_002 takes its delayed gates one hop back, not history_s back.
+# case_neg_002 takes its delayed gates one hop back, not history_s back; case_neg_003 seats without confirm.
 tensors:
   gate:
     max_abs: 0.0
