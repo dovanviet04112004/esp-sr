@@ -12,3 +12,6 @@ eval:
   variants:                         # keep_deg comes from each scene's label, or the kept talker of the tinyai turns
     fixed: {mode: 0}
     learn: {mode: 1}
+    learn D0.5: {mode: 1, delay_s: 0.5}  # bss_live's delayed output, lookahead_s from contracts/afe.yaml
+    learn D2: {mode: 1, delay_s: 2.0}
+    learn D4: {mode: 1, delay_s: 4.0}

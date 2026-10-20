@@ -2,7 +2,7 @@
 
 doa against the talker's angle by condition, RT60 and region; gsc's SIR gained and talker loss, exact as both
 images pass the same weights; bss on two talkers in turns, the scenes' talker then interferer and board B's talkers
-A and B, exact as the gate is one factor a hop.
+A and B, exact as the gate is one factor a hop, live or as bss_live's delayed output gates it.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from srpipe.metrics.doa_err import doa_score
 from srpipe.scenes import room
 
 HOP = grid.HOP_SAMPLES
+HOP_S = grid.HOP_SAMPLES / grid.SAMPLE_RATE_HZ
 PRODUCT = "product"
 VAD_GATED = "product, vad"
 CHAIN_MODULES = ("hpf", "doa", "ns_omlsa", "vad", "agc")
@@ -229,30 +230,60 @@ def gsc_tables(scenes: list[SceneGsc]) -> str:
 
 
 @dataclass(frozen=True)
+class BssRun:
+    """One scored run of bss: its settings, and bss_live's delayed output, delay_s late with lookahead_s; 0 is live."""
+
+    cfg: bss.BssConfig
+    delay_s: float = 0.0
+    lookahead_s: float = afe.BSS_LOOKAHEAD_S
+
+
+@dataclass(frozen=True)
 class TurnsBss:
-    """Per run of one item in turns: the kept talker's level, the other talker's leak overall and from settle_s after
-    each change of talker, all in dB against their own input, and the seconds LEARN took to split, None if never."""
+    """Per run of one item in turns, in dB against each talker's own input: the kept talker's level; the other
+    talker's leak overall, in the first settle_s after each change of talker, after it, and before LEARN's seats split;
+    then the seconds LEARN took to split, None if never. A leak over no hops is nan."""
 
     item: str
     group: tuple
-    runs: dict[str, tuple[float, float, float, float | None]]
+    runs: dict[str, tuple[float, float, float, float, float, float | None]]
 
 
-def turn_gates(pcm: np.ndarray, cfg: bss.BssConfig) -> tuple[np.ndarray, float | None]:
-    """The gate bss keeps per hop in the chain with bss as its spatial stage, and when its seats first split."""
-    chain = Chain("MM", ChainConfig(modules=CHAIN_MODULES, spatial="bss", bss=cfg))
+def bss_variants(spec: dict) -> dict[str, BssRun]:
+    """configs/afe/bss.yaml's variants: bss settings over the contract's, and the delayed output's settings."""
+    runs = {}
+    for name, over in spec["variants"].items():
+        output = {k: float(over[k]) for k in ("delay_s", "lookahead_s") if k in over}
+        runs[name] = BssRun(replace(bss.BssConfig(), **{k: v for k, v in over.items() if k not in output}), **output)
+    return runs
+
+
+def turn_gates(pcm: np.ndarray, run: BssRun) -> tuple[np.ndarray, float | None]:
+    """The kept seat's gate of every hop in the chain with bss as its spatial stage, and when its seats first split.
+    Delayed, hop t takes the gate bss_live gives it delay_s later: the seats held then, the angle held lookahead_s after
+    t; the input runs on in silence for delay_s, as bss_live's does, so the last hops have theirs."""
+    delay = round(run.delay_s / HOP_S)
+    back = delay - min(delay, round(run.lookahead_s / HOP_S))
+    chain = Chain("MM", ChainConfig(modules=CHAIN_MODULES, spatial="bss", bss=replace(run.cfg, history_s=back * HOP_S)))
     n_hops = len(pcm) // HOP
+    silence = np.zeros(HOP * pcm.shape[1], dtype=pcm.dtype)
     gates, split = np.empty(n_hops), None
-    for h in range(n_hops):
-        chain.process(pcm[h * HOP : (h + 1) * HOP].reshape(-1))
-        gates[h] = chain.separator.gate
-        if split is None and chain.separator.seats >= 2:
-            split = h * HOP / grid.SAMPLE_RATE_HZ
+    for h in range(n_hops + delay):
+        chain.process(pcm[h * HOP : (h + 1) * HOP].reshape(-1) if h < n_hops else silence)
+        if split is None and h < n_hops and chain.separator.seats >= 2:
+            split = h * HOP_S
+        if delay == 0:
+            gates[h] = chain.separator.gate
+        elif h >= delay:
+            shares, kept = chain.separator.numbered_back(back)
+            gates[h - delay] = shares[kept]
     return gates, split
 
 
 def kept_db(gates: np.ndarray, bins: list[np.ndarray], hops: np.ndarray) -> float:
-    """dB of a talker's plain mean that the gates pass over the hops selected."""
+    """dB of a talker's plain mean that the gates pass over the hops selected; nan when none is."""
+    if not np.any(hops):
+        return math.nan
     power = np.sum(np.abs(0.5 * (bins[0][hops] + bins[1][hops])) ** 2, axis=1, dtype=np.float64)
     return 10 * math.log10(max(float(np.sum(gates[hops] ** 2 * power)), 1e-30) / max(float(power.sum()), 1e-30))
 
@@ -263,20 +294,31 @@ def turns_runs(parts: list[np.ndarray], owner: list[int], kept: int, keep_deg: f
     n_hops = int(starts[-1])
     total = np.concatenate([p[: (len(p) // HOP) * HOP] for p in parts])
     talker_of = np.concatenate([np.full(len(p) // HOP, o) for p, o in zip(parts, owner, strict=True)])
-    since = np.concatenate([np.arange(len(p) // HOP) for p in parts]) * HOP / grid.SAMPLE_RATE_HZ
+    since = np.concatenate([np.arange(len(p) // HOP) for p in parts]) * HOP_S
     pcm = np.clip(np.rint(total * PCM_FULL_SCALE), PCM_MIN, PCM_MAX).astype(np.int16)
     comps = {}
     for who in set(owner):
         alone = np.concatenate([p if o == who else np.zeros_like(p) for p, o in zip(parts, owner, strict=True)])
         comps[who] = component_bins(alone, n_hops)
     other = [o for o in comps if o != kept]
+    hop_s = np.arange(n_hops) * HOP_S
     runs = {}
-    for name, cfg in variants.items():
-        gates, split = turn_gates(pcm, replace(cfg, keep_deg=keep_deg))
-        mine, theirs = talker_of == kept, np.isin(talker_of, other)
-        leak = [kept_db(gates, comps[o], theirs & (talker_of == o)) for o in other]
-        settled = [kept_db(gates, comps[o], (talker_of == o) & (since >= settle_s)) for o in other]
-        runs[name] = (kept_db(gates, comps[kept], mine), max(leak), max(settled), split)
+    for name, run in variants.items():
+        gates, split = turn_gates(pcm, replace(run, cfg=replace(run.cfg, keep_deg=keep_deg)))
+        before = hop_s < (math.inf if split is None else split)
+
+        def leak(hops: np.ndarray, gates=gates) -> float:
+            values = [kept_db(gates, comps[o], hops & (talker_of == o)) for o in other]
+            return max((v for v in values if not math.isnan(v)), default=math.nan)
+
+        runs[name] = (
+            kept_db(gates, comps[kept], talker_of == kept),
+            leak(np.ones(n_hops, dtype=bool)),
+            leak(since < settle_s),
+            leak(since >= settle_s),
+            leak(before),
+            split,
+        )
     return runs
 
 
@@ -322,8 +364,8 @@ def learnt_seats(pcm: np.ndarray, cfg: bss.BssConfig) -> tuple[float | None, lis
 
 
 def recordings_bss(raw: Path, spec: dict, variants: dict) -> str:
-    """Board B's own recordings without labels: when each LEARN variant splits and where its seats end."""
-    learn = {name: cfg for name, cfg in variants.items() if cfg.mode == bss.MODE_LEARN}
+    """Board B's own recordings without labels: when each live LEARN variant splits and where its seats end."""
+    learn = {name: r.cfg for name, r in variants.items() if r.cfg.mode == bss.MODE_LEARN and r.delay_s == 0.0}
     lines = ["", "Board B recordings, no labels: split s / seats deg", "| Recording | " + " | ".join(learn) + " |"]
     lines.append("|---|" + "---|" * len(learn))
     for name in spec["recordings"]:
@@ -338,19 +380,21 @@ def recordings_bss(raw: Path, spec: dict, variants: dict) -> str:
 
 
 def bss_tables(tinyai: list[TurnsBss], scenes: list[TurnsBss], settle_s: float) -> str:
-    """Kept / leaked / leaked after settle_s in dB, and LEARN's split: board B's turns, then scenes by RT60, side."""
+    """Kept and leaked dB, and LEARN's split: board B's turns, then scenes by RT60 and side."""
     runs = list(tinyai[0].runs)
-    head = f"kept dB / other leaked dB / leaked from {settle_s:g} s after a change dB / split s"
+    head = f"kept dB / other leaked dB: all, first {settle_s:g} s of a turn, after it, before the split / split s"
     lines = ["", "Board B, talkers A and B in turns: " + head, "| Item | " + " | ".join(runs) + " |"]
     lines.append("|---|" + "---|" * len(runs))
 
+    def mean(values: list[float], digits: int) -> str:
+        kept = [v for v in values if not math.isnan(v)]
+        return f"{np.mean(kept):+.{digits}f}" if kept else "—"
+
     def cell(values: list[tuple]) -> str:
-        splits = [v[3] for v in values if v[3] is not None]
+        splits = [v[5] for v in values if v[5] is not None]
         split = f"{np.median(splits):.1f} ({len(splits)}/{len(values)})" if splits else "—"
-        return (
-            f"{np.mean([v[0] for v in values]):+.2f} / {np.mean([v[1] for v in values]):+.1f} / "
-            f"{np.mean([v[2] for v in values]):+.1f} / {split}"
-        )
+        leaks = " / ".join(mean([v[i] for v in values], 1) for i in range(1, 5))
+        return f"{mean([v[0] for v in values], 2)} / {leaks} / {split}"
 
     for t in tinyai:
         lines.append(f"| {t.item} | " + " | ".join(cell([t.runs[r]]) for r in runs) + " |")
@@ -388,7 +432,7 @@ def main(argv: list[str] | None = None) -> int:
             variants = doa_variants(spec)
             print(doa_tables(list(pool.map(score_scene, [(f, variants, scene_cfg) for f in folders])), spec))
         elif args.block == "bss":
-            variants = {name: replace(bss.BssConfig(), **o) for name, o in spec["variants"].items()}
+            variants = bss_variants(spec)
             jobs = [(f, variants, spec["settle_s"]) for f in folders]
             scenes = [s for s in pool.map(scene_bss, jobs) if s is not None]
             print(bss_tables(tinyai_bss(data_paths()["raw"], spec, variants), scenes, spec["settle_s"]))
