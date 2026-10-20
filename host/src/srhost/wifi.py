@@ -2,7 +2,8 @@
 
 Asks the network, the one Windows is on by default, and its key without echo, the key Windows saved by default; sends
 them through the console of main, restarts the board until it has an address, then points device/mqtt_uri and
-device/stream_host at this PC's address on that network. The key never reaches the screen, a file or a log.
+device/stream_host at this PC's address on that network. The key never reaches the screen, a file or a log. A network
+Windows' scan hears only off 2.4 GHz is refused before the board is touched: ESP32-S3 has a 2.4 GHz radio only.
 """
 
 from __future__ import annotations
@@ -29,6 +30,12 @@ POLL_S = 0.1
 KEY_BYTES_MIN, KEY_BYTES_MAX = 8, 63  # WPA2 passphrase, as wifi set of main checks it
 SSID_LINE = re.compile(r"^\s*SSID\s*:\s*(.+?)\s*$", re.MULTILINE)
 KEY_LINE = re.compile(r"^\s*Key Content\s*:\s*(.+?)\s*$", re.MULTILINE)
+SCAN_SSID = re.compile(r"^SSID \d+ : ", re.MULTILINE)
+SCAN_BSSID = re.compile(r"^\s*BSSID \d+\s*:", re.MULTILINE)
+SCAN_BAND = re.compile(r"^\s*Band\s*:\s*(.+?)\s*$", re.MULTILINE)
+SCAN_CHANNEL = re.compile(r"^\s*Channel\s*:\s*(\d+)", re.MULTILINE)
+BAND_24, BAND_5 = "2.4 GHz", "5 GHz"
+CHANNEL_24_MAX = 14  # netsh of older Windows prints the channel and no band
 IPV4_LINE = re.compile(r"IPv4[^:\r\n]*:\s*(\d+\.\d+\.\d+\.\d+)")
 STA_IP = re.compile(rb"sta ip: (\d+\.\d+\.\d+\.\d+)")
 SESSION_UP = re.compile(rb"net_mqtt: session up")
@@ -54,6 +61,29 @@ def current_ssid(netsh_interfaces: str) -> str:
     """The network of the first connected Wi-Fi adapter in netsh wlan show interfaces, or ""."""
     found = SSID_LINE.search(netsh_interfaces)
     return found.group(1) if found else ""
+
+
+def scan_bands(netsh_networks: str) -> dict[str, set[str]]:
+    """Every named network of netsh wlan show networks mode=bssid, with the bands its access points are heard on."""
+    heard: dict[str, set[str]] = {}
+    for block in SCAN_SSID.split(netsh_networks)[1:]:
+        name, _, rest = block.partition("\n")
+        for ap in SCAN_BSSID.split(rest)[1:]:
+            band, channel = SCAN_BAND.search(ap), SCAN_CHANNEL.search(ap)
+            if name.strip() and (band or channel):
+                low = channel is not None and int(channel.group(1)) <= CHANNEL_24_MAX
+                heard.setdefault(name.strip(), set()).add(band.group(1) if band else BAND_24 if low else BAND_5)
+    return heard
+
+
+def check_band(ssid: str, heard: dict[str, set[str]]) -> None:
+    """Refuse a network the scan hears only off 2.4 GHz; one out of the scan may still reach the board, so it passes."""
+    bands = heard.get(ssid)
+    if bands and BAND_24 not in bands:
+        raise BoardError(
+            f"{ssid} is on {', '.join(sorted(bands))} only here and ESP32-S3 joins 2.4 GHz networks only: "
+            "pick a 2.4 GHz one, such as the esp hotspot"
+        )
 
 
 def saved_key(netsh_profile: str) -> str:
@@ -189,10 +219,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         stream_port = record_config().stream_port
+        heard = scan_bands(windows("netsh.exe", "wlan", "show", "networks", "mode=bssid"))
         default = current_ssid(windows("netsh.exe", "wlan", "show", "interfaces"))
+        if BAND_24 not in heard.get(default, {BAND_24}):
+            print(f"Windows is on {default}, heard on {', '.join(sorted(heard[default]))} only: board B cannot join it")
+            default = ""
         ssid = input(f"Wi-Fi network [{default}]: ").strip() or default
         if not ssid:
-            raise BoardError("no network: Windows is on none, type one")
+            raise BoardError("no network: type a 2.4 GHz one")
+        check_band(ssid, heard)
         key = getpass.getpass(f"key for {ssid} (Enter: the key Windows saved for it): ")
         if not key:
             key = saved_key(windows("netsh.exe", "wlan", "show", "profile", f"name={ssid}", "key=clear"))

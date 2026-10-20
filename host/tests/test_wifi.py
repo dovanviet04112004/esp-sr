@@ -31,10 +31,72 @@ Wireless LAN adapter Wi-Fi:
    IPv4 Address. . . . . . . . . . . : 192.168.116.251
 """
 
+# netsh wlan show networks mode=bssid as Windows 11 prints it, one block cut short; "old" without Band lines.
+NETWORKS = """
+Interface name : Wi-Fi
+There are 5 networks currently visible.
+
+SSID 1 : TPLINK5G
+    Network type            : Infrastructure
+    BSSID 1                 : 90:a7:c1:02:f6:a2
+         Signal             : 80%
+         Radio type         : 802.11ac
+         Band               : 5 GHz
+         Channel            : 132
+         Bss Load:
+             Connected Stations:         0
+             Channel Utilization:        3 (1 %)
+
+SSID 2 : Aladdin T2
+    Network type            : Infrastructure
+    BSSID 1                 : 24:43:e2:e1:3e:10
+         Band               : 2.4 GHz
+         Channel            : 2
+    BSSID 2                 : 24:43:e2:e1:3e:11
+         Band               : 5 GHz
+         Channel            : 153
+
+SSID 3 : esp
+    Network type            : Infrastructure
+    BSSID 1                 : 36:62:99:3e:8b:c4
+         Band               : 2.4 GHz
+         Channel            : 11
+
+SSID 4 : old 2g
+    BSSID 1                 : 00:11:22:33:44:55
+         Channel            : 6
+
+SSID 5 : old 5g
+    BSSID 1                 : 00:11:22:33:44:66
+         Channel            : 36
+"""
+
 
 def test_the_network_is_the_ssid_line_not_the_bssid_one() -> None:
     assert wifi.current_ssid(INTERFACES) == "esp"
     assert wifi.current_ssid("There is no wireless interface on the system.") == ""
+
+
+def test_the_scan_gives_each_network_the_bands_it_is_heard_on() -> None:
+    assert wifi.scan_bands(NETWORKS) == {
+        "TPLINK5G": {"5 GHz"},
+        "Aladdin T2": {"2.4 GHz", "5 GHz"},
+        "esp": {"2.4 GHz"},
+        "old 2g": {"2.4 GHz"},
+        "old 5g": {"5 GHz"},
+    }
+    assert wifi.scan_bands("") == {}
+
+
+@pytest.mark.parametrize("ssid", ["TPLINK5G", "old 5g"])
+def test_a_network_heard_only_off_2_4_ghz_is_refused(ssid: str) -> None:
+    with pytest.raises(wifi.BoardError, match=r"2\.4 GHz networks only"):
+        wifi.check_band(ssid, wifi.scan_bands(NETWORKS))
+
+
+@pytest.mark.parametrize("ssid", ["esp", "Aladdin T2", "old 2g", "hidden, out of the scan"])
+def test_a_2_4_ghz_dual_band_or_unscanned_network_passes(ssid: str) -> None:
+    wifi.check_band(ssid, wifi.scan_bands(NETWORKS))
 
 
 def test_the_saved_key_is_the_key_content_line() -> None:
