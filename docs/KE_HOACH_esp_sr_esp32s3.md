@@ -2722,6 +2722,7 @@ host/
 │   │                              #   xuống test_apps/calib
 │   ├── bridge.py                  # cầu RFC 2217 tới cổng COM của board B, chạy bằng Python của Windows (§2.1)
 │   ├── wifi.py                    # make wifi: Wi-Fi của board qua console, broker và luồng trỏ về máy tính (§7.2)
+│   ├── boot.py                    # make product: đọc log khởi động, in ngưỡng, danh sách người nói, bộ lệnh (§6.2)
 │   └── speaker.py                 # §3.17 đường máy chủ: ghép up/voice với sự kiện cùng seq, embedding ReDimNet M qua
 │                                  #   ml/spk_ref/redimnet, cosine với mẫu giọng; đăng ký mẫu giọng từ một phiên thu
 ├── plans/                         # kịch bản một buổi thu: mỗi dòng một lời dặn và nhãn một phiên
