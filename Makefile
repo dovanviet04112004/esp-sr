@@ -382,7 +382,7 @@ fw-prod: ## Build the prod profile in build_prod, from its own sdkconfig
 BRIDGE_SESSION := board-bridge
 bridge_up = netstat.exe -an -p TCP | tr -d '\r' | grep -q " $(BRIDGE_HOST):$(BRIDGE_TCP_PORT) .*LISTENING"
 
-.PHONY: board-attach board-detach flash monitor models-flash capture-flash capture-radio-off-flash
+.PHONY: board-attach board-detach flash monitor wifi models-flash capture-flash capture-radio-off-flash
 # The bridge runs on Windows' Python from its temp folder, with host/'s pyserial copied beside it.
 board-attach: ## Serve board B's COM port to WSL over RFC 2217, so every target reaches it at PORT (KEHOACH 2.1)
 	@command -v py.exe >/dev/null || { echo "board-attach needs Python on Windows (py.exe)"; exit 1; }
@@ -412,6 +412,9 @@ flash: ## Flash and monitor the dev profile over the CH340
 
 monitor: ## Open the serial monitor on the CH340
 	cd firmware && idf.py -p $(PORT) monitor
+
+wifi: ## Put board B on a Wi-Fi network, the PC's by default, and point its broker and stream at this PC (KEHOACH 7.2)
+	cd host && uv run python -m srhost.wifi --port "$(PORT)"
 
 models-flash: ## Pack every model of contracts/models.lock.json and write models_0 of board B (KEHOACH 4.5.6, 6.1)
 	cd ml && PORT=$(PORT) BAUD=$(FLASH_BAUD) ./scripts/50_pack_and_flash.sh
