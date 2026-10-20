@@ -161,9 +161,10 @@ Hai mươi kịch bản:
 - hai ghế mà ba người nói;
 - một người nói 90%;
 - hai người gần nhau (80° và 100°);
-- hai người gần hơn `min_gap` (86° và 94°, một ghế);
+- hai người gần hơn `min_gap` (86° và 94°: một hướng, không ghế);
 - một người trôi dần;
-- nói đè; nghỉ dài; chỉ có lần dò lạc;
+- nói đè; nghỉ dài; 20 s không ai nói (kịch bản `strays only`: `track` chỉ dò khi có người nói, nên kịch bản này
+  không có lần dò nào, kể cả lần lạc);
 - lượt 0,5 s;
 - một người rời đi, người khác đến, rồi người cũ quay lại;
 - ba ghế mà bốn người nói;
@@ -176,6 +177,14 @@ Kết quả:
   hơn qua, kéo tâm ghế về giữa đường quét, và để lần dò lạc kéo ghế đi.
 - Giới hạn còn lại: một người chỉ nói 10% thời gian với câu 0,5 s, khi `doa` quét chuyển tới 20 bước, không đủ khối
   lượng ở lõi để có ghế (KẾ HOẠCH §3.8).
+- **Chỉ có lần dò lạc thì LEARN lập ghế ma.** Script tạm chạy bản soi gương, mà C khớp từng bit (§7), trên 20 s toàn lần
+  dò lạc, hai bước một lần như lúc có tiếng, 5 hạt giống:
+  - lạc đều theo góc, như phần lạc của bộ kịch bản: 5/5 ra hai ghế ở 12–15° và 165–167°, sau 3,5–9,5 s. Đều theo góc thì
+    dồn về hai đầu trục độ trễ (τ = τ_max·cos θ), nên hai đầu thành hai đỉnh nổi rõ, lõi giữ trên 5% cửa sổ;
+  - lạc đều theo độ trễ: 4/5 ra hai ghế ở chỗ ngẫu nhiên, sau 6,5–17,6 s.
+
+  Trên board B, `doa` chỉ dò khi `vad` thô báo có tiếng, nên ca này cần tiếng ồn không hướng làm `vad` thô bật. Chưa đo
+  board B có ra chuỗi như vậy không 🔬 (TASKS E8-T8).
 
 ## 7. Khớp với bản C
 
