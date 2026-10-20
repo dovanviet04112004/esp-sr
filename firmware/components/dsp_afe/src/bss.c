@@ -27,9 +27,10 @@ struct dsp_afe_bss_s {
     dsp_afe_bss_config_t cfg;
     span_t span;
     double slope;
-    float delay[ANGLES];     // samples of delay of each whole degree
-    float broadside[ANGLES]; // broadside split's gate of keep_deg's side
+    float delay[ANGLES]; // samples of delay of each whole degree
+    float rise[ANGLES];  // broadside split's share of number 1
     float keep_delay;
+    uint8_t side; // keep_deg's broadside number
     float rate;
     float half_gap;
     float share_hi;
@@ -46,7 +47,9 @@ struct dsp_afe_bss_s {
     float offsets[DSP_AFE_BSS_SEATS_MAX - 1];
     uint32_t seen[DSP_AFE_BSS_SEATS_MAX]; // hop of each seat's last update
     uint32_t votes[DSP_AFE_BSS_SEATS_MAX];
+    uint8_t number[DSP_AFE_BSS_SEATS_MAX];
     float gate;
+    float shares[DSP_AFE_BSS_SEATS_MAX]; // gate of each number at the last search
 };
 
 static double speech_s(const dsp_afe_bss_config_t *cfg)
@@ -128,11 +131,6 @@ static float above(const dsp_afe_bss_t *st, float delay, const float *cuts, size
     return (float)logistic(2.0 * st->slope * ((double)delay - (double)cuts[j - 1]));
 }
 
-static float seat_gate(const dsp_afe_bss_t *st, float delay, const float *cuts, size_t n_cuts, size_t seat)
-{
-    return above(st, delay, cuts, n_cuts, seat) - above(st, delay, cuts, n_cuts, seat + 1);
-}
-
 static size_t nearest(float value, const float *centres, size_t n)
 {
     size_t at = 0;
@@ -161,7 +159,11 @@ void dsp_afe_bss_reset(dsp_afe_bss_t *st)
     memset(st->offsets, 0, sizeof(st->offsets));
     memset(st->seen, 0, sizeof(st->seen));
     memset(st->votes, 0, sizeof(st->votes));
+    memset(st->number, 0, sizeof(st->number));
     st->gate = GATE_START;
+    memset(st->shares, 0, sizeof(st->shares));
+    st->shares[0] = GATE_START;
+    st->shares[1] = GATE_START;
 }
 
 esp_err_t dsp_afe_bss_init(dsp_afe_bss_t **out, const dsp_afe_bss_config_t *cfg, void *mem, size_t bytes)
@@ -182,10 +184,10 @@ esp_err_t dsp_afe_bss_init(dsp_afe_bss_t **out, const dsp_afe_bss_config_t *cfg,
         st->delay[d] = (float)(tau_max * afe_cos_series((double)d * AFE_PI / DEG_PER_HALF_TURN));
     }
     st->keep_delay = (float)(tau_max * afe_cos_series((double)cfg->keep_deg * AFE_PI / DEG_PER_HALF_TURN));
-    const size_t side = st->keep_delay > 0.0f ? 1u : 0u;
+    st->side = st->keep_delay > 0.0f ? 1u : 0u;
     const float axis[1] = {0.0f};
     for (size_t d = 0; d < ANGLES; d++) {
-        st->broadside[d] = seat_gate(st, st->delay[d], axis, 1, side);
+        st->rise[d] = above(st, st->delay[d], axis, 1, 1) - above(st, st->delay[d], axis, 1, 2);
     }
     st->rate = (float)(1.0 - afe_exp_series(-speech_s(cfg) / (double)cfg->track_tau_s));
     st->half_gap = 0.5f * cfg->min_gap;
@@ -239,6 +241,7 @@ static void forget(dsp_afe_bss_t *st)
             st->centres[j] = st->centres[j + 1];
             st->seen[j] = st->seen[j + 1];
             st->votes[j] = st->votes[j + 1];
+            st->number[j] = st->number[j + 1];
         }
         for (size_t j = i < last ? i : last - 1u; j + 1 < last; j++) {
             st->offsets[j] = st->offsets[j + 1];
@@ -351,6 +354,46 @@ static void window_votes(dsp_afe_bss_t *st)
     }
 }
 
+static bool holds(const int8_t *numbers, size_t n, int8_t value)
+{
+    for (size_t i = 0; i < n; i++) {
+        if (numbers[i] == value) { return true; }
+    }
+    return false;
+}
+
+// Held seats pass their numbers, by rising delay, to the nearest free centre (KEHOACH 3.8).
+static void renumber(dsp_afe_bss_t *st, const float *centres, uint8_t found)
+{
+    int8_t numbers[DSP_AFE_BSS_SEATS_MAX];
+    memset(numbers, -1, sizeof(numbers));
+    for (size_t i = 0; i < st->seats; i++) {
+        size_t at = 0;
+        float best = 0.0f;
+        bool any = false;
+        for (size_t j = 0; j < found; j++) {
+            const float d = fabsf(centres[j] - st->centres[i]);
+            if (numbers[j] < 0 && (!any || d < best)) {
+                best = d;
+                at = j;
+                any = true;
+            }
+        }
+        numbers[at] = (int8_t)st->number[i];
+    }
+    int8_t next = 0;
+    for (size_t j = 0; j < found; j++) {
+        if (numbers[j] >= 0) { continue; }
+        while (holds(numbers, found, next)) {
+            next++;
+        }
+        numbers[j] = next;
+    }
+    for (size_t j = 0; j < found; j++) {
+        st->number[j] = (uint8_t)numbers[j];
+    }
+}
+
 // Seats grow once confirm clusterings agree and never shrink here: a seat goes only by forget.
 static void cluster(dsp_afe_bss_t *st)
 {
@@ -370,6 +413,7 @@ static void cluster(dsp_afe_bss_t *st)
         st->agree = found == st->pending ? (uint8_t)(st->agree + 1) : 1;
         st->pending = found;
         if (st->agree >= st->cfg.confirm) {
+            renumber(st, fit_c, found);
             st->seats = found;
             memcpy(st->centres, fit_c, found * sizeof(float));
             memcpy(st->offsets, fit_o, (found - 1u) * sizeof(float));
@@ -403,14 +447,28 @@ static size_t keep_seat(const dsp_afe_bss_t *st)
     return at;
 }
 
-static float gate_of(const dsp_afe_bss_t *st, int16_t angle)
+// The kept seat's gate; shares gets the gate of every number.
+static float gates_of(const dsp_afe_bss_t *st, int16_t angle, float *shares)
 {
-    if (st->seats < 2) { return st->broadside[angle]; }
+    memset(shares, 0, DSP_AFE_BSS_SEATS_MAX * sizeof(float));
+    if (st->seats < 2) {
+        shares[0] = 1.0f - st->rise[angle];
+        shares[1] = st->rise[angle];
+        return shares[st->side];
+    }
     float cuts[DSP_AFE_BSS_SEATS_MAX - 1];
     for (size_t j = 0; j + 1 < st->seats; j++) {
         cuts[j] = 0.5f * (st->centres[j] + st->centres[j + 1]) + st->offsets[j];
     }
-    return seat_gate(st, st->delay[angle], cuts, st->seats - 1u, keep_seat(st));
+    float up[DSP_AFE_BSS_SEATS_MAX + 1];
+    for (size_t j = 0; j <= st->seats; j++) {
+        up[j] = above(st, st->delay[angle], cuts, st->seats - 1u, j);
+    }
+    for (size_t j = 0; j < st->seats; j++) {
+        shares[st->number[j]] = up[j] - up[j + 1];
+    }
+    const size_t keep = keep_seat(st);
+    return up[keep] - up[keep + 1];
 }
 
 esp_err_t dsp_afe_bss_process(dsp_afe_bss_t *st, const dsp_spec_cplx_t *x0, const dsp_spec_cplx_t *x1,
@@ -431,7 +489,7 @@ esp_err_t dsp_afe_bss_process(dsp_afe_bss_t *st, const dsp_spec_cplx_t *x0, cons
             cluster(st);
         }
     }
-    if (counted) { st->gate = gate_of(st, angle_deg); }
+    if (counted) { st->gate = gates_of(st, angle_deg, st->shares); }
     st->hop++;
     const float keep = st->gate;
     const float other = 1.0f - keep;
@@ -465,4 +523,17 @@ void dsp_afe_bss_state(const dsp_afe_bss_t *st, uint8_t *seats, float *gate)
 {
     *seats = st->seats;
     *gate = st->gate;
+}
+
+void dsp_afe_bss_numbered(const dsp_afe_bss_t *st, float gate[DSP_AFE_BSS_SEATS_MAX],
+                          int16_t angle_deg[DSP_AFE_BSS_SEATS_MAX])
+{
+    memcpy(gate, st->shares, sizeof(st->shares));
+    for (size_t j = 0; j < DSP_AFE_BSS_SEATS_MAX; j++) {
+        angle_deg[j] = ANGLE_UNKNOWN_DEG;
+    }
+    if (st->seats < 2) { return; }
+    for (size_t j = 0; j < st->seats; j++) {
+        angle_deg[st->number[j]] = (int16_t)nearest(st->centres[j], st->delay, ANGLES);
+    }
 }

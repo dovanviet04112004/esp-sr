@@ -85,6 +85,14 @@ void dsp_afe_bss_directions(const dsp_afe_bss_t *st, int16_t angle_deg[2]);
  */
 void dsp_afe_bss_state(const dsp_afe_bss_t *st, uint8_t *seats, float *gate);
 
+/** Gate and whole degrees of every seat number: a seat holds its number from the clustering that takes it
+ * until it is forgotten; below two seats, 0 is the side past 90 deg and 1 the other (KEHOACH 3.8).
+ *  @ctx any | non-blocking
+ *  @param gate the gates the last search set, summing to 1; angle_deg -1 for a number no seat holds
+ */
+void dsp_afe_bss_numbered(const dsp_afe_bss_t *st, float gate[DSP_AFE_BSS_SEATS_MAX],
+                          int16_t angle_deg[DSP_AFE_BSS_SEATS_MAX]);
+
 /** Forget every angle and seat and set the gate back to one half; the tables stay.
  *  @ctx any | non-blocking
  */
