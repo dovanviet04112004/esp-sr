@@ -142,6 +142,8 @@ def receiver(out: Path, port: int, seconds: int) -> Iterator[subprocess.Popen]:
 def test_bss_live(dut) -> None:
     board_line(dut, "app ")
     board_ip = board_line(dut, "wifi ")
+    if not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", board_ip):
+        pytest.fail(f"board B: wifi {board_ip}; make wifi puts it on this PC's network")
     limits = limits_of(board_line(dut, "ready "))
     host = pc_address(board_ip)
     port = int(os.environ["BSS_LIVE_STREAM_PORT"])
@@ -159,7 +161,7 @@ def test_bss_live(dut) -> None:
     (out / "status.txt").write_text("\n".join(texts) + "\n", encoding="utf-8")
     stream = json.loads((out / SUMMARY_FILE).read_text(encoding="utf-8")) if (out / SUMMARY_FILE).exists() else {}
     wavs = sorted(p.name for p in out.glob("*.wav"))
-    print(f"{out}\n  {' '.join(wavs)}")
+    print(f"{out}\n  {' '.join(wavs)}\nboard B runs bss_live until make product puts the product back")
     summary = next((SUMMARY.search(t) for t in texts if SUMMARY.search(t)), None)
     assert summary is not None, "board B sent no summary line"
     assert int(summary.group(2)) == 0 and int(summary.group(3)) == 0, f"board B lost hops: {summary.group(0)}"
