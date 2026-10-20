@@ -306,6 +306,21 @@ nghe ở địa chỉ phía Windows của mạng NAT của WSL (gateway mặc đ
 client chờ cầu xác nhận từng lệnh DTR/RTS mà cầu đã nuốt, và mở cổng hết giờ. Mở cổng là reset chip. `make
 board-detach` tắt cầu, trả cổng COM cho chương trình Windows.
 
+**Nạp qua cầu chỉ tốn phần khác.** pyserial phía WSL coi mỗi lần đổi timeout đọc là đổi cấu hình cổng: nó gửi lại
+baud, số bit, parity, stop bit sang cầu rồi ngủ ít nhất 50 ms chờ trả lời. esptool đổi timeout quanh từng lệnh, nên qua
+cầu mỗi lệnh tốn 305 ms thay vì 3,9 ms, và mỗi lần gọi esptool phí chừng 30 s (`measurements/latency.md` §30).
+Timeout đọc không phải thứ cầu áp được. Vì vậy mọi đích make chạm board (`BOARD_GOALS` của Makefile) đặt
+`tools/board_link/` lên đầu `PYTHONPATH`. `sitecustomize.py` trong đó chạy trước mọi Python của đích ấy, kể cả esptool
+mà `idf.py` và parttool gọi. Khi `serial.rfc2217` được nạp, nó giữ timeout ở phía WSL.
+
+Mỗi lần nạp chỉ ghi ảnh nào khác bản đang trên flash: esptool `--skip-flashed` so MD5 từng ảnh.
+- App pytest bật nó qua `firmware/conftest.py`; `ON_BOARD` nạp file này nhờ `--confcutdir`.
+- `idf.py flash` bật nó qua `--extra-args`.
+- `models_0` và `storage` của `make product` được ghi thẳng vào offset của phân vùng, không xoá trắng trước: ảnh model
+  tự khai cỡ từng model (§6.3), còn ảnh `storage` dài đúng bằng phân vùng.
+
+`idf.py` nạp ở `FLASH_BAUD` qua `ESPBAUD`, như pytest-embedded.
+
 ### 2.2 Bảng chân
 
 Chân GPIO khai ở **đúng hai chỗ**: bảng này và `firmware/components/bsp_board/include/app_config.h`,
@@ -2375,6 +2390,7 @@ firmware/
 ├── partitions.csv                    # §6.1
 ├── dependencies.lock                 # ✅
 ├── .clang-format                     # thụt 4, gần kiểu ESP-IDF; file gen_*.h không đi qua nó
+├── conftest.py                       # mọi app pytest trên board B (ON_BOARD nạp): esptool chỉ ghi ảnh khác (§2.1)
 │
 ├── main/
 │   ├── CMakeLists.txt  ├── idf_component.yml  ├── Kconfig.projbuild
@@ -2856,6 +2872,7 @@ broker khởi động lại là mất `status` `offline` của máy đang tắt.
 | `check_purity.py` | `common`, `dsp_*`, `lang_*` không include FreeRTOS, driver, log, heap | pre-commit, CI |
 | `budget.py` | gộp CSV của `bench_*` ở `docs/measurements/bench/` thành bảng RAM và µs theo module (TỔNG QUAN V5.0.10); CSV commit cùng bảng nên `make report` dựng lại số chỉ từ repo | `make measure` |
 | `ci_status.py` | đọc kết quả GitHub Actions của một commit bằng `gh`, gắn trạng thái lên đúng commit ấy trên Gitea qua API | `make ci-status` |
+| `board_link/sitecustomize.py` | Python của mọi đích make chạm board nạp nó trước tiên qua `PYTHONPATH`; khi `serial.rfc2217` được nạp, timeout đọc chỉ đặt ở phía WSL, không gửi sang cầu (§2.1) | đích board của Makefile |
 | `tests/` + `__init__.py` | `unittest` cho chính các script trên: hợp đồng hợp lệ, generator tất định và C sinh ra chạy đúng, mỗi luật kiểm có một ca vi phạm cố ý | `make test`, CI |
 
 ### 4.9 Cấm hardcode — mỗi hằng số có đúng một nguồn
