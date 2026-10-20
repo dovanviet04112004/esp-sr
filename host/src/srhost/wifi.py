@@ -143,7 +143,9 @@ class Console:
     def prompt(self) -> None:
         self.port.write(b"\r\n")
         if self.wait(PROMPT, PROMPT_TIMEOUT_S) is None:
-            raise BoardError("no 'sr> ' prompt: flash the product with its console first (make fw-bench-flash)")
+            raise BoardError(
+                "no 'sr> ' prompt: board B runs no product; make product puts it back (make bss sets bss_live's Wi-Fi)"
+            )
         time.sleep(SETTLE_S)
         self.port.reset_input_buffer()
         self.seen = b""
