@@ -2,7 +2,8 @@
 
 Mirror of firmware/components/dsp_afe/src/bss.c in float32, after tinyai-signal's micarray separation: each counted doa
 angle becomes a delay and sets the kept seat's gate, one factor for the whole mean; logistic by series in double.
-Mode 0 splits two seats at broadside; mode 1 clusters the last decision_s of speech into up to seats_max seats.
+Mode 0 splits two seats at broadside; mode 1 clusters the last decision_s of speech into up to seats_max seats, each
+holding one number from the clustering that takes it to the hop it is forgotten.
 """
 
 from __future__ import annotations
@@ -148,8 +149,8 @@ class Bss:
         self.delay = [f32(tau_max * cos_series(d * PI / 180.0)) for d in range(ANGLES)]
         self.keep_delay = f32(tau_max * cos_series(float(f32(c.keep_deg)) * PI / 180.0))
         self.slope = float(f32(c.gate_slope))
-        side = 1 if self.keep_delay > 0 else 0
-        self.broadside = [seat_gates(self.delay[d], [f32(0.0)], self.slope)[side] for d in range(ANGLES)]
+        self.side = 1 if self.keep_delay > 0 else 0
+        self.rise = [seat_gates(self.delay[d], [f32(0.0)], self.slope)[1] for d in range(ANGLES)]
         speech_s = update_s(c)
         hop_s = grid.HOP_SAMPLES / grid.SAMPLE_RATE_HZ
         self.window = rounded(float(f32(c.decision_s)) / speech_s)
@@ -179,8 +180,10 @@ class Bss:
         self.offsets = [f32(0.0)] * (SEATS_CAP - 1)
         self.seen = [0] * SEATS_CAP
         self.votes = [0] * SEATS_CAP
+        self.number = [0] * SEATS_CAP
         self.pending = self.agree = 0
         self.gate = GATE_START
+        self.shares = [GATE_START, GATE_START] + [f32(0.0)] * (SEATS_CAP - 2)
 
     def process(
         self, x0: np.ndarray, x1: np.ndarray, angle_deg: int, confidence: int, update: bool
@@ -198,7 +201,7 @@ class Bss:
                 self.since = 0
                 self._cluster()
         if counted:
-            self.gate = self._gate(angle_deg)
+            self.gate, self.shares = self._gates(angle_deg)
         self.hop += 1
         mean = (f32(0.5) * (np.asarray(x0, dtype=np.complex64) + np.asarray(x1, dtype=np.complex64))).astype(
             np.complex64
@@ -215,6 +218,15 @@ class Bss:
         others = [i for i in range(self.seats) if i != keep]
         other = others[nearest(centres[keep], [centres[i] for i in others])]
         return nearest(centres[keep], self.delay), nearest(centres[other], self.delay)
+
+    def numbered(self) -> tuple[list, list]:
+        """Gate and whole degrees of every seat number, SEATS_CAP each: the gates the last search set, summing to 1;
+        -1 degrees for a number no seat holds, and below two seats, where 0 is the side past 90 deg and 1 the other."""
+        angles = [-1] * SEATS_CAP
+        if self.seats >= 2:
+            for j in range(self.seats):
+                angles[self.number[j]] = nearest(self.centres[j], self.delay)
+        return list(self.shares), angles
 
     def _count(self, angle: int) -> None:
         if self.filled == self.window:
@@ -248,7 +260,7 @@ class Bss:
                 self.offsets[i - 1] = f32(0.0)
             for j in range(i, last):
                 self.centres[j], self.seen[j] = self.centres[j + 1], self.seen[j + 1]
-                self.votes[j] = self.votes[j + 1]
+                self.votes[j], self.number[j] = self.votes[j + 1], self.number[j + 1]
             for j in range(i if i < last else last - 1, last - 1):
                 self.offsets[j] = self.offsets[j + 1]
             self.seats -= 1
@@ -329,6 +341,7 @@ class Bss:
             self.pending = found
             if self.agree >= self.cfg.confirm:
                 centres, offsets = fit
+                self.number[:found] = self._numbers(centres)
                 self.seats = found
                 self.centres[:found] = centres
                 self.offsets[: found - 1] = offsets
@@ -341,6 +354,20 @@ class Bss:
             _, offsets = fit
             for j in range(current - 1):
                 self.offsets[j] = f32(self.offsets[j] + f32(self.follow * f32(offsets[j] - self.offsets[j])))
+
+    def _numbers(self, centres: list) -> list:
+        """Numbers of the seats a clustering takes: each held seat, by rising delay, hands its number to the nearest
+        centre still free; the other centres take the smallest numbers left, by rising delay."""
+        numbers = [-1] * len(centres)
+        for i in range(self.seats):
+            best, at = None, 0
+            for j, c in enumerate(centres):
+                d = abs(f32(c - self.centres[i]))
+                if numbers[j] < 0 and (best is None or d < best):
+                    best, at = d, j
+            numbers[at] = self.number[i]
+        free = (n for n in range(self.cfg.seats_max) if n not in numbers)
+        return [n if n >= 0 else next(free) for n in numbers]
 
     def _keep_seat(self) -> int:
         centres = self.centres[: self.seats]
@@ -357,9 +384,16 @@ class Bss:
                 counts[nearest(self.delay[d], self.centres[: self.seats])] += self.hist[d]
         return counts
 
-    def _gate(self, angle: int) -> np.float32:
+    def _gates(self, angle: int) -> tuple[np.float32, list]:
+        """The kept seat's gate and the gate of every number for this angle."""
+        shares = [f32(0.0)] * SEATS_CAP
         if self.seats < 2:
-            return self.broadside[angle]
+            rise = self.rise[angle]
+            shares[0], shares[1] = f32(f32(1.0) - rise), rise
+            return shares[self.side], shares
         c = self.centres
         cuts = [f32(f32(f32(0.5) * f32(c[j] + c[j + 1])) + self.offsets[j]) for j in range(self.seats - 1)]
-        return seat_gates(self.delay[angle], cuts, self.slope)[self._keep_seat()]
+        gates = seat_gates(self.delay[angle], cuts, self.slope)
+        for j in range(self.seats):
+            shares[self.number[j]] = gates[j]
+        return gates[self._keep_seat()], shares

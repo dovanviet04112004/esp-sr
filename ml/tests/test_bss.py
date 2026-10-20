@@ -24,9 +24,11 @@ def bins(seed: int = 7) -> tuple[np.ndarray, np.ndarray]:
     return x[0].astype(np.complex64), x[1].astype(np.complex64)
 
 
-def speak(b: bss.Bss, plan: list[tuple[int, int | None]], seed: int = 3) -> list[tuple[float, int]]:
+def speak(
+    b: bss.Bss, plan: list[tuple[int, int | None]], seed: int = 3, numbered: list | None = None
+) -> list[tuple[float, int]]:
     """Hops of talkers at whole angles or of silence, None, as doa reads them: a search every other hop, the angle
-    wandering a grid step either side; the gate and seats after each hop."""
+    wandering a grid step either side; the gate and seats after each hop, and into numbered what numbered() says."""
     rng = np.random.default_rng(seed)
     x0, x1 = bins()
     out, hop = [], 0
@@ -36,6 +38,8 @@ def speak(b: bss.Bss, plan: list[tuple[int, int | None]], seed: int = 3) -> list
             reading = int(np.clip(angle + 2 * rng.integers(-1, 2), 0, 180)) if angle is not None else -1
             b.process(x0, x1, reading, 120, searched)
             out.append((float(b.gate), b.seats))
+            if numbered is not None:
+                numbered.append(b.numbered())
             hop += 1
     return out
 
@@ -117,3 +121,34 @@ def test_reset_is_where_init_leaves_it() -> None:
     speak(b, [(100, 48), (100, 130)])
     b.reset()
     assert (b.gate, b.seats, b.filled, b.directions()) == (0.5, 0, 0, (-1, -1))
+
+
+def near(angle: int, talker: int) -> bool:
+    return abs(angle - talker) <= 4
+
+
+def test_broadside_numbers_the_side_past_90_deg_0_and_the_other_1() -> None:
+    b = separator(keep_deg=135.0)
+    gates, angles = b.numbered()
+    assert gates[:2] == [0.5, 0.5] and angles == [-1] * bss.SEATS_CAP
+    speak(b, [(4, 150)])
+    gates, _ = b.numbered()
+    assert gates[0] == b.gate == 1.0 and gates[1] < 1e-6
+    speak(b, [(4, 30)])
+    gates, _ = b.numbered()
+    assert gates[0] == b.gate == 0.0 and gates[1] == 1.0
+
+
+def test_held_seats_keep_their_numbers_when_seats_are_taken_or_forgotten() -> None:
+    b = separator(mode=bss.MODE_LEARN, seats_max=3)
+    seen: list = []
+    plan = [(60, 90), (60, 30), (60, 150), (60, 90), (60, 30), (60, 150), (100, 30), (100, 150), (100, 30)]
+    out = speak(b, plan, numbered=seen)
+    two = seen[next(i for i, (_, s) in enumerate(out) if s == 2)][1]
+    three = seen[next(i for i, (_, s) in enumerate(out) if s == 3)][1]
+    after = seen[-1][1]
+    assert near(two[0], 90) and near(two[1], 30) and two[2:] == [-1, -1]
+    assert near(three[0], 90) and near(three[1], 30) and near(three[2], 150)
+    assert out[-1][1] == 2 and after[0] == -1 and near(after[1], 30) and near(after[2], 150)
+    assert all(abs(sum(float(g) for g in gates) - 1.0) < 1e-6 for gates, _ in seen)
+    assert all(np.float32(gate) in gates for (gate, _), (gates, _) in zip(out, seen, strict=True))
