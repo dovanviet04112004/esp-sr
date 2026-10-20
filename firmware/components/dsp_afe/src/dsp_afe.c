@@ -233,6 +233,7 @@ static dsp_afe_bss_config_t bss_config(void)
         .update_every_hops = GEN_AFE_DOA_UPDATE_EVERY_HOPS,
         .spacing_m = GEN_ARRAY_SPACING_M,
         .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
+        .history_s = GEN_AFE_BSS_HISTORY_S,
     };
 }
 #endif

@@ -51,6 +51,7 @@ typedef struct {
     uint8_t update_every_hops; // doa's search period
     float spacing_m;
     float speed_of_sound_m_s;
+    float history_s; // held angles numbered_back reaches; 0 in the product
 } dsp_afe_bss_config_t;
 
 typedef struct dsp_afe_bss_s dsp_afe_bss_t;
@@ -92,6 +93,14 @@ void dsp_afe_bss_state(const dsp_afe_bss_t *st, uint8_t *seats, float *gate);
  */
 void dsp_afe_bss_numbered(const dsp_afe_bss_t *st, float gate[DSP_AFE_BSS_SEATS_MAX],
                           int16_t angle_deg[DSP_AFE_BSS_SEATS_MAX]);
+
+/** Gate of every seat number for the angle held back_hops ago under the seats held now, and the kept seat's
+ *  number: the delayed output's gates (KEHOACH 3.8); with no angle held yet, the gates it starts with.
+ *  @ctx any | non-blocking
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG back_hops past the history_s the configuration keeps
+ */
+esp_err_t dsp_afe_bss_numbered_back(const dsp_afe_bss_t *st, uint32_t back_hops,
+                                    float gate[DSP_AFE_BSS_SEATS_MAX], uint8_t *kept);
 
 /** Forget every angle and seat and set the gate back to one half; the tables stay.
  *  @ctx any | non-blocking

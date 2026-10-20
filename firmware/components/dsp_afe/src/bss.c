@@ -21,6 +21,7 @@ typedef struct {
     size_t first;  // updates ahead of the first clustering
     uint32_t recheck_hops;
     uint32_t forget_hops;
+    uint32_t history; // hops of held angles numbered_back reaches
 } span_t;
 
 struct dsp_afe_bss_s {
@@ -35,6 +36,8 @@ struct dsp_afe_bss_s {
     float half_gap;
     float share_hi;
     int16_t *ring;
+    int16_t *held; // held angle of each of the last history + 1 hops
+    int16_t last_angle;
     size_t head;
     size_t filled;
     uint32_t hist[ANGLES];
@@ -71,7 +74,7 @@ static bool config_ok(const dsp_afe_bss_config_t *cfg)
                     cfg->boundary_share_min >= 0.0f && cfg->boundary_share_min <= 0.5f &&
                     cfg->boundary_follow >= 0.0f && cfg->boundary_follow <= 1.0f && cfg->track_tau_s > 0.0f &&
                     cfg->track_gate > 0.0f && cfg->seat_forget_s > 0.0f && cfg->update_every_hops >= 1 &&
-                    cfg->spacing_m > 0.0f && cfg->speed_of_sound_m_s > 0.0f;
+                    cfg->spacing_m > 0.0f && cfg->speed_of_sound_m_s > 0.0f && cfg->history_s >= 0.0f;
     return ok && speech_s(cfg) / (double)cfg->track_tau_s <= EXP_SERIES_REACH;
 }
 
@@ -90,6 +93,7 @@ static span_t span_of(const dsp_afe_bss_config_t *cfg)
         .first = rounded((double)cfg->first_speech_s / per_update),
         .recheck_hops = (uint32_t)rounded((double)cfg->recheck_s / hop_s),
         .forget_hops = (uint32_t)rounded((double)cfg->seat_forget_s / hop_s),
+        .history = (uint32_t)floor((double)cfg->history_s / hop_s + 0.5),
     };
     if (s.first > s.window) { s.first = s.window; }
     return s;
@@ -99,7 +103,11 @@ static dsp_afe_bss_t *carve(afe_arena_t *a, const span_t *s)
 {
     dsp_afe_bss_t *st = afe_take(a, sizeof(*st));
     int16_t *ring = afe_take(a, s->window * sizeof(int16_t));
-    if (st != NULL) { st->ring = ring; }
+    int16_t *held = afe_take(a, (s->history + 1u) * sizeof(int16_t));
+    if (st != NULL) {
+        st->ring = ring;
+        st->held = held;
+    }
     return st;
 }
 
@@ -164,6 +172,10 @@ void dsp_afe_bss_reset(dsp_afe_bss_t *st)
     memset(st->shares, 0, sizeof(st->shares));
     st->shares[0] = GATE_START;
     st->shares[1] = GATE_START;
+    st->last_angle = ANGLE_UNKNOWN_DEG;
+    for (size_t h = 0; h <= st->span.history; h++) {
+        st->held[h] = ANGLE_UNKNOWN_DEG;
+    }
 }
 
 esp_err_t dsp_afe_bss_init(dsp_afe_bss_t **out, const dsp_afe_bss_config_t *cfg, void *mem, size_t bytes)
@@ -174,8 +186,10 @@ esp_err_t dsp_afe_bss_init(dsp_afe_bss_t **out, const dsp_afe_bss_config_t *cfg,
     dsp_afe_bss_t *st = carve(&arena, &s);
     if (st == NULL || arena.used > arena.cap) { return ESP_ERR_INVALID_SIZE; }
     int16_t *ring = st->ring;
+    int16_t *held = st->held;
     memset(st, 0, sizeof(*st));
     st->ring = ring;
+    st->held = held;
     st->cfg = *cfg;
     st->span = s;
     st->slope = (double)cfg->gate_slope;
@@ -489,7 +503,11 @@ esp_err_t dsp_afe_bss_process(dsp_afe_bss_t *st, const dsp_spec_cplx_t *x0, cons
             cluster(st);
         }
     }
-    if (counted) { st->gate = gates_of(st, angle_deg, st->shares); }
+    if (counted) {
+        st->gate = gates_of(st, angle_deg, st->shares);
+        st->last_angle = angle_deg;
+    }
+    st->held[st->hop % (st->span.history + 1u)] = st->last_angle;
     st->hop++;
     const float keep = st->gate;
     const float other = 1.0f - keep;
@@ -536,4 +554,23 @@ void dsp_afe_bss_numbered(const dsp_afe_bss_t *st, float gate[DSP_AFE_BSS_SEATS_
     for (size_t j = 0; j < st->seats; j++) {
         angle_deg[st->number[j]] = (int16_t)nearest(st->centres[j], st->delay, ANGLES);
     }
+}
+
+esp_err_t dsp_afe_bss_numbered_back(const dsp_afe_bss_t *st, uint32_t back_hops,
+                                    float gate[DSP_AFE_BSS_SEATS_MAX], uint8_t *kept)
+{
+    if (st == NULL || gate == NULL || kept == NULL || back_hops > st->span.history) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *kept = st->seats >= 2 ? st->number[keep_seat(st)] : st->side;
+    const int16_t angle = st->hop > back_hops ? st->held[(st->hop - 1u - back_hops) % (st->span.history + 1u)]
+                                              : ANGLE_UNKNOWN_DEG;
+    if (angle < 0) {
+        memset(gate, 0, DSP_AFE_BSS_SEATS_MAX * sizeof(float));
+        gate[0] = GATE_START;
+        gate[1] = GATE_START;
+        return ESP_OK;
+    }
+    (void)gates_of(st, angle, gate);
+    return ESP_OK;
 }
