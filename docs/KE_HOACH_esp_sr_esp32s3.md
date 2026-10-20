@@ -672,6 +672,7 @@ một hệ số theo hướng ấy: người ở ghế giữ đi qua, người �
 | Hướng | góc của `doa` (§3.6) ở mỗi bước nó dò lại, đổi ra trễ giữa hai micro `τ = τ_max·cos θ` mẫu, τ_max = d·fs/c = 2,10; lần dò có độ tin dưới `conf_min` thì bỏ; giữa hai lần dò cổng giữ nguyên. Dưới `bss`, `doa` dò theo **quyết định thô của một `vad` thứ hai trên trung bình hai micro sau `hpf`**, không theo `vad` của lối ra | `doa` đã chạy trong chuỗi và chỉ dò khi có tiếng nói, nên hướng là của người nói. Trên bản thu board B, dải 2–8 kHz của nó cho hai người ở hai phía trễ ±1,4 mẫu, tách hẳn; bộ ước trễ riêng của `tinyai-signal` (300–3 800 Hz, cửa sổ 0,4 s) chỉ ra −0,8 / +0,6 mẫu và chồng lên nhau. `vad` của lối ra nghe tiếng đã qua cổng: cổng dìm ghế kia là `vad` tắt, `doa` thôi dò, cổng kẹt, và bản ghép A/B không tách được gì. Quyết định thô, không phần kéo dài, vì lúc khởi động phần kéo dài báo có tiếng 0,26 s trên nhiễu điện chung của hai micro, mà `doa` đọc ra 88° với độ tin 112–125 |
 | Cổng | ghế j, đánh số theo τ tăng dần, nhận `σ(2s(τ − b_{j−1})) − σ(2s(τ − b_j))`: σ là hàm logistic, `s` là `gate_slope` 20 mỗi mẫu trễ, `b` các ranh giới, hai đầu ±∞ | các cổng cộng lại đúng 1 nên hai lối ra bù nhau; 20 mỗi mẫu là độ dốc của `tinyai-signal`, cách ranh giới 0,1 mẫu đã qua 98% |
 | Lối ra | lối ra 0 là trộn trần (trung bình hai kênh) nhân cổng của ghế giữ, lối ra 1 là trộn trần nhân phần còn lại | trộn trần là đường gốc của §3.2, nên E8-T4 đo đúng phần cổng thêm vào |
+| Số ghế | mỗi ghế giữ một số 0…`seats_max`−1 từ lúc được nhận tới lúc bị quên. Lần phân cụm nhận thêm ghế ghép từng ghế cũ, theo τ tăng dần, với tâm mới gần nó nhất chưa ghế nào lấy; ghế mới lấy số nhỏ nhất còn trống, theo τ tăng dần. Khi chưa có hai ghế, và ở FIXED, số 0 là phía τ < 0 (trên 90°), số 1 là phía τ > 0. Cổng của từng số đặt ở mỗi lần dò và giữ nguyên giữa hai lần dò, như cổng của ghế giữ; module trả cổng và hướng của mọi số | lối ra theo từng ghế (`test_apps/bss_live`) nghe được một người qua cả buổi, kể cả khi LEARN nhận thêm ghế xen giữa hai ghế cũ |
 | FIXED, `mode` 0 (mặc định) | hai ghế, ranh giới b = 0 (90°, trục vuông góc của cặp micro); ghế giữ là phía chứa `keep_deg` | biết trước người ra lệnh ngồi phía nào thì tách ngay từ lần dò đầu |
 | LEARN, `mode` 1 | ghế phân cụm từ chính các lần dò, tối đa `seats_max` ghế; ghế giữ theo `keep_rule`: 0 là ghế có tâm gần `keep_deg` nhất, 1 là ghế được gán nhiều lần dò nhất kể từ lúc nhận, bắt đầu từ số đếm trong cửa sổ; trước khi có hai ghế, ghế giữ là phía của `keep_deg` | hai người ngồi cùng một phía của board, hay không biết trước ai ngồi đâu |
 
@@ -2406,6 +2407,7 @@ firmware/
 │   ├── soak/                         # chạy dài, đếm khung mất, theo dõi heap
 │   ├── capture/                      # ★ app chỉ thu: đẩy thô ch0 ch1 ref về máy để lấy dữ liệu
 │   ├── calib/                        # ★ hiệu chuẩn balance và trễ tham chiếu, ghi NVS
+│   ├── bss_live/                     # tách trực tiếp: chuỗi bss trên tiếng thu, mỗi ghế một kênh về host/ (§3.8, §7.4)
 │   └── espsr_compare/                # chỗ DUY NHẤT link espressif/esp-sr (§3.16, §4.5.1): AFE của ESP-SR và dsp_afe
 │       ├── main/{idf_component.yml, Kconfig.projbuild, job_format.h, *.c}   # esp-sr ghim ở đây; khuôn việc
 │       │                             #   và kết quả qua TCP một chỗ, cổng TCP ở Kconfig
@@ -2642,6 +2644,7 @@ sinh ra chỗ hở sau, mãi: ghi `set.json` 222 ms làm board bỏ 76% khung kh
 | Chạy dài | `test_apps/soak/` | 30 phút cho Cửa 5, 8 giờ trước khi báo cáo |
 | Thu dữ liệu | `test_apps/capture/` | đẩy thô về `host/` |
 | Hiệu chuẩn | `test_apps/calib/` | ghi NVS `calib/*` |
+| Tách trực tiếp | `test_apps/bss_live/` | `make bss-live`: board thu hai micro và chạy chuỗi `bss` từng bước như `dsp_afe`, chế độ, số ghế, luật giữ và chỗ đặt `ns` nhận lúc chạy; luồng `mode` 6–8 về `srhost.stream_rx`, mỗi ghế một WAV, dòng trạng thái mỗi giây qua `test_report` |
 | So với ESP-SR | `test_apps/espsr_compare/` | `make espsr-compare`: `esptool write_flash` ảnh model của ESP-SR, board nối Wi-Fi và mở cổng TCP, máy tính gửi từng mục của bàn so §3.16 và nhận lối ra của mọi biến thể kèm CRC32 thành `<biến thể>.wav`, app in chi phí qua `test_report`; số vào `docs/measurements/afe/compare.md` |
 
 Case cần người đứng nói gắn tag `[manual]`; vòng tự động bỏ qua, như repo face attendance.
@@ -3381,6 +3384,14 @@ Chỉ để **thu dữ liệu và gỡ lỗi**. Tắt mặc định, không có 
 | 3 | thô `ch0 ch1 ref` | 96 KB/s |
 | 4 | thô `ch0 ch1 ref` + sạch | 128 KB/s |
 | 5 | thô `ch0 ch1` + sạch | 96 KB/s |
+| 6 | thô `ch0 ch1` + `seat0 seat1` | 128 KB/s |
+| 7 | thô `ch0 ch1` + `seat0`…`seat2` | 160 KB/s |
+| 8 | thô `ch0 ch1` + `seat0`…`seat3` | 192 KB/s |
+
+`mode` 6–8 là lối ra theo ghế của `bss` (§3.8), một kênh cho mỗi số ghế tới `seats_max`, chỉ `test_apps/bss_live` mở.
+Kênh `seat<n>` là trộn trần sau `balance` nhân cổng của số n rồi tổng hợp; số không có ghế ở lần dò gần nhất thì im.
+`ns`, nếu bật, chạy một lần trên trộn trần trước cổng (`mean`), hoặc riêng trên từng kênh sau cổng như chuỗi sản phẩm
+(`each`): sau cổng, `ns` thấy cả quãng ghế mình bị dìm và hạ ước lượng sàn nhiễu theo.
 
 `mode` 5 là `mode` 4 cho board không có loa: không có `ref` thì `mode` 4 không mở được, mà so vào với ra
 trên cùng một bước (E5-T11, rồi từng module của E7–E9) cần cả hai trong một khung.
