@@ -42,7 +42,7 @@ bss:                                # direction gate on doa's angle (KEHOACH 3.8
   seat_follow: 0.25                 # LEARN: share of the way a seat's centre moves to its peak at each recheck
   boundary_share_min: 0.2           # LEARN: least share of the gap the boundary at the density's low point leaves a seat
   boundary_follow: 0.25             # LEARN: share of the way a boundary moves to the density's low point at each recheck
-  seat_forget_s: 60.0               # LEARN: a seat no update has reached this long is dropped
+  seat_forget_s: 60.0               # LEARN: speech a seat may go without an update; LEARN keeps two seats
   history_s: 0.0                    # delayed output: seconds of held angles kept for old hops; product 0
   lookahead_s: 0.1                  # delayed output: an old hop's gate takes the angle held this long after it; 0.15 s and more lose turn ends when talkers answer without a pause
 ns:
