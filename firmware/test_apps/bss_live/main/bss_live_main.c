@@ -701,9 +701,9 @@ static void print_status(void)
     test_report_line(
         "t %.1f %s %u seats %u deg %d,%d,%d,%d gate %.2f,%.2f,%.2f,%.2f us %.0f/%.0f dropped %" PRIu32,
         (double)((float)hops / hops_per_s), recording ? "left" : "flush",
-        (unsigned)ceilf((float)ahead / hops_per_s), (unsigned)seats, angle_deg[0], angle_deg[1], angle_deg[2],
-        angle_deg[3], (double)gate[0], (double)gate[1], (double)gate[2], (double)gate[3], (double)mean_us,
-        (double)((float)peak / per_us), svc_report_stream_dropped());
+        (unsigned)lrintf((float)ahead / hops_per_s), (unsigned)seats, angle_deg[0], angle_deg[1],
+        angle_deg[2], angle_deg[3], (double)gate[0], (double)gate[1], (double)gate[2], (double)gate[3],
+        (double)mean_us, (double)((float)peak / per_us), svc_report_stream_dropped());
 }
 
 static void drain(void)
