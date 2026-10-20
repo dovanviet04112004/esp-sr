@@ -949,17 +949,28 @@ def bss_track(rng: np.random.Generator, plan: list[tuple[int, float | None]], co
     return np.array(angle, dtype=np.int32), np.array(conf, dtype=np.uint8), np.array(searched, dtype=bool)
 
 
-def bss_case(x0: np.ndarray, x1: np.ndarray, track: tuple, cfg: bss.BssConfig) -> dict[str, np.ndarray]:
-    """One pair of bins every hop, doa per hop and the configuration; the gate, seats and directions after each hop,
-    and both outputs of the last."""
+def bss_case(
+    x0: np.ndarray, x1: np.ndarray, track: tuple, cfg: bss.BssConfig, by_rank: bool = False
+) -> dict[str, np.ndarray]:
+    """One pair of bins every hop, doa per hop and the configuration; the gate, seats, directions and every seat
+    number's gate and degrees after each hop, and both outputs of the last. by_rank numbers the seats by rising delay
+    instead of keeping them, as a negative control."""
     angle, conf, searched = track
     separator = bss.Bss(cfg)
-    gate, seats, dirs = [], [], []
+    gate, seats, dirs, number_gate, number_deg = [], [], [], [], []
     for h in range(len(angle)):
         y0, y1 = separator.process(x0, x1, int(angle[h]), int(conf[h]), bool(searched[h]))
         gate.append(separator.gate)
         seats.append(separator.seats)
         dirs.append(separator.directions())
+        gates, degrees = separator.numbered()
+        if by_rank and separator.seats >= 2:
+            held = separator.number[: separator.seats]
+            spare = bss.SEATS_CAP - separator.seats
+            gates = [gates[n] for n in held] + [np.float32(0.0)] * spare
+            degrees = [degrees[n] for n in held] + [-1] * spare
+        number_gate.append(gates)
+        number_deg.append(degrees)
     return {
         "config": np.array([getattr(cfg, f) for f in BSS_FIELDS], dtype=np.float32),
         "bins0": _pairs(x0[None]),
@@ -970,6 +981,8 @@ def bss_case(x0: np.ndarray, x1: np.ndarray, track: tuple, cfg: bss.BssConfig) -
         "gate": np.array(gate, dtype=np.float32),
         "seats": np.array(seats, dtype=np.uint8),
         "directions": np.array(dirs, dtype=np.int32),
+        "number_gate": np.array(number_gate, dtype=np.float32),
+        "number_deg": np.array(number_deg, dtype=np.int32),
         "out0": _pairs(y0[None]),
         "out1": _pairs(y1[None]),
     }
@@ -995,7 +1008,8 @@ def _bss_inputs(rng: np.random.Generator) -> list[tuple[tuple, bss.BssConfig]]:
 
 
 def emit_bss(root: Path) -> list[Path]:
-    """Four cases, then a negative control: the one-side case's gates as the broadside split gives them."""
+    """Four cases, then two negative controls: the one-side case's gates as the broadside split gives them, and the
+    three-seat case with its seats numbered by rising delay."""
     rng = np.random.default_rng(SEED + 12)
     x0 = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
     x1 = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
@@ -1007,9 +1021,15 @@ def emit_bss(root: Path) -> list[Path]:
         written.append(path)
     track, cfg = cases[3]
     negative = bss_case(x0, x1, track, cfg)
-    negative["gate"] = bss_case(x0, x1, track, replace(cfg, mode=bss.MODE_FIXED))["gate"]
+    broadside = bss_case(x0, x1, track, replace(cfg, mode=bss.MODE_FIXED))
+    for name in ("gate", "number_gate", "number_deg"):
+        negative[name] = broadside[name]
     path = root / "bss" / "case_neg_000.gold"
     write_gold(path, negative)
+    written.append(path)
+    track, cfg = cases[2]
+    path = root / "bss" / "case_neg_001.gold"
+    write_gold(path, bss_case(x0, x1, track, cfg, by_rank=True))
     written.append(path)
     return written
 
