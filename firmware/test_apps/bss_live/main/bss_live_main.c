@@ -73,6 +73,7 @@
 #define UART_RX_BYTES 1024
 #define REPORT_SPARE_LINES 16
 #define PORT_MAX 65535
+#define STOP_LINE "stop"
 
 typedef enum {
     NS_OFF = 0,
@@ -106,7 +107,8 @@ static struct {
     uint32_t back_hops;                            // the delay less the lookahead
     dsp_spec_cplx_t (*late_mean)[GEN_GRID_N_BINS]; // PSRAM ring, slot hop % delay_hops
     int16_t (*late_raw)[GEN_GRID_HOP_SAMPLES * N_MICS];
-    bool heard; // raw decision of vad_in on the last hop
+    bool heard;    // raw decision of vad_in on the last hop
+    bool stopping; // stop is taken: the run ends once the ring is out
     bool in_psram;
     const dsp_afe_calib_t *calib;
     dsp_spec_fft_t *fft;
@@ -144,10 +146,13 @@ static struct {
     uint8_t seats;
     float gate[SEATS_MAX];
     int16_t angle_deg[SEATS_MAX];
+    uint32_t heard_end; // hops recorded, then hops_total once the ring is out
+    uint32_t hops_total;
 } s_stats;
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static atomic_bool s_running;
+static atomic_bool s_stop_asked;
 static TaskHandle_t s_waiter;
 static StreamBufferHandle_t s_sb;
 
@@ -248,7 +253,7 @@ static bool parse_job(char *line, job_t *job)
     return seen == FIELDS && (job->mode == DSP_AFE_BSS_LEARN || job->seats == SEATS_MIN);
 }
 
-// The console UART takes its driver only while the job is read; test_report_serve installs it again later.
+// The console keeps a UART driver from the job to the run's end, for stop; test_report_serve reinstalls it.
 static void read_job(job_t *job)
 {
     ESP_ERROR_CHECK(uart_driver_install(CONFIG_ESP_CONSOLE_UART_NUM, UART_RX_BYTES, 0, 0, NULL, 0));
@@ -263,8 +268,31 @@ static void read_job(job_t *job)
         if (parse_job(line, job)) { break; }
         test_report_line("refused: a job names mode, seats, ns, seconds, delay_ms, host and port once each");
     }
+}
+
+static void release_console(void)
+{
     uart_vfs_dev_use_nonblocking(CONFIG_ESP_CONSOLE_UART_NUM);
     ESP_ERROR_CHECK(uart_driver_delete(CONFIG_ESP_CONSOLE_UART_NUM));
+}
+
+// Whether a whole "stop" line has come in on the console since the last call; never waits.
+static bool stop_typed(void)
+{
+    static char line[JOB_BYTES];
+    static size_t used;
+    uint8_t byte = 0;
+    while (uart_read_bytes(CONFIG_ESP_CONSOLE_UART_NUM, &byte, 1, 0) == 1) {
+        if (byte != '\n' && byte != '\r') {
+            if (used + 1 < sizeof(line)) { line[used++] = (char)byte; }
+            continue;
+        }
+        line[used] = '\0';
+        const bool stop = strcmp(line, STOP_LINE) == 0;
+        used = 0;
+        if (stop) { return true; }
+    }
+    return false;
 }
 
 static bool join_wifi(EventGroupHandle_t system, const char *device_id, char *ip, size_t cap)
@@ -526,7 +554,17 @@ static void account(uint32_t cycles, const float *gate, const int16_t *angle_deg
     s_stats.seats = seats;
     memcpy(s_stats.gate, gate, sizeof(s_stats.gate));
     memcpy(s_stats.angle_deg, angle_deg, sizeof(s_stats.angle_deg));
+    s_stats.heard_end = s_chain.hops_total - s_chain.delay_hops;
+    s_stats.hops_total = s_chain.hops_total;
     taskEXIT_CRITICAL(&s_lock);
+}
+
+// The run ends once the ring has let out the last hop heard ahead of the stop.
+static void stop_after_flush(void)
+{
+    s_chain.stopping = true;
+    const uint32_t end = s_chain.hop + s_chain.delay_hops;
+    if (end < s_chain.hops_total) { s_chain.hops_total = end; }
 }
 
 static void sach_task(void *arg)
@@ -537,6 +575,7 @@ static void sach_task(void *arg)
         uint32_t seq = 0;
         const bool got = drv_audio_read_frame(s_chain.raw, &seq, DMA_WAIT_MS) == ESP_OK;
         if (got && atomic_load(&s_running)) {
+            if (atomic_load(&s_stop_asked) && !s_chain.stopping) { stop_after_flush(); }
             float gate[SEATS_MAX];
             int16_t angle_deg[SEATS_MAX];
             uint8_t seats = 0;
@@ -576,17 +615,23 @@ static void print_status(void)
     int16_t angle_deg[SEATS_MAX];
     memcpy(gate, s_stats.gate, sizeof(gate));
     memcpy(angle_deg, s_stats.angle_deg, sizeof(angle_deg));
+    const uint32_t heard_end = s_stats.heard_end;
+    const uint32_t total = s_stats.hops_total;
     s_stats.window_hops = 0;
     s_stats.window_cycles = 0;
     s_stats.window_peak = 0;
     taskEXIT_CRITICAL(&s_lock);
     const float per_us = (float)esp_rom_get_cpu_ticks_per_us();
     const float mean_us = window > 0 ? (float)cycles / (float)window / per_us : 0.0f;
-    test_report_line("t %.1f seats %u deg %d,%d,%d,%d gate %.2f,%.2f,%.2f,%.2f us %.0f/%.0f dropped %" PRIu32,
-                     (double)((float)hops / ((float)GEN_GRID_SAMPLE_RATE_HZ / GEN_GRID_HOP_SAMPLES)),
-                     (unsigned)seats, angle_deg[0], angle_deg[1], angle_deg[2], angle_deg[3], (double)gate[0],
-                     (double)gate[1], (double)gate[2], (double)gate[3], (double)mean_us,
-                     (double)((float)peak / per_us), svc_report_stream_dropped());
+    const float hops_per_s = (float)GEN_GRID_SAMPLE_RATE_HZ / GEN_GRID_HOP_SAMPLES;
+    const bool recording = hops < heard_end;
+    const uint32_t ahead = recording ? heard_end - hops : (total > hops ? total - hops : 0);
+    test_report_line(
+        "t %.1f %s %u seats %u deg %d,%d,%d,%d gate %.2f,%.2f,%.2f,%.2f us %.0f/%.0f dropped %" PRIu32,
+        (double)((float)hops / hops_per_s), recording ? "left" : "flush",
+        (unsigned)ceilf((float)ahead / hops_per_s), (unsigned)seats, angle_deg[0], angle_deg[1], angle_deg[2],
+        angle_deg[3], (double)gate[0], (double)gate[1], (double)gate[2], (double)gate[3], (double)mean_us,
+        (double)((float)peak / per_us), svc_report_stream_dropped());
 }
 
 static void drain(void)
@@ -689,12 +734,17 @@ void app_main(void)
         if (err == ESP_OK) {
             while (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(STATUS_PERIOD_MS)) == 0) {
                 print_status();
+                if (!atomic_load(&s_stop_asked) && stop_typed()) {
+                    atomic_store(&s_stop_asked, true);
+                    test_report_line("stop asked: the delayed output flushes, then the stream closes");
+                }
             }
             print_status();
             drain();
         } else {
             test_report_line("run refused: %s", esp_err_to_name(err));
         }
+        release_console();
     }
     summarise();
     test_report_line("done");

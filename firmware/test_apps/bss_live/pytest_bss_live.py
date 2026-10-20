@@ -1,9 +1,8 @@
 """Live bss on board B, one WAV per seat (E8-T5, KEHOACH 3.8, 7.4): make bss builds and flashes the app, then runs this.
 
-Once the board is on Wi-Fi it asks mode, seats, ns, seconds and the output's delay, from the limits the board prints
-(BSS_LIVE_MODE, _SEATS, _NS, _SECONDS, _DELAY answer ahead), starts srhost.stream_rx in Docker, sends the job and shows
-the board's status each second. WAVs, status.txt and job.json land in
-$SRPIPE_DATA_ROOT/cache/bss_live/<time>_<mode>_<seats>_<ns>_d<delay>/, never in the repo.
+Asks mode, seats, ns, seconds and delay from the limits the board prints (BSS_LIVE_MODE, _SEATS, _NS, _SECONDS, _DELAY
+answer ahead), starts srhost.stream_rx in Docker, sends the job and shows the board's status each second, seconds left
+first; Enter stops early and the receiver ends between frames. WAVs land in $SRPIPE_DATA_ROOT/cache/bss_live/<run>/.
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ DEFAULTS = {"mode": "learn", "seats": "2", "ns": "mean", "seconds": "30", "delay
 NS_HELP = {"off": "no noise suppression", "mean": "once on the mean, before the gates", "each": "on each seat"}
 BOOT_TIMEOUT_S = 90
 LISTEN_TIMEOUT_S = 180
-RECEIVER_SLACK_S = 60
+RECEIVER_GRACE_S = 10  # after the board's last line, for the last frames
 DELAY_STEPS_PER_S = 2  # the menu offers the delay in 0.5 s steps
 SUMMARY_FILE = "stream.json"  # what srhost.stream_rx writes beside the WAVs
 LINE = rf"{TAG} \d+ ([^\r\n]*?) crc=[0-9a-f]{{8}}"
@@ -142,12 +141,26 @@ def receiver(out: Path, port: int, seconds: int) -> Iterator[subprocess.Popen]:
         yield proc
     finally:
         try:
-            proc.wait(timeout=seconds + RECEIVER_SLACK_S)
+            proc.wait(timeout=RECEIVER_GRACE_S)
         except subprocess.TimeoutExpired:
-            subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
+            # Stopped early, it waits for audio that never comes; SIGTERM ends it between frames, WAVs closed.
+            subprocess.run(["docker", "stop", "-t", str(RECEIVER_GRACE_S), CONTAINER], capture_output=True, check=False)
+            try:
+                proc.wait(timeout=RECEIVER_GRACE_S)
+            except subprocess.TimeoutExpired:
+                subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True, check=False)
         while not lines.empty():
             seen.append(lines.get())
         print("".join(line for line in seen if "frames" in line or "gap" in line), end="")
+
+
+def stop_on_enter(dut) -> None:
+    """Send stop to the board once Enter is pressed; a piped or closed stdin sends nothing."""
+    if sys.stdin is None or not sys.stdin.isatty():
+        return
+    if sys.stdin.readline():
+        dut.write("stop\n")
+        print("stopping: board B lets out what it heard, then closes the stream")
 
 
 @pytest.mark.esp32s3
@@ -168,12 +181,13 @@ def test_bss_live(dut) -> None:
     out.mkdir(parents=True)
     (out / "job.json").write_text(json.dumps(job, indent=2) + "\n", encoding="utf-8")
     with receiver(out, port, int(job["seconds"])):
-        print(f"talk for {job['seconds']} s, one at a time, from different directions around board B")
+        print(f"talk for {job['seconds']} s, one at a time, from different directions around board B; Enter stops")
         if job["delay"] != "0":
             print(f"the WAVs trail the room by {job['delay']} s: board B listens that much longer")
         delay = {"delay_ms": round(float(job["delay"]) * 1000)}
         fields = {**{k: v for k, v in job.items() if k != "delay"}, **delay, "host": host, "port": port}
         dut.write("job " + " ".join(f"{k}={v}" for k, v in fields.items()) + "\n")
+        threading.Thread(target=stop_on_enter, args=(dut,), daemon=True).start()
         texts = collect(dut, TAG)
     (out / "status.txt").write_text("\n".join(texts) + "\n", encoding="utf-8")
     stream = json.loads((out / SUMMARY_FILE).read_text(encoding="utf-8")) if (out / SUMMARY_FILE).exists() else {}
