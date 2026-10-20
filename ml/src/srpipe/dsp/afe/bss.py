@@ -2,8 +2,8 @@
 
 Mirror of firmware/components/dsp_afe/src/bss.c in float32, after tinyai-signal's micarray separation: each counted doa
 angle becomes a delay and sets the kept seat's gate, one factor for the whole mean; logistic by series in double.
-Mode 0 splits two seats at broadside; mode 1 clusters the last decision_s of speech into up to seats_max seats, each
-holding one number from the clustering that takes it to the hop it is forgotten.
+Mode 0 splits two seats at broadside; mode 1 finds seats as peaks of the delay density of the last decision_s of speech,
+up to seats_max, each holding one number from the recheck that takes it to the hop it is forgotten.
 """
 
 from __future__ import annotations
@@ -19,11 +19,11 @@ from srpipe.generated import afe, array, grid
 f32 = np.float32
 ANGLES = 181  # every whole degree doa reports, 0 .. 180
 SEATS_CAP = 4  # seats one separator holds; seats_max may not pass it
+BINS_PER_GAP_CAP = 64  # finer bins than this buy nothing at doa's 2 deg grid
 MODE_FIXED, MODE_LEARN = 0, 1
 KEEP_ANGLE, KEEP_MOST = 0, 1
 LOGISTIC_REACH = 40.0  # past this the logistic is 0 or 1 in float32
 EXP_SPLIT = 8.0  # e^y as (e^(y/8))^8, the series kept within |x| <= 5
-EXP_SERIES_REACH = 5.0
 GATE_START = f32(0.5)
 RISING = range(ANGLES - 1, -1, -1)  # degrees by rising delay: cos falls as the angle grows
 
@@ -33,24 +33,24 @@ class BssConfig:
     """Field for field as dsp_afe_bss_config_t."""
 
     mode: int = afe.BSS_MODE
-    keep_deg: float = afe.BSS_KEEP_DEG
     keep_rule: int = afe.BSS_KEEP_RULE
+    keep_deg: float = afe.BSS_KEEP_DEG
     gate_slope: float = afe.BSS_GATE_SLOPE
     conf_min: int = afe.BSS_CONF_MIN
     seats_max: int = afe.BSS_SEATS_MAX
     decision_s: float = afe.BSS_DECISION_S
     recheck_s: float = afe.BSS_RECHECK_S
     first_speech_s: float = afe.BSS_FIRST_SPEECH_S
-    kmeans_rounds: int = afe.BSS_KMEANS_ROUNDS
     confirm: int = afe.BSS_CONFIRM
     occupancy_min: float = afe.BSS_OCCUPANCY_MIN
-    valley_max: float = afe.BSS_VALLEY_MAX
-    valley_width: float = afe.BSS_VALLEY_WIDTH
     min_gap: float = afe.BSS_MIN_GAP
+    bins_per_gap: int = afe.BSS_BINS_PER_GAP
+    smooth_bins: int = afe.BSS_SMOOTH_BINS
+    prominence: float = afe.BSS_PROMINENCE
+    core_share: float = afe.BSS_CORE_SHARE
+    seat_follow: float = afe.BSS_SEAT_FOLLOW
     boundary_share_min: float = afe.BSS_BOUNDARY_SHARE_MIN
     boundary_follow: float = afe.BSS_BOUNDARY_FOLLOW
-    track_tau_s: float = afe.BSS_TRACK_TAU_S
-    track_gate: float = afe.BSS_TRACK_GATE
     seat_forget_s: float = afe.BSS_SEAT_FORGET_S
     update_every_hops: int = afe.DOA_UPDATE_EVERY_HOPS
     spacing_m: float = array.SPACING_M
@@ -76,23 +76,23 @@ def check(cfg: BssConfig) -> None:
         and c["decision_s"] > 0.0
         and c["recheck_s"] > 0.0
         and 0.0 < c["first_speech_s"] <= c["decision_s"]
-        and c["kmeans_rounds"] >= 1
         and c["confirm"] >= 1
         and 0.0 <= c["occupancy_min"] < 1.0
-        and c["valley_max"] > 0.0
-        and 0.0 < c["valley_width"] < 0.5
         and c["min_gap"] > 0.0
+        and 1 <= c["bins_per_gap"] <= BINS_PER_GAP_CAP
+        and 0 <= c["smooth_bins"] <= c["bins_per_gap"]
+        and 0.0 < c["prominence"] <= 1.0
+        and 0.0 < c["core_share"] <= 0.5
+        and 0.0 <= c["seat_follow"] <= 1.0
         and 0.0 <= c["boundary_share_min"] <= 0.5
         and 0.0 <= c["boundary_follow"] <= 1.0
-        and c["track_tau_s"] > 0.0
-        and c["track_gate"] > 0.0
         and c["seat_forget_s"] > 0.0
         and c["update_every_hops"] >= 1
         and c["spacing_m"] > 0.0
         and c["speed_of_sound_m_s"] > 0.0
         and c["history_s"] >= 0.0
     )
-    if not ok or update_s(cfg) / c["track_tau_s"] > EXP_SERIES_REACH:
+    if not ok:
         raise ValueError(f"bad bss configuration {cfg}")
 
 
@@ -127,18 +127,6 @@ def nearest(value: np.float32, centres: list) -> int:
     return at
 
 
-def sort_rising(c: list) -> list:
-    """Insertion sort, as the C side does on at most SEATS_CAP centres."""
-    out = list(c)
-    for i in range(1, len(out)):
-        v, j = out[i], i - 1
-        while j >= 0 and out[j] > v:
-            out[j + 1] = out[j]
-            j -= 1
-        out[j + 1] = v
-    return out
-
-
 class Bss:
     """One separator; the gate starts at one half on both outputs and LEARN starts with no seats."""
 
@@ -160,16 +148,19 @@ class Bss:
         self.recheck_hops = rounded(float(f32(c.recheck_s)) / hop_s)
         self.forget_hops = rounded(float(f32(c.seat_forget_s)) / hop_s)
         self.history = math.floor(float(f32(c.history_s)) / hop_s + 0.5)
-        self.rate = f32(1.0 - exp_series(-speech_s / float(f32(c.track_tau_s))))
-        self.occupancy, self.valley_max, self.valley_width = (
-            f32(c.occupancy_min),
-            f32(c.valley_max),
-            f32(c.valley_width),
-        )
+        self.occupancy = f32(c.occupancy_min)
         self.min_gap, self.half_gap = f32(c.min_gap), f32(f32(0.5) * f32(c.min_gap))
         self.share_lo = f32(c.boundary_share_min)
         self.share_hi = f32(f32(1.0) - self.share_lo)
-        self.follow, self.track_gate = f32(c.boundary_follow), f32(c.track_gate)
+        self.follow, self.seat_follow = f32(c.boundary_follow), f32(c.seat_follow)
+        self.prominence = f32(c.prominence)
+        self.width = float(self.min_gap) / c.bins_per_gap
+        self.lo = -float(self.delay[0])
+        self.n_bins = math.floor(2.0 * float(self.delay[0]) / self.width) + 1
+        self.bin_of = [
+            min(self.n_bins - 1, math.floor((float(self.delay[d]) - self.lo) / self.width)) for d in range(ANGLES)
+        ]
+        self.core = float(self.min_gap) * float(f32(c.core_share))
         self.reset()
 
     def reset(self) -> None:
@@ -184,7 +175,8 @@ class Bss:
         self.seen = [0] * SEATS_CAP
         self.votes = [0] * SEATS_CAP
         self.number = [0] * SEATS_CAP
-        self.pending = self.agree = 0
+        self.agree = 0
+        self.candidates: list = []
         self.gate = GATE_START
         self.shares = [GATE_START, GATE_START] + [f32(0.0)] * (SEATS_CAP - 2)
         self.last_angle = -1
@@ -199,7 +191,7 @@ class Bss:
             if counted:
                 self._count(angle_deg)
                 if self.seats >= 2:
-                    self._track(self.delay[angle_deg])
+                    self._mark(self.delay[angle_deg])
             self._forget()
             self.since += 1
             if self.since >= self.recheck_hops and self.filled >= self.first:
@@ -256,18 +248,6 @@ class Bss:
         self.hist[angle] += 1
         self.head = (self.head + 1) % self.window
 
-    def _track(self, delay: np.float32) -> None:
-        c = self.centres
-        j = nearest(delay, c[: self.seats])
-        if abs(f32(delay - c[j])) <= self.track_gate:
-            c[j] = f32(c[j] + f32(self.rate * f32(delay - c[j])))
-            for i in range(self.seats - 1):
-                if f32(c[i + 1] - c[i]) < self.min_gap:
-                    mid = f32(f32(0.5) * f32(c[i] + c[i + 1]))
-                    c[i], c[i + 1] = f32(mid - self.half_gap), f32(mid + self.half_gap)
-            self.seen[j] = self.hop
-            self.votes[j] += 1
-
     def _forget(self) -> None:
         i = 0
         while i < self.seats and self.seats >= 2:
@@ -286,107 +266,208 @@ class Bss:
         if self.seats < 2:
             self.seats = 0
 
-    def _density(self, at: np.float32, width: np.float32) -> int:
-        return sum(self.hist[d] for d in RISING if self.hist[d] > 0 and abs(f32(self.delay[d] - at)) < width)
+    def _mark(self, delay: np.float32) -> None:
+        """Count a reading for the seat whose region holds it: what keeps that seat from being forgotten."""
+        c, j = self.centres, 0
+        for i in range(self.seats - 1):
+            if delay > f32(f32(f32(0.5) * f32(c[i] + c[i + 1])) + self.offsets[i]):
+                j = i + 1
+        self.seen[j] = self.hop
+        self.votes[j] += 1
 
-    def _kmeans(self, k: int) -> tuple[list, list] | None:
-        """k centres and the offsets of their k - 1 boundaries off the midpoints, or None when the window does not
-        hold k seats."""
-        total = self.filled
-        seeds = []
-        for i in range(k):
-            target = total * (10 * (k - 1) + 80 * i) // (100 * (k - 1))
-            run = 0
-            for d in RISING:
-                run += self.hist[d]
-                if self.hist[d] > 0 and run > target:
-                    seeds.append(self.delay[d])
-                    break
-        c = seeds
-        for _ in range(self.cfg.kmeans_rounds):
-            sums, counts = [f32(0.0)] * k, [0] * k
-            for d in RISING:
-                n = self.hist[d]
-                if n == 0:
-                    continue
-                j = nearest(self.delay[d], c)
-                sums[j] = f32(sums[j] + f32(f32(n) * self.delay[d]))
-                counts[j] += n
-            c = sort_rising([f32(sums[j] / f32(counts[j])) if counts[j] > 0 else c[j] for j in range(k)])
-        squares, counts = [f32(0.0)] * k, [0] * k
-        for d in RISING:
-            n = self.hist[d]
-            if n == 0:
+    def _density(self) -> list:
+        """The window's counts binned by delay and smoothed with the integer triangular kernel."""
+        counts = [0] * self.n_bins
+        for d in range(ANGLES):
+            counts[self.bin_of[d]] += self.hist[d]
+        r = self.cfg.smooth_bins
+        s = [0] * self.n_bins
+        for i in range(self.n_bins):
+            for k in range(-r, r + 1):
+                if 0 <= i + k < self.n_bins:
+                    s[i] += (r + 1 - abs(k)) * counts[i + k]
+        return s
+
+    @staticmethod
+    def _col(s: list, p: int, step: int) -> int:
+        """Lowest density between bin p and the nearest higher bin one way, 0 when no higher bin lies that way."""
+        low, i = s[p], p
+        while 0 <= i + step < len(s):
+            i += step
+            if s[i] > s[p]:
+                return low
+            low = min(low, s[i])
+        return 0
+
+    @staticmethod
+    def _saddle(s: list, a: int, b: int) -> int:
+        """The bin of the lowest density between bins a and b, the middle one of those tied lowest."""
+        lo, hi = min(a, b), max(a, b)
+        low = min(s[lo : hi + 1])
+        tied = [i for i in range(lo, hi + 1) if s[i] == low]
+        return tied[len(tied) // 2]
+
+    def _candidates(self, s: list) -> list:
+        """(centre, peak bin) of every peak that stands out by prominence, the higher kept within min_gap, and whose
+        core holds occupancy_min of the window; the centre is the core's mean delay; rising."""
+        n = self.n_bins
+        standing = []
+        for p in range(n):
+            if s[p] == 0 or (p > 0 and s[p] <= s[p - 1]) or (p < n - 1 and s[p] < s[p + 1]):
                 continue
-            j = nearest(self.delay[d], c)
-            off = f32(self.delay[d] - c[j])
-            squares[j] = f32(squares[j] + f32(f32(n) * f32(off * off)))
-            counts[j] += n
-        least = f32(self.occupancy * f32(total))
-        if any(f32(n) < least for n in counts):
-            return None
-        spread = [f32(np.sqrt(f32(squares[j] / f32(counts[j])))) if counts[j] > 1 else f32(0.0) for j in range(k)]
-        offsets = []
-        for j in range(k - 1):
-            gap = f32(c[j + 1] - c[j])
-            mid = f32(f32(0.5) * f32(c[j] + c[j + 1]))
-            width = f32(self.valley_width * gap)
-            peaks = f32(f32(0.5) * f32(self._density(c[j], width) + self._density(c[j + 1], width)))
-            if gap < self.min_gap or not f32(self._density(mid, width)) < f32(self.valley_max * peaks):
-                return None
-            a, b = spread[j], spread[j + 1]
-            both = f32(a + b)
-            bound = mid
-            if both > 0:
-                share = f32(a / both)
-                if self.share_lo <= share <= self.share_hi:
-                    bound = f32(f32(f32(c[j] * b) + f32(c[j + 1] * a)) / both)
-                else:
-                    w = self.share_lo if share < self.share_lo else self.share_hi
-                    bound = f32(c[j] + f32(w * gap))
-            offsets.append(f32(bound - mid))
-        return c, offsets
+            saddle = max(self._col(s, p, -1), self._col(s, p, 1))
+            if f32(s[p] - saddle) >= f32(self.prominence * f32(s[p])):
+                standing.append(p)
+        chosen: list = []
+        for p in sorted(standing, key=lambda q: (-s[q], q)):
+            if all(abs(p - q) >= self.cfg.bins_per_gap for q in chosen):
+                chosen.append(p)
+        out = []
+        for p in sorted(chosen):
+            peak = self.lo + (p + 0.5) * self.width
+            mass, acc = 0, f32(0.0)
+            for d in RISING:
+                if self.hist[d] > 0 and abs(float(self.delay[d]) - peak) <= self.core:
+                    mass += self.hist[d]
+                    acc = f32(acc + f32(f32(self.hist[d]) * self.delay[d]))
+            if mass > 0 and not f32(mass) < f32(self.occupancy * f32(self.filled)):
+                out.append((f32(acc / f32(mass)), p))
+        return out
+
+    def _target(self, j: int, s: list, a: int, b: int) -> np.float32:
+        """Offset off the midpoint of seats j and j + 1 of the density's lowest point between their peaks a and b, each
+        seat keeping boundary_share_min of the gap."""
+        c = self.centres
+        cut = f32(self.lo + (self._saddle(s, a, b) + 0.5) * self.width)
+        gap = f32(c[j + 1] - c[j])
+        cut = max(cut, f32(c[j] + f32(self.share_lo * gap)))
+        cut = min(cut, f32(c[j] + f32(self.share_hi * gap)))
+        return f32(cut - f32(f32(0.5) * f32(c[j] + c[j + 1])))
+
+    def _space(self) -> None:
+        """Keep the seats rising and at least min_gap apart."""
+        c = self.centres
+        for i in range(self.seats - 1):
+            if f32(c[i + 1] - c[i]) < self.min_gap:
+                mid = f32(f32(0.5) * f32(c[i] + c[i + 1]))
+                c[i], c[i + 1] = f32(mid - self.half_gap), f32(mid + self.half_gap)
+
+    def _agrees(self, fresh: list, paired: bool) -> bool:
+        """Whether fresh centres repeat the last recheck's within half min_gap, in order when paired."""
+        if not fresh or not self.candidates:
+            return False
+        if paired:
+            return len(fresh) == len(self.candidates) and all(
+                abs(f32(u - q)) < self.half_gap for u, q in zip(fresh, self.candidates, strict=True)
+            )
+        return all(any(abs(f32(u - q)) < self.half_gap for q in self.candidates) for u in fresh)
 
     def _cluster(self) -> None:
-        found, fit = 1, None
-        for k in range(2, self.cfg.seats_max + 1):
-            got = self._kmeans(k)
-            if got is None:
-                break
-            found, fit = k, got
-        current = max(self.seats, 1)
-        if found > current:
-            self.agree = self.agree + 1 if found == self.pending else 1
-            self.pending = found
-            if self.agree >= self.cfg.confirm:
-                centres, offsets = fit
-                self.number[:found] = self._numbers(centres)
-                self.seats = found
-                self.centres[:found] = centres
-                self.offsets[: found - 1] = offsets
-                self.seen[:found] = [self.hop] * found
-                self.votes[:found] = self._window_votes()
-                self.pending = self.agree = 0
+        s = self._density()
+        cands = self._candidates(s)
+        if self.seats < 2:
+            self._first_split(s, cands)
             return
-        self.pending = self.agree = 0
-        if found == current and current >= 2:
-            _, offsets = fit
-            for j in range(current - 1):
-                self.offsets[j] = f32(self.offsets[j] + f32(self.follow * f32(offsets[j] - self.offsets[j])))
+        held = self.centres[: self.seats]
+        match = [-1] * self.seats
+        new = []
+        for ci, (c, _) in enumerate(cands):
+            j = nearest(c, held)
+            dist = abs(f32(c - held[j]))
+            if not dist < self.min_gap:
+                new.append(ci)
+            elif match[j] < 0 or dist < abs(f32(cands[match[j]][0] - held[j])):
+                match[j] = ci
+        for j in range(self.seats):
+            if match[j] >= 0:
+                self.centres[j] = f32(
+                    self.centres[j] + f32(self.seat_follow * f32(cands[match[j]][0] - self.centres[j]))
+                )
+        self._space()
+        room = self.cfg.seats_max - self.seats
+        vacant = [j for j in range(self.seats) if match[j] < 0]
+        if new and (room > 0 or vacant):
+            fresh = [cands[ci][0] for ci in new]
+            self.agree = self.agree + 1 if self._agrees(fresh, paired=False) else 1
+            self.candidates = fresh
+            if self.agree >= self.cfg.confirm:
+                bins = [cands[m][1] if m >= 0 else -1 for m in match]
+                if room > 0:
+                    self._take([cands[ci] for ci in new[:room]], s, bins)
+                else:
+                    self._move([cands[ci] for ci in new], vacant, s, bins)
+                self.agree, self.candidates = 0, []
+            return
+        self.agree, self.candidates = 0, []
+        for j in range(self.seats - 1):
+            if match[j] >= 0 and match[j + 1] >= 0:
+                target = self._target(j, s, cands[match[j]][1], cands[match[j + 1]][1])
+                self.offsets[j] = f32(self.offsets[j] + f32(self.follow * f32(target - self.offsets[j])))
 
-    def _numbers(self, centres: list) -> list:
-        """Numbers of the seats a clustering takes: each held seat, by rising delay, hands its number to the nearest
-        centre still free; the other centres take the smallest numbers left, by rising delay."""
-        numbers = [-1] * len(centres)
-        for i in range(self.seats):
-            best, at = None, 0
-            for j, c in enumerate(centres):
-                d = abs(f32(c - self.centres[i]))
-                if numbers[j] < 0 and (best is None or d < best):
-                    best, at = d, j
-            numbers[at] = self.number[i]
-        free = (n for n in range(self.cfg.seats_max) if n not in numbers)
-        return [n if n >= 0 else next(free) for n in numbers]
+    def _first_split(self, s: list, cands: list) -> None:
+        """Seats from two or more candidates seen alike on confirm rechecks in a row, numbered by rising delay; with
+        more candidates than seats, only once the ones left out stand below (1 - prominence) of the lowest one kept."""
+        if len(cands) < 2:
+            self.agree, self.candidates = 0, []
+            return
+        if len(cands) > self.cfg.seats_max:
+            order = sorted(range(len(cands)), key=lambda i: (-s[cands[i][1]], i))
+            tall, rest = order[: self.cfg.seats_max], order[self.cfg.seats_max :]
+            lowest = s[cands[tall[-1]][1]]
+            if f32(s[cands[rest[0]][1]]) > f32(f32(f32(1.0) - self.prominence) * f32(lowest)):
+                self.agree, self.candidates = 0, []
+                return
+            cands = [cands[i] for i in sorted(tall)]
+        fresh = [c for c, _ in cands]
+        self.agree = self.agree + 1 if self._agrees(fresh, paired=True) else 1
+        self.candidates = fresh
+        if self.agree < self.cfg.confirm:
+            return
+        self.seats = len(cands)
+        for j, (c, _) in enumerate(cands):
+            self.centres[j], self.number[j], self.seen[j] = c, j, self.hop
+        self.votes[: self.seats] = self._window_votes()
+        for j in range(self.seats - 1):
+            self.offsets[j] = self._target(j, s, cands[j][1], cands[j + 1][1])
+        self.agree, self.candidates = 0, []
+
+    def _move(self, fresh: list, vacant: list, s: list, held_bins: list) -> None:
+        """With every seat taken, move each seat no peak of its own sits near to the nearest fresh (centre, bin)
+        candidate, keeping its number: a seat placed off its talker, or a talker gone and another come."""
+        for c, b in fresh:
+            if not vacant:
+                break
+            j = vacant[nearest(c, [self.centres[v] for v in vacant])]
+            vacant.remove(j)
+            self.centres[j], self.seen[j], held_bins[j] = c, self.hop, b
+        rows = sorted(range(self.seats), key=lambda j: float(self.centres[j]))
+        order = [(self.centres[j], self.number[j], self.seen[j], self.votes[j], held_bins[j]) for j in rows]
+        for j, (c, n, seen, votes, _) in enumerate(order):
+            self.centres[j], self.number[j], self.seen[j], self.votes[j] = c, n, seen, votes
+        self._space()
+        for j in range(self.seats - 1):
+            a, b = order[j][4], order[j + 1][4]
+            self.offsets[j] = self._target(j, s, a, b) if a >= 0 and b >= 0 else f32(0.0)
+
+    def _take(self, fresh: list, s: list, held_bins: list) -> None:
+        """Seat fresh (centre, bin) candidates beside the held seats, which keep centre, number and counts; fresh ones
+        take the smallest free numbers; a boundary between two seats with peaks in the window sits at its low point."""
+        rows = [(self.centres[j], self.number[j], self.seen[j], self.votes[j], held_bins[j]) for j in range(self.seats)]
+        used = [r[1] for r in rows]
+        free = [n for n in range(self.cfg.seats_max) if n not in used]
+        rows += [(c, free[i], self.hop, 0, b) for i, (c, b) in enumerate(fresh)]
+        for i in range(1, len(rows)):
+            row, k = rows[i], i - 1
+            while k >= 0 and rows[k][0] > row[0]:
+                rows[k + 1] = rows[k]
+                k -= 1
+            rows[k + 1] = row
+        self.seats = len(rows)
+        for j, (c, n, seen, votes, _) in enumerate(rows):
+            self.centres[j], self.number[j], self.seen[j], self.votes[j] = c, n, seen, votes
+        for j in range(self.seats - 1):
+            a, b = rows[j][4], rows[j + 1][4]
+            self.offsets[j] = self._target(j, s, a, b) if a >= 0 and b >= 0 else f32(0.0)
 
     def _keep_seat(self) -> int:
         centres = self.centres[: self.seats]
