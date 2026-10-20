@@ -159,7 +159,7 @@ class Bss:
         self.window = rounded(float(f32(c.decision_s)) / speech_s)
         self.first = min(self.window, rounded(float(f32(c.first_speech_s)) / speech_s))
         self.recheck_hops = rounded(float(f32(c.recheck_s)) / hop_s)
-        self.forget_hops = rounded(float(f32(c.seat_forget_s)) / hop_s)
+        self.forget = rounded(float(f32(c.seat_forget_s)) / speech_s)
         self.history = math.floor(float(f32(c.history_s)) / hop_s + 0.5)
         self.occupancy = f32(c.occupancy_min)
         self.min_gap, self.half_gap = f32(c.min_gap), f32(f32(0.5) * f32(c.min_gap))
@@ -183,6 +183,7 @@ class Bss:
         self.head = self.filled = 0
         self.hist = [0] * ANGLES
         self.hop = self.since = 0
+        self.heard = 0
         self.seats = 0
         self.centres = [f32(0.0)] * SEATS_CAP
         self.offsets = [f32(0.0)] * (SEATS_CAP - 1)
@@ -203,10 +204,11 @@ class Bss:
         counted = bool(update) and 0 <= angle_deg < ANGLES and confidence >= self.cfg.conf_min
         if self.learn:
             if counted:
+                self.heard += 1
                 self._count(angle_deg)
                 if self.seats >= 2:
                     self._mark(self.delay[angle_deg])
-            self._forget()
+                self._forget()
             self.since += 1
             if self.since >= self.recheck_hops and self.filled >= self.first:
                 self.since = 0
@@ -234,7 +236,8 @@ class Bss:
 
     def numbered(self) -> tuple[list, list]:
         """Gate and whole degrees of every seat number, SEATS_CAP each: the gates the last search set, summing to 1;
-        -1 degrees for a number no seat holds, and below two seats, where 0 is the side past 90 deg and 1 the other."""
+        -1 degrees for a number no seat holds, and until the first split, where 0 is the side past 90 deg and 1 the
+        other."""
         angles = [-1] * SEATS_CAP
         if self.seats >= 2:
             for j in range(self.seats):
@@ -263,9 +266,10 @@ class Bss:
         self.head = (self.head + 1) % self.window
 
     def _forget(self) -> None:
+        """Drop seats no reading reached over seat_forget_s of speech, never below the two that keep their numbers."""
         i = 0
-        while i < self.seats and self.seats >= 2:
-            if self.hop - self.seen[i] < self.forget_hops:
+        while i < self.seats and self.seats > 2:
+            if self.heard - self.seen[i] < self.forget:
                 i += 1
                 continue
             last = self.seats - 1
@@ -277,8 +281,6 @@ class Bss:
             for j in range(i if i < last else last - 1, last - 1):
                 self.offsets[j] = self.offsets[j + 1]
             self.seats -= 1
-        if self.seats < 2:
-            self.seats = 0
 
     def _mark(self, delay: np.float32) -> None:
         """Count a reading for the seat whose region holds it: what keeps that seat from being forgotten."""
@@ -286,7 +288,7 @@ class Bss:
         for i in range(self.seats - 1):
             if delay > f32(f32(f32(0.5) * f32(c[i] + c[i + 1])) + self.offsets[i]):
                 j = i + 1
-        self.seen[j] = self.hop
+        self.seen[j] = self.heard
         self.votes[j] += 1
 
     def _density(self) -> list:
@@ -439,7 +441,7 @@ class Bss:
             return
         self.seats = len(cands)
         for j, (c, _) in enumerate(cands):
-            self.centres[j], self.number[j], self.seen[j] = c, j, self.hop
+            self.centres[j], self.number[j], self.seen[j] = c, j, self.heard
         self.votes[: self.seats] = self._window_votes()
         for j in range(self.seats - 1):
             self.offsets[j] = self._target(j, s, cands[j][1], cands[j + 1][1])
@@ -453,7 +455,7 @@ class Bss:
                 break
             j = vacant[nearest(c, [self.centres[v] for v in vacant])]
             vacant.remove(j)
-            self.centres[j], self.seen[j], held_bins[j] = c, self.hop, b
+            self.centres[j], self.seen[j], held_bins[j] = c, self.heard, b
         rows = sorted(range(self.seats), key=lambda j: float(self.centres[j]))
         order = [(self.centres[j], self.number[j], self.seen[j], self.votes[j], held_bins[j]) for j in rows]
         for j, (c, n, seen, votes, _) in enumerate(order):
@@ -469,7 +471,7 @@ class Bss:
         rows = [(self.centres[j], self.number[j], self.seen[j], self.votes[j], held_bins[j]) for j in range(self.seats)]
         used = [r[1] for r in rows]
         free = [n for n in range(self.cfg.seats_max) if n not in used]
-        rows += [(c, free[i], self.hop, 0, b) for i, (c, b) in enumerate(fresh)]
+        rows += [(c, free[i], self.heard, 0, b) for i, (c, b) in enumerate(fresh)]
         for i in range(1, len(rows)):
             row, k = rows[i], i - 1
             while k >= 0 and rows[k][0] > row[0]:
