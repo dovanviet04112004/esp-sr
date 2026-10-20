@@ -1,8 +1,9 @@
-# `bss` (E8-T3, E8-T7)
+# `bss` (E8-T3, E8-T6, E8-T7)
 
 `bss` là cổng hướng theo ghế của KẾ HOẠCH §3.8, dựng theo module `separation` của `micarray` trong `tinyai-signal`
 (commit `642e6e4`). Số của §1–3 đo ngày 19/10 trên bản Python soi gương; §4–6 đo ngày 20/10 trên bản soi gương ở
-`5137faf`, LEARN dò đỉnh của mật độ độ trễ (E8-T7); §7 và §8 đo trên board B ngày 20/10.
+`5137faf`, LEARN dò đỉnh của mật độ độ trễ (E8-T7); §7 và §8 đo trên board B ngày 20/10; §9, lối ra trễ của `bss_live`
+(E8-T6), đo ngày 20/10 trên bản soi gương ở `9a6453b` và trên board B.
 
 **Thước** của mục này:
 - **mất**: phần năng lượng của người được giữ mà cổng làm mất;
@@ -222,3 +223,61 @@ ghế và 394 lần dời ghế trống.
 - Bench dựng kèm `bss`, nên dòng chuỗi của `budget.md` là 86 464 B, hơn 1 040 B so với 11/10: đệm trung bình hai micro
   1 KB và các con trỏ của `vad` thứ hai nằm trong struct của mặt tiền khi `bss` được dựng. Sản phẩm không dựng `bss` nên
   không mang phần này.
+
+## 9. Lối ra trễ của `bss_live` (E8-T6)
+
+`make bss` cho chọn độ trễ D của lối ra (KẾ HOẠCH §3.8). Bước t ra ở bước t + D, cổng của nó lấy ghế đang giữ ở t + D và
+góc đã giữ ở t + `lookahead_s`. Phần chấm (`make eval-bss`, `9a6453b`) làm như board: thêm D giây im sau bản để bước cuối
+có lối ra. Mỗi ô: mất / rò cả bài / rò trong 0,5 s đầu mỗi lượt / rò trước khi LEARN tách, dB.
+
+**Nhìn trước bao xa.** D = 2 s; cột "sống" là lối ra không trễ:
+
+| `lookahead_s` | A/B, giữ A: rò sau 0,5 s đầu lượt / trước khi tách | A/B, giữ B: rò cả bài / sau 0,5 s đầu lượt | Cảnh hai phía, RT60 0,4 s: rò cả bài / 0,5 s đầu lượt |
+|---|---|---|---|
+| sống | −299 / −10,9 | −23,3 / −126 | −25,5 / −7,0 |
+| 0 | −332 / −4,9 | −23,3 / −126 | −25,6 / −7,0 |
+| 0,05 s | −282 / −5,9 | −27,4 / −117 | −49,3 / −26,5 |
+| **0,1 s** | **−277 / −318** | **−30,9 / −117** | **−52,1 / −27,7** |
+| 0,15 s | −18,7 / −318 | −27,2 / −29,3 | −53,3 / −28,7 |
+| 0,2 s | −17,2 / −318 | −26,1 / −27,5 | −53,4 / −28,5 |
+| 0,3 s | −14,8 / −318 | −19,7 / −19,8 | −88,1 / −61,9 |
+| 0,5 s | −11,7 / −318 | −9,3 / −9,1 | −162 / −136 |
+
+- `doa` làm trơn 0,2 s nên góc đi sau người nói. Nhìn trước 0,1 s cắt phần rò đầu mỗi lượt và chặn hết đoạn trước khi tách.
+- Từ 0,15 s, đuôi mỗi lượt đã lấy góc của người sau. Bản ghép A/B nối lời không nghỉ nên rò ở phần ổn định lên −17 đến
+  −29 dB, và ở 0,5 s người được giữ mất tới 0,55 dB. Cảnh dựng có quãng nghỉ giữa hai người, nên ở đó càng nhìn trước
+  càng đỡ rò.
+- Chốt 0,1 s trong `contracts/afe.yaml`, theo bản thu thật, nơi người ta đáp lời không nghỉ.
+
+**Trễ bao lâu.** `lookahead_s` 0,1 s:
+
+| Mục | Sống | D 0,5 s | D 2 s | D 4 s |
+|---|---|---|---|---|
+| A/B, giữ A | −0,03 / −14,8 / −5,3 / −10,9 | −0,01 / −15,6 / −6,1 / −318 | −0,01 / −15,6 / −6,1 / −318 | −0,01 / −15,6 / −6,1 / −318 |
+| A/B, giữ B | −0,17 / −23,3 / −9,3 / −22,6 | −0,12 / −29,5 / −16,9 / −22,0 | −0,12 / −30,9 / −16,9 / −23,4 | −0,12 / −30,9 / −16,9 / −23,4 |
+| Cảnh một phía, 0,2 s (1) | 0,00 / −2,2 / 0,0 / −0,1 | 0,00 / −2,5 / 0,0 / −0,4 | 0,00 / −4,1 / 0,0 / −2,0 | 0,00 / −4,1 / 0,0 / −2,0 |
+| Cảnh một phía, 0,4 s (1) | −0,01 / −3,2 / 0,0 / 0,0 | 0,00 / −4,2 / 0,0 / −1,0 | 0,00 / −8,6 / 0,0 / −5,3 | 0,00 / −13,8 / 0,0 / −10,5 |
+| Cảnh một phía, 0,6 s (3) | 0,00 / −5,0 / −110 / −0,5 | −0,06 / −5,4 / −3,1 / −0,9 | −0,06 / −25,8 / −16,0 / −21,3 | −0,06 / −76,4 / −123 / −71,9 |
+| Cảnh hai phía, 0,2 s (31) | 0,00 / −26,1 / −5,7 / −21,2 | 0,00 / −37,0 / −13,4 / −34,5 | 0,00 / −37,0 / −13,4 / −34,5 | 0,00 / −37,0 / −13,4 / −34,5 |
+| Cảnh hai phía, 0,4 s (31) | −0,01 / −25,5 / −7,0 / −21,2 | −0,01 / −40,3 / −17,3 / −37,0 | −0,02 / −52,1 / −27,7 / −48,9 | −0,04 / −58,2 / −33,5 / −55,0 |
+| Cảnh hai phía, 0,6 s (29) | −0,02 / −27,0 / −5,3 / −22,0 | −0,02 / −35,5 / −9,5 / −32,1 | −0,02 / −43,9 / −17,5 / −40,0 | −0,02 / −43,8 / −17,3 / −39,8 |
+
+- **Hai người cùng một phía:** khi D dài hơn thời gian LEARN chờ tách (2,4–3 s sau khi người thứ hai mở lời), đoạn chờ
+  ấy cũng vào đúng ghế. Ở RT60 0,6 s, rò cả bài −5 dB ở lối ra sống, −26 dB với D 2 s, −76 dB với D 4 s. Menu mặc định
+  4 s.
+- **Hai người hai phía:** chia ở chính diện đã tách họ trước khi LEARN tách. Phần lợi là nhìn trước ở đầu mỗi lượt: 0,5 s
+  đầu từ −5,7 xuống −13,4 dB ở RT60 0,2 s, từ −7,0 xuống −33,5 dB ở 0,4 s.
+- Người được giữ mất không quá 0,12 dB ở mọi D.
+- D 0,5 s ngắn hơn thời gian chờ. Trên bản ghép A/B giữ B, 0,1 s cuối lượt A trước khi tách lấy góc `doa` đang quét qua
+  90° dưới cổng chia ở chính diện, cổng 0,5. Rò ở phần ổn định vì thế lên −35 dB, so với −126 dB ở lối ra sống và
+  −117 dB với D 2 s.
+
+**Trên board B** (`make bss`, D 4 s, LEARN hai ghế, `ns` trên trung bình, 15 s tiếng phòng):
+- board nghe 19 s (1 188 bước) và ra 938 khung, 15,0 s mỗi WAV; không rơi bước, không tràn DMA, luồng không hở;
+- vòng đệm 751 KB trong PSRAM;
+- mỗi bước tốn 3,25 ms khi đang xuất, đỉnh 4,09 ms trên khung 16 ms; lối ra sống tốn 3,15 ms, đỉnh 3,59 ms.
+
+`make bench-board` (profile `bench`), dòng `bss` LEARN kèm lối ra trễ 4 s:
+- mỗi bước làm đúng phần `bss_live` thêm vào: cổng của bước cũ, trung bình và hai kênh thô ra vào vòng đệm;
+- 287,4 µs trung bình, đỉnh 457,0 µs (1,8% khung), hơn LEARN không trễ 201 µs;
+- vùng `hot` 4 768 B, thêm góc giữ của 244 bước; PSRAM 770 000 B.
