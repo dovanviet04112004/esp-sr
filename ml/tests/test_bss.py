@@ -100,6 +100,24 @@ def test_silence_ages_no_seat() -> None:
     assert all(near(a, b) for a, b in zip(seen[-1][1][:3], seen[three][1][:3], strict=True))
 
 
+def test_readings_older_than_window_horizon_s_leave_the_window() -> None:
+    b = separator(mode=bss.MODE_LEARN, window_horizon_s=2.0)
+    speak(b, [(60, 48)])
+    assert b.filled == 30
+    speak(b, [(200, None)])
+    assert b.filled == 0
+
+
+def test_a_peak_older_than_the_horizon_makes_no_seat() -> None:
+    out = speak(separator(mode=bss.MODE_LEARN, window_horizon_s=2.0), [(100, 48), (200, None), (100, 130)])
+    assert max(s for _, s in out) == 0
+
+
+def test_a_zero_horizon_keeps_readings_until_the_window_pushes_them_out() -> None:
+    out = speak(separator(mode=bss.MODE_LEARN, window_horizon_s=0.0), [(100, 48), (200, None), (100, 130)])
+    assert out[-1][1] == 2
+
+
 def test_a_quiet_talker_is_still_a_seat() -> None:
     """No level gate: tinyai-signal lost the quieter of two talkers 12 dB apart; here the level never enters."""
     b = separator(mode=bss.MODE_LEARN)

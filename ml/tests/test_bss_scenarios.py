@@ -167,3 +167,25 @@ def test_learn_seats_every_talker_and_no_one_else(name: str, seed: int, stray: f
         seated = next(h for h in range(len(seats)) if seats[h] == seats_want)
         assert own_share(gates, degrees, owner, talker, seated) >= OWN_SHARE_MIN
         assert number_share(gates, degrees, owner, talker, seated) >= OWN_SHARE_MIN, f"{talker} changes number"
+
+
+SPARSE_PER_S = 0.1  # board B's room after the held-speech run: 91 in 15 min
+SPARSE_SOURCES_DEG = (45.0, 90.0, 170.0)  # where that room's readings gathered
+
+
+def test_sparse_sources_for_15_minutes_make_no_seat() -> None:
+    """Three steady sources each read now and then, about one reading in ten seconds in all, as board B's room gave
+    once doa waited for held speech; no seat may form."""
+    b = bss.Bss(replace(bss.BssConfig(), mode=bss.MODE_LEARN, seats_max=4))
+    rng = np.random.default_rng(11)
+    x = rng.standard_normal((2, grid.N_BINS)) + 1j * rng.standard_normal((2, grid.N_BINS))
+    x0, x1 = x[0].astype(np.complex64), x[1].astype(np.complex64)
+    held, most = -1, 0
+    for hop in range(round(15 * 60 / HOP_S)):
+        searched = hop % 2 == 0 and rng.random() < SPARSE_PER_S * 2 * HOP_S
+        if searched:
+            angle = SPARSE_SOURCES_DEG[rng.integers(len(SPARSE_SOURCES_DEG))] + rng.normal(0.0, JITTER_DEG)
+            held = int(np.clip(round(angle / 2) * 2, 0, 180))
+        b.process(x0, x1, held, CONFIDENCE, searched)
+        most = max(most, b.seats)
+    assert most == 0
