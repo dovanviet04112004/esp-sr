@@ -350,12 +350,10 @@ def test_committed_chain_bss_cases_match_a_fresh_emit(tmp_path: Path) -> None:
         assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
 
 
-def test_the_chain_bss_negative_control_reads_doa_in_the_short_bursts() -> None:
+def test_the_chain_bss_negative_control_moves_doa_where_the_output_vad_is_silent() -> None:
     case = read_gold(emit_golden.GOLDEN_ROOT / "chain_bss" / "case_000.gold")
     negative = read_gold(emit_golden.GOLDEN_ROOT / "chain_bss" / "case_neg_000.gold")
-    bursts = slice(10, 64)
-    assert (case["doa_deg"][bursts] < 0).all()
-    assert (negative["doa_deg"][bursts] >= 0).any()
+    assert (case["doa_deg"] != negative["doa_deg"]).any()
 
 
 def test_the_bss_horizon_negative_control_seats_the_peak_the_horizon_drops() -> None:
@@ -363,3 +361,9 @@ def test_the_bss_horizon_negative_control_seats_the_peak_the_horizon_drops() -> 
     negative = read_gold(emit_golden.GOLDEN_ROOT / "bss" / "case_neg_005.gold")
     assert case["seats"].max() == 0
     assert negative["seats"].max() == 2
+
+
+def test_the_bss_learn_run_negative_control_counts_the_single_searches() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "bss" / "case_008.gold")
+    negative = read_gold(emit_golden.GOLDEN_ROOT / "bss" / "case_neg_006.gold")
+    assert (case["seats"] != negative["seats"]).any()

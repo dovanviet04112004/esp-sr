@@ -32,7 +32,7 @@ CHAIN_RESET = 1
 CHAIN_RESUME = 2
 CHAIN_RESUME_HOPS = (72, 108)
 CHAIN_BSS_HOPS = 160
-CHAIN_BSS_CLICK_HOPS = 3  # far short of heard_run_s's 8 hops
+CHAIN_BSS_CLICK_HOPS = 3  # a key stroke's run of the raw vad
 CHAIN_BSS_RESUME_HOP = 140
 HPF_HOPS = 16
 BALANCE_HOPS = 16
@@ -307,14 +307,18 @@ def _chain_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray
     ]
 
 
-def chain_case(ch0: np.ndarray, ch1: np.ndarray, reset: np.ndarray, cfg: chain.ChainConfig) -> dict[str, np.ndarray]:
+def chain_case(
+    ch0: np.ndarray, ch1: np.ndarray, reset: np.ndarray, cfg: chain.ChainConfig, without_vad_in: bool = False
+) -> dict[str, np.ndarray]:
     """Interleaved int16 input, per hop CHAIN_RESET or CHAIN_RESUME before it or 0, the afe/* settings (ns floor dB,
     agc target dBFS, vad mode), calib/bal as re, im pairs when the case has one, and every field of the frames the
-    chain gives."""
+    chain gives. without_vad_in drops bss's second vad, so doa follows the output's, as a negative control."""
     pcm_min, pcm_max = np.iinfo(np.int16).min, np.iinfo(np.int16).max
     mics = np.stack([ch0, ch1], axis=-1)
     interleaved = np.clip(np.rint(mics), pcm_min, pcm_max).astype(np.int16).reshape(reset.size, -1)
     ch = chain.Chain("MM", cfg)
+    if without_vad_in:
+        ch._vad_in = None
     frames = []
     for hop, flag in zip(interleaved, reset, strict=True):
         if flag == CHAIN_RESET:
@@ -444,8 +448,8 @@ def emit_chain_modules(root: Path) -> list[Path]:
 
 def _chain_bss_input(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """ch0, ch1 and the resume flags of speech-like bursts on a calibrated board: six bursts of CHAIN_BSS_CLICK_HOPS
-    from one side, too short for heard_run_s, then held speech from that side, a pause, and held speech from the
-    other, resumed once in it. ch1 lags ch0 by a sample on the first side and leads it on the other."""
+    from one side, then held speech from that side, a pause, and held speech from the other, resumed once in it. ch1
+    lags ch0 by a sample on the first side and leads it on the other."""
     n = CHAIN_BSS_HOPS * grid.HOP_SAMPLES
     on = np.zeros(CHAIN_BSS_HOPS, dtype=bool)
     side = np.zeros(CHAIN_BSS_HOPS, dtype=np.int8)
@@ -467,21 +471,15 @@ def _chain_bss_input(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, 
 
 
 def emit_chain_bss(root: Path) -> list[Path]:
-    """One case through the facade with the modules of the modules build and bss as its spatial stage, then a
-    negative control computed with doa searching from the first hop the raw vad hears, as before heard_run_s."""
+    """One case through the facade with the modules of the modules build and bss as its spatial stage, then a negative
+    control whose doa searches on the vad of the output, which the gate silences, in place of vad_in (KEHOACH 3.8)."""
     ch0, ch1, resumes = _chain_bss_input(np.random.default_rng(SEED + 13))
     cfg = chain.ChainConfig(spatial="bss", balance_gains=board_like_gains())
     path = root / "chain_bss" / "case_000.gold"
     write_gold(path, chain_case(ch0, ch1, resumes, cfg))
     written = [path]
-    held = chain.HEARD_RUN_HOPS
-    chain.HEARD_RUN_HOPS = 1
-    try:
-        negative = chain_case(ch0, ch1, resumes, cfg)
-    finally:
-        chain.HEARD_RUN_HOPS = held
     path = root / "chain_bss" / "case_neg_000.gold"
-    write_gold(path, negative)
+    write_gold(path, chain_case(ch0, ch1, resumes, cfg, without_vad_in=True))
     written.append(path)
     return written
 
@@ -962,6 +960,7 @@ BSS_FIELDS = (
     "boundary_follow",
     "seat_forget_s",
     "window_horizon_s",
+    "learn_run_s",
     "update_every_hops",
     "spacing_m",
     "speed_of_sound_m_s",
@@ -1057,12 +1056,11 @@ def bss_case(
 
 
 def _bss_inputs(rng: np.random.Generator) -> list[tuple[tuple, bss.BssConfig]]:
-    """(doa per hop, configuration): split at broadside with talkers at 48 and 130 deg; learnt seats for the same two;
-    three seats kept by most updates, two of them falling silent, one forgotten and the last two kept; two talkers on
-    one side, 40 and 76 deg, kept at 76, low confidences left out; three talkers, then a fourth at 60 deg joining with
-    one of them; a talker at 75 deg settling at 54 beside one at 140, seated once the split is plain, then 140 leaving
-    and 100 coming; three seats through a silence past seat_forget_s, then 90 deg alone until the other two go; a
-    talker at 48 deg, a silence past window_horizon_s, then one at 130: no seat from the peak the horizon dropped."""
+    """(doa per hop, configuration): broadside, 48 and 130 deg; LEARN on them; three seats kept by most updates, two
+    falling silent until one goes; 40 and 76 deg on one side, kept at 76, conf_min 60; a fourth at 60 deg joining
+    three; 75 deg settling at 54 beside 140, then 140 leaving and 100 coming; three seats through a silence past
+    seat_forget_s, then 90 deg alone; 48 deg, a silence past window_horizon_s, then 130: no seat from the dropped peak;
+    single searches at 90 deg broken by silence, then 48 and 130: LEARN counts none of the 90s."""
     turns = [(10, None), (100, 48.0), (100, 130.0), (100, 48.0), (100, 130.0)]
     return [
         (bss_track(rng, [(10, None), (80, 48.0), (80, 130.0), (60, None), (80, 48.0)]), bss_config()),
@@ -1098,6 +1096,10 @@ def _bss_inputs(rng: np.random.Generator) -> list[tuple[tuple, bss.BssConfig]]:
             bss_config(mode=bss.MODE_LEARN, seats_max=3),
         ),
         (bss_track(rng, [(100, 48.0), (250, None), (100, 130.0)]), bss_config(mode=bss.MODE_LEARN)),
+        (
+            bss_track(rng, [(2, 90.0), (6, None)] * 12 + [(100, 48.0), (100, 130.0)] * 2),
+            bss_config(mode=bss.MODE_LEARN),
+        ),
     ]
 
 
@@ -1114,10 +1116,10 @@ class _ForgetsOnHops(bss.Bss):
 
 
 def emit_bss(root: Path) -> list[Path]:
-    """Eight cases, then six negative controls: the one-side case's gates as the broadside split gives them, the
+    """Nine cases, then seven negative controls: the one-side case's gates as the broadside split gives them, the
     three-seat case with its seats numbered by rising delay, the learnt case's delayed gates taken a hop back, the late
-    talker's case seated without waiting for confirm, the silent case's seats aged on hops, and the horizon case with
-    no horizon."""
+    talker's case seated without waiting for confirm, the silent case's seats aged on hops, the horizon case with no
+    horizon, and the single-search case counting every reading."""
     rng = np.random.default_rng(SEED + 12)
     x0 = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
     x1 = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
@@ -1160,6 +1162,12 @@ def emit_bss(root: Path) -> list[Path]:
     endless["config"] = np.array([getattr(cfg, f) for f in BSS_FIELDS], dtype=np.float32)
     path = root / "bss" / "case_neg_005.gold"
     write_gold(path, endless)
+    written.append(path)
+    track, cfg = cases[8]
+    eager = bss_case(x0, x1, track, replace(cfg, learn_run_s=0.0))
+    eager["config"] = np.array([getattr(cfg, f) for f in BSS_FIELDS], dtype=np.float32)
+    path = root / "bss" / "case_neg_006.gold"
+    write_gold(path, eager)
     written.append(path)
     return written
 
