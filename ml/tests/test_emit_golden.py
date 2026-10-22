@@ -342,3 +342,24 @@ def test_the_pitch_tolerance_rejects_the_negative_control() -> None:
     right = read_gold(emit_golden.GOLDEN_ROOT / "pitch" / "case_000.gold")["features"].astype(np.float64)
     snr_db = 10.0 * np.log10(np.sum(right**2) / np.sum((wrong - right) ** 2))
     assert np.max(np.abs(wrong - right)) > limits["max_abs"] and snr_db < limits["min_snr_db"]
+
+
+def test_committed_chain_bss_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_chain_bss(tmp_path):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
+
+
+def test_the_chain_bss_negative_control_reads_doa_in_the_short_bursts() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "chain_bss" / "case_000.gold")
+    negative = read_gold(emit_golden.GOLDEN_ROOT / "chain_bss" / "case_neg_000.gold")
+    bursts = slice(10, 64)
+    assert (case["doa_deg"][bursts] < 0).all()
+    assert (negative["doa_deg"][bursts] >= 0).any()
+
+
+def test_the_bss_horizon_negative_control_seats_the_peak_the_horizon_drops() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "bss" / "case_007.gold")
+    negative = read_gold(emit_golden.GOLDEN_ROOT / "bss" / "case_neg_005.gold")
+    assert case["seats"].max() == 0
+    assert negative["seats"].max() == 2

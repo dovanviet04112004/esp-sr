@@ -31,6 +31,9 @@ CHAIN_MODULES_HOPS = 192
 CHAIN_RESET = 1
 CHAIN_RESUME = 2
 CHAIN_RESUME_HOPS = (72, 108)
+CHAIN_BSS_HOPS = 160
+CHAIN_BSS_CLICK_HOPS = 3  # far short of heard_run_s's 8 hops
+CHAIN_BSS_RESUME_HOP = 140
 HPF_HOPS = 16
 BALANCE_HOPS = 16
 # Every vad case outlives the 100-hop window of the minimum tracker.
@@ -435,6 +438,50 @@ def emit_chain_modules(root: Path) -> list[Path]:
     resumed["reset"] = np.where(resumed["reset"] == CHAIN_RESUME, CHAIN_RESET, 0).astype(np.uint8)
     path = root / "chain_modules" / "case_neg_001.gold"
     write_gold(path, resumed)
+    written.append(path)
+    return written
+
+
+def _chain_bss_input(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """ch0, ch1 and the resume flags of speech-like bursts on a calibrated board: six bursts of CHAIN_BSS_CLICK_HOPS
+    from one side, too short for heard_run_s, then held speech from that side, a pause, and held speech from the
+    other, resumed once in it. ch1 lags ch0 by a sample on the first side and leads it on the other."""
+    n = CHAIN_BSS_HOPS * grid.HOP_SAMPLES
+    on = np.zeros(CHAIN_BSS_HOPS, dtype=bool)
+    side = np.zeros(CHAIN_BSS_HOPS, dtype=np.int8)
+    for k in range(6):
+        start = 10 + 9 * k
+        on[start : start + CHAIN_BSS_CLICK_HOPS] = True
+        side[start : start + CHAIN_BSS_CLICK_HOPS] = 1
+    on[70:110], side[70:110] = True, 1
+    on[120:160], side[120:160] = True, -1
+    voice = speechlike(rng, n, 0.1) * np.repeat(on, grid.HOP_SAMPLES)
+    lag = np.concatenate([[0.0], voice[:-1]])
+    lead = np.concatenate([voice[1:], [0.0]])
+    per_sample = np.repeat(side, grid.HOP_SAMPLES)
+    ch1 = np.where(per_sample > 0, lag, np.where(per_sample < 0, lead, voice)) * 10 ** (-11.0 / 20.0)
+    floor = 3e-4 * rng.standard_normal((2, n))
+    resumes = np.zeros(CHAIN_BSS_HOPS, dtype=np.uint8)
+    resumes[CHAIN_BSS_RESUME_HOP] = CHAIN_RESUME
+    return 32768 * (voice + floor[0]), 32768 * (ch1 + floor[1]), resumes
+
+
+def emit_chain_bss(root: Path) -> list[Path]:
+    """One case through the facade with the modules of the modules build and bss as its spatial stage, then a
+    negative control computed with doa searching from the first hop the raw vad hears, as before heard_run_s."""
+    ch0, ch1, resumes = _chain_bss_input(np.random.default_rng(SEED + 13))
+    cfg = chain.ChainConfig(spatial="bss", balance_gains=board_like_gains())
+    path = root / "chain_bss" / "case_000.gold"
+    write_gold(path, chain_case(ch0, ch1, resumes, cfg))
+    written = [path]
+    held = chain.HEARD_RUN_HOPS
+    chain.HEARD_RUN_HOPS = 1
+    try:
+        negative = chain_case(ch0, ch1, resumes, cfg)
+    finally:
+        chain.HEARD_RUN_HOPS = held
+    path = root / "chain_bss" / "case_neg_000.gold"
+    write_gold(path, negative)
     written.append(path)
     return written
 
@@ -914,6 +961,7 @@ BSS_FIELDS = (
     "boundary_share_min",
     "boundary_follow",
     "seat_forget_s",
+    "window_horizon_s",
     "update_every_hops",
     "spacing_m",
     "speed_of_sound_m_s",
@@ -923,7 +971,14 @@ BSS_FIELDS = (
 
 def bss_config(**over) -> bss.BssConfig:
     """The contract's bss with windows short enough for a few hundred hops, every float as float32 holds it."""
-    short = {"decision_s": 2.0, "recheck_s": 0.25, "first_speech_s": 0.5, "seat_forget_s": 3.0, "history_s": 1.0} | over
+    short = {
+        "decision_s": 2.0,
+        "recheck_s": 0.25,
+        "first_speech_s": 0.5,
+        "seat_forget_s": 3.0,
+        "window_horizon_s": 3.0,
+        "history_s": 1.0,
+    } | over
     cfg = replace(bss.BssConfig(), **short)
     return replace(
         cfg, **{f: float(np.float32(getattr(cfg, f))) for f in BSS_FIELDS if isinstance(getattr(cfg, f), float)}
@@ -1006,7 +1061,8 @@ def _bss_inputs(rng: np.random.Generator) -> list[tuple[tuple, bss.BssConfig]]:
     three seats kept by most updates, two of them falling silent, one forgotten and the last two kept; two talkers on
     one side, 40 and 76 deg, kept at 76, low confidences left out; three talkers, then a fourth at 60 deg joining with
     one of them; a talker at 75 deg settling at 54 beside one at 140, seated once the split is plain, then 140 leaving
-    and 100 coming; three seats through a silence past seat_forget_s, then 90 deg alone until the other two go."""
+    and 100 coming; three seats through a silence past seat_forget_s, then 90 deg alone until the other two go; a
+    talker at 48 deg, a silence past window_horizon_s, then one at 130: no seat from the peak the horizon dropped."""
     turns = [(10, None), (100, 48.0), (100, 130.0), (100, 48.0), (100, 130.0)]
     return [
         (bss_track(rng, [(10, None), (80, 48.0), (80, 130.0), (60, None), (80, 48.0)]), bss_config()),
@@ -1041,6 +1097,7 @@ def _bss_inputs(rng: np.random.Generator) -> list[tuple[tuple, bss.BssConfig]]:
             ),
             bss_config(mode=bss.MODE_LEARN, seats_max=3),
         ),
+        (bss_track(rng, [(100, 48.0), (250, None), (100, 130.0)]), bss_config(mode=bss.MODE_LEARN)),
     ]
 
 
@@ -1057,9 +1114,10 @@ class _ForgetsOnHops(bss.Bss):
 
 
 def emit_bss(root: Path) -> list[Path]:
-    """Seven cases, then five negative controls: the one-side case's gates as the broadside split gives them, the
+    """Eight cases, then six negative controls: the one-side case's gates as the broadside split gives them, the
     three-seat case with its seats numbered by rising delay, the learnt case's delayed gates taken a hop back, the late
-    talker's case seated without waiting for confirm, and the silent case's seats aged on hops."""
+    talker's case seated without waiting for confirm, the silent case's seats aged on hops, and the horizon case with
+    no horizon."""
     rng = np.random.default_rng(SEED + 12)
     x0 = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
     x1 = (rng.standard_normal(grid.N_BINS) + 1j * rng.standard_normal(grid.N_BINS)).astype(np.complex64)
@@ -1097,6 +1155,12 @@ def emit_bss(root: Path) -> list[Path]:
     path = root / "bss" / "case_neg_004.gold"
     write_gold(path, bss_case(x0, x1, track, cfg, separator_type=_ForgetsOnHops))
     written.append(path)
+    track, cfg = cases[7]
+    endless = bss_case(x0, x1, track, replace(cfg, window_horizon_s=0.0))
+    endless["config"] = np.array([getattr(cfg, f) for f in BSS_FIELDS], dtype=np.float32)
+    path = root / "bss" / "case_neg_005.gold"
+    write_gold(path, endless)
+    written.append(path)
     return written
 
 
@@ -1110,7 +1174,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
     emitted = emit_stft(args.out) + emit_mel(args.out) + emit_spk_fbank(args.out)
-    emitted += emit_chain(args.out) + emit_chain_modules(args.out)
+    emitted += emit_chain(args.out) + emit_chain_modules(args.out) + emit_chain_bss(args.out)
     emitted += emit_hpf(args.out) + emit_balance(args.out) + emit_vad(args.out) + emit_agc(args.out)
     emitted += emit_doa(args.out) + emit_gsc(args.out) + emit_bss(args.out) + emit_pitch(args.out, pitch_config())
     for path in emitted + emit_ns_omlsa(args.out):
