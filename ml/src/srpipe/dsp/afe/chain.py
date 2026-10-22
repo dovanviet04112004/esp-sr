@@ -90,6 +90,10 @@ def to_pcm(hop: np.ndarray) -> np.ndarray:
     return np.clip(np.rint(hop * PCM_FULL_SCALE), PCM_MIN, PCM_MAX).astype(np.int16)
 
 
+# Hops of held speech the raw vad under bss needs for doa to search (KEHOACH 3.8).
+HEARD_RUN_HOPS = round(float(np.float32(afe.BSS_HEARD_RUN_S)) * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES)
+
+
 class Chain:
     """One instance, one hop at a time; starts from silence with seq 0."""
 
@@ -125,6 +129,7 @@ class Chain:
         # bss's gate silences the other seat at vad, so doa searches on a raw vad of the mics' mean (KEHOACH 3.8).
         self._vad_in = vad.Vad(self.cfg.vad_aggressiveness) if self._bss is not None else None
         self._last_heard = False
+        self._heard_run = 0
         self._last_vad = False
         self._ns = None
         if "ns_omlsa" in on:
@@ -151,8 +156,8 @@ class Chain:
 
     def resume(self) -> None:
         """Forget only what holds samples from before a short gap, the STFT and iSTFT buffers, hpf's memory, vad's
-        band filters and agc's look-ahead, and keep every estimate; the next frame carries FLAG_GAP and seq runs on
-        (KEHOACH 4.5.5)."""
+        band filters, the raw vad's run of held speech and agc's look-ahead, and keep every estimate; the next frame
+        carries FLAG_GAP and seq runs on (KEHOACH 4.5.5)."""
         for st in self._analysis:
             st.reset()
         self._synthesis.reset()
@@ -162,6 +167,8 @@ class Chain:
             self._vad.flush()
         if self._vad_in is not None:
             self._vad_in.flush()
+            self._heard_run = 0
+            self._last_heard = False
         if self._agc is not None:
             self._agc.flush()
         self._gap = True
@@ -181,7 +188,9 @@ class Chain:
         heard = self._last_heard if self._vad_in is not None else self._last_vad
         update = heard and self._seq % afe.DOA_UPDATE_EVERY_HOPS == 0
         if self._vad_in is not None:
-            self._last_heard = self._vad_in.process(np.float32(0.5) * (samples[:, 0] + samples[:, 1])).raw
+            raw = self._vad_in.process(np.float32(0.5) * (samples[:, 0] + samples[:, 1])).raw
+            self._heard_run = self._heard_run + 1 if raw else 0
+            self._last_heard = self._heard_run >= HEARD_RUN_HOPS
         if self._doa is not None:
             direction = self._doa.process(bins[0], bins[1], update)
         if self._gsc is not None:

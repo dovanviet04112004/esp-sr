@@ -53,6 +53,7 @@ class BssConfig:
     boundary_share_min: float = afe.BSS_BOUNDARY_SHARE_MIN
     boundary_follow: float = afe.BSS_BOUNDARY_FOLLOW
     seat_forget_s: float = afe.BSS_SEAT_FORGET_S
+    window_horizon_s: float = afe.BSS_WINDOW_HORIZON_S
     update_every_hops: int = afe.DOA_UPDATE_EVERY_HOPS
     spacing_m: float = array.SPACING_M
     speed_of_sound_m_s: float = array.SPEED_OF_SOUND_M_S
@@ -99,6 +100,7 @@ def check(cfg: BssConfig) -> None:
         and 0.0 <= c["boundary_share_min"] <= 0.5
         and 0.0 <= c["boundary_follow"] <= 1.0
         and c["seat_forget_s"] > 0.0
+        and c["window_horizon_s"] >= 0.0
         and c["update_every_hops"] >= 1
         and c["spacing_m"] > 0.0
         and c["speed_of_sound_m_s"] > 0.0
@@ -160,6 +162,7 @@ class Bss:
         self.first = min(self.window, rounded(float(f32(c.first_speech_s)) / speech_s))
         self.recheck_hops = rounded(float(f32(c.recheck_s)) / hop_s)
         self.forget = rounded(float(f32(c.seat_forget_s)) / speech_s)
+        self.horizon_hops = math.floor(float(f32(c.window_horizon_s)) / hop_s + 0.5)
         self.history = math.floor(float(f32(c.history_s)) / hop_s + 0.5)
         self.occupancy = f32(c.occupancy_min)
         self.min_gap, self.half_gap = f32(c.min_gap), f32(f32(0.5) * f32(c.min_gap))
@@ -180,6 +183,7 @@ class Bss:
     def reset(self) -> None:
         """Back to where init leaves it: no angles counted, no seats, the gate at one half."""
         self.ring = [0] * self.window
+        self.stamp = [0] * self.window
         self.head = self.filled = 0
         self.hist = [0] * ANGLES
         self.hop = self.since = 0
@@ -203,6 +207,8 @@ class Bss:
         """Count doa's angle when it searched this hop, learn, and return the kept and the other share of the mean."""
         counted = bool(update) and 0 <= angle_deg < ANGLES and confidence >= self.cfg.conf_min
         if self.learn:
+            if self.horizon_hops:
+                self._expire()
             if counted:
                 self.heard += 1
                 self._count(angle_deg)
@@ -262,8 +268,15 @@ class Bss:
         else:
             self.filled += 1
         self.ring[self.head] = angle
+        self.stamp[self.head] = self.hop
         self.hist[angle] += 1
         self.head = (self.head + 1) % self.window
+
+    def _expire(self) -> None:
+        """Drop the window's readings older than window_horizon_s, oldest first."""
+        while self.filled and self.hop - self.stamp[(self.head - self.filled) % self.window] > self.horizon_hops:
+            self.hist[self.ring[(self.head - self.filled) % self.window]] -= 1
+            self.filled -= 1
 
     def _forget(self) -> None:
         """Drop seats no reading reached over seat_forget_s of speech, never below the two that keep their numbers."""
