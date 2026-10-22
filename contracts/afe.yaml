@@ -44,7 +44,7 @@ bss:                                # direction gate on doa's angle (KEHOACH 3.8
   boundary_follow: 0.25             # LEARN: share of the way a boundary moves to the density's low point at each recheck
   seat_forget_s: 60.0               # LEARN: speech a seat may go without an update; LEARN keeps two seats
   window_horizon_s: 60.0            # LEARN: readings older than this leave the window; 0 keeps them till pushed out
-  heard_run_s: 0.128                # doa under bss searches once the raw vad has held speech this long in a row
+  learn_run_s: 0.096                # LEARN: a reading counts once doa has searched without a break this long
   history_s: 0.0                   # delayed output: seconds of held angles kept for old hops; product 0
   lookahead_s: 0.1                  # delayed output: an old hop's gate takes the angle held this long after it; 0.15 s and more lose turn ends when talkers answer without a pause
 ns:
