@@ -3,8 +3,6 @@ modules against what each of them must add."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import numpy as np
 import pytest
 import soundfile as sf
@@ -175,30 +173,3 @@ def test_render_writes_every_whole_hop_of_a_recording(tmp_path) -> None:
     chain.main([str(tmp_path / "in.wav"), str(tmp_path / "out.wav"), "--spatial", "gsc"])
     info = sf.info(str(tmp_path / "out.wav"))
     assert (info.channels, info.frames) == (1, HOPS * grid.HOP_SAMPLES)
-
-
-class ScheduledVad:
-    """A raw vad that answers each hop as its schedule says, in place of the chain's second vad under bss."""
-
-    def __init__(self, schedule: list[bool]) -> None:
-        self._schedule = iter(schedule)
-
-    def process(self, _mean: np.ndarray) -> SimpleNamespace:
-        return SimpleNamespace(raw=next(self._schedule))
-
-    def flush(self) -> None:
-        pass
-
-
-def test_doa_under_bss_searches_only_once_the_raw_vad_held_heard_run_s() -> None:
-    run_hops = round(afe.BSS_HEARD_RUN_S * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES)
-    clicks = ([True] * (run_hops - 1) + [False] * 3) * 10
-    held = [True] * (run_hops + 6)
-    ch = chain.Chain("MM", chain.ChainConfig(modules=("doa",), spatial="bss"))
-    ch._vad_in = ScheduledVad(clicks + held)
-    noise = np.random.default_rng(5).normal(0.0, 3000.0, (len(clicks) + len(held)) * grid.HOP_SAMPLES + 1)
-    pcm = np.rint(noise).astype(np.int16)
-    degrees = [f.doa_deg for f in run(ch, interleave(pcm[1:], pcm[:-1]))]
-    first = len(clicks) + run_hops
-    assert all(d < 0 for d in degrees[:first])
-    assert any(d >= 0 for d in degrees[first:])

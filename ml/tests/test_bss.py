@@ -100,6 +100,17 @@ def test_silence_ages_no_seat() -> None:
     assert all(near(a, b) for a, b in zip(seen[-1][1][:3], seen[three][1][:3], strict=True))
 
 
+def test_learn_counts_a_reading_from_the_third_search_in_a_row_and_the_gate_follows_every_one() -> None:
+    b = separator(mode=bss.MODE_LEARN)
+    x0, x1 = bins()
+    for hop in range(16):
+        b.process(x0, x1, 150, 120, hop % 8 in (0, 2))
+    assert b.filled == 0 and b.last_angle == 150
+    for hop in range(16, 26):
+        b.process(x0, x1, 40, 120, hop % 2 == 0)
+    assert b.filled == 3 and b.last_angle == 40
+
+
 def test_readings_older_than_window_horizon_s_leave_the_window() -> None:
     b = separator(mode=bss.MODE_LEARN, window_horizon_s=2.0)
     speak(b, [(60, 48)])
