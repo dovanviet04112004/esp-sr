@@ -112,7 +112,7 @@ def test_learn_counts_a_reading_from_the_third_search_in_a_row_and_the_gate_foll
 
 
 def test_readings_older_than_window_horizon_s_leave_the_window() -> None:
-    b = separator(mode=bss.MODE_LEARN, window_horizon_s=2.0)
+    b = separator(mode=bss.MODE_LEARN, window_horizon_s=2.0, learn_run_s=0.0)
     speak(b, [(60, 48)])
     assert b.filled == 30
     speak(b, [(200, None)])

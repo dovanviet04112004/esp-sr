@@ -54,6 +54,7 @@ class BssConfig:
     boundary_follow: float = afe.BSS_BOUNDARY_FOLLOW
     seat_forget_s: float = afe.BSS_SEAT_FORGET_S
     window_horizon_s: float = afe.BSS_WINDOW_HORIZON_S
+    learn_run_s: float = afe.BSS_LEARN_RUN_S
     update_every_hops: int = afe.DOA_UPDATE_EVERY_HOPS
     spacing_m: float = array.SPACING_M
     speed_of_sound_m_s: float = array.SPEED_OF_SOUND_M_S
@@ -101,6 +102,7 @@ def check(cfg: BssConfig) -> None:
         and 0.0 <= c["boundary_follow"] <= 1.0
         and c["seat_forget_s"] > 0.0
         and c["window_horizon_s"] >= 0.0
+        and c["learn_run_s"] >= 0.0
         and c["update_every_hops"] >= 1
         and c["spacing_m"] > 0.0
         and c["speed_of_sound_m_s"] > 0.0
@@ -163,6 +165,7 @@ class Bss:
         self.recheck_hops = rounded(float(f32(c.recheck_s)) / hop_s)
         self.forget = rounded(float(f32(c.seat_forget_s)) / speech_s)
         self.horizon_hops = math.floor(float(f32(c.window_horizon_s)) / hop_s + 0.5)
+        self.learn_run = rounded(float(f32(c.learn_run_s)) / speech_s)
         self.history = math.floor(float(f32(c.history_s)) / hop_s + 0.5)
         self.occupancy = f32(c.occupancy_min)
         self.min_gap, self.half_gap = f32(c.min_gap), f32(f32(0.5) * f32(c.min_gap))
@@ -188,6 +191,7 @@ class Bss:
         self.hist = [0] * ANGLES
         self.hop = self.since = 0
         self.heard = 0
+        self.streak = self.searched_at = 0
         self.seats = 0
         self.centres = [f32(0.0)] * SEATS_CAP
         self.offsets = [f32(0.0)] * (SEATS_CAP - 1)
@@ -206,10 +210,14 @@ class Bss:
     ) -> tuple[np.ndarray, np.ndarray]:
         """Count doa's angle when it searched this hop, learn, and return the kept and the other share of the mean."""
         counted = bool(update) and 0 <= angle_deg < ANGLES and confidence >= self.cfg.conf_min
+        if update:
+            spaced = self.streak and self.hop - self.searched_at == self.cfg.update_every_hops
+            self.streak = self.streak + 1 if spaced else 1
+            self.searched_at = self.hop
         if self.learn:
             if self.horizon_hops:
                 self._expire()
-            if counted:
+            if counted and self.streak >= self.learn_run:
                 self.heard += 1
                 self._count(angle_deg)
                 if self.seats >= 2:
