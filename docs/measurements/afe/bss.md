@@ -393,12 +393,20 @@ Tiếng gõ và tiếng tách dài 16–48 ms nên làm `vad` thô bật 1–3 b
 | `doa` dò khi `vad` thô liền 6 bước | 4 ghế từ 226 s | — | — | 3,2–3,8 s | không tách / 14,3 s |
 | `doa` dò khi `vad` thô liền 8 bước | không ghế, 43 lần dò | không ghế, 41 lần dò | 4 ghế ở 765 s (91 và 165 lần dò) | 3,2–3,8 s | 26,2 / 14,4 s |
 | 8 bước liền và cửa sổ quên lần dò cũ hơn 60 s | không ghế | không ghế | không ghế | 3,2–3,8 s | 26,2 / 14,4 s |
+| LEARN chỉ đếm lần dò từ lần thứ 3 liền nhau, và cửa sổ quên lần dò cũ hơn 60 s | không ghế | không ghế | không ghế (30 phút) | 3,4–3,9 s | 14,9 / 14,2 s |
+| như trên, từ lần thứ 4 liền nhau | không ghế | không ghế | không ghế (30 phút) | 3,5–3,9 s | 25,7 / 14,6 s |
+| như trên, từ lần thứ 5 liền nhau | không ghế | không ghế | không ghế (30 phút) | 3,5–3,9 s | 26,1 / 15,2 s |
 
 - Ở 2 ghế, cửa sổ quên 20 hay 40 s và bước hữu thanh còn làm lượt 5 phút ra 2 ghế (37° và 90°, 37° và 66°, 47° và
   88°), vì bớt ứng viên thì tách lần đầu hết chờ.
 - Lần dò lạc đều theo góc, 3 hay 10 lần mỗi giây trong 300 s, vẫn ra 4 ghế với cửa sổ quên 20 hay 40 s.
 - Chỉ đòi tiếng liền thì tiếng động hiếm vẫn cộng dồn qua nhiều phút: cửa sổ đếm theo tiếng nói, nên 91 lần dò trong
   15 phút vẫn thành bốn đỉnh. Hạn 60 s chặn cộng dồn; người nói thật đầy 47 lần dò đầu trong vài giây.
-- Giữ cách cuối: `heard_run_s` 0,128 s và `window_horizon_s` 60 s (KẾ HOẠCH §3.8). Một nguồn chỉ thành ghế khi có
-  1,5 s lần dò trong tiếng liền 8 bước trở lên, trong 60 s gần nhất: người đang nói với board có đủ sau vài giây, còn
-  tiếng gõ phím và tiếng nói lẻ tẻ ở xa thì không.
+- **Đòi tiếng liền ở chỗ `doa` dò thì cổng chậm.** `make eval-bss` với `doa` chỉ dò sau 8 bước liền (`0d15d72`): ở đầu
+  mỗi lượt, cổng giữ hướng người trước lâu hơn. Bản ghép A/B, giữ B: rò sau 0,5 s đầu lượt −27,6 dB thay vì −126 dB;
+  cảnh hai phía RT60 0,4 s, lối ra trễ 4 s: rò cả bài −27,4 dB thay vì −58,2 dB; cả cột chia ở chính diện cũng rò hơn.
+  Bỏ cách ấy.
+- **Giữ cách cuối**: `doa` dò và cổng đi theo mọi lần dò như cũ, còn LEARN chỉ đếm vào cửa sổ, đồng hồ quên và dấu của
+  ghế những lần dò từ lần thứ 3 liền nhau (`learn_run_s` 0,096 s), và cửa sổ quên lần dò cũ hơn `window_horizon_s` 60 s
+  (KẾ HOẠCH §3.8). Một nguồn chỉ thành ghế khi có 1,5 s lần dò trong tiếng liền, trong 60 s gần nhất: người đang nói
+  với board có đủ sau vài giây, còn tiếng gõ phím và tiếng nói lẻ tẻ ở xa thì không.
