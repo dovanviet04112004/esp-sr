@@ -684,7 +684,7 @@ một hệ số theo hướng ấy: người ở ghế giữ đi qua, người �
 
 | Chốt | Giá trị | Vì sao |
 |---|---|---|
-| Hướng | góc của `doa` (§3.6) ở mỗi bước nó dò lại, đổi ra trễ giữa hai micro `τ = τ_max·cos θ` mẫu, τ_max = d·fs/c = 2,10; lần dò có độ tin dưới `conf_min` thì bỏ; giữa hai lần dò cổng giữ nguyên. Dưới `bss`, `doa` dò theo **quyết định thô của một `vad` thứ hai trên trung bình hai micro sau `hpf`**, không theo `vad` của lối ra, và chỉ khi quyết định thô ấy đã báo có tiếng liền `heard_run_s` (0,128 s, 8 bước) | `doa` đã chạy trong chuỗi và chỉ dò khi có tiếng nói, nên hướng là của người nói. Trên bản thu board B, dải 2–8 kHz của nó cho hai người ở hai phía trễ ±1,4 mẫu, tách hẳn; bộ ước trễ riêng của `tinyai-signal` (300–3 800 Hz, cửa sổ 0,4 s) chỉ ra −0,8 / +0,6 mẫu và chồng lên nhau. `vad` của lối ra nghe tiếng đã qua cổng: cổng dìm ghế kia là `vad` tắt, `doa` thôi dò, cổng kẹt, và bản ghép A/B không tách được gì. Quyết định thô, không phần kéo dài, vì lúc khởi động phần kéo dài báo có tiếng 0,26 s trên nhiễu điện chung của hai micro, mà `doa` đọc ra 88° với độ tin 112–125. Tiếng gõ phím và tiếng tách dài 16–48 ms làm quyết định thô bật 1–3 bước, và mỗi bàn phím có hướng của nó: 10 phút tiếng phòng trên board B, quạt, gõ phím và có thể người nói chuyện ở xa, không ai nói với board, cho LEARN 4 ghế, còn đòi 0,128 s liền thì chỉ còn 41 lần dò và không ghế nào, mà người nói thật vẫn tách sau 3,2–3,8 s (`measurements/afe/bss.md` §11) |
+| Hướng | góc của `doa` (§3.6) ở mỗi bước nó dò lại, đổi ra trễ giữa hai micro `τ = τ_max·cos θ` mẫu, τ_max = d·fs/c = 2,10; lần dò có độ tin dưới `conf_min` thì bỏ; giữa hai lần dò cổng giữ nguyên. Dưới `bss`, `doa` dò theo **quyết định thô của một `vad` thứ hai trên trung bình hai micro sau `hpf`**, không theo `vad` của lối ra | `doa` đã chạy trong chuỗi và chỉ dò khi có tiếng nói, nên hướng là của người nói. Trên bản thu board B, dải 2–8 kHz của nó cho hai người ở hai phía trễ ±1,4 mẫu, tách hẳn; bộ ước trễ riêng của `tinyai-signal` (300–3 800 Hz, cửa sổ 0,4 s) chỉ ra −0,8 / +0,6 mẫu và chồng lên nhau. `vad` của lối ra nghe tiếng đã qua cổng: cổng dìm ghế kia là `vad` tắt, `doa` thôi dò, cổng kẹt, và bản ghép A/B không tách được gì. Quyết định thô, không phần kéo dài, vì lúc khởi động phần kéo dài báo có tiếng 0,26 s trên nhiễu điện chung của hai micro, mà `doa` đọc ra 88° với độ tin 112–125. |
 | Cổng | ghế j, đánh số theo τ tăng dần, nhận `σ(2s(τ − b_{j−1})) − σ(2s(τ − b_j))`: σ là hàm logistic, `s` là `gate_slope` 20 mỗi mẫu trễ, `b` các ranh giới, hai đầu ±∞ | các cổng cộng lại đúng 1 nên hai lối ra bù nhau; 20 mỗi mẫu là độ dốc của `tinyai-signal`, cách ranh giới 0,1 mẫu đã qua 98% |
 | Lối ra | lối ra 0 là trộn trần (trung bình hai kênh) nhân cổng của ghế giữ, lối ra 1 là trộn trần nhân phần còn lại | trộn trần là đường gốc của §3.2, nên E8-T4 đo đúng phần cổng thêm vào |
 | Số ghế | mỗi ghế giữ một số 0…`seats_max`−1 từ lúc được nhận tới lúc bị quên. Lần tách đầu đánh số theo τ tăng dần; ghế nhận sau lấy số nhỏ nhất còn trống, theo τ tăng dần; ghế dời về người mới giữ số của nó. Trước lần tách đầu, và ở FIXED, số 0 là phía τ < 0 (trên 90°), số 1 là phía τ > 0. Cổng của từng số đặt ở mỗi lần dò và giữ nguyên giữa hai lần dò, như cổng của ghế giữ; module trả cổng và hướng của mọi số | lối ra theo từng ghế (`test_apps/bss_live`) nghe được một người qua cả buổi, kể cả khi LEARN nhận thêm ghế xen giữa hai ghế cũ |
@@ -692,12 +692,20 @@ một hệ số theo hướng ấy: người ở ghế giữ đi qua, người �
 | FIXED, `mode` 0 (mặc định) | hai ghế, ranh giới b = 0 (90°, trục vuông góc của cặp micro); ghế giữ là phía chứa `keep_deg` | biết trước người ra lệnh ngồi phía nào thì tách ngay từ lần dò đầu |
 | LEARN, `mode` 1 | ghế là các đỉnh của mật độ các lần dò, tối đa `seats_max` ghế; ghế giữ theo `keep_rule`: 0 là ghế có tâm gần `keep_deg` nhất, 1 là ghế được gán nhiều lần dò nhất kể từ lúc nhận, bắt đầu từ số đếm trong cửa sổ; trước khi có hai ghế, ghế giữ là phía của `keep_deg` | hai người ngồi cùng một phía của board, hay không biết trước ai ngồi đâu |
 
-**LEARN** giữ histogram số lần dò rơi vào mỗi độ 0…180 trong `decision_s` giây tiếng nói gần nhất, chỉ tính những lần
-dò trong `window_horizon_s` giây gần nhất (60 s): vòng đệm các góc, góc vào thì cộng một, góc rời hay quá hạn thì trừ
-một. Không có hạn này, tiếng lẻ tẻ cộng dồn qua nhiều phút thành đỉnh: 15 phút tiếng phòng ấy trên board B, đã lọc
-`heard_run_s`, vẫn cho 4 ghế ở phút 12,7; có hạn 60 s thì không ghế nào, còn người nói thật tách như cũ
-(`measurements/afe/bss.md` §11). Mỗi `recheck_s`, lần đầu ngay khi các lần dò phủ `first_speech_s` giây tiếng nói,
-nó tìm **đỉnh** của histogram ấy:
+**LEARN** giữ histogram số lần dò rơi vào mỗi độ 0…180 trong `decision_s` giây tiếng nói gần nhất: vòng đệm các góc,
+góc vào thì cộng một, góc rời thì trừ một. Hai luật chọn lần dò nào vào đó; cổng vẫn đi theo mọi lần dò:
+
+- **Tiếng liền.** Một lần dò chỉ được đếm vào histogram, vào đồng hồ `seat_forget_s` và vào ghế có vùng chứa nó khi
+  `doa` đã dò liền `learn_run_s` (0,096 s: lần thứ 3 liên tiếp, cách nhau `update_every_hops`). Tiếng gõ phím và tiếng
+  tách dài 16–48 ms làm `vad` thô bật 1–3 bước, mỗi bàn phím một hướng: 10 phút tiếng phòng trên board B, quạt, gõ phím
+  và có thể người nói chuyện ở xa, không ai nói với board, cho LEARN 4 ghế. Đòi tiếng liền ngay ở chỗ `doa` dò cũng chặn
+  được, nhưng cổng giữ hướng người trước lâu hơn ở đầu mỗi lượt, rò tăng tới 30 dB; đòi ở chỗ LEARN đếm thì cổng
+  không đổi (`measurements/afe/bss.md` §11).
+- **Hạn.** Lần dò cũ hơn `window_horizon_s` (60 s) rời histogram. Không có hạn, tiếng lẻ tẻ cộng dồn qua nhiều phút
+  thành đỉnh, vì cửa sổ đếm theo tiếng nói: 15 phút tiếng phòng ấy vẫn cho 4 ghế ở phút 12,7. Có cả hai luật, 30 phút
+  tiếng phòng không cho ghế nào, còn người nói thật tách sau 3,4–3,9 s (`measurements/afe/bss.md` §11).
+
+Mỗi `recheck_s`, lần đầu ngay khi các lần dò phủ `first_speech_s` giây tiếng nói, nó tìm **đỉnh** của histogram ấy:
 
 - **Mật độ theo độ trễ.** Số đếm dồn vào các ô đều theo τ, mỗi `min_gap` chia `bins_per_gap` ô, rồi làm trơn bằng nhân
   tam giác nửa rộng `smooth_bins` ô, trọng số nguyên, nên C và bản soi gương ra cùng số nguyên.
