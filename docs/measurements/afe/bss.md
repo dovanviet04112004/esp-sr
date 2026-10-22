@@ -133,6 +133,10 @@ LEARN, mặc định của `contracts/afe.yaml`. Cột "đỉnh của `doa`" là
 Ghế nằm trên đỉnh của bản đồ góc. Lúc nói đè, mỗi bước cổng giữ một phía, không tách được hai giọng trong cùng một bước
 (KẾ HOẠCH §3.8, giới hạn).
 
+`make eval-bss` chạy chuỗi không có `calib/bal`, còn board áp nó. Có `calib/bal` (bản soi gương, 22/10), ba bản thu
+này tách cùng giây, 5,8, 3,1 và 3,6 s, ghế lệch 4–12°: 50° và 141°, 47° và 131°, 19° và 123°. Trên lượt `make bss`
+17:36 (§10), bỏ `calib/bal` đổi hẳn giây tách.
+
 **Bản thu luân phiên tách ở 5,8 s.** B mở lời ở giây 2,0 khi A chưa dứt, và trong 0,75 s nói đè `doa` đọc B ở 74–76°.
 Từ giây 3,25, B nói một mình và `doa` đọc 52–62°. Hai cụm của B cách nhau hơn `min_gap` nên là hai đỉnh. Với
 `seats_max` 2, có ba đỉnh thì LEARN chờ đến khi đỉnh bị bỏ thấp hơn nửa đỉnh thấp nhất được giữ (KẾ HOẠCH §3.8):
@@ -192,10 +196,10 @@ Kết quả:
 
   Với luật ở `f8d0a6e`, lạc 0%: hai ghế cùng phía về 0 ghế ở giây 58 và người còn nói (76°) chuyển từ số 0 sang số 1,
   số của phía chứa cả hai, tới khi người kia quay lại.
-- **Lần dò lạc của `doa` trên board B**, qua chuỗi của bản soi gương, lần dò cách đỉnh gần nhất quá 20° là lạc: một người
-  nói rõ (`A_trai_1`, `B_phai_1`) 0–0,5%; hai người luân phiên hay nói đè 0,9–3,2%, chủ yếu là đoạn quét chuyển ở
-  khoảng 80°, thành chuỗi 6–7 lần liền. Độ tin của lần lạc không thấp hơn lần dò của người nói (trung vị 52–64 so với
-  44–50), nên `conf_min` không lọc được lạc.
+- **Lần dò lạc của `doa` trên board B**, qua chuỗi của bản soi gương có `calib/bal`, lần dò cách đỉnh gần nhất quá 20°
+  là lạc: một người nói rõ (`A_trai_1`, `B_phai_1`) 0–0,5%; hai người luân phiên hay nói đè 1,8–2,8%, chủ yếu ở đoạn
+  quét chuyển giữa hai người. Độ tin của lần lạc không thấp hơn lần dò của người nói (trung vị 48–74 so với 45), nên
+  `conf_min` không lọc được lạc.
 - **Chỉ có lần dò lạc thì LEARN lập ghế ma.** Script tạm chạy bản soi gương trên 20 s toàn lần dò lạc, hai bước một lần
   như lúc có tiếng, 5 hạt giống:
   - lạc đều theo góc, như phần lạc của bộ kịch bản: 5/5 ra hai ghế ở 12–15° và 165–167°, sau 3,5–9,5 s. Đều theo góc thì
@@ -313,22 +317,33 @@ có lối ra. Mỗi ô: mất / rò cả bài / rò trong 0,5 s đầu mỗi lư
 
 ## 10. Lượt `make bss` của chủ repo, 20/10 chiều
 
-LEARN, 2 ghế, `ns` mean, D 4 s. Tiếng thô `ch0` và `ch1` của từng lượt chạy lại qua chuỗi của bản soi gương (script tạm):
+LEARN, 2 ghế, `ns` mean, D 4 s. Tiếng thô `ch0` và `ch1` của từng lượt chạy lại qua chuỗi của bản soi gương có
+`calib/bal` của board (`calib/board_b_balance.csv`), script tạm. Với bảng ấy, bản soi gương ra đúng số ghế, hướng và
+giây tách mà dòng trạng thái của board in ra; bỏ bảng ấy thì lượt 17:36 tách ở giây 6,6 thay vì 47,9, ở 167° và 87°.
 
 | Lượt | Dài | Trên nền +6 dB | Trên nền +10 dB | `vad` thô nghe | Lần dò của `doa` | Ghế |
 |---|---|---|---|---|---|---|
 | 16:13 | 30 s | 1,6 s | 0,7 s | 1,0 s | — | 0 |
 | 16:23 | 10 s | 1,6 s | 1,0 s | 1,2 s | — | 0 |
-| 16:27 | 10 s | 0,5 s | 0,3 s | 0,5 s | 15, ở 94–104° | 0 |
-| 16:36 | 10 s | 1,2 s | 0,7 s | 0,9 s | 33: 50°, 78–90°, 20 lần ở 176–180° độ tin trung vị 36 | 0 |
+| 16:27 | 10 s | 0,5 s | 0,3 s | 0,5 s | 15, ở 90–109° | 0 |
+| 16:36 | 10 s | 1,2 s | 0,7 s | 0,9 s | 33: 40–49°, 70–89°, 24 lần ở 150–180°, độ tin trung vị 35 | 0 |
+| 17:36 | 60 s | 14,7 s | 10,2 s | 17,2 s | 527: 353 ở 80–129°, 89 ở 0–29°, 77 ở 140–180°, độ tin trung vị 33 | 2 từ giây 48: 121° và 84° |
+| 17:39 | 45 s | 18,8 s | 14,0 s | 19,6 s | 612: 553 ở 80–119°, 44 ở 150–169°, độ tin trung vị 48 | 2 từ giây 11: 160° và 100°; cuối lượt 94° và 111° |
 
-- Không lượt nào có đủ tiếng: `vad` thô nghe 0,5–1,2 s, trong khi LEARN cần các lần dò phủ `first_speech_s` 1,5 s tiếng
-  nói mới dò đỉnh lần đầu, rồi hai lần kiểm lại khớp nhau. Board ra `seats 0` suốt, bản soi gương cũng vậy. `vad` nghe
+- Bốn lượt 16:13–16:36 không có đủ tiếng: `vad` thô nghe 0,5–1,2 s, trong khi LEARN cần các lần dò phủ `first_speech_s`
+  1,5 s tiếng nói mới dò đỉnh lần đầu, rồi hai lần kiểm lại khớp nhau. Board ra `seats 0` suốt, bản soi gương cũng vậy. `vad` nghe
   khớp với thời gian tiếng vượt nền 6 dB, nên `vad` không bỏ sót: bản thu thiếu tiếng nói.
 - Hai lượt 16:27 và 16:36 không có tiếng nói: mọi đoạn vượt nền 10 dB chỉ dài 16–48 ms, như tiếng gõ hay tiếng tách,
-  không đoạn nào dài như một âm tiết. Lượt 16:27 có 10 tiếng tách cách nhau đều ~0,75 s, 15–21 dB trên nền, ở 94–104°;
-  lượt 16:36 có 23 tiếng tách lộn xộn, 10–26 dB, phần lớn ở 176–180°. Bản thu hai người luân phiên của board B, cùng
+  không đoạn nào dài như một âm tiết. Lượt 16:27 có 10 tiếng tách cách nhau đều ~0,75 s, 15–21 dB trên nền, ở 90–109°;
+  lượt 16:36 có 23 tiếng tách lộn xộn, 10–26 dB, phần lớn ở 150–180°. Bản thu hai người luân phiên của board B, cùng
   chuỗi: `vad` nghe 7,7 s trong 10 s đầu, đỉnh 24–31 dB trên nền mỗi giây.
+- Hai lượt 17:36 và 17:39 có tiếng nói, nhưng người nói không ngồi ở hai đầu cặp micro:
+  - 17:39: hai người nói từ 80–99° và 100–119°, cả hai trước mặt board, lệch nhau khoảng 20°, cỡ 0,6 mẫu trễ, vừa trên
+    `min_gap`. Giây 2–4 có một tràng tiếng từ 140–179°: LEARN lập ghế ở 160° từ giây 11 và giữ ghế ấy trống tới giây 42
+    mới dời về 94°; trong lúc ấy cả hai người phần lớn vào cùng một số ghế.
+  - 17:36: tiếng đến từ bốn vùng, 120–129°, 80–99°, 0–29° và 150–169°. Với 2 ghế, tách lần đầu chờ tới khi đỉnh bị bỏ
+    thấp hơn nửa đỉnh thấp nhất được giữ: tới giây 48, ở 121° và 84°; trước đó cổng chia ở chính diện.
+  - LEARN tách nhanh khi hai người ngồi ở hai đầu cặp micro: bản thu luân phiên của board B, 52° và 140°, tách ở 5,8 s.
 - `ch1` to hơn `ch0` 9,2–10,5 dB ở mọi lượt, cả lúc chỉ có nền, đúng mức lệch của `mic_array.md` §1; `calib/bal` của
   board bù mức này trong chuỗi (dòng `job` ghi `balance calib/bal`).
 - Lượt 17:33 (60 s) không ra tệp nào: WSL vừa khởi động lại và Docker Desktop chưa lên, nên `srhost.stream_rx` không
@@ -339,25 +354,25 @@ LEARN, 2 ghế, `ns` mean, D 4 s. Tiếng thô `ch0` và `ch1` của từng lư�
 `make bss` 20/10 lúc 17:53, LEARN, 2 ghế, `ns` mean, D 4 s, 300 s, không ai được mời nói: board ra `seats 0` suốt lượt,
 18 750 khung không rơi khung nào, không tràn DMA, 3 241 µs trung bình và 4 345 µs đỉnh mỗi bước.
 
-Tiếng thô chạy lại qua chuỗi của bản soi gương:
+Tiếng thô chạy lại qua chuỗi của bản soi gương có `calib/bal` của board:
 - `vad` thô nghe 12,7 s; 397 lần dò thành 113 đợt, phần lớn dài 0–0,7 s, đỉnh 2–34 dB trên nền.
-- Góc: 178 lần ở 30–60° (các đợt quanh 48° lên 25–33 dB trên nền), 78 lần ở 80–110°, 68 lần ở 150–180°, còn lại rải.
-- LEARN 2 ghế không lập ghế: cả 141 lần dò đỉnh đều thấy 3–4 ứng viên ngang nhau (174°, 95°, 69°, 48°), nên tách lần đầu
-  chờ mãi. 3 ghế thì lập ghế ở 48°, 95°, 174° từ giây 159; 4 ghế thì ở 48°, 69°, 95°, 174°.
+- Góc: 154 lần ở 30–59° (các đợt quanh 45° lên 25–33 dB trên nền), 77 lần ở 80–109°, 74 lần ở 150–180°, còn lại rải.
+- LEARN 2 ghế không lập ghế: cả 141 lần dò đỉnh đều thấy 3–4 ứng viên ngang nhau, thường nhất ở 45°, 90° và 175°, nên
+  tách lần đầu chờ mãi. 3 ghế thì lập ghế ở 47°, 90°, 168° từ giây 159; 4 ghế thì ở 47°, 66°, 90°, 168°.
 - Độ hữu thanh của bước có lần dò (đỉnh tự tương quan ở cao độ 80–400 Hz): người nói thật trên board B trung vị
   0,59–0,80 và 48–76% lần dò trên 0,6; lượt này trung vị 0,42 và 12%, ở mọi dải góc thấp như nhau.
 
-Ba cách sửa đã thử trên bản soi gương, không cách nào được giữ:
+Ba cách sửa đã thử trên bản soi gương có `calib/bal`, không cách nào được giữ:
 
 | Cách | Tiếng phòng, 2 ghế | Tiếng phòng, 4 ghế | Ba bản thu người thật, tách sau |
 |---|---|---|---|
 | như hiện nay | không ghế | 4 ghế từ 159 s | 3,1–5,8 s |
-| cửa sổ quên lần dò cũ hơn 20 s | 2 ghế ở 42°, 174° từ 187 s | 4 ghế từ 167 s | như cũ |
-| cửa sổ quên lần dò cũ hơn 40 s | 2 ghế ở 42°, 69° từ 206 s | 4 ghế từ 166 s | như cũ |
-| chỉ học từ bước hữu thanh, ngưỡng 0,6 | 2 ghế ở 51°, 92° từ 226 s | 4 ghế từ 226 s | 3,2–3,7 s |
-| `vad` thô ở mức 3 | không ghế | 4 ghế từ 251 s | 3,1–3,7 s, lần dò của người nói bớt 3–20% |
+| cửa sổ quên lần dò cũ hơn 20 s | 2 ghế ở 37°, 90° từ 187 s | 4 ghế từ 167 s | như cũ |
+| cửa sổ quên lần dò cũ hơn 40 s | 2 ghế ở 37°, 66° từ 206 s | 4 ghế từ 166 s | như cũ |
+| chỉ học từ bước hữu thanh, ngưỡng 0,6 | 2 ghế ở 47°, 88° từ 226 s | 4 ghế từ 226 s | 3,2–3,7 s |
+| `vad` thô ở mức 3 | không ghế | 4 ghế từ 205 s | 3,1–3,7 s, lần dò của người nói bớt 3–20% |
 
-Lần dò lạc đều theo góc, 3 hay 10 lần mỗi giây trong 300 s, vẫn ra 4 ghế với cả hai mức quên của cửa sổ. Các đợt quanh 48°
-và 92° có phần hữu thanh và to tới 33 dB trên nền: nhiều khả năng là tiếng người hay tiếng động thật trong nhà lúc thu,
+Lần dò lạc đều theo góc, 3 hay 10 lần mỗi giây trong 300 s, vẫn ra 4 ghế với cả hai mức quên của cửa sổ. Các đợt quanh 45°
+và 90° có phần hữu thanh và to tới 33 dB trên nền: nhiều khả năng là tiếng người hay tiếng động thật trong nhà lúc thu,
 và LEARN không có cách nào biết đó không phải người nói. Chưa đổi luật khi chưa có bản thu phòng trống biết rõ nguồn
 tiếng (TASKS E8-T8). Tới lúc đó: phòng có tiếng động thì `make bss` nên chọn 2 ghế.
