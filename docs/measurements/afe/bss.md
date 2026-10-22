@@ -349,30 +349,56 @@ giây tách mà dòng trạng thái của board in ra; bỏ bảng ấy thì lư
 - Lượt 17:33 (60 s) không ra tệp nào: WSL vừa khởi động lại và Docker Desktop chưa lên, nên `srhost.stream_rx` không
   chạy, và `make bss` chờ dòng `listening on` 180 s mà không in gì.
 
-## 11. Tiếng phòng 5 phút và ghế ma
+## 11. Tiếng phòng và ghế ma
 
-`make bss` 20/10 lúc 17:53, LEARN, 2 ghế, `ns` mean, D 4 s, 300 s, không ai được mời nói: board ra `seats 0` suốt lượt,
-18 750 khung không rơi khung nào, không tràn DMA, 3 241 µs trung bình và 4 345 µs đỉnh mỗi bước.
+Phòng thu có tiếng quạt, tiếng gõ phím của mọi người và có thể có người nói chuyện ở xa; không ai nói với board (chủ
+repo, 22/10). Ghế ma ở đây là ghế không thuộc người nào đang nói với board. Mọi lần chạy lại dưới đây đi qua chuỗi của
+bản soi gương có `calib/bal` của board, và ra đúng ghế, hướng, giây tách mà board in ra.
 
-Tiếng thô chạy lại qua chuỗi của bản soi gương có `calib/bal` của board:
+**5 phút**, `make bss` 20/10 lúc 17:53, LEARN, 2 ghế, `ns` mean, D 4 s: board ra `seats 0` suốt lượt, 18 750 khung
+không rơi khung nào, không tràn DMA, 3 241 µs trung bình và 4 345 µs đỉnh mỗi bước.
 - `vad` thô nghe 12,7 s; 397 lần dò thành 113 đợt, phần lớn dài 0–0,7 s, đỉnh 2–34 dB trên nền.
 - Góc: 154 lần ở 30–59° (các đợt quanh 45° lên 25–33 dB trên nền), 77 lần ở 80–109°, 74 lần ở 150–180°, còn lại rải.
 - LEARN 2 ghế không lập ghế: cả 141 lần dò đỉnh đều thấy 3–4 ứng viên ngang nhau, thường nhất ở 45°, 90° và 175°, nên
   tách lần đầu chờ mãi. 3 ghế thì lập ghế ở 47°, 90°, 168° từ giây 159; 4 ghế thì ở 47°, 66°, 90°, 168°.
 - Độ hữu thanh của bước có lần dò (đỉnh tự tương quan ở cao độ 80–400 Hz): người nói thật trên board B trung vị
-  0,59–0,80 và 48–76% lần dò trên 0,6; lượt này trung vị 0,42 và 12%, ở mọi dải góc thấp như nhau.
+  0,59–0,80 và 48–76% lần dò trên 0,6; lượt này trung vị 0,42 và 12%.
 
-Ba cách sửa đã thử trên bản soi gương có `calib/bal`, không cách nào được giữ:
+**10 phút**, `make bss` 22/10 lúc 08:28, LEARN 4 ghế, `ns` mean, D 4 s: board tự ra ghế ma, 2 ghế ở giây 193 (155° và
+88°), 3 ghế ở giây 211 (thêm 58°), 4 ghế ở giây 451 (156°, 88°, 63°, 102°), giữ tới hết lượt; bản soi gương ra 4 ghế
+từ giây 192,7. 4,04 ms trung bình và 5,66 ms đỉnh mỗi bước, không tràn DMA; mạng `esp` rơi 111 khung quanh giây 232
+nên lượt báo đỏ ở bước kiểm luồng.
 
-| Cách | Tiếng phòng, 2 ghế | Tiếng phòng, 4 ghế | Ba bản thu người thật, tách sau |
+**Độ dài tiếng liền dưới lần dò.** Phần lần dò còn lại nếu `doa` chỉ dò khi `vad` thô đã báo có tiếng liền K bước:
+
+| Bản thu | K 4 | K 6 | K 8 |
 |---|---|---|---|
-| như hiện nay | không ghế | 4 ghế từ 159 s | 3,1–5,8 s |
-| cửa sổ quên lần dò cũ hơn 20 s | 2 ghế ở 37°, 90° từ 187 s | 4 ghế từ 167 s | như cũ |
-| cửa sổ quên lần dò cũ hơn 40 s | 2 ghế ở 37°, 66° từ 206 s | 4 ghế từ 166 s | như cũ |
-| chỉ học từ bước hữu thanh, ngưỡng 0,6 | 2 ghế ở 47°, 88° từ 226 s | 4 ghế từ 226 s | 3,2–3,7 s |
-| `vad` thô ở mức 3 | không ghế | 4 ghế từ 205 s | 3,1–3,7 s, lần dò của người nói bớt 3–20% |
+| tiếng phòng 5 phút | 34% | 19% | 11% |
+| lượt 16:36, chỉ có tiếng tách | 3% | 0% | 0% |
+| năm bản thu người nói của board B | 76–89% | 65–83% | 56–79% |
+| lượt 17:36 và 17:39, có người nói | 64–76% | 49–63% | 38–52% |
 
-Lần dò lạc đều theo góc, 3 hay 10 lần mỗi giây trong 300 s, vẫn ra 4 ghế với cả hai mức quên của cửa sổ. Các đợt quanh 45°
-và 90° có phần hữu thanh và to tới 33 dB trên nền: nhiều khả năng là tiếng người hay tiếng động thật trong nhà lúc thu,
-và LEARN không có cách nào biết đó không phải người nói. Chưa đổi luật khi chưa có bản thu phòng trống biết rõ nguồn
-tiếng (TASKS E8-T8). Tới lúc đó: phòng có tiếng động thì `make bss` nên chọn 2 ghế.
+Tiếng gõ và tiếng tách dài 16–48 ms nên làm `vad` thô bật 1–3 bước; một âm tiết dài hơn 8 bước.
+
+**Các cách sửa, LEARN 4 ghế trên tiếng phòng, 2 ghế trên người nói:**
+
+| Cách | Phòng 5 phút | Phòng 10 phút | Phòng ghép 15 và 30 phút | Ba bản thu người thật, tách sau | 17:36 / 17:39 |
+|---|---|---|---|---|---|
+| như hiện nay | 4 ghế từ 159 s | 4 ghế từ 193 s | — | 3,1–5,8 s | 47,9 / 11,1 s |
+| cửa sổ quên lần dò cũ hơn 20 s | 4 ghế từ 167 s | — | — | như cũ | — |
+| cửa sổ quên lần dò cũ hơn 40 s | 4 ghế từ 166 s | — | — | như cũ | — |
+| chỉ học từ bước hữu thanh, ngưỡng 0,6 | 4 ghế từ 226 s | — | — | 3,2–3,7 s | — |
+| `vad` thô ở mức 3 | 4 ghế từ 205 s | — | — | 3,1–3,7 s | — |
+| `doa` dò khi `vad` thô liền 4 bước | 4 ghế từ 185 s | — | — | 3,2–6,1 s | không tách / 14,2 s |
+| `doa` dò khi `vad` thô liền 6 bước | 4 ghế từ 226 s | — | — | 3,2–3,8 s | không tách / 14,3 s |
+| `doa` dò khi `vad` thô liền 8 bước | không ghế, 43 lần dò | không ghế, 41 lần dò | 4 ghế ở 765 s (91 và 165 lần dò) | 3,2–3,8 s | 26,2 / 14,4 s |
+| 8 bước liền và cửa sổ quên lần dò cũ hơn 60 s | không ghế | không ghế | không ghế | 3,2–3,8 s | 26,2 / 14,4 s |
+
+- Ở 2 ghế, cửa sổ quên 20 hay 40 s và bước hữu thanh còn làm lượt 5 phút ra 2 ghế (37° và 90°, 37° và 66°, 47° và
+  88°), vì bớt ứng viên thì tách lần đầu hết chờ.
+- Lần dò lạc đều theo góc, 3 hay 10 lần mỗi giây trong 300 s, vẫn ra 4 ghế với cửa sổ quên 20 hay 40 s.
+- Chỉ đòi tiếng liền thì tiếng động hiếm vẫn cộng dồn qua nhiều phút: cửa sổ đếm theo tiếng nói, nên 91 lần dò trong
+  15 phút vẫn thành bốn đỉnh. Hạn 60 s chặn cộng dồn; người nói thật đầy 47 lần dò đầu trong vài giây.
+- Giữ cách cuối: `heard_run_s` 0,128 s và `window_horizon_s` 60 s (KẾ HOẠCH §3.8). Một nguồn chỉ thành ghế khi có
+  1,5 s lần dò trong tiếng liền 8 bước trở lên, trong 60 s gần nhất: người đang nói với board có đủ sau vài giây, còn
+  tiếng gõ phím và tiếng nói lẻ tẻ ở xa thì không.
