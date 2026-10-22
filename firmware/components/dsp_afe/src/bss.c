@@ -20,12 +20,13 @@ typedef struct {
     size_t window; // updates the ring holds
     size_t first;  // updates ahead of the first search
     uint32_t recheck_hops;
-    uint32_t forget;  // updates of speech a seat may go unreached
-    uint32_t horizon; // hops a reading stays in the window; 0 keeps it
-    uint32_t history; // hops of held angles numbered_back reaches
-    size_t n_bins;    // delay bins of the density
-    size_t standing;  // most peaks it holds: never two in adjacent bins
-    size_t peaks;     // most peaks bins_per_gap apart
+    uint32_t forget;    // updates of speech a seat may go unreached
+    uint32_t horizon;   // hops a reading stays in the window; 0 keeps it
+    uint32_t learn_run; // searches in a row LEARN needs to count a reading
+    uint32_t history;   // hops of held angles numbered_back reaches
+    size_t n_bins;      // delay bins of the density
+    size_t standing;    // most peaks it holds: never two in adjacent bins
+    size_t peaks;       // most peaks bins_per_gap apart
 } span_t;
 
 typedef struct {
@@ -64,7 +65,9 @@ struct dsp_afe_bss_s {
     size_t n_prev;
     uint32_t hist[ANGLES];
     uint32_t hop;
-    uint32_t heard; // updates counted so far: the clock of seat_forget_s
+    uint32_t heard;       // updates counted so far: the clock of seat_forget_s
+    uint32_t streak;      // searches in a row, update_every_hops apart
+    uint32_t searched_at; // hop of the last search
     uint32_t since;
     uint8_t seats;
     uint8_t agree;
@@ -116,8 +119,8 @@ static bool config_ok(const dsp_afe_bss_config_t *cfg)
         cfg->core_share > 0.0f && cfg->core_share <= 0.5f && cfg->seat_follow >= 0.0f &&
         cfg->seat_follow <= 1.0f && cfg->boundary_share_min >= 0.0f && cfg->boundary_share_min <= 0.5f &&
         cfg->boundary_follow >= 0.0f && cfg->boundary_follow <= 1.0f && cfg->seat_forget_s > 0.0f &&
-        cfg->window_horizon_s >= 0.0f && cfg->update_every_hops >= 1 && cfg->spacing_m > 0.0f &&
-        cfg->speed_of_sound_m_s > 0.0f && cfg->history_s >= 0.0f;
+        cfg->window_horizon_s >= 0.0f && cfg->learn_run_s >= 0.0f && cfg->update_every_hops >= 1 &&
+        cfg->spacing_m > 0.0f && cfg->speed_of_sound_m_s > 0.0f && cfg->history_s >= 0.0f;
     return ok && density_bins(cfg) <= DENSITY_BINS_CAP;
 }
 
@@ -138,6 +141,7 @@ static span_t span_of(const dsp_afe_bss_config_t *cfg)
         .recheck_hops = (uint32_t)rounded((double)cfg->recheck_s / hop_s),
         .forget = (uint32_t)rounded((double)cfg->seat_forget_s / per_update),
         .horizon = (uint32_t)floor((double)cfg->window_horizon_s / hop_s + 0.5),
+        .learn_run = (uint32_t)rounded((double)cfg->learn_run_s / per_update),
         .history = (uint32_t)floor((double)cfg->history_s / hop_s + 0.5),
         .n_bins = n_bins,
         .standing = (n_bins - 1u) / 2u + 1u,
@@ -219,6 +223,8 @@ void dsp_afe_bss_reset(dsp_afe_bss_t *st)
     memset(st->hist, 0, sizeof(st->hist));
     st->hop = 0;
     st->heard = 0;
+    st->streak = 0;
+    st->searched_at = 0;
     st->since = 0;
     st->seats = 0;
     st->agree = 0;
@@ -809,9 +815,14 @@ esp_err_t dsp_afe_bss_process(dsp_afe_bss_t *st, const dsp_spec_cplx_t *x0, cons
 {
     if (st == NULL || x0 == NULL || x1 == NULL || y0 == NULL || y1 == NULL) { return ESP_ERR_INVALID_ARG; }
     const bool counted = searched && angle_deg >= 0 && angle_deg < ANGLES && confidence >= st->cfg.conf_min;
+    if (searched) {
+        const bool spaced = st->streak > 0 && st->hop - st->searched_at == st->cfg.update_every_hops;
+        st->streak = spaced ? st->streak + 1u : 1u;
+        st->searched_at = st->hop;
+    }
     if (st->cfg.mode == DSP_AFE_BSS_LEARN) {
         if (st->span.horizon > 0) { expire(st); }
-        if (counted) {
+        if (counted && st->streak >= st->span.learn_run) {
             st->heard++;
             count(st, angle_deg);
             if (st->seats >= 2) { mark(st, st->delay[angle_deg]); }

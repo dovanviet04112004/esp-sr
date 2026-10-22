@@ -351,6 +351,7 @@ static void bench_bss(bool learn, bool late)
         .boundary_follow = GEN_AFE_BSS_BOUNDARY_FOLLOW,
         .seat_forget_s = GEN_AFE_BSS_SEAT_FORGET_S,
         .window_horizon_s = GEN_AFE_BSS_WINDOW_HORIZON_S,
+        .learn_run_s = GEN_AFE_BSS_LEARN_RUN_S,
         .update_every_hops = GEN_AFE_DOA_UPDATE_EVERY_HOPS,
         .spacing_m = GEN_ARRAY_SPACING_M,
         .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
