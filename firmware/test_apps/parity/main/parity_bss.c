@@ -6,7 +6,7 @@
 #include "parity.h"
 
 #define FLOATS_PER_BIN 2
-#define CONFIG_VALUES 24 // in the order of srpipe.dsp.emit_golden.BSS_FIELDS
+#define CONFIG_VALUES 25 // in the order of srpipe.dsp.emit_golden.BSS_FIELDS
 #define DIRECTIONS 2
 #define NUMBERS DSP_AFE_BSS_SEATS_MAX
 
@@ -38,10 +38,11 @@ static dsp_afe_bss_config_t config_of(const float *v)
                                   .boundary_share_min = v[17],
                                   .boundary_follow = v[18],
                                   .seat_forget_s = v[19],
-                                  .update_every_hops = (uint8_t)v[20],
-                                  .spacing_m = v[21],
-                                  .speed_of_sound_m_s = v[22],
-                                  .history_s = v[23]};
+                                  .window_horizon_s = v[20],
+                                  .update_every_hops = (uint8_t)v[21],
+                                  .spacing_m = v[22],
+                                  .speed_of_sound_m_s = v[23],
+                                  .history_s = v[24]};
 }
 
 // The mirror's own reach, Bss.history: the delayed gates are read that far back.

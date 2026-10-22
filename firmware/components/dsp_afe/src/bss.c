@@ -21,6 +21,7 @@ typedef struct {
     size_t first;  // updates ahead of the first search
     uint32_t recheck_hops;
     uint32_t forget;  // updates of speech a seat may go unreached
+    uint32_t horizon; // hops a reading stays in the window; 0 keeps it
     uint32_t history; // hops of held angles numbered_back reaches
     size_t n_bins;    // delay bins of the density
     size_t standing;  // most peaks it holds: never two in adjacent bins
@@ -29,6 +30,7 @@ typedef struct {
 
 typedef struct {
     int16_t *ring;
+    uint32_t *stamp;  // hop of each reading in the ring
     int16_t *held;    // held angle of each of the last history + 1 hops
     uint16_t *bin_of; // delay bin of each degree
     uint32_t *counts;
@@ -114,8 +116,8 @@ static bool config_ok(const dsp_afe_bss_config_t *cfg)
         cfg->core_share > 0.0f && cfg->core_share <= 0.5f && cfg->seat_follow >= 0.0f &&
         cfg->seat_follow <= 1.0f && cfg->boundary_share_min >= 0.0f && cfg->boundary_share_min <= 0.5f &&
         cfg->boundary_follow >= 0.0f && cfg->boundary_follow <= 1.0f && cfg->seat_forget_s > 0.0f &&
-        cfg->update_every_hops >= 1 && cfg->spacing_m > 0.0f && cfg->speed_of_sound_m_s > 0.0f &&
-        cfg->history_s >= 0.0f;
+        cfg->window_horizon_s >= 0.0f && cfg->update_every_hops >= 1 && cfg->spacing_m > 0.0f &&
+        cfg->speed_of_sound_m_s > 0.0f && cfg->history_s >= 0.0f;
     return ok && density_bins(cfg) <= DENSITY_BINS_CAP;
 }
 
@@ -135,6 +137,7 @@ static span_t span_of(const dsp_afe_bss_config_t *cfg)
         .first = rounded((double)cfg->first_speech_s / per_update),
         .recheck_hops = (uint32_t)rounded((double)cfg->recheck_s / hop_s),
         .forget = (uint32_t)rounded((double)cfg->seat_forget_s / per_update),
+        .horizon = (uint32_t)floor((double)cfg->window_horizon_s / hop_s + 0.5),
         .history = (uint32_t)floor((double)cfg->history_s / hop_s + 0.5),
         .n_bins = n_bins,
         .standing = (n_bins - 1u) / 2u + 1u,
@@ -148,6 +151,7 @@ static dsp_afe_bss_t *carve(afe_arena_t *a, const span_t *s)
 {
     dsp_afe_bss_t *st = afe_take(a, sizeof(*st));
     int16_t *ring = afe_take(a, s->window * sizeof(int16_t));
+    uint32_t *stamp = afe_take(a, s->window * sizeof(uint32_t));
     int16_t *held = afe_take(a, (s->history + 1u) * sizeof(int16_t));
     uint16_t *bin_of = afe_take(a, ANGLES * sizeof(uint16_t));
     uint32_t *counts = afe_take(a, s->n_bins * sizeof(uint32_t));
@@ -160,7 +164,7 @@ static dsp_afe_bss_t *carve(afe_arena_t *a, const span_t *s)
     float *fresh_centre = afe_take(a, s->peaks * sizeof(float));
     float *prev = afe_take(a, s->peaks * sizeof(float));
     if (st != NULL) {
-        st->buf = (views_t){ring,   held,        bin_of,   counts, density,      standing,
+        st->buf = (views_t){ring,   stamp,       held,     bin_of, counts,       density, standing,
                             chosen, cand_centre, cand_bin, fresh,  fresh_centre, prev};
     }
     return st;
@@ -280,8 +284,20 @@ static void count(dsp_afe_bss_t *st, int16_t angle)
         st->filled++;
     }
     st->buf.ring[st->head] = angle;
+    st->buf.stamp[st->head] = st->hop;
     st->hist[angle]++;
     st->head = (st->head + 1) % st->span.window;
+}
+
+// The oldest reading sits filled places behind head.
+static void expire(dsp_afe_bss_t *st)
+{
+    while (st->filled > 0) {
+        const size_t tail = (st->head + st->span.window - st->filled) % st->span.window;
+        if (st->hop - st->buf.stamp[tail] <= st->span.horizon) { return; }
+        st->hist[st->buf.ring[tail]]--;
+        st->filled--;
+    }
 }
 
 // A reading keeps the seat whose region holds it from being forgotten.
@@ -794,6 +810,7 @@ esp_err_t dsp_afe_bss_process(dsp_afe_bss_t *st, const dsp_spec_cplx_t *x0, cons
     if (st == NULL || x0 == NULL || x1 == NULL || y0 == NULL || y1 == NULL) { return ESP_ERR_INVALID_ARG; }
     const bool counted = searched && angle_deg >= 0 && angle_deg < ANGLES && confidence >= st->cfg.conf_min;
     if (st->cfg.mode == DSP_AFE_BSS_LEARN) {
+        if (st->span.horizon > 0) { expire(st); }
         if (counted) {
             st->heard++;
             count(st, angle_deg);

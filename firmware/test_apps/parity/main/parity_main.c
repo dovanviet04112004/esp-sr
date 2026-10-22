@@ -30,6 +30,9 @@ static const struct {
     {"speaker_noise", parity_speaker_noise},
 #if PARITY_CHAIN_MODULES
     {"chain_modules", parity_chain_modules},
+#if CONFIG_DSP_AFE_BSS_ENABLE
+    {"chain_bss", parity_chain_bss},
+#endif
 #else
     {"chain", parity_chain},
 #endif

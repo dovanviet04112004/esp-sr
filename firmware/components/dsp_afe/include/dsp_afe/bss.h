@@ -48,6 +48,7 @@ typedef struct {
     float boundary_share_min;     // share of the gap each seat keeps
     float boundary_follow;
     float seat_forget_s;       // speech a seat may go without an update
+    float window_horizon_s;    // seconds a reading stays in the window; 0: no limit
     uint8_t update_every_hops; // doa's search period
     float spacing_m;
     float speed_of_sound_m_s;

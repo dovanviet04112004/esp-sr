@@ -73,6 +73,12 @@ bool parity_chain(const char *case_name, const void *buf, size_t len);
  */
 bool parity_chain_modules(const char *case_name, const void *buf, size_t len);
 
+/** parity_chain for contracts/golden/chain_bss, with bss as the facade's spatial stage, reported under that
+ * block.
+ *  @ctx task | blocking | the build must turn on the modules of firmware/sdkconfig.afe and bss
+ */
+bool parity_chain_bss(const char *case_name, const void *buf, size_t len);
+
 /** Run one hpf case at the cutoff it carries, one hop per call on each channel, as dsp_afe does.
  *  @ctx task | blocking | builds only with CONFIG_DSP_AFE_HPF_ENABLE, where hpf.c is compiled
  *  @ret false when the case lacks a tensor, has the wrong shape or the module refuses it

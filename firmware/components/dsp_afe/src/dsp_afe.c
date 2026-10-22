@@ -23,6 +23,8 @@
 #define BROADSIDE_DEG ((GEN_ARRAY_DOA_MIN_DEG + GEN_ARRAY_DOA_MAX_DEG) / 2.0f)
 #define ANGLE_UNKNOWN_DEG (-1)
 #define VAD_AGGRESSIVENESS_MAX 3 // dsp_afe_vad_config_t: 0 most lenient .. 3 strictest
+#define HEARD_RUN_HOPS                                                                                       \
+    ((uint32_t)(GEN_AFE_BSS_HEARD_RUN_S * GEN_GRID_SAMPLE_RATE_HZ / GEN_GRID_HOP_SAMPLES + 0.5f))
 
 _Static_assert(N_MICS == 2, "the spatial stage takes exactly two microphones");
 
@@ -68,7 +70,8 @@ struct dsp_afe_s {
     void *vad_in_mem;
     size_t vad_in_bytes;
     float mics_mean[GEN_GRID_HOP_SAMPLES];
-    bool heard; // vad_in's raw decision of the last hop
+    uint32_t heard_run; // hops in a row vad_in has heard speech
+    bool heard;         // that run has reached heard_run_s
 #endif
 #if CONFIG_DSP_AFE_VAD_ENABLE
     dsp_afe_vad_t *vad;
@@ -230,6 +233,7 @@ static dsp_afe_bss_config_t bss_config(void)
         .boundary_share_min = GEN_AFE_BSS_BOUNDARY_SHARE_MIN,
         .boundary_follow = GEN_AFE_BSS_BOUNDARY_FOLLOW,
         .seat_forget_s = GEN_AFE_BSS_SEAT_FORGET_S,
+        .window_horizon_s = GEN_AFE_BSS_WINDOW_HORIZON_S,
         .update_every_hops = GEN_AFE_DOA_UPDATE_EVERY_HOPS,
         .spacing_m = GEN_ARRAY_SPACING_M,
         .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
@@ -459,8 +463,8 @@ static void run_echo_stage(dsp_afe_t *afe, uint16_t *flags)
 }
 
 #if CONFIG_DSP_AFE_DOA_ENABLE
-// Under bss, doa searches on a raw vad of the microphones' mean: the gate silences the other seat at vad
-// (KEHOACH 3.8).
+// Under bss, doa searches on a raw vad of the microphones' mean held for heard_run_s: the gate silences the
+// other seat at vad, and key strokes make a run of 1-3 hops (KEHOACH 3.8).
 static bool heard_last(const dsp_afe_t *afe)
 {
 #if CONFIG_DSP_AFE_BSS_ENABLE && CONFIG_DSP_AFE_VAD_ENABLE
@@ -480,7 +484,8 @@ static void hear_mics(dsp_afe_t *afe)
     dsp_afe_vad_process(afe->vad_in, afe->mics_mean, &speech);
     dsp_afe_vad_detail_t detail;
     dsp_afe_vad_detail(afe->vad_in, &detail);
-    afe->heard = detail.raw;
+    afe->heard_run = detail.raw ? afe->heard_run + 1u : 0u;
+    afe->heard = afe->heard_run >= HEARD_RUN_HOPS;
 #else
     (void)afe;
 #endif
@@ -678,6 +683,7 @@ void dsp_afe_reset(dsp_afe_t *afe)
     afe->last_vad = false;
 #if CONFIG_DSP_AFE_BSS_ENABLE && CONFIG_DSP_AFE_VAD_ENABLE
     if (afe->vad_in != NULL) { dsp_afe_vad_reset(afe->vad_in); }
+    afe->heard_run = 0;
     afe->heard = false;
 #endif
     afe->doa_result = (dsp_afe_doa_result_t){.angle_deg = ANGLE_UNKNOWN_DEG, .confidence = 0};
@@ -691,6 +697,8 @@ void dsp_afe_resume(dsp_afe_t *afe)
 #endif
 #if CONFIG_DSP_AFE_BSS_ENABLE && CONFIG_DSP_AFE_VAD_ENABLE
     if (afe->vad_in != NULL) { dsp_afe_vad_flush(afe->vad_in); }
+    afe->heard_run = 0;
+    afe->heard = false;
 #endif
 #if CONFIG_DSP_AFE_AGC_ENABLE
     dsp_afe_agc_flush(afe->agc);

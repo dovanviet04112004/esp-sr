@@ -74,6 +74,8 @@
 #define REPORT_SPARE_LINES 16
 #define PORT_MAX 65535
 #define STOP_LINE "stop"
+#define HEARD_RUN_HOPS                                                                                       \
+    ((uint32_t)(GEN_AFE_BSS_HEARD_RUN_S * GEN_GRID_SAMPLE_RATE_HZ / GEN_GRID_HOP_SAMPLES + 0.5f))
 #define WIFI_LINE "wifi "
 #define JOB_LINE "job "
 #define SSID_MAX_BYTES 32 // wifi_sta_config_t.ssid less its terminator
@@ -114,8 +116,9 @@ static struct {
     uint32_t back_hops;                            // the delay less the lookahead
     dsp_spec_cplx_t (*late_mean)[GEN_GRID_N_BINS]; // PSRAM ring, slot hop % delay_hops
     int16_t (*late_raw)[GEN_GRID_HOP_SAMPLES * N_MICS];
-    bool heard;    // raw decision of vad_in on the last hop
-    bool stopping; // stop is taken: the run ends once the ring is out
+    uint32_t heard_run; // hops in a row vad_in has heard speech
+    bool heard;         // that run has reached heard_run_s
+    bool stopping;      // stop is taken: the run ends once the ring is out
     bool in_psram;
     const dsp_afe_calib_t *calib;
     dsp_spec_fft_t *fft;
@@ -456,6 +459,7 @@ static dsp_afe_bss_config_t bss_config(const job_t *job)
         .boundary_share_min = GEN_AFE_BSS_BOUNDARY_SHARE_MIN,
         .boundary_follow = GEN_AFE_BSS_BOUNDARY_FOLLOW,
         .seat_forget_s = GEN_AFE_BSS_SEAT_FORGET_S,
+        .window_horizon_s = GEN_AFE_BSS_WINDOW_HORIZON_S,
         .update_every_hops = GEN_AFE_DOA_UPDATE_EVERY_HOPS,
         .spacing_m = GEN_ARRAY_SPACING_M,
         .speed_of_sound_m_s = GEN_ARRAY_SPEED_OF_SOUND_M_S,
@@ -596,7 +600,8 @@ static bool run_hop(float gate[SEATS_MAX], int16_t angle_deg[SEATS_MAX], uint8_t
     dsp_afe_vad_process(s_chain.vad_in, s_chain.mics_mean, &speech);
     dsp_afe_vad_detail_t detail;
     dsp_afe_vad_detail(s_chain.vad_in, &detail);
-    s_chain.heard = detail.raw;
+    s_chain.heard_run = detail.raw ? s_chain.heard_run + 1u : 0u;
+    s_chain.heard = s_chain.heard_run >= HEARD_RUN_HOPS;
     dsp_afe_doa_result_t direction;
     dsp_afe_doa_process(s_chain.doa, s_chain.bins[0], s_chain.bins[1], update, &direction);
     dsp_afe_bss_process(s_chain.bss, s_chain.bins[0], s_chain.bins[1], direction.angle_deg,

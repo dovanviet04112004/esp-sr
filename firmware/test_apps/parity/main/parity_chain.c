@@ -58,7 +58,8 @@ static void fill(const dsp_afe_frame_t *frames, size_t hops, field_t field, floa
 enum { CONFIG_NS_FLOOR_DB, CONFIG_AGC_TARGET_DBFS, CONFIG_VAD_AGGRESSIVENESS, CONFIG_COUNT };
 
 // A case without gains is a board never calibrated: calib stays NULL and the chain runs without balance.
-static bool read_setup(const void *buf, size_t len, dsp_afe_config_t *cfg, dsp_afe_calib_t *calib)
+static bool read_setup(const void *buf, size_t len, dsp_afe_spatial_t spatial, dsp_afe_config_t *cfg,
+                       dsp_afe_calib_t *calib)
 {
     gold_tensor_t config, gains;
     float settings[CONFIG_COUNT];
@@ -67,7 +68,7 @@ static bool read_setup(const void *buf, size_t len, dsp_afe_config_t *cfg, dsp_a
     }
     *cfg = (dsp_afe_config_t){
         .input_format = "MM",
-        .spatial = DSP_AFE_SPATIAL_NONE,
+        .spatial = spatial,
         .ns_floor_db = settings[CONFIG_NS_FLOOR_DB],
         .agc_target_dbfs = settings[CONFIG_AGC_TARGET_DBFS],
         .vad_aggressiveness = (uint8_t)settings[CONFIG_VAD_AGGRESSIVENESS],
@@ -103,7 +104,8 @@ static bool run_frames(const dsp_afe_config_t *cfg, const gold_tensor_t *input, 
     return ok;
 }
 
-static bool run_chain(const char *block, const char *case_name, const void *buf, size_t len)
+static bool run_chain(const char *block, dsp_afe_spatial_t spatial, const char *case_name, const void *buf,
+                      size_t len)
 {
     gold_tensor_t input, reset, want[FIELD_COUNT];
     if (!parity_tensor(buf, len, "input", &input) || !parity_tensor(buf, len, "reset", &reset) ||
@@ -116,7 +118,7 @@ static bool run_chain(const char *block, const char *case_name, const void *buf,
     }
     dsp_afe_config_t cfg;
     dsp_afe_calib_t calib = {0};
-    if (!read_setup(buf, len, &cfg, &calib)) { return false; }
+    if (!read_setup(buf, len, spatial, &cfg, &calib)) { return false; }
     const size_t hops = input.dims[0];
     dsp_afe_frame_t *frames = heap_caps_malloc(hops * sizeof(dsp_afe_frame_t), MALLOC_CAP_SPIRAM);
     float *got = heap_caps_malloc(hops * GEN_GRID_HOP_SAMPLES * sizeof(float), MALLOC_CAP_SPIRAM);
@@ -136,10 +138,15 @@ static bool run_chain(const char *block, const char *case_name, const void *buf,
 
 bool parity_chain(const char *case_name, const void *buf, size_t len)
 {
-    return run_chain("chain", case_name, buf, len);
+    return run_chain("chain", DSP_AFE_SPATIAL_NONE, case_name, buf, len);
 }
 
 bool parity_chain_modules(const char *case_name, const void *buf, size_t len)
 {
-    return run_chain("chain_modules", case_name, buf, len);
+    return run_chain("chain_modules", DSP_AFE_SPATIAL_NONE, case_name, buf, len);
+}
+
+bool parity_chain_bss(const char *case_name, const void *buf, size_t len)
+{
+    return run_chain("chain_bss", DSP_AFE_SPATIAL_BSS, case_name, buf, len);
 }
