@@ -177,7 +177,9 @@ Hai mươi hai kịch bản:
 - bốn người, rồi cả phòng im 90 s.
 
 Kết quả:
-- Ở `3f8d35d`: 198 lượt (22 kịch bản × 3 hạt giống × lạc 0%, 3% và 6%) qua hết.
+- Ở `3fc7d49`: 198 lượt (22 kịch bản × 3 hạt giống × lạc 0%, 3% và 6%) qua hết, và ba nguồn đều đặn mỗi nguồn đọc
+  lẻ tẻ, chừng một lần dò mỗi 10 s cả thảy, suốt 15 phút không ra ghế nào; bản soi gương chưa có luật tiếng liền và hạn
+  cho ba nguồn ấy 3 ghế.
 - Luật ở `f8d0a6e` (`seat_forget_s` đếm theo bước, dưới hai ghế thì về 0 ghế) trượt hai kịch bản mới: người còn nói đổi
   số khi một trong hai người cùng phía vắng lâu (lạc 0%, 3/3 hạt giống), và cả bốn người bị đánh số lại sau quãng im
   (lạc 3% và 6%, 6/6).
@@ -210,10 +212,10 @@ Kết quả:
 
 ## 7. Khớp với bản C
 
-`make parity-host`, và `make parity-board` cả hai bản dựng ngày 20/10 (`d708e4e`), bộ vàng `contracts/golden/bss/`.
-Máy tính và board B ra cùng số.
+`make parity-host`, và `make parity-board` cả hai bản dựng ngày 22/10 (`e371c70`), bộ vàng `contracts/golden/bss/` và
+`contracts/golden/chain_bss/`. Máy tính và board B ra cùng số.
 
-Bảy ca khớp từng bit, mọi tensor `max_abs 0` (cổng, số ghế, hướng, cổng và hướng của mọi số ghế, cổng trễ và số ghế giữ
+Chín ca của `bss` khớp từng bit, mọi tensor `max_abs 0` (cổng, số ghế, hướng, cổng và hướng của mọi số ghế, cổng trễ và số ghế giữ
 của lối ra trễ sau mọi bước, hai lối ra của bước cuối):
 - chia ở chính diện;
 - LEARN hai người;
@@ -221,7 +223,13 @@ của lối ra trễ sau mọi bước, hai lối ra của bước cuối):
 - hai người một phía, `conf_min` 60;
 - ba người, rồi người thứ tư ở 60° vào (`seats_max` 4);
 - một người ở 75° dừng ở 54°, cạnh người ở 140°, tách khi đã rõ, rồi 140° rời đi và 100° đến (dời ghế trống);
-- ba ghế qua một quãng im dài hơn `seat_forget_s`, rồi 90° nói một mình tới khi một trong hai ghế kia bị quên.
+- ba ghế qua một quãng im dài hơn `seat_forget_s`, rồi 90° nói một mình tới khi một trong hai ghế kia bị quên;
+- một người ở 48°, im lâu hơn `window_horizon_s`, rồi một người ở 130°: đỉnh đã quá hạn không thành ghế;
+- những lần dò lẻ ở 90° cách nhau bởi im lặng, rồi hai người ở 48° và 130°: LEARN không đếm lần nào ở 90°.
+
+Các ca LEARN chạy với hạn 3 s cạnh cửa sổ ngắn của chúng. `chain_bss` cho mặt tiền chạy với các module của bản dựng
+`modules` và `bss` làm khối không gian: sáu tràng tiếng 3 bước, rồi tiếng liền từ hai phía, có một lần `resume`; khớp
+từng bit, `pcm` cũng vậy.
 
 Năm đối chứng âm đều đỏ:
 - 000: cổng của chế độ chia ở chính diện trên ca một phía. Cổng lệch 1, hướng của số ghế lệch 79°.
@@ -229,6 +237,16 @@ Năm đối chứng âm đều đỏ:
 - 002: cổng trễ lấy góc lùi một bước. Cổng lệch 1.
 - 003: ca người thứ tư với `confirm` 1. Số ghế lệch 2, hướng lệch 94°.
 - 004: ca thứ bảy với ghế già theo bước, cả lúc im. Số ghế lệch 1, hướng của số ghế lệch 151°, cổng lệch 1.
+- 005: ca có hạn mà không hạn. Số ghế lệch 2, hướng lệch 133°.
+- 006: ca lần dò lẻ mà LEARN đếm mọi lần dò. Số ghế lệch 2, hướng lệch 91°.
+- `chain_bss` 000: `doa` dò theo `vad` của lối ra, thứ cổng dìm đi, thay vì `vad` thứ hai. Hướng lệch 8°, độ tin lệch 31.
+
+**Dòng `plan` của board.** App kiểm khớp in tên các bộ vàng sẽ chạy ở dòng `plan`, và máy tính chỉ chấm những bộ có tên
+ở đó. Bản dựng `modules` có dòng ấy dài quá 128 byte, bị cắt ở `chain_modules hp`, nên tới `6a4a8f5` các bộ `hpf`,
+`balance`, `doa`, `gsc`, `bss`, `ns_omlsa`, `vad`, `agc` có chạy trên board nhưng không được chấm. Chấm lại báo cáo của
+`d708e4e` với đủ tên: mọi ca như mong đợi. Từ `6a4a8f5`, dòng có 160 byte và không chứa nổi thì app dừng với dòng lỗi;
+mỗi bản dựng mang một ảnh LittleFS chỉ có bộ vàng nó chạy (4,7 và 10,8 MB), vì một ảnh chứa hết 15,5 MB không vừa
+phân vùng 15,25 MB.
 
 Ở `5137faf`, với luật quên theo bước, thêm 600 ca ngẫu nhiên, sinh từ bản soi gương bằng một script tạm:
 - cấu hình khắp dải `check()` nhận, 2–4 ghế;
@@ -239,18 +257,19 @@ ghế và 394 lần dời ghế trống.
 
 ## 8. Chi phí
 
-`make bench-board` ngày 20/10 (`d708e4e`, profile `bench`), nhân 1, số mặc định của `contracts/afe.yaml`:
+`make bench-board` ngày 22/10 (`e371c70`, profile `bench`), nhân 1, số mặc định của `contracts/afe.yaml`:
 
 | Đường | µs trung bình | µs đỉnh | % khung 16 ms | Vùng `hot` |
 |---|---|---|---|---|
-| Chia ở chính diện | 25,4 | 30,0 | 0,2 | 4 288 B |
-| LEARN, hai người ở 48° và 130° đổi lượt mỗi 2,5 s | 86,1 | 254,8 | 0,5 | 4 288 B |
+| Chia ở chính diện | 25,5 | 30,1 | 0,2 | 5 328 B |
+| LEARN, hai người ở 48° và 130° đổi lượt mỗi 2,5 s | 86,3 | 252,9 | 0,5 | 5 328 B |
 | `vad` thứ hai trên trung bình hai micro, chỉ có khi `bss` là khối không gian | 138,0 | 175,2 | 0,9 | 2 640 B |
 
 - Đỉnh của LEARN là bước kiểm lại, mỗi `recheck_s` một lần: dồn histogram vào 68 ô độ trễ, làm trơn, dò đỉnh, tính khối
-  lượng lõi. Đỉnh 254,8 µs, LEARN k-means lên 317,2 µs ở bước phân cụm. `tinyai-signal` phân cụm cả vòng đệm, đỉnh một
+  lượng lõi. Đỉnh 252,9 µs, LEARN k-means lên 317,2 µs ở bước phân cụm. `tinyai-signal` phân cụm cả vòng đệm, đỉnh một
   nhịp lên 2,9 ms.
-- Vùng `hot` 4 288 B, hơn LEARN k-means 1 344 B: mật độ 68 ô, bảng ô của 181 độ và các danh sách đỉnh, cỡ theo cấu hình.
+- Vùng `hot` 5 328 B: mật độ 68 ô, bảng ô của 181 độ và các danh sách đỉnh, cỡ theo cấu hình, cộng 1 000 B ghi bước
+  của 250 lần dò trong cửa sổ cho `window_horizon_s`.
 - Trong chuỗi, `bss` cộng `vad` thứ hai tốn 163 µs mỗi bước khi chia ở chính diện, 224 µs với LEARN. `gsc` tốn 141 µs
   khi góc lái đứng yên, 485 µs khi góc lái đổi mỗi bước.
 - Bench dựng kèm `bss`, nên dòng chuỗi của `budget.md` là 86 464 B, hơn 1 040 B so với 11/10: đệm trung bình hai micro
@@ -310,10 +329,10 @@ có lối ra. Mỗi ô: mất / rò cả bài / rò trong 0,5 s đầu mỗi lư
 - vòng đệm 751 KB trong PSRAM;
 - mỗi bước tốn 3,25 ms khi đang xuất, đỉnh 4,09 ms trên khung 16 ms; lối ra sống tốn 3,15 ms, đỉnh 3,59 ms.
 
-`make bench-board` (`d708e4e`, profile `bench`), dòng `bss` LEARN kèm lối ra trễ 4 s:
+`make bench-board` (profile `bench`), dòng `bss` LEARN kèm lối ra trễ 4 s:
 - mỗi bước làm đúng phần `bss_live` thêm vào: cổng của bước cũ, trung bình và hai kênh thô ra vào vòng đệm;
-- 287,1 µs trung bình, đỉnh 456,8 µs (1,8% khung), hơn LEARN không trễ 201 µs;
-- vùng `hot` 4 768 B, thêm góc giữ của 244 bước; PSRAM 770 000 B.
+- 287,0 µs trung bình, đỉnh 455,8 µs (1,8% khung), hơn LEARN không trễ 201 µs (`e371c70`);
+- vùng `hot` 5 808 B, thêm góc giữ của 244 bước; PSRAM 770 000 B.
 
 ## 10. Lượt `make bss` của chủ repo, 20/10 chiều
 
@@ -410,3 +429,15 @@ Tiếng gõ và tiếng tách dài 16–48 ms nên làm `vad` thô bật 1–3 b
   ghế những lần dò từ lần thứ 3 liền nhau (`learn_run_s` 0,096 s), và cửa sổ quên lần dò cũ hơn `window_horizon_s` 60 s
   (KẾ HOẠCH §3.8). Một nguồn chỉ thành ghế khi có 1,5 s lần dò trong tiếng liền, trong 60 s gần nhất: người đang nói
   với board có đủ sau vài giây, còn tiếng gõ phím và tiếng nói lẻ tẻ ở xa thì không.
+
+**Luật cuối, `e371c70`.** `make eval-bss`, không `calib/bal` như mọi lần chấm ở §4: cột chia ở chính diện như cũ từng
+số; LEARN và lối ra trễ 4 s trên cảnh dựng lệch nhau dưới 1 dB so với `5137faf` (hai phía RT60 0,4 s, D 4 s: rò cả bài
+−58,1 dB, trước −58,2); LEARN tách muộn hơn trên bản ghép A/B, 8,5 s thay vì 6,7 s, và trên bản luân phiên 30 s,
+6,9 s thay vì 5,8 s, vì hai lần dò đầu mỗi quãng tiếng không được đếm. Có `calib/bal`, bản luân phiên tách ở 3,4 s.
+
+**Lượt xác nhận trên board**, `make bss` 22/10 lúc 09:48, firmware `e371c70`, LEARN 4 ghế, 600 s, không rơi khung:
+2 ghế từ giây 7, 3 ghế ở giây 61, 4 ghế ở giây 121 (156°, 13°, 81°, 44°), giữ tới hết; bản soi gương ra đúng các ghế
+ấy. 30 s đầu có tiếng nói thật: mỗi 10 s có 8,1, 6,3 rồi 2,7 s trên nền 10 dB, đoạn liền dài tới 2,7 s, độ hữu thanh
+trung vị 0,65–0,74 như người nói của board B; LEARN đếm 233 lần dò ở phút đầu, rồi 26, 19, 8 và dưới 5 mỗi phút sau.
+Các ghế ấy là người nói thật trong phòng, không phải tiếng gõ. Chưa có lượt board nào trong phòng hoàn toàn không ai
+nói với luật cuối 🔬.
