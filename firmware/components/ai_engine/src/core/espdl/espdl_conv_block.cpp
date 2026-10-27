@@ -32,6 +32,12 @@ void ai_engine_pw_residual_x_c24_s8_esp32s3(int8_t *out, const int8_t *in, const
                                             const int32_t *run);
 void ai_engine_pw_residual_x_c48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
                                             const int32_t *run);
+void ai_engine_pw_conv_k12_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                      const int32_t *run);
+void ai_engine_pw_conv_k24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                      const int32_t *run);
+void ai_engine_pw_conv_k24_n12_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                          const int32_t *run);
 }
 
 namespace ai {
@@ -51,10 +57,18 @@ constexpr int kRing = 3;
 constexpr int kRows = 2 * kRing + 2;
 
 enum Input { kX = 0, kDw1, kPw1, kPw1Bias, kBn, kBnBias, kDw2, kPw2, kPw2Bias, kInputs };
+// "pre" and "post": a joined 1x1 convolution's values a pixel, then its shift.
+enum Joined { kJoinedValues = 0, kJoinedShift, kJoinedSize };
 enum Shift { kShiftDw1 = 0, kShiftPw1, kShiftBn, kShiftDw2, kShiftPw2, kShiftResidual };
 // Slots of conv_row_s8_esp32s3.S's runs that hold addresses.
 enum NormRun { kNormBias = 6, kNormWeights, kNormBnBias, kNormSize = 10 };
 enum ResidualRun { kResidualBias = 6, kResidualX, kResidualSize = 10 };
+// Slots of conv_row_s8_esp32s3.S's PointwiseS8 run.
+enum ConvRun { kConvBias = 6, kConvSize = 10 };
+// Values a pixel the joined convolutions' kernels read in front of the block and give behind it.
+constexpr int kPreSmall = 12;
+constexpr int kPreWide = 24;
+constexpr int kPostOutputs = 12;
 
 using RowKernel = void (*)(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
 
@@ -78,12 +92,14 @@ int padded(int channels) noexcept
     return (channels + kChannelStep - 1) / kChannelStep * kChannelStep;
 }
 
-// Inputs as esp_ppq_patches.conv_block_from lays them, in Input's order: x [1, T, F, C], taps [9][Cp],
-// pointwise [Cp / 16][C][16], bias and norm weights [Cp]; Cp is C padded with zeros to a multiple of 16.
+// Inputs as esp_ppq_patches.conv_block_from lays them: x [1, T, F, C], taps [9][Cp], pointwise
+// [Cp / 16][C][16], bias and norm weights [Cp], then any "pre", "post" ones; with "pre", x is its rows.
 class ConvBlock final : public dl::module::Module {
   public:
-    ConvBlock(const char *name, std::vector<int> shifts)
-        : Module(name, dl::MODULE_NON_INPLACE, dl::QUANT_TYPE_SYMM_8BIT), shifts_(std::move(shifts))
+    ConvBlock(const char *name, std::vector<int> shifts, std::vector<int> pre, std::vector<int> post,
+              std::vector<int> out_shape)
+        : Module(name, dl::MODULE_NON_INPLACE, dl::QUANT_TYPE_SYMM_8BIT), shifts_(std::move(shifts)),
+          pre_(std::move(pre)), post_(std::move(post)), out_shape_(std::move(out_shape))
     {}
 
     ~ConvBlock() override
@@ -96,6 +112,7 @@ class ConvBlock final : public dl::module::Module {
 
     std::vector<std::vector<int>> get_output_shape(std::vector<std::vector<int>> &input_shapes) override
     {
+        if (!out_shape_.empty()) { return {out_shape_}; }
         return {input_shapes[kX]};
     }
 
@@ -112,6 +129,15 @@ class ConvBlock final : public dl::module::Module {
         norm_run_[kNormWeights] = address_of(context, kBn);
         norm_run_[kNormBnBias] = address_of(context, kBnBias);
         residual_run_[kResidualBias] = address_of(context, kPw2Bias);
+        if (!pre_.empty()) {
+            pre_weights_ = context->get_tensor(m_inputs_index[kInputs])->get_element_ptr<int8_t>();
+            pre_run_[kConvBias] = address_of(context, kInputs + 1);
+        }
+        if (!post_.empty()) {
+            const int at = kInputs + (pre_.empty() ? 0 : 2);
+            post_weights_ = context->get_tensor(m_inputs_index[at])->get_element_ptr<int8_t>();
+            post_run_[kConvBias] = address_of(context, at + 1);
+        }
         const int8_t *xs = x->get_element_ptr<int8_t>();
         int8_t *ys = y->get_element_ptr<int8_t>();
         memset(rows_, 0, 2 * kRing * padded_row_);
@@ -124,7 +150,13 @@ class ConvBlock final : public dl::module::Module {
             const int8_t *window[kRing] = {c_row(t - 1), c_row(t), c_row(t + 1)};
             ai_engine_dw3x3_row_s8_esp32s3(d_, window, dw2, dw2_run_.data());
             residual_run_[kResidualX] = reinterpret_cast<int32_t>(x_row(t) + padded_);
-            residual_kernel_(ys + t * width_ * channels_, d_, pw2, residual_run_.data());
+            if (post_.empty()) {
+                residual_kernel_(ys + t * width_ * channels_, d_, pw2, residual_run_.data());
+            } else {
+                residual_kernel_(out_row_, d_, pw2, residual_run_.data());
+                post_kernel_(ys + t * width_ * post_[kJoinedValues], out_row_, post_weights_,
+                             post_run_.data());
+            }
         }
     }
 
@@ -137,14 +169,24 @@ class ConvBlock final : public dl::module::Module {
     static dl::module::Module *deserialize(fbs::FbsModel *fbs_model, std::string node_name)
     {
         std::vector<int> shifts;
+        std::vector<int> pre;
+        std::vector<int> post;
+        std::vector<int> out_shape;
         dl::quant_type_t quant_type = dl::QUANT_TYPE_NONE;
         fbs_model->get_operation_attribute(node_name, "shifts", shifts);
+        fbs_model->get_operation_attribute(node_name, "pre", pre);
+        fbs_model->get_operation_attribute(node_name, "post", post);
+        fbs_model->get_operation_attribute(node_name, "out_shape", out_shape);
         fbs_model->get_operation_attribute(node_name, "quant_type", quant_type);
-        if (quant_type != dl::QUANT_TYPE_SYMM_8BIT || shifts.size() != kShifts) {
+        const bool joined_fit = (pre.empty() || pre.size() == kJoinedSize) &&
+                                (post.empty() || post.size() == kJoinedSize) &&
+                                (pre.empty() && post.empty() ? out_shape.empty() : out_shape.size() == kRank);
+        if (quant_type != dl::QUANT_TYPE_SYMM_8BIT || shifts.size() != kShifts || !joined_fit) {
             ESP_LOGE(TAG, "%s: only an int8 block with six shifts runs as ConvBlock", node_name.c_str());
             return nullptr;
         }
-        return new ConvBlock(node_name.c_str(), std::move(shifts));
+        return new ConvBlock(node_name.c_str(), std::move(shifts), std::move(pre), std::move(post),
+                             std::move(out_shape));
     }
 
   private:
@@ -169,6 +211,8 @@ class ConvBlock final : public dl::module::Module {
         int8_t *slot = x_row(t) + padded_;
         if (t >= frames_) {
             memset(slot, 0, width_ * padded_);
+        } else if (!pre_.empty()) {
+            pre_kernel_(slot, xs + t * width_ * pre_[kJoinedValues], pre_weights_, pre_run_.data());
         } else if (channels_ == padded_) {
             memcpy(slot, xs + t * width_ * channels_, width_ * channels_);
         } else {
@@ -195,32 +239,56 @@ class ConvBlock final : public dl::module::Module {
         return reinterpret_cast<uintptr_t>(p) % kVectorAlignBytes == 0;
     }
 
+    // The block's channels, from its pointwise weights [Cp / 16][C][16] and taps [9][Cp].
+    int block_channels(dl::ModelContext *context) const noexcept
+    {
+        const int cp = context->get_tensor(m_inputs_index[kDw1])->get_size() / kTaps;
+        return cp > 0 ? context->get_tensor(m_inputs_index[kPw1])->get_size() / cp : 0;
+    }
+
     bool shapes_fit(dl::ModelContext *context, dl::TensorBase *x, dl::TensorBase *y) const
     {
-        if (m_inputs_index.size() != kInputs || x->shape.size() != kRank || x->shape != y->shape ||
-            x->get_dtype() != dl::DATA_TYPE_INT8 || y->get_dtype() != dl::DATA_TYPE_INT8 ||
-            x->shape[3] % kHalfStep != 0) {
-            ESP_LOGE(TAG, "%s: %u inputs, or x and y not one int8 [N, T, F, C] of C a multiple of 8", name,
+        const size_t inputs = kInputs + (pre_.empty() ? 0 : 2) + (post_.empty() ? 0 : 2);
+        const int c = block_channels(context);
+        const int cp = padded(c);
+        if (m_inputs_index.size() != inputs || x->shape.size() != kRank ||
+            x->get_dtype() != dl::DATA_TYPE_INT8 || y->get_dtype() != dl::DATA_TYPE_INT8 || c <= 0 ||
+            c % kHalfStep != 0) {
+            ESP_LOGE(TAG, "%s: %u inputs, or x and y not int8 maps of a block of C a multiple of 8", name,
                      static_cast<unsigned>(m_inputs_index.size()));
             return false;
         }
-        const int c = x->shape[3];
-        const int cp = padded(c);
-        const int sizes[kInputs] = {0, kTaps * cp, cp * c, cp, cp, cp, kTaps * cp, cp * c, cp};
-        for (int i = kDw1; i < kInputs; i++) {
-            dl::TensorBase *p = context->get_tensor(m_inputs_index[i]);
+        const int k = pre_.empty() ? c : pre_[kJoinedValues];
+        const int row = x->shape[2] * x->shape[3];
+        const int n = post_.empty() ? c : post_[kJoinedValues];
+        const bool joined = (pre_.empty() || ((k == kPreSmall || k == kPreWide) && row % k == 0)) &&
+                            (post_.empty() || (n == kPostOutputs && c == kPreWide)) &&
+                            (!pre_.empty() || x->shape[3] == c);
+        if (!joined || y->get_size() != x->shape[1] * (row / k) * n) {
+            ESP_LOGE(TAG, "%s: the joined convolutions do not fit a block of %d channels", name, c);
+            return false;
+        }
+        std::vector<int> sizes = {kTaps * cp, cp * c, cp, cp, cp, kTaps * cp, cp * c, cp};
+        if (!pre_.empty()) { sizes.insert(sizes.end(), {cp * k, cp}); }
+        if (!post_.empty()) { sizes.insert(sizes.end(), {kChannelStep * c, kChannelStep}); }
+        for (size_t i = 0; i < sizes.size(); i++) {
+            dl::TensorBase *p = context->get_tensor(m_inputs_index[kDw1 + i]);
             if (p->get_size() != sizes[i] || !aligned(p->get_element_ptr())) {
-                ESP_LOGE(TAG, "%s: input %d holds %d values, the block wants %d", name, i, p->get_size(),
-                         sizes[i]);
+                ESP_LOGE(TAG, "%s: input %u holds %d values, the block wants %d", name,
+                         static_cast<unsigned>(kDw1 + i), p->get_size(), sizes[i]);
                 return false;
             }
         }
-        for (int k = kShiftDw1; k <= kShiftResidual; k++) {
-            if (shifts_[k] < (k == kShiftResidual ? 0 : 1)) {
-                ESP_LOGE(TAG, "%s: shift %d is %d, the kernels round right shifts of 1 or more", name, k,
-                         shifts_[k]);
+        for (int i = kShiftDw1; i <= kShiftResidual; i++) {
+            if (shifts_[i] < (i == kShiftResidual ? 0 : 1)) {
+                ESP_LOGE(TAG, "%s: shift %d is %d, the kernels round right shifts of 1 or more", name, i,
+                         shifts_[i]);
                 return false;
             }
+        }
+        if ((!pre_.empty() && pre_[kJoinedShift] < 1) || (!post_.empty() && post_[kJoinedShift] < 1)) {
+            ESP_LOGE(TAG, "%s: a joined convolution's shift is under 1", name);
+            return false;
         }
         return true;
     }
@@ -229,15 +297,20 @@ class ConvBlock final : public dl::module::Module {
     {
         if (!shapes_fit(context, x, y)) { return false; }
         frames_ = x->shape[1];
-        width_ = x->shape[2];
-        channels_ = x->shape[3];
+        channels_ = block_channels(context);
+        width_ = pre_.empty() ? x->shape[2] : x->shape[2] * x->shape[3] / pre_[kJoinedValues];
         padded_ = padded(channels_);
         padded_row_ = (width_ + 2) * padded_;
-        for (int i : {kPw1Bias, kBnBias, kPw2Bias}) {
+        std::vector<int> biases = {kPw1Bias, kBnBias, kPw2Bias};
+        if (!pre_.empty()) { biases.push_back(kInputs + 1); }
+        if (!post_.empty()) { biases.push_back(kInputs + (pre_.empty() ? 1 : 3)); }
+        for (int i : biases) {
             context->get_tensor(m_inputs_index[i])->reset_bias_layout(quant_type, true);
         }
-        rows_ = static_cast<int8_t *>(
-            heap_caps_aligned_calloc(kVectorAlignBytes, kRows, padded_row_, MALLOC_CAP_SPIRAM));
+        const int out_bytes =
+            post_.empty() ? 0 : (width_ * channels_ + kChannelStep - 1) / kChannelStep * kChannelStep;
+        rows_ = static_cast<int8_t *>(heap_caps_aligned_calloc(
+            kVectorAlignBytes, 1, kRows * padded_row_ + out_bytes, MALLOC_CAP_SPIRAM));
         if (rows_ == nullptr) {
             ESP_LOGE(TAG, "%s: no memory for %d rows of %d bytes", name, kRows, padded_row_);
             return false;
@@ -246,6 +319,7 @@ class ConvBlock final : public dl::module::Module {
         c_ring_ = x_ring_ + kRing * padded_row_;
         a_ = c_ring_ + kRing * padded_row_;
         d_ = a_ + padded_row_;
+        out_row_ = d_ + padded_row_;
         const int vectors = padded_ / kChannelStep;
         const int whole = channels_ / kChannelStep;
         const int half = channels_ % kChannelStep != 0;
@@ -272,11 +346,23 @@ class ConvBlock final : public dl::module::Module {
                 residual_kernel_ = shifts_[kShiftResidual] > 0 ? u.residual_x : u.residual;
             }
         }
+        if (!pre_.empty()) {
+            pre_kernel_ = pre_[kJoinedValues] == kPreSmall ? ai_engine_pw_conv_k12_s8_esp32s3
+                                                           : ai_engine_pw_conv_k24_s8_esp32s3;
+            pre_run_ = {width_, vectors, 0, 0, 0, pre_[kJoinedShift], 0, 0, -1, kChannelStep};
+        }
+        if (!post_.empty()) {
+            post_kernel_ = ai_engine_pw_conv_k24_n12_s8_esp32s3;
+            post_run_ = {width_, 1, 0, 0, 0, post_[kJoinedShift], 0, 0, -1, kChannelStep};
+        }
         built_ = true;
         return true;
     }
 
     std::vector<int> shifts_;
+    std::vector<int> pre_;
+    std::vector<int> post_;
+    std::vector<int> out_shape_;
     int frames_ = 0;
     int width_ = 0;
     int channels_ = 0;
@@ -287,13 +373,20 @@ class ConvBlock final : public dl::module::Module {
     int8_t *c_ring_ = nullptr;
     int8_t *a_ = nullptr;
     int8_t *d_ = nullptr;
+    int8_t *out_row_ = nullptr; // the block's output row the post convolution reads
+    const int8_t *pre_weights_ = nullptr;
+    const int8_t *post_weights_ = nullptr;
     std::array<int32_t, 3> dw1_run_ = {};
     std::array<int32_t, 3> dw2_run_ = {};
     std::array<int32_t, 3> pad_run_ = {};
     std::array<int32_t, kNormSize> norm_run_ = {};
     std::array<int32_t, kResidualSize> residual_run_ = {};
+    std::array<int32_t, kConvSize> pre_run_ = {};
+    std::array<int32_t, kConvSize> post_run_ = {};
     RowKernel norm_kernel_ = ai_engine_pw_norm_row_s8_esp32s3;
     RowKernel residual_kernel_ = ai_engine_pw_residual_row_s8_esp32s3;
+    RowKernel pre_kernel_ = nullptr;
+    RowKernel post_kernel_ = nullptr;
     bool built_ = false;
 };
 

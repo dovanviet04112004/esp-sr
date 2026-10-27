@@ -289,10 +289,14 @@ ai_engine_pw_bias_row_s8_esp32s3:
 
 // One block's products over the held inputs, from product k of the pixel.
 .macro fixed_products c, k, total
+    .if \c == 12
+    fixed_lanes q0, 12, \k, \total
+    .else
     fixed_lanes q0, 16, \k, \total
+    .endif
     .if \c == 24
     fixed_lanes q5, 8, (\k + 16), \total
-    .else
+    .elseif \c == 48
     fixed_lanes q5, 16, (\k + 16), \total
     fixed_lanes q6, 16, (\k + 32), \total
     .endif
@@ -448,6 +452,10 @@ ai_engine_pw_residual_x_c48_s8_esp32s3:
 // void ai_engine_pw_add_x_k24_s8_esp32s3(...), ai_engine_pw_add_x_k48_s8_esp32s3(...)
 // Rows of 24 or 48 inputs held in q0, q5, q6, rows of 24 8-byte aligned; _add_ with a residual, _add_x_ shifting it
 // right by 1 or more as RequantizeLinear rounds it.
+//
+// void ai_engine_pw_conv_k12_s8_esp32s3(...), ai_engine_pw_conv_k24_n12_s8_esp32s3(...)
+// ConvBlock's convolutions joined before and after it: rows of 12 inputs 4-byte aligned, held in q0; rows of 24 inputs
+// into one block of 12 outputs, stored as three words. Their runs as those above.
 
     .global ai_engine_pw_conv_rows_s8_esp32s3
     .type   ai_engine_pw_conv_rows_s8_esp32s3, @function
@@ -463,6 +471,10 @@ ai_engine_pw_residual_x_c48_s8_esp32s3:
     .type   ai_engine_pw_add_x_k24_s8_esp32s3, @function
     .global ai_engine_pw_add_x_k48_s8_esp32s3
     .type   ai_engine_pw_add_x_k48_s8_esp32s3, @function
+    .global ai_engine_pw_conv_k12_s8_esp32s3
+    .type   ai_engine_pw_conv_k12_s8_esp32s3, @function
+    .global ai_engine_pw_conv_k24_n12_s8_esp32s3
+    .type   ai_engine_pw_conv_k24_n12_s8_esp32s3, @function
 
     .align  4
 ai_engine_pw_conv_rows_s8_esp32s3:
@@ -520,15 +532,25 @@ ai_engine_pw_conv_rows_s8_esp32s3:
     .endif
     ee.vadds.s8     q3, q3, q4
     .endif
+    .if \width == 12
+    ee.movi.32.a    q3, a12, 0
+    s32i    a12, a2, 0
+    ee.movi.32.a    q3, a12, 1
+    s32i    a12, a2, 4
+    ee.movi.32.a    q3, a12, 2
+    s32i    a12, a2, 8
+    addi    a2, a2, 12
+    .else
     ee.vst.l.64.ip  q3, a2, 8
     .if \width == 16
     ee.vst.h.64.ip  q3, a2, 8
     .endif
+    .endif
 .endm
 
 // a9 rows, a10 blocks less one, a6 bias, a7 its pointer, a4 weights, a8 their pointer, a11 residual, a13 and a14 the
-// shifts less 1, a5 the last block's outputs; residual 0 none, 1 added, 2 shifted then added.
-.macro held_rows k, residual
+// shifts less 1, a5 the last block's outputs; residual 0 none, 1 added, 2 shifted then added; twelve: 12 outputs.
+.macro held_rows k, residual, twelve=0
     entry   a1, 48
     ones_in_q7 a7
     l32i    a9, a5, 0
@@ -544,7 +566,15 @@ ai_engine_pw_conv_rows_s8_esp32s3:
     movi.n  a15, 1
     beqz    a9, 9f
 1:
-    .if \k == 24
+    .if \k == 12
+    l32i    a12, a3, 0
+    ee.movi.32.q    q0, a12, 0
+    l32i    a12, a3, 4
+    ee.movi.32.q    q0, a12, 1
+    l32i    a12, a3, 8
+    ee.movi.32.q    q0, a12, 2
+    addi    a3, a3, 12
+    .elseif \k == 24
     ee.vld.l.64.ip  q0, a3, 8
     ee.vld.h.64.ip  q0, a3, 8
     ee.vld.l.64.ip  q5, a3, 8
@@ -557,9 +587,9 @@ ai_engine_pw_conv_rows_s8_esp32s3:
     mov     a7, a6
     ee.vld.128.ip   q1, a8, 16
     ee.vld.128.ip   q2, a8, 16
-    .if \k == 24
+    .if \k < 48
     loopgtz a10, 2f
-    held_block 24, \residual, 0, 16
+    held_block \k, \residual, 0, 16
 2:
     .else
     mov     a12, a10
@@ -570,12 +600,16 @@ ai_engine_pw_conv_rows_s8_esp32s3:
     bnez    a12, 3b
 2:
     .endif
+    .if \twelve
+    held_block \k, \residual, 1, 12
+    .else
     bnei    a5, 16, 4f
     held_block \k, \residual, 1, 16
     j       5f
 4:
     held_block \k, \residual, 1, 8
 5:
+    .endif
     addi    a9, a9, -1
     bnez    a9, 1b
 9:
@@ -605,3 +639,11 @@ ai_engine_pw_add_x_k24_s8_esp32s3:
     .align  4
 ai_engine_pw_add_x_k48_s8_esp32s3:
     held_rows 48, 2
+
+    .align  4
+ai_engine_pw_conv_k12_s8_esp32s3:
+    held_rows 12, 0
+
+    .align  4
+ai_engine_pw_conv_k24_n12_s8_esp32s3:
+    held_rows 24, 0, 1
