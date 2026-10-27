@@ -756,20 +756,29 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
 | Hàng kl như 11/10 | 1173,7 ms | 2 134 984 B | Softmax 14,9 ms và QuantizeLinear 9,2 ms ở mỗi attention 148 khung |
 | `SoftmaxQuant`, tổng cộng thẳng vào bộ nhớ | 1155,5 ms | 2 135 328 B | 20 ms ở mỗi attention 148 khung, ~55 chu kỳ một phần tử |
 | `SoftmaxQuant` cộng bốn cột trong thanh ghi, bảng tra theo byte không dấu; `LayerNormS8` | 1100,7 ms | 2 140 252 B | `SoftmaxQuant` 46,4 ms cả 7 op; LayerNorm 123,3 → 92,7 ms, stem 101,5 → 73,6 ms |
-| `StageSum` | **943,6 ms** | **1 488 352 B** | 6 `StageSum` 55,0 ms thay 27 Mul, 21 Add và 4 Resize (~210 ms); PSRAM bớt các tổng giữa và đầu ra Resize |
+| `StageSum` | 943,6 ms | 1 488 352 B | 6 `StageSum` 55,0 ms thay 27 Mul, 21 Add và 4 Resize (~210 ms); PSRAM bớt các tổng giữa và đầu ra Resize |
+| `ConvBlock`, nhân pointwise lấy từ face attendance | 701,3 ms | 1 422 656 B | 21 khối 260,7 ms thay ~500 ms Conv, Add, Relu, RequantizeLinear; stage 0 42,7 ms một khối |
+| `ConvBlock` viết lại nhân: depthwise nạp kèm nhân-cộng, BN gộp vào pointwise thứ nhất, nhánh dư vào pointwise thứ hai | 611,4 ms | 1 347 148 B | 21 khối 173,9 ms; stage 0 28,4 ms một khối |
+| `LayerNormS8`: trung bình bằng tích sửa một FMA, bước Newton đầu không chia, phép chia không lời gọi | 591,1 ms | 1 347 452 B | LayerNorm 92,0 → 72,6 ms, stem 73,6 → 56,7 ms |
+| `LayerNormS8` và `SoftmaxQuant` tính 4 giá trị xen nhau, làm tròn bằng một phép cộng rồi cắt | 557,5 ms | 1 349 764 B | LayerNorm 55,7 ms, stem 44,2 ms; SoftmaxQuant 46,3 → 28,8 ms, 7,7 ms mỗi attention 148 khung |
+| `softmax_scale`: `Mul` của attention thành bảng tra theo byte | **549,6 ms** | **1 348 604 B** | Mul 20,3 → 13,0 ms, bỏ 6 `Mul` của attention |
 
-- **`SoftmaxQuant`:** bảng `exp` và nghịch đảo tổng như esp-dl, rồi `floor(v + 0,5)` bằng phép float đúng như `double`
-  của esp-dl với v ≥ 0. Phần còn lại là phép float từng phần tử: đọc bảng, nhân, cắt nguyên, so nửa bước.
-- **`LayerNormS8`:** trung bình bằng phép chia float, đúng như phép `double` của esp-dl với mọi tổng int8 khi phần lẻ
-  của n là 1 hay 3 (test kiểm hết). Mỗi vị trí còn ~10 phép chia: một cho trung bình, 6,1 vòng Newton trung bình ở stem
-  (6,0 ở stage 0), một cho nghịch đảo. GCC gọi `__divsf3` của ROM cho mọi phép chia float, kể cả với `-ffast-math`,
-  và hàm ấy là chuỗi `div0.s` … `divn.s` của FPU, ~25 lệnh nối nhau. Stem có 10 656 vị trí nhưng chỉ 4 755 phương sai
-  khác nhau, nên nhớ kết quả Newton theo phương sai còn bớt được hơn nửa số vòng 🔬.
+- **`SoftmaxQuant`:** bảng `exp` và nghịch đảo tổng như esp-dl. Xác suất không âm, nên `floor(v + 0,5)` của esp-dl là
+  phép cắt của tổng float `v + 0,5`: dưới 2^22 tổng ấy không làm tròn sang phần nguyên khác. Mỗi lượt chuẩn hoá tính 4
+  cột xen nhau, còn ~9 chu kỳ một phần tử; `Mul` trước nó thành bảng 256 tích theo byte, tra trước bảng `exp`.
+- **`LayerNormS8`:** trung bình là tích với `fl(1/n)` sửa một FMA, đúng thương float, cũng là số của phép `double`
+  esp-dl, với mọi tổng int8 khi phần lẻ của n là 1 hay 3 (test kiểm hết); tích trần sai 1018 trên 3061 tổng ở n = 12.
+  Bước Newton đầu chia x cho chính nó nên không chia; còn trung bình 5,1 phép chia Newton và một nghịch đảo mỗi vị trí,
+  chạy thẳng chuỗi `div0.s` … `divn.s` của `__divsf3` ROM. Stem còn ~1000 chu kỳ một vị trí, phần lớn là chuỗi phép
+  chia nối nhau. Nhớ kết quả Newton theo đối số chỉ trúng 22% với 1024 ô, 39% với 4096 ô trên cửa sổ của bản dò.
 - **`StageSum`:** mỗi tổng đọc thẳng các đầu ra stage nó cộng, mỗi hàng một lần, đọc bản 74 và 37 khung trước Resize
   theo hàng `t / k`. Nhân PIE làm đúng các lệnh của `Mul` int8 esp-dl (`EE.VMULAS.S8.QACC`, làm tròn như
-  `tie728_s8_vector_round_result`) rồi cộng bão hoà `EE.VADDS.S8` như `Add`.
-- Op tốn nhất còn lại: Conv 511,8 ms trên 181 op, phần lớn là khối conv của stage 0–5 (depthwise 3×3 1,7 chu kỳ một
-  phép nhân-cộng); Add 80,6 ms và Relu 52,0 ms, phần lớn là cộng dư và `Relu` cuối mỗi khối; LayerNorm stem 73,6 ms.
+  `tie728_s8_vector_round_result`) rồi cộng bão hoà `EE.VADDS.S8` như `Add`. ~50 MB/s đọc PSRAM: chạm trần băng
+  thông, không phải phép tính.
+- **`ConvBlock`:** mỗi điểm ảnh của khối 24 kênh (đệm 32): chép hàng vào ~100 chu kỳ, mỗi depthwise ~72, pointwise kèm
+  BN ~153, pointwise kèm nhánh dư ~160; mỗi khối 16 đầu ra của pointwise tốn ~50 chu kỳ ngoài các phép nhân-cộng.
+- Op tốn nhất còn lại: `ConvBlock` 172,2 ms; Conv 124,8 ms trên 76 op (stem 12,0 ms ở 2,5 chu kỳ một phép nhân-cộng,
+  depthwise bước 2 của stage 2 và 4 ở 8,0 và 4,3); LayerNorm 55,7 ms; `StageSum` 55,0 ms; MatMul 47,3 ms.
 
 ## 26. `command_ctc` qua chuỗi tăng tốc (E11-T30)
 
