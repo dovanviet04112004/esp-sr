@@ -120,6 +120,32 @@ def channel_norms(model: nn.Module) -> nn.Module:
     return model
 
 
+class GroupNorm1d(nn.Module):
+    """redimnet2's agg_gnorm GroupNorm over (b, channels, frames) as a layer_norm without affine over each group's
+    values, then its weights and bias per channel: the same norm, where ONNX gets InstanceNormalization, which esp-dl
+    lacks."""
+
+    def __init__(self, norm: nn.GroupNorm) -> None:
+        super().__init__()
+        self.groups, self.eps = norm.num_groups, norm.eps
+        self.weight, self.bias = norm.weight, norm.bias
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, c, t = x.shape
+        grouped = x.reshape(b, self.groups, c // self.groups * t)
+        normed = functional.layer_norm(grouped, (grouped.shape[-1],), eps=self.eps).reshape(b, c, t)
+        return normed * self.weight[:, None] + self.bias[:, None]
+
+
+def group_norms(model: nn.Module) -> nn.Module:
+    """model with each GroupNorm of redimnet2's agg_gnorm as a GroupNorm1d."""
+    for parent in list(model.modules()):
+        for name, m in list(parent.named_children()):
+            if isinstance(m, nn.GroupNorm):
+                setattr(parent, name, GroupNorm1d(m))
+    return model
+
+
 class StageSum(nn.Module):
     """redimnet2's weigth1d as one depthwise 1x1 convolution an input, kernels its softmaxed weights, the outputs added:
     the same sum, where weigth1d stacks its inputs and sums over the stack, an axis esp-dl sums slowly
@@ -299,9 +325,9 @@ class Embed(nn.Module):
         if not wrap.pool.global_context_att or wrap.return_all_outputs:
             raise ValueError("Embed reads a pool with global context and one backbone output")
         b = wrap.backbone
-        if b.is_subnet or b.agg_gnorm or any(b._stage_has_dual):
+        if b.is_subnet or any(b._stage_has_dual):
             raise ValueError("Embed runs one plain stage after another")
-        rewritten = stage_sums(channel_norms(ungrouped(explicit_padding(copy.deepcopy(b)))))
+        rewritten = group_norms(stage_sums(channel_norms(ungrouped(explicit_padding(copy.deepcopy(b))))))
         self.backbone = time_major(ptq_espdl.one_channel_inputs(unit_upsamples(keys_first_attention(rewritten))))
         to2d, head = self.backbone.fin_to2d, self.backbone.head
         channels, bands = head.out_channels if isinstance(head, nn.Conv2d) else to2d.channels, to2d.bands
@@ -314,7 +340,8 @@ class Embed(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b = self.backbone
         x = x[:, :, : x.shape[2] // b.time_stride * b.time_stride, :]
-        outs = [b.stem(x)]
+        stem = b.stem(x)
+        outs = [b.stem_gnorm(stem) if b.agg_gnorm else stem]
         for stage in range(b.num_stages):
             outs.extend(b.run_stage(outs, stage))
         return self.head(self.pool(To1d()(b.head(b.fin_to2d(b.fin_wght1d(outs))))))

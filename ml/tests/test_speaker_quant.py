@@ -73,6 +73,22 @@ def test_channel_norms_give_what_the_channels_first_norm_gives_as_one_layer_norm
     assert "Pow" in {n.op_type for n in plain}
 
 
+def test_group_norms_give_what_the_group_norm_gives_as_a_layer_norm_per_group(tmp_path: Path) -> None:
+    torch.manual_seed(6)
+    norm = nn.GroupNorm(3, 4 * CHANNELS).eval()
+    with torch.no_grad():
+        norm.weight.uniform_(0.5, 1.5)
+        norm.bias.uniform_(-0.5, 0.5)
+    x = torch.randn(1, 4 * CHANNELS, FRAMES)
+    model = quant.group_norms(nn.Sequential(norm)).eval()
+    with torch.no_grad():
+        torch.testing.assert_close(model(x), norm(x))
+    ops = {n.op_type for n in onnx.load(onnx_export.checked(model, (x.numpy(),), tmp_path / "g.onnx", 1e-4)).graph.node}
+    plain = onnx.load(onnx_export.checked(norm, (x.numpy(),), tmp_path / "p.onnx", 1e-4)).graph.node
+    assert "LayerNormalization" in ops and "InstanceNormalization" not in ops
+    assert "InstanceNormalization" in {n.op_type for n in plain}
+
+
 class StackedSum(nn.Module):
     """redimnet2/layers/redim_structural.py weigth1d, not sequential, at the pin."""
 
