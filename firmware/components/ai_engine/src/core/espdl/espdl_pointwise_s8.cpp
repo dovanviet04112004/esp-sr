@@ -1,5 +1,6 @@
 #include "core/espdl/espdl_pointwise_s8.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -11,6 +12,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
+#include "sdkconfig.h"
 
 extern "C" {
 void ai_engine_pw_conv_rows_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
@@ -38,6 +40,7 @@ constexpr int kHalfStep = 8;
 constexpr size_t kVectorAlignBytes = 16;
 constexpr size_t kBiasBlockBytes = 64; // one block's bias in esp-dl's QACC layout
 constexpr size_t kPatchRank = 4;
+constexpr int kDataCacheBytes = CONFIG_ESP32S3_DATA_CACHE_SIZE;
 
 using RowKernel = void (*)(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
 
@@ -68,6 +71,7 @@ enum Run {
     kRunResidual,
     kRunResidualShift,
     kRunLast,
+    kRunSkip,
     kRunSize
 };
 
@@ -123,7 +127,7 @@ class PointwiseS8 final : public dl::module::Module {
         }
         const int8_t *weights = context->get_tensor(m_inputs_index[1])->get_element_ptr<int8_t>();
         if (!patched()) {
-            kernel_(y->get_element_ptr<int8_t>(), x->get_element_ptr<int8_t>(), weights, run_.data());
+            run_slices(y->get_element_ptr<int8_t>(), x->get_element_ptr<int8_t>(), weights);
             return;
         }
         const int8_t *xs = x->get_element_ptr<int8_t>();
@@ -171,6 +175,33 @@ class PointwiseS8 final : public dl::module::Module {
     bool patched() const noexcept
     {
         return patch_[0] * patch_[1] > 1;
+    }
+
+    void run_slices(int8_t *ys, const int8_t *xs, const int8_t *weights) noexcept
+    {
+        if (slice_blocks_ == 0) {
+            kernel_(ys, xs, weights, run_.data());
+            return;
+        }
+        const int blocks = padded(columns_) / kChannelStep;
+        for (int b = 0; b < blocks; b += slice_blocks_) {
+            const int n = std::min(slice_blocks_, blocks - b);
+            run_[kRunBlocks] = n;
+            run_[kRunBias] = bias_at_ + b * kBiasBlockBytes;
+            run_[kRunSkip] = columns_ - n * kChannelStep;
+            kernel_(ys + b * kChannelStep, xs, weights + b * inputs_ * kChannelStep, run_.data());
+        }
+    }
+
+    // Weights past the data cache run as slices of half of it, as even as cache_sized_convolutions lays them.
+    int slice_blocks(int k) const noexcept
+    {
+        const int blocks = padded(columns_) / kChannelStep;
+        const int block_bytes = k * kChannelStep;
+        if (blocks * block_bytes <= kDataCacheBytes || columns_ % kChannelStep != 0) { return 0; }
+        const int most = std::max(kDataCacheBytes / 2 / block_bytes, 1);
+        const int slices = (blocks + most - 1) / most;
+        return (blocks + slices - 1) / slices;
     }
 
     // Output row t's patches as rows of K: each patch's kh input rows of kw pixels in turn.
@@ -234,10 +265,9 @@ class PointwiseS8 final : public dl::module::Module {
             ESP_LOGE(TAG, "%s: a residual needs rows of 24 or 48 and the output's int8 shape", name);
             return false;
         }
-        int32_t bias_at = 0;
         if (bias != nullptr) {
             bias->reset_bias_layout(quant_type, true);
-            bias_at = reinterpret_cast<int32_t>(bias->get_element_ptr());
+            bias_at_ = reinterpret_cast<int32_t>(bias->get_element_ptr());
         } else {
             zero_bias_ = static_cast<int8_t *>(heap_caps_aligned_calloc(kVectorAlignBytes, np / kChannelStep,
                                                                         kBiasBlockBytes, MALLOC_CAP_SPIRAM));
@@ -245,7 +275,7 @@ class PointwiseS8 final : public dl::module::Module {
                 ESP_LOGE(TAG, "%s: no memory for a zero bias of %d outputs", name, np);
                 return false;
             }
-            bias_at = reinterpret_cast<int32_t>(zero_bias_);
+            bias_at_ = reinterpret_cast<int32_t>(zero_bias_);
         }
         const int vectors = k / kChannelStep;
         run_ = {rows,
@@ -254,12 +284,15 @@ class PointwiseS8 final : public dl::module::Module {
                 vectors - 1,
                 0,
                 shift_,
-                bias_at,
+                bias_at_,
                 0,
                 residual_shift_,
-                columns_ % kChannelStep != 0 ? kHalfStep : kChannelStep};
+                columns_ % kChannelStep != 0 ? kHalfStep : kChannelStep,
+                0};
+        inputs_ = k;
         if (h == nullptr) {
             kernel_ = ai_engine_pw_conv_rows_s8_esp32s3;
+            slice_blocks_ = patched() ? 0 : slice_blocks(k);
         } else if (residual == nullptr) {
             kernel_ = h->conv;
         } else {
@@ -278,6 +311,9 @@ class PointwiseS8 final : public dl::module::Module {
     int width_ = 0;
     int out_rows_ = 0;
     int patches_ = 0;
+    int inputs_ = 0;
+    int slice_blocks_ = 0; // 0: all blocks in one pass over the rows
+    int32_t bias_at_ = 0;
     int8_t *gathered_ = nullptr;  // one output row's patches as rows of K
     int8_t *zero_bias_ = nullptr; // QACC-layout zeros when the convolution has no bias
     std::array<int32_t, kRunSize> run_ = {};

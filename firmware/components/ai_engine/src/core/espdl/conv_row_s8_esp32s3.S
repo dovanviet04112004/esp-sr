@@ -445,7 +445,7 @@ ai_engine_pw_residual_x_c48_s8_esp32s3:
 // [rows][N], residual shift onto the sum's exponent, last block's outputs (16 or 8). out: [rows][N], 8-byte aligned.
 //
 // void ai_engine_pw_conv_rows_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run)
-// Rows of K a multiple of 16 inputs, 16-byte aligned, no residual.
+// Rows of K a multiple of 16 inputs, 16-byte aligned, no residual; run ends with out bytes past each row's blocks.
 //
 // void ai_engine_pw_conv_k24_s8_esp32s3(...), ai_engine_pw_conv_k48_s8_esp32s3(...)
 // void ai_engine_pw_add_k24_s8_esp32s3(...), ai_engine_pw_add_k48_s8_esp32s3(...)
@@ -507,6 +507,8 @@ ai_engine_pw_conv_rows_s8_esp32s3:
     l32i    a15, a5, 8
     slli    a15, a15, 4
     add     a3, a3, a15
+    l32i    a15, a5, 40
+    add     a2, a2, a15
     addi    a6, a6, -1
     bnez    a6, 1b
     retw.n
