@@ -810,6 +810,11 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
   0 và 1 rơi về nhân không căn của esp-dl, 2–3 chu kỳ một phép nhân-cộng, cửa sổ lên 472,6 ms; nên `aligned_pointwise`
   chỉ để nguyên cột các conv `PointwiseS8` nhận. `exp_dim` với `Add` 9,6 → 6,3 ms ở stage 0 và 1, `red_dim` 4,5 →
   3,4 ms; ba conv gộp cột 12 kênh còn 8,1, 7,8 và 4,8 ms, phần lớn là ghi map 256 KB ra PSRAM.
+- **Depthwise theo thời gian của TCM** (24 conv, kernel 7–59, cùng Gelu sau nó; ~7,6 ms): một op riêng có nhân
+  khớp từng bit, 0,05–0,18 ms một op trên app đo, nhưng cả op 0,2–0,6 ms, 24 op 8,6 ms, cửa sổ 366,9 → 367,7 ms. Phần
+  thêm là bộ đệm riêng của mỗi op trong PSRAM (hàng vào đệm lên 32 kênh, hàng ra, ~10 KB) nạp nguội mỗi lần chạy, và
+  lượt tra bảng. Đọc x tại chỗ (hàng 24 byte) thì mỗi vector phải nạp hai nửa 8 byte, nhân chậm gấp đôi; lợi còn
+  ~4 ms. Bỏ, giữ conv của esp-dl.
 - **`MatMulS8`:** MatMul của esp-dl với 24 cột chạy 16 cột qua nhân unaligned, 8 cột còn lại qua vòng C, ~2,25 chu kỳ
   một phép nhân-cộng; cả hai làm tròn nửa lên như tích chập không bias, nên một hàng là một pointwise.
 - **`AttentionCore`:** hai tích chạy nhân pointwise của `MatMulS8` theo khối 16 khung query, ~0,5 ms ở attention 148
