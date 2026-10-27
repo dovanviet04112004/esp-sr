@@ -15,7 +15,7 @@ from pathlib import Path
 ELEMENTWISE = {"Add", "Sub", "Mul", "Div", "Pow"}
 SAME_SHAPE = {
     "Relu", "Gelu", "Tanh", "Sigmoid", "Swish", "Sqrt", "Clip", "LUT", "Softmax", "LayerNormalization",
-    "QuantizeLinear", "DequantizeLinear", "RequantizeLinear", "Identity",
+    "QuantizeLinear", "DequantizeLinear", "RequantizeLinear", "Identity", "SoftmaxQuant", "LayerNormS8",
 }  # fmt: skip
 REDUCE = {"ReduceMean", "ReduceSum", "ReduceMax", "ReduceMin"}
 SHAPE_PARAMS_MAX = 8  # longer values are weights, never shapes or axes
