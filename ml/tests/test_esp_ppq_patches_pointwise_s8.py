@@ -133,6 +133,49 @@ def test_pointwise_s8_reads_a_convolution_of_its_stride_as_patches(tmp_path: Pat
         )
 
 
+class WidePatches(nn.Module):
+    """Two 2x2 convolutions of stride 2: 96 to 192 channels, 72 KB of weights past the data cache as b3's stage 5
+    holds, then 192 to 48, 36 KB between half the data cache and all of it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.wide, self.middle = nn.Conv2d(96, 192, 2, stride=2), nn.Conv2d(192, 48, 2, stride=2)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.middle(self.wide(x))
+
+
+def test_pointwise_s8_reads_patches_whose_weights_outgrow_the_data_cache(tmp_path: Path) -> None:
+    torch.manual_seed(9)
+    rng = np.random.default_rng(33)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 96, 8, 8)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(WidePatches().eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    with esp_ppq_patches.applied(["pointwise_s8"]):
+        path = export_espdl.export(graph, tmp_path / "wide.espdl")
+    nodes, tensors = espdl_graph(path)
+    ops = [op for op, _ in nodes.values()]
+    assert ops.count("PointwiseS8") == 1 and ops.count("Conv") == 1
+    info = path.with_suffix(".info").read_text()
+    transposed = dict(re.findall(r"%(\S+) = Transpose\[.*?\]\(%([^)]+)\)", info))
+    ((made, attrs, inputs),) = re.findall(r"%(\S+) = PointwiseS8\[(.*?)\]\(([^)]*)\)", info)
+    assert re.search(r"patch = \[2, 2\]", attrs)
+    shift = int(re.search(r"shift = (\d+)", attrs).group(1))
+    names = [v.strip().lstrip("%") for v in inputs.split(",")]
+    maps = [names[0], made]
+    got = TorchExecutor(graph, device="cpu").forward(inputs=calib[0], output_names=[transposed.get(m, m) for m in maps])
+    x, want = (
+        torch.round(v[0].permute(1, 2, 0) / 2.0 ** exponent(info, m)).to(torch.int64).numpy()
+        for v, m in zip(got, maps, strict=True)
+    )
+    rows, n = patch_rows(x, 2, 2), want.shape[-1]
+    assert tensors[names[1]].size > esp_ppq_patches.DATA_CACHE_BYTES
+    out = pointwise_s8_espdl(rows, tensors[names[1]], tensors[names[2]][:n], shift, None, -1)
+    assert np.array_equal(out, want.reshape(-1, n))
+    assert not np.array_equal(
+        pointwise_s8_espdl(rows, tensors[names[1]], tensors[names[2]][:n], shift + 1, None, -1), want.reshape(-1, n)
+    )
+
+
 def test_pointwise_s8_joins_a_concat_of_its_slices_back_into_one_op(tmp_path: Path) -> None:
     torch.manual_seed(5)
     rng = np.random.default_rng(18)

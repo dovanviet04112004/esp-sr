@@ -85,8 +85,8 @@ def pointwise_s8_from(graph, op, info) -> bool:
     laid_x, laid_y = laid_shape(x, info), laid_shape(y, info)
     k, n = laid_x[-1] * math.prod(patch), laid_y[-1]
     if math.prod(patch) > 1:
-        # Each output pixel reads all the weights again: past half the data cache they stop staying there.
-        if len(laid_x) != 4 or laid_x[0] != 1 or k % CHANNEL_STEP or k * n > DATA_CACHE_BYTES // 2:
+        # Weights within half the data cache stay there; past all of it the op runs them in slices that do.
+        if len(laid_x) != 4 or laid_x[0] != 1 or k % CHANNEL_STEP or DATA_CACHE_BYTES // 2 < k * n <= DATA_CACHE_BYTES:
             return False
         (kh, kw), (t, f) = patch, laid_x[1:3]
         if t % kh or f % kw or laid_y != [1, t // kh, f // kw, n]:
