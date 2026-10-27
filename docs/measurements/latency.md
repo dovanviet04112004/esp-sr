@@ -766,7 +766,8 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
 | `AttentionCore`: cắt head, điểm, softmax, nhân value, gộp head của 6 attention | 508,5 ms | 1 418 652 B | 6 op 28,2 ms thay MatMul 23,9 ms, Transpose 7,6 ms và softmax ~21 ms; attention 148 khung 9,8 ms, ~90% là softmax |
 | `StemConv`: bản sao log-mel và depthwise 3×3 của stem | 493,6 ms | 1 422 860 B | 4,5 ms thay Add 7,5 ms và Conv 12,0 ms; phần lớn là ghi 128 KB đầu ra ra PSRAM |
 | Softmax theo dải 8 cột bằng nhân PIE, tổng và thang trong thanh ghi FPU | 490,0 ms | 1 422 860 B | `AttentionCore` 28,2 → 24,6 ms (8,4 ms ở 148 khung); softmax của pool vẫn 8,2 ms: map 85 KB lớn hơn cache, mỗi dải cột nạp lại các dòng của nó |
-| `StrideDepthwise`: depthwise bước 2 của stage 2 và bước 4 của stage 4 | **489,3 ms** | **1 426 392 B** | 3,5 và 2,1 ms thay 6,6 và 2,3 ms; cả hai giờ ở trần PSRAM: 128 KB đọc vào, 64 và 32 KB ghi ra |
+| `StrideDepthwise`: depthwise bước 2 của stage 2 và bước 4 của stage 4 | 489,3 ms | 1 426 392 B | 3,5 và 2,1 ms thay 6,6 và 2,3 ms; cả hai giờ ở trần PSRAM: 128 KB đọc vào, 64 và 32 KB ghi ra |
+| `WeightedStats`: x·x, p·x, p·(x·x) và hai `ReduceSum` theo thời gian của pool | **473,8 ms** | **1 427 400 B** | 2,9 ms thay 3 Mul và 2 ReduceSum (~18,5 ms) |
 
 - **`SoftmaxQuant`:** bảng `exp` và nghịch đảo tổng như esp-dl. Xác suất không âm, nên `floor(v + 0,5)` của esp-dl là
   phép cắt của tổng float `v + 0,5`: dưới 2^22 tổng ấy không làm tròn sang phần nguyên khác. Mỗi lượt chuẩn hoá tính 4
@@ -791,9 +792,9 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
   dcache mặc định tắt (`EXTMEM_DCACHE_AUTOLOAD_CTRL` = 0x8); bật cho đúng vùng đọc, mọi kiểu kích và mọi cỡ, không
   đổi gì. Bật cho cả vùng 32 MB từ 0x3C000000 thì cache báo lỗi cấu hình preload và chip khởi động lại. Op chạm trần
   băng thông chỉ nhanh lên khi bớt lượt đọc ghi, tức là gộp op.
-- Op tốn nhất còn lại: `ConvBlock` 172,5 ms; Conv 106,9 ms trên 73 op, phần lớn pointwise ở tốc độ vector mà nửa thời
-  gian là đọc ghi PSRAM; LayerNorm 55,7 ms, stem 44,2 ms; `StageSum` 54,8 ms; `AttentionCore` 24,8 ms; pool ~45 ms
-  (ReduceMean, ReduceSum, Mul, Sub, softmax theo thời gian).
+- Op tốn nhất còn lại: `ConvBlock` 172,0 ms; Conv 106,4 ms trên 73 op, phần lớn pointwise ở tốc độ vector mà nửa thời
+  gian là đọc ghi PSRAM; LayerNorm 55,6 ms, stem 44,2 ms; `StageSum` 54,9 ms; `AttentionCore` 24,7 ms; phần còn lại
+  của pool ~25 ms (ReduceMean, Sub, Mul, softmax theo thời gian, các conv chú ý).
 
 ## 26. `command_ctc` qua chuỗi tăng tốc (E11-T30)
 
