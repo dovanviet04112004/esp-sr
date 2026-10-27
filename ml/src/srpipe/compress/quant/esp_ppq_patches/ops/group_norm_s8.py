@@ -8,6 +8,7 @@ from collections.abc import Iterator
 
 from ..base import config_of, exponent_of, int8_tensor, laid_shape, read_once
 from .layernorm_s8 import LAYERNORM_S8
+from .stage_sum import repeated_rows
 
 GROUP_NORM_S8 = "GroupNormS8"
 CHANNELS_SWAPPED = [0, 2, 1]
@@ -46,7 +47,9 @@ def group_norm_s8_from(graph, norm, info) -> bool:
     """norm, the LayerNorm of a GroupNorm1d chain (Transpose to channels first, Reshape to [1, G, n], the norm with
     one gamma and one beta value, Reshape to [1, C, T], a Mul and an Add of int8 constants per channel on the output's
     exponent, Transpose back), with the chain as one GroupNormS8 on the map the first Transpose reads: [1, T, C], or
-    [1, T, F, C] read as [1, T, F * C], ReDimNet2's to1d of a 2-d map then giving channels in that order."""
+    [1, T, F, C] read as [1, T, F * C], ReDimNet2's to1d of a 2-d map then giving channels in that order. A [1, T, C]
+    map out of a Resize that only repeats its rows, read by the chain alone, goes with the Resize: the op reads the
+    map before it, "repeat" times each row."""
     from esp_ppq.core import OperationQuantizationConfig
     from esp_ppq.IR.quantize import QuantableOperation
 
@@ -89,8 +92,11 @@ def group_norm_s8_from(graph, norm, info) -> bool:
     e |= {"b": exponent_of(b, info), "a": exponent_of(add.outputs[0], info), "y": exponent_of(y, info)}
     if None in e.values() or not e["m"] == e["b"] == e["a"] == e["y"] or e["m"] - e["n"] - e["w"] < 1:
         return False
+    resize = x.source_op
+    repeat = repeated_rows(resize, info) if len(shape) == 3 and read_once(graph, x) else 0
+    source = resize.inputs[0] if repeat > 1 else x
     configs = [
-        first.input_quant_config[0],
+        resize.input_quant_config[0] if repeat > 1 else first.input_quant_config[0],
         mul.input_quant_config[mul.inputs.index(w)],
         add.input_quant_config[add.inputs.index(b)],
     ]
@@ -111,9 +117,12 @@ def group_norm_s8_from(graph, norm, info) -> bool:
     for v in middles:
         if v.name in graph.variables:
             graph.remove_variable(v)
+    if repeat > 1:
+        graph.remove_operation(resize)
+        graph.remove_variable(x)
     norm.inputs.clear()
     norm.outputs.clear()
-    for v in (x, w, b):
+    for v in (source, w, b):
         norm.inputs.append(v)
         v.dest_ops.append(norm)
     norm.outputs.append(y)
@@ -128,6 +137,7 @@ def group_norm_s8_from(graph, norm, info) -> bool:
         beta=beta,
         norm_exponent=int(e["n"]),
         mul_shift=int(e["m"] - e["n"] - e["w"]),
+        repeat=int(max(repeat, 1)),
     )
     norm.config = OperationQuantizationConfig(configs, [out_config])
     return True

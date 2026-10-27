@@ -57,6 +57,18 @@ class MapGroupNormed(GroupNormed):
         return self.back(normed * self.weight[:, None] + self.bias[:, None])
 
 
+class RepeatedGroupNormed(GroupNormed):
+    """GroupNormed over a map whose frames a nearest Resize doubles, as b3's stages 2-5 upsample their frames before
+    their agg_gnorm."""
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = functional.interpolate(self.front(x)[:, :, ::2], scale_factor=2.0, mode="nearest")
+        b, c, t = y.shape
+        grouped = y.reshape(b, GROUPS, c // GROUPS * t)
+        normed = functional.layer_norm(grouped, (grouped.shape[-1],), eps=1e-5).reshape(b, c, t)
+        return self.back(normed * self.weight[:, None] + self.bias[:, None])
+
+
 def group_norm_s8_espdl(q: np.ndarray, w: np.ndarray, b: np.ndarray, attrs: dict, e_x: int) -> np.ndarray:
     """GroupNormS8's int8 output [C, T] for int8 q [C, T]: each group's LayerNorm as layernorm_as_espdl takes it, its
     squares summed channel after channel, frame after frame; then the Mul's rounding and the saturating Add."""
@@ -83,25 +95,27 @@ def group_norm_s8_espdl(q: np.ndarray, w: np.ndarray, b: np.ndarray, attrs: dict
     return out
 
 
-@pytest.mark.parametrize("on_map", [False, True])
-def test_group_norm_s8_runs_the_chain_as_one_op_giving_its_integers(tmp_path: Path, on_map: bool) -> None:
+@pytest.mark.parametrize("kind", ["rows", "map", "repeated"])
+def test_group_norm_s8_runs_the_chain_as_one_op_giving_its_integers(tmp_path: Path, kind: str) -> None:
     torch.manual_seed(11)
     rng = np.random.default_rng(41)
+    on_map = kind == "map"
     shape = (1, NORMED_CHANNELS // MAP_BANDS, HOPS, MAP_BANDS) if on_map else (1, NORMED_CHANNELS, HOPS)
     calib = [torch.from_numpy(rng.normal(0, 1, shape).astype(np.float32)) for _ in range(2)]
-    net = MapGroupNormed() if on_map else GroupNormed()
+    net = {"rows": GroupNormed, "map": MapGroupNormed, "repeated": RepeatedGroupNormed}[kind]()
     graph = ptq_espdl.quantize(net.eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
     with esp_ppq_patches.applied(["layernorm_s8", "group_norm_s8"]):
         path = export_espdl.export(graph, tmp_path / "grouped.espdl")
     nodes, tensors = espdl_graph(path)
     ops = [op for op, _ in nodes.values()]
     assert ops.count("GroupNormS8") == 1
-    assert not {"LayerNormS8", "LayerNormalization", "Mul", "Add", "Transpose"} & set(ops)
+    assert not {"LayerNormS8", "LayerNormalization", "Mul", "Add", "Transpose", "Resize"} & set(ops)
     info = path.with_suffix(".info").read_text()
     ((made, attrs, inputs),) = re.findall(r"%(\S+) = GroupNormS8\[(.*?)\]\(([^)]*)\)", info)
     x, w, b = (v.strip().lstrip("%") for v in inputs.split(","))
     found = dict(re.findall(r"(\w+) = (-?[\d.e+-]+)", attrs))
-    fields = {k: int(found[k]) for k in ("groups", "norm_exponent", "mul_shift")}
+    fields = {k: int(found[k]) for k in ("groups", "norm_exponent", "mul_shift", "repeat")}
+    assert fields["repeat"] == (2 if kind == "repeated" else 1)
     fields |= {k: float(found[k]) for k in ("epsilon", "gamma", "beta")}
     (add,) = [op.outputs[0].name for op in graph.operations.values() if op.type == "Add"]
     with esp_ppq_patches.applied(["layernorm_as_espdl"]):
@@ -112,6 +126,7 @@ def test_group_norm_s8_runs_the_chain_as_one_op_giving_its_integers(tmp_path: Pa
     )
     if on_map:
         q = q.transpose(2, 0, 1).reshape(NORMED_CHANNELS, HOPS)
+    q = np.repeat(q, fields["repeat"], axis=1)
     assert np.array_equal(group_norm_s8_espdl(q, tensors[w], tensors[b], fields, exponent(info, x)), want)
     off = fields | {"mul_shift": fields["mul_shift"] + 1}
     assert not np.array_equal(group_norm_s8_espdl(q, tensors[w], tensors[b], off, exponent(info, x)), want)
