@@ -1274,6 +1274,13 @@ Profile của b3, tổng 7 086 ms:
 
 - Đồ thị ở flash tốn b0 thêm 52 ms (15%). Sản phẩm chạy speaker như thế (`deploy.weights_in_flash`), nên 408,5 ms
   là giờ của b0 trên sản phẩm.
+
+Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash, mỗi bước khớp từng bit ở embedding ra:
+
+| Bước | Một cửa sổ | PSRAM cho tensor | Ghi chú |
+|---|---|---|---|
+| Thô: các op viết cho b0 | 7 089,2 ms | 3 927 576 B | như bảng trên |
+| `PointwiseS8` cắt lát cả khi N lẻ 8, và với mảnh | **3 464,3 ms** | **4 183 324 B** | conv 4×2 của stage 5 1 540 → 69 ms; mỗi `red_dim` dưới 51 ms, từ tới 642 ms; thêm 256 KB bộ đệm mảnh. `ConvBlock` còn 2 353 ms |
 - **Chưa đo:** 7 `GroupNorm`, ước 80–120 ms 🔬 vì mỗi phép đọc ghi map 256 KB hai lượt; độ chính xác sau int8, cần
   `GroupNorm` trong đường chip rồi mới chạy được thang int8.
 - **Đọc:** đây là số thô. b3 chạy qua các op viết cho hình dạng của b0, chưa có bước nào tối ưu riêng cho nó. b3 có
