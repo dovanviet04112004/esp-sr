@@ -33,6 +33,7 @@ esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches aroun
   - layernorm_s8                   # each int8 LayerNorm as ai_engine's op: float steps, no double mean
   - stage_sum                      # each weighted sum of stage outputs as one op of ai_engine (after channel_scales_as_mul)
   - conv_block                     # each residual conv block as one op of ai_engine run a row at a time (after aligned_pointwise)
+  - matmul_s8                      # each projection by constant weights and its bias as one op of ai_engine
 deploy:                            # make speaker-deploy RUN= ROW= (E11-T26, KEHOACH 3.17)
   weights_in_flash: true           # the image entry stays in flash; PSRAM holds the tensors only (KEHOACH 6.6)
   shares: [0.05]                   # impostors passing: the first, unless a distance then keeps under keep_min (KEHOACH 3.17)
