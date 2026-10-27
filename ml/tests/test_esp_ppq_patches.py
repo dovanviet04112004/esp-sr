@@ -716,6 +716,33 @@ def test_copies_by_broadcast_writes_the_copies_as_an_add_of_zeros(tmp_path: Path
     assert tensors[zeros].shape == (1, 1, 1, 12) and not tensors[zeros].any()
 
 
+def test_stem_conv_runs_the_copies_and_their_depthwise_as_one_op(tmp_path: Path) -> None:
+    torch.manual_seed(4)
+    rng = np.random.default_rng(17)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 1, 6, 8)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(CopiedStem().eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    with esp_ppq_patches.applied(["copies_by_broadcast", "stem_conv"]):
+        path = export_espdl.export(graph, tmp_path / "stem.espdl")
+    nodes, tensors = espdl_graph(path)
+    ((_, (_, taps, bias)),) = [node for node in nodes.values() if node[0] == "StemConv"]
+    assert not {"Add", "Conv", "Concat", "Transpose"} & {op for op, _ in nodes.values()}
+    assert tensors[taps].shape == (9, 16) and tensors[bias].shape == (16,)
+    shift = int(re.search(r"= StemConv\[.*shift = (\d+)", path.with_suffix(".info").read_text()).group(1))
+    io = ptq_espdl.io_of(graph)
+    x = ptq_espdl.to_int8(calib[0].numpy(), io.input_exponent)
+    want = ptq_espdl.Simulator(graph)(x.astype(np.float32) * np.float32(2.0**io.input_exponent))
+    want = np.round(want[0].transpose(1, 2, 0) / 2.0**io.output_exponent).astype(np.int64)
+    padded = np.pad(x[0, 0].astype(np.int64), 1)
+    weights, offsets = tensors[taps][:, :12].astype(np.int64), tensors[bias][:12].astype(np.int64)
+
+    def stem(s: int) -> np.ndarray:
+        acc = sum(padded[i : i + 6, j : j + 8, None] * weights[3 * i + j] for i in range(3) for j in range(3))
+        return round_shift(acc + offsets, s)
+
+    assert np.array_equal(stem(shift), want)
+    assert not np.array_equal(stem(shift + 1), want)
+
+
 def test_cache_sized_convolutions_slice_a_wide_projection_along_its_outputs(tmp_path: Path) -> None:
     torch.manual_seed(5)
     rng = np.random.default_rng(18)
