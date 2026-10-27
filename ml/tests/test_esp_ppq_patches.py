@@ -953,6 +953,18 @@ def test_cache_sized_convolutions_slice_a_wide_projection_along_its_outputs(tmp_
     assert np.array_equal(np.concatenate([tensors[ins[2]] for ins in parts]), plain[1][b])
 
 
+def test_cache_sized_convolutions_leave_whole_a_projection_of_one_slice(tmp_path: Path) -> None:
+    """72 outputs, no multiple of 16, make one slice: no Concat of that one input, which esp-dl's Concat refuses."""
+    torch.manual_seed(5)
+    rng = np.random.default_rng(18)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 1152, 6)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(nn.Conv1d(1152, 72, 1).eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    with esp_ppq_patches.applied(["cache_sized_convolutions"]):
+        nodes, _ = espdl_graph(export_espdl.export(graph, tmp_path / "whole.espdl"))
+    ops = [op for op, _ in nodes.values()]
+    assert ops.count("Conv") == 1 and "Concat" not in ops
+
+
 class OneWeightSum(nn.Module):
     """A convolution, a weighted sum of its output alone as ReDimNet2's stage sums give it, a depthwise convolution
     by 1, and another convolution; equalisation scales a sum between convolutions, not b0's after a LayerNorm."""

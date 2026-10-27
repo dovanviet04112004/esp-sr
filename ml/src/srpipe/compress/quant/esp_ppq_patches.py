@@ -853,7 +853,7 @@ def slice_outputs(graph, op, sizes: list[int], info) -> None:
 
 def slice_wide_convolutions(graph) -> int:
     """Each ungrouped pointwise convolution over more than one position whose int8 weights outgrow the data cache, as
-    slice_outputs lays it by output_sizes into slices of at most half of it; how many."""
+    slice_outputs lays it by output_sizes into slices of at most half of it, when they make more than one; how many."""
     from esp_ppq.IR.quantize import QuantableOperation
     from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
 
@@ -864,8 +864,9 @@ def slice_wide_convolutions(graph) -> int:
         w, laid = op.inputs[1].value, laid_shape(op.outputs[0], info)
         if any(k != 1 for k in op.attributes["kernel_shape"]) or math.prod(laid[:-1]) < 2:
             continue
-        if w.numel() > DATA_CACHE_BYTES:
-            slice_outputs(graph, op, output_sizes(laid[-1], w.numel(), DATA_CACHE_BYTES // 2), info)
+        sizes = output_sizes(laid[-1], w.numel(), DATA_CACHE_BYTES // 2) if w.numel() > DATA_CACHE_BYTES else []
+        if len(sizes) > 1:
+            slice_outputs(graph, op, sizes, info)
             done += 1
     return done
 
