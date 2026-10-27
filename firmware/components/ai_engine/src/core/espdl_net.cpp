@@ -4,6 +4,7 @@
 #include <new>
 #include <string>
 
+#include "core/espdl/espdl_ops.hpp"
 #include "dl_model_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -67,6 +68,7 @@ esp_err_t EspdlNet::build(Blob blob, const char *name) noexcept
     const size_t psram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     const int64_t started_us = esp_timer_get_time();
     dl::Model *model = nullptr;
+    register_espdl_ops();
     {
         const ExternalMallocGuard guard;
         // Every tensor in PSRAM; the parameters stay in the loaded copy, itself in PSRAM.

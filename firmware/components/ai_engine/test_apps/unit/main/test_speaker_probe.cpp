@@ -5,6 +5,7 @@
 
 #include "ai_engine.h"
 #include "app_events.h"
+#include "core/espdl/espdl_ops.hpp"
 #include "core/espdl_net.hpp"
 #include "core/model_image.hpp"
 #include "dl_model_base.hpp"
@@ -68,6 +69,7 @@ enum ChainKind : uint32_t { kEnrol = 0, kOwner, kImpostor, kMember };
 
 esp_err_t test_of(const ai::Blob &blob, bool profiled)
 {
+    ai::register_espdl_ops();
     dl::Model model(reinterpret_cast<const char *>(blob.data), fbs::MODEL_LOCATION_IN_FLASH_RODATA, 0,
                     dl::MEMORY_MANAGER_GREEDY, nullptr, false);
     if (profiled) { model.profile_module(true); }
