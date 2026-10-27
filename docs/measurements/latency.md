@@ -797,6 +797,9 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
   96 kênh chỉ bớt ~12% mà mã dài 2,6 KB mỗi nhân, nên giữ nhân chung. Depthwise 3×3: QACC không thêm chu kỳ nào (9
   nhân-cộng, làm tròn và ghi: 16 chu kỳ cho 14 lệnh); nhân cũ theo điểm ảnh ~30 chu kỳ một vector cho 25 lệnh, nhân
   theo vector giữ tap 0–3, 20 lệnh, 23,5 chu kỳ ở hàng 72 điểm ảnh, 24,7 ở 18 và 25,6 ở 9.
+  Gộp các khối liền nhau của một stage thành một op (mỗi khối một vòng hàng, hàng ra vào thẳng vòng khối sau) khớp
+  từng bit nhưng cửa sổ 391,5 → 452,9 ms: vòng hàng và trọng số của mọi khối phải cùng nằm trong dcache 64 KB.
+  Stage 5 (96 kênh, ~55 KB trọng số) 13,4 → 38,5 ms, stage 3 30 → 49 ms, stage 0 44,4 → 44,2 ms. Bỏ.
 - **`PointwiseS8`:** trên app đo, nhân có vòng với K bội 16 chạy 0,083–0,093 chu kỳ một phép nhân-cộng; K = 24 giữ
   trong thanh ghi cộng nhánh dư 0,11–0,12; esp-dl 0,13–0,45. Bỏ hẳn `aligned_pointwise` thì ba conv 12 kênh của stage
   0 và 1 rơi về nhân không căn của esp-dl, 2–3 chu kỳ một phép nhân-cộng, cửa sổ lên 472,6 ms; nên `aligned_pointwise`
