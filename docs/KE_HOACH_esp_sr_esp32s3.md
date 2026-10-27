@@ -1600,8 +1600,12 @@ Một mạng đi từ torch tới chip qua các file của `srpipe/compress/quan
    hơn của từng trục mà không kiểm) hay `Reshape` lệch kích thước thì bị từ chối ngay trên máy tính, trước khi ghi
    flash; op nó chưa biết thì để hình dạng là chưa biết, không chặn.
 
-`esp_ppq_patches.py` sửa lỗi của ESP-PPQ 1.3.11, chỉ cho nhánh khai nó trong config, ở mọi chỗ nhánh ấy dùng ESP-PPQ:
-lượng tử, QAT, mô phỏng và xuất; mỗi lỗi ghi triệu chứng trên board và test ghim nó. Bản vá ở bước xuất còn bỏ việc
+`esp_ppq_patches/` sửa lỗi của ESP-PPQ 1.3.11, chỉ cho nhánh khai nó trong config, ở mọi chỗ nhánh ấy dùng ESP-PPQ:
+lượng tử, QAT, mô phỏng và xuất; mỗi lỗi ghi triệu chứng trên board và test ghim nó. Package chia theo bước:
+`quantise.py` vá lúc lượng tử và viết lại trước lượng tử, `simulate.py` tính như từng nhân S3, `layout.py` gồm các bản
+vá xuất vẫn giữ op của esp-dl, `ops/<op>.py` mỗi op riêng của `ai_engine` một module cùng tên với `espdl_<op>.cpp`;
+`base.py` giữ hằng số chip và hàm đồ thị dùng chung, `__init__.py` bảng tên → bản vá và `applied()`. Mỗi module một
+file test `tests/test_esp_ppq_patches_<module>.py`. Bản vá ở bước xuất còn bỏ việc
 thừa ESP-PPQ để lại cho chip mà không đổi một số nguyên nào của đồ thị: Transpose và QuantizeLinear trùng nhau, tích
 chập có số kênh không chia hết cho 16 chạy lại trên đường vector của esp-dl bằng cách gộp các cột kề nhau vào kênh, tích
 chập có trọng số lớn hơn cache dữ liệu tách theo kênh ra; test so số nguyên của bản xuất có và không có bản vá. Viết lại
@@ -1626,7 +1630,7 @@ mỗi bước một commit.
    2. `make <nhánh>-timing RUN=<run>`, rồi `make ai-unit-<nhánh> RUN=<run> ROW=timing`. Qua khi model nạp được và
       `model->test()` khớp mô phỏng từng bit ở cả đồ thị lẫn mọi bản cắt (`probe.cuts`). `espdl_shapes.py` đã chặn trên
       máy tính mọi đồ thị esp-dl dựng sai hình dạng. Lệch thì chia đôi bằng các bản cắt (`CUT_RANGE`) tới op đầu tiên
-      lệch: op mà esp-dl tính khác ESP-PPQ thì sửa mô phỏng trong `esp_ppq_patches.py` (như `layernorm_as_espdl`,
+      lệch: op mà esp-dl tính khác ESP-PPQ thì sửa mô phỏng trong `esp_ppq_patches/simulate.py` (như `layernorm_as_espdl`,
       `softmax_as_espdl`), op esp-dl không có thì viết lại ở bước 1.1. Bản vá mô phỏng chép theo **mã máy** của nhân
       (`xtensa-esp32s3-elf-objdump` trên ELF của bản dò), không theo mã C. esp-dl dựng với `-ffast-math -O3`, nên
       trình biên dịch đổi thứ tự các phép float, gộp nhân-cộng thành `madd.s` và đổi phép chia thành nhân nghịch đảo.
@@ -1650,8 +1654,9 @@ mỗi bước một commit.
       Các nhãn ấy là nhân float của esp-dl, đường không căn, vòng gọi nhân một lần mỗi điểm ảnh, và chuỗi op mà op nào
       cũng đọc ghi cả tensor qua PSRAM. Bản vá trong `esp_ppq_patches` viết lại đồ thị sau `prepare_graph` của ESP-PPQ,
       khi bố cục, lưới và số mũ đã chốt, nên op riêng đọc đúng các tensor và lưới mà các op esp-dl kia đọc.
-      `ai_engine/src/core/espdl/` cài module cùng tên, đăng ký với `ModuleCreator` của esp-dl trước model đầu tiên.
-      Module tính bằng nhân PIE viết tay (`*_esp32s3.S`) hay gọi đúng nhân esp-dl trên từng dải hàng nằm trong cache dữ
+      `ai_engine/src/core/espdl/espdl_<op>.cpp` cài module cùng tên với `esp_ppq_patches/ops/<op>.py`, đăng ký với
+      `ModuleCreator` của esp-dl trước model đầu tiên. Module tính bằng nhân PIE viết tay (`<họ>_s8_esp32s3.S`, macro
+      dùng chung ở `pie_s8_esp32s3.inc`) hay gọi đúng nhân esp-dl trên từng dải hàng nằm trong cache dữ
       liệu. Mỗi số nguyên ra phải đúng là số mà các op esp-dl kia tính, nên mô phỏng không đổi: qua khi bản dò khớp từng
       bit ở cả đồ thị lẫn mọi bản cắt; giữ khi giờ trên board giảm, khớp mà chậm hơn thì bỏ. Phần float của op riêng
       chép đúng chuỗi phép của bản vá mô phỏng (`layernorm_as_espdl`, `softmax_as_espdl`): dựng không `-ffast-math`,
@@ -1690,7 +1695,8 @@ Một nhánh vào quy trình khi có đủ các móc: lệnh `<nhánh>-timing`, 
 tên của `quant.py` của nhánh (`tasks/speaker/quant.py`, `tasks/command/ctc/quant.py`); `ai-unit-<nhánh>` nhận `RUN`,
 `ROW`, `CUT_RANGE`, chạy `model->test()` của bản dò với
 `profile_module` bật. Makefile khai `SPEED_LOG_<nhánh>` là log của bản dò và `SPEED_ESPDL_<nhánh>` là `.espdl` của hàng
-`timing`. Bản vá mới vào `esp_ppq_patches.py`, nhãn đường chậm mới vào `espdl_profile.py`; quy trình không đổi.
+`timing`. Bản vá mới vào module của bước nó trong `esp_ppq_patches/`, op riêng mới thành một module mới trong `ops/`;
+nhãn đường chậm mới vào `espdl_profile.py`; quy trình không đổi.
 
 Mỗi nhánh dựng thang của mình ở `tasks/<nhánh>/quant.py`: mỗi bậc một lệnh con, mỗi dòng so với float bằng thước của
 nhánh sau int8, ghi vào `<run>/int8/ladder.yaml`, đồ thị của dòng ở `<run>/int8/<dòng>/`. Bậc 3 và 4 dựng trên cách hiệu
@@ -2273,8 +2279,14 @@ ml/
 │   │   ├── export_espdl.py            # ghi .espdl (chạy dòng, mẫu thử) và đồ thị native
 │   │   ├── espdl_shapes.py            # phát lại hình dạng esp-dl dựng trên .info vừa xuất, chặn đồ thị chip không dựng nổi
 │   │   ├── espdl_profile.py           # xếp module theo thời gian đo trên board, gắn nhãn đường chậm của esp-dl S3
-│   │   └── esp_ppq_patches.py         # vá lỗi ESP-PPQ 1.3.11, mỗi bản vá một hàm ghi lỗi, triệu chứng trên board
-│   │                                  #   và test ghim nó; chỉ nhánh khai `esp_ppq_patches` trong config mới bật
+│   │   └── esp_ppq_patches/           # vá lỗi ESP-PPQ 1.3.11, mỗi bản vá một hàm ghi lỗi, triệu chứng trên board
+│   │       │                          #   và test ghim nó; chỉ nhánh khai `esp_ppq_patches` trong config mới bật
+│   │       ├── __init__.py            # bảng tên → bản vá, applied(), các tên module khác đọc
+│   │       ├── base.py                # hằng số chip và hàm đồ thị mọi bản vá dùng chung
+│   │       ├── quantise.py            # vá lúc lượng tử, viết lại trước lượng tử
+│   │       ├── simulate.py            # mô phỏng float32 như từng nhân S3 của esp-dl
+│   │       ├── layout.py              # bản vá xuất vẫn giữ op của esp-dl: bố cục, lượng tử, cột gộp, lát cache
+│   │       └── ops/<op>.py            # mỗi op riêng của ai_engine một module, cùng tên espdl_<op>.cpp
 │   └── export/{pack_models.py, update_lock.py}
 │
 ├── tts/<bộ>/{pyproject.toml, uv.lock, run.py}  # mỗi bộ TTS và bộ nghe kiểm (asr) một dự án uv riêng, ghim bản:
@@ -2292,7 +2304,9 @@ ml/
 ├── data/{README.md, manifests/, splits/}   # ✅ chỉ siêu dữ liệu; dữ liệu ở SRPIPE_DATA_ROOT (§4.4.1)
 ├── artifacts/                         # ❌ gitignore — mỗi run một thư mục
 └── tests/                             # pytest; mỗi golden có một phép kiểm đối chứng âm;
-                                       #   test_splits.py chạy luật §1.3 trên mọi split đã commit
+                                       #   test_splits.py chạy luật §1.3 trên mọi split đã commit;
+                                       #   test_esp_ppq_patches_<module>.py mỗi module của esp_ppq_patches/,
+                                       #   esp_ppq_cases.py các mạng và phép tính kiểu esp-dl chúng dùng chung
 ```
 
 **`dsp/` và `lang/` là thuật toán thuần, `tasks/` là mô hình học** — đúng đường ranh của firmware
@@ -2466,7 +2480,8 @@ firmware/
 │   ├── sys_storage/   [C]   L2  # NVS + LittleFS + mmap ảnh model; sở hữu storage_format.h
 │   ├── sys_time/      [C]   L2  # SNTP
 │   ├── ai_engine/     [C++] L3  # esp-dl; src/core/ không biết tên model;
-│   │                            #   src/core/espdl/: op riêng đăng ký với esp-dl, nhân PIE *_esp32s3.S (§3.14);
+│   │                            #   src/core/espdl/: op riêng espdl_<op>.{cpp,hpp} đăng ký với esp-dl (§3.14),
+│   │                            #   nhân PIE <họ>_s8_esp32s3.S, macro PIE dùng chung pie_s8_esp32s3.inc;
 │   │                            #   src/{ns,ns_rnnoise,ns_nsnet,wake,command_kws,command_ctc,command_rnnt,speaker,synth}/;
 │   │                            #   Kconfig AI_ENGINE_NS_BACKEND chọn một thư mục ns*, AI_ENGINE_COMMAND_BACKEND
 │   │                            #   một thư mục command_* vào danh sách nguồn
