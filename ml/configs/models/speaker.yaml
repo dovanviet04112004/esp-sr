@@ -37,6 +37,7 @@ esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches aroun
   - attention_core                 # each attention's heads, scores, softmax and weighing as one op (after softmax_scale)
   - stem_conv                      # the stem's broadcast copies and their depthwise as one op (after copies_by_broadcast)
   - stride_depthwise               # depthwise convolutions over 2 or 4 frames at that stride as one op of ai_engine
+  - weighted_stats                 # the pool's weighted sums of x and x*x over time as one op of ai_engine
 deploy:                            # make speaker-deploy RUN= ROW= (E11-T26, KEHOACH 3.17)
   weights_in_flash: true           # the image entry stays in flash; PSRAM holds the tensors only (KEHOACH 6.6)
   shares: [0.05]                   # impostors passing: the first, unless a distance then keeps under keep_min (KEHOACH 3.17)
