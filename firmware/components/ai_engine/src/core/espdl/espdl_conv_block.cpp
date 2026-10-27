@@ -157,9 +157,11 @@ class ConvBlock final : public dl::module::Module {
             post_weights_ = weights(context, at, loan);
             post_run_[kConvBias] = word_of(weights(context, at + 1, loan));
         }
+        place_rows(ring_bytes_ > 0 && loan != nullptr && lent.bytes >= loan_bytes_ + ring_bytes_ ? loan
+                                                                                                 : nullptr);
         const int8_t *xs = x->get_element_ptr<int8_t>();
         int8_t *ys = y->get_element_ptr<int8_t>();
-        memset(rows_, 0, 2 * kRing * padded_row_);
+        memset(x_ring_, 0, 2 * kRing * padded_row_);
         load_x(0, xs);
         load_x(1, xs);
         norm_row(0, dw1, pw1);
@@ -208,6 +210,17 @@ class ConvBlock final : public dl::module::Module {
     int8_t *c_row(int t) const noexcept
     {
         return c_ring_ + ((t + 1) % kRing) * padded_row_;
+    }
+
+    // The rings and one strip buffer for both depthwise outputs at mem, the loan past the weights; else
+    // rows_.
+    void place_rows(int8_t *mem) noexcept
+    {
+        x_ring_ = mem != nullptr ? mem : rows_;
+        c_ring_ = x_ring_ + kRing * padded_row_;
+        a_ = c_ring_ + kRing * padded_row_;
+        d_ = mem != nullptr ? a_ : a_ + padded_row_;
+        out_row_ = d_ + padded_row_;
     }
 
     // Input's data, copied first to the loan's next free bytes when the block runs on a loan.
@@ -357,11 +370,7 @@ class ConvBlock final : public dl::module::Module {
             ESP_LOGE(TAG, "%s: no memory for %d rows of %d bytes", name, kRows, padded_row_);
             return false;
         }
-        x_ring_ = rows_;
-        c_ring_ = x_ring_ + kRing * padded_row_;
-        a_ = c_ring_ + kRing * padded_row_;
-        d_ = a_ + padded_row_;
-        out_row_ = d_ + padded_row_;
+        place_rows(nullptr);
         const int vectors = padded_ / kChannelStep;
         const int whole = channels_ / kChannelStep;
         const int half = channels_ % kChannelStep != 0;
@@ -399,6 +408,7 @@ class ConvBlock final : public dl::module::Module {
         }
         const bool shared = norm_kernel_ == ai_engine_pw_norm_row_s8_esp32s3;
         strip_ = shared && post_.empty() ? kStripPixels : width_;
+        ring_bytes_ = shared && post_.empty() ? 2 * kRing * padded_row_ + strip_ * padded_ : 0;
         if (shared) {
             for (size_t i = kDw1; i < m_inputs_index.size(); i++) {
                 loan_bytes_ += loaned_bytes(context->get_tensor(m_inputs_index[i]));
@@ -439,6 +449,7 @@ class ConvBlock final : public dl::module::Module {
     RowKernel post_kernel_ = nullptr;
     int strip_ = 0;
     size_t loan_bytes_ = 0; // its weights' bytes; 0 for the unrolled kernels
+    size_t ring_bytes_ = 0; // its rings and strip buffer, when they may join the loan
     bool built_ = false;
 };
 
