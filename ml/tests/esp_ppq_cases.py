@@ -119,14 +119,16 @@ def filters(stored: np.ndarray) -> np.ndarray:
 
 
 class CopiedStem(nn.Module):
-    """A one-channel map copied into 12 channels, as ReDimNet2 b0's stem is rewritten, then a depthwise convolution."""
+    """A one-channel map copied into c channels, as ReDimNet2's stem is rewritten (b0 12, b3 24), then a depthwise
+    convolution."""
 
-    def __init__(self) -> None:
+    def __init__(self, c: int = 12) -> None:
         super().__init__()
-        self.depthwise = nn.Conv2d(12, 12, 3, padding=1, groups=12)
+        self.c = c
+        self.depthwise = nn.Conv2d(c, c, 3, padding=1, groups=c)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.depthwise(torch.cat([x] * 12, dim=1))
+        return self.depthwise(torch.cat([x] * self.c, dim=1))
 
 
 class WeightedChannels(nn.Module):
