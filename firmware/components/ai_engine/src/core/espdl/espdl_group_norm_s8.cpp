@@ -10,6 +10,7 @@
 #include "core/espdl/espdl_float_s3.hpp"
 #include "dl_define.hpp"
 #include "dl_module_base.hpp"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
 
@@ -21,6 +22,9 @@ const char *TAG = "group_norm_s8";
 
 constexpr size_t kRank = 3;
 constexpr size_t kMapRank = 4;
+constexpr int kInterleaved = 4; // groups whose FMA chains overlap
+constexpr int kTableSize = 256;
+constexpr int kTableOffset = 128;
 
 int8_t saturated(int v) noexcept
 {
@@ -37,6 +41,14 @@ class GroupNormS8 final : public dl::module::Module {
           gamma_(gamma), beta_(beta), norm_exponent_(norm_exponent), mul_shift_(mul_shift)
     {}
 
+    ~GroupNormS8() override
+    {
+        heap_caps_free(tables_);
+    }
+
+    GroupNormS8(const GroupNormS8 &) = delete;
+    GroupNormS8 &operator=(const GroupNormS8 &) = delete;
+
     std::vector<std::vector<int>> get_output_shape(std::vector<std::vector<int>> &input_shapes) override
     {
         const std::vector<int> &x = input_shapes[0];
@@ -51,10 +63,12 @@ class GroupNormS8 final : public dl::module::Module {
         dl::TensorBase *w = context->get_tensor(m_inputs_index[1]);
         dl::TensorBase *b = context->get_tensor(m_inputs_index[2]);
         if (!built_ && !build(x, y, w, b)) { return; }
-        for (int g = 0; g < groups_; g++) {
-            run_group(x->get_element_ptr<int8_t>(), y->get_element_ptr<int8_t>(),
-                      w->get_element_ptr<int8_t>(), b->get_element_ptr<int8_t>(), g * width_);
+        const int8_t *xs = x->get_element_ptr<int8_t>();
+        means(xs);
+        for (int g = 0; g < groups_; g += kInterleaved) {
+            tables(xs, g, std::min(kInterleaved, groups_ - g));
         }
+        outputs(xs, y->get_element_ptr<int8_t>(), w->get_element_ptr<int8_t>(), b->get_element_ptr<int8_t>());
     }
 
     void print() override
@@ -109,38 +123,71 @@ class GroupNormS8 final : public dl::module::Module {
         in_scale_ = DL_SCALE(x->get_exponent());
         per_value_ = 1.0f / static_cast<float>(n_) * (in_scale_ * in_scale_);
         norm_rescale_ = DL_RESCALE(norm_exponent_);
+        tables_ =
+            static_cast<int8_t *>(heap_caps_calloc(groups_, kTableSize + sizeof(float), MALLOC_CAP_SPIRAM));
+        if (tables_ == nullptr) {
+            ESP_LOGE(TAG, "%s: no memory for %d groups' tables", name, groups_);
+            return false;
+        }
+        means_ = reinterpret_cast<float *>(tables_ + groups_ * kTableSize);
         built_ = true;
         return true;
     }
 
-    // The LayerNorm of one group, its squares in the LayerNorm's own order, channel after channel then frame
-    // after frame; then each value's int8 norm, its Mul rounded half up and its bias added, both saturating.
-    void run_group(const int8_t *xs, int8_t *ys, const int8_t *w, const int8_t *b, int c0) const noexcept
+    // Each group's mean as esp-dl's double gives it from the exact int8 sum, the map read row after row.
+    void means(const int8_t *xs) const noexcept
     {
-        int sum = 0;
-        for (int t = 0; t < frames_; t++) {
-            for (int j = 0; j < width_; j++) {
-                sum += xs[t * channels_ + c0 + j];
+        for (int g = 0; g < groups_; g++) {
+            int sum = 0;
+            for (int t = 0; t < frames_; t++) {
+                const int8_t *at = xs + t * channels_ + g * width_;
+                for (int j = 0; j < width_; j++) {
+                    sum += at[j];
+                }
             }
+            means_[g] = static_cast<float>(sum * (1.0 / n_));
         }
-        const float mean = static_cast<float>(sum * (1.0 / n_));
-        float squares = 0.0f;
+    }
+
+    // count groups' squares in the LayerNorm's order, channel after channel then frame after frame, their FMA
+    // chains side by side; then each group's int8 norm of every int8 value, the float steps once per value.
+    void tables(const int8_t *xs, int g0, int count) const noexcept
+    {
+        float squares[kInterleaved] = {};
         for (int j = 0; j < width_; j++) {
             for (int t = 0; t < frames_; t++) {
-                const float d = static_cast<float>(xs[t * channels_ + c0 + j]) - mean;
-                squares = fmaf(d, d, squares);
+                const int8_t *at = xs + t * channels_ + g0 * width_ + j;
+                for (int k = 0; k < count; k++) {
+                    const float d = static_cast<float>(at[k * width_]) - means_[g0 + k];
+                    squares[k] = fmaf(d, d, squares[k]);
+                }
             }
         }
-        const float scale = divide(1.0f, sqrt_newton(fmaf(per_value_, squares, epsilon_))) * in_scale_;
-        const float gs = gamma_ * scale;
+        for (int k = 0; k < count; k++) {
+            const float mean = means_[g0 + k];
+            const float scale = divide(1.0f, sqrt_newton(fmaf(per_value_, squares[k], epsilon_))) * in_scale_;
+            const float gs = gamma_ * scale;
+            int8_t *table = tables_ + (g0 + k) * kTableSize;
+            for (int v = 0; v < kTableSize; v++) {
+                table[v] = round_half_up((gs * (static_cast<float>(v - kTableOffset) - mean) + beta_) *
+                                         norm_rescale_);
+            }
+        }
+    }
+
+    // Each value's int8 norm from its group's table, its Mul rounded half up and its bias added, both
+    // saturating.
+    void outputs(const int8_t *xs, int8_t *ys, const int8_t *w, const int8_t *b) const noexcept
+    {
         for (int t = 0; t < frames_; t++) {
-            for (int j = 0; j < width_; j++) {
-                const int c = c0 + j;
-                const float d = static_cast<float>(xs[t * channels_ + c]) - mean;
-                const int normed = round_half_up((gs * d + beta_) * norm_rescale_);
-                const int product = normed * w[c];
-                const int m = saturated(((product >> (mul_shift_ - 1)) + 1) >> 1);
-                ys[t * channels_ + c] = saturated(m + b[c]);
+            const int8_t *row = xs + t * channels_;
+            int8_t *out = ys + t * channels_;
+            for (int g = 0; g < groups_; g++) {
+                const int8_t *table = tables_ + g * kTableSize + kTableOffset;
+                for (int c = g * width_; c < (g + 1) * width_; c++) {
+                    const int m = saturated(((table[row[c]] * w[c] >> (mul_shift_ - 1)) + 1) >> 1);
+                    out[c] = saturated(m + b[c]);
+                }
             }
         }
     }
@@ -158,6 +205,8 @@ class GroupNormS8 final : public dl::module::Module {
     float in_scale_ = 0.0f;
     float per_value_ = 0.0f;
     float norm_rescale_ = 0.0f;
+    int8_t *tables_ = nullptr; // per group, each int8 value's int8 norm; then means
+    float *means_ = nullptr;
     bool built_ = false;
 };
 
