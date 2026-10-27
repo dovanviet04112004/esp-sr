@@ -1,5 +1,6 @@
 #include "core/espdl/espdl_conv_block.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -60,6 +61,7 @@ enum Input { kX = 0, kDw1, kPw1, kPw1Bias, kBn, kBnBias, kDw2, kPw2, kPw2Bias, k
 // "pre" and "post": a joined 1x1 convolution's values a pixel, then its shift.
 enum Joined { kJoinedValues = 0, kJoinedShift, kJoinedSize };
 enum Shift { kShiftDw1 = 0, kShiftPw1, kShiftBn, kShiftDw2, kShiftPw2, kShiftResidual };
+constexpr int kRunPixels = 0; // every row kernel's run starts with its pixels
 // Slots of conv_row_s8_esp32s3.S's runs that hold addresses.
 enum NormRun { kNormBias = 6, kNormWeights, kNormBnBias, kNormSize = 10 };
 enum ResidualRun { kResidualBias = 6, kResidualX, kResidualSize = 10 };
@@ -69,6 +71,13 @@ enum ConvRun { kConvBias = 6, kConvSize = 10 };
 constexpr int kPreSmall = 12;
 constexpr int kPreWide = 24;
 constexpr int kPostOutputs = 12;
+// Pixels the shared kernels take a call, each strip's depthwise rows then staying cached for its pointwise.
+constexpr int kStripPixels = 4;
+
+// The internal RAM EspdlNet lends for a run, and the most a block built since the last take borrows.
+int8_t *s_loan = nullptr;
+size_t s_loan_bytes = 0;
+size_t s_loan_asked = 0;
 
 using RowKernel = void (*)(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
 
@@ -90,6 +99,18 @@ constexpr Unrolled kUnrolled[] = {
 int padded(int channels) noexcept
 {
     return (channels + kChannelStep - 1) / kChannelStep * kChannelStep;
+}
+
+int32_t word_of(const void *p) noexcept
+{
+    return static_cast<int32_t>(reinterpret_cast<uintptr_t>(p));
+}
+
+// A weight's bytes in the loan, each kept 16-byte aligned for the vector loads.
+size_t loaned_bytes(dl::TensorBase *tensor) noexcept
+{
+    return (static_cast<size_t>(tensor->get_bytes()) + kVectorAlignBytes - 1) / kVectorAlignBytes *
+           kVectorAlignBytes;
 }
 
 // Inputs as esp_ppq_patches.conv_block_from lays them: x [1, T, F, C], taps [9][Cp], pointwise
@@ -121,22 +142,23 @@ class ConvBlock final : public dl::module::Module {
         dl::TensorBase *x = context->get_tensor(m_inputs_index[kX]);
         dl::TensorBase *y = context->get_tensor(m_outputs_index[0]);
         if (!built_ && !build(context, x, y)) { return; }
-        const int8_t *dw1 = context->get_tensor(m_inputs_index[kDw1])->get_element_ptr<int8_t>();
-        const int8_t *pw1 = context->get_tensor(m_inputs_index[kPw1])->get_element_ptr<int8_t>();
-        const int8_t *dw2 = context->get_tensor(m_inputs_index[kDw2])->get_element_ptr<int8_t>();
-        const int8_t *pw2 = context->get_tensor(m_inputs_index[kPw2])->get_element_ptr<int8_t>();
-        norm_run_[kNormBias] = address_of(context, kPw1Bias);
-        norm_run_[kNormWeights] = address_of(context, kBn);
-        norm_run_[kNormBnBias] = address_of(context, kBnBias);
-        residual_run_[kResidualBias] = address_of(context, kPw2Bias);
+        int8_t *loan = loan_bytes_ > 0 && s_loan_bytes >= loan_bytes_ ? s_loan : nullptr;
+        const int8_t *dw1 = weights(context, kDw1, loan);
+        const int8_t *pw1 = weights(context, kPw1, loan);
+        const int8_t *dw2 = weights(context, kDw2, loan);
+        const int8_t *pw2 = weights(context, kPw2, loan);
+        norm_run_[kNormBias] = word_of(weights(context, kPw1Bias, loan));
+        norm_run_[kNormWeights] = word_of(weights(context, kBn, loan));
+        norm_run_[kNormBnBias] = word_of(weights(context, kBnBias, loan));
+        residual_run_[kResidualBias] = word_of(weights(context, kPw2Bias, loan));
         if (!pre_.empty()) {
-            pre_weights_ = context->get_tensor(m_inputs_index[kInputs])->get_element_ptr<int8_t>();
-            pre_run_[kConvBias] = address_of(context, kInputs + 1);
+            pre_weights_ = weights(context, kInputs, loan);
+            pre_run_[kConvBias] = word_of(weights(context, kInputs + 1, loan));
         }
         if (!post_.empty()) {
             const int at = kInputs + (pre_.empty() ? 0 : 2);
-            post_weights_ = context->get_tensor(m_inputs_index[at])->get_element_ptr<int8_t>();
-            post_run_[kConvBias] = address_of(context, at + 1);
+            post_weights_ = weights(context, at, loan);
+            post_run_[kConvBias] = word_of(weights(context, at + 1, loan));
         }
         const int8_t *xs = x->get_element_ptr<int8_t>();
         int8_t *ys = y->get_element_ptr<int8_t>();
@@ -147,16 +169,7 @@ class ConvBlock final : public dl::module::Module {
         for (int t = 0; t < frames_; t++) {
             load_x(t + 2, xs);
             norm_row(t + 1, dw1, pw1);
-            const int8_t *window[kRing] = {c_row(t - 1), c_row(t), c_row(t + 1)};
-            ai_engine_dw3x3_row_s8_esp32s3(d_, window, dw2, dw2_run_.data());
-            residual_run_[kResidualX] = reinterpret_cast<int32_t>(x_row(t) + padded_);
-            if (post_.empty()) {
-                residual_kernel_(ys + t * width_ * channels_, d_, pw2, residual_run_.data());
-            } else {
-                residual_kernel_(out_row_, d_, pw2, residual_run_.data());
-                post_kernel_(ys + t * width_ * post_[kJoinedValues], out_row_, post_weights_,
-                             post_run_.data());
-            }
+            output_row(t, dw2, pw2, ys);
         }
     }
 
@@ -200,9 +213,16 @@ class ConvBlock final : public dl::module::Module {
         return c_ring_ + ((t + 1) % kRing) * padded_row_;
     }
 
-    int32_t address_of(dl::ModelContext *context, int input) const noexcept
+    // Input's data, copied first to the loan's next free bytes when the block runs on a loan.
+    const int8_t *weights(dl::ModelContext *context, int input, int8_t *&loan) const noexcept
     {
-        return reinterpret_cast<int32_t>(context->get_tensor(m_inputs_index[input])->get_element_ptr());
+        dl::TensorBase *tensor = context->get_tensor(m_inputs_index[input]);
+        const int8_t *data = tensor->get_element_ptr<int8_t>();
+        if (loan == nullptr) { return data; }
+        memcpy(loan, data, tensor->get_bytes());
+        const int8_t *copy = loan;
+        loan += loaned_bytes(tensor);
+        return copy;
     }
 
     // Row t of x into its ring slot, a zero pixel at each end; zeros past the frames.
@@ -229,9 +249,34 @@ class ConvBlock final : public dl::module::Module {
             memset(slot, 0, width_ * padded_);
             return;
         }
-        const int8_t *window[kRing] = {x_row(t - 1), x_row(t), x_row(t + 1)};
-        ai_engine_dw3x3_row_s8_esp32s3(a_, window, dw1, dw1_run_.data());
-        norm_kernel_(slot, a_, pw1, norm_run_.data());
+        for (int f0 = 0; f0 < width_; f0 += strip_) {
+            const int at = f0 * padded_;
+            const int8_t *window[kRing] = {x_row(t - 1) + at, x_row(t) + at, x_row(t + 1) + at};
+            dw1_run_[kRunPixels] = std::min(strip_, width_ - f0);
+            norm_run_[kRunPixels] = dw1_run_[kRunPixels];
+            ai_engine_dw3x3_row_s8_esp32s3(a_, window, dw1, dw1_run_.data());
+            norm_kernel_(slot + at, a_, pw1, norm_run_.data());
+        }
+    }
+
+    // Output row t from the norm rows around it, plus x row t.
+    void output_row(int t, const int8_t *dw2, const int8_t *pw2, int8_t *ys) noexcept
+    {
+        for (int f0 = 0; f0 < width_; f0 += strip_) {
+            const int at = f0 * padded_;
+            const int8_t *window[kRing] = {c_row(t - 1) + at, c_row(t) + at, c_row(t + 1) + at};
+            dw2_run_[kRunPixels] = std::min(strip_, width_ - f0);
+            residual_run_[kRunPixels] = dw2_run_[kRunPixels];
+            ai_engine_dw3x3_row_s8_esp32s3(d_, window, dw2, dw2_run_.data());
+            residual_run_[kResidualX] = word_of(x_row(t) + padded_ + at);
+            if (post_.empty()) {
+                residual_kernel_(ys + (t * width_ + f0) * channels_, d_, pw2, residual_run_.data());
+            } else {
+                residual_kernel_(out_row_, d_, pw2, residual_run_.data());
+                post_kernel_(ys + t * width_ * post_[kJoinedValues], out_row_, post_weights_,
+                             post_run_.data());
+            }
+        }
     }
 
     static bool aligned(const void *p) noexcept
@@ -355,6 +400,14 @@ class ConvBlock final : public dl::module::Module {
             post_kernel_ = ai_engine_pw_conv_k24_n12_s8_esp32s3;
             post_run_ = {width_, 1, 0, 0, 0, post_[kJoinedShift], 0, 0, -1, kChannelStep};
         }
+        const bool shared = norm_kernel_ == ai_engine_pw_norm_row_s8_esp32s3;
+        strip_ = shared && post_.empty() ? kStripPixels : width_;
+        if (shared) {
+            for (size_t i = kDw1; i < m_inputs_index.size(); i++) {
+                loan_bytes_ += loaned_bytes(context->get_tensor(m_inputs_index[i]));
+            }
+            s_loan_asked = std::max(s_loan_asked, loan_bytes_);
+        }
         built_ = true;
         return true;
     }
@@ -387,6 +440,8 @@ class ConvBlock final : public dl::module::Module {
     RowKernel residual_kernel_ = ai_engine_pw_residual_row_s8_esp32s3;
     RowKernel pre_kernel_ = nullptr;
     RowKernel post_kernel_ = nullptr;
+    int strip_ = 0;
+    size_t loan_bytes_ = 0; // its weights' bytes; 0 for the unrolled kernels
     bool built_ = false;
 };
 
@@ -395,6 +450,32 @@ class ConvBlock final : public dl::module::Module {
 dl::module::Module *conv_block_from(fbs::FbsModel *fbs_model, std::string node_name)
 {
     return ConvBlock::deserialize(fbs_model, std::move(node_name));
+}
+
+size_t conv_block_take_loan_bytes() noexcept
+{
+    const size_t bytes = s_loan_asked;
+    s_loan_asked = 0;
+    return bytes;
+}
+
+ConvBlockLoan::ConvBlockLoan(size_t bytes) noexcept
+{
+    if (bytes == 0) {
+        granted_ = true;
+        return;
+    }
+    mem_ = heap_caps_aligned_alloc(kVectorAlignBytes, bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    granted_ = mem_ != nullptr;
+    s_loan = static_cast<int8_t *>(mem_);
+    s_loan_bytes = granted_ ? bytes : 0;
+}
+
+ConvBlockLoan::~ConvBlockLoan()
+{
+    s_loan = nullptr;
+    s_loan_bytes = 0;
+    heap_caps_free(mem_);
 }
 
 } // namespace ai

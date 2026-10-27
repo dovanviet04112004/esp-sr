@@ -4,6 +4,7 @@
 #include <new>
 #include <string>
 
+#include "core/espdl/espdl_conv_block.hpp"
 #include "core/espdl/espdl_ops.hpp"
 #include "dl_model_base.hpp"
 #include "esp_heap_caps.h"
@@ -69,6 +70,7 @@ esp_err_t EspdlNet::build(Blob blob, const char *name) noexcept
     const int64_t started_us = esp_timer_get_time();
     dl::Model *model = nullptr;
     register_espdl_ops();
+    (void)conv_block_take_loan_bytes();
     {
         const ExternalMallocGuard guard;
         // Every tensor in PSRAM; the parameters stay in the loaded copy, itself in PSRAM.
@@ -90,10 +92,11 @@ esp_err_t EspdlNet::build(Blob blob, const char *name) noexcept
         return ESP_ERR_NOT_SUPPORTED;
     }
     model_ = model;
-    ESP_LOGI(TAG, "%s: built in %lld us, internal %u B, psram %u B", name_,
+    loan_bytes_ = conv_block_take_loan_bytes();
+    ESP_LOGI(TAG, "%s: built in %lld us, internal %u B, psram %u B, loan %u B a run", name_,
              static_cast<long long>(esp_timer_get_time() - started_us),
              (unsigned)(internal_before - heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
-             (unsigned)(psram_before - heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
+             (unsigned)(psram_before - heap_caps_get_free_size(MALLOC_CAP_SPIRAM)), (unsigned)loan_bytes_);
     return ESP_OK;
 }
 
@@ -122,6 +125,12 @@ Int8Tensor EspdlNet::output(const char *name) noexcept
 esp_err_t EspdlNet::step() noexcept
 {
     if (model_ == nullptr) { return ESP_ERR_INVALID_STATE; }
+    const ConvBlockLoan loan(loan_bytes_);
+    if (!loan.granted() && !loan_missed_) {
+        loan_missed_ = true;
+        ESP_LOGW(TAG, "%s: no %u B of internal RAM to lend, its ConvBlocks read their weights in place",
+                 name_, (unsigned)loan_bytes_);
+    }
     model_->run();
     return ESP_OK;
 }
