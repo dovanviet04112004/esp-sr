@@ -1169,7 +1169,8 @@ def music(cfg: dict, run: Path, paths: dict, workers: int) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("import", help="the survey's pretrained b0 as a run under artifacts/speaker/runs")
+    found = sub.add_parser("import", help="a pretrained ReDimNet2 of the survey as a run under artifacts/speaker/runs")
+    found.add_argument("--extractor", help="one of the survey's ReDimNet2 extractors; source.extractor otherwise")
     ladder = sub.add_parser("ptq", help="rungs 1 and 2: each calibration beside float into <run>/int8/")
     ladder.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.speaker.quant import")
     ladder.add_argument("--workers", type=int, default=8, help="processes simulating the impostors' sessions")
@@ -1195,7 +1196,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     cfg = load_yaml(CONFIG)
     if args.command == "import":
-        print(import_run(cfg, data_paths()))
+        source = cfg["source"] | ({"extractor": args.extractor} if args.extractor else {})
+        print(import_run(cfg | {"source": source}, data_paths()))
     elif args.command == "music":
         body = music(cfg, args.run, data_paths(), args.workers)
         print(music_table(body))

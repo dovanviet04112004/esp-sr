@@ -191,8 +191,8 @@ eval-speaker: ## EER of the pretrained extractors, and the owner's windows kept 
 SPEAKER_QUANT = $(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.speaker.quant
 
 .PHONY: speaker-import speaker-ptq speaker-int16 speaker-timing speaker-same-int8 speaker-deploy speaker-music speed
-speaker-import: ## Import the survey's pretrained ReDimNet2 b0 as a run into ml/artifacts/speaker/runs
-	$(SPEAKER_QUANT) import
+speaker-import: ## Import a pretrained ReDimNet2 of the survey as a run into ml/artifacts/speaker/runs: [EXTRACTOR=redimnet2_b0] (E11-T35)
+	$(SPEAKER_QUANT) import $(if $(EXTRACTOR),--extractor $(EXTRACTOR))
 
 # Each calibration of configs/models/speaker.yaml quantises for tens of minutes on the CPU: run it in tmux. WORKERS
 # simulate the impostors' sessions, about 0.5 GB each.
