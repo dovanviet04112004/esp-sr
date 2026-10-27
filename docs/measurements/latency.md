@@ -776,7 +776,8 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
 | `PointwiseS8` nhận conv 2×2 bước 2 của stage 3 theo mảnh | 388,3 ms | 1 443 560 B | 7,8 → 4,8 ms; conv 4×2 của stage 5 (trọng số 37 KB) chạy theo mảnh 8,3 ms, esp-dl 7,9 ms, nên giữ esp-dl |
 | Softmax theo nhóm 64 cột, chuẩn hoá khi các hàng còn trong cache; lượt tổng xen 8 cột từng bước | 386,0 ms | 1 443 560 B | softmax của pool 8,2 → 7,0 ms, `AttentionCore` 24,5 → 23,5 ms |
 | `ConvBlock` nhận conv 1×1 đầu và cuối stage 0, đầu stage 1 (trọng số gốc lấy lại từ dạng gộp cột) | 366,9 ms | 1 410 952 B | ba `PointwiseS8` gộp cột (8,1, 7,8 và 4,8 ms) bỏ; khối nhận chúng 21,4, 23,2 và 11,2 ms, từ 22,2, 22,1 và 10,4 |
-| `PointwiseS8` nhận `Concat` của các lát conv pool, chạy theo lát khối ghi thẳng cột của lát trong hàng ra | **364,2 ms** | **1 408 280 B** | `Concat` 3,2 → 0,1 ms; `frames` 8,1 → 7,8 ms, `linear2` 8,4 → 5,8 ms |
+| `PointwiseS8` nhận `Concat` của các lát conv pool, chạy theo lát khối ghi thẳng cột của lát trong hàng ra | 364,2 ms | 1 408 280 B | `Concat` 3,2 → 0,1 ms; `frames` 8,1 → 7,8 ms, `linear2` 8,4 → 5,8 ms |
+| `LayerNormS8`: căn của phương sai bằng một bước Newton từ `sqrtf`, giá trị bị đánh dấu về Newton của esp-dl | **356,1 ms** | **1 408 280 B** | LayerNorm 31,5 → 23,5 ms, stem 25,1 → 17,9 ms |
 
 - **`SoftmaxQuant`:** bảng `exp` và nghịch đảo tổng như esp-dl. Xác suất không âm, nên `floor(v + 0,5)` của esp-dl là
   phép cắt của tổng float `v + 0,5`: dưới 2^22 tổng ấy không làm tròn sang phần nguyên khác. Mỗi lượt chuẩn hoá tính 4
@@ -789,6 +790,12 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
   nhau. GCC xếp vòng float như thể trễ ngắn, ~15 chu kỳ một giá trị, nên cả ba pha viết tay: độ lệch ~147, Newton ~282
   (hai vị trí, ~46 chu kỳ một bước một vị trí), ghi ra ~123 chu kỳ một vị trí stem, từ ~1040. Nhớ kết quả Newton theo
   đối số chỉ trúng 22% với 1024 ô, 39% với 4096 ô.
+  Bước cuối Newton của esp-dl, từ r sát √x, là fl(fl(r + fl(x/r))·0,5): nó chỉ phụ thuộc r qua δ²/√x ≥ 0 (δ = r − √x),
+  nên một bước từ s0 = `sqrtf(x)` cho đúng số ấy, trừ khi x/s0 nằm sát dưới một điểm giữa lưới. `sqrtf` một mình lệch
+  1 ulp ở ~25% giá trị. Duyệt mọi float32 của [2^-3, 2^26): không sai giá trị nào khi đánh dấu phần dư trong 2^-7·h dưới
+  ±h và s0 là lũy thừa của 2, 0,78% giá trị; dưới 2^-3 Newton của esp-dl dừng trước khi hội tụ, sai ở 183 giá trị của
+  [2^-4, 2^-3). Trên app đo: pha căn 289,8 → 102,0 chu kỳ một vị trí stem, 150 trên 10 656 vị trí về Newton cũ; nhân
+  asm so với `sqrt_newton` C++ ở mọi float32 của [2^-3, 2^12), ~126 triệu giá trị, không sai giá trị nào.
 - **`StageSum`:** mỗi tổng đọc thẳng các đầu ra stage nó cộng, mỗi hàng một lần, đọc bản 74 và 37 khung trước Resize
   theo hàng `t / k`. Nhân PIE làm đúng các lệnh của `Mul` int8 esp-dl (`EE.VMULAS.S8.QACC`, làm tròn như
   `tie728_s8_vector_round_result`) rồi cộng bão hoà `EE.VADDS.S8` như `Add`. ~50 MB/s đọc PSRAM: chạm trần băng
