@@ -24,6 +24,7 @@ from .layout import (
 from .ops.attention import attention_core
 from .ops.conv_block import conv_block
 from .ops.global_stats import global_stats
+from .ops.group_norm_s8 import group_norm_s8
 from .ops.layernorm_s8 import layernorm_s8
 from .ops.matmul_s8 import matmul_s8
 from .ops.pointwise_s8 import pointwise_s8
@@ -89,6 +90,7 @@ PATCHES = {
     "softmax_quant": softmax_quant,
     "softmax_scale": softmax_scale,
     "layernorm_s8": layernorm_s8,
+    "group_norm_s8": group_norm_s8,
     "stage_sum": stage_sum,
     "conv_block": conv_block,
     "matmul_s8": matmul_s8,

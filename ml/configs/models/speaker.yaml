@@ -31,6 +31,7 @@ esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches aroun
   - softmax_quant                  # each Softmax and its quantiser as one int8 op of ai_engine (after lean_quantizers)
   - softmax_scale                  # attention's scaled scores as a table the op looks up (after softmax_quant)
   - layernorm_s8                   # each int8 LayerNorm as ai_engine's op: float steps, no double mean
+  - group_norm_s8                  # each GroupNorm chain of agg_gnorm as one op on its [T, C] map (after layernorm_s8)
   - stage_sum                      # each weighted sum of stage outputs as one op of ai_engine (after channel_scales_as_mul)
   - conv_block                     # each residual conv block as one op of ai_engine run a row at a time
   - matmul_s8                      # each projection by constant weights and its bias as one op of ai_engine
