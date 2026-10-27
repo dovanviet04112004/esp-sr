@@ -1272,6 +1272,57 @@ def test_pointwise_s8_exports_each_1x1_convolution_and_its_residual_add_as_one_o
     assert joined == 2
 
 
+class Patches(nn.Module):
+    """Convolutions whose kernel is their stride, as ReDimNet2 b0's stages 3 and 5 shrink their maps: 2x2 from 24 to
+    48 channels, then 4x2 from 48 to 32."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.square, self.tall = nn.Conv2d(24, 48, 2, stride=2), nn.Conv2d(48, 32, (4, 2), stride=(4, 2))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.tall(self.square(x))
+
+
+def patch_rows(laid: np.ndarray, kh: int, kw: int) -> np.ndarray:
+    """A [T, F, C] map's non-overlapping kh x kw patches as rows [T / kh * F / kw, kh * kw * C], each patch's rows in
+    turn, its columns, then channels."""
+    t, f, c = laid.shape
+    return laid.reshape(t // kh, kh, f // kw, kw, c).transpose(0, 2, 1, 3, 4).reshape(-1, kh * kw * c)
+
+
+def test_pointwise_s8_reads_a_convolution_of_its_stride_as_patches(tmp_path: Path) -> None:
+    torch.manual_seed(8)
+    rng = np.random.default_rng(31)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 24, 16, 8)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(Patches().eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    with esp_ppq_patches.applied(["pointwise_s8"]):
+        path = export_espdl.export(graph, tmp_path / "patches.espdl")
+    nodes, tensors = espdl_graph(path)
+    assert [op for op, _ in nodes.values()].count("PointwiseS8") == 2
+    info = path.with_suffix(".info").read_text()
+    transposed = dict(re.findall(r"%(\S+) = Transpose\[.*?\]\(%([^)]+)\)", info))
+    for made, attrs, inputs in re.findall(r"%(\S+) = PointwiseS8\[(.*?)\]\(([^)]*)\)", info):
+        kh, kw = (int(v) for v in re.search(r"patch = \[(\d+), (\d+)\]", attrs).groups())
+        shift = int(re.search(r"shift = (\d+)", attrs).group(1))
+        names = [v.strip().lstrip("%") for v in inputs.split(",")]
+        maps = [names[0], made]
+        got = TorchExecutor(graph, device="cpu").forward(
+            inputs=calib[0], output_names=[transposed.get(m, m) for m in maps]
+        )
+        x, want = (
+            torch.round(v[0].permute(1, 2, 0) / 2.0 ** exponent(info, m)).to(torch.int64).numpy()
+            for v, m in zip(got, maps, strict=True)
+        )
+        rows, n = patch_rows(x, kh, kw), want.shape[-1]
+        bias = tensors[names[2]][:n]
+        out = pointwise_s8_espdl(rows, tensors[names[1]], bias, shift, None, -1)
+        assert np.array_equal(out, want.reshape(-1, n)), made
+        assert not np.array_equal(
+            pointwise_s8_espdl(rows, tensors[names[1]], bias, shift + 1, None, -1), want.reshape(-1, n)
+        )
+
+
 class Attention(nn.Module):
     """Four heads of six over the hops in the form ReDimNet2 b0's attention exports in: scores of keys [H, T, D] by
     queries [H, D, T], a softmax over the keys, values [H, D, T] weighed by it, the heads laid back. The keys project

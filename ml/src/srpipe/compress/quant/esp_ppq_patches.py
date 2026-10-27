@@ -2455,7 +2455,8 @@ def pointwise_takes(op, info) -> bool:
 def pointwise_s8_from(graph, op, info) -> bool:
     """op, an int8 1x1 Conv of K inputs to N outputs over a map's rows, K 24, 48 or a multiple of 16, N a multiple of
     8, its mac shift 1 or more, as one PointwiseS8: weights [Np / 16][K][16], bias [Np] when it has one, Np being N
-    padded with zeros to a multiple of 16. With K held in registers, the residual Add after it joins too."""
+    padded with zeros to a multiple of 16. With K held in registers, the residual Add after it joins too. A 2-d one
+    whose kernel [kh, kw] is its stride reads non-overlapping patches, K = kh * kw * C a multiple of 16, as "patch"."""
     import torch
     from esp_ppq.core import OperationQuantizationConfig
     from esp_ppq.IR.quantize import QuantableOperation
@@ -2463,14 +2464,26 @@ def pointwise_s8_from(graph, op, info) -> bool:
     if op.type != "Conv" or not isinstance(op, QuantableOperation) or len(op.inputs) not in (2, 3):
         return False
     attrs, (x, w), y = op.attributes, op.inputs[:2], op.outputs[0]
-    kernel = attrs.get("kernel_shape", [])
-    if not kernel or any(v != 1 for v in [*kernel, *attrs.get("strides", []), *attrs.get("dilations", [])]):
+    kernel = list(attrs.get("kernel_shape", []))
+    patch = kernel if len(kernel) == 2 and list(attrs.get("strides", [])) == kernel else [1] * len(kernel)
+    if not kernel or any(v != 1 for v in attrs.get("dilations", [])) or kernel != patch:
+        return False
+    if any(v != 1 for v in attrs.get("strides", [])) and math.prod(patch) == 1:
         return False
     if any(attrs.get("pads", [])) or attrs.get("group", 1) != 1 or attrs.get("activation", "Linear") != "Linear":
         return False
     laid_x, laid_y = laid_shape(x, info), laid_shape(y, info)
-    k, n = laid_x[-1], laid_y[-1]
-    if laid_x[:-1] != laid_y[:-1] or not (k in HELD_INPUTS or k % CHANNEL_STEP == 0) or n % (CHANNEL_STEP // 2):
+    k, n = laid_x[-1] * math.prod(patch), laid_y[-1]
+    if math.prod(patch) > 1:
+        # Each output pixel reads all the weights again: past half the data cache they stop staying there.
+        if len(laid_x) != 4 or laid_x[0] != 1 or k % CHANNEL_STEP or k * n > DATA_CACHE_BYTES // 2:
+            return False
+        (kh, kw), (t, f) = patch, laid_x[1:3]
+        if t % kh or f % kw or laid_y != [1, t // kh, f // kw, n]:
+            return False
+    elif laid_x[:-1] != laid_y[:-1] or not (k in HELD_INPUTS or k % CHANNEL_STEP == 0):
+        return False
+    if n % (CHANNEL_STEP // 2):
         return False
     if w.value is None or w.value.numel() != k * n:
         return False
@@ -2491,7 +2504,7 @@ def pointwise_s8_from(graph, op, info) -> bool:
         b = op.inputs[2]
         b.value = torch.from_numpy(np.pad(b.value.cpu().numpy().reshape(-1), (0, padded - n)))
     configs, out_config, residual_shift = list(op.input_quant_config), op.output_quant_config[0], -1
-    found = residual_add(graph, y, info) if k in HELD_INPUTS else None
+    found = residual_add(graph, y, info) if k in HELD_INPUTS and math.prod(patch) == 1 else None
     if found is not None:
         add, other, r, requantiser, residual_shift = found
         r_config = add.input_quant_config[add.inputs.index(other)] if requantiser is None else config_of(r)
@@ -2511,7 +2524,13 @@ def pointwise_s8_from(graph, op, info) -> bool:
     op.type = POINTWISE_S8
     for name in [a for a in op.attributes if a != "quant_type"]:
         del op.attributes[name]
-    op.attributes.update(shift=int(e_y - e_x - e_w), columns=int(n), biased=biased, residual_shift=int(residual_shift))
+    op.attributes.update(
+        shift=int(e_y - e_x - e_w),
+        columns=int(n),
+        biased=biased,
+        residual_shift=int(residual_shift),
+        patch=[int(v) for v in (patch if len(patch) == 2 else [1, 1])],
+    )
     op.config = OperationQuantizationConfig(configs, [out_config])
     return True
 
