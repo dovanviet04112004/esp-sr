@@ -1351,6 +1351,20 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
   | `PPQ_Operation_208` (128 → 2016, 148) | 32,8 | 23,9 | 9,7 ms |
 
   Lần chép đọc mỗi trọng số từ flash đúng một lần, ~27–31 MB/s.
+- **`ConvBlock` chia theo phần trên app đo** (28/10), trọng số chép vào RAM nội, dải 4 điểm ảnh, ms một khối:
+
+  | Stage | Nạp hàng x | Depthwise 1 + 2 | Pointwise 1 + 2 | Cả khối | Hàng vòng cũng ở RAM nội |
+  |---|---|---|---|---|---|
+  | 0 | 20,2 | 46,4 (0,6 chu kỳ/MAC) | 80,2 | 149,7 | **109,5**: nạp 12,1, depthwise 15,4 (0,20) |
+  | 1 | 15,6 | 19,7 (0,34) | 80,6 | 118,8 | **107,2** |
+  | 2 | 5,2 | 5,5 | 20,1 | 32,3 | **28,6** |
+  | 5 | 1,2 | 1,2 | 8,4 | 13,9 | 12,5 |
+
+  - Pointwise sát mức nhân: 0,082–0,098 chu kỳ một phép nhân-cộng như khi trọng số nóng.
+  - Depthwise quét từng vector qua dải, đọc lại ba hàng vòng; hàng vòng ở PSRAM bị cache đẩy ra giữa hai lần dùng,
+    nên stage 0 chạy 0,6 chu kỳ một phép nhân-cộng, gấp ba khi hàng nằm ở RAM nội.
+  - Trọng số cộng hàng vòng: stage 0 63,5 KB, stage 1 79,3 KB khi hai đệm dải dùng chung, vừa 79 680 B; stage 5 90,5 KB,
+    không vừa. 21 khối ước bớt ~140 ms 🔬.
 - **Chưa đo:** độ chính xác của b3 sau int8 (thang int8 đang chạy).
 - **Đọc:** đây là số thô. b3 chạy qua các op viết cho hình dạng của b0, chưa có bước nào tối ưu riêng cho nó. b3 có
   2,16 tỉ MAC (`torch.utils.flop_counter`, không tính GroupNorm), b0 0,24 tỉ. 1,61 tỉ nằm trong 19 `ConvBlock`, chạy
