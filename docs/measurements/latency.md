@@ -763,7 +763,9 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
 | `LayerNormS8` và `SoftmaxQuant` tính 4 giá trị xen nhau, làm tròn bằng một phép cộng rồi cắt | 557,5 ms | 1 349 764 B | LayerNorm 55,7 ms, stem 44,2 ms; SoftmaxQuant 46,3 → 28,8 ms, 7,7 ms mỗi attention 148 khung |
 | `softmax_scale`: `Mul` của attention thành bảng tra theo byte | 549,6 ms | 1 348 604 B | Mul 20,3 → 13,0 ms, bỏ 6 `Mul` của attention |
 | `MatMulS8`: 36 phép chiếu của TCM cùng `Add` bias | 531,7 ms | 1 424 476 B | MatMul và Add bias ~27 ms → 4,6 ms; PSRAM thêm hàng đệm 32 byte của mỗi phép chiếu 24 kênh |
-| `AttentionCore`: cắt head, điểm, softmax, nhân value, gộp head của 6 attention | **508,5 ms** | **1 418 652 B** | 6 op 28,2 ms thay MatMul 23,9 ms, Transpose 7,6 ms và softmax ~21 ms; attention 148 khung 9,8 ms, ~90% là softmax |
+| `AttentionCore`: cắt head, điểm, softmax, nhân value, gộp head của 6 attention | 508,5 ms | 1 418 652 B | 6 op 28,2 ms thay MatMul 23,9 ms, Transpose 7,6 ms và softmax ~21 ms; attention 148 khung 9,8 ms, ~90% là softmax |
+| `StemConv`: bản sao log-mel và depthwise 3×3 của stem | 493,6 ms | 1 422 860 B | 4,5 ms thay Add 7,5 ms và Conv 12,0 ms; phần lớn là ghi 128 KB đầu ra ra PSRAM |
+| Softmax theo dải 8 cột bằng nhân PIE, tổng và thang trong thanh ghi FPU | **490,0 ms** | **1 422 860 B** | `AttentionCore` 28,2 → 24,6 ms (8,4 ms ở 148 khung); softmax của pool vẫn 8,2 ms: map 85 KB lớn hơn cache, mỗi dải cột nạp lại các dòng của nó |
 
 - **`SoftmaxQuant`:** bảng `exp` và nghịch đảo tổng như esp-dl. Xác suất không âm, nên `floor(v + 0,5)` của esp-dl là
   phép cắt của tổng float `v + 0,5`: dưới 2^22 tổng ấy không làm tròn sang phần nguyên khác. Mỗi lượt chuẩn hoá tính 4
@@ -782,10 +784,15 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
 - **`MatMulS8`:** MatMul của esp-dl với 24 cột chạy 16 cột qua nhân unaligned, 8 cột còn lại qua vòng C, ~2,25 chu kỳ
   một phép nhân-cộng; cả hai làm tròn nửa lên như tích chập không bias, nên một hàng là một pointwise.
 - **`AttentionCore`:** hai tích chạy nhân pointwise của `MatMulS8` theo khối 16 khung query, ~0,5 ms ở attention 148
-  khung; phần còn lại là softmax của khối, ~27 chu kỳ một phần tử.
-- Op tốn nhất còn lại: `ConvBlock` 172,3 ms; Conv 127,7 ms trên 76 op (stem 12,0 ms ở 2,5 chu kỳ một phép nhân-cộng,
-  depthwise bước 2 của stage 2 và 4 ở 8,0 và 4,3); LayerNorm 55,5 ms; `StageSum` 54,8 ms; `AttentionCore` 28,2 ms;
-  pool ~45 ms (ReduceMean, ReduceSum, Mul, Sub, softmax theo thời gian).
+  khung; phần còn lại là softmax của khối, ~23 chu kỳ một phần tử với nhân dải 8 cột.
+- **PSRAM của board B** (27/10, vùng 256 KB, cache trống trước mỗi lượt): đọc tuần tự 91 MB/s, ~0,7 µs mỗi dòng cache
+  64 byte; `memcpy` 31,6 MB/s, vì mỗi dòng đích được nạp vào cache trước khi ghi đè rồi mới ghi ngược. Autoload của
+  dcache mặc định tắt (`EXTMEM_DCACHE_AUTOLOAD_CTRL` = 0x8); bật cho đúng vùng đọc, mọi kiểu kích và mọi cỡ, không
+  đổi gì. Bật cho cả vùng 32 MB từ 0x3C000000 thì cache báo lỗi cấu hình preload và chip khởi động lại. Op chạm trần
+  băng thông chỉ nhanh lên khi bớt lượt đọc ghi, tức là gộp op.
+- Op tốn nhất còn lại: `ConvBlock` 172,2 ms; Conv 115,6 ms trên 75 op (depthwise bước 2 của stage 2 và 4 ở 8,0 và 4,3
+  chu kỳ một phép nhân-cộng); LayerNorm 55,5 ms, stem 44,2 ms; `StageSum` 54,7 ms; `AttentionCore` 28,2 ms; pool
+  ~45 ms (ReduceMean, ReduceSum, Mul, Sub, softmax theo thời gian).
 
 ## 26. `command_ctc` qua chuỗi tăng tốc (E11-T30)
 
