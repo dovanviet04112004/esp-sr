@@ -2669,6 +2669,56 @@ def pointwise_s8_from(graph, op, info) -> bool:
     return True
 
 
+def pointwise_concat(graph, concat, info) -> bool:
+    """concat, joining along the channels PointwiseS8 nodes alone each read by it, over one input with one shift and
+    bias or none, no residual nor patch, each giving a multiple of 16 outputs on concat's exponent, as the first of
+    them giving concat's output: their weights and biases one after another, "columns" their sum."""
+    import torch
+    from esp_ppq.core import OperationQuantizationConfig
+
+    if concat.type != "Concat" or len(concat.inputs) < 2:
+        return False
+    parts = [v.source_op for v in concat.inputs]
+    out = concat.outputs[0]
+    if any(p is None or p.type != POINTWISE_S8 for p in parts) or len(set(id(p) for p in parts)) != len(parts):
+        return False
+    laid = [laid_shape(v, info) for v in concat.inputs]
+    lo = laid_shape(out, info)
+    if any(v[:-1] != lo[:-1] for v in laid) or sum(v[-1] for v in laid) != lo[-1]:
+        return False
+    first = parts[0]
+    keys = ("shift", "biased", "residual_shift", "patch")
+    for p, v in zip(parts, concat.inputs, strict=True):
+        if v.dest_ops != [concat] or v.name in graph.outputs or p.inputs[0] is not first.inputs[0]:
+            return False
+        if any(p.attributes.get(k) != first.attributes.get(k) for k in keys) or p.attributes["residual_shift"] != -1:
+            return False
+        if p.attributes["columns"] % CHANNEL_STEP or exponent_of(v, info) != exponent_of(out, info):
+            return False
+    if first.attributes["patch"] != [1, 1]:
+        return False
+    biased = first.attributes["biased"]
+    weights = np.concatenate([p.inputs[1].value.cpu().numpy() for p in parts])
+    first.inputs[1].value = torch.from_numpy(np.ascontiguousarray(weights)).to(first.inputs[1].value.dtype)
+    if biased:
+        bias = np.concatenate([p.inputs[2].value.cpu().numpy() for p in parts])
+        first.inputs[2].value = torch.from_numpy(bias).to(first.inputs[2].value.dtype)
+    out_config, middles = concat.output_quant_config[0], [v for v in concat.inputs]
+    for p in parts[1:]:
+        p.inputs[0].dest_ops.remove(p)
+        del p.inputs[0]
+    graph.remove_operation(concat)
+    for p in parts[1:]:
+        graph.remove_operation(p)
+    for v in middles:
+        graph.remove_variable(v)
+    first.outputs.append(out)
+    out.source_op = first
+    first.attributes["columns"] = int(sum(p.attributes["columns"] for p in parts))
+    first.config = OperationQuantizationConfig(list(first.config.input_quantization_config), [out_config])
+    return True
+
+
 @contextlib.contextmanager
 def pointwise_s8() -> Iterator[None]:
     """Each int8 1x1 convolution exported as one PointwiseS8 (KEHOACH 3.14 step 2.5), the residual Add after it with
@@ -2689,6 +2739,9 @@ def pointwise_s8() -> Iterator[None]:
         for op in list(graph.operations.values()):
             if op.name in graph.operations:
                 pointwise_s8_from(graph, op, info)
+        for op in list(graph.operations.values()):
+            if op.name in graph.operations:
+                pointwise_concat(graph, op, info)
         return graph
 
     def unless_taken(op, info):

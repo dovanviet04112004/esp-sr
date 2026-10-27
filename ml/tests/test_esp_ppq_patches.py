@@ -1377,6 +1377,31 @@ def test_pointwise_s8_reads_a_convolution_of_its_stride_as_patches(tmp_path: Pat
         )
 
 
+def test_pointwise_s8_joins_a_concat_of_its_slices_back_into_one_op(tmp_path: Path) -> None:
+    torch.manual_seed(5)
+    rng = np.random.default_rng(18)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 576, HOPS)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(nn.Conv1d(576, 128, 1).eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    with esp_ppq_patches.applied(["cache_sized_convolutions", "pointwise_s8"]):
+        path = export_espdl.export(graph, tmp_path / "joined.espdl")
+    nodes, tensors = espdl_graph(path)
+    ops = [op for op, _ in nodes.values()]
+    assert ops.count("PointwiseS8") == 1 and "Concat" not in ops
+    info = path.with_suffix(".info").read_text()
+    transposed = dict(re.findall(r"%(\S+) = Transpose\[.*?\]\(%([^)]+)\)", info))
+    ((made, attrs, inputs),) = re.findall(r"%(\S+) = PointwiseS8\[(.*?)\]\(([^)]*)\)", info)
+    shift, columns = (int(re.search(name + r" = (\d+)", attrs).group(1)) for name in ("shift", "columns"))
+    x, w, b = (v.strip().lstrip("%") for v in inputs.split(","))
+    assert columns == 128 and tensors[w].shape == (8, 576, 16)
+    maps = [x, made]
+    got = TorchExecutor(graph, device="cpu").forward(inputs=calib[0], output_names=[transposed.get(m, m) for m in maps])
+    rows, want = (
+        torch.round(v[0].T / 2.0 ** exponent(info, m)).to(torch.int64).numpy() for v, m in zip(got, maps, strict=True)
+    )
+    assert np.array_equal(pointwise_s8_espdl(rows, tensors[w], tensors[b], shift, None, -1), want)
+    assert not np.array_equal(pointwise_s8_espdl(rows, tensors[w], tensors[b], shift + 1, None, -1), want)
+
+
 class Attention(nn.Module):
     """Four heads of six over the hops in the form ReDimNet2 b0's attention exports in: scores of keys [H, T, D] by
     queries [H, D, T], a softmax over the keys, values [H, D, T] weighed by it, the heads laid back. The keys project
