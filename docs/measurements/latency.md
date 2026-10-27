@@ -1237,3 +1237,44 @@ nên lượt đầu tiên ghi lại app.
 
 Cả hai lượt parity đều qua. Mọi lượt không còn bốn cảnh báo cuối pytest, cũng không còn cảnh báo `hard_reset` của
 esptool. Dòng `Failed to get VID/PID` vẫn còn: esptool in nó mỗi lần nối, vì cổng qua mạng không có mã USB.
+
+## 31. ReDimNet2 b3 nhiều ngôn ngữ trên board B (E11-T35)
+
+Đo ngày 27/10 trên board B. Run `20261027_1a7464c-dirty_92a838` nhập bằng `make speaker-import
+EXTRACTOR=redimnet2_b3_mix` (`b3-vb2+vox2+cnc2_v0-lm`, 4,51 M tham số, `speaker.md` §2). So với b0: C = 24 thay 12,
+kênh mở rộng trong khối 4, 3, 2, 1, 1, 1 theo stage thay 2, 1, 1, 1, 1, 1.
+
+**b3 chưa vào được đường chip.** b3 có `agg_gnorm`: một `GroupNorm` 24 nhóm trên 1728 kênh sau stem và sau mỗi
+stage, mỗi nhóm chuẩn hoá 72 kênh trên cả trục thời gian. `Embed` của đường chip chưa có phép này. Để đo giờ, một
+script dùng một lần dựng hàng `timing` (minmax) với 7 `GroupNorm` bỏ đi; phần còn lại của mạng y như b3.
+
+Hai chặn trước khi chạy được:
+- `cache_sized_convolutions` dựng một `Concat` một đầu vào cho conv `red_dim` (1728 → 72, 124 KB trọng số), vì 72
+  không chia thành các lát bội 16; esp-dl assert khi định cỡ tensor. Sửa ở `d81dabc`.
+- Ảnh dò gồm đồ thị và 4 bản cắt nặng 13,4 MB, quá khe 6 MB, nên chạy `CUTS=0`. Đồ thị 5,3 MB chép vào PSRAM thì
+  tensor của b3 không còn chỗ, và `Slice` đầu tiên đọc phải tensor rỗng. `IN_FLASH=1` để đồ thị ở flash, như sản
+  phẩm chạy speaker.
+
+| | b0, hàng kl | b3 nhiều ngôn ngữ, hàng timing, không GroupNorm |
+|---|---|---|
+| `.espdl` | 1 482 448 B | 5 412 928 B |
+| Một cửa sổ 1,5 s, đồ thị trong PSRAM | 356,1 ms | không vừa PSRAM |
+| Một cửa sổ 1,5 s, đồ thị ở flash | 408,5 ms | **7 089,2 ms** |
+| PSRAM cho tensor | 1 408 256 B | 3 927 576 B |
+| Khớp từng bit với mô phỏng | đồ thị và 4 bản cắt | đồ thị |
+
+Profile của b3, tổng 7 086 ms:
+
+| Phần | Giờ | Vì sao |
+|---|---|---|
+| Conv 4×2 của stage 5 (esp-dl) | 1 540 ms, 7,5 chu kỳ một phép nhân-cộng | 144 KB trọng số, đọc lại từ flash ở mỗi vị trí ra |
+| 6 conv `red_dim` 1728 → 72 (`PointwiseS8`) | 2 248 ms | 124 KB trọng số, không cắt lát được |
+| 19 `ConvBlock` | 2 406 ms | ~370 ms mỗi khối stage 1, ~300 ms mỗi khối stage 0 |
+| Các conv esp-dl còn lại, `StageSum`, `LayerNormS8` | 150, 136 và 61 ms | |
+
+- Đồ thị ở flash tốn b0 thêm 52 ms (15%). Sản phẩm chạy speaker như thế (`deploy.weights_in_flash`), nên 408,5 ms
+  là giờ của b0 trên sản phẩm.
+- **Chưa đo:** 7 `GroupNorm`, ước 80–120 ms 🔬 vì mỗi phép đọc ghi map 256 KB hai lượt; độ chính xác sau int8, cần
+  `GroupNorm` trong đường chip rồi mới chạy được thang int8.
+- **Đọc:** b3 chậm gấp ~7 lần mức ~1 s của điều kiện cắm (ADR-0021), gấp ~17 lần b0 cùng cách đặt trọng số. Cắt lát
+  được hai loại conv quá dcache thì còn ~3,5 s 🔬, vẫn quá xa mức ấy.
