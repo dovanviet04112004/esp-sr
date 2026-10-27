@@ -5,7 +5,7 @@
 
 #include "ai_engine.h"
 #include "app_events.h"
-#include "core/espdl/espdl_conv_block.hpp"
+#include "core/espdl/espdl_loan.hpp"
 #include "core/espdl/espdl_ops.hpp"
 #include "core/espdl_net.hpp"
 #include "core/model_image.hpp"
@@ -73,10 +73,10 @@ esp_err_t test_of(const ai::Blob &blob, bool profiled)
     ai::register_espdl_ops();
     dl::Model model(reinterpret_cast<const char *>(blob.data), fbs::MODEL_LOCATION_IN_FLASH_RODATA, 0,
                     dl::MEMORY_MANAGER_GREEDY, nullptr, false);
-    // One run builds every module, so the test then runs on the ConvBlocks' loan as EspdlNet::step does.
-    (void)ai::conv_block_take_loan_bytes();
+    // One run builds every module, so the test then runs on the ops' loan as EspdlNet::step does.
+    (void)ai::loan_take_asked();
     model.run();
-    const ai::ConvBlockLoan loan(ai::conv_block_take_loan_bytes());
+    const ai::WeightLoan loan(ai::loan_take_asked());
     if (profiled) { model.profile_module(true); }
     return model.test();
 }

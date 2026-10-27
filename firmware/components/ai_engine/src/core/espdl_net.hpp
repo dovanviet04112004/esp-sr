@@ -47,8 +47,8 @@ class EspdlNet {
     Int8Tensor input(const char *name) noexcept;
     /** The output of that graph name; empty when the graph has none. */
     Int8Tensor output(const char *name) noexcept;
-    /** One run over what input() holds; streaming caches keep the earlier hops. A graph whose ConvBlocks
-     * borrow internal RAM gets it for the run only, and runs slower but alike when none is free
+    /** One run over what input() holds; streaming caches keep the earlier hops. A graph whose ops borrow
+     * internal RAM gets it for the run only, and runs slower but alike when none is free
      * (KEHOACH 6.5).
      */
     esp_err_t step() noexcept;
@@ -64,7 +64,7 @@ class EspdlNet {
   private:
     dl::Model *model_ = nullptr;
     const char *name_ = "";
-    size_t loan_bytes_ = 0; // internal RAM its ConvBlocks borrow a run
+    size_t loan_bytes_ = 0; // internal RAM its ops borrow a run
     bool loan_missed_ = false;
 };
 

@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/espdl/espdl_loan.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -74,11 +75,6 @@ constexpr int kPostOutputs = 12;
 // Pixels the shared kernels take a call, each strip's depthwise rows then staying cached for its pointwise.
 constexpr int kStripPixels = 4;
 
-// The internal RAM EspdlNet lends for a run, and the most a block built since the last take borrows.
-int8_t *s_loan = nullptr;
-size_t s_loan_bytes = 0;
-size_t s_loan_asked = 0;
-
 using RowKernel = void (*)(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
 
 // Channel counts whose pointwise rows run unrolled; residual_x takes an x shift of 1 or more.
@@ -142,7 +138,8 @@ class ConvBlock final : public dl::module::Module {
         dl::TensorBase *x = context->get_tensor(m_inputs_index[kX]);
         dl::TensorBase *y = context->get_tensor(m_outputs_index[0]);
         if (!built_ && !build(context, x, y)) { return; }
-        int8_t *loan = loan_bytes_ > 0 && s_loan_bytes >= loan_bytes_ ? s_loan : nullptr;
+        const Loan lent = loan_lent();
+        int8_t *loan = loan_bytes_ > 0 && lent.bytes >= loan_bytes_ ? lent.mem : nullptr;
         const int8_t *dw1 = weights(context, kDw1, loan);
         const int8_t *pw1 = weights(context, kPw1, loan);
         const int8_t *dw2 = weights(context, kDw2, loan);
@@ -406,7 +403,7 @@ class ConvBlock final : public dl::module::Module {
             for (size_t i = kDw1; i < m_inputs_index.size(); i++) {
                 loan_bytes_ += loaned_bytes(context->get_tensor(m_inputs_index[i]));
             }
-            s_loan_asked = std::max(s_loan_asked, loan_bytes_);
+            loan_ask(loan_bytes_);
         }
         built_ = true;
         return true;
@@ -450,32 +447,6 @@ class ConvBlock final : public dl::module::Module {
 dl::module::Module *conv_block_from(fbs::FbsModel *fbs_model, std::string node_name)
 {
     return ConvBlock::deserialize(fbs_model, std::move(node_name));
-}
-
-size_t conv_block_take_loan_bytes() noexcept
-{
-    const size_t bytes = s_loan_asked;
-    s_loan_asked = 0;
-    return bytes;
-}
-
-ConvBlockLoan::ConvBlockLoan(size_t bytes) noexcept
-{
-    if (bytes == 0) {
-        granted_ = true;
-        return;
-    }
-    mem_ = heap_caps_aligned_alloc(kVectorAlignBytes, bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    granted_ = mem_ != nullptr;
-    s_loan = static_cast<int8_t *>(mem_);
-    s_loan_bytes = granted_ ? bytes : 0;
-}
-
-ConvBlockLoan::~ConvBlockLoan()
-{
-    s_loan = nullptr;
-    s_loan_bytes = 0;
-    heap_caps_free(mem_);
 }
 
 } // namespace ai
