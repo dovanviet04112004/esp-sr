@@ -2390,6 +2390,164 @@ def global_stats() -> Iterator[None]:
         EspdlExporter.prepare_graph = prepare
 
 
+POINTWISE_S8 = "PointwiseS8"
+# Input channels PointwiseS8 holds a row of in registers; others it reads 16 a vector.
+HELD_INPUTS = (24, 48)
+
+
+def config_of(var):
+    """var's quantisation config as the op making it gives it, or as one reading it takes it; None when no
+    quantised op does."""
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    if isinstance(var.source_op, QuantableOperation):
+        return var.source_op.output_quant_config[var.source_op.outputs.index(var)]
+    for reader in var.dest_ops:
+        if isinstance(reader, QuantableOperation):
+            return reader.input_quant_config[reader.inputs.index(var)]
+    return None
+
+
+def residual_add(graph, out, info) -> tuple | None:
+    """(add, other, r, requantiser, shift) when out, read by one int8 Add alone on its exponent, is added to other, a
+    map of out's laid shape on that exponent too: r itself, or r through a RequantizeLinear read by that Add alone,
+    shifting r's integers right by shift; None otherwise."""
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    if out.name in graph.outputs or len(out.dest_ops) != 1:
+        return None
+    (add,) = out.dest_ops
+    if add.type != "Add" or not isinstance(add, QuantableOperation) or len(add.inputs) != 2:
+        return None
+    configs = [*add.input_quant_config, *add.output_quant_config]
+    if add.inputs[0] is add.inputs[1] or not all(int8_tensor(c) for c in configs):
+        return None
+    other = add.inputs[1] if add.inputs[0] is out else add.inputs[0]
+    total = exponent_of(add.outputs[0], info)
+    if other.is_parameter or total is None or exponent_of(out, info) != total or exponent_of(other, info) != total:
+        return None
+    r, requantiser = other, other.source_op
+    if (
+        requantiser is not None
+        and requantiser.type == "RequantizeLinear"
+        and other.dest_ops == [add]
+        and other.name not in graph.outputs
+    ):
+        r = requantiser.inputs[0]
+    else:
+        requantiser = None
+    e_r = exponent_of(r, info)
+    if e_r is None or e_r > total or laid_shape(r, info) != laid_shape(out, info) or config_of(r) is None:
+        return None
+    return add, other, r, requantiser, int(total - e_r)
+
+
+def pointwise_takes(op, info) -> bool:
+    """Whether op is a 1x1 convolution of one group whose channel counts PointwiseS8 runs as they are, so
+    aligned_pointwise leaves its columns unmerged."""
+    attrs = op.attributes
+    if op.type != "Conv" or attrs.get("group", 1) != 1 or any(v != 1 for v in attrs.get("kernel_shape", [0])):
+        return False
+    k, n = laid_shape(op.inputs[0], info)[-1], laid_shape(op.outputs[0], info)[-1]
+    return (k in HELD_INPUTS or k % CHANNEL_STEP == 0) and n % (CHANNEL_STEP // 2) == 0
+
+
+def pointwise_s8_from(graph, op, info) -> bool:
+    """op, an int8 1x1 Conv of K inputs to N outputs over a map's rows, K 24, 48 or a multiple of 16, N a multiple of
+    8, its mac shift 1 or more, as one PointwiseS8: weights [Np / 16][K][16], bias [Np] when it has one, Np being N
+    padded with zeros to a multiple of 16. With K held in registers, the residual Add after it joins too."""
+    import torch
+    from esp_ppq.core import OperationQuantizationConfig
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    if op.type != "Conv" or not isinstance(op, QuantableOperation) or len(op.inputs) not in (2, 3):
+        return False
+    attrs, (x, w), y = op.attributes, op.inputs[:2], op.outputs[0]
+    kernel = attrs.get("kernel_shape", [])
+    if not kernel or any(v != 1 for v in [*kernel, *attrs.get("strides", []), *attrs.get("dilations", [])]):
+        return False
+    if any(attrs.get("pads", [])) or attrs.get("group", 1) != 1 or attrs.get("activation", "Linear") != "Linear":
+        return False
+    laid_x, laid_y = laid_shape(x, info), laid_shape(y, info)
+    k, n = laid_x[-1], laid_y[-1]
+    if laid_x[:-1] != laid_y[:-1] or not (k in HELD_INPUTS or k % CHANNEL_STEP == 0) or n % (CHANNEL_STEP // 2):
+        return False
+    if w.value is None or w.value.numel() != k * n:
+        return False
+    if not all(int8_tensor(c) for c in [*op.input_quant_config[:2], *op.output_quant_config]):
+        return False
+    biased = int(len(op.inputs) == 3)
+    e_x, e_w, e_y = (exponent_of(v, info) for v in (x, w, y))
+    if None in (e_x, e_w, e_y) or e_y - e_x - e_w < 1:
+        return False
+    if biased and exponent_of(op.inputs[2], info) != e_x + e_w:
+        return False
+    padded = -(-n // CHANNEL_STEP) * CHANNEL_STEP
+    weights = np.pad(dense_filters(w.value.cpu().numpy(), n), [(0, padded - n), (0, 0)])
+    w.value = torch.from_numpy(
+        np.ascontiguousarray(weights.reshape(padded // CHANNEL_STEP, CHANNEL_STEP, k).transpose(0, 2, 1))
+    )
+    if biased:
+        b = op.inputs[2]
+        b.value = torch.from_numpy(np.pad(b.value.cpu().numpy().reshape(-1), (0, padded - n)))
+    configs, out_config, residual_shift = list(op.input_quant_config), op.output_quant_config[0], -1
+    found = residual_add(graph, y, info) if k in HELD_INPUTS else None
+    if found is not None:
+        add, other, r, requantiser, residual_shift = found
+        r_config = add.input_quant_config[add.inputs.index(other)] if requantiser is None else config_of(r)
+        out_config, total = add.output_quant_config[0], add.outputs[0]
+        add.inputs.remove(other)
+        other.dest_ops.remove(add)
+        graph.remove_operation(add)
+        graph.remove_variable(y)
+        op.outputs.append(total)
+        total.source_op = op
+        if requantiser is not None:
+            graph.remove_operation(requantiser)
+            graph.remove_variable(other)
+        op.inputs.append(r)
+        r.dest_ops.append(op)
+        configs.append(r_config)
+    op.type = POINTWISE_S8
+    for name in [a for a in op.attributes if a != "quant_type"]:
+        del op.attributes[name]
+    op.attributes.update(shift=int(e_y - e_x - e_w), columns=int(n), biased=biased, residual_shift=int(residual_shift))
+    op.config = OperationQuantizationConfig(configs, [out_config])
+    return True
+
+
+@contextlib.contextmanager
+def pointwise_s8() -> Iterator[None]:
+    """Each int8 1x1 convolution exported as one PointwiseS8 (KEHOACH 3.14 step 2.5), the residual Add after it with
+    it when its rows are 24 or 48 values: esp-dl ran them at 0.13 to 0.45 cycles a multiply-add, 24 channels through
+    its unaligned kernel or aligned_pointwise's merged columns, and the Add through PSRAM. The op sums each row as a
+    pointwise convolution, rounds as esp-dl's Conv and adds the residual saturating as its Add. ReDimNet2 b0 (KEHOACH
+    3.17) on board B: ~80 ms of 1x1 convolutions and ~14 ms of residual Adds.
+    """
+    from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
+    from esp_ppq.parser.espdl_exporter import EspdlExporter
+
+    global column_merge
+    prepare, merge = EspdlExporter.prepare_graph, column_merge
+
+    def joining(self, graph, *args, **kwargs):
+        graph = prepare(self, graph, *args, **kwargs)
+        info = ExporterPatternInfo()
+        for op in list(graph.operations.values()):
+            if op.name in graph.operations:
+                pointwise_s8_from(graph, op, info)
+        return graph
+
+    def unless_taken(op, info):
+        return None if pointwise_takes(op, info) else merge(op, info)
+
+    EspdlExporter.prepare_graph, column_merge = joining, unless_taken
+    try:
+        yield
+    finally:
+        EspdlExporter.prepare_graph, column_merge = prepare, merge
+
+
 @contextlib.contextmanager
 def simplify_without_bn_fusion() -> Iterator[None]:
     """espdl_quantize_onnx simplifies the ONNX with onnxsim's defaults, whose fuse_bn pass leaves a tensor whose stored
@@ -2459,6 +2617,7 @@ PATCHES = {
     "stride_depthwise": stride_depthwise,
     "weighted_stats": weighted_stats,
     "global_stats": global_stats,
+    "pointwise_s8": pointwise_s8,
 }
 
 

@@ -1209,6 +1209,69 @@ def test_matmul_s8_exports_each_projection_and_its_bias_as_one_op(tmp_path: Path
     assert not np.array_equal(matmul_s8_espdl(rows, tensors[w], tensors[b][:24], shift + 1), want)
 
 
+class Pointwises(nn.Module):
+    """Rows of 24 values through 1x1 convolutions as ReDimNet2 b0 runs them: 24 to 24 added to the rows, as a TCM's
+    pwconv1; 24 to 48 added to another such map, as a stage's exp_dim; 48 to 64, then 64 to 24 without bias."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tcm, self.side, self.wide = nn.Conv1d(24, 24, 1), nn.Conv1d(24, 48, 1), nn.Conv1d(24, 48, 1)
+        self.narrow, self.back = nn.Conv1d(48, 64, 1), nn.Conv1d(64, 24, 1, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        a = x + self.tcm(torch.relu(x))
+        return self.back(self.narrow(self.side(a) + self.wide(a)))
+
+
+def pointwise_s8_espdl(rows: np.ndarray, laid: np.ndarray, bias, shift: int, residual, residual_shift: int):
+    """PointwiseS8's int8 output for int8 rows [T, K] from its weights [Np / 16][K][16], bias [N] or none, shift and
+    residual rows [T, N] or none, as esp-dl's Conv, the RequantizeLinear of the residual and their Add give it."""
+    k = rows.shape[1]
+    weights = laid.astype(np.int64).transpose(0, 2, 1).reshape(-1, k)
+    n = weights.shape[0] if bias is None else bias.size
+    acc = rows.astype(np.int64) @ weights[:n].T + (0 if bias is None else bias.astype(np.int64))
+    y = round_shift(acc, shift)
+    if residual is not None:
+        y = np.clip(y + round_shift(residual.astype(np.int64), residual_shift), -128, 127)
+    return y
+
+
+def test_pointwise_s8_exports_each_1x1_convolution_and_its_residual_add_as_one_op(tmp_path: Path) -> None:
+    torch.manual_seed(6)
+    rng = np.random.default_rng(29)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 24, HOPS)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(Pointwises().eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    with esp_ppq_patches.applied(["pointwise_s8"]):
+        path = export_espdl.export(graph, tmp_path / "pointwises.espdl")
+    nodes, tensors = espdl_graph(path)
+    ops = [op for op, _ in nodes.values()]
+    assert ops.count("PointwiseS8") == 5
+    assert "Conv" not in ops and ops.count("Add") <= 1
+    info = path.with_suffix(".info").read_text()
+    transposed = dict(re.findall(r"%(\S+) = Transpose\[.*?\]\(%([^)]+)\)", info))
+    joined = 0
+    for made, attrs, inputs in re.findall(r"%(\S+) = PointwiseS8\[(.*?)\]\(([^)]*)\)", info):
+        values = dict(re.findall(r"(\w+) = (-?\d+)", attrs))
+        shift, n, biased, residual_shift = (int(values[a]) for a in ("shift", "columns", "biased", "residual_shift"))
+        names = [v.strip().lstrip("%") for v in inputs.split(",")]
+        b = names[2] if biased else None
+        maps = [names[0], made] + ([names[2 + biased]] if residual_shift >= 0 else [])
+        got = TorchExecutor(graph, device="cpu").forward(
+            inputs=calib[0], output_names=[transposed.get(m, m) for m in maps]
+        )
+        rows, want, *residual = (
+            torch.round(v[0].T / 2.0 ** exponent(info, m)).to(torch.int64).numpy()
+            for v, m in zip(got, maps, strict=True)
+        )
+        joined += bool(residual)
+        bias, res = (tensors[b][:n] if b else None), (residual[0] if residual else None)
+        out = pointwise_s8_espdl(rows, tensors[names[1]], bias, shift, res, residual_shift)[:, :n]
+        assert np.array_equal(out, want), made
+        off = pointwise_s8_espdl(rows, tensors[names[1]], bias, shift + 1, res, residual_shift)[:, :n]
+        assert not np.array_equal(off, want)
+    assert joined == 2
+
+
 class Attention(nn.Module):
     """Four heads of six over the hops in the form ReDimNet2 b0's attention exports in: scores of keys [H, T, D] by
     queries [H, D, T], a softmax over the keys, values [H, D, T] weighed by it, the heads laid back. The keys project
