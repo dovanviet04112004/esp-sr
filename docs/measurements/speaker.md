@@ -659,3 +659,31 @@ dùng được.
 - **Nạp lên board B** (`make models-flash`, 14/10). Log khởi động in `threshold 1486 to 3020 thousandths for 1 to 8
   voiceprints, model c3373e4e` và `2 voiceprints of this model`, nên hai mẫu đã đăng ký vẫn dùng được. Lần nạp ấy gieo
   lại ngưỡng lệnh của ảnh, 200 / 0 / 60; ngưỡng của chủ repo đặt lại qua console thành 300 / 30 / 65535.
+
+## 7. Đường chip: ReDimNet2 b3 nhiều ngôn ngữ int8 (E11-T35)
+
+Đo ngày 28/10. Bộ trích `b3-vb2+vox2+cnc2_v0-lm` nhập thành run `ml/artifacts/speaker/runs/20261027_1a7464c-dirty_92a838`
+bằng `make speaker-import EXTRACTOR=redimnet2_b3_mix`. Vật liệu và thước như §6.1: 986 cửa sổ, 64 để hiệu chỉnh,
+k = 10, 20 lần rút. Thang chỉ chạy hàng kl, 5 giờ 44 phút trên CPU. Bảng tính phần lệnh được nhận mà kiểm người nói
+giữ lại, như §6.1:
+
+| Đồ thị | Người lạ lọt | EER | Giữ, cả bốn phiên | 28/09 1 m | 28/09 3 m | 07/10 1 m | 07/10 3 m |
+|---|---|---|---|---|---|---|---|
+| b3 float | 1% | 4,00% | 91,4% | 100% | 90,9% | 87,2% | 90,2% |
+| b3 float | 5% | 4,00% | 98,2% | 100% | 97,0% | 95,7% | 100% |
+| **b3 int8 kl** | 1% | **2,99%** | **98,2%** | 100% | 100% | 97,9% | 95,7% |
+| **b3 int8 kl** | 5% | **2,99%** | **99,4%** | 100% | 100% | 97,9% | 100% |
+| b0 int8 kl (§6.1) | 1% | 4,00% | 95,8% | 97,7% | 93,9% | 97,9% | 95,7% |
+| b0 int8 kl (§6.1) | 5% | 4,00% | 98,2% | 100% | 93,9% | 97,9% | 100% |
+
+- **b3 int8 hơn b0 int8 trên cùng thước:**
+  - EER 2,99% so với 4,00%;
+  - giữ 98,2% so với 95,8% ở 1% người lạ lọt, 99,4% so với 98,2% ở 5%;
+  - phiên 28/09 3 m, chỗ b0 hụt (93,9%), b3 giữ đủ.
+- **Qua cửa của KẾ HOẠCH §3.17:** gộp theo khoảng cách, ở 5% người lạ lọt, giữ 98,9% ở 1 m và 100% ở 3 m.
+- **int8 hơn float của chính nó** (EER 2,99% so với 4,00%), như b0 ở §6.1. Trên 986 cửa sổ, vài cửa sổ đổi phía
+  ngưỡng là đổi một điểm phần trăm. Cosine giữa embedding int8 và float có trung vị 0,77, phân vị 10 là 0,67; b0 là 0,51
+  và 0,36.
+- **Câu một từ** vẫn chỉ giữ 2/3, như mọi bộ ở §3.4.
+- **Giờ trên board B** 2,15 s một cửa sổ (`latency.md` §31), trên mức ~1 s của điều kiện cắm (ADR-0021). b0 trên sản
+  phẩm chạy 0,41 s.
