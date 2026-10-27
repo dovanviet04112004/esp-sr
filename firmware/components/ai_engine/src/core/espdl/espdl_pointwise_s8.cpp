@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
@@ -36,6 +37,7 @@ constexpr int kChannelStep = 16;
 constexpr int kHalfStep = 8;
 constexpr size_t kVectorAlignBytes = 16;
 constexpr size_t kBiasBlockBytes = 64; // one block's bias in esp-dl's QACC layout
+constexpr size_t kPatchRank = 4;
 
 using RowKernel = void (*)(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
 
@@ -79,18 +81,20 @@ bool aligned(const void *p) noexcept
     return reinterpret_cast<uintptr_t>(p) % kVectorAlignBytes == 0;
 }
 
-// Inputs as esp_ppq_patches.pointwise_s8_from lays them: rows [..., K], weights [Np / 16][K][16], bias [Np]
-// if "biased", residual [..., N] if "residual_shift" >= 0; Np: "columns" padded to a multiple of 16.
+// Inputs as esp_ppq_patches.pointwise_s8_from lays them: rows [..., K] or [1, T, F, C] in "patch" patches,
+// weights [Np / 16][K][16], bias [Np] if "biased", residual if "residual_shift" >= 0; Np: "columns" padded.
 class PointwiseS8 final : public dl::module::Module {
   public:
-    PointwiseS8(const char *name, int shift, int columns, int biased, int residual_shift)
+    PointwiseS8(const char *name, int shift, int columns, int biased, int residual_shift,
+                std::vector<int> patch)
         : Module(name, dl::MODULE_NON_INPLACE, dl::QUANT_TYPE_SYMM_8BIT), shift_(shift), columns_(columns),
-          biased_(biased), residual_shift_(residual_shift)
+          biased_(biased), residual_shift_(residual_shift), patch_(std::move(patch))
     {}
 
     ~PointwiseS8() override
     {
         heap_caps_free(zero_bias_);
+        heap_caps_free(gathered_);
     }
 
     PointwiseS8(const PointwiseS8 &) = delete;
@@ -100,6 +104,10 @@ class PointwiseS8 final : public dl::module::Module {
     {
         std::vector<int> shape = input_shapes[0];
         if (shape.empty()) { return {{columns_}}; }
+        if (patched() && shape.size() == kPatchRank) {
+            shape[1] /= patch_[0];
+            shape[2] /= patch_[1];
+        }
         shape[shape.size() - 1] = columns_;
         return {shape};
     }
@@ -114,7 +122,16 @@ class PointwiseS8 final : public dl::module::Module {
                 context->get_tensor(m_inputs_index[2 + biased_])->get_element_ptr());
         }
         const int8_t *weights = context->get_tensor(m_inputs_index[1])->get_element_ptr<int8_t>();
-        kernel_(y->get_element_ptr<int8_t>(), x->get_element_ptr<int8_t>(), weights, run_.data());
+        if (!patched()) {
+            kernel_(y->get_element_ptr<int8_t>(), x->get_element_ptr<int8_t>(), weights, run_.data());
+            return;
+        }
+        const int8_t *xs = x->get_element_ptr<int8_t>();
+        int8_t *ys = y->get_element_ptr<int8_t>();
+        for (int t = 0; t < out_rows_; t++) {
+            gather(xs, t);
+            kernel_(ys + t * patches_ * columns_, gathered_, weights, run_.data());
+        }
     }
 
     void print() override
@@ -129,23 +146,45 @@ class PointwiseS8 final : public dl::module::Module {
         int columns = 0;
         int biased = 0;
         int residual_shift = -1;
+        std::vector<int> patch;
         dl::quant_type_t quant_type = dl::QUANT_TYPE_NONE;
         fbs_model->get_operation_attribute(node_name, "shift", shift);
         fbs_model->get_operation_attribute(node_name, "columns", columns);
         fbs_model->get_operation_attribute(node_name, "biased", biased);
         fbs_model->get_operation_attribute(node_name, "residual_shift", residual_shift);
+        fbs_model->get_operation_attribute(node_name, "patch", patch);
+        if (patch.empty()) { patch = {1, 1}; }
         fbs_model->get_operation_attribute(node_name, "quant_type", quant_type);
-        if (quant_type != dl::QUANT_TYPE_SYMM_8BIT || shift < 1 || columns <= 0 || columns % kHalfStep != 0) {
+        if (quant_type != dl::QUANT_TYPE_SYMM_8BIT || shift < 1 || columns <= 0 || columns % kHalfStep != 0 ||
+            patch.size() != 2 || patch[0] < 1 || patch[1] < 1) {
             ESP_LOGE(
                 TAG,
                 "%s: only an int8 1x1 convolution of shift 1 or more into a multiple of 8 outputs runs here",
                 node_name.c_str());
             return nullptr;
         }
-        return new PointwiseS8(node_name.c_str(), shift, columns, biased != 0, residual_shift);
+        return new PointwiseS8(node_name.c_str(), shift, columns, biased != 0, residual_shift,
+                               std::move(patch));
     }
 
   private:
+    bool patched() const noexcept
+    {
+        return patch_[0] * patch_[1] > 1;
+    }
+
+    // Output row t's patches as rows of K: each patch's kh input rows of kw pixels in turn.
+    void gather(const int8_t *xs, int t) noexcept
+    {
+        const int span = patch_[1] * channels_;
+        for (int f = 0; f < patches_; f++) {
+            for (int i = 0; i < patch_[0]; i++) {
+                memcpy(gathered_ + f * span * patch_[0] + i * span,
+                       xs + ((t * patch_[0] + i) * width_ + f * patch_[1]) * channels_, span);
+            }
+        }
+    }
+
     const Held *held(int k) const noexcept
     {
         for (const Held &h : kHeld) {
@@ -156,9 +195,29 @@ class PointwiseS8 final : public dl::module::Module {
 
     bool build(dl::ModelContext *context, dl::TensorBase *x, dl::TensorBase *y)
     {
-        const int k = x->shape.empty() ? 0 : x->shape.back();
+        int k = x->shape.empty() ? 0 : x->shape.back();
+        int rows = k > 0 ? x->get_size() / k : 0;
+        if (patched()) {
+            if (x->shape.size() != kPatchRank || x->shape[0] != 1 || x->shape[1] % patch_[0] != 0 ||
+                x->shape[2] % patch_[1] != 0) {
+                ESP_LOGE(TAG, "%s: patches need one [1, T, F, C] map of whole patches", name);
+                return false;
+            }
+            channels_ = k;
+            width_ = x->shape[2];
+            out_rows_ = x->shape[1] / patch_[0];
+            patches_ = width_ / patch_[1];
+            k *= patch_[0] * patch_[1];
+            rows = patches_;
+            gathered_ = static_cast<int8_t *>(
+                heap_caps_aligned_calloc(kVectorAlignBytes, patches_, k, MALLOC_CAP_SPIRAM));
+            if (gathered_ == nullptr) {
+                ESP_LOGE(TAG, "%s: no memory for a row of %d patches", name, patches_);
+                return false;
+            }
+        }
         const int np = padded(columns_);
-        const Held *h = held(k);
+        const Held *h = patched() ? nullptr : held(k);
         dl::TensorBase *weights = context->get_tensor(m_inputs_index[1]);
         dl::TensorBase *bias = biased_ ? context->get_tensor(m_inputs_index[2]) : nullptr;
         dl::TensorBase *residual =
@@ -189,7 +248,7 @@ class PointwiseS8 final : public dl::module::Module {
             bias_at = reinterpret_cast<int32_t>(zero_bias_);
         }
         const int vectors = k / kChannelStep;
-        run_ = {x->get_size() / k,
+        run_ = {rows,
                 np / kChannelStep,
                 vectors,
                 vectors - 1,
@@ -214,6 +273,12 @@ class PointwiseS8 final : public dl::module::Module {
     int columns_;
     int biased_;
     int residual_shift_;
+    std::vector<int> patch_;
+    int channels_ = 0;
+    int width_ = 0;
+    int out_rows_ = 0;
+    int patches_ = 0;
+    int8_t *gathered_ = nullptr;  // one output row's patches as rows of K
     int8_t *zero_bias_ = nullptr; // QACC-layout zeros when the convolution has no bias
     std::array<int32_t, kRunSize> run_ = {};
     RowKernel kernel_ = nullptr;
