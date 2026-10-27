@@ -20,6 +20,18 @@ void ai_engine_pw_norm_row_s8_esp32s3(int8_t *out, const int8_t *in, const int8_
                                       const int32_t *run);
 void ai_engine_pw_residual_row_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
                                           const int32_t *run);
+void ai_engine_pw_norm_c24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                      const int32_t *run);
+void ai_engine_pw_norm_c48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                      const int32_t *run);
+void ai_engine_pw_residual_c24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                          const int32_t *run);
+void ai_engine_pw_residual_c48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                          const int32_t *run);
+void ai_engine_pw_residual_x_c24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                            const int32_t *run);
+void ai_engine_pw_residual_x_c48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                            const int32_t *run);
 }
 
 namespace ai {
@@ -43,6 +55,23 @@ enum Shift { kShiftDw1 = 0, kShiftPw1, kShiftBn, kShiftDw2, kShiftPw2, kShiftRes
 // Slots of conv_row_s8_esp32s3.S's runs that hold addresses.
 enum NormRun { kNormBias = 6, kNormWeights, kNormBnBias, kNormSize = 10 };
 enum ResidualRun { kResidualBias = 6, kResidualX, kResidualSize = 10 };
+
+using RowKernel = void (*)(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
+
+// Channel counts whose pointwise rows run unrolled; residual_x takes an x shift of 1 or more.
+struct Unrolled {
+    int channels;
+    RowKernel norm;
+    RowKernel residual;
+    RowKernel residual_x;
+};
+
+constexpr Unrolled kUnrolled[] = {
+    {24, ai_engine_pw_norm_c24_s8_esp32s3, ai_engine_pw_residual_c24_s8_esp32s3,
+     ai_engine_pw_residual_x_c24_s8_esp32s3},
+    {48, ai_engine_pw_norm_c48_s8_esp32s3, ai_engine_pw_residual_c48_s8_esp32s3,
+     ai_engine_pw_residual_x_c48_s8_esp32s3},
+};
 
 int padded(int channels) noexcept
 {
@@ -95,7 +124,7 @@ class ConvBlock final : public dl::module::Module {
             const int8_t *window[kRing] = {c_row(t - 1), c_row(t), c_row(t + 1)};
             ai_engine_dw3x3_row_s8_esp32s3(d_, window, dw2, dw2_run_.data());
             residual_run_[kResidualX] = reinterpret_cast<int32_t>(x_row(t) + padded_);
-            ai_engine_pw_residual_row_s8_esp32s3(ys + t * width_ * channels_, d_, pw2, residual_run_.data());
+            residual_kernel_(ys + t * width_ * channels_, d_, pw2, residual_run_.data());
         }
     }
 
@@ -158,7 +187,7 @@ class ConvBlock final : public dl::module::Module {
         }
         const int8_t *window[kRing] = {x_row(t - 1), x_row(t), x_row(t + 1)};
         ai_engine_dw3x3_row_s8_esp32s3(a_, window, dw1, dw1_run_.data());
-        ai_engine_pw_norm_row_s8_esp32s3(slot, a_, pw1, norm_run_.data());
+        norm_kernel_(slot, a_, pw1, norm_run_.data());
     }
 
     static bool aligned(const void *p) noexcept
@@ -237,6 +266,12 @@ class ConvBlock final : public dl::module::Module {
                          0,
                          shifts_[kShiftResidual],
                          half ? kHalfStep : kChannelStep};
+        for (const Unrolled &u : kUnrolled) {
+            if (u.channels == channels_) {
+                norm_kernel_ = u.norm;
+                residual_kernel_ = shifts_[kShiftResidual] > 0 ? u.residual_x : u.residual;
+            }
+        }
         built_ = true;
         return true;
     }
@@ -257,6 +292,8 @@ class ConvBlock final : public dl::module::Module {
     std::array<int32_t, 3> pad_run_ = {};
     std::array<int32_t, kNormSize> norm_run_ = {};
     std::array<int32_t, kResidualSize> residual_run_ = {};
+    RowKernel norm_kernel_ = ai_engine_pw_norm_row_s8_esp32s3;
+    RowKernel residual_kernel_ = ai_engine_pw_residual_row_s8_esp32s3;
     bool built_ = false;
 };
 

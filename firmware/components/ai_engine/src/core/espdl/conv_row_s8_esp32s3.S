@@ -239,3 +239,198 @@ ai_engine_pw_bias_row_s8_esp32s3:
     addi    a6, a6, -1
     bnez    a6, 1b
     retw.n
+
+// ConvBlock's pointwise rows for a pixel of 24 or 48 channels held in q0, q5, q6, every product unrolled: weight row k
+// multiplies q1 when k is even, q2 when odd, and reloads that register for k + 2, so no load is used the next step.
+//
+// void ai_engine_pw_norm_c24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run)
+// void ai_engine_pw_norm_c48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run)
+// As ai_engine_pw_norm_row_s8_esp32s3, its run alike.
+//
+// void ai_engine_pw_residual_c24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run)
+// void ai_engine_pw_residual_c48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run)
+// void ai_engine_pw_residual_x_c24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run)
+// void ai_engine_pw_residual_x_c48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run)
+// As ai_engine_pw_residual_row_s8_esp32s3, its run alike; _x for an x shift of 1 or more, the others for 0.
+
+    .global ai_engine_pw_norm_c24_s8_esp32s3
+    .type   ai_engine_pw_norm_c24_s8_esp32s3, @function
+    .global ai_engine_pw_norm_c48_s8_esp32s3
+    .type   ai_engine_pw_norm_c48_s8_esp32s3, @function
+    .global ai_engine_pw_residual_c24_s8_esp32s3
+    .type   ai_engine_pw_residual_c24_s8_esp32s3, @function
+    .global ai_engine_pw_residual_c48_s8_esp32s3
+    .type   ai_engine_pw_residual_c48_s8_esp32s3, @function
+    .global ai_engine_pw_residual_x_c24_s8_esp32s3
+    .type   ai_engine_pw_residual_x_c24_s8_esp32s3, @function
+    .global ai_engine_pw_residual_x_c48_s8_esp32s3
+    .type   ai_engine_pw_residual_x_c48_s8_esp32s3, @function
+
+// Products k .. k + count - 1 of a pixel's total, on lanes 0 .. count - 1 of in.
+.macro fixed_lanes in, count, k, total
+    .irp lane, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    .if \lane < \count
+    .if ((\k + \lane) % 2) == 0
+    .if (\k + \lane + 2) < \total
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, \in, \lane
+    .else
+    ee.vsmulas.s8.qacc  q1, \in, \lane
+    .endif
+    .else
+    .if (\k + \lane + 2) < \total
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, \in, \lane
+    .else
+    ee.vsmulas.s8.qacc  q2, \in, \lane
+    .endif
+    .endif
+    .endif
+    .endr
+.endm
+
+// One block's products over the held inputs, from product k of the pixel.
+.macro fixed_products c, k, total
+    fixed_lanes q0, 16, \k, \total
+    .if \c == 24
+    fixed_lanes q5, 8, (\k + 16), \total
+    .else
+    fixed_lanes q5, 16, (\k + 16), \total
+    fixed_lanes q6, 16, (\k + 32), \total
+    .endif
+.endm
+
+// The pixel's inputs, then its first two weight rows.
+.macro fixed_inputs c
+    ee.vld.128.ip   q0, a3, 16
+    ee.vld.128.ip   q5, a3, 16
+    .if \c == 48
+    ee.vld.128.ip   q6, a3, 16
+    .endif
+    ee.vld.128.ip   q1, a8, 16
+    ee.vld.128.ip   q2, a8, 16
+.endm
+
+// reg -= bytes, a multiple of 16 below 4096.
+.macro rewind reg, bytes
+    .if \bytes >= 256
+    addmi   \reg, \reg, -((\bytes) / 256 * 256)
+    .endif
+    .if ((\bytes) % 256) > 128
+    addi    \reg, \reg, -128
+    addi    \reg, \reg, -((\bytes) % 256 - 128)
+    .elseif ((\bytes) % 256) > 0
+    addi    \reg, \reg, -((\bytes) % 256)
+    .endif
+.endm
+
+// a9 pixels; a7 bias, a8 weights, a5 norm weights, a6 norm bias, each rewound after a pixel; a13, a14 shifts less 1.
+.macro fixed_norm c
+    entry   a1, 48
+    ones_in_q7 a7
+    l32i    a9, a5, 0
+    l32i    a13, a5, 20
+    addi    a13, a13, -1
+    l32i    a7, a5, 24
+    l32i    a14, a5, 36
+    addi    a14, a14, -1
+    l32i    a6, a5, 32
+    l32i    a5, a5, 28
+    mov     a8, a4
+    movi.n  a12, 0
+    movi.n  a15, 1
+    beqz    a9, 9f
+1:
+    fixed_inputs \c
+    .irp b, 0, 1, 2
+    .if \b < (\c + 15) / 16
+    bias_into_qacc  a7
+    ee.vld.128.ip   q4, a5, 16
+    fixed_products \c, (\b * \c), (((\c + 15) / 16) * \c)
+    round_into  q3, a13, a15
+    ee.vrelu.s8     q3, a12, a12
+    bias_into_qacc  a6
+    ee.vmulas.s8.qacc   q3, q4
+    round_into  q3, a14, a15
+    ee.vst.128.ip   q3, a2, 16
+    .endif
+    .endr
+    rewind  a8, (((\c + 15) / 16) * \c * 16)
+    rewind  a7, (((\c + 15) / 16) * 64)
+    rewind  a5, (((\c + 15) / 16) * 16)
+    rewind  a6, (((\c + 15) / 16) * 64)
+    addi    a9, a9, -1
+    bnez    a9, 1b
+9:
+    retw.n
+.endm
+
+// a9 pixels; a7 bias and a8 weights rewound after a pixel; a10 x; a11 x shift less 1 when shifted; a13 mac shift less 1.
+.macro fixed_residual c, shifted
+    entry   a1, 48
+    ones_in_q7 a7
+    l32i    a9, a5, 0
+    l32i    a13, a5, 20
+    addi    a13, a13, -1
+    l32i    a7, a5, 24
+    l32i    a10, a5, 28
+    l32i    a11, a5, 32
+    addi    a11, a11, -1
+    mov     a8, a4
+    movi.n  a12, 0
+    movi.n  a15, 1
+    beqz    a9, 9f
+1:
+    fixed_inputs \c
+    .irp b, 0, 1, 2
+    .if \b < (\c + 15) / 16
+    bias_into_qacc  a7
+    fixed_products \c, (\b * \c), (((\c + 15) / 16) * \c)
+    round_into  q3, a13, a15
+    .if \shifted
+    ee.ldqa.s8.128.ip   a10, 16
+    round_into  q4, a11, a15
+    .else
+    ee.vld.128.ip   q4, a10, 16
+    .endif
+    ee.vadds.s8     q3, q3, q4
+    ee.vrelu.s8     q3, a12, a12
+    .if \c == 48
+    ee.vst.128.ip   q3, a2, 16
+    .elseif \b == 0
+    ee.vst.l.64.ip  q3, a2, 8
+    ee.vst.h.64.ip  q3, a2, 8
+    .else
+    ee.vst.l.64.ip  q3, a2, 8
+    .endif
+    .endif
+    .endr
+    rewind  a8, (((\c + 15) / 16) * \c * 16)
+    rewind  a7, (((\c + 15) / 16) * 64)
+    addi    a9, a9, -1
+    bnez    a9, 1b
+9:
+    retw.n
+.endm
+
+    .align  4
+ai_engine_pw_norm_c24_s8_esp32s3:
+    fixed_norm 24
+
+    .align  4
+ai_engine_pw_norm_c48_s8_esp32s3:
+    fixed_norm 48
+
+    .align  4
+ai_engine_pw_residual_c24_s8_esp32s3:
+    fixed_residual 24, 0
+
+    .align  4
+ai_engine_pw_residual_c48_s8_esp32s3:
+    fixed_residual 48, 0
+
+    .align  4
+ai_engine_pw_residual_x_c24_s8_esp32s3:
+    fixed_residual 24, 1
+
+    .align  4
+ai_engine_pw_residual_x_c48_s8_esp32s3:
+    fixed_residual 48, 1
