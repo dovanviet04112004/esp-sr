@@ -37,6 +37,7 @@ const char *TAG = "pointwise_s8";
 
 constexpr int kChannelStep = 16;
 constexpr int kHalfStep = 8;
+constexpr int kAllHalves = 0; // the run's last width: every block stored as two halves
 constexpr size_t kVectorAlignBytes = 16;
 constexpr size_t kBiasBlockBytes = 64; // one block's bias in esp-dl's QACC layout
 constexpr size_t kPatchRank = 4;
@@ -132,8 +133,15 @@ class PointwiseS8 final : public dl::module::Module {
         }
         const int8_t *xs = x->get_element_ptr<int8_t>();
         int8_t *ys = y->get_element_ptr<int8_t>();
+        if (slice_blocks_ > 0) {
+            for (int t = 0; t < out_rows_; t++) {
+                gather(xs, t, gathered_ + t * patches_ * inputs_);
+            }
+            run_slices(ys, gathered_, weights);
+            return;
+        }
         for (int t = 0; t < out_rows_; t++) {
-            gather(xs, t);
+            gather(xs, t, gathered_);
             kernel_(ys + t * patches_ * columns_, gathered_, weights, run_.data());
         }
     }
@@ -184,11 +192,14 @@ class PointwiseS8 final : public dl::module::Module {
             return;
         }
         const int blocks = padded(columns_) / kChannelStep;
+        const bool half = columns_ % kChannelStep != 0;
         for (int b = 0; b < blocks; b += slice_blocks_) {
             const int n = std::min(slice_blocks_, blocks - b);
+            const bool last = b + n == blocks;
             run_[kRunBlocks] = n;
             run_[kRunBias] = bias_at_ + b * kBiasBlockBytes;
-            run_[kRunSkip] = columns_ - n * kChannelStep;
+            run_[kRunLast] = !half ? kChannelStep : (last ? kHalfStep : kAllHalves);
+            run_[kRunSkip] = columns_ - n * kChannelStep + (half && last ? kHalfStep : 0);
             kernel_(ys + b * kChannelStep, xs, weights + b * inputs_ * kChannelStep, run_.data());
         }
     }
@@ -198,19 +209,19 @@ class PointwiseS8 final : public dl::module::Module {
     {
         const int blocks = padded(columns_) / kChannelStep;
         const int block_bytes = k * kChannelStep;
-        if (blocks * block_bytes <= kDataCacheBytes || columns_ % kChannelStep != 0) { return 0; }
+        if (blocks * block_bytes <= kDataCacheBytes) { return 0; }
         const int most = std::max(kDataCacheBytes / 2 / block_bytes, 1);
         const int slices = (blocks + most - 1) / most;
         return (blocks + slices - 1) / slices;
     }
 
     // Output row t's patches as rows of K: each patch's kh input rows of kw pixels in turn.
-    void gather(const int8_t *xs, int t) noexcept
+    void gather(const int8_t *xs, int t, int8_t *dst) const noexcept
     {
         const int span = patch_[1] * channels_;
         for (int f = 0; f < patches_; f++) {
             for (int i = 0; i < patch_[0]; i++) {
-                memcpy(gathered_ + f * span * patch_[0] + i * span,
+                memcpy(dst + f * span * patch_[0] + i * span,
                        xs + ((t * patch_[0] + i) * width_ + f * patch_[1]) * channels_, span);
             }
         }
@@ -240,12 +251,6 @@ class PointwiseS8 final : public dl::module::Module {
             patches_ = width_ / patch_[1];
             k *= patch_[0] * patch_[1];
             rows = patches_;
-            gathered_ = static_cast<int8_t *>(
-                heap_caps_aligned_calloc(kVectorAlignBytes, patches_, k, MALLOC_CAP_SPIRAM));
-            if (gathered_ == nullptr) {
-                ESP_LOGE(TAG, "%s: no memory for a row of %d patches", name, patches_);
-                return false;
-            }
         }
         const int np = padded(columns_);
         const Held *h = patched() ? nullptr : held(k);
@@ -292,11 +297,21 @@ class PointwiseS8 final : public dl::module::Module {
         inputs_ = k;
         if (h == nullptr) {
             kernel_ = ai_engine_pw_conv_rows_s8_esp32s3;
-            slice_blocks_ = patched() ? 0 : slice_blocks(k);
+            slice_blocks_ = slice_blocks(k);
         } else if (residual == nullptr) {
             kernel_ = h->conv;
         } else {
             kernel_ = residual_shift_ > 0 ? h->add_x : h->add;
+        }
+        if (patched()) {
+            const int gathered_rows = slice_blocks_ > 0 ? out_rows_ * patches_ : patches_;
+            gathered_ = static_cast<int8_t *>(
+                heap_caps_aligned_calloc(kVectorAlignBytes, gathered_rows, k, MALLOC_CAP_SPIRAM));
+            if (gathered_ == nullptr) {
+                ESP_LOGE(TAG, "%s: no memory for %d rows of patches", name, gathered_rows);
+                return false;
+            }
+            run_[kRunRows] = gathered_rows;
         }
         built_ = true;
         return true;
@@ -314,7 +329,7 @@ class PointwiseS8 final : public dl::module::Module {
     int inputs_ = 0;
     int slice_blocks_ = 0; // 0: all blocks in one pass over the rows
     int32_t bias_at_ = 0;
-    int8_t *gathered_ = nullptr;  // one output row's patches as rows of K
+    int8_t *gathered_ = nullptr;  // patches as rows of K: one output row's, all when sliced
     int8_t *zero_bias_ = nullptr; // QACC-layout zeros when the convolution has no bias
     std::array<int32_t, kRunSize> run_ = {};
     RowKernel kernel_ = nullptr;

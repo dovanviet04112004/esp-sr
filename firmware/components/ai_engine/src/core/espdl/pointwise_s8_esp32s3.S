@@ -5,6 +5,7 @@
 //
 // void ai_engine_pw_conv_rows_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run)
 // Rows of K a multiple of 16 inputs, 16-byte aligned, no residual; run ends with out bytes past each row's blocks.
+// A last block's outputs of 0 stores every block's 16 as two 8-byte halves.
 //
 // void ai_engine_pw_conv_k24_s8_esp32s3(...), ai_engine_pw_conv_k48_s8_esp32s3(...)
 // void ai_engine_pw_add_k24_s8_esp32s3(...), ai_engine_pw_add_k48_s8_esp32s3(...)
@@ -53,7 +54,9 @@ ai_engine_pw_conv_rows_s8_esp32s3:
     j       10f
 9:
     ee.vst.l.64.ip  q3, a2, 8
+    beqz    a14, 11f
     beqi    a7, 1, 10f
+11:
     ee.vst.h.64.ip  q3, a2, 8
 10:
     addi    a7, a7, -1
