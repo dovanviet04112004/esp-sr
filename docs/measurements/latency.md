@@ -768,16 +768,20 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
 | Softmax theo dải 8 cột bằng nhân PIE, tổng và thang trong thanh ghi FPU | 490,0 ms | 1 422 860 B | `AttentionCore` 28,2 → 24,6 ms (8,4 ms ở 148 khung); softmax của pool vẫn 8,2 ms: map 85 KB lớn hơn cache, mỗi dải cột nạp lại các dòng của nó |
 | `StrideDepthwise`: depthwise bước 2 của stage 2 và bước 4 của stage 4 | 489,3 ms | 1 426 392 B | 3,5 và 2,1 ms thay 6,6 và 2,3 ms; cả hai giờ ở trần PSRAM: 128 KB đọc vào, 64 và 32 KB ghi ra |
 | `WeightedStats`: x·x, p·x, p·(x·x) và hai `ReduceSum` theo thời gian của pool | 473,8 ms | 1 427 400 B | 2,9 ms thay 3 Mul và 2 ReduceSum (~18,5 ms) |
-| `GlobalStats`: trung bình theo thời gian và trung bình bình phương lệch tâm của pool | **462,9 ms** | **1 427 444 B** | 3,2 ms thay 2 ReduceMean, RequantizeLinear, Sub và Mul (~14,5 ms) |
+| `GlobalStats`: trung bình theo thời gian và trung bình bình phương lệch tâm của pool | 462,9 ms | 1 427 444 B | 3,2 ms thay 2 ReduceMean, RequantizeLinear, Sub và Mul (~14,5 ms) |
+| `LayerNormS8` hai vị trí một lượt bằng nhân asm, các bước Newton của hai vị trí xen từng lệnh | **439,0 ms** | **1 470 804 B** | 19 op 55,6 → 31,6 ms, stem 44,2 → 25,1 ms; mỗi op giữ độ lệch float của một khối 16 vị trí |
 
 - **`SoftmaxQuant`:** bảng `exp` và nghịch đảo tổng như esp-dl. Xác suất không âm, nên `floor(v + 0,5)` của esp-dl là
   phép cắt của tổng float `v + 0,5`: dưới 2^22 tổng ấy không làm tròn sang phần nguyên khác. Mỗi lượt chuẩn hoá tính 4
   cột xen nhau, còn ~9 chu kỳ một phần tử; `Mul` trước nó thành bảng 256 tích theo byte, tra trước bảng `exp`.
 - **`LayerNormS8`:** trung bình là tích với `fl(1/n)` sửa một FMA, đúng thương float, cũng là số của phép `double`
   esp-dl, với mọi tổng int8 khi phần lẻ của n là 1 hay 3 (test kiểm hết); tích trần sai 1018 trên 3061 tổng ở n = 12.
-  Bước Newton đầu chia x cho chính nó nên không chia; còn trung bình 5,1 phép chia Newton và một nghịch đảo mỗi vị trí,
-  chạy thẳng chuỗi `div0.s` … `divn.s` của `__divsf3` ROM. Stem còn ~1000 chu kỳ một vị trí, phần lớn là chuỗi phép
-  chia nối nhau. Nhớ kết quả Newton theo đối số chỉ trúng 22% với 1024 ô, 39% với 4096 ô trên cửa sổ của bản dò.
+  Bước Newton đầu chia x cho chính nó nên không chia. Trên cửa sổ của bản dò, phương sai của stem nằm trong 13–82,
+  86% vị trí cần 5 phép chia Newton, còn lại 6–7, rồi một nghịch đảo. Đo trên board B bằng một app đo riêng: `madd.s`,
+  `add.s`, `mul.s` trễ 4 chu kỳ, mỗi chu kỳ nhận một lệnh; chuỗi `div0.s` … `divn.s` của `__divsf3` 33 chu kỳ khi nối
+  nhau. GCC xếp vòng float như thể trễ ngắn, ~15 chu kỳ một giá trị, nên cả ba pha viết tay: độ lệch ~147, Newton ~282
+  (hai vị trí, ~46 chu kỳ một bước một vị trí), ghi ra ~123 chu kỳ một vị trí stem, từ ~1040. Nhớ kết quả Newton theo
+  đối số chỉ trúng 22% với 1024 ô, 39% với 4096 ô.
 - **`StageSum`:** mỗi tổng đọc thẳng các đầu ra stage nó cộng, mỗi hàng một lần, đọc bản 74 và 37 khung trước Resize
   theo hàng `t / k`. Nhân PIE làm đúng các lệnh của `Mul` int8 esp-dl (`EE.VMULAS.S8.QACC`, làm tròn như
   `tie728_s8_vector_round_result`) rồi cộng bão hoà `EE.VADDS.S8` như `Add`. ~50 MB/s đọc PSRAM: chạm trần băng
@@ -793,8 +797,8 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
   dcache mặc định tắt (`EXTMEM_DCACHE_AUTOLOAD_CTRL` = 0x8); bật cho đúng vùng đọc, mọi kiểu kích và mọi cỡ, không
   đổi gì. Bật cho cả vùng 32 MB từ 0x3C000000 thì cache báo lỗi cấu hình preload và chip khởi động lại. Op chạm trần
   băng thông chỉ nhanh lên khi bớt lượt đọc ghi, tức là gộp op.
-- Op tốn nhất còn lại: `ConvBlock` 171,6 ms; Conv 109,0 ms trên 73 op, phần lớn pointwise ở tốc độ vector mà nửa thời
-  gian là đọc ghi PSRAM; LayerNorm 55,6 ms, stem 44,2 ms; `StageSum` 54,9 ms; `AttentionCore` 24,7 ms; Add 16,1 ms;
+- Op tốn nhất còn lại: `ConvBlock` 171,9 ms; Conv 109,4 ms trên 73 op, phần lớn pointwise ở tốc độ vector mà nửa thời
+  gian là đọc ghi PSRAM; `StageSum` 55,0 ms; LayerNorm 31,6 ms, stem 25,1 ms; `AttentionCore` 24,6 ms; Add 16,0 ms;
   softmax theo thời gian của pool 8,2 ms.
 
 ## 26. `command_ctc` qua chuỗi tăng tốc (E11-T30)
