@@ -19,15 +19,16 @@ namespace {
 
 const char *TAG = "group_norm_s8";
 
-constexpr int kRank = 3;
+constexpr size_t kRank = 3;
+constexpr size_t kMapRank = 4;
 
 int8_t saturated(int v) noexcept
 {
     return static_cast<int8_t>(std::max(std::min(v, static_cast<int>(INT8_MAX)), static_cast<int>(INT8_MIN)));
 }
 
-// Inputs as esp_ppq_patches.group_norm_s8_from leaves them: x [1, T, C] whose groups are C / G consecutive
-// channels of every frame, the Mul's weights [C], the Add's bias [C] on the output's exponent.
+// x [1, T, C] or [1, T, F, C] read as [1, T, F * C], groups of C / G consecutive channels; the Mul's weights
+// and the Add's bias [C], the bias on y's exponent; y [1, T, C] (esp_ppq_patches.group_norm_s8_from).
 class GroupNormS8 final : public dl::module::Module {
   public:
     GroupNormS8(const char *name, int groups, float epsilon, float gamma, float beta, int norm_exponent,
@@ -38,7 +39,9 @@ class GroupNormS8 final : public dl::module::Module {
 
     std::vector<std::vector<int>> get_output_shape(std::vector<std::vector<int>> &input_shapes) override
     {
-        return {input_shapes[0]};
+        const std::vector<int> &x = input_shapes[0];
+        if (x.size() == kMapRank) { return {{x[0], x[1], x[2] * x[3]}}; }
+        return {x};
     }
 
     void forward(dl::ModelContext *context, dl::runtime_mode_t) override
@@ -89,15 +92,18 @@ class GroupNormS8 final : public dl::module::Module {
   private:
     bool build(dl::TensorBase *x, dl::TensorBase *y, dl::TensorBase *w, dl::TensorBase *b)
     {
-        if (x->shape.size() != kRank || x->shape[0] != 1 || x->shape != y->shape ||
+        const size_t rank = x->shape.size();
+        const int frames = rank == kRank || rank == kMapRank ? x->shape[1] : 0;
+        const int channels = frames > 0 ? x->get_size() / frames : 0;
+        if (frames == 0 || x->shape[0] != 1 || y->shape != std::vector<int>{1, frames, channels} ||
             x->get_dtype() != dl::DATA_TYPE_INT8 || y->get_dtype() != dl::DATA_TYPE_INT8 ||
-            x->shape[2] % groups_ != 0 || w->get_size() != x->shape[2] || b->get_size() != x->shape[2]) {
+            channels % groups_ != 0 || w->get_size() != channels || b->get_size() != channels) {
             ESP_LOGE(TAG, "%s: not an int8 [1, T, C] map of %d groups with C weights and biases", name,
                      groups_);
             return false;
         }
-        frames_ = x->shape[1];
-        channels_ = x->shape[2];
+        frames_ = frames;
+        channels_ = channels;
         width_ = channels_ / groups_;
         n_ = width_ * frames_;
         in_scale_ = DL_SCALE(x->get_exponent());
