@@ -8,13 +8,15 @@
 // void ai_engine_gn_squares_s8_esp32s3(float *squares, const int8_t *x, const float *deviations, const int32_t *run)
 // run: frames, row stride, W. Two groups; deviations: [2][256], entry u of group k the int8 value of byte u less the
 // group's mean, rounded once. squares[k] sums group k's deviations squared channel after channel then frame after
-// frame, each step one fused multiply-add, the two chains an instruction apart.
+// frame, each step one fused multiply-add, the two chains an instruction apart. The _x2 and _x4 kernels take each
+// frame 2 or 4 times in a row, as over its rows repeated by a nearest Resize.
 //
 // void ai_engine_gn_outputs_s8_esp32s3(int8_t *y, const int8_t *x, const int8_t *tables, const int32_t *run)
 // run: frames, columns, W, groups, mul shift less 1, the Mul's weights and the Add's bias at the batch's first
 // channel, a buffer of columns bytes, row stride. tables: [groups][256], entry u of a group the int8 norm of the int8
 // value of byte u. Each frame's norms are looked up into the buffer, 4 a step, then times the weights through QACC
-// rounded half up as tie728 does, the bias added saturating, 16 channels at a time. columns a multiple of 16.
+// rounded half up as tie728 does, the bias added saturating, 16 channels at a time. columns a multiple of 16. run's
+// last slot repeats each frame's output into that many rows, 1 or more.
 
 #include "pie_s8_esp32s3.inc"
 
@@ -23,6 +25,10 @@
     .type   ai_engine_gn_sums_s8_esp32s3, @function
     .global ai_engine_gn_squares_s8_esp32s3
     .type   ai_engine_gn_squares_s8_esp32s3, @function
+    .global ai_engine_gn_squares_x2_s8_esp32s3
+    .type   ai_engine_gn_squares_x2_s8_esp32s3, @function
+    .global ai_engine_gn_squares_x4_s8_esp32s3
+    .type   ai_engine_gn_squares_x4_s8_esp32s3, @function
     .global ai_engine_gn_outputs_s8_esp32s3
     .type   ai_engine_gn_outputs_s8_esp32s3, @function
 
@@ -68,8 +74,8 @@ ai_engine_gn_sums_s8_esp32s3:
     bnez    a9, 1b
     retw.n
 
-    .align  4
-ai_engine_gn_squares_s8_esp32s3:
+// Each frame's deviations multiplied in repeat times.
+.macro gn_squares repeat
     entry   a1, 32
     l32i    a6, a5, 0
     l32i    a7, a5, 4
@@ -90,8 +96,10 @@ ai_engine_gn_squares_s8_esp32s3:
     add     a11, a11, a7
     lsi     f0, a12, 0
     lsi     f1, a13, 0
+    .rept \repeat
     madd.s  f12, f0, f0
     madd.s  f13, f1, f1
+    .endr
 2:
     addi    a3, a3, 1
     addi    a8, a8, -1
@@ -99,6 +107,19 @@ ai_engine_gn_squares_s8_esp32s3:
     ssi     f12, a2, 0
     ssi     f13, a2, 4
     retw.n
+.endm
+
+    .align  4
+ai_engine_gn_squares_s8_esp32s3:
+    gn_squares 1
+
+    .align  4
+ai_engine_gn_squares_x2_s8_esp32s3:
+    gn_squares 2
+
+    .align  4
+ai_engine_gn_squares_x4_s8_esp32s3:
+    gn_squares 4
 
     .align  4
 ai_engine_gn_outputs_s8_esp32s3:
@@ -154,11 +175,30 @@ ai_engine_gn_outputs_s8_esp32s3:
     ee.vadds.s8     q2, q2, q3
     ee.vst.128.ip   q2, a2, 16
 4:
-    l32i    a10, a5, 32
+    // The row just written into the repeat - 1 rows after it.
     l32i    a11, a5, 4
-    sub     a10, a10, a11
-    add     a3, a3, a10
-    add     a2, a2, a10
+    l32i    a12, a5, 36
+    sub     a13, a2, a11
+    mov     a14, a13
+5:
+    addi    a12, a12, -1
+    beqz    a12, 6f
+    l32i    a8, a5, 32
+    add     a14, a14, a8
+    mov     a15, a13
+    mov     a9, a14
+    srli    a10, a11, 4
+    loopgtz a10, 7f
+    ee.vld.128.ip   q0, a15, 16
+    ee.vst.128.ip   q0, a9, 16
+7:
+    j       5b
+6:
+    l32i    a8, a5, 32
+    sub     a8, a8, a11
+    add     a2, a14, a11
+    add     a2, a2, a8
+    add     a3, a3, a8
     addi    a6, a6, -1
     bnez    a6, 1b
     retw.n
