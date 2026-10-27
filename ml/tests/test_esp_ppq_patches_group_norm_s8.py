@@ -19,7 +19,7 @@ from torch.nn import functional  # noqa: E402
 from esp_ppq_cases import HOPS, RUNGS, espdl_graph, exponent, round_shift  # noqa: E402
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl  # noqa: E402
 
-NORMED_CHANNELS, GROUPS = 24, 4
+NORMED_CHANNELS, GROUPS, MAP_BANDS = 24, 4, 4
 
 
 class GroupNormed(nn.Module):
@@ -38,6 +38,22 @@ class GroupNormed(nn.Module):
         b, c, t = x.shape
         grouped = x.reshape(b, GROUPS, c // GROUPS * t)
         normed = functional.layer_norm(grouped, (grouped.shape[-1],), eps=1e-5).reshape(b, c, t)
+        return self.back(normed * self.weight[:, None] + self.bias[:, None])
+
+
+class MapGroupNormed(GroupNormed):
+    """GroupNormed over a 2-d map: a 1x1 convolution over (c, frames, bands), the map read as quant.To1d reads it,
+    bands times channels, then the same chain, as b3's stem_gnorm reads its stem."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.front = nn.Conv2d(NORMED_CHANNELS // MAP_BANDS, NORMED_CHANNELS // MAP_BANDS, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.front(x)
+        b, c, t, f = y.shape
+        grouped = y.permute(0, 3, 1, 2).reshape(b, GROUPS, f * c // GROUPS * t)
+        normed = functional.layer_norm(grouped, (grouped.shape[-1],), eps=1e-5).reshape(b, f * c, t)
         return self.back(normed * self.weight[:, None] + self.bias[:, None])
 
 
@@ -67,11 +83,14 @@ def group_norm_s8_espdl(q: np.ndarray, w: np.ndarray, b: np.ndarray, attrs: dict
     return out
 
 
-def test_group_norm_s8_runs_the_chain_as_one_op_giving_its_integers(tmp_path: Path) -> None:
+@pytest.mark.parametrize("on_map", [False, True])
+def test_group_norm_s8_runs_the_chain_as_one_op_giving_its_integers(tmp_path: Path, on_map: bool) -> None:
     torch.manual_seed(11)
     rng = np.random.default_rng(41)
-    calib = [torch.from_numpy(rng.normal(0, 1, (1, NORMED_CHANNELS, HOPS)).astype(np.float32)) for _ in range(2)]
-    graph = ptq_espdl.quantize(GroupNormed().eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    shape = (1, NORMED_CHANNELS // MAP_BANDS, HOPS, MAP_BANDS) if on_map else (1, NORMED_CHANNELS, HOPS)
+    calib = [torch.from_numpy(rng.normal(0, 1, shape).astype(np.float32)) for _ in range(2)]
+    net = MapGroupNormed() if on_map else GroupNormed()
+    graph = ptq_espdl.quantize(net.eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
     with esp_ppq_patches.applied(["layernorm_s8", "group_norm_s8"]):
         path = export_espdl.export(graph, tmp_path / "grouped.espdl")
     nodes, tensors = espdl_graph(path)
@@ -91,6 +110,8 @@ def test_group_norm_s8_runs_the_chain_as_one_op_giving_its_integers(tmp_path: Pa
         torch.round(v[0] / 2.0 ** exponent(info, m)).to(torch.int64).numpy()
         for v, m in zip(got, (x, made), strict=True)
     )
+    if on_map:
+        q = q.transpose(2, 0, 1).reshape(NORMED_CHANNELS, HOPS)
     assert np.array_equal(group_norm_s8_espdl(q, tensors[w], tensors[b], fields, exponent(info, x)), want)
     off = fields | {"mul_shift": fields["mul_shift"] + 1}
     assert not np.array_equal(group_norm_s8_espdl(q, tensors[w], tensors[b], off, exponent(info, x)), want)

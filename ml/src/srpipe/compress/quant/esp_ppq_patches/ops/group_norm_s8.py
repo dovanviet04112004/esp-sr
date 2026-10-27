@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import math
 from collections.abc import Iterator
 
 from ..base import config_of, exponent_of, int8_tensor, laid_shape, read_once
@@ -10,6 +11,8 @@ from .layernorm_s8 import LAYERNORM_S8
 
 GROUP_NORM_S8 = "GroupNormS8"
 CHANNELS_SWAPPED = [0, 2, 1]
+# The Transpose taking a [1, T, C] map, or a [1, T, F, C] one read as [1, T, F * C], to channels first.
+TO_CHANNELS_FIRST = {3: CHANNELS_SWAPPED, 4: [0, 2, 3, 1]}
 
 
 def only_reader(graph, var, kind: str):
@@ -42,7 +45,8 @@ def one_value(var) -> float | None:
 def group_norm_s8_from(graph, norm, info) -> bool:
     """norm, the LayerNorm of a GroupNorm1d chain (Transpose to channels first, Reshape to [1, G, n], the norm with
     one gamma and one beta value, Reshape to [1, C, T], a Mul and an Add of int8 constants per channel on the output's
-    exponent, Transpose back), with the chain as one GroupNormS8 on the [1, T, C] map the first Transpose reads."""
+    exponent, Transpose back), with the chain as one GroupNormS8 on the map the first Transpose reads: [1, T, C], or
+    [1, T, F, C] read as [1, T, F * C], ReDimNet2's to1d of a 2-d map then giving channels in that order."""
     from esp_ppq.core import OperationQuantizationConfig
     from esp_ppq.IR.quantize import QuantableOperation
 
@@ -52,7 +56,7 @@ def group_norm_s8_from(graph, norm, info) -> bool:
     if to_groups is None or to_groups.type != "Reshape" or not read_once(graph, norm.inputs[0]):
         return False
     first = to_groups.inputs[0].source_op
-    if first is None or first.type != "Transpose" or list(first.attributes.get("perm", [])) != CHANNELS_SWAPPED:
+    if first is None or first.type != "Transpose":
         return False
     if not read_once(graph, to_groups.inputs[0]):
         return False
@@ -64,9 +68,11 @@ def group_norm_s8_from(graph, norm, info) -> bool:
         return False
     x, y = first.inputs[0], last.outputs[0]
     shape, grouped = laid_shape(x, info), laid_shape(norm.inputs[0], info)
-    if len(shape) != 3 or shape[0] != 1 or laid_shape(y, info) != shape or len(grouped) != 3:
+    if list(first.attributes.get("perm", [])) != TO_CHANNELS_FIRST.get(len(shape)) or shape[0] != 1:
         return False
-    frames, channels, groups = shape[1], shape[2], grouped[1]
+    frames, channels, groups = shape[1], math.prod(shape[2:]), grouped[1] if len(grouped) == 3 else 0
+    if laid_shape(y, info) != [1, frames, channels] or not groups:
+        return False
     if channels % groups or grouped[2] != channels // groups * frames:
         return False
     w, b = channel_constant(mul, channels), channel_constant(add, channels)
