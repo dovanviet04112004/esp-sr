@@ -1276,5 +1276,9 @@ Profile của b3, tổng 7 086 ms:
   là giờ của b0 trên sản phẩm.
 - **Chưa đo:** 7 `GroupNorm`, ước 80–120 ms 🔬 vì mỗi phép đọc ghi map 256 KB hai lượt; độ chính xác sau int8, cần
   `GroupNorm` trong đường chip rồi mới chạy được thang int8.
-- **Đọc:** b3 chậm gấp ~7 lần mức ~1 s của điều kiện cắm (ADR-0021), gấp ~17 lần b0 cùng cách đặt trọng số. Cắt lát
-  được hai loại conv quá dcache thì còn ~3,5 s 🔬, vẫn quá xa mức ấy.
+- **Đọc:** đây là số thô. b3 chạy qua các op viết cho hình dạng của b0, chưa có bước nào tối ưu riêng cho nó. b3 có
+  2,16 tỉ MAC (`torch.utils.flop_counter`, không tính GroupNorm), b0 0,24 tỉ. 1,61 tỉ nằm trong 19 `ConvBlock`, chạy
+  ~0,36 chu kỳ một phép nhân-cộng; khối của b0 ~0,24 (147 triệu MAC trong 146,8 ms). Hai loại conv quá dcache tốn 3,8 s
+  cho ~115 triệu MAC. Tối ưu như b0 (cắt lát hai loại conv ấy, pointwise của khối ở 96 và 144 kênh gần 0,09 chu kỳ
+  như `PointwiseS8`, trọng số của khối không đọc lại từ flash, gộp phần còn lại, thêm `GroupNorm`) ước còn ~1,3–1,8 s
+  một cửa sổ 🔬, vẫn trên mức ~1 s của điều kiện cắm (ADR-0021).
