@@ -7,6 +7,7 @@
 #include "core/espdl/espdl_softmax_quant.hpp"
 #include "core/espdl/espdl_stage_sum.hpp"
 #include "core/espdl/espdl_stem_conv.hpp"
+#include "core/espdl/espdl_stride_depthwise.hpp"
 #include "dl_module_creator.hpp"
 
 namespace ai {
@@ -23,6 +24,7 @@ void register_espdl_ops() noexcept
     creator->register_module("MatMulS8", matmul_s8_from);
     creator->register_module("AttentionCore", attention_core_from);
     creator->register_module("StemConv", stem_conv_from);
+    creator->register_module("StrideDepthwise", stride_depthwise_from);
 }
 
 } // namespace ai

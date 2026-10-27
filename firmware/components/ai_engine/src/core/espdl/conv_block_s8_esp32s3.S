@@ -1,4 +1,4 @@
-// Row kernels of ConvBlock's depthwise steps and its padded rows (KEHOACH 3.14 step 2.5), each taking esp-dl
+// Depthwise row kernels of ai_engine's own ops and their padded rows (KEHOACH 3.14 step 2.5), each taking esp-dl
 // 3.3.11's int8 steps for the op it stands for: QACC products, round half up as tie728_s8_vector_round_result does.
 // Pointers 16-byte aligned unless said; a pixel is V 16-byte vectors.
 //
@@ -13,6 +13,10 @@
 // void ai_engine_spread_row_s8_esp32s3(int8_t *out, const int8_t *in, int pixels)
 // Each byte of in into all 16 bytes of its out pixel, as esp-dl's Add of an int8 map by zeros [16] broadcasts it.
 //
+// void ai_engine_dwk_row_s8_esp32s3(int8_t *out, const int8_t *const *rows, const int8_t *taps, const int32_t *run)
+// rows: k [F][16 V] rows; taps: [V][k][16]; run: F pixels, V, mac shift (1 or more), bias in esp-dl's QACC layout,
+// k (2 or 4). out: [F][16 V]. A depthwise k x 1 at a stride of k, as tie728_s8_depthwise_conv2d_hwc1 with bias.
+//
 // void ai_engine_pad_row_s8_esp32s3(int8_t *out, const int8_t *in, const int32_t *run)
 // run: pixels, whole 16-byte vectors of a pixel, 8 bytes more or not (1 or 0). in: [pixels][C], 8-byte aligned;
 // out: [pixels][C rounded up to 16], the bytes past C left as they are.
@@ -25,6 +29,8 @@
     .type   ai_engine_dw3x3_bias_row_s8_esp32s3, @function
     .global ai_engine_spread_row_s8_esp32s3
     .type   ai_engine_spread_row_s8_esp32s3, @function
+    .global ai_engine_dwk_row_s8_esp32s3
+    .type   ai_engine_dwk_row_s8_esp32s3, @function
     .global ai_engine_pad_row_s8_esp32s3
     .type   ai_engine_pad_row_s8_esp32s3, @function
 
@@ -132,6 +138,54 @@ ai_engine_spread_row_s8_esp32s3:
     ee.vldbc.8.ip   q0, a3, 1
     ee.vst.128.ip   q0, a2, 16
 1:
+    retw.n
+
+// One tap of the k: the row's vector from \row, its tap from a15, both stepping on.
+.macro dwk_tap row
+    ee.vld.128.ip   q0, \row, 16
+    ee.vld.128.ip   q1, a15, 16
+    ee.vmulas.s8.qacc   q0, q1
+.endm
+
+.macro dwk_rows k
+1:
+    mov     a15, a4
+    mov     a8, a5
+    loopgtz a7, 2f
+    bias_into_qacc  a8
+    dwk_tap a9
+    dwk_tap a10
+  .if \k == 4
+    dwk_tap a11
+    dwk_tap a12
+  .endif
+    round_into  q6, a13, a14
+    ee.vst.128.ip   q6, a2, 16
+2:
+    addi    a6, a6, -1
+    bnez    a6, 1b
+.endm
+
+    .align  4
+ai_engine_dwk_row_s8_esp32s3:
+    entry   a1, 48
+    l32i    a9, a3, 0
+    l32i    a10, a3, 4
+    l32i    a6, a5, 0
+    l32i    a7, a5, 4
+    l32i    a13, a5, 8
+    l32i    a8, a5, 16
+    l32i    a5, a5, 12
+    addi    a13, a13, -1
+    movi.n  a14, 1
+    ones_in_q7 a15
+    beqi    a8, 2, 3f
+    l32i    a11, a3, 8
+    l32i    a12, a3, 12
+    dwk_rows 4
+    retw.n
+3:
+    dwk_rows 2
     retw.n
 
     .align  4
