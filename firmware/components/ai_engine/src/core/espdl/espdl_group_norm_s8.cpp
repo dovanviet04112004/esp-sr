@@ -1,6 +1,7 @@
 #include "core/espdl/espdl_group_norm_s8.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <string>
@@ -14,6 +15,13 @@
 #include "esp_log.h"
 #include "fbs_model.hpp"
 
+extern "C" {
+void ai_engine_gn_sums_s8_esp32s3(int32_t *sums, const int8_t *x, const int32_t *run);
+void ai_engine_gn_squares_s8_esp32s3(float *squares, const int8_t *x, const float *deviations,
+                                     const int32_t *run);
+void ai_engine_gn_outputs_s8_esp32s3(int8_t *y, const int8_t *x, const int8_t *tables, const int32_t *run);
+}
+
 namespace ai {
 
 namespace {
@@ -22,9 +30,37 @@ const char *TAG = "group_norm_s8";
 
 constexpr size_t kRank = 3;
 constexpr size_t kMapRank = 4;
-constexpr int kInterleaved = 4; // groups whose FMA chains overlap
+constexpr int kBatch = 2; // groups whose rows stay cached through every pass
 constexpr int kTableSize = 256;
-constexpr int kTableOffset = 128;
+constexpr int kBlock = 16;
+constexpr int kHalfBlock = 8;
+constexpr size_t kVectorAlignBytes = 16;
+
+// Slots of group_norm_s8_esp32s3.S's runs.
+enum SumsRun { kSumsFrames = 0, kSumsStride, kSumsWidth, kSumsGroups, kSumsSize };
+enum SquaresRun { kSquaresFrames = 0, kSquaresStride, kSquaresWidth, kSquaresSize };
+enum OutputsRun {
+    kOutFrames = 0,
+    kOutColumns,
+    kOutWidth,
+    kOutGroups,
+    kOutShiftLess1,
+    kOutWeights,
+    kOutBias,
+    kOutBuffer,
+    kOutStride,
+    kOutSize
+};
+
+bool aligned(const void *p) noexcept
+{
+    return reinterpret_cast<uintptr_t>(p) % kVectorAlignBytes == 0;
+}
+
+int32_t word_of(const void *p) noexcept
+{
+    return static_cast<int32_t>(reinterpret_cast<uintptr_t>(p));
+}
 
 int8_t saturated(int v) noexcept
 {
@@ -64,11 +100,17 @@ class GroupNormS8 final : public dl::module::Module {
         dl::TensorBase *b = context->get_tensor(m_inputs_index[2]);
         if (!built_ && !build(x, y, w, b)) { return; }
         const int8_t *xs = x->get_element_ptr<int8_t>();
-        means(xs);
-        for (int g = 0; g < groups_; g += kInterleaved) {
-            tables(xs, g, std::min(kInterleaved, groups_ - g));
+        int8_t *ys = y->get_element_ptr<int8_t>();
+        const int8_t *ws = w->get_element_ptr<int8_t>();
+        const int8_t *bs = b->get_element_ptr<int8_t>();
+        for (int g = 0; g < groups_; g += kBatch) {
+            const int count = std::min(kBatch, groups_ - g);
+            float squares[kBatch] = {};
+            means(xs, g, count);
+            squares_of(xs, g, count, squares);
+            tables(g, count, squares);
+            outputs(xs, ys, ws, bs, g, count);
         }
-        outputs(xs, y->get_element_ptr<int8_t>(), w->get_element_ptr<int8_t>(), b->get_element_ptr<int8_t>());
     }
 
     void print() override
@@ -123,37 +165,63 @@ class GroupNormS8 final : public dl::module::Module {
         in_scale_ = DL_SCALE(x->get_exponent());
         per_value_ = 1.0f / static_cast<float>(n_) * (in_scale_ * in_scale_);
         norm_rescale_ = DL_RESCALE(norm_exponent_);
+        const size_t batch_bytes = (kBatch * width_ + kBlock - 1) / kBlock * kBlock;
+        const size_t bytes =
+            groups_ * kTableSize + batch_bytes + (kBatch * kTableSize + groups_) * sizeof(float);
         tables_ =
-            static_cast<int8_t *>(heap_caps_calloc(groups_, kTableSize + sizeof(float), MALLOC_CAP_SPIRAM));
+            static_cast<int8_t *>(heap_caps_aligned_calloc(kVectorAlignBytes, 1, bytes, MALLOC_CAP_SPIRAM));
         if (tables_ == nullptr) {
             ESP_LOGE(TAG, "%s: no memory for %d groups' tables", name, groups_);
             return false;
         }
-        means_ = reinterpret_cast<float *>(tables_ + groups_ * kTableSize);
+        int8_t *buffer = tables_ + groups_ * kTableSize;
+        deviations_ = reinterpret_cast<float *>(buffer + batch_bytes);
+        means_ = deviations_ + kBatch * kTableSize;
+        vector_ = groups_ % kBatch == 0 && width_ % kHalfBlock == 0 && channels_ % kBlock == 0 &&
+                  aligned(x->get_element_ptr()) && aligned(y->get_element_ptr()) &&
+                  aligned(w->get_element_ptr()) && aligned(b->get_element_ptr());
+        sums_run_ = {frames_, channels_, width_, kBatch};
+        squares_run_ = {frames_, channels_, width_};
+        outputs_run_ = {frames_, kBatch * width_, width_,   kBatch, mul_shift_ - 1, 0,
+                        0,       word_of(buffer), channels_};
         built_ = true;
         return true;
     }
 
-    // Each group's mean as esp-dl's double gives it from the exact int8 sum, the map read row after row.
-    void means(const int8_t *xs) const noexcept
+    // Each group's mean as esp-dl's double gives it from the exact int8 sum.
+    void means(const int8_t *xs, int g0, int count) const noexcept
     {
-        for (int g = 0; g < groups_; g++) {
-            int sum = 0;
-            for (int t = 0; t < frames_; t++) {
-                const int8_t *at = xs + t * channels_ + g * width_;
-                for (int j = 0; j < width_; j++) {
-                    sum += at[j];
+        int32_t sums[kBatch] = {};
+        if (vector_) {
+            ai_engine_gn_sums_s8_esp32s3(sums, xs + g0 * width_, sums_run_.data());
+        } else {
+            for (int k = 0; k < count; k++) {
+                for (int t = 0; t < frames_; t++) {
+                    const int8_t *at = xs + t * channels_ + (g0 + k) * width_;
+                    for (int j = 0; j < width_; j++) {
+                        sums[k] += at[j];
+                    }
                 }
             }
-            means_[g] = static_cast<float>(sum * (1.0 / n_));
+        }
+        for (int k = 0; k < count; k++) {
+            means_[g0 + k] = static_cast<float>(sums[k] * (1.0 / n_));
         }
     }
 
-    // count groups' squares in the LayerNorm's order, channel after channel then frame after frame, their FMA
-    // chains side by side; then each group's int8 norm of every int8 value, the float steps once per value.
-    void tables(const int8_t *xs, int g0, int count) const noexcept
+    // The batch's squares in the LayerNorm's order, channel after channel then frame after frame.
+    void squares_of(const int8_t *xs, int g0, int count, float *squares) const noexcept
     {
-        float squares[kInterleaved] = {};
+        if (vector_) {
+            for (int k = 0; k < kBatch; k++) {
+                float *deviation = deviations_ + k * kTableSize;
+                for (int v = INT8_MIN; v <= INT8_MAX; v++) {
+                    deviation[static_cast<uint8_t>(v)] = static_cast<float>(v) - means_[g0 + k];
+                }
+            }
+            ai_engine_gn_squares_s8_esp32s3(squares, xs + g0 * width_, deviations_, squares_run_.data());
+            return;
+        }
         for (int j = 0; j < width_; j++) {
             for (int t = 0; t < frames_; t++) {
                 const int8_t *at = xs + t * channels_ + g0 * width_ + j;
@@ -163,29 +231,42 @@ class GroupNormS8 final : public dl::module::Module {
                 }
             }
         }
+    }
+
+    // Each group's int8 norm of every int8 value, the float steps once per value.
+    void tables(int g0, int count, const float *squares) const noexcept
+    {
         for (int k = 0; k < count; k++) {
             const float mean = means_[g0 + k];
             const float scale = divide(1.0f, sqrt_newton(fmaf(per_value_, squares[k], epsilon_))) * in_scale_;
             const float gs = gamma_ * scale;
             int8_t *table = tables_ + (g0 + k) * kTableSize;
-            for (int v = 0; v < kTableSize; v++) {
-                table[v] = round_half_up((gs * (static_cast<float>(v - kTableOffset) - mean) + beta_) *
-                                         norm_rescale_);
+            for (int v = INT8_MIN; v <= INT8_MAX; v++) {
+                table[static_cast<uint8_t>(v)] =
+                    round_half_up((gs * (static_cast<float>(v) - mean) + beta_) * norm_rescale_);
             }
         }
     }
 
-    // Each value's int8 norm from its group's table, its Mul rounded half up and its bias added, both
-    // saturating.
-    void outputs(const int8_t *xs, int8_t *ys, const int8_t *w, const int8_t *b) const noexcept
+    // The batch's channels of every frame: each value's int8 norm from its group's table, its Mul rounded
+    // half up and its bias added, both saturating.
+    void outputs(const int8_t *xs, int8_t *ys, const int8_t *w, const int8_t *b, int g0, int count) noexcept
     {
+        const int c0 = g0 * width_;
+        if (vector_) {
+            outputs_run_[kOutWeights] = word_of(w + c0);
+            outputs_run_[kOutBias] = word_of(b + c0);
+            ai_engine_gn_outputs_s8_esp32s3(ys + c0, xs + c0, tables_ + g0 * kTableSize, outputs_run_.data());
+            return;
+        }
         for (int t = 0; t < frames_; t++) {
             const int8_t *row = xs + t * channels_;
             int8_t *out = ys + t * channels_;
-            for (int g = 0; g < groups_; g++) {
-                const int8_t *table = tables_ + g * kTableSize + kTableOffset;
+            for (int g = g0; g < g0 + count; g++) {
+                const int8_t *table = tables_ + g * kTableSize;
                 for (int c = g * width_; c < (g + 1) * width_; c++) {
-                    const int m = saturated(((table[row[c]] * w[c] >> (mul_shift_ - 1)) + 1) >> 1);
+                    const int m = saturated(
+                        ((table[static_cast<uint8_t>(row[c])] * w[c] >> (mul_shift_ - 1)) + 1) >> 1);
                     out[c] = saturated(m + b[c]);
                 }
             }
@@ -205,8 +286,13 @@ class GroupNormS8 final : public dl::module::Module {
     float in_scale_ = 0.0f;
     float per_value_ = 0.0f;
     float norm_rescale_ = 0.0f;
-    int8_t *tables_ = nullptr; // per group, each int8 value's int8 norm; then means
+    int8_t *tables_ = nullptr; // per group, by the value's byte, its int8 norm
+    float *deviations_ = nullptr;
     float *means_ = nullptr;
+    std::array<int32_t, kSumsSize> sums_run_ = {};
+    std::array<int32_t, kSquaresSize> squares_run_ = {};
+    std::array<int32_t, kOutSize> outputs_run_ = {};
+    bool vector_ = false;
     bool built_ = false;
 };
 
