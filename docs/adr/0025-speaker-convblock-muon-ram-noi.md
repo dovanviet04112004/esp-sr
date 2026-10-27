@@ -1,4 +1,4 @@
-# ADR-0025 — `speaker` trên chip: op của `ai_engine` mượn RAM nội cho trọng số trong lúc mạng chạy
+# ADR-0025 — `speaker` trên chip: op của `ai_engine` mượn RAM nội cho trọng số và hàng vòng trong lúc mạng chạy
 
 - **Trạng thái**: Chấp nhận (chủ repo, 2026-10-28)
 - **Ngày**: 2026-10-28
@@ -30,12 +30,13 @@ KẾ HOẠCH §6.5 cấm model chiếm RAM nội. Giữ luật ấy thì phần 
 | **Mượn RAM nội trong lúc mạng chạy; hàng theo dải 4 điểm ảnh** | khối nhanh như khi trọng số ở RAM nội | trái luật §6.5; mỗi lượt chạy cần 79 680 B RAM nội liền | 149 / 118 / 14, kể cả lần chép; 21 khối 919 ms đo |
 
 Cùng vùng mượn, `PointwiseS8` theo lát chép vào đó trên app đo: `red_dim` 42,4 → 17,1 ms, conv 2016 → 128 87,7 →
-29,0 ms, `head` 44,8 → 23,0 ms.
+29,0 ms, `head` 44,8 → 23,0 ms. Khi hàng vòng của khối cũng nằm trong vùng ấy: một khối stage 0 149,7 → 109,5 ms,
+stage 1 118,8 → 107,2 ms, stage 2 32,3 → 28,6 ms.
 
 ## Quyết định
 
-Chủ repo chọn mượn RAM nội cho `ConvBlock` ngày 28/10, rồi cùng ngày cho `PointwiseS8` mượn cùng vùng ấy. Chi tiết ở
-KẾ HOẠCH §3.14 và §6.5; mã ở `espdl_loan`.
+Chủ repo chọn ngày 28/10, ba bước: mượn RAM nội cho trọng số của `ConvBlock`; cho `PointwiseS8` mượn cùng vùng ấy;
+rồi cho `ConvBlock` đặt cả hàng vòng vào vùng ấy khi còn vừa. Chi tiết ở KẾ HOẠCH §3.14 và §6.5; mã ở `espdl_loan`.
 
 - **Ai xin:** khối `ConvBlock` chạy nhân chung, tức C khác 24 và 48. Mỗi khối xin lúc dựng số byte mọi trọng số nó
   đọc ở từng điểm ảnh:
@@ -46,7 +47,8 @@ KẾ HOẠCH §3.14 và §6.5; mã ở `espdl_loan`.
 - **Cấp và nhả:** `EspdlNet::step` của đồ thị có lần xin cấp một vùng RAM nội cỡ lần xin lớn nhất ngay trước lượt
   chạy, và nhả ngay sau lượt ấy. b3 cần 79 680 B (stage 5).
 - **Ai mượn:**
-  - mỗi khối chép trọng số của nó vào vùng ấy lúc bắt đầu;
+  - mỗi khối chép trọng số của nó vào vùng ấy lúc bắt đầu. Trọng số cộng hai vòng ba hàng và một đệm dải còn vừa vùng
+    thì các hàng ấy cũng nằm ở đó, không thì ở PSRAM; khối không xin thêm byte nào cho chúng;
   - `PointwiseS8` nhân có vòng không xin thêm byte nào. Nó chạy theo lát vừa vùng ấy, chép trọng số và bias của mỗi
     lát vào đó trước khi chạy lát.
 - **Cấp không được** thì op đọc trọng số tại chỗ: chậm hơn, cùng kết quả.
@@ -54,7 +56,8 @@ KẾ HOẠCH §3.14 và §6.5; mã ở `espdl_loan`.
 
 ## Hệ quả
 
-- **§6.5 có ngoại lệ thứ hai** cho luật mọi model ở PSRAM. Ngoại lệ chỉ sống trong lúc mạng chạy.
+- **§6.5 có ngoại lệ thứ hai** cho luật mọi model ở PSRAM, cả trọng số lẫn hàng vòng của `ConvBlock`. Ngoại lệ chỉ
+  sống trong lúc mạng chạy, cỡ vùng không đổi.
 - **Cần đo trên firmware sản phẩm** RAM nội liền còn lại lúc `xac_task` chạy speaker. Không đủ 79 680 B thì speaker
   chậm lại chứ không sai.
 - **b0 không đổi:** khối 24 và 48 kênh chạy nhân trải phẳng, không xin nên đồ thị b0 không có vùng mượn.
