@@ -1,5 +1,6 @@
 #include "core/espdl/espdl_layernorm_s8.hpp"
 
+#include <algorithm>
 #include <climits>
 #include <cmath>
 #include <cstdint>
@@ -20,32 +21,69 @@ namespace {
 const char *TAG = "layernorm_s8";
 
 constexpr float kNewtonStop = 0.00001f; // EN of esp-dl's dl_math.hpp
+constexpr int kLanes = 4;
 
-// esp-dl's dl::math::sqrt_newton: halving is exact, so its double 0.5 gives what float does.
+// a / b by the instructions of the S3 ROM's __divsf3, in their order, without its call.
+inline float divide(float a, float b) noexcept
+{
+    float q, t2, t3, t4, t5, t6, t7, t8;
+    asm("div0.s %[t3], %[b]\n\t"
+        "nexp01.s %[t4], %[b]\n\t"
+        "const.s %[t5], 1\n\t"
+        "maddn.s %[t5], %[t4], %[t3]\n\t"
+        "mov.s %[t6], %[t3]\n\t"
+        "mov.s %[t7], %[b]\n\t"
+        "nexp01.s %[t2], %[a]\n\t"
+        "maddn.s %[t6], %[t5], %[t6]\n\t"
+        "const.s %[t5], 1\n\t"
+        "const.s %[q], 0\n\t"
+        "neg.s %[t8], %[t2]\n\t"
+        "maddn.s %[t5], %[t4], %[t6]\n\t"
+        "maddn.s %[q], %[t8], %[t3]\n\t"
+        "mkdadj.s %[t7], %[a]\n\t"
+        "maddn.s %[t6], %[t5], %[t6]\n\t"
+        "maddn.s %[t8], %[t4], %[q]\n\t"
+        "const.s %[t3], 1\n\t"
+        "maddn.s %[t3], %[t4], %[t6]\n\t"
+        "maddn.s %[q], %[t8], %[t6]\n\t"
+        "neg.s %[t2], %[t2]\n\t"
+        "maddn.s %[t6], %[t3], %[t6]\n\t"
+        "maddn.s %[t2], %[t4], %[q]\n\t"
+        "addexpm.s %[q], %[t7]\n\t"
+        "addexp.s %[t6], %[t7]\n\t"
+        "divn.s %[q], %[t2], %[t6]"
+        : [q] "=&f"(q), [t2] "=&f"(t2), [t3] "=&f"(t3), [t4] "=&f"(t4), [t5] "=&f"(t5), [t6] "=&f"(t6),
+          [t7] "=&f"(t7), [t8] "=&f"(t8)
+        : [a] "f"(a), [b] "f"(b));
+    return q;
+}
+
+// esp-dl's dl::math::sqrt_newton: halving is exact, so its double 0.5 gives what float does, and its first
+// step divides x by itself, 1 exactly.
 float sqrt_newton(float x) noexcept
 {
     if (x == 0.0f) { return 0.0f; }
-    float result = x;
-    float last = 0.0f;
-    do {
+    float last = x;
+    float result = (x + 1.0f) * 0.5f;
+    while (fabsf(result - last) > kNewtonStop) {
         last = result;
-        result = (last + x / last) * 0.5f;
-    } while (fabsf(result - last) > kNewtonStop);
+        result = (last + divide(x, last)) * 0.5f;
+    }
     return result;
 }
 
-// esp-dl's floor(v + 0.5) in double then its int8 clip, from float steps that are exact below 2^23.
+// esp-dl's floor(v + 0.5) in double then its int8 clip: below 2^22 the float sum v + 0.5 rounds to no other
+// integer part, and the FPU's floor saturates beyond int.
 int8_t round_half_up(float v) noexcept
 {
-    if (v >= static_cast<float>(INT8_MAX)) { return INT8_MAX; }
-    if (v <= static_cast<float>(INT8_MIN)) { return INT8_MIN; }
-    int whole = static_cast<int>(v);
-    if (static_cast<float>(whole) > v) { whole -= 1; }
-    return static_cast<int8_t>(whole + (v - static_cast<float>(whole) >= 0.5f ? 1 : 0));
+    int whole;
+    asm("floor.s %0, %1, 0" : "=a"(whole) : "f"(v + 0.5f));
+    return static_cast<int8_t>(
+        std::max(std::min(whole, static_cast<int>(INT8_MAX)), static_cast<int>(INT8_MIN)));
 }
 
-// A count whose odd part is 1 or 3 divides an int8 sum in float exactly as esp-dl's double does
-// (test_esp_ppq_patches checks every sum).
+// A count whose odd part is 1 or 3 divides an int8 sum in float exactly as esp-dl's double does, and a
+// product by its inverse corrected by one FMA gives that quotient (test_esp_ppq_patches checks every sum).
 bool float_mean_matches(int n) noexcept
 {
     while (n % 2 == 0) {
@@ -120,12 +158,13 @@ class LayerNormS8 final : public dl::module::Module {
             ESP_LOGE(TAG, "%s: not an int8 norm of %d values with gamma", name, n_);
             return false;
         }
-        gamma_ = static_cast<float *>(heap_caps_malloc(2 * n_ * sizeof(float), MALLOC_CAP_SPIRAM));
+        gamma_ = static_cast<float *>(heap_caps_calloc(3 * n_, sizeof(float), MALLOC_CAP_SPIRAM));
         if (gamma_ == nullptr) {
-            ESP_LOGE(TAG, "%s: no memory for %d gammas and betas", name, n_);
+            ESP_LOGE(TAG, "%s: no memory for %d gammas, betas and deviations", name, n_);
             return false;
         }
         beta_ = gamma_ + n_;
+        deviations_ = beta_ + n_;
         const int8_t *g = gamma->get_element_ptr<int8_t>();
         const float g_scale = DL_SCALE(gamma->get_exponent());
         for (int j = 0; j < n_; j++) {
@@ -138,12 +177,13 @@ class LayerNormS8 final : public dl::module::Module {
                 beta_[j] = b[j] * b_scale;
             }
         }
-        biased_ = beta != nullptr;
         positions_ = x->get_size() / n_;
         in_scale_ = DL_SCALE(x->get_exponent());
         per_value_ = 1.0f / static_cast<float>(n_) * (in_scale_ * in_scale_);
         out_rescale_ = DL_RESCALE(y->get_exponent());
         float_mean_ = float_mean_matches(n_);
+        count_ = static_cast<float>(n_);
+        inverse_n_ = 1.0f / count_;
         built_ = true;
         return true;
     }
@@ -155,18 +195,35 @@ class LayerNormS8 final : public dl::module::Module {
         for (int j = 0; j < n_; j++) {
             sum += x[j];
         }
-        const float mean = float_mean_ ? static_cast<float>(sum) / static_cast<float>(n_)
-                                       : static_cast<float>(sum * (1.0 / n_));
+        float mean;
+        if (float_mean_) {
+            const float s = static_cast<float>(sum);
+            const float q = s * inverse_n_;
+            mean = fmaf(fmaf(-q, count_, s), inverse_n_, q);
+        } else {
+            mean = static_cast<float>(sum * (1.0 / n_));
+        }
+        float *d = deviations_;
         float squares = 0.0f;
         for (int j = 0; j < n_; j++) {
-            const float d = static_cast<float>(x[j]) - mean;
-            squares = fmaf(d, d, squares);
+            d[j] = static_cast<float>(x[j]) - mean;
+            squares = fmaf(d[j], d[j], squares);
         }
-        const float scale = 1.0f / sqrt_newton(fmaf(per_value_, squares, epsilon_)) * in_scale_;
-        for (int j = 0; j < n_; j++) {
-            float result = gamma_[j] * scale * (static_cast<float>(x[j]) - mean);
-            if (biased_) { result = result + beta_[j]; }
-            y[j] = round_half_up(result * out_rescale_);
+        const float scale = divide(1.0f, sqrt_newton(fmaf(per_value_, squares, epsilon_))) * in_scale_;
+        // Four values at once so their float steps overlap; a zero beta adds nothing the rounding sees.
+        int j = 0;
+        for (; j + kLanes <= n_; j += kLanes) {
+            const float r0 = gamma_[j] * scale * d[j] + beta_[j];
+            const float r1 = gamma_[j + 1] * scale * d[j + 1] + beta_[j + 1];
+            const float r2 = gamma_[j + 2] * scale * d[j + 2] + beta_[j + 2];
+            const float r3 = gamma_[j + 3] * scale * d[j + 3] + beta_[j + 3];
+            y[j] = round_half_up(r0 * out_rescale_);
+            y[j + 1] = round_half_up(r1 * out_rescale_);
+            y[j + 2] = round_half_up(r2 * out_rescale_);
+            y[j + 3] = round_half_up(r3 * out_rescale_);
+        }
+        for (; j < n_; j++) {
+            y[j] = round_half_up((gamma_[j] * scale * d[j] + beta_[j]) * out_rescale_);
         }
     }
 
@@ -176,9 +233,11 @@ class LayerNormS8 final : public dl::module::Module {
     float in_scale_ = 0.0f;
     float per_value_ = 0.0f;
     float out_rescale_ = 0.0f;
-    float *gamma_ = nullptr; // gamma then beta, as float, one allocation
+    float count_ = 0.0f;
+    float inverse_n_ = 0.0f;
+    float *gamma_ = nullptr; // gamma, beta, deviations: one allocation
     float *beta_ = nullptr;
-    bool biased_ = false;
+    float *deviations_ = nullptr;
     bool float_mean_ = false;
     bool built_ = false;
 };
