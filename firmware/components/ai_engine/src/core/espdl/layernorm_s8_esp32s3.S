@@ -2,12 +2,13 @@
 // step of layernorm_as_espdl rounded once as there, two positions a pass. n a multiple of 4 whose odd part is 1 or 3.
 //
 // void ai_engine_ln_deviations_s8_esp32s3(float *dev, float *variances, const int8_t *x, int pairs, const int32_t *run)
-// run: n, n / 4, 128 n, then as float bits 1 / n, n, the variance's scale per value, epsilon, in_scale, 1e-5, 0.5.
-// x: [2 pairs][n]. dev: [pairs][n][2], each value less its position's mean; variances: [2 pairs], epsilon plus the
-// scale times the squares of dev summed in channel order, each step one fused multiply-add.
+// run: n, n / 4, 128 n, then as float bits 1 / n, n, the variance's scale per value, epsilon, in_scale, the root's
+// window 2^-7, 0.5. x: [2 pairs][n]. dev: [pairs][n][2], each value less its position's mean; variances: [2 pairs],
+// epsilon plus the scale times the squares of dev summed in channel order, each step one fused multiply-add.
 //
 // void ai_engine_ln_scales_s8_esp32s3(float *scales, const float *variances, const int32_t *run, int pairs)
-// scales: in_scale / sqrt_newton(variance), each division __divsf3's instructions of the S3 ROM; variances above 0.
+// scales: in_scale / sqrt_newton(variance), the root one Newton step from sqrtf, the inverse __divsf3's instructions
+// of the S3 ROM; 0 where the step may differ from esp-dl's Newton. The caller checks the variance's range.
 //
 // void ai_engine_ln_outputs_s8_esp32s3(int8_t *y, const float *dev, const float *scales, const float *gb, int pairs,
 //                                      const int32_t *run)
@@ -164,118 +165,133 @@ ai_engine_ln_scales_s8_esp32s3:
     l32i    a13, a4, 28
     l32i    a10, a4, 32
     l32i    a9, a4, 36
+    movi    a11, 0x7f8
+    slli    a11, a11, 20
+    movi    a12, 0xc0
+    slli    a12, a12, 20
 1:
     l32i    a5, a3, 0
     l32i    a6, a3, 4
-    wfr     f7, a5
-    wfr     f15, a6
-    const.s f5, 1
-    const.s f13, 1
-    add.s   f2, f7, f5
-    add.s   f10, f15, f13
-    wfr     f5, a9
-    wfr     f13, a9
-    mul.s   f2, f2, f5
-    mul.s   f10, f10, f13
-    sub.s   f6, f2, f7
-    sub.s   f14, f10, f15
-    abs.s   f6, f6
-    abs.s   f14, f14
-    wfr     f1, a10
-    wfr     f9, a10
-    olt.s   b0, f1, f6
-    olt.s   b1, f9, f14
-    rfr     a7, f2
-    rfr     a8, f10
-    // One Newton step a pass, lane 0 in f0-f7, lane 1 in f8-f15; a lane that has stopped keeps its root.
-2:
-    orb     b4, b0, b1
-    bf      b4, 3f
-    wfr     f0, a7
-    wfr     f8, a8
-    div0.s  f4, f0
-    div0.s  f12, f8
-    nexp01.s f1, f0
-    nexp01.s f9, f8
-    const.s f5, 1
-    const.s f13, 1
-    maddn.s f5, f1, f4
-    maddn.s f13, f9, f12
-    mov.s   f2, f4
-    mov.s   f10, f12
-    wfr     f7, a5
-    wfr     f15, a6
-    nexp01.s f7, f7
-    nexp01.s f15, f15
-    maddn.s f2, f5, f2
-    maddn.s f10, f13, f10
-    const.s f5, 1
-    const.s f13, 1
+    // Square roots as libgcc's __ieee754_sqrtf, lane 0 in f0-f7, lane 1 in f8-f15.
+    wfr     f1, a5
+    wfr     f9, a6
+    sqrt0.s f2, f1
+    sqrt0.s f10, f9
     const.s f3, 0
     const.s f11, 0
-    neg.s   f6, f7
-    neg.s   f14, f15
-    maddn.s f5, f1, f2
-    maddn.s f13, f9, f10
-    maddn.s f3, f6, f4
-    maddn.s f11, f14, f12
-    wfr     f4, a5
-    wfr     f12, a6
-    mkdadj.s f0, f4
-    mkdadj.s f8, f12
-    maddn.s f2, f5, f2
-    maddn.s f10, f13, f10
-    maddn.s f6, f1, f3
-    maddn.s f14, f9, f11
-    const.s f4, 1
-    const.s f12, 1
-    maddn.s f4, f1, f2
-    maddn.s f12, f9, f10
-    maddn.s f3, f6, f2
-    maddn.s f11, f14, f10
-    wfr     f7, a5
-    wfr     f15, a6
-    nexp01.s f7, f7
-    nexp01.s f15, f15
-    neg.s   f7, f7
-    neg.s   f15, f15
-    maddn.s f2, f4, f2
-    maddn.s f10, f12, f10
-    maddn.s f7, f1, f3
-    maddn.s f15, f9, f11
-    addexpm.s f3, f0
-    addexpm.s f11, f8
-    addexp.s f2, f0
-    addexp.s f10, f8
-    divn.s  f3, f7, f2
-    divn.s  f11, f15, f10
-    wfr     f1, a7
-    wfr     f9, a8
-    add.s   f2, f1, f3
-    add.s   f10, f9, f11
-    wfr     f5, a9
-    wfr     f13, a9
-    mul.s   f2, f2, f5
-    mul.s   f10, f10, f13
-    sub.s   f5, f2, f1
-    sub.s   f13, f10, f9
-    abs.s   f5, f5
-    abs.s   f13, f13
-    wfr     f1, a10
-    wfr     f9, a10
-    olt.s   b2, f1, f5
-    olt.s   b3, f9, f13
-    rfr     a11, f2
-    rfr     a12, f10
-    movt    a7, a11, b0
-    movt    a8, a12, b1
-    andb    b0, b0, b2
-    andb    b1, b1, b3
-    j       2b
-3:
+    maddn.s f3, f2, f2
+    maddn.s f11, f10, f10
+    nexp01.s f4, f1
+    nexp01.s f12, f9
+    const.s f0, 3
+    const.s f8, 3
+    addexp.s f4, f0
+    addexp.s f12, f8
+    maddn.s f0, f3, f4
+    maddn.s f8, f11, f12
+    nexp01.s f3, f1
+    nexp01.s f11, f9
+    neg.s   f5, f3
+    neg.s   f13, f11
+    maddn.s f2, f0, f2
+    maddn.s f10, f8, f10
+    const.s f0, 0
+    const.s f8, 0
+    const.s f6, 0
+    const.s f14, 0
+    const.s f7, 0
+    const.s f15, 0
+    maddn.s f0, f5, f2
+    maddn.s f8, f13, f10
+    maddn.s f6, f2, f4
+    maddn.s f14, f10, f12
+    const.s f4, 3
+    const.s f12, 3
+    maddn.s f7, f4, f2
+    maddn.s f15, f12, f10
+    maddn.s f3, f0, f0
+    maddn.s f11, f8, f8
+    maddn.s f4, f6, f2
+    maddn.s f12, f14, f10
+    neg.s   f2, f7
+    neg.s   f10, f15
+    maddn.s f0, f3, f2
+    maddn.s f8, f11, f10
+    maddn.s f7, f4, f7
+    maddn.s f15, f12, f15
+    mksadj.s f2, f1
+    mksadj.s f10, f9
+    nexp01.s f1, f1
+    nexp01.s f9, f9
+    maddn.s f1, f0, f0
+    maddn.s f9, f8, f8
+    neg.s   f3, f7
+    neg.s   f11, f15
+    addexpm.s f0, f2
+    addexpm.s f8, f10
+    addexp.s f3, f2
+    addexp.s f11, f10
+    divn.s  f0, f1, f3
+    divn.s  f8, f9, f11
+    // fl(x / s0) from the exact remainder x - s0 * s0 against h = s0 * ulp(s0) / 2, then one Newton step.
+    wfr     f1, a5
+    wfr     f9, a6
+    msub.s  f1, f0, f0
+    msub.s  f9, f8, f8
+    rfr     a7, f0
+    rfr     a8, f8
+    and     a15, a7, a11
+    sub     a15, a15, a12
+    wfr     f2, a15
+    and     a15, a8, a11
+    sub     a15, a15, a12
+    wfr     f10, a15
+    slli    a7, a7, 9
+    slli    a8, a8, 9
+    mul.s   f3, f0, f2
+    mul.s   f11, f8, f10
+    add.s   f2, f2, f2
+    add.s   f10, f10, f10
+    add.s   f4, f0, f2
+    add.s   f12, f8, f10
+    sub.s   f5, f0, f2
+    sub.s   f13, f8, f10
+    mov.s   f6, f0
+    mov.s   f14, f8
+    olt.s   b0, f3, f1
+    olt.s   b1, f11, f9
+    movt.s  f6, f4, b0
+    movt.s  f14, f12, b1
+    neg.s   f7, f3
+    neg.s   f15, f11
+    olt.s   b2, f1, f7
+    olt.s   b3, f9, f15
+    movt.s  f6, f5, b2
+    movt.s  f14, f13, b3
+    add.s   f6, f6, f0
+    add.s   f14, f14, f8
+    wfr     f4, a9
+    wfr     f12, a9
+    mul.s   f6, f6, f4
+    mul.s   f14, f14, f12
+    // Within 2^-7 h under +-h, esp-dl's step from its own last root may round x / root the other way.
+    wfr     f4, a10
+    wfr     f12, a10
+    mul.s   f4, f3, f4
+    mul.s   f12, f11, f12
+    add.s   f1, f1, f4
+    add.s   f9, f9, f12
+    abs.s   f1, f1
+    abs.s   f9, f9
+    sub.s   f1, f1, f3
+    sub.s   f9, f9, f11
+    abs.s   f1, f1
+    abs.s   f9, f9
+    ole.s   b4, f1, f4
+    ole.s   b5, f9, f12
     // The inverse of each root, times in_scale.
-    wfr     f0, a7
-    wfr     f8, a8
+    mov.s   f0, f6
+    mov.s   f8, f14
     div0.s  f4, f0
     div0.s  f12, f8
     nexp01.s f1, f0
@@ -336,8 +352,16 @@ ai_engine_ln_scales_s8_esp32s3:
     wfr     f9, a13
     mul.s   f3, f3, f1
     mul.s   f11, f11, f9
-    ssi     f3, a2, 0
-    ssi     f11, a2, 4
+    // A flagged lane stores 0, its caller taking esp-dl's Newton for it.
+    rfr     a5, f3
+    rfr     a6, f11
+    movi    a15, 0
+    movt    a5, a15, b4
+    movt    a6, a15, b5
+    moveqz  a5, a15, a7
+    moveqz  a6, a15, a8
+    s32i    a5, a2, 0
+    s32i    a6, a2, 4
     addi    a2, a2, 8
     addi    a3, a3, 8
     addi    a14, a14, -1

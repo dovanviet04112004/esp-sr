@@ -31,6 +31,10 @@ namespace {
 const char *TAG = "layernorm_s8";
 
 constexpr float kNewtonStop = 0.00001f; // EN of esp-dl's dl_math.hpp
+// The kernel's root is esp-dl's over this range (test_esp_ppq_patches checks every float in it).
+constexpr float kRootLow = 0x1p-3f;
+constexpr float kRootHigh = 0x1p12f;
+constexpr float kRootWindow = 0x1p-7f; // flagged band under each half ulp of x / root
 constexpr int kLanes = 4;
 constexpr int kBlock = 16;
 constexpr int kWordBytes = 4;
@@ -47,7 +51,7 @@ enum Run {
     kRunPerValue,
     kRunEpsilon,
     kRunInScale,
-    kRunStop,
+    kRunWindow,
     kRunHalf,
     kRunSize
 };
@@ -241,7 +245,7 @@ class LayerNormS8 final : public dl::module::Module {
                 bits_of(per_value_),
                 bits_of(epsilon_),
                 bits_of(in_scale_),
-                bits_of(kNewtonStop),
+                bits_of(kRootWindow),
                 bits_of(0.5f)};
         paired_ = float_mean_ && n_ % kWordBytes == 0 && n_ <= kMaxPaired;
         built_ = true;
@@ -256,11 +260,11 @@ class LayerNormS8 final : public dl::module::Module {
             const int count = std::min(kBlock, (positions_ - p) & ~1);
             const int pairs = count / 2;
             ai_engine_ln_deviations_s8_esp32s3(deviations_, variances_, xs + p * n_, pairs, run_.data());
-            if (std::find(variances_, variances_ + count, 0.0f) == variances_ + count) {
-                ai_engine_ln_scales_s8_esp32s3(scales_, variances_, run_.data(), pairs);
-            } else {
-                for (int i = 0; i < count; i++) {
-                    scales_[i] = divide(1.0f, sqrt_newton(variances_[i])) * in_scale_;
+            ai_engine_ln_scales_s8_esp32s3(scales_, variances_, run_.data(), pairs);
+            for (int i = 0; i < count; i++) {
+                const float v = variances_[i];
+                if (scales_[i] == 0.0f || v < kRootLow || v >= kRootHigh) {
+                    scales_[i] = divide(1.0f, sqrt_newton(v)) * in_scale_;
                 }
             }
             ai_engine_ln_outputs_s8_esp32s3(ys + p * n_, deviations_, scales_, gb_, pairs, run_.data());
