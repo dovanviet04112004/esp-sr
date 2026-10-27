@@ -1287,7 +1287,8 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
 | `GroupNormS8` đọc thẳng map 2-D [T, F, C] của stem | 4 183,7 ms | 3 932 744 B | 7 phép 685 ms |
 | Mỗi nhóm một bảng: LN int8 của từng giá trị int8 vào | 4 073,1 ms | 3 976 756 B | 7 phép 579 ms, ~82,5 ms mỗi phép |
 | Nhân viết tay: bình phương 4 nhóm xen nhau, ghi ra cả hàng qua QACC | 3 710,1 ms | 3 989 004 B | 7 phép 215 ms |
-| Lô hai nhóm qua mọi lượt, tổng bằng ACCX, độ lệch tra bảng | **3 642,7 ms** | **3 992 332 B** | 7 phép 154 ms, ~22 ms mỗi phép. `ConvBlock` 2 428 ms, `PointwiseS8` 538 ms, `StageSum` 155 ms |
+| Lô hai nhóm qua mọi lượt, tổng bằng ACCX, độ lệch tra bảng | 3 642,7 ms | 3 992 332 B | 7 phép 154 ms, ~22 ms mỗi phép. `ConvBlock` 2 428 ms, `PointwiseS8` 538 ms, `StageSum` 155 ms |
+| `ConvBlock` nhân chung mượn RAM nội cho trọng số (ADR-0025), mỗi hàng theo dải 4 điểm ảnh | **2 154,1 ms** | **3 992 332 B**, cộng 79 680 B RAM nội trong lúc chạy | `ConvBlock` 2 428 → 919 ms: stage 0 ~140, stage 1 ~119, stage 2 ~32 ms một khối |
 - Từ bước `GroupNormS8`, mỗi bước khớp từng bit cả ở đồ thị lẫn bản cắt.
 - **`GroupNormS8` trên app đo** (map 148 × 1728 trong PSRAM, 24 nhóm), chu kỳ một giá trị:
 
@@ -1331,6 +1332,18 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
     | Trọng số chép | 20 KB, 0,68 ms | 44 KB, 1,45 ms | 20 KB | 20 KB | 20 KB | 77 KB, 2,54 ms |
 
     21 khối ước ~0,93 s 🔬, từ 2,43 s. Đầu ra như nhau ở mọi R và P.
+- **`PointwiseS8` của b3 trên app đo** (28/10), trọng số ở flash. Op chạy theo lát như `run_slices`, hoặc theo lát
+  vừa 79 680 B: mỗi lát chép vào RAM nội trước khi chạy. ms, kể cả lần chép; đầu ra như nhau:
+
+  | Op (K → N, hàng) | Lát của `run_slices` | Lát chép vào RAM nội | Chép |
+  |---|---|---|---|
+  | `red_dim` (1728 → 72, 148) | 42,4 | 17,1 | 4,9 ms |
+  | `PPQ_Operation_199` (2016 → 128, 148) | 87,7 | 29,0 | 8,8 ms |
+  | conv bước 4×2 của stage 5 (768 → 192, 333) | 54,6 | 24,0 | 5,3 ms |
+  | `head` (192 → 224, 1332) | 44,8 | 23,0 | 1,8 ms |
+  | `PPQ_Operation_208` (128 → 2016, 148) | 32,8 | 23,9 | 9,7 ms |
+
+  Lần chép đọc mỗi trọng số từ flash đúng một lần, ~27–31 MB/s.
 - **Chưa đo:** độ chính xác của b3 sau int8 (thang int8 đang chạy).
 - **Đọc:** đây là số thô. b3 chạy qua các op viết cho hình dạng của b0, chưa có bước nào tối ưu riêng cho nó. b3 có
   2,16 tỉ MAC (`torch.utils.flop_counter`, không tính GroupNorm), b0 0,24 tỉ. 1,61 tỉ nằm trong 19 `ConvBlock`, chạy
