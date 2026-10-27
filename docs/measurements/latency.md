@@ -746,6 +746,31 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
 
   Phí nằm ở vòng lặp theo vị trí, không ở số kênh. Đệm 24 → 32 kênh chỉ thêm 33% phép tính, nên bỏ.
 
+**Op riêng của `ai_engine`** (E11-T34, KẾ HOẠCH §3.14 bước 2.5), 27/10 trên board B, `make ai-unit-speaker ROW=kl`, hàng
+đang khoá. Mỗi lượt xuất lại `.espdl` từ `graph.native` của hàng với các bản vá ở `speaker.yaml`. Mỗi lượt qua
+`model->test()` ở cả đồ thị lẫn 4 bản cắt, lệch 0. Số ms một cửa sổ là trung bình 10 lần chạy không bật
+`profile_module`.
+
+| Lượt | Một cửa sổ | PSRAM cho tensor | Bảng xếp hạng |
+|---|---|---|---|
+| Hàng kl như 11/10 | 1173,7 ms | 2 134 984 B | Softmax 14,9 ms và QuantizeLinear 9,2 ms ở mỗi attention 148 khung |
+| `SoftmaxQuant`, tổng cộng thẳng vào bộ nhớ | 1155,5 ms | 2 135 328 B | 20 ms ở mỗi attention 148 khung, ~55 chu kỳ một phần tử |
+| `SoftmaxQuant` cộng bốn cột trong thanh ghi, bảng tra theo byte không dấu; `LayerNormS8` | 1100,7 ms | 2 140 252 B | `SoftmaxQuant` 46,4 ms cả 7 op; LayerNorm 123,3 → 92,7 ms, stem 101,5 → 73,6 ms |
+| `StageSum` | **943,6 ms** | **1 488 352 B** | 6 `StageSum` 55,0 ms thay 27 Mul, 21 Add và 4 Resize (~210 ms); PSRAM bớt các tổng giữa và đầu ra Resize |
+
+- **`SoftmaxQuant`:** bảng `exp` và nghịch đảo tổng như esp-dl, rồi `floor(v + 0,5)` bằng phép float đúng như `double`
+  của esp-dl với v ≥ 0. Phần còn lại là phép float từng phần tử: đọc bảng, nhân, cắt nguyên, so nửa bước.
+- **`LayerNormS8`:** trung bình bằng phép chia float, đúng như phép `double` của esp-dl với mọi tổng int8 khi phần lẻ
+  của n là 1 hay 3 (test kiểm hết). Mỗi vị trí còn ~10 phép chia: một cho trung bình, 6,1 vòng Newton trung bình ở stem
+  (6,0 ở stage 0), một cho nghịch đảo. GCC gọi `__divsf3` của ROM cho mọi phép chia float, kể cả với `-ffast-math`,
+  và hàm ấy là chuỗi `div0.s` … `divn.s` của FPU, ~25 lệnh nối nhau. Stem có 10 656 vị trí nhưng chỉ 4 755 phương sai
+  khác nhau, nên nhớ kết quả Newton theo phương sai còn bớt được hơn nửa số vòng 🔬.
+- **`StageSum`:** mỗi tổng đọc thẳng các đầu ra stage nó cộng, mỗi hàng một lần, đọc bản 74 và 37 khung trước Resize
+  theo hàng `t / k`. Nhân PIE làm đúng các lệnh của `Mul` int8 esp-dl (`EE.VMULAS.S8.QACC`, làm tròn như
+  `tie728_s8_vector_round_result`) rồi cộng bão hoà `EE.VADDS.S8` như `Add`.
+- Op tốn nhất còn lại: Conv 511,8 ms trên 181 op, phần lớn là khối conv của stage 0–5 (depthwise 3×3 1,7 chu kỳ một
+  phép nhân-cộng); Add 80,6 ms và Relu 52,0 ms, phần lớn là cộng dư và `Relu` cuối mỗi khối; LayerNorm stem 73,6 ms.
+
 ## 26. `command_ctc` qua chuỗi tăng tốc (E11-T30)
 
 Đo ngày 10/10 trên board B bằng `make speed BRANCH=ctc RUN=artifacts/command_ctc/runs/20261007_439d763-dirty_f438bd
