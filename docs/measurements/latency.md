@@ -1288,8 +1288,12 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
 | Mỗi nhóm một bảng: LN int8 của từng giá trị int8 vào | 4 073,1 ms | 3 976 756 B | 7 phép 579 ms, ~82,5 ms mỗi phép |
 | Nhân viết tay: bình phương 4 nhóm xen nhau, ghi ra cả hàng qua QACC | 3 710,1 ms | 3 989 004 B | 7 phép 215 ms |
 | Lô hai nhóm qua mọi lượt, tổng bằng ACCX, độ lệch tra bảng | 3 642,7 ms | 3 992 332 B | 7 phép 154 ms, ~22 ms mỗi phép. `ConvBlock` 2 428 ms, `PointwiseS8` 538 ms, `StageSum` 155 ms |
-| `ConvBlock` nhân chung mượn RAM nội cho trọng số (ADR-0025), mỗi hàng theo dải 4 điểm ảnh | **2 154,1 ms** | **3 992 332 B**, cộng 79 680 B RAM nội trong lúc chạy | `ConvBlock` 2 428 → 919 ms: stage 0 ~140, stage 1 ~119, stage 2 ~32 ms một khối |
+| `ConvBlock` nhân chung mượn RAM nội cho trọng số (ADR-0025), mỗi hàng theo dải 4 điểm ảnh | 2 154,1 ms | 3 992 332 B, cộng 79 680 B RAM nội trong lúc chạy | `ConvBlock` 2 428 → 919 ms: stage 0 ~140, stage 1 ~119, stage 2 ~32 ms một khối |
+| `PointwiseS8` nhân có vòng mượn cùng vùng theo lát | **1 935,3 ms** | **3 992 332 B**, cùng 79 680 B RAM nội | `PointwiseS8` 530 → 314 ms: conv bước của stage 5 67 → 32, `PPQ_Operation_199` 87 → 29, `head` 46 → 23 ms. Còn lại: `ConvBlock` 919, `GroupNormS8` 152, `StageSum` 155, conv esp-dl 113, `LayerNormS8` 58 ms |
 - Từ bước `GroupNormS8`, mỗi bước khớp từng bit cả ở đồ thị lẫn bản cắt.
+- Lượt dò có profile chạy đồ thị hai lần liền nhau (~4 s ở nhân 0) thì task watchdog báo IDLE0; bản báo rơi vào
+  giờ của một module, ~43 ms ở một `GroupNormS8` hay `LayerNormS8`. Giờ một cửa sổ đo ở lượt có `vTaskDelay(1)`
+  giữa các lần chạy, nên không dính.
 - **`GroupNormS8` trên app đo** (map 148 × 1728 trong PSRAM, 24 nhóm), chu kỳ một giá trị:
 
   | Bản | Tổng | Bình phương | Bảng | Ghi ra | Một phép |
