@@ -1646,7 +1646,33 @@ mỗi bước một commit.
       (mặc định HEAD) bằng chính các bậc của thang, cùng dữ liệu hiệu chuẩn, rồi so mô phỏng trên vài cửa sổ. Qua khi
       không lệch số nào (`ptq_espdl.same_integers`), vì bias correction của ESP-PPQ hiệu chỉnh theo khối op nên thêm hay
       bớt op có thể đổi số nguyên dù phép tính không đổi. Viết lại không qua được thì làm ở bước xuất.
-   5. Dừng khi bảng xếp hạng chỉ còn nhãn không có bản vá và các op còn lại đã chạy ở băng thông PSRAM.
+   5. **Op riêng của `ai_engine`.** Nhãn còn lại sau 3 và 4 thì bước xuất ghép op hay chuỗi op ấy thành một op riêng.
+      Các nhãn ấy là nhân float của esp-dl, đường không căn, vòng gọi nhân một lần mỗi điểm ảnh, và chuỗi op mà op nào
+      cũng đọc ghi cả tensor qua PSRAM. Bản vá trong `esp_ppq_patches` viết lại đồ thị sau `prepare_graph` của ESP-PPQ,
+      khi bố cục, lưới và số mũ đã chốt, nên op riêng đọc đúng các tensor và lưới mà các op esp-dl kia đọc.
+      `ai_engine/src/core/espdl/` cài module cùng tên, đăng ký với `ModuleCreator` của esp-dl trước model đầu tiên.
+      Module tính bằng nhân PIE viết tay (`*_esp32s3.S`) hay gọi đúng nhân esp-dl trên từng dải hàng nằm trong cache dữ
+      liệu. Mỗi số nguyên ra phải đúng là số mà các op esp-dl kia tính, nên mô phỏng không đổi: qua khi bản dò khớp từng
+      bit ở cả đồ thị lẫn mọi bản cắt; giữ khi giờ trên board giảm, khớp mà chậm hơn thì bỏ. Phần float của op riêng
+      chép đúng chuỗi phép của bản vá mô phỏng (`layernorm_as_espdl`, `softmax_as_espdl`): dựng không `-ffast-math`,
+      không gộp nhân-cộng ngầm, chỗ chip gộp thì gọi `fmaf` tường minh.
+   6. Dừng khi mọi op còn lại chạy ở trần của chính nó: tích chập ở tốc độ nhân khi dữ liệu nằm trong cache, op chép và
+      op từng phần tử ở băng thông PSRAM, và không còn chuỗi nào ghép lại mà bớt được lượt đọc ghi PSRAM.
+
+**Op riêng của `ai_engine`** (bước 2.5), theo thứ tự làm cho b0 của `speaker` (§3.17), từ bảng xếp hạng ngày 11/10:
+1193 ms cho 696 module (`measurements/latency.md` §25). Số giờ dưới đây là phần các op được thay đang tốn, chưa phải giờ
+của op riêng.
+
+| Op riêng | Nhận chỗ nào của đồ thị | Làm gì |
+|---|---|---|
+| `SoftmaxQuant` | `Softmax` int8 mà đầu đọc duy nhất là một `QuantizeLinear` theo tensor: ba attention ở 148 và 74 khung, softmax của pool; ~85 ms | đọc vào int8, tra cùng bảng `exp` 256 giá trị esp-dl dựng, cộng tổng theo đúng thứ tự, nhân với nghịch đảo của tổng rồi lượng tử như `QuantizeLinear` của esp-dl, ra thẳng int8. Tensor float32 ở giữa không còn ra PSRAM, và mỗi head chạy trong cache thay vì đi bước nhảy qua PSRAM |
+| `LayerNormS8` | `LayerNormalization` int8 theo tensor trên trục cuối; ~81 ms, riêng stem 65 ms | đúng chuỗi float của `layernorm_as_espdl`, nhưng trung bình lấy từ bảng dựng lúc nạp theo mọi tổng có thể có, thay cho phép `double` chạy giả lập, và gamma, beta đổi thang một lần mỗi kênh thay vì một lần mỗi phần tử |
+| `StageSum` | các `Mul` theo kênh rồi `Add` cộng dồn đầu ra từng stage vào đầu vào các stage sau (`weigth1d` của ReDimNet2), cả `Resize` nearest đưa đầu ra 74 và 37 khung về 148; ~210 ms | mỗi phần tử qua đúng phép nhân, làm tròn và cộng bão hoà của `Mul` và `Add` int8 esp-dl, nhưng đầu ra mỗi stage chỉ đọc một lần cho mọi tổng nó góp vào, và tích không ra PSRAM |
+| `ConvBlock` | khối của stage 0–5: depthwise 3×3, pointwise, BN thành depthwise 1×1, depthwise 3×3, pointwise, cộng dư, `Relu`, cùng `Reshape` gộp cột và `RequantizeLinear` giữa chúng; ~580 ms | cả khối chạy theo dải hàng nằm trong cache dữ liệu, mỗi op con bằng đúng nhân esp-dl của nó trên dải ấy hay nhân PIE làm đúng các lệnh ấy cho cả hàng; tensor giữa các op con không ra PSRAM |
+| `Stem` | `Add` phát sóng ra 12 bản sao, depthwise 3×3 trên 12 kênh và `LayerNormalization` của stem; ~85 ms | mỗi điểm tính 12 tích chập 3×3 trên một kênh log-mel rồi chuẩn hoá ngay, như hai op riêng trên |
+
+Mỗi op riêng có bảng nhãn ở `espdl_profile.py` trỏ về bản vá của nó, và mục giờ ở `measurements/latency.md` §25 sau
+khi bản dò khớp từng bit. Op đầu tiên làm xong bước 2.5 thêm phần đăng ký vào `src/core/`; các op sau chỉ thêm module.
 3. **Chất lượng.** `make <nhánh>-ptq RUN=<run>` chạy đủ các cách hiệu chuẩn của bậc 2. Chọn cách tốt nhất theo thước của
    nhánh, ghi vào `<nhánh>.md` cạnh float. Còn trượt cửa thì bậc 3, rồi bậc 4 (QAT, cần chủ repo cho học), như bảng
    trên.
@@ -2431,6 +2457,7 @@ firmware/
 │   ├── sys_storage/   [C]   L2  # NVS + LittleFS + mmap ảnh model; sở hữu storage_format.h
 │   ├── sys_time/      [C]   L2  # SNTP
 │   ├── ai_engine/     [C++] L3  # esp-dl; src/core/ không biết tên model;
+│   │                            #   src/core/espdl/: op riêng đăng ký với esp-dl, nhân PIE *_esp32s3.S (§3.14);
 │   │                            #   src/{ns,ns_rnnoise,ns_nsnet,wake,command_kws,command_ctc,command_rnnt,speaker,synth}/;
 │   │                            #   Kconfig AI_ENGINE_NS_BACKEND chọn một thư mục ns*, AI_ENGINE_COMMAND_BACKEND
 │   │                            #   một thư mục command_* vào danh sách nguồn
@@ -2579,7 +2606,10 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 việc, chạy, đo — không biết tên model nào. Mỗi model một thư mục `src/<nhánh>/` chứa tiền xử lý và
 hậu xử lý riêng của nó (dải của `ns_rnnoise`, log công suất và sigmoid của `ns_nsnet`, làm trơn đầu ra `wake`, chấm CTC
 của `command_ctc`, luật từ chối của `command_kws`, điểm với mẫu giọng của `speaker`). Phần hậu xử lý
-là C thuần và có golden riêng, dù nằm trong component C++.
+là C thuần và có golden riêng, dù nằm trong component C++. `src/core/espdl/` giữ các op riêng mà bước xuất sinh ra
+(§3.14 bước 2.5): mỗi op một cặp `.cpp` và `.hpp`, nhân PIE của nó ở `<nhân>_esp32s3.S`. Chúng biết op, không biết
+model, và chạy trên đúng nhân của task gọi model. Vùng đệm của op riêng thuộc từng module, không dùng chung giữa các
+model: `nhan_task` và `xac_task` đều gọi model và có thể giành nhau giữa chừng (§5.2).
 
 #### 4.5.5 Hợp đồng gọi — đóng băng ở E3
 
