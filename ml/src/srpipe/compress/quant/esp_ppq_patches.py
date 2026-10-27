@@ -1200,6 +1200,90 @@ def softmax_quant_from(graph, softmax) -> bool:
     return True
 
 
+def scaled_by_constant(graph, var, info) -> tuple | None:
+    """(mul, map, constant, shift) when var, read by one op alone, is an int8 Mul of a map by one int8 constant, its
+    rows at least CHANNEL_STEP long so esp-dl's S3 vector kernel runs it, the shift onto var's exponent to the right;
+    None otherwise."""
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    mul = var.source_op
+    if mul is None or mul.type != "Mul" or not isinstance(mul, QuantableOperation) or len(mul.inputs) != 2:
+        return None
+    if var.name in graph.outputs or len(var.dest_ops) != 1 or laid_shape(var, info)[-1] < CHANNEL_STEP:
+        return None
+    constants = [v for v in mul.inputs if v.is_parameter and v.value is not None and v.value.numel() == 1]
+    maps = [v for v in mul.inputs if not v.is_parameter]
+    if len(constants) != 1 or len(maps) != 1 or not all(int8_tensor(c) for c in mul.input_quant_config):
+        return None
+    exponents = [exponent_of(v, info) for v in (var, maps[0], constants[0])]
+    if None in exponents or exponents[0] - exponents[1] - exponents[2] < 0:
+        return None
+    return mul, maps[0], int(constants[0].value.item()), exponents[0] - exponents[1] - exponents[2]
+
+
+def products_by_byte(constant: int, shift: int) -> np.ndarray:
+    """int8 x * constant by the byte of x, as tie728_s8_mul_w1_16_w2_1 gives it: the QACC product rounded half up
+    by shift as tie728_s8_vector_round_result does, saturated."""
+    x = np.arange(256, dtype=np.int64).astype(np.uint8).view(np.int8).astype(np.int64)
+    product = x * constant
+    if shift:
+        product = ((product >> (shift - 1)) + 1) >> 1
+    return np.clip(product, -128, 127).astype(np.int8)
+
+
+def softmax_scale_from(graph, softmax, info) -> bool:
+    """A SoftmaxQuant reading the int8 product of a map by one constant reads the map instead, the products by the
+    map's byte as a second input on the product's exponent; the Mul and its product go."""
+    import torch
+    from esp_ppq.core import DataType
+
+    if softmax.type != SOFTMAX_QUANT or len(softmax.inputs) != 1:
+        return False
+    found = scaled_by_constant(graph, softmax.inputs[0], info)
+    if found is None:
+        return False
+    mul, source, constant, shift = found
+    product, exponent = mul.outputs[0], exponent_of(softmax.inputs[0], info)
+    configs = [mul.input_quant_config[mul.inputs.index(source)], softmax.input_quant_config[0]]
+    product.dest_ops.clear()
+    graph.remove_operation(mul)
+    graph.remove_variable(product)
+    table = graph.create_variable(value=torch.from_numpy(products_by_byte(constant, shift)), is_parameter=True)
+    table.dtype = DataType.INT8
+    info.add_var_exponents(table.name, exponent)
+    softmax.inputs[:] = [source, table]
+    source.dest_ops.append(softmax)
+    table.dest_ops.append(softmax)
+    softmax.config.input_quantization_config[:] = configs
+    return True
+
+
+@contextlib.contextmanager
+def softmax_scale() -> Iterator[None]:
+    """Each SoftmaxQuant reading an int8 map times one constant reads the map, the products by its byte as a table
+    (KEHOACH 3.14 step 2.5): esp-dl's Mul wrote every scaled score through PSRAM for the op to read back. The op looks
+    each byte up in the table before its exp table. Run after softmax_quant. ReDimNet2 b0 (KEHOACH 3.17) on board B:
+    each attention at 148 frames scaled its scores in 3.1 ms.
+    """
+    from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
+    from esp_ppq.parser.espdl_exporter import EspdlExporter
+
+    prepare = EspdlExporter.prepare_graph
+
+    def joining(self, graph, *args, **kwargs):
+        graph = prepare(self, graph, *args, **kwargs)
+        info = ExporterPatternInfo()
+        for op in list(graph.operations.values()):
+            softmax_scale_from(graph, op, info)
+        return graph
+
+    EspdlExporter.prepare_graph = joining
+    try:
+        yield
+    finally:
+        EspdlExporter.prepare_graph = prepare
+
+
 @contextlib.contextmanager
 def softmax_quant() -> Iterator[None]:
     """Each int8 Softmax and the QuantizeLinear alone reading it exported as one SoftmaxQuant (KEHOACH 3.14 step 2.5):
@@ -1409,6 +1493,247 @@ def stage_sum() -> Iterator[None]:
         EspdlExporter.prepare_graph = prepare
 
 
+CONV_BLOCK = "ConvBlock"
+# (kernel, depthwise, bias, activation) of a ReDimNet2 conv block's convolutions from its input on.
+BLOCK_STEPS = (
+    (3, True, False, "Linear"),
+    (1, False, True, "Relu"),
+    (1, True, True, "Linear"),
+    (3, True, False, "Linear"),
+    (1, False, True, "Linear"),
+)
+
+
+def exponent_of(var, info) -> int | None:
+    found = info.get_var_exponents(var.name)
+    return found[0] if found and len(found) == 1 else None
+
+
+def behind_reshapes(graph, var) -> tuple:
+    """(the op making var, the Reshapes passed) going back from var through Reshapes, each variable on the way read
+    by one op alone and no graph output; (None, []) when one is not."""
+    passed = []
+    while var.name not in graph.outputs and len(var.dest_ops) == 1 and var.source_op is not None:
+        if var.source_op.type != "Reshape":
+            return var.source_op, passed
+        passed.append(var.source_op)
+        var = var.source_op.inputs[0]
+    return None, []
+
+
+def block_conv(op, kernel: int, depthwise: bool, bias: bool, activation: str, info) -> bool:
+    """op is an int8 convolution of one grid a tensor, kernel by kernel at a stride of 1 padded to keep the map's
+    size, depthwise or not, with or without bias, then activation."""
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    if op is None or op.type != "Conv" or not isinstance(op, QuantableOperation) or len(op.inputs) != 2 + bias:
+        return False
+    attrs, laid = op.attributes, laid_shape(op.inputs[0], info)
+    return (
+        len(laid) == 4
+        and laid == laid_shape(op.outputs[0], info)
+        and attrs.get("kernel_shape") == [kernel, kernel]
+        and attrs.get("strides", [1, 1]) == [1, 1]
+        and attrs.get("dilations", [1, 1]) == [1, 1]
+        and attrs.get("pads", [0] * 4) == [kernel // 2] * 4
+        and attrs.get("group", 1) == (laid[-1] if depthwise else 1)
+        and attrs.get("activation", "Linear") == activation
+        and all(int8_tensor(c) for c in [*op.input_quant_config[:2], *op.output_quant_config])
+    )
+
+
+def relu_of_sum(graph, relu, info) -> bool:
+    """relu is an int8 Relu giving max(0, x) on its input's exponent, of an Add read by it alone."""
+    import torch
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    if relu.type != "Relu" or not isinstance(relu, QuantableOperation):
+        return False
+    s, add = relu.inputs[0], relu.inputs[0].source_op
+    if add is None or add.type != "Add" or len(add.inputs) != 2 or s.dest_ops != [relu] or s.name in graph.outputs:
+        return False
+    if exponent_of(s, info) is None or exponent_of(s, info) != exponent_of(relu.outputs[0], info):
+        return False
+    lut = relu.attributes.get("lut")
+    table = None if lut is None else info.get_lut(lut)
+    return lut is None or (
+        table is not None and torch.equal(table.flatten().long().cpu(), torch.arange(-128, 128).clamp(min=0))
+    )
+
+
+def block_shifts(x, convs, total, info) -> list[int] | None:
+    """Each convolution's mac shift, the five read in turn from x, when each takes the exponent the one before gives
+    and its bias that of its products; total, the exponent of the residual added, last. None otherwise."""
+    shifts, e_in = [], exponent_of(x, info)
+    for op in convs:
+        e_w, e_out = exponent_of(op.inputs[1], info), exponent_of(op.outputs[0], info)
+        if None in (e_in, e_w, e_out) or exponent_of(op.inputs[0], info) != e_in:
+            return None
+        if len(op.inputs) == 3 and exponent_of(op.inputs[2], info) != e_in + e_w:
+            return None
+        shifts.append(int(e_out - e_in - e_w))
+        e_in = e_out
+    return [*shifts, int(total - exponent_of(x, info))]
+
+
+def conv_block_parts(graph, relu, info) -> tuple | None:
+    """(x, convs, reshapes, requantiser, shifts) when relu ends a ReDimNet2 conv block on an int8 [1, T, F, C] map x,
+    C a multiple of 8: the convolutions of BLOCK_STEPS, Reshapes alone between them, added to x, or to x requantised
+    for the sum alone, on the sum's exponent, then ReLU; shifts as ConvBlock takes them, each convolution's 1 or more
+    to the right, the residual's 0 or more. None otherwise."""
+    if not relu_of_sum(graph, relu, info):
+        return None
+    add, total = relu.inputs[0].source_op, exponent_of(relu.inputs[0], info)
+    for e, r in (add.inputs, add.inputs[::-1]):
+        convs, reshapes, var = [], [], e
+        for step in reversed(BLOCK_STEPS):
+            op, passed = behind_reshapes(graph, var)
+            if not block_conv(op, *step, info):
+                break
+            convs.insert(0, op)
+            reshapes += passed
+            var = op.inputs[0]
+        else:
+            x, requantiser = var, r.source_op
+            if r is x:
+                requantiser = None
+            elif (
+                requantiser is None
+                or requantiser.type != "RequantizeLinear"
+                or requantiser.inputs[0] is not x
+                or r.dest_ops != [add]
+                or r.name in graph.outputs
+            ):
+                return None
+            laid = laid_shape(x, info)
+            if laid[0] != 1 or laid[-1] % (CHANNEL_STEP // 2) or laid_shape(relu.outputs[0], info) != laid:
+                return None
+            if total != exponent_of(e, info) or exponent_of(r, info) != total:
+                return None
+            shifts = block_shifts(x, convs, total, info)
+            if shifts is None or min(shifts[:-1]) < 1 or shifts[-1] < 0:
+                return None
+            return x, convs, reshapes, requantiser, shifts
+    return None
+
+
+def depthwise_taps(stored: np.ndarray, n: int, taps: int) -> np.ndarray:
+    """A depthwise convolution's (taps, n) weights from ESP-PPQ's S3 layout of them: each 16 channels' taps, the
+    channels innermost, then the rest's taps (ResetParamLayoutPattern)."""
+    flat, aligned = stored.reshape(-1), n // CHANNEL_STEP * CHANNEL_STEP
+    head = flat[: aligned * taps].reshape(n // CHANNEL_STEP, taps, CHANNEL_STEP).transpose(1, 0, 2)
+    return np.concatenate([head.reshape(taps, aligned), flat[aligned * taps :].reshape(taps, n - aligned)], axis=1)
+
+
+def dense_filters(stored: np.ndarray, n: int) -> np.ndarray:
+    """A pointwise convolution's (n outputs, inputs) weights from ESP-PPQ's S3 layout of them, each 16 outputs
+    interleaved innermost and the rest as they are (ResetParamLayoutPattern)."""
+    flat, aligned = stored.reshape(-1), n // CHANNEL_STEP * CHANNEL_STEP
+    per = flat.size // n
+    head = flat[: aligned * per].reshape(n // CHANNEL_STEP, per, CHANNEL_STEP).transpose(0, 2, 1)
+    return np.concatenate([head.reshape(aligned, per), flat[aligned * per :].reshape(n - aligned, per)])
+
+
+def first_of_repeats(values: np.ndarray, k: int, c: int) -> np.ndarray | None:
+    """values[..., :c] when the last axis holds it k times over, as merge_columns repeats a depthwise op's values."""
+    return (
+        values[..., :c] if values.shape[-1] == k * c and np.array_equal(values, np.tile(values[..., :c], k)) else None
+    )
+
+
+def block_values(op, c: int, info) -> list[np.ndarray] | None:
+    """op's weights and bias as ConvBlock's kernels take them, its channels c padded to Cp, a multiple of 16, with
+    zeros: taps [kernel * kernel][Cp], or pointwise weights [Cp / 16][c][16], the outputs padded; bias [Cp]. op may
+    run over k columns merged into its channels, the same block of weights each (merge_columns). None when it does
+    not."""
+    stored = [v.value.cpu().numpy() for v in op.inputs[1:]]
+    n = laid_shape(op.inputs[0], info)[-1]
+    k, cp = n // c, -(-c // CHANNEL_STEP) * CHANNEL_STEP
+    if op.attributes.get("group", 1) == 1:
+        merged = dense_filters(stored[0], n)
+        if n != k * c or not np.array_equal(merged, np.kron(np.eye(k, dtype=merged.dtype), merged[:c, :c])):
+            return None
+        padded = np.pad(merged[:c, :c], [(0, cp - c), (0, 0)])
+        weights = padded.reshape(cp // CHANNEL_STEP, CHANNEL_STEP, c).transpose(0, 2, 1)
+    else:
+        kernel = op.attributes["kernel_shape"][0]
+        taps = first_of_repeats(depthwise_taps(stored[0], n, kernel * kernel), k, c)
+        weights = None if taps is None else np.pad(taps, [(0, 0), (0, cp - c)])
+    biases = [first_of_repeats(b.reshape(-1), k, c) for b in stored[1:]]
+    if weights is None or any(b is None for b in biases):
+        return None
+    return [np.ascontiguousarray(weights), *(np.pad(b, (0, cp - c)) for b in biases)]
+
+
+def conv_block_from(graph, relu, info) -> bool:
+    """relu and the conv block conv_block_parts finds before it replaced by one ConvBlock reading x, then each
+    convolution's weights and bias in turn, laid as block_values lays them; the block's ops and middle maps go."""
+    import torch
+    from esp_ppq.core import OperationQuantizationConfig
+
+    found = conv_block_parts(graph, relu, info)
+    if found is None:
+        return False
+    x, convs, reshapes, requantiser, shifts = found
+    c = laid_shape(x, info)[-1]
+    laid = [block_values(op, c, info) for op in convs]
+    if any(v is None for v in laid):
+        return False
+    params, configs = [], [convs[0].input_quant_config[0]]
+    for op, values in zip(convs, laid, strict=True):
+        for v, value, config in zip(op.inputs[1:], values, op.input_quant_config[1:], strict=True):
+            v.value = torch.from_numpy(value).to(v.value.dtype)
+            v.dest_ops.remove(op)
+            params.append(v)
+            configs.append(config)
+        del op.inputs[1:]
+    add = relu.inputs[0].source_op
+    relu.inputs[0].dest_ops.remove(relu)
+    relu.inputs.clear()
+    gone = [add, *convs, *reshapes, *([requantiser] if requantiser is not None else [])]
+    middles = [v for op in gone for v in op.outputs]
+    for op in gone:
+        graph.remove_operation(op)
+    for v in middles:
+        graph.remove_variable(v)
+    for v in [x, *params]:
+        relu.inputs.append(v)
+        v.dest_ops.append(relu)
+    relu.type = CONV_BLOCK
+    relu.attributes.pop("lut", None)
+    relu.attributes["shifts"] = shifts
+    relu.config = OperationQuantizationConfig(configs, relu.output_quant_config)
+    return True
+
+
+@contextlib.contextmanager
+def conv_block() -> Iterator[None]:
+    """Each int8 ReDimNet2 conv block exported as one ConvBlock (KEHOACH 3.14 step 2.5): esp-dl runs its eight ops
+    one map at a time through PSRAM, its depthwise ones a pixel a call, 24 channels unaligned. The op runs the block
+    a row at a time with its maps' rows in the cache, each op's integers as esp-dl's kernels give them. Run after
+    aligned_pointwise, whose merged columns it reads back. ReDimNet2 b0 (KEHOACH 3.17) on board B: its 21 blocks took
+    ~500 ms of 0.96 s a window.
+    """
+    from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
+    from esp_ppq.parser.espdl_exporter import EspdlExporter
+
+    prepare = EspdlExporter.prepare_graph
+
+    def joining(self, graph, *args, **kwargs):
+        graph = prepare(self, graph, *args, **kwargs)
+        info = ExporterPatternInfo()
+        for op in list(graph.topological_sort()):
+            if op.name in graph.operations:
+                conv_block_from(graph, op, info)
+        return graph
+
+    EspdlExporter.prepare_graph = joining
+    try:
+        yield
+    finally:
+        EspdlExporter.prepare_graph = prepare
+
+
 @contextlib.contextmanager
 def simplify_without_bn_fusion() -> Iterator[None]:
     """espdl_quantize_onnx simplifies the ONNX with onnxsim's defaults, whose fuse_bn pass leaves a tensor whose stored
@@ -1468,8 +1793,10 @@ PATCHES = {
     "identity_convolutions_dropped": identity_convolutions_dropped,
     "channel_scales_as_mul": channel_scales_as_mul,
     "softmax_quant": softmax_quant,
+    "softmax_scale": softmax_scale,
     "layernorm_s8": layernorm_s8,
     "stage_sum": stage_sum,
+    "conv_block": conv_block,
 }
 
 

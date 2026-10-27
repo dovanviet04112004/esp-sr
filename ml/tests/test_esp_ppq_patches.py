@@ -309,10 +309,17 @@ def test_layernorm_s8_exports_an_int8_norm_as_its_own_op(tmp_path: Path) -> None
 
 @pytest.mark.parametrize("n", [1, 2, 3, 6, 8, 12, 16, 24, 48, 96, 192])
 def test_layernorm_s8_takes_the_mean_by_float_division_where_it_equals_espdls_double_one(n: int) -> None:
-    """LayerNormS8 divides in float32 when n's odd part is 1 or 3; esp-dl takes every int8 sum through double."""
+    """LayerNormS8 takes the float32 quotient when n's odd part is 1 or 3, as a product by fl(1 / n) corrected by
+    one FMA; esp-dl takes every int8 sum through double."""
     sums = np.arange(-128 * n, 127 * n + 1)
     through_double = (sums.astype(np.float64) * (1.0 / n)).astype(np.float32)
     assert np.array_equal(sums.astype(np.float32) / np.float32(n), through_double)
+    s = torch.from_numpy(sums.astype(np.float32))
+    inverse, count = torch.full_like(s, 1.0 / np.float32(n)), torch.full_like(s, n)
+    product = s * inverse
+    corrected = esp_ppq_patches.fma32(esp_ppq_patches.fma32(-product, count, s), inverse, product)
+    assert np.array_equal(corrected.numpy(), through_double)
+    assert n % 3 or not np.array_equal(product.numpy(), through_double)
 
 
 SOFTMAX_ROWS, SOFTMAX_WIDTH = 512, 148
@@ -558,6 +565,48 @@ def test_softmax_quant_exports_each_softmax_and_its_quantiser_as_one_op(tmp_path
     assert not re.findall(r"= (?:Softmax|QuantizeLinear)\[", joined)
     assert exponent(joined, out) == quantiser_exponent(lean)
     assert len(re.findall(rf"\(%{re.escape(out)}[,)]|, %{re.escape(out)}[,)]", joined)) == 2
+
+
+class ScaledScores(nn.Module):
+    """Each hop's scores against every hop scaled by a constant into a softmax over them that weighs the hops, as
+    ReDimNet2's attention scales q.k before its softmax."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.linear = nn.Linear(BANDS, BANDS)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.linear(x)
+        return torch.matmul(torch.softmax(torch.matmul(y, y.transpose(1, 2)) * 0.41, dim=-1), y)
+
+
+def test_softmax_scale_looks_each_score_up_as_esp_dls_mul_scales_it(tmp_path: Path) -> None:
+    torch.manual_seed(2)
+    rng = np.random.default_rng(15)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, HOPS, BANDS)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(ScaledScores().eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    patches = ["lean_quantizers", "softmax_quant"]
+    assert len(re.findall(r"= Mul\[", export_info(graph, tmp_path / "plain.espdl", patches))) == 1
+    with esp_ppq_patches.applied([*patches, "softmax_scale"]):
+        nodes, tensors = espdl_graph(export_espdl.export(graph, tmp_path / "scaled.espdl"))
+    ((_, (_, table)),) = [node for node in nodes.values() if node[0] == "SoftmaxQuant"]
+    assert "Mul" not in {op for op, _ in nodes.values()}
+
+    (mul,) = [op for op in graph.operations.values() if op.type == "Mul"]
+    scores = next(v for v in mul.inputs if not v.is_parameter)
+    constant = next(v for v in mul.inputs if v.is_parameter)
+    s_in, s_c = (float(mul.input_quant_config[mul.inputs.index(v)].scale) for v in (scores, constant))
+    s_out = float(mul.output_quant_config[0].scale)
+    values = TorchExecutor(graph, device="cpu").forward(
+        inputs=calib[0], output_names=[scores.name, mul.outputs[0].name]
+    )
+    given, made = (
+        torch.round(v / s).to(torch.int64).numpy().ravel() for v, s in zip(values, (s_in, s_out), strict=True)
+    )
+    bytes_in = given.astype(np.int8).view(np.uint8)
+    assert np.array_equal(tensors[table][bytes_in], made)
+    c, shift = round(float(constant.value) / s_c), round(math.log2(s_out / (s_in * s_c)))
+    assert not np.array_equal(esp_ppq_patches.products_by_byte(c, shift + 1)[bytes_in], made)
 
 
 def test_softmax_quant_leaves_a_softmax_two_quantisers_read(tmp_path: Path) -> None:
@@ -820,6 +869,113 @@ def test_stage_sum_leaves_a_chain_whose_product_another_op_reads(tmp_path: Path)
     assert re.findall(r"= StageSum\[.*rows = \[([\d, ]+)\]", info) == ["1, 1, 2"]
     assert len(re.findall(r"= Mul\[", info)) == 2
     assert len(re.findall(r"= Add\[", info)) == 1
+
+
+BLOCK_HOPS, BLOCK_BANDS = 6, 8
+
+
+class ResBlock(nn.Module):
+    """A ReDimNet2 conv block over a [1, C, T, F] map as its ResBasicBlock runs one, depthwise: a 3x3 and a pointwise
+    convolution, a ReLU and a norm, the two again and a norm, the input added and a ReLU; middle, the first norm's
+    output is an output of its own too."""
+
+    def __init__(self, c: int, middle: bool = False) -> None:
+        super().__init__()
+        self.middle = middle
+        self.conv1, self.conv2 = (nn.Conv2d(c, c, 3, padding=1, groups=c, bias=False) for _ in range(2))
+        self.conv1pw, self.conv2pw = nn.Conv2d(c, c, 1), nn.Conv2d(c, c, 1)
+        self.bn1, self.bn2 = nn.BatchNorm2d(c), nn.BatchNorm2d(c)
+        for bn in (self.bn1, self.bn2):
+            nn.init.uniform_(bn.weight, 0.5, 1.5)
+            nn.init.uniform_(bn.bias, -0.5, 0.5)
+            bn.running_mean.uniform_(-0.5, 0.5)
+            bn.running_var.uniform_(0.5, 2.0)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.bn1(torch.relu(self.conv1pw(self.conv1(x))))
+        z = self.bn2(self.conv2pw(self.conv2(y)))
+        out = torch.relu(z + x)
+        return torch.cat([out, y], dim=1) if self.middle else out
+
+
+def res_block(tmp_path: Path, c: int, middle: bool):
+    """The quantised ResBlock of c channels and a window on its input's int8 grid."""
+    torch.manual_seed(c)
+    rng = np.random.default_rng(c)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, c, BLOCK_HOPS, BLOCK_BANDS)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(ResBlock(c, middle).eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    exponent = ptq_espdl.io_of(graph).input_exponent
+    return graph, ptq_espdl.to_int8(calib[0].numpy(), exponent).astype(np.float32) * np.float32(2.0**exponent)
+
+
+def round_shift(acc: np.ndarray, shift: int) -> np.ndarray:
+    """int8 saturate(round half up(acc / 2^shift)), as tie728_s8_vector_round_result takes a QACC to int8."""
+    if shift:
+        acc = ((acc >> (shift - 1)) + 1) >> 1
+    return np.clip(acc, -128, 127)
+
+
+def conv_block_espdl(x: np.ndarray, values: list[np.ndarray], shifts: list[int]) -> np.ndarray:
+    """ConvBlock's int8 output for x [T, F, C], from its weights and biases as the export lays them and its shifts,
+    each op's integers as esp-dl's S3 kernels give them."""
+    t, f, c = x.shape
+    dw1, pw1, b1, bn, bn_bias, dw2, pw2, b2 = (v.astype(np.int64) for v in values)
+
+    def depthwise(m: np.ndarray, taps: np.ndarray, shift: int) -> np.ndarray:
+        p = np.pad(m, [(1, 1), (1, 1), (0, 0)])
+        return round_shift(
+            sum(p[i : i + t, j : j + f] * taps[3 * i + j, :c] for i in range(3) for j in range(3)), shift
+        )
+
+    def pointwise(m: np.ndarray, laid: np.ndarray, bias: np.ndarray, shift: int) -> np.ndarray:
+        weights = laid.transpose(0, 2, 1).reshape(-1, c)[:c]
+        return round_shift(m @ weights.T + bias[:c], shift)
+
+    x = x.astype(np.int64)
+    a = depthwise(x, dw1, shifts[0])
+    b = np.maximum(pointwise(a, pw1, b1, shifts[1]), 0)
+    d = depthwise(round_shift(b * bn[0, :c] + bn_bias[:c], shifts[2]), dw2, shifts[3])
+    e = pointwise(d, pw2, b2, shifts[4])
+    return np.maximum(np.clip(e + round_shift(x, shifts[5]), -128, 127), 0)
+
+
+@pytest.mark.parametrize("c", [24, 48])
+def test_conv_block_exports_a_block_as_one_op_giving_its_integers(tmp_path: Path, c: int) -> None:
+    graph, x = res_block(tmp_path, c, middle=False)
+    patches = ["requantise_graph_inputs", "aligned_pointwise", "conv_block"]
+    with esp_ppq_patches.applied(patches):
+        path = export_espdl.export(graph, tmp_path / "block.espdl")
+    nodes, tensors = espdl_graph(path)
+    ((_, (_, *params)),) = [node for node in nodes.values() if node[0] == "ConvBlock"]
+    assert not {"Conv", "Add", "Relu", "Reshape", "RequantizeLinear"} & {op for op, _ in nodes.values()}
+    cp = -(-c // 16) * 16
+    taps, pointwise, channels = (9, cp), (cp // 16, c, 16), (cp,)
+    assert [tensors[p].shape for p in params] == [
+        taps,
+        pointwise,
+        channels,
+        (1, cp),
+        channels,
+        taps,
+        pointwise,
+        channels,
+    ]
+    info = path.with_suffix(".info").read_text()
+    shifts = [int(s) for s in re.search(r"= ConvBlock\[.*shifts = \[([-\d, ]+)\]", info).group(1).split(",")]
+    io = ptq_espdl.io_of(graph)
+    want = ptq_espdl.Simulator(graph, patches)(x) / 2.0**io.output_exponent
+    laid = x[0].transpose(1, 2, 0) / 2.0**io.input_exponent
+    values = [tensors[p] for p in params]
+    assert np.array_equal(conv_block_espdl(laid.astype(np.int64), values, shifts), want[0].transpose(1, 2, 0))
+    off = [*shifts[:4], shifts[4] + 1, shifts[5]]
+    assert not np.array_equal(conv_block_espdl(laid.astype(np.int64), values, off), want[0].transpose(1, 2, 0))
+
+
+def test_conv_block_leaves_a_block_whose_middle_map_another_op_reads(tmp_path: Path) -> None:
+    graph, _ = res_block(tmp_path, 24, middle=True)
+    info = export_info(graph, tmp_path / "middle.espdl", ["requantise_graph_inputs", "aligned_pointwise", "conv_block"])
+    assert not re.findall(r"= ConvBlock\[", info)
+    assert len(re.findall(r"= Relu\[", info)) == 1
 
 
 def test_channel_scales_as_mul_weighs_the_channels_by_the_same_integers(tmp_path: Path) -> None:
