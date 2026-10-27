@@ -1,4 +1,4 @@
-# ADR-0025 — `speaker` trên chip: `ConvBlock` mượn RAM nội cho trọng số của nó trong lúc mạng chạy
+# ADR-0025 — `speaker` trên chip: op của `ai_engine` mượn RAM nội cho trọng số trong lúc mạng chạy
 
 - **Trạng thái**: Chấp nhận (chủ repo, 2026-10-28)
 - **Ngày**: 2026-10-28
@@ -8,13 +8,15 @@
 
 ## Bối cảnh
 
-Trên board B, b3 (E11-T35) chạy 3,64 s một cửa sổ, trong đó 21 `ConvBlock` chiếm 2,43 s. Khối của b3 rộng 96, 144 và
-192 kênh, nên hai pointwise của một khối cần 18–74 KB trọng số. Đồ thị đọc trọng số thẳng từ flash (`IN_FLASH`).
+Trên board B, b3 (E11-T35) chạy 3,64 s một cửa sổ, trong đó 21 `ConvBlock` chiếm 2,43 s và 33 `PointwiseS8` 0,53 s.
+Khối của b3 rộng 96, 144 và 192 kênh, nên hai pointwise của một khối cần 18–74 KB trọng số. Vài `PointwiseS8` còn
+lớn hơn: `red_dim` 1728 → 72 cần 138 KB, conv 2016 → 128 cần 258 KB. Đồ thị đọc trọng số thẳng từ flash
+(`IN_FLASH`).
 
 App đo cho ba kết quả (`latency.md` §31):
 - Pointwise với trọng số đã nóng trong cache chạy như nhau dù trọng số ở flash, PSRAM hay RAM nội.
 - dcache của S3 không giữ dòng nóng: đọc 8 KB dữ liệu khác chen giữa hai lượt pointwise 144 kênh làm lượt sau chậm 34%.
-- Mỗi hàng của khối chuyển x, y và các hàng vòng qua cache, nên trọng số liên tục bị đẩy ra và đọc lại từ flash.
+- Mỗi hàng chuyển đầu vào, đầu ra và các hàng giữa qua cache, nên trọng số liên tục bị đẩy ra và đọc lại từ flash.
 
 KẾ HOẠCH §6.5 cấm model chiếm RAM nội. Giữ luật ấy thì phần chậm này không gỡ hết được.
 
@@ -25,31 +27,37 @@ KẾ HOẠCH §6.5 cấm model chiếm RAM nội. Giữ luật ấy thì phần 
 | Như cũ | — | — | 289 / 386 / 106; 21 khối 2,43 s |
 | Chỉ PSRAM: lô R hàng, mỗi pha một pointwise; hàng theo dải P điểm ảnh | giữ luật §6.5 | vòng R + 2 hàng ở PSRAM, tới ~0,5 MB; stage nhỏ chậm đi | 215 / 222 / 35; 21 khối ~1,6 s 🔬 |
 | Khoá dòng cache bằng hàm ROM `Cache_Lock_DCache_Items` | không tốn RAM nội | IDF dặn không gọi trong ứng dụng; cache dùng chung hai nhân, AFE và `wake` ở nhân kia mất phần cache bị khoá | chưa đo |
-| **Mượn RAM nội trong lúc mạng chạy; hàng theo dải 4 điểm ảnh** | khối nhanh như khi trọng số ở RAM nội | trái luật §6.5; mỗi lượt chạy cần ≤ 77 KB RAM nội liền | 149 / 118 / 14, kể cả lần chép; 21 khối ~0,93 s 🔬 |
+| **Mượn RAM nội trong lúc mạng chạy; hàng theo dải 4 điểm ảnh** | khối nhanh như khi trọng số ở RAM nội | trái luật §6.5; mỗi lượt chạy cần 79 680 B RAM nội liền | 149 / 118 / 14, kể cả lần chép; 21 khối 919 ms đo |
+
+Cùng vùng mượn, `PointwiseS8` theo lát chép vào đó trên app đo: `red_dim` 42,4 → 17,1 ms, conv 2016 → 128 87,7 →
+29,0 ms, `head` 44,8 → 23,0 ms.
 
 ## Quyết định
 
-Chủ repo chọn mượn RAM nội ngày 28/10. Chi tiết ở KẾ HOẠCH §3.14 và §6.5.
+Chủ repo chọn mượn RAM nội cho `ConvBlock` ngày 28/10, rồi cùng ngày cho `PointwiseS8` mượn cùng vùng ấy. Chi tiết ở
+KẾ HOẠCH §3.14 và §6.5; mã ở `espdl_loan`.
 
-- **Ai mượn:** khối chạy nhân chung, tức C khác 24 và 48. Mỗi khối ghi lại số byte nó cần lúc dựng.
-- **Cấp và nhả:** `EspdlNet::step` của đồ thị có khối như thế cấp một vùng RAM nội cỡ khối lớn nhất ngay trước lượt
-  chạy, và nhả ngay sau lượt ấy. Các khối mượn vùng ấy lần lượt.
-- **Mỗi khối chép vào đó lúc bắt đầu** mọi trọng số nó đọc ở từng điểm ảnh:
+- **Ai xin:** khối `ConvBlock` chạy nhân chung, tức C khác 24 và 48. Mỗi khối xin lúc dựng số byte mọi trọng số nó
+  đọc ở từng điểm ảnh:
   - tap của hai depthwise;
   - hai pointwise;
   - các bias và BN;
   - conv trước khối, nếu có.
-
-  b3 cần tới 77 KB (stage 5); lần chép mất 2,5 ms.
-- **Cấp không được** thì khối đọc trọng số tại chỗ: chậm hơn, cùng kết quả.
-- **Mỗi hàng chạy theo dải 4 điểm ảnh:** depthwise rồi pointwise của một dải xong mới sang dải sau.
+- **Cấp và nhả:** `EspdlNet::step` của đồ thị có lần xin cấp một vùng RAM nội cỡ lần xin lớn nhất ngay trước lượt
+  chạy, và nhả ngay sau lượt ấy. b3 cần 79 680 B (stage 5).
+- **Ai mượn:**
+  - mỗi khối chép trọng số của nó vào vùng ấy lúc bắt đầu;
+  - `PointwiseS8` nhân có vòng không xin thêm byte nào. Nó chạy theo lát vừa vùng ấy, chép trọng số và bias của mỗi
+    lát vào đó trước khi chạy lát.
+- **Cấp không được** thì op đọc trọng số tại chỗ: chậm hơn, cùng kết quả.
+- **Dải:** khối nhân chung chạy mỗi hàng theo dải 4 điểm ảnh, depthwise rồi pointwise của một dải xong mới sang dải sau.
 
 ## Hệ quả
 
-- **§6.5 có ngoại lệ thứ hai** cho luật mọi model ở PSRAM. Ngoại lệ chỉ sống trong lúc `speaker` chạy.
-- **Cần đo trên firmware sản phẩm** RAM nội liền còn lại lúc `xac_task` chạy speaker. Không đủ 77 KB thì speaker chậm
-  lại chứ không sai.
-- **b0 không đổi:** khối 24 và 48 kênh chạy nhân trải phẳng và không mượn.
+- **§6.5 có ngoại lệ thứ hai** cho luật mọi model ở PSRAM. Ngoại lệ chỉ sống trong lúc mạng chạy.
+- **Cần đo trên firmware sản phẩm** RAM nội liền còn lại lúc `xac_task` chạy speaker. Không đủ 79 680 B thì speaker
+  chậm lại chứ không sai.
+- **b0 không đổi:** khối 24 và 48 kênh chạy nhân trải phẳng, không xin nên đồ thị b0 không có vùng mượn.
 - **Xét lại** khi:
   - RAM nội lúc chạy speaker không đủ chỗ;
-  - hay một model khác cũng cần mượn.
+  - hay một model khác, hoặc một op khác, cũng cần mượn.
