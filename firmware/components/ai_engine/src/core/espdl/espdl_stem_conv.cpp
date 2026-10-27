@@ -1,5 +1,6 @@
 #include "core/espdl/espdl_stem_conv.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -30,16 +31,18 @@ constexpr int kWordBytes = 4;
 constexpr size_t kAlignBytes = 16;
 constexpr int kTaps = 9;
 constexpr int kRing = 3;
+constexpr int kBiasBytes = 64; // 16 channels' bias in esp-dl's QACC layout
 
 enum Input { kX = 0, kTapsIn, kBias, kInputs };
 enum Run { kRunBias = 3, kRunSize = 4 };
 
-// Inputs as esp_ppq_patches.stem_conv_from writes them: x [1, T, F, 1], the taps [9][16] and bias [16] of the
-// C channels padded with zeros; output [1, T, F, C].
+// Inputs as esp_ppq_patches.stem_conv_from writes them: x [1, T, F, 1], the taps [V * 9][16] and bias [V *
+// 16] of the C channels padded with zeros, V = ceil(C / 16); output [1, T, F, C].
 class StemConv final : public dl::module::Module {
   public:
     StemConv(const char *name, int shift, int channels)
-        : Module(name, dl::MODULE_NON_INPLACE, dl::QUANT_TYPE_SYMM_8BIT), shift_(shift), channels_(channels)
+        : Module(name, dl::MODULE_NON_INPLACE, dl::QUANT_TYPE_SYMM_8BIT), shift_(shift), channels_(channels),
+          vectors_((channels + kStep - 1) / kStep)
     {}
 
     ~StemConv() override
@@ -63,24 +66,20 @@ class StemConv final : public dl::module::Module {
         dl::TensorBase *y = context->get_tensor(m_outputs_index[0]);
         if (!built_ && !build(context, x, y)) { return; }
         const int8_t *taps = context->get_tensor(m_inputs_index[kTapsIn])->get_element_ptr<int8_t>();
-        run_[kRunBias] =
-            reinterpret_cast<int32_t>(context->get_tensor(m_inputs_index[kBias])->get_element_ptr());
+        const int8_t *bias = context->get_tensor(m_inputs_index[kBias])->get_element_ptr<int8_t>();
         const int8_t *xs = x->get_element_ptr<int8_t>();
         int8_t *ys = y->get_element_ptr<int8_t>();
         memset(rows_, 0, kRing * padded_row_);
         spread(0, xs);
-        const int words = channels_ / kWordBytes;
         for (int t = 0; t < frames_; t++) {
             spread(t + 1, xs);
             const int8_t *window[kRing] = {row(t - 1), row(t), row(t + 1)};
-            ai_engine_dw3x3_bias_row_s8_esp32s3(convolved_, window, taps, run_.data());
-            const uint32_t *from = reinterpret_cast<const uint32_t *>(convolved_);
-            uint32_t *to = reinterpret_cast<uint32_t *>(ys + t * width_ * channels_);
-            for (int f = 0; f < width_; f++) {
-                for (int w = 0; w < words; w++) {
-                    to[f * words + w] = from[f * (kStep / kWordBytes) + w];
-                }
+            for (int v = 0; v < vectors_; v++) {
+                run_[kRunBias] = reinterpret_cast<int32_t>(bias + v * kBiasBytes);
+                ai_engine_dw3x3_bias_row_s8_esp32s3(convolved_ + v * width_ * kStep, window,
+                                                    taps + v * kTaps * kStep, run_.data());
             }
+            interleave(ys + t * width_ * channels_);
         }
     }
 
@@ -97,10 +96,12 @@ class StemConv final : public dl::module::Module {
         fbs_model->get_operation_attribute(node_name, "shift", shift);
         fbs_model->get_operation_attribute(node_name, "channels", channels);
         fbs_model->get_operation_attribute(node_name, "quant_type", quant_type);
-        if (quant_type != dl::QUANT_TYPE_SYMM_8BIT || shift < 1 || channels <= 0 || channels > kStep ||
+        if (quant_type != dl::QUANT_TYPE_SYMM_8BIT || shift < 1 || channels <= 0 ||
             channels % kWordBytes != 0) {
-            ESP_LOGE(TAG, "%s: only an int8 stem of shift 1 or more into up to 16 channels runs as StemConv",
-                     node_name.c_str());
+            ESP_LOGE(
+                TAG,
+                "%s: only an int8 stem of shift 1 or more into a multiple of 4 channels runs as StemConv",
+                node_name.c_str());
             return nullptr;
         }
         return new StemConv(node_name.c_str(), shift, channels);
@@ -110,6 +111,22 @@ class StemConv final : public dl::module::Module {
     int8_t *row(int t) const noexcept
     {
         return rows_ + ((t + kRing) % kRing) * padded_row_;
+    }
+
+    // The convolved row's 16-channel planes into C channels a pixel.
+    void interleave(int8_t *out) const noexcept
+    {
+        uint32_t *to = reinterpret_cast<uint32_t *>(out);
+        for (int f = 0; f < width_; f++) {
+            for (int v = 0; v < vectors_; v++) {
+                const uint32_t *from =
+                    reinterpret_cast<const uint32_t *>(convolved_ + (v * width_ + f) * kStep);
+                const int words = std::min(kStep, channels_ - v * kStep) / kWordBytes;
+                for (int w = 0; w < words; w++) {
+                    *to++ = from[w];
+                }
+            }
+        }
     }
 
     // Row t of x spread into its ring slot past the zero pixel at its start; zeros past the frames.
@@ -129,18 +146,18 @@ class StemConv final : public dl::module::Module {
         dl::TensorBase *bias = context->get_tensor(m_inputs_index[kBias]);
         if (m_inputs_index.size() != kInputs || x->shape.size() != kRank || x->shape[3] != 1 ||
             y->shape.size() != kRank || y->shape[3] != channels_ || x->get_dtype() != dl::DATA_TYPE_INT8 ||
-            y->get_dtype() != dl::DATA_TYPE_INT8 || taps->get_size() != kTaps * kStep ||
-            bias->get_size() != kStep) {
-            ESP_LOGE(TAG, "%s: not an int8 [1, T, F, 1] map into up to 16 channels", name);
+            y->get_dtype() != dl::DATA_TYPE_INT8 || taps->get_size() != vectors_ * kTaps * kStep ||
+            bias->get_size() != vectors_ * kStep) {
+            ESP_LOGE(TAG, "%s: not an int8 [1, T, F, 1] map into %d channels", name, channels_);
             return false;
         }
         frames_ = x->shape[1];
         width_ = x->shape[2];
         padded_row_ = (width_ + 2) * kStep;
         bias->reset_bias_layout(quant_type, true);
-        // A ring of three spread rows, then the convolved row.
+        // A ring of three spread rows, then the convolved row's planes.
         rows_ = static_cast<int8_t *>(heap_caps_aligned_calloc(
-            kAlignBytes, kRing * padded_row_ + width_ * kStep, 1, MALLOC_CAP_SPIRAM));
+            kAlignBytes, kRing * padded_row_ + vectors_ * width_ * kStep, 1, MALLOC_CAP_SPIRAM));
         if (rows_ == nullptr) {
             ESP_LOGE(TAG, "%s: no memory for the spread rows", name);
             return false;
@@ -153,6 +170,7 @@ class StemConv final : public dl::module::Module {
 
     int shift_;
     int channels_;
+    int vectors_; // 16-channel passes
     int frames_ = 0;
     int width_ = 0;
     int padded_row_ = 0;
