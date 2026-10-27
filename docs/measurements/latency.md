@@ -775,7 +775,8 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
 | Depthwise 3×3 của `ConvBlock` từng vector qua cả hàng, tap 0–3 giữ trong thanh ghi | 391,5 ms | 1 439 452 B | 21 khối 151,5 → 145,4 ms |
 | `PointwiseS8` nhận conv 2×2 bước 2 của stage 3 theo mảnh | 388,3 ms | 1 443 560 B | 7,8 → 4,8 ms; conv 4×2 của stage 5 (trọng số 37 KB) chạy theo mảnh 8,3 ms, esp-dl 7,9 ms, nên giữ esp-dl |
 | Softmax theo nhóm 64 cột, chuẩn hoá khi các hàng còn trong cache; lượt tổng xen 8 cột từng bước | 386,0 ms | 1 443 560 B | softmax của pool 8,2 → 7,0 ms, `AttentionCore` 24,5 → 23,5 ms |
-| `ConvBlock` nhận conv 1×1 đầu và cuối stage 0, đầu stage 1 (trọng số gốc lấy lại từ dạng gộp cột) | **366,9 ms** | **1 410 952 B** | ba `PointwiseS8` gộp cột (8,1, 7,8 và 4,8 ms) bỏ; khối nhận chúng 21,4, 23,2 và 11,2 ms, từ 22,2, 22,1 và 10,4 |
+| `ConvBlock` nhận conv 1×1 đầu và cuối stage 0, đầu stage 1 (trọng số gốc lấy lại từ dạng gộp cột) | 366,9 ms | 1 410 952 B | ba `PointwiseS8` gộp cột (8,1, 7,8 và 4,8 ms) bỏ; khối nhận chúng 21,4, 23,2 và 11,2 ms, từ 22,2, 22,1 và 10,4 |
+| `PointwiseS8` nhận `Concat` của các lát conv pool, chạy theo lát khối ghi thẳng cột của lát trong hàng ra | **364,2 ms** | **1 408 280 B** | `Concat` 3,2 → 0,1 ms; `frames` 8,1 → 7,8 ms, `linear2` 8,4 → 5,8 ms |
 
 - **`SoftmaxQuant`:** bảng `exp` và nghịch đảo tổng như esp-dl. Xác suất không âm, nên `floor(v + 0,5)` của esp-dl là
   phép cắt của tổng float `v + 0,5`: dưới 2^22 tổng ấy không làm tròn sang phần nguyên khác. Mỗi lượt chuẩn hoá tính 4
@@ -809,7 +810,10 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
   trong thanh ghi cộng nhánh dư 0,11–0,12; esp-dl 0,13–0,45. Bỏ hẳn `aligned_pointwise` thì ba conv 12 kênh của stage
   0 và 1 rơi về nhân không căn của esp-dl, 2–3 chu kỳ một phép nhân-cộng, cửa sổ lên 472,6 ms; nên `aligned_pointwise`
   chỉ để nguyên cột các conv `PointwiseS8` nhận. `exp_dim` với `Add` 9,6 → 6,3 ms ở stage 0 và 1, `red_dim` 4,5 →
-  3,4 ms; ba conv gộp cột 12 kênh còn 8,1, 7,8 và 4,8 ms, phần lớn là ghi map 256 KB ra PSRAM.
+  3,4 ms; ba conv gộp cột 12 kênh còn 8,1, 7,8 và 4,8 ms, phần lớn là ghi map 256 KB ra PSRAM. Hai conv của pool
+  (trọng số 72 KB, lát 48/48/32 và 3 × 192 cột) thành một op mỗi conv, lát nào cũng qua mọi hàng rồi ghi đúng cột
+  của mình: `linear2` bớt đúng phần `Concat` chép map 85 KB (2,6 ms); `frames` chỉ bớt 0,3 ms vì mỗi lát vẫn đọc lại
+  map vào 85 KB, lớn hơn dcache.
 - **Depthwise theo thời gian của TCM** (24 conv, kernel 7–59, cùng Gelu sau nó; ~7,6 ms): một op riêng có nhân
   khớp từng bit, 0,05–0,18 ms một op trên app đo, nhưng cả op 0,2–0,6 ms, 24 op 8,6 ms, cửa sổ 366,9 → 367,7 ms. Phần
   thêm là bộ đệm riêng của mỗi op trong PSRAM (hàng vào đệm lên 32 kênh, hàng ra, ~10 KB) nạp nguội mỗi lần chạy, và
