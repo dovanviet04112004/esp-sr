@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/espdl/espdl_loan.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -86,6 +87,11 @@ bool aligned(const void *p) noexcept
     return reinterpret_cast<uintptr_t>(p) % kVectorAlignBytes == 0;
 }
 
+int32_t word_of(const void *p) noexcept
+{
+    return static_cast<int32_t>(reinterpret_cast<uintptr_t>(p));
+}
+
 // Inputs as esp_ppq_patches.pointwise_s8_from lays them: rows [..., K] or [1, T, F, C] in "patch" patches,
 // weights [Np / 16][K][16], bias [Np] if "biased", residual if "residual_shift" >= 0; Np: "columns" padded.
 class PointwiseS8 final : public dl::module::Module {
@@ -127,8 +133,9 @@ class PointwiseS8 final : public dl::module::Module {
                 context->get_tensor(m_inputs_index[2 + biased_])->get_element_ptr());
         }
         const int8_t *weights = context->get_tensor(m_inputs_index[1])->get_element_ptr<int8_t>();
+        const Loan loan = kernel_ == ai_engine_pw_conv_rows_s8_esp32s3 ? loan_lent() : Loan{nullptr, 0};
         if (!patched()) {
-            run_slices(y->get_element_ptr<int8_t>(), x->get_element_ptr<int8_t>(), weights);
+            run_slices(y->get_element_ptr<int8_t>(), x->get_element_ptr<int8_t>(), weights, loan);
             return;
         }
         const int8_t *xs = x->get_element_ptr<int8_t>();
@@ -137,8 +144,14 @@ class PointwiseS8 final : public dl::module::Module {
             for (int t = 0; t < out_rows_; t++) {
                 gather(xs, t, gathered_ + t * patches_ * inputs_);
             }
-            run_slices(ys, gathered_, weights);
+            run_slices(ys, gathered_, weights, loan);
             return;
+        }
+        const int blocks = padded(columns_) / kChannelStep;
+        run_[kRunBias] = word_of(bias_);
+        if (loan.bytes >= blocks * (block_bytes() + kBiasBlockBytes)) {
+            weights = borrowed(weights, 0, blocks, loan);
+            run_[kRunBias] = word_of(loan.mem + blocks * block_bytes());
         }
         for (int t = 0; t < out_rows_; t++) {
             gather(xs, t, gathered_);
@@ -185,23 +198,41 @@ class PointwiseS8 final : public dl::module::Module {
         return patch_[0] * patch_[1] > 1;
     }
 
-    void run_slices(int8_t *ys, const int8_t *xs, const int8_t *weights) noexcept
+    // Every block over the rows, a slice at a time: as many blocks as the loan holds when one is lent, else
+    // the dcache's slices.
+    void run_slices(int8_t *ys, const int8_t *xs, const int8_t *weights, const Loan &loan) noexcept
     {
-        if (slice_blocks_ == 0) {
-            kernel_(ys, xs, weights, run_.data());
-            return;
-        }
         const int blocks = padded(columns_) / kChannelStep;
+        const int lent = static_cast<int>(loan.bytes / (block_bytes() + kBiasBlockBytes));
+        const int per = lent > 0 ? std::min(lent, blocks) : (slice_blocks_ > 0 ? slice_blocks_ : blocks);
         const bool half = columns_ % kChannelStep != 0;
-        for (int b = 0; b < blocks; b += slice_blocks_) {
-            const int n = std::min(slice_blocks_, blocks - b);
+        for (int b = 0; b < blocks; b += per) {
+            const int n = std::min(per, blocks - b);
             const bool last = b + n == blocks;
+            const int8_t *slice = weights + b * block_bytes();
+            run_[kRunBias] = word_of(bias_ + b * kBiasBlockBytes);
+            if (lent > 0) {
+                slice = borrowed(weights, b, n, loan);
+                run_[kRunBias] = word_of(loan.mem + n * block_bytes());
+            }
             run_[kRunBlocks] = n;
-            run_[kRunBias] = bias_at_ + b * kBiasBlockBytes;
             run_[kRunLast] = !half ? kChannelStep : (last ? kHalfStep : kAllHalves);
             run_[kRunSkip] = columns_ - n * kChannelStep + (half && last ? kHalfStep : 0);
-            kernel_(ys + b * kChannelStep, xs, weights + b * inputs_ * kChannelStep, run_.data());
+            kernel_(ys + b * kChannelStep, xs, slice, run_.data());
         }
+    }
+
+    size_t block_bytes() const noexcept
+    {
+        return static_cast<size_t>(inputs_) * kChannelStep;
+    }
+
+    // Blocks b .. b + n - 1 of the weights, then their bias, copied to the start of the loan.
+    const int8_t *borrowed(const int8_t *weights, int b, int n, const Loan &loan) const noexcept
+    {
+        memcpy(loan.mem, weights + b * block_bytes(), n * block_bytes());
+        memcpy(loan.mem + n * block_bytes(), bias_ + b * kBiasBlockBytes, n * kBiasBlockBytes);
+        return loan.mem;
     }
 
     // Weights past the data cache run as slices of half of it, as even as cache_sized_convolutions lays them.
@@ -272,7 +303,7 @@ class PointwiseS8 final : public dl::module::Module {
         }
         if (bias != nullptr) {
             bias->reset_bias_layout(quant_type, true);
-            bias_at_ = reinterpret_cast<int32_t>(bias->get_element_ptr());
+            bias_ = bias->get_element_ptr<int8_t>();
         } else {
             zero_bias_ = static_cast<int8_t *>(heap_caps_aligned_calloc(kVectorAlignBytes, np / kChannelStep,
                                                                         kBiasBlockBytes, MALLOC_CAP_SPIRAM));
@@ -280,7 +311,7 @@ class PointwiseS8 final : public dl::module::Module {
                 ESP_LOGE(TAG, "%s: no memory for a zero bias of %d outputs", name, np);
                 return false;
             }
-            bias_at_ = reinterpret_cast<int32_t>(zero_bias_);
+            bias_ = zero_bias_;
         }
         const int vectors = k / kChannelStep;
         run_ = {rows,
@@ -289,7 +320,7 @@ class PointwiseS8 final : public dl::module::Module {
                 vectors - 1,
                 0,
                 shift_,
-                bias_at_,
+                word_of(bias_),
                 0,
                 residual_shift_,
                 columns_ % kChannelStep != 0 ? kHalfStep : kChannelStep,
@@ -328,7 +359,7 @@ class PointwiseS8 final : public dl::module::Module {
     int patches_ = 0;
     int inputs_ = 0;
     int slice_blocks_ = 0; // 0: all blocks in one pass over the rows
-    int32_t bias_at_ = 0;
+    const int8_t *bias_ = nullptr;
     int8_t *gathered_ = nullptr;  // patches as rows of K: one output row's, all when sliced
     int8_t *zero_bias_ = nullptr; // QACC-layout zeros when the convolution has no bias
     std::array<int32_t, kRunSize> run_ = {};
