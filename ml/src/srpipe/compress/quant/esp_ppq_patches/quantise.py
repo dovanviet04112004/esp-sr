@@ -1,0 +1,248 @@
+"""Fixes to ESP-PPQ's quantisation and the rewrites ahead of it: graph inputs, streaming caches, passive ops,
+onnxsim, GELU as one table."""
+
+from __future__ import annotations
+
+import contextlib
+import functools
+import math
+from collections.abc import Iterator
+
+from .base import CONV_TIME_AXIS
+
+
+def requantise_graph_input_readers(op, graph) -> None:
+    """Requantise each graph input op reads at another scale than the input's first reader, whose scale esp-dl gives
+    the input."""
+    import torch
+    from esp_ppq.IR.quantize import QuantableOperation
+    from esp_ppq.parser.espdl.espdl_graph_utils import insert_requantize_node
+    from esp_ppq.parser.espdl.espdl_typedef import QUANT_OP_SET, ExporterPatternInfo
+    from esp_ppq.parser.espdl.export_patterns import EspdlQuantHelper
+
+    def exportable(config, var) -> bool:
+        return EspdlQuantHelper.TQC_Exportable_Check(TQC=config, bounded_var=var)
+
+    if not isinstance(op, QuantableOperation) or op.type in QUANT_OP_SET:
+        return
+    for config, var in list(zip(op.input_quant_config, op.inputs, strict=True)):
+        if var.name not in graph.inputs or var.source_op is not None or not exportable(config, var):
+            continue
+        readers = [o for o in graph.topological_sort() if isinstance(o, QuantableOperation) and var in o.inputs]
+        pairs = (pair for o in readers for pair in zip(o.input_quant_config, o.inputs, strict=True))
+        upstream = next(c for c, v in pairs if v is var and exportable(c, v))
+        if upstream.num_of_bits == config.num_of_bits and torch.equal(upstream.scale, config.scale):
+            continue
+        created = insert_requantize_node(graph=graph, var=var, upstream_config=upstream, config=config, op=op)
+        info = ExporterPatternInfo()
+        if perm := info.get_var_permute(var.name):
+            info.add_var_permute(created.outputs[0].name, perm)
+
+
+@contextlib.contextmanager
+def requantise_graph_inputs() -> Iterator[None]:
+    """InsertRequantNodePattern requantises only variables an op produces, so a graph input two readers take at two
+    scales reaches esp-dl at the first reader's, and an Add or Sub aligned to its output adds integers of two scales.
+    Board B, ctc_lay (the layer reads its input in a Conv, an Add and the bypass Sub): model->test() off by 8 steps.
+    """
+    from esp_ppq.parser import espdl_exporter
+
+    base = espdl_exporter.InsertRequantNodePattern
+
+    class Pattern(base):
+        def export(self, op, graph, **kwargs):
+            op = super().export(op, graph, **kwargs)
+            requantise_graph_input_readers(op, graph)
+            return op
+
+    espdl_exporter.InsertRequantNodePattern = Pattern
+    try:
+        yield
+    finally:
+        espdl_exporter.InsertRequantNodePattern = base
+
+
+@contextlib.contextmanager
+def conv_caches_along_time() -> Iterator[None]:
+    """A cache registered without a frame axis takes the graph input's, which is the channel axis of a convolution's
+    tensor once the input reaches the convolutions through a layout-agnostic op; this gives such caches time.
+    Board B, ctc_net (a Slice feeds the front's 2D convolutions): esp-dl asserts in Reshape while building.
+    """
+    from esp_ppq.parser.espdl.espdl_streaming import StreamingTable
+
+    add = StreamingTable.add
+
+    def along_time(self, var_name, op_name, window_size, frame_axis=None):
+        return add(self, var_name, op_name, window_size, CONV_TIME_AXIS if frame_axis is None else frame_axis)
+
+    StreamingTable.add = along_time
+    try:
+        yield
+    finally:
+        StreamingTable.add = add
+
+
+@contextlib.contextmanager
+def fuse_passive_ops_on_graph_inputs() -> Iterator[None]:
+    """QuantizeFusionPass gives each passive op its input's scale, except one that reads a graph input, which ESP-PPQ
+    then rescales at its output; esp-dl's passive modules copy integers, so the chip skips that rescale.
+    Board B, command_ctc on percentile: the pitch Slice at 2^-4 under the features' 2^-3, the pitch halved on chip.
+    """
+    from esp_ppq.core import PASSIVE_OPERATIONS
+    from esp_ppq.IR.quantize import QuantableOperation
+    from esp_ppq.quantization.optim import QuantizeFusionPass
+
+    optimize = QuantizeFusionPass.optimize
+
+    def fused(self, graph, **kwargs):
+        optimize(self, graph, **kwargs)
+        for op in graph.operations.values():
+            reads_input = isinstance(op, QuantableOperation) and op.inputs[0].source_op is None
+            if self.fuse_passive_op and op.type in PASSIVE_OPERATIONS and reads_input:
+                for config in op.output_quant_config:
+                    config.dominated_by = op.input_quant_config[0]
+
+    QuantizeFusionPass.optimize = fused
+    try:
+        yield
+    finally:
+        QuantizeFusionPass.optimize = optimize
+
+
+def scalar_and_other(op):
+    """op's one single-valued parameter and its other input, or None when op has not exactly that."""
+    params = [v for v in op.inputs if v.is_parameter and v.value is not None and v.value.numel() == 1]
+    others = [v for v in op.inputs if not v.is_parameter]
+    if len(params) != 1 or len(others) != 1:
+        return None
+    return float(params[0].value.flatten()[0]), others[0]
+
+
+def tanh_gelu_chain(tanh):
+    """The input, output and ops of torch's tanh GELU around tanh, 0.5 x (1 + tanh(sqrt(2/pi) (x + 0.044715 x^3))) as
+    torch exports it, or None when tanh is not in one."""
+
+    def made_by(var, kind, value=None):
+        op = var.source_op
+        if op is None or op.type != kind or len(var.dest_ops) != 1:
+            return None
+        split = scalar_and_other(op) if value is not None else None
+        if value is not None and (split is None or not math.isclose(split[0], value, rel_tol=1e-6)):
+            return None
+        return op, (split[1] if split else None)
+
+    def used_by(var, kind, value=None):
+        if len(var.dest_ops) != 1 or var.dest_ops[0].type != kind:
+            return None
+        op = var.dest_ops[0]
+        if value is not None:
+            split = scalar_and_other(op)
+            if split is None or not math.isclose(split[0], value, rel_tol=1e-6):
+                return None
+        return op
+
+    found = made_by(tanh.inputs[0], "Mul", math.sqrt(2 / math.pi))
+    inner = found and made_by(found[1], "Add")
+    if not inner:
+        return None
+    for term in inner[0].inputs:
+        cube = made_by(term, "Mul", 0.044715)
+        power = cube and made_by(cube[1], "Pow")
+        if not power or scalar_and_other(power[0]) is None or scalar_and_other(power[0])[0] != 3.0:
+            continue
+        x = scalar_and_other(power[0])[1]
+        if x not in inner[0].inputs:
+            continue
+        plus_one = used_by(tanh.outputs[0], "Add", 1.0)
+        product = plus_one and used_by(plus_one.outputs[0], "Mul")
+        half = product and next((v for v in product.inputs if v is not plus_one.outputs[0]), None)
+        halved = half is not None and made_by(half, "Mul", 0.5)
+        if not halved or halved[1] is not x:
+            return None
+        return x, product.outputs[0], [halved[0], power[0], cube[0], inner[0], found[0], tanh, plus_one, product]
+    return None
+
+
+@contextlib.contextmanager
+def fuse_tanh_gelu() -> Iterator[None]:
+    """ESP-PPQ formats an ONNX graph without fusing torch's tanh GELU, so its Pow runs in float with a quantise and a
+    dequantise around it and Mul, Add and Tanh each round once; this fuses each chain into one Gelu with approximate
+    tanh, simulated and tabled for esp-dl as that function. ReDimNet2 b0 (KEHOACH 3.17): six such feed-forward
+    activations in the attention blocks.
+    """
+    from esp_ppq.api import interface
+    from esp_ppq.executor.base import OPERATION_FORWARD_TABLE
+    from torch.nn import functional
+
+    format_graph = interface.format_graph
+
+    def formatted(graph):
+        graph = format_graph(graph)
+        for tanh in [op for op in graph.operations.values() if op.type == "Tanh"]:
+            chain = tanh_gelu_chain(tanh) if tanh.name in graph.operations else None
+            if chain is None:
+                continue
+            x, out, ops = chain
+            inner = [v for op in ops for v in op.outputs if v is not out]
+            for op in ops:
+                graph.remove_operation(op)
+            for var in inner:
+                graph.remove_variable(var)
+            graph.create_operation(op_type="Gelu", attributes={"approximate": "tanh"}, inputs=[x], outputs=[out])
+        return graph
+
+    def gelu(op, values, ctx=None, **kwargs):
+        return functional.gelu(values[0], approximate=op.attributes.get("approximate", "none"))
+
+    tables = list({id(t): t for t in OPERATION_FORWARD_TABLE.values()}.values())
+    simulated = [table.get("Gelu") for table in tables]
+    interface.format_graph = formatted
+    for table in tables:
+        table["Gelu"] = gelu
+    try:
+        yield
+    finally:
+        interface.format_graph = format_graph
+        for table, simulate in zip(tables, simulated, strict=True):
+            table["Gelu"] = simulate
+
+
+@contextlib.contextmanager
+def simplify_without_bn_fusion() -> Iterator[None]:
+    """espdl_quantize_onnx simplifies the ONNX with onnxsim's defaults, whose fuse_bn pass leaves a tensor whose stored
+    shape differs in rank from the one inferred after it; this runs onnxsim without that pass, ESP-PPQ fusing the
+    norms itself. ReDimNet2 b0 (KEHOACH 3.17): "[ShapeInferenceError] Inferred shape and existing shape differ in rank:
+    (3) vs (2)" before quantisation starts, on the PC.
+    """
+    from esp_ppq.api import espdl_interface
+
+    simplify = espdl_interface.simplify
+    espdl_interface.simplify = functools.partial(simplify, skip_fuse_bn=True)
+    try:
+        yield
+    finally:
+        espdl_interface.simplify = simplify
+
+
+@contextlib.contextmanager
+def fuse_erf_gelu() -> Iterator[None]:
+    """ESP-PPQ formats an ONNX graph without fusing GELU, so torch's Div, Erf, Add, Mul, Mul stay, and esp-dl has no
+    Erf; this fuses them into one Gelu by ESP-PPQ's own GraphMerger.fuse_gelu, which esp-dl runs as an int8 table
+    of the exact function. ReDimNet2 b0 (KEHOACH 3.17) on board B: "Do not support Erf, please implement and register
+    it first", the model never loads.
+    """
+    from esp_ppq.api import interface
+    from esp_ppq.IR.morph import GraphMerger
+
+    format_graph = interface.format_graph
+
+    def formatted(graph):
+        graph = format_graph(graph)
+        GraphMerger(graph).fuse_gelu()
+        return graph
+
+    interface.format_graph = formatted
+    try:
+        yield
+    finally:
+        interface.format_graph = format_graph
