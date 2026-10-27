@@ -770,7 +770,8 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
 | `WeightedStats`: x·x, p·x, p·(x·x) và hai `ReduceSum` theo thời gian của pool | 473,8 ms | 1 427 400 B | 2,9 ms thay 3 Mul và 2 ReduceSum (~18,5 ms) |
 | `GlobalStats`: trung bình theo thời gian và trung bình bình phương lệch tâm của pool | 462,9 ms | 1 427 444 B | 3,2 ms thay 2 ReduceMean, RequantizeLinear, Sub và Mul (~14,5 ms) |
 | `LayerNormS8` hai vị trí một lượt bằng nhân asm, các bước Newton của hai vị trí xen từng lệnh | 439,0 ms | 1 470 804 B | 19 op 55,6 → 31,6 ms, stem 44,2 → 25,1 ms; mỗi op giữ độ lệch float của một khối 16 vị trí |
-| Pointwise của `ConvBlock` 24 và 48 kênh trải phẳng, thanh ghi trọng số nạp trước hai bước | **418,2 ms** | **1 470 804 B** | 21 khối 171,9 → 151,0 ms; khối stage 0 26,7 → 23,2 ms |
+| Pointwise của `ConvBlock` 24 và 48 kênh trải phẳng, thanh ghi trọng số nạp trước hai bước | 418,2 ms | 1 470 804 B | 21 khối 171,9 → 151,0 ms; khối stage 0 26,7 → 23,2 ms |
+| `PointwiseS8`: mọi conv 1×1 còn lại, cùng `Add` dư sau nó khi 24 hay 48 kênh vào | **397,2 ms** | **1 439 452 B** | 47 op 81,7 ms thay ~94 ms Conv và 13 Add dư; Conv còn 21,9 ms, Add 1,0 ms |
 
 - **`SoftmaxQuant`:** bảng `exp` và nghịch đảo tổng như esp-dl. Xác suất không âm, nên `floor(v + 0,5)` của esp-dl là
   phép cắt của tổng float `v + 0,5`: dưới 2^22 tổng ấy không làm tròn sang phần nguyên khác. Mỗi lượt chuẩn hoá tính 4
@@ -793,6 +794,11 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
   Mã trải phẳng không chậm hơn vòng phần cứng (1,02 so với 1,00 chu kỳ một lệnh). Nhân trải phẳng một điểm ảnh, đầu vào
   giữ trong thanh ghi: 24 kênh BN 150 → 113, nhánh dư 147 → 94; 48 kênh 301 → 243 và 293 → 209 chu kỳ một điểm ảnh.
   96 kênh chỉ bớt ~12% mà mã dài 2,6 KB mỗi nhân, nên giữ nhân chung.
+- **`PointwiseS8`:** trên app đo, nhân có vòng với K bội 16 chạy 0,083–0,093 chu kỳ một phép nhân-cộng; K = 24 giữ
+  trong thanh ghi cộng nhánh dư 0,11–0,12; esp-dl 0,13–0,45. Bỏ hẳn `aligned_pointwise` thì ba conv 12 kênh của stage
+  0 và 1 rơi về nhân không căn của esp-dl, 2–3 chu kỳ một phép nhân-cộng, cửa sổ lên 472,6 ms; nên `aligned_pointwise`
+  chỉ để nguyên cột các conv `PointwiseS8` nhận. `exp_dim` với `Add` 9,6 → 6,3 ms ở stage 0 và 1, `red_dim` 4,5 →
+  3,4 ms; ba conv gộp cột 12 kênh còn 8,1, 7,8 và 4,8 ms, phần lớn là ghi map 256 KB ra PSRAM.
 - **`MatMulS8`:** MatMul của esp-dl với 24 cột chạy 16 cột qua nhân unaligned, 8 cột còn lại qua vòng C, ~2,25 chu kỳ
   một phép nhân-cộng; cả hai làm tròn nửa lên như tích chập không bias, nên một hàng là một pointwise.
 - **`AttentionCore`:** hai tích chạy nhân pointwise của `MatMulS8` theo khối 16 khung query, ~0,5 ms ở attention 148
@@ -802,9 +808,9 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
   dcache mặc định tắt (`EXTMEM_DCACHE_AUTOLOAD_CTRL` = 0x8); bật cho đúng vùng đọc, mọi kiểu kích và mọi cỡ, không
   đổi gì. Bật cho cả vùng 32 MB từ 0x3C000000 thì cache báo lỗi cấu hình preload và chip khởi động lại. Op chạm trần
   băng thông chỉ nhanh lên khi bớt lượt đọc ghi, tức là gộp op.
-- Op tốn nhất còn lại: `ConvBlock` 151,0 ms; Conv 109,3 ms trên 73 op, ~80 ms trong đó là tích chập 1×1 (`exp_dim`,
-  `red_dim`, đầu và cuối stage, `head`, pool) ở 0,13–0,45 chu kỳ một phép nhân-cộng; `StageSum` 54,9 ms; LayerNorm 31,7
-  ms, stem 25,1 ms; `AttentionCore` 24,6 ms; Add 16,0 ms; softmax theo thời gian của pool 8,2 ms.
+- Op tốn nhất còn lại: `ConvBlock` 151,5 ms; `PointwiseS8` 81,7 ms; `StageSum` 53,6 ms; LayerNorm 31,1 ms, stem
+  25,1 ms; `AttentionCore` 24,6 ms; Conv 21,9 ms, trong đó conv bước 2×2 của stage 3 (7,8 ms, nhân không căn) và
+  bước 4×2 của stage 5 (7,9 ms); softmax theo thời gian của pool 8,2 ms.
 
 ## 26. `command_ctc` qua chuỗi tăng tốc (E11-T30)
 
