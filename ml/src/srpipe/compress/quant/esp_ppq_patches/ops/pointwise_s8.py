@@ -62,11 +62,18 @@ def pointwise_takes(op, info) -> bool:
     return (k in HELD_INPUTS or k % CHANNEL_STEP == 0) and n % (CHANNEL_STEP // 2) == 0
 
 
+def odd_rows(laid_x: list[int]) -> bool:
+    """Whether laid_x is a 1-d map [1, T, K] of K a multiple of 8; when K is no multiple of 16, PointwiseS8 copies its
+    rows to rows padded to 16 before its kernel reads them."""
+    return len(laid_x) == 3 and laid_x[0] == 1 and laid_x[-1] % (CHANNEL_STEP // 2) == 0
+
+
 def pointwise_s8_from(graph, op, info) -> bool:
-    """op, an int8 1x1 Conv of K inputs to N outputs over a map's rows, K 24, 48 or a multiple of 16, N a multiple of
-    8, its mac shift 1 or more, as one PointwiseS8: weights [Np / 16][K][16], bias [Np] when it has one, Np being N
-    padded with zeros to a multiple of 16. With K held in registers, the residual Add after it joins too. A 2-d one
-    whose kernel [kh, kw] is its stride reads non-overlapping patches, K = kh * kw * C a multiple of 16, as "patch"."""
+    """op, an int8 1x1 Conv of K inputs to N outputs over a map's rows, K 24, 48 or a multiple of 16, or of 8 over a
+    1-d map [1, T, K], N a multiple of 8, its mac shift 1 or more, as one PointwiseS8: weights [Np / 16][K][16], bias
+    [Np] when it has one, Np being N padded with zeros to a multiple of 16. With K held in registers, the residual Add
+    after it joins too. A 2-d one whose kernel [kh, kw] is its stride reads non-overlapping patches, K = kh * kw * C a
+    multiple of 16, as "patch"."""
     import torch
     from esp_ppq.core import OperationQuantizationConfig
     from esp_ppq.IR.quantize import QuantableOperation
@@ -91,7 +98,7 @@ def pointwise_s8_from(graph, op, info) -> bool:
         (kh, kw), (t, f) = patch, laid_x[1:3]
         if t % kh or f % kw or laid_y != [1, t // kh, f // kw, n]:
             return False
-    elif laid_x[:-1] != laid_y[:-1] or not (k in HELD_INPUTS or k % CHANNEL_STEP == 0):
+    elif laid_x[:-1] != laid_y[:-1] or not (k in HELD_INPUTS or k % CHANNEL_STEP == 0 or odd_rows(laid_x)):
         return False
     if n % (CHANNEL_STEP // 2):
         return False

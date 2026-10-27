@@ -82,6 +82,47 @@ def test_pointwise_s8_exports_each_1x1_convolution_and_its_residual_add_as_one_o
     assert joined == 2
 
 
+class OddRows(nn.Module):
+    """Rows of 72 values, as ReDimNet2 b3's 1-d maps out of red_dim, through 1x1 convolutions 72 to 48, 48 to 40 and
+    40 to 72: K 72 and 40 a multiple of 8, not of 16."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.up, self.mid, self.down = nn.Conv1d(72, 48, 1), nn.Conv1d(48, 40, 1), nn.Conv1d(40, 72, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.down(self.mid(self.up(x)))
+
+
+def test_pointwise_s8_takes_rows_of_a_multiple_of_8_values(tmp_path: Path) -> None:
+    torch.manual_seed(8)
+    rng = np.random.default_rng(31)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 72, HOPS)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(OddRows().eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    with esp_ppq_patches.applied(["pointwise_s8"]):
+        path = export_espdl.export(graph, tmp_path / "odd.espdl")
+    nodes, tensors = espdl_graph(path)
+    ops = [op for op, _ in nodes.values()]
+    assert ops.count("PointwiseS8") == 3 and "Conv" not in ops
+    info = path.with_suffix(".info").read_text()
+    transposed = dict(re.findall(r"%(\S+) = Transpose\[.*?\]\(%([^)]+)\)", info))
+    for made, attrs, inputs in re.findall(r"%(\S+) = PointwiseS8\[(.*?)\]\(([^)]*)\)", info):
+        values = dict(re.findall(r"(\w+) = (-?\d+)", attrs))
+        shift, n = int(values["shift"]), int(values["columns"])
+        names = [v.strip().lstrip("%") for v in inputs.split(",")]
+        got = TorchExecutor(graph, device="cpu").forward(
+            inputs=calib[0], output_names=[transposed.get(m, m) for m in (names[0], made)]
+        )
+        rows, want = (
+            torch.round(v[0].T / 2.0 ** exponent(info, m)).to(torch.int64).numpy()
+            for v, m in zip(got, (names[0], made), strict=True)
+        )
+        bias = tensors[names[2]][:n]
+        assert np.array_equal(pointwise_s8_espdl(rows, tensors[names[1]], bias, shift, None, -1)[:, :n], want), made
+        off = pointwise_s8_espdl(rows, tensors[names[1]], bias, shift + 1, None, -1)[:, :n]
+        assert not np.array_equal(off, want)
+
+
 class Patches(nn.Module):
     """Convolutions whose kernel is their stride, as ReDimNet2 b0's stages 3 and 5 shrink their maps: 2x2 from 24 to
     48 channels, then 4x2 from 48 to 32."""
