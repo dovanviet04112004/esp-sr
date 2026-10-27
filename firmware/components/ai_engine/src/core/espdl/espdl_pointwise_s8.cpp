@@ -42,6 +42,7 @@ constexpr int kAllHalves = 0; // the run's last width: every block stored as two
 constexpr size_t kVectorAlignBytes = 16;
 constexpr size_t kBiasBlockBytes = 64; // one block's bias in esp-dl's QACC layout
 constexpr size_t kPatchRank = 4;
+constexpr size_t kRank1d = 3; // [1, T, K], the only map whose rows may be a multiple of 8
 constexpr int kDataCacheBytes = CONFIG_ESP32S3_DATA_CACHE_SIZE;
 
 using RowKernel = void (*)(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
@@ -135,7 +136,12 @@ class PointwiseS8 final : public dl::module::Module {
         const int8_t *weights = context->get_tensor(m_inputs_index[1])->get_element_ptr<int8_t>();
         const Loan loan = kernel_ == ai_engine_pw_conv_rows_s8_esp32s3 ? loan_lent() : Loan{nullptr, 0};
         if (!patched()) {
-            run_slices(y->get_element_ptr<int8_t>(), x->get_element_ptr<int8_t>(), weights, loan);
+            const int8_t *rows = x->get_element_ptr<int8_t>();
+            if (odd_rows_) {
+                pad_rows(rows);
+                rows = gathered_;
+            }
+            run_slices(y->get_element_ptr<int8_t>(), rows, weights, loan);
             return;
         }
         const int8_t *xs = x->get_element_ptr<int8_t>();
@@ -222,6 +228,14 @@ class PointwiseS8 final : public dl::module::Module {
         }
     }
 
+    // Rows of K values into rows padded to a multiple of 16, as the kernel's vector loads take them.
+    void pad_rows(const int8_t *xs) noexcept
+    {
+        for (int r = 0; r < run_[kRunRows]; r++) {
+            memcpy(gathered_ + r * padded_inputs_, xs + r * inputs_, inputs_);
+        }
+    }
+
     size_t block_bytes() const noexcept
     {
         return static_cast<size_t>(inputs_) * kChannelStep;
@@ -289,9 +303,11 @@ class PointwiseS8 final : public dl::module::Module {
         dl::TensorBase *bias = biased_ ? context->get_tensor(m_inputs_index[2]) : nullptr;
         dl::TensorBase *residual =
             residual_shift_ >= 0 ? context->get_tensor(m_inputs_index[2 + biased_]) : nullptr;
-        if (k <= 0 || (h == nullptr && k % kChannelStep != 0) || x->get_dtype() != dl::DATA_TYPE_INT8 ||
-            y->get_dtype() != dl::DATA_TYPE_INT8 || !aligned(x->get_element_ptr()) ||
-            weights->get_size() != np * k || !aligned(weights->get_element_ptr()) ||
+        odd_rows_ = h == nullptr && !patched() && k % kChannelStep != 0;
+        if (k <= 0 || (h == nullptr && k % kHalfStep != 0) || (odd_rows_ && x->shape.size() != kRank1d) ||
+            x->get_dtype() != dl::DATA_TYPE_INT8 || y->get_dtype() != dl::DATA_TYPE_INT8 ||
+            !aligned(x->get_element_ptr()) || weights->get_size() != np * k ||
+            !aligned(weights->get_element_ptr()) ||
             (bias != nullptr && (bias->get_size() != np || !aligned(bias->get_element_ptr())))) {
             ESP_LOGE(TAG, "%s: rows of %d, or weights and bias not laid for %d outputs", name, k, columns_);
             return false;
@@ -313,12 +329,14 @@ class PointwiseS8 final : public dl::module::Module {
             }
             bias_ = zero_bias_;
         }
-        const int vectors = k / kChannelStep;
+        // Whole vectors run ahead of a tail of the last 16 inputs, or of the 8 left.
+        const int whole = k / kChannelStep;
+        const int half = k % kChannelStep != 0;
         run_ = {rows,
                 np / kChannelStep,
-                vectors,
-                vectors - 1,
-                0,
+                whole + half,
+                half ? whole : whole - 1,
+                half,
                 shift_,
                 word_of(bias_),
                 0,
@@ -333,6 +351,15 @@ class PointwiseS8 final : public dl::module::Module {
             kernel_ = h->conv;
         } else {
             kernel_ = residual_shift_ > 0 ? h->add_x : h->add;
+        }
+        if (odd_rows_) {
+            padded_inputs_ = padded(k);
+            gathered_ = static_cast<int8_t *>(
+                heap_caps_aligned_calloc(kVectorAlignBytes, rows, padded_inputs_, MALLOC_CAP_SPIRAM));
+            if (gathered_ == nullptr) {
+                ESP_LOGE(TAG, "%s: no memory for %d rows padded to %d values", name, rows, padded_inputs_);
+                return false;
+            }
         }
         if (patched()) {
             const int gathered_rows = slice_blocks_ > 0 ? out_rows_ * patches_ : patches_;
@@ -360,7 +387,9 @@ class PointwiseS8 final : public dl::module::Module {
     int inputs_ = 0;
     int slice_blocks_ = 0; // 0: all blocks in one pass over the rows
     const int8_t *bias_ = nullptr;
-    int8_t *gathered_ = nullptr;  // patches as rows of K: one output row's, all when sliced
+    int8_t *gathered_ = nullptr; // patch rows: one row's, all when sliced; or padded rows
+    bool odd_rows_ = false;      // K a multiple of 8, not of 16, its rows padded first
+    int padded_inputs_ = 0;
     int8_t *zero_bias_ = nullptr; // QACC-layout zeros when the convolution has no bias
     std::array<int32_t, kRunSize> run_ = {};
     RowKernel kernel_ = nullptr;
