@@ -12,6 +12,11 @@
 // run: pixels, blocks, input pixel stride in vectors, whole input vectors, tail, mac shift, bias, x [pixels][16
 // blocks], x shift onto the sum's exponent (0 or more), last block's outputs (16 or 8). x as esp-dl's int8
 // RequantizeLinear rounds it, added saturating as its Add does, then max(0, .). out: [pixels][C], 8-byte aligned.
+//
+// void ai_engine_pw_bias_row_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run)
+// run: rows, blocks, input row stride in vectors, whole input vectors, tail, mac shift, an int8 bias [16 blocks] on
+// the output's exponent or 0, ReLU or not (1 or 0), last block's outputs (16 or 8). Each row as esp-dl's int8
+// MatMul of it by constant weights gives it, its ReLU, then the bias added saturating as Add does. out: [rows][N].
 
     .text
     .align  4
@@ -19,6 +24,8 @@
     .type   ai_engine_pw_norm_row_s8_esp32s3, @function
     .global ai_engine_pw_residual_row_s8_esp32s3
     .type   ai_engine_pw_residual_row_s8_esp32s3, @function
+    .global ai_engine_pw_bias_row_s8_esp32s3
+    .type   ai_engine_pw_bias_row_s8_esp32s3, @function
 
 .macro ones_in_q7 tmp
     movi    \tmp, 257
@@ -178,6 +185,51 @@ ai_engine_pw_residual_row_s8_esp32s3:
     ee.vst.l.64.ip  q5, a2, 8
     beqi    a7, 1, 10f
     ee.vst.h.64.ip  q5, a2, 8
+10:
+    addi    a7, a7, -1
+    bnez    a7, 2b
+    l32i    a15, a5, 8
+    slli    a15, a15, 4
+    add     a3, a3, a15
+    addi    a6, a6, -1
+    bnez    a6, 1b
+    retw.n
+
+    .align  4
+ai_engine_pw_bias_row_s8_esp32s3:
+    entry   a1, 48
+    l32i    a6, a5, 0
+    l32i    a13, a5, 20
+    addi    a13, a13, -1
+    l32i    a11, a5, 24
+    l32i    a14, a5, 28
+    ones_in_q7 a15
+1:
+    mov     a8, a4
+    mov     a10, a11
+    l32i    a7, a5, 4
+2:
+    ee.zero.qacc
+    mov     a12, a3
+    pointwise_products
+    movi.n  a15, 1
+    round_into  q3, a13, a15
+    beqz    a14, 7f
+    movi.n  a15, 0
+    ee.vrelu.s8     q3, a15, a15
+7:
+    beqz    a11, 8f
+    ee.vld.128.ip   q4, a10, 16
+    ee.vadds.s8     q3, q3, q4
+8:
+    l32i    a15, a5, 32
+    bnei    a15, 16, 9f
+    ee.vst.128.ip   q3, a2, 16
+    j       10f
+9:
+    ee.vst.l.64.ip  q3, a2, 8
+    beqi    a7, 1, 10f
+    ee.vst.h.64.ip  q3, a2, 8
 10:
     addi    a7, a7, -1
     bnez    a7, 2b
