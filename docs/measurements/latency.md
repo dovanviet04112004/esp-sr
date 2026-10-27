@@ -772,7 +772,8 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
 | `LayerNormS8` hai vị trí một lượt bằng nhân asm, các bước Newton của hai vị trí xen từng lệnh | 439,0 ms | 1 470 804 B | 19 op 55,6 → 31,6 ms, stem 44,2 → 25,1 ms; mỗi op giữ độ lệch float của một khối 16 vị trí |
 | Pointwise của `ConvBlock` 24 và 48 kênh trải phẳng, thanh ghi trọng số nạp trước hai bước | 418,2 ms | 1 470 804 B | 21 khối 171,9 → 151,0 ms; khối stage 0 26,7 → 23,2 ms |
 | `PointwiseS8`: mọi conv 1×1 còn lại, cùng `Add` dư sau nó khi 24 hay 48 kênh vào | 397,2 ms | 1 439 452 B | 47 op 81,7 ms thay ~94 ms Conv và 13 Add dư; Conv còn 21,9 ms, Add 1,0 ms |
-| Depthwise 3×3 của `ConvBlock` từng vector qua cả hàng, tap 0–3 giữ trong thanh ghi | **391,5 ms** | **1 439 452 B** | 21 khối 151,5 → 145,4 ms |
+| Depthwise 3×3 của `ConvBlock` từng vector qua cả hàng, tap 0–3 giữ trong thanh ghi | 391,5 ms | 1 439 452 B | 21 khối 151,5 → 145,4 ms |
+| `PointwiseS8` nhận conv 2×2 bước 2 của stage 3 theo mảnh | **388,3 ms** | **1 443 560 B** | 7,8 → 4,8 ms; conv 4×2 của stage 5 (trọng số 37 KB) chạy theo mảnh 8,3 ms, esp-dl 7,9 ms, nên giữ esp-dl |
 
 - **`SoftmaxQuant`:** bảng `exp` và nghịch đảo tổng như esp-dl. Xác suất không âm, nên `floor(v + 0,5)` của esp-dl là
   phép cắt của tổng float `v + 0,5`: dưới 2^22 tổng ấy không làm tròn sang phần nguyên khác. Mỗi lượt chuẩn hoá tính 4
@@ -814,9 +815,9 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
   dcache mặc định tắt (`EXTMEM_DCACHE_AUTOLOAD_CTRL` = 0x8); bật cho đúng vùng đọc, mọi kiểu kích và mọi cỡ, không
   đổi gì. Bật cho cả vùng 32 MB từ 0x3C000000 thì cache báo lỗi cấu hình preload và chip khởi động lại. Op chạm trần
   băng thông chỉ nhanh lên khi bớt lượt đọc ghi, tức là gộp op.
-- Op tốn nhất còn lại: `ConvBlock` 145,4 ms; `PointwiseS8` 81,7 ms; `StageSum` 53,6 ms; LayerNorm 31,1 ms, stem
-  25,1 ms; `AttentionCore` 24,6 ms; Conv 21,9 ms, trong đó conv bước 2×2 của stage 3 (7,8 ms, nhân không căn) và
-  bước 4×2 của stage 5 (7,9 ms); softmax theo thời gian của pool 8,2 ms.
+- Op tốn nhất còn lại: `ConvBlock` 145,8 ms; `PointwiseS8` 87,0 ms; `StageSum` 53,6 ms; LayerNorm 31,1 ms, stem
+  25,1 ms; `AttentionCore` 24,6 ms; Conv 14,2 ms, trong đó conv bước 4×2 của stage 5 7,9 ms; softmax theo thời
+  gian của pool 8,2 ms.
 
 ## 26. `command_ctc` qua chuỗi tăng tốc (E11-T30)
 
