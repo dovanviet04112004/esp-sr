@@ -23,7 +23,7 @@ esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches aroun
   - fuse_tanh_gelu                 # feed-forward GELU (tanh form) as one table, not a float Pow
   - lean_transposes                # one Transpose per variable and perm, chains folded at export
   - lean_quantizers                # one QuantizeLinear per variable and grid, the Softmax's float output quantised once
-  - aligned_pointwise              # 12- and 24-channel 1x1 convolutions over merged columns, on the vector path
+  - aligned_pointwise              # 12-channel 1x1 convolutions over merged columns, on the vector path
   - copies_by_broadcast            # the stem's copies of the log-mel as an Add of zeros, not a Concat and Transpose
   - cache_sized_convolutions       # the pool's 72 KB projections as slices whose weights stay in the data cache
   - identity_convolutions_dropped  # stage 0's sum of the stem output alone, a convolution by 1, removed
@@ -32,13 +32,14 @@ esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches aroun
   - softmax_scale                  # attention's scaled scores as a table the op looks up (after softmax_quant)
   - layernorm_s8                   # each int8 LayerNorm as ai_engine's op: float steps, no double mean
   - stage_sum                      # each weighted sum of stage outputs as one op of ai_engine (after channel_scales_as_mul)
-  - conv_block                     # each residual conv block as one op of ai_engine run a row at a time (after aligned_pointwise)
+  - conv_block                     # each residual conv block as one op of ai_engine run a row at a time
   - matmul_s8                      # each projection by constant weights and its bias as one op of ai_engine
   - attention_core                 # each attention's heads, scores, softmax and weighing as one op (after softmax_scale)
   - stem_conv                      # the stem's broadcast copies and their depthwise as one op (after copies_by_broadcast)
   - stride_depthwise               # depthwise convolutions over 2 or 4 frames at that stride as one op of ai_engine
   - weighted_stats                 # the pool's weighted sums of x and x*x over time as one op of ai_engine
   - global_stats                   # the pool's mean over time and mean centred square as one op of ai_engine
+  - pointwise_s8                   # other 1x1 convolutions and their residual Adds as one op, unmerged (last)
 deploy:                            # make speaker-deploy RUN= ROW= (E11-T26, KEHOACH 3.17)
   weights_in_flash: true           # the image entry stays in flash; PSRAM holds the tensors only (KEHOACH 6.6)
   shares: [0.05]                   # impostors passing: the first, unless a distance then keeps under keep_min (KEHOACH 3.17)
