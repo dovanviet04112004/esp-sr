@@ -1244,9 +1244,10 @@ esptool. Dòng `Failed to get VID/PID` vẫn còn: esptool in nó mỗi lần n�
 EXTRACTOR=redimnet2_b3_mix` (`b3-vb2+vox2+cnc2_v0-lm`, 4,51 M tham số, `speaker.md` §2). So với b0: C = 24 thay 12,
 kênh mở rộng trong khối 4, 3, 2, 1, 1, 1 theo stage thay 2, 1, 1, 1, 1, 1.
 
-**b3 chưa vào được đường chip.** b3 có `agg_gnorm`: một `GroupNorm` 24 nhóm trên 1728 kênh sau stem và sau mỗi
-stage, mỗi nhóm chuẩn hoá 72 kênh trên cả trục thời gian. `Embed` của đường chip chưa có phép này. Để đo giờ, một
-script dùng một lần dựng hàng `timing` (minmax) với 7 `GroupNorm` bỏ đi; phần còn lại của mạng y như b3.
+**GroupNorm.** b3 có `agg_gnorm`: một `GroupNorm` 24 nhóm trên 1728 kênh sau stem và sau mỗi stage, mỗi nhóm chuẩn
+hoá 72 kênh trên cả trục thời gian. Bảng thô và hai bước tối ưu đầu đo trên hàng `timing` (minmax) dựng bằng một
+script dùng một lần, 7 `GroupNorm` bỏ đi. Từ bước thứ ba, `timing` xuất lại qua `Embed` với 7 chuỗi `GroupNorm1d`, và
+chip chạy chúng.
 
 Hai chặn trước khi chạy được:
 - `cache_sized_convolutions` dựng một `Concat` một đầu vào cho conv `red_dim` (1728 → 72, 124 KB trọng số), vì 72
@@ -1280,9 +1281,29 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
 | Bước | Một cửa sổ | PSRAM cho tensor | Ghi chú |
 |---|---|---|---|
 | Thô: các op viết cho b0 | 7 089,2 ms | 3 927 576 B | như bảng trên |
-| `PointwiseS8` cắt lát cả khi N lẻ 8, và với mảnh | **3 464,3 ms** | **4 183 324 B** | conv 4×2 của stage 5 1 540 → 69 ms; mỗi `red_dim` dưới 51 ms, từ tới 642 ms; thêm 256 KB bộ đệm mảnh. `ConvBlock` còn 2 353 ms |
-- **Chưa đo:** 7 `GroupNorm`, ước 80–120 ms 🔬 vì mỗi phép đọc ghi map 256 KB hai lượt; độ chính xác sau int8, cần
-  `GroupNorm` trong đường chip rồi mới chạy được thang int8.
+| `PointwiseS8` cắt lát cả khi N lẻ 8, và với mảnh | 3 464,3 ms | 4 183 324 B | conv 4×2 của stage 5 1 540 → 69 ms; mỗi `red_dim` dưới 51 ms, từ tới 642 ms; thêm 256 KB bộ đệm mảnh. `ConvBlock` còn 2 353 ms |
+| Thêm 7 `GroupNorm`, mỗi chuỗi chạy bằng op esp-dl (`Transpose`, `LayerNormS8` theo nhóm, `Mul`, `Add`) | 6 706,4 ms | 8 293 692 B | **lệch 38** ở embedding ra; 14 `Transpose` 2 677 ms, `LayerNormS8` 586 ms |
+| `GroupNormS8`: mỗi chuỗi một op, bản C | 4 553,1 ms | 4 804 072 B | 6 phép 587 ms; chuỗi của stem còn hai `Transpose`, 376 ms |
+| `GroupNormS8` đọc thẳng map 2-D [T, F, C] của stem | 4 183,7 ms | 3 932 744 B | 7 phép 685 ms |
+| Mỗi nhóm một bảng: LN int8 của từng giá trị int8 vào | 4 073,1 ms | 3 976 756 B | 7 phép 579 ms, ~82,5 ms mỗi phép |
+| Nhân viết tay: bình phương 4 nhóm xen nhau, ghi ra cả hàng qua QACC | 3 710,1 ms | 3 989 004 B | 7 phép 215 ms |
+| Lô hai nhóm qua mọi lượt, tổng bằng ACCX, độ lệch tra bảng | **3 642,7 ms** | **3 992 332 B** | 7 phép 154 ms, ~22 ms mỗi phép. `ConvBlock` 2 428 ms, `PointwiseS8` 538 ms, `StageSum` 155 ms |
+- Từ bước `GroupNormS8`, mỗi bước khớp từng bit cả ở đồ thị lẫn bản cắt.
+- **`GroupNormS8` trên app đo** (map 148 × 1728 trong PSRAM, 24 nhóm), chu kỳ một giá trị:
+
+  | Bản | Tổng | Bình phương | Bảng | Ghi ra | Một phép |
+  |---|---|---|---|---|---|
+  | C, bảng mỗi nhóm | 5,5 | 26,5 | 0,9 | 44,1 | 82 ms |
+  | Nhân 4 nhóm, ghi ra cả hàng | 5,5 | 10,6 | 0,9 | 11,1 | 30 ms |
+  | Lô hai nhóm | 5,1 | 5,1 | 0,85 | 9,7 | 22,5 ms |
+
+  - Bình phương 4 nhóm tra bảng độ lệch chạy 15,5–30,4 chu kỳ tuỳ dữ liệu. Các hàng của lô 4 nhóm (~52 KB dòng
+    cache) cộng bảng 4 KB tràn vài tập của cache 8 đường, nên mỗi lượt quét theo khung trượt lại. Lô hai nhóm
+    (~28 KB) không trượt.
+  - Tổng ACCX một mình 2,8 chu kỳ, sát băng thông đọc PSRAM. Ở lô hai nhóm, nó gánh thêm việc ghi ngược các dòng y
+    của lô trước.
+  - Ghi ra gần trần băng thông: mỗi dòng y nạp vào cache trước khi ghi đè, rồi mới ghi ngược.
+- **Chưa đo:** độ chính xác của b3 sau int8 (thang int8 đang chạy).
 - **Đọc:** đây là số thô. b3 chạy qua các op viết cho hình dạng của b0, chưa có bước nào tối ưu riêng cho nó. b3 có
   2,16 tỉ MAC (`torch.utils.flop_counter`, không tính GroupNorm), b0 0,24 tỉ. 1,61 tỉ nằm trong 19 `ConvBlock`, chạy
   ~0,36 chu kỳ một phép nhân-cộng; khối của b0 ~0,24 (147 triệu MAC trong 146,8 ms). Hai loại conv quá dcache tốn 3,8 s
