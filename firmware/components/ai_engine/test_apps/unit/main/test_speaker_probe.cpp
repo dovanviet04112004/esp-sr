@@ -76,6 +76,8 @@ esp_err_t test_of(const ai::Blob &blob, bool profiled)
     // One run builds every module, so the test then runs on the ops' loan as EspdlNet::step does.
     (void)ai::loan_take_asked();
     model.run();
+    // Two runs back to back starve IDLE0 past the task watchdog, whose report lands inside a module's time.
+    vTaskDelay(1);
     const ai::WeightLoan loan(ai::loan_take_asked());
     if (profiled) { model.profile_module(true); }
     return model.test();
