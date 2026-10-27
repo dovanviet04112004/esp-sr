@@ -30,6 +30,7 @@ const char *TAG = "softmax_quant";
 
 constexpr int kTableOffset = 128; // esp-dl's gen_lut_8bit: entry i is exp(s * (i - 128))
 constexpr int kStrip = 8;         // columns softmax_s8_esp32s3.S takes at once
+constexpr int kGroup = 64;        // columns sharing one 64-byte cache line of a row
 
 // esp-dl's floor(v + 0.5) in double, for the v >= 0 a probability gives, then its int8 clip: below 2^22 the
 // float sum v + 0.5 rounds to no other integer part, so truncating it floors it.
@@ -173,8 +174,18 @@ void softmax_block_s8(const int8_t *x, int8_t *y, int len, int inner, const floa
 {
     const uint8_t *in = reinterpret_cast<const uint8_t *>(x);
     const int strips = inner / kStrip * kStrip;
-    for (int k = 0; k < strips; k += kStrip) {
-        ai_engine_softmax_sums_s8_esp32s3(scales + k, x + k, table, len, inner);
+    // A group's columns are normalised while its rows are still in the cache from their sums.
+    for (int g = 0; g < strips; g += kGroup) {
+        const int end = std::min(g + kGroup, strips);
+        for (int k = g; k < end; k += kStrip) {
+            ai_engine_softmax_sums_s8_esp32s3(scales + k, x + k, table, len, inner);
+        }
+        for (int k = g; k < end; k++) {
+            scales[k] = 1.0f / scales[k] * out_rescale;
+        }
+        for (int k = g; k < end; k += kStrip) {
+            ai_engine_softmax_norm_s8_esp32s3(y + k, x + k, table, scales + k, len, inner);
+        }
     }
     for (int k = strips; k < inner; k++) {
         float s = 0.0f;
@@ -185,11 +196,8 @@ void softmax_block_s8(const int8_t *x, int8_t *y, int len, int inner, const floa
         scales[k] = s;
     }
     // A power of two scales exactly, so one product rounds as esp-dl's p * (1 / sum) then p * 2^-e do.
-    for (int k = 0; k < inner; k++) {
+    for (int k = strips; k < inner; k++) {
         scales[k] = 1.0f / scales[k] * out_rescale;
-    }
-    for (int k = 0; k < strips; k += kStrip) {
-        ai_engine_softmax_norm_s8_esp32s3(y + k, x + k, table, scales + k, len, inner);
     }
     for (int i = 0; i < len && strips < inner; i++) {
         const uint8_t *row = in + i * inner;

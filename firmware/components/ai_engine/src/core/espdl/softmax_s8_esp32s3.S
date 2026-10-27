@@ -16,13 +16,6 @@
     .global ai_engine_softmax_norm_s8_esp32s3
     .type   ai_engine_softmax_norm_s8_esp32s3, @function
 
-.macro add_column acc, tmp, at, offset
-    l8ui    \at, a3, \offset
-    addx4   \at, \at, a4
-    lsi     \tmp, \at, 0
-    add.s   \acc, \acc, \tmp
-.endm
-
 ai_engine_softmax_sums_s8_esp32s3:
     entry   a1, 32
     movi.n  a8, 0
@@ -34,15 +27,40 @@ ai_engine_softmax_sums_s8_esp32s3:
     wfr     f5, a8
     wfr     f6, a8
     wfr     f7, a8
+    // Each step for the eight columns at once: their bytes, table addresses, values, then the eight adds.
     loopgtz a5, 1f
-    add_column  f0, f8, a8, 0
-    add_column  f1, f9, a9, 1
-    add_column  f2, f10, a10, 2
-    add_column  f3, f11, a11, 3
-    add_column  f4, f12, a12, 4
-    add_column  f5, f13, a13, 5
-    add_column  f6, f14, a14, 6
-    add_column  f7, f15, a15, 7
+    l8ui    a8, a3, 0
+    l8ui    a9, a3, 1
+    l8ui    a10, a3, 2
+    l8ui    a11, a3, 3
+    l8ui    a12, a3, 4
+    l8ui    a13, a3, 5
+    l8ui    a14, a3, 6
+    l8ui    a15, a3, 7
+    addx4   a8, a8, a4
+    addx4   a9, a9, a4
+    addx4   a10, a10, a4
+    addx4   a11, a11, a4
+    addx4   a12, a12, a4
+    addx4   a13, a13, a4
+    addx4   a14, a14, a4
+    addx4   a15, a15, a4
+    lsi     f8, a8, 0
+    lsi     f9, a9, 0
+    lsi     f10, a10, 0
+    lsi     f11, a11, 0
+    lsi     f12, a12, 0
+    lsi     f13, a13, 0
+    lsi     f14, a14, 0
+    lsi     f15, a15, 0
+    add.s   f0, f0, f8
+    add.s   f1, f1, f9
+    add.s   f2, f2, f10
+    add.s   f3, f3, f11
+    add.s   f4, f4, f12
+    add.s   f5, f5, f13
+    add.s   f6, f6, f14
+    add.s   f7, f7, f15
     add     a3, a3, a6
 1:
     ssi     f0, a2, 0
