@@ -4,7 +4,8 @@
 //
 // void ai_engine_dw3x3_row_s8_esp32s3(int8_t *out, const int8_t *const *rows, const int8_t *taps, const int32_t *run)
 // rows: three [F + 2][16 V] rows, t - 1, t, t + 1, a zero pixel at each end; taps: [9][16 V], tap 3 * kh + kw;
-// run: F pixels, V, mac shift, 1 or more. out: [F][16 V]. Depthwise 3x3 without bias, as tie728_s8_depthwise_conv2d_33c1.
+// run: F pixels, V, mac shift, 1 or more. out: [F][16 V]. Depthwise 3x3 without bias, as tie728_s8_depthwise_conv2d_33c1,
+// one vector at a time over every pixel: its taps 0-3 held in q0-q3, the inputs and taps 4-8 through q4-q6.
 //
 // void ai_engine_dw3x3_bias_row_s8_esp32s3(int8_t *out, const int8_t *const *rows, const int8_t *taps,
 //                                          const int32_t *run)
@@ -120,9 +121,58 @@
     bnez    a6, 1b
 .endm
 
+// a9 the pixel stride 16 V, a8 one pixel back, a14 tap 8 back to tap 4, a5 a row's pixels less one vector; a10-a12
+// the rows, a13 the taps, each step loading what the step after next multiplies.
 ai_engine_dw3x3_row_s8_esp32s3:
     entry   a1, 48
-    dw3x3_rows 0
+    ones_in_q7 a15
+    l32i    a6, a5, 0
+    l32i    a7, a5, 4
+    l32i    a15, a5, 8
+    addi    a15, a15, -1
+    slli    a9, a7, 4
+    neg     a8, a9
+    slli    a14, a9, 2
+    neg     a14, a14
+    mull    a5, a6, a9
+    addi    a5, a5, -16
+    l32i    a10, a3, 0
+    l32i    a11, a3, 4
+    l32i    a12, a3, 8
+    movi.n  a3, 1
+1:
+    mov     a13, a4
+    ee.vld.128.xp   q0, a13, a9
+    ee.vld.128.xp   q1, a13, a9
+    ee.vld.128.xp   q2, a13, a9
+    ee.vld.128.xp   q3, a13, a9
+    loopgtz a6, 2f
+    ee.zero.qacc
+    ee.vld.128.xp   q4, a10, a9
+    ee.vld.128.xp   q5, a10, a9
+    ee.vmulas.s8.qacc.ld.xp q6, a10, a8, q4, q0
+    ee.vmulas.s8.qacc.ld.xp q4, a11, a9, q5, q1
+    ee.vmulas.s8.qacc.ld.xp q5, a11, a9, q6, q2
+    ee.vmulas.s8.qacc.ld.xp q6, a13, a9, q4, q3
+    ee.vld.128.xp   q4, a11, a8
+    ee.vmulas.s8.qacc.ld.xp q5, a13, a9, q5, q6
+    ee.vld.128.xp   q6, a12, a9
+    ee.vmulas.s8.qacc.ld.xp q4, a13, a9, q4, q5
+    ee.vld.128.xp   q5, a12, a9
+    ee.vmulas.s8.qacc.ld.xp q6, a13, a9, q6, q4
+    ee.vld.128.xp   q4, a12, a8
+    ee.vmulas.s8.qacc.ld.xp q5, a13, a14, q5, q6
+    ee.vmulas.s8.qacc   q4, q5
+    round_into  q6, a15, a3
+    ee.vst.128.xp   q6, a2, a9
+2:
+    sub     a2, a2, a5
+    sub     a10, a10, a5
+    sub     a11, a11, a5
+    sub     a12, a12, a5
+    addi    a4, a4, 16
+    addi    a7, a7, -1
+    bnez    a7, 1b
     retw.n
 
     .align  4
