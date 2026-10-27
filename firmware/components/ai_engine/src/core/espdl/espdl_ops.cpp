@@ -1,5 +1,6 @@
 #include "core/espdl/espdl_ops.hpp"
 
+#include "core/espdl/espdl_attention.hpp"
 #include "core/espdl/espdl_conv_block.hpp"
 #include "core/espdl/espdl_layernorm_s8.hpp"
 #include "core/espdl/espdl_matmul_s8.hpp"
@@ -19,6 +20,7 @@ void register_espdl_ops() noexcept
     creator->register_module("StageSum", stage_sum_from);
     creator->register_module("ConvBlock", conv_block_from);
     creator->register_module("MatMulS8", matmul_s8_from);
+    creator->register_module("AttentionCore", attention_core_from);
 }
 
 } // namespace ai

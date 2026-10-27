@@ -21,9 +21,15 @@ namespace {
 
 const char *TAG = "softmax_quant";
 
-constexpr int kTableSize = 256;
 constexpr int kTableOffset = 128; // esp-dl's gen_lut_8bit: entry i is exp(s * (i - 128))
 constexpr int kColumnsAtOnce = 4;
+
+// esp-dl's floor(v + 0.5) in double, for the v >= 0 a probability gives, then its int8 clip: below 2^22 the
+// float sum v + 0.5 rounds to no other integer part, so truncating it floors it.
+int8_t round_half_up(float v) noexcept
+{
+    return static_cast<int8_t>(std::min(static_cast<int>(v + 0.5f), static_cast<int>(INT8_MAX)));
+}
 
 // Input esp-dl's int8 Softmax input, or after softmax_scale_from the map it scaled and the int8 products by
 // byte on the Softmax's exponent; output the int8 tensor its QuantizeLinear wrote, on that node's exponent.
@@ -92,7 +98,7 @@ class SoftmaxQuant final : public dl::module::Module {
         dl::TensorBase *products =
             m_inputs_index.size() > 1 ? context->get_tensor(m_inputs_index[1]) : nullptr;
         if (products != nullptr &&
-            (products->get_size() != kTableSize || products->get_dtype() != dl::DATA_TYPE_INT8)) {
+            (products->get_size() != kSoftmaxTableSize || products->get_dtype() != dl::DATA_TYPE_INT8)) {
             ESP_LOGE(TAG, "%s: the scaled bytes are %d values, not one int8 each", name,
                      products->get_size());
             return false;
@@ -106,95 +112,27 @@ class SoftmaxQuant final : public dl::module::Module {
             inner_ *= x->shape[d];
         }
         len_ = x->shape[axis];
-        table_ = static_cast<float *>(heap_caps_malloc(kTableSize * sizeof(float), MALLOC_CAP_SPIRAM));
+        table_ = static_cast<float *>(heap_caps_malloc(kSoftmaxTableSize * sizeof(float), MALLOC_CAP_SPIRAM));
         scales_ = static_cast<float *>(heap_caps_malloc(inner_ * sizeof(float), MALLOC_CAP_SPIRAM));
-        float *esp_dl_table =
-            static_cast<float *>(heap_caps_malloc(kTableSize * sizeof(float), MALLOC_CAP_SPIRAM));
-        if (table_ == nullptr || scales_ == nullptr || esp_dl_table == nullptr) {
-            heap_caps_free(esp_dl_table);
+        if (table_ == nullptr || scales_ == nullptr) {
             ESP_LOGE(TAG, "%s: no memory for the table and %d column scales", name, inner_);
             return false;
         }
-        if (products == nullptr) {
-            dl::tool::gen_lut_8bit(esp_dl_table, x->get_exponent(), expf);
-            for (int i = 0; i < kTableSize; i++) {
-                table_[static_cast<uint8_t>(i - kTableOffset)] = esp_dl_table[i];
-            }
-        } else {
-            dl::tool::gen_lut_8bit(esp_dl_table, products->get_exponent(), expf);
-            const int8_t *scaled = products->get_element_ptr<int8_t>();
-            for (int i = 0; i < kTableSize; i++) {
-                table_[i] = esp_dl_table[scaled[i] + kTableOffset];
-            }
+        const bool table_made = products == nullptr ? softmax_table_s8(table_, x->get_exponent(), nullptr)
+                                                    : softmax_table_s8(table_, products->get_exponent(),
+                                                                       products->get_element_ptr<int8_t>());
+        if (!table_made) {
+            ESP_LOGE(TAG, "%s: no memory for esp-dl's exp table", name);
+            return false;
         }
-        heap_caps_free(esp_dl_table);
         out_rescale_ = DL_RESCALE(y->get_exponent());
         built_ = true;
         return true;
     }
 
-    // Each column of a block summed in order along the axis, as esp-dl's Softmax sums it.
     void run_block(const int8_t *x, int8_t *y) const noexcept
     {
-        const uint8_t *in = reinterpret_cast<const uint8_t *>(x);
-        const float *table = table_;
-        float *scales = scales_;
-        const int len = len_;
-        const int inner = inner_;
-        int k = 0;
-        for (; k + kColumnsAtOnce <= inner; k += kColumnsAtOnce) {
-            float s0 = 0.0f;
-            float s1 = 0.0f;
-            float s2 = 0.0f;
-            float s3 = 0.0f;
-            const uint8_t *p = in + k;
-            for (int i = 0; i < len; i++, p += inner) {
-                s0 += table[p[0]];
-                s1 += table[p[1]];
-                s2 += table[p[2]];
-                s3 += table[p[3]];
-            }
-            scales[k] = s0;
-            scales[k + 1] = s1;
-            scales[k + 2] = s2;
-            scales[k + 3] = s3;
-        }
-        for (; k < inner; k++) {
-            float s = 0.0f;
-            const uint8_t *p = in + k;
-            for (int i = 0; i < len; i++, p += inner) {
-                s += table[*p];
-            }
-            scales[k] = s;
-        }
-        // A power of two scales exactly, so one product rounds as esp-dl's p * (1 / sum) then p * 2^-e do.
-        for (k = 0; k < inner; k++) {
-            scales[k] = 1.0f / scales[k] * out_rescale_;
-        }
-        for (int i = 0; i < len; i++) {
-            const uint8_t *row = in + i * inner;
-            int8_t *out = y + i * inner;
-            for (k = 0; k + kColumnsAtOnce <= inner; k += kColumnsAtOnce) {
-                const float v0 = table[row[k]] * scales[k];
-                const float v1 = table[row[k + 1]] * scales[k + 1];
-                const float v2 = table[row[k + 2]] * scales[k + 2];
-                const float v3 = table[row[k + 3]] * scales[k + 3];
-                out[k] = round_half_up(v0);
-                out[k + 1] = round_half_up(v1);
-                out[k + 2] = round_half_up(v2);
-                out[k + 3] = round_half_up(v3);
-            }
-            for (; k < inner; k++) {
-                out[k] = round_half_up(table[row[k]] * scales[k]);
-            }
-        }
-    }
-
-    // esp-dl's floor(v + 0.5) in double, for the v >= 0 a probability gives, then its int8 clip: below 2^22
-    // the float sum v + 0.5 rounds to no other integer part, so truncating it floors it.
-    static int8_t round_half_up(float v) noexcept
-    {
-        return static_cast<int8_t>(std::min(static_cast<int>(v + 0.5f), static_cast<int>(INT8_MAX)));
+        softmax_block_s8(x, y, len_, inner_, table_, scales_, out_rescale_);
     }
 
     int axis_;
@@ -208,6 +146,73 @@ class SoftmaxQuant final : public dl::module::Module {
 };
 
 } // namespace
+
+bool softmax_table_s8(float *table, int exponent, const int8_t *products)
+{
+    float *esp_dl_table =
+        static_cast<float *>(heap_caps_malloc(kSoftmaxTableSize * sizeof(float), MALLOC_CAP_SPIRAM));
+    if (esp_dl_table == nullptr) { return false; }
+    dl::tool::gen_lut_8bit(esp_dl_table, exponent, expf);
+    for (int i = 0; i < kSoftmaxTableSize; i++) {
+        const int byte = products == nullptr ? static_cast<uint8_t>(i - kTableOffset) : i;
+        table[byte] = esp_dl_table[products == nullptr ? i : products[i] + kTableOffset];
+    }
+    heap_caps_free(esp_dl_table);
+    return true;
+}
+
+void softmax_block_s8(const int8_t *x, int8_t *y, int len, int inner, const float *table, float *scales,
+                      float out_rescale) noexcept
+{
+    const uint8_t *in = reinterpret_cast<const uint8_t *>(x);
+    int k = 0;
+    for (; k + kColumnsAtOnce <= inner; k += kColumnsAtOnce) {
+        float s0 = 0.0f;
+        float s1 = 0.0f;
+        float s2 = 0.0f;
+        float s3 = 0.0f;
+        const uint8_t *p = in + k;
+        for (int i = 0; i < len; i++, p += inner) {
+            s0 += table[p[0]];
+            s1 += table[p[1]];
+            s2 += table[p[2]];
+            s3 += table[p[3]];
+        }
+        scales[k] = s0;
+        scales[k + 1] = s1;
+        scales[k + 2] = s2;
+        scales[k + 3] = s3;
+    }
+    for (; k < inner; k++) {
+        float s = 0.0f;
+        const uint8_t *p = in + k;
+        for (int i = 0; i < len; i++, p += inner) {
+            s += table[*p];
+        }
+        scales[k] = s;
+    }
+    // A power of two scales exactly, so one product rounds as esp-dl's p * (1 / sum) then p * 2^-e do.
+    for (k = 0; k < inner; k++) {
+        scales[k] = 1.0f / scales[k] * out_rescale;
+    }
+    for (int i = 0; i < len; i++) {
+        const uint8_t *row = in + i * inner;
+        int8_t *out = y + i * inner;
+        for (k = 0; k + kColumnsAtOnce <= inner; k += kColumnsAtOnce) {
+            const float v0 = table[row[k]] * scales[k];
+            const float v1 = table[row[k + 1]] * scales[k + 1];
+            const float v2 = table[row[k + 2]] * scales[k + 2];
+            const float v3 = table[row[k + 3]] * scales[k + 3];
+            out[k] = round_half_up(v0);
+            out[k + 1] = round_half_up(v1);
+            out[k + 2] = round_half_up(v2);
+            out[k + 3] = round_half_up(v3);
+        }
+        for (; k < inner; k++) {
+            out[k] = round_half_up(table[row[k]] * scales[k]);
+        }
+    }
+}
 
 dl::module::Module *softmax_quant_from(fbs::FbsModel *fbs_model, std::string node_name)
 {
