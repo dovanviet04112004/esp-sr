@@ -1,9 +1,11 @@
 #include "core/espdl/espdl_layernorm_s8.hpp"
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
@@ -14,6 +16,14 @@
 #include "esp_log.h"
 #include "fbs_model.hpp"
 
+extern "C" {
+void ai_engine_ln_deviations_s8_esp32s3(float *dev, float *variances, const int8_t *x, int pairs,
+                                        const int32_t *run);
+void ai_engine_ln_scales_s8_esp32s3(float *scales, const float *variances, const int32_t *run, int pairs);
+void ai_engine_ln_outputs_s8_esp32s3(int8_t *y, const float *dev, const float *scales, const float *gb,
+                                     int pairs, const int32_t *run);
+}
+
 namespace ai {
 
 namespace {
@@ -22,6 +32,32 @@ const char *TAG = "layernorm_s8";
 
 constexpr float kNewtonStop = 0.00001f; // EN of esp-dl's dl_math.hpp
 constexpr int kLanes = 4;
+constexpr int kBlock = 16;
+constexpr int kWordBytes = 4;
+// The paired kernels sum n bytes, each offset by 128, in 16-bit halves of a word.
+constexpr int kMaxPaired = 512;
+
+// Slots of layernorm_s8_esp32s3.S's run.
+enum Run {
+    kRunN = 0,
+    kRunWords,
+    kRunOffset,
+    kRunInverseN,
+    kRunCount,
+    kRunPerValue,
+    kRunEpsilon,
+    kRunInScale,
+    kRunStop,
+    kRunHalf,
+    kRunSize
+};
+
+int32_t bits_of(float v) noexcept
+{
+    int32_t bits;
+    memcpy(&bits, &v, sizeof(bits));
+    return bits;
+}
 
 // a / b by the instructions of the S3 ROM's __divsf3, in their order, without its call.
 inline float divide(float a, float b) noexcept
@@ -120,6 +156,10 @@ class LayerNormS8 final : public dl::module::Module {
         if (!built_ && !build(context, x, y)) { return; }
         const int8_t *xs = x->get_element_ptr<int8_t>();
         int8_t *ys = y->get_element_ptr<int8_t>();
+        if (paired_) {
+            run_pairs(xs, ys);
+            return;
+        }
         for (int p = 0; p < positions_; p++) {
             run_position(xs + p * n_, ys + p * n_);
         }
@@ -158,13 +198,18 @@ class LayerNormS8 final : public dl::module::Module {
             ESP_LOGE(TAG, "%s: not an int8 norm of %d values with gamma", name, n_);
             return false;
         }
-        gamma_ = static_cast<float *>(heap_caps_calloc(3 * n_, sizeof(float), MALLOC_CAP_SPIRAM));
+        const int floats = 2 * n_ + kBlock * n_ + 2 * kBlock + 2 * n_;
+        gamma_ = static_cast<float *>(heap_caps_calloc(floats, sizeof(float), MALLOC_CAP_SPIRAM));
         if (gamma_ == nullptr) {
-            ESP_LOGE(TAG, "%s: no memory for %d gammas, betas and deviations", name, n_);
+            ESP_LOGE(TAG, "%s: no memory for %d floats of gammas, betas and a block's deviations", name,
+                     floats);
             return false;
         }
         beta_ = gamma_ + n_;
         deviations_ = beta_ + n_;
+        variances_ = deviations_ + kBlock * n_;
+        scales_ = variances_ + kBlock;
+        gb_ = scales_ + kBlock;
         const int8_t *g = gamma->get_element_ptr<int8_t>();
         const float g_scale = DL_SCALE(gamma->get_exponent());
         for (int j = 0; j < n_; j++) {
@@ -184,8 +229,44 @@ class LayerNormS8 final : public dl::module::Module {
         float_mean_ = float_mean_matches(n_);
         count_ = static_cast<float>(n_);
         inverse_n_ = 1.0f / count_;
+        for (int j = 0; j < n_; j++) {
+            gb_[2 * j] = gamma_[j] * out_rescale_;
+            gb_[2 * j + 1] = beta_[j] * out_rescale_;
+        }
+        run_ = {n_,
+                n_ / kWordBytes,
+                -INT8_MIN * n_,
+                bits_of(inverse_n_),
+                bits_of(count_),
+                bits_of(per_value_),
+                bits_of(epsilon_),
+                bits_of(in_scale_),
+                bits_of(kNewtonStop),
+                bits_of(0.5f)};
+        paired_ = float_mean_ && n_ % kWordBytes == 0 && n_ <= kMaxPaired;
         built_ = true;
         return true;
+    }
+
+    // Blocks of up to kBlock positions, two a pass; in place, a block's y is written once all its x is read.
+    void run_pairs(const int8_t *xs, int8_t *ys) const noexcept
+    {
+        int p = 0;
+        while (positions_ - p >= 2) {
+            const int count = std::min(kBlock, (positions_ - p) & ~1);
+            const int pairs = count / 2;
+            ai_engine_ln_deviations_s8_esp32s3(deviations_, variances_, xs + p * n_, pairs, run_.data());
+            if (std::find(variances_, variances_ + count, 0.0f) == variances_ + count) {
+                ai_engine_ln_scales_s8_esp32s3(scales_, variances_, run_.data(), pairs);
+            } else {
+                for (int i = 0; i < count; i++) {
+                    scales_[i] = divide(1.0f, sqrt_newton(variances_[i])) * in_scale_;
+                }
+            }
+            ai_engine_ln_outputs_s8_esp32s3(ys + p * n_, deviations_, scales_, gb_, pairs, run_.data());
+            p += count;
+        }
+        if (p < positions_) { run_position(xs + p * n_, ys + p * n_); }
     }
 
     // layernorm_as_espdl's steps for one position, each a float32 operation rounded once.
@@ -235,10 +316,15 @@ class LayerNormS8 final : public dl::module::Module {
     float out_rescale_ = 0.0f;
     float count_ = 0.0f;
     float inverse_n_ = 0.0f;
-    float *gamma_ = nullptr; // gamma, beta, deviations: one allocation
+    float *gamma_ = nullptr; // one allocation holds every buffer below
     float *beta_ = nullptr;
     float *deviations_ = nullptr;
+    float *variances_ = nullptr;
+    float *scales_ = nullptr;
+    float *gb_ = nullptr; // gamma, beta interleaved, times out_rescale
+    std::array<int32_t, kRunSize> run_ = {};
     bool float_mean_ = false;
+    bool paired_ = false;
     bool built_ = false;
 };
 

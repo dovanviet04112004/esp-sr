@@ -1,5 +1,6 @@
 set(srcs "src/core/engine.cpp" "src/core/model_image.cpp" "src/core/espdl_net.cpp" "src/core/espdl/espdl_ops.cpp"
          "src/core/espdl/espdl_softmax_quant.cpp" "src/core/espdl/espdl_layernorm_s8.cpp"
+         "src/core/espdl/layernorm_s8_esp32s3.S"
          "src/core/espdl/espdl_stage_sum.cpp" "src/core/espdl/stage_sum_s8_esp32s3.S"
          "src/core/espdl/espdl_conv_block.cpp" "src/core/espdl/conv_block_s8_esp32s3.S"
          "src/core/espdl/espdl_matmul_s8.cpp" "src/core/espdl/espdl_attention.cpp"
