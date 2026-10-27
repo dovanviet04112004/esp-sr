@@ -105,11 +105,18 @@ def cut_points(graph, count: int, span: tuple[int, int] | None = None) -> list[t
 
 
 def probe(
-    cfg: dict, run: Path, row: str, out: Path, span: tuple[int, int] | None = None, pcm: Path | None = None
+    cfg: dict,
+    run: Path,
+    row: str,
+    out: Path,
+    span: tuple[int, int] | None = None,
+    pcm: Path | None = None,
+    in_flash: bool = False,
 ) -> tuple[Path, Path]:
     """Write out/speaker_models.bin and out/speaker_windows.bin of the run's row under cfg, the branch's config, the
     cuts of probe.cuts within span among the image's entries; the .espdl files stay beside the row's graph. The window
-    is the run's probe window, or the int16 samples saved in pcm through the chip's front end."""
+    is the run's probe window, or the int16 samples saved in pcm through the chip's front end. The graph is copied
+    into PSRAM at load, or left in flash with in_flash."""
     patches = cfg["esp_ppq_patches"]
     folder = run / quant.INT8_DIR
     graph = export_espdl.load_native(folder / row / quant.GRAPH_FILE)
@@ -129,7 +136,7 @@ def probe(
         raise ValueError(f"{row}: the simulated embedding is not on the int8 grid of its exponent")
     with esp_ppq_patches.applied(patches):
         espdl = export_espdl.export(graph, folder / row / f"{ENTRY}.espdl", test_input=x).read_bytes()
-    entries = [pack_models.Entry(ENTRY, "espdl", espdl)]
+    entries = [pack_models.Entry(ENTRY, "espdl", espdl, pack_models.IN_FLASH if in_flash else 0)]
     for k, (index, name) in enumerate(cut_points(graph, cfg["probe"]["cuts"], span)):
         with esp_ppq_patches.applied(patches):
             part = export_espdl.export(
@@ -243,6 +250,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--row", required=True, help="the row of <run>/int8/ladder.yaml whose graph the board runs")
     parser.add_argument("--cut-range", type=int, nargs=2, help="topological op indices the cuts are spread between")
     parser.add_argument("--cuts", type=int, help="cuts of the graph in the image; probe.cuts otherwise")
+    parser.add_argument("--in-flash", action="store_true", help="the graph left in flash, PSRAM holding its tensors")
     parser.add_argument("--chain", action="store_true", help="the deployed speaker and the chain's windows")
     parser.add_argument("--pcm", type=Path, help="a .npy of int16 samples to probe instead of the run's window")
     parser.add_argument("--workers", type=int, default=6, help="processes simulating the impostors' sessions")
@@ -255,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.chain:
         paths = chain(cfg, args.run, args.row, args.out, args.workers)
     else:
-        paths = probe(cfg, args.run, args.row, args.out, span, args.pcm)
+        paths = probe(cfg, args.run, args.row, args.out, span, args.pcm, args.in_flash)
     for path in paths:
         print(f"{path}: {path.stat().st_size} bytes")
     return 0
