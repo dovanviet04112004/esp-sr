@@ -1,15 +1,26 @@
-// Row kernel of ai_engine's WeightedStats (KEHOACH 3.14 step 2.5), each product as esp-dl 3.3.11's int8 Mul gives it
+// Row kernels of ai_engine's pool ops (KEHOACH 3.14 step 2.5), each product as esp-dl 3.3.11's int8 Mul gives it
 // (tie728_s8_mul_w1_16_w2_16: QACC product, round half up as tie728_s8_vector_round_result does, saturated).
 //
 // void ai_engine_weighted_stats_row_s8_esp32s3(int16_t *sums, const int8_t *x, const int8_t *p, const int32_t *run)
 // run: 16-channel groups, the shifts of x * x, of p * x and of p * (x * x), each 1 or more. sums: per group the int16
 // sums of p * x over channels 0-7 and 8-15, then those of p * (x * x), each row's products added; pointers 16-byte
 // aligned. ReduceSum's int32 sums are these while a sum stays within int16.
+//
+// void ai_engine_row_sums_s8_esp32s3(int16_t *sums, const int8_t *x, int groups)
+// sums: per group the int16 sums of x over channels 0-7 and 8-15, the row added.
+//
+// void ai_engine_centred_squares_row_s8_esp32s3(int16_t *sums, const int8_t *x, const int8_t *mean, const int32_t *run)
+// run: groups, the shift of d * d (1 or more). d = x - mean saturating, as esp-dl's int8 Sub gives it, then d * d as
+// its Mul does, added into per-group int16 sums as above.
 
     .text
     .align  4
     .global ai_engine_weighted_stats_row_s8_esp32s3
     .type   ai_engine_weighted_stats_row_s8_esp32s3, @function
+    .global ai_engine_row_sums_s8_esp32s3
+    .type   ai_engine_row_sums_s8_esp32s3, @function
+    .global ai_engine_centred_squares_row_s8_esp32s3
+    .type   ai_engine_centred_squares_row_s8_esp32s3, @function
 
 .macro ones_in_q7 tmp
     movi    \tmp, 257
@@ -70,5 +81,37 @@ ai_engine_weighted_stats_row_s8_esp32s3:
     round_into  q4, a15, a12
     add_to_sums q3
     add_to_sums q4
+1:
+    retw.n
+
+    .align  4
+ai_engine_row_sums_s8_esp32s3:
+    entry   a1, 32
+    mov     a11, a2
+    ee.zero.q   q6
+    loopgtz a4, 1f
+    ee.vld.128.ip   q3, a3, 16
+    add_to_sums q3
+1:
+    retw.n
+
+    .align  4
+ai_engine_centred_squares_row_s8_esp32s3:
+    entry   a1, 32
+    l32i    a6, a5, 0
+    l32i    a13, a5, 4
+    addi    a13, a13, -1
+    movi.n  a12, 1
+    mov     a11, a2
+    ones_in_q7 a10
+    ee.zero.q   q6
+    loopgtz a6, 1f
+    ee.vld.128.ip   q0, a3, 16
+    ee.vld.128.ip   q1, a4, 16
+    ee.vsubs.s8     q2, q0, q1
+    ee.zero.qacc
+    ee.vmulas.s8.qacc   q2, q2
+    round_into  q3, a13, a12
+    add_to_sums q3
 1:
     retw.n

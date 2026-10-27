@@ -2,6 +2,7 @@
 
 #include "core/espdl/espdl_attention.hpp"
 #include "core/espdl/espdl_conv_block.hpp"
+#include "core/espdl/espdl_global_stats.hpp"
 #include "core/espdl/espdl_layernorm_s8.hpp"
 #include "core/espdl/espdl_matmul_s8.hpp"
 #include "core/espdl/espdl_softmax_quant.hpp"
@@ -27,6 +28,7 @@ void register_espdl_ops() noexcept
     creator->register_module("StemConv", stem_conv_from);
     creator->register_module("StrideDepthwise", stride_depthwise_from);
     creator->register_module("WeightedStats", weighted_stats_from);
+    creator->register_module("GlobalStats", global_stats_from);
 }
 
 } // namespace ai
