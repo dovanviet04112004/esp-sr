@@ -242,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run", type=Path, required=True, help="a run of python -m srpipe.tasks.speaker.quant import")
     parser.add_argument("--row", required=True, help="the row of <run>/int8/ladder.yaml whose graph the board runs")
     parser.add_argument("--cut-range", type=int, nargs=2, help="topological op indices the cuts are spread between")
+    parser.add_argument("--cuts", type=int, help="cuts of the graph in the image; probe.cuts otherwise")
     parser.add_argument("--chain", action="store_true", help="the deployed speaker and the chain's windows")
     parser.add_argument("--pcm", type=Path, help="a .npy of int16 samples to probe instead of the run's window")
     parser.add_argument("--workers", type=int, default=6, help="processes simulating the impostors' sessions")
@@ -249,6 +250,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     span = tuple(args.cut_range) if args.cut_range else None
     cfg = load_yaml(quant.CONFIG)
+    if args.cuts is not None:
+        cfg = cfg | {"probe": cfg["probe"] | {"cuts": args.cuts}}
     if args.chain:
         paths = chain(cfg, args.run, args.row, args.out, args.workers)
     else:
