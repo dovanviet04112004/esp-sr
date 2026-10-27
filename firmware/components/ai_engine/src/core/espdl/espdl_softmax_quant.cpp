@@ -15,6 +15,13 @@
 #include "esp_log.h"
 #include "fbs_model.hpp"
 
+extern "C" {
+void ai_engine_softmax_sums_s8_esp32s3(float *sums, const int8_t *x, const float *table, int rows,
+                                       int stride);
+void ai_engine_softmax_norm_s8_esp32s3(int8_t *y, const int8_t *x, const float *table, const float *scales,
+                                       int rows, int stride);
+}
+
 namespace ai {
 
 namespace {
@@ -22,7 +29,7 @@ namespace {
 const char *TAG = "softmax_quant";
 
 constexpr int kTableOffset = 128; // esp-dl's gen_lut_8bit: entry i is exp(s * (i - 128))
-constexpr int kColumnsAtOnce = 4;
+constexpr int kStrip = 8;         // columns softmax_s8_esp32s3.S takes at once
 
 // esp-dl's floor(v + 0.5) in double, for the v >= 0 a probability gives, then its int8 clip: below 2^22 the
 // float sum v + 0.5 rounds to no other integer part, so truncating it floors it.
@@ -165,25 +172,11 @@ void softmax_block_s8(const int8_t *x, int8_t *y, int len, int inner, const floa
                       float out_rescale) noexcept
 {
     const uint8_t *in = reinterpret_cast<const uint8_t *>(x);
-    int k = 0;
-    for (; k + kColumnsAtOnce <= inner; k += kColumnsAtOnce) {
-        float s0 = 0.0f;
-        float s1 = 0.0f;
-        float s2 = 0.0f;
-        float s3 = 0.0f;
-        const uint8_t *p = in + k;
-        for (int i = 0; i < len; i++, p += inner) {
-            s0 += table[p[0]];
-            s1 += table[p[1]];
-            s2 += table[p[2]];
-            s3 += table[p[3]];
-        }
-        scales[k] = s0;
-        scales[k + 1] = s1;
-        scales[k + 2] = s2;
-        scales[k + 3] = s3;
+    const int strips = inner / kStrip * kStrip;
+    for (int k = 0; k < strips; k += kStrip) {
+        ai_engine_softmax_sums_s8_esp32s3(scales + k, x + k, table, len, inner);
     }
-    for (; k < inner; k++) {
+    for (int k = strips; k < inner; k++) {
         float s = 0.0f;
         const uint8_t *p = in + k;
         for (int i = 0; i < len; i++, p += inner) {
@@ -192,23 +185,16 @@ void softmax_block_s8(const int8_t *x, int8_t *y, int len, int inner, const floa
         scales[k] = s;
     }
     // A power of two scales exactly, so one product rounds as esp-dl's p * (1 / sum) then p * 2^-e do.
-    for (k = 0; k < inner; k++) {
+    for (int k = 0; k < inner; k++) {
         scales[k] = 1.0f / scales[k] * out_rescale;
     }
-    for (int i = 0; i < len; i++) {
+    for (int k = 0; k < strips; k += kStrip) {
+        ai_engine_softmax_norm_s8_esp32s3(y + k, x + k, table, scales + k, len, inner);
+    }
+    for (int i = 0; i < len && strips < inner; i++) {
         const uint8_t *row = in + i * inner;
         int8_t *out = y + i * inner;
-        for (k = 0; k + kColumnsAtOnce <= inner; k += kColumnsAtOnce) {
-            const float v0 = table[row[k]] * scales[k];
-            const float v1 = table[row[k + 1]] * scales[k + 1];
-            const float v2 = table[row[k + 2]] * scales[k + 2];
-            const float v3 = table[row[k + 3]] * scales[k + 3];
-            out[k] = round_half_up(v0);
-            out[k + 1] = round_half_up(v1);
-            out[k + 2] = round_half_up(v2);
-            out[k + 3] = round_half_up(v3);
-        }
-        for (; k < inner; k++) {
+        for (int k = strips; k < inner; k++) {
             out[k] = round_half_up(table[row[k]] * scales[k]);
         }
     }
