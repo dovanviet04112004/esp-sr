@@ -1907,7 +1907,8 @@ người lạ lọt.
   của thang (`make ai-unit-speaker`). Đồ thị chạy từ đặc trưng của chính b0 tới embedding 192 chiều; khâu đặc trưng ở
   ngoài đồ thị. `make speaker-import EXTRACTOR=<bộ>` nhập một ReDimNet2 khác của khảo sát theo đúng đường ấy để đo
   trên chip (E11-T35: b3 nhiều ngôn ngữ). Ảnh dò của mạng lớn vượt khe 6 MB thì `CUTS=` bớt số bản cắt; `CUTS=0` chỉ
-  còn đồ thị đầy đủ, khớp từng bit xét ở embedding ra.
+  còn đồ thị đầy đủ, khớp từng bit xét ở embedding ra. Trọng số cộng tensor vượt PSRAM thì `IN_FLASH=1` để đồ thị ở
+  flash như `deploy.weights_in_flash`, PSRAM chỉ giữ tensor.
 - **Điều kiện cắm đã đạt** (E11-T25, ADR-0021): một lần chạy quanh 1 s trên cửa sổ 1,5 s; sau int8 giữ ≥ 95% lệnh được
   nhận ở cả 1 m và 3 m, gộp các phiên của mỗi khoảng cách, với ≤ 5% người lạ lọt. Hàng kl int8 chạy 1128,5 ms khi trọng
   số ở PSRAM, 1171,9 ms khi trọng số ở flash, và giữ 98,9% ở 1 m, 97,5% ở 3 m.
