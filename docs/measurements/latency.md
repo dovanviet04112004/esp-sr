@@ -1303,6 +1303,34 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
   - Tổng ACCX một mình 2,8 chu kỳ, sát băng thông đọc PSRAM. Ở lô hai nhóm, nó gánh thêm việc ghi ngược các dòng y
     của lô trước.
   - Ghi ra gần trần băng thông: mỗi dòng y nạp vào cache trước khi ghi đè, rồi mới ghi ngược.
+- **`ConvBlock` của b3 trên app đo** (28/10). App gọi các nhân của khối theo đúng thứ tự `forward`, ở cỡ của từng
+  stage, map x và y ở PSRAM, trọng số ngẫu nhiên. ms một khối:
+
+  | Stage (C, F, T) | Trọng số ở flash | ở PSRAM | ở RAM nội |
+  |---|---|---|---|
+  | 0 (96, 72, 148) | 288,5 | 238,9 | 173,5 |
+  | 1 (144, 36, 148) | 386,3 | 258,2 | 127,5 |
+  | 3 (96, 18, 74) | 19,9 | 17,0 | 15,0 |
+  | 5 (192, 9, 37) | 105,5 | 50,3 | 11,0 |
+
+  - Cột flash khớp bảng xếp hạng của bản dò (stage 1 ~385 ms, stage 5 ~107 ms).
+  - Pointwise chạy lặp trên cùng một hàng, trọng số đã nóng: 0,097, 0,087, 0,082 chu kỳ một phép nhân-cộng ở C =
+    96, 144, 192. Số như nhau dù trọng số ở flash, PSRAM hay RAM nội, nên cache trúng không chậm hơn RAM nội.
+  - **dcache của S3 không giữ dòng nóng.** Đọc S KB dữ liệu PSRAM khác chen giữa hai lượt pointwise, trọng số 20,7 KB
+    (C = 144): 8 KB làm lượt sau chậm 34%, 16 KB chậm 53%; ở C = 192, 8 KB chậm 49%. Cache 64 KB thay dòng theo LRU thì
+    8 KB không đẩy trọng số nào ra. Mỗi hàng của khối chuyển x, y và các hàng vòng qua cache, nên trọng số liên tục bị
+    đẩy ra và đọc lại từ flash.
+  - Chỉ PSRAM, xếp lại: lô R hàng (mỗi pha một pointwise), mỗi hàng theo dải P điểm ảnh, trọng số ở flash. Tốt nhất
+    stage 0 215,3 ms (R16 P4), stage 1 221,5 ms (R16 P4), stage 5 35,4 ms (R16 P2). Stage 3 chậm đi khi R tăng, từ
+    20,0 tới 29,7 ms ở R37.
+  - Trọng số chép từ flash vào RAM nội lúc khối bắt đầu, mỗi hàng theo dải 4 điểm ảnh, kể cả lần chép:
+
+    | Stage | 0 | 1 | 2 | 3 | 4 | 5 |
+    |---|---|---|---|---|---|---|
+    | ms một khối | 149,2 | 118,3 | 32,0 | 15,8 | 8,3 | 13,6 |
+    | Trọng số chép | 20 KB, 0,68 ms | 44 KB, 1,45 ms | 20 KB | 20 KB | 20 KB | 77 KB, 2,54 ms |
+
+    21 khối ước ~0,93 s 🔬, từ 2,43 s. Đầu ra như nhau ở mọi R và P.
 - **Chưa đo:** độ chính xác của b3 sau int8 (thang int8 đang chạy).
 - **Đọc:** đây là số thô. b3 chạy qua các op viết cho hình dạng của b0, chưa có bước nào tối ưu riêng cho nó. b3 có
   2,16 tỉ MAC (`torch.utils.flop_counter`, không tính GroupNorm), b0 0,24 tỉ. 1,61 tỉ nằm trong 19 `ConvBlock`, chạy
