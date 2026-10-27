@@ -1,0 +1,189 @@
+// Pointwise row kernels of ConvBlock (KEHOACH 3.14 step 2.5), each block of 16 outputs as esp-dl 3.3.11's aligned
+// int8 1x1 kernel sums it: bias loaded into QACC in esp-dl's layout, one product a step, round half up as
+// tie728_s8_vector_round_result does. Weights [blocks][C][16], C the inputs summed; pointers 16-byte aligned unless
+// said.
+//
+// void ai_engine_pw_norm_row_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run)
+// run: pixels, blocks, input pixel stride in vectors, whole input vectors run ahead of the tail, tail (0: 16 inputs,
+// 1: 8), mac shift, bias, norm weights [16 blocks], norm bias, norm shift; shifts 1 or more. Then ReLU and the
+// norm's depthwise 1x1 with bias, as tie728_s8_depthwise_conv2d_hwc1. out: [pixels][16 blocks].
+//
+// void ai_engine_pw_residual_row_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run)
+// run: pixels, blocks, input pixel stride in vectors, whole input vectors, tail, mac shift, bias, x [pixels][16
+// blocks], x shift onto the sum's exponent (0 or more), last block's outputs (16 or 8). x as esp-dl's int8
+// RequantizeLinear rounds it, added saturating as its Add does, then max(0, .). out: [pixels][C], 8-byte aligned.
+
+    .text
+    .align  4
+    .global ai_engine_pw_norm_row_s8_esp32s3
+    .type   ai_engine_pw_norm_row_s8_esp32s3, @function
+    .global ai_engine_pw_residual_row_s8_esp32s3
+    .type   ai_engine_pw_residual_row_s8_esp32s3, @function
+
+.macro ones_in_q7 tmp
+    movi    \tmp, 257
+    ee.movi.32.q    q7, \tmp, 0
+    ee.movi.32.q    q7, \tmp, 1
+    ee.movi.32.q    q7, \tmp, 2
+    ee.movi.32.q    q7, \tmp, 3
+    movi.n  \tmp, 16
+    wsr.sar \tmp
+    ee.vsl.32       q6, q7
+    ee.orq          q7, q6, q7
+.endm
+
+// QACC >> (less + 1) rounded half up into out: q7 holds 1 in every byte, one holds 1.
+.macro round_into out, less, one
+    ee.srcmb.s8.qacc    \out, \less, 0
+    ee.vsmulas.s8.qacc  q7, q7, 0
+    ee.srcmb.s8.qacc    \out, \one, 0
+.endm
+
+.macro bias_into_qacc ptr
+    ee.ld.qacc_l.l.128.ip   \ptr, 16
+    ee.ld.qacc_l.h.32.ip    \ptr, 16
+    ee.ld.qacc_h.l.128.ip   \ptr, 16
+    ee.ld.qacc_h.h.32.ip    \ptr, 16
+.endm
+
+// QACC += the pixel's inputs from a12 times the block's weight rows from a8, as tie728_s8_conv2d_11c16 takes them:
+// each whole vector's 16th product loads the next vector, then the tail of 16 or 8 inputs. a15 is scratch.
+.macro pointwise_products
+    ee.vld.128.ip   q0, a12, 16
+    ee.vld.128.ip   q1, a8, 16
+    ee.vld.128.ip   q2, a8, 16
+    l32i    a15, a5, 12
+    loopgtz a15, 4f
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 0
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 1
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 2
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 3
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 4
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 5
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 6
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 7
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 8
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 9
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 10
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 11
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 12
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 13
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 14
+    ee.vsmulas.s8.qacc.ld.incp  q0, a12, q2, q0, 15
+    ee.vld.128.ip   q2, a8, 16
+4:
+    l32i    a15, a5, 16
+    bnez    a15, 5f
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 0
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 1
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 2
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 3
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 4
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 5
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 6
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 7
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 8
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 9
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 10
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 11
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 12
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 13
+    ee.vsmulas.s8.qacc  q1, q0, 14
+    ee.vsmulas.s8.qacc  q2, q0, 15
+    j       6f
+5:
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 0
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 1
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 2
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 3
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 4
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 5
+    ee.vsmulas.s8.qacc  q1, q0, 6
+    ee.vsmulas.s8.qacc  q2, q0, 7
+6:
+.endm
+
+ai_engine_pw_norm_row_s8_esp32s3:
+    entry   a1, 48
+    l32i    a6, a5, 0
+    l32i    a13, a5, 20
+    addi    a13, a13, -1
+    l32i    a14, a5, 36
+    addi    a14, a14, -1
+    ones_in_q7 a15
+1:
+    mov     a8, a4
+    l32i    a9, a5, 24
+    l32i    a10, a5, 28
+    l32i    a11, a5, 32
+    l32i    a7, a5, 4
+2:
+    bias_into_qacc  a9
+    mov     a12, a3
+    pointwise_products
+    movi.n  a15, 1
+    round_into  q3, a13, a15
+    movi.n  a15, 0
+    ee.vrelu.s8     q3, a15, a15
+    bias_into_qacc  a11
+    ee.vld.128.ip   q4, a10, 16
+    ee.vmulas.s8.qacc   q3, q4
+    movi.n  a15, 1
+    round_into  q5, a14, a15
+    ee.vst.128.ip   q5, a2, 16
+    addi    a7, a7, -1
+    bnez    a7, 2b
+    l32i    a15, a5, 8
+    slli    a15, a15, 4
+    add     a3, a3, a15
+    addi    a6, a6, -1
+    bnez    a6, 1b
+    retw.n
+
+    .align  4
+ai_engine_pw_residual_row_s8_esp32s3:
+    entry   a1, 48
+    l32i    a6, a5, 0
+    l32i    a13, a5, 20
+    addi    a13, a13, -1
+    l32i    a10, a5, 28
+    l32i    a14, a5, 32
+    addi    a11, a14, -1
+    ones_in_q7 a15
+1:
+    mov     a8, a4
+    l32i    a9, a5, 24
+    l32i    a7, a5, 4
+2:
+    bias_into_qacc  a9
+    mov     a12, a3
+    pointwise_products
+    movi.n  a15, 1
+    round_into  q3, a13, a15
+    beqz    a14, 7f
+    ee.ldqa.s8.128.ip   a10, 16
+    round_into  q4, a11, a15
+    j       8f
+7:
+    ee.vld.128.ip   q4, a10, 16
+8:
+    ee.vadds.s8     q5, q3, q4
+    movi.n  a15, 0
+    ee.vrelu.s8     q5, a15, a15
+    l32i    a15, a5, 36
+    bnei    a15, 16, 9f
+    ee.vst.128.ip   q5, a2, 16
+    j       10f
+9:
+    ee.vst.l.64.ip  q5, a2, 8
+    beqi    a7, 1, 10f
+    ee.vst.h.64.ip  q5, a2, 8
+10:
+    addi    a7, a7, -1
+    bnez    a7, 2b
+    l32i    a15, a5, 8
+    slli    a15, a15, 4
+    add     a3, a3, a15
+    addi    a6, a6, -1
+    bnez    a6, 1b
+    retw.n

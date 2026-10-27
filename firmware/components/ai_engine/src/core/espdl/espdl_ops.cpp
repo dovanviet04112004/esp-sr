@@ -1,5 +1,6 @@
 #include "core/espdl/espdl_ops.hpp"
 
+#include "core/espdl/espdl_conv_block.hpp"
 #include "core/espdl/espdl_layernorm_s8.hpp"
 #include "core/espdl/espdl_softmax_quant.hpp"
 #include "core/espdl/espdl_stage_sum.hpp"
@@ -15,6 +16,7 @@ void register_espdl_ops() noexcept
     creator->register_module("SoftmaxQuant", softmax_quant_from);
     creator->register_module("LayerNormS8", layernorm_s8_from);
     creator->register_module("StageSum", stage_sum_from);
+    creator->register_module("ConvBlock", conv_block_from);
 }
 
 } // namespace ai
