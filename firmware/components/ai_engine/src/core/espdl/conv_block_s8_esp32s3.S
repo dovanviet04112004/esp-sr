@@ -6,6 +6,13 @@
 // rows: three [F + 2][16 V] rows, t - 1, t, t + 1, a zero pixel at each end; taps: [9][16 V], tap 3 * kh + kw;
 // run: F pixels, V, mac shift, 1 or more. out: [F][16 V]. Depthwise 3x3 without bias, as tie728_s8_depthwise_conv2d_33c1.
 //
+// void ai_engine_dw3x3_bias_row_s8_esp32s3(int8_t *out, const int8_t *const *rows, const int8_t *taps,
+//                                          const int32_t *run)
+// As the one above, run also holding the bias in esp-dl's QACC layout, 64 bytes a vector, loaded ahead of the products.
+//
+// void ai_engine_spread_row_s8_esp32s3(int8_t *out, const int8_t *in, int pixels)
+// Each byte of in into all 16 bytes of its out pixel, as esp-dl's Add of an int8 map by zeros [16] broadcasts it.
+//
 // void ai_engine_pad_row_s8_esp32s3(int8_t *out, const int8_t *in, const int32_t *run)
 // run: pixels, whole 16-byte vectors of a pixel, 8 bytes more or not (1 or 0). in: [pixels][C], 8-byte aligned;
 // out: [pixels][C rounded up to 16], the bytes past C left as they are.
@@ -14,6 +21,10 @@
     .align  4
     .global ai_engine_dw3x3_row_s8_esp32s3
     .type   ai_engine_dw3x3_row_s8_esp32s3, @function
+    .global ai_engine_dw3x3_bias_row_s8_esp32s3
+    .type   ai_engine_dw3x3_bias_row_s8_esp32s3, @function
+    .global ai_engine_spread_row_s8_esp32s3
+    .type   ai_engine_spread_row_s8_esp32s3, @function
     .global ai_engine_pad_row_s8_esp32s3
     .type   ai_engine_pad_row_s8_esp32s3, @function
 
@@ -36,14 +47,24 @@
     ee.srcmb.s8.qacc    \out, \one, 0
 .endm
 
-ai_engine_dw3x3_row_s8_esp32s3:
-    entry   a1, 48
+.macro bias_into_qacc ptr
+    ee.ld.qacc_l.l.128.ip   \ptr, 16
+    ee.ld.qacc_l.h.32.ip    \ptr, 16
+    ee.ld.qacc_h.l.128.ip   \ptr, 16
+    ee.ld.qacc_h.h.32.ip    \ptr, 16
+.endm
+
+// Loads the run, then each pixel's V vectors; biased takes each vector's bias from a5 instead of a zero QACC.
+.macro dw3x3_rows biased
     l32i    a10, a3, 0
     l32i    a11, a3, 4
     l32i    a12, a3, 8
     l32i    a6, a5, 0
     l32i    a7, a5, 4
     l32i    a13, a5, 8
+  .if \biased
+    l32i    a5, a5, 12
+  .endif
     addi    a13, a13, -1
     movi.n  a14, 1
     slli    a9, a7, 4
@@ -57,7 +78,11 @@ ai_engine_dw3x3_row_s8_esp32s3:
 1:
     mov     a15, a4
     loopgtz a7, 2f
+  .if \biased
+    bias_into_qacc  a5
+  .else
     ee.zero.qacc
+  .endif
     ee.vld.128.xp   q0, a10, a9
     ee.vld.128.xp   q1, a15, a9
     ee.vld.128.xp   q2, a10, a9
@@ -81,8 +106,32 @@ ai_engine_dw3x3_row_s8_esp32s3:
     round_into  q6, a13, a14
     ee.vst.128.ip   q6, a2, 16
 2:
+  .if \biased
+    slli    a15, a7, 6
+    sub     a5, a5, a15
+  .endif
     addi    a6, a6, -1
     bnez    a6, 1b
+.endm
+
+ai_engine_dw3x3_row_s8_esp32s3:
+    entry   a1, 48
+    dw3x3_rows 0
+    retw.n
+
+    .align  4
+ai_engine_dw3x3_bias_row_s8_esp32s3:
+    entry   a1, 48
+    dw3x3_rows 1
+    retw.n
+
+    .align  4
+ai_engine_spread_row_s8_esp32s3:
+    entry   a1, 32
+    loopgtz a4, 1f
+    ee.vldbc.8.ip   q0, a3, 1
+    ee.vst.128.ip   q0, a2, 16
+1:
     retw.n
 
     .align  4
