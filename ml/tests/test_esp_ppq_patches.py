@@ -1158,6 +1158,60 @@ def test_conv_block_exports_a_block_as_one_op_giving_its_integers(tmp_path: Path
     assert not np.array_equal(conv_block_espdl(laid.astype(np.int64), values, off), want[0].transpose(1, 2, 0))
 
 
+class StageEnds(nn.Module):
+    """A conv block between 1x1 convolutions, as ReDimNet2 b0's stages 0 and 1 run theirs: 12 channels to 24, by a
+    1x1 or by a 1x2 at a stride of 2, the block, then back to 12."""
+
+    def __init__(self, pair: bool) -> None:
+        super().__init__()
+        self.pre = nn.Conv2d(12, 24, (1, 2), stride=(1, 2)) if pair else nn.Conv2d(12, 24, 1)
+        self.block, self.post = ResBlock(24), nn.Conv2d(24, 12, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.post(self.block(self.pre(x)))
+
+
+def pointwise_espdl(rows: np.ndarray, laid: np.ndarray, bias: np.ndarray, shift: int, n: int) -> np.ndarray:
+    """A pointwise convolution's int8 outputs [..., n] from int8 rows [..., K], its laid weights and bias, as esp-dl's
+    Conv rounds them."""
+    weights = laid.astype(np.int64).transpose(0, 2, 1).reshape(-1, rows.shape[-1])[:n]
+    return round_shift(rows.astype(np.int64) @ weights.T + bias[:n].astype(np.int64), shift)
+
+
+@pytest.mark.parametrize("pair", [False, True])
+def test_conv_block_takes_the_1x1_convolutions_before_and_after_it(tmp_path: Path, pair: bool) -> None:
+    torch.manual_seed(7)
+    rng = np.random.default_rng(7)
+    bands = BLOCK_BANDS * (2 if pair else 1)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 12, BLOCK_HOPS, bands)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(StageEnds(pair).eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    exponent = ptq_espdl.io_of(graph).input_exponent
+    x = ptq_espdl.to_int8(calib[0].numpy(), exponent).astype(np.float32) * np.float32(2.0**exponent)
+    patches = ["requantise_graph_inputs", "aligned_pointwise", "conv_block"]
+    with esp_ppq_patches.applied(patches):
+        path = export_espdl.export(graph, tmp_path / "ends.espdl")
+    nodes, tensors = espdl_graph(path)
+    assert "Conv" not in {op for op, _ in nodes.values()}
+    ((_, (_, *params)),) = [node for node in nodes.values() if node[0] == "ConvBlock"]
+    assert len(params) == 12
+    info = path.with_suffix(".info").read_text()
+    line = re.search(r"= ConvBlock\[(.*?)\]\(", info).group(1)
+    shifts = [int(v) for v in re.search(r"shifts = \[([-\d, ]+)\]", line).group(1).split(",")]
+    (k, pre_shift), (n, post_shift) = (
+        [int(v) for v in re.search(name + r" = \[(\d+), (\d+)\]", line).groups()] for name in ("pre", "post")
+    )
+    assert (k, n) == (24 if pair else 12, 12)
+    io = ptq_espdl.io_of(graph)
+    want = ptq_espdl.Simulator(graph, patches)(x) / 2.0**io.output_exponent
+    laid = (x[0].transpose(1, 2, 0) / 2.0**io.input_exponent).astype(np.int64)
+    values = [tensors[p] for p in params]
+    middle = pointwise_espdl(laid.reshape(laid.shape[0], -1, k), values[8], values[9], pre_shift, 24)
+    block = conv_block_espdl(middle, values[:8], shifts)
+    assert np.array_equal(pointwise_espdl(block, values[10], values[11], post_shift, n), want[0].transpose(1, 2, 0))
+    off = pointwise_espdl(block, values[10], values[11], post_shift + 1, n)
+    assert not np.array_equal(off, want[0].transpose(1, 2, 0))
+
+
 def test_conv_block_leaves_a_block_whose_middle_map_another_op_reads(tmp_path: Path) -> None:
     graph, _ = res_block(tmp_path, 24, middle=True)
     info = export_info(graph, tmp_path / "middle.espdl", ["requantise_graph_inputs", "aligned_pointwise", "conv_block"])

@@ -1706,6 +1706,139 @@ def conv_block_from(graph, relu, info) -> bool:
     return True
 
 
+# Values a pixel the ConvBlock kernels take for a 1x1 convolution joined in front of a block, and give behind it.
+BLOCK_PRE_INPUTS = (12, 24)
+BLOCK_POST_OUTPUTS = (12,)
+
+
+def unmerged_pointwise(op, c_in: int | None, c_out: int | None, info) -> tuple | None:
+    """(weights [n, k], bias [n], shift) of op, an int8 1x1 convolution with bias, as it runs on each pixel before
+    merge_columns laid m of them as channels: m from c_out, or from c_in when c_out is None, op's laid channel counts
+    being m * k in and m * n out; None when op is no such convolution or its weights are not m blocks of one."""
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    if op is None or op.type != "Conv" or not isinstance(op, QuantableOperation) or len(op.inputs) != 3:
+        return None
+    attrs = op.attributes
+    ones = [*attrs.get("kernel_shape", [0]), *attrs.get("strides", []), *attrs.get("dilations", [])]
+    if attrs.get("group", 1) != 1 or any(v != 1 for v in ones) or any(attrs.get("pads", [])):
+        return None
+    if attrs.get("activation", "Linear") != "Linear":
+        return None
+    if not all(int8_tensor(c) for c in [*op.input_quant_config[:2], *op.output_quant_config]):
+        return None
+    km, nm = laid_shape(op.inputs[0], info)[-1], laid_shape(op.outputs[0], info)[-1]
+    m = nm // c_out if c_out else km // c_in
+    if m < 1 or km % m or nm % m or (c_out and nm != m * c_out) or (c_in and km != m * c_in):
+        return None
+    k, n = km // m, nm // m
+    dense = dense_filters(op.inputs[1].value.cpu().numpy(), nm)
+    base = dense[:n, :k]
+    if not np.array_equal(dense, np.kron(np.eye(m, dtype=dense.dtype), base)):
+        return None
+    bias = first_of_repeats(op.inputs[2].value.cpu().numpy().reshape(-1), m, n)
+    e_x, e_w, e_y = (exponent_of(v, info) for v in op.inputs[:2] + op.outputs[:1])
+    if bias is None or None in (e_x, e_w, e_y) or e_y - e_x - e_w < 1 or exponent_of(op.inputs[2], info) != e_x + e_w:
+        return None
+    return base, bias, int(e_y - e_x - e_w)
+
+
+def laid_pointwise(weights: np.ndarray, bias: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """weights [n, k] as the pointwise kernels read them, [Np / 16][k][16], and bias [Np], n padded with zeros to a
+    multiple of 16."""
+    n, k = weights.shape
+    np_ = -(-n // CHANNEL_STEP) * CHANNEL_STEP
+    padded = np.pad(weights, [(0, np_ - n), (0, 0)])
+    laid = np.ascontiguousarray(padded.reshape(np_ // CHANNEL_STEP, CHANNEL_STEP, k).transpose(0, 2, 1))
+    return laid, np.pad(bias, (0, np_ - n))
+
+
+def join_block_params(block, conv, laid: tuple, configs: list) -> None:
+    """conv's weights and bias, laid as given, appended to block's inputs with their configs; conv loses them."""
+    import torch
+
+    for v, value in zip(conv.inputs[1:3], laid, strict=True):
+        v.value = torch.from_numpy(value).to(v.value.dtype)
+        v.dest_ops.remove(conv)
+        block.inputs.append(v)
+        v.dest_ops.append(block)
+    configs += list(conv.input_quant_config[1:3])
+    del conv.inputs[1:]
+
+
+def block_pre(graph, block, info) -> bool:
+    """The 1x1 convolution making block's x, through Reshapes each read by one op alone, joined into block when it
+    reads K in BLOCK_PRE_INPUTS values a pixel of x: its input becomes block's first, its weights and bias follow the
+    block's, "pre" holds K and its shift, "out_shape" block's output's laid shape."""
+    from esp_ppq.core import OperationQuantizationConfig
+
+    x = block.inputs[0]
+    op, passed = behind_reshapes(graph, x)
+    lx = laid_shape(x, info)
+    found = unmerged_pointwise(op, None, lx[-1], info) if len(lx) == 4 else None
+    if found is None or found[0].shape[1] not in BLOCK_PRE_INPUTS:
+        return False
+    weights, bias, shift = found
+    k, source = weights.shape[1], op.inputs[0]
+    ls = laid_shape(source, info)
+    if len(ls) != 4 or ls[:2] != lx[:2] or ls[2] * ls[3] != lx[2] * k:
+        return False
+    configs = [op.input_quant_config[0], *block.config.input_quantization_config[1:]]
+    join_block_params(block, op, laid_pointwise(weights, bias), configs)
+    middles = [op.outputs[0], *(r.outputs[0] for r in passed)]
+    source.dest_ops.remove(op)
+    block.inputs.remove(x)
+    x.dest_ops.remove(block)
+    for gone in [op, *passed]:
+        graph.remove_operation(gone)
+    for v in middles:
+        graph.remove_variable(v)
+    block.inputs.insert(0, source)
+    source.dest_ops.append(block)
+    block.attributes["pre"] = [int(k), shift]
+    block.attributes["out_shape"] = [int(v) for v in laid_shape(block.outputs[0], info)]
+    block.config = OperationQuantizationConfig(configs, block.output_quant_config)
+    return True
+
+
+def block_post(graph, block, info) -> bool:
+    """The 1x1 convolution alone reading block's output, through Reshapes each read by one op alone, joined into
+    block when it gives N in BLOCK_POST_OUTPUTS values a pixel: its output becomes block's, its weights and bias
+    follow block's inputs, "post" holds N and its shift, "out_shape" the new output's laid shape."""
+    from esp_ppq.core import OperationQuantizationConfig
+
+    y, passed = block.outputs[0], []
+    var = y
+    while var.name not in graph.outputs and len(var.dest_ops) == 1 and var.dest_ops[0].type == "Reshape":
+        passed.append(var.dest_ops[0])
+        var = var.dest_ops[0].outputs[0]
+    if var.name in graph.outputs or len(var.dest_ops) != 1:
+        return False
+    op, ly = var.dest_ops[0], laid_shape(y, info)
+    found = unmerged_pointwise(op, ly[-1], None, info) if len(ly) == 4 else None
+    if found is None or found[0].shape[0] not in BLOCK_POST_OUTPUTS:
+        return False
+    weights, bias, shift = found
+    n, out = weights.shape[0], op.outputs[0]
+    lo = laid_shape(out, info)
+    if len(lo) != 4 or lo[:2] != ly[:2] or lo[2] * lo[3] != ly[2] * n:
+        return False
+    configs = list(block.config.input_quantization_config)
+    join_block_params(block, op, laid_pointwise(weights, bias), configs)
+    out_config = op.output_quant_config[0]
+    middles = [y, *(r.outputs[0] for r in passed)]
+    for gone in [*passed, op]:
+        graph.remove_operation(gone)
+    for v in middles:
+        graph.remove_variable(v)
+    block.outputs.append(out)
+    out.source_op = block
+    block.attributes["post"] = [int(n), shift]
+    block.attributes["out_shape"] = [int(v) for v in lo]
+    block.config = OperationQuantizationConfig(configs, [out_config])
+    return True
+
+
 @contextlib.contextmanager
 def conv_block() -> Iterator[None]:
     """Each int8 ReDimNet2 conv block exported as one ConvBlock (KEHOACH 3.14 step 2.5): esp-dl runs its eight ops
@@ -1723,8 +1856,9 @@ def conv_block() -> Iterator[None]:
         graph = prepare(self, graph, *args, **kwargs)
         info = ExporterPatternInfo()
         for op in list(graph.topological_sort()):
-            if op.name in graph.operations:
-                conv_block_from(graph, op, info)
+            if op.name in graph.operations and conv_block_from(graph, op, info):
+                block_pre(graph, op, info)
+                block_post(graph, op, info)
         return graph
 
     EspdlExporter.prepare_graph = joining
