@@ -5,6 +5,7 @@
 #include "core/espdl/espdl_global_stats.hpp"
 #include "core/espdl/espdl_layernorm_s8.hpp"
 #include "core/espdl/espdl_matmul_s8.hpp"
+#include "core/espdl/espdl_pointwise_s8.hpp"
 #include "core/espdl/espdl_softmax_quant.hpp"
 #include "core/espdl/espdl_stage_sum.hpp"
 #include "core/espdl/espdl_stem_conv.hpp"
@@ -29,6 +30,7 @@ void register_espdl_ops() noexcept
     creator->register_module("StrideDepthwise", stride_depthwise_from);
     creator->register_module("WeightedStats", weighted_stats_from);
     creator->register_module("GlobalStats", global_stats_from);
+    creator->register_module("PointwiseS8", pointwise_s8_from);
 }
 
 } // namespace ai

@@ -7,6 +7,7 @@ set(srcs "src/core/engine.cpp" "src/core/model_image.cpp" "src/core/espdl_net.cp
          "src/core/espdl/espdl_stem_conv.cpp" "src/core/espdl/softmax_s8_esp32s3.S"
          "src/core/espdl/espdl_stride_depthwise.cpp" "src/core/espdl/espdl_weighted_stats.cpp"
          "src/core/espdl/pool_s8_esp32s3.S" "src/core/espdl/espdl_global_stats.cpp"
+         "src/core/espdl/espdl_pointwise_s8.cpp"
          "src/core/espdl/conv_row_s8_esp32s3.S" "src/ns/ns.cpp"
          "src/wake/wake.cpp" "src/speaker/speaker.cpp" "src/speaker/score.c" "src/synth/synth.cpp")
 if(CONFIG_AI_ENGINE_COMMAND_BACKEND_CTC)
