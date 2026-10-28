@@ -1297,7 +1297,8 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
 | `ConvBlock` gộp conv 1×1 trước và sau rộng hơn (48 → 144 trước stage 1, 96 → 24 sau stage 0, 144 → 48 sau stage 1, sau stage 2) | 1 661,2 ms | 4 082 080 B, cùng 79 680 B RAM nội | `PointwiseS8` 372 → 298 ms, `ConvBlock` 802 → 845 ms: phần tính của các conv ấy vào khối gần nguyên vẹn, phần đọc ghi map bớt được nhỏ hơn ước; ở stage 1, trọng số của chúng không vừa vùng mượn cùng hàng vòng nên đọc tại chỗ. 242 KB PSRAM ít hơn |
 | `StageSum` chép trọng số theo kênh vào vùng mượn | 1 622,8 ms | 4 082 080 B, cùng 79 680 B RAM nội | `StageSum` 154,5 → 116,1 ms |
 | `Add` dư vào nhân có vòng của `PointwiseS8`, kể cả op gộp từ lát | 1 605,2 ms | 4 077 844 B, cùng 79 680 B RAM nội | các tổng dư [T, 1728] sau conv 72 → 1728 của mỗi stage vào op |
-| Pointwise của `ConvBlock` trải phẳng ở 96, 144, 192 kênh, trọng số chuẩn hoá nạp trước tích | **1 554,6 ms** | **4 077 844 B**, cùng 79 680 B RAM nội | `ConvBlock` 845,7 → ~795 ms: stage 0 ~104–118, stage 1 ~101–115, stage 2 ~27 ms một khối. Trên app đo, 16 kênh ra một điểm ảnh 149,8 → 138,8, 200,9 → 189,4, 251,6 → 240,2 chu kỳ ở C = 96, 144, 192 (0,090, 0,082, 0,078 chu kỳ một phép nhân-cộng) |
+| Pointwise của `ConvBlock` trải phẳng ở 96, 144, 192 kênh, trọng số chuẩn hoá nạp trước tích | 1 554,6 ms | 4 077 844 B, cùng 79 680 B RAM nội | `ConvBlock` 845,7 → ~795 ms: stage 0 ~104–118, stage 1 ~101–115, stage 2 ~27 ms một khối. Trên app đo, 16 kênh ra một điểm ảnh 149,8 → 138,8, 200,9 → 189,4, 251,6 → 240,2 chu kỳ ở C = 96, 144, 192 (0,090, 0,082, 0,078 chu kỳ một phép nhân-cộng) |
+| `GroupNormS8` ghi một hàng mỗi hàng nguồn, `Resize` dời ra sau nó vào `StageSum`; `StageSum` chạy theo khối hàng ra cỡ lần lặp lớn nhất | **1 525,1 ms** | **4 077 812 B**, cùng 79 680 B RAM nội | `GroupNormS8` 122,2 → 105,0 ms (stage 4 12,1 → 7,5), `StageSum` 115,5 → 103,2 ms (`fin_wght1d` 27,2 → 21,8): 4 map ra ngắn đi 2 hay 4 lần, mỗi hàng nguồn đọc một lần cho cả khối. PSRAM cho tensor gần như không đổi, vì đỉnh của trình xếp nằm ở stage 0–1 |
 - **Mọi số trên chạy một nhân** (nhân 0, như `xac_task` ở KẾ HOẠCH §5.2); nhân 1 giữ đường âm thanh thời gian thực.
 - Từ bước `GroupNormS8`, mỗi bước khớp từng bit cả ở đồ thị lẫn bản cắt.
 - Lượt dò có profile chạy đồ thị hai lần liền nhau (~4 s ở nhân 0) thì task watchdog báo IDLE0; bản báo rơi vào
@@ -1374,6 +1375,9 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
 - **`StageSum` trên board B** (28/10, thử trước khi xin duyệt): mỗi hàng ra đọc trọng số theo kênh của mọi số hạng,
   7 × 1728 B ở `fin_wght1d`, từ flash, và cache đẩy chúng ra giữa hai hàng. Chép chúng vào vùng mượn lúc op bắt đầu:
   6 `StageSum` 154,5 → 116,1 ms, `fin_wght1d` 40,6 → 27,3 ms; một cửa sổ 1 661,2 → 1 622,8 ms, khớp từng bit.
+- **Autoload của dcache trên app đo** (28/10): bật cho đúng vùng đang đọc, 1 tới 4 khối mỗi lần, kích khi trượt hay cả
+  khi trúng. Chép 128 KB từ flash 31,8 → 32,3 MB/s, cộng dồn 256 KB ở PSRAM 87,8 → 89,3 MB/s. Đọc tuần tự đã sát trần
+  bus, nên nạp trước chỉ lợi khi chồng được lên phần tính.
 - **Chưa đo:** độ chính xác của b3 sau int8 (thang int8 đang chạy).
 - **Đọc:** đây là số thô. b3 chạy qua các op viết cho hình dạng của b0, chưa có bước nào tối ưu riêng cho nó. b3 có
   2,16 tỉ MAC (`torch.utils.flop_counter`, không tính GroupNorm), b0 0,24 tỉ. 1,61 tỉ nằm trong 19 `ConvBlock`, chạy
