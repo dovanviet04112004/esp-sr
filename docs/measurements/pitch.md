@@ -285,3 +285,25 @@ nhân cửa sổ và các bin không còn ra bộ nhớ. Mọi phép giữ nguy�
   của KẾ HOẠCH §5.6.
 - Phần còn lại phần lớn là ba FFT (913 µs), `sqrtf` (535 µs) và `ln` (241 µs). Bớt hai phần sau phải đổi phép tính,
   tức đổi KẾ HOẠCH §3.11 bước 3.1 và bản soi gương: chờ chủ repo.
+
+### 7.2 CNN chạy dòng (phần 3.2, 29/10)
+
+`make ai-unit-pitch RUN=artifacts/pitch/runs/20261028_eb08333-dirty_9ab2ce ROW=kl STEP=16`: hàng kl xuất có
+`band_stream`, 16 khung mỗi lượt. Cùng cửa sổ 256 khung của §5 đi qua 16 lượt sau `reset`, so với mô phỏng của cả cửa
+sổ.
+
+| Đo | Kết quả |
+|---|---|
+| Trễ, đọc từ `.info` của đồ thị đã xuất | logit cao độ 6 khung, độ tin 7 khung, như KẾ HOẠCH §3.11 bước 3.2 |
+| Khớp, lượt đầu sau `reset` | **lệch 0** ở mọi khung còn đủ khung sau: 250 khung × 95 bậc logit, 249 khung độ tin |
+| Giờ một lượt 16 khung | **28,1 ms** trung bình, 28,5 ms đỉnh, trên 160 lượt sau một lượt làm nóng |
+| Giờ một hop | **1 758 µs**; cửa sổ 16 khung không chạy dòng 1 675 µs (§6) |
+| PSRAM cho đồ thị, tensor và cột giữ | 246 632 B; cửa sổ 16 khung 110 000 B |
+
+- Lần chạy đầu lệch 12 989 giá trị, lệch lớn nhất 91. Vùng giữ cột vào của `BandBlock` và `BandHead` cấp bằng
+  `heap_caps_calloc`, không thẳng 16 byte, mà nhân PIE đọc 128 bit ở địa chỉ đã làm tròn xuống. Cấp bằng
+  `heap_caps_aligned_calloc` thì khớp.
+- Vùng giữ cột vào xếp như cả tensor vào (32 KB mỗi khối 7 × 3, 24 KB ở `BandHead`) để nhân đọc cột cũ và cột mới
+  cùng một bước dải, dù mỗi dải chỉ dùng 2 cột. Phần PSRAM thêm phần lớn ở đây.
+- SwiftF0 trên chip giờ tốn ~4,1 ms mỗi hop: front end 2 367 µs (§7.1) cộng CNN chạy dòng 1 758 µs, so với Kaldi
+  2 101 µs. Còn phần 3.3: giải cao độ, độ tin và ba chiều thang Kaldi.
