@@ -18,6 +18,10 @@
 extern "C" {
 void ai_engine_pw_conv_rows_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
                                        const int32_t *run);
+void ai_engine_pw_add_rows_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                      const int32_t *run);
+void ai_engine_pw_add_x_rows_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                        const int32_t *run);
 void ai_engine_pw_conv_k24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
                                       const int32_t *run);
 void ai_engine_pw_conv_k48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
@@ -130,11 +134,10 @@ class PointwiseS8 final : public dl::module::Module {
         dl::TensorBase *y = context->get_tensor(m_outputs_index[0]);
         if (!built_ && !build(context, x, y)) { return; }
         if (residual_shift_ >= 0) {
-            run_[kRunResidual] = reinterpret_cast<int32_t>(
-                context->get_tensor(m_inputs_index[2 + biased_])->get_element_ptr());
+            residual_ = context->get_tensor(m_inputs_index[2 + biased_])->get_element_ptr<int8_t>();
         }
         const int8_t *weights = context->get_tensor(m_inputs_index[1])->get_element_ptr<int8_t>();
-        const Loan loan = kernel_ == ai_engine_pw_conv_rows_s8_esp32s3 ? loan_lent() : Loan{nullptr, 0};
+        const Loan loan = looped_ ? loan_lent() : Loan{nullptr, 0};
         if (!patched()) {
             const int8_t *rows = x->get_element_ptr<int8_t>();
             if (odd_rows_) {
@@ -217,6 +220,7 @@ class PointwiseS8 final : public dl::module::Module {
             const bool last = b + n == blocks;
             const int8_t *slice = weights + b * block_bytes();
             run_[kRunBias] = word_of(bias_ + b * kBiasBlockBytes);
+            if (residual_ != nullptr) { run_[kRunResidual] = word_of(residual_ + b * kChannelStep); }
             if (lent > 0) {
                 slice = borrowed(weights, b, n, loan);
                 run_[kRunBias] = word_of(loan.mem + n * block_bytes());
@@ -313,8 +317,8 @@ class PointwiseS8 final : public dl::module::Module {
             return false;
         }
         if (residual != nullptr &&
-            (h == nullptr || residual->shape != y->shape || residual->get_dtype() != dl::DATA_TYPE_INT8)) {
-            ESP_LOGE(TAG, "%s: a residual needs rows of 24 or 48 and the output's int8 shape", name);
+            (patched() || residual->shape != y->shape || residual->get_dtype() != dl::DATA_TYPE_INT8)) {
+            ESP_LOGE(TAG, "%s: a residual needs rows, not patches, and the output's int8 shape", name);
             return false;
         }
         if (bias != nullptr) {
@@ -344,8 +348,11 @@ class PointwiseS8 final : public dl::module::Module {
                 columns_ % kChannelStep != 0 ? kHalfStep : kChannelStep,
                 0};
         inputs_ = k;
-        if (h == nullptr) {
-            kernel_ = ai_engine_pw_conv_rows_s8_esp32s3;
+        looped_ = h == nullptr;
+        if (looped_) {
+            kernel_ = residual == nullptr   ? ai_engine_pw_conv_rows_s8_esp32s3
+                      : residual_shift_ > 0 ? ai_engine_pw_add_x_rows_s8_esp32s3
+                                            : ai_engine_pw_add_rows_s8_esp32s3;
             slice_blocks_ = slice_blocks(k);
         } else if (residual == nullptr) {
             kernel_ = h->conv;
@@ -387,6 +394,8 @@ class PointwiseS8 final : public dl::module::Module {
     int inputs_ = 0;
     int slice_blocks_ = 0; // 0: all blocks in one pass over the rows
     const int8_t *bias_ = nullptr;
+    const int8_t *residual_ = nullptr; // [rows][N], each slice reading its own columns
+    bool looped_ = false;
     int8_t *gathered_ = nullptr; // patch rows: one row's, all when sliced; or padded rows
     bool odd_rows_ = false;      // K a multiple of 8, not of 16, its rows padded first
     int padded_inputs_ = 0;
