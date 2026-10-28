@@ -587,3 +587,56 @@ def test_the_threshold_table_sets_noise_bins_only_when_given_noisy_material() ->
     for count, quiet in zip(noisy["counts"], plain["counts"], strict=True):
         assert len(count["noise"]["milli_z"]) == 3
         assert count["noise"]["quiet"] >= quiet["shares"][quiet["chosen"]]["milli_z"]
+
+
+def kept_deploy(tmp_path: Path, row: str) -> Path:
+    """A pretrained run with a deploy kept in it, as deploy leaves one."""
+    import json
+
+    import yaml
+
+    from srpipe.export import update_lock
+
+    run = tmp_path / "runs" / "20261028_abc_123"
+    pins = {"args": ["b3.pt"], "files": {"b3.pt": {"sha256": "ab"}}}
+    run.mkdir(parents=True)
+    cfg = {"source": {"extractor": "b3", "pins": pins}}
+    (run / "config.resolved.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    kept = run / quant.INT8_DIR / row / quant.KEPT_DIR
+    kept.mkdir(parents=True)
+    (kept / f"{quant.BRANCH}.espdl").write_bytes(b"graph")
+    (kept / quant.COHORT_FILE).write_bytes(b"cohort")
+    files = {name: update_lock.sha256(kept / name) for name in (f"{quant.BRANCH}.espdl", quant.COHORT_FILE)}
+    record = {"files": files, "fields": {"row": row, "threshold": {"milli_z": [1486]}}}
+    (kept / quant.KEPT_FILE).write_text(json.dumps(record), encoding="utf-8")
+    return run
+
+
+def test_use_puts_a_kept_deploy_into_the_firmware_and_the_lock_and_refuses_a_changed_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from srpipe.export import update_lock
+
+    lock = tmp_path / "models.lock.json"
+    lock.write_text(json.dumps({"version": 1, "models": {"command": {"run": "kept"}}}), encoding="utf-8")
+    monkeypatch.setattr(update_lock, "LOCK", lock)
+    monkeypatch.setattr(update_lock, "MODELS", tmp_path / "models")
+    run = kept_deploy(tmp_path, "kl")
+    quant.use(run, "kl")
+    folder = tmp_path / "models" / quant.BRANCH
+    assert (folder / f"{quant.BRANCH}.espdl").read_bytes() == b"graph"
+    assert (folder / quant.COHORT_FILE).read_bytes() == b"cohort"
+    rows = json.loads(lock.read_text(encoding="utf-8"))["models"]
+    assert rows["command"] == {"run": "kept"} and rows[quant.BRANCH]["run"] == run.name
+    assert rows[quant.BRANCH]["threshold"] == {"milli_z": [1486]} and rows[quant.BRANCH]["row"] == "kl"
+    assert [(f["entry"], f["kind"]) for f in rows[quant.BRANCH]["files"]] == [
+        (quant.BRANCH, "espdl"),
+        (quant.COHORT_ENTRY, "cohort"),
+    ]
+    (run / quant.INT8_DIR / "kl" / quant.KEPT_DIR / quant.COHORT_FILE).write_bytes(b"other")
+    with pytest.raises(ValueError, match="differs from the sha256"):
+        quant.use(run, "kl")
+    with pytest.raises(FileNotFoundError, match="keeps no deploy"):
+        quant.use(run, "timing")

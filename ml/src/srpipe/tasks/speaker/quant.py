@@ -1,9 +1,9 @@
-"""ReDimNet2 b0, the chip path of KEHOACH 3.17, along command_ctc's path: import writes the survey's pinned b0 as a run,
-model.pt with its network's code; ptq rewrites it for esp-dl without changing what it computes, from its log-mel
-features to the embedding, quantises it with each calibration of rung 2 (3.14) into <run>/int8/<calibration>/, and
-rows each beside float in <run>/int8/ladder.yaml on the survey's material, keeping the board probe's window; int16 adds
-rung 3's rows on rung 2's best; deploy locks a row with its threshold into firmware/models/speaker/; music scores the
-locked row with music in the room. Run: python -m srpipe.tasks.speaker.quant import | <command> <run>"""
+"""ReDimNet2, the chip path of KEHOACH 3.17, along command_ctc's path: import writes the survey's pinned extractor as a
+run, model.pt with its network's code; ptq rewrites it for esp-dl without changing what it computes, quantises it with
+each calibration of rung 2 (3.14) into <run>/int8/<calibration>/ and rows each beside float in <run>/int8/ladder.yaml,
+keeping the board probe's window; int16 adds rung 3's rows; deploy keeps a row and its threshold in the run and locks
+them into the firmware, as use does for a kept variant; music scores the locked row with music in the room.
+Run: python -m srpipe.tasks.speaker.quant import | use <variant> | <command> <run>"""
 
 from __future__ import annotations
 
@@ -45,6 +45,7 @@ GRAPH_FILE = "graph.native"
 LADDER_FILE = "ladder.yaml"
 WINDOW_FILE = "board_window.npy"  # float log-mel (1, 1, mels, frames) the probe runs
 DEPLOY_FILE = "deploy.yaml"  # in <run>/int8/<row>/: the threshold, its figures
+KEPT_DIR, KEPT_FILE = "deploy", "lock_fields.json"  # <run>/int8/<row>/deploy/: what use installs
 MUSIC_FILE = "music.yaml"  # in <run>/int8/<row>/: its figures with music in the room
 COHORT_FILE, COHORT_ENTRY = "cohort.bin", "speaker_cohort"  # float32 rows of dims
 COHORT_STREAM = 3  # rng stream of the cohort, beside the survey's
@@ -928,9 +929,9 @@ def locked_threshold(table: dict, held: list[str]) -> dict:
 
 
 def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[Path, Path]:
-    """The graph of row as firmware/models/speaker/ holds it: the .espdl with the board probe's window for
-    model->test(), the cohort of strangers as cohort.bin, the threshold set on the survey's material through the chip's
-    own path, and the lock (KEHOACH 3.17, ADR-0022).
+    """The graph of row as firmware/models/speaker/ holds it, kept in <run>/int8/<row>/deploy/ and put there by use:
+    the .espdl with the board probe's window for model->test(), the cohort of strangers as cohort.bin, the threshold set
+    on the survey's material through the chip's own path, the lock's fields (KEHOACH 3.17, ADR-0022, ADR-0028).
     <run>/int8/<row>/deploy.yaml keeps the threshold's figures, the front end's gap to the extractor and the survey's
     figures on that path, beside the ladder's. Refused for a run whose window or front end is not
     contracts/speaker.yaml's, and for a row not int8 at both ends."""
@@ -968,17 +969,14 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
     io = ptq_espdl.io_of(graph)
     pcm = spk_fbank.tail(np.rint(impostors[board].samples * PCM_FULL_SCALE).astype(np.int16), front.cfg.window_samples)
     x = ptq_espdl.to_int8(front.run(pcm)[None, None], io.input_exponent)
+    kept = folder / KEPT_DIR
     with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
         built = export_espdl.export(
             graph,
-            folder / "deploy" / f"{BRANCH}.espdl",
+            kept / f"{BRANCH}.espdl",
             test_input=x.astype(np.float32) * np.float32(2.0**io.input_exponent),
         )
-    target = update_lock.MODELS / BRANCH
-    target.mkdir(parents=True, exist_ok=True)
-    espdl = target / f"{BRANCH}.espdl"
-    espdl.write_bytes(built.read_bytes())
-    cohort_file = target / COHORT_FILE
+    cohort_file = kept / COHORT_FILE
     cohort_file.write_bytes(cohort_rows(units, scored, cohort).astype("<f4").tobytes())
     rungs = yaml.safe_load((run / INT8_DIR / LADDER_FILE).read_text(encoding="utf-8"))["rows"][row]
     fields = {
@@ -990,8 +988,30 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
         "cohort": {"seed": survey_cfg["seed"], "stream": COHORT_STREAM} | table["cohort"],
         "weights_in_flash": dq["weights_in_flash"],
     }
-    files = [update_lock.Deployed(espdl, BRANCH, "espdl"), update_lock.Deployed(cohort_file, COHORT_ENTRY, "cohort")]
-    return update_lock.record(BRANCH, run, files, fields)
+    files = {path.name: update_lock.sha256(path) for path in (built, cohort_file)}
+    record = json.dumps({"files": files, "fields": fields}, indent=2, ensure_ascii=False)
+    (kept / KEPT_FILE).write_text(record + "\n", encoding="utf-8")
+    return use(run, row)
+
+
+def use(run: Path, row: str) -> tuple[Path, Path]:
+    """The deploy kept in <run>/int8/<row>/deploy/ into firmware/models/speaker/ and the lock, as deploy locked it;
+    refused when a kept file differs from the sha256 kept beside it (KEHOACH 3.17, ADR-0028)."""
+    kept = run / INT8_DIR / row / KEPT_DIR
+    if not (kept / KEPT_FILE).is_file():
+        raise FileNotFoundError(f"{kept} keeps no deploy: make speaker-deploy RUN={run} ROW={row}")
+    record = json.loads((kept / KEPT_FILE).read_text(encoding="utf-8"))
+    target = update_lock.MODELS / BRANCH
+    target.mkdir(parents=True, exist_ok=True)
+    for name, digest in record["files"].items():
+        if update_lock.sha256(kept / name) != digest:
+            raise ValueError(f"{kept / name} differs from the sha256 {KEPT_FILE} keeps")
+        shutil.copyfile(kept / name, target / name)
+    files = [
+        update_lock.Deployed(target / f"{BRANCH}.espdl", BRANCH, "espdl"),
+        update_lock.Deployed(target / COHORT_FILE, COHORT_ENTRY, "cohort"),
+    ]
+    return update_lock.record(BRANCH, run, files, record["fields"])
 
 
 def music_prints(
@@ -1233,6 +1253,8 @@ def main(argv: list[str] | None = None) -> int:
     lock.add_argument("run", type=Path)
     lock.add_argument("--row", required=True, help="a row of <run>/int8/ladder.yaml")
     lock.add_argument("--workers", type=int, default=8)
+    installed = sub.add_parser("use", help="a variant's kept deploy into firmware/models/speaker/ and the lock")
+    installed.add_argument("variant", help="a name of the config's variants: a deployed run and row")
     noisy = sub.add_parser("music", help="the locked row with music in the room at each SNR of music.snr_db")
     noisy.add_argument("run", type=Path)
     noisy.add_argument("--workers", type=int, default=8)
@@ -1247,6 +1269,12 @@ def main(argv: list[str] | None = None) -> int:
         print(args.run / INT8_DIR / body["row"] / MUSIC_FILE)
     elif args.command == "deploy":
         for path in deploy(cfg, args.run, args.row, data_paths(), args.workers):
+            print(path)
+    elif args.command == "use":
+        if args.variant not in cfg["variants"]:
+            parser.error(f"variant {args.variant!r}: the config's variants are {sorted(cfg['variants'])}")
+        variant = cfg["variants"][args.variant]
+        for path in use(ML_ROOT / "artifacts" / BRANCH / "runs" / variant["run"], variant["row"]):
             print(path)
     elif args.command == "int16":
         int16(cfg, args.run, data_paths(), args.workers)

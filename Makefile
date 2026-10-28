@@ -190,7 +190,8 @@ eval-speaker: ## EER of the pretrained extractors, and the owner's windows kept 
 
 SPEAKER_QUANT = $(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.speaker.quant
 
-.PHONY: speaker-import speaker-ptq speaker-int16 speaker-timing speaker-same-int8 speaker-deploy speaker-music speed
+.PHONY: speaker-import speaker-ptq speaker-int16 speaker-timing speaker-same-int8 speaker-deploy speaker-use \
+  speaker-music speed
 speaker-import: ## Import a pretrained ReDimNet2 of the survey as a run into ml/artifacts/speaker/runs: [EXTRACTOR=redimnet2_b0] (E11-T35)
 	$(SPEAKER_QUANT) import $(if $(EXTRACTOR),--extractor $(EXTRACTOR))
 
@@ -209,9 +210,13 @@ speaker-same-int8: ## Step 2.4: b0 as quant.py builds it now and at AGAINST, qua
 	$(SPEAKER_QUANT) same-int8 $(RUN) --against $(or $(AGAINST),HEAD) $(if $(CALIB),--calibration $(CALIB)) \
 	  $(if $(WORKERS),--workers $(WORKERS))
 
-# The survey's material through the chip's own path, about 900 windows of b0's int8 simulation: run it in tmux.
+# The survey's material, four conditions of it, through WORKERS processes of the int8 simulation: run it in tmux. The
+# deploy stays in <run>/int8/<row>/deploy/, where speaker-use finds it.
 speaker-deploy: ## Lock a ladder row into firmware/models/speaker with its threshold set on the chip's path: RUN=<run> ROW=<row> [WORKERS=6] (E11-T26)
 	$(SPEAKER_QUANT) deploy $(RUN) --row $(ROW) $(if $(WORKERS),--workers $(WORKERS))
+
+speaker-use: ## Put a kept deploy, a variant of configs/models/speaker.yaml, into firmware/models/speaker and the lock: SPEAKER=b0|b3 (ADR-0028)
+	$(SPEAKER_QUANT) use $(SPEAKER)
 
 # The survey's material quiet and at each music level, all through the chip's path: about four deploys' work, run it
 # in tmux.
@@ -468,7 +473,8 @@ storage-flash: fw-bench ## Write the bench build's LittleFS image, set.json amon
 	$(call write_at,storage,firmware/build_bench/storage.bin)
 
 # Models and storage go first: the product's first boot then finds its models and keeps the thresholds in NVS.
-product: ## Put the product back on board B after test apps: models, storage, then firmware, and show its boot
+product: ## Put the product back on board B after test apps: models, storage, then firmware, and show its boot [SPEAKER=b0|b3]
+	$(if $(SPEAKER),$(MAKE) --no-print-directory speaker-use SPEAKER=$(SPEAKER))
 	$(MAKE) --no-print-directory models-flash
 	$(MAKE) --no-print-directory storage-flash
 	$(MAKE) --no-print-directory fw-bench-flash

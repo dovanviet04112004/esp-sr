@@ -49,7 +49,10 @@ deploy:                            # make speaker-deploy RUN= ROW= (E11-T26, KEH
   cohort_top: 100                  # cohort rows AS-norm averages over at each side (ADR-0023)
   noise:                           # the noisier bins' material (ADR-0024): scenes/device.yaml's pools
     snr_db: [20, 10, 5]            # the talker's speech hops over the whole noise at ch0
-music:                             # make speaker-music RUN=: the locked row with music in the room (E11-T33)
+variants:                          # make speaker-use / make product SPEAKER=<name>: a deployed run and row (ADR-0028)
+  b0: {run: 20261010_5a45475-dirty_94e5a9, row: kl}   # ReDimNet2 b0-vox2-lm (ADR-0021)
+  b3: {run: 20261027_1a7464c-dirty_92a838, row: kl}   # b3-vb2+vox2+cnc2_v0-lm (ADR-0028)
+music:                           # make speaker-music RUN=: the locked row with music in the room (E11-T33)
   pool: {dir: noise/musan/musan/music, glob: "**/*.wav", weight: 1}   # under raw/, as scenes/device.yaml lists it
   snr_db: [20, 10, 5]              # the talker's speech hops over the whole music at ch0
   mixed_snr_db: 10                 # the condition the mixed voiceprint takes its music windows from
