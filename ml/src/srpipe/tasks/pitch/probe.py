@@ -80,7 +80,11 @@ def probe(
     folder, patches = run / quant.INT8_DIR / row, cfg["esp_ppq_patches"]
     graph = export_espdl.load_native(folder / quant.GRAPH_FILE)
     (port_in,), ports_out = ptq_espdl.ports_of(graph)
-    graph.inputs[port_in.name].shape = list(spectra.shape)
+    quantised = graph.inputs[port_in.name].shape[-1]
+    for var in graph.variables.values():
+        # Frames are the last axis of every map of SwiftF0's network, as torch exported it.
+        if not var.is_parameter and var.shape and var.shape[-1] == quantised:
+            var.shape = [*var.shape[:-1], spectra.shape[-1]]
     x = ptq_espdl.to_int8(spectra, port_in.exponent).astype(np.float32) * np.float32(2.0**port_in.exponent)
     ys = ptq_espdl.Simulator(graph, patches).run(x)
     with esp_ppq_patches.applied(patches):
