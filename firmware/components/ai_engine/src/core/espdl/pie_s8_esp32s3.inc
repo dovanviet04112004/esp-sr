@@ -84,6 +84,49 @@
 6:
 .endm
 
+// The products of a pixel over V whole input vectors from a12, unrolled: each product loads the weight row two
+// steps ahead from a8, the 16th of a vector the next input vector, then one load the next row; none past the last.
+.macro unrolled_products V
+    ee.vld.128.ip   q0, a12, 16
+    ee.vld.128.ip   q1, a8, 16
+    ee.vld.128.ip   q2, a8, 16
+    .rept \V - 1
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 0
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 1
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 2
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 3
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 4
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 5
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 6
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 7
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 8
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 9
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 10
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 11
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 12
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 13
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 14
+    ee.vsmulas.s8.qacc.ld.incp  q0, a12, q2, q0, 15
+    ee.vld.128.ip   q2, a8, 16
+    .endr
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 0
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 1
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 2
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 3
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 4
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 5
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 6
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 7
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 8
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 9
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 10
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 11
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 12
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 13
+    ee.vsmulas.s8.qacc  q1, q0, 14
+    ee.vsmulas.s8.qacc  q2, q0, 15
+.endm
+
 // Products k .. k + count - 1 of a pixel's total, on lanes 0 .. count - 1 of in.
 .macro fixed_lanes in, count, k, total
     .irp lane, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15

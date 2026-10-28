@@ -13,6 +13,11 @@
 // blocks], x shift onto the sum's exponent (0 or more), last block's outputs (16 or 8). x as esp-dl's int8
 // RequantizeLinear rounds it, added saturating as its Add does, then max(0, .). out: [pixels][C], 8-byte aligned.
 //
+// void ai_engine_pw_norm_c96_s8_esp32s3(...), _c144_, _c192_; ai_engine_pw_residual_c96_s8_esp32s3(...), _c144_,
+// _c192_; ai_engine_pw_residual_x_c96_s8_esp32s3(...), _c144_, _c192_
+// As the two above for 96, 144 or 192 inputs and outputs, their products unrolled, the norm weights loaded ahead;
+// _residual_ adds x as it is, _residual_x_ shifts it right by 1 or more first. out 16-byte aligned.
+//
 // void ai_engine_pw_bias_row_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run)
 // run: rows, blocks, input row stride in vectors, whole input vectors, tail, mac shift, an int8 bias [16 blocks] on
 // the output's exponent or 0, ReLU or not (1 or 0), last block's outputs (16 or 8). Each row as esp-dl's int8
@@ -158,6 +163,134 @@ ai_engine_pw_bias_row_s8_esp32s3:
     addi    a6, a6, -1
     bnez    a6, 1b
     retw.n
+
+// The norm row kernel for V whole input vectors, its products unrolled, the norm weights loaded ahead.
+.macro norm_unrolled V
+    entry   a1, 48
+    l32i    a6, a5, 0
+    l32i    a13, a5, 20
+    addi    a13, a13, -1
+    l32i    a14, a5, 36
+    addi    a14, a14, -1
+    ones_in_q7 a15
+1:
+    mov     a8, a4
+    l32i    a9, a5, 24
+    l32i    a10, a5, 28
+    l32i    a11, a5, 32
+    l32i    a7, a5, 4
+2:
+    bias_into_qacc  a9
+    ee.vld.128.ip   q4, a10, 16
+    mov     a12, a3
+    unrolled_products \V
+    movi.n  a15, 1
+    round_into  q3, a13, a15
+    movi.n  a15, 0
+    ee.vrelu.s8     q3, a15, a15
+    bias_into_qacc  a11
+    ee.vmulas.s8.qacc   q3, q4
+    movi.n  a15, 1
+    round_into  q5, a14, a15
+    ee.vst.128.ip   q5, a2, 16
+    addi    a7, a7, -1
+    bnez    a7, 2b
+    l32i    a15, a5, 8
+    slli    a15, a15, 4
+    add     a3, a3, a15
+    addi    a6, a6, -1
+    bnez    a6, 1b
+    retw.n
+.endm
+
+// The residual row kernel for V whole input vectors, its products unrolled; shifted: x rounded right first.
+.macro residual_unrolled V, shifted
+    entry   a1, 48
+    l32i    a6, a5, 0
+    l32i    a13, a5, 20
+    addi    a13, a13, -1
+    l32i    a10, a5, 28
+  .if \shifted
+    l32i    a11, a5, 32
+    addi    a11, a11, -1
+  .endif
+    ones_in_q7 a15
+1:
+    mov     a8, a4
+    l32i    a9, a5, 24
+    l32i    a7, a5, 4
+2:
+    bias_into_qacc  a9
+    mov     a12, a3
+    unrolled_products \V
+    movi.n  a15, 1
+    round_into  q3, a13, a15
+  .if \shifted
+    ee.ldqa.s8.128.ip   a10, 16
+    round_into  q4, a11, a15
+  .else
+    ee.vld.128.ip   q4, a10, 16
+  .endif
+    ee.vadds.s8     q5, q3, q4
+    movi.n  a15, 0
+    ee.vrelu.s8     q5, a15, a15
+    ee.vst.128.ip   q5, a2, 16
+    addi    a7, a7, -1
+    bnez    a7, 2b
+    l32i    a15, a5, 8
+    slli    a15, a15, 4
+    add     a3, a3, a15
+    addi    a6, a6, -1
+    bnez    a6, 1b
+    retw.n
+.endm
+
+    .global ai_engine_pw_norm_c96_s8_esp32s3
+    .type   ai_engine_pw_norm_c96_s8_esp32s3, @function
+    .global ai_engine_pw_norm_c144_s8_esp32s3
+    .type   ai_engine_pw_norm_c144_s8_esp32s3, @function
+    .global ai_engine_pw_norm_c192_s8_esp32s3
+    .type   ai_engine_pw_norm_c192_s8_esp32s3, @function
+    .global ai_engine_pw_residual_c96_s8_esp32s3
+    .type   ai_engine_pw_residual_c96_s8_esp32s3, @function
+    .global ai_engine_pw_residual_c144_s8_esp32s3
+    .type   ai_engine_pw_residual_c144_s8_esp32s3, @function
+    .global ai_engine_pw_residual_c192_s8_esp32s3
+    .type   ai_engine_pw_residual_c192_s8_esp32s3, @function
+    .global ai_engine_pw_residual_x_c96_s8_esp32s3
+    .type   ai_engine_pw_residual_x_c96_s8_esp32s3, @function
+    .global ai_engine_pw_residual_x_c144_s8_esp32s3
+    .type   ai_engine_pw_residual_x_c144_s8_esp32s3, @function
+    .global ai_engine_pw_residual_x_c192_s8_esp32s3
+    .type   ai_engine_pw_residual_x_c192_s8_esp32s3, @function
+
+    .align  4
+ai_engine_pw_norm_c96_s8_esp32s3:
+    norm_unrolled 6
+    .align  4
+ai_engine_pw_norm_c144_s8_esp32s3:
+    norm_unrolled 9
+    .align  4
+ai_engine_pw_norm_c192_s8_esp32s3:
+    norm_unrolled 12
+    .align  4
+ai_engine_pw_residual_c96_s8_esp32s3:
+    residual_unrolled 6, 0
+    .align  4
+ai_engine_pw_residual_c144_s8_esp32s3:
+    residual_unrolled 9, 0
+    .align  4
+ai_engine_pw_residual_c192_s8_esp32s3:
+    residual_unrolled 12, 0
+    .align  4
+ai_engine_pw_residual_x_c96_s8_esp32s3:
+    residual_unrolled 6, 1
+    .align  4
+ai_engine_pw_residual_x_c144_s8_esp32s3:
+    residual_unrolled 9, 1
+    .align  4
+ai_engine_pw_residual_x_c192_s8_esp32s3:
+    residual_unrolled 12, 1
 
 // ConvBlock's pointwise rows for a pixel of 24 or 48 channels held in q0, q5, q6, every product unrolled: weight row k
 // multiplies q1 when k is even, q2 when odd, and reloads that register for k + 2, so no load is used the next step.

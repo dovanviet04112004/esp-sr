@@ -34,6 +34,24 @@ void ai_engine_pw_residual_x_c24_s8_esp32s3(int8_t *out, const int8_t *in, const
                                             const int32_t *run);
 void ai_engine_pw_residual_x_c48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
                                             const int32_t *run);
+void ai_engine_pw_norm_c96_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                      const int32_t *run);
+void ai_engine_pw_residual_c96_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                          const int32_t *run);
+void ai_engine_pw_residual_x_c96_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                            const int32_t *run);
+void ai_engine_pw_norm_c144_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                       const int32_t *run);
+void ai_engine_pw_residual_c144_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                           const int32_t *run);
+void ai_engine_pw_residual_x_c144_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                             const int32_t *run);
+void ai_engine_pw_norm_c192_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                       const int32_t *run);
+void ai_engine_pw_residual_c192_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                           const int32_t *run);
+void ai_engine_pw_residual_x_c192_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                             const int32_t *run);
 void ai_engine_pw_conv_k12_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
                                       const int32_t *run);
 void ai_engine_pw_conv_k24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
@@ -82,19 +100,27 @@ constexpr int kStripPixels = 4;
 
 using RowKernel = void (*)(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
 
-// Channel counts whose pointwise rows run unrolled; residual_x takes an x shift of 1 or more.
+// Channel counts whose pointwise rows run unrolled, held: their inputs in registers, rows whole; residual_x
+// takes an x shift of 1 or more.
 struct Unrolled {
     int channels;
+    bool held;
     RowKernel norm;
     RowKernel residual;
     RowKernel residual_x;
 };
 
 constexpr Unrolled kUnrolled[] = {
-    {24, ai_engine_pw_norm_c24_s8_esp32s3, ai_engine_pw_residual_c24_s8_esp32s3,
+    {24, true, ai_engine_pw_norm_c24_s8_esp32s3, ai_engine_pw_residual_c24_s8_esp32s3,
      ai_engine_pw_residual_x_c24_s8_esp32s3},
-    {48, ai_engine_pw_norm_c48_s8_esp32s3, ai_engine_pw_residual_c48_s8_esp32s3,
+    {48, true, ai_engine_pw_norm_c48_s8_esp32s3, ai_engine_pw_residual_c48_s8_esp32s3,
      ai_engine_pw_residual_x_c48_s8_esp32s3},
+    {96, false, ai_engine_pw_norm_c96_s8_esp32s3, ai_engine_pw_residual_c96_s8_esp32s3,
+     ai_engine_pw_residual_x_c96_s8_esp32s3},
+    {144, false, ai_engine_pw_norm_c144_s8_esp32s3, ai_engine_pw_residual_c144_s8_esp32s3,
+     ai_engine_pw_residual_x_c144_s8_esp32s3},
+    {192, false, ai_engine_pw_norm_c192_s8_esp32s3, ai_engine_pw_residual_c192_s8_esp32s3,
+     ai_engine_pw_residual_x_c192_s8_esp32s3},
 };
 
 int padded(int channels) noexcept
@@ -406,6 +432,7 @@ class ConvBlock final : public dl::module::Module {
             if (u.channels == channels_) {
                 norm_kernel_ = u.norm;
                 residual_kernel_ = shifts_[kShiftResidual] > 0 ? u.residual_x : u.residual;
+                held_ = u.held;
             }
         }
         if (!pre_.empty()) {
@@ -431,7 +458,7 @@ class ConvBlock final : public dl::module::Module {
                          -1,     n % kChannelStep != 0 ? kHalfStep : kChannelStep,
                          0};
         }
-        const bool shared = norm_kernel_ == ai_engine_pw_norm_row_s8_esp32s3;
+        const bool shared = !held_;
         strip_ = shared ? kStripPixels : width_;
         ring_bytes_ = shared ? 2 * kRing * padded_row_ + strip_ * padded_ : 0;
         if (shared) {
@@ -473,6 +500,7 @@ class ConvBlock final : public dl::module::Module {
     RowKernel residual_kernel_ = ai_engine_pw_residual_row_s8_esp32s3;
     RowKernel pre_kernel_ = nullptr;
     RowKernel post_kernel_ = nullptr;
+    bool held_ = false; // inputs held in registers, rows whole: no strips, no loan
     int strip_ = 0;
     size_t loan_bytes_ = 0; // its weights' bytes; 0 for the unrolled kernels
     size_t ring_bytes_ = 0; // its rings and strip buffer, when they may join the loan
