@@ -235,10 +235,10 @@ speed: ## Same integers, timing row, board probe, profile report: BRANCH=<branch
 	$(MAKE) ai-unit-$(BRANCH) RUN=$(RUN) ROW=timing
 	$(MAKE) ai-profile LOG=$(SPEED_LOG_$(BRANCH)) ESPDL=$(SPEED_ESPDL_$(BRANCH))
 
-##@ Pitch: SwiftF0 on the chip, step 1 on the PC (KEHOACH 3.11)
+##@ Pitch: SwiftF0 on the chip (KEHOACH 3.11)
 
 PITCH_QUANT = $(ML_CPU) --extra train --extra espdl --extra swiftf0 python -m srpipe.tasks.pitch.quant
-.PHONY: pitch-import pitch-ptq pitch-rebuild
+.PHONY: pitch-import pitch-ptq pitch-rebuild pitch-timing pitch-same-int8
 pitch-import: ## swift-f0's pinned model.onnx as a run under ml/artifacts/pitch/runs, its rewrite held to swift-f0
 	$(PITCH_QUANT) import
 
@@ -247,6 +247,15 @@ pitch-ptq: ## Rung 2: each calibration of configs/models/pitch.yaml against floa
 
 pitch-rebuild: ## Files of the command build simulated afresh on a row's pitch, into processed/command/<build>_resim_<row>: RUN=<run> ROW=<row>|float [FILES=val] [WORKERS=6]
 	$(PITCH_QUANT) rebuild $(RUN) --row $(ROW) $(if $(FILES),--files $(FILES)) $(if $(WORKERS),--workers $(WORKERS))
+
+pitch-timing: ## Step 2.1 of KEHOACH 3.14's procedure: the timing row into <run>/int8/timing/: RUN=<run>
+	$(PITCH_QUANT) timing $(RUN)
+
+pitch-same-int8: ## Step 2.4: model.py's network now and at AGAINST, quantised alike, same integers: RUN=<run> [AGAINST=HEAD] [CALIB=kl]
+	$(PITCH_QUANT) same-int8 $(RUN) --against $(or $(AGAINST),HEAD) $(if $(CALIB),--calibration $(CALIB))
+
+SPEED_LOG_pitch = $(UNIT_APP)/build_pitch/unit.log
+SPEED_ESPDL_pitch = ml/$(RUN)/int8/timing/pitch.espdl
 
 ##@ Wake
 

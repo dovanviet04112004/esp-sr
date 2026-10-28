@@ -2,7 +2,8 @@
 rewrite of model.py, swift_front and decode held to swift-f0's own detect; ptq quantises the network after its front end
 with each calibration of rung 2 (3.14) into <run>/int8/<calibration>/, calibrated on train sessions of the command build
 simulated again, and rows each against float in <run>/int8/ladder.yaml on the voiced frames of val sessions; rebuild
-gives files of that build a row's pitch. Run: python -m srpipe.tasks.pitch.quant import | ptq <run> | rebuild <run>"""
+gives files of that build a row's pitch; timing and same-int8 are the hooks of 3.14's speed loop.
+Run: python -m srpipe.tasks.pitch.quant import | ptq <run> | rebuild <run> | timing <run> | same-int8 <run>"""
 
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ import numpy as np
 import torch
 import yaml
 
-from srpipe.compress.quant import export_espdl, ptq_espdl
+from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
 from srpipe.core import run_dir, splits
 from srpipe.core.audio_io import to_float
 from srpipe.core.config import CONFIGS, ML_ROOT, contract_front, data_paths, load_yaml
@@ -96,7 +97,8 @@ class Detector:
             net = model.load(run / MODEL_FILE)
             self.outputs = lambda spectra: float_outputs(net, spectra)
         else:
-            sim = ptq_espdl.Simulator(export_espdl.load_native(run / INT8_DIR / row / GRAPH_FILE))
+            graph = export_espdl.load_native(run / INT8_DIR / row / GRAPH_FILE)
+            sim = ptq_espdl.Simulator(graph, load_yaml(CONFIG)["esp_ppq_patches"])
             self.outputs = lambda spectra: tuple(o[0] for o in sim.run(spectra[None]))
 
     def detect(self, audio: np.ndarray, sample_rate: int, f_min_hz: float, f_max_hz: float) -> Found:
@@ -196,25 +198,37 @@ def row_figures(want: list[tuple], got: list[tuple]) -> dict:
     }
 
 
+def calib_chunks(cfg: dict, run: Path, paths: dict) -> list[torch.Tensor]:
+    """The ladder's calibration: every whole chunk of the spectra of quant.calib_sessions train sessions of the command
+    build, drawn with the seed and simulated again, each a (1, SPECTRA, BANDS, CHUNK_HOPS) tensor."""
+    q = cfg["quant"]
+    folder = paths["processed"] / "command" / q["build"]
+    train_files = sorted(p.name for p in folder.glob("train*") if p.is_dir())
+    windows, bands = front_tables(run / MODEL_FILE)
+    rng = np.random.default_rng([q["seed"], CALIB_STREAM])
+    streams = drawn_cleans(paths, q["build"], train_files, q["calib_sessions"], rng)
+    return [torch.from_numpy(c[None]) for s in streams for c in chunks(swift_front.spectra(s, windows, bands))]
+
+
+def val_chunks(cfg: dict, run: Path, paths: dict, sessions: int) -> list[np.ndarray]:
+    """Every whole chunk of the spectra of sessions val sessions of the command build, drawn with the seed as the
+    ladder's rows draw theirs and simulated again."""
+    q = cfg["quant"]
+    windows, bands = front_tables(run / MODEL_FILE)
+    streams = drawn_cleans(paths, q["build"], ["val"], sessions, np.random.default_rng([q["seed"], ROWS_STREAM]))
+    return [c for s in streams for c in chunks(swift_front.spectra(s, windows, bands))]
+
+
 def ptq(cfg: dict, run: Path, paths: dict, calibrations: list[str] | None = None) -> Path:
     """Rung 2 of the network: each of calibrations, by default all of quant.calibrations, kept at
     <run>/int8/<calibration>/graph.native and rowed in <run>/int8/ladder.yaml against float, both decoded over
     contracts/listen.yaml's F0 range."""
-    q = cfg["quant"]
+    q, patches = cfg["quant"], cfg["esp_ppq_patches"]
     unknown = sorted(set(calibrations or []) - set(q["calibrations"]))
     if unknown:
         raise ValueError(f"{unknown} are not among quant.calibrations {q['calibrations']}")
-    folder = paths["processed"] / "command" / q["build"]
-    train_files = sorted(p.name for p in folder.glob("train*") if p.is_dir())
-    windows, bands = front_tables(run / MODEL_FILE)
-    calib_streams = drawn_cleans(
-        paths, q["build"], train_files, q["calib_sessions"], np.random.default_rng([q["seed"], CALIB_STREAM])
-    )
-    rows_streams = drawn_cleans(
-        paths, q["build"], ["val"], q["rows_sessions"], np.random.default_rng([q["seed"], ROWS_STREAM])
-    )
-    calib = [torch.from_numpy(c[None]) for s in calib_streams for c in chunks(swift_front.spectra(s, windows, bands))]
-    rows_in = [c for s in rows_streams for c in chunks(swift_front.spectra(s, windows, bands))]
+    calib = calib_chunks(cfg, run, paths)
+    rows_in = val_chunks(cfg, run, paths, q["rows_sessions"])
     net = model.load(run / MODEL_FILE)
     pitch = contract_front()["pitch"]
     f0_range = (pitch["min_f0_hz"], pitch["max_f0_hz"])
@@ -225,9 +239,10 @@ def ptq(cfg: dict, run: Path, paths: dict, calibrations: list[str] | None = None
     for calibration in calibrations or q["calibrations"]:
         rungs = ptq_espdl.ladder(LADDER) | {"calibration": calibration}
         work = run / INT8_DIR / calibration
-        graph = ptq_espdl.quantize(net, calib, work, rungs)
+        with esp_ppq_patches.applied(patches):
+            graph = ptq_espdl.quantize(net, calib, work, rungs)
         export_espdl.save_native(graph, work / GRAPH_FILE)
-        sim = ptq_espdl.Simulator(graph)
+        sim = ptq_espdl.Simulator(graph, patches)
         got = [decode.decode(*(o[0] for o in sim.run(c[None])), *f0_range) for c in rows_in]
         ladder["rows"][calibration] = {"calibration": calibration} | row_figures(want, got)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -267,6 +282,31 @@ def rebuild(cfg: dict, run: Path, row: str, paths: dict, files: list[str], worke
     return out
 
 
+def timing(cfg: dict, run: Path, paths: dict) -> Path:
+    """<run>/int8/timing/graph.native: the network quantised under quant.yaml's timing rungs on the ladder's
+    calibration chunks, quick to make, its time on the chip the ladder's own (KEHOACH 3.14 step 2.1)."""
+    folder = run / INT8_DIR / ptq_espdl.TIMING_ROW
+    rungs = ptq_espdl.timing_rungs(LADDER)
+    with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
+        graph = ptq_espdl.quantize(model.load(run / MODEL_FILE), calib_chunks(cfg, run, paths), folder, rungs)
+    return export_espdl.save_native(graph, folder / GRAPH_FILE)
+
+
+def same_int8(cfg: dict, run: Path, paths: dict, against: str, calibration: str | None) -> tuple[int, float] | None:
+    """(off, worst) of ptq_espdl.same_integers for model.py's network as it stands and at commit against, both
+    quantised under the ladder's rungs on quant.check_chunks of its calibration chunks and compared on as many val
+    chunks; None when model.py is the commit's (KEHOACH 3.14 step 2.4)."""
+    old = ptq_espdl.at_commit(Path(model.__file__), model.__name__, against)
+    if old is None:
+        return None
+    count = cfg["quant"]["check_chunks"]
+    calib = calib_chunks(cfg, run, paths)[:count]
+    inputs = [c[None] for c in val_chunks(cfg, run, paths, 1)[:count]]
+    rungs = ptq_espdl.ladder(LADDER) | ({"calibration": calibration} if calibration else {})
+    nets = [old.load(run / MODEL_FILE), model.load(run / MODEL_FILE)]
+    return ptq_espdl.same_integers(nets, calib, inputs, rungs, cfg["esp_ppq_patches"])
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -279,6 +319,12 @@ def main(argv: list[str] | None = None) -> int:
     again.add_argument("--row", required=True, help="a row of <run>/int8/ladder.yaml, or float for swift-f0 itself")
     again.add_argument("--files", nargs="+", default=["val"], help="files of the build, val by default")
     again.add_argument("--workers", type=int, default=6, help="processes simulating the sessions")
+    quick = sub.add_parser("timing", help="the timing row: a quick graph that times the chip as the ladder's rows")
+    quick.add_argument("run", type=Path)
+    check = sub.add_parser("same-int8", help="whether a rewrite of the network keeps every integer under the rungs")
+    check.add_argument("run", type=Path)
+    check.add_argument("--against", default="HEAD", help="the commit whose network code the edited one is held to")
+    check.add_argument("--calibration", help="one of quant.calibrations; the ladder's default otherwise")
     args = parser.parse_args(argv)
     cfg = load_yaml(CONFIG)
     if args.command == "import":
@@ -286,6 +332,11 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "rebuild":
         for path in rebuild(cfg, args.run, args.row, data_paths(), args.files, args.workers):
             print(path)
+    elif args.command == "timing":
+        print(timing(cfg, args.run, data_paths()))
+    elif args.command == "same-int8":
+        found = same_int8(cfg, args.run, data_paths(), args.against, args.calibration)
+        return ptq_espdl.same_int8_verdict(found, args.against)
     else:
         print(ptq(cfg, args.run, data_paths(), args.calibrations))
     return 0

@@ -281,8 +281,9 @@ def same_integers(
     nets: Sequence[nn.Module], calib: list[torch.Tensor], inputs: list[np.ndarray], rungs: dict, patches: Sequence[str]
 ) -> tuple[int, float]:
     """How many of the simulated outputs of nets, each quantised under rungs and patches on calib, differ from the
-    first net's on inputs, and by how much at most: (0, 0.0) when a rewrite between them keeps every integer, the
-    check step 2.4 of KEHOACH 3.14's procedure asks of a rewrite of the network."""
+    first net's on inputs, and by how much at most, every output of a graph of several counted: (0, 0.0) when a
+    rewrite between them keeps every integer, the check step 2.4 of KEHOACH 3.14's procedure asks of a rewrite of the
+    network."""
     import tempfile
 
     outs = []
@@ -290,7 +291,7 @@ def same_integers(
         with esp_ppq_patches.applied(patches), tempfile.TemporaryDirectory() as work:
             graph = quantize(net, calib, Path(work), rungs)
         sim = Simulator(graph, patches)
-        outs.append(np.stack([sim(x).ravel() for x in inputs]))
+        outs.append(np.stack([np.concatenate([o.ravel() for o in sim.run(x)]) for x in inputs]))
     first, rest = outs[0], outs[1:]
     off = sum(int((first != other).sum()) for other in rest)
     return off, max((float(np.abs(first - other).max()) for other in rest), default=0.0)

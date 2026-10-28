@@ -5,12 +5,14 @@ source:                            # make pitch-import: the network as the swift
   file: model.onnx
   sha256: 6385e8c2ebc3872e82c9ff5946228de44cd3be77a750ea53698b7dbfe94b0a22
 rewrite_rtol: 1.0e-4               # largest gap of model.py's network to the ONNX's, as a share of its largest output
+esp_ppq_patches: []                # srpipe.compress.quant.esp_ppq_patches around this branch's quantisation and export
 quant:                             # make pitch-ptq RUN=: rung 2 of KEHOACH 3.14 on the network after the front end
   build: v8                        # processed/command/<build>: v8's sessions, simulated again for their clean samples
   seed: 20261028
   calib_sessions: 8                # train sessions ESP-PPQ calibrates on, drawn with the seed
   rows_sessions: 16                # val sessions each row is held to float on, drawn with the seed
   calibrations: [kl, percentile, minmax, mse]   # rung 2, one row each, in this order
+  check_chunks: 8                  # calibration and val chunks of make pitch-same-int8
 probe:                             # step 2: one row's network on board B over one window (make ai-unit-pitch)
   runs: 10                         # timed runs on the board, after one untimed
   cuts: 4                          # copies of the graph cut at tensors spread over its ops, each model->test()ed

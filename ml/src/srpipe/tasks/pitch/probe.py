@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from srpipe.compress.quant import export_espdl, ptq_espdl
+from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
 from srpipe.core.config import ML_ROOT, data_paths, load_yaml
 from srpipe.dsp.spec import swift_front
 from srpipe.export import pack_models
@@ -73,14 +73,16 @@ def probe(
     cfg: dict, run: Path, row: str, out: Path, spectra: np.ndarray, span: tuple[int, int] | None = None
 ) -> tuple[Path, Path]:
     """Write out/pitch_models.bin and out/pitch_window.bin of the run's row over spectra, one window, with the cuts of
-    probe.cuts within span among the image's entries; the .espdl files stay beside the row's graph. Refused when
-    ESP-PPQ stored other values for model->test() than the simulation gives, or a port's name outgrows its field."""
-    folder = run / quant.INT8_DIR / row
+    probe.cuts within span among the image's entries, all exported under the branch's esp_ppq_patches; the .espdl
+    files stay beside the row's graph. Refused when ESP-PPQ stored other values for model->test() than the simulation
+    gives, or a port's name outgrows its field."""
+    folder, patches = run / quant.INT8_DIR / row, cfg["esp_ppq_patches"]
     graph = export_espdl.load_native(folder / quant.GRAPH_FILE)
     (port_in,), ports_out = ptq_espdl.ports_of(graph)
     x = ptq_espdl.to_int8(spectra, port_in.exponent).astype(np.float32) * np.float32(2.0**port_in.exponent)
-    ys = ptq_espdl.Simulator(graph).run(x)
-    espdl = export_espdl.export(graph, folder / f"{ENTRY}.espdl", test_input=x)
+    ys = ptq_espdl.Simulator(graph, patches).run(x)
+    with esp_ppq_patches.applied(patches):
+        espdl = export_espdl.export(graph, folder / f"{ENTRY}.espdl", test_input=x)
     wanted = {p.name: (p, v) for p, v in [(port_in, x), *zip(ports_out, ys, strict=True)]}
     stored = stored_ports(espdl)
     if sorted(name for name, _, _ in stored) != sorted(wanted) or stored[0][0] != port_in.name:
@@ -98,7 +100,8 @@ def probe(
         body += PORT.pack(name.encode("ascii"), len(raw), port.exponent) + raw + b"\0" * (-len(raw) % 4)
     entries = [pack_models.Entry(ENTRY, "espdl", espdl.read_bytes())]
     for k, (index, name) in enumerate(cut_points(graph, cfg["probe"]["cuts"], span)):
-        part = export_espdl.export(truncated(graph, name), folder / f"{CUT_ENTRY.format(k)}.espdl", test_input=x)
+        with esp_ppq_patches.applied(patches):
+            part = export_espdl.export(truncated(graph, name), folder / f"{CUT_ENTRY.format(k)}.espdl", test_input=x)
         entries.append(pack_models.Entry(CUT_ENTRY.format(k), "espdl", part.read_bytes()))
         print(f"{CUT_ENTRY.format(k)}: op {index}, {name}, {part.stat().st_size} bytes of .espdl")
     out.mkdir(parents=True, exist_ok=True)

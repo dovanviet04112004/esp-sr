@@ -19,7 +19,7 @@ from srpipe.tasks.pitch import probe, quant  # noqa: E402
 
 SPECTRA, BANDS, FRAMES = 3, 8, 16
 ROW = "kl"
-CFG = {"probe": {"runs": 3, "cuts": 1}}
+CFG = {"esp_ppq_patches": [], "probe": {"runs": 3, "cuts": 1}}
 
 
 class TwoHeads(nn.Module):
