@@ -10,6 +10,7 @@
 
 #include "core/espdl/espdl_loan.hpp"
 #include "core/espdl/espdl_preload.hpp"
+#include "core/espdl/espdl_split.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -98,6 +99,9 @@ constexpr int kPreHeld = 48;
 constexpr int kPostOutputs = 12;
 // Pixels the shared kernels take a call, each strip's depthwise rows then staying cached for its pointwise.
 constexpr int kStripPixels = 4;
+constexpr int kLanesMax = 2;
+// Columns a lane's x reaches past its outputs on each side: one for each depthwise step.
+constexpr int kHalo = 2;
 
 using RowKernel = void (*)(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
 
@@ -153,7 +157,7 @@ class ConvBlock final : public dl::module::Module {
 
     ~ConvBlock() override
     {
-        heap_caps_free(rows_);
+        heap_caps_free(whole_.rows);
     }
 
     ConvBlock(const ConvBlock &) = delete;
@@ -173,41 +177,58 @@ class ConvBlock final : public dl::module::Module {
         const Loan lent = loan_lent();
         int8_t *loan = loan_bytes_ > 0 && lent.bytes >= loan_bytes_ ? lent.mem : nullptr;
         const size_t room = loan != nullptr && rings_bytes_ > 0 ? lent.bytes - loan_bytes_ : 0;
-        const bool rings = room >= rings_bytes_ + kStripPixels * padded_;
-        strip_ = held_ ? width_ : rings ? widest_strip(room - rings_bytes_) : kStripPixels;
-        const size_t before_ends = loan_bytes_ + (rings ? rings_bytes_ + strip_ * padded_ : 0);
+        // Halves run only in the loan: PSRAM a part wrote and read back, the other core running, came back
+        // wrong.
+        const int half_strip = halved_ ? split_strip(room) : 0;
+        split_ = half_strip > 0;
+        const bool rings = !split_ && room >= rings_bytes_ + kStripPixels * padded_;
+        strip_ = split_  ? half_strip
+                 : held_ ? width_
+                 : rings ? widest_strip(room - rings_bytes_)
+                         : kStripPixels;
+        const size_t before_ends = loan_bytes_ + (split_  ? halves_bytes(strip_)
+                                                  : rings ? rings_bytes_ + strip_ * padded_
+                                                          : 0);
         int8_t *ends =
             loan != nullptr && lent.bytes >= before_ends + ends_bytes_ ? lent.mem + before_ends : nullptr;
-        const int8_t *dw1 = weights(context, kDw1, loan);
-        const int8_t *pw1 = weights(context, kPw1, loan);
-        const int8_t *dw2 = weights(context, kDw2, loan);
-        const int8_t *pw2 = weights(context, kPw2, loan);
-        norm_run_[kNormBias] = word_of(weights(context, kPw1Bias, loan));
-        norm_run_[kNormWeights] = word_of(weights(context, kBn, loan));
-        norm_run_[kNormBnBias] = word_of(weights(context, kBnBias, loan));
-        residual_run_[kResidualBias] = word_of(weights(context, kPw2Bias, loan));
-        place_rows(rings ? loan : nullptr);
+        dw1_ = weights(context, kDw1, loan);
+        pw1_ = weights(context, kPw1, loan);
+        dw2_ = weights(context, kDw2, loan);
+        pw2_ = weights(context, kPw2, loan);
+        const int32_t pw1_bias = word_of(weights(context, kPw1Bias, loan));
+        const int32_t bn = word_of(weights(context, kBn, loan));
+        const int32_t bn_bias = word_of(weights(context, kBnBias, loan));
+        const int32_t pw2_bias = word_of(weights(context, kPw2Bias, loan));
+        if (split_) {
+            place_halves(loan);
+        } else {
+            place_whole(rings ? loan : nullptr);
+        }
+        int32_t pre_bias = 0;
+        int32_t post_bias = 0;
         if (!pre_.empty()) {
             pre_weights_ = weights(context, kInputs, ends);
-            pre_run_[kConvBias] = word_of(weights(context, kInputs + 1, ends));
+            pre_bias = word_of(weights(context, kInputs + 1, ends));
         }
         if (!post_.empty()) {
             const int at = kInputs + (pre_.empty() ? 0 : 2);
             post_weights_ = weights(context, at, ends);
-            post_run_[kConvBias] = word_of(weights(context, at + 1, ends));
+            post_bias = word_of(weights(context, at + 1, ends));
         }
-        const int8_t *xs = x->get_element_ptr<int8_t>();
-        int8_t *ys = y->get_element_ptr<int8_t>();
-        memset(x_ring_, 0, 2 * kRing * padded_row_);
-        load_x(0, xs);
-        load_x(1, xs);
-        norm_row(0, dw1, pw1);
-        for (int t = 0; t < frames_; t++) {
-            load_x(t + 2, xs);
-            preload_rows(t, xs, ys);
-            norm_row(t + 1, dw1, pw1);
-            output_row(t, dw2, pw2, ys);
-            preload_.finish();
+        for (Lane *lane : {&whole_, &halves_[0], &halves_[1]}) {
+            lane->runs.norm[kNormBias] = pw1_bias;
+            lane->runs.norm[kNormWeights] = bn;
+            lane->runs.norm[kNormBnBias] = bn_bias;
+            lane->runs.residual[kResidualBias] = pw2_bias;
+            lane->runs.pre[kConvBias] = pre_bias;
+            lane->runs.post[kConvBias] = post_bias;
+        }
+        xs_ = x->get_element_ptr<int8_t>();
+        ys_ = y->get_element_ptr<int8_t>();
+        if (split_) {
+            split_run(run_part, this);
+        } else {
+            run_lane(whole_);
         }
     }
 
@@ -241,14 +262,73 @@ class ConvBlock final : public dl::module::Module {
     }
 
   private:
-    int8_t *x_row(int t) const noexcept
+    // A lane's kernel runs: run_lane works on a copy on the stack of the core running it, in internal RAM.
+    struct Runs {
+        std::array<int32_t, 3> dw1 = {};
+        std::array<int32_t, 3> dw2 = {};
+        std::array<int32_t, 3> pad = {};
+        std::array<int32_t, kNormSize> norm = {};
+        std::array<int32_t, kResidualSize> residual = {};
+        std::array<int32_t, kConvSize> pre = {};
+        std::array<int32_t, kConvSize> post = {};
+    };
+
+    // A lane's columns and rows: the whole row, or a frequency half on each core. A ring row holds the
+    // columns from first, each padded_ bytes; columns outside the map stay zero.
+    struct Lane {
+        int lo = 0; // output columns [lo, hi)
+        int hi = 0;
+        int x_lo = 0; // x columns loaded, [x_lo, x_hi)
+        int x_hi = 0;
+        int c_lo = 0; // norm columns computed, [c_lo, c_hi)
+        int c_hi = 0;
+        int first = 0;
+        int row_bytes = 0;
+        int8_t *rows = nullptr; // PSRAM rows, for when the loan holds none
+        int8_t *x_ring = nullptr;
+        int8_t *c_ring = nullptr;
+        int8_t *a = nullptr;
+        int8_t *d = nullptr;
+        int8_t *out_row = nullptr; // the block's output strip the post convolution reads
+        Runs runs;
+    };
+
+    static void run_part(void *self, int part)
     {
-        return x_ring_ + ((t + kRing) % kRing) * padded_row_;
+        auto *block = static_cast<ConvBlock *>(self);
+        block->run_lane(block->halves_[part]);
     }
 
-    int8_t *c_row(int t) const noexcept
+    void run_lane(const Lane &lane) noexcept
     {
-        return c_ring_ + ((t + 1) % kRing) * padded_row_;
+        Runs runs = lane.runs;
+        Preload preload(split_);
+        memset(lane.x_ring, 0, 2 * kRing * lane.row_bytes);
+        load_x(lane, runs, 0);
+        load_x(lane, runs, 1);
+        norm_row(lane, runs, preload, 0);
+        for (int t = 0; t < frames_; t++) {
+            load_x(lane, runs, t + 2);
+            preload_rows(lane, preload, t);
+            norm_row(lane, runs, preload, t + 1);
+            output_row(lane, runs, preload, t);
+            preload.finish();
+        }
+    }
+
+    int8_t *x_row(const Lane &lane, int t) const noexcept
+    {
+        return lane.x_ring + ((t + kRing) % kRing) * lane.row_bytes;
+    }
+
+    int8_t *c_row(const Lane &lane, int t) const noexcept
+    {
+        return lane.c_ring + ((t + 1) % kRing) * lane.row_bytes;
+    }
+
+    int8_t *column(const Lane &lane, int8_t *row, int f) const noexcept
+    {
+        return row + (f - lane.first) * padded_;
     }
 
     // The widest strip of whole pixels room holds, kStripPixels up to a row, leaving the joined weights
@@ -260,15 +340,58 @@ class ConvBlock final : public dl::module::Module {
         return static_cast<int>(std::min<size_t>(pixels, width_));
     }
 
-    // Rings and one strip buffer for both depthwise outputs at mem, else in rows_; the post convolution's
-    // input row stays in rows_, since the joined weights may follow the rings in the loan.
-    void place_rows(int8_t *mem) noexcept
+    size_t out_strip_bytes(int strip) const noexcept
     {
-        x_ring_ = mem != nullptr ? mem : rows_;
-        c_ring_ = x_ring_ + kRing * padded_row_;
-        a_ = c_ring_ + kRing * padded_row_;
-        d_ = mem != nullptr ? a_ : a_ + padded_row_;
-        out_row_ = rows_ + kRows * padded_row_;
+        const size_t bytes = post_.empty() ? 0 : static_cast<size_t>(strip) * channels_;
+        return (bytes + kVectorAlignBytes - 1) / kVectorAlignBytes * kVectorAlignBytes;
+    }
+
+    // Both halves' rings, strip buffers and post convolution input strips.
+    size_t halves_bytes(int strip) const noexcept
+    {
+        return halves_rings_bytes_ + kLanesMax * (strip * padded_ + out_strip_bytes(strip));
+    }
+
+    // The widest strip, kStripPixels up to a half's norm columns, at which room holds halves_bytes, leaving
+    // the joined weights theirs when it can; 0 when no strip of kStripPixels fits.
+    int split_strip(size_t room) const noexcept
+    {
+        const size_t pixel_bytes = kLanesMax * (padded_ + (post_.empty() ? 0 : channels_));
+        const size_t fixed = halves_rings_bytes_ + kLanesMax * kVectorAlignBytes;
+        if (room < fixed + kStripPixels * pixel_bytes) { return 0; }
+        const size_t free = room - fixed;
+        const size_t beside_ends = free >= ends_bytes_ ? (free - ends_bytes_) / pixel_bytes : 0;
+        const size_t pixels = beside_ends >= kStripPixels ? beside_ends : free / pixel_bytes;
+        return static_cast<int>(std::min<size_t>(pixels, halves_span_));
+    }
+
+    // The whole row's rings and one strip buffer at mem, else in its rows; the post convolution's input row
+    // stays in the rows, since the joined weights may follow the rings in the loan.
+    void place_whole(int8_t *mem) noexcept
+    {
+        whole_.x_ring = mem != nullptr ? mem : whole_.rows;
+        whole_.c_ring = whole_.x_ring + kRing * whole_.row_bytes;
+        whole_.a = whole_.c_ring + kRing * whole_.row_bytes;
+        whole_.d = mem != nullptr ? whole_.a : whole_.a + whole_.row_bytes;
+        whole_.out_row = whole_.rows + kRows * whole_.row_bytes;
+    }
+
+    // Both halves' rings, then each one's strip buffer and post convolution input strip, at mem in the loan.
+    void place_halves(int8_t *mem) noexcept
+    {
+        int8_t *at = mem;
+        for (Lane &half : halves_) {
+            half.x_ring = at;
+            half.c_ring = at + kRing * half.row_bytes;
+            at += 2 * kRing * half.row_bytes;
+        }
+        for (Lane &half : halves_) {
+            half.a = at;
+            half.d = at;
+            at += strip_ * padded_;
+            half.out_row = at;
+            at += out_strip_bytes(strip_);
+        }
     }
 
     // Input's data, copied first to the loan's next free bytes when the block runs on a loan.
@@ -283,70 +406,85 @@ class ConvBlock final : public dl::module::Module {
         return copy;
     }
 
-    // Row t of x into its ring slot, a zero pixel at each end; zeros past the frames.
-    void load_x(int t, const int8_t *xs) noexcept
+    // Row t of x over the lane's columns into its ring slot; zeros past the frames.
+    void load_x(const Lane &lane, Runs &runs, int t) noexcept
     {
-        int8_t *slot = x_row(t) + padded_;
+        int8_t *slot = column(lane, x_row(lane, t), lane.x_lo);
+        const int8_t *from =
+            xs_ + (t * width_ + lane.x_lo) * (pre_.empty() ? channels_ : pre_[kJoinedValues]);
         if (t >= frames_) {
-            memset(slot, 0, width_ * padded_);
+            memset(slot, 0, (lane.x_hi - lane.x_lo) * padded_);
         } else if (!pre_.empty()) {
-            pre_kernel_(slot, xs + t * width_ * pre_[kJoinedValues], pre_weights_, pre_run_.data());
+            pre_kernel_(slot, from, pre_weights_, runs.pre.data());
         } else if (channels_ == padded_) {
-            memcpy(slot, xs + t * width_ * channels_, width_ * channels_);
+            memcpy(slot, from, (lane.x_hi - lane.x_lo) * channels_);
         } else {
-            ai_engine_pad_row_s8_esp32s3(slot, xs + t * width_ * channels_, pad_run_.data());
+            ai_engine_pad_row_s8_esp32s3(slot, from, runs.pad.data());
         }
     }
 
-    // Output row t's bytes, then those load_x reads for row t + 3, into the dcache while the row computes.
-    void preload_rows(int t, const int8_t *xs, const int8_t *ys) noexcept
+    // The lane's bytes of output row t, then those load_x reads for row t + 3, into the dcache while the row
+    // computes.
+    void preload_rows(const Lane &lane, Preload &preload, int t) noexcept
     {
         const int out_values = post_.empty() ? channels_ : post_[kJoinedValues];
         const int in_values = pre_.empty() ? channels_ : pre_[kJoinedValues];
-        preload_.add(ys + t * width_ * out_values, width_ * out_values);
-        if (t + 3 < frames_) { preload_.add(xs + (t + 3) * width_ * in_values, width_ * in_values); }
-        preload_.pump();
+        const int8_t *y_row = ys_ + (t * width_ + lane.lo) * out_values;
+        const size_t y_bytes = static_cast<size_t>(lane.hi - lane.lo) * out_values;
+        if (split_) {
+            preload.add_written(y_row, y_bytes);
+        } else {
+            preload.add(y_row, y_bytes);
+        }
+        if (t + 3 < frames_) {
+            preload.add(xs_ + ((t + 3) * width_ + lane.x_lo) * in_values,
+                        (lane.x_hi - lane.x_lo) * in_values);
+        }
+        preload.pump();
     }
 
-    // The norm's output at row t, from the first depthwise and pointwise; zeros past the frames, as padding
-    // is.
-    void norm_row(int t, const int8_t *dw1, const int8_t *pw1) noexcept
+    // The norm's output at row t over the lane's norm columns, from the first depthwise and pointwise; zeros
+    // past the frames, as padding is.
+    void norm_row(const Lane &lane, Runs &runs, Preload &preload, int t) noexcept
     {
-        int8_t *slot = c_row(t) + padded_;
+        int8_t *row = c_row(lane, t);
         if (t >= frames_) {
-            memset(slot, 0, width_ * padded_);
+            memset(column(lane, row, lane.c_lo), 0, (lane.c_hi - lane.c_lo) * padded_);
             return;
         }
-        for (int f0 = 0; f0 < width_; f0 += strip_) {
-            const int at = f0 * padded_;
-            const int8_t *window[kRing] = {x_row(t - 1) + at, x_row(t) + at, x_row(t + 1) + at};
-            dw1_run_[kRunPixels] = std::min(strip_, width_ - f0);
-            norm_run_[kRunPixels] = dw1_run_[kRunPixels];
-            ai_engine_dw3x3_row_s8_esp32s3(a_, window, dw1, dw1_run_.data());
-            norm_kernel_(slot + at, a_, pw1, norm_run_.data());
-            preload_.pump();
+        for (int f0 = lane.c_lo; f0 < lane.c_hi; f0 += strip_) {
+            const int8_t *window[kRing] = {column(lane, x_row(lane, t - 1), f0 - 1),
+                                           column(lane, x_row(lane, t), f0 - 1),
+                                           column(lane, x_row(lane, t + 1), f0 - 1)};
+            runs.dw1[kRunPixels] = std::min(strip_, lane.c_hi - f0);
+            runs.norm[kRunPixels] = runs.dw1[kRunPixels];
+            ai_engine_dw3x3_row_s8_esp32s3(lane.a, window, dw1_, runs.dw1.data());
+            norm_kernel_(column(lane, row, f0), lane.a, pw1_, runs.norm.data());
+            preload.pump();
         }
     }
 
-    // Output row t from the norm rows around it, plus x row t.
-    void output_row(int t, const int8_t *dw2, const int8_t *pw2, int8_t *ys) noexcept
+    // Output row t over the lane's columns from the norm rows around it, plus x row t.
+    void output_row(const Lane &lane, Runs &runs, Preload &preload, int t) noexcept
     {
-        for (int f0 = 0; f0 < width_; f0 += strip_) {
-            const int at = f0 * padded_;
-            const int8_t *window[kRing] = {c_row(t - 1) + at, c_row(t) + at, c_row(t + 1) + at};
-            dw2_run_[kRunPixels] = std::min(strip_, width_ - f0);
-            residual_run_[kRunPixels] = dw2_run_[kRunPixels];
-            ai_engine_dw3x3_row_s8_esp32s3(d_, window, dw2, dw2_run_.data());
-            residual_run_[kResidualX] = word_of(x_row(t) + padded_ + at);
+        preload.settle_writes();
+        for (int f0 = lane.lo; f0 < lane.hi; f0 += strip_) {
+            const int8_t *window[kRing] = {column(lane, c_row(lane, t - 1), f0 - 1),
+                                           column(lane, c_row(lane, t), f0 - 1),
+                                           column(lane, c_row(lane, t + 1), f0 - 1)};
+            runs.dw2[kRunPixels] = std::min(strip_, lane.hi - f0);
+            runs.residual[kRunPixels] = runs.dw2[kRunPixels];
+            ai_engine_dw3x3_row_s8_esp32s3(lane.d, window, dw2_, runs.dw2.data());
+            runs.residual[kResidualX] = word_of(column(lane, x_row(lane, t), f0));
             if (post_.empty()) {
-                residual_kernel_(ys + (t * width_ + f0) * channels_, d_, pw2, residual_run_.data());
+                residual_kernel_(ys_ + (t * width_ + f0) * channels_, lane.d, pw2_, runs.residual.data());
             } else {
-                residual_kernel_(out_row_, d_, pw2, residual_run_.data());
-                post_run_[kRunPixels] = dw2_run_[kRunPixels];
-                post_kernel_(ys + (t * width_ + f0) * post_[kJoinedValues], out_row_, post_weights_,
-                             post_run_.data());
+                residual_kernel_(lane.out_row, lane.d, pw2_, runs.residual.data());
+                runs.post[kRunPixels] = runs.dw2[kRunPixels];
+                post_kernel_(ys_ + (t * width_ + f0) * post_[kJoinedValues], lane.out_row, post_weights_,
+                             runs.post.data());
             }
-            preload_.pump();
+            preload.pump();
         }
     }
 
@@ -411,6 +549,83 @@ class ConvBlock final : public dl::module::Module {
         return true;
     }
 
+    void set_columns(Lane &lane, int lo, int hi) const noexcept
+    {
+        lane.lo = lo;
+        lane.hi = hi;
+        lane.x_lo = std::max(lo - kHalo, 0);
+        lane.x_hi = std::min(hi + kHalo, width_);
+        lane.c_lo = std::max(lo - 1, 0);
+        lane.c_hi = std::min(hi + 1, width_);
+        lane.first = std::max(lo - kHalo, -1);
+        lane.row_bytes = (std::min(hi + kHalo, width_ + 1) - lane.first) * padded_;
+    }
+
+    // The whole row's lane with its PSRAM rows; and with two parts, a row wide enough and the shared kernels,
+    // a frequency half's lane each, run only in the loan.
+    bool place_lanes() noexcept
+    {
+        set_columns(whole_, 0, width_);
+        const int out_bytes =
+            post_.empty() ? 0 : (width_ * channels_ + kChannelStep - 1) / kChannelStep * kChannelStep;
+        whole_.rows = static_cast<int8_t *>(heap_caps_aligned_calloc(
+            kVectorAlignBytes, 1, kRows * whole_.row_bytes + out_bytes, MALLOC_CAP_SPIRAM));
+        if (whole_.rows == nullptr) {
+            ESP_LOGE(TAG, "%s: no memory for %d rows of %d bytes", name, kRows, whole_.row_bytes);
+            return false;
+        }
+        halved_ = !held_ && split_parts() >= kLanesMax && width_ >= kLanesMax * kHalo;
+        for (int l = 0; halved_ && l < kLanesMax; l++) {
+            Lane &half = halves_[l];
+            set_columns(half, width_ * l / kLanesMax, width_ * (l + 1) / kLanesMax);
+            halves_rings_bytes_ += 2 * kRing * half.row_bytes;
+            halves_span_ = std::max(halves_span_, half.c_hi - half.c_lo);
+        }
+        return true;
+    }
+
+    void set_runs(Lane &lane) const noexcept
+    {
+        const int vectors = padded_ / kChannelStep;
+        const int whole = channels_ / kChannelStep;
+        const int half = channels_ % kChannelStep != 0;
+        // Whole input vectors whose last product loads the next; the tail then sums the last 16, or the 8
+        // left.
+        const int ahead = half ? whole : whole - 1;
+        const int x_pixels = lane.x_hi - lane.x_lo;
+        lane.runs.dw1 = {x_pixels, vectors, shifts_[kShiftDw1]};
+        lane.runs.dw2 = {x_pixels, vectors, shifts_[kShiftDw2]};
+        lane.runs.pad = {x_pixels, whole, half};
+        lane.runs.norm = {x_pixels,           vectors, vectors, ahead, half,
+                          shifts_[kShiftPw1], 0,       0,       0,     shifts_[kShiftBn]};
+        lane.runs.residual = {x_pixels,
+                              vectors,
+                              vectors,
+                              ahead,
+                              half,
+                              shifts_[kShiftPw2],
+                              0,
+                              0,
+                              shifts_[kShiftResidual],
+                              half ? kHalfStep : kChannelStep};
+        if (!pre_.empty()) {
+            const int in = pre_[kJoinedValues] / kChannelStep;
+            lane.runs.pre = {x_pixels, vectors, in, in - 1, 0, pre_[kJoinedShift], 0, 0, -1, kChannelStep, 0};
+        }
+        if (!post_.empty() && post_kernel_ == ai_engine_pw_conv_k24_n12_s8_esp32s3) {
+            lane.runs.post = {x_pixels, 1, 0, 0, 0, post_[kJoinedShift], 0, 0, -1, kChannelStep, 0};
+        } else if (!post_.empty()) {
+            const int n = post_[kJoinedValues];
+            const int in = channels_ / kChannelStep;
+            lane.runs.post = {x_pixels, padded(n) / kChannelStep,
+                              in,       in - 1,
+                              0,        post_[kJoinedShift],
+                              0,        0,
+                              -1,       n % kChannelStep != 0 ? kHalfStep : kChannelStep,
+                              0};
+        }
+    }
+
     bool build(dl::ModelContext *context, dl::TensorBase *x, dl::TensorBase *y)
     {
         if (!shapes_fit(context, x, y)) { return false; }
@@ -418,42 +633,12 @@ class ConvBlock final : public dl::module::Module {
         channels_ = block_channels(context);
         width_ = pre_.empty() ? x->shape[2] : x->shape[2] * x->shape[3] / pre_[kJoinedValues];
         padded_ = padded(channels_);
-        padded_row_ = (width_ + 2) * padded_;
         std::vector<int> biases = {kPw1Bias, kBnBias, kPw2Bias};
         if (!pre_.empty()) { biases.push_back(kInputs + 1); }
         if (!post_.empty()) { biases.push_back(kInputs + (pre_.empty() ? 1 : 3)); }
         for (int i : biases) {
             context->get_tensor(m_inputs_index[i])->reset_bias_layout(quant_type, true);
         }
-        const int out_bytes =
-            post_.empty() ? 0 : (width_ * channels_ + kChannelStep - 1) / kChannelStep * kChannelStep;
-        rows_ = static_cast<int8_t *>(heap_caps_aligned_calloc(
-            kVectorAlignBytes, 1, kRows * padded_row_ + out_bytes, MALLOC_CAP_SPIRAM));
-        if (rows_ == nullptr) {
-            ESP_LOGE(TAG, "%s: no memory for %d rows of %d bytes", name, kRows, padded_row_);
-            return false;
-        }
-        place_rows(nullptr);
-        const int vectors = padded_ / kChannelStep;
-        const int whole = channels_ / kChannelStep;
-        const int half = channels_ % kChannelStep != 0;
-        // Whole input vectors whose last product loads the next; the tail then sums the last 16, or the 8
-        // left.
-        const int ahead = half ? whole : whole - 1;
-        dw1_run_ = {width_, vectors, shifts_[kShiftDw1]};
-        dw2_run_ = {width_, vectors, shifts_[kShiftDw2]};
-        pad_run_ = {width_, whole, half};
-        norm_run_ = {width_, vectors, vectors, ahead, half, shifts_[kShiftPw1], 0, 0, 0, shifts_[kShiftBn]};
-        residual_run_ = {width_,
-                         vectors,
-                         vectors,
-                         ahead,
-                         half,
-                         shifts_[kShiftPw2],
-                         0,
-                         0,
-                         shifts_[kShiftResidual],
-                         half ? kHalfStep : kChannelStep};
         for (const Unrolled &u : kUnrolled) {
             if (u.channels == channels_) {
                 norm_kernel_ = u.norm;
@@ -467,25 +652,17 @@ class ConvBlock final : public dl::module::Module {
                           : k == kPreWide ? ai_engine_pw_conv_k24_s8_esp32s3
                           : k == kPreHeld ? ai_engine_pw_conv_k48_s8_esp32s3
                                           : ai_engine_pw_conv_rows_s8_esp32s3;
-            const int in = k / kChannelStep;
-            pre_run_ = {width_, vectors, in, in - 1, 0, pre_[kJoinedShift], 0, 0, -1, kChannelStep, 0};
         }
-        if (!post_.empty() && channels_ == kPreWide && post_[kJoinedValues] == kPostOutputs) {
-            post_kernel_ = ai_engine_pw_conv_k24_n12_s8_esp32s3;
-            post_run_ = {width_, 1, 0, 0, 0, post_[kJoinedShift], 0, 0, -1, kChannelStep, 0};
-        } else if (!post_.empty()) {
-            const int n = post_[kJoinedValues];
-            const int in = channels_ / kChannelStep;
-            post_kernel_ = ai_engine_pw_conv_rows_s8_esp32s3;
-            post_run_ = {width_, padded(n) / kChannelStep,
-                         in,     in - 1,
-                         0,      post_[kJoinedShift],
-                         0,      0,
-                         -1,     n % kChannelStep != 0 ? kHalfStep : kChannelStep,
-                         0};
+        if (!post_.empty()) {
+            const bool narrow = channels_ == kPreWide && post_[kJoinedValues] == kPostOutputs;
+            post_kernel_ = narrow ? ai_engine_pw_conv_k24_n12_s8_esp32s3 : ai_engine_pw_conv_rows_s8_esp32s3;
+        }
+        if (!place_lanes()) { return false; }
+        for (Lane *lane : {&whole_, &halves_[0], &halves_[1]}) {
+            set_runs(*lane);
         }
         const bool shared = !held_;
-        rings_bytes_ = shared ? 2 * kRing * padded_row_ : 0;
+        rings_bytes_ = shared ? 2 * kRing * whole_.row_bytes : 0;
         if (shared) {
             for (size_t i = kDw1; i < m_inputs_index.size(); i++) {
                 (i < kInputs ? loan_bytes_ : ends_bytes_) +=
@@ -505,31 +682,28 @@ class ConvBlock final : public dl::module::Module {
     int width_ = 0;
     int channels_ = 0;
     int padded_ = 0;
-    int padded_row_ = 0;
-    int8_t *rows_ = nullptr;
-    int8_t *x_ring_ = nullptr;
-    int8_t *c_ring_ = nullptr;
-    int8_t *a_ = nullptr;
-    int8_t *d_ = nullptr;
-    int8_t *out_row_ = nullptr; // the block's output row the post convolution reads
+    Lane whole_;
+    std::array<Lane, kLanesMax> halves_ = {};
+    bool halved_ = false; // halves_ laid out, for two parts
+    bool split_ = false;  // this run on the halves
+    int halves_span_ = 0; // the widest half's norm columns
+    size_t halves_rings_bytes_ = 0;
+    const int8_t *xs_ = nullptr;
+    int8_t *ys_ = nullptr;
+    const int8_t *dw1_ = nullptr;
+    const int8_t *pw1_ = nullptr;
+    const int8_t *dw2_ = nullptr;
+    const int8_t *pw2_ = nullptr;
     const int8_t *pre_weights_ = nullptr;
     const int8_t *post_weights_ = nullptr;
-    std::array<int32_t, 3> dw1_run_ = {};
-    std::array<int32_t, 3> dw2_run_ = {};
-    std::array<int32_t, 3> pad_run_ = {};
-    std::array<int32_t, kNormSize> norm_run_ = {};
-    std::array<int32_t, kResidualSize> residual_run_ = {};
-    std::array<int32_t, kConvSize> pre_run_ = {};
-    std::array<int32_t, kConvSize> post_run_ = {};
     RowKernel norm_kernel_ = ai_engine_pw_norm_row_s8_esp32s3;
     RowKernel residual_kernel_ = ai_engine_pw_residual_row_s8_esp32s3;
     RowKernel pre_kernel_ = nullptr;
     RowKernel post_kernel_ = nullptr;
     bool held_ = false; // inputs held in registers, rows whole: no strips, no loan
-    Preload preload_;
     int strip_ = 0;
     size_t loan_bytes_ = 0;  // its weights' bytes; 0 for the unrolled kernels
-    size_t rings_bytes_ = 0; // its two rings, when the loan may hold them
+    size_t rings_bytes_ = 0; // the whole row's two rings, when the loan may hold them
     size_t ends_bytes_ = 0;  // the joined convolutions' weights, after the rings
     bool built_ = false;
 };

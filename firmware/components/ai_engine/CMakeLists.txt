@@ -19,6 +19,11 @@ elseif(CONFIG_AI_ENGINE_COMMAND_BACKEND_RNNT)
 else()
     list(APPEND srcs "src/command/command.cpp")
 endif()
+if(CONFIG_AI_ENGINE_CORES_TWO)
+    list(APPEND srcs "src/core/espdl/espdl_split_two.cpp")
+else()
+    list(APPEND srcs "src/core/espdl/espdl_split_one.cpp")
+endif()
 
 idf_component_register(
     SRCS ${srcs}

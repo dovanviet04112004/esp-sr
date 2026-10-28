@@ -10,6 +10,7 @@
 
 #include "core/espdl/espdl_loan.hpp"
 #include "core/espdl/espdl_preload.hpp"
+#include "core/espdl/espdl_split.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -255,46 +256,73 @@ class PointwiseS8 final : public dl::module::Module {
     }
 
   private:
+    // The slice run_slices hands the parts.
+    struct Pass {
+        int8_t *ys;
+        const int8_t *xs;
+        const int8_t *slice;
+        int block;
+        int chunk; // rows a kernel call
+    };
+
     bool patched() const noexcept
     {
         return patch_[0] * patch_[1] > 1;
     }
 
-    // Every block over the rows, a slice at a time: as many blocks as the loan holds when one is lent, else
-    // the dcache's slices. On a loan, chunks of rows, each preloading the next one's input (ADR-0026).
+    // Every block over the rows a slice at a time, as many blocks as the loan holds, else the dcache's
+    // slices, the parts sharing a slice's rows; the next slice enters the loan once both are done (ADR-0027).
     void run_slices(int8_t *ys, const int8_t *xs, const int8_t *weights, const Loan &loan) noexcept
     {
         const int blocks = padded(columns_) / kChannelStep;
         const int lent = static_cast<int>(loan.bytes / (block_bytes() + kBiasBlockBytes));
         const int per = lent > 0 ? std::min(lent, blocks) : (slice_blocks_ > 0 ? slice_blocks_ : blocks);
         const bool half = columns_ % kChannelStep != 0;
-        const int rows = run_[kRunRows];
         const int stride = run_[kRunStride] * kChannelStep;
-        const int chunk = lent > 0 ? std::max(kChunkBytes / stride, 1) : rows;
+        pass_ = {ys, xs, nullptr, 0, lent > 0 ? std::max(kChunkBytes / stride, 1) : run_[kRunRows]};
         for (int b = 0; b < blocks; b += per) {
             const int n = std::min(per, blocks - b);
             const bool last = b + n == blocks;
-            const int8_t *slice = weights + b * block_bytes();
+            pass_.slice = weights + b * block_bytes();
+            pass_.block = b;
             run_[kRunBias] = word_of(bias_ + b * kBiasBlockBytes);
             if (lent > 0) {
-                slice = borrowed(weights, b, n, loan);
+                pass_.slice = borrowed(weights, b, n, loan);
                 run_[kRunBias] = word_of(loan.mem + n * block_bytes());
             }
             run_[kRunBlocks] = n;
             run_[kRunLast] = !half ? kChannelStep : (last ? kHalfStep : kAllHalves);
             run_[kRunSkip] = columns_ - n * kChannelStep + (half && last ? kHalfStep : 0);
-            for (int r0 = 0; r0 < rows; r0 += chunk) {
-                const int r1 = std::min(r0 + chunk, rows);
-                if (r1 < rows) { preload_.add(xs + r1 * stride, (std::min(r1 + chunk, rows) - r1) * stride); }
-                preload_.pump();
-                const int at = r0 * columns_ + b * kChannelStep;
-                if (residual_ != nullptr) { run_[kRunResidual] = word_of(residual_ + at); }
-                run_[kRunRows] = r1 - r0;
-                kernel_(ys + at, xs + r0 * stride, slice, run_.data());
-                preload_.finish();
-            }
+            split_run(run_part, this);
         }
-        run_[kRunRows] = rows;
+    }
+
+    static void run_part(void *self, int part)
+    {
+        static_cast<PointwiseS8 *>(self)->run_rows(part);
+    }
+
+    // The slice over this part's rows in chunks, each preloading the next one's input on a loan (ADR-0026),
+    // its run and preloads on the stack of the core running it, in internal RAM.
+    void run_rows(int part) noexcept
+    {
+        const int rows = run_[kRunRows];
+        const int parts = split_parts();
+        const int end = rows * (part + 1) / parts;
+        const int stride = run_[kRunStride] * kChannelStep;
+        const int chunk = pass_.chunk;
+        std::array<int32_t, kRunSize> run = run_;
+        Preload preload(parts > 1);
+        for (int r0 = rows * part / parts; r0 < end; r0 += chunk) {
+            const int r1 = std::min(r0 + chunk, end);
+            if (r1 < end) { preload.add(pass_.xs + r1 * stride, (std::min(r1 + chunk, end) - r1) * stride); }
+            preload.pump();
+            const int at = r0 * columns_ + pass_.block * kChannelStep;
+            if (residual_ != nullptr) { run[kRunResidual] = word_of(residual_ + at); }
+            run[kRunRows] = r1 - r0;
+            kernel_(pass_.ys + at, pass_.xs + r0 * stride, pass_.slice, run.data());
+            preload.finish();
+        }
     }
 
     // Rows of K values into rows padded to a multiple of 16, as the kernel's vector loads take them.
@@ -461,7 +489,7 @@ class PointwiseS8 final : public dl::module::Module {
     int8_t *zero_bias_ = nullptr; // QACC-layout zeros when the convolution has no bias
     std::array<int32_t, kRunSize> run_ = {};
     RowKernel kernel_ = nullptr;
-    Preload preload_;
+    Pass pass_ = {};
     bool built_ = false;
 };
 

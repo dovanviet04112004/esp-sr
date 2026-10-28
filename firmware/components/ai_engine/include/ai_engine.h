@@ -173,6 +173,11 @@ uint32_t ai_engine_speaker_model_id(void);
 esp_err_t ai_engine_synth_render(const uint8_t *units, size_t n_units, int16_t *pcm, size_t cap,
                                  size_t *n_samples);
 
+/** Run the part of an ai_engine op a network's task hands over, waiting up to wait_ms for one (KEHOACH 5.1).
+ *  @ctx phu_task, pinned to core 1 below thu and sach | blocks up to wait_ms | built with AI_ENGINE_CORES_TWO
+ */
+void ai_engine_helper_serve(uint32_t wait_ms);
+
 #ifdef __cplusplus
 }
 #endif
