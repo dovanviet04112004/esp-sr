@@ -17,6 +17,10 @@
 extern "C" {
 void ai_engine_band_conv_s8_esp32s3(int8_t *out, const int8_t *const *columns, const int8_t *weights,
                                     const int32_t *run);
+void ai_engine_band_k1_s8_esp32s3(int8_t *out, const int32_t *run);
+void ai_engine_band_k1_res_s8_esp32s3(int8_t *out, const int32_t *run);
+void ai_engine_band_k3_s8_esp32s3(int8_t *out, const int32_t *run);
+void ai_engine_band_k3_res_s8_esp32s3(int8_t *out, const int32_t *run);
 }
 
 namespace ai {
@@ -50,6 +54,21 @@ enum Run {
     kRunRelu,
     kRunSize
 };
+// Slots of the fast kernels' run, for a column whose time taps all lie within the frames.
+enum Fast {
+    kFastBands = 0,
+    kFastTable,
+    kFastStep,
+    kFastOutStride,
+    kFastShift,
+    kFastBias,
+    kFastResidual,
+    kFastResidualDelta,
+    kFastColumns,
+    kFastWeights = kFastColumns + kTimeTapsMax,
+    kFastSize = kFastWeights + kTimeTapsMax
+};
+using FastKernel = void (*)(int8_t *out, const int32_t *run);
 
 struct Scratch {
     int8_t *mem;
@@ -122,6 +141,13 @@ class BandBlock final : public dl::module::Module {
         first_[kRunBias] = word_of(context->get_tensor(m_inputs_index[kB1])->get_element_ptr());
         second_[kRunBias] = word_of(context->get_tensor(m_inputs_index[kB2])->get_element_ptr());
         second_[kRunResidualDelta] = word_of(xs_) - word_of(ys);
+        first_fast_[kFastBias] = first_[kRunBias];
+        second_fast_[kFastBias] = second_[kRunBias];
+        second_fast_[kFastResidualDelta] = second_[kRunResidualDelta];
+        for (int c = 0; c < time_taps_; c++) {
+            first_fast_[kFastWeights + c] = word_of(w1 + c * first_[kRunTapBytes]);
+            second_fast_[kFastWeights + c] = word_of(w2 + c * second_[kRunTapBytes]);
+        }
         const int half = time_taps_ / 2;
         for (int t = 0; t < half && t < frames_; t++) {
             middle(t, w1);
@@ -129,11 +155,19 @@ class BandBlock final : public dl::module::Module {
         const int8_t *columns[kTimeTapsMax];
         for (int t = 0; t < frames_; t++) {
             if (t + half < frames_) { middle(t + half, w1); }
+            int8_t *out = ys + t * kChannels;
+            if (t >= half && t + half < frames_) {
+                for (int c = 0; c < time_taps_; c++) {
+                    second_fast_[kFastColumns + c] = word_of(middle_column(t - half + c));
+                }
+                second_kernel_(out, second_fast_.data());
+                continue;
+            }
             for (int c = 0; c < time_taps_; c++) {
                 const int at = t - half + c;
                 columns[c] = at >= 0 && at < frames_ ? middle_column(at) : nullptr;
             }
-            ai_engine_band_conv_s8_esp32s3(ys + t * kChannels, columns, w2, second_.data());
+            ai_engine_band_conv_s8_esp32s3(out, columns, w2, second_.data());
         }
     }
 
@@ -180,6 +214,13 @@ class BandBlock final : public dl::module::Module {
     {
         const int8_t *columns[kTimeTapsMax];
         const int half = time_taps_ / 2;
+        if (t >= half && t + half < frames_) {
+            for (int c = 0; c < time_taps_; c++) {
+                first_fast_[kFastColumns + c] = word_of(xs_ + (t - half + c) * kChannels);
+            }
+            first_kernel_(middle_column(t), first_fast_.data());
+            return;
+        }
         for (int c = 0; c < time_taps_; c++) {
             const int at = t - half + c;
             columns[c] = at >= 0 && at < frames_ ? xs_ + at * kChannels : nullptr;
@@ -256,6 +297,20 @@ class BandBlock final : public dl::module::Module {
                    shifts_[kShiftResidual] + 1,
                    0,
                    1};
+        first_fast_[kFastBands] = bands_;
+        first_fast_[kFastTable] = first_[kRunTable];
+        first_fast_[kFastStep] = first_[kRunStep];
+        first_fast_[kFastOutStride] = first_[kRunOutStride];
+        first_fast_[kFastShift] = shifts_[kShift1] - 1;
+        second_fast_[kFastBands] = bands_;
+        second_fast_[kFastTable] = second_[kRunTable];
+        second_fast_[kFastStep] = second_[kRunStep];
+        second_fast_[kFastOutStride] = second_[kRunOutStride];
+        second_fast_[kFastShift] = shifts_[kShift2] - 1;
+        second_fast_[kFastResidual] = shifts_[kShiftResidual] - 1;
+        const bool three = time_taps_ == kTimeTapsMax;
+        first_kernel_ = three ? ai_engine_band_k3_s8_esp32s3 : ai_engine_band_k1_s8_esp32s3;
+        second_kernel_ = three ? ai_engine_band_k3_res_s8_esp32s3 : ai_engine_band_k1_res_s8_esp32s3;
         loan_ask(scratch_bytes_);
         built_ = true;
         return true;
@@ -273,6 +328,10 @@ class BandBlock final : public dl::module::Module {
     int32_t *tables_ = nullptr; // each convolution's band table, in PSRAM
     std::array<int32_t, kRunSize> first_ = {};
     std::array<int32_t, kRunSize> second_ = {};
+    std::array<int32_t, kFastSize> first_fast_ = {};
+    std::array<int32_t, kFastSize> second_fast_ = {};
+    FastKernel first_kernel_ = nullptr;
+    FastKernel second_kernel_ = nullptr;
     const int8_t *xs_ = nullptr;
     int8_t *ring_ = nullptr;
     bool built_ = false;

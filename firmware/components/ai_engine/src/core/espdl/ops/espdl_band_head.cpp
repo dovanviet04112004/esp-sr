@@ -17,6 +17,8 @@
 extern "C" {
 void ai_engine_band_conv_s8_esp32s3(int8_t *out, const int8_t *const *columns, const int8_t *weights,
                                     const int32_t *run);
+void ai_engine_band_k1_linear_s8_esp32s3(int8_t *out, const int32_t *run);
+void ai_engine_band_k3_s8_esp32s3(int8_t *out, const int32_t *run);
 }
 
 namespace ai {
@@ -55,6 +57,20 @@ enum Run {
     kRunResidualDelta,
     kRunRelu,
     kRunSize
+};
+// Slots of the fast kernels' run, for a column whose time taps all lie within the frames.
+enum Fast {
+    kFastBands = 0,
+    kFastTable,
+    kFastStep,
+    kFastOutStride,
+    kFastShift,
+    kFastBias,
+    kFastResidual,
+    kFastResidualDelta,
+    kFastColumns,
+    kFastWeights = kFastColumns + kHeadTaps,
+    kFastSize = kFastWeights + kHeadTaps
 };
 
 struct Scratch {
@@ -149,6 +165,13 @@ class BandHead final : public dl::module::Module {
         memcpy(spread_w, context->get_tensor(m_inputs_index[kSpreadW])->get_element_ptr(), spread_bytes_);
         head_run_[kRunBias] = word_of(context->get_tensor(m_inputs_index[kHeadB])->get_element_ptr());
         spread_run_[kRunBias] = word_of(context->get_tensor(m_inputs_index[kSpreadB])->get_element_ptr());
+        head_fast_[kFastBias] = head_run_[kRunBias];
+        spread_fast_[kFastBias] = spread_run_[kRunBias];
+        for (int c = 0; c < kHeadTaps; c++) {
+            head_fast_[kFastWeights + c] = word_of(head_w + c * head_run_[kRunTapBytes]);
+        }
+        spread_fast_[kFastWeights] = word_of(spread_w);
+        spread_fast_[kFastColumns] = word_of(head);
         const int8_t *pitch_w = context->get_tensor(m_inputs_index[kPitchW])->get_element_ptr<int8_t>();
         const int32_t pitch_b = context->get_tensor(m_inputs_index[kPitchB])->get_element_ptr<int32_t>()[0];
         const int8_t *xs = x->get_element_ptr<int8_t>();
@@ -157,13 +180,20 @@ class BandHead final : public dl::module::Module {
         const int out_bands = bands_ - 1;
         const int8_t *columns[kHeadTaps];
         for (int t = 0; t < frames_; t++) {
-            for (int c = 0; c < kHeadTaps; c++) {
-                const int at = t - kHeadTaps / 2 + c;
-                columns[c] = at >= 0 && at < frames_ ? xs + at * kChannels : nullptr;
+            const int first = t - kHeadTaps / 2;
+            if (first >= 0 && first + kHeadTaps <= frames_) {
+                for (int c = 0; c < kHeadTaps; c++) {
+                    head_fast_[kFastColumns + c] = word_of(xs + (first + c) * kChannels);
+                }
+                ai_engine_band_k3_s8_esp32s3(head, head_fast_.data());
+            } else {
+                for (int c = 0; c < kHeadTaps; c++) {
+                    const int at = first + c;
+                    columns[c] = at >= 0 && at < frames_ ? xs + at * kChannels : nullptr;
+                }
+                ai_engine_band_conv_s8_esp32s3(head, columns, head_w, head_run_.data());
             }
-            ai_engine_band_conv_s8_esp32s3(head, columns, head_w, head_run_.data());
-            columns[0] = head;
-            ai_engine_band_conv_s8_esp32s3(spread, columns, spread_w, spread_run_.data());
+            ai_engine_band_k1_linear_s8_esp32s3(spread, spread_fast_.data());
             for (int c = 0; c < outputs_; c++) {
                 int8_t most = spread[c];
                 for (int b = 1; b < out_bands; b++) {
@@ -271,6 +301,16 @@ class BandHead final : public dl::module::Module {
                        0,
                        0,
                        0};
+        head_fast_[kFastBands] = out_bands;
+        head_fast_[kFastTable] = head_run_[kRunTable];
+        head_fast_[kFastStep] = head_run_[kRunStep];
+        head_fast_[kFastOutStride] = head_run_[kRunOutStride];
+        head_fast_[kFastShift] = shifts_[kShiftHead] - 1;
+        spread_fast_[kFastBands] = out_bands;
+        spread_fast_[kFastTable] = spread_run_[kRunTable];
+        spread_fast_[kFastStep] = spread_run_[kRunStep];
+        spread_fast_[kFastOutStride] = spread_run_[kRunOutStride];
+        spread_fast_[kFastShift] = shifts_[kShiftSpread] - 1;
         loan_ask(scratch_bytes_);
         built_ = true;
         return true;
@@ -289,6 +329,8 @@ class BandHead final : public dl::module::Module {
     int32_t *tables_ = nullptr; // the 3x3 then the 5x1 band table, in PSRAM
     std::array<int32_t, kRunSize> head_run_ = {};
     std::array<int32_t, kRunSize> spread_run_ = {};
+    std::array<int32_t, kFastSize> head_fast_ = {};
+    std::array<int32_t, kFastSize> spread_fast_ = {};
     bool built_ = false;
 };
 
