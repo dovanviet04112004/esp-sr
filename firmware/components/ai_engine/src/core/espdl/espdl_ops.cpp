@@ -1,6 +1,7 @@
 #include "core/espdl/espdl_ops.hpp"
 
 #include "core/espdl/ops/espdl_attention.hpp"
+#include "core/espdl/ops/espdl_band_block.hpp"
 #include "core/espdl/ops/espdl_conv_block.hpp"
 #include "core/espdl/ops/espdl_global_stats.hpp"
 #include "core/espdl/ops/espdl_group_norm_s8.hpp"
@@ -35,6 +36,7 @@ void register_espdl_ops() noexcept
     creator->register_module("WeightedStats", weighted_stats_from);
     creator->register_module("GlobalStats", global_stats_from);
     creator->register_module("PointwiseS8", pointwise_s8_from);
+    creator->register_module("BandBlock", band_block_from);
 }
 
 } // namespace ai
