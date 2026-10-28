@@ -1064,11 +1064,56 @@ như hiện nay:
   chủ repo ở AUC 0,88–1,00 nhưng `val` chỉ 0,67 (§12.18); thêm vòng truy ngược 25 khung;
 - một bộ dò cộng hài âm kiểu SWIPE′ hay SHS ở `dsp_spec`, thuật toán thuần, một FFT mỗi octave ứng viên: trên giọng chủ
   repo SWIPE′ 0,22–1,00, SHS 0,56–1,00; `val` chưa đo;
-- một mạng nhỏ học từ SwiftF0, ở `ai_engine` vì là mạng học: SwiftF0 nguyên cỡ cần chừng 0,57 tỉ MAC/s 🔬, quá sức
-  esp-dl trên board (0,1–0,5 tỉ MAC/s).
+- SwiftF0 ở `ai_engine` vì là mạng học: nguyên cỡ chỉ 0,21 tỉ MAC/s, 3,3 triệu mỗi hop (đo trên ONNX, mục dưới).
 
 Chọn bằng AUC thanh của từ đầu trên `val` và trên giọng chủ repo, rồi µs đo trên board; bộ được chọn dựng lại đặc trưng
 và học một lượt để xác nhận Cửa 3. Không bộ nào hơn cách tốt nhất trong ba cách trên thì dùng cách ấy.
+
+**SwiftF0 lên chip** (chủ repo duyệt bước 1 ngày 28/10).
+- **Lý do:** `command/v8` học trên cao độ SwiftF0. Board chạy nó không cao độ: cả ba chiều cao độ đặt cố định bằng
+  trung bình lúc học, gập vào trọng số (`HOLD=pitch`), nên mạng chỉ nghe log-mel. Nghe SwiftF0 như lúc học thì, so với
+  không cao độ (`measurements/command.md` §12.25):
+  - trên 209 câu Cửa 3, đúng nhất 196 so với 194;
+  - thanh các âm tiết sau 77% so với 66%;
+  - lỗi đơn vị `val` 0,343 so với 0,375.
+- **Bỏ Kaldi:** chủ repo nghiêng về bỏ hẳn bộ dò Kaldi (28/10), vì không cao độ đang hơn nó. Bộ dò ấy vẫn chạy mỗi
+  bước, 1,98 ms ở nhân 0, mà `command` đang deploy không đọc đầu ra của nó. Trên chip chỉ còn hai cách nghe: không cao
+  độ, hay SwiftF0. Cách board chọn giữa hai cách bàn ở bước 3.
+
+Mạng, đo trên `model.onnx` của `swift-f0` 0.3.0 (28/10):
+- 25 949 tham số. Đầu vào là mẫu PCM:
+  - ba STFT cỡ 512, 1024 và 2048, bước 256;
+  - biên độ của mỗi STFT qua một ma trận thành 128 dải log-tần số, rồi lấy log;
+  - 3 × 128 mỗi khung vào một CNN 2-D 12 kênh: 13 conv, trong đó bốn cặp giãn theo tần số 17, 27, 40 và 48;
+  - hai đầu ra: cao độ 95 bậc log từ 46,875 tới 2 093,75 Hz, và độ tin qua một sigmoid.
+- 3,3 triệu phép nhân-cộng mỗi hop 16 ms: 2,3 triệu ở CNN, phần còn lại ở STFT. ONNX viết STFT bằng DFT nhân ma trận;
+  trên chip đó là FFT.
+- Trục thời gian của CNN là ±7 khung, nên một khung chốt khi đã có 10 khung sau (160 ms).
+- **Chỗ đặt:** STFT và các dải là xử lý tín hiệu thuần, ở `dsp_spec`. CNN là mạng học, ở nhánh `pitch` của
+  `ai_engine` (CLAUDE.md §3).
+
+Bước 1, trên máy tính, không đụng chip:
+1. `make pitch-import` nhập `model.onnx` theo bản ghim thành một run ở `artifacts/pitch/runs/`.
+   - `tasks/pitch/model.py` viết lại CNN bằng torch, nạp trọng số từ ONNX.
+   - Phải khớp phần CNN của ONNX trong `rewrite_rtol` của `configs/models/pitch.yaml`.
+2. `srpipe.dsp.spec.swift_front` tính đầu vào của CNN bằng FFT float32. Lệch so với phần STFT của ONNX đo trên `val`,
+   ghi vào `measurements/pitch.md`.
+3. `make pitch-ptq RUN=` dựng bậc 2 của thang §3.14: kl, percentile, minmax, mse.
+   - Hiệu chỉnh trên các khung của phiên `train` trong split của v8, qua chuỗi mô phỏng board, rút theo seed.
+   - Mỗi hàng ghi hai số so với float, trên các khung có tiếng của `val`: lệch cao độ (cent), và phần khung đổi phía
+     ngưỡng độ tin. `tasks/pitch/postproc/decode.py` giải cao độ và độ tin từ đầu ra của mạng, như board sẽ giải.
+4. Hàng tốt nhất dựng lại ba chiều cao độ của `val` và của 209 câu Cửa 3.
+   - Hàng ấy vào `pitch_source` như một bộ dò cùng giao diện `detect` với `swift-f0`.
+   - Đo với v8 float như §12.25, bằng `make ctc-tone-flip CHECK=places` và `make command-eval`.
+
+Điều kiện đạt, chốt trước khi thấy số:
+- lỗi đơn vị `val` từ 0,359 trở xuống: còn ít nhất nửa phần hơn của SwiftF0 float so với không cao độ;
+- thanh các âm tiết sau trên 209 câu từ 72% trở lên;
+- đúng nhất kém SwiftF0 float không quá 5 câu (nhiễu đếm).
+
+Không đạt thì dừng: SwiftF0 int8 không đáng đưa lên chip. Đạt thì bước 2 là bản dò trên board B (giờ mỗi hop, khớp
+từng bit). Bước 3 là đường chip trong chuỗi: STFT ở `dsp_spec` đủ bốn bước, cột cao độ trễ 10 khung cộng 0,4 s nhìn sau
+của chuẩn hoá trong `svc_listen`, và cách chọn cách nghe.
 
 **Hướng còn lại**, theo thứ tự, khi các bước trên chưa đủ:
 - mạng nhìn trước tới 0,4 s: board vốn chờ `utterance.gap_s` 0,4 s trước khi chốt câu nên không thêm trễ quyết định;
@@ -2208,14 +2253,14 @@ ml/
 │   ├── scenes/standard.yaml           # bộ cảnh có nhãn chuẩn của E4-T4: phòng, RT60, góc, SNR, seed
 │   ├── scenes/speaker.yaml            # khảo sát §3.17: bộ trích ghim bản, phiên đăng ký và thử, người lạ, k, seed
 │   ├── scenes/device.yaml             # đường mô phỏng board của E4-T8: kho phòng, mức nói, nhiễu, micro, log-mel
-│   └── models/{ns.yaml, wake.yaml, command.yaml, command_kws.yaml, command_ctc.yaml, speaker.yaml, synth.yaml,
-│                quant.yaml}
+│   └── models/{ns.yaml, wake.yaml, command.yaml, command_kws.yaml, command_ctc.yaml, speaker.yaml, pitch.yaml,
+│                synth.yaml, quant.yaml}
 │                                      #   ns.yaml: split, bộ trộn, hai ứng viên và lịch học chung của khe ns
 │                                      #   (§3.9); command.yaml: đường sản phẩm (backend), đặc trưng;
 │                                      #   command_kws.yaml, command_ctc.yaml: split, mạng, lịch học của từng
 │                                      #   đường; speaker.yaml: đường chip §3.17, bộ trích nhập thành run, thang
-│                                      #   int8, bản dò, biến thể b0/b3 của make product SPEAKER=;
-│                                      #   quant.yaml: thang §3.14
+│                                      #   int8, bản dò, biến thể b0/b3 của make product SPEAKER=; pitch.yaml:
+│                                      #   SwiftF0 §3.11, bản ghim, thang int8; quant.yaml: thang §3.14
 │
 ├── src/srpipe/
 │   ├── core/                          # ── HẠ TẦNG: không chứa tên khối nào ──
@@ -2268,8 +2313,9 @@ ml/
 │   │                                  #   chữ bộ nghe kiểm đọc ra và độ chênh log-xác suất với chữ phải nói, kể cả dấu
 │   │
 │   ├── dsp/                           # ── THUẬT TOÁN THUẦN, soi gương firmware 1:1 ──
-│   │   ├── spec/{fft.py, window.py, stft.py, mel.py, pitch.py, spk_fbank.py}   # ★ dsp_spec; spk_fbank: khâu
-│   │   │                              #   đặc trưng của b0 (§3.17)
+│   │   ├── spec/{fft.py, window.py, stft.py, mel.py, pitch.py, spk_fbank.py, swift_front.py}   # ★ dsp_spec;
+│   │   │                              #   spk_fbank: khâu đặc trưng của b0 (§3.17); swift_front: ba STFT và
+│   │   │                              #   128 dải log-tần số vào CNN của SwiftF0 (§3.11)
 │   │   ├── afe/{hpf.py, balance.py, aec.py, doa.py, gsc.py, bss.py,
 │   │   │        ns_omlsa.py, vad.py, agc.py, chain.py}                # ★ dsp_afe
 │   │   └── emit_golden.py             # → contracts/golden/{spec,afe}/…
@@ -2320,6 +2366,10 @@ ml/
 │   │   │                              #   ngưỡng trên đường chip mô phỏng, giữ bản deploy trong run và khoá hàng,
 │   │   │                              #   use cài lại một biến thể; probe.py bản dò board của một hàng và cả
 │   │   │                              #   chuỗi PCM → điểm; score.py chuẩn hoá, mẫu giọng, điểm, ngưỡng
+│   │   ├── pitch/{model.py, quant.py, postproc/decode.py ★}   # SwiftF0 lên chip §3.11: model.py CNN của
+│   │   │                              #   SwiftF0 viết lại bằng torch, nạp trọng số từ ONNX; quant.py lệnh con
+│   │   │                              #   import nhập model.onnx theo bản ghim thành một run, ptq dựng thang
+│   │   │                              #   §3.14; decode.py giải cao độ và độ tin từ đầu ra của mạng
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
 │   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py, pitch.py}
