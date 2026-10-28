@@ -17,6 +17,7 @@ import yaml
 torch = pytest.importorskip("torch")
 
 from srpipe.compress.quant import esp_ppq_patches, ptq_espdl, qat_espdl  # noqa: E402
+from srpipe.core import run_dir  # noqa: E402
 from srpipe.core.config import contract_front, load_yaml  # noqa: E402
 from srpipe.generated import listen  # noqa: E402
 from srpipe.tasks.command import ctc  # noqa: E402
@@ -322,9 +323,39 @@ def test_kaldi_hears_a_run_on_its_mel_from_build_only_if_that_is_the_contracts_f
         quant.kaldi_cfg(cfg | {"simulate": {}}, {})
 
 
+def test_the_contract_hears_a_run_on_a_build_of_its_split_on_the_contracts_front(monkeypatch, tmp_path: Path) -> None:
+    folder = tmp_path / "command" / "v9"
+    folder.mkdir(parents=True)
+    for name, rows in (("train_a.txt", "a\n"), ("val.txt", "b\n")):
+        (folder / name).write_text(rows, encoding="utf-8")
+    locked = run_dir.split_lock(list(folder.glob("*.txt")))
+    learnt = contract_front() | {"pitch": {"source": "swiftf0"}}
+    cfg = {"split": {"version": "v8"}, "listen": learnt, "listen_hash": 0}
+    monkeypatch.setattr(quant.data, "unbuilt", lambda _cfg, _paths: [])
+    heard = quant.contract_cfg(cfg, {"splits": tmp_path}, "v9", locked)
+    assert heard["split"]["version"] == "v9" and heard["listen"]["pitch"] == dict(listen.PITCH)
+    assert heard["listen_hash"] == listen.HASH and cfg["split"]["version"] == "v8"
+    (folder / "val.txt").write_text("c\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="not the split the run learnt on"):
+        quant.contract_cfg(cfg, {"splits": tmp_path}, "v9", locked)
+    (folder / "val.txt").write_text("b\n", encoding="utf-8")
+    monkeypatch.setattr(quant.data, "unbuilt", lambda _cfg, _paths: [Path("v9/test")])
+    with pytest.raises(ValueError, match="not the contract's front"):
+        quant.contract_cfg(cfg, {"splits": tmp_path}, "v9", locked)
+
+
+def test_a_ladder_heard_on_the_contract_keeps_a_folder_of_its_build(tmp_path: Path) -> None:
+    assert quant.Hearing(contract="v9").folder(tmp_path) == tmp_path / "int8_contract_v9"
+    assert quant.Hearing(hold="voicing", contract="v9").folder(tmp_path) == tmp_path / "int8_contract_v9_voicing"
+    with pytest.raises(ValueError, match="not both"):
+        quant.Hearing(kaldi=True, contract="v9")
+
+
 def test_a_deploy_record_names_the_hearing_its_row_was_built_on() -> None:
-    kaldi = quant.Hearing(kaldi=True, hold="voicing")
+    kaldi, contract = quant.Hearing(kaldi=True, hold="voicing"), quant.Hearing(contract="v9")
     assert quant.hearing_of(quant.heard_head(kaldi)) == kaldi
+    assert quant.hearing_of(quant.heard_head(contract)) == contract
+    assert quant.heard_head(contract) == {"heard": {"pitch": "contract", "hold": None, "build": "v9"}}
     assert quant.hearing_of({}) == quant.LEARNT == quant.hearing_of(quant.heard_head(quant.LEARNT))
 
 

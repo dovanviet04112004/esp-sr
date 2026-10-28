@@ -24,7 +24,7 @@ import yaml
 
 from srpipe.core import corpus
 from srpipe.core.audio_io import to_float
-from srpipe.core.config import data_paths, device_of, load_run_config, load_yaml, on_kaldi_pitch
+from srpipe.core.config import data_paths, device_of, load_run_config, load_yaml, on_contract_pitch, on_kaldi_pitch
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.stft import Stft
@@ -490,11 +490,17 @@ def main(argv: list[str] | None = None) -> int:
         help="ctc, rnnt: a command set file to score in place of "
         "default_vi.json, as the board runs the set the host gives it; the gate of KEHOACH 3.12 is the default's",
     )
-    parser.add_argument(
+    heard = parser.add_mutually_exclusive_group()
+    heard.add_argument(
+        "--contract-pitch",
+        action="store_true",
+        help="ctc, rnnt: hear the sessions through the contract's pitch, as the chip computes it, in place of the "
+        "pitch the run learnt on",
+    )
+    heard.add_argument(
         "--kaldi-pitch",
         action="store_true",
-        help="ctc, rnnt: hear the sessions through the contract's Kaldi pitch, as the board runs it, in place of the "
-        "pitch the run learnt on",
+        help="ctc, rnnt: hear the sessions through Kaldi's pitch, as the board ran it until 29/10",
     )
     parser.add_argument(
         "--hold",
@@ -512,6 +518,8 @@ def main(argv: list[str] | None = None) -> int:
     net = load_ctc(args.run, args.commands)
     if args.kaldi_pitch:
         net = replace(net, cfg=on_kaldi_pitch(net.cfg))
+    if args.contract_pitch:
+        net = replace(net, cfg=on_contract_pitch(net.cfg))
     forms = sum(len(v) for v in net.lexicon)
     said = f"{len(net.names)} commands of {args.commands.name}, {forms} variants"
     held_dims = f", {args.hold} held" if args.hold else ""

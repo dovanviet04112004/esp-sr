@@ -153,9 +153,9 @@ def test_gate_3_counts_the_chips_decisions_and_refuses_a_log_missing_a_window(tm
         probe.gate_on_chip(log, labels)
 
 
-def unchecked_body(clean: np.ndarray, vad: np.ndarray, tracker, mel) -> bytes:
+def unchecked_body(clean: np.ndarray, vad: np.ndarray, pitch_of, mel) -> bytes:
     """A session's record as listen_rounds writes it with the speaker check off, each window decided by its length."""
-    laid = probe.listen_session(clean, vad, lambda x: [len(x), 1, 2, 3, 4], tracker, mel)
+    laid = probe.listen_session(clean, vad, lambda x: [len(x), 1, 2, 3, 4], pitch_of, mel)
     return probe.session_body(clean, vad, laid, [(0, 0, probe.NO_CHECK, 0)] * len(laid[1]), False)
 
 
@@ -167,9 +167,12 @@ def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read(
     vad[50:80] = vad[second : second + 30] = vad[second + 36 : second + 50] = vad[total - 20 : total - 10] = True
     clean = rng.integers(-2000, 2000, total * hop).astype(np.int16)
     features = rng.normal(size=(total, listen.N_BANDS)).astype(np.float32)
-    tracker = SimpleNamespace(reset=lambda: None, step=lambda x: np.zeros(3, dtype=np.float32))
+
+    def pitch_of(fed: np.ndarray) -> np.ndarray:
+        return np.zeros((len(fed) // hop, 3), dtype=np.float32)
+
     mel = SimpleNamespace(log=lambda bins: np.zeros(listen.N_BANDS, dtype=np.float32))
-    body = unchecked_body(clean, vad, tracker, mel)
+    body = unchecked_body(clean, vad, pitch_of, mel)
     hops, n_segments, n_windows, enrol = probe.SESSION_HEAD.unpack_from(body)
     assert hops == total and n_windows == 2 and enrol == 0
     at = probe.SESSION_HEAD.size
@@ -191,7 +194,7 @@ def test_a_listen_session_keeps_vad_whole_and_only_the_samples_its_windows_read(
     assert at + n_windows * probe.WINDOW_RECORD.size == len(body)
     vad[total - 20 : total] = True
     session = gate.with_silence(clean, vad, features, mel)
-    body = unchecked_body(session[0], session[1], tracker, mel)
+    body = unchecked_body(session[0], session[1], pitch_of, mel)
     hops, _, n_windows, _ = probe.SESSION_HEAD.unpack_from(body)
     last = probe.WINDOW_RECORD.unpack_from(body, len(body) - probe.WINDOW_RECORD.size)
     assert hops == total + listen.UTTERANCE_GAP_HOPS + 1 and n_windows == 3

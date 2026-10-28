@@ -1,9 +1,9 @@
 """The quantisation ladder of the ctc net (KEHOACH 3.14, ADR-0013). Run: python -m srpipe.tasks.command.ctc.quant
-ptq|int16|qat|timing <run> | same-int8 <run> [--against <commit>] | thresholds|deploy <run> --row <row> [--kaldi-pitch]
-[--hold <dim>]: rungs 1 to 4, each row's unit error rate and Gate 3 after int8 beside float in <run>/int8/ladder.yaml,
-its graph under <run>/int8/<row>/ for probe.py as the timing row's (3.14 step 2.1); heard on the board's Kaldi pitch,
-a dim folded at its mean, under <run>/int8_kaldi_<dim>/. same-int8 holds the net to a commit's (step 2.4); thresholds
-picks a row's deltas; deploy puts graph and pair into firmware/models/command/ and locks them (E11-T19)."""
+ptq|int16|qat|timing <run> | same-int8 <run> [--against <commit>] | thresholds|deploy <run> --row <row>, with
+[--contract-pitch <build> | --kaldi-pitch] [--hold <dim>]: rungs 1 to 4, each row's unit error rate and Gate 3 after
+int8 beside float in <run>/int8/ladder.yaml, a graph a row under it; heard on another pitch, a dim folded at its mean,
+under <run>/int8_contract_<build>/ or <run>/int8_kaldi_<dim>/. same-int8 holds the net to a commit's (step 2.4);
+thresholds picks a row's deltas; deploy puts graph and pair into firmware/models/command/ and locks them (E11-T19)."""
 
 from __future__ import annotations
 
@@ -21,8 +21,8 @@ from torch import nn
 from torch.nn import functional
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, ptq_espdl, qat_espdl
-from srpipe.core import corpus, extract, screen, splits
-from srpipe.core.config import apply_overrides, data_paths, load_yaml, on_kaldi_pitch
+from srpipe.core import corpus, extract, run_dir, screen, splits
+from srpipe.core.config import apply_overrides, data_paths, load_yaml, on_contract_pitch, on_kaldi_pitch
 from srpipe.dsp.spec import pitch
 from srpipe.export import update_lock
 from srpipe.generated import listen
@@ -50,6 +50,18 @@ def kaldi_cfg(cfg: dict, paths: dict) -> dict:
     heard = on_kaldi_pitch(cfg) | {"split": cfg["split"] | {"version": source}, "listen_hash": listen.HASH}
     if stale := data.unbuilt(heard, paths):
         raise ValueError(f"{', '.join(str(p) for p in stale)}: not the contract's front over the split, as {source}")
+    return heard
+
+
+def contract_cfg(cfg: dict, paths: dict, build: str, split_lock: str) -> dict:
+    """cfg on the contract's pitch as the chip computes it, its sentences read from build; refused unless build lists
+    the split the run learnt on, as its split_lock holds it, simulated on the contract's front (KEHOACH 3.14)."""
+    folder = paths["splits"] / "command" / build
+    if run_dir.split_lock(list(folder.glob("*.txt"))) != split_lock:
+        raise ValueError(f"{folder}: not the split the run learnt on")
+    heard = on_contract_pitch(cfg) | {"split": cfg["split"] | {"version": build}, "listen_hash": listen.HASH}
+    if stale := data.unbuilt(heard, paths):
+        raise ValueError(f"{', '.join(str(p) for p in stale)}: not the contract's front over the split, as {build}")
     return heard
 
 
@@ -88,20 +100,29 @@ class CopiedFront(nn.Module):
 
 @dataclass(frozen=True)
 class Hearing:
-    """The pitch a ladder hears its run on: the one the run learnt, or the contract's Kaldi pitch as the board gives
-    it, with the pitch dims gate.HOLDS names under hold folded at their train mean; its front a CopiedFront, the
-    rewrite for esp-dl that changes no sum (KEHOACH 3.14)."""
+    """The pitch a ladder hears its run on: the one the run learnt, the contract's as the chip computes it on build
+    contract, or Kaldi's as the board gave it until 29/10, with the pitch dims gate.HOLDS names under hold folded at
+    their train mean; its front a CopiedFront, the rewrite for esp-dl that changes no sum (KEHOACH 3.14)."""
 
     kaldi: bool = False
     hold: str | None = None
+    contract: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kaldi and self.contract:
+            raise ValueError("a ladder hears the contract's pitch or Kaldi's, not both")
 
     def folder(self, run: Path) -> Path:
-        return run / "_".join(["int8", *(["kaldi"] if self.kaldi else []), *([self.hold] if self.hold else [])])
+        heard = ["contract", self.contract] if self.contract else ["kaldi"] if self.kaldi else []
+        return run / "_".join(["int8", *heard, *([self.hold] if self.hold else [])])
 
     def net(self, run: Path, paths: dict) -> gate.Ctc:
         net = gate.load_ctc(run)
         if self.kaldi:
             net = replace(net, cfg=kaldi_cfg(net.cfg, paths))
+        if self.contract:
+            locked = (run / "split.lock").read_text(encoding="utf-8")
+            net = replace(net, cfg=contract_cfg(net.cfg, paths, self.contract, locked))
         net = folded(net, gate.HOLDS[self.hold]) if self.hold else net
         net.model.front = CopiedFront(net.model.front)
         return net
@@ -335,13 +356,15 @@ def best_calibration(run: Path, calibrations: list[str], tie: int, hearing: Hear
 
 
 def heard_head(hearing: Hearing) -> dict:
-    return {"heard": {"pitch": "kaldi" if hearing.kaldi else "learnt", "hold": hearing.hold}}
+    pitch = "contract" if hearing.contract else "kaldi" if hearing.kaldi else "learnt"
+    built = {"build": hearing.contract} if hearing.contract else {}
+    return {"heard": {"pitch": pitch, "hold": hearing.hold} | built}
 
 
 def hearing_of(record: dict) -> Hearing:
     """The hearing a ladder head or a deploy record names under heard, the run's own pitch when it names none."""
     heard = record.get("heard") or {}
-    return Hearing(heard.get("pitch") == "kaldi", heard.get("hold"))
+    return Hearing(heard.get("pitch") == "kaldi", heard.get("hold"), heard.get("build"))
 
 
 def step_ptq(cfg: dict, run: Path, hearing: Hearing = LEARNT) -> Path:
@@ -400,7 +423,8 @@ def same_int8(cfg: dict, run: Path, against: str, method: str | None, hearing: H
     root = paths["processed"] / "command" / net.cfg["split"]["version"]
     spans = calibration(cfg["quant"], net.mean, net.std, root)
     rungs = ptq_espdl.ladder(LADDER) | ({"calibration": method} if method else {})
-    nets = [old.Hearing(hearing.kaldi, hearing.hold).net(run, paths).model, net.model]
+    heard = {"contract": hearing.contract} if hearing.contract else {}
+    nets = [old.Hearing(hearing.kaldi, hearing.hold, **heard).net(run, paths).model, net.model]
     inputs = [s.numpy() for s in spans[n : 2 * n]]
     return ptq_espdl.same_integers(nets, spans[:n], inputs, rungs, cfg["esp_ppq_patches"])
 
@@ -604,13 +628,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--against", default="HEAD", help="same-int8: the commit whose network code is held to")
     parser.add_argument("--calibration", help="same-int8: one of quant.calibrations; the ladder's default otherwise")
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
-    parser.add_argument(
-        "--kaldi-pitch", action="store_true", help="hear the run on the contract's Kaldi pitch, as the board gives it"
+    heard = parser.add_mutually_exclusive_group()
+    heard.add_argument(
+        "--contract-pitch", metavar="BUILD", help="hear the run on the contract's pitch, its sentences from this build"
     )
+    heard.add_argument("--kaldi-pitch", action="store_true", help="hear the run on Kaldi's pitch, as the board gave it")
     parser.add_argument("--hold", choices=sorted(gate.HOLDS), help="pitch dims folded at the run's train mean")
     args = parser.parse_args(argv)
     cfg = apply_overrides(load_yaml(ctc.CONFIG), args.overrides)
-    hearing = Hearing(args.kaldi_pitch, args.hold)
+    hearing = Hearing(args.kaldi_pitch, args.hold, args.contract_pitch)
     if args.step in ("thresholds", "deploy") and args.row is None:
         parser.error(f"{args.step} needs --row")
     if args.step == "thresholds":

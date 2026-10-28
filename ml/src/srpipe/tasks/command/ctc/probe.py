@@ -24,7 +24,6 @@ from srpipe.core.audio_io import to_float
 from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, device_of, load_yaml
 from srpipe.dsp.spec import spk_fbank
 from srpipe.dsp.spec.mel import Mel, MelConfig
-from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
 from srpipe.dsp.spec.stft import Stft
 from srpipe.export import pack_models, update_lock
 from srpipe.generated import grid, listen, speaker
@@ -309,7 +308,7 @@ def probe(
 
 
 def listen_session(
-    clean: np.ndarray, vad: np.ndarray, decided_of: Callable, tracker, mel: Mel
+    clean: np.ndarray, vad: np.ndarray, decided_of: Callable, pitch_of: Callable, mel: Mel
 ) -> tuple[list[list[int]], list[tuple[int, int]], list[list[int]], list[int]]:
     """A board session with the silence eval.heard_rows puts after it, as svc_listen's test feeds it: the segments of
     every hop a command window reads and the hop ahead of it, which the STFT of the window's first hop overlaps, each
@@ -330,7 +329,7 @@ def listen_session(
         fed[first * hop : (last + 1) * hop] = clean[first * hop : (last + 1) * hop]
     stft = Stft()
     features = np.stack([mel.log(stft.analyze(to_float(h))) for h in fed.reshape(-1, hop)]).astype(np.float32)
-    windows = gate.ctc_windows(features, device.stream_pitch(tracker, fed), spans)
+    windows = gate.ctc_windows(features, pitch_of(fed), spans)
     return segments, ranges, [list(decided_of(x)) for x in windows], [first for first, _ in spans]
 
 
@@ -459,7 +458,7 @@ def listen_rounds(cfg: dict, out: Path, speaker_on: bool = False) -> list[Path]:
     int8 = quant.Int8Net(graph, cfg["quant"]["hops"], trained.mean, trained.std, trained.model, cfg["esp_ppq_patches"])
     reject, margin = cfg["quant"]["reject"], cfg["eval"]["margin"]
     lexicon, per_frames = ctc_score.default_lexicon(), ctc_score.window_frames(trained.model.front.hop_stride)
-    tracker = PitchTracker(PitchConfig(**device_of(trained.cfg)["pitch"]))
+    pitch_of = device.pitch_of(device_of(trained.cfg)["pitch"])
     mel = Mel(MelConfig(**device_of(trained.cfg)["features"]))
 
     def decided_of(x: np.ndarray) -> list[int]:
@@ -477,7 +476,7 @@ def listen_rounds(cfg: dict, out: Path, speaker_on: bool = False) -> list[Path]:
     named = b"".join(c["id"].encode() + b"\0" + c["text"].encode() + b"\0" for c in listed)
     named += b"\0" * (-(LISTEN_HEAD.size + len(named)) % 4)
     sessions = [(row, clean, vad) for row, clean, vad, _f, _p in gate.heard_sessions(trained.cfg, spec, data_paths())]
-    laid = [listen_session(clean, vad, decided_of, tracker, mel) for _, clean, vad in sessions]
+    laid = [listen_session(clean, vad, decided_of, pitch_of, mel) for _, clean, vad in sessions]
     checks = [[(0, 0, NO_CHECK, 0)] * len(layout[1]) for layout in laid]
     bodies = [
         session_body(clean, vad, layout, checked, False)
@@ -531,7 +530,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--work", type=Path, default=ML_ROOT / "artifacts" / "command_ctc" / "probe")
     parser.add_argument("--run", type=Path, help="stream a row of this trained run's ladder instead of random weights")
     parser.add_argument("--row", help="the row of <run>/int8/ladder.yaml whose graph streams")
-    parser.add_argument("--kaldi-pitch", action="store_true", help="the row of the run's ladder on Kaldi's pitch")
+    heard = parser.add_mutually_exclusive_group()
+    heard.add_argument("--contract-pitch", metavar="BUILD", help="the row of the run's ladder on the contract's pitch")
+    heard.add_argument("--kaldi-pitch", action="store_true", help="the row of the run's ladder on Kaldi's pitch")
     parser.add_argument("--hold", choices=sorted(gate.HOLDS), help="the row of the ladder with these pitch dims folded")
     parser.add_argument("--gate-log", type=Path, help="count Gate 3 on the chip's decisions in this unit app log")
     parser.add_argument("--listen", action="store_true", help="write svc_listen's rounds of Gate 3 sessions instead")
@@ -548,7 +549,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if (args.run is None) != (args.row is None):
         parser.error("--run and --row go together")
-    hearing = quant.Hearing(args.kaldi_pitch, args.hold)
+    hearing = quant.Hearing(args.kaldi_pitch, args.hold, args.contract_pitch)
     for path in probe(
         load_yaml(ctc.CONFIG), args.out, args.work, args.run, args.row, hearing, args.net_only, args.in_flash
     ):

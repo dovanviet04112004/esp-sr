@@ -329,19 +329,20 @@ ctc-tone-flip: ## The tone checks of KEHOACH 3.11 into <run>/tone_flip_<check>.y
 
 ##@ Command: ctc int8 ladder (KEHOACH 3.14)
 
-# KALDI=1 hears a run on the board's Kaldi pitch, HOLD folds that pitch dim at its train mean; each ladder step then
-# writes into <run>/int8_kaldi_<hold>/.
-CTC_HEARD = $(if $(KALDI),--kaldi-pitch) $(if $(HOLD),--hold $(HOLD))
+# CONTRACT=<build> hears a run on the contract's pitch, its sentences from that build of the run's split, KALDI=1 on
+# Kaldi's as the board ran it until 29/10, and HOLD folds a pitch dim at its train mean; each ladder step then writes
+# into <run>/int8_contract_<build>/ or <run>/int8_kaldi_<hold>/.
+CTC_HEARD = $(if $(CONTRACT),--contract-pitch $(CONTRACT)) $(if $(KALDI),--kaldi-pitch) $(if $(HOLD),--hold $(HOLD))
 CTC_QUANT = $(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant
 
 .PHONY: ctc-ptq ctc-int16 ctc-qat ctc-thresholds ctc-deploy ctc-timing ctc-same-int8
-ctc-ptq: ## Rungs 1 and 2: each calibration beside float: RUN=<run> [KALDI=1] [HOLD=voicing|f0|pitch] (E11-T12)
+ctc-ptq: ## Rungs 1 and 2: each calibration beside float: RUN=<run> [CONTRACT=<build> | KALDI=1] [HOLD=voicing|f0|pitch] (E11-T12)
 	$(CTC_QUANT) ptq $(RUN) $(CTC_HEARD)
 
-ctc-int16: ## Rung 3: the convolutions ESP-PPQ ranks worst at 16 bits, on ctc-ptq's best: RUN=<run> [KALDI=1] [HOLD=]
+ctc-int16: ## Rung 3: the convolutions ESP-PPQ ranks worst at 16 bits, on ctc-ptq's best: RUN=<run> [CONTRACT=<build> | KALDI=1] [HOLD=]
 	$(CTC_QUANT) int16 $(RUN) $(CTC_HEARD)
 
-ctc-qat: ## Rung 4: QAT on the GPU from ctc-ptq's best calibration: RUN=<run> [KALDI=1] [HOLD=] (E11-T12)
+ctc-qat: ## Rung 4: QAT on the GPU from ctc-ptq's best calibration: RUN=<run> [CONTRACT=<build> | KALDI=1] [HOLD=] (E11-T12)
 	$(ML) --extra train --extra espdl python -m srpipe.tasks.command.ctc.quant qat $(RUN) $(CTC_HEARD)
 
 ctc-thresholds: ## Choose delta1..3 of a ladder row on val_commands and val, as the chip decides: RUN=<run> ROW=<row> (E11-T13)
@@ -350,10 +351,10 @@ ctc-thresholds: ## Choose delta1..3 of a ladder row on val_commands and val, as 
 ctc-deploy: ## Export a ladder row and its thresholds into firmware/models/command and lock them: RUN=<run> ROW=<row> (E11-T19)
 	$(CTC_QUANT) deploy $(RUN) --row $(ROW) $(CTC_HEARD)
 
-ctc-timing: ## Step 2.1 of KEHOACH 3.14's procedure: the timing row beside the ladder's rows: RUN=<run> [KALDI=1] [HOLD=]
+ctc-timing: ## Step 2.1 of KEHOACH 3.14's procedure: the timing row beside the ladder's rows: RUN=<run> [CONTRACT=<build> | KALDI=1] [HOLD=]
 	$(CTC_QUANT) timing $(RUN) $(CTC_HEARD)
 
-ctc-same-int8: ## Step 2.4: the net as quant.py hears it now and at AGAINST, same integers: RUN=<run> [AGAINST=HEAD] [CALIB=] [KALDI=1] [HOLD=]
+ctc-same-int8: ## Step 2.4: the net as quant.py hears it now and at AGAINST, same integers: RUN=<run> [AGAINST=HEAD] [CALIB=] [CONTRACT=<build> | KALDI=1] [HOLD=]
 	$(CTC_QUANT) same-int8 $(RUN) --against $(or $(AGAINST),HEAD) $(if $(CALIB),--calibration $(CALIB)) $(CTC_HEARD)
 
 SPEED_LOG_ctc = $(UNIT_APP)/build_ctc/unit.log
@@ -368,10 +369,12 @@ rnnt-ptq: ## Rung 2: three graphs with each calibration, Gate 3 after int8 besid
 ##@ Command: Gate 3 (E11-T13, E11-T17)
 
 .PHONY: command-eval
-# SET is a command set file from the repo root; KALDI=1 hears a pitch_source run through the board's Kaldi pitch;
-# HOLD puts those pitch dims at the run's train mean.
-command-eval: ## Score Gate 3 of a track on the board sessions: TRACK=kws|ctc|rnnt RUN=<run> [SET=] [KALDI=1] [HOLD=voicing|f0|pitch]
-	$(ML) --extra train --extra swiftf0 python -m srpipe.tasks.command.eval $(TRACK) $(RUN) $(if $(SET),--commands $(abspath $(SET))) $(if $(KALDI),--kaldi-pitch) $(if $(HOLD),--hold $(HOLD))
+# SET is a command set file from the repo root; CONTRACT=<build> hears a run through the contract's pitch as the chip
+# computes it, the build read only by the ladder; KALDI=1 through Kaldi's as the board ran it until 29/10; HOLD puts
+# those pitch dims at the run's train mean.
+command-eval: ## Score Gate 3 of a track on the board sessions: TRACK=kws|ctc|rnnt RUN=<run> [SET=] [CONTRACT=<build> | KALDI=1] [HOLD=voicing|f0|pitch]
+	$(ML) --extra train --extra espdl --extra swiftf0 python -m srpipe.tasks.command.eval $(TRACK) $(RUN) $(if $(SET),--commands $(abspath $(SET))) \
+	  $(if $(CONTRACT),--contract-pitch) $(if $(KALDI),--kaldi-pitch) $(if $(HOLD),--hold $(HOLD))
 
 ##@ Noise suppression: ns candidates (E9-T3, E9-T4)
 
@@ -620,7 +623,7 @@ ai-unit-rnnt: ## Run the rnnt build of the ai_engine suite on board B [RNNT_RUN=
 
 # A row of the ctc ladder goes to model slot 0 with one of its layers; each streams a chunk a step, checked against
 # Python bit for bit and timed module by module; slot 0 ends erased.
-ai-unit-ctc: ## Run the ctc build of the ai_engine suite on board B: RUN=<run> ROW=<row of its ladder> [KALDI=1] [HOLD=] [IN_FLASH=1] (E11-T30)
+ai-unit-ctc: ## Run the ctc build of the ai_engine suite on board B: RUN=<run> ROW=<row of its ladder> [CONTRACT=<build> | KALDI=1] [HOLD=] [IN_FLASH=1] (E11-T30)
 	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.command.ctc.probe --run $(RUN) --row $(ROW) --net-only \
 	  $(CTC_HEARD) $(if $(IN_FLASH),--in-flash)
 	@$(call fresh_sdkconfig,$(UNIT_APP)/build_ctc/sdkconfig,$(call app_defaults,$(UNIT_APP)))
