@@ -153,6 +153,12 @@ def test_gate_3_counts_the_chips_decisions_and_refuses_a_log_missing_a_window(tm
         probe.gate_on_chip(log, labels)
 
 
+def test_a_session_waits_out_the_pitch_dims_of_its_last_hop_only_with_a_pitch_model() -> None:
+    """3 front hops, 7 of the CNN's confidence, 25 of swift_dims's look-ahead, 15 of a 16-frame call (KEHOACH 3.11)."""
+    assert probe.pitch_lag_hops({"command": {}}) == 0
+    assert probe.pitch_lag_hops({"pitch": {"delays": {"logits": 6, "confidence": 7}, "step_frames": 16}}) == 50
+
+
 def unchecked_body(clean: np.ndarray, vad: np.ndarray, pitch_of, mel) -> bytes:
     """A session's record as listen_rounds writes it with the speaker check off, each window decided by its length."""
     laid = probe.listen_session(clean, vad, lambda x: [len(x), 1, 2, 3, 4], pitch_of, mel)

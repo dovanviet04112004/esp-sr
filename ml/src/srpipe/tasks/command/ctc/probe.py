@@ -22,7 +22,7 @@ from torch import nn
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
 from srpipe.core.audio_io import to_float
 from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, device_of, load_yaml
-from srpipe.dsp.spec import spk_fbank
+from srpipe.dsp.spec import spk_fbank, swift_dims, swift_front
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.stft import Stft
 from srpipe.export import pack_models, update_lock
@@ -441,13 +441,24 @@ def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> l
     return out
 
 
+def pitch_lag_hops(models: dict) -> int:
+    """The most hops svc_listen's pitch dims trail a hop by with the lock's pitch model, none without one: the front's
+    delay, the CNN's confidence delay, swift_dims's look-ahead and a call's frames less one (KEHOACH 3.11 step 3.4)."""
+    if (pitch := models.get("pitch")) is None:
+        return 0
+    ahead = swift_dims.DimsConfig.of(listen.PITCH).right_frames
+    return swift_front.DELAY_HOPS + pitch["delays"]["confidence"] + ahead + pitch["step_frames"] - 1
+
+
 def listen_rounds(cfg: dict, out: Path, speaker_on: bool = False) -> list[Path]:
-    """Every Gate 3 session through svc_listen as listen_session lays it out, decided by the locked command model's
-    int8 simulation at quant.reject and eval.margin; sessions grouped into rounds, a round one record each in the
-    partitions of LISTEN_PARTITIONS, as listen_<round>_<partition>.bin. speaker_on turns the speaker check on from the
-    first round, its voiceprint erased, and enrols ahead of enrolment_session's session (speaker_checks). Refused while
-    the lock holds a model of another listen.yaml, which ai_engine leaves off (KEHOACH 6.3)."""
-    lock = json.loads(update_lock.LOCK.read_text(encoding="utf-8"))["models"]["command"]
+    """Every Gate 3 session through svc_listen as listen_session lays it out, pitch_lag_hops of silence more after it,
+    decided by the locked command model's int8 simulation at quant.reject and eval.margin; sessions grouped into
+    rounds, a round one record each in the partitions of LISTEN_PARTITIONS, as listen_<round>_<partition>.bin.
+    speaker_on turns the speaker check on from the first round, its voiceprint erased, and enrols ahead of
+    enrolment_session's session (speaker_checks). Refused while the lock holds a model of another listen.yaml, which
+    ai_engine leaves off (KEHOACH 6.3)."""
+    models = json.loads(update_lock.LOCK.read_text(encoding="utf-8"))["models"]
+    lock = models["command"]
     if (learnt := lock.get("listen_hash")) != f"0x{listen.HASH:08x}":
         raise ValueError(f"the locked command learned on listen hash {learnt}, svc_listen cuts by 0x{listen.HASH:08x}")
     meta = json.loads((update_lock.MODELS / "command" / "meta.json").read_text(encoding="utf-8"))
@@ -475,7 +486,11 @@ def listen_rounds(cfg: dict, out: Path, speaker_on: bool = False) -> list[Path]:
     listed = json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
     named = b"".join(c["id"].encode() + b"\0" + c["text"].encode() + b"\0" for c in listed)
     named += b"\0" * (-(LISTEN_HEAD.size + len(named)) % 4)
-    sessions = [(row, clean, vad) for row, clean, vad, _f, _p in gate.heard_sessions(trained.cfg, spec, data_paths())]
+    tail = pitch_lag_hops(models)
+    sessions = [
+        (row, np.pad(clean, (0, tail * grid.HOP_SAMPLES)), np.pad(vad, (0, tail)))
+        for row, clean, vad, _f, _p in gate.heard_sessions(trained.cfg, spec, data_paths())
+    ]
     laid = [listen_session(clean, vad, decided_of, pitch_of, mel) for _, clean, vad in sessions]
     checks = [[(0, 0, NO_CHECK, 0)] * len(layout[1]) for layout in laid]
     bodies = [
