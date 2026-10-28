@@ -28,6 +28,7 @@ from .ops.band_block import band_block
 from .ops.band_chain import band_chain
 from .ops.band_head import band_head
 from .ops.band_stem import band_stem
+from .ops.band_tail import band_stream
 from .ops.conv_block import conv_block
 from .ops.global_stats import global_stats
 from .ops.group_norm_s8 import group_norm_s8
@@ -114,6 +115,7 @@ PATCHES = {
     "band_head": band_head,
     "band_stem": band_stem,
     "band_chain": band_chain,
+    "band_stream": band_stream,
 }
 
 

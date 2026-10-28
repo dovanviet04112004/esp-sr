@@ -20,6 +20,40 @@ def calib(rng: np.random.Generator) -> list:
     return [torch.from_numpy(rng.normal(0, 1, (1, BANDS, HOPS)).astype(np.float32)) for _ in range(4)]
 
 
+TAIL_BANDS, TAIL_FRAMES, TAIL_SLICED, TAIL_TAPS = 24, 40, 20, 3
+
+
+class Tail(nn.Module):
+    """SwiftF0 without its blocks: a stem, then the head's pitch logits and peaks, and the confidence from the peaks
+    beside the input's level, as SwiftF0Net computes them."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stem = nn.Conv2d(3, 12, 3, padding=1)
+        self.head = nn.Conv2d(12, 4, 3)
+        self.spread = nn.Conv2d(4, 4, (5, 1), padding=(2, 0))
+        self.pitch = nn.Conv2d(4, 1, 1)
+        self.hidden = nn.Conv1d(5, 16, TAIL_TAPS, padding=1)
+        self.confidence = nn.Conv1d(16, 1, 1)
+
+    def forward(self, spectra: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        x = torch.relu(self.stem(spectra))
+        h = torch.relu(self.head(nn.functional.pad(x[:, :, :TAIL_SLICED], (1, 1, 1, 0))))
+        peaks = self.spread(h).amax(dim=2)
+        level = spectra.mean(dim=(1, 2))[:, None]
+        confidence = self.confidence(torch.relu(self.hidden(torch.cat([peaks, level], dim=1))))
+        return self.pitch(h)[:, 0], confidence[:, 0]
+
+
+def tail_calib(rng: np.random.Generator) -> list:
+    """Spectra for Tail: a small offset a frame moves the level frame to frame, on the peaks' exponent."""
+    shape = (1, 3, TAIL_BANDS, TAIL_FRAMES)
+    offsets = (1, 1, 1, TAIL_FRAMES)
+    return [
+        torch.from_numpy((rng.normal(0, 1, shape) + rng.normal(0, 0.05, offsets)).astype(np.float32)) for _ in range(2)
+    ]
+
+
 def export_info(graph, out: Path, patches: list[str], streaming_input_shape: list[int] | None = None) -> str:
     with esp_ppq_patches.applied(patches):
         path = export_espdl.export(graph, out, streaming_input_shape=streaming_input_shape)
