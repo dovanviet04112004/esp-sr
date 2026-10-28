@@ -1148,7 +1148,8 @@ CNN còn 1,675 ms mỗi hop, khớp từng bit (`measurements/pitch.md` §6). Ch
 **Bước 3, đường chip.** Năm phần theo thứ tự, mỗi phần qua mốc của nó mới sang phần sau.
 
 3.1 **Front end ở `dsp_spec`** (`dsp_spec/swift_front.{h,c}`, bản soi gương `srpipe.dsp.spec.swift_front`):
-- Mỗi hop nhận 256 mẫu sạch. Khung của hop h căn giữa ở mẫu đầu hop, nên ra khi đã có 1 024 mẫu sau đó: trễ 4 hop.
+- Mỗi hop nhận 256 mẫu sạch. Khung của hop h căn giữa ở mẫu đầu hop, nên ra khi đã có 1 024 mẫu sau đó: ra lúc
+  nhận hop h + 3, trễ 3 hop.
 - Ba STFT 1 024, 2 048 và 512 điểm, theo thứ tự kênh của mạng, trên FFT cơ số 4 của `dsp_spec`:
   - cửa sổ Hann tuần hoàn, số 0 trước đầu luồng;
   - biên độ bằng `sqrtf`;
@@ -1180,7 +1181,7 @@ CNN còn 1,675 ms mỗi hop, khớp từng bit (`measurements/pitch.md` §6). Ch
 - Mốc: bộ vàng khớp.
 
 3.4 **`svc_listen` và `command`.**
-- Cột cao độ đến muộn hơn log-mel 36 khung: 4 khung của STFT, 7 của CNN, 25 của 0,4 s nhìn sau. Cửa sổ `command` đọc
+- Cột cao độ đến muộn hơn log-mel 35 khung: 3 khung của STFT, 7 của CNN, 25 của 0,4 s nhìn sau. Cửa sổ `command` đọc
   log-mel và cao độ đã thẳng hàng.
 - Quyết định chậm thêm phần trễ vượt 0,4 s `utterance.gap_s`, cỡ 0,18 s. Con số ấy đo lại trên board.
 - `command` dùng run v8 đã học trên cao độ SwiftF0, không giữ chiều nào, với `listen_hash` của front mới trong
