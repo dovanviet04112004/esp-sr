@@ -585,9 +585,9 @@ ai-unit-rnnt: ## Run the rnnt build of the ai_engine suite on board B [RNNT_RUN=
 
 # A row of the ctc ladder goes to model slot 0 with one of its layers; each streams a chunk a step, checked against
 # Python bit for bit and timed module by module; slot 0 ends erased.
-ai-unit-ctc: ## Run the ctc build of the ai_engine suite on board B: RUN=<run> ROW=<row of its ladder> [KALDI=1] [HOLD=] (E11-T30)
+ai-unit-ctc: ## Run the ctc build of the ai_engine suite on board B: RUN=<run> ROW=<row of its ladder> [KALDI=1] [HOLD=] [IN_FLASH=1] (E11-T30)
 	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.command.ctc.probe --run $(RUN) --row $(ROW) --net-only \
-	  $(CTC_HEARD)
+	  $(CTC_HEARD) $(if $(IN_FLASH),--in-flash)
 	@$(call fresh_sdkconfig,$(UNIT_APP)/build_ctc/sdkconfig,$(call app_defaults,$(UNIT_APP)))
 	cd $(UNIT_APP) && rm -f build_ctc/unit.status && idf.py -B build_ctc -D SDKCONFIG=build_ctc/sdkconfig -D UNIT_PROFILE=ctc build && \
 	  $(WRITE_PART) models_0 --input main/probe/ctc_models.bin && \

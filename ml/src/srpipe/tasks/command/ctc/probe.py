@@ -235,13 +235,14 @@ def probe(
     row: str | None = None,
     hearing=quant.LEARNT,
     net_only: bool = False,
+    in_flash: bool = False,
 ) -> tuple[Path, ...]:
     """Write out/ctc_models.bin and out/ctc_streams.bin: the first stack's layer a frame a step, the net a chunk a
-    step, work keeping each ONNX and .espdl; out/ctc_decide.bin, the decision of the default commands (E11-T13); and
-    out/ctc_windows.bin, windows through the command calls. With run, the net is the graph of row in its ladder of
-    hearing, streaming a test sentence, and the windows are the board's; out/ctc_gate_<round>.bin then hold every
-    Gate 3 window, a round the voice partition takes, and out/ctc_gate.json what each should get, for the on-chip
-    Gate 3; without run none is left. net_only writes the first two alone, all make ai-unit-ctc runs."""
+    step, work keeping each ONNX and .espdl; out/ctc_decide.bin, the default commands' decision (E11-T13); and
+    out/ctc_windows.bin, windows through the command calls. With run, the net is row's graph in its ladder of hearing,
+    streaming a test sentence, the windows the board's, and out/ctc_gate_<round>.bin hold every Gate 3 window, a round
+    the voice partition takes, out/ctc_gate.json what each should get, for the on-chip Gate 3; without run none is left.
+    net_only writes the first two alone, all make ai-unit-ctc runs; in_flash flags the net IN_FLASH (ADR-0028)."""
     if cfg["probe"]["hops"] % cfg["chunk_hops"] or cfg["quant"]["hops"] % cfg["chunk_hops"]:
         raise ValueError(f"probe and quant hops must be multiples of chunk_hops {cfg['chunk_hops']}")
     scales, p, rungs = cfg["probe"]["norm_scale"], cfg["probe"], ptq_espdl.ladder(quant.LADDER)
@@ -278,7 +279,8 @@ def probe(
     built.append((NET_ENTRY, probe_net(net_graph, NET_ENTRY, cfg["chunk_hops"], cfg, work, net_x)))
     out.mkdir(parents=True, exist_ok=True)
     image = out / MODELS_FILE
-    entries = [pack_models.Entry(name, "espdl", espdl) for name, (espdl, _) in built]
+    flags = {NET_ENTRY: pack_models.IN_FLASH if in_flash else 0}
+    entries = [pack_models.Entry(name, "espdl", espdl, flags.get(name, 0)) for name, (espdl, _) in built]
     entries.append(pack_models.Entry(NET_ENTRY, "norm", np.concatenate(norm).astype("<f4").tobytes()))
     image.write_bytes(pack_models.pack(entries, listen_hash=listen_hash))
     streams = out / STREAMS_FILE
@@ -535,6 +537,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--listen", action="store_true", help="write svc_listen's rounds of Gate 3 sessions instead")
     parser.add_argument("--speaker", action="store_true", help="with --listen, the rounds with the speaker check on")
     parser.add_argument("--net-only", action="store_true", help="only the streamed nets, as make ai-unit-ctc runs them")
+    parser.add_argument("--in-flash", action="store_true", help="the net's graph left in flash, its tensors in PSRAM")
     args = parser.parse_args(argv)
     if args.gate_log:
         print(gate_on_chip(args.gate_log, args.out / GATE_LABELS))
@@ -546,7 +549,9 @@ def main(argv: list[str] | None = None) -> int:
     if (args.run is None) != (args.row is None):
         parser.error("--run and --row go together")
     hearing = quant.Hearing(args.kaldi_pitch, args.hold)
-    for path in probe(load_yaml(ctc.CONFIG), args.out, args.work, args.run, args.row, hearing, args.net_only):
+    for path in probe(
+        load_yaml(ctc.CONFIG), args.out, args.work, args.run, args.row, hearing, args.net_only, args.in_flash
+    ):
         print(f"{path}: {path.stat().st_size} bytes")
     return 0
 
