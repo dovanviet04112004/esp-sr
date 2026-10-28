@@ -5,7 +5,13 @@ network, float32 on int8 logits with tables built in double and rounded, as the 
 
 from __future__ import annotations
 
+import argparse
+from pathlib import Path
+
 import numpy as np
+
+from srpipe.core.config import ML_ROOT, contract_front
+from srpipe.golden.gold import write_gold
 
 F_MIN_HZ, F_MAX_HZ = 46.875, 2093.75
 PITCH_BINS = 95
@@ -13,6 +19,10 @@ STEPS_HZ = (F_MIN_HZ * (F_MAX_HZ / F_MIN_HZ) ** (np.arange(PITCH_BINS) / (PITCH_
 STEPS_LOG = np.log(STEPS_HZ.astype(np.float64))
 NEIGHBOURS = np.arange(-1, 2)
 INT8_STEPS = 256
+GOLDEN_ROOT = ML_ROOT.parent / "contracts" / "golden"
+BLOCK = "pitch_decode"
+SEED = 20261029
+GOLDEN_FRAMES = 64
 
 
 def decode(
@@ -62,3 +72,68 @@ def decode_int8(
     log_f0 = ((e[0] / total) * steps[0] + (e[1] / total) * steps[1]) + (e[2] / total) * steps[2]
     sure_at = sigmoid_table(sure_exponent)[np.asarray(sure, np.int64) + INT8_STEPS // 2]
     return log_f0, np.where(inside[q.argmax(axis=0)], sure_at, np.float32(0.0))
+
+
+def case(logits, logit_exponent: int, sure, sure_exponent: int, range_hz, off_exponent: int = 0) -> dict:
+    """The int8 logits and confidence logits, their exponents, the range, and decode_int8's log F0 and confidence;
+    off_exponent decodes the logits at another exponent than the one stated, a negative control."""
+    log_f0, confidence = decode_int8(logits, logit_exponent + off_exponent, sure, sure_exponent, *range_hz)
+    return {
+        "logits": np.asarray(logits, np.int8),
+        "sure": np.asarray(sure, np.int8),
+        "exponents": np.array([logit_exponent, sure_exponent], np.int32),
+        "range_hz": np.array(range_hz, np.float32),
+        "log_f0": log_f0,
+        "confidence": confidence,
+    }
+
+
+def walking_peak(rng: np.random.Generator, frames: int) -> np.ndarray:
+    """Logits peaking on a step that wanders from frame to frame, a neighbour or two close under it, as speech gives."""
+    steps = np.arange(PITCH_BINS)[:, None]
+    peak = 30 + 25 * np.sin(np.arange(frames) / 7.0)
+    logits = 90 - 9 * np.abs(steps - peak[None, :]) + rng.integers(-6, 7, (PITCH_BINS, frames))
+    return np.clip(logits, -128, 127)
+
+
+def emit(root: Path) -> list[Path]:
+    """A peak wandering within the range, uniform logits with their ties, peaks on, beside and past the range's
+    edges, and the network's whole range, GOLDEN_FRAMES frames each; then a negative control decoding the logits at
+    an exponent one under theirs."""
+    rng = np.random.default_rng(SEED)
+    n = GOLDEN_FRAMES
+    sure = rng.integers(-128, 128, n)
+    pitch = contract_front()["pitch"]
+    in_range = (pitch["min_f0_hz"], pitch["max_f0_hz"])
+    inside = np.flatnonzero((np.float32(in_range[0]) <= STEPS_HZ) & (np.float32(in_range[1]) >= STEPS_HZ))
+    edges = np.full((PITCH_BINS, n), -60)
+    for t, step in enumerate(
+        np.resize([inside[0] - 1, inside[0], inside[0] + 1, inside[-1] - 1, inside[-1], inside[-1] + 1], n)
+    ):
+        edges[step, t] = 100
+        edges[min(step + 1, PITCH_BINS - 1), t] = 100 - t % 3 * 40
+    cases = {
+        "case_000": case(walking_peak(rng, n), -3, sure, -4, in_range),
+        "case_001": case(rng.integers(-128, 128, (PITCH_BINS, n)), -2, sure, -5, in_range),
+        "case_002": case(edges, -3, sure, -4, in_range),
+        "case_003": case(walking_peak(rng, n), -4, sure, -3, (F_MIN_HZ, F_MAX_HZ)),
+        "case_neg_000": case(walking_peak(rng, n), -3, sure, -4, in_range, off_exponent=-1),
+    }
+    written = []
+    for name, tensors in cases.items():
+        path = root / BLOCK / f"{name}.gold"
+        write_gold(path, tensors)
+        written.append(path)
+    return written
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
+    for path in emit(parser.parse_args().out):
+        print(path)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

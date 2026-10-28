@@ -1,0 +1,11 @@
+# C ai_engine/src/pitch/decode.c against srpipe.tasks.pitch.postproc.decode.decode_int8 (KEHOACH 3.11 step 3.3), bit
+# for bit: the tables built in double and rounded to float32 alike, then the same float32 steps in order, no fused
+# multiply-add. log_f0 is ln Hz, confidence the sigmoid of the confidence logit. case_neg_000 decodes the logits at an
+# exponent one under theirs and must fall outside these limits.
+tensors:
+  log_f0:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  confidence:
+    max_abs: 0.0
+    min_snr_db: 0.0
