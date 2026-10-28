@@ -47,14 +47,22 @@ Chủ repo chọn ngày 28/10:
     nạp lại.
 - **`command_ctc` để ở flash:** mục `ESPDL` của nó mang cờ `IN_FLASH` như mục `speaker`, PSRAM chỉ giữ tensor của nó.
   Cờ nằm ở `deploy.weights_in_flash` của `configs/models/command_ctc.yaml`.
+- **b0 giữ làm biến thể, đổi bằng `make product SPEAKER=b0|b3`** (KẾ HOẠCH §3.17):
+  - `speaker-deploy` giữ bản deploy của mỗi run trong chính run ấy;
+  - `variants` của `configs/models/speaker.yaml` đặt tên cho từng bản;
+  - `speaker-use` cài bản được chọn vào `firmware/models/speaker/` và lock.
+
+  Firmware và khuôn ảnh không đổi. Cách kia là mang cả hai model trong ảnh và chọn bằng Kconfig: nó tốn ~10,9 / 11 MB
+  của `models_0` và phải đổi khuôn ảnh.
 
 ## Hệ quả
 
 - **Không còn OTA.** Một khe app không cập nhật qua mạng được. E13 muốn OTA thì phải xếp lại bảng, ví dụ khi ảnh model
   nhỏ đi. Đổi bảng phân vùng là nạp lại qua cổng CH340 (§6.1).
 - **`synth` ghép mẩu** (E12-T2) đặt mẩu tiếng trong phần dư của `models_0` hay trong `storage` khi tới lượt.
-- **Mẫu giọng của b0 không dùng được với b3.** `model_id` đổi, nên board coi người đã đăng ký là chưa đăng ký; mỗi
-  người phải đăng ký lại (`make speaker-enrol`).
+- **Mẫu giọng không qua được một lần đổi model.** `model_id` đổi, nên board coi người đã đăng ký là chưa đăng ký. Sau
+  mỗi lần đổi b0 ↔ b3, mỗi người phải đăng ký lại (`make speaker-enrol`). Muốn giữ mẫu giọng của cả hai thì NVS phải
+  có một danh sách cho mỗi model, tức đổi khuôn NVS (KẾ HOẠCH §6.2).
 - **Xác minh chậm hơn.** Mỗi lệnh thêm ~1,4–1,5 s 🔬, chưa đạt mức ~1 s của điều kiện cắm (ADR-0021); chủ repo nhận.
   `xac_task` giữ nhân 0 chừng ấy, dưới 2 s của `q_clean`; đo `clean_dropped` qua lệnh được xác minh.
 - **Bước của `command` chậm đi** khi đọc trọng số từ flash: đo trên board B trước khi chốt, kể cả phần đuổi kịp đầu
