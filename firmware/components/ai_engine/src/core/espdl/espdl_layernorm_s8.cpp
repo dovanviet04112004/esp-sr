@@ -57,14 +57,11 @@ enum Run {
     kRunSize
 };
 
-// A count whose odd part is 1 or 3 divides an int8 sum in float exactly as esp-dl's double does, and a
-// product by its inverse corrected by one FMA gives that quotient (test_esp_ppq_patches checks every sum).
+// For these counts an int8 sum times fl(1 / n), corrected by one FMA, is esp-dl's double quotient
+// (test_esp_ppq_patches checks every such count against every sum).
 bool float_mean_matches(int n) noexcept
 {
-    while (n % 2 == 0) {
-        n /= 2;
-    }
-    return n == 1 || n == 3;
+    return n % kWordBytes == 0 && n <= kMaxPaired;
 }
 
 // Inputs as esp_ppq_patches.layernorm_s8_from leaves them: x, gamma, beta if any, all int8 on one exponent
