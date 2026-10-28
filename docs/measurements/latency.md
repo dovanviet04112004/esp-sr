@@ -1295,7 +1295,9 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
 | `GroupNormS8` đọc map trước `Resize` lặp khung, k = 2 hay 4 | 1 819,2 ms | 4 324 384 B, cùng 79 680 B RAM nội | 4 `Resize` (25 ms) bỏ đi; `GroupNormS8` của stage 2–5 đọc 74 hay 37 khung, tính mỗi hàng nguồn một lần |
 | Hàng vòng của `ConvBlock` cũng vào vùng mượn khi vừa (ADR-0025) | 1 692,5 ms | 4 324 384 B, cùng 79 680 B RAM nội | `ConvBlock` 925 → 802 ms: stage 0 ~112, stage 1 ~106, stage 2 ~29 ms một khối. Còn lại: `PointwiseS8` 372, `StageSum` 154, `GroupNormS8` 122, `LayerNormS8` 58 ms |
 | `ConvBlock` gộp conv 1×1 trước và sau rộng hơn (48 → 144 trước stage 1, 96 → 24 sau stage 0, 144 → 48 sau stage 1, sau stage 2) | 1 661,2 ms | 4 082 080 B, cùng 79 680 B RAM nội | `PointwiseS8` 372 → 298 ms, `ConvBlock` 802 → 845 ms: phần tính của các conv ấy vào khối gần nguyên vẹn, phần đọc ghi map bớt được nhỏ hơn ước; ở stage 1, trọng số của chúng không vừa vùng mượn cùng hàng vòng nên đọc tại chỗ. 242 KB PSRAM ít hơn |
-| `StageSum` chép trọng số theo kênh vào vùng mượn | **1 622,8 ms** | **4 082 080 B**, cùng 79 680 B RAM nội | `StageSum` 154,5 → 116,1 ms |
+| `StageSum` chép trọng số theo kênh vào vùng mượn | 1 622,8 ms | 4 082 080 B, cùng 79 680 B RAM nội | `StageSum` 154,5 → 116,1 ms |
+| `Add` dư vào nhân có vòng của `PointwiseS8`, kể cả op gộp từ lát | **1 605,2 ms** | **4 077 844 B**, cùng 79 680 B RAM nội | các tổng dư [T, 1728] sau conv 72 → 1728 của mỗi stage vào op |
+- **Mọi số trên chạy một nhân** (nhân 0, như `xac_task` ở KẾ HOẠCH §5.2); nhân 1 giữ đường âm thanh thời gian thực.
 - Từ bước `GroupNormS8`, mỗi bước khớp từng bit cả ở đồ thị lẫn bản cắt.
 - Lượt dò có profile chạy đồ thị hai lần liền nhau (~4 s ở nhân 0) thì task watchdog báo IDLE0; bản báo rơi vào
   giờ của một module, ~43 ms ở một `GroupNormS8` hay `LayerNormS8`. Giờ một cửa sổ đo ở lượt có `vTaskDelay(1)`
