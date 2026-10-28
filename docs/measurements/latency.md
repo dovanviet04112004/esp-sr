@@ -1378,6 +1378,18 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
 - **Autoload của dcache trên app đo** (28/10): bật cho đúng vùng đang đọc, 1 tới 4 khối mỗi lần, kích khi trượt hay cả
   khi trúng. Chép 128 KB từ flash 31,8 → 32,3 MB/s, cộng dồn 256 KB ở PSRAM 87,8 → 89,3 MB/s. Đọc tuần tự đã sát trần
   bus, nên nạp trước chỉ lợi khi chồng được lên phần tính.
+- **Preload thủ công của dcache trên app đo** (28/10, `Cache_Start_DCache_Preload` của ROM, chạy nền, một vùng mỗi
+  lần). Vòng hàng như `ConvBlock` stage 0: đầu hàng chép hàng x 6 912 B từ PSRAM vào RAM nội, rồi 18 dải, mỗi dải
+  tính trong RAM nội và ghi 384 B vào hàng y ở PSRAM. µs một hàng:
+
+  | Phần tính một hàng | Không preload | Hàng y này rồi hàng x sau, nối nhau giữa các dải | Chỉ hàng x sau | Chỉ hàng y này |
+  |---|---|---|---|---|
+  | ~0,5 ms | 718,7 | **548,1** | 664,0 | 608,4 |
+  | ~1,5 ms | 1 726,9 | **1 555,7** | 1 661,1 | 1 616,2 |
+
+  - Ghi một hàng y 6 912 B vào PSRAM tốn ~140 µs, đọc một hàng x ~79 µs: cache nạp mỗi dòng y trước khi ghi đè rồi
+    mới ghi ngược. Nối hai lần preload giấu ~171 µs một hàng, không lần nào phải chờ preload xong.
+  - Ước cho b3: `ConvBlock` stage 0–1 ~25 và ~19 ms một khối, cả 21 khối ~100–150 ms 🔬.
 - **Chưa đo:** độ chính xác của b3 sau int8 (thang int8 đang chạy).
 - **Đọc:** đây là số thô. b3 chạy qua các op viết cho hình dạng của b0, chưa có bước nào tối ưu riêng cho nó. b3 có
   2,16 tỉ MAC (`torch.utils.flop_counter`, không tính GroupNorm), b0 0,24 tỉ. 1,61 tỉ nằm trong 19 `ConvBlock`, chạy
