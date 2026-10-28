@@ -245,8 +245,9 @@ pitch-import: ## swift-f0's pinned model.onnx as a run under ml/artifacts/pitch/
 pitch-ptq: ## Rung 2: each calibration of configs/models/pitch.yaml against float into <run>/int8/: RUN=<run>
 	$(PITCH_QUANT) ptq $(RUN)
 
-pitch-rebuild: ## Files of the command build simulated afresh on a row's pitch, into processed/command/<build>_resim_<row>: RUN=<run> ROW=<row>|float [FILES=val] [WORKERS=6]
-	$(PITCH_QUANT) rebuild $(RUN) --row $(ROW) $(if $(FILES),--files $(FILES)) $(if $(WORKERS),--workers $(WORKERS))
+pitch-rebuild: ## Files of the command build simulated afresh on a row's pitch, into processed/command/<build>_resim_<row>[_stream]: RUN=<run> ROW=<row>|float [FILES=val] [WORKERS=6] [STREAM=1]
+	$(PITCH_QUANT) rebuild $(RUN) --row $(ROW) $(if $(FILES),--files $(FILES)) $(if $(WORKERS),--workers $(WORKERS)) \
+	  $(if $(STREAM),--stream)
 
 pitch-timing: ## Step 2.1 of KEHOACH 3.14's procedure: the timing row into <run>/int8/timing/: RUN=<run>
 	$(PITCH_QUANT) timing $(RUN)
@@ -319,9 +320,9 @@ ctc-watch: ## Score each checkpoint of a ctc run as its training writes it, into
 # again; owner moves the first word of the owner's bật / tắt sessions; places reads tone right at the first and later
 # syllables, pitch held or not. val and owner need Docker for the aligner. STEPS scores those checkpoints with owner or
 # places; KALDI=1 hears through the board's Kaldi pitch.
-ctc-tone-flip: ## The tone checks of KEHOACH 3.11 into <run>/tone_flip_<check>.yaml: CHECK=val|owner|places|gate RUN=<run> [STEPS=2000,4000] [KALDI=1] [BUILD=v8_pitch_kl] [PITCH_RUN=<pitch run> PITCH_ROW=kl]
+ctc-tone-flip: ## The tone checks of KEHOACH 3.11 into <run>/tone_flip_<check>.yaml: CHECK=val|owner|places|gate RUN=<run> [STEPS=2000,4000] [KALDI=1] [BUILD=v8_pitch_kl] [PITCH_RUN=<pitch run> PITCH_ROW=kl [PITCH_STREAM=1]]
 	$(ML_CPU) --extra train --extra espdl --extra swiftf0 --extra praat python -m srpipe.tasks.command.ctc.tone_flip $(or $(CHECK),val) $(RUN) $(if $(STEPS),--steps $(STEPS)) $(if $(KALDI),--kaldi-pitch) \
-	  $(if $(BUILD),--build $(BUILD)) $(if $(PITCH_ROW),--pitch-row $(PITCH_RUN) $(PITCH_ROW))
+	  $(if $(BUILD),--build $(BUILD)) $(if $(PITCH_ROW),--pitch-row $(PITCH_RUN) $(PITCH_ROW)) $(if $(PITCH_STREAM),--pitch-stream)
 
 ##@ Command: ctc int8 ladder (KEHOACH 3.14)
 

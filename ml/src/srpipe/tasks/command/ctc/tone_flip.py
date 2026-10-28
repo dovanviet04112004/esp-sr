@@ -764,10 +764,12 @@ def gate_check(net: gate.Ctc, paths: dict) -> dict:
     return {"utterances": utterances, "best_right": best} | tones | {"syllables": dict(total)}
 
 
-def with_pitch_row(cfg: dict, pitch_run: Path, row: str) -> dict:
-    """A run's config heard through a row of the pitch ladder in place of float SwiftF0 (KEHOACH 3.11)."""
+def with_pitch_row(cfg: dict, pitch_run: Path, row: str, stream: bool = False) -> dict:
+    """A run's config heard through a row of the pitch ladder in place of float SwiftF0, its pitch dims streaming as
+    the chip computes them when stream (KEHOACH 3.11)."""
     listen = cfg["listen"]
-    return cfg | {"listen": listen | {"pitch": listen["pitch"] | {"int8": {"run": pitch_run.name, "row": row}}}}
+    pitch = listen["pitch"] | {"int8": {"run": pitch_run.name, "row": row}} | ({"stream": True} if stream else {})
+    return cfg | {"listen": listen | {"pitch": pitch}}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -784,6 +786,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--pitch-row", nargs=2, metavar=("PITCH_RUN", "ROW"), help="gate: hear through a row of the pitch ladder"
     )
+    parser.add_argument("--pitch-stream", action="store_true", help="gate: that row's pitch dims as the chip streams")
     args = parser.parse_args(argv)
     spec, paths = load_yaml(ctc.CONFIG)["tone_flip"], data_paths()
     if args.steps and args.check in ("val", "gate"):
@@ -792,8 +795,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--kaldi-pitch goes with owner")
     if (args.build and args.check != "places") or (args.pitch_row and args.check != "gate"):
         parser.error("--build goes with places, --pitch-row with gate")
+    if args.pitch_stream and not args.pitch_row:
+        parser.error("--pitch-stream goes with --pitch-row")
     tag = "_kaldi_pitch" if args.kaldi_pitch else f"_{args.build}" if args.build else ""
     tag += f"_pitch_{args.pitch_row[1]}" if args.pitch_row else ""
+    tag += "_stream" if args.pitch_stream else ""
     if args.check == "owner":
         commands = ML_ROOT.parent / spec["owner_set"]
         listed = json.loads(commands.read_text(encoding="utf-8"))["commands"]
@@ -806,7 +812,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.check == "gate":
         net = gate.load_ctc(args.run)
         if args.pitch_row:
-            net = replace(net, cfg=with_pitch_row(net.cfg, Path(args.pitch_row[0]), args.pitch_row[1]))
+            net = replace(
+                net, cfg=with_pitch_row(net.cfg, Path(args.pitch_row[0]), args.pitch_row[1], args.pitch_stream)
+            )
     if args.steps:
         report = {}
         for step in (int(v) for v in args.steps.split(",")):
