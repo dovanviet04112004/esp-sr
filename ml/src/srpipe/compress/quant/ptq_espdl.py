@@ -8,10 +8,12 @@ hop, and that equality is what the board is held to (E11-T10).
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+import numba
 import numpy as np
 import torch
 from torch import nn
@@ -256,6 +258,53 @@ def to_int8(x: np.ndarray, exponent: int) -> np.ndarray:
     return np.clip(np.rint(x / 2.0**exponent), INT8_MIN, INT8_MAX).astype(np.int8)
 
 
+@numba.njit(cache=True)
+def _fake_quant(x: np.ndarray, scale, offset, low, high, half_even: bool) -> np.ndarray:
+    out = np.empty_like(x)
+    for i in range(x.size):
+        v = x[i] / scale
+        r = (np.rint(v) if half_even else np.floor(v + np.float32(0.5))) + offset
+        if r < low:
+            r = low
+        elif r > high:
+            r = high
+        out[i] = (r - offset) * scale
+    return out
+
+
+@contextmanager
+def fused_fake_quant() -> Iterator[None]:
+    """ESP-PPQ's tensorwise quantise and dequantise in one float32 pass, the same IEEE operations in the same order
+    as its torch ops, so the same bits: for inference on the CPU under one scale with half-even or half-up rounding,
+    ESP-PPQ's own pass otherwise."""
+    from esp_ppq.core import RoundingPolicy
+    from esp_ppq.quantization.qfunction import linear
+
+    kept = linear.TensorwiseLinearQuantImpl.__dict__["forward"]
+    fused = {RoundingPolicy.ROUND_HALF_EVEN: True, RoundingPolicy.ROUND_HALF_UP: False}
+
+    def forward(ctx, tensor, scales, offsets, quant_min, quant_max, rounding):
+        if (
+            torch.is_grad_enabled()
+            or tensor.device.type != "cpu"
+            or tensor.dtype != torch.float32
+            or scales.numel() != 1
+            or offsets.numel() != 1
+            or rounding not in fused
+        ):
+            return kept.__func__(ctx, tensor, scales, offsets, quant_min, quant_max, rounding)
+        x = tensor.detach().contiguous().view(-1).numpy()
+        bounds = np.float32(quant_min), np.float32(quant_max)
+        y = _fake_quant(x, np.float32(scales.item()), np.float32(offsets.item()), *bounds, fused[rounding])
+        return torch.from_numpy(y).view(tensor.shape)
+
+    linear.TensorwiseLinearQuantImpl.forward = staticmethod(forward)
+    try:
+        yield
+    finally:
+        linear.TensorwiseLinearQuantImpl.forward = kept
+
+
 class Simulator:
     """The quantised graph run by ESP-PPQ's executor on whole sequences, under the ESP-PPQ fixes its branch names: the
     numbers the chip computes."""
@@ -272,7 +321,7 @@ class Simulator:
     def run(self, *xs: np.ndarray) -> list[np.ndarray]:
         """Every output of a graph of several inputs, given in the graph's order."""
         tensors = [torch.from_numpy(np.ascontiguousarray(x, dtype=np.float32)) for x in xs]
-        with esp_ppq_patches.applied(self.patches):
+        with esp_ppq_patches.applied(self.patches), fused_fake_quant():
             outs = self.executor.forward(inputs=tensors)
         return [out.detach().cpu().numpy() for out in outs]
 

@@ -32,6 +32,31 @@ def test_the_simulated_output_sits_on_the_int8_grid_of_its_exponent(tmp_path: Pa
     assert np.array_equal(on_grid, y) and (tmp_path / "graph.onnx").is_file()
 
 
+def esp_ppq_quantised(x, scale: float, rounding) -> torch.Tensor:
+    from esp_ppq.quantization.qfunction.linear import TensorwiseLinearQuantImpl
+
+    with torch.no_grad():
+        return TensorwiseLinearQuantImpl.apply(x, torch.tensor([scale]), torch.tensor([0.0]), -128, 127, rounding)
+
+
+def test_the_fused_fake_quant_gives_esp_ppq_s_bits_and_a_wrong_rounding_does_not() -> None:
+    from esp_ppq.core import RoundingPolicy
+
+    rng = np.random.default_rng(3)
+    spread = rng.normal(0, 40, 4096) * rng.choice([1e-3, 1, 1e3], 4096)
+    halves = np.arange(-300, 300) + 0.5
+    x = torch.from_numpy(np.concatenate([spread, halves, -halves, [0.0, -0.0, 1e30, -1e30]]).astype(np.float32))
+    for scale in (2.0**-3, 2.0**4, 0.37):
+        for rounding in (RoundingPolicy.ROUND_HALF_EVEN, RoundingPolicy.ROUND_HALF_UP):
+            want = esp_ppq_quantised(x * np.float32(scale), scale, rounding)
+            with ptq_espdl.fused_fake_quant():
+                got = esp_ppq_quantised(x * np.float32(scale), scale, rounding)
+            assert torch.equal(got.view(torch.int32), want.view(torch.int32)), (scale, rounding)
+    with ptq_espdl.fused_fake_quant():
+        up = esp_ppq_quantised(x, 1.0, RoundingPolicy.ROUND_HALF_UP)
+    assert not torch.equal(up, esp_ppq_quantised(x, 1.0, RoundingPolicy.ROUND_HALF_EVEN))
+
+
 def test_the_ladder_reaches_the_esp_ppq_setting() -> None:
     setting = ptq_espdl.setting_of({**RUNGS, "int16_ops": ["/out/Conv"]})
     eq = RUNGS["equalization"]
