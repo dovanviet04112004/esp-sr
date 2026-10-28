@@ -406,7 +406,7 @@ static int spk_cmd(int argc, char **argv)
         return 0;
     }
     if (!spk_request(action, id)) { return 1; }
-    // Zero timeout: a b0 run holds xac_task about a second, and the console says so rather than wait.
+    // Zero timeout: a speaker run holds xac_task about 1.5 s, and the console says so rather than wait.
     const bool sent = xQueueSend(w->speaker_requests, s_spk_request, 0) == pdTRUE;
     printf("spk %s %s: %s\n", action, id,
            sent ? "sent to xac_task, spk list shows the outcome" : "busy, again later");

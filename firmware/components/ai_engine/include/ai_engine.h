@@ -112,9 +112,9 @@ esp_err_t ai_engine_command_abort(void);
  */
 size_t ai_engine_command_features(void);
 
-/** Embed the last GEN_SPEAKER_WINDOW_SAMPLES of a command window: b0's front end, one run, unit length
+/** Embed the last GEN_SPEAKER_WINDOW_SAMPLES of a command window: spk_fbank's features, one run, unit length
  * (KEHOACH 3.17).
- *  @ctx xac_task | blocking, about 1.2 s of core 0 | pcm read; unit gets ai_engine_speaker_dims() floats
+ *  @ctx xac_task | blocking, ~1.5 s of core 0 (b3) | pcm read; unit gets ai_engine_speaker_dims() floats
  *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_STATE no speaker in the image
  */
 esp_err_t ai_engine_speaker_embed(const int16_t *pcm, float *unit);
