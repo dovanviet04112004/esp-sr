@@ -1,5 +1,5 @@
 """Export patches that keep esp-dl's own ops: fewer Transposes and quantisers, merged columns, cache-sized slices,
-channel scales, dropped identities, broadcast copies."""
+channel scales, dropped identities, broadcast copies, positive axes."""
 
 from __future__ import annotations
 
@@ -664,6 +664,50 @@ def lean_quantizers() -> Iterator[None]:
         return graph
 
     EspdlExporter.prepare_graph = leaner
+    try:
+        yield
+    finally:
+        EspdlExporter.prepare_graph = prepare
+
+
+def turn_axes_positive(graph) -> int:
+    """Each Unsqueeze's negative axes as the output axes they name, ONNX's reading, on its own copy of axes another op
+    also reads; how many."""
+    done = 0
+    for op in [op for op in graph.topological_sort() if op.type == "Unsqueeze"]:
+        axes = op.inputs[1]
+        rank = len(op.inputs[0].shape) + axes.value.numel()
+        named = axes.value.where(axes.value >= 0, axes.value + rank)
+        if named.equal(axes.value):
+            continue
+        if len(axes.dest_ops) > 1:
+            axes.dest_ops.remove(op)
+            own = graph.create_variable(value=named, is_parameter=True)
+            own.dtype, own.dest_ops[:] = axes.dtype, [op]
+            op.inputs[1] = own
+        else:
+            axes.value = named
+        done += 1
+    return done
+
+
+@contextlib.contextmanager
+def unsqueeze_axes_positive() -> Iterator[None]:
+    """esp-dl's Unsqueeze turns a negative axis positive inside its own parameter tensor while the model plans its
+    memory, and a graph left in flash keeps that tensor in flash, read only. command_ctc (ADR-0028) on board B: its
+    stacks' axis -1 panicked the build, "Dbus write to cache rejected". After the export's passes this writes each such
+    axis as the output axis it names, the same integers.
+    """
+    from esp_ppq.parser.espdl_exporter import EspdlExporter
+
+    prepare = EspdlExporter.prepare_graph
+
+    def positive(self, graph, *args, **kwargs):
+        graph = prepare(self, graph, *args, **kwargs)
+        turn_axes_positive(graph)
+        return graph
+
+    EspdlExporter.prepare_graph = positive
     try:
         yield
     finally:

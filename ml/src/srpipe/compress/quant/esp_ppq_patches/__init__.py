@@ -20,6 +20,7 @@ from .layout import (
     identity_convolutions_dropped,
     lean_quantizers,
     lean_transposes,
+    unsqueeze_axes_positive,
 )
 from .ops.attention import attention_core
 from .ops.conv_block import conv_block
@@ -83,6 +84,7 @@ PATCHES = {
     "fuse_tanh_gelu": fuse_tanh_gelu,
     "lean_transposes": lean_transposes,
     "lean_quantizers": lean_quantizers,
+    "unsqueeze_axes_positive": unsqueeze_axes_positive,
     "aligned_pointwise": aligned_pointwise,
     "copies_by_broadcast": copies_by_broadcast,
     "cache_sized_convolutions": cache_sized_convolutions,

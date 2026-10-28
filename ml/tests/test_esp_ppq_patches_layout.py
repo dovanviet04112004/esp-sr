@@ -255,3 +255,28 @@ def test_channel_scales_as_mul_weighs_the_channels_by_the_same_integers(tmp_path
     ((_, (_, weights)),) = [node for node in nodes.values() if node[0] == "Mul"]
     assert tensors[weights].shape == (1, 1, BANDS)
     assert np.array_equal(tensors[weights].ravel(), plain[1][plain[0]["/weigh/Conv"][1][1]].ravel())
+
+
+class TrailingAxis(nn.Module):
+    """A convolution's map given a trailing axis and copied along it, then laid flat, as command_ctc's stacks repeat
+    their frames."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv = nn.Conv1d(BANDS, BANDS, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        y = self.conv(x).unsqueeze(-1)
+        return torch.cat([y, y], dim=-1).reshape(1, BANDS, 2 * HOPS)
+
+
+def test_unsqueeze_axes_positive_writes_the_axis_unsqueeze_names(tmp_path: Path) -> None:
+    torch.manual_seed(10)
+    graph = ptq_espdl.quantize(TrailingAxis().eval(), calib(np.random.default_rng(23)), tmp_path, RUNGS)
+    plain, plain_tensors = espdl_graph(export_espdl.export(graph, tmp_path / "plain.espdl"))
+    with esp_ppq_patches.applied(["unsqueeze_axes_positive"]):
+        nodes, tensors = espdl_graph(export_espdl.export(graph, tmp_path / "positive.espdl"))
+    ((_, (_, axes)),) = [node for node in nodes.values() if node[0] == "Unsqueeze"]
+    ((_, (_, plain_axes)),) = [node for node in plain.values() if node[0] == "Unsqueeze"]
+    assert plain_tensors[plain_axes].tolist() == [-1] and tensors[axes].tolist() == [3]
+    assert all(np.array_equal(tensors[k], v) for k, v in plain_tensors.items() if k != plain_axes)
