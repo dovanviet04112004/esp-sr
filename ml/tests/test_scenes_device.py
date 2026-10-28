@@ -137,8 +137,10 @@ def floor_session(raw: Path, name: str, kind: str, pcm_shift: int, samples: np.n
 
 
 def tiny(**changes: object) -> dict:
+    """The board simulation at two rooms of two items, hearing Kaldi's tracker: the contract's SwiftF0 needs a run."""
     cfg = load_device(CONFIGS / "scenes" / "device.yaml")
     small = {
+        "pitch": dict(listen.KALDI_PITCH),
         "rooms": {
             **cfg["rooms"],
             "count": 2,
