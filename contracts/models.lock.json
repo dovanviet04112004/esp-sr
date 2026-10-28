@@ -70,7 +70,8 @@
       "heard": {
         "pitch": "kaldi",
         "hold": "pitch"
-      }
+      },
+      "weights_in_flash": true
     },
     "speaker": {
       "run": "20261010_5a45475-dirty_94e5a9",

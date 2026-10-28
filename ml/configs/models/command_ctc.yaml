@@ -115,6 +115,8 @@ esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches aroun
   - lean_transposes                # one Transpose per variable and perm, chains folded at export
   - lean_quantizers                # one QuantizeLinear per variable and grid
   - cache_sized_convolutions       # the front's projection, 150 KB of weights, in slices the data cache holds
+deploy:                            # make ctc-deploy RUN= ROW= (E11-T19)
+  weights_in_flash: true           # the image entry stays in flash; PSRAM holds the tensors only (ADR-0028)
 probe:                             # E11-T12: one layer, then the whole net, random weights, on board B (make ai-probe)
   seed: 20260930
   calib_sequences: 8

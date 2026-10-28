@@ -589,6 +589,7 @@ def step_deploy(cfg: dict, run: Path, row: str, hearing: Hearing = LEARNT) -> tu
         "row": row,
         "rungs": {"calibration": rungs["calibration"], "int16_ops": rungs["int16_ops"]},
         "thresholds": {k: chosen[k] for k in THRESHOLD_KEYS},
+        "weights_in_flash": cfg["deploy"]["weights_in_flash"],
     }
     if hearing != LEARNT:
         fields |= heard_head(hearing)
