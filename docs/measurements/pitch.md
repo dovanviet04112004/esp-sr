@@ -360,7 +360,9 @@ phỏng trên cả 384 khung, rồi `decode_int8`.
 **Bản dựng `command/v9`.** Split cắt lại trùng từng dòng v8. Mô phỏng cả bản bằng front của hợp đồng:
 `make ctc-features SET='split.version=v9 pitch_source=null simulate.mel_from=null simulate.workers=6'`, tmux `ctc-v9`.
 
-- Mỗi worker giữ ~1 GB, nên RAM 9,9 GB chỉ đủ 6 worker.
+- Mỗi worker giữ 1,1–1,2 GB, phiên dài của `vlsp` còn hơn. Với 6 worker trên RAM 9,9 GB của WSL, swap lên 2,8 GB,
+  10% thời gian mọi tiến trình đứng chờ bộ nhớ (`/proc/pressure/memory`, `full avg60`), và VS Code server sập lúc
+  05:05. Từ 05:10 chạy 5 worker.
 - Lượt đầu, 02:39–03:10: 28 shard. Một phiên 50 s mất ~1 s mô phỏng phòng, 2–3 s chuỗi và log-mel, 5–6 s cao độ
   (máy đang chạy việc khác). Cả train ước 13–18 giờ 🔬.
 - Trong phần cao độ, 4,3 s trên 5,9 s là phép lượng tử giả từng tensor của ESP-PPQ: sáu phép torch đi qua mỗi tensor.
