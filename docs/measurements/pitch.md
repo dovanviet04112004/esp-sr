@@ -274,6 +274,14 @@ Tách phần bằng các hàng đo tạm trên board B (không commit), mỗi h�
 | Cả front end, như hàng của `budget.md` | 3 054 |
 
 - Bảng dải của model đã ghim dùng gần hết bin của cả ba FFT (bin 3–513, 6–1 025, 1–257), nên không bỏ bớt bin nào được.
-- SwiftF0 trên chip lúc này tốn ~4,8 ms mỗi hop: front end 3,1 ms cộng CNN 1,675 ms ở cửa sổ 16 khung (§6). Kaldi
-  tốn 2 101 µs. Bỏ Kaldi và chạy SwiftF0 thì các module theo nhịp hop của nhân 0 lên ~30% khung, vẫn dưới mục tiêu
-  70% của KẾ HOẠCH §5.6.
+
+**Lượt bớt giờ 1 (29/10):** lịch sử thành vòng đệm đôi, mỗi mẫu giữ hai lần cách nhau 2 048 nên 2 048 mẫu cuối luôn
+nằm liền một dải; FFT nhân cửa sổ ngay lúc nạp điểm và ghi biên độ ngay lúc tách bin (`spec_fft_magnitudes`). Khung đã
+nhân cửa sổ và các bin không còn ra bộ nhớ. Mọi phép giữ nguyên thứ tự, nên mọi ca vàng vẫn lệch 0 trên máy tính.
+- **2 367 µs trung bình, 2 462 µs đỉnh mỗi hop**, 14,8% khung (từ 3 107 µs); vùng làm việc 68 368 → 60 160 B.
+- `stft` và `spk_fbank` dùng chung phần tách bin, giờ không đổi.
+- SwiftF0 trên chip giờ tốn ~4,0 ms mỗi hop: front end 2,37 ms cộng CNN 1,675 ms ở cửa sổ 16 khung (§6), so với
+  Kaldi 2 101 µs. Bỏ Kaldi và chạy SwiftF0 thì các module theo nhịp hop của nhân 0 lên ~26% khung, dưới mục tiêu 70%
+  của KẾ HOẠCH §5.6.
+- Phần còn lại phần lớn là ba FFT (913 µs), `sqrtf` (535 µs) và `ln` (241 µs). Bớt hai phần sau phải đổi phép tính,
+  tức đổi KẾ HOẠCH §3.11 bước 3.1 và bản soi gương: chờ chủ repo.
