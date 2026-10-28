@@ -1132,6 +1132,11 @@ Bước 2, bản dò trên board B (chủ repo duyệt 28/10): bước 1.2 và b
 §23, 2 048 ngoại suy, cộng cửa sổ, biên độ, dải, log. CNN vừa phần còn lại thì sang bước 3. Không vừa thì chủ repo chọn:
 qua vòng tăng tốc, bước 2 của §3.14, rồi mới sang bước 3; hay nhận thêm tải ở nhân 0.
 
+Bước 2 khớp từng bit, nhưng CNN tốn 26,3 ms mỗi hop, quá cả khung 16 ms (`measurements/pitch.md` §5). Chủ repo chọn
+vòng tăng tốc đủ như b0 và b3 (28/10): bước 2 của §3.14 trên cửa sổ ấy và hàng kl, tới khi mọi op chạy ở trần của nó.
+Bước 3 chạy CNN dòng nên ưu tiên cách tăng tốc không dựa vào số khung mỗi lượt; cách gộp các khung theo thời gian chỉ
+giữ được khi bước 3 chạy đủ khung mỗi bước.
+
 Bước 3 là đường chip trong chuỗi: STFT ở `dsp_spec` đủ bốn bước, CNN chạy dòng, cột cao độ trễ 10 khung cộng 0,4 s nhìn
 sau của chuẩn hoá trong `svc_listen`, và cách chọn cách nghe.
 
