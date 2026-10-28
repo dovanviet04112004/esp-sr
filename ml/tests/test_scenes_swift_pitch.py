@@ -1,6 +1,8 @@
 """srpipe.scenes.swift_pitch: SwiftF0's frames on Kaldi's three scales; a first syllable above the next reads above
 its reference once the mean looks ahead, and at it when it does not; unvoiced frames bridged; no voiced frame, no pitch;
-device.pitch_of keeps Kaldi's tracker unless a pitch_source names SwiftF0; front_of takes the contract's shared keys."""
+device.pitch_of keeps Kaldi's tracker unless a pitch_source names SwiftF0; front_of takes the contract's shared keys.
+Streaming as the chip computes them, the dims are the session's while every unvoiced gap fits the look-ahead, and a
+longer gap holds the last voiced log F0 until the next voiced frame comes in sight."""
 
 from __future__ import annotations
 
@@ -114,3 +116,26 @@ def test_front_of_tracks_pitch_by_a_pitch_source_with_the_contracts_range_left_c
     assert front_of({}) == contract_front()
     learnt = {"features": {"n_bands": 40}, "pitch": {}}
     assert front_of({"listen": learnt, "pitch_source": source}) is learnt
+
+
+def test_streaming_dims_are_the_sessions_while_every_unvoiced_gap_fits_the_look_ahead() -> None:
+    hz, voiced = command()
+    session = swift_pitch.features(silent(len(hz)), SPEC, Fixed(hz, voiced))
+    streamed = swift_pitch.features(silent(len(hz)), SPEC | {"stream": True}, Fixed(hz, voiced))
+    assert streamed.dtype == np.float32 and streamed.shape == session.shape
+    assert np.allclose(streamed, session, atol=1e-5)
+
+
+def test_a_gap_past_the_look_ahead_holds_the_last_voiced_log_f0_until_the_next_comes_in_sight() -> None:
+    hz = np.r_[np.full(20, 100.0), np.full(60, 80.0), np.full(40, 200.0)]
+    voiced = np.r_[np.ones(20), np.zeros(60), np.ones(40)]
+    ahead = round(SPEC["normalization_right_s"] * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES)
+    session = swift_pitch.features(silent(len(hz)), SPEC, Fixed(hz, voiced))
+    streamed = swift_pitch.features(silent(len(hz)), SPEC | {"stream": True}, Fixed(hz, voiced))
+    sighted = 80 - ahead
+    assert np.allclose(streamed[sighted:, 1], session[sighted:, 1], atol=1e-5)
+    # Only voiced frames weigh the mean, so on a held frame the two differ by the bridge the session draws.
+    t = 30
+    bridge = np.log(100.0) + (np.log(200.0) - np.log(100.0)) * (t - 19) / (80 - 19)
+    held_by = (np.log(100.0) - bridge) * SPEC["pitch_scale"]
+    assert streamed[t, 1] - session[t, 1] == pytest.approx(held_by, abs=1e-5)

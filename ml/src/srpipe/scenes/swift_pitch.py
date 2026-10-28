@@ -1,5 +1,5 @@
 """Three pitch features of a stream from SwiftF0 (Nieradzik 2025), on the scales of Kaldi's: the pitch_source trial of
-KEHOACH 3.11, whose runs never deploy, since the board tracks pitch with Kaldi's online tracker."""
+KEHOACH 3.11, over the whole session, or streaming as the chip computes them when the spec says stream."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import numpy as np
 
 from srpipe.core.audio_io import to_float
 from srpipe.core.config import ML_ROOT
+from srpipe.dsp.spec import swift_dims
 from srpipe.generated import grid
 
 SOURCE = "swiftf0"
@@ -47,11 +48,19 @@ def features(clean: np.ndarray, spec: dict, detect: Any) -> np.ndarray:
     """(hops, 3) float32 of a stream's clean int16 samples, a row per grid hop as SwiftF0 gives a frame per hop: POV
     of the confidence, log F0 less its confidence-weighted mean over the voiced frames normalization_left_s before
     and normalization_right_s after, and its delta; Kaldi's three scales. Unvoiced frames carry log F0 drawn straight
-    between the voiced ones; a stream with no voiced frame gives zero pitch and delta."""
+    between the voiced ones; a stream with no voiced frame gives zero pitch and delta. With spec's stream true, the
+    dims are swift_dims's, as the chip computes them streaming (KEHOACH 3.11 step 3.3)."""
     hops = len(clean) // grid.HOP_SAMPLES
     found = detect.detect(
         to_float(clean[: hops * grid.HOP_SAMPLES]), grid.SAMPLE_RATE_HZ, spec["min_f0_hz"], spec["max_f0_hz"]
     )
+    if spec.get("stream"):
+        chip_log_f0 = getattr(found, "log_f0", None)
+        if chip_log_f0 is None:
+            chip_log_f0 = np.log(np.asarray(found.pitch_hz, dtype=np.float64))
+        log_f0 = np.asarray(chip_log_f0[:hops], dtype=np.float32)
+        sure = np.asarray(found.confidence[:hops], dtype=np.float32)
+        return swift_dims.dims(log_f0, sure, swift_dims.DimsConfig.of(spec))
     confidence = np.asarray(found.confidence[:hops], dtype=np.float64)
     voiced = confidence >= spec["confidence"]
     if not voiced.any():
