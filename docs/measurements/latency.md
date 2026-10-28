@@ -777,7 +777,8 @@ hiệu chuẩn trên 64 cửa sổ tiếng của thang. Trên board, cả 4 bả
 | Softmax theo nhóm 64 cột, chuẩn hoá khi các hàng còn trong cache; lượt tổng xen 8 cột từng bước | 386,0 ms | 1 443 560 B | softmax của pool 8,2 → 7,0 ms, `AttentionCore` 24,5 → 23,5 ms |
 | `ConvBlock` nhận conv 1×1 đầu và cuối stage 0, đầu stage 1 (trọng số gốc lấy lại từ dạng gộp cột) | 366,9 ms | 1 410 952 B | ba `PointwiseS8` gộp cột (8,1, 7,8 và 4,8 ms) bỏ; khối nhận chúng 21,4, 23,2 và 11,2 ms, từ 22,2, 22,1 và 10,4 |
 | `PointwiseS8` nhận `Concat` của các lát conv pool, chạy theo lát khối ghi thẳng cột của lát trong hàng ra | 364,2 ms | 1 408 280 B | `Concat` 3,2 → 0,1 ms; `frames` 8,1 → 7,8 ms, `linear2` 8,4 → 5,8 ms |
-| `LayerNormS8`: căn của phương sai bằng một bước Newton từ `sqrtf`, giá trị bị đánh dấu về Newton của esp-dl | **356,1 ms** | **1 408 280 B** | LayerNorm 31,5 → 23,5 ms, stem 25,1 → 17,9 ms |
+| `LayerNormS8`: căn của phương sai bằng một bước Newton từ `sqrtf`, giá trị bị đánh dấu về Newton của esp-dl | 356,1 ms | 1 408 280 B | LayerNorm 31,5 → 23,5 ms, stem 25,1 → 17,9 ms |
+| Các op đổi cho b3 (E11-T35, 28/10): pointwise trải phẳng 96–192 kênh, `StageSum` theo khối hàng, nạp trước dcache của `ConvBlock` (ADR-0026), `TimeDepthwise`; b0 không có vùng mượn | **345,2 ms** | **1 411 400 B** | khớp từng bit ở đồ thị và 4/4 bản cắt, cả khi nhân 1 ghi NVS 94 lần. `TimeDepthwise` 24 op 3,2 ms với vùng nháp PSRAM dùng chung (conv esp-dl ~5,5 ms, ước từ 7,6 ms gồm Gelu). `ConvBlock` 141,9, `PointwiseS8` 62,0, `StageSum` 51,1 ms |
 
 - **`SoftmaxQuant`:** bảng `exp` và nghịch đảo tổng như esp-dl. Xác suất không âm, nên `floor(v + 0,5)` của esp-dl là
   phép cắt của tổng float `v + 0,5`: dưới 2^22 tổng ấy không làm tròn sang phần nguyên khác. Mỗi lượt chuẩn hoá tính 4
