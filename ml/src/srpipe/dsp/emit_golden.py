@@ -14,7 +14,7 @@ import numpy as np
 import scipy.signal
 
 from srpipe.dsp.afe import agc, balance, bss, chain, doa, gsc, hpf, ns_omlsa, vad
-from srpipe.dsp.spec import mel, pitch, spk_fbank, stft
+from srpipe.dsp.spec import mel, pitch, spk_fbank, stft, swift_front
 from srpipe.generated import afe, array, grid, listen
 from srpipe.golden.gold import write_gold
 
@@ -214,6 +214,76 @@ def emit_spk_fbank(root: Path) -> list[Path]:
     written = []
     for name, tensors in cases.items():
         path = root / "spk_fbank" / f"{name}.gold"
+        write_gold(path, tensors)
+        written.append(path)
+    return written
+
+
+SWIFT_FRONT_HOPS = 40
+
+
+def swift_front_tables() -> tuple[dict[int, np.ndarray], dict[int, swift_front.Bands]]:
+    """Tables shaped as the pinned SwiftF0 model's yet built from a formula, so the golden needs no model: a periodic
+    Hann window a spectrum, and BANDS triangles a spectrum on log-spaced centres from bin 1 to the last, at least one
+    bin either side, each summing to 1."""
+    windows, bands = {}, {}
+    for n in swift_front.SIZES:
+        windows[n] = (0.5 - 0.5 * np.cos(2.0 * np.pi * np.arange(n) / n)).astype(np.float32)
+        bins = np.arange(n // 2 + 1)
+        matrix = np.zeros((len(bins), swift_front.BANDS))
+        for b, centre in enumerate(np.geomspace(1.0, n // 2, swift_front.BANDS)):
+            weights = np.maximum(0.0, 1.0 - np.abs(bins - centre) / max(1.0, 0.04 * centre))
+            matrix[:, b] = weights / weights.sum()
+        bands[n] = swift_front.sparse(matrix.astype(np.float32))
+    return windows, bands
+
+
+def swift_front_case(pcm: np.ndarray, reset: np.ndarray, tables: tuple) -> dict[str, np.ndarray]:
+    """The tables, a stream of int16 hops with the hops it is reset ahead of, and what SwiftFront gives at each hop:
+    its frame, zeros before one is whole, and whether one came out."""
+    windows, bands = tables
+    front = swift_front.SwiftFront(windows, bands)
+    hops = pcm.reshape(-1, grid.HOP_SAMPLES)
+    out = np.zeros((len(hops), len(swift_front.SIZES), swift_front.BANDS), np.float32)
+    ready = np.zeros(len(hops), np.uint8)
+    for h, hop in enumerate(hops):
+        if reset[h]:
+            front.reset()
+        frame = front.push(hop)
+        if frame is not None:
+            out[h], ready[h] = frame, 1
+    tensors = {"pcm": pcm.astype(np.int16), "reset": reset.astype(np.uint8), "out": out, "ready": ready}
+    for s, n in enumerate(swift_front.SIZES):
+        tensors[f"window_{s}"] = windows[n]
+        tensors[f"first_{s}"] = bands[n].first.astype(np.int32)
+        tensors[f"count_{s}"] = bands[n].count.astype(np.int32)
+        tensors[f"weights_{s}"] = bands[n].weights
+    return tensors
+
+
+def emit_swift_front(root: Path) -> list[Path]:
+    """A voice, noise, silence into a tone, and noise near full scale reset halfway, SWIFT_FRONT_HOPS hops each on
+    the same tables; then a negative control whose frames come one hop late."""
+    rng = np.random.default_rng(37)
+    tables = swift_front_tables()
+    n = SWIFT_FRONT_HOPS * grid.HOP_SAMPLES
+    t = np.arange(n) / grid.SAMPLE_RATE_HZ
+    tone = np.round(9000.0 * np.sin(2.0 * np.pi * 220.0 * t) * (t > t[-1] / 2)).astype(np.int16)
+    no_reset = np.zeros(SWIFT_FRONT_HOPS, np.uint8)
+    halfway = no_reset.copy()
+    halfway[SWIFT_FRONT_HOPS // 2] = 1
+    cases = {
+        "case_000": swift_front_case(_voice(rng, n), no_reset, tables),
+        "case_001": swift_front_case(np.round(rng.uniform(-9000.0, 9000.0, n)).astype(np.int16), no_reset, tables),
+        "case_002": swift_front_case(tone, no_reset, tables),
+        "case_003": swift_front_case(np.round(rng.uniform(-32000.0, 32000.0, n)).astype(np.int16), halfway, tables),
+    }
+    negative = swift_front_case(_voice(rng, n), no_reset, tables)
+    negative["out"] = np.concatenate([np.zeros_like(negative["out"][:1]), negative["out"][:-1]])
+    cases["case_neg_000"] = negative
+    written = []
+    for name, tensors in cases.items():
+        path = root / "swift_front" / f"{name}.gold"
         write_gold(path, tensors)
         written.append(path)
     return written
@@ -1181,7 +1251,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
-    emitted = emit_stft(args.out) + emit_mel(args.out) + emit_spk_fbank(args.out)
+    emitted = emit_stft(args.out) + emit_mel(args.out) + emit_spk_fbank(args.out) + emit_swift_front(args.out)
     emitted += emit_chain(args.out) + emit_chain_modules(args.out) + emit_chain_bss(args.out)
     emitted += emit_hpf(args.out) + emit_balance(args.out) + emit_vad(args.out) + emit_agc(args.out)
     emitted += emit_doa(args.out) + emit_gsc(args.out) + emit_bss(args.out) + emit_pitch(args.out, pitch_config())

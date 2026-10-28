@@ -1,0 +1,8 @@
+# C dsp_spec/swift_front against srpipe.dsp.spec.swift_front, the front end of the pitch network SwiftF0 (KEHOACH 3.11).
+# Both sides run the same float32 operations in the same order with mel's own ln, so they match bit for bit with the
+# default FFT, Kconfig DSP_SPEC_FFT_RADIX4; dl_fft does not. The tables are built from a formula shaped like the
+# pinned model's. case_neg_* must fall outside these limits.
+tensors:
+  out:
+    max_abs: 0.0
+    min_snr_db: 0.0
