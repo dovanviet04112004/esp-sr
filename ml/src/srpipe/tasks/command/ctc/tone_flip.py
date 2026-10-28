@@ -25,7 +25,7 @@ from torch.nn import functional
 
 from srpipe.core import audio_io, corpus, repitch, screen, splits
 from srpipe.core.audio_io import ItemReader
-from srpipe.core.config import ML_ROOT, data_paths, device_of, load_yaml, on_contract_pitch
+from srpipe.core.config import ML_ROOT, data_paths, device_of, load_yaml, on_kaldi_pitch
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.generated import grid, lang_vi
@@ -804,7 +804,7 @@ def main(argv: list[str] | None = None) -> int:
         commands = ML_ROOT.parent / spec["owner_set"]
         listed = json.loads(commands.read_text(encoding="utf-8"))["commands"]
         net = gate.load_ctc(args.run, commands)
-        cfg = on_contract_pitch(net.cfg) if args.kaldi_pitch else net.cfg
+        cfg = on_kaldi_pitch(net.cfg) if args.kaldi_pitch else net.cfg
         heard = owner_heard(cfg, spec, paths)
     elif args.check == "places":
         net = gate.load_ctc(args.run)

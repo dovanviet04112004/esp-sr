@@ -13,7 +13,7 @@ RATE = grid.SAMPLE_RATE_HZ
 
 
 def config() -> pitch.PitchConfig:
-    return pitch.PitchConfig(**listen.PITCH)
+    return pitch.PitchConfig(**listen.KALDI_PITCH)
 
 
 def harmonics(f0_hz: np.ndarray, seconds: float, level: float = 0.3) -> np.ndarray:

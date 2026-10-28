@@ -221,7 +221,7 @@ static void release(workspaces_t *w)
 static esp_err_t front_end(workspaces_t *w)
 {
     const dsp_spec_mel_config_t mel_cfg = GEN_LISTEN_MEL_CONFIG;
-    const dsp_spec_pitch_config_t pitch_cfg = GEN_LISTEN_PITCH_CONFIG;
+    const dsp_spec_pitch_config_t pitch_cfg = GEN_LISTEN_KALDI_PITCH_CONFIG;
     const size_t fft_bytes = dsp_spec_fft_workspace_bytes(GEN_GRID_FFT_SIZE);
     const size_t stft_bytes = dsp_spec_stft_workspace_bytes();
     const size_t mel_bytes = dsp_spec_mel_workspace_bytes(&mel_cfg);

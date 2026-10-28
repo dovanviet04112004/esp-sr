@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=None, help="only the first N utterances")
     limit = parser.parse_args(argv).limit
     paths = data_paths()
-    spec = listen.PITCH
+    spec = listen.KALDI_PITCH
     cfg = pitch.PitchConfig(**spec)
     wavs = sorted((paths["raw"] / CORPUS).glob("*/*.wav"))[:limit]
     work = paths["cache"] / "pitch_ref"

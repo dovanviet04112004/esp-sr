@@ -1315,7 +1315,7 @@ def emit_bss(root: Path) -> list[Path]:
 
 def pitch_config() -> pitch.PitchConfig:
     """The pitch settings the models read, from the features config (KEHOACH 3.11)."""
-    return pitch.PitchConfig(**listen.PITCH)
+    return pitch.PitchConfig(**listen.KALDI_PITCH)
 
 
 def main() -> int:

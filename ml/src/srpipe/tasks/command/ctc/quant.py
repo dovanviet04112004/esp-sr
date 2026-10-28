@@ -22,7 +22,7 @@ from torch.nn import functional
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, ptq_espdl, qat_espdl
 from srpipe.core import corpus, extract, screen, splits
-from srpipe.core.config import apply_overrides, data_paths, load_yaml, on_contract_pitch
+from srpipe.core.config import apply_overrides, data_paths, load_yaml, on_kaldi_pitch
 from srpipe.dsp.spec import pitch
 from srpipe.export import update_lock
 from srpipe.generated import listen
@@ -47,7 +47,7 @@ def kaldi_cfg(cfg: dict, paths: dict) -> dict:
     source = cfg.get("simulate", {}).get("mel_from")
     if source is None:
         raise ValueError("the run's build tracked its pitch over its own log-mel: no build holds it on Kaldi's pitch")
-    heard = on_contract_pitch(cfg) | {"split": cfg["split"] | {"version": source}, "listen_hash": listen.HASH}
+    heard = on_kaldi_pitch(cfg) | {"split": cfg["split"] | {"version": source}, "listen_hash": listen.HASH}
     if stale := data.unbuilt(heard, paths):
         raise ValueError(f"{', '.join(str(p) for p in stale)}: not the contract's front over the split, as {source}")
     return heard

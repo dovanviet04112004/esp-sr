@@ -165,18 +165,26 @@ def gen_array_py(a: dict) -> str:
     )
 
 
-LISTEN_NUMBERS = ("features", "pitch")
+LISTEN_NUMBERS = ("features", "kaldi_pitch")
+# The pitch section's keys that name rather than count: its source, the row the chip runs, the streaming rule.
+PITCH_NAMES = {"source": str, "int8": dict, "stream": bool}
 
 
 def listen_values(g: dict) -> dict:
-    """listen.yaml, checked to hold numbers only in features and pitch; the cut and the window also in hops of the
-    grid, rounded as Python rounds them, so the board cuts where Gate 3 does; and the contract's hash, the first four
-    bytes of sha256 of it as JSON with sorted keys, that a model image carries to be refused on another listener."""
+    """listen.yaml, checked to hold numbers only in features, kaldi_pitch and pitch past its names; the cut, the
+    window and the pitch dims' windows also in hops of the grid, rounded as Python rounds them, so the board cuts
+    where Gate 3 does; and the contract's hash, the first four bytes of sha256 of it as JSON with sorted keys, that a
+    model image carries to be refused on another listener."""
     doc = load_yaml("listen.yaml")
     for section in LISTEN_NUMBERS:
         for name, value in doc[section].items():
             if not is_number(value):
                 raise ValueError(f"listen.yaml {section}.{name} must be a number, got {value!r}")
+    for name, value in doc["pitch"].items():
+        if not isinstance(value, PITCH_NAMES.get(name, float | int)) or (
+            name not in PITCH_NAMES and not is_number(value)
+        ):
+            raise ValueError(f"listen.yaml pitch.{name} is {value!r}, not a {PITCH_NAMES.get(name, 'number')}")
     rate = g["frames_per_s"]
     canonical = json.dumps(doc, sort_keys=True, separators=(",", ":"))
     return {
@@ -186,12 +194,29 @@ def listen_values(g: dict) -> dict:
         "min_hops": round(doc["utterance"]["min_s"] * rate),
         "lead_hops": round(doc["utterance"]["lead_s"] * rate),
         "window_hops": round(doc["window_s"] * rate),
+        "pitch_left_frames": round(doc["pitch"]["normalization_left_s"] * rate),
+        "pitch_right_frames": round(doc["pitch"]["normalization_right_s"] * rate),
     }
 
 
 def c_initializer(fields: dict) -> str:
     """A designated initializer of a struct whose fields are named as the contract's keys."""
     return "{" + ", ".join(f".{name} = {c_number(value)}" for name, value in fields.items()) + "}"
+
+
+def swift_dims_initializer(v: dict) -> str:
+    """dsp_spec_swift_dims_config_t of the pitch section, its windows in frames."""
+    pitch = v["pitch"]
+    return c_initializer(
+        {
+            "confidence": float(pitch["confidence"]),
+            "left_frames": v["pitch_left_frames"],
+            "right_frames": v["pitch_right_frames"],
+            "pov_scale": float(pitch["pov_scale"]),
+            "pitch_scale": float(pitch["pitch_scale"]),
+            "delta_scale": float(pitch["delta_pitch_scale"]),
+        }
+    )
 
 
 def gen_listen_h(v: dict) -> str:
@@ -202,7 +227,10 @@ def gen_listen_h(v: dict) -> str:
         f"#define GEN_LISTEN_HASH 0x{v['listen_hash']:08x}u // sha256 of the sorted JSON, 4 bytes",
         f"#define GEN_LISTEN_N_BANDS {v['features']['n_bands']}",
         f"#define GEN_LISTEN_MEL_CONFIG {c_initializer(v['features'])}       // dsp_spec_mel_config_t",
-        f"#define GEN_LISTEN_PITCH_CONFIG {c_initializer(v['pitch'])}       // dsp_spec_pitch_config_t",
+        f"#define GEN_LISTEN_KALDI_PITCH_CONFIG {c_initializer(v['kaldi_pitch'])}       // dsp_spec_pitch_config_t",
+        f"#define GEN_LISTEN_PITCH_MIN_F0_HZ {c_number(v['pitch']['min_f0_hz'])}",
+        f"#define GEN_LISTEN_PITCH_MAX_F0_HZ {c_number(v['pitch']['max_f0_hz'])}",
+        f"#define GEN_LISTEN_SWIFT_DIMS_CONFIG {swift_dims_initializer(v)}       // dsp_spec_swift_dims_config_t",
         f"#define GEN_LISTEN_UTTERANCE_GAP_HOPS {v['gap_hops']}",
         f"#define GEN_LISTEN_UTTERANCE_MIN_HOPS {v['min_hops']}",
         f"#define GEN_LISTEN_UTTERANCE_LEAD_HOPS {v['lead_hops']}",
@@ -221,6 +249,7 @@ def gen_listen_py(v: dict) -> str:
         f"HASH = 0x{v['listen_hash']:08x}\n"
         f"FEATURES = {literal(v['features'])}\n"
         f"PITCH = {literal(v['pitch'])}\n"
+        f"KALDI_PITCH = {literal(v['kaldi_pitch'])}\n"
         f"N_BANDS = {v['features']['n_bands']}\n"
         f"UTTERANCE_GAP_S = {v['utterance']['gap_s']!r}\n"
         f"UTTERANCE_MIN_S = {v['utterance']['min_s']!r}\n"

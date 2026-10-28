@@ -212,13 +212,19 @@ class ListenTests(unittest.TestCase):
         exec(gen_contracts.gen_listen_py(values), namespace)
         self.assertEqual(namespace["FEATURES"], values["features"])
         self.assertEqual(namespace["PITCH"], values["pitch"])
-        sections = {"features": "GEN_LISTEN_MEL_CONFIG", "pitch": "GEN_LISTEN_PITCH_CONFIG"}
+        self.assertEqual(namespace["KALDI_PITCH"], values["kaldi_pitch"])
+        sections = {"features": "GEN_LISTEN_MEL_CONFIG", "kaldi_pitch": "GEN_LISTEN_KALDI_PITCH_CONFIG"}
         fields = [f"struct {s} {{ " + " ".join(f"double {n};" for n in values[s]) + " };" for s in sections]
         lines = [f"    struct {s} {s} = {m};" for s, m in sections.items()]
         for section in sections:
             lines += [f'    printf("{section}.{n} %.9g\\n", {section}.{n});' for n in values[section]]
         for name in ("UTTERANCE_GAP_HOPS", "UTTERANCE_MIN_HOPS", "UTTERANCE_LEAD_HOPS", "WINDOW_HOPS"):
             lines.append(f'    printf("{name} %d\\n", GEN_LISTEN_{name});')
+        dims = ("confidence", "left_frames", "right_frames", "pov_scale", "pitch_scale", "delta_scale")
+        fields.append("struct dims { " + " ".join(f"double {n};" for n in dims) + " };")
+        lines.append("    struct dims dims = GEN_LISTEN_SWIFT_DIMS_CONFIG;")
+        lines += [f'    printf("dims.{n} %.9g\\n", dims.{n});' for n in dims]
+        lines += [f'    printf("{n} %.9g\\n", (double)GEN_LISTEN_PITCH_{n});' for n in ("MIN_F0_HZ", "MAX_F0_HZ")]
         probe = (
             '#include <stdio.h>\n#include "gen_listen.h"\n'
             + "\n".join(fields)
@@ -238,6 +244,19 @@ class ListenTests(unittest.TestCase):
             for name, number in values[section].items():
                 self.assertAlmostEqual(float(printed[f"{section}.{name}"]), float(number), places=6)
         rate = gen_contracts.grid_values()["frames_per_s"]
+        pitch = values["pitch"]
+        want = {
+            "dims.confidence": pitch["confidence"],
+            "dims.left_frames": round(pitch["normalization_left_s"] * rate),
+            "dims.right_frames": round(pitch["normalization_right_s"] * rate),
+            "dims.pov_scale": pitch["pov_scale"],
+            "dims.pitch_scale": pitch["pitch_scale"],
+            "dims.delta_scale": pitch["delta_pitch_scale"],
+            "MIN_F0_HZ": pitch["min_f0_hz"],
+            "MAX_F0_HZ": pitch["max_f0_hz"],
+        }
+        for name, number in want.items():
+            self.assertAlmostEqual(float(printed[name]), float(number), places=6)
         self.assertEqual(int(printed["UTTERANCE_GAP_HOPS"]), round(values["utterance"]["gap_s"] * rate))
         self.assertEqual(int(printed["UTTERANCE_MIN_HOPS"]), round(values["utterance"]["min_s"] * rate))
         self.assertEqual(int(printed["UTTERANCE_LEAD_HOPS"]), round(values["utterance"]["lead_s"] * rate))
@@ -255,14 +274,15 @@ class ListenTests(unittest.TestCase):
         for changed in (
             {**doc, "window_s": doc["window_s"] + 0.25},
             {**doc, "utterance": {**doc["utterance"], "lead_s": doc["utterance"]["lead_s"] + 0.25}},
-            {**doc, "pitch": {**doc["pitch"], "delta_window": doc["pitch"]["delta_window"] + 1}},
+            {**doc, "kaldi_pitch": {**doc["kaldi_pitch"], "delta_window": doc["kaldi_pitch"]["delta_window"] + 1}},
+            {**doc, "pitch": {**doc["pitch"], "int8": {**doc["pitch"]["int8"], "row": "mse"}}},
         ):
             gen_contracts.load_yaml = lambda _, changed=changed: changed
             try:
                 hashes.add(gen_contracts.listen_values(grid)["listen_hash"])
             finally:
                 gen_contracts.load_yaml = original
-        self.assertEqual(len(hashes | {values["listen_hash"]}), 4)
+        self.assertEqual(len(hashes | {values["listen_hash"]}), 5)
         header = (REPO / gen_contracts.COMMON_INC / "gen_listen.h").read_text()
         self.assertIn(f"#define GEN_LISTEN_HASH 0x{values['listen_hash']:08x}u", header)
         namespace: dict = {}
@@ -283,8 +303,13 @@ class ListenTests(unittest.TestCase):
     def test_a_value_that_is_not_a_number_is_refused(self) -> None:
         doc, grid = gen_contracts.load_yaml("listen.yaml"), gen_contracts.grid_values()
         original = gen_contracts.load_yaml
-        for section, name in (("features", "n_bands"), ("pitch", "min_f0_hz")):
-            bad = {**doc, section: {**doc[section], name: "40"}}
+        for section, name, value in (
+            ("features", "n_bands", "40"),
+            ("pitch", "min_f0_hz", "40"),
+            ("kaldi_pitch", "min_f0_hz", "40"),
+            ("pitch", "stream", "yes"),
+        ):
+            bad = {**doc, section: {**doc[section], name: value}}
             gen_contracts.load_yaml = lambda _, bad=bad: bad
             try:
                 with self.assertRaisesRegex(ValueError, f"{section}.{name}"):

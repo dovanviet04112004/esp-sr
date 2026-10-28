@@ -537,7 +537,7 @@ static void fill_voice(void)
 
 static void bench_pitch(void)
 {
-    const dsp_spec_pitch_config_t cfg = GEN_LISTEN_PITCH_CONFIG;
+    const dsp_spec_pitch_config_t cfg = GEN_LISTEN_KALDI_PITCH_CONFIG;
     row_t row = {.module = "dsp_spec pitch Kaldi (vùng làm việc PSRAM)", .core = CORE_NHAN, .in_total = true};
     row.hot_bytes = dsp_spec_pitch_workspace_bytes(&cfg);
     void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_SPIRAM);
@@ -625,21 +625,10 @@ static void bench_swift_front(void)
     }
 }
 
-#define SWIFT_VOICED 0.5f // pitch_source's confidence threshold (command_ctc.yaml)
-
-// Syllables of 18 frames split by gaps of 6, a frame a hop; the look-ahead the utterance gap, as KEHOACH 3.11
-// sets it.
+// Syllables of 18 frames split by gaps of 6, a frame a hop, through listen.yaml's dims.
 static void bench_swift_dims(void)
 {
-    const dsp_spec_pitch_config_t pitch = GEN_LISTEN_PITCH_CONFIG;
-    const dsp_spec_swift_dims_config_t cfg = {
-        .confidence = SWIFT_VOICED,
-        .left_frames =
-            (int)lrintf(pitch.normalization_left_s * GEN_GRID_SAMPLE_RATE_HZ / GEN_GRID_HOP_SAMPLES),
-        .right_frames = GEN_LISTEN_UTTERANCE_GAP_HOPS,
-        .pov_scale = pitch.pov_scale,
-        .pitch_scale = pitch.pitch_scale,
-        .delta_scale = pitch.delta_pitch_scale};
+    const dsp_spec_swift_dims_config_t cfg = GEN_LISTEN_SWIFT_DIMS_CONFIG;
     row_t row = {.module = "dsp_spec swift_dims ba chiều cao độ của SwiftF0", .core = CORE_NHAN};
     row.hot_bytes = dsp_spec_swift_dims_workspace_bytes(&cfg);
     void *mem = malloc(row.hot_bytes);

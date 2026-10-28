@@ -313,7 +313,7 @@ def test_kaldi_hears_a_run_on_its_mel_from_build_only_if_that_is_the_contracts_f
     cfg = {"simulate": {"mel_from": "v7"}, "split": {"version": "v8"}, "listen": learnt, "listen_hash": 0}
     monkeypatch.setattr(quant.data, "unbuilt", lambda _cfg, _paths: [])
     heard = quant.kaldi_cfg(cfg, {})
-    assert heard["split"]["version"] == "v7" and heard["listen"]["pitch"] == contract_front()["pitch"]
+    assert heard["split"]["version"] == "v7" and heard["listen"]["pitch"] == dict(listen.KALDI_PITCH)
     assert heard["listen_hash"] == listen.HASH and cfg["split"]["version"] == "v8"
     monkeypatch.setattr(quant.data, "unbuilt", lambda _cfg, _paths: [Path("v7/test")])
     with pytest.raises(ValueError, match="not the contract's front"):

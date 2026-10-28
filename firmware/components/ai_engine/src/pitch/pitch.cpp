@@ -5,7 +5,6 @@
 #include "core/branch.hpp"
 #include "core/espdl_net.hpp"
 #include "core/model_image.hpp"
-#include "dsp_spec/pitch.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "gen_listen.h"
@@ -139,10 +138,10 @@ esp_err_t pitch_load() noexcept
         pitch_drop();
         return ESP_ERR_INVALID_SIZE;
     }
-    const dsp_spec_pitch_config_t range = GEN_LISTEN_PITCH_CONFIG;
     s.held = static_cast<int8_t *>(heap_caps_calloc(s.lead, AI_ENGINE_PITCH_BINS, MALLOC_CAP_SPIRAM));
-    if (s.held == nullptr || !ai_engine_pitch_decoder_init(&s.decoder, range.min_f0_hz, range.max_f0_hz,
-                                                           s.logits.exponent, s.sure.exponent)) {
+    if (s.held == nullptr ||
+        !ai_engine_pitch_decoder_init(&s.decoder, GEN_LISTEN_PITCH_MIN_F0_HZ, GEN_LISTEN_PITCH_MAX_F0_HZ,
+                                      s.logits.exponent, s.sure.exponent)) {
         ESP_LOGE(TAG, "%s: no memory for its held logits, or no step within the F0 range", kEntry);
         pitch_drop();
         return ESP_ERR_NO_MEM;

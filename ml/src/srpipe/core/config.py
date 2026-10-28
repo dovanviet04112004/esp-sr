@@ -47,14 +47,21 @@ def apply_overrides(cfg: dict[str, Any], overrides: list[str]) -> dict[str, Any]
 
 
 def contract_front() -> dict[str, Any]:
-    """The recogniser's front end of contracts/listen.yaml: the features and the pitch tracker (KEHOACH 3.11)."""
+    """The recogniser's front end of contracts/listen.yaml: the features and the pitch, SwiftF0 as the board streams
+    it (KEHOACH 3.11)."""
     return {"features": dict(listen.FEATURES), "pitch": dict(listen.PITCH)}
 
 
 def on_contract_pitch(cfg: dict[str, Any]) -> dict[str, Any]:
-    """cfg heard through the contract's pitch, Kaldi's tracker as the board runs it, in place of the pitch its front
-    learnt on: how a pitch_source run would do on the board as it is (KEHOACH 3.11)."""
+    """cfg heard through the contract's pitch, as the board runs it, in place of the pitch its front learnt on
+    (KEHOACH 3.11)."""
     return cfg | {"listen": front_of(cfg) | {"pitch": contract_front()["pitch"]}}
+
+
+def on_kaldi_pitch(cfg: dict[str, Any]) -> dict[str, Any]:
+    """cfg heard through Kaldi's tracker of listen.yaml's kaldi_pitch, as the board ran it until 29/10 (KEHOACH
+    3.11)."""
+    return cfg | {"listen": front_of(cfg) | {"pitch": dict(listen.KALDI_PITCH)}}
 
 
 def front_of(cfg: dict[str, Any]) -> dict[str, Any]:

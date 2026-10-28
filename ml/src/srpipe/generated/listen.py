@@ -2,10 +2,21 @@
 # Source: contracts/listen.yaml
 # Regenerate: python3 tools/gen_contracts.py
 
-VERSION = 5
-HASH = 0x354b1ae6
+VERSION = 6
+HASH = 0x2bd4316d
 FEATURES = {'n_bands': 80, 'f_min_hz': 20.0, 'f_max_hz': 7600.0, 'log_floor': 1e-06}
-PITCH = {'resample_hz': 4000.0,
+PITCH = {'source': 'swiftf0',
+ 'int8': {'run': '20261028_eb08333-dirty_9ab2ce', 'row': 'kl'},
+ 'stream': True,
+ 'min_f0_hz': 50.0,
+ 'max_f0_hz': 400.0,
+ 'confidence': 0.5,
+ 'normalization_left_s': 0.75,
+ 'normalization_right_s': 0.4,
+ 'pov_scale': 2.0,
+ 'pitch_scale': 2.0,
+ 'delta_pitch_scale': 10.0}
+KALDI_PITCH = {'resample_hz': 4000.0,
  'lowpass_cutoff_hz': 1000.0,
  'lowpass_zeros': 1,
  'upsample_zeros': 5,

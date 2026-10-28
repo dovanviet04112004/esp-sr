@@ -24,7 +24,7 @@ import yaml
 
 from srpipe.core import corpus
 from srpipe.core.audio_io import to_float
-from srpipe.core.config import data_paths, device_of, load_run_config, load_yaml, on_contract_pitch
+from srpipe.core.config import data_paths, device_of, load_run_config, load_yaml, on_kaldi_pitch
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.stft import Stft
@@ -511,7 +511,7 @@ def main(argv: list[str] | None = None) -> int:
     ctc_cfg = load_yaml(ctc.CONFIG)
     net = load_ctc(args.run, args.commands)
     if args.kaldi_pitch:
-        net = replace(net, cfg=on_contract_pitch(net.cfg))
+        net = replace(net, cfg=on_kaldi_pitch(net.cfg))
     forms = sum(len(v) for v in net.lexicon)
     said = f"{len(net.names)} commands of {args.commands.name}, {forms} variants"
     held_dims = f", {args.hold} held" if args.hold else ""

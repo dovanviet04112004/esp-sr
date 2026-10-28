@@ -13,7 +13,7 @@ import pytest
 
 from srpipe.core.config import PITCH_SHARED, contract_front, front_of
 from srpipe.dsp.spec.pitch import PitchConfig, PitchTracker
-from srpipe.generated import grid
+from srpipe.generated import grid, listen
 from srpipe.scenes import device, swift_pitch
 
 SPEC = {k: contract_front()["pitch"][k] for k in PITCH_SHARED} | {
@@ -100,7 +100,7 @@ def test_the_detector_hears_the_whole_hops_in_float_at_the_grid_rate_within_the_
 def test_pitch_of_runs_kaldis_tracker_unless_the_spec_names_swiftf0(monkeypatch: pytest.MonkeyPatch) -> None:
     rng = np.random.default_rng(7)
     clean = (rng.standard_normal(40 * grid.HOP_SAMPLES) * 3000).astype(np.int16)
-    kaldi = contract_front()["pitch"]
+    kaldi = dict(listen.KALDI_PITCH)
     tracker = PitchTracker(PitchConfig(**kaldi))
     assert np.array_equal(device.pitch_of(kaldi)(clean), device.stream_pitch(tracker, clean))
     fixed = Fixed(np.full(40, 150.0), np.ones(40))

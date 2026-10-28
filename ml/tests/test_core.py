@@ -14,6 +14,7 @@ import soundfile as sf
 import yaml
 
 from srpipe.core import audio_io, config, logger, run_dir, seed
+from srpipe.generated import listen
 
 
 def test_a_history_row_prints_counts_whole_and_measures_to_four_digits() -> None:
@@ -147,10 +148,12 @@ def test_a_ramp_fades_both_edges_and_leaves_the_middle() -> None:
     assert audio_io.ramped(np.ones(10), 0.01).max() <= 1.0
 
 
-def test_a_pitch_source_run_can_be_heard_through_the_boards_kaldi_pitch() -> None:
+def test_a_pitch_source_run_can_be_heard_through_the_boards_pitch_or_kaldis() -> None:
     front = config.contract_front()
     swift = {"listen": front | {"pitch": {"source": "swiftf0", "pitch_scale": 2.0}}, "train": {"steps": 1}}
     heard = config.on_contract_pitch(swift)
     assert heard["listen"]["pitch"] == front["pitch"] and heard["listen"]["features"] == front["features"]
     assert heard["train"] == swift["train"] and swift["listen"]["pitch"]["source"] == "swiftf0"
     assert config.on_contract_pitch({"pitch_source": {"source": "swiftf0"}})["listen"]["pitch"] == front["pitch"]
+    kaldi = config.on_kaldi_pitch(swift)["listen"]
+    assert kaldi["pitch"] == dict(listen.KALDI_PITCH) and kaldi["features"] == front["features"]
