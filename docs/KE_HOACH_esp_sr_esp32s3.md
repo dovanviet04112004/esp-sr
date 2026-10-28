@@ -3496,7 +3496,10 @@ RAM nội. Hai ngoại lệ:
   mạng đọc trọng số tại chỗ. b0 chậm 3,8% để đổi 1,72 MB PSRAM (`measurements/latency.md` §25, chủ repo 11/10).
 - **Op của `ai_engine` mượn RAM nội cho trọng số trong lúc mạng chạy** (ADR-0025, chủ repo 28/10, `espdl_loan`).
   - `ConvBlock` chạy nhân chung (C khác 24 và 48) xin lúc dựng số byte trọng số nó đọc ở từng điểm ảnh.
-  - `EspdlNet::step` cấp một vùng RAM nội cỡ lần xin lớn nhất ngay trước lượt chạy và nhả ngay sau. b3 cần 79 680 B.
+  - `EspdlNet::step` cấp vùng ngay trước lượt chạy và nhả ngay sau. Vùng là khối RAM nội liền lớn nhất còn trống,
+    tối đa bằng lần xin lớn nhất, chừa lại `AI_ENGINE_LOAN_RESERVE_BYTES` (Kconfig) cho các task khác.
+  - b3 xin 79 680 B. Trên firmware sản phẩm, lúc nghe khối lớn nhất chỉ còn 49 152 B (`measurements/ram.md` §4),
+    nên mỗi op dùng phần được cấp thật.
   - Mỗi khối chép trọng số của nó vào vùng ấy lúc bắt đầu. Trọng số cộng hai vòng ba hàng và một đệm dải còn vừa
     thì các hàng ấy cũng nằm ở đó, không thì ở PSRAM; khối không xin thêm byte nào cho chúng.
   - `PointwiseS8` nhân chung không xin thêm byte nào: nó mượn chính vùng ấy theo lát, chép mỗi lát trước khi chạy.
@@ -3505,10 +3508,11 @@ RAM nội. Hai ngoại lệ:
   - Op riêng cũng dùng vùng ấy làm vùng nháp khi vừa (hàng đệm, hàng ra, tổng tạm), không xin thêm byte nào:
     `TimeDepthwise` đặt hàng đệm và hàng ra ở đó.
   - Ở hai nhân (ADR-0027) mỗi nửa của `ConvBlock` có vòng hàng, đệm dải và hàng vào conv sau riêng, cả hai trong
-    vùng; vùng không đủ cho cả hai thì khối chạy cả hàng ở một nhân, vùng vẫn 79 680 B.
+    vùng; vùng được cấp không đủ cho cả hai thì khối chạy cả hàng ở một nhân.
 
   Lý do: dcache của S3 không giữ dòng nóng, nên mỗi hàng đẩy trọng số ra và đọc lại từ flash
-  (`measurements/latency.md` §31). Không cấp được thì op đọc trọng số tại chỗ, chậm hơn, cùng kết quả.
+  (`measurements/latency.md` §31). Mỗi op chọn cách chạy theo cỡ được cấp lúc chạy: thứ vừa thì chép vào, thứ không
+  vừa thì đọc tại chỗ. Kết quả như nhau ở mọi cỡ, chỉ giờ chạy khác.
 
 Kéo trọng số `ns` (104 KB với RNNoise-16k,
 337 KB với NSNet-16k L) và `wake` (~100 KB) về RAM nội như luật "chỉ giữ thứ bị chạm mỗi khung" của TỔNG QUAN
