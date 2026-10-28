@@ -1654,10 +1654,10 @@ mỗi bước một commit.
       Các nhãn ấy là nhân float của esp-dl, đường không căn, vòng gọi nhân một lần mỗi điểm ảnh, và chuỗi op mà op nào
       cũng đọc ghi cả tensor qua PSRAM. Bản vá trong `esp_ppq_patches` viết lại đồ thị sau `prepare_graph` của ESP-PPQ,
       khi bố cục, lưới và số mũ đã chốt, nên op riêng đọc đúng các tensor và lưới mà các op esp-dl kia đọc.
-      `ai_engine/src/core/espdl/espdl_<op>.cpp` cài module cùng tên với `esp_ppq_patches/ops/<op>.py`, đăng ký với
-      `ModuleCreator` của esp-dl trước model đầu tiên. Module tính bằng nhân PIE viết tay (`<họ>_s8_esp32s3.S`, macro
-      dùng chung ở `pie_s8_esp32s3.inc`) hay gọi đúng nhân esp-dl trên từng dải hàng nằm trong cache dữ
-      liệu. Mỗi số nguyên ra phải đúng là số mà các op esp-dl kia tính, nên mô phỏng không đổi: qua khi bản dò khớp từng
+      `ai_engine/src/core/espdl/ops/espdl_<op>.cpp` cài module cùng tên với `esp_ppq_patches/ops/<op>.py`, đăng ký
+      với `ModuleCreator` của esp-dl trước model đầu tiên. Module tính bằng nhân PIE viết tay
+      (`kernels/<họ>_s8_esp32s3.S`, macro dùng chung ở `kernels/pie_s8_esp32s3.inc`) hay gọi đúng nhân esp-dl trên
+      từng dải hàng nằm trong cache dữ liệu. Mỗi số nguyên ra phải đúng là số mà các op esp-dl kia tính, nên mô phỏng không đổi: qua khi bản dò khớp từng
       bit ở cả đồ thị lẫn mọi bản cắt; giữ khi giờ trên board giảm, khớp mà chậm hơn thì bỏ. Phần float của op riêng
       chép đúng chuỗi phép của bản vá mô phỏng (`layernorm_as_espdl`, `softmax_as_espdl`): dựng không `-ffast-math`,
       không gộp nhân-cộng ngầm, chỗ chip gộp thì gọi `fmaf` tường minh.
@@ -2514,12 +2514,17 @@ firmware/
 │   ├── sys_storage/   [C]   L2  # NVS + LittleFS + mmap ảnh model; sở hữu storage_format.h
 │   ├── sys_time/      [C]   L2  # SNTP
 │   ├── ai_engine/     [C++] L3  # esp-dl; src/core/ không biết tên model;
-│   │                            #   src/core/espdl/: op riêng espdl_<op>.{cpp,hpp} đăng ký với esp-dl (§3.14),
-│   │                            #   nhân PIE <họ>_s8_esp32s3.S, macro PIE dùng chung pie_s8_esp32s3.inc,
-│   │                            #   các bước float32 kiểu esp-dl mà op dùng chung espdl_float_s3.hpp,
-│   │                            #   vùng RAM nội op mượn cho trọng số lúc chạy espdl_loan.{cpp,hpp} (§6.5),
-│   │                            #   chuỗi vùng nạp trước vào dcache espdl_preload.{cpp,hpp} (§3.14),
-│   │                            #   chia việc của op cho hai nhân espdl_split.hpp cùng espdl_split_{one,two}.cpp (§5.1);
+│   │                            #   src/core/espdl/: espdl_ops.{cpp,hpp} đăng ký op riêng với esp-dl (§3.14);
+│   │                            #     ops/ mỗi op riêng một cặp espdl_<op>.{cpp,hpp}, một-một với
+│   │                            #     esp_ppq_patches/ops/<op>.py, cùng các bước float32 kiểu esp-dl mà op dùng
+│   │                            #     chung espdl_float_s3.hpp;
+│   │                            #     kernels/ nhân PIE <họ>_s8_esp32s3.S đặt tên theo việc chúng làm (depthwise,
+│   │                            #     pointwise, pointwise_fused, layernorm, group_norm, softmax, stats, stage_sum),
+│   │                            #     dùng chung giữa các op, cùng macro PIE pie_s8_esp32s3.inc;
+│   │                            #     runtime/ phần chạy chung của op: vùng RAM nội mượn lúc chạy
+│   │                            #     espdl_loan.{cpp,hpp} (§6.5), chuỗi vùng nạp trước vào dcache
+│   │                            #     espdl_preload.{cpp,hpp} (§3.14), chia việc của op cho hai nhân
+│   │                            #     espdl_split.hpp cùng espdl_split_{one,two}.cpp (§5.1);
 │   │                            #   src/{ns,ns_rnnoise,ns_nsnet,wake,command_kws,command_ctc,command_rnnt,speaker,synth}/;
 │   │                            #   Kconfig AI_ENGINE_NS_BACKEND chọn một thư mục ns*, AI_ENGINE_COMMAND_BACKEND
 │   │                            #   một thư mục command_*, AI_ENGINE_CORES một espdl_split_* vào danh sách nguồn
@@ -2669,8 +2674,9 @@ việc, chạy, đo — không biết tên model nào. Mỗi model một thư m�
 hậu xử lý riêng của nó (dải của `ns_rnnoise`, log công suất và sigmoid của `ns_nsnet`, làm trơn đầu ra `wake`, chấm CTC
 của `command_ctc`, luật từ chối của `command_kws`, điểm với mẫu giọng của `speaker`). Phần hậu xử lý
 là C thuần và có golden riêng, dù nằm trong component C++. `src/core/espdl/` giữ các op riêng mà bước xuất sinh ra
-(§3.14 bước 2.5): mỗi op một cặp `.cpp` và `.hpp`, nhân PIE của nó ở `<nhân>_esp32s3.S`. Chúng biết op, không biết
-model, và chạy trên nhân của task gọi model, cộng `phu_task` ở nhân 1 khi bật hai nhân (§5.1). Vùng đệm của op riêng thuộc từng module, không dùng chung giữa các
+(§3.14 bước 2.5): mỗi op một cặp `.cpp` và `.hpp` ở `ops/`, nhân PIE dùng chung ở `kernels/`, phần chạy chung của
+op (vùng mượn, preload, chia hai nhân) ở `runtime/`. Chúng biết op, không biết model, và chạy trên nhân của task gọi
+model, cộng `phu_task` ở nhân 1 khi bật hai nhân (§5.1). Vùng đệm của op riêng thuộc từng module, không dùng chung giữa các
 model: `nhan_task` và `xac_task` đều gọi model và có thể giành nhau giữa chừng (§5.2).
 
 #### 4.5.5 Hợp đồng gọi — đóng băng ở E3
