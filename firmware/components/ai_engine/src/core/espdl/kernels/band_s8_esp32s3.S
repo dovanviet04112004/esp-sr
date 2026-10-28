@@ -97,7 +97,8 @@ ai_engine_band_conv_s8_esp32s3:
 // void ai_engine_band_<variant>_s8_esp32s3(int8_t *out, const int32_t *run)
 // run: bands, band table, input step between band taps, output band stride, mac shift less 1, bias, residual shift
 // less 1 (-1: added as it is), residual less output address, then the columns of the time taps, then each time
-// tap's weights [band tap][lanes][16]. Variants: k1 and k3 the time taps, res a residual, linear no ReLU; 12 lanes.
+// tap's weights [band tap][lanes][16]. Variants: k1 and k3 the time taps, res a residual, linear no ReLU; 12 lanes
+// unless l3, three.
 
 // QACC += one input pixel's lanes in \in times their weight rows, streaming two steps ahead through q1 and q2 from
 // a8; \first 1 when q2 holds the pixel's first row.
@@ -200,3 +201,4 @@ ai_engine_band_conv_s8_esp32s3:
     band_fast ai_engine_band_k1_linear_s8_esp32s3, 1, 12, 0, 0
     band_fast ai_engine_band_k3_s8_esp32s3, 3, 12, 0, 1
     band_fast ai_engine_band_k3_res_s8_esp32s3, 3, 12, 1, 1
+    band_fast ai_engine_band_k3_l3_s8_esp32s3, 3, 3, 0, 1
