@@ -2,7 +2,7 @@
 # esp-dl into the parity app (KEHOACH 4.5.4).
 set(ai_engine "${CMAKE_CURRENT_LIST_DIR}/../../../components/ai_engine")
 set(ai_engine_src "${ai_engine}/src")
-set(srcs "parity_main.c" "parity_common.c" "parity_stft.c" "parity_mel.c" "parity_spk_fbank.c" "parity_pitch.c"
+set(srcs "parity_main.c" "parity_common.c" "parity_stft.c" "parity_mel.c" "parity_spk_fbank.c" "parity_swift_front.c" "parity_pitch.c"
     "parity_chain.c"
     "parity_lang_vi.c" "parity_command_kws.c" "${ai_engine_src}/command_kws/decide.c"
     "parity_command_ctc.c" "${ai_engine_src}/command_ctc/ctc_score.c" "parity_command_rnnt.c"

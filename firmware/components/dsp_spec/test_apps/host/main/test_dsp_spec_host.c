@@ -19,9 +19,8 @@ static const struct {
     const char *block;
     parity_runner_t run;
 } kBlocks[] = {
-    {"stft", parity_stft},
-    {"mel", parity_mel},
-    {"spk_fbank", parity_spk_fbank},
+    {"stft", parity_stft},           {"mel", parity_mel},
+    {"spk_fbank", parity_spk_fbank}, {"swift_front", parity_swift_front},
     {"pitch", parity_pitch},
 };
 

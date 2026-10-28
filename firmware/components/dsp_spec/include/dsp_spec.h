@@ -5,4 +5,5 @@
 #include "dsp_spec/pitch.h"
 #include "dsp_spec/spk_fbank.h"
 #include "dsp_spec/stft.h"
+#include "dsp_spec/swift_front.h"
 #include "dsp_spec/window.h"
