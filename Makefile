@@ -648,11 +648,12 @@ ai-unit-speaker: ## Run the speaker build of the ai_engine suite on board B: RUN
 
 # A row of pitch-ptq's ladder goes to model slot 0 with its cuts; one window is checked against Python and timed,
 # module by module too; slot 0 ends erased (KEHOACH 3.11 step 2). With STEP the graph streams STEP frames a call
-# instead and the window goes through it call by call (step 3.2).
-ai-unit-pitch: ## Run the pitch build of the ai_engine suite on board B: RUN=<run> ROW=<row of its int8/ladder.yaml> [FRAMES=<n>] [CUT_RANGE="<first op> <last op>"] [CUTS=<n>] [STEP=<frames a call>] (E11-T37)
+# instead and the window goes through it call by call (step 3.2); with CHAIN PCM goes through the front end, the
+# network and the decode as the product runs them (step 3.4).
+ai-unit-pitch: ## Run the pitch build of the ai_engine suite on board B: RUN=<run> ROW=<row of its int8/ladder.yaml> [FRAMES=<n>] [CUT_RANGE="<first op> <last op>"] [CUTS=<n>] [STEP=<frames a call>] [CHAIN=1] (E11-T37)
 	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.pitch.probe --run $(RUN) --row $(ROW) \
 	  $(if $(FRAMES),--frames $(FRAMES)) $(if $(CUT_RANGE),--cut-range $(CUT_RANGE)) $(if $(CUTS),--cuts $(CUTS)) \
-	  $(if $(STEP),--stream $(STEP))
+	  $(if $(STEP),--stream $(STEP)) $(if $(CHAIN),--chain)
 	@$(call fresh_sdkconfig,$(UNIT_APP)/build_pitch/sdkconfig,$(call app_defaults,$(UNIT_APP)))
 	cd $(UNIT_APP) && rm -f build_pitch/unit.status && idf.py -B build_pitch -D SDKCONFIG=build_pitch/sdkconfig -D UNIT_PROFILE=pitch build && \
 	  $(WRITE_PART) models_0 --input main/probe/pitch_models.bin && \

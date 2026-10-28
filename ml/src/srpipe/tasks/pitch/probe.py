@@ -15,11 +15,13 @@ from pathlib import Path
 import numpy as np
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
-from srpipe.core.config import ML_ROOT, data_paths, load_yaml
+from srpipe.core.config import ML_ROOT, contract_front, data_paths, load_yaml
 from srpipe.dsp.spec import swift_front
 from srpipe.export import pack_models
+from srpipe.generated import grid
 from srpipe.tasks.command.ctc.probe import ESPDL_HEAD_BYTES
 from srpipe.tasks.pitch import quant
+from srpipe.tasks.pitch.postproc import decode
 from srpipe.tasks.speaker.probe import cut_points, truncated
 
 PROBE_DIR = ML_ROOT.parent / "firmware" / "components" / "ai_engine" / "test_apps" / "unit" / "main" / "probe"
@@ -36,6 +38,11 @@ PORT_NAME_BYTES = 32
 # The streaming record: the same head, then each port as PORT followed by the frames it trails the input.
 STREAM_MAGIC = b"SRPS"
 STREAM_PORT = struct.Struct("<32sIii")
+# The chain record: magic, timed runs, hops of PCM, frames checked, frames the decoded ones trail the front's; then
+# the hops' int16 samples, then the frames' float32 ln Hz and confidence.
+CHAIN_HEAD = struct.Struct("<4sIIII")
+CHAIN_MAGIC = b"SRPC"
+CHAIN_HOPS = 400  # 6.4 s of the session
 
 
 def window(cfg: dict, run: Path, paths: dict, frames: int = quant.CHUNK_HOPS) -> np.ndarray:
@@ -165,6 +172,64 @@ def probe_stream(cfg: dict, run: Path, row: str, out: Path, spectra: np.ndarray,
     return image, record
 
 
+def chain_pcm(cfg: dict, paths: dict, hops: int) -> np.ndarray:
+    """hops whole hops of int16 clean samples: the loudest stretch of a val session of quant.build drawn with the
+    seed and simulated again."""
+    rng = np.random.default_rng([cfg["quant"]["seed"], PROBE_STREAM])
+    (clean,) = quant.drawn_cleans(paths, cfg["quant"]["build"], ["val"], 1, rng)
+    pcm = np.round(np.asarray(clean, np.float64) * swift_front.PCM_FULL_SCALE).astype(np.int16)
+    whole = len(pcm) // grid.HOP_SAMPLES
+    hops = min(hops, whole)
+    energy = np.square(pcm[: whole * grid.HOP_SAMPLES].astype(np.float64)).reshape(whole, -1).sum(axis=1)
+    start = int(np.argmax(np.convolve(energy, np.ones(hops), "valid"))) * grid.HOP_SAMPLES
+    return pcm[start : start + hops * grid.HOP_SAMPLES]
+
+
+def probe_chain(cfg: dict, run: Path, row: str, out: Path, pcm: np.ndarray) -> tuple[Path, Path]:
+    """Write out/pitch_models.bin with the row exported to stream deploy.step_frames a call and the front end's
+    tables, and out/pitch_window.bin with pcm and what the chain gives the chip will run (KEHOACH 3.11 step 3.4):
+    swift_front hop by hop, the frames on the input's int8 grid, the network simulated over all of them, then
+    decode_int8, on every frame whose decoded value the chip gives once the last call is in."""
+    step = cfg["deploy"]["step_frames"]
+    windows, bands = quant.front_tables(run / quant.MODEL_FILE)
+    front = swift_front.SwiftFront(windows, {n: swift_front.sparse(bands[n]) for n in swift_front.SIZES})
+    hops = pcm.reshape(-1, grid.HOP_SAMPLES)
+    frames = [f for f in (front.push(hop) for hop in hops) if f is not None]
+    taken = len(frames) // step * step
+    spectra = np.stack(frames[:taken], axis=-1)[None]
+    graph = export_espdl.load_native(run / quant.INT8_DIR / row / quant.GRAPH_FILE)
+    (port_in,), ports_out = ptq_espdl.ports_of(graph)
+    quant.framed(graph, taken)
+    x = ptq_espdl.to_int8(spectra, port_in.exponent).astype(np.float32) * np.float32(2.0**port_in.exponent)
+    logits, sure = ptq_espdl.Simulator(graph, cfg["esp_ppq_patches"]).run(x)
+    pitch = contract_front()["pitch"]
+    log_f0, confidence = decode.decode_int8(
+        ptq_espdl.to_int8(logits[0], ports_out[0].exponent),
+        ports_out[0].exponent,
+        ptq_espdl.to_int8(sure[0], ports_out[1].exponent),
+        ports_out[1].exponent,
+        pitch["min_f0_hz"],
+        pitch["max_f0_hz"],
+    )
+    quant.framed(graph, step)
+    with esp_ppq_patches.applied([*cfg["esp_ppq_patches"], quant.STREAM_PATCH]):
+        espdl = export_espdl.export(graph, run / quant.INT8_DIR / row / "chain" / f"{ENTRY}.espdl")
+    delay = max(quant.output_delays(espdl.with_suffix(".info").read_text(), [p.name for p in ports_out]))
+    checked = taken - delay
+    out.mkdir(parents=True, exist_ok=True)
+    image = out / MODELS_FILE
+    entries = [
+        pack_models.Entry(ENTRY, "espdl", espdl.read_bytes()),
+        pack_models.Entry(ENTRY, "front", quant.front_blob(windows, bands)),
+    ]
+    image.write_bytes(pack_models.pack(entries))
+    record = out / WINDOW_FILE
+    head = CHAIN_HEAD.pack(CHAIN_MAGIC, cfg["probe"]["runs"], len(hops), checked, delay)
+    record.write_bytes(head + pcm.astype("<i2").tobytes() + log_f0[:checked].tobytes() + confidence[:checked].tobytes())
+    print(f"{ENTRY}: {len(hops)} hops, {taken} front frames in calls of {step}, {checked} decoded frames checked")
+    return image, record
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--run", type=Path, required=True, help="a run of python -m srpipe.tasks.pitch.quant import")
@@ -173,12 +238,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cuts", type=int, help="cuts of the graph in the image; probe.cuts otherwise")
     parser.add_argument("--frames", type=int, default=quant.CHUNK_HOPS, help="frames of the window, its first ones")
     parser.add_argument("--stream", type=int, help="frames a call: export the graph to stream instead")
+    parser.add_argument("--chain", action="store_true", help="PCM through the front end, network and decode instead")
     parser.add_argument("--out", type=Path, default=PROBE_DIR)
     args = parser.parse_args(argv)
     cfg = load_yaml(quant.CONFIG)
     if args.cuts is not None:
         cfg = cfg | {"probe": cfg["probe"] | {"cuts": args.cuts}}
     span = tuple(args.cut_range) if args.cut_range else None
+    if args.chain:
+        for path in probe_chain(cfg, args.run, args.row, args.out, chain_pcm(cfg, data_paths(), CHAIN_HOPS)):
+            print(f"{path}: {path.stat().st_size} bytes")
+        return 0
     spectra = window(cfg, args.run, data_paths(), args.frames)
     if args.stream:
         written = probe_stream(cfg, args.run, args.row, args.out, spectra, args.stream)
