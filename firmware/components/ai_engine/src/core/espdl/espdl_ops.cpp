@@ -5,6 +5,7 @@
 #include "core/espdl/ops/espdl_band_chain.hpp"
 #include "core/espdl/ops/espdl_band_head.hpp"
 #include "core/espdl/ops/espdl_band_stem.hpp"
+#include "core/espdl/ops/espdl_band_tail.hpp"
 #include "core/espdl/ops/espdl_conv_block.hpp"
 #include "core/espdl/ops/espdl_global_stats.hpp"
 #include "core/espdl/ops/espdl_group_norm_s8.hpp"
@@ -43,6 +44,7 @@ void register_espdl_ops() noexcept
     creator->register_module("BandHead", band_head_from);
     creator->register_module("BandStem", band_stem_from);
     creator->register_module("BandChain", band_chain_from);
+    creator->register_module("BandTail", band_tail_from);
 }
 
 } // namespace ai

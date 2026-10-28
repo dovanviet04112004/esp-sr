@@ -25,12 +25,14 @@ namespace {
 const char *TAG = "band_stem";
 
 constexpr size_t kRank = 4;
-constexpr int kChannels = 16; // an output pixel's values, one vector
-constexpr int kLanes = 3;     // inputs a pixel of ai_engine_band_k3_l3_s8_esp32s3
-constexpr int kTaps = 3;      // bands and frames
+constexpr int kChannels = 16;    // an output pixel's values, one vector
+constexpr int kLanes = 3;        // inputs a pixel of ai_engine_band_k3_l3_s8_esp32s3
+constexpr int kTaps = 3;         // bands and frames
+constexpr int kKept = kTaps - 1; // laid columns a streaming call takes from the last
 constexpr size_t kVectorAlignBytes = 16;
 constexpr size_t kStreamSlackBytes = 32; // two weight rows the kernel reads past a column
 constexpr int kTableWords = 3;           // a band's first input offset, first weight offset, taps
+constexpr int kWindow = -1;              // the delay of an op running one window a call
 
 enum Input { kX = 0, kWeights, kBias };
 // Slots of the fast kernels' run.
@@ -81,15 +83,23 @@ int32_t word_of(const void *p) noexcept
 }
 
 // Inputs as esp_ppq_patches.band_stem_from lays them: x [1, B, T, 3], weights [3][3][3][16], bias [16].
+// With a delay it streams (KEHOACH 3.11 step 3.2): output frame t of a call is input frame t - 1.
 class BandStem final : public dl::module::Module {
   public:
-    BandStem(const char *name, int shift)
-        : Module(name, dl::MODULE_NON_INPLACE, dl::QUANT_TYPE_SYMM_8BIT), shift_(shift)
+    BandStem(const char *name, int shift, int delay)
+        : Module(name, dl::MODULE_NON_INPLACE, dl::QUANT_TYPE_SYMM_8BIT), shift_(shift), delay_(delay)
     {}
 
     ~BandStem() override
     {
         heap_caps_free(table_);
+        heap_caps_free(kept_);
+    }
+
+    void reset() override
+    {
+        seen_ = 0;
+        if (kept_ != nullptr) { memset(kept_, 0, kKept * column_bytes_); }
     }
 
     BandStem(const BandStem &) = delete;
@@ -119,6 +129,10 @@ class BandStem final : public dl::module::Module {
         }
         const int8_t *xs = x->get_element_ptr<int8_t>();
         int8_t *ys = y->get_element_ptr<int8_t>();
+        if (kept_ != nullptr) {
+            stream(ring, xs, ys);
+            return;
+        }
         lay_out(ring, xs, 0);
         for (int t = 0; t < frames_; t++) {
             if (t + 1 < frames_) { lay_out(ring + (t + 1) % kTaps * column_bytes_, xs, t + 1); }
@@ -140,19 +154,55 @@ class BandStem final : public dl::module::Module {
     {
         int shift = 0;
         int lanes = 0;
+        int delay = 0;
         dl::quant_type_t quant_type = dl::QUANT_TYPE_NONE;
         fbs_model->get_operation_attribute(node_name, "shift", shift);
         fbs_model->get_operation_attribute(node_name, "lanes", lanes);
         fbs_model->get_operation_attribute(node_name, "quant_type", quant_type);
-        if (quant_type != dl::QUANT_TYPE_SYMM_8BIT || shift < 1 || lanes != kLanes) {
-            ESP_LOGE(TAG, "%s: only an int8 stem of 3 inputs and a shift of 1 or more runs as BandStem",
+        const bool streams = fbs_model->get_operation_attribute(node_name, "delay", delay) == ESP_OK;
+        if (quant_type != dl::QUANT_TYPE_SYMM_8BIT || shift < 1 || lanes != kLanes ||
+            (streams && delay < 1)) {
+            ESP_LOGE(TAG,
+                     "%s: only an int8 stem of 3 inputs, a shift and any delay of 1 or more runs as BandStem",
                      node_name.c_str());
             return nullptr;
         }
-        return new BandStem(node_name.c_str(), shift);
+        return new BandStem(node_name.c_str(), shift, streams ? delay : kWindow);
     }
 
   private:
+    int8_t *slot(int8_t *ring, int t) const noexcept
+    {
+        return ring + (t % kTaps + kTaps) % kTaps * column_bytes_;
+    }
+
+    // Output column t reads laid columns t - 2 to t; columns -2 and -1 are the last call's, zeros after a
+    // reset.
+    void stream(int8_t *ring, const int8_t *xs, int8_t *ys) noexcept
+    {
+        for (int k = 0; k < kKept; k++) {
+            memcpy(slot(ring, k - kKept), kept_ + k * column_bytes_, column_bytes_);
+        }
+        const int first = seen_ - delay_;
+        for (int t = 0; t < frames_; t++) {
+            lay_out(slot(ring, t), xs, t);
+            if (first + t < 0) {
+                for (int b = 0; b < bands_; b++) {
+                    memset(ys + (b * frames_ + t) * kChannels, 0, kChannels);
+                }
+                continue;
+            }
+            for (int c = 0; c < kTaps; c++) {
+                fast_[kFastColumns + c] = word_of(slot(ring, t - kKept + c));
+            }
+            ai_engine_band_k3_l3_s8_esp32s3(ys + t * kChannels, fast_.data());
+        }
+        for (int k = 0; k < kKept; k++) {
+            memcpy(kept_ + k * column_bytes_, slot(ring, frames_ - kKept + k), column_bytes_);
+        }
+        seen_ = std::min(seen_ + frames_, delay_);
+    }
+
     // Frame t's column of x, its 3 values a band, laid 16 bytes a band at column; lanes 3 to 15 go unread.
     void lay_out(int8_t *column, const int8_t *xs, int t) const noexcept
     {
@@ -186,7 +236,10 @@ class BandStem final : public dl::module::Module {
         scratch_bytes_ = weight_stride_ + (1 + kTaps) * column_bytes_;
         table_ = static_cast<int32_t *>(
             heap_caps_malloc(bands_ * kTableWords * sizeof(int32_t), MALLOC_CAP_SPIRAM));
-        if (table_ == nullptr || !scratch_holds(scratch_bytes_)) {
+        if (delay_ != kWindow) {
+            kept_ = static_cast<int8_t *>(heap_caps_calloc(kKept, column_bytes_, MALLOC_CAP_SPIRAM));
+        }
+        if (table_ == nullptr || !scratch_holds(scratch_bytes_) || (delay_ != kWindow && kept_ == nullptr)) {
             ESP_LOGE(TAG, "%s: no memory for its band table, weights and columns", name);
             return false;
         }
@@ -208,6 +261,8 @@ class BandStem final : public dl::module::Module {
     }
 
     int shift_;
+    int delay_;    // frames behind the graph input, or kWindow
+    int seen_ = 0; // frames taken since the reset, held once past delay_
     int bands_ = 0;
     int frames_ = 0;
     size_t weight_bytes_ = 0;
@@ -215,6 +270,7 @@ class BandStem final : public dl::module::Module {
     size_t column_bytes_ = 0;
     size_t scratch_bytes_ = 0; // weights, a column of zeros, then the column ring
     int32_t *table_ = nullptr; // in PSRAM
+    int8_t *kept_ = nullptr;   // the last call's last laid columns, when streaming
     std::array<int32_t, kFastSize> fast_ = {};
     bool built_ = false;
 };

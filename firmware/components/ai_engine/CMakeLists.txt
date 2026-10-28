@@ -2,7 +2,7 @@ set(espdl "src/core/espdl")
 set(srcs "src/core/engine.cpp" "src/core/model_image.cpp" "src/core/espdl_net.cpp" "${espdl}/espdl_ops.cpp"
          "${espdl}/ops/espdl_attention.cpp" "${espdl}/ops/espdl_band_block.cpp" "${espdl}/ops/espdl_band_chain.cpp"
          "${espdl}/ops/espdl_band_head.cpp"
-         "${espdl}/ops/espdl_band_stem.cpp" "${espdl}/ops/espdl_conv_block.cpp"
+         "${espdl}/ops/espdl_band_stem.cpp" "${espdl}/ops/espdl_band_tail.cpp" "${espdl}/ops/espdl_conv_block.cpp"
          "${espdl}/ops/espdl_global_stats.cpp"
          "${espdl}/ops/espdl_group_norm_s8.cpp" "${espdl}/ops/espdl_layernorm_s8.cpp" "${espdl}/ops/espdl_matmul_s8.cpp"
          "${espdl}/ops/espdl_pointwise_s8.cpp" "${espdl}/ops/espdl_softmax_quant.cpp" "${espdl}/ops/espdl_stage_sum.cpp"

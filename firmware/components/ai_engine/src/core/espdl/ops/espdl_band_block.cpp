@@ -36,6 +36,7 @@ constexpr int kTimeTapsMax = 3;
 constexpr size_t kVectorAlignBytes = 16;
 constexpr size_t kStreamSlackBytes = 32; // two weight rows the kernel reads past a column
 constexpr int kTableWords = 3;           // a band's first input offset, first weight offset, taps
+constexpr int kWindow = -1;              // the delay of an op running one window a call
 
 enum Input { kX = 0, kW1, kB1, kW2, kB2 };
 enum Shift { kShift1 = 0, kShift2, kShiftResidual, kShifts };
@@ -106,14 +107,24 @@ int32_t word_of(const void *p) noexcept
 // [time tap][band tap][12][16] and bias [16]; a column is a frame, its bands a pixel or a row apart.
 class BandBlock final : public dl::module::Module {
   public:
-    BandBlock(const char *name, int band_taps, int time_taps, int dilation, std::vector<int> shifts)
+    BandBlock(const char *name, int band_taps, int time_taps, int dilation, std::vector<int> shifts,
+              int delay)
         : Module(name, dl::MODULE_NON_INPLACE, dl::QUANT_TYPE_SYMM_8BIT), band_taps_(band_taps),
-          time_taps_(time_taps), dilation_(dilation), shifts_(std::move(shifts))
+          time_taps_(time_taps), dilation_(dilation), shifts_(std::move(shifts)), delay_(delay)
     {}
 
     ~BandBlock() override
     {
         heap_caps_free(tables_);
+        heap_caps_free(kept_x_);
+        heap_caps_free(kept_middle_);
+    }
+
+    void reset() override
+    {
+        seen_ = 0;
+        if (kept_x_ != nullptr) { memset(kept_x_, 0, static_cast<size_t>(bands_) * frames_ * kChannels); }
+        if (kept_middle_ != nullptr) { memset(kept_middle_, 0, (time_taps_ - 1) * column_bytes()); }
     }
 
     BandBlock(const BandBlock &) = delete;
@@ -147,6 +158,10 @@ class BandBlock final : public dl::module::Module {
         for (int c = 0; c < time_taps_; c++) {
             first_fast_[kFastWeights + c] = word_of(w1 + c * first_[kRunTapBytes]);
             second_fast_[kFastWeights + c] = word_of(w2 + c * second_[kRunTapBytes]);
+        }
+        if (delay_ != kWindow) {
+            stream(ys);
+            return;
         }
         const int half = time_taps_ / 2;
         for (int t = 0; t < half && t < frames_; t++) {
@@ -183,30 +198,95 @@ class BandBlock final : public dl::module::Module {
         std::vector<int> shifts;
         int dilation = 0;
         int in_channels = 0;
+        int delay = 0;
         dl::quant_type_t quant_type = dl::QUANT_TYPE_NONE;
         fbs_model->get_operation_attribute(node_name, "kernel", kernel);
         fbs_model->get_operation_attribute(node_name, "dilation", dilation);
         fbs_model->get_operation_attribute(node_name, "shifts", shifts);
         fbs_model->get_operation_attribute(node_name, "in_channels", in_channels);
         fbs_model->get_operation_attribute(node_name, "quant_type", quant_type);
+        const bool streams = fbs_model->get_operation_attribute(node_name, "delay", delay) == ESP_OK;
         const bool kernel_fits =
             kernel.size() == 2 && kernel[0] % 2 == 1 && (kernel[1] == 1 || kernel[1] == 3);
         const bool shifts_fit = shifts.size() == kShifts && shifts[kShift1] >= 1 && shifts[kShift2] >= 1 &&
                                 shifts[kShiftResidual] >= 0;
         if (quant_type != dl::QUANT_TYPE_SYMM_8BIT || !kernel_fits || dilation < 1 || !shifts_fit ||
-            in_channels != kInChannels) {
+            in_channels != kInChannels || (streams && delay < kernel[1] - 1)) {
             ESP_LOGE(TAG,
-                     "%s: only int8 blocks of an odd band kernel, 1 or 3 frames, 12 inputs run as BandBlock",
+                     "%s: only int8 blocks of an odd band kernel, 1 or 3 frames, 12 inputs, any delay past "
+                     "their own run as BandBlock",
                      node_name.c_str());
             return nullptr;
         }
-        return new BandBlock(node_name.c_str(), kernel[0], kernel[1], dilation, std::move(shifts));
+        return new BandBlock(node_name.c_str(), kernel[0], kernel[1], dilation, std::move(shifts),
+                             streams ? delay : kWindow);
     }
 
   private:
+    size_t column_bytes() const noexcept
+    {
+        return static_cast<size_t>(bands_) * kChannels;
+    }
+
     int8_t *middle_column(int t) const noexcept
     {
-        return ring_ + (t % time_taps_) * bands_ * kChannels;
+        return ring_ + (t % time_taps_ + time_taps_) % time_taps_ * column_bytes();
+    }
+
+    // Input column t of a streaming call; a negative t is the last call's column, at its place in kept_x_.
+    const int8_t *input_column(int t) const noexcept
+    {
+        return t >= 0 ? xs_ + t * kChannels : kept_x_ + (frames_ + t) * kChannels;
+    }
+
+    // Output column t is centred on input column t - 2 half; middle columns under -half are the last call's.
+    void stream(int8_t *ys) noexcept
+    {
+        const int half = time_taps_ / 2;
+        const int lead = 2 * half;
+        for (int k = 0; k < lead; k++) {
+            memcpy(middle_column(k - 3 * half), kept_middle_ + k * column_bytes(), column_bytes());
+        }
+        const int input_first = seen_ - (delay_ - lead);
+        const int output_first = seen_ - delay_;
+        const int row = frames_ * kChannels;
+        for (int t = 0; t < frames_; t++) {
+            stream_middle(t - half, input_first + t - half);
+            int8_t *out = ys + t * kChannels;
+            if (output_first + t < 0) {
+                for (int b = 0; b < bands_; b++) {
+                    memset(out + b * row, 0, kChannels);
+                }
+                continue;
+            }
+            for (int c = 0; c < time_taps_; c++) {
+                second_fast_[kFastColumns + c] = word_of(middle_column(t - 3 * half + c));
+            }
+            second_fast_[kFastResidualDelta] = word_of(input_column(t - lead)) - word_of(out);
+            second_kernel_(out, second_fast_.data());
+        }
+        for (int k = 0; k < lead; k++) {
+            memcpy(kept_middle_ + k * column_bytes(), middle_column(frames_ - 3 * half + k), column_bytes());
+        }
+        for (int b = 0; b < bands_; b++) {
+            const int at = b * row + (frames_ - lead) * kChannels;
+            memcpy(kept_x_ + at, xs_ + at, lead * kChannels);
+        }
+        seen_ = std::min(seen_ + frames_, delay_);
+    }
+
+    // Middle column t of a streaming call, the first convolution's with ReLU; zeros where no frame is.
+    void stream_middle(int t, int frame) noexcept
+    {
+        if (frame < 0) {
+            memset(middle_column(t), 0, column_bytes());
+            return;
+        }
+        const int half = time_taps_ / 2;
+        for (int c = 0; c < time_taps_; c++) {
+            first_fast_[kFastColumns + c] = word_of(input_column(t - half + c));
+        }
+        first_kernel_(middle_column(t), first_fast_.data());
     }
 
     // The first convolution's column t, ReLU on, into the ring.
@@ -273,6 +353,16 @@ class BandBlock final : public dl::module::Module {
             ESP_LOGE(TAG, "%s: no memory for its weights and %d middle columns", name, time_taps_);
             return false;
         }
+        if (delay_ != kWindow && time_taps_ > 1) {
+            kept_x_ = static_cast<int8_t *>(heap_caps_aligned_calloc(
+                kVectorAlignBytes, static_cast<size_t>(bands_) * frames_, kChannels, MALLOC_CAP_SPIRAM));
+            kept_middle_ =
+                static_cast<int8_t *>(heap_caps_calloc(time_taps_ - 1, column_bytes(), MALLOC_CAP_SPIRAM));
+            if (kept_x_ == nullptr || kept_middle_ == nullptr) {
+                ESP_LOGE(TAG, "%s: no memory for the columns it keeps between calls", name);
+                return false;
+            }
+        }
         tables_ = static_cast<int32_t *>(
             heap_caps_malloc(2 * bands_ * kTableWords * sizeof(int32_t), MALLOC_CAP_SPIRAM));
         if (tables_ == nullptr) {
@@ -320,6 +410,10 @@ class BandBlock final : public dl::module::Module {
     int time_taps_;
     int dilation_;
     std::vector<int> shifts_;
+    int delay_;                     // frames behind the graph input, or kWindow
+    int seen_ = 0;                  // frames taken since the reset, held once past delay_
+    int8_t *kept_x_ = nullptr;      // the last call's last input columns, laid as x
+    int8_t *kept_middle_ = nullptr; // and its last middle columns
     int bands_ = 0;
     int frames_ = 0;
     size_t weight_bytes_ = 0;

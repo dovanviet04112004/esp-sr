@@ -34,6 +34,7 @@ constexpr int kColumns = 3;     // a block's input, middle and output columns
 constexpr size_t kVectorAlignBytes = 16;
 constexpr size_t kStreamSlackBytes = 32; // two weight rows the kernel reads past a column
 constexpr int kTableWords = 3;           // a band's first input offset, first weight offset, taps
+constexpr int kWindow = -1;              // the delay of an op running one window a call
 
 enum Param { kW1 = 0, kB1, kW2, kB2 };
 // Slots of the fast kernels' run.
@@ -92,14 +93,19 @@ struct Block {
 class BandChain final : public dl::module::Module {
   public:
     BandChain(const char *name, std::vector<int> band_taps, std::vector<int> dilations,
-              std::vector<int> shifts)
+              std::vector<int> shifts, int delay)
         : Module(name, dl::MODULE_NON_INPLACE, dl::QUANT_TYPE_SYMM_8BIT), band_taps_(std::move(band_taps)),
-          dilations_(std::move(dilations)), shifts_(std::move(shifts))
+          dilations_(std::move(dilations)), shifts_(std::move(shifts)), delay_(delay)
     {}
 
     ~BandChain() override
     {
         heap_caps_free(tables_);
+    }
+
+    void reset() override
+    {
+        seen_ = 0;
     }
 
     BandChain(const BandChain &) = delete;
@@ -132,7 +138,15 @@ class BandChain final : public dl::module::Module {
         const int8_t *xs = x->get_element_ptr<int8_t>();
         int8_t *ys = y->get_element_ptr<int8_t>();
         const int row = frames_ * kChannels;
+        // Frames earlier than the stream come out zeros, as the window's padding gives them.
+        const int first = delay_ == kWindow ? 0 : seen_ - delay_;
         for (int t = 0; t < frames_; t++) {
+            if (first + t < 0) {
+                for (int band = 0; band < bands_; band++) {
+                    memset(ys + band * row + t * kChannels, 0, kChannels);
+                }
+                continue;
+            }
             int8_t *in = columns;
             int8_t *middle = in + column_bytes_;
             int8_t *out = middle + column_bytes_;
@@ -151,6 +165,7 @@ class BandChain final : public dl::module::Module {
                 memcpy(ys + band * row + t * kChannels, in + band * kChannels, kChannels);
             }
         }
+        if (delay_ != kWindow) { seen_ = std::min(seen_ + frames_, delay_); }
     }
 
     void print() override
@@ -166,7 +181,9 @@ class BandChain final : public dl::module::Module {
         std::vector<int> dilations;
         std::vector<int> shifts;
         int in_channels = 0;
+        int delay = 0;
         dl::quant_type_t quant_type = dl::QUANT_TYPE_NONE;
+        const bool streams = fbs_model->get_operation_attribute(node_name, "delay", delay) == ESP_OK;
         fbs_model->get_operation_attribute(node_name, "band_taps", band_taps);
         fbs_model->get_operation_attribute(node_name, "dilations", dilations);
         fbs_model->get_operation_attribute(node_name, "shifts", shifts);
@@ -174,7 +191,7 @@ class BandChain final : public dl::module::Module {
         fbs_model->get_operation_attribute(node_name, "quant_type", quant_type);
         bool fits = quant_type == dl::QUANT_TYPE_SYMM_8BIT && in_channels == kInChannels &&
                     !band_taps.empty() && dilations.size() == band_taps.size() &&
-                    shifts.size() == kShifts * band_taps.size();
+                    shifts.size() == kShifts * band_taps.size() && (!streams || delay >= 0);
         for (size_t i = 0; fits && i < band_taps.size(); i++) {
             fits = band_taps[i] % 2 == 1 && dilations[i] >= 1 && shifts[kShifts * i] >= 1 &&
                    shifts[kShifts * i + 1] >= 1 && shifts[kShifts * i + 2] >= 0;
@@ -185,8 +202,8 @@ class BandChain final : public dl::module::Module {
                      node_name.c_str());
             return nullptr;
         }
-        return new BandChain(node_name.c_str(), std::move(band_taps), std::move(dilations),
-                             std::move(shifts));
+        return new BandChain(node_name.c_str(), std::move(band_taps), std::move(dilations), std::move(shifts),
+                             streams ? delay : kWindow);
     }
 
   private:
@@ -271,6 +288,8 @@ class BandChain final : public dl::module::Module {
     std::vector<int> band_taps_;
     std::vector<int> dilations_;
     std::vector<int> shifts_;
+    int delay_;    // frames behind the graph input, or kWindow
+    int seen_ = 0; // frames taken since the reset, held once past delay_
     int bands_ = 0;
     int frames_ = 0;
     size_t column_bytes_ = 0;

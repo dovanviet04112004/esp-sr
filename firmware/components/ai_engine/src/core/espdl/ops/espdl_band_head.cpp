@@ -39,6 +39,8 @@ constexpr size_t kStreamSlackBytes = 32; // two weight rows the kernel reads pas
 constexpr int kTableWords = 3;           // a band's first input offset, first weight offset, taps
 constexpr int kInt8Min = -128;
 constexpr int kInt8Max = 127;
+constexpr int kKept = kHeadTaps - 1; // input columns a streaming call takes from the last
+constexpr int kWindow = -1;          // the delay of an op running one window a call
 
 enum Input { kX = 0, kHeadW, kHeadB, kSpreadW, kSpreadB, kPitchW, kPitchB };
 enum Output { kLogits = 0, kPeaks };
@@ -129,14 +131,21 @@ void fill_table(int32_t *table, int out_bands, int in_bands, int below, int taps
 // [3][3][12][16] and bias [16]; the 5x1 one's [1][5][12][16] and [16]; the 1x1 one's [1][N] and [1].
 class BandHead final : public dl::module::Module {
   public:
-    BandHead(const char *name, std::vector<int> shifts, int bands)
+    BandHead(const char *name, std::vector<int> shifts, int bands, int delay)
         : Module(name, dl::MODULE_NON_INPLACE, dl::QUANT_TYPE_SYMM_8BIT), shifts_(std::move(shifts)),
-          bands_(bands)
+          bands_(bands), delay_(delay)
     {}
 
     ~BandHead() override
     {
         heap_caps_free(tables_);
+        heap_caps_free(kept_x_);
+    }
+
+    void reset() override
+    {
+        seen_ = 0;
+        if (kept_x_ != nullptr) { memset(kept_x_, 0, static_cast<size_t>(bands_) * frames_ * kChannels); }
     }
 
     BandHead(const BandHead &) = delete;
@@ -179,9 +188,20 @@ class BandHead final : public dl::module::Module {
         int8_t *peak = peaks->get_element_ptr<int8_t>();
         const int out_bands = bands_ - 1;
         const int8_t *columns[kHeadTaps];
+        const bool streams = delay_ != kWindow;
         for (int t = 0; t < frames_; t++) {
-            const int first = t - kHeadTaps / 2;
-            if (first >= 0 && first + kHeadTaps <= frames_) {
+            if (streams && seen_ - delay_ + t < 0) {
+                zero_frame(logit, peak, t);
+                continue;
+            }
+            // A streaming call's column t is centred on input column t - 1, the window's on t.
+            const int first = t - kHeadTaps / 2 - (streams ? 1 : 0);
+            if (streams) {
+                for (int c = 0; c < kHeadTaps; c++) {
+                    head_fast_[kFastColumns + c] = word_of(input_column(xs, first + c));
+                }
+                ai_engine_band_k3_s8_esp32s3(head, head_fast_.data());
+            } else if (first >= 0 && first + kHeadTaps <= frames_) {
                 for (int c = 0; c < kHeadTaps; c++) {
                     head_fast_[kFastColumns + c] = word_of(xs + (first + c) * kChannels);
                 }
@@ -209,6 +229,7 @@ class BandHead final : public dl::module::Module {
                 logit[b * frames_ + t] = rounded(acc, shifts_[kShiftPitch]);
             }
         }
+        if (streams) { keep(xs); }
     }
 
     void print() override
@@ -221,20 +242,50 @@ class BandHead final : public dl::module::Module {
     {
         std::vector<int> shifts;
         int bands = 0;
+        int delay = 0;
         dl::quant_type_t quant_type = dl::QUANT_TYPE_NONE;
         fbs_model->get_operation_attribute(node_name, "shifts", shifts);
         fbs_model->get_operation_attribute(node_name, "bands", bands);
         fbs_model->get_operation_attribute(node_name, "quant_type", quant_type);
+        const bool streams = fbs_model->get_operation_attribute(node_name, "delay", delay) == ESP_OK;
         if (quant_type != dl::QUANT_TYPE_SYMM_8BIT || shifts.size() != kShifts ||
-            *std::min_element(shifts.begin(), shifts.end()) < 1 || bands < kSpreadTaps) {
-            ESP_LOGE(TAG, "%s: only an int8 head of shifts 1 or more over enough bands runs as BandHead",
+            *std::min_element(shifts.begin(), shifts.end()) < 1 || bands < kSpreadTaps ||
+            (streams && delay < 1)) {
+            ESP_LOGE(TAG,
+                     "%s: only an int8 head of shifts 1 or more over enough bands, any delay 1 or more, runs "
+                     "as BandHead",
                      node_name.c_str());
             return nullptr;
         }
-        return new BandHead(node_name.c_str(), std::move(shifts), bands);
+        return new BandHead(node_name.c_str(), std::move(shifts), bands, streams ? delay : kWindow);
     }
 
   private:
+    // Input column t of a streaming call; a negative t is the last call's column, at its place in kept_x_.
+    const int8_t *input_column(const int8_t *xs, int t) const noexcept
+    {
+        return t >= 0 ? xs + t * kChannels : kept_x_ + (frames_ + t) * kChannels;
+    }
+
+    void zero_frame(int8_t *logit, int8_t *peak, int t) const noexcept
+    {
+        for (int b = 0; b < bands_ - 1; b++) {
+            logit[b * frames_ + t] = 0;
+        }
+        memset(peak + t * outputs_, 0, outputs_);
+    }
+
+    // The last kKept input columns of the bands the head reads, for the next call; then the frames taken.
+    void keep(const int8_t *xs) noexcept
+    {
+        const int row = frames_ * kChannels;
+        for (int b = 0; b < bands_; b++) {
+            const int at = b * row + (frames_ - kKept) * kChannels;
+            memcpy(kept_x_ + at, xs + at, kKept * kChannels);
+        }
+        seen_ = std::min(seen_ + frames_, delay_);
+    }
+
     bool build(dl::ModelContext *context, dl::TensorBase *x, dl::TensorBase *logits, dl::TensorBase *peaks)
     {
         dl::TensorBase *pitch_w = context->get_tensor(m_inputs_index[kPitchW]);
@@ -270,7 +321,12 @@ class BandHead final : public dl::module::Module {
         scratch_bytes_ = head_stride_ + spread_stride_ + 2 * column_bytes_;
         tables_ = static_cast<int32_t *>(
             heap_caps_malloc(2 * out_bands * kTableWords * sizeof(int32_t), MALLOC_CAP_SPIRAM));
-        if (tables_ == nullptr || !scratch_holds(scratch_bytes_)) {
+        if (delay_ != kWindow) {
+            kept_x_ = static_cast<int8_t *>(heap_caps_aligned_calloc(
+                kVectorAlignBytes, static_cast<size_t>(bands_) * frames_, kChannels, MALLOC_CAP_SPIRAM));
+        }
+        if (tables_ == nullptr || !scratch_holds(scratch_bytes_) ||
+            (delay_ != kWindow && kept_x_ == nullptr)) {
             ESP_LOGE(TAG, "%s: no memory for its band tables, weights and columns", name);
             return false;
         }
@@ -318,6 +374,9 @@ class BandHead final : public dl::module::Module {
 
     std::vector<int> shifts_;
     int bands_;
+    int delay_;                // frames behind the graph input, or kWindow
+    int seen_ = 0;             // frames taken since the reset, held once past delay_
+    int8_t *kept_x_ = nullptr; // the last call's last input columns, laid as x
     int frames_ = 0;
     int outputs_ = 0;
     size_t head_bytes_ = 0;
