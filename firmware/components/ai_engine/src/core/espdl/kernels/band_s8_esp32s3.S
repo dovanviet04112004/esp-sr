@@ -8,8 +8,8 @@
 // read 32 bytes past a column's last tap. run: bands, band table (per band: the first tap's input offset, its
 // weight offset, taps), time taps, weight bytes a time tap, input step between band taps, output band stride, mac
 // shift (1 or more), bias, residual (0 none, else its shift onto the sum's exponent plus 1), residual less output
-// address. With a residual, x as esp-dl's int8 RequantizeLinear rounds it is added saturating as its Add does;
-// then max(0, .). out: one column, band 0 first.
+// address, ReLU (1) or not (0). With a residual, x as esp-dl's int8 RequantizeLinear rounds it is added saturating
+// as its Add does; then max(0, .) with ReLU. out: one column, band 0 first.
 
 #include "pie_s8_esp32s3.inc"
 
@@ -80,8 +80,11 @@ ai_engine_band_conv_s8_esp32s3:
 5:
     ee.vadds.s8     q3, q3, q4
 6:
+    l32i    a11, a5, 40
+    beqz    a11, 7f
     movi.n  a15, 0
     ee.vrelu.s8     q3, a15, a15
+7:
     l32i    a11, a5, 20
     ee.vst.128.xp   q3, a2, a11
     addi    a7, a7, 12

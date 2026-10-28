@@ -47,6 +47,7 @@ enum Run {
     kRunBias,
     kRunResidual,
     kRunResidualDelta,
+    kRunRelu,
     kRunSize
 };
 
@@ -242,7 +243,8 @@ class BandBlock final : public dl::module::Module {
         fill_table(tables_ + bands_ * kTableWords, kChannels);
         const int32_t tap_bytes = band_taps_ * kInChannels * kChannels;
         first_ = {bands_,    word_of(tables_), time_taps_, tap_bytes, dilation_ * row,
-                  kChannels, shifts_[kShift1], 0,          0,         0};
+                  kChannels, shifts_[kShift1], 0,          0,         0,
+                  1};
         second_ = {bands_,
                    word_of(tables_ + bands_ * kTableWords),
                    time_taps_,
@@ -252,7 +254,8 @@ class BandBlock final : public dl::module::Module {
                    shifts_[kShift2],
                    0,
                    shifts_[kShiftResidual] + 1,
-                   0};
+                   0,
+                   1};
         loan_ask(scratch_bytes_);
         built_ = true;
         return true;
