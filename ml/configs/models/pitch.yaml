@@ -5,7 +5,8 @@ source:                            # make pitch-import: the network as the swift
   file: model.onnx
   sha256: 6385e8c2ebc3872e82c9ff5946228de44cd3be77a750ea53698b7dbfe94b0a22
 rewrite_rtol: 1.0e-4               # largest gap of model.py's network to the ONNX's, as a share of its largest output
-esp_ppq_patches: []                # srpipe.compress.quant.esp_ppq_patches around this branch's quantisation and export
+esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches around this branch's quantisation and export
+  - aligned_channels               # KEHOACH 3.14 step 2.3: 12-channel trunk padded to 16, the vector path
 quant:                             # make pitch-ptq RUN=: rung 2 of KEHOACH 3.14 on the network after the front end
   build: v8                        # processed/command/<build>: v8's sessions, simulated again for their clean samples
   seed: 20261028
