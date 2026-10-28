@@ -52,6 +52,7 @@ static const struct {
     {"mel", parity_mel},
     {"spk_fbank", parity_spk_fbank},
     {"swift_front", parity_swift_front},
+    {"swift_dims", parity_swift_dims},
     {"pitch", parity_pitch},
     {"g2p", parity_g2p},
     {"normalize", parity_normalize},

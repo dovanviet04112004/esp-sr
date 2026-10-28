@@ -52,5 +52,8 @@ static inline float spec_bin_magnitude(float re, float im)
 // spec_bin_magnitude of each of the n / 2 + 1 bins dsp_spec_fft_forward gives for in times window.
 esp_err_t spec_fft_magnitudes(dsp_spec_fft_t *fft, const float *in, const float *window, float *magnitude);
 
+// Kaldi's POV feature of an NCCF in [-1, 1], (1.0001 - c)^0.15 - 1, in double, as pitch.py takes it.
+float spec_pov_feature(float nccf);
+
 // The module's float32 ln, within 2e-6 of ln, as srpipe.dsp.spec.mel.ln_f32 takes it (ADR-0020).
 float spec_ln_f32(float x);

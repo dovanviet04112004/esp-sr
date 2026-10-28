@@ -11,7 +11,7 @@ set(REPORT "${FIRMWARE}/test_apps/components/test_report")
 add_library(test_report_host STATIC "${REPORT}/test_report.c")
 target_include_directories(test_report_host PUBLIC "${REPORT}/include")
 add_library(dsp_spec_host_lib STATIC
-    "${SPEC}/src/window.c" "${SPEC}/src/stft.c" "${SPEC}/src/mel.c" "${SPEC}/src/spk_fbank.c" "${SPEC}/src/swift_front.c" "${SPEC}/src/pitch.c"
+    "${SPEC}/src/window.c" "${SPEC}/src/stft.c" "${SPEC}/src/mel.c" "${SPEC}/src/spk_fbank.c" "${SPEC}/src/swift_front.c" "${SPEC}/src/swift_dims.c" "${SPEC}/src/pitch.c"
     "${SPEC}/src/fft.c")
 target_include_directories(dsp_spec_host_lib
     PUBLIC "${CMAKE_CURRENT_LIST_DIR}/shim" "${SPEC}/include" "${FIRMWARE}/components/common/include"
@@ -23,7 +23,7 @@ target_link_libraries(dsp_spec_host_lib PUBLIC m)
 
 add_executable(dsp_spec_host
     main/test_dsp_spec_host.c "${PARITY}/parity_common.c" "${PARITY}/parity_stft.c" "${PARITY}/parity_mel.c"
-    "${PARITY}/parity_spk_fbank.c" "${PARITY}/parity_swift_front.c" "${PARITY}/parity_pitch.c")
+    "${PARITY}/parity_spk_fbank.c" "${PARITY}/parity_swift_front.c" "${PARITY}/parity_swift_dims.c" "${PARITY}/parity_pitch.c")
 target_include_directories(dsp_spec_host PRIVATE "${PARITY}")
 set_target_properties(dsp_spec_host PROPERTIES C_STANDARD 17 C_EXTENSIONS ON)
 target_compile_options(dsp_spec_host PRIVATE -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare)

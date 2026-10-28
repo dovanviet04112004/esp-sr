@@ -471,7 +471,7 @@ static float nccf_to_pov(float nccf)
     return (float)(1.0 / (1.0 + exp(-r)));
 }
 
-static float nccf_to_pov_feature(float nccf)
+float spec_pov_feature(float nccf)
 {
     const double c = fmin(fmax((double)nccf, -1.0), 1.0);
     return (float)(pow(1.0001 - c, 0.15) - 1.0);
@@ -526,7 +526,7 @@ static void features_of_newest(dsp_spec_pitch_t *p, float *out)
         delta += scale * traced_at(p, slot, p->path[k])->log_pitch;
     }
     const float nccf = p->pov_nccf[newest_slot * n + state];
-    out[0] = p->cfg.pov_scale * nccf_to_pov_feature(nccf);
+    out[0] = p->cfg.pov_scale * spec_pov_feature(nccf);
     out[1] = (newest_log_pitch - sum_log_pitch_pov / sum_pov) * p->cfg.pitch_scale;
     out[2] = delta * p->cfg.delta_pitch_scale;
     p->latest_nccf = nccf;
