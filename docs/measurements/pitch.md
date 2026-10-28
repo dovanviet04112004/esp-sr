@@ -244,3 +244,36 @@ ra.
   `BandStem` 1,8 ms, ReduceMean 0,7 ms, còn lại 0,4 ms.
 - Sàn của cách tính theo dải: `ee.vsmulas.s8.qacc` dùng 12 trong 16 làn, nên 2,2 triệu phép nhân-cộng thật của thân
   cần ít nhất ~0,76 ms mỗi hop.
+
+## 7. SwiftF0, bước 3 trên chip (KẾ HOẠCH §3.11; E11-T37)
+
+### 7.1 Front end ở `dsp_spec` (phần 3.1, 28/10)
+
+`dsp_spec/swift_front` qua đủ bốn bước của TỔNG QUAN §5.3.
+
+| Bước | Kết quả |
+|---|---|
+| Bản soi gương | `srpipe.dsp.spec.swift_front` chạy từng hop như bản C; khớp từng bit bản cả đoạn của bước 1, lệch đường nhân ma trận và `np.log` cũ tối đa 6,6e-7 |
+| Bộ vàng | `contracts/golden/swift_front/`: giọng, ồn, im lặng sang âm 220 Hz, ồn gần tràn có reset giữa chừng, mỗi ca 40 hop trên cùng bảng (cửa sổ Hann tuần hoàn, 128 tam giác trên tâm log); đối chứng âm ra khung trễ một hop |
+| Khớp, máy tính | `make parity-host`: bốn ca lệch 0; đối chứng âm lệch 4,73, SNR 13,9 dB, đỏ |
+| Khớp, board B | `make parity-board`: bốn ca lệch 0; đối chứng âm 4,73, 13,9 dB, đỏ |
+| Giờ, board B | `make bench-board`, vùng làm việc 68 368 B và bảng ở PSRAM, nhân 0: **3 107 µs trung bình, 3 143 µs đỉnh mỗi hop**, 19,4% khung |
+
+Giờ gấp 2,4 lần mức ước 🔬 1 300 µs ở KẾ HOẠCH §3.11. Mức ước lấy FFT đo một mình ở `latency.md` §23 và ngoại suy
+2 048 điểm, chưa tính tới căn bậc hai, `ln` và PSRAM.
+
+Tách phần bằng các hàng đo tạm trên board B (không commit), mỗi hàng 2 000 hop sau 16 hop làm nóng:
+
+| Phần | µs mỗi hop |
+|---|---|
+| Ba FFT 1 024, 2 048, 512 điểm, đo một mình, vùng làm việc PSRAM hay RAM nội như nhau | 257 + 539 + 117 = 913 |
+| `sqrtf` cho 1 795 bin: libm chạy chuỗi `sqrt0.s` … `divn.s` của FPU qua hai lớp gọi hàm | 535 |
+| `spec_ln_f32` 384 lần, gọi sang `mel.c`, mỗi lần một phép chia | 241 |
+| Dời lịch sử 7 KB rồi nhân cửa sổ 3 584 mẫu, cả hai ở PSRAM | 508 |
+| Cả front end, vùng làm việc và bảng ở RAM nội | 2 365 |
+| Cả front end, như hàng của `budget.md` | 3 054 |
+
+- Bảng dải của model đã ghim dùng gần hết bin của cả ba FFT (bin 3–513, 6–1 025, 1–257), nên không bỏ bớt bin nào được.
+- SwiftF0 trên chip lúc này tốn ~4,8 ms mỗi hop: front end 3,1 ms cộng CNN 1,675 ms ở cửa sổ 16 khung (§6). Kaldi
+  tốn 2 101 µs. Bỏ Kaldi và chạy SwiftF0 thì các module theo nhịp hop của nhân 0 lên ~30% khung, vẫn dưới mục tiêu
+  70% của KẾ HOẠCH §5.6.
