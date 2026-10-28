@@ -29,6 +29,7 @@ const char *TAG = "global_stats";
 
 constexpr int kRank = 3;
 constexpr int kStep = 16;
+constexpr int kGroup = 64; // channels a pass: one 64-byte line of a row
 constexpr size_t kAlignBytes = 16;
 constexpr int kShifts = 2;
 // Frames whose int8 values sum within int16, as the kernels hold them.
@@ -85,22 +86,29 @@ class GlobalStats final : public dl::module::Module {
         if (!built_ && !build(x)) { return; }
         const int8_t *xs = x->get_element_ptr<int8_t>();
         int8_t *means = mean->get_element_ptr<int8_t>();
-        memset(sums_, 0, channels_ * sizeof(int16_t));
-        for (int t = 0; t < frames_; t++) {
-            ai_engine_row_sums_s8_esp32s3(sums_, xs + t * channels_, groups_);
-        }
-        const int shift = shifts_[kShiftRequantize];
-        for (int c = 0; c < channels_; c++) {
-            means[c] = mean_like_espdl(sums_[c], frames_, x->get_exponent(), mean->get_exponent());
-            centre_[c] = clip(shift > 0 ? (means[c] + (1 << (shift - 1))) >> shift : means[c]);
-        }
-        memset(sums_, 0, channels_ * sizeof(int16_t));
-        for (int t = 0; t < frames_; t++) {
-            ai_engine_centred_squares_row_s8_esp32s3(sums_, xs + t * channels_, centre_, run_.data());
-        }
         int8_t *spreads = spread->get_element_ptr<int8_t>();
-        for (int c = 0; c < channels_; c++) {
-            spreads[c] = mean_like_espdl(sums_[c], frames_, square_exponent_, spread->get_exponent());
+        const int shift = shifts_[kShiftRequantize];
+        memset(sums_, 0, channels_ * sizeof(int16_t));
+        std::array<int32_t, 2> run = run_;
+        // Both passes of a group go over its rows while they are still cached (KEHOACH 3.14).
+        for (int g = 0; g < channels_; g += kGroup) {
+            const int end = std::min(g + kGroup, channels_);
+            run[0] = (end - g) / kStep;
+            for (int t = 0; t < frames_; t++) {
+                ai_engine_row_sums_s8_esp32s3(sums_ + g, xs + t * channels_ + g, run[0]);
+            }
+            for (int c = g; c < end; c++) {
+                means[c] = mean_like_espdl(sums_[c], frames_, x->get_exponent(), mean->get_exponent());
+                centre_[c] = clip(shift > 0 ? (means[c] + (1 << (shift - 1))) >> shift : means[c]);
+                sums_[c] = 0;
+            }
+            for (int t = 0; t < frames_; t++) {
+                ai_engine_centred_squares_row_s8_esp32s3(sums_ + g, xs + t * channels_ + g, centre_ + g,
+                                                         run.data());
+            }
+            for (int c = g; c < end; c++) {
+                spreads[c] = mean_like_espdl(sums_[c], frames_, square_exponent_, spread->get_exponent());
+            }
         }
     }
 
