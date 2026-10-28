@@ -1,6 +1,6 @@
-#include "core/espdl/espdl_layernorm_s8.hpp"
+#include "core/espdl/ops/espdl_layernorm_s8.hpp"
 
-#include "core/espdl/espdl_float_s3.hpp"
+#include "core/espdl/ops/espdl_float_s3.hpp"
 
 #include <algorithm>
 #include <array>

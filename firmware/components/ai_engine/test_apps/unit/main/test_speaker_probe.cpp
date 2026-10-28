@@ -5,9 +5,9 @@
 
 #include "ai_engine.h"
 #include "app_events.h"
-#include "core/espdl/espdl_loan.hpp"
+#include "core/espdl/runtime/espdl_loan.hpp"
 #include "core/espdl/espdl_ops.hpp"
-#include "core/espdl/espdl_split.hpp"
+#include "core/espdl/runtime/espdl_split.hpp"
 #include "core/espdl_net.hpp"
 #include "core/model_image.hpp"
 #include "dl_model_base.hpp"

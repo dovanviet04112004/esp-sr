@@ -1,4 +1,4 @@
-#include "core/espdl/espdl_conv_block.hpp"
+#include "core/espdl/ops/espdl_conv_block.hpp"
 
 #include <algorithm>
 #include <array>
@@ -8,9 +8,9 @@
 #include <utility>
 #include <vector>
 
-#include "core/espdl/espdl_loan.hpp"
-#include "core/espdl/espdl_preload.hpp"
-#include "core/espdl/espdl_split.hpp"
+#include "core/espdl/runtime/espdl_loan.hpp"
+#include "core/espdl/runtime/espdl_preload.hpp"
+#include "core/espdl/runtime/espdl_split.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -87,10 +87,10 @@ enum Input { kX = 0, kDw1, kPw1, kPw1Bias, kBn, kBnBias, kDw2, kPw2, kPw2Bias, k
 enum Joined { kJoinedValues = 0, kJoinedShift, kJoinedSize };
 enum Shift { kShiftDw1 = 0, kShiftPw1, kShiftBn, kShiftDw2, kShiftPw2, kShiftResidual };
 constexpr int kRunPixels = 0; // every row kernel's run starts with its pixels
-// Slots of conv_row_s8_esp32s3.S's runs that hold addresses.
+// Slots of pointwise_fused_s8_esp32s3.S's runs that hold addresses.
 enum NormRun { kNormBias = 6, kNormWeights, kNormBnBias, kNormSize = 10 };
 enum ResidualRun { kResidualBias = 6, kResidualX, kResidualSize = 10 };
-// Slots of conv_row_s8_esp32s3.S's PointwiseS8 run.
+// Slots of pointwise_s8_esp32s3.S's PointwiseS8 run.
 enum ConvRun { kConvBias = 6, kConvSize = 11 };
 // Values a pixel the joined convolutions' kernels read in front of the block and give behind it.
 constexpr int kPreSmall = 12;

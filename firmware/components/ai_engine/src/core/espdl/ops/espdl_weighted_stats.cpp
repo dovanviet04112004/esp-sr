@@ -1,4 +1,4 @@
-#include "core/espdl/espdl_weighted_stats.hpp"
+#include "core/espdl/ops/espdl_weighted_stats.hpp"
 
 #include <algorithm>
 #include <array>
@@ -9,8 +9,8 @@
 #include <utility>
 #include <vector>
 
-#include "core/espdl/espdl_loan.hpp"
-#include "core/espdl/espdl_softmax_quant.hpp"
+#include "core/espdl/runtime/espdl_loan.hpp"
+#include "core/espdl/ops/espdl_softmax_quant.hpp"
 #include "dl_define.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"

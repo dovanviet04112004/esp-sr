@@ -1,4 +1,4 @@
-#include "core/espdl/espdl_attention.hpp"
+#include "core/espdl/ops/espdl_attention.hpp"
 
 #include <array>
 #include <cstdint>
@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-#include "core/espdl/espdl_softmax_quant.hpp"
+#include "core/espdl/ops/espdl_softmax_quant.hpp"
 #include "dl_define.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"

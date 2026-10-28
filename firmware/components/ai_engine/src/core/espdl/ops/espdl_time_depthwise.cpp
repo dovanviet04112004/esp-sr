@@ -1,4 +1,4 @@
-#include "core/espdl/espdl_time_depthwise.hpp"
+#include "core/espdl/ops/espdl_time_depthwise.hpp"
 
 #include <array>
 #include <cstdint>
@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "core/espdl/espdl_loan.hpp"
+#include "core/espdl/runtime/espdl_loan.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -29,7 +29,7 @@ constexpr int kHalfStep = 8;
 constexpr size_t kVectorAlignBytes = 16;
 
 enum Input { kX = 0, kTaps, kBias };
-// Slots of conv_block_s8_esp32s3.S's time depthwise run.
+// Slots of depthwise_s8_esp32s3.S's time depthwise run.
 enum Run { kRunRows = 0, kRunVectors, kRunTaps, kRunShift, kRunBias, kRunSize };
 
 // Padded rows, then the output rows, of whichever TimeDepthwise runs; it only grows, while graphs are built.

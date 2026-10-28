@@ -20,8 +20,8 @@ menu "ai_engine"
         prompt "cores ai_engine's own ops run on (KEHOACH 5.1, ADR-0027)"
         default AI_ENGINE_CORES_ONE
         help
-            Which src/core/espdl/espdl_split_*.cpp builds into ai_engine. With two, main creates phu_task on core 1
-            at priority 1, below thu and sach, and every op of ai_engine's own hands it half its work.
+            Which src/core/espdl/runtime/espdl_split_*.cpp builds into ai_engine. With two, main creates phu_task
+            on core 1 at priority 1, below thu and sach, and the ops that split hand it half their work.
 
         config AI_ENGINE_CORES_ONE
             bool "one: every op runs whole on the task running its network"

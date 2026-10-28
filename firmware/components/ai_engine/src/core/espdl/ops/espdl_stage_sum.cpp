@@ -1,4 +1,4 @@
-#include "core/espdl/espdl_stage_sum.hpp"
+#include "core/espdl/ops/espdl_stage_sum.hpp"
 
 #include <algorithm>
 #include <array>
@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "core/espdl/espdl_loan.hpp"
+#include "core/espdl/runtime/espdl_loan.hpp"
 #include "dl_module_base.hpp"
 #include "esp_log.h"
 #include "fbs_model.hpp"

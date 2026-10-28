@@ -1,6 +1,6 @@
-#include "core/espdl/espdl_preload.hpp"
+#include "core/espdl/runtime/espdl_preload.hpp"
 
-#include "core/espdl/espdl_split.hpp"
+#include "core/espdl/runtime/espdl_split.hpp"
 #include "esp32s3/rom/cache.h"
 #include "sdkconfig.h"
 #include "soc/soc.h"

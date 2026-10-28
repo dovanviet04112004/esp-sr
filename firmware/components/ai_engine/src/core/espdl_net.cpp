@@ -4,7 +4,7 @@
 #include <new>
 #include <string>
 
-#include "core/espdl/espdl_loan.hpp"
+#include "core/espdl/runtime/espdl_loan.hpp"
 #include "core/espdl/espdl_ops.hpp"
 #include "dl_model_base.hpp"
 #include "esp_heap_caps.h"

@@ -1,4 +1,4 @@
-#include "core/espdl/espdl_matmul_s8.hpp"
+#include "core/espdl/ops/espdl_matmul_s8.hpp"
 
 #include <array>
 #include <cstdint>

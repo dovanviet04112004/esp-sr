@@ -2,7 +2,7 @@
 #include <cstdint>
 
 #include "ai_engine.h"
-#include "core/espdl/espdl_split.hpp"
+#include "core/espdl/runtime/espdl_split.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 

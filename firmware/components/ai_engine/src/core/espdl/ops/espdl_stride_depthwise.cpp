@@ -1,4 +1,4 @@
-#include "core/espdl/espdl_stride_depthwise.hpp"
+#include "core/espdl/ops/espdl_stride_depthwise.hpp"
 
 #include <array>
 #include <cstdint>

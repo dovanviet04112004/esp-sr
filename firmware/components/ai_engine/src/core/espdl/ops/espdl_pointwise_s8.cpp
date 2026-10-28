@@ -1,4 +1,4 @@
-#include "core/espdl/espdl_pointwise_s8.hpp"
+#include "core/espdl/ops/espdl_pointwise_s8.hpp"
 
 #include <algorithm>
 #include <array>
@@ -8,9 +8,9 @@
 #include <utility>
 #include <vector>
 
-#include "core/espdl/espdl_loan.hpp"
-#include "core/espdl/espdl_preload.hpp"
-#include "core/espdl/espdl_split.hpp"
+#include "core/espdl/runtime/espdl_loan.hpp"
+#include "core/espdl/runtime/espdl_preload.hpp"
+#include "core/espdl/runtime/espdl_split.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -120,7 +120,7 @@ const Kernels *kernels_for(const Kernels *table, size_t count, int k) noexcept
     return nullptr;
 }
 
-// Slots of conv_row_s8_esp32s3.S's PointwiseS8 run.
+// Slots of pointwise_s8_esp32s3.S's PointwiseS8 run.
 enum Run {
     kRunRows = 0,
     kRunBlocks,

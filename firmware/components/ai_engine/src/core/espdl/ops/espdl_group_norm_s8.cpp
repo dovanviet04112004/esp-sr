@@ -1,4 +1,4 @@
-#include "core/espdl/espdl_group_norm_s8.hpp"
+#include "core/espdl/ops/espdl_group_norm_s8.hpp"
 
 #include <algorithm>
 #include <array>
@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "core/espdl/espdl_float_s3.hpp"
+#include "core/espdl/ops/espdl_float_s3.hpp"
 #include "dl_define.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"

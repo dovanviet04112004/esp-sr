@@ -1,4 +1,4 @@
-#include "core/espdl/espdl_stem_conv.hpp"
+#include "core/espdl/ops/espdl_stem_conv.hpp"
 
 #include <algorithm>
 #include <array>
@@ -8,8 +8,8 @@
 #include <utility>
 #include <vector>
 
-#include "core/espdl/espdl_layernorm_s8.hpp"
-#include "core/espdl/espdl_loan.hpp"
+#include "core/espdl/ops/espdl_layernorm_s8.hpp"
+#include "core/espdl/runtime/espdl_loan.hpp"
 #include "dl_define.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"

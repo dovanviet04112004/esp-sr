@@ -1,4 +1,4 @@
-#include "core/espdl/espdl_softmax_quant.hpp"
+#include "core/espdl/ops/espdl_softmax_quant.hpp"
 
 #include <algorithm>
 #include <climits>
