@@ -172,8 +172,11 @@ class ConvBlock final : public dl::module::Module {
         if (!built_ && !build(context, x, y)) { return; }
         const Loan lent = loan_lent();
         int8_t *loan = loan_bytes_ > 0 && lent.bytes >= loan_bytes_ ? lent.mem : nullptr;
-        const bool rings = loan != nullptr && ring_bytes_ > 0 && lent.bytes >= loan_bytes_ + ring_bytes_;
-        const size_t before_ends = loan_bytes_ + (rings ? ring_bytes_ : 0);
+        const bool wide = loan != nullptr && wide_bytes_ > 0 && lent.bytes >= loan_bytes_ + wide_bytes_;
+        const bool rings =
+            wide || (loan != nullptr && ring_bytes_ > 0 && lent.bytes >= loan_bytes_ + ring_bytes_);
+        const size_t before_ends = loan_bytes_ + (wide ? wide_bytes_ : rings ? ring_bytes_ : 0);
+        strip_ = wide || held_ ? width_ : kStripPixels;
         int8_t *ends =
             loan != nullptr && lent.bytes >= before_ends + ends_bytes_ ? lent.mem + before_ends : nullptr;
         const int8_t *dw1 = weights(context, kDw1, loan);
@@ -474,8 +477,8 @@ class ConvBlock final : public dl::module::Module {
                          0};
         }
         const bool shared = !held_;
-        strip_ = shared ? kStripPixels : width_;
-        ring_bytes_ = shared ? 2 * kRing * padded_row_ + strip_ * padded_ : 0;
+        ring_bytes_ = shared ? 2 * kRing * padded_row_ + kStripPixels * padded_ : 0;
+        wide_bytes_ = shared ? 2 * kRing * padded_row_ + width_ * padded_ : 0;
         if (shared) {
             for (size_t i = kDw1; i < m_inputs_index.size(); i++) {
                 (i < kInputs ? loan_bytes_ : ends_bytes_) +=
@@ -520,6 +523,7 @@ class ConvBlock final : public dl::module::Module {
     int strip_ = 0;
     size_t loan_bytes_ = 0; // its weights' bytes; 0 for the unrolled kernels
     size_t ring_bytes_ = 0; // its rings and strip buffer, when they may join the loan
+    size_t wide_bytes_ = 0; // the same with a whole row's strip buffer
     size_t ends_bytes_ = 0; // the joined convolutions' weights, after the rings
     bool built_ = false;
 };
