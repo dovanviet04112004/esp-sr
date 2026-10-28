@@ -18,6 +18,7 @@
 #include "dsp_spec/pitch.h"
 #include "dsp_spec/spk_fbank.h"
 #include "dsp_spec/stft.h"
+#include "dsp_spec/swift_front.h"
 #include "esp_app_desc.h"
 #include "esp_cpu.h"
 #include "esp_heap_caps.h"
@@ -554,6 +555,75 @@ static void bench_pitch(void)
     heap_caps_free(mem);
 }
 
+#define SWIFT_BAND_SPAN 0.04 // a band's half width over its centre bin
+
+// Tables shaped like the golden's: a periodic Hann window and BANDS triangles on log-spaced centres.
+static void swift_tables(dsp_spec_swift_front_tables_t *t, size_t points)
+{
+    float *window = heap_caps_malloc(points * sizeof(float), MALLOC_CAP_SPIRAM);
+    uint16_t *first = heap_caps_malloc(2 * DSP_SPEC_SWIFT_FRONT_BANDS * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+    float *weights = heap_caps_malloc((points / 2 + 1) * DSP_SPEC_SWIFT_FRONT_BANDS / 8 * sizeof(float),
+                                      MALLOC_CAP_SPIRAM);
+    uint16_t *count = first + DSP_SPEC_SWIFT_FRONT_BANDS;
+    for (size_t i = 0; i < points; i++) {
+        window[i] = (float)(0.5 - 0.5 * cos(2.0 * M_PI * (double)i / (double)points));
+    }
+    size_t used = 0;
+    const double last = (double)(points / 2);
+    for (size_t b = 0; b < DSP_SPEC_SWIFT_FRONT_BANDS; b++) {
+        const double centre = pow(last, (double)b / (DSP_SPEC_SWIFT_FRONT_BANDS - 1));
+        const double half = fmax(1.0, SWIFT_BAND_SPAN * centre);
+        const long lo = lround(fmax(0.0, ceil(centre - half)));
+        const long hi = lround(fmin(last, floor(centre + half)));
+        first[b] = (uint16_t)lo;
+        count[b] = (uint16_t)(hi - lo + 1);
+        for (long k = lo; k <= hi; k++) {
+            weights[used++] = (float)fmax(0.0, 1.0 - fabs((double)k - centre) / half);
+        }
+    }
+    *t =
+        (dsp_spec_swift_front_tables_t){.window = window, .first = first, .count = count, .weights = weights};
+}
+
+// fill_voice's tone through SwiftF0's front end, a frame a hop; workspace and tables in PSRAM.
+static void bench_swift_front(void)
+{
+    static const size_t points[DSP_SPEC_SWIFT_FRONT_SPECTRA] = {1024, 2048, 512};
+    row_t row = {.module = "dsp_spec swift_front ba STFT của SwiftF0 (vùng làm việc PSRAM)",
+                 .core = CORE_NHAN};
+    dsp_spec_swift_front_tables_t tables[DSP_SPEC_SWIFT_FRONT_SPECTRA];
+    for (size_t s = 0; s < DSP_SPEC_SWIFT_FRONT_SPECTRA; s++) {
+        swift_tables(&tables[s], points[s]);
+    }
+    row.hot_bytes = dsp_spec_swift_front_workspace_bytes();
+    void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_SPIRAM);
+    float *out = malloc(DSP_SPEC_SWIFT_FRONT_SPECTRA * DSP_SPEC_SWIFT_FRONT_BANDS * sizeof(float));
+    const size_t before = heap_free();
+    dsp_spec_swift_front_t *front = NULL;
+    ESP_ERROR_CHECK(dsp_spec_swift_front_init(&front, tables, mem, row.hot_bytes));
+    row.static_bytes = before - heap_free();
+    fill_voice();
+    int16_t pcm[GEN_GRID_HOP_SAMPLES];
+    timing_t t = {0};
+    for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
+        for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
+            pcm[i] = (int16_t)lrintf(s_voice[h % PITCH_VOICE_HOPS][i] * PCM_FULL_SCALE);
+        }
+        bool ready = false;
+        const uint32_t start = esp_cpu_get_cycle_count();
+        dsp_spec_swift_front_push(front, pcm, out, &ready);
+        hop_done(&t, h, start);
+    }
+    report(&row, &t);
+    heap_caps_free(mem);
+    free(out);
+    for (size_t s = 0; s < DSP_SPEC_SWIFT_FRONT_SPECTRA; s++) {
+        heap_caps_free((void *)tables[s].window);
+        heap_caps_free((void *)tables[s].first);
+        heap_caps_free((void *)tables[s].weights);
+    }
+}
+
 // fill_voice's tone as one window; workspace, features and PCM in PSRAM, as xac_task keeps them.
 static void bench_spk_fbank(void)
 {
@@ -655,6 +725,7 @@ static void core0_benches(void *done)
     bench_mel();
     vTaskDelay(1);
     bench_pitch();
+    bench_swift_front();
     vTaskDelay(1);
     bench_spk_fbank();
     xTaskNotifyGive((TaskHandle_t)done);
