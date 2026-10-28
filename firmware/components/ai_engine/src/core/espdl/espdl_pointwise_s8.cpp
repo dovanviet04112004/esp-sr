@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/espdl/espdl_loan.hpp"
+#include "core/espdl/espdl_preload.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -48,6 +49,7 @@ constexpr size_t kBiasBlockBytes = 64; // one block's bias in esp-dl's QACC layo
 constexpr size_t kPatchRank = 4;
 constexpr size_t kRank1d = 3; // [1, T, K], the only map whose rows may be a multiple of 8
 constexpr int kDataCacheBytes = CONFIG_ESP32S3_DATA_CACHE_SIZE;
+constexpr int kChunkBytes = kDataCacheBytes / 4; // a loan slice's rows a kernel call, as Preload takes them
 
 using RowKernel = void (*)(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
 
@@ -208,19 +210,21 @@ class PointwiseS8 final : public dl::module::Module {
     }
 
     // Every block over the rows, a slice at a time: as many blocks as the loan holds when one is lent, else
-    // the dcache's slices.
+    // the dcache's slices. On a loan, chunks of rows, each preloading the next one's input (ADR-0026).
     void run_slices(int8_t *ys, const int8_t *xs, const int8_t *weights, const Loan &loan) noexcept
     {
         const int blocks = padded(columns_) / kChannelStep;
         const int lent = static_cast<int>(loan.bytes / (block_bytes() + kBiasBlockBytes));
         const int per = lent > 0 ? std::min(lent, blocks) : (slice_blocks_ > 0 ? slice_blocks_ : blocks);
         const bool half = columns_ % kChannelStep != 0;
+        const int rows = run_[kRunRows];
+        const int stride = run_[kRunStride] * kChannelStep;
+        const int chunk = lent > 0 ? std::max(kChunkBytes / stride, 1) : rows;
         for (int b = 0; b < blocks; b += per) {
             const int n = std::min(per, blocks - b);
             const bool last = b + n == blocks;
             const int8_t *slice = weights + b * block_bytes();
             run_[kRunBias] = word_of(bias_ + b * kBiasBlockBytes);
-            if (residual_ != nullptr) { run_[kRunResidual] = word_of(residual_ + b * kChannelStep); }
             if (lent > 0) {
                 slice = borrowed(weights, b, n, loan);
                 run_[kRunBias] = word_of(loan.mem + n * block_bytes());
@@ -228,8 +232,18 @@ class PointwiseS8 final : public dl::module::Module {
             run_[kRunBlocks] = n;
             run_[kRunLast] = !half ? kChannelStep : (last ? kHalfStep : kAllHalves);
             run_[kRunSkip] = columns_ - n * kChannelStep + (half && last ? kHalfStep : 0);
-            kernel_(ys + b * kChannelStep, xs, slice, run_.data());
+            for (int r0 = 0; r0 < rows; r0 += chunk) {
+                const int r1 = std::min(r0 + chunk, rows);
+                if (r1 < rows) { preload_.add(xs + r1 * stride, (std::min(r1 + chunk, rows) - r1) * stride); }
+                preload_.pump();
+                const int at = r0 * columns_ + b * kChannelStep;
+                if (residual_ != nullptr) { run_[kRunResidual] = word_of(residual_ + at); }
+                run_[kRunRows] = r1 - r0;
+                kernel_(ys + at, xs + r0 * stride, slice, run_.data());
+                preload_.finish();
+            }
         }
+        run_[kRunRows] = rows;
     }
 
     // Rows of K values into rows padded to a multiple of 16, as the kernel's vector loads take them.
@@ -402,6 +416,7 @@ class PointwiseS8 final : public dl::module::Module {
     int8_t *zero_bias_ = nullptr; // QACC-layout zeros when the convolution has no bias
     std::array<int32_t, kRunSize> run_ = {};
     RowKernel kernel_ = nullptr;
+    Preload preload_;
     bool built_ = false;
 };
 
