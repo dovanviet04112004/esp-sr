@@ -121,23 +121,9 @@ def pointwise_s8_from(graph, op, info) -> bool:
         b = op.inputs[2]
         b.value = torch.from_numpy(np.pad(b.value.cpu().numpy().reshape(-1), (0, padded - n)))
     configs, out_config, residual_shift = list(op.input_quant_config), op.output_quant_config[0], -1
-    found = residual_add(graph, y, info) if k in HELD_INPUTS and math.prod(patch) == 1 else None
-    if found is not None:
-        add, other, r, requantiser, residual_shift = found
-        r_config = add.input_quant_config[add.inputs.index(other)] if requantiser is None else config_of(r)
-        out_config, total = add.output_quant_config[0], add.outputs[0]
-        add.inputs.remove(other)
-        other.dest_ops.remove(add)
-        graph.remove_operation(add)
-        graph.remove_variable(y)
-        op.outputs.append(total)
-        total.source_op = op
-        if requantiser is not None:
-            graph.remove_operation(requantiser)
-            graph.remove_variable(other)
-        op.inputs.append(r)
-        r.dest_ops.append(op)
-        configs.append(r_config)
+    joined = join_residual(graph, op, y, configs, info) if math.prod(patch) == 1 else None
+    if joined is not None:
+        residual_shift, out_config = joined
     op.type = POINTWISE_S8
     for name in [a for a in op.attributes if a != "quant_type"]:
         del op.attributes[name]
@@ -149,6 +135,46 @@ def pointwise_s8_from(graph, op, info) -> bool:
         patch=[int(v) for v in (patch if len(patch) == 2 else [1, 1])],
     )
     op.config = OperationQuantizationConfig(configs, [out_config])
+    return True
+
+
+def join_residual(graph, op, y, configs: list, info) -> tuple | None:
+    """The residual Add alone reading y, op's output, joined into op: the map it adds, or that map before a
+    RequantizeLinear only the Add reads, appended to op's inputs and its config to configs, the Add's output becoming
+    op's; (the residual's shift, the Add's output config), None when no such Add follows."""
+    found = residual_add(graph, y, info)
+    if found is None:
+        return None
+    add, other, r, requantiser, residual_shift = found
+    r_config = add.input_quant_config[add.inputs.index(other)] if requantiser is None else config_of(r)
+    out_config, total = add.output_quant_config[0], add.outputs[0]
+    add.inputs.remove(other)
+    other.dest_ops.remove(add)
+    graph.remove_operation(add)
+    graph.remove_variable(y)
+    op.outputs.append(total)
+    total.source_op = op
+    if requantiser is not None:
+        graph.remove_operation(requantiser)
+        graph.remove_variable(other)
+    op.inputs.append(r)
+    r.dest_ops.append(op)
+    configs.append(r_config)
+    return residual_shift, out_config
+
+
+def concat_residual(graph, op, info) -> bool:
+    """The residual Add after op, a PointwiseS8 pointwise_concat joined from slices, joined into it too."""
+    from esp_ppq.core import OperationQuantizationConfig
+
+    if op.type != POINTWISE_S8 or op.attributes.get("residual_shift") != -1 or op.attributes.get("patch") != [1, 1]:
+        return False
+    configs = list(op.config.input_quantization_config)
+    joined = join_residual(graph, op, op.outputs[0], configs, info)
+    if joined is None:
+        return False
+    op.attributes["residual_shift"] = int(joined[0])
+    op.config = OperationQuantizationConfig(configs, [joined[1]])
     return True
 
 
@@ -205,7 +231,7 @@ def pointwise_concat(graph, concat, info) -> bool:
 @contextlib.contextmanager
 def pointwise_s8() -> Iterator[None]:
     """Each int8 1x1 convolution exported as one PointwiseS8 (KEHOACH 3.14 step 2.5), the residual Add after it with
-    it when its rows are 24 or 48 values: esp-dl ran them at 0.13 to 0.45 cycles a multiply-add, 24 channels through
+    it: esp-dl ran them at 0.13 to 0.45 cycles a multiply-add, 24 channels through
     its unaligned kernel or aligned_pointwise's merged columns, and the Add through PSRAM. The op sums each row as a
     pointwise convolution, rounds as esp-dl's Conv and adds the residual saturating as its Add. ReDimNet2 b0 (KEHOACH
     3.17) on board B: ~80 ms of 1x1 convolutions and ~14 ms of residual Adds.
@@ -222,8 +248,10 @@ def pointwise_s8() -> Iterator[None]:
             if op.name in graph.operations:
                 pointwise_s8_from(graph, op, info)
         for op in list(graph.operations.values()):
-            if op.name in graph.operations:
-                pointwise_concat(graph, op, info)
+            if op.name in graph.operations and op.type == "Concat":
+                out = op.outputs[0]
+                if pointwise_concat(graph, op, info):
+                    concat_residual(graph, out.source_op, info)
         return graph
 
     def unless_taken(op, info):

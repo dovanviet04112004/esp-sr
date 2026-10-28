@@ -217,6 +217,62 @@ def test_pointwise_s8_reads_patches_whose_weights_outgrow_the_data_cache(tmp_pat
     )
 
 
+class LoopedResiduals(nn.Module):
+    """Rows of 128 values through a 128 to 128 convolution added to its own input; then 128 to 576 and 576 to 128,
+    both past the data cache, the last added to the rows again, as b3 adds its 72 to 1728 expansion to the stage's
+    map."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.front, self.mix = nn.Conv1d(128, 128, 1), nn.Conv1d(128, 128, 1)
+        self.up, self.down = nn.Conv1d(128, 576, 1), nn.Conv1d(576, 128, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        a = self.front(x)
+        b = a + self.mix(a)
+        return b + self.down(self.up(b))
+
+
+def test_pointwise_s8_joins_the_residual_add_to_its_looped_kernel(tmp_path: Path) -> None:
+    torch.manual_seed(9)
+    rng = np.random.default_rng(37)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 128, HOPS)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(LoopedResiduals().eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    with esp_ppq_patches.applied(["cache_sized_convolutions", "pointwise_s8"]):
+        path = export_espdl.export(graph, tmp_path / "looped.espdl")
+    nodes, tensors = espdl_graph(path)
+    ops = [op for op, _ in nodes.values()]
+    assert ops.count("PointwiseS8") == 4 and not {"Conv", "Add", "Concat"} & set(ops)
+    info = path.with_suffix(".info").read_text()
+    transposed = dict(re.findall(r"%(\S+) = Transpose\[.*?\]\(%([^)]+)\)", info))
+    joined = 0
+    for made, attrs, inputs in re.findall(r"%(\S+) = PointwiseS8\[(.*?)\]\(([^)]*)\)", info):
+        values = dict(re.findall(r"(\w+) = (-?\d+)", attrs))
+        shift, n, residual_shift = (int(values[a]) for a in ("shift", "columns", "residual_shift"))
+        names = [v.strip().lstrip("%") for v in inputs.split(",")]
+        maps = [names[0], made] + ([names[3]] if residual_shift >= 0 else [])
+        unique = list(dict.fromkeys(maps))
+        got = dict(
+            zip(
+                unique,
+                TorchExecutor(graph, device="cpu").forward(
+                    inputs=calib[0], output_names=[transposed.get(m, m) for m in unique]
+                ),
+                strict=True,
+            )
+        )
+        rows, want, *residual = (
+            torch.round(got[m][0].T / 2.0 ** exponent(info, m)).to(torch.int64).numpy() for m in maps
+        )
+        joined += bool(residual)
+        res = residual[0] if residual else None
+        out = pointwise_s8_espdl(rows, tensors[names[1]], tensors[names[2]][:n], shift, res, residual_shift)
+        assert np.array_equal(out[:, :n], want), made
+        off = pointwise_s8_espdl(rows, tensors[names[1]], tensors[names[2]][:n], shift + 1, res, residual_shift)
+        assert not np.array_equal(off[:, :n], want)
+    assert joined == 2
+
+
 def test_pointwise_s8_joins_a_concat_of_its_slices_back_into_one_op(tmp_path: Path) -> None:
     torch.manual_seed(5)
     rng = np.random.default_rng(18)
