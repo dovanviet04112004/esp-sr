@@ -206,10 +206,20 @@ def conv_block_from(graph, relu, info) -> bool:
     return True
 
 
-# Values a pixel the ConvBlock kernels take for a 1x1 convolution joined in front of a block, and give behind it.
-BLOCK_PRE_INPUTS = (12, 24)
-
+# Values a pixel the ConvBlock kernels hold for a 1x1 convolution joined in front of a block, besides any multiple
+# of 16, and the one count they give behind a 24-channel block; a block of C a multiple of 16 gives any multiple of 8.
+BLOCK_PRE_INPUTS = (12, 24, 48)
 BLOCK_POST_OUTPUTS = (12,)
+
+
+def pre_taken(k: int) -> bool:
+    """Whether ConvBlock runs a 1x1 convolution of k inputs a pixel in front of its block."""
+    return k in BLOCK_PRE_INPUTS or k % CHANNEL_STEP == 0
+
+
+def post_taken(c: int, n: int) -> bool:
+    """Whether ConvBlock runs a 1x1 convolution of n outputs a pixel behind its block of c channels."""
+    return (c == 24 and n in BLOCK_POST_OUTPUTS) or (c % CHANNEL_STEP == 0 and n % (CHANNEL_STEP // 2) == 0)
 
 
 def unmerged_pointwise(op, c_in: int | None, c_out: int | None, info) -> tuple | None:
@@ -269,7 +279,7 @@ def join_block_params(block, conv, laid: tuple, configs: list) -> None:
 
 def block_pre(graph, block, info) -> bool:
     """The 1x1 convolution making block's x, through Reshapes each read by one op alone, joined into block when it
-    reads K in BLOCK_PRE_INPUTS values a pixel of x: its input becomes block's first, its weights and bias follow the
+    reads K values a pixel of x that pre_taken takes: its input becomes block's first, its weights and bias follow the
     block's, "pre" holds K and its shift, "out_shape" block's output's laid shape."""
     from esp_ppq.core import OperationQuantizationConfig
 
@@ -277,7 +287,7 @@ def block_pre(graph, block, info) -> bool:
     op, passed = behind_reshapes(graph, x)
     lx = laid_shape(x, info)
     found = unmerged_pointwise(op, None, lx[-1], info) if len(lx) == 4 else None
-    if found is None or found[0].shape[1] not in BLOCK_PRE_INPUTS:
+    if found is None or not pre_taken(found[0].shape[1]):
         return False
     weights, bias, shift = found
     k, source = weights.shape[1], op.inputs[0]
@@ -304,7 +314,7 @@ def block_pre(graph, block, info) -> bool:
 
 def block_post(graph, block, info) -> bool:
     """The 1x1 convolution alone reading block's output, through Reshapes each read by one op alone, joined into
-    block when it gives N in BLOCK_POST_OUTPUTS values a pixel: its output becomes block's, its weights and bias
+    block when it gives N values a pixel that post_taken takes: its output becomes block's, its weights and bias
     follow block's inputs, "post" holds N and its shift, "out_shape" the new output's laid shape."""
     from esp_ppq.core import OperationQuantizationConfig
 
@@ -317,7 +327,7 @@ def block_post(graph, block, info) -> bool:
         return False
     op, ly = var.dest_ops[0], laid_shape(y, info)
     found = unmerged_pointwise(op, ly[-1], None, info) if len(ly) == 4 else None
-    if found is None or found[0].shape[0] not in BLOCK_POST_OUTPUTS:
+    if found is None or not post_taken(ly[-1], found[0].shape[0]):
         return False
     weights, bias, shift = found
     n, out = weights.shape[0], op.outputs[0]

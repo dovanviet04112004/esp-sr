@@ -111,13 +111,13 @@ def test_conv_block_exports_a_block_as_one_op_giving_its_integers(tmp_path: Path
 
 
 class StageEnds(nn.Module):
-    """A conv block between 1x1 convolutions, as ReDimNet2 b0's stages 0 and 1 run theirs: 12 channels to 24, by a
-    1x1 or by a 1x2 at a stride of 2, the block, then back to 12."""
+    """A conv block between 1x1 convolutions, as ReDimNet2 runs its stages' ends: b0's 12 channels to 24, by a 1x1 or
+    by a 1x2 at a stride of 2, the block, then back to 12; or b3's c_in to c and c back to c_out."""
 
-    def __init__(self, pair: bool) -> None:
+    def __init__(self, pair: bool, c_in: int = 12, c: int = 24, c_out: int = 12) -> None:
         super().__init__()
-        self.pre = nn.Conv2d(12, 24, (1, 2), stride=(1, 2)) if pair else nn.Conv2d(12, 24, 1)
-        self.block, self.post = ResBlock(24), nn.Conv2d(24, 12, 1)
+        self.pre = nn.Conv2d(c_in, c, (1, 2), stride=(1, 2)) if pair else nn.Conv2d(c_in, c, 1)
+        self.block, self.post = ResBlock(c), nn.Conv2d(c, c_out, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.post(self.block(self.pre(x)))
@@ -130,13 +130,19 @@ def pointwise_espdl(rows: np.ndarray, laid: np.ndarray, bias: np.ndarray, shift:
     return round_shift(rows.astype(np.int64) @ weights.T + bias[:n].astype(np.int64), shift)
 
 
-@pytest.mark.parametrize("pair", [False, True])
-def test_conv_block_takes_the_1x1_convolutions_before_and_after_it(tmp_path: Path, pair: bool) -> None:
+@pytest.mark.parametrize(
+    ("pair", "c_in", "c", "c_out"), [(False, 12, 24, 12), (True, 12, 24, 12), (False, 48, 96, 24), (False, 32, 96, 48)]
+)
+def test_conv_block_takes_the_1x1_convolutions_before_and_after_it(
+    tmp_path: Path, pair: bool, c_in: int, c: int, c_out: int
+) -> None:
     torch.manual_seed(7)
     rng = np.random.default_rng(7)
     bands = BLOCK_BANDS * (2 if pair else 1)
-    calib = [torch.from_numpy(rng.normal(0, 1, (1, 12, BLOCK_HOPS, bands)).astype(np.float32)) for _ in range(2)]
-    graph = ptq_espdl.quantize(StageEnds(pair).eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, c_in, BLOCK_HOPS, bands)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(
+        StageEnds(pair, c_in, c, c_out).eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"}
+    )
     exponent = ptq_espdl.io_of(graph).input_exponent
     x = ptq_espdl.to_int8(calib[0].numpy(), exponent).astype(np.float32) * np.float32(2.0**exponent)
     patches = ["requantise_graph_inputs", "aligned_pointwise", "conv_block"]
@@ -152,12 +158,12 @@ def test_conv_block_takes_the_1x1_convolutions_before_and_after_it(tmp_path: Pat
     (k, pre_shift), (n, post_shift) = (
         [int(v) for v in re.search(name + r" = \[(\d+), (\d+)\]", line).groups()] for name in ("pre", "post")
     )
-    assert (k, n) == (24 if pair else 12, 12)
+    assert (k, n) == (2 * c_in if pair else c_in, c_out)
     io = ptq_espdl.io_of(graph)
     want = ptq_espdl.Simulator(graph, patches)(x) / 2.0**io.output_exponent
     laid = (x[0].transpose(1, 2, 0) / 2.0**io.input_exponent).astype(np.int64)
     values = [tensors[p] for p in params]
-    middle = pointwise_espdl(laid.reshape(laid.shape[0], -1, k), values[8], values[9], pre_shift, 24)
+    middle = pointwise_espdl(laid.reshape(laid.shape[0], -1, k), values[8], values[9], pre_shift, c)
     block = conv_block_espdl(middle, values[:8], shifts)
     assert np.array_equal(pointwise_espdl(block, values[10], values[11], post_shift, n), want[0].transpose(1, 2, 0))
     off = pointwise_espdl(block, values[10], values[11], post_shift + 1, n)
