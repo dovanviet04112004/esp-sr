@@ -308,8 +308,8 @@ kws-train: ## Train the kws DS-CNN on processed/command_kws on the GPU into ml/a
 .PHONY: ctc-features ctc-train ctc-watch ctc-tone-flip
 # Simulates the split with pitch into processed/command, then cuts the board sessions with Gate 3's code, which needs
 # torch; Ctrl-C pauses at once, and run again it goes on from the finished shards.
-ctc-features: ## Run each file of the command split through the board simulation with pitch into processed/command
-	$(ML) --extra train --extra swiftf0 python -m srpipe.tasks.command.ctc.data simulate
+ctc-features: ## Run each file of the command split through the board simulation with pitch into processed/command [SET="key=value ..."]
+	$(ML_CPU) --extra train --extra espdl --extra swiftf0 python -m srpipe.tasks.command.ctc.data simulate $(foreach s,$(SET),--set $(s))
 
 # SET overrides command_ctc.yaml, such as train.init.
 ctc-train: ## Train the ctc net on the GPU into ml/artifacts/command_ctc/runs [RESUME=<run>] [SET="key=value ..."]
