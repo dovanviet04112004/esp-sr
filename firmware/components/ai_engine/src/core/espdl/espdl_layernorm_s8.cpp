@@ -72,14 +72,6 @@ class LayerNormS8 final : public dl::module::Module {
         : Module(name, dl::MODULE_INPLACE_CHANGED_BUFFER, dl::QUANT_TYPE_SYMM_8BIT), epsilon_(epsilon)
     {}
 
-    ~LayerNormS8() override
-    {
-        heap_caps_free(gamma_);
-    }
-
-    LayerNormS8(const LayerNormS8 &) = delete;
-    LayerNormS8 &operator=(const LayerNormS8 &) = delete;
-
     std::vector<std::vector<int>> get_output_shape(std::vector<std::vector<int>> &input_shapes) override
     {
         return {input_shapes[0]};
@@ -90,15 +82,7 @@ class LayerNormS8 final : public dl::module::Module {
         dl::TensorBase *x = context->get_tensor(m_inputs_index[0]);
         dl::TensorBase *y = context->get_tensor(m_outputs_index[0]);
         if (!built_ && !build(context, x, y)) { return; }
-        const int8_t *xs = x->get_element_ptr<int8_t>();
-        int8_t *ys = y->get_element_ptr<int8_t>();
-        if (paired_) {
-            run_pairs(xs, ys);
-            return;
-        }
-        for (int p = 0; p < positions_; p++) {
-            run_position(xs + p * n_, ys + p * n_);
-        }
+        rows_.run(x->get_element_ptr<int8_t>(), y->get_element_ptr<int8_t>(), positions_);
     }
 
     void print() override
@@ -127,144 +111,155 @@ class LayerNormS8 final : public dl::module::Module {
     {
         dl::TensorBase *gamma = m_inputs_index.size() > 1 ? context->get_tensor(m_inputs_index[1]) : nullptr;
         dl::TensorBase *beta = m_inputs_index.size() > 2 ? context->get_tensor(m_inputs_index[2]) : nullptr;
-        n_ = x->shape.empty() ? 0 : x->shape.back();
-        if (n_ <= 0 || gamma == nullptr || gamma->get_size() != n_ ||
-            (beta != nullptr && beta->get_size() != n_) || x->get_dtype() != dl::DATA_TYPE_INT8 ||
+        const int n = x->shape.empty() ? 0 : x->shape.back();
+        if (n <= 0 || gamma == nullptr || gamma->get_size() != n ||
+            (beta != nullptr && beta->get_size() != n) || x->get_dtype() != dl::DATA_TYPE_INT8 ||
             y->get_dtype() != dl::DATA_TYPE_INT8 || x->shape != y->shape) {
-            ESP_LOGE(TAG, "%s: not an int8 norm of %d values with gamma", name, n_);
+            ESP_LOGE(TAG, "%s: not an int8 norm of %d values with gamma", name, n);
             return false;
         }
-        const int floats = 2 * n_ + kBlock * n_ + 2 * kBlock + 2 * n_;
-        gamma_ = static_cast<float *>(heap_caps_calloc(floats, sizeof(float), MALLOC_CAP_SPIRAM));
-        if (gamma_ == nullptr) {
-            ESP_LOGE(TAG, "%s: no memory for %d floats of gammas, betas and a block's deviations", name,
-                     floats);
+        const bool made = rows_.init(n, gamma->get_element_ptr<int8_t>(), DL_SCALE(gamma->get_exponent()),
+                                     beta != nullptr ? beta->get_element_ptr<int8_t>() : nullptr,
+                                     beta != nullptr ? DL_SCALE(beta->get_exponent()) : 0.0f,
+                                     x->get_exponent(), y->get_exponent(), epsilon_);
+        if (!made) {
+            ESP_LOGE(TAG, "%s: no memory for the floats of a norm of %d values", name, n);
             return false;
         }
-        beta_ = gamma_ + n_;
-        deviations_ = beta_ + n_;
-        variances_ = deviations_ + kBlock * n_;
-        scales_ = variances_ + kBlock;
-        gb_ = scales_ + kBlock;
-        const int8_t *g = gamma->get_element_ptr<int8_t>();
-        const float g_scale = DL_SCALE(gamma->get_exponent());
-        for (int j = 0; j < n_; j++) {
-            gamma_[j] = g[j] * g_scale;
-        }
-        if (beta != nullptr) {
-            const int8_t *b = beta->get_element_ptr<int8_t>();
-            const float b_scale = DL_SCALE(beta->get_exponent());
-            for (int j = 0; j < n_; j++) {
-                beta_[j] = b[j] * b_scale;
-            }
-        }
-        positions_ = x->get_size() / n_;
-        in_scale_ = DL_SCALE(x->get_exponent());
-        per_value_ = 1.0f / static_cast<float>(n_) * (in_scale_ * in_scale_);
-        out_rescale_ = DL_RESCALE(y->get_exponent());
-        float_mean_ = float_mean_matches(n_);
-        count_ = static_cast<float>(n_);
-        inverse_n_ = 1.0f / count_;
-        for (int j = 0; j < n_; j++) {
-            gb_[2 * j] = gamma_[j] * out_rescale_;
-            gb_[2 * j + 1] = beta_[j] * out_rescale_;
-        }
-        run_ = {n_,
-                n_ / kWordBytes,
-                -INT8_MIN * n_,
-                bits_of(inverse_n_),
-                bits_of(count_),
-                bits_of(per_value_),
-                bits_of(epsilon_),
-                bits_of(in_scale_),
-                bits_of(kRootWindow),
-                bits_of(0.5f)};
-        paired_ = float_mean_ && n_ % kWordBytes == 0 && n_ <= kMaxPaired;
+        positions_ = x->get_size() / n;
         built_ = true;
         return true;
     }
 
-    // Blocks of up to kBlock positions, two a pass; in place, a block's y is written once all its x is read.
-    void run_pairs(const int8_t *xs, int8_t *ys) const noexcept
-    {
-        int p = 0;
-        while (positions_ - p >= 2) {
-            const int count = std::min(kBlock, (positions_ - p) & ~1);
-            const int pairs = count / 2;
-            ai_engine_ln_deviations_s8_esp32s3(deviations_, variances_, xs + p * n_, pairs, run_.data());
-            ai_engine_ln_scales_s8_esp32s3(scales_, variances_, run_.data(), pairs);
-            for (int i = 0; i < count; i++) {
-                const float v = variances_[i];
-                if (scales_[i] == 0.0f || v < kRootLow || v >= kRootHigh) {
-                    scales_[i] = divide(1.0f, sqrt_newton(v)) * in_scale_;
-                }
-            }
-            ai_engine_ln_outputs_s8_esp32s3(ys + p * n_, deviations_, scales_, gb_, pairs, run_.data());
-            p += count;
-        }
-        if (p < positions_) { run_position(xs + p * n_, ys + p * n_); }
-    }
-
-    // layernorm_as_espdl's steps for one position, each a float32 operation rounded once.
-    void run_position(const int8_t *x, int8_t *y) const noexcept
-    {
-        int sum = 0;
-        for (int j = 0; j < n_; j++) {
-            sum += x[j];
-        }
-        float mean;
-        if (float_mean_) {
-            const float s = static_cast<float>(sum);
-            const float q = s * inverse_n_;
-            mean = fmaf(fmaf(-q, count_, s), inverse_n_, q);
-        } else {
-            mean = static_cast<float>(sum * (1.0 / n_));
-        }
-        float *d = deviations_;
-        float squares = 0.0f;
-        for (int j = 0; j < n_; j++) {
-            d[j] = static_cast<float>(x[j]) - mean;
-            squares = fmaf(d[j], d[j], squares);
-        }
-        const float scale = divide(1.0f, sqrt_newton(fmaf(per_value_, squares, epsilon_))) * in_scale_;
-        // Four values at once so their float steps overlap; a zero beta adds nothing the rounding sees.
-        int j = 0;
-        for (; j + kLanes <= n_; j += kLanes) {
-            const float r0 = gamma_[j] * scale * d[j] + beta_[j];
-            const float r1 = gamma_[j + 1] * scale * d[j + 1] + beta_[j + 1];
-            const float r2 = gamma_[j + 2] * scale * d[j + 2] + beta_[j + 2];
-            const float r3 = gamma_[j + 3] * scale * d[j + 3] + beta_[j + 3];
-            y[j] = round_half_up(r0 * out_rescale_);
-            y[j + 1] = round_half_up(r1 * out_rescale_);
-            y[j + 2] = round_half_up(r2 * out_rescale_);
-            y[j + 3] = round_half_up(r3 * out_rescale_);
-        }
-        for (; j < n_; j++) {
-            y[j] = round_half_up((gamma_[j] * scale * d[j] + beta_[j]) * out_rescale_);
-        }
-    }
-
     float epsilon_;
-    int n_ = 0;
     int positions_ = 0;
-    float in_scale_ = 0.0f;
-    float per_value_ = 0.0f;
-    float out_rescale_ = 0.0f;
-    float count_ = 0.0f;
-    float inverse_n_ = 0.0f;
-    float *gamma_ = nullptr; // one allocation holds every buffer below
-    float *beta_ = nullptr;
-    float *deviations_ = nullptr;
-    float *variances_ = nullptr;
-    float *scales_ = nullptr;
-    float *gb_ = nullptr; // gamma, beta interleaved, times out_rescale
-    std::array<int32_t, kRunSize> run_ = {};
-    bool float_mean_ = false;
-    bool paired_ = false;
+    LayerNormRows rows_;
     bool built_ = false;
 };
 
 } // namespace
+
+LayerNormRows::~LayerNormRows()
+{
+    heap_caps_free(gamma_);
+}
+
+bool LayerNormRows::init(int n, const int8_t *gamma, float gamma_scale, const int8_t *beta, float beta_scale,
+                         int x_exponent, int y_exponent, float epsilon) noexcept
+{
+    static_assert(kRunSlots == kRunSize, "layernorm_s8_esp32s3.S's run");
+    n_ = n;
+    epsilon_ = epsilon;
+    const int floats = 2 * n_ + kBlock * n_ + 2 * kBlock + 2 * n_;
+    gamma_ = static_cast<float *>(heap_caps_calloc(floats, sizeof(float), MALLOC_CAP_SPIRAM));
+    if (gamma_ == nullptr) { return false; }
+    beta_ = gamma_ + n_;
+    deviations_ = beta_ + n_;
+    variances_ = deviations_ + kBlock * n_;
+    scales_ = variances_ + kBlock;
+    gb_ = scales_ + kBlock;
+    for (int j = 0; j < n_; j++) {
+        gamma_[j] = gamma[j] * gamma_scale;
+    }
+    if (beta != nullptr) {
+        for (int j = 0; j < n_; j++) {
+            beta_[j] = beta[j] * beta_scale;
+        }
+    }
+    in_scale_ = DL_SCALE(x_exponent);
+    per_value_ = 1.0f / static_cast<float>(n_) * (in_scale_ * in_scale_);
+    out_rescale_ = DL_RESCALE(y_exponent);
+    float_mean_ = float_mean_matches(n_);
+    count_ = static_cast<float>(n_);
+    inverse_n_ = 1.0f / count_;
+    for (int j = 0; j < n_; j++) {
+        gb_[2 * j] = gamma_[j] * out_rescale_;
+        gb_[2 * j + 1] = beta_[j] * out_rescale_;
+    }
+    run_ = {n_,
+            n_ / kWordBytes,
+            -INT8_MIN * n_,
+            bits_of(inverse_n_),
+            bits_of(count_),
+            bits_of(per_value_),
+            bits_of(epsilon_),
+            bits_of(in_scale_),
+            bits_of(kRootWindow),
+            bits_of(0.5f)};
+    paired_ = float_mean_ && n_ % kWordBytes == 0 && n_ <= kMaxPaired;
+    return true;
+}
+
+void LayerNormRows::run(const int8_t *xs, int8_t *ys, int positions) const noexcept
+{
+    if (paired_) {
+        run_pairs(xs, ys, positions);
+        return;
+    }
+    for (int p = 0; p < positions; p++) {
+        run_position(xs + p * n_, ys + p * n_);
+    }
+}
+
+// Blocks of up to kBlock positions, two a pass; in place, a block's y is written once all its x is read.
+void LayerNormRows::run_pairs(const int8_t *xs, int8_t *ys, int positions) const noexcept
+{
+    int p = 0;
+    while (positions - p >= 2) {
+        const int count = std::min(kBlock, (positions - p) & ~1);
+        const int pairs = count / 2;
+        ai_engine_ln_deviations_s8_esp32s3(deviations_, variances_, xs + p * n_, pairs, run_.data());
+        ai_engine_ln_scales_s8_esp32s3(scales_, variances_, run_.data(), pairs);
+        for (int i = 0; i < count; i++) {
+            const float v = variances_[i];
+            if (scales_[i] == 0.0f || v < kRootLow || v >= kRootHigh) {
+                scales_[i] = divide(1.0f, sqrt_newton(v)) * in_scale_;
+            }
+        }
+        ai_engine_ln_outputs_s8_esp32s3(ys + p * n_, deviations_, scales_, gb_, pairs, run_.data());
+        p += count;
+    }
+    if (p < positions) { run_position(xs + p * n_, ys + p * n_); }
+}
+
+// layernorm_as_espdl's steps for one position, each a float32 operation rounded once.
+void LayerNormRows::run_position(const int8_t *x, int8_t *y) const noexcept
+{
+    int sum = 0;
+    for (int j = 0; j < n_; j++) {
+        sum += x[j];
+    }
+    float mean;
+    if (float_mean_) {
+        const float s = static_cast<float>(sum);
+        const float q = s * inverse_n_;
+        mean = fmaf(fmaf(-q, count_, s), inverse_n_, q);
+    } else {
+        mean = static_cast<float>(sum * (1.0 / n_));
+    }
+    float *d = deviations_;
+    float squares = 0.0f;
+    for (int j = 0; j < n_; j++) {
+        d[j] = static_cast<float>(x[j]) - mean;
+        squares = fmaf(d[j], d[j], squares);
+    }
+    const float scale = divide(1.0f, sqrt_newton(fmaf(per_value_, squares, epsilon_))) * in_scale_;
+    // Four values at once so their float steps overlap; a zero beta adds nothing the rounding sees.
+    int j = 0;
+    for (; j + kLanes <= n_; j += kLanes) {
+        const float r0 = gamma_[j] * scale * d[j] + beta_[j];
+        const float r1 = gamma_[j + 1] * scale * d[j + 1] + beta_[j + 1];
+        const float r2 = gamma_[j + 2] * scale * d[j + 2] + beta_[j + 2];
+        const float r3 = gamma_[j + 3] * scale * d[j + 3] + beta_[j + 3];
+        y[j] = round_half_up(r0 * out_rescale_);
+        y[j + 1] = round_half_up(r1 * out_rescale_);
+        y[j + 2] = round_half_up(r2 * out_rescale_);
+        y[j + 3] = round_half_up(r3 * out_rescale_);
+    }
+    for (; j < n_; j++) {
+        y[j] = round_half_up((gamma_[j] * scale * d[j] + beta_[j]) * out_rescale_);
+    }
+}
 
 dl::module::Module *layernorm_s8_from(fbs::FbsModel *fbs_model, std::string node_name)
 {
