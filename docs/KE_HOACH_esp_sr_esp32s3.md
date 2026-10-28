@@ -2422,9 +2422,10 @@ ml/
 │   │                                  #   chữ bộ nghe kiểm đọc ra và độ chênh log-xác suất với chữ phải nói, kể cả dấu
 │   │
 │   ├── dsp/                           # ── THUẬT TOÁN THUẦN, soi gương firmware 1:1 ──
-│   │   ├── spec/{fft.py, window.py, stft.py, mel.py, pitch.py, spk_fbank.py, swift_front.py}   # ★ dsp_spec;
-│   │   │                              #   spk_fbank: khâu đặc trưng của b0 (§3.17); swift_front: ba STFT và
-│   │   │                              #   128 dải log-tần số vào CNN của SwiftF0 (§3.11)
+│   │   ├── spec/{fft.py, window.py, stft.py, mel.py, pitch.py, spk_fbank.py, swift_front.py, swift_dims.py}
+│   │   │                              # ★ dsp_spec; spk_fbank: khâu đặc trưng của b0 (§3.17); swift_front: ba STFT
+│   │   │                              #   và 128 dải log-tần số vào CNN của SwiftF0; swift_dims: ba chiều cao độ
+│   │   │                              #   thang Kaldi từ cao độ và độ tin của SwiftF0, chạy dòng (§3.11)
 │   │   ├── afe/{hpf.py, balance.py, aec.py, doa.py, gsc.py, bss.py,
 │   │   │        ns_omlsa.py, vad.py, agc.py, chain.py}                # ★ dsp_afe
 │   │   └── emit_golden.py             # → contracts/golden/{spec,afe}/…
@@ -2682,7 +2683,7 @@ firmware/
 ├── components/                       # ── 100% CODE TỰ VIẾT ──
 │   ├── common/        [C]   L0  # header thuần: app_err.h, app_events.h, gen_grid.h, gen_array.h, gen_stream.h, gen_units.h,
 │   │                            #   gen_listen.h, gen_speaker.h
-│   ├── dsp_spec/      [C]   L1  # fft, window, stft, mel, pitch, spk_fbank, swift_front — thuật toán thuần;
+│   ├── dsp_spec/      [C]   L1  # fft, window, stft, mel, pitch, spk_fbank, swift_front, swift_dims — thuật toán thuần;
 │   │                            #   Kconfig DSP_SPEC_FFT_BACKEND chọn src/fft.c (viết tay, mặc định) hay src/fft_dl.c
 │   │                            #   (dl_fft) vào danh sách nguồn
 │   ├── lang_vi/       [C]   L1  # normalize, g2p, lexicon — luật ngôn ngữ thuần
@@ -2907,7 +2908,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 
 | Component | Hàm chính | `@ctx` |
 |---|---|---|
-| `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame`, `spk_fbank_run` (khâu đặc trưng của b0, §3.17), `swift_front_push` (front end của SwiftF0, §3.11) | any, không chặn, người gọi giữ bộ nhớ |
+| `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame`, `spk_fbank_run` (khâu đặc trưng của b0, §3.17), `swift_front_push` (front end của SwiftF0, §3.11), `swift_dims_push` (ba chiều cao độ của SwiftF0, §3.11) | any, không chặn, người gọi giữ bộ nhớ |
 | `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_entry`, `lang_vi_unit_name` | any, không chặn |
 | `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,voiceprint,norm,best,noise_bin,passes,model_id}`, `ai_engine_ns_ops()`, `ai_engine_synth_render`, `ai_engine_helper_serve` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,5 s với b3, chỉ ở `xac_task`; `helper_serve` chặn tới hạn chờ, chỉ ở `phu_task` và chỉ có khi `AI_ENGINE_CORES_TWO` (§5.1) |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |
