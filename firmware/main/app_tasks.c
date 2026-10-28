@@ -30,7 +30,7 @@
 #include "svc_report.h"
 #include "sys_storage.h"
 
-#define CORE_FRAME 1    // hard 16 ms deadline, nothing else runs here (KEHOACH 5.1)
+#define CORE_FRAME 1    // hard 16 ms deadline; phu_task only below it (KEHOACH 5.1)
 #define CORE_BUFFERED 0 // Wi-Fi, lwIP and every task a queue shields
 
 #define THU_STACK_BYTES 3072
@@ -42,6 +42,7 @@
 #define GUI_STACK_BYTES 4096
 #define NET_STACK_BYTES 4096
 #define LUONG_STACK_BYTES 4096
+#define PHU_STACK_BYTES 4096
 
 #define THU_PRIORITY 17
 #define SACH_PRIORITY 16
@@ -53,11 +54,13 @@
 #define GUI_PRIORITY 4
 #define NET_PRIORITY 3
 #define LUONG_PRIORITY 3
+#define PHU_PRIORITY 1 // core 1's idle time, under thu and sach (KEHOACH 5.1)
 
 #define DMA_WAIT_MS (2 * GEN_GRID_HOP_US / 1000)
 #define FRAME_WAIT_MS 100
 #define CLEAN_WAIT_MS 100
 #define VERIFY_WAIT_MS 100
+#define PHU_WAIT_MS 100
 #define DIEU_WAIT_MS 100
 #define SPEAK_WAIT_MS 1000
 #define GUI_PERIOD_MS 100
@@ -172,6 +175,18 @@ static void sach_task(void *arg)
         esp_task_wdt_reset();
     }
 }
+
+#if CONFIG_AI_ENGINE_CORES_TWO
+static void phu_task(void *arg)
+{
+    (void)arg;
+    ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
+    for (;;) {
+        ai_engine_helper_serve(PHU_WAIT_MS);
+        esp_task_wdt_reset();
+    }
+}
+#endif
 
 static void send_up(const app_wiring_t *w, const app_event_t *e)
 {
@@ -556,10 +571,16 @@ static StackType_t s_noi_stack[NOI_STACK_BYTES] __attribute__((aligned(portBYTE_
 #if CONFIG_NET_STREAM_ENABLE
 static StackType_t s_luong_stack[LUONG_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 #endif
+#if CONFIG_AI_ENGINE_CORES_TWO
+static StackType_t s_phu_stack[PHU_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
+#endif
 
 static const task_spec_t kTasks[] = {
     {thu_task, "thu_task", s_thu_stack, THU_STACK_BYTES, THU_PRIORITY, CORE_FRAME},
     {sach_task, "sach_task", s_sach_stack, SACH_STACK_BYTES, SACH_PRIORITY, CORE_FRAME},
+#if CONFIG_AI_ENGINE_CORES_TWO
+    {phu_task, "phu_task", s_phu_stack, PHU_STACK_BYTES, PHU_PRIORITY, CORE_FRAME},
+#endif
     {nhan_task, "nhan_task", s_nhan_stack, NHAN_STACK_BYTES, NHAN_PRIORITY, CORE_BUFFERED},
     {xac_task, "xac_task", s_xac_stack, XAC_STACK_BYTES, XAC_PRIORITY, CORE_BUFFERED},
     {dieu_task, "dieu_task", s_dieu_stack, DIEU_STACK_BYTES, DIEU_PRIORITY, CORE_BUFFERED},
