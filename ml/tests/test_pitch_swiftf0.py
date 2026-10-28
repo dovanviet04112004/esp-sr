@@ -1,6 +1,7 @@
 """SwiftF0 rewritten for the chip: decode puts a peak on its pitch step, moves between steps by the neighbours and gives
-no confidence to a peak outside the range; swift_front gives a frame a hop, the same hop by hop as over the whole
-stream, again from the start after a reset; the rewrite matches swift-f0's detect."""
+no confidence to a peak outside the range; decode_int8 gives decode's log F0 and confidence in float32 from int8
+logits, a neighbour outside the range weighing nothing; swift_front gives a frame a hop, the same hop by hop as over the
+whole stream, again from the start after a reset; the rewrite matches swift-f0's detect."""
 
 from __future__ import annotations
 
@@ -39,6 +40,26 @@ def test_decode_moves_between_steps_by_the_neighbours() -> None:
     logits[31] = 8.0
     pitch_hz, _ = decode.decode(logits, np.zeros(FRAMES, dtype=np.float32), 50.0, 400.0)
     assert np.allclose(pitch_hz, np.sqrt(decode.STEPS_HZ[30].astype(np.float64) * decode.STEPS_HZ[31]), rtol=1e-6)
+
+
+def test_decode_int8_gives_decodes_log_f0_and_confidence_in_float32() -> None:
+    rng = np.random.default_rng(5)
+    logits = rng.integers(-128, 128, (decode.PITCH_BINS, 64)).astype(np.int8)
+    sure = rng.integers(-128, 128, 64).astype(np.int8)
+    log_f0, confidence = decode.decode_int8(logits, -3, sure, -4, 50.0, 400.0)
+    pitch_hz, want = decode.decode(logits * np.float32(2.0**-3), sure * np.float32(2.0**-4), 50.0, 400.0)
+    assert log_f0.dtype == np.float32 and confidence.dtype == np.float32
+    assert np.allclose(log_f0, np.log(pitch_hz), atol=1e-6)
+    assert np.allclose(confidence, want, atol=1e-7)
+
+
+def test_decode_int8_weighs_nothing_past_the_ranges_edge() -> None:
+    edge = int(np.flatnonzero(np.float32(50.0) <= decode.STEPS_HZ)[0])
+    logits = np.full((decode.PITCH_BINS, FRAMES), -100, dtype=np.int8)
+    logits[edge - 1 : edge + 2] = 100
+    log_f0, _ = decode.decode_int8(logits, -3, np.zeros(FRAMES, np.int8), -4, 50.0, 400.0)
+    both = (np.log(decode.STEPS_HZ[edge].astype(np.float64)) + np.log(decode.STEPS_HZ[edge + 1])) / 2
+    assert np.allclose(log_f0, both, atol=1e-6)
 
 
 def test_spectra_give_a_frame_a_whole_hop_and_the_log_floor_on_silence() -> None:

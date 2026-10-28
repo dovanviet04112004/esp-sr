@@ -37,6 +37,7 @@ VOICED = 0.5  # confidence at which swift-f0 calls a frame voiced
 CALIB_STREAM, ROWS_STREAM = 1, 2  # rng streams of the drawn sessions, beside the seed
 SILENCE_PEAK = 1e-3  # swift-f0's: a hop peaking under it has confidence 0
 FLOAT_ROW = "float"  # rebuild's row for swift-f0 itself
+STREAM_SUFFIX = "_stream"  # of a rebuilt build whose pitch dims stream as the chip's
 
 
 def sha256(path: Path) -> str:
@@ -81,18 +82,21 @@ def float_outputs(net: model.SwiftF0Net, spectra: np.ndarray) -> tuple[np.ndarra
 
 @dataclass(frozen=True)
 class Found:
-    """A stream's frames as swift-f0's detect gives them."""
+    """A stream's frames as swift-f0's detect gives them, with the chip's float32 log F0 when decoded as it does."""
 
     pitch_hz: np.ndarray
     confidence: np.ndarray
+    log_f0: np.ndarray | None = None
 
 
 class Detector:
     """SwiftF0 behind swift-f0's detect, as the chip runs it: the front end on dsp_spec's FFT, the network of a row of
-    the run's ladder as ESP-PPQ simulates it, float without a row, the decoding, and swift-f0's silence gate."""
+    the run's ladder as ESP-PPQ simulates it, float without a row, the decoding, decode_int8 on a row's int8 outputs,
+    and swift-f0's silence gate."""
 
     def __init__(self, run: Path, row: str | None = None) -> None:
         self.windows, self.bands = front_tables(run / MODEL_FILE)
+        self.exponents = None
         if row is None:
             net = model.load(run / MODEL_FILE)
             self.outputs = lambda spectra: float_outputs(net, spectra)
@@ -100,16 +104,31 @@ class Detector:
             graph = export_espdl.load_native(run / INT8_DIR / row / GRAPH_FILE)
             sim = ptq_espdl.Simulator(graph, load_yaml(CONFIG)["esp_ppq_patches"])
             self.outputs = lambda spectra: tuple(o[0] for o in sim.run(spectra[None]))
+            self.exponents = [port.exponent for port in ptq_espdl.ports_of(graph)[1]]
 
     def detect(self, audio: np.ndarray, sample_rate: int, f_min_hz: float, f_max_hz: float) -> Found:
         """Pitch and confidence of each whole hop of float audio, at least one."""
         if sample_rate != grid.SAMPLE_RATE_HZ:
             raise ValueError(f"{sample_rate} Hz: the chip's SwiftF0 hears {grid.SAMPLE_RATE_HZ} Hz")
         spectra = swift_front.spectra(audio, self.windows, self.bands)
-        pitch_hz, confidence = decode.decode(*self.outputs(spectra), f_min_hz, f_max_hz)
+        log_f0 = None
+        if self.exponents is None:
+            pitch_hz, confidence = decode.decode(*self.outputs(spectra), f_min_hz, f_max_hz)
+        else:
+            (logits, sure), (logit_exponent, sure_exponent) = self.outputs(spectra), self.exponents
+            log_f0, confidence = decode.decode_int8(
+                ptq_espdl.to_int8(logits, logit_exponent),
+                logit_exponent,
+                ptq_espdl.to_int8(sure, sure_exponent),
+                sure_exponent,
+                f_min_hz,
+                f_max_hz,
+            )
+            pitch_hz = np.exp(log_f0.astype(np.float64))
         hops = np.zeros((len(confidence), grid.HOP_SAMPLES), np.float32)
         hops.reshape(-1)[: min(hops.size, len(audio))] = audio[: hops.size]
-        return Found(pitch_hz, np.where(np.abs(hops).max(axis=1) < SILENCE_PEAK, np.float32(0.0), confidence))
+        silent = np.abs(hops).max(axis=1) < SILENCE_PEAK
+        return Found(pitch_hz, np.where(silent, np.float32(0.0), confidence), log_f0)
 
 
 def rewrite_gap(run: Path, f_min_hz: float, f_max_hz: float) -> float:
@@ -251,27 +270,32 @@ def ptq(cfg: dict, run: Path, paths: dict, calibrations: list[str] | None = None
     return path
 
 
-def rebuilt_root(paths: dict, build: str, row: str) -> Path:
-    """Where rebuild writes the files of a command build heard on a row of the pitch ladder, or on swift-f0 itself."""
-    return paths["processed"] / "command" / f"{build}_resim_{row}"
+def rebuilt_root(paths: dict, build: str, row: str, stream: bool = False) -> Path:
+    """Where rebuild writes the files of a command build heard on a row of the pitch ladder, or on swift-f0 itself,
+    its pitch dims streaming as the chip computes them when stream."""
+    return paths["processed"] / "command" / f"{build}_resim_{row}{STREAM_SUFFIX if stream else ''}"
 
 
-def rebuild(cfg: dict, run: Path, row: str, paths: dict, files: list[str], workers: int) -> list[Path]:
+def rebuild(
+    cfg: dict, run: Path, row: str, paths: dict, files: list[str], workers: int, stream: bool = False
+) -> list[Path]:
     """Each of files of the command build quant.build simulated afresh into rebuilt_root, its three pitch dims from
-    row of the run's ladder as the chip runs it, or from swift-f0 itself for FLOAT_ROW. The log-mel is today's, which
-    the build's may no longer match, so the two rows compare on one log-mel (KEHOACH 3.11)."""
+    row of the run's ladder as the chip runs it, or from swift-f0 itself for FLOAT_ROW, streaming as the chip computes
+    them when stream (step 3.3). The log-mel is today's, which the build's may no longer match, so the rows compare on
+    one log-mel (KEHOACH 3.11)."""
     build = cfg["quant"]["build"]
     out = []
     for name in files:
         built = yaml.safe_load((paths["processed"] / "command" / build / name / "manifest.yaml").read_text("utf-8"))
         pitch = built["config"]["pitch"] | ({} if row == FLOAT_ROW else {"int8": {"run": run.name, "row": row}})
+        pitch |= {"stream": True} if stream else {}
         out.append(
             device.build(
                 built["config"] | {"pitch": pitch},
                 paths["splits"] / "command" / build / f"{name}.txt",
                 paths["raw"],
                 paths["interim"],
-                rebuilt_root(paths, build, row) / name,
+                rebuilt_root(paths, build, row, stream) / name,
                 workers,
                 repeats=built["repeats"],
                 pitch=True,
@@ -319,6 +343,7 @@ def main(argv: list[str] | None = None) -> int:
     again.add_argument("--row", required=True, help="a row of <run>/int8/ladder.yaml, or float for swift-f0 itself")
     again.add_argument("--files", nargs="+", default=["val"], help="files of the build, val by default")
     again.add_argument("--workers", type=int, default=6, help="processes simulating the sessions")
+    again.add_argument("--stream", action="store_true", help="the pitch dims streaming as the chip computes them")
     quick = sub.add_parser("timing", help="the timing row: a quick graph that times the chip as the ladder's rows")
     quick.add_argument("run", type=Path)
     check = sub.add_parser("same-int8", help="whether a rewrite of the network keeps every integer under the rungs")
@@ -330,7 +355,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "import":
         print(import_run(cfg))
     elif args.command == "rebuild":
-        for path in rebuild(cfg, args.run, args.row, data_paths(), args.files, args.workers):
+        for path in rebuild(cfg, args.run, args.row, data_paths(), args.files, args.workers, args.stream):
             print(path)
     elif args.command == "timing":
         print(timing(cfg, args.run, data_paths()))
