@@ -75,6 +75,8 @@ Chủ repo duyệt ngày 28/10. Chi tiết ở KẾ HOẠCH §3.14 và §5, mã 
 
 - **Đo trên board B:** b3 từ ~1 400 ms xuống ~1 310 ms một cửa sổ, khớp từng bit ở cả hai cờ (`latency.md` §31).
   Ước 0,9–1,0 s lúc lập ADR là sai: khoảng nửa giờ của các op lớn là đọc ghi PSRAM, mà hai nhân dùng chung một bus.
+  b0 gần như không đổi, 342,7 → 341,0 ms (`latency.md` §25): khối 24 và 48 kênh của nó không dùng vùng mượn nên
+  không chia, vì vậy sản phẩm chạy b0 không có lý do bật hai nhân.
 - **`sach` chung bus và dcache với `phu_task`.** Để đo, app thử của `ai_engine` chạy chuỗi `dsp_afe` mỗi 16 ms ở
   nhân 1, ưu tiên của `sach`, trong lúc speaker chạy hai nhân. Đỉnh một khung phải dưới 12,8 ms (KẾ HOẠCH §5.6).
 - **IDLE1** chạy giữa hai op: `phu_task` chặn sau mỗi phần.
