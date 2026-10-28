@@ -335,3 +335,22 @@ Bản C, cả hai qua đủ các bước của TỔNG QUAN §5.3 (29/10):
 |---|---|---|---|---|
 | `dsp_spec/swift_dims` | `contracts/golden/swift_dims/`: âm tiết cách quãng ngắn, hai quãng quá 25 khung nhìn sau, 100 khung đầu không tiếng, khung ngẫu nhiên có reset giữa chừng | lệch 0 cả bốn ca | ra trễ một khung: lệch 0,653, 8,1 dB | **44,2 µs trung bình, 66,1 µs đỉnh mỗi hop**, vùng làm việc 656 B |
 | `ai_engine/src/pitch/decode.c` | `contracts/golden/pitch_decode/`: đỉnh đi trong khoảng F0, logit đều có hoà, đỉnh ở và quá mép khoảng, cả khoảng của mạng | lệch 0 cả bốn ca, cả log F0 lẫn độ tin; bảng dựng bằng `pow`, `log`, `exp` double của newlib trùng numpy | logit giải ở số mũ thấp hơn một: log F0 lệch 0,006 | đo cùng nhánh ở phần 3.4 |
+
+### 7.4 Cả chuỗi từ PCM qua nhánh `pitch` của `ai_engine` (phần 3.4.2, 29/10)
+
+`make ai-unit-pitch RUN=artifacts/pitch/runs/20261028_eb08333-dirty_9ab2ce ROW=kl CHAIN=1`: 400 hop PCM sạch (6,4 s,
+đoạn to nhất của một phiên `val`) qua `dsp_spec_swift_front` với bảng `ai_engine_pitch_tables` lấy từ mục `FRONT` của
+ảnh, gom 16 khung rồi `ai_engine_pitch_run`. So với chuỗi soi gương: `SwiftFront`, lượng tử theo số mũ đầu vào, CNN mô
+phỏng trên cả 384 khung, rồi `decode_int8`.
+
+| Đo | Kết quả |
+|---|---|
+| Khớp, lượt đầu sau `reset` | **lệch 0 trên 754 giá trị**: log F0 và độ tin của 377 khung, trễ 7 khung đọc từ đồ thị |
+| `swift_front` mỗi hop, trong chuỗi | 2 651 µs trung bình, 3 098 µs đỉnh |
+| Mạng và giải mỗi lượt 16 khung | 30 611 µs trung bình, 30 827 µs đỉnh: **1 913 µs mỗi hop** |
+| SwiftF0 cả chuỗi | **~4,6 ms mỗi hop**, cộng `swift_dims` 44 µs (§7.3) |
+
+- Front end trong chuỗi chậm hơn hàng của `budget.md` (2 367 µs): CNN chạy xen giữa đẩy các bảng và lịch sử của front
+  ra khỏi cache dữ liệu.
+- Mạng và giải thêm 155 µs mỗi hop so với CNN một mình (§7.2): xếp lại đầu vào sang [dải][khung][phổ] có lượng tử, và
+  giải 16 khung.
