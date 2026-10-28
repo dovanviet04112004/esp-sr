@@ -408,7 +408,7 @@ def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> l
     threshold for one in the window's noise bin, on the chip's path (KEHOACH 3.17, ADR-0023, ADR-0024)."""
     lock = json.loads(update_lock.LOCK.read_text(encoding="utf-8"))["models"][spk.BRANCH]
     run = ML_ROOT / "artifacts" / spk.BRANCH / "runs" / lock["run"]
-    graph = export_espdl.load_native(run / spk.INT8_DIR / lock["row"] / spk.GRAPH_FILE)
+    graph_file = run / spk.INT8_DIR / lock["row"] / spk.GRAPH_FILE
     patches, quiet = load_yaml(spk.CONFIG)["esp_ppq_patches"], [int(t) for t in lock["threshold"]["milli_z"]]
     noise = lock["threshold"].get("noise", {})
     edges = [np.float32(e) for e in noise.get("edges", [0.0] * pack_models.NOISE_EDGES)]
@@ -416,7 +416,7 @@ def speaker_checks(sessions: list[tuple], laid: list[tuple], enrol_at: int) -> l
     front = spk_fbank.SpkFbank(spk_fbank.contract_config())
     checked = [(k, w) for k in range(enrol_at, len(sessions)) for w in accepted_of(laid[k])]
     found = [survey.Window("board", "", survey.window_of(sessions[k][1], *laid[k][1][w])) for k, w in checked]
-    units, _ = spk.chip_units(graph, patches, found, front, spk.load_wrap(run))
+    units, _ = spk.chip_units(graph_file, patches, found, front, spk.load_wrap(run))
     unit_of = dict(zip(checked, units, strict=True))
     enrolling = checked[: speaker.ENROL_COMMANDS]
     voiceprint = score.voiceprint([unit_of[x] for x in enrolling])

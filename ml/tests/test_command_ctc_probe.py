@@ -243,7 +243,7 @@ def test_speaker_checks_leave_rejects_unchecked_count_the_enrolment_and_score_th
     units = [owner] * speaker.ENROL_COMMANDS + [owner, stranger, near]
     seen = []
 
-    def chip_units(graph, patches, windows, front, wrap) -> tuple[list, dict]:
+    def chip_units(graph_file, patches, windows, front, wrap) -> tuple[list, dict]:
         seen.extend(windows)
         return units, {}
 

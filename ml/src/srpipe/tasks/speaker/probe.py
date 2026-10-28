@@ -215,10 +215,10 @@ def chain(cfg: dict, run: Path, row: str, out: Path, workers: int) -> tuple[Path
     threshold = table[pack_models.SPEAKERS - 1]
     survey_cfg, paths = load_yaml(CONFIGS / cfg["source"]["survey"]), data_paths()
     picked, enrolments = chain_windows(survey_cfg, cfg["quant"], paths, workers, pack_models.SPEAKERS - 1)
-    graph = export_espdl.load_native(run / quant.INT8_DIR / row / quant.GRAPH_FILE)
+    graph_file = run / quant.INT8_DIR / row / quant.GRAPH_FILE
     front = spk_fbank.SpkFbank(spk_fbank.contract_config())
     windows = [w for _, w in picked] + [w for theirs in enrolments for w in theirs]
-    units, _ = quant.chip_units(graph, cfg["esp_ppq_patches"], windows, front, quant.load_wrap(run))
+    units, _ = quant.chip_units(graph_file, cfg["esp_ppq_patches"], windows, front, quant.load_wrap(run), workers)
     units, members = units[: len(picked)], units[len(picked) :]
     prints = [score.voiceprint([u for (kind, _), u in zip(picked, units, strict=True) if kind == ENROL])]
     for k in range(len(enrolments)):

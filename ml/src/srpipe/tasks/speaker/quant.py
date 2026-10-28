@@ -12,6 +12,7 @@ import copy
 import importlib
 import json
 import math
+import multiprocessing
 import shutil
 import sys
 from collections import defaultdict
@@ -619,15 +620,28 @@ def front_end_gaps(wrap: nn.Module) -> list[str]:
     return gaps
 
 
+_chip: dict = {}
+
+
+def _chip_start(graph_file: Path, patches: list[str]) -> None:
+    torch.set_num_threads(1)
+    _chip["sim"] = ptq_espdl.Simulator(export_espdl.load_native(graph_file), patches)
+
+
+def _chip_run(x: np.ndarray) -> np.ndarray:
+    return _chip["sim"](x)
+
+
 def chip_units(
-    graph, patches: list[str], windows: list, front: spk_fbank.SpkFbank, wrap: nn.Module
+    graph_file: Path, patches: list[str], windows: list, front: spk_fbank.SpkFbank, wrap: nn.Module, workers: int = 1
 ) -> tuple[list[np.ndarray], dict]:
     """Each window's unit embedding as the chip computes it: the tail's features by the mirror of spk_fbank, put on the
-    graph's int8 input grid, the ESP-PPQ simulation, the mirror of the scoring's unit length. Beside them, how far the
-    mirror's features sit from the extractor's own and how many int8 inputs that moves (KEHOACH 3.17)."""
-    io, sim = ptq_espdl.io_of(graph), ptq_espdl.Simulator(graph, patches)
+    int8 input grid of the graph save_native kept at graph_file, the ESP-PPQ simulation in workers processes of one
+    torch thread each, the mirror of the scoring's unit length. Beside them, how far the mirror's features sit from the
+    extractor's own and how many int8 inputs that moves (KEHOACH 3.17)."""
+    io = ptq_espdl.io_of(export_espdl.load_native(graph_file))
     n = front.cfg.window_samples
-    out, worst, gaps, moved, inputs = [], 0.0, [], 0, 0
+    xs, worst, gaps, moved, inputs = [], 0.0, [], 0, 0
     for w in windows:
         pcm = spk_fbank.tail(np.rint(w.samples * PCM_FULL_SCALE).astype(np.int16), n)
         mirror = front.run(pcm)[None, None]
@@ -637,8 +651,10 @@ def chip_units(
         x = ptq_espdl.to_int8(mirror, io.input_exponent)
         moved += int(np.count_nonzero(x != ptq_espdl.to_int8(extractor, io.input_exponent)))
         inputs += x.size
-        y = sim(x.astype(np.float32) * np.float32(2.0**io.input_exponent))
-        out.append(score.unit(ptq_espdl.to_int8(y, io.output_exponent).ravel(), io.output_exponent))
+        xs.append(x.astype(np.float32) * np.float32(2.0**io.input_exponent))
+    with multiprocessing.get_context("spawn").Pool(workers, _chip_start, (graph_file, patches)) as pool:
+        ys = pool.map(_chip_run, xs)
+    out = [score.unit(ptq_espdl.to_int8(y, io.output_exponent).ravel(), io.output_exponent) for y in ys]
     gap = {"max_abs": worst, "mean_abs": float(np.mean(gaps)), "int8_inputs_moved": moved, "int8_inputs": inputs}
     return out, gap
 
@@ -934,7 +950,7 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
     picks, board = drawn(cfg["quant"], impostors)
     scored = owner + [w for i, w in enumerate(impostors) if i not in set(picks)]
     front = spk_fbank.SpkFbank(spk_fbank.contract_config())
-    units, gap = chip_units(graph, cfg["esp_ppq_patches"], scored, front, wrap)
+    units, gap = chip_units(folder / GRAPH_FILE, cfg["esp_ppq_patches"], scored, front, wrap, workers)
     cohort = cohort_speakers(scored, survey_cfg)
     pools = device_of(survey.board_cfg(survey_cfg))["noise"]["pools"]
     noisy = {}
@@ -942,7 +958,8 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
         pcm_of = survey.NoisyPcm(survey_cfg, vads, snr, pools, paths, survey_cfg["seed"])
         ws = survey.owner_windows(survey_cfg, paths, pcm_of=pcm_of)
         ws += survey.impostor_windows(survey_cfg, paths, workers, (pools, snr))
-        noisy[f"{snr:g} dB"] = (chip_units(graph, cfg["esp_ppq_patches"], ws, front, wrap)[0], ws)
+        units_at, _ = chip_units(folder / GRAPH_FILE, cfg["esp_ppq_patches"], ws, front, wrap, workers)
+        noisy[f"{snr:g} dB"] = (units_at, ws)
     table = threshold_table(units, scored, survey_cfg, dq, pack_models.SPEAKERS, cohort, noisy)
     table["noise"]["held back"] = bins_held_back(table["counts"], dq["shares"][0])
     survey_figures = figures(np.stack(units), scored, survey_cfg, cfg["quant"])
@@ -1158,7 +1175,6 @@ def music(cfg: dict, run: Path, paths: dict, workers: int) -> dict:
     if lock["run"] != run.name:
         raise ValueError(f"the lock deploys {lock['run']}, not {run.name}")
     folder = run / INT8_DIR / lock["row"]
-    graph = export_espdl.load_native(folder / GRAPH_FILE)
     wrap, front = load_wrap(run), spk_fbank.SpkFbank(spk_fbank.contract_config())
     survey_cfg, m = load_yaml(CONFIGS / cfg["source"]["survey"]), cfg["music"]
     vads: dict = {}
@@ -1176,7 +1192,7 @@ def music(cfg: dict, run: Path, paths: dict, workers: int) -> dict:
     for cut, windows in cuts.items():
         units = {}
         for name, ws in windows.items():
-            units[name] = chip_units(graph, cfg["esp_ppq_patches"], ws, front, wrap)[0]
+            units[name] = chip_units(folder / GRAPH_FILE, cfg["esp_ppq_patches"], ws, front, wrap, workers)[0]
             print(f"{cut}, {name}: {len(ws)} windows through the chip's path", flush=True)
         if cut == "full":
             rows_ = deployed_cohort(lock, len(units["quiet"][0]))
