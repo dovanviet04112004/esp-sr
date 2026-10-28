@@ -21,6 +21,11 @@
 // void ai_engine_pad_row_s8_esp32s3(int8_t *out, const int8_t *in, const int32_t *run)
 // run: pixels, whole 16-byte vectors of a pixel, 8 bytes more or not (1 or 0). in: [pixels][C], 8-byte aligned;
 // out: [pixels][C rounded up to 16], the bytes past C left as they are.
+//
+// void ai_engine_dw_time_s8_esp32s3(int8_t *out, const int8_t *x, const int8_t *taps, const int32_t *run)
+// x: [T + K - 1][16 V] rows, K / 2 zero rows at each end; taps: [K][16 V]; run: T rows, V, K (odd, 3 or more), mac
+// shift (1 or more), bias in esp-dl's QACC layout. out: [T][16 V]. A depthwise convolution along time with bias, as
+// tie728_s8_depthwise_conv2d_hwc1 takes it: each vector's K products, a row and a tap loaded for each.
 
     .text
     .align  4
@@ -34,6 +39,8 @@
     .type   ai_engine_dwk_row_s8_esp32s3, @function
     .global ai_engine_pad_row_s8_esp32s3
     .type   ai_engine_pad_row_s8_esp32s3, @function
+    .global ai_engine_dw_time_s8_esp32s3
+    .type   ai_engine_dw_time_s8_esp32s3, @function
 
 .macro ones_in_q7 tmp
     movi    \tmp, 257
@@ -256,4 +263,72 @@ ai_engine_pad_row_s8_esp32s3:
 3:
     addi    a6, a6, -1
     bnez    a6, 1b
+    retw.n
+
+// a11 the row stride 16 V, a8 (K - 1) rows back to the next row, a14 K rows back to tap 0, a10 tap pairs less one;
+// the stack holds the vector's out, x, taps and bias, each 16 bytes (64 for the bias) on from the last vector's.
+    .align  4
+ai_engine_dw_time_s8_esp32s3:
+    entry   a1, 64
+    ones_in_q7 a15
+    l32i    a12, a5, 0
+    s32i    a12, a1, 16
+    l32i    a7, a5, 4
+    l32i    a10, a5, 8
+    l32i    a13, a5, 12
+    addi    a13, a13, -1
+    l32i    a14, a5, 16
+    s32i    a14, a1, 20
+    s32i    a2, a1, 24
+    s32i    a3, a1, 28
+    s32i    a4, a1, 32
+    slli    a11, a7, 4
+    mull    a14, a10, a11
+    sub     a8, a14, a11
+    srli    a10, a10, 1
+    addi    a10, a10, -1
+    movi.n  a15, 1
+1:
+    l32i    a12, a1, 16
+    l32i    a5, a1, 20
+    l32i    a2, a1, 24
+    l32i    a3, a1, 28
+    l32i    a4, a1, 32
+2:
+    mov     a9, a5
+    bias_into_qacc  a9
+    ee.vld.128.xp   q0, a3, a11
+    ee.vld.128.xp   q1, a4, a11
+    ee.vld.128.xp   q2, a3, a11
+    ee.vld.128.xp   q3, a4, a11
+    loopgtz a10, 3f
+    ee.vmulas.s8.qacc.ld.xp q0, a3, a11, q0, q1
+    ee.vld.128.xp   q1, a4, a11
+    ee.vmulas.s8.qacc.ld.xp q2, a3, a11, q2, q3
+    ee.vld.128.xp   q3, a4, a11
+3:
+    ee.vmulas.s8.qacc.ld.xp q0, a3, a11, q0, q1
+    ee.vld.128.xp   q1, a4, a11
+    ee.vmulas.s8.qacc   q2, q3
+    ee.vmulas.s8.qacc   q0, q1
+    round_into  q4, a13, a15
+    ee.vst.128.xp   q4, a2, a11
+    sub     a3, a3, a8
+    sub     a4, a4, a14
+    addi    a12, a12, -1
+    bnez    a12, 2b
+    l32i    a9, a1, 20
+    addi    a9, a9, 64
+    s32i    a9, a1, 20
+    l32i    a9, a1, 24
+    addi    a9, a9, 16
+    s32i    a9, a1, 24
+    l32i    a9, a1, 28
+    addi    a9, a9, 16
+    s32i    a9, a1, 28
+    l32i    a9, a1, 32
+    addi    a9, a9, 16
+    s32i    a9, a1, 32
+    addi    a7, a7, -1
+    bnez    a7, 1b
     retw.n

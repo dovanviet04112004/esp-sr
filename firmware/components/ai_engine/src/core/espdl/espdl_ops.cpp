@@ -11,6 +11,7 @@
 #include "core/espdl/espdl_stage_sum.hpp"
 #include "core/espdl/espdl_stem_conv.hpp"
 #include "core/espdl/espdl_stride_depthwise.hpp"
+#include "core/espdl/espdl_time_depthwise.hpp"
 #include "core/espdl/espdl_weighted_stats.hpp"
 #include "dl_module_creator.hpp"
 
@@ -30,6 +31,7 @@ void register_espdl_ops() noexcept
     creator->register_module("AttentionCore", attention_core_from);
     creator->register_module("StemConv", stem_conv_from);
     creator->register_module("StrideDepthwise", stride_depthwise_from);
+    creator->register_module("TimeDepthwise", time_depthwise_from);
     creator->register_module("WeightedStats", weighted_stats_from);
     creator->register_module("GlobalStats", global_stats_from);
     creator->register_module("PointwiseS8", pointwise_s8_from);
