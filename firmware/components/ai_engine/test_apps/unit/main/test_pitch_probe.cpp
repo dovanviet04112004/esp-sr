@@ -5,6 +5,7 @@
 
 #include "ai_engine.h"
 #include "core/espdl/espdl_ops.hpp"
+#include "core/espdl/runtime/espdl_loan.hpp"
 #include "core/espdl_net.hpp"
 #include "core/model_image.hpp"
 #include "dl_model_base.hpp"
@@ -54,9 +55,14 @@ esp_err_t test_of(const ai::Blob &blob, bool profiled)
     ai::register_espdl_ops();
     dl::Model model(reinterpret_cast<const char *>(blob.data), fbs::MODEL_LOCATION_IN_FLASH_RODATA, 0,
                     dl::MEMORY_MANAGER_GREEDY, nullptr, false);
+    // One run builds every module, so the rest run on the ops' loan as EspdlNet::step does.
+    (void)ai::loan_take_asked();
+    model.run();
+    // Back-to-back runs starve IDLE0 past the task watchdog, whose report lands inside a module's time.
+    vTaskDelay(1);
+    const ai::WeightLoan loan(ai::loan_take_asked());
     if (profiled) {
         model.profile_module(true);
-        // Back-to-back runs starve IDLE0 past the task watchdog, whose report lands inside a module's time.
         vTaskDelay(1);
     }
     return model.test();
