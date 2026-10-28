@@ -54,6 +54,22 @@ esp_err_t dsp_spec_fft_forward(dsp_spec_fft_t *fft, const float *in, dsp_spec_cp
     return ESP_OK;
 }
 
+esp_err_t spec_fft_magnitudes(dsp_spec_fft_t *fft, const float *in, const float *window, float *magnitude)
+{
+    if (fft == NULL || in == NULL || window == NULL || magnitude == NULL) { return ESP_ERR_INVALID_ARG; }
+    const size_t half = fft->n_points / 2;
+    for (size_t i = 0; i < fft->n_points; i++) {
+        fft->packed[i] = in[i] * window[i];
+    }
+    if (dl_rfft_f32_run(fft->plan, fft->packed) != ESP_OK) { return ESP_FAIL; }
+    magnitude[0] = spec_bin_magnitude(fft->packed[0], 0.0f);
+    magnitude[half] = spec_bin_magnitude(fft->packed[1], 0.0f);
+    for (size_t k = 1; k < half; k++) {
+        magnitude[k] = spec_bin_magnitude(fft->packed[2 * k], fft->packed[2 * k + 1]);
+    }
+    return ESP_OK;
+}
+
 esp_err_t dsp_spec_fft_inverse(dsp_spec_fft_t *fft, const dsp_spec_cplx_t *in, float *out)
 {
     if (fft == NULL || in == NULL || out == NULL) { return ESP_ERR_INVALID_ARG; }

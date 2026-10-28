@@ -134,6 +134,25 @@ static void butterflies(const dsp_spec_fft_t *fft)
     }
 }
 
+// Bins k and n / 2 - k of the real transform, from the n / 2 point one in zr, zi.
+static inline void split_pair(const dsp_spec_fft_t *fft, size_t k, dsp_spec_cplx_t *low,
+                              dsp_spec_cplx_t *high)
+{
+    const float *zr = fft->zr;
+    const float *zi = fft->zi;
+    const size_t j = fft->n_points / 2 - k;
+    const float even_r = (zr[k] + zr[j]) * 0.5f;
+    const float even_i = (zi[k] - zi[j]) * 0.5f;
+    const float odd_r = (zi[k] + zi[j]) * 0.5f;
+    const float odd_i = (zr[j] - zr[k]) * 0.5f;
+    const float c = fft->cosines[k];
+    const float s = fft->sines[k];
+    const float qr = c * odd_r + s * odd_i;
+    const float qi = c * odd_i - s * odd_r;
+    *low = (dsp_spec_cplx_t){even_r + qr, even_i + qi};
+    *high = (dsp_spec_cplx_t){even_r - qr, qi - even_i};
+}
+
 esp_err_t dsp_spec_fft_forward(dsp_spec_fft_t *fft, const float *in, dsp_spec_cplx_t *out)
 {
     if (fft == NULL || in == NULL || out == NULL) { return ESP_ERR_INVALID_ARG; }
@@ -148,17 +167,32 @@ esp_err_t dsp_spec_fft_forward(dsp_spec_fft_t *fft, const float *in, dsp_spec_cp
     out[0] = (dsp_spec_cplx_t){zr[0] + zi[0], 0.0f};
     out[m] = (dsp_spec_cplx_t){zr[0] - zi[0], 0.0f};
     for (size_t k = 1; k <= m / 2; k++) {
-        const size_t j = m - k;
-        const float even_r = (zr[k] + zr[j]) * 0.5f;
-        const float even_i = (zi[k] - zi[j]) * 0.5f;
-        const float odd_r = (zi[k] + zi[j]) * 0.5f;
-        const float odd_i = (zr[j] - zr[k]) * 0.5f;
-        const float c = fft->cosines[k];
-        const float s = fft->sines[k];
-        const float qr = c * odd_r + s * odd_i;
-        const float qi = c * odd_i - s * odd_r;
-        out[k] = (dsp_spec_cplx_t){even_r + qr, even_i + qi};
-        if (j != k) { out[j] = (dsp_spec_cplx_t){even_r - qr, qi - even_i}; }
+        dsp_spec_cplx_t low, high;
+        split_pair(fft, k, &low, &high);
+        out[k] = low;
+        if (m - k != k) { out[m - k] = high; }
+    }
+    return ESP_OK;
+}
+
+esp_err_t spec_fft_magnitudes(dsp_spec_fft_t *fft, const float *in, const float *window, float *magnitude)
+{
+    if (fft == NULL || in == NULL || window == NULL || magnitude == NULL) { return ESP_ERR_INVALID_ARG; }
+    const size_t m = fft->n_points / 2;
+    float *zr = fft->zr;
+    float *zi = fft->zi;
+    for (size_t k = 0; k < m; k++) {
+        zr[fft->reversed[k]] = in[2 * k] * window[2 * k];
+        zi[fft->reversed[k]] = in[2 * k + 1] * window[2 * k + 1];
+    }
+    butterflies(fft);
+    magnitude[0] = spec_bin_magnitude(zr[0] + zi[0], 0.0f);
+    magnitude[m] = spec_bin_magnitude(zr[0] - zi[0], 0.0f);
+    for (size_t k = 1; k <= m / 2; k++) {
+        dsp_spec_cplx_t low, high;
+        split_pair(fft, k, &low, &high);
+        magnitude[k] = spec_bin_magnitude(low.re, low.im);
+        if (m - k != k) { magnitude[m - k] = spec_bin_magnitude(high.re, high.im); }
     }
     return ESP_OK;
 }
