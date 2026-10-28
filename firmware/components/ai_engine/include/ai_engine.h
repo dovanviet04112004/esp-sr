@@ -1,5 +1,6 @@
-/** Every learned model: ns, wake, command, speaker, synth, run on esp-dl from the model slot (KEHOACH 4.5.4).
- *  Models are process-wide singletons, loaded once at boot; each step belongs to one task (KEHOACH 5.2).
+/** Every learned model: ns, wake, command, speaker, pitch, synth, run on esp-dl from the model slot
+ * (KEHOACH 4.5.4). Models are process-wide singletons, loaded once at boot; each step belongs to one task
+ * (KEHOACH 5.2).
  */
 #pragma once
 
@@ -8,6 +9,7 @@
 #include <stdint.h>
 
 #include "dsp_afe/ns.h"
+#include "dsp_spec/swift_front.h"
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -25,6 +27,7 @@ typedef enum {
     AI_ENGINE_MODEL_COMMAND,
     AI_ENGINE_MODEL_SYNTH,
     AI_ENGINE_MODEL_SPEAKER,
+    AI_ENGINE_MODEL_PITCH,
     AI_ENGINE_MODEL_COUNT,
 } ai_engine_model_t;
 
@@ -177,6 +180,36 @@ esp_err_t ai_engine_synth_render(const uint8_t *units, size_t n_units, int16_t *
  *  @ctx phu_task, pinned to core 1 below thu and sach | blocks up to wait_ms | built with AI_ENGINE_CORES_TWO
  */
 void ai_engine_helper_serve(uint32_t wait_ms);
+
+/** SwiftF0's front end tables, pointers into the image's FRONT entry for dsp_spec_swift_front_init
+ * (KEHOACH 3.11).
+ *  @ctx task | non-blocking | valid while the image stays loaded
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no pitch in the image
+ */
+esp_err_t ai_engine_pitch_tables(dsp_spec_swift_front_tables_t tables[DSP_SPEC_SWIFT_FRONT_SPECTRA]);
+
+/** Frames a call of ai_engine_pitch_run takes and gives; 0 without a pitch.
+ *  @ctx any | non-blocking
+ */
+size_t ai_engine_pitch_frames(void);
+
+/** Frames the decoded frames of a call trail the front frames it takes; 0 without a pitch.
+ *  @ctx any | non-blocking
+ */
+size_t ai_engine_pitch_delay(void);
+
+/** Run SwiftF0's network over the next front frames, ai_engine_pitch_frames() of DSP_SPEC_SWIFT_FRONT_SPECTRA
+ * times BANDS floats each, and decode as many frames, the first ai_engine_pitch_delay() behind the first
+ * taken: ln Hz and confidence, not yet gated by silence.
+ *  @ctx nhan_task | ~28 ms of core 0 for 16 frames | caller owns every pointer
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_STATE no pitch in the image | esp-dl's error
+ */
+esp_err_t ai_engine_pitch_run(const float *front, float *log_f0, float *confidence);
+
+/** Forget every frame the network keeps, as at the start of a stream.
+ *  @ctx nhan_task | non-blocking
+ */
+void ai_engine_pitch_reset(void);
 
 #ifdef __cplusplus
 }

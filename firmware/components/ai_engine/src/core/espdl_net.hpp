@@ -47,6 +47,12 @@ class EspdlNet {
     Int8Tensor input(const char *name) noexcept;
     /** The output of that graph name; empty when the graph has none. */
     Int8Tensor output(const char *name) noexcept;
+    /** Up to max of the graph's outputs into out, in esp-dl's order of their names; how many it has. */
+    size_t outputs(Int8Tensor *out, size_t max) noexcept;
+    /** The int attribute named attribute of the first node, in topological order, that also carries an int
+     * attribute named with; false when no node carries both.
+     */
+    bool node_int(const char *attribute, const char *with, int *value) noexcept;
     /** One run over what input() holds; streaming caches keep the earlier hops. A graph whose ops borrow
      * internal RAM gets it for the run only, and runs slower but alike when none is free
      * (KEHOACH 6.5).

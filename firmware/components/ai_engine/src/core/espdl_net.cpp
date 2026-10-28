@@ -122,6 +122,37 @@ Int8Tensor EspdlNet::output(const char *name) noexcept
                                                 : Int8Tensor{nullptr, 0, 0};
 }
 
+size_t EspdlNet::outputs(Int8Tensor *out, size_t max) noexcept
+{
+    if (model_ == nullptr) { return 0; }
+    std::map<std::string, dl::TensorBase *> &tensors = model_->get_outputs();
+    size_t k = 0;
+    for (auto &entry : tensors) {
+        if (k < max) { out[k] = view(entry.second); }
+        k++;
+    }
+    return tensors.size();
+}
+
+bool EspdlNet::node_int(const char *attribute, const char *with, int *value) noexcept
+{
+    if (model_ == nullptr || attribute == nullptr || with == nullptr || value == nullptr) { return false; }
+    fbs::FbsModel *fbs = model_->get_fbs_model();
+    // esp-dl clears its node map once a graph is built; it comes back for the lookup alone.
+    fbs->load_map();
+    bool found = false;
+    for (const std::string &node : fbs->topological_sort()) {
+        int carried = 0;
+        if (fbs->get_operation_attribute(node, with, carried) == ESP_OK &&
+            fbs->get_operation_attribute(node, attribute, *value) == ESP_OK) {
+            found = true;
+            break;
+        }
+    }
+    fbs->clear_map();
+    return found;
+}
+
 esp_err_t EspdlNet::step() noexcept
 {
     if (model_ == nullptr) { return ESP_ERR_INVALID_STATE; }

@@ -16,6 +16,7 @@ add_executable(ai_engine_parity_host main/parity_host.c "${ENGINE}/src/command_k
     "${PARITY}/parity_pitch_decode.c" "${REPORT}/test_report.c")
 target_include_directories(ai_engine_parity_host PRIVATE
     "${ENGINE}/src" "${ENGINE}/include" "${FIRMWARE}/components/dsp_afe/include" "${FIRMWARE}/components/common/include"
+    "${FIRMWARE}/components/dsp_spec/include"
     "${FIRMWARE}/components/dsp_spec/test_apps/host/shim" "${PARITY}" "${REPORT}/include")
 set_target_properties(ai_engine_parity_host PROPERTIES C_STANDARD 17 C_EXTENSIONS ON)
 target_compile_options(ai_engine_parity_host PRIVATE -Wall -Wextra -Werror)
@@ -33,7 +34,8 @@ add_executable(ai_engine_host main/test_ai_engine_host.c main/fake_storage.c mai
     "${ENGINE}/src/wake/wake.cpp" "${ENGINE}/src/command/command.cpp" "${ENGINE}/src/synth/synth.cpp")
 target_include_directories(ai_engine_host PRIVATE
     "${ENGINE}/include" "${ENGINE}/src" "${FIRMWARE}/components/dsp_afe/include"
-    "${FIRMWARE}/components/common/include" "${FIRMWARE}/components/sys_storage/include"
+    "${FIRMWARE}/components/dsp_spec/include" "${FIRMWARE}/components/common/include"
+    "${FIRMWARE}/components/sys_storage/include"
     "${CMAKE_CURRENT_LIST_DIR}/shim" "${FIRMWARE}/components/dsp_spec/test_apps/host/shim")
 target_link_libraries(ai_engine_host PRIVATE OpenSSL::Crypto)
 set_target_properties(ai_engine_host PROPERTIES C_STANDARD 17 CXX_STANDARD 20 CXX_EXTENSIONS OFF)

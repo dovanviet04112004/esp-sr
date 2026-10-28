@@ -32,4 +32,16 @@ esp_err_t speaker_load() noexcept;
 /** Whether speaker_load built the branch. */
 bool speaker_ready() noexcept;
 
+/** Free whatever the pitch branch built over the image about to be dropped. */
+void pitch_drop() noexcept;
+
+/** Build the pitch branch over the loaded image; ESP_OK also when the image carries no pitch, or a FRONT
+ * entry whose tables do not fit (KEHOACH 3.11).
+ *  @ret ESP_OK | ESP_ERR_NO_MEM | ESP_ERR_NOT_SUPPORTED esp-dl refused the graph | ESP_ERR_INVALID_SIZE
+ */
+esp_err_t pitch_load() noexcept;
+
+/** Whether pitch_load built the branch. */
+bool pitch_ready() noexcept;
+
 } // namespace ai
