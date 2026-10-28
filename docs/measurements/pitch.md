@@ -55,3 +55,39 @@ nhiễu, lặng rồi tông có đặt lại ở bước 60) và một đối ch
 
 Bench chạy trên cây có sửa `docs/` chưa commit, nên cột commit của `budget.md` mang đuôi `-dirty`; mã firmware đúng là
 `614c607`. Chưa tách thời gian theo phần (NCCF, đổi sang lưới độ trễ log, Viterbi, truy vết 48 khung).
+
+## 4. SwiftF0 lên chip, bước 1: int8 trên máy tính (KẾ HOẠCH §3.11, E11-T36)
+
+Đo ngày 28/10. `make pitch-import` nhập `model.onnx` của `swift-f0` 0.3.0 (sha256 `6385e8c2…`) thành run
+`ml/artifacts/pitch/runs/20261028_eb08333-dirty_9ab2ce`.
+
+**Mạng**, đo trên ONNX:
+- 25 949 tham số, 3,3 triệu phép nhân-cộng mỗi hop 16 ms.
+- 2,3 triệu ở CNN 2-D 12 kênh trên 128 dải log-tần số. Phần còn lại là ba STFT 512, 1024 và 2048 điểm, mà ONNX viết
+  bằng DFT nhân ma trận.
+- Trục thời gian của CNN ±7 khung, nên một khung chốt khi đã có 10 khung sau.
+
+**Dựng lại để lượng tử:** `dsp/spec/swift_front.py` (FFT của `dsp_spec`), `tasks/pitch/model.py` (torch, trọng số từ
+ONNX), `tasks/pitch/postproc/decode.py`. So với ONNX và `detect` của gói:
+
+| Khâu | Lệch |
+|---|---|
+| Front end, 3 × 128 dải mỗi khung, miền log | lớn nhất 3,4·10⁻⁴, trung bình 3·10⁻⁶ |
+| CNN, logit cao độ trên thang 19 | lớn nhất 9,5·10⁻⁶, cùng argmax ở mọi khung |
+| Cả chuỗi so với `detect` | cao độ lệch lớn nhất 0,0003 cent; độ tin 4·10⁻⁶; không khung nào đổi phía ngưỡng 0,5 |
+
+**Thang int8 bậc 2** (`make pitch-ptq`). Hiệu chỉnh trên 142 đoạn 256 khung của 8 phiên `train` của bản dựng
+`command/v8`, mô phỏng lại lấy tiếng `clean`. So với float trên 208 đoạn của 16 phiên `val`, bỏ 10 khung mỗi mép đoạn;
+cả hai giải trên dải F0 50–400 Hz của `contracts/listen.yaml`:
+
+| Hiệu chỉnh | Khung hữu thanh cả hai | Lệch cao độ, trung vị / p90 / p99 (cent) | Lệch > 50 cent | Khung đổi phía hữu thanh |
+|---|---|---|---|---|
+| **kl** | 13 024 | **2,5 / 6,8 / 22,4** | 0,63% | **2,1%** |
+| percentile | 13 087 | 2,7 / 7,4 / 23,2 | 0,60% | 2,1% |
+| minmax | 12 666 | 3,0 / 8,0 / 29,2 | 0,68% | 2,5% |
+| mse | 12 716 | 2,9 / 7,8 / 28,3 | 0,68% | 2,4% |
+
+- Lệch trung vị 2,5 cent, nhỏ hơn nhiều khoảng cách giữa các thanh. Khung đổi phía hữu thanh là những khung có độ tin
+  sát ngưỡng 0,5.
+- **Chưa đo:** điều kiện đạt của bước 1 là v8 nghe ba chiều cao độ của hàng kl, dựng lại cho `val` và 209 câu Cửa 3,
+  như `command.md` §12.25.
