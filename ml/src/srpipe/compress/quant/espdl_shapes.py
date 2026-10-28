@@ -110,6 +110,9 @@ def output_shape(op: str, attrs: str, shapes: list, values: list) -> list[int] |
     if op == "Conv" and shapes[1] is not None:
         w, pads, strides = shapes[1], attribute(attrs, "pads"), attribute(attrs, "strides")
         dilations, group = attribute(attrs, "dilations"), attribute(attrs, "group")
+        # Conv::deserialize reorders ONNX's [h begin, w begin, h end, w end] to [top, bottom, left, right].
+        if len(pads) == 4:
+            pads = [pads[0], pads[2], pads[1], pads[3]]
         out = list(x)
         out[1] = (x[1] + pads[0] + pads[1] - dilations[0] * (w[0] - 1) - 1) // strides[0] + 1
         if len(x) == 4:

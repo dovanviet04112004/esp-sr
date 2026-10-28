@@ -1,6 +1,6 @@
 """esp-dl's shapes replayed over an exported .info: a weight left channels-first over channels-last data, a Reshape of
-another size and a grouped convolution that multiplies channels are refused, each beside the same graph done right;
-an op the replay does not know leaves its output unchecked."""
+another size, a grouped convolution that multiplies channels and a convolution whose pads change the size are refused,
+each beside the same graph done right; an op the replay does not know leaves its output unchecked."""
 
 from __future__ import annotations
 
@@ -52,6 +52,19 @@ def test_a_grouped_convolution_that_multiplies_channels_breaks_the_shapes_after_
 
     assert problems(graph(12, "1x1x1x24")) == ["z: Reshape of [1, 8, 8, 12] to [1, 8, 192]"]
     assert problems(graph(1, "1x1x12x24")) == []
+
+
+def test_a_convolution_reads_its_pads_as_onnx_orders_them_begins_then_ends() -> None:
+    def graph(pads: str) -> str:
+        nodes = [
+            f"%y = Conv[dilations = [1, 1], group = 1, kernel_shape = [7, 3], pads = [{pads}], "
+            "strides = [1, 1]](%x, %w)",
+            "%z = Add[quant_type = 'S8'](%x, %y)",
+        ]
+        return info(nodes, ["%w[INT8, 7x3x12x12]"], x="1x128x256x12")
+
+    assert problems(graph("3, 1, 3, 1")) == []
+    assert problems(graph("3, 1, 2, 1")) == ["z: Add broadcasts [1, 128, 256, 12] with [1, 127, 256, 12]"]
 
 
 def test_an_op_the_replay_does_not_know_leaves_its_output_unchecked() -> None:
