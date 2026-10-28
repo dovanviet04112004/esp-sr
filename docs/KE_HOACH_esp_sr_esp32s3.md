@@ -1236,7 +1236,8 @@ SwiftF0 từ phần này.
      `kaldi_pitch`, chỉ cho bộ vàng và bench của nó. Mô phỏng đọc mục `pitch` nên tính đúng cao độ chip tính.
   4. **`svc_listen`:** mỗi hop đỉnh |PCM| vào vòng đỉnh, rồi `swift_front`; gom 16 khung thì `ai_engine_pitch_run`;
      mỗi khung giải ra, độ tin về 0 khi đỉnh hop của nó dưới ngưỡng im lặng của `swift-f0`, rồi `swift_dims`; ba chiều
-     vào vòng cao độ ở ô của hop. Đứt nhịp thì reset cả ba và vòng gom.
+     vào vòng cao độ ở ô của hop. Đứt nhịp thì reset cả ba và vòng gom; cửa sổ đã chốt mà cột cao độ chưa về tới bước
+     cuối thì thành `FRAME_GAP` như câu đang mở (§5.4), vì cột của các bước ấy không bao giờ tới.
   5. **`command`:** run v8 nghe cao độ của hợp đồng, không gập chiều nào (§3.14, `CONTRACT=v9`):
      - bản dựng `command/v9`: split trùng từng dòng với v8, mô phỏng lại cả bản bằng front của hợp đồng: log-mel hôm
        nay, ba chiều SwiftF0 hàng kl chạy dòng như chip, cả các phiên board của `train`;
@@ -1246,7 +1247,11 @@ SwiftF0 từ phần này.
        của hợp đồng;
      - mốc: Cửa 3 của dòng ấy nhận đúng không kém dòng đang deploy (`int8_kaldi_pitch/percentile`, 163/209 ở δ của
        thang) quá `quant.gate_tie` câu, và lỗi đơn vị trên `test` thấp hơn của nó (0,434).
-  6. **Trên board B:** bản sản phẩm nghe lệnh của chủ repo; đo trễ quyết định, giờ nhân 0 và lệnh nhận đúng.
+  6. **Trên board B:**
+     - `make listen-unit` sinh lại với hàng của phần 5: mỗi phiên kèm thêm số bước im lặng bằng độ trễ lớn nhất của
+       cột cao độ (trễ front, trễ độ tin của CNN, nhìn sau của `swift_dims`, một lượt 16 khung trừ một), để mọi cửa sổ
+       được quyết trước chỗ hở `seq` app thử đặt giữa hai phiên; mốc: mọi cửa sổ trùng Python từng trường;
+     - bản sản phẩm nghe lệnh của chủ repo; đo trễ quyết định, giờ nhân 0 và lệnh nhận đúng.
 
 3.5 **Chọn cách nghe:** chủ repo chọn SwiftF0 cho sản phẩm ngày 29/10, trước số đo của 3.4. Phần còn chờ: xoá hẳn bộ
 dò Kaldi, và bớt `sqrtf`, `ln` của front end (3.1).
@@ -3401,7 +3406,9 @@ giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec`
 - luồng đứt (`seq` hở hay khung mang `DSP_AFE_FLAG_GAP`) giữa một câu đang mở thì cửa sổ của câu ấy không được chấm:
   phần tiếng đã mất không lấy lại được, và chấm một câu thủng là có thể nhận nhầm. Cửa sổ ấy vẫn ra một quyết định đúng
   lượt của nó, `REJECT` mã `FRAME_GAP`, bước cuối là bước cuối của cửa sổ lúc hở, để `host` biết câu mất vì đâu thay vì
-  không thấy gì. Lúc hở chưa biết câu đang mở là câu thật hay một tiếng click, nên click trùng chỗ hở cũng ra `FRAME_GAP`;
+  không thấy gì. Lúc hở chưa biết câu đang mở là câu thật hay một tiếng click, nên click trùng chỗ hở cũng ra `FRAME_GAP`.
+  Câu đã chốt mà cột cao độ chưa về tới bước cuối của cửa sổ cũng ra `FRAME_GAP`: cột của các bước ấy không bao giờ tới
+  (§3.11 bước 3.4);
 - mỗi quyết định là một sự kiện vào `q_event_up`: `COMMAND` kèm điểm và khoảng cách nhất–nhì, hay `REJECT` kèm mã:
   `LOW_SCORE` khi lệnh tốt nhất kém vòng tự do quá `δ₁`, `LOW_MARGIN` khi hơn lệnh nhì chưa đủ `δ₂`, `LOW_SYLLABLE` khi
   âm tiết kém nhất của nó hụt quá `δ₃` (§3.12), `PART` khi một phần của lệnh được điểm bằng hay hơn cả lệnh, xét theo
