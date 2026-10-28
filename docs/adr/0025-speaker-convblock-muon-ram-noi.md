@@ -45,8 +45,12 @@ vào vùng ấy; rồi cho chúng dùng vùng ấy làm vùng nháp. Không bư�
   - hai pointwise;
   - các bias và BN;
   - conv trước khối, nếu có.
-- **Cấp và nhả:** `EspdlNet::step` của đồ thị có lần xin cấp một vùng RAM nội cỡ lần xin lớn nhất ngay trước lượt
-  chạy, và nhả ngay sau lượt ấy. b3 cần 79 680 B (stage 5).
+- **Cấp và nhả:** `EspdlNet::step` của đồ thị có lần xin cấp một vùng ngay trước lượt chạy, và nhả ngay sau lượt
+  ấy.
+  - Vùng là khối RAM nội liền lớn nhất còn trống lúc ấy, tối đa bằng lần xin lớn nhất, chừa lại
+    `AI_ENGINE_LOAN_RESERVE_BYTES` (Kconfig) cho các task khác.
+  - b3 xin 79 680 B (stage 5). Trên firmware sản phẩm, lúc nghe khối lớn nhất chỉ còn 49 152 B (chủ repo duyệt cấp
+    theo khối còn trống, 28/10).
 - **Ai mượn:**
   - mỗi khối chép trọng số của nó vào vùng ấy lúc bắt đầu. Trọng số cộng hai vòng ba hàng và một đệm dải còn vừa vùng
     thì các hàng ấy cũng nằm ở đó, không thì ở PSRAM; khối không xin thêm byte nào cho chúng;
@@ -56,15 +60,17 @@ vào vùng ấy; rồi cho chúng dùng vùng ấy làm vùng nháp. Không bư�
     byte nào; `StageSum` chép trọng số theo kênh của mọi số hạng (6 op 154,5 → 116,1 ms).
   - Op riêng cũng được dùng vùng ấy làm vùng nháp khi vừa: hàng đệm, hàng ra, tổng tạm. `TimeDepthwise` đặt hàng
     đệm và hàng ra ở đó; ở PSRAM, mỗi op của b3 nạp nguội chúng ~0,5 ms mỗi lần chạy.
-- **Cấp không được** thì op đọc trọng số tại chỗ: chậm hơn, cùng kết quả.
+- **Cấp ít hơn lần xin, hay không cấp được:** mỗi op chọn cách chạy theo cỡ được cấp thật. Thứ vừa thì chép vào,
+  thứ không vừa thì đọc tại chỗ. Kết quả như nhau ở mọi cỡ, chỉ giờ chạy khác.
 - **Dải:** khối nhân chung chạy mỗi hàng theo dải 4 điểm ảnh, depthwise rồi pointwise của một dải xong mới sang dải sau.
 
 ## Hệ quả
 
 - **§6.5 có ngoại lệ thứ hai** cho luật mọi model ở PSRAM, cả trọng số lẫn hàng vòng của `ConvBlock`. Ngoại lệ chỉ
-  sống trong lúc mạng chạy, cỡ vùng không đổi.
-- **Cần đo trên firmware sản phẩm** RAM nội liền còn lại lúc `xac_task` chạy speaker. Không đủ 79 680 B thì speaker
-  chậm lại chứ không sai.
+  sống trong lúc mạng chạy, và không lớn hơn lần xin lớn nhất.
+- **Đo trên firmware sản phẩm** (28/10, `measurements/ram.md` §4): lúc nghe, sau `dsp_afe`, khối RAM nội liền lớn
+  nhất là 49 152 B. Một vùng đúng 79 680 B không bao giờ cấp được, nên vùng lấy phần còn trống; giờ của b3 ở cỡ ấy đo
+  ở `measurements/latency.md` §31.
 - **b0 không đổi:** khối 24 và 48 kênh chạy nhân trải phẳng, không xin nên đồ thị b0 không có vùng mượn.
 - **Xét lại** khi:
   - RAM nội lúc chạy speaker không đủ chỗ;
