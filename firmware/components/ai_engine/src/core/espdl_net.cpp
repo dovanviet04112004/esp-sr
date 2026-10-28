@@ -128,8 +128,8 @@ esp_err_t EspdlNet::step() noexcept
     const WeightLoan loan(loan_bytes_);
     if (!loan.granted() && !loan_missed_) {
         loan_missed_ = true;
-        ESP_LOGW(TAG, "%s: no %u B of internal RAM to lend, its ops read their weights in place", name_,
-                 (unsigned)loan_bytes_);
+        ESP_LOGW(TAG, "%s: %u of %u B of internal RAM to lend, ops read in place what does not fit", name_,
+                 (unsigned)loan.lent(), (unsigned)loan_bytes_);
     }
     model_->run();
     return ESP_OK;

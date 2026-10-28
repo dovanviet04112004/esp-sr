@@ -30,4 +30,13 @@ menu "ai_engine"
             bool "two: each op runs half on the network's task and half on phu_task on core 1"
     endchoice
 
+    config AI_ENGINE_LOAN_RESERVE_BYTES
+        int "internal RAM the ops' loan leaves free (KEHOACH 6.5, ADR-0025)"
+        default 0
+        range 0 65536
+        help
+            Each run lends ai_engine's own ops the largest free internal block, at most what they asked for, less
+            this many bytes, which other tasks may still allocate while the graph runs. None by default: the other
+            tasks allocate from the rest of internal RAM, and an op whose weights miss the loan reads them from flash.
+
 endmenu

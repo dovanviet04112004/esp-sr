@@ -30,8 +30,8 @@ size_t loan_take_asked() noexcept;
  */
 Loan loan_lent() noexcept;
 
-/** Internal RAM lent to the ops while this lives, bytes as loan_take_asked gave them; with none to be had,
- * every op reads its weights in place.
+/** Internal RAM lent to the ops while this lives: the largest free block less the reserve, at most the bytes
+ * loan_take_asked gave; each op uses what fits and reads the rest in place.
  *  @ctx task | allocates, non-blocking | the task running the graph, around a run; one loan at a time
  */
 class WeightLoan {
@@ -45,9 +45,15 @@ class WeightLoan {
     {
         return granted_;
     }
+    /** The bytes lent; 0 when none could be. */
+    size_t lent() const noexcept
+    {
+        return lent_;
+    }
 
   private:
     void *mem_ = nullptr;
+    size_t lent_ = 0;
     bool granted_ = false;
 };
 
