@@ -3510,7 +3510,7 @@ nào khai lại struct.
 ```
 offset 0x000  header 1 KB
    +0x000 magic       'SRMD'
-   +0x004 format_ver  u32, 9 cho khuôn này
+   +0x004 format_ver  u32, 10 cho khuôn này
    +0x008 count       u32, ≤ 8
    +0x00C grid_hash   u32 — băm của contracts/grid.yaml lúc huấn luyện
    +0x010 listen_hash u32 — băm của contracts/listen.yaml mà model command học theo; 0 khi ảnh không có command
@@ -3532,7 +3532,9 @@ offset 0x400  dữ liệu, mỗi entry căn 64 B
 
 `kind`: `ESPDL` (một file `.espdl`), `NORM` (thống kê chuẩn hoá của một model, float32), `UNITS`
 (bảng đơn vị của `command` `ctc`), `COHORT` (nhóm chuẩn của `speaker`: embedding đơn vị float32, từng hàng
-`dims`). `flags`: bit 0 `IN_FLASH`, mục đọc tại chỗ qua mmap, không chép lên PSRAM (§6.5); bước đóng gói đặt nó cho đồ
+`dims`), `FRONT` (bảng front end của `pitch`, SwiftF0, §3.11: đầu `storage_model_front_t` 28 B ghi số dải, số điểm và
+số trọng số của mỗi phổ; rồi mỗi phổ theo thứ tự kênh của mạng có cửa sổ float32, bin đầu và số bin uint16 của từng
+dải, trọng số float32 dải nối dải, mỗi mảng đệm tới bội 4 B). `ai_engine` trao con trỏ vào mục ấy cho `dsp_spec`. `flags`: bit 0 `IN_FLASH`, mục đọc tại chỗ qua mmap, không chép lên PSRAM (§6.5); bước đóng gói đặt nó cho đồ
 thị của hàng deploy có `weights_in_flash`, hiện là `speaker` (§3.17), và cho nhóm chuẩn, chỉ đọc lúc tính μ, σ.
 
 **`firmware/models/<nhánh>/meta.json`** đi cùng mỗi `.espdl` và được commit (§4.3): `grid_hash`, nguồn dữ liệu đã học

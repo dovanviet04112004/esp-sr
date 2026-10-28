@@ -97,7 +97,7 @@ _Static_assert(sizeof(storage_speaker_roster_t) == 8 + APP_SPEAKERS_MAX * 140,
 #define STORAGE_PATH_RESPONSES "/lfs/resp/vi.json"
 
 #define STORAGE_MODEL_MAGIC 0x444d5253u // "SRMD" little-endian
-#define STORAGE_MODEL_FORMAT_VER 9
+#define STORAGE_MODEL_FORMAT_VER 10
 #define STORAGE_MODEL_MAX_ENTRIES 8
 #define STORAGE_SPK_NOISE_EDGES 3 // noise bins are one more, the last the quietest
 #define STORAGE_MODEL_NAME_BYTES 16
@@ -111,7 +111,18 @@ typedef enum {
     STORAGE_MODEL_KIND_NORM = 2,
     STORAGE_MODEL_KIND_UNITS = 3,
     STORAGE_MODEL_KIND_COHORT = 4, // speaker's cohort: unit embeddings, float32 rows of dims
+    STORAGE_MODEL_KIND_FRONT = 5,  // SwiftF0's front: storage_model_front_t, its tables
 } storage_model_kind_t;
+
+#define STORAGE_FRONT_SPECTRA 3 // SwiftF0's STFTs, in the network's channel order
+
+// A FRONT entry: this head, then each spectrum's window float32[points], first and count uint16[bands] and
+// weights float32[weights], each array padded to 4 bytes.
+typedef struct {
+    uint32_t bands;
+    uint32_t points[STORAGE_FRONT_SPECTRA];
+    uint32_t weights[STORAGE_FRONT_SPECTRA]; // weighted bins over every band
+} storage_model_front_t;
 
 #define STORAGE_MODEL_FLAG_IN_FLASH 1u // read in place through the mapping, never copied to PSRAM
 
@@ -146,6 +157,7 @@ typedef struct {
 } storage_model_header_t;
 
 _Static_assert(sizeof(storage_model_entry_t) == 64, "model entry is 64 bytes (KEHOACH 6.3)");
+_Static_assert(sizeof(storage_model_front_t) == 28, "a FRONT entry's head is 28 bytes (KEHOACH 6.3)");
 _Static_assert(sizeof(storage_model_header_t) == STORAGE_MODEL_HEADER_BYTES,
                "model header is 1 KB (KEHOACH 6.3)");
 _Static_assert(offsetof(storage_model_header_t, spk_noise_edges) == 0x240,
