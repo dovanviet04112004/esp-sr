@@ -234,6 +234,16 @@ speed: ## Same integers, timing row, board probe, profile report: BRANCH=<branch
 	$(MAKE) ai-unit-$(BRANCH) RUN=$(RUN) ROW=timing
 	$(MAKE) ai-profile LOG=$(SPEED_LOG_$(BRANCH)) ESPDL=$(SPEED_ESPDL_$(BRANCH))
 
+##@ Pitch: SwiftF0 on the chip, step 1 on the PC (KEHOACH 3.11)
+
+PITCH_QUANT = $(ML_CPU) --extra train --extra espdl --extra swiftf0 python -m srpipe.tasks.pitch.quant
+.PHONY: pitch-import pitch-ptq
+pitch-import: ## swift-f0's pinned model.onnx as a run under ml/artifacts/pitch/runs, its rewrite held to swift-f0
+	$(PITCH_QUANT) import
+
+pitch-ptq: ## Rung 2: each calibration of configs/models/pitch.yaml against float into <run>/int8/: RUN=<run>
+	$(PITCH_QUANT) ptq $(RUN)
+
 ##@ Wake
 
 .PHONY: wake-features wake-train eval-tts wake-synth
