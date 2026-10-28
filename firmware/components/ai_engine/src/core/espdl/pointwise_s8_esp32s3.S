@@ -14,6 +14,10 @@
 // void ai_engine_pw_add_x_k24_s8_esp32s3(...), ai_engine_pw_add_x_k48_s8_esp32s3(...)
 // Rows of 24 or 48 inputs held in q0, q5, q6, rows of 24 8-byte aligned; _add_ with a residual, _add_x_ shifting it
 // right by 1 or more as RequantizeLinear rounds it.
+//
+// void ai_engine_pw_conv_k72_s8_esp32s3(...), _k96_, _k128_, _k144_, _k192_; the same with _add_ and _add_x_
+// As the looped kernels for 72 (rows of 80, the last 8 lanes as the tail), 96, 128, 144 or 192 inputs, their products
+// unrolled; run's whole vectors and tail are not read.
 
 #include "pie_s8_esp32s3.inc"
 
@@ -36,10 +40,41 @@
     .type   ai_engine_pw_add_x_k24_s8_esp32s3, @function
     .global ai_engine_pw_add_x_k48_s8_esp32s3
     .type   ai_engine_pw_add_x_k48_s8_esp32s3, @function
+    .global ai_engine_pw_conv_k72_s8_esp32s3
+    .type   ai_engine_pw_conv_k72_s8_esp32s3, @function
+    .global ai_engine_pw_add_k72_s8_esp32s3
+    .type   ai_engine_pw_add_k72_s8_esp32s3, @function
+    .global ai_engine_pw_add_x_k72_s8_esp32s3
+    .type   ai_engine_pw_add_x_k72_s8_esp32s3, @function
+    .global ai_engine_pw_conv_k96_s8_esp32s3
+    .type   ai_engine_pw_conv_k96_s8_esp32s3, @function
+    .global ai_engine_pw_add_k96_s8_esp32s3
+    .type   ai_engine_pw_add_k96_s8_esp32s3, @function
+    .global ai_engine_pw_add_x_k96_s8_esp32s3
+    .type   ai_engine_pw_add_x_k96_s8_esp32s3, @function
+    .global ai_engine_pw_conv_k128_s8_esp32s3
+    .type   ai_engine_pw_conv_k128_s8_esp32s3, @function
+    .global ai_engine_pw_add_k128_s8_esp32s3
+    .type   ai_engine_pw_add_k128_s8_esp32s3, @function
+    .global ai_engine_pw_add_x_k128_s8_esp32s3
+    .type   ai_engine_pw_add_x_k128_s8_esp32s3, @function
+    .global ai_engine_pw_conv_k144_s8_esp32s3
+    .type   ai_engine_pw_conv_k144_s8_esp32s3, @function
+    .global ai_engine_pw_add_k144_s8_esp32s3
+    .type   ai_engine_pw_add_k144_s8_esp32s3, @function
+    .global ai_engine_pw_add_x_k144_s8_esp32s3
+    .type   ai_engine_pw_add_x_k144_s8_esp32s3, @function
+    .global ai_engine_pw_conv_k192_s8_esp32s3
+    .type   ai_engine_pw_conv_k192_s8_esp32s3, @function
+    .global ai_engine_pw_add_k192_s8_esp32s3
+    .type   ai_engine_pw_add_k192_s8_esp32s3, @function
+    .global ai_engine_pw_add_x_k192_s8_esp32s3
+    .type   ai_engine_pw_add_x_k192_s8_esp32s3, @function
 
     .align  4
-// The looped kernel's rows; residual 0 none, 1 added, 2 shifted then added: a11 its pointer, a10 its shift less 1.
-.macro pw_rows residual
+// The kernel's rows; residual 0 none, 1 added, 2 shifted then added: a11 its pointer, a10 its shift less 1. V 0
+// loops over the input vectors as run says, else V whole vectors unrolled and, with tail, 8 lanes more.
+.macro pw_rows residual, V=0, tail=0
     entry   a1, 48
     l32i    a6, a5, 0
     l32i    a13, a5, 20
@@ -60,7 +95,13 @@
 2:
     bias_into_qacc  a9
     mov     a12, a3
+  .if \V == 0
     pointwise_products
+  .elseif \tail
+    unrolled_products_tail \V
+  .else
+    unrolled_products \V
+  .endif
     movi.n  a15, 1
     round_into  q3, a13, a15
   .if \residual
@@ -138,3 +179,63 @@ ai_engine_pw_add_x_k24_s8_esp32s3:
     .align  4
 ai_engine_pw_add_x_k48_s8_esp32s3:
     held_rows 48, 2
+
+    .align  4
+ai_engine_pw_conv_k72_s8_esp32s3:
+    pw_rows 0, 4, 1
+
+    .align  4
+ai_engine_pw_add_k72_s8_esp32s3:
+    pw_rows 1, 4, 1
+
+    .align  4
+ai_engine_pw_add_x_k72_s8_esp32s3:
+    pw_rows 2, 4, 1
+
+    .align  4
+ai_engine_pw_conv_k96_s8_esp32s3:
+    pw_rows 0, 6, 0
+
+    .align  4
+ai_engine_pw_add_k96_s8_esp32s3:
+    pw_rows 1, 6, 0
+
+    .align  4
+ai_engine_pw_add_x_k96_s8_esp32s3:
+    pw_rows 2, 6, 0
+
+    .align  4
+ai_engine_pw_conv_k128_s8_esp32s3:
+    pw_rows 0, 8, 0
+
+    .align  4
+ai_engine_pw_add_k128_s8_esp32s3:
+    pw_rows 1, 8, 0
+
+    .align  4
+ai_engine_pw_add_x_k128_s8_esp32s3:
+    pw_rows 2, 8, 0
+
+    .align  4
+ai_engine_pw_conv_k144_s8_esp32s3:
+    pw_rows 0, 9, 0
+
+    .align  4
+ai_engine_pw_add_k144_s8_esp32s3:
+    pw_rows 1, 9, 0
+
+    .align  4
+ai_engine_pw_add_x_k144_s8_esp32s3:
+    pw_rows 2, 9, 0
+
+    .align  4
+ai_engine_pw_conv_k192_s8_esp32s3:
+    pw_rows 0, 12, 0
+
+    .align  4
+ai_engine_pw_add_k192_s8_esp32s3:
+    pw_rows 1, 12, 0
+
+    .align  4
+ai_engine_pw_add_x_k192_s8_esp32s3:
+    pw_rows 2, 12, 0

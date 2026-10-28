@@ -127,6 +127,41 @@
     ee.vsmulas.s8.qacc  q2, q0, 15
 .endm
 
+// unrolled_products for V whole input vectors then 8 lanes of the next, K = 16 V + 8: the 16th product of the last
+// whole vector loads the tail's vector; none past the last row.
+.macro unrolled_products_tail V
+    ee.vld.128.ip   q0, a12, 16
+    ee.vld.128.ip   q1, a8, 16
+    ee.vld.128.ip   q2, a8, 16
+    .rept \V
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 0
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 1
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 2
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 3
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 4
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 5
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 6
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 7
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 8
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 9
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 10
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 11
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 12
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 13
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 14
+    ee.vsmulas.s8.qacc.ld.incp  q0, a12, q2, q0, 15
+    ee.vld.128.ip   q2, a8, 16
+    .endr
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 0
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 1
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 2
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 3
+    ee.vsmulas.s8.qacc.ld.incp  q1, a8, q1, q0, 4
+    ee.vsmulas.s8.qacc.ld.incp  q2, a8, q2, q0, 5
+    ee.vsmulas.s8.qacc  q1, q0, 6
+    ee.vsmulas.s8.qacc  q2, q0, 7
+.endm
+
 // Products k .. k + count - 1 of a pixel's total, on lanes 0 .. count - 1 of in.
 .macro fixed_lanes in, count, k, total
     .irp lane, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15

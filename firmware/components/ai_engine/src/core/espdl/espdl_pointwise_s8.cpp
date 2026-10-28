@@ -33,6 +33,34 @@ void ai_engine_pw_add_x_k24_s8_esp32s3(int8_t *out, const int8_t *in, const int8
                                        const int32_t *run);
 void ai_engine_pw_add_x_k48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
                                        const int32_t *run);
+void ai_engine_pw_conv_k72_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                      const int32_t *run);
+void ai_engine_pw_add_k72_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
+void ai_engine_pw_add_x_k72_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                       const int32_t *run);
+void ai_engine_pw_conv_k96_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                      const int32_t *run);
+void ai_engine_pw_add_k96_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
+void ai_engine_pw_add_x_k96_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                       const int32_t *run);
+void ai_engine_pw_conv_k128_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                       const int32_t *run);
+void ai_engine_pw_add_k128_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                      const int32_t *run);
+void ai_engine_pw_add_x_k128_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                        const int32_t *run);
+void ai_engine_pw_conv_k144_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                       const int32_t *run);
+void ai_engine_pw_add_k144_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                      const int32_t *run);
+void ai_engine_pw_add_x_k144_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                        const int32_t *run);
+void ai_engine_pw_conv_k192_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                       const int32_t *run);
+void ai_engine_pw_add_k192_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                      const int32_t *run);
+void ai_engine_pw_add_x_k192_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
+                                        const int32_t *run);
 }
 
 namespace ai {
@@ -53,20 +81,43 @@ constexpr int kChunkBytes = kDataCacheBytes / 4; // a loan slice's rows a kernel
 
 using RowKernel = void (*)(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
 
-// Input counts held in registers: no residual, a residual, a residual shifted 1 or more.
-struct Held {
+// Kernels for one input count: no residual, a residual, a residual shifted 1 or more.
+struct Kernels {
     int inputs;
     RowKernel conv;
     RowKernel add;
     RowKernel add_x;
 };
 
-constexpr Held kHeld[] = {
+// Inputs held in registers.
+constexpr Kernels kHeld[] = {
     {24, ai_engine_pw_conv_k24_s8_esp32s3, ai_engine_pw_add_k24_s8_esp32s3,
      ai_engine_pw_add_x_k24_s8_esp32s3},
     {48, ai_engine_pw_conv_k48_s8_esp32s3, ai_engine_pw_add_k48_s8_esp32s3,
      ai_engine_pw_add_x_k48_s8_esp32s3},
 };
+
+// Inputs read a vector at a time, the products unrolled; slices and the loan as the looped kernel takes them.
+constexpr Kernels kUnrolled[] = {
+    {72, ai_engine_pw_conv_k72_s8_esp32s3, ai_engine_pw_add_k72_s8_esp32s3,
+     ai_engine_pw_add_x_k72_s8_esp32s3},
+    {96, ai_engine_pw_conv_k96_s8_esp32s3, ai_engine_pw_add_k96_s8_esp32s3,
+     ai_engine_pw_add_x_k96_s8_esp32s3},
+    {128, ai_engine_pw_conv_k128_s8_esp32s3, ai_engine_pw_add_k128_s8_esp32s3,
+     ai_engine_pw_add_x_k128_s8_esp32s3},
+    {144, ai_engine_pw_conv_k144_s8_esp32s3, ai_engine_pw_add_k144_s8_esp32s3,
+     ai_engine_pw_add_x_k144_s8_esp32s3},
+    {192, ai_engine_pw_conv_k192_s8_esp32s3, ai_engine_pw_add_k192_s8_esp32s3,
+     ai_engine_pw_add_x_k192_s8_esp32s3},
+};
+
+const Kernels *kernels_for(const Kernels *table, size_t count, int k) noexcept
+{
+    for (size_t i = 0; i < count; i++) {
+        if (table[i].inputs == k) { return &table[i]; }
+    }
+    return nullptr;
+}
 
 // Slots of conv_row_s8_esp32s3.S's PointwiseS8 run.
 enum Run {
@@ -290,14 +341,6 @@ class PointwiseS8 final : public dl::module::Module {
         }
     }
 
-    const Held *held(int k) const noexcept
-    {
-        for (const Held &h : kHeld) {
-            if (h.inputs == k) { return &h; }
-        }
-        return nullptr;
-    }
-
     bool build(dl::ModelContext *context, dl::TensorBase *x, dl::TensorBase *y)
     {
         int k = x->shape.empty() ? 0 : x->shape.back();
@@ -316,7 +359,7 @@ class PointwiseS8 final : public dl::module::Module {
             rows = patches_;
         }
         const int np = padded(columns_);
-        const Held *h = patched() ? nullptr : held(k);
+        const Kernels *h = patched() ? nullptr : kernels_for(kHeld, std::size(kHeld), k);
         dl::TensorBase *weights = context->get_tensor(m_inputs_index[1]);
         dl::TensorBase *bias = biased_ ? context->get_tensor(m_inputs_index[2]) : nullptr;
         dl::TensorBase *residual =
@@ -364,9 +407,11 @@ class PointwiseS8 final : public dl::module::Module {
         inputs_ = k;
         looped_ = h == nullptr;
         if (looped_) {
-            kernel_ = residual == nullptr   ? ai_engine_pw_conv_rows_s8_esp32s3
-                      : residual_shift_ > 0 ? ai_engine_pw_add_x_rows_s8_esp32s3
-                                            : ai_engine_pw_add_rows_s8_esp32s3;
+            const Kernels *u = kernels_for(kUnrolled, std::size(kUnrolled), k);
+            const Kernels looped = {k, ai_engine_pw_conv_rows_s8_esp32s3, ai_engine_pw_add_rows_s8_esp32s3,
+                                    ai_engine_pw_add_x_rows_s8_esp32s3};
+            const Kernels &f = u != nullptr ? *u : looped;
+            kernel_ = residual == nullptr ? f.conv : residual_shift_ > 0 ? f.add_x : f.add;
             slice_blocks_ = slice_blocks(k);
         } else if (residual == nullptr) {
             kernel_ = h->conv;
