@@ -22,13 +22,14 @@ class AttentivePool(nn.Module):
     """Weights over time from a convolution, then each channel's weighted sums of x and of x * x, as ReDimNet2's pool
     sums them."""
 
-    def __init__(self) -> None:
+    def __init__(self, softmax_dim: int = 2) -> None:
         super().__init__()
         self.front, self.score = nn.Conv1d(16, 16, 1), nn.Conv1d(16, 16, 1)
+        self.softmax_dim = softmax_dim
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         x = self.front(inputs)
-        p = torch.softmax(self.score(x), dim=2)
+        p = torch.softmax(self.score(x), dim=self.softmax_dim)
         return torch.cat([torch.sum(p * x, dim=2), torch.sum(p * (x * x), dim=2)], dim=1)
 
 
@@ -43,9 +44,10 @@ def test_weighted_stats_sums_both_products_over_time_as_one_op(tmp_path: Path) -
     with esp_ppq_patches.applied(["lean_quantizers", "softmax_quant", "weighted_stats"]):
         path = export_espdl.export(graph, tmp_path / "pool.espdl")
     ops = [op for op, _ in espdl_graph(path)[0].values()]
-    assert ops.count("WeightedStats") == 1 and not {"Mul", "ReduceSum"} & set(ops)
+    assert ops.count("WeightedStats") == 1 and not {"Mul", "ReduceSum", "SoftmaxQuant"} & set(ops)
     info = path.with_suffix(".info").read_text()
     shifts = [int(v) for v in re.search(r"= WeightedStats\[.*shifts = \[([-\d, ]+)\]", info).group(1).split(",")]
+    prob_exponent = int(re.search(r"= WeightedStats\[.*prob_exponent = (-?\d+)", info).group(1))
 
     (weigh,) = [
         op
@@ -64,6 +66,7 @@ def test_weighted_stats_sums_both_products_over_time_as_one_op(tmp_path: Path) -
     ints = [
         PPQLinearQuant_toInt(v, c).to(torch.int64).numpy().reshape(-1) for v, c in zip(values, configs, strict=True)
     ]
+    assert prob_exponent == round(float(np.log2(configs[0].scale.item())))
     pi, xi = ints[0].reshape(16, HOPS), ints[1].reshape(16, HOPS)
 
     def stats(shift: list[int]) -> tuple[np.ndarray, np.ndarray]:
@@ -75,3 +78,16 @@ def test_weighted_stats_sums_both_products_over_time_as_one_op(tmp_path: Path) -
     assert [np.array_equal(a, b) for a, b in zip(stats(shifts), ints[2:], strict=True)] == [True, True]
     off = stats([*shifts[:2], shifts[2] + 1, *shifts[3:]])
     assert not np.array_equal(off[1], ints[3])
+
+
+def test_weighted_stats_leaves_a_softmax_over_the_channels(tmp_path: Path) -> None:
+    torch.manual_seed(6)
+    rng = np.random.default_rng(25)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 16, HOPS)).astype(np.float32)) for _ in range(2)]
+    rungs = RUNGS | {"calibration": "minmax", "bias_correction": False}
+    graph = ptq_espdl.quantize(AttentivePool(softmax_dim=1).eval(), calib, tmp_path, rungs)
+    with esp_ppq_patches.applied(["lean_quantizers", "softmax_quant", "weighted_stats"]):
+        path = export_espdl.export(graph, tmp_path / "pool.espdl")
+    ops = [op for op, _ in espdl_graph(path)[0].values()]
+    assert ops.count("WeightedStats") == 1 and ops.count("SoftmaxQuant") == 1
+    assert "prob_exponent" not in path.with_suffix(".info").read_text()

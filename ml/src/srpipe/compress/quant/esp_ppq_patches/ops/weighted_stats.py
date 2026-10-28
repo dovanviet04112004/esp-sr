@@ -6,6 +6,7 @@ import contextlib
 from collections.abc import Iterator
 
 from ..base import CHANNEL_STEP, exponent_of, int8_tensor, laid_shape, read_once
+from .softmax_quant import SOFTMAX_QUANT
 
 WEIGHTED_STATS = "WeightedStats"
 # Frames whose int8 products the op sums within int16.
@@ -118,12 +119,38 @@ def weighted_stats_from(graph, op, info) -> bool:
     return True
 
 
+def softmax_into(graph, op, info) -> bool:
+    """op, a WeightedStats whose p is the int8 output of a SoftmaxQuant over the frames of a [1, T, C] map, with no
+    product table and read by op alone, joined with it: op reads the scores instead, p's exponent its prob_exponent."""
+    from esp_ppq.core import OperationQuantizationConfig
+
+    if op.type != WEIGHTED_STATS:
+        return False
+    p = op.inputs[0]
+    softmax = p.source_op
+    if softmax is None or softmax.type != SOFTMAX_QUANT or len(softmax.inputs) != 1 or not read_once(graph, p):
+        return False
+    scores, laid, e_p = softmax.inputs[0], laid_shape(p, info), exponent_of(p, info)
+    if len(laid) != 3 or laid[0] != 1 or softmax.attributes.get("axis", -1) % 3 != 1 or e_p is None:
+        return False
+    configs = [softmax.input_quant_config[0], op.input_quant_config[1]]
+    op.inputs[0] = scores
+    scores.dest_ops.append(op)
+    p.dest_ops.remove(op)
+    graph.remove_operation(softmax)
+    graph.remove_variable(p)
+    op.attributes["prob_exponent"] = int(e_p)
+    op.config = OperationQuantizationConfig(configs, list(op.output_quant_config))
+    return True
+
+
 @contextlib.contextmanager
 def weighted_stats() -> Iterator[None]:
     """An attentive pool's sums over time of p * x and of p * (x * x) exported as one WeightedStats (KEHOACH 3.14
     step 2.5): esp-dl wrote x * x and both products through PSRAM, then summed each. The op reads p and x once a row,
     takes each product as esp-dl's int8 Mul rounds it and sums them in int16 per channel, then shifts each sum as
-    ReduceSum does. ReDimNet2 b0 (KEHOACH 3.17) on board B: the pool's three Muls and two ReduceSums took ~18.5 ms.
+    ReduceSum does; a SoftmaxQuant over time feeding p alone goes into it, its probabilities kept off PSRAM.
+    ReDimNet2 b0 (KEHOACH 3.17) on board B: the pool's three Muls and two ReduceSums took ~18.5 ms.
     """
     from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
     from esp_ppq.parser.espdl_exporter import EspdlExporter
@@ -136,6 +163,8 @@ def weighted_stats() -> Iterator[None]:
         for op in list(graph.operations.values()):
             if op.name in graph.operations:
                 weighted_stats_from(graph, op, info)
+        for op in list(graph.operations.values()):
+            softmax_into(graph, op, info)
         return graph
 
     EspdlExporter.prepare_graph = joining
