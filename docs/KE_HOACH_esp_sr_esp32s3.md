@@ -1419,7 +1419,7 @@ trường của kết quả chấm phải bằng quyết định Python lấy tr
 và mỗi lần chấm. **Cửa 3 đo trên chip**: mọi cửa sổ của Cửa 3 (§3.12, Thước) đi qua chip, và Cửa 3 đếm trên chính quyết
 định của chip. Bản ghi giữ đầu vào int8 của từng cửa sổ, tức đặc trưng đã chuẩn hoá trên lưới số mũ đầu vào, vì chip
 lượng tử về đúng lưới ấy; test dựng lại đặc trưng thô từ đó bằng `NORM` rồi gọi `_step`, nên chip thấy đúng các số int8
-của bản thu. Bản ghi nằm ở phân vùng `voice` (§6.1) mà app unit không dùng, chia theo lượt cho vừa phân vùng ấy như
+của bản thu. Bản ghi nằm ở phân vùng `voice` của bảng app thử (§6.1), chia theo lượt cho vừa phân vùng ấy như
 `make listen-unit`: mỗi lượt mang chỉ số cửa sổ đầu của nó, các lượt sau lượt đầu chỉ chạy Cửa 3 và chạy trước cả bộ, vì
 ca chạy dòng của cả bộ xoá khe model 0 khi xong.
 
@@ -1517,7 +1517,7 @@ Chốt ở E12-T1 bằng bảng so bộ nhớ, flash, phép tính, chất lượ
 
 | Phương án | Loại | Chỗ nằm | Giá |
 |---|---|---|---|
-| **Ghép mẩu cả câu và số** | thuần | `svc_speak` + phân vùng `voice` | sinh sẵn câu trả lời và các từ số; 100 câu × 1,5 s × 16 kHz × 2 B = 4,8 MB PCM, ~1,2 MB với IMA-ADPCM. Chất lượng tốt nhất, chỉ nói được câu có sẵn |
+| **Ghép mẩu cả câu và số** | thuần | `svc_speak` + mẩu tiếng trong phần dư của `models_0` hay `storage` (§6.1) | sinh sẵn câu trả lời và các từ số; 100 câu × 1,5 s × 16 kHz × 2 B = 4,8 MB PCM, ~1,2 MB với IMA-ADPCM. Chất lượng tốt nhất, chỉ nói được câu có sẵn |
 | Ghép âm tiết hoặc âm đôi | thuần | `svc_speak` | kho âm tiết đóng làm việc này khả thi hơn ngôn ngữ đa âm tiết; ngôn điệu khô |
 | Mạng chưng cất kiểu sanoTTS | mô hình | `ai_engine/src/synth/` | mốc ngoài: 567 008 tham số, 0,22× thời gian thực trên ESP32-S3, đường trường độ → âm học → iSTFT, **22,05 kHz**, tiếng Anh |
 
@@ -1937,8 +1937,9 @@ người lạ lọt.
 - **Mẫu giọng:** nằm ở thư mục dữ liệu ngoài repo của host, đăng ký bằng `make speaker-enrol` từ một phiên thu 10 lệnh
   qua board.
 
-**Đường chip: ReDimNet2 b0.** Trọng số `b0-vox2-lm` học sẵn, 1,1 M tham số, ~0,27 tỉ MAC cho 1,5 s lời; chạy trong
-`ai_engine` (`src/speaker/`), int8 của esp-dl, ở nhân 0 sau khi `command` nhận lệnh.
+**Đường chip: ReDimNet2 b3 nhiều ngôn ngữ** (ADR-0028, chủ repo 28/10; b0 trước đó, ADR-0021). Trọng số
+`b3-vb2+vox2+cnc2_v0-lm` học sẵn, 4,51 M tham số, ~2,11 tỉ MAC cho 1,5 s lời, embedding 192 chiều như b0; chạy trong
+`ai_engine` (`src/speaker/`), int8 của esp-dl cùng các op riêng của §3.14, ở nhân 0 sau khi `command` nhận lệnh.
 - **Đi đúng đường của `command_ctc`:** b0 nhập thành một run ở `artifacts/speaker/runs/` (`make speaker-import`):
   `model.pt` cùng mã mạng ở bản ghim. Thang int8 vào `<run>/int8/` (`make speaker-ptq`), bản dò board đọc một hàng
   của thang (`make ai-unit-speaker`). Đồ thị chạy từ đặc trưng của chính b0 tới embedding 192 chiều; khâu đặc trưng ở
@@ -1949,9 +1950,10 @@ người lạ lọt.
   sau mỗi stage, mỗi nhóm là 72 kênh 1-D liền nhau trên mọi khung. `Embed` viết mỗi phép thành LayerNorm không affine
   trên các giá trị của nhóm rồi `Mul` và `Add` theo kênh: ESP-PPQ lượng tử được cả chuỗi, chip chạy nó bằng op sẵn
   có (`LayerNormS8` với n bất kỳ), mô phỏng của `layernorm_as_espdl` không đổi.
-- **Điều kiện cắm đã đạt** (E11-T25, ADR-0021): một lần chạy quanh 1 s trên cửa sổ 1,5 s; sau int8 giữ ≥ 95% lệnh được
-  nhận ở cả 1 m và 3 m, gộp các phiên của mỗi khoảng cách, với ≤ 5% người lạ lọt. Hàng kl int8 chạy 1128,5 ms khi trọng
-  số ở PSRAM, 1171,9 ms khi trọng số ở flash, và giữ 98,9% ở 1 m, 97,5% ở 3 m.
+- **Điều kiện cắm** (E11-T25, ADR-0021): một lần chạy quanh 1 s trên cửa sổ 1,5 s; sau int8 giữ ≥ 95% lệnh được nhận ở
+  cả 1 m và 3 m, gộp các phiên của mỗi khoảng cách, với ≤ 5% người lạ lọt. b0 đạt (hàng kl 342,7 ms sau các op của
+  §3.14). b3 giữ nhiều lệnh hơn (EER int8 2,99% so với 4,00%, `measurements/speaker.md` §7) nhưng chạy ~1,4 s trên
+  một nhân, 1,31 s trên hai (`measurements/latency.md` §31); chủ repo nhận mức ấy (ADR-0028).
 - **Hàng được chọn vào firmware bằng `make speaker-deploy`**, như `ctc-deploy`: kiểm run nhập theo đúng
   `contracts/speaker.yaml`, đặt ngưỡng, ghi `firmware/models/speaker/` (`speaker.espdl`, `meta.json`) và
   `contracts/models.lock.json`. Bước đóng gói đưa mục `speaker` vào ảnh với cờ để ở flash, và ghi ngưỡng cùng
@@ -1973,8 +1975,8 @@ người lạ lọt.
 | Quyết định | `COMMAND` kèm `speakerPermille` và `speakerId` của người khớp nhất khi qua; `speakerPermille` là cosine của người ấy, phần nghìn, còn quyết định dựa trên điểm AS-norm. `REJECT` mã `SPEAKER` khi dưới ngưỡng, kèm hai trường ấy; `SPEAKER_BUSY` khi cả hai ô đang bận hay đuôi tiếng của cửa sổ đã trôi khỏi vòng PCM; `SPEAKER_UNENROLLED` khi cờ bật mà chưa ai có mẫu giọng của ảnh này; `SPEAKER_ENROLLING` trong lúc đăng ký, kèm `speakerId` và `enrolCount` 1…10. Mọi `REJECT` của khối giữ `commandId` của lệnh đã nhận |
 | Bật tắt | trường `check` của danh sách người nói (dưới), lưu ở NVS `speaker/chip`. Tắt thì `nhan_task` đưa lệnh lên như chưa có khối này: không chép, không chạy mạng |
 | Người nói | tối đa 8 người; thêm, xoá, sửa và đăng ký giọng đi như đổi bộ lệnh (dưới) |
-| Trễ | lệnh rời board sau khi xác minh xong: thêm một lần chạy b0 ~1,17 s cộng phần nhân 0 nhường cho `nhan_task` 🔬. Vì thế `REJECT` của câu sau có thể rời board trước `COMMAND` của câu trước; `seq` cho thứ tự |
-| Bộ nhớ | ~2,6 MB PSRAM khi ảnh có `speaker` (§6.6), gồm 8 mẫu giọng 6 KB và chỗ chấm trên nhóm chuẩn, 6 B mỗi hàng, cấp lúc boot kể cả khi cờ tắt (§5.5 luật 6). Vừa nhờ tối đa 64 lệnh (§4.5.5) và trọng số để ở flash; nhóm chuẩn cũng đọc thẳng từ flash |
+| Trễ | lệnh rời board sau khi xác minh xong: thêm một lần chạy b3 ~1,4 s cộng khâu đặc trưng và phần nhân 0 nhường cho `nhan_task` 🔬. Vì thế `REJECT` của câu sau có thể rời board trước `COMMAND` của câu trước; `seq` cho thứ tự |
+| Bộ nhớ | ~4,6 MB PSRAM khi ảnh có `speaker` (§6.6), gồm 8 mẫu giọng 6 KB và chỗ chấm trên nhóm chuẩn, 6 B mỗi hàng, cấp lúc boot kể cả khi cờ tắt (§5.5 luật 6). Vừa nhờ tối đa 64 lệnh (§4.5.5), trọng số b3 và `command_ctc` để ở flash (ADR-0028); nhóm chuẩn cũng đọc thẳng từ flash. Mỗi lần chạy mượn thêm 79 680 B RAM nội (§6.5) |
 
 **Danh sách người nói** (E11-T31) đi như bộ lệnh (§4.6, §6.4): host giữ danh sách, board giữ mẫu giọng. Mọi lối vào
 gửi cùng hai yêu cầu, nên màn hình của board sau này chỉ là thêm một lối vào.
@@ -2545,7 +2547,7 @@ firmware/
 ├── test_apps/                        # test TÍCH HỢP toàn hệ; unit test nằm trong component
 │   ├── components/test_report/       # dòng kết quả có số thứ tự và CRC32, gửi lại khi máy tính xin (§4.5.7)
 │   ├── test_report.py                # phía máy tính của test_report: kiểm CRC, xin lại dòng thiếu
-│   ├── partitions_unit.csv           # unit test trên board: bảng §6.1, vùng ota_1 làm khe nháp models_1
+│   ├── partitions_unit.csv           # unit test trên board: bảng riêng, bố cục trước ADR-0028, khe nháp models_1
 │   ├── parity/                       # đọc contracts/golden/, so C với Python; partitions.csv riêng, storage 15,25 MB
 │   ├── bench_afe/  ├── bench_kws/    # µs trung bình và đỉnh mỗi module → CSV
 │   ├── bench_mem/                    # heap đỉnh, watermark ngăn xếp, RAM tĩnh
@@ -2730,7 +2732,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 |---|---|---|
 | `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame`, `spk_fbank_run` (khâu đặc trưng của b0, §3.17) | any, không chặn, người gọi giữ bộ nhớ |
 | `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_entry`, `lang_vi_unit_name` | any, không chặn |
-| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,voiceprint,norm,best,noise_bin,passes,model_id}`, `ai_engine_ns_ops()`, `ai_engine_synth_render`, `ai_engine_helper_serve` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,2 s, chỉ ở `xac_task`; `helper_serve` chặn tới hạn chờ, chỉ ở `phu_task` và chỉ có khi `AI_ENGINE_CORES_TWO` (§5.1) |
+| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,voiceprint,norm,best,noise_bin,passes,model_id}`, `ai_engine_ns_ops()`, `ai_engine_synth_render`, `ai_engine_helper_serve` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,5 s với b3, chỉ ở `xac_task`; `helper_serve` chặn tới hạn chờ, chỉ ở `phu_task` và chỉ có khi `AI_ENGINE_CORES_TWO` (§5.1) |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |
 | `svc_*` | `svc_<x>_init`, `svc_<x>_step` | task, gọi từ đúng task của bảng §5.2 |
 
@@ -2777,7 +2779,7 @@ sinh ra chỗ hở sau, mãi: ghi `set.json` 222 ms làm board bỏ 76% khung kh
 | Loại | Là gì | Vào flash bằng |
 |---|---|---|
 | `.espdl` | artifact của `ml/`, không phải source | `ml/scripts/50_pack_and_flash.sh`: kiểm sha256 theo `contracts/models.lock.json` → gộp `models.bin` theo khuôn §6.3 → `parttool.py write_partition` xuống `models_0` |
-| Mẩu tiếng cho ghép mẩu | bản thu, không phải source | `svc_speak` đọc từ phân vùng `voice` (§6.1) qua mmap |
+| Mẩu tiếng cho ghép mẩu | bản thu, không phải source | `svc_speak` đọc qua mmap từ phần dư của `models_0` hay từ `storage` (§6.1), khi E12-T2 tới |
 | Bộ lệnh mặc định, câu trả lời | source ở `contracts/` | nướng vào ảnh LittleFS `storage` lúc dựng |
 
 **Firmware không nhúng model.** Nhúng thành mảng C thì đổi model phải dựng lại cả firmware.
@@ -3084,12 +3086,12 @@ không theo độ quan trọng: `thu` > `sach` > `phu` (nhân 1); `nhan` > `dieu
 (log-mel, cao độ, mở và cắt câu) phải theo kịp nhịp khung nên chạy ở 10; việc cửa sổ (mạng và phép chấm) đuổi kịp
 liền cả giây mỗi khi câu mở, nên chạy ở 2, ngang console và dưới mọi task ứng dụng khác của nhân 0. Các task ấy chỉ dùng vài phần trăm
 CPU, còn nhịp 100 ms của `gui_task`, keepalive và sự kiện của esp-mqtt không chờ được tới hết một đợt đuổi.
-`xac_task` cũng chạy liền ~1,2 s mỗi lệnh, nên đứng dưới mọi task theo nhịp khung hay theo mạng; nó đứng trên việc
+`xac_task` cũng chạy liền ~1,5 s mỗi lệnh 🔬 với b3, nên đứng dưới mọi task theo nhịp khung hay theo mạng; nó đứng trên việc
 cửa sổ vì lệnh nó xác minh đã được nhận và người dùng đang chờ lệnh ấy, còn câu sau chưa xong. `luong_task` và
-`net_task` cùng mức 3 hầu như luôn chặn, nên không tranh lát thời gian với nó. Một lần chạy b0 giữ IDLE0 ~1,2 s, dưới
+`net_task` cùng mức 3 hầu như luôn chặn, nên không tranh lát thời gian với nó. Một lần chạy b3 giữ IDLE0 ~1,5 s, dưới
 5 s của task watchdog. Nó cũng giữ chính `nhan_task`: lệnh tới `xac_task` từ giữa một đợt việc cửa sổ, lúc `nhan_task`
 còn ở ưu tiên 2, nên `nhan_task` chỉ nạp khung lại khi lần chạy ấy xong. Vì thế `q_clean` sâu 2 s, chứa trọn một lần
-chạy b0 cùng phần khung đang chờ (§5.3).
+chạy b3 cùng phần khung đang chờ (§5.3); `clean_dropped` qua một lệnh được xác minh là phép đo của nó.
 
 ### 5.3 Hàng đợi, đệm, khoá, cờ
 
@@ -3109,7 +3111,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `q_speak` | Queue depth 4, `app_speak_req_t`, bộ nhớ ở PSRAM | 4 × 546 B | `dieu_task` | `noi_task` | bỏ, log | |
 | `q_event_up` | Queue depth 16, `app_event_t`, bộ nhớ ở PSRAM | 16 × 92 B | `nhan_task`, `xac_task`, `dieu_task` | `gui_task` | bỏ, tăng `events_dropped` | **người phát sự kiện không bao giờ publish**: publish QoS 1 chờ PUBACK, và `nhan_task` đứng chờ mạng là đệm 1 s đầy dần |
 | `q_verify` | Queue depth 2, chỉ số ô `uint8_t`; hai ô của `svc_listen` ở PSRAM, mỗi ô 24 000 mẫu `int16` cùng quyết định `COMMAND`, cấp lúc boot khi ảnh có `speaker` | 2 × ~47 KB | `nhan_task` | `xac_task` | không bao giờ đầy: chỉ ô lấy được từ `q_verify_free` mới được gửi | không chép tiếng hai lần; một ô chỉ có một chủ tại một lúc, như `q_frame` |
-| `q_verify_free` | Queue depth 2, chỉ số ô, nạp sẵn cả hai lúc boot | 2 B | `xac_task` trả ô đã xác minh xong | `nhan_task` lấy ô trước khi chép, timeout 0 | hết ô thì lệnh thành `REJECT SPEAKER_BUSY` ngay, không chờ | `nhan_task` không bao giờ đứng chờ một lần chạy b0 |
+| `q_verify_free` | Queue depth 2, chỉ số ô, nạp sẵn cả hai lúc boot | 2 B | `xac_task` trả ô đã xác minh xong | `nhan_task` lấy ô trước khi chép, timeout 0 | hết ô thì lệnh thành `REJECT SPEAKER_BUSY` ngay, không chờ | `nhan_task` không bao giờ đứng chờ một lần chạy của `speaker` |
 | `q_spk` | Queue depth 2, `app_speaker_request_t`: `SET` cả danh sách, `ENROL` một `id` hay `ENROL_CANCEL` (§3.17), ở PSRAM | 2 × 1 084 B | console, `dieu_task` | `xac_task` | không chờ: console báo bận, `dieu_task` ra `ERROR SPEAKERS_REFUSED` | trạng thái của khối (danh sách, mẫu giọng, cờ, tổng đang đăng ký) chỉ một task chạm, nên không cần khoá |
 | `q_spkset` | Queue depth 1, `net_mqtt_speakers_t` từ `down/speakers`: kết quả phân tích và `app_speaker_set_t`, ở PSRAM | 1 076 B | task esp-mqtt | `xac_task` | ghi đè: bản mới thay bản chờ; payload rỗng, tức bản retained bị xoá, không vào hàng | như `q_cmdset`: danh sách retained tới lúc nối lại không chen hàng với yêu cầu của console; bản sai khuôn vẫn vào hàng để `xac_task` ra `ERROR SPEAKERS_INVALID` |
 | `q_roster` | Queue depth 1, `app_speaker_state_t`, ở PSRAM | 1 092 B | `xac_task`, ghi đè | `gui_task`, console, `xQueuePeek` | ghi đè | bản trạng thái mới nhất của danh sách người nói; người đọc chỉ nhìn, không lấy đi, không ai chờ trên nó |
@@ -3174,7 +3176,7 @@ giờ chạy cùng lúc. Nói chen chỉ mở được sau khi Cửa của `aec`
   giữa hai câu), và khi `q_clean` không có khung chờ, `nhan_task` chạy liền các bước của cửa sổ tới khi có khung mới,
   ở ưu tiên 2 để mọi task ứng dụng khác của nhân 0 chen vào ngay khi có việc (§5.2), và chờ một tick giữa hai đợt để
   IDLE0 chạy. Trong đợt ấy khung mới chỉ được nhận khi xong bước đang chạy và các task 3–9 của nhân 0 nhả CPU, nên
-  không task nào trong số ấy được giữ CPU lâu, trừ `xac_task` với một lần chạy b0; `q_clean` 2 s là biên. Chạy mỗi lần một bước và đợi đủ `utterance.min_s` thì từ ngắn chưa đuổi kịp khi câu chốt
+  không task nào trong số ấy được giữ CPU lâu, trừ `xac_task` với một lần chạy b3; `q_clean` 2 s là biên. Chạy mỗi lần một bước và đợi đủ `utterance.min_s` thì từ ngắn chưa đuổi kịp khi câu chốt
   (`measurements/latency.md` §17);
 - cửa sổ dài quá `window_s` thì thôi chạy theo luồng: lúc câu chốt nó lùi từ bước cuối tối đa `window_s`, không qua mốc
   chặn, rồi chạy cả cửa sổ, quyết định chậm cỡ thời gian mạng chạy hết cửa sổ, khoảng 1,2 s 🔬;
@@ -3236,7 +3238,7 @@ trung bình ≤ 70%. Mọi ô là ước 🔬 lấy từ §3.3; `docs/measuremen
 | `hpf` hai kênh | 20 | `wake`, trạng thái `NGHE` | ~22% |
 | `aec` hai micro | 1 300 | mạng `command`, trạng thái `LENH` (bề rộng 160 đo, `latency.md` §18) | ~32% (thay `wake`) |
 | `stft` hai kênh | 314 | `synth`, trạng thái `DAP` | < 100% trong thời gian dựng |
-| | | `speaker` b0 sau mỗi lệnh nhận được, khi đường chip bật (§3.17) | 100% trong ~1,2 s mỗi lệnh |
+| | | `speaker` b3 sau mỗi lệnh nhận được, khi đường chip bật (§3.17) | 100% trong ~1,5 s mỗi lệnh 🔬 |
 | `balance` | 10 | `gui` + `mqtt` + `luong` | 2–5% |
 | `doa` (dò mỗi hai khung khi có tiếng; đo) | 641 | log-mel và cao độ mỗi bước, mọi trạng thái (đo) | ~14% |
 | `gsc` (đo, ở bước đổi góc lái; `bss` cùng `vad` thứ hai của nó đo 163 µs khi chia ở chính diện, 224 µs với LEARN) | 485 | | |
@@ -3265,29 +3267,31 @@ nvs,        data, nvs,      0x9000,    0x6000,
 otadata,    data, ota,      0xF000,    0x2000,
 phy_init,   data, phy,      0x11000,   0x1000,
 nvs_keys,   data, nvs_keys, 0x12000,   0x1000,   encrypted
-ota_0,      app,  ota_0,    0x20000,   0x300000,        # 3 MB   firmware A
-ota_1,      app,  ota_1,    0x320000,  0x300000,        # 3 MB   firmware B
-models_0,   data, 0x40,     0x620000,  0x600000,        # 6 MB   ns + wake + command + synth
-voice,      data, 0x42,     0xC20000,  0x200000,        # 2 MB   mẩu tiếng cho ghép mẩu, IMA-ADPCM
+ota_0,      app,  ota_0,    0x20000,   0x300000,        # 3 MB   firmware, khe duy nhất
+models_0,   data, 0x40,     0x320000,  0xB00000,        # 11 MB  ns + wake + command + speaker + synth
 storage,    data, littlefs, 0xE20000,  0x1C0000,        # 1,75 MB bộ lệnh, câu trả lời
 coredump,   data, coredump, 0xFE0000,  0x10000,
 # còn trống: 0xFF0000 → 0x1000000 (64 KB)
 ```
 
-**Một khe model 6 MB** (ADR-0018). Mạng `command` của ADR-0017, bề rộng 160, có 3,14 triệu tham số cho encoder và đầu
-CTC, thêm 0,25 triệu cho bộ dự đoán và bộ nối RNN-T: khoảng 3,5–3,7 MB int8 🔬, cộng `ns` 337 KB (NSNet-16k L, ADR-0014)
-và `wake` ~100 KB 🔬 là vượt một khe 3 MB của bảng hai khe. `models_0` lấy cả vùng của khe thứ hai, ở đúng địa chỉ cũ;
-`nvs`, `voice`, `storage`, `coredump` không dời. Cái giá là không còn quay về model cũ khi cập nhật hỏng (§7.6). `synth`
-ghép mẩu nằm ở `voice` (E12-T2), không chiếm khe model; còn khoảng 2 MB 🔬 cho `synth` mạng nếu E12-T1 chọn nó.
+**Một khe model 11 MB, một khe app** (ADR-0028, chủ repo 28/10). Ảnh model mang `command_ctc` 3,45 MB, `speaker` b3
+5,40 MB và nhóm chuẩn 0,29 MB của nó (§3.17), ~9,14 MB; còn ~1,9 MB cho `ns` (337 KB với NSNet-16k L, ADR-0014),
+`wake` (~100 KB 🔬) và `synth`. Để có chỗ ấy, bảng bỏ khe app thứ hai `ota_1` và phân vùng `voice`; `models_0` bắt đầu
+ngay sau `ota_0`. `nvs`, `storage`, `coredump` không dời, nên bộ lệnh, ngưỡng và danh sách người nói còn nguyên khi
+bảng đổi. Cái giá:
+- không còn OTA, cũng không còn quay về model cũ khi cập nhật hỏng (§7.6); E13 muốn OTA thì phải xếp lại bảng;
+- `synth` ghép mẩu (E12-T2) đặt mẩu tiếng trong phần dư của `models_0` hay trong `storage` khi tới lượt.
 
 **Slot app 3 MB** vì esp-dl chiếm ~860 KB flash khi link (số của repo face attendance, cùng chip); cộng
-Wi-Fi, MQTT, TLS, ảnh dựng cỡ 2 MB 🔬. `idf.py size` trong CI báo biên còn lại.
+Wi-Fi, MQTT, TLS, ảnh dựng 2,12 MB đo (28/10). `idf.py size` trong CI báo biên còn lại.
 
-**Unit test trên board dựng với `test_apps/partitions_unit.csv`**: bảng trên, riêng `ota_0` dài 3,5 MB, vì app thử
-của `ai_engine` nhúng probe của mọi khối và với một run đã học thì quá 3 MB, và 2,5 MB còn lại của vùng `ota_1`, nơi
-test không bao giờ cập nhật OTA, là khe nháp `models_1`. Probe của `ai_engine`, bản ghi từng vòng của `make listen-unit` và
-các ca tự dựng ảnh model ghi vào đó, còn `models_0` mang model như sản phẩm. Nạp lại firmware sản phẩm thì otadata trỏ
-về `ota_0`; vùng ấy chỉ còn rác cho tới lần OTA sau ghi đè.
+**Unit test trên board dựng với `test_apps/partitions_unit.csv`**, bảng riêng giữ bố cục trước ADR-0028:
+- `ota_0` dài 3,5 MB, vì app thử của `ai_engine` nhúng probe của mọi khối, và với một run đã học thì quá 3 MB;
+- 2,5 MB còn lại của vùng `ota_1` cũ là khe nháp `models_1`. Probe của `ai_engine`, bản ghi từng vòng của
+  `make listen-unit` và các ca tự dựng ảnh model ghi vào đó;
+- `models_0` 6 MB ở 0x620000 mang ảnh dò, và `voice` mang chuỗi của `make ai-unit-speaker CHAIN=1`.
+
+Hai bảng khác nhau, nên sau mọi app thử, `make product` ghi lại cả bảng phân vùng, ảnh model và `storage`.
 
 Bảng phân vùng không đi qua OTA được: đổi bảng là nạp lại qua cổng CH340.
 
@@ -3462,20 +3466,20 @@ Board B, profile `bench`, lúc đã nghe (`measurements/ram.md` §4). Số đo l
 |---|---|
 | Hàng đợi (§5.3), `q_clean` 2 s, `sb_stream` 512 KB (chỉ khi `NET_STREAM_ENABLE`, không có ở `prod`) | 603 KB đo |
 | `net_mqtt`: hai vùng JSON 2 × 40 KB, hai ô bộ lệnh của `q_cmdset` 2 × ~53 KB | ~0,19 MB tính 🔬; đo 344 KB khi `command_set.schema.json` còn 301 mục |
-| Ảnh model chép vào PSRAM: `command_ctc` và bảng chuẩn hoá | 3 370 KB đo |
+| Ảnh model chép vào PSRAM: chỉ bảng chuẩn hoá của `command_ctc`; mạng của nó đọc thẳng từ flash (ADR-0028) | ~1 KB; 3 370 KB khi còn chép (đo) |
 | Tensor `command_ctc`, vùng chấm ctc (cây tiền tố tới 8 192 nút) | ~628 KB đo |
 | `svc_listen`: vòng 512 bước log-mel và cao độ, hai bảng lexicon | ~383 KB, đo 502 KB với 301 lệnh |
-| `speaker` (§3.17): tensor b0 2 135 KB đo, vòng PCM 512 bước 256 KB, hai ô xác minh 94 KB, đặc trưng 42 KB, `spk_fbank` 58 KB đo, chỗ chấm trên nhóm chuẩn 2 KB | ~2,6 MB |
-| **Còn trống khi nghe** | **538 004 B đo** (0,51 MB; `measurements/ram.md` §4) |
+| `speaker` (§3.17): tensor b3 4 122 KB đo ở app thử, vòng PCM 512 bước 256 KB, hai ô xác minh 94 KB, đặc trưng 42 KB, `spk_fbank` 58 KB đo, chỗ chấm trên nhóm chuẩn 2 KB | ~4,6 MB 🔬 |
+| **Còn trống khi nghe** | ~1,2 MB 🔬 với b3 và `command_ctc` ở flash; 538 004 B đo với b0 và `command_ctc` chép vào PSRAM (`measurements/ram.md` §4) |
 | Chưa có trong firmware: `ns` + `wake` | 187 KB (RNNoise-16k) tới 394 KB (NSNet-16k L), đo ở E9-T10, + ~100 KB |
 | Chưa có: đệm dựng câu của `noi_task`, 5 s × 16 kHz × 2 B | 160 KB |
 | Chưa có: `synth` nếu là mạng | ≤ 1 MB + ~0,3 MB |
 | Chưa có: vùng TLS của `prod` | ~50 KB |
 
-**Phần chưa có không vừa 0,51 MB còn lại khi `speaker` nằm trong ảnh.** Khi tới lượt chúng, thứ tự gỡ là: bỏ
-`speaker` khỏi ảnh của bản dựng không cần nó; `prod` không có `sb_stream` (512 KB); để trọng số `command_ctc` ở flash
-như b0 (~3,4 MB), sau khi đo bước mạng chậm đi bao nhiêu trên board B 🔬 — b0 chậm 3,8% (`measurements/latency.md`
-§25).
+**Trọng số `command_ctc` đọc thẳng từ flash** (ADR-0028) để tensor của b3 vừa PSRAM; bước mạng chậm đi bao nhiêu đo
+trên board B 🔬 (b0 chậm 3,8% khi để ở flash, `measurements/latency.md` §25). Phần chưa có vẫn chưa chắc vừa phần còn
+lại; khi tới lượt chúng, thứ tự gỡ là bỏ `speaker` khỏi ảnh của bản dựng không cần nó, rồi bỏ `sb_stream` (512 KB),
+vốn không có ở `prod`.
 
 **PSRAM không miễn phí về băng thông.** Flash và PSRAM chung một bus MSPI và chung cache dữ liệu; repo
 face attendance đo được suy luận chậm đi 16,6% khi nhân kia đẩy ~8,7 MB/s qua PSRAM, kể cả model có
@@ -3600,11 +3604,12 @@ phiên nền ồn "Wi-Fi tắt" của E2-T4, cùng khuôn và cùng đường ch
 
 ### 7.6 OTA — E13, tuỳ chọn
 
-Firmware A/B bằng `esp_https_ota` với rollback (`esp_ota_mark_app_valid_cancel_rollback` sau khi tự
-kiểm lúc boot), cùng khuôn repo face attendance. Model chỉ có một khe (§6.1, ADR-0018): bản cập nhật ghi đè `models_0`,
-`ai_engine_load` kiểm sha256 từng mục nên ảnh ghi dở không bao giờ được nạp, và máy chạy thiếu model ấy tới khi cập
-nhật lại thành công; `sys/last_ota_result` ghi kết quả. OTA ghi flash nhiều giây, nên nó **dừng chuỗi nghe** và giương
-`OTA_RUNNING` (§5.5 luật 10).
+Bảng §6.1 chỉ còn một khe app (ADR-0028), nên chưa làm OTA được: E13 bắt đầu bằng việc xếp lại bảng cho hai khe app,
+ví dụ khi ảnh model nhỏ đi. Khi có hai khe: firmware A/B bằng `esp_https_ota` với rollback
+(`esp_ota_mark_app_valid_cancel_rollback` sau khi tự kiểm lúc boot), cùng khuôn repo face attendance. Model chỉ có một
+khe: bản cập nhật ghi đè `models_0`, `ai_engine_load` kiểm sha256 từng mục nên ảnh ghi dở không bao giờ được nạp, và
+máy chạy thiếu model ấy tới khi cập nhật lại thành công; `sys/last_ota_result` ghi kết quả. OTA ghi flash nhiều giây,
+nên nó **dừng chuỗi nghe** và giương `OTA_RUNNING` (§5.5 luật 10).
 
 ### 7.7 Máy tính nhận
 
