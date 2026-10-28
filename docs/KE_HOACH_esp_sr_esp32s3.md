@@ -1164,6 +1164,8 @@ CNN còn 1,675 ms mỗi hop, khớp từng bit (`measurements/pitch.md` §6). Ch
   - bộ vàng `contracts/golden/swift_front/`, có đối chứng âm;
   - bản C khớp từng bit trên máy tính và trên board;
   - giờ đo trên board, ghi vào `budget.md`.
+- Bớt `sqrtf` và `ln` của front end bằng cách tính khác (căn bằng lặp Newton, `ln` không phép chia) phải đổi phép tính
+  ở trên, bản soi gương và bộ vàng: để sau 3.5, chỉ khi chủ repo chọn SwiftF0 (29/10).
 
 3.2 **CNN chạy dòng.**
 - `ai_engine` lượng tử khung của front end về int8 theo số mũ đầu vào của CNN, làm tròn về chẵn như ESP-PPQ, như
@@ -1188,11 +1190,23 @@ CNN còn 1,675 ms mỗi hop, khớp từng bit (`measurements/pitch.md` §6). Ch
     sau trong cửa sổ, độ tin ở mọi khung còn đủ 7.
 
 3.3 **Ba chiều cao độ ở chip.**
-- Giải cao độ và độ tin là hậu xử lý của mạng, ở `ai_engine`; bản soi gương là `tasks/pitch/postproc/decode.py`.
+- Giải cao độ và độ tin là hậu xử lý của mạng, ở `ai_engine`. Bản soi gương là `tasks/pitch/postproc/decode.py`,
+  viết bằng float32:
+  - bậc lớn nhất trong [`min_f0_hz`, `max_f0_hz`], rồi softmax của nó và hai bậc kề trên logit int8;
+  - log F0 là tổng log tần số của ba bậc theo các trọng số ấy;
+  - độ tin là sigmoid của logit độ tin. Độ tin bằng 0 khi bậc lớn nhất trong cả 95 bậc nằm ngoài khoảng ấy, hay khi
+    hop có đỉnh dưới ngưỡng im lặng của `swift-f0`;
+  - bảng exp theo hiệu logit, bảng sigmoid và bảng log tần số dựng lúc nạp, bằng double rồi làm tròn về float32.
 - Ba chiều thang Kaldi của `swift_pitch.features` là xử lý tín hiệu thuần, ở `dsp_spec`:
-  - độ hữu thanh từ độ tin;
+  - độ hữu thanh từ độ tin, bằng phép biến đổi POV của `pitch.c`;
   - log F0 nội suy qua khung không tiếng, chuẩn hoá trên 0,75 s trước và 0,4 s sau;
   - delta.
+- Chạy dòng chỉ thấy 25 khung (0,4 s) sau khung đang ra. Chủ repo chọn cách nội suy ngày 29/10:
+  - khung không tiếng nội suy thẳng giữa khung hữu thanh trước và khung hữu thanh sau mà chip đã thấy;
+  - chưa thấy khung hữu thanh sau thì giữ log F0 của khung hữu thanh cuối; chưa có khung trước thì lấy của khung sau;
+  - so với bản đọc cả luồng, chỉ khác ở khung không tiếng dài quá 0,4 s mà còn trong 0,75 s sau một khung hữu thanh.
+- Trước bản C: bản soi gương chạy dòng dựng lại ba chiều của `val` và của 209 câu Cửa 3 trên hàng kl, rồi đo v8 như
+  bước 1.4. Đạt khi vẫn qua mốc của bước 1: lỗi đơn vị `val` ≤ 0,359, thanh các âm tiết sau ≥ 72%.
 - Mốc: bộ vàng khớp.
 
 3.4 **`svc_listen` và `command`.**
