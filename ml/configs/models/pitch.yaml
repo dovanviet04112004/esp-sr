@@ -8,6 +8,7 @@ rewrite_rtol: 1.0e-4               # largest gap of model.py's network to the ON
 esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches around this branch's quantisation and export
   - aligned_channels               # KEHOACH 3.14 step 2.3: 12-channel trunk padded to 16, the vector path
   - band_block                     # step 2.5: each residual block as one op, after aligned_channels
+  - band_head                      # step 2.5: the head's three convolutions and maximum as one op
 quant:                             # make pitch-ptq RUN=: rung 2 of KEHOACH 3.14 on the network after the front end
   build: v8                        # processed/command/<build>: v8's sessions, simulated again for their clean samples
   seed: 20261028
