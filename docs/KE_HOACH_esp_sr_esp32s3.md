@@ -1692,6 +1692,20 @@ RAM nội giữa các lần đọc ghi PSRAM thì nạp trước vùng nó sắp
 - Op kết thúc mọi preload trước khi trả về.
 - IDF ghi các hàm này là nội bộ, nên đổi bản IDF thì kiểm lại.
 - `Cache_Suspend_DCache` bản IDF vá chờ cache rảnh, nên một lần ghi flash rơi giữa preload chờ preload ấy xong.
+- Cả chip chỉ có một bộ preload. Một spinlock giữ bước "xem rảnh rồi khởi vùng", và mỗi nhân chỉ kết thúc vùng nó
+  khởi, nên hai nhân dùng chung được (ADR-0027).
+
+**Hai nhân** (ADR-0027, chủ repo 28/10, `espdl_split`). Với Kconfig `AI_ENGINE_CORES_TWO`, op riêng chia việc của nó
+thành hai phần độc lập qua `split_run`: task chạy mạng làm phần 0, `phu_task` ở nhân 1 làm phần 1 (§5.1). Mỗi giá trị
+ra vẫn do đúng nhân PIE ấy tính trên đúng các số ấy, nên khớp từng bit như một nhân. Mỗi phần có trạng thái chạy
+riêng (mảng tham số của nhân, hàng nháp, chuỗi preload); với `AI_ENGINE_CORES_ONE`, phần 0 làm trọn việc như trước.
+- `ConvBlock` chia theo nửa cột tần số. Depthwise 3×3 đọc cột bên cạnh, nên mỗi nửa nạp thêm hai cột x và tính thêm
+  một cột của nhánh chuẩn hoá ở chỗ chia; trong op hai nửa không chờ nhau. Vòng hàng và đệm dải mỗi nửa một bộ, trong
+  vùng mượn khi đủ chỗ cho cả hai, không thì cả hai ở PSRAM (§6.5).
+- `PointwiseS8` chia hàng của mỗi lát: lát chép vào vùng mượn một lần, hai phần cùng đọc, và lát sau chỉ chép khi cả
+  hai xong.
+- `GroupNormS8` chia các lô nhóm; `StageSum` chia các khối hàng.
+- Op khác chạy trọn ở phần 0 cho tới khi số đo cho thấy đáng chia.
 
 Mỗi op riêng có bảng nhãn ở `espdl_profile.py` trỏ về bản vá của nó, và mục giờ ở `measurements/latency.md` §25 sau
 khi bản dò khớp từng bit. Op đầu tiên làm xong bước 2.5 thêm phần đăng ký vào `src/core/`; các op sau chỉ thêm module.
@@ -2498,10 +2512,11 @@ firmware/
 │   │                            #   nhân PIE <họ>_s8_esp32s3.S, macro PIE dùng chung pie_s8_esp32s3.inc,
 │   │                            #   các bước float32 kiểu esp-dl mà op dùng chung espdl_float_s3.hpp,
 │   │                            #   vùng RAM nội op mượn cho trọng số lúc chạy espdl_loan.{cpp,hpp} (§6.5),
-│   │                            #   chuỗi vùng nạp trước vào dcache espdl_preload.{cpp,hpp} (§3.14);
+│   │                            #   chuỗi vùng nạp trước vào dcache espdl_preload.{cpp,hpp} (§3.14),
+│   │                            #   chia việc của op cho hai nhân espdl_split.hpp cùng espdl_split_{one,two}.cpp (§5.1);
 │   │                            #   src/{ns,ns_rnnoise,ns_nsnet,wake,command_kws,command_ctc,command_rnnt,speaker,synth}/;
 │   │                            #   Kconfig AI_ENGINE_NS_BACKEND chọn một thư mục ns*, AI_ENGINE_COMMAND_BACKEND
-│   │                            #   một thư mục command_* vào danh sách nguồn
+│   │                            #   một thư mục command_*, AI_ENGINE_CORES một espdl_split_* vào danh sách nguồn
 │   ├── net_wifi/      [C]   L3
 │   ├── net_mqtt/      [C]   L3  # include/gen_topics.h, gen_payload.h
 │   ├── net_stream/    [C]   L3  # TCP khách, đẩy khung theo khuôn contracts/stream
@@ -2703,7 +2718,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 |---|---|---|
 | `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame`, `spk_fbank_run` (khâu đặc trưng của b0, §3.17) | any, không chặn, người gọi giữ bộ nhớ |
 | `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_entry`, `lang_vi_unit_name` | any, không chặn |
-| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,voiceprint,norm,best,noise_bin,passes,model_id}`, `ai_engine_ns_ops()`, `ai_engine_synth_render` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,2 s, chỉ ở `xac_task` |
+| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,voiceprint,norm,best,noise_bin,passes,model_id}`, `ai_engine_ns_ops()`, `ai_engine_synth_render`, `ai_engine_helper_serve` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,2 s, chỉ ở `xac_task`; `helper_serve` chặn tới hạn chờ, chỉ ở `phu_task` và chỉ có khi `AI_ENGINE_CORES_TWO` (§5.1) |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |
 | `svc_*` | `svc_<x>_init`, `svc_<x>_step` | task, gọi từ đúng task của bảng §5.2 |
 
@@ -2999,7 +3014,7 @@ không chép lại các bảng này.
 
 | Nhân | Giao cho | Vì sao |
 |---|---|---|
-| **Nhân 1** | **chỉ `thu_task` và `sach_task`** | Chuỗi làm sạch có **hạn cứng mỗi 16 ms**: lỡ một khung là mất khung vĩnh viễn và STFT đứt mạch. Không chung nhân với Wi-Fi, lwIP, hay việc chạy từng đợt nào |
+| **Nhân 1** | **chỉ `thu_task` và `sach_task`**; khi bật hai nhân, thêm `phu_task` ở ưu tiên 1, dưới cả hai (dưới) | Chuỗi làm sạch có **hạn cứng mỗi 16 ms**: lỡ một khung là mất khung vĩnh viễn và STFT đứt mạch. Không chung nhân với Wi-Fi, lwIP, hay việc chạy từng đợt nào ở ưu tiên chen được khung |
 | **Nhân 0** | Wi-Fi, lwIP, `esp_timer`, esp-mqtt, cộng `nhan_task`, `dieu_task`, `noi_task`, `gui_task`, `luong_task`, `net_task` | Toàn bộ là việc **chịu trễ được nhờ đệm**: `nhan_task` đọc hàng đợi sâu 1 s nên Wi-Fi chen vài chục ms không mất gì |
 
 **Chỗ đổi so với TỔNG QUAN §6.3.** TỔNG QUAN đặt `thu`, `sach` và `nhan` cùng ở nhân 1, trong khi
@@ -3014,6 +3029,15 @@ giảm việc trên nhân 0, **không** kéo `nhan` về nhân 1.
 **Ba thứ IDF mặc định không ghim, phải ghim về nhân 0 bằng Kconfig**: task `tcpip` của lwIP, task
 `esp_timer`, task của esp-mqtt (§4.5.8). Để mặc định thì chúng có thể chạy sang nhân 1 giữa một khung.
 
+**Phần nhân 1 để không cho op riêng của `ai_engine`** (ADR-0027, chủ repo 28/10). Kconfig `AI_ENGINE_CORES` chọn
+`ONE` (mặc định) hay `TWO`. Ở `TWO`:
+- `phu_task` ghim nhân 1 ở ưu tiên 1, dưới `thu` 17 và `sach` 16. Nó chỉ chạy khi hai task ấy chặn, nên không khung
+  nào phải chờ nó.
+- Mỗi op riêng của `ai_engine` (§3.14) chia việc thành hai phần độc lập. Task chạy mạng làm phần 0, `phu_task` làm
+  phần 1. Lý do: b3 chạy 1,4 s trên một nhân, trong khi nhân 1 để không bốn phần năm thời gian (`budget.md`).
+- Cái `sach` mất là bus MSPI và dcache dùng chung. µs đỉnh của nó đo trong lúc speaker chạy hai nhân, và phải nằm
+  trong 12,8 ms của §5.6.
+
 ### 5.2 Bảng task
 
 Mọi task tạo ở `main/app_tasks.c` bằng `xTaskCreateStaticPinnedToCore` từ một bảng tĩnh; không
@@ -3024,6 +3048,7 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 |---|---|---|---|---|---|---|
 | `thu_task` | `svc_front` | 1 | 17 | 3 KB | chặn trong `drv_audio_read_frame` tới khi DMA đủ một khung | lấy khung `ch0 ch1 [ref]`, gắn `seq`, đẩy chỉ số ô vào `q_frame`; đếm tràn DMA. **Không làm gì khác** |
 | `sach_task` | `svc_front` | 1 | 16 | 6 KB | `q_frame` | `dsp_afe_feed` rồi `fetch`; khung sạch vào `q_clean`; ghi `s_afe_stats`; luồng mở thì chép khung vào `sb_stream` không chờ |
+| `phu_task` | `ai_engine` | 1 | 1 | 4 KB | chỉ khi `AI_ENGINE_CORES_TWO`; `ai_engine_helper_serve` chờ phần việc tới 100 ms | làm phần 1 của op riêng `ai_engine` mà task chạy mạng giao qua `s_split`, rồi báo xong (§5.1, ADR-0027); hết hạn chờ thì nạp watchdog |
 | `nhan_task` | `svc_listen` | 0 | 10; 2 khi chạy việc cửa sổ | 8 KB | `q_clean`, `q_cmdset` | log-mel và cao độ mỗi bước → `wake` mỗi khung; ở trạng thái `LENH` thì chạy cửa sổ `command` theo luồng thay `wake`; câu chốt → chấm → `q_dialog`; ảnh không có `wake` thì mở cửa sổ cho mọi câu `vad` tìm ra, cắt như Cửa 3 (§5.4), sự kiện → `q_event_up`; khi khối nhận diện người nói bật, lệnh nhận được đi sang `q_verify` thay vì lên thẳng (§3.17); giữa hai câu nhận bộ lệnh mới từ `q_cmdset`, đổi bảng lệnh, đưa cho `ai_engine_command_prepare`, ghi `set.json` (§5.3, §6.4) |
 | `xac_task` | `svc_listen` | 0 | 3 | 8 KB | `q_verify`, `q_spk`, `q_spkset` | xác minh người nói của đường chip (§3.17): đặc trưng b0, mạng, điểm với mọi mẫu giọng → `COMMAND` hay `REJECT` vào `q_event_up`, trả ô qua `q_verify_free`; đổi danh sách người nói và đăng ký theo `q_spkset`, `q_spk`, huỷ lần đăng ký quá hạn mỗi vòng chờ 100 ms, ghi NVS qua `sys_storage`, ghi bản trạng thái vào `q_roster`. Ngăn xếp ở RAM nội vì nó ghi flash |
 | `dieu_task` | `svc_dialog` | 0 | 8 | 4 KB | `q_dialog`, `q_cmd` | máy trạng thái §5.4; ra `q_speak`, `q_event_up`; báo `nhan_task` đổi chế độ; `SPEAKER_ENROL`, `SPEAKER_ENROL_CANCEL` của `q_cmd` thành yêu cầu `ENROL`, `ENROL_CANCEL` vào `q_spk` |
@@ -3042,7 +3067,7 @@ Gộp làm một thì một khung đỉnh của AEC là một lần tràn DMA, v
 đâu.
 
 **Luật ưu tiên:** mọi task ứng dụng dưới 18 để không chèn Wi-Fi. Xếp theo **độ gấp của hạn chót**,
-không theo độ quan trọng: `thu` > `sach` (nhân 1); `nhan` > `dieu` > `mqtt` = `noi` > `gui` > `luong`
+không theo độ quan trọng: `thu` > `sach` > `phu` (nhân 1); `nhan` > `dieu` > `mqtt` = `noi` > `gui` > `luong`
 = `net` = `xac` > việc cửa sổ của `nhan` (nhân 0). `nhan_task` có hai phần với hai hạn chót: nạp khung từ `q_clean`
 (log-mel, cao độ, mở và cắt câu) phải theo kịp nhịp khung nên chạy ở 10; việc cửa sổ (mạng và phép chấm) đuổi kịp
 liền cả giây mỗi khi câu mở, nên chạy ở 2, ngang console và dưới mọi task ứng dụng khác của nhân 0. Các task ấy chỉ dùng vài phần trăm
@@ -3077,12 +3102,14 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `q_spkset` | Queue depth 1, `net_mqtt_speakers_t` từ `down/speakers`: kết quả phân tích và `app_speaker_set_t`, ở PSRAM | 1 076 B | task esp-mqtt | `xac_task` | ghi đè: bản mới thay bản chờ; payload rỗng, tức bản retained bị xoá, không vào hàng | như `q_cmdset`: danh sách retained tới lúc nối lại không chen hàng với yêu cầu của console; bản sai khuôn vẫn vào hàng để `xac_task` ra `ERROR SPEAKERS_INVALID` |
 | `q_roster` | Queue depth 1, `app_speaker_state_t`, ở PSRAM | 1 092 B | `xac_task`, ghi đè | `gui_task`, console, `xQueuePeek` | ghi đè | bản trạng thái mới nhất của danh sách người nói; người đọc chỉ nhìn, không lấy đi, không ai chờ trên nó |
 | `s_diverting` | `atomic_bool` trong `svc_listen` | 1 B | `xac_task` | `nhan_task` | — ghi đè | kiểm người nói bật hay đang đăng ký: không thì `nhan_task` không chép, không gửi; một người ghi, một người đọc, một byte |
+| `s_split` | một phần việc trong `ai_engine` (`espdl_split_two.cpp`), chỉ khi `AI_ENGINE_CORES_TWO`: con trỏ hàm, ngữ cảnh, trạng thái nguyên tử; thông báo task tới `phu_task` | ~16 B | task chạy mạng | `phu_task` | không bao giờ đầy, mỗi lần một phần việc. Task khác đang giữ nó thì op chạy cả hai phần ở chỗ. Task giao xong phần 0 mà `phu_task` chưa nhận phần 1 thì tự làm phần ấy | trạng thái nguyên tử thay khoá: task giao không chờ `phu_task` bắt đầu, chỉ chờ phần nó đã nhận, lâu nhất phần ấy cộng một khung của `sach` |
 | `eg_system` | EventGroup | 4 B | mọi task | mọi task | — | bit `WIFI_OK` `MQTT_OK` `TIME_OK` `MODELS_OK` `STREAM_ON` `SPEAKING` `CALIBRATING` `OTA_RUNNING` |
 | `m_storage` | Mutex, nội bộ `sys_storage` | — | mọi đường ghi NVS và LittleFS | — | chờ có hạn 200 ms | khoá lá, không lấy khoá nào khác bên trong |
 
-**Task ở nhân 1 không lấy mutex nào.** Thứ duy nhất chúng chạm chung với nhân 0 là `s_afe_stats` dưới
+**Task ở nhân 1 không lấy mutex nào.** Thứ duy nhất `thu` và `sach` chạm chung với nhân 0 là `s_afe_stats` dưới
 spinlock (vài chục byte) và hàng đợi với timeout 0. Một mutex dùng chung với nhân 0 là một lần đảo
-ngược ưu tiên có thể xảy ra giữa hạn chót của khung.
+ngược ưu tiên có thể xảy ra giữa hạn chót của khung. `phu_task` cũng không lấy khoá nào: nó nhận việc qua thông báo
+task và trạng thái nguyên tử của `s_split`, và chỉ chạm spinlock của bộ preload, quanh vài lệnh ghi thanh ghi (§3.14).
 
 **Thứ tự khoá:** chỉ có một khoá, `m_storage`, và nó là khoá lá. Thêm khoá thứ hai thì phải ghi thứ tự
 vào đây trước khi viết code.
@@ -3171,7 +3198,7 @@ lần như vậy soát lại `docs/FREERTOS.md` từ đầu.
 | # | Luật | Vì sao |
 |---|---|---|
 | 1 | **Một task cho mỗi nguồn nhịp khác nhau**, không cho mỗi module. Module của `dsp_*` và `ai_engine` là hàm do task sở hữu nhịp gọi | Chia task không làm nhanh lên; cái đắt là ngăn xếp và lỗi đồng thời |
-| 2 | Việc có hạn cứng theo khung → nhân 1. Việc chịu trễ được nhờ đệm → nhân 0. Mạng luôn ở nhân 0 | §5.1 |
+| 2 | Việc có hạn cứng theo khung → nhân 1. Việc chịu trễ được nhờ đệm → nhân 0. Mạng luôn ở nhân 0, trừ phần 1 của op riêng `ai_engine` ở `phu_task` ưu tiên 1 khi `AI_ENGINE_CORES_TWO` | §5.1 |
 | 3 | Ưu tiên theo độ gấp của hạn chót, dưới 18 | không chèn Wi-Fi; task quan trọng mà không gấp thì không cần ưu tiên cao |
 | 4 | Mỗi hàng đợi ghi đủ: độ sâu, ai gửi, ai nhận, **đầy thì làm gì**, và tên bộ đếm khi bỏ | bỏ trong im lặng là lỗi không ai lần ra được |
 | 5 | Task ở nhân 1 **không chặn** trên mạng, flash, mutex, hay `ESP_LOGx` trong vòng khung | khoá log của IDF lấy bằng `portMAX_DELAY` |
@@ -3210,6 +3237,9 @@ trung bình ≤ 70%. Mọi ô là ước 🔬 lấy từ §3.3; `docs/measuremen
 Với NSNet-16k L, nhân 1 nhỉnh hơn mục tiêu trung bình 50% ở trường hợp nặng nhất, trong đó `aec` còn là ước: E9-T7 đo, vượt thì `ns` lùi về NSNet-16k M hay S, học cùng lượt. Nhân 0 chật ở trạng thái `LENH`. Nếu số đo xác nhận điều đó thì thứ tự cắt là:
 giảm tần suất `doa` và `telemetry` trong `LENH`, rồi thu nhỏ mạng `command` — không chuyển việc sang
 nhân 1.
+
+`phu_task` không có ô trong bảng: nó chỉ chạy lúc `thu` và `sach` chặn. Phần nó làm chậm `sach`, qua bus và dcache
+dùng chung, đo riêng như §5.1.
 
 ---
 
@@ -3392,6 +3422,8 @@ RAM nội. Hai ngoại lệ:
     `StageSum` chép trọng số theo kênh của mọi số hạng.
   - Op riêng cũng dùng vùng ấy làm vùng nháp khi vừa (hàng đệm, hàng ra, tổng tạm), không xin thêm byte nào:
     `TimeDepthwise` đặt hàng đệm và hàng ra ở đó.
+  - Ở hai nhân (ADR-0027) mỗi nửa của `ConvBlock` có vòng hàng và đệm dải riêng: vùng không đủ cho cả hai thì cả hai
+    nằm ở PSRAM, vùng vẫn 79 680 B.
 
   Lý do: dcache của S3 không giữ dòng nóng, nên mỗi hàng đẩy trọng số ra và đọc lại từ flash
   (`measurements/latency.md` §31). Không cấp được thì op đọc trọng số tại chỗ, chậm hơn, cùng kết quả.
