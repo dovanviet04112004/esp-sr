@@ -117,3 +117,46 @@ khác. Hai dòng float và không cao độ trùng `command.md` §12.25.
 **Bước 1 đạt cả ba điều kiện.** int8 hàng kl mất 0,001 lỗi đơn vị so với float. So với cách board chạy v8 hôm nay,
 không cao độ, nó bớt 0,031 lỗi đơn vị trên `val` và thêm 4,2 điểm thanh các âm tiết sau trên 209 câu Cửa 3. Bước 2 là
 bản dò trên board B: giờ mỗi hop, khớp từng bit.
+
+## 5. SwiftF0 lên chip, bước 2: bản dò trên board B (KẾ HOẠCH §3.11, E11-T37)
+
+Đo ngày 28/10 bằng `make ai-unit-pitch RUN=artifacts/pitch/runs/20261028_eb08333-dirty_9ab2ce ROW=kl`. App unit của
+`ai_engine` dựng ở cờ của `bench`; đồ thị chép vào PSRAM lúc nạp.
+
+- Cửa sổ 256 khung (4,1 s), không chạy dòng: đoạn to nhất của một phiên `val` của `command/v8`, mô phỏng lại.
+- `.espdl` 174 992 B, gồm cả giá trị thử của `model->test()`.
+- Bốn bản cắt, sau `/blocks.1/Relu`, `/blocks.2/Relu_1`, `/blocks.4/Relu_1` và `Relu` của đầu ra cao độ.
+
+| Đo | Kết quả |
+|---|---|
+| `model->test()`, bốn bản cắt | khớp cả bốn |
+| `model->test()`, cả đồ thị | khớp |
+| `EspdlNet`, 10 lượt sau một lượt không tính giờ, cả hai đầu ra | **lệch 0** |
+| Giờ một cửa sổ | **6 740,3 ms** trung bình, đỉnh hơn trung bình 28 µs |
+| Giờ một hop | **26,3 ms**, 165% khung 16 ms |
+| Dựng, gồm một lượt chạy | 6,8 s |
+| PSRAM cho đồ thị và tensor | 1 304 300 B |
+
+**Bảng `profile_module`** (`make ai-profile`): 6 743,7 ms trên 43 module.
+- Conv: 18 module, 6 487,4 ms (96%). Add, Relu, ReduceMax mỗi loại ~70–75 ms; các loại còn lại cộng 38 ms.
+- Mọi conv chạy nhân "unaligned" của esp-dl, vì số kênh (12, hay 3 và 4 ở đầu và cuối) không chia hết cho 16. Ở b0,
+  nhân ấy tốn 1,4 chu kỳ một phép nhân-cộng, so với 0,15 ở đường aligned (`latency.md` §25).
+
+| Module | Hình | Giờ một cửa sổ | Chu kỳ một phép nhân-cộng |
+|---|---|---|---|
+| bốn conv của `blocks.0` và `blocks.5` | 7 × 3, 12 → 12 kênh | 948–1 026 ms mỗi cái | 2,30–2,48 |
+| tám conv của `blocks.1`–`blocks.4` | 7, 5, 3 × 1, giãn 17–48 theo dải | 193–353 ms mỗi cái | 2,46–3,59 |
+| `stem` | 3 × 3, 3 → 12 kênh | 355 ms | 8,02 |
+| `head`, `spread` | 3 × 3, 12 → 4; 5 × 1, 4 → 4 | 94 ms, 79 ms | 2,15; 9,79 |
+
+Cả cửa sổ là 589 triệu phép nhân-cộng (2,3 triệu mỗi hop), trung bình 2,75 chu kỳ mỗi phép.
+
+Watchdog task báo 18 lần rằng IDLE0 không được chạy, vì một lượt giữ nhân 0 6,7 s, quá hạn 5 s. Đỉnh chỉ hơn trung
+bình 28 µs, nên các lần báo ấy không làm lệch số đo.
+
+**Đọc theo KẾ HOẠCH §3.11:**
+- Khớp từng bit: **đạt**.
+- Giờ: không vừa. CNN một mình đã gấp 13 lần chỗ Kaldi nhường (1 980 µs mỗi hop, §3 trên), và quá cả khung 16 ms.
+  Phần còn lại sau ba STFT ước 🔬 chỉ cỡ 700 µs, nhỏ hơn giờ đo 38 lần.
+- Nhận thêm tải ở nhân 0 không đủ, vì CNN đã vượt khung. Còn lại hai đường, chủ repo chọn: qua vòng tăng tốc, bước 2
+  của §3.14, rồi mới sang bước 3; hay dừng SwiftF0 trên chip.
