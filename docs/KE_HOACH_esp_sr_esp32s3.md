@@ -1137,6 +1137,12 @@ vòng tăng tốc đủ như b0 và b3 (28/10): bước 2 của §3.14 trên c�
 Bước 3 chạy CNN dòng nên ưu tiên cách tăng tốc không dựa vào số khung mỗi lượt; cách gộp các khung theo thời gian chỉ
 giữ được khi bước 3 chạy đủ khung mỗi bước.
 
+Giờ của vòng tăng tốc đo trên cửa sổ 16 khung (`FRAMES=16`, một bước của `command`), không phải 256 khung:
+- Ở cửa sổ 256 khung, hai dải liền nhau cách nhau 4 KB trong PSRAM. Một cột 128 dải chỉ rơi vào 2 trong 128 tập của
+  cache dữ liệu 64 KB 8 đường, nên mỗi tap theo dải trượt cache.
+- Chạy dòng ở bước 3 chỉ giữ vài chục KB mỗi bước, không gặp cảnh ấy.
+- Khớp từng bit vẫn kiểm ở cả hai cửa sổ.
+
 Bước 3 là đường chip trong chuỗi: STFT ở `dsp_spec` đủ bốn bước, CNN chạy dòng, cột cao độ trễ 10 khung cộng 0,4 s nhìn
 sau của chuẩn hoá trong `svc_listen`, và cách chọn cách nghe.
 
