@@ -1393,6 +1393,7 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
   - Ghi một hàng y 6 912 B vào PSRAM tốn ~140 µs, đọc một hàng x ~79 µs: cache nạp mỗi dòng y trước khi ghi đè rồi
     mới ghi ngược. Nối hai lần preload giấu ~171 µs một hàng, không lần nào phải chờ preload xong.
   - Ước cho b3: `ConvBlock` stage 0–1 ~25 và ~19 ms một khối, cả 21 khối ~100–150 ms 🔬. Trên bản dò chỉ được 48,6 ms (bảng trên): nhân thật ghi y bằng `ee.vst.128` rải giữa phần tính, nên cache đã chồng lần nạp dòng y lên phần tính, chỉ chép hàng x còn đứng chờ.
+  - LN của stem (255 KB, 24 giá trị một vị trí) chạy theo cụm 16 KB nạp trước cụm sau: LN 28,3 → 27,5 ms, nhưng cả cửa sổ 1 439,5 → 1 442,2 ms vì `StageSum`, `PointwiseS8`, `GroupNormS8` xê 0,4–1,2 ms theo chỗ đặt mới của code và tensor. Lợi nhỏ hơn mức xê ấy, nên bỏ.
 - **Chưa đo:** độ chính xác của b3 sau int8 (thang int8 đang chạy).
 - **Đọc:** đây là số thô. b3 chạy qua các op viết cho hình dạng của b0, chưa có bước nào tối ưu riêng cho nó. b3 có
   2,16 tỉ MAC (`torch.utils.flop_counter`, không tính GroupNorm), b0 0,24 tỉ. 1,61 tỉ nằm trong 19 `ConvBlock`, chạy
