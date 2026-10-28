@@ -10,6 +10,7 @@ esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches aroun
   - band_block                     # step 2.5: each residual block as one op, after aligned_channels
   - band_head                      # step 2.5: the head's three convolutions and maximum as one op
   - band_stem                      # step 2.5: the stem from the three spectra on the band kernel
+  - band_chain                     # step 2.5: the single-frame blocks as one op, after band_block
 quant:                             # make pitch-ptq RUN=: rung 2 of KEHOACH 3.14 on the network after the front end
   build: v8                        # processed/command/<build>: v8's sessions, simulated again for their clean samples
   seed: 20261028
