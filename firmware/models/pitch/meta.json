@@ -1,0 +1,32 @@
+{
+  "branch": "pitch",
+  "run": "20261028_eb08333-dirty_9ab2ce",
+  "grid_hash": "0x9c914b61",
+  "files": [
+    {
+      "file": "pitch.espdl",
+      "entry": "pitch",
+      "kind": "espdl",
+      "sha256": "b6ed96ac493b4fb0366a9b0a9ad980ba3a27720cd1b4157d4fcb0527bf53771c"
+    },
+    {
+      "file": "pitch.front.bin",
+      "entry": "pitch",
+      "kind": "front",
+      "sha256": "d249d9b6131e4c277a5c4726af4a2df841ae2f9bb92dd3ab2cc655c656218469"
+    }
+  ],
+  "learnt_from": {
+    "pretrained": "swift_f0 0.3.0",
+    "weights": {
+      "file": "model.onnx",
+      "sha256": "6385e8c2ebc3872e82c9ff5946228de44cd3be77a750ea53698b7dbfe94b0a22"
+    }
+  },
+  "row": "kl",
+  "step_frames": 16,
+  "delays": {
+    "logits": 6,
+    "confidence": 7
+  }
+}
