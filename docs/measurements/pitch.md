@@ -307,3 +307,31 @@ sổ.
   cùng một bước dải, dù mỗi dải chỉ dùng 2 cột. Phần PSRAM thêm phần lớn ở đây.
 - SwiftF0 trên chip giờ tốn ~4,1 ms mỗi hop: front end 2 367 µs (§7.1) cộng CNN chạy dòng 1 758 µs, so với Kaldi
   2 101 µs. Còn phần 3.3: giải cao độ, độ tin và ba chiều thang Kaldi.
+
+### 7.3 Ba chiều cao độ chạy dòng (phần 3.3, 29/10)
+
+Chủ repo chọn cách nội suy ngày 29/10 (KẾ HOẠCH §3.11 bước 3.3): khung không tiếng nội suy giữa các khung hữu thanh chip
+đã thấy, và giữ log F0 của khung hữu thanh cuối khi chưa thấy khung sau. Bản soi gương `srpipe.dsp.spec.swift_dims` tính
+như vậy, trên log F0 và độ tin mà `decode_int8` giải từ đầu ra int8 của hàng kl, như chip giải.
+
+Đo với run v8 `20261007_439d763-dirty_f438bd`:
+- `val`: `make pitch-rebuild RUN=artifacts/pitch/runs/20261028_eb08333-dirty_9ab2ce ROW=kl STREAM=1` dựng lại `val` thành
+  bản dựng `v8_resim_kl_stream`, rồi `make ctc-tone-flip CHECK=places BUILD=v8_resim_kl_stream`;
+- Cửa 3: `make ctc-tone-flip CHECK=gate PITCH_RUN=… PITCH_ROW=kl PITCH_STREAM=1`.
+
+| Cao độ | `val`: lỗi đơn vị | `val`: thanh đầu / sau | Cửa 3: đúng nhất | Cửa 3: thanh đầu | Cửa 3: thanh sau |
+|---|---|---|---|---|---|
+| SwiftF0 float, cả phiên (§4) | 0,343 | 73,5% / 83,1% | 196/209 | 167/209 (79,9%) | 179/233 (76,8%) |
+| hàng kl, cả phiên (§4) | 0,344 | 72,8% / 83,1% | 192/209 | 169/209 (80,9%) | 182/233 (78,1%) |
+| **hàng kl, chạy dòng như chip** | **0,345** | 72,9% / 83,1% | **192/209** | 168/209 (80,4%) | **180/233 (77,3%)** |
+| không cao độ (§4) | 0,375 | 71,4% / 79,0% | | | |
+| Mốc của bước 1 | ≤ 0,359: **đạt** | | kém float ≤ 5 câu: **đạt** | | ≥ 72%: **đạt** |
+
+Chạy dòng mất 0,001 lỗi đơn vị và 2 âm tiết sau đúng thanh trên Cửa 3 so với ba chiều tính cả phiên, trong nhiễu đếm.
+
+Bản C, cả hai qua đủ các bước của TỔNG QUAN §5.3 (29/10):
+
+| Khối | Bộ vàng | Khớp, máy tính và board B | Đối chứng âm | Giờ trên board B |
+|---|---|---|---|---|
+| `dsp_spec/swift_dims` | `contracts/golden/swift_dims/`: âm tiết cách quãng ngắn, hai quãng quá 25 khung nhìn sau, 100 khung đầu không tiếng, khung ngẫu nhiên có reset giữa chừng | lệch 0 cả bốn ca | ra trễ một khung: lệch 0,653, 8,1 dB | **44,2 µs trung bình, 66,1 µs đỉnh mỗi hop**, vùng làm việc 656 B |
+| `ai_engine/src/pitch/decode.c` | `contracts/golden/pitch_decode/`: đỉnh đi trong khoảng F0, logit đều có hoà, đỉnh ở và quá mép khoảng, cả khoảng của mạng | lệch 0 cả bốn ca, cả log F0 lẫn độ tin; bảng dựng bằng `pow`, `log`, `exp` double của newlib trùng numpy | logit giải ở số mũ thấp hơn một: log F0 lệch 0,006 | đo cùng nhánh ở phần 3.4 |
