@@ -9,6 +9,7 @@ import numpy as np
 
 from ..base import CHANNEL_STEP, WORD_BYTES, exponent_of, laid_shape, read_once
 from .conv_block import block_conv, block_shifts, block_values
+from .layernorm_s8 import LAYERNORM_S8
 
 STEM_CONV = "StemConv"
 
@@ -57,13 +58,45 @@ def stem_conv_from(graph, conv, info) -> bool:
     return True
 
 
+def layernorm_into(graph, stem, info) -> bool:
+    """stem, a StemConv whose output a LayerNormS8 over its channels alone reads, joined with it: the norm's gamma and
+    beta become its inputs after the bias, its epsilon and the convolution's own exponent its attributes."""
+    from esp_ppq.core import OperationQuantizationConfig
+
+    y = stem.outputs[0]
+    if y.name in graph.outputs or len(y.dest_ops) != 1:
+        return False
+    norm = y.dest_ops[0]
+    if norm.type != LAYERNORM_S8 or norm.inputs[0] is not y or len(norm.inputs) < 2 or len(norm.outputs) != 1:
+        return False
+    e_y = exponent_of(y, info)
+    if e_y is None:
+        return False
+    out, params = norm.outputs[0], list(norm.inputs[1:])
+    configs = [*stem.input_quant_config, *norm.input_quant_config[1:]]
+    out_config, epsilon = norm.output_quant_config[0], float(norm.attributes.get("epsilon", 1e-5))
+    for v in params:
+        norm.inputs.remove(v)
+        v.dest_ops.remove(norm)
+    graph.remove_operation(norm)
+    graph.remove_variable(y)
+    for v in params:
+        stem.inputs.append(v)
+        v.dest_ops.append(stem)
+    stem.outputs.append(out)
+    out.source_op = stem
+    stem.attributes.update(normed=1, epsilon=epsilon, conv_exponent=int(e_y))
+    stem.config = OperationQuantizationConfig(configs, [out_config])
+    return True
+
+
 @contextlib.contextmanager
 def stem_conv() -> Iterator[None]:
     """ReDimNet2's stem, the log-mel broadcast into C channels by an Add of zeros (copies_by_broadcast) and their
     depthwise 3x3, exported as one StemConv (KEHOACH 3.14 step 2.5): the Add wrote C copies through PSRAM and esp-dl
     ran the depthwise apart. The op spreads each byte across a vector and runs ConvBlock's depthwise kernel with the
-    bias, one pass per 16 channels. On board B: b0 (12 channels) 7.5 ms for the Add, 12.0 ms for the Conv; b3 (24)
-    5.8 and 16.9 ms.
+    bias, one pass per 16 channels, then the LayerNormS8 reading it a row at a time. On board B: b0 (12 channels) 7.5
+    ms for the Add, 12.0 ms for the Conv; b3 (24) 5.8 and 16.9 ms.
     """
     from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
     from esp_ppq.parser.espdl_exporter import EspdlExporter
@@ -74,8 +107,8 @@ def stem_conv() -> Iterator[None]:
         graph = prepare(self, graph, *args, **kwargs)
         info = ExporterPatternInfo()
         for op in list(graph.operations.values()):
-            if op.name in graph.operations:
-                stem_conv_from(graph, op, info)
+            if op.name in graph.operations and stem_conv_from(graph, op, info):
+                layernorm_into(graph, op, info)
         return graph
 
     EspdlExporter.prepare_graph = joining
