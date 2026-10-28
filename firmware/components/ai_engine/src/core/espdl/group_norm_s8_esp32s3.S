@@ -15,8 +15,7 @@
 // run: frames, columns, W, groups, mul shift less 1, the Mul's weights and the Add's bias at the batch's first
 // channel, a buffer of columns bytes, row stride. tables: [groups][256], entry u of a group the int8 norm of the int8
 // value of byte u. Each frame's norms are looked up into the buffer, 4 a step, then times the weights through QACC
-// rounded half up as tie728 does, the bias added saturating, 16 channels at a time. columns a multiple of 16. run's
-// last slot repeats each frame's output into that many rows, 1 or more.
+// rounded half up as tie728 does, the bias added saturating, 16 channels at a time. columns a multiple of 16.
 
 #include "pie_s8_esp32s3.inc"
 
@@ -175,28 +174,9 @@ ai_engine_gn_outputs_s8_esp32s3:
     ee.vadds.s8     q2, q2, q3
     ee.vst.128.ip   q2, a2, 16
 4:
-    // The row just written into the repeat - 1 rows after it.
     l32i    a11, a5, 4
-    l32i    a12, a5, 36
-    sub     a13, a2, a11
-    mov     a14, a13
-5:
-    addi    a12, a12, -1
-    beqz    a12, 6f
-    l32i    a8, a5, 32
-    add     a14, a14, a8
-    mov     a15, a13
-    mov     a9, a14
-    srli    a10, a11, 4
-    loopgtz a10, 7f
-    ee.vld.128.ip   q0, a15, 16
-    ee.vst.128.ip   q0, a9, 16
-7:
-    j       5b
-6:
     l32i    a8, a5, 32
     sub     a8, a8, a11
-    add     a2, a14, a11
     add     a2, a2, a8
     add     a3, a3, a8
     addi    a6, a6, -1

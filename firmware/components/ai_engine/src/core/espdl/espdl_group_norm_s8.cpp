@@ -53,7 +53,6 @@ enum OutputsRun {
     kOutBias,
     kOutBuffer,
     kOutStride,
-    kOutRepeat,
     kOutSize
 };
 
@@ -74,8 +73,8 @@ int8_t saturated(int v) noexcept
     return static_cast<int8_t>(std::max(std::min(v, static_cast<int>(INT8_MAX)), static_cast<int>(INT8_MIN)));
 }
 
-// x [1, T, C] or [1, T, F, C] read as [1, T, F * C], C / G channels a group, each frame "repeat" times; Mul's
-// weights and Add's bias [C] on y's exponent; y [1, T * repeat, C] (esp_ppq_patches.group_norm_s8_from).
+// x [1, T, C] or [1, T, F, C] as [1, T, F * C], C / G channels a group, each row "repeat" frames of the
+// norm; Mul's weights and Add's bias [C] on y's exponent; y [1, T, C] (esp_ppq_patches.group_norm_s8_from).
 class GroupNormS8 final : public dl::module::Module {
   public:
     GroupNormS8(const char *name, int groups, float epsilon, float gamma, float beta, int norm_exponent,
@@ -95,8 +94,8 @@ class GroupNormS8 final : public dl::module::Module {
     std::vector<std::vector<int>> get_output_shape(std::vector<std::vector<int>> &input_shapes) override
     {
         const std::vector<int> &x = input_shapes[0];
-        if (x.size() == kMapRank) { return {{x[0], x[1] * repeat_, x[2] * x[3]}}; }
-        return {{x[0], x[1] * repeat_, x[2]}};
+        if (x.size() == kMapRank) { return {{x[0], x[1], x[2] * x[3]}}; }
+        return {{x[0], x[1], x[2]}};
     }
 
     void forward(dl::ModelContext *context, dl::runtime_mode_t) override
@@ -162,7 +161,7 @@ class GroupNormS8 final : public dl::module::Module {
         const size_t rank = x->shape.size();
         const int frames = rank == kRank || rank == kMapRank ? x->shape[1] : 0;
         const int channels = frames > 0 ? x->get_size() / frames : 0;
-        if (frames == 0 || x->shape[0] != 1 || y->shape != std::vector<int>{1, frames * repeat_, channels} ||
+        if (frames == 0 || x->shape[0] != 1 || y->shape != std::vector<int>{1, frames, channels} ||
             x->get_dtype() != dl::DATA_TYPE_INT8 || y->get_dtype() != dl::DATA_TYPE_INT8 ||
             channels % groups_ != 0 || w->get_size() != channels || b->get_size() != channels) {
             ESP_LOGE(TAG, "%s: not an int8 [1, T, C] map of %d groups with C weights and biases", name,
@@ -195,7 +194,7 @@ class GroupNormS8 final : public dl::module::Module {
         sums_run_ = {source_frames_, channels_, width_, kBatch};
         squares_run_ = {source_frames_, channels_, width_};
         outputs_run_ = {source_frames_,  kBatch * width_, width_, kBatch, mul_shift_ - 1, 0, 0,
-                        word_of(buffer), channels_,       repeat_};
+                        word_of(buffer), channels_};
         squares_kernel_ = repeat_ == 1   ? ai_engine_gn_squares_s8_esp32s3
                           : repeat_ == 2 ? ai_engine_gn_squares_x2_s8_esp32s3
                           : repeat_ == 4 ? ai_engine_gn_squares_x4_s8_esp32s3
@@ -275,8 +274,8 @@ class GroupNormS8 final : public dl::module::Module {
             ai_engine_gn_outputs_s8_esp32s3(ys + c0, xs + c0, tables_ + g0 * kTableSize, outputs_run_.data());
             return;
         }
-        for (int t = 0; t < frames_; t++) {
-            const int8_t *row = xs + t / repeat_ * channels_;
+        for (int t = 0; t < source_frames_; t++) {
+            const int8_t *row = xs + t * channels_;
             int8_t *out = ys + t * channels_;
             for (int g = g0; g < g0 + count; g++) {
                 const int8_t *table = tables_ + g * kTableSize;

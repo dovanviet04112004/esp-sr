@@ -1,5 +1,6 @@
 #include "core/espdl/espdl_stage_sum.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -72,11 +73,15 @@ class StageSum final : public dl::module::Module {
                 weights_[k] = lent.mem + k * channels;
             }
         }
-        for (int t = 0; t < y->shape[1]; t++) {
-            int8_t *row = out + t * channels;
+        const int rows = y->shape[1];
+        for (int t0 = 0; t0 < rows; t0 += block_) {
+            const int end = std::min(t0 + block_, rows);
             for (size_t k = 0; k < terms_.size(); k++) {
-                const int8_t *x = maps_[k] + t / terms_[k].rows * channels;
-                ai_engine_stage_sum_row_s8_esp32s3(row, x, weights_[k], terms_[k].run.data());
+                for (int t = t0; t < end; t++) {
+                    const int8_t *x = maps_[k] + t / terms_[k].rows * channels;
+                    ai_engine_stage_sum_row_s8_esp32s3(out + t * channels, x, weights_[k],
+                                                       terms_[k].run.data());
+                }
             }
         }
     }
@@ -124,6 +129,7 @@ class StageSum final : public dl::module::Module {
                               m_inputs_index[2 * k + 1],
                               rows_[k],
                               {y->shape[2] / kChannelStep, shift, k == 0 ? 1 : 0}});
+            block_ = std::max(block_, rows_[k]);
         }
         maps_.resize(terms_.size());
         weights_.resize(terms_.size());
@@ -135,6 +141,7 @@ class StageSum final : public dl::module::Module {
     std::vector<Term> terms_;
     std::vector<const int8_t *> maps_;
     std::vector<const int8_t *> weights_;
+    int block_ = 1; // output rows a term sums into at once: largest repeat
     bool built_ = false;
 };
 
