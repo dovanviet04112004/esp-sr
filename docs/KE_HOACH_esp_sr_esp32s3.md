@@ -1692,20 +1692,26 @@ RAM nội giữa các lần đọc ghi PSRAM thì nạp trước vùng nó sắp
 - Op kết thúc mọi preload trước khi trả về.
 - IDF ghi các hàm này là nội bộ, nên đổi bản IDF thì kiểm lại.
 - `Cache_Suspend_DCache` bản IDF vá chờ cache rảnh, nên một lần ghi flash rơi giữa preload chờ preload ấy xong.
-- Cả chip chỉ có một bộ preload. Một spinlock giữ bước "xem rảnh rồi khởi vùng", và mỗi nhân chỉ kết thúc vùng nó
-  khởi, nên hai nhân dùng chung được (ADR-0027).
+- Cả chip chỉ có một bộ preload. Phần việc chạy song song (ADR-0027) giữ bước "xem rảnh rồi khởi vùng" dưới một
+  spinlock, và mỗi nhân chỉ kết thúc vùng nó khởi; phần chạy một mình không khoá.
 
 **Hai nhân** (ADR-0027, chủ repo 28/10, `espdl_split`). Với Kconfig `AI_ENGINE_CORES_TWO`, op riêng chia việc của nó
 thành hai phần độc lập qua `split_run`: task chạy mạng làm phần 0, `phu_task` ở nhân 1 làm phần 1 (§5.1). Mỗi giá trị
-ra vẫn do đúng nhân PIE ấy tính trên đúng các số ấy, nên khớp từng bit như một nhân. Mỗi phần có trạng thái chạy
-riêng (mảng tham số của nhân, hàng nháp, chuỗi preload); với `AI_ENGINE_CORES_ONE`, phần 0 làm trọn việc như trước.
+ra vẫn do đúng nhân PIE ấy tính trên đúng các số ấy, nên khớp từng bit như một nhân. Với `AI_ENGINE_CORES_ONE`, op
+chạy trọn ở task gọi như trước.
+
+Phần chạy song song chỉ ghi PSRAM, không đọc lại thứ nó vừa ghi trong op: vùng nháp, mảng tham số của nhân và hàng
+đợi preload của nó nằm ở RAM nội (vùng mượn hay ngăn xếp của task chạy nó). Trên board B, `ConvBlock` có vòng hàng ở
+PSRAM ra số sai khi hai nhân chạy cùng lúc, dù hai nhân ghi chung dòng cache PSRAM không mất byte nào
+(`measurements/latency.md` §31).
 - `ConvBlock` chia theo nửa cột tần số. Depthwise 3×3 đọc cột bên cạnh, nên mỗi nửa nạp thêm hai cột x và tính thêm
-  một cột của nhánh chuẩn hoá ở chỗ chia; trong op hai nửa không chờ nhau. Vòng hàng và đệm dải mỗi nửa một bộ, trong
-  vùng mượn khi đủ chỗ cho cả hai, không thì cả hai ở PSRAM (§6.5).
+  một cột của nhánh chuẩn hoá ở chỗ chia; trong op hai nửa không chờ nhau. Hai nửa chạy khi vùng mượn chứa vòng hàng,
+  đệm dải và hàng vào conv sau của cả hai; không thì khối chạy cả hàng ở task gọi (§6.5). Mỗi nửa chỉ nạp trước các
+  dòng hàng y nằm trọn trong phần của mình.
 - `PointwiseS8` chia hàng của mỗi lát: lát chép vào vùng mượn một lần, hai phần cùng đọc, và lát sau chỉ chép khi cả
   hai xong.
-- `GroupNormS8` chia các lô nhóm; `StageSum` chia các khối hàng.
-- Op khác chạy trọn ở phần 0 cho tới khi số đo cho thấy đáng chia.
+- `GroupNormS8` (bảng và hàng nháp ở PSRAM) và `StageSum` (cộng dồn vào chính hàng ra) chạy trọn ở task gọi.
+- Op khác chạy trọn ở task gọi cho tới khi số đo cho thấy đáng chia.
 
 Mỗi op riêng có bảng nhãn ở `espdl_profile.py` trỏ về bản vá của nó, và mục giờ ở `measurements/latency.md` §25 sau
 khi bản dò khớp từng bit. Op đầu tiên làm xong bước 2.5 thêm phần đăng ký vào `src/core/`; các op sau chỉ thêm module.
@@ -2664,7 +2670,7 @@ hậu xử lý riêng của nó (dải của `ns_rnnoise`, log công suất và 
 của `command_ctc`, luật từ chối của `command_kws`, điểm với mẫu giọng của `speaker`). Phần hậu xử lý
 là C thuần và có golden riêng, dù nằm trong component C++. `src/core/espdl/` giữ các op riêng mà bước xuất sinh ra
 (§3.14 bước 2.5): mỗi op một cặp `.cpp` và `.hpp`, nhân PIE của nó ở `<nhân>_esp32s3.S`. Chúng biết op, không biết
-model, và chạy trên đúng nhân của task gọi model. Vùng đệm của op riêng thuộc từng module, không dùng chung giữa các
+model, và chạy trên nhân của task gọi model, cộng `phu_task` ở nhân 1 khi bật hai nhân (§5.1). Vùng đệm của op riêng thuộc từng module, không dùng chung giữa các
 model: `nhan_task` và `xac_task` đều gọi model và có thể giành nhau giữa chừng (§5.2).
 
 #### 4.5.5 Hợp đồng gọi — đóng băng ở E3
@@ -3422,8 +3428,8 @@ RAM nội. Hai ngoại lệ:
     `StageSum` chép trọng số theo kênh của mọi số hạng.
   - Op riêng cũng dùng vùng ấy làm vùng nháp khi vừa (hàng đệm, hàng ra, tổng tạm), không xin thêm byte nào:
     `TimeDepthwise` đặt hàng đệm và hàng ra ở đó.
-  - Ở hai nhân (ADR-0027) mỗi nửa của `ConvBlock` có vòng hàng và đệm dải riêng: vùng không đủ cho cả hai thì cả hai
-    nằm ở PSRAM, vùng vẫn 79 680 B.
+  - Ở hai nhân (ADR-0027) mỗi nửa của `ConvBlock` có vòng hàng, đệm dải và hàng vào conv sau riêng, cả hai trong
+    vùng; vùng không đủ cho cả hai thì khối chạy cả hàng ở một nhân, vùng vẫn 79 680 B.
 
   Lý do: dcache của S3 không giữ dòng nóng, nên mỗi hàng đẩy trọng số ra và đọc lại từ flash
   (`measurements/latency.md` §31). Không cấp được thì op đọc trọng số tại chỗ, chậm hơn, cùng kết quả.
