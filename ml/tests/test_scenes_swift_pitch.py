@@ -102,7 +102,7 @@ def test_pitch_of_runs_kaldis_tracker_unless_the_spec_names_swiftf0(monkeypatch:
     tracker = PitchTracker(PitchConfig(**kaldi))
     assert np.array_equal(device.pitch_of(kaldi)(clean), device.stream_pitch(tracker, clean))
     fixed = Fixed(np.full(40, 150.0), np.ones(40))
-    monkeypatch.setattr(swift_pitch, "detector", lambda: fixed)
+    monkeypatch.setattr(swift_pitch, "detector", lambda spec=None: fixed)
     assert np.array_equal(device.pitch_of(SPEC)(clean), swift_pitch.features(clean, SPEC, fixed))
 
 
