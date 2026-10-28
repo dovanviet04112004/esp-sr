@@ -89,5 +89,31 @@ cả hai giải trên dải F0 50–400 Hz của `contracts/listen.yaml`:
 
 - Lệch trung vị 2,5 cent, nhỏ hơn nhiều khoảng cách giữa các thanh. Khung đổi phía hữu thanh là những khung có độ tin
   sát ngưỡng 0,5.
-- **Chưa đo:** điều kiện đạt của bước 1 là v8 nghe ba chiều cao độ của hàng kl, dựng lại cho `val` và 209 câu Cửa 3,
-  như `command.md` §12.25.
+
+**Điều kiện đạt của bước 1** (KẾ HOẠCH §3.11): v8 (`20261007_439d763-dirty_f438bd`, float) nghe ba chiều cao độ của
+hàng kl.
+
+Trên 209 câu Cửa 3 (`make ctc-tone-flip CHECK=gate`): chuỗi chạy bằng code hôm nay, cao độ tính từ tiếng `clean` của
+bản thu, thanh so với cách đọc miền Bắc của lệnh. Lượt float cho đúng từng số của `command.md` §12.25.
+
+| Cao độ | Đúng nhất | Thanh âm tiết đầu | Thanh các âm tiết sau |
+|---|---|---|---|
+| SwiftF0 float | 196/209 | 167/209 (79,9%) | 179/233 (76,8%) |
+| **SwiftF0 int8 hàng kl** | **192/209** | **169/209 (80,9%)** | **182/233 (78,1%)** |
+| Điều kiện | kém float ≤ 5 câu: **đạt** | — | ≥ 72%: **đạt** |
+
+Trên `val` (`make ctc-tone-flip CHECK=places BUILD=…`), 1 583 câu, dựng lại từ đầu bằng mô phỏng hôm nay
+(`make pitch-rebuild`), một lần với SwiftF0 float, một lần với hàng kl. Log-mel đã lưu của bản dựng v8 (FFT trước
+ADR-0020) không còn khớp mô phỏng hôm nay, nên `mel_from` không nối được; hai bản dựng mới cùng log-mel, chỉ cao độ
+khác. Hai dòng float và không cao độ trùng `command.md` §12.25.
+
+| Cao độ | Lỗi đơn vị | Thanh âm tiết đầu | Thanh các âm tiết sau |
+|---|---|---|---|
+| SwiftF0 float | 0,343 | 73,5% | 83,1% |
+| **SwiftF0 int8 hàng kl** | **0,344** | 72,8% | 83,1% |
+| không cao độ (ba chiều giữ ở trung bình, như board chạy v8) | 0,375 | 71,4% | 79,0% |
+| Điều kiện | ≤ 0,359: **đạt** | | |
+
+**Bước 1 đạt cả ba điều kiện.** int8 hàng kl mất 0,001 lỗi đơn vị so với float. So với cách board chạy v8 hôm nay,
+không cao độ, nó bớt 0,031 lỗi đơn vị trên `val` và thêm 4,2 điểm thanh các âm tiết sau trên 209 câu Cửa 3. Bước 2 là
+bản dò trên board B: giờ mỗi hop, khớp từng bit.
