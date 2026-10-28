@@ -1220,6 +1220,25 @@ SwiftF0 từ phần này.
 - Bộ dò Kaldi rời đường nghe. `dsp_spec/pitch` và bộ vàng của nó vẫn ở repo: xoá hẳn chờ chủ repo.
 - `command` dùng run v8 đã học trên cao độ SwiftF0, không giữ chiều nào, với `listen_hash` của front mới trong
   `contracts/listen.yaml`.
+- Làm theo thứ tự, mỗi phần một mốc:
+  1. **Deploy của `pitch`:** `make pitch-deploy RUN=<run> ROW=<hàng>` xuất hàng ấy với `band_stream` cho 16 khung một
+     lượt vào `firmware/models/pitch/pitch.espdl`, bảng front end vào `pitch.front.bin` (mục `FRONT`, §6.3), cùng
+     `meta.json`. Dòng `pitch` của `models.lock.json` ghi run, hàng, `grid_hash`, số khung một lượt và độ trễ hai đầu
+     ra; ảnh model mang mục `pitch` (`ESPDL`) và `pitch` (`FRONT`).
+  2. **Nhánh `pitch` của `ai_engine`** (`src/pitch/`), thêm vào hợp đồng gọi §4.5.5:
+     - `AI_ENGINE_MODEL_PITCH`; `ai_engine_pitch_tables` trao con trỏ vào mục `FRONT` cho `dsp_spec_swift_front_init`;
+     - `ai_engine_pitch_run` nhận 16 khung front float, lượng tử theo số mũ đầu vào, chạy CNN một lượt, rồi giải 16
+       khung: log F0 và độ tin, khung đầu trễ 7 khung sau khung front đầu của lượt; `ai_engine_pitch_reset`;
+     - mốc: bản dò trên board chạy chuỗi front, CNN, giải từ PCM và khớp từng bit chuỗi soi gương.
+  3. **`contracts/listen.yaml`:** mục `pitch` thành của SwiftF0: `source`, hàng int8 (`int8.run`, `int8.row`), quy tắc
+     chạy dòng (`stream`), khoảng F0, ngưỡng hữu thanh, hai cửa sổ và ba thang. Tham số của `dsp_spec/pitch` sang mục
+     `kaldi_pitch`, chỉ cho bộ vàng và bench của nó. Mô phỏng đọc mục `pitch` nên tính đúng cao độ chip tính.
+  4. **`svc_listen`:** mỗi hop đỉnh |PCM| vào vòng đỉnh, rồi `swift_front`; gom 16 khung thì `ai_engine_pitch_run`;
+     mỗi khung giải ra, độ tin về 0 khi đỉnh hop của nó dưới ngưỡng im lặng của `swift-f0`, rồi `swift_dims`; ba chiều
+     vào vòng cao độ ở ô của hop. Đứt nhịp thì reset cả ba và vòng gom.
+  5. **`command`:** hàng int8 của v8 không gập chiều nào, hiệu chỉnh trên ba chiều chạy dòng; `δ₁`–`δ₃` chọn lại cho
+     hàng ấy (§3.12); deploy với `listen_hash` mới.
+  6. **Trên board B:** bản sản phẩm nghe lệnh của chủ repo; đo trễ quyết định, giờ nhân 0 và lệnh nhận đúng.
 
 3.5 **Chọn cách nghe:** chủ repo chọn SwiftF0 cho sản phẩm ngày 29/10, trước số đo của 3.4. Phần còn chờ: xoá hẳn bộ
 dò Kaldi, và bớt `sqrtf`, `ln` của front end (3.1).
@@ -2484,8 +2503,9 @@ ml/
 │   │   ├── pitch/{model.py, quant.py, probe.py, postproc/decode.py ★}   # SwiftF0 lên chip §3.11: model.py
 │   │   │                              #   CNN của SwiftF0 viết lại bằng torch, nạp trọng số từ ONNX; quant.py lệnh
 │   │   │                              #   con import nhập model.onnx theo bản ghim thành một run, ptq dựng thang
-│   │   │                              #   §3.14; probe.py bản dò board của một hàng trên một cửa sổ cố định;
-│   │   │                              #   decode.py giải cao độ và độ tin từ đầu ra của mạng
+│   │   │                              #   §3.14, deploy xuất một hàng chạy dòng cùng bảng front end vào
+│   │   │                              #   firmware/models/pitch/; probe.py bản dò board của một hàng trên một cửa
+│   │   │                              #   sổ cố định; decode.py giải cao độ và độ tin từ đầu ra của mạng
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
 │   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py, pitch.py}
