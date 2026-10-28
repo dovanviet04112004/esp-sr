@@ -1111,9 +1111,29 @@ Bước 1, trên máy tính, không đụng chip:
 - thanh các âm tiết sau trên 209 câu từ 72% trở lên;
 - đúng nhất kém SwiftF0 float không quá 5 câu (nhiễu đếm).
 
-Không đạt thì dừng: SwiftF0 int8 không đáng đưa lên chip. Đạt thì bước 2 là bản dò trên board B (giờ mỗi hop, khớp
-từng bit). Bước 3 là đường chip trong chuỗi: STFT ở `dsp_spec` đủ bốn bước, cột cao độ trễ 10 khung cộng 0,4 s nhìn sau
-của chuẩn hoá trong `svc_listen`, và cách chọn cách nghe.
+Không đạt thì dừng: SwiftF0 int8 không đáng đưa lên chip.
+
+Bước 2, bản dò trên board B (chủ repo duyệt 28/10): bước 1.2 và bước 4 của quy trình §3.14 trên hàng bước 1 chọn.
+1. `make ai-unit-pitch RUN=<run> ROW=<hàng>` xuất CNN của hàng ấy cho một cửa sổ cố định `CHUNK_HOPS` khung (256, 4,1 s),
+   không chạy dòng, cùng `probe.cuts` bản cắt.
+   - Đầu vào thử: đoạn to nhất của một phiên `val` mô phỏng lại, rút theo seed như các hàng của thang.
+   - Lối xuất chạy dòng của §3.14 chỉ nhận tích chập nhân quả. CNN của SwiftF0 nhìn ±1 khung ở bảy tích chập, hai trong
+     số ấy ở khối có nhánh tắt. Muốn chạy dòng phải viết lại nhân quả và làm trễ nhánh tắt cho khớp: việc của bước 3.
+2. Trên board, ghi vào `measurements/pitch.md`:
+   - `model->test()` của đồ thị và của mọi bản cắt;
+   - `EspdlNet` chạy cửa sổ ấy `probe.runs` lượt sau một lượt không tính giờ, mỗi lượt so cả hai đầu ra với mô phỏng;
+     giờ trung bình, giờ đỉnh, PSRAM;
+   - bảng `profile_module`.
+3. Giờ mỗi hop là giờ một cửa sổ chia số khung. Chạy dòng tính cùng số phép mỗi khung, cộng giờ gọi các module mỗi bước;
+   phần ấy đo ở bước 3.
+
+Điều kiện đạt: khớp mô phỏng từng bit ở đồ thị và mọi bản cắt. Giờ đặt cạnh chỗ Kaldi nhường ở nhân 0, 1 980 µs mỗi hop
+(`measurements/pitch.md` §3). Ba STFT ước 🔬 đã chiếm ~1 300 µs của chỗ ấy: FFT 512 và 1 024 điểm đo ở `latency.md`
+§23, 2 048 ngoại suy, cộng cửa sổ, biên độ, dải, log. CNN vừa phần còn lại thì sang bước 3. Không vừa thì chủ repo chọn:
+qua vòng tăng tốc, bước 2 của §3.14, rồi mới sang bước 3; hay nhận thêm tải ở nhân 0.
+
+Bước 3 là đường chip trong chuỗi: STFT ở `dsp_spec` đủ bốn bước, CNN chạy dòng, cột cao độ trễ 10 khung cộng 0,4 s nhìn
+sau của chuẩn hoá trong `svc_listen`, và cách chọn cách nghe.
 
 **Hướng còn lại**, theo thứ tự, khi các bước trên chưa đủ:
 - mạng nhìn trước tới 0,4 s: board vốn chờ `utterance.gap_s` 0,4 s trước khi chốt câu nên không thêm trễ quyết định;
@@ -2366,10 +2386,11 @@ ml/
 │   │   │                              #   ngưỡng trên đường chip mô phỏng, giữ bản deploy trong run và khoá hàng,
 │   │   │                              #   use cài lại một biến thể; probe.py bản dò board của một hàng và cả
 │   │   │                              #   chuỗi PCM → điểm; score.py chuẩn hoá, mẫu giọng, điểm, ngưỡng
-│   │   ├── pitch/{model.py, quant.py, postproc/decode.py ★}   # SwiftF0 lên chip §3.11: model.py CNN của
-│   │   │                              #   SwiftF0 viết lại bằng torch, nạp trọng số từ ONNX; quant.py lệnh con
-│   │   │                              #   import nhập model.onnx theo bản ghim thành một run, ptq dựng thang
-│   │   │                              #   §3.14; decode.py giải cao độ và độ tin từ đầu ra của mạng
+│   │   ├── pitch/{model.py, quant.py, probe.py, postproc/decode.py ★}   # SwiftF0 lên chip §3.11: model.py
+│   │   │                              #   CNN của SwiftF0 viết lại bằng torch, nạp trọng số từ ONNX; quant.py lệnh
+│   │   │                              #   con import nhập model.onnx theo bản ghim thành một run, ptq dựng thang
+│   │   │                              #   §3.14; probe.py bản dò board của một hàng trên một cửa sổ cố định;
+│   │   │                              #   decode.py giải cao độ và độ tin từ đầu ra của mạng
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
 │   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py, pitch.py}
