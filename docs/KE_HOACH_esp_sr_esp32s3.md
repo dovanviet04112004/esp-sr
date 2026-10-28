@@ -1954,10 +1954,24 @@ người lạ lọt.
   cả 1 m và 3 m, gộp các phiên của mỗi khoảng cách, với ≤ 5% người lạ lọt. b0 đạt (hàng kl 342,7 ms sau các op của
   §3.14). b3 giữ nhiều lệnh hơn (EER int8 2,99% so với 4,00%, `measurements/speaker.md` §7) nhưng chạy ~1,4 s trên
   một nhân, 1,31 s trên hai (`measurements/latency.md` §31); chủ repo nhận mức ấy (ADR-0028).
-- **Hàng được chọn vào firmware bằng `make speaker-deploy`**, như `ctc-deploy`: kiểm run nhập theo đúng
-  `contracts/speaker.yaml`, đặt ngưỡng, ghi `firmware/models/speaker/` (`speaker.espdl`, `meta.json`) và
-  `contracts/models.lock.json`. Bước đóng gói đưa mục `speaker` vào ảnh với cờ để ở flash, và ghi ngưỡng cùng
-  `speaker_hash` vào header (§6.3).
+- **Hàng được chọn vào firmware bằng `make speaker-deploy`**, như `ctc-deploy`:
+  - kiểm run nhập theo đúng `contracts/speaker.yaml`, rồi đặt ngưỡng trên đường chip mô phỏng;
+  - giữ bản deploy trong run, ở `<run>/int8/<hàng>/deploy/`: `speaker.espdl`, `cohort.bin`, và `lock_fields.json` mang
+    các trường riêng của dòng lock cùng sha256 của hai tệp;
+  - rồi cài bản ấy như `speaker-use` (dưới).
+
+  Bước đóng gói đưa mục `speaker` và `speaker_cohort` vào ảnh với cờ để ở flash, và ghi ngưỡng cùng `speaker_hash`
+  vào header (§6.3).
+- **b0 và b3 đổi cho nhau bằng `make product SPEAKER=<biến thể>`** (chủ repo chọn 28/10, ADR-0028):
+  - `variants` của `configs/models/speaker.yaml` gán mỗi tên một run và một hàng đã deploy.
+  - `make speaker-use SPEAKER=…` chép bản giữ trong run vào `firmware/models/speaker/` (`speaker.espdl`, `cohort.bin`,
+    `meta.json`) và vào dòng `speaker` của `contracts/models.lock.json`. Việc này mất vài giây, không mô phỏng lại. Thiếu
+    bản giữ, hay tệp lệch sha256 đã giữ, thì từ chối.
+  - `make product SPEAKER=…` chạy nó trước khi nạp; không có `SPEAKER` thì nạp đúng lock.
+
+  Lock vì thế luôn ghi model đang trên board. Lock đã commit là mặc định của sản phẩm, nên đổi mặc định là một thay
+  đổi của lock. Mẫu giọng gắn với sha256 của mục `speaker` (bảng dưới), nên sau mỗi lần đổi, mỗi người phải đăng ký
+  lại.
 
 **Đường chip trong chuỗi** (E11-T26):
 
@@ -2200,7 +2214,8 @@ ml/
 │                                      #   (§3.9); command.yaml: đường sản phẩm (backend), đặc trưng;
 │                                      #   command_kws.yaml, command_ctc.yaml: split, mạng, lịch học của từng
 │                                      #   đường; speaker.yaml: đường chip §3.17, bộ trích nhập thành run, thang
-│                                      #   int8, bản dò; quant.yaml: thang §3.14
+│                                      #   int8, bản dò, biến thể b0/b3 của make product SPEAKER=;
+│                                      #   quant.yaml: thang §3.14
 │
 ├── src/srpipe/
 │   ├── core/                          # ── HẠ TẦNG: không chứa tên khối nào ──
@@ -2302,8 +2317,9 @@ ml/
 │   │   ├── speaker/{quant.py, probe.py, postproc/score.py ★}   # đường chip §3.17, đi như ctc: quant.py lệnh con
 │   │   │                              #   import nhập ReDimNet2 b0 học sẵn của khảo sát theo bản ghim thành một run
 │   │   │                              #   (model.pt cùng mã mạng), ptq dựng thang §3.14 vào <run>/int8/, deploy đặt
-│   │   │                              #   ngưỡng trên đường chip mô phỏng và khoá hàng; probe.py bản dò board của một
-│   │   │                              #   hàng và cả chuỗi PCM → điểm; score.py chuẩn hoá, mẫu giọng, điểm, ngưỡng
+│   │   │                              #   ngưỡng trên đường chip mô phỏng, giữ bản deploy trong run và khoá hàng,
+│   │   │                              #   use cài lại một biến thể; probe.py bản dò board của một hàng và cả
+│   │   │                              #   chuỗi PCM → điểm; score.py chuẩn hoá, mẫu giọng, điểm, ngưỡng
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
 │   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py, pitch.py}
