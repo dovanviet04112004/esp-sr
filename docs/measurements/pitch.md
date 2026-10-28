@@ -170,6 +170,8 @@ trên board B, cùng cửa sổ 256 khung như §5, rồi `make ai-profile`.
 |---|---|---|---|---|---|
 | §5 | không | 6 740,3 ms | 26,3 ms | 1 304 300 B | lệch 0, bốn bản cắt khớp |
 | 1 (28/10) | `aligned_channels` | **1 464,1 ms** | **5,72 ms** | 1 697 100 B | lệch 0, bốn bản cắt khớp |
+| 2 (28/10) | thêm `band_block` | 1 260,9 ms | 4,93 ms | 1 184 228 B | lệch 0, bốn bản cắt khớp |
+| 2, cửa sổ 16 khung | như trên, `FRAMES=16` | **41,3 ms** | **2,58 ms** | 109 060 B | lệch 0, bốn bản cắt khớp |
 
 **Lượt 1, `aligned_channels`** (bước 2.3, bản vá mới): đệm thân 12 kênh lên 16 bằng kênh 0, nên mọi conv của thân
 chạy nhân vector của esp-dl.
@@ -190,3 +192,25 @@ Bảng xếp hạng sau lượt 1, 1 465,3 ms trên 43 module:
 
 Cả thân là conv, Add, Relu và RequantizeLinear nối nhau qua PSRAM. esp-dl không có Add gộp Relu, nên phần ấy chỉ còn
 đường op riêng (bước 2.5).
+
+**Lượt 2, `band_block`** (bước 2.5, op riêng `BandBlock`): mỗi khối dư thành một op, chạy từng cột khung, cột giữa ở
+RAM nội. Khớp từng bit ngay lần đầu, cả ở cửa sổ 256 khung lẫn 16 khung.
+- Ở cửa sổ 256 khung, sáu khối chỉ bớt từ ~1 176 xuống 973 ms. Khối 1 tốn 203 ms, trong khi số lệnh của nó chỉ cỡ
+  27 ms.
+- Nguyên nhân là cache: hai dải liền nhau cách 4 KB trong PSRAM, nên 128 dải của một cột chỉ rơi vào 2 trong 128 tập
+  của cache dữ liệu (64 KB, 8 đường, dòng 64 B). Mỗi tap theo dải trượt cache.
+- Chạy dòng ở bước 3 mỗi bước chỉ giữ vài chục KB, nên từ lượt này giờ đo ở cửa sổ 16 khung, một bước của `command`
+  (KẾ HOẠCH §3.11).
+
+Bảng xếp hạng ở cửa sổ 16 khung, có vùng mượn, 41,3 ms trên 23 module:
+
+| Phần | Giờ một cửa sổ | Ghi chú |
+|---|---|---|
+| sáu `BandBlock` | 24,4 ms | `blocks.0`, `blocks.5` 7,2–7,3 ms; `blocks.1`–`blocks.4` 2,2–3,0 ms |
+| `head` 16 → 4, `spread` 4 → 4 | 6,0 ms, 5,0 ms | nhân unaligned, 1,64 và 9,82 chu kỳ một phép nhân-cộng |
+| `stem` 3 → 16 | 3,5 ms | nhân unaligned, 0,96 chu kỳ |
+| `pitch`, ReduceMean, ReduceMax, Slice, còn lại | 2,4 ms | |
+
+- `blocks.0` chạy 12,4 triệu phép nhân-cộng thật trong 7,3 ms, 0,14 chu kỳ một phép.
+- Khối 3 × 1 tốn ~130 chu kỳ mỗi dải ngoài 2–3 tap của nó: nạp bias, làm tròn, nhánh dư, và lần đầu chạm từng dòng
+  PSRAM của x và đầu ra.
