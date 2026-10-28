@@ -140,3 +140,22 @@ Firmware `bench` @ `ab23bce` có `speaker`, đo tối 11/10 qua cầu RFC 2217:
 
 - Trước khi `q_clean` lên 128 bước, bước `listen` còn 571 796 B. 64 bước thêm tốn đúng 33 792 B.
 - RAM nội còn 96 023 B lúc nghe, mảnh liền lớn nhất 55 296 B.
+
+Firmware `bench` @ `83789d9` với b3 (ADR-0028), đo 28/10 qua cầu RFC 2217, Wi-Fi chưa nối:
+- bảng phân vùng một khe app, `models_0` 11 MB;
+- ảnh 4 mục, cả `command_ctc` lẫn `speaker` để ở flash, 0 KB chép vào PSRAM;
+- tối đa 64 lệnh, bộ mặc định.
+
+| Bước | PSRAM còn B | Dùng thêm | RAM nội còn B, mảnh liền lớn nhất |
+|---|---|---|---|
+| `storage` | 8 384 752 | — | 200 055, 139 264 |
+| `wiring` | 7 767 184 | 603 KB | 200 055, 139 264 |
+| `audio` | 7 570 772 | 192 KB | 182 603, 139 264 |
+| `models` | 2 777 080 | 4 681 KB: tensor `command_ctc` 314 KB, tensor b3 4 012 KB, vùng chấm ctc | 176 923, 131 072 |
+| `front` | 2 777 080 | 0 | 90 903, **49 152** |
+| `listen` | **2 022 720** | 737 KB | 90 615, **49 152** |
+
+- PSRAM còn khi nghe lên 1,93 MB, từ 0,51 MB với b0 khi trọng số `command_ctc` còn chép vào PSRAM.
+- **Vùng mượn 79 680 B của b3 (ADR-0025) không còn chỗ:** sau `dsp_afe`, mảnh RAM nội liền lớn nhất chỉ 49 152 B, mà
+  vùng mượn là một khối liền xin ở mỗi lần chạy. Lúc ấy op đọc trọng số tại chỗ, cùng kết quả, chậm hơn. Wi-Fi nối thì
+  RAM nội còn ít hơn.
