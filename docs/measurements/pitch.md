@@ -172,6 +172,7 @@ trên board B, cùng cửa sổ 256 khung như §5, rồi `make ai-profile`.
 | 1 (28/10) | `aligned_channels` | **1 464,1 ms** | **5,72 ms** | 1 697 100 B | lệch 0, bốn bản cắt khớp |
 | 2 (28/10) | thêm `band_block` | 1 260,9 ms | 4,93 ms | 1 184 228 B | lệch 0, bốn bản cắt khớp |
 | 2, cửa sổ 16 khung | như trên, `FRAMES=16` | **41,3 ms** | **2,58 ms** | 109 060 B | lệch 0, bốn bản cắt khớp |
+| 3, cửa sổ 16 khung | thêm `band_head` | **32,1 ms** | **2,01 ms** | 115 072 B | lệch 0, bốn bản cắt khớp |
 
 **Lượt 1, `aligned_channels`** (bước 2.3, bản vá mới): đệm thân 12 kênh lên 16 bằng kênh 0, nên mọi conv của thân
 chạy nhân vector của esp-dl.
@@ -214,3 +215,11 @@ Bảng xếp hạng ở cửa sổ 16 khung, có vùng mượn, 41,3 ms trên 23
 - `blocks.0` chạy 12,4 triệu phép nhân-cộng thật trong 7,3 ms, 0,14 chu kỳ một phép.
 - Khối 3 × 1 tốn ~130 chu kỳ mỗi dải ngoài 2–3 tap của nó: nạp bias, làm tròn, nhánh dư, và lần đầu chạm từng dòng
   PSRAM của x và đầu ra.
+
+**Lượt 3, `band_head`** (bước 2.5, op riêng `BandHead`): phần đầu ra thành một op. Lần chạy đầu, chip từ chối dựng
+op vì node thiếu `quant_type`; node tạo mới sau `prepare_graph` phải mang thuộc tính ấy như mọi node esp-dl dựng. Sửa
+xong thì khớp từng bit.
+- Phần đầu ra 12,3 → 3,0 ms một cửa sổ 16 khung.
+- Bảng xếp hạng, 32,1 ms trên 19 module: sáu `BandBlock` 24,6 ms (77%), `stem` 3,5 ms, `BandHead` 3,0 ms, ReduceMean
+  0,7 ms, còn lại 0,3 ms.
+- CNN giờ tốn 2,01 ms mỗi hop, ngang chỗ Kaldi nhường (1 980 µs), chưa kể ba STFT.
