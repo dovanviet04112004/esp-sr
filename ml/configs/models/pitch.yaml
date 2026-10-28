@@ -11,3 +11,6 @@ quant:                             # make pitch-ptq RUN=: rung 2 of KEHOACH 3.14
   calib_sessions: 8                # train sessions ESP-PPQ calibrates on, drawn with the seed
   rows_sessions: 16                # val sessions each row is held to float on, drawn with the seed
   calibrations: [kl, percentile, minmax, mse]   # rung 2, one row each, in this order
+probe:                             # step 2: one row's network on board B over one window (make ai-unit-pitch)
+  runs: 10                         # timed runs on the board, after one untimed
+  cuts: 4                          # copies of the graph cut at tensors spread over its ops, each model->test()ed
