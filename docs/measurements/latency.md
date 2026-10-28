@@ -1367,6 +1367,9 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
     nên stage 0 chạy 0,6 chu kỳ một phép nhân-cộng, gấp ba khi hàng nằm ở RAM nội.
   - Trọng số cộng hàng vòng: stage 0 63,5 KB, stage 1 79,3 KB khi hai đệm dải dùng chung, vừa 79 680 B; stage 5 90,5 KB,
     không vừa. 21 khối ước bớt ~140 ms 🔬.
+- **`StageSum` trên board B** (28/10, thử trước khi xin duyệt): mỗi hàng ra đọc trọng số theo kênh của mọi số hạng,
+  7 × 1728 B ở `fin_wght1d`, từ flash, và cache đẩy chúng ra giữa hai hàng. Chép chúng vào vùng mượn lúc op bắt đầu:
+  6 `StageSum` 154,5 → 116,1 ms, `fin_wght1d` 40,6 → 27,3 ms; một cửa sổ 1 661,2 → 1 622,8 ms, khớp từng bit.
 - **Chưa đo:** độ chính xác của b3 sau int8 (thang int8 đang chạy).
 - **Đọc:** đây là số thô. b3 chạy qua các op viết cho hình dạng của b0, chưa có bước nào tối ưu riêng cho nó. b3 có
   2,16 tỉ MAC (`torch.utils.flop_counter`, không tính GroupNorm), b0 0,24 tỉ. 1,61 tỉ nằm trong 19 `ConvBlock`, chạy
