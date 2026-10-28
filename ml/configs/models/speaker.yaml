@@ -38,6 +38,7 @@ esp_ppq_patches:                   # srpipe.compress.quant.esp_ppq_patches aroun
   - attention_core                 # each attention's heads, scores, softmax and weighing as one op (after softmax_scale)
   - stem_conv                      # the stem's broadcast copies and their depthwise as one op (after copies_by_broadcast)
   - stride_depthwise               # depthwise convolutions over 2 or 4 frames at that stride as one op of ai_engine
+  - time_depthwise                 # Linear depthwise convolutions over time of an odd kernel as one op of ai_engine
   - weighted_stats                 # the pool's weighted sums of x and x*x over time as one op of ai_engine
   - global_stats                   # the pool's mean over time and mean centred square as one op of ai_engine
   - pointwise_s8                   # other 1x1 convolutions and their residual Adds as one op, unmerged (last)

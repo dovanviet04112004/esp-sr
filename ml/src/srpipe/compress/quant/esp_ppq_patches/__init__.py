@@ -32,6 +32,7 @@ from .ops.softmax_quant import products_by_byte, softmax_quant, softmax_scale
 from .ops.stage_sum import stage_sum
 from .ops.stem_conv import stem_conv
 from .ops.stride_depthwise import stride_depthwise
+from .ops.time_depthwise import time_depthwise
 from .ops.weighted_stats import weighted_stats
 from .quantise import (
     conv_caches_along_time,
@@ -97,6 +98,7 @@ PATCHES = {
     "attention_core": attention_core,
     "stem_conv": stem_conv,
     "stride_depthwise": stride_depthwise,
+    "time_depthwise": time_depthwise,
     "weighted_stats": weighted_stats,
     "global_stats": global_stats,
     "pointwise_s8": pointwise_s8,
