@@ -218,7 +218,7 @@ speaker-deploy: ## Lock a ladder row into firmware/models/speaker with its thres
 speaker-music: ## The locked row with music in the room: owner kept, strangers passing, into <run>/int8/<row>/music.yaml: RUN=<run> [WORKERS=6] (E11-T33)
 	$(SPEAKER_QUANT) music $(RUN) $(if $(WORKERS),--workers $(WORKERS))
 
-SPEED_LOG_speaker = $(UNIT_APP)/build_speaker/unit.log
+SPEED_LOG_speaker = $(UNIT_APP)/$(SPEAKER_BUILD)/unit.log
 SPEED_ESPDL_speaker = ml/$(RUN)/int8/timing/speaker.espdl
 
 # Phase 2 of KEHOACH 3.14's procedure in one chain, stopping at the first step that fails; source IDF's export.sh first,
@@ -597,19 +597,21 @@ ai-unit-ctc: ## Run the ctc build of the ai_engine suite on board B: RUN=<run> R
 
 # A row of speaker-ptq's ladder goes to model slot 0, its window is checked against Python and timed; slot 0 ends
 # erased. CHAIN=1 puts the deployed speaker there instead and the chain's windows in voice, run from PCM to decision.
-ai-unit-speaker: ## Run the speaker build of the ai_engine suite on board B: RUN=<run> ROW=<row of its int8/ladder.yaml> [CUT_RANGE="<first op> <last op>"] [CUTS=<n>] [IN_FLASH=1] [CHAIN=1 [WORKERS=6] | PCM=<int16 .npy>] (E11-T25, E11-T26, E11-T31)
+# CORES=2 builds AI_ENGINE_CORES_TWO in a build folder of its own, so switching never reuses the other's sdkconfig.
+SPEAKER_BUILD = build_speaker$(if $(filter 2,$(CORES)),_two)
+ai-unit-speaker: ## Run the speaker build of the ai_engine suite on board B: RUN=<run> ROW=<row of its int8/ladder.yaml> [CUT_RANGE="<first op> <last op>"] [CUTS=<n>] [IN_FLASH=1] [CHAIN=1 [WORKERS=6] | PCM=<int16 .npy>] [CORES=2] (E11-T25, E11-T26, E11-T31, E11-T35)
 	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.speaker.probe --run $(RUN) --row $(ROW) $(if $(CUT_RANGE),--cut-range $(CUT_RANGE)) $(if $(CUTS),--cuts $(CUTS)) $(if $(IN_FLASH),--in-flash) \
 	  $(if $(CHAIN),--chain) $(if $(PCM),--pcm $(abspath $(PCM))) $(if $(WORKERS),--workers $(WORKERS))
-	@$(call fresh_sdkconfig,$(UNIT_APP)/build_speaker/sdkconfig,$(call app_defaults,$(UNIT_APP)))
-	cd $(UNIT_APP) && rm -f build_speaker/unit.status && idf.py -B build_speaker -D SDKCONFIG=build_speaker/sdkconfig -D UNIT_PROFILE=speaker build && \
+	@$(call fresh_sdkconfig,$(UNIT_APP)/$(SPEAKER_BUILD)/sdkconfig,$(call app_defaults,$(UNIT_APP)))
+	cd $(UNIT_APP) && rm -f $(SPEAKER_BUILD)/unit.status && idf.py -B $(SPEAKER_BUILD) -D SDKCONFIG=$(SPEAKER_BUILD)/sdkconfig -D UNIT_PROFILE=speaker -D UNIT_CORES=$(or $(CORES),1) build && \
 	  $(WRITE_PART) models_0 --input main/probe/speaker_models.bin && \
 	  $(if $(CHAIN),$(WRITE_PART) voice --input main/probe/speaker_chain.bin,$(ERASE_PART) voice) && \
-	  { pytest pytest_unit.py $(ON_BOARD) --build-dir build_speaker -s; echo $$? > build_speaker/unit.status; } 2>&1 \
-	    | tee build_speaker/unit.log; \
-	  exit $$(cat build_speaker/unit.status 2>/dev/null || echo 1)
+	  { pytest pytest_unit.py $(ON_BOARD) --build-dir $(SPEAKER_BUILD) -s; echo $$? > $(SPEAKER_BUILD)/unit.status; } 2>&1 \
+	    | tee $(SPEAKER_BUILD)/unit.log; \
+	  exit $$(cat $(SPEAKER_BUILD)/unit.status 2>/dev/null || echo 1)
 
 # Step 2.2 of KEHOACH 3.14's procedure, any branch: LOG holds esp-dl's profile_module table of a board run, ESPDL
-# the model that ran, its .info beside it (make ai-unit-speaker leaves build_speaker/unit.log and <run>/int8/<row>/).
+# the model that ran, its .info beside it (make ai-unit-speaker leaves $(SPEAKER_BUILD)/unit.log and <run>/int8/<row>/).
 ai-profile: ## Rank a board run's modules by time, each slow esp-dl path tagged with its patch: LOG=<log> ESPDL=<model> [TOP=40] (E11-T29)
 	$(ML) --extra espdl python -m srpipe.compress.quant.espdl_profile --log $(abspath $(LOG)) --espdl $(abspath $(ESPDL)) \
 	  $(if $(TOP),--top $(TOP))

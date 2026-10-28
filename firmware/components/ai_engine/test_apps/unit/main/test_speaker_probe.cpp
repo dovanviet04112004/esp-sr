@@ -7,6 +7,7 @@
 #include "app_events.h"
 #include "core/espdl/espdl_loan.hpp"
 #include "core/espdl/espdl_ops.hpp"
+#include "core/espdl/espdl_split.hpp"
 #include "core/espdl_net.hpp"
 #include "core/model_image.hpp"
 #include "dl_model_base.hpp"
@@ -35,6 +36,9 @@ constexpr int kLoadedRuns = 3;               // windows embedded while core 1 wr
 constexpr uint32_t kLoadStackBytes = 4096;
 constexpr UBaseType_t kLoadPriority = 2;
 constexpr uint32_t kLoadGapMs = 10; // between NVS writes, sparing the flash
+constexpr uint32_t kHelperStackBytes = 4096;
+constexpr UBaseType_t kHelperPriority = 1; // phu_task's, under the app's other tasks (KEHOACH 5.2)
+constexpr uint32_t kHelperWaitMs = 100;
 
 // Layout written by srpipe.tasks.speaker.probe; the record's int8 data is padded to four bytes.
 struct WindowsHead {
@@ -71,6 +75,27 @@ struct ChainWindow {
 };
 static_assert(sizeof(ChainHead) == 20 && sizeof(ChainWindow) == 28, "speaker_chain.bin layout");
 enum ChainKind : uint32_t { kEnrol = 0, kOwner, kImpostor, kMember };
+
+#if CONFIG_AI_ENGINE_CORES_TWO
+void serve(void *)
+{
+    for (;;) {
+        ai_engine_helper_serve(kHelperWaitMs);
+    }
+}
+
+// The app's own phu_task on core 1, as main's task table makes it.
+void start_helper()
+{
+    static TaskHandle_t helper = nullptr;
+    if (helper != nullptr) { return; }
+    TEST_ASSERT_EQUAL(pdPASS, xTaskCreatePinnedToCore(serve, "phu_task", kHelperStackBytes, nullptr,
+                                                      kHelperPriority, &helper, 1));
+}
+#else
+void start_helper()
+{}
+#endif
 
 esp_err_t test_of(const ai::Blob &blob, bool profiled)
 {
@@ -151,6 +176,7 @@ int worst_under_flash_writes(ai::EspdlNet &net, const int8_t *x, const int8_t *y
 
 TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, timed", "[ai_engine][speaker]")
 {
+    start_helper();
     TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, ai_engine_load(0),
                               "models_0 lacks speaker_models.bin: run make ai-unit-speaker");
     WindowsHead head;
@@ -197,9 +223,10 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
         vTaskDelay(1);
     }
     printf("%s: %" PRIu32 " frames x %" PRIu32 " mels: worst |board - simulation| %d, %" PRId64
-           " us mean, %" PRId64 " us peak a window over %" PRIu32 " runs, psram %u B with its tensors\n",
+           " us mean, %" PRId64 " us peak a window over %" PRIu32
+           " runs, psram %u B with its tensors, %d op parts\n",
            rec.entry, rec.frames, rec.mels, worst, total_us / head.runs, peak_us, head.runs,
-           (unsigned)psram_bytes);
+           (unsigned)psram_bytes, ai::split_parts());
     printf("%s: %" PRIu32 " of %" PRIu32 " values off the simulation; first board/simulation:", rec.entry,
            off, rec.dims);
     for (uint32_t k = 0; k < rec.dims && k < kShownValues; k++) {
@@ -218,8 +245,77 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
     TEST_ASSERT_LESS_OR_EQUAL(kToleranceSteps, loaded_worst);
 }
 
+namespace {
+
+constexpr size_t kLineTestBytes = 256 * 1024; // four times the dcache, so lines leave and come back
+constexpr int kLineTestRounds = 64;
+constexpr size_t kLineBytes = CONFIG_ESP32S3_DATA_CACHE_LINE_SIZE;
+constexpr int kCores = 2;
+
+// One core's half of every cache line of a PSRAM buffer, written then read back each round.
+struct HalfLines {
+    uint8_t *buf = nullptr;
+    size_t half = 0;
+    volatile bool done = false;
+    uint32_t wrong = 0;
+};
+
+void write_half_lines(void *arg)
+{
+    auto *h = static_cast<HalfLines *>(arg);
+    for (int r = 0; r < kLineTestRounds; r++) {
+        const auto value = static_cast<uint8_t>(kCores * r + h->half);
+        alignas(16) uint8_t pattern[16];
+        memset(pattern, value, sizeof(pattern));
+        const uint8_t *from = pattern;
+        asm volatile("ee.vld.128.ip q0, %0, 0" : "+r"(from) : : "memory");
+        for (size_t at = h->half * kLineBytes / 2; at < kLineTestBytes; at += kLineBytes) {
+            for (size_t v = 0; v < kLineBytes / 2; v += sizeof(pattern)) {
+                uint8_t *to = h->buf + at + v;
+                if (r % 2 == 0) {
+                    asm volatile("ee.vst.128.ip q0, %0, 0" : "+r"(to) : : "memory");
+                } else {
+                    memset(to, value, sizeof(pattern));
+                }
+            }
+        }
+        for (size_t at = h->half * kLineBytes / 2; at < kLineTestBytes; at += kLineBytes) {
+            for (size_t i = 0; i < kLineBytes / 2; i++) {
+                h->wrong += h->buf[at + i] != value;
+            }
+        }
+    }
+    h->done = true;
+    vTaskDelete(nullptr);
+}
+
+} // namespace
+
+TEST_CASE("two cores writing either half of every PSRAM cache line keep each other's bytes",
+          "[ai_engine][psram_lines]")
+{
+    auto *buf =
+        static_cast<uint8_t *>(heap_caps_aligned_alloc(kLineBytes, kLineTestBytes, MALLOC_CAP_SPIRAM));
+    TEST_ASSERT_NOT_NULL(buf);
+    HalfLines halves[kCores];
+    for (int c = 0; c < kCores; c++) {
+        halves[c].buf = buf;
+        halves[c].half = c;
+        TEST_ASSERT_EQUAL(pdPASS, xTaskCreatePinnedToCore(write_half_lines, "half_lines", kLoadStackBytes,
+                                                          &halves[c], kLoadPriority, nullptr, c));
+    }
+    while (!halves[0].done || !halves[1].done) {
+        vTaskDelay(1);
+    }
+    heap_caps_free(buf);
+    printf("psram lines: %" PRIu32 " and %" PRIu32 " bytes lost over %d rounds of %u KB\n", halves[0].wrong,
+           halves[1].wrong, kLineTestRounds, static_cast<unsigned>(kLineTestBytes / 1024));
+    TEST_ASSERT_EQUAL(0, halves[0].wrong + halves[1].wrong);
+}
+
 TEST_CASE("each cut of the speaker graph runs as its ESP-PPQ simulation does", "[ai_engine][speaker_cuts]")
 {
+    start_helper();
     TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, ai_engine_load(0),
                               "models_0 lacks speaker_models.bin: run make ai-unit-speaker");
     int differing = 0;
@@ -300,6 +396,7 @@ uint32_t embed_all(const uint8_t *at, const ChainHead &head, size_t dims, float 
 TEST_CASE("the speaker chain enrols a full roster and scores every window against it as Python does, timed",
           "[ai_engine][speaker_chain]")
 {
+    start_helper();
     const esp_partition_t *part =
         esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, kChainLabel);
     TEST_ASSERT_NOT_NULL(part);
@@ -415,6 +512,7 @@ extern "C" void app_main(void)
 {
     ESP_ERROR_CHECK(sys_storage_init());
     UNITY_BEGIN();
+    unity_run_tests_by_tag("[psram_lines]", false);
     // The whole-graph case erases model slot 0 when it ends, so the cuts run first.
     unity_run_tests_by_tag("[speaker_cuts]", false);
     unity_run_tests_by_tag("[speaker_chain]", false);

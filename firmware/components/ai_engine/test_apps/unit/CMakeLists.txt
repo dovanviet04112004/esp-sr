@@ -13,6 +13,11 @@ if(UNIT_PROFILE STREQUAL "rnnt")
     file(WRITE "${CMAKE_BINARY_DIR}/sdkconfig.rnnt" "CONFIG_AI_ENGINE_COMMAND_BACKEND_RNNT=y\n")
     list(APPEND SDKCONFIG_DEFAULTS "${CMAKE_BINARY_DIR}/sdkconfig.rnnt")
 endif()
+# idf.py -D UNIT_CORES=2 splits every op of ai_engine's own with phu_task on core 1 (KEHOACH 5.1).
+if(UNIT_CORES STREQUAL "2")
+    file(WRITE "${CMAKE_BINARY_DIR}/sdkconfig.cores" "CONFIG_AI_ENGINE_CORES_TWO=y\n")
+    list(APPEND SDKCONFIG_DEFAULTS "${CMAKE_BINARY_DIR}/sdkconfig.cores")
+endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(ai_engine_unit)
