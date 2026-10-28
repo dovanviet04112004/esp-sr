@@ -173,6 +173,8 @@ trên board B, cùng cửa sổ 256 khung như §5, rồi `make ai-profile`.
 | 2 (28/10) | thêm `band_block` | 1 260,9 ms | 4,93 ms | 1 184 228 B | lệch 0, bốn bản cắt khớp |
 | 2, cửa sổ 16 khung | như trên, `FRAMES=16` | **41,3 ms** | **2,58 ms** | 109 060 B | lệch 0, bốn bản cắt khớp |
 | 3, cửa sổ 16 khung | thêm `band_head` | **32,1 ms** | **2,01 ms** | 115 072 B | lệch 0, bốn bản cắt khớp |
+| 4, cửa sổ 16 khung | nhân nhanh cho cột trong | 28,9 ms | 1,81 ms | 115 952 B | lệch 0, bốn bản cắt khớp |
+| 5, cửa sổ 16 khung | thêm `band_stem` | **27,4 ms** | **1,71 ms** | 117 568 B | lệch 0, bốn bản cắt khớp |
 
 **Lượt 1, `aligned_channels`** (bước 2.3, bản vá mới): đệm thân 12 kênh lên 16 bằng kênh 0, nên mọi conv của thân
 chạy nhân vector của esp-dl.
@@ -223,3 +225,11 @@ xong thì khớp từng bit.
 - Bảng xếp hạng, 32,1 ms trên 19 module: sáu `BandBlock` 24,6 ms (77%), `stem` 3,5 ms, `BandHead` 3,0 ms, ReduceMean
   0,7 ms, còn lại 0,3 ms.
 - CNN giờ tốn 2,01 ms mỗi hop, ngang chỗ Kaldi nhường (1 980 µs), chưa kể ba STFT.
+
+**Lượt 4, nhân nhanh:** cột có mọi tap thời gian trong khung chạy nhân riêng, không xét cột đệm. Mỗi đầu vào nạp
+trước một tap ở q0 hay q5, không nạp quá tap cuối. Lần chạy đầu panic `LoadProhibited`: nhân hai tham số đọc `run` ở
+a5 thay vì a3. `BandBlock` 24,6 → 22,1 ms, `BandHead` 3,0 → 2,5 ms.
+
+**Lượt 5, `band_stem`** (op riêng `BandStem`): mỗi cột vào ba giá trị một dải, xếp lại 16 byte một dải ở RAM nội rồi
+chạy nhân nhanh ba làn. `stem` 3,5 → 1,7 ms. Bảng xếp hạng, 27,2 ms: sáu `BandBlock` 21,8 ms (`blocks.0`, `blocks.5`
+6,4–6,5 ms; `blocks.1`–`blocks.4` 2,0–2,7 ms), `BandHead` 2,6 ms, `BandStem` 1,7 ms, ReduceMean 0,7 ms, còn lại 0,4 ms.
