@@ -309,8 +309,9 @@ ctc-watch: ## Score each checkpoint of a ctc run as its training writes it, into
 # again; owner moves the first word of the owner's bật / tắt sessions; places reads tone right at the first and later
 # syllables, pitch held or not. val and owner need Docker for the aligner. STEPS scores those checkpoints with owner or
 # places; KALDI=1 hears through the board's Kaldi pitch.
-ctc-tone-flip: ## The tone checks of KEHOACH 3.11 into <run>/tone_flip_<check>.yaml: CHECK=val|owner|places RUN=<run> [STEPS=2000,4000] [KALDI=1]
-	$(ML_CPU) --extra train --extra swiftf0 --extra praat python -m srpipe.tasks.command.ctc.tone_flip $(or $(CHECK),val) $(RUN) $(if $(STEPS),--steps $(STEPS)) $(if $(KALDI),--kaldi-pitch)
+ctc-tone-flip: ## The tone checks of KEHOACH 3.11 into <run>/tone_flip_<check>.yaml: CHECK=val|owner|places|gate RUN=<run> [STEPS=2000,4000] [KALDI=1] [BUILD=v8_pitch_kl] [PITCH_RUN=<pitch run> PITCH_ROW=kl]
+	$(ML_CPU) --extra train --extra espdl --extra swiftf0 --extra praat python -m srpipe.tasks.command.ctc.tone_flip $(or $(CHECK),val) $(RUN) $(if $(STEPS),--steps $(STEPS)) $(if $(KALDI),--kaldi-pitch) \
+	  $(if $(BUILD),--build $(BUILD)) $(if $(PITCH_ROW),--pitch-row $(PITCH_RUN) $(PITCH_ROW))
 
 ##@ Command: ctc int8 ladder (KEHOACH 3.14)
 

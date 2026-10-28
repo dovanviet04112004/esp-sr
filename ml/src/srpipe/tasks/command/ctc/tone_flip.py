@@ -42,7 +42,7 @@ from srpipe.tasks.wake.data import sentence_units
 from srpipe.tts import CONFIG as TTS_CONFIG
 from srpipe.tts import engines
 
-CHECKS = ("val", "owner", "places")
+CHECKS = ("val", "owner", "places", "gate")
 CONDITIONS = ("recorded", "same", "swap")  # owner: as recorded, F0 kept, F0 moved
 PLACES = ("first", "later")
 MODES = ("same", "swap")  # resynthesised on its own contour, or on the other tone's
@@ -672,13 +672,14 @@ def matched(hyp: list[int], ref: np.ndarray) -> list[int | None]:
     return out
 
 
-def places_val(cfg: dict, paths: dict) -> train.Sentences:
-    """val of a run's split as its training reads it."""
+def places_val(cfg: dict, paths: dict, build: str | None = None) -> train.Sentences:
+    """val of a run's split as its training reads it, from processed/command/<build> in place of the run's own
+    version's build when given."""
     version, spec = cfg["split"]["version"], cfg["train"]
     listed = {r.item for r in splits.read_split(paths["splits"] / "command" / version / "val.txt")}
     units_of = sentence_units(screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech"), listed, spec["dialect"])
     longest = round(spec["max_s"] * train.HOPS_PER_S)
-    return train.load_role([paths["processed"] / "command" / version / "val"], units_of, longest, "float32")
+    return train.load_role([paths["processed"] / "command" / (build or version) / "val"], units_of, longest, "float32")
 
 
 def tone_places(units: np.ndarray) -> list[tuple[int, str, bool]]:
@@ -730,6 +731,45 @@ def places_line(report: dict) -> str:
     return "; ".join(f"{name}: {line(report[name])}" for name in ("simulated", "pitch held at mean"))
 
 
+def gate_check(net: gate.Ctc, paths: dict) -> dict:
+    """Gate 3's sessions as the board hears them: of the utterances of a learned command, those whose best command is
+    the one said, and tone right at the command's first syllable and at its later ones, the window's best path
+    aligned to the command's units in the run's dialect (KEHOACH 3.11)."""
+    board = load_yaml(command.CONFIG)["eval"]["board"]
+    said = {c["id"]: c["text"] for c in json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]}
+    region = lang_vi.DIALECTS.index(net.cfg["train"]["dialect"])
+    units_of = {cid: unit_ids(g2p.syllables(normalize(text, region), region))[0] for cid, text in said.items()}
+
+    def decided_of(clean, features, pitch, spans):
+        out = []
+        for x in gate.ctc_windows(features, pitch, spans):
+            window, frames = gate.normalised_window(net, x)
+            with torch.no_grad():
+                log_probs = net.model(window).log_softmax(1)[0, :, :frames].numpy()
+            out.append((gate.ctc_heard(net, x)[0], train.best_path(log_probs)))
+        return out
+
+    right, total, best, utterances = Counter(), Counter(), 0, 0
+    for r in gate.board(net.cfg, board, paths, said, decided_of):
+        if r.expected not in units_of:
+            continue
+        ref = units_of[r.expected]
+        for heard_as, hyp in r.decided:
+            best, utterances = best + (heard_as == r.expected), utterances + 1
+            hit = matched(hyp, ref)
+            for k, place, _ in tone_places(ref):
+                total[place] += 1
+                right[place] += hit[k] == int(ref[k])
+    tones = {f"tone_right_{p}": right[p] / total[p] for p in PLACES}
+    return {"utterances": utterances, "best_right": best} | tones | {"syllables": dict(total)}
+
+
+def with_pitch_row(cfg: dict, pitch_run: Path, row: str) -> dict:
+    """A run's config heard through a row of the pitch ladder in place of float SwiftF0 (KEHOACH 3.11)."""
+    listen = cfg["listen"]
+    return cfg | {"listen": listen | {"pitch": listen["pitch"] | {"int8": {"run": pitch_run.name, "row": row}}}}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("check", choices=CHECKS)
@@ -740,13 +780,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--kaldi-pitch", action="store_true", help="owner: hear through the contract's Kaldi pitch, as the board does"
     )
+    parser.add_argument("--build", help="places: val from processed/command/<build>, as make pitch-rebuild writes it")
+    parser.add_argument(
+        "--pitch-row", nargs=2, metavar=("PITCH_RUN", "ROW"), help="gate: hear through a row of the pitch ladder"
+    )
     args = parser.parse_args(argv)
     spec, paths = load_yaml(ctc.CONFIG)["tone_flip"], data_paths()
-    if args.steps and args.check == "val":
+    if args.steps and args.check in ("val", "gate"):
         parser.error("--steps goes with owner and places")
     if args.kaldi_pitch and args.check != "owner":
         parser.error("--kaldi-pitch goes with owner")
-    tag = "_kaldi_pitch" if args.kaldi_pitch else ""
+    if (args.build and args.check != "places") or (args.pitch_row and args.check != "gate"):
+        parser.error("--build goes with places, --pitch-row with gate")
+    tag = "_kaldi_pitch" if args.kaldi_pitch else f"_{args.build}" if args.build else ""
+    tag += f"_pitch_{args.pitch_row[1]}" if args.pitch_row else ""
     if args.check == "owner":
         commands = ML_ROOT.parent / spec["owner_set"]
         listed = json.loads(commands.read_text(encoding="utf-8"))["commands"]
@@ -755,7 +802,11 @@ def main(argv: list[str] | None = None) -> int:
         heard = owner_heard(cfg, spec, paths)
     elif args.check == "places":
         net = gate.load_ctc(args.run)
-        val = places_val(net.cfg, paths)
+        val = places_val(net.cfg, paths, args.build)
+    elif args.check == "gate":
+        net = gate.load_ctc(args.run)
+        if args.pitch_row:
+            net = replace(net, cfg=with_pitch_row(net.cfg, Path(args.pitch_row[0]), args.pitch_row[1]))
     if args.steps:
         report = {}
         for step in (int(v) for v in args.steps.split(",")):
@@ -778,6 +829,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.check == "owner":
         report = owner_report(net, heard, listed, spec)
         print(owner_table(report))
+    elif args.check == "gate":
+        report = {"run": str(args.run)} | gate_check(net, paths)
+        print(report)
     else:
         report = {"run": str(args.run), "split": net.cfg["split"]["version"]} | places_check(net, val)
         print(places_line(report))
