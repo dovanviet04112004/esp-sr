@@ -1209,15 +1209,20 @@ CNN còn 1,675 ms mỗi hop, khớp từng bit (`measurements/pitch.md` §6). Ch
   bước 1.4. Đạt khi vẫn qua mốc của bước 1: lỗi đơn vị `val` ≤ 0,359, thanh các âm tiết sau ≥ 72%.
 - Mốc: bộ vàng khớp.
 
-3.4 **`svc_listen` và `command`.**
-- Cột cao độ đến muộn hơn log-mel 35 khung: 3 khung của STFT, 7 của CNN, 25 của 0,4 s nhìn sau. Cửa sổ `command` đọc
-  log-mel và cao độ đã thẳng hàng.
-- Quyết định chậm thêm phần trễ vượt 0,4 s `utterance.gap_s`, cỡ 0,18 s. Con số ấy đo lại trên board.
+3.4 **`svc_listen` và `command`.** Chủ repo chọn ngày 29/10: CNN chạy trong `nhan_task`, và sản phẩm chuyển hẳn sang
+SwiftF0 từ phần này.
+- Mỗi hop `nhan_task` đưa PCM sạch vào `swift_front`. Cứ 16 khung front thì CNN chạy dòng một lượt (~28 ms), giải từng
+  khung và áp ngưỡng im lặng theo đỉnh của hop ấy; `swift_dims` ra ba chiều của khung trễ 25 khung, vào vòng cao độ ở
+  đúng ô của hop. Một lượt 28 ms làm chậm việc nạp chừng 2 hop, `q_clean` sâu 128 hop đỡ được.
+- Cột cao độ đến muộn hơn log-mel 35 khung: 3 khung của STFT, 7 của CNN, 25 của 0,4 s nhìn sau; cộng tới 15 khung chờ
+  đủ một lượt 16 khung. Cửa sổ `command` chỉ đọc hop đã có cột cao độ, nên log-mel và cao độ luôn thẳng hàng.
+- Quyết định chậm thêm phần trễ vượt 0,4 s `utterance.gap_s`, cỡ 10–25 khung (0,16–0,4 s). Con số ấy đo lại trên board.
+- Bộ dò Kaldi rời đường nghe. `dsp_spec/pitch` và bộ vàng của nó vẫn ở repo: xoá hẳn chờ chủ repo.
 - `command` dùng run v8 đã học trên cao độ SwiftF0, không giữ chiều nào, với `listen_hash` của front mới trong
   `contracts/listen.yaml`.
 
-3.5 **Chọn cách nghe:** không cao độ hay SwiftF0, cùng việc bỏ hẳn bộ dò Kaldi. Chủ repo chọn khi đến phần này, trên
-số đo của 3.1–3.4.
+3.5 **Chọn cách nghe:** chủ repo chọn SwiftF0 cho sản phẩm ngày 29/10, trước số đo của 3.4. Phần còn chờ: xoá hẳn bộ
+dò Kaldi, và bớt `sqrtf`, `ln` của front end (3.1).
 
 **Hướng còn lại**, theo thứ tự, khi các bước trên chưa đủ:
 - mạng nhìn trước tới 0,4 s: board vốn chờ `utterance.gap_s` 0,4 s trước khi chốt câu nên không thêm trễ quyết định;
