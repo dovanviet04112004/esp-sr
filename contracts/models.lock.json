@@ -52,7 +52,7 @@
         ]
       },
       "backend": "ctc",
-      "listen_hash": "0x354b1ae6",
+      "listen_hash": "0x2bd4316d",
       "features": {
         "name": "log_mel80_pitch3",
         "dims": 83
