@@ -29,6 +29,13 @@ dl::module::Module *softmax_quant_from(fbs::FbsModel *fbs_model, std::string nod
  */
 bool softmax_table_s8(float *table, int exponent, const int8_t *products);
 
+/** Up to 64 columns, a multiple of 8, of esp-dl's int8 Softmax over len rows and its QuantizeLinear, as
+ * softmax_block_s8 takes them, written into y of its own row stride.
+ *  @ctx any | non-blocking | caller owns y, x, table and scales (columns floats); strides in bytes
+ */
+void softmax_columns_s8(int8_t *y, int y_stride, const int8_t *x, int len, int stride, int columns,
+                        const float *table, float *scales, float out_rescale) noexcept;
+
 /** One block of esp-dl's int8 Softmax and the QuantizeLinear after it: each of inner columns of len rows
  * summed in order through table, then each value scaled by 1 / sum * out_rescale and rounded half up to int8.
  *  @ctx any | non-blocking | caller owns x, y, table and scales (inner floats)

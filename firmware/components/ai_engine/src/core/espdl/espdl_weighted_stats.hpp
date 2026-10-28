@@ -1,5 +1,6 @@
 /** Build WeightedStats for one .espdl node: an attentive pool's weighted sums of x and of x * x over time,
- * each integer as esp-dl's Mul and ReduceSum compute it (KEHOACH 3.14 step 2.5).
+ * the Softmax over time of the weights too when it carries prob_exponent, each integer as esp-dl computes it
+ * (KEHOACH 3.14 step 2.5).
  *  @ctx task | non-blocking | esp-dl's creator calls it while a dl::Model is built
  *  @ret the module, nullptr when the node is not int8 or lacks its five shifts
  */

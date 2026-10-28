@@ -6,8 +6,8 @@
 // sums: eight floats, each the sum of its column's table values over rows, from 0; stride: bytes from row to row.
 //
 // void ai_engine_softmax_norm_s8_esp32s3(int8_t *y, const int8_t *x, const float *table, const float *scales,
-//                                        int rows, int stride)
-// y: the eight columns, each value min(trunc(table[x] * scale + 0.5), 127); y and x share stride.
+//                                        int rows, const int32_t *strides)
+// y: the eight columns, each value min(trunc(table[x] * scale + 0.5), 127); strides: x's, then y's.
 
     .text
     .align  4
@@ -112,6 +112,8 @@ ai_engine_softmax_sums_s8_esp32s3:
     .align  4
 ai_engine_softmax_norm_s8_esp32s3:
     entry   a1, 32
+    l32i    a12, a7, 4
+    l32i    a7, a7, 0
     lsi     f0, a5, 0
     lsi     f1, a5, 4
     lsi     f2, a5, 8
@@ -129,6 +131,6 @@ ai_engine_softmax_norm_s8_esp32s3:
     four_columns    0, f0, f1, f2, f3
     four_columns    4, f4, f5, f6, f7
     add     a3, a3, a7
-    add     a2, a2, a7
+    add     a2, a2, a12
 1:
     retw.n

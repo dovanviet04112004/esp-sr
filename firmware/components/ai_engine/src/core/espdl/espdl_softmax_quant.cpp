@@ -19,7 +19,7 @@ extern "C" {
 void ai_engine_softmax_sums_s8_esp32s3(float *sums, const int8_t *x, const float *table, int rows,
                                        int stride);
 void ai_engine_softmax_norm_s8_esp32s3(int8_t *y, const int8_t *x, const float *table, const float *scales,
-                                       int rows, int stride);
+                                       int rows, const int32_t *strides);
 }
 
 namespace ai {
@@ -169,6 +169,21 @@ bool softmax_table_s8(float *table, int exponent, const int8_t *products)
     return true;
 }
 
+void softmax_columns_s8(int8_t *y, int y_stride, const int8_t *x, int len, int stride, int columns,
+                        const float *table, float *scales, float out_rescale) noexcept
+{
+    for (int k = 0; k < columns; k += kStrip) {
+        ai_engine_softmax_sums_s8_esp32s3(scales + k, x + k, table, len, stride);
+    }
+    for (int k = 0; k < columns; k++) {
+        scales[k] = 1.0f / scales[k] * out_rescale;
+    }
+    const int32_t strides[] = {stride, y_stride};
+    for (int k = 0; k < columns; k += kStrip) {
+        ai_engine_softmax_norm_s8_esp32s3(y + k, x + k, table, scales + k, len, strides);
+    }
+}
+
 void softmax_block_s8(const int8_t *x, int8_t *y, int len, int inner, const float *table, float *scales,
                       float out_rescale) noexcept
 {
@@ -176,16 +191,8 @@ void softmax_block_s8(const int8_t *x, int8_t *y, int len, int inner, const floa
     const int strips = inner / kStrip * kStrip;
     // A group's columns are normalised while its rows are still in the cache from their sums.
     for (int g = 0; g < strips; g += kGroup) {
-        const int end = std::min(g + kGroup, strips);
-        for (int k = g; k < end; k += kStrip) {
-            ai_engine_softmax_sums_s8_esp32s3(scales + k, x + k, table, len, inner);
-        }
-        for (int k = g; k < end; k++) {
-            scales[k] = 1.0f / scales[k] * out_rescale;
-        }
-        for (int k = g; k < end; k += kStrip) {
-            ai_engine_softmax_norm_s8_esp32s3(y + k, x + k, table, scales + k, len, inner);
-        }
+        softmax_columns_s8(y + g, inner, x + g, len, inner, std::min(kGroup, strips - g), table, scales + g,
+                           out_rescale);
     }
     for (int k = strips; k < inner; k++) {
         float s = 0.0f;
