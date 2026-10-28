@@ -35,9 +35,9 @@ stage 1 118,8 → 107,2 ms, stage 2 32,3 → 28,6 ms.
 
 ## Quyết định
 
-Chủ repo chọn ngày 28/10, theo bốn bước: mượn RAM nội cho trọng số của `ConvBlock`; cho `PointwiseS8` mượn cùng vùng
-ấy; cho `ConvBlock` đặt cả hàng vòng vào vùng ấy khi còn vừa; rồi cho mọi op riêng của `ai_engine` chép hằng số của nó
-vào vùng ấy, không xin thêm byte nào. Chi tiết ở KẾ HOẠCH §3.14 và §6.5; mã ở `espdl_loan`.
+Chủ repo chọn ngày 28/10, theo năm bước: mượn RAM nội cho trọng số của `ConvBlock`; cho `PointwiseS8` mượn cùng vùng
+ấy; cho `ConvBlock` đặt cả hàng vòng vào vùng ấy khi còn vừa; cho mọi op riêng của `ai_engine` chép hằng số của nó
+vào vùng ấy; rồi cho chúng dùng vùng ấy làm vùng nháp. Không bước nào xin thêm byte. Chi tiết ở KẾ HOẠCH §3.14 và §6.5; mã ở `espdl_loan`.
 
 - **Ai xin:** khối `ConvBlock` chạy nhân chung, tức C khác 24 và 48. Mỗi khối xin lúc dựng số byte mọi trọng số nó
   đọc ở từng điểm ảnh:
@@ -54,6 +54,8 @@ vào vùng ấy, không xin thêm byte nào. Chi tiết ở KẾ HOẠCH §3.14 
     lát vào đó trước khi chạy lát.
   - Mọi op riêng khác của `ai_engine` được chép hằng số nó đọc lại nhiều lần vào vùng ấy khi vừa, cũng không xin thêm
     byte nào; `StageSum` chép trọng số theo kênh của mọi số hạng (6 op 154,5 → 116,1 ms).
+  - Op riêng cũng được dùng vùng ấy làm vùng nháp khi vừa: hàng đệm, hàng ra, tổng tạm. `TimeDepthwise` đặt hàng
+    đệm và hàng ra ở đó; ở PSRAM, mỗi op của b3 nạp nguội chúng ~0,5 ms mỗi lần chạy.
 - **Cấp không được** thì op đọc trọng số tại chỗ: chậm hơn, cùng kết quả.
 - **Dải:** khối nhân chung chạy mỗi hàng theo dải 4 điểm ảnh, depthwise rồi pointwise của một dải xong mới sang dải sau.
 
