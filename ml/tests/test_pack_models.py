@@ -1,5 +1,5 @@
 """The model slot image: the header of storage_format.h, entries aligned and hashed, the slot size respected; the unit
-test table is the product table with ota_1's region as the scratch models_1."""
+test table keeps the product's settings partitions where the product reads them."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def test_the_header_fits_the_layout_storage_format_fixes() -> None:
     assert pack_models.HEAD.size == 64 and pack_models.ENTRY.size == 64
     assert pack_models.HEAD.size + pack_models.MAX_ENTRIES * pack_models.ENTRY.size <= pack_models.HEADER_BYTES
     assert pack_models.MAGIC.to_bytes(4, "little") == b"SRMD"
-    assert pack_models.slot_bytes() == 0x600000
+    assert pack_models.slot_bytes() == 0xB00000
 
 
 def rows_of(table) -> dict[str, tuple[int, int]]:
@@ -36,14 +36,14 @@ def rows_of(table) -> dict[str, tuple[int, int]]:
     return {r[0]: (int(r[3], 0), int(r[4], 0)) for r in rows}
 
 
-def test_the_unit_table_is_the_products_with_its_app_span_split_into_a_bigger_app_and_a_scratch_model_slot() -> None:
+def test_the_unit_table_keeps_the_products_settings_in_place_and_lays_apps_and_models_in_the_same_span() -> None:
     product, unit = rows_of(pack_models.PARTITIONS), rows_of(pack_models.UNIT_PARTITIONS)
-    app, scratch = unit.pop("ota_0"), unit.pop("models_1")
-    first, second = product.pop("ota_0"), product.pop("ota_1")
-    assert "models_1" not in product and app[0] == first[0] and app[1] > first[1] and app[0] + app[1] == scratch[0]
-    assert scratch[0] + scratch[1] == second[0] + second[1]
-    assert unit == product
-    assert pack_models.partition_bytes("models_1", pack_models.UNIT_PARTITIONS) == scratch[1]
+    for kept in ("nvs", "otadata", "phy_init", "nvs_keys", "storage", "coredump"):
+        assert unit.pop(kept) == product.pop(kept), kept
+    span = min(start for start, _ in product.values()), max(start + size for start, size in product.values())
+    assert set(product) == {"ota_0", "models_0"} and {"ota_0", "models_0", "models_1", "voice"} == set(unit)
+    assert span == (min(start for start, _ in unit.values()), max(start + size for start, size in unit.values()))
+    assert pack_models.partition_bytes("models_1", pack_models.UNIT_PARTITIONS) == unit["models_1"][1]
 
 
 def test_entries_are_aligned_hashed_and_in_order() -> None:
