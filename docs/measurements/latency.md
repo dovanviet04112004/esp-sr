@@ -1316,6 +1316,56 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
 - Lượt dò có profile chạy đồ thị hai lần liền nhau (~4 s ở nhân 0) thì task watchdog báo IDLE0; bản báo rơi vào
   giờ của một module, ~43 ms ở một `GroupNormS8` hay `LayerNormS8`. Giờ một cửa sổ đo ở lượt có `vTaskDelay(1)`
   giữa các lần chạy, nên không dính.
+- **Hai nhân** (ADR-0027, 28/10). `make ai-unit-speaker ... CORES=2` dựng `AI_ENGINE_CORES_TWO`, và app thử chạy
+  `phu_task` của nó ở nhân 1, ưu tiên 1. Hàng `timing`, đồ thị ở flash, 10 cửa sổ:
+
+  | Bản | Một cửa sổ | 3 cửa sổ khi nhân 1 ghi NVS | Khớp từng bit |
+  |---|---|---|---|
+  | Một nhân, mốc trước khi tách làn | 1 399,6 ms | — | ✓ |
+  | Một nhân, làn cả hàng và preload khoá theo phần | 1 401,6 ms | 1 550,9 ms, 379 lần ghi | ✓ |
+  | **Hai nhân**: nửa `ConvBlock` chỉ trong vùng mượn, `PointwiseS8` chia hàng | **1 310,1 ms** | 1 487,7 ms, 358 lần ghi | ✓ |
+
+  Giờ theo loại op, một nhân → hai nhân: `ConvBlock` 726,3 → 647,9 ms (stage 0 97,7 → 73,1 và 102,8 → 77,2 ms mỗi
+  khối, stage 2 −16 tới −20%, stage 3 và 4 −11 tới −12%; stage 1 và 5 chạy cả hàng), `PointwiseS8` 284,7 → 270,5 ms.
+  Op khác như nhau.
+  - **Ước 0,9–1,0 s của ADR-0027 sai.** Lượt đầu chia cả bốn op, kể cả khi vòng hàng nằm ở PSRAM. `GroupNormS8` chia
+    theo lô nhóm, `StageSum` theo khối hàng. Kết quả:
+    - `ConvBlock` 727,0 → 605,4 ms;
+    - `PointwiseS8` 285,1 → 271,1 ms (`red_dim` không đổi: mỗi lát đọc lại cả x 255 KB);
+    - `StageSum` 103,3 → 99,6 ms;
+    - `GroupNormS8` 104,8 → 110,3 ms: ba phép 148 khung chậm 12–23% vì hai nửa giành dcache, hai phép 37 khung nhanh
+      33%.
+    - Phần đọc ghi PSRAM của các op lớn không giảm khi chia, vì hai nhân dùng chung một bus.
+  - **Lượt ấy không khớp:** lệch tới 21 ở embedding, chủ yếu từ cửa sổ thứ hai trở đi. Các lượt khoanh vùng, mỗi
+    lượt 10 cửa sổ:
+
+    | Lượt | Một cửa sổ | Lệch nhất |
+    |---|---|---|
+    | Mỗi nửa chỉ nạp trước các dòng hàng y nằm trọn trong phần của mình | 1 264,4 ms | 21 |
+    | Thêm: vùng y nạp xong hay bỏ, rồi mới ghi | 1 267,6 ms | 21 |
+    | Hai phần chạy lần lượt trên nhân 0, không có `phu_task` | 1 466,1 ms | **0** |
+    | Có `phu_task`, tắt hẳn preload | 1 288,3 ms | 23 |
+    | Chỉ `ConvBlock` chạy song song, ba op kia lần lượt | 1 288,9 ms | 22 |
+
+  - Hai phần chạy lần lượt thì khớp, nên cách chia đúng; lỗi chỉ đến khi hai nhân chạy cùng lúc, và không do preload.
+  - **Bài thử `[psram_lines]`** của app thử: hai task, mỗi nhân một task, ghi xen hai nửa mọi dòng cache của 256 KB
+    PSRAM rồi đọc lại, 64 vòng, bằng `memset` và bằng `ee.vst.128.ip`. Không mất byte nào, nên hai nhân ghi chung
+    một dòng không phải nguyên nhân.
+  - **Bản gỡ lỗi** so mỗi `ConvBlock` chạy song song với chính hai làn ấy chạy lần lượt:
+    - mọi chỗ lệch ở khối có vòng hàng trong PSRAM: stage 1, vì vùng mượn không chứa nổi vòng của hai nửa; stage 5,
+      không vùng mượn; và mọi khối ở lượt dựng chưa có vùng mượn;
+    - chỗ lệch rải khắp hàng và cột, không dồn ở chỗ chia;
+    - khối có vòng hàng trong vùng mượn không lệch lần nào.
+
+    Cơ chế chưa rõ. Luật rút ra: phần chạy song song không đọc lại PSRAM nó vừa ghi. Vùng nháp, mảng tham số của nhân
+    và hàng đợi preload của phần ấy nằm ở vùng mượn hay trên ngăn xếp. `StageSum` cộng dồn vào chính hàng ra, và
+    `GroupNormS8` giữ bảng và hàng nháp ở PSRAM, nên cả hai không chia.
+  - **Khoá bộ preload ở mọi lần `pump`** làm `ConvBlock` bản một nhân chậm 2,7–3,4 ms. Với
+    `CONFIG_STDATOMIC_S32C1I_SPIRAM_WORKAROUND`, mỗi phép nguyên tử là một lời gọi hàm thư viện. Thêm vào đó, nạp
+    trước chỉ các dòng nằm trọn trong hàng y bỏ mất dòng đầu và cuối mỗi hàng, vì đáy tensor không thẳng hàng 64 byte.
+    Giờ chỉ phần chạy song song mới khoá và mới nạp trước kiểu ấy.
+  - **Còn mở:** stage 1 (ba khối, 90–106 ms) chia được khi vùng mượn rộng thêm ~4 KB; đỉnh µs của chuỗi `dsp_afe` ở
+    nhân 1 trong lúc speaker chạy hai nhân (ADR-0027) chưa đo.
 - **`GroupNormS8` trên app đo** (map 148 × 1728 trong PSRAM, 24 nhóm), chu kỳ một giá trị:
 
   | Bản | Tổng | Bình phương | Bảng | Ghi ra | Một phép |
