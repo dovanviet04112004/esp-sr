@@ -25,6 +25,7 @@ from .layout import (
 )
 from .ops.attention import attention_core
 from .ops.band_block import band_block
+from .ops.band_chain import band_chain
 from .ops.band_head import band_head
 from .ops.band_stem import band_stem
 from .ops.conv_block import conv_block
@@ -112,6 +113,7 @@ PATCHES = {
     "band_block": band_block,
     "band_head": band_head,
     "band_stem": band_stem,
+    "band_chain": band_chain,
 }
 
 
