@@ -26,7 +26,7 @@ from srpipe.core.audio_io import to_float
 from srpipe.core.config import CONFIGS, ML_ROOT, contract_front, data_paths, load_yaml
 from srpipe.dsp.spec import swift_front
 from srpipe.export import update_lock
-from srpipe.generated import grid
+from srpipe.generated import grid, listen
 from srpipe.scenes import device
 from srpipe.tasks.pitch import model
 from srpipe.tasks.pitch.postproc import decode
@@ -39,7 +39,7 @@ CHUNK_HOPS = 256  # frames of one calibration or row tensor, 4.1 s
 EDGE_HOPS = 10  # each chunk end's frames that see zero padding
 VOICED = 0.5  # confidence at which swift-f0 calls a frame voiced
 CALIB_STREAM, ROWS_STREAM = 1, 2  # rng streams of the drawn sessions, beside the seed
-SILENCE_PEAK = 1e-3  # swift-f0's: a hop peaking under it has confidence 0
+SILENCE_PEAK = listen.PITCH["silence_peak"]  # swift-f0's, as listen.yaml carries it to the chip
 FLOAT_ROW = "float"  # rebuild's row for swift-f0 itself
 STREAM_SUFFIX = "_stream"  # of a rebuilt build whose pitch dims stream as the chip's
 STREAM_PATCH = "band_stream"

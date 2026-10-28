@@ -230,6 +230,7 @@ def gen_listen_h(v: dict) -> str:
         f"#define GEN_LISTEN_KALDI_PITCH_CONFIG {c_initializer(v['kaldi_pitch'])}       // dsp_spec_pitch_config_t",
         f"#define GEN_LISTEN_PITCH_MIN_F0_HZ {c_number(v['pitch']['min_f0_hz'])}",
         f"#define GEN_LISTEN_PITCH_MAX_F0_HZ {c_number(v['pitch']['max_f0_hz'])}",
+        f"#define GEN_LISTEN_PITCH_SILENCE_PEAK {c_number(v['pitch']['silence_peak'])}",
         f"#define GEN_LISTEN_SWIFT_DIMS_CONFIG {swift_dims_initializer(v)}       // dsp_spec_swift_dims_config_t",
         f"#define GEN_LISTEN_UTTERANCE_GAP_HOPS {v['gap_hops']}",
         f"#define GEN_LISTEN_UTTERANCE_MIN_HOPS {v['min_hops']}",

@@ -224,7 +224,8 @@ class ListenTests(unittest.TestCase):
         fields.append("struct dims { " + " ".join(f"double {n};" for n in dims) + " };")
         lines.append("    struct dims dims = GEN_LISTEN_SWIFT_DIMS_CONFIG;")
         lines += [f'    printf("dims.{n} %.9g\\n", dims.{n});' for n in dims]
-        lines += [f'    printf("{n} %.9g\\n", (double)GEN_LISTEN_PITCH_{n});' for n in ("MIN_F0_HZ", "MAX_F0_HZ")]
+        ends = ("MIN_F0_HZ", "MAX_F0_HZ", "SILENCE_PEAK")
+        lines += [f'    printf("{n} %.9g\\n", (double)GEN_LISTEN_PITCH_{n});' for n in ends]
         probe = (
             '#include <stdio.h>\n#include "gen_listen.h"\n'
             + "\n".join(fields)
@@ -254,6 +255,7 @@ class ListenTests(unittest.TestCase):
             "dims.delta_scale": pitch["delta_pitch_scale"],
             "MIN_F0_HZ": pitch["min_f0_hz"],
             "MAX_F0_HZ": pitch["max_f0_hz"],
+            "SILENCE_PEAK": pitch["silence_peak"],
         }
         for name, number in want.items():
             self.assertAlmostEqual(float(printed[name]), float(number), places=6)

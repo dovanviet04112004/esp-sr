@@ -1,7 +1,7 @@
 # What the listener computes from the clean output and how it cuts speech into command windows (KEHOACH 3.11, 3.12,
 # 5.4). One source for svc_listen on the board, the board simulation and every ml branch: a model learns on these
 # features, and Gate 3 counts the windows the board decides.
-version: 6
+version: 7
 features:                          # log-mel of the clean output, a frame a hop
   n_bands: 80                      # one number switches every branch, the board and the simulation (ADR-0017)
   f_min_hz: 20.0
@@ -16,6 +16,7 @@ pitch:                             # SwiftF0 on every hop as nhan_task streams i
   min_f0_hz: 50.0
   max_f0_hz: 400.0
   confidence: 0.5                  # a frame is voiced at this or above, as SwiftF0 calibrates it
+  silence_peak: 0.001              # swift-f0's: a hop peaking under it, over int16 full scale, has confidence 0
   normalization_left_s: 0.75       # past of the confidence-weighted log F0 mean
   normalization_right_s: 0.4       # and its look-ahead, within the utterance gap
   pov_scale: 2.0

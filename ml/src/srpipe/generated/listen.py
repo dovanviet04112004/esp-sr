@@ -2,8 +2,8 @@
 # Source: contracts/listen.yaml
 # Regenerate: python3 tools/gen_contracts.py
 
-VERSION = 6
-HASH = 0x2bd4316d
+VERSION = 7
+HASH = 0x895601c9
 FEATURES = {'n_bands': 80, 'f_min_hz': 20.0, 'f_max_hz': 7600.0, 'log_floor': 1e-06}
 PITCH = {'source': 'swiftf0',
  'int8': {'run': '20261028_eb08333-dirty_9ab2ce', 'row': 'kl'},
@@ -11,6 +11,7 @@ PITCH = {'source': 'swiftf0',
  'min_f0_hz': 50.0,
  'max_f0_hz': 400.0,
  'confidence': 0.5,
+ 'silence_peak': 0.001,
  'normalization_left_s': 0.75,
  'normalization_right_s': 0.4,
  'pov_scale': 2.0,
