@@ -1,5 +1,6 @@
 """SwiftF0 rewritten for the chip: decode puts a peak on its pitch step, moves between steps by the neighbours and gives
-no confidence to a peak outside the range; swift_front gives a frame a hop; the rewrite matches swift-f0's detect."""
+no confidence to a peak outside the range; swift_front gives a frame a hop, the same hop by hop as over the whole
+stream, again from the start after a reset; the rewrite matches swift-f0's detect."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import numpy as np
 import pytest
 
 from srpipe.dsp.spec import swift_front
+from srpipe.dsp.spec.mel import ln_f32
 from srpipe.generated import grid
 from srpipe.tasks.pitch.postproc import decode
 
@@ -45,7 +47,25 @@ def test_spectra_give_a_frame_a_whole_hop_and_the_log_floor_on_silence() -> None
     silence = np.zeros(5 * grid.HOP_SAMPLES + 17, dtype=np.float32)
     out = swift_front.spectra(silence, windows, bands)
     assert out.shape == (len(swift_front.SIZES), 128, 5)
-    assert np.all(out == np.log(swift_front.LOG_FLOOR))
+    assert np.all(out == ln_f32(np.array([swift_front.LOG_FLOOR]))[0])
+
+
+def test_the_front_hop_by_hop_gives_the_whole_stream_s_frames_and_restarts_after_a_reset() -> None:
+    rng = np.random.default_rng(9)
+    windows = {n: np.hanning(n).astype(np.float32) for n in swift_front.SIZES}
+    dense = {n: rng.uniform(0.0, 1.0, (n // 2 + 1, swift_front.BANDS)).astype(np.float32) for n in swift_front.SIZES}
+    pcm = np.round(rng.normal(0.0, 3000.0, 12 * grid.HOP_SAMPLES)).astype(np.int16)
+    whole = swift_front.spectra(pcm / np.float32(32768.0), windows, dense)
+    front = swift_front.SwiftFront(windows, {n: swift_front.sparse(m) for n, m in dense.items()})
+    tail = np.zeros(swift_front.DELAY_HOPS * grid.HOP_SAMPLES, np.int16)
+
+    def frames() -> np.ndarray:
+        hops = np.concatenate([pcm, tail]).reshape(-1, grid.HOP_SAMPLES)
+        return np.stack([f for f in map(front.push, hops) if f is not None], axis=-1)
+
+    assert np.array_equal(frames(), whole)
+    front.reset()
+    assert np.array_equal(frames(), whole)
 
 
 def test_the_rewrite_matches_swift_f0_detect(tmp_path: Path) -> None:
