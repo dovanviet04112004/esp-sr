@@ -56,24 +56,34 @@ Chủ repo duyệt ngày 28/10. Chi tiết ở KẾ HOẠCH §3.14 và §5, mã 
 - **Cách chia:**
   - `ConvBlock` theo nửa tần số. Mỗi nửa tự tính cột đệm của mình, nên trong op hai nửa không chờ nhau.
   - `PointwiseS8` theo hàng trong mỗi lát.
-  - `GroupNormS8` theo lô nhóm.
-  - `StageSum` theo khối hàng.
+  - `GroupNormS8` và `StageSum` chạy trọn ở task gọi, theo luật dưới. `GroupNormS8` giữ bảng và hàng nháp ở PSRAM,
+    và khi chia thì ba phép 148 khung chậm 12–23% vì hai nửa giành dcache. `StageSum` cộng dồn từng số hạng vào chính
+    hàng ra.
   - Op khác chia sau, khi số đo cho thấy đáng.
-- **Vùng mượn** (ADR-0025) giữ 79 680 B. Mỗi nửa của khối có vòng hàng và đệm dải riêng. Vùng không đủ cho cả hai
-  thì cả hai đặt ở PSRAM.
-- **Bộ preload** (ADR-0026): cả chip chỉ có một bộ. Một spinlock giữ bước "xem rảnh rồi khởi vùng", và mỗi nhân chỉ
-  kết thúc vùng của mình.
+- **Luật của phần chạy song song:** phần ấy chỉ ghi PSRAM mà không đọc lại thứ nó vừa ghi trong op. Vùng nháp, mảng
+  tham số của nhân và hàng đợi preload nằm ở RAM nội: vùng mượn hay ngăn xếp của task chạy phần ấy. Trên board B,
+  khi hai nhân chạy cùng lúc, `ConvBlock` có vòng hàng ở PSRAM ra số sai rải khắp hàng và cột, còn khối có vòng hàng
+  trong vùng mượn thì không lần nào. Bài thử hai nhân ghi xen hai nửa mọi dòng cache PSRAM không mất byte nào, nên
+  nguyên nhân nằm ở lượt đọc lại, chưa rõ cơ chế (`latency.md` §31).
+- **Vùng mượn** (ADR-0025) giữ 79 680 B. Hai nửa của khối chạy khi vùng mượn chứa vòng hàng, đệm dải và hàng vào
+  conv sau của cả hai; không thì khối chạy cả hàng ở task gọi, như bản một nhân. Ở b3 vì thế stage 1 và 5 không chia.
+- **Bộ preload** (ADR-0026): cả chip chỉ có một bộ. Phần chạy song song giữ bước "xem rảnh rồi khởi vùng" dưới
+  một spinlock, mỗi nhân chỉ kết thúc vùng của mình, và mỗi nửa chỉ nạp trước các dòng hàng y nằm trọn trong phần
+  của mình. Phần chạy một mình không khoá, như bản một nhân.
 
 ## Hệ quả
 
-- b3 ước ~0,9–1,0 s 🔬: phần tính của các op chia gần đôi, phần đọc ghi PSRAM không giảm.
+- **Đo trên board B:** b3 từ ~1 400 ms xuống ~1 310 ms một cửa sổ, khớp từng bit ở cả hai cờ (`latency.md` §31).
+  Ước 0,9–1,0 s lúc lập ADR là sai: khoảng nửa giờ của các op lớn là đọc ghi PSRAM, mà hai nhân dùng chung một bus.
 - **`sach` chung bus và dcache với `phu_task`.** Để đo, app thử của `ai_engine` chạy chuỗi `dsp_afe` mỗi 16 ms ở
   nhân 1, ưu tiên của `sach`, trong lúc speaker chạy hai nhân. Đỉnh một khung phải dưới 12,8 ms (KẾ HOẠCH §5.6).
 - **IDLE1** chạy giữa hai op: `phu_task` chặn sau mỗi phần.
 - **Ghi flash:** nhân kia đứng trong lúc ghi, nên `phu_task` đứng theo. Lượt thử ghi NVS song song của ADR-0026 chạy
   ở cả hai cờ.
 - **Đo:** mặc định vẫn một nhân tới khi chủ repo chọn. Mỗi bước đo cả hai cờ trên board B, khớp từng bit ở cả hai.
+- **Còn mở:** stage 1 của b3 (ba khối, ~95 ms mỗi khối) chia được khi vùng mượn rộng thêm ~4 KB; việc ấy cần đo RAM
+  nội trên firmware sản phẩm và chủ repo duyệt.
 - **Xét lại** khi:
   - `sach` vượt 12,8 ms đỉnh;
   - nhân 1 thêm một task;
-  - b3 không xuống quanh 1 s.
+  - một op chia mới cần vùng nháp ngoài RAM nội.
