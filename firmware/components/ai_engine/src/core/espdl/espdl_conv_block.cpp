@@ -172,11 +172,10 @@ class ConvBlock final : public dl::module::Module {
         if (!built_ && !build(context, x, y)) { return; }
         const Loan lent = loan_lent();
         int8_t *loan = loan_bytes_ > 0 && lent.bytes >= loan_bytes_ ? lent.mem : nullptr;
-        const bool wide = loan != nullptr && wide_bytes_ > 0 && lent.bytes >= loan_bytes_ + wide_bytes_;
-        const bool rings =
-            wide || (loan != nullptr && ring_bytes_ > 0 && lent.bytes >= loan_bytes_ + ring_bytes_);
-        const size_t before_ends = loan_bytes_ + (wide ? wide_bytes_ : rings ? ring_bytes_ : 0);
-        strip_ = wide || held_ ? width_ : kStripPixels;
+        const size_t room = loan != nullptr && rings_bytes_ > 0 ? lent.bytes - loan_bytes_ : 0;
+        const bool rings = room >= rings_bytes_ + kStripPixels * padded_;
+        strip_ = held_ ? width_ : rings ? widest_strip(room - rings_bytes_) : kStripPixels;
+        const size_t before_ends = loan_bytes_ + (rings ? rings_bytes_ + strip_ * padded_ : 0);
         int8_t *ends =
             loan != nullptr && lent.bytes >= before_ends + ends_bytes_ ? lent.mem + before_ends : nullptr;
         const int8_t *dw1 = weights(context, kDw1, loan);
@@ -250,6 +249,15 @@ class ConvBlock final : public dl::module::Module {
     int8_t *c_row(int t) const noexcept
     {
         return c_ring_ + ((t + 1) % kRing) * padded_row_;
+    }
+
+    // The widest strip of whole pixels room holds, kStripPixels up to a row, leaving the joined weights
+    // theirs when it can.
+    int widest_strip(size_t room) const noexcept
+    {
+        const size_t beside_ends = room >= ends_bytes_ ? (room - ends_bytes_) / padded_ : 0;
+        const size_t pixels = beside_ends >= kStripPixels ? beside_ends : room / padded_;
+        return static_cast<int>(std::min<size_t>(pixels, width_));
     }
 
     // Rings and one strip buffer for both depthwise outputs at mem, else in rows_; the post convolution's
@@ -477,8 +485,7 @@ class ConvBlock final : public dl::module::Module {
                          0};
         }
         const bool shared = !held_;
-        ring_bytes_ = shared ? 2 * kRing * padded_row_ + kStripPixels * padded_ : 0;
-        wide_bytes_ = shared ? 2 * kRing * padded_row_ + width_ * padded_ : 0;
+        rings_bytes_ = shared ? 2 * kRing * padded_row_ : 0;
         if (shared) {
             for (size_t i = kDw1; i < m_inputs_index.size(); i++) {
                 (i < kInputs ? loan_bytes_ : ends_bytes_) +=
@@ -521,10 +528,9 @@ class ConvBlock final : public dl::module::Module {
     bool held_ = false; // inputs held in registers, rows whole: no strips, no loan
     Preload preload_;
     int strip_ = 0;
-    size_t loan_bytes_ = 0; // its weights' bytes; 0 for the unrolled kernels
-    size_t ring_bytes_ = 0; // its rings and strip buffer, when they may join the loan
-    size_t wide_bytes_ = 0; // the same with a whole row's strip buffer
-    size_t ends_bytes_ = 0; // the joined convolutions' weights, after the rings
+    size_t loan_bytes_ = 0;  // its weights' bytes; 0 for the unrolled kernels
+    size_t rings_bytes_ = 0; // its two rings, when the loan may hold them
+    size_t ends_bytes_ = 0;  // the joined convolutions' weights, after the rings
     bool built_ = false;
 };
 
