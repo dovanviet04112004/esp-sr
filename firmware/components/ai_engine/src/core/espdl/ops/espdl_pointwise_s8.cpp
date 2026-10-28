@@ -278,8 +278,7 @@ class PointwiseS8 final : public dl::module::Module {
         const int lent = static_cast<int>(loan.bytes / (block_bytes() + kBiasBlockBytes));
         const int per = lent > 0 ? std::min(lent, blocks) : (slice_blocks_ > 0 ? slice_blocks_ : blocks);
         const bool half = columns_ % kChannelStep != 0;
-        const int stride = run_[kRunStride] * kChannelStep;
-        pass_ = {ys, xs, nullptr, 0, lent > 0 ? std::max(kChunkBytes / stride, 1) : run_[kRunRows]};
+        pass_ = {ys, xs, nullptr, 0, lent > 0 ? std::max(kChunkBytes / row_bytes_, 1) : run_[kRunRows]};
         for (int b = 0; b < blocks; b += per) {
             const int n = std::min(per, blocks - b);
             const bool last = b + n == blocks;
@@ -309,7 +308,7 @@ class PointwiseS8 final : public dl::module::Module {
         const int rows = run_[kRunRows];
         const int parts = split_parts();
         const int end = rows * (part + 1) / parts;
-        const int stride = run_[kRunStride] * kChannelStep;
+        const int stride = row_bytes_;
         const int chunk = pass_.chunk;
         std::array<int32_t, kRunSize> run = run_;
         Preload preload(parts > 1);
@@ -433,6 +432,7 @@ class PointwiseS8 final : public dl::module::Module {
                 columns_ % kChannelStep != 0 ? kHalfStep : kChannelStep,
                 0};
         inputs_ = k;
+        row_bytes_ = h != nullptr || k % kChannelStep == 0 ? k : padded(k);
         looped_ = h == nullptr;
         if (looped_) {
             const Kernels *u = kernels_for(kUnrolled, std::size(kUnrolled), k);
@@ -479,6 +479,7 @@ class PointwiseS8 final : public dl::module::Module {
     int out_rows_ = 0;
     int patches_ = 0;
     int inputs_ = 0;
+    int row_bytes_ = 0;    // x row stride: K, or K padded to 16 when copied
     int slice_blocks_ = 0; // 0: all blocks in one pass over the rows
     const int8_t *bias_ = nullptr;
     const int8_t *residual_ = nullptr; // [rows][N], each slice reading its own columns
