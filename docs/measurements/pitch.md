@@ -160,3 +160,33 @@ bình 28 µs, nên các lần báo ấy không làm lệch số đo.
   Phần còn lại sau ba STFT ước 🔬 chỉ cỡ 700 µs, nhỏ hơn giờ đo 38 lần.
 - Nhận thêm tải ở nhân 0 không đủ, vì CNN đã vượt khung. Còn lại hai đường, chủ repo chọn: qua vòng tăng tốc, bước 2
   của §3.14, rồi mới sang bước 3; hay dừng SwiftF0 trên chip.
+
+## 6. SwiftF0, vòng tăng tốc (KẾ HOẠCH §3.11, §3.14 bước 2; E11-T37)
+
+Chủ repo chọn vòng tăng tốc đủ ngày 28/10. Mỗi lượt là `make ai-unit-pitch RUN=artifacts/pitch/runs/20261028_eb08333-dirty_9ab2ce ROW=kl`
+trên board B, cùng cửa sổ 256 khung như §5, rồi `make ai-profile`.
+
+| Lượt | Bản vá của nhánh | Một cửa sổ | Một hop | PSRAM cho đồ thị và tensor | Khớp |
+|---|---|---|---|---|---|
+| §5 | không | 6 740,3 ms | 26,3 ms | 1 304 300 B | lệch 0, bốn bản cắt khớp |
+| 1 (28/10) | `aligned_channels` | **1 464,1 ms** | **5,72 ms** | 1 697 100 B | lệch 0, bốn bản cắt khớp |
+
+**Lượt 1, `aligned_channels`** (bước 2.3, bản vá mới): đệm thân 12 kênh lên 16 bằng kênh 0, nên mọi conv của thân
+chạy nhân vector của esp-dl.
+- Conv 6 487 → 1 149 ms. Mười hai conv của thân 0,14–0,40 chu kỳ một phép nhân-cộng, tính trên phép đã đệm (thêm 78%).
+  Conv giãn theo dải chậm hơn conv 7 × 3: 102 trong 128 hàng nằm ở mép, chạy bộ lọc cắt ngắn từng hàng.
+- Tensor lớn thêm một phần ba, nên Add và Relu 74 → 100 ms mỗi loại, Slice 10 → 13 ms; PSRAM thêm 392 800 B.
+
+Bảng xếp hạng sau lượt 1, 1 465,3 ms trên 43 module:
+
+| Phần | Giờ một cửa sổ | Ghi chú |
+|---|---|---|
+| 12 conv của thân | 956 ms | `blocks.5` 145–147 ms, `blocks.0` 104 ms, `blocks.1`–`blocks.4` 39–70 ms |
+| Add, Relu sau mỗi khối | 199 ms | mỗi cái 16,4–16,9 ms, đọc ghi cả tensor qua PSRAM |
+| `head` 16 → 4, `spread` 4 → 4 | 96 ms, 79 ms | nhân unaligned, 1,64 và 9,80 chu kỳ |
+| ReduceMax theo dải | 71 ms | |
+| `stem` 3 → 16 | 55 ms | nhân unaligned, 0,93 chu kỳ |
+| RequantizeLinear, Slice, ReduceMean, `pitch`, còn lại | 60 ms | |
+
+Cả thân là conv, Add, Relu và RequantizeLinear nối nhau qua PSRAM. esp-dl không có Add gộp Relu, nên phần ấy chỉ còn
+đường op riêng (bước 2.5).
