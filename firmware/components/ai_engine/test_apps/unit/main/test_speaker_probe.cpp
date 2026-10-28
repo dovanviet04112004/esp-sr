@@ -31,6 +31,10 @@ constexpr int kToleranceSteps = 0; // bit for bit, as model->test() asks of int8
 constexpr uint32_t kShownValues = 8;
 constexpr int kCutsMax = 16;
 constexpr const char *kChainLabel = "voice"; // make ai-unit-speaker CHAIN=1 writes it
+constexpr int kLoadedRuns = 3;               // windows embedded while core 1 writes flash
+constexpr uint32_t kLoadStackBytes = 4096;
+constexpr UBaseType_t kLoadPriority = 2;
+constexpr uint32_t kLoadGapMs = 10; // between NVS writes, sparing the flash
 
 // Layout written by srpipe.tasks.speaker.probe; the record's int8 data is padded to four bytes.
 struct WindowsHead {
@@ -81,6 +85,66 @@ esp_err_t test_of(const ai::Blob &blob, bool profiled)
     const ai::WeightLoan loan(ai::loan_take_asked());
     if (profiled) { model.profile_module(true); }
     return model.test();
+}
+
+// Core 1's NVS writes of a threshold, two values in turn, as an MQTT threshold change makes them.
+struct FlashLoad {
+    volatile bool stop = false;
+    volatile bool done = false;
+    uint16_t first = 0;
+    uint32_t writes = 0;
+    esp_err_t err = ESP_OK;
+};
+
+void write_flash(void *arg)
+{
+    auto *load = static_cast<FlashLoad *>(arg);
+    for (uint16_t flip = 1; !load->stop && load->err == ESP_OK; flip ^= 1) {
+        load->err = sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN,
+                                        static_cast<uint16_t>(load->first ^ flip));
+        load->writes++;
+        vTaskDelay(pdMS_TO_TICKS(kLoadGapMs));
+    }
+    load->done = true;
+    vTaskDelete(nullptr);
+}
+
+// The window's worst step off the simulation over runs embedded while core 1 writes flash; flash writes wait
+// out core 0's dcache preloads (ADR-0026).
+int worst_under_flash_writes(ai::EspdlNet &net, const int8_t *x, const int8_t *y, uint32_t dims)
+{
+    FlashLoad load;
+    const bool had = sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, &load.first) == ESP_OK;
+    TEST_ASSERT_EQUAL(pdPASS, xTaskCreatePinnedToCore(write_flash, "flash_load", kLoadStackBytes, &load,
+                                                      kLoadPriority, nullptr, 1));
+    const ai::Int8Tensor in = net.input();
+    const ai::Int8Tensor out = net.output();
+    int worst = 0;
+    int64_t total_us = 0;
+    for (int r = 0; r < kLoadedRuns; r++) {
+        memcpy(in.data, x, in.elements);
+        const int64_t started_us = esp_timer_get_time();
+        TEST_ASSERT_EQUAL(ESP_OK, net.step());
+        total_us += esp_timer_get_time() - started_us;
+        for (uint32_t k = 0; k < dims; k++) {
+            const int diff = abs(out.data[k] - y[k]);
+            worst = diff > worst ? diff : worst;
+        }
+        vTaskDelay(1);
+    }
+    load.stop = true;
+    while (!load.done) {
+        vTaskDelay(1);
+    }
+    const esp_err_t restored = had ? sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, load.first)
+                                   : sys_storage_erase(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN);
+    printf("speaker: %d windows while core 1 wrote NVS %" PRIu32
+           " times: worst |board - simulation| %d, %" PRId64 " us mean a window\n",
+           kLoadedRuns, load.writes, worst, total_us / kLoadedRuns);
+    TEST_ASSERT_EQUAL(ESP_OK, load.err);
+    TEST_ASSERT_EQUAL(ESP_OK, restored);
+    TEST_ASSERT_GREATER_THAN(0, load.writes);
+    return worst;
 }
 
 } // namespace
@@ -142,6 +206,7 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
         printf(" %d/%d", out.data[k], y[k]);
     }
     printf("\n");
+    const int loaded_worst = worst_under_flash_writes(net, x, y, rec.dims);
     net.release();
     const esp_err_t tested = test_of(blob, true);
     const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY,
@@ -150,6 +215,7 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
     TEST_ASSERT_EQUAL(ESP_OK, esp_partition_erase_range(part, 0, kSectorBytes));
     TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, tested, rec.entry);
     TEST_ASSERT_LESS_OR_EQUAL(kToleranceSteps, worst);
+    TEST_ASSERT_LESS_OR_EQUAL(kToleranceSteps, loaded_worst);
 }
 
 TEST_CASE("each cut of the speaker graph runs as its ESP-PPQ simulation does", "[ai_engine][speaker_cuts]")
