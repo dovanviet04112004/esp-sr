@@ -354,3 +354,31 @@ phỏng trên cả 384 khung, rồi `decode_int8`.
   ra khỏi cache dữ liệu.
 - Mạng và giải thêm 155 µs mỗi hop so với CNN một mình (§7.2): xếp lại đầu vào sang [dải][khung][phổ] có lượng tử, và
   giải 16 khung.
+
+### 7.5 `command` trên cao độ của hợp đồng (phần 3.4.5, 29/10)
+
+**Bản dựng `command/v9`.** Split cắt lại trùng từng dòng v8. Mô phỏng cả bản bằng front của hợp đồng:
+`make ctc-features SET='split.version=v9 pitch_source=null simulate.mel_from=null simulate.workers=6'`, tmux `ctc-v9`.
+
+- Mỗi worker giữ ~1 GB, nên RAM 9,9 GB chỉ đủ 6 worker.
+- Lượt đầu, 02:39–03:10: 28 shard. Một phiên 50 s mất ~1 s mô phỏng phòng, 2–3 s chuỗi và log-mel, 5–6 s cao độ
+  (máy đang chạy việc khác). Cả train ước 13–18 giờ 🔬.
+- Trong phần cao độ, 4,3 s trên 5,9 s là phép lượng tử giả từng tensor của ESP-PPQ: sáu phép torch đi qua mỗi tensor.
+  `ptq_espdl.fused_fake_quant` làm cùng các phép float32, cùng thứ tự, trong một vòng numba. Trên ba phiên `val`,
+  cao độ ra trùng từng bit, và 7,5–8,5 s còn 3,1–3,6 s mỗi phiên.
+- Phép kiểm: dựng lại `v9/val` bằng bản gộp thì cả 28 file trùng sha256 bản dựng của lượt đầu. 7 shard mất 2 phút
+  19 giây, so với khoảng 6 phút của lượt đầu.
+
+**v8 float nghe cao độ của hợp đồng, Cửa 3** (`make command-eval TRACK=ctc RUN=… CONTRACT=v9`): cao độ tính từ bản thu
+như chip tính. Mỗi sitting chạy liền một mạch, không reset.
+
+| Cao độ | Đúng nhất | δ₁ 100 ‰: nhận đúng (trung bình theo lệnh) / từ chối | δ₁ 300 ‰ |
+|---|---|---|---|
+| SwiftF0 cả phiên, như lúc học (§4) | 196/209 | | |
+| giữ cả ba chiều ở trung bình (thang `int8_kaldi_pitch`, dòng float) | 194/209 | | |
+| **SwiftF0 hàng kl chạy dòng, như chip** | **192/209** | 72% / 126/126 | 76% / 123/126 |
+
+- δ₂ 50 ‰ ở mọi cột.
+- Đúng nhất theo lệnh: bật đèn 35/37, tắt đèn 32/35, bật quạt 35/36, tắt quạt 28/34, mở cửa 10/10, đóng cửa 10/11,
+  tăng âm lượng 10/13, giảm âm lượng 11/11, dừng lại 10/11, chụp ảnh 11/11.
+- Số câu nhận đúng tính chung cả 209 câu lấy từ dòng float của thang `CONTRACT=v9`, khi bản dựng xong.
