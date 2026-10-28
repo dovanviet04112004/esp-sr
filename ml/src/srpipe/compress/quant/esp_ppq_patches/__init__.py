@@ -25,6 +25,7 @@ from .layout import (
 )
 from .ops.attention import attention_core
 from .ops.band_block import band_block
+from .ops.band_head import band_head
 from .ops.conv_block import conv_block
 from .ops.global_stats import global_stats
 from .ops.group_norm_s8 import group_norm_s8
@@ -108,6 +109,7 @@ PATCHES = {
     "global_stats": global_stats,
     "pointwise_s8": pointwise_s8,
     "band_block": band_block,
+    "band_head": band_head,
 }
 
 
