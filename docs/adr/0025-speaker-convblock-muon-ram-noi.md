@@ -35,8 +35,9 @@ stage 1 118,8 → 107,2 ms, stage 2 32,3 → 28,6 ms.
 
 ## Quyết định
 
-Chủ repo chọn ngày 28/10, ba bước: mượn RAM nội cho trọng số của `ConvBlock`; cho `PointwiseS8` mượn cùng vùng ấy;
-rồi cho `ConvBlock` đặt cả hàng vòng vào vùng ấy khi còn vừa. Chi tiết ở KẾ HOẠCH §3.14 và §6.5; mã ở `espdl_loan`.
+Chủ repo chọn ngày 28/10, theo bốn bước: mượn RAM nội cho trọng số của `ConvBlock`; cho `PointwiseS8` mượn cùng vùng
+ấy; cho `ConvBlock` đặt cả hàng vòng vào vùng ấy khi còn vừa; rồi cho mọi op riêng của `ai_engine` chép hằng số của nó
+vào vùng ấy, không xin thêm byte nào. Chi tiết ở KẾ HOẠCH §3.14 và §6.5; mã ở `espdl_loan`.
 
 - **Ai xin:** khối `ConvBlock` chạy nhân chung, tức C khác 24 và 48. Mỗi khối xin lúc dựng số byte mọi trọng số nó
   đọc ở từng điểm ảnh:
@@ -51,6 +52,8 @@ rồi cho `ConvBlock` đặt cả hàng vòng vào vùng ấy khi còn vừa. Ch
     thì các hàng ấy cũng nằm ở đó, không thì ở PSRAM; khối không xin thêm byte nào cho chúng;
   - `PointwiseS8` nhân có vòng không xin thêm byte nào. Nó chạy theo lát vừa vùng ấy, chép trọng số và bias của mỗi
     lát vào đó trước khi chạy lát.
+  - Mọi op riêng khác của `ai_engine` được chép hằng số nó đọc lại nhiều lần vào vùng ấy khi vừa, cũng không xin thêm
+    byte nào; `StageSum` chép trọng số theo kênh của mọi số hạng (6 op 154,5 → 116,1 ms).
 - **Cấp không được** thì op đọc trọng số tại chỗ: chậm hơn, cùng kết quả.
 - **Dải:** khối nhân chung chạy mỗi hàng theo dải 4 điểm ảnh, depthwise rồi pointwise của một dải xong mới sang dải sau.
 
@@ -63,4 +66,5 @@ rồi cho `ConvBlock` đặt cả hàng vòng vào vùng ấy khi còn vừa. Ch
 - **b0 không đổi:** khối 24 và 48 kênh chạy nhân trải phẳng, không xin nên đồ thị b0 không có vùng mượn.
 - **Xét lại** khi:
   - RAM nội lúc chạy speaker không đủ chỗ;
-  - hay một model khác, hoặc một op khác, cũng cần mượn.
+  - một model khác cũng cần mượn;
+  - hay một op cần vùng lớn hơn 79 680 B.
