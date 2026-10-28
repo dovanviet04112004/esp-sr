@@ -43,13 +43,34 @@ def one_value(var) -> float | None:
     return float(stored[0]) * float(config.scale) if bool(torch.all(stored == stored[0])) else None
 
 
+def resize_after(graph, resize, y, config, info):
+    """resize moved to repeat into y the rows of a new variable on y's grid, laid as resize's input; the new
+    variable."""
+    from esp_ppq.core import OperationQuantizationConfig
+
+    source, repeated = resize.inputs[0], resize.outputs[0]
+    rows = graph.create_variable()
+    rows.shape, rows.dtype = list(source.shape), y.dtype
+    info.add_var_permute(rows.name, info.get_var_permute(source.name))
+    info.add_var_exponents(rows.name, info.get_var_exponents(y.name))
+    info.add_var_layout(rows.name, info.get_var_layout(y.name))
+    source.dest_ops.remove(resize)
+    resize.inputs[0] = rows
+    rows.dest_ops.append(resize)
+    graph.remove_variable(repeated)
+    resize.outputs.append(y)
+    y.source_op = resize
+    resize.config = OperationQuantizationConfig([config, *resize.input_quant_config[1:]], [config])
+    return rows
+
+
 def group_norm_s8_from(graph, norm, info) -> bool:
     """norm, the LayerNorm of a GroupNorm1d chain (Transpose to channels first, Reshape to [1, G, n], the norm with
     one gamma and one beta value, Reshape to [1, C, T], a Mul and an Add of int8 constants per channel on the output's
     exponent, Transpose back), with the chain as one GroupNormS8 on the map the first Transpose reads: [1, T, C], or
-    [1, T, F, C] read as [1, T, F * C], ReDimNet2's to1d of a 2-d map then giving channels in that order. A [1, T, C]
-    map out of a Resize that only repeats its rows, read by the chain alone, goes with the Resize: the op reads the
-    map before it, "repeat" times each row."""
+    [1, T, F, C] read as [1, T, F * C], ReDimNet2's to1d of a 2-d map then giving channels in that order. From a [1, T,
+    C] map that a Resize only repeating rows makes for the chain alone, the op reads each row as "repeat" frames and
+    gives one row a source row; the Resize moves after it, where StageSum takes it as it takes any before its terms."""
     from esp_ppq.core import OperationQuantizationConfig
     from esp_ppq.IR.quantize import QuantableOperation
 
@@ -117,16 +138,14 @@ def group_norm_s8_from(graph, norm, info) -> bool:
     for v in middles:
         if v.name in graph.variables:
             graph.remove_variable(v)
-    if repeat > 1:
-        graph.remove_operation(resize)
-        graph.remove_variable(x)
+    out = resize_after(graph, resize, y, out_config, info) if repeat > 1 else y
     norm.inputs.clear()
     norm.outputs.clear()
     for v in (source, w, b):
         norm.inputs.append(v)
         v.dest_ops.append(norm)
-    norm.outputs.append(y)
-    y.source_op = norm
+    norm.outputs.append(out)
+    out.source_op = norm
     norm.type = GROUP_NORM_S8
     for name in [a for a in norm.attributes if a != "quant_type"]:
         del norm.attributes[name]
