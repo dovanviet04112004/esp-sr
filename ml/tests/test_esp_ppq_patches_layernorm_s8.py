@@ -25,19 +25,21 @@ def test_layernorm_s8_exports_an_int8_norm_as_its_own_op(tmp_path: Path) -> None
     assert re.findall(r"= LayerNormalization\[(.*?)\]", as_is) == [attrs]
 
 
-@pytest.mark.parametrize("n", [1, 2, 3, 6, 8, 12, 16, 24, 48, 96, 192])
-def test_layernorm_s8_takes_the_mean_by_float_division_where_it_equals_espdls_double_one(n: int) -> None:
-    """LayerNormS8 takes the float32 quotient when n's odd part is 1 or 3, as a product by fl(1 / n) corrected by
-    one FMA; esp-dl takes every int8 sum through double."""
-    sums = np.arange(-128 * n, 127 * n + 1)
-    through_double = (sums.astype(np.float64) * (1.0 / n)).astype(np.float32)
-    assert np.array_equal(sums.astype(np.float32) / np.float32(n), through_double)
-    s = torch.from_numpy(sums.astype(np.float32))
-    inverse, count = torch.full_like(s, 1.0 / np.float32(n)), torch.full_like(s, n)
-    product = s * inverse
-    corrected = esp_ppq_patches.fma32(esp_ppq_patches.fma32(-product, count, s), inverse, product)
-    assert np.array_equal(corrected.numpy(), through_double)
-    assert n % 3 or not np.array_equal(product.numpy(), through_double)
+PAIRED_COUNTS = range(4, 513, 4)  # n of the paired kernel, up to kMaxPaired
+
+
+def test_layernorm_s8_takes_the_mean_by_a_corrected_product_for_every_paired_count() -> None:
+    """For every n the paired kernel takes and every int8 sum, the product by fl(1 / n) corrected by one FMA is
+    esp-dl's double quotient; the product alone misses wherever n is no power of 2."""
+    for n in PAIRED_COUNTS:
+        sums = np.arange(-128 * n, 127 * n + 1)
+        through_double = (sums.astype(np.float64) * (1.0 / n)).astype(np.float32)
+        s = torch.from_numpy(sums.astype(np.float32))
+        inverse, count = torch.full_like(s, 1.0 / np.float32(n)), torch.full_like(s, n)
+        product = s * inverse
+        corrected = esp_ppq_patches.fma32(esp_ppq_patches.fma32(-product, count, s), inverse, product)
+        assert np.array_equal(corrected.numpy(), through_double), n
+        assert np.array_equal(product.numpy(), through_double) == (n & (n - 1) == 0), n
 
 
 ROOT_BINADES = range(-3, 12)  # kRootLow to kRootHigh of espdl_layernorm_s8.cpp
