@@ -685,5 +685,33 @@ giữ lại, như §6.1:
   ngưỡng là đổi một điểm phần trăm. Cosine giữa embedding int8 và float có trung vị 0,77, phân vị 10 là 0,67; b0 là 0,51
   và 0,36.
 - **Câu một từ** vẫn chỉ giữ 2/3, như mọi bộ ở §3.4.
-- **Giờ trên board B** 2,15 s một cửa sổ (`latency.md` §31), trên mức ~1 s của điều kiện cắm (ADR-0021). b0 trên sản
-  phẩm chạy 0,41 s.
+- **Giờ trên board B:** hàng kl 1 414,5 ms một cửa sổ, một nhân, đồ thị ở flash như sản phẩm (`latency.md` §31). Vẫn
+  trên mức ~1 s của điều kiện cắm (ADR-0021); chủ repo nhận mức ấy (ADR-0028).
+
+### 7.1 Ngưỡng của b3 trên đường chip (E11-T36, ADR-0028)
+
+`make speaker-deploy RUN=artifacts/speaker/runs/20261027_1a7464c-dirty_92a838 ROW=kl WORKERS=6`, 28/10, 73 phút với
+mô phỏng ESP-PPQ chia cho 6 tiến trình mỗi tiến trình một luồng. Vật liệu như b0: 209 cửa sổ của chủ repo, 397 của
+người lạ, mỗi điều kiện. Khâu đặc trưng lệch bộ trích như b0: 43 trên 10 577 808 giá trị int8 đổi.
+
+| Số người có mẫu giọng | Ngưỡng (‰ z) | Người lạ lọt | Giữ lệnh của chủ repo, 1 m / 3 m | Gọi đúng người |
+|---|---|---|---|---|
+| 1 | 2 076 (b0: 1 486) | 5,0% | 98,9% / 100% (b0: 98,9% / 97,5%) | chủ repo 100% |
+| 2 | 2 515 | 5,0% | 98,9% / 100% | thành viên 97,8% |
+| 3 | 2 890 | 5,0% | 98,9% / 99,8% | thành viên 98,2% |
+| 4–8 | 3 162, 3 156, 3 391, 3 369, 3 527 | | | |
+
+Một người, ở ngưỡng của điều kiện yên tĩnh, theo độ ồn:
+
+| Điều kiện | Giữ, 1 m / 3 m | Người lạ lọt |
+|---|---|---|
+| Yên tĩnh | 98,9% / 100% | 5,9% |
+| Nhiễu 20 dB | 96,7% / 95,9% | 5,5% |
+| Nhiễu 10 dB | 98,7% / 86,5% | 4,0% |
+| Nhiễu 5 dB | 99,9% / 93,0% | 4,7% |
+
+- **Mọi dải ồn đều bị giữ lại theo luật của ADR-0024**, ở mọi số người: ở yên tĩnh và ở 20 dB, người lạ lọt quá 5%.
+  Ngưỡng của các dải ồn vì thế bằng ngưỡng yên tĩnh, như b0.
+- **Thước của thang trên đường chip:** EER 2,99%; giữ 98,2% lệnh được nhận ở 1% người lạ lọt, 99,4% ở 5%; đúng như
+  hàng kl ở §7.
+- **Mẫu giọng của b0 không dùng được:** `model_id` đổi, nên mỗi người đăng ký lại sau khi nạp.

@@ -911,6 +911,21 @@ trung bình). Bản dò chạy hàng `timing` của run, dựng `UNIT_PROFILE=ct
   900 s rồi báo hết hạn; các lượt còn lại không chạy. Console in theo kiểu chờ FIFO, nên CPU dừng giữa `printf`, hoặc
   đường USB/IP ngừng chuyển; dmesg không có lỗi `vhci_hcd` lúc ấy, và esptool nối lại được ngay sau đó. Cùng đoạn mã
   qua ở lần đo 08/10. Chưa rõ gốc, chưa coi là qua (TASKS E11-T30).
+- **Đồ thị ở PSRAM hay ở flash** (28/10, ADR-0028). Lệnh: `make ai-unit-ctc
+  RUN=artifacts/command_ctc/runs/20261007_439d763-dirty_f438bd ROW=percentile KALDI=1 HOLD=pitch [IN_FLASH=1]`.
+  - **Chép vào PSRAM:** 48 bước 16 hop, lệch 0, **63,3 ms** trung bình, 63,6 ms đỉnh mỗi bước; dựng 331 ms, PSRAM cho
+    tensor 321 664 B.
+  - **Để ở flash: chip panic lúc dựng**, "Cache error: Dbus write to cache rejected" ở 0x3ca21960, vùng flash được
+    mmap. Backtrace dừng ở `dl::module::Unsqueeze::get_output_shape`, gọi từ `MemoryManagerGreedy` của
+    `dl::Model::build`.
+  - Nguyên nhân: `Unsqueeze` của esp-dl đổi trục âm thành trục dương ngay trong tensor tham số, mà tensor ấy trỏ thẳng
+    vào ảnh. `Unsqueeze` của `stacks.1` và `stacks.2` mang trục −1. `Reshape` cũng ghi như thế khi `shape` có số 0,
+    nhưng 4 `Reshape` của mạng không có số 0.
+  - Đồ thị speaker không có hai trường hợp ấy, nên chạy được ở flash.
+  - **Với bản vá xuất `unsqueeze_axes_positive`**, hai trục ấy xuất thành 3. Đồ thị ở flash: lệch 0, **126,3 ms** trung
+    bình, 126,6 ms đỉnh mỗi bước; dựng 403 ms, PSRAM cho tensor 321 580 B.
+  - Gấp đôi bản chép vào PSRAM. Mỗi bước đọc lại 3,1 MB trọng số: ~24,6 MB/s từ flash, ~49 MB/s từ PSRAM. Một bước
+    là 256 ms tiếng, nên lúc cửa sổ lệnh mở, mạng giữ nhân 0 ~49% thời gian thay ~25%.
 
 ## 27. `speaker` trên chip trong chuỗi: từ PCM tới quyết định (E11-T26)
 
@@ -1456,7 +1471,16 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
   - Ước cho b3: `ConvBlock` stage 0–1 ~25 và ~19 ms một khối, cả 21 khối ~100–150 ms 🔬. Trên bản dò chỉ được 48,6 ms (bảng trên): nhân thật ghi y bằng `ee.vst.128` rải giữa phần tính, nên cache đã chồng lần nạp dòng y lên phần tính, chỉ chép hàng x còn đứng chờ.
   - LN của stem (255 KB, 24 giá trị một vị trí) chạy theo cụm 16 KB nạp trước cụm sau: LN 28,3 → 27,5 ms, nhưng cả cửa sổ 1 439,5 → 1 442,2 ms vì `StageSum`, `PointwiseS8`, `GroupNormS8` xê 0,4–1,2 ms theo chỗ đặt mới của code và tensor. Lợi nhỏ hơn mức xê ấy, nên bỏ.
 - **Bảng GELU vào `TimeDepthwise`** (28/10): 24 `Gelu` đọc riêng đầu ra của op, op mang `lut` của chúng và tra từng byte lúc chép hàng ra. Khớp từng bit, nhưng `TimeDepthwise` 7,7 → 15,7 ms trong khi `Gelu` chỉ bớt 4,1 ms (5,2 → 1,1 ms); cửa sổ 1 426,6 → 1 432,0 ms. Lượt tra từng byte tốn ~13 chu kỳ một giá trị, op `Gelu` của esp-dl ~4. Bỏ.
-- **Chưa đo:** độ chính xác của b3 sau int8 (thang int8 đang chạy).
+- **Hàng kl, hàng vào sản phẩm** (28/10, ADR-0028): `make ai-unit-speaker
+  RUN=artifacts/speaker/runs/20261027_1a7464c-dirty_92a838 ROW=kl CUTS=0 IN_FLASH=1`, một nhân. Chất lượng sau int8 ở
+  `speaker.md` §7.
+
+  | Đo | Hàng kl |
+  |---|---|
+  | Khớp mô phỏng | lệch 0, 0/192 giá trị |
+  | Một cửa sổ, 10 lần | **1 414,5 ms** trung bình và đỉnh; hàng `timing` cùng mã 1 401,9 ms |
+  | 3 cửa sổ khi nhân 1 ghi NVS 382 lần | 1 567,9 ms, lệch 0 |
+  | Dựng | 3,79 s; PSRAM cho tensor 4 108 656 B, RAM nội 5 352 B, vùng mượn 79 680 B mỗi lần chạy |
 - **Đọc:** đây là số thô. b3 chạy qua các op viết cho hình dạng của b0, chưa có bước nào tối ưu riêng cho nó. b3 có
   2,16 tỉ MAC (`torch.utils.flop_counter`, không tính GroupNorm), b0 0,24 tỉ. 1,61 tỉ nằm trong 19 `ConvBlock`, chạy
   ~0,36 chu kỳ một phép nhân-cộng; khối của b0 ~0,24 (147 triệu MAC trong 146,8 ms). Hai loại conv quá dcache tốn 3,8 s
