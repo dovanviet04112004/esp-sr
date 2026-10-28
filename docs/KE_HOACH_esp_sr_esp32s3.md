@@ -1143,8 +1143,51 @@ Giờ của vòng tăng tốc đo trên cửa sổ 16 khung (`FRAMES=16`, một 
 - Chạy dòng ở bước 3 chỉ giữ vài chục KB mỗi bước, không gặp cảnh ấy.
 - Khớp từng bit vẫn kiểm ở cả hai cửa sổ.
 
-Bước 3 là đường chip trong chuỗi: STFT ở `dsp_spec` đủ bốn bước, CNN chạy dòng, cột cao độ trễ 10 khung cộng 0,4 s nhìn
-sau của chuẩn hoá trong `svc_listen`, và cách chọn cách nghe.
+CNN còn 1,675 ms mỗi hop, khớp từng bit (`measurements/pitch.md` §6). Chủ repo cho sang bước 3 ngày 28/10.
+
+**Bước 3, đường chip.** Năm phần theo thứ tự, mỗi phần qua mốc của nó mới sang phần sau.
+
+3.1 **Front end ở `dsp_spec`** (`dsp_spec/swift_front.{h,c}`, bản soi gương `srpipe.dsp.spec.swift_front`):
+- Mỗi hop nhận 256 mẫu sạch. Khung của hop h căn giữa ở mẫu đầu hop, nên ra khi đã có 1 024 mẫu sau đó: trễ 4 hop.
+- Ba STFT 1 024, 2 048 và 512 điểm, theo thứ tự kênh của mạng, trên FFT cơ số 4 của `dsp_spec`:
+  - cửa sổ Hann tuần hoàn, số 0 trước đầu luồng;
+  - biên độ bằng `sqrtf`;
+  - ma trận dải thưa, mỗi dải cộng các bin theo thứ tự bin tăng;
+  - `ln` của `mel.c` lấy trên tổng ấy cộng 1e-8;
+  - lượng tử int8 theo số mũ đầu vào của CNN, làm tròn về chẵn như ESP-PPQ.
+- Cửa sổ và ma trận dải là bảng của model đã ghim, không có công thức gọn khớp từng bit:
+  - deploy của nhánh `pitch` gói chúng vào ảnh model, thành mục kiểu mới `FRONT` (§6.3);
+  - `ai_engine` trao con trỏ cho `dsp_spec` lúc dựng, nên `dsp_spec` vẫn thuần.
+- Mốc: đủ bốn bước của TỔNG QUAN §5.3.
+  - bản soi gương float32 cùng thứ tự phép với bản C;
+  - bộ vàng `contracts/golden/swift_front/`, có đối chứng âm;
+  - bản C khớp từng bit trên máy tính và trên board;
+  - giờ đo trên board, ghi vào `budget.md`.
+
+3.2 **CNN chạy dòng.**
+- Mỗi lượt nhận S khung mới; S = 16, một bước của `command`.
+- Các op riêng giữ vòng cột của mình qua các lượt, `EspdlNet::reset` xoá chúng.
+- Mỗi op ra những khung đã có đủ khung sau nó: `BandStem` trễ 1 khung, khối 7 × 3 trễ 2, `BandChain` không trễ,
+  `BandHead` trễ 1. Mức trung bình của đầu vào trễ theo cho khớp; nhánh độ tin trễ thêm 1 khung ở conv 1-D.
+- Mốc: khớp từng bit với mô phỏng của đồ thị cửa sổ dài trên cùng các khung; giờ mỗi hop đo lại.
+
+3.3 **Ba chiều cao độ ở chip.**
+- Giải cao độ và độ tin là hậu xử lý của mạng, ở `ai_engine`; bản soi gương là `tasks/pitch/postproc/decode.py`.
+- Ba chiều thang Kaldi của `swift_pitch.features` là xử lý tín hiệu thuần, ở `dsp_spec`:
+  - độ hữu thanh từ độ tin;
+  - log F0 nội suy qua khung không tiếng, chuẩn hoá trên 0,75 s trước và 0,4 s sau;
+  - delta.
+- Mốc: bộ vàng khớp.
+
+3.4 **`svc_listen` và `command`.**
+- Cột cao độ đến muộn hơn log-mel 36 khung: 4 khung của STFT, 7 của CNN, 25 của 0,4 s nhìn sau. Cửa sổ `command` đọc
+  log-mel và cao độ đã thẳng hàng.
+- Quyết định chậm thêm phần trễ vượt 0,4 s `utterance.gap_s`, cỡ 0,18 s. Con số ấy đo lại trên board.
+- `command` dùng run v8 đã học trên cao độ SwiftF0, không giữ chiều nào, với `listen_hash` của front mới trong
+  `contracts/listen.yaml`.
+
+3.5 **Chọn cách nghe:** không cao độ hay SwiftF0, cùng việc bỏ hẳn bộ dò Kaldi. Chủ repo chọn khi đến phần này, trên
+số đo của 3.1–3.4.
 
 **Hướng còn lại**, theo thứ tự, khi các bước trên chưa đủ:
 - mạng nhìn trước tới 0,4 s: board vốn chờ `utterance.gap_s` 0,4 s trước khi chốt câu nên không thêm trễ quyết định;
