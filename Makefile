@@ -49,8 +49,9 @@ FW_DEFAULTS := firmware/sdkconfig.defaults firmware/sdkconfig.defaults.esp32s3 f
 # idf.py only adds options a generated sdkconfig lacks, so one older than its defaults, their list or a Kconfig
 # default is dropped.
 fresh_sdkconfig = if [ -f $(1) ] && [ -n "$$(find $(2) -newer $(1))" ]; then rm $(1); echo "$(1) regenerated"; fi
-# What a test app's sdkconfig is generated from: the bench profile and the app's own defaults.
-app_defaults = firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.bench $(1)/sdkconfig.defaults $(1)/CMakeLists.txt
+# What a test app's sdkconfig is generated from: the bench profile, the app's own defaults, the components' Kconfig.
+app_defaults = firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.bench $(1)/sdkconfig.defaults $(1)/CMakeLists.txt \
+  $(wildcard firmware/components/*/Kconfig)
 
 # Test apps on board B, run by pytest-embedded from the app's folder.
 BENCH_APP := firmware/test_apps/bench_afe
