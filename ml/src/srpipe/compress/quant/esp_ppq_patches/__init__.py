@@ -12,6 +12,7 @@ from collections.abc import Iterator, Sequence
 
 from .base import CHANNEL_STEP, DATA_CACHE_BYTES
 from .layout import (
+    aligned_channels,
     aligned_pointwise,
     cache_sized_convolutions,
     chain_as_one,
@@ -86,6 +87,7 @@ PATCHES = {
     "lean_quantizers": lean_quantizers,
     "unsqueeze_axes_positive": unsqueeze_axes_positive,
     "aligned_pointwise": aligned_pointwise,
+    "aligned_channels": aligned_channels,
     "copies_by_broadcast": copies_by_broadcast,
     "cache_sized_convolutions": cache_sized_convolutions,
     "identity_convolutions_dropped": identity_convolutions_dropped,

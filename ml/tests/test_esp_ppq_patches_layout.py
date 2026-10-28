@@ -280,3 +280,80 @@ def test_unsqueeze_axes_positive_writes_the_axis_unsqueeze_names(tmp_path: Path)
     ((_, (_, plain_axes)),) = [node for node in plain.values() if node[0] == "Unsqueeze"]
     assert plain_tensors[plain_axes].tolist() == [-1] and tensors[axes].tolist() == [3]
     assert all(np.array_equal(tensors[k], v) for k, v in plain_tensors.items() if k != plain_axes)
+
+
+class Trunk(nn.Module):
+    """SwiftF0's trunk in small: a stem from three spectra, a block of two convolutions along the bands with its input
+    added back, and a head of four channels on the lowest bands."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stem = nn.Conv2d(3, 12, 3, padding=1)
+        self.first = nn.Conv2d(12, 12, (3, 1), padding=(2, 0), dilation=(2, 1))
+        self.second = nn.Conv2d(12, 12, (3, 1), padding=(2, 0), dilation=(2, 1))
+        self.head = nn.Conv2d(12, 4, 3, padding=1)
+
+    def block(self, x: torch.Tensor) -> torch.Tensor:
+        x = torch.relu(self.stem(x))
+        return torch.relu(x + self.second(torch.relu(self.first(x))))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.head(self.block(x)[:, :, :6])
+
+
+class TrunkShown(Trunk):
+    """Trunk with its block's output a graph output as well."""
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        y = self.block(x)
+        return self.head(y[:, :, :6]), y
+
+
+def conv_weights(stored: np.ndarray) -> np.ndarray:
+    """A convolution's (outputs, kernel rows, kernel columns, inputs) weights from ESP-PPQ's S3 layout of them."""
+    rows, columns, inputs, outputs = stored.shape
+    return filters(stored).reshape(outputs, rows, columns, inputs)
+
+
+def trunk_weights(net: nn.Module, tmp_path: Path) -> tuple[dict, dict]:
+    """Each convolution's weights and bias of net exported plain and under aligned_channels."""
+    rng = np.random.default_rng(24)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 3, 8, 6)).astype(np.float32)) for _ in range(2)]
+    graph = ptq_espdl.quantize(net.eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"})
+    exported = []
+    for name, patches in (("plain", []), ("padded", ["aligned_channels"])):
+        with esp_ppq_patches.applied(patches):
+            nodes, tensors = espdl_graph(export_espdl.export(graph, tmp_path / f"{name}.espdl"))
+        convs = {k: ins for k, (op, ins) in nodes.items() if op == "Conv"}
+        exported.append({k: (conv_weights(tensors[w]), tensors[b]) for k, (_, w, b) in convs.items()})
+    return exported[0], exported[1]
+
+
+def test_aligned_channels_pads_a_twelve_channel_trunk_with_zero_channels(tmp_path: Path) -> None:
+    torch.manual_seed(11)
+    plain, padded = trunk_weights(Trunk(), tmp_path)
+    shapes = {name: w.shape for name, (w, _) in padded.items()}
+    assert shapes == {
+        "/stem/Conv": (16, 3, 3, 3),
+        "/first/Conv": (16, 3, 1, 16),
+        "/second/Conv": (16, 3, 1, 16),
+        "/head/Conv": (4, 3, 3, 16),
+    }
+    for name, (w, b) in plain.items():
+        w_padded, b_padded = padded[name]
+        outputs, inputs = w.shape[0], w.shape[-1]
+        assert np.array_equal(w_padded[:outputs, ..., :inputs], w) and np.array_equal(b_padded[:outputs], b)
+        assert not w_padded[outputs:].any() and not w_padded[..., inputs:].any() and not b_padded[outputs:].any()
+
+
+def test_aligned_channels_leaves_a_trunk_that_is_also_a_graph_output(tmp_path: Path) -> None:
+    torch.manual_seed(11)
+    plain, padded = trunk_weights(TrunkShown(), tmp_path)
+    shapes = {name: w.shape for name, (w, _) in padded.items()}
+    assert shapes == {
+        "/stem/Conv": (12, 3, 3, 3),
+        "/first/Conv": (16, 3, 1, 12),
+        "/second/Conv": (12, 3, 1, 16),
+        "/head/Conv": (4, 3, 3, 12),
+    }
+    assert all(np.array_equal(padded[name][0], plain[name][0]) for name in ("/stem/Conv", "/head/Conv"))

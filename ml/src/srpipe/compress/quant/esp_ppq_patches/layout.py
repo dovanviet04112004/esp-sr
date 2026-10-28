@@ -1,5 +1,5 @@
 """Export patches that keep esp-dl's own ops: fewer Transposes and quantisers, merged columns, cache-sized slices,
-channel scales, dropped identities, broadcast copies, positive axes."""
+channel scales, dropped identities, broadcast copies, positive axes, channels padded to the vector step."""
 
 from __future__ import annotations
 
@@ -712,3 +712,151 @@ def unsqueeze_axes_positive() -> Iterator[None]:
         yield
     finally:
         EspdlExporter.prepare_graph = prepare
+
+
+def padded_size(channels: int) -> int | None:
+    """The multiple of CHANNEL_STEP channels pads up to when that adds at most a third of them; None when channels
+    is one already or would grow more."""
+    up = -(-channels // CHANNEL_STEP) * CHANNEL_STEP
+    return up if up != channels and 3 * up <= 4 * channels else None
+
+
+def keeps_channels(op, info) -> bool:
+    """op passes every channel of its tensor inputs to its output as it finds it, zero staying zero: a Relu, an Add
+    of two tensors, a RequantizeLinear on one grid about zero, or a Slice along other axes."""
+    tensors = [v for v in op.inputs if not v.is_parameter]
+    if op.type == "Relu":
+        return len(tensors) == 1
+    if op.type == "Add":
+        return len(tensors) == 2 == len(op.inputs)
+    if op.type == "RequantizeLinear":
+        zero = op.inputs[2:3]
+        return len(tensors) == 1 and op.inputs[1].value.numel() == 1 and all(not v.value.any() for v in zero)
+    if op.type == "Slice" and len(op.inputs) > 3 and op.inputs[3].is_parameter:
+        rank = len(laid_shape(op.inputs[0], info))
+        return len(tensors) == 1 and all(int(a) % rank != rank - 1 for a in op.inputs[3].value.tolist())
+    return False
+
+
+def writes_zero_for_zero(op) -> bool:
+    """op is an ungrouped convolution whose zero weights and bias give zero, its activation none or a Relu."""
+    return (
+        op.type == "Conv"
+        and op.attributes.get("group", 1) == 1
+        and op.attributes.get("activation", "Linear") in ("Linear", "Relu")
+    )
+
+
+def channel_region(graph, start, info) -> tuple[set[str], set[str], set[str]] | None:
+    """(variables, writers, readers) around start, a convolution's output: every variable joined to it through ops
+    that keep_channels, the convolutions writing one of them and the ungrouped ones reading one as their input; None
+    when another op writes or reads one, one is a graph output, or one is not laid channels last."""
+    region, writers, readers, todo = set(), set(), set(), [start]
+    while todo:
+        var = todo.pop()
+        if var.name in region:
+            continue
+        perm = info.get_var_permute(var.name)
+        if var.name in graph.outputs or var.source_op is None or not perm or perm[-1] != 1:
+            return None
+        region.add(var.name)
+        source = var.source_op
+        if writes_zero_for_zero(source):
+            writers.add(source.name)
+        elif keeps_channels(source, info):
+            todo += [v for v in source.inputs if not v.is_parameter]
+        else:
+            return None
+        for op in var.dest_ops:
+            if op.type == "Conv" and op.inputs[0] is var and op.attributes.get("group", 1) == 1:
+                readers.add(op.name)
+            elif keeps_channels(op, info):
+                todo += [v for v in op.inputs if not v.is_parameter] + list(op.outputs)
+            else:
+                return None
+    return region, writers, readers
+
+
+def zero_padded(value, axis: int, size: int):
+    """value with zeros appended along axis up to size."""
+    import torch
+
+    shape = list(value.shape)
+    shape[axis] = size - shape[axis]
+    return torch.cat([value, torch.zeros(shape, dtype=value.dtype)], dim=axis)
+
+
+def pad_parameter(op, index: int, axis: int, size: int) -> None:
+    """op's parameter input index padded with zeros along axis up to size, its per-channel grid along with it when
+    it pads the outputs."""
+    param, config = op.inputs[index], op.input_quant_config[index]
+    if len(param.dest_ops) != 1:
+        raise ValueError(f"{op.name}: {param.name} is shared, so padding it would change another op")
+    param.value = zero_padded(param.value, axis, size)
+    if axis == 0 and config.scale is not None and config.scale.dim() > 0:
+        extra = size - config.scale.numel()
+        config.scale = edge_repeated(config.scale, extra)
+        config.offset = edge_repeated(config.offset, extra)
+
+
+def edge_repeated(values, extra: int):
+    """values with its last entry repeated extra times."""
+    import torch
+
+    return torch.cat([values, values[-1:].repeat(extra)])
+
+
+def pad_channels(graph) -> int:
+    """Each channel_region whose channels padded_size pads, padded: its writers' weights and bias and its readers'
+    weights with zero channels, its variables wider by as many. The zero channels stay zero through every op of the
+    region, so the other channels keep their integers; how many regions."""
+    from esp_ppq.IR.quantize import QuantableOperation
+    from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
+
+    info, seen, done = ExporterPatternInfo(), set(), 0
+    for op in list(graph.topological_sort()):
+        if op.type != "Conv" or not isinstance(op, QuantableOperation) or op.outputs[0].name in seen:
+            continue
+        found = channel_region(graph, op.outputs[0], info)
+        if found is None:
+            continue
+        region, writers, readers = found
+        seen |= region
+        channels = laid_shape(op.outputs[0], info)[-1]
+        size = padded_size(channels)
+        if size is None:
+            continue
+        for name in writers:
+            writer = graph.operations[name]
+            for index in range(1, len(writer.inputs)):
+                pad_parameter(writer, index, 0, size)
+        for name in readers:
+            pad_parameter(graph.operations[name], 1, 1, size)
+        for name in region:
+            var = graph.variables[name]
+            var.shape = [size if i == 1 else d for i, d in enumerate(var.shape)]
+        done += 1
+    return done
+
+
+@contextlib.contextmanager
+def aligned_channels() -> Iterator[None]:
+    """esp-dl's S3 convolution kernels take their vector path only when both channel counts are multiples of 16.
+    After the export's layout pass this pads each run of tensors of 12 or 24 channels, joined by Relu, Add,
+    RequantizeLinear and Slice between ungrouped convolutions, to the next multiple with zero channels (pad_channels):
+    the same integers in the real channels, a third more multiply-adds at the vector rate. SwiftF0 (KEHOACH 3.11) on
+    board B: its 12-channel convolutions ran at 2.3 to 3.6 cycles a multiply-add, 96% of 6.74 s a window.
+    """
+    from esp_ppq.parser import espdl_exporter
+
+    reset = espdl_exporter.reset_graph_layout
+
+    def padded(graph):
+        reset(graph)
+        pad_channels(graph)
+
+    espdl_exporter.reset_graph_layout = padded
+    try:
+        yield
+    finally:
+        espdl_exporter.reset_graph_layout = reset
