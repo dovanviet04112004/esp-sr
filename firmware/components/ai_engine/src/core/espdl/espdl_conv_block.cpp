@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/espdl/espdl_loan.hpp"
+#include "core/espdl/espdl_preload.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -201,8 +202,10 @@ class ConvBlock final : public dl::module::Module {
         norm_row(0, dw1, pw1);
         for (int t = 0; t < frames_; t++) {
             load_x(t + 2, xs);
+            preload_rows(t, xs, ys);
             norm_row(t + 1, dw1, pw1);
             output_row(t, dw2, pw2, ys);
+            preload_.finish();
         }
     }
 
@@ -284,6 +287,16 @@ class ConvBlock final : public dl::module::Module {
         }
     }
 
+    // Output row t's bytes, then those load_x reads for row t + 3, into the dcache while the row computes.
+    void preload_rows(int t, const int8_t *xs, const int8_t *ys) noexcept
+    {
+        const int out_values = post_.empty() ? channels_ : post_[kJoinedValues];
+        const int in_values = pre_.empty() ? channels_ : pre_[kJoinedValues];
+        preload_.add(ys + t * width_ * out_values, width_ * out_values);
+        if (t + 3 < frames_) { preload_.add(xs + (t + 3) * width_ * in_values, width_ * in_values); }
+        preload_.pump();
+    }
+
     // The norm's output at row t, from the first depthwise and pointwise; zeros past the frames, as padding
     // is.
     void norm_row(int t, const int8_t *dw1, const int8_t *pw1) noexcept
@@ -300,6 +313,7 @@ class ConvBlock final : public dl::module::Module {
             norm_run_[kRunPixels] = dw1_run_[kRunPixels];
             ai_engine_dw3x3_row_s8_esp32s3(a_, window, dw1, dw1_run_.data());
             norm_kernel_(slot + at, a_, pw1, norm_run_.data());
+            preload_.pump();
         }
     }
 
@@ -321,6 +335,7 @@ class ConvBlock final : public dl::module::Module {
                 post_kernel_(ys + (t * width_ + f0) * post_[kJoinedValues], out_row_, post_weights_,
                              post_run_.data());
             }
+            preload_.pump();
         }
     }
 
@@ -501,6 +516,7 @@ class ConvBlock final : public dl::module::Module {
     RowKernel pre_kernel_ = nullptr;
     RowKernel post_kernel_ = nullptr;
     bool held_ = false; // inputs held in registers, rows whole: no strips, no loan
+    Preload preload_;
     int strip_ = 0;
     size_t loan_bytes_ = 0; // its weights' bytes; 0 for the unrolled kernels
     size_t ring_bytes_ = 0; // its rings and strip buffer, when they may join the loan
