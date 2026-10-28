@@ -1481,6 +1481,21 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
   | Một cửa sổ, 10 lần | **1 414,5 ms** trung bình và đỉnh; hàng `timing` cùng mã 1 401,9 ms |
   | 3 cửa sổ khi nhân 1 ghi NVS 382 lần | 1 567,9 ms, lệch 0 |
   | Dựng | 3,79 s; PSRAM cho tensor 4 108 656 B, RAM nội 5 352 B, vùng mượn 79 680 B mỗi lần chạy |
+
+- **Hàng kl với RAM nội như firmware sản phẩm** (28/10). `make ai-unit-speaker … LOAN_CAP=49152` giữ RAM nội tới khi
+  khối lớn nhất còn 49 152 B, như sản phẩm lúc nghe (`ram.md` §4). Lệch 0 ở mọi dòng:
+
+  | Vùng mượn | Một cửa sổ, 10 lần | 3 cửa sổ khi nhân 1 ghi NVS |
+  |---|---|---|
+  | không có: vùng tất-cả-hoặc-không xin 79 680 B một khối | 3 424,0 ms | 3 816,8 ms, 920 lần ghi |
+  | 40 944 B: khối lớn nhất, chừa 8 KB | 2 735,3 ms | 3 035,9 ms, 737 lần ghi |
+  | **49 088 B: khối lớn nhất, không chừa** (`AI_ENGINE_LOAN_RESERVE_BYTES` mặc định 0) | **1 870,2 ms** | 3 021,1 ms, 730 lần ghi |
+  | đủ 79 680 B, heap của app thử (trên) | 1 414,5 ms | 1 567,9 ms |
+
+  - Trọng số `ConvBlock` stage 1, ~44 KB, chỉ vừa khi lấy trọn khối, nên 8 KB chừa ra tốn 865 ms.
+  - Khi nhân 1 ghi flash, phần trọng số còn đọc từ flash phải chờ, nên vùng mượn một phần chậm ~3 s ở cả hai cỡ.
+  - Lấy khối 49 088 B mà không chừa thì byte đầu khối 64 B và đệm căn lề phải trừ ra; xin sát khít khối thì
+    `heap_caps_aligned_alloc` thất bại và không cấp được gì.
 - **Đọc:** đây là số thô. b3 chạy qua các op viết cho hình dạng của b0, chưa có bước nào tối ưu riêng cho nó. b3 có
   2,16 tỉ MAC (`torch.utils.flop_counter`, không tính GroupNorm), b0 0,24 tỉ. 1,61 tỉ nằm trong 19 `ConvBlock`, chạy
   ~0,36 chu kỳ một phép nhân-cộng; khối của b0 ~0,24 (147 triệu MAC trong 146,8 ms). Hai loại conv quá dcache tốn 3,8 s
