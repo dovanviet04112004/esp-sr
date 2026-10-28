@@ -620,11 +620,12 @@ ai-unit-ctc: ## Run the ctc build of the ai_engine suite on board B: RUN=<run> R
 # erased. CHAIN=1 puts the deployed speaker there instead and the chain's windows in voice, run from PCM to decision.
 # CORES=2 builds AI_ENGINE_CORES_TWO in a build folder of its own, so switching never reuses the other's sdkconfig.
 SPEAKER_BUILD = build_speaker$(if $(filter 2,$(CORES)),_two)
-ai-unit-speaker: ## Run the speaker build of the ai_engine suite on board B: RUN=<run> ROW=<row of its int8/ladder.yaml> [CUT_RANGE="<first op> <last op>"] [CUTS=<n>] [IN_FLASH=1] [CHAIN=1 [WORKERS=6] | PCM=<int16 .npy>] [CORES=2] (E11-T25, E11-T26, E11-T31, E11-T35)
+ai-unit-speaker: ## Run the speaker build of the ai_engine suite on board B: RUN=<run> ROW=<row of its int8/ladder.yaml> [CUT_RANGE="<first op> <last op>"] [CUTS=<n>] [IN_FLASH=1] [CHAIN=1 [WORKERS=6] | PCM=<int16 .npy>] [CORES=2] [LOAN_CAP=<bytes>] (E11-T25, E11-T26, E11-T31, E11-T35)
 	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.speaker.probe --run $(RUN) --row $(ROW) $(if $(CUT_RANGE),--cut-range $(CUT_RANGE)) $(if $(CUTS),--cuts $(CUTS)) $(if $(IN_FLASH),--in-flash) \
 	  $(if $(CHAIN),--chain) $(if $(PCM),--pcm $(abspath $(PCM))) $(if $(WORKERS),--workers $(WORKERS))
 	@$(call fresh_sdkconfig,$(UNIT_APP)/$(SPEAKER_BUILD)/sdkconfig,$(call app_defaults,$(UNIT_APP)))
-	cd $(UNIT_APP) && rm -f $(SPEAKER_BUILD)/unit.status && idf.py -B $(SPEAKER_BUILD) -D SDKCONFIG=$(SPEAKER_BUILD)/sdkconfig -D UNIT_PROFILE=speaker -D UNIT_CORES=$(or $(CORES),1) build && \
+	cd $(UNIT_APP) && rm -f $(SPEAKER_BUILD)/unit.status && idf.py -B $(SPEAKER_BUILD) -D SDKCONFIG=$(SPEAKER_BUILD)/sdkconfig -D UNIT_PROFILE=speaker -D UNIT_CORES=$(or $(CORES),1) \
+	  -D UNIT_LOAN_CAP=$(or $(LOAN_CAP),0) build && \
 	  $(WRITE_PART) models_0 --input main/probe/speaker_models.bin && \
 	  $(if $(CHAIN),$(WRITE_PART) voice --input main/probe/speaker_chain.bin,$(ERASE_PART) voice) && \
 	  { pytest pytest_unit.py $(ON_BOARD) --build-dir $(SPEAKER_BUILD) -s; echo $$? > $(SPEAKER_BUILD)/unit.status; } 2>&1 \

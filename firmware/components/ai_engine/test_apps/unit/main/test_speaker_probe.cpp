@@ -39,6 +39,8 @@ constexpr uint32_t kLoadGapMs = 10; // between NVS writes, sparing the flash
 constexpr uint32_t kHelperStackBytes = 4096;
 constexpr UBaseType_t kHelperPriority = 1; // phu_task's, under the app's other tasks (KEHOACH 5.2)
 constexpr uint32_t kHelperWaitMs = 100;
+constexpr uint32_t kInternalCaps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+constexpr int kCapBlocksMax = 32; // blocks held to cap internal RAM, at most
 
 // Layout written by srpipe.tasks.speaker.probe; the record's int8 data is padded to four bytes.
 struct WindowsHead {
@@ -172,6 +174,20 @@ int worst_under_flash_writes(ai::EspdlNet &net, const int8_t *x, const int8_t *y
     return worst;
 }
 
+// Internal RAM held until its largest free block is at most cap bytes, as on the product once dsp_afe runs:
+// the count of blocks held.
+int cap_internal(size_t cap, void **held)
+{
+    int n = 0;
+    for (size_t largest = heap_caps_get_largest_free_block(kInternalCaps); largest > cap && n < kCapBlocksMax;
+         largest = heap_caps_get_largest_free_block(kInternalCaps)) {
+        held[n] = heap_caps_malloc(largest - cap, kInternalCaps);
+        if (held[n] == nullptr) { break; }
+        n++;
+    }
+    return n;
+}
+
 } // namespace
 
 TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, timed", "[ai_engine][speaker]")
@@ -200,6 +216,12 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
     TEST_ASSERT_EQUAL(rec.dims, out.elements);
     TEST_ASSERT_EQUAL(rec.input_exponent, in.exponent);
     TEST_ASSERT_EQUAL(rec.output_exponent, out.exponent);
+    void *held[kCapBlocksMax] = {};
+    const int capped = UNIT_LOAN_CAP_BYTES > 0 ? cap_internal(UNIT_LOAN_CAP_BYTES, held) : 0;
+    if (UNIT_LOAN_CAP_BYTES > 0) {
+        printf("%s: internal RAM held in %d blocks, largest free %u B\n", rec.entry, capped,
+               (unsigned)heap_caps_get_largest_free_block(kInternalCaps));
+    }
 
     int worst = 0;
     uint32_t off = 0;
@@ -236,6 +258,9 @@ TEST_CASE("the speaker graph embeds one window as its ESP-PPQ simulation does, t
     const int loaded_worst = worst_under_flash_writes(net, x, y, rec.dims);
     net.release();
     const esp_err_t tested = test_of(blob, true);
+    for (int k = 0; k < capped; k++) {
+        heap_caps_free(held[k]);
+    }
     const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY,
                                                            STORAGE_MODEL_LABEL_SLOT0);
     TEST_ASSERT_NOT_NULL(part);

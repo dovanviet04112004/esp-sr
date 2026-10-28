@@ -33,3 +33,8 @@ idf_component_register(
     EMBED_FILES ${embedded}
     WHOLE_ARCHIVE
 )
+# idf.py -D UNIT_LOAN_CAP=<bytes> leaves the speaker's runs no internal block over that, as on the product (KEHOACH 6.5).
+if(NOT UNIT_LOAN_CAP)
+    set(UNIT_LOAN_CAP 0)
+endif()
+target_compile_definitions(${COMPONENT_LIB} PRIVATE "UNIT_LOAN_CAP_BYTES=${UNIT_LOAN_CAP}")
