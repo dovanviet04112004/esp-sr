@@ -27,6 +27,7 @@ constexpr size_t kSectorBytes = 4096;
 constexpr int kToleranceSteps = 0; // bit for bit, as model->test() asks of int8 (KEHOACH 3.14)
 constexpr int kCutsMax = 16;
 constexpr const char *kEntry = "pitch";
+constexpr const char *kStreamMagic = "SRPS";
 constexpr size_t kPortNameBytes = 32;
 constexpr uint32_t kPortsMax = 4;
 constexpr int64_t kUsPerMs = 1000;
@@ -43,11 +44,24 @@ struct PortRecord {
     uint32_t elements;
     int32_t exponent;
 };
-static_assert(sizeof(ProbeHead) == 16 && sizeof(PortRecord) == 40, "pitch_window.bin layout");
+// The streaming record's port: PortRecord, then the frames the output trails the input.
+struct StreamPortRecord {
+    char name[kPortNameBytes];
+    uint32_t elements; // the whole window's
+    int32_t exponent;
+    int32_t delay;
+};
+static_assert(sizeof(ProbeHead) == 16 && sizeof(PortRecord) == 40 && sizeof(StreamPortRecord) == 44,
+              "pitch_window.bin layout");
 
 struct Port {
     PortRecord rec;
     const int8_t *values; // esp-dl's layout of the tensor
+};
+
+struct StreamPort {
+    StreamPortRecord rec;
+    const int8_t *values; // esp-dl's layout, frames along the whole window
 };
 
 esp_err_t test_of(const ai::Blob &blob, bool profiled)
@@ -78,6 +92,51 @@ uint32_t read_ports(const ProbeHead &head, Port *ports)
         at += sizeof(PortRecord) + (ports[p].rec.elements + 3) / 4 * 4;
     }
     return head.ports;
+}
+
+uint32_t read_stream_ports(const ProbeHead &head, StreamPort *ports)
+{
+    const uint8_t *at = pitch_window_start + sizeof(head);
+    for (uint32_t p = 0; p < head.ports; p++) {
+        memcpy(&ports[p].rec, at, sizeof(StreamPortRecord));
+        TEST_ASSERT_NOT_NULL(memchr(ports[p].rec.name, '\0', kPortNameBytes));
+        ports[p].values = reinterpret_cast<const int8_t *>(at + sizeof(StreamPortRecord));
+        at += sizeof(StreamPortRecord) + (ports[p].rec.elements + 3) / 4 * 4;
+    }
+    return head.ports;
+}
+
+// The window's frames call..call + step into in, [1, bands, step, lanes] of the window's [1, bands, frames,
+// lanes].
+void feed(const ai::Int8Tensor &in, const int8_t *window, uint32_t frames, uint32_t call)
+{
+    const size_t bands = in.dims[1];
+    const size_t step_bytes = in.dims[2] * in.dims[3];
+    for (size_t b = 0; b < bands; b++) {
+        memcpy(in.data + b * step_bytes, window + (b * frames + call) * in.dims[3], step_bytes);
+    }
+}
+
+// Values of out off the window's, delay frames behind the call; first_off takes the earliest frame off.
+uint32_t off_in(const ai::Int8Tensor &out, const StreamPort &port, uint32_t frames, uint32_t call, int *worst,
+                int64_t *first_off)
+{
+    const size_t step = out.dims[out.rank - 1];
+    const size_t rows = out.elements / step;
+    uint32_t off = 0;
+    for (size_t j = 0; j < step; j++) {
+        const int64_t t = static_cast<int64_t>(call + j) - port.rec.delay;
+        if (t < 0) { continue; }
+        for (size_t r = 0; r < rows; r++) {
+            const int diff = abs(out.data[r * step + j] - port.values[r * frames + t]);
+            *worst = diff > *worst ? diff : *worst;
+            if (diff > kToleranceSteps) {
+                off++;
+                *first_off = *first_off < 0 || t < *first_off ? t : *first_off;
+            }
+        }
+    }
+    return off;
 }
 
 } // namespace
@@ -171,12 +230,96 @@ TEST_CASE("the pitch graph runs one window as its ESP-PPQ simulation does, timed
     TEST_ASSERT_LESS_OR_EQUAL(kToleranceSteps, worst);
 }
 
+TEST_CASE("the streaming pitch graph runs a window a few frames a call as its simulation does, timed",
+          "[ai_engine][pitch_stream]")
+{
+    TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, ai_engine_load(0),
+                              "models_0 lacks pitch_models.bin: run make ai-unit-pitch STEP=<frames>");
+    ProbeHead head;
+    memcpy(&head, pitch_window_start, sizeof(head));
+    TEST_ASSERT_EQUAL_MEMORY(kStreamMagic, head.magic, 4);
+    TEST_ASSERT_GREATER_THAN(0, head.runs);
+    TEST_ASSERT_TRUE(head.ports >= 2 && head.ports <= kPortsMax);
+    StreamPort ports[kPortsMax];
+    const uint32_t count = read_stream_ports(head, ports);
+
+    const ai::Blob blob = ai::image_find(kEntry, STORAGE_MODEL_KIND_ESPDL);
+    TEST_ASSERT_NOT_NULL_MESSAGE(blob.data, kEntry);
+    static ai::EspdlNet net;
+    const size_t psram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    TEST_ASSERT_EQUAL(ESP_OK, net.build(blob, kEntry));
+    const size_t psram_bytes = psram_before - heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    const ai::Int8Tensor in = net.input(ports[0].rec.name);
+    TEST_ASSERT_NOT_NULL_MESSAGE(in.data, ports[0].rec.name);
+    TEST_ASSERT_EQUAL(4, in.rank);
+    TEST_ASSERT_EQUAL(ports[0].rec.exponent, in.exponent);
+    const uint32_t step = in.dims[2];
+    TEST_ASSERT_EQUAL(ports[0].rec.elements, in.elements / step * head.frames);
+    TEST_ASSERT_EQUAL(0, head.frames % step);
+    ai::Int8Tensor outs[kPortsMax] = {};
+    for (uint32_t p = 1; p < count; p++) {
+        outs[p] = net.output(ports[p].rec.name);
+        TEST_ASSERT_NOT_NULL_MESSAGE(outs[p].data, ports[p].rec.name);
+        TEST_ASSERT_EQUAL(ports[p].rec.exponent, outs[p].exponent);
+        TEST_ASSERT_EQUAL(ports[p].rec.elements, outs[p].elements / step * head.frames);
+    }
+
+    int worst = 0;
+    uint32_t off = 0;
+    uint32_t port_off[kPortsMax] = {};
+    int64_t first_off[kPortsMax] = {-1, -1, -1, -1};
+    int64_t total_us = 0;
+    int64_t peak_us = 0;
+    for (uint32_t r = 0; r <= head.runs; r++) {
+        net.reset();
+        for (uint32_t call = 0; call < head.frames; call += step) {
+            feed(in, ports[0].values, head.frames, call);
+            const int64_t started_us = esp_timer_get_time();
+            TEST_ASSERT_EQUAL(ESP_OK, net.step());
+            const int64_t took_us = esp_timer_get_time() - started_us;
+            for (uint32_t p = 1; p < count && r == 0; p++) {
+                const uint32_t found = off_in(outs[p], ports[p], head.frames, call, &worst, &first_off[p]);
+                port_off[p] += found;
+                off += found;
+            }
+            // The first pass is untimed: it pays the caches' first fill.
+            if (r > 0) {
+                total_us += took_us;
+                peak_us = took_us > peak_us ? took_us : peak_us;
+            }
+        }
+        vTaskDelay(1);
+    }
+    const int64_t calls = static_cast<int64_t>(head.runs) * (head.frames / step);
+    const int64_t mean_us = total_us / calls;
+    printf("%s: %" PRIu32 " frames, %" PRIu32 " a call: worst |board - simulation| %d, %" PRIu32
+           " values off; %" PRId64 " us mean, %" PRId64 " us peak a call over %" PRId64 " calls, %" PRId64
+           " us a hop; psram %u B with its tensors\n",
+           kEntry, head.frames, step, worst, off, mean_us, peak_us, calls, mean_us / step,
+           (unsigned)psram_bytes);
+    for (uint32_t p = 1; p < count; p++) {
+        printf("%s: %s, %" PRId32 " frames behind: %" PRIu32 " values off, the earliest at frame %" PRId64
+               "\n",
+               kEntry, ports[p].rec.name, ports[p].rec.delay, port_off[p], first_off[p]);
+    }
+    net.release();
+    const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY,
+                                                           STORAGE_MODEL_LABEL_SLOT0);
+    TEST_ASSERT_NOT_NULL(part);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_partition_erase_range(part, 0, kSectorBytes));
+    TEST_ASSERT_LESS_OR_EQUAL(kToleranceSteps, worst);
+}
+
 extern "C" void app_main(void)
 {
     ESP_ERROR_CHECK(sys_storage_init());
     UNITY_BEGIN();
-    // The whole-graph case erases model slot 0 when it ends, so the cuts run first.
-    unity_run_tests_by_tag("[pitch_cuts]", false);
-    unity_run_tests_by_tag("[pitch]", false);
+    if (memcmp(pitch_window_start, kStreamMagic, 4) == 0) {
+        unity_run_tests_by_tag("[pitch_stream]", false);
+    } else {
+        // The whole-graph case erases model slot 0 when it ends, so the cuts run first.
+        unity_run_tests_by_tag("[pitch_cuts]", false);
+        unity_run_tests_by_tag("[pitch]", false);
+    }
     UNITY_END();
 }
