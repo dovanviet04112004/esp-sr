@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import shutil
+import struct
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -18,10 +20,12 @@ import torch
 import yaml
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
+from srpipe.compress.quant.espdl_shapes import attribute
 from srpipe.core import run_dir, splits
 from srpipe.core.audio_io import to_float
 from srpipe.core.config import CONFIGS, ML_ROOT, contract_front, data_paths, load_yaml
 from srpipe.dsp.spec import swift_front
+from srpipe.export import update_lock
 from srpipe.generated import grid
 from srpipe.scenes import device
 from srpipe.tasks.pitch import model
@@ -38,6 +42,10 @@ CALIB_STREAM, ROWS_STREAM = 1, 2  # rng streams of the drawn sessions, beside th
 SILENCE_PEAK = 1e-3  # swift-f0's: a hop peaking under it has confidence 0
 FLOAT_ROW = "float"  # rebuild's row for swift-f0 itself
 STREAM_SUFFIX = "_stream"  # of a rebuilt build whose pitch dims stream as the chip's
+STREAM_PATCH = "band_stream"
+FRONT_FILE = "pitch.front.bin"
+FRONT_HEAD = struct.Struct("<7I")  # storage_model_front_t: bands, points, weights
+NODE = re.compile(r"^  %(?P<outs>\S+(?:, %\S+)*) = (?P<op>\w+)\[(?P<attrs>.*)\]\((?P<ins>.*)\)$", re.M)
 
 
 def sha256(path: Path) -> str:
@@ -331,6 +339,65 @@ def same_int8(cfg: dict, run: Path, paths: dict, against: str, calibration: str 
     return ptq_espdl.same_integers(nets, calib, inputs, rungs, cfg["esp_ppq_patches"])
 
 
+def framed(graph, frames: int) -> None:
+    """Every map of graph over frames frames, the last axis of each as torch exported SwiftF0's network."""
+    (port_in,), _ = ptq_espdl.ports_of(graph)
+    now = graph.inputs[port_in.name].shape[-1]
+    for var in graph.variables.values():
+        if not var.is_parameter and var.shape and var.shape[-1] == now:
+            var.shape = [*var.shape[:-1], frames]
+
+
+def output_delays(info: str, names: list[str]) -> list[int]:
+    """Frames each named output of an exported streaming graph trails its input: the delay of the op its value
+    comes from, back through the ops after it, which read one frame a frame."""
+    made = {o.strip().lstrip("%"): m for m in NODE.finditer(info) for o in m["outs"].split(",")}
+    delays = []
+    for name in names:
+        node = made[name]
+        while attribute(node["attrs"], "delay") is None:
+            node = made[node["ins"].split(",")[0].strip().lstrip("%")]
+        delays.append(attribute(node["attrs"], "delay"))
+    return delays
+
+
+def front_blob(windows: dict[int, np.ndarray], bands: dict[int, np.ndarray]) -> bytes:
+    """The image's FRONT entry (storage_format.h, KEHOACH 6.3): its head, then in swift_front.SIZES's order each
+    spectrum's window, first and count bins and weights, each array padded to 4 bytes."""
+    sparse = {n: swift_front.sparse(bands[n]) for n in swift_front.SIZES}
+    weighted = [len(sparse[n].weights) for n in swift_front.SIZES]
+    out = FRONT_HEAD.pack(swift_front.BANDS, *swift_front.SIZES, *weighted)
+    for n in swift_front.SIZES:
+        for values in (windows[n], sparse[n].first, sparse[n].count, sparse[n].weights):
+            raw = values.astype(values.dtype.newbyteorder("<")).tobytes()
+            out += raw + b"\0" * (-len(raw) % 4)
+    return out
+
+
+def deploy(cfg: dict, run: Path, row: str) -> tuple[Path, Path]:
+    """firmware/models/pitch/: the row's graph exported to stream deploy.step_frames a call under the branch's
+    esp_ppq_patches and band_stream, the front end's tables as a FRONT entry, and the branch's meta.json and lock row
+    with the frames each output trails the graph's input (KEHOACH 3.11 step 3.4)."""
+    step = cfg["deploy"]["step_frames"]
+    graph = export_espdl.load_native(run / INT8_DIR / row / GRAPH_FILE)
+    _, ports_out = ptq_espdl.ports_of(graph)
+    framed(graph, step)
+    work = run / INT8_DIR / row / "deploy"
+    with esp_ppq_patches.applied([*cfg["esp_ppq_patches"], STREAM_PATCH]):
+        built = export_espdl.export(graph, work / f"{BRANCH}.espdl")
+    delays = output_delays(built.with_suffix(".info").read_text(), [p.name for p in ports_out])
+    target = update_lock.MODELS / BRANCH
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(built, target / built.name)
+    (target / FRONT_FILE).write_bytes(front_blob(*front_tables(run / MODEL_FILE)))
+    fields = {"row": row, "step_frames": step, "delays": dict(zip(["logits", "confidence"], delays, strict=True))}
+    files = [
+        update_lock.Deployed(target / built.name, BRANCH, "espdl"),
+        update_lock.Deployed(target / FRONT_FILE, BRANCH, "front"),
+    ]
+    return update_lock.record(BRANCH, run, files, fields)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -346,6 +413,9 @@ def main(argv: list[str] | None = None) -> int:
     again.add_argument("--stream", action="store_true", help="the pitch dims streaming as the chip computes them")
     quick = sub.add_parser("timing", help="the timing row: a quick graph that times the chip as the ladder's rows")
     quick.add_argument("run", type=Path)
+    ship = sub.add_parser("deploy", help="a row exported to stream, with the front end's tables, into firmware/models")
+    ship.add_argument("run", type=Path)
+    ship.add_argument("--row", required=True, help="a row of <run>/int8/ladder.yaml")
     check = sub.add_parser("same-int8", help="whether a rewrite of the network keeps every integer under the rungs")
     check.add_argument("run", type=Path)
     check.add_argument("--against", default="HEAD", help="the commit whose network code the edited one is held to")
@@ -359,6 +429,9 @@ def main(argv: list[str] | None = None) -> int:
             print(path)
     elif args.command == "timing":
         print(timing(cfg, args.run, data_paths()))
+    elif args.command == "deploy":
+        for path in deploy(cfg, args.run, args.row):
+            print(path)
     elif args.command == "same-int8":
         found = same_int8(cfg, args.run, data_paths(), args.against, args.calibration)
         return ptq_espdl.same_int8_verdict(found, args.against)

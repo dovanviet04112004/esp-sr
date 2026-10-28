@@ -18,6 +18,8 @@ quant:                             # make pitch-ptq RUN=: rung 2 of KEHOACH 3.14
   rows_sessions: 16                # val sessions each row is held to float on, drawn with the seed
   calibrations: [kl, percentile, minmax, mse]   # rung 2, one row each, in this order
   check_chunks: 8                  # calibration and val chunks of make pitch-same-int8
+deploy:                            # make pitch-deploy RUN= ROW=: a row into firmware/models/pitch (KEHOACH 3.11 step 3.4)
+  step_frames: 16                  # frames a call of the streaming graph: a command step
 probe:                             # step 2: one row's network on board B over one window (make ai-unit-pitch)
   runs: 10                         # timed runs on the board, after one untimed
   cuts: 4                          # copies of the graph cut at tensors spread over its ops, each model->test()ed

@@ -249,6 +249,9 @@ pitch-rebuild: ## Files of the command build simulated afresh on a row's pitch, 
 	$(PITCH_QUANT) rebuild $(RUN) --row $(ROW) $(if $(FILES),--files $(FILES)) $(if $(WORKERS),--workers $(WORKERS)) \
 	  $(if $(STREAM),--stream)
 
+pitch-deploy: ## A row of the pitch ladder into firmware/models/pitch and models.lock.json, streaming deploy.step_frames a call: RUN=<run> ROW=<row> (E11-T37)
+	$(PITCH_QUANT) deploy $(RUN) --row $(ROW)
+
 pitch-timing: ## Step 2.1 of KEHOACH 3.14's procedure: the timing row into <run>/int8/timing/: RUN=<run>
 	$(PITCH_QUANT) timing $(RUN)
 

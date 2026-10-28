@@ -9,14 +9,12 @@ from __future__ import annotations
 import argparse
 import itertools
 import math
-import re
 import struct
 from pathlib import Path
 
 import numpy as np
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
-from srpipe.compress.quant.espdl_shapes import attribute
 from srpipe.core.config import ML_ROOT, data_paths, load_yaml
 from srpipe.dsp.spec import swift_front
 from srpipe.export import pack_models
@@ -38,8 +36,6 @@ PORT_NAME_BYTES = 32
 # The streaming record: the same head, then each port as PORT followed by the frames it trails the input.
 STREAM_MAGIC = b"SRPS"
 STREAM_PORT = struct.Struct("<32sIii")
-STREAM_PATCH = "band_stream"
-NODE = re.compile(r"^  %(?P<outs>\S+(?:, %\S+)*) = (?P<op>\w+)\[(?P<attrs>.*)\]\((?P<ins>.*)\)$", re.M)
 
 
 def window(cfg: dict, run: Path, paths: dict, frames: int = quant.CHUNK_HOPS) -> np.ndarray:
@@ -82,28 +78,6 @@ def laid_out(values: np.ndarray, dims: tuple[int, ...], raw: bytes) -> bool:
     return layout_of(values, dims, raw) is not None
 
 
-def framed(graph, frames: int) -> None:
-    """Every map of graph over frames frames, the last axis of each as torch exported SwiftF0's network."""
-    (port_in,), _ = ptq_espdl.ports_of(graph)
-    now = graph.inputs[port_in.name].shape[-1]
-    for var in graph.variables.values():
-        if not var.is_parameter and var.shape and var.shape[-1] == now:
-            var.shape = [*var.shape[:-1], frames]
-
-
-def output_delays(info: str, names: list[str]) -> list[int]:
-    """Frames each named output of an exported streaming graph trails its input: the delay of the op its value
-    comes from, back through the ops after it, which read one frame a frame."""
-    made = {o.strip().lstrip("%"): m for m in NODE.finditer(info) for o in m["outs"].split(",")}
-    delays = []
-    for name in names:
-        node = made[name]
-        while attribute(node["attrs"], "delay") is None:
-            node = made[node["ins"].split(",")[0].strip().lstrip("%")]
-        delays.append(attribute(node["attrs"], "delay"))
-    return delays
-
-
 def probe(
     cfg: dict, run: Path, row: str, out: Path, spectra: np.ndarray, span: tuple[int, int] | None = None
 ) -> tuple[Path, Path]:
@@ -114,7 +88,7 @@ def probe(
     folder, patches = run / quant.INT8_DIR / row, cfg["esp_ppq_patches"]
     graph = export_espdl.load_native(folder / quant.GRAPH_FILE)
     (port_in,), ports_out = ptq_espdl.ports_of(graph)
-    framed(graph, spectra.shape[-1])
+    quant.framed(graph, spectra.shape[-1])
     x = ptq_espdl.to_int8(spectra, port_in.exponent).astype(np.float32) * np.float32(2.0**port_in.exponent)
     ys = ptq_espdl.Simulator(graph, patches).run(x)
     with esp_ppq_patches.applied(patches):
@@ -161,16 +135,16 @@ def probe_stream(cfg: dict, run: Path, row: str, out: Path, spectra: np.ndarray,
         raise ValueError(f"{frames} frames are not a whole number of calls of {step}")
     graph = export_espdl.load_native(folder / quant.GRAPH_FILE)
     (port_in,), ports_out = ptq_espdl.ports_of(graph)
-    framed(graph, frames)
+    quant.framed(graph, frames)
     x = ptq_espdl.to_int8(spectra, port_in.exponent).astype(np.float32) * np.float32(2.0**port_in.exponent)
     ys = ptq_espdl.Simulator(graph, patches).run(x)
-    framed(graph, step)
+    quant.framed(graph, step)
     first = x[..., :step]
     firsts = ptq_espdl.Simulator(graph, patches).run(first)
-    with esp_ppq_patches.applied([*patches, STREAM_PATCH]):
+    with esp_ppq_patches.applied([*patches, quant.STREAM_PATCH]):
         espdl = export_espdl.export(graph, folder / f"{ENTRY}.espdl", test_input=first)
     stored = {name: (dims, raw) for name, dims, raw in stored_ports(espdl)}
-    delays = output_delays(espdl.with_suffix(".info").read_text(), [p.name for p in ports_out])
+    delays = quant.output_delays(espdl.with_suffix(".info").read_text(), [p.name for p in ports_out])
     body = b""
     for port, value, value_first, delay in [(port_in, x, first, 0), *zip(ports_out, ys, firsts, delays, strict=True)]:
         dims, raw = stored[port.name]
