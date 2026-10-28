@@ -175,6 +175,7 @@ trên board B, cùng cửa sổ 256 khung như §5, rồi `make ai-profile`.
 | 3, cửa sổ 16 khung | thêm `band_head` | **32,1 ms** | **2,01 ms** | 115 072 B | lệch 0, bốn bản cắt khớp |
 | 4, cửa sổ 16 khung | nhân nhanh cho cột trong | 28,9 ms | 1,81 ms | 115 952 B | lệch 0, bốn bản cắt khớp |
 | 5, cửa sổ 16 khung | thêm `band_stem` | **27,4 ms** | **1,71 ms** | 117 568 B | lệch 0, bốn bản cắt khớp |
+| 6, cửa sổ 16 khung | thêm `band_chain` | **26,8 ms** | **1,675 ms** | 110 000 B | lệch 0, bốn bản cắt khớp |
 
 **Lượt 1, `aligned_channels`** (bước 2.3, bản vá mới): đệm thân 12 kênh lên 16 bằng kênh 0, nên mọi conv của thân
 chạy nhân vector của esp-dl.
@@ -233,3 +234,13 @@ a5 thay vì a3. `BandBlock` 24,6 → 22,1 ms, `BandHead` 3,0 → 2,5 ms.
 **Lượt 5, `band_stem`** (op riêng `BandStem`): mỗi cột vào ba giá trị một dải, xếp lại 16 byte một dải ở RAM nội rồi
 chạy nhân nhanh ba làn. `stem` 3,5 → 1,7 ms. Bảng xếp hạng, 27,2 ms: sáu `BandBlock` 21,8 ms (`blocks.0`, `blocks.5`
 6,4–6,5 ms; `blocks.1`–`blocks.4` 2,0–2,7 ms), `BandHead` 2,6 ms, `BandStem` 1,7 ms, ReduceMean 0,7 ms, còn lại 0,4 ms.
+
+**Lượt 6, `band_chain`** (op riêng `BandChain`): khối 1–4 thành một op, mỗi cột x gom vào RAM nội một lần, cả bốn
+khối chạy trên cột RAM nội. Khối 1–4 chỉ 9,0 → 8,7 ms: ba bản đồ giữa chuỗi tốn ít; phần lớn là việc lặp ở mỗi dải
+ra.
+- Mỗi dải ra của khối một khung tốn ~127 chu kỳ, trong đó chỉ ~45 là nhân-cộng. Phần còn lại là nạp bias vào QACC,
+  làm tròn, nhánh dư và chuỗi phụ thuộc qua QACC.
+- Bảng xếp hạng, 27,0 ms: hai `BandBlock` 12,8 ms (6,4–6,5 ms mỗi khối 7 × 3), `BandChain` 8,7 ms, `BandHead` 2,6 ms,
+  `BandStem` 1,8 ms, ReduceMean 0,7 ms, còn lại 0,4 ms.
+- Sàn của cách tính theo dải: `ee.vsmulas.s8.qacc` dùng 12 trong 16 làn, nên 2,2 triệu phép nhân-cộng thật của thân
+  cần ít nhất ~0,76 ms mỗi hop.
