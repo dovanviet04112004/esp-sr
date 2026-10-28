@@ -213,8 +213,9 @@ khác là phòng thật, micro thật và giọng thật, và tập thu qua boar
 đường không gian) thì sinh lại đặc trưng bằng một lệnh. Nhánh khai `pitch_source` (§3.11) thì ba chiều cao độ do bộ
 dò ấy tính trên cả phiên. Khi chỉ cao độ đổi, `simulate.mel_from` cho bản dựng mới móc cứng log-mel, số của chuỗi và
 danh sách mẫu của bản dựng cùng file split ở phiên bản ấy, rồi chỉ ghi cao độ mới: mô phỏng vẫn chạy lại cả phiên, và
-log-mel tính lại phải trùng từng byte bản cũ, không thì bản dựng dừng. Ổ dữ liệu không đủ chỗ cho bản dựng thứ hai
-(`command/v8` lấy log-mel của `command/v7`, cùng mục).
+log-mel tính lại phải trùng từng byte bản cũ, không thì bản dựng dừng. Ổ dữ liệu chỉ đủ chỗ cho hai bản dựng đầy đủ:
+`command/v8` lấy log-mel của `command/v7`, cùng mục; `command/v9` dựng lại cả bản, vì log-mel của v7 tính trước
+ADR-0020 không còn trùng chuỗi hôm nay.
 
 Nhiễu của chính phòng dùng (TỔNG QUAN V5.3.2) thu bằng `test_apps/capture` (§4.5.7), không thu bằng
 máy khác: đáp ứng của micro là một phần của miền dữ liệu.
@@ -1236,8 +1237,15 @@ SwiftF0 từ phần này.
   4. **`svc_listen`:** mỗi hop đỉnh |PCM| vào vòng đỉnh, rồi `swift_front`; gom 16 khung thì `ai_engine_pitch_run`;
      mỗi khung giải ra, độ tin về 0 khi đỉnh hop của nó dưới ngưỡng im lặng của `swift-f0`, rồi `swift_dims`; ba chiều
      vào vòng cao độ ở ô của hop. Đứt nhịp thì reset cả ba và vòng gom.
-  5. **`command`:** hàng int8 của v8 không gập chiều nào, hiệu chỉnh trên ba chiều chạy dòng; `δ₁`–`δ₃` chọn lại cho
-     hàng ấy (§3.12); deploy với `listen_hash` mới.
+  5. **`command`:** run v8 nghe cao độ của hợp đồng, không gập chiều nào (§3.14, `CONTRACT=v9`):
+     - bản dựng `command/v9`: split trùng từng dòng với v8, mô phỏng lại cả bản bằng front của hợp đồng: log-mel hôm
+       nay, ba chiều SwiftF0 hàng kl chạy dòng như chip, cả các phiên board của `train`;
+     - thang trên bản dựng ấy: bậc 2 với bốn cách hiệu chuẩn, bậc 3 trên cách tốt nhất; mỗi dòng đo lỗi đơn vị trên
+       2 000 câu `test` và Cửa 3 trên các phiên board đã thu, quyết như chip;
+     - `δ₁`–`δ₃` chọn lại cho dòng được chọn (§3.12) trên `val_commands` và `val` của `v9`; deploy với `listen_hash`
+       của hợp đồng;
+     - mốc: Cửa 3 của dòng ấy nhận đúng không kém dòng đang deploy (`int8_kaldi_pitch/percentile`, 163/209 ở δ của
+       thang) quá `quant.gate_tie` câu, và lỗi đơn vị trên `test` thấp hơn của nó (0,434).
   6. **Trên board B:** bản sản phẩm nghe lệnh của chủ repo; đo trễ quyết định, giờ nhân 0 và lệnh nhận đúng.
 
 3.5 **Chọn cách nghe:** chủ repo chọn SwiftF0 cho sản phẩm ngày 29/10, trước số đo của 3.4. Phần còn chờ: xoá hẳn bộ
@@ -1914,13 +1922,18 @@ chuẩn tốt nhất của bậc 2 theo thước ấy. Với `command` `ctc`: đ
 phép đếm trên 112 câu, coi như hoà, và giữa các cách hoà thì lỗi đơn vị trên 2 000 câu thử thấp nhất thắng, rồi ít câu
 nhận nhầm hơn.
 
-Run chạy trên board bằng cao độ khác cao độ nó học (§3.11): mọi bước của thang, ngưỡng và deploy nhận `KALDI=1` và
-`HOLD=<chiều>`. Mạng vào thang đã gập chiều giữ vào trọng số: cột của chiều ấy trong phép chiếu `front.proj` về 0, đúng
-bằng giữ nó ở trung bình lúc học, vì ba chiều cao độ chỉ vào mạng qua phép trung bình theo bước và phép chiếu ấy. Hiệu
-chuẩn, câu thử, `val` và `val_commands` đọc shard của bản dựng `simulate.mel_from` của run: cùng mục, cùng log-mel, cao
-độ Kaldi của hợp đồng; bản dựng có cao độ khác hợp đồng bị từ chối. QAT học trên các shard ấy với chiều giữ ở trung
-bình, nên cột ấy ở 0 suốt lượt. Thống kê chuẩn hoá vẫn là của run. Thang ấy ghi ở `<run>/int8_kaldi_<chiều>/`, tách
-khỏi thang trên cao độ lúc học; deploy ghi `listen_hash` của hợp đồng như mạng học thẳng trên Kaldi.
+Run chạy trên board bằng cao độ khác cao độ nó học (§3.11): mọi bước của thang, ngưỡng và deploy nhận cách nghe ấy;
+thống kê chuẩn hoá vẫn là của run, và mỗi cách nghe một thang riêng, tách khỏi thang trên cao độ lúc học.
+- `CONTRACT=<bản dựng>`: cao độ của hợp đồng (`contracts/listen.yaml`), như chip tính. Hiệu chuẩn, câu thử, `val` và
+  `val_commands` đọc shard của bản dựng ấy: cùng split với bản dựng của run, mô phỏng bằng front của hợp đồng; bản dựng
+  có front khác bị từ chối. Cửa 3 tính cao độ ấy trên các phiên board. Thang ghi ở `<run>/int8_contract_<bản dựng>/`.
+- `KALDI=1`: bộ dò Kaldi của mục `kaldi_pitch`, như board chạy tới 29/10. Shard đọc từ bản dựng `simulate.mel_from` của
+  run: cùng mục, cùng log-mel, cao độ Kaldi. Thang ghi ở `<run>/int8_kaldi_<chiều>/`.
+- `HOLD=<chiều>`: mạng vào thang đã gập chiều giữ vào trọng số: cột của chiều ấy trong phép chiếu `front.proj` về 0,
+  đúng bằng giữ nó ở trung bình lúc học, vì ba chiều cao độ chỉ vào mạng qua phép trung bình theo bước và phép chiếu
+  ấy. QAT học với chiều giữ ở trung bình, nên cột ấy ở 0 suốt lượt.
+
+Deploy ghi `listen_hash` của hợp đồng như mạng học thẳng trên front ấy.
 
 Cấu hình thang nằm ở `configs/models/quant.yaml`, một khối mặc định và một khối ghi đè mỗi nhánh; những gì thang đem ra
 thử (các cách hiệu chuẩn, số lớp int16 mỗi dòng, bước học QAT) nằm ở mục `quant` của config nhánh. Chọn bậc bằng số
