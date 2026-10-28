@@ -1,0 +1,8 @@
+# C dsp_spec/swift_dims against srpipe.dsp.spec.swift_dims, SwiftF0's three Kaldi-scale pitch dims streaming
+# (KEHOACH 3.11 step 3.3): the same float32 steps in order, the POV feature in double as pitch.c takes it, so they match
+# bit for bit. out holds each push's dims of the frame right_frames back, zeros until one is due. case_neg_* gives them
+# one frame late and must fall outside these limits.
+tensors:
+  out:
+    max_abs: 0.0
+    min_snr_db: 0.0

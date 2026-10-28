@@ -13,8 +13,9 @@ from pathlib import Path
 import numpy as np
 import scipy.signal
 
+from srpipe.core.config import CONFIGS, front_of, load_yaml
 from srpipe.dsp.afe import agc, balance, bss, chain, doa, gsc, hpf, ns_omlsa, vad
-from srpipe.dsp.spec import mel, pitch, spk_fbank, stft, swift_front
+from srpipe.dsp.spec import mel, pitch, spk_fbank, stft, swift_dims, swift_front
 from srpipe.generated import afe, array, grid, listen
 from srpipe.golden.gold import write_gold
 
@@ -55,6 +56,8 @@ GSC_HOPS = 64
 GSC_LEARN_HOPS = 16
 BSS_JITTER_STEPS = 2  # doa's grid steps an angle wanders off its talker
 PITCH_HOPS = 96
+SWIFT_DIMS_FRAMES = 200
+PITCH_SOURCE_CONFIG = CONFIGS / "models" / "command_ctc.yaml"  # its pitch_source: SwiftF0's
 PITCH_WINDOW_HOPS = 300  # past ballast_window_s: the ring of the ballast turns
 PITCH_RESET_HOP = 60
 LSB = 1.0 / 32768.0
@@ -259,6 +262,74 @@ def swift_front_case(pcm: np.ndarray, reset: np.ndarray, tables: tuple) -> dict[
         tensors[f"count_{s}"] = bands[n].count.astype(np.int32)
         tensors[f"weights_{s}"] = bands[n].weights
     return tensors
+
+
+def swift_dims_config() -> swift_dims.DimsConfig:
+    """The dims of the command branch's pitch_source, with listen.yaml's left context and scales."""
+    return swift_dims.DimsConfig.of(front_of(load_yaml(PITCH_SOURCE_CONFIG))["pitch"])
+
+
+def swift_dims_case(log_f0: np.ndarray, confidence: np.ndarray, reset: np.ndarray, cfg) -> dict[str, np.ndarray]:
+    """The config, a stream of frames with the frames it is reset ahead of, and what dsp_spec_swift_dims_push gives at
+    each: the dims of the frame right_frames back, zeros until one is due, and whether one came out."""
+    frames = len(log_f0)
+    out = np.zeros((frames, swift_dims.DIMS), np.float32)
+    ready = np.zeros(frames, np.uint8)
+    starts = [*np.flatnonzero(reset[1:]) + 1]
+    for lo, hi in zip([0, *starts], [*starts, frames], strict=True):
+        given = swift_dims.dims(log_f0[lo:hi], confidence[lo:hi], cfg)
+        due = np.arange(lo + cfg.right_frames, hi)
+        out[due], ready[due] = given[due - lo - cfg.right_frames], 1
+    return {
+        "log_f0": log_f0.astype(np.float32),
+        "confidence": confidence.astype(np.float32),
+        "reset": reset.astype(np.uint8),
+        "config_f": np.array([cfg.confidence, cfg.pov_scale, cfg.pitch_scale, cfg.delta_scale], np.float32),
+        "config_i": np.array([cfg.left_frames, cfg.right_frames], np.int32),
+        "out": out,
+        "ready": ready,
+    }
+
+
+def emit_swift_dims(root: Path) -> list[Path]:
+    """Syllables split by short gaps, a gap past the look-ahead, a stream voiceless for its first 80 frames, and noise
+    reset halfway, SWIFT_DIMS_FRAMES frames each; then a negative control whose dims come one frame late."""
+    rng = np.random.default_rng(41)
+    cfg = swift_dims_config()
+    n = SWIFT_DIMS_FRAMES
+    no_reset = np.zeros(n, np.uint8)
+    halfway = no_reset.copy()
+    halfway[n // 2] = 1
+
+    def syllables(gaps: list[int]) -> tuple[np.ndarray, np.ndarray]:
+        voiced = np.zeros(n, bool)
+        at = 20
+        for gap in gaps:
+            voiced[at : at + 18] = True
+            at += 18 + gap
+        hz = 120.0 * np.exp(0.3 * np.sin(np.arange(n) / 9.0)) * (1.0 + 0.02 * rng.standard_normal(n))
+        sure = np.where(voiced, rng.uniform(0.55, 0.98, n), rng.uniform(0.0, 0.45, n))
+        return np.log(hz).astype(np.float32), sure.astype(np.float32)
+
+    voiceless_lead = syllables([6, 4, 9, 6])
+    voiceless_lead[1][:100] = rng.uniform(0.0, 0.45, 100).astype(np.float32)
+    cases = {
+        "case_000": swift_dims_case(*syllables([6, 4, 9, 6, 5, 8]), no_reset, cfg),
+        "case_001": swift_dims_case(*syllables([60, 50]), no_reset, cfg),
+        "case_002": swift_dims_case(*voiceless_lead, no_reset, cfg),
+        "case_003": swift_dims_case(
+            rng.uniform(3.5, 6.0, n).astype(np.float32), rng.uniform(0.0, 1.0, n).astype(np.float32), halfway, cfg
+        ),
+    }
+    negative = swift_dims_case(*syllables([6, 4, 9, 6, 5, 8]), no_reset, cfg)
+    negative["out"] = np.concatenate([np.zeros_like(negative["out"][:1]), negative["out"][:-1]])
+    cases["case_neg_000"] = negative
+    written = []
+    for name, tensors in cases.items():
+        path = root / "swift_dims" / f"{name}.gold"
+        write_gold(path, tensors)
+        written.append(path)
+    return written
 
 
 def emit_swift_front(root: Path) -> list[Path]:
@@ -1252,6 +1323,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=GOLDEN_ROOT)
     args = parser.parse_args()
     emitted = emit_stft(args.out) + emit_mel(args.out) + emit_spk_fbank(args.out) + emit_swift_front(args.out)
+    emitted += emit_swift_dims(args.out)
     emitted += emit_chain(args.out) + emit_chain_modules(args.out) + emit_chain_bss(args.out)
     emitted += emit_hpf(args.out) + emit_balance(args.out) + emit_vad(args.out) + emit_agc(args.out)
     emitted += emit_doa(args.out) + emit_gsc(args.out) + emit_bss(args.out) + emit_pitch(args.out, pitch_config())
