@@ -9,8 +9,9 @@
 #include "app_err.h"
 #include "dsp_spec/fft.h"
 #include "dsp_spec/mel.h"
-#include "dsp_spec/pitch.h"
 #include "dsp_spec/stft.h"
+#include "dsp_spec/swift_dims.h"
+#include "dsp_spec/swift_front.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -20,7 +21,8 @@
 #include "storage_format.h"
 #include "sys_storage.h"
 
-#define FEATURES (GEN_LISTEN_N_BANDS + DSP_SPEC_PITCH_FEATURES)
+#define FEATURES (GEN_LISTEN_N_BANDS + DSP_SPEC_SWIFT_DIMS)
+#define FRONT_VALUES (DSP_SPEC_SWIFT_FRONT_SPECTRA * DSP_SPEC_SWIFT_FRONT_BANDS)
 #define WINDOWS_MAX 4
 // A queued window whose first hop the ring passes is dropped, never read torn.
 #define RING_HOPS 512
@@ -48,7 +50,7 @@ typedef struct {
 } window_t;
 
 typedef struct {
-    void *fft, *stft, *mel, *pitch;
+    void *fft, *stft, *mel, *front, *dims;
 } workspaces_t;
 
 typedef struct {
@@ -87,11 +89,19 @@ static struct {
     bool ready;
     dsp_spec_stft_t *stft;
     dsp_spec_mel_t *mel;
-    dsp_spec_pitch_t *pitch;
+    dsp_spec_swift_front_t *front; // NULL without a pitch in the image: the pitch dims stay 0
+    dsp_spec_swift_dims_t *dims;
+    float *batch;          // a call's front frames, FRONT_VALUES each
+    float *log_f0, *sure;  // a call's decoded frames
+    uint16_t *peaks;       // each hop's |PCM| peak, at its ring slot
+    size_t step, filled;   // front frames a network call takes; those in batch
+    uint32_t right;        // frames swift_dims waits for
+    uint32_t stream_first; // the hop the pitch stream restarted at
+    uint32_t pitch_seq;    // the newest hop whose pitch dims are in the ring
     float *hop;
     dsp_spec_cplx_t *bins;
     float (*log_mel)[GEN_LISTEN_N_BANDS];
-    float (*pitch_ring)[DSP_SPEC_PITCH_FEATURES];
+    float (*pitch_ring)[DSP_SPEC_SWIFT_DIMS];
     table_t tables[2]; // the one in use, and a spare to read a new set into
     size_t active;
     lang_vi_dialect_t dialects;
@@ -201,6 +211,9 @@ static void release(workspaces_t *w)
                             s.bins,
                             s.log_mel,
                             s.pitch_ring,
+                            s.batch,
+                            s.log_f0,
+                            s.peaks,
                             s.tables[0].units,
                             s.tables[0].ids,
                             s.tables[0].lexicon,
@@ -210,7 +223,8 @@ static void release(workspaces_t *w)
                             w->fft,
                             w->stft,
                             w->mel,
-                            w->pitch};
+                            w->front,
+                            w->dims};
     for (size_t i = 0; i < sizeof(blocks) / sizeof(blocks[0]); i++) {
         heap_caps_free(blocks[i]);
     }
@@ -218,25 +232,50 @@ static void release(workspaces_t *w)
     atomic_store(&s_diverting, false);
 }
 
+// SwiftF0's front end and dims over the tables and the call size of the image's pitch (KEHOACH 3.11
+// step 3.4).
+static esp_err_t pitch_front(workspaces_t *w)
+{
+    if (!ai_engine_has(AI_ENGINE_MODEL_PITCH)) {
+        ESP_LOGW(TAG, "no pitch in the image: the pitch dims stay 0");
+        return ESP_OK;
+    }
+    const dsp_spec_swift_dims_config_t dims_cfg = GEN_LISTEN_SWIFT_DIMS_CONFIG;
+    const size_t front_bytes = dsp_spec_swift_front_workspace_bytes();
+    const size_t dims_bytes = dsp_spec_swift_dims_workspace_bytes(&dims_cfg);
+    s.step = ai_engine_pitch_frames();
+    s.right = (uint32_t)dims_cfg.right_frames;
+    w->front = take(front_bytes);
+    w->dims = take(dims_bytes);
+    s.batch = take(s.step * FRONT_VALUES * sizeof(float));
+    s.log_f0 = take(2 * s.step * sizeof(float));
+    s.peaks = take(RING_HOPS * sizeof(*s.peaks));
+    if (w->front == NULL || w->dims == NULL || s.batch == NULL || s.log_f0 == NULL || s.peaks == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    s.sure = s.log_f0 + s.step;
+    dsp_spec_swift_front_tables_t tables[DSP_SPEC_SWIFT_FRONT_SPECTRA];
+    esp_err_t err = ai_engine_pitch_tables(tables);
+    if (err == ESP_OK) { err = dsp_spec_swift_front_init(&s.front, tables, w->front, front_bytes); }
+    if (err == ESP_OK) { err = dsp_spec_swift_dims_init(&s.dims, &dims_cfg, w->dims, dims_bytes); }
+    return err;
+}
+
 static esp_err_t front_end(workspaces_t *w)
 {
     const dsp_spec_mel_config_t mel_cfg = GEN_LISTEN_MEL_CONFIG;
-    const dsp_spec_pitch_config_t pitch_cfg = GEN_LISTEN_KALDI_PITCH_CONFIG;
     const size_t fft_bytes = dsp_spec_fft_workspace_bytes(GEN_GRID_FFT_SIZE);
     const size_t stft_bytes = dsp_spec_stft_workspace_bytes();
     const size_t mel_bytes = dsp_spec_mel_workspace_bytes(&mel_cfg);
-    const size_t pitch_bytes = dsp_spec_pitch_workspace_bytes(&pitch_cfg);
     w->fft = take(fft_bytes);
     w->stft = take(stft_bytes);
     w->mel = take(mel_bytes);
-    w->pitch = take(pitch_bytes);
-    if (w->fft == NULL || w->stft == NULL || w->mel == NULL || w->pitch == NULL) { return ESP_ERR_NO_MEM; }
+    if (w->fft == NULL || w->stft == NULL || w->mel == NULL) { return ESP_ERR_NO_MEM; }
     dsp_spec_fft_t *fft = NULL;
     esp_err_t err = dsp_spec_fft_init(&fft, GEN_GRID_FFT_SIZE, w->fft, fft_bytes);
     if (err == ESP_OK) { err = dsp_spec_stft_init(&s.stft, fft, w->stft, stft_bytes); }
     if (err == ESP_OK) { err = dsp_spec_mel_init(&s.mel, &mel_cfg, w->mel, mel_bytes); }
-    if (err == ESP_OK) { err = dsp_spec_pitch_init(&s.pitch, &pitch_cfg, w->pitch, pitch_bytes); }
-    return err;
+    return err == ESP_OK ? pitch_front(w) : err;
 }
 
 static bool well_formed(const svc_listen_commands_t *c)
@@ -423,13 +462,71 @@ static void extend_open(uint32_t seq)
     }
 }
 
+static void pitch_restart(uint32_t seq)
+{
+    s.stream_first = seq;
+    s.pitch_seq = seq - 1;
+    s.filled = 0;
+    if (s.front == NULL) { return; }
+    dsp_spec_swift_front_reset(s.front);
+    dsp_spec_swift_dims_reset(s.dims);
+    ai_engine_pitch_reset();
+}
+
+static bool pitched(uint32_t hop)
+{
+    return (int32_t)(s.pitch_seq - hop) >= 0;
+}
+
+// A call's decoded frames, gated by their hops' peaks as swift-f0 gates them, through swift_dims; each
+// frame's dims land at the slot of the hop right frames back. Its last front frame is seq's, DELAY_HOPS back.
+static esp_err_t pitch_call(uint32_t seq)
+{
+    esp_err_t err = ai_engine_pitch_run(s.batch, s.log_f0, s.sure);
+    const uint32_t first =
+        seq - DSP_SPEC_SWIFT_FRONT_DELAY_HOPS - (uint32_t)(s.step - 1) - (uint32_t)ai_engine_pitch_delay();
+    for (size_t j = 0; err == ESP_OK && j < s.step; j++) {
+        const uint32_t hop = first + (uint32_t)j;
+        if ((int32_t)(hop - s.stream_first) < 0) { continue; }
+        const bool silent = (float)s.peaks[hop % RING_HOPS] / PCM_FULL_SCALE < GEN_LISTEN_PITCH_SILENCE_PEAK;
+        float dims[DSP_SPEC_SWIFT_DIMS];
+        bool given = false;
+        err = dsp_spec_swift_dims_push(s.dims, s.log_f0[j], silent ? 0.0f : s.sure[j], dims, &given);
+        if (err != ESP_OK || !given) { continue; }
+        s.pitch_seq = hop - s.right;
+        memcpy(s.pitch_ring[s.pitch_seq % RING_HOPS], dims, sizeof(dims));
+    }
+    return err;
+}
+
+// SwiftF0 a hop at a time; without a pitch in the image the hop's pitch dims are 0 at once (KEHOACH 3.11).
+static esp_err_t pitch_hop(const int16_t *pcm, uint32_t seq)
+{
+    if (s.front == NULL) {
+        memset(s.pitch_ring[seq % RING_HOPS], 0, sizeof(s.pitch_ring[0]));
+        s.pitch_seq = seq;
+        return ESP_OK;
+    }
+    uint16_t peak = 0;
+    for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
+        const uint16_t magnitude = (uint16_t)(pcm[i] < 0 ? -(int32_t)pcm[i] : pcm[i]);
+        peak = magnitude > peak ? magnitude : peak;
+    }
+    s.peaks[seq % RING_HOPS] = peak;
+    bool ready = false;
+    const esp_err_t err = dsp_spec_swift_front_push(s.front, pcm, s.batch + s.filled * FRONT_VALUES, &ready);
+    if (err != ESP_OK || !ready || ++s.filled < s.step) { return err; }
+    s.filled = 0;
+    return pitch_call(seq);
+}
+
 esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
 {
     if (!s.ready) { return ESP_ERR_INVALID_STATE; }
     if (pcm == NULL) { return ESP_ERR_INVALID_ARG; }
     if (!s.started || seq != s.next_seq || gap) {
         dsp_spec_stft_reset(s.stft);
-        dsp_spec_pitch_reset(s.pitch);
+        pitch_restart(seq);
         hole_open();
         s.in_run = false;
         s.after = seq;
@@ -441,7 +538,7 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
     to_float(pcm, s.hop);
     esp_err_t err = dsp_spec_stft_analyze(s.stft, s.hop, s.bins);
     if (err == ESP_OK) { err = dsp_spec_mel_log(s.mel, s.bins, s.log_mel[slot]); }
-    if (err == ESP_OK) { err = dsp_spec_pitch_frame(s.pitch, s.hop, s.pitch_ring[slot]); }
+    if (err == ESP_OK) { err = pitch_hop(pcm, seq); }
     if (err != ESP_OK) { return err; }
     if (s.in_run && seq - s.run_last > GEN_LISTEN_UTTERANCE_GAP_HOPS) { close_utterance(); }
     if (vad) {
@@ -463,7 +560,11 @@ bool svc_listen_pending(void)
 {
     if (!s.ready || s.count == 0) { return false; }
     const window_t *w = &s.queue[s.head];
-    return workable(w) && (!w->open || !s.working || s.at <= w->last);
+    const uint32_t next = s.working ? s.at : w->first;
+    // A hop is worked once its pitch dims are in, 35 frames or more after its log-mel (KEHOACH 3.11
+    // step 3.4).
+    const bool due = w->holed || (s.working && s.at > w->last) || pitched(next);
+    return workable(w) && (!w->open || !s.working || s.at <= w->last) && due;
 }
 
 bool svc_listen_busy(void)
@@ -549,6 +650,7 @@ bool svc_listen_work(svc_listen_decision_t *out)
         s.work_us = 0;
     }
     if (s.at <= w->last) {
+        if (!pitched(s.at)) { return false; }
         const size_t slot = s.at % RING_HOPS;
         float features[FEATURES];
         memcpy(features, s.log_mel[slot], sizeof(s.log_mel[slot]));
