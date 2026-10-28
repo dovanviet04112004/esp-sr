@@ -2,6 +2,7 @@
 
 #include "core/espdl/ops/espdl_attention.hpp"
 #include "core/espdl/ops/espdl_band_block.hpp"
+#include "core/espdl/ops/espdl_band_chain.hpp"
 #include "core/espdl/ops/espdl_band_head.hpp"
 #include "core/espdl/ops/espdl_band_stem.hpp"
 #include "core/espdl/ops/espdl_conv_block.hpp"
@@ -41,6 +42,7 @@ void register_espdl_ops() noexcept
     creator->register_module("BandBlock", band_block_from);
     creator->register_module("BandHead", band_head_from);
     creator->register_module("BandStem", band_stem_from);
+    creator->register_module("BandChain", band_chain_from);
 }
 
 } // namespace ai
