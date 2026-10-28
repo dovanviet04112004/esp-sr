@@ -9,12 +9,14 @@
 #include "core/espdl_net.hpp"
 #include "core/model_image.hpp"
 #include "dl_model_base.hpp"
+#include "dsp_spec/swift_front.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_partition.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "gen_grid.h"
 #include "storage_format.h"
 #include "sys_storage.h"
 #include "unity.h"
@@ -28,6 +30,7 @@ constexpr int kToleranceSteps = 0; // bit for bit, as model->test() asks of int8
 constexpr int kCutsMax = 16;
 constexpr const char *kEntry = "pitch";
 constexpr const char *kStreamMagic = "SRPS";
+constexpr const char *kChainMagic = "SRPC";
 constexpr size_t kPortNameBytes = 32;
 constexpr uint32_t kPortsMax = 4;
 constexpr int64_t kUsPerMs = 1000;
@@ -53,6 +56,16 @@ struct StreamPortRecord {
 };
 static_assert(sizeof(ProbeHead) == 16 && sizeof(PortRecord) == 40 && sizeof(StreamPortRecord) == 44,
               "pitch_window.bin layout");
+
+// The chain record: then the hops' int16 samples, then the checked frames' float32 ln Hz and confidence.
+struct ChainHead {
+    char magic[4];
+    uint32_t runs;
+    uint32_t hops;
+    uint32_t checked; // decoded frames held to the mirror
+    uint32_t delay;   // frames they trail the front's
+};
+static_assert(sizeof(ChainHead) == 20, "pitch_window.bin chain layout");
 
 struct Port {
     PortRecord rec;
@@ -310,12 +323,116 @@ TEST_CASE("the streaming pitch graph runs a window a few frames a call as its si
     TEST_ASSERT_LESS_OR_EQUAL(kToleranceSteps, worst);
 }
 
+// Frames whose bits differ from want's, at frames delay behind the calls' first front frame, up to checked.
+uint32_t chain_off(const float *got, const float *want, size_t step, int64_t first, uint32_t checked,
+                   uint32_t *seen)
+{
+    uint32_t off = 0;
+    for (size_t j = 0; j < step; j++) {
+        const int64_t t = first + static_cast<int64_t>(j);
+        if (t < 0 || t >= checked) { continue; }
+        off += memcmp(&got[j], &want[t], sizeof(float)) != 0;
+        (*seen)++;
+    }
+    return off;
+}
+
+TEST_CASE("PCM through SwiftF0's front end, streaming network and decode as the mirror chain, timed",
+          "[ai_engine][pitch_chain]")
+{
+    TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, ai_engine_load(0),
+                              "models_0 lacks pitch_models.bin: run make ai-unit-pitch CHAIN=1");
+    TEST_ASSERT_TRUE_MESSAGE(ai_engine_has(AI_ENGINE_MODEL_PITCH), "no pitch branch built over the image");
+    ChainHead head;
+    memcpy(&head, pitch_window_start, sizeof(head));
+    TEST_ASSERT_EQUAL_MEMORY(kChainMagic, head.magic, 4);
+    const int16_t *pcm = reinterpret_cast<const int16_t *>(pitch_window_start + sizeof(head));
+    const float *want_log_f0 = reinterpret_cast<const float *>(pcm + head.hops * GEN_GRID_HOP_SAMPLES);
+    const float *want_sure = want_log_f0 + head.checked;
+    const size_t step = ai_engine_pitch_frames();
+    TEST_ASSERT_GREATER_THAN(0, step);
+    TEST_ASSERT_EQUAL(head.delay, ai_engine_pitch_delay());
+    dsp_spec_swift_front_tables_t tables[DSP_SPEC_SWIFT_FRONT_SPECTRA];
+    TEST_ASSERT_EQUAL(ESP_OK, ai_engine_pitch_tables(tables));
+    const size_t bytes = dsp_spec_swift_front_workspace_bytes();
+    const size_t frame_values = DSP_SPEC_SWIFT_FRONT_SPECTRA * DSP_SPEC_SWIFT_FRONT_BANDS;
+    void *mem = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
+    float *batch =
+        static_cast<float *>(heap_caps_malloc(step * frame_values * sizeof(float), MALLOC_CAP_SPIRAM));
+    float *log_f0 = static_cast<float *>(malloc(2 * step * sizeof(float)));
+    TEST_ASSERT_TRUE(mem != nullptr && batch != nullptr && log_f0 != nullptr);
+    float *sure = log_f0 + step;
+    dsp_spec_swift_front_t *front = nullptr;
+    TEST_ASSERT_EQUAL(ESP_OK, dsp_spec_swift_front_init(&front, tables, mem, bytes));
+
+    uint32_t off = 0;
+    uint32_t seen = 0;
+    int64_t front_us = 0;
+    int64_t front_peak_us = 0;
+    int64_t run_us = 0;
+    int64_t run_peak_us = 0;
+    int64_t hops_timed = 0;
+    int64_t calls_timed = 0;
+    for (uint32_t r = 0; r <= head.runs; r++) {
+        dsp_spec_swift_front_reset(front);
+        ai_engine_pitch_reset();
+        size_t filled = 0;
+        int64_t taken = 0;
+        for (uint32_t h = 0; h < head.hops; h++) {
+            bool ready = false;
+            const int64_t front_from_us = esp_timer_get_time();
+            TEST_ASSERT_EQUAL(ESP_OK, dsp_spec_swift_front_push(front, pcm + h * GEN_GRID_HOP_SAMPLES,
+                                                                batch + filled * frame_values, &ready));
+            const int64_t front_took_us = esp_timer_get_time() - front_from_us;
+            // The first pass is untimed: it pays the caches' first fill.
+            if (r > 0) {
+                front_us += front_took_us;
+                front_peak_us = front_took_us > front_peak_us ? front_took_us : front_peak_us;
+                hops_timed++;
+            }
+            if (!ready || ++filled < step) { continue; }
+            const int64_t run_from_us = esp_timer_get_time();
+            TEST_ASSERT_EQUAL(ESP_OK, ai_engine_pitch_run(batch, log_f0, sure));
+            const int64_t run_took_us = esp_timer_get_time() - run_from_us;
+            if (r > 0) {
+                run_us += run_took_us;
+                run_peak_us = run_took_us > run_peak_us ? run_took_us : run_peak_us;
+                calls_timed++;
+            } else {
+                const int64_t first = taken - static_cast<int64_t>(head.delay);
+                off += chain_off(log_f0, want_log_f0, step, first, head.checked, &seen);
+                off += chain_off(sure, want_sure, step, first, head.checked, &seen);
+            }
+            taken += static_cast<int64_t>(step);
+            filled = 0;
+        }
+        vTaskDelay(1);
+    }
+    printf("%s chain: %" PRIu32 " hops, %u a call: %" PRIu32 " of %" PRIu32 " values off; front %" PRId64
+           " us mean, %" PRId64 " us peak a hop; network and decode %" PRId64 " us mean, %" PRId64
+           " us peak a call, %" PRId64 " us a hop\n",
+           kEntry, head.hops, (unsigned)step, off, seen, front_us / (hops_timed ? hops_timed : 1),
+           front_peak_us, run_us / (calls_timed ? calls_timed : 1), run_peak_us,
+           run_us / (calls_timed ? calls_timed : 1) / static_cast<int64_t>(step));
+    heap_caps_free(mem);
+    heap_caps_free(batch);
+    free(log_f0);
+    const esp_partition_t *part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY,
+                                                           STORAGE_MODEL_LABEL_SLOT0);
+    TEST_ASSERT_NOT_NULL(part);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_partition_erase_range(part, 0, kSectorBytes));
+    TEST_ASSERT_EQUAL(2 * head.checked, seen);
+    TEST_ASSERT_EQUAL(0, off);
+}
+
 extern "C" void app_main(void)
 {
     ESP_ERROR_CHECK(sys_storage_init());
     UNITY_BEGIN();
     if (memcmp(pitch_window_start, kStreamMagic, 4) == 0) {
         unity_run_tests_by_tag("[pitch_stream]", false);
+    } else if (memcmp(pitch_window_start, kChainMagic, 4) == 0) {
+        unity_run_tests_by_tag("[pitch_chain]", false);
     } else {
         // The whole-graph case erases model slot 0 when it ends, so the cuts run first.
         unity_run_tests_by_tag("[pitch_cuts]", false);
