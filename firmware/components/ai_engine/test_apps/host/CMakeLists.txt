@@ -1,5 +1,5 @@
 # ai_engine on the host with plain CMake: the C++ sources behind the C facade, called from a C test over the
-# ESP-IDF header shims of dsp_spec's host test (KEHOACH 4.5.7); and the kws, ctc and rnnt decisions and speaker scoring against contracts/golden through
+# ESP-IDF header shims of dsp_spec's host test (KEHOACH 4.5.7); and the kws, ctc and rnnt decisions, speaker scoring and pitch decoding against contracts/golden through
 # the parity comparators, alone with AI_ENGINE_HOST_PARITY_ONLY, which needs no OpenSSL (make parity-host).
 cmake_minimum_required(VERSION 3.16)
 project(ai_engine_host C CXX)
@@ -11,8 +11,9 @@ set(PARITY "${FIRMWARE}/test_apps/parity/main")
 set(REPORT "${FIRMWARE}/test_apps/components/test_report")
 add_executable(ai_engine_parity_host main/parity_host.c "${ENGINE}/src/command_kws/decide.c"
     "${ENGINE}/src/command_ctc/ctc_score.c" "${ENGINE}/src/command_rnnt/rnnt_search.c" "${ENGINE}/src/speaker/score.c"
-    "${PARITY}/parity_common.c" "${PARITY}/parity_command_kws.c" "${PARITY}/parity_command_ctc.c"
-    "${PARITY}/parity_command_rnnt.c" "${PARITY}/parity_speaker.c" "${REPORT}/test_report.c")
+    "${ENGINE}/src/pitch/decode.c" "${PARITY}/parity_common.c" "${PARITY}/parity_command_kws.c"
+    "${PARITY}/parity_command_ctc.c" "${PARITY}/parity_command_rnnt.c" "${PARITY}/parity_speaker.c"
+    "${PARITY}/parity_pitch_decode.c" "${REPORT}/test_report.c")
 target_include_directories(ai_engine_parity_host PRIVATE
     "${ENGINE}/src" "${ENGINE}/include" "${FIRMWARE}/components/dsp_afe/include" "${FIRMWARE}/components/common/include"
     "${FIRMWARE}/components/dsp_spec/test_apps/host/shim" "${PARITY}" "${REPORT}/include")
@@ -20,7 +21,7 @@ set_target_properties(ai_engine_parity_host PROPERTIES C_STANDARD 17 C_EXTENSION
 target_compile_options(ai_engine_parity_host PRIVATE -Wall -Wextra -Werror)
 # The ctc decision matches its mirror rounding for rounding: no multiply-add fused into one rounding (KEHOACH 3.12).
 set_source_files_properties("${ENGINE}/src/command_ctc/ctc_score.c" "${ENGINE}/src/command_rnnt/rnnt_search.c"
-    "${ENGINE}/src/speaker/score.c" PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+    "${ENGINE}/src/speaker/score.c" "${ENGINE}/src/pitch/decode.c" PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 target_link_libraries(ai_engine_parity_host PRIVATE m)
 if(AI_ENGINE_HOST_PARITY_ONLY)
     return()
