@@ -1,5 +1,6 @@
 """The pitch probe's window record: the input then every output of a two-output graph, each at its exponent in the
-layout esp-dl holds it in, the values the simulation gives; refused when the stored test values are not those."""
+layout esp-dl holds it in, the values the simulation gives, over the frames the graph was quantised on or fewer;
+refused when the stored test values are not those."""
 
 from __future__ import annotations
 
@@ -60,15 +61,18 @@ def ports(record: bytes) -> tuple[tuple, list[tuple[str, int, bytes]]]:
     return head, found
 
 
-def test_the_record_holds_the_input_then_each_output_as_the_simulation_gives_them(run: Path, tmp_path: Path) -> None:
-    spectra = np.random.default_rng(1).normal(0, 1, (1, SPECTRA, BANDS, FRAMES)).astype(np.float32)
+@pytest.mark.parametrize("frames", [FRAMES, FRAMES // 2])
+def test_the_record_holds_the_input_then_each_output_as_the_simulation_gives_them(
+    run: Path, tmp_path: Path, frames: int
+) -> None:
+    spectra = np.random.default_rng(1).normal(0, 1, (1, SPECTRA, BANDS, frames)).astype(np.float32)
     image, record = probe.probe(CFG, run, ROW, tmp_path, spectra)
     graph = export_espdl.load_native(run / quant.INT8_DIR / ROW / quant.GRAPH_FILE)
     (port_in,), ports_out = ptq_espdl.ports_of(graph)
     x_int8 = ptq_espdl.to_int8(spectra, port_in.exponent)
     ys = ptq_espdl.Simulator(graph).run(x_int8.astype(np.float32) * np.float32(2.0**port_in.exponent))
     head, found = ports(record.read_bytes())
-    assert head == (probe.MAGIC, 3, FRAMES, 3)
+    assert head == (probe.MAGIC, 3, frames, 3)
     assert found[0] == (port_in.name, port_in.exponent, np.ascontiguousarray(x_int8.transpose(0, 2, 3, 1)).tobytes())
     by_name = {name: (exponent, raw) for name, exponent, raw in found[1:]}
     for port, y in zip(ports_out, ys, strict=True):

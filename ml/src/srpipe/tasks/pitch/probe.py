@@ -1,8 +1,8 @@
 """The board probe of SwiftF0's network (KEHOACH 3.11 step 2, E11-T37): a row of <run>/int8/ladder.yaml as
-ai_engine/test_apps/unit runs it on board B over one fixed window of quant.CHUNK_HOPS frames, its graph and probe.cuts
-cuts in a model image; the window is the loudest chunk of a val session simulated again, kept with every output the
-simulation gives, each in esp-dl's layout. Run: python -m srpipe.tasks.pitch.probe --run <run> --row <row>
-[--cut-range <a> <b>] [--cuts <n>]"""
+ai_engine/test_apps/unit runs it on board B over one window, quant.CHUNK_HOPS frames or the first --frames of them,
+its graph and probe.cuts cuts in a model image; the window is from the loudest chunk of a val session simulated again,
+kept with every output the simulation gives, each in esp-dl's layout. Run: python -m srpipe.tasks.pitch.probe
+--run <run> --row <row> [--frames <n>] [--cut-range <a> <b>] [--cuts <n>]"""
 
 from __future__ import annotations
 
@@ -35,14 +35,15 @@ PORT = struct.Struct("<32sIi")
 PORT_NAME_BYTES = 32
 
 
-def window(cfg: dict, run: Path, paths: dict) -> np.ndarray:
-    """(1, SPECTRA, BANDS, CHUNK_HOPS) spectra of the loudest chunk of a val session of quant.build, drawn with the
-    seed and simulated again."""
+def window(cfg: dict, run: Path, paths: dict, frames: int = quant.CHUNK_HOPS) -> np.ndarray:
+    """(1, SPECTRA, BANDS, frames) spectra: the first frames of the loudest chunk of a val session of quant.build,
+    drawn with the seed and simulated again."""
     q = cfg["quant"]
     rng = np.random.default_rng([q["seed"], PROBE_STREAM])
     (clean,) = quant.drawn_cleans(paths, q["build"], ["val"], 1, rng)
     windows, bands = quant.front_tables(run / quant.MODEL_FILE)
-    return max(quant.chunks(swift_front.spectra(clean, windows, bands)), key=lambda c: float(c.mean()))[None]
+    loudest = max(quant.chunks(swift_front.spectra(clean, windows, bands)), key=lambda c: float(c.mean()))
+    return loudest[None, ..., :frames]
 
 
 def stored_ports(espdl: Path) -> list[tuple[str, tuple[int, ...], bytes]]:
@@ -72,13 +73,14 @@ def laid_out(values: np.ndarray, dims: tuple[int, ...], raw: bytes) -> bool:
 def probe(
     cfg: dict, run: Path, row: str, out: Path, spectra: np.ndarray, span: tuple[int, int] | None = None
 ) -> tuple[Path, Path]:
-    """Write out/pitch_models.bin and out/pitch_window.bin of the run's row over spectra, one window, with the cuts of
-    probe.cuts within span among the image's entries, all exported under the branch's esp_ppq_patches; the .espdl
-    files stay beside the row's graph. Refused when ESP-PPQ stored other values for model->test() than the simulation
-    gives, or a port's name outgrows its field."""
+    """Write out/pitch_models.bin and out/pitch_window.bin of the run's row over spectra, one window of any frames,
+    with the cuts of probe.cuts within span among the image's entries, all exported under the branch's esp_ppq_patches;
+    the .espdl files stay beside the row's graph. Refused when ESP-PPQ stored other values for model->test() than the
+    simulation gives, or a port's name outgrows its field."""
     folder, patches = run / quant.INT8_DIR / row, cfg["esp_ppq_patches"]
     graph = export_espdl.load_native(folder / quant.GRAPH_FILE)
     (port_in,), ports_out = ptq_espdl.ports_of(graph)
+    graph.inputs[port_in.name].shape = list(spectra.shape)
     x = ptq_espdl.to_int8(spectra, port_in.exponent).astype(np.float32) * np.float32(2.0**port_in.exponent)
     ys = ptq_espdl.Simulator(graph, patches).run(x)
     with esp_ppq_patches.applied(patches):
@@ -119,13 +121,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--row", required=True, help="the row of <run>/int8/ladder.yaml whose graph the board runs")
     parser.add_argument("--cut-range", type=int, nargs=2, help="topological op indices the cuts are spread between")
     parser.add_argument("--cuts", type=int, help="cuts of the graph in the image; probe.cuts otherwise")
+    parser.add_argument("--frames", type=int, default=quant.CHUNK_HOPS, help="frames of the window, its first ones")
     parser.add_argument("--out", type=Path, default=PROBE_DIR)
     args = parser.parse_args(argv)
     cfg = load_yaml(quant.CONFIG)
     if args.cuts is not None:
         cfg = cfg | {"probe": cfg["probe"] | {"cuts": args.cuts}}
     span = tuple(args.cut_range) if args.cut_range else None
-    for path in probe(cfg, args.run, args.row, args.out, window(cfg, args.run, data_paths()), span):
+    for path in probe(cfg, args.run, args.row, args.out, window(cfg, args.run, data_paths(), args.frames), span):
         print(f"{path}: {path.stat().st_size} bytes")
     return 0
 
