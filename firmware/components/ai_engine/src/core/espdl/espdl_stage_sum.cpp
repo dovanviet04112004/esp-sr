@@ -2,10 +2,12 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "core/espdl/espdl_loan.hpp"
 #include "dl_module_base.hpp"
 #include "esp_log.h"
 #include "fbs_model.hpp"
@@ -63,6 +65,13 @@ class StageSum final : public dl::module::Module {
         }
         int8_t *out = y->get_element_ptr<int8_t>();
         const int channels = y->shape[2];
+        const Loan lent = loan_lent();
+        if (lent.bytes >= terms_.size() * channels) {
+            for (size_t k = 0; k < terms_.size(); k++) {
+                memcpy(lent.mem + k * channels, weights_[k], channels);
+                weights_[k] = lent.mem + k * channels;
+            }
+        }
         for (int t = 0; t < y->shape[1]; t++) {
             int8_t *row = out + t * channels;
             for (size_t k = 0; k < terms_.size(); k++) {
