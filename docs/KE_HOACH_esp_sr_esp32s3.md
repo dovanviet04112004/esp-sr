@@ -1169,10 +1169,23 @@ CNN còn 1,675 ms mỗi hop, khớp từng bit (`measurements/pitch.md` §6). Ch
 - `ai_engine` lượng tử khung của front end về int8 theo số mũ đầu vào của CNN, làm tròn về chẵn như ESP-PPQ, như
   đầu vào của `command` và `speaker`.
 - Mỗi lượt nhận S khung mới; S = 16, một bước của `command`.
-- Các op riêng giữ vòng cột của mình qua các lượt, `EspdlNet::reset` xoá chúng.
-- Mỗi op ra những khung đã có đủ khung sau nó: `BandStem` trễ 1 khung, khối 7 × 3 trễ 2, `BandChain` không trễ,
-  `BandHead` trễ 1. Mức trung bình của đầu vào trễ theo cho khớp; nhánh độ tin trễ thêm 1 khung ở conv 1-D.
+- Bản vá xuất `band_stream` chỉ chạy ở lối xuất chạy dòng, sau mọi bản vá dải:
+  - ghi vào mỗi op riêng thuộc tính `delay`, số khung mà đầu ra của op trễ sau đầu vào của đồ thị;
+  - thay phần đuôi của nhánh độ tin bằng op riêng `BandTail`: Concat đỉnh với mức trung bình, conv 1-D 3 tap có
+    ReLU, conv 1 × 1, cùng các Transpose và Gather quanh chúng.
+- Op có `delay` chạy dòng. Op không có thì chạy cửa sổ như bước 2, nên bản dò cửa sổ và các bản cắt vẫn soi được
+  từng op.
+- Các op riêng giữ vòng cột của mình qua các lượt; `EspdlNet::reset` xoá chúng:
+  - `BandStem` và `BandHead` giữ 2 cột vào; khối 7 × 3 giữ 2 cột vào và 2 cột giữa; `BandChain` không giữ cột nào;
+  - `BandTail` giữ mức trung bình của 6 khung và 2 cột vào của conv 1-D.
+- Mỗi op ra những khung đã có đủ khung sau nó:
+  - `BandStem` trễ 1 khung, khối 7 × 3 trễ 2, `BandChain` không trễ, `BandHead` trễ 1: logit cao độ trễ 6 khung;
+  - `BandTail` lấy mức trung bình trễ 6 khung cho khớp với đỉnh, conv 1-D trễ thêm 1: độ tin trễ 7 khung.
+- Khung trước đầu luồng ra số 0 ở mọi op, đúng như phần đệm của đồ thị cửa sổ dài.
 - Mốc: khớp từng bit với mô phỏng của đồ thị cửa sổ dài trên cùng các khung; giờ mỗi hop đo lại.
+  - Bản dò xuất đồ thị S khung có `band_stream`, rồi mô phỏng đồ thị 256 khung trên cùng cửa sổ thử của bước 2.
+  - Trên board, `EspdlNet` nhận 256 khung ấy theo từng lượt S khung sau `reset`. Logit so ở mọi khung còn đủ 6 khung
+    sau trong cửa sổ, độ tin ở mọi khung còn đủ 7.
 
 3.3 **Ba chiều cao độ ở chip.**
 - Giải cao độ và độ tin là hậu xử lý của mạng, ở `ai_engine`; bản soi gương là `tasks/pitch/postproc/decode.py`.
@@ -1809,6 +1822,7 @@ của op riêng.
 | `BandHead` | đầu ra của SwiftF0 (§3.11) sau `BandBlock`: `Slice` lấy 96 dải thấp của bản đồ thân [1, 128, T, 16]; `Conv` int8 3 × 3 có bias 16 → 4 kênh, đệm một dải dưới, không dải trên, một khung hai bên, `Relu` gộp; từ đầu ra ấy `Conv` 5 × 1 4 → 4 `Linear` rồi `ReduceMax` theo dải trên cùng số mũ, và `Conv` 1 × 1 4 → 1 `Linear`; shift của tích chập từ 1; 12,3 ms của 41,3 ms một cửa sổ 16 khung (`measurements/pitch.md` §6) | mỗi khung một cột: conv 3 × 3 và conv 5 × 1 chạy nhân của `BandBlock`, kênh ra đệm lên 16 bằng 0, `Relu` theo cờ, cột ở RAM nội; max theo dải của bốn kênh và conv 1 × 1 từng dải bằng C, làm tròn nửa lên, bão hoà như esp-dl. Hai đầu ra: logit cao độ [1, 95, T, 1] và đỉnh [1, T, 4], đúng bố cục các op esp-dl sau nó đọc |
 | `BandStem` | tích chập đầu của SwiftF0 (§3.11): `Conv` int8 3 × 3 có bias, bước 1, đệm giữ cỡ, `Relu` gộp, đọc thẳng đầu vào của đồ thị [1, B, T, C] với C ≤ 12 (ba phổ), ra bản đồ [1, B, T, 16] mà `aligned_channels` đã đệm; shift từ 1; 3,5 ms của 32,1 ms một cửa sổ 16 khung, nhân unaligned của esp-dl | mỗi khung một cột: C byte mỗi dải của các cột vào xếp lại thành 16 byte ở RAM nội, cột ngoài khung là một cột số 0, rồi chạy nhân nhanh của `BandBlock` với C làn, mỗi tap một lệnh `ee.vsmulas.s8.qacc` cho mỗi kênh vào; trọng số [3][3][C][16] |
 | `BandChain` | các `BandBlock` một khung thời gian (k_t = 1) nối tiếp nhau, mỗi khối đọc riêng đầu ra khối trước, không đầu ra nào giữa chuỗi là đầu ra của đồ thị: `blocks.1`–`blocks.4` của SwiftF0; 9,0 ms của 27,4 ms một cửa sổ 16 khung | mỗi khung một cột: gom cột x từ PSRAM vào RAM nội một lần, chạy lần lượt từng khối trên các cột RAM nội bằng nhân nhanh k1 của `BandBlock` (cột vào, cột giữa, cột ra, nhánh dư cách cột ra một khoảng cố định), rồi rải cột cuối về y; trọng số mọi khối và ba cột ở vùng mượn khi đủ, không thì ở PSRAM |
+| `BandTail` | chỉ ở lối xuất chạy dòng của SwiftF0 (§3.11, bước 3.2), do `band_stream` dựng: `Concat` của đỉnh `BandHead` [1, T, 4] với mức trung bình của đầu vào [1, 1, T] trên cùng số mũ, `Transpose`, `Conv` 1-D int8 3 tap có bias, đệm một khung hai bên, `Relu` gộp, `Conv` 1 × 1 `Linear` ra một kênh, `Transpose` và `Gather` ra [1, T]; shift từ 1; ~0,4 ms một cửa sổ 16 khung | mỗi khung một cột bằng C vô hướng, đúng phép làm tròn của conv esp-dl; giữ qua các lượt mức trung bình của `lag` khung trước (6, số khung đỉnh trễ sau mức trung bình) và 2 cột vào conv 1-D, ra độ tin trễ `delay` khung. `band_stream` ở `esp_ppq_patches/ops/band_tail.py` |
 
 **Nạp trước vào dcache** (ADR-0026, chủ repo 28/10, `espdl_preload`). Ghi một dòng PSRAM qua cache tốn gấp đôi đọc
 nó, vì cache nạp dòng trước khi ghi đè; đọc thì CPU đứng chờ mỗi dòng trượt. Op riêng của `ai_engine` tính lâu trong
