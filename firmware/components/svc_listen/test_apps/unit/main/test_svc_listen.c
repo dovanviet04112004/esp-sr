@@ -57,6 +57,7 @@ enum { CHECK_NONE = 0, CHECK_PASSED, CHECK_STOPPED, CHECK_UNENROLLED, CHECK_ENRO
 #define CLICK_HOPS 2          // vad hops of a click, too short to be an utterance
 #define CLICK_SEQ 0xC0000000u // past every round's sessions, so svc_listen starts afresh
 #define RESET_SEQ (CLICK_SEQ + SEQ_APART)
+#define CLOSED_SEQ (RESET_SEQ + SEQ_APART)
 
 #define VERIFY_SLOT 0 // one task stands for nhan_task and xac_task here
 #define OWNER_NAME "owner"
@@ -328,6 +329,40 @@ TEST_CASE("svc_listen decides the open window FRAME_GAP when the chain breaks", 
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(RESET_SEQ + hop - 1, d.event.seq,
                                      "the decision ends on the window's last hop");
     TEST_ASSERT_FALSE_MESSAGE(svc_listen_busy(), "a window reached across the chain's break");
+    esp_partition_munmap(handle);
+}
+
+TEST_CASE("svc_listen decides a closed window FRAME_GAP when the chain breaks before its pitch",
+          "[svc_listen]")
+{
+    listen_head_t head;
+    named_t named;
+    esp_partition_mmap_handle_t handle;
+    read_round(&head, &named, &handle);
+    listen_on(&head, &named);
+    if (!ai_engine_has(AI_ENGINE_MODEL_PITCH)) {
+        esp_partition_munmap(handle);
+        TEST_IGNORE_MESSAGE("no pitch in the image: a closed window has its pitch dims at once");
+    }
+    uint32_t hop = 0;
+    for (; hop <= GEN_LISTEN_UTTERANCE_MIN_HOPS; hop++) {
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, CLOSED_SEQ + hop, true, false));
+    }
+    const uint32_t last = hop;
+    for (uint32_t quiet = 0; quiet <= GEN_LISTEN_UTTERANCE_GAP_HOPS; quiet++, hop++) {
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, CLOSED_SEQ + hop, false, false));
+    }
+    TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, CLOSED_SEQ + hop, false, true));
+    svc_listen_decision_t d;
+    bool decided = false;
+    while (!decided && svc_listen_pending()) {
+        decided = svc_listen_work(&d);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(decided, "the closed window gave no decision");
+    TEST_ASSERT_EQUAL_STRING(APP_CODE_FRAME_GAP, d.event.code);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(CLOSED_SEQ + last, d.event.seq,
+                                     "the decision ends on the window's last hop");
+    TEST_ASSERT_FALSE_MESSAGE(svc_listen_busy(), "a window waited for pitch the break cut off");
     esp_partition_munmap(handle);
 }
 

@@ -478,6 +478,17 @@ static bool pitched(uint32_t hop)
     return (int32_t)(s.pitch_seq - hop) >= 0;
 }
 
+// A closed window short of its pitch columns at a break never gets them: it goes out FRAME_GAP (KEHOACH 5.4).
+static void hole_unpitched(void)
+{
+    for (size_t k = 0; k < s.count; k++) {
+        window_t *w = &s.queue[(s.head + k) % WINDOWS_MAX];
+        if (w->holed || pitched(w->last)) { continue; }
+        stop_working(w);
+        w->holed = true;
+    }
+}
+
 // A call's decoded frames, gated by their hops' peaks as swift-f0 gates them, through swift_dims; each
 // frame's dims land at the slot of the hop right frames back. Its last front frame is seq's, DELAY_HOPS back.
 static esp_err_t pitch_call(uint32_t seq)
@@ -526,8 +537,9 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
     if (pcm == NULL) { return ESP_ERR_INVALID_ARG; }
     if (!s.started || seq != s.next_seq || gap) {
         dsp_spec_stft_reset(s.stft);
-        pitch_restart(seq);
         hole_open();
+        hole_unpitched();
+        pitch_restart(seq);
         s.in_run = false;
         s.after = seq;
     }
