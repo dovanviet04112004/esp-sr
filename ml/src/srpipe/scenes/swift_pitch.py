@@ -8,14 +8,21 @@ from typing import Any
 import numpy as np
 
 from srpipe.core.audio_io import to_float
+from srpipe.core.config import ML_ROOT
 from srpipe.generated import grid
 
 SOURCE = "swiftf0"
 DELTA_WINDOW = 2  # frames each side, as Kaldi's delta
 
 
-def detector() -> Any:
-    """SwiftF0 on one thread that sleeps between calls: one per simulation worker."""
+def detector(spec: dict | None = None) -> Any:
+    """SwiftF0 on one thread that sleeps between calls, one per simulation worker; with the spec's int8, a run and a
+    row of the pitch ladder, that row as the chip runs it (KEHOACH 3.11)."""
+    if spec and (int8 := spec.get("int8")):
+        # Imported here: tasks.pitch builds on the simulation that imports this module.
+        from srpipe.tasks.pitch import quant
+
+        return quant.Detector(ML_ROOT / "artifacts" / quant.BRANCH / "runs" / int8["run"], int8["row"])
     import swift_f0  # the swiftf0 extra of pyproject.toml
 
     return swift_f0.SwiftF0(threads=1, spin=False)

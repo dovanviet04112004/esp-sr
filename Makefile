@@ -237,12 +237,15 @@ speed: ## Same integers, timing row, board probe, profile report: BRANCH=<branch
 ##@ Pitch: SwiftF0 on the chip, step 1 on the PC (KEHOACH 3.11)
 
 PITCH_QUANT = $(ML_CPU) --extra train --extra espdl --extra swiftf0 python -m srpipe.tasks.pitch.quant
-.PHONY: pitch-import pitch-ptq
+.PHONY: pitch-import pitch-ptq pitch-rebuild
 pitch-import: ## swift-f0's pinned model.onnx as a run under ml/artifacts/pitch/runs, its rewrite held to swift-f0
 	$(PITCH_QUANT) import
 
 pitch-ptq: ## Rung 2: each calibration of configs/models/pitch.yaml against float into <run>/int8/: RUN=<run>
 	$(PITCH_QUANT) ptq $(RUN)
+
+pitch-rebuild: ## Files of the command build simulated afresh on a row's pitch, into processed/command/<build>_resim_<row>: RUN=<run> ROW=<row>|float [FILES=val] [WORKERS=6]
+	$(PITCH_QUANT) rebuild $(RUN) --row $(ROW) $(if $(FILES),--files $(FILES)) $(if $(WORKERS),--workers $(WORKERS))
 
 ##@ Wake
 

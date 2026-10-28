@@ -1,15 +1,15 @@
 """SwiftF0 on the chip path of KEHOACH 3.11, along speaker's: import writes swift-f0's pinned model.onnx as a run, the
 rewrite of model.py, swift_front and decode held to swift-f0's own detect; ptq quantises the network after its front end
 with each calibration of rung 2 (3.14) into <run>/int8/<calibration>/, calibrated on train sessions of the command build
-simulated again, and rows each against float in <run>/int8/ladder.yaml on the voiced frames of val sessions.
-Run: python -m srpipe.tasks.pitch.quant import | ptq <run>"""
+simulated again, and rows each against float in <run>/int8/ladder.yaml on the voiced frames of val sessions; rebuild
+gives files of that build a row's pitch. Run: python -m srpipe.tasks.pitch.quant import | ptq <run> | rebuild <run>"""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import shutil
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -34,6 +34,8 @@ CHUNK_HOPS = 256  # frames of one calibration or row tensor, 4.1 s
 EDGE_HOPS = 10  # each chunk end's frames that see zero padding
 VOICED = 0.5  # confidence at which swift-f0 calls a frame voiced
 CALIB_STREAM, ROWS_STREAM = 1, 2  # rng streams of the drawn sessions, beside the seed
+SILENCE_PEAK = 1e-3  # swift-f0's: a hop peaking under it has confidence 0
+FLOAT_ROW = "float"  # rebuild's row for swift-f0 itself
 
 
 def sha256(path: Path) -> str:
@@ -76,6 +78,38 @@ def float_outputs(net: model.SwiftF0Net, spectra: np.ndarray) -> tuple[np.ndarra
     return logits[0].numpy(), confidence[0].numpy()
 
 
+@dataclass(frozen=True)
+class Found:
+    """A stream's frames as swift-f0's detect gives them."""
+
+    pitch_hz: np.ndarray
+    confidence: np.ndarray
+
+
+class Detector:
+    """SwiftF0 behind swift-f0's detect, as the chip runs it: the front end on dsp_spec's FFT, the network of a row of
+    the run's ladder as ESP-PPQ simulates it, float without a row, the decoding, and swift-f0's silence gate."""
+
+    def __init__(self, run: Path, row: str | None = None) -> None:
+        self.windows, self.bands = front_tables(run / MODEL_FILE)
+        if row is None:
+            net = model.load(run / MODEL_FILE)
+            self.outputs = lambda spectra: float_outputs(net, spectra)
+        else:
+            sim = ptq_espdl.Simulator(export_espdl.load_native(run / INT8_DIR / row / GRAPH_FILE))
+            self.outputs = lambda spectra: tuple(o[0] for o in sim.run(spectra[None]))
+
+    def detect(self, audio: np.ndarray, sample_rate: int, f_min_hz: float, f_max_hz: float) -> Found:
+        """Pitch and confidence of each whole hop of float audio, at least one."""
+        if sample_rate != grid.SAMPLE_RATE_HZ:
+            raise ValueError(f"{sample_rate} Hz: the chip's SwiftF0 hears {grid.SAMPLE_RATE_HZ} Hz")
+        spectra = swift_front.spectra(audio, self.windows, self.bands)
+        pitch_hz, confidence = decode.decode(*self.outputs(spectra), f_min_hz, f_max_hz)
+        hops = np.zeros((len(confidence), grid.HOP_SAMPLES), np.float32)
+        hops.reshape(-1)[: min(hops.size, len(audio))] = audio[: hops.size]
+        return Found(pitch_hz, np.where(np.abs(hops).max(axis=1) < SILENCE_PEAK, np.float32(0.0), confidence))
+
+
 def rewrite_gap(run: Path, f_min_hz: float, f_max_hz: float) -> float:
     """Largest relative gap of the rewritten chain's pitch on voiced frames, and of its confidence on every frame, to
     swift-f0's detect, on a glide with its harmonics in light noise."""
@@ -88,9 +122,8 @@ def rewrite_gap(run: Path, f_min_hz: float, f_max_hz: float) -> float:
     audio = 0.1 * (np.sin(phase) + 0.5 * np.sin(2 * phase)) * (t % 1.0 < 0.7) + rng.normal(0, 0.01, t.size)
     audio = audio.astype(np.float32)
     want = swift_f0.SwiftF0(threads=1, spin=False).detect(audio, grid.SAMPLE_RATE_HZ, f_min_hz, f_max_hz)
-    windows, bands = front_tables(run / MODEL_FILE)
-    logits, sure = float_outputs(model.load(run / MODEL_FILE), swift_front.spectra(audio, windows, bands))
-    pitch_hz, confidence = decode.decode(logits, sure, f_min_hz, f_max_hz)
+    found = Detector(run).detect(audio, grid.SAMPLE_RATE_HZ, f_min_hz, f_max_hz)
+    pitch_hz, confidence = found.pitch_hz, found.confidence
     n = min(len(pitch_hz), len(want.pitch_hz))
     voiced = want.confidence[:n] >= VOICED
     pitch_gap = np.abs(pitch_hz[:n][voiced] / want.pitch_hz[:n][voiced] - 1.0).max(initial=0.0)
@@ -203,6 +236,37 @@ def ptq(cfg: dict, run: Path, paths: dict, calibrations: list[str] | None = None
     return path
 
 
+def rebuilt_root(paths: dict, build: str, row: str) -> Path:
+    """Where rebuild writes the files of a command build heard on a row of the pitch ladder, or on swift-f0 itself."""
+    return paths["processed"] / "command" / f"{build}_resim_{row}"
+
+
+def rebuild(cfg: dict, run: Path, row: str, paths: dict, files: list[str], workers: int) -> list[Path]:
+    """Each of files of the command build quant.build simulated afresh into rebuilt_root, its three pitch dims from
+    row of the run's ladder as the chip runs it, or from swift-f0 itself for FLOAT_ROW. The log-mel is today's, which
+    the build's may no longer match, so the two rows compare on one log-mel (KEHOACH 3.11)."""
+    build = cfg["quant"]["build"]
+    out = []
+    for name in files:
+        built = yaml.safe_load((paths["processed"] / "command" / build / name / "manifest.yaml").read_text("utf-8"))
+        pitch = built["config"]["pitch"] | ({} if row == FLOAT_ROW else {"int8": {"run": run.name, "row": row}})
+        out.append(
+            device.build(
+                built["config"] | {"pitch": pitch},
+                paths["splits"] / "command" / build / f"{name}.txt",
+                paths["raw"],
+                paths["interim"],
+                rebuilt_root(paths, build, row) / name,
+                workers,
+                repeats=built["repeats"],
+                pitch=True,
+                keep_pcm=False,
+                cut=built.get("cut", "pads"),
+            )
+        )
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -210,9 +274,20 @@ def main(argv: list[str] | None = None) -> int:
     rung = sub.add_parser("ptq", help="rung 2: each calibration against float into <run>/int8/")
     rung.add_argument("run", type=Path, help="a run directory of python -m srpipe.tasks.pitch.quant import")
     rung.add_argument("--calibrations", nargs="+", help="only these of quant.calibrations: a stopped ladder goes on")
+    again = sub.add_parser("rebuild", help="files of the command build with their pitch from a row of the ladder")
+    again.add_argument("run", type=Path)
+    again.add_argument("--row", required=True, help="a row of <run>/int8/ladder.yaml, or float for swift-f0 itself")
+    again.add_argument("--files", nargs="+", default=["val"], help="files of the build, val by default")
+    again.add_argument("--workers", type=int, default=6, help="processes simulating the sessions")
     args = parser.parse_args(argv)
     cfg = load_yaml(CONFIG)
-    print(import_run(cfg) if args.command == "import" else ptq(cfg, args.run, data_paths(), args.calibrations))
+    if args.command == "import":
+        print(import_run(cfg))
+    elif args.command == "rebuild":
+        for path in rebuild(cfg, args.run, args.row, data_paths(), args.files, args.workers):
+            print(path)
+    else:
+        print(ptq(cfg, args.run, data_paths(), args.calibrations))
     return 0
 
 

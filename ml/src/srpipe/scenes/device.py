@@ -516,9 +516,10 @@ def stream_pitch(tracker: PitchTracker, clean: np.ndarray) -> np.ndarray:
 
 def pitch_of(spec: dict) -> Callable[[np.ndarray], np.ndarray]:
     """Pitch features (hops, 3) of a stream's clean int16 samples by the tracker spec names, built once: Kaldi's
-    online tracker as stream_pitch runs it, or SwiftF0 for a pitch_source trial (KEHOACH 3.11)."""
+    online tracker as stream_pitch runs it, or SwiftF0 for a pitch_source trial, int8 when spec names a row of its
+    ladder (KEHOACH 3.11)."""
     if spec.get("source") == swift_pitch.SOURCE:
-        detect = swift_pitch.detector()
+        detect = swift_pitch.detector(spec)
         return lambda clean: swift_pitch.features(clean, spec, detect)
     tracker = PitchTracker(PitchConfig(**spec))
     return lambda clean: stream_pitch(tracker, clean)
