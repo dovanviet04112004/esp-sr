@@ -1541,3 +1541,26 @@ trực tiếp "on" rồi lệnh, 29/10 19:02–19:30; 128 quyết định trong 
   sau 848 s của lần 19:16. `pitch` mượn được 13 760 / 14 272 B, `speaker` 13 760 / 21 408 B; phần thiếu đọc tại chỗ.
 - `make listen-unit` sau `3115469d` (ảnh không có `wake`, 29/10 19:35–20:05): 7 lượt đạt, 309 cửa sổ của các phiên Cửa 3
   trùng Python từng trường; từ lúc câu chốt tới quyết định 356–440 ms trung bình mỗi lượt.
+
+## 33. `speaker` ở nhân 1 cùng lúc mạng của nhân 0: sai số và chậm, không dùng (E11-T37)
+
+Thử 29/10 tối để lệnh không chờ thêm một lần chạy `speaker` sau khi được nhận: `xac_task` sang nhân 1, chạy b0 song
+song với `pitch`, `wake` và `command` của `nhan_task` ở nhân 0. Trước đó sửa `ai_engine` cho hai mạng chạy cùng lúc:
+vùng mượn RAM nội theo task, bộ preload một vùng mỗi lúc dưới một khoá, vùng nạp trước chỉ gồm dòng nằm trọn trong
+vùng. Bài thử chẩn đoán chạy một lần trên board B, app thử `ai_engine` với ảnh model sản phẩm: mỗi mạng chạy một mình
+lấy kết quả mẫu (đầu vào giả cố định), rồi b0 chạy 20 lần ở nhân 1, ưu tiên 2, trong lúc nhân 0 chạy lặp cả ba mạng
+kia trên cùng đầu vào:
+
+| | Một mình | Cùng lúc | Lần lệch kết quả mẫu |
+|---|---|---|---|
+| b0 ở nhân 1, một cửa sổ 1,5 s | 468 ms | 1 139 ms | 0 / 20 |
+| `pitch` 8 lượt, `wake` 128 bước, `command` 128 bước và chấm, ở nhân 0 | 1 317 ms | 3 869 ms | **2 / 6** |
+
+- Hai nhân cùng đọc ghi PSRAM thì mạng của nhân 0 ra số khác, như `ConvBlock` chia hai nhân ở §31, nên cơ chế ấy
+  không riêng phép chia một op. Cơ chế vẫn chưa rõ; preload không phải (§31). Giả thuyết chưa thử: autoload của
+  dcache nạp dòng kế tiếp trong lúc nhân kia ghi dòng ấy.
+- Cả hai phía chậm 2,4–2,9 lần vì chung bus MSPI và dcache, nên dù đúng thì lệnh cũng ra muộn hơn.
+- Không dùng. `xac_task` ở lại nhân 0; các thay đổi của lượt thử không vào repo.
+- Còn mở: nhân 1 của sản phẩm (`thu`, `sach`) cũng ghi PSRAM (`q_clean`) trong lúc nhân 0 chạy mạng. Các phép kiểm
+  từng bit của chuỗi (`listen-unit`, app thử `ai_engine`) chạy không có chuỗi làm sạch, nên chưa đo xem lượng ghi nhỏ
+  ấy có làm lệch mạng của nhân 0 không.
