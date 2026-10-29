@@ -1296,10 +1296,12 @@ chừng nửa giây, 28 lần mỗi triệu âm tiết lời nói: ngắn và th
 siết báo nhầm để sau, khi có dữ liệu thu thật.
 
 **Từ tạm "on"** (ADR-0029). Tới khi có giọng thật nói "trợ lý", sản phẩm thức bằng "on" của Speech Commands v0.02,
-split `wake/on1`:
+split `wake/on2`:
 - dương: mọi mẩu "on" của bộ, cắt ở cuối tiếng nói; `val` lấy từ `testing_list.txt`, `train` từ mẩu không nằm ở danh
   sách nào, nên người nói tách như bộ tách;
-- âm bản khó: các từ còn lại của bộ, rút theo seed;
+- âm bản khó: các từ còn lại của bộ, rút theo seed: 3 000 cho `train` và 600 cho `val` như `on1`, rồi thêm 27 000 cho
+  `train` sau khi rút `val`, nên `val` trùng `on1`. Với 3 000, mỗi mẩu lặp ~213 lần trong 20 000 bước, `val` bắt 89% ở
+  bước 6 000 rồi tụt về 68% ở bước cuối (`measurements/wake.md` §8): mạng thuộc lòng âm bản khó;
 - âm bản học: 100 giờ lời nói tiếng Việt rút mới từ các kho học còn trên đĩa, không Bud500; `val_neg`, `test_neg` là
   lời nói công khai của `wake/v4`, vốn không có Bud500, không mẩu TTS nào;
 - mọi mẩu dương là giọng thật, nên không có tỉ lệ mẩu thật; việc phụ CTC giữ trên lời nói tiếng Việt của `train_neg`.
