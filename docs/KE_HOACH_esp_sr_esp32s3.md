@@ -3448,7 +3448,12 @@ nên `nhan_task` mở cửa sổ cho mọi câu `vad` tìm ra, mốc chặn là 
 **Ảnh có `wake`**: `wake` vượt ngưỡng ở bước k thì vào `LENH` với mốc chặn k + 1, nên cửa sổ không chứa từ đánh thức:
 câu đang chạy qua bước k ("trợ lý bật đèn" nói liền) mở cửa sổ ở k + 1, câu sau đó mở như trên. Cửa sổ ấy thấy trước lệnh
 ít hơn cửa sổ của ảnh không có `wake`; điểm chia `T_W` (§3.12) nên `δ₁` `δ₂` giữ nguyên nghĩa, còn độ đúng thì đo lại trên
-phiên có `wake` khi `wake` vào ảnh (E11-T14). Im 1,5 s mà không có câu nào thì về `NGHE`, không chấm.
+phiên có `wake` khi `wake` vào ảnh (E11-T14). Bước k là bước của điểm `ai_engine_wake_step` vừa trả, trễ
+`ai_engine_wake_delay()` bước so với khung vừa nạp (§3.11); vượt ngưỡng ra một sự kiện `WAKE` mang k và điểm ‰, trước mọi
+quyết định của câu sau đó. Trong `NGHE` `svc_listen` vẫn theo dõi câu theo `vad` nhưng không mở cửa sổ. Một quyết định cho
+cửa sổ của `LENH`, lệnh hay từ chối, đưa máy về `NGHE`; im `SVC_LISTEN_COMMAND_WAIT_MS` (1,5 s, `Kconfig` của
+`svc_listen`, vì đổi `listen.yaml` là đổi `listen_hash`) mà không có câu nào cũng về `NGHE`, không chấm. Về `NGHE` thì bộ
+đệm của `wake` được xoá, nên trong trường nhìn 127 khung đầu sau đó nó nghe kém hơn khi chạy liền.
 
 ### 5.5 Quy chuẩn thêm task hoặc việc song song
 
