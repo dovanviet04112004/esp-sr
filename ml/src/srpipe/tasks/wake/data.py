@@ -402,26 +402,30 @@ def real_positives(cfg: dict, raw: Path) -> dict[str, float]:
     return items
 
 
+def synth_manifests(cfg: dict, interim: Path) -> dict[str, list[dict]]:
+    """The synth manifests under interim/wake by folder, positives trimmed at their word's end, hard only when built."""
+    manifests = {}
+    for folder in (synth.SETS["positives"], synth.SETS["negatives"], synth.SETS["hard"]):
+        listing = interim / "wake" / folder / "manifest.yaml"
+        if folder == synth.SETS["hard"] and not listing.exists():
+            continue
+        clips = yaml.safe_load(listing.read_text(encoding="utf-8"))["clips"]
+        manifests[folder] = trimmed(clips, folder, cfg, interim) if folder == synth.SETS["positives"] else clips
+    return manifests
+
+
 def cut_split(cfg: dict, paths: dict[str, Path]) -> int:
     screening = load_yaml(screen.CONFIG)
     public = screen.kept_clips(screening, paths, "speech")
     seconds = screen.lengths(screening, paths, "speech")
-    manifests = {}
-    real = real_positives(cfg, paths["raw"]) if "real_pos" in cfg["split"] else {}
-    seconds |= real
-    for folder in (synth.SETS["positives"], synth.SETS["negatives"], synth.SETS["hard"]):
-        listing = paths["interim"] / "wake" / folder / "manifest.yaml"
-        if folder == synth.SETS["hard"] and not listing.exists():
-            continue
-        clips = yaml.safe_load(listing.read_text(encoding="utf-8"))["clips"]
-        if folder == synth.SETS["positives"]:
-            clips = trimmed(clips, folder, cfg, paths["interim"])
-        manifests[folder] = clips
-        seconds |= {synth_item(folder, c): c.get("cut_s", c["seconds"]) for c in clips}
     if cfg["split"]["speech_commands"]:
         files, lengths = speech_commands_files(cfg, paths, public, seconds)
         seconds |= lengths
     else:
+        real = real_positives(cfg, paths["raw"]) if "real_pos" in cfg["split"] else {}
+        manifests = synth_manifests(cfg, paths["interim"])
+        seconds |= real
+        seconds |= {synth_item(f, c): c.get("cut_s", c["seconds"]) for f, clips in manifests.items() for c in clips}
         files = build(cfg, public, seconds, manifests, tuple(real))
     out = paths["splits"] / "wake" / cfg["split"]["version"]
     splits.write_version(out, files, notes(cfg, files, seconds))
