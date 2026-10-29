@@ -265,7 +265,7 @@ SPEED_ESPDL_pitch = ml/$(RUN)/int8/timing/pitch.espdl
 
 .PHONY: wake-features wake-train wake-ptq wake-deploy eval-tts wake-synth
 wake-features: ## Run each file of the wake split through the board simulation into processed/wake (E4-T8)
-	$(ML) python -m srpipe.tasks.wake.data simulate
+	$(ML) --extra praat python -m srpipe.tasks.wake.data simulate
 
 wake-train: ## Train the wake TCN on processed/wake/<split> on the GPU into ml/artifacts/wake/runs (E11-T11)
 	$(ML) --extra train python -m srpipe.tasks.wake.train

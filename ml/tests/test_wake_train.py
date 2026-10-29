@@ -1,10 +1,12 @@
 """Wake training: the smoothing and lockout the device mirrors, labels around a positive's end, windows that hold
-the whole label past the warm-up, sentences for the CTC side task, a tiny run that keeps its last weights and saves each
-evaluated one, a board table whose rows keep their columns, and a run scored with the network it was trained as."""
+the whole label past the warm-up, a louder word window equal to the log-mel of louder samples, sentences for the CTC
+side task, a tiny run that keeps its last weights and saves each evaluated one, a board table whose rows keep their
+columns, and a run scored with the network it was trained as."""
 
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -12,8 +14,10 @@ import pytest
 import yaml
 
 from srpipe.core import corpus
-from srpipe.core.config import load_yaml
+from srpipe.core.config import device_of, load_yaml
+from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.generated import grid
+from srpipe.scenes import device
 from srpipe.tasks.wake import CONFIG, data
 from srpipe.tasks.wake.postproc.smooth import smooth, triggers
 
@@ -93,6 +97,31 @@ def test_windows_hold_the_label_past_the_warm_up(tmp_path: Path) -> None:
     x, y = train.Windows(pos, neg, tiny_cfg(), np.random.default_rng(2)).batch()
     assert x.shape == (16, 32, BANDS) and y.shape == (16, 32)
     assert all(y[k, 8:].any() for k in range(4)) and not y[4:].any()
+
+
+def test_a_louder_word_window_is_the_log_mel_of_louder_samples(tmp_path: Path) -> None:
+    rng = np.random.default_rng(3)
+    cfg = tiny_cfg()
+    around = data.label_hops(cfg["train"]["label_s"])
+    pos = data.load_set(processed(tmp_path / "p", [(60, 20, 40)] * 4, rng, True), True, around, "float16")
+    neg = data.load_set(processed(tmp_path / "n", [(60, 0, 60)] * 4, rng, False), False, around, "float16")
+    cfg["train"].pop("word_gain_db")
+    plain = train.Windows(pos, neg, cfg, np.random.default_rng(4))
+    doubled_db = 20.0 * math.log10(2.0)
+    loud = tiny_cfg()
+    loud["train"]["word_gain_db"] = [doubled_db, doubled_db]
+    windows = train.Windows(pos, neg, loud, np.random.default_rng(4))
+    mel = Mel(MelConfig(**device_of(cfg)["features"]))
+    tone = 3000.0 * np.sin(2.0 * np.pi * 440.0 * np.arange(20 * grid.HOP_SAMPLES) / grid.SAMPLE_RATE_HZ)
+    hops = (tone + rng.normal(0.0, 30.0, len(tone))).astype(np.int16).reshape(-1, grid.HOP_SAMPLES)
+
+    def log_mel(scale: int) -> np.ndarray:
+        stft = device.Stft()
+        return np.stack([mel.log(stft.analyze(device.to_float(scale * h))) for h in hops]).astype(np.float32)
+
+    quiet = log_mel(1)
+    np.testing.assert_allclose(windows.louder(quiet), log_mel(2), atol=1e-3)
+    assert plain.word(quiet) is quiet
 
 
 def test_sentences_carry_the_lead_before_them_their_units_and_nothing_too_long(tmp_path: Path) -> None:

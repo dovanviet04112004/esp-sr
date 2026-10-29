@@ -18,7 +18,7 @@ from torch import nn
 from torch.nn import functional
 
 from srpipe.core import screen
-from srpipe.core.config import apply_overrides, data_paths, load_yaml
+from srpipe.core.config import apply_overrides, data_paths, device_of, load_yaml
 from srpipe.core.logger import row_line
 from srpipe.core.run_dir import create_run_dir
 from srpipe.core.seed import seed_everything
@@ -54,7 +54,8 @@ def band_stats(shards: list[Shard]) -> tuple[np.ndarray, np.ndarray]:
 
 class Windows:
     """Examples of window_hops hops: one that holds a positive's whole label past the warm-up, one over a hard near
-    miss, one ending in the first onset_s of a negative sentence's speech, or one anywhere in a negative."""
+    miss, one ending in the first onset_s of a negative sentence's speech, or one anywhere in a negative. With
+    word_gain_db, positive and hard windows are made louder by a gain drawn uniformly from it (KEHOACH 3.11)."""
 
     def __init__(
         self,
@@ -83,6 +84,18 @@ class Windows:
         self.slack = width - self.cfg["warmup_hops"] - self.before - self.after
         if self.slack < 1:
             raise ValueError("window_hops leaves no room for a whole label past the warm-up")
+        self.gain_db = self.cfg.get("word_gain_db")
+        self.log_floor = np.float32(device_of(cfg)["features"]["log_floor"]) if self.gain_db else None
+
+    def louder(self, x: np.ndarray) -> np.ndarray:
+        """x as the log-mel of its clean samples made louder by a gain drawn from word_gain_db: the band energy under
+        the log scaled, its floor not, so the result is what the board would compute from those samples."""
+        power = np.float32(10.0 ** (self.rng.uniform(*self.gain_db) / 10.0))
+        energy = np.maximum(np.exp(x.astype(np.float32)) - self.log_floor, np.float32(0.0))
+        return np.log(power * energy + self.log_floor).astype(x.dtype)
+
+    def word(self, x: np.ndarray) -> np.ndarray:
+        return self.louder(x) if self.gain_db else x
 
     def cut(self, shard: Shard, stop: int) -> tuple[np.ndarray, np.ndarray]:
         width = self.cfg["window_hops"]
@@ -131,11 +144,11 @@ class Windows:
         for shard_index, end in self.positive_ends(n_pos):
             stop = end + self.after + int(self.rng.integers(self.slack))
             x, y = self.cut(self.positives[shard_index], stop)
-            xs.append(x), ys.append(y)
+            xs.append(self.word(x)), ys.append(y)
         for k in self.rng.integers(len(self.hard_items), size=n_hard) if n_hard else []:
             shard_index, item = self.hard_items[k]
             x, y = self.cut(self.hard[shard_index], self.hard_stop(item))
-            xs.append(x), ys.append(y)
+            xs.append(self.word(x)), ys.append(y)
         n_onset = round(n_neg * self.cfg["onset_share"]) if self.onsets else 0
         for k in self.rng.integers(len(self.onsets), size=n_onset) if n_onset else []:
             shard_index, first = self.onsets[k]
