@@ -54,8 +54,8 @@ SLOT_FRACTION_BITS = 31
 # The chain's iSTFT hands a hop out one hop after it came in.
 CHAIN_LAG_HOPS = 1
 A_WEIGHT_GRID_POINTS = 4097
-# Speeds and F0 targets have streams of their own, so the rooms, levels and noise match a build without them.
-ROOM_STREAM, SESSION_STREAM, SPEED_STREAM, AGC_STREAM, F0_STREAM = 1, 2, 3, 4, 5
+# Speeds draw from their own stream, so a build with speeds keeps the rooms, levels and noise of one without.
+ROOM_STREAM, SESSION_STREAM, SPEED_STREAM, AGC_STREAM = 1, 2, 3, 4
 SPEED_DENOMINATOR = 100  # resampling ratios as small fractions: 1.1 is 10/11
 TALKER, NOISE = 0, 1
 CLEAN_ORIGINS = frozenset({"public", "synth"})
@@ -177,29 +177,6 @@ def spoken_at(x: np.ndarray, speed: float) -> np.ndarray:
         return x
     ratio = Fraction(1.0 / speed).limit_denominator(SPEED_DENOMINATOR)
     return signal.resample_poly(x, ratio.numerator, ratio.denominator)
-
-
-def f0_targets(seed: int, k: int, n: int, spec: dict) -> list[float]:
-    """Session k's target median F0 for each of its n utterances, log-uniform in spec's f0_hz, NaN for one left as
-    spoken (KEHOACH 1.2)."""
-    rng = np.random.default_rng([seed, F0_STREAM, k])
-    low, high = np.log(spec["f0_hz"])
-    targets = np.exp(rng.uniform(low, high, n))
-    targets[rng.random(n) < spec["natural_share"]] = np.nan
-    return targets.tolist()
-
-
-def repitched(x: np.ndarray, target_hz: float, spec: dict) -> tuple[np.ndarray, float]:
-    """x with its median F0 moved toward target_hz as spec bounds it, and the semitones moved; x itself and 0 for a NaN
-    target or a clip with no voiced frame."""
-    if math.isnan(target_hz):
-        return x, 0.0
-    # Praat is an extra of pyproject: only a build that moves pitch loads it.
-    from srpipe.core import repitch
-
-    step_s, f0_range = spec["time_step_s"], tuple(spec["f0_range_hz"])
-    semitones = repitch.toward_st(x, target_hz, spec["max_st"], step_s, f0_range)
-    return (repitch.moved(x, semitones, step_s, f0_range), semitones) if semitones else (x, 0.0)
 
 
 def tilted(x: np.ndarray, db_per_octave: float, from_hz: float) -> np.ndarray:
@@ -457,21 +434,18 @@ def simulate_session(
     floor: Floor | None = None,
     speeds: tuple[float, ...] = (),
     room: int | None = None,
-    repitch: dict | None = None,
 ) -> tuple[np.ndarray, list[tuple[int, int]], dict, np.ndarray]:
     """Session k: the interleaved int16 frames board B would capture, each utterance's [start, end) in samples, the
     session's draws, and talker_vad of its talker at ch0; bank_room indexes rooms.yaml's labels, readers read raw/ and
     interim/ by root name. With speeds, each utterance is spoken at one drawn from them, listed in draws as speeds;
-    with repitch, its F0 moved toward a drawn target, the semitones listed in draws as f0_st; with
-    session.agc_start_drawn, the gain the agc starts the session from as agc_start_db (KEHOACH 1.2). room puts the
-    session in that room of the bank instead of the drawn one, every other draw the same."""
+    with session.agc_start_drawn, the gain the agc starts the session from as agc_start_db (KEHOACH 1.2). room puts
+    the session in that room of the bank instead of the drawn one, every other draw the same."""
     rng = np.random.default_rng([cfg["seed"], SESSION_STREAM, k])
     said_at = (
         [float(v) for v in np.random.default_rng([cfg["seed"], SPEED_STREAM, k]).choice(speeds, len(rows))]
         if speeds
         else []
     )
-    targets, moves = (f0_targets(cfg["seed"], k, len(rows), repitch) if repitch else []), []
     s, t = cfg["session"], cfg["talker"]
     drawn = int(rng.integers(cfg["rooms"]["count"]))
     entry = drawn if room is None else room
@@ -482,11 +456,7 @@ def simulate_session(
     pieces, spans = [np.zeros(at)], []
     for i, row in enumerate(rows):
         x = readers[ROOT_OF[row.origin]].read(row.item)
-        x = spoken_at(x, said_at[i]) if said_at else x
-        if targets:
-            x, semitones = repitched(x, targets[i], repitch)
-            moves.append(semitones)
-        x = ramped(x, t["edge_ramp_s"])
+        x = ramped(spoken_at(x, said_at[i]) if said_at else x, t["edge_ramp_s"])
         jitter_db = float(rng.uniform(-t["jitter_db"], t["jitter_db"]))
         pieces.append(x * 10.0 ** (jitter_db / 20.0) / active_rms(x, t["active_below_peak_db"]))
         spans.append((at, at + len(x)))
@@ -504,8 +474,7 @@ def simulate_session(
         start_db = np.random.default_rng([cfg["seed"], AGC_STREAM, k]).uniform(0.0, afe.AGC_GAIN_MAX_DB)
         draws |= {"agc_start_db": round(float(start_db), 3)}
     heard = talker_vad(talker[0], dry, t["active_below_peak_db"])
-    draws |= ({"speeds": said_at} if said_at else {}) | ({"f0_st": moves} if targets else {})
-    return hear(air, mics, rng, floor), spans, draws, heard
+    return hear(air, mics, rng, floor), spans, draws | ({"speeds": said_at} if said_at else {}), heard
 
 
 def item_frames(span: tuple[int, int], pads_s: tuple[float, float], n_hops: int) -> tuple[int, int, int, int]:
@@ -596,9 +565,7 @@ def _ignore_interrupt() -> None:
 
 
 def _shard(job: tuple) -> list[Path]:
-    cfg, roots, bank, out, shard, sessions, pools, pads_s, cut, with_pitch, keep_pcm, speeds, dtype, mel_from, moved = (
-        job
-    )
+    cfg, roots, bank, out, shard, sessions, pools, pads_s, cut, with_pitch, keep_pcm, speeds, dtype, mel_from = job
     mics = load_microphones(cfg["microphone"])
     floor_cfg = cfg["microphone"].get("floor")
     floor = load_floor(floor_cfg, roots["raw"], mics.pcm_shift) if floor_cfg else None
@@ -608,12 +575,10 @@ def _shard(job: tuple) -> list[Path]:
     readers = {name: ItemReader(root) for name, root in roots.items()}
     features, figures, pcm, pitches, items, offset = [], [], [], [], [], 0
     for k, rows in sessions:
-        captured, spans, draws, heard = simulate_session(
-            cfg, k, rows, bank, mics, pools, readers, floor, speeds, repitch=moved
-        )
+        captured, spans, draws, heard = simulate_session(cfg, k, rows, bank, mics, pools, readers, floor, speeds)
         clean, figs, feats = listen(captured, replace(chain_cfg, agc_start_db=draws.get("agc_start_db")), mel)
         heard_pitch = pitch(clean) if pitch is not None else None
-        said_at, semitones = draws.pop("speeds", []), draws.pop("f0_st", [])
+        said_at = draws.pop("speeds", [])
         for first, stop, held, speech in cut_items(cut, spans, pads_s, heard):
             features.append(feats[first:stop])
             figures.append(figs[first:stop])
@@ -625,7 +590,6 @@ def _shard(job: tuple) -> list[Path]:
             holding = {"clips": [rows[k].item for k in held]} if len(held) > 1 else {}
             spoken = {"speed": said_at[held[0]]} if said_at and len(held) == 1 else {}
             spoken |= {"speeds": [said_at[k] for k in held]} if said_at and len(held) > 1 else {}
-            spoken |= {"f0_st": [round(semitones[k], 3) for k in held]} if semitones else {}
             items.append(
                 {"item": row.item, **holding, "spk": row.spk, "room": row.room, "origin": row.origin}
                 | where
@@ -666,14 +630,13 @@ def build(
     dtype: str = "float32",
     cut: str = "pads",
     mel_from: Path | None = None,
-    repitch: dict | None = None,
 ) -> Path:
     """Every item of split_file through the simulation into out, repeats times over, each pass in sessions of their
     own rooms, levels and noise; an item is a clip with pads_s around it (session.pad_s unless given), or with cut
     listen the window the board cuts around it (KEHOACH 1.2); with pitch its pitch, its clean samples unless keep_pcm
-    is off, with speeds each clip spoken at one drawn from them, with repitch its F0 moved, stored as dtype; with
-    mel_from, a build of the same split and config but its pitch, the log-mel, figures and items linked from it. Then
-    manifest.yaml, counting with cut listen the clips no window holds; Ctrl-C stops at once, a rerun resumes shards."""
+    is off, with speeds each clip spoken at one drawn from them, stored as dtype; with mel_from, a build of the same
+    split and config but its pitch, the log-mel, figures and items linked from it. Then manifest.yaml, counting with
+    cut listen the clips no window holds; Ctrl-C stops at once, and the same build run again goes on from its shards."""
     if cut not in CUTS or (cut == "listen" and pads_s):
         raise ValueError(f"cut {cut!r}: one of {', '.join(CUTS)}, and the listen cut takes no pads_s")
     rows = splits.read_split(split_file)
@@ -704,7 +667,6 @@ def build(
         **({"pitch": True} if pitch else {}),
         **({} if keep_pcm else {"pcm": False}),
         **({"speeds": list(speeds)} if speeds else {}),
-        **({"repitch": repitch} if repitch else {}),
         **({"dtype": dtype} if dtype != "float32" else {}),
         **cut_marks(cut),
         "rooms_sha256": sha256_of(bank / "rooms.yaml"),
@@ -727,7 +689,7 @@ def build(
     begun.write_text(yaml.safe_dump(head, allow_unicode=True, sort_keys=False), encoding="utf-8")
     roots = {"raw": raw_root, "interim": interim}
     shards = range(math.ceil(len(sessions) / per_shard))
-    options = (pools, pads, cut, pitch, keep_pcm, speeds, dtype, mel_from, repitch)
+    options = (pools, pads, cut, pitch, keep_pcm, speeds, dtype, mel_from)
     jobs = [
         (cfg, roots, bank, out, j, sessions[j * per_shard : (j + 1) * per_shard], *options)
         for j in shards

@@ -174,27 +174,6 @@ def test_the_extracts_clips_of_the_word_join_the_train_positives(tmp_path: Path)
     assert "speech/vlsp/a_3.wav" not in negatives and len(negatives) == 3
 
 
-def test_a_build_counts_as_built_only_with_the_pitch_moves_asked(tmp_path: Path) -> None:
-    split_file = tmp_path / "train_pos.txt"
-    split_file.write_text("speech/x/a.wav\t-\t-\tpublic\n", encoding="utf-8")
-    out = tmp_path / "train_pos"
-    out.mkdir()
-    moves = {"f0_hz": [100.0, 280.0], "natural_share": 0.25}
-    body = {"config": {"seed": 1}, "split": {"sha256": splits.sha256_of(split_file)}, "repeats": 1}
-    (out / "manifest.yaml").write_text(yaml.safe_dump(body), encoding="utf-8")
-    assert data.built_as(out, {"seed": 1}, split_file, 1, "float32")
-    assert not data.built_as(out, {"seed": 1}, split_file, 1, "float32", moves)
-    (out / "manifest.yaml").write_text(yaml.safe_dump(body | {"repitch": moves}), encoding="utf-8")
-    assert data.built_as(out, {"seed": 1}, split_file, 1, "float32", moves)
-    assert not data.built_as(out, {"seed": 1}, split_file, 1, "float32")
-
-
-def test_repitch_moves_only_the_files_it_lists() -> None:
-    spec = {"repitch": {"sets": ["train_pos"], "f0_hz": [100.0, 280.0]}}
-    assert data.moves_of(spec, "train_pos") == {"f0_hz": [100.0, 280.0]}
-    assert data.moves_of(spec, "val_pos") is None and data.moves_of({}, "train_pos") is None
-
-
 def test_a_build_counts_as_built_only_in_the_dtype_asked(tmp_path: Path) -> None:
     split_file = tmp_path / "train_neg.txt"
     split_file.write_text("speech/x/a.wav\t-\t-\tpublic\n", encoding="utf-8")
