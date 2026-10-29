@@ -192,8 +192,9 @@ của một file split thành đúng thứ bộ nhận dạng thấy trên máy:
 3. Chạy `srpipe.dsp.afe.chain` và log-mel của `srpipe.dsp.spec`. Đây là bản soi gương khớp firmware từng bit
    (§3.14), với đúng danh sách module sản phẩm. Cao độ, ở nhánh khai nó, tính liền cả phiên bằng một bộ dò không đặt
    lại, như `svc_listen` tính mỗi bước trên board (§3.11); mỗi mẫu lấy phần của nó. Ra `processed/<nhánh>/<tập>/`: đặc
-   trưng, số của chuỗi (`vad`, mức, gain) và PCM sạch của từng mẫu, cộng manifest sha256. Nhánh nào khai kiểu lưu cho tập học thì đặc trưng của `train`
-   lưu theo kiểu ấy (float16 ở `command`, đúng kiểu bộ nạp giữ lúc học); `val` và `test` luôn float32.
+   trưng, số của chuỗi (`vad`, mức, gain), cộng manifest sha256; PCM sạch của từng mẫu chỉ lưu ở nhánh đọc nó, `command`
+   và `wake` thì không. Nhánh nào khai kiểu lưu cho tập học thì đặc trưng của `train` lưu theo kiểu ấy (float16 ở
+   `command` và `wake`, đúng kiểu bộ nạp giữ lúc học); `val` và `test` luôn float32.
 4. Cắt mẫu. `command` `ctc` và `rnnt` cắt theo **luật cửa sổ lệnh của board** (§5.4), bằng chính code Cửa 3 dùng,
    trên `vad` của **riêng tiếng người nói**: bộ dò `vad` của chuỗi chạy trên tiếng người nói ở micro 0, đã qua phòng,
    chưa cộng nhiễu, đưa về mức đích của `agc`. Các đoạn `vad` ấy thành câu theo `utterance` của

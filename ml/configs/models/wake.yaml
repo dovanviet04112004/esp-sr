@@ -80,6 +80,7 @@ simulate:                          # make wake-features: python -m srpipe.tasks.
   split: on1
   workers: 12                      # each holds about 450 MB; more push a 10 GB WSL into swap
   repeats: {train_pos: 8}          # passes over a file, each in other rooms, levels and noise; else 1
+  train_dtype: float16             # train's features as stored: the trainer holds them so (KEHOACH 1.2)
 train:                             # E11-T11: python -m srpipe.tasks.wake.train (KEHOACH 3.11), on the GPU when present
   split: on1                       # processed/wake/<split>/<file> of make wake-features
   seed: 20260928

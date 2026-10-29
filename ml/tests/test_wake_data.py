@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 from srpipe.core import corpus, extract, splits
 from srpipe.core.audio_io import write_wav
@@ -171,6 +172,19 @@ def test_the_extracts_clips_of_the_word_join_the_train_positives(tmp_path: Path)
     assert not files["val_pos.txt"]
     negatives = [r.item for name in ("train_neg.txt", "val_neg.txt", "test_neg.txt") for r in files[name]]
     assert "speech/vlsp/a_3.wav" not in negatives and len(negatives) == 3
+
+
+def test_a_build_counts_as_built_only_in_the_dtype_asked(tmp_path: Path) -> None:
+    split_file = tmp_path / "train_neg.txt"
+    split_file.write_text("speech/x/a.wav\t-\t-\tpublic\n", encoding="utf-8")
+    device_cfg = {"seed": 1}
+    out = tmp_path / "train_neg"
+    out.mkdir()
+    body = {"config": device_cfg, "split": {"sha256": splits.sha256_of(split_file)}, "repeats": 2}
+    for store, built in (({"dtype": "float16", "pcm": False}, True), ({"dtype": "float32", "pcm": False}, False)):
+        (out / "manifest.yaml").write_text(yaml.safe_dump(body | store), encoding="utf-8")
+        assert data.built_as(out, device_cfg, split_file, 2, "float16") is built
+    assert not data.built_as(out, device_cfg, split_file, 1, "float32")
 
 
 def test_a_pilot_drawing_its_train_negatives_leaves_out_the_word_and_the_kept_speakers(tmp_path: Path) -> None:

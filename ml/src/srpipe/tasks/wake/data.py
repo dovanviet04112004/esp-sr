@@ -347,32 +347,46 @@ Dựng bằng `python -m srpipe.tasks.wake.data` (`make splits`), seed {spec["se
 """
 
 
-def built_as(out: Path, device_cfg: dict, split_file: Path, repeats: int) -> bool:
-    """Whether out holds a finished simulation of split_file with this config and number of passes."""
+def built_as(out: Path, device_cfg: dict, split_file: Path, repeats: int, dtype: str) -> bool:
+    """Whether out holds a finished simulation of split_file with this config, number of passes and features' dtype."""
     if not (out / "manifest.yaml").exists():
         return False
     body = yaml.safe_load((out / "manifest.yaml").read_text(encoding="utf-8"))
     same_split = body["split"]["sha256"] == splits.sha256_of(split_file)
-    return body["config"] == device_cfg and same_split and body.get("repeats", 1) == repeats
+    same_dtype = body.get("dtype", "float32") == dtype
+    return body["config"] == device_cfg and same_split and body.get("repeats", 1) == repeats and same_dtype
 
 
 def simulate(cfg: dict, paths: dict[str, Path]) -> None:
     """Every file of the split through the board simulation into processed/wake/<split>/<file>, smallest first,
-    each as many passes as simulate.repeats asks; a file already built the same way is left as it is."""
+    each as many passes as simulate.repeats asks, train's features stored as simulate.train_dtype and the rest in
+    float32, no clean samples kept; a file already built the same way is left as it is."""
     spec = cfg["simulate"]
     device_cfg = load_device(cfg["features"])
     for split_file in sorted((paths["splits"] / "wake" / spec["split"]).glob("*.txt"), key=lambda f: f.stat().st_size):
         out = paths["processed"] / "wake" / spec["split"] / split_file.stem
         repeats = spec["repeats"].get(split_file.stem, 1)
-        if built_as(out, device_cfg, split_file, repeats):
+        dtype = spec.get("train_dtype", "float32") if split_file.stem.startswith("train") else "float32"
+        if built_as(out, device_cfg, split_file, repeats, dtype):
             print(f"{out}: already built", flush=True)
             continue
         twins = [d for d in sorted(out.parent.parent.glob(f"*/{split_file.stem}")) if d != out]
-        twin = next((d for d in twins if built_as(d, device_cfg, split_file, repeats)), None)
+        twin = next((d for d in twins if built_as(d, device_cfg, split_file, repeats, dtype)), None)
         if twin is not None:
             print(f"{out}: linked from {device.link_build(twin, out)}", flush=True)
             continue
-        print(device.build(device_cfg, split_file, paths["raw"], paths["interim"], out, spec["workers"], repeats))
+        out_file = device.build(
+            device_cfg,
+            split_file,
+            paths["raw"],
+            paths["interim"],
+            out,
+            spec["workers"],
+            repeats,
+            keep_pcm=False,
+            dtype=dtype,
+        )
+        print(out_file)
 
 
 def real_positives(cfg: dict, raw: Path) -> dict[str, float]:
