@@ -388,3 +388,26 @@ như chip tính. Mỗi sitting chạy liền một mạch, không reset.
 - Đúng nhất theo lệnh: bật đèn 35/37, tắt đèn 32/35, bật quạt 35/36, tắt quạt 28/34, mở cửa 10/10, đóng cửa 10/11,
   tăng âm lượng 10/13, giảm âm lượng 11/11, dừng lại 10/11, chụp ảnh 11/11.
 - Số câu nhận đúng tính chung cả 209 câu lấy từ dòng float của thang `CONTRACT=v9`, khi bản dựng xong.
+
+**Thang int8 của v8 trên cao độ của hợp đồng** (`make ctc-ptq` rồi `make ctc-int16`, `RUN=…/20261007_439d763-dirty_f438bd
+CONTRACT=v9`, 09:50–10:50). Hiệu chuẩn 64 đoạn `train`, lỗi đơn vị trên 1 963 câu `test`, Cửa 3 ở δ₁ 300 ‰, δ₂ 50 ‰ của
+thang. Trong ngoặc là thang của dòng đang deploy (`int8_kaldi_pitch`, cả ba chiều cao độ giữ ở trung bình):
+
+| Dòng | Lỗi đơn vị | Đúng nhất | Nhận đúng | Nhận nhầm |
+|---|---|---|---|---|
+| float | 0,379 (0,414) | 192 (194) | 161 (167) | 3 (3) |
+| bậc 2: `minmax` | 0,441 (0,473) | 193 (191) | 141 (146) | 3 (2) |
+| bậc 2: `percentile` | 0,393 (0,434) | 195 (196) | 157 (163) | 3 (4) |
+| bậc 2: `mse` | 0,405 (0,443) | 194 (194) | 152 (151) | 3 (2) |
+| bậc 2: `kl` | 0,401 (0,449) | 195 (198) | 136 (135) | 3 (2) |
+| bậc 3: `percentile`, int16 1 lớp | 0,394 | 194 | 151 | 3 |
+| bậc 3: `percentile`, int16 2 lớp | 0,396 | 195 | 151 | 3 |
+| bậc 3: `percentile`, int16 4 lớp | 0,391 | 196 | 159 | 3 |
+
+- Mọi dòng bớt 0,03–0,05 lỗi đơn vị so với cùng dòng khi giữ cao độ. Cửa 3 gần như không đổi: đúng nhất trong ±3 câu,
+  nhận đúng ở δ của thang kém 6 câu với `percentile`.
+- ESP-PPQ xếp ba tích chập 2D của phần đầu đứng đầu sai số từng lớp (`front/convs.2` 0,0036, `convs.1` 0,0034,
+  `first` 0,0022), như thang giữ cao độ.
+- Theo luật KẾ HOẠCH §3.14 (`gate_tie` 5), int16 4 lớp (159) và `percentile` (157) hoà, int16 4 lớp lỗi đơn vị thấp
+  hơn 0,002. Mốc của phần 3.4.5 (nhận đúng ≥ 158, lỗi đơn vị < 0,434): int16 4 lớp đạt, `percentile` kém 1 câu. Giờ chip
+  của bốn tích chập int16 chưa đo.
