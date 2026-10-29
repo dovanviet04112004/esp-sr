@@ -3362,6 +3362,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `q_spkset` | Queue depth 1, `net_mqtt_speakers_t` từ `down/speakers`: kết quả phân tích và `app_speaker_set_t`, ở PSRAM | 1 076 B | task esp-mqtt | `xac_task` | ghi đè: bản mới thay bản chờ; payload rỗng, tức bản retained bị xoá, không vào hàng | như `q_cmdset`: danh sách retained tới lúc nối lại không chen hàng với yêu cầu của console; bản sai khuôn vẫn vào hàng để `xac_task` ra `ERROR SPEAKERS_INVALID` |
 | `q_roster` | Queue depth 1, `app_speaker_state_t`, ở PSRAM | 1 092 B | `xac_task`, ghi đè | `gui_task`, console, `xQueuePeek` | ghi đè | bản trạng thái mới nhất của danh sách người nói; người đọc chỉ nhìn, không lấy đi, không ai chờ trên nó |
 | `s_diverting` | `atomic_bool` trong `svc_listen` | 1 B | `xac_task` | `nhan_task` | — ghi đè | kiểm người nói bật hay đang đăng ký: không thì `nhan_task` không chép, không gửi; một người ghi, một người đọc, một byte |
+| `s_enrolling` | `atomic_bool` trong `svc_listen` | 1 B | `xac_task` | `nhan_task` | — ghi đè | đang đăng ký giọng: ảnh có `wake` thì mọi câu vẫn mở cửa sổ (§5.4); một người ghi, một người đọc, một byte |
 | `s_split` | một phần việc trong `ai_engine` (`espdl_split_two.cpp`), chỉ khi `AI_ENGINE_CORES_TWO`: con trỏ hàm, ngữ cảnh, trạng thái nguyên tử; thông báo task tới `phu_task` | ~16 B | task chạy mạng | `phu_task` | không bao giờ đầy, mỗi lần một phần việc. Task khác đang giữ nó thì op chạy cả hai phần ở chỗ. Task giao xong phần 0 mà `phu_task` chưa nhận phần 1 thì tự làm phần ấy | trạng thái nguyên tử thay khoá: task giao không chờ `phu_task` bắt đầu, chỉ chờ phần nó đã nhận, lâu nhất phần ấy cộng một khung của `sach` |
 | `eg_system` | EventGroup | 4 B | mọi task | mọi task | — | bit `WIFI_OK` `MQTT_OK` `TIME_OK` `MODELS_OK` `STREAM_ON` `SPEAKING` `CALIBRATING` `OTA_RUNNING` |
 | `m_storage` | Mutex, nội bộ `sys_storage` | — | mọi đường ghi NVS và LittleFS | — | chờ có hạn 200 ms | khoá lá, không lấy khoá nào khác bên trong |
@@ -3461,7 +3462,8 @@ cửa sổ của `LENH`, lệnh hay từ chối, đưa máy về `NGHE`; im `SVC
 `svc_listen`, vì đổi `listen.yaml` là đổi `listen_hash`) mà không có câu nào cũng về `NGHE`, không chấm. Một lần vượt
 ngưỡng chỉ tính một lần: điểm phải xuống dưới ngưỡng rồi mới được vượt lại. `wake` vượt ngưỡng giữa lúc `LENH` thì `LENH`
 bắt đầu lại từ bước mới: cửa sổ đang mở có từ đánh thức ấy bị bỏ, mốc chặn dời tới sau nó; cửa sổ đã chốt vẫn được chấm.
-Bộ đệm của `wake` chỉ xoá khi luồng đứt.
+Bộ đệm của `wake` chỉ xoá khi luồng đứt. Trong lúc đăng ký giọng (§3.17) mọi câu đều mở cửa sổ như ảnh không có `wake`:
+người đăng ký chỉ đọc lệnh trình nhắc đưa ra, không nói từ đánh thức trước mỗi lệnh.
 
 ### 5.5 Quy chuẩn thêm task hoặc việc song song
 
