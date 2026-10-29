@@ -1,6 +1,7 @@
 """srpipe.core.repitch: a kept contour resynthesises near the original F0 and leaves the clip outside its stretch as it
 was; a target contour moves F0 inside the stretch only, which a kept contour does not; a glide reads as semitones over
-the reference; noise has no voiced stretch; a speaker's median skips unvoiced frames; the config keeps its fields."""
+the reference; noise has no voiced stretch; a speaker's median skips unvoiced frames; a clip's median F0 is its
+voice's and NaN for noise; the config keeps its fields."""
 
 from __future__ import annotations
 
@@ -91,6 +92,12 @@ def test_a_speakers_median_skips_unvoiced_frames() -> None:
     ]
     assert repitch.median_hz(tracks) == 120.0
     assert math.isnan(repitch.median_hz([repitch.Track(np.zeros(1), np.zeros(1))]))
+
+
+def test_a_clips_median_f0_is_its_voices_and_nan_for_noise(steady: np.ndarray) -> None:
+    assert repitch.clip_median_hz(steady, CFG.time_step_s, CFG.f0_range_hz) == pytest.approx(150.0, rel=0.02)
+    noise = np.random.default_rng(0).normal(0.0, 0.1, FS)
+    assert math.isnan(repitch.clip_median_hz(noise, CFG.time_step_s, CFG.f0_range_hz))
 
 
 def test_the_config_takes_its_own_fields() -> None:

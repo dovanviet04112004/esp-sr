@@ -1,6 +1,7 @@
 """One syllable's F0 contour replaced by Praat's overlap-add, formants kept (KEHOACH 3.11): a clip's pitch by Praat,
 a syllable's voiced stretch, its contour in semitones over the speaker's median F0 at even points of that stretch, and
-the clip resynthesised over the syllable on another contour or on its own. Praat is the praat extra of pyproject."""
+the clip resynthesised over the syllable on another contour or on its own; also a clip's median F0, which the wake's
+pitch-weighted draws read (KEHOACH 3.11). Praat is the praat extra of pyproject."""
 
 from __future__ import annotations
 
@@ -53,6 +54,12 @@ def median_hz(tracks: list[Track]) -> float:
     """The median F0 over every voiced frame of tracks, a speaker's reference; NaN when none is voiced."""
     voiced = np.concatenate([t.f0_hz[t.f0_hz > 0] for t in tracks])
     return float(np.median(voiced)) if len(voiced) else math.nan
+
+
+def clip_median_hz(x: np.ndarray, time_step_s: float, f0_range_hz: tuple[float, float]) -> float:
+    """The median F0 over the frames Praat calls voiced in x (float, 16 kHz); NaN when it calls none."""
+    pitch = parselmouth.Sound(x.astype(np.float64), sampling_frequency=FS).to_pitch(time_step_s, *f0_range_hz)
+    return median_hz([Track(np.asarray(pitch.xs()), np.asarray(pitch.selected_array["frequency"]))])
 
 
 def voiced_stretch(t: Track, start_s: float, end_s: float, cfg: RepitchConfig) -> tuple[float, float] | None:
