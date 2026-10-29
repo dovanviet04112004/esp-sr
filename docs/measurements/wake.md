@@ -546,3 +546,5 @@ Mẩu bắt đầu và kết thúc giữa quãng ấy.
 - 19:09:46 board B ngừng quyết định sau 7 phút nói thử: `COMMAND` bật đèn rồi `WAKE` ở bước 27 228 trong câu đang có
   cửa sổ, từ đó không `WAKE` nào, mọi câu "window queue full" tới khi khởi động lại 19:13. Cửa sổ thứ hai mở chồng lên
   cửa sổ đang mở, cái đầu không bao giờ đóng nên chặn hàng đợi 4 cửa sổ. Sửa ở `3115469d`, nạp 19:16.
+- Sau bản sửa, 19:16–19:30, δ 300 / 10 / 65 535, 900‰: 59 `WAKE`, 36 `COMMAND`, 0 không có quyết định, 9 `PART`,
+  7 `LOW_SCORE`, 7 `SPEAKER`.

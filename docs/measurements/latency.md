@@ -1518,3 +1518,26 @@ Tối ưu riêng cho b3, hàng `timing` không GroupNorm, đồ thị ở flash,
   cho ~115 triệu MAC. Tối ưu như b0 (cắt lát hai loại conv ấy, pointwise của khối ở 96 và 144 kênh gần 0,09 chu kỳ
   như `PointwiseS8`, trọng số của khối không đọc lại từ flash, gộp phần còn lại, thêm `GroupNorm`) ước còn ~1,3–1,8 s
   một cửa sổ 🔬, vẫn trên mức ~1 s của điều kiện cắm (ADR-0021).
+
+## 32. Sản phẩm có `wake` và SwiftF0: từ lúc câu chốt tới sự kiện (E11-T37, E11-T14)
+
+Board B, firmware sản phẩm `bench` từ `4e53f4da` rồi `3115469d`, ảnh có `wake` `on2` (900‰), `command` v9 hàng
+`percentile` nghe SwiftF0 (hàng kl, 16 khung một lượt), `speaker` b0 bật, δ 300 / 10 / 65 535, bộ 38 lệnh. Chủ repo nói
+trực tiếp "on" rồi lệnh, 29/10 19:02–19:30; 128 quyết định trong log UART:
+
+| | Số | Cửa sổ, bước | Việc của cửa sổ | Từ lúc câu chốt tới quyết định | Kiểm giọng |
+|---|---|---|---|---|---|
+| `COMMAND` | 62 | p50 128, p90 169, max 208 | p50 1 259 ms, p90 1 671 ms | p50 514 ms, p90 678 ms, max 5 856 ms | 504 ms |
+| `REJECT` | 66 | p50 113, p90 200, max 234 | p50 1 117 ms, p90 1 937 ms | p50 695 ms, p90 4 956 ms, max 6 584 ms | — |
+
+- Việc của cửa sổ là 9,8 ms mỗi bước của cửa sổ (trung vị, thời gian thật của các lượt `svc_listen_work`). Cộng cao
+  độ SwiftF0 ~4,6 ms mỗi bước (`pitch.md` §7.4) và `wake` 0,3 ms mỗi bước (`wake.md` §8), nhân 0 bận chừng 15 trong
+  16 ms mỗi bước khi có cửa sổ: ước từ ba số đo, chưa đo tải nhân trực tiếp 🔬.
+- Từ lúc hết tiếng tới `COMMAND`, trung vị: hangover `vad` 240 ms, `utterance.gap_s` 400 ms để câu chốt, 514 ms, kiểm
+  giọng 504 ms, cộng chừng 1,66 s. App thử `listen-unit` cùng hàng chốt tới quyết định 387 ms trung vị (`pitch.md`
+  §7.6).
+- Đuôi 4,9–6,6 s: tiếng nói liền giữ `LENH`, cửa sổ 200–234 bước nối nhau và việc dồn lại.
+- RAM nội trống thấp nhất (`min` của `heartbeat`): 5,2 KiB sau lần khởi động 18:36, 5,4 KiB sau lần 19:02, 12,5 KiB
+  sau 848 s của lần 19:16. `pitch` mượn được 13 760 / 14 272 B, `speaker` 13 760 / 21 408 B; phần thiếu đọc tại chỗ.
+- `make listen-unit` sau `3115469d` (ảnh không có `wake`, 29/10 19:35–20:05): 7 lượt đạt, 309 cửa sổ của các phiên Cửa 3
+  trùng Python từng trường; từ lúc câu chốt tới quyết định 356–440 ms trung bình mỗi lượt.
