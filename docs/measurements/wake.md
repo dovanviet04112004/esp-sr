@@ -474,3 +474,21 @@ Mẩu bắt đầu và kết thúc giữa quãng ấy.
 - Bốn cách cắt giữa câu đều bị bác: mép rộng, bộ nghe chọn mép, chỉ ngắt hơi sau cụm, mép ở chỗ khép miệng.
   Ở các kho này người nói hầu như không bao giờ ngắt hơi quanh "trợ lý". Đây là giới hạn của dữ liệu, không phải của
   luật cắt.
+
+## 8. Từ tạm "on": nhịp học trên `wake/on1` (29/10)
+
+`processed/wake/on1` dựng xong 16:31: 7 file, `train_neg` 233 shard 3,8 GB float16, `train_pos` 0,36 GB,
+`val_neg` 0,76 GB và `test_neg` 1,4 GB float32. RAM của WSL là ~9,9 GB.
+
+| Lượt (`make wake-train`) | Đặc trưng nằm ở | RAM tiến trình | Nhịp |
+|---|---|---|---|
+| 16:38, dừng tay | đọc hết vào RAM, `astype` chép thêm | 6,2 GB trước bước đầu, RAM sẵn còn 1,2 GB | chưa tới bước 1 |
+| 16:44, dừng ở bước 3 000 | ánh xạ từ ổ E: (`mmap_mode="r"`, `852b233f`) | RAM sẵn 5,9 GB | 1 000 bước mỗi 2–3,6 phút, ~4,6–7,8 bước/s |
+| `v3`, `v4` (29/09, 01/10) | RAM | — | 20 000 bước trong 10–12 phút, ~30 bước/s |
+
+- Lượt ánh xạ đọc 11,3 GB từ ổ E: trong 9 phút cho 4,7 GB dữ liệu: page cache không giữ trang ánh xạ qua 9p của WSL
+  (`cache=5`), mỗi cửa sổ 40 KB thành chừng mười lần đọc trang. Đọc trước cả file bằng `cat` (62 s) không giúp.
+  Tiến trình dùng 81–100% một nhân, GPU 12–42%.
+- Ở bước 1 000–3 000 (float, chưa xong lịch học): `val` bắt 85,1–85,9% ở báo nhầm 2,95 lần/giờ.
+- Còn: đọc mỗi cửa sổ một lần liền khối thay vì từng trang, hay giữ `train` trong RAM khi `val`, `test` ánh xạ; chủ repo
+  cho dừng 16:59 để sửa rồi học lại.
