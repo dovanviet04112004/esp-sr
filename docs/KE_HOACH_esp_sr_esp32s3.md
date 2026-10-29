@@ -54,7 +54,7 @@ Bảng này tồn tại cho tới khi TỔNG QUAN được sửa theo (E1-T9). S
 | 8 | DOA GCC-PHAT, không nói độ phân giải | Dò **lưới góc** trên phổ chéo đã làm trơn, không lấy đỉnh trễ nguyên | Micro của board B cách 4,5 cm ở 16 kHz chỉ có ±2,10 mẫu trễ: lấy đỉnh nguyên chỉ ra 5 góc | §3.6 |
 | 9 | `command` so chuỗi âm vị với danh sách | Hai đường sau một hợp đồng (ADR-0012): **chấm CTC có ràng buộc** từng lệnh bằng thuật toán tiến, kèm **biến thể phương ngữ** (`ctc`); và **DS-CNN phân lớp** bộ lệnh cố định (`kws`), đường mặc định tới khi Cửa 3 chọn | Giải tham lam rồi so chuỗi vứt đi xác suất; tập lệnh đóng cho phép chấm thẳng từng lệnh với giá gần bằng không. `kws` chạy được trước khi cao độ, GRU chạy dòng và chấm CTC xong | §3.12 |
 | 10 | Thanh điệu: ba đường | **Nhãn thanh chen trong cùng chuỗi CTC** trên 44 đơn vị, từ **log-mel 80 cộng ba chiều cao độ** (ADR-0010, ADR-0017) | Tài liệu: thanh phải nằm trong đơn vị và cao độ hạ lỗi rõ ở ngôn ngữ có thanh, còn cách đặt thanh không đổi lỗi gộp; một đầu ra, bộ ký hiệu nhỏ nhất | §3.11, §3.12 |
-| 11 | Từ đánh thức 2–3 âm tiết | Bản demo: **"trợ lý"**, 2 âm tiết, ưu tiên bắt được (ADR-0011); cụm 3–4 âm tiết là hướng khi siết báo nhầm | Cụm hai âm tiết dài chừng nửa giây và trùng lời nói thường nhiều hơn; đổi lại nó tự nhiên và người thật trong kho nói nó 223 lần, nên có mẫu dương giọng thật | §3.11 |
+| 11 | Từ đánh thức 2–3 âm tiết | Đích: **"trợ lý"**, 2 âm tiết, ưu tiên bắt được (ADR-0011); cụm 3–4 âm tiết là hướng khi siết báo nhầm. Tạm: **"on"** của Speech Commands, tới khi có giọng thật nói "trợ lý" (ADR-0029) | Cụm hai âm tiết dài chừng nửa giây và trùng lời nói thường nhiều hơn; đổi lại nó tự nhiên và người thật trong kho nói nó 223 lần, nên có mẫu dương giọng thật | §3.11 |
 | 12 | `ns` mạng là RNNoise, không chọn mạng theo vạch vì đắt; ~24% một nhân, ~40 MFLOPS | **Hai ứng viên** cùng dữ liệu, cùng lưới, học trong một lượt, cắm vào cùng khe `ns` (chủ repo chốt 30/09 và 01/10): **RNNoise-16k**, dựng lại dải cho 16 kHz và huấn luyện lại, phần mạng ~11 MFLOP/s ở 62,5 khung/s 🔬; và **NSNet-16k**, mạng theo vạch họ NSNet2, cỡ L chủ repo chọn sau probe trên board B (ADR-0014). Bản hơn sàn bằng thước của §3.15 thì giữ, không bản nào hơn thì giữ sàn; ADR ghi | Bàn so §3.16 thấy mạng dìm nhiễu hạ nhiễu sâu hơn sàn nhiều trên cùng lối vào (`docs/measurements/afe/compare.md`, mục "Dìm nhiễu trên cùng lối vào gsc"). Giá của mạng theo vạch nằm ở bề rộng lớp hồi tiếp, hai lớp dày vào và ra chỉ tăng tuyến tính theo số vạch, nên NSNet-16k L, 5,1 ms mỗi bước trên board B, giữ nhân 1 quanh mục tiêu 50% (§5.6). Số 40 MFLOPS là của bản 48 kHz, 100 khung/s | §3.9 |
 | 13 | Task `nhan` ở nhân 1 cùng `thu` và `sach` | `nhan` ở **nhân 0** | TỔNG QUAN tự nói "một nhân không đủ", nhưng lại dồn cả ba việc liên tục vào nhân 1; cửa sổ lệnh 11–18 ms mỗi 32 ms đẩy nhân 1 quá 100% | §5.1 |
 | 14 | RAM nội ~97 KB; luật "RAM nội chỉ giữ thứ bị chạm mỗi khung" kéo trọng số `ns` và `wake` vào RAM nội | Ước lại, thiếu ba khoản: ngăn xếp mạng, trạng thái AEC thật, đệm luồng. **Mọi model — trọng số và vùng làm việc — nằm ở PSRAM**, trọng số chép từ flash lên lúc nạp; hai ngoại lệ ở §6.5 | Cộng cả trọng số `ns` và `wake` vào thì RAM nội vượt phần còn cấp được sau Wi-Fi | §6.5 |
@@ -119,6 +119,7 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | Speech-MASSIVE, phần tiếng Việt | `command` | 5 122 câu ra lệnh cho trợ lý ảo, có mã người nói | CC BY 4.0 | lời cùng loại với bộ lệnh; tách theo người nói như §1.3 |
 | ViMD (Vietnamese Multi-Dialect) | `command` | ~100 giờ 🔬, 63 tỉnh, có mã người nói và giới | CC BY-NC-ND 4.0, **không phái sinh** | giọng mọi vùng; câu dài ~19 s, quá `train.max_s`: cắt lại theo mốc từ trước khi vào split |
 | **Mẩu trích theo lời** từ các kho tiếng Việt trên Hugging Face (`srpipe/core/extract.py`, `configs/common/extract.yaml`) | người thật nói đúng từ đánh thức và các lệnh của bộ lệnh, mỗi mẩu chỉ chứa cụm ấy; `wake` dương, `command` học | chỉ các câu có lời đọc ra một cụm; cắt xong câu gốc bị xoá, chỉ giữ mẩu | theo từng kho, ghi ở `DU_LIEU.md` | kho lớn (GigaSpeech2, YODAS2, PhoAudiobook, VietSpeech, viVoice…) quá cỡ ổ dữ liệu: dò lời qua mạng, chỉ kéo phần âm thanh chứa câu khớp; lệnh chưa học của E11-T13 không trích; chỉ vào tập học; kho tự ghi là tiếng tổng hợp (dolly-audio) vẫn trích nhưng mẩu mang nhãn `synth` ở `clips.tsv`, `wake` không lấy làm người thật |
+| Speech Commands v0.02 (Google) | `wake` tạm: dương "on", âm bản khó là các từ khác (ADR-0029) | 105 829 mẩu ≤ 1 s, 35 từ tiếng Anh, 2 618 người nói | CC BY 4.0 | người thật nhiều giọng; `val` theo `testing_list.txt` của bộ |
 | Lệnh điều khiển nhà tự thu (repo `edge-ai-voice-control-esp32`) | `command` | ~1 300 lệnh 1 s: bật/tắt đèn, bật/tắt quạt, bật/tắt hết; nhiễu phòng | MIT | người thật nói đúng lệnh của bộ lệnh; không có mã người nói, chỉ vào tập học |
 | MUSAN | `ns`, tăng cường | ~100 giờ nhiễu, nhạc, lời nói | CC BY 4.0 phần lớn 🔬 | |
 | DEMAND | `ns` | 15 môi trường, 16 kênh | CC BY-SA 3.0 🔬 | |
@@ -1286,6 +1287,18 @@ bằng `StreamingCache` của esp-dl. Đầu ra làm trơn trung bình trượt 
 chừng nửa giây, 28 lần mỗi triệu âm tiết lời nói: ngắn và thông dụng hơn luật 3–4 âm tiết, pha thanh khác nhau, mà
 `candidates` vẫn chấm. Bản demo **ưu tiên bắt được**: cụm na ná như "trợ giúp", "trợ cấp" bị bắt nhầm cũng chấp nhận;
 siết báo nhầm để sau, khi có dữ liệu thu thật.
+
+**Từ tạm "on"** (ADR-0029). Tới khi có giọng thật nói "trợ lý", sản phẩm thức bằng "on" của Speech Commands v0.02,
+split `wake/on1`:
+- dương: mọi mẩu "on" của bộ, cắt ở cuối tiếng nói; `val` lấy từ `testing_list.txt`, `train` từ mẩu không nằm ở danh
+  sách nào, nên người nói tách như bộ tách;
+- âm bản khó: các từ còn lại của bộ, rút theo seed;
+- âm bản học: 100 giờ lời nói tiếng Việt rút mới từ các kho học còn trên đĩa, không Bud500; `val_neg`, `test_neg` giữ
+  nguyên của `wake/v4`, vốn không có Bud500;
+- mọi mẩu dương là giọng thật, nên không có tỉ lệ mẩu thật; việc phụ CTC giữ trên lời nói tiếng Việt của `train_neg`.
+"on" một âm tiết, gần "ông", "không", "con": báo nhầm đo trên phiên board thu lời nói tiếng Việt.
+
+Các đoạn dưới tả đường của "trợ lý".
 
 **Dữ liệu dương** gồm tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, và **người thật nói
 "trợ lý"**: mọi câu có lời đọc ra từ ấy, của kho học lẫn của những kho tiếng Việt lớn trên Hugging Face, trích theo
