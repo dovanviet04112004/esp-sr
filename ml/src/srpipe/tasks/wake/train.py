@@ -288,11 +288,13 @@ def main(argv: list[str] | None = None) -> int:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     root = paths["processed"] / "wake" / cfg["train"]["split"]
     around = label_hops(cfg["train"]["label_s"])
-    sets = {
-        name: load_set(root / name, positive, around, dtype)
-        for name, (positive, dtype) in SETS.items()
-        if name not in OPTIONAL or (root / name).exists()
-    }
+    present = [name for name in SETS if name not in OPTIONAL or (root / name).exists()]
+
+    def loaded(names: list[str]) -> dict[str, list[Shard]]:
+        return {name: load_set(root / name, SETS[name][0], around, SETS[name][1]) for name in names}
+
+    # test's features join only once train's are gone: all of on1's together pass 8 GB of the machine's 10.
+    sets = loaded([name for name in present if not name.startswith("test")])
     split_files = sorted((paths["splits"] / "wake" / cfg["train"]["split"]).glob("*.txt"))
     units = None
     if cfg["train"].get("aux", {}).get("weight", 0) > 0:
@@ -301,6 +303,9 @@ def main(argv: list[str] | None = None) -> int:
         units = sentence_units(clips, spoken, cfg["train"]["aux"]["dialect"])
     run = create_run_dir(paths["artifacts"], "wake", cfg, split_files)
     model, stats, history = train(cfg, sets, device, units, run)
+    sets = {name: s for name, s in sets.items() if not name.startswith("train")} | loaded(
+        [name for name in present if name.startswith("test")]
+    )
     threshold = stats["kept"]["threshold"]
     report = {"val": stats["kept"], "history": history}
     for name in ("val", "test"):
