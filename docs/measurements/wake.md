@@ -588,7 +588,7 @@ Mỗi phép thử đổi đúng một thứ rồi chấm lại cả 41 câu. Ô 
   6 dB đưa nửa câu to từ 802 lên 954. Tiếng sáng hơn (giọng gắng sức) kéo cả hai xuống.
 
 Vật liệu học của `on2` so với giọng chủ repo. Cao độ là F0 trung vị mỗi mẩu, đo trên tiếng gốc; mức là trung bình
-log-mel ở bước to nhất, đầu vào model trước thống kê dải, đo trên shard đã dựng:
+log-mel (log tự nhiên của công suất dải) ở bước to nhất, đầu vào model trước thống kê dải, đo trên shard đã dựng:
 
 | Tập | F0 p10 / p50 / p90 (Hz) | Trên 158 Hz | Mức p10 / p50 / p90 |
 |---|---|---|---|
@@ -600,11 +600,14 @@ log-mel ở bước to nhất, đầu vào model trước thống kê dải, đo
 - F0 trung vị từng kho tiếng Việt: VIVOS 226, VLSP 207, FPT 182, LSVSC 162, ViMD 127 Hz.
 - Nguyên nhân: vật liệu học gắn cao độ và độ to với nhãn.
   - Mẫu dương là "on" tiếng Anh, phần lớn giọng trầm, mỗi mẩu một từ.
-  - Âm bản tiếng Việt giọng cao hơn và là câu dài. Âm tiết to nhất của âm bản to hơn chữ "on" của mẫu dương 2,5 dB ở
-    trung vị, có lẽ vì mô phỏng đưa mỗi mẩu về cùng RMS phần có tiếng.
+  - Âm bản tiếng Việt giọng cao hơn và là câu dài. Ở bước to nhất, đầu vào model của âm bản cao hơn chữ "on" của mẫu
+    dương 2,5 đơn vị log ở trung vị, chừng 10 dB. Mức vào chuỗi ở bước ấy gần như bằng nhau (trung vị −53 dBFS ở dương
+    và âm bản khó, −52 ở âm bản), còn `agc` cho âm bản 23 dB, dương 18 dB, âm bản khó 17 dB: câu dài đủ lâu để `agc`
+    kéo lên mức đích, từ đứng riêng thì không. Phần còn lại của chênh chưa tách.
   - Model học thêm luật tắt "cao và to thì không phải 'on'". Giọng chủ repo đã nằm ở phần trên của mẫu dương: F0 ở phân
     vị 74, mức ở phân vị 77. Nói to và cao đẩy nó sang vùng của âm bản.
 - Chưa sửa, theo ý chủ repo. Hướng sửa để chọn:
   - đưa "on" của chủ repo đủ ba giọng (trầm, thường, to cao) vào mẫu dương;
   - dịch cao độ mẫu dương khi học;
   - cân mức chữ dương với âm tiết to nhất của âm bản.
+- Chủ repo chọn không thu thêm, sửa bằng hai hướng sau: `wake/on3` (KẾ HOẠCH §3.11).
