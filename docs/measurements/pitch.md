@@ -370,6 +370,10 @@ phỏng trên cả 384 khung, rồi `decode_int8`.
   cao độ ra trùng từng bit, và 7,5–8,5 s còn 3,1–3,6 s mỗi phiên.
 - Phép kiểm: dựng lại `v9/val` bằng bản gộp thì cả 28 file trùng sha256 bản dựng của lượt đầu. 7 shard mất 2 phút
   19 giây, so với khoảng 6 phút của lượt đầu.
+- Bản dựng xong 09:31, `exit=0`: 906 shard cùng file `board` (105 câu của 10 phiên), ~18 GB trên ổ E:. Ba lần dừng
+  giữa chừng (đổi sang bản gộp, giảm worker, chủ repo đi làm) đều đi tiếp từ shard đã xong. Với 5 worker và bản gộp,
+  nhịp là 2–3 shard mỗi phút.
+- `quant.contract_cfg` nhận bản dựng: split trùng `split.lock` của v8, front đúng hợp đồng (`listen_hash` 0x895601c9).
 
 **v8 float nghe cao độ của hợp đồng, Cửa 3** (`make command-eval TRACK=ctc RUN=… CONTRACT=v9`): cao độ tính từ bản thu
 như chip tính. Mỗi sitting chạy liền một mạch, không reset.
