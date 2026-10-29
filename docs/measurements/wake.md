@@ -618,3 +618,41 @@ log-mel (log tự nhiên của công suất dải) ở bước to nhất, đầu
 - Bảng F0 của `train_pos` (Praat, mẩu sạch): p10 / p50 / p90 là 92 / 122 / 199 Hz; 9 / 3 086 mẩu không có F0. Rút theo
   trọng số thì thành 111 / 164 / 232 Hz, 55% số lần rút trên 158 Hz (26% khi rút đều), số mẫu hiệu dụng 13 910 /
   24 688.
+- Lượt học `on3` (run `20261029_f740a15-dirty_ac56bc`): split `on2`, cùng seed, 20 000 bước; mẫu dương và âm bản khó
+  rút theo trọng số cao độ (âm bản khó hiệu dụng 18 550 / 30 000), cửa sổ của chúng to thêm 0–20 dB. Float: `val` bắt
+  83,8% ở 0,935, 2,77 báo nhầm/giờ (`on2` 80,1% ở 2,95); `test` 3,62/giờ (`on2` 3,41).
+
+| Hàng int8 của `on3` | Ngưỡng | `val` bắt | `val` báo nhầm/giờ | `test` báo nhầm/giờ |
+|---|---|---|---|---|
+| `kl` | 930‰ | 86,4% | 2,86 | 4,24 |
+| `percentile` | 925‰ | 86,4% | 2,86 | 4,29 |
+| `minmax` | 920‰ | 85,1% | 2,95 | 4,29 |
+| `mse` | 925‰ | 87,9% | 2,77 | 4,81 |
+
+Hàng `minmax` của `on3` ở các ngưỡng, cùng 41 câu của phiên `20261029_home_001` chấm như chip. Ở 900–930‰ `on2` qua
+3–6 câu, `on1` 19–20 câu:
+
+| Ngưỡng | `val` bắt | `val` báo nhầm/giờ | `test` báo nhầm/giờ | Câu qua ngưỡng |
+|---|---|---|---|---|
+| 900‰ | 88,6% | 3,58 | 5,33 | 24 / 41 |
+| 910‰ | 87,4% | 3,22 | 4,81 | 22 / 41 |
+| 920‰ | 85,1% | 2,95 | 4,29 | 22 / 41 |
+| 930‰ | 84,6% | 2,68 | 3,78 | 21 / 41 |
+
+Cùng các phép thử đổi từng thứ ở trên. Ô là số câu qua ngưỡng: `on1` ở 960‰, `on2` ở 900‰, `on3` ở 920‰.
+
+| Phép thử | `on1` | `on2` | `on3` |
+|---|---|---|---|
+| Tiếng sạch của board | 17 / 41 | 6 / 41 | **22 / 41** |
+| Nửa F0 cao / nửa F0 thấp | 6 / 11 trên 19 | 3 / 3 trên 19 | **12 / 10** trên 19 |
+| Nửa to / nửa nhỏ | 6 / 20, 11 / 21 | 4 / 20, 2 / 21 | **12 / 20**, 10 / 21 |
+| Mức vào chuỗi −12 / −6 / 0 / +6 dB | 20 / 19 / 18 / 14 | 7 / 5 / 5 / 4 | 20 / 22 / 21 / 21 |
+| Mức vào model −6 / +6 dB | 20 / 15 | 4 / 5 | 17 / 23 |
+| Cao độ −4 / −2 / 0 / +2 / +4 nửa cung | 25 / 22 / 16 / 20 / 20 | 16 / 11 / 7 / 4 / 4 | 16 / 16 / 21 / 18 / 13 |
+| Độ nghiêng −3 / +3 dB/octave | 18 / 16 | 7 / 4 | 25 / 22 |
+
+- Hai đường tắt đã mất. Giọng cao và to qua ngưỡng ngang hoặc hơn giọng trầm, nhỏ. Mức vào chuỗi không còn kéo điểm
+  xuống. Hạ giọng không còn giúp: dịch bên nào cũng tụt so với đối chứng 0 nửa cung, có lẽ do dấu vết PSOLA.
+- `on3` thiên nhẹ về tiếng to ở đầu vào model (−6 dB: 17, +6 dB: 23). Giọng chủ repo ở 1 m đã nằm ở phía to.
+- Deploy hàng `minmax` của `on3`, ngưỡng gợi ý 920‰ như `on2`, nên NVS của board giữ 900‰ chủ repo đặt: phiên
+  `20261029_home_001` qua 24 / 41 câu, `test` 5,33 báo nhầm/giờ.
