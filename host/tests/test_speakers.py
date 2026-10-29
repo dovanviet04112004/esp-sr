@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from srhost import mqtt_rx, speakers
 from srhost.config import REPO_ROOT
@@ -196,7 +197,8 @@ def test_the_prompter_asks_each_command_in_turn_and_again_after_a_refusal() -> N
 def test_the_default_prompts_are_the_baked_set_and_the_count_is_speaker_yamls() -> None:
     texts = speakers.set_texts(speakers.DEFAULT_SET)
     assert next(iter(texts.values())) == "bật đèn" and len(texts) == 10
-    assert speakers.ENROL_COMMANDS == 10
+    contract = yaml.safe_load((REPO_ROOT / "contracts" / "speaker.yaml").read_text(encoding="utf-8"))
+    assert contract["enrol_commands"] == speakers.ENROL_COMMANDS
 
 
 def test_a_file_that_is_no_command_set_is_refused(tmp_path: Path) -> None:

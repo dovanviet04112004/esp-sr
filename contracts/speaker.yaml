@@ -3,7 +3,7 @@
 # svc_listen, dsp_spec/spk_fbank and the ml branch speaker; a run whose front end differs is refused.
 version: 1
 window_s: 1.5                      # the last 1.5 s of a command window, zeros ahead of a shorter one
-enrol_commands: 10                 # commands the voiceprint is the unit-length sum of, said through the board
+enrol_commands: 5                  # commands the voiceprint is the unit-length sum of, said through the board
 features:                          # dsp_spec/spk_fbank, every number from b0's model_config or TFMelBanks's defaults
   frame_samples: 400               # symmetric Hamming
   hop_samples: 160                 # model_config hop_length; frames are padded by half a hop at both ends

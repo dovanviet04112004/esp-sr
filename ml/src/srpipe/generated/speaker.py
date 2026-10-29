@@ -3,10 +3,10 @@
 # Regenerate: python3 tools/gen_contracts.py
 
 VERSION = 1
-HASH = 0xd94df25c
+HASH = 0x7910b900
 WINDOW_S = 1.5
 WINDOW_SAMPLES = 24000
-ENROL_COMMANDS = 10
+ENROL_COMMANDS = 5
 N_FRAMES = 149
 N_BANDS = 72
 FEATURES = {'frame_samples': 400,

@@ -231,7 +231,9 @@ def test_enrolment_starts_at_the_first_owner_session_its_round_lets_finish() -> 
     sessions = [
         ({"spk": spk, "session": f"{date}_{k}", "distance_cm": d}, None, None) for k, (spk, d) in enumerate(rows)
     ]
-    laid = [commands_laid(4, 2), commands_laid(2), commands_laid(9), commands_laid(7, 1), commands_laid(5)]
+    enrol = speaker.ENROL_COMMANDS
+    laid = [commands_laid(enrol - 3, 2), commands_laid(2), commands_laid(enrol - 1), commands_laid(enrol - 3, 1)]
+    laid.append(commands_laid(3))
     assert probe.enrolment_session(sessions, laid, [[[0, 1], []], [[2, 3], [4]]]) == 3
     with pytest.raises(ValueError, match="commands left in its round"):
         probe.enrolment_session(sessions, laid, [[[0], [1]], [[2], [3]], [[4], []]])
@@ -259,13 +261,14 @@ def test_speaker_checks_leave_rejects_unchecked_count_the_enrolment_and_score_th
     monkeypatch.setattr(probe.spk, "chip_units", chip_units)
     clean = np.zeros(8 * grid.HOP_SAMPLES, np.int16)
     sessions = [(None, clean, None)] * 4
-    laid = [commands_laid(2, 1), commands_laid(6), commands_laid(4, 1), commands_laid(3)]
+    enrol = speaker.ENROL_COMMANDS
+    laid = [commands_laid(2, 1), commands_laid(enrol - 2), commands_laid(2, 1), commands_laid(3)]
 
     checks = probe.speaker_checks(sessions, laid, 1)
     assert len(seen) == len(units)
     assert checks[0] == [(0, 0, probe.UNENROLLED, 0)] * 2 + [(0, 0, probe.NO_CHECK, 0)]
-    assert checks[1] == [(n, 0, probe.ENROLLING, 0) for n in range(1, 7)]
-    assert checks[2] == [(n, 0, probe.ENROLLING, 0) for n in range(7, 11)] + [(0, 0, probe.NO_CHECK, 0)]
+    assert checks[1] == [(n, 0, probe.ENROLLING, 0) for n in range(1, enrol - 1)]
+    assert checks[2] == [(n, 0, probe.ENROLLING, 0) for n in (enrol - 1, enrol)] + [(0, 0, probe.NO_CHECK, 0)]
     norms = [score.norm(owner, cohort, 2)]
     want = [score.best(u, [owner], norms, score.norm(u, cohort, 2)) for u in (owner, stranger, near)]
     assert [(z, c) for z, _, c in want] == [(z, c) for z, c, _, _ in checks[3]]
