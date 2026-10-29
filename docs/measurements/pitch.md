@@ -411,3 +411,17 @@ thang. Trong ngoặc là thang của dòng đang deploy (`int8_kaldi_pitch`, c�
 - Theo luật KẾ HOẠCH §3.14 (`gate_tie` 5), int16 4 lớp (159) và `percentile` (157) hoà, int16 4 lớp lỗi đơn vị thấp
   hơn 0,002. Mốc của phần 3.4.5 (nhận đúng ≥ 158, lỗi đơn vị < 0,434): int16 4 lớp đạt, `percentile` kém 1 câu. Giờ chip
   của bốn tích chập int16 chưa đo.
+
+**Ngưỡng của từng dòng** (`make ctc-thresholds RUN=… ROW=<dòng> CONTRACT=v9`, 11:26–11:43): δ₁–δ₃ chọn trên 216 cửa sổ
+`val_commands` và 1 583 cửa sổ `val` như chip quyết, rồi Cửa 3 ở đúng bộ ấy. Dòng đang deploy lấy từ
+`int8_kaldi_pitch/percentile/thresholds.yaml`:
+
+| Dòng | δ₁ / δ₂ / δ₃ | `val_commands` nhận đúng, lệnh kém nhất | Nhận nhầm `val` | Lệnh ngoài bộ nhận | Cửa 3 nhận đúng | Cửa 3 nhận nhầm |
+|---|---|---|---|---|---|---|
+| `percentile` | 100 / 0 / 70 | 77,3%, 40% | 1 | 17 | 172/209 | 1/126 |
+| int16 4 lớp | 100 / 0 / 60 | 72,7%, 40% | 2 | 11 | 163/209 | 1/126 |
+| đang deploy | 200 / 0 / 60 | 75,0%, 50% | 4 | 17 | 175/209 | 0/126 |
+
+- Ở ngưỡng riêng, int16 4 lớp kém `percentile` 9 câu Cửa 3: thắng hoà ở δ của thang không giữ được.
+- `percentile` kém dòng đang deploy 3 câu Cửa 3, trong `gate_tie`; hơn trên `val_commands` (mở cửa 43/60 so với 35/60)
+  và nhận nhầm `val` 1 so với 4.
