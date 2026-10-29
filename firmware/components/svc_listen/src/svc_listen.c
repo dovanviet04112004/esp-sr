@@ -12,6 +12,7 @@
 #include "dsp_spec/stft.h"
 #include "dsp_spec/swift_dims.h"
 #include "dsp_spec/swift_front.h"
+#include "gen_afe.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -35,6 +36,7 @@
 #define NO_SLOT (-1)
 #define US_PER_S 1000000
 #define MS_PER_S 1000
+#define HANGOVER_HOPS (GEN_AFE_VAD_HANGOVER_MS * GEN_GRID_SAMPLE_RATE_HZ / MS_PER_S / GEN_GRID_HOP_SAMPLES)
 
 _Static_assert(AI_ENGINE_VARIANTS_MAX == LANG_VI_VARIANTS_MAX, "one command's readings fit one lexicon row");
 _Static_assert(RING_HOPS >= 2 * WINDOW_HOPS, "the ring holds the window worked and the next one whole");
@@ -47,6 +49,7 @@ typedef struct {
     bool open;            // its utterance still runs
     bool cut_back;        // outgrew WINDOW_HOPS: worked from its end once closed
     bool holed;           // seq broke while open: decided FRAME_GAP, never scored
+    bool wake_tail;       // opened in the wake word's own utterance
     int64_t closed_us;
 } window_t;
 
@@ -110,6 +113,7 @@ static struct {
     bool wake;         // a wake in the image: windows only in LENH
     bool commanding;   // LENH
     bool woke_pending; // a WAKE event svc_listen_work has not handed out
+    bool armed;        // the wake score fell under wake_th since it crossed
     uint16_t wake_th, wake_score;
     uint32_t woke;          // the hop whose score crossed wake_th
     uint32_t command_until; // LENH ends at this hop with no utterance running
@@ -126,6 +130,8 @@ static struct {
 
 // Checking on or an enrolment running: xac_task writes it, nhan_task reads it (KEHOACH 5.3).
 static atomic_bool s_diverting;
+// An enrolment running: xac_task writes it, nhan_task reads it to open windows with no wake (KEHOACH 5.4).
+static atomic_bool s_enrolling;
 
 static void *take(size_t bytes)
 {
@@ -161,6 +167,7 @@ static void tpl_key(size_t slot, char key[STORAGE_NVS_NAME_MAX_BYTES])
 static void divert(void)
 {
     atomic_store(&s_diverting, s.spk.on || s.spk.enrolling != NO_SLOT);
+    atomic_store(&s_enrolling, s.spk.enrolling != NO_SLOT);
 }
 
 // A voiceprint enrolled on another speaker entry lies in another space, so it stays unused (KEHOACH 3.17).
@@ -238,6 +245,7 @@ static void release(workspaces_t *w)
     }
     memset(&s, 0, sizeof(s));
     atomic_store(&s_diverting, false);
+    atomic_store(&s_enrolling, false);
 }
 
 // SwiftF0's front end and dims over the tables and the call size of the image's pitch (KEHOACH 3.11
@@ -360,6 +368,7 @@ esp_err_t svc_listen_init(const svc_listen_config_t *cfg)
     s.syllable = cfg->syllable_permille;
     s.wake = ai_engine_has(AI_ENGINE_MODEL_WAKE);
     s.wake_th = cfg->wake_permille;
+    s.armed = true;
     s.wait_hops = (uint32_t)((uint64_t)CONFIG_SVC_LISTEN_COMMAND_WAIT_MS * GEN_GRID_SAMPLE_RATE_HZ /
                              ((uint64_t)MS_PER_S * GEN_GRID_HOP_SAMPLES));
     s.spk.enrol_window_us = (int64_t)cfg->enrol_window_s * US_PER_S;
@@ -448,9 +457,11 @@ static esp_err_t open_utterance(uint32_t seq)
 static void close_utterance(void)
 {
     s.in_run = false;
-    const bool kept = s.run_last - s.run_first >= GEN_LISTEN_UTTERANCE_MIN_HOPS;
-    const uint32_t end = s.run_last + 1;
     window_t *w = open_window();
+    // The wake word's own utterance keeps a window only with speech past vad's hangover (KEHOACH 5.4).
+    const uint32_t need = GEN_LISTEN_UTTERANCE_MIN_HOPS + (w != NULL && w->wake_tail ? HANGOVER_HOPS : 0);
+    const bool kept = s.run_last - s.run_first >= need;
+    const uint32_t end = s.run_last + 1;
     if (w != NULL && !kept) { drop_open(); }
     if (w != NULL && kept) {
         w->open = false;
@@ -543,35 +554,40 @@ static esp_err_t pitch_hop(const int16_t *pcm, uint32_t seq)
     return pitch_call(seq);
 }
 
-// Without a wake every utterance gets a window; with one, only those of LENH (KEHOACH 5.4).
+// Without a wake every utterance gets a window; with one, those of LENH and of an enrolment (KEHOACH 5.4).
 static bool commands_open(void)
 {
-    return !s.wake || s.commanding;
+    return !s.wake || s.commanding || atomic_load(&s_enrolling);
 }
 
-static void leave_command(void)
-{
-    s.commanding = false;
-    ai_engine_wake_reset();
-}
-
-// The score ai_engine_wake_step returns is the frame's ai_engine_wake_delay hops back (KEHOACH 3.11).
+// A crossing counts once: the score must fall under wake_th for the next; one in LENH starts it again from
+// its hop, dropping the open window that holds the word (KEHOACH 5.4).
 static esp_err_t hear_wake(uint32_t seq)
 {
     uint16_t score = 0;
     const esp_err_t err = ai_engine_wake_step(s.log_mel[seq % RING_HOPS], &score);
-    if (err != ESP_OK || score < s.wake_th) { return err; }
-    s.commanding = true;
+    if (err != ESP_OK) { return err; }
+    if (score < s.wake_th) {
+        s.armed = true;
+        return ESP_OK;
+    }
+    if (!s.armed) { return ESP_OK; }
+    s.armed = false;
     s.woke = seq - (uint32_t)ai_engine_wake_delay();
+    const window_t *held = open_window();
+    if (held != NULL && (int32_t)(held->first - (s.woke + 1)) < 0) { drop_open(); }
+    s.commanding = true;
     s.wake_score = score;
     s.woke_pending = true;
     s.command_until = seq + s.wait_hops;
     if ((int32_t)(s.woke + 1 - s.after) > 0) { s.after = s.woke + 1; }
     if (!s.in_run) { return ESP_OK; }
-    // The utterance running through the wake word opens at the hop after it (KEHOACH 5.4).
     const esp_err_t opened = open_utterance(seq);
     window_t *w = open_window();
-    if (w != NULL) { w->speech = s.after; }
+    if (w != NULL) {
+        w->speech = s.after;
+        w->wake_tail = true;
+    }
     s.run_first = s.after;
     return opened;
 }
@@ -582,7 +598,7 @@ static void wait_command(uint32_t seq)
     if (s.in_run || s.count > 0) {
         s.command_until = seq + s.wait_hops;
     } else if ((int32_t)(seq - s.command_until) >= 0) {
-        leave_command();
+        s.commanding = false;
     }
 }
 
@@ -595,7 +611,10 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
         hole_open();
         hole_unpitched();
         pitch_restart(seq);
-        if (s.wake) { ai_engine_wake_reset(); }
+        if (s.wake) {
+            ai_engine_wake_reset();
+            s.armed = true;
+        }
         s.in_run = false;
         s.after = seq;
     }
@@ -607,7 +626,7 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
     esp_err_t err = dsp_spec_stft_analyze(s.stft, s.hop, s.bins);
     if (err == ESP_OK) { err = dsp_spec_mel_log(s.mel, s.bins, s.log_mel[slot]); }
     if (err == ESP_OK) { err = pitch_hop(pcm, seq); }
-    if (err == ESP_OK && s.wake && !s.commanding) { err = hear_wake(seq); }
+    if (err == ESP_OK && s.wake) { err = hear_wake(seq); }
     if (err != ESP_OK) { return err; }
     if (s.in_run && seq - s.run_last > GEN_LISTEN_UTTERANCE_GAP_HOPS) { close_utterance(); }
     if (vad) {
@@ -650,7 +669,7 @@ static void done(void)
     s.working = false;
     s.head = (s.head + 1) % WINDOWS_MAX;
     s.count--;
-    if (s.commanding) { leave_command(); }
+    s.commanding = false;
 }
 
 static void drop(const window_t *w, const char *why)
