@@ -3392,7 +3392,7 @@ nguyên tử và gọi hàm `*FromISR`. Không log, không `malloc`, không floa
 | Trạng thái | Nhân 1 | `nhan_task` | `noi_task` | Ghi chú |
 |---|---|---|---|---|
 | `NGHE` | `thu` + `sach` | `wake` nhận mỗi khung, mạng chạy mỗi 8 khung | nghỉ | tải thường trực |
-| `LENH` | `thu` + `sach` | cửa sổ `command` theo luồng; `wake` vẫn nghe, chỉ để thấy một từ đánh thức mới | nghỉ | `ctc`, `rnnt`: mạng và phép chấm mỗi khối 16 bước trên log-mel và cao độ đã có, tối đa `window_s`; `kws`: chép khung, một lần chạy mạng lúc câu chốt (§3.12) |
+| `LENH` | `thu` + `sach` | cửa sổ `command` theo luồng; `wake` vẫn nghe để giữ trường nhìn, lần vượt ngưỡng không tính | nghỉ | `ctc`, `rnnt`: mạng và phép chấm mỗi khối 16 bước trên log-mel và cao độ đã có, tối đa `window_s`; `kws`: chép khung, một lần chạy mạng lúc câu chốt (§3.12) |
 | `DAP` | `thu` + `sach`; `aec` tiếp tục học | nghỉ | dựng rồi phát | nói chen khi máy đang nói nằm ngoài phạm vi (§9) |
 
 Trong code và payload, ba trạng thái mang tên tiếng Anh theo CLAUDE.md §3.1: `NGHE` = `LISTEN`,
@@ -3450,7 +3450,9 @@ trường nhìn trống sau mỗi lệnh. Nói chen chỉ mở được sau khi 
 nên `nhan_task` mở cửa sổ cho mọi câu `vad` tìm ra, mốc chặn là bước sau cửa sổ trước.
 
 **Ảnh có `wake`**: `wake` vượt ngưỡng ở bước k thì vào `LENH` với mốc chặn k + 1, nên cửa sổ không chứa từ đánh thức:
-câu đang chạy qua bước k ("trợ lý bật đèn" nói liền) mở cửa sổ ở k + 1, câu sau đó mở như trên. Cửa sổ của câu chạy qua
+câu đang chạy qua bước k ("trợ lý bật đèn" nói liền) mở cửa sổ ở k + 1, câu sau đó mở như trên. Mỗi câu chỉ một cửa
+sổ: câu chạy qua k đã có cửa sổ (mở trong `LENH` trước khi một quyết định đưa máy về `NGHE`, hay lúc đăng ký giọng) thì
+cửa sổ ấy dời về k + 1; cửa sổ thứ hai sẽ bỏ cái đầu mở mãi, không ai chấm, và chặn hàng đợi. Cửa sổ của câu chạy qua
 k chỉ được giữ khi phần sau k dài hơn `utterance.min_s` cộng hangover của `vad` (240 ms, `contracts/afe.yaml`): từ đánh
 thức nói riêng rồi dừng thì đuôi của nó bị bỏ lặng lẽ, máy vẫn ở `LENH` chờ lệnh, thay vì chấm cái đuôi ra một
 `REJECT` rồi về `NGHE` bỏ lỡ lệnh đến sau (board B, 29/10). Cửa sổ thấy trước lệnh
@@ -3460,9 +3462,10 @@ phiên có `wake` khi `wake` vào ảnh (E11-T14). Bước k là bước của �
 quyết định của câu sau đó. Trong `NGHE` `svc_listen` vẫn theo dõi câu theo `vad` nhưng không mở cửa sổ. Một quyết định cho
 cửa sổ của `LENH`, lệnh hay từ chối, đưa máy về `NGHE`; im `SVC_LISTEN_COMMAND_WAIT_MS` (1,5 s, `Kconfig` của
 `svc_listen`, vì đổi `listen.yaml` là đổi `listen_hash`) mà không có câu nào cũng về `NGHE`, không chấm. Một lần vượt
-ngưỡng chỉ tính một lần: điểm phải xuống dưới ngưỡng rồi mới được vượt lại. `wake` vượt ngưỡng giữa lúc `LENH` thì `LENH`
-bắt đầu lại từ bước mới: cửa sổ đang mở có từ đánh thức ấy bị bỏ, mốc chặn dời tới sau nó; cửa sổ đã chốt vẫn được chấm.
-Bộ đệm của `wake` chỉ xoá khi luồng đứt. Trong lúc đăng ký giọng (§3.17) mọi câu đều mở cửa sổ như ảnh không có `wake`:
+ngưỡng chỉ tính một lần: điểm phải xuống dưới ngưỡng rồi mới được vượt lại. Trong `LENH` máy đã thức, nên lần vượt ngưỡng
+ở đó không tính: điểm làm trơn dao động quanh ngưỡng trong một từ đánh thức, và tính chúng là ra nhiều `WAKE` liền cho
+một lần nói (board B, 29/10). Như vậy mỗi lần thức có khoảng khoá ít nhất `SVC_LISTEN_COMMAND_WAIT_MS`, gần với
+`eval.lockout_s` 2 s mà ngưỡng được chọn theo. Bộ đệm của `wake` chỉ xoá khi luồng đứt. Trong lúc đăng ký giọng (§3.17) mọi câu đều mở cửa sổ như ảnh không có `wake`:
 người đăng ký chỉ đọc lệnh trình nhắc đưa ra, không nói từ đánh thức trước mỗi lệnh.
 
 ### 5.5 Quy chuẩn thêm task hoặc việc song song
