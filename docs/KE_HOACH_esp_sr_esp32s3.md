@@ -2117,7 +2117,7 @@ người lạ lọt.
 | Điểm | Chốt |
 |---|---|
 | Chỗ trong luồng | sau khi `command` nhận một lệnh, trên đúng cửa sổ lệnh ấy: lối ra `clean` của chuỗi (§3.2), cắt như `svc_listen` (§5.4); không chạy trên `wake`, không chạy mỗi khung |
-| Đăng ký | mẫu giọng là trung bình các embedding đã chuẩn hoá của 5 câu lệnh (`enrol_commands` của `contracts/speaker.yaml`) người dùng nói qua chính board; điểm là cosine với mẫu giọng |
+| Đăng ký | mẫu giọng là trung bình các embedding đã chuẩn hoá của 10 câu lệnh (`enrol_commands` của `contracts/speaker.yaml`) người dùng nói qua chính board; điểm là cosine với mẫu giọng |
 | Ngưỡng | đặt trên vật liệu của khảo sát ở **5% người lạ lọt** (chủ repo, 14/10). Ở 1%, người đăng ký thêm chỉ được giữ 18–32% lệnh; ở 5% là 36–59%, còn chủ repo được giữ ≥ 97% ở cả hai mức (`measurements/speaker.md` §6.7). Đổi lại, cứ khoảng 20 lệnh của người lạ thì một lệnh lọt |
 | Bị chặn | lệnh không được thi hành, sự kiện ghi lý do `SPEAKER` (`contracts/`) |
 | Bật tắt | cờ NVS theo đường, tắt mặc định; tắt thì luồng lệnh như chưa có khối này |
@@ -2131,10 +2131,10 @@ người lạ lọt.
 - **Host:** `srhost.speaker` ghép tiếng với sự kiện cùng `seq`. Nó chạy ReDimNet M qua `ml/spk_ref/redimnet`, dự án uv
   riêng có torch, nên `host/` không kéo torch (§4.6). Rồi nó so với mẫu giọng và ghi kết quả vào sự kiện mà host thi hành
   hay hiện ra.
-- **Mẫu giọng:** nằm ở thư mục dữ liệu ngoài repo của host, đăng ký bằng `make speaker-enrol` từ một phiên thu 5 lệnh
-  qua board. Chủ repo chọn 5 ngày 29/10 cho đăng ký nhanh, chấp nhận mẫu giọng kém hơn: trên khảo sát, ReDimNet M
-  giữ 98,3% lệnh với 5 câu, 99,4% với 10 câu. Số câu nằm trong `GEN_SPEAKER_HASH`, nên đổi nó thì mọi bản deploy
-  của `speaker` phải deploy lại, để ngưỡng tính trên mẫu giọng đúng số câu.
+- **Mẫu giọng:** nằm ở thư mục dữ liệu ngoài repo của host, đăng ký bằng `make speaker-enrol` từ một phiên thu 10 lệnh
+  qua board. Chủ repo chọn 10 lệnh với b3 ngày 29/10, sau khi thử 5 lệnh với b0: 5 lệnh đăng ký nhanh hơn mà mẫu giọng
+  kém hơn (trên khảo sát, ReDimNet M giữ 98,3% lệnh với 5 câu, 99,4% với 10 câu). Số câu nằm trong `GEN_SPEAKER_HASH`,
+  nên đổi nó thì mọi bản deploy của `speaker` phải deploy lại, để ngưỡng tính trên mẫu giọng đúng số câu.
 
 **Đường chip: ReDimNet2 b3 nhiều ngôn ngữ** (ADR-0028, chủ repo 28/10; b0 trước đó, ADR-0021). Trọng số
 `b3-vb2+vox2+cnc2_v0-lm` học sẵn, 4,51 M tham số, ~2,11 tỉ MAC cho 1,5 s lời, embedding 192 chiều như b0; chạy trong
@@ -2198,7 +2198,7 @@ gửi cùng hai yêu cầu, nên màn hình của board sau này chỉ là thêm
 |---|---|
 | Danh sách | tối đa 8 người: `id` là mã người nói `spk_NNN` (§1.4), `name` để hiện, tối đa 31 ký tự; cờ `check` của khối. Khuôn `contracts/schema/speaker_set.schema.json`; `version` là giờ Unix lúc gửi |
 | Đổi danh sách | yêu cầu `SET` mang cả danh sách. `id` mới thì thêm, chưa có mẫu giọng; `id` vắng thì xoá mẫu giọng của người ấy ngay (§1.4); tên khác thì sửa. Mỗi người giữ ô `k` của mình tới khi bị xoá, ô trống thấp nhất cho người mới. `version` không lớn hơn bản đang giữ thì bỏ qua, nên bản retained cũ tới lại lúc nối lại không lật một thay đổi sau nó |
-| Đăng ký | yêu cầu `ENROL` mang `id` của một người trong danh sách: `enrol_commands` (5) lệnh kế tiếp `command` nhận thành mẫu giọng của người ấy, mỗi lệnh ra `REJECT SPEAKER_ENROLLING` thay vì được thi hành. Xong thì mẫu mới thay mẫu cũ, nên đăng ký lại là sửa giọng. Lần đăng ký chỉ mở trong `CONFIG_SVC_LISTEN_ENROL_WINDOW_S` (180 s) kể từ `ENROL`; quá hạn mà chưa đủ lệnh thì `xac_task` huỷ nó. Không có hạn này, một lần đăng ký bị bỏ dở nuốt mọi lệnh về sau: lệnh không được thi hành, và giọng của bất kỳ ai nói lúc dùng thật thành mẫu của người đang đăng ký. Yêu cầu `ENROL_CANCEL`, một `ENROL` khác, một `SET` bỏ người đang đăng ký, hay khởi động lại cũng huỷ lần đang dở; mẫu cũ còn nguyên |
+| Đăng ký | yêu cầu `ENROL` mang `id` của một người trong danh sách: `enrol_commands` (10) lệnh kế tiếp `command` nhận thành mẫu giọng của người ấy, mỗi lệnh ra `REJECT SPEAKER_ENROLLING` thay vì được thi hành. Xong thì mẫu mới thay mẫu cũ, nên đăng ký lại là sửa giọng. Lần đăng ký chỉ mở trong `CONFIG_SVC_LISTEN_ENROL_WINDOW_S` (180 s) kể từ `ENROL`; quá hạn mà chưa đủ lệnh thì `xac_task` huỷ nó. Không có hạn này, một lần đăng ký bị bỏ dở nuốt mọi lệnh về sau: lệnh không được thi hành, và giọng của bất kỳ ai nói lúc dùng thật thành mẫu của người đang đăng ký. Yêu cầu `ENROL_CANCEL`, một `ENROL` khác, một `SET` bỏ người đang đăng ký, hay khởi động lại cũng huỷ lần đang dở; mẫu cũ còn nguyên |
 | Lối vào | yêu cầu `app_speaker_request_t` (`common/include/app_events.h`, như mọi kiểu đi qua hàng đợi) vào `q_spk`, danh sách từ MQTT vào `q_spkset` (§5.3); chỉ `xac_task` đổi trạng thái của khối. MQTT: `down/speakers` (retained, `speaker_set`) và `down/cmd` op `SPEAKER_ENROL`, `SPEAKER_ENROL_CANCEL` (§7.3). Console ở `dev`, `bench`: `spk list`, `spk add <id> <tên>`, `spk del <id>`, `spk name <id> <tên>`, `spk enrol <id>`, `spk on`, `spk off`; mỗi lệnh dựng yêu cầu từ bản trạng thái mới nhất, `version` bằng bản ấy cộng 1 |
 | Lối ra | sau mỗi thay đổi, `xac_task` ghi bản trạng thái vào `q_roster`; `gui_task` đăng `up/speakers` (retained, `speaker_roster`): `version`, `check`, mỗi người `id`, `name`, có mẫu giọng chưa; người đang đăng ký và số lệnh đã thu. Lỗi lên `ERROR`: `SPEAKERS_INVALID` (sai khuôn, trùng `id`), `SPEAKERS_REFUSED` (ảnh không có `speaker`, hay hàng đợi đầy), `SPEAKERS_NOT_SAVED` (ghi NVS hỏng), `SPEAKER_UNKNOWN` (`ENROL` một `id` không có trong danh sách) |
 | Host | `make speakers DEVICE=… SET=<file>`: file theo khuôn `speaker_set`, mỗi người thêm `consent` là mã phiếu đồng ý; `srhost.speakers` từ chối người thiếu phiếu, bỏ `consent`, đóng `version`, gửi retained rồi in `up/speakers`. `make speaker-enrol DEVICE=… ID=spk_NNN [SET=<file>]` gửi `SPEAKER_ENROL`, rồi nhắc lần lượt lệnh cần nói, mỗi lệnh của bộ `SET` một lần (mặc định `contracts/commands/default_vi.json`, bộ nướng sẵn), tới đủ `enrol_commands` của `contracts/speaker.yaml`. Theo `up/event`: board giữ một lệnh thì in số đã giữ cùng lệnh nó nghe, rồi nhắc lệnh đầu tiên của bộ mà board chưa nghe, nên một lệnh nghe nhầm không làm lời nhắc trôi lệch; `REJECT` khác không in, vì tiếng nói quanh board cũng ra `REJECT` mỗi vài giây và chen lẫn lời nhắc. Lệnh chờ tới 180 s, bằng hạn của board. Chưa đủ lệnh mà hết giờ, bị Ctrl+C, hay `up/speakers` báo board đã thôi đăng ký, thì nó gửi `SPEAKER_ENROL_CANCEL` rồi báo số lệnh đã giữ. Vì vậy không lần đăng ký nào sống lâu hơn lệnh make mở nó. `make host-live` in tên người cạnh `speakerId` của mỗi sự kiện, lấy từ `up/speakers`. Hai lệnh sửa từng người mà không mở file, cùng đọc file danh sách `ROSTER` (mặc định `host/speakers/home_vi.json`): `make speaker-name DEVICE=… ID=spk_NNN NAME=… [CONSENT=…]` đổi tên người ấy, hay thêm người ấy khi có `CONSENT`, ghi lại file rồi gửi như `make speakers`; `make speaker-forget DEVICE=… ID=spk_NNN` gửi danh sách thiếu người ấy rồi gửi lại cả file, nên board xoá mẫu giọng mà vẫn giữ người ấy để đăng ký lại. File danh sách mang tên người nên nằm ngoài git, trừ `host/speakers/example_vi.json` |
@@ -3176,7 +3176,7 @@ board và sự kiện `COMMAND` mang `id` mới. `CLEAR=1` xoá bản retained; 
 thiếu phiếu, trùng `id` hay quá 8 người thì từ chối. Nó bỏ `consent`, đóng `version` bằng giờ gửi, gửi retained xuống
 `down/speakers`, rồi nghe `up/speakers` và `up/event` 5 s: in danh sách board giữ, ai đã có mẫu giọng, và lỗi
 `SPEAKERS_*`. `make speaker-enrol DEVICE=<deviceId> ID=spk_NNN` gửi `SPEAKER_ENROL` rồi in tiến độ đăng ký từ
-`up/event` tới khi đủ `enrol_commands` (5) lệnh hay hết 180 s; người ấy nói chừng ấy lệnh với board trong lúc đó. Chưa đủ lệnh mà lệnh make
+`up/event` tới khi đủ `enrol_commands` (10) lệnh hay hết 180 s; người ấy nói chừng ấy lệnh với board trong lúc đó. Chưa đủ lệnh mà lệnh make
 dừng thì nó gửi `SPEAKER_ENROL_CANCEL` (§3.17). `make speakers DEVICE=… LIST=1`
 chỉ in `up/speakers`. File danh sách mang tên người thật nên để ngoài git (`host/speakers/` chỉ giữ
 `example_vi.json` với người giả).
