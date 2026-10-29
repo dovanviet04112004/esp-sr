@@ -606,6 +606,36 @@ def test_a_speed_resamples_so_the_clip_shortens_and_its_pitch_rises() -> None:
     assert abs(peak_hz - 220.0) < 2.0
 
 
+MOVES = {"f0_hz": [100.0, 280.0], "natural_share": 0.25, "max_st": 8.0, "time_step_s": 0.01, "f0_range_hz": [60, 600]}
+
+
+def test_f0_targets_draw_a_stream_of_their_own_log_uniform_with_a_share_left_as_spoken() -> None:
+    targets = np.array(device.f0_targets(7, 3, 4000, MOVES))
+    assert np.array_equal(targets, np.array(device.f0_targets(7, 3, 4000, MOVES)), equal_nan=True)
+    assert not np.array_equal(targets, np.array(device.f0_targets(7, 4, 4000, MOVES)), equal_nan=True)
+    kept = np.isnan(targets)
+    assert kept.mean() == pytest.approx(0.25, abs=0.03)
+    assert targets[~kept].min() >= 100.0 and targets[~kept].max() <= 280.0
+    assert np.median(targets[~kept]) == pytest.approx(math.sqrt(100.0 * 280.0), rel=0.05)
+
+
+def test_a_clip_left_as_spoken_is_not_resynthesised() -> None:
+    x = np.random.default_rng(1).standard_normal(FS)
+    assert device.repitched(x, math.nan, MOVES) == (x, 0.0)
+
+
+def test_repitch_lists_its_moves_and_leaves_the_rooms_levels_and_noise_alone(raw_root: Path, tmp_path: Path) -> None:
+    pytest.importorskip("parselmouth")
+    split = split_file(tmp_path / "train.txt", raw_root)
+    interim = screened(tmp_path / "interim")
+    plain = device.build(tiny(), split, raw_root, interim, tmp_path / "plain")
+    moved = device.build(tiny(), split, raw_root, interim, tmp_path / "moved", repitch=MOVES)
+    assert "repitch" not in yaml.safe_load(plain.read_text()) and yaml.safe_load(moved.read_text())["repitch"] == MOVES
+    for before, after in zip(items_of(tmp_path / "plain"), items_of(tmp_path / "moved"), strict=True):
+        assert after["f0_st"] == [0.0] and "f0_st" not in before
+        assert all(after[k] == before[k] for k in ("item", "session", "bank_room", "spl_1m_db", "noise"))
+
+
 def test_speeds_draw_per_item_and_leave_the_rooms_levels_and_noise_alone(raw_root: Path, tmp_path: Path) -> None:
     split = split_file(tmp_path / "train.txt", raw_root)
     interim = screened(tmp_path / "interim")
