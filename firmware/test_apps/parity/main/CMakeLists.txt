@@ -1,5 +1,5 @@
-# ai_engine's kws, ctc and rnnt decisions, its speaker scoring and its pitch decoding are pure C: compiled here alone,
-# they bring no esp-dl into the parity app (KEHOACH 4.5.4).
+# ai_engine's kws, ctc and rnnt decisions, its speaker scoring, its pitch decoding and its wake scoring are pure C:
+# compiled here alone, they bring no esp-dl into the parity app (KEHOACH 4.5.4).
 set(ai_engine "${CMAKE_CURRENT_LIST_DIR}/../../../components/ai_engine")
 set(ai_engine_src "${ai_engine}/src")
 set(srcs "parity_main.c" "parity_common.c" "parity_stft.c" "parity_mel.c" "parity_spk_fbank.c" "parity_swift_front.c" "parity_swift_dims.c" "parity_pitch.c"
@@ -7,7 +7,7 @@ set(srcs "parity_main.c" "parity_common.c" "parity_stft.c" "parity_mel.c" "parit
     "parity_lang_vi.c" "parity_command_kws.c" "${ai_engine_src}/command_kws/decide.c"
     "parity_command_ctc.c" "${ai_engine_src}/command_ctc/ctc_score.c" "parity_command_rnnt.c"
     "${ai_engine_src}/command_rnnt/rnnt_search.c" "parity_speaker.c" "${ai_engine_src}/speaker/score.c"
-    "parity_pitch_decode.c" "${ai_engine_src}/pitch/decode.c")
+    "parity_pitch_decode.c" "${ai_engine_src}/pitch/decode.c" "parity_wake_score.c" "${ai_engine_src}/wake/score.c")
 if(CONFIG_DSP_AFE_HPF_ENABLE)
     list(APPEND srcs "parity_hpf.c")
 endif()

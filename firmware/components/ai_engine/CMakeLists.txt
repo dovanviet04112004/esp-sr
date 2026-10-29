@@ -14,7 +14,7 @@ set(srcs "src/core/engine.cpp" "src/core/model_image.cpp" "src/core/espdl_net.cp
          "${espdl}/kernels/pointwise_s8_esp32s3.S" "${espdl}/kernels/softmax_s8_esp32s3.S"
          "${espdl}/kernels/stage_sum_s8_esp32s3.S" "${espdl}/kernels/stats_s8_esp32s3.S"
          "${espdl}/runtime/espdl_loan.cpp" "${espdl}/runtime/espdl_preload.cpp"
-         "src/ns/ns.cpp" "src/wake/wake.cpp" "src/speaker/speaker.cpp" "src/speaker/score.c" "src/synth/synth.cpp"
+         "src/ns/ns.cpp" "src/wake/wake.cpp" "src/wake/score.c" "src/speaker/speaker.cpp" "src/speaker/score.c" "src/synth/synth.cpp"
          "src/pitch/pitch.cpp" "src/pitch/decode.c")
 if(CONFIG_AI_ENGINE_COMMAND_BACKEND_CTC)
     list(APPEND srcs "src/command_ctc/command.cpp" "src/command_ctc/ctc_score.c")
@@ -38,6 +38,6 @@ idf_component_register(
 )
 # The decisions match their mirrors rounding for rounding: no multiply-add fused into one rounding (KEHOACH 3.12).
 set_source_files_properties("src/command_ctc/ctc_score.c" "src/command_rnnt/rnnt_search.c" "src/speaker/score.c"
-    "src/pitch/decode.c"
+    "src/pitch/decode.c" "src/wake/score.c"
     "${espdl}/ops/espdl_softmax_quant.cpp" "${espdl}/ops/espdl_layernorm_s8.cpp" "${espdl}/ops/espdl_group_norm_s8.cpp"
     PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")

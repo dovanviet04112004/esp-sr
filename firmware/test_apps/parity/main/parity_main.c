@@ -54,6 +54,7 @@ static const struct {
     {"swift_front", parity_swift_front},
     {"swift_dims", parity_swift_dims},
     {"pitch_decode", parity_pitch_decode},
+    {"wake_score", parity_wake_score},
     {"pitch", parity_pitch},
     {"g2p", parity_g2p},
     {"normalize", parity_normalize},
