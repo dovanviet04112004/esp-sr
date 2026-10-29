@@ -49,8 +49,9 @@ def label_hops(label_s: list[float]) -> tuple[int, int]:
 
 
 def load_set(folder: Path, positive: bool, around: tuple[int, int], dtype: str) -> list[Shard]:
-    """Every shard of one processed split file, labelled, its features held as dtype; the folder must hold the
-    manifest of a finished build."""
+    """Every shard of one processed split file, labelled, its features as dtype: mapped from the file when it holds
+    that dtype already, so the page cache keeps them and gives them back under pressure, else read and converted;
+    the folder must hold the manifest of a finished build."""
     if not (folder / "manifest.yaml").exists():
         raise FileNotFoundError(f"{folder} has no manifest.yaml: run make wake-features to the end")
     built = yaml.safe_load((folder / "manifest.yaml").read_text(encoding="utf-8"))["sha256"]
@@ -58,7 +59,9 @@ def load_set(folder: Path, positive: bool, around: tuple[int, int], dtype: str) 
     for name in sorted(n for n in built if n.endswith(".items.jsonl")):
         listing = folder / name
         stem = str(listing).removesuffix(".items.jsonl")
-        features = np.load(stem + ".features.npy").astype(dtype)
+        features = np.load(stem + ".features.npy", mmap_mode="r")
+        if features.dtype != np.dtype(dtype):
+            features = features.astype(dtype)
         items = [json.loads(line) for line in listing.read_text(encoding="utf-8").splitlines()]
         labels = np.zeros(len(features), dtype=np.uint8)
         if positive:
