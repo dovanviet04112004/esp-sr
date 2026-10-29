@@ -562,3 +562,49 @@ Mẩu bắt đầu và kết thúc giữa quãng ấy.
   774 → 953, 901 → 672): trạng thái chuỗi không làm điểm tụt; AGC 0–9 dB, DOA 104–118° suốt phiên. Điểm thấp nằm
   trong tiếng của từng lần nói, nên cách sửa là học thêm giọng chủ repo; chỉnh ngưỡng không đủ.
 - Chủ repo giữ on2 ở 900‰ (22:41).
+- 23:00 chủ repo thấy nói "on" giọng trầm thì ăn, nói to và cao thì tệ dần. Kiểm trên phiên `20261029_home_001`: 41 câu
+  `vad` có tiếng nói, 38 câu đo được cao độ (F0 của Praat, trung vị mỗi câu); điểm int8 chấm như chip trên tiếng sạch
+  của board, on1 ở 960‰, on2 ở 900‰.
+  - Giọng chủ repo: F0 p10 / p50 / p90 là 125 / 158 / 179 Hz. Ở on1, nửa câu F0 dưới 158 Hz qua ngưỡng 11/19 lần,
+    nửa trên 6/19; nửa nhỏ hơn −27,8 dBFS ở mic 11/21, nửa to hơn 6/20. Tương quan hạng từng câu gần 0 (F0 +0,01,
+    mức −0,07): mỗi câu còn lệch vì nhiều thứ khác, nên phải thử từng thứ một.
+  - 100 s đầu so với từ giây 120: F0 trung vị 149 → 162 Hz, mức −28,3 → −26,8 dBFS, on1 13/24 → 4/17 lần qua ngưỡng
+    (trung vị 969 → 804). Gọi trượt thì gọi to và cao hơn, điểm càng tụt: đó là cảm giác board "ngu dần".
+
+Mỗi phép thử đổi đúng một thứ rồi chấm lại cả 41 câu. Ô là trung vị điểm cao nhất, rồi số câu qua ngưỡng. Hàng cao độ
+0 nửa cung là đối chứng: dựng lại qua PSOLA mà không đổi cao độ.
+
+| Phép thử | on1 | on2 |
+|---|---|---|
+| Tiếng sạch của board, int8 | 888, 17/41 | 643, 6/41 |
+| Như trên, float | 903, 19/41 | 631, 6/41 |
+| Mức vào chuỗi (mic thô) −12 / −6 / 0 / +6 dB | 958 / 909 / 845 / 836; 20 / 19 / 18 / 14 | 641 / 585 / 640 / 485; 7 / 5 / 5 / 4 |
+| Mức vào model (tiếng sạch) −6 / +6 dB | 959, 20 / 836, 15 | 641, 4 / 592, 5 |
+| Cao độ (Praat PSOLA, giữ formant) −4 / −2 / 0 / +2 / +4 nửa cung | 974 / 972 / 874 / 957 / 959; 25 / 22 / 16 / 20 / 20 | 821 / 800 / 550 / 432 / 500; 16 / 11 / 7 / 4 / 4 |
+| Độ nghiêng phổ trên 1 kHz −3 / +3 dB/octave | 932, 18 / 862, 16 | 677, 7 / 603, 4 |
+
+- int8 và float cùng dạng: không phải do lượng tử hoá. on2 (đang chạy trên board) hạ giọng 4 nửa cung thì 7 lên 16/41,
+  nâng 2 nửa cung còn 4/41. on1 khá lên với mọi lần dịch so với đối chứng, nhiều nhất khi hạ (25/41); hạ mức vào model
+  6 dB đưa nửa câu to từ 802 lên 954. Tiếng sáng hơn (giọng gắng sức) kéo cả hai xuống.
+
+Vật liệu học của `on2` so với giọng chủ repo. Cao độ là F0 trung vị mỗi mẩu, đo trên tiếng gốc; mức là trung bình
+log-mel ở bước to nhất, đầu vào model trước thống kê dải, đo trên shard đã dựng:
+
+| Tập | F0 p10 / p50 / p90 (Hz) | Trên 158 Hz | Mức p10 / p50 / p90 |
+|---|---|---|---|
+| "on" của chủ repo qua board | 125 / 158 / 179 | 50% | −8,0 / −7,0 / −5,8 |
+| `train_pos`: "on" của Speech Commands, 3 064 mẩu | 92 / 122 / 199 | 26% | −11,8 / −8,8 / −5,8 (trong chữ) |
+| `train_hard`: từ khác của Speech Commands, 1 471 mẩu rút | 96 / 129 / 218 | 32% | −11,8 / −8,4 / −5,2 |
+| `train_neg`: 100 giờ tiếng Việt, 150 mẩu mỗi kho, trộn theo tỉ lệ | 112 / 167 / 249 | 53% | −10,7 / −6,3 / −4,5 |
+
+- F0 trung vị từng kho tiếng Việt: VIVOS 226, VLSP 207, FPT 182, LSVSC 162, ViMD 127 Hz.
+- Nguyên nhân: vật liệu học gắn cao độ và độ to với nhãn.
+  - Mẫu dương là "on" tiếng Anh, phần lớn giọng trầm, mỗi mẩu một từ.
+  - Âm bản tiếng Việt giọng cao hơn và là câu dài. Âm tiết to nhất của âm bản to hơn chữ "on" của mẫu dương 2,5 dB ở
+    trung vị, có lẽ vì mô phỏng đưa mỗi mẩu về cùng RMS phần có tiếng.
+  - Model học thêm luật tắt "cao và to thì không phải 'on'". Giọng chủ repo đã nằm ở phần trên của mẫu dương: F0 ở phân
+    vị 74, mức ở phân vị 77. Nói to và cao đẩy nó sang vùng của âm bản.
+- Chưa sửa, theo ý chủ repo. Hướng sửa để chọn:
+  - đưa "on" của chủ repo đủ ba giọng (trầm, thường, to cao) vào mẫu dương;
+  - dịch cao độ mẫu dương khi học;
+  - cân mức chữ dương với âm tiết to nhất của âm bản.
