@@ -8,6 +8,7 @@ The last weights are kept, each evaluated one saved beside them. Run: python -m 
 from __future__ import annotations
 
 import argparse
+import json
 import math
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from srpipe.core.seed import seed_everything
 from srpipe.generated import grid
 from srpipe.lang import g2p
 from srpipe.tasks.wake import CONFIG
-from srpipe.tasks.wake.data import Shard, label_hops, load_set, sentence_units
+from srpipe.tasks.wake.data import F0_TABLE, Shard, label_hops, load_set, sentence_units
 from srpipe.tasks.wake.eval import checkpoint, operating_point, sweep
 from srpipe.tasks.wake.model.tcn import Tcn
 
@@ -52,10 +53,27 @@ def band_stats(shards: list[Shard]) -> tuple[np.ndarray, np.ndarray]:
     return mean.astype(np.float32), np.sqrt(square / count - mean * mean).astype(np.float32)
 
 
+def pitch_weights(f0_hz: list[float | None], spec: dict) -> np.ndarray:
+    """Draw probabilities that give items of these F0s the log-normal of spec (median_hz, spread_st): the target density
+    over the items' own by semitone bins, capped at max_weight times the mean; an item without F0 weighs the mean."""
+    st = np.array([12.0 * math.log2(hz / spec["median_hz"]) if hz else np.nan for hz in f0_hz])
+    voiced = ~np.isnan(st)
+    weights = np.ones(len(st))
+    if voiced.any():
+        edges = np.arange(math.floor(st[voiced].min()), math.ceil(st[voiced].max()) + 1.0)
+        counts, _ = np.histogram(st[voiced], edges)
+        own = counts[np.clip(np.digitize(st[voiced], edges) - 1, 0, len(counts) - 1)]
+        weights[voiced] = np.exp(-0.5 * (st[voiced] / spec["spread_st"]) ** 2) / own
+        weights[voiced] /= weights[voiced].mean()
+    weights = np.minimum(weights, spec["max_weight"])
+    return weights / weights.sum()
+
+
 class Windows:
     """Examples of window_hops hops: one that holds a positive's whole label past the warm-up, one over a hard near
     miss, one ending in the first onset_s of a negative sentence's speech, or one anywhere in a negative. With
-    word_gain_db, positive and hard windows are made louder by a gain drawn uniformly from it (KEHOACH 3.11)."""
+    word_gain_db, positive and hard windows are made louder by a gain drawn uniformly from it; with f0_balance and
+    f0_hz, an item's F0, real positives and hard words are drawn by pitch_weights (KEHOACH 3.11)."""
 
     def __init__(
         self,
@@ -64,6 +82,7 @@ class Windows:
         cfg: dict,
         rng: np.random.Generator,
         hard: list[Shard] | None = None,
+        f0_hz: dict[str, float | None] | None = None,
     ) -> None:
         self.cfg, self.rng = cfg["train"], rng
         self.positives, self.negatives, self.hard = positives, negatives, hard or []
@@ -76,6 +95,11 @@ class Windows:
         self.real = [e for e, r in zip(self.ends, spoken, strict=True) if r]
         self.synth = [e for e, r in zip(self.ends, spoken, strict=True) if not r]
         self.hard_items = [(k, i) for k, s in enumerate(self.hard) for i in s.items]
+        balance = self.cfg.get("f0_balance") if f0_hz is not None else None
+        real_items = [i["item"] for s in positives for i in s.items if i["origin"] != "synth"]
+        self.real_p = pitch_weights([f0_hz[k] for k in real_items], balance) if balance and self.real else None
+        hard_f0 = [f0_hz[i["item"]] for _, i in self.hard_items] if balance else []
+        self.hard_p = pitch_weights(hard_f0, balance) if hard_f0 else None
         self.onsets = [(k, i["frame_offset"] + i["speech_frames"][0]) for k, s in enumerate(negatives) for i in s.items]
         rate = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
         self.onset_hops, self.word_hops = round(self.cfg["onset_s"] * rate), round(self.cfg["word_s"] * rate)
@@ -121,9 +145,13 @@ class Windows:
         wanted = self.expected_real(n_pos)
         return int(wanted) + int(self.rng.random() < wanted - int(wanted))
 
+    def drawn(self, n: int, count: int, p: np.ndarray | None) -> np.ndarray:
+        """count indices below n, by the probabilities p when given, else uniformly."""
+        return self.rng.choice(n, size=count, p=p) if p is not None else self.rng.integers(n, size=count)
+
     def positive_ends(self, n_pos: int) -> list[tuple[int, int]]:
         n_real = self.real_count(n_pos)
-        picks = [self.real[k] for k in self.rng.integers(len(self.real), size=n_real)] if n_real else []
+        picks = [self.real[k] for k in self.drawn(len(self.real), n_real, self.real_p)] if n_real else []
         if n_pos > n_real:
             picks += [self.synth[k] for k in self.rng.integers(len(self.synth), size=n_pos - n_real)]
         return picks
@@ -145,7 +173,7 @@ class Windows:
             stop = end + self.after + int(self.rng.integers(self.slack))
             x, y = self.cut(self.positives[shard_index], stop)
             xs.append(self.word(x)), ys.append(y)
-        for k in self.rng.integers(len(self.hard_items), size=n_hard) if n_hard else []:
+        for k in self.drawn(len(self.hard_items), n_hard, self.hard_p) if n_hard else []:
             shard_index, item = self.hard_items[k]
             x, y = self.cut(self.hard[shard_index], self.hard_stop(item))
             xs.append(self.word(x)), ys.append(y)
@@ -219,9 +247,11 @@ def train(
     device: str,
     units: dict[str, list[int]] | None = None,
     run: Path | None = None,
+    f0_hz: dict[str, float | None] | None = None,
 ) -> tuple[Tcn, dict, list[dict]]:
     """The weights of the last step, the band statistics and one row of val figures per evaluation; with units, the
-    trunk also learns the CTC side task; each evaluated net is saved in the run's checkpoints when run is given."""
+    trunk also learns the CTC side task; each evaluated net is saved in the run's checkpoints when run is given; with
+    f0_hz, the words are drawn by pitch as f0_balance asks."""
     spec, rng = cfg["train"], seed_everything(cfg["train"]["seed"])
     mean, std = band_stats(sets["train_pos"] + sets["train_neg"])
     n_bands = len(mean)
@@ -234,10 +264,13 @@ def train(
     schedule = torch.optim.lr_scheduler.LambdaLR(
         optimiser, lambda step: final + (1 - final) * 0.5 * (1 + math.cos(math.pi * step / spec["steps"]))
     )
-    windows = Windows(sets["train_pos"], sets["train_neg"], cfg, rng, sets.get("train_hard"))
+    windows = Windows(sets["train_pos"], sets["train_neg"], cfg, rng, sets.get("train_hard"), f0_hz)
     mean_t, std_t = torch.tensor(mean, device=device)[:, None], torch.tensor(std, device=device)[:, None]
     history, losses, side = [], [], []
     print(coverage(cfg, windows) + (side_coverage(cfg, sentences) if sentences else ""), flush=True)
+    for name, p in (("positives", windows.real_p), ("hard words", windows.hard_p)):
+        if p is not None:
+            print(f"pitch-weighted {name}: {1.0 / np.sum(p * p):.0f} effective of {len(p)}", flush=True)
     for step in range(1, spec["steps"] + 1):
         x, y = windows.batch()
         x = (torch.from_numpy(x.astype(np.float32)).to(device).transpose(1, 2) - mean_t) / std_t
@@ -287,6 +320,18 @@ def side_coverage(cfg: dict, sentences: Sentences) -> str:
     return f"; CTC side task on {len(sentences.items)} sentences, each about {visits:.1f} times"
 
 
+def pitch_tables(root: Path, sets: dict[str, list[Shard]]) -> dict[str, float | None]:
+    """Each item's F0 from the F0_TABLE of train_pos and, when present, train_hard under root."""
+    f0_hz = {}
+    for name in ("train_pos", "train_hard"):
+        if name in sets:
+            table = root / name / F0_TABLE
+            if not table.exists():
+                raise FileNotFoundError(f"{table}: f0_balance reads it; make wake-features writes it")
+            f0_hz |= json.loads(table.read_text(encoding="utf-8"))
+    return f0_hz
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -313,8 +358,9 @@ def main(argv: list[str] | None = None) -> int:
         spoken = {i["item"] for s in sets["train_neg"] for i in s.items if i["origin"] == "public"}
         clips = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
         units = sentence_units(clips, spoken, cfg["train"]["aux"]["dialect"])
+    f0_hz = pitch_tables(root, sets) if cfg["train"].get("f0_balance") else None
     run = create_run_dir(paths["artifacts"], "wake", cfg, split_files)
-    model, stats, history = train(cfg, sets, device, units, run)
+    model, stats, history = train(cfg, sets, device, units, run, f0_hz)
     threshold = stats["kept"]["threshold"]
     report = {"val": stats["kept"], "history": history}
     for name in ("val", "test"):

@@ -1,7 +1,7 @@
 """Wake training: the smoothing and lockout the device mirrors, labels around a positive's end, windows that hold
-the whole label past the warm-up, a louder word window equal to the log-mel of louder samples, sentences for the CTC
-side task, a tiny run that keeps its last weights and saves each evaluated one, a board table whose rows keep their
-columns, and a run scored with the network it was trained as."""
+the whole label past the warm-up, a louder word window equal to the log-mel of louder samples, pitch weights that draw
+words near the target F0, sentences for the CTC side task, a tiny run that keeps its last weights and saves each
+evaluated one, a board table whose rows keep their columns, and a run scored with the network it was trained as."""
 
 from __future__ import annotations
 
@@ -122,6 +122,30 @@ def test_a_louder_word_window_is_the_log_mel_of_louder_samples(tmp_path: Path) -
     quiet = log_mel(1)
     np.testing.assert_allclose(windows.louder(quiet), log_mel(2), atol=1e-3)
     assert plain.word(quiet) is quiet
+
+
+def test_pitch_weights_pull_the_draws_to_the_target_and_cap_any_item() -> None:
+    spec = {"median_hz": 160.0, "spread_st": 3.0, "max_weight": 4.0}
+    p = train.pitch_weights([100.0] * 80 + [160.0] * 20 + [None] * 10, spec)
+    assert p.sum() == pytest.approx(1.0)
+    assert p[80:100].sum() > 0.8 > p[:80].sum()
+    assert p[80] / p[100] == pytest.approx(4.0)
+
+
+def test_pitch_weighted_windows_draw_words_near_the_target_pitch(tmp_path: Path) -> None:
+    rng = np.random.default_rng(9)
+    cfg = tiny_cfg()
+    cfg["train"]["f0_balance"] = {"median_hz": 167.0, "spread_st": 3.0, "max_weight": 5.0}
+    around = data.label_hops(cfg["train"]["label_s"])
+    pos = data.load_set(processed(tmp_path / "p", [(60, 20, 40)] * 8, rng, True), True, around, "float16")
+    neg = data.load_set(processed(tmp_path / "n", [(60, 0, 60)] * 4, rng, False), False, around, "float16")
+    f0 = {i["item"]: 167.0 if k % 2 else 100.0 for k, i in enumerate(i for s in pos for i in s.items)}
+    windows = train.Windows(pos, neg, cfg, np.random.default_rng(10), f0_hz=f0)
+    near = {e for e, item in zip(windows.real, f0, strict=True) if f0[item] == 167.0}
+    drawn = [windows.real[k] for k in windows.drawn(len(windows.real), 4000, windows.real_p)]
+    assert sum(e in near for e in drawn) > 0.9 * len(drawn)
+    plain = train.Windows(pos, neg, tiny_cfg(), np.random.default_rng(10))
+    assert plain.real_p is None and plain.hard_p is None
 
 
 def test_sentences_carry_the_lead_before_them_their_units_and_nothing_too_long(tmp_path: Path) -> None:

@@ -82,6 +82,10 @@ simulate:                          # make wake-features: python -m srpipe.tasks.
   workers: 12                      # each holds about 450 MB; more push a 10 GB WSL into swap
   repeats: {train_pos: 8}          # passes over a file, each in other rooms, levels and noise; else 1
   train_dtype: float16             # train's features as stored: the trainer holds them so (KEHOACH 1.2)
+  f0:                              # f0_hz.json beside these builds: each clean clip's median F0 by Praat (KEHOACH 3.11)
+    sets: [train_pos, train_hard]
+    time_step_s: 0.01
+    f0_range_hz: [60.0, 600.0]
 train:                             # E11-T11: python -m srpipe.tasks.wake.train (KEHOACH 3.11), on the GPU when present
   split: on2                       # processed/wake/<split>/<file> of make wake-features
   seed: 20260928
@@ -95,6 +99,10 @@ train:                             # E11-T11: python -m srpipe.tasks.wake.train 
   word_s: 1.2                      # a hard negative this short is a word: its window ends where a positive's label does
   word_gain_db: [0.0, 20.0]        # positive and hard windows louder by a gain drawn here: the agc leaves single words
                                    #   ~10 dB under the sentences it lifts (KEHOACH 3.11, wake.md 8)
+  f0_balance:                      # positive and hard words drawn so their F0 follows train_neg's (KEHOACH 3.11)
+    median_hz: 167.0               # with spread_st, a log-normal through train_neg's p10/p50/p90 of 112/167/249 Hz
+    spread_st: 5.4
+    max_weight: 5.0                # of the mean weight: a thin stretch of F0 does not take over the draws
   label_smoothing: 0.0             # BCE targets pulled this far toward 0.5 in total; 0 keeps them 0 and 1
   real_share: 0.01                 # of those positives, from real speech: the 24 real clips' own share (KEHOACH 3.11)
   batch: 128

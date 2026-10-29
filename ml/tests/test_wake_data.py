@@ -1,12 +1,14 @@
 """Wake split: voices follow their speaker's role, clones of speakerless corpora train, negatives never say the wake
 word, test_neg comes only from its corpora less the speakers moved whole into val_neg, train_neg stops at its hours,
-and the extract's clips of the word join the train positives."""
+and the extract's clips of the word join the train positives; a build's items get their clip's median F0 once."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 import yaml
 
 from srpipe.core import corpus, extract, splits
@@ -172,6 +174,25 @@ def test_the_extracts_clips_of_the_word_join_the_train_positives(tmp_path: Path)
     assert not files["val_pos.txt"]
     negatives = [r.item for name in ("train_neg.txt", "val_neg.txt", "test_neg.txt") for r in files[name]]
     assert "speech/vlsp/a_3.wav" not in negatives and len(negatives) == 3
+
+
+def test_each_items_clean_clip_gets_its_median_f0_once(tmp_path: Path) -> None:
+    pytest.importorskip("parselmouth")
+    raw, fs = tmp_path / "raw", grid.SAMPLE_RATE_HZ
+    t = np.arange(fs) / fs
+    voice = sum(np.sin(2 * np.pi * 150.0 * k * t) / k for k in range(1, 20))
+    write_wav(raw / "speech" / "x" / "voice.wav", 0.3 * voice / np.abs(voice).max())
+    write_wav(raw / "speech" / "x" / "noise.wav", 0.1 * np.random.default_rng(0).standard_normal(fs))
+    build = tmp_path / "train_pos"
+    build.mkdir()
+    rows = [{"item": f"speech/x/{name}.wav", "origin": "public"} for name in ("voice", "noise", "voice")]
+    (build / "shard_00000.items.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    roots, spec = {"raw": raw, "interim": tmp_path}, {"time_step_s": 0.01, "f0_range_hz": [60.0, 600.0]}
+    hz = json.loads(data.f0_table(build, roots, spec, 1).read_text(encoding="utf-8"))
+    assert set(hz) == {"speech/x/voice.wav", "speech/x/noise.wav"} and hz["speech/x/noise.wav"] is None
+    assert hz["speech/x/voice.wav"] == pytest.approx(150.0, rel=0.02)
+    (build / data.F0_TABLE).write_text("{}", encoding="utf-8")
+    assert data.f0_table(build, roots, spec, 1).read_text(encoding="utf-8") == "{}"
 
 
 def test_a_build_counts_as_built_only_in_the_dtype_asked(tmp_path: Path) -> None:

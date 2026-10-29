@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import multiprocessing
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -30,6 +32,7 @@ from srpipe.tasks.wake import CONFIG, synth
 PUBLIC, SYNTH = "public", "synth"
 SPEECH_COMMANDS_STREAM = 3
 NEGATIVES = ("train_neg.txt", "val_neg.txt", "test_neg.txt")
+F0_TABLE = "f0_hz.json"  # beside a build: each item's median F0, null if unvoiced
 
 
 @dataclass
@@ -374,10 +377,39 @@ def built_as(out: Path, device_cfg: dict, split_file: Path, repeats: int, dtype:
     return body["config"] == device_cfg and same_split and body.get("repeats", 1) == repeats and same_dtype
 
 
+def _clip_f0(job: tuple[Path, str, float, list[float]]) -> float | None:
+    root, item, time_step_s, f0_range_hz = job
+    # Praat is the praat extra of pyproject: only this step loads it.
+    from srpipe.core import repitch
+
+    hz = repitch.clip_median_hz(ItemReader(root).read(item), time_step_s, tuple(f0_range_hz))
+    return None if math.isnan(hz) else round(hz, 2)
+
+
+def f0_table(folder: Path, roots: dict[str, Path], spec: dict, workers: int) -> Path:
+    """folder's F0_TABLE: per item of its build, the median F0 Praat hears in the clean clip, None when it calls no
+    frame voiced (KEHOACH 3.11); a table already there is kept."""
+    out = folder / F0_TABLE
+    if out.exists():
+        return out
+    origin = {}
+    for listing in sorted(folder.glob("shard_*.items.jsonl")):
+        for line in listing.read_text(encoding="utf-8").splitlines():
+            row = json.loads(line)
+            origin[row["item"]] = row["origin"]
+    items = sorted(origin)
+    jobs = [(roots[device.ROOT_OF[origin[i]]], i, spec["time_step_s"], spec["f0_range_hz"]) for i in items]
+    with multiprocessing.get_context("spawn").Pool(workers) as pool:
+        hz = pool.map(_clip_f0, jobs, chunksize=64)
+    out.write_text(json.dumps(dict(zip(items, hz, strict=True))), encoding="utf-8")
+    return out
+
+
 def simulate(cfg: dict, paths: dict[str, Path]) -> None:
     """Every file of the split through the board simulation into processed/wake/<split>/<file>, smallest first,
     each as many passes as simulate.repeats asks, train's features stored as simulate.train_dtype and the rest in
-    float32, no clean samples kept; a file already built the same way is left as it is."""
+    float32, no clean samples kept; a file already built the same way is left as it is. Then each file simulate.f0
+    lists gets its F0_TABLE."""
     spec = cfg["simulate"]
     device_cfg = load_device(cfg["features"])
     for split_file in sorted((paths["splits"] / "wake" / spec["split"]).glob("*.txt"), key=lambda f: f.stat().st_size):
@@ -404,6 +436,10 @@ def simulate(cfg: dict, paths: dict[str, Path]) -> None:
             dtype=dtype,
         )
         print(out_file)
+    roots = {"raw": paths["raw"], "interim": paths["interim"]}
+    for name in spec.get("f0", {}).get("sets", []):
+        folder = paths["processed"] / "wake" / spec["split"] / name
+        print(f0_table(folder, roots, spec["f0"], spec["workers"]), flush=True)
 
 
 def real_positives(cfg: dict, raw: Path) -> dict[str, float]:
