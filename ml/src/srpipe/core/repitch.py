@@ -1,6 +1,7 @@
 """One syllable's F0 contour replaced by Praat's overlap-add, formants kept (KEHOACH 3.11): a clip's pitch by Praat,
 a syllable's voiced stretch, its contour in semitones over the speaker's median F0 at even points of that stretch, and
-the clip resynthesised over the syllable on another contour or on its own. Praat is the praat extra of pyproject."""
+the clip resynthesised over the syllable on another contour or on its own. Also a whole clip's F0 moved toward a
+target median, the simulation's repitch (KEHOACH 1.2). Praat is the praat extra of pyproject."""
 
 from __future__ import annotations
 
@@ -103,3 +104,26 @@ def resynthesised(
     out = x.astype(np.float64)
     out[a:b] = y
     return out
+
+
+def toward_st(x: np.ndarray, target_hz: float, max_st: float, time_step_s: float, f0_range_hz: tuple) -> float:
+    """Semitones that move the median F0 of x (float, 16 kHz) to target_hz, within ±max_st; 0 when Praat hears no
+    voiced frame in it."""
+    pitch = parselmouth.Sound(x.astype(np.float64), sampling_frequency=FS).to_pitch(time_step_s, *f0_range_hz)
+    hz = pitch.selected_array["frequency"]
+    voiced = hz[hz > 0]
+    if not len(voiced):
+        return 0.0
+    return float(np.clip(12.0 * np.log2(target_hz / np.median(voiced)), -max_st, max_st))
+
+
+def moved(x: np.ndarray, semitones: float, time_step_s: float, f0_range_hz: tuple) -> np.ndarray:
+    """x (float, 16 kHz) through Praat's overlap-add with every pitch point moved by semitones, formants and timing
+    kept, as long as x."""
+    sound = parselmouth.Sound(x.astype(np.float64), sampling_frequency=FS)
+    manipulation = call(sound, "To Manipulation", time_step_s, *f0_range_hz)
+    tier = call(manipulation, "Extract pitch tier")
+    call(tier, "Multiply frequencies", sound.xmin, sound.xmax, 2.0 ** (semitones / 12.0))
+    call([tier, manipulation], "Replace pitch tier")
+    y = call(manipulation, "Get resynthesis (overlap-add)").values[0]
+    return np.pad(y, (0, max(0, len(x) - len(y))))[: len(x)]

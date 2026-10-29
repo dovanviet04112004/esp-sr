@@ -47,6 +47,20 @@ def steady() -> np.ndarray:
     return voiced(np.full(FS, 150.0))
 
 
+def test_a_whole_clip_moves_by_the_semitones_asked_and_keeps_its_length(steady: np.ndarray) -> None:
+    y = repitch.moved(steady, 4.0, CFG.time_step_s, CFG.f0_range_hz)
+    assert len(y) == len(steady)
+    assert median_in(y, 0.2, 0.8) == pytest.approx(150.0 * 2.0 ** (4.0 / 12.0), rel=0.02)
+
+
+def test_the_move_toward_a_target_is_bounded_and_nothing_without_a_voice(steady: np.ndarray) -> None:
+    up_three = 150.0 * 2.0 ** (3.0 / 12.0)
+    assert repitch.toward_st(steady, up_three, 8.0, CFG.time_step_s, CFG.f0_range_hz) == pytest.approx(3.0, abs=0.2)
+    assert repitch.toward_st(steady, 600.0, 8.0, CFG.time_step_s, CFG.f0_range_hz) == 8.0
+    noise = np.random.default_rng(0).normal(0.0, 0.1, FS)
+    assert repitch.toward_st(noise, 200.0, 8.0, CFG.time_step_s, CFG.f0_range_hz) == 0.0
+
+
 def test_a_kept_contour_resynthesises_near_its_f0_and_leaves_the_rest(steady: np.ndarray) -> None:
     y = repitch.resynthesised(steady, STRETCH, None, CFG)
     assert median_in(y, *STRETCH) == pytest.approx(150.0, rel=0.02)
