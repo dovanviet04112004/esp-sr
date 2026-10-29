@@ -490,5 +490,30 @@ Mẩu bắt đầu và kết thúc giữa quãng ấy.
   (`cache=5`), mỗi cửa sổ 40 KB thành chừng mười lần đọc trang. Đọc trước cả file bằng `cat` (62 s) không giúp.
   Tiến trình dùng 81–100% một nhân, GPU 12–42%.
 - Ở bước 1 000–3 000 (float, chưa xong lịch học): `val` bắt 85,1–85,9% ở báo nhầm 2,95 lần/giờ.
-- Còn: đọc mỗi cửa sổ một lần liền khối thay vì từng trang, hay giữ `train` trong RAM khi `val`, `test` ánh xạ; chủ repo
-  cho dừng 16:59 để sửa rồi học lại.
+- Sửa (`b7c67102`): `train` giữ trong RAM (4,08 GB float16, nạp 41 s), `val` và `test` ánh xạ, đọc tuần tự ~110 MB/s.
+  Lượt học lại 17:29: 1 000 bước mỗi ~50 s, GPU 77–83%, RAM sẵn ~2,1 GB; 20 000 bước xong 17:44.
+
+**Hai split, cùng `val` và `test`, cùng 20 000 bước** (`val`: 396 mẩu "on" dương, 11,18 giờ âm bản; `test`: 19,33 giờ):
+
+| Split | Âm bản khó `train` | `val` bắt, float | Ngưỡng | `val` báo nhầm/giờ | `test` báo nhầm/giờ |
+|---|---|---|---|---|---|
+| `on1` | 3 000, mỗi mẩu ~213 lần | 67,7% | 0,975 | 2,42 | 3,67 |
+| `on2` | 30 000, mỗi mẩu ~21 lần | **80,1%** | 0,915 | 2,95 | 3,41 |
+
+- `on1` bắt 85–89% ở bước 1 000–6 000 rồi tụt dần về 64–74% từ bước 15 000: thuộc lòng âm bản khó. `on2` giữ 80–90%
+  suốt lịch học.
+- Thang int8, chấm như chip (bảng ‰, làm trơn số nguyên), ngưỡng thấp nhất giữ báo nhầm `val` ≤ 3 lần/giờ:
+
+| Dòng | `on1`: ngưỡng, `val` bắt, `test` báo nhầm/giờ | `on2`: ngưỡng, `val` bắt, `test` báo nhầm/giờ |
+|---|---|---|
+| `kl` | 970‰, 73,2%, 3,98 | 930‰, 79,3%, 2,74 |
+| `percentile` | 970‰, 73,0%, 3,67 | 925‰, 79,3%, 3,05 |
+| `minmax` | 960‰, 78,5%, 3,73 | **920‰, 83,6%, 3,52** |
+| `mse` | 970‰, 74,2%, 4,09 | 915‰, 83,3%, 3,16 |
+
+- Deploy `on2` dòng `minmax` (`e8bbdc37`). Nhánh `wake` của `ai_engine` trên board B (`make ai-unit-wake STEP=8`):
+  256 khung log-mel thô qua `ai_engine_wake_step`, **0 điểm lệch** `chip_scores`, 2 345 µs lượt chạy mạng, đối chứng
+  không `reset` lệch 123.
+- Thử sống đầu tiên của chủ repo (18:13, `host-live`): `WAKE` 0,97–0,98 rồi `COMMAND` bật quạt, chụp ảnh, tắt đèn; hai
+  lần `WAKE` ra `REJECT PART` và `LOW_SCORE`: cửa sổ mở cho đuôi chữ "on" còn trong câu `vad` đưa máy về `NGHE`. Sửa
+  ở `4e53f4da`; chưa đo lại.
