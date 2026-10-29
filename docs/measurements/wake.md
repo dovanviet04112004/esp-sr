@@ -553,3 +553,12 @@ Mẩu bắt đầu và kết thúc giữa quãng ấy.
   `WAKE` trước, nên trong `LENH` thành cửa sổ lệnh, `REJECT LOW_SCORE`; 883, 853; 664, 634, 612, 585, 539, 432, 412.
   `on2` ở 900‰ bắt 2/12 lần "on" của chủ repo qua board, 850‰ thì 4/12: giọng thật xa vật liệu học (Speech Commands
   tiếng Anh qua mô phỏng). Không phải firmware treo hay chuỗi làm sạch trôi.
+- 22:09, on1 nạp lại vào board B cùng bản chẩn đoán, chủ repo nói "on" lặp lại như trên: 8 trong 11 lần đầu
+  `WAKE` ở 960‰, điểm cao nhất 965–999; các lần trượt 906, 948, 802. on1 nghe giọng chủ repo cao hơn on2 rõ.
+- Phiên `20261029_home_001` (board B, 200 s, ch0, ch1 và tiếng sạch, chủ repo nói "on" mỗi 2–3 s ở 1 m, có đoạn
+  nghỉ ~30 s), on1 hàng `minmax` chấm như chip trên tiếng sạch của board: 38 lần "on", 17 lần ≥ 960, 20 lần ≥ 900,
+  25 lần ≥ 800; điểm trải 590–1 000 suốt phiên, 13/23 trong 88 s đầu và 4/16 sau đó ở 960. Cho mỗi lần nói chạy lại
+  qua chuỗi làm sạch mới (bản soi gương) từ 3 s trước, điểm lúc cao lúc thấp hơn điểm của board (791 → 707,
+  774 → 953, 901 → 672): trạng thái chuỗi không làm điểm tụt; AGC 0–9 dB, DOA 104–118° suốt phiên. Điểm thấp nằm
+  trong tiếng của từng lần nói, nên cách sửa là học thêm giọng chủ repo; chỉnh ngưỡng không đủ.
+- Chủ repo giữ on2 ở 900‰ (22:41).
