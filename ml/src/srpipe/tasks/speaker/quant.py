@@ -996,11 +996,17 @@ def deploy(cfg: dict, run: Path, row: str, paths: dict, workers: int) -> tuple[P
 
 def use(run: Path, row: str) -> tuple[Path, Path]:
     """The deploy kept in <run>/int8/<row>/deploy/ into firmware/models/speaker/ and the lock, as deploy locked it;
-    refused when a kept file differs from the sha256 kept beside it (KEHOACH 3.17, ADR-0028)."""
+    refused when a kept file differs from the sha256 kept beside it, or when it was deployed on another
+    contracts/speaker.yaml, whose speaker the firmware leaves off (KEHOACH 3.17, ADR-0028)."""
     kept = run / INT8_DIR / row / KEPT_DIR
     if not (kept / KEPT_FILE).is_file():
         raise FileNotFoundError(f"{kept} keeps no deploy: make speaker-deploy RUN={run} ROW={row}")
     record = json.loads((kept / KEPT_FILE).read_text(encoding="utf-8"))
+    if (made := record["fields"].get("speaker_hash")) != f"0x{speaker.HASH:08x}":
+        raise ValueError(
+            f"{kept} was deployed on speaker hash {made}, contracts/speaker.yaml hashes 0x{speaker.HASH:08x}: "
+            f"make speaker-deploy RUN={run} ROW={row}"
+        )
     target = update_lock.MODELS / BRANCH
     target.mkdir(parents=True, exist_ok=True)
     for name, digest in record["files"].items():

@@ -14,6 +14,7 @@ pytest.importorskip("onnxruntime")
 from torch import nn  # noqa: E402
 
 from srpipe.compress.quant import onnx_export, ptq_espdl  # noqa: E402
+from srpipe.generated import speaker  # noqa: E402
 from srpipe.tasks.speaker import quant  # noqa: E402
 
 CHANNELS, BOTTLENECK, FRAMES = 6, 4, 19
@@ -607,7 +608,8 @@ def kept_deploy(tmp_path: Path, row: str) -> Path:
     (kept / f"{quant.BRANCH}.espdl").write_bytes(b"graph")
     (kept / quant.COHORT_FILE).write_bytes(b"cohort")
     files = {name: update_lock.sha256(kept / name) for name in (f"{quant.BRANCH}.espdl", quant.COHORT_FILE)}
-    record = {"files": files, "fields": {"row": row, "threshold": {"milli_z": [1486]}}}
+    fields = {"row": row, "speaker_hash": f"0x{speaker.HASH:08x}", "threshold": {"milli_z": [1486]}}
+    record = {"files": files, "fields": fields}
     (kept / quant.KEPT_FILE).write_text(json.dumps(record), encoding="utf-8")
     return run
 
@@ -631,6 +633,7 @@ def test_use_puts_a_kept_deploy_into_the_firmware_and_the_lock_and_refuses_a_cha
     rows = json.loads(lock.read_text(encoding="utf-8"))["models"]
     assert rows["command"] == {"run": "kept"} and rows[quant.BRANCH]["run"] == run.name
     assert rows[quant.BRANCH]["threshold"] == {"milli_z": [1486]} and rows[quant.BRANCH]["row"] == "kl"
+    assert rows[quant.BRANCH]["speaker_hash"] == f"0x{speaker.HASH:08x}"
     assert [(f["entry"], f["kind"]) for f in rows[quant.BRANCH]["files"]] == [
         (quant.BRANCH, "espdl"),
         (quant.COHORT_ENTRY, "cohort"),
@@ -640,3 +643,16 @@ def test_use_puts_a_kept_deploy_into_the_firmware_and_the_lock_and_refuses_a_cha
         quant.use(run, "kl")
     with pytest.raises(FileNotFoundError, match="keeps no deploy"):
         quant.use(run, "timing")
+
+
+def test_use_refuses_a_deploy_made_on_another_speaker_contract(tmp_path: Path) -> None:
+    """A kept deploy of the ten-command contract under the five-command one: the firmware would leave it off."""
+    import json
+
+    run = kept_deploy(tmp_path, "kl")
+    record_file = run / quant.INT8_DIR / "kl" / quant.KEPT_DIR / quant.KEPT_FILE
+    record = json.loads(record_file.read_text(encoding="utf-8"))
+    record["fields"]["speaker_hash"] = "0xd94df25c"
+    record_file.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ValueError, match="deployed on speaker hash 0xd94df25c"):
+        quant.use(run, "kl")
