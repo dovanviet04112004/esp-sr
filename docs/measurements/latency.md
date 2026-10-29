@@ -1561,6 +1561,39 @@ kia trên cùng đầu vào:
   dcache nạp dòng kế tiếp trong lúc nhân kia ghi dòng ấy.
 - Cả hai phía chậm 2,4–2,9 lần vì chung bus MSPI và dcache, nên dù đúng thì lệnh cũng ra muộn hơn.
 - Không dùng. `xac_task` ở lại nhân 0; các thay đổi của lượt thử không vào repo.
-- Còn mở: nhân 1 của sản phẩm (`thu`, `sach`) cũng ghi PSRAM (`q_clean`) trong lúc nhân 0 chạy mạng. Các phép kiểm
-  từng bit của chuỗi (`listen-unit`, app thử `ai_engine`) chạy không có chuỗi làm sạch, nên chưa đo xem lượng ghi nhỏ
-  ấy có làm lệch mạng của nhân 0 không.
+- Nhân 1 của sản phẩm (`thu`, `sach`) cũng ghi PSRAM (`q_clean`) trong lúc nhân 0 chạy mạng. `make ai-unit-cores`
+  (app thử `ai_engine`, ảnh model sản phẩm, `ai_engine` của HEAD): nhân 0 chạy lặp cả bốn mạng (`pitch`, `wake`,
+  `command`, hai cửa sổ `speaker`; 2 280 ms một lượt khi một mình) trên đầu vào cố định, so từng bit với lượt một
+  mình, trong lúc nhân 1:
+
+  | Nhân 1 | Lượt | Lệch | Một lượt |
+  |---|---|---|---|
+  | ghi một khung 530 B mỗi 16 ms vào vòng 128 khung ở PSRAM, ưu tiên 16, như `sach` vào `q_clean`; nhân 0 đọc lại mọi khung | 27 | 0, và 0 byte sai trong 3 803 khung | 2 254 ms |
+  | ghi liền 256 KB PSRAM, ưu tiên 2 | 8 | 0 | 6 662 ms |
+  | đọc liền 256 KB PSRAM, ưu tiên 2 | 8 | 0 | 5 381 ms |
+
+  PSRAM bận ở nhân 1 chỉ làm nhân 0 chậm, không làm lệch: chuỗi làm sạch của sản phẩm không chạm kết quả mạng. Autoload
+  của dcache tắt sẵn ở bản dựng này, nên giả thuyết autoload ở trên không đứng.
+- Mạng chen nhau trên một nhân thì không lệch: task `speaker` ở ưu tiên 3 ngắt task chạy `pitch`, `wake`, `command` ở
+  ưu tiên 2 giữa lượt, như `xac_task` ngắt việc cửa sổ của `nhan_task`: 12 lượt và 108 lượt `speaker`, 0 lệch.
+  Cùng bài ấy với `speaker` ở nhân 1 (vẫn `ai_engine` của HEAD, vùng mượn là một con trỏ chung): 12/12 lượt và 14/28
+  lượt `speaker` lệch. Chỉ hai mạng chạy cùng lúc trên hai nhân mới hỏng.
+
+## 34. Kiểm giọng bắt đầu lúc câu chốt, trên nhân 0: không lãi (E11-T37)
+
+Thử 29/10 tối (`e86ff44b`, đảo lại ở `69e290ca`): câu chốt thì 1,5 s cuối của cửa sổ vào ô xác minh, `xac_task`
+tính đặc trưng ở ưu tiên 1, dưới việc cửa sổ; lệnh được nhận thì nó lên 3 để xong và chấm. Board B, firmware sản
+phẩm với lượt thử, chủ repo nói trực tiếp "on" rồi lệnh, 11 `COMMAND`, log UART:
+
+| | Trước (§32, 62 lệnh) | Lượt thử (11 lệnh) |
+|---|---|---|
+| Từ lúc câu chốt tới quyết định, trung vị | 514 ms | 493 ms |
+| Từ lúc câu chốt tới lúc lệnh rời board, trung vị | ~1 018 ms (514 + kiểm giọng 504) | 994 ms |
+| Lần chạy `speaker`, từ lúc bắt đầu tới lúc xong | 504 ms | 947–1 621 ms, trung vị 950 ms |
+
+- Từ lúc câu chốt tới quyết định, nhân 0 gần như không rảnh: việc cửa sổ còn đuổi phần dồn bên cạnh cao độ và `wake`
+  của mỗi bước, nên lần chạy `speaker` ở ưu tiên 1 chỉ đi được chừng một phần mười trước quyết định, và sau đó vẫn cần
+  ~500 ms. Lợi chỉ ~25 ms, không đáng độ phức tạp thêm vào; không giữ.
+- Sau một câu là chừng 1 s việc của nhân 0, nửa chấm lệnh, nửa kiểm giọng, và chỉ làm mạng nhanh hơn mới rút ngắn
+  được nó. Chỗ còn lại: trọng số `command_ctc` ở flash (ADR-0028), mỗi bước 16 hop đọc lại 3,1 MB (§26); front end
+  SwiftF0 2,4 ms mỗi hop, phần `sqrtf` và `ln` chưa bớt (`pitch.md` §7).
