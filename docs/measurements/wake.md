@@ -610,4 +610,11 @@ log-mel (log tự nhiên của công suất dải) ở bước to nhất, đầu
   - đưa "on" của chủ repo đủ ba giọng (trầm, thường, to cao) vào mẫu dương;
   - dịch cao độ mẫu dương khi học;
   - cân mức chữ dương với âm tiết to nhất của âm bản.
-- Chủ repo chọn không thu thêm, sửa bằng hai hướng sau: `wake/on3` (KẾ HOẠCH §3.11).
+- Chủ repo chọn không thu thêm, sửa bằng hai hướng sau.
+- Thử dời cao độ mẩu "on" bằng PSOLA của Praat (`cache/pilot_on3`: 3 giọng, mỗi giọng dời −3, +4, +8 nửa cung).
+  - Đo được: F0 dời đúng số nửa cung, không bão hoà, HNR không kém bản gốc.
+  - Nhưng chủ repo nghe thấy nhiều file như rác, nhất là giọng khàn sẵn (HNR 8 dB, dài 0,5 s).
+  - Bỏ cách ấy, thay bằng rút mẫu theo trọng số cao độ trên bản dựng `on2` (KẾ HOẠCH §3.11).
+- Bảng F0 của `train_pos` (Praat, mẩu sạch): p10 / p50 / p90 là 92 / 122 / 199 Hz; 9 / 3 086 mẩu không có F0. Rút theo
+  trọng số thì thành 111 / 164 / 232 Hz, 55% số lần rút trên 158 Hz (26% khi rút đều), số mẫu hiệu dụng 13 910 /
+  24 688.
