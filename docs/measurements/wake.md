@@ -548,3 +548,8 @@ Mẩu bắt đầu và kết thúc giữa quãng ấy.
   cửa sổ đang mở, cái đầu không bao giờ đóng nên chặn hàng đợi 4 cửa sổ. Sửa ở `3115469d`, nạp 19:16.
 - Sau bản sửa, 19:16–19:30, δ 300 / 10 / 65 535, 900‰: 59 `WAKE`, 36 `COMMAND`, 0 không có quyết định, 9 `PART`,
   7 `LOW_SCORE`, 7 `SPEAKER`.
+- 22:04, bản chẩn đoán in điểm cao nhất của mỗi lần điểm làm trơn lên quá 300‰ và mỗi câu `vad`: chủ repo nói riêng
+  "on" 12 lần, cách nhau 2–3 s, mỗi lần là một câu `vad`. Điểm cao nhất: 912 và 901 (`WAKE`); 909 nói chưa tới 2 s sau
+  `WAKE` trước, nên trong `LENH` thành cửa sổ lệnh, `REJECT LOW_SCORE`; 883, 853; 664, 634, 612, 585, 539, 432, 412.
+  `on2` ở 900‰ bắt 2/12 lần "on" của chủ repo qua board, 850‰ thì 4/12: giọng thật xa vật liệu học (Speech Commands
+  tiếng Anh qua mô phỏng). Không phải firmware treo hay chuỗi làm sạch trôi.
