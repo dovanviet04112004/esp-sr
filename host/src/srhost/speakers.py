@@ -248,27 +248,29 @@ def set_texts(path: Path) -> dict[str, str]:
 
 
 class Prompter:
-    """Prompts the commands of a set in turn, one for each command an enrolment still needs; follows the board's
-    REJECT events: one it keeps prints the count and the command it heard, then the next prompt, any other repeats the
-    prompt."""
+    """Prompts, for each command an enrolment still needs, the first command of a set the board has not heard yet, so
+    a misheard command does not shift the prompts after it; follows the board's REJECT events: one it keeps prints the
+    count and the command it heard, then the next prompt. Other REJECTs are left out: the talk around a board raises
+    one every few seconds (KEHOACH 3.17)."""
 
     def __init__(self, texts: dict[str, str], total: int = ENROL_COMMANDS, out: Callable[[str], None] = print) -> None:
         self.texts, self.total, self.out, self.kept = texts, total, out, 0
+        self.heard: set[str] = set()
 
     def wanted(self) -> str:
-        listed = list(self.texts.values())
-        return listed[self.kept % len(listed)]
+        unheard = [text for command, text in self.texts.items() if command not in self.heard]
+        return unheard[0] if unheard else list(self.texts.values())[self.kept % len(self.texts)]
 
     def prompt(self) -> None:
         self.out(f"  {self.kept + 1}/{self.total} say: {self.wanted()}")
 
     def __call__(self, event: dict) -> None:
         if event["code"] != ENROLLING:
-            self.out(f"  not taken ({event['code']}), say again: {self.wanted()}")
             return
         self.kept = event.get("enrolCount", self.kept + 1)
-        heard = self.texts.get(event.get("commandId", ""), event.get("commandId", "?"))
-        self.out(f"  kept {self.kept}/{self.total}: heard {heard}")
+        command = event.get("commandId", "")
+        self.heard.add(command)
+        self.out(f"  kept {self.kept}/{self.total}: heard {self.texts.get(command, command or '?')}")
         if self.kept < self.total:
             self.prompt()
 

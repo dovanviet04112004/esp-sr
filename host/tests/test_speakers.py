@@ -175,21 +175,23 @@ def test_the_report_waits_for_the_version_sent_and_lists_each_person() -> None:
     assert lines[0].startswith(f"v{roster['version']}, check on, 1 people") and "spk_001 Chủ nhà: enrolled" in lines[1]
 
 
-def test_the_prompter_asks_each_command_in_turn_and_again_after_a_refusal() -> None:
+def test_the_prompter_asks_the_unheard_commands_and_leaves_other_rejects_out() -> None:
+    """The second "tắt đèn" heard as "bật đèn" is prompted again, not skipped; a background REJECT prints nothing."""
     lines: list[str] = []
-    prompter = speakers.Prompter({"bat_den": "bật đèn", "tat_den": "tắt đèn"}, total=3, out=lines.append)
+    texts = {"bat_den": "bật đèn", "tat_den": "tắt đèn", "bat_quat": "bật quạt"}
+    prompter = speakers.Prompter(texts, total=3, out=lines.append)
     prompter.prompt()
     prompter({"kind": "REJECT", "code": "LOW_SCORE"})
     prompter({"kind": "REJECT", "code": speakers.ENROLLING, "enrolCount": 1, "commandId": "bat_den"})
     prompter({"kind": "REJECT", "code": speakers.ENROLLING, "enrolCount": 2, "commandId": "bat_den"})
+    prompter({"kind": "REJECT", "code": "LOW_MARGIN"})
     prompter({"kind": "REJECT", "code": speakers.ENROLLING, "enrolCount": 3, "commandId": "tat_den"})
     assert lines == [
         "  1/3 say: bật đèn",
-        "  not taken (LOW_SCORE), say again: bật đèn",
         "  kept 1/3: heard bật đèn",
         "  2/3 say: tắt đèn",
         "  kept 2/3: heard bật đèn",
-        "  3/3 say: bật đèn",
+        "  3/3 say: tắt đèn",
         "  kept 3/3: heard tắt đèn",
     ]
 
