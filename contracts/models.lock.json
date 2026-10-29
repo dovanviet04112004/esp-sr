@@ -220,6 +220,48 @@
         "logits": 6,
         "confidence": 7
       }
+    },
+    "wake": {
+      "run": "20261029_b7c6710-dirty_b2ae63",
+      "grid_hash": "0x9c914b61",
+      "files": [
+        {
+          "file": "wake.espdl",
+          "entry": "wake",
+          "kind": "espdl",
+          "sha256": "bcba5063ff64b30fca96ae9bb5f1cc82bde9c6cb9736806406d9e4ce87970e90"
+        },
+        {
+          "file": "wake.norm.bin",
+          "entry": "wake",
+          "kind": "norm",
+          "sha256": "bf4d5320fe32c8e757775c0ce577974e30799255f904ce4631644d2d89f098e2"
+        }
+      ],
+      "learnt_from": {
+        "split": "on1",
+        "train": [
+          {
+            "file": "train_hard.txt",
+            "sha256": "fd23a5e6cee011419530f45b01ad3cdf3cd9f21849726d16a4cedcbf8899161b"
+          },
+          {
+            "file": "train_neg.txt",
+            "sha256": "865e6f8ee7713f4f70f3264ad37e24c708c87be6474e9e74b3bf56fbdd140ea3"
+          },
+          {
+            "file": "train_pos.txt",
+            "sha256": "479615dde23fa234063a48b2d696bc37d57d174ac0f7a7b17cbb014c6f08799f"
+          }
+        ]
+      },
+      "row": "minmax",
+      "word": "on",
+      "step_frames": 8,
+      "threshold": {
+        "permille": 960
+      },
+      "smooth_hops": 5
     }
   }
 }
