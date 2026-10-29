@@ -10,4 +10,5 @@ uv run python -m srpipe.export.pack_models "$image" --lock
 offset=$(python "$IDF_PATH/components/partition_table/parttool.py" --partition-table-file ../firmware/partitions.csv \
   get_partition_info --partition-name models_0 --info offset)
 # Written where the flash differs, the rest kept: the image's header gives every model's size (KEHOACH 2.1, 6.3).
-python -m esptool --chip esp32s3 --port "$port" --baud "$baud" write-flash --skip-flashed "$offset" "$image"
+python -m esptool --chip esp32s3 --port "$port" --baud "$baud" --after "${AFTER:-hard-reset}" write-flash --skip-flashed \
+  "$offset" "$image"

@@ -481,12 +481,13 @@ wifi: ## Put board B on a Wi-Fi network, the PC's by default, and point its brok
 	cd host && uv run python -m srhost.wifi --port "$(PORT)"
 
 models-flash: ## Pack every model of contracts/models.lock.json and write models_0 of board B (KEHOACH 4.5.6, 6.1)
-	cd ml && PORT=$(PORT) BAUD=$(FLASH_BAUD) ./scripts/50_pack_and_flash.sh
+	cd ml && PORT=$(PORT) BAUD=$(FLASH_BAUD) AFTER=$(AFTER) ./scripts/50_pack_and_flash.sh
 
 PRODUCT_PARTS = python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --baud $(FLASH_BAUD) \
   --partition-table-file firmware/partitions.csv
 # Writes FILE $(2) at partition $(1) where board B's flash differs, without erasing the partition first (KEHOACH 2.1).
-write_at = python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD) write-flash --skip-flashed \
+write_at = python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD) --after $(or $(AFTER),hard-reset) \
+  write-flash --skip-flashed \
   $$($(PRODUCT_PARTS) get_partition_info --partition-name $(1) --info offset) $(2)
 
 .PHONY: nvs-save nvs-restore storage-flash product
@@ -503,11 +504,12 @@ nvs-restore: ## Write FILE, a copy nvs-save made, back to board B's NVS partitio
 storage-flash: fw-bench ## Write the bench build's LittleFS image, set.json among it, to board B's storage partition
 	$(call write_at,storage,firmware/build_bench/storage.bin)
 
-# Models and storage go first: the product's first boot then finds its models and keeps the thresholds in NVS.
+# Models and storage go first, each write leaving the chip in its loader: the product's first boot finds its models and
+# keeps the NVS thresholds, and no test app left in ota_0 boots in between to write its own slots over models_0.
 product: ## Put the product back on board B after test apps: models, storage, then firmware, and show its boot [SPEAKER=b0|b3]
 	$(if $(SPEAKER),$(MAKE) --no-print-directory speaker-use SPEAKER=$(SPEAKER))
-	$(MAKE) --no-print-directory models-flash
-	$(MAKE) --no-print-directory storage-flash
+	$(MAKE) --no-print-directory models-flash AFTER=no-reset
+	$(MAKE) --no-print-directory storage-flash AFTER=no-reset
 	$(MAKE) --no-print-directory fw-bench-flash
 	cd host && uv run python -m srhost.boot --port "$(PORT)"
 
