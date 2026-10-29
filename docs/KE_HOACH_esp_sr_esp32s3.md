@@ -1286,8 +1286,9 @@ khung thêm chỉ ~50 µs, nên 8 khung mỗi lượt là 288 µs mỗi khung th
 16 khung bớt thêm 118 µs mà trễ gấp đôi. `ai_engine_wake_step` vẫn nhận từng khung, và điểm nó trả là của khung 7 bước
 trước (`ai_engine_wake_delay`, 112 ms), như nhau ở mọi khung, nên bước vượt ngưỡng vẫn biết đúng. Đầu vào chuẩn hoá
 theo trung bình và độ lệch từng dải rồi lượng tử làm tròn nửa lên như ESP-PPQ; logit ra đổi sang xác suất ‰ bằng bảng
-256 mục dựng ở Python, làm trơn trung bình trượt 5 khung bằng số nguyên rồi so ngưỡng, nên điểm trên chip trùng bản
-Python từng ‰. Ngưỡng nằm ở NVS `kws/wake_th`.
+256 mục, dựng lúc nạp bằng phép double như bản Python (như bảng giải của `pitch`, không đổi khuôn ảnh), làm trơn
+trung bình trượt 5 khung bằng số nguyên rồi so ngưỡng, nên điểm trên chip trùng bản Python từng ‰. Ngưỡng nằm ở NVS
+`kws/wake_th`.
 
 **Từ đánh thức "trợ lý"** (ADR-0011, thay "Chào Mina" của ADR-0007). Chủ dự án chọn vì tự nhiên. Hai âm tiết, dài
 chừng nửa giây, 28 lần mỗi triệu âm tiết lời nói: ngắn và thông dụng hơn luật 3–4 âm tiết, pha thanh khác nhau, mà
