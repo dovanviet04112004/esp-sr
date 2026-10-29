@@ -225,7 +225,7 @@ def test_a_pilot_drawing_its_train_negatives_leaves_out_the_word_and_the_kept_sp
     assert kept["train_neg.txt"] == splits.read_split(earlier / "train_neg.txt")
 
 
-def test_a_speech_commands_pilot_cuts_the_word_reuses_negatives_and_draws_hard_ones(tmp_path: Path) -> None:
+def test_a_speech_commands_pilot_cuts_the_word_reuses_public_negatives_and_draws_hard_ones(tmp_path: Path) -> None:
     root, hop = tmp_path / "speech" / "sc", grid.HOP_SAMPLES
     tone = 0.3 * np.sin(2 * np.pi * 300.0 * np.arange(20 * hop) / grid.SAMPLE_RATE_HZ)
     said = {"yes": ["aa_nohash_0", "bb_nohash_0", "cc_nohash_0"], "no": ["aa_nohash_0", "dd_nohash_0"]}
@@ -238,7 +238,9 @@ def test_a_speech_commands_pilot_cuts_the_word_reuses_negatives_and_draws_hard_o
     earlier = tmp_path / "splits" / "wake" / "v4"
     earlier.mkdir(parents=True)
     for name in data.NEGATIVES:
-        (earlier / name).write_text(f"speech/vivos/{name}.wav\tVIVOSSPK01\t-\tpublic\n", encoding="utf-8")
+        public = f"speech/vivos/{name}.wav\tVIVOSSPK01\t-\tpublic\n"
+        tts = f"wake/synth_neg/f5/{name}.wav\tvieneu_preset_02\t-\tsynth\n"
+        (earlier / name).write_text(public + tts, encoding="utf-8")
     pilot = {"dir": "speech/sc", "negatives_from": "v4", "hard_clips": {"train": 5, "val": 5}}
     cfg = load_yaml(CONFIG)
     cfg = cfg | {"word": "yes", "split": cfg["split"] | {"speech_commands": pilot}}
@@ -247,5 +249,5 @@ def test_a_speech_commands_pilot_cuts_the_word_reuses_negatives_and_draws_hard_o
     assert [r.item for r in files["train_pos.txt"]] == ["speech/sc/yes/aa_nohash_0.wav@0.000-0.320"]
     assert [r.spk for r in files["val_pos.txt"]] == ["bb"] and [r.spk for r in files["val_hard.txt"]] == ["dd"]
     assert [r.spk for r in files["train_hard.txt"]] == ["aa"]
-    assert files["train_neg.txt"] == splits.read_split(earlier / "train_neg.txt")
+    assert files["train_neg.txt"] == splits.read_split(earlier / "train_neg.txt")[:1]
     assert seconds["speech/sc/yes/aa_nohash_0.wav@0.000-0.320"] == 0.32

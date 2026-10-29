@@ -199,8 +199,8 @@ def speech_commands_files(
 ) -> tuple[dict[str, list[splits.Row]], dict[str, float]]:
     """A Speech Commands pilot's files and their lengths: the word's clips as positives, each cut at the end of its
     speech; the other words as hard negatives drawn to their counts; val from the corpus's testing list, train from
-    neither of its lists; and an earlier version's negatives as they are, so their simulation is linked, not rerun,
-    or with draw_train_neg its val and test negatives and a train_neg of fresh_train_negatives over public."""
+    neither of its lists; an earlier version's negatives without their TTS clips, train_neg among them unless
+    draw_train_neg draws it anew by fresh_train_negatives over public."""
     spec, word = cfg["split"]["speech_commands"], cfg["word"]
     if not isinstance(word, str):
         raise ValueError(f"word {word!r} is no string: YAML reads yes, no, on and off unquoted as booleans")
@@ -231,7 +231,7 @@ def speech_commands_files(
             seconds[item] = length
         files[f"{role}_{kind}.txt"] = rows
     earlier = paths["splits"] / "wake" / spec["negatives_from"]
-    files |= {name: splits.read_split(earlier / name) for name in NEGATIVES}
+    files |= {name: [r for r in splits.read_split(earlier / name) if r.origin != SYNTH] for name in NEGATIVES}
     if spec.get("draw_train_neg"):
         files["train_neg.txt"] = fresh_train_negatives(cfg, list(public), heard_s or {}, files)
         seconds |= {r.item: (heard_s or {})[r.item] for r in files["train_neg.txt"]}
@@ -273,11 +273,11 @@ def sentence_units(clips: list[corpus.Clip], items: set[str], dialect: str) -> d
 
 def negatives_note(spec: dict) -> str:
     """SPLIT.md's line on a Speech Commands pilot's negatives, as speech_commands_files takes them."""
-    earlier = f"`wake/{spec['speech_commands']['negatives_from']}`"
+    earlier = f"lời nói công khai của `wake/{spec['speech_commands']['negatives_from']}`, không mẩu TTS nào"
     if not spec["speech_commands"].get("draw_train_neg"):
-        return f"- `train_neg`, `val_neg`, `test_neg`: nguyên văn của {earlier}."
+        return f"- `train_neg`, `val_neg`, `test_neg`: {earlier}."
     return (
-        f"- `val_neg`, `test_neg`: nguyên văn của {earlier}. `train_neg`: {spec['negative_hours']} giờ lời nói rút theo"
+        f"- `val_neg`, `test_neg`: {earlier}. `train_neg`: {spec['negative_hours']} giờ lời nói rút theo"
         f" seed từ {', '.join(spec['learning'])}, không câu nào đọc ra từ đánh thức, không người nói nào của `val_neg`,"
         " `test_neg`."
     )
