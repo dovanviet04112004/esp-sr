@@ -113,3 +113,9 @@ eval:
   board:                           # sessions recorded through board B, run through the same chain and log-mel
     manifest: device/board_b.csv   # under data/manifests
     pcm_shift: 13                  # the shift the product keeps (E2-T5); other sessions are left out
+quant:                             # python -m srpipe.tasks.wake.quant ptq <run>: rung 2 of KEHOACH 3.14 (E11-T11)
+  seed: 20261029
+  calib_windows: 64                # of train.window_hops hops, half from train_pos, half from train_neg
+  calibrations: [kl, percentile, minmax, mse]   # one row each, in this order, scored as the chip scores
+deploy:                            # make wake-deploy RUN= ROW=: a row into firmware/models/wake (KEHOACH 3.11)
+  step_frames: 8                   # frames a call of the streaming graph; the score trails the frame fed by 7

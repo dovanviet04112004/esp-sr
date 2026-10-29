@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -54,27 +55,45 @@ def thresholds(spec: dict) -> np.ndarray:
     return np.concatenate([coarse, fine])
 
 
-def sweep(model, positives: list[Shard], negatives: list[Shard], mean, std, cfg: dict, device: str) -> Sweep:
-    """Recall and false accepts per hour at every threshold of cfg['eval']."""
+def sweep_scores(
+    score_of: Callable[[Shard], np.ndarray], positives: list[Shard], negatives: list[Shard], cfg: dict, grid_th
+) -> Sweep:
+    """Recall and false accepts per hour at each threshold of grid_th, every shard scored whole by score_of: its
+    smoothed score per hop on the thresholds' scale."""
     spec, rate = cfg["eval"], grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
-    grid_th = thresholds(spec["thresholds"])
     after = round(cfg["train"]["label_s"][1] * rate)
     peaks = []
     for shard in positives:
-        s = smooth(probabilities(model, shard, mean, std, device), spec["smooth_hops"])
+        s = score_of(shard)
         for item in shard.items:
             first = item["frame_offset"] + item["speech_frames"][0]
-            peaks.append(float(s[first : item["frame_offset"] + item["speech_frames"][1] + after].max()))
+            peaks.append(s[first : item["frame_offset"] + item["speech_frames"][1] + after].max())
     lockout = round(spec["lockout_s"] * rate)
     fired = np.zeros(len(grid_th))
     hops = 0
     for shard in negatives:
-        s = smooth(probabilities(model, shard, mean, std, device), spec["smooth_hops"])
+        s = score_of(shard)
         fired += [len(triggers(s, th, lockout)) for th in grid_th]
         hops += len(s)
     hours = hops / HOPS_PER_HOUR
-    recall = (np.array(peaks)[None, :] >= grid_th[:, None]).mean(axis=1)
-    return Sweep(grid_th, recall, fired / hours, len(peaks), hours)
+    recall = (
+        (np.array(peaks)[None, :] >= np.asarray(grid_th)[:, None]).mean(axis=1)
+        if peaks
+        else np.full(len(grid_th), np.nan)
+    )
+    return Sweep(np.asarray(grid_th), recall, fired / hours, len(peaks), hours)
+
+
+def sweep(model, positives: list[Shard], negatives: list[Shard], mean, std, cfg: dict, device: str) -> Sweep:
+    """Recall and false accepts per hour at every threshold of cfg['eval'], on the float net's smoothed probability."""
+    hops = cfg["eval"]["smooth_hops"]
+    return sweep_scores(
+        lambda shard: smooth(probabilities(model, shard, mean, std, device), hops),
+        positives,
+        negatives,
+        cfg,
+        thresholds(cfg["eval"]["thresholds"]),
+    )
 
 
 def operating_point(result: Sweep, target_per_hour: float) -> tuple[float, float, float]:

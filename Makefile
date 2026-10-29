@@ -263,12 +263,19 @@ SPEED_ESPDL_pitch = ml/$(RUN)/int8/timing/pitch.espdl
 
 ##@ Wake
 
-.PHONY: wake-features wake-train eval-tts wake-synth
+.PHONY: wake-features wake-train wake-ptq wake-deploy eval-tts wake-synth
 wake-features: ## Run each file of the wake split through the board simulation into processed/wake (E4-T8)
 	$(ML) python -m srpipe.tasks.wake.data simulate
 
 wake-train: ## Train the wake TCN on processed/wake/<split> on the GPU into ml/artifacts/wake/runs (E11-T11)
 	$(ML) --extra train python -m srpipe.tasks.wake.train
+
+WAKE_QUANT = $(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.wake.quant
+wake-ptq: ## Rung 2 of the wake TCN, each calibration scored as the chip scores, into <run>/int8: RUN=<run> [CALIBRATIONS="kl ..."] (E11-T11)
+	$(WAKE_QUANT) ptq $(RUN) $(if $(CALIBRATIONS),--calibrations $(CALIBRATIONS))
+
+wake-deploy: ## Lock a ladder row of the wake, its threshold and smoothing, into firmware/models/wake: RUN=<run> ROW=<row> (E11-T11)
+	$(WAKE_QUANT) deploy $(RUN) --row $(ROW)
 
 eval-tts: screen ## Compare the desktop TTS engines on the wake word, heard back by PhoWhisper (tts_engines.md)
 	$(ML) python -m srpipe.tasks.wake.synth pilot
