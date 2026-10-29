@@ -1,6 +1,6 @@
 # The wake network of KEHOACH 3.11. E11-T10 exports it with random weights to prove esp-dl streams it one hop at a time.
 features: scenes/device.yaml       # the board simulation; the log-mel the network reads is contracts/listen.yaml's
-word: trợ lý                        # ADR-0011: the demo favours catching it over refusing look-alikes
+word: "on"                          # ADR-0029, for "trợ lý" of ADR-0011; quoted, as YAML reads a bare on as true
 model:
   kernel: 3
   channels: 64                     # with the CTC side task it lifts real speech, 32 does not (wake.md §5)
@@ -60,29 +60,34 @@ synth:                             # E11-T7: clips from the engines of common/tt
     phrases: [trợ, lý]             # each half said alone must not wake the device either
     voices: {vieneu: 6, f5: 4}     # per phrase, drawn with the seed; VieNeu from presets and clones
 split:                             # E11-T11: data/splits/wake/<version> by python -m srpipe.tasks.wake.data (KEHOACH 1.3)
-  version: v4
+  version: on1
   seed: 20260928
   val_speakers: 0.2                # of VIVOS train speakers and of VieNeu presets, each held out whole with its clones
-  learning: [speech/vivos/train/, speech/fpt_open/, speech/vlsp/, speech/bud500/]   # gave the reference voices
+  learning: [speech/vivos/train/, speech/fpt_open/, speech/vlsp/, speech/lsvsc/, speech/vimd/]
   negative_hours: 100              # public speech drawn from learning into train_neg
   test_neg: [speech/common_voice_vi/, speech/vivos/test/]   # no reference voice came from these
   val_from_test: {speech/common_voice_vi/: 0.4}   # share of its speakers moved whole into val_neg (KEHOACH 3.11)
   real_pos: hf_extract             # the extract of common/extract.yaml whose clips of the word are the real positives,
                                    #   train only as it names no speakers (KEHOACH 3.11)
-  speech_commands: null            # a pilot on Speech Commands v0.02: {dir, negatives_from, hard_clips: {train, val}}
+  speech_commands:                 # the word from Speech Commands v0.02 (ADR-0029)
+    dir: speech/speech_commands
+    negatives_from: v4             # its val and test negatives, free of Bud500
+    hard_clips: {train: 3000, val: 600}   # of the other words, drawn with the seed
+    draw_train_neg: true           # v4's train negatives are Bud500, deleted 06/10
   end_below_peak_db: 40.0          # every positive, TTS or real, ends at its last hop within this of its loudest: the
                                    #   simulation labels a clip's end, and both kinds carry silence after the word
 simulate:                          # make wake-features: python -m srpipe.tasks.wake.data simulate (E4-T8)
-  split: v4
+  split: on1
   workers: 12                      # each holds about 450 MB; more push a 10 GB WSL into swap
   repeats: {train_pos: 8}          # passes over a file, each in other rooms, levels and noise; else 1
 train:                             # E11-T11: python -m srpipe.tasks.wake.train (KEHOACH 3.11), on the GPU when present
-  split: v4                        # processed/wake/<split>/<file> of make wake-features
+  split: on1                       # processed/wake/<split>/<file> of make wake-features
   seed: 20260928
   window_hops: 256                 # one example, twice the receptive field
   warmup_hops: 128                 # a window's first hops see zero padding, not audio: no loss on them
   label_s: [0.2, 0.3]              # a positive is 1 from this long before the end of its speech to this long after
   positive_share: 0.25             # of each batch
+  hard_share: 0.25                 # of each batch, from train_hard
   onset_share: 0.25                # of the negative windows, ending within onset_s of a sentence's first speech hop:
   onset_s: 2.0                     #   every positive follows a silence, so a net never shown these fires there
   word_s: 1.2                      # a hard negative this short is a word: its window ends where a positive's label does

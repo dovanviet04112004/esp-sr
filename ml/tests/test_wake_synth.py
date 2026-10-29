@@ -23,7 +23,8 @@ def refs(root: Path) -> list[clips.Reference]:
 
 @pytest.mark.parametrize("which", ["pilot", "positives"])
 def test_positives_ask_every_engine_for_every_voice_text_seed_and_speed(tmp_path: Path, which: str) -> None:
-    cfg = load_yaml(CONFIG)
+    """TTS speaks the word of ADR-0011, the one its texts carry, whatever word the branch learns on now."""
+    cfg = load_yaml(CONFIG) | {"word": "trợ lý"}
     spec = cfg["synth"][which]
     requests = synth.positive_requests(cfg, spec, PRESETS, refs(tmp_path), tmp_path)
     vieneu, f5 = spec["vieneu"], spec["f5"]

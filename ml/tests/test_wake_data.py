@@ -162,15 +162,53 @@ def test_the_extracts_clips_of_the_word_join_the_train_positives(tmp_path: Path)
     assert real == {f"speech/x/tro_ly/a__0.wav@0.000-{end:.3f}": end}
     assert data.says_word(corpus.Clip("a", None, "nhờ trợ lí nhé"), corpus.sounds("trợ lý"))
     assert not data.says_word(corpus.Clip("a", None, "hỗ trợ lực lượng"), corpus.sounds("trợ lý"))
-    public = [corpus.Clip(f"speech/bud500/data/train-0.parquet#{n}", None, "một câu") for n in range(3)]
-    public += [corpus.Clip("speech/bud500/data/train-0.parquet#3", None, "theo các trợ lý tổng thống")]
+    public = [corpus.Clip(f"speech/vlsp/a_{n}.wav", None, "một câu") for n in range(3)]
+    public += [corpus.Clip("speech/vlsp/a_3.wav", None, "theo các trợ lý tổng thống")]
     seconds = dict.fromkeys((c.item for c in public), 1.0) | real
     manifests = {synth.SETS["positives"]: [], synth.SETS["negatives"]: []}
     files = data.build(cfg, public, seconds, manifests, tuple(real))
     assert [(r.item, r.spk, r.origin) for r in files["train_pos.txt"]] == [(*real, "-", "public")]
     assert not files["val_pos.txt"]
     negatives = [r.item for name in ("train_neg.txt", "val_neg.txt", "test_neg.txt") for r in files[name]]
-    assert "speech/bud500/data/train-0.parquet#3" not in negatives and len(negatives) == 3
+    assert "speech/vlsp/a_3.wav" not in negatives and len(negatives) == 3
+
+
+def test_a_pilot_drawing_its_train_negatives_leaves_out_the_word_and_the_kept_speakers(tmp_path: Path) -> None:
+    """Fresh train negatives of split.learning: a sentence saying the word, a speaker of the kept val negatives and a
+    corpus outside learning stay out; the val and test negatives come over as they are."""
+    root, hop = tmp_path / "speech" / "sc", grid.HOP_SAMPLES
+    tone = 0.3 * np.sin(2 * np.pi * 300.0 * np.arange(20 * hop) / grid.SAMPLE_RATE_HZ)
+    for word, stem in (("on", "aa_nohash_0"), ("off", "bb_nohash_0")):
+        write_wav(root / word / f"{stem}.wav", np.concatenate([tone, np.zeros(30 * hop)]))
+    (root / "testing_list.txt").write_text("", encoding="utf-8")
+    (root / "validation_list.txt").write_text("", encoding="utf-8")
+    earlier = tmp_path / "splits" / "wake" / "v4"
+    earlier.mkdir(parents=True)
+    for name, spk in zip(data.NEGATIVES, ("BUD", "VIVOSSPK01", "VIVOSSPK02"), strict=True):
+        (earlier / name).write_text(f"speech/x/{name}.wav\t{spk}\t-\tpublic\n", encoding="utf-8")
+    pilot = {"dir": "speech/sc", "negatives_from": "v4", "hard_clips": {"train": 5, "val": 5}, "draw_train_neg": True}
+    cfg = load_yaml(CONFIG)
+    learning = ["speech/vivos/train/", "speech/fpt_open/"]
+    split = cfg["split"] | {"speech_commands": pilot, "learning": learning, "negative_hours": 1.0}
+    cfg = cfg | {"word": "on", "split": split}
+    public = [
+        corpus.Clip("speech/vivos/train/VIVOSSPK01_001.wav", "VIVOSSPK01", "một câu"),
+        corpus.Clip("speech/vivos/train/VIVOSSPK03_001.wav", "VIVOSSPK03", "một câu"),
+        corpus.Clip("speech/fpt_open/a.mp3", None, "câu khác"),
+        corpus.Clip("speech/fpt_open/b.mp3", None, "hát on nhé"),
+        corpus.Clip("speech/vlsp/c.wav", None, "câu ngoài"),
+    ]
+    heard_s = dict.fromkeys((c.item for c in public), 2.0)
+    paths = {"raw": tmp_path, "splits": tmp_path / "splits"}
+    files, seconds = data.speech_commands_files(cfg, paths, public, heard_s)
+    drawn = [r.item for r in files["train_neg.txt"]]
+    assert drawn == ["speech/vivos/train/VIVOSSPK03_001.wav", "speech/fpt_open/a.mp3"]
+    assert files["val_neg.txt"] == splits.read_split(earlier / "val_neg.txt")
+    assert files["test_neg.txt"] == splits.read_split(earlier / "test_neg.txt")
+    assert seconds["speech/fpt_open/a.mp3"] == 2.0
+    copying = split | {"speech_commands": pilot | {"draw_train_neg": False}}
+    kept, _ = data.speech_commands_files(cfg | {"split": copying}, paths)
+    assert kept["train_neg.txt"] == splits.read_split(earlier / "train_neg.txt")
 
 
 def test_a_speech_commands_pilot_cuts_the_word_reuses_negatives_and_draws_hard_ones(tmp_path: Path) -> None:

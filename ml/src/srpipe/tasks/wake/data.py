@@ -179,10 +179,28 @@ def build(
     return files
 
 
-def speech_commands_files(cfg: dict, paths: dict[str, Path]) -> tuple[dict[str, list[splits.Row]], dict[str, float]]:
+def fresh_train_negatives(
+    cfg: dict, public: list[corpus.Clip], seconds: dict[str, float], kept: dict[str, list[splits.Row]]
+) -> list[splits.Row]:
+    """split.negative_hours of the public speech of split.learning drawn with the seed, none saying the word and none
+    spoken by a speaker of the val and test negatives kept, so no voice is both learnt and scored."""
+    spec, word = cfg["split"], corpus.sounds(cfg["word"])
+    held = {r.spk for name in ("val_neg.txt", "test_neg.txt") for r in kept[name]} - {splits.ABSENT}
+    pool = [
+        c
+        for c in public
+        if c.item.startswith(tuple(spec["learning"])) and not says_word(c, word) and c.speaker not in held
+    ]
+    return splits.clip_rows(draw_hours(pool, seconds, spec["negative_hours"], spec["seed"]), PUBLIC)
+
+
+def speech_commands_files(
+    cfg: dict, paths: dict[str, Path], public: list[corpus.Clip] = (), heard_s: dict[str, float] | None = None
+) -> tuple[dict[str, list[splits.Row]], dict[str, float]]:
     """A Speech Commands pilot's files and their lengths: the word's clips as positives, each cut at the end of its
     speech; the other words as hard negatives drawn to their counts; val from the corpus's testing list, train from
-    neither of its lists; and an earlier version's negatives as they are, so their simulation is linked, not rerun."""
+    neither of its lists; and an earlier version's negatives as they are, so their simulation is linked, not rerun,
+    or with draw_train_neg its val and test negatives and a train_neg of fresh_train_negatives over public."""
     spec, word = cfg["split"]["speech_commands"], cfg["word"]
     if not isinstance(word, str):
         raise ValueError(f"word {word!r} is no string: YAML reads yes, no, on and off unquoted as booleans")
@@ -214,6 +232,9 @@ def speech_commands_files(cfg: dict, paths: dict[str, Path]) -> tuple[dict[str, 
         files[f"{role}_{kind}.txt"] = rows
     earlier = paths["splits"] / "wake" / spec["negatives_from"]
     files |= {name: splits.read_split(earlier / name) for name in NEGATIVES}
+    if spec.get("draw_train_neg"):
+        files["train_neg.txt"] = fresh_train_negatives(cfg, list(public), heard_s or {}, files)
+        seconds |= {r.item: (heard_s or {})[r.item] for r in files["train_neg.txt"]}
     return dict(sorted(files.items())), seconds
 
 
@@ -250,6 +271,18 @@ def sentence_units(clips: list[corpus.Clip], items: set[str], dialect: str) -> d
     return units
 
 
+def negatives_note(spec: dict) -> str:
+    """SPLIT.md's line on a Speech Commands pilot's negatives, as speech_commands_files takes them."""
+    earlier = f"`wake/{spec['speech_commands']['negatives_from']}`"
+    if not spec["speech_commands"].get("draw_train_neg"):
+        return f"- `train_neg`, `val_neg`, `test_neg`: nguyên văn của {earlier}."
+    return (
+        f"- `val_neg`, `test_neg`: nguyên văn của {earlier}. `train_neg`: {spec['negative_hours']} giờ lời nói rút theo"
+        f" seed từ {', '.join(spec['learning'])}, không câu nào đọc ra từ đánh thức, không người nói nào của `val_neg`,"
+        " `test_neg`."
+    )
+
+
 def notes(cfg: dict, files: dict[str, list[splits.Row]], seconds: dict[str, float]) -> str:
     """SPLIT.md ahead of the checksums: rules, seed, command and each file's size."""
     spec = cfg["split"]
@@ -267,7 +300,7 @@ Dựng bằng `python -m srpipe.tasks.wake.data split`, seed {spec["seed"]}, m�
   `testing_list.txt`, `train` từ mẩu không nằm ở danh sách nào của bộ, nên người nói tách như bộ tách.
 - `train_hard`, `val_hard`: các từ còn lại của bộ, rút theo seed {pilot["hard_clips"]["train"]} và
   {pilot["hard_clips"]["val"]} mẩu.
-- `train_neg`, `val_neg`, `test_neg`: nguyên văn của `wake/{pilot["negatives_from"]}`.
+{negatives_note(spec)}
 
 | File | Mẩu | Giờ | Mẩu TTS |
 |---|---|---|---|
@@ -372,7 +405,7 @@ def cut_split(cfg: dict, paths: dict[str, Path]) -> int:
         manifests[folder] = clips
         seconds |= {synth_item(folder, c): c.get("cut_s", c["seconds"]) for c in clips}
     if cfg["split"]["speech_commands"]:
-        files, lengths = speech_commands_files(cfg, paths)
+        files, lengths = speech_commands_files(cfg, paths, public, seconds)
         seconds |= lengths
     else:
         files = build(cfg, public, seconds, manifests, tuple(real))
