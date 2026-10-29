@@ -425,3 +425,27 @@ thang. Trong ngoặc là thang của dòng đang deploy (`int8_kaldi_pitch`, c�
 - Ở ngưỡng riêng, int16 4 lớp kém `percentile` 9 câu Cửa 3: thắng hoà ở δ của thang không giữ được.
 - `percentile` kém dòng đang deploy 3 câu Cửa 3, trong `gate_tie`; hơn trên `val_commands` (mở cửa 43/60 so với 35/60)
   và nhận nhầm `val` 1 so với 4.
+
+### 7.6 Trên board B (phần 3.4.6, 29/10)
+
+Dòng `percentile` vào sản phẩm (`3f7ab963`) cùng hàng kl chạy dòng của `pitch`. `make listen-unit`: 7 lượt Cửa 3 qua
+`svc_listen` trên chip, nạp từng bước như `latency.md` §16. Mỗi cửa sổ so với Python từng trường: lệnh hay mã từ
+chối, điểm, biên, hai khoảng (‰).
+
+| Lượt chạy | Trùng Python | Cửa sổ lệch |
+|---|---|---|
+| 12:30–12:42, đầu vào CNN làm tròn bằng `lrintf` | 104/105, dừng ở lượt 1 | 34..214: chip 929, 37, 45, 26; Python 928, 37, 47, 28 |
+| 13:55–14:15, sau `28916846` | **336/336**, cả 7 lượt, 43 phiên, 160 lệnh nhận | — |
+
+- **Gốc của lệch:** chip lượng tử đầu vào của CNN bằng `lrintf`, làm tròn nửa về chẵn. ESP-PPQ, mà bản soi gương
+  mô phỏng qua, làm tròn nửa lên. Một giá trị rơi đúng nửa bước thì hai bên ra hai số int8. Sửa ở `on_grid` của
+  `ai_engine/src/pitch/pitch.cpp`: `floorf(x + 0,5)` (KẾ HOẠCH §3.11).
+- **Cả chuỗi lại sau bản sửa** (`make ai-unit-pitch … ROW=kl CHAIN=1`, 14:17–14:20, tiếng sạch rút từ `command/v9`
+  vì `v8` đã xoá; split trùng từng dòng nên phiên rút ra như cũ): **lệch 0 trên 754 giá trị**. Front 2 651 µs trung
+  bình, 3 098 µs đỉnh mỗi hop; mạng và giải 30 460 µs mỗi lượt 16 khung, 1 903 µs mỗi hop, như §7.4.
+- **Công mỗi cửa sổ**, cộng dồn qua các bước: 1,19–1,46 s trung bình theo lượt, 1,95 s đỉnh. Thời Kaldi là 665 ms
+  và 985 ms (`latency.md` §16).
+- **Từ bước chốt tới quyết định:** 387 ms trung vị, 519 ms p95, 195 ms thấp nhất. Ba cửa sổ 234 bước, cắt lùi từ
+  cuối câu, mất 2,07–2,08 s. Thời Kaldi là 47,7 ms trung vị. Cửa sổ phải chờ cột cao độ của nó, trễ sau log-mel tới
+  50 bước. App nạp không theo nhịp, nên đây là giờ tính, chưa phải độ trễ của sản phẩm 🔬.
+- Còn của phần 3.4.6: độ trễ và tải nhân 0 khi sản phẩm chạy thật.
