@@ -687,10 +687,11 @@ ai-profile: ## Rank a board run's modules by time, each slow esp-dl path tagged 
 	$(ML) --extra espdl python -m srpipe.compress.quant.espdl_profile --log $(abspath $(LOG)) --espdl $(abspath $(ESPDL)) \
 	  $(if $(TOP),--top $(TOP))
 
-# The locked models go to model slot 0; each window is decided as Python decides its int8 simulation, field by field.
+# The locked models but the wake go to model slot 0, so every utterance has its window (KEHOACH 5.4); each window
+# is decided as Python decides its int8 simulation, field by field.
 listen-unit: ## Run svc_listen on board B over every Gate 3 session, round by round [SPEAKER=1: the speaker check on] (E11-T14, E11-T26)
 	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.command.ctc.probe --listen $(if $(SPEAKER),--speaker)
-	$(ML) python -m srpipe.export.pack_models artifacts/models.bin --lock
+	$(ML) python -m srpipe.export.pack_models artifacts/models.bin --lock --skip wake
 	@$(call fresh_sdkconfig,$(LISTEN_APP)/sdkconfig,$(call app_defaults,$(LISTEN_APP)))
 	cd $(LISTEN_APP) && idf.py build
 	$(WRITE_PART) models_0 --input ml/artifacts/models.bin
