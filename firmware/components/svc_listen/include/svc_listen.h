@@ -1,8 +1,8 @@
-/** The nhan half of the listener (KEHOACH 3.12, 5.2, 5.4): log-mel of every clean hop and, on an image
- * without wake, a command window for each utterance vad finds, cut as Gate 3 cuts it, stepped through
- * ai_engine while the utterance runs and decided once it closes. With speaker in the image, xac_task checks
- * the speaker of each command through the verify calls (KEHOACH 3.17). Memory is taken once in init; every
- * other call belongs to nhan_task, the verify and speaker calls to xac_task.
+/** The nhan half of the listener (KEHOACH 3.12, 5.2, 5.4): log-mel of every clean hop and a command window
+ * for each utterance vad finds, with a wake in the image only in LENH after it fires; each cut as Gate 3 cuts
+ * it, stepped through ai_engine while the utterance runs and decided once it closes. With speaker in the
+ * image, xac_task checks the speaker of each command through the verify calls (KEHOACH 3.17). Memory is taken
+ * once in init; every other call belongs to nhan_task, the verify and speaker calls to xac_task.
  */
 #pragma once
 
@@ -32,11 +32,12 @@ typedef struct {
     uint16_t reject_permille;   // delta1 ai_engine decides with
     uint16_t margin_permille;   // delta2 ai_engine decides with
     uint16_t syllable_permille; // delta3 ai_engine decides with
+    uint16_t wake_permille;     // the wake's smoothed score that leaves NGHE
     uint16_t enrol_window_s;    // an unfinished enrolment ends this long after ENROL
 } svc_listen_config_t;
 
 typedef struct {
-    app_event_t event;              // COMMAND or REJECT; seq is the window's last hop
+    app_event_t event;              // WAKE at its hop, else at the window's last hop
     uint32_t first_seq;             // the window's first hop
     uint32_t speech_seq;            // its utterance's first vad hop
     uint16_t free_gap_permille;     // free unit loop over the best command

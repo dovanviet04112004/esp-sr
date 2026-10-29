@@ -27,6 +27,24 @@ menu "svc_listen"
             unit loop by more than this a frame (KEHOACH 3.12, 6.2), unless the model image carries the delta3
             chosen for its command (KEHOACH 6.3). 65535 caps nothing, as a model chosen without delta3 decides.
 
+    config SVC_LISTEN_WAKE_PERMILLE
+        int "NVS kws/wake_th when the model image carries no wake threshold: permille of the smoothed score"
+        range 1 1000
+        default 950
+        help
+            With a wake in the image, svc_listen leaves NGHE for LENH when the wake's smoothed score reaches
+            this (KEHOACH 3.11, 5.4). An image whose header carries the threshold chosen for its wake seeds
+            that one instead (KEHOACH 6.3).
+
+    config SVC_LISTEN_COMMAND_WAIT_MS
+        int "Milliseconds LENH waits for an utterance before going back to NGHE"
+        range 100 10000
+        default 1500
+        help
+            With a wake in the image, svc_listen goes back to NGHE when no utterance has run this long after
+            the wake or after the last utterance (KEHOACH 5.4). It lives here, not in listen.yaml, whose hash
+            the command model is held to.
+
     config SVC_LISTEN_ENROL_WINDOW_S
         int "Seconds a speaker enrolment stays open for its commands"
         range 30 3600

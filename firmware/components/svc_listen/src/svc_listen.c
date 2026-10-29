@@ -34,6 +34,7 @@
 #define TAIL_HOPS ((GEN_SPEAKER_WINDOW_SAMPLES + GEN_GRID_HOP_SAMPLES - 1) / GEN_GRID_HOP_SAMPLES)
 #define NO_SLOT (-1)
 #define US_PER_S 1000000
+#define MS_PER_S 1000
 
 _Static_assert(AI_ENGINE_VARIANTS_MAX == LANG_VI_VARIANTS_MAX, "one command's readings fit one lexicon row");
 _Static_assert(RING_HOPS >= 2 * WINDOW_HOPS, "the ring holds the window worked and the next one whole");
@@ -106,6 +107,13 @@ static struct {
     size_t active;
     lang_vi_dialect_t dialects;
     uint16_t reject, margin, syllable;
+    bool wake;         // a wake in the image: windows only in LENH
+    bool commanding;   // LENH
+    bool woke_pending; // a WAKE event svc_listen_work has not handed out
+    uint16_t wake_th, wake_score;
+    uint32_t woke;          // the hop whose score crossed wake_th
+    uint32_t command_until; // LENH ends at this hop with no utterance running
+    uint32_t wait_hops;     // SVC_LISTEN_COMMAND_WAIT_MS on the grid
     bool started, in_run, has_open, working;
     uint32_t next_seq, after, run_first, run_last, at;
     window_t queue[WINDOWS_MAX];
@@ -350,6 +358,10 @@ esp_err_t svc_listen_init(const svc_listen_config_t *cfg)
     s.reject = cfg->reject_permille;
     s.margin = cfg->margin_permille;
     s.syllable = cfg->syllable_permille;
+    s.wake = ai_engine_has(AI_ENGINE_MODEL_WAKE);
+    s.wake_th = cfg->wake_permille;
+    s.wait_hops = (uint32_t)((uint64_t)CONFIG_SVC_LISTEN_COMMAND_WAIT_MS * GEN_GRID_SAMPLE_RATE_HZ /
+                             ((uint64_t)MS_PER_S * GEN_GRID_HOP_SAMPLES));
     s.spk.enrol_window_us = (int64_t)cfg->enrol_window_s * US_PER_S;
     s.ready = true;
     return ESP_OK;
@@ -531,6 +543,49 @@ static esp_err_t pitch_hop(const int16_t *pcm, uint32_t seq)
     return pitch_call(seq);
 }
 
+// Without a wake every utterance gets a window; with one, only those of LENH (KEHOACH 5.4).
+static bool commands_open(void)
+{
+    return !s.wake || s.commanding;
+}
+
+static void leave_command(void)
+{
+    s.commanding = false;
+    ai_engine_wake_reset();
+}
+
+// The score ai_engine_wake_step returns is the frame's ai_engine_wake_delay hops back (KEHOACH 3.11).
+static esp_err_t hear_wake(uint32_t seq)
+{
+    uint16_t score = 0;
+    const esp_err_t err = ai_engine_wake_step(s.log_mel[seq % RING_HOPS], &score);
+    if (err != ESP_OK || score < s.wake_th) { return err; }
+    s.commanding = true;
+    s.woke = seq - (uint32_t)ai_engine_wake_delay();
+    s.wake_score = score;
+    s.woke_pending = true;
+    s.command_until = seq + s.wait_hops;
+    if ((int32_t)(s.woke + 1 - s.after) > 0) { s.after = s.woke + 1; }
+    if (!s.in_run) { return ESP_OK; }
+    // The utterance running through the wake word opens at the hop after it (KEHOACH 5.4).
+    const esp_err_t opened = open_utterance(seq);
+    window_t *w = open_window();
+    if (w != NULL) { w->speech = s.after; }
+    s.run_first = s.after;
+    return opened;
+}
+
+static void wait_command(uint32_t seq)
+{
+    if (!s.commanding) { return; }
+    if (s.in_run || s.count > 0) {
+        s.command_until = seq + s.wait_hops;
+    } else if ((int32_t)(seq - s.command_until) >= 0) {
+        leave_command();
+    }
+}
+
 esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
 {
     if (!s.ready) { return ESP_ERR_INVALID_STATE; }
@@ -540,6 +595,7 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
         hole_open();
         hole_unpitched();
         pitch_restart(seq);
+        if (s.wake) { ai_engine_wake_reset(); }
         s.in_run = false;
         s.after = seq;
     }
@@ -551,14 +607,17 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
     esp_err_t err = dsp_spec_stft_analyze(s.stft, s.hop, s.bins);
     if (err == ESP_OK) { err = dsp_spec_mel_log(s.mel, s.bins, s.log_mel[slot]); }
     if (err == ESP_OK) { err = pitch_hop(pcm, seq); }
+    if (err == ESP_OK && s.wake && !s.commanding) { err = hear_wake(seq); }
     if (err != ESP_OK) { return err; }
     if (s.in_run && seq - s.run_last > GEN_LISTEN_UTTERANCE_GAP_HOPS) { close_utterance(); }
     if (vad) {
-        if (!s.in_run) { err = open_utterance(seq); }
+        if (!s.in_run) { s.run_first = seq; }
+        if (!s.in_run && commands_open()) { err = open_utterance(seq); }
         s.in_run = true;
         s.run_last = seq;
     }
     extend_open(seq);
+    wait_command(seq);
     return err;
 }
 
@@ -570,6 +629,7 @@ static bool workable(const window_t *w)
 
 bool svc_listen_pending(void)
 {
+    if (s.ready && s.woke_pending) { return true; }
     if (!s.ready || s.count == 0) { return false; }
     const window_t *w = &s.queue[s.head];
     const uint32_t next = s.working ? s.at : w->first;
@@ -584,11 +644,13 @@ bool svc_listen_busy(void)
     return s.ready && (s.count > 0 || s.in_run);
 }
 
+// A window decided in LENH sends the listener back to NGHE (KEHOACH 5.4).
 static void done(void)
 {
     s.working = false;
     s.head = (s.head + 1) % WINDOWS_MAX;
     s.count--;
+    if (s.commanding) { leave_command(); }
 }
 
 static void drop(const window_t *w, const char *why)
@@ -627,6 +689,17 @@ static void decide(const window_t *w, const ai_engine_command_result_t *r, svc_l
     out->close_us = (uint32_t)(esp_timer_get_time() - w->closed_us);
 }
 
+static void decide_wake(svc_listen_decision_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->event.kind = APP_EVT_WAKE;
+    out->event.seq = s.woke;
+    out->event.doa_deg = -1;
+    out->event.score_permille = s.wake_score;
+    out->first_seq = s.woke;
+    s.woke_pending = false;
+}
+
 static void decide_holed(const window_t *w, svc_listen_decision_t *out)
 {
     memset(out, 0, sizeof(*out));
@@ -641,6 +714,10 @@ static void decide_holed(const window_t *w, svc_listen_decision_t *out)
 bool svc_listen_work(svc_listen_decision_t *out)
 {
     if (!svc_listen_pending() || out == NULL) { return false; }
+    if (s.woke_pending) {
+        decide_wake(out);
+        return true;
+    }
     const window_t *w = &s.queue[s.head];
     if (w->holed) {
         decide_holed(w, out);

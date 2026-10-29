@@ -199,6 +199,10 @@ static void raise_decision(const app_wiring_t *w, const svc_listen_decision_t *d
     const app_event_t *e = &d->event;
     // The event leaves first: the log line can wait on a busy UART.
     send_up(w, e);
+    if (e->kind == APP_EVT_WAKE) {
+        ESP_LOGI(TAG, "WAKE score %u at hop %" PRIu32, (unsigned)e->score_permille, e->seq);
+        return;
+    }
     ESP_LOGI(TAG,
              "%s %s score %u margin %u gap %u syllable %u, hops %" PRIu32 "..%" PRIu32 ", %" PRIu32
              " ms work, %" PRIu32 " ms after the close, speaker %d milli-z %d %s %u noise %u in %" PRIu32

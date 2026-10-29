@@ -111,6 +111,20 @@ static const dsp_afe_calib_t *load_calib(void)
     return &calib;
 }
 
+// The image brings the threshold chosen for its wake; SET_CONFIG wins until the suggested one changes or the
+// key is gone (KEHOACH 6.2).
+static void seed_wake(uint16_t suggested)
+{
+    uint16_t seeded = 0, held = 0;
+    if (sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_WAKE_SEED, &seeded) == ESP_OK &&
+        seeded == suggested && sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_WAKE_TH, &held) == ESP_OK) {
+        return;
+    }
+    esp_err_t err = sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_WAKE_TH, suggested);
+    if (err == ESP_OK) { err = sys_storage_set_u16(STORAGE_NS_KWS, STORAGE_KEY_WAKE_SEED, suggested); }
+    ESP_LOGI(TAG, "wake threshold %u seeded: %s", (unsigned)suggested, esp_err_to_name(err));
+}
+
 // The image brings the triple chosen for its command; SET_CONFIG wins until the suggested triple changes or a
 // key is gone (KEHOACH 6.2).
 static void seed_thresholds(void)
@@ -119,8 +133,10 @@ static void seed_thresholds(void)
                                        STORAGE_KEY_CMD_SYLLABLE};
     uint16_t suggested[] = {CONFIG_SVC_LISTEN_CMD_REJECT_PERMILLE, CONFIG_SVC_LISTEN_CMD_MARGIN_PERMILLE,
                             CONFIG_SVC_LISTEN_CMD_SYLLABLE_PERMILLE};
+    uint16_t wake = CONFIG_SVC_LISTEN_WAKE_PERMILLE;
     sys_storage_models_t models;
     if (sys_storage_map_models(MODEL_SLOT, &models) == ESP_OK) {
+        if (models.header->wake_th_permille != 0) { wake = models.header->wake_th_permille; }
         if (models.header->cmd_reject_permille != 0) {
             suggested[0] = models.header->cmd_reject_permille;
             suggested[1] = models.header->cmd_margin_permille;
@@ -130,6 +146,7 @@ static void seed_thresholds(void)
         }
         sys_storage_unmap_models(&models);
     }
+    seed_wake(wake);
     uint16_t seeded[3] = {0}, held = 0;
     bool kept =
         sys_storage_get_blob(STORAGE_NS_KWS, STORAGE_KEY_CMD_SEEDS, seeded, sizeof(seeded)) == ESP_OK &&
@@ -179,14 +196,21 @@ static esp_err_t listen_to(const command_set_t *set)
         .reject_permille = CONFIG_SVC_LISTEN_CMD_REJECT_PERMILLE,
         .margin_permille = CONFIG_SVC_LISTEN_CMD_MARGIN_PERMILLE,
         .syllable_permille = CONFIG_SVC_LISTEN_CMD_SYLLABLE_PERMILLE,
+        .wake_permille = CONFIG_SVC_LISTEN_WAKE_PERMILLE,
         .enrol_window_s = CONFIG_SVC_LISTEN_ENROL_WINDOW_S,
     };
     (void)sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_REJECT, &cfg.reject_permille);
     (void)sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_MARGIN, &cfg.margin_permille);
     (void)sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_CMD_SYLLABLE, &cfg.syllable_permille);
+    (void)sys_storage_get_u16(STORAGE_NS_KWS, STORAGE_KEY_WAKE_TH, &cfg.wake_permille);
     const esp_err_t err = svc_listen_init(&cfg);
     heap_caps_free(names);
-    if (err == ESP_OK) {
+    if (err == ESP_OK && ai_engine_has(AI_ENGINE_MODEL_WAKE)) {
+        ESP_LOGI(TAG,
+                 "listening: after the wake at %u permille, delta1 %u, delta2 %u, delta3 %u (KEHOACH 5.4)",
+                 (unsigned)cfg.wake_permille, (unsigned)cfg.reject_permille, (unsigned)cfg.margin_permille,
+                 (unsigned)cfg.syllable_permille);
+    } else if (err == ESP_OK) {
         ESP_LOGI(TAG, "listening: every utterance vad finds, delta1 %u, delta2 %u, delta3 %u (KEHOACH 5.4)",
                  (unsigned)cfg.reject_permille, (unsigned)cfg.margin_permille,
                  (unsigned)cfg.syllable_permille);
