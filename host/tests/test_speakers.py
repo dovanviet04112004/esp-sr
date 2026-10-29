@@ -175,8 +175,8 @@ def test_the_report_waits_for_the_version_sent_and_lists_each_person() -> None:
     assert lines[0].startswith(f"v{roster['version']}, check on, 1 people") and "spk_001 Chủ nhà: enrolled" in lines[1]
 
 
-def test_the_prompter_asks_the_unheard_commands_and_leaves_other_rejects_out() -> None:
-    """The second "tắt đèn" heard as "bật đèn" is prompted again, not skipped; a background REJECT prints nothing."""
+def test_the_prompter_asks_the_unheard_commands_and_says_why_nothing_was_taken() -> None:
+    """The second "tắt đèn" heard as "bật đèn" is prompted again, not skipped; any other REJECT asks for it again."""
     lines: list[str] = []
     texts = {"bat_den": "bật đèn", "tat_den": "tắt đèn", "bat_quat": "bật quạt"}
     prompter = speakers.Prompter(texts, total=3, out=lines.append)
@@ -187,11 +187,13 @@ def test_the_prompter_asks_the_unheard_commands_and_leaves_other_rejects_out() -
     prompter({"kind": "REJECT", "code": "LOW_MARGIN"})
     prompter({"kind": "REJECT", "code": speakers.ENROLLING, "enrolCount": 3, "commandId": "tat_den"})
     assert lines == [
-        "  1/3 say: bật đèn",
+        "  1/3 say: bật đèn  (listening)",
+        "  not taken (LOW_SCORE): say it again: bật đèn",
         "  kept 1/3: heard bật đèn",
-        "  2/3 say: tắt đèn",
+        "  2/3 say: tắt đèn  (listening)",
         "  kept 2/3: heard bật đèn",
-        "  3/3 say: tắt đèn",
+        "  3/3 say: tắt đèn  (listening)",
+        "  not taken (LOW_MARGIN): say it again: tắt đèn",
         "  kept 3/3: heard tắt đèn",
     ]
 

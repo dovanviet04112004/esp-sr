@@ -250,8 +250,8 @@ def set_texts(path: Path) -> dict[str, str]:
 class Prompter:
     """Prompts, for each command an enrolment still needs, the first command of a set the board has not heard yet, so
     a misheard command does not shift the prompts after it; follows the board's REJECT events: one it keeps prints the
-    count and the command it heard, then the next prompt. Other REJECTs are left out: the talk around a board raises
-    one every few seconds (KEHOACH 3.17)."""
+    count and the command it heard, then the next prompt; any other says why the board took nothing and asks for the
+    command again, so the person reading always knows what the board made of it (KEHOACH 3.17)."""
 
     def __init__(self, texts: dict[str, str], total: int = ENROL_COMMANDS, out: Callable[[str], None] = print) -> None:
         self.texts, self.total, self.out, self.kept = texts, total, out, 0
@@ -262,10 +262,13 @@ class Prompter:
         return unheard[0] if unheard else list(self.texts.values())[self.kept % len(self.texts)]
 
     def prompt(self) -> None:
-        self.out(f"  {self.kept + 1}/{self.total} say: {self.wanted()}")
+        self.out(f"  {self.kept + 1}/{self.total} say: {self.wanted()}  (listening)")
 
     def __call__(self, event: dict) -> None:
-        if event["code"] != ENROLLING:
+        if event.get("kind") == "REJECT" and event.get("code") != ENROLLING:
+            self.out(f"  not taken ({event.get('code')}): say it again: {self.wanted()}")
+            return
+        if event.get("code") != ENROLLING:
             return
         self.kept = event.get("enrolCount", self.kept + 1)
         command = event.get("commandId", "")
