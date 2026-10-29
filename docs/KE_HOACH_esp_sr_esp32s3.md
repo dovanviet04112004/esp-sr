@@ -3244,7 +3244,7 @@ broker khởi động lại là mất `status` `offline` của máy đang tắt.
 | Hình học dàn, thứ tự kênh, dấu | `contracts/array.yaml` | `gen_array.h` · `srpipe.generated.array` |
 | Đặc trưng bộ nhận dạng đọc (dải mel, cao độ), luật cắt câu từ `vad`, cửa sổ `LENH` | `contracts/listen.yaml` | `gen_listen.h` · `srpipe.generated.listen` |
 | Cửa sổ và khâu đặc trưng của b0, đường chip của `speaker` | `contracts/speaker.yaml` | `gen_speaker.h` · `srpipe.generated.speaker` |
-| Ngưỡng của model (`δ₁` `δ₂` `δ₃` của `command`, ngưỡng điểm của `speaker`) | `meta.json` của hàng deploy | header ảnh model (§6.3) |
+| Ngưỡng của model (`δ₁` `δ₂` `δ₃` của `command`, ngưỡng điểm của `speaker`, ngưỡng và số khung làm trơn của `wake`) | `meta.json` của hàng deploy | header ảnh model (§6.3) |
 | Trường payload MQTT | `contracts/schema/*.json` | `gen_payload.h` · `srhost.generated.payload` |
 | Topic, QoS, retained | `contracts/mqtt_topics.yaml` | `gen_topics.h` · `srhost.generated.topics` |
 | Khuôn luồng tiếng | `contracts/stream/frame.yaml` | `gen_stream.h` · `srhost.generated.stream` |
@@ -3253,7 +3253,7 @@ broker khởi động lại là mất `status` `offline` của máy đang tắt.
 | Ngưỡng khớp golden | `contracts/golden/<khối>/tolerance.yaml` | đọc file |
 | Hệ số hiệu chuẩn từng board | NVS `calib/*` (§6.2) | `sys_storage` — **số đo**, không phải hằng số |
 | Tham số số của module `dsp_afe` (tần số cắt, dải, bước học, hằng thời gian, bảng mô hình `vad`), và tập module sản phẩm bật (`modules:`) | `contracts/afe.yaml` | `gen_afe.h` · `srpipe.generated.afe`; bản dựng chỉ chọn module bật bằng Kconfig |
-| Ngưỡng vận hành (`wake`, từ chối lệnh, gain sàn) | NVS `kws/*`, `afe/*`; `afe/*` gieo từ `contracts/afe.yaml`, `kws/*` từ `Kconfig` của `svc_listen` | `SET_CONFIG` qua MQTT |
+| Ngưỡng vận hành (`wake`, từ chối lệnh, gain sàn) | NVS `kws/*`, `afe/*`; `afe/*` gieo từ `contracts/afe.yaml`, `kws/*` từ header ảnh, ảnh không mang thì từ `Kconfig` của `svc_listen` | `SET_CONFIG` qua MQTT |
 | URL broker, máy nhận luồng, credential | NVS `device/*`, giá trị lùi ở `Kconfig` | `sys_storage` |
 | Đường dẫn dữ liệu | `ml/configs/common/paths.yaml` | nạp config |
 | Siêu tham số | `ml/configs/**/*.yaml` | nạp config |
@@ -3551,7 +3551,7 @@ Bảng phân vùng không đi qua OTA được: đổi bảng là nạp lại qu
 | `device` | `serial`, `mqtt_uri`, `mqtt_user`, `mqtt_pass`, `stream_host`, `stream_port`, `sntp_host`, `tz` | str / u16 | vắng `serial` thì dựng từ eFuse MAC: `sr-` + 12 hex thường (board B: `sr-3485188f7a70`); `mqtt_uri` mang cả scheme; vắng thì lùi về `Kconfig` của `net_mqtt` |
 | `calib` | `bal` (blob 257 × 2 float), `bal_ver` (u32), `bal_at` (u32 epoch), `aec_delay` (u32, mẫu), `pcm_shift` (u8) | | kết quả của `test_apps/calib`; **đo trên từng board**, không phải hằng số |
 | `afe` | `ns_floor_db` (i8), `agc_target_dbfs` (i8), `vad_mode` (u8) | | gieo từ `contracts/afe.yaml`, đổi bằng `SET_CONFIG` |
-| `kws` | `wake_th` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16), `cmd_syllable` (u16), `cmd_seeds` (blob 3 × u16) | | `wake_th` gieo từ `Kconfig` của `svc_listen`; ba khoá lệnh mang nghĩa của đường đang dựng (§3.12): `δ₁`, `δ₂`, `δ₃` của `ctc` theo phần nghìn nat mỗi khung, hay xác suất thấp nhất và khoảng nhất–nhì của `kws`, ‰, đường không dùng `δ₃`. Chúng gieo từ header của ảnh ở `models_0` (§6.3), ảnh không mang thì từ `Kconfig` (`δ₃` 65 535 là không trần); `cmd_seeds` giữ bộ ba đã gieo: lúc boot, bộ gợi ý khác nó, hay một trong ba khoá vắng, thì ghi lại cả ba, nên model mới mang ngưỡng chọn cho nó tới board, khoá bị xoá (app thử `svc_listen` xoá chúng) không rơi về `Kconfig`, còn giá trị `SET_CONFIG` ghi giữ tới khi bộ gợi ý đổi |
+| `kws` | `wake_th` (u16, ‰), `wake_seed` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16), `cmd_syllable` (u16), `cmd_seeds` (blob 3 × u16) | | `wake_th` gieo từ header của ảnh ở `models_0` (§6.3), ảnh không mang thì từ `Kconfig` của `svc_listen`; `wake_seed` giữ ngưỡng đã gieo, cùng luật với `cmd_seeds` dưới đây; ba khoá lệnh mang nghĩa của đường đang dựng (§3.12): `δ₁`, `δ₂`, `δ₃` của `ctc` theo phần nghìn nat mỗi khung, hay xác suất thấp nhất và khoảng nhất–nhì của `kws`, ‰, đường không dùng `δ₃`. Chúng gieo từ header của ảnh ở `models_0` (§6.3), ảnh không mang thì từ `Kconfig` (`δ₃` 65 535 là không trần); `cmd_seeds` giữ bộ ba đã gieo: lúc boot, bộ gợi ý khác nó, hay một trong ba khoá vắng, thì ghi lại cả ba, nên model mới mang ngưỡng chọn cho nó tới board, khoá bị xoá (app thử `svc_listen` xoá chúng) không rơi về `Kconfig`, còn giá trị `SET_CONFIG` ghi giữ tới khi bộ gợi ý đổi |
 | `model` | `version` (str), `sha256` (blob 32 B) | | ảnh đang nằm ở `models_0` (§6.1) |
 | `speaker` | `chip`, `server` (u8), `roster` (blob `storage_speaker_roster_t`, 1 128 B), `tpl0` … `tpl7` (blob, 4 B một chiều của embedding) | | `chip`, `server`: cờ kiểm người nói của hai đường (§3.17), vắng là tắt; `roster`: danh sách người nói của đường chip, khuôn số `format` 1 (khuôn khác thì như chưa có danh sách), `version` của nó, mỗi ô `id`, `name` và 4 byte đầu sha256 của mục `speaker` lúc người ấy đăng ký (0 khi chưa có mẫu; khác mục đang nạp thì mẫu không dùng); `tpl<k>`: mẫu giọng của người ở ô `k`, độ dài 1; xoá người là xoá luôn `tpl<k>` của họ (§1.4). Đổi danh sách ghi theo thứ tự: xoá `tpl<k>` của người bị bỏ, ghi `chip`, rồi `roster` sau cùng, nên mất điện giữa chừng thì `version` cũ còn đó và bản retained được áp lại; lúc khởi động, ô trống thì `tpl<k>` của nó bị xoá, nên mẫu của người đã xoá không sót lại. Khoá `tpl`, `tpl_model` của khuôn một người bị xoá lúc khởi động |
 | `sys` | `boot_count` (u32), `seed_ver` (u32), `last_ota_result` (u8), `fw_valid` (u8) | | |
@@ -3573,18 +3573,19 @@ nào khai lại struct.
 ```
 offset 0x000  header 1 KB
    +0x000 magic       'SRMD'
-   +0x004 format_ver  u32, 10 cho khuôn này
+   +0x004 format_ver  u32, 11 cho khuôn này
    +0x008 count       u32, ≤ 8
    +0x00C grid_hash   u32 — băm của contracts/grid.yaml lúc huấn luyện
    +0x010 listen_hash u32 — băm của contracts/listen.yaml mà model command học theo; 0 khi ảnh không có command
    +0x014 cmd_reject_permille u16 — δ₁ chọn cho model command của ảnh; 0 khi ảnh không mang ngưỡng
    +0x016 cmd_margin_permille u16 — δ₂, cùng đơn vị
    +0x018 cmd_syllable_permille u16 — δ₃, cùng đơn vị; 0 khi ảnh không mang
-   +0x01A dự trữ u16
+   +0x01A wake_th_permille u16 — ngưỡng ‰ chọn cho model wake của ảnh; 0 khi ảnh không mang
    +0x01C speaker_hash u32 — băm của contracts/speaker.yaml mà speaker được nhập theo; 0 khi ảnh không có speaker
    +0x020 spk_accept_milli_z i16[8] — ngưỡng điểm của speaker khi n = 1…8 người có mẫu giọng, ở dải độ ồn yên nhất, phần nghìn của điểm AS-norm (ADR-0023, ADR-0024)
    +0x030 spk_cohort_top u16 — K, số hàng cao nhất của nhóm chuẩn mà AS-norm lấy μ, σ; 0 khi ảnh không có speaker
-   +0x032 dự trữ 14 B
+   +0x032 wake_smooth_hops u16 — số khung điểm wake làm trơn trung bình trượt; 0 khi ảnh không có wake
+   +0x034 dự trữ 12 B
    +0x040 entry[8] × 64 B:
           name[16]  offset u32  size u32  sha256[32]  kind u32  flags u32
    +0x240 spk_noise_edges f32[3] — biên các dải độ ồn, tỉ số công suất lời trên đoạn trước lời, tăng dần; 0 khi ảnh không mang (ADR-0024)
@@ -3626,6 +3627,10 @@ và từ chối dòng `speaker` thiếu K hay có biên không hữu hạn, âm 
 biên và bảng dải ồn là 0: mọi tỉ số ≥ 0, nên mọi cửa sổ rơi vào dải yên nhất và chấm như ADR-0023. `ai_engine` từ
 chối dựng nhánh khi băm khác `gen_speaker.h`, như `listen_hash` với `command`, khi ảnh có `speaker` mà thiếu nhóm
 chuẩn, khi K ngoài 1…số hàng của nhóm chuẩn, và khi biên không hữu hạn, âm hay không tăng dần.
+
+Của `wake` có `threshold.permille`, ngưỡng chọn trên `val` cho đúng dòng thang int8 được deploy, theo điểm ‰ làm
+trơn như chip chấm (§3.11), và `smooth_hops`, số khung làm trơn từ mục `eval` của `wake.yaml`; deploy từ chối dòng
+chưa chọn ngưỡng, bước đóng gói ghi cả hai vào header, và lúc boot board gieo NVS `kws/wake_th` từ ngưỡng ấy (§6.2).
 
 Của `ns` có thêm trường `backend` (`rnnoise` | `nsnet`, §3.9): bước đóng gói đặt tên mục trong ảnh theo nó (`ns_rnnoise`
 hay `ns_nsnet`), nên bản dựng của ứng viên kia không tìm thấy model, `ai_engine_ns_ops()` trả `NULL` và chuỗi chạy sàn.

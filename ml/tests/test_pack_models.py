@@ -66,11 +66,19 @@ def test_the_header_carries_its_commands_listen_hash_and_thresholds_and_0_withou
     assert not any(pack_models.HEAD.unpack_from(bare, 0)[4:])
 
 
+def test_the_header_carries_its_wakes_threshold_and_smoothing_and_0_without_a_wake() -> None:
+    image = pack_models.pack([pack_models.Entry("wake", "espdl", b"w")], wake_th_permille=950, wake_smooth_hops=5)
+    fields = pack_models.HEAD.unpack_from(image, 0)
+    assert (fields[8], fields[-1]) == (950, 5)
+    with pytest.raises(ValueError, match="wake threshold"):
+        pack_models.pack([pack_models.Entry("wake", "espdl", b"w")], wake_th_permille=1001, wake_smooth_hops=5)
+
+
 def test_the_header_carries_its_speakers_hash_a_threshold_a_count_its_cohorts_top_and_an_entry_its_flags() -> None:
     entries = [pack_models.Entry("speaker", "espdl", b"s" * 10, pack_models.IN_FLASH)]
     table = tuple(-37 + 10 * n for n in range(pack_models.SPEAKERS))
     image = pack_models.pack(entries, speaker_hash=speaker.HASH, speaker_milli_z=table, speaker_cohort_top=100)
-    assert pack_models.HEAD.unpack_from(image, 0)[9:] == (speaker.HASH, *table, 100)
+    assert pack_models.HEAD.unpack_from(image, 0)[9:] == (speaker.HASH, *table, 100, 0)
     assert pack_models.ENTRY.unpack_from(image, pack_models.HEAD.size)[5] == pack_models.IN_FLASH
     with pytest.raises(ValueError, match="speaker thresholds"):
         pack_models.pack(entries, speaker_milli_z=(*table, 0))

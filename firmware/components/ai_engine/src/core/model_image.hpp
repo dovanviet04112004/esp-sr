@@ -40,6 +40,9 @@ int16_t image_speaker_threshold_milli_z(size_t prints) noexcept;
 /** The cohort rows AS-norm averages over at each side, as the image's header gives it; 0 without one. */
 uint16_t image_speaker_cohort_top() noexcept;
 
+/** Hops the wake score averages over, as the image's header gives it; 0 without a wake (KEHOACH 3.11). */
+uint16_t image_wake_smooth_hops() noexcept;
+
 /** The image's STORAGE_SPK_NOISE_EDGES noise edges, rising utterance-over-lead power ratios, 0 without them
  * (ADR-0024). */
 const float *image_speaker_noise_edges() noexcept;

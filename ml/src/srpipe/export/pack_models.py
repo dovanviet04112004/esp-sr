@@ -54,7 +54,7 @@ IN_FLASH = storage_define("STORAGE_MODEL_FLAG_IN_FLASH")
 SPEAKERS = storage_define("APP_SPEAKERS_MAX", APP_EVENTS)
 NOISE_EDGES = storage_define("STORAGE_SPK_NOISE_EDGES")
 ENTRY = struct.Struct(f"<{NAME_BYTES}sII{SHA256_BYTES}sII")
-_FIELDS = f"<IIIIIHHHHI{SPEAKERS}hH"
+_FIELDS = f"<IIIIIHHHHI{SPEAKERS}hHH"
 HEAD = struct.Struct(f"{_FIELDS}{FIELDS_BYTES - struct.calcsize(_FIELDS)}x")
 NOISE = struct.Struct(f"<{NOISE_EDGES}f{SPEAKERS * NOISE_EDGES}h")  # after the entries (ADR-0024)
 INT16_MIN, INT16_MAX = -32768, 32767
@@ -70,7 +70,7 @@ class Entry:
 
 @dataclass(frozen=True)
 class Locked:
-    """What contracts/models.lock.json packs into: the entries and the header's fields of command and speaker."""
+    """What contracts/models.lock.json packs into: the entries and the header's fields of command, speaker and wake."""
 
     entries: list[Entry]
     listen_hash: int = 0
@@ -80,6 +80,8 @@ class Locked:
     speaker_cohort_top: int = 0
     speaker_noise_edges: tuple[float, ...] = ()
     speaker_noisy_milli_z: tuple[tuple[int, ...], ...] = ()
+    wake_th_permille: int = 0
+    wake_smooth_hops: int = 0
 
 
 def storage_string(name: str) -> str:
@@ -128,19 +130,22 @@ def pack(
     speaker_cohort_top: int = 0,
     speaker_noise_edges: tuple[float, ...] = (),
     speaker_noisy_milli_z: tuple[tuple[int, ...], ...] = (),
+    wake_th_permille: int = 0,
+    wake_smooth_hops: int = 0,
 ) -> bytes:
-    """The image bytes: header, then the entries in order, each at the next ALIGN_BYTES boundary; listen_hash is the
-    GEN_LISTEN_HASH the entries' command learned on and thresholds its delta1, delta2 and delta3 in permille, 0
-    without a command or a chosen value; speaker_hash is the GEN_SPEAKER_HASH the speaker was imported on,
-    speaker_milli_z its threshold in thousandths of the AS-norm score with 1, 2 ... SPEAKERS voiceprints held, 0 for
-    each it lacks, speaker_cohort_top the cohort rows AS-norm averages over, and the noise edges and thresholds of
-    the noisier bins, 0 without them, so every window takes the quiet table (KEHOACH 6.3, ADR-0023, ADR-0024)."""
+    """The image bytes: header, then the entries in order, each at the next ALIGN_BYTES boundary. The header holds
+    the GEN_LISTEN_HASH the command learned on and its delta1..3 in permille; the GEN_SPEAKER_HASH of the speaker,
+    its thresholds in thousandths of the AS-norm score with 1 ... SPEAKERS voiceprints, its cohort top and noisier
+    bins' edges and thresholds; the wake's threshold in permille and the hops its score averages over. A field is 0
+    without its model or value, so a window takes the quiet table (KEHOACH 6.3, ADR-0023, ADR-0024)."""
     if not 0 < len(entries) <= MAX_ENTRIES:
         raise ValueError(f"{len(entries)} entries, the header holds 1..{MAX_ENTRIES}")
     if len(speaker_milli_z) > SPEAKERS:
         raise ValueError(f"{len(speaker_milli_z)} speaker thresholds, the header holds {SPEAKERS}")
     if not 0 <= speaker_cohort_top <= 0xFFFF:
         raise ValueError(f"cohort top {speaker_cohort_top}, the header holds a u16")
+    if not (0 <= wake_th_permille <= 1000 and 0 <= wake_smooth_hops <= 0xFFFF):
+        raise ValueError(f"wake threshold {wake_th_permille} permille and {wake_smooth_hops} hops: 0..1000 and a u16")
     checked_noise(speaker_noise_edges, speaker_noisy_milli_z)
     body, table, at = bytearray(), [], HEADER_BYTES
     for e in entries:
@@ -159,10 +164,11 @@ def pack(
         grid_hash,
         listen_hash,
         *thresholds,
-        0,
+        wake_th_permille,
         speaker_hash,
         *table_of,
         speaker_cohort_top,
+        wake_smooth_hops,
     )
     edges = speaker_noise_edges or (0.0,) * NOISE_EDGES
     noisy = [t for row in speaker_noisy_milli_z for t in row] or [0] * (SPEAKERS * NOISE_EDGES)
@@ -176,9 +182,10 @@ def pack(
 def locked() -> Locked:
     """Every file models.lock.json lists, in its order, as the image entry it names, a row's graphs flagged to stay in
     flash when it was deployed so; the listen hash and delta1..3 of the rows that record them, 0 otherwise; the
-    speaker's hash, thresholds for 1 to SPEAKERS voiceprints, cohort top and noise fields, none without them. Refused
-    when a file differs from its sha256, rows learned on two listen.yaml, two record thresholds or a speaker, or the
-    speaker's row lacks SPEAKERS thresholds or a cohort top, or holds noise fields checked_noise refuses."""
+    speaker's hash, thresholds for 1 to SPEAKERS voiceprints, cohort top and noise fields, none without them; the
+    wake's threshold and smoothing hops, 0 without a wake. Refused when a file differs from its sha256, rows learned
+    on two listen.yaml, two record thresholds, a speaker or a wake, the speaker's row lacks SPEAKERS thresholds or a
+    cohort top or holds noise fields checked_noise refuses, or the wake's lacks its threshold or hops."""
     rows = json.loads(LOCK.read_text(encoding="utf-8"))["models"]
     entries = []
     for branch, row in rows.items():
@@ -217,9 +224,26 @@ def locked() -> Locked:
             f" thousandths of the AS-norm score for each of 1..{SPEAKERS} voiceprints and a top: make speaker-deploy"
             " again"
         )
+    wakes = [(r["threshold"].get("permille"), r["smooth_hops"]) for r in rows.values() if "smooth_hops" in r]
+    if len(wakes) > 1:
+        raise ValueError(f"{len(wakes)} rows of {LOCK.name} record a wake, the header holds one")
+    wake_th, hops = next(iter(wakes), (0, 0))
+    if wakes and not (isinstance(wake_th, int) and 0 < wake_th <= 1000 and isinstance(hops, int) and hops > 0):
+        raise ValueError(f"the wake of {LOCK.name} holds threshold {wake_th!r} over {hops!r} hops: deploy it again")
     triple = next(iter(triples), (0, 0, 0))
     thresholds = tuple(int(t) for t in table)
-    return Locked(entries, next(iter(listen_hashes), 0), triple, speaker_hash, thresholds, int(top or 0), edges, noisy)
+    return Locked(
+        entries,
+        next(iter(listen_hashes), 0),
+        triple,
+        speaker_hash,
+        thresholds,
+        int(top or 0),
+        edges,
+        noisy,
+        wake_th,
+        hops,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -246,6 +270,8 @@ def main(argv: list[str] | None = None) -> int:
             speaker_cohort_top=lock.speaker_cohort_top,
             speaker_noise_edges=lock.speaker_noise_edges,
             speaker_noisy_milli_z=lock.speaker_noisy_milli_z,
+            wake_th_permille=lock.wake_th_permille,
+            wake_smooth_hops=lock.wake_smooth_hops,
         )
     )
     size = args.out.stat().st_size
@@ -254,6 +280,7 @@ def main(argv: list[str] | None = None) -> int:
     said += f", speaker 0x{lock.speaker_hash:08x} at {', '.join(map(str, lock.speaker_milli_z)) or 0} milli-z"
     said += f" over the cohort's top {lock.speaker_cohort_top}"
     said += f", noise edges {', '.join(f'{e:g}' for e in lock.speaker_noise_edges) or 'none'}"
+    said += f", wake at {lock.wake_th_permille} permille over {lock.wake_smooth_hops} hops"
     print(f"{args.out}: {len(entries)} entries, {size} bytes, {said}")
     return 0
 

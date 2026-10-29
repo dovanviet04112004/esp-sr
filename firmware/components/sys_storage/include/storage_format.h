@@ -97,7 +97,7 @@ _Static_assert(sizeof(storage_speaker_roster_t) == 8 + APP_SPEAKERS_MAX * 140,
 #define STORAGE_PATH_RESPONSES "/lfs/resp/vi.json"
 
 #define STORAGE_MODEL_MAGIC 0x444d5253u // "SRMD" little-endian
-#define STORAGE_MODEL_FORMAT_VER 10
+#define STORAGE_MODEL_FORMAT_VER 11
 #define STORAGE_MODEL_MAX_ENTRIES 8
 #define STORAGE_SPK_NOISE_EDGES 3 // noise bins are one more, the last the quietest
 #define STORAGE_MODEL_NAME_BYTES 16
@@ -139,16 +139,17 @@ typedef struct {
     uint32_t magic;
     uint32_t format_ver;
     uint32_t count;
-    uint32_t grid_hash;             // GEN_GRID_HASH of the grid the models learned on
-    uint32_t listen_hash;           // GEN_LISTEN_HASH the command learned on; 0 without one
-    uint16_t cmd_reject_permille;   // delta1 chosen for the command; 0 without one
-    uint16_t cmd_margin_permille;   // delta2 chosen for the command
-    uint16_t cmd_syllable_permille; // delta3 chosen for the command; 0 without one
-    uint16_t reserved0;
+    uint32_t grid_hash;                           // GEN_GRID_HASH of the grid the models learned on
+    uint32_t listen_hash;                         // GEN_LISTEN_HASH the command learned on; 0 without one
+    uint16_t cmd_reject_permille;                 // delta1 chosen for the command; 0 without one
+    uint16_t cmd_margin_permille;                 // delta2 chosen for the command
+    uint16_t cmd_syllable_permille;               // delta3 chosen for the command; 0 without one
+    uint16_t wake_th_permille;                    // threshold chosen for the wake; 0 without one
     uint32_t speaker_hash;                        // GEN_SPEAKER_HASH of its speaker; 0 without one
     int16_t spk_accept_milli_z[APP_SPEAKERS_MAX]; // with 1 + index voiceprints held, AS-norm (ADR-0023)
     uint16_t spk_cohort_top;                      // cohort rows AS-norm averages over; 0 without one
-    uint8_t reserved[14];
+    uint16_t wake_smooth_hops;                    // hops the wake score averages over; 0 without a wake
+    uint8_t reserved[12];
     storage_model_entry_t entry[STORAGE_MODEL_MAX_ENTRIES];
     float spk_noise_edges[STORAGE_SPK_NOISE_EDGES]; // rising utterance-over-lead power; 0 without
     int16_t spk_noisy_milli_z[APP_SPEAKERS_MAX][STORAGE_SPK_NOISE_EDGES]; // per count, noisiest bin first
