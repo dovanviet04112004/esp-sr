@@ -60,7 +60,7 @@ synth:                             # E11-T7: clips from the engines of common/tt
     phrases: [trợ, lý]             # each half said alone must not wake the device either
     voices: {vieneu: 6, f5: 4}     # per phrase, drawn with the seed; VieNeu from presets and clones
 split:                             # E11-T11: data/splits/wake/<version> by python -m srpipe.tasks.wake.data (KEHOACH 1.3)
-  version: on1
+  version: on2
   seed: 20260928
   val_speakers: 0.2                # of VIVOS train speakers and of VieNeu presets, each held out whole with its clones
   learning: [speech/vivos/train/, speech/fpt_open/, speech/vlsp/, speech/lsvsc/, speech/vimd/]
@@ -72,17 +72,18 @@ split:                             # E11-T11: data/splits/wake/<version> by pyth
   speech_commands:                 # the word from Speech Commands v0.02 (ADR-0029)
     dir: speech/speech_commands
     negatives_from: v4             # its val and test negatives, free of Bud500
-    hard_clips: {train: 3000, val: 600}   # of the other words, drawn with the seed
+    hard_clips: {train: 3000, val: 600, train_after: 27000}   # of the other words, drawn with the seed; train_after
+                                   #   more for train once val is drawn, so on1's draws stay and val is on1's
     draw_train_neg: true           # v4's train negatives are Bud500, deleted 06/10
   end_below_peak_db: 40.0          # every positive, TTS or real, ends at its last hop within this of its loudest: the
                                    #   simulation labels a clip's end, and both kinds carry silence after the word
 simulate:                          # make wake-features: python -m srpipe.tasks.wake.data simulate (E4-T8)
-  split: on1
+  split: on2
   workers: 12                      # each holds about 450 MB; more push a 10 GB WSL into swap
   repeats: {train_pos: 8}          # passes over a file, each in other rooms, levels and noise; else 1
   train_dtype: float16             # train's features as stored: the trainer holds them so (KEHOACH 1.2)
 train:                             # E11-T11: python -m srpipe.tasks.wake.train (KEHOACH 3.11), on the GPU when present
-  split: on1                       # processed/wake/<split>/<file> of make wake-features
+  split: on2                       # processed/wake/<split>/<file> of make wake-features
   seed: 20260928
   window_hops: 256                 # one example, twice the receptive field
   warmup_hops: 128                 # a window's first hops see zero padding, not audio: no loss on them

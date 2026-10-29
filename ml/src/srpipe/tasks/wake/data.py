@@ -201,9 +201,9 @@ def speech_commands_files(
     cfg: dict, paths: dict[str, Path], public: list[corpus.Clip] = (), heard_s: dict[str, float] | None = None
 ) -> tuple[dict[str, list[splits.Row]], dict[str, float]]:
     """A Speech Commands pilot's files and their lengths: the word's clips as positives, each cut at the end of its
-    speech; the other words as hard negatives drawn to their counts; val from the corpus's testing list, train from
-    neither of its lists; an earlier version's negatives without their TTS clips, train_neg among them unless
-    draw_train_neg draws it anew by fresh_train_negatives over public."""
+    speech; the other words as hard negatives drawn to their counts, train_after more for train once val is drawn;
+    val from the corpus's testing list, train from neither of its lists; an earlier version's negatives without
+    their TTS clips, train_neg among them unless draw_train_neg draws it anew by fresh_train_negatives over public."""
     spec, word = cfg["split"]["speech_commands"], cfg["word"]
     if not isinstance(word, str):
         raise ValueError(f"word {word!r} is no string: YAML reads yes, no, on and off unquoted as booleans")
@@ -219,10 +219,18 @@ def speech_commands_files(
     rng = np.random.default_rng([cfg["split"]["seed"], SPEECH_COMMANDS_STREAM])
     files: dict[str, list[splits.Row]] = {}
     seconds: dict[str, float] = {}
+    picked: dict[tuple[str, str], list[str]] = {}
     for (role, kind), names in sorted(found.items()):
         if kind == "hard":
             count = min(spec["hard_clips"][role], len(names))
             names = sorted(rng.choice(names, size=count, replace=False).tolist())
+        picked[(role, kind)] = names
+    # Drawn after val, so a version without them keeps every draw of its own.
+    if more := spec["hard_clips"].get("train_after", 0):
+        left = sorted(set(found[("train", "hard")]) - set(picked[("train", "hard")]))
+        extra = rng.choice(left, size=min(more, len(left)), replace=False).tolist()
+        picked[("train", "hard")] = sorted(picked[("train", "hard")] + extra)
+    for (role, kind), names in sorted(picked.items()):
         rows = []
         for name in names:
             item = f"{spec['dir']}/{name}"
@@ -286,6 +294,12 @@ def negatives_note(spec: dict) -> str:
     )
 
 
+def more_hard(pilot: dict) -> str:
+    """SPLIT.md's words on the hard negatives drawn for train once val is, none without them."""
+    more = pilot["hard_clips"].get("train_after", 0)
+    return f", rồi thêm {more} mẩu cho `train` sau khi rút `val`, nên mọi lần rút trước đó giữ nguyên" if more else ""
+
+
 def notes(cfg: dict, files: dict[str, list[splits.Row]], seconds: dict[str, float]) -> str:
     """SPLIT.md ahead of the checksums: rules, seed, command and each file's size."""
     spec = cfg["split"]
@@ -302,7 +316,7 @@ Dựng bằng `python -m srpipe.tasks.wake.data split`, seed {spec["seed"]}, m�
 - `train_pos`, `val_pos`: mọi mẩu của từ ấy ở `raw/{pilot["dir"]}`, cắt ở cuối tiếng nói như mọi mẩu dương; `val` lấy từ
   `testing_list.txt`, `train` từ mẩu không nằm ở danh sách nào của bộ, nên người nói tách như bộ tách.
 - `train_hard`, `val_hard`: các từ còn lại của bộ, rút theo seed {pilot["hard_clips"]["train"]} và
-  {pilot["hard_clips"]["val"]} mẩu.
+  {pilot["hard_clips"]["val"]} mẩu{more_hard(pilot)}.
 {negatives_note(spec)}
 
 | File | Mẩu | Giờ | Mẩu TTS |

@@ -251,3 +251,31 @@ def test_a_speech_commands_pilot_cuts_the_word_reuses_public_negatives_and_draws
     assert [r.spk for r in files["train_hard.txt"]] == ["aa"]
     assert files["train_neg.txt"] == splits.read_split(earlier / "train_neg.txt")[:1]
     assert seconds["speech/sc/yes/aa_nohash_0.wav@0.000-0.320"] == 0.32
+
+
+def test_hard_negatives_drawn_after_val_add_to_train_and_keep_every_earlier_draw(tmp_path: Path) -> None:
+    root, hop = tmp_path / "speech" / "sc", grid.HOP_SAMPLES
+    tone = 0.3 * np.sin(2 * np.pi * 300.0 * np.arange(20 * hop) / grid.SAMPLE_RATE_HZ)
+    said = {"on": ["aa_nohash_0"], "no": ["aa_nohash_0", "dd_nohash_0"], "up": ["ee_nohash_0", "ff_nohash_0"]}
+    for word, stems in said.items():
+        for stem in stems:
+            write_wav(root / word / f"{stem}.wav", np.concatenate([tone, np.zeros(30 * hop)]))
+    (root / "testing_list.txt").write_text("no/dd_nohash_0.wav\nup/ff_nohash_0.wav\n", encoding="utf-8")
+    (root / "validation_list.txt").write_text("", encoding="utf-8")
+    earlier = tmp_path / "splits" / "wake" / "v4"
+    earlier.mkdir(parents=True)
+    for name in data.NEGATIVES:
+        (earlier / name).write_text(f"speech/vivos/{name}.wav\tVIVOSSPK01\t-\tpublic\n", encoding="utf-8")
+    cfg = load_yaml(CONFIG)
+    paths = {"raw": tmp_path, "splits": tmp_path / "splits"}
+
+    def cut(**more: int) -> dict:
+        pilot = {"dir": "speech/sc", "negatives_from": "v4", "hard_clips": {"train": 1, "val": 1, **more}}
+        return data.speech_commands_files(
+            cfg | {"word": "on", "split": cfg["split"] | {"speech_commands": pilot}}, paths
+        )[0]
+
+    base, more = cut(), cut(train_after=5)
+    assert more["val_hard.txt"] == base["val_hard.txt"] and len(base["train_hard.txt"]) == 1
+    assert {r.item for r in base["train_hard.txt"]} < {r.item for r in more["train_hard.txt"]}
+    assert len(more["train_hard.txt"]) == 2
