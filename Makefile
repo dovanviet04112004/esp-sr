@@ -438,10 +438,11 @@ fw-bench: ## Build the bench profile, the only one numbers are reported from
 	@$(call fresh_sdkconfig,firmware/build_bench/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.bench)
 	cd firmware && $(IDF_BENCH) build
 
-# A test app leaves its own partition table on the board, so the product's goes back with the app.
+# A test app leaves its own partition table on the board, so the product's goes back with the app, all in one esptool
+# call: a reset between them boots the test app, which writes its model slot over models_0. OTA data stays.
 fw-bench-flash: fw-bench ## Flash the bench app, its bootloader and partition table over the CH340; storage, set.json among it, stays
-	cd firmware && $(IDF_BENCH) -p $(PORT) bootloader-flash $(ONLY_CHANGED) partition-table-flash $(ONLY_CHANGED) \
-	  app-flash $(ONLY_CHANGED)
+	cd firmware/build_bench && python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD) write-flash \
+	  --skip-flashed $$(sed -n 1p flash_args) $$(sed 1d flash_args | grep -v -e ota_data -e storage)
 
 fw-prod: ## Build the prod profile in build_prod, from its own sdkconfig
 	rm -f firmware/build_prod/sdkconfig
