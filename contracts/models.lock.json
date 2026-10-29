@@ -74,28 +74,28 @@
       }
     },
     "speaker": {
-      "run": "20261027_1a7464c-dirty_92a838",
+      "run": "20261010_5a45475-dirty_94e5a9",
       "grid_hash": "0x9c914b61",
       "files": [
         {
           "file": "speaker.espdl",
           "entry": "speaker",
           "kind": "espdl",
-          "sha256": "7c07d8a1e5d497a45be9420e137becdf6426ce398ca2e7239f7fd3c12c1c34a5"
+          "sha256": "2b1c8546eee77d2dba61032d4955240d990ea3dccf941bc272bcb4d1ddefe58c"
         },
         {
           "file": "cohort.bin",
           "entry": "speaker_cohort",
           "kind": "cohort",
-          "sha256": "0aa59592331f62adbee2a8e161319f8df48e4cbb25249c83be9d358945433e87"
+          "sha256": "9ed21501071e2f4cca9656f4ccde17e5bdd313078d89894d68aa597798b59288"
         }
       ],
       "learnt_from": {
-        "pretrained": "redimnet2_b3_mix",
+        "pretrained": "redimnet2_b0",
         "weights": {
-          "file": "b3-vb2+vox2+cnc2_v0-lm.pt",
-          "sha256": "b64989536ef8822447d72517ad9019b870a951e85a3f176f0ed42d2a4c3d811d",
-          "url": "https://github.com/PalabraAI/redimnet2/releases/download/v1.0.0/b3-vb2+vox2+cnc2_v0-lm.pt"
+          "file": "b0-vox2-lm.pt",
+          "sha256": "4b5a8c00f813ab0d92fc81ea7c504475d8201bed608fb2c6aaba65be723e9c61",
+          "url": "https://github.com/PalabraAI/redimnet2/releases/download/v1.0.0/b0-vox2-lm.pt"
         }
       },
       "speaker_hash": "0xd94df25c",
@@ -111,14 +111,14 @@
       },
       "threshold": {
         "milli_z": [
-          2076,
-          2515,
-          2890,
-          3162,
-          3156,
-          3391,
-          3369,
-          3527
+          1486,
+          2100,
+          2430,
+          2640,
+          2691,
+          2846,
+          2882,
+          3020
         ],
         "impostors_passing": [
           0.05,
@@ -138,44 +138,44 @@
           ],
           "milli_z": [
             [
-              2076,
-              2076,
-              2076
+              1486,
+              1486,
+              1486
             ],
             [
-              2515,
-              2515,
-              2515
+              2100,
+              2100,
+              2100
             ],
             [
-              2890,
-              2890,
-              2890
+              2430,
+              2430,
+              2430
             ],
             [
-              3162,
-              3162,
-              3162
+              2640,
+              2640,
+              2640
             ],
             [
-              3156,
-              3156,
-              3156
+              2691,
+              2691,
+              2691
             ],
             [
-              3391,
-              3391,
-              3391
+              2846,
+              2846,
+              2846
             ],
             [
-              3369,
-              3369,
-              3369
+              2882,
+              2882,
+              2882
             ],
             [
-              3527,
-              3527,
-              3527
+              3020,
+              3020,
+              3020
             ]
           ]
         }
