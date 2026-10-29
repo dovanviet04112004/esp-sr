@@ -560,8 +560,8 @@ static bool commands_open(void)
     return !s.wake || s.commanding || atomic_load(&s_enrolling);
 }
 
-// A crossing counts once: the score must fall under wake_th for the next; one in LENH starts it again from
-// its hop, dropping the open window that holds the word (KEHOACH 5.4).
+// A crossing counts once, the score falling under wake_th for the next; none counts in LENH, where the
+// score wobbles around wake_th within the word that woke it (KEHOACH 5.4).
 static esp_err_t hear_wake(uint32_t seq)
 {
     uint16_t score = 0;
@@ -573,18 +573,21 @@ static esp_err_t hear_wake(uint32_t seq)
     }
     if (!s.armed) { return ESP_OK; }
     s.armed = false;
-    s.woke = seq - (uint32_t)ai_engine_wake_delay();
-    const window_t *held = open_window();
-    if (held != NULL && (int32_t)(held->first - (s.woke + 1)) < 0) { drop_open(); }
+    if (s.commanding) { return ESP_OK; }
     s.commanding = true;
+    s.woke = seq - (uint32_t)ai_engine_wake_delay();
     s.wake_score = score;
     s.woke_pending = true;
     s.command_until = seq + s.wait_hops;
     if ((int32_t)(s.woke + 1 - s.after) > 0) { s.after = s.woke + 1; }
     if (!s.in_run) { return ESP_OK; }
-    const esp_err_t opened = open_utterance(seq);
+    // One window per utterance: a second would leave the first open for good, the queue stuck (KEHOACH 5.4).
+    const esp_err_t opened = open_window() == NULL ? open_utterance(seq) : ESP_OK;
     window_t *w = open_window();
     if (w != NULL) {
+        stop_working(w);
+        if ((int32_t)(s.after - w->first) > 0) { w->first = s.after; }
+        w->floor = s.after;
         w->speech = s.after;
         w->wake_tail = true;
     }
