@@ -1,0 +1,7 @@
+# C ai_engine/src/wake/score.c against srpipe.tasks.wake.postproc.smooth.chip_scores (KEHOACH 3.11), to the permille:
+# the table built in double and rounded half up alike, then the same integer mean. case_neg_000 scores the logits at
+# an exponent one over theirs and must fall outside these limits.
+tensors:
+  score:
+    max_abs: 0.0
+    min_snr_db: 0.0
