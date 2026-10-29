@@ -660,6 +660,28 @@ dùng được.
   voiceprints, model c3373e4e` và `2 voiceprints of this model`, nên hai mẫu đã đăng ký vẫn dùng được. Lần nạp ấy gieo
   lại ngưỡng lệnh của ảnh, 200 / 0 / 60; ngưỡng của chủ repo đặt lại qua console thành 300 / 30 / 65535.
 
+### 6.11 Mẫu giọng 5 câu (E11-T31, 29/10)
+
+Chủ repo chọn đăng ký 5 lệnh thay 10 (KẾ HOẠCH §3.17, `contracts/speaker.yaml`, `GEN_SPEAKER_HASH` 0x7910b900).
+`make speaker-deploy RUN=artifacts/speaker/runs/20261010_5a45475-dirty_94e5a9 ROW=kl WORKERS=5`, 19 phút trên CPU,
+cùng vật liệu và luật 5% người lạ lọt của §6.10, mỗi lần rút đăng ký 5 câu. `speaker.espdl` giữ nguyên sha256
+(`2b1c8546…`), nên mẫu giọng đã đăng ký vẫn dùng được.
+
+| Người có mẫu | Ngưỡng (‰ z) | Chủ repo giữ 1 m / 3 m | Người đăng ký thêm giữ | Đúng người: chủ repo / người đăng ký thêm |
+|---|---|---|---|---|
+| 1 | 1359 | 98,7 / 97,8% | — | 100% / — |
+| 2 | 2018 | 98,2 / 97,7% | 50,3% | 99,5 / 94,1% |
+| 3 | 2343 | 98,1 / 97,0% | 47,4% | 99,1 / 89,4% |
+| 4 | 2510 | 97,9 / 96,9% | 39,7% | 99,1 / 81,1% |
+| 5 | 2665 | 97,5 / 96,3% | 40,2% | 98,9 / 78,9% |
+| 6 | 2712 | 97,4 / 96,1% | 35,5% | 98,9 / 77,3% |
+| 7 | 2759 | 97,3 / 96,0% | 34,6% | 98,7 / 74,7% |
+| 8 | 2923 | 96,9 / 95,4% | 30,8% | 98,6 / 71,0% |
+
+- So với 10 câu (§6.10): ngưỡng thấp hơn 26–134 ‰ z ở mọi số người. Chủ repo với 1 người có mẫu giữ 98,7 / 97,8%,
+  so với 98,9 / 97,5%. Với 8 người: 96,9 / 95,4%, so với 98,0 / 97,3%.
+- Cổng của ADR-0024 vẫn chặn dải ồn ở mọi số người: dải lúc yên để lọt 5,4–5,9% người lạ, quá 5%.
+
 ## 7. Đường chip: ReDimNet2 b3 nhiều ngôn ngữ int8 (E11-T35)
 
 Đo ngày 28/10. Bộ trích `b3-vb2+vox2+cnc2_v0-lm` nhập thành run `ml/artifacts/speaker/runs/20261027_1a7464c-dirty_92a838`
