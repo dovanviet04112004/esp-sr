@@ -34,8 +34,8 @@ Chủ repo chọn **"on"** làm từ đánh thức tạm. "trợ lý" vẫn là 
 - Mẫu dương là mọi mẩu "on" của Speech Commands v0.02, cắt ở cuối tiếng nói như mọi mẩu dương. `val` lấy từ
   `testing_list.txt`, `train` từ mẩu không nằm ở danh sách nào, nên người nói tách như bộ tách.
 - Âm bản khó là các từ còn lại của bộ, rút theo seed như pilot "yes".
-- Âm bản học rút mới 100 giờ lời nói tiếng Việt từ các kho còn trên đĩa, không Bud500. `val_neg` và `test_neg` giữ
-  nguyên của `wake/v4`, vốn không có Bud500.
+- Âm bản học rút mới 100 giờ lời nói tiếng Việt từ các kho còn trên đĩa, không Bud500. `val_neg` và `test_neg` là
+  lời nói công khai của `wake/v4`, vốn không có Bud500, không mẩu TTS nào.
 - Học lại trên log-mel 80 dải của `contracts/listen.yaml`, cùng công thức đã sửa lối tắt đầu câu của pilot "yes".
 
 ## Hệ quả

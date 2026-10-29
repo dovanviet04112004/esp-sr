@@ -1294,8 +1294,8 @@ split `wake/on1`:
 - dương: mọi mẩu "on" của bộ, cắt ở cuối tiếng nói; `val` lấy từ `testing_list.txt`, `train` từ mẩu không nằm ở danh
   sách nào, nên người nói tách như bộ tách;
 - âm bản khó: các từ còn lại của bộ, rút theo seed;
-- âm bản học: 100 giờ lời nói tiếng Việt rút mới từ các kho học còn trên đĩa, không Bud500; `val_neg`, `test_neg` giữ
-  nguyên của `wake/v4`, vốn không có Bud500;
+- âm bản học: 100 giờ lời nói tiếng Việt rút mới từ các kho học còn trên đĩa, không Bud500; `val_neg`, `test_neg` là
+  lời nói công khai của `wake/v4`, vốn không có Bud500, không mẩu TTS nào;
 - mọi mẩu dương là giọng thật, nên không có tỉ lệ mẩu thật; việc phụ CTC giữ trên lời nói tiếng Việt của `train_neg`.
 "on" một âm tiết, gần "ông", "không", "con": báo nhầm đo trên phiên board thu lời nói tiếng Việt.
 
