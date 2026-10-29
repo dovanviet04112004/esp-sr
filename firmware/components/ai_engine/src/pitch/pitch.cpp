@@ -39,9 +39,10 @@ struct Pitch {
 ai::EspdlNet s_net;
 Pitch s;
 
+// Half up as ESP-PPQ quantises the graph's input: lrintf rounds exact halves to even (KEHOACH 3.11).
 int8_t on_grid(float x, float inverse_step)
 {
-    const long q = lrintf(x * inverse_step);
+    const float q = floorf(x * inverse_step + 0.5f);
     return static_cast<int8_t>(q < kInt8Min ? kInt8Min : (q > kInt8Max ? kInt8Max : q));
 }
 
