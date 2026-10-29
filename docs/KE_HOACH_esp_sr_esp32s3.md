@@ -528,7 +528,7 @@ vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đ
 | `ns` mạng `nsnet` | **mô hình** | `ai_engine/src/ns_nsnet/` | NSNet-16k: mạng theo vạch họ NSNet2, một gain sigmoid mỗi vạch | 256 vạch, GRU 2 × 144 (cỡ L) | 5,1 ms int8 đo trên board B (E9-T10), hơn `nsnet2` của ESP-SR 21%; chủ repo chọn L (ADR-0014) | E9-T12 |
 | `vad` | thuần | `dsp_afe` | GMM sáu dải kiểu WebRTC, kéo dài 240 ms | bảng WebRTC ở `contracts/afe.yaml` | ~140 µs | E7-T3 |
 | `agc` | thuần | `dsp_afe` | hai tầng: chậm theo mức nói, nhanh chặn đỉnh nhìn trước 4 ms | đích −26 dBFS | ~260 µs, ~340 µs khi chặn mọi mẫu | E7-T4 |
-| `wake` | **mô hình** | `ai_engine/src/wake/` | TCN giãn nở nhân quả int8, chạy dòng | trường nhìn ~2 s | **1,99 ms đo** mỗi bước, 64 kênh, trọng số ngẫu nhiên (`measurements/latency.md` §8) | E11-T11 |
+| `wake` | **mô hình** | `ai_engine/src/wake/` | TCN giãn nở nhân quả int8, chạy dòng 8 khung mỗi lượt | trường nhìn ~2 s | **288 µs đo** mỗi khung, 80 dải, 64 kênh, trọng số ngẫu nhiên (`measurements/latency.md` §8) | E11-T11 |
 | `normalize` `g2p` `lexicon` | thuần | `lang_vi` | luật chính tả → đơn vị, sinh biến thể phương ngữ | `contracts/lang_vi.yaml` | chỉ lúc nạp bộ lệnh: **1,18 ms đo** mỗi lệnh, ba vùng | E11-T4 |
 | `command` `kws` | **mô hình** + thuần | `ai_engine/src/command_kws/` | DS-CNN phân lớp các lệnh đã học + `other` + `silence` trên một cửa sổ mỗi câu; từ chối theo lớp thắng, xác suất và khoảng cách nhất–nhì (ADR-0012) | cửa sổ 94 bước log-mel 80 + 3 chiều cao độ; cỡ S, M, L ở cấu hình | S **41,9 ms đo** ở 40 dải một lần mỗi câu (22 triệu MAC; M 277 ms, L 2,03 s, `measurements/latency.md` §10); `step` chỉ chép khung, còn `pitch` tốn ~2 ms mỗi bước trên nhân 0 (`measurements/pitch.md`) | E11-T17 |
 | `command` `ctc` | **mô hình** + thuần | `ai_engine/src/command_ctc/` | encoder kiểu MultiNet7 + CTC (ADR-0013), chấm có ràng buộc từng lệnh, từ chối theo khoảng cách với vòng tự do | | 11–18 ms mỗi 32 ms, **chỉ trong cửa sổ lệnh**; chấm dần theo khối, sau bước chốt còn phần kết **1,5 ms đo** với bộ lệnh mặc định, 1,8 ms với 64 lệnh (§3.12) | E11-T13 |
@@ -1281,8 +1281,13 @@ log F0 thô (D), log-mel trừ độ lợi `agc` (N), khoảng trước câu rú
 
 **`wake`** — TCN tích chập giãn nở nhân quả, kernel 3, giãn 1, 2, 4, …, 32 một lượt: trường nhìn 127 khung ≈ 2 s;
 64 kênh, vì cùng việc phụ CTC dưới đây nó cho giọng thật cao nhất (`docs/measurements/wake.md` §5). Int8, chạy dòng
-bằng `StreamingCache` của esp-dl. Đầu ra làm trơn trung bình trượt 5 khung rồi so ngưỡng; ngưỡng nằm ở NVS
-`kws/wake_th`.
+bằng `StreamingCache` của esp-dl, **8 khung mỗi lượt**. Mỗi lượt tốn ~1,9 ms cố định cho 26 module của esp-dl, mỗi
+khung thêm chỉ ~50 µs, nên 8 khung mỗi lượt là 288 µs mỗi khung thay vì 1 965 µs (`measurements/latency.md` §8);
+16 khung bớt thêm 118 µs mà trễ gấp đôi. `ai_engine_wake_step` vẫn nhận từng khung, và điểm nó trả là của khung 7 bước
+trước (`ai_engine_wake_delay`, 112 ms), như nhau ở mọi khung, nên bước vượt ngưỡng vẫn biết đúng. Đầu vào chuẩn hoá
+theo trung bình và độ lệch từng dải rồi lượng tử làm tròn nửa lên như ESP-PPQ; logit ra đổi sang xác suất ‰ bằng bảng
+256 mục dựng ở Python, làm trơn trung bình trượt 5 khung bằng số nguyên rồi so ngưỡng, nên điểm trên chip trùng bản
+Python từng ‰. Ngưỡng nằm ở NVS `kws/wake_th`.
 
 **Từ đánh thức "trợ lý"** (ADR-0011, thay "Chào Mina" của ADR-0007). Chủ dự án chọn vì tự nhiên. Hai âm tiết, dài
 chừng nửa giây, 28 lần mỗi triệu âm tiết lời nói: ngắn và thông dụng hơn luật 3–4 âm tiết, pha thanh khác nhau, mà
@@ -2970,7 +2975,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 |---|---|---|
 | `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame`, `spk_fbank_run` (khâu đặc trưng của b0, §3.17), `swift_front_push` (front end của SwiftF0, §3.11), `swift_dims_push` (ba chiều cao độ của SwiftF0, §3.11) | any, không chặn, người gọi giữ bộ nhớ |
 | `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_entry`, `lang_vi_unit_name` | any, không chặn |
-| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_step`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,voiceprint,norm,best,noise_bin,passes,model_id}`, `ai_engine_pitch_{tables,frames,delay,run,reset}` (SwiftF0, §3.11), `ai_engine_ns_ops()`, `ai_engine_synth_render`, `ai_engine_helper_serve` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,5 s với b3, chỉ ở `xac_task`; `helper_serve` chặn tới hạn chờ, chỉ ở `phu_task` và chỉ có khi `AI_ENGINE_CORES_TWO` (§5.1) |
+| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_{step,delay,reset}`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,voiceprint,norm,best,noise_bin,passes,model_id}`, `ai_engine_pitch_{tables,frames,delay,run,reset}` (SwiftF0, §3.11), `ai_engine_ns_ops()`, `ai_engine_synth_render`, `ai_engine_helper_serve` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,5 s với b3, chỉ ở `xac_task`; `helper_serve` chặn tới hạn chờ, chỉ ở `phu_task` và chỉ có khi `AI_ENGINE_CORES_TWO` (§5.1) |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |
 | `svc_*` | `svc_<x>_init`, `svc_<x>_step` | task, gọi từ đúng task của bảng §5.2 |
 
@@ -3382,7 +3387,7 @@ nguyên tử và gọi hàm `*FromISR`. Không log, không `malloc`, không floa
 
 | Trạng thái | Nhân 1 | `nhan_task` | `noi_task` | Ghi chú |
 |---|---|---|---|---|
-| `NGHE` | `thu` + `sach` | `wake` mỗi khung | nghỉ | tải thường trực |
+| `NGHE` | `thu` + `sach` | `wake` nhận mỗi khung, mạng chạy mỗi 8 khung | nghỉ | tải thường trực |
 | `LENH` | `thu` + `sach` | cửa sổ `command` theo luồng, **`wake` dừng** | nghỉ | `ctc`, `rnnt`: mạng và phép chấm mỗi khối 16 bước trên log-mel và cao độ đã có, tối đa `window_s`; `kws`: chép khung, một lần chạy mạng lúc câu chốt (§3.12) |
 | `DAP` | `thu` + `sach`; `aec` tiếp tục học | nghỉ | dựng rồi phát | nói chen khi máy đang nói nằm ngoài phạm vi (§9) |
 
