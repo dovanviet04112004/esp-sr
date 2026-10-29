@@ -3,9 +3,9 @@
 # idf.py and the python that drives board B come from IDF's export.sh. In a terminal that has not sourced it, a goal
 # that needs them runs make once more under it, about 5 s; IDF_LOADED stops a second round if export.sh fails.
 IDF_EXPORT ?= $(HOME)/esp/esp-idf/export.sh
-IDF_GOALS := ai-unit ai-unit-ctc ai-unit-pitch ai-unit-rnnt ai-unit-speaker bench-board bss calib-flash capture-flash \
-  capture-radio-off-flash espsr-compare flash fw-bench fw-bench-flash fw-dev fw-prod listen-unit models-flash monitor \
-  nvs-restore nvs-save parity-board product session session-plan storage-flash
+IDF_GOALS := ai-unit ai-unit-ctc ai-unit-pitch ai-unit-rnnt ai-unit-speaker ai-unit-wake bench-board bss calib-flash \
+  capture-flash capture-radio-off-flash espsr-compare flash fw-bench fw-bench-flash fw-dev fw-prod listen-unit \
+  models-flash monitor nvs-restore nvs-save parity-board product session session-plan storage-flash
 ifneq ($(and $(filter $(IDF_GOALS),$(MAKECMDGOALS)),$(if $(IDF_LOADED)$(shell command -v idf.py),,no idf.py)),)
 .PHONY: $(MAKECMDGOALS)
 $(firstword $(MAKECMDGOALS)):
@@ -541,8 +541,8 @@ calib-shift: ## Store NVS calib/pcm_shift through test_apps/calib: SHIFT=13
 # Where srpipe.scenes.compare prepare wrote the items, read from ml/ only when a recipe needs it.
 COMPARE_ITEMS = $(shell $(ML) --quiet python -c "from srpipe.core.config import data_paths; print(data_paths()['interim'] / 'scenes' / 'afe_compare')")
 
-.PHONY: bench-board bss espsr-compare ai-probe ai-unit ai-unit-rnnt ai-unit-speaker ai-unit-ctc ai-unit-pitch ai-profile \
-  listen-unit
+.PHONY: bench-board bss espsr-compare ai-probe ai-unit ai-unit-rnnt ai-unit-speaker ai-unit-ctc ai-unit-pitch ai-unit-wake \
+  ai-profile listen-unit
 bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/bench, then rebuild budget.md
 	@$(call fresh_sdkconfig,$(BENCH_APP)/sdkconfig,$(call app_defaults,$(BENCH_APP)) firmware/sdkconfig.afe)
 	cd $(BENCH_APP) && idf.py build
@@ -665,6 +665,14 @@ ai-unit-pitch: ## Run the pitch build of the ai_engine suite on board B: RUN=<ru
 	  { pytest pytest_unit.py $(ON_BOARD) --build-dir build_pitch -s; echo $$? > build_pitch/unit.status; } 2>&1 \
 	    | tee build_pitch/unit.log; \
 	  exit $$(cat build_pitch/unit.status 2>/dev/null || echo 1)
+
+ai-unit-wake: ## Stream the wake TCN of wake.yaml, random weights, on board B: its profile in build_wake/unit.log [STEP=<hops a call>] (E11-T11)
+	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.wake.quant probe $(if $(STEP),--step $(STEP))
+	@$(call fresh_sdkconfig,$(UNIT_APP)/build_wake/sdkconfig,$(call app_defaults,$(UNIT_APP)))
+	cd $(UNIT_APP) && rm -f build_wake/unit.status && idf.py -B build_wake -D SDKCONFIG=build_wake/sdkconfig -D UNIT_PROFILE=wake build && \
+	  { pytest pytest_unit.py $(ON_BOARD) --build-dir build_wake -s; echo $$? > build_wake/unit.status; } 2>&1 \
+	    | tee build_wake/unit.log; \
+	  exit $$(cat build_wake/unit.status 2>/dev/null || echo 1)
 
 # Step 2.2 of KEHOACH 3.14's procedure, any branch: LOG holds esp-dl's profile_module table of a board run, ESPDL
 # the model that ran, its .info beside it (make ai-unit-speaker leaves $(SPEAKER_BUILD)/unit.log and <run>/int8/<row>/).

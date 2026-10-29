@@ -27,10 +27,11 @@ struct StreamHead {
     uint32_t hops;
     uint32_t bands;
     uint32_t outputs;
+    uint32_t step; // hops a call
     int32_t input_exponent;
     int32_t output_exponent;
 };
-static_assert(sizeof(StreamHead) == 24, "stream.bin head is 24 bytes");
+static_assert(sizeof(StreamHead) == 28, "stream.bin head is 28 bytes");
 
 void write_probe_image(const esp_partition_t *part)
 {
@@ -40,28 +41,28 @@ void write_probe_image(const esp_partition_t *part)
     TEST_ASSERT_EQUAL(ESP_OK, esp_partition_write(part, 0, probe_models_start, bytes));
 }
 
-// Worst |board - simulation| over hops run from the caches as they stand; mean and peak us per step.
-int stream(ai::EspdlNet &net, const StreamHead &head, const int8_t *x, const int8_t *y, uint32_t hops,
-           int64_t *mean_us, int64_t *peak_us)
+// Worst |board - simulation| over all hops fed step a call from the caches as they stand; us per call.
+int stream(ai::EspdlNet &net, const StreamHead &head, const int8_t *x, const int8_t *y, int64_t *mean_us,
+           int64_t *peak_us)
 {
     const ai::Int8Tensor in = net.input();
     const ai::Int8Tensor out = net.output();
     int worst = 0;
     int64_t total_us = 0;
     *peak_us = 0;
-    for (uint32_t t = 0; t < hops; t++) {
-        memcpy(in.data, x + t * head.bands, head.bands);
+    for (uint32_t t = 0; t < head.hops; t += head.step) {
+        memcpy(in.data, x + t * head.bands, head.step * head.bands);
         const int64_t started_us = esp_timer_get_time();
         TEST_ASSERT_EQUAL(ESP_OK, net.step());
         const int64_t took_us = esp_timer_get_time() - started_us;
         total_us += took_us;
         *peak_us = took_us > *peak_us ? took_us : *peak_us;
-        for (uint32_t k = 0; k < head.outputs; k++) {
+        for (uint32_t k = 0; k < head.step * head.outputs; k++) {
             const int diff = abs(out.data[k] - y[t * head.outputs + k]);
             worst = diff > worst ? diff : worst;
         }
     }
-    *mean_us = total_us / hops;
+    *mean_us = total_us / (head.hops / head.step);
     return worst;
 }
 
@@ -80,37 +81,39 @@ TEST_CASE("an ESP-PPQ network streamed hop by hop matches its whole-sequence sim
     {
         dl::Model model(reinterpret_cast<const char *>(blob.data), fbs::MODEL_LOCATION_IN_FLASH_RODATA, 0,
                         dl::MEMORY_MANAGER_GREEDY, nullptr, false);
-        TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, model.test(), "the first hop exported for model->test()");
+        TEST_ASSERT_EQUAL_MESSAGE(ESP_OK, model.test(), "the first call exported for model->test()");
+        model.profile_module(true);
     }
 
     StreamHead head;
     memcpy(&head, probe_stream_start, sizeof(head));
     TEST_ASSERT_EQUAL_MEMORY("SRST", head.magic, 4);
+    TEST_ASSERT_TRUE(head.step > 0 && head.hops % head.step == 0);
     const int8_t *x = reinterpret_cast<const int8_t *>(probe_stream_start + sizeof(head));
     const int8_t *y = x + head.hops * head.bands;
 
     static ai::EspdlNet net;
     TEST_ASSERT_EQUAL(ESP_OK, net.build(blob, "probe"));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, net.build(blob, "probe"));
-    TEST_ASSERT_EQUAL(head.bands, net.input().elements);
-    TEST_ASSERT_EQUAL(head.outputs, net.output().elements);
+    TEST_ASSERT_EQUAL(head.step * head.bands, net.input().elements);
+    TEST_ASSERT_EQUAL(head.step * head.outputs, net.output().elements);
     TEST_ASSERT_EQUAL(head.input_exponent, net.input().exponent);
     TEST_ASSERT_EQUAL(head.output_exponent, net.output().exponent);
 
     int64_t mean_us = 0;
     int64_t peak_us = 0;
-    const int worst = stream(net, head, x, y, head.hops, &mean_us, &peak_us);
-    printf("probe streamed %" PRIu32 " hops: worst |board - simulation| %d, %" PRId64 " us mean, %" PRId64
-           " us peak per hop\n",
-           head.hops, worst, mean_us, peak_us);
+    const int worst = stream(net, head, x, y, &mean_us, &peak_us);
+    printf("probe streamed %" PRIu32 " hops, %" PRIu32 " a call: worst |board - simulation| %d, %" PRId64
+           " us mean, %" PRId64 " us peak a call, %" PRId64 " us a hop\n",
+           head.hops, head.step, worst, mean_us, peak_us, mean_us / (int64_t)head.step);
     TEST_ASSERT_LESS_OR_EQUAL(kToleranceSteps, worst);
 
     // Without reset the caches still hold the last hops, so the same input must come out different.
-    const int stale = stream(net, head, x, y, head.hops, &mean_us, &peak_us);
+    const int stale = stream(net, head, x, y, &mean_us, &peak_us);
     printf("same input again without reset: worst |board - simulation| %d\n", stale);
     TEST_ASSERT_GREATER_THAN(kToleranceSteps, stale);
     net.reset();
-    TEST_ASSERT_LESS_OR_EQUAL(kToleranceSteps, stream(net, head, x, y, head.hops, &mean_us, &peak_us));
+    TEST_ASSERT_LESS_OR_EQUAL(kToleranceSteps, stream(net, head, x, y, &mean_us, &peak_us));
     net.release();
 
     TEST_ASSERT_EQUAL(ESP_OK, esp_partition_erase_range(part, 0, kSectorBytes));

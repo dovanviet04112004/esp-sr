@@ -1,6 +1,10 @@
-# The probes are exported by ml, never committed: make ai-probe, or make ai-unit-rnnt, ai-unit-speaker, ai-unit-ctc
-# and ai-unit-pitch for those builds, writes them.
-if(UNIT_PROFILE STREQUAL "speaker")
+# The probes are exported by ml, never committed: make ai-probe, or make ai-unit-rnnt, ai-unit-speaker, ai-unit-ctc,
+# ai-unit-pitch and ai-unit-wake for those builds, writes them.
+if(UNIT_PROFILE STREQUAL "wake")
+    set(tests "test_stream.cpp" "test_stream_main.c")
+    set(embedded "probe/models.bin" "probe/stream.bin")
+    set(flashed "")
+elseif(UNIT_PROFILE STREQUAL "speaker")
     set(tests "test_speaker_probe.cpp")
     set(embedded "probe/speaker_windows.bin")
     set(flashed "probe/speaker_models.bin")
@@ -26,7 +30,7 @@ else()
 endif()
 foreach(probe ${embedded} ${flashed})
     if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/${probe}")
-        message(FATAL_ERROR "main/${probe} is missing: run make ai-probe, or make ai-unit-rnnt, -speaker, -ctc or -pitch")
+        message(FATAL_ERROR "main/${probe} is missing: run make ai-probe, or the make ai-unit-<profile> of this build")
     endif()
 endforeach()
 
