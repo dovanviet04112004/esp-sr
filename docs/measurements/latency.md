@@ -161,6 +161,22 @@ Bản đầu dùng `auto_streaming` của ESP-PPQ: phép cộng dư nhận bộ 
 Lượt 30/09 tại `b85f271`, cùng app, với 64 kênh như `wake.yaml` hiện giữ: chênh int8 lớn nhất 0, một bước **1 994 µs**
 trung bình, 2 032 µs đỉnh; dựng mạng 26,3 ms, PSRAM 31,4 KB.
 
+**Nhiều bước mỗi lượt** (29/10, `make ai-unit-wake STEP=<n>`, bản dựng riêng của app chỉ có ca này). Mạng như
+`wake.yaml` hiện giữ: 80 dải vào, 64 kênh, trọng số ngẫu nhiên có seed, `.espdl` 127 KB. ESP-PPQ xuất đồ thị chạy dòng
+n bước mỗi lượt; mỗi `StreamingCache` ghép phần nhớ với n khung mới. 256 bước so với mô phỏng cả chuỗi:
+
+| Bước mỗi lượt | Chênh int8 lớn nhất | Một lượt, trung bình | Đỉnh | Mỗi bước | Báo thức trễ thêm tối đa |
+|---|---|---|---|---|---|
+| 1 | 0 | 1 965 µs | 1 982 µs | **1 965 µs** | 0 |
+| 8 | 0 | 2 309 µs | 2 327 µs | **288 µs** | 7 bước, 112 ms |
+| 16 | 0 | 2 726 µs | 2 737 µs | **170 µs** | 15 bước, 240 ms |
+
+- Thêm một khung vào lượt tốn ~50 µs, nên ~1,9 ms mỗi lượt là phần cố định.
+- Bảng `profile_module` của lượt 1 bước (2,0 ms qua 26 module, `make ai-profile`): 14 tích chập 1,6 ms, mỗi tích chập
+  giãn 3 tap ~0,2 ms và mỗi tích chập 1×1 ~0,1 ms. 6 `StreamingCache` 0,2 ms, 6 phép cộng dư 0,2 ms. Một phép cộng 64
+  số mất ~30 µs, như tích chập 64 → 1 cuối: phần lớn là phí của module, không phải phép tính.
+- Đối chứng âm (chạy lại không `reset`) chênh 46 ở cả ba.
+
 ## 10. DS-CNN của `kws` trên esp-dl, ba cỡ (E11-T17)
 
 Board B, `ai_engine/test_apps/unit` (profile mặc định `-Og`; nhân chập của esp-dl là mã dịch sẵn), IDF 6.0.2, esp-dl
