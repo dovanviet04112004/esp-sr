@@ -222,14 +222,14 @@
       }
     },
     "wake": {
-      "run": "20261029_b7c6710-dirty_b2ae63",
+      "run": "20261029_cd3cafd-dirty_ed5214",
       "grid_hash": "0x9c914b61",
       "files": [
         {
           "file": "wake.espdl",
           "entry": "wake",
           "kind": "espdl",
-          "sha256": "bcba5063ff64b30fca96ae9bb5f1cc82bde9c6cb9736806406d9e4ce87970e90"
+          "sha256": "200c908f2b94a6856ee729db2ed156f997e31d5f6f3274e42d9e69a113cf1645"
         },
         {
           "file": "wake.norm.bin",
@@ -239,11 +239,11 @@
         }
       ],
       "learnt_from": {
-        "split": "on1",
+        "split": "on2",
         "train": [
           {
             "file": "train_hard.txt",
-            "sha256": "fd23a5e6cee011419530f45b01ad3cdf3cd9f21849726d16a4cedcbf8899161b"
+            "sha256": "536c23abf241c7c944959bf59ced53b3b420e633789f8ac73fecba0b0f2ddaa3"
           },
           {
             "file": "train_neg.txt",
@@ -259,7 +259,7 @@
       "word": "on",
       "step_frames": 8,
       "threshold": {
-        "permille": 960
+        "permille": 920
       },
       "smooth_hops": 5
     }
