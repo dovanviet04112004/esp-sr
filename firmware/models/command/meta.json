@@ -7,7 +7,7 @@
       "file": "command_ctc.espdl",
       "entry": "command_ctc",
       "kind": "espdl",
-      "sha256": "fcae787e241a4a42139df51723a498d2c4da6f46028c705f83b43062bee1f706"
+      "sha256": "75e0b8b976d2b646b28ff69376d17867a734e8e3731c2716084ab0317247360f"
     },
     {
       "file": "command_ctc.norm.bin",
@@ -61,13 +61,14 @@
     "int16_ops": []
   },
   "thresholds": {
-    "reject_permille": 200,
+    "reject_permille": 100,
     "margin_permille": 0,
-    "syllable_permille": 60
+    "syllable_permille": 70
   },
   "weights_in_flash": true,
   "heard": {
-    "pitch": "kaldi",
-    "hold": "pitch"
+    "pitch": "contract",
+    "hold": null,
+    "build": "v9"
   }
 }
