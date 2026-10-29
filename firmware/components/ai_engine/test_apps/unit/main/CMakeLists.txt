@@ -2,7 +2,7 @@
 # ai-unit-pitch and ai-unit-wake for those builds, writes them.
 if(UNIT_PROFILE STREQUAL "wake")
     set(tests "test_stream.cpp" "test_stream_main.c")
-    set(embedded "probe/models.bin" "probe/stream.bin")
+    set(embedded "probe/models.bin" "probe/stream.bin" "probe/wake_models.bin" "probe/wake_branch.bin")
     set(flashed "")
 elseif(UNIT_PROFILE STREQUAL "speaker")
     set(tests "test_speaker_probe.cpp")
@@ -24,7 +24,8 @@ else()
     # Cases run in this order; test_ctc_net.cpp's erases model slot 0, which the ctc cases before it read.
     set(tests "test_ai_engine.c" "test_stream.cpp" "test_kws_probe.cpp" "test_ctc_probe.cpp" "test_ctc_net.cpp"
               "test_ns_probe.cpp" "test_ctc_decide.c")
-    set(embedded "probe/models.bin" "probe/stream.bin" "probe/kws_models.bin" "probe/kws_windows.bin"
+    set(embedded "probe/models.bin" "probe/stream.bin" "probe/wake_models.bin" "probe/wake_branch.bin"
+                 "probe/kws_models.bin" "probe/kws_windows.bin"
                  "probe/ctc_streams.bin" "probe/ctc_decide.bin" "probe/ctc_windows.bin" "probe/ns_streams.bin")
     set(flashed "probe/ctc_models.bin" "probe/ns_models.bin")
 endif()

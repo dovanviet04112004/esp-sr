@@ -44,4 +44,15 @@ esp_err_t pitch_load() noexcept;
 /** Whether pitch_load built the branch. */
 bool pitch_ready() noexcept;
 
+/** Free whatever the wake branch built over the image about to be dropped. */
+void wake_drop() noexcept;
+
+/** Build the wake branch over the loaded image; ESP_OK also when the image carries no wake (KEHOACH 3.11).
+ *  @ret ESP_OK | ESP_ERR_NO_MEM | ESP_ERR_NOT_SUPPORTED esp-dl refused the graph | ESP_ERR_INVALID_SIZE
+ */
+esp_err_t wake_load() noexcept;
+
+/** Whether wake_load built the branch. */
+bool wake_ready() noexcept;
+
 } // namespace ai

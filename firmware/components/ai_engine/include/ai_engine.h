@@ -67,11 +67,17 @@ bool ai_engine_has(ai_engine_model_t model);
  */
 const dsp_afe_ns_ops_t *ai_engine_ns_ops(void);
 
-/** Feed one frame of normalised-inside log-mel features; score is the smoothed wake probability.
- *  @ctx nhan_task | non-blocking | features are the raw log-mel of dsp_spec_mel_log
- *  @ret ESP_OK | ESP_ERR_INVALID_STATE the loaded image has no wake
+/** Feed one frame of raw log-mel; score is the smoothed wake probability of the frame ai_engine_wake_delay
+ *  calls back, 0 until that many have come since load or reset (KEHOACH 3.11).
+ *  @ctx nhan_task | non-blocking; the call that completes the graph's frames runs it, ~2.3 ms
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE the loaded image has no wake | ESP_ERR_INVALID_ARG
  */
 esp_err_t ai_engine_wake_step(const float *log_mel, uint16_t *score_permille);
+
+/** Frames the score of ai_engine_wake_step trails the frame fed; 0 when the image has no wake.
+ *  @ctx any | non-blocking
+ */
+size_t ai_engine_wake_delay(void);
 
 /** Clear the streaming state of wake, as after a gap in the frame sequence.
  *  @ctx nhan_task | non-blocking

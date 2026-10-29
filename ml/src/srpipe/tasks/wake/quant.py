@@ -1,6 +1,6 @@
 """Quantise and export the wake TCN (KEHOACH 3.11, 3.14): probe streams a seeded random network a few hops a call
-for ai_engine/test_apps/unit (E11-T10), the image and every hop's int8 input and output; ptq rows each calibration of
-a trained run, scored on val and test as the chip scores; deploy exports a row into firmware/models/wake.
+for ai_engine/test_apps/unit (E11-T10), every hop's int8 input and output, and as an image's wake for the branch;
+ptq rows each calibration of a trained run, scored as the chip scores; deploy exports a row into firmware/models.
 Run: python -m srpipe.tasks.wake.quant probe [--step <hops a call>] | ptq <run> | deploy <run> --row <row>
 """
 
@@ -33,6 +33,9 @@ PROBE_ENTRY = "probe"
 # (hops x outputs).
 VECTORS_HEAD = struct.Struct("<4sIIIIii")
 VECTORS_MAGIC = b"SRST"
+# hops, bands, hops a call, smoothing hops; then float32 raw log-mel (hops x bands), then uint16 scores (hops).
+BRANCH_HEAD = struct.Struct("<4sIIII")
+BRANCH_MAGIC = b"SRWB"
 
 
 def n_bands(cfg: dict) -> int:
@@ -44,9 +47,9 @@ def build(cfg: dict) -> Tcn:
     return Tcn(n_bands(cfg), m["channels"], m["kernel"], m["dilations"])
 
 
-def probe(cfg: dict, out: Path, work: Path, step: int = 1) -> tuple[Path, Path]:
-    """Write out/models.bin and out/stream.bin from a seeded random network streamed step hops a call; work keeps the
-    ONNX and the .espdl."""
+def probe(cfg: dict, out: Path, work: Path, step: int = 1) -> list[Path]:
+    """Write out/models.bin and out/stream.bin from a seeded random network streamed step hops a call, then
+    branch_probe's two files; work keeps the ONNX and the .espdl."""
     p = cfg["probe"]
     if p["hops"] % step:
         raise ValueError(f"probe.hops {p['hops']} is no multiple of {step} hops a call")
@@ -76,7 +79,29 @@ def probe(cfg: dict, out: Path, work: Path, step: int = 1) -> tuple[Path, Path]:
     vectors = out / "stream.bin"
     head = VECTORS_HEAD.pack(VECTORS_MAGIC, shape[2], shape[1], y.shape[1], step, io.input_exponent, io.output_exponent)
     vectors.write_bytes(head + x_int8[0].T.tobytes() + y_int8[0].T.tobytes())
-    return image, vectors
+    return [image, vectors, *branch_probe(cfg, graph, espdl, out, rng, step)]
+
+
+def branch_probe(cfg: dict, graph, espdl: Path, out: Path, rng: np.random.Generator, step: int) -> list[Path]:
+    """out/wake_models.bin, an image whose wake is the probe's graph with band statistics drawn by rng, and
+    out/wake_branch.bin, raw log-mel frames and the smoothed permille chip_scores gives each, for ai_engine's wake
+    branch on board B (KEHOACH 3.11)."""
+    p, hops, io = cfg["probe"], cfg["eval"]["smooth_hops"], ptq_espdl.io_of(graph)
+    frames, bands = p["hops"], n_bands(cfg)
+    mean = rng.normal(0.0, 1.0, bands).astype(np.float32)
+    std = rng.uniform(0.25, 0.75, bands).astype(np.float32)
+    raw = (mean + std * rng.normal(p["input_mean"], p["input_std"], (frames, bands))).astype(np.float32)
+    y = ptq_espdl.Simulator(graph)(normalised(raw, mean, std))[0, 0]
+    logits = np.rint(y / np.float32(2.0**io.output_exponent)).astype(np.int64)
+    scores = chip_scores(logits, io.output_exponent, hops)
+    norm = mean.astype("<f4").tobytes() + std.astype("<f4").tobytes()
+    entries = [pack_models.Entry(BRANCH, "espdl", espdl.read_bytes()), pack_models.Entry(BRANCH, "norm", norm)]
+    image = out / "wake_models.bin"
+    image.write_bytes(pack_models.pack(entries, wake_th_permille=PERMILLE // 2, wake_smooth_hops=hops))
+    vectors = out / "wake_branch.bin"
+    head = BRANCH_HEAD.pack(BRANCH_MAGIC, frames, bands, step, hops)
+    vectors.write_bytes(head + raw.astype("<f4").tobytes() + scores.astype("<u2").tobytes())
+    return [image, vectors]
 
 
 def drawn_windows(folder: Path, count: int, width: int, rng: np.random.Generator) -> list[np.ndarray]:

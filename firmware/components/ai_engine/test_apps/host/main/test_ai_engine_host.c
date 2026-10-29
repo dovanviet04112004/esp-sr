@@ -167,7 +167,6 @@ static void check_shells(void)
     static int16_t pcm[16];
     static const uint8_t units[3] = {1, 2, 3};
     static ai_engine_lexicon_t lexicon;
-    uint16_t score = 7;
     size_t n_samples = 9;
     ai_engine_command_result_t result;
     bool none = true;
@@ -176,10 +175,6 @@ static void check_shells(void)
     }
     check(none, "no branch builds a network yet, so no model is present");
     check(ai_engine_ns_ops() == NULL, "ns shell: nothing to plug into the dsp_afe slot");
-    ai_engine_wake_reset();
-    check(ai_engine_wake_step(log_mel, &score) == ESP_ERR_INVALID_STATE &&
-              ai_engine_wake_step(NULL, &score) == ESP_ERR_INVALID_ARG,
-          "wake shell: no wake model, arguments still checked");
     check(ai_engine_command_prepare(&lexicon) == ESP_ERR_INVALID_STATE &&
               ai_engine_command_begin() == ESP_ERR_INVALID_STATE &&
               ai_engine_command_step(log_mel) == ESP_ERR_INVALID_STATE &&

@@ -1,6 +1,6 @@
 #include "core/branch.hpp"
 
-// The host test runs without esp-dl: the speaker and pitch branches never build there.
+// The host test runs without esp-dl: the speaker, pitch and wake branches never build there.
 namespace ai {
 
 void speaker_drop() noexcept
@@ -25,6 +25,19 @@ esp_err_t pitch_load() noexcept
 }
 
 bool pitch_ready() noexcept
+{
+    return false;
+}
+
+void wake_drop() noexcept
+{}
+
+esp_err_t wake_load() noexcept
+{
+    return ESP_OK;
+}
+
+bool wake_ready() noexcept
 {
     return false;
 }
