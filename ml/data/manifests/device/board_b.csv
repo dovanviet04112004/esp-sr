@@ -92,3 +92,4 @@ session,board,fw,grid_hash,pcm_shift,kind,spk,consent,room,distance_cm,doa_deg,p
 20261007_home_006,board_b,capture@contract-v1-1008-g62d9ab5,0x9c914b61,13,cmd,spk_001,C001,home,300,90,bật quạt,2026-10-07T00:19:07+00:00,0,40.0,d9e27fb5b78ecdd42ebba5c931f4434af894551eff04803a656a61844d40557f
 20261007_home_007,board_b,capture@contract-v1-1008-g62d9ab5,0x9c914b61,13,cmd,spk_001,C001,home,300,90,tắt quạt,2026-10-07T00:20:04+00:00,0,40.0,17b99614fb173fad1d3e13957e6bdb8c087ea1beb5ae636bf41842f3e3d702f2
 20261007_home_008,board_b,capture@contract-v1-1008-g62d9ab5,0x9c914b61,13,cmd,spk_001,C001,home,300,90,bật đèn,2026-10-07T00:20:57+00:00,0,40.0,ede7ec0d3ba682091258e65f403e713c46e995c8546e194f76fbead5340fc4ba
+20261029_home_001,board_b,0.1.0+bee312e8.diag,0x9c914b61,13,wake,spk_001,C001,home,100,,on lap lai,2026-10-29T15:28:35+00:00,0,200.0,641cb5b058839a458dc4afcc996814869287258280515473cfe6950d03aa5c9c
