@@ -1228,8 +1228,9 @@ SwiftF0 từ phần này.
      ra; ảnh model mang mục `pitch` (`ESPDL`) và `pitch` (`FRONT`).
   2. **Nhánh `pitch` của `ai_engine`** (`src/pitch/`), thêm vào hợp đồng gọi §4.5.5:
      - `AI_ENGINE_MODEL_PITCH`; `ai_engine_pitch_tables` trao con trỏ vào mục `FRONT` cho `dsp_spec_swift_front_init`;
-     - `ai_engine_pitch_run` nhận 16 khung front float, lượng tử theo số mũ đầu vào, chạy CNN một lượt, rồi giải 16
-       khung: log F0 và độ tin, khung đầu trễ 7 khung sau khung front đầu của lượt; `ai_engine_pitch_reset`;
+     - `ai_engine_pitch_run` nhận 16 khung front float, lượng tử theo số mũ đầu vào, làm tròn nửa lên như ESP-PPQ
+       lượng tử đầu vào của đồ thị và như esp-dl làm tròn trên S3, chạy CNN một lượt, rồi giải 16 khung: log F0 và độ
+       tin, khung đầu trễ 7 khung sau khung front đầu của lượt; `ai_engine_pitch_reset`;
      - mốc: bản dò trên board chạy chuỗi front, CNN, giải từ PCM và khớp từng bit chuỗi soi gương.
   3. **`contracts/listen.yaml`:** mục `pitch` thành của SwiftF0: `source`, hàng int8 (`int8.run`, `int8.row`), quy tắc
      chạy dòng (`stream`), khoảng F0, ngưỡng hữu thanh, hai cửa sổ và ba thang. Tham số của `dsp_spec/pitch` sang mục
