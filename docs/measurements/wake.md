@@ -517,3 +517,32 @@ Mẩu bắt đầu và kết thúc giữa quãng ấy.
 - Thử sống đầu tiên của chủ repo (18:13, `host-live`): `WAKE` 0,97–0,98 rồi `COMMAND` bật quạt, chụp ảnh, tắt đèn; hai
   lần `WAKE` ra `REJECT PART` và `LOW_SCORE`: cửa sổ mở cho đuôi chữ "on" còn trong câu `vad` đưa máy về `NGHE`. Sửa
   ở `4e53f4da`; chưa đo lại.
+- Thử sống thứ hai (18:36–18:47, `on2` ở 920‰, `LENH` không tính lần vượt ngưỡng): 72 `WAKE`. Số in trong sự kiện
+  `WAKE` là điểm ở bước đầu tiên vượt ngưỡng, không phải đỉnh của chữ. Làm tròn 0,01, `on1` ở 960‰ in cao hơn ngưỡng
+  0 / 0,01 / 0,02 / 0,03 ở 15 / 31 / 15 / 7 trên 68 lần; `on2` ở 920‰ cao hơn 0 … 0,06 ở 19 / 26 / 13 / 9 / 2 / 2 / 1
+  trên 72 lần. Hai phân bố cùng dạng, sát ngưỡng: `on2` in thấp hơn vì ngưỡng thấp hơn, số in không đo độ chắc của
+  model. Lần nói "on" không ra `WAKE` không có trong sự kiện; so `on1` với `on2` trên giọng chủ repo cần phiên thu qua
+  board.
+- 18:50 chủ repo bảo hạ ngưỡng: `kws/wake_th` 900‰ qua console, board đọc "after the wake at 900 permille". `on2` dòng
+  `minmax` chấm như chip ở ngưỡng thấp hơn (script chẩn đoán chạy một lần; hàng 920‰ khớp `ladder.yaml`):
+
+| Ngưỡng | `val` bắt | `val` báo nhầm/giờ | `test` báo nhầm/giờ |
+|---|---|---|---|
+| 850‰ | 91,7% | 4,83 | 7,14 |
+| 870‰ | 90,2% | 4,56 | 6,16 |
+| 880‰ | 88,4% | 4,21 | 5,69 |
+| 890‰ | 87,6% | 4,03 | 5,23 |
+| **900‰** | **87,1%** | **3,85** | **4,50** |
+| 910‰ | 85,6% | 3,22 | 3,93 |
+| 920‰ (ảnh) | 83,6% | 2,77 | 3,52 |
+
+- Bước vượt ngưỡng đầu tiên so với cuối chữ "on" (cuối nhãn của 396 mẩu `val_pos`, cùng dòng, cùng cách chấm), số
+  dương là trước cuối chữ: 900‰ trung vị 32 ms, p10 −160 ms, p90 176 ms; 920‰ 16 / −160 / 160 ms; 960‰ −16 / −208 /
+  144 ms. Hạ 920‰ xuống 900‰ đưa mốc chặn k + 1 của cửa sổ lệnh sớm thêm chừng 16 ms.
+- Sau mỗi `WAKE` từ 18:44 (đăng ký lại giọng) tới 19:04, 52 lần: 22 `COMMAND`, 6 không có quyết định nào, 13
+  `LOW_SCORE`, 4 `LOW_SYLLABLE` (lúc δ₃ 70‰), 3 `LOW_MARGIN`, 3 `PART`, 1 `SPEAKER`. Console 19:02–19:04: cửa sổ lệnh
+  đầu tiên bắt đầu ở k + 1 và dài 112–131 bước; khi tiếng nói liền, `LENH` kéo dài, cửa sổ bị cắt ở 233 bước và quyết
+  định ra 3,5 s sau khi câu đóng.
+- 19:09:46 board B ngừng quyết định sau 7 phút nói thử: `COMMAND` bật đèn rồi `WAKE` ở bước 27 228 trong câu đang có
+  cửa sổ, từ đó không `WAKE` nào, mọi câu "window queue full" tới khi khởi động lại 19:13. Cửa sổ thứ hai mở chồng lên
+  cửa sổ đang mở, cái đầu không bao giờ đóng nên chặn hàng đợi 4 cửa sổ. Sửa ở `3115469d`, nạp 19:16.

@@ -1826,3 +1826,21 @@ hai; nhìn trước cuối 9 (75%) / −3 (30%) / 18 (78%) cả cửa sổ, 9 (7
 trung bình trị tuyệt đối theo nhịp t … t + 12: 0,855, 0,365, 0,322, 0,275, 0,153, rồi dưới 0,11; nó đọc chừng ba tới năm
 khung kế tiếp, tức phần cuối của chính âm tiết. Nguyên âm của "tắt" hỏng từ bên trong âm tiết, không do chữ sau; ở bước
 10 000 biên nguyên âm đã chỉ 4 ‰ so với 24 ‰ của v8. Đo bằng script chẩn đoán chạy một lần.
+
+### 12.36 Bộ ba của ảnh model trên board B có `wake`, bộ 38 lệnh (29/10)
+
+Board B chạy `wake` "on" (`on2`, 920‰) với bộ `host/sets/demo_vi.json` 38 lệnh giữ ở broker. 18:38 chủ repo đổi
+300 / 30 / 65 535 sang bộ ba ảnh model đề xuất, δ₁ 100 ‰, δ₂ 0 ‰, δ₃ 70 ‰, chọn trên bộ mặc định 10 lệnh (KẾ HOẠCH
+§3.12). Sự kiện `host-live`, trừ lúc đăng ký giọng 18:43:
+
+| Quãng | `WAKE` | `COMMAND` | `LOW_SCORE` | `LOW_MARGIN` | `LOW_SYLLABLE` | `PART` | `SPEAKER` |
+|---|---|---|---|---|---|---|---|
+| 300 / 30 / 65 535, 18:36–18:38 | 17 | 9 | 4 | 3 | — | 0 | 1 |
+| 100 / 0 / 70, 18:39–18:47 | 55 | 24 | 14 | — | 5 | 2 | 8 |
+
+"Mở cửa" nhận được ở 100 / 0 / 70 có điểm 0,87–0,92, hơn lệnh nhì 0,01–0,28; hai lần 0,01 và 0,02 thì δ₂ 30 ‰ đã
+từ chối. Ở 300 / 30 / 65 535 với `on1` cùng tối (18:13–18:27), năm lần nhận có điểm 0,86–0,92, hơn lệnh nhì 0,04–0,20;
+bật, tắt đèn và quạt phần lớn được 0,97–1,00. Sự kiện `REJECT` của luật điểm không mang tên lệnh, nên không biết lệnh
+nào bị loại; quãng chủ repo hỏi về "mở cửa" (18:46:55–18:47:20) có năm `WAKE`, mỗi lần theo sau là nhận "mở cửa",
+`LOW_SCORE`, nhận "mở cửa", `LOW_SYLLABLE`, `LOW_SYLLABLE`. Cùng hướng §12.34: trần âm tiết loại nhiều lệnh chủ repo
+nói trực tiếp; và "mở cửa" là lệnh mọi cửa sổ thừa rơi vào (§12.9), nên lời "mở cửa" thật khó hơn hẳn lệnh nhì.
