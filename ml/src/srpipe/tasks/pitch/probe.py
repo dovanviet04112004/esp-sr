@@ -188,8 +188,9 @@ def chain_pcm(cfg: dict, paths: dict, hops: int) -> np.ndarray:
 def probe_chain(cfg: dict, run: Path, row: str, out: Path, pcm: np.ndarray) -> tuple[Path, Path]:
     """Write out/pitch_models.bin with the row exported to stream deploy.step_frames a call and the front end's
     tables, and out/pitch_window.bin with pcm and what the chain gives the chip will run (KEHOACH 3.11 step 3.4):
-    swift_front hop by hop, the frames on the input's int8 grid, the network simulated over all of them, then
-    decode_int8, on every frame whose decoded value the chip gives once the last call is in."""
+    swift_front hop by hop, the network simulated over all the frames, ESP-PPQ putting them on the input's int8 grid
+    half up as the chip does, then decode_int8, on every frame whose decoded value the chip gives once the last call
+    is in."""
     step = cfg["deploy"]["step_frames"]
     windows, bands = quant.front_tables(run / quant.MODEL_FILE)
     front = swift_front.SwiftFront(windows, {n: swift_front.sparse(bands[n]) for n in swift_front.SIZES})
@@ -198,10 +199,9 @@ def probe_chain(cfg: dict, run: Path, row: str, out: Path, pcm: np.ndarray) -> t
     taken = len(frames) // step * step
     spectra = np.stack(frames[:taken], axis=-1)[None]
     graph = export_espdl.load_native(run / quant.INT8_DIR / row / quant.GRAPH_FILE)
-    (port_in,), ports_out = ptq_espdl.ports_of(graph)
+    _, ports_out = ptq_espdl.ports_of(graph)
     quant.framed(graph, taken)
-    x = ptq_espdl.to_int8(spectra, port_in.exponent).astype(np.float32) * np.float32(2.0**port_in.exponent)
-    logits, sure = ptq_espdl.Simulator(graph, cfg["esp_ppq_patches"]).run(x)
+    logits, sure = ptq_espdl.Simulator(graph, cfg["esp_ppq_patches"]).run(spectra)
     pitch = contract_front()["pitch"]
     log_f0, confidence = decode.decode_int8(
         ptq_espdl.to_int8(logits[0], ports_out[0].exponent),
