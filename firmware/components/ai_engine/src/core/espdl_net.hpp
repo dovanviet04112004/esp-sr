@@ -66,6 +66,11 @@ class EspdlNet {
     {
         return model_ != nullptr;
     }
+    /** The graph itself, for a branch whose tensors are not all int8; nullptr if unbuilt. */
+    dl::Model *model() const noexcept
+    {
+        return model_;
+    }
 
   private:
     dl::Model *model_ = nullptr;

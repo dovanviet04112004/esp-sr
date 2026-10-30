@@ -226,6 +226,30 @@ typedef struct {
     uint16_t score_permille; // sigmoid of the class logit
 } ai_engine_box_t;
 
+/** Map label's vision image, check its header and .espdl sha256, build the network over flash (KEHOACH 3.18).
+ *  @ctx task | blocking, reads flash and runs the network once | nhin_task; weights stay in flash
+ *  @ret ESP_OK | ESP_ERR_NOT_FOUND no image | ESP_ERR_INVALID_VERSION | ESP_ERR_INVALID_CRC | ESP_ERR_NO_MEM
+ *       | ESP_ERR_INVALID_SIZE classes differ from the network's | ESP_ERR_INVALID_STATE loaded already
+ */
+esp_err_t ai_engine_detect_load(const char *label);
+
+/** Up to cap boxes of one RGB888 picture, best score first, in the picture's own pixels.
+ *  @ctx nhin_task | blocking, seconds | caller owns rgb and boxes
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE nothing loaded | ESP_ERR_INVALID_ARG | esp-dl's error
+ */
+esp_err_t ai_engine_detect_run(const uint8_t *rgb, uint16_t width, uint16_t height, ai_engine_box_t *boxes,
+                               size_t cap, size_t *n);
+
+/** The name of class cls from the vision image's header; NULL past its classes or with nothing loaded.
+ *  @ctx any | non-blocking | valid until ai_engine_detect_unload
+ */
+const char *ai_engine_detect_name(uint16_t cls);
+
+/** Free the network and the mapping, ahead of the vision slot being written (KEHOACH 3.18).
+ *  @ctx nhin_task | non-blocking
+ */
+void ai_engine_detect_unload(void);
+
 #ifdef __cplusplus
 }
 #endif
