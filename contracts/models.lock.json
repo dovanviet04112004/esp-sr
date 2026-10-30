@@ -264,13 +264,13 @@
       "smooth_hops": 5
     },
     "detect": {
-      "run": "20261030_8b3b0e4-dirty_001351",
+      "run": "20261030_4ae2501-dirty_1e05ac",
       "files": [
         {
           "file": "detect.espdl",
           "entry": "detect",
           "kind": "espdl",
-          "sha256": "6fa37dd2da52c8c810902363fdddc6f0f9640de4c2e9ae41b12534f9c21e8ca7"
+          "sha256": "b351f6b1057bc097f356d7d3bfd7d3d1fca5df1b7420a8e0c220bdf43e77f845"
         }
       ],
       "learnt_from": {
