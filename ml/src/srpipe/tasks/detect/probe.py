@@ -107,20 +107,34 @@ def reexported(graph, taps: list[int], cfg: dict, row: dict, folder: Path) -> by
     return pack.image(espdl, f"{row['run'][:28]}+x", row["size"], row["names"], chip["score_permille"], chip["top_k"])
 
 
-def build(out: Path, taps: list[int], patches: list[str]) -> dict[str, Path]:
-    """Write detect_vision.bin, detect_broken.bin, detect_pictures.bin and detect_expect.bin under out; with taps, the
-    vision image and the expectations carry those blocks' outputs too; with patches, export patches beyond the run's,
-    which keep every integer, the vision image is exported under them as well."""
+def row_of(run: Path) -> dict:
+    """The fields of a lock row the probe reads, for a run not deployed: its config's S, letterbox fill and chip
+    fields, model.pt's class names."""
+    cfg = load_yaml(run / "config.resolved.yaml")
+    meta = json.loads((run / "model.onnx.json").read_text(encoding="utf-8"))
+    return {"run": run.name, "size": cfg["size"], "pad": cfg["pad"], "names": meta["names"], "chip": cfg["chip"]}
+
+
+def build(out: Path, taps: list[int], patches: list[str], unlocked: Path | None = None) -> dict[str, Path]:
+    """Write detect_vision.bin, detect_broken.bin, detect_pictures.bin and detect_expect.bin under out, for the lock's
+    detect row or for the run unlocked; with taps, the vision image and the expectations carry those blocks' outputs
+    too; with patches, export patches beyond the run's, which keep every integer, the image is exported under them."""
     from esp_ppq.executor import TorchExecutor
 
     from srpipe.compress.quant import esp_ppq_patches, export_espdl
 
-    row = json.loads(pack_models.LOCK.read_text(encoding="utf-8"))["models"][pack.BRANCH]
-    run = RUNS / row["run"]
-    (entry,) = row["files"]
-    if hashlib.sha256((run / "int8" / "model.espdl").read_bytes()).hexdigest() != entry["sha256"]:
-        raise ValueError(f"{run}: int8/model.espdl is not the .espdl the lock holds, so graph.native is not either")
-    vision = pack.locked()
+    if unlocked is None:
+        row = json.loads(pack_models.LOCK.read_text(encoding="utf-8"))["models"][pack.BRANCH]
+        run = RUNS / row["run"]
+        (entry,) = row["files"]
+        if hashlib.sha256((run / "int8" / "model.espdl").read_bytes()).hexdigest() != entry["sha256"]:
+            raise ValueError(f"{run}: int8/model.espdl is not the .espdl the lock holds, so graph.native is not either")
+        vision = pack.locked()
+    else:
+        run, row = unlocked, row_of(unlocked)
+        chip = row["chip"]
+        espdl = (run / "int8" / "model.espdl").read_bytes()
+        vision = pack.image(espdl, row["run"], row["size"], row["names"], chip["score_permille"], chip["top_k"])
     broken = bytearray(vision)
     broken[pack.HEADER_BYTES + (len(vision) - pack.HEADER_BYTES) // 2] ^= 0xFF
     cfg = load_yaml(run / "config.resolved.yaml")
@@ -169,8 +183,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=PROBE_DIR)
     parser.add_argument("--taps", type=int, nargs="*", default=[], help="blocks whose outputs the chip reports too")
     parser.add_argument("--patches", nargs="*", default=[], help="export patches beyond the run's for the image")
+    parser.add_argument("--run", type=Path, default=None, help="a run to probe in place of the lock's detect row")
     args = parser.parse_args(argv)
-    for key, path in build(args.out, args.taps, args.patches).items():
+    for key, path in build(args.out, args.taps, args.patches, args.run).items():
         print(f"{path}: {path.stat().st_size} bytes{f' for {SLOTS[key]}' if key in SLOTS else ''}")
     return 0
 
