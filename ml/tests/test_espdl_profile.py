@@ -64,6 +64,37 @@ def test_report_tags_each_slow_path_and_leaves_an_aligned_convolution_alone(tmp_
     assert ["8 output columns run in C (lay the product transposed)"] in found.values()
 
 
+class WideInt16(nn.Module):
+    """A projection whose weights fit the data cache at one byte each and outgrow it at two."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.proj = nn.Conv1d(256, 160, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.proj(x)
+
+
+def test_report_sizes_an_int16_convolutions_weights_at_two_bytes(tmp_path: Path) -> None:
+    torch.manual_seed(0)
+    rng = np.random.default_rng(1)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 256, FRAMES)).astype(np.float32)) for _ in range(2)]
+    rungs = ptq_espdl.ladder("speaker") | {
+        "equalization": None,
+        "bias_correction": False,
+        "calibration": "minmax",
+        "int16_ops": ["/proj/Conv"],
+    }
+    graph = ptq_espdl.quantize(WideInt16().eval(), calib, tmp_path, rungs)
+    espdl = export_espdl.export(graph, tmp_path / "wide16.espdl")
+    log = "\n".join(
+        f"I (1) dl::Model: | {name:40s} | {op:12s} | {100 + i}us |"
+        for i, (name, (op, *_)) in enumerate(espdl_profile.nodes(espdl).items())
+    )
+    found = tagged(espdl_profile.report(log, espdl, top=50))
+    assert found["/proj/Conv"] == ["80 KB of weights outgrow the data cache (cache_sized_convolutions)"]
+
+
 def test_profile_keeps_the_last_time_each_module_was_printed() -> None:
     log = "| /a/Conv | Conv | 5us |\n| /a/Conv | Conv | 7us |\n| /b/Add | Add | 3us |"
     assert espdl_profile.profile(log) == {"/a/Conv": ("Conv", 7), "/b/Add": ("Add", 3)}

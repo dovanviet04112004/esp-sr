@@ -17,6 +17,7 @@ from srpipe.compress.quant.esp_ppq_patches import CHANNEL_STEP, DATA_CACHE_BYTES
 
 CPU_MHZ = 240  # CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ of the firmware apps
 MATMUL_STEP = 16  # dl_base_matmul.cpp: vector path, 16 output columns
+WEIGHT_BYTES = {"S8": 1, "S16": 2}  # a Conv's weights take its quant_type's width
 LAYOUT_OPS = frozenset({"Transpose"})
 GRID_OPS = frozenset({"QuantizeLinear", "RequantizeLinear", "DequantizeLinear"})
 FLOAT_KERNEL_OPS = frozenset({"LayerNormalization", "Softmax"})
@@ -84,7 +85,7 @@ def conv_tags(module: Module, laid: dict[str, list[int]]) -> tuple[list[str], fl
         columns = kernel is not None and set(kernel[:-1]) <= {1} and strides[-1] == kernel[-1]
         fix = "aligned_pointwise" if taps == 1 or (columns and group == 1) else "no export patch"
         tags.append(f"unaligned {c_in} -> {c_out} channels ({fix})")
-    weight_bytes = math.prod(w)
+    weight_bytes = math.prod(w) * WEIGHT_BYTES.get(espdl_shapes.attribute(module.attrs, "quant_type", "S8"), 1)
     if group == 1 and weight_bytes > DATA_CACHE_BYTES and math.prod(y[:-1]) > 1:
         tags.append(f"{weight_bytes // 1024} KB of weights outgrow the data cache (cache_sized_convolutions)")
     return tags, module.us * CPU_MHZ / max(macs, 1)
