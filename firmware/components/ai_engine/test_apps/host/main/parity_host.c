@@ -38,6 +38,8 @@ int main(int argc, char **argv)
     cases +=
         parity_run_block(argv[1], "pitch_decode", parity_pitch_decode, read_case, buf, sizeof(buf), &errors);
     cases += parity_run_block(argv[1], "wake_score", parity_wake_score, read_case, buf, sizeof(buf), &errors);
+    cases += parity_run_block(argv[1], "detect_decode", parity_detect_decode, read_case, buf, sizeof(buf),
+                              &errors);
     test_report_line("done %u cases", cases);
     test_report_serve();
     printf("HOST %u failure(s)\n", errors);

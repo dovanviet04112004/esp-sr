@@ -217,6 +217,15 @@ esp_err_t ai_engine_pitch_run(const float *front, float *log_f0, float *confiden
  */
 void ai_engine_pitch_reset(void);
 
+typedef struct {
+    int16_t x1; // left edge, pixels of the picture run took
+    int16_t y1;
+    int16_t x2;
+    int16_t y2;
+    uint16_t cls;            // index for ai_engine_detect_name
+    uint16_t score_permille; // sigmoid of the class logit
+} ai_engine_box_t;
+
 #ifdef __cplusplus
 }
 #endif
