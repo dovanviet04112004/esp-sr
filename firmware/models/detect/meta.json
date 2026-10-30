@@ -1,12 +1,12 @@
 {
   "branch": "detect",
-  "run": "20261030_4ae2501-dirty_1e05ac",
+  "run": "20261030_38a8738-dirty_37f714",
   "files": [
     {
       "file": "detect.espdl",
       "entry": "detect",
       "kind": "espdl",
-      "sha256": "b351f6b1057bc097f356d7d3bfd7d3d1fca5df1b7420a8e0c220bdf43e77f845"
+      "sha256": "f058b6ab2b86e45a40054ef3201ce72b0cc655af00b0be2b170310acbee72004"
     }
   ],
   "learnt_from": {
@@ -119,10 +119,10 @@
       "map50": 0.5151
     },
     "int8": {
-      "map50_95": 0.3506,
-      "map50": 0.5008
+      "map50_95": 0.3503,
+      "map50": 0.5021
     },
-    "drop": 0.0129
+    "drop": 0.0132
   },
   "trained": {
     "map50_95": 0.40116,
