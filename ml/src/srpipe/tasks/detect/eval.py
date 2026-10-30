@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 import yaml
+from scipy.special import expit
 
 from srpipe.core.config import data_paths, load_yaml
 from srpipe.tasks.detect import data
@@ -31,7 +32,7 @@ def decode(boxes: list[np.ndarray], logits: list[np.ndarray], strides: list[int]
         gy, gx = np.meshgrid(np.arange(h, dtype=np.float32) + 0.5, np.arange(w, dtype=np.float32) + 0.5, indexing="ij")
         corners = np.stack([gx - box[0], gy - box[1], gx + box[2], gy + box[3]]) * np.float32(stride)
         out_boxes.append(corners.reshape(4, -1).T)
-        out_scores.append((1.0 / (1.0 + np.exp(-logit.astype(np.float32)))).reshape(logit.shape[0], -1).T)
+        out_scores.append(expit(logit.astype(np.float32)).reshape(logit.shape[0], -1).T)
     return np.concatenate(out_boxes), np.concatenate(out_scores)
 
 
