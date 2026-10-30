@@ -1,7 +1,7 @@
 """A server's YOLO26 model.pt exported to the ONNX the detect chain imports (KEHOACH 3.18), then held to model.pt.
 
 Head and Attention follow scripts/export.py of Espressif's YOLO26 tutorial (esp-dl, MIT): both branches' six raw maps,
-no box decoding, static shapes. Writes <out> and <out>.json: names, strides, size, versions and the check.
+no box decoding, static shapes. <out>.json: names, strides, size, versions, the check, the mAP model.pt trained to.
 Run: uv run --project ml/detect_ref/ultralytics python ml/detect_ref/ultralytics/run.py <model.pt> <out.onnx>
      --size <S> --check <image dir> [--count 8] [--rtol 1e-3]"""
 
@@ -45,9 +45,23 @@ def static_attention(self: Attention, x: torch.Tensor) -> torch.Tensor:
     return self.proj((v @ attn.transpose(-2, -1)).view(-1, c, h, w) + self.pe(v.reshape(-1, c, h, w)))
 
 
+def trained(ckpt: dict) -> dict | None:
+    """The val mAP Ultralytics measured while the server trained, and the image size it trained at, when model.pt
+    keeps them."""
+    scores = ckpt.get("train_metrics") or {}
+    if "metrics/mAP50-95(B)" not in scores:
+        return None
+    return {
+        "map50_95": float(scores["metrics/mAP50-95(B)"]),
+        "map50": float(scores["metrics/mAP50(B)"]),
+        "imgsz": (ckpt.get("train_args") or {}).get("imgsz"),
+    }
+
+
 def patched(model_pt: Path) -> tuple[torch.nn.Module, dict]:
     """The checkpoint's network in eval mode, batch norms fused, both branches kept, with its names and strides."""
     yolo = YOLO(str(model_pt))
+    ckpt = yolo.ckpt if isinstance(yolo.ckpt, dict) else {}
     net = yolo.model.float().eval()
     head = net.model[-1]
     # Detect.fuse drops the one-to-many branch; the chain prunes it after quantisation (KEHOACH 3.18).
@@ -62,7 +76,8 @@ def patched(model_pt: Path) -> tuple[torch.nn.Module, dict]:
         "nc": int(head.nc),
         "stride": [int(s) for s in head.stride.tolist()],
         "reg_max": int(head.reg_max),
-        "trained_with": yolo.ckpt.get("version") if isinstance(yolo.ckpt, dict) else None,
+        "trained_with": ckpt.get("version"),
+        "trained": trained(ckpt),
     }
     return net, meta
 
