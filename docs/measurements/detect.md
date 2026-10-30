@@ -181,3 +181,52 @@ float64 chậm. Run cũ có int8 0,3504 trên `val`.
 `make parity-board` có thêm bộ vàng `detect_decode`. 4 ca khớp tuyệt đối trên chip; ca đối chứng âm lệch 3 nên đỏ, đúng
 như phải thế. Bộ ấy làm dòng `plan` của bản dựng mặc định dài quá 160 B, nên app dừng trước ca đầu tiên; app giờ in
 mỗi khối một dòng `plan`. Hai bản dựng qua: 128 và 61 ca, 4 phút 28.
+
+## 4. Thời gian từng toán tử trên board B (E15-T9, 30/10)
+
+`profile_module` của esp-dl chạy lại từng module trên ảnh cuối của bản dò, một nhân: run `20261030_7bf6e8a-dirty_7d38c2`,
+S = 512, trọng số đọc thẳng từ flash. `make ai-profile` xếp 298 module, tổng 3 097,9 ms; lượt chạy thường mất
+3 140 ms vì gồm cả letterbox và `decode.c`.
+
+| Loại op | Module | ms |
+|---|---|---|
+| Conv | 102 | 2 211,6 |
+| Swish int8 | 66 | 249,7 |
+| Concat | 19 | 160,2 |
+| LUT (Swish int16) | 21 | 120,4 |
+| Slice | 16 | 79,9 |
+| RequantizeLinear | 20 | 67,7 |
+| MatMul | 4 | 51,1 |
+| Add | 20 | 35,2 |
+| Softmax | 2 | 33,1 |
+| QuantizeLinear | 2 | 28,6 |
+| Transpose | 10 | 23,6 |
+| Resize | 2 | 18,8 |
+| Mul, Split, MaxPool, Reshape | 14 | 18,0 |
+
+Hai đường chậm của esp-dl chiếm một phần ba thời gian.
+
+**Trọng số lớn hơn cache dữ liệu 64 KB:** 8 tích chập, 767 ms (25%).
+
+| Tích chập | Kiểu | Trọng số | ms | Chu kỳ một nhân-cộng |
+|---|---|---|---|---|
+| `/model.23/one2one_cv2.2/one2one_cv2.2.0` | 3 × 3, int16, 256 → 16, P5 | 72 KB | 291,9 | 7,42 |
+| `/model.5/conv` | 3 × 3 bước 2, int8 | 144 KB | 164,2 | 0,26 |
+| `/model.7/conv` | 3 × 3 bước 2, int8 | 288 KB | 79,4 | 0,25 |
+| `/model.22/cv2` | 1 × 1, int16 | 192 KB | 75,4 | 0,72 |
+| `/model.9/cv2` | 1 × 1, int8 | 128 KB | 46,0 | 0,33 |
+| `/model.20/conv` | 3 × 3 bước 2, int8 | 144 KB | 40,1 | 0,25 |
+| `/model.22/cv1` | 1 × 1, int8 | 96 KB | 34,9 | 0,33 |
+| `/model.8/cv2` | 1 × 1, int8 | 96 KB | 34,6 | 0,33 |
+
+- Nặng nhất là tích chập đầu tiên của nhánh khung ở P5: một module chiếm 9,4% cả mạng. Tích chập cùng chỗ ở P3 và P4
+  có trọng số 18 và 36 KB, vừa cache, chạy 0,25 và 0,38 chu kỳ. Ở P5 nó chậm hơn 20–30 lần: trọng số đọc lại từ flash
+  ở mỗi điểm ảnh ra.
+- Ba tích chập 3 × 3 int8 lớn chỉ chậm hơn `model.3` (0,19 chu kỳ, vừa cache) chừng một phần ba.
+- `cache_sized_convolutions` hiện chỉ cắt tích chập 1 × 1 int8 theo kênh ra, nên trong 8 tích chập trên chỉ áp được
+  cho 3.
+
+**Số kênh không chia hết cho 16:** 3 tích chập, 258 ms (8%).
+- `/model.2/m.0/cv1`, 16 → 8 kênh: 116,5 ms, 1,48 chu kỳ.
+- `/model.0/conv`, ảnh RGB 3 → 16 kênh: 108,9 ms, 0,92 chu kỳ.
+- `/model.2/m.0/cv2`, 8 → 16 kênh: 32,4 ms.
