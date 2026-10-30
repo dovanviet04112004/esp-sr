@@ -2375,7 +2375,8 @@ retained kích tải lại. Lúc dựng có thêm đường USB, `make vision-fl
 - `ai_engine_detect_run` nhận một ảnh RGB888 cỡ bất kỳ, letterbox bằng `ImagePreprocessor` của esp-dl (viền 114, như
   `YOLO26`), chạy mạng, rồi `decode.c` giải theo đúng phép của `YOLO26::postprocess` (MIT): lọc trước bằng ngưỡng
   nguyên rồi mới sigmoid, giải khung quanh tâm ô, giữ K khung điểm cao. Khác component ở ba chỗ:
-  - không cấp phát mỗi lượt; component dựng một `std::vector` cho từng khung, trái §4.1 và làm vụn RAM nội;
+  - không cấp phát mỗi lượt; component dựng một `std::vector` cho từng khung, trái luật không `new` sau khi boot
+    (CLAUDE.md §4.1) và làm vụn RAM nội;
   - xếp điểm cao trước; component chỉ chia nhóm bằng `nth_element`;
   - đổi khung từ ô S×S về điểm ảnh của ảnh gốc, như các bộ hậu xử lý detect của esp-dl: bỏ viền, nhân nghịch tỉ lệ,
     cắt về số nguyên, kẹp trong ảnh.
