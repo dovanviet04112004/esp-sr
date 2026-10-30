@@ -58,4 +58,6 @@ Chủ repo chọn các phương án in đậm.
 - Repo có thêm nhánh `detect` ở `ml/`, `ai_engine/src/detect/`, `host/` và các topic `down/vision`, `up/vision`,
   `down/image`, `up/detections`.
 - Camera là việc sau: chọn module, chân (KẾ HOẠCH §2.2), driver.
+- E15-T5 viết lại hậu xử lý của `YOLO26` thành `ai_engine/src/detect/decode.c` không cấp phát mỗi lượt; tiền xử lý
+  dùng thẳng `ImagePreprocessor` của esp-dl, nên repo không link `espressif/yolo26` (KẾ HOẠCH §3.18).
 - Model của server mang giấy phép của dữ liệu server học; `contracts/models.lock.json` và header ghi nguồn.

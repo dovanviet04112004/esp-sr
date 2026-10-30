@@ -91,7 +91,7 @@ dữ liệu huấn luyện.
 | `synth` | `ai_engine/src/synth/` | chốt ở E12-T1: mạng chưng cất kiểu sanoTTS (trường độ → âm học → iSTFT) | chuỗi đơn vị + trường độ | PCM 16 kHz | ≤ 1 MB | tuỳ phương án; phương án không mạng nằm ở `svc_speak` (§3.13) |
 | `speaker` máy chủ | `host/` (`srhost.speaker`), qua `ml/spk_ref/redimnet` | **ReDimNet M** của IDRnD, `M-vb2+vox2+cnc-ft_mix` (§3.17) | PCM 16 kHz của cửa sổ lệnh | embedding 192 chiều, cosine với mẫu giọng | 4,8 M tham số, float trên máy chủ | học sẵn, không học lại |
 | `speaker` chip | `ai_engine`, thư mục chốt khi cắm (§3.17) | **ReDimNet2 b0** của PalabraAI, `b0-vox2-lm` | PCM 16 kHz của cửa sổ lệnh | embedding 192 chiều, cosine với mẫu giọng | 1,1 M tham số, ~1,1 MB int8 🔬 | học sẵn; học lại trên dữ liệu nhiều ngôn ngữ cộng tiếng Việt nếu int8 kéo chất lượng xuống |
-| `detect` | `ai_engine/src/detect/`, khe `vision_0` (§3.18) | **YOLO26n** của Ultralytics, đầu one-to-one không NMS, chạy bằng esp-dl và `espressif/yolo26` | ảnh RGB letterbox S×S, S bội 32 trong 160–640 | K khung: lớp, điểm, toạ độ | 2,93 MiB int8 + int16 ở bản COCO | server học lớp riêng; bản thử học sẵn trên COCO |
+| `detect` | `ai_engine/src/detect/`, khe `vision_0` (§3.18) | **YOLO26n** của Ultralytics, đầu one-to-one không NMS, chạy bằng esp-dl | ảnh RGB letterbox S×S, S bội 32 trong 160–640 | K khung: lớp, điểm, toạ độ | 2,93 MiB int8 + int16 ở bản COCO | server học lớp riêng; bản thử học sẵn trên COCO |
 
 Runtime của mọi khối chạy trên chip là `esp-dl`, ghim bản chính xác (§4.5.1). `esp-dl` có sẵn GRU int8
 (`dl_module_gru.hpp`) cho `ns` và mô-đun `StreamingCache` (`dl_module_streaming_cache.hpp`) cho mạng
@@ -2280,14 +2280,15 @@ model ấy, mà làm từ bước nhập model trở xuống: nhập, lượng t
 YOLO26n học sẵn trên COCO.
 
 **Mạng.** YOLO26n của Ultralytics có 2,4 M tham số và 5,4 GFLOPs ở 640. Đầu one-to-one ra thẳng khung, nên không cần
-NMS, và không có DFL. Board chạy nó bằng esp-dl cùng component `espressif/yolo26` (MIT). Lớp `YOLO26` của component
-lo bốn việc:
+NMS, và không có DFL. Board chạy nó bằng esp-dl. Espressif phát hành component `espressif/yolo26` (MIT), lớp `YOLO26`
+của nó lo bốn việc:
 - giải JPEG thành RGB;
 - letterbox về S×S với viền xám 114, khớp từng điểm ảnh bản Python;
 - lượng tử điểm ảnh vào thẳng tensor đầu vào bằng bảng;
 - hậu xử lý: lấy K khung điểm cao nhất (K = 32, ngưỡng điểm 0,25 mặc định).
 
-Số lớp đọc từ hình tensor ra, tên lớp do người dùng đưa. Espressif đo trên S3 240 MHz, int8:
+Repo làm đúng các phép ấy nhưng không link component: tiền xử lý dùng `ImagePreprocessor` của esp-dl như `YOLO26`,
+hậu xử lý viết lại ở `ai_engine/src/detect/decode.c` (dưới). Số lớp đọc từ hình tensor ra, tên lớp do người dùng đưa. Espressif đo trên S3 240 MHz, int8:
 
 | S | Tiền xử lý | Model | Hậu xử lý | mAP50-95 COCO val2017 |
 |---|---|---|---|---|
@@ -2298,9 +2299,9 @@ Trên board B, trọng số đọc từ flash, tiếng nói nghỉ: 512 mất 3,
 (`measurements/detect.md` §1). Chủ repo chọn **S = 512** tạm thời (30/10), tới bước chọn S của phần tối ưu. Số khi
 tiếng nói cùng chạy đo ở E15-T7 🔬.
 
-**Nâng esp-dl.** `espressif/yolo26` đòi esp-dl ~3.3.14, nên repo nâng từ 3.3.11 trước mọi việc khác của nhánh
-(E15-T1). Bản 3.3.14 viết lại kernel Conv, Gemm, MatMul, Resize, LUT và Pooling: chia khối theo cache, kernel PIE cho
-S3. Mọi phép kiểm chip khớp Python của `wake`, `command`, `pitch`, `speaker` vẫn lệch 0, kể cả các op của repo và
+**Nâng esp-dl.** Ví dụ và component YOLO26 của Espressif dựng trên esp-dl ~3.3.14, nên repo nâng từ 3.3.11 trước mọi
+việc khác của nhánh (E15-T1). Bản 3.3.14 viết lại kernel Conv, Gemm, MatMul, Resize, LUT và Pooling: chia khối theo
+cache, kernel PIE cho S3. Mọi phép kiểm chip khớp Python của `wake`, `command`, `pitch`, `speaker` vẫn lệch 0, kể cả các op của repo và
 phần nạp trước dcache (ADR-0026). Mạng chạy bằng conv của esp-dl nhanh lên 3,5–4%, mạng chủ yếu op riêng của repo
 gần như không đổi (`measurements/latency.md` §35).
 
@@ -2370,17 +2371,19 @@ retained kích tải lại. Lúc dựng có thêm đường USB, `make vision-fl
 **Nhánh `detect` của `ai_engine`** (`src/detect/`, §4.5.5).
 - `ai_engine_detect_load(label)` ánh xạ ảnh thị giác của phân vùng ấy qua `sys_storage` (`vision_0` ở sản phẩm, khe dò
   `models_0` ở app thử), kiểm magic, `format_ver` và sha256 của `.espdl`, rồi dựng mạng với trọng số đọc thẳng từ
-  flash. Lớp `YOLO26` của `espressif/yolo26` nhận `top_k`, ngưỡng điểm và tên lớp của header; `classes` khác số kênh
-  lớp của mạng thì từ chối.
-- `ai_engine_detect_run` nhận một ảnh RGB888 cỡ bất kỳ, letterbox bằng bộ tiền xử lý của esp-dl, chạy mạng, lấy K khung
-  bằng hậu xử lý của component. Component để khung trong ô S×S và không xếp thứ tự; `ai_engine` đổi khung về điểm ảnh
-  của ảnh gốc, cùng phép của `Letterbox.to_source`, và xếp điểm cao trước.
+  flash. `top_k`, ngưỡng điểm và tên lớp lấy từ header; `classes` khác số kênh lớp của mạng thì từ chối.
+- `ai_engine_detect_run` nhận một ảnh RGB888 cỡ bất kỳ, letterbox bằng `ImagePreprocessor` của esp-dl (viền 114, như
+  `YOLO26`), chạy mạng, rồi `decode.c` giải theo đúng phép của `YOLO26::postprocess` (MIT): lọc trước bằng ngưỡng
+  nguyên rồi mới sigmoid, giải khung quanh tâm ô, giữ K khung điểm cao. Khác component ở ba chỗ:
+  - không cấp phát mỗi lượt; component dựng một `std::vector` cho từng khung, trái §4.1 và làm vụn RAM nội;
+  - xếp điểm cao trước; component chỉ chia nhóm bằng `nth_element`;
+  - đổi khung từ ô S×S về điểm ảnh của ảnh gốc, như các bộ hậu xử lý detect của esp-dl: bỏ viền, nhân nghịch tỉ lệ,
+    cắt về số nguyên, kẹp trong ảnh.
 - Giải JPEG là việc của người gọi (`nhin_task`, E15-T7), bằng bộ giải của esp-dl. Phép kiểm chip đưa thẳng RGB888, nên
   bản mô phỏng thấy đúng những điểm ảnh ấy.
 - Bước 5 của chuỗi, chip khớp mô phỏng, chạy ở app thử của `ai_engine` với profile `detect`. 8 ảnh COCO RGB888, CRC32
   của sáu tensor ra và các khung kỳ vọng do `tasks/detect/probe.py` dựng: ESP-PPQ mô phỏng đồ thị int8 trên letterbox
-  của chip, `postproc/decode.py` ★ chép đúng hậu xử lý của `YOLO26` (lọc trước bằng ngưỡng nguyên, sigmoid, toạ độ cắt
-  về số nguyên). Ảnh có sha256 sai thì `load` từ chối.
+  của chip, `postproc/decode.py` ★ chép đúng `decode.c`. Ảnh có sha256 sai thì `load` từ chối.
 
 **Chạy trên board.** `nhin_task` ở nhân 0, ưu tiên thấp nhất, dưới mọi task tiếng nói; mỗi lần một ảnh. Tiếng nói
 giành CPU khi cần, ảnh chờ. Không chạy ở nhân 1: hai đồ thị esp-dl song song trên hai nhân từng làm sai kết quả
@@ -2856,7 +2859,6 @@ chứng âm cố ý vi phạm:
 |---|---|---|
 | `espressif/dl_fft` | `dsp_spec` | `>=0.7.0,<=0.8.0`, ngoại lệ duy nhất của luật ghim một bản: `esp-dl` 3.3.14 đòi 0.8.0, còn esp-sr 2.5.5 của `espsr_compare` chỉ dựng được với 0.7.0, mà cả hai app cùng dựng `dsp_spec`; file lock của từng app vẫn khoá đúng một bản (sản phẩm 0.8.0). Bản 0.7.0 đo ở E6-T3 (ADR-0002); FFT chọn được bằng Kconfig, không mặc định (ADR-0020) |
 | `espressif/esp-dl` | `ai_engine` | `==3.3.14` (E15-T1, `measurements/latency.md` §35: mọi model tiếng nói vẫn khớp từng bit), cặp với ESP-PPQ `==1.3.11` ở `ml/pyproject.toml`; chạy dòng khớp mô phỏng từng bit ở E11-T10 |
-| `espressif/yolo26` | `ai_engine` | `==0.1.1` (MIT): tiền xử lý và hậu xử lý YOLO26 của Espressif, đòi `esp-dl` ~3.3.14 (§3.18) |
 | `espressif/mqtt`, `espressif/cjson` | `net_mqtt` | `^`; IDF v6 đã đưa cả hai ra khỏi lõi, `REQUIRES mqtt` trơ fail ở bước giải phụ thuộc |
 | `joltwallet/littlefs` | `sys_storage` | `^` |
 | `espressif/esp-sr` | **chỉ** `test_apps/espsr_compare/main` | `==2.5.5`, bản mới nhất trên registry ngày 30/09; không dựng được trên IDF v6.0.2 thì ghim bản dựng được và sửa dòng này |
