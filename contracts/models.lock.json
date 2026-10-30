@@ -264,13 +264,13 @@
       "smooth_hops": 5
     },
     "detect": {
-      "run": "20261030_7bf6e8a-dirty_7d38c2",
+      "run": "20261030_8b3b0e4-dirty_001351",
       "files": [
         {
           "file": "detect.espdl",
           "entry": "detect",
           "kind": "espdl",
-          "sha256": "bc95c3d084c1e6c71c8d4c6bc898cbdbbd50bbd2ad85d0cbda1720bf81c0d1b2"
+          "sha256": "6fa37dd2da52c8c810902363fdddc6f0f9640de4c2e9ae41b12534f9c21e8ca7"
         }
       ],
       "learnt_from": {
@@ -383,10 +383,10 @@
           "map50": 0.5151
         },
         "int8": {
-          "map50_95": 0.3511,
-          "map50": 0.5031
+          "map50_95": 0.3506,
+          "map50": 0.5008
         },
-        "drop": 0.0124
+        "drop": 0.0129
       },
       "trained": {
         "map50_95": 0.40116,
