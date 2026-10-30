@@ -629,11 +629,12 @@ log-mel (log tự nhiên của công suất dải) ở bước to nhất, đầu
 | `minmax` | 920‰ | 85,1% | 2,95 | 4,29 |
 | `mse` | 925‰ | 87,9% | 2,77 | 4,81 |
 
-Hàng `minmax` của `on3` ở các ngưỡng, cùng 41 câu của phiên `20261029_home_001` chấm như chip. Ở 900–930‰ `on2` qua
-3–6 câu, `on1` 19–20 câu:
+Hàng `minmax` của `on3` ở các ngưỡng, cùng 41 câu của phiên `20261029_home_001` chấm như chip. Ở 850–930‰ `on2` qua
+3–7 câu, `on1` 19–21 câu:
 
 | Ngưỡng | `val` bắt | `val` báo nhầm/giờ | `test` báo nhầm/giờ | Câu qua ngưỡng |
 |---|---|---|---|---|
+| 850‰ | 92,4% | 5,73 | 7,40 | 28 / 41 |
 | 900‰ | 88,6% | 3,58 | 5,33 | 24 / 41 |
 | 910‰ | 87,4% | 3,22 | 4,81 | 22 / 41 |
 | 920‰ | 85,1% | 2,95 | 4,29 | 22 / 41 |
@@ -656,3 +657,5 @@ Cùng các phép thử đổi từng thứ ở trên. Ô là số câu qua ngư�
 - `on3` thiên nhẹ về tiếng to ở đầu vào model (−6 dB: 17, +6 dB: 23). Giọng chủ repo ở 1 m đã nằm ở phía to.
 - Deploy hàng `minmax` của `on3`, ngưỡng gợi ý 920‰ như `on2`, nên NVS của board giữ 900‰ chủ repo đặt: phiên
   `20261029_home_001` qua 24 / 41 câu, `test` 5,33 báo nhầm/giờ.
+- 30/10 chủ repo hạ `kws/wake_th` xuống 850‰ (console; board đọc "after the wake at 850 permille, delta1 300,
+  delta2 10, delta3 65535"): phiên `20261029_home_001` qua 28 / 41 câu, `test` 7,40 báo nhầm/giờ.
