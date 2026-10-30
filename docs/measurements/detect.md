@@ -105,4 +105,46 @@ Loss lớn ở conv lớp của P4 và P5 có ở cả hai bên: logit lớp có
 - Softmax trong khối Attention ra float: log xuất không có thông tin lượng tử cho `Softmax_output`. speaker phải vá chỗ
   này (`softmax_as_espdl`) để chip khớp mô phỏng, nên đây là chỗ đầu tiên cần soi ở E15-T5.
 
-Chưa làm: lock và `meta.json` (chạy lại cả chuỗi bằng code đã chốt), int8 chấm bằng letterbox song tuyến.
+**Lock.** Chuỗi chạy lại bằng code đã chốt ở `f3fd898`: run `20261030_f3fd898-dirty_a82130`. Trên `val`, float 0,3635,
+int8 0,3504, tụt 0,0131; trên `test`, int8 0,3485. Lock và `meta.json` lấy từ run này.
+
+Chưa làm: int8 chấm bằng letterbox song tuyến.
+
+## 3. Chip so với mô phỏng ESP-PPQ (E15-T5, 30/10)
+
+`make ai-unit-detect` trên board B với run đang khoá, `20261030_f3fd898-dirty_a82130`. Thử 8 ảnh `val`: 2 ảnh giữ cỡ
+gốc, 6 ảnh thu về cạnh dài 256 px.
+- Nạp ảnh thị giác mất 3 461 ms, gồm kiểm sha256 của 2,86 MiB đọc từ flash. Mỗi ảnh 3 102–3 160 ms, gồm tiền xử lý và
+  hậu xử lý.
+- Khung `decode.c` ra trùng bản Python trên cả 8 ảnh. Ảnh có sha256 sai bị `load` từ chối.
+- 46 trên 48 tensor ra có CRC khác mô phỏng; chỉ `one2one_p4_box` của ảnh 1 và 5 khớp. Tám giá trị đầu mỗi tensor in
+  ra đều trùng, nên chỗ lệch nằm rải rác.
+
+**Dò bằng điểm đo.** `make ai-unit-detect TAPS="0 1 2 4 6 8 9 10 13 16 19 22"` lấy thêm đầu ra của 12 khối làm đầu ra
+của đồ thị:
+- khối 0–9 khớp trên cả 8 ảnh;
+- đầu (khối 23, int16) lệch ở mọi ảnh, kể cả ảnh 1, 2 và 5, nơi cả ba đầu vào của nó (khối 16, 19, 22) đều khớp;
+- khối 10–22 lệch lác đác. Ảnh 4 lệch từ khối 10, khối Attention, trở đi. Ảnh 0, 3, 6, 7 lệch ở một trong ba lối ra
+  int16 của cổ: khối 16, 19 hoặc 22.
+
+**Hai chỗ ESP-PPQ tính khác chip.**
+1. Tích chập int16. Nhân S3 của esp-dl nạp bias vào QACC, cộng từng tích 16 × 16 bit đúng tuyệt đối trên làn 40 bit,
+   rồi làm tròn nửa lên một lần (`tie728_s16_vector_round_result`). ESP-PPQ cộng bằng float32, chỉ giữ 24 bit, trong
+   khi các tích chập của đầu dịch 11–17 bit ra int16, nên tổng lên tới 2^32. Gần nửa bước của lưới ra, hai bên làm tròn lệch nhau một bậc. Bản vá
+   `conv_s16_as_espdl` cộng bằng float64, đúng tới 53 bit, rồi làm tròn một lần như chip.
+2. Softmax của Attention. Đây đúng là lỗi speaker đã vá bằng `softmax_as_espdl`: ở ảnh 4, một xác suất rơi sát nửa
+   bước.
+
+Swish int16 qua bảng tra bước 32 không lệch: ESP-PPQ 1.3.11 đã chép đúng `lut_s16_nearest_neighbor` của S3, làm tròn
+nửa lên.
+
+Run ấy mô phỏng lại trên PC, so với CRC chip đã báo (8 ảnh × 18 tensor: 6 đầu ra, 12 điểm đo):
+
+| Bản vá | Khớp chip |
+|---|---|
+| không | 89/144 |
+| `conv_s16_as_espdl` | 133/144; ảnh 4 còn lệch từ khối 10 |
+| `conv_s16_as_espdl` + `softmax_as_espdl` | **144/144** |
+
+Hai bản vá khai ở `esp_ppq_patches` của `detect.yaml`, áp cho `ptq`, `eval` và bản dò. Hiệu chuẩn và TQT chạy trên mô
+phỏng đã vá, nên số nguyên của lượng tử có thể đổi; chuỗi chạy lại thành run mới.
