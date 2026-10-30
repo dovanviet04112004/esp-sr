@@ -2,10 +2,12 @@
 to the source, COCO boxes become YOLO lines without crowds, a package missing its model or a label is refused, the
 one-to-one head decodes and keeps boxes as espressif/yolo26 and Ultralytics do, mAP is 1 for exact boxes and lower
 for shifted ones, the gate refuses labels that miss the model and an int8 that fell too far, deploy takes only a run
-that passed it, and calibration batches hold the chip's letterbox in uint8."""
+that passed it, the vision image lays its header as storage_format.h does and takes only the lock's .espdl, and
+calibration batches hold the chip's letterbox in uint8."""
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -157,6 +159,60 @@ def test_deploy_refuses_a_run_without_a_passing_int8_score_on_val(tmp_path: Path
     (run / "int8" / "map_val.yaml").write_text(yaml.safe_dump(scored(0.004, 0.003) | {"passes": False}), "utf-8")
     with pytest.raises(ValueError, match="passed the gate"):
         quant.deploy({}, run)
+
+
+def test_the_vision_header_lays_its_fields_where_storage_format_puts_them() -> None:
+    from srpipe.tasks.detect import pack
+
+    espdl = bytes(range(256)) * 3
+    out = pack.image(espdl, "run_1", 512, ["người", "xe đạp"], 250, 32)
+    assert len(out) == pack.HEADER_BYTES + len(espdl) and out[pack.HEADER_BYTES :] == espdl
+    magic, ver, tag, size, classes, score, top_k, at, length, sha = pack.HEAD.unpack_from(out)
+    assert (magic.to_bytes(4, "little"), ver, tag.rstrip(b"\0"), size, classes) == (b"SRVI", 1, b"run_1", 512, 2)
+    assert (score, top_k, at, length) == (250, 32, pack.HEADER_BYTES, len(espdl))
+    assert sha == hashlib.sha256(espdl).digest() and pack.HEAD.size == 0x80
+    second = out[0x80 + pack.CLASS_BYTES : 0x80 + 2 * pack.CLASS_BYTES]
+    assert second.rstrip(b"\0").decode("utf-8") == "xe đạp"
+
+
+def test_the_vision_image_takes_the_lock_row_and_refuses_a_changed_espdl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from srpipe.export import pack_models
+    from srpipe.tasks.detect import pack
+
+    monkeypatch.setattr(pack_models, "LOCK", tmp_path / "models.lock.json")
+    monkeypatch.setattr(pack_models, "MODELS", tmp_path / "models")
+    (tmp_path / "models" / "detect").mkdir(parents=True)
+    (tmp_path / "models" / "detect" / "detect.espdl").write_bytes(b"graph")
+    row = {
+        "run": "run_2",
+        "slot": "vision_0",
+        "size": 320,
+        "names": ["a", "b", "c"],
+        "chip": {"score_permille": 300, "top_k": 16},
+        "files": [
+            {"file": "detect.espdl", "entry": "detect", "kind": "espdl", "sha256": hashlib.sha256(b"graph").hexdigest()}
+        ],
+    }
+    pack_models.LOCK.write_text(json.dumps({"version": 1, "models": {"detect": row}}), encoding="utf-8")
+    assert pack.locked() == pack.image(b"graph", "run_2", 320, ["a", "b", "c"], 300, 16)
+    (tmp_path / "models" / "detect" / "detect.espdl").write_bytes(b"other")
+    with pytest.raises(ValueError, match="differs from the sha256"):
+        pack.locked()
+
+
+@pytest.mark.parametrize(
+    "names, size, score",
+    [(["x" * 32], 512, 250), ([f"c{k}" for k in range(121)], 512, 250), (["a"], 500, 250), (["a"], 512, 0)],
+)
+def test_the_vision_header_refuses_what_it_cannot_hold(names: list[str], size: int, score: int) -> None:
+    from srpipe.tasks.detect import pack
+
+    with pytest.raises(ValueError):
+        pack.image(b"graph", "run", size, names, score, 32)
 
 
 def test_calibration_batches_are_the_chips_letterbox_in_uint8(tmp_path: Path) -> None:
