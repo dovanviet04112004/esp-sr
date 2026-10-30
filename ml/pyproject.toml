@@ -29,6 +29,11 @@ train = [
 espdl = [
     "esp-ppq==1.3.11",
 ]
+# The detect chain of KEHOACH 3.18: images read and COCO-style mAP. Ultralytics stays in ml/detect_ref.
+detect = [
+    "pillow==13.0.0",
+    "pycocotools==2.0.11",
+]
 # SwiftF0 pitch for the pitch_source trial of KEHOACH 3.11: the simulation and Gate 3 of its runs only.
 swiftf0 = [
     "swift-f0==0.3.0",
