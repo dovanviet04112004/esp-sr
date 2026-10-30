@@ -5,7 +5,8 @@
 IDF_EXPORT ?= $(HOME)/esp/esp-idf/export.sh
 IDF_GOALS := ai-unit ai-unit-cores ai-unit-ctc ai-unit-pitch ai-unit-rnnt ai-unit-speaker ai-unit-wake bench-board bss calib-flash \
   capture-flash capture-radio-off-flash espsr-compare flash fw-bench fw-bench-flash fw-dev fw-prod listen-unit \
-  models-flash monitor nvs-restore nvs-save parity-board product session session-plan storage-flash vision-flash
+  models-flash monitor nvs-restore nvs-save parity-board product session session-plan storage-flash vision-flash \
+  ai-unit-detect
 ifneq ($(and $(filter $(IDF_GOALS),$(MAKECMDGOALS)),$(if $(IDF_LOADED)$(shell command -v idf.py),,no idf.py)),)
 .PHONY: $(MAKECMDGOALS)
 $(firstword $(MAKECMDGOALS)):
@@ -708,6 +709,20 @@ ai-unit-pitch: ## Run the pitch build of the ai_engine suite on board B: RUN=<ru
 	  { pytest pytest_unit.py $(ON_BOARD) --build-dir build_pitch -s; echo $$? > build_pitch/unit.status; } 2>&1 \
 	    | tee build_pitch/unit.log; \
 	  exit $$(cat build_pitch/unit.status 2>/dev/null || echo 1)
+
+# The pictures and expectations come from the lock's detect row, ESP-PPQ simulating it on the CPU; the good image goes
+# to models_0, the one with a flipped .espdl byte to voice, the pictures to models_1 (KEHOACH 3.18 step 5). TAPS adds
+# those blocks' outputs to the image and the check, to find the first one the chip computes otherwise.
+ai-unit-detect: ## Hold the detect branch to ESP-PPQ on eight COCO pictures on board B, and refuse a bad sha256 (E15-T5) [TAPS="<block> ..."]
+	$(ML_CPU) --extra train --extra espdl --extra detect python -m srpipe.tasks.detect.probe $(if $(TAPS),--taps $(TAPS))
+	@$(call fresh_sdkconfig,$(UNIT_APP)/build_detect/sdkconfig,$(call app_defaults,$(UNIT_APP)))
+	cd $(UNIT_APP) && rm -f build_detect/unit.status && idf.py -B build_detect -D SDKCONFIG=build_detect/sdkconfig -D UNIT_PROFILE=detect build && \
+	  $(WRITE_PART) models_0 --input main/probe/detect_vision.bin && \
+	  $(WRITE_PART) voice --input main/probe/detect_broken.bin && \
+	  $(WRITE_PART) models_1 --input main/probe/detect_pictures.bin && \
+	  { pytest pytest_unit.py $(ON_BOARD) --build-dir build_detect -s; echo $$? > build_detect/unit.status; } 2>&1 \
+	    | tee build_detect/unit.log; \
+	  exit $$(cat build_detect/unit.status 2>/dev/null || echo 1)
 
 ai-unit-cores: ## Run the product's four graphs on core 0, preempting each other as xac_task and nhan_task do, beside sach's frames on core 1, on board B: each one's bits alone (E11-T37)
 	$(ML) python -m srpipe.export.pack_models artifacts/models.bin --lock

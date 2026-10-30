@@ -1,5 +1,5 @@
 # The probes are exported by ml, never committed: make ai-probe, or make ai-unit-rnnt, ai-unit-speaker, ai-unit-ctc,
-# ai-unit-pitch and ai-unit-wake for those builds, writes them.
+# ai-unit-pitch, ai-unit-wake and ai-unit-detect for those builds, writes them.
 if(UNIT_PROFILE STREQUAL "wake")
     set(tests "test_stream.cpp" "test_stream_main.c")
     set(embedded "probe/models.bin" "probe/stream.bin" "probe/wake_models.bin" "probe/wake_branch.bin")
@@ -12,6 +12,10 @@ elseif(UNIT_PROFILE STREQUAL "pitch")
     set(tests "test_pitch_probe.cpp")
     set(embedded "probe/pitch_window.bin")
     set(flashed "probe/pitch_models.bin")
+elseif(UNIT_PROFILE STREQUAL "detect")
+    set(tests "test_detect_probe.cpp")
+    set(embedded "probe/detect_expect.bin")
+    set(flashed "probe/detect_vision.bin" "probe/detect_broken.bin" "probe/detect_pictures.bin")
 elseif(UNIT_PROFILE STREQUAL "cores")
     set(tests "test_cores.cpp")
     set(embedded "")
