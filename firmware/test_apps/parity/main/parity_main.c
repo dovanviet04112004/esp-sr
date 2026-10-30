@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <string.h>
 
 #include "esp_heap_caps.h"
 #include "parity.h"
@@ -10,7 +9,6 @@
 #define GOLDEN_DIR STORAGE_LFS_MOUNT "/golden"
 #define CASE_BYTES_MAX (512 * 1024)
 #define REPORT_LINES_MAX 1024
-#define PLAN_BYTES 160 // a 192-byte report line holds it with tag and crc
 
 static const struct {
     const char *block;
@@ -82,17 +80,10 @@ void app_main(void)
         test_report_line("error setup");
         test_report_serve();
     }
-    char plan[PLAN_BYTES] = "plan";
     for (size_t i = 0; i < sizeof(kBlocks) / sizeof(kBlocks[0]); i++) {
-        // The host judges only the blocks the plan names: a cut plan would leave the rest unjudged.
-        if (strlen(plan) + 1 + strlen(kBlocks[i].block) >= sizeof(plan)) {
-            test_report_line("error plan has no room for %s", kBlocks[i].block);
-            test_report_serve();
-        }
-        strncat(plan, " ", sizeof(plan) - strlen(plan) - 1);
-        strncat(plan, kBlocks[i].block, sizeof(plan) - strlen(plan) - 1);
+        // The host judges only the blocks the plan lines name, so the plan lines lead the report.
+        test_report_line("plan %s", kBlocks[i].block);
     }
-    test_report_line("%s", plan);
     unsigned cases = 0;
     for (size_t i = 0; i < sizeof(kBlocks) / sizeof(kBlocks[0]); i++) {
         cases += parity_run_block(GOLDEN_DIR, kBlocks[i].block, kBlocks[i].run, read_case, buf,

@@ -30,7 +30,7 @@ def judge(lines: list[str], golden: Path = GOLDEN) -> list[str]:
     """Every broken expectation over the texts of a report: a case outside tolerance, a negative control inside it, a
     case never run, a tensor of tolerance.yaml a case never reported.
 
-    A run that reports "plan <blocks>" answers for those blocks only; without a plan every block counts.
+    A run that reports "plan <blocks>" lines answers for the blocks they name only; without a plan every block counts.
     """
     passed: dict[tuple[str, str], list[bool]] = {}
     reported: dict[tuple[str, str], set[str]] = {}
