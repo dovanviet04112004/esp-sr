@@ -230,3 +230,39 @@ Hai đường chậm của esp-dl chiếm một phần ba thời gian.
 - `/model.2/m.0/cv1`, 16 → 8 kênh: 116,5 ms, 1,48 chu kỳ.
 - `/model.0/conv`, ảnh RGB 3 → 16 kênh: 108,9 ms, 0,92 chu kỳ.
 - `/model.2/m.0/cv2`, 8 → 16 kênh: 32,4 ms.
+
+## 5. Tối ưu ở bước xuất (E15-T10, 30/10)
+
+Ba bản vá ở bước xuất, giữ nguyên mọi số nguyên của đồ thị. Mỗi bước, `make ai-unit-detect` khớp mô phỏng từng giá trị
+trên 8 ảnh. Hai bản vá sau đo bằng `PATCHES=` trên run có bản vá đầu, không lượng tử lại.
+
+| Bước | Mỗi ảnh, trung bình / đỉnh | Các module, một nhân | PSRAM của đồ thị |
+|---|---|---|---|
+| run `20261030_7bf6e8a-dirty_7d38c2`, chưa vá | 3 140 / 3 166 ms | 3 097,9 ms, 298 module | 2 707 852 B |
+| `cache_sized_convolutions` cho int16 mọi kernel: run `20261030_8b3b0e4-dirty_001351` | 2 845 / 2 869 ms | 2 757,8 ms, 324 module | 2 757 412 B |
+| thêm `lean_quantizers` và `aligned_channels` | 2 719 / 2 745 ms | 2 633,6 ms, 319 module | 2 852 444 B |
+| run chính thức với cả ba: `20261030_4ae2501-dirty_1e05ac`, int8 `val` 0,3506 | **2 722 / 2 750 ms** | 2 635,1 ms, 318 module | 2 852 444 B |
+
+**Cắt tích chập theo kênh ra.** 5 tích chập thành 21 phần, mỗi phần có trọng số vừa nửa cache, thêm 5 Concat:
+
+| Tích chập | Trước | Sau, cộng các phần | Chu kỳ một nhân-cộng |
+|---|---|---|---|
+| `/model.23/one2one_cv2.2/one2one_cv2.2.0`, int16 3 × 3, 2 phần 8 kênh | 291,9 ms | 23,1 ms | 7,42 → 0,59 |
+| `/model.22/cv2`, int16 1 × 1, 6 phần 40 kênh và 1 phần 16 | 75,4 ms | 61,2 ms | 0,72 → 0,57–0,68 |
+| `/model.9/cv2`, int8 1 × 1, 4 phần 64 kênh | 46,0 ms | 29,8 ms | 0,33 → 0,21–0,22 |
+| `/model.22/cv1`, int8 1 × 1, 4 phần | 34,9 ms | 20,2 ms | 0,33 → 0,19–0,20 |
+| `/model.8/cv2`, int8 1 × 1, 4 phần | 34,6 ms | 19,8 ms | 0,33 → 0,19 |
+
+- Gần hết phần lợi đến từ tích chập int16 ở P5.
+- Ba tích chập int8 3 × 3 có trọng số 144–288 KB (`model.5`, `7`, `20`) để nguyên. Chúng chạy 0,25 chu kỳ, gần mức 0,19 của
+  tích chập vừa cache; cắt ra thì phần nào cũng phải đọc lại cả ảnh vào.
+- Bảy phần của `/model.22/cv2` mỗi phần có một RequantizeLinear riêng, chuyển cùng Concat sang int16, mỗi cái 5,2 ms:
+  RequantizeLinear tăng từ 67,7 lên 98,5 ms. `lean_quantizers` gộp chúng làm một, về 67,7 ms.
+- Các phần thêm 49 560 B PSRAM.
+
+**Đệm khối 8 kênh của `model.2`.** `aligned_channels` đệm vùng 8 kênh giữa hai tích chập 3 × 3, qua Swish, lên 16 kênh
+bằng kênh 0, để cả hai đi đường vector của esp-dl:
+- `cv1` 16 → 8 kênh: 116,5 → 21,9 ms;
+- `cv2` 8 → 16 kênh: 32,5 → 21,9 ms;
+- Swish của vùng ấy: 4,1 → 8,2 ms;
+- thêm 95 032 B PSRAM.
