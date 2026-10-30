@@ -26,6 +26,7 @@ E1 nền repo ─┬─► E2 phần cứng, dàn micro ──┐
                                         E13 mạng, máy tính nhận (song song từ E5)
                                                       ▼
                                           E14 ôm về thành app ─► CỬA 5
+                                          E15 nhận diện vật thể (sau E11, E13)
 ```
 
 **Nguyên tắc**: nền và hợp đồng trước, module sau, app cuối — nhưng **đo ngay từ module đầu tiên**.
@@ -317,6 +318,32 @@ Mở khi pha B có đủ module cho một đường chạy trọn: `hpf` → `ba
 | E14-T7 | 🔬 Ghi flash trong lúc nghe | ghi NVS liên tục 10 phút, đếm khung mất; chiều sâu DMA 128 ms có đủ không | E14-T4 | — |
 | E14-T8 | 🔬 Tầm thu | tỉ lệ bắt `wake` và đúng `command` ở 0,5 / 1 / 2 / 3 m; giới hạn ghi thành một con số (TỔNG QUAN §9.1) | E14-T4 | — |
 | E14-T9 | `make report` dựng lại mọi số trong báo cáo bằng một lệnh | chạy trên máy sạch từ repo + dữ liệu đã tải ra đúng các bảng ở `docs/measurements/` | E14-T2 | — |
+
+---
+
+## E15 — Nhận diện vật thể (YOLO26n, model do server đẩy xuống)
+
+KẾ HOẠCH §3.18, ADR-0030. Repo làm từ bước nhập model trở xuống; server học lớp riêng. Bản thử là YOLO26n học sẵn trên
+COCO. Board B chưa có camera: ảnh do host gửi xuống. Bước 9–14 là tối ưu tốc độ, làm sau khi đã đúng, như với speaker
+b3.
+
+| ID | Task | Xong khi | Chặn bởi | V5 |
+|---|---|---|---|---|
+| E15-T1 | Nâng esp-dl 3.3.11 → 3.3.14 cho cả `ai_engine` (KẾ HOẠCH §3.18, §4.5.1); ghim `espressif/yolo26` 0.1.1 | 🔬 mọi phép kiểm chip khớp Python từng bit vẫn xanh: `ai-unit` của `wake`, `ctc`, `pitch`, speaker b0 và b3, `ai-unit-cores`, `listen-unit` 309/309; thời gian từng model trước và sau ghi ở `latency.md` | — | — |
+| E15-T2 | 🔬 Đo YOLO26n S3 dựng sẵn của Espressif (512, 640) trên board B, bố cục phân vùng của sản phẩm, không đụng NVS: ms tiền xử lý, model, hậu xử lý; PSRAM và RAM nội; trọng số đọc từ flash so với chép sang PSRAM; một lần khi tiếng nói nghỉ, một lần khi `listen-unit` chạy | bảng ở `docs/measurements/detect.md`; đích ms mỗi ảnh chốt cùng chủ repo | E15-T1 | — |
+| E15-T3 | `ml/detect` và `configs/models/detect.yaml`: nhập gói của server (ONNX, tên lớp, ảnh hiệu chuẩn, tập kiểm), kiểm toán tử, vá đồ thị, lượng tử theo quy trình YOLO26 của Espressif trên esp-ppq của repo, chấm mAP float và int8, xuất `.espdl`; bản thử COCO ở S = 512 và 320 | 🔬 mAP50-95 int8 trên COCO val2017 ở 512 trong 0,01 của 0,363 Espressif công bố; cửa mAP chặn được một gói cố ý hỏng (đối chứng âm); lock và `meta.json` | E15-T1 | — |
+| E15-T4 | Khuôn ảnh thị giác và phân vùng: `partitions.csv` (`models_0` 9 MiB, `vision_0` 3,25 MiB, `storage` 0,5 MiB), header thị giác ở `storage_format.h`, KẾ HOẠCH §6.1 và §6.3 trong cùng một commit; `make vision-flash`; `make product` ghi bảng mới | sản phẩm với b0 và với b3 đều nạp được; NVS giữ ngưỡng và mẫu giọng; bộ lệnh lấy lại từ tin retained | E15-T3 | — |
+| E15-T5 | Nhánh `ai_engine/src/detect/` và test app: nạp từ `vision_0`, trọng số đọc thẳng từ flash, lớp `YOLO26` của `espressif/yolo26`; đủ bốn bước TỔNG QUAN §5.3 | chip khớp mô phỏng ESP-PPQ từng giá trị trên 8 ảnh COCO; khung sau hậu xử lý trùng bản Python; ảnh có sha256 sai bị từ chối | E15-T4 | — |
+| E15-T6 | Hợp đồng ở `contracts/`: topic `down/image`, `up/detections`, `down/vision`, `up/vision` cùng schema từng payload; `make gen` | host và firmware chỉ dùng code sinh; mỗi schema có đối chứng âm | E15-T5 | — |
+| E15-T7 | `nhin_task` ở nhân 0, ưu tiên thấp nhất, hàng đợi ảnh (KẾ HOẠCH §5.2, §5.3, `FREERTOS.md`); `host/vision.py` gửi ảnh và in khung (`make vision-send`) | ảnh COCO từ host ra cùng khung như trên PC; 🔬 độ trễ `COMMAND` không tăng khi một ảnh đang chạy | E15-T6 | — |
+| E15-T8 | Đẩy model qua Wi-Fi: host phục vụ HTTP và đăng `down/vision` retained; board tải vào PSRAM, kiểm sha256, dừng chuỗi nghe, ghi `vision_0` với header sau cùng, nạp lại không khởi động lại, báo `up/vision` | đổi qua lại giữa bản COCO và một model khác lớp qua Wi-Fi; sha256 sai thì model cũ vẫn chạy; rút điện lúc ghi thì lần khởi động sau tự tải lại | E15-T7 | — |
+| E15-T9 | 🔬 Tối ưu 1: hồ sơ từng toán tử trên board ở S đang dùng (thời gian, trọng số ở flash hay PSRAM, trượt cache) | bảng ở `detect.md`, toán tử xếp theo ms | E15-T5 | — |
+| E15-T10 | 🔬 Tối ưu 2: trọng số đọc từ flash so với chép sang PSRAM; nạp trước dcache cho các tích chập nặng nhất (ADR-0026) | giữ cách nhanh hơn khi kết quả vẫn khớp từng giá trị; số trước và sau | E15-T9 | — |
+| E15-T11 | 🔬 Tối ưu 3: chọn S trong 320, 416, 512 theo đường mAP theo ms | chủ repo chọn S trên bảng đo | E15-T3, E15-T9 | — |
+| E15-T12 | 🔬 Tối ưu 4: độ chính xác hỗn hợp, đầu int16 hay int8 (bậc thang KẾ HOẠCH §3.14) | giữ khi mAP mất trong ngưỡng của gói và ms lợi đo được | E15-T11 | — |
+| E15-T13 | 🔬 Tối ưu 5: kernel riêng cho các toán tử nặng nhất khi esp-dl chưa đủ; bộ đệm nóng ở RAM nội nếu vừa ngân sách §6.5 | mỗi kernel khớp từng giá trị, có ADR và số trước, sau | E15-T10 | — |
+| E15-T14 | 🔬 Tối ưu 6: `nhin_task` sang nhân 1 khi trạng thái chung của `ai_engine` đã tách riêng từng task (ADR-0027) | `ai-unit-cores` có ca YOLO song song tiếng nói, 0 sai; ms mỗi ảnh và độ trễ lệnh đo lại | E15-T13 | — |
+| E15-T15 | Camera: chọn module, chân (KẾ HOẠCH §2.2), driver; nguồn ảnh thay host | làm khi chủ repo chọn module | — | — |
 
 ---
 

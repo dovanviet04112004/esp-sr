@@ -32,6 +32,7 @@ Ký hiệu: 🔬 là số ước hoặc số của tài liệu ngoài, **chưa �
 | | |
 |---|---|
 | Việc | chuỗi tiếng nói đầy đủ trên board hai micro, từ thu tới nói lại, bằng mã đọc được |
+| Việc thêm | nhận diện vật thể trên ảnh bằng model server học rồi đẩy xuống qua Wi-Fi (§3.18, ADR-0030) |
 | Ngôn ngữ đích | tiếng Việt cho từ đánh thức, lệnh và tiếng nói ra |
 | Nền | `esp-dl`, `dl_fft` — hai thư viện mã mở của Espressif: `esp-dl` cho mọi mạng học; `dl_fft` là FFT chọn được bằng Kconfig, không mặc định vì không khớp bản soi gương từng bit (ADR-0020). `esp-dsp` được đo và loại ba lần: FFT ở ADR-0002, biquad của `hpf` ở ADR-0004, nhân phức của `balance` ở ADR-0005. **Không** link bất kỳ `.a` nào của ESP-SR vào sản phẩm (TỔNG QUAN §1); chỗ duy nhất được link là app đo `test_apps/espsr_compare` (§3.16, §4.5.1) |
 | Chip | ESP32-S3, hai nhân Xtensa LX7 240 MHz, flash 16 MB, PSRAM 8 MB octal |
@@ -75,7 +76,8 @@ có cột ánh xạ về mã `V5.x.y`.
 
 ### 1.1 Bảng mô hình
 
-Năm khối dùng mô hình học; khối thứ năm, `speaker`, là khối nghiên cứu của §3.17. Mọi khối khác là công thức, không cần
+Sáu khối dùng mô hình học; khối thứ năm, `speaker`, là khối nghiên cứu của §3.17, khối thứ sáu, `detect`, nhận diện
+vật thể trên ảnh bằng model server học (§3.18). Mọi khối khác là công thức, không cần
 dữ liệu huấn luyện.
 
 | Nhánh | Chỗ chạy | Kiến trúc | Vào | Ra | Cỡ mục tiêu | Khởi đầu từ |
@@ -89,6 +91,7 @@ dữ liệu huấn luyện.
 | `synth` | `ai_engine/src/synth/` | chốt ở E12-T1: mạng chưng cất kiểu sanoTTS (trường độ → âm học → iSTFT) | chuỗi đơn vị + trường độ | PCM 16 kHz | ≤ 1 MB | tuỳ phương án; phương án không mạng nằm ở `svc_speak` (§3.13) |
 | `speaker` máy chủ | `host/` (`srhost.speaker`), qua `ml/spk_ref/redimnet` | **ReDimNet M** của IDRnD, `M-vb2+vox2+cnc-ft_mix` (§3.17) | PCM 16 kHz của cửa sổ lệnh | embedding 192 chiều, cosine với mẫu giọng | 4,8 M tham số, float trên máy chủ | học sẵn, không học lại |
 | `speaker` chip | `ai_engine`, thư mục chốt khi cắm (§3.17) | **ReDimNet2 b0** của PalabraAI, `b0-vox2-lm` | PCM 16 kHz của cửa sổ lệnh | embedding 192 chiều, cosine với mẫu giọng | 1,1 M tham số, ~1,1 MB int8 🔬 | học sẵn; học lại trên dữ liệu nhiều ngôn ngữ cộng tiếng Việt nếu int8 kéo chất lượng xuống |
+| `detect` | `ai_engine/src/detect/`, khe `vision_0` (§3.18) | **YOLO26n** của Ultralytics, đầu one-to-one không NMS, chạy bằng esp-dl và `espressif/yolo26` | ảnh RGB letterbox S×S, S bội 32 trong 160–640 | K khung: lớp, điểm, toạ độ | 2,93 MiB int8 + int16 ở bản COCO | server học lớp riêng; bản thử học sẵn trên COCO |
 
 Runtime của mọi khối chạy trên chip là `esp-dl`, ghim bản chính xác (§4.5.1). `esp-dl` có sẵn GRU int8
 (`dl_module_gru.hpp`) cho `ns` và mô-đun `StreamingCache` (`dl_module_streaming_cache.hpp`) cho mạng
@@ -120,6 +123,7 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | ViMD (Vietnamese Multi-Dialect) | `command` | ~100 giờ 🔬, 63 tỉnh, có mã người nói và giới | CC BY-NC-ND 4.0, **không phái sinh** | giọng mọi vùng; câu dài ~19 s, quá `train.max_s`: cắt lại theo mốc từ trước khi vào split |
 | **Mẩu trích theo lời** từ các kho tiếng Việt trên Hugging Face (`srpipe/core/extract.py`, `configs/common/extract.yaml`) | người thật nói đúng từ đánh thức và các lệnh của bộ lệnh, mỗi mẩu chỉ chứa cụm ấy; `wake` dương, `command` học | chỉ các câu có lời đọc ra một cụm; cắt xong câu gốc bị xoá, chỉ giữ mẩu | theo từng kho, ghi ở `DU_LIEU.md` | kho lớn (GigaSpeech2, YODAS2, PhoAudiobook, VietSpeech, viVoice…) quá cỡ ổ dữ liệu: dò lời qua mạng, chỉ kéo phần âm thanh chứa câu khớp; lệnh chưa học của E11-T13 không trích; chỉ vào tập học; kho tự ghi là tiếng tổng hợp (dolly-audio) vẫn trích nhưng mẩu mang nhãn `synth` ở `clips.tsv`, `wake` không lấy làm người thật |
 | Speech Commands v0.02 (Google) | `wake` tạm: dương "on", âm bản khó là các từ khác (ADR-0029) | 105 829 mẩu ≤ 1 s, 35 từ tiếng Anh, 2 618 người nói | CC BY 4.0 | người thật nhiều giọng; `val` theo `testing_list.txt` của bộ |
+| COCO val2017 | `detect` bản thử: ảnh hiệu chuẩn và tập kiểm mAP (§3.18), không học | 5 000 ảnh, 80 lớp | nhãn CC BY 4.0, ảnh theo giấy phép Flickr của từng ảnh | chỉ hiệu chuẩn và chấm bản thử |
 | Lệnh điều khiển nhà tự thu (repo `edge-ai-voice-control-esp32`) | `command` | ~1 300 lệnh 1 s: bật/tắt đèn, bật/tắt quạt, bật/tắt hết; nhiễu phòng | MIT | người thật nói đúng lệnh của bộ lệnh; không có mã người nói, chỉ vào tập học |
 | MUSAN | `ns`, tăng cường | ~100 giờ nhiễu, nhạc, lời nói | CC BY 4.0 phần lớn 🔬 | |
 | DEMAND | `ns` | 15 môi trường, 16 kênh | CC BY-SA 3.0 🔬 | |
@@ -260,7 +264,8 @@ người nói. Embedding của khảo sát nằm ở `cache/`; mẫu giọng c�
 
 Giấy phép **lan sang mô hình**: model huấn luyện trên VIVOS mang ràng buộc phi thương mại của VIVOS.
 `docs/DU_LIEU.md` ghi giấy phép của từng nguồn, và `contracts/models.lock.json` ghi model nào đã học
-từ nguồn nào.
+từ nguồn nào. Model `detect` mang giấy phép của dữ liệu server học; Ultralytics (AGPL-3.0) chỉ chạy ở server,
+không vào repo (§3.18).
 
 ---
 
@@ -278,7 +283,7 @@ Dự án chạy trên **board B** — board duy nhất đã có micro, nên mọ
 | MAC cơ sở | `34:85:18:8f:7a:70` → `deviceId` mặc định `sr-3485188f7a70` (§6.2) |
 | Micro | **2 × INMP441, đã lắp**, chung một dây dữ liệu I2S |
 | Loa, ampli | **chưa lắp**. Mốc demo (§8) chỉ gửi kết quả lên server qua MQTT nên chưa cần; cần từ `aec` (E10) và `synth` (E12) |
-| Camera | không |
+| Camera | không; `detect` nhận ảnh qua mạng tới khi gắn camera (§3.18) |
 
 **INMP441 dưới mốc SNR 1 dB.** Datasheet ghi SNR 61 dBA, độ nhạy −26 dBFS ở 94 dB SPL, ra 24 bit trong
 khe 32 bit; hướng dẫn phần cứng của Espressif đặt mốc 62 dB cho chuỗi này (TỔNG QUAN V5.0). Chủ dự án
@@ -2268,6 +2273,97 @@ phỏng ESP-PPQ (§3.14). Cả chuỗi kiểm trên board B:
 **Bước sau, nếu cần:** học lại b0 trên dữ liệu nhiều ngôn ngữ cộng tiếng Việt (VieSpeaker, CC BY-NC 4.0), hay trên đặc
 trưng của hợp đồng.
 
+### 3.18 Nhận diện vật thể (`detect`)
+
+Board nhận diện vật thể trên ảnh bằng một model **server học theo lớp riêng rồi đẩy xuống** (ADR-0030). Repo không học
+model ấy, mà làm từ bước nhập model trở xuống: nhập, lượng tử, đóng gói, đẩy qua Wi-Fi, chạy trên board. Bản thử là
+YOLO26n học sẵn trên COCO.
+
+**Mạng.** YOLO26n của Ultralytics có 2,4 M tham số và 5,4 GFLOPs ở 640. Đầu one-to-one ra thẳng khung, nên không cần
+NMS, và không có DFL. Board chạy nó bằng esp-dl cùng component `espressif/yolo26` (MIT). Lớp `YOLO26` của component
+lo bốn việc:
+- giải JPEG thành RGB;
+- letterbox về S×S với viền xám 114, khớp từng điểm ảnh bản Python;
+- lượng tử điểm ảnh vào thẳng tensor đầu vào bằng bảng;
+- hậu xử lý: lấy K khung điểm cao nhất (K = 32, ngưỡng điểm 0,25 mặc định).
+
+Số lớp đọc từ hình tensor ra, tên lớp do người dùng đưa. Espressif đo trên S3 240 MHz, int8:
+
+| S | Tiền xử lý | Model | Hậu xử lý | mAP50-95 COCO val2017 |
+|---|---|---|---|---|
+| 512 | 34,6 ms | 2 348 ms | 23,5 ms | 0,363 |
+| 640 | 51,2 ms | 3 793 ms | 36,6 ms | 0,384 |
+
+Số trên board B, khi tiếng nói cùng chạy, đo ở E15-T2 🔬.
+
+**Nâng esp-dl.** `espressif/yolo26` đòi esp-dl ~3.3.14, repo đang ghim 3.3.11. Bản 3.3.14 viết lại kernel Conv, Gemm,
+MatMul, Resize, LUT và Pooling: chia khối theo cache, kernel PIE cho S3. Việc nâng làm trước mọi việc khác của nhánh
+(E15-T1), rồi chạy lại toàn bộ phép kiểm chip khớp Python từng bit của `wake`, `command`, `pitch`, `speaker`, cùng
+các op của repo đăng ký và phần nạp trước dcache (ADR-0026). Thời gian mỗi model đo lại trước và sau.
+
+**Server giao gì.** Một gói gồm:
+- ONNX đã học: đầu one-to-one, đầu vào 1×3×S×S, S bội 32 trong 160–640;
+- tên lớp theo thứ tự đầu ra;
+- vài trăm ảnh hiệu chuẩn đại diện cho cảnh dùng;
+- một tập kiểm có nhãn khung theo khuôn YOLO.
+
+Repo không chạy Ultralytics (AGPL-3.0): xuất ONNX là việc của server. ONNX của bản thử COCO xuất một lần ngoài repo.
+
+**Nhập và lượng tử** (`ml`, nhánh `detect`), theo quy trình YOLO26 của Espressif trong
+`examples/tutorial/how_to_quantize_model/quantize_yolo26` của esp-dl (Apache-2.0):
+1. kiểm toán tử, vá đồ thị: tách đầu ra ghép thành sáu tensor, khung và lớp ở ba tầng;
+2. PTQ trên ảnh hiệu chuẩn, rồi TQT;
+3. int8 cho thân, int16 cho đầu khung, đầu lớp và lối ra của cổ;
+4. Swish int16 bằng bảng nội suy bậc thang; Add và Concat căn về chung một thang;
+5. xuất `.espdl`.
+
+Quy trình ấy ghim esp-ppq 1.2.4, repo ghim 1.3.11. Nhánh dùng bản của repo và vá chỗ khác, như các bản vá ESP-PPQ đã
+có. Model chỉ xuống board khi qua hai cửa:
+- mAP50-95 int8 trên tập kiểm của gói không tụt quá ngưỡng của gói so với float 🔬;
+- chip khớp mô phỏng ESP-PPQ từng giá trị trên vài ảnh, như mọi nhánh (§3.14).
+
+**Ảnh thị giác và khe.** Model thị giác nằm trong ảnh riêng, khe riêng `vision_0`, không chung ảnh model tiếng nói.
+Nhờ vậy server đổi model mà không đụng các nhánh tiếng nói.
+- Ảnh gồm header (magic, phiên bản khuôn, phiên bản model, S, số lớp, ngưỡng điểm, K, sha256, tên lớp) rồi tới
+  `.espdl`. Header ghi sau cùng.
+- Trọng số đọc thẳng từ flash qua ánh xạ, không chép sang PSRAM, như speaker b3 (ADR-0028). PSRAM chỉ chứa tensor
+  trung gian.
+- Bảng phân vùng sẽ thành: `ota_0` 3 MiB, `models_0` 9 MiB, `vision_0` 3,25 MiB, `storage` 0,5 MiB.
+  - Ảnh tiếng nói nặng 5,17 MiB với b0, 8,91 MiB với b3; YOLO26n nặng 2,93 MiB.
+  - Hai khe vision thì không vừa: `models_0` còn ~5,3 MiB, b0 dư 0,1 MiB, b3 không vào.
+- §6.1 và §6.3 đổi cùng một commit với `partitions.csv` và `storage_format.h` (E15-T4).
+
+**Đẩy xuống qua Wi-Fi.**
+1. Host phục vụ file ảnh thị giác qua HTTP và đăng tin retained `down/vision`: phiên bản, URL, sha256, cỡ.
+2. Board dừng nhận diện, tải ảnh vào PSRAM (~3 MB, chỗ tensor trung gian vừa trả lại) và kiểm sha256.
+3. Chỉ khi đúng, board xoá rồi ghi `vision_0`, header ghi sau cùng. Ghi flash là việc của `sys_storage`; lúc ghi,
+   chuỗi nghe dừng và `OTA_RUNNING` giương (§7.6).
+4. Board nạp lại mạng, không khởi động lại, và báo `up/vision`.
+
+Tải hỏng hay sha256 sai thì model cũ vẫn chạy. Mất điện lúc ghi thì header vắng, nhận diện tắt; lần khởi động sau, tin
+retained kích tải lại. Lúc dựng có thêm đường USB, `make vision-flash`.
+
+**Ảnh vào.** Board B không có camera (§2.1). Tới khi gắn camera, host gửi ảnh JPEG xuống `down/image`, board trả
+`up/detections`: mỗi khung gồm lớp, điểm, toạ độ, cùng số ms. Camera là việc sau: chọn module, chân (§2.2), driver.
+
+**Chạy trên board.** `nhin_task` ở nhân 0, ưu tiên thấp nhất, dưới mọi task tiếng nói; mỗi lần một ảnh. Tiếng nói
+giành CPU khi cần, ảnh chờ. Không chạy ở nhân 1: hai đồ thị esp-dl song song trên hai nhân từng làm sai kết quả
+(ADR-0027, `measurements/latency.md` §33). Tensor trung gian ở PSRAM, cỡ đo ở E15-T2 🔬.
+
+**Tối ưu tốc độ,** sau khi đã đúng, như đã làm với speaker b3. Mỗi bước đo trên board và chỉ giữ khi kết quả không
+lệch ngoài ngưỡng:
+1. hồ sơ từng toán tử trên board ở S đang dùng: thời gian, trọng số nằm ở flash hay PSRAM, lần trượt cache;
+2. trọng số đọc từ flash so với chép sang PSRAM, đo cả hai;
+3. nạp trước dcache cho trọng số của các tích chập nặng nhất (ADR-0026);
+4. chọn S trong 320, 416, 512: đường mAP theo ms, vì thời gian đi theo bình phương của S;
+5. độ chính xác hỗn hợp: đầu int16 hay int8, theo mAP mất và ms lợi (bậc thang §3.14);
+6. kernel riêng cho các toán tử tốn nhiều thời gian nhất khi esp-dl chưa đủ, mỗi kernel một ADR;
+7. bộ đệm nóng ở RAM nội khi vừa ngân sách §6.5;
+8. sang nhân 1 chỉ khi trạng thái chung của `ai_engine` đã tách riêng từng task và phép kiểm hai nhân hết sai
+   (ADR-0027).
+
+Đích thời gian mỗi ảnh chốt sau phép đo E15-T2 🔬, kèm điều kiện độ trễ lệnh tiếng nói không tăng.
+
 ---
 ## 4. Cấu trúc repo
 
@@ -2439,7 +2535,7 @@ ml/
 │   ├── scenes/speaker.yaml            # khảo sát §3.17: bộ trích ghim bản, phiên đăng ký và thử, người lạ, k, seed
 │   ├── scenes/device.yaml             # đường mô phỏng board của E4-T8: kho phòng, mức nói, nhiễu, micro, log-mel
 │   └── models/{ns.yaml, wake.yaml, command.yaml, command_kws.yaml, command_ctc.yaml, speaker.yaml, pitch.yaml,
-│                synth.yaml, quant.yaml}
+│                synth.yaml, quant.yaml, detect.yaml}
 │                                      #   ns.yaml: split, bộ trộn, hai ứng viên và lịch học chung của khe ns
 │                                      #   (§3.9); command.yaml: đường sản phẩm (backend), đặc trưng;
 │                                      #   command_kws.yaml, command_ctc.yaml: split, mạng, lịch học của từng
@@ -2558,6 +2654,9 @@ ml/
 │   │   │                              #   §3.14, deploy xuất một hàng chạy dòng cùng bảng front end vào
 │   │   │                              #   firmware/models/pitch/; probe.py bản dò board của một hàng trên một cửa
 │   │   │                              #   sổ cố định; decode.py giải cao độ và độ tin từ đầu ra của mạng
+│   │   ├── detect/{data.py, quant.py, eval.py, pack.py}   # §3.18: data.py nhập gói của server, kiểm và vá
+│   │   │                              #   ONNX; quant.py lượng tử theo quy trình YOLO26 của Espressif; eval.py
+│   │   │                              #   chấm mAP float và int8; pack.py đóng ảnh thị giác cho vision_0
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
 │   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py, pitch.py}
@@ -2782,7 +2881,7 @@ firmware/
 │   │                            #     espdl_loan.{cpp,hpp} (§6.5), chuỗi vùng nạp trước vào dcache
 │   │                            #     espdl_preload.{cpp,hpp} (§3.14), chia việc của op cho hai nhân
 │   │                            #     espdl_split.hpp cùng espdl_split_{one,two}.cpp (§5.1);
-│   │                            #   src/{ns,ns_rnnoise,ns_nsnet,wake,command_kws,command_ctc,command_rnnt,speaker,synth}/;
+│   │                            #   src/{ns,ns_rnnoise,ns_nsnet,wake,command_kws,command_ctc,command_rnnt,speaker,synth,detect}/;
 │   │                            #   Kconfig AI_ENGINE_NS_BACKEND chọn một thư mục ns*, AI_ENGINE_COMMAND_BACKEND
 │   │                            #   một thư mục command_*, AI_ENGINE_CORES một espdl_split_* vào danh sách nguồn
 │   ├── net_wifi/      [C]   L3
@@ -2798,7 +2897,7 @@ firmware/
 ├── third_party/README.md
 │   └── webrtc_vad/{LICENSE, UPSTREAM.md}   # nguồn của thuật toán và bảng `vad` (§3.10); không vendor mã
 ├── models/                           # ❌ gitignore trừ README.md, models.lock.json, */meta.json
-│   └── {ns,wake,command,speaker,synth}/{*.espdl, meta.json}
+│   └── {ns,wake,command,speaker,synth,detect}/{*.espdl, meta.json}
 ├── test_apps/                        # test TÍCH HỢP toàn hệ; unit test nằm trong component
 │   ├── components/test_report/       # dòng kết quả có số thứ tự và CRC32, gửi lại khi máy tính xin (§4.5.7)
 │   ├── test_report.py                # phía máy tính của test_report: kiểm CRC, xin lại dòng thiếu
@@ -3122,6 +3221,8 @@ host/
 │   ├── live.py                    # xem trực tiếp: hướng, cờ tiếng nói, mức, sự kiện kèm tên người nói
 │   ├── commands.py                # gửi bộ lệnh xuống down/commands của một board, in lỗi COMMANDS_* board báo về
 │   ├── speakers.py                # gửi danh sách người nói xuống down/speakers, đăng ký giọng, in up/speakers
+│   ├── vision.py                  # §3.18: phục vụ ảnh thị giác qua HTTP, báo down/vision, gửi ảnh thử
+│   │                              #   xuống down/image, in up/vision và up/detections
 │   ├── session.py                 # phiên thu có nhãn: danh sách câu nhắc, mã người nói, mã phiếu đồng ý
 │   ├── score.py                   # chấm một phiên đã thu theo nhãn, gọi ml/src/srpipe/metrics
 │   ├── calib.py                   # ước balance từ phiên ồn trắng (srpipe), kiểm chéo; ghi calib/bal và calib/pcm_shift
@@ -3895,6 +3996,9 @@ khe: bản cập nhật ghi đè `models_0`, `ai_engine_load` kiểm sha256 từ
 máy chạy thiếu model ấy tới khi cập nhật lại thành công; `sys/last_ota_result` ghi kết quả. OTA ghi flash nhiều giây,
 nên nó **dừng chuỗi nghe** và giương `OTA_RUNNING` (§5.5 luật 10).
 
+Model thị giác có khe riêng `vision_0` và đường riêng qua Wi-Fi (§3.18): tải vào PSRAM, kiểm sha256, rồi mới ghi
+khe, header sau cùng. Lúc ghi khe, chuỗi nghe cũng dừng và `OTA_RUNNING` giương như trên.
+
 ### 7.7 Máy tính nhận
 
 Ba vai — xem, chấm, thu — ở §4.6. `host/` đọc schema và khuôn khung từ code sinh, nên đổi hợp đồng ở
@@ -3904,7 +4008,7 @@ Ba vai — xem, chấm, thu — ở §4.6. `host/` đọc schema và khuôn khun
 
 ## 8. Thứ tự thực hiện
 
-Backlog đầy đủ ở **`docs/TASKS.md`**: 14 epic, mỗi task có điều kiện "xong khi" đo được, task chặn
+Backlog đầy đủ ở **`docs/TASKS.md`**: 15 epic, mỗi task có điều kiện "xong khi" đo được, task chặn
 nó, và mã `V5.x.y` tương ứng của TỔNG QUAN.
 
 ```
@@ -3918,6 +4022,7 @@ E1 nền repo ─┬─► E2 phần cứng, dàn micro ──┐
                                         E13 mạng, máy tính nhận (song song từ E5)
                                                       ▼
                                           E14 ôm về thành app ─► CỬA 5
+                                          E15 nhận diện vật thể (sau E11, E13)
 ```
 
 **Pha A của TỔNG QUAN là E1–E6**, pha B là E7–E12, pha C là E14. E13 chạy song song suốt từ lúc
