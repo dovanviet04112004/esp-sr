@@ -2304,18 +2304,23 @@ S3. Mọi phép kiểm chip khớp Python của `wake`, `command`, `pitch`, `spe
 phần nạp trước dcache (ADR-0026). Mạng chạy bằng conv của esp-dl nhanh lên 3,5–4%, mạng chủ yếu op riêng của repo
 gần như không đổi (`measurements/latency.md` §35).
 
-**Server giao gì.** Một gói gồm:
-- ONNX đã học: đầu one-to-one, đầu vào 1×3×S×S, S bội 32 trong 160–640;
-- tên lớp theo thứ tự đầu ra;
-- vài trăm ảnh hiệu chuẩn đại diện cho cảnh dùng;
-- một tập kiểm có nhãn khung theo khuôn YOLO.
+**Server giao gì.** Một gói là một thư mục:
+- `model.onnx`: mạng đã học, xuất theo bản vá đầu dò trong `export.py` của quy trình YOLO26 của Espressif. Đầu vào
+  `images` 1×3×S×S, S bội 32 trong 160–640, opset 13, hình tĩnh. Sáu đầu ra thô `one2many_p3…p5`, `one2one_p3…p5`,
+  mỗi đầu ghép 4 kênh khung với các kênh lớp. Khối Attention xuất theo bản vá ấy, không có phần giải khung;
+- `classes.json`: tên lớp theo thứ tự kênh lớp;
+- `calib/`: vài trăm ảnh hiệu chuẩn đại diện cho cảnh dùng;
+- `check/images/` và `check/labels/`: tập kiểm, mỗi ảnh một file nhãn khung theo khuôn YOLO (lớp, tâm, cỡ, đã chia
+  cho cỡ ảnh).
 
-Repo không chạy Ultralytics (AGPL-3.0): xuất ONNX là việc của server. ONNX của bản thử COCO xuất một lần ngoài repo.
+Repo không chạy Ultralytics (AGPL-3.0): xuất ONNX là việc của server. ONNX của bản thử COCO xuất một lần ngoài repo;
+gói thử lấy ảnh hiệu chuẩn từ train2017, tập kiểm từ val2017.
 
 **Nhập và lượng tử** (`ml`, nhánh `detect`), theo quy trình YOLO26 của Espressif trong
 `examples/tutorial/how_to_quantize_model/quantize_yolo26` của esp-dl (Apache-2.0):
-1. kiểm toán tử, vá đồ thị: tách đầu ra ghép thành sáu tensor, khung và lớp ở ba tầng;
-2. PTQ trên ảnh hiệu chuẩn, rồi TQT;
+1. kiểm toán tử, vá đồ thị: bỏ nhánh one-to-many, tách ba đầu one-to-one thành sáu tensor, khung và lớp ở ba tầng;
+2. PTQ trên ảnh hiệu chuẩn, rồi TQT. Ảnh hiệu chuẩn và ảnh kiểm đi qua đúng letterbox của chip (láng giềng gần
+   nhất, viền 114), không kéo dãn như notebook của Espressif;
 3. int8 cho thân, int16 cho đầu khung, đầu lớp và lối ra của cổ;
 4. Swish int16 bằng bảng nội suy bậc thang; Add và Concat căn về chung một thang;
 5. xuất `.espdl`.
