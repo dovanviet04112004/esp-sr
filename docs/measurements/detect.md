@@ -295,3 +295,29 @@ trị, nhưng mỗi ảnh 2 807 ms thay vì 2 722, nên không dùng.
 - Các phần đã cắt mà PointwiseS8 ghép lại thành một op cũng chậm hơn, ví dụ 7,6 → 29,1 ms.
 - Kernel 1 × 1 của esp-dl chạy các tích chập này ở 0,19–0,22 chu kỳ một nhân-cộng. Các kernel nhanh của PointwiseS8 viết
   cho K 24–192 của speaker.
+
+## 7. ConvLut: tích chập cùng bảng tra của hàm kích hoạt (E15-T13, ADR-0031, 30/10)
+
+`conv_lut` gộp mỗi tích chập với Swish int8 hay bảng tra int16 đọc riêng nó thành một op ConvLut. Op chạy kernel tích chập
+của esp-dl theo dải hàng, mỗi dải ra 16 KB, rồi tra bảng lên dải ấy khi còn trong cache. 82 cặp được gộp.
+
+| Bước | Mỗi ảnh, trung bình / đỉnh | Các module, một nhân | PSRAM của đồ thị |
+|---|---|---|---|
+| run `20261030_4ae2501-dirty_1e05ac`, ba bản vá ở bước xuất | 2 722 / 2 750 ms | 2 635,1 ms, 318 module | 2 852 444 B |
+| thêm `conv_lut` (`PATCHES=`) | 2 662 / 2 694 ms | 2 626,3 ms, 237 module | 2 825 888 B |
+| run chính thức `20261030_38a8738-dirty_37f714`, int8 `val` 0,3503 | **2 658 / 2 690 ms** | | 2 825 888 B |
+
+Cả ba khớp mô phỏng từng giá trị trên 8 ảnh.
+
+- **Lợi nhỏ hơn ước lượng.** 82 ConvLut nhanh hơn cặp tích chập và kích hoạt cũ chỉ 44,5 ms: 57 cặp nhanh hơn, 20 cặp chậm
+  hơn. `model.0`, chẳng hạn, đi từ 142,1 xuống 136,3 ms, dù lượt Swish riêng của nó từng tốn 32,9 ms.
+- **Vì sao.** Lượt bảng tra nghẽn ở chính phép tra, không ở PSRAM: S3 không có lệnh tra byte theo vectơ, mỗi byte tốn vài
+  chu kỳ dù dữ liệu đã ở trong cache. Chép bảng ra vùng căn 16 byte để `lut_s8` đi đường vectơ không đổi gì: 2 663 so với
+  2 662 ms.
+- **Một Add chậm đi.** `/model.2/m.0/Add` từ 11,7 lên 56,3 ms, dù nút, số mũ và đầu vào y hệt hai bên. Bỏ các tensor trung
+  gian làm bộ xếp bộ nhớ của esp-dl đặt lại các tensor trong PSRAM.
+
+**Các op chỉ chép dữ liệu còn lại**, theo bảng ConvLut, cộng 253 ms:
+- Slice và Concat trong các khối C3k2: ~177 ms; `model.2` (128 × 128) 65,5 ms, `model.16` 32,2, `model.4` 27,0;
+- Concat của cổ mạng (`model.12`, `15`, `18`, `21`): ~55 ms;
+- Concat của các tích chập đã cắt: 10,1 ms.
