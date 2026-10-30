@@ -219,7 +219,8 @@ def split_heads(graph, n_classes: int) -> None:
 
 
 def ptq(cfg: dict, run: Path, paths: dict) -> Path:
-    """<run>/int8: the quantised graph as ESP-PPQ's native file and as .espdl, a val image kept for model->test()."""
+    """<run>/int8: the quantised graph as ESP-PPQ's native file and as .espdl, ESP-PPQ run under the config's
+    esp_ppq_patches."""
     import esp_ppq.lib as ppq_lib
     import torch
     from esp_ppq.api import get_target_platform
@@ -236,54 +237,55 @@ def ptq(cfg: dict, run: Path, paths: dict) -> Path:
         RuntimeCalibrationPass,
     )
 
-    from srpipe.compress.quant import export_espdl
+    from srpipe.compress.quant import esp_ppq_patches, export_espdl
 
     spec = cfg["quant"]
     found = data.package(paths["interim"] / cfg["package"])
     meta = json.loads((run / "model.onnx.json").read_text(encoding="utf-8"))
     device = "cuda" if torch.cuda.is_available() else "cpu"
     torch.manual_seed(spec["seed"])
-    graph = load_onnx_graph(onnx_import_file=str(run / "model.onnx"))
-    quantizer = ppq_lib.Quantizer(platform=get_target_platform(TARGET, 8), graph=graph)
-    dispatch(graph, quantizer, cfg)
-    executor = TorchExecutor(graph=graph, device=device)
-    executor.tracing_operation_meta(inputs=torch.zeros(1, 3, cfg["size"], cfg["size"], device=device))
-    sample = calibration_sample(cfg, found)
+    with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
+        graph = load_onnx_graph(onnx_import_file=str(run / "model.onnx"))
+        quantizer = ppq_lib.Quantizer(platform=get_target_platform(TARGET, 8), graph=graph)
+        dispatch(graph, quantizer, cfg)
+        executor = TorchExecutor(graph=graph, device=device)
+        executor.tracing_operation_meta(inputs=torch.zeros(1, 3, cfg["size"], cfg["size"], device=device))
+        sample = calibration_sample(cfg, found)
 
-    def collate(x):
-        return x.to(device).float() / 255.0
+        def collate(x):
+            return x.to(device).float() / 255.0
 
-    ppq_lib.Pipeline(
-        [
-            QuantizeSimplifyPass(),
-            QuantizeFusionPass(activation_type=quantizer.activation_fusion_types),
-            ParameterQuantizePass(),
-            RuntimeCalibrationPass(method=spec["calibration"]),
-        ]
-    ).optimize(
-        calib_steps=spec["calib_steps"],
-        collate_fn=collate,
-        graph=graph,
-        dataloader=Batches(sample, cfg),
-        executor=executor,
-    )
-    ppq_lib.Pipeline(
-        [
-            one_block_tqt(spec["tqt"]),
-            PassiveParameterQuantizePass(clip_visiblity=QuantizationVisibility.EXPORT_WHEN_ACTIVE),
-            QuantAlignmentPass(elementwise_alignment=spec["alignment"]),
-            EspdlLUTFusionPass(target_ops=["Swish"], lut_step=spec["lut_step"]),
-        ]
-    ).optimize(
-        collate_fn=collate,
-        graph=graph,
-        dataloader=list(Batches(sample[: spec["tqt_images"]], cfg)),
-        executor=executor,
-    )
-    split_heads(graph, meta["nc"])
-    out = run / "int8"
-    export_espdl.save_native(graph, out / "graph.native")
-    return export_espdl.export(graph, out / "model.espdl", int16_lut_step=spec["lut_step"])
+        ppq_lib.Pipeline(
+            [
+                QuantizeSimplifyPass(),
+                QuantizeFusionPass(activation_type=quantizer.activation_fusion_types),
+                ParameterQuantizePass(),
+                RuntimeCalibrationPass(method=spec["calibration"]),
+            ]
+        ).optimize(
+            calib_steps=spec["calib_steps"],
+            collate_fn=collate,
+            graph=graph,
+            dataloader=Batches(sample, cfg),
+            executor=executor,
+        )
+        ppq_lib.Pipeline(
+            [
+                one_block_tqt(spec["tqt"]),
+                PassiveParameterQuantizePass(clip_visiblity=QuantizationVisibility.EXPORT_WHEN_ACTIVE),
+                QuantAlignmentPass(elementwise_alignment=spec["alignment"]),
+                EspdlLUTFusionPass(target_ops=["Swish"], lut_step=spec["lut_step"]),
+            ]
+        ).optimize(
+            collate_fn=collate,
+            graph=graph,
+            dataloader=list(Batches(sample[: spec["tqt_images"]], cfg)),
+            executor=executor,
+        )
+        split_heads(graph, meta["nc"])
+        out = run / "int8"
+        export_espdl.save_native(graph, out / "graph.native")
+        return export_espdl.export(graph, out / "model.espdl", int16_lut_step=spec["lut_step"])
 
 
 def deploy(cfg: dict, run: Path) -> tuple[Path, Path]:

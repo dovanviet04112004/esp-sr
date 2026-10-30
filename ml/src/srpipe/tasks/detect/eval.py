@@ -150,16 +150,19 @@ def verdict(report: dict, trained: dict | None, gate: dict) -> dict:
 
 
 def evaluate(run: Path, split: str, limit: int | None) -> dict:
+    from srpipe.compress.quant import esp_ppq_patches
+
     cfg = load_yaml(run / "config.resolved.yaml")
     found = data.package(data_paths()["interim"] / cfg["package"])
     images = found.images[split][:limit] if limit else found.images[split]
     meta = json.loads((run / "model.onnx.json").read_text(encoding="utf-8"))
     report = {"split": split, "images": len(images)}
-    for name, make in (("float", float_net), ("int8", int8_net)):
-        if name == "int8" and not (run / "int8" / "graph.native").exists():
-            continue
-        map50_95, map50 = score(images, found, cfg, meta["stride"], make(run))
-        report[name] = {"map50_95": round(map50_95, 4), "map50": round(map50, 4)}
+    with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
+        for name, make in (("float", float_net), ("int8", int8_net)):
+            if name == "int8" and not (run / "int8" / "graph.native").exists():
+                continue
+            map50_95, map50 = score(images, found, cfg, meta["stride"], make(run))
+            report[name] = {"map50_95": round(map50_95, 4), "map50": round(map50, 4)}
     return verdict(report, meta.get("trained"), cfg["eval"])
 
 
