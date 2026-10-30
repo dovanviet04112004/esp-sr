@@ -434,3 +434,11 @@ def test_aligned_channels_leaves_a_trunk_that_is_also_a_graph_output(tmp_path: P
         "/head/Conv": (4, 3, 3, 12),
     }
     assert all(np.array_equal(padded[name][0], plain[name][0]) for name in ("/stem/Conv", "/head/Conv"))
+
+
+def test_zero_padded_keeps_a_value_on_its_device() -> None:
+    """ptq exports with the weights on the GPU, so the padding must sit on their device; meta stands in for it."""
+    from srpipe.compress.quant.esp_ppq_patches.layout import zero_padded
+
+    padded = zero_padded(torch.ones(2, 3, device="meta"), 0, 4)
+    assert padded.device.type == "meta" and tuple(padded.shape) == (4, 3)

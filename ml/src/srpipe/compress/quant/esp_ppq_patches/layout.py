@@ -784,12 +784,12 @@ def channel_region(graph, start, info) -> tuple[set[str], set[str], set[str]] | 
 
 
 def zero_padded(value, axis: int, size: int):
-    """value with zeros appended along axis up to size."""
+    """value with zeros appended along axis up to size, on value's device."""
     import torch
 
     shape = list(value.shape)
     shape[axis] = size - shape[axis]
-    return torch.cat([value, torch.zeros(shape, dtype=value.dtype)], dim=axis)
+    return torch.cat([value, torch.zeros(shape, dtype=value.dtype, device=value.device)], dim=axis)
 
 
 def pad_parameter(op, index: int, axis: int, size: int) -> None:
