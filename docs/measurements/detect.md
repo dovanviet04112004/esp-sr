@@ -58,6 +58,17 @@ Máy: RTX 3050 Laptop 4 GB, WSL ~10 GB RAM. Mọi số mAP ở đây là mô ph�
 
 Cửa `eval.gate` 0,02 của cấu hình: qua.
 
+**mAP trên `test`**, 2 500 ảnh, cùng cách chấm, 11 phút 10: float 0,3645, int8 0,3492, tụt 0,0153, cùng cỡ với `val`.
+
+**Đối chứng âm của cửa** (KẾ HOẠCH §3.18 bước 4). `make detect-coco-broken` dựng gói giữ nguyên ảnh, `model.pt` và
+`data.yaml`, nhưng dời nhãn mọi khung sang lớp kế tiếp, mỗi tập 300 ảnh. Run `20261030_0929027-dirty_4e3632`:
+- import cho qua: tên lớp của `model.pt` vẫn khớp `data.yaml`, nên bước này không thể thấy lỗi;
+- float trên `val` 0,0058, bằng 0,0145 lần mAP 0,40116 mà Ultralytics ghi trong `model.pt` (học ở 640), dưới mức 0,5
+  của `eval.min_float_share`: `passes: false`;
+- `make detect-deploy` từ chối run.
+
+Gói thật giữ 0,906 lần mAP ấy (0,3635 trên 0,40116): khoảng hở do S = 512 và letterbox của chip.
+
 **So với số của Espressif.** Bảng S3 ghi 0,363 ở 512 (ADR-0030). Notebook lượng tử của họ in 0,365 cho bản P4 ở 512,
 mô phỏng int8. Hai bên chấm khác nhau:
 
@@ -87,12 +98,11 @@ Espressif lưu đủ 106 khối, cùng thứ tự với repo. Hai bên học tr�
 Loss lớn ở conv lớp của P4 và P5 có ở cả hai bên: logit lớp có biên độ lớn.
 
 **`.espdl`.**
-- `int8/model.espdl` nặng 4,474 MiB vì kèm cặp thử cho `model->test()`: ảnh vào int8 1×512×512×3 cùng sáu đầu ra.
-- Xuất lại không kèm cặp thử: 2,862 MiB (3 001 360 B); bản COCO của Espressif nặng 2,93 MiB. Chỉ bản này vừa khe
-  `vision_0` 3,25 MiB (KẾ HOẠCH §3.18). Bản khoá xuống sản phẩm vì thế xuất không kèm cặp thử. Cặp thử dùng cho test app
-  của E15-T5, vốn có bảng phân vùng riêng.
+- Lần chạy đầu xuất kèm cặp thử cho `model->test()`: ảnh vào int8 1×512×512×3 cùng sáu đầu ra, nặng 4,474 MiB.
+- Không kèm cặp thử: 2,862 MiB (3 001 360 B); bản COCO của Espressif nặng 2,93 MiB. Chỉ bản này vừa khe `vision_0`
+  3,25 MiB, nên `ptq` xuất không kèm cặp thử (KẾ HOẠCH §3.18 bước 3). E15-T5 đưa ảnh vào chip theo đường khác.
 - Ảnh vào lượng tử với exponent −6: 0..1 thành 0..64, mỗi bậc gom 4 mức điểm ảnh. Chưa đo ảnh hưởng 🔬.
 - Softmax trong khối Attention ra float: log xuất không có thông tin lượng tử cho `Softmax_output`. speaker phải vá chỗ
   này (`softmax_as_espdl`) để chip khớp mô phỏng, nên đây là chỗ đầu tiên cần soi ở E15-T5.
 
-Chưa làm: chấm `test`, đối chứng âm của cửa mAP, lock và `meta.json`, int8 chấm bằng letterbox song tuyến.
+Chưa làm: lock và `meta.json` (chạy lại cả chuỗi bằng code đã chốt), int8 chấm bằng letterbox song tuyến.
