@@ -313,12 +313,12 @@ def deploy(cfg: dict, run: Path) -> tuple[Path, Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("import", help="the package as a run: splits locked, model.pt exported to ONNX and checked")
+    start = sub.add_parser("import", help="the package as a run: splits locked, model.pt exported to ONNX and checked")
+    start.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     rung = sub.add_parser("ptq", help="Espressif's YOLO26 recipe into <run>/int8/")
     rung.add_argument("run", type=Path)
     lock = sub.add_parser("deploy", help="a run that passed the val gate into firmware/models/detect and the lock")
     lock.add_argument("run", type=Path)
-    parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     args = parser.parse_args(argv)
     paths = data_paths()
     if args.command == "import":
