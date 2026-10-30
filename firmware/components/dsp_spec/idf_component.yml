@@ -1,3 +1,3 @@
 dependencies:
   idf: ">=6.0"
-  espressif/dl_fft: "==0.7.0"
+  espressif/dl_fft: ">=0.7.0,<=0.8.0"   # esp-dl 3.3.14 needs 0.8.0, esp-sr 2.5.5 0.7.0 (KEHOACH 4.5.1)

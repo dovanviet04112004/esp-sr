@@ -471,7 +471,7 @@ nhận luỹ thừa 2. Đệm 320 lên 512 thì phần tổng hợp không còn 
 **Chi phí STFT, đo ở E6-T8** (`latency.md` §23, ADR-0020). Mỗi khung hai phân tích và một tổng hợp. Kconfig
 `DSP_SPEC_FFT_BACKEND` chọn FFT thực của `dsp_spec`: mặc định là bản cơ số 4 viết tay, khớp bản soi gương từng bit
 (§3.14); ở `-O2` trên board B, phân tích một bước mất 142 µs, tổng hợp 158 µs → **442 µs mỗi khung, ~2,8% một nhân**.
-Bản kia là `dl_fft` 0.7.0, đo cùng ngày 451 µs, giữ để so. FFT `int16` nhanh gấp tám nhưng SNR chỉ ~58 dB ở 512 điểm,
+Bản kia là `dl_fft` (bản 0.7.0 đo cùng ngày 451 µs; sản phẩm giờ kéo 0.8.0 theo `esp-dl`), giữ để so. FFT `int16` nhanh gấp tám nhưng SNR chỉ ~58 dB ở 512 điểm,
 không đủ cho AEC và NS, nên không dùng.
 
 ### 3.2 Chuỗi đã chốt
@@ -2296,10 +2296,11 @@ Số lớp đọc từ hình tensor ra, tên lớp do người dùng đưa. Espr
 
 Số trên board B, khi tiếng nói cùng chạy, đo ở E15-T2 🔬.
 
-**Nâng esp-dl.** `espressif/yolo26` đòi esp-dl ~3.3.14, repo đang ghim 3.3.11. Bản 3.3.14 viết lại kernel Conv, Gemm,
-MatMul, Resize, LUT và Pooling: chia khối theo cache, kernel PIE cho S3. Việc nâng làm trước mọi việc khác của nhánh
-(E15-T1), rồi chạy lại toàn bộ phép kiểm chip khớp Python từng bit của `wake`, `command`, `pitch`, `speaker`, cùng
-các op của repo đăng ký và phần nạp trước dcache (ADR-0026). Thời gian mỗi model đo lại trước và sau.
+**Nâng esp-dl.** `espressif/yolo26` đòi esp-dl ~3.3.14, nên repo nâng từ 3.3.11 trước mọi việc khác của nhánh
+(E15-T1). Bản 3.3.14 viết lại kernel Conv, Gemm, MatMul, Resize, LUT và Pooling: chia khối theo cache, kernel PIE cho
+S3. Mọi phép kiểm chip khớp Python của `wake`, `command`, `pitch`, `speaker` vẫn lệch 0, kể cả các op của repo và
+phần nạp trước dcache (ADR-0026). Mạng chạy bằng conv của esp-dl nhanh lên 3,5–4%, mạng chủ yếu op riêng của repo
+gần như không đổi (`measurements/latency.md` §35).
 
 **Server giao gì.** Một gói gồm:
 - ONNX đã học: đầu one-to-one, đầu vào 1×3×S×S, S bội 32 trong 160–640;
@@ -2813,8 +2814,8 @@ chứng âm cố ý vi phạm:
 
 | Phụ thuộc | Khai ở | Ghim |
 |---|---|---|
-| `espressif/dl_fft` | `dsp_spec` | `==0.7.0`, bản đo ở E6-T3 (ADR-0002); FFT chọn được bằng Kconfig, không mặc định (ADR-0020); ghim này cũng giữ bản `dl_fft` riêng của `esp-dl` |
-| `espressif/esp-dl` | `ai_engine` | `==3.3.11`, cặp với ESP-PPQ `==1.3.11` ở `ml/pyproject.toml`; chạy dòng khớp mô phỏng từng bit ở E11-T10 |
+| `espressif/dl_fft` | `dsp_spec` | `>=0.7.0,<=0.8.0`, ngoại lệ duy nhất của luật ghim một bản: `esp-dl` 3.3.14 đòi 0.8.0, còn esp-sr 2.5.5 của `espsr_compare` chỉ dựng được với 0.7.0, mà cả hai app cùng dựng `dsp_spec`; file lock của từng app vẫn khoá đúng một bản (sản phẩm 0.8.0). Bản 0.7.0 đo ở E6-T3 (ADR-0002); FFT chọn được bằng Kconfig, không mặc định (ADR-0020) |
+| `espressif/esp-dl` | `ai_engine` | `==3.3.14` (E15-T1, `measurements/latency.md` §35: mọi model tiếng nói vẫn khớp từng bit), cặp với ESP-PPQ `==1.3.11` ở `ml/pyproject.toml`; chạy dòng khớp mô phỏng từng bit ở E11-T10 |
 | `espressif/mqtt`, `espressif/cjson` | `net_mqtt` | `^`; IDF v6 đã đưa cả hai ra khỏi lõi, `REQUIRES mqtt` trơ fail ở bước giải phụ thuộc |
 | `joltwallet/littlefs` | `sys_storage` | `^` |
 | `espressif/esp-sr` | **chỉ** `test_apps/espsr_compare/main` | `==2.5.5`, bản mới nhất trên registry ngày 30/09; không dựng được trên IDF v6.0.2 thì ghim bản dựng được và sửa dòng này |

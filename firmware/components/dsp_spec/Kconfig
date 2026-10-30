@@ -13,7 +13,7 @@ menu "dsp_spec"
                 chip match Python exactly only with this FFT (KEHOACH 3.14).
 
         config DSP_SPEC_FFT_DL_FFT
-            bool "dl_fft 0.7.0"
+            bool "dl_fft 0.8.0"
             help
                 Adds src/fft_dl.c. dl_fft allocates its own tables in internal RAM at init (KEHOACH 4.5.3
                 rule 7); on the S3 it runs fused multiply-adds and newlib's cosf and sinf, so the features no
