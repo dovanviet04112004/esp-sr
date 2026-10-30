@@ -205,14 +205,20 @@ def test_the_vision_image_takes_the_lock_row_and_refuses_a_changed_espdl(
 
 
 @pytest.mark.parametrize(
-    "names, size, score",
-    [(["x" * 32], 512, 250), ([f"c{k}" for k in range(121)], 512, 250), (["a"], 500, 250), (["a"], 512, 0)],
+    "names, size, score, top_k",
+    [
+        (["x" * 32], 512, 250, 32),
+        ([f"c{k}" for k in range(121)], 512, 250, 32),
+        (["a"], 500, 250, 32),
+        (["a"], 512, 0, 32),
+        (["a"], 512, 250, 65),
+    ],
 )
-def test_the_vision_header_refuses_what_it_cannot_hold(names: list[str], size: int, score: int) -> None:
+def test_the_vision_header_refuses_what_it_cannot_hold(names: list[str], size: int, score: int, top_k: int) -> None:
     from srpipe.tasks.detect import pack
 
     with pytest.raises(ValueError):
-        pack.image(b"graph", "run", size, names, score, 32)
+        pack.image(b"graph", "run", size, names, score, top_k)
 
 
 def test_calibration_batches_are_the_chips_letterbox_in_uint8(tmp_path: Path) -> None:

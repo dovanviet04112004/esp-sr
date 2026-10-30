@@ -21,6 +21,7 @@ HEADER_BYTES = pack_models.storage_define("STORAGE_VISION_HEADER_BYTES")
 VERSION_BYTES = pack_models.storage_define("STORAGE_VISION_VERSION_BYTES")
 MAX_CLASSES = pack_models.storage_define("STORAGE_VISION_MAX_CLASSES")
 CLASS_BYTES = pack_models.storage_define("STORAGE_VISION_CLASS_BYTES")
+TOP_K_MAX = pack_models.storage_define("STORAGE_VISION_TOP_K_MAX")
 LABEL = pack_models.storage_string("STORAGE_VISION_LABEL")
 HEAD = struct.Struct(f"<II{VERSION_BYTES}sHHHHII{pack_models.SHA256_BYTES}s40x")
 
@@ -31,8 +32,8 @@ def image(espdl: bytes, version: str, size: int, names: list[str], score_permill
     tag = version.encode("utf-8")
     if len(tag) >= VERSION_BYTES or not 0 < len(names) <= MAX_CLASSES or any(len(n) >= CLASS_BYTES for n in encoded):
         raise ValueError(f"version under {VERSION_BYTES} bytes, 1..{MAX_CLASSES} names under {CLASS_BYTES} bytes")
-    if size % 32 or not 0 < score_permille <= 1000 or top_k < 1:
-        raise ValueError(f"S {size} a multiple of 32, score {score_permille} in 1..1000 permille, top_k {top_k} >= 1")
+    if size % 32 or not 0 < score_permille <= 1000 or not 0 < top_k <= TOP_K_MAX:
+        raise ValueError(f"S {size} by 32, score {score_permille} in 1..1000, top_k {top_k} in 1..{TOP_K_MAX}")
     head = HEAD.pack(
         MAGIC,
         FORMAT_VER,
