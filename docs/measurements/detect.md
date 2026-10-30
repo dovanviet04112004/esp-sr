@@ -284,3 +284,14 @@ từng giá trị trên 8 ảnh.
   0,02: 0,0129, 0,0089, 0,0121.
 - `model.pt` học ở 640. Mọi S ở đây chấm trên cùng 2 500 ảnh `val`, cùng letterbox của chip.
 - Chọn S là việc của chủ repo; sản phẩm giữ 512 tới khi chọn.
+
+**PointwiseS8 của speaker, thử 30/10.** `make ai-unit-detect PATCHES="pointwise_s8"` trên run chính thức: khớp từng giá
+trị, nhưng mỗi ảnh 2 807 ms thay vì 2 722, nên không dùng.
+- 40 tích chập 1 × 1 int8 thành PointwiseS8, tốn 568,2 ms. Phần esp-dl chúng thay, gồm cả Add và Concat ghép theo, tốn
+  khoảng 485 ms.
+- 23 chỗ PointwiseS8 nhanh hơn, mỗi chỗ chỉ 0,6–2,4 ms.
+- Chậm nhất là ba tích chập 256 → 256 kênh trên lưới 16 × 16 (`model.8/cv1`, `model.10/cv1`, `model.10/cv2`), 20,6 →
+  56,6 ms mỗi cái: trọng số 64 KB, đúng bằng cache dữ liệu.
+- Các phần đã cắt mà PointwiseS8 ghép lại thành một op cũng chậm hơn, ví dụ 7,6 → 29,1 ms.
+- Kernel 1 × 1 của esp-dl chạy các tích chập này ở 0,19–0,22 chu kỳ một nhân-cộng. Các kernel nhanh của PointwiseS8 viết
+  cho K 24–192 của speaker.
