@@ -36,8 +36,17 @@ def sha256(path: Path) -> str:
 
 def learnt_from(run: Path) -> dict:
     """The run's split and the train files of its split.lock, each with its sha256; for a run imported pretrained,
-    which learnt nothing here, the extractor and the pin of its weights (KEHOACH 4.4)."""
+    which learnt nothing here, the extractor and the pin of its weights (KEHOACH 4.4); for a server's detect package,
+    the package, its model.pt and the train list calibration drew from (KEHOACH 3.18)."""
     cfg = yaml.safe_load((run / "config.resolved.yaml").read_text(encoding="utf-8"))
+    rows = [line.split(maxsplit=1) for line in (run / "split.lock").read_text(encoding="utf-8").splitlines() if line]
+    if "package" in cfg:
+        model = json.loads((run / "model.onnx.json").read_text(encoding="utf-8"))
+        return {
+            "package": cfg["package"],
+            "model": {"file": "model.pt", "sha256": model["model_sha256"]},
+            "calibrated_on": [{"file": name, "sha256": digest} for digest, name in rows if name.startswith("train")],
+        }
     if "split" not in cfg and "package" in cfg["source"]:
         source = cfg["source"]
         weights = {"file": source["file"], "sha256": source["sha256"]}
@@ -46,26 +55,28 @@ def learnt_from(run: Path) -> dict:
         source = cfg["source"]
         weights = source["pins"]["args"][0]
         return {"pretrained": source["extractor"], "weights": {"file": weights} | source["pins"]["files"][weights]}
-    rows = [line.split(maxsplit=1) for line in (run / "split.lock").read_text(encoding="utf-8").splitlines() if line]
     return {
         "split": cfg["split"]["version"],
         "train": [{"file": name, "sha256": digest} for digest, name in rows if name.startswith("train")],
     }
 
 
-def record(branch: str, run: Path, files: list[Deployed], fields: dict) -> tuple[Path, Path]:
+def record(branch: str, run: Path, files: list[Deployed], fields: dict, grid_bound: bool = True) -> tuple[Path, Path]:
     """Write firmware/models/<branch>/meta.json and the branch's row of models.lock.json; files must sit in that
-    folder already, and fields go into both."""
+    folder already, and fields go into both. A model that never saw the time grid, as detect, is not grid_bound."""
     folder = MODELS / branch
     for f in files:
         if f.path.parent.resolve() != folder.resolve() or f.kind not in pack_models.KINDS:
             raise ValueError(f"{f.path}: deploy into {folder} as one of {sorted(pack_models.KINDS)}")
-    row = {
-        "run": run.name,
-        "grid_hash": f"0x{grid.GRID_HASH:08x}",
-        "files": [{"file": f.path.name, "entry": f.entry, "kind": f.kind, "sha256": sha256(f.path)} for f in files],
-        "learnt_from": learnt_from(run),
-    } | fields
+    row = (
+        {"run": run.name}
+        | ({"grid_hash": f"0x{grid.GRID_HASH:08x}"} if grid_bound else {})
+        | {
+            "files": [{"file": f.path.name, "entry": f.entry, "kind": f.kind, "sha256": sha256(f.path)} for f in files],
+            "learnt_from": learnt_from(run),
+        }
+        | fields
+    )
     meta = folder / META_FILE
     meta.write_text(json.dumps({"branch": branch} | row, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     lock = json.loads(LOCK.read_text(encoding="utf-8"))

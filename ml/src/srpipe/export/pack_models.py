@@ -1,7 +1,7 @@
 """The model slot image of KEHOACH 6.3: a 1 KB header, then each entry 64-byte aligned with its sha256.
 Layout constants come from sys_storage/include/storage_format.h and the slot size from firmware/partitions.csv, so
-ai_engine_load and this packer cannot disagree. --lock packs every file of contracts/models.lock.json held to its sha256
-(KEHOACH 4.5.6), the command's listen hash and thresholds, the speaker's hash, a threshold for each count of
+ai_engine_load and this packer cannot disagree. --lock packs every models_0 file of contracts/models.lock.json held to
+its sha256 (KEHOACH 4.5.6), the command's listen hash and thresholds, the speaker's hash, a threshold for each count of
 voiceprints and its noise edges and noisier bins' thresholds, and flags in flash a row's graphs deployed so.
 Run: python -m srpipe.export.pack_models <out.bin> (--lock | <name>:<kind>:<file>...)"""
 
@@ -27,6 +27,7 @@ PARTITIONS = FIRMWARE / "partitions.csv"
 UNIT_PARTITIONS = FIRMWARE / "test_apps" / "partitions_unit.csv"
 LOCK = FIRMWARE.parent / "contracts" / "models.lock.json"
 MODELS = FIRMWARE / "models"
+SLOT = "models_0"
 ENTRY_TAIL = struct.Struct("<II")
 FIELDS_BYTES = 64  # storage_model_header_t ahead of its entries
 
@@ -180,13 +181,17 @@ def pack(
 
 
 def locked(skip: tuple[str, ...] = ()) -> Locked:
-    """Every file models.lock.json lists, but the branches of skip, in order as the image entry it names, graphs
-    flagged to stay in flash when deployed so; the listen hash and delta1..3, the speaker's hash, thresholds, cohort
-    top and noise fields, the wake's threshold and smoothing hops, each 0 without its row. Refused when a file
+    """Every file models.lock.json lists for models_0, but the branches of skip, in order as the image entry it names,
+    graphs flagged to stay in flash when deployed so; the listen hash and delta1..3, the speaker's hash, thresholds,
+    cohort top and noise fields, the wake's threshold and smoothing hops, each 0 without its row. Refused when a file
     differs from its sha256, rows learned on two listen.yaml, two record thresholds, a speaker or a wake, the
     speaker's row lacks SPEAKERS thresholds or a cohort top or holds noise fields checked_noise refuses, or the
     wake's lacks its threshold or hops."""
-    rows = {b: r for b, r in json.loads(LOCK.read_text(encoding="utf-8"))["models"].items() if b not in skip}
+    rows = {
+        b: r
+        for b, r in json.loads(LOCK.read_text(encoding="utf-8"))["models"].items()
+        if b not in skip and r.get("slot", SLOT) == SLOT
+    }
     entries = []
     for branch, row in rows.items():
         for f in row["files"]:
