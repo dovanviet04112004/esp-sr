@@ -287,8 +287,8 @@ def ptq(cfg: dict, run: Path, paths: dict) -> Path:
 
 
 def deploy(cfg: dict, run: Path) -> tuple[Path, Path]:
-    """<run>/int8/model.espdl into firmware/models/detect with meta.json and the lock's detect row, slot vision_0,
-    refused unless the run's val score holds int8 and passed the gate of KEHOACH 3.18 step 4."""
+    """<run>/int8/model.espdl into firmware/models/detect with meta.json and the lock's detect row, slot vision_0 and
+    detect.yaml's chip fields, refused unless the run's val score holds int8 and passed KEHOACH 3.18 step 4's gate."""
     scored = run / "int8" / "map_val.yaml"
     report = load_yaml(scored) if scored.exists() else {}
     if "int8" not in report or not report["passes"]:
@@ -305,6 +305,7 @@ def deploy(cfg: dict, run: Path) -> tuple[Path, Path]:
         "names": meta["names"],
         "val": {k: report[k] for k in ("images", "float", "int8", "drop") if k in report},
         "trained": meta.get("trained"),
+        "chip": load_yaml(CONFIG)["chip"],
     }
     files = [update_lock.Deployed(target / f"{BRANCH}.espdl", BRANCH, "espdl")]
     return update_lock.record(BRANCH, run, files, fields, grid_bound=False)

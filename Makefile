@@ -5,7 +5,7 @@
 IDF_EXPORT ?= $(HOME)/esp/esp-idf/export.sh
 IDF_GOALS := ai-unit ai-unit-cores ai-unit-ctc ai-unit-pitch ai-unit-rnnt ai-unit-speaker ai-unit-wake bench-board bss calib-flash \
   capture-flash capture-radio-off-flash espsr-compare flash fw-bench fw-bench-flash fw-dev fw-prod listen-unit \
-  models-flash monitor nvs-restore nvs-save parity-board product session session-plan storage-flash
+  models-flash monitor nvs-restore nvs-save parity-board product session session-plan storage-flash vision-flash
 ifneq ($(and $(filter $(IDF_GOALS),$(MAKECMDGOALS)),$(if $(IDF_LOADED)$(shell command -v idf.py),,no idf.py)),)
 .PHONY: $(MAKECMDGOALS)
 $(firstword $(MAKECMDGOALS)):
@@ -283,6 +283,18 @@ detect-eval: ## mAP50-95 of float and int8 on a split, into <run>/int8/map_<spli
 
 detect-deploy: ## A run that passed the val gate into firmware/models/detect and the lock's detect row: RUN=<run>
 	$(DETECT).quant deploy $(RUN)
+
+VISION_DIR = $(CURDIR)/ml/artifacts/vision
+VISION_TOOL = python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD)
+# The header sector is erased first and written last, after the .espdl: a cut midway leaves no header (KEHOACH 6.3).
+vision-flash: ## Pack the lock's detect row into the vision image and write it to board B's vision_0, header last
+	$(DETECT).pack $(VISION_DIR)
+	off=$$($(PRODUCT_PARTS) get_partition_info --partition-name vision_0 --info offset); \
+	head=$$(stat -c %s $(VISION_DIR)/vision.header.bin); \
+	$(VISION_TOOL) --after no-reset erase-region $$off $$head && \
+	$(VISION_TOOL) --after no-reset write-flash --skip-flashed $$(printf '0x%x' $$((off + head))) \
+	  $(VISION_DIR)/vision.espdl.bin && \
+	$(VISION_TOOL) --after $(or $(AFTER),hard-reset) write-flash $$off $(VISION_DIR)/vision.header.bin
 
 ##@ Wake
 

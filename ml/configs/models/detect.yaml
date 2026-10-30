@@ -19,6 +19,9 @@ quant:                                # Espressif's YOLO26 recipe on the repo's 
   int16:                              # op names, as regular expressions, kept at 16 bits: neck exits, one-to-one heads
     - '^/model\.(16|19|22)/cv2/conv/'
     - '^/model\.23/one2one_cv[23]\.'
+chip:                                 # the vision image's header (KEHOACH 6.3), copied into the lock by deploy
+  score_permille: 250                 # lowest score a box keeps: espressif/yolo26's 0.25
+  top_k: 32                           # boxes kept a picture, best first
 eval:
   max_det: 300                        # boxes an image keeps for mAP, as Ultralytics' validator
   conf: 0.001                         # lowest score that counts as a box for mAP
