@@ -721,17 +721,17 @@ def unsqueeze_axes_positive() -> Iterator[None]:
 
 
 def padded_size(channels: int) -> int | None:
-    """The multiple of CHANNEL_STEP channels pads up to when that adds at most a third of them; None when channels
-    is one already or would grow more."""
+    """The multiple of CHANNEL_STEP channels pads up to when that at most doubles them; None when channels is one
+    already or would grow more."""
     up = -(-channels // CHANNEL_STEP) * CHANNEL_STEP
-    return up if up != channels and 3 * up <= 4 * channels else None
+    return up if up != channels and up <= 2 * channels else None
 
 
 def keeps_channels(op, info) -> bool:
-    """op passes every channel of its tensor inputs to its output as it finds it, zero staying zero: a Relu, an Add
-    of two tensors, a RequantizeLinear on one grid about zero, or a Slice along other axes."""
+    """op passes every channel of its tensor inputs to its output as it finds it, zero staying zero: a Relu or a
+    Swish, an Add of two tensors, a RequantizeLinear on one grid about zero, or a Slice along other axes."""
     tensors = [v for v in op.inputs if not v.is_parameter]
-    if op.type == "Relu":
+    if op.type in ("Relu", "Swish"):
         return len(tensors) == 1
     if op.type == "Add":
         return len(tensors) == 2 == len(op.inputs)
@@ -848,10 +848,10 @@ def pad_channels(graph) -> int:
 @contextlib.contextmanager
 def aligned_channels() -> Iterator[None]:
     """esp-dl's S3 convolution kernels take their vector path only when both channel counts are multiples of 16.
-    After the export's layout pass this pads each run of tensors of 12 or 24 channels, joined by Relu, Add,
-    RequantizeLinear and Slice between ungrouped convolutions, to the next multiple with zero channels (pad_channels):
-    the same integers in the real channels, a third more multiply-adds at the vector rate. SwiftF0 (KEHOACH 3.11) on
-    board B: its 12-channel convolutions ran at 2.3 to 3.6 cycles a multiply-add, 96% of 6.74 s a window.
+    After the export's layout pass this pads each run of tensors that the next multiple at most doubles, joined by
+    Relu, Swish, Add, RequantizeLinear and Slice between ungrouped convolutions, with zero channels (pad_channels):
+    the same integers in the real channels, at most twice the multiply-adds at the vector rate. On board B, SwiftF0's
+    12-channel convolutions ran at 2.3 to 3.6 cycles a multiply-add (KEHOACH 3.11), YOLO26n's 8-channel one at 1.5.
     """
     from esp_ppq.parser import espdl_exporter
 

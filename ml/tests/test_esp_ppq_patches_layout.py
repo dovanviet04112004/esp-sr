@@ -389,6 +389,40 @@ def test_aligned_channels_pads_a_twelve_channel_trunk_with_zero_channels(tmp_pat
         assert not w_padded[outputs:].any() and not w_padded[..., inputs:].any() and not b_padded[outputs:].any()
 
 
+class Bottleneck(nn.Module):
+    """YOLO26n's first bottleneck in small: 16 channels to 8 and back through 3 x 3 convolutions and Swish, the input
+    added back."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stem = nn.Conv2d(3, 16, 3, padding=1)
+        self.first = nn.Conv2d(16, 8, 3, padding=1)
+        self.second = nn.Conv2d(8, 16, 3, padding=1)
+        self.head = nn.Conv2d(16, 16, 1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = nn.functional.silu(self.stem(x))
+        return self.head(x + nn.functional.silu(self.second(nn.functional.silu(self.first(x)))))
+
+
+def test_aligned_channels_pads_an_eight_channel_run_through_swish(tmp_path: Path) -> None:
+    torch.manual_seed(11)
+    plain, padded = trunk_weights(Bottleneck(), tmp_path)
+    shapes = {name: w.shape for name, (w, _) in padded.items()}
+    assert shapes == {
+        "/stem/Conv": (16, 3, 3, 3),
+        "/first/Conv": (16, 3, 3, 16),
+        "/second/Conv": (16, 3, 3, 16),
+        "/head/Conv": (16, 1, 1, 16),
+    }
+    w, b = plain["/first/Conv"]
+    w_padded, b_padded = padded["/first/Conv"]
+    assert np.array_equal(w_padded[:8], w) and np.array_equal(b_padded[:8], b)
+    assert not w_padded[8:].any() and not b_padded[8:].any()
+    assert np.array_equal(padded["/second/Conv"][0][..., :8], plain["/second/Conv"][0])
+    assert not padded["/second/Conv"][0][..., 8:].any()
+
+
 def test_aligned_channels_leaves_a_trunk_that_is_also_a_graph_output(tmp_path: Path) -> None:
     torch.manual_seed(11)
     plain, padded = trunk_weights(TrunkShown(), tmp_path)
