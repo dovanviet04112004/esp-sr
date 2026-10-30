@@ -148,3 +148,36 @@ Run ấy mô phỏng lại trên PC, so với CRC chip đã báo (8 ảnh × 18 
 
 Hai bản vá khai ở `esp_ppq_patches` của `detect.yaml`, áp cho `ptq`, `eval` và bản dò. Hiệu chuẩn và TQT chạy trên mô
 phỏng đã vá, nên số nguyên của lượng tử có thể đổi; chuỗi chạy lại thành run mới.
+
+**Run mới** `20261030_7bf6e8a-dirty_7d38c2`, chuỗi chạy lại ở `7bf6e8af` dưới hai bản vá, lock và `meta.json` lấy từ
+run này:
+
+| Bước | Thời gian | Đỉnh RAM | Kết quả |
+|---|---|---|---|
+| `make detect-ptq` | 19 phút 12 | 3,71 GB | `.espdl` 3 001 424 B |
+| `make detect-eval SPLIT=val` | 13 phút 05 | 2,23 GB | float 0,3635, int8 **0,3511**, tụt 0,0124: qua cửa |
+| `make detect-eval SPLIT=test` | 13 phút 30 | 2,23 GB | float 0,3645, int8 0,3496, tụt 0,0149 |
+
+PTQ chậm thêm 2 phút và mỗi lượt chấm thêm 2,5 phút: các tích chập int16 tính bằng float64, mà GPU laptop tính
+float64 chậm. Run cũ có int8 0,3504 trên `val`.
+
+**Board B**, `make ai-unit-detect`: 4 phút 45 gồm dựng ảnh thử, build, ghi flash và chạy.
+- Cả 8 ảnh: 6 tensor ra và các khung khớp mô phỏng từng giá trị; ảnh sha256 sai bị từ chối.
+- Nạp 3 469 ms. Mỗi ảnh trung bình 3 140 ms, đỉnh 3 166 ms, gồm letterbox, mạng và `decode.c`; ảnh 640×427 lâu
+  nhất. Hai lượt chạy cách nhau 6 phút ra cùng số tới 1 ms.
+- Bộ nhớ, đo bằng heap còn trống:
+
+| | RAM nội | PSRAM |
+|---|---|---|
+| đồ thị đã nạp giữ | 6 072 B | 2 707 852 B |
+| một lần chạy dùng thêm, tối đa | 320 B | 11 152 B |
+| còn giữ sau lần gỡ đầu | 5 748 B | 0 |
+| còn giữ sau mỗi lần nạp và gỡ về sau | 0 | 0 |
+
+- 5 748 B RAM nội chỉ cấp ở lần nạp đầu, không rò theo mỗi lần đổi model (E15-T8). Ca thứ hai của bản dò giữ điều này.
+- E15-T2 dựng mạng thẳng bằng esp-dl, tốn 109 KB RAM nội. Qua `ai_engine` chỉ còn 6 KB, vì `ExternalMallocGuard` đẩy
+  các khoản cấp phát của esp-dl sang PSRAM.
+
+`make parity-board` có thêm bộ vàng `detect_decode`. 4 ca khớp tuyệt đối trên chip; ca đối chứng âm lệch 3 nên đỏ, đúng
+như phải thế. Bộ ấy làm dòng `plan` của bản dựng mặc định dài quá 160 B, nên app dừng trước ca đầu tiên; app giờ in
+mỗi khối một dòng `plan`. Hai bản dựng qua: 128 và 61 ca, 4 phút 28.
