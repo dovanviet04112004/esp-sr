@@ -2367,6 +2367,21 @@ retained kích tải lại. Lúc dựng có thêm đường USB, `make vision-fl
 **Ảnh vào.** Board B không có camera (§2.1). Tới khi gắn camera, host gửi ảnh JPEG xuống `down/image`, board trả
 `up/detections`: mỗi khung gồm lớp, điểm, toạ độ, cùng số ms. Camera là việc sau: chọn module, chân (§2.2), driver.
 
+**Nhánh `detect` của `ai_engine`** (`src/detect/`, §4.5.5).
+- `ai_engine_detect_load(label)` ánh xạ ảnh thị giác của phân vùng ấy qua `sys_storage` (`vision_0` ở sản phẩm, khe dò
+  `models_0` ở app thử), kiểm magic, `format_ver` và sha256 của `.espdl`, rồi dựng mạng với trọng số đọc thẳng từ
+  flash. Lớp `YOLO26` của `espressif/yolo26` nhận `top_k`, ngưỡng điểm và tên lớp của header; `classes` khác số kênh
+  lớp của mạng thì từ chối.
+- `ai_engine_detect_run` nhận một ảnh RGB888 cỡ bất kỳ, letterbox bằng bộ tiền xử lý của esp-dl, chạy mạng, lấy K khung
+  bằng hậu xử lý của component. Component để khung trong ô S×S và không xếp thứ tự; `ai_engine` đổi khung về điểm ảnh
+  của ảnh gốc, cùng phép của `Letterbox.to_source`, và xếp điểm cao trước.
+- Giải JPEG là việc của người gọi (`nhin_task`, E15-T7), bằng bộ giải của esp-dl. Phép kiểm chip đưa thẳng RGB888, nên
+  bản mô phỏng thấy đúng những điểm ảnh ấy.
+- Bước 5 của chuỗi, chip khớp mô phỏng, chạy ở app thử của `ai_engine` với profile `detect`. 8 ảnh COCO RGB888, CRC32
+  của sáu tensor ra và các khung kỳ vọng do `tasks/detect/probe.py` dựng: ESP-PPQ mô phỏng đồ thị int8 trên letterbox
+  của chip, `postproc/decode.py` ★ chép đúng hậu xử lý của `YOLO26` (lọc trước bằng ngưỡng nguyên, sigmoid, toạ độ cắt
+  về số nguyên). Ảnh có sha256 sai thì `load` từ chối.
+
 **Chạy trên board.** `nhin_task` ở nhân 0, ưu tiên thấp nhất, dưới mọi task tiếng nói; mỗi lần một ảnh. Tiếng nói
 giành CPU khi cần, ảnh chờ. Không chạy ở nhân 1: hai đồ thị esp-dl song song trên hai nhân từng làm sai kết quả
 (ADR-0027, `measurements/latency.md` §33). Tensor trung gian ở PSRAM, cỡ đo ở E15-T2 🔬.
@@ -2675,10 +2690,12 @@ ml/
 │   │   │                              #   §3.14, deploy xuất một hàng chạy dòng cùng bảng front end vào
 │   │   │                              #   firmware/models/pitch/; probe.py bản dò board của một hàng trên một cửa
 │   │   │                              #   sổ cố định; decode.py giải cao độ và độ tin từ đầu ra của mạng
-│   │   ├── detect/{data.py, quant.py, eval.py, pack.py}   # §3.18: data.py nhận gói của server (model.pt và
-│   │   │                              #   data/ khuôn YOLO), letterbox của chip; quant.py gọi detect_ref xuất
-│   │   │                              #   ONNX rồi lượng tử theo quy trình YOLO26 của Espressif; eval.py chấm
-│   │   │                              #   mAP float và int8; pack.py đóng ảnh thị giác cho vision_0
+│   │   ├── detect/{data.py, quant.py, eval.py, pack.py, probe.py, postproc/decode.py ★}   # §3.18: data.py
+│   │   │                              #   nhận gói của server (model.pt và data/ khuôn YOLO), letterbox của
+│   │   │                              #   chip; quant.py gọi detect_ref xuất ONNX rồi lượng tử theo quy trình
+│   │   │                              #   YOLO26 của Espressif; eval.py chấm mAP float và int8; pack.py đóng
+│   │   │                              #   ảnh thị giác cho vision_0; probe.py dựng ảnh thử, CRC tensor ra và
+│   │   │                              #   khung kỳ vọng cho app thử; decode.py là hậu xử lý của YOLO26
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
 │   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py, pitch.py}
@@ -2839,6 +2856,7 @@ chứng âm cố ý vi phạm:
 |---|---|---|
 | `espressif/dl_fft` | `dsp_spec` | `>=0.7.0,<=0.8.0`, ngoại lệ duy nhất của luật ghim một bản: `esp-dl` 3.3.14 đòi 0.8.0, còn esp-sr 2.5.5 của `espsr_compare` chỉ dựng được với 0.7.0, mà cả hai app cùng dựng `dsp_spec`; file lock của từng app vẫn khoá đúng một bản (sản phẩm 0.8.0). Bản 0.7.0 đo ở E6-T3 (ADR-0002); FFT chọn được bằng Kconfig, không mặc định (ADR-0020) |
 | `espressif/esp-dl` | `ai_engine` | `==3.3.14` (E15-T1, `measurements/latency.md` §35: mọi model tiếng nói vẫn khớp từng bit), cặp với ESP-PPQ `==1.3.11` ở `ml/pyproject.toml`; chạy dòng khớp mô phỏng từng bit ở E11-T10 |
+| `espressif/yolo26` | `ai_engine` | `==0.1.1` (MIT): tiền xử lý và hậu xử lý YOLO26 của Espressif, đòi `esp-dl` ~3.3.14 (§3.18) |
 | `espressif/mqtt`, `espressif/cjson` | `net_mqtt` | `^`; IDF v6 đã đưa cả hai ra khỏi lõi, `REQUIRES mqtt` trơ fail ở bước giải phụ thuộc |
 | `joltwallet/littlefs` | `sys_storage` | `^` |
 | `espressif/esp-sr` | **chỉ** `test_apps/espsr_compare/main` | `==2.5.5`, bản mới nhất trên registry ngày 30/09; không dựng được trên IDF v6.0.2 thì ghim bản dựng được và sửa dòng này |
@@ -3110,7 +3128,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 |---|---|---|
 | `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame`, `spk_fbank_run` (khâu đặc trưng của b0, §3.17), `swift_front_push` (front end của SwiftF0, §3.11), `swift_dims_push` (ba chiều cao độ của SwiftF0, §3.11) | any, không chặn, người gọi giữ bộ nhớ |
 | `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_entry`, `lang_vi_unit_name` | any, không chặn |
-| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_{step,delay,reset}`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,voiceprint,norm,best,noise_bin,passes,model_id}`, `ai_engine_pitch_{tables,frames,delay,run,reset}` (SwiftF0, §3.11), `ai_engine_ns_ops()`, `ai_engine_synth_render`, `ai_engine_helper_serve` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,5 s với b3, chỉ ở `xac_task`; `helper_serve` chặn tới hạn chờ, chỉ ở `phu_task` và chỉ có khi `AI_ENGINE_CORES_TWO` (§5.1) |
+| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_{step,delay,reset}`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,voiceprint,norm,best,noise_bin,passes,model_id}`, `ai_engine_pitch_{tables,frames,delay,run,reset}` (SwiftF0, §3.11), `ai_engine_detect_{load,run,name,unload}` (§3.18), `ai_engine_ns_ops()`, `ai_engine_synth_render`, `ai_engine_helper_serve` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,5 s với b3, chỉ ở `xac_task`; `helper_serve` chặn tới hạn chờ, chỉ ở `phu_task` và chỉ có khi `AI_ENGINE_CORES_TWO` (§5.1); `detect_load` chặn và đọc flash, `detect_run` chặn vài giây, chỉ ở `nhin_task` |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |
 | `svc_*` | `svc_<x>_init`, `svc_<x>_step` | task, gọi từ đúng task của bảng §5.2 |
 
