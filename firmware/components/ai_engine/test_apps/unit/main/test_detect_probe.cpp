@@ -213,6 +213,8 @@ TEST_CASE("detect: the six outputs and the boxes match ESP-PPQ's on eight pictur
     printf("%" PRIu32 " pictures: mean %lld ms, peak %lld ms\n", head->pictures,
            total_ms / (long long)head->pictures, peak_ms);
     print_taken("a run peaked beyond the loaded graph at", loaded, lowest);
+    // esp-dl's time a module on the last picture, which make ai-profile ranks (KEHOACH 3.14 step 2.2).
+    model->profile_module(true);
     ai_engine_detect_unload();
     print_taken("unload left taken", before, free_now());
     esp_partition_munmap(handle);
