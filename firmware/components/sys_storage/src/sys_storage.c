@@ -496,3 +496,46 @@ void sys_storage_unmap_models(sys_storage_models_t *models)
     esp_partition_munmap(models->unmap_handle);
     memset(models, 0, sizeof(*models));
 }
+
+static esp_err_t check_vision(const storage_vision_header_t *header, size_t partition_bytes)
+{
+    // The header sector goes last, so an erased or half-written image has none (KEHOACH 6.3).
+    if (header->magic != STORAGE_VISION_MAGIC) { return ESP_ERR_NOT_FOUND; }
+    if (header->format_ver != STORAGE_VISION_FORMAT_VER) { return ESP_ERR_INVALID_VERSION; }
+    const bool inside = header->espdl_offset >= STORAGE_VISION_HEADER_BYTES && header->espdl_size > 0 &&
+                        (uint64_t)header->espdl_offset + header->espdl_size <= partition_bytes;
+    if (!inside || header->classes == 0 || header->classes > STORAGE_VISION_MAX_CLASSES) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    return ESP_OK;
+}
+
+esp_err_t sys_storage_map_vision(const char *label, sys_storage_vision_t *out)
+{
+    if (out == NULL || label == NULL) { return ESP_ERR_INVALID_ARG; }
+    if (!s_ready) { return ESP_ERR_INVALID_STATE; }
+    const esp_partition_t *part =
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, label);
+    if (part == NULL) { return ESP_ERR_NOT_FOUND; }
+    if (part->size < STORAGE_VISION_HEADER_BYTES) { return ESP_ERR_INVALID_SIZE; }
+    const void *base = NULL;
+    esp_partition_mmap_handle_t handle;
+    esp_err_t err = esp_partition_mmap(part, 0, part->size, ESP_PARTITION_MMAP_DATA, &base, &handle);
+    if (err != ESP_OK) { return err; }
+    err = check_vision(base, part->size);
+    if (err != ESP_OK) {
+        esp_partition_munmap(handle);
+        return err;
+    }
+    out->header = base;
+    out->espdl = (const uint8_t *)base + out->header->espdl_offset;
+    out->unmap_handle = handle;
+    return ESP_OK;
+}
+
+void sys_storage_unmap_vision(sys_storage_vision_t *vision)
+{
+    if (vision == NULL || vision->header == NULL) { return; }
+    esp_partition_munmap(vision->unmap_handle);
+    memset(vision, 0, sizeof(*vision));
+}

@@ -34,6 +34,12 @@ typedef struct {
     uint32_t unmap_handle;
 } sys_storage_models_t;
 
+typedef struct {
+    const storage_vision_header_t *header; // .espdl range validated
+    const uint8_t *espdl;                  // header->espdl_size bytes, in place
+    uint32_t unmap_handle;
+} sys_storage_vision_t;
+
 /** Initialise NVS, mount LittleFS (formatting it when unreadable) and count this boot.
  *  @ctx task | blocking | once at boot, ahead of every other call
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE on a second call | an nvs_flash or littlefs error
@@ -150,6 +156,19 @@ esp_err_t sys_storage_map_models(uint8_t slot, sys_storage_models_t *out);
  *  @ctx task | non-blocking
  */
 void sys_storage_unmap_models(sys_storage_models_t *models);
+
+/** Memory-map the vision image of the partition of that label read-only; check its header layout
+ * (KEHOACH 6.3).
+ *  @ctx task | blocking | the mapping stays valid until sys_storage_unmap_vision
+ *  @param label STORAGE_VISION_LABEL, or a test table's scratch slot
+ *  @ret ESP_OK | ESP_ERR_NOT_FOUND no partition or no header | ESP_ERR_INVALID_VERSION | ESP_ERR_INVALID_SIZE
+ */
+esp_err_t sys_storage_map_vision(const char *label, sys_storage_vision_t *out);
+
+/** Release a mapping from sys_storage_map_vision.
+ *  @ctx task | non-blocking
+ */
+void sys_storage_unmap_vision(sys_storage_vision_t *vision);
 
 #ifdef __cplusplus
 }
