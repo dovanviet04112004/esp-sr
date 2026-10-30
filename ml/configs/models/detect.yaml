@@ -23,9 +23,11 @@ eval:
   max_det: 300                        # boxes an image keeps for mAP, as Ultralytics' validator
   conf: 0.001                         # lowest score that counts as a box for mAP
   gate: 0.02                          # int8 mAP50-95 on val may fall at most this below float 🔬
+  min_float_share: 0.5                # float mAP50-95 at least this share of the one model.pt was trained to 🔬
 coco:                                 # the COCO 2017 test package (python -m srpipe.tasks.detect.data coco)
   seed: 20261030
   train_count: 1024                   # train2017 images drawn into train, the calibration pool
   train_url: http://images.cocodataset.org/train2017
   train_sample: train2017_sample      # under raw/vision/coco2017, downloaded from the coco-urls list
   model: yolo26n.pt                   # under raw/vision/coco2017: Ultralytics' COCO-trained YOLO26n, the server's model
+  broken_images: 300                  # each split of coco-broken, the package with every label on the wrong class

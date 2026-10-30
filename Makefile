@@ -264,9 +264,12 @@ SPEED_ESPDL_pitch = ml/$(RUN)/int8/timing/pitch.espdl
 ##@ Detect: YOLO26 from a server's package (KEHOACH 3.18)
 
 DETECT = $(ML) --extra train --extra espdl --extra detect python -m srpipe.tasks.detect
-.PHONY: detect-coco detect-import detect-ptq detect-eval
+.PHONY: detect-coco detect-coco-broken detect-import detect-ptq detect-eval detect-deploy
 detect-coco: ## The COCO 2017 test package from raw/vision/coco2017 into interim/detect (E15-T3)
 	$(DETECT).data coco
+
+detect-coco-broken: ## The test package with every label on the wrong class, the mAP gate's negative control
+	$(DETECT).data coco-broken
 
 detect-import: ## A package as a run under ml/artifacts/detect/runs: splits locked, model.pt to ONNX held to it [SET="key=value ..."]
 	$(DETECT).quant import $(foreach s,$(SET),--set $(s))
@@ -277,6 +280,9 @@ detect-ptq: ## Espressif's YOLO26 recipe into <run>/int8/{graph.native, model.es
 
 detect-eval: ## mAP50-95 of float and int8 on a split, into <run>/int8/map_<split>.yaml: RUN=<run> [SPLIT=val|test] [LIMIT=N]
 	$(DETECT).eval $(RUN) --split $(or $(SPLIT),val) $(if $(LIMIT),--limit $(LIMIT))
+
+detect-deploy: ## A run that passed the val gate into firmware/models/detect and the lock's detect row: RUN=<run>
+	$(DETECT).quant deploy $(RUN)
 
 ##@ Wake
 

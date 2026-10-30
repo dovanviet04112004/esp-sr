@@ -1,14 +1,16 @@
 """The detect chain of KEHOACH 3.18 from a server's package to an esp-dl graph. import locks the package's splits in a
 run and exports model.pt to ONNX through ml/detect_ref/ultralytics, held to model.pt; ptq runs Espressif's YOLO26
 recipe on the repo's esp-ppq, calibrated on a seeded train sample through the chip's letterbox, drops the one-to-many
-branch, splits each one-to-one output into box and class tensors, and writes <run>/int8/{graph.native, model.espdl}.
-Run: python -m srpipe.tasks.detect.quant import | ptq <run>"""
+branch, splits each one-to-one output into box and class tensors, and writes <run>/int8/{graph.native, model.espdl},
+the .espdl without model->test()'s pair; deploy locks a run that passed the val gate for the vision_0 slot.
+Run: python -m srpipe.tasks.detect.quant import | ptq <run> | deploy <run>"""
 
 from __future__ import annotations
 
 import argparse
 import json
 import re
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -16,10 +18,12 @@ import numpy as np
 
 from srpipe.core.config import ML_ROOT, apply_overrides, data_paths, load_yaml
 from srpipe.core.run_dir import create_run_dir
+from srpipe.export import update_lock
 from srpipe.scenes import refs
 from srpipe.tasks.detect import CONFIG, data
 
 BRANCH = "detect"
+SLOT = "vision_0"
 REFS = ML_ROOT / "detect_ref"
 TARGET = "esp32s3"
 ONE_TO_ONE = ("one2one_p3", "one2one_p4", "one2one_p5")
@@ -279,10 +283,31 @@ def ptq(cfg: dict, run: Path, paths: dict) -> Path:
     split_heads(graph, meta["nc"])
     out = run / "int8"
     export_espdl.save_native(graph, out / "graph.native")
-    square, _ = data.letterbox(data.rgb_of(found.images["val"][0]), cfg["size"], cfg["pad"])
-    return export_espdl.export(
-        graph, out / "model.espdl", test_input=data.input_of(square), int16_lut_step=spec["lut_step"]
-    )
+    return export_espdl.export(graph, out / "model.espdl", int16_lut_step=spec["lut_step"])
+
+
+def deploy(cfg: dict, run: Path) -> tuple[Path, Path]:
+    """<run>/int8/model.espdl into firmware/models/detect with meta.json and the lock's detect row, slot vision_0,
+    refused unless the run's val score holds int8 and passed the gate of KEHOACH 3.18 step 4."""
+    scored = run / "int8" / "map_val.yaml"
+    report = load_yaml(scored) if scored.exists() else {}
+    if "int8" not in report or not report["passes"]:
+        raise ValueError(f"{run}: no int8 score on val that passed the gate, {report or 'none'}")
+    meta = json.loads((run / "model.onnx.json").read_text(encoding="utf-8"))
+    target = update_lock.MODELS / BRANCH
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(run / "int8" / "model.espdl", target / f"{BRANCH}.espdl")
+    fields = {
+        "slot": SLOT,
+        "size": cfg["size"],
+        "pad": cfg["pad"],
+        "stride": meta["stride"],
+        "names": meta["names"],
+        "val": {k: report[k] for k in ("images", "float", "int8", "drop") if k in report},
+        "trained": meta.get("trained"),
+    }
+    files = [update_lock.Deployed(target / f"{BRANCH}.espdl", BRANCH, "espdl")]
+    return update_lock.record(BRANCH, run, files, fields, grid_bound=False)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -291,13 +316,20 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("import", help="the package as a run: splits locked, model.pt exported to ONNX and checked")
     rung = sub.add_parser("ptq", help="Espressif's YOLO26 recipe into <run>/int8/")
     rung.add_argument("run", type=Path)
+    lock = sub.add_parser("deploy", help="a run that passed the val gate into firmware/models/detect and the lock")
+    lock.add_argument("run", type=Path)
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     args = parser.parse_args(argv)
     paths = data_paths()
     if args.command == "import":
         print(import_run(apply_overrides(load_yaml(CONFIG), args.overrides), paths))
         return 0
-    print(ptq(load_yaml(args.run / "config.resolved.yaml"), args.run, paths))
+    cfg = load_yaml(args.run / "config.resolved.yaml")
+    if args.command == "deploy":
+        for path in deploy(cfg, args.run):
+            print(path)
+        return 0
+    print(ptq(cfg, args.run, paths))
     return 0
 
 

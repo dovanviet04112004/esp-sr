@@ -134,21 +134,33 @@ def int8_net(run: Path) -> Callable:
     return net
 
 
+def verdict(report: dict, trained: dict | None, gate: dict) -> dict:
+    """report with the checks of KEHOACH 3.18 step 4 that apply: float at least gate's min_float_share of the val mAP
+    model.pt was trained to, int8 at most gate's drop below float; it passes when each of them holds."""
+    checks = []
+    if trained:
+        report["trained"] = trained
+        report["float_share"] = round(report["float"]["map50_95"] / trained["map50_95"], 4)
+        checks.append(report["float_share"] >= gate["min_float_share"])
+    if "int8" in report:
+        report["drop"] = round(report["float"]["map50_95"] - report["int8"]["map50_95"], 4)
+        checks.append(report["drop"] <= gate["gate"])
+    report["passes"] = all(checks)
+    return report
+
+
 def evaluate(run: Path, split: str, limit: int | None) -> dict:
     cfg = load_yaml(run / "config.resolved.yaml")
     found = data.package(data_paths()["interim"] / cfg["package"])
     images = found.images[split][:limit] if limit else found.images[split]
-    strides = json.loads((run / "model.onnx.json").read_text(encoding="utf-8"))["stride"]
+    meta = json.loads((run / "model.onnx.json").read_text(encoding="utf-8"))
     report = {"split": split, "images": len(images)}
     for name, make in (("float", float_net), ("int8", int8_net)):
         if name == "int8" and not (run / "int8" / "graph.native").exists():
             continue
-        map50_95, map50 = score(images, found, cfg, strides, make(run))
+        map50_95, map50 = score(images, found, cfg, meta["stride"], make(run))
         report[name] = {"map50_95": round(map50_95, 4), "map50": round(map50, 4)}
-    if "int8" in report:
-        report["drop"] = round(report["float"]["map50_95"] - report["int8"]["map50_95"], 4)
-        report["passes"] = report["drop"] <= cfg["eval"]["gate"]
-    return report
+    return verdict(report, meta.get("trained"), cfg["eval"])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -165,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     out.write_text(yaml.safe_dump(report, sort_keys=False), encoding="utf-8")
     print(yaml.safe_dump(report, sort_keys=False))
-    return 0 if report.get("passes", True) else 1
+    return 0 if report["passes"] else 1
 
 
 if __name__ == "__main__":

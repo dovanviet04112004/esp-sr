@@ -1,7 +1,8 @@
 """The detect chain's package (KEHOACH 3.18): model.pt and data/ in YOLO's layout as a server hands them over, the
 chip's letterbox, and the COCO 2017 test package: yolo26n.pt, a seeded train2017 sample as train, val2017 halved by
-the seed into val and test, read from raw/vision/coco2017 and written to interim/<package>.
-Run: python -m srpipe.tasks.detect.data coco-urls (the train sample to download) | coco"""
+the seed into val and test, read from raw/vision/coco2017 and written to interim/<package>; and its copy with every
+label on the wrong class, the mAP gate's negative control.
+Run: python -m srpipe.tasks.detect.data coco-urls (the train sample to download) | coco | coco-broken"""
 
 from __future__ import annotations
 
@@ -191,9 +192,34 @@ def build_coco(cfg: dict, paths: dict) -> Path:
     return out
 
 
+def shifted(line: str, n_classes: int) -> str:
+    """A YOLO label line with its class moved to the next one, the last wrapping to 0."""
+    c, rest = line.split(maxsplit=1)
+    return f"{(int(c) + 1) % n_classes} {rest}"
+
+
+def build_broken(cfg: dict, paths: dict) -> Path:
+    """The test package with every label's class moved to the next one and each split cut to coco.broken_images: a
+    server's package whose labels miss its model, the negative control of the mAP gate (KEHOACH 3.18 step 4)."""
+    found = package(paths["interim"] / cfg["package"])
+    out = paths["interim"] / f"{cfg['package']}_broken_labels"
+    if (out / "data" / "data.yaml").exists():
+        return out
+    for split in SPLITS:
+        picks = found.images[split][: cfg["coco"]["broken_images"]]
+        rows = {
+            p.name: [shifted(line, len(found.names)) for line in found.labels_of(p).read_text("utf-8").splitlines()]
+            for p in picks
+        }
+        write_split(out, split, {p.name: p.read_bytes() for p in picks}, rows)
+    shutil.copyfile(found.model, out / "model.pt")
+    shutil.copyfile(found.root / "data" / "data.yaml", out / "data" / "data.yaml")
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("step", choices=["coco-urls", "coco"])
+    parser.add_argument("step", choices=["coco-urls", "coco", "coco-broken"])
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     args = parser.parse_args(argv)
     cfg, paths = apply_overrides(load_yaml(CONFIG), args.overrides), data_paths()
@@ -202,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
         for name in train_sample(train, cfg["coco"]["train_count"], cfg["coco"]["seed"]):
             print(f"{cfg['coco']['train_url']}/{name}")
         return 0
-    out = build_coco(cfg, paths)
+    out = build_broken(cfg, paths) if args.step == "coco-broken" else build_coco(cfg, paths)
     found = package(out)
     print(f"{out}: {len(found.names)} classes, " + ", ".join(f"{s} {len(found.images[s])}" for s in SPLITS))
     return 0
