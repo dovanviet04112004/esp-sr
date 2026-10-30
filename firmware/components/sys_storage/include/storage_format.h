@@ -166,3 +166,31 @@ _Static_assert(offsetof(storage_model_header_t, spk_noise_edges) == 0x240,
                "the noise edges follow the entries (KEHOACH 6.3)");
 _Static_assert(offsetof(storage_model_header_t, spk_noisy_milli_z) == 0x24c,
                "the noisy thresholds follow the edges (KEHOACH 6.3)");
+
+#define STORAGE_VISION_MAGIC 0x49565253u // "SRVI" little-endian
+#define STORAGE_VISION_FORMAT_VER 1
+#define STORAGE_VISION_HEADER_BYTES 4096 // one flash sector, written last
+#define STORAGE_VISION_VERSION_BYTES 32
+#define STORAGE_VISION_MAX_CLASSES 120
+#define STORAGE_VISION_CLASS_BYTES 32 // UTF-8, NUL-padded
+#define STORAGE_VISION_LABEL "vision_0"
+
+typedef struct {
+    uint32_t magic;
+    uint32_t format_ver;
+    char version[STORAGE_VISION_VERSION_BYTES]; // the server's name for the model
+    uint16_t size;                              // S of the S x S input
+    uint16_t classes;                           // class channels, names in order
+    uint16_t score_permille;                    // lowest score a box keeps
+    uint16_t top_k;                             // boxes kept a picture, best first
+    uint32_t espdl_offset;                      // from the partition start
+    uint32_t espdl_size;
+    uint8_t sha256[STORAGE_MODEL_SHA256_BYTES]; // of the .espdl
+    uint8_t reserved[40];
+    char names[STORAGE_VISION_MAX_CLASSES][STORAGE_VISION_CLASS_BYTES];
+    uint8_t pad[STORAGE_VISION_HEADER_BYTES - 0x80 - STORAGE_VISION_MAX_CLASSES * STORAGE_VISION_CLASS_BYTES];
+} storage_vision_header_t;
+
+_Static_assert(offsetof(storage_vision_header_t, names) == 0x80, "class names start at 0x80 (KEHOACH 6.3)");
+_Static_assert(sizeof(storage_vision_header_t) == STORAGE_VISION_HEADER_BYTES,
+               "vision header is one 4 KB sector (KEHOACH 6.3)");

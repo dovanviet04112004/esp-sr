@@ -2345,14 +2345,14 @@ tách theo seed.
 
 **Ảnh thị giác và khe.** Model thị giác nằm trong ảnh riêng, khe riêng `vision_0`, không chung ảnh model tiếng nói.
 Nhờ vậy server đổi model mà không đụng các nhánh tiếng nói.
-- Ảnh gồm header (magic, phiên bản khuôn, phiên bản model, S, số lớp, ngưỡng điểm, K, sha256, tên lớp) rồi tới
-  `.espdl`. Header ghi sau cùng.
+- Ảnh gồm header 4 KB (magic, phiên bản khuôn, phiên bản model, S, số lớp, ngưỡng điểm, K, sha256, tên lớp) rồi
+  tới `.espdl`, khuôn ở §6.3. Header ghi sau cùng.
 - Trọng số đọc thẳng từ flash qua ánh xạ, không chép sang PSRAM, như speaker b3 (ADR-0028). PSRAM chỉ chứa tensor
   trung gian.
-- Bảng phân vùng sẽ thành: `ota_0` 3 MiB, `models_0` 9 MiB, `vision_0` 3,25 MiB, `storage` 0,5 MiB.
-  - Ảnh tiếng nói nặng 5,17 MiB với b0, 8,91 MiB với b3; YOLO26n nặng 2,93 MiB.
+- Bảng phân vùng (§6.1): `ota_0` 3 MiB, `models_0` 9 MiB, `vision_0` 3,25 MiB, `storage` 0,5 MiB.
+  - Ảnh tiếng nói nặng 5,17 MiB với b0, 8,91 MiB với b3; YOLO26n COCO của repo nặng 2,86 MiB (`measurements/detect.md`
+    §2).
   - Hai khe vision thì không vừa: `models_0` còn ~5,3 MiB, b0 dư 0,1 MiB, b3 không vào.
-- §6.1 và §6.3 đổi cùng một commit với `partitions.csv` và `storage_format.h` (E15-T4).
 
 **Đẩy xuống qua Wi-Fi.**
 1. Host phục vụ file ảnh thị giác qua HTTP và đăng tin retained `down/vision`: phiên bản, URL, sha256, cỡ.
@@ -3665,19 +3665,22 @@ nvs,        data, nvs,      0x9000,    0x6000,
 otadata,    data, ota,      0xF000,    0x2000,
 phy_init,   data, phy,      0x11000,   0x1000,
 nvs_keys,   data, nvs_keys, 0x12000,   0x1000,   encrypted
-ota_0,      app,  ota_0,    0x20000,   0x300000,        # 3 MB   firmware, khe duy nhất
-models_0,   data, 0x40,     0x320000,  0xB00000,        # 11 MB  ns + wake + command + speaker + synth
-storage,    data, littlefs, 0xE20000,  0x1C0000,        # 1,75 MB bộ lệnh, câu trả lời
+ota_0,      app,  ota_0,    0x20000,   0x300000,        # 3 MiB    firmware, khe duy nhất
+models_0,   data, 0x40,     0x320000,  0x900000,        # 9 MiB    ns + wake + command + speaker + synth
+vision_0,   data, 0x43,     0xC20000,  0x340000,        # 3,25 MiB ảnh thị giác của detect (§3.18)
+storage,    data, littlefs, 0xF60000,  0x80000,         # 0,5 MiB  bộ lệnh, câu trả lời
 coredump,   data, coredump, 0xFE0000,  0x10000,
 # còn trống: 0xFF0000 → 0x1000000 (64 KB)
 ```
 
-**Một khe model 11 MB, một khe app** (ADR-0028, chủ repo 28/10). Ảnh model mang `command_ctc` 3,45 MB, `speaker` b3
-5,40 MB và nhóm chuẩn 0,29 MB của nó (§3.17), ~9,14 MB; còn ~1,9 MB cho `ns` (337 KB với NSNet-16k L, ADR-0014),
-`wake` (~100 KB 🔬) và `synth`. Để có chỗ ấy, bảng bỏ khe app thứ hai `ota_1` và phân vùng `voice`; `models_0` bắt đầu
-ngay sau `ota_0`. `nvs`, `storage`, `coredump` không dời, nên bộ lệnh, ngưỡng và danh sách người nói còn nguyên khi
-bảng đổi. Cái giá:
-- không còn OTA, cũng không còn quay về model cũ khi cập nhật hỏng (§7.6); E13 muốn OTA thì phải xếp lại bảng;
+**Một khe model tiếng nói 9 MiB, một khe thị giác, một khe app** (ADR-0028, ADR-0030). Ảnh model tiếng nói nặng
+5,17 MiB với b0 và 8,91 MiB với b3, nên với b3 `models_0` chỉ còn ~0,09 MiB: `ns` (337 KB với NSNet-16k L, ADR-0014)
+hay `synth` vào thì phải về b0 hoặc xếp lại bảng. `vision_0` mang ảnh thị giác (§6.3), ghi qua Wi-Fi hay
+`make vision-flash`, không đụng ảnh tiếng nói. `storage` chứa `set.json` (5,5 KB với bộ 64 lệnh) và `vi.json` (0,7 KB):
+0,5 MiB là 128 khối LittleFS 4 KB, đủ cho bản tạm của lần thay bộ lệnh. `nvs`, `nvs_keys`, `coredump` không dời, nên
+ngưỡng và mẫu giọng còn nguyên khi bảng đổi; `storage` dời từ 0xE20000, nên lần nạp đầu với bảng này ghi lại ảnh
+LittleFS, và bộ lệnh lấy lại từ tin retained của broker (§6.4). Cái giá:
+- không còn OTA app, cũng không còn quay về model cũ khi cập nhật hỏng (§7.6); E13 muốn OTA thì phải xếp lại bảng;
 - `synth` ghép mẩu (E12-T2) đặt mẩu tiếng trong phần dư của `models_0` hay trong `storage` khi tới lượt.
 
 **Slot app 3 MB** vì esp-dl chiếm ~860 KB flash khi link (số của repo face attendance, cùng chip); cộng
@@ -3687,9 +3690,14 @@ Wi-Fi, MQTT, TLS, ảnh dựng 2,12 MB đo (28/10). `idf.py size` trong CI báo 
 - `ota_0` dài 3,5 MB, vì app thử của `ai_engine` nhúng probe của mọi khối, và với một run đã học thì quá 3 MB;
 - 2,5 MB còn lại của vùng `ota_1` cũ là khe nháp `models_1`. Probe của `ai_engine`, bản ghi từng vòng của
   `make listen-unit` và các ca tự dựng ảnh model ghi vào đó;
-- `models_0` 6 MB ở 0x620000 mang ảnh dò, và `voice` mang chuỗi của `make ai-unit-speaker CHAIN=1`.
+- `models_0` 6 MB ở 0x620000 mang ảnh dò, và `voice` mang chuỗi của `make ai-unit-speaker CHAIN=1`;
+- `voice` phủ đúng khoảng của `vision_0`; `nvs`, `nvs_keys`, `storage`, `coredump` ở đúng chỗ của bảng sản phẩm
+  (`test_pack_models.py` kiểm), nên ngưỡng, mẫu giọng và bộ lệnh còn nguyên qua app thử. Ảnh thị giác của app thử nằm
+  trong khe dò `models_0`.
 
-Hai bảng khác nhau, nên sau mọi app thử, `make product` ghi lại cả bảng phân vùng, ảnh model và `storage`.
+Hai bảng khác nhau, nên sau mọi app thử, `make product` ghi lại cả bảng phân vùng, ảnh model và `storage`. Khe
+`vision_0` thì không: app thử để header của nó hỏng, nhận diện tắt, và tin retained `down/vision` kích board tải
+lại model của server (§3.18); lúc dựng thì `make vision-flash`.
 
 Bảng phân vùng không đi qua OTA được: đổi bảng là nạp lại qua cổng CH340.
 
@@ -3799,6 +3807,32 @@ firmware biên dịch với nó trong `gen_listen.h`. Ảnh mang băm khác thì
 băm: `ai_engine_has(AI_ENGINE_MODEL_COMMAND)` trả false, `svc_listen` không nghe, còn `wake` và `ns`, không đọc
 `listen.yaml`, vẫn nạp. Không có chốt này, đổi `lead_s` từ 2,0 sang 1,25 s vẫn nạp được model, vẫn chạy, và nhận kém
 đi mà không có dấu hiệu nào.
+
+**Ảnh thị giác** (khe `vision_0`, §3.18). Khuôn khai ở `storage_format.h` (`storage_vision_header_t`), phiên bản
+riêng, không chung `format_ver` với ảnh tiếng nói.
+
+```
+offset 0x000  header 4 KB, đúng một sector, ghi sau cùng
+   +0x000 magic           'SRVI'
+   +0x004 format_ver      u32, 1 cho khuôn này
+   +0x008 version         char[32] — tên server đặt cho model, UTF-8
+   +0x028 size            u16 — S của đầu vào S×S
+   +0x02A classes         u16 — số kênh lớp của mạng, ≤ 120
+   +0x02C score_permille  u16 — điểm thấp nhất một khung được giữ, ‰
+   +0x02E top_k           u16 — số khung giữ lại mỗi ảnh, điểm cao trước
+   +0x030 espdl_offset    u32 — từ đầu phân vùng, 0x1000
+   +0x034 espdl_size      u32
+   +0x038 sha256          [32] — của `.espdl`
+   +0x058 dự trữ 40 B
+   +0x080 names[120][32]  — tên lớp theo thứ tự kênh, UTF-8, đệm NUL
+   +0xF80 dự trữ tới hết 4 KB
+offset 0x1000 `.espdl`, không kèm cặp thử của `model->test()`
+```
+
+Bước đóng gói lấy `.espdl`, `names` và S từ dòng `detect` của `models.lock.json` cùng `meta.json`, `score_permille`
+và `top_k` từ `detect.yaml` (0,25 và 32, §3.18). Ghi ảnh mới, qua USB (`make vision-flash`) hay qua Wi-Fi, đều xoá
+sector header trước, ghi `.espdl`, rồi mới ghi header: mất điện giữa chừng thì header vắng, nhận diện tắt. `ai_engine`
+từ chối dựng nhánh khi magic hay `format_ver` sai, hay khi `classes` khác số kênh lớp của mạng.
 
 ### 6.4 LittleFS (`storage`)
 

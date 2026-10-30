@@ -26,7 +26,7 @@ def test_the_header_fits_the_layout_storage_format_fixes() -> None:
     assert pack_models.HEAD.size == 64 and pack_models.ENTRY.size == 64
     assert pack_models.HEAD.size + pack_models.MAX_ENTRIES * pack_models.ENTRY.size <= pack_models.HEADER_BYTES
     assert pack_models.MAGIC.to_bytes(4, "little") == b"SRMD"
-    assert pack_models.slot_bytes() == 0xB00000
+    assert pack_models.slot_bytes() == 0x900000
 
 
 def rows_of(table) -> dict[str, tuple[int, int]]:
@@ -41,7 +41,8 @@ def test_the_unit_table_keeps_the_products_settings_in_place_and_lays_apps_and_m
     for kept in ("nvs", "otadata", "phy_init", "nvs_keys", "storage", "coredump"):
         assert unit.pop(kept) == product.pop(kept), kept
     span = min(start for start, _ in product.values()), max(start + size for start, size in product.values())
-    assert set(product) == {"ota_0", "models_0"} and {"ota_0", "models_0", "models_1", "voice"} == set(unit)
+    assert set(product) == {"ota_0", "models_0", "vision_0"}
+    assert {"ota_0", "models_0", "models_1", "voice"} == set(unit)
     assert span == (min(start for start, _ in unit.values()), max(start + size for start, size in unit.values()))
     assert pack_models.partition_bytes("models_1", pack_models.UNIT_PARTITIONS) == unit["models_1"][1]
 
