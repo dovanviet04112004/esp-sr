@@ -123,7 +123,7 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | ViMD (Vietnamese Multi-Dialect) | `command` | ~100 giờ 🔬, 63 tỉnh, có mã người nói và giới | CC BY-NC-ND 4.0, **không phái sinh** | giọng mọi vùng; câu dài ~19 s, quá `train.max_s`: cắt lại theo mốc từ trước khi vào split |
 | **Mẩu trích theo lời** từ các kho tiếng Việt trên Hugging Face (`srpipe/core/extract.py`, `configs/common/extract.yaml`) | người thật nói đúng từ đánh thức và các lệnh của bộ lệnh, mỗi mẩu chỉ chứa cụm ấy; `wake` dương, `command` học | chỉ các câu có lời đọc ra một cụm; cắt xong câu gốc bị xoá, chỉ giữ mẩu | theo từng kho, ghi ở `DU_LIEU.md` | kho lớn (GigaSpeech2, YODAS2, PhoAudiobook, VietSpeech, viVoice…) quá cỡ ổ dữ liệu: dò lời qua mạng, chỉ kéo phần âm thanh chứa câu khớp; lệnh chưa học của E11-T13 không trích; chỉ vào tập học; kho tự ghi là tiếng tổng hợp (dolly-audio) vẫn trích nhưng mẩu mang nhãn `synth` ở `clips.tsv`, `wake` không lấy làm người thật |
 | Speech Commands v0.02 (Google) | `wake` tạm: dương "on", âm bản khó là các từ khác (ADR-0029) | 105 829 mẩu ≤ 1 s, 35 từ tiếng Anh, 2 618 người nói | CC BY 4.0 | người thật nhiều giọng; `val` theo `testing_list.txt` của bộ |
-| COCO val2017 | `detect` bản thử: ảnh hiệu chuẩn và tập kiểm mAP (§3.18), không học | 5 000 ảnh, 80 lớp | nhãn CC BY 4.0, ảnh theo giấy phép Flickr của từng ảnh | chỉ hiệu chuẩn và chấm bản thử |
+| COCO 2017 | `detect` bản thử (§3.18), không học: mẫu train2017 làm `train` để hiệu chuẩn, val2017 chia đôi làm `val` và `test` | val2017 5 000 ảnh, 80 lớp | nhãn CC BY 4.0, ảnh theo giấy phép Flickr của từng ảnh | chỉ hiệu chuẩn và chấm bản thử |
 | Lệnh điều khiển nhà tự thu (repo `edge-ai-voice-control-esp32`) | `command` | ~1 300 lệnh 1 s: bật/tắt đèn, bật/tắt quạt, bật/tắt hết; nhiễu phòng | MIT | người thật nói đúng lệnh của bộ lệnh; không có mã người nói, chỉ vào tập học |
 | MUSAN | `ns`, tăng cường | ~100 giờ nhiễu, nhạc, lời nói | CC BY 4.0 phần lớn 🔬 | |
 | DEMAND | `ns` | 15 môi trường, 16 kênh | CC BY-SA 3.0 🔬 | |
@@ -264,8 +264,8 @@ người nói. Embedding của khảo sát nằm ở `cache/`; mẫu giọng c�
 
 Giấy phép **lan sang mô hình**: model huấn luyện trên VIVOS mang ràng buộc phi thương mại của VIVOS.
 `docs/DU_LIEU.md` ghi giấy phép của từng nguồn, và `contracts/models.lock.json` ghi model nào đã học
-từ nguồn nào. Model `detect` mang giấy phép của dữ liệu server học; Ultralytics (AGPL-3.0) chỉ chạy ở server,
-không vào repo (§3.18).
+từ nguồn nào. Model `detect` mang giấy phép của dữ liệu server học. Ultralytics (AGPL-3.0) chỉ chạy trong dự án uv
+riêng `ml/detect_ref/ultralytics/` để xuất ONNX, không vào `srpipe` (§3.18).
 
 ---
 
@@ -2304,31 +2304,36 @@ S3. Mọi phép kiểm chip khớp Python của `wake`, `command`, `pitch`, `spe
 phần nạp trước dcache (ADR-0026). Mạng chạy bằng conv của esp-dl nhanh lên 3,5–4%, mạng chủ yếu op riêng của repo
 gần như không đổi (`measurements/latency.md` §35).
 
-**Server giao gì.** Một gói là một thư mục:
-- `model.onnx`: mạng đã học, xuất theo bản vá đầu dò trong `export.py` của quy trình YOLO26 của Espressif. Đầu vào
-  `images` 1×3×S×S, S bội 32 trong 160–640, opset 13, hình tĩnh. Sáu đầu ra thô `one2many_p3…p5`, `one2one_p3…p5`,
-  mỗi đầu ghép 4 kênh khung với các kênh lớp. Khối Attention xuất theo bản vá ấy, không có phần giải khung;
-- `classes.json`: tên lớp theo thứ tự kênh lớp;
-- `calib/`: vài trăm ảnh hiệu chuẩn đại diện cho cảnh dùng;
-- `check/images/` và `check/labels/`: tập kiểm, mỗi ảnh một file nhãn khung theo khuôn YOLO (lớp, tâm, cỡ, đã chia
-  cho cỡ ảnh).
+**Server giao gì.** Server học model rồi đưa xuống một gói thư mục, không làm gì thêm cho chip:
+- `model.pt`: model gốc YOLO26 đã học, đúng file Ultralytics ghi ra, kèm bản Ultralytics đã dùng;
+- `data/`: bộ dữ liệu theo khuôn YOLO, `images/{train,val,test}/` và `labels/{train,val,test}/`, mỗi ảnh một file
+  nhãn khung (lớp, tâm, cỡ, đã chia cho cỡ ảnh); `data.yaml` ghi tên lớp theo thứ tự.
 
-Repo không chạy Ultralytics (AGPL-3.0): xuất ONNX là việc của server. ONNX của bản thử COCO xuất một lần ngoài repo;
-gói thử lấy ảnh hiệu chuẩn từ train2017, tập kiểm từ val2017.
+Gói thử là `yolo26n.pt` học sẵn trên COCO. `train` là mẫu rút từ train2017, `val` và `test` là hai nửa của val2017,
+tách theo seed.
 
-**Nhập và lượng tử** (`ml`, nhánh `detect`), theo quy trình YOLO26 của Espressif trong
-`examples/tutorial/how_to_quantize_model/quantize_yolo26` của esp-dl (Apache-2.0):
-1. kiểm toán tử, vá đồ thị: bỏ nhánh one-to-many, tách ba đầu one-to-one thành sáu tensor, khung và lớp ở ba tầng;
-2. PTQ trên ảnh hiệu chuẩn, rồi TQT. Ảnh hiệu chuẩn và ảnh kiểm đi qua đúng letterbox của chip (láng giềng gần
-   nhất, viền 114), không kéo dãn như notebook của Espressif;
-3. int8 cho thân, int16 cho đầu khung, đầu lớp và lối ra của cổ;
-4. Swish int16 bằng bảng nội suy bậc thang; Add và Concat căn về chung một thang;
-5. xuất `.espdl`.
-
-Quy trình ấy ghim esp-ppq 1.2.4, repo ghim 1.3.11. Nhánh dùng bản của repo và vá chỗ khác, như các bản vá ESP-PPQ đã
-có. Model chỉ xuống board khi qua hai cửa:
-- mAP50-95 int8 trên tập kiểm của gói không tụt quá ngưỡng của gói so với float 🔬;
-- chip khớp mô phỏng ESP-PPQ từng giá trị trên vài ảnh, như mọi nhánh (§3.14).
+**Chuỗi từ gói xuống `.espdl`.** Mỗi bước ghi vào một run `ml/artifacts/detect/runs/<ngày>_<sha>_<cấu hình>/`.
+1. Nhận gói: kiểm khuôn thư mục và `data.yaml`, băm danh sách ảnh của ba tập thành `split.lock` của run.
+2. Xuất ONNX từ `model.pt`, trong dự án uv riêng `ml/detect_ref/ultralytics/`, ghim Ultralytics và torch như
+   `spk_ref/` (§4.4). `srpipe` không bao giờ import Ultralytics (AGPL-3.0). Bản xuất dùng bản vá đầu dò trong
+   `export.py` của quy trình YOLO26 của Espressif (Apache-2.0):
+   - đầu vào `images` 1×3×S×S, S bội 32 trong 160–640, opset 13, hình tĩnh;
+   - sáu đầu ra thô `one2many_p3…p5`, `one2one_p3…p5`, mỗi đầu ghép 4 kênh khung với các kênh lớp, không có phần giải
+     khung;
+   - khối Attention xuất theo bản vá ấy.
+   Bước này đối chiếu ONNX với `model.pt` trên ảnh `val`: lệch quá ngưỡng thì dừng.
+3. Lượng tử bằng ESP-PPQ của repo, theo quy trình YOLO26 của Espressif:
+   - bỏ nhánh one-to-many, tách ba đầu one-to-one thành sáu tensor, khung và lớp ở ba tầng;
+   - PTQ trên một mẫu ảnh `train` rút theo seed, rồi TQT. Ảnh hiệu chuẩn và ảnh chấm đi qua đúng letterbox của chip
+     (láng giềng gần nhất, viền 114), không kéo dãn như notebook của Espressif;
+   - int8 cho thân, int16 cho đầu khung, đầu lớp và lối ra của cổ;
+   - Swish int16 bằng bảng nội suy bậc thang; Add và Concat căn về chung một thang;
+   - xuất `.espdl`.
+   Quy trình của Espressif ghim esp-ppq 1.2.4, repo ghim 1.3.11, vốn đã có sẵn TQT và pass LUT; chỗ khác vá như các
+   bản vá ESP-PPQ đã có.
+4. Chấm mAP50-95 float và int8 trên `val`. int8 tụt quá ngưỡng của cấu hình so với float thì model không xuống
+   board 🔬. `test` chỉ để báo số cuối, không dùng để chọn gì.
+5. Chip khớp mô phỏng ESP-PPQ từng giá trị trên vài ảnh, như mọi nhánh (§3.14).
 
 **Ảnh thị giác và khe.** Model thị giác nằm trong ảnh riêng, khe riêng `vision_0`, không chung ảnh model tiếng nói.
 Nhờ vậy server đổi model mà không đụng các nhánh tiếng nói.
@@ -2662,9 +2667,10 @@ ml/
 │   │   │                              #   §3.14, deploy xuất một hàng chạy dòng cùng bảng front end vào
 │   │   │                              #   firmware/models/pitch/; probe.py bản dò board của một hàng trên một cửa
 │   │   │                              #   sổ cố định; decode.py giải cao độ và độ tin từ đầu ra của mạng
-│   │   ├── detect/{data.py, quant.py, eval.py, pack.py}   # §3.18: data.py nhập gói của server, kiểm và vá
-│   │   │                              #   ONNX; quant.py lượng tử theo quy trình YOLO26 của Espressif; eval.py
-│   │   │                              #   chấm mAP float và int8; pack.py đóng ảnh thị giác cho vision_0
+│   │   ├── detect/{data.py, quant.py, eval.py, pack.py}   # §3.18: data.py nhận gói của server (model.pt và
+│   │   │                              #   data/ khuôn YOLO), letterbox của chip; quant.py gọi detect_ref xuất
+│   │   │                              #   ONNX rồi lượng tử theo quy trình YOLO26 của Espressif; eval.py chấm
+│   │   │                              #   mAP float và int8; pack.py đóng ảnh thị giác cho vision_0
 │   │   └── synth/                     # chỉ khi E12-T1 chọn mạng
 │   │
 │   ├── metrics/{sisdr.py, stoi.py, pesq.py, erle.py, doa_err.py, det.py, mic_pair.py, vad.py, pitch.py}
@@ -2693,6 +2699,8 @@ ml/
 │                                      #   tts/; trọng số tải vào cache/ theo commit ghim và sha256
 ├── spk_ref/<họ>/{pyproject.toml, uv.lock, run.py}   # ecapa, speakerlab, redimnet: bộ trích embedding người
 │                                      #   nói của khảo sát §3.17, cùng khuôn afe_ref/
+├── detect_ref/ultralytics/{pyproject.toml, uv.lock, run.py}   # §3.18: xuất ONNX từ model.pt của server bằng
+│                                      #   Ultralytics ghim bản, đối chiếu với model.pt; srpipe không import nó
 ├── scripts/                           # đánh số theo thứ tự chạy; mỗi script một việc
 │   ├── 10_prepare.sh  ├── 11_scenes.sh
 │   ├── 20_train_ns.sh ├── 21_train_wake.sh ├── 22_train_command.sh ├── 23_train_synth.sh

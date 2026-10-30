@@ -29,8 +29,8 @@ repo không học model ấy, mà làm sẵn từ bước nhập model trở xu�
 | | Wi-Fi, hai khe | đổi khe nguyên tử | `models_0` còn ~5,3 MiB: b0 dư 0,1 MiB, b3 không vào |
 | | USB | không phải đổi gì ở mạng | không đúng việc server đẩy xuống |
 | Ảnh vào | **host gửi ảnh, camera sau** | thử trọn đường ngay trên board hiện có | chưa nhận diện cảnh thật |
-| Server giao gì | **ONNX, tên lớp, ảnh hiệu chuẩn, tập kiểm** | repo không chạy Ultralytics (AGPL-3.0) | server phải xuất ONNX theo đầu one-to-one |
-| | file `.pt` của Ultralytics | server làm ít hơn | repo phải chạy Ultralytics |
+| Server giao gì | **model gốc `model.pt` và dữ liệu `train`, `val`, `test` khuôn YOLO** | server chỉ học; chuỗi xuống chip nằm trọn ở repo | repo phải chạy Ultralytics để xuất ONNX, trong một môi trường riêng |
+| | ONNX đã vá đầu dò, tên lớp, ảnh hiệu chuẩn, tập kiểm | repo không chạy Ultralytics (AGPL-3.0) | server phải biết khuôn của chip |
 | Trọng số | **đọc thẳng từ flash** | PSRAM chỉ chứa tensor trung gian | chậm hơn chép sang PSRAM, bù bằng tối ưu như b3 |
 | | chép sang PSRAM | nhanh hơn | thêm ~3 MiB PSRAM |
 
@@ -40,8 +40,12 @@ Chủ repo chọn các phương án in đậm.
 
 - Mạng là YOLO26n, chạy bằng esp-dl và `espressif/yolo26`; nâng esp-dl lên 3.3.14 trước mọi việc khác của nhánh, rồi
   kiểm lại mọi model tiếng nói khớp từng bit.
-- Lượng tử theo quy trình YOLO26 của Espressif: int8 cho thân, int16 cho đầu dò, Swish int16 bằng bảng; chặn bằng mAP
-  int8 trên tập kiểm của gói.
+- Server giao model gốc `model.pt` và dữ liệu khuôn YOLO chia sẵn `train`, `val`, `test`. Chủ repo chọn ONNX lúc đầu,
+  rồi đổi trong ngày 30/10: chuỗi xuống chip phải nằm trọn ở repo.
+- Repo xuất ONNX trong dự án uv riêng `ml/detect_ref/ultralytics/` (Ultralytics ghim bản), đối chiếu với `model.pt`;
+  `srpipe` không import Ultralytics.
+- Lượng tử theo quy trình YOLO26 của Espressif: int8 cho thân, int16 cho đầu dò, Swish int16 bằng bảng. Hiệu chuẩn
+  trên mẫu `train`, chặn bằng mAP int8 trên `val`, báo số trên `test`.
 - Model thị giác nằm trong ảnh riêng, khe riêng `vision_0` 3,25 MiB, header ghi sau cùng. `models_0` còn 9 MiB,
   `storage` 0,5 MiB.
 - Host báo phiên bản mới qua MQTT retained; board tải HTTP vào PSRAM, kiểm sha256, rồi mới ghi khe và nạp lại.
