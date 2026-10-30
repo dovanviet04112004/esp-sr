@@ -68,11 +68,13 @@ def export(
     out: Path,
     streaming_input_shape: list[int] | None = None,
     test_input: np.ndarray | tuple[np.ndarray, ...] | None = None,
+    int16_lut_step: int | None = None,
 ) -> Path:
     """Write out as .espdl, with StreamingCache ahead of every causal convolution when streaming_input_shape gives
-    the one-hop input; test_input, of that shape, or a tuple of one array an input, is stored for model->test(). The
-    exporter works on its own copy, so graph stays the whole-sequence one the Simulator runs. A graph whose passive
-    ops rescale, or whose shapes esp-dl would build otherwise (espdl_shapes), is refused (KEHOACH 3.14)."""
+    the one-hop input; test_input, of that shape, or a tuple of one array an input, is stored for model->test();
+    int16_lut_step is the step EspdlLUTFusionPass built its tables with. The exporter works on its own copy, so graph
+    stays the whole-sequence one the Simulator runs. A graph whose passive ops rescale, or whose shapes esp-dl would
+    build otherwise (espdl_shapes), is refused (KEHOACH 3.14)."""
     import esp_ppq.lib as ppq_lib
     from esp_ppq.api.espdl_interface import generate_test_value, get_target_platform
 
@@ -91,6 +93,7 @@ def export(
         export_config=True,
         streaming_input_shape=streaming_input_shape,
         streaming_custom_passes=[cache_each_causal_conv] if streaming_input_shape is not None else None,
+        **({"int16_lut_step": int16_lut_step} if int16_lut_step is not None else {}),
     )
     espdl_shapes.check(out.with_suffix(".info"))
     return out
