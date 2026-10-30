@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 import tempfile
 from pathlib import Path
 
@@ -17,10 +16,11 @@ import numpy as np
 
 from srpipe.core.config import ML_ROOT, apply_overrides, data_paths, load_yaml
 from srpipe.core.run_dir import create_run_dir
+from srpipe.scenes import refs
 from srpipe.tasks.detect import CONFIG, data
 
 BRANCH = "detect"
-REF = ML_ROOT / "detect_ref" / "ultralytics"
+REFS = ML_ROOT / "detect_ref"
 TARGET = "esp32s3"
 ONE_TO_ONE = ("one2one_p3", "one2one_p4", "one2one_p5")
 ONE_TO_MANY = ("one2many_p3", "one2many_p4", "one2many_p5")
@@ -39,26 +39,19 @@ def import_run(cfg: dict, paths: dict) -> Path:
             lists.append(listing)
         run = create_run_dir(paths["artifacts"], BRANCH, cfg, lists)
     spec = cfg["export"]
-    subprocess.run(
-        [
-            "uv",
-            "run",
-            "--project",
-            str(REF),
-            "python",
-            str(REF / "run.py"),
-            str(found.model),
-            str(run / "model.onnx"),
-            "--size",
-            str(cfg["size"]),
-            "--check",
-            str(found.root / "data" / "images" / "val"),
-            "--count",
-            str(spec["check_images"]),
-            "--rtol",
-            str(spec["rtol"]),
-        ],
-        check=True,
+    refs.run(
+        "ultralytics",
+        str(found.model),
+        str(run / "model.onnx"),
+        "--size",
+        str(cfg["size"]),
+        "--check",
+        str(found.root / "data" / "images" / "val"),
+        "--count",
+        str(spec["check_images"]),
+        "--rtol",
+        str(spec["rtol"]),
+        projects=REFS,
     )
     meta = json.loads((run / "model.onnx.json").read_text(encoding="utf-8"))
     if meta["names"] != found.names:
