@@ -712,9 +712,11 @@ ai-unit-pitch: ## Run the pitch build of the ai_engine suite on board B: RUN=<ru
 
 # The pictures and expectations come from the lock's detect row, ESP-PPQ simulating it on the CPU; the good image goes
 # to models_0, the one with a flipped .espdl byte to voice, the pictures to models_1 (KEHOACH 3.18 step 5). TAPS adds
-# those blocks' outputs to the image and the check, to find the first one the chip computes otherwise.
-ai-unit-detect: ## Hold the detect branch to ESP-PPQ on eight COCO pictures on board B, and refuse a bad sha256 (E15-T5) [TAPS="<block> ..."]
-	$(ML_CPU) --extra train --extra espdl --extra detect python -m srpipe.tasks.detect.probe $(if $(TAPS),--taps $(TAPS))
+# those blocks' outputs to the image and the check, to find the first one the chip computes otherwise; PATCHES exports
+# the image under more export patches, which keep every integer, to time them without a new run (KEHOACH 3.14 step 2.3).
+ai-unit-detect: ## Hold the detect branch to ESP-PPQ on eight COCO pictures on board B, and refuse a bad sha256 (E15-T5) [TAPS="<block> ..."] [PATCHES="<patch> ..."]
+	$(ML_CPU) --extra train --extra espdl --extra detect python -m srpipe.tasks.detect.probe $(if $(TAPS),--taps $(TAPS)) \
+	  $(if $(PATCHES),--patches $(PATCHES))
 	@$(call fresh_sdkconfig,$(UNIT_APP)/build_detect/sdkconfig,$(call app_defaults,$(UNIT_APP)))
 	cd $(UNIT_APP) && rm -f build_detect/unit.status && idf.py -B build_detect -D SDKCONFIG=build_detect/sdkconfig -D UNIT_PROFILE=detect build && \
 	  $(WRITE_PART) models_0 --input main/probe/detect_vision.bin && \

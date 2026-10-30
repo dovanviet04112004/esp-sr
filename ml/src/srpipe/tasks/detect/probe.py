@@ -93,23 +93,24 @@ def block_output(graph, block: int) -> str:
     return last[-1].outputs[0].name
 
 
-def tapped(graph, taps: list[int], cfg: dict, row: dict, folder: Path) -> bytes:
-    """The vision image of graph with each tap block's output added as a graph output, exported afresh: a
-    diagnostic image that finds the first output the chip computes otherwise."""
+def reexported(graph, taps: list[int], cfg: dict, row: dict, folder: Path) -> bytes:
+    """The vision image of graph exported afresh under the patches in force, each tap block's output added as a graph
+    output: a diagnostic image that finds the first output the chip computes otherwise, or times export patches."""
     from srpipe.compress.quant import export_espdl
 
     for block in taps:
         name = block_output(graph, block)
         graph.outputs[name] = graph.variables[name]
-    export_espdl.export(graph, folder / "tapped.espdl", int16_lut_step=cfg["quant"]["lut_step"])
-    espdl = (folder / "tapped.espdl").read_bytes()
+    export_espdl.export(graph, folder / "probe.espdl", int16_lut_step=cfg["quant"]["lut_step"])
+    espdl = (folder / "probe.espdl").read_bytes()
     chip = row["chip"]
-    return pack.image(espdl, f"{row['run'][:28]}+t", row["size"], row["names"], chip["score_permille"], chip["top_k"])
+    return pack.image(espdl, f"{row['run'][:28]}+x", row["size"], row["names"], chip["score_permille"], chip["top_k"])
 
 
-def build(out: Path, taps: list[int]) -> dict[str, Path]:
+def build(out: Path, taps: list[int], patches: list[str]) -> dict[str, Path]:
     """Write detect_vision.bin, detect_broken.bin, detect_pictures.bin and detect_expect.bin under out; with taps, the
-    vision image and the expectations carry those blocks' outputs too."""
+    vision image and the expectations carry those blocks' outputs too; with patches, export patches beyond the run's,
+    which keep every integer, the vision image is exported under them as well."""
     from esp_ppq.executor import TorchExecutor
 
     from srpipe.compress.quant import esp_ppq_patches, export_espdl
@@ -127,10 +128,11 @@ def build(out: Path, taps: list[int]) -> dict[str, Path]:
     graph = export_espdl.load_native(run / "int8" / "graph.native")
     keep = row["chip"]["top_k"]
     blob, records, tables, shapes = bytearray(), [], [], None
+    extra = [p for p in patches if p not in cfg["esp_ppq_patches"]]
     with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
-        if taps:
-            with tempfile.TemporaryDirectory() as folder:
-                vision = tapped(graph, taps, cfg, row, Path(folder))
+        if taps or extra:
+            with tempfile.TemporaryDirectory() as folder, esp_ppq_patches.applied(extra):
+                vision = reexported(graph, taps, cfg, row, Path(folder))
         executor = TorchExecutor(graph=graph, device="cpu")
         for rgb in pictures_of(found):
             square, _ = data.letterbox(rgb, row["size"], row["pad"])
@@ -166,8 +168,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=PROBE_DIR)
     parser.add_argument("--taps", type=int, nargs="*", default=[], help="blocks whose outputs the chip reports too")
+    parser.add_argument("--patches", nargs="*", default=[], help="export patches beyond the run's for the image")
     args = parser.parse_args(argv)
-    for key, path in build(args.out, args.taps).items():
+    for key, path in build(args.out, args.taps, args.patches).items():
         print(f"{path}: {path.stat().st_size} bytes{f' for {SLOTS[key]}' if key in SLOTS else ''}")
     return 0
 
