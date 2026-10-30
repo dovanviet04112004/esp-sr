@@ -63,12 +63,15 @@ def package(root: Path) -> Package:
 
 @dataclass(frozen=True)
 class Letterbox:
-    """Where an image went in the letterboxed square: source pixels per square pixel, and the top-left border."""
+    """Where an image goes in the letterboxed square: source pixels per square pixel in float32, the top-left border and
+    the span the image fills."""
 
-    step_x: float
-    step_y: float
+    step_x: np.float32
+    step_y: np.float32
     left: int
     top: int
+    span_w: int
+    span_h: int
 
     def to_source(self, boxes: np.ndarray) -> np.ndarray:
         """Boxes (n, 4) x1 y1 x2 y2 in the square back to source pixels."""
@@ -78,25 +81,33 @@ class Letterbox:
         return out
 
 
-def letterbox(rgb: np.ndarray, size: int, pad: int) -> tuple[np.ndarray, Letterbox]:
-    """rgb (h, w, 3) uint8 by nearest neighbour into size x size, pad around, as espressif/yolo26's preprocess does."""
-    src_h, src_w = rgb.shape[:2]
-    scale_x, scale_y = size / float(src_w), size / float(src_h)
+def geometry(width: int, height: int, size: int) -> Letterbox:
+    """A width x height image's place in the size x size square as esp-dl's ImagePreprocessor computes it: float32
+    scales, the gap cut to an integer, half of it before the image."""
+    scale_x, scale_y = np.float32(size) / np.float32(width), np.float32(size) / np.float32(height)
     scale = min(scale_x, scale_y)
     left = top = 0
     span_w = span_h = size
     if scale_x < scale_y:
-        gap = size - int(scale * src_h)
+        gap = size - int(scale * np.float32(height))
         top, span_h = gap // 2, size - gap
     else:
-        gap = size - int(scale * src_w)
+        gap = size - int(scale * np.float32(width))
         left, span_w = gap // 2, size - gap
-    step_x, step_y = float(src_w) / span_w, float(src_h) / span_h
-    rows = np.minimum((np.arange(span_h) * step_y).astype(np.int64), src_h - 1)
-    cols = np.minimum((np.arange(span_w) * step_x).astype(np.int64), src_w - 1)
+    step_x, step_y = np.float32(width) / np.float32(span_w), np.float32(height) / np.float32(span_h)
+    return Letterbox(step_x, step_y, left, top, span_w, span_h)
+
+
+def letterbox(rgb: np.ndarray, size: int, pad: int) -> tuple[np.ndarray, Letterbox]:
+    """rgb (h, w, 3) uint8 by nearest neighbour into size x size, pad around, the source pixel of each picked in float32
+    as esp-dl's ImageTransformer picks it."""
+    src_h, src_w = rgb.shape[:2]
+    box = geometry(src_w, src_h, size)
+    rows = np.minimum((np.arange(box.span_h, dtype=np.float32) * box.step_y).astype(np.int64), src_h - 1)
+    cols = np.minimum((np.arange(box.span_w, dtype=np.float32) * box.step_x).astype(np.int64), src_w - 1)
     out = np.full((size, size, 3), pad, dtype=np.uint8)
-    out[top : top + span_h, left : left + span_w] = rgb[rows[:, None], cols[None, :]]
-    return out, Letterbox(step_x, step_y, left, top)
+    out[box.top : box.top + box.span_h, box.left : box.left + box.span_w] = rgb[rows[:, None], cols[None, :]]
+    return out, box
 
 
 def rgb_of(path: Path) -> np.ndarray:
