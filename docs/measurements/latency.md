@@ -1597,3 +1597,31 @@ phẩm với lượt thử, chủ repo nói trực tiếp "on" rồi lệnh, 11 
 - Sau một câu là chừng 1 s việc của nhân 0, nửa chấm lệnh, nửa kiểm giọng, và chỉ làm mạng nhanh hơn mới rút ngắn
   được nó. Chỗ còn lại: trọng số `command_ctc` ở flash (ADR-0028), mỗi bước 16 hop đọc lại 3,1 MB (§26); front end
   SwiftF0 2,4 ms mỗi hop, phần `sqrtf` và `ln` chưa bớt (`pitch.md` §7).
+
+## 35. esp-dl 3.3.11 → 3.3.14 (E15-T1)
+
+Nâng ngày 30/10, vì `espressif/yolo26` đòi esp-dl ~3.3.14 (KẾ HOẠCH §3.18).
+- esp-dl 3.3.14 kéo `dl_fft` ≥ 0.8.0. `dsp_spec` nhận 0.7.0–0.8.0, nên `espsr_compare` vẫn giữ 0.7.0 cho esp-sr 2.5.5
+  (KẾ HOẠCH §4.5.1).
+- App sản phẩm 2 140 720 → 2 137 584 B.
+
+Mọi phép kiểm chạy trên board B, cùng lệnh và cấu hình với mốc cũ:
+
+| Kiểm | Lệnh | Khớp | 3.3.11 | 3.3.14 |
+|---|---|---|---|---|
+| Cả chuỗi nghe trên các phiên Cửa 3 | `make listen-unit` | 7/7 lượt, 0 cửa sổ khác Python | việc 1 190–1 457 ms mỗi cửa sổ, quyết định 356–440 ms (29/10, §32) | việc 1 150–1 408 ms (−3,5% ở từng lượt), quyết định 346–428 ms |
+| `command_ctc` đang deploy, trọng số ở flash | `make ai-unit-ctc … ROW=percentile CONTRACT=v9 IN_FLASH=1` | lệch 0 | 126,3 ms mỗi khúc 16 bước (28/10, `KALDI=1 HOLD=pitch`, §26) | 121,6 ms (−3,7%), PSRAM 322 768 B |
+| speaker b0, trọng số ở flash | `make ai-unit-speaker … ROW=kl IN_FLASH=1` | lệch 0, cả khi nhân 1 ghi NVS | 408,5 ms trước hai đợt op cuối (§31); chưa đo ở flash sau đó | 380,4 ms; 415,1 ms khi nhân 1 ghi NVS |
+| speaker b3, trọng số ở flash | `make ai-unit-speaker … ROW=kl CUTS=0 IN_FLASH=1` | lệch 0 | 1 414,5 ms; 1 567,9 ms khi nhân 1 ghi NVS (§31) | 1 413,7 ms; 1 560,7 ms |
+| pitch SwiftF0, cửa sổ 16 khung | `make ai-unit-pitch … FRAMES=16` | 0 giá trị lệch | 26,8 ms, 1 675 µs mỗi hop (`pitch.md` §6) | 26,7 ms, 1 668 µs mỗi hop |
+| pitch SwiftF0, cửa sổ 256 khung | `make ai-unit-pitch …` | 0 giá trị lệch | — | 580,2 ms, 2 266 µs mỗi hop |
+| `wake`, 8 khung mỗi lượt | `make ai-unit-wake STEP=8` | 0 điểm lệch | 2 345 µs mỗi lượt (29/10) | 2 245 µs (−4,3%) |
+| Bốn đồ thị xen nhau ở nhân 0, `sach` ghi khung ở nhân 1 | `make ai-unit-cores` | 3/3 ca khớp từng bit | — | — |
+
+- Mạng chạy bằng conv và gemm của esp-dl nhanh lên 3,5–4%. Mạng chạy chủ yếu bằng op riêng của repo (speaker b3, pitch)
+  gần như không đổi.
+- Lần đầu gọi kiểm b3 thiếu `CUTS=0`: ảnh thử gồm cả các bản cắt nặng 13,3 MB, tràn khe 11 MB, nên dừng ở bước đóng
+  ảnh, chưa lên board.
+- Các app thử để lại δ2 50 và kiểm giọng tắt trong NVS. Đặt lại qua console: `nvs set kws cmd_margin 10 -t u16` và
+  `spk on`. Board đọc "speaker check on … 1 voiceprints" và "after the wake at 850 permille, delta1 300, delta2 10,
+  delta3 65535"; roster còn `spk_001 owner: enrolled`.
