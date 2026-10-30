@@ -266,3 +266,21 @@ bằng kênh 0, để cả hai đi đường vector của esp-dl:
 - `cv2` 8 → 16 kênh: 32,5 → 21,9 ms;
 - Swish của vùng ấy: 4,1 → 8,2 ms;
 - thêm 95 032 B PSRAM.
+
+## 6. Cỡ ảnh vào S (E15-T11, 30/10)
+
+Mỗi S là một run riêng từ cùng gói COCO và cùng `model.pt`, có cả ba bản vá ở bước xuất. Run 416 và 320 tạo bằng
+`make detect-import SET="size=<S>"`, đo trên board bằng `make ai-unit-detect RUN=<run>`, không deploy. Cả ba khớp mô phỏng
+từng giá trị trên 8 ảnh.
+
+| S | Run | mAP50-95 `val` float / int8 | Mỗi ảnh, trung bình / đỉnh | Nạp | PSRAM của đồ thị |
+|---|---|---|---|---|---|
+| **512** (đang khoá) | `20261030_4ae2501-dirty_1e05ac` | 0,3635 / **0,3506** | **2 722 / 2 750 ms** | 3 075 ms | 2 852 444 B |
+| 416 | `20261030_c73d011-dirty_1ee057` | 0,3291 / 0,3202 | 1 815 / 1 849 ms | 2 177 ms | 1 962 892 B |
+| 320 | `20261030_c73d011-dirty_d298a9` | 0,2897 / 0,2776 | 1 048 / 1 085 ms | 1 420 ms | 1 256 708 B |
+
+- Thời gian theo S²: 416 lấy 67% thời gian của 512 (S² là 66%), 320 lấy 39% (S² là 39%).
+- mAP int8 so với 512: 416 mất 0,030, tức 8,7%; 320 mất 0,073, tức 20,8%. Phần mất do lượng tử ở cả ba cỡ đều dưới cửa
+  0,02: 0,0129, 0,0089, 0,0121.
+- `model.pt` học ở 640. Mọi S ở đây chấm trên cùng 2 500 ảnh `val`, cùng letterbox của chip.
+- Chọn S là việc của chủ repo; sản phẩm giữ 512 tới khi chọn.
