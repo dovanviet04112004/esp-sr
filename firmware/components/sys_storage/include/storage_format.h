@@ -173,6 +173,7 @@ _Static_assert(offsetof(storage_model_header_t, spk_noisy_milli_z) == 0x24c,
 #define STORAGE_VISION_VERSION_BYTES 32
 #define STORAGE_VISION_MAX_CLASSES 120
 #define STORAGE_VISION_CLASS_BYTES 32 // UTF-8, NUL-padded
+#define STORAGE_VISION_TOP_K_MAX 64   // boxes a picture keeps at most
 #define STORAGE_VISION_LABEL "vision_0"
 
 typedef struct {

@@ -3840,7 +3840,7 @@ offset 0x000  header 4 KB, đúng một sector, ghi sau cùng
    +0x028 size            u16 — S của đầu vào S×S
    +0x02A classes         u16 — số kênh lớp của mạng, ≤ 120
    +0x02C score_permille  u16 — điểm thấp nhất một khung được giữ, ‰
-   +0x02E top_k           u16 — số khung giữ lại mỗi ảnh, điểm cao trước
+   +0x02E top_k           u16 — số khung giữ lại mỗi ảnh, điểm cao trước, ≤ 64
    +0x030 espdl_offset    u32 — từ đầu phân vùng, 0x1000
    +0x034 espdl_size      u32
    +0x038 sha256          [32] — của `.espdl`
