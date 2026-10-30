@@ -2316,7 +2316,7 @@ tách theo seed.
 1. Nhận gói: kiểm khuôn thư mục và `data.yaml`, băm danh sách ảnh của ba tập thành `split.lock` của run.
 2. Xuất ONNX từ `model.pt`, trong dự án uv riêng `ml/detect_ref/ultralytics/`, ghim Ultralytics và torch như
    `spk_ref/` (§4.4). `srpipe` không bao giờ import Ultralytics (AGPL-3.0). Bản xuất dùng bản vá đầu dò trong
-   `export.py` của quy trình YOLO26 của Espressif (Apache-2.0):
+   `export.py` của quy trình YOLO26 của Espressif (esp-dl, MIT):
    - đầu vào `images` 1×3×S×S, S bội 32 trong 160–640, opset 13, hình tĩnh;
    - sáu đầu ra thô `one2many_p3…p5`, `one2one_p3…p5`, mỗi đầu ghép 4 kênh khung với các kênh lớp, không có phần giải
      khung;
