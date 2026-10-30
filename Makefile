@@ -261,6 +261,23 @@ pitch-same-int8: ## Step 2.4: model.py's network now and at AGAINST, quantised a
 SPEED_LOG_pitch = $(UNIT_APP)/build_pitch/unit.log
 SPEED_ESPDL_pitch = ml/$(RUN)/int8/timing/pitch.espdl
 
+##@ Detect: YOLO26 from a server's package (KEHOACH 3.18)
+
+DETECT = $(ML) --extra train --extra espdl --extra detect python -m srpipe.tasks.detect
+.PHONY: detect-coco detect-import detect-ptq detect-eval
+detect-coco: ## The COCO 2017 test package from raw/vision/coco2017 into interim/detect (E15-T3)
+	$(DETECT).data coco
+
+detect-import: ## A package as a run under ml/artifacts/detect/runs: splits locked, model.pt to ONNX held to it [SET="key=value ..."]
+	$(DETECT).quant import $(foreach s,$(SET),--set $(s))
+
+# Calibration and TQT on the GPU for tens of minutes, TQT's cache in RAM: run it in tmux, nothing heavy beside it.
+detect-ptq: ## Espressif's YOLO26 recipe into <run>/int8/{graph.native, model.espdl}: RUN=<run>
+	$(DETECT).quant ptq $(RUN)
+
+detect-eval: ## mAP50-95 of float and int8 on a split, into <run>/int8/map_<split>.yaml: RUN=<run> [SPLIT=val|test] [LIMIT=N]
+	$(DETECT).eval $(RUN) --split $(or $(SPLIT),val) $(if $(LIMIT),--limit $(LIMIT))
+
 ##@ Wake
 
 .PHONY: wake-features wake-train wake-ptq wake-deploy eval-tts wake-synth

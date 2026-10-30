@@ -1,0 +1,31 @@
+# Object detection on the chip (KEHOACH 3.18, ADR-0030): a server's YOLO26 package down to an esp-dl graph.
+# python -m srpipe.tasks.detect.data coco | srpipe.tasks.detect.quant import | ptq <run> | eval <run>
+package: detect/coco2017_yolo26n      # under interim/: model.pt and data/ as a server hands them over
+size: 512                             # S, the owner's choice of 30/10 (KEHOACH 3.18)
+pad: 114                              # letterbox fill of espressif/yolo26's YOLO26::preprocess
+export:                               # ml/detect_ref/ultralytics: model.pt to ONNX, held to model.pt
+  check_images: 8                     # val images the ONNX is held to model.pt on
+  rtol: 1.0e-3                        # largest gap, as a share of an output's peak
+quant:                                # Espressif's YOLO26 recipe on the repo's esp-ppq
+  seed: 20261030
+  calib_images: 1024                  # drawn from train with the seed
+  tqt_images: 256                     # the first of them; TQT holds 7.3 MB of RAM an image
+  batch: 16
+  calib_steps: 64
+  calibration: percentile
+  alignment: Align to Output          # Add and Concat brought to one scale
+  tqt: {steps: 200, lr: 2.0e-5, int_lambda: 0.25, block_size: 1}
+  lut_step: 32                        # step of the int16 Swish table
+  int16:                              # op names, as regular expressions, kept at 16 bits: neck exits, one-to-one heads
+    - '^/model\.(16|19|22)/cv2/conv/'
+    - '^/model\.23/one2one_cv[23]\.'
+eval:
+  max_det: 300                        # boxes an image keeps for mAP, as Ultralytics' validator
+  conf: 0.001                         # lowest score that counts as a box for mAP
+  gate: 0.02                          # int8 mAP50-95 on val may fall at most this below float 🔬
+coco:                                 # the COCO 2017 test package (python -m srpipe.tasks.detect.data coco)
+  seed: 20261030
+  train_count: 1024                   # train2017 images drawn into train, the calibration pool
+  train_url: http://images.cocodataset.org/train2017
+  train_sample: train2017_sample      # under raw/vision/coco2017, downloaded from the coco-urls list
+  model: yolo26n.pt                   # under raw/vision/coco2017: Ultralytics' COCO-trained YOLO26n, the server's model
