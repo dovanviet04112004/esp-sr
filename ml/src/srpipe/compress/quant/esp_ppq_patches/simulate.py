@@ -1,5 +1,5 @@
-"""Float32 mirrors of esp-dl's S3 kernels for ESP-PPQ's simulator: RMSNorm, LayerNorm and Softmax rounded where the
-chip rounds."""
+"""Mirrors of esp-dl's S3 kernels for ESP-PPQ's simulator: RMSNorm, LayerNorm and Softmax in float32 rounded where the
+chip rounds, int16 convolutions summed exactly as QACC sums them."""
 
 from __future__ import annotations
 
@@ -277,3 +277,53 @@ def softmax_as_espdl() -> Iterator[None]:
     finally:
         for table, simulate in zip(tables, simulated, strict=True):
             table["Softmax"] = simulate
+
+
+def conv_s16_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platforms: frozenset, **kwargs):
+    """op's output as esp-dl's S3 int16 convolutions compute it once op, on one of platforms, has its output quantised
+    on one grid: the bias and every product summed exactly, then rounded once on the output's grid; simulate's float32
+    output otherwise. The gradient is simulate's."""
+    import torch
+    from esp_ppq.core import QuantizationStates
+    from esp_ppq.IR.quantize import QuantableOperation
+    from esp_ppq.utils.round import ppq_tensor_round
+
+    if not isinstance(op, QuantableOperation) or op.platform not in platforms:
+        return simulate(op, values, ctx, **kwargs)
+    out = op.output_quant_config[0].dominated_by
+    if not QuantizationStates.is_activated(out.state) or out.scale.numel() != 1:
+        return simulate(op, values, ctx, **kwargs)
+    with torch.no_grad():
+        # QACC holds 40 bits a lane and float64 is exact to 53, so these sums are the chip's.
+        sums = simulate(op, [v.detach().double() for v in values], ctx, **kwargs)
+        step = float(out.scale)
+        exact = (ppq_tensor_round(sums / step, out.rounding).clamp(out.quant_min, out.quant_max) * step).float()
+    if not torch.is_grad_enabled():
+        return exact
+    floating = simulate(op, values, ctx, **kwargs)
+    return floating - floating.detach() + exact
+
+
+@contextlib.contextmanager
+def conv_s16_as_espdl() -> Iterator[None]:
+    """ESP-PPQ sums a convolution in float32, which keeps 24 bits of a sum; esp-dl's S3 int16 kernels start QACC from
+    the bias, add each 16 x 16-bit product exactly and round half up once, so near a half step of the output's grid the
+    two round apart. YOLO26n (KEHOACH 3.18) on board B: the one-to-one heads, int16, off the simulation on all eight
+    probe pictures; with this and softmax_as_espdl every head and tapped block matched.
+    """
+    from esp_ppq.api.espdl_interface import get_target_platform
+    from esp_ppq.executor.base import OPERATION_FORWARD_TABLE
+
+    from srpipe.compress.quant.ptq_espdl import TARGET, WIDE_BITS
+
+    platforms = frozenset({get_target_platform(TARGET, WIDE_BITS)})
+    # Every esp-dl platform shares one table, so the patched forward checks the platform itself.
+    tables = list({id(t): t for t in (OPERATION_FORWARD_TABLE[p] for p in platforms)}.values())
+    simulated = [table["Conv"] for table in tables]
+    for table, simulate in zip(tables, simulated, strict=True):
+        table["Conv"] = functools.partial(conv_s16_like_espdl, simulate=simulate, platforms=platforms)
+    try:
+        yield
+    finally:
+        for table, simulate in zip(tables, simulated, strict=True):
+            table["Conv"] = simulate

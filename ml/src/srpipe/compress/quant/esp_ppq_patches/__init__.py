@@ -50,6 +50,8 @@ from .quantise import (
     simplify_without_bn_fusion,
 )
 from .simulate import (
+    conv_s16_as_espdl,
+    conv_s16_like_espdl,
     exp_table_s3,
     expf_s3,
     fma32,
@@ -68,6 +70,7 @@ __all__ = [
     "PATCHES",
     "applied",
     "chain_as_one",
+    "conv_s16_like_espdl",
     "exp_table_s3",
     "expf_s3",
     "fma32",
@@ -87,6 +90,7 @@ PATCHES = {
     "fuse_erf_gelu": fuse_erf_gelu,
     "layernorm_as_espdl": layernorm_as_espdl,
     "softmax_as_espdl": softmax_as_espdl,
+    "conv_s16_as_espdl": conv_s16_as_espdl,
     "fuse_tanh_gelu": fuse_tanh_gelu,
     "lean_transposes": lean_transposes,
     "lean_quantizers": lean_quantizers,

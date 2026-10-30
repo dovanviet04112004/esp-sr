@@ -214,3 +214,93 @@ def test_rmsnorm_as_espdl_passes_the_gradient_of_the_float_norm(tmp_path: Path) 
         grads.append((xs.grad, scale.grad))
     assert all(torch.equal(a, b) and torch.equal(a, c) for a, b, c in zip(*grads, strict=True))
     assert torch.equal(outs[2], outs[0]) and not torch.equal(outs[1], outs[0])
+
+
+CONV16_CHANNELS, CONV16_SIDE = 64, 32
+
+
+class WideConv(nn.Module):
+    """A 3 x 3 convolution over CONV16_CHANNELS channels: at 16 bits its sums pass float32's 24."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(CONV16_CHANNELS, CONV16_CHANNELS, 3, padding=1)
+
+    def forward(self, x):
+        return self.conv(x)
+
+
+def wide_conv_graph(tmp_path: Path):
+    rng = np.random.default_rng(21)
+    shape = (1, CONV16_CHANNELS, CONV16_SIDE, CONV16_SIDE)
+    calib = [torch.from_numpy(rng.normal(0, 2, shape).astype(np.float32)) for _ in range(2)]
+    rungs = RUNGS | {"calibration": "minmax", "int16_ops": ["/conv/Conv"]}
+    graph = ptq_espdl.quantize(WideConv().eval(), calib, tmp_path, rungs)
+    (op,) = [op for op in graph.operations.values() if op.type == "Conv"]
+    return graph, op, rng
+
+
+def on_grid(value: torch.Tensor, config) -> np.ndarray:
+    """value's integers on config's grid, rounded half up as the S3's quantisers round."""
+    step = float(config.scale)
+    q = np.floor(value.detach().double().numpy() / step + 0.5)
+    return np.clip(q, config.quant_min, config.quant_max).astype(np.int64)
+
+
+def espdl_conv_s16(q: np.ndarray, w: np.ndarray, b: np.ndarray, shift: int) -> np.ndarray:
+    """esp-dl's S3 int16 3 x 3 convolution, padded by one: QACC from the bias, each product added exactly, then rounded
+    half up and saturated as tie728_s16_vector_round_result takes QACC to int16."""
+    side = q.shape[-1]
+    padded = np.pad(q[0], ((0, 0), (1, 1), (1, 1)))
+    acc = np.repeat(np.repeat(b[:, None, None], side, 1), side, 2)
+    for dy in range(3):
+        for dx in range(3):
+            acc = acc + np.einsum("oc,chw->ohw", w[:, :, dy, dx], padded[:, dy : dy + side, dx : dx + side])
+    acc = ((acc >> (shift - 1)) + 1) >> 1
+    return np.clip(acc, -32768, 32767)[None]
+
+
+def test_conv_s16_as_espdl_sums_each_int16_convolution_as_the_chip_does(tmp_path: Path) -> None:
+    """ESP-PPQ as is sums an int16 convolution in float32, so near a half step of the output's grid it rounds apart from
+    the chip's exact sums, a step at most; patched, every value is the chip's."""
+    from esp_ppq.api.espdl_interface import get_target_platform
+
+    graph, op, rng = wide_conv_graph(tmp_path)
+    assert op.platform == get_target_platform(ptq_espdl.TARGET, ptq_espdl.WIDE_BITS)
+    given, weight, bias = op.input_quant_config[:3]
+    out = op.output_quant_config[0]
+    shift = ptq_espdl.exponent_of(out) - ptq_espdl.exponent_of(given) - ptq_espdl.exponent_of(weight)
+    assert float(bias.scale) == float(given.scale) * float(weight.scale) and shift > 0
+    w, b = on_grid(op.inputs[1].value, weight), on_grid(op.inputs[2].value, bias)
+    executor, name, apart = TorchExecutor(graph, device="cpu"), op.outputs[0].name, 0
+    for _ in range(4):
+        x = torch.from_numpy(rng.normal(0, 2, (1, CONV16_CHANNELS, CONV16_SIDE, CONV16_SIDE)).astype(np.float32))
+        want = espdl_conv_s16(on_grid(x, given), w, b, shift)
+        with esp_ppq_patches.applied(["conv_s16_as_espdl"]):
+            patched = on_grid(executor.forward(inputs=[x], output_names=[name])[0], out)
+        as_is = on_grid(executor.forward(inputs=[x], output_names=[name])[0], out)
+        assert np.array_equal(patched, want)
+        assert np.abs(as_is - want).max() <= 1
+        apart += int((as_is != want).sum())
+    assert apart > 0
+
+
+def test_conv_s16_as_espdl_passes_the_gradient_of_the_float_convolution(tmp_path: Path) -> None:
+    from esp_ppq.executor.op.torch.default import Conv_forward
+
+    _, op, rng = wide_conv_graph(tmp_path)
+    given = op.input_quant_config[0]
+    q = rng.normal(0, 4000, (1, CONV16_CHANNELS, 8, 8)).round().clip(-32768, 32767)
+    x = torch.from_numpy(q.astype(np.float32) * np.float32(given.scale))
+    w, b = (v.detach().clone() for v in (op.inputs[1].value, op.inputs[2].value))
+    grads, outs = [], []
+    patched = {"simulate": Conv_forward, "platforms": frozenset({op.platform})}
+    for kwargs in ({}, patched):
+        forward = esp_ppq_patches.conv_s16_like_espdl if kwargs else Conv_forward
+        xs = x.clone().requires_grad_()
+        outs.append(forward(op, [xs, w, b], **kwargs))
+        (outs[-1] * torch.linspace(-1, 1, 8)).sum().backward()
+        grads.append(xs.grad)
+    assert torch.equal(grads[0], grads[1])
+    step = float(op.output_quant_config[0].scale)
+    assert torch.equal(outs[1], torch.round(outs[1] / step) * step) and not torch.equal(outs[1], outs[0])
