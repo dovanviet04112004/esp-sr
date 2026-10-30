@@ -1,0 +1,11 @@
+# C ai_engine/src/detect/decode.c against srpipe.tasks.detect.postproc.decode.decode (KEHOACH 3.18), integer for
+# integer: the class by its integer logit, the floor and the sigmoid from double, the boxes from float32 steps cut to
+# integers, no fused multiply-add. count is how many boxes; boxes holds x1 y1 x2 y2 class score_permille a row.
+# case_neg_000 maps its boxes with the left border one pixel off and must fall outside these limits.
+tensors:
+  count:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  boxes:
+    max_abs: 0.0
+    min_snr_db: 0.0
