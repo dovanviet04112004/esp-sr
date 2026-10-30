@@ -1,5 +1,6 @@
 """update_lock: a branch's meta.json and lock row carry each deployed file's entry, kind and sha256, the grid, the run
-and the train files of its split; another branch's row stays, and a file outside the branch's folder is refused."""
+and the train files of its split; a detect row carries its package, model and calibration list but no grid, and the
+speech image leaves it out; another branch's row stays, and a file outside the branch's folder is refused."""
 
 from __future__ import annotations
 
@@ -55,6 +56,45 @@ def test_an_imported_run_records_the_pin_of_its_weights(tmp_path: Path) -> None:
     (run / "config.resolved.yaml").write_text(yaml.safe_dump({"source": source}), encoding="utf-8")
     (run / "split.lock").write_text("", encoding="utf-8")
     assert update_lock.learnt_from(run) == {"pretrained": "redimnet2_b0", "weights": {"file": "b0.pt"} | pin}
+
+
+def test_a_detect_run_records_its_package_model_and_calibration_list_and_no_grid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = tmp_path / "models.lock.json"
+    lock.write_text(json.dumps({"version": 1, "models": {}}), encoding="utf-8")
+    monkeypatch.setattr(update_lock, "LOCK", lock)
+    monkeypatch.setattr(update_lock, "MODELS", tmp_path / "models")
+    run = tmp_path / "runs" / "20261030_abc_123"
+    run.mkdir(parents=True)
+    (run / "config.resolved.yaml").write_text(yaml.safe_dump({"package": "detect/pkg"}), encoding="utf-8")
+    (run / "split.lock").write_text("aa  test.txt\nbb  train.txt\ncc  val.txt\n", encoding="utf-8")
+    (run / "model.onnx.json").write_text(json.dumps({"model_sha256": "dd"}), encoding="utf-8")
+    folder = tmp_path / "models" / "detect"
+    folder.mkdir(parents=True)
+    (folder / "detect.espdl").write_bytes(b"graph")
+    files = [update_lock.Deployed(folder / "detect.espdl", "detect", "espdl")]
+    update_lock.record("detect", run, files, {"slot": "vision_0"}, grid_bound=False)
+    row = json.loads(lock.read_text(encoding="utf-8"))["models"]["detect"]
+    assert "grid_hash" not in row and row["slot"] == "vision_0"
+    assert row["learnt_from"] == {
+        "package": "detect/pkg",
+        "model": {"file": "model.pt", "sha256": "dd"},
+        "calibrated_on": [{"file": "train.txt", "sha256": "bb"}],
+    }
+
+
+def test_the_speech_image_leaves_out_a_row_of_another_slot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    lock = tmp_path / "models.lock.json"
+    monkeypatch.setattr(pack_models, "LOCK", lock)
+    monkeypatch.setattr(pack_models, "MODELS", tmp_path / "models")
+    (tmp_path / "models" / "command").mkdir(parents=True)
+    (tmp_path / "models" / "command" / "c.espdl").write_bytes(b"ctc")
+    ctc = {"file": "c.espdl", "entry": "command_ctc", "kind": "espdl", "sha256": hashlib.sha256(b"ctc").hexdigest()}
+    detect = {"file": "detect.espdl", "entry": "detect", "kind": "espdl", "sha256": "00" * 32}
+    rows = {"command": {"files": [ctc]}, "detect": {"slot": "vision_0", "files": [detect]}}
+    lock.write_text(json.dumps({"version": 1, "models": rows}), encoding="utf-8")
+    assert [e.name for e in pack_models.locked().entries] == ["command_ctc"]
 
 
 def test_a_file_outside_the_branch_folder_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

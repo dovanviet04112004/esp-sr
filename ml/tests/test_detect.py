@@ -1,7 +1,8 @@
 """The detect chain's pure parts (KEHOACH 3.18): the letterbox matches Espressif's per-pixel reference, a box maps back
 to the source, COCO boxes become YOLO lines without crowds, a package missing its model or a label is refused, the
 one-to-one head decodes and keeps boxes as espressif/yolo26 and Ultralytics do, mAP is 1 for exact boxes and lower
-for shifted ones, and calibration batches hold the chip's letterbox in uint8."""
+for shifted ones, the gate refuses labels that miss the model and an int8 that fell too far, deploy takes only a run
+that passed it, and calibration batches hold the chip's letterbox in uint8."""
 
 from __future__ import annotations
 
@@ -116,6 +117,46 @@ def test_map_is_one_for_exact_boxes_and_lower_for_shifted_ones(tmp_path: Path) -
     assert detect_eval.mean_ap([image], found, [exact])[0] == pytest.approx(1.0)
     shifted = exact + np.array([[8.0, 4.0, 8.0, 4.0, 0.0, 0.0]])
     assert detect_eval.mean_ap([image], found, [shifted])[0] < 0.5
+
+
+GATE = {"gate": 0.02, "min_float_share": 0.5}
+TRAINED = {"map50_95": 0.40, "map50": 0.56, "imgsz": 640}
+
+
+def scored(float_map: float, int8_map: float | None = None) -> dict:
+    report = {"float": {"map50_95": float_map}}
+    return report | ({"int8": {"map50_95": int8_map}} if int8_map is not None else {})
+
+
+def test_the_gate_passes_a_close_int8_of_a_float_near_what_the_server_measured() -> None:
+    report = detect_eval.verdict(scored(0.3635, 0.3496), TRAINED, GATE)
+    assert report["passes"] and report["drop"] == pytest.approx(0.0139) and report["float_share"] > 0.9
+
+
+def test_the_gate_refuses_a_package_whose_labels_miss_its_model_though_int8_keeps_up() -> None:
+    assert not detect_eval.verdict(scored(0.004, 0.003), TRAINED, GATE)["passes"]
+    assert detect_eval.verdict(scored(0.004, 0.003), None, GATE)["passes"]
+
+
+def test_the_gate_refuses_an_int8_that_fell_too_far() -> None:
+    assert not detect_eval.verdict(scored(0.3635, 0.30), TRAINED, GATE)["passes"]
+
+
+def test_the_broken_package_moves_each_label_to_the_next_class() -> None:
+    assert data.shifted("79 0.5 0.5 0.1 0.2", 80) == "0 0.5 0.5 0.1 0.2"
+    assert data.shifted("3 0.1 0.2 0.3 0.4", 80) == "4 0.1 0.2 0.3 0.4"
+
+
+def test_deploy_refuses_a_run_without_a_passing_int8_score_on_val(tmp_path: Path) -> None:
+    from srpipe.tasks.detect import quant
+
+    run = tmp_path / "run"
+    (run / "int8").mkdir(parents=True)
+    with pytest.raises(ValueError, match="passed the gate"):
+        quant.deploy({}, run)
+    (run / "int8" / "map_val.yaml").write_text(yaml.safe_dump(scored(0.004, 0.003) | {"passes": False}), "utf-8")
+    with pytest.raises(ValueError, match="passed the gate"):
+        quant.deploy({}, run)
 
 
 def test_calibration_batches_are_the_chips_letterbox_in_uint8(tmp_path: Path) -> None:
