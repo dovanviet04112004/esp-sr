@@ -2328,11 +2328,19 @@ tách theo seed.
      (láng giềng gần nhất, viền 114), không kéo dãn như notebook của Espressif;
    - int8 cho thân, int16 cho đầu khung, đầu lớp và lối ra của cổ;
    - Swish int16 bằng bảng nội suy bậc thang; Add và Concat căn về chung một thang;
-   - xuất `.espdl`.
+   - xuất `.espdl` không kèm cặp thử của `model->test()`: ở 512 cặp ấy nặng ~1,6 MiB, khe `vision_0` không chứa
+     nổi. Bước 5 đưa ảnh vào chip theo đường khác.
    Quy trình của Espressif ghim esp-ppq 1.2.4, repo ghim 1.3.11, vốn đã có sẵn TQT và pass LUT; chỗ khác vá như các
    bản vá ESP-PPQ đã có.
-4. Chấm mAP50-95 float và int8 trên `val`. int8 tụt quá ngưỡng của cấu hình so với float thì model không xuống
-   board 🔬. `test` chỉ để báo số cuối, không dùng để chọn gì.
+4. Chấm mAP50-95 float và int8 trên `val`, ảnh qua letterbox của chip. Model không xuống board khi 🔬:
+   - int8 tụt quá ngưỡng của cấu hình so với float: lượng tử hỏng;
+   - float thấp hơn một tỉ lệ của cấu hình so với mAP mà Ultralytics ghi vào `model.pt` lúc server học
+     (`train_metrics`), khi có: nhãn hay ảnh của gói không khớp model, hoặc bước xuất hỏng. Một gói nhãn lệch kéo
+     cả float lẫn int8 về gần 0, nên riêng mức tụt không thấy. Tỉ lệ chừa chỗ cho cỡ ảnh lúc học khác S và cho
+     letterbox của chip khác của Ultralytics.
+   `test` chỉ để báo số cuối, không dùng để chọn gì.
+   Lệnh `deploy` chỉ nhận run đã qua cửa này. Nó xuất `.espdl` vào `firmware/models/detect/` và ghi dòng `detect`
+   của `models.lock.json` với `slot: vision_0`; ảnh model tiếng nói (§6.3) bỏ qua dòng ấy.
 5. Chip khớp mô phỏng ESP-PPQ từng giá trị trên vài ảnh, như mọi nhánh (§3.14).
 
 **Ảnh thị giác và khe.** Model thị giác nằm trong ảnh riêng, khe riêng `vision_0`, không chung ảnh model tiếng nói.
@@ -3148,7 +3156,7 @@ sinh ra chỗ hở sau, mãi: ghi `set.json` 222 ms làm board bỏ 76% khung kh
 
 | Loại | Là gì | Vào flash bằng |
 |---|---|---|
-| `.espdl` | artifact của `ml/`, không phải source | `ml/scripts/50_pack_and_flash.sh`: kiểm sha256 theo `contracts/models.lock.json` → gộp `models.bin` theo khuôn §6.3 → `parttool.py write_partition` xuống `models_0` |
+| `.espdl` | artifact của `ml/`, không phải source | `ml/scripts/50_pack_and_flash.sh`: kiểm sha256 theo `contracts/models.lock.json` → gộp `models.bin` theo khuôn §6.3 → `parttool.py write_partition` xuống `models_0`. Dòng có `slot` khác `models_0`, như `detect` (§3.18), không vào `models.bin` mà vào ảnh thị giác của khe ấy |
 | Mẩu tiếng cho ghép mẩu | bản thu, không phải source | `svc_speak` đọc qua mmap từ phần dư của `models_0` hay từ `storage` (§6.1), khi E12-T2 tới |
 | Bộ lệnh mặc định, câu trả lời | source ở `contracts/` | nướng vào ảnh LittleFS `storage` lúc dựng |
 
