@@ -25,6 +25,7 @@ esp_ppq_patches:                      # srpipe.compress.quant.esp_ppq_patches ar
   - cache_sized_convolutions          # P5's 72 KB int16 box convolution and the wide pointwise ones in cached slices
   - lean_quantizers                   # one int16 requantise of model.22's Concat for its 7 slices, not 7
   - aligned_channels                  # model.2's 8-channel bottleneck padded to 16, on esp-dl's vector path
+  - conv_lut                          # each Swish or int16 table run on its convolution's bands in the cache
 chip:                               # the vision image's header (KEHOACH 6.3), copied into the lock by deploy
   score_permille: 250                 # lowest score a box keeps: espressif/yolo26's 0.25
   top_k: 32                           # boxes kept a picture, best first
