@@ -2294,7 +2294,9 @@ Số lớp đọc từ hình tensor ra, tên lớp do người dùng đưa. Espr
 | 512 | 34,6 ms | 2 348 ms | 23,5 ms | 0,363 |
 | 640 | 51,2 ms | 3 793 ms | 36,6 ms | 0,384 |
 
-Số trên board B, khi tiếng nói cùng chạy, đo ở E15-T2 🔬.
+Trên board B, trọng số đọc từ flash, tiếng nói nghỉ: 512 mất 3,02 s, 640 mất 4,88 s; chỉ 512 vừa PSRAM của sản phẩm
+(`measurements/detect.md` §1). Chủ repo chọn **S = 512** tạm thời (30/10), tới bước chọn S của phần tối ưu. Số khi
+tiếng nói cùng chạy đo ở E15-T7 🔬.
 
 **Nâng esp-dl.** `espressif/yolo26` đòi esp-dl ~3.3.14, nên repo nâng từ 3.3.11 trước mọi việc khác của nhánh
 (E15-T1). Bản 3.3.14 viết lại kernel Conv, Gemm, MatMul, Resize, LUT và Pooling: chia khối theo cache, kernel PIE cho
