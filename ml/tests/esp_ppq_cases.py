@@ -132,7 +132,7 @@ def espdl_graph(path: Path) -> tuple[dict, dict]:
             node.OpType().decode(),
             [node.Input(j).decode() for j in range(node.InputLength())],
         )
-    dtypes, tensors = {1: np.float32, 3: np.int8, 6: np.int32, 7: np.int64}, {}
+    dtypes, tensors = {1: np.float32, 3: np.int8, 5: np.int16, 6: np.int32, 7: np.int64}, {}
     for i in range(graph.InitializerLength()):
         t = graph.Initializer(i)
         dims = [int(d) for d in t.DimsAsNumpy()]
@@ -142,13 +142,13 @@ def espdl_graph(path: Path) -> tuple[dict, dict]:
     return nodes, tensors
 
 
-def filters(stored: np.ndarray) -> np.ndarray:
-    """A pointwise convolution's (outputs, inputs) weights from ESP-PPQ's S3 layout of them, each 16 outputs
-    interleaved innermost and the rest as they are (ResetParamLayoutPattern)."""
+def filters(stored: np.ndarray, lanes: int = 16) -> np.ndarray:
+    """A convolution's (outputs, taps x inputs) weights from ESP-PPQ's S3 layout of them, each lanes outputs
+    interleaved innermost, 16 at int8 and 8 at int16, and the rest as they are (ResetParamLayoutPattern)."""
     n = stored.shape[-1]
-    flat, aligned = stored.reshape(-1), n // 16 * 16
+    flat, aligned = stored.reshape(-1), n // lanes * lanes
     per = flat.size // n
-    head = flat[: aligned * per].reshape(n // 16, per, 16).transpose(0, 2, 1).reshape(aligned, per)
+    head = flat[: aligned * per].reshape(n // lanes, per, lanes).transpose(0, 2, 1).reshape(aligned, per)
     return np.concatenate([head, flat[aligned * per :].reshape(n - aligned, per)])
 
 

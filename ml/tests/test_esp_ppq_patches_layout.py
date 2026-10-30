@@ -161,6 +161,49 @@ def test_cache_sized_convolutions_leave_whole_a_projection_of_one_slice(tmp_path
     assert ops.count("Conv") == 1 and "Concat" not in ops
 
 
+class WideKernel(nn.Module):
+    """A 3 x 3 convolution from 256 channels to 16: 72 KB of weights at int16, 36 KB at int8."""
+
+    def __init__(self, outputs: int = 16) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(256, outputs, 3, padding=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.conv(x)
+
+
+def wide_kernel_graph(tmp_path: Path, rungs: dict, outputs: int = 16):
+    torch.manual_seed(5)
+    rng = np.random.default_rng(19)
+    calib = [torch.from_numpy(rng.normal(0, 1, (1, 256, 6, 6)).astype(np.float32)) for _ in range(2)]
+    return ptq_espdl.quantize(WideKernel(outputs).eval(), calib, tmp_path, RUNGS | {"calibration": "minmax"} | rungs)
+
+
+def test_cache_sized_convolutions_slice_an_int16_kernel_by_its_8_lanes(tmp_path: Path) -> None:
+    """72 KB of int16 3 x 3 weights become two halves of 8 outputs, each 36 KB; weights and bias split exactly."""
+    graph = wide_kernel_graph(tmp_path, {"int16_ops": ["/conv/Conv"]})
+    plain = espdl_graph(export_espdl.export(graph, tmp_path / "plain.espdl"))
+    with esp_ppq_patches.applied(["cache_sized_convolutions"]):
+        nodes, tensors = espdl_graph(export_espdl.export(graph, tmp_path / "sliced.espdl"))
+    ((_, (_, w, b)),) = [node for node in plain[0].values() if node[0] == "Conv"]
+    parts = [ins for op, ins in nodes.values() if op == "Conv"]
+    assert [tensors[ins[1]].shape[-1] for ins in parts] == [8, 8]
+    assert [op for op, _ in nodes.values()].count("Concat") == 1
+    weights = np.concatenate([filters(tensors[ins[1]], 8) for ins in parts])
+    assert np.array_equal(weights, filters(plain[1][w], 8))
+    assert np.array_equal(np.concatenate([tensors[ins[2]] for ins in parts]), plain[1][b])
+
+
+def test_cache_sized_convolutions_leave_whole_an_int8_kernel(tmp_path: Path) -> None:
+    """esp-dl's int8 3 x 3 kernels ran 144-288 KB of YOLO26n's weights at 0.25 cycles a multiply-add against 0.19
+    cached (KEHOACH 3.18): 72 KB of them stay one convolution."""
+    graph = wide_kernel_graph(tmp_path, {}, outputs=32)
+    with esp_ppq_patches.applied(["cache_sized_convolutions"]):
+        nodes, _ = espdl_graph(export_espdl.export(graph, tmp_path / "whole.espdl"))
+    ops = [op for op, _ in nodes.values()]
+    assert ops.count("Conv") == 1 and "Concat" not in ops
+
+
 class OneWeightSum(nn.Module):
     """A convolution, a weighted sum of its output alone as ReDimNet2's stage sums give it, a depthwise convolution
     by 1, and another convolution; equalisation scales a sum between convolutions, not b0's after a LayerNorm."""

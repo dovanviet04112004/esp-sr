@@ -316,20 +316,20 @@ def aligned_pointwise() -> Iterator[None]:
         espdl_exporter.reset_graph_layout = reset
 
 
-def output_sizes(outputs: int, weight_bytes: int, weight_bytes_max: int) -> list[int]:
-    """Slices of outputs, each a multiple of CHANNEL_STEP and holding at most weight_bytes_max of the convolution's
+def output_sizes(outputs: int, weight_bytes: int, weight_bytes_max: int, lanes: int = CHANNEL_STEP) -> list[int]:
+    """Slices of outputs, each a multiple of lanes and holding at most weight_bytes_max of the convolution's
     weight_bytes, as even as that allows; one slice when it holds them all."""
     per_output = weight_bytes // outputs
-    step = max(weight_bytes_max // per_output // CHANNEL_STEP, 1) * CHANNEL_STEP
-    if outputs % CHANNEL_STEP or outputs <= step:
+    step = max(weight_bytes_max // per_output // lanes, 1) * lanes
+    if outputs % lanes or outputs <= step:
         return [outputs]
-    size = -(-outputs // -(-outputs // step) // CHANNEL_STEP) * CHANNEL_STEP
+    size = -(-outputs // -(-outputs // step) // lanes) * lanes
     return [size] * (outputs // size) + ([outputs % size] if outputs % size else [])
 
 
 def slice_outputs(graph, op, sizes: list[int], info) -> None:
-    """op, an ungrouped pointwise convolution, as one convolution per slice of its outputs, each on its own slice of
-    the weights and bias and on op's grids, concatenated along the channels into op's output."""
+    """op, an ungrouped convolution, as one convolution per slice of its outputs, each on its own slice of the
+    weights and bias and on op's grids, concatenated along the channels into op's output."""
     from esp_ppq.core import OperationQuantizationConfig
     from esp_ppq.IR.quantize import QuantableOperation
     from esp_ppq.parser.espdl.espdl_graph_utils import get_default_perm
@@ -345,7 +345,7 @@ def slice_outputs(graph, op, sizes: list[int], info) -> None:
         for value, config in zip(values, configs[1:], strict=True):
             param = graph.create_variable(value=value[start : start + size].clone(), is_parameter=True)
             config = config.copy()
-            if config.scale is not None and config.scale.dim() > 0:
+            if config.scale is not None and config.scale.numel() == len(value) > 1:
                 config.scale, config.offset = config.scale[start : start + size], config.offset[start : start + size]
             sliced.append((param, config))
         part = graph.create_variable()
@@ -362,8 +362,9 @@ def slice_outputs(graph, op, sizes: list[int], info) -> None:
 
 
 def slice_wide_convolutions(graph) -> int:
-    """Each ungrouped pointwise convolution over more than one position whose int8 weights outgrow the data cache, as
-    slice_outputs lays it by output_sizes into slices of at most half of it, when they make more than one; how many."""
+    """Each ungrouped convolution over more than one position whose weights outgrow the data cache, pointwise at int8
+    or of any kernel at int16, as slice_outputs lays it by output_sizes into slices of at most half of it, when they
+    make more than one; how many."""
     from esp_ppq.IR.quantize import QuantableOperation
     from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
 
@@ -372,9 +373,14 @@ def slice_wide_convolutions(graph) -> int:
         if op.type != "Conv" or not isinstance(op, QuantableOperation) or op.attributes.get("group", 1) != 1:
             continue
         w, laid = op.inputs[1].value, laid_shape(op.outputs[0], info)
-        if any(k != 1 for k in op.attributes["kernel_shape"]) or math.prod(laid[:-1]) < 2:
+        wide = op.input_quant_config[1].num_of_bits > 8
+        pointwise = all(k == 1 for k in op.attributes["kernel_shape"])
+        if not (wide or pointwise) or math.prod(laid[:-1]) < 2:
             continue
-        sizes = output_sizes(laid[-1], w.numel(), DATA_CACHE_BYTES // 2) if w.numel() > DATA_CACHE_BYTES else []
+        # An int16 vector holds 8 lanes, an int8 one 16.
+        weight_bytes, lanes = (w.numel() * 2, CHANNEL_STEP // 2) if wide else (w.numel(), CHANNEL_STEP)
+        fits = weight_bytes <= DATA_CACHE_BYTES
+        sizes = [] if fits else output_sizes(laid[-1], weight_bytes, DATA_CACHE_BYTES // 2, lanes)
         if len(sizes) > 1:
             slice_outputs(graph, op, sizes, info)
             done += 1
@@ -383,11 +389,11 @@ def slice_wide_convolutions(graph) -> int:
 
 @contextlib.contextmanager
 def cache_sized_convolutions() -> Iterator[None]:
-    """esp-dl's pointwise convolution kernel reads all of its weights again at every output position, so weights
-    larger than the S3's data cache come from PSRAM at each one. After the export's layout pass this runs each such
-    convolution as slices of its outputs, each slice's weights within half the data cache, concatenated: the same
-    integers. ReDimNet2 b0 (KEHOACH 3.17) on board B: its pool's two per-frame projections, 72 KB of weights each,
-    took 94 and 77 ms of a 1.79 s window, two cycles a multiply-add against 0.15 for cached weights.
+    """esp-dl's int8 pointwise kernel and its int16 kernels of any size read all of a convolution's weights again at
+    every output position, so weights larger than the S3's data cache come from PSRAM or flash at each one. After the
+    export's layout pass this runs each such convolution as slices of its outputs, each slice's weights within half the
+    data cache, concatenated: the same integers. On board B, ReDimNet2 b0's 72 KB projections ran at 2 cycles a
+    multiply-add against 0.15 cached (KEHOACH 3.17), YOLO26n's 72 KB int16 3 x 3 at 7.4 against 0.25 (KEHOACH 3.18).
     """
     from esp_ppq.parser import espdl_exporter
 
