@@ -3829,8 +3829,8 @@ offset 0x000  header 4 KB, đúng một sector, ghi sau cùng
 offset 0x1000 `.espdl`, không kèm cặp thử của `model->test()`
 ```
 
-Bước đóng gói lấy `.espdl`, `names` và S từ dòng `detect` của `models.lock.json` cùng `meta.json`, `score_permille`
-và `top_k` từ `detect.yaml` (0,25 và 32, §3.18). Ghi ảnh mới, qua USB (`make vision-flash`) hay qua Wi-Fi, đều xoá
+Bước đóng gói lấy mọi trường từ dòng `detect` của `models.lock.json`: `.espdl` giữ đúng sha256 của dòng, `version`
+là run, S, `names`, cùng `score_permille` và `top_k` mà `deploy` chép từ `detect.yaml` (0,25 và 32, §3.18). Ghi ảnh mới, qua USB (`make vision-flash`) hay qua Wi-Fi, đều xoá
 sector header trước, ghi `.espdl`, rồi mới ghi header: mất điện giữa chừng thì header vắng, nhận diện tắt. `ai_engine`
 từ chối dựng nhánh khi magic hay `format_ver` sai, hay khi `classes` khác số kênh lớp của mạng.
 
