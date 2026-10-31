@@ -413,3 +413,16 @@ Thời gian từng module, ms (một nhân, lượt đo trên ảnh cuối):
 - Còn lại theo lượt chia giờ: tích chập các lớp độ phân giải cao nghẽn ở đọc ghi PSRAM (`model.0` 32 ms tích chập cho
   768 KB vào, 1 MB ra; `model.2` cả khối C3k2 ~210 ms gồm Slice, Concat, Add); depthwise int16 của đầu dò ~16 chu kỳ
   một giá trị ra.
+
+**Khối C3k2 theo hàng (ADR-0036, 31/10).** Ảnh xuất thêm `c3k2_block` sau `conv_lut_plain`; vùng 32 KB.
+
+| Bước | Mỗi ảnh, trung bình / đỉnh | PSRAM của đồ thị |
+|---|---|---|
+| bảng tra của repo (ở trên) | 1 988 / 1 997 ms | 2 824 384 B |
+| **`model.2` và `model.4` thành `C3k2Block`** | **1 913 / 1 922 ms** | 2 602 488 B, kể cả 45 072 B hàng chung |
+
+Khớp mô phỏng từng giá trị trên 8 ảnh.
+- Khối `model.2` 157,3 ms, từ ~210 ms của 8 module; `model.4` 79,5 ms, từ ~105.
+- Phần còn lại của khối là tính: 142,5 triệu nhân-cộng của bốn tích chập ở `model.2`, ~0,13 chu kỳ một nhân-cộng khi
+  trọng số ở vùng mượn, cộng bốn lượt bảng tra trên 2 MB.
+- ESP-PPQ chỉ ghi vào ảnh các bảng mà thuộc tính `lut` của một op trỏ tới; lần xuất đầu thiếu bảng của khối, op từ chối nút.
