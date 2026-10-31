@@ -1928,3 +1928,43 @@ bật tiếng YouTube từ điện thoại.
 - Tiếng YouTube giữ `vad` bật: `WAKE` 13:15:17 ra quyết định lúc 13:15:32, `WAKE` 13:15:44 lúc 13:16:12, cả hai `LOW_MARGIN`
   trên cửa sổ 234 bước đã lùi từ cuối, `fill 0`. Câu không chốt thì cửa sổ dài quá `window_s` chờ tới khi tiếng nền ngừng,
   `LENH` không nhận `wake` mới, và phần được chấm là 3,75 s cuối, không phải lệnh nói ngay sau "on".
+
+### 12.40 Dựng lại cửa sổ của board từ luồng tiếng: đoạn bù trên lời thật của chủ repo (31/10)
+
+Firmware `bench` @ `fe953ae` (đoạn bù tới 0,5 s, cửa sổ `LENH` chốt ở `window_s`, log có bước lời đầu và câu mang từ
+đánh thức), cùng ngưỡng và bộ 39 lệnh. Phiên `20261031_home_001` (`probe`, `spk_001`, 1 m, phòng ở nhà): luồng `mode` 5,
+`first_seq` 590, 16 766 bước, không hở; log UART cùng lúc. Chủ repo nói theo kịch bản: "on mở cửa" liền × 10, "on" ngừng
+chừng 1 s rồi "mở cửa" × 10, "bật quạt" × 10 liền rồi có ngừng, "đóng cửa" liền × 5.
+
+- **Board:** mở cửa liền 7 `WAKE`: `mo_cua` 3, `SPEAKER` 3 (z 1,107, 1,272, 1,449, ngưỡng 1,486), `PART` 1; mở cửa có
+  ngừng 11 `WAKE`: `mo_cua` 11; bật quạt: `bat_quat` 7, `PART` 1, 2 `WAKE` không quyết định; đóng cửa: `dong_cua` 6.
+  Không lần nào "mở cửa" ra `bat_quat`.
+- **Parity:** log-mel, cao độ của hợp đồng và mô phỏng int8 hàng `percentile` trên kênh sạch của phiên dựng lại 32/32 quyết
+  định của board, trùng lệnh, điểm, khoảng nhất–nhì, khoảng tới vòng tự do và âm tiết, kể cả cửa sổ có đoạn bù.
+- Đoạn bù của board ở một cửa sổ ngắn hơn luật tính theo cửa sổ trước (24 thay 31 bước): mốc chặn trước `wake` dời theo
+  mọi câu đã chốt, nên đoạn bù dừng ở câu ngắn ngay trước "on" và không bao giờ chứa tiếng nói.
+
+Cùng các câu, mỗi luật bù chấm lại các cửa sổ mở ở mốc của `wake` (mô phỏng int8, ngưỡng của board); ô là lệnh đúng:
+
+| Luật | Mở cửa liền | Mở cửa có ngừng | Bật quạt | Đóng cửa | Cộng | Nhầm lệnh khác |
+|---|---|---|---|---|---|---|
+| không bù | 2/7 | 10/11 | 6/7 | 6/6 | 24/31 | 0 |
+| bù tới 16 bước | 5/7 | 11/11 | 6/7 | 6/6 | 28/31 | 0 |
+| bù tới 31 bước (board) | 6/7 | 11/11 | 6/7 | 6/6 | 29/31 | 0 |
+| bù tới 62 bước | 4/7 | 10/11 | 7/7 | 6/6 | 27/31 | 1 (`phat_co`) |
+| bù tới 125 bước | 5/7 | 10/11 | 7/7 | 5/6 | 27/31 | 1 (đóng cửa ra `mo_cua`) |
+
+- Bù tới 0,5 s nhận nhiều nhất và không nhầm lệnh nào, như Cửa 3 (§12.38). Bù tới 1 s cho "mở cửa" liền khoảng nhất–nhì
+  trung bình 88 ‰ thay 67 ‰ trên các câu nhận đúng, nhưng nhận đúng ít hơn (4/7).
+- Ở bù tới 0,5 s, mạng nhận đúng 6/7 câu "mở cửa" liền; board từ chối 3 trong số ấy vì `SPEAKER`. Cửa sổ của chúng 79–90
+  bước, ngắn hơn 94 bước của cửa sổ kiểm người nói, nên `svc_listen_hold` đệm số 0 phía trước (KẾ HOẠCH §3.17); lời có
+  ngừng cho cửa sổ dài hơn và z 2,35–5,57 thay 1,11–3,39.
+
+### 12.41 Khoảng ngừng sau từ đánh thức và thời gian chờ của `LENH` (31/10)
+
+Cùng phiên §12.40. Từ bước của `WAKE` tới bước lời đầu của cửa sổ, 31 cửa sổ mở ở mốc của `wake`: 13 lần 0,02 s (lệnh
+liền sau "on", cùng một câu `vad`), còn lại 0,58–1,98 s, 11 lần trên 1 s; chủ repo được dặn ngừng chừng 1 s.
+
+`WAKE` ở bước 9334 ("on" 9315–9334) không có cửa sổ nào. Năng lượng kênh sạch cho thấy "mở cửa" ở bước 9474–9519, 2,24 s
+sau `WAKE`: `LENH` chờ `SVC_LISTEN_COMMAND_WAIT_MS` 1,5 s sau khi câu "on" chốt, tức tới chừng bước 9468, nên lệnh tới
+muộn 6 bước bị bỏ, không sự kiện nào. `WAKE` ở bước 12160 không cửa sổ là "on" nói hai lần liền, không lệnh ở giữa.
