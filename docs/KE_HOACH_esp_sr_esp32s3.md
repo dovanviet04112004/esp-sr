@@ -1323,6 +1323,8 @@ tiết chừng 0,3 s là quá ít để bắt, và gần "ông", "không", "con"
 Báo nhầm của "happy" đo trên phiên board thu lời nói tiếng Việt, gồm cả hát "Happy birthday" và âm gần như "hấp",
 "hẹp".
 
+**Từ thử "vừng ơi"** (ADR-0040). Chủ repo muốn một từ tiếng Việt và chọn "vừng ơi"; split `wake/vung1` đi đường TTS của "trợ lý" dưới đây với bộ `omnivoice` (KhanhTTS-OmniVoice), mẩu không qua PhoWhisper. Model của nó chỉ vào board khi chủ repo nói "vừng ơi" qua board và nó bắt nhiều hơn "happy"; tới lúc ấy sản phẩm vẫn thức bằng "happy".
+
 Các đoạn dưới tả đường của "trợ lý".
 
 **Dữ liệu dương** gồm tiếng tổng hợp nhiều giọng đọc từ đánh thức ở nhiều tốc độ và ngữ điệu, và **người thật nói
