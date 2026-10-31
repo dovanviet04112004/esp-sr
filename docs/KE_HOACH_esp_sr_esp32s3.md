@@ -2214,7 +2214,7 @@ người lạ lọt.
 
 | Điểm | Chốt |
 |---|---|
-| Cửa sổ | 1,5 s cuối của tiếng mạng `command` vừa chấm, 24 000 mẫu `clean`: đoạn bù của cửa sổ sau `wake` (§5.4, ADR-0032) rồi tới cửa sổ, số 0 phía trước chỉ khi cả hai ngắn hơn; `window_s` của `contracts/speaker.yaml`, đúng như vật liệu của khảo sát cắt. Vật liệu ấy luôn có 2 s trước câu nên không bao giờ có số 0; lệnh nói liền sau "on" cho cửa sổ 79–90 bước, và đệm số 0 vào đó thì điểm của chủ repo tụt dưới ngưỡng (`measurements/command.md` §12.40) |
+| Cửa sổ | 1,5 s `clean`, 24 000 mẫu, kết ở bước cuối của cửa sổ lệnh vừa chấm; `window_s` của `contracts/speaker.yaml`, đúng như vật liệu của khảo sát cắt, vốn luôn có 2 s trước câu. Cửa sổ thường: tiếng mạng `command` vừa nghe, số 0 phía trước chỉ khi nó ngắn hơn. Cửa sổ có đoạn bù, tức lệnh nói liền sau từ đánh thức (§5.4, ADR-0032, ADR-0039): 1,5 s liền từ vòng đệm, gồm cả từ đánh thức do chính người nói ấy nói. Đoạn bù cộng cửa sổ chỉ 79–87 bước, nên số 0 và tiếng nền chiếm nửa cửa sổ, và điểm của chủ repo tụt dưới ngưỡng: `SPEAKER` 3/10 lệnh nói liền sau "happy" (`measurements/command.md` §12.40, §12.45) |
 | Đặc trưng | `dsp_spec/spk_fbank` (dưới), số của `contracts/speaker.yaml` qua `gen_speaker.h`; bản soi gương `srpipe.dsp.spec.spk_fbank`, khớp từng bit |
 | Mạng | mục `speaker` của ảnh, trọng số đọc thẳng từ flash (`param_copy` tắt), vùng tensor ~1,98 MB ở PSRAM; đầu vào lượng tử `lrintf(x · 2^−e)` kẹp vào int8, như mô phỏng ESP-PPQ |
 | Hậu xử lý | `ai_engine/src/speaker/`, bản soi gương `tasks/speaker/postproc/`: embedding int8 nhân 2^e thành float32, chia cho độ dài L2. μ_t, σ_t của chính embedding ấy trên nhóm chuẩn (dưới), tính một lần mỗi lệnh. Với mỗi mẫu giọng: d là tích vô hướng với embedding; z_e = (d − μ_e)/σ_e theo μ, σ của mẫu ấy, z_t = (d − μ_t)/σ_t; điểm là (z_e + z_t)/2, đổi ra phần nghìn bằng `lrintf`, trong ±32 767 (AS-norm, ADR-0023). Lấy điểm lớn nhất, bằng nhau thì người ở ô thấp hơn; nhận khi điểm ≥ ngưỡng của số người đang có mẫu giọng, ở dải độ ồn của cửa sổ (dưới). Mọi tổng là float32 cộng theo thứ tự, không phép nhân cộng gộp |
@@ -3558,8 +3558,8 @@ nguyên tử và gọi hàm `*FromISR`. Không log, không `malloc`, không floa
 ```
         wake ≥ ngưỡng                  câu chốt: vad tắt quá utterance.gap_s
  NGHE ─────────────────► LENH ───────────────────────────────────► chấm
-  ▲                        │ im 1,5 s                                │
-  │                        └──────────────► NGHE        lệnh ◄──────┤──── từ chối → NGHE
+  ▲                        │ im 3 s                                  │
+  │                        └──────────────► NGHE        lệnh ◄──────┤──── từ chối → LENH
   │                                                      │
   └────────────── phát xong ◄──── DAP ◄──────────────────┘
 ```
@@ -3599,7 +3599,7 @@ trường nhìn trống sau mỗi lệnh. Nói chen chỉ mở được sau khi 
   phần đầu cửa sổ là phần có lệnh. Tiếng nền giữ `vad` bật (TV, nhạc từ điện thoại) thì câu không bao giờ chốt; cửa sổ
   lùi từ cuối như dưới đây thì board không quyết định gì tới khi tiếng nền ngừng, `LENH` không nhận `wake` mới, rồi chấm
   3,75 s cuối thay vì lệnh (board B 31/10: 15 s và 28 s, §12.39). Chốt sớm thì quyết định đến chậm nhất `window_s` sau
-  mốc, rồi máy về `NGHE`;
+  mốc. Sau một từ chối máy chờ thêm `SVC_LISTEN_COMMAND_WAIT_MS` kể từ cửa sổ cuối, dù tiếng nền còn giữ `vad` bật;
 - **cửa sổ chạy theo luồng**: ngay từ bước `vad` đầu của câu, `svc_listen` đưa log-mel và cao độ đã có của từng bước
   của cửa sổ vào `ai_engine_command_step`, đuổi kịp phần trước câu rồi đi cùng các khung mới; mạng chạy mỗi khối và
   phép chấm đi tiếp trên khung mới, theo bộ lệnh `ai_engine_command_prepare` đã nhận. Cuối cửa sổ chỉ dời về sau, nên
@@ -3641,27 +3641,35 @@ trường nhìn trống sau mỗi lệnh. Nói chen chỉ mở được sau khi 
 **Ảnh model không có `wake`** (trước khi `wake` qua Cửa 2, hay khi chỉ demo `command`): không có gì đưa máy vào `LENH`,
 nên `nhan_task` mở cửa sổ cho mọi câu `vad` tìm ra, mốc chặn là bước sau cửa sổ trước.
 
-**Ảnh có `wake`**: `wake` vượt ngưỡng ở bước k thì vào `LENH` với mốc chặn k + 1, nên cửa sổ không chứa từ đánh thức:
-câu đang chạy qua bước k ("trợ lý bật đèn" nói liền) mở cửa sổ ở k + 1, câu sau đó mở như trên. Mỗi câu chỉ một cửa
-sổ: câu chạy qua k đã có cửa sổ (mở trong `LENH` trước khi một quyết định đưa máy về `NGHE`, hay lúc đăng ký giọng) thì
-cửa sổ ấy dời về k + 1; cửa sổ thứ hai sẽ bỏ cái đầu mở mãi, không ai chấm, và chặn hàng đợi. Cửa sổ của câu chạy qua
-k chỉ được giữ khi phần sau k dài hơn `utterance.min_s` cộng hangover của `vad` (240 ms, `contracts/afe.yaml`): từ đánh
-thức nói riêng rồi dừng thì đuôi của nó bị bỏ lặng lẽ, máy vẫn ở `LENH` chờ lệnh, thay vì chấm cái đuôi ra một
-`REJECT` rồi về `NGHE` bỏ lỡ lệnh đến sau (board B, 29/10). Cửa sổ thấy trước lệnh
-ít hơn cửa sổ của ảnh không có `wake`; điểm chia `T_W` (§3.12) nên `δ₁` `δ₂` giữ nguyên nghĩa, còn độ đúng thì đo lại trên
-phiên có `wake` khi `wake` vào ảnh (E11-T14). Bước k là bước của điểm `ai_engine_wake_step` vừa trả, trễ
-`ai_engine_wake_delay()` bước so với khung vừa nạp (§3.11); vượt ngưỡng ra một sự kiện `WAKE` mang k và điểm ‰, trước mọi
-quyết định của câu sau đó. Trong `NGHE` `svc_listen` vẫn theo dõi câu theo `vad` nhưng không mở cửa sổ. Một quyết định cho
-cửa sổ của `LENH`, lệnh hay từ chối, đưa máy về `NGHE`; im `SVC_LISTEN_COMMAND_WAIT_MS` (3 s, `Kconfig` của
-`svc_listen`, vì đổi `listen.yaml` là đổi `listen_hash`) mà không có câu nào cũng về `NGHE`, không chấm. Board không
-báo cho người nói lúc nào nó đã thức, nên người ta ngừng sau từ đánh thức lâu hơn ta tưởng: chủ repo ngừng 1,5–2,2 s, và
-với 1,5 s một lệnh tới sau 2,24 s bị bỏ mà không có sự kiện nào (`measurements/command.md` §12.41). Đổi lại, từ đánh thức
-nói lại trong lúc chờ thành một câu của `LENH`, bị chấm và từ chối. Một lần vượt
-ngưỡng chỉ tính một lần: điểm phải xuống dưới ngưỡng rồi mới được vượt lại. Trong `LENH` máy đã thức, nên lần vượt ngưỡng
-ở đó không tính: điểm làm trơn dao động quanh ngưỡng trong một từ đánh thức, và tính chúng là ra nhiều `WAKE` liền cho
-một lần nói (board B, 29/10). Như vậy mỗi lần thức có khoảng khoá ít nhất `SVC_LISTEN_COMMAND_WAIT_MS`, dài hơn
-`eval.lockout_s` 2 s mà ngưỡng được chọn theo, nên trên board số báo nhầm mỗi giờ không cao hơn số đo lúc chọn ngưỡng. Bộ đệm của `wake` chỉ xoá khi luồng đứt. Trong lúc đăng ký giọng (§3.17) mọi câu đều mở cửa sổ như ảnh không có `wake`:
-người đăng ký chỉ đọc lệnh trình nhắc đưa ra, không nói từ đánh thức trước mỗi lệnh.
+**Ảnh có `wake`**: `wake` vượt ngưỡng ở bước k thì vào `LENH` và ra một sự kiện `WAKE` mang k và điểm ‰, trước mọi quyết
+định của câu sau đó. Bước k là bước của điểm `ai_engine_wake_step` vừa trả, trễ `ai_engine_wake_delay()` bước so với
+khung vừa nạp (§3.11). **Mốc chặn** của cửa sổ lệnh là cuối từ đánh thức, để cửa sổ không chứa từ ấy (ADR-0039). Điểm
+làm trơn vượt ngưỡng trước cuối từ, nên mốc tạm k + 1 để đuôi từ lọt vào cửa sổ ở 68% số lần với "happy"
+(`measurements/wake.md` §10). Điểm học là 1 tới 0,3 s sau cuối từ, nên khung j điểm rơi lại dưới ngưỡng bám cuối từ chặt
+hơn. Lúc ấy mốc chốt ở max(k + 1, j − `SVC_LISTEN_WAKE_END_MS`) (224 ms): đuôi còn lọt ở 21% số lần, mốc trung vị 64 ms
+sau cuối từ. Điểm chưa rơi sau `SVC_LISTEN_WAKE_FALL_MS` (768 ms) kể từ lúc vượt, hay câu chứa từ chốt trước khi điểm
+rơi, thì mốc giữ k + 1. Hai hằng ở `Kconfig` của `svc_listen`; đổi từ đánh thức hay model `wake` thì đo lại. Câu đang
+chạy qua k ("happy bật đèn" nói liền) mở cửa sổ ở mốc tạm, và cửa sổ dời về mốc khi mốc chốt; mạng giữ phần đoạn bù đã
+chạy nếu chưa nghe bước nào sau mốc tạm. Câu sau đó mở như trên. Mỗi câu chỉ một cửa sổ: câu chạy qua k đã có cửa sổ
+(lúc đăng ký giọng, hay mở trong `LENH` trước một `COMMAND`) thì cửa sổ ấy dời về mốc; cửa sổ thứ hai sẽ bỏ cái đầu mở
+mãi, không ai chấm, và chặn hàng đợi. Cửa sổ của câu chạy qua k chỉ được giữ khi phần sau mốc dài hơn `utterance.min_s`
+cộng hangover của `vad` (240 ms, `contracts/afe.yaml`): từ đánh thức nói riêng rồi dừng thì đuôi của nó bị bỏ lặng lẽ,
+máy vẫn ở `LENH` chờ lệnh. Cửa sổ thấy trước lệnh ít hơn cửa sổ của ảnh không có `wake`; điểm chia `T_W` (§3.12) nên
+`δ₁` `δ₂` giữ nguyên nghĩa, còn độ đúng thì đo lại trên phiên có `wake` khi `wake` vào ảnh (E11-T14). Trong `NGHE`
+`svc_listen` vẫn theo dõi câu theo `vad` nhưng không mở cửa sổ. **Chỉ một `COMMAND` đưa máy về `NGHE`.** `REJECT`, kể cả
+`FRAME_GAP` và cửa sổ bỏ vì lỗi, để máy chờ tiếp: tiếng động hay một lệnh không rõ không nuốt lệnh người nói nói lại
+ngay sau. Im `SVC_LISTEN_COMMAND_WAIT_MS` (3 s, `Kconfig` của `svc_listen`, vì đổi `listen.yaml` là đổi `listen_hash`)
+mà không có câu nào thì về `NGHE`, không chấm. Board không báo cho người nói lúc nào nó đã thức, nên người ta ngừng sau
+từ đánh thức lâu hơn ta tưởng: chủ repo ngừng 1,5–2,2 s, và với 1,5 s một lệnh tới sau 2,24 s bị bỏ mà không có sự kiện
+nào (`measurements/command.md` §12.41). Một lần vượt ngưỡng chỉ tính một lần: điểm phải xuống dưới ngưỡng rồi mới được
+vượt lại. Trong `LENH`, lần vượt ngưỡng trong cùng câu với lần thức trước không tính: điểm làm trơn dao động quanh
+ngưỡng trong một từ đánh thức, và tính chúng là ra nhiều `WAKE` liền cho một lần nói (board B, 29/10). Vượt ngưỡng ở một
+câu mới là **thức lại** (ADR-0039): một `WAKE` mới, cửa sổ của câu ấy dời về mốc của nó như lần thức đầu, thời gian chờ
+tính lại; từ đánh thức nói lại trong lúc chờ nên không thành một câu lệnh bị chấm và từ chối. Khoá giữa hai lần thức chỉ
+còn một câu, ngắn hơn `eval.lockout_s` 2 s mà ngưỡng được chọn theo: một tiếng giống từ đánh thức lặp lại trong `LENH`
+có thể ra nhiều `WAKE` hơn số đo lúc chọn ngưỡng 🔬. Bộ đệm của `wake` chỉ xoá khi luồng đứt. Trong lúc đăng ký giọng
+(§3.17) mọi câu đều mở cửa sổ như ảnh không có `wake`: người đăng ký chỉ đọc lệnh trình nhắc đưa ra, không nói từ đánh
+thức trước mỗi lệnh.
 
 ### 5.5 Quy chuẩn thêm task hoặc việc song song
 
