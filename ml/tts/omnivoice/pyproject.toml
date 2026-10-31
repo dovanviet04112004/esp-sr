@@ -1,0 +1,16 @@
+[project]
+name = "tts-omnivoice"
+version = "0.1.0"
+description = "KhanhTTS-OmniVoice (Apache 2.0), k2-fsa's OmniVoice tuned on Vietnamese, behind run.py, for srpipe.tts"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "omnivoice==0.2.1",
+    "torch==2.14.0",
+    "torchaudio==2.11.0",
+    "transformers==5.17.0",
+    "soundfile",
+    "huggingface-hub>=0.24",
+]
+
+[tool.uv]
+package = false

@@ -6,6 +6,7 @@ chunk_clips:                       # clips a run of each engine and of the check
                                    #   part of every clip's and every answer's fingerprint
   vieneu: 1000                     # ~0.5 s a clip, the model loads in seconds (tts_engines.md)
   f5: 300                          # ~2.9 s a clip
+  omnivoice: 400                   # ~1.5 s a clip in batches of 4, the model loads in ~30 s (tts_engines.md §6)
   asr: 500                         # ~0.5 s a clip, a run loads 3 GB from E: in ~3 min; 3000 lost 43 min to a crash
 asr:
   model: vinai/PhoWhisper-large@b9136a44b5f2ca664bd0b8f74baecf1715f6eeeb
@@ -35,3 +36,6 @@ engines:
       min_syllable_s: 0.3          # VieNeu says a command at about 0.26 s a syllable, silences aside
       tail_s: 0.25                 # room for the last syllable to fade before the clip ends
       peak_dbfs: -1.0              # louder clips are scaled down, or 16-bit writing clips them
+  omnivoice:                       # designed voices and clones of a reference clip and its text (ADR-0040)
+    checkpoint: kjanh/KhanhTTS-OmniVoice@20d056b8ea5d8d578b4cbaf1f703012fa3798a84
+    dtype: float16                 # as the model card runs it; 3 GB of a 4 GB card at a batch of 16

@@ -24,11 +24,13 @@ def run(name: str, *args: str, cache: Path) -> str:
 
 
 def engine_args(engine: str, tts: dict) -> list[str]:
-    """What the engine's run.py takes ahead of its command: VieNeu two pinned repos and its dtype, F5 its pinned
-    checkpoint and vocoder and its timing as JSON."""
+    """What the engine's run.py takes ahead of its command: VieNeu two pinned repos and its dtype, OmniVoice its
+    pinned checkpoint and dtype, F5 its pinned checkpoint and vocoder and its timing as JSON."""
     spec = tts["engines"][engine]
     if engine == "vieneu":
         return [spec["checkpoint"], spec["codec"], spec["dtype"]]
+    if engine == "omnivoice":
+        return [spec["checkpoint"], spec["dtype"]]
     return [spec["checkpoint"], spec["vocoder"], json.dumps(spec["timing"])]
 
 

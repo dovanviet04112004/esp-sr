@@ -21,6 +21,7 @@ from srpipe.lang.normalize import LangError, normalize
 from srpipe.tts import engines
 
 ROW_KEYS = ("speaker", "text", "say", "seed", "speed")
+PACED = ("f5", "omnivoice")  # their clones take the reference's text and a speed
 NOT_SPOKEN = ("id", "out", "speaker", "say", "rivals")
 REFERENCES = "synth_refs"
 
@@ -125,10 +126,10 @@ def training_references(
     return refs
 
 
-def preset_request(k: int, voice: dict, n: int, text: str, seed: int, folder: Path) -> dict:
-    """Voice k of the engine's presets reading text n."""
-    rid = f"preset_{k:02d}_t{n}_s{seed}"
-    return {
+def preset_request(k: int, voice: dict, n: int, text: str, seed: int, folder: Path, speed: float | None = None) -> dict:
+    """Voice k of the engine's presets reading text n, at speed for an engine that takes one."""
+    rid = f"preset_{k:02d}_t{n}_s{seed}" + (f"_v{round(speed * 100)}" if speed is not None else "")
+    req = {
         "id": rid,
         "speaker": voice["label"],
         "text": text,
@@ -136,11 +137,13 @@ def preset_request(k: int, voice: dict, n: int, text: str, seed: int, folder: Pa
         "voice": voice["id"],
         "out": str(folder / f"{rid}.wav"),
     }
+    return req | {"speed": speed} if speed is not None else req
 
 
 def clone_request(engine: str, ref: Reference, n: int, text: str, seed: int, speed: float, folder: Path) -> dict:
-    """The voice of ref reading text n; F5 also takes the reference's text and a speed, VieNeu neither."""
-    rid = f"clone_{ref.speaker}_t{n}_s{seed}" + (f"_v{round(speed * 100)}" if engine == "f5" else "")
+    """The voice of ref reading text n; F5 and OmniVoice also take the reference's text and a speed, VieNeu neither."""
+    paced = engine in PACED
+    rid = f"clone_{ref.speaker}_t{n}_s{seed}" + (f"_v{round(speed * 100)}" if paced else "")
     req = {
         "id": rid,
         "speaker": ref.speaker,
@@ -149,7 +152,7 @@ def clone_request(engine: str, ref: Reference, n: int, text: str, seed: int, spe
         "ref_audio": str(ref.wav),
         "out": str(folder / f"{rid}.wav"),
     }
-    return req | {"ref_text": ref.text, "speed": speed} if engine == "f5" else req
+    return req | {"ref_text": ref.text, "speed": speed} if paced else req
 
 
 def write_manifest(out: Path, body: dict) -> Path:
@@ -226,13 +229,19 @@ def make_clips(engine: str, reqs: list[dict], tts: dict, work: Path, cache: Path
 
 
 def render(
-    requests: dict[str, list[dict]], tts: dict, work: Path, cache: Path, timings: dict[str, dict] | None = None
+    requests: dict[str, list[dict]],
+    tts: dict,
+    work: Path,
+    cache: Path,
+    timings: dict[str, dict] | None = None,
+    heard_back: bool = True,
 ) -> list[dict]:
     """Make every engine's requests {id, speaker, text, out, say?, rivals?, ...} as make_clips does, hear every clip
     back, and return one manifest row per clip: heard, what the checker heard; passed, whether it spells what the
     clip must say; margin, how much more log-probability the checker gives what it heard than what the clip must say,
-    near 0 when only the spelling differs; rivals, the same margin for each text it must not say. timings, when given,
-    gets per engine the clips made and heard and the seconds of each."""
+    near 0 when only the spelling differs; rivals, the same margin for each text it must not say. Without heard_back
+    no clip is heard: heard is None, every clip passes and margins are 0. timings, when given, gets per engine the clips
+    made and heard and the seconds of each."""
     rows = []
     for engine, reqs in requests.items():
         started = time.monotonic()
@@ -240,12 +249,17 @@ def render(
         synthesised = time.monotonic()
         targets = {r["id"]: [said(r), *r.get("rivals", [])] for r in reqs}
         asked = [{"id": f"{engine}/{r['id']}", "wav": r["out"], "targets": targets[r["id"]]} for r in reqs]
-        heard = engines.hear(asked, tts, work, cache)
+        unheard = {"text": None, "logp": 0.0}
+        heard = (
+            engines.hear(asked, tts, work, cache)
+            if heard_back
+            else {a["id"]: unheard | {"targets": dict.fromkeys(a["targets"], 0.0)} for a in asked}
+        )
         if timings is not None:
             timings[engine] = {
                 "made": count,
                 "made_s": round(synthesised - started, 1),
-                "heard": len(reqs),
+                "heard": len(reqs) if heard_back else 0,
                 "heard_s": round(time.monotonic() - synthesised, 1),
             }
         for r in reqs:
@@ -258,7 +272,7 @@ def render(
                     "id": r["id"],
                     **{k: r[k] for k in ROW_KEYS if k in r},
                     "heard": h["text"],
-                    "passed": spelled(h["text"]) == spelled(said(r)),
+                    "passed": not heard_back or spelled(h["text"]) == spelled(said(r)),
                     "margin": gap[said(r)],
                     **({"rivals": {t: gap[t] for t in r["rivals"]}} if "rivals" in r else {}),
                     "seconds": round(sf.info(str(wav)).duration, 3),
