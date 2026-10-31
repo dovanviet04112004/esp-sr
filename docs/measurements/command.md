@@ -2007,3 +2007,47 @@ rồi "mở cửa", lệnh khi điện thoại phát YouTube, "on" một mình.
 - **YouTube:** mỗi `WAKE` ra quyết định trong 4–5 s, không treo; lệnh bị `LOW_SCORE` hay `PART`, điểm 636–754 ‰, cách vòng
   tự do 262–453 ‰: tiếng nói của điện thoại lọt qua chuỗi làm sạch vào cửa sổ.
 - **"on" một mình:** `WAKE` không kèm cửa sổ, máy về `NGHE` sau thời gian chờ, không quyết định nào.
+
+### 12.44 Rà chuỗi `wake` → `LENH` với "happy" (31/10)
+
+Chủ repo dùng "happy" ở 880 ‰ (`dfd708cb`) trên firmware `bench` @ `d82ffeb` và thấy hai điều:
+- nói "happy" xong, board ra ngay `REJECT LOW_SCORE`;
+- lệnh nói sau 1–2 s ăn hơn lệnh nói liền.
+
+Bốn lượt rà đọc `svc_listen.c`, `swift_dims.c`, `command.cpp`; mỗi kết luận được một lượt khác soát lại trên mã. Chưa phiên
+"happy" nào bắt được `REJECT` ấy 🔬: năm `WAKE` "happy" trong log UART 31/10 đều bỏ cửa sổ đuôi.
+
+- **Mốc chặn là bước vượt ngưỡng, không là cuối từ.** `hear_wake` đặt mốc ở k + 1, k là khung đầu có điểm trơn ≥ ngưỡng,
+  biết ở bước k + 7. Câu chứa từ đánh thức được một cửa sổ `wake_tail` từ k + 1, kèm 31 bước bù lấy trước từ
+  (svc_listen.c:620-642, 454-466). Với "on" ở 900 ‰, k đến trước cuối từ trung vị 32 ms, p90 176 ms (`wake.md` §8). "happy"
+  hai âm tiết, ngưỡng 880 thấp hơn 925 của run, nên phần từ sau k có thể dài hơn 🔬.
+- **Cửa sổ đuôi được giữ thì ra `REJECT`.** Câu chốt sau 25 bước không `vad`. Cửa sổ đuôi giữ khi `run_last − (k + 1)` ≥
+  16 + 15 bước (svc_listen.c:491-497). Hơi thở, tiếng động hay âm cuối kéo dài trong 0,64 s sau từ nhập vào câu, nên cửa
+  sổ đuôi được chấm và vòng tự do hơn mọi lệnh quá δ₁: `LOW_SCORE`. Với "on" đã gặp 7 lần ngày 31/10 (§12.37).
+- **Tràn số:** `run_first`, `run_last` là `uint32_t`. Khi k rơi sau bước `vad` cuối của câu mà câu chưa chốt, hiệu tràn,
+  cửa sổ rỗng được giữ và chấm đoạn bù: `REJECT` ~0,5 s sau `WAKE`. Chưa thấy trên board.
+- **Quyết định nào cũng kết thúc `LENH`** (`done()`, svc_listen.c:717-724). `REJECT` của cửa sổ đuôi rơi vào lúc chủ repo
+  đang ngừng; lệnh bắt đầu sau quyết định ấy không được mở cửa sổ.
+- **Lệnh nói liền, ngừng dưới ~0,64 s, chung câu với từ đánh thức** nên được chấm trong cửa sổ đuôi. Mạng nghe 0,5 s tiếng
+  nền trước từ, nhảy sang k + 1, nghe phần "happy" sau mốc, khoảng ngừng, rồi mới tới lệnh; mẫu học có 0,3–2 s không lời
+  trước câu (`command_ctc.yaml`). Ba chiều cao độ của âm tiết đầu chuẩn hoá trên 0,75 s trước nó, gồm cả "happy"
+  (swift_dims.c:102-115). Kiểm người nói đọc 94 bước cuối, gồm đuôi từ và đoạn bù. Với "on": "mở cửa" liền 3/7, có ngừng
+  11/11 (§12.40). Lệnh sau 1–2 s có cửa sổ riêng, phần trước câu là tiếng thật như lúc học.
+- **Không ca kiểm hay bản soi gương nào phủ `LENH`** (ADR-0032): Cửa 3, `listen-unit` và mẫu học đều không có từ đánh thức.
+
+### 12.45 Lệnh nói liền sau "happy" với mốc ở cuối từ (31/10)
+
+Firmware `bench` của ADR-0039 (mốc ở cuối từ, `REJECT` không kết thúc `LENH`) trên board B, "happy" 880 ‰, 300 / 10 / 65 535,
+kiểm người nói `b0` một mẫu giọng, ngưỡng z 1,486. Chủ repo nói theo yêu cầu, log UART 22:25–22:27.
+
+| Cách nói | Lần | `COMMAND` đúng | `SPEAKER` | `PART` |
+|---|---|---|---|---|
+| "happy" rồi lệnh liền | 10 | 6 | 3 | 1 |
+| "happy", ngừng 1–2 s, rồi lệnh | 4 | 4 | 0 | 0 |
+
+- Ba lần `SPEAKER` có điểm lệnh 992, 970, 908 ‰: mạng lệnh nghe đúng, chỉ kiểm người nói loại. z 1,272, 1,378, 0,825; sáu lần
+  nhận có z 1,58–4,55. Lần có ngừng z 1,49–4,52.
+- Cửa sổ của lệnh nói liền bắt đầu ở mốc và có đoạn bù 31 bước. Mạng lệnh nghe 79–87 bước, nên cửa sổ kiểm người nói 94 bước
+  có số 0 phía trước, rồi 0,5 s tiếng nền lấy từ trước từ đánh thức, rồi lệnh.
+- Mốc rời k + 1 ở 1/10 lần nói liền (k + 4): với giọng chủ repo, điểm vượt ngưỡng sát cuối từ và rơi lại nhanh, nên
+  j − 14 hiếm khi muộn hơn k + 1. Lần `PART` (điểm 878, cách vòng tự do 75 ‰) là lỗi của mạng lệnh.

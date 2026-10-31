@@ -686,3 +686,30 @@ của MLCommons (từ cắt khỏi câu đọc của Common Voice bằng căn c�
   "Firefox" thành hai mẩu riêng; Firefox là nhãn hiệu.
 - Trong các từ nói riêng, "on" đã là từ nhiều dữ liệu nhất của Speech Commands ngoài chữ số; các từ hai âm tiết có chừng
   một nửa. Mẩu MSWC cắt khỏi câu, gần như mẩu `hf_extract` đã gặp ở §7, chưa được nghe thử.
+
+## 10. Cuối từ "happy" so với lúc điểm vượt và rơi ngưỡng (31/10)
+
+Run `20261031_5e5921a-dirty_72c36d` (`happy1`, đang ở board B), mạng float, điểm làm trơn 5 bước như chip, ngưỡng 0,88; 183
+mẩu `val_pos` bắt được. Cuối từ là cuối phần có tiếng của mẩu, như nhãn học (`train.label_s` 0,2 s trước tới 0,3 s sau).
+Đơn vị là bước 16 ms, số âm là trước cuối từ.
+
+| Bước so với cuối từ | p10 | p25 | Trung vị | p75 | p90 |
+|---|---|---|---|---|---|
+| vượt ngưỡng đầu tiên, k | −14 | −9,5 | −6 | −1,5 | +6 |
+| điểm rơi lại dưới ngưỡng, j | +2 | +12 | +18 | +20 | +21 |
+| đỉnh điểm giữa k và j | −6,6 | 0 | +6 | +11 | +14 |
+
+Mốc chặn của cửa sổ lệnh theo từng luật; mốc trước cuối từ hơn 2 bước là đuôi "-py" lọt vào cửa sổ:
+
+| Mốc | Trước cuối từ > 2 bước | Trong [−2, +6] | p10 | Trung vị | p90 |
+|---|---|---|---|---|---|
+| k + 1 | 68% | 19% | −13 | −5 | +7 |
+| j − 14 | 23% | 60% | −12 | +4 | +7 |
+| **max(k + 1, j − 14)** | **21%** | 56% | −7 | +4 | +8 |
+| max(k + 1, j − 16) | 27% | 60% | −9 | +2 | +7 |
+| max(k + 1, j − 18) | 34% | 54% | −10 | 0 | +7 |
+
+- Điểm rơi ngưỡng bám cuối từ chặt hơn lúc vượt ngưỡng, vì nhãn học giữ điểm cao tới 0,3 s sau từ: p25–p90 của j trải 9
+  bước, của k 15,5 bước. Đuôi sớm của j (p10 +2) là điểm dao động xuống dưới ngưỡng giữa từ; max với k + 1 chặn nó.
+- `SVC_LISTEN_WAKE_END_MS` 224 ms, tức 14 bước, lấy từ hàng in đậm. Mẩu là "happy" tiếng Anh nói riêng qua mô phỏng; số trên
+  lời chủ repo, nhất là khi lệnh nói liền, chưa đo 🔬.
