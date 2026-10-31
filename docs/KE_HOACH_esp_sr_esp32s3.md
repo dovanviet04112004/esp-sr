@@ -2404,6 +2404,16 @@ lệch ngoài ngưỡng:
 8. sang nhân 1 chỉ khi trạng thái chung của `ai_engine` đã tách riêng từng task và phép kiểm hai nhân hết sai
    (ADR-0027).
 
+**Op riêng của nhánh.** Bước xuất gộp mỗi tích chập với bảng tra hàm kích hoạt đọc riêng nó thành một `ConvLut`
+(ADR-0031). Op chạy kernel tích chập của esp-dl theo dải hàng và tra bảng lên dải khi dải còn trong cache. Hai chỗ op
+không chạy như esp-dl (ADR-0034):
+- trọng số đọc từ vùng RAM nội mượn mỗi lượt (§6.5), theo lát kênh ra khi filter lớn hơn vùng: đọc qua cache từ flash,
+  tích chập int8 chạy 0,2–0,27 chu kỳ một nhân-cộng, từ vùng mượn ~0,11;
+- tích chập đầu, RGB 3 kênh vào 16 kênh ra bước 2, chạy trên kernel `stem` của repo thay kernel không căn của esp-dl.
+
+Trên app thử, một ảnh 512 mất 2 118 ms với vùng 64 KB, 2 157 ms với 32 KB, 2 359 ms với 16 KB, khớp mô phỏng từng giá trị
+(`measurements/detect.md` §8). Trong sản phẩm, vùng được cấp tuỳ RAM nội còn trống lúc chạy 🔬.
+
 Đích thời gian mỗi ảnh chốt sau phép đo E15-T2 🔬, kèm điều kiện độ trễ lệnh tiếng nói không tăng.
 
 ---
@@ -2923,7 +2933,8 @@ firmware/
 │   │                            #     esp_ppq_patches/ops/<op>.py, cùng các bước float32 kiểu esp-dl mà op dùng
 │   │                            #     chung espdl_float_s3.hpp;
 │   │                            #     kernels/ nhân PIE <họ>_s8_esp32s3.S đặt tên theo việc chúng làm (depthwise,
-│   │                            #     pointwise, pointwise_fused, layernorm, group_norm, softmax, stats, stage_sum, band),
+│   │                            #     pointwise, pointwise_fused, layernorm, group_norm, softmax, stats, stage_sum, band,
+│   │                            #     stem),
 │   │                            #     dùng chung giữa các op, cùng macro PIE pie_s8_esp32s3.inc;
 │   │                            #     runtime/ phần chạy chung của op: vùng RAM nội mượn lúc chạy
 │   │                            #     espdl_loan.{cpp,hpp} (§6.5), chuỗi vùng nạp trước vào dcache
@@ -3924,6 +3935,8 @@ RAM nội. Hai ngoại lệ:
     `StageSum` chép trọng số theo kênh của mọi số hạng.
   - Op riêng cũng dùng vùng ấy làm vùng nháp khi vừa (hàng đệm, hàng ra, tổng tạm), không xin thêm byte nào:
     `TimeDepthwise` đặt hàng đệm và hàng ra ở đó.
+  - `ConvLut` của `detect` xin số byte trọng số của nó, tối đa 32 KB (ADR-0034). Vùng chứa cả filter thì op chép cả;
+    không thì op chạy theo lát kênh ra, mỗi lát chép vào vùng trước pass của nó.
   - Ở hai nhân (ADR-0027) mỗi nửa của `ConvBlock` có vòng hàng, đệm dải và hàng vào conv sau riêng, cả hai trong
     vùng; vùng được cấp không đủ cho cả hai thì khối chạy cả hàng ở một nhân.
 
