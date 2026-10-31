@@ -12,7 +12,9 @@
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_partition.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 #include "storage_format.h"
 #include "sys_storage.h"
 #include "unity.h"
@@ -156,10 +158,24 @@ int check_boxes(const ai_engine_box_t *got, size_t n, const int16_t *want, const
     return bad;
 }
 
+// The graph holds core 0 for seconds: IDLE0 leaves the task watchdog meanwhile, or its backtrace, ~50 ms over
+// the UART, lands in whichever picture or module is being timed.
+struct IdleUnwatched {
+    IdleUnwatched()
+    {
+        esp_task_wdt_delete(xTaskGetIdleTaskHandleForCore(0));
+    }
+    ~IdleUnwatched()
+    {
+        esp_task_wdt_add(xTaskGetIdleTaskHandleForCore(0));
+    }
+};
+
 } // namespace
 
 TEST_CASE("detect: the six outputs and the boxes match ESP-PPQ's on eight pictures", "[detect]")
 {
+    const IdleUnwatched unwatched;
     const auto *head = reinterpret_cast<const ExpectHead *>(detect_expect_start);
     TEST_ASSERT_EQUAL_MEMORY("SRDE", head->magic, 4);
     TEST_ASSERT_TRUE(head->outputs <= kOutputsMax && head->keep <= STORAGE_VISION_TOP_K_MAX);
