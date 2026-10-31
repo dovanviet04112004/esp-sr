@@ -145,3 +145,29 @@ quyết mẩu nào đủ gần "dừng lại" để giữ. Bộ đủ theo cấu
 351 giọng nhân bản (41 người VIVOS mà split `command` giữ ở `train`, cộng 310 mẩu parquet) và 25 giọng có sẵn; âm bản 84 cụm
 (26 gần âm, 35 mở đầu, 16 nửa lệnh, 7 danh sách tay) × 10 giọng = 840 mẩu. Theo tốc độ pilot (VieNeu khoảng 0,9 s, F5
 khoảng 3,5 s một mẩu kể cả nghe lại) là khoảng 8,5 giờ trên RTX 3050 🔬.
+
+## 6. KhanhTTS-OmniVoice cho "vừng ơi" (31/10, ADR-0040)
+
+`kjanh/KhanhTTS-OmniVoice@20d056b8`: OmniVoice của k2-fsa tinh chỉnh trên ~1 500 giờ tiếng Việt và tiếng Anh, Apache 2.0,
+0,6 tỉ tham số, ra 24 kHz. Chạy float16 trên RTX 3050 Laptop 4 GB, `num_step` 32 mặc định.
+
+**Pilot nghe thử.** 13 giọng × 4 chữ ("vừng ơi", "Vừng ơi!", "trợ lý", "Trợ lý!"), 52 mẩu trong 190 s gồm cả nạp model:
+- 8 giọng nhân bản từ người nói VIVOS train, 4 nam, 4 nữ, mỗi người mẩu đầu dài 4–7,5 s cùng câu của nó;
+- 4 giọng thiết kế theo giới, tuổi, độ cao;
+- giọng mặc định.
+
+Phần có tiếng 0,84–1,43 s một mẩu. Ba mẩu dưới 0,5 s nghi cụt: nhân bản VIVOSSPK27 "trợ lý", thiết kế nam trẻ trầm
+"Trợ lý!", thiết kế nam trung niên "Vừng ơi!". Chủ repo nghe cả bộ và nhận: "nghe ok". Chủ repo bỏ bước nghe lại bằng
+PhoWhisper cho bản thử, vì bộ nghe ấy hay sai trên cụm ngắn đứng riêng (§2).
+
+**Sinh theo lô** (một lời gọi `generate` nhiều mẩu, cùng chữ "vừng ơi", giọng nhân bản khác nhau):
+
+| Lô | Thời gian một mẩu | GPU cao nhất |
+|---|---|---|
+| 1 | 3,62 s, kể cả lượt chạy đầu | 2 008 MiB |
+| 4 | 1,53 s | 2 195 MiB |
+| 8 | 1,53 s | 2 455 MiB |
+| 16 | 1,54 s | 2 963 MiB |
+
+Từ lô 4 GPU đã đầy. Trên cả bộ, mẩu tham chiếu parquet dài hơn làm lô 8 đẩy GPU tới 3,95 GB trên 4 GB và mỗi mẩu mất
+3,1 s, gấp đôi, vì card đầy tràn sang RAM chung. Nên `run.py` của bộ chạy lô 4.

@@ -713,3 +713,19 @@ Mốc chặn của cửa sổ lệnh theo từng luật; mốc trước cuối t
   bước, của k 15,5 bước. Đuôi sớm của j (p10 +2) là điểm dao động xuống dưới ngưỡng giữa từ; max với k + 1 chặn nó.
 - `SVC_LISTEN_WAKE_END_MS` 224 ms, tức 14 bước, lấy từ hàng in đậm. Mẩu là "happy" tiếng Anh nói riêng qua mô phỏng; số trên
   lời chủ repo, nhất là khi lệnh nói liền, chưa đo 🔬.
+
+## 11. Phiên chủ repo nói "vừng ơi" và "trợ lý" qua board B (31/10)
+
+`make session-plan PLAN=host/plans/wake_vi.tsv` (E11-T41, ADR-0040): firmware `bench` 0.1.0+03fd0e52-dirty, luồng mode 5,
+`pcm_shift` 13, `spk_001`, phòng ở nhà, chính diện 1 m, mỗi phiên 40 s, chủ repo nói 10 lần cách 2–3 s. Bản product chỉ
+stream sau lệnh console `stream 5`, nên mỗi phiên có một lệnh như thế gửi tới board ngay khi máy thu bắt đầu ghi.
+
+| Phiên | Nói | Đoạn có tiếng | Độ dài đoạn |
+|---|---|---|---|
+| `20261031_home_004` | "vừng ơi" | 11 | 0,42–1,10 s |
+| `20261031_home_005` | "vừng ơi" | 13 | 0,46–1,28 s |
+| `20261031_home_006` | "trợ lý" | 14 | 0,62–1,41 s |
+| `20261031_home_007` | "trợ lý" | 16 | 0,32–1,12 s |
+
+Đoạn có tiếng đếm bằng năng lượng của kênh sạch, 15 dB trên phân vị 20, nối qua chỗ ngắt dưới 0,4 s; số dư so với 10 lần
+nói có lẽ là tiếng thở hay tiếng động, chưa nghe lại. `20261031_home_003` là phiên thử 10 s không lời của đường thu.
