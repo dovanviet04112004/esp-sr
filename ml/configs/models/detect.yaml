@@ -26,6 +26,11 @@ esp_ppq_patches:                      # srpipe.compress.quant.esp_ppq_patches ar
   - lean_quantizers                   # one int16 requantise of model.22's Concat for its 7 slices, not 7
   - aligned_channels                  # model.2's 8-channel bottleneck padded to 16, on esp-dl's vector path
   - conv_lut                          # each Swish or int16 table run on its convolution's bands in the cache
+  - softmax_quant                     # the attention's Softmax and its quantiser as one op
+  - softmax_scale                     # the attention's score Mul as a table of that op
+  - conv_lut_plain                    # every other Conv a ConvLut, its weights on the loan (ADR-0035)
+  - c3k2_block                        # model.2 and model.4 a row at a time (ADR-0036)
+  - upsample_concat_conv              # the neck's 1x1 over its doubled Concat (ADR-0037)
 chip:                               # the vision image's header (KEHOACH 6.3), copied into the lock by deploy
   score_permille: 250                 # lowest score a box keeps: espressif/yolo26's 0.25
   top_k: 32                           # boxes kept a picture, best first
