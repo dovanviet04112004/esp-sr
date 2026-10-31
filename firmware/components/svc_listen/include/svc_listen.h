@@ -40,6 +40,8 @@ typedef struct {
     app_event_t event;              // WAKE at its hop, else at the window's last hop
     uint32_t first_seq;             // the window's first hop
     uint32_t speech_seq;            // its utterance's first vad hop
+    uint32_t fill_first_seq;        // lead topped up ahead of the wake word
+    uint16_t fill_hops;             // its hops, 0 with none (ADR-0032)
     uint16_t free_gap_permille;     // free unit loop over the best command
     uint16_t syllable_gap_permille; // free loop over its worst syllable
     uint32_t work_us;               // network and score of the window

@@ -43,13 +43,14 @@ _Static_assert(RING_HOPS >= 2 * WINDOW_HOPS, "the ring holds the window worked a
 _Static_assert(RING_HOPS > TAIL_HOPS, "the PCM ring holds a speaker window");
 
 typedef struct {
-    uint32_t first, last; // hops, both in; last moves on while it is open
-    uint32_t speech;      // the utterance's first vad hop
-    uint32_t floor;       // no window reaches back past this hop
-    bool open;            // its utterance still runs
-    bool cut_back;        // outgrew WINDOW_HOPS: worked from its end once closed
-    bool holed;           // seq broke while open: decided FRAME_GAP, never scored
-    bool wake_tail;       // opened in the wake word's own utterance
+    uint32_t first, last;           // hops, both in; last moves on while it is open
+    uint32_t speech;                // the utterance's first vad hop
+    uint32_t floor;                 // no window reaches back past this hop
+    uint32_t fill_first, fill_hops; // lead topped up from ahead of the wake word
+    bool open;                      // its utterance still runs
+    bool cut_back;                  // outgrew WINDOW_HOPS: worked from its end once closed
+    bool holed;                     // seq broke while open: decided FRAME_GAP, never scored
+    bool wake_tail;                 // opened in the wake word's own utterance
     int64_t closed_us;
 } window_t;
 
@@ -116,6 +117,9 @@ static struct {
     bool armed;        // the wake score fell under wake_th since it crossed
     uint16_t wake_th, wake_score;
     uint32_t woke;          // the hop whose score crossed wake_th
+    uint32_t wake_from;     // first vad hop of the wake word's utterance
+    uint32_t wake_floor;    // the floor the wake raised to wake_mark
+    uint32_t wake_mark;     // the hop after the wake's decision
     uint32_t command_until; // LENH ends at this hop with no utterance running
     uint32_t wait_hops;     // SVC_LISTEN_COMMAND_WAIT_MS on the grid
     bool started, in_run, has_open, working;
@@ -442,13 +446,35 @@ static void hole_open(void)
     s.has_open = false;
 }
 
+// A lead the wake's mark cut short is topped up to LEAD_HOPS with the hops ahead of the wake word (ADR-0032).
+static void fill_lead(window_t *w)
+{
+    w->fill_hops = 0;
+    const int32_t short_hops = (int32_t)(w->first - w->speech) + LEAD_HOPS;
+    if (!s.commanding || w->floor != s.wake_mark || short_hops <= 0) { return; }
+    const uint32_t oldest = s.next_seq > RING_HOPS ? s.next_seq - RING_HOPS : 0;
+    uint32_t from = s.wake_from > (uint32_t)short_hops ? s.wake_from - (uint32_t)short_hops : 0;
+    if ((int32_t)(s.wake_floor - from) > 0) { from = s.wake_floor; }
+    if ((int32_t)(oldest - from) > 0) { from = oldest; }
+    if ((int32_t)(s.wake_from - from) <= 0) { return; }
+    w->fill_first = from;
+    w->fill_hops = s.wake_from - from;
+}
+
+static uint32_t net_first(const window_t *w)
+{
+    return w->fill_hops > 0 ? w->fill_first : w->first;
+}
+
 static esp_err_t open_utterance(uint32_t seq)
 {
     s.run_first = seq;
     if (s.count == WINDOWS_MAX) { return ESP_ERR_NO_MEM; }
     const uint32_t lead = seq >= LEAD_HOPS ? seq - LEAD_HOPS : 0;
-    s.queue[(s.head + s.count) % WINDOWS_MAX] = (window_t){
+    window_t *w = &s.queue[(s.head + s.count) % WINDOWS_MAX];
+    *w = (window_t){
         .first = lead > s.after ? lead : s.after, .last = seq, .speech = seq, .floor = s.after, .open = true};
+    fill_lead(w);
     s.count++;
     s.has_open = true;
     return ESP_OK;
@@ -479,8 +505,9 @@ static void extend_open(uint32_t seq)
     window_t *w = open_window();
     if (w == NULL) { return; }
     w->last = s.run_last + 1 <= seq ? s.run_last + 1 : seq;
-    if (!w->cut_back && w->last + 1 - w->first > WINDOW_HOPS) {
+    if (!w->cut_back && w->fill_hops + w->last + 1 - w->first > WINDOW_HOPS) {
         w->cut_back = true;
+        w->fill_hops = 0;
         stop_working(w);
     }
 }
@@ -579,7 +606,10 @@ static esp_err_t hear_wake(uint32_t seq)
     s.wake_score = score;
     s.woke_pending = true;
     s.command_until = seq + s.wait_hops;
+    s.wake_from = s.run_first;
+    s.wake_floor = s.after;
     if ((int32_t)(s.woke + 1 - s.after) > 0) { s.after = s.woke + 1; }
+    s.wake_mark = s.after;
     if (!s.in_run) { return ESP_OK; }
     // One window per utterance: a second would leave the first open for good, the queue stuck (KEHOACH 5.4).
     const esp_err_t opened = open_window() == NULL ? open_utterance(seq) : ESP_OK;
@@ -590,6 +620,7 @@ static esp_err_t hear_wake(uint32_t seq)
         w->floor = s.after;
         w->speech = s.after;
         w->wake_tail = true;
+        fill_lead(w);
     }
     s.run_first = s.after;
     return opened;
@@ -654,7 +685,7 @@ bool svc_listen_pending(void)
     if (s.ready && s.woke_pending) { return true; }
     if (!s.ready || s.count == 0) { return false; }
     const window_t *w = &s.queue[s.head];
-    const uint32_t next = s.working ? s.at : w->first;
+    const uint32_t next = s.working ? s.at : net_first(w);
     // A hop is worked once its pitch dims are in, 35 frames or more after its log-mel (KEHOACH 3.11
     // step 3.4).
     const bool due = w->holed || (s.working && s.at > w->last) || pitched(next);
@@ -705,6 +736,8 @@ static void decide(const window_t *w, const ai_engine_command_result_t *r, svc_l
     }
     out->first_seq = w->first;
     out->speech_seq = w->speech;
+    out->fill_first_seq = w->fill_first;
+    out->fill_hops = (uint16_t)w->fill_hops;
     out->free_gap_permille = r->free_gap_permille;
     out->syllable_gap_permille = r->syllable_gap_permille;
     out->work_us = (uint32_t)s.work_us;
@@ -747,7 +780,7 @@ bool svc_listen_work(svc_listen_decision_t *out)
         return true;
     }
     const int64_t from_us = esp_timer_get_time();
-    if (s.next_seq - (s.working ? s.at : w->first) > RING_HOPS) {
+    if (s.next_seq - (s.working ? s.at : net_first(w)) > RING_HOPS) {
         drop(w, "the ring moved past it");
         return false;
     }
@@ -757,7 +790,7 @@ bool svc_listen_work(svc_listen_decision_t *out)
             return false;
         }
         s.working = true;
-        s.at = w->first;
+        s.at = net_first(w);
         s.work_us = 0;
     }
     if (s.at <= w->last) {
@@ -772,6 +805,7 @@ bool svc_listen_work(svc_listen_decision_t *out)
             return false;
         }
         s.at++;
+        if (w->fill_hops > 0 && s.at == w->fill_first + w->fill_hops) { s.at = w->first; }
         s.work_us += esp_timer_get_time() - from_us;
         return false;
     }
