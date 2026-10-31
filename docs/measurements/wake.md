@@ -729,3 +729,58 @@ stream sau lệnh console `stream 5`, nên mỗi phiên có một lệnh như th
 
 Đoạn có tiếng đếm bằng năng lượng của kênh sạch, 15 dB trên phân vị 20, nối qua chỗ ngắt dưới 0,4 s; số dư so với 10 lần
 nói có lẽ là tiếng thở hay tiếng động, chưa nghe lại. `20261031_home_003` là phiên thử 10 s không lời của đường thu.
+
+## 12. "vừng ơi" học từ OmniVoice, chấm trên giọng chủ repo (01/11)
+
+Run `20261101_9ea480d-dirty_44afb0`, split `vung1` (ADR-0040): 13 408 mẩu dương OmniVoice, 826 âm bản khó, công thức học
+của `happy1`, 20 000 bước trong 69 phút trên RTX 3050. Float: `val` bắt 88,2% ở 0,905, 2,99 báo nhầm/giờ trên 30,77 giờ;
+`test` 6,05/giờ trên 19,33 giờ.
+
+| Hàng int8 | Ngưỡng | `val` bắt | `val` báo nhầm/giờ | `test` báo nhầm/giờ |
+|---|---|---|---|---|
+| `kl` | 900‰ | 88,2% | 2,89 | 5,43 |
+| `percentile` | 895‰ | 88,2% | 2,99 | 6,05 |
+| `minmax` | 865‰ | 89,7% | 2,99 | 6,21 |
+| `mse` | 880‰ | 91,2% | 2,99 | 6,31 |
+
+Phiên của §11 qua chuỗi của sản phẩm, mạng float (`python -m srpipe.tasks.wake.eval board`). `vad` cắt 10 và 12 đoạn ở
+hai phiên "vừng ơi", 15 và 16 ở hai phiên "trợ lý"; đoạn đầu của `home_004` bắt đầu ở 0,02 s, lúc luồng vừa mở.
+
+| Ngưỡng | `val` bắt | `val` báo nhầm/giờ | `test` báo nhầm/giờ | Đoạn "vừng ơi" qua ngưỡng |
+|---|---|---|---|---|
+| 0,750 | 91,2% | 7,86 | 16,30 | 13 / 22 |
+| 0,800 | 91,2% | 6,17 | 13,09 | 10 / 22 |
+| 0,850 | 91,2% | 4,45 | 9,21 | 8 / 22 |
+| 0,880 | 89,7% | 3,70 | 7,35 | 7 / 22 |
+| **0,905** | 88,2% | 2,99 | 6,05 | **6 / 22** |
+
+- Điểm từng đoạn: `home_004` 0,24 0,96 0,11 0,99 0,61 0,05 0,85 0,29 0,85 0,96; `home_005` 0,99 0,90 0,26 0,76 0,54 0,82
+  0,78 0,72 0,91 0,76 0,95 0,20. Độ dài đoạn (0,62–1,86 s) và mức log-mel cao nhất không tách đoạn bắt được với đoạn trượt.
+- Hai phiên "trợ lý" cao nhất 0,36. 85 phiên không có từ (1,30 giờ, gồm "chào mi na" và hai phiên nói tự do 31/10): 2 lần
+  vượt 0,905; đoạn cao nhất 0,82, một câu "chào mi na".
+- 9 / 22 đoạn nằm giữa 0,72 và 0,90: mạng gần nhận ra giọng chủ repo mà chưa qua ngưỡng. Hạ ngưỡng mua thêm câu bằng báo
+  nhầm: 13 / 22 ở 0,75 với `test` 16/giờ. Mẫu dương toàn tổng hợp vẫn là giới hạn của §3, nhẹ hơn VieNeu và F5 cho "chào mi
+  na" (0 / 60).
+- Chưa có phiên chủ repo nói "happy", nên điều kiện của ADR-0040 điểm 3 chưa so được; `test` của `happy1` và `vung1` khác
+  nhau nên báo nhầm/giờ cũng không so thẳng.
+
+**Học thêm giọng chủ repo** (script một lần ngoài repo, KẾ HOẠCH §1.3: phiên của người dùng thật vào `train`). Tiếp từ mạng
+trên 3 000 bước, `learning_rate` 2e-4 giảm cosine về 5e-5, không việc phụ CTC. Các đoạn `vad` của một phiên là mẫu dương
+thật (`real_share` 0,05), cuối từ là bước cuối cách bước to nhất của đoạn không quá 25 dB. Phiên còn lại để chấm. Lượt đối
+chứng học ngần ấy bước, không có giọng chủ repo. Ngưỡng chọn lại trên `val` ở 3 báo nhầm/giờ như mọi lượt.
+
+| Lượt | Ngưỡng | `val` bắt | `test` báo nhầm/giờ | `home_004` | `home_005` | "trợ lý" cao nhất | Báo nhầm trên 85 phiên |
+|---|---|---|---|---|---|---|---|
+| Mạng gốc | 0,905 | 88,2% | 6,05 | 3 / 10 | 3 / 12 | 0,36 | 2 |
+| Đối chứng | 0,930 | 86,8% | 5,95 | 3 / 10 | 2 / 12 | 0,39 | 1 |
+| Học `home_004` | 0,930 | 83,8% | 5,54 | *9 / 10* | **12 / 12** | 0,33 | 3 |
+| Học `home_005` | 0,940 | 83,8% | 4,86 | **6 / 10** | *12 / 12* | 0,14 | 2 |
+
+Ô nghiêng là phiên đã học, ô đậm là phiên chưa học: cùng người nói, cùng phòng, khác phiên, thu cách nhau vài phút.
+
+- Học một phiên đưa phiên kia từ 2–3 / 12 lên 12 / 12 và từ 3 / 10 lên 6 / 10 mà báo nhầm không tăng. Học thêm ngần ấy bước
+  không có giọng thật (đối chứng) không đổi gì.
+- Bốn đoạn của `home_004` thấp ở mọi lượt không học nó: đoạn ở 0,02 s, 7,17 s, 18,80 s và 26,13 s. Chưa nghe lại để biết là
+  cách đọc khác hay không phải "vừng ơi".
+- Ở cùng ngưỡng 0,93, `val` bắt của hai lượt học giọng thật kém đối chứng 1–2 mẩu trên 68 (83,8% và 85,3% so với 86,8%),
+  trong tầm dao động của 68 mẩu. Giọng người khác chưa đo 🔬; số trên không thay số của người chưa học (KẾ HOẠCH §1.3).
