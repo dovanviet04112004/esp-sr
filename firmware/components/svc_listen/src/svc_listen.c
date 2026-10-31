@@ -122,6 +122,7 @@ static struct {
     uint32_t wake_mark;     // the hop after the wake's decision
     uint32_t command_until; // LENH ends at this hop with no utterance running
     uint32_t wait_hops;     // SVC_LISTEN_COMMAND_WAIT_MS on the grid
+    uint32_t wake_lead;     // SVC_LISTEN_WAKE_LEAD_MS on the grid, hops
     bool started, in_run, has_open, working;
     uint32_t next_seq, after, run_first, run_last, at;
     window_t queue[WINDOWS_MAX];
@@ -375,6 +376,8 @@ esp_err_t svc_listen_init(const svc_listen_config_t *cfg)
     s.armed = true;
     s.wait_hops = (uint32_t)((uint64_t)CONFIG_SVC_LISTEN_COMMAND_WAIT_MS * GEN_GRID_SAMPLE_RATE_HZ /
                              ((uint64_t)MS_PER_S * GEN_GRID_HOP_SAMPLES));
+    s.wake_lead = (uint32_t)((uint64_t)CONFIG_SVC_LISTEN_WAKE_LEAD_MS * GEN_GRID_SAMPLE_RATE_HZ /
+                             ((uint64_t)MS_PER_S * GEN_GRID_HOP_SAMPLES));
     s.spk.enrol_window_us = (int64_t)cfg->enrol_window_s * US_PER_S;
     s.ready = true;
     return ESP_OK;
@@ -446,11 +449,11 @@ static void hole_open(void)
     s.has_open = false;
 }
 
-// A lead the wake's mark cut short is topped up to LEAD_HOPS with the hops ahead of the wake word (ADR-0032).
+// A lead the wake's mark cut short is topped up to wake_lead with the hops ahead of the wake word (ADR-0032).
 static void fill_lead(window_t *w)
 {
     w->fill_hops = 0;
-    const int32_t short_hops = (int32_t)(w->first - w->speech) + LEAD_HOPS;
+    const int32_t short_hops = (int32_t)(w->first - w->speech) + (int32_t)s.wake_lead;
     if (!s.commanding || w->floor != s.wake_mark || short_hops <= 0) { return; }
     const uint32_t oldest = s.next_seq > RING_HOPS ? s.next_seq - RING_HOPS : 0;
     uint32_t from = s.wake_from > (uint32_t)short_hops ? s.wake_from - (uint32_t)short_hops : 0;
