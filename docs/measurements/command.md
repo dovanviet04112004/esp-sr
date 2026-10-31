@@ -1968,3 +1968,25 @@ liền sau "on", cùng một câu `vad`), còn lại 0,58–1,98 s, 11 lần tr�
 `WAKE` ở bước 9334 ("on" 9315–9334) không có cửa sổ nào. Năng lượng kênh sạch cho thấy "mở cửa" ở bước 9474–9519, 2,24 s
 sau `WAKE`: `LENH` chờ `SVC_LISTEN_COMMAND_WAIT_MS` 1,5 s sau khi câu "on" chốt, tức tới chừng bước 9468, nên lệnh tới
 muộn 6 bước bị bỏ, không sự kiện nào. `WAKE` ở bước 12160 không cửa sổ là "on" nói hai lần liền, không lệnh ở giữa.
+
+### 12.42 Kiểm người nói trên cửa sổ ngắn: số 0 hay đoạn bù (31/10)
+
+Cùng phiên §12.40, b0 hàng `kl` mô phỏng như chip (`spk.chip_units`), AS-norm trên nhóm chuẩn của lock. Mẫu giọng của
+board không rời NVS, nên một mẫu giọng chỉ nằm trong bộ nhớ, dựng từ 10 cửa sổ dài của loạt có ngừng, thay chỗ nó: số z
+cao hơn của board, chỉ so được hai cách cắt với nhau. 30 cửa sổ được kiểm, 12 ngắn hơn 94 bước:
+
+| Cửa sổ | Bước | Board | Số 0 phía trước (board) | Đoạn bù phía trước |
+|---|---|---|---|---|
+| mở cửa liền, `SPEAKER` | 83 | 1,11 | 8,28 | 10,53 |
+| mở cửa liền, `SPEAKER` | 79 | 1,27 | 6,94 | 11,46 |
+| mở cửa liền, `SPEAKER` | 81 | 1,45 | 7,84 | 11,62 |
+| mở cửa liền | 81 | 1,74 | 8,05 | 11,90 |
+| mở cửa liền | 88 | 2,52 | 9,73 | 11,27 |
+| mở cửa liền | 90 | 3,39 | 11,01 | 12,43 |
+| bật quạt liền | 92 | 3,55 | 8,74 | 9,42 |
+| bật quạt liền | 74 | 2,32 | 5,03 | 9,14 |
+| đóng cửa liền | 88 | 3,70 | 8,23 | 9,65 |
+| đóng cửa liền | 86 | 4,49 | 6,50 | 7,48 |
+
+- Mọi cửa sổ ngắn có đoạn bù đều lên điểm khi đoạn bù thay số 0, nhiều nhất ở ba cửa sổ board từ chối (+2,2 tới +4,5).
+- Cửa sổ không đoạn bù, hay đủ 94 bước, cho cùng một điểm ở hai cách cắt.
