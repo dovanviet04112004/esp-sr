@@ -769,6 +769,7 @@ static void decide_wake(svc_listen_decision_t *out)
     out->event.doa_deg = -1;
     out->event.score_permille = s.wake_score;
     out->first_seq = s.woke;
+    out->speech_seq = s.wake_from;
     s.woke_pending = false;
 }
 

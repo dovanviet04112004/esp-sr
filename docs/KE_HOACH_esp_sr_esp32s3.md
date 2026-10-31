@@ -3611,8 +3611,10 @@ trường nhìn trống sau mỗi lệnh. Nói chen chỉ mở được sau khi 
   `LOW_SCORE` khi lệnh tốt nhất kém vòng tự do quá `δ₁`, `LOW_MARGIN` khi hơn lệnh nhì chưa đủ `δ₂`, `LOW_SYLLABLE` khi
   âm tiết kém nhất của nó hụt quá `δ₃` (§3.12), `PART` khi một phần của lệnh được điểm bằng hay hơn cả lệnh, xét theo
   thứ tự ấy, `FRAME_GAP` khi câu gặp chỗ hở (điểm và khoảng cách là 0); kèm một dòng log
-  có bước đầu, bước cuối của cửa sổ, bước đầu và số bước của đoạn bù, và thời gian từ bước chốt tới quyết định, để máy
-  tính dựng lại đúng cửa sổ ấy từ luồng tiếng (`mode` 5 mang mẫu sạch) và so quyết định của board với Python;
+  có bước đầu, bước cuối, bước lời đầu của cửa sổ, bước đầu và số bước của đoạn bù, và thời gian từ bước chốt tới quyết
+  định, còn dòng của `WAKE` có bước `vad` đầu của câu mang từ đánh thức, để máy tính dựng lại đúng cửa sổ ấy và mọi
+  luật bù khác từ luồng tiếng (`mode` 5 mang mẫu sạch, `first_seq` của phiên căn bước) và so quyết định của board với
+  Python;
 - khi nhận diện người nói của đường chip bật, `COMMAND` qua `xac_task` trước khi lên (§3.17) và có thể thành `REJECT`
   mã `SPEAKER`, `SPEAKER_BUSY`, `SPEAKER_UNENROLLED` hay `SPEAKER_ENROLLING`, giữ `commandId`, cùng một dòng log có
   điểm người nói và thời gian xác minh.
