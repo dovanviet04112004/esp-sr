@@ -13,7 +13,6 @@
 #include "dl_base_conv_args.hpp"
 #include "dl_base_conv_select.hpp"
 #include "dl_base_depthwise_conv2d.hpp"
-#include "dl_base_lut.hpp"
 #include "dl_module_base.hpp"
 #include "esp_log.h"
 #include "fbs_model.hpp"
@@ -21,6 +20,8 @@
 extern "C" {
 void ai_engine_stem3_s8_esp32s3(int8_t *out, const int32_t *run);
 void ai_engine_stem3_top_s8_esp32s3(int8_t *out, const int32_t *run);
+void ai_engine_lut_s8_esp32s3(int8_t *values, int n, const int8_t *turned);
+void ai_engine_lut_s16_esp32s3(int16_t *values, int n, const int16_t *middle, int shift);
 }
 
 namespace ai {
@@ -38,6 +39,7 @@ constexpr int kBandWorkBytes = CONFIG_ESP32S3_DATA_CACHE_SIZE / 2; // a loaned p
 constexpr int kVectorBytes = 16;
 constexpr int kTableSpan = 65536; // int16 inputs an int16 table steps over
 constexpr int kTableMiddle = 128; // an int8 table's entry for input 0
+constexpr int kTableBytes = 256;  // an int8 table's entries
 constexpr int kStemInputs = 3;    // channels a stem pixel holds
 constexpr int kStemTaps = 3;      // a stem window's rows and columns
 constexpr int kStemRowBytes = kStemTaps * kStemInputs * kVectorBytes; // a window row's weights
@@ -343,14 +345,33 @@ class ConvLut final : public dl::module::Module {
         return part;
     }
 
+    // The int16 table's entry for input 0: it steps over kTableSpan inputs from -32768.
+    static const int16_t *middle16(const void *table, int step) noexcept
+    {
+        return static_cast<const int16_t *>(table) + kTableSpan / 2 / step;
+    }
+
+    static int shift_of(int step) noexcept
+    {
+        return __builtin_ctz(static_cast<unsigned>(step));
+    }
+
+    // esp-dl's table, entry 0 for input -128, rotated so a value's unsigned byte indexes it.
+    static void turn(const int8_t *table, int8_t *turned) noexcept
+    {
+        memcpy(turned, table + kTableMiddle, kTableBytes - kTableMiddle);
+        memcpy(turned + kTableBytes - kTableMiddle, table, kTableMiddle);
+    }
+
     void look_up(void *values, int n, const void *table, int step) const noexcept
     {
         if (quant_type == dl::QUANT_TYPE_SYMM_8BIT) {
-            int8_t *v = static_cast<int8_t *>(values);
-            dl::base::lut_s8(v, v, n, static_cast<const int8_t *>(table));
+            alignas(kVectorBytes) std::array<int8_t, kTableBytes> turned;
+            turn(static_cast<const int8_t *>(table), turned.data());
+            ai_engine_lut_s8_esp32s3(static_cast<int8_t *>(values), n, turned.data());
         } else {
-            int16_t *v = static_cast<int16_t *>(values);
-            dl::base::lut_s16_nearest_neighbor(v, v, n, static_cast<const int16_t *>(table), step);
+            ai_engine_lut_s16_esp32s3(static_cast<int16_t *>(values), n, middle16(table, step),
+                                      shift_of(step));
         }
     }
 
@@ -358,18 +379,18 @@ class ConvLut final : public dl::module::Module {
     void look_up_tile(void *values, int pixels, int n, int stride, const void *table, int step) const noexcept
     {
         if (quant_type == dl::QUANT_TYPE_SYMM_8BIT) {
-            const int8_t *middle = static_cast<const int8_t *>(table) + kTableMiddle;
+            alignas(kVectorBytes) std::array<int8_t, kTableBytes> turned;
+            turn(static_cast<const int8_t *>(table), turned.data());
             int8_t *v = static_cast<int8_t *>(values);
             for (int p = 0; p < pixels; p++, v += stride) {
-                for (int i = 0; i < n; i++) {
-                    v[i] = middle[v[i]];
-                }
+                ai_engine_lut_s8_esp32s3(v, n, turned.data());
             }
             return;
         }
+        const int16_t *middle = middle16(table, step);
         int16_t *v = static_cast<int16_t *>(values);
         for (int p = 0; p < pixels; p++, v += stride) {
-            dl::base::lut_s16_nearest_neighbor(v, v, n, static_cast<const int16_t *>(table), step);
+            ai_engine_lut_s16_esp32s3(v, n, middle, shift_of(step));
         }
     }
 
