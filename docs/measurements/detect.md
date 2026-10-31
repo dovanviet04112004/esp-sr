@@ -443,3 +443,28 @@ nhau, mỗi hàng theo thứ tự của nó, rồi chuẩn hoá bằng lượt 8
 
 Khớp mô phỏng từng giá trị ở cả ba. `model.16/cv1` 41,6 ms, `model.13/cv1` 28,9 ms, mỗi cái gồm cả Resize và Concat từng
 tốn riêng. Ở vùng 48 KB, mọi ConvLut có lát to hơn: phần lớn chênh 28 ms giữa 1 805 và 1 833 là ở chúng, không ở op mới.
+
+**Run chính thức (31/10).** `detect.yaml` nêu đủ 11 bản vá; run `20261031_cb3ce8d-dirty_7ec170` vào lock. Trên val, int8
+mAP50-95 0,3507, float 0,3635, tụt 0,0128, dưới cổng 0,02. `.espdl` 2 971 792 B. `make ai-unit-detect` chạy dòng lock
+trên board B: khớp mô phỏng từng giá trị và từng box trên 8 ảnh. Mỗi ảnh 1 839 / 1 848 ms, PSRAM của đồ thị 2 617 780 B.
+Run hiệu chuẩn lại nên vài số mũ khác run của các lượt dò, chậm hơn lượt dò cuối 6 ms.
+
+Lượt đo từng module trên ảnh cuối của run này cộng 1 782 ms. ~57 ms còn lại của một ảnh là tiền xử lý, giải mã box và
+phần ngoài module.
+
+| Loại | Số module | ms |
+|---|---|---|
+| ConvLut | 108 | 1 167,8 |
+| C3k2Block | 2 | 236,9 |
+| Concat, Slice, Add, Split, Transpose | 63 | 158,0 |
+| UpsampleConcatConv | 2 | 70,7 |
+| RequantizeLinear | 20 | 66,7 |
+| MatMul, SoftmaxQuant | 6 | 67,6 |
+
+- Tích chập 3 × 3 lớn (`model.3`, `5`, `7`) chạy ~0,12–0,17 chu kỳ một nhân-cộng. Kernel int8 của esp-dl giữ 16 kênh ra
+  trong QACC, nên mỗi lượt nhân-cộng cần hai lượt nạp: trọng số và giá trị vào phát rộng. Trần của nó ~0,125.
+- **Phần int16 ~445 ms**: đầu dò `model.23` 316 ms, trong đó P3 214 ms; `model.16/cv2` và `model.19/cv2` 74 ms; đổi int8
+  ↔ int16 quanh `model.16`, `19`, `22` 53 ms, mỗi lượt đổi gần trần băng thông PSRAM.
+- Trong đầu dò, nhánh lớp (`one2one_cv3`) 240 ms, nhánh khung 75 ms; riêng tích chập cuối ra 80 lớp 41 ms. Nhánh lớp
+  rộng max(64, min(số lớp, 100)) kênh, nên model ≤ 64 lớp hẹp cả bốn lớp ẩn của nó.
+- Các khối C3k (`model.6`, `8`, `13`, `16`, `19`) 446 ms, trong đó Slice, Concat, Add, RequantizeLinear ~89 ms.
