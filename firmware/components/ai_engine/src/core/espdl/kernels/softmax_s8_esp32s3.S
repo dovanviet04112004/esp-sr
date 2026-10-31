@@ -8,6 +8,9 @@
 // void ai_engine_softmax_norm_s8_esp32s3(int8_t *y, const int8_t *x, const float *table, const float *scales,
 //                                        int rows, const int32_t *strides)
 // y: the eight columns, each value min(trunc(table[x] * scale + 0.5), 127); strides: x's, then y's.
+//
+// void ai_engine_softmax_row_sums_s8_esp32s3(float *sums, const int8_t *x, const float *table, int len, int stride)
+// sums: four floats, each the sum of the table values of one row of len bytes in its order, rows stride bytes apart.
 
     .text
     .align  4
@@ -15,6 +18,8 @@
     .type   ai_engine_softmax_sums_s8_esp32s3, @function
     .global ai_engine_softmax_norm_s8_esp32s3
     .type   ai_engine_softmax_norm_s8_esp32s3, @function
+    .global ai_engine_softmax_row_sums_s8_esp32s3
+    .type   ai_engine_softmax_row_sums_s8_esp32s3, @function
 
 ai_engine_softmax_sums_s8_esp32s3:
     entry   a1, 32
@@ -133,4 +138,45 @@ ai_engine_softmax_norm_s8_esp32s3:
     add     a3, a3, a7
     add     a2, a2, a12
 1:
+    retw.n
+
+// a8-a11 the four rows' next bytes, a12-a15 their table addresses; each row's adds keep its own order.
+    .align  4
+ai_engine_softmax_row_sums_s8_esp32s3:
+    entry   a1, 32
+    movi.n  a8, 0
+    wfr     f0, a8
+    wfr     f1, a8
+    wfr     f2, a8
+    wfr     f3, a8
+    mov     a8, a3
+    add     a9, a8, a6
+    add     a10, a9, a6
+    add     a11, a10, a6
+    loopgtz a5, 1f
+    l8ui    a12, a8, 0
+    l8ui    a13, a9, 0
+    l8ui    a14, a10, 0
+    l8ui    a15, a11, 0
+    addx4   a12, a12, a4
+    addx4   a13, a13, a4
+    addx4   a14, a14, a4
+    addx4   a15, a15, a4
+    lsi     f4, a12, 0
+    lsi     f5, a13, 0
+    lsi     f6, a14, 0
+    lsi     f7, a15, 0
+    add.s   f0, f0, f4
+    add.s   f1, f1, f5
+    add.s   f2, f2, f6
+    add.s   f3, f3, f7
+    addi    a8, a8, 1
+    addi    a9, a9, 1
+    addi    a10, a10, 1
+    addi    a11, a11, 1
+1:
+    ssi     f0, a2, 0
+    ssi     f1, a2, 4
+    ssi     f2, a2, 8
+    ssi     f3, a2, 12
     retw.n

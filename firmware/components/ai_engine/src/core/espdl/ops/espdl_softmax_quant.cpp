@@ -1,6 +1,7 @@
 #include "core/espdl/ops/espdl_softmax_quant.hpp"
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cmath>
 #include <cstdint>
@@ -16,6 +17,8 @@
 #include "fbs_model.hpp"
 
 extern "C" {
+void ai_engine_softmax_row_sums_s8_esp32s3(float *sums, const int8_t *x, const float *table, int len,
+                                           int stride);
 void ai_engine_softmax_sums_s8_esp32s3(float *sums, const int8_t *x, const float *table, int rows,
                                        int stride);
 void ai_engine_softmax_norm_s8_esp32s3(int8_t *y, const int8_t *x, const float *table, const float *scales,
@@ -24,6 +27,9 @@ void ai_engine_softmax_norm_s8_esp32s3(int8_t *y, const int8_t *x, const float *
 
 namespace ai {
 
+void softmax_rows_s8(const int8_t *x, int8_t *y, int rows, int len, const float *table,
+                     float out_rescale) noexcept;
+
 namespace {
 
 const char *TAG = "softmax_quant";
@@ -31,6 +37,7 @@ const char *TAG = "softmax_quant";
 constexpr int kTableOffset = 128; // esp-dl's gen_lut_8bit: entry i is exp(s * (i - 128))
 constexpr int kStrip = 8;         // columns softmax_s8_esp32s3.S takes at once
 constexpr int kGroup = 64;        // columns sharing one 64-byte cache line of a row
+constexpr int kRowLanes = 4;      // rows softmax_row_sums takes at once
 
 // esp-dl's floor(v + 0.5) in double, for the v >= 0 a probability gives, then its int8 clip: below 2^22 the
 // float sum v + 0.5 rounds to no other integer part, so truncating it floors it.
@@ -69,6 +76,10 @@ class SoftmaxQuant final : public dl::module::Module {
         const int8_t *xs = x->get_element_ptr<int8_t>();
         int8_t *ys = y->get_element_ptr<int8_t>();
         const int block = len_ * inner_;
+        if (inner_ == 1 && len_ % kStrip == 0) {
+            softmax_rows_s8(xs, ys, outer_, len_, table_, out_rescale_);
+            return;
+        }
         for (int o = 0; o < outer_; o++) {
             run_block(xs + o * block, ys + o * block);
         }
@@ -181,6 +192,36 @@ void softmax_columns_s8(int8_t *y, int y_stride, const int8_t *x, int len, int s
     const int32_t strides[] = {stride, y_stride};
     for (int k = 0; k < columns; k += kStrip) {
         ai_engine_softmax_norm_s8_esp32s3(y + k, x + k, table, scales + k, len, strides);
+    }
+}
+
+// Rows of len values in turn, as softmax_block_s8 with inner 1 takes each: its sum in order, the scale, then
+// each value normalised by softmax_s8_esp32s3.S's eight-lane kernel with the scale in every lane.
+void softmax_rows_s8(const int8_t *x, int8_t *y, int rows, int len, const float *table,
+                     float out_rescale) noexcept
+{
+    std::array<float, kRowLanes> sums = {};
+    std::array<float, kStrip> scales = {};
+    const int32_t strides[] = {kStrip, kStrip};
+    for (int r = 0; r < rows; r += kRowLanes) {
+        const int lanes = std::min(kRowLanes, rows - r);
+        if (lanes == kRowLanes) {
+            ai_engine_softmax_row_sums_s8_esp32s3(sums.data(), x + r * len, table, len, len);
+        } else {
+            for (int k = 0; k < lanes; k++) {
+                float s = 0.0f;
+                const uint8_t *p = reinterpret_cast<const uint8_t *>(x + (r + k) * len);
+                for (int i = 0; i < len; i++) {
+                    s += table[p[i]];
+                }
+                sums[k] = s;
+            }
+        }
+        for (int k = 0; k < lanes; k++) {
+            scales.fill(1.0f / sums[k] * out_rescale);
+            const int at = (r + k) * len;
+            ai_engine_softmax_norm_s8_esp32s3(y + at, x + at, table, scales.data(), len / kStrip, strides);
+        }
     }
 }
 
