@@ -3566,6 +3566,14 @@ trường nhìn trống sau mỗi lệnh. Nói chen chỉ mở được sau khi 
   từ bộ đệm rỗng, và âm tiết đầu của lệnh chỉ được nghe tốt khi mạng đã chạy chừng 2 s trước nó: mạng bề rộng 160 mở
   2,0 s thay 1,25 s thì Cửa 3 float 89 → 98/112, mở 3 hay 4 s không hơn (`measurements/command.md` §12). Mẫu học của
   `command` cắt cùng luật (§1.2), nên mạng thấy trước câu đúng như lúc học (ADR-0019);
+- **phần trước câu sau `wake`** (ADR-0032): trong `LENH`, khi mốc của `wake` giữ bước đầu cửa sổ muộn hơn
+  `utterance.lead_s` trước câu, phần còn thiếu được bù bằng các bước ngay trước bước `vad` đầu của câu chứa từ đánh thức,
+  không lùi qua mốc chặn trước `wake` hay quá vòng đệm. Mạng chạy đoạn bù rồi cửa sổ từ bộ đệm rỗng và chấm cả hai như
+  phần trước câu lúc học; từ đánh thức không bao giờ vào mạng `command`. Không bù thì lệnh nói liền sau "on" gần như mất
+  hết: Cửa 3 với mốc 0 ms trước câu nhận đúng 6/209 câu thay 181, gần hết `PART`; có đoạn bù thì 170, mốc 496 ms 173
+  thay 174 (`measurements/command.md` §12.38). Mạng chạy qua tiếng thật trước mốc mà không chấm thì không thay được: nó
+  nghe tiếng nói trong phần trước câu, điều mẫu học không có, và chỉ nhận 163. Cửa sổ cộng đoạn bù dài quá `window_s`
+  thì lùi từ cuối như mọi cửa sổ, bỏ đoạn bù;
 - **cửa sổ chạy theo luồng**: ngay từ bước `vad` đầu của câu, `svc_listen` đưa log-mel và cao độ đã có của từng bước
   của cửa sổ vào `ai_engine_command_step`, đuổi kịp phần trước câu rồi đi cùng các khung mới; mạng chạy mỗi khối và
   phép chấm đi tiếp trên khung mới, theo bộ lệnh `ai_engine_command_prepare` đã nhận. Cuối cửa sổ chỉ dời về sau, nên
@@ -3595,8 +3603,8 @@ trường nhìn trống sau mỗi lệnh. Nói chen chỉ mở được sau khi 
   `LOW_SCORE` khi lệnh tốt nhất kém vòng tự do quá `δ₁`, `LOW_MARGIN` khi hơn lệnh nhì chưa đủ `δ₂`, `LOW_SYLLABLE` khi
   âm tiết kém nhất của nó hụt quá `δ₃` (§3.12), `PART` khi một phần của lệnh được điểm bằng hay hơn cả lệnh, xét theo
   thứ tự ấy, `FRAME_GAP` khi câu gặp chỗ hở (điểm và khoảng cách là 0); kèm một dòng log
-  có bước đầu, bước cuối của cửa sổ và thời gian từ bước chốt tới quyết định, để máy tính dựng lại đúng cửa sổ ấy từ
-  luồng tiếng (`mode` 5 mang mẫu sạch) và so quyết định của board với Python;
+  có bước đầu, bước cuối của cửa sổ, bước đầu và số bước của đoạn bù, và thời gian từ bước chốt tới quyết định, để máy
+  tính dựng lại đúng cửa sổ ấy từ luồng tiếng (`mode` 5 mang mẫu sạch) và so quyết định của board với Python;
 - khi nhận diện người nói của đường chip bật, `COMMAND` qua `xac_task` trước khi lên (§3.17) và có thể thành `REJECT`
   mã `SPEAKER`, `SPEAKER_BUSY`, `SPEAKER_UNENROLLED` hay `SPEAKER_ENROLLING`, giữ `commandId`, cùng một dòng log có
   điểm người nói và thời gian xác minh.
