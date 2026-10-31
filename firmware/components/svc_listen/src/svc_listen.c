@@ -51,6 +51,7 @@ typedef struct {
     bool cut_back;                  // outgrew WINDOW_HOPS: worked from its end once closed
     bool holed;                     // seq broke while open: decided FRAME_GAP, never scored
     bool wake_tail;                 // opened in the wake word's own utterance
+    bool lenh;                      // opened in LENH: closes at WINDOW_HOPS
     int64_t closed_us;
 } window_t;
 
@@ -475,8 +476,12 @@ static esp_err_t open_utterance(uint32_t seq)
     if (s.count == WINDOWS_MAX) { return ESP_ERR_NO_MEM; }
     const uint32_t lead = seq >= LEAD_HOPS ? seq - LEAD_HOPS : 0;
     window_t *w = &s.queue[(s.head + s.count) % WINDOWS_MAX];
-    *w = (window_t){
-        .first = lead > s.after ? lead : s.after, .last = seq, .speech = seq, .floor = s.after, .open = true};
+    *w = (window_t){.first = lead > s.after ? lead : s.after,
+                    .last = seq,
+                    .speech = seq,
+                    .floor = s.after,
+                    .open = true,
+                    .lenh = s.commanding};
     fill_lead(w);
     s.count++;
     s.has_open = true;
@@ -508,11 +513,19 @@ static void extend_open(uint32_t seq)
     window_t *w = open_window();
     if (w == NULL) { return; }
     w->last = s.run_last + 1 <= seq ? s.run_last + 1 : seq;
-    if (!w->cut_back && w->fill_hops + w->last + 1 - w->first > WINDOW_HOPS) {
-        w->cut_back = true;
-        w->fill_hops = 0;
-        stop_working(w);
+    if (w->cut_back || w->fill_hops + w->last + 1 - w->first <= WINDOW_HOPS) { return; }
+    // In LENH the command follows the wake word: background keeping vad on never holds its decision back.
+    if (w->lenh) {
+        w->last = w->first + (WINDOW_HOPS - w->fill_hops) - 1;
+        w->open = false;
+        w->closed_us = esp_timer_get_time();
+        s.has_open = false;
+        s.after = w->last + 1;
+        return;
     }
+    w->cut_back = true;
+    w->fill_hops = 0;
+    stop_working(w);
 }
 
 static void pitch_restart(uint32_t seq)
@@ -623,6 +636,7 @@ static esp_err_t hear_wake(uint32_t seq)
         w->floor = s.after;
         w->speech = s.after;
         w->wake_tail = true;
+        w->lenh = true;
         fill_lead(w);
     }
     s.run_first = s.after;
