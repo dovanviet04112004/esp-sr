@@ -85,6 +85,11 @@ dl::Model *detect_model() noexcept
     return s_net.model();
 }
 
+size_t detect_loan_bytes() noexcept
+{
+    return s_net.loan_bytes();
+}
+
 } // namespace ai
 
 extern "C" esp_err_t ai_engine_detect_load(const char *label)

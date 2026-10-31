@@ -3,6 +3,8 @@
  */
 #pragma once
 
+#include <stddef.h>
+
 namespace dl {
 class Model;
 } // namespace dl
@@ -10,5 +12,8 @@ class Model;
 namespace ai {
 
 dl::Model *detect_model() noexcept;
+
+/** The internal RAM a run of detect_model lends its ops, for the test app's profile run (KEHOACH 6.5). */
+size_t detect_loan_bytes() noexcept;
 
 } // namespace ai

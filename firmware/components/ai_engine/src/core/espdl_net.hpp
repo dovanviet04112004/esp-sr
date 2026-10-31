@@ -71,6 +71,11 @@ class EspdlNet {
     {
         return model_;
     }
+    /** The internal RAM step lends its ops, for a run that bypasses step; 0 if unbuilt. */
+    size_t loan_bytes() const noexcept
+    {
+        return loan_bytes_;
+    }
 
   private:
     dl::Model *model_ = nullptr;
