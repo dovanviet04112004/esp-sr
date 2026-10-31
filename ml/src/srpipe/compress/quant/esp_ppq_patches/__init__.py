@@ -30,7 +30,7 @@ from .ops.band_head import band_head
 from .ops.band_stem import band_stem
 from .ops.band_tail import band_stream
 from .ops.conv_block import conv_block
-from .ops.conv_lut import conv_lut
+from .ops.conv_lut import conv_lut, conv_lut_plain
 from .ops.global_stats import global_stats
 from .ops.group_norm_s8 import group_norm_s8
 from .ops.layernorm_s8 import layernorm_s8
@@ -109,6 +109,7 @@ PATCHES = {
     "stage_sum": stage_sum,
     "conv_block": conv_block,
     "conv_lut": conv_lut,
+    "conv_lut_plain": conv_lut_plain,
     "matmul_s8": matmul_s8,
     "attention_core": attention_core,
     "stem_conv": stem_conv,

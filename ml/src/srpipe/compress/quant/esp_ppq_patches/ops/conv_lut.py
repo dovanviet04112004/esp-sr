@@ -40,6 +40,23 @@ def conv_lut_from(graph, op, info) -> bool:
     return True
 
 
+def conv_lut_plain_from(op, info) -> bool:
+    """op, an int8 or int16 Conv with no activation of its own, as a ConvLut with no "lut": its inputs and
+    attributes, "conv_exponent" its output's exponent."""
+    from esp_ppq.IR.quantize import QuantableOperation
+
+    if op.type != "Conv" or not isinstance(op, QuantableOperation):
+        return False
+    conv_exponent = exponent_of(op.outputs[0], info)
+    if op.attributes.get("activation", "Linear") != "Linear" or conv_exponent is None:
+        return False
+    if op.attributes.get("quant_type") not in ("S8", "S16"):
+        return False
+    op.type = CONV_LUT
+    op.attributes.update(conv_exponent=int(conv_exponent))
+    return True
+
+
 @contextlib.contextmanager
 def conv_lut() -> Iterator[None]:
     """Each Conv and the activation with a table that alone reads it exported as one ConvLut (ADR-0031, KEHOACH 3.14
@@ -57,6 +74,31 @@ def conv_lut() -> Iterator[None]:
         info = ExporterPatternInfo()
         for op in list(graph.topological_sort()):
             conv_lut_from(graph, op, info)
+        return graph
+
+    EspdlExporter.prepare_graph = joined
+    try:
+        yield
+    finally:
+        EspdlExporter.prepare_graph = prepare
+
+
+@contextlib.contextmanager
+def conv_lut_plain() -> Iterator[None]:
+    """Each Conv conv_lut leaves, one no table reads, exported as a ConvLut with no table (ADR-0035): esp-dl's Conv
+    reads its weights from flash through the dcache, ConvLut from the run's internal RAM loan in channel tiles
+    (ADR-0034). Run after conv_lut. YOLO26n (KEHOACH 3.18) on board B: 36 such Convs took 255 ms of a 2.16 s picture.
+    """
+    from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
+    from esp_ppq.parser.espdl_exporter import EspdlExporter
+
+    prepare = EspdlExporter.prepare_graph
+
+    def joined(self, graph, *args, **kwargs):
+        graph = prepare(self, graph, *args, **kwargs)
+        info = ExporterPatternInfo()
+        for op in list(graph.topological_sort()):
+            conv_lut_plain_from(op, info)
         return graph
 
     EspdlExporter.prepare_graph = joined
