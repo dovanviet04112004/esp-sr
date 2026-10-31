@@ -69,14 +69,14 @@ int32_t word_of(const void *p) noexcept
 
 enum Input { kX = 0, kFilter, kBias };
 
-// Inputs as esp_ppq_patches.conv_lut_from writes them: x [1, H, W, C], esp-dl's filter, the bias if any,
-// then the table esp-dl's builder appends for a lut module; output on the table's grid.
+// Inputs as esp_ppq_patches' conv_lut and conv_lut_plain write them: x [1, H, W, C], esp-dl's filter, the
+// bias if any, and the table esp-dl appends for a node naming a "lut", whose grid the output then takes.
 class ConvLut final : public dl::module::Module {
   public:
     ConvLut(const char *name, dl::quant_type_t quant, std::vector<int> pads, std::vector<int> strides,
-            std::vector<int> dilations, int group, int conv_exponent)
+            std::vector<int> dilations, int group, int conv_exponent, bool tabled)
         : Module(name, dl::MODULE_NON_INPLACE, quant), pads_(std::move(pads)), strides_(std::move(strides)),
-          dilations_(std::move(dilations)), group_(group), conv_exponent_(conv_exponent)
+          dilations_(std::move(dilations)), group_(group), conv_exponent_(conv_exponent), tabled_(tabled)
     {}
 
     ConvLut(const ConvLut &) = delete;
@@ -84,7 +84,7 @@ class ConvLut final : public dl::module::Module {
 
     bool is_lut_module() const override
     {
-        return true;
+        return tabled_;
     }
 
     std::vector<std::vector<int>> get_output_shape(std::vector<std::vector<int>> &input_shapes) override
@@ -104,7 +104,7 @@ class ConvLut final : public dl::module::Module {
         dl::TensorBase *x = context->get_tensor(m_inputs_index[kX]);
         dl::TensorBase *filter = context->get_tensor(m_inputs_index[kFilter]);
         dl::TensorBase *bias = biased() ? context->get_tensor(m_inputs_index[kBias]) : nullptr;
-        dl::TensorBase *table = context->get_tensor(m_inputs_index.back());
+        dl::TensorBase *table = tabled_ ? context->get_tensor(m_inputs_index.back()) : nullptr;
         dl::TensorBase *y = context->get_tensor(m_outputs_index[0]);
         if (bias != nullptr && !bias_laid_) {
             bias->reset_bias_layout(quant_type, group_ != 1);
@@ -129,8 +129,8 @@ class ConvLut final : public dl::module::Module {
         alignas(kVectorBytes) std::array<int8_t, kStemTaps * kStemRowBytes> left;
         const bool stem = stem_fits(whole);
         if (stem) { lay_left(whole, left.data()); }
-        run_bands(whole, filter->get_bytes(), table->get_size(), table->get_element_ptr(),
-                  stem ? left.data() : nullptr);
+        run_bands(whole, filter->get_bytes(), table != nullptr ? table->get_size() : 0,
+                  table != nullptr ? table->get_element_ptr() : nullptr, stem ? left.data() : nullptr);
     }
 
     static dl::module::Module *deserialize(fbs::FbsModel *fbs_model, std::string node_name)
@@ -156,14 +156,16 @@ class ConvLut final : public dl::module::Module {
         // ONNX lists pads top, left, bottom, right; esp-dl's kernels take top, bottom, left, right.
         pads =
             pads.empty() ? std::vector<int>(kPads, 0) : std::vector<int>{pads[0], pads[2], pads[1], pads[3]};
+        std::string lut;
+        const bool tabled = fbs_model->get_operation_lut_name(node_name, lut) == ESP_OK;
         return new ConvLut(node_name.c_str(), quant, std::move(pads), std::move(strides),
-                           std::move(dilations), group, conv_exponent);
+                           std::move(dilations), group, conv_exponent, tabled);
     }
 
   private:
     bool biased() const noexcept
     {
-        return m_inputs_index.size() == kBias + 2;
+        return m_inputs_index.size() == kBias + (tabled_ ? 2 : 1);
     }
 
     // Output channels of one pass: all of them when the loan holds the whole filter or nothing tiles, else
@@ -209,7 +211,8 @@ class ConvLut final : public dl::module::Module {
         const Loan lent = loan_lent();
         const int tile = channel_tile(whole, filter_bytes, lent.bytes, bytes);
         const int rows = band_rows(whole, bytes);
-        const int step = quant_type == dl::QUANT_TYPE_SYMM_16BIT ? kTableSpan / (entries - 1) : 1;
+        const int step =
+            quant_type == dl::QUANT_TYPE_SYMM_16BIT && entries > 1 ? kTableSpan / (entries - 1) : 1;
         for (int c0 = 0; c0 < whole.output_channel; c0 += tile) {
             dl::base::ConvArgsType part = tile_of(whole, c0, tile, bytes);
             const int part_bytes =
@@ -241,6 +244,7 @@ class ConvLut final : public dl::module::Module {
                 } else {
                     dl::base::depthwise_conv2d(&band, quant_type, fn_[0], fn_[1], fn_[2]);
                 }
+                if (table == nullptr) { continue; }
                 if (tile == whole.output_channel) {
                     look_up(band.output_element, band.output_height * out_row, table, step);
                 } else {
@@ -364,6 +368,7 @@ class ConvLut final : public dl::module::Module {
     std::vector<int> dilations_;
     int group_;
     int conv_exponent_;
+    bool tabled_;
     bool bias_laid_ = false;
     bool asked_ = false;
     dl_kernel_erased_t fn_[3] = {};
