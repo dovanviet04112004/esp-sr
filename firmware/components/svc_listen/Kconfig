@@ -39,7 +39,7 @@ menu "svc_listen"
     config SVC_LISTEN_COMMAND_WAIT_MS
         int "Milliseconds LENH waits for an utterance before going back to NGHE"
         range 100 10000
-        default 1500
+        default 3000
         help
             With a wake in the image, svc_listen goes back to NGHE when no utterance has run this long after
             the wake or after the last utterance (KEHOACH 5.4). It lives here, not in listen.yaml, whose hash

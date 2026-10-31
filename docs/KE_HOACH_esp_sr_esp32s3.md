@@ -3633,12 +3633,15 @@ thức nói riêng rồi dừng thì đuôi của nó bị bỏ lặng lẽ, má
 phiên có `wake` khi `wake` vào ảnh (E11-T14). Bước k là bước của điểm `ai_engine_wake_step` vừa trả, trễ
 `ai_engine_wake_delay()` bước so với khung vừa nạp (§3.11); vượt ngưỡng ra một sự kiện `WAKE` mang k và điểm ‰, trước mọi
 quyết định của câu sau đó. Trong `NGHE` `svc_listen` vẫn theo dõi câu theo `vad` nhưng không mở cửa sổ. Một quyết định cho
-cửa sổ của `LENH`, lệnh hay từ chối, đưa máy về `NGHE`; im `SVC_LISTEN_COMMAND_WAIT_MS` (1,5 s, `Kconfig` của
-`svc_listen`, vì đổi `listen.yaml` là đổi `listen_hash`) mà không có câu nào cũng về `NGHE`, không chấm. Một lần vượt
+cửa sổ của `LENH`, lệnh hay từ chối, đưa máy về `NGHE`; im `SVC_LISTEN_COMMAND_WAIT_MS` (3 s, `Kconfig` của
+`svc_listen`, vì đổi `listen.yaml` là đổi `listen_hash`) mà không có câu nào cũng về `NGHE`, không chấm. Board không
+báo cho người nói lúc nào nó đã thức, nên người ta ngừng sau từ đánh thức lâu hơn ta tưởng: chủ repo ngừng 1,5–2,2 s, và
+với 1,5 s một lệnh tới sau 2,24 s bị bỏ mà không có sự kiện nào (`measurements/command.md` §12.41). Đổi lại, từ đánh thức
+nói lại trong lúc chờ thành một câu của `LENH`, bị chấm và từ chối. Một lần vượt
 ngưỡng chỉ tính một lần: điểm phải xuống dưới ngưỡng rồi mới được vượt lại. Trong `LENH` máy đã thức, nên lần vượt ngưỡng
 ở đó không tính: điểm làm trơn dao động quanh ngưỡng trong một từ đánh thức, và tính chúng là ra nhiều `WAKE` liền cho
-một lần nói (board B, 29/10). Như vậy mỗi lần thức có khoảng khoá ít nhất `SVC_LISTEN_COMMAND_WAIT_MS`, gần với
-`eval.lockout_s` 2 s mà ngưỡng được chọn theo. Bộ đệm của `wake` chỉ xoá khi luồng đứt. Trong lúc đăng ký giọng (§3.17) mọi câu đều mở cửa sổ như ảnh không có `wake`:
+một lần nói (board B, 29/10). Như vậy mỗi lần thức có khoảng khoá ít nhất `SVC_LISTEN_COMMAND_WAIT_MS`, dài hơn
+`eval.lockout_s` 2 s mà ngưỡng được chọn theo, nên trên board số báo nhầm mỗi giờ không cao hơn số đo lúc chọn ngưỡng. Bộ đệm của `wake` chỉ xoá khi luồng đứt. Trong lúc đăng ký giọng (§3.17) mọi câu đều mở cửa sổ như ảnh không có `wake`:
 người đăng ký chỉ đọc lệnh trình nhắc đưa ra, không nói từ đánh thức trước mỗi lệnh.
 
 ### 5.5 Quy chuẩn thêm task hoặc việc song song
