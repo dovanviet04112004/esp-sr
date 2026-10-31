@@ -2405,8 +2405,10 @@ lệch ngoài ngưỡng:
    (ADR-0027).
 
 **Op riêng của nhánh.** Bước xuất gộp mỗi tích chập với bảng tra hàm kích hoạt đọc riêng nó thành một `ConvLut`
-(ADR-0031). Conv nào không có bảng theo sau cũng thành ConvLut, không bảng (ADR-0035). Op chạy kernel tích chập của
-esp-dl theo dải hàng và tra bảng lên dải khi dải còn trong cache. Ba chỗ op không chạy như esp-dl (ADR-0034, ADR-0035):
+(ADR-0031). Conv nào không có bảng theo sau cũng thành ConvLut, không bảng (ADR-0035). Khối C3k2 một bottleneck mà Add và
+Concat cùng số mũ (`model.2`, `model.4`) thành một `C3k2Block`, chạy cả khối theo hàng, mọi map giữa nằm trong cache
+(ADR-0036). Op chạy kernel tích chập của esp-dl theo dải hàng và tra bảng lên dải khi dải còn trong cache. Ba chỗ op
+không chạy như esp-dl (ADR-0034, ADR-0035):
 - trọng số đọc từ vùng RAM nội mượn mỗi lượt (§6.5), theo lát kênh ra khi filter lớn hơn vùng: đọc qua cache từ flash,
   tích chập int8 chạy 0,2–0,27 chu kỳ một nhân-cộng, từ vùng mượn ~0,11. Dải của pass ấy giữ hàng vào cộng hàng ra trong
   nửa dcache;
@@ -2414,7 +2416,7 @@ esp-dl theo dải hàng và tra bảng lên dải khi dải còn trong cache. Ba
 - bảng tra int8 và int16 chạy trên kernel `lut` của repo, cùng phép làm tròn của esp-dl.
 
 Bước xuất vẫn cắt các tích chập mà một nhóm làn đã lớn hơn vùng mượn (`cache_sized_convolutions`). Trên app thử, một ảnh
-512 mất 1 988 ms với vùng 32 KB, khớp mô phỏng từng giá trị (`measurements/detect.md` §8). Trong sản phẩm, vùng được cấp
+512 mất 1 913 ms với vùng 32 KB, khớp mô phỏng từng giá trị (`measurements/detect.md` §8). Trong sản phẩm, vùng được cấp
 tuỳ RAM nội còn trống lúc chạy 🔬. `nhin_task` giữ nhân 0 nhiều giây mỗi ảnh, nên IDLE0 không kịp nuôi watchdog của task.
 
 Đích thời gian mỗi ảnh chốt sau phép đo E15-T2 🔬, kèm điều kiện độ trễ lệnh tiếng nói không tăng.
@@ -3940,6 +3942,7 @@ RAM nội. Hai ngoại lệ:
     `TimeDepthwise` đặt hàng đệm và hàng ra ở đó.
   - `ConvLut` của `detect`, cả ConvLut không bảng, xin số byte trọng số của nó, tối đa 32 KB (ADR-0034, ADR-0035). Vùng
     chứa cả filter thì op chép cả; không thì op chạy theo lát kênh ra, mỗi lát chép vào vùng trước pass của nó.
+    `C3k2Block` xin tổng trọng số bốn tích chập của khối và chép cả khi vừa (ADR-0036).
   - Ở hai nhân (ADR-0027) mỗi nửa của `ConvBlock` có vòng hàng, đệm dải và hàng vào conv sau riêng, cả hai trong
     vùng; vùng được cấp không đủ cho cả hai thì khối chạy cả hàng ở một nhân.
 
