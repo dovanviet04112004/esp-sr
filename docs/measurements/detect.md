@@ -431,3 +431,15 @@ Khớp mô phỏng từng giá trị trên 8 ảnh.
 `SoftmaxQuant` không vào lượt 8 cột mà đi vòng vô hướng, ~38 chu kỳ một giá trị, 20,6 ms một attention. Cộng 4 hàng xen
 nhau, mỗi hàng theo thứ tự của nó, rồi chuẩn hoá bằng lượt 8 cột với tỉ lệ của hàng ở mọi làn: 9,7 ms một attention; một
 ảnh 1 891 / 1 900 ms, từ 1 913, khớp từng giá trị.
+
+**Tích chập 1 × 1 của cổ đọc thẳng map phóng đôi (ADR-0037, 31/10).** Ảnh xuất thêm `upsample_concat_conv`.
+
+| Bước | Mỗi ảnh, trung bình / đỉnh | Vùng mượn |
+|---|---|---|
+| softmax theo hàng liền (ở trên) | 1 891 / 1 900 ms | 32 KB |
+| `model.13/cv1`, `model.16/cv1` thành `UpsampleConcatConv`, xin cả filter | 1 805 / 1 814 ms | 48 KB |
+| như trên, xin tối đa 32 KB, filter lớn hơn thì đọc tại chỗ | 1 851 / 1 860 ms | 32 KB |
+| **như trên, filter lớn hơn thì chạy theo lát kênh** | **1 833 / 1 842 ms** | 32 KB |
+
+Khớp mô phỏng từng giá trị ở cả ba. `model.16/cv1` 41,6 ms, `model.13/cv1` 28,9 ms, mỗi cái gồm cả Resize và Concat từng
+tốn riêng. Ở vùng 48 KB, mọi ConvLut có lát to hơn: phần lớn chênh 28 ms giữa 1 805 và 1 833 là ở chúng, không ở op mới.
