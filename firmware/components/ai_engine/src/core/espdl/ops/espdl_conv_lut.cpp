@@ -34,6 +34,7 @@ constexpr size_t kPads = 4;
 constexpr size_t kSpatial = 2;
 constexpr int kBandBytes = CONFIG_ESP32S3_DATA_CACHE_SIZE / 4; // a band's output, as PointwiseS8's chunks
 constexpr int kLoanFilterBytes = 32 * 1024;                    // the most weights a pass copies to the loan
+constexpr int kBandWorkBytes = CONFIG_ESP32S3_DATA_CACHE_SIZE / 2; // a loaned pass's input and output rows
 constexpr int kVectorBytes = 16;
 constexpr int kTableSpan = 65536; // int16 inputs an int16 table steps over
 constexpr int kTableMiddle = 128; // an int8 table's entry for input 0
@@ -183,10 +184,18 @@ class ConvLut final : public dl::module::Module {
                                                                                        : tile;
     }
 
-    // Output rows of one band: its output lines a quarter of the cache.
-    static int band_rows(const dl::base::ConvArgsType &whole, int bytes) noexcept
+    // Output rows of one band: its output lines a quarter of the cache, and with the weights on the loan, its
+    // input and output rows half of it, which keeps them out of each other's cache sets.
+    static int band_rows(const dl::base::ConvArgsType &whole, int bytes, bool loaned) noexcept
     {
-        return std::max(1, kBandBytes / (whole.output_width * whole.output_channel * bytes));
+        const int out_row = whole.output_width * whole.output_channel * bytes;
+        const int rows = std::max(1, kBandBytes / out_row);
+        if (!loaned) { return rows; }
+        const int in_row = whole.input_width * whole.input_channel * bytes;
+        const int reach = whole.dilation_h * (whole.filter_height - 1) + 1;
+        const int fit =
+            (kBandWorkBytes - (reach - whole.stride_y) * in_row) / (whole.stride_y * in_row + out_row);
+        return std::max(1, std::min(rows, fit));
     }
 
     static Rows input_rows(const dl::base::ConvArgsType &whole, int o0, int o1) noexcept
@@ -210,7 +219,6 @@ class ConvLut final : public dl::module::Module {
         const int out_row = whole.output_width * whole.output_channel;
         const Loan lent = loan_lent();
         const int tile = channel_tile(whole, filter_bytes, lent.bytes, bytes);
-        const int rows = band_rows(whole, bytes);
         const int step =
             quant_type == dl::QUANT_TYPE_SYMM_16BIT && entries > 1 ? kTableSpan / (entries - 1) : 1;
         for (int c0 = 0; c0 < whole.output_channel; c0 += tile) {
@@ -219,13 +227,15 @@ class ConvLut final : public dl::module::Module {
                 tile == whole.output_channel
                     ? filter_bytes
                     : part.output_channel * whole.filter_height * whole.filter_width * whole.filter_c * bytes;
-            if (static_cast<size_t>(part_bytes) <= lent.bytes) {
+            const bool loaned = static_cast<size_t>(part_bytes) <= lent.bytes;
+            if (loaned) {
                 const int remainder_at = static_cast<const char *>(part.filter_element_unaligned) -
                                          static_cast<const char *>(part.filter_element);
                 memcpy(lent.mem, part.filter_element, part_bytes);
                 part.filter_element = lent.mem;
                 part.filter_element_unaligned = lent.mem + remainder_at;
             }
+            const int rows = band_rows(whole, bytes, loaned);
             for (int o0 = 0; o0 < whole.output_height; o0 += rows) {
                 const int o1 = std::min(whole.output_height, o0 + rows);
                 const Rows in = input_rows(whole, o0, o1);
