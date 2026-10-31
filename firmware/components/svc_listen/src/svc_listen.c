@@ -120,10 +120,16 @@ static struct {
     uint32_t woke;          // the hop whose score crossed wake_th
     uint32_t wake_from;     // first vad hop of the wake word's utterance
     uint32_t wake_floor;    // the floor the wake raised to wake_mark
-    uint32_t wake_mark;     // the hop after the wake's decision
-    uint32_t command_until; // LENH ends at this hop with no utterance running
+    uint32_t wake_mark;     // the hop after the wake word's end: LENH's floor
+    uint32_t command_until; // LENH ends at this hop with no window left
     uint32_t wait_hops;     // SVC_LISTEN_COMMAND_WAIT_MS on the grid
     uint32_t wake_lead;     // SVC_LISTEN_WAKE_LEAD_MS on the grid, hops
+    uint32_t end_hops;      // SVC_LISTEN_WAKE_END_MS on the grid
+    uint32_t fall_hops;     // SVC_LISTEN_WAKE_FALL_MS on the grid
+    bool marking;           // wake_mark waits for the score's fall
+    uint32_t runs;          // utterances vad has started
+    uint32_t wake_run;      // the utterance of the last wake
+    uint32_t mark_by;       // marking stops at this hop
     bool started, in_run, has_open, working;
     uint32_t next_seq, after, run_first, run_last, at;
     window_t queue[WINDOWS_MAX];
@@ -379,6 +385,10 @@ esp_err_t svc_listen_init(const svc_listen_config_t *cfg)
                              ((uint64_t)MS_PER_S * GEN_GRID_HOP_SAMPLES));
     s.wake_lead = (uint32_t)((uint64_t)CONFIG_SVC_LISTEN_WAKE_LEAD_MS * GEN_GRID_SAMPLE_RATE_HZ /
                              ((uint64_t)MS_PER_S * GEN_GRID_HOP_SAMPLES));
+    s.end_hops = (uint32_t)((uint64_t)CONFIG_SVC_LISTEN_WAKE_END_MS * GEN_GRID_SAMPLE_RATE_HZ /
+                            ((uint64_t)MS_PER_S * GEN_GRID_HOP_SAMPLES));
+    s.fall_hops = (uint32_t)((uint64_t)CONFIG_SVC_LISTEN_WAKE_FALL_MS * GEN_GRID_SAMPLE_RATE_HZ /
+                             ((uint64_t)MS_PER_S * GEN_GRID_HOP_SAMPLES));
     s.spk.enrol_window_us = (int64_t)cfg->enrol_window_s * US_PER_S;
     s.ready = true;
     return ESP_OK;
@@ -491,10 +501,11 @@ static esp_err_t open_utterance(uint32_t seq)
 static void close_utterance(void)
 {
     s.in_run = false;
+    s.marking = false;
     window_t *w = open_window();
     // The wake word's own utterance keeps a window only with speech past vad's hangover (KEHOACH 5.4).
     const uint32_t need = GEN_LISTEN_UTTERANCE_MIN_HOPS + (w != NULL && w->wake_tail ? HANGOVER_HOPS : 0);
-    const bool kept = s.run_last - s.run_first >= need;
+    const bool kept = (int32_t)(s.run_last - s.run_first) >= (int32_t)need;
     const uint32_t end = s.run_last + 1;
     if (w != NULL && !kept) { drop_open(); }
     if (w != NULL && kept) {
@@ -603,22 +614,63 @@ static bool commands_open(void)
     return !s.wake || s.commanding || atomic_load(&s_enrolling);
 }
 
-// A crossing counts once, the score falling under wake_th for the next; none counts in LENH, where the
-// score wobbles around wake_th within the word that woke it (KEHOACH 5.4).
+// The wake word's window starts at the settled mark. The command net keeps the fill it ran when it heard
+// nothing past the old start, else it runs the window again (ADR-0039).
+static void pin_to_mark(window_t *w)
+{
+    const bool head = s.working && w == &s.queue[s.head];
+    const uint32_t fill_first = w->fill_first;
+    const uint32_t fill_hops = w->fill_hops;
+    const bool past = head && (int32_t)(s.at - w->first) > 0;
+    const bool junction = head && s.at == w->first;
+    w->first = s.after;
+    w->floor = s.after;
+    w->speech = s.after;
+    fill_lead(w);
+    if (past || (head && (w->fill_first != fill_first || w->fill_hops != fill_hops))) {
+        stop_engine();
+    } else if (junction) {
+        s.at = w->first;
+    }
+}
+
+// The wake word ends end_hops ahead of the frame its score fell back under wake_th, and no earlier than the
+// hop after the crossing; with no fall the mark stays there (KEHOACH 5.4, ADR-0039).
+static void settle_mark(uint32_t fell, bool fallen)
+{
+    s.marking = false;
+    if (!fallen) { return; }
+    const uint32_t end = fell - s.end_hops;
+    if ((int32_t)(end - s.wake_mark) <= 0) { return; }
+    const uint32_t mark = s.wake_mark;
+    s.wake_mark = end;
+    if ((int32_t)(end - s.after) > 0) { s.after = end; }
+    window_t *w = open_window();
+    if (w == NULL || !w->wake_tail || w->floor != mark) { return; }
+    pin_to_mark(w);
+    s.run_first = s.after;
+}
+
+// A crossing counts once, the score falling under wake_th for the next. In LENH it counts only in a new
+// utterance, as the score wobbles within the word that woke it, and wakes the listener again (ADR-0039).
 static esp_err_t hear_wake(uint32_t seq)
 {
     uint16_t score = 0;
     const esp_err_t err = ai_engine_wake_step(s.log_mel[seq % RING_HOPS], &score);
     if (err != ESP_OK) { return err; }
-    if (score < s.wake_th) {
+    const uint32_t frame = seq - (uint32_t)ai_engine_wake_delay();
+    const bool under = score < s.wake_th;
+    if (s.marking && (under || (int32_t)(seq - s.mark_by) >= 0)) { settle_mark(frame, under); }
+    if (under) {
         s.armed = true;
         return ESP_OK;
     }
     if (!s.armed) { return ESP_OK; }
     s.armed = false;
-    if (s.commanding) { return ESP_OK; }
+    if (s.commanding && s.runs == s.wake_run) { return ESP_OK; }
     s.commanding = true;
-    s.woke = seq - (uint32_t)ai_engine_wake_delay();
+    s.wake_run = s.runs;
+    s.woke = frame;
     s.wake_score = score;
     s.woke_pending = true;
     s.command_until = seq + s.wait_hops;
@@ -626,6 +678,8 @@ static esp_err_t hear_wake(uint32_t seq)
     s.wake_floor = s.after;
     if ((int32_t)(s.woke + 1 - s.after) > 0) { s.after = s.woke + 1; }
     s.wake_mark = s.after;
+    s.marking = s.in_run;
+    s.mark_by = seq + s.fall_hops;
     if (!s.in_run) { return ESP_OK; }
     // One window per utterance: a second would leave the first open for good, the queue stuck (KEHOACH 5.4).
     const esp_err_t opened = open_window() == NULL ? open_utterance(seq) : ESP_OK;
@@ -643,10 +697,11 @@ static esp_err_t hear_wake(uint32_t seq)
     return opened;
 }
 
+// LENH waits from its last window, not from vad: background holding vad on would keep it waiting for good.
 static void wait_command(uint32_t seq)
 {
     if (!s.commanding) { return; }
-    if (s.in_run || s.count > 0) {
+    if (s.count > 0) {
         s.command_until = seq + s.wait_hops;
     } else if ((int32_t)(seq - s.command_until) >= 0) {
         s.commanding = false;
@@ -665,6 +720,7 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
         if (s.wake) {
             ai_engine_wake_reset();
             s.armed = true;
+            s.marking = false;
         }
         s.in_run = false;
         s.after = seq;
@@ -681,7 +737,10 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
     if (err != ESP_OK) { return err; }
     if (s.in_run && seq - s.run_last > GEN_LISTEN_UTTERANCE_GAP_HOPS) { close_utterance(); }
     if (vad) {
-        if (!s.in_run) { s.run_first = seq; }
+        if (!s.in_run) {
+            s.run_first = seq;
+            s.runs++;
+        }
         if (!s.in_run && commands_open()) { err = open_utterance(seq); }
         s.in_run = true;
         s.run_last = seq;
@@ -714,13 +773,14 @@ bool svc_listen_busy(void)
     return s.ready && (s.count > 0 || s.in_run);
 }
 
-// A window decided in LENH sends the listener back to NGHE (KEHOACH 5.4).
-static void done(void)
+// A command sends the listener back to NGHE; a rejection leaves LENH waiting for the next utterance
+// (KEHOACH 5.4).
+static void done(bool commanded)
 {
     s.working = false;
     s.head = (s.head + 1) % WINDOWS_MAX;
     s.count--;
-    s.commanding = false;
+    if (commanded) { s.commanding = false; }
 }
 
 static void drop(const window_t *w, const char *why)
@@ -728,7 +788,7 @@ static void drop(const window_t *w, const char *why)
     ESP_LOGW(TAG, "window %u..%u dropped: %s", (unsigned)w->first, (unsigned)w->last, why);
     if (w->open) { s.has_open = false; }
     stop_engine();
-    done();
+    done(false);
 }
 
 static void decide(const window_t *w, const ai_engine_command_result_t *r, svc_listen_decision_t *out)
@@ -794,7 +854,7 @@ bool svc_listen_work(svc_listen_decision_t *out)
     const window_t *w = &s.queue[s.head];
     if (w->holed) {
         decide_holed(w, out);
-        done();
+        done(false);
         return true;
     }
     const int64_t from_us = esp_timer_get_time();
@@ -835,7 +895,7 @@ bool svc_listen_work(svc_listen_decision_t *out)
         return false;
     }
     decide(w, &result, out);
-    done();
+    done(out->event.kind == APP_EVT_COMMAND);
     return true;
 }
 
@@ -878,16 +938,24 @@ static void weigh_noise(const svc_listen_decision_t *decision, verify_slot_t *v)
     v->speech_samples = (last + 1 - speech) * GEN_GRID_HOP_SAMPLES;
 }
 
-// The last TAIL_HOPS hops the command net heard, less the oldest samples past a speaker window, zeros
-// ahead of a shorter run: a window's fill stands in for the lead it lacks, as training's windows had one.
+// The hop at index i of a speaker window: straight from the ring from the fill's first hop on, else as heard.
+static uint32_t held_hop(const svc_listen_decision_t *d, bool straight, uint32_t i)
+{
+    return straight ? d->fill_first_seq + i : heard_hop(d, i);
+}
+
+// A speaker window ending at the window's last hop: straight from the ring for a window with a fill, its
+// speaker's wake word in it (ADR-0039), else what the command net heard with zeros ahead of a shorter run.
 esp_err_t svc_listen_hold(const svc_listen_decision_t *decision, uint8_t slot)
 {
     if (!s.ready || s.pcm_ring == NULL || decision == NULL || slot >= SVC_LISTEN_VERIFY_SLOTS) {
         return ESP_ERR_INVALID_ARG;
     }
-    const uint32_t heard = decision->fill_hops + (decision->event.seq + 1 - decision->first_seq);
+    const bool straight = decision->fill_hops > 0;
+    const uint32_t heard = straight ? decision->event.seq + 1 - decision->fill_first_seq
+                                    : decision->fill_hops + (decision->event.seq + 1 - decision->first_seq);
     const uint32_t from = heard > TAIL_HOPS ? heard - TAIL_HOPS : 0;
-    if (s.next_seq - heard_hop(decision, from) > RING_HOPS) { return ESP_ERR_NOT_FOUND; }
+    if (s.next_seq - held_hop(decision, straight, from) > RING_HOPS) { return ESP_ERR_NOT_FOUND; }
     verify_slot_t *v = &s.slots[slot];
     const size_t have = (size_t)(heard - from) * GEN_GRID_HOP_SAMPLES;
     const size_t zeros = have < GEN_SPEAKER_WINDOW_SAMPLES ? GEN_SPEAKER_WINDOW_SAMPLES - have : 0;
@@ -896,7 +964,7 @@ esp_err_t svc_listen_hold(const svc_listen_decision_t *decision, uint8_t slot)
     int16_t *to = v->pcm + zeros;
     for (uint32_t i = from; i != heard; i++) {
         const size_t off = skip < GEN_GRID_HOP_SAMPLES ? skip : GEN_GRID_HOP_SAMPLES;
-        memcpy(to, s.pcm_ring[heard_hop(decision, i) % RING_HOPS] + off,
+        memcpy(to, s.pcm_ring[held_hop(decision, straight, i) % RING_HOPS] + off,
                (GEN_GRID_HOP_SAMPLES - off) * sizeof(int16_t));
         to += GEN_GRID_HOP_SAMPLES - off;
         skip -= off;

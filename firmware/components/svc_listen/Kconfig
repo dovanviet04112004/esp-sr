@@ -56,6 +56,24 @@ menu "svc_listen"
             work the decision waits for. It lives here, not in listen.yaml, whose hash the command model is
             held to.
 
+    config SVC_LISTEN_WAKE_END_MS
+        int "Milliseconds the wake's smoothed score stays over wake_th past the end of the wake word"
+        range 0 1000
+        default 224
+        help
+            In LENH the mark no command window reaches back past is the end of the wake word: the frame where
+            the wake's smoothed score falls back under wake_th, less this, and never before the hop after the
+            crossing (KEHOACH 5.4, ADR-0039). 224 ms is what puts the fewest marks inside "happy" on happy1's
+            val_pos (docs/measurements/wake.md section 10); a new wake word or model is measured again.
+
+    config SVC_LISTEN_WAKE_FALL_MS
+        int "Milliseconds after a wake crossing its score has to fall back under wake_th to move the mark"
+        range 0 5000
+        default 768
+        help
+            A score still over wake_th this long after it crossed leaves the mark at the hop after the
+            crossing, as does an utterance that closes first (KEHOACH 5.4, ADR-0039).
+
     config SVC_LISTEN_ENROL_WINDOW_S
         int "Seconds a speaker enrolment stays open for its commands"
         range 30 3600
