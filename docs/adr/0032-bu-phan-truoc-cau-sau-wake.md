@@ -51,6 +51,9 @@ trước chặn, nên số của phương án chọn là cận dưới. Trên bo
 - Cửa sổ mở trong `LENH` chốt khi nó, cả đoạn bù, đủ `window_s`, dù câu còn chạy, và được chấm trên chính phần ấy: lệnh
   luôn đến ngay sau từ đánh thức. Tiếng nền giữ `vad` bật thì câu không chốt, và cửa sổ lùi từ cuối như ngoài `LENH` đã
   giữ board không quyết định gì 15 s và 28 s rồi chấm tiếng nền (§12.39).
+- Phép kiểm người nói và phép đo độ ồn của nó đọc cùng tiếng mạng `command` đã nghe: 1,5 s cuối của đoạn bù rồi cửa sổ,
+  phần trước lời gồm cả đoạn bù. Lệnh nói liền sau "on" cho cửa sổ 79–90 bước; đệm số 0 vào đó, điều vật liệu của ngưỡng
+  không có, đã làm board từ chối 3/6 câu "mở cửa" nhận đúng (`command.md` §12.40, §12.42).
 - Dòng log của mỗi quyết định in thêm bước đầu và số bước của đoạn bù, để máy tính dựng lại đúng cửa sổ từ luồng tiếng.
 - `ai_engine` không đổi: đoạn bù đi qua `ai_engine_command_step` như mọi bước.
 
