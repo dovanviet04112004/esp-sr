@@ -761,8 +761,9 @@ hai phiên "vừng ơi", 15 và 16 ở hai phiên "trợ lý"; đoạn đầu c�
 - 9 / 22 đoạn nằm giữa 0,72 và 0,90: mạng gần nhận ra giọng chủ repo mà chưa qua ngưỡng. Hạ ngưỡng mua thêm câu bằng báo
   nhầm: 13 / 22 ở 0,75 với `test` 16/giờ. Mẫu dương toàn tổng hợp vẫn là giới hạn của §3, nhẹ hơn VieNeu và F5 cho "chào mi
   na" (0 / 60).
-- Chưa có phiên chủ repo nói "happy", nên điều kiện của ADR-0040 điểm 3 chưa so được; `test` của `happy1` và `vung1` khác
-  nhau nên báo nhầm/giờ cũng không so thẳng.
+- `test_neg` của `vung1` trùng byte với của `happy1` và `v4`, nên báo nhầm trên `test` so thẳng được: `happy1` 4,29/giờ ở
+  hàng int8 `minmax` 925‰ của board B, 5,02/giờ float ở 0,94; `vung1` cao hơn ở mọi hàng. `val` của `vung1` có thêm ViMD
+  (30,8 giờ âm bản so với 11,2). Chưa có phiên chủ repo nói "happy", nên tỉ lệ bắt của ADR-0040 điểm 3 chưa so được.
 
 **Học thêm giọng chủ repo** (script một lần ngoài repo, KẾ HOẠCH §1.3: phiên của người dùng thật vào `train`). Tiếp từ mạng
 trên 3 000 bước, `learning_rate` 2e-4 giảm cosine về 5e-5, không việc phụ CTC. Các đoạn `vad` của một phiên là mẫu dương
