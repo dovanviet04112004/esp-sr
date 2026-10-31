@@ -23,28 +23,37 @@ from srpipe.tts import clips, engines
 
 SETS = {"pilot": "synth_pilot", "positives": "synth_pos", "negatives": "synth_neg", "hard": "synth_hard"}
 SETS_KEPT = ("positives", "negatives", "hard")
+PRESETTED = ("vieneu", "omnivoice")  # engines whose run.py lists voices of its own
 
 
-def positive_requests(cfg: dict, spec: dict, presets: list[dict], refs: list[clips.Reference], out: Path) -> dict:
-    """VieNeu's presets and clones over their own seeds, F5's clones over seeds and speeds; every text must spell the
-    wake word, which every clip must say."""
-    for engine in ("vieneu", "f5"):
-        for text in spec[engine]["texts"]:
+def positive_requests(
+    cfg: dict, spec: dict, presets: dict[str, list[dict]], refs: list[clips.Reference], out: Path
+) -> dict:
+    """Each engine of spec reads every text: its presets over preset_seeds, its clones over clone_seeds, F5's over
+    seeds, at each of its speeds when it takes one; every text must spell the wake word, which every clip must say."""
+    readers = {engine: e for engine, e in spec.items() if isinstance(e, dict)}
+    for engine, e in readers.items():
+        for text in e["texts"]:
             if clips.spelled(text) != clips.spelled(cfg["word"]):
                 raise ValueError(f"{engine} text {text!r} is not the wake word {cfg['word']!r}")
-    requests: dict[str, list[dict]] = {"vieneu": [], "f5": []}
-    vieneu, f5 = spec["vieneu"], spec["f5"]
-    for n, text in enumerate(vieneu["texts"]):
-        for seed in vieneu["preset_seeds"]:
-            requests["vieneu"] += [
-                clips.preset_request(k, v, n, text, seed, out / "vieneu") for k, v in enumerate(presets)
-            ]
-        for seed in vieneu["clone_seeds"]:
-            requests["vieneu"] += [clips.clone_request("vieneu", r, n, text, seed, 1.0, out / "vieneu") for r in refs]
-    for n, text in enumerate(f5["texts"]):
-        for ref in refs:
-            for seed in f5["seeds"]:
-                requests["f5"] += [clips.clone_request("f5", ref, n, text, seed, v, out / "f5") for v in f5["speeds"]]
+    requests: dict[str, list[dict]] = {}
+    for engine, e in readers.items():
+        folder, speeds = out / engine, e.get("speeds", [1.0])
+        paced = engine in clips.PACED
+        reqs = []
+        for n, text in enumerate(e["texts"]):
+            for seed in e.get("preset_seeds", []):
+                for k, voice in enumerate(presets.get(engine, [])):
+                    paces = speeds if paced else [None]
+                    reqs += [clips.preset_request(k, voice, n, text, seed, folder, v) for v in paces]
+            for seed in e.get("clone_seeds", []):
+                for ref in refs:
+                    paces = speeds if paced else [1.0]
+                    reqs += [clips.clone_request(engine, ref, n, text, seed, v, folder) for v in paces]
+            for ref in refs:
+                for seed in e.get("seeds", []):
+                    reqs += [clips.clone_request(engine, ref, n, text, seed, v, folder) for v in speeds]
+        requests[engine] = reqs
     return {engine: [r | {"say": cfg["word"]} for r in reqs] for engine, reqs in requests.items()}
 
 
@@ -62,25 +71,25 @@ def negative_texts(cfg: dict, stream: np.ndarray, vocab: list[str], codes: np.nd
 def negative_requests(
     cfg: dict,
     texts: list[str],
-    presets: list[dict],
+    presets: dict[str, list[dict]],
     refs: list[clips.Reference],
     rng: np.random.Generator,
     out: Path,
     counts: dict[str, int],
 ) -> dict:
-    """Each text read by counts of VieNeu voices drawn from presets and clones, and of F5 clones, at seed 0 and speed
+    """Each text read by counts of each engine's voices, drawn from its presets and the clones, at seed 0 and speed
     1; the wake word is each clip's rival."""
-    requests: dict[str, list[dict]] = {"vieneu": [], "f5": []}
-    pool = len(presets) + len(refs)
+    requests: dict[str, list[dict]] = {engine: [] for engine in counts}
     for n, text in enumerate(texts):
-        for i in sorted(rng.choice(pool, counts["vieneu"], replace=False)):
-            requests["vieneu"].append(
-                clips.preset_request(i, presets[i], n, text, 0, out / "vieneu")
-                if i < len(presets)
-                else clips.clone_request("vieneu", refs[i - len(presets)], n, text, 0, 1.0, out / "vieneu")
-            )
-        for i in sorted(rng.choice(len(refs), counts["f5"], replace=False)):
-            requests["f5"].append(clips.clone_request("f5", refs[i], n, text, 0, 1.0, out / "f5"))
+        for engine, count in counts.items():
+            voices, folder = presets.get(engine, []), out / engine
+            speed = 1.0 if engine in clips.PACED else None
+            for i in sorted(rng.choice(len(voices) + len(refs), count, replace=False)):
+                requests[engine].append(
+                    clips.preset_request(i, voices[i], n, text, 0, folder, speed)
+                    if i < len(voices)
+                    else clips.clone_request(engine, refs[i - len(voices)], n, text, 0, 1.0, folder)
+                )
     return {engine: [r | {"rivals": [cfg["word"]]} for r in reqs] for engine, reqs in requests.items()}
 
 
@@ -130,12 +139,13 @@ def select(cfg: dict, interim: Path) -> float:
     word, false_accept = cfg["word"], cfg["synth"]["false_accept"]
     made = [s for s in SETS_KEPT if (interim / SETS[s] / "manifest.yaml").exists()]
     body = {s: yaml.safe_load((interim / SETS[s] / "manifest.yaml").read_text(encoding="utf-8")) for s in made}
-    margin = threshold(body["negatives"]["clips"], word, false_accept)
+    heard_back = cfg["synth"].get("heard_back", True)
+    margin = threshold(body["negatives"]["clips"], word, false_accept) if heard_back else float("nan")
     for c in body["positives"]["clips"]:
-        c["kept"] = c["passed"] or c["margin"] <= margin
+        c["kept"] = not heard_back or c["passed"] or c["margin"] <= margin
     for s in made[1:]:
         for c in body[s]["clips"]:
-            c["kept"] = c["passed"] and c["rivals"][word] > margin
+            c["kept"] = not heard_back or (c["passed"] and c["rivals"][word] > margin)
     seen: set[str] = set()
     for s in made:
         for c in body[s]["clips"]:
@@ -184,7 +194,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     out = interim / SETS[which]
     rejected = set(screen.rejected(paths["interim"]))
-    presets = engines.presets("vieneu", tts, cache)
+    asked = cfg["synth"]["pilot" if which == "pilot" else "positives"] if which in ("pilot", "positives") else None
+    named = asked or cfg["synth"]["hard" if which == "hard" else "negatives"]["voices"]
+    presets = {e: engines.presets(e, tts, cache) for e in named if e in PRESETTED}
     body = {"word": cfg["word"], "synth": cfg["synth"], "tts": tts}
     if which == "pilot":
         spec = cfg["synth"]["pilot"]
@@ -207,7 +219,9 @@ def main(argv: list[str] | None = None) -> int:
             rng = np.random.default_rng(cfg["synth"]["seed"])
             requests = negative_requests(cfg, texts, presets, refs, rng, out, cfg["synth"]["negatives"]["voices"])
             body["texts"] = texts
-    body |= {"references": [str(r.wav) for r in refs], "clips": clips.render(requests, tts, out / "work", cache)}
+    heard_back = cfg["synth"].get("heard_back", True)
+    rows = clips.render(requests, tts, out / "work", cache, heard_back=heard_back)
+    body |= {"references": [str(r.wav) for r in refs], "clips": rows}
     print("\n".join(table(clips.write_manifest(out, body), by_text=which == "pilot")))
     return 0
 

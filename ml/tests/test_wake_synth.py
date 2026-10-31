@@ -14,21 +14,21 @@ from srpipe.core.config import load_yaml
 from srpipe.tasks.wake import CONFIG, synth
 from srpipe.tts import clips
 
-PRESETS = [{"label": "Một", "id": "v1"}, {"label": "Hai", "id": "v2"}, {"label": "Ba", "id": "v3"}]
+VOICES = [{"label": "Một", "id": "v1"}, {"label": "Hai", "id": "v2"}, {"label": "Ba", "id": "v3"}]
+PRESETS = {"vieneu": VOICES, "omnivoice": VOICES}
 
 
 def refs(root: Path) -> list[clips.Reference]:
     return [clips.Reference(s, root / f"{s}.wav", f"câu của {s}") for s in ("A", "B", "C")]
 
 
-@pytest.mark.parametrize("which", ["pilot", "positives"])
-def test_positives_ask_every_engine_for_every_voice_text_seed_and_speed(tmp_path: Path, which: str) -> None:
-    """TTS speaks the word of ADR-0011, the one its texts carry, whatever word the branch learns on now."""
+def test_positives_ask_every_engine_for_every_voice_text_seed_and_speed(tmp_path: Path) -> None:
+    """The pilot speaks the word of ADR-0011, the one its texts carry, whatever word the branch learns on now."""
     cfg = load_yaml(CONFIG) | {"word": "trợ lý"}
-    spec = cfg["synth"][which]
+    spec = cfg["synth"]["pilot"]
     requests = synth.positive_requests(cfg, spec, PRESETS, refs(tmp_path), tmp_path)
     vieneu, f5 = spec["vieneu"], spec["f5"]
-    voices = len(PRESETS) * len(vieneu["preset_seeds"]) + 3 * len(vieneu["clone_seeds"])
+    voices = len(VOICES) * len(vieneu["preset_seeds"]) + 3 * len(vieneu["clone_seeds"])
     assert len(requests["vieneu"]) == len(vieneu["texts"]) * voices
     assert len(requests["f5"]) == len(f5["texts"]) * 3 * len(f5["seeds"]) * len(f5["speeds"])
     for reqs in requests.values():
@@ -40,9 +40,24 @@ def test_positives_ask_every_engine_for_every_voice_text_seed_and_speed(tmp_path
     assert all(r["say"] == cfg["word"] for reqs in requests.values() for r in reqs)
 
 
+def test_omnivoice_reads_its_designs_and_clones_at_every_speed(tmp_path: Path) -> None:
+    """ADR-0040's positives: OmniVoice's designed voices and clones, each at every speed, a clone with its reference's
+    text, every id once."""
+    cfg = load_yaml(CONFIG)
+    spec = cfg["synth"]["positives"]
+    e = spec["omnivoice"]
+    requests = synth.positive_requests(cfg, spec, PRESETS, refs(tmp_path), tmp_path)["omnivoice"]
+    voices = len(VOICES) * len(e.get("preset_seeds", [])) + 3 * len(e["clone_seeds"])
+    assert len(requests) == len(e["texts"]) * voices * len(e["speeds"])
+    assert len({r["id"] for r in requests}) == len({r["out"] for r in requests}) == len(requests)
+    assert {r["speed"] for r in requests} == set(e["speeds"])
+    assert all(r["ref_text"].startswith("câu của") for r in requests if "ref_audio" in r)
+    assert all(r["say"] == cfg["word"] for r in requests)
+
+
 def test_a_positive_that_is_not_the_wake_word_is_refused(tmp_path: Path) -> None:
     cfg = load_yaml(CONFIG)
-    cfg["synth"]["positives"]["f5"]["texts"] = ["chào mí na"]
+    cfg["synth"]["positives"]["omnivoice"]["texts"] = ["vững ơi"]
     with pytest.raises(ValueError, match="not the wake word"):
         synth.positive_requests(cfg, cfg["synth"]["positives"], PRESETS, refs(tmp_path), tmp_path)
 
@@ -51,6 +66,7 @@ def pinned() -> dict:
     """wake.yaml with the word and near-miss settings these tests were written around, whatever word is chosen."""
     cfg = load_yaml(CONFIG)
     cfg["word"] = "chào mi na"
+    cfg["synth"]["heard_back"] = True
     phrases = ["chào mi", "mi na", "mi na ơi", "chào chị na", "chào mi nhé"]
     cfg["synth"]["negatives"] |= {"misses": 3, "openings": 30, "phrases": phrases}
     cfg["synth"]["hard"] = {
@@ -141,6 +157,25 @@ def test_the_threshold_lets_the_configured_share_of_near_misses_pass_and_no_clip
     assert kept["positives"] == [True, True, False, False]
     assert kept["negatives"] == [False, False, *[True] * 8, False, False]
     assert kept["hard"] == [True, False, False]
+
+
+def test_unheard_clips_are_all_kept_but_a_repeat(tmp_path: Path) -> None:
+    """ADR-0040: with heard_back off the checker never runs, so selection keeps every clip and drops only repeats."""
+    cfg = pinned()
+    cfg["synth"]["heard_back"] = False
+    rows = {
+        "positives": [clip(0, True, 0.0, 0.0, "p0"), clip(1, True, 0.0, 0.0, "p0")],
+        "negatives": [clip(0, True, 0.0, 0.0, "n0"), clip(1, True, 0.0, 0.0, "n1")],
+    }
+    for name, clipped in rows.items():
+        (tmp_path / synth.SETS[name]).mkdir()
+        clips.write_manifest(tmp_path / synth.SETS[name], {"clips": clipped})
+    synth.select(cfg, tmp_path)
+    kept = {
+        name: [c["kept"] for c in yaml.safe_load((tmp_path / synth.SETS[name] / "manifest.yaml").read_text())["clips"]]
+        for name in rows
+    }
+    assert kept == {"positives": [True, False], "negatives": [True, True]}
 
 
 def test_hard_families_fill_their_slots_and_never_say_the_word_or_a_held_out_phrase() -> None:

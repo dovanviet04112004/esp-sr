@@ -1,6 +1,6 @@
 # The wake network of KEHOACH 3.11. E11-T10 exports it with random weights to prove esp-dl streams it one hop at a time.
 features: scenes/device.yaml       # the board simulation; the log-mel the network reads is contracts/listen.yaml's
-word: "happy"                       # ADR-0033, for "trợ lý" of ADR-0011
+word: "vừng ơi"                     # ADR-0040, a trial; the product wakes on "happy" of ADR-0033
 model:
   kernel: 3
   channels: 64                     # with the CTC side task it lifts real speech, 32 does not (wake.md §5)
@@ -42,43 +42,45 @@ synth:                             # E11-T7: clips from the engines of common/tt
   seed: 20260928                   # draws the parquet references and the voices of each negative
   false_accept: 0.01               # share of the near misses heard right that the margin threshold would
                                    #   let pass as the wake word (KEHOACH 4.4)
+  heard_back: false                # ADR-0040: the owner heard OmniVoice and kept it; PhoWhisper mishears a
+                                   #   lone short phrase (tts_engines.md 2), so every clip is kept unheard
   references:                      # KEHOACH 1.3: cloned voices come from training material only
     vivos: speech/vivos/train      # under raw/: every speaker's first clip inside ref_seconds
     parquet:                       # corpora that only ever feed training, clips spread over their files
       files: data/train-*.parquet  # under raw/speech/<corpus>/
-      counts: {fpt_open: 80, vlsp: 80, bud500: 150}
+      counts: {fpt_open: 80, vlsp: 80}   # Bud500 deleted 06/10
   pilot:                           # make eval-tts: the engines side by side on a few voices
     speakers: [VIVOSSPK01, VIVOSSPK05, VIVOSSPK12, VIVOSSPK27, VIVOSSPK40]
     vieneu: {texts: [trợ lý, Trợ lý!], preset_seeds: [0], clone_seeds: [0]}
     f5: {texts: [trợ lý], seeds: [0, 1, 2], speeds: [1.0]}
   positives:                       # every text spells the wake word
-    vieneu: {texts: [trợ lý, Trợ lý!], preset_seeds: [0, 1, 2], clone_seeds: [0, 1]}  # drops end punctuation
-    f5: {texts: [trợ lý, trợ lý!], seeds: [0], speeds: [0.85, 1.0, 1.15]}
+    omnivoice: {texts: [vừng ơi, Vừng ơi!], preset_seeds: [0], clone_seeds: [0, 1], speeds: [0.9, 1.1]}
   negatives:                       # a light set read by the voices of the positives, so a TTS voice is no cue (ADR-0011)
     misses: 1                      # every corpus phrase this many syllable components from the word: 6 for "trợ lý"
     openings: 10                   # the commonest corpus phrases of its length opening with its first syllable
-    phrases: [trợ, lý]             # each half said alone must not wake the device either
-    voices: {vieneu: 6, f5: 4}     # per phrase, drawn with the seed; VieNeu from presets and clones
+    phrases: [vừng, ơi]            # each half said alone must not wake the device either
+    voices: {omnivoice: 6}         # per phrase, drawn with the seed from designs and clones
+  hard:                            # near-miss families (KEHOACH 3.11): a near onset in place of "vừng"
+    onsets: [v, z, f, b_<, m]      # lang_vi onsets: v, d/gi, ph, b, m
+    near_syllables: 30
+    any_syllables: 0
+    families: [{text: "{x} ơi", fill: near}]
+    held_out: []
+    voices: {omnivoice: 4}
 split:                             # E11-T11: data/splits/wake/<version> by python -m srpipe.tasks.wake.data (KEHOACH 1.3)
-  version: happy1
+  version: vung1
   seed: 20260928
   val_speakers: 0.2                # of VIVOS train speakers and of VieNeu presets, each held out whole with its clones
   learning: [speech/vivos/train/, speech/fpt_open/, speech/vlsp/, speech/lsvsc/, speech/vimd/]
   negative_hours: 100              # public speech drawn from learning into train_neg
   test_neg: [speech/common_voice_vi/, speech/vivos/test/]   # no reference voice came from these
   val_from_test: {speech/common_voice_vi/: 0.4}   # share of its speakers moved whole into val_neg (KEHOACH 3.11)
-  real_pos: hf_extract             # the extract of common/extract.yaml whose clips of the word are the real positives,
-                                   #   train only as it names no speakers (KEHOACH 3.11)
-  speech_commands:                 # the word from Speech Commands v0.02 (ADR-0029)
-    dir: speech/speech_commands
-    negatives_from: v4             # its val and test negatives, free of Bud500
-    hard_clips: {train: 3000, val: 600, train_after: 27000}   # of the other words, drawn with the seed; train_after
-                                   #   more for train once val is drawn, so on1's draws stay and val is on1's
-    draw_train_neg: true           # v4's train negatives are Bud500, deleted 06/10
+  hard: ["\\bơi\\b", "\\bvừng\\b"]   # real near misses mined from learning: a call with "ơi", any "vừng"
+  speech_commands: null            # the TTS route of KEHOACH 3.11; Speech Commands words take {dir, negatives_from, ...}
   end_below_peak_db: 40.0          # every positive, TTS or real, ends at its last hop within this of its loudest: the
                                    #   simulation labels a clip's end, and both kinds carry silence after the word
 simulate:                          # make wake-features: python -m srpipe.tasks.wake.data simulate (E4-T8)
-  split: happy1
+  split: vung1
   workers: 12                      # each holds about 450 MB; more push a 10 GB WSL into swap
   repeats: {train_pos: 8}          # passes over a file, each in other rooms, levels and noise; else 1
   train_dtype: float16             # train's features as stored: the trainer holds them so (KEHOACH 1.2)
@@ -87,7 +89,7 @@ simulate:                          # make wake-features: python -m srpipe.tasks.
     time_step_s: 0.01
     f0_range_hz: [60.0, 600.0]
 train:                             # E11-T11: python -m srpipe.tasks.wake.train (KEHOACH 3.11), on the GPU when present
-  split: happy1                    # processed/wake/<split>/<file> of make wake-features
+  split: vung1                     # processed/wake/<split>/<file> of make wake-features
   seed: 20260928
   window_hops: 256                 # one example, twice the receptive field
   warmup_hops: 128                 # a window's first hops see zero padding, not audio: no loss on them

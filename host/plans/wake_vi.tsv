@@ -1,0 +1,6 @@
+# E11-T41 trial words (ADR-0040): "vừng ơi" and "trợ lý" said by the owner through board B, 1 m in front, two rounds
+# each; scored by the wake runs as the test set of each word. Columns as in levels.tsv.
+Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "Vừng ơi" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'vừng ơi'
+Lượt 2, chính diện, cách 1 m. Chờ 2 s, nói "Vừng ơi" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'vừng ơi'
+Chính diện, cách 1 m. Chờ 2 s, nói "Trợ lý" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'trợ lý'
+Lượt 2, chính diện, cách 1 m. Chờ 2 s, nói "Trợ lý" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'trợ lý'
