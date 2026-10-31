@@ -14,6 +14,7 @@ set(srcs "src/core/engine.cpp" "src/core/model_image.cpp" "src/core/espdl_net.cp
          "${espdl}/kernels/layernorm_s8_esp32s3.S" "${espdl}/kernels/pointwise_fused_s8_esp32s3.S"
          "${espdl}/kernels/pointwise_s8_esp32s3.S" "${espdl}/kernels/softmax_s8_esp32s3.S"
          "${espdl}/kernels/stage_sum_s8_esp32s3.S" "${espdl}/kernels/stats_s8_esp32s3.S"
+         "${espdl}/kernels/stem_s8_esp32s3.S"
          "${espdl}/runtime/espdl_loan.cpp" "${espdl}/runtime/espdl_preload.cpp"
          "src/ns/ns.cpp" "src/wake/wake.cpp" "src/wake/score.c" "src/speaker/speaker.cpp" "src/speaker/score.c" "src/synth/synth.cpp"
          "src/pitch/pitch.cpp" "src/pitch/decode.c" "src/detect/detect.cpp" "src/detect/decode.c")

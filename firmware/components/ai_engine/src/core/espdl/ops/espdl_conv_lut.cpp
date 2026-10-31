@@ -1,6 +1,7 @@
 #include "core/espdl/ops/espdl_conv_lut.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -17,6 +18,11 @@
 #include "esp_log.h"
 #include "fbs_model.hpp"
 
+extern "C" {
+void ai_engine_stem3_s8_esp32s3(int8_t *out, const int32_t *run);
+void ai_engine_stem3_top_s8_esp32s3(int8_t *out, const int32_t *run);
+}
+
 namespace ai {
 
 namespace {
@@ -31,11 +37,35 @@ constexpr int kLoanFilterBytes = 32 * 1024;                    // the most weigh
 constexpr int kVectorBytes = 16;
 constexpr int kTableSpan = 65536; // int16 inputs an int16 table steps over
 constexpr int kTableMiddle = 128; // an int8 table's entry for input 0
+constexpr int kStemInputs = 3;    // channels a stem pixel holds
+constexpr int kStemTaps = 3;      // a stem window's rows and columns
+constexpr int kStemRowBytes = kStemTaps * kStemInputs * kVectorBytes; // a window row's weights
+
+// Slots of ai_engine_stem3's run.
+enum Stem {
+    kStemPixels = 0,
+    kStemStep,
+    kStemRows,
+    kStemWeights = kStemRows + kStemTaps,
+    kStemShift,
+    kStemBias,
+    kStemSize
+};
 
 struct Rows {
     int start; // first input row a band reads
     int end;   // one past its last
 };
+
+bool aligned(const void *p) noexcept
+{
+    return reinterpret_cast<uintptr_t>(p) % kVectorBytes == 0;
+}
+
+int32_t word_of(const void *p) noexcept
+{
+    return static_cast<int32_t>(reinterpret_cast<uintptr_t>(p));
+}
 
 enum Input { kX = 0, kFilter, kBias };
 
@@ -96,7 +126,11 @@ class ConvLut final : public dl::module::Module {
             loan_ask(std::min(filter->get_bytes(), kLoanFilterBytes));
             asked_ = true;
         }
-        run_bands(whole, filter->get_bytes(), table->get_size(), table->get_element_ptr());
+        alignas(kVectorBytes) std::array<int8_t, kStemTaps * kStemRowBytes> left;
+        const bool stem = stem_fits(whole);
+        if (stem) { lay_left(whole, left.data()); }
+        run_bands(whole, filter->get_bytes(), table->get_size(), table->get_element_ptr(),
+                  stem ? left.data() : nullptr);
     }
 
     static dl::module::Module *deserialize(fbs::FbsModel *fbs_model, std::string node_name)
@@ -166,8 +200,8 @@ class ConvLut final : public dl::module::Module {
 
     // Rows [o0, o1) and channels [c0, c0 + tile) a pass, the head's padding in the first band only, the
     // tail's in the last; each pass reads its weights from the loan when it holds them (KEHOACH 6.5).
-    void run_bands(const dl::base::ConvArgsType &whole, int filter_bytes, int entries,
-                   const void *table) noexcept
+    void run_bands(const dl::base::ConvArgsType &whole, int filter_bytes, int entries, const void *table,
+                   const int8_t *left) noexcept
     {
         const int bytes = dl::base::conv_feature_bytes(quant_type);
         const int in_row = whole.input_width * whole.input_channel;
@@ -200,7 +234,9 @@ class ConvLut final : public dl::module::Module {
                 band.input_element = dl::base::conv_ptr_add(whole.input_element, in.start * in_row, bytes);
                 band.output_height = o1 - o0;
                 band.output_element = dl::base::conv_ptr_add(part.output_element, o0 * out_row, bytes);
-                if (group_ == 1) {
+                if (left != nullptr) {
+                    stem_rows(part, o0, o1, left);
+                } else if (group_ == 1) {
                     dl::base::conv2d(&band, quant_type, fn_[0], fn_[1], fn_[2]);
                 } else {
                     dl::base::depthwise_conv2d(&band, quant_type, fn_[0], fn_[1], fn_[2]);
@@ -210,6 +246,62 @@ class ConvLut final : public dl::module::Module {
                 } else {
                     look_up_tile(band.output_element, band.output_height * whole.output_width,
                                  part.output_channel, whole.output_channel, table, step);
+                }
+            }
+        }
+    }
+
+    // An RGB stem ai_engine_stem3 runs: 3 int8 inputs into 16 outputs, 3x3 of stride 2 whose windows stay
+    // within the map on its bottom and right, and rows 16 bytes apart a whole number of times.
+    bool stem_fits(const dl::base::ConvArgsType &a) const noexcept
+    {
+        const bool shape = a.input_channel == kStemInputs && a.output_channel == kVectorBytes &&
+                           a.filter_height == kStemTaps && a.filter_width == kStemTaps && a.stride_y == 2 &&
+                           a.stride_x == 2 && a.dilation_h == 1 && a.dilation_w == 1 &&
+                           a.padding_h_head == 1 && a.padding_w_head == 1;
+        const bool inside = a.input_height % 2 == 0 && a.input_width % 2 == 0 &&
+                            a.input_width * kStemInputs % kVectorBytes == 0;
+        return quant_type == dl::QUANT_TYPE_SYMM_8BIT && group_ == 1 && shape && inside && a.mac_shift >= 1 &&
+               a.bias_element != nullptr && aligned(a.output_element) && aligned(a.filter_element);
+    }
+
+    // The filter without its first column, the one the left edge's windows put on the padding.
+    static void lay_left(const dl::base::ConvArgsType &a, int8_t *left) noexcept
+    {
+        memcpy(left, a.filter_element, kStemTaps * kStemRowBytes);
+        for (int r = 0; r < kStemTaps; r++) {
+            memset(left + r * kStemRowBytes, 0, kStemInputs * kVectorBytes);
+        }
+    }
+
+    // Output rows [o0, o1) of the stem: the left edge on left, the rest of a row on the filter, and the row
+    // whose first window row lies in the head's padding on the top kernel, past that row's weights.
+    static void stem_rows(const dl::base::ConvArgsType &a, int o0, int o1, const int8_t *left) noexcept
+    {
+        const int8_t *xs = static_cast<const int8_t *>(a.input_element);
+        const int in_row = a.input_width * kStemInputs;
+        const std::array<const int8_t *, 2> weights = {left, static_cast<const int8_t *>(a.filter_element)};
+        std::array<int32_t, kStemSize> run = {};
+        run[kStemStep] = a.stride_x * kStemInputs;
+        run[kStemShift] = a.mac_shift - 1;
+        run[kStemBias] = word_of(a.bias_element);
+        for (int oy = o0; oy < o1; oy++) {
+            const int iy = oy * a.stride_y - a.padding_h_head;
+            const bool top = iy < 0;
+            int8_t *ys = static_cast<int8_t *>(a.output_element) + oy * a.output_y_offset;
+            for (int ox = 0; ox < 2; ox++) {
+                const int ix = ox * a.stride_x - a.padding_w_head;
+                run[kStemPixels] = ox == 0 ? 1 : a.output_width - 1;
+                for (int r = 0; r < kStemTaps; r++) {
+                    const int row = std::min(a.input_height - 1, (top ? 0 : iy) + r);
+                    run[kStemRows + r] = word_of(xs + row * in_row + ix * kStemInputs);
+                }
+                run[kStemWeights] = word_of(weights[ox] + (top ? kStemRowBytes : 0));
+                int8_t *out = ys + ox * a.output_x_offset;
+                if (top) {
+                    ai_engine_stem3_top_s8_esp32s3(out, run.data());
+                } else {
+                    ai_engine_stem3_s8_esp32s3(out, run.data());
                 }
             }
         }
