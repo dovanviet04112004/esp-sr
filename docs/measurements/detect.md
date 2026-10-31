@@ -426,3 +426,8 @@ Khớp mô phỏng từng giá trị trên 8 ảnh.
 - Phần còn lại của khối là tính: 142,5 triệu nhân-cộng của bốn tích chập ở `model.2`, ~0,13 chu kỳ một nhân-cộng khi
   trọng số ở vùng mượn, cộng bốn lượt bảng tra trên 2 MB.
 - ESP-PPQ chỉ ghi vào ảnh các bảng mà thuộc tính `lut` của một op trỏ tới; lần xuất đầu thiếu bảng của khối, op từ chối nút.
+
+**Softmax theo trục liền (31/10).** Softmax của hai attention PSA lấy theo trục cuối, hàng 256 giá trị liền nhau, nên
+`SoftmaxQuant` không vào lượt 8 cột mà đi vòng vô hướng, ~38 chu kỳ một giá trị, 20,6 ms một attention. Cộng 4 hàng xen
+nhau, mỗi hàng theo thứ tự của nó, rồi chuẩn hoá bằng lượt 8 cột với tỉ lệ của hàng ở mọi làn: 9,7 ms một attention; một
+ảnh 1 891 / 1 900 ms, từ 1 913, khớp từng giá trị.
