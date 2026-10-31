@@ -1990,3 +1990,20 @@ cao hơn của board, chỉ so được hai cách cắt với nhau. 30 cửa s�
 
 - Mọi cửa sổ ngắn có đoạn bù đều lên điểm khi đoạn bù thay số 0, nhiều nhất ở ba cửa sổ board từ chối (+2,2 tới +4,5).
 - Cửa sổ không đoạn bù, hay đủ 94 bước, cho cùng một điểm ở hai cách cắt.
+
+### 12.43 Board B với thời gian chờ 3 s và kiểm người nói trên đoạn bù (31/10)
+
+Firmware `bench` @ `d82ffeb`: `SVC_LISTEN_COMMAND_WAIT_MS` 3 000, `SVC_LISTEN_WAKE_LEAD_MS` 500, kiểm người nói đọc đoạn
+bù rồi cửa sổ, cửa sổ `LENH` chốt ở `window_s`. Phiên `20261031_home_002` (`probe`, `spk_001`, `first_seq` 590, 14 140
+bước, không hở) cùng log UART, 14:41–14:44. Chủ repo nói: "on mở cửa" (phần lớn vẫn ngừng 0,7–1 s), "on" ngừng 2–2,5 s
+rồi "mở cửa", lệnh khi điện thoại phát YouTube, "on" một mình.
+
+- **Chờ 3 s:** 4 lệnh sau 2,00–2,46 s ngừng đều có quyết định (`mo_cua` 3, `PART` 1); với 1,5 s cả bốn đã bị bỏ (§12.41).
+- **Kiểm người nói:** cửa sổ duy nhất mở liền sau "on" có đoạn bù (84 bước, bù 31) được z 4,476; §12.40 các cửa sổ ấy được
+  1,107–3,393.
+- **Ngừng dài thì chậm:** cửa sổ ngừng 2–2,5 s mở đủ 125 bước trước câu, từ bước chốt tới quyết định 1 608–1 775 ms; ngừng
+  0,7–1 s: 522–722 ms. Mạng chạy ~9,8 ms một bước (trọng số `command_ctc` ở flash, ADR-0028) nên không đuổi kịp phần
+  trước câu trong lúc người nói còn nói.
+- **YouTube:** mỗi `WAKE` ra quyết định trong 4–5 s, không treo; lệnh bị `LOW_SCORE` hay `PART`, điểm 636–754 ‰, cách vòng
+  tự do 262–453 ‰: tiếng nói của điện thoại lọt qua chuỗi làm sạch vào cửa sổ.
+- **"on" một mình:** `WAKE` không kèm cửa sổ, máy về `NGHE` sau thời gian chờ, không quyết định nào.
