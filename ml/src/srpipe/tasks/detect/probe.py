@@ -115,10 +115,13 @@ def row_of(run: Path) -> dict:
     return {"run": run.name, "size": cfg["size"], "pad": cfg["pad"], "names": meta["names"], "chip": cfg["chip"]}
 
 
-def build(out: Path, taps: list[int], patches: list[str], unlocked: Path | None = None) -> dict[str, Path]:
+def build(
+    out: Path, taps: list[int], patches: list[str], unlocked: Path | None = None, drop: list[str] | None = None
+) -> dict[str, Path]:
     """Write detect_vision.bin, detect_broken.bin, detect_pictures.bin and detect_expect.bin under out, for the lock's
     detect row or for the run unlocked; with taps, the vision image and the expectations carry those blocks' outputs
-    too; with patches, export patches beyond the run's, which keep every integer, the image is exported under them."""
+    too; with patches, export patches beyond the run's, which keep every integer, the image is exported under them;
+    drop leaves those of the run's export patches out of the image, ESP-PPQ's simulation keeping them all."""
     from esp_ppq.executor import TorchExecutor
 
     from srpipe.compress.quant import esp_ppq_patches, export_espdl
@@ -143,10 +146,11 @@ def build(out: Path, taps: list[int], patches: list[str], unlocked: Path | None 
     keep = row["chip"]["top_k"]
     blob, records, tables, shapes = bytearray(), [], [], None
     extra = [p for p in patches if p not in cfg["esp_ppq_patches"]]
+    kept = [p for p in cfg["esp_ppq_patches"] if p not in (drop or [])]
+    if taps or extra or kept != cfg["esp_ppq_patches"]:
+        with tempfile.TemporaryDirectory() as folder, esp_ppq_patches.applied(kept + extra):
+            vision = reexported(graph, taps, cfg, row, Path(folder))
     with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
-        if taps or extra:
-            with tempfile.TemporaryDirectory() as folder, esp_ppq_patches.applied(extra):
-                vision = reexported(graph, taps, cfg, row, Path(folder))
         executor = TorchExecutor(graph=graph, device="cpu")
         for rgb in pictures_of(found):
             square, _ = data.letterbox(rgb, row["size"], row["pad"])
@@ -184,8 +188,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--taps", type=int, nargs="*", default=[], help="blocks whose outputs the chip reports too")
     parser.add_argument("--patches", nargs="*", default=[], help="export patches beyond the run's for the image")
     parser.add_argument("--run", type=Path, default=None, help="a run to probe in place of the lock's detect row")
+    parser.add_argument("--drop", nargs="*", default=[], help="export patches of the run the image leaves out")
     args = parser.parse_args(argv)
-    for key, path in build(args.out, args.taps, args.patches, args.run).items():
+    for key, path in build(args.out, args.taps, args.patches, args.run, args.drop).items():
         print(f"{path}: {path.stat().st_size} bytes{f' for {SLOTS[key]}' if key in SLOTS else ''}")
     return 0
 

@@ -714,11 +714,13 @@ ai-unit-pitch: ## Run the pitch build of the ai_engine suite on board B: RUN=<ru
 # to models_0, the one with a flipped .espdl byte to voice, the pictures to models_1 (KEHOACH 3.18 step 5). TAPS adds
 # those blocks' outputs to the image and the check, to find the first one the chip computes otherwise; PATCHES exports
 # the image under more export patches, which keep every integer, to time them without a new run (KEHOACH 3.14 step 2.3).
-# RUN probes a run not deployed, to time another S without touching the lock (E15-T11). KEEP=1 rebuilds and runs only
-# the firmware, on the images the last probe left on the board, to time a change of ai_engine's ops.
-ai-unit-detect: ## Hold the detect branch to ESP-PPQ on eight COCO pictures on board B, and refuse a bad sha256 (E15-T5) [TAPS="<block> ..."] [PATCHES="<patch> ..."] [RUN=<run>] [KEEP=1]
+# RUN probes a run not deployed, to time another S without touching the lock (E15-T11). DROP exports the image without
+# those of the run's export patches. KEEP=1 rebuilds and runs only the firmware, on the images the last probe left on
+# the board, to time a change of ai_engine's ops.
+ai-unit-detect: ## Hold the detect branch to ESP-PPQ on eight COCO pictures on board B, and refuse a bad sha256 (E15-T5) [TAPS="<block> ..."] [PATCHES="<patch> ..."] [DROP="<patch> ..."] [RUN=<run>] [KEEP=1]
 	$(if $(KEEP),,$(ML_CPU) --extra train --extra espdl --extra detect python -m srpipe.tasks.detect.probe \
-	  $(if $(TAPS),--taps $(TAPS)) $(if $(PATCHES),--patches $(PATCHES)) $(if $(RUN),--run $(abspath $(RUN))))
+	  $(if $(TAPS),--taps $(TAPS)) $(if $(PATCHES),--patches $(PATCHES)) $(if $(DROP),--drop $(DROP)) \
+	  $(if $(RUN),--run $(abspath $(RUN))))
 	@$(call fresh_sdkconfig,$(UNIT_APP)/build_detect/sdkconfig,$(call app_defaults,$(UNIT_APP)))
 	cd $(UNIT_APP) && rm -f build_detect/unit.status && idf.py -B build_detect -D SDKCONFIG=build_detect/sdkconfig -D UNIT_PROFILE=detect build && \
 	  $(if $(KEEP),,$(WRITE_PART) models_0 --input main/probe/detect_vision.bin && \
