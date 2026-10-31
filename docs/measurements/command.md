@@ -1868,3 +1868,30 @@ Sau `WAKE`, mốc chặn của mọi cửa sổ là bước sau quyết định 
 đầu đặt ngay ở mốc (`svc_listen.c`, `wake_tail`). Lời nói liền sau "on" vì thế có dưới 0,25 s trước câu, nơi mạng bắt
 đầu từ bộ đệm rỗng chỉ nhận 9–160/210 câu thay 172 (§12.32). Giả thuyết cho `PART`: âm tiết đầu nghe từ mạng nguội 🔬;
 cần độ dài phần trước câu của từng quyết định để kiểm.
+
+### 12.38 Mốc `wake` sát câu trên Cửa 3: mạng nguội, làm ấm, bù tiếng nền (31/10)
+
+Cửa 3 của run deploy `20261007_439d763-dirty_f438bd` (float, cao độ của hợp đồng), bộ mặc định, ngưỡng của board B (δ₁
+300 ‰, δ₂ 10 ‰, không trần âm tiết). Mỗi câu thêm một mốc chặn giả, như quyết định `wake`, cách bước `vad` đầu của câu
+0, 6, 16 hay 31 bước; script chẩn đoán chạy một lần, 43 phiên.
+- **nguội**: như board hôm nay, mạng bắt đầu từ bộ đệm rỗng ở bước đầu cửa sổ;
+- **ấm 2 s**: mạng chạy từ 2 s trước câu, kể cả câu trước, các khung trước mốc không chấm;
+- **ấm 0,5 s**: như trên, chỉ 31 bước và không lùi qua cửa sổ trước;
+- **bù**: 25 bước ngay trước mốc đóng vai từ đánh thức và bị bỏ; phần trước câu còn thiếu so với 2 s được bù bằng các bước
+  trước đó, không lùi qua cửa sổ trước; mạng nguội ở đầu đoạn bù, chấm cả đoạn bù.
+
+Ô là nhận đúng trên 209 câu lệnh, rồi `PART`:
+
+| Mốc trước câu | Nguội | Ấm 2 s | Ấm 0,5 s | Bù |
+|---|---|---|---|---|
+| không mốc | 181, 10 | 164, 30 | — | — |
+| 0 ms | 6, 136 | 163, 31 | 174, 22 | 170, 21 |
+| 96 ms | 45, 125 | 163, 31 | 169, 22 | 169, 23 |
+| 256 ms | 160, 37 | 163, 31 | 173, 20 | 172, 24 |
+| 496 ms | 174, 23 | 163, 31 | 168, 21 | 173, 22 |
+
+- Mạng nguội sát câu mất gần hết lệnh, gần hết vì `PART`: giả thuyết của §12.37 đúng trên Cửa 3.
+- Ấm 2 s đứng yên ở 163 và làm hỏng cả cửa sổ không mốc (181 → 164): mạng nghe tiếng nói trong phần trước câu, điều mẫu
+  học không bao giờ có, vì mẫu học cắt bằng cùng luật mốc chặn (ADR-0019).
+- Bù giữ 169–173 ở mọi mốc và không làm hỏng mốc 496 ms; nhận nhầm 7–8 câu thay 5, câu lạ từ chối 120–122/126 như cũ.
+  Cửa 3 không có từ đánh thức thật, và tiếng nền trước nó hay bị câu trước chặn, nên số của bù là cận dưới.
