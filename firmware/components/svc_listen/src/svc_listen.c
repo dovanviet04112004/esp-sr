@@ -856,41 +856,48 @@ static uint64_t energy_of(uint32_t from, uint32_t to)
     return total;
 }
 
+// The hop at index i of what the command net heard: the window's fill, then the window (ADR-0032).
+static uint32_t heard_hop(const svc_listen_decision_t *d, uint32_t i)
+{
+    return i < d->fill_hops ? d->fill_first_seq + i : d->first_seq + (i - d->fill_hops);
+}
+
 // A lead the ring has passed leaves the sums empty: the noise bin is then the quietest (ADR-0024).
 static void weigh_noise(const svc_listen_decision_t *decision, verify_slot_t *v)
 {
     const uint32_t first = decision->first_seq;
     const uint32_t last = decision->event.seq;
     const uint32_t speech = decision->speech_seq > first ? decision->speech_seq : first;
+    const uint32_t fill_end = decision->fill_first_seq + decision->fill_hops;
     v->lead_energy = v->speech_energy = 0;
     v->lead_samples = v->speech_samples = 0;
-    if (s.next_seq - first > RING_HOPS || speech > last) { return; }
-    v->lead_energy = energy_of(first, speech);
-    v->lead_samples = (speech - first) * GEN_GRID_HOP_SAMPLES;
+    if (s.next_seq - heard_hop(decision, 0) > RING_HOPS || speech > last) { return; }
+    v->lead_energy = energy_of(decision->fill_first_seq, fill_end) + energy_of(first, speech);
+    v->lead_samples = (decision->fill_hops + speech - first) * GEN_GRID_HOP_SAMPLES;
     v->speech_energy = energy_of(speech, last + 1);
     v->speech_samples = (last + 1 - speech) * GEN_GRID_HOP_SAMPLES;
 }
 
-// The window's last TAIL_HOPS hops, less the oldest samples past a speaker window, zeros ahead of a shorter
-// one.
+// The last TAIL_HOPS hops the command net heard, less the oldest samples past a speaker window, zeros
+// ahead of a shorter run: a window's fill stands in for the lead it lacks, as training's windows had one.
 esp_err_t svc_listen_hold(const svc_listen_decision_t *decision, uint8_t slot)
 {
     if (!s.ready || s.pcm_ring == NULL || decision == NULL || slot >= SVC_LISTEN_VERIFY_SLOTS) {
         return ESP_ERR_INVALID_ARG;
     }
-    const uint32_t last = decision->event.seq;
-    const uint32_t hops = last + 1 - decision->first_seq;
-    const uint32_t from = hops > TAIL_HOPS ? last + 1 - TAIL_HOPS : decision->first_seq;
-    if (s.next_seq - from > RING_HOPS) { return ESP_ERR_NOT_FOUND; }
+    const uint32_t heard = decision->fill_hops + (decision->event.seq + 1 - decision->first_seq);
+    const uint32_t from = heard > TAIL_HOPS ? heard - TAIL_HOPS : 0;
+    if (s.next_seq - heard_hop(decision, from) > RING_HOPS) { return ESP_ERR_NOT_FOUND; }
     verify_slot_t *v = &s.slots[slot];
-    const size_t have = (size_t)(last + 1 - from) * GEN_GRID_HOP_SAMPLES;
+    const size_t have = (size_t)(heard - from) * GEN_GRID_HOP_SAMPLES;
     const size_t zeros = have < GEN_SPEAKER_WINDOW_SAMPLES ? GEN_SPEAKER_WINDOW_SAMPLES - have : 0;
     size_t skip = have > GEN_SPEAKER_WINDOW_SAMPLES ? have - GEN_SPEAKER_WINDOW_SAMPLES : 0;
     memset(v->pcm, 0, zeros * sizeof(int16_t));
     int16_t *to = v->pcm + zeros;
-    for (uint32_t h = from; h != last + 1; h++) {
+    for (uint32_t i = from; i != heard; i++) {
         const size_t off = skip < GEN_GRID_HOP_SAMPLES ? skip : GEN_GRID_HOP_SAMPLES;
-        memcpy(to, s.pcm_ring[h % RING_HOPS] + off, (GEN_GRID_HOP_SAMPLES - off) * sizeof(int16_t));
+        memcpy(to, s.pcm_ring[heard_hop(decision, i) % RING_HOPS] + off,
+               (GEN_GRID_HOP_SAMPLES - off) * sizeof(int16_t));
         to += GEN_GRID_HOP_SAMPLES - off;
         skip -= off;
     }
