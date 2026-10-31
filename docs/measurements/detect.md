@@ -384,3 +384,32 @@ Thời gian từng module, ms (một nhân, lượt đo trên ảnh cuối):
 - **Một module chậm gấp bốn mà không rõ vì sao:** `/model.4/m.0/cv2` 58,7 ms ở firmware gốc của bước này, 13,5 ms ở mọi
   firmware sau, trên cùng một ảnh xuất. `/model.2/m.0/Add` từng như thế ở §7 (11,7 → 56,3 ms) giữa hai ảnh xuất.
   Nguyên nhân chưa rõ 🔬.
+
+**Conv thường, bảng tra và nhiễu đo (ADR-0035, 31/10).** Ảnh xuất thêm `conv_lut_plain` sau hai bản vá softmax; vùng
+32 KB.
+
+| Bước | Mỗi ảnh, trung bình / đỉnh | Khớp |
+|---|---|---|
+| ConvLut theo lát vùng mượn, stem (ở trên) | 2 157 / 2 188 ms | khớp |
+| `conv_lut_plain`: 36 Conv không bảng tra cũng chạy như ConvLut, trọng số từ vùng mượn | 2 080 / 2 112 ms | khớp |
+| thêm bỏ `cache_sized_convolutions` và `lean_quantizers` khỏi ảnh xuất (`DROP=`) | 2 352 / 2 381 ms | khớp |
+| không bỏ; IDLE0 ra khỏi watchdog lúc đo | 2 077 / 2 086 ms | khớp |
+| dải của pass có trọng số trong vùng mượn: hàng vào cộng hàng ra ≤ nửa dcache | 2 071 / 2 080 ms | khớp |
+| bảng int8 trên kernel `lut_s8` của repo | 2 010 / 2 019 ms | khớp |
+| **bảng int16 trên kernel `lut_s16` của repo** | **1 988 / 1 997 ms** | khớp |
+
+- **Bỏ cắt tích chập ở bước xuất thì chậm hơn 272 ms.** `/model.23/one2one_cv2.2/one2one_cv2.2.0`, int16 3 × 3 của khung P5,
+  72 KB trọng số, chạy 293,6 ms: một nhóm 8 kênh của nó đã cần 36 KB, hơn vùng 32 KB, nên nó đọc trọng số từ flash ở
+  mỗi điểm ảnh như §4. `cache_sized_convolutions` giữ nguyên.
+- **Nhiễu đo: watchdog của task.** Mạng giữ nhân 0 nhiều giây, IDLE0 không chạy, nên cứ 5 s watchdog in một backtrace
+  ~600 byte qua UART, ~50 ms, vào ảnh hay module đang chạy. Các module "chậm gấp bốn" ở §7 và ở trên chính là nó: lượt nào
+  cũng thêm ~43 ms vào một module đầu đồ thị (`/model.2/m.0/Add`, `/model.4/m.0/cv2`, `/model.1/conv`, `/model.0/conv`).
+  Các số mỗi ảnh trước bước này gồm nhiễu ấy, ~10–25 ms; đỉnh hơn trung bình ~30 ms. Bản dò nay gỡ IDLE0 khỏi
+  watchdog trong lúc đo. Sản phẩm (`nhin_task`, E15-T7) sẽ gặp đúng chuyện này.
+- **Bảng tra:** lượt đo chia giờ trong ConvLut (đồng hồ quanh tích chập và bảng tra, lượt dò không tính số mỗi ảnh vì
+  dòng log của đồng hồ) cho 99 ConvLut: tích chập 1 115 ms, bảng tra 243 ms. Bảng int8 của esp-dl ~6 chu kỳ một byte;
+  kernel của repo 4 lệnh một byte trên bảng xoay 128 byte, ~4,4 chu kỳ. Bảng int16 của esp-dl ~9 chu kỳ một giá trị;
+  kernel của repo 6 lệnh: 91,1 → 68,7 ms.
+- Còn lại theo lượt chia giờ: tích chập các lớp độ phân giải cao nghẽn ở đọc ghi PSRAM (`model.0` 32 ms tích chập cho
+  768 KB vào, 1 MB ra; `model.2` cả khối C3k2 ~210 ms gồm Slice, Concat, Add); depthwise int16 của đầu dò ~16 chu kỳ
+  một giá trị ra.
