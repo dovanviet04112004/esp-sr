@@ -1844,3 +1844,27 @@ bật, tắt đèn và quạt phần lớn được 0,97–1,00. Sự kiện `RE
 nào bị loại; quãng chủ repo hỏi về "mở cửa" (18:46:55–18:47:20) có năm `WAKE`, mỗi lần theo sau là nhận "mở cửa",
 `LOW_SCORE`, nhận "mở cửa", `LOW_SYLLABLE`, `LOW_SYLLABLE`. Cùng hướng §12.34: trần âm tiết loại nhiều lệnh chủ repo
 nói trực tiếp; và "mở cửa" là lệnh mọi cửa sổ thừa rơi vào (§12.9), nên lời "mở cửa" thật khó hơn hẳn lệnh nhì.
+
+### 12.37 Chủ repo nói trực tiếp với `on3`, 300 / 10 / 65 535, bộ 39 lệnh (31/10)
+
+Board B, firmware `bench` @ `9abf45f`, `wake` `on3` ở 850‰, δ₁ 300 ‰, δ₂ 10 ‰, δ₃ 65 535, kiểm người nói bật với một
+mẫu giọng b0, bộ `host/sets/demo_vi.json` 39 lệnh (`v1793423827`). Log UART 12:25:37–12:35:30; chủ repo nói "mở cửa",
+"đóng cửa", "dừng lại" mỗi lệnh một loạt, rồi các lệnh khác:
+
+| `WAKE` | `COMMAND` | `PART` | `LOW_SCORE` | `SPEAKER` | `LOW_MARGIN` | Không quyết định |
+|---|---|---|---|---|---|---|
+| 72 | 51 | 8 | 6 | 3 | 3 | 4 |
+
+- Mọi `COMMAND` đúng lệnh chủ repo nói: "dừng lại" 14, "mở cửa" 12, "đóng cửa" 11, các lệnh khác 14. Trong ba loạt
+  liền (12:26:20–12:28:13) mỗi `WAKE` ra đúng lệnh: 8, 6, 8 lần; không lần nào "đóng cửa" thành "mở cửa".
+- δ₁ và δ₂ không loại lệnh nào của ba loạt: hơn lệnh nhì 41–227 ‰, cách vòng tự do ≤ 68 ‰.
+- `LOW_SCORE`: hai cửa sổ ~1,3 s ngay sau một `COMMAND` (12:29:19, 12:32:55); một cửa sổ 0,54 s trong đuôi câu `wake`,
+  lệnh đến ở cửa sổ kế (12:31:50); ba lần sau `WAKE` không lệnh nào theo sau (12:33:08, 12:34:00, 12:35:01).
+- `SPEAKER`: z 0,697, 0,807 và 1,349, dưới ngưỡng 1,486 của một mẫu giọng; 51 lệnh qua có z 1,75–6,46.
+- `PART` có điểm 797–937 ‰, hơn lệnh nhì 27–199 ‰, cửa sổ 1,89–2,11 s: lệnh tốt nhất khớp, nhưng một phần của nó khớp
+  ngang hay hơn. Log `REJECT` không mang tên lệnh, nên chưa biết lệnh nào.
+
+Sau `WAKE`, mốc chặn của mọi cửa sổ là bước sau quyết định của `wake` (KẾ HOẠCH §5.4), và câu còn mở lúc ấy có bước lời
+đầu đặt ngay ở mốc (`svc_listen.c`, `wake_tail`). Lời nói liền sau "on" vì thế có dưới 0,25 s trước câu, nơi mạng bắt
+đầu từ bộ đệm rỗng chỉ nhận 9–160/210 câu thay 172 (§12.32). Giả thuyết cho `PART`: âm tiết đầu nghe từ mạng nguội 🔬;
+cần độ dài phần trước câu của từng quyết định để kiểm.
