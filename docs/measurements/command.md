@@ -1895,3 +1895,36 @@ Cửa 3 của run deploy `20261007_439d763-dirty_f438bd` (float, cao độ của
   học không bao giờ có, vì mẫu học cắt bằng cùng luật mốc chặn (ADR-0019).
 - Bù giữ 169–173 ở mọi mốc và không làm hỏng mốc 496 ms; nhận nhầm 7–8 câu thay 5, câu lạ từ chối 120–122/126 như cũ.
   Cửa 3 không có từ đánh thức thật, và tiếng nền trước nó hay bị câu trước chặn, nên số của bù là cận dưới.
+
+Bù chỉ tới một phần trước câu ngắn hơn 2 s, cùng cách đo: phần trước câu của cửa sổ cộng đoạn bù dừng ở 16, 31, 47 hay
+62 bước. Ô là nhận đúng trên 209:
+
+| Mốc trước câu | 16 bước | 31 bước | 47 bước | 62 bước | 125 bước |
+|---|---|---|---|---|---|
+| 0 ms | 161 | 171 | 172 | 169 | 170 |
+| 96 ms | 163 | 171 | 168 | 173 | 169 |
+
+Từ 31 bước (0,5 s) trở lên các mức chỉ chênh 2–3 câu; 16 bước kém rõ. Mỗi bước bù là công mạng mà quyết định phải chờ
+(§12.39).
+
+### 12.39 Board B với đoạn bù tới 2 s: lệnh, độ trễ, tiếng nền (31/10)
+
+Firmware `bench` @ `323096f`: đoạn bù của ADR-0032 tới đủ `utterance.lead_s`, các ngưỡng và bộ 39 lệnh như §12.37. Log
+UART 13:06:43–13:16:35; chủ repo nói "mở cửa", "đóng cửa", "dừng lại" liền sau "on", rồi các lệnh khác, cuối phiên có
+bật tiếng YouTube từ điện thoại.
+
+| | §12.37, không bù | Có bù |
+|---|---|---|
+| `WAKE` | 72 | 77 |
+| `COMMAND` | 51 | 65 |
+| Cửa sổ có đoạn bù: `COMMAND` / tất cả | — | 58 / 67 |
+| `PART` ở cửa sổ có đoạn bù | — | 4 |
+| Từ bước chốt tới quyết định, trung vị / p90 | 487 / 652 ms | 1 239 / 1 300 ms |
+
+- Đoạn bù 28–125 bước; 22 cửa sổ bù đủ 125 bước, tức lệnh liền sau "on" trong cùng một câu `vad`.
+- Độ trễ đi theo phần trước câu cộng đoạn bù mà mạng phải chạy: cửa sổ nào cũng thành chừng 125 bước trước câu, và
+  mạng (~9 ms một bước 16 ms, cùng chuỗi nghe trong `nhan_task`) chỉ đuổi được chừng 0,4 bước mỗi khung lúc người nói
+  còn nói, nên phần lớn chạy sau bước chốt.
+- Tiếng YouTube giữ `vad` bật: `WAKE` 13:15:17 ra quyết định lúc 13:15:32, `WAKE` 13:15:44 lúc 13:16:12, cả hai `LOW_MARGIN`
+  trên cửa sổ 234 bước đã lùi từ cuối, `fill 0`. Câu không chốt thì cửa sổ dài quá `window_s` chờ tới khi tiếng nền ngừng,
+  `LENH` không nhận `wake` mới, và phần được chấm là 3,75 s cuối, không phải lệnh nói ngay sau "on".
