@@ -321,3 +321,66 @@ Cả ba khớp mô phỏng từng giá trị trên 8 ảnh.
 - Slice và Concat trong các khối C3k2: ~177 ms; `model.2` (128 × 128) 65,5 ms, `model.16` 32,2, `model.4` 27,0;
 - Concat của cổ mạng (`model.12`, `15`, `18`, `21`): ~55 ms;
 - Concat của các tích chập đã cắt: 10,1 ms.
+
+## 8. Trọng số trên vùng mượn RAM nội và kernel stem RGB (E15-T13, ADR-0034, 31/10)
+
+Mọi bước đo trên board B bằng `make ai-unit-detect`, run chính thức `20261030_38a8738-dirty_37f714`, khớp mô phỏng từng
+giá trị trên 8 ảnh trừ chỗ ghi khác. Ảnh xuất có `PATCHES="softmax_quant softmax_scale"`; các bước firmware sau đó chạy
+`KEEP=1` trên cùng ảnh ấy.
+
+**Bản vá ở bước xuất.**
+
+| Bước | Mỗi ảnh, trung bình / đỉnh | Ghi chú |
+|---|---|---|
+| ConvLut (§7) | 2 658 / 2 690 ms | |
+| thêm `softmax_quant`, `softmax_scale` | **2 629 / 2 661 ms** | gốc của các bước dưới |
+| thêm `lean_transposes`, `attention_core` | 2 636 / 2 667 ms | lấy thêm 5 712 B RAM nội; không dùng |
+
+`attention_core` viết cho bố cục [1, T, H × D] của speaker, không bắt được attention của khối PSA.
+
+**ConvLut, các cách chạy thử.**
+
+| Bước | Mỗi ảnh | Khớp |
+|---|---|---|
+| lát kênh ≤ 16 KB trọng số, dải 1 hàng, nạp trước dải sau | 2 607 ms | **sai** 63 chỗ |
+| dải 1 hàng, nạp trước dải sau, kernel stem RGB | 2 800 ms | khớp |
+| dải như §7, nạp trước, trọng số ≤ 64 KB chép vào vùng mượn, kernel stem | 2 273 ms | khớp |
+| như trên, bỏ nạp trước | 2 255 ms | khớp |
+| **lát kênh vừa vùng mượn, chép lát vào vùng mượn, kernel stem**, vùng 64 KB | **2 118 / 2 144 ms** | khớp |
+| như trên, vùng 32 KB | 2 157 / 2 188 ms | khớp |
+| như trên, vùng 16 KB | 2 359 / 2 390 ms | khớp |
+
+- **Lỗi của lượt sai:** lát cuối hẹp hơn các lát trước (48, 48, 32 kênh), mà bảng tra vẫn đi đủ 48 giá trị một điểm ảnh, lấn
+  sang 16 kênh đầu của điểm ảnh sau vốn đã tra rồi. Tra đúng số kênh của lát thì khớp.
+- **Nạp trước dải sau không lợi:** dải 1 hàng làm tích chập 3 × 3 lớn chậm hẳn (`model.5` 169 → 227 ms), vì vòng của esp-dl
+  trong mỗi dải đọc lại toàn bộ trọng số từ flash. Giữ dải như §7 thì nạp trước vẫn thêm 3–8 ms ở các lớp nhỏ, và bỏ nó
+  nhanh hơn 18 ms.
+- **Trọng số trong RAM nội là đòn bẩy chính.** Đọc qua cache từ flash, tích chập int8 của esp-dl chạy 0,2–0,27 chu kỳ một
+  nhân-cộng; trọng số trong vùng mượn thì ~0,11, kể cả khi đầu vào vẫn ở PSRAM. Lớp lớn hơn vùng chạy theo lát kênh ra,
+  mỗi lát chép vào vùng rồi đọc lại đầu vào; vùng nhỏ thì lát hẹp, đầu vào đọc lại nhiều lần hơn.
+- Lượt đo từng module trước đây chạy ngoài `EspdlNet::step`, nên không có vùng mượn. Nay app thử cấp vùng như một lượt
+  chạy.
+
+Thời gian từng module, ms (một nhân, lượt đo trên ảnh cuối):
+
+| Module | Trọng số | Gốc | Vùng 16 KB | 32 KB | 64 KB |
+|---|---|---|---|---|---|
+| `/model.0/conv`, stem RGB | 0,4 KB | 136,2 | 59,3 | 59,3 | 59,3 |
+| `/model.3/conv` | 36 KB | 124,6 | 97,4 | 76,8 | 69,1 |
+| `/model.5/conv` | 144 KB | 169,1 | 169,2 | 90,6 | 91,9 |
+| `/model.7/conv` | 288 KB | 76,7 | 76,8 | 52,1 | 42,9 |
+| `/model.20/conv` | 144 KB | 41,3 | 41,3 | 26,3 | 25,3 |
+| `/model.13/cv1` | 48 KB | 55,3 | 34,3 | 28,8 | 24,4 |
+| `/model.19/cv2`, int16 | 48 KB | 65,2 | 45,6 | 35,9 | 31,0 |
+| `/model.8/cv1` | 64 KB | 24,7 | 12,3 | 11,3 | 10,5 |
+| ConvLut, 82 module | | 1 839,0 | 1 522,9 | 1 318,2 | 1 289,0 |
+| Cả đồ thị, 235 module | | 2 592,8 | 2 276,1 | 2 071,8 | 2 043,2 |
+
+- Ở 16 KB, `model.5`, `7`, `20` không được lát nào: một lát 16 kênh của chúng cần 18 KB.
+- **Kernel stem RGB** (`stem_s8_esp32s3.S`): 136,2 → 59,3 ms, ~45 chu kỳ một điểm ảnh cho 27 phép nhân-cộng vector, phần
+  còn lại là bảng tra Swish 16 byte một điểm ảnh.
+- Chưa đổi: `model.1` (16 → 32 kênh, 59,7 ms) và `model.2/cv2` (48 → 64 kênh 1 × 1 trên 128 × 128, 62,2 ms) nghẽn ở
+  vòng mỗi tap và lượt đọc ghi PSRAM, không ở trọng số.
+- **Một module chậm gấp bốn mà không rõ vì sao:** `/model.4/m.0/cv2` 58,7 ms ở firmware gốc của bước này, 13,5 ms ở mọi
+  firmware sau, trên cùng một ảnh xuất. `/model.2/m.0/Add` từng như thế ở §7 (11,7 → 56,3 ms) giữa hai ảnh xuất.
+  Nguyên nhân chưa rõ 🔬.
