@@ -71,6 +71,7 @@ class Summary:
     samples: int
     start_utc: str | None
     gaps: list[Gap] = field(default_factory=list)
+    first_seq: int | None = None  # hop of the first sample, as board logs count hops
 
     @property
     def duration_s(self) -> float:
@@ -102,6 +103,7 @@ class Recorder:
     def add(self, header: Header, pcm: bytes) -> None:
         if not self._wavs:
             self._open(header.mode)
+            self.summary.first_seq = header.seq
         elif header.mode != self.summary.mode:
             raise FrameError(f"mode {header.mode} after mode {self.summary.mode}")
         if self._next_seq is not None and header.seq != self._next_seq:

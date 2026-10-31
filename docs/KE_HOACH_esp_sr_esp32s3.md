@@ -2812,8 +2812,9 @@ ghi vào `raw/`. Tiếng tổng hợp bằng TTS trên máy tính sinh lại đ�
 
 `session.json` mang `session`, `board`, `fw` (`PROJECT_VER` + commit), `grid_hash`, `pcm_shift`, `kind`,
 `spk` (`spk_NNN`, `null` với `noise`), `consent` (mã phiếu, `null` với `noise`), `room`, `distance_cm`,
-`doa_deg`, `prompt` (chữ đã đọc), `start_utc`, `seq_gaps`. `board_b.csv` lặp lại các cột ấy để lọc mà
-không mở từng phiên, thêm `duration_s` và `sha256` của `ch0.wav`. Bảng tên thật ↔ `spk_NNN` và bản quét
+`doa_deg`, `prompt` (chữ đã đọc), `start_utc`, `seq_gaps`, `first_seq` (`seq` của mẫu đầu, tức bước mà log của
+board đếm, để dựng lại cửa sổ của một quyết định từ luồng tiếng). `board_b.csv` lặp lại các cột ấy trừ `first_seq` để
+lọc mà không mở từng phiên, thêm `duration_s` và `sha256` của `ch0.wav`. Bảng tên thật ↔ `spk_NNN` và bản quét
 phiếu đồng ý nằm **ngoài repo và ngoài `SRPIPE_DATA_ROOT`** (§1.4, E11-T2).
 
 Manifest của một kho, ví dụ `manifests/speech/vivos.yaml`:
@@ -3328,7 +3329,7 @@ của app `capture`, vốn gửi ngay từ lúc boot, bắt đầu ở `seq` 0 c
 chạy trước.
 
 `session.py` ghi những trường của `session.json` mà `host` thấy được (`grid_hash` từ code sinh, `start_utc`,
-`seq_gaps`, `duration_s`, `sha256`); `fw` (`PROJECT_VER` + commit) và `pcm_shift` là tham số bắt buộc khi mở
+`seq_gaps`, `first_seq`, `duration_s`, `sha256`); `fw` (`PROJECT_VER` + commit) và `pcm_shift` là tham số bắt buộc khi mở
 phiên, đọc từ log boot của board, vì luồng tiếng không mang chúng. Tên kênh của từng `mode` nằm ở
 `contracts/stream/frame.yaml`, không gõ lại ở `host/`.
 

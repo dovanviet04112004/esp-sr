@@ -46,6 +46,7 @@ def test_a_reconnect_after_a_blip_is_one_recording_with_the_gap_listed(tmp_path:
     summary = run_server(tmp_path, board_factory, batches, hops=len(before) + len(after))
     assert summary.channels == ("ch0", "ch1", "ref")
     assert summary.frames == len(before) + len(after)
+    assert summary.first_seq == before[0]
     assert summary.gaps == [stream_rx.Gap(len(before) * grid.HOP_SAMPLES, 10, 13)]
     for c, name in enumerate(summary.channels):
         assert read_wav(tmp_path / f"{name}.wav") == expected_channel(before + after, c)

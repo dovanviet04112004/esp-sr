@@ -1,7 +1,7 @@
 """Record one labelled session into raw/device/<board>/<session>/ and a row of the device manifest (KEHOACH 4.4.1).
 
-The session directory holds one WAV per channel, session.json and gaps.txt; the manifest row repeats
-the labels plus duration_s and the sha256 of the first WAV. seq_gaps counts the lines of gaps.txt.
+One WAV per channel, gaps.txt, and session.json with first_seq, the board's hop of the first sample; the manifest
+row repeats the labels but first_seq, plus duration_s and the first WAV's sha256. seq_gaps counts gaps.txt's lines.
 Run: uv run python -m srhost.session --kind cmd --spk spk_001 --consent C001 --room lab --fw 0.1.0+87b0337
 --pcm-shift 16 --prompt "bật đèn" --duration-s 30
 """
@@ -157,6 +157,7 @@ def record(
         "prompt": labels.prompt,
         "start_utc": summary.start_utc,
         "seq_gaps": len(summary.gaps),
+        "first_seq": summary.first_seq,
     }
     (out / "session.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     first_wav = out / f"{summary.channels[0]}.wav"

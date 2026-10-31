@@ -42,7 +42,8 @@ def test_a_session_lands_in_raw_with_its_labels_and_a_manifest_row(tmp_path: Pat
     assert sorted(p.name for p in out.iterdir()) == ["ch0.wav", "ch1.wav", "gaps.txt", "ref.wav", "session.json"]
     meta = json.loads((out / "session.json").read_text(encoding="utf-8"))
     assert meta["grid_hash"] == "0x9c914b61" and meta["seq_gaps"] == 1 and meta["prompt"] == "bật đèn"
-    assert set(meta) == set(session.MANIFEST_COLUMNS) - {"duration_s", "sha256"}
+    assert meta["first_seq"] == 0
+    assert set(meta) == set(session.MANIFEST_COLUMNS) - {"duration_s", "sha256"} | {"first_seq"}
     rows = list(csv.DictReader((tmp_path / "board_b.csv").open(encoding="utf-8")))
     assert len(rows) == 1 and rows[0]["session"] == "20260926_lab_001"
     assert rows[0]["sha256"] == hashlib.sha256((out / "ch0.wav").read_bytes()).hexdigest()
