@@ -659,3 +659,30 @@ Cùng các phép thử đổi từng thứ ở trên. Ô là số câu qua ngư�
   `20261029_home_001` qua 24 / 41 câu, `test` 5,33 báo nhầm/giờ.
 - 30/10 chủ repo hạ `kws/wake_th` xuống 850‰ (console; board đọc "after the wake at 850 permille, delta1 300,
   delta2 10, delta3 65535"): phiên `20261029_home_001` qua 28 / 41 câu, `test` 7,40 báo nhầm/giờ.
+
+## 9. Dữ liệu cho một từ đánh thức khác "on" (31/10)
+
+Chủ repo thấy "on" nhiều lúc nhận kém và hỏi từ nào, tiếng Anh hay tiếng Việt, có nhiều dữ liệu. Số mẩu của Speech Commands
+v0.02 đếm trên `raw/speech/speech_commands/` (từ nói riêng, ~2 600 người nói, CC-BY 4.0); của MSWC từ `metadata.json.gz`
+của MLCommons (từ cắt khỏi câu đọc của Common Voice bằng căn cưỡng bức, CC-BY 4.0, chỉ từ từ ba chữ cái):
+
+| Từ | Âm tiết | Speech Commands | MSWC `en` | Cộng |
+|---|---|---|---|---|
+| on | 1 | 3 845 | — | 3 845 |
+| happy | 2 | 2 054 | 1 911 | 3 965 |
+| forward | 2 | 1 557 | 1 034 | 2 591 |
+| follow | 2 | 1 579 | 939 | 2 518 |
+| marvin | 2 | 2 100 | 36 | 2 136 |
+| sheila | 2 | 2 022 | 20 | 2 042 |
+| visual | 3 | 1 592 | 247 | 1 839 |
+| computer | 3 | — | 1 427 | 1 427 |
+| firefox | 3 | — | 931 | 931 |
+| jarvis, alexa | 2, 3 | — | 17, 7 | — |
+
+- Tiếng Việt: MSWC `vi` có 47 từ, 350 mẩu cả bộ; không tìm thấy bộ từ đánh thức tiếng Việt công khai nào. Phễu "trợ lý"
+  của `hf_extract` dừng ở chừng 50 mẩu sạch (§7).
+- Hey Snips (Sonos): 69 582 câu, 1 774 người nói, làm riêng cho từ đánh thức, nhưng giấy phép chỉ cho nghiên cứu.
+- Common Voice có đoạn "Single Word" (chữ số, yes, no, hey, Firefox; 64 giờ hợp lệ, 18 ngôn ngữ, CC0), thu "hey" và
+  "Firefox" thành hai mẩu riêng; Firefox là nhãn hiệu.
+- Trong các từ nói riêng, "on" đã là từ nhiều dữ liệu nhất của Speech Commands ngoài chữ số; các từ hai âm tiết có chừng
+  một nửa. Mẩu MSWC cắt khỏi câu, gần như mẩu `hf_extract` đã gặp ở §7, chưa được nghe thử.
