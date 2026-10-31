@@ -468,3 +468,16 @@ phần ngoài module.
 - Trong đầu dò, nhánh lớp (`one2one_cv3`) 240 ms, nhánh khung 75 ms; riêng tích chập cuối ra 80 lớp 41 ms. Nhánh lớp
   rộng max(64, min(số lớp, 100)) kênh, nên model ≤ 64 lớp hẹp cả bốn lớp ẩn của nó.
 - Các khối C3k (`model.6`, `8`, `13`, `16`, `19`) 446 ms, trong đó Slice, Concat, Add, RequantizeLinear ~89 ms.
+
+## 9. Đầu dò int8 thay int16 (E15-T12, 31/10)
+
+Run `20261031_03fd0e5-dirty_0abd1b`: `make detect-import SET="quant.int16=[]"`, cùng công thức, seed, ảnh hiệu chuẩn và 11
+bản vá với run của lock, chỉ khác mọi op đều int8, kể cả lối ra của cổ (`model.16`, `19`, `22` cv2) và đầu dò.
+
+| Run | int8 mAP50-95 / mAP50 trên val | Tụt so với float | `.espdl` |
+|---|---|---|---|
+| lock, đầu và lối ra cổ int16 | 0,3507 / 0,5022 | 0,0128 | 2 971 792 B |
+| mọi op int8 | 0,3249 / 0,4826 | 0,0386, trượt cổng 0,02 | 2 636 880 B |
+
+Đầu int8 mất 0,026 mAP50-95. Chủ repo chỉ nhận tối ưu không làm giảm chất lượng (31/10), nên đầu dò giữ int16 và E15-T12
+dừng ở đây. Phần int16 ~445 ms một ảnh (§8) chỉ còn đường của E15-T16.
