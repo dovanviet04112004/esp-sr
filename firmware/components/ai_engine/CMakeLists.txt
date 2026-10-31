@@ -4,6 +4,7 @@ set(srcs "src/core/engine.cpp" "src/core/model_image.cpp" "src/core/espdl_net.cp
          "${espdl}/ops/espdl_band_head.cpp"
          "${espdl}/ops/espdl_band_stem.cpp" "${espdl}/ops/espdl_band_tail.cpp" "${espdl}/ops/espdl_conv_block.cpp"
          "${espdl}/ops/espdl_c3k2_block.cpp" "${espdl}/ops/espdl_conv_lut.cpp"
+         "${espdl}/ops/espdl_upsample_concat_conv.cpp"
          "${espdl}/ops/espdl_global_stats.cpp"
          "${espdl}/ops/espdl_group_norm_s8.cpp" "${espdl}/ops/espdl_layernorm_s8.cpp" "${espdl}/ops/espdl_matmul_s8.cpp"
          "${espdl}/ops/espdl_pointwise_s8.cpp" "${espdl}/ops/espdl_softmax_quant.cpp" "${espdl}/ops/espdl_stage_sum.cpp"

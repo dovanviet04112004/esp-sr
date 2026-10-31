@@ -9,6 +9,7 @@
 #include "core/espdl/ops/espdl_conv_block.hpp"
 #include "core/espdl/ops/espdl_c3k2_block.hpp"
 #include "core/espdl/ops/espdl_conv_lut.hpp"
+#include "core/espdl/ops/espdl_upsample_concat_conv.hpp"
 #include "core/espdl/ops/espdl_global_stats.hpp"
 #include "core/espdl/ops/espdl_group_norm_s8.hpp"
 #include "core/espdl/ops/espdl_layernorm_s8.hpp"
@@ -49,6 +50,7 @@ void register_espdl_ops() noexcept
     creator->register_module("BandTail", band_tail_from);
     creator->register_module("ConvLut", conv_lut_from);
     creator->register_module("C3k2Block", c3k2_block_from);
+    creator->register_module("UpsampleConcatConv", upsample_concat_conv_from);
 }
 
 } // namespace ai
