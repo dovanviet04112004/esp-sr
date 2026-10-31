@@ -29,6 +29,7 @@ from .ops.band_chain import band_chain
 from .ops.band_head import band_head
 from .ops.band_stem import band_stem
 from .ops.band_tail import band_stream
+from .ops.c3k2_block import c3k2_block
 from .ops.conv_block import conv_block
 from .ops.conv_lut import conv_lut, conv_lut_plain
 from .ops.global_stats import global_stats
@@ -110,6 +111,7 @@ PATCHES = {
     "conv_block": conv_block,
     "conv_lut": conv_lut,
     "conv_lut_plain": conv_lut_plain,
+    "c3k2_block": c3k2_block,
     "matmul_s8": matmul_s8,
     "attention_core": attention_core,
     "stem_conv": stem_conv,
