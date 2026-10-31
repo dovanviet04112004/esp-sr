@@ -42,6 +42,7 @@ from .ops.stage_sum import stage_sum
 from .ops.stem_conv import stem_conv
 from .ops.stride_depthwise import stride_depthwise
 from .ops.time_depthwise import time_depthwise
+from .ops.upsample_concat_conv import upsample_concat_conv
 from .ops.weighted_stats import weighted_stats
 from .quantise import (
     conv_caches_along_time,
@@ -112,6 +113,7 @@ PATCHES = {
     "conv_lut": conv_lut,
     "conv_lut_plain": conv_lut_plain,
     "c3k2_block": c3k2_block,
+    "upsample_concat_conv": upsample_concat_conv,
     "matmul_s8": matmul_s8,
     "attention_core": attention_core,
     "stem_conv": stem_conv,
