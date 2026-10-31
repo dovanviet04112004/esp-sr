@@ -3567,13 +3567,19 @@ trường nhìn trống sau mỗi lệnh. Nói chen chỉ mở được sau khi 
   2,0 s thay 1,25 s thì Cửa 3 float 89 → 98/112, mở 3 hay 4 s không hơn (`measurements/command.md` §12). Mẫu học của
   `command` cắt cùng luật (§1.2), nên mạng thấy trước câu đúng như lúc học (ADR-0019);
 - **phần trước câu sau `wake`** (ADR-0032): trong `LENH`, khi mốc của `wake` giữ bước đầu cửa sổ muộn hơn
-  `utterance.lead_s` trước câu, phần còn thiếu được bù bằng các bước ngay trước bước `vad` đầu của câu chứa từ đánh thức,
-  không lùi qua mốc chặn trước `wake` hay quá vòng đệm. Mạng chạy đoạn bù rồi cửa sổ từ bộ đệm rỗng và chấm cả hai như
-  phần trước câu lúc học; từ đánh thức không bao giờ vào mạng `command`. Không bù thì lệnh nói liền sau "on" gần như mất
-  hết: Cửa 3 với mốc 0 ms trước câu nhận đúng 6/209 câu thay 181, gần hết `PART`; có đoạn bù thì 170, mốc 496 ms 173
-  thay 174 (`measurements/command.md` §12.38). Mạng chạy qua tiếng thật trước mốc mà không chấm thì không thay được: nó
-  nghe tiếng nói trong phần trước câu, điều mẫu học không có, và chỉ nhận 163. Cửa sổ cộng đoạn bù dài quá `window_s`
-  thì lùi từ cuối như mọi cửa sổ, bỏ đoạn bù;
+  `SVC_LISTEN_WAKE_LEAD_MS` (0,5 s, `Kconfig` của `svc_listen`, vì đổi `listen.yaml` là đổi `listen_hash`) trước câu,
+  phần còn thiếu được bù bằng các bước ngay trước bước `vad` đầu của câu chứa từ đánh thức, không lùi qua mốc chặn trước
+  `wake` hay quá vòng đệm. Mạng chạy đoạn bù rồi cửa sổ từ bộ đệm rỗng và chấm cả hai như phần trước câu lúc học; từ
+  đánh thức không bao giờ vào mạng `command`. Không bù thì lệnh nói liền sau "on" gần như mất hết: Cửa 3 với mốc 0 ms
+  trước câu nhận đúng 6/209 câu thay 181, gần hết `PART`; bù tới 0,5 s thì 171, như bù tới 2 s (170), còn 0,25 s chỉ
+  161 (`measurements/command.md` §12.38). Mỗi bước bù là công mạng quyết định phải chờ: bù tới 2 s đẩy thời gian từ bước
+  chốt tới quyết định từ 487 lên 1 239 ms trung vị trên board B (§12.39). Mạng chạy qua tiếng thật trước mốc mà không
+  chấm thì không thay được: nó nghe tiếng nói trong phần trước câu, điều mẫu học không có, và chỉ nhận 163;
+- **cửa sổ mở trong `LENH` chốt ở `window_s`**, tính cả đoạn bù, dù câu còn chạy: lệnh luôn đến ngay sau từ đánh thức, nên
+  phần đầu cửa sổ là phần có lệnh. Tiếng nền giữ `vad` bật (TV, nhạc từ điện thoại) thì câu không bao giờ chốt; cửa sổ
+  lùi từ cuối như dưới đây thì board không quyết định gì tới khi tiếng nền ngừng, `LENH` không nhận `wake` mới, rồi chấm
+  3,75 s cuối thay vì lệnh (board B 31/10: 15 s và 28 s, §12.39). Chốt sớm thì quyết định đến chậm nhất `window_s` sau
+  mốc, rồi máy về `NGHE`;
 - **cửa sổ chạy theo luồng**: ngay từ bước `vad` đầu của câu, `svc_listen` đưa log-mel và cao độ đã có của từng bước
   của cửa sổ vào `ai_engine_command_step`, đuổi kịp phần trước câu rồi đi cùng các khung mới; mạng chạy mỗi khối và
   phép chấm đi tiếp trên khung mới, theo bộ lệnh `ai_engine_command_prepare` đã nhận. Cuối cửa sổ chỉ dời về sau, nên
@@ -3589,8 +3595,9 @@ trường nhìn trống sau mỗi lệnh. Nói chen chỉ mở được sau khi 
   IDLE0 chạy. Trong đợt ấy khung mới chỉ được nhận khi xong bước đang chạy và các task 3–9 của nhân 0 nhả CPU, nên
   không task nào trong số ấy được giữ CPU lâu, trừ `xac_task` với một lần chạy b3; `q_clean` 2 s là biên. Chạy mỗi lần một bước và đợi đủ `utterance.min_s` thì từ ngắn chưa đuổi kịp khi câu chốt
   (`measurements/latency.md` §17);
-- cửa sổ dài quá `window_s` thì thôi chạy theo luồng: lúc câu chốt nó lùi từ bước cuối tối đa `window_s`, không qua mốc
-  chặn, rồi chạy cả cửa sổ, quyết định chậm cỡ thời gian mạng chạy hết cửa sổ, khoảng 1,2 s 🔬;
+- cửa sổ không mở trong `LENH` (ảnh không có `wake`, lúc đăng ký giọng) dài quá `window_s` thì thôi chạy theo luồng: lúc
+  câu chốt nó lùi từ bước cuối tối đa `window_s`, không qua mốc chặn, rồi chạy cả cửa sổ, quyết định chậm cỡ thời gian
+  mạng chạy hết cửa sổ, khoảng 1,2 s 🔬;
 - `svc_listen` tính log-mel và cao độ mỗi bước ở mọi trạng thái và giữ chúng cho các bước gần nhất ở PSRAM; bộ dò
   chỉ đặt lại khi luồng đứt; mạng bắt đầu từ bộ đệm rỗng ở đầu cửa sổ như lúc học;
 - luồng đứt (`seq` hở hay khung mang `DSP_AFE_FLAG_GAP`) giữa một câu đang mở thì cửa sổ của câu ấy không được chấm:

@@ -39,18 +39,25 @@ trước chặn, nên số của phương án chọn là cận dưới. Trên bo
 
 ## Quyết định
 
-- Trong `LENH`, khi mốc của `wake` giữ bước đầu cửa sổ muộn hơn `utterance.lead_s` trước câu, `svc_listen` bù phần còn
-  thiếu bằng các bước ngay trước bước `vad` đầu của câu chứa từ đánh thức: không lùi qua mốc chặn trước `wake` (cửa sổ
-  trước, chỗ luồng đứt), không quá vòng đệm, cộng với phần trước câu sẵn có không quá `utterance.lead_s`.
+- Trong `LENH`, khi mốc của `wake` giữ bước đầu cửa sổ muộn hơn `SVC_LISTEN_WAKE_LEAD_MS` trước câu, `svc_listen` bù
+  phần còn thiếu bằng các bước ngay trước bước `vad` đầu của câu chứa từ đánh thức: không lùi qua mốc chặn trước `wake`
+  (cửa sổ trước, chỗ luồng đứt), không quá vòng đệm.
+- `SVC_LISTEN_WAKE_LEAD_MS` là 500 ms, ở `Kconfig` của `svc_listen` như `SVC_LISTEN_COMMAND_WAIT_MS`, vì `listen.yaml`
+  mang băm mà model `command` bị giữ theo. Mỗi bước bù là công mạng mà quyết định phải chờ: bù tới 2 s đẩy thời gian từ
+  bước chốt tới quyết định từ 487 lên 1 239 ms trung vị trên board B (`command.md` §12.39), còn Cửa 3 bù tới 0,5 s nhận
+  171/209 như bù tới 2 s (§12.38).
 - Mạng bắt đầu từ bộ đệm rỗng ở đầu đoạn bù, chạy đoạn bù rồi cửa sổ, và chấm cả hai như phần trước câu lúc học. Từ
   đánh thức không bao giờ vào mạng `command`.
-- Cửa sổ cộng đoạn bù dài quá `window_s` thì lùi từ cuối như mọi cửa sổ, bỏ đoạn bù.
+- Cửa sổ mở trong `LENH` chốt khi nó, cả đoạn bù, đủ `window_s`, dù câu còn chạy, và được chấm trên chính phần ấy: lệnh
+  luôn đến ngay sau từ đánh thức. Tiếng nền giữ `vad` bật thì câu không chốt, và cửa sổ lùi từ cuối như ngoài `LENH` đã
+  giữ board không quyết định gì 15 s và 28 s rồi chấm tiếng nền (§12.39).
 - Dòng log của mỗi quyết định in thêm bước đầu và số bước của đoạn bù, để máy tính dựng lại đúng cửa sổ từ luồng tiếng.
 - `ai_engine` không đổi: đoạn bù đi qua `ai_engine_command_step` như mọi bước.
 
 ## Hệ quả
 
-- Cửa 3, `listen-unit` và mẫu học không đổi: chúng không có `wake`.
+- Cửa 3, `listen-unit` và mẫu học không đổi: chúng không có `wake`, nên không có đoạn bù và cửa sổ dài vẫn lùi từ cuối.
+- Có tiếng nền, mọi lệnh sau `wake` chờ tới `window_s` sau mốc mới có quyết định, vì câu không chốt sớm hơn.
 - `LENH` chưa có bản soi gương Python và golden. Board B kiểm bằng một phiên chủ repo nói trực tiếp, so `PART` với
   §12.37; phép so từng quyết định với Python dựng lại từ luồng tiếng `mode` 5 làm sau.
 - Dải độ ồn của kiểm người nói vẫn đo trên phần trước câu của chính cửa sổ (ADR-0024), không trên đoạn bù.
