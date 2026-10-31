@@ -44,10 +44,11 @@ profile `bench`, ghi tay từ `measurements/latency.md` §27.
 | `speaker` lúc nạp: dựng b0 cùng một lần chạy thử | 0 | lúc boot | 1783 ms | 0 | 2 134 920 B: tensor, bảng `exp` của Softmax | `7c77692` | 2026-10-11 |
 | `speaker` lúc nạp: `spk_fbank_init` | 0 | lúc boot | ~141 ms | 0 | 59 568 B vùng làm việc, đo bằng `bench_afe` | `6521d03` | 2026-10-11 |
 | `svc_listen_hold`: chép 1,5 s cuối cửa sổ sang ô xác minh, cộng hai tổng bình phương của cửa sổ lệnh (`nhan_task`) | 0 | mỗi lệnh được nhận, khi kiểm người nói bật | 3,66 ms trung bình, 4,47 ms đỉnh, 170 lần | 0 B thêm | 0 B thêm | `898a1ba` | 2026-10-13 |
-| `detect`: một ảnh qua `ai_engine_detect_run`: letterbox của esp-dl, YOLO26n S = 512 trọng số đọc thẳng từ flash, `decode.c` (app thử của `ai_engine`, profile `detect`) | 0 | mỗi ảnh (E15-T7) | 3 140 ms trung bình, 3 166 ms đỉnh, 8 ảnh | 320 B thêm lúc chạy | 11 152 B thêm lúc chạy | `7bf6e8af` | 2026-10-30 |
-| `detect` lúc nạp: `ai_engine_detect_load`, ánh xạ `vision_0`, sha256 của 2,86 MiB, dựng mạng | 0 | lúc boot và mỗi lần đổi model | 3 469 ms | 6 072 B; 5 748 B ở lại sau lần gỡ đầu | 2 707 852 B: tensor và đồ thị | `7bf6e8af` | 2026-10-30 |
+| `detect`: một ảnh qua `ai_engine_detect_run`: letterbox của esp-dl, YOLO26n S = 512 trọng số đọc thẳng từ flash, `decode.c` (app thử của `ai_engine`, profile `detect`) | 0 | mỗi ảnh (E15-T7) | 2 658 ms trung bình, 2 690 ms đỉnh, 8 ảnh | 320 B thêm lúc chạy | 11 152 B thêm lúc chạy | `38a87388` | 2026-10-30 |
+| `detect` lúc nạp: `ai_engine_detect_load`, ánh xạ `vision_0`, sha256 của 2,85 MiB, dựng mạng | 0 | lúc boot và mỗi lần đổi model | 2 965 ms | 6 132 B; 5 808 B ở lại sau lần gỡ đầu | 2 825 888 B: tensor và đồ thị | `38a87388` | 2026-10-30 |
 
 - "0 B thêm" là heap còn trống trước và sau lần xác minh đầu tiên sau nạp; ca chuỗi đỏ nếu lệch một byte.
-- Hai dòng `detect` ghi tay từ `measurements/detect.md` §3: RAM nội và PSRAM là heap còn trống quanh lần nạp và đáy
-  của nó trong 8 lần chạy. `nhin_task` chưa có (E15-T7); một ảnh giữ nhân 0 ~3,1 s.
+- Hai dòng `detect` ghi tay từ `measurements/detect.md` §3 và §7, run `20261030_38a8738-dirty_37f714`: RAM nội và PSRAM
+  là heap còn trống quanh lần nạp và đáy của nó trong 8 lần chạy. `nhin_task` chưa có (E15-T7); một ảnh giữ nhân 0
+  ~2,7 s. Cạnh sản phẩm thì chỗ chật là RAM nội (`measurements/ram.md` §5).
 - Một lần chạy b0 giữ nhân 0 ~1,26 s, ở ưu tiên 3 dưới mọi task theo nhịp khung và theo mạng (KẾ HOẠCH §5.2).

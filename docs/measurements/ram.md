@@ -159,3 +159,32 @@ Firmware `bench` @ `83789d9` với b3 (ADR-0028), đo 28/10 qua cầu RFC 2217, 
 - **Vùng mượn 79 680 B của b3 (ADR-0025) không còn chỗ:** sau `dsp_afe`, mảnh RAM nội liền lớn nhất chỉ 49 152 B, mà
   vùng mượn là một khối liền xin ở mỗi lần chạy. Lúc ấy op đọc trọng số tại chỗ, cùng kết quả, chậm hơn. Wi-Fi nối thì
   RAM nội còn ít hơn.
+
+## 5. Sản phẩm b0 cạnh ảnh thị giác của `detect` (31/10)
+
+Board B, firmware `bench` @ `9abf45f`, sau `make product` và `make vision-flash`, đọc qua cầu RFC 2217:
+- ảnh tiếng nói theo lock, 5 425 984 B: b0, `command_ctc` và `speaker` đọc thẳng từ flash;
+- `vision_0` mang YOLO26n COCO của run `20261030_38a8738-dirty_37f714`, 2 989 120 B. Firmware chưa có `nhin_task`
+  nên chưa dựng mạng `detect`;
+- các bước khởi động đo với bộ mặc định 10 lệnh, heartbeat đo với bộ retained 38 lệnh, tối đa vẫn 64 lệnh.
+
+| Bước | PSRAM còn B | Dùng thêm | RAM nội còn B, mảnh liền lớn nhất |
+|---|---|---|---|
+| `storage` | 8 384 752 | — | 196 771, 139 264 |
+| `wiring` | 7 767 184 | 603 KB | 196 771, 139 264 |
+| `audio` | 7 570 772 | 192 KB | 179 319, 131 072 |
+| `models` | 4 960 856 | 2 549 KB | 173 283, 131 072 |
+| `front` | 4 960 856 | 0 | 87 263, 47 104 |
+| `listen` | **4 278 432** | 666 KB | 86 975, 45 056 |
+
+**Heartbeat**, Wi-Fi và MQTT đã nối, ba nhịp 30 s liền nhau ra cùng số:
+- RAM nội còn **32 495 B**, thấp nhất từ lúc khởi động **12 675 B**: Wi-Fi và MQTT lấy 54 480 B so với bước `listen`;
+- PSRAM còn **4 258 212 B**, thấp nhất 4 224 148 B: Wi-Fi và MQTT lấy 20 220 B.
+
+**`detect` cạnh sản phẩm**, cộng số của bản dò (`measurements/detect.md` §3, §7) vào heartbeat:
+- PSRAM: đồ thị 2 825 888 B cộng 11 152 B lúc chạy, còn 1 421 172 B (1 387 108 B trên mức thấp nhất). Chưa tính ảnh
+  từ host: RGB888 640 × 480 là 921 600 B 🔬.
+- RAM nội: nạp 6 132 B (5 808 B ở lại từ lần nạp đầu) cộng 320 B lúc chạy, còn 26 043 B; trên mức thấp nhất chỉ còn
+  6 223 B, chưa tính ngăn xếp `nhin_task` 🔬. RAM nội là chỗ chật, không phải PSRAM.
+- Với b3, §4 đo còn 2 022 720 B PSRAM lúc nghe (28/10, chưa nối Wi-Fi), dưới 2 837 040 B của `detect`: b3 và `detect`
+  không cùng vừa.
