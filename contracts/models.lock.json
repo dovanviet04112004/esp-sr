@@ -222,44 +222,44 @@
       }
     },
     "wake": {
-      "run": "20261029_f740a15-dirty_ac56bc",
+      "run": "20261031_5e5921a-dirty_72c36d",
       "grid_hash": "0x9c914b61",
       "files": [
         {
           "file": "wake.espdl",
           "entry": "wake",
           "kind": "espdl",
-          "sha256": "25e49ece64656e01325b74eab2b8a756f667c00161dbce74d28405e5c3426053"
+          "sha256": "2ca55ba1f65775e47ed413576c22d7a50c418934b5f6988533122c3b2d8b1190"
         },
         {
           "file": "wake.norm.bin",
           "entry": "wake",
           "kind": "norm",
-          "sha256": "bf4d5320fe32c8e757775c0ce577974e30799255f904ce4631644d2d89f098e2"
+          "sha256": "ecc93a11963787b9dd342e94f5664e8f8e8fdfca47a972b09577803a4b5b6afe"
         }
       ],
       "learnt_from": {
-        "split": "on2",
+        "split": "happy1",
         "train": [
           {
             "file": "train_hard.txt",
-            "sha256": "536c23abf241c7c944959bf59ced53b3b420e633789f8ac73fecba0b0f2ddaa3"
+            "sha256": "819c10585941a915db39bce49bd7839fb7fbddf4933fc2b77f9d6715b9768863"
           },
           {
             "file": "train_neg.txt",
-            "sha256": "865e6f8ee7713f4f70f3264ad37e24c708c87be6474e9e74b3bf56fbdd140ea3"
+            "sha256": "7a7161770d17f0143f4a06cf03fd7f9a721845e8a438af5aa01eaeb0f589d04a"
           },
           {
             "file": "train_pos.txt",
-            "sha256": "479615dde23fa234063a48b2d696bc37d57d174ac0f7a7b17cbb014c6f08799f"
+            "sha256": "637c45ad79f46894fe37a0765aa637b83c33fcbf71b5137644ca067cac440bd6"
           }
         ]
       },
       "row": "minmax",
-      "word": "on",
+      "word": "happy",
       "step_frames": 8,
       "threshold": {
-        "permille": 920
+        "permille": 925
       },
       "smooth_hops": 5
     },
