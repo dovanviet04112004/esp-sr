@@ -2325,7 +2325,7 @@ hậu xử lý viết lại ở `ai_engine/src/detect/decode.c` (dưới). Số 
 | 640 | 51,2 ms | 3 793 ms | 36,6 ms | 0,384 |
 
 Trên board B, trọng số đọc từ flash, tiếng nói nghỉ: 512 mất 3,02 s, 640 mất 4,88 s; chỉ 512 vừa PSRAM của sản phẩm
-(`measurements/detect.md` §1). Chủ repo chọn **S = 512** tạm thời (30/10), tới bước chọn S của phần tối ưu. Số khi
+(`measurements/detect.md` §1). Chủ repo chốt **S = 512** và đủ 80 lớp (01/11), không đổi gì làm giảm chất lượng. Số khi
 tiếng nói cùng chạy đo ở E15-T7 🔬.
 
 **Nâng esp-dl.** Ví dụ và component YOLO26 của Espressif dựng trên esp-dl ~3.3.14, nên repo nâng từ 3.3.11 trước mọi
@@ -2450,7 +2450,9 @@ Bước xuất vẫn cắt các tích chập mà một nhóm làn đã lớn hơ
 512 mất 1 833 ms với vùng 32 KB, khớp mô phỏng từng giá trị (`measurements/detect.md` §8). Trong sản phẩm, vùng được cấp
 tuỳ RAM nội còn trống lúc chạy 🔬. `nhin_task` giữ nhân 0 nhiều giây mỗi ảnh, nên IDLE0 không kịp nuôi watchdog của task.
 
-Đích thời gian mỗi ảnh chốt sau phép đo E15-T2 🔬, kèm điều kiện độ trễ lệnh tiếng nói không tăng.
+**Thời gian mỗi ảnh chốt ở chừng 1,84 s** (S = 512, 80 lớp, khớp mô phỏng từng giá trị; chủ repo 01/11): phần tối ưu tốc
+độ dừng ở đó. Bước nào còn lại mà làm giảm chất lượng thì không làm; `ConcatConv` khớp từng giá trị nhưng chậm hơn 61 ms
+nên không dùng (ADR-0038, `measurements/detect.md` §10). Điều kiện độ trễ lệnh tiếng nói không tăng vẫn giữ, đo ở E15-T7 🔬.
 
 ---
 ## 4. Cấu trúc repo
