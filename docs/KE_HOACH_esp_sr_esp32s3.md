@@ -1390,7 +1390,18 @@ và mạng thức khi người ấy nói "mừng ơi" hay "dừng lại" (`measu
 sẵn thì rút đều; phiên đã học không bao giờ được chấm. Luật cắt
 của §1.2 chỉ để lại 24 mẩu "trợ lý" thật giữa 2 219 mẩu TTS, nên với chúng tỉ lệ ấy bằng đúng phần của chúng, chừng 1%:
 đẩy cao hơn thì mạng học thuộc 24 mẩu (chủ repo, 01/10). Với "vừng ơi", học thêm một phiên của chủ repo ở 5% đưa phiên
-khác của chính người ấy từ 2–3/12 lên 12/12 (`measurements/wake.md` §12). Mất mát là BCE theo bước. Chấm như trên máy: điểm làm trơn trung bình trượt 5 khung rồi so
+khác của chính người ấy từ 2–3/12 lên 12/12 (`measurements/wake.md` §12). Vài phiên của một người không phủ hết cách
+người ấy nói: giọng cao và to ở 1 m, kiểu chưa có trong tập học, chỉ bắt chừng 6/11 (`measurements/wake.md` §12). Vì
+thế mỗi cửa sổ dương và âm bản khó, của người thật lẫn TTS, đi qua cùng bốn phép đổi, mỗi phép rút đều trong khoảng của
+nó ở mục `train`; hai lớp cùng chịu phép đổi nên phép đổi không thành dấu hiệu của lớp nào:
+- nắn trục tần số (`word_warp`): mỗi dải mel đọc năng lượng ở tần số tâm của nó chia hệ số rút được, nội suy giữa hai
+  dải, như cùng từ ấy nói bằng giọng có ống thanh ngắn hay dài hơn (VTLP, Jaitly và Hinton, 2013);
+- nghiêng phổ (`word_tilt_db`), tính bằng dB mỗi octave quanh 1 kHz: nói to dồn năng lượng lên dải cao, nói nhỏ thì
+  ngược lại;
+- đổi nhịp (`word_tempo`): mỗi bước của cửa sổ là bước gốc gần nhất, bỏ bớt hay lặp lại bước, không trộn hai bước, nhãn
+  đi cùng bước của nó; cuối từ vẫn nằm sau phần khởi động;
+- độ lợi (`word_gain_db`) như đoạn "happy" trên.
+Ba phép đầu đổi năng lượng dưới log và giữ nguyên sàn log, như phép độ lợi. Mất mát là BCE theo bước. Chấm như trên máy: điểm làm trơn trung bình trượt 5 khung rồi so
 ngưỡng. Bắt được là tỉ lệ mẩu dương có một lần vượt ngưỡng. Báo nhầm là số lần vượt trên âm bản, mỗi lần vượt khoá
 một quãng rồi mới đếm tiếp như máy khoá sau khi thức, quy ra lần mỗi giờ. Ngưỡng chọn trên `val` sao cho báo nhầm
 không quá mục tiêu, rồi ghi vào NVS `kws/wake_th`.
