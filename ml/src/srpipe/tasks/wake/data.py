@@ -9,6 +9,7 @@ another version built the same way. Run: python -m srpipe.tasks.wake.data {split
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 import multiprocessing
@@ -18,21 +19,26 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import soundfile as sf
 import yaml
 
 from srpipe.core import corpus, extract, screen, splits
 from srpipe.core.audio_io import ItemReader
 from srpipe.core.config import apply_overrides, data_paths, load_device, load_yaml
-from srpipe.generated import grid, lang_vi
+from srpipe.dsp.afe.chain import ChainConfig
+from srpipe.dsp.spec.mel import Mel, MelConfig
+from srpipe.generated import array, grid, lang_vi
 from srpipe.lang import g2p
 from srpipe.lang.normalize import LangError, normalize
 from srpipe.scenes import device, room
 from srpipe.tasks.wake import CONFIG, synth
 
-PUBLIC, SYNTH = "public", "synth"
+PUBLIC, SYNTH, BOARD = "public", "synth", "board"
 SPEECH_COMMANDS_STREAM = 3
 NEGATIVES = ("train_neg.txt", "val_neg.txt", "test_neg.txt")
 F0_TABLE = "f0_hz.json"  # beside a build: each item's median F0, null if unvoiced
+BOARD_SET = "train_board"  # eval.board.train's sessions, cut as one shard
+BOARD_SHARD = "shard_00000"
 
 
 @dataclass
@@ -405,11 +411,95 @@ def f0_table(folder: Path, roots: dict[str, Path], spec: dict, workers: int) -> 
     return out
 
 
+def session_chain(session: Path, chain_cfg: ChainConfig, mel: Mel) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """device.listen over the microphones of a board session, cut to a common whole number of hops."""
+    channels = [sf.read(session / f"ch{m}.wav", dtype="int16")[0] for m in range(array.N_MICS)]
+    n = min(len(c) for c in channels) // grid.HOP_SAMPLES * grid.HOP_SAMPLES
+    return device.listen(np.stack([c[:n] for c in channels], axis=1), chain_cfg, mel)
+
+
+def board_rows(cfg: dict, paths: dict[str, Path]) -> list[dict]:
+    """The manifest rows of the sessions eval.board.train gives to train (KEHOACH 1.3); one missing from the manifest,
+    at another pcm_shift than the product's, or no wake session saying the word, is refused."""
+    spec, word = cfg["eval"]["board"], corpus.sounds(cfg["word"])
+    wanted = spec.get("train", [])
+    if not wanted:
+        return []
+    with (paths["manifests"] / spec["manifest"]).open(encoding="utf-8") as f:
+        rows = [r for r in csv.DictReader(f) if r["session"] in wanted]
+    if missing := sorted(set(wanted) - {r["session"] for r in rows}):
+        raise ValueError(f"{', '.join(missing)}: not in {spec['manifest']}")
+    if shifts := sorted({r["pcm_shift"] for r in rows} - {str(spec["pcm_shift"])}):
+        raise ValueError(f"train sessions at pcm_shift {shifts}; the product keeps {spec['pcm_shift']}")
+    saying = {r["session"] for r in rows if r["kind"] == "wake" and corpus.says(corpus.sounds(r["prompt"]), word)}
+    if other := [r["session"] for r in rows if r["session"] not in saying]:
+        raise ValueError(f"{', '.join(other)}: no wake session saying {cfg['word']!r}")
+    return rows
+
+
+def word_spans(clean: np.ndarray, vad: np.ndarray, below_peak_db: float) -> list[tuple[int, int]]:
+    """[first, stop) hops of each utterance of vad, stopping after its last hop within below_peak_db of its loudest on
+    the chain's clean samples, hops by samples, as a TTS positive stops (KEHOACH 3.11)."""
+    spans = []
+    for first, last in device.utterances(vad):
+        active = room.active_hops(clean[first : last + 1].reshape(-1).astype(np.float64), below_peak_db)
+        spans.append((first, first + int(np.flatnonzero(active)[-1]) + 1))
+    return spans
+
+
+def board_built_as(out: Path, device_cfg: dict, rows: list[dict], below_peak_db: float, dtype: str) -> bool:
+    """Whether out holds the cut of these sessions with this device config, word end and features' dtype."""
+    if not (out / "manifest.yaml").exists():
+        return False
+    body = yaml.safe_load((out / "manifest.yaml").read_text(encoding="utf-8"))
+    same_cut = body["sessions"] == [r["session"] for r in rows] and body["end_below_peak_db"] == below_peak_db
+    return body["config"] == device_cfg and same_cut and body["dtype"] == dtype
+
+
+def cut_board(cfg: dict, paths: dict[str, Path], out: Path) -> str:
+    """eval.board.train's sessions as one shard of train's dtype, each through the product's chain and log-mel, every
+    utterance of its vad a real positive ending as word_spans ends it (KEHOACH 1.3, 3.11)."""
+    rows, below_peak_db = board_rows(cfg, paths), cfg["split"]["end_below_peak_db"]
+    device_cfg = load_device(cfg["features"])
+    chain_cfg = ChainConfig(balance_gains=device.load_microphones(device_cfg["microphone"]).gains)
+    mel = Mel(MelConfig(**device_cfg["features"]))
+    features, items, offset = [], [], 0
+    for r in rows:
+        clean, figures, x = session_chain(paths["raw"] / "device" / r["board"] / r["session"], chain_cfg, mel)
+        for k, (first, stop) in enumerate(word_spans(clean, figures[:, 0].astype(bool), below_peak_db)):
+            items.append(
+                {
+                    "item": f"{BOARD}/{r['session']}#{k}",
+                    "origin": BOARD,
+                    "frame_offset": offset,
+                    "n_frames": len(x),
+                    "speech_frames": [first, stop],
+                }
+            )
+        features.append(x)
+        offset += len(x)
+    dtype = cfg["simulate"].get("train_dtype", "float32")
+    out.mkdir(parents=True, exist_ok=True)
+    np.save(out / f"{BOARD_SHARD}.features.npy", np.concatenate(features).astype(dtype))
+    lines = "".join(json.dumps(i, ensure_ascii=False) + "\n" for i in items)
+    (out / f"{BOARD_SHARD}.items.jsonl").write_text(lines, encoding="utf-8")
+    names = [f"{BOARD_SHARD}.features.npy", f"{BOARD_SHARD}.items.jsonl"]
+    head = {
+        "config": device_cfg,
+        "sessions": [r["session"] for r in rows],
+        "end_below_peak_db": below_peak_db,
+        "dtype": dtype,
+        "sha256": {n: splits.sha256_of(out / n) for n in names},
+    }
+    (out / "manifest.yaml").write_text(yaml.safe_dump(head, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return f"{out}: {len(items)} utterances of {len(rows)} sessions"
+
+
 def simulate(cfg: dict, paths: dict[str, Path]) -> None:
     """Every file of the split through the board simulation into processed/wake/<split>/<file>, smallest first,
     each as many passes as simulate.repeats asks, train's features stored as simulate.train_dtype and the rest in
     float32, no clean samples kept; a file already built the same way is left as it is. Then each file simulate.f0
-    lists gets its F0_TABLE."""
+    lists gets its F0_TABLE, and eval.board.train's sessions, when it lists some, their cut as BOARD_SET."""
     spec = cfg["simulate"]
     device_cfg = load_device(cfg["features"])
     for split_file in sorted((paths["splits"] / "wake" / spec["split"]).glob("*.txt"), key=lambda f: f.stat().st_size):
@@ -440,6 +530,11 @@ def simulate(cfg: dict, paths: dict[str, Path]) -> None:
     for name in spec.get("f0", {}).get("sets", []):
         folder = paths["processed"] / "wake" / spec["split"] / name
         print(f0_table(folder, roots, spec["f0"], spec["workers"]), flush=True)
+    if rows := board_rows(cfg, paths):
+        out = paths["processed"] / "wake" / spec["split"] / BOARD_SET
+        dtype, below_peak_db = spec.get("train_dtype", "float32"), cfg["split"]["end_below_peak_db"]
+        built = board_built_as(out, device_cfg, rows, below_peak_db, dtype)
+        print(f"{out}: already built" if built else cut_board(cfg, paths, out), flush=True)
 
 
 def real_positives(cfg: dict, raw: Path) -> dict[str, float]:

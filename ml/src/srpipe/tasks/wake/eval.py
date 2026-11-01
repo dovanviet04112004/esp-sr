@@ -21,10 +21,10 @@ from srpipe.core import corpus
 from srpipe.core.config import data_paths, device_of, load_run_config, load_yaml
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
-from srpipe.generated import array, grid
+from srpipe.generated import grid
 from srpipe.scenes import device
 from srpipe.tasks.wake import CONFIG
-from srpipe.tasks.wake.data import Shard
+from srpipe.tasks.wake.data import Shard, session_chain
 from srpipe.tasks.wake.model.tcn import Tcn
 from srpipe.tasks.wake.postproc.smooth import smooth, triggers
 
@@ -120,9 +120,7 @@ class BoardSession:
 def session_features(session: Path, chain_cfg: ChainConfig, mel: Mel) -> tuple[np.ndarray, np.ndarray]:
     """Log-mel and vad per hop of ch0 and ch1 as the product's chain gives them, the channels cut to a common whole
     number of hops."""
-    channels = [sf.read(session / f"ch{m}.wav", dtype="int16")[0] for m in range(array.N_MICS)]
-    n = min(len(c) for c in channels) // grid.HOP_SAMPLES * grid.HOP_SAMPLES
-    _, figures, features = device.listen(np.stack([c[:n] for c in channels], axis=1), chain_cfg, mel)
+    _, figures, features = session_chain(session, chain_cfg, mel)
     return features, figures[:, 0].astype(bool)
 
 
@@ -135,8 +133,10 @@ def session_kind(kind: str, prompt: str, word: list[tuple[str, ...]]) -> str:
     return kind if kind != "wake" or corpus.says(said, word) else "neg"
 
 
-def board(model, mean: np.ndarray, std: np.ndarray, cfg: dict, paths: dict, threshold: float, dev: str):
-    """Every session of the board manifest at the product's pcm_shift, scored at threshold."""
+def board(
+    model, mean: np.ndarray, std: np.ndarray, cfg: dict, paths: dict, threshold: float, dev: str, learnt=frozenset()
+):
+    """Every session of the board manifest at the product's pcm_shift but those the run learnt, scored at threshold."""
     spec, rate = cfg["eval"]["board"], grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
     device_cfg = device_of(cfg)
     mics = device.load_microphones(device_cfg["microphone"])
@@ -148,7 +148,7 @@ def board(model, mean: np.ndarray, std: np.ndarray, cfg: dict, paths: dict, thre
     root = paths["raw"] / "device" / rows[0]["board"] if rows else paths["raw"]
     results = []
     for r in rows:
-        if not (root / r["session"]).exists():
+        if r["session"] in learnt or not (root / r["session"]).exists():
             continue
         features, vad = session_features(root / r["session"], chain_cfg, mel)
         kind = session_kind(r["kind"], r["prompt"], corpus.sounds(cfg["word"]))
@@ -246,7 +246,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.what == "wav":
         results = [recording(model, stats["mean"], stats["std"], cfg, args.wav, threshold, "cpu")]
     else:
-        results = board(model, stats["mean"], stats["std"], cfg, data_paths(), threshold, "cpu")
+        learnt = frozenset(load_run_config(args.run)["eval"]["board"].get("train", []))
+        results = board(model, stats["mean"], stats["std"], cfg, data_paths(), threshold, "cpu", learnt)
+        if learnt:
+            print(f"left out, learnt by the run (KEHOACH 1.3): {', '.join(sorted(learnt))}\n")
     print(board_table(results, threshold))
     return 0
 

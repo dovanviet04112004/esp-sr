@@ -1,7 +1,8 @@
 """Wake training: the smoothing and lockout the device mirrors, labels around a positive's end, windows that hold
 the whole label past the warm-up, a louder word window equal to the log-mel of louder samples, pitch weights that draw
 words near the target F0, sentences for the CTC side task, a tiny run that keeps its last weights and saves each
-evaluated one, a board table whose rows keep their columns, and a run scored with the network it was trained as."""
+evaluated one, a board table whose rows keep their columns, a board score that leaves out the sessions a run learnt,
+real positives without a pitch drawn evenly, and a run scored with the network it was trained as."""
 
 from __future__ import annotations
 
@@ -318,3 +319,33 @@ def test_a_wake_session_for_another_word_is_scored_as_a_negative() -> None:
     assert wake_eval.session_kind("wake", "chào mi na", word) == "neg"
     assert wake_eval.session_kind("cmd", "trợ lý bật đèn", word) == "cmd"
     assert wake_eval.session_kind("cmd", "yes", corpus.sounds("yes")) == "wake"
+
+
+def test_real_positives_without_a_pitch_are_drawn_evenly_under_pitch_balance(tmp_path: Path) -> None:
+    rng = np.random.default_rng(11)
+    cfg = tiny_cfg()
+    cfg["train"] |= {"f0_balance": {"median_hz": 167.0, "spread_st": 3.0, "max_weight": 5.0}, "real_share": 0.5}
+    around = data.label_hops(cfg["train"]["label_s"])
+    tts = data.load_set(processed(tmp_path / "t", [(60, 20, 40)] * 4, rng, True, "synth"), True, around, "float16")
+    board = data.load_set(processed(tmp_path / "b", [(60, 20, 40)] * 3, rng, True, "board"), True, around, "float16")
+    neg = data.load_set(processed(tmp_path / "n", [(60, 0, 60)] * 4, rng, False), False, around, "float16")
+    windows = train.Windows(tts + board, neg, cfg, np.random.default_rng(12), f0_hz={"elsewhere": 120.0})
+    assert len(windows.real) == 3 and np.allclose(windows.real_p, 1 / 3)
+
+
+def test_the_board_score_leaves_out_the_sessions_a_run_learnt(tmp_path: Path, monkeypatch) -> None:
+    cfg = load_yaml(CONFIG) | {"word": "vừng ơi"}
+    rows = [("s1", "wake", "vừng ơi"), ("s2", "wake", "vừng ơi"), ("s3", "neg", "mừng ơi")]
+    lines = ["session,board,pcm_shift,kind,prompt"] + [f"{s},board_b,13,{k},{p}" for s, k, p in rows]
+    (tmp_path / "b.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    for s, _, _ in rows:
+        (tmp_path / "raw" / "device" / "board_b" / s).mkdir(parents=True)
+    cfg["eval"] = cfg["eval"] | {"board": {"manifest": "b.csv", "pcm_shift": 13}}
+    vad = np.zeros(200, dtype=bool)
+    vad[50:80] = True
+    monkeypatch.setattr(wake_eval, "session_features", lambda *_: (np.zeros((200, BANDS), np.float32), vad))
+    model = Tcn(BANDS, kernel=3, channels=4, dilations=[1, 2]).eval()
+    paths = {"manifests": tmp_path, "raw": tmp_path / "raw"}
+    mean, std = np.zeros(BANDS, np.float32), np.ones(BANDS, np.float32)
+    results = wake_eval.board(model, mean, std, cfg, paths, 0.5, "cpu", frozenset({"s2"}))
+    assert [(r.session, r.kind) for r in results] == [("s1", "wake"), ("s3", "neg")]

@@ -1,6 +1,7 @@
 """Wake split: voices follow their speaker's role, clones of speakerless corpora train, negatives never say the wake
 word, test_neg comes only from its corpora less the speakers moved whole into val_neg, train_neg stops at its hours,
-and the extract's clips of the word join the train positives; a build's items get their clip's median F0 once."""
+and the extract's clips of the word join the train positives; a build's items get their clip's median F0 once; the
+owner's board sessions saying the word are cut into real positives that end where the word does."""
 
 from __future__ import annotations
 
@@ -138,7 +139,8 @@ def test_simulate_links_a_twin_build_instead_of_running_it_again(tmp_path, monke
     (built / "manifest.yaml").write_text(data.yaml.safe_dump(manifest), encoding="utf-8")
     monkeypatch.setattr(data.device, "build", lambda *a, **k: (_ for _ in ()).throw(AssertionError("simulated")))
     paths = {"splits": tmp_path / "splits", "processed": tmp_path / "processed", "raw": tmp_path, "interim": tmp_path}
-    data.simulate(cfg | {"simulate": {"split": "v2", "workers": 1, "repeats": {}}}, paths)
+    unboarded = cfg["eval"] | {"board": cfg["eval"]["board"] | {"train": []}}
+    data.simulate(cfg | {"simulate": {"split": "v2", "workers": 1, "repeats": {}}, "eval": unboarded}, paths)
     linked = tmp_path / "processed" / "wake" / "v2" / "val_pos" / "shard_00000.features.npy"
     assert linked.stat().st_ino == (built / "shard_00000.features.npy").stat().st_ino
 
@@ -300,3 +302,59 @@ def test_hard_negatives_drawn_after_val_add_to_train_and_keep_every_earlier_draw
     assert more["val_hard.txt"] == base["val_hard.txt"] and len(base["train_hard.txt"]) == 1
     assert {r.item for r in base["train_hard.txt"]} < {r.item for r in more["train_hard.txt"]}
     assert len(more["train_hard.txt"]) == 2
+
+
+def board_manifest(folder: Path, rows: list[tuple[str, str, int, str]]) -> dict:
+    """A board manifest b.csv of (session, kind, pcm_shift, prompt) rows on board_b, and eval.board pointing at it."""
+    lines = ["session,board,pcm_shift,kind,prompt"] + [f"{s},board_b,{p},{k},{t}" for s, k, p, t in rows]
+    (folder / "b.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return {"manifest": "b.csv", "pcm_shift": 13}
+
+
+def test_board_rows_take_only_wake_sessions_saying_the_word_at_the_products_shift(tmp_path: Path) -> None:
+    cfg = load_yaml(CONFIG) | {"word": "vừng ơi"}
+    rows = [("s1", "wake", 13, "Vừng ơi!"), ("s2", "wake", 13, "vừng ơi giọng nhỏ"), ("s3", "wake", 13, "trợ lý")]
+    rows += [("s4", "wake", 16, "vừng ơi"), ("s5", "neg", 13, "mừng ơi | vừng")]
+    board, paths = board_manifest(tmp_path, rows), {"manifests": tmp_path}
+    cfg["eval"] = cfg["eval"] | {"board": board | {"train": ["s2", "s1"]}}
+    assert [r["session"] for r in data.board_rows(cfg, paths)] == ["s1", "s2"]
+    for wrong, refusal in (("s3", "no wake session"), ("s5", "no wake session"), ("s4", "pcm_shift"), ("s9", "b.csv")):
+        cfg["eval"]["board"]["train"] = [wrong]
+        with pytest.raises(ValueError, match=refusal):
+            data.board_rows(cfg, paths)
+    cfg["eval"]["board"]["train"] = []
+    assert data.board_rows(cfg, paths) == []
+
+
+def test_a_board_utterance_ends_after_its_last_hop_near_its_loudest() -> None:
+    clean = np.zeros((130, grid.HOP_SAMPLES), dtype=np.int16)
+    vad = np.zeros(130, dtype=bool)
+    clean[20:40], clean[40:44], clean[44:50] = 8000, 200, 20
+    vad[20:60] = True
+    clean[100:110], vad[100:125] = 3000, True
+    assert data.word_spans(clean, vad, 40.0) == [(20, 44), (100, 110)]
+    assert data.word_spans(clean, vad, 20.0) == [(20, 40), (100, 110)]
+
+
+def test_the_board_cut_labels_each_utterance_at_its_word_end_and_records_its_sessions(tmp_path, monkeypatch) -> None:
+    cfg = load_yaml(CONFIG) | {"word": "vừng ơi"}
+    board = board_manifest(tmp_path, [("s1", "wake", 13, "vừng ơi"), ("s2", "wake", 13, "vừng ơi")])
+    cfg["eval"] = cfg["eval"] | {"board": board | {"train": ["s1", "s2"]}}
+    paths = {"manifests": tmp_path, "raw": tmp_path / "raw"}
+
+    def chain(session: Path, chain_cfg, mel) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        hops = 120 if session.name == "s1" else 90
+        clean, figures = np.zeros((hops, grid.HOP_SAMPLES), np.int16), np.zeros((hops, 3), np.int8)
+        clean[20:40], figures[20:60, 0] = 8000, 1
+        return clean, figures, np.full((hops, 4), -8.0, np.float32)
+
+    monkeypatch.setattr(data, "session_chain", chain)
+    out = tmp_path / data.BOARD_SET
+    assert data.cut_board(cfg, paths, out).endswith("2 utterances of 2 sessions")
+    (shard,) = data.load_set(out, True, (2, 3), "float16")
+    assert [(i["item"], i["origin"]) for i in shard.items] == [("board/s1#0", "board"), ("board/s2#0", "board")]
+    assert np.flatnonzero(shard.labels).tolist() == [38, 39, 40, 41, 42, 158, 159, 160, 161, 162]
+    rows, device_cfg, dtype = data.board_rows(cfg, paths), load_device(cfg["features"]), cfg["simulate"]["train_dtype"]
+    assert data.board_built_as(out, device_cfg, rows, cfg["split"]["end_below_peak_db"], dtype)
+    assert not data.board_built_as(out, device_cfg, rows[:1], cfg["split"]["end_below_peak_db"], dtype)
+    assert not data.board_built_as(out, device_cfg, rows, 30.0, dtype)

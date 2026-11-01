@@ -26,7 +26,16 @@ from srpipe.core.seed import seed_everything
 from srpipe.generated import grid
 from srpipe.lang import g2p
 from srpipe.tasks.wake import CONFIG
-from srpipe.tasks.wake.data import F0_TABLE, Shard, label_hops, load_set, sentence_units
+from srpipe.tasks.wake.data import (
+    BOARD_SET,
+    F0_TABLE,
+    Shard,
+    board_built_as,
+    board_rows,
+    label_hops,
+    load_set,
+    sentence_units,
+)
 from srpipe.tasks.wake.eval import checkpoint, operating_point, sweep
 from srpipe.tasks.wake.model.tcn import Tcn
 
@@ -97,7 +106,7 @@ class Windows:
         self.hard_items = [(k, i) for k, s in enumerate(self.hard) for i in s.items]
         balance = self.cfg.get("f0_balance") if f0_hz is not None else None
         real_items = [i["item"] for s in positives for i in s.items if i["origin"] != "synth"]
-        self.real_p = pitch_weights([f0_hz[k] for k in real_items], balance) if balance and self.real else None
+        self.real_p = pitch_weights([f0_hz.get(k) for k in real_items], balance) if balance and self.real else None
         hard_f0 = [f0_hz[i["item"]] for _, i in self.hard_items] if balance else []
         self.hard_p = pitch_weights(hard_f0, balance) if hard_f0 else None
         self.onsets = [(k, i["frame_offset"] + i["speech_frames"][0]) for k, s in enumerate(negatives) for i in s.items]
@@ -264,7 +273,8 @@ def train(
     schedule = torch.optim.lr_scheduler.LambdaLR(
         optimiser, lambda step: final + (1 - final) * 0.5 * (1 + math.cos(math.pi * step / spec["steps"]))
     )
-    windows = Windows(sets["train_pos"], sets["train_neg"], cfg, rng, sets.get("train_hard"), f0_hz)
+    positives = sets["train_pos"] + sets.get(BOARD_SET, [])
+    windows = Windows(positives, sets["train_neg"], cfg, rng, sets.get("train_hard"), f0_hz)
     mean_t, std_t = torch.tensor(mean, device=device)[:, None], torch.tensor(std, device=device)[:, None]
     history, losses, side = [], [], []
     print(coverage(cfg, windows) + (side_coverage(cfg, sentences) if sentences else ""), flush=True)
@@ -352,6 +362,11 @@ def main(argv: list[str] | None = None) -> int:
         for name, (positive, dtype) in SETS.items()
         if name not in OPTIONAL or (root / name).exists()
     }
+    if rows := board_rows(cfg, paths):
+        board, dtype = root / BOARD_SET, cfg["simulate"]["train_dtype"]
+        if not board_built_as(board, device_of(cfg), rows, cfg["split"]["end_below_peak_db"], dtype):
+            raise FileNotFoundError(f"{board} is no cut of eval.board.train's sessions as cfg asks: make wake-features")
+        sets[BOARD_SET] = load_set(board, True, around, dtype, resident=True)
     split_files = sorted((paths["splits"] / "wake" / cfg["train"]["split"]).glob("*.txt"))
     units = None
     if cfg["train"].get("aux", {}).get("weight", 0) > 0:
