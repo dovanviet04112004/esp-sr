@@ -895,3 +895,22 @@ nào để chấm.
   thức, nên bị che khỏi mất mát.
 - Nhãn mẩu TTS tràn qua cuối mẩu ở 226/1024 mẩu của bốn shard `train_pos`. Phần tràn rơi vào nền đầu mẩu kế, như nền
   sau từ ngoài đời, nên giữ.
+
+**Học phiên giọng cao, to; cắt lại phiên board; nhân dữ liệu** (01/11 tối). Mọi lượt dưới chấm bằng chuỗi ấm
+(`python -m srpipe.tasks.wake.eval board`, `python -m srpipe.tasks.wake.quant board`), trên các phiên không học: 35 đoạn
+"vừng ơi" (`20261031_home_004`, `005`, `20261101_home_008`), 64 phiên khác (1,04 giờ).
+
+| Lượt | Khác lượt trước | `val` bắt | `test` báo nhầm/giờ | Từ đánh thức | Thức ở phiên khác |
+|---|---|---|---|---|---|
+| 4: `c6e0527-dirty_4cd687`, `percentile` 910‰ int8 | (đang trên board tới 19:50) | 85,3% | 5,54 | 32 / 35 | 1 |
+| 5: `59fb21e-dirty_fc7f5a`, float 0,915 | + phiên cao, to `home_012`, cắt một lượt | 82,4% | 4,81 | 27 / 35 | 2 |
+| 6: `528604f-dirty_b4b1a4`, `percentile` 800‰ int8 | cắt hai lượt, bỏ đoạn rác, che đoạn dài, nhân dữ liệu | 88,2% | 5,69 | 32 / 35 | 1 |
+
+- Lượt 4 trên phiên giọng cao, to (chưa học nó), int8 910‰: 3/14 đoạn qua ngưỡng, nhiều đoạn ở 0,85–0,92.
+- Lượt 5 tụt vì học phiên cao, to bằng cách cắt cũ: các đoạn tiếng thở giữa phiên thành mẫu dương.
+- Lượt 6 bắt giọng TTS không học tốt hơn (88,2% so với 85,3%), báo nhầm `test` cao hơn chút (5,69 so với 5,54), phiên của
+  chủ repo ngang lượt 4. Không còn phiên cao, to nào giữ riêng để chấm 🔬.
+- Hàng `percentile` 800‰ của lượt 6 nạp lên board B lúc 19:50, cùng firmware ADR-0041, NVS 800 / 300 / 10 / 65 535.
+- `make listen-unit` (kiểm firmware trước khi nạp) đã xoá ba ngưỡng lệnh trong NVS và đặt danh sách người nói về kiểm
+  giọng tắt. Ngưỡng đặt lại bằng console; danh sách bật kiểm giọng gửi lại qua `make speakers`, giữ trên broker cho tới khi
+  board vào lại mạng. Lần sau chạy `make nvs-save` trước app thử.
