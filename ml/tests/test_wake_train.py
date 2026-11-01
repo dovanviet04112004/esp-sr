@@ -321,7 +321,7 @@ def test_a_wake_session_for_another_word_is_scored_as_a_negative() -> None:
     assert wake_eval.session_kind("cmd", "yes", corpus.sounds("yes")) == "wake"
 
 
-def test_real_positives_without_a_pitch_are_drawn_evenly_under_pitch_balance(tmp_path: Path) -> None:
+def test_board_items_without_a_pitch_are_drawn_evenly_under_pitch_balance(tmp_path: Path) -> None:
     rng = np.random.default_rng(11)
     cfg = tiny_cfg()
     cfg["train"] |= {"f0_balance": {"median_hz": 167.0, "spread_st": 3.0, "max_weight": 5.0}, "real_share": 0.5}
@@ -329,8 +329,10 @@ def test_real_positives_without_a_pitch_are_drawn_evenly_under_pitch_balance(tmp
     tts = data.load_set(processed(tmp_path / "t", [(60, 20, 40)] * 4, rng, True, "synth"), True, around, "float16")
     board = data.load_set(processed(tmp_path / "b", [(60, 20, 40)] * 3, rng, True, "board"), True, around, "float16")
     neg = data.load_set(processed(tmp_path / "n", [(60, 0, 60)] * 4, rng, False), False, around, "float16")
-    windows = train.Windows(tts + board, neg, cfg, np.random.default_rng(12), f0_hz={"elsewhere": 120.0})
+    hard = data.load_set(processed(tmp_path / "h", [(60, 20, 40)] * 2, rng, False, "board"), False, around, "float16")
+    windows = train.Windows(tts + board, neg, cfg, np.random.default_rng(12), hard, f0_hz={"elsewhere": 120.0})
     assert len(windows.real) == 3 and np.allclose(windows.real_p, 1 / 3)
+    assert len(windows.hard_items) == 2 and np.allclose(windows.hard_p, 1 / 2)
 
 
 def test_the_board_score_leaves_out_the_sessions_a_run_learnt(tmp_path: Path, monkeypatch) -> None:

@@ -311,19 +311,20 @@ def board_manifest(folder: Path, rows: list[tuple[str, str, int, str]]) -> dict:
     return {"manifest": "b.csv", "pcm_shift": 13}
 
 
-def test_board_rows_take_only_wake_sessions_saying_the_word_at_the_products_shift(tmp_path: Path) -> None:
+def test_board_rows_sort_the_products_sessions_by_whether_they_say_the_word(tmp_path: Path) -> None:
     cfg = load_yaml(CONFIG) | {"word": "vừng ơi"}
     rows = [("s1", "wake", 13, "Vừng ơi!"), ("s2", "wake", 13, "vừng ơi giọng nhỏ"), ("s3", "wake", 13, "trợ lý")]
-    rows += [("s4", "wake", 16, "vừng ơi"), ("s5", "neg", 13, "mừng ơi | vừng")]
+    rows += [("s4", "wake", 16, "vừng ơi"), ("s5", "neg", 13, "mừng ơi | vừng"), ("s6", "cmd", 13, "dừng lại")]
     board, paths = board_manifest(tmp_path, rows), {"manifests": tmp_path}
-    cfg["eval"] = cfg["eval"] | {"board": board | {"train": ["s2", "s1"]}}
-    assert [r["session"] for r in data.board_rows(cfg, paths)] == ["s1", "s2"]
-    for wrong, refusal in (("s3", "no wake session"), ("s5", "no wake session"), ("s4", "pcm_shift"), ("s9", "b.csv")):
+    cfg["eval"] = cfg["eval"] | {"board": board | {"train": ["s6", "s5", "s3", "s2", "s1"]}}
+    sorted_rows = {name: [r["session"] for r in rows] for name, rows in data.board_rows(cfg, paths).items()}
+    assert sorted_rows == {data.BOARD_SET: ["s1", "s2"], data.BOARD_HARD_SET: ["s3", "s5", "s6"]}
+    for wrong, refusal in (("s4", "pcm_shift"), ("s9", "b.csv")):
         cfg["eval"]["board"]["train"] = [wrong]
         with pytest.raises(ValueError, match=refusal):
             data.board_rows(cfg, paths)
     cfg["eval"]["board"]["train"] = []
-    assert data.board_rows(cfg, paths) == []
+    assert data.board_rows(cfg, paths) == {}
 
 
 def test_a_board_utterance_of_a_words_length_ends_where_its_vads_hangover_began() -> None:
@@ -349,12 +350,12 @@ def test_the_board_cut_labels_each_utterance_at_its_word_end_and_records_its_ses
 
     monkeypatch.setattr(data, "session_chain", chain)
     out = tmp_path / data.BOARD_SET
-    assert data.cut_board(cfg, paths, out).endswith("2 utterances of 2 sessions, 0 outside 0.4-2.0 s")
+    rows = data.board_rows(cfg, paths)[data.BOARD_SET]
+    assert data.cut_board(cfg, paths, out, rows).endswith("2 utterances of 2 sessions, 0 outside 0.4-2.0 s")
     (shard,) = data.load_set(out, True, (2, 3), "float16")
     assert [(i["item"], i["origin"]) for i in shard.items] == [("board/s1#0", "board"), ("board/s2#0", "board")]
     assert np.flatnonzero(shard.labels).tolist() == [38, 39, 40, 41, 42, 158, 159, 160, 161, 162]
-    rows, device_cfg, dtype = data.board_rows(cfg, paths), load_device(cfg["features"]), cfg["simulate"]["train_dtype"]
-    board = cfg["split"]["board"]
+    device_cfg, dtype, board = load_device(cfg["features"]), cfg["simulate"]["train_dtype"], cfg["split"]["board"]
     assert data.board_built_as(out, device_cfg, rows, board, dtype)
     assert not data.board_built_as(out, device_cfg, rows[:1], board, dtype)
     assert not data.board_built_as(out, device_cfg, rows, board | {"max_s": 1.0}, dtype)

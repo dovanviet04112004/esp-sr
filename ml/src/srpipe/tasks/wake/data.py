@@ -38,7 +38,8 @@ PUBLIC, SYNTH, BOARD = "public", "synth", "board"
 SPEECH_COMMANDS_STREAM = 3
 NEGATIVES = ("train_neg.txt", "val_neg.txt", "test_neg.txt")
 F0_TABLE = "f0_hz.json"  # beside a build: each item's median F0, null if unvoiced
-BOARD_SET = "train_board"  # eval.board.train's sessions, cut as one shard
+BOARD_SET = "train_board"  # eval.board.train's sessions saying the word
+BOARD_HARD_SET = "train_board_hard"  # its other sessions: hard negatives
 BOARD_SHARD = "shard_00000"
 HANGOVER_HOPS = hangover_hops(afe.VAD_HANGOVER_MS)
 HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
@@ -421,13 +422,14 @@ def session_chain(session: Path, chain_cfg: ChainConfig, mel: Mel) -> tuple[np.n
     return device.listen(np.stack([c[:n] for c in channels], axis=1), chain_cfg, mel)
 
 
-def board_rows(cfg: dict, paths: dict[str, Path]) -> list[dict]:
-    """The manifest rows of the sessions eval.board.train gives to train (KEHOACH 1.3); one missing from the manifest,
-    at another pcm_shift than the product's, or no wake session saying the word, is refused."""
+def board_rows(cfg: dict, paths: dict[str, Path]) -> dict[str, list[dict]]:
+    """The manifest rows of the sessions eval.board.train gives to train (KEHOACH 1.3, 3.11) by the build they feed:
+    BOARD_SET the wake sessions saying the word, BOARD_HARD_SET the others; a session missing from the manifest or at
+    another pcm_shift than the product's is refused."""
     spec, word = cfg["eval"]["board"], corpus.sounds(cfg["word"])
     wanted = spec.get("train", [])
     if not wanted:
-        return []
+        return {}
     with (paths["manifests"] / spec["manifest"]).open(encoding="utf-8") as f:
         rows = [r for r in csv.DictReader(f) if r["session"] in wanted]
     if missing := sorted(set(wanted) - {r["session"] for r in rows}):
@@ -435,9 +437,10 @@ def board_rows(cfg: dict, paths: dict[str, Path]) -> list[dict]:
     if shifts := sorted({r["pcm_shift"] for r in rows} - {str(spec["pcm_shift"])}):
         raise ValueError(f"train sessions at pcm_shift {shifts}; the product keeps {spec['pcm_shift']}")
     saying = {r["session"] for r in rows if r["kind"] == "wake" and corpus.says(corpus.sounds(r["prompt"]), word)}
-    if other := [r["session"] for r in rows if r["session"] not in saying]:
-        raise ValueError(f"{', '.join(other)}: no wake session saying {cfg['word']!r}")
-    return rows
+    return {
+        BOARD_SET: [r for r in rows if r["session"] in saying],
+        BOARD_HARD_SET: [r for r in rows if r["session"] not in saying],
+    }
 
 
 def word_spans(vad: np.ndarray, hangover: int, run_hops: tuple[int, int]) -> dict[int, tuple[int, int]]:
@@ -466,11 +469,10 @@ def board_built_as(out: Path, device_cfg: dict, rows: list[dict], board: dict, d
     )
 
 
-def cut_board(cfg: dict, paths: dict[str, Path], out: Path) -> str:
-    """eval.board.train's sessions as one shard of train's dtype, each through the product's chain and log-mel, every
-    utterance of its vad lasting split.board's min_s to max_s a real positive ending as word_spans ends it
-    (KEHOACH 1.3, 3.11)."""
-    rows, device_cfg, board = board_rows(cfg, paths), load_device(cfg["features"]), cfg["split"]["board"]
+def cut_board(cfg: dict, paths: dict[str, Path], out: Path, rows: list[dict]) -> str:
+    """Board sessions as one shard of train's dtype, each through the product's chain and log-mel, every utterance of
+    its vad lasting split.board's min_s to max_s an item ending as word_spans ends it (KEHOACH 1.3, 3.11)."""
+    device_cfg, board = load_device(cfg["features"]), cfg["split"]["board"]
     run_hops = (round(board["min_s"] * HOPS_PER_S), round(board["max_s"] * HOPS_PER_S))
     chain_cfg = ChainConfig(balance_gains=device.load_microphones(device_cfg["microphone"]).gains)
     mel = Mel(MelConfig(**device_cfg["features"]))
@@ -516,7 +518,7 @@ def simulate(cfg: dict, paths: dict[str, Path]) -> None:
     """Every file of the split through the board simulation into processed/wake/<split>/<file>, smallest first,
     each as many passes as simulate.repeats asks, train's features stored as simulate.train_dtype and the rest in
     float32, no clean samples kept; a file already built the same way is left as it is. Then each file simulate.f0
-    lists gets its F0_TABLE, and eval.board.train's sessions, when it lists some, their cut as BOARD_SET."""
+    lists gets its F0_TABLE, and eval.board.train's sessions their cuts, as board_rows sorts them."""
     spec = cfg["simulate"]
     device_cfg = load_device(cfg["features"])
     for split_file in sorted((paths["splits"] / "wake" / spec["split"]).glob("*.txt"), key=lambda f: f.stat().st_size):
@@ -547,10 +549,12 @@ def simulate(cfg: dict, paths: dict[str, Path]) -> None:
     for name in spec.get("f0", {}).get("sets", []):
         folder = paths["processed"] / "wake" / spec["split"] / name
         print(f0_table(folder, roots, spec["f0"], spec["workers"]), flush=True)
-    if rows := board_rows(cfg, paths):
-        out = paths["processed"] / "wake" / spec["split"] / BOARD_SET
-        built = board_built_as(out, device_cfg, rows, cfg["split"]["board"], spec.get("train_dtype", "float32"))
-        print(f"{out}: already built" if built else cut_board(cfg, paths, out), flush=True)
+    for name, rows in board_rows(cfg, paths).items():
+        out, dtype = paths["processed"] / "wake" / spec["split"] / name, spec.get("train_dtype", "float32")
+        if rows and board_built_as(out, device_cfg, rows, cfg["split"]["board"], dtype):
+            print(f"{out}: already built", flush=True)
+        elif rows:
+            print(cut_board(cfg, paths, out, rows), flush=True)
 
 
 def real_positives(cfg: dict, raw: Path) -> dict[str, float]:
