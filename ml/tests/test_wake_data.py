@@ -306,7 +306,7 @@ def test_hard_negatives_drawn_after_val_add_to_train_and_keep_every_earlier_draw
 
 def board_manifest(folder: Path, rows: list[tuple[str, str, int, str]]) -> dict:
     """A board manifest b.csv of (session, kind, pcm_shift, prompt) rows on board_b, and eval.board pointing at it."""
-    lines = ["session,board,pcm_shift,kind,prompt"] + [f"{s},board_b,{p},{k},{t}" for s, k, p, t in rows]
+    lines = ["session,board,pcm_shift,kind,prompt,sha256"] + [f"{s},board_b,{p},{k},{t},{s}00" for s, k, p, t in rows]
     (folder / "b.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return {"manifest": "b.csv", "pcm_shift": 13}
 
@@ -327,13 +327,48 @@ def test_board_rows_sort_the_products_sessions_by_whether_they_say_the_word(tmp_
     assert data.board_rows(cfg, paths) == {}
 
 
-def test_a_board_utterance_of_a_words_length_ends_where_its_vads_hangover_began() -> None:
-    vad = np.zeros(200, dtype=bool)
-    vad[20:45], vad[55:60], vad[100:125], vad[150:168] = True, True, True, True
-    assert data.word_spans(vad, 15, (16, 100)) == {0: (20, 45), 1: (100, 110), 2: (150, 153)}
-    assert data.word_spans(vad, 40, (16, 100)) == {0: (20, 21), 1: (100, 101), 2: (150, 151)}
-    assert data.word_spans(vad, 15, (20, 30)) == {1: (100, 110)}
+def test_a_board_word_ends_at_its_hangover_and_other_runs_are_left_out_or_masked() -> None:
+    vad = np.zeros(440, dtype=bool)
+    x = np.full((440, 4), -9.0, np.float32)
+    runs = ((20, 59, 0.0), (100, 124, 0.5), (160, 185, -6.0), (220, 330, 0.2), (370, 380, 0.0), (420, 439, 0.1))
+    for first, last, loud in runs:
+        vad[first : last + 1], x[first : last + 1] = True, loud
+    words = data.run_items("s", vad, x, 1000, (16, 100), 3.0)
+    assert [(i["item"], i["speech_frames"], bool(i.get("ignore"))) for i in words] == [
+        ("board/s#0", [20, 45], False),
+        ("board/s#1", [100, 110], False),
+        ("board/s#3", [220, 331], True),
+        ("board/s#4", [420, 440], True),
+    ]
+    assert {i["frame_offset"] for i in words} == {1000} and {i["n_frames"] for i in words} == {440}
+    unsorted = data.run_items("s", vad, x, 0, (16, 100), None)
+    assert [i["item"] for i in unsorted] == ["board/s#0", "board/s#1", "board/s#2"]
     assert data.HANGOVER_HOPS == 15
+
+
+def test_a_masked_run_is_labelled_ignored_and_a_word_round_its_end(tmp_path: Path) -> None:
+    folder = tmp_path / "board"
+    folder.mkdir()
+    np.save(folder / "shard_00000.features.npy", np.zeros((120, 4), np.float16))
+    items = [
+        {"item": "board/s#0", "origin": "board", "frame_offset": 0, "n_frames": 120, "speech_frames": [20, 40]},
+        {
+            "item": "board/s#1",
+            "origin": "board",
+            "frame_offset": 0,
+            "n_frames": 120,
+            "speech_frames": [70, 100],
+            "ignore": True,
+        },
+    ]
+    (folder / "shard_00000.items.jsonl").write_text("".join(json.dumps(i) + "\n" for i in items), encoding="utf-8")
+    listed = {"shard_00000.features.npy": "-", "shard_00000.items.jsonl": "-"}
+    (folder / "manifest.yaml").write_text(yaml.safe_dump({"sha256": listed}), encoding="utf-8")
+    (shard,) = data.load_set(folder, True, (2, 3), "float16")
+    assert np.flatnonzero(shard.labels == 1).tolist() == [38, 39, 40, 41, 42]
+    assert np.flatnonzero(shard.labels == data.IGNORED).tolist() == list(range(70, 100))
+    (negative,) = data.load_set(folder, False, (2, 3), "float16")
+    assert not negative.labels.any()
 
 
 def test_the_board_cut_labels_each_utterance_at_its_word_end_and_records_its_sessions(tmp_path, monkeypatch) -> None:
@@ -351,7 +386,7 @@ def test_the_board_cut_labels_each_utterance_at_its_word_end_and_records_its_ses
     monkeypatch.setattr(data, "session_chain", chain)
     out = tmp_path / data.BOARD_SET
     rows = data.board_rows(cfg, paths)[data.BOARD_SET]
-    assert data.cut_board(cfg, paths, out, rows).endswith("2 utterances of 2 sessions, 0 outside 0.4-2.0 s")
+    assert data.cut_board(cfg, paths, out, rows, True).endswith("2 of 2 runs of 2 sessions kept, 0 masked, 0 left out")
     (shard,) = data.load_set(out, True, (2, 3), "float16")
     assert [(i["item"], i["origin"]) for i in shard.items] == [("board/s1#0", "board"), ("board/s2#0", "board")]
     assert np.flatnonzero(shard.labels).tolist() == [38, 39, 40, 41, 42, 158, 159, 160, 161, 162]
@@ -359,4 +394,5 @@ def test_the_board_cut_labels_each_utterance_at_its_word_end_and_records_its_ses
     assert data.board_built_as(out, device_cfg, rows, board, dtype)
     assert not data.board_built_as(out, device_cfg, rows[:1], board, dtype)
     assert not data.board_built_as(out, device_cfg, rows, board | {"max_s": 1.0}, dtype)
+    assert not data.board_built_as(out, device_cfg, [rows[0], rows[1] | {"sha256": "other"}], board, dtype)
     assert not data.board_built_as(out, device_cfg, rows, board, "float32")

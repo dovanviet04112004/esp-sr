@@ -2,7 +2,8 @@
 the whole label past the warm-up, a louder word window equal to the log-mel of louder samples, pitch weights that draw
 words near the target F0, sentences for the CTC side task, a tiny run that keeps its last weights and saves each
 evaluated one, a board table whose rows keep their columns, a board score that leaves out the sessions a run learnt,
-real positives without a pitch drawn evenly, and a run scored with the network it was trained as."""
+real positives without a pitch drawn evenly, masked hops left out of the loss, and a run scored with the network it
+was trained as."""
 
 from __future__ import annotations
 
@@ -351,3 +352,25 @@ def test_the_board_score_leaves_out_the_sessions_a_run_learnt(tmp_path: Path, mo
     mean, std = np.zeros(BANDS, np.float32), np.ones(BANDS, np.float32)
     results = wake_eval.board(model, mean, std, cfg, paths, 0.5, "cpu", frozenset({"s2"}))
     assert [(r.session, r.kind) for r in results] == [("s1", "wake"), ("s3", "neg")]
+
+
+def test_masked_hops_hold_no_word_and_add_nothing_to_the_loss(tmp_path: Path) -> None:
+    rng = np.random.default_rng(13)
+    cfg = tiny_cfg()
+    around = data.label_hops(cfg["train"]["label_s"])
+    folder = processed(tmp_path / "b", [(60, 20, 40)] * 3, rng, True, "board")
+    listing = folder / "shard_00000.items.jsonl"
+    items = [json.loads(line) for line in listing.read_text().splitlines()]
+    items[1] |= {"ignore": True}
+    listing.write_text("".join(json.dumps(i) + "\n" for i in items))
+    board = data.load_set(folder, True, around, "float16")
+    windows = train.Windows(board, board, cfg, np.random.default_rng(14))
+    assert len(windows.ends) == 2 and (board[0].labels == data.IGNORED).sum() == 20
+    sets = {
+        "train_pos": board,
+        "train_neg": data.load_set(processed(tmp_path / "n", [(60, 0, 60)] * 4, rng, False), False, around, "float16"),
+        "val_pos": data.load_set(processed(tmp_path / "vp", [(60, 20, 40)] * 2, rng, True), True, around, "float32"),
+        "val_neg": data.load_set(processed(tmp_path / "vn", [(60, 0, 60)] * 2, rng, False), False, around, "float32"),
+    }
+    _, _, history = train.train(cfg, sets, "cpu")
+    assert all(np.isfinite(row["loss"]) for row in history)

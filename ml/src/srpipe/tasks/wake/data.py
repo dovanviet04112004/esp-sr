@@ -28,7 +28,7 @@ from srpipe.core.config import apply_overrides, data_paths, load_device, load_ya
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.afe.vad import hangover_hops
 from srpipe.dsp.spec.mel import Mel, MelConfig
-from srpipe.generated import afe, array, grid, lang_vi
+from srpipe.generated import afe, array, grid, lang_vi, listen
 from srpipe.lang import g2p
 from srpipe.lang.normalize import LangError, normalize
 from srpipe.scenes import device, room
@@ -41,6 +41,8 @@ F0_TABLE = "f0_hz.json"  # beside a build: each item's median F0, null if unvoic
 BOARD_SET = "train_board"  # eval.board.train's sessions saying the word
 BOARD_HARD_SET = "train_board_hard"  # its other sessions: hard negatives
 BOARD_SHARD = "shard_00000"
+BOARD_CHAIN = "warm"  # chain run over a session twice, second pass kept
+IGNORED = 2  # a label no loss reads: the hop may hold the word
 HANGOVER_HOPS = hangover_hops(afe.VAD_HANGOVER_MS)
 HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
 
@@ -78,7 +80,10 @@ def load_set(folder: Path, positive: bool, around: tuple[int, int], dtype: str, 
         items = [json.loads(line) for line in listing.read_text(encoding="utf-8").splitlines()]
         labels = np.zeros(len(features), dtype=np.uint8)
         if positive:
-            for item in items:
+            for item in (i for i in items if i.get("ignore")):
+                first, stop = (item["frame_offset"] + f for f in item["speech_frames"])
+                labels[first:stop] = IGNORED
+            for item in (i for i in items if not i.get("ignore")):
                 end = item["frame_offset"] + item["speech_frames"][1]
                 labels[max(0, end - around[0]) : end + around[1]] = 1
         shards.append(Shard(features, labels, items, positive))
@@ -416,10 +421,12 @@ def f0_table(folder: Path, roots: dict[str, Path], spec: dict, workers: int) -> 
 
 
 def session_chain(session: Path, chain_cfg: ChainConfig, mel: Mel) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """device.listen over the microphones of a board session, cut to a common whole number of hops."""
+    """device.listen over the microphones of a board session, cut to a common whole number of hops, warmed by a pass
+    over the same session first, as a board that has long been running hears it (KEHOACH 3.11)."""
     channels = [sf.read(session / f"ch{m}.wav", dtype="int16")[0] for m in range(array.N_MICS)]
     n = min(len(c) for c in channels) // grid.HOP_SAMPLES * grid.HOP_SAMPLES
-    return device.listen(np.stack([c[:n] for c in channels], axis=1), chain_cfg, mel)
+    pcm = np.stack([c[:n] for c in channels], axis=1)
+    return device.listen(pcm, chain_cfg, mel, warm=pcm)
 
 
 def board_rows(cfg: dict, paths: dict[str, Path]) -> dict[str, list[dict]]:
@@ -443,55 +450,65 @@ def board_rows(cfg: dict, paths: dict[str, Path]) -> dict[str, list[dict]]:
     }
 
 
-def word_spans(vad: np.ndarray, hangover: int, run_hops: tuple[int, int]) -> dict[int, tuple[int, int]]:
-    """[first, stop) hops of each utterance of vad by its index, only those whose run lasts run_hops' shortest to
-    longest, stopping where the hangover of hangover hops began: where the board's vad heard the speech stop
-    (KEHOACH 3.11)."""
+def run_items(
+    session: str, vad: np.ndarray, x: np.ndarray, offset: int, run_hops: tuple[int, int], below_nat: float | None
+) -> list[dict]:
+    """The items of a board session's vad runs at offset in its shard (KEHOACH 3.11). A run lasting run_hops' shortest
+    to longest, off the recording's last hop and, with below_nat, with its loudest log-mel hop no further than that
+    under the median run's, ends where its hangover of HANGOVER_HOPS began, where the board's vad heard the speech
+    stop. With below_nat, a longer run or one at the last hop is an ignored item, as it may hold the word; any other
+    run gives no item."""
     shortest, longest = run_hops
+    runs = device.utterances(vad)
+    loudest = [float(x[first : last + 1].max()) for first, last in runs]
+    median = float(np.median(loudest)) if runs else 0.0
+    items = []
+    for k, ((first, last), loud) in enumerate(zip(runs, loudest, strict=True)):
+        length, cut = last + 1 - first, last + 1 >= len(vad)
+        item = {"item": f"{BOARD}/{session}#{k}", "origin": BOARD, "frame_offset": offset, "n_frames": len(vad)}
+        if below_nat is not None and (length > longest or cut):
+            items.append(item | {"speech_frames": [first, last + 1], "ignore": True})
+        elif shortest <= length <= longest and not cut and (below_nat is None or loud >= median - below_nat):
+            items.append(item | {"speech_frames": [first, max(first + 1, last + 1 - HANGOVER_HOPS)]})
+    return items
+
+
+def board_cut(rows: list[dict], board: dict) -> dict:
+    """What a board cut is made of besides the device config and dtype: the sessions and their audio, split.board,
+    the chain's passes, the vad hangover and listen's utterance rules."""
     return {
-        k: (first, max(first + 1, last + 1 - hangover))
-        for k, (first, last) in enumerate(device.utterances(vad))
-        if shortest <= last + 1 - first <= longest
+        "sessions": [r["session"] for r in rows],
+        "audio_sha256": [r["sha256"] for r in rows],
+        "board": dict(board),
+        "chain": BOARD_CHAIN,
+        "hangover_hops": HANGOVER_HOPS,
+        "listen_hash": f"0x{listen.HASH:08x}",
     }
 
 
 def board_built_as(out: Path, device_cfg: dict, rows: list[dict], board: dict, dtype: str) -> bool:
-    """Whether out holds the cut of these sessions with this device config, split.board, vad hangover and dtype."""
+    """Whether out holds the cut of these sessions as board_cut, this device config and dtype make it."""
     if not (out / "manifest.yaml").exists():
         return False
     body = yaml.safe_load((out / "manifest.yaml").read_text(encoding="utf-8"))
-    same_cut = body["sessions"] == [r["session"] for r in rows] and body.get("board") == dict(board)
-    return (
-        body["config"] == device_cfg
-        and same_cut
-        and body.get("hangover_hops") == HANGOVER_HOPS
-        and body["dtype"] == dtype
-    )
+    same_cut = all(body.get(k) == v for k, v in board_cut(rows, board).items())
+    return body["config"] == device_cfg and same_cut and body["dtype"] == dtype
 
 
-def cut_board(cfg: dict, paths: dict[str, Path], out: Path, rows: list[dict]) -> str:
-    """Board sessions as one shard of train's dtype, each through the product's chain and log-mel, every utterance of
-    its vad lasting split.board's min_s to max_s an item ending as word_spans ends it (KEHOACH 1.3, 3.11)."""
+def cut_board(cfg: dict, paths: dict[str, Path], out: Path, rows: list[dict], positive: bool) -> str:
+    """Board sessions as one shard of train's dtype, each through the warmed chain and log-mel of session_chain, its
+    vad runs as run_items makes them: the words of sessions saying the wake word when positive, with
+    split.board.below_nat, else their runs (KEHOACH 1.3, 3.11)."""
     device_cfg, board = load_device(cfg["features"]), cfg["split"]["board"]
     run_hops = (round(board["min_s"] * HOPS_PER_S), round(board["max_s"] * HOPS_PER_S))
     chain_cfg = ChainConfig(balance_gains=device.load_microphones(device_cfg["microphone"]).gains)
     mel = Mel(MelConfig(**device_cfg["features"]))
-    features, items, offset, dropped = [], [], 0, 0
+    features, items, offset, runs = [], [], 0, 0
     for r in rows:
         _, figures, x = session_chain(paths["raw"] / "device" / r["board"] / r["session"], chain_cfg, mel)
         vad = figures[:, 0].astype(bool)
-        spans = word_spans(vad, HANGOVER_HOPS, run_hops)
-        dropped += len(device.utterances(vad)) - len(spans)
-        for k, (first, stop) in spans.items():
-            items.append(
-                {
-                    "item": f"{BOARD}/{r['session']}#{k}",
-                    "origin": BOARD,
-                    "frame_offset": offset,
-                    "n_frames": len(x),
-                    "speech_frames": [first, stop],
-                }
-            )
+        items += run_items(r["session"], vad, x, offset, run_hops, board["below_nat"] if positive else None)
+        runs += len(device.utterances(vad))
         features.append(x)
         offset += len(x)
     dtype = cfg["simulate"].get("train_dtype", "float32")
@@ -500,18 +517,12 @@ def cut_board(cfg: dict, paths: dict[str, Path], out: Path, rows: list[dict]) ->
     lines = "".join(json.dumps(i, ensure_ascii=False) + "\n" for i in items)
     (out / f"{BOARD_SHARD}.items.jsonl").write_text(lines, encoding="utf-8")
     names = [f"{BOARD_SHARD}.features.npy", f"{BOARD_SHARD}.items.jsonl"]
-    head = {
-        "config": device_cfg,
-        "sessions": [r["session"] for r in rows],
-        "board": dict(board),
-        "hangover_hops": HANGOVER_HOPS,
-        "dtype": dtype,
-        "sha256": {n: splits.sha256_of(out / n) for n in names},
-    }
+    head = {"config": device_cfg} | board_cut(rows, board) | {"dtype": dtype}
+    head["sha256"] = {n: splits.sha256_of(out / n) for n in names}
     (out / "manifest.yaml").write_text(yaml.safe_dump(head, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    return (
-        f"{out}: {len(items)} utterances of {len(rows)} sessions, {dropped} outside {board['min_s']}-{board['max_s']} s"
-    )
+    masked = sum(bool(i.get("ignore")) for i in items)
+    kept = len(items) - masked
+    return f"{out}: {kept} of {runs} runs of {len(rows)} sessions kept, {masked} masked, {runs - len(items)} left out"
 
 
 def simulate(cfg: dict, paths: dict[str, Path]) -> None:
@@ -554,7 +565,7 @@ def simulate(cfg: dict, paths: dict[str, Path]) -> None:
         if rows and board_built_as(out, device_cfg, rows, cfg["split"]["board"], dtype):
             print(f"{out}: already built", flush=True)
         elif rows:
-            print(cut_board(cfg, paths, out, rows), flush=True)
+            print(cut_board(cfg, paths, out, rows, name == BOARD_SET), flush=True)
 
 
 def real_positives(cfg: dict, raw: Path) -> dict[str, float]:

@@ -216,10 +216,15 @@ def diffuse_pair(u: np.ndarray, v: np.ndarray) -> np.ndarray:
     return np.stack([np.asarray(u, dtype=np.float64), sfft.irfft(mixed, size)[:n]])
 
 
-def listen(pcm: np.ndarray, chain_cfg: ChainConfig, mel: Mel) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def listen(
+    pcm: np.ndarray, chain_cfg: ChainConfig, mel: Mel, warm: np.ndarray | None = None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """The chain over interleaved int16 frames: clean int16 samples, per hop its vad, level_dbfs and gain_db as int8,
-    and per hop the log-mel of the clean samples (KEHOACH 3.11)."""
+    and per hop the log-mel of the clean samples (KEHOACH 3.11). With warm, the chain first runs over those frames and
+    drops what they give, so it meets pcm settled, as a board that has long been running does."""
     chain, stft = Chain("MM", chain_cfg), Stft()
+    for hop in warm.reshape(-1, HOP * array.N_MICS) if warm is not None else []:
+        chain.process(hop)
     hops = pcm.reshape(-1, HOP * array.N_MICS)
     clean = np.empty((len(hops), HOP), dtype=np.int16)
     figures = np.empty((len(hops), 3), dtype=np.int8)

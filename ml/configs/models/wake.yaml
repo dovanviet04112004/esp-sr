@@ -81,7 +81,9 @@ split:                             # E11-T11: data/splits/wake/<version> by pyth
                                    #   simulation labels a clip's end, and both kinds carry silence after the word
   board:                           # eval.board.train's vad runs kept as positives (KEHOACH 3.11)
     min_s: 0.4                     # shorter is a noise
-    max_s: 2.0                     # longer is other speech run on
+    max_s: 2.0                     # longer may be calls run together: masked from the loss
+    below_nat: 3.0                 # a run this far under its session's median loudest log-mel hop is a breath or a noise
+                                   #   (wake.md 12)
 simulate:                          # make wake-features: python -m srpipe.tasks.wake.data simulate (E4-T8)
   split: vung1
   workers: 12                      # each holds about 450 MB; more push a 10 GB WSL into swap

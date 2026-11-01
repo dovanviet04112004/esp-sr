@@ -30,6 +30,7 @@ from srpipe.tasks.wake.data import (
     BOARD_HARD_SET,
     BOARD_SET,
     F0_TABLE,
+    IGNORED,
     Shard,
     board_built_as,
     board_rows,
@@ -100,13 +101,14 @@ class Windows:
         width = self.cfg["window_hops"]
         if short := [len(s.features) for s in positives + negatives + self.hard if len(s.features) < width]:
             raise ValueError(f"a shard of {min(short)} hops is shorter than a {width}-hop window")
-        self.ends = [(k, i["frame_offset"] + i["speech_frames"][1]) for k, s in enumerate(positives) for i in s.items]
-        spoken = [i["origin"] != "synth" for s in positives for i in s.items]
+        words = [(k, i) for k, s in enumerate(positives) for i in s.items if not i.get("ignore")]
+        self.ends = [(k, i["frame_offset"] + i["speech_frames"][1]) for k, i in words]
+        spoken = [i["origin"] != "synth" for _, i in words]
         self.real = [e for e, r in zip(self.ends, spoken, strict=True) if r]
         self.synth = [e for e, r in zip(self.ends, spoken, strict=True) if not r]
-        self.hard_items = [(k, i) for k, s in enumerate(self.hard) for i in s.items]
+        self.hard_items = [(k, i) for k, s in enumerate(self.hard) for i in s.items if not i.get("ignore")]
         balance = self.cfg.get("f0_balance") if f0_hz is not None else None
-        real_items = [i["item"] for s in positives for i in s.items if i["origin"] != "synth"]
+        real_items = [i["item"] for _, i in words if i["origin"] != "synth"]
         self.real_p = pitch_weights([f0_hz.get(k) for k in real_items], balance) if balance and self.real else None
         hard_f0 = [f0_hz.get(i["item"]) for _, i in self.hard_items] if balance else []
         self.hard_p = pitch_weights(hard_f0, balance) if hard_f0 else None
@@ -288,8 +290,11 @@ def train(
         x = (torch.from_numpy(x.astype(np.float32)).to(device).transpose(1, 2) - mean_t) / std_t
         y = torch.from_numpy(y.astype(np.float32)).to(device)
         logits = model(x)[:, 0, spec["warmup_hops"] :]
-        target = y[:, spec["warmup_hops"] :] * (1.0 - spec["label_smoothing"]) + spec["label_smoothing"] / 2
-        loss = functional.binary_cross_entropy_with_logits(logits, target)
+        heard = y[:, spec["warmup_hops"] :]
+        learnt = (heard != IGNORED).float()
+        target = (heard == 1).float() * (1.0 - spec["label_smoothing"]) + spec["label_smoothing"] / 2
+        bce = functional.binary_cross_entropy_with_logits(logits, target, reduction="none")
+        loss = (bce * learnt).sum() / learnt.sum()
         if sentences:
             heard, lengths, targets, counts = sentences.batch()
             heard = (torch.from_numpy(heard.astype(np.float32)).to(device).transpose(1, 2) - mean_t) / std_t
