@@ -54,12 +54,17 @@ cao nhất 293‰; câu gần âm cao nhất 177‰; câu "vừng ơi" giọng c
    - lỗi của mạng `wake` vẫn để bước chạy hết phần sổ sách rồi mới trả lỗi;
    - phần còn lại của câu bị luồng đứt không mở cửa sổ, tới khi câu ấy chốt.
 
+6. **Thức lại không ra `WAKE`.** Máy đã ở `LENH` nên không có trạng thái mới để báo; chỉ lần chuyển `NGHE` → `LENH`
+   ra sự kiện `WAKE`. Thức lại vẫn dời cửa sổ về mốc mới và tính lại thời gian chờ, kèm một dòng log có bước và điểm. Điều
+   này thay phần "một `WAKE` mới" của ADR-0039 điểm 5. Chủ repo 01/11, thấy một chuỗi `WAKE` 0,48–0,58 khi gọi lại: "ẩn nó
+   đi".
+
 Không ghi lệnh gần nhất vào `REJECT`: `ai_engine_command_result_t` không mang nó, và đó là hợp đồng đã đóng băng ở
 `contract-v1` (KẾ HOẠCH §4.5.5).
 
 ## Hệ quả
 
-- "Vừng ơi" nói lại trong `LENH` với điểm từ 450‰ ra `WAKE` thay vì một chuỗi `REJECT`. Một câu lệnh có điểm `wake` từ
+- "Vừng ơi" nói lại trong `LENH` với điểm từ 450‰ là thức lại lặng lẽ, thay vì một chuỗi `REJECT`. Một câu lệnh có điểm `wake` từ
   450‰ sẽ thành thức lại và mất. Trên các phiên của chủ repo chưa câu nào như thế, nhưng giọng người khác chưa đo 🔬.
 - Hai lần từ chối liền là hết `LENH`: người nói phải gọi lại từ đánh thức.
 - Lệnh bị chặn vì người nói cho nói lại ngay, không phải gọi lại.

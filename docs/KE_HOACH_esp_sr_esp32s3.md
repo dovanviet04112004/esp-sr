@@ -3699,8 +3699,9 @@ từ đánh thức lâu hơn ta tưởng: chủ repo ngừng 1,5–2,2 s, và v�
 nào (`measurements/command.md` §12.41). Một lần vượt ngưỡng chỉ tính một lần: điểm phải xuống dưới ngưỡng rồi mới được
 vượt lại. Trong `LENH`, lần vượt ngưỡng trong cùng câu với lần thức trước không tính: điểm làm trơn dao động quanh
 ngưỡng trong một từ đánh thức, và tính chúng là ra nhiều `WAKE` liền cho một lần nói (board B, 29/10). Vượt ngưỡng ở một
-câu mới là **thức lại** (ADR-0039): một `WAKE` mới, cửa sổ của câu ấy dời về mốc của nó như lần thức đầu, thời gian chờ
-tính lại; từ đánh thức nói lại trong lúc chờ nên không thành một câu lệnh bị chấm và từ chối. Ở câu mới, ngưỡng ấy là
+câu mới là **thức lại** (ADR-0039): cửa sổ của câu ấy dời về mốc của nó như lần thức đầu, thời gian chờ tính lại; từ
+đánh thức nói lại trong lúc chờ nên không thành một câu lệnh bị chấm và từ chối. Thức lại không ra `WAKE`, chỉ một dòng
+log: máy vẫn ở `LENH`, và `WAKE` chỉ báo lúc chuyển từ `NGHE` (ADR-0041). Ở câu mới, ngưỡng ấy là
 `SVC_LISTEN_WAKE_REPEAT_PERMILLE` (450‰), thấp hơn `wake_th`: người gọi lại thường nói to và cao hơn, và được ít điểm hơn
 lần đầu (0,5–0,7 với "vừng ơi"), còn không câu lệnh nào của chủ repo quá 293‰ (ADR-0041). Khoá giữa hai lần thức chỉ
 còn một câu, ngắn hơn `eval.lockout_s` 2 s mà ngưỡng được chọn theo: một tiếng giống từ đánh thức lặp lại trong `LENH`
