@@ -689,6 +689,8 @@ static esp_err_t hear_wake(uint32_t seq)
     if (!s.armed) { return ESP_OK; }
     s.armed = false;
     if (s.commanding && s.runs == s.wake_run) { return ESP_OK; }
+    // Only NGHE to LENH is news: a wake in LENH moves the mark and the wait, and only logs (ADR-0041).
+    const bool again = s.commanding;
     s.commanding = true;
     s.wakes++;
     s.rejects = 0;
@@ -696,7 +698,11 @@ static esp_err_t hear_wake(uint32_t seq)
     s.wake_run = s.runs;
     s.woke = frame;
     s.wake_score = score;
-    s.woke_pending = true;
+    s.woke_pending = !again;
+    if (again) {
+        ESP_LOGI(TAG, "woke again, score %u at hop %" PRIu32 " of the utterance from %" PRIu32,
+                 (unsigned)score, frame, s.run_first);
+    }
     s.command_until = seq + s.wait_hops;
     s.wake_from = s.run_first;
     s.wake_floor = s.after;
