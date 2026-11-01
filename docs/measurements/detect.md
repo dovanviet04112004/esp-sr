@@ -481,3 +481,35 @@ bản vá với run của lock, chỉ khác mọi op đều int8, kể cả lố
 
 Đầu int8 mất 0,026 mAP50-95. Chủ repo chỉ nhận tối ưu không làm giảm chất lượng (31/10), nên đầu dò giữ int16 và E15-T12
 dừng ở đây. Phần int16 ~445 ms một ảnh (§8) chỉ còn đường của E15-T16.
+
+## 10. `ConcatConv` trên board B (E15-T16, ADR-0038, 01/11)
+
+`make ai-unit-detect PATCHES=concat_conv`: ảnh xuất của lock (`20261031_cb3ce8d-dirty_7ec170`) cùng mọi bản vá của nó,
+thêm `concat_conv` sau cùng; 13 op `ConcatConv` thay các Concat, Slice và RequantizeLinear quanh tích chập 1 × 1 của chúng.
+Đối chứng là `make ai-unit-detect` của chính lock, chạy ngay sau đó trên cùng board.
+
+| Ảnh xuất | Mỗi ảnh, trung bình / đỉnh | Khớp ESP-PPQ |
+|---|---|---|
+| Lock | 1 833 / 1 842 ms | sáu đầu ra và các hộp, tám ảnh |
+| Thêm `concat_conv` | 1 894 / 1 903 ms | sáu đầu ra và các hộp, tám ảnh |
+
+Lượt đo từng module (ảnh cuối), cộng theo khối, ms:
+
+| Khối | Lock | `concat_conv` | Chênh |
+|---|---|---|---|
+| `model.19`, có tích chập int16 `cv2` | 90,7 | 149,2 | +58,6 |
+| `model.16`, có tích chập int16 `cv2` | 159,9 | 217,9 | +58,1 |
+| `model.6` | 66,3 | 82,7 | +16,4 |
+| `model.13`, `model.18` | 91,3 | 76,5 | −14,8 |
+| op đổi số mũ của bước xuất (`PPQ_Operation_*`) | 196,5 | 140,1 | −56,4 |
+| Cả đồ thị, 215 và 191 module | 1 775,2 | 1 837,2 | +62,0 |
+
+- Phần gộp có lợi đúng như ADR-0038 tính: bỏ được 56 ms đổi int8 ↔ int16 và 15 ms ghép.
+- Hai tích chập int16 (`/model.16/cv2` 121 ms, `/model.19/cv2` 102 ms) mất nhiều hơn số ấy:
+  - op dựng hàng ghép, giãn int8 → int16 và chép bản int8 ra bằng vòng vô hướng, từng giá trị một; các RequantizeLinear của
+    esp-dl mà nó thay chạy bằng lệnh vector;
+  - bộ lọc lớn hơn vùng mượn 32 KB thì tích chập chạy theo lát kênh, và mỗi lát dựng lại toàn bộ hàng ghép;
+  - hàng ghép nằm ở PSRAM, không ở RAM nội.
+- Không dùng: lock giữ 1 839 ms. Muốn op có lợi thì cần kernel vector cho phép giãn và phép chép, và dựng hàng một lần cho
+  mọi lát. Lợi tối đa theo bảng trên chừng 70 ms, khoảng 4% một ảnh 🔬. Code của op giữ ở nhánh
+  `feat/firmware-ai-engine-concat-conv`.

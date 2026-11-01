@@ -1,7 +1,8 @@
 # ADR-0038 — Op `ConcatConv`: tích chập 1 × 1 đọc thẳng các phần của Concat, gộp các lượt đổi số mũ quanh nó
 
-- **Trạng thái**: Chấp nhận theo KẾ HOẠCH §3.18 bước 6 và 7 (chủ repo 31/10: "tiếp tục tối ưu mà không làm giảm chất
-  lượng"); chủ repo chưa xem riêng ADR này
+- **Trạng thái**: Không dùng (đo 01/11, `detect.md` §10): khớp từng giá trị nhưng mỗi ảnh chậm hơn 61 ms. Code ở nhánh
+  `feat/firmware-ai-engine-concat-conv`. Trước đó: chấp nhận theo KẾ HOẠCH §3.18 bước 6 và 7 (chủ repo 31/10: "tiếp tục
+  tối ưu mà không làm giảm chất lượng")
 - **Ngày**: 2026-10-31
 - **Liên quan**: KẾ HOẠCH §3.18, §6.5; ADR-0034, ADR-0035, ADR-0037; TASKS E15-T16; `docs/measurements/detect.md` §8
 
