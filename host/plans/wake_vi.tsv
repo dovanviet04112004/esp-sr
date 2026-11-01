@@ -1,6 +1,19 @@
-# E11-T41 trial words (ADR-0040): "vừng ơi" and "trợ lý" said by the owner through board B, 1 m in front, two rounds
-# each; scored by the wake runs as the test set of each word. Columns as in levels.tsv.
+# E11-T41 trial words (ADR-0040): "vừng ơi" and "trợ lý" said by the owner through board B, at 1 m in front twice, soft,
+# from the side, at 3 m in front and at 45°, called loud, then each word's near misses; "happy" last, to compare with.
 Chính diện, cách 1 m. Thấy 'board connected' thì chờ 2 s, nói "Vừng ơi" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'vừng ơi'
 Lượt 2, chính diện, cách 1 m. Chờ 2 s, nói "Vừng ơi" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'vừng ơi'
 Chính diện, cách 1 m. Chờ 2 s, nói "Trợ lý" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'trợ lý'
 Lượt 2, chính diện, cách 1 m. Chờ 2 s, nói "Trợ lý" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'trợ lý'
+Chính diện, cách 1 m. Chờ 2 s, nói "Vừng ơi" 10 lần, mỗi lần cách 2-3 s, giọng NHỎ như nói trong phòng lúc tối.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'vừng ơi, giọng nhỏ'
+Bên PHẢI, phía lỗ B (ch1), cách 1 m. Chờ 2 s, nói "Vừng ơi" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 0 --duration-s 40 --prompt 'vừng ơi'
+Chính diện, cách 3 m. Chờ 2 s, nói "Vừng ơi" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 300 --doa-deg 90 --duration-s 40 --prompt 'vừng ơi'
+Chéo giữa chính diện và bên phải, cách 3 m. Chờ 2 s, nói "Vừng ơi" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 300 --doa-deg 45 --duration-s 40 --prompt 'vừng ơi'
+Chính diện, cách 3 m. Chờ 2 s, GỌI TO "Vừng ơi!" 10 lần như gọi người ở phòng bên, mỗi lần cách 2-3 s.	--kind wake --spk {spk} --consent {consent} --distance-cm 300 --doa-deg 90 --duration-s 40 --prompt 'vừng ơi, gọi to'
+Chính diện, cách 1 m. Chờ 2 s rồi đọc lần lượt, mỗi cụm 2 lần, cách 2 s: mừng ơi, dừng ơi, rừng ơi, vâng ơi, vững ơi, em ơi, anh ơi, vừng, ơi, vừng à.	--kind neg --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 60 --prompt 'mừng ơi | dừng ơi | rừng ơi | vâng ơi | vững ơi | em ơi | anh ơi | vừng | ơi | vừng à'
+Chính diện, cách 1 m. Chờ 2 s, nói "Trợ lý" 10 lần, mỗi lần cách 2-3 s, giọng NHỎ như nói trong phòng lúc tối.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'trợ lý, giọng nhỏ'
+Bên PHẢI, phía lỗ B (ch1), cách 1 m. Chờ 2 s, nói "Trợ lý" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 0 --duration-s 40 --prompt 'trợ lý'
+Chính diện, cách 3 m. Chờ 2 s, nói "Trợ lý" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 300 --doa-deg 90 --duration-s 40 --prompt 'trợ lý'
+Chéo giữa chính diện và bên phải, cách 3 m. Chờ 2 s, nói "Trợ lý" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên.	--kind wake --spk {spk} --consent {consent} --distance-cm 300 --doa-deg 45 --duration-s 40 --prompt 'trợ lý'
+Chính diện, cách 3 m. Chờ 2 s, GỌI TO "Trợ lý!" 10 lần như gọi người ở phòng bên, mỗi lần cách 2-3 s.	--kind wake --spk {spk} --consent {consent} --distance-cm 300 --doa-deg 90 --duration-s 40 --prompt 'trợ lý, gọi to'
+Chính diện, cách 1 m. Chờ 2 s rồi đọc lần lượt, mỗi cụm 2 lần, cách 2 s: hỗ trợ, trợ giúp, trợ cấp, trợ lực, chị lý, vợ lý, xử lý, quản lý, hợp lý, lý do.	--kind neg --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 60 --prompt 'hỗ trợ | trợ giúp | trợ cấp | trợ lực | chị lý | vợ lý | xử lý | quản lý | hợp lý | lý do'
+Chính diện, cách 1 m. Chờ 2 s, nói "Happy" 10 lần, mỗi lần cách 2-3 s, giọng tự nhiên (để so với "vừng ơi").	--kind wake --spk {spk} --consent {consent} --distance-cm 100 --doa-deg 90 --duration-s 40 --prompt 'happy'
