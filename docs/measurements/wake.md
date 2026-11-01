@@ -801,3 +801,25 @@ cuối từ tới cuối đoạn `vad`, cuối từ là bước cuối còn tron
   ấy đúng với chúng.
 - Ở 20 dB, cuối từ cách cuối đoạn đúng 15 bước ở trung vị, bằng hangover 240 ms của `vad` (`contracts/afe.yaml`). Cuối
   đoạn trừ hangover là cuối tiếng nói như chính `vad` của board quyết định, và không phụ thuộc mức nền của từng phiên.
+
+**Học sáu phiên của chủ repo** (run `20261101_276f9f6-dirty_85b9fe`, split `vung1`, cùng seed và 20 000 bước như mạng chỉ
+học TTS): `home_001`, `002` (1 m), `005` (nói nhỏ), `006` (bên cạnh), `007` (3 m), `009` (3 m, gọi to) của 01/11, 76 đoạn
+`vad` ở `real_share` 0,05, mỗi đoạn được rút chừng 421 lần. Float: `val` bắt 85,3% ở 0,92, 2,83 báo nhầm/giờ; `test`
+5,64/giờ. Hàng int8: `kl` 915‰ 85,3% / 5,85, `percentile` 915‰ 85,3% / 6,05, `minmax` 930‰ 86,8% / 5,95, `mse` 925‰
+86,8% / 5,95 (`val` bắt / `test` báo nhầm mỗi giờ).
+
+Phiên không học, mạng float ở 0,92, cùng người nói, cùng phòng, khác phiên:
+
+| Phiên | Chỉ học TTS (0,905) | Học sáu phiên (0,92) |
+|---|---|---|
+| "vừng ơi" 1 m, 31/10 (`home_004`, `005`) | 6 / 22 | 21 / 22 |
+| "vừng ơi" 3 m chéo, 01/11 (`home_008`) | 5 / 12 (int8 850‰) | 12 / 12 |
+| "trợ lý", sáu phiên 31/10 và 01/11 | 0 lần thức | 0 lần thức |
+| Các cụm gần âm 01/11 (`home_010`) | 0 / 21 đoạn qua ngưỡng | **12 / 21**, 13 lần thức |
+| "dừng lại" 28/09 (`home_020`, `030`) | 0 | **4 lần thức** |
+| Lần thức trên 89 phiên không có từ (1,35 giờ) | 2 | **19** |
+
+- Đoạn trượt duy nhất của 31/10 là đoạn ở 0,02 s, lúc luồng vừa mở.
+- Hai lần thức còn lại nằm ở một phiên đọc câu có nhạc nền và một phiên demo.
+- Mạng chỉ thấy giọng chủ repo khi người ấy nói từ đánh thức, nên học lối tắt "giọng ấy cộng vần -ừng hay 'ơi' là thức".
+  Âm bản gần âm TTS "{x} ơi" không chặn được, vì chúng đọc bằng giọng khác.

@@ -1384,7 +1384,10 @@ cho `train` (§1.3). Phiên ấy không qua đường mô phỏng mà qua đúng
 `split.board.min_s`–`max_s` là một mẫu dương (ngắn hơn là tiếng động, dài hơn là lời khác nói liền), cuối từ ở chỗ `vad`
 bắt đầu hangover, tức cuối đoạn trừ `VAD_HANGOVER_MS`. Luật 40 dB của mẩu TTS không
 dùng được ở đây: đỉnh lời của board chỉ cao hơn nền phòng 16–40 dB, nên luật ấy rơi vào nền (`measurements/wake.md`
-§12). Mẫu người thật không có cao độ đo sẵn thì rút đều; phiên đã học không bao giờ được chấm. Luật cắt
+§12). Phiên trong danh sách ấy mà không nói từ đánh thức (lệnh, từ đánh thức khác, cụm gần âm) cắt cùng luật thành âm
+bản khó, rút chung với `train_hard`: chỉ học các phiên nói từ đánh thức thì giọng người ấy thành dấu hiệu của lớp dương,
+và mạng thức khi người ấy nói "mừng ơi" hay "dừng lại" (`measurements/wake.md` §12). Mẫu người thật không có cao độ đo
+sẵn thì rút đều; phiên đã học không bao giờ được chấm. Luật cắt
 của §1.2 chỉ để lại 24 mẩu "trợ lý" thật giữa 2 219 mẩu TTS, nên với chúng tỉ lệ ấy bằng đúng phần của chúng, chừng 1%:
 đẩy cao hơn thì mạng học thuộc 24 mẩu (chủ repo, 01/10). Với "vừng ơi", học thêm một phiên của chủ repo ở 5% đưa phiên
 khác của chính người ấy từ 2–3/12 lên 12/12 (`measurements/wake.md` §12). Mất mát là BCE theo bước. Chấm như trên máy: điểm làm trơn trung bình trượt 5 khung rồi so
