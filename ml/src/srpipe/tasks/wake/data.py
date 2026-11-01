@@ -429,10 +429,19 @@ def session_chain(session: Path, chain_cfg: ChainConfig, mel: Mel) -> tuple[np.n
     return device.listen(pcm, chain_cfg, mel, warm=pcm)
 
 
+def session_kind(kind: str, prompt: str, word: list[tuple[str, ...]]) -> str:
+    """A wake session says the configured word (corpus.sounds); one recorded for another word is a negative, and a
+    command session whose prompt is the word alone counts as a wake session."""
+    said = corpus.sounds(prompt)
+    if kind == "cmd" and said == word:
+        return "wake"
+    return kind if kind != "wake" or corpus.says(said, word) else "neg"
+
+
 def board_rows(cfg: dict, paths: dict[str, Path]) -> dict[str, list[dict]]:
     """The manifest rows of the sessions eval.board.train gives to train (KEHOACH 1.3, 3.11) by the build they feed:
-    BOARD_SET the wake sessions saying the word, BOARD_HARD_SET the others; a session missing from the manifest or at
-    another pcm_shift than the product's is refused."""
+    BOARD_SET those session_kind calls wake sessions, BOARD_HARD_SET the others; a session missing from the manifest or
+    at another pcm_shift than the product's is refused."""
     spec, word = cfg["eval"]["board"], corpus.sounds(cfg["word"])
     wanted = spec.get("train", [])
     if not wanted:
@@ -443,7 +452,7 @@ def board_rows(cfg: dict, paths: dict[str, Path]) -> dict[str, list[dict]]:
         raise ValueError(f"{', '.join(missing)}: not in {spec['manifest']}")
     if shifts := sorted({r["pcm_shift"] for r in rows} - {str(spec["pcm_shift"])}):
         raise ValueError(f"train sessions at pcm_shift {shifts}; the product keeps {spec['pcm_shift']}")
-    saying = {r["session"] for r in rows if r["kind"] == "wake" and corpus.says(corpus.sounds(r["prompt"]), word)}
+    saying = {r["session"] for r in rows if session_kind(r["kind"], r["prompt"], word) == "wake"}
     return {
         BOARD_SET: [r for r in rows if r["session"] in saying],
         BOARD_HARD_SET: [r for r in rows if r["session"] not in saying],

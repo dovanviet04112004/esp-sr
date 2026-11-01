@@ -24,10 +24,11 @@ from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.generated import grid
 from srpipe.scenes import device
 from srpipe.tasks.wake import CONFIG
-from srpipe.tasks.wake.data import Shard, session_chain
+from srpipe.tasks.wake.data import Shard, session_chain, session_kind
 from srpipe.tasks.wake.model.tcn import Tcn
 from srpipe.tasks.wake.postproc.smooth import smooth, triggers
 
+Scorer = Callable[[np.ndarray, np.ndarray], np.ndarray]  # log-mel and vad to a smoothed score per hop
 HOPS_PER_HOUR = 3600.0 * grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
 
 
@@ -124,19 +125,21 @@ def session_features(session: Path, chain_cfg: ChainConfig, mel: Mel) -> tuple[n
     return features, figures[:, 0].astype(bool)
 
 
-def session_kind(kind: str, prompt: str, word: list[tuple[str, ...]]) -> str:
-    """A wake session says the configured word (corpus.sounds); one recorded for another word is a negative, and a
-    command session whose prompt is the word alone counts as a wake session."""
-    said = corpus.sounds(prompt)
-    if kind == "cmd" and said == word:
-        return "wake"
-    return kind if kind != "wake" or corpus.says(said, word) else "neg"
+def float_scorer(model, mean: np.ndarray, std: np.ndarray, cfg: dict, dev: str) -> Scorer:
+    """The float net's smoothed probability of a session's log-mel and vad."""
+    return lambda features, vad: smooth(
+        probabilities(model, Shard(features, vad, [], False), mean, std, dev), cfg["eval"]["smooth_hops"]
+    )
 
 
-def board(
-    model, mean: np.ndarray, std: np.ndarray, cfg: dict, paths: dict, threshold: float, dev: str, learnt=frozenset()
-):
-    """Every session of the board manifest at the product's pcm_shift but those the run learnt, scored at threshold."""
+def learnt_sessions(run: Path) -> frozenset[str]:
+    """The board sessions a run learnt from (KEHOACH 1.3), none for a run older than eval.board.train."""
+    return frozenset((load_run_config(run).get("eval", {}).get("board") or {}).get("train") or [])
+
+
+def board(score_of: Scorer, cfg: dict, paths: dict, threshold: float, learnt=frozenset()):
+    """Every session of the board manifest at the product's pcm_shift but those the run learnt, scored by score_of
+    at threshold."""
     spec, rate = cfg["eval"]["board"], grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
     device_cfg = device_of(cfg)
     mics = device.load_microphones(device_cfg["microphone"])
@@ -153,15 +156,14 @@ def board(
         features, vad = session_features(root / r["session"], chain_cfg, mel)
         kind = session_kind(r["kind"], r["prompt"], corpus.sounds(cfg["word"]))
         heard = (r["session"], kind, r["prompt"])
-        results.append(scored(heard, features, vad, (model, mean, std, dev), cfg, (after, lockout), threshold))
+        results.append(scored(heard, score_of(features, vad), vad, (after, lockout), threshold))
     return results
 
 
-def scored(heard: tuple, features: np.ndarray, vad: np.ndarray, net: tuple, cfg: dict, hops: tuple, threshold: float):
-    """One session's (name, kind, prompt) scored: each utterance's peak, and the triggers inside none of them."""
-    model, mean, std, dev = net
+def scored(heard: tuple, s: np.ndarray, vad: np.ndarray, hops: tuple, threshold: float) -> BoardSession:
+    """One session's (name, kind, prompt) by its smoothed score s: each utterance's peak, and the triggers inside none
+    of them."""
     after, lockout = hops
-    s = smooth(probabilities(model, Shard(features, vad, [], False), mean, std, dev), cfg["eval"]["smooth_hops"])
     spans = device.utterances(vad)
     fired = triggers(s, threshold, lockout)
     inside = [any(a <= f <= b + after for a, b in spans) for f in fired]
@@ -170,7 +172,7 @@ def scored(heard: tuple, features: np.ndarray, vad: np.ndarray, net: tuple, cfg:
     return BoardSession(*heard, seconds, peaks, len(fired), inside.count(False))
 
 
-def recording(model, mean: np.ndarray, std: np.ndarray, cfg: dict, wav: Path, threshold: float, dev: str):
+def recording(score_of: Scorer, cfg: dict, wav: Path, threshold: float) -> BoardSession:
     """A mono recording at the grid's rate scored as a wake session: both microphones hear it, the product's chain
     and log-mel run on it, its utterances found by the chain's vad."""
     rate = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
@@ -183,8 +185,17 @@ def recording(model, mean: np.ndarray, std: np.ndarray, cfg: dict, wav: Path, th
     n = len(x) // grid.HOP_SAMPLES * grid.HOP_SAMPLES
     _, figures, features = device.listen(np.stack([x[:n], x[:n]], axis=1), chain_cfg, mel)
     hops = (round(cfg["train"]["label_s"][1] * rate), round(cfg["eval"]["lockout_s"] * rate))
-    heard = (wav.stem, "wake", cfg["word"])
-    return scored(heard, features, figures[:, 0].astype(bool), (model, mean, std, dev), cfg, hops, threshold)
+    heard, vad = (wav.stem, "wake", cfg["word"]), figures[:, 0].astype(bool)
+    return scored(heard, score_of(features, vad), vad, hops, threshold)
+
+
+def board_report(results: list[BoardSession], threshold: float, learnt: frozenset[str]) -> str:
+    """board_table after the sessions the run learnt, left out: its other sessions of the same speakers are scores of
+    the same speaker, the same room, another session (KEHOACH 1.3)."""
+    if not learnt:
+        return board_table(results, threshold)
+    head = f"left out, learnt by the run: {', '.join(sorted(learnt))}; same speaker, same room, another session\n"
+    return head + "\n" + board_table(results, threshold)
 
 
 def board_table(results: list[BoardSession], threshold: float) -> str:
@@ -243,14 +254,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     model, stats, cfg, chosen = load_run(args.run, load_yaml(CONFIG), args.step)
     threshold = args.threshold if args.threshold is not None else chosen
+    score_of = float_scorer(model, stats["mean"], stats["std"], cfg, "cpu")
     if args.what == "wav":
-        results = [recording(model, stats["mean"], stats["std"], cfg, args.wav, threshold, "cpu")]
-    else:
-        learnt = frozenset(load_run_config(args.run)["eval"]["board"].get("train", []))
-        results = board(model, stats["mean"], stats["std"], cfg, data_paths(), threshold, "cpu", learnt)
-        if learnt:
-            print(f"left out, learnt by the run (KEHOACH 1.3): {', '.join(sorted(learnt))}\n")
-    print(board_table(results, threshold))
+        print(board_table([recording(score_of, cfg, args.wav, threshold)], threshold))
+        return 0
+    learnt = learnt_sessions(args.run)
+    print(board_report(board(score_of, cfg, data_paths(), threshold, learnt), threshold, learnt))
     return 0
 
 

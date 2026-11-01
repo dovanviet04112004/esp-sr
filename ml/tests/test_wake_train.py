@@ -353,8 +353,16 @@ def test_the_board_score_leaves_out_the_sessions_a_run_learnt(tmp_path: Path, mo
     model = Tcn(BANDS, kernel=3, channels=4, dilations=[1, 2]).eval()
     paths = {"manifests": tmp_path, "raw": tmp_path / "raw"}
     mean, std = np.zeros(BANDS, np.float32), np.ones(BANDS, np.float32)
-    results = wake_eval.board(model, mean, std, cfg, paths, 0.5, "cpu", frozenset({"s2"}))
+    score_of = wake_eval.float_scorer(model, mean, std, cfg, "cpu")
+    results = wake_eval.board(score_of, cfg, paths, 0.5, frozenset({"s2"}))
     assert [(r.session, r.kind) for r in results] == [("s1", "wake"), ("s3", "neg")]
+    flat = wake_eval.board(lambda features, _: np.zeros(len(features)), cfg, paths, 0.5)
+    assert [r.peaks for r in flat] == [[0.0]] * 3 and sum(r.triggers for r in flat) == 0
+    old = tmp_path / "old_run"
+    old.mkdir()
+    (old / "config.resolved.yaml").write_text(yaml.safe_dump({"eval": {}}), encoding="utf-8")
+    assert wake_eval.learnt_sessions(old) == frozenset()
+    assert "same speaker, same room" in wake_eval.board_report(results, 0.5, frozenset({"s2"}))
 
 
 def changing(change: str, span: list[float], tmp_path: Path) -> train.Windows:

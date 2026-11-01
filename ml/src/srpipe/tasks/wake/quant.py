@@ -218,6 +218,26 @@ def deploy(cfg: dict, run: Path, row: str) -> tuple[Path, Path]:
     return update_lock.record(BRANCH, run, files, fields)
 
 
+def board(cfg: dict, run: Path, row: str, threshold_permille: int | None = None) -> str:
+    """The board sessions the run did not learn, scored by the row's int8 net as the chip scores them, at the row's
+    permille threshold or the one given: the table KEHOACH 1.3 picks a row by."""
+    rows = yaml.safe_load((run / INT8_DIR / LADDER_FILE).read_text(encoding="utf-8"))["rows"]
+    if row not in rows:
+        raise ValueError(f"{run}: no row {row!r} in {INT8_DIR}/{LADDER_FILE}, rows {sorted(rows)}")
+    graph = export_espdl.load_native(run / INT8_DIR / row / GRAPH_FILE)
+    sim, io = ptq_espdl.Simulator(graph), ptq_espdl.io_of(graph)
+    _, stats, used, _ = wake_eval.load_run(run, cfg)
+    permille = threshold_permille if threshold_permille is not None else rows[row]["threshold_permille"]
+
+    def score_of(features: np.ndarray, vad: np.ndarray) -> np.ndarray:
+        shard = data.Shard(features, vad, [], False)
+        return int8_scores(sim, io, shard, stats, used["eval"]["smooth_hops"]).astype(np.float64) / PERMILLE
+
+    learnt = wake_eval.learnt_sessions(run)
+    results = wake_eval.board(score_of, used, data_paths(), permille / PERMILLE, learnt)
+    return f"{row}, as the chip scores\n" + wake_eval.board_report(results, permille / PERMILLE, learnt)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -231,6 +251,10 @@ def main(argv: list[str] | None = None) -> int:
     ship = sub.add_parser("deploy", help="a row exported to stream, with its band statistics, into firmware/models")
     ship.add_argument("run", type=Path)
     ship.add_argument("--row", required=True, help="a row of <run>/int8/ladder.yaml")
+    seen = sub.add_parser("board", help="the board sessions the run did not learn, scored by a row as the chip does")
+    seen.add_argument("run", type=Path)
+    seen.add_argument("--row", required=True, help="a row of <run>/int8/ladder.yaml")
+    seen.add_argument("--threshold", type=int, help="permille, instead of the row's")
     args = parser.parse_args(argv)
     cfg = load_yaml(CONFIG)
     if args.command == "ptq":
@@ -238,6 +262,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "deploy":
         print("\n".join(map(str, deploy(cfg, args.run, args.row))))
+        return 0
+    if args.command == "board":
+        print(board(cfg, args.run, args.row, args.threshold))
         return 0
     for path in probe(cfg, args.out, args.work, args.step):
         print(f"{path}: {path.stat().st_size} bytes")
