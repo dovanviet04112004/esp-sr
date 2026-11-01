@@ -109,7 +109,8 @@ train:                             # E11-T11: python -m srpipe.tasks.wake.train 
     spread_st: 5.4
     max_weight: 5.0                # of the mean weight: a thin stretch of F0 does not take over the draws
   label_smoothing: 0.0             # BCE targets pulled this far toward 0.5 in total; 0 keeps them 0 and 1
-  real_share: 0.05                 # of those positives, from real speech: the owner's sessions (wake.md 12)
+  real_share: 0.1                  # of those positives, from real speech: the owner's sessions, against his
+                                   #   negatives' quarter of the hard draws (wake.md 12)
   batch: 128
   steps: 20000
   learning_rate: 1.0e-3
@@ -160,6 +161,7 @@ eval:
       - 20261031_home_001          # "on" and commands, said on and off for 268 s
       - 20261101_home_003          # "trợ lý" at 1 m, twice
       - 20261101_home_004
+      - 20261101_home_010          # the word's near misses; none of his is left to score (wake.md 12)
 quant:                             # python -m srpipe.tasks.wake.quant ptq <run>: rung 2 of KEHOACH 3.14 (E11-T11)
   seed: 20261029
   calib_windows: 64                # of train.window_hops hops, half from train_pos, half from train_neg
