@@ -1380,9 +1380,14 @@ tỉ lệ dương cố định mỗi lô. Một tỉ lệ cố định của c�
 nói của một câu âm: mẩu dương nào cũng là một từ ngay sau khoảng lặng, nên thiếu những cửa sổ ấy mạng học lối tắt "đầu
 câu cộng chừng 1 s" và báo nhầm ở đó (`measurements/speech_commands.md` §4). Trong phần dương, một tỉ lệ cố định
 (`train.real_share`) lấy từ người thật: mẩu trích của kho, và câu của các phiên thu qua board mà `eval.board.train` giao
-cho `train` (§1.3). Phiên ấy không qua đường mô phỏng mà qua đúng chuỗi và log-mel của sản phẩm; mỗi đoạn `vad` dài trong
-`split.board.min_s`–`max_s` là một mẫu dương (ngắn hơn là tiếng động, dài hơn là lời khác nói liền), cuối từ ở chỗ `vad`
-bắt đầu hangover, tức cuối đoạn trừ `VAD_HANGOVER_MS`. Luật 40 dB của mẩu TTS không
+cho `train` (§1.3). Phiên ấy không qua đường mô phỏng mà qua đúng chuỗi và log-mel của sản phẩm. Chuỗi chạy qua phiên hai
+lượt và chỉ giữ lượt sau, như board đã chạy lâu: chạy từ trạng thái đầu thì `agc` bắt đầu ở 0 dB và chỉ lên khi có tiếng,
+nên các câu đầu phiên nhỏ hơn board thật nghe tới 7 nat, và lúc mở luồng có thêm đoạn `vad` board không có
+(`measurements/wake.md` §12). Ở phiên nói từ đánh thức, mỗi đoạn `vad` là một mẫu dương khi nó dài trong
+`split.board.min_s`–`max_s`, không chạm bước cuối của bản thu, và bước to nhất không thấp hơn trung vị các đoạn của phiên
+quá `split.board.below_nat`. Đoạn ngắn hơn hay nhỏ hơn là tiếng thở, tiếng động, giữ nhãn 0. Đoạn dài hơn, hay chạm cuối
+bản thu, có thể chứa từ đánh thức (hai lần gọi dính nhau), nên các bước của nó không vào mất mát. Cuối từ ở chỗ `vad` bắt
+đầu hangover, tức cuối đoạn trừ `VAD_HANGOVER_MS`. Luật 40 dB của mẩu TTS không
 dùng được ở đây: đỉnh lời của board chỉ cao hơn nền phòng 16–40 dB, nên luật ấy rơi vào nền (`measurements/wake.md`
 §12). Phiên trong danh sách ấy mà không nói từ đánh thức (lệnh, từ đánh thức khác, cụm gần âm) cắt cùng luật thành âm
 bản khó, rút chung với `train_hard`: chỉ học các phiên nói từ đánh thức thì giọng người ấy thành dấu hiệu của lớp dương,

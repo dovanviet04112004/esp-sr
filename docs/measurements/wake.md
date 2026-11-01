@@ -876,3 +876,22 @@ nào để chấm.
   `minmax` 940‰ ở 4,76/giờ.
 - Hàng `percentile` 910‰ nạp thử lên board B 01/11 lúc 13:56, NVS 910 / 300 / 10 / 65 535; sản phẩm vẫn là "happy" theo
   ADR-0040. Muốn biết phiên gần âm có tổng quát hoá không thì cần một phiên gần âm mới của chủ repo 🔬.
+
+**Chuỗi ấm và đoạn không phải từ** (01/11, bản rà của agent). Năm phiên của chủ repo qua chuỗi một lượt và hai lượt (lượt
+đầu bỏ đi). Ô là mức log-mel to nhất của đoạn so với trung vị các đoạn của phiên, nat:
+
+| Phiên | Một lượt: câu đầu → câu cuối | Hai lượt: các câu | Hai lượt: đoạn không phải từ |
+|---|---|---|---|
+| `20261101_home_001` | −3,3 → 0,0 | −0,8 … +0,7 | 0,0 s và 1,0 s, 0,3–0,4 s dài: −5,5, −5,2 |
+| `20261101_home_005` (nói nhỏ) | −2,8 → +3,1 | −0,4 … +0,6 | — |
+| `20261101_home_007` (3 m) | −4,1 → +1,3 | −0,4 … +0,4 | — |
+| `20261101_home_012` (cao, to) | −2,3 → +0,8 | −1,0 … +1,5 | 8,9 s và 17,3 s: −8,8, −6,2 |
+| `20261031_home_004` | −3,2 → +1,8 | −0,5 … +1,1 | 36,1 s, 0,4 s dài: −1,4 |
+
+- Một lượt, `agc` leo dần trong phiên, nên câu đầu nhỏ hơn câu cuối tới 7 nat. Hai lượt thì các câu chỉ lệch nhau
+  dưới ±1,5 nat.
+- Hai lượt, đoạn không phải từ thấp hơn trung vị 5–9 nat. Ngưỡng 3 nat (chừng 13 dB) tách hết chúng ở năm phiên này.
+- Ở phiên gọi to, hai lượt nối nhiều lần gọi thành đoạn 2,4–3,1 s. Đoạn như thế dài quá `max_s`, có thể chứa từ đánh
+  thức, nên bị che khỏi mất mát.
+- Nhãn mẩu TTS tràn qua cuối mẩu ở 226/1024 mẩu của bốn shard `train_pos`. Phần tràn rơi vào nền đầu mẩu kế, như nền
+  sau từ ngoài đời, nên giữ.
