@@ -23,6 +23,7 @@ from srpipe.core.config import apply_overrides, data_paths, device_of, load_yaml
 from srpipe.core.logger import row_line
 from srpipe.core.run_dir import create_run_dir
 from srpipe.core.seed import seed_everything
+from srpipe.dsp.spec.mel import hz_to_mel, mel_to_hz
 from srpipe.generated import grid
 from srpipe.lang import g2p
 from srpipe.tasks.wake import CONFIG
@@ -52,6 +53,7 @@ SETS = {
     "test_neg": (False, "float32"),
 }
 OPTIONAL = ("train_hard", "val_hard")  # wake/v1 has none
+TILT_PIVOT_HZ = 1000.0  # word_tilt_db turns the spectrum about here
 
 
 def band_stats(shards: list[Shard]) -> tuple[np.ndarray, np.ndarray]:
@@ -82,9 +84,10 @@ def pitch_weights(f0_hz: list[float | None], spec: dict) -> np.ndarray:
 
 class Windows:
     """Examples of window_hops hops: one that holds a positive's whole label past the warm-up, one over a hard near
-    miss, one ending in the first onset_s of a negative sentence's speech, or one anywhere in a negative. With
-    word_gain_db, positive and hard windows are made louder by a gain drawn uniformly from it; with f0_balance and
-    f0_hz, an item's F0, real positives and hard words are drawn by pitch_weights (KEHOACH 3.11)."""
+    miss, one ending in the first onset_s of a negative sentence's speech, or one anywhere in a negative. Positive and
+    hard windows alike are changed by each of word_warp, word_gain_db, word_tilt_db and word_tempo that is set, each
+    drawn uniformly per window; with f0_balance and f0_hz, an item's F0, real positives and hard words are drawn by
+    pitch_weights (KEHOACH 3.11)."""
 
     def __init__(
         self,
@@ -120,23 +123,52 @@ class Windows:
         self.slack = width - self.cfg["warmup_hops"] - self.before - self.after
         if self.slack < 1:
             raise ValueError("window_hops leaves no room for a whole label past the warm-up")
-        self.gain_db = self.cfg.get("word_gain_db")
-        self.log_floor = np.float32(device_of(cfg)["features"]["log_floor"]) if self.gain_db else None
-
-    def louder(self, x: np.ndarray) -> np.ndarray:
-        """x as the log-mel of its clean samples made louder by a gain drawn from word_gain_db: the band energy under
-        the log scaled, its floor not, so the result is what the board would compute from those samples."""
-        power = np.float32(10.0 ** (self.rng.uniform(*self.gain_db) / 10.0))
-        energy = np.maximum(np.exp(x.astype(np.float32)) - self.log_floor, np.float32(0.0))
-        return np.log(power * energy + self.log_floor).astype(x.dtype)
+        self.warp, self.gain_db = self.cfg.get("word_warp"), self.cfg.get("word_gain_db")
+        self.tilt_db, self.tempo = self.cfg.get("word_tilt_db"), self.cfg.get("word_tempo")
+        features = device_of(cfg)["features"]
+        self.log_floor = np.float32(features["log_floor"])
+        edges = np.linspace(hz_to_mel(features["f_min_hz"]), hz_to_mel(features["f_max_hz"]), features["n_bands"] + 2)
+        self.centres_mel = edges[1:-1]
+        self.octaves = np.log2(mel_to_hz(self.centres_mel) / TILT_PIVOT_HZ)
 
     def word(self, x: np.ndarray) -> np.ndarray:
-        return self.louder(x) if self.gain_db else x
+        """x, a positive or hard window, as the log-mel of other samples of its word: its frequencies scaled by
+        word_warp, louder by word_gain_db and tilted by word_tilt_db an octave about TILT_PIVOT_HZ, each when set. The
+        band energy under the log changes and its floor does not, so the result is what the board would compute from
+        such samples."""
+        if not (self.warp or self.gain_db or self.tilt_db):
+            return x
+        energy = np.maximum(np.exp(x.astype(np.float32)) - self.log_floor, np.float32(0.0))
+        if self.warp:
+            energy = self.warped(energy, self.rng.uniform(*self.warp))
+        gain_db = self.rng.uniform(*self.gain_db) if self.gain_db else 0.0
+        db = gain_db + self.rng.uniform(*self.tilt_db) * self.octaves if self.tilt_db else np.float64(gain_db)
+        power = (10.0 ** (db / 10.0)).astype(np.float32)
+        return np.log(power * energy + self.log_floor).astype(x.dtype)
 
-    def cut(self, shard: Shard, stop: int) -> tuple[np.ndarray, np.ndarray]:
+    def warped(self, energy: np.ndarray, factor: float) -> np.ndarray:
+        """Band energies of the same sound at factor times its frequencies: each band reads the energy at its centre
+        over factor, between the two nearest bands; past either edge it reads the edge band."""
+        centres = np.arange(len(self.centres_mel))
+        read = np.interp(hz_to_mel(mel_to_hz(self.centres_mel) / factor), self.centres_mel, centres)
+        low = np.floor(read).astype(np.int64)
+        high = np.minimum(low + 1, len(centres) - 1)
+        share = (read - low).astype(np.float32)
+        return energy[:, low] * (1.0 - share) + energy[:, high] * share
+
+    def rate(self) -> float:
+        """Source hops a window hop, drawn from word_tempo when set."""
+        return float(self.rng.uniform(*self.tempo)) if self.tempo else 1.0
+
+    def cut(self, shard: Shard, stop: int, rate: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+        """The window ending at stop, kept inside the shard, rate source hops a window hop: each hop the nearest source
+        hop and its label, never a blend, so the speech in it runs rate times faster."""
         width = self.cfg["window_hops"]
-        start = min(max(0, stop - width), len(shard.features) - width)
-        return shard.features[start : start + width], shard.labels[start : start + width]
+        back = np.rint((width - 1 - np.arange(width)) * rate).astype(np.int64)
+        span = int(back[0]) + 1
+        start = min(max(0, stop - span), len(shard.features) - span)
+        hops = np.clip(start + span - 1 - back, 0, len(shard.features) - 1)
+        return shard.features[hops], shard.labels[hops]
 
     def counts(self) -> tuple[int, int, int]:
         """Positives, hard negatives and other negatives of a batch."""
@@ -168,13 +200,18 @@ class Windows:
             picks += [self.synth[k] for k in self.rng.integers(len(self.synth), size=n_pos - n_real)]
         return picks
 
-    def hard_stop(self, item: dict) -> int:
+    def word_stop(self, end: int, rate: float) -> int:
+        """Where a window of rate source hops a hop stops so that a word ending at end leaves its whole label past the
+        warm-up."""
+        return end + round((self.after + int(self.rng.integers(self.slack))) * rate)
+
+    def hard_stop(self, item: dict, rate: float = 1.0) -> int:
         """A TTS phrase or a clip no longer than a word ends inside the loss region as a positive would; a corpus
         sentence has no word timing, so the window ends anywhere in its speech."""
         first = item["frame_offset"] + item["speech_frames"][0]
         end = item["frame_offset"] + item["speech_frames"][1]
         if item["origin"] == "synth" or end - first <= self.word_hops:
-            return end + self.after + int(self.rng.integers(self.slack))
+            return self.word_stop(end, rate)
         return int(self.rng.integers(first + 1, end + self.after + 1))
 
     def batch(self) -> tuple[np.ndarray, np.ndarray]:
@@ -182,12 +219,13 @@ class Windows:
         n_pos, n_hard, n_neg = self.counts()
         xs, ys = [], []
         for shard_index, end in self.positive_ends(n_pos):
-            stop = end + self.after + int(self.rng.integers(self.slack))
-            x, y = self.cut(self.positives[shard_index], stop)
+            rate = self.rate()
+            x, y = self.cut(self.positives[shard_index], self.word_stop(end, rate), rate)
             xs.append(self.word(x)), ys.append(y)
         for k in self.drawn(len(self.hard_items), n_hard, self.hard_p) if n_hard else []:
             shard_index, item = self.hard_items[k]
-            x, y = self.cut(self.hard[shard_index], self.hard_stop(item))
+            rate = self.rate()
+            x, y = self.cut(self.hard[shard_index], self.hard_stop(item, rate), rate)
             xs.append(self.word(x)), ys.append(y)
         n_onset = round(n_neg * self.cfg["onset_share"]) if self.onsets else 0
         for k in self.rng.integers(len(self.onsets), size=n_onset) if n_onset else []:

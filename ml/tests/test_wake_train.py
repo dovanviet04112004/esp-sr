@@ -2,8 +2,8 @@
 the whole label past the warm-up, a louder word window equal to the log-mel of louder samples, pitch weights that draw
 words near the target F0, sentences for the CTC side task, a tiny run that keeps its last weights and saves each
 evaluated one, a board table whose rows keep their columns, a board score that leaves out the sessions a run learnt,
-real positives without a pitch drawn evenly, masked hops left out of the loss, and a run scored with the network it
-was trained as."""
+real positives without a pitch drawn evenly, masked hops left out of the loss, word windows warped, tilted and
+stretched as other voices say them, and a run scored with the network it was trained as."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import yaml
 
 from srpipe.core import corpus
 from srpipe.core.config import device_of, load_yaml
-from srpipe.dsp.spec.mel import Mel, MelConfig
+from srpipe.dsp.spec.mel import Mel, MelConfig, mel_to_hz
 from srpipe.generated import grid
 from srpipe.scenes import device
 from srpipe.tasks.wake import CONFIG, data
@@ -83,7 +83,10 @@ def test_labels_sit_around_the_end_of_a_positive_and_a_build_must_be_finished(tm
 
 
 def tiny_cfg() -> dict:
+    """wake.yaml on a tiny net and window, its words changed by gain alone: the other changes read real mel bands."""
     cfg = load_yaml(CONFIG)
+    for change in ("word_warp", "word_tilt_db", "word_tempo"):
+        cfg["train"].pop(change, None)
     cfg["model"] = {"kernel": 3, "channels": 4, "dilations": [1, 2]}
     cfg["train"] |= {"window_hops": 32, "warmup_hops": 8, "batch": 16, "steps": 40, "eval_every": 20}
     cfg["train"]["label_s"] = [0.032, 0.048]
@@ -122,7 +125,7 @@ def test_a_louder_word_window_is_the_log_mel_of_louder_samples(tmp_path: Path) -
         return np.stack([mel.log(stft.analyze(device.to_float(scale * h))) for h in hops]).astype(np.float32)
 
     quiet = log_mel(1)
-    np.testing.assert_allclose(windows.louder(quiet), log_mel(2), atol=1e-3)
+    np.testing.assert_allclose(windows.word(quiet), log_mel(2), atol=1e-3)
     assert plain.word(quiet) is quiet
 
 
@@ -352,6 +355,57 @@ def test_the_board_score_leaves_out_the_sessions_a_run_learnt(tmp_path: Path, mo
     mean, std = np.zeros(BANDS, np.float32), np.ones(BANDS, np.float32)
     results = wake_eval.board(model, mean, std, cfg, paths, 0.5, "cpu", frozenset({"s2"}))
     assert [(r.session, r.kind) for r in results] == [("s1", "wake"), ("s3", "neg")]
+
+
+def changing(change: str, span: list[float], tmp_path: Path) -> train.Windows:
+    """Windows over tiny shards whose words take only one change, its range span."""
+    rng = np.random.default_rng(5)
+    cfg = tiny_cfg()
+    cfg["train"].pop("word_gain_db")
+    cfg["train"][change] = span
+    around = data.label_hops(cfg["train"]["label_s"])
+    pos = data.load_set(processed(tmp_path / "p", [(60, 20, 40)] * 2, rng, True), True, around, "float16")
+    neg = data.load_set(processed(tmp_path / "n", [(60, 0, 60)] * 2, rng, False), False, around, "float16")
+    return train.Windows(pos, neg, cfg, np.random.default_rng(6))
+
+
+def test_a_warped_word_moves_its_energy_to_the_bands_of_its_scaled_frequencies(tmp_path: Path) -> None:
+    windows = changing("word_warp", [1.1, 1.1], tmp_path)
+    hz = mel_to_hz(windows.centres_mel)
+    x = np.full((4, len(hz)), math.log(1e-3), np.float32)
+    x[:, 30] = 0.0
+    moved = windows.word(x)
+    assert abs(int(np.argmax(moved[0])) - int(np.argmin(np.abs(hz - 1.1 * hz[30])))) <= 1
+    assert np.argmax(moved[0]) > 30 and moved.dtype == x.dtype
+
+
+def test_a_tilted_word_gains_its_db_an_octave_about_the_pivot(tmp_path: Path) -> None:
+    windows = changing("word_tilt_db", [3.0, 3.0], tmp_path)
+    x = np.zeros((4, len(windows.octaves)), np.float32)
+    gained_db = (windows.word(x) - x) * 10.0 / math.log(10.0)
+    np.testing.assert_allclose(gained_db[0], 3.0 * windows.octaves, atol=1e-3)
+
+
+def test_a_faster_window_takes_the_nearest_source_hops_and_their_labels(tmp_path: Path) -> None:
+    windows = changing("word_tempo", [1.15, 1.15], tmp_path)
+    width = windows.cfg["window_hops"]
+    labels = np.zeros(80, np.uint8)
+    labels[50:60] = 1
+    shard = data.Shard(np.repeat(np.arange(80, dtype=np.float32)[:, None], BANDS, axis=1), labels, [], True)
+    x, y = windows.cut(shard, 70, 1.15)
+    hops = x[:, 0].astype(int)
+    assert len(hops) == width and hops[-1] == 69 and np.all(np.diff(hops) >= 1) and np.all(np.diff(hops) <= 2)
+    assert np.array_equal(y, labels[hops]) and 8 <= int(y.sum()) <= 9
+    x, y = windows.cut(shard, 70)
+    assert x[:, 0].tolist() == list(range(70 - width, 70))
+
+
+def test_word_windows_at_any_tempo_hold_their_label_past_the_warm_up(tmp_path: Path) -> None:
+    windows = changing("word_tempo", [0.85, 1.15], tmp_path)
+    for _ in range(20):
+        _, y = windows.batch()
+        n_pos = windows.counts()[0]
+        assert all(y[k, windows.cfg["warmup_hops"] :].any() for k in range(n_pos))
 
 
 def test_masked_hops_hold_no_word_and_add_nothing_to_the_loss(tmp_path: Path) -> None:

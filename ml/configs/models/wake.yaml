@@ -106,6 +106,10 @@ train:                             # E11-T11: python -m srpipe.tasks.wake.train 
   word_s: 1.2                      # a hard negative this short is a word: its window ends where a positive's label does
   word_gain_db: [0.0, 20.0]        # positive and hard windows louder by a gain drawn here: the agc leaves single words
                                    #   ~10 dB under the sentences it lifts (KEHOACH 3.11, wake.md 8)
+  word_warp: [0.88, 1.12]          # and their frequencies scaled by a factor drawn here, as a voice with a shorter or
+                                   #   longer vocal tract says them (VTLP); the owner's high, loud word (wake.md 12)
+  word_tilt_db: [-3.0, 3.0]        # and their spectrum tilted this much an octave about 1 kHz: a loud voice leans high
+  word_tempo: [0.85, 1.15]         # and their speech this many times faster, by nearest source hops
   f0_balance:                      # positive and hard words drawn so their F0 follows train_neg's (KEHOACH 3.11)
     median_hz: 167.0               # with spread_st, a log-normal through train_neg's p10/p50/p90 of 112/167/249 Hz
     spread_st: 5.4
