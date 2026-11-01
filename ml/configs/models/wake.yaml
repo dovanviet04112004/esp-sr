@@ -137,6 +137,7 @@ eval:
       - 20261101_home_006          # the word at 1 m, from the side
       - 20261101_home_007          # the word at 3 m in front
       - 20261101_home_009          # the word at 3 m, called loud
+      - 20261101_home_012          # the word at 1 m, high and loud
       - 20260928_home_012          # hard negatives from here: the first round of commands of 28/09, "dừng lại" among them
       - 20260928_home_013
       - 20260928_home_014
