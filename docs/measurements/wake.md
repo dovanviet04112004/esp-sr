@@ -823,3 +823,31 @@ Phiên không học, mạng float ở 0,92, cùng người nói, cùng phòng, k
 - Hai lần thức còn lại nằm ở một phiên đọc câu có nhạc nền và một phiên demo.
 - Mạng chỉ thấy giọng chủ repo khi người ấy nói từ đánh thức, nên học lối tắt "giọng ấy cộng vần -ừng hay 'ơi' là thức".
   Âm bản gần âm TTS "{x} ơi" không chặn được, vì chúng đọc bằng giọng khác.
+
+**Thêm âm bản của chủ repo** (run `20261101_74723e4-dirty_96d0b2`): như trên, cộng 24 phiên không nói từ đánh thức của chủ
+repo làm âm bản khó. 276 đoạn `vad` trong 0,4–2,0 s (38 đoạn ngoài khoảng ấy bị bỏ) rút chung với 826 mẩu của
+`train_hard`, mỗi mẩu chừng 581 lần. Float: `val` bắt 83,8% ở 0,92, 2,73 báo nhầm/giờ; `test` 5,59/giờ. Hàng int8: `kl`
+925‰ 82,4% / 5,79, `percentile` 930‰ 83,8% / 5,48, `minmax` 940‰ 85,3% / 4,76, `mse` 935‰ 85,3% / 5,43.
+
+| Phiên không học, float ở 0,92 | Học sáu phiên | Thêm âm bản của chủ repo |
+|---|---|---|
+| "vừng ơi" 1 m, 31/10 | 21 / 22 | 17 / 22 |
+| "vừng ơi" 3 m chéo, 01/11 | 12 / 12 | 12 / 12 |
+| Các cụm gần âm 01/11 (`home_010`) | 12 / 21 | 5 / 21 |
+| Lần thức trên các phiên không có từ | 19 trong 1,35 giờ | 5 trong 1,06 giờ, cả 5 ở `home_010` |
+
+Cùng mạng ở các ngưỡng, trên các phiên không học: 34 đoạn có từ đánh thức, 21 đoạn gần âm, 1,04 giờ các phiên khác. Phần
+1,04 giờ ấy gồm lượt lệnh thứ hai 28/09 có "dừng lại", các phiên 01/10 và 07/10, "chào mi na", đọc câu và ba phiên "trợ lý":
+
+| Ngưỡng | Từ đánh thức | Gần âm qua ngưỡng | Lần thức ở phiên khác |
+|---|---|---|---|
+| 0,80 | 30 / 34 | 6 / 21 | 0 |
+| 0,85–0,88 | 30 / 34 | 5 / 21 | 0 |
+| 0,90–0,94 | 29 / 34 | 5 / 21 | 0 |
+| 0,96 | 28 / 34 | 5 / 21 | 0 |
+
+- Âm bản của chủ repo xoá mọi lần thức ngoài phiên gần âm, kể cả "dừng lại" ở lượt chưa học. Đổi lại, phiên 1 m của 31/10
+  tụt từ 9/10 xuống 5/10: bốn đoạn ở 0,36–0,88.
+- Năm đoạn gần âm vẫn ≥ 0,96 ở mọi ngưỡng. Theo thứ tự đọc, đó là các cụm đầu phiên, chừng "mừng ơi", "dừng ơi", "rừng
+  ơi"; chưa nghe lại.
+  Không cụm "{x} ơi" nào của chủ repo nằm trong tập học, và đây là phiên gần âm duy nhất của người ấy.
