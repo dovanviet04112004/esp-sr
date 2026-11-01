@@ -74,6 +74,25 @@ menu "svc_listen"
             A score still over wake_th this long after it crossed leaves the mark at the hop after the
             crossing, as does an utterance that closes first (KEHOACH 5.4, ADR-0039).
 
+    config SVC_LISTEN_WAKE_REPEAT_PERMILLE
+        int "Permille of the smoothed wake score a new utterance in LENH needs to wake again"
+        range 1 1000
+        default 450
+        help
+            In LENH a new utterance whose wake score reaches this wakes the listener again, as a crossing of wake_th
+            does, and is never scored as a command; a lower wake_th takes its place (KEHOACH 5.4, ADR-0041). 450 is
+            above every command of the owner's sessions, 293 at most, and under every repeat of the wake word that
+            missed wake_th, 507 to 688, on vung1 (docs/adr/0041); a new wake word or model is measured again.
+
+    config SVC_LISTEN_COMMAND_TRIES
+        int "Windows the command net may reject after a wake before LENH ends"
+        range 1 10
+        default 2
+        help
+            A wake allows this many windows the command net rejects, a command turned down for its speaker among
+            them, then the listener goes back to NGHE. FRAME_GAP and windows dropped on an error do not count, and
+            a new wake starts the count again (KEHOACH 5.4, ADR-0041).
+
     config SVC_LISTEN_ENROL_WINDOW_S
         int "Seconds a speaker enrolment stays open for its commands"
         range 30 3600
