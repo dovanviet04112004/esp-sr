@@ -364,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     if rows := board_rows(cfg, paths):
         board, dtype = root / BOARD_SET, cfg["simulate"]["train_dtype"]
-        if not board_built_as(board, device_of(cfg), rows, cfg["split"]["end_below_peak_db"], dtype):
+        if not board_built_as(board, device_of(cfg), rows, cfg["split"]["board"], dtype):
             raise FileNotFoundError(f"{board} is no cut of eval.board.train's sessions as cfg asks: make wake-features")
         sets[BOARD_SET] = load_set(board, True, around, dtype, resident=True)
     split_files = sorted((paths["splits"] / "wake" / cfg["train"]["split"]).glob("*.txt"))

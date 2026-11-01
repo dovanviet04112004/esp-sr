@@ -26,8 +26,9 @@ from srpipe.core import corpus, extract, screen, splits
 from srpipe.core.audio_io import ItemReader
 from srpipe.core.config import apply_overrides, data_paths, load_device, load_yaml
 from srpipe.dsp.afe.chain import ChainConfig
+from srpipe.dsp.afe.vad import hangover_hops
 from srpipe.dsp.spec.mel import Mel, MelConfig
-from srpipe.generated import array, grid, lang_vi
+from srpipe.generated import afe, array, grid, lang_vi
 from srpipe.lang import g2p
 from srpipe.lang.normalize import LangError, normalize
 from srpipe.scenes import device, room
@@ -39,6 +40,8 @@ NEGATIVES = ("train_neg.txt", "val_neg.txt", "test_neg.txt")
 F0_TABLE = "f0_hz.json"  # beside a build: each item's median F0, null if unvoiced
 BOARD_SET = "train_board"  # eval.board.train's sessions, cut as one shard
 BOARD_SHARD = "shard_00000"
+HANGOVER_HOPS = hangover_hops(afe.VAD_HANGOVER_MS)
+HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
 
 
 @dataclass
@@ -437,36 +440,47 @@ def board_rows(cfg: dict, paths: dict[str, Path]) -> list[dict]:
     return rows
 
 
-def word_spans(clean: np.ndarray, vad: np.ndarray, below_peak_db: float) -> list[tuple[int, int]]:
-    """[first, stop) hops of each utterance of vad, stopping after its last hop within below_peak_db of its loudest on
-    the chain's clean samples, hops by samples, as a TTS positive stops (KEHOACH 3.11)."""
-    spans = []
-    for first, last in device.utterances(vad):
-        active = room.active_hops(clean[first : last + 1].reshape(-1).astype(np.float64), below_peak_db)
-        spans.append((first, first + int(np.flatnonzero(active)[-1]) + 1))
-    return spans
+def word_spans(vad: np.ndarray, hangover: int, run_hops: tuple[int, int]) -> dict[int, tuple[int, int]]:
+    """[first, stop) hops of each utterance of vad by its index, only those whose run lasts run_hops' shortest to
+    longest, stopping where the hangover of hangover hops began: where the board's vad heard the speech stop
+    (KEHOACH 3.11)."""
+    shortest, longest = run_hops
+    return {
+        k: (first, max(first + 1, last + 1 - hangover))
+        for k, (first, last) in enumerate(device.utterances(vad))
+        if shortest <= last + 1 - first <= longest
+    }
 
 
-def board_built_as(out: Path, device_cfg: dict, rows: list[dict], below_peak_db: float, dtype: str) -> bool:
-    """Whether out holds the cut of these sessions with this device config, word end and features' dtype."""
+def board_built_as(out: Path, device_cfg: dict, rows: list[dict], board: dict, dtype: str) -> bool:
+    """Whether out holds the cut of these sessions with this device config, split.board, vad hangover and dtype."""
     if not (out / "manifest.yaml").exists():
         return False
     body = yaml.safe_load((out / "manifest.yaml").read_text(encoding="utf-8"))
-    same_cut = body["sessions"] == [r["session"] for r in rows] and body["end_below_peak_db"] == below_peak_db
-    return body["config"] == device_cfg and same_cut and body["dtype"] == dtype
+    same_cut = body["sessions"] == [r["session"] for r in rows] and body.get("board") == dict(board)
+    return (
+        body["config"] == device_cfg
+        and same_cut
+        and body.get("hangover_hops") == HANGOVER_HOPS
+        and body["dtype"] == dtype
+    )
 
 
 def cut_board(cfg: dict, paths: dict[str, Path], out: Path) -> str:
     """eval.board.train's sessions as one shard of train's dtype, each through the product's chain and log-mel, every
-    utterance of its vad a real positive ending as word_spans ends it (KEHOACH 1.3, 3.11)."""
-    rows, below_peak_db = board_rows(cfg, paths), cfg["split"]["end_below_peak_db"]
-    device_cfg = load_device(cfg["features"])
+    utterance of its vad lasting split.board's min_s to max_s a real positive ending as word_spans ends it
+    (KEHOACH 1.3, 3.11)."""
+    rows, device_cfg, board = board_rows(cfg, paths), load_device(cfg["features"]), cfg["split"]["board"]
+    run_hops = (round(board["min_s"] * HOPS_PER_S), round(board["max_s"] * HOPS_PER_S))
     chain_cfg = ChainConfig(balance_gains=device.load_microphones(device_cfg["microphone"]).gains)
     mel = Mel(MelConfig(**device_cfg["features"]))
-    features, items, offset = [], [], 0
+    features, items, offset, dropped = [], [], 0, 0
     for r in rows:
-        clean, figures, x = session_chain(paths["raw"] / "device" / r["board"] / r["session"], chain_cfg, mel)
-        for k, (first, stop) in enumerate(word_spans(clean, figures[:, 0].astype(bool), below_peak_db)):
+        _, figures, x = session_chain(paths["raw"] / "device" / r["board"] / r["session"], chain_cfg, mel)
+        vad = figures[:, 0].astype(bool)
+        spans = word_spans(vad, HANGOVER_HOPS, run_hops)
+        dropped += len(device.utterances(vad)) - len(spans)
+        for k, (first, stop) in spans.items():
             items.append(
                 {
                     "item": f"{BOARD}/{r['session']}#{k}",
@@ -487,12 +501,15 @@ def cut_board(cfg: dict, paths: dict[str, Path], out: Path) -> str:
     head = {
         "config": device_cfg,
         "sessions": [r["session"] for r in rows],
-        "end_below_peak_db": below_peak_db,
+        "board": dict(board),
+        "hangover_hops": HANGOVER_HOPS,
         "dtype": dtype,
         "sha256": {n: splits.sha256_of(out / n) for n in names},
     }
     (out / "manifest.yaml").write_text(yaml.safe_dump(head, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    return f"{out}: {len(items)} utterances of {len(rows)} sessions"
+    return (
+        f"{out}: {len(items)} utterances of {len(rows)} sessions, {dropped} outside {board['min_s']}-{board['max_s']} s"
+    )
 
 
 def simulate(cfg: dict, paths: dict[str, Path]) -> None:
@@ -532,8 +549,7 @@ def simulate(cfg: dict, paths: dict[str, Path]) -> None:
         print(f0_table(folder, roots, spec["f0"], spec["workers"]), flush=True)
     if rows := board_rows(cfg, paths):
         out = paths["processed"] / "wake" / spec["split"] / BOARD_SET
-        dtype, below_peak_db = spec.get("train_dtype", "float32"), cfg["split"]["end_below_peak_db"]
-        built = board_built_as(out, device_cfg, rows, below_peak_db, dtype)
+        built = board_built_as(out, device_cfg, rows, cfg["split"]["board"], spec.get("train_dtype", "float32"))
         print(f"{out}: already built" if built else cut_board(cfg, paths, out), flush=True)
 
 

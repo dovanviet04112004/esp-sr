@@ -326,14 +326,13 @@ def test_board_rows_take_only_wake_sessions_saying_the_word_at_the_products_shif
     assert data.board_rows(cfg, paths) == []
 
 
-def test_a_board_utterance_ends_after_its_last_hop_near_its_loudest() -> None:
-    clean = np.zeros((130, grid.HOP_SAMPLES), dtype=np.int16)
-    vad = np.zeros(130, dtype=bool)
-    clean[20:40], clean[40:44], clean[44:50] = 8000, 200, 20
-    vad[20:60] = True
-    clean[100:110], vad[100:125] = 3000, True
-    assert data.word_spans(clean, vad, 40.0) == [(20, 44), (100, 110)]
-    assert data.word_spans(clean, vad, 20.0) == [(20, 40), (100, 110)]
+def test_a_board_utterance_of_a_words_length_ends_where_its_vads_hangover_began() -> None:
+    vad = np.zeros(200, dtype=bool)
+    vad[20:45], vad[55:60], vad[100:125], vad[150:168] = True, True, True, True
+    assert data.word_spans(vad, 15, (16, 100)) == {0: (20, 45), 1: (100, 110), 2: (150, 153)}
+    assert data.word_spans(vad, 40, (16, 100)) == {0: (20, 21), 1: (100, 101), 2: (150, 151)}
+    assert data.word_spans(vad, 15, (20, 30)) == {1: (100, 110)}
+    assert data.HANGOVER_HOPS == 15
 
 
 def test_the_board_cut_labels_each_utterance_at_its_word_end_and_records_its_sessions(tmp_path, monkeypatch) -> None:
@@ -344,17 +343,19 @@ def test_the_board_cut_labels_each_utterance_at_its_word_end_and_records_its_ses
 
     def chain(session: Path, chain_cfg, mel) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         hops = 120 if session.name == "s1" else 90
-        clean, figures = np.zeros((hops, grid.HOP_SAMPLES), np.int16), np.zeros((hops, 3), np.int8)
-        clean[20:40], figures[20:60, 0] = 8000, 1
-        return clean, figures, np.full((hops, 4), -8.0, np.float32)
+        figures = np.zeros((hops, 3), np.int8)
+        figures[20:55, 0] = 1
+        return np.zeros(hops * grid.HOP_SAMPLES, np.int16), figures, np.full((hops, 4), -8.0, np.float32)
 
     monkeypatch.setattr(data, "session_chain", chain)
     out = tmp_path / data.BOARD_SET
-    assert data.cut_board(cfg, paths, out).endswith("2 utterances of 2 sessions")
+    assert data.cut_board(cfg, paths, out).endswith("2 utterances of 2 sessions, 0 outside 0.4-2.0 s")
     (shard,) = data.load_set(out, True, (2, 3), "float16")
     assert [(i["item"], i["origin"]) for i in shard.items] == [("board/s1#0", "board"), ("board/s2#0", "board")]
     assert np.flatnonzero(shard.labels).tolist() == [38, 39, 40, 41, 42, 158, 159, 160, 161, 162]
     rows, device_cfg, dtype = data.board_rows(cfg, paths), load_device(cfg["features"]), cfg["simulate"]["train_dtype"]
-    assert data.board_built_as(out, device_cfg, rows, cfg["split"]["end_below_peak_db"], dtype)
-    assert not data.board_built_as(out, device_cfg, rows[:1], cfg["split"]["end_below_peak_db"], dtype)
-    assert not data.board_built_as(out, device_cfg, rows, 30.0, dtype)
+    board = cfg["split"]["board"]
+    assert data.board_built_as(out, device_cfg, rows, board, dtype)
+    assert not data.board_built_as(out, device_cfg, rows[:1], board, dtype)
+    assert not data.board_built_as(out, device_cfg, rows, board | {"max_s": 1.0}, dtype)
+    assert not data.board_built_as(out, device_cfg, rows, board, "float32")
