@@ -851,3 +851,28 @@ Cùng mạng ở các ngưỡng, trên các phiên không học: 34 đoạn có 
 - Năm đoạn gần âm vẫn ≥ 0,96 ở mọi ngưỡng. Theo thứ tự đọc, đó là các cụm đầu phiên, chừng "mừng ơi", "dừng ơi", "rừng
   ơi"; chưa nghe lại.
   Không cụm "{x} ơi" nào của chủ repo nằm trong tập học, và đây là phiên gần âm duy nhất của người ấy.
+
+**Thêm phiên gần âm, `real_share` 0,1** (run `20261101_c6e0527-dirty_4cd687`): như trên, cộng `home_010` vào âm bản (297
+đoạn của 25 phiên), mỗi đoạn của chủ repo nói từ đánh thức được rút chừng 842 lần. Float: `val` bắt 82,4% ở 0,91, 2,92
+báo nhầm/giờ; `test` 5,90/giờ. Hàng int8: `kl` 910‰ 77,9% / 5,64, `percentile` 910‰ 85,3% / 5,54, `minmax` 905‰
+82,4% / 5,95, `mse` 915‰ 77,9% / 5,90.
+
+Hàng int8 chấm như chip trên các phiên không học: 34 đoạn có từ đánh thức, 1,04 giờ các phiên khác. Không còn phiên gần âm
+nào để chấm.
+
+| Hàng | 850‰ | 880‰ | 900–920‰ | 940‰ |
+|---|---|---|---|---|
+| `kl` | 32/34, 2 | 32/34, 2 | 31/34, 1 | 31/34, 1 |
+| `percentile` | 32/34, 2 | 32/34, 1 | **32/34, 1** | 31/34, 1 |
+| `minmax` | 32/34, 2 | 32/34, 2 | 31/34, 2 | 31/34, 1 |
+| `mse` | 31/34, 2 | 31/34, 1 | 31/34, 1 | 31/34, 1 |
+
+Ô là đoạn bắt được, rồi số lần thức ở phiên khác.
+
+- So với lượt chưa học phiên gần âm, float ở 0,91: 31/34 thay cho 29/34. Phiên 1 m của 31/10 hồi lại.
+- Lần thức còn lại nằm ở phiên demo `20261002_001`; ở ngưỡng thấp hơn có thêm `20261002_003` và phiên nhạc không lời
+  `20260928_010`.
+- `test` báo nhầm cao hơn "happy" trên cùng `test_neg`: 5,54/giờ so với 4,29/giờ. Lượt chưa học phiên gần âm có hàng
+  `minmax` 940‰ ở 4,76/giờ.
+- Hàng `percentile` 910‰ nạp thử lên board B 01/11 lúc 13:56, NVS 910 / 300 / 10 / 65 535; sản phẩm vẫn là "happy" theo
+  ADR-0040. Muốn biết phiên gần âm có tổng quát hoá không thì cần một phiên gần âm mới của chủ repo 🔬.
