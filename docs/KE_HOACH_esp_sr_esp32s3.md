@@ -3558,7 +3558,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `sb_stream` | StreamBuffer ở PSRAM, **chỉ tồn tại khi** `NET_STREAM_ENABLE`; cỡ `SVC_REPORT_STREAM_BUFFER_KB` | 512 KB: ~5 s ở `mode` 5, ~8 s ở `mode` 2 | `sach_task` | `luong_task` | ghi với timeout 0; không đủ chỗ cho **cả khung** thì bỏ cả khung, đếm; không bao giờ ghi nửa khung | một người ghi, một người đọc — đúng hợp đồng của stream buffer. Đường tới máy nhận khựng 0,4–0,8 s vài lần mỗi 10 phút trên board B (`latency.md` §4), quá 64 KB |
 | `q_dialog` | Queue depth 8, `app_event_t`, bộ nhớ ở PSRAM | 8 × 92 B | `nhan_task` | `dieu_task` | chờ 20 ms rồi bỏ, log **một lần** ở cạnh đầy | `nhan_task` không được đứng chờ lâu: sau lưng nó là 1 s đệm đang đầy dần |
 | `q_cmd` | Queue depth 4, `device_cmd_t` (sinh từ `contracts/`, chở cả chữ 512 B của `SPEAK`), bộ nhớ ở PSRAM | 4 × ~600 B | task của esp-mqtt | `dieu_task` | không chờ: bỏ, tăng `cmd_dropped` của `net_mqtt`, log; bản ngoài `device_cmd.schema.json` cũng vậy | callback esp-mqtt chỉ **phân tích** rồi bỏ vào đây; chờ ở callback là chặn cả đường MQTT |
-| `q_cmdset` | Queue depth 1, con trỏ tới một trong hai ô bộ lệnh của `net_mqtt` ở PSRAM, cấp lúc boot: bộ đã phân tích, kết quả phân tích, payload nguyên văn | 4 B + 2 × ~53 KB | task của esp-mqtt | `nhan_task` | bản mới thay bản chờ: task esp-mqtt rút bản chờ về rồi gửi bản mới; ô `nhan_task` đã nhận giữ nguyên tới lần nhận sau (`FREERTOS.md` 8.10); payload rỗng, tức bản retained bị xoá, không vào hàng | `nhan_task` tự chạy `lang_vi`, đổi bảng lệnh và gọi `ai_engine_command_prepare` **giữa hai câu**: ở trạng thái `NGHE`, hay ở ảnh không có `wake` khi không có cửa sổ nào mở hay chờ chấm; bộ trùng `version` với bộ đang dùng bị bỏ qua |
+| `q_cmdset` | Queue depth 1, con trỏ tới một trong hai ô bộ lệnh của `net_mqtt` ở PSRAM, cấp lúc boot: bộ đã phân tích, kết quả phân tích, payload nguyên văn | 4 B + 2 × ~53 KB | task của esp-mqtt | `nhan_task` | bản mới thay bản chờ: task esp-mqtt rút bản chờ về rồi gửi bản mới; ô `nhan_task` đã nhận giữ nguyên tới lần nhận sau (`FREERTOS.md` 8.10); payload rỗng, tức bản retained bị xoá, không vào hàng | `nhan_task` tự chạy `lang_vi`, đổi bảng lệnh và gọi `ai_engine_command_prepare` **giữa hai câu**: khi không có cửa sổ nào mở hay chờ chấm và không câu nào đang chạy, ở mọi trạng thái; bộ trùng `version` với bộ đang dùng bị bỏ qua |
 | `q_speak` | Queue depth 4, `app_speak_req_t`, bộ nhớ ở PSRAM | 4 × 546 B | `dieu_task` | `noi_task` | bỏ, log | |
 | `q_event_up` | Queue depth 16, `app_event_t`, bộ nhớ ở PSRAM | 16 × 92 B | `nhan_task`, `xac_task`, `dieu_task` | `gui_task` | bỏ, tăng `events_dropped` | **người phát sự kiện không bao giờ publish**: publish QoS 1 chờ PUBACK, và `nhan_task` đứng chờ mạng là đệm 1 s đầy dần |
 | `q_verify` | Queue depth 2, chỉ số ô `uint8_t`; hai ô của `svc_listen` ở PSRAM, mỗi ô 24 000 mẫu `int16` cùng quyết định `COMMAND`, cấp lúc boot khi ảnh có `speaker` | 2 × ~47 KB | `nhan_task` | `xac_task` | không bao giờ đầy: chỉ ô lấy được từ `q_verify_free` mới được gửi | không chép tiếng hai lần; một ô chỉ có một chủ tại một lúc, như `q_frame` |
@@ -3589,7 +3589,7 @@ nguyên tử và gọi hàm `*FromISR`. Không log, không `malloc`, không floa
         wake ≥ ngưỡng                  câu chốt: vad tắt quá utterance.gap_s
  NGHE ─────────────────► LENH ───────────────────────────────────► chấm
   ▲                        │ im 3 s                                  │
-  │                        └──────────────► NGHE        lệnh ◄──────┤──── từ chối → LENH
+  │                        └──────────────► NGHE        lệnh ◄──────┤──── từ chối → LENH, tối đa 2 lần
   │                                                      │
   └────────────── phát xong ◄──── DAP ◄──────────────────┘
 ```
@@ -3597,7 +3597,7 @@ nguyên tử và gọi hàm `*FromISR`. Không log, không `malloc`, không floa
 | Trạng thái | Nhân 1 | `nhan_task` | `noi_task` | Ghi chú |
 |---|---|---|---|---|
 | `NGHE` | `thu` + `sach` | `wake` nhận mỗi khung, mạng chạy mỗi 8 khung | nghỉ | tải thường trực |
-| `LENH` | `thu` + `sach` | cửa sổ `command` theo luồng; `wake` vẫn nghe để giữ trường nhìn, lần vượt ngưỡng không tính | nghỉ | `ctc`, `rnnt`: mạng và phép chấm mỗi khối 16 bước trên log-mel và cao độ đã có, tối đa `window_s`; `kws`: chép khung, một lần chạy mạng lúc câu chốt (§3.12) |
+| `LENH` | `thu` + `sach` | cửa sổ `command` theo luồng; `wake` vẫn nghe: câu mới vượt ngưỡng gọi lại thì thức lại | nghỉ | `ctc`, `rnnt`: mạng và phép chấm mỗi khối 16 bước trên log-mel và cao độ đã có, tối đa `window_s`; `kws`: chép khung, một lần chạy mạng lúc câu chốt (§3.12) |
 | `DAP` | `thu` + `sach`; `aec` tiếp tục học | nghỉ | dựng rồi phát | nói chen khi máy đang nói nằm ngoài phạm vi (§9) |
 
 Trong code và payload, ba trạng thái mang tên tiếng Anh theo CLAUDE.md §3.1: `NGHE` = `LISTEN`,
@@ -3655,7 +3655,8 @@ trường nhìn trống sau mỗi lệnh. Nói chen chỉ mở được sau khi 
   lượt của nó, `REJECT` mã `FRAME_GAP`, bước cuối là bước cuối của cửa sổ lúc hở, để `host` biết câu mất vì đâu thay vì
   không thấy gì. Lúc hở chưa biết câu đang mở là câu thật hay một tiếng click, nên click trùng chỗ hở cũng ra `FRAME_GAP`.
   Câu đã chốt mà cột cao độ chưa về tới bước cuối của cửa sổ cũng ra `FRAME_GAP`: cột của các bước ấy không bao giờ tới
-  (§3.11 bước 3.4);
+  (§3.11 bước 3.4). Phần còn lại của câu bị hở không mở cửa sổ mới tới khi câu ấy chốt: mạng nguội sẽ chấm nửa sau của
+  một lệnh thủng (ADR-0041);
 - mỗi quyết định là một sự kiện vào `q_event_up`: `COMMAND` kèm điểm và khoảng cách nhất–nhì, hay `REJECT` kèm mã:
   `LOW_SCORE` khi lệnh tốt nhất kém vòng tự do quá `δ₁`, `LOW_MARGIN` khi hơn lệnh nhì chưa đủ `δ₂`, `LOW_SYLLABLE` khi
   âm tiết kém nhất của nó hụt quá `δ₃` (§3.12), `PART` khi một phần của lệnh được điểm bằng hay hơn cả lệnh, xét theo
@@ -3666,7 +3667,8 @@ trường nhìn trống sau mỗi lệnh. Nói chen chỉ mở được sau khi 
   Python;
 - khi nhận diện người nói của đường chip bật, `COMMAND` qua `xac_task` trước khi lên (§3.17) và có thể thành `REJECT`
   mã `SPEAKER`, `SPEAKER_BUSY`, `SPEAKER_UNENROLLED` hay `SPEAKER_ENROLLING`, giữ `commandId`, cùng một dòng log có
-  điểm người nói và thời gian xác minh.
+  điểm người nói và thời gian xác minh. Lệnh bị chặn như thế để máy chờ tiếp ở `LENH`, tính là một lần từ chối: người nói
+  nói lại lệnh được ngay, không phải gọi lại từ đánh thức (ADR-0041).
 
 **Ảnh model không có `wake`** (trước khi `wake` qua Cửa 2, hay khi chỉ demo `command`): không có gì đưa máy vào `LENH`,
 nên `nhan_task` mở cửa sổ cho mọi câu `vad` tìm ra, mốc chặn là bước sau cửa sổ trước.
@@ -3686,16 +3688,21 @@ mãi, không ai chấm, và chặn hàng đợi. Cửa sổ của câu chạy qu
 cộng hangover của `vad` (240 ms, `contracts/afe.yaml`): từ đánh thức nói riêng rồi dừng thì đuôi của nó bị bỏ lặng lẽ,
 máy vẫn ở `LENH` chờ lệnh. Cửa sổ thấy trước lệnh ít hơn cửa sổ của ảnh không có `wake`; điểm chia `T_W` (§3.12) nên
 `δ₁` `δ₂` giữ nguyên nghĩa, còn độ đúng thì đo lại trên phiên có `wake` khi `wake` vào ảnh (E11-T14). Trong `NGHE`
-`svc_listen` vẫn theo dõi câu theo `vad` nhưng không mở cửa sổ. **Chỉ một `COMMAND` đưa máy về `NGHE`.** `REJECT`, kể cả
-`FRAME_GAP` và cửa sổ bỏ vì lỗi, để máy chờ tiếp: tiếng động hay một lệnh không rõ không nuốt lệnh người nói nói lại
-ngay sau. Im `SVC_LISTEN_COMMAND_WAIT_MS` (3 s, `Kconfig` của `svc_listen`, vì đổi `listen.yaml` là đổi `listen_hash`)
-mà không có câu nào thì về `NGHE`, không chấm. Board không báo cho người nói lúc nào nó đã thức, nên người ta ngừng sau
+`svc_listen` vẫn theo dõi câu theo `vad` nhưng không mở cửa sổ. **Chỉ một `COMMAND` đưa máy về `NGHE`**, và chỉ khi
+cửa sổ của nó mở sau lần thức gần nhất: lệnh của câu trước một lần thức lại không cắt lần thức ấy. `REJECT` để máy chờ
+tiếp: tiếng động hay một lệnh không rõ không nuốt lệnh người nói nói lại ngay sau. Mỗi lần thức cho tối đa
+`SVC_LISTEN_COMMAND_TRIES` (2) cửa sổ bị mạng `command` từ chối rồi về `NGHE`; `FRAME_GAP` và cửa sổ bỏ vì lỗi không tính,
+thức lại đặt lại số đếm (ADR-0041). Im `SVC_LISTEN_COMMAND_WAIT_MS` (3 s, `Kconfig` của `svc_listen`, vì đổi
+`listen.yaml` là đổi `listen_hash`) mà không có câu nào thì về `NGHE`, không chấm. Đồng hồ chờ chỉ tính lại khi có cửa sổ
+đã chốt chờ chấm, hay câu đang mở đã dài tới `utterance.min_s`, nên một tiếng click không giữ máy chờ. Board không báo cho người nói lúc nào nó đã thức, nên người ta ngừng sau
 từ đánh thức lâu hơn ta tưởng: chủ repo ngừng 1,5–2,2 s, và với 1,5 s một lệnh tới sau 2,24 s bị bỏ mà không có sự kiện
 nào (`measurements/command.md` §12.41). Một lần vượt ngưỡng chỉ tính một lần: điểm phải xuống dưới ngưỡng rồi mới được
 vượt lại. Trong `LENH`, lần vượt ngưỡng trong cùng câu với lần thức trước không tính: điểm làm trơn dao động quanh
 ngưỡng trong một từ đánh thức, và tính chúng là ra nhiều `WAKE` liền cho một lần nói (board B, 29/10). Vượt ngưỡng ở một
 câu mới là **thức lại** (ADR-0039): một `WAKE` mới, cửa sổ của câu ấy dời về mốc của nó như lần thức đầu, thời gian chờ
-tính lại; từ đánh thức nói lại trong lúc chờ nên không thành một câu lệnh bị chấm và từ chối. Khoá giữa hai lần thức chỉ
+tính lại; từ đánh thức nói lại trong lúc chờ nên không thành một câu lệnh bị chấm và từ chối. Ở câu mới, ngưỡng ấy là
+`SVC_LISTEN_WAKE_REPEAT_PERMILLE` (450‰), thấp hơn `wake_th`: người gọi lại thường nói to và cao hơn, và được ít điểm hơn
+lần đầu (0,5–0,7 với "vừng ơi"), còn không câu lệnh nào của chủ repo quá 293‰ (ADR-0041). Khoá giữa hai lần thức chỉ
 còn một câu, ngắn hơn `eval.lockout_s` 2 s mà ngưỡng được chọn theo: một tiếng giống từ đánh thức lặp lại trong `LENH`
 có thể ra nhiều `WAKE` hơn số đo lúc chọn ngưỡng 🔬. Bộ đệm của `wake` chỉ xoá khi luồng đứt. Trong lúc đăng ký giọng
 (§3.17) mọi câu đều mở cửa sổ như ảnh không có `wake`: người đăng ký chỉ đọc lệnh trình nhắc đưa ra, không nói từ đánh
