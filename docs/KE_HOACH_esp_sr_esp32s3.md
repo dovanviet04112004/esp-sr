@@ -1323,7 +1323,7 @@ tiết chừng 0,3 s là quá ít để bắt, và gần "ông", "không", "con"
 Báo nhầm của "happy" đo trên phiên board thu lời nói tiếng Việt, gồm cả hát "Happy birthday" và âm gần như "hấp",
 "hẹp".
 
-**Từ thử "vừng ơi"** (ADR-0040). Chủ repo muốn một từ tiếng Việt và chọn "vừng ơi"; split `wake/vung1` đi đường TTS của "trợ lý" dưới đây với bộ `omnivoice` (KhanhTTS-OmniVoice), mẩu không qua PhoWhisper. Model của nó chỉ vào board khi chủ repo nói "vừng ơi" qua board và nó bắt nhiều hơn "happy"; tới lúc ấy sản phẩm vẫn thức bằng "happy".
+**Từ thử "vừng ơi"** (ADR-0040). Chủ repo muốn một từ tiếng Việt và chọn "vừng ơi"; split `wake/vung1` đi đường TTS của "trợ lý" dưới đây với bộ `omnivoice` (KhanhTTS-OmniVoice), mẩu không qua PhoWhisper. Model của nó chỉ vào board khi chủ repo nói "vừng ơi" qua board và nó bắt nhiều hơn "happy"; tới lúc ấy sản phẩm vẫn thức bằng "happy". Chỉ học TTS thì nó bắt 6/22 câu của chủ repo (`measurements/wake.md` §12), nên nó học thêm các phiên chủ repo nói "vừng ơi" qua board (đoạn **Huấn luyện**).
 
 Các đoạn dưới tả đường của "trợ lý".
 
@@ -1362,7 +1362,7 @@ của `lang_vi`, không theo chữ viết: "trợ lí" cũng là nó.
 mẫu dương: cụm của kho cách từ đánh thức một thành phần âm tiết ("chị lý", "vợ lý") và cụm hay gặp nhất mở đầu bằng
 "trợ" ("trợ giúp", "trợ cấp"), cùng từng nửa của từ đánh thức nói riêng ("trợ", "lý"), để giọng TTS không thành dấu
 hiệu của lớp dương và một nửa của từ không đủ đánh thức.
-Bản thu qua board để chấm (§1.3).
+Bản thu qua board để chấm, trừ phiên giao cho `train` (§1.3).
 
 **Âm bản khó** — cơ chế để siết báo nhầm, **tắt ở bản demo**. Khi bật (mục `synth.hard` và `split.hard` của cấu
 hình), split thêm `train_hard` và `val_hard` từ ba nguồn: TTS đọc các họ cụm gần âm, các cụm gần âm của `synth_neg`, và
@@ -1378,10 +1378,14 @@ của `processed/wake/<split>/` do đường mô phỏng board dựng, chuẩn h
 trên cửa sổ dài hơn trường nhìn: cắt sao cho chứa cuối một mẩu dương, hoặc ở chỗ ngẫu nhiên trong một mẩu âm, với
 tỉ lệ dương cố định mỗi lô. Một tỉ lệ cố định của cửa sổ âm (`train.onset_share`) dừng trong `train.onset_s` đầu tiếng
 nói của một câu âm: mẩu dương nào cũng là một từ ngay sau khoảng lặng, nên thiếu những cửa sổ ấy mạng học lối tắt "đầu
-câu cộng chừng 1 s" và báo nhầm ở đó (`measurements/speech_commands.md` §4). Trong phần dương, một tỉ lệ cố định (mục `train`) lấy từ mẩu người thật. Luật cắt của
-§1.2 chỉ để lại 24 mẩu "trợ lý" thật giữa 2 219 mẩu TTS, nên tỉ lệ ấy bằng đúng phần của chúng, chừng 1%: đẩy cao hơn
-thì mạng học thuộc 24 mẩu (chủ repo, 01/10). Tăng lại khi phiên thu qua board (E11-T6) cho thêm giọng thật. Mất mát là
-BCE theo bước. Chấm như trên máy: điểm làm trơn trung bình trượt 5 khung rồi so
+câu cộng chừng 1 s" và báo nhầm ở đó (`measurements/speech_commands.md` §4). Trong phần dương, một tỉ lệ cố định
+(`train.real_share`) lấy từ người thật: mẩu trích của kho, và câu của các phiên thu qua board mà `eval.board.train` giao
+cho `train` (§1.3). Phiên ấy không qua đường mô phỏng mà qua đúng chuỗi và log-mel của sản phẩm; mỗi đoạn `vad` là một
+mẫu dương, cuối từ ở bước cuối còn trong `split.end_below_peak_db` so với bước to nhất của đoạn trên tiếng sạch của
+chuỗi, như mẩu TTS. Mẫu người thật không có cao độ đo sẵn thì rút đều; phiên đã học không bao giờ được chấm. Luật cắt
+của §1.2 chỉ để lại 24 mẩu "trợ lý" thật giữa 2 219 mẩu TTS, nên với chúng tỉ lệ ấy bằng đúng phần của chúng, chừng 1%:
+đẩy cao hơn thì mạng học thuộc 24 mẩu (chủ repo, 01/10). Với "vừng ơi", học thêm một phiên của chủ repo ở 5% đưa phiên
+khác của chính người ấy từ 2–3/12 lên 12/12 (`measurements/wake.md` §12). Mất mát là BCE theo bước. Chấm như trên máy: điểm làm trơn trung bình trượt 5 khung rồi so
 ngưỡng. Bắt được là tỉ lệ mẩu dương có một lần vượt ngưỡng. Báo nhầm là số lần vượt trên âm bản, mỗi lần vượt khoá
 một quãng rồi mới đếm tiếp như máy khoá sau khi thức, quy ra lần mỗi giờ. Ngưỡng chọn trên `val` sao cho báo nhầm
 không quá mục tiêu, rồi ghi vào NVS `kws/wake_th`.
