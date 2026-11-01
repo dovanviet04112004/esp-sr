@@ -1380,8 +1380,9 @@ tỉ lệ dương cố định mỗi lô. Một tỉ lệ cố định của c�
 nói của một câu âm: mẩu dương nào cũng là một từ ngay sau khoảng lặng, nên thiếu những cửa sổ ấy mạng học lối tắt "đầu
 câu cộng chừng 1 s" và báo nhầm ở đó (`measurements/speech_commands.md` §4). Trong phần dương, một tỉ lệ cố định
 (`train.real_share`) lấy từ người thật: mẩu trích của kho, và câu của các phiên thu qua board mà `eval.board.train` giao
-cho `train` (§1.3). Phiên ấy không qua đường mô phỏng mà qua đúng chuỗi và log-mel của sản phẩm; mỗi đoạn `vad` là một
-mẫu dương, cuối từ ở chỗ `vad` bắt đầu hangover, tức cuối đoạn trừ `VAD_HANGOVER_MS`. Luật 40 dB của mẩu TTS không
+cho `train` (§1.3). Phiên ấy không qua đường mô phỏng mà qua đúng chuỗi và log-mel của sản phẩm; mỗi đoạn `vad` dài trong
+`split.board.min_s`–`max_s` là một mẫu dương (ngắn hơn là tiếng động, dài hơn là lời khác nói liền), cuối từ ở chỗ `vad`
+bắt đầu hangover, tức cuối đoạn trừ `VAD_HANGOVER_MS`. Luật 40 dB của mẩu TTS không
 dùng được ở đây: đỉnh lời của board chỉ cao hơn nền phòng 16–40 dB, nên luật ấy rơi vào nền (`measurements/wake.md`
 §12). Mẫu người thật không có cao độ đo sẵn thì rút đều; phiên đã học không bao giờ được chấm. Luật cắt
 của §1.2 chỉ để lại 24 mẩu "trợ lý" thật giữa 2 219 mẩu TTS, nên với chúng tỉ lệ ấy bằng đúng phần của chúng, chừng 1%:
