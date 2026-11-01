@@ -785,3 +785,19 @@ chứng học ngần ấy bước, không có giọng chủ repo. Ngưỡng ch�
   cách đọc khác hay không phải "vừng ơi".
 - Ở cùng ngưỡng 0,93, `val` bắt của hai lượt học giọng thật kém đối chứng 1–2 mẩu trên 68 (83,8% và 85,3% so với 86,8%),
   trong tầm dao động của 68 mẩu. Giọng người khác chưa đo 🔬; số trên không thay số của người chưa học (KẾ HOẠCH §1.3).
+
+**Cuối từ trên phiên board.** Tiếng sạch của chuỗi trên bốn phiên "vừng ơi" 01/11 (`home_001`, `005`, `007`, `009`):
+bước to nhất của mỗi đoạn `vad` chỉ cao hơn trung vị các bước lặng 16 / 34 / 40 dB (p10 / trung vị / p90). Số bước từ
+cuối từ tới cuối đoạn `vad`, cuối từ là bước cuối còn trong ngưỡng so với bước to nhất của đoạn:
+
+| Ngưỡng | p10 | Trung vị | p90 | Rơi đúng cuối đoạn `vad` |
+|---|---|---|---|---|
+| 20 dB | 10 | 15 | 19 | 4% |
+| 25 dB | 0 | 13 | 15 | 19% |
+| 30 dB | 0 | 0 | 14 | 52% |
+| 40 dB (luật của mẩu TTS) | 0 | 0 | 0 | 94% |
+
+- Luật 40 dB rơi vào nền phòng, nên cuối từ thành cuối đoạn `vad`, muộn hơn chừng 240 ms. Mẩu TTS có lặng số nên luật
+  ấy đúng với chúng.
+- Ở 20 dB, cuối từ cách cuối đoạn đúng 15 bước ở trung vị, bằng hangover 240 ms của `vad` (`contracts/afe.yaml`). Cuối
+  đoạn trừ hangover là cuối tiếng nói như chính `vad` của board quyết định, và không phụ thuộc mức nền của từng phiên.
