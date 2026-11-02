@@ -1,4 +1,4 @@
-/** I2S0 for two INMP441 on one data line, and the speaker side once it is fitted (KEHOACH 2.2, 2.4).
+/** I2S0 for one or two INMP441 on one data line, and the speaker side once it is fitted (KEHOACH 2.2, 2.4).
  *  Delivers whole hops of GEN_GRID_HOP_SAMPLES per channel, 24-bit samples shifted to int16.
  */
 #pragma once
@@ -16,10 +16,17 @@ extern "C" {
 #define DRV_AUDIO_PCM_SHIFT_MIN 8  // keeps all 24 bits of the INMP441, saturating to int16
 #define DRV_AUDIO_PCM_SHIFT_MAX 16 // keeps the top 16 of its 24 bits
 
+typedef enum {
+    DRV_AUDIO_MICS_BOTH = 0, // ch0 on the left slot, ch1 on the right
+    DRV_AUDIO_MICS_LEFT,     // one microphone, L/R to GND
+    DRV_AUDIO_MICS_RIGHT,    // one microphone, L/R to VDD
+} drv_audio_mics_t;
+
 typedef struct {
-    uint8_t pcm_shift;    // right shift of each 32-bit slot (KEHOACH 6.2)
-    bool enable_tx;       // APP_SPEAKER_ENABLE; adds the ref channel
-    uint8_t dma_desc_num; // 8 gives 128 ms of slack (KEHOACH 5.5)
+    uint8_t pcm_shift;     // right shift of each 32-bit slot (KEHOACH 6.2)
+    bool enable_tx;        // APP_SPEAKER_ENABLE; adds the ref channel
+    uint8_t dma_desc_num;  // 8 gives 128 ms of slack (KEHOACH 5.5)
+    drv_audio_mics_t mics; // APP_MIC_COUNT and APP_MIC_SLOT (ADR-0042)
 } drv_audio_config_t;
 
 typedef struct {
@@ -35,7 +42,7 @@ typedef struct {
  */
 esp_err_t drv_audio_init(const drv_audio_config_t *cfg);
 
-/** Channels per hop: 2 for ch0 ch1, 3 when TX adds the aligned ref.
+/** Channels per hop since init: the microphones, 1 or 2, then the aligned ref once TX adds it.
  *  @ctx any | non-blocking
  */
 uint8_t drv_audio_channels(void);

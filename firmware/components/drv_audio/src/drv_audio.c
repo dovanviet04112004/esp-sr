@@ -10,10 +10,10 @@
 #include "freertos/FreeRTOS.h"
 #include "gen_grid.h"
 
-#define RX_CHANNELS 2
-#define SLOT_WORDS (GEN_GRID_HOP_SAMPLES * RX_CHANNELS)
+#define RX_CHANNELS_MAX 2
 
 static i2s_chan_handle_t s_rx;
+static uint8_t s_channels;
 static uint8_t s_shift;
 static uint32_t s_next_seq;
 static uint32_t s_overflows_seen;
@@ -21,7 +21,7 @@ static uint32_t s_overflows_before_read;
 static bool s_reading;
 static _Atomic uint32_t s_overflows;
 static drv_audio_stats_t s_stats;
-static int32_t s_slots[SLOT_WORDS];
+static int32_t s_slots[GEN_GRID_HOP_SAMPLES * RX_CHANNELS_MAX];
 
 // Each overflow event is one DMA buffer dropped, and a buffer holds exactly one hop.
 static IRAM_ATTR bool on_rx_overflow(i2s_chan_handle_t handle, i2s_event_data_t *event, void *ctx)
@@ -33,7 +33,7 @@ static IRAM_ATTR bool on_rx_overflow(i2s_chan_handle_t handle, i2s_event_data_t 
 esp_err_t drv_audio_init(const drv_audio_config_t *cfg)
 {
     if (cfg == NULL || cfg->pcm_shift < DRV_AUDIO_PCM_SHIFT_MIN || cfg->pcm_shift > DRV_AUDIO_PCM_SHIFT_MAX ||
-        cfg->dma_desc_num < 2) {
+        cfg->dma_desc_num < 2 || cfg->mics > DRV_AUDIO_MICS_RIGHT) {
         return ESP_ERR_INVALID_ARG;
     }
     if (s_rx != NULL) { return ESP_ERR_INVALID_STATE; }
@@ -45,10 +45,12 @@ esp_err_t drv_audio_init(const drv_audio_config_t *cfg)
     esp_err_t err = i2s_new_channel(&chan, NULL, &s_rx);
     if (err != ESP_OK) { return err; }
 
-    // INMP441 speaks standard I2S: 24-bit data left-justified in 32-bit slots, 64 BCLK per WS.
-    const i2s_std_config_t std = {
+    const bool both = cfg->mics == DRV_AUDIO_MICS_BOTH;
+    // INMP441 speaks standard I2S: 24-bit data left-justified in 32-bit slots, 64 BCLK per WS, mono or not.
+    i2s_std_config_t std = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(GEN_GRID_SAMPLE_RATE_HZ),
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT,
+                                                        both ? I2S_SLOT_MODE_STEREO : I2S_SLOT_MODE_MONO),
         .gpio_cfg =
             {
                 .mclk = I2S_GPIO_UNUSED,
@@ -58,6 +60,7 @@ esp_err_t drv_audio_init(const drv_audio_config_t *cfg)
                 .din = APP_I2S_DIN_GPIO,
             },
     };
+    if (cfg->mics == DRV_AUDIO_MICS_RIGHT) { std.slot_cfg.slot_mask = I2S_STD_SLOT_RIGHT; }
     const i2s_event_callbacks_t callbacks = {.on_recv_q_ovf = on_rx_overflow};
     if ((err = i2s_channel_init_std_mode(s_rx, &std)) != ESP_OK ||
         (err = i2s_channel_register_event_callback(s_rx, &callbacks, NULL)) != ESP_OK ||
@@ -67,29 +70,31 @@ esp_err_t drv_audio_init(const drv_audio_config_t *cfg)
         return err;
     }
     s_shift = cfg->pcm_shift;
+    s_channels = both ? RX_CHANNELS_MAX : 1;
     return ESP_OK;
 }
 
 uint8_t drv_audio_channels(void)
 {
-    return RX_CHANNELS;
+    return s_channels;
 }
 
 esp_err_t drv_audio_read_frame(int16_t *interleaved, uint32_t *seq, uint32_t timeout_ms)
 {
     if (s_rx == NULL || interleaved == NULL || seq == NULL) { return ESP_ERR_INVALID_STATE; }
+    const size_t words = (size_t)GEN_GRID_HOP_SAMPLES * s_channels;
+    const size_t bytes = words * sizeof(s_slots[0]);
     size_t got = 0;
     // The ring filled with no reader yet: drop what it holds, not hand the reader the whole ring in one
     // burst, and count seq and overflows from the first fresh hop.
     if (!s_reading) {
-        while (i2s_channel_read(s_rx, s_slots, sizeof(s_slots), &got, 0) == ESP_OK &&
-               got == sizeof(s_slots)) {}
+        while (i2s_channel_read(s_rx, s_slots, bytes, &got, 0) == ESP_OK && got == bytes) {}
         s_overflows_seen = s_overflows_before_read = atomic_load(&s_overflows);
         s_reading = true;
     }
-    esp_err_t err = i2s_channel_read(s_rx, s_slots, sizeof(s_slots), &got, pdMS_TO_TICKS(timeout_ms));
+    esp_err_t err = i2s_channel_read(s_rx, s_slots, bytes, &got, pdMS_TO_TICKS(timeout_ms));
     if (err != ESP_OK) { return err; }
-    if (got != sizeof(s_slots)) { return ESP_ERR_INVALID_SIZE; }
+    if (got != bytes) { return ESP_ERR_INVALID_SIZE; }
 
     const uint32_t overflows = atomic_load(&s_overflows);
     const uint32_t lost = overflows - s_overflows_seen;
@@ -97,7 +102,7 @@ esp_err_t drv_audio_read_frame(int16_t *interleaved, uint32_t *seq, uint32_t tim
     *seq = s_next_seq + lost;
     s_next_seq = *seq + 1;
 
-    for (size_t i = 0; i < SLOT_WORDS; i++) {
+    for (size_t i = 0; i < words; i++) {
         int32_t v = s_slots[i] >> s_shift;
         if (v > INT16_MAX || v < INT16_MIN) {
             v = v > 0 ? INT16_MAX : INT16_MIN;
