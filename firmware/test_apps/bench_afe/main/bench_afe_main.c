@@ -64,6 +64,7 @@
 #else
 #define CHAIN_ROW "dsp_afe chuỗi (hpf + stft x2 + balance + trộn + ns + istft + vad + agc)"
 #endif
+#define CHAIN_ONE_MIC_ROW "dsp_afe chuỗi một micro (hpf + stft + ns + istft + vad + agc)"
 // A command with a number and a symbol: normalize, then g2p in each region, as nhan_task does on a new set.
 #define LANG_LINE "t\xc4\x83ng \xc3\xa2m l\xc6\xb0\xe1\xbb\xa3ng l\xc3\xaan 50%"
 
@@ -84,6 +85,7 @@ typedef struct {
 
 static float s_hop[GEN_ARRAY_N_MICS][GEN_GRID_HOP_SAMPLES];
 static int16_t s_interleaved[GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS];
+static int16_t s_one_mic[GEN_GRID_HOP_SAMPLES];
 static dsp_spec_cplx_t s_bins[GEN_ARRAY_N_MICS][GEN_GRID_N_BINS];
 static dsp_spec_cplx_t s_work[GEN_GRID_N_BINS];
 static float s_work_pcm[GEN_GRID_HOP_SAMPLES];
@@ -110,6 +112,7 @@ static void fill_inputs(void)
             s_hop[m][i] = 0.25f * noise();
             s_interleaved[i * GEN_ARRAY_N_MICS + m] = (int16_t)lrintf(s_hop[m][i] * PCM_FULL_SCALE);
         }
+        s_one_mic[i] = s_interleaved[i * GEN_ARRAY_N_MICS];
     }
     for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
         s_calib.balance[k] = (dsp_spec_cplx_t){noise(), noise()};
@@ -472,15 +475,16 @@ static void bench_agc(bool limiting)
     report(&row, &t);
 }
 
-static void bench_chain(void)
+// The product's chain counts in the total; a one-microphone board's (ADR-0042) replaces it.
+static void bench_chain(bool one_mic)
 {
-    const dsp_afe_config_t cfg = {.input_format = "MM",
+    const dsp_afe_config_t cfg = {.input_format = one_mic ? "M" : "MM",
                                   .spatial = DSP_AFE_SPATIAL_NONE,
                                   .calib = &s_calib,
                                   .ns_floor_db = GEN_AFE_NS_FLOOR_DB,
                                   .agc_target_dbfs = GEN_AFE_AGC_TARGET_DBFS,
                                   .vad_aggressiveness = GEN_AFE_VAD_AGGRESSIVENESS};
-    row_t row = {.module = CHAIN_ROW, .core = CORE_SACH, .in_total = true};
+    row_t row = {.module = one_mic ? CHAIN_ONE_MIC_ROW : CHAIN_ROW, .core = CORE_SACH, .in_total = !one_mic};
     ESP_ERROR_CHECK(dsp_afe_workspace_bytes(&cfg, &row.hot_bytes, &row.cold_bytes));
     void *hot = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
     void *cold = row.cold_bytes > 0 ? heap_caps_malloc(row.cold_bytes, MALLOC_CAP_SPIRAM) : NULL;
@@ -492,11 +496,14 @@ static void bench_chain(void)
     timing_t t = {0};
     for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
         const uint32_t start = esp_cpu_get_cycle_count();
-        ESP_ERROR_CHECK(dsp_afe_feed(afe, s_interleaved, 1));
+        ESP_ERROR_CHECK(dsp_afe_feed(afe, one_mic ? s_one_mic : s_interleaved, 1));
         ESP_ERROR_CHECK(dsp_afe_fetch(afe, &frame));
         hop_done(&t, h, start);
     }
     report(&row, &t);
+    // Two chains held at once leave the benches after them short of internal RAM.
+    heap_caps_free(hot);
+    heap_caps_free(cold);
 }
 
 static void bench_mel(void)
@@ -690,7 +697,9 @@ static void bench_spk_fbank(void)
 // The chain goes first: dl_fft keeps its tables once made, so the first user of them pays their RAM.
 static void core1_benches(void *done)
 {
-    bench_chain();
+    bench_chain(false);
+    vTaskDelay(1);
+    bench_chain(true);
     vTaskDelay(1);
     bench_stft();
     vTaskDelay(1);
