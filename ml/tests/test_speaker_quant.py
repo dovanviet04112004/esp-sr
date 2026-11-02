@@ -590,8 +590,22 @@ def test_the_threshold_table_sets_noise_bins_only_when_given_noisy_material() ->
         assert count["noise"]["quiet"] >= quiet["shares"][quiet["chosen"]]["milli_z"]
 
 
+@pytest.fixture
+def lock_in_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """update_lock's lock and firmware/models moved into tmp_path, so no use here can write the real ones."""
+    import json
+
+    from srpipe.export import update_lock
+
+    lock = tmp_path / "models.lock.json"
+    lock.write_text(json.dumps({"version": 1, "models": {"command": {"run": "kept"}}}), encoding="utf-8")
+    monkeypatch.setattr(update_lock, "LOCK", lock)
+    monkeypatch.setattr(update_lock, "MODELS", tmp_path / "models")
+    return lock
+
+
 def kept_deploy(tmp_path: Path, row: str) -> Path:
-    """A pretrained run with a deploy kept in it, as deploy leaves one."""
+    """A pretrained run with a deploy kept in it, as deploy leaves one: its split.lock empty, nothing learnt here."""
     import json
 
     import yaml
@@ -603,6 +617,7 @@ def kept_deploy(tmp_path: Path, row: str) -> Path:
     run.mkdir(parents=True)
     cfg = {"source": {"extractor": "b3", "pins": pins}}
     (run / "config.resolved.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    (run / "split.lock").write_text("", encoding="utf-8")
     kept = run / quant.INT8_DIR / row / quant.KEPT_DIR
     kept.mkdir(parents=True)
     (kept / f"{quant.BRANCH}.espdl").write_bytes(b"graph")
@@ -615,22 +630,16 @@ def kept_deploy(tmp_path: Path, row: str) -> Path:
 
 
 def test_use_puts_a_kept_deploy_into_the_firmware_and_the_lock_and_refuses_a_changed_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, lock_in_tmp: Path
 ) -> None:
     import json
 
-    from srpipe.export import update_lock
-
-    lock = tmp_path / "models.lock.json"
-    lock.write_text(json.dumps({"version": 1, "models": {"command": {"run": "kept"}}}), encoding="utf-8")
-    monkeypatch.setattr(update_lock, "LOCK", lock)
-    monkeypatch.setattr(update_lock, "MODELS", tmp_path / "models")
     run = kept_deploy(tmp_path, "kl")
     quant.use(run, "kl")
     folder = tmp_path / "models" / quant.BRANCH
     assert (folder / f"{quant.BRANCH}.espdl").read_bytes() == b"graph"
     assert (folder / quant.COHORT_FILE).read_bytes() == b"cohort"
-    rows = json.loads(lock.read_text(encoding="utf-8"))["models"]
+    rows = json.loads(lock_in_tmp.read_text(encoding="utf-8"))["models"]
     assert rows["command"] == {"run": "kept"} and rows[quant.BRANCH]["run"] == run.name
     assert rows[quant.BRANCH]["threshold"] == {"milli_z": [1486]} and rows[quant.BRANCH]["row"] == "kl"
     assert rows[quant.BRANCH]["speaker_hash"] == f"0x{speaker.HASH:08x}"
@@ -645,14 +654,16 @@ def test_use_puts_a_kept_deploy_into_the_firmware_and_the_lock_and_refuses_a_cha
         quant.use(run, "timing")
 
 
-def test_use_refuses_a_deploy_made_on_another_speaker_contract(tmp_path: Path) -> None:
-    """A kept deploy of the ten-command contract under the five-command one: the firmware would leave it off."""
+def test_use_refuses_a_deploy_made_on_another_speaker_contract(tmp_path: Path, lock_in_tmp: Path) -> None:
+    """A kept deploy made on another contracts/speaker.yaml: the firmware would leave it off, so nothing is copied."""
     import json
 
     run = kept_deploy(tmp_path, "kl")
     record_file = run / quant.INT8_DIR / "kl" / quant.KEPT_DIR / quant.KEPT_FILE
     record = json.loads(record_file.read_text(encoding="utf-8"))
-    record["fields"]["speaker_hash"] = "0xd94df25c"
+    other = f"0x{speaker.HASH ^ 1:08x}"
+    record["fields"]["speaker_hash"] = other
     record_file.write_text(json.dumps(record), encoding="utf-8")
-    with pytest.raises(ValueError, match="deployed on speaker hash 0xd94df25c"):
+    with pytest.raises(ValueError, match=f"deployed on speaker hash {other}"):
         quant.use(run, "kl")
+    assert not (tmp_path / "models").exists()
