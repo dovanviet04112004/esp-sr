@@ -112,3 +112,5 @@ session,board,fw,grid_hash,pcm_shift,kind,spk,consent,room,distance_cm,doa_deg,p
 20261101_home_010,board_b,0.1.0+03fd0e52-dirty,0x9c914b61,13,neg,spk_001,C001,home,100,90,mừng ơi | dừng ơi | rừng ơi | vâng ơi | vững ơi | em ơi | anh ơi | vừng | ơi | vừng à,2026-11-01T03:39:54+00:00,0,60.0,a4683faab6285f3a48625c6c05f35b59123665dc04b195756618f1ef1a31286c
 20261101_home_011,board_b,0.1.0+03fd0e52-dirty,0x9c914b61,13,wake,spk_001,C001,home,100,90,"trợ lý, giọng nhỏ",2026-11-01T03:41:21+00:00,0,40.0,1e26b0a7322d90ceb1f7596ebc3fba76b97fe396839118311f1790dc492a8496
 20261101_home_012,board_b,0.1.0+03fd0e52-dirty,0x9c914b61,13,wake,spk_001,C001,home,100,90,"vừng ơi, giọng cao, to",2026-11-01T10:23:48+00:00,0,40.0,4251ddad39fec67762a879dda7decf868dde8a0df2beac6da1ff9a6cd4612196
+20261102_home_001,board_b,0.1.0+4f422ade,0x9c914b61,13,probe,,,home,,,,2026-11-02T02:10:20+00:00,0,20.0,22b8114017b9530acdfef3983320ff820b65c49ed71d5c5346a1abf5249f4bd0
+20261102_home_002,board_b,0.1.0+4f422ade,0x9c914b61,13,probe,,,home,,,,2026-11-02T03:26:53+00:00,1,300.0,6674bfc45a656d3b5d53b846b6912b9e821ca9ea88f9c6b3c5b97378c3702992
