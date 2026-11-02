@@ -58,8 +58,8 @@ static void fill(const dsp_afe_frame_t *frames, size_t hops, field_t field, floa
 enum { CONFIG_NS_FLOOR_DB, CONFIG_AGC_TARGET_DBFS, CONFIG_VAD_AGGRESSIVENESS, CONFIG_COUNT };
 
 // A case without gains is a board never calibrated: calib stays NULL and the chain runs without balance.
-static bool read_setup(const void *buf, size_t len, dsp_afe_spatial_t spatial, dsp_afe_config_t *cfg,
-                       dsp_afe_calib_t *calib)
+static bool read_setup(const void *buf, size_t len, const char *format, dsp_afe_spatial_t spatial,
+                       dsp_afe_config_t *cfg, dsp_afe_calib_t *calib)
 {
     gold_tensor_t config, gains;
     float settings[CONFIG_COUNT];
@@ -67,7 +67,7 @@ static bool read_setup(const void *buf, size_t len, dsp_afe_spatial_t spatial, d
         return false;
     }
     *cfg = (dsp_afe_config_t){
-        .input_format = "MM",
+        .input_format = format,
         .spatial = spatial,
         .ns_floor_db = settings[CONFIG_NS_FLOOR_DB],
         .agc_target_dbfs = settings[CONFIG_AGC_TARGET_DBFS],
@@ -97,7 +97,7 @@ static bool run_frames(const dsp_afe_config_t *cfg, const gold_tensor_t *input, 
     for (size_t h = 0; ok && h < input->dims[0]; h++) {
         if (resets[h] == GAP_RESET) { dsp_afe_reset(afe); }
         if (resets[h] == GAP_RESUME) { dsp_afe_resume(afe); }
-        ok = dsp_afe_feed(afe, in + h * GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS, 1) == ESP_OK &&
+        ok = dsp_afe_feed(afe, in + h * input->dims[1], 1) == ESP_OK &&
              dsp_afe_fetch(afe, &frames[h]) == ESP_OK;
     }
     free(mem);
@@ -110,15 +110,18 @@ static bool run_chain(const char *block, dsp_afe_spatial_t spatial, const char *
     gold_tensor_t input, reset, want[FIELD_COUNT];
     if (!parity_tensor(buf, len, "input", &input) || !parity_tensor(buf, len, "reset", &reset) ||
         input.dtype != GOLD_I16 || reset.dtype != GOLD_U8 || input.ndim != 2 ||
-        input.dims[1] != GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS || reset.dims[0] != input.dims[0]) {
+        (input.dims[1] != GEN_GRID_HOP_SAMPLES && input.dims[1] != GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS) ||
+        reset.dims[0] != input.dims[0]) {
         return false;
     }
     for (size_t f = 0; f < FIELD_COUNT; f++) {
         if (!parity_tensor(buf, len, kFields[f], &want[f])) { return false; }
     }
+    // A one-microphone case is one sample wide per step (ADR-0042).
+    const char *format = input.dims[1] == GEN_GRID_HOP_SAMPLES ? "M" : "MM";
     dsp_afe_config_t cfg;
     dsp_afe_calib_t calib = {0};
-    if (!read_setup(buf, len, spatial, &cfg, &calib)) { return false; }
+    if (!read_setup(buf, len, format, spatial, &cfg, &calib)) { return false; }
     const size_t hops = input.dims[0];
     dsp_afe_frame_t *frames = heap_caps_malloc(hops * sizeof(dsp_afe_frame_t), MALLOC_CAP_SPIRAM);
     float *got = heap_caps_malloc(hops * GEN_GRID_HOP_SAMPLES * sizeof(float), MALLOC_CAP_SPIRAM);

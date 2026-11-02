@@ -112,9 +112,15 @@ static int16_t tone(size_t n)
     return (int16_t)lrint(AMPLITUDE * sin(2.0 * M_PI * TONE_HZ * (double)n / GEN_GRID_SAMPLE_RATE_HZ));
 }
 
+// The input format spells one letter per channel: the microphones' M, then R.
 static uint8_t channels_of(const dsp_afe_config_t *cfg)
 {
-    return strcmp(cfg->input_format, "MMR") == 0 ? MAX_CHANNELS : GEN_ARRAY_N_MICS;
+    return (uint8_t)strlen(cfg->input_format);
+}
+
+static uint8_t mics_of(const dsp_afe_config_t *cfg)
+{
+    return (uint8_t)strspn(cfg->input_format, "M");
 }
 
 static dsp_afe_t *make(const dsp_afe_config_t *cfg)
@@ -127,14 +133,16 @@ static dsp_afe_t *make(const dsp_afe_config_t *cfg)
                                                                                                      : NULL;
 }
 
-// Both microphones get the same tone, ch1 negated when opposite is set; the reference stays silent.
-static void fill_hop(int16_t *interleaved, uint8_t n_channels, size_t hop, bool opposite)
+// Every microphone gets the same tone, ch1 negated when opposite is set; the reference stays silent.
+static void fill_hop(int16_t *interleaved, const dsp_afe_config_t *cfg, size_t hop, bool opposite)
 {
+    const uint8_t n_mics = mics_of(cfg);
+    const uint8_t n_channels = channels_of(cfg);
     for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
         const int16_t s = tone(hop * GEN_GRID_HOP_SAMPLES + i);
-        interleaved[i * n_channels] = s;
-        interleaved[i * n_channels + 1] = opposite ? (int16_t)-s : s;
-        if (n_channels == MAX_CHANNELS) { interleaved[i * n_channels + 2] = 0; }
+        for (uint8_t ch = 0; ch < n_channels; ch++) {
+            interleaved[i * n_channels + ch] = ch >= n_mics ? 0 : (ch == 1 && opposite ? (int16_t)-s : s);
+        }
     }
 }
 
@@ -207,8 +215,8 @@ static void check_round_trip(const dsp_afe_config_t *cfg, const char *what)
 #else
     void *agc = NULL;
 #endif
-    const uint8_t n_channels = channels_of(cfg);
-    const uint16_t want_flags = n_channels == MAX_CHANNELS ? DSP_AFE_FLAG_NO_REF : 0u;
+    const bool twin = mics_of(cfg) == GEN_ARRAY_N_MICS;
+    const uint16_t want_flags = channels_of(cfg) > mics_of(cfg) ? DSP_AFE_FLAG_NO_REF : 0u;
     // The twin channels sit at broadside, where bss's gate holds the mean at one half (KEHOACH 3.8).
     const float spatial_gain = cfg->spatial == DSP_AFE_SPATIAL_BSS ? 0.5f : 1.0f;
     dsp_afe_config_t unit_ns = *cfg;
@@ -220,9 +228,9 @@ static void check_round_trip(const dsp_afe_config_t *cfg, const char *what)
     for (size_t h = 0; ok && h < HOPS; h++) {
         dsp_afe_frame_t out;
         int want_gain_db = 0;
-        fill_hop(in, n_channels, h, false);
+        fill_hop(in, cfg, h, false);
         ok = dsp_afe_feed(afe, in, 1) == ESP_OK && dsp_afe_fetch(afe, &out) == ESP_OK && out.seq == h &&
-             (out.doa_deg == -1 || (kDoaBuilt && out.doa_deg == BROADSIDE_DEG)) &&
+             (out.doa_deg == -1 || (kDoaBuilt && twin && out.doa_deg == BROADSIDE_DEG)) &&
              (kVadBuilt || out.vad == 0) && out.flags == want_flags;
         expected_frame(agc, previous, out.vad, want, &want_gain_db);
         ok = ok && abs(out.gain_db - want_gain_db) <= 1;
@@ -250,7 +258,7 @@ static void check_mix_is_the_mean(void)
     int worst = 0;
     for (size_t h = 0; ok && h < HOPS; h++) {
         dsp_afe_frame_t out;
-        fill_hop(in, GEN_ARRAY_N_MICS, h, true);
+        fill_hop(in, &kPlain, h, true);
         ok = dsp_afe_feed(afe, in, 1) == ESP_OK && dsp_afe_fetch(afe, &out) == ESP_OK;
         for (size_t i = 0; ok && i < GEN_GRID_HOP_SAMPLES; i++) {
             worst = abs(out.pcm[i]) > worst ? abs(out.pcm[i]) : worst;
@@ -277,16 +285,25 @@ static void check_config_errors(void)
     ok = ok && dsp_afe_workspace_bytes(&cfg, &hot, &cold) == ESP_ERR_INVALID_ARG;
     ok = ok && dsp_afe_workspace_bytes(NULL, &hot, &cold) == ESP_ERR_INVALID_ARG;
     check(ok, "unknown formats, spatial paths and out-of-range parameters are refused");
+    cfg = kPlain;
+    cfg.input_format = "M";
+    cfg.spatial = DSP_AFE_SPATIAL_GSC;
+    ok = dsp_afe_workspace_bytes(&cfg, &hot, &cold) == ESP_ERR_NOT_SUPPORTED;
+    cfg.spatial = DSP_AFE_SPATIAL_BSS;
+    ok = ok && dsp_afe_workspace_bytes(&cfg, &hot, &cold) == ESP_ERR_NOT_SUPPORTED;
+    check(ok, "gsc and bss are refused on one microphone, built or not");
 #if !CONFIG_DSP_AFE_AEC_ENABLE && !CONFIG_DSP_AFE_GSC_ENABLE && !CONFIG_DSP_AFE_BSS_ENABLE
     cfg = kPlain;
     cfg.input_format = "MMR";
     ok = dsp_afe_workspace_bytes(&cfg, &hot, &cold) == ESP_ERR_NOT_SUPPORTED;
+    cfg.input_format = "MR";
+    ok = ok && dsp_afe_workspace_bytes(&cfg, &hot, &cold) == ESP_ERR_NOT_SUPPORTED;
     cfg = kPlain;
     cfg.spatial = DSP_AFE_SPATIAL_GSC;
     ok = ok && dsp_afe_workspace_bytes(&cfg, &hot, &cold) == ESP_ERR_NOT_SUPPORTED;
     cfg.spatial = DSP_AFE_SPATIAL_BSS;
     ok = ok && dsp_afe_workspace_bytes(&cfg, &hot, &cold) == ESP_ERR_NOT_SUPPORTED;
-    check(ok, "MMR, gsc and bss are refused when their modules are not built");
+    check(ok, "MR, MMR, gsc and bss are refused when their modules are not built");
 #endif
 }
 
@@ -344,8 +361,10 @@ static void check_gap_and_clip(void)
 }
 
 // Bursts of the tone over noise, ch1 at half level, so every adaptive module leaves its start.
-static void fill_varied(int16_t *interleaved, uint8_t n_channels, size_t hop, uint32_t *lcg)
+static void fill_varied(int16_t *interleaved, const dsp_afe_config_t *cfg, size_t hop, uint32_t *lcg)
 {
+    const uint8_t n_mics = mics_of(cfg);
+    const uint8_t n_channels = channels_of(cfg);
     const double level = (hop / 8) % 2 == 0 ? AMPLITUDE : AMPLITUDE / 16.0;
     for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
         *lcg = *lcg * 1664525u + 1013904223u;
@@ -353,8 +372,8 @@ static void fill_varied(int16_t *interleaved, uint8_t n_channels, size_t hop, ui
         const double s = level * sin(2.0 * M_PI * TONE_HZ * (double)(hop * GEN_GRID_HOP_SAMPLES + i) /
                                      GEN_GRID_SAMPLE_RATE_HZ);
         interleaved[i * n_channels] = (int16_t)lrint(s + noise);
-        interleaved[i * n_channels + 1] = (int16_t)lrint(0.5 * s - noise);
-        if (n_channels == MAX_CHANNELS) { interleaved[i * n_channels + 2] = 0; }
+        if (n_mics > 1) { interleaved[i * n_channels + 1] = (int16_t)lrint(0.5 * s - noise); }
+        if (n_channels > n_mics) { interleaved[i * n_channels + n_mics] = 0; }
     }
 }
 
@@ -374,7 +393,6 @@ static bool step(dsp_afe_t *afe, const int16_t *in, dsp_afe_frame_t *out)
 static void check_reset_is_fresh(const dsp_afe_config_t *cfg, const char *what)
 {
     static int16_t in[GEN_GRID_HOP_SAMPLES * MAX_CHANNELS];
-    const uint8_t n_channels = channels_of(cfg);
     dsp_afe_t *reset = make(cfg);
     dsp_afe_t *kept = make(cfg);
     dsp_afe_t *fresh = NULL;
@@ -384,7 +402,7 @@ static void check_reset_is_fresh(const dsp_afe_config_t *cfg, const char *what)
     uint32_t lcg = 777u;
     bool ok = reset != NULL && kept != NULL;
     for (size_t h = 0; ok && h < HOPS * 4; h++) {
-        fill_varied(in, n_channels, h, &lcg);
+        fill_varied(in, cfg, h, &lcg);
         ok = step(reset, in, &a) && step(kept, in, &b);
     }
     if (ok) {
@@ -395,7 +413,7 @@ static void check_reset_is_fresh(const dsp_afe_config_t *cfg, const char *what)
     bool same = true;
     bool kept_same = true;
     for (size_t h = 0; ok && h < HOPS * 4; h++) {
-        fill_varied(in, n_channels, HOPS * 4 + h, &lcg);
+        fill_varied(in, cfg, HOPS * 4 + h, &lcg);
         ok = step(reset, in, &a) && step(fresh, in, &b) && step(kept, in, &c);
         same = same && same_frame(&a, &b);
         kept_same = kept_same && same_frame(&c, &b);
@@ -404,6 +422,35 @@ static void check_reset_is_fresh(const dsp_afe_config_t *cfg, const char *what)
     snprintf(line, sizeof(line),
              "%s: after reset the chain runs bit for bit as a fresh one, unreset it does not", what);
     check(ok && same && !kept_same, line);
+}
+
+static void check_one_microphone(void)
+{
+    static int16_t one_in[GEN_GRID_HOP_SAMPLES];
+    static int16_t twin_in[GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS];
+    dsp_afe_config_t one = kPlain;
+    one.input_format = "M";
+    check_round_trip(&one, "one microphone");
+    check_reset_is_fresh(&one, "one microphone");
+    dsp_afe_t *a = make(&one);
+    dsp_afe_t *b = make(&kPlain);
+    uint32_t lcg = 99u;
+    bool ok = a != NULL && b != NULL;
+    bool same = true;
+    for (size_t h = 0; ok && h < HOPS * 4; h++) {
+        fill_varied(one_in, &one, h, &lcg);
+        for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
+            twin_in[2 * i] = twin_in[2 * i + 1] = one_in[i];
+        }
+        dsp_afe_frame_t x;
+        dsp_afe_frame_t y;
+        ok = step(a, one_in, &x) && step(b, twin_in, &y);
+        same = same && x.doa_deg == -1 && x.doa_conf == 0;
+        y.doa_deg = x.doa_deg;
+        y.doa_conf = x.doa_conf;
+        same = same && same_frame(&x, &y);
+    }
+    check(ok && same, "one microphone gives what two identical ones give but doa, which stays unknown");
 }
 
 static void check_params(void)
@@ -597,6 +644,10 @@ static void check_every_path(void)
     check_reset_is_fresh(&cfg, "MMR with aec and bss");
     cfg.spatial = DSP_AFE_SPATIAL_GSC;
     check_reset_is_fresh(&cfg, "MMR with aec and gsc");
+    cfg.input_format = "MR";
+    cfg.spatial = DSP_AFE_SPATIAL_NONE;
+    check_round_trip(&cfg, "MR with aec through every shell, silent reference flagged");
+    check_reset_is_fresh(&cfg, "MR with aec");
 }
 
 static void check_balance_in_chain(void)
@@ -617,7 +668,7 @@ static void check_balance_in_chain(void)
     int worst = 0;
     for (size_t h = 0; ok && h < HOPS; h++) {
         dsp_afe_frame_t out;
-        fill_hop(in, GEN_ARRAY_N_MICS, h, false);
+        fill_hop(in, &cfg, h, false);
         ok = dsp_afe_feed(afe, in, 1) == ESP_OK && dsp_afe_fetch(afe, &out) == ESP_OK;
         for (size_t i = 0; ok && i < GEN_GRID_HOP_SAMPLES; i++) {
             worst = abs(out.pcm[i]) > worst ? abs(out.pcm[i]) : worst;
@@ -707,6 +758,7 @@ int main(int argc, char **argv)
     check_fifo();
     check_gap_and_clip();
     check_reset_is_fresh(&kPlain, "the chain as built");
+    check_one_microphone();
     check_params();
 #if DSP_AFE_HOST_ALL_MODULES
     check_module_shells();

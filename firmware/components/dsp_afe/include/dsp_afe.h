@@ -29,7 +29,7 @@ typedef enum {
     DSP_AFE_FLAG_GAP = 1u << 0,     // upstream dropped frames
     DSP_AFE_FLAG_CLIPPED = 1u << 1, // an input sample hit full scale
     DSP_AFE_FLAG_AEC_DIVERGED = 1u << 2,
-    DSP_AFE_FLAG_NO_REF = 1u << 3, // "MMR" asked, reference is silent
+    DSP_AFE_FLAG_NO_REF = 1u << 3, // "MR"/"MMR" asked, reference is silent
 } dsp_afe_flag_t;
 
 typedef struct {
@@ -38,11 +38,11 @@ typedef struct {
 } dsp_afe_calib_t;
 
 typedef struct {
-    const char *input_format; // "MM", or "MMR" with a reference
+    const char *input_format; // "M" or "MM", "R" appended for a reference
     dsp_afe_spatial_t spatial;
     const dsp_afe_ns_ops_t *ns; // NULL: OM-LSA floor if built, else no ns
     void *ns_ctx;
-    const dsp_afe_calib_t *calib; // NULL skips balance, zero delay
+    const dsp_afe_calib_t *calib; // NULL skips balance, zero delay; "M" never balances
     float ns_floor_db;
     float agc_target_dbfs;
     uint8_t vad_aggressiveness;
@@ -78,7 +78,7 @@ typedef struct dsp_afe_s dsp_afe_t;
 /** Split the memory this configuration needs into hot (touched every hop) and cold parts.
  *  @ctx any | non-blocking
  *  @ret ESP_OK | ESP_ERR_INVALID_ARG unknown format or parameter out of range
- *       | ESP_ERR_NOT_SUPPORTED "MMR" without aec, or a spatial path not built (Kconfig)
+ *       | ESP_ERR_NOT_SUPPORTED a reference without aec, a spatial path not built (Kconfig) or on one mic
  */
 esp_err_t dsp_afe_workspace_bytes(const dsp_afe_config_t *cfg, size_t *hot_bytes, size_t *cold_bytes);
 

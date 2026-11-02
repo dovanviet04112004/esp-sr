@@ -18,13 +18,24 @@
 #include "sdkconfig.h"
 
 #define N_MICS GEN_ARRAY_N_MICS
-#define MAX_CHANNELS (N_MICS + 1) // "MMR" appends the loudspeaker reference
+#define MAX_CHANNELS (N_MICS + 1) // "R" appends the loudspeaker reference
 #define PCM_FULL_SCALE 32768.0f
 #define BROADSIDE_DEG ((GEN_ARRAY_DOA_MIN_DEG + GEN_ARRAY_DOA_MAX_DEG) / 2.0f)
 #define ANGLE_UNKNOWN_DEG (-1)
 #define VAD_AGGRESSIVENESS_MAX 3 // dsp_afe_vad_config_t: 0 most lenient .. 3 strictest
 
 _Static_assert(N_MICS == 2, "the spatial stage takes exactly two microphones");
+
+static const struct {
+    const char *name;
+    uint8_t n_mics;
+    uint8_t n_channels;
+} kFormats[] = {
+    {"M", 1, 1},
+    {"MR", 1, 2},
+    {"MM", N_MICS, N_MICS},
+    {"MMR", N_MICS, N_MICS + 1},
+};
 
 typedef enum {
     WALK_SIZE,  // count bytes only
@@ -39,6 +50,7 @@ typedef struct {
 
 struct dsp_afe_s {
     dsp_afe_config_t cfg; // calib points at the copy below
+    uint8_t n_mics;
     uint8_t n_channels;
     dsp_afe_calib_t calib;
     dsp_spec_fft_t *fft;
@@ -106,20 +118,22 @@ static bool param_ok(dsp_afe_param_t param, float value)
     }
 }
 
-static esp_err_t check_config(const dsp_afe_config_t *cfg, uint8_t *n_channels)
+static esp_err_t check_config(const dsp_afe_config_t *cfg, uint8_t *n_mics, uint8_t *n_channels)
 {
     if (cfg == NULL || cfg->input_format == NULL) { return ESP_ERR_INVALID_ARG; }
-    if (strcmp(cfg->input_format, "MM") == 0) {
-        *n_channels = N_MICS;
-    } else if (strcmp(cfg->input_format, "MMR") == 0) {
-        *n_channels = N_MICS + 1;
-    } else {
-        return ESP_ERR_INVALID_ARG;
+    size_t f = 0;
+    while (f < sizeof(kFormats) / sizeof(kFormats[0]) && strcmp(cfg->input_format, kFormats[f].name) != 0) {
+        f++;
     }
+    if (f == sizeof(kFormats) / sizeof(kFormats[0])) { return ESP_ERR_INVALID_ARG; }
+    *n_mics = kFormats[f].n_mics;
+    *n_channels = kFormats[f].n_channels;
     const bool params_ok = param_ok(DSP_AFE_PARAM_NS_FLOOR_DB, cfg->ns_floor_db) &&
                            param_ok(DSP_AFE_PARAM_AGC_TARGET_DBFS, cfg->agc_target_dbfs) &&
                            param_ok(DSP_AFE_PARAM_VAD_AGGRESSIVENESS, cfg->vad_aggressiveness);
-    return params_ok ? ESP_OK : ESP_ERR_INVALID_ARG;
+    if (!params_ok) { return ESP_ERR_INVALID_ARG; }
+    const bool steered = cfg->spatial == DSP_AFE_SPATIAL_GSC || cfg->spatial == DSP_AFE_SPATIAL_BSS;
+    return steered && *n_mics < N_MICS ? ESP_ERR_NOT_SUPPORTED : ESP_OK;
 }
 
 static void fail(walker_t *w, esp_err_t err)
@@ -137,12 +151,12 @@ static void *region(walker_t *w, size_t bytes)
     return w->mode == WALK_SIZE ? NULL : mem;
 }
 
-static void walk_spec(walker_t *w, dsp_afe_t *afe)
+static void walk_spec(walker_t *w, uint8_t n_mics, dsp_afe_t *afe)
 {
     const size_t fft_bytes = dsp_spec_fft_workspace_bytes(GEN_GRID_FFT_SIZE);
     void *mem = region(w, fft_bytes);
     if (mem != NULL) { fail(w, dsp_spec_fft_init(&afe->fft, GEN_GRID_FFT_SIZE, mem, fft_bytes)); }
-    for (size_t m = 0; m < N_MICS; m++) {
+    for (size_t m = 0; m < n_mics; m++) {
         mem = region(w, dsp_spec_stft_workspace_bytes());
         if (mem != NULL) {
             fail(w, dsp_spec_stft_init(&afe->analysis[m], afe->fft, mem, dsp_spec_stft_workspace_bytes()));
@@ -154,25 +168,27 @@ static void walk_spec(walker_t *w, dsp_afe_t *afe)
     }
 }
 
-static void walk_hpf(walker_t *w, dsp_afe_t *afe)
+static void walk_hpf(walker_t *w, uint8_t n_mics, dsp_afe_t *afe)
 {
 #if CONFIG_DSP_AFE_HPF_ENABLE
-    const dsp_afe_hpf_config_t cfg = {.cutoff_hz = GEN_AFE_HPF_CUTOFF_HZ, .n_channels = N_MICS};
+    const dsp_afe_hpf_config_t cfg = {.cutoff_hz = GEN_AFE_HPF_CUTOFF_HZ, .n_channels = n_mics};
     const size_t bytes = dsp_afe_hpf_workspace_bytes(&cfg);
     void *mem = region(w, bytes);
     if (mem != NULL) { fail(w, dsp_afe_hpf_init(&afe->hpf, &cfg, mem, bytes)); }
 #else
     (void)w;
+    (void)n_mics;
     (void)afe;
 #endif
 }
 
-static void walk_aec(walker_t *w, const dsp_afe_config_t *cfg, uint8_t n_channels, dsp_afe_t *afe)
+static void walk_aec(walker_t *w, const dsp_afe_config_t *cfg, uint8_t n_mics, uint8_t n_channels,
+                     dsp_afe_t *afe)
 {
-    if (n_channels <= N_MICS) { return; }
+    if (n_channels <= n_mics) { return; }
 #if CONFIG_DSP_AFE_AEC_ENABLE
     const dsp_afe_aec_config_t aec = {
-        .n_mics = N_MICS,
+        .n_mics = n_mics,
         .n_partitions = GEN_AFE_AEC_PARTITIONS,
         .bulk_delay_samples = cfg->calib != NULL ? cfg->calib->aec_delay_samples : 0,
     };
@@ -186,8 +202,9 @@ static void walk_aec(walker_t *w, const dsp_afe_config_t *cfg, uint8_t n_channel
 #endif
 }
 
-static void walk_doa(walker_t *w, dsp_afe_t *afe)
+static void walk_doa(walker_t *w, uint8_t n_mics, dsp_afe_t *afe)
 {
+    if (n_mics < N_MICS) { return; }
 #if CONFIG_DSP_AFE_DOA_ENABLE
     const dsp_afe_doa_config_t cfg = {
         .spacing_m = GEN_ARRAY_SPACING_M,
@@ -367,14 +384,14 @@ static void walk_agc(walker_t *w, const dsp_afe_config_t *cfg, dsp_afe_t *afe)
 }
 
 // One walk sizes and builds, so the two can never disagree on the layout of hot.
-static esp_err_t walk(const dsp_afe_config_t *cfg, uint8_t n_channels, dsp_afe_t *afe, afe_arena_t *arena,
-                      walk_mode_t mode)
+static esp_err_t walk(const dsp_afe_config_t *cfg, uint8_t n_mics, uint8_t n_channels, dsp_afe_t *afe,
+                      afe_arena_t *arena, walk_mode_t mode)
 {
     walker_t w = {.arena = arena, .mode = mode, .err = ESP_OK};
-    walk_spec(&w, afe);
-    walk_hpf(&w, afe);
-    walk_aec(&w, cfg, n_channels, afe);
-    walk_doa(&w, afe);
+    walk_spec(&w, n_mics, afe);
+    walk_hpf(&w, n_mics, afe);
+    walk_aec(&w, cfg, n_mics, n_channels, afe);
+    walk_doa(&w, n_mics, afe);
     walk_spatial(&w, cfg->spatial, afe);
     walk_ns(&w, cfg, afe);
     walk_vad(&w, cfg, afe);
@@ -384,13 +401,14 @@ static esp_err_t walk(const dsp_afe_config_t *cfg, uint8_t n_channels, dsp_afe_t
 
 esp_err_t dsp_afe_workspace_bytes(const dsp_afe_config_t *cfg, size_t *hot_bytes, size_t *cold_bytes)
 {
+    uint8_t n_mics = 0;
     uint8_t n_channels = 0;
     if (hot_bytes == NULL || cold_bytes == NULL) { return ESP_ERR_INVALID_ARG; }
-    esp_err_t err = check_config(cfg, &n_channels);
+    esp_err_t err = check_config(cfg, &n_mics, &n_channels);
     if (err != ESP_OK) { return err; }
     afe_arena_t sizing = afe_arena(NULL, 0);
     afe_take(&sizing, sizeof(struct dsp_afe_s));
-    err = walk(cfg, n_channels, NULL, &sizing, WALK_SIZE);
+    err = walk(cfg, n_mics, n_channels, NULL, &sizing, WALK_SIZE);
     if (err != ESP_OK) { return err; }
     *hot_bytes = AFE_ALIGN_BYTES + sizing.used;
     *cold_bytes = 0;
@@ -411,13 +429,13 @@ esp_err_t dsp_afe_init(dsp_afe_t **out, const dsp_afe_config_t *cfg, void *hot, 
     dsp_afe_t *afe = afe_take(&arena, sizeof(*afe));
     memset(afe, 0, sizeof(*afe));
     afe->cfg = *cfg;
-    check_config(cfg, &afe->n_channels);
+    check_config(cfg, &afe->n_mics, &afe->n_channels);
     if (cfg->calib != NULL) {
         afe->calib = *cfg->calib;
         afe->cfg.calib = &afe->calib;
     }
     afe->doa_result.angle_deg = ANGLE_UNKNOWN_DEG;
-    err = walk(&afe->cfg, afe->n_channels, afe, &arena, WALK_BUILD);
+    err = walk(&afe->cfg, afe->n_mics, afe->n_channels, afe, &arena, WALK_BUILD);
     if (err == ESP_OK) { *out = afe; }
     return err;
 }
@@ -430,26 +448,26 @@ static void to_float(dsp_afe_t *afe, const int16_t *interleaved, bool *clipped, 
     for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
         for (uint8_t ch = 0; ch < n; ch++) {
             const int16_t s = interleaved[i * n + ch];
-            clip = clip || (ch < N_MICS && (s == INT16_MAX || s == INT16_MIN));
-            silent = silent && (ch < N_MICS || s == 0);
+            clip = clip || (ch < afe->n_mics && (s == INT16_MAX || s == INT16_MIN));
+            silent = silent && (ch < afe->n_mics || s == 0);
             afe->pcm[ch][i] = (float)s / PCM_FULL_SCALE;
         }
     }
     *clipped = clip;
-    *ref_silent = n > N_MICS && silent;
+    *ref_silent = n > afe->n_mics && silent;
 }
 
 static void run_echo_stage(dsp_afe_t *afe, uint16_t *flags)
 {
 #if CONFIG_DSP_AFE_HPF_ENABLE
-    for (uint8_t m = 0; m < N_MICS; m++) {
+    for (uint8_t m = 0; m < afe->n_mics; m++) {
         dsp_afe_hpf_process(afe->hpf, m, afe->pcm[m], GEN_GRID_HOP_SAMPLES);
     }
 #endif
 #if CONFIG_DSP_AFE_AEC_ENABLE
-    if (afe->n_channels > N_MICS) {
+    if (afe->n_channels > afe->n_mics) {
         float *const mics[N_MICS] = {afe->pcm[0], afe->pcm[1]};
-        dsp_afe_aec_process(afe->aec, mics, afe->pcm[N_MICS], afe->echo_power);
+        dsp_afe_aec_process(afe->aec, mics, afe->pcm[afe->n_mics], afe->echo_power);
         dsp_afe_aec_stats_t aec;
         dsp_afe_aec_stats(afe->aec, &aec);
         *flags |= aec.diverged ? DSP_AFE_FLAG_AEC_DIVERGED : 0u;
@@ -491,6 +509,7 @@ static void hear_mics(dsp_afe_t *afe)
 
 static dsp_spec_cplx_t *run_spatial_stage(dsp_afe_t *afe)
 {
+    if (afe->n_mics < N_MICS) { return afe->bins[0]; }
     const dsp_spec_cplx_t *x0 = afe->bins[0];
     const dsp_spec_cplx_t *x1 = afe->bins[1];
     dsp_spec_cplx_t *y = afe->beam[0];
@@ -531,7 +550,7 @@ static void run_ns_stage(dsp_afe_t *afe, dsp_spec_cplx_t *y)
     for (size_t k = 0; k < GEN_GRID_N_BINS; k++) {
         afe->power[k] = y[k].re * y[k].re + y[k].im * y[k].im;
     }
-    const float *echo_power = afe->n_channels > N_MICS ? afe->echo_power : NULL;
+    const float *echo_power = afe->n_channels > afe->n_mics ? afe->echo_power : NULL;
     float speech_prob = 0.0f;
     if (afe->ns->process(afe->ns_ctx, afe->ns_state, afe->power, echo_power, afe->gain, &speech_prob) !=
         ESP_OK) {
@@ -575,7 +594,7 @@ static void run_hop(dsp_afe_t *afe, const int16_t *interleaved, dsp_afe_frame_t 
     uint16_t flags = afe->gap_pending ? DSP_AFE_FLAG_GAP : 0u;
     to_float(afe, interleaved, &clipped, &ref_silent);
     run_echo_stage(afe, &flags);
-    for (size_t m = 0; m < N_MICS; m++) {
+    for (size_t m = 0; m < afe->n_mics; m++) {
         dsp_spec_stft_analyze(afe->analysis[m], afe->pcm[m], afe->bins[m]);
     }
     dsp_spec_cplx_t *y = run_spatial_stage(afe);
@@ -647,7 +666,7 @@ static void reset_spatial(dsp_afe_t *afe)
 
 static void drop_samples(dsp_afe_t *afe)
 {
-    for (size_t m = 0; m < N_MICS; m++) {
+    for (size_t m = 0; m < afe->n_mics; m++) {
         dsp_spec_stft_reset(afe->analysis[m]);
     }
     dsp_spec_istft_reset(afe->synthesis);
@@ -664,10 +683,10 @@ void dsp_afe_reset(dsp_afe_t *afe)
 {
     drop_samples(afe);
 #if CONFIG_DSP_AFE_AEC_ENABLE
-    if (afe->n_channels > N_MICS) { dsp_afe_aec_reset(afe->aec); }
+    if (afe->n_channels > afe->n_mics) { dsp_afe_aec_reset(afe->aec); }
 #endif
 #if CONFIG_DSP_AFE_DOA_ENABLE
-    dsp_afe_doa_reset(afe->doa);
+    if (afe->doa != NULL) { dsp_afe_doa_reset(afe->doa); }
 #endif
     reset_spatial(afe);
     if (afe->ns != NULL) { afe->ns->reset(afe->ns_ctx, afe->ns_state); }
