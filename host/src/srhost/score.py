@@ -34,7 +34,8 @@ PCM_MIN, PCM_MAX = -32768, 32767
 SAMPLE_BYTES = 2
 BLOCK = 1 << 20
 CHAIN_TOLERANCE = REPO_ROOT / "contracts" / "golden" / "chain" / "tolerance.yaml"
-PARITY_CHANNELS = ("ch0", "ch1", "clean")
+# The microphones a session streams: two, or one on a one-microphone board (KEHOACH 7.4).
+SESSION_MICS = (("ch0", "ch1"), ("mic",))
 PAIR_CHANNELS = ("ch0", "ch1")
 # Search twice the nominal reach, so a spacing up to double the contract still shows (KEHOACH 2.3).
 MAX_LAG_SAMPLES = 2.0 * array.MAX_DELAY_SAMPLES
@@ -159,22 +160,22 @@ def chain_tolerance_lsb() -> float:
     return float(yaml.safe_load(CHAIN_TOLERANCE.read_text(encoding="utf-8"))["tensors"]["pcm"]["max_abs"])
 
 
-def chain_parity(ch0: np.ndarray, ch1: np.ndarray, clean: np.ndarray, gaps: list[Gap]) -> ParityFigures:
-    """Run the mirror over the stretches between gaps, each gap bridged as the board bridges it, and compare hop by
-    hop past the warm-up of every stretch."""
+def chain_parity(mics: list[np.ndarray], clean: np.ndarray, gaps: list[Gap]) -> ParityFigures:
+    """Run the mirror over the stretches between gaps, one microphone as "M", each gap bridged as the board bridges
+    it, and compare hop by hop past the warm-up of every stretch."""
     hop = grid.HOP_SAMPLES
     bounds = [0, *(g.offset_samples for g in gaps), len(clean)]
     tolerance = chain_tolerance_lsb()
     compared = skipped = over = 0
     max_abs = 0
     signal_power = error_power = 0.0
-    chain = Chain(cfg=PLAIN)
+    chain = Chain("M" if len(mics) == 1 else "MM", PLAIN)
     for stretch, (start, end) in enumerate(pairwise(bounds)):
         if stretch > 0:
             bridge(chain, gaps[stretch - 1])
         for k, at in enumerate(range(start, end - hop + 1, hop)):
-            mics = np.column_stack([ch0[at : at + hop], ch1[at : at + hop]]).reshape(-1)
-            mirror = chain.process(mics).pcm.astype(np.int32)
+            interleaved = np.column_stack([m[at : at + hop] for m in mics]).reshape(-1)
+            mirror = chain.process(interleaved).pcm.astype(np.int32)
             if k < WARMUP_HOPS:
                 skipped += 1
                 continue
@@ -314,8 +315,9 @@ def score(session: Path, shift: int | None = None) -> Score:
         floors[name] = mic_pair.noise_floor_dbfs(mic_pair.pair_stats(pcm[name], pcm[name]), 0)
     channels = [channel_figures(name, samples, floors[name]) for name, samples in pcm.items()]
     parity = None
-    if shift is None and all(name in pcm for name in PARITY_CHANNELS):
-        parity = chain_parity(pcm["ch0"], pcm["ch1"], pcm["clean"], read_gaps(session))
+    mics = next((names for names in SESSION_MICS if all(name in pcm for name in names)), None)
+    if shift is None and mics is not None and "clean" in pcm:
+        parity = chain_parity([pcm[name] for name in mics], pcm["clean"], read_gaps(session))
     pair = None
     front = ns = None
     if stats is not None:

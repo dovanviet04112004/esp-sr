@@ -102,6 +102,16 @@ def test_one_sample_off_by_more_than_the_tolerance_is_caught(tmp_path: Path) -> 
     assert (parity.max_abs_lsb, parity.over_tolerance) == (5, 1)
 
 
+def test_a_one_microphone_session_is_checked_against_the_one_microphone_chain(tmp_path: Path) -> None:
+    rng = np.random.default_rng(8)
+    mic = rng.integers(-3000, 3000, size=HOPS * HOP, dtype=np.int16)
+    chain = Chain("M", ChainConfig(modules=()))
+    clean = np.concatenate([chain.process(mic[k * HOP : (k + 1) * HOP]).pcm for k in range(HOPS)])
+    result = score.score(write(tmp_path, {"mic": mic, "clean": clean}))
+    assert [f.name for f in result.channels] == ["clean", "mic"] and result.front is None
+    assert (result.parity.hops_compared, result.parity.max_abs_lsb) == (HOPS - score.WARMUP_HOPS, 0)
+
+
 def test_a_session_without_clean_gets_channel_figures_only(tmp_path: Path) -> None:
     session, channels = board_session(tmp_path)
     del channels["clean"]
