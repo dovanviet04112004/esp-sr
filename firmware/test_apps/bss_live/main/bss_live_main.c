@@ -761,7 +761,7 @@ static esp_err_t start_run(EventGroupHandle_t system)
     s_sb = xStreamBufferCreateWithCaps(CONFIG_SVC_REPORT_STREAM_BUFFER_KB * 1024, 1, MALLOC_CAP_SPIRAM);
     if (s_sb == NULL) { return ESP_ERR_NO_MEM; }
     const svc_report_stream_config_t stream = {
-        .sb = s_sb, .system = system, .raw_channels = s_chain.out_channels};
+        .sb = s_sb, .system = system, .raw_channels = s_chain.out_channels, .n_mics = GEN_ARRAY_N_MICS};
     ESP_RETURN_ON_ERROR(svc_report_stream_init(&stream), TAG, "stream");
     const uint32_t stream_s = job->seconds + STREAM_SLACK_S + (job->delay_ms + MS_PER_S - 1) / MS_PER_S;
     ESP_RETURN_ON_ERROR(svc_report_stream_start(stream_mode(job->seats), job->host, job->port, stream_s), TAG,

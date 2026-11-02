@@ -14,7 +14,8 @@ extern "C" {
 #endif
 
 typedef struct {
-    uint8_t n_channels;           // drv_audio_channels(): 2, or 3 with the speaker reference
+    uint8_t n_mics;               // APP_MIC_COUNT: 1 runs dsp_afe as "M" (ADR-0042)
+    uint8_t n_channels;           // drv_audio_channels(): n_mics, one more with the ref
     const dsp_afe_calib_t *calib; // NULL skips balance; copied
     float ns_floor_db;
     float agc_target_dbfs;

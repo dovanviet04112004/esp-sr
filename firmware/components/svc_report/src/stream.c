@@ -34,6 +34,7 @@ static struct {
     StreamBufferHandle_t sb;
     EventGroupHandle_t system;
     uint8_t raw_channels;
+    uint8_t n_mics;
     _Atomic uint8_t mode;
     _Atomic uint32_t dropped;
     portMUX_TYPE lock; // host, port, until_us: start runs on another task
@@ -50,7 +51,18 @@ static struct {
 static bool wants_clean(uint8_t mode)
 {
     return mode == GEN_STREAM_MODE_CLEAN || mode == GEN_STREAM_MODE_RAW_REF_CLEAN ||
-           mode == GEN_STREAM_MODE_RAW_CLEAN;
+           mode == GEN_STREAM_MODE_RAW_CLEAN || mode == GEN_STREAM_MODE_MIC_CLEAN;
+}
+
+// The microphones a mode's channels name: ch0 ch1, the one mic, or none (KEHOACH 7.4).
+static uint8_t mics_named(uint8_t mode)
+{
+    switch (mode) {
+    case GEN_STREAM_MODE_CLEAN: return 0;
+    case GEN_STREAM_MODE_MIC:
+    case GEN_STREAM_MODE_MIC_CLEAN: return 1;
+    default: return GEN_ARRAY_N_MICS;
+    }
 }
 
 static uint8_t raw_needed(uint8_t mode)
@@ -62,11 +74,13 @@ static uint8_t raw_needed(uint8_t mode)
 esp_err_t svc_report_stream_init(const svc_report_stream_config_t *cfg)
 {
     if (s_stream.sb != NULL) { return ESP_ERR_INVALID_STATE; }
-    if (cfg == NULL || cfg->sb == NULL || cfg->system == NULL || cfg->raw_channels < GEN_ARRAY_N_MICS) {
+    if (cfg == NULL || cfg->sb == NULL || cfg->system == NULL || cfg->n_mics == 0 ||
+        cfg->n_mics > GEN_ARRAY_N_MICS || cfg->raw_channels < cfg->n_mics) {
         return ESP_ERR_INVALID_ARG;
     }
     s_stream.system = cfg->system;
     s_stream.raw_channels = cfg->raw_channels;
+    s_stream.n_mics = cfg->n_mics;
     s_stream.sb = cfg->sb;
     return ESP_OK;
 }
@@ -78,7 +92,8 @@ esp_err_t svc_report_stream_start(uint8_t mode, const char *host, uint16_t port,
         strlen(host) >= HOST_BYTES || port == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (raw_needed(mode) > s_stream.raw_channels ||
+    const uint8_t mics = mics_named(mode);
+    if (raw_needed(mode) > s_stream.raw_channels || (mics != 0 && mics != s_stream.n_mics) ||
         gen_stream_mode_channels((gen_stream_mode_t)mode) > CONFIG_SVC_REPORT_STREAM_CHANNELS_MAX) {
         return ESP_ERR_NOT_SUPPORTED;
     }

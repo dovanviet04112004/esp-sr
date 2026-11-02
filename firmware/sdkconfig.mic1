@@ -1,0 +1,3 @@
+# One INMP441 on the right slot, board B's ch1: make product MICS=1 (ADR-0042, KEHOACH 2.3).
+CONFIG_APP_MIC_COUNT=1
+CONFIG_APP_MIC_SLOT_RIGHT=y

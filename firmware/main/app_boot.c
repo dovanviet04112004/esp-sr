@@ -42,6 +42,14 @@ _Static_assert(sizeof(((command_set_t *)0)->commands) / sizeof(((command_set_t *
 #define SPEAKER_FITTED false
 #endif
 
+#if CONFIG_APP_MIC_COUNT == 2
+#define MIC_SLOTS DRV_AUDIO_MICS_BOTH
+#elif CONFIG_APP_MIC_SLOT_RIGHT
+#define MIC_SLOTS DRV_AUDIO_MICS_RIGHT
+#else
+#define MIC_SLOTS DRV_AUDIO_MICS_LEFT
+#endif
+
 static const char *TAG = "app_boot";
 
 static void log_heap(const char *step)
@@ -251,6 +259,7 @@ esp_err_t app_boot(void)
         .pcm_shift = pcm_shift(),
         .enable_tx = SPEAKER_FITTED,
         .dma_desc_num = DMA_DESC_NUM,
+        .mics = MIC_SLOTS,
     };
     ESP_RETURN_ON_ERROR(drv_audio_init(&audio), TAG, "audio");
     log_heap("audio");
@@ -259,6 +268,7 @@ esp_err_t app_boot(void)
     load_models();
     log_heap("models");
     const svc_front_config_t front = {
+        .n_mics = CONFIG_APP_MIC_COUNT,
         .n_channels = drv_audio_channels(),
         .calib = load_calib(),
         .ns_floor_db = afe_i8(STORAGE_KEY_NS_FLOOR_DB, GEN_AFE_NS_FLOOR_DB),
@@ -272,15 +282,17 @@ esp_err_t app_boot(void)
     start_listener();
     log_heap("listen");
 #if CONFIG_NET_STREAM_ENABLE
-    const svc_report_stream_config_t stream = {
-        .sb = app_wiring()->stream, .system = app_wiring()->system, .raw_channels = drv_audio_channels()};
+    const svc_report_stream_config_t stream = {.sb = app_wiring()->stream,
+                                               .system = app_wiring()->system,
+                                               .raw_channels = drv_audio_channels(),
+                                               .n_mics = CONFIG_APP_MIC_COUNT};
     ESP_RETURN_ON_ERROR(svc_report_stream_init(&stream), TAG, "stream");
 #endif
 
     char device_id[GEN_TOPIC_DEVICE_ID_MAX + 1];
     ESP_RETURN_ON_ERROR(sys_storage_device_id(device_id, sizeof(device_id)), TAG, "device id");
-    ESP_LOGI(TAG, "esp-sr %s, grid 0x%08x, %s, boot %" PRIu32 ", %u channel(s), speaker %s",
+    ESP_LOGI(TAG, "esp-sr %s, grid 0x%08x, %s, boot %" PRIu32 ", %u mic(s), %u channel(s), speaker %s",
              esp_app_get_description()->version, (unsigned)GEN_GRID_HASH, device_id, sys_storage_boot_count(),
-             (unsigned)drv_audio_channels(), SPEAKER_FITTED ? "on" : "off");
+             (unsigned)CONFIG_APP_MIC_COUNT, (unsigned)drv_audio_channels(), SPEAKER_FITTED ? "on" : "off");
     return ESP_OK;
 }

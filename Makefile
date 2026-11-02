@@ -42,8 +42,11 @@ ML_CPU := cd ml && CUDA_VISIBLE_DEVICES= uv run
 SDKCONFIG_BASE := sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.afe
 SECRETS := $(if $(wildcard firmware/sdkconfig.secrets),;sdkconfig.secrets)
 IDF_DEV = idf.py -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.dev$(SECRETS)"
-IDF_BENCH = idf.py -B build_bench -D SDKCONFIG=build_bench/sdkconfig \
-  -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.bench$(SECRETS)"
+# MICS=1 builds the one-microphone board in a folder of its own, sdkconfig.mic1 last (ADR-0042, KEHOACH 4.5.8).
+BENCH_BUILD := build_bench$(if $(filter 1,$(MICS)),_mic1)
+MIC1 := $(if $(filter 1,$(MICS)),sdkconfig.mic1)
+IDF_BENCH = idf.py -B $(BENCH_BUILD) -D SDKCONFIG=$(BENCH_BUILD)/sdkconfig \
+  -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.bench$(SECRETS)$(if $(MIC1),;$(MIC1))"
 FW_DEFAULTS := firmware/sdkconfig.defaults firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.afe \
                firmware/CMakeLists.txt $(wildcard firmware/sdkconfig.secrets) \
                $(wildcard firmware/components/*/Kconfig) firmware/main/Kconfig.projbuild
@@ -470,14 +473,15 @@ fw-dev: ## Build the dev profile
 	@$(call fresh_sdkconfig,firmware/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.dev)
 	cd firmware && $(IDF_DEV) build
 
-fw-bench: ## Build the bench profile, the only one numbers are reported from
-	@$(call fresh_sdkconfig,firmware/build_bench/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.bench)
+fw-bench: ## Build the bench profile, the only one numbers are reported from [MICS=1: one microphone]
+	@$(call fresh_sdkconfig,firmware/$(BENCH_BUILD)/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.bench \
+	  $(addprefix firmware/,$(MIC1)))
 	cd firmware && $(IDF_BENCH) build
 
 # A test app leaves its own partition table on the board, so the product's goes back with the app, all in one esptool
 # call: a reset between them boots the test app, which writes its model slot over models_0. OTA data stays.
 fw-bench-flash: fw-bench ## Flash the bench app, its bootloader and partition table over the CH340; storage, set.json among it, stays
-	cd firmware/build_bench && python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD) write-flash \
+	cd firmware/$(BENCH_BUILD) && python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD) write-flash \
 	  --skip-flashed $$(sed -n 1p flash_args) $$(sed 1d flash_args | grep -v -e ota_data -e storage)
 
 fw-prod: ## Build the prod profile in build_prod, from its own sdkconfig
@@ -546,11 +550,11 @@ nvs-restore: ## Write FILE, a copy nvs-save made, back to board B's NVS partitio
 	$(PRODUCT_PARTS) write_partition --partition-name nvs --input "$(abspath $(FILE))"
 
 storage-flash: fw-bench ## Write the bench build's LittleFS image, set.json among it, to board B's storage partition
-	$(call write_at,storage,firmware/build_bench/storage.bin)
+	$(call write_at,storage,firmware/$(BENCH_BUILD)/storage.bin)
 
 # Models and storage go first, each write leaving the chip in its loader: the product's first boot finds its models and
 # keeps the NVS thresholds, and no test app left in ota_0 boots in between to write its own slots over models_0.
-product: ## Put the product back on board B after test apps: models, storage, then firmware, and show its boot [SPEAKER=b0|b3]
+product: ## Put the product back on board B after test apps: models, storage, then firmware, and show its boot [SPEAKER=b0|b3] [MICS=1]
 	$(if $(SPEAKER),$(MAKE) --no-print-directory speaker-use SPEAKER=$(SPEAKER))
 	$(MAKE) --no-print-directory models-flash AFTER=no-reset
 	$(MAKE) --no-print-directory storage-flash AFTER=no-reset

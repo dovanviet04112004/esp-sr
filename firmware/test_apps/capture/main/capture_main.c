@@ -140,7 +140,7 @@ void app_main(void)
     StreamBufferHandle_t sb =
         xStreamBufferCreateWithCaps(stream_buffer_bytes(drv_audio_channels()), 1, MALLOC_CAP_SPIRAM);
     const svc_report_stream_config_t stream = {
-        .sb = sb, .system = system, .raw_channels = drv_audio_channels()};
+        .sb = sb, .system = system, .raw_channels = drv_audio_channels(), .n_mics = GEN_ARRAY_N_MICS};
     ESP_ERROR_CHECK(sb != NULL ? svc_report_stream_init(&stream) : ESP_ERR_NO_MEM);
     const uint8_t mode =
         drv_audio_channels() > GEN_ARRAY_N_MICS ? GEN_STREAM_MODE_RAW_REF : GEN_STREAM_MODE_RAW;

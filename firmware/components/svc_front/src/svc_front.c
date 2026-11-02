@@ -16,14 +16,18 @@ static struct {
     bool started;
 } s_front;
 
+// dsp_afe's input format by microphone count, then without and with the reference.
+static const char *const kFormats[GEN_ARRAY_N_MICS][2] = {{"M", "MR"}, {"MM", "MMR"}};
+
 esp_err_t svc_front_init(const svc_front_config_t *cfg)
 {
     if (s_front.afe != NULL) { return ESP_ERR_INVALID_STATE; }
-    if (cfg == NULL || cfg->n_channels < GEN_ARRAY_N_MICS || cfg->n_channels > GEN_ARRAY_N_MICS + 1) {
+    if (cfg == NULL || cfg->n_mics == 0 || cfg->n_mics > GEN_ARRAY_N_MICS || cfg->n_channels < cfg->n_mics ||
+        cfg->n_channels > cfg->n_mics + 1) {
         return ESP_ERR_INVALID_ARG;
     }
     const dsp_afe_config_t afe_cfg = {
-        .input_format = cfg->n_channels > GEN_ARRAY_N_MICS ? "MMR" : "MM",
+        .input_format = kFormats[cfg->n_mics - 1][cfg->n_channels - cfg->n_mics],
         .spatial = DSP_AFE_SPATIAL_NONE,
         .calib = cfg->calib,
         .ns_floor_db = cfg->ns_floor_db,

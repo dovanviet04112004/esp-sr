@@ -15,6 +15,29 @@ menu "esp-sr application"
             only, noi_task is never created, and replies stay MQTT events
             (KEHOACH 2.1).
 
+    config APP_MIC_COUNT
+        int "INMP441 microphones on the I2S data line"
+        range 1 2
+        default 2
+        help
+            Board B has two. One runs dsp_afe as "M": no balance, no doa,
+            no gsc or bss, and the raw stream as modes 9 and 10 (ADR-0042,
+            KEHOACH 2.3).
+
+    choice APP_MIC_SLOT
+        prompt "I2S slot of the one microphone"
+        depends on APP_MIC_COUNT = 1
+        default APP_MIC_SLOT_LEFT
+        help
+            The INMP441's L/R pin picks it: to GND is left, to VDD right.
+            Board B's ch1, its better microphone, is the right slot.
+
+        config APP_MIC_SLOT_LEFT
+            bool "Left: L/R to GND"
+        config APP_MIC_SLOT_RIGHT
+            bool "Right: L/R to VDD"
+    endchoice
+
     config APP_PCM_SHIFT_FALLBACK
         int "Microphone right shift until calib/pcm_shift is measured"
         range 8 16
