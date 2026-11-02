@@ -77,6 +77,7 @@ Board B là board duy nhất có micro (KẾ HOẠCH §2.1). Mọi phép đo thu
 | E2-T8 | Lắp MAX98357A + loa 4 Ω 3 W vào GPIO 17/18 (§2.2), loa trên đường trung trực của dàn. **Lắp khi tới E10**; mốc demo không cần | phát được một tông 1 kHz qua `drv_audio` TX với `APP_SPEAKER_ENABLE=y` | E10-T1 | V5.4.1 |
 | E2-T9 | 🔬 Đo trễ khối TX → RX bằng tiếng quét tần | trễ ghi NVS `calib/aec_delay`, đo lại năm lần lệch không quá một mẫu | E2-T8 | V5.4.1 |
 | E2-T10 | Khung `hardware/`: `README.md`, `datasheets/INDEX.md` (tên file ↔ URL ↔ sha256), ảnh board, luật ignore PDF | `git status` sạch sau khi thả PDF vào | E1-T1 | — |
+| E2-T11 | Board một micro (ADR-0042, KẾ HOẠCH §2.3) cho sản phẩm có một micro và một camera. Các bước: `APP_MIC_COUNT`/`APP_MIC_SLOT`; `drv_audio` đọc một khe; `dsp_afe` nhận `"M"`/`"MR"`, bản Python làm trước, rồi golden có đối chứng âm, rồi bản C; `svc_front` và `svc_report` nhận `n_mics`; mode luồng 9 và 10; `host`/`ml` đọc `mic.wav`; `make product MICS=1` | parity sạch, kể cả ca một micro; golden hai micro không đổi byte nào; board B chạy bản `MICS=1` ở khe phải, thức và nhận lệnh 🔬; chi phí một micro ghi vào `budget.md` | — | — |
 
 ---
 

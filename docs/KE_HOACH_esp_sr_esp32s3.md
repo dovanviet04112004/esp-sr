@@ -281,7 +281,7 @@ Dự án chạy trên **board B** — board duy nhất đã có micro, nên mọ
 | Flash / PSRAM | 16 MB / 8 MB (AP_3v3, octal) |
 | Cầu nạp | CH340 (`1a86:7523`); Windows giữ cổng COM, WSL tới nó qua cầu RFC 2217 (dưới đây); console là **UART0** |
 | MAC cơ sở | `34:85:18:8f:7a:70` → `deviceId` mặc định `sr-3485188f7a70` (§6.2) |
-| Micro | **2 × INMP441, đã lắp**, chung một dây dữ liệu I2S |
+| Micro | **2 × INMP441, đã lắp**, chung một dây dữ liệu I2S; firmware dựng được cho board chỉ có một micro (§2.3) |
 | Loa, ampli | **chưa lắp**. Mốc demo (§8) chỉ gửi kết quả lên server qua MQTT nên chưa cần; cần từ `aec` (E10) và `synth` (E12) |
 | Camera | không; `detect` nhận ảnh qua mạng tới khi gắn camera (§3.18) |
 
@@ -398,13 +398,26 @@ chọn cặp micro vì phần pha trôi theo nhiệt độ và tuổi linh kiệ
 |---|---|
 | `ch0` | micro khe trái, là kênh chuẩn pha và kênh ra của mọi phép bù |
 | `ch1` | micro khe phải |
-| `ref` | kênh thứ ba khi có AEC: bản sao luồng phát (§2.4) |
+| `ref` | kênh sau các micro khi có AEC: bản sao luồng phát (§2.4) |
+| `mic` | micro duy nhất của board một micro, ở khe mà `APP_MIC_SLOT` chọn |
 | Trễ | `τ = t₀ − t₁`, giây; dương khi âm tới `ch1` trước |
 | Góc | `θ = arccos(c·τ / d)`: **0° là phía `ch1`**, 90° là chính diện, 180° là phía `ch0` |
 | Trước và sau | dàn thẳng hai micro **không phân biệt được** nguồn đằng trước với nguồn đối xứng đằng sau; góc ra chỉ trong 0–180° |
 
 Đặt loa: cách dàn micro xa nhất có thể và **trên đường trung trực** của hai micro, để vọng trực tiếp
 tới hai kênh cùng lúc và cùng mức.
+
+**Một micro là một cấu hình build** (ADR-0042). Sản phẩm kế tiếp có một micro và một camera. Kconfig `APP_MIC_COUNT`
+(1 hay 2, mặc định 2) và `APP_MIC_SLOT` (trái hay phải) nằm trong `firmware/main/Kconfig.projbuild`. Một micro thì:
+- `drv_audio` đọc I2S mono ở khe ấy;
+- `svc_front` cho `dsp_afe` định dạng `"M"`, hay `"MR"` khi có tham chiếu;
+- chuỗi bỏ `balance`, `doa` và trộn trần (§3.2), nên khung ra luôn có `doa_deg` −1;
+- `gsc` và `bss` không dựng được;
+- luồng tiếng thô dùng mode `mic` và `mic_clean` (§7.4).
+
+`firmware/sdkconfig.mic1` chọn một micro ở khe phải, tức `ch1` của board B. `make product MICS=1` nạp bản ấy để thử trên
+board B. Model không đổi. Trên các phiên của board B, chỉ dùng micro tốt thì `wake` không đổi và lệnh mất 1 điểm
+(`mic_array.md` §5). Micro của board mới phải đo lại 🔬.
 
 ### 2.4 Đường tham chiếu cho khử vọng
 
@@ -507,6 +520,10 @@ flowchart TB
 
 Sáu chỗ khoá cứng của TỔNG QUAN §2.2 vẫn đúng. Ba chỗ đổi, đã ghi ở §0.2: `balance` sang sau STFT,
 `vad` lên trước `agc`, `ns` thành một **khe** nhận sàn hay một bản mạng.
+
+**Board một micro** (§2.3) chạy cùng chuỗi, chỉ bỏ ba khối cần một cặp micro: `balance`, `doa` và trộn trần. Phổ của
+micro đi thẳng vào khe `ns`. Nếu hai micro thu cùng một tín hiệu và không có `balance`, chuỗi hai micro cho cùng tiếng
+sạch, từng bit.
 
 **Khe `ns` là cách giữ `dsp_afe` không biết mô hình học tồn tại.** `dsp_afe` khai một bảng hàm
 `dsp_afe_ns_ops_t` (cỡ trạng thái, khởi tạo, đặt lại, xử lý một khung phổ công suất ra gain 257 vạch). Bản
@@ -2936,6 +2953,7 @@ firmware/
 ├── sdkconfig.defaults.esp32s3        # riêng chip: PSRAM octal, cache, nhân (§4.5.8)
 ├── sdkconfig.{dev,bench,prod,ci}     # bốn profile
 ├── sdkconfig.afe                     # sinh từ modules: của contracts/afe.yaml — module dsp_afe sản phẩm bật
+├── sdkconfig.mic1                    # một micro ở khe phải: make product MICS=1 (§2.3, ADR-0042)
 ├── sdkconfig.secrets                 # ❌ gitignore — mật khẩu broker của bàn thử, nếu có
 ├── partitions.csv                    # §6.1
 ├── dependencies.lock                 # ✅
@@ -3140,7 +3158,7 @@ CLAUDE.md §1.2. Phác thảo dưới đây chốt **hình dạng**; tên trư�
 ```c
 // dsp_afe.h — mặt tiền. Một thể hiện, một task gọi cả feed lẫn fetch.
 typedef struct {
-    const char *input_format;              // "MM" hoặc "MMR": ch0, ch1, rồi ref nếu có
+    const char *input_format;              // "M", "MM", "MR", "MMR": các micro, rồi ref nếu có
     dsp_afe_spatial_t spatial;             // NONE | GSC | BSS, từ Kconfig
     const dsp_afe_ns_ops_t *ns;            // NULL là OM-LSA nội bộ; ai_engine cắm mạng dìm nhiễu vào đây
     void *ns_ctx;
@@ -3172,7 +3190,7 @@ Bốn điểm đã chốt, mỗi điểm một lý do:
 
 | Điểm | Chốt | Vì sao |
 |---|---|---|
-| Kênh vào | chuỗi định dạng `"MM"` / `"MMR"` ngay từ bản đầu | AEC làm sau cùng (E10) mà không phải đổi hợp đồng |
+| Kênh vào | chuỗi định dạng `"MM"` / `"MMR"` ngay từ bản đầu; `"M"` / `"MR"` cho board một micro (ADR-0042) | AEC làm sau cùng (E10) mà không phải đổi hợp đồng; thêm định dạng chỉ thêm giá trị được nhận, chữ ký giữ nguyên |
 | Bộ nhớ | hai vùng, `hot` và `cold`, người gọi cấp | luật 7 của §4.5.3; chỗ đặt đo được |
 | Nhịp | `feed` và `fetch` **cùng một task**; hàng đệm bên trong chỉ vài khung | thư viện thuần không có khoá (luật 9). Chỗ "nạp và lấy không cùng nhịp" của TỔNG QUAN §4.3 là hàng đợi FreeRTOS **giữa** `sach_task` và `nhan_task` (§5.3), không nằm trong `dsp_afe` |
 | Ra | một kênh + số liệu trong cùng struct | số liệu phải đi cùng đúng khung của nó; hai đường riêng thì lệch nhau |
@@ -3278,7 +3296,11 @@ và `bench_afe` dùng kênh này.
 | `NVS_ENCRYPTION` | n | n | **y** | n |
 
 `bench` giống `prod` về tốc độ và chỉ khác ở chỗ còn bộ đo. **Số báo cáo lấy từ `bench`**; `-Og` của
-`dev` chậm hơn đáng kể. `prod` không có luồng tiếng thô: một máy đặt trong phòng không được có đường
+`dev` chậm hơn đáng kể.
+
+Board một micro (§2.3) là một lớp chồng lên profile, không phải profile thứ năm. `MICS=1` của `fw-bench` và `product`
+thêm `sdkconfig.mic1` vào cuối danh sách defaults và dựng trong `build_bench_mic1`, để hai bản không dùng chung
+`sdkconfig`. `prod` không có luồng tiếng thô: một máy đặt trong phòng không được có đường
 đẩy tiếng người ra ngoài chỉ vì ai đó quên tắt (§7.5).
 
 Chung cả bốn (`sdkconfig.defaults.esp32s3`):
@@ -4131,6 +4153,11 @@ Chỉ để **thu dữ liệu và gỡ lỗi**. Tắt mặc định, không có 
 | 6 | thô `ch0 ch1` + `seat0 seat1` | 128 KB/s |
 | 7 | thô `ch0 ch1` + `seat0`…`seat2` | 160 KB/s |
 | 8 | thô `ch0 ch1` + `seat0`…`seat3` | 192 KB/s |
+| 9 | thô `mic` | 32 KB/s |
+| 10 | thô `mic` + sạch | 64 KB/s |
+
+`mode` 9 và 10 là `mode` 2 và 5 của board một micro (§2.3). Mode có `ch0 ch1` chỉ mở khi có hai micro, mode có `mic` chỉ
+mở khi có một, và mode có `ref` chỉ mở khi có loa. `host` ghi `mic.wav`, và mọi chỗ đọc phiên chạy chuỗi `"M"` trên nó.
 
 `mode` 6–8 là lối ra theo ghế của `bss` (§3.8), một kênh cho mỗi số ghế tới `seats_max`, chỉ `test_apps/bss_live` mở.
 Kênh `seat<n>` là trộn trần sau `balance` nhân cổng của số n rồi tổng hợp; số không có ghế ở lần dò gần nhất thì im.
