@@ -32,6 +32,7 @@ CHAIN_MODULES_HOPS = 192
 CHAIN_RESET = 1
 CHAIN_RESUME = 2
 CHAIN_RESUME_HOPS = (72, 108)
+CHAIN_FRAME_FIELDS = ("pcm", "seq", "doa_deg", "doa_conf", "vad", "level_dbfs", "gain_db", "flags")
 CHAIN_BSS_HOPS = 160
 CHAIN_BSS_CLICK_HOPS = 3  # a key stroke's run of the raw vad
 CHAIN_BSS_RESUME_HOP = 140
@@ -449,15 +450,16 @@ def _chain_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray
 
 
 def chain_case(
-    ch0: np.ndarray, ch1: np.ndarray, reset: np.ndarray, cfg: chain.ChainConfig, without_vad_in: bool = False
+    ch0: np.ndarray, ch1: np.ndarray | None, reset: np.ndarray, cfg: chain.ChainConfig, without_vad_in: bool = False
 ) -> dict[str, np.ndarray]:
     """Interleaved int16 input, per hop CHAIN_RESET or CHAIN_RESUME before it or 0, the afe/* settings (ns floor dB,
     agc target dBFS, vad mode), calib/bal as re, im pairs when the case has one, and every field of the frames the
-    chain gives. without_vad_in drops bss's second vad, so doa follows the output's, as a negative control."""
+    chain gives. ch1 None runs one microphone, "M", whose input is one sample wide per step (ADR-0042).
+    without_vad_in drops bss's second vad, so doa follows the output's, as a negative control."""
     pcm_min, pcm_max = np.iinfo(np.int16).min, np.iinfo(np.int16).max
-    mics = np.stack([ch0, ch1], axis=-1)
+    mics = np.stack([ch0] if ch1 is None else [ch0, ch1], axis=-1)
     interleaved = np.clip(np.rint(mics), pcm_min, pcm_max).astype(np.int16).reshape(reset.size, -1)
-    ch = chain.Chain("MM", cfg)
+    ch = chain.Chain("M" if ch1 is None else "MM", cfg)
     if without_vad_in:
         ch._vad_in = None
     frames = []
@@ -486,8 +488,8 @@ def chain_case(
 
 
 def emit_chain(root: Path) -> list[Path]:
-    """Four cases through the facade with every module off, then a negative control whose output is one sample
-    late."""
+    """Four cases through the facade with every module off, a fifth on one microphone, then a negative control whose
+    output is one sample late."""
     rng = np.random.default_rng(SEED + 2)
     plain = chain.ChainConfig(modules=())
     written = []
@@ -501,6 +503,14 @@ def emit_chain(root: Path) -> list[Path]:
     negative["pcm"] = late.reshape(negative["pcm"].shape)
     path = root / "chain" / "case_neg_000.gold"
     write_gold(path, negative)
+    written.append(path)
+    mono = np.random.default_rng(SEED + 17)
+    t = np.arange(n) / grid.SAMPLE_RATE_HZ
+    with_reset = np.zeros(CHAIN_HOPS, dtype=np.uint8)
+    with_reset[CHAIN_RESET_HOP] = CHAIN_RESET
+    one_mic = 30000.0 * np.sin(2 * np.pi * 700.0 * t) + mono.normal(0, 3000, n)
+    path = root / "chain" / "case_004.gold"
+    write_gold(path, chain_case(one_mic, None, with_reset, plain))
     written.append(path)
     return written
 
@@ -584,7 +594,25 @@ def emit_chain_modules(root: Path) -> list[Path]:
     path = root / "chain_modules" / "case_neg_001.gold"
     write_gold(path, resumed)
     written.append(path)
-    return written
+    return written + _emit_chain_modules_mono(root, np.random.default_rng(SEED + 19))
+
+
+def _emit_chain_modules_mono(root: Path, rng: np.random.Generator) -> list[Path]:
+    """Speech with pauses on one microphone of a calibrated board, whose balance the chain must skip; then a negative
+    control computed as the mean of that microphone and a silent slot, a one-microphone build still reading two."""
+    n = CHAIN_MODULES_HOPS * grid.HOP_SAMPLES
+    pauses = np.repeat(np.arange(CHAIN_MODULES_HOPS) % 64 < 40, grid.HOP_SAMPLES)
+    voice = 32768 * (speechlike(rng, n, 0.05) * pauses + 3e-4 * rng.standard_normal(n))
+    no_reset = np.zeros(CHAIN_MODULES_HOPS, dtype=np.uint8)
+    board = chain.ChainConfig(balance_gains=board_like_gains())
+    case = chain_case(voice, None, no_reset, board)
+    path = root / "chain_modules" / "case_005.gold"
+    write_gold(path, case)
+    two_slots = chain_case(voice, np.zeros(n), no_reset, board)
+    negative = {**case, **{name: two_slots[name] for name in CHAIN_FRAME_FIELDS}}
+    negative_path = root / "chain_modules" / "case_neg_002.gold"
+    write_gold(negative_path, negative)
+    return [path, negative_path]
 
 
 def _chain_bss_input(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

@@ -114,6 +114,24 @@ def test_the_chain_modules_negative_control_skipped_its_calib() -> None:
     assert np.max(np.abs(case["pcm"].astype(int) - right["pcm"])) > 100
 
 
+def test_one_microphone_cases_are_one_sample_wide_per_step() -> None:
+    for block, name, hops in (("chain", "case_004", emit_golden.CHAIN_HOPS), ("chain_modules", "case_005", 192)):
+        case = read_gold(emit_golden.GOLDEN_ROOT / block / f"{name}.gold")
+        assert case["input"].shape == (hops, grid.HOP_SAMPLES), name
+        assert np.all(case["doa_deg"] == -1) and not case["doa_conf"].any(), name
+
+
+def test_the_one_microphone_negative_control_reads_a_silent_second_slot() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "chain_modules" / "case_neg_002.gold")
+    gains = case["gains"][:, 0] + 1j * case["gains"][:, 1]
+    right = emit_golden.chain_case(
+        case["input"].reshape(-1), None, case["reset"], chain.ChainConfig(balance_gains=gains)
+    )
+    speech = right["level_dbfs"] > -60
+    assert np.median(right["level_dbfs"][speech] - case["level_dbfs"][speech]) == 6
+    assert np.max(np.abs(case["pcm"].astype(int) - right["pcm"])) > 100
+
+
 def test_committed_hpf_cases_match_a_fresh_emit(tmp_path: Path) -> None:
     for path in emit_golden.emit_hpf(tmp_path):
         committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
