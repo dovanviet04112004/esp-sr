@@ -21,6 +21,8 @@ typedef enum {
     GEN_STREAM_MODE_RAW_SEATS2 = 6,
     GEN_STREAM_MODE_RAW_SEATS3 = 7,
     GEN_STREAM_MODE_RAW_SEATS4 = 8,
+    GEN_STREAM_MODE_MIC = 9,
+    GEN_STREAM_MODE_MIC_CLEAN = 10,
 } gen_stream_mode_t;
 
 typedef enum {
@@ -63,6 +65,8 @@ static inline uint8_t gen_stream_mode_channels(gen_stream_mode_t mode)
     case GEN_STREAM_MODE_RAW_SEATS2: return 4;
     case GEN_STREAM_MODE_RAW_SEATS3: return 5;
     case GEN_STREAM_MODE_RAW_SEATS4: return 6;
+    case GEN_STREAM_MODE_MIC: return 1;
+    case GEN_STREAM_MODE_MIC_CLEAN: return 2;
     default: return 0;
     }
 }
