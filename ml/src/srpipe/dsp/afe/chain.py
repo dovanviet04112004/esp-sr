@@ -2,9 +2,8 @@
 
 Mirror of dsp_afe.c: hpf and the STFT per microphone, balance on ch1, doa searched every second hop after a speech hop,
 the spatial stage (the plain two-channel mean, or gsc steered by doa), the ns floor's gains, iSTFT, vad on the clean
-hop, its level, agc, back to int16. Modules follow ChainConfig.modules, by default the product's of contracts/afe.yaml;
-golden/chain runs with none of them. Run: python -m srpipe.dsp.afe.chain <in.wav> <out.wav> [--spatial gsc]
-"""
+hop, its level, agc, back to int16. One microphone ("M") skips balance, doa and the mean (ADR-0042). Modules follow
+ChainConfig.modules, by default contracts/afe.yaml's. Run: python -m srpipe.dsp.afe.chain <in.wav> <out.wav>"""
 
 from __future__ import annotations
 
@@ -19,7 +18,7 @@ from srpipe.dsp.afe import agc, balance, bss, doa, gsc, hpf, ns_omlsa, vad
 from srpipe.dsp.spec.stft import Istft, Stft
 from srpipe.generated import afe, array, grid
 
-FORMATS = {"MM": array.N_MICS, "MMR": array.N_MICS + 1}
+FORMATS = {"M": 1, "MR": 2, "MM": array.N_MICS, "MMR": array.N_MICS + 1}
 MODULES_BUILT = ("hpf", "balance", "doa", "ns_omlsa", "vad", "agc")
 SPATIALS = ("none", "gsc", "bss")
 BROADSIDE_DEG = np.float32(sum(array.DOA_RANGE_DEG) / 2.0)
@@ -97,8 +96,8 @@ class Chain:
         cfg = cfg or ChainConfig()
         if input_format not in FORMATS:
             raise ValueError(f"input format {input_format!r} is not one of {sorted(FORMATS)}")
-        if input_format == "MMR":
-            raise NotImplementedError("MMR needs aec, which lands in E10")
+        if input_format.endswith("R"):
+            raise NotImplementedError(f"{input_format} needs aec, which lands in E10")
         if missing := sorted(set(cfg.modules) - set(MODULES_BUILT)):
             raise NotImplementedError(f"no Python reference yet for {', '.join(missing)}")
         if cfg.spatial not in SPATIALS:
@@ -107,10 +106,13 @@ class Chain:
             raise ValueError("spatial bss gates on doa's angle, and doa is off")
         self.cfg = cfg
         self.n_channels = FORMATS[input_format]
-        self._analysis = [Stft() for _ in range(array.N_MICS)]
+        self.n_mics = input_format.count("M")
+        if self.n_mics == 1 and cfg.spatial != "none":
+            raise ValueError(f"spatial {cfg.spatial} needs two microphones")
+        self._analysis = [Stft() for _ in range(self.n_mics)]
         self._synthesis = Istft()
         self._gains = None
-        if "balance" in cfg.modules and cfg.balance_gains is not None:
+        if self.n_mics == 2 and "balance" in cfg.modules and cfg.balance_gains is not None:
             self._gains = np.asarray(cfg.balance_gains, dtype=np.complex64)
         self._start_modules()
         self._seq = 0
@@ -119,7 +121,7 @@ class Chain:
     def _start_modules(self) -> None:
         on = self.cfg.modules
         self._hpf = hpf.Hpf() if "hpf" in on else None
-        self._doa = doa.Doa() if "doa" in on else None
+        self._doa = doa.Doa() if "doa" in on and self.n_mics == 2 else None
         self._gsc = gsc.Gsc() if self.cfg.spatial == "gsc" else None
         self._bss = bss.Bss(self.cfg.bss) if self.cfg.spatial == "bss" else None
         # bss's gate silences the other seat at vad, so doa searches on a raw vad of the mics' mean (KEHOACH 3.8).
@@ -169,11 +171,11 @@ class Chain:
     def process(self, interleaved: np.ndarray) -> Frame:
         """Take HOP_SAMPLES interleaved int16 samples of every channel and return the clean frame."""
         hop = np.asarray(interleaved, dtype=np.int16).reshape(grid.HOP_SAMPLES, self.n_channels)
-        mics = hop[:, : array.N_MICS]
+        mics = hop[:, : self.n_mics]
         clipped = bool(np.any((mics == PCM_MAX) | (mics == PCM_MIN)))
         samples = hop.astype(np.float32) / PCM_FULL_SCALE
         if self._hpf is not None:
-            samples = np.stack([self._hpf.process(m, samples[:, m]) for m in range(array.N_MICS)], axis=-1)
+            samples = np.stack([self._hpf.process(m, samples[:, m]) for m in range(self.n_mics)], axis=-1)
         bins = [st.analyze(samples[:, m]) for m, st in enumerate(self._analysis)]
         if self._gains is not None:
             bins[1] = balance.apply(bins[1], self._gains)
@@ -189,6 +191,8 @@ class Chain:
             mixed = self._gsc.process(bins[0], bins[1], angle_deg, not self._last_vad)
         elif self._bss is not None:
             mixed, _ = self._bss.process(bins[0], bins[1], direction.angle_deg, direction.confidence, update)
+        elif self.n_mics == 1:
+            mixed = bins[0]
         else:
             mixed = np.float32(0.5) * (bins[0] + bins[1])
         if self._ns is not None:
@@ -218,13 +222,15 @@ class Chain:
 
 
 def render(wav_in: Path, wav_out: Path, cfg: ChainConfig) -> None:
-    """Every whole hop of a two-microphone int16 WAV through the chain into a mono int16 WAV of the clean frames."""
+    """Every whole hop of a one- or two-microphone int16 WAV through the chain into a mono int16 WAV of the clean
+    frames."""
     x, rate = sf.read(wav_in, dtype="int16", always_2d=True)
-    if rate != grid.SAMPLE_RATE_HZ or x.shape[1] != array.N_MICS:
+    formats = {FORMATS[f]: f for f in ("M", "MM")}
+    if rate != grid.SAMPLE_RATE_HZ or x.shape[1] not in formats:
         raise ValueError(
-            f"{wav_in}: want {array.N_MICS} channels at {grid.SAMPLE_RATE_HZ} Hz, got {x.shape[1]} at {rate}"
+            f"{wav_in}: want 1 or {array.N_MICS} channels at {grid.SAMPLE_RATE_HZ} Hz, got {x.shape[1]} at {rate}"
         )
-    chain = Chain("MM", cfg)
+    chain = Chain(formats[x.shape[1]], cfg)
     hop = grid.HOP_SAMPLES
     clean = [chain.process(x[k * hop : (k + 1) * hop].reshape(-1)).pcm for k in range(len(x) // hop)]
     wav_out.parent.mkdir(parents=True, exist_ok=True)
@@ -233,7 +239,7 @@ def render(wav_in: Path, wav_out: Path, cfg: ChainConfig) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("wav_in", type=Path, help="two microphones, int16 at the grid's rate")
+    parser.add_argument("wav_in", type=Path, help="one or two microphones, int16 at the grid's rate")
     parser.add_argument("wav_out", type=Path)
     parser.add_argument("--spatial", choices=SPATIALS, default="none")
     args = parser.parse_args(argv)

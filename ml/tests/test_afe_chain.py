@@ -78,8 +78,30 @@ def test_to_pcm_rounds_half_to_even_and_saturates() -> None:
 def test_formats_the_default_build_cannot_run_are_refused() -> None:
     with pytest.raises(ValueError):
         chain.Chain("XY")
-    with pytest.raises(NotImplementedError):
-        chain.Chain("MMR")
+    for with_ref in ("MR", "MMR"):
+        with pytest.raises(NotImplementedError):
+            chain.Chain(with_ref)
+
+
+def test_one_microphone_gives_what_two_identical_ones_give_but_doa() -> None:
+    rng = np.random.default_rng(6)
+    x = np.rint(32768 * speechlike(rng, 4 * HOPS * grid.HOP_SAMPLES, 0.05)).astype(np.int16)
+    x[rng.integers(0, x.size, 8)] = np.iinfo(np.int16).max
+    gains = np.full(grid.N_BINS, 0.5 + 0.5j, dtype=np.complex64)
+    one = run(chain.Chain("M", chain.ChainConfig(balance_gains=gains)), x.reshape(-1, grid.HOP_SAMPLES))
+    two = run(chain.Chain("MM"), interleave(x, x))
+    fields = [(f.seq, f.vad, f.level_dbfs, f.gain_db, f.flags) for f in two]
+    assert [(f.seq, f.vad, f.level_dbfs, f.gain_db, f.flags) for f in one] == fields
+    assert all(np.array_equal(a.pcm, b.pcm) for a, b in zip(one, two, strict=True))
+    assert all((f.doa_deg, f.doa_conf) == (-1, 0) for f in one)
+    assert any(f.doa_deg >= 0 for f in two), "doa never ran on two microphones, so nothing shows one skips it"
+    assert any(f.flags & chain.FLAG_CLIPPED for f in one) and any(f.vad for f in one)
+
+
+def test_one_microphone_refuses_the_spatial_stages() -> None:
+    for spatial in ("gsc", "bss"):
+        with pytest.raises(ValueError):
+            chain.Chain("M", chain.ChainConfig(spatial=spatial))
 
 
 def test_the_default_modules_are_the_products() -> None:
@@ -173,3 +195,13 @@ def test_render_writes_every_whole_hop_of_a_recording(tmp_path) -> None:
     chain.main([str(tmp_path / "in.wav"), str(tmp_path / "out.wav"), "--spatial", "gsc"])
     info = sf.info(str(tmp_path / "out.wav"))
     assert (info.channels, info.frames) == (1, HOPS * grid.HOP_SAMPLES)
+
+
+def test_render_takes_a_one_microphone_recording(tmp_path) -> None:
+    x = tone(HOPS * grid.HOP_SAMPLES)
+    sf.write(tmp_path / "one.wav", x, grid.SAMPLE_RATE_HZ, subtype="PCM_16")
+    sf.write(tmp_path / "two.wav", np.stack([x, x], axis=-1), grid.SAMPLE_RATE_HZ, subtype="PCM_16")
+    for name in ("one", "two"):
+        chain.render(tmp_path / f"{name}.wav", tmp_path / f"{name}_out.wav", chain.ChainConfig())
+    one, two = (sf.read(tmp_path / f"{name}_out.wav", dtype="int16")[0] for name in ("one", "two"))
+    assert np.array_equal(one, two)
