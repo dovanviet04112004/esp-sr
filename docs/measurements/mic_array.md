@@ -225,3 +225,49 @@ srpipe.tasks.command.eval ctc`; một micro qua một script ngoài repo):
   khác nhau.
 - Một micro mất hướng người nói (`doa`), phần lợi chừng 3 dB của phép trung bình với nhiễu không tương quan, và micro dự
   phòng khi một lỗ bị che. Các model không phải học lại để dùng một micro tốt 🔬 (chưa đo trên board có một micro thật).
+
+## 6. Bản một micro trên board B (02/11)
+
+Firmware dựng với `MICS=1` (ADR-0042): một micro ở khe phải, profile bench, commit `4f422ade`. Board khởi động với
+`1 mic(s), 1 channel(s)`. Heartbeat không có khung rơi, không tràn DMA.
+
+**Khe phải là `ch1`.** Hai phiên thu cách nhau 77 phút trong cùng phòng: `20261102_home_001` (một micro, 20 s) và
+`20261102_home_002` (hai micro, 300 s). So mức theo dải ở 5% số bước yên nhất, nơi nền phòng ít đổi giữa hai lần thu
+(dB, cùng thang):
+
+| Dải | `ch0` | `ch1` | `mic` |
+|---|---|---|---|
+| 100–300 Hz | −24,3 | −13,8 | −13,6 |
+| 300–1000 Hz | −17,2 | −6,4 | −5,4 |
+| 1–3 kHz | −19,9 | −18,0 | −16,1 |
+| 3–7 kHz | −25,7 | −21,6 | −17,9 |
+
+Ở hai dải thấp, `mic` khớp `ch1` trong vòng 1 dB và cao hơn `ch0` 11 dB. Dải cao thì lúc thu phiên một micro phòng ồn
+hơn.
+
+**Parity trên chip.** Ca một micro của `chain` và `chain_modules` khớp bản Python từng bit ở cả hai bản dựng của
+`test_apps/parity`. `case_neg_002` trượt như phải trượt: `pcm` SNR 0 dB, `level_dbfs` lệch 7.
+
+**Chi phí** (`bench_afe`, nhân 1, `budget.md`; RAM nội còn trống lấy từ log khởi động của sản phẩm, sau bước `front`):
+
+| Chuỗi | µs mỗi khung | Đỉnh µs | Vùng nóng B | RAM nội còn trống | Khối lớn nhất |
+|---|---|---|---|---|---|
+| Hai micro `"MM"` | 2 621 | 3 308 | 86 464 | 86 595 B | 45 056 B |
+| Một micro `"M"` | 2 353 | 2 463 | 75 984 | 102 987 B | 61 440 B |
+
+Một micro nhẹ hơn 10% thời gian của chuỗi và để dư 16 KB RAM nội: phần của `dsp_afe` cộng một nửa đệm DMA.
+
+**`wake` trên cùng một bản thu.** Chấm `20261102_home_002` bằng run `20261101_528604f-dirty_b4b1a4`, hàng int8
+`percentile`, ngưỡng 800‰, chuỗi ấm:
+
+| Chuỗi | Lần thức | Điểm cao nhất | `vad` |
+|---|---|---|---|
+| Hai micro `"MM"` | 0 | 542‰ | 16% |
+| Chỉ `ch1`, `"M"` | 0 | 500‰ | 20% |
+| Chỉ `ch0`, `"M"` | 0 | 438‰ | 16% |
+
+Lúc board chạy bản một micro, không ai gọi mà board vẫn thức 3 lần trong 8 phút đầu sau khi khởi động, ở 850, 872 và
+804‰. Sáu cửa sổ sau ba lần ấy đều bị từ chối: 4 `PART`, 1 `LOW_MARGIN`, 1 `SPEAKER`. Phòng khi ấy có tiếng giống tiếng
+nói: phiên 20 s thu cùng lúc có `vad` bật ở 48% số bước. Đoạn ấy không được thu lại, nên chưa biết hai micro có thức
+trên cùng tiếng ấy không 🔬. Muốn trả lời thì cần một phiên dài trong phòng có tiếng nói, thu bằng hai micro, rồi chấm
+cả ba chuỗi như trên.
