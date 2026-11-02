@@ -219,13 +219,14 @@ def diffuse_pair(u: np.ndarray, v: np.ndarray) -> np.ndarray:
 def listen(
     pcm: np.ndarray, chain_cfg: ChainConfig, mel: Mel, warm: np.ndarray | None = None
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """The chain over interleaved int16 frames: clean int16 samples, per hop its vad, level_dbfs and gain_db as int8,
-    and per hop the log-mel of the clean samples (KEHOACH 3.11). With warm, the chain first runs over those frames and
-    drops what they give, so it meets pcm settled, as a board that has long been running does."""
-    chain, stft = Chain("MM", chain_cfg), Stft()
-    for hop in warm.reshape(-1, HOP * array.N_MICS) if warm is not None else []:
+    """The chain over interleaved int16 frames (samples, mics), one microphone as "M": clean int16 samples, per hop its
+    vad, level_dbfs and gain_db as int8, and per hop the log-mel of the clean samples (KEHOACH 3.11). With warm, the
+    chain first runs over those frames and drops what they give, so it meets pcm settled, as a long-running board."""
+    n_mics = pcm.shape[1]
+    chain, stft = Chain("M" if n_mics == 1 else "MM", chain_cfg), Stft()
+    for hop in warm.reshape(-1, HOP * n_mics) if warm is not None else []:
         chain.process(hop)
-    hops = pcm.reshape(-1, HOP * array.N_MICS)
+    hops = pcm.reshape(-1, HOP * n_mics)
     clean = np.empty((len(hops), HOP), dtype=np.int16)
     figures = np.empty((len(hops), 3), dtype=np.int8)
     features = np.empty((len(hops), mel.cfg.n_bands), dtype=np.float32)
@@ -778,13 +779,19 @@ def floor_table(folder: Path, sessions: list[str], cfg: dict) -> str:
     return "\n".join(lines)
 
 
+def session_mics(folder: Path) -> np.ndarray:
+    """A board session's microphones side by side, cut to whole hops: (samples, mics) int16 from ch0.wav and ch1.wav,
+    or from mic.wav alone on a one-microphone board (ADR-0042)."""
+    names = ["mic"] if (folder / "mic.wav").exists() else [f"ch{m}" for m in range(array.N_MICS)]
+    channels = [read_wav(folder / f"{name}.wav")[0][:, 0] for name in names]
+    n = min(len(c) for c in channels) // HOP * HOP
+    return (np.stack([c[:n] for c in channels], axis=1) * PCM_FULL_SCALE).astype(np.int16)
+
+
 def session_speech(folder: Path, cfg: dict) -> np.ndarray:
     """Log-mel of the hops vad marks in a board session run through the product's chain."""
-    channels = [read_wav(folder / f"ch{m}.wav")[0][:, 0] for m in range(array.N_MICS)]
-    n = min(len(c) for c in channels) // HOP * HOP
-    pcm = (np.stack([c[:n] for c in channels], axis=1) * PCM_FULL_SCALE).astype(np.int16)
     chain_cfg = ChainConfig(balance_gains=load_microphones(cfg["microphone"]).gains)
-    _, figures, features = listen(pcm, chain_cfg, Mel(MelConfig(**cfg["features"])))
+    _, figures, features = listen(session_mics(folder), chain_cfg, Mel(MelConfig(**cfg["features"])))
     return features[figures[:, 0].astype(bool)]
 
 

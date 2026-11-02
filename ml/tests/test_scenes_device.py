@@ -619,3 +619,16 @@ def test_speeds_draw_per_item_and_leave_the_rooms_levels_and_noise_alone(raw_roo
         assert after["speed"] in (0.9, 1.1) and "speed" not in before
         assert all(after[k] == before[k] for k in ("item", "session", "bank_room", "spl_1m_db", "noise"))
     assert {i["speed"] for i in items_of(tmp_path / "sped")} == {0.9, 1.1}
+
+
+def test_a_one_microphone_session_is_heard_as_the_same_microphone_twice(tmp_path: Path) -> None:
+    rng = np.random.default_rng(11)
+    x = 0.05 * rng.standard_normal(40 * grid.HOP_SAMPLES + 77)
+    write_wav(tmp_path / "one" / "mic.wav", x)
+    for m in range(array.N_MICS):
+        write_wav(tmp_path / "two" / f"ch{m}.wav", x)
+    one, two = device.session_mics(tmp_path / "one"), device.session_mics(tmp_path / "two")
+    assert one.shape == (40 * grid.HOP_SAMPLES, 1) and two.shape == (40 * grid.HOP_SAMPLES, array.N_MICS)
+    mel = Mel(MelConfig(**tiny()["features"]))
+    heard = [device.listen(pcm, ChainConfig(), mel) for pcm in (one, two)]
+    assert all(np.array_equal(a, b) for a, b in zip(*heard, strict=True))

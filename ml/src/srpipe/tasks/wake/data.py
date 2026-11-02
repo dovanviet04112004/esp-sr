@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import soundfile as sf
 import yaml
 
 from srpipe.core import corpus, extract, screen, splits
@@ -28,7 +27,7 @@ from srpipe.core.config import apply_overrides, data_paths, load_device, load_ya
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.afe.vad import hangover_hops
 from srpipe.dsp.spec.mel import Mel, MelConfig
-from srpipe.generated import afe, array, grid, lang_vi, listen
+from srpipe.generated import afe, grid, lang_vi, listen
 from srpipe.lang import g2p
 from srpipe.lang.normalize import LangError, normalize
 from srpipe.scenes import device, room
@@ -423,9 +422,7 @@ def f0_table(folder: Path, roots: dict[str, Path], spec: dict, workers: int) -> 
 def session_chain(session: Path, chain_cfg: ChainConfig, mel: Mel) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """device.listen over the microphones of a board session, cut to a common whole number of hops, warmed by a pass
     over the same session first, as a board that has long been running hears it (KEHOACH 3.11)."""
-    channels = [sf.read(session / f"ch{m}.wav", dtype="int16")[0] for m in range(array.N_MICS)]
-    n = min(len(c) for c in channels) // grid.HOP_SAMPLES * grid.HOP_SAMPLES
-    pcm = np.stack([c[:n] for c in channels], axis=1)
+    pcm = device.session_mics(session)
     return device.listen(pcm, chain_cfg, mel, warm=pcm)
 
 

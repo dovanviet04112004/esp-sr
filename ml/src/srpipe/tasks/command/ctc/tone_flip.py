@@ -524,7 +524,7 @@ def owner_heard(cfg: dict, spec: dict, paths: dict) -> OwnerHeard:
     said_of = {r["session"]: gate.said_alone(r, paths, chain_cfg, mel) for r in rows}
     recorded, recorded_hops = owner_windows(cfg, rows, paths, manifest, said_of, gone_of)
     windows = {"recorded": recorded}
-    pcm = {s: gate.channels_of(paths["raw"] / "device" / r["board"] / s) for s, r in row_of.items()}
+    pcm = {s: device.session_mics(paths["raw"] / "device" / r["board"] / s) for s, r in row_of.items()}
     work = paths["cache"] / "tone_flip" / "owner"
     before, after = spec["owner_margin_hops"]
     asked, starts = [], {}

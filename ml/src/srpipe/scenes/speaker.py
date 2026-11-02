@@ -164,7 +164,7 @@ class NoisyPcm:
         rirs = np.load(self.bank / f"room_{int(rng.integers(self.dev['rooms']['count'])):04d}.npy")
         files = self.files[0 if len(self.files) == 1 else int(rng.choice(len(self.files), p=self.weights))]
         y = self.raw.read(files[int(rng.integers(len(files)))])
-        pcm = gate.channels_of(self.folders[session])
+        pcm = device.session_mics(self.folders[session])
         start = int(rng.integers(max(1, len(y) - len(pcm))))
         speech = self.vads[session][device.CHAIN_LAG_HOPS :].astype(bool)
         return with_noise(pcm, speech, rirs, np.resize(y[start:], len(pcm)), self.snr_db, self.mics)

@@ -218,7 +218,7 @@ def test_a_command_sessions_windows_its_utterances_alone_miss_are_extra_and_to_b
     on[50:80] = on[150:170] = on[250:290] = True
     alone[52:78] = alone[255:285] = True
     monkeypatch.setattr(gate, "heard_sessions", lambda *_: iter([(row, None, on, None, None)]))
-    monkeypatch.setattr(gate, "channels_of", lambda _folder: None)
+    monkeypatch.setattr(gate.device, "session_mics", lambda _folder: None)
     monkeypatch.setattr(gate.device, "listen", lambda *_: (None, alone[:, None].astype(np.int8), None))
     results = gate.board(
         {"features": "scenes/device.yaml"},
@@ -240,7 +240,7 @@ def test_a_window_over_an_utterance_left_out_is_scored_neither_as_said_nor_as_ex
     on[50:80] = on[150:170] = on[250:290] = True
     alone[52:78] = alone[255:285] = True
     monkeypatch.setattr(gate, "heard_sessions", lambda *_: iter([(row, None, on, None, None)]))
-    monkeypatch.setattr(gate, "channels_of", lambda _folder: None)
+    monkeypatch.setattr(gate.device, "session_mics", lambda _folder: None)
     monkeypatch.setattr(gate.device, "listen", lambda *_: (None, alone[:, None].astype(np.int8), None))
     results = gate.board(
         {"features": "scenes/device.yaml"},

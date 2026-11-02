@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
-import soundfile as sf
 import torch
 import yaml
 
@@ -28,7 +27,7 @@ from srpipe.core.config import data_paths, device_of, load_run_config, load_yaml
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.dsp.spec.stft import Stft
-from srpipe.generated import array, grid, listen
+from srpipe.generated import grid, listen
 from srpipe.scenes import device
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc, kws
@@ -156,13 +155,6 @@ def sittings(manifest: list[dict]) -> list[list[dict]]:
         else:
             out.append([r])
     return out
-
-
-def channels_of(folder: Path) -> np.ndarray:
-    """A session's ch0 and ch1 side by side, cut to whole hops: (samples, mics) int16."""
-    channels = [sf.read(folder / f"ch{m}.wav", dtype="int16")[0] for m in range(array.N_MICS)]
-    n = min(len(c) for c in channels) // grid.HOP_SAMPLES * grid.HOP_SAMPLES
-    return np.stack([c[:n] for c in channels], axis=1)
 
 
 def with_silence(
@@ -322,7 +314,7 @@ def heard_rows(
         if missing := [f.name for f in folders if not f.is_dir()]:
             raise FileNotFoundError(f"{', '.join(missing)}: in the board manifest, not under {paths['raw'] / 'device'}")
         pcm = [(pcm_of or {}).get(r["session"]) for r in sitting]
-        pcm = [channels_of(f) if p is None else p for f, p in zip(folders, pcm, strict=True)]
+        pcm = [device.session_mics(f) if p is None else p for f, p in zip(folders, pcm, strict=True)]
         clean, figures, features = device.listen(np.concatenate(pcm), chain_cfg, mel)
         cuts = np.cumsum([len(p) // grid.HOP_SAMPLES for p in pcm])[:-1]
         samples, vads = np.split(clean, cuts * grid.HOP_SAMPLES), np.split(figures[:, 0].astype(bool), cuts)
@@ -349,7 +341,7 @@ def owners(spans: Spans, said: Spans) -> list[list[int]]:
 def said_alone(row: dict, paths: dict, chain_cfg: ChainConfig, mel: Mel) -> Spans:
     """The utterances the chain finds in a session run alone from a fresh start, the reference of what was said:
     a chain used to the speaker also catches breaths and noises between them (measurements/command.md 12.9)."""
-    pcm = channels_of(paths["raw"] / "device" / row["board"] / row["session"])
+    pcm = device.session_mics(paths["raw"] / "device" / row["board"] / row["session"])
     return device.utterances(device.listen(pcm, chain_cfg, mel)[1][:, 0].astype(bool))
 
 
