@@ -195,3 +195,33 @@ Theo hai bảng, mô phỏng sửa theo KẾ HOẠCH §1.2: mỗi phiên rút m�
 người nói, và mức nói 45–74 dB SPL ở 1 m. Nền thu ở bảng đầu thì không dùng: nó có tiếng quạt máy tính, và cộng dưới mọi
 phiên thì mạng học từ đầu không học được (`command.md` §7); mô phỏng giữ nhiễu tự thân tới khi có nền thu lúc máy tính
 tắt.
+
+## 5. Một micro so với hai (02/11)
+
+Chủ repo hỏi: chuyển hệ thống từ hai micro sang một thì mất gì. Đo trên các phiên đã thu qua board B, chuỗi ấm, không
+thu thêm. Một micro giả lập bằng cách chép kênh ấy sang cả hai đầu vào của chuỗi, `balance` tắt: trung bình hai kênh
+giống nhau là chính kênh ấy, đúng như board chỉ có một micro.
+
+`wake`, run `20261101_528604f-dirty_b4b1a4`, hàng int8 `percentile` 800‰, trên các phiên run ấy không học:
+
+| Micro | Đoạn "vừng ơi" qua ngưỡng | Lần thức ở 64 phiên khác (1,04 giờ) |
+|---|---|---|
+| Hai | 32 / 35 | 1 |
+| Chỉ `ch0` | 31 / 35 | 2 |
+| Chỉ `ch1` | 32, `vad` cắt 42 đoạn | 1 |
+
+Cửa 3 của `command`, run `20261007_439d763-dirty_f438bd` (float, mạng của sản phẩm), δ₂ 50‰, δ₁ 300‰ (`python -m
+srpipe.tasks.command.eval ctc`; một micro qua một script ngoài repo):
+
+| Micro | Lệnh đúng | Lệnh kém nhất | Câu không phải lệnh bị từ chối |
+|---|---|---|---|
+| Hai | 74% | 46% | 145 / 150 |
+| Chỉ `ch0` | 65% | 31% | 128 / 132 |
+| Chỉ `ch1` | 73% | 40% | 139 / 143 |
+
+- Với micro tốt (`ch1`), `wake` không đổi và lệnh mất 1 điểm. Với micro kém (`ch0`, nhỏ hơn `ch1` chừng 10 dB ở mọi phiên),
+  lệnh mất 9 điểm và `wake` thêm một lần thức nhầm.
+- Số đoạn đổi theo micro vì `vad` của chuỗi nghe một kênh to hơn hay nhỏ hơn trung bình hai kênh, nên mẫu số các bảng
+  khác nhau.
+- Một micro mất hướng người nói (`doa`), phần lợi chừng 3 dB của phép trung bình với nhiễu không tương quan, và micro dự
+  phòng khi một lỗ bị che. Các model không phải học lại để dùng một micro tốt 🔬 (chưa đo trên board có một micro thật).
