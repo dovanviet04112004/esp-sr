@@ -68,11 +68,53 @@ bảng quét ở `measurements/data_screen.md`.
 
 ## 2. Split
 
-| Nhánh | Split | Luật | Seed | sha256 `split.lock` | `SPLIT.md` |
-|---|---|---|---|---|---|
-| `wake` | v1: `train_pos` 3 466 (1,0 h TTS), `train_neg` 122 483 (100,1 h), `val_pos` 118, `val_neg` 2 497 (3,3 h), `test_neg` 20 717 (22,9 h) | theo người nói; giọng nhân bản theo vai của người được nhân bản; `test_neg` là Common Voice và VIVOS test, không kho nào làm giọng mẫu; không âm bản nào nói từ đánh thức | 20260928 | `6f81be63…` | `ml/data/splits/wake/v1/SPLIT.md` |
-| `command` | v1: `train_*` một file mỗi kho, 758 897 mẩu (626,2 h), `val` 1 583 (1,9 h), `test` 2 000 (2,0 h, 59 người nói) | theo người nói; FPT, VLSP, Bud500 chỉ vào học; 196 câu chứa "chụp ảnh" rời tập học (lệnh chưa học, E11-T13) | 20260928 | `4bfcd902…` | `ml/data/splits/command/v1/SPLIT.md` |
-| `ns` | v1: `train` tiếng 150 614 mẩu (135,1 h: VIVOS train, FPT, VLSP, Bud500), nhiễu 59 845 tệp (201,4 h), nền phòng 52 (0,4 h); `val` 1 520 mẩu (1,8 h, 25 người nói), nhiễu 14,6 h; `test` 1 780 (1,7 h, 57 người nói), nhiễu 13,5 h | tiếng học qua luật sạch từng kho và dải tần ≥ 7 kHz đo từng mẩu, không trần giờ, không Common Voice; `val`, `test` là dòng của `command/v1` qua khoảng động ≥ 30 dB và cùng luật dải tần, người nói của chúng không vào học; nhiễu chia vai theo nhóm nguồn (Freesound, nghệ sĩ, môi trường DEMAND, phòng, tệp), không nhóm nào ở hai vai; giấy phép theo nguồn ở §1, VIVOS và Bud500 phi thương mại | 20260930 | `2d6a8556…` | `ml/data/splits/ns/v1/SPLIT.md` |
+Mỗi split là một thư mục `ml/data/splits/<nhánh>/<split>/`: các file danh sách và `SPLIT.md` ghi luật, seed, số mẩu và
+sha256 từng file. Cột sha256 là tám ký tự đầu của sha256 tệp `split.lock` mà một lượt học trên đủ các file `.txt` của
+split ghi (`srpipe.core.run_dir.split_lock`). Phiên board không nằm trong file danh sách mà ở `eval.board.train` của cấu
+hình nhánh, nên split chỉ thêm phiên board thì trùng băm với bản trước. Mỗi dòng sau dòng đầu chỉ ghi phần khác bản
+trước; "của vN" nghĩa là file trùng từng byte.
+
+**`wake`**, seed 20260928:
+
+| Split | Ngày | File | Luật, phần khác bản trước | sha256 `split.lock` |
+|---|---|---|---|---|
+| v1 | 28/09 | `train_pos` 3 466 (1,0 h TTS), `train_neg` 122 483 (100,1 h), `val_pos` 118, `val_neg` 2 497 (3,3 h), `test_neg` 20 717 (22,9 h) | theo người nói; giọng nhân bản theo vai của người được nhân bản; `test_neg` là Common Voice và VIVOS test, không kho nào làm giọng mẫu; không âm bản nào nói từ đánh thức | `6f81be63…` |
+| v2 | 29/09 | năm file của v1; thêm `train_hard` 2 590 (4,19 h), `val_hard` 8 | âm bản khó: TTS `synth_hard`, 370 cụm gần âm, 1 979 câu kho học khớp `split.hard`; không câu nào chứa cụm của phiên board 039, giữ lại để đo tổng quát hoá | `41c6fe2e…` |
+| v3 | 29/09 | `val_neg` 8 545 (9,45 h), `test_neg` 14 669 (16,82 h); còn lại của v2 | 40% người nói Common Voice chuyển trọn từ `test_neg` sang `val_neg`, để mục tiêu báo nhầm của `val` dựa trên nhiều lần vượt | `60544ef5…` |
+| v4 | 01/10 | `train_pos` 2 243 (0,42 h), `train_neg` 122 229, `val_pos` 74, `val_neg` 8 532; `test_neg` của v3; không có `*_hard` | từ "trợ lý" (ADR-0011): 2 219 mẩu TTS và 24 mẩu thật của `hf_extract`; âm bản bỏ câu đọc như "trợ lý" giọng Bắc | `92d35d27…` |
+| yes1 | 01/10 | `train_pos` 3 228, `val_pos` 419, `train_hard` 3 000, `val_hard` 600; `train_neg`, `val_neg`, `test_neg` của v4 | thử "yes" của Speech Commands, các từ khác làm âm bản khó | `dc1d6635…` |
+| on1 | 29/10 | `train_pos` 3 086, `val_pos` 396, `train_hard` 3 000, `val_hard` 600, `train_neg` 59 403 (100 h), `val_neg` 8 531; `test_neg` của v3 | từ tạm "on" (ADR-0029); `train_neg` rút mới, không người nói nào của `val`, `test`; `val_neg` là của v4 trừ một mẩu TTS gần âm "trợ lý" | `be597fd6…` |
+| on2 | 29/10 | `train_hard` 30 000 (8,17 h); còn lại của on1 | thêm 27 000 âm bản khó rút sau `val` | `03c25f9f…` |
+| happy1 | 31/10 | `train_pos` 1 632, `val_pos` 203, `train_hard` 30 000, `val_hard` 600, `train_neg` 59 560; `val_neg` của on1, `test_neg` của v3 | từ tạm "happy" (ADR-0033, E11-T39), split của lock sản phẩm; âm bản khó là các từ khác, cả "on", rút như on2; `train_neg` rút mới | `f73e4987…` |
+| vung1 | 01/11 | `train_pos` 1 676 (0,60 h), `train_neg` 59 939, `val_pos` 68, `val_neg` 18 494 (27,6 h), `train_hard` 826, `val_hard` 11; `test_neg` của v3 | thử "vừng ơi" (ADR-0040): mẫu dương và gần âm OmniVoice, 20% giọng nhân bản và giọng thiết kế vào `val`; `train_neg` rút mới; `val_neg` là ViMD 11 029 mẩu, Common Voice 6 048, VIVOS 1 411 và 6 mẩu TTS gần âm; lượt học còn lấy 32 phiên board | `7cdd7cfd…` |
+
+**`command`**, seed 20260928; `val` 1 583 (1,9 h) và `test` 2 000 (2,0 h, 59 người nói) giữ nguyên từ v1 tới v9:
+
+| Split | Ngày | File | Luật, phần khác bản trước | sha256 `split.lock` |
+|---|---|---|---|---|
+| v1 | 28/09 | `train_*` một file mỗi kho, 758 897 mẩu (626,2 h) | theo người nói; FPT, VLSP, Bud500 chỉ vào học; 196 câu chứa "chụp ảnh" rời tập học (lệnh chưa học, E11-T13) | `4bfcd902…` |
+| v2 | 01/10 | `train_*` 97 443 mẩu (103,4 h) | trần giờ rút theo seed: VLSP 15 h, Bud500 25 h | `dc992c77…` |
+| v3 | 02/10 | của v1 | bỏ trần giờ | `4bfcd902…` |
+| v4 | 04/10 | của v3 | thêm 10 phiên board 20261004_home_001…010 vào học, câu 0,8–2,4 s, shard lặp 75 lần | `4bfcd902…` |
+| v5 | 05/10 | thêm `val_commands` 216 | tới 60 mẩu người thật mỗi lệnh đã học từ `hf_extract`, không học, chỉ để chọn δ₁, δ₂ | `c0951d0d…` |
+| v6 | 06/10 | bỏ `train_bud500`: `train_*` 109 887 mẩu (164,2 h) | Bud500 đã xoá khỏi máy; "chụp ảnh" rời học 63 câu | `e4cdfaca…` |
+| v7 | 06/10 | thêm `train_lsvsc` 56 808 (100,6 h), `train_speech_massive_vi` 5 001 (5,3 h), `train_vimd` 55 117 đoạn (97,0 h): `train_*` 226 810 mẩu (367,2 h) | câu nguồn của `val_commands` rời học (17 mẩu); "chụp ảnh" 91 câu | `0bcd2604…` |
+| v8 | 07/10 | của v7 | thử cao độ SwiftF0 (E11-T12): đặc trưng dựng riêng, log-mel nối từ v7; split của lock sản phẩm | `0bcd2604…` |
+| v9 | 29/10 | của v8 | front của hợp đồng `listen.yaml` (E11-T37), không nối log-mel của v7 | `0bcd2604…` |
+
+**`command_kws`**, seed 20260930, các split thử KWS của E11-T17 (`measurements/speech_commands.md`):
+
+| Split | Ngày | File | Luật | sha256 `split.lock` |
+|---|---|---|---|---|
+| p2 | 01/10 | `train` 3 308, `val` 414 mẩu | bốn lệnh của `kws_vi_command`, mẩu thử của chính kho làm `val` | `99e0993d…` |
+| p4 | 01/10 | `train` 3 800, `val` 1 400 | mười từ của Speech Commands, 200 mẩu học mỗi từ | `d93afc11…` |
+| p5 | 01/10 | `train` 9 458, `val` 1 224 | "yes" và "no" với mọi mẩu của kho | `d7ee166b…` |
+
+**`ns`**, seed 20260930:
+
+| Split | Ngày | File | Luật | sha256 `split.lock` |
+|---|---|---|---|---|
+| v1 | 01/10 | `train` tiếng 150 614 mẩu (135,1 h: VIVOS train, FPT, VLSP, Bud500), nhiễu 59 845 tệp (201,4 h), nền phòng 52 (0,4 h); `val` 1 520 mẩu (1,8 h, 25 người nói), nhiễu 14,6 h; `test` 1 780 (1,7 h, 57 người nói), nhiễu 13,5 h | tiếng học qua luật sạch từng kho và dải tần ≥ 7 kHz đo từng mẩu, không trần giờ, không Common Voice; `val`, `test` là dòng của `command/v1` qua khoảng động ≥ 30 dB và cùng luật dải tần, người nói của chúng không vào học; nhiễu chia vai theo nhóm nguồn (Freesound, nghệ sĩ, môi trường DEMAND, phòng, tệp), không nhóm nào ở hai vai; giấy phép theo nguồn ở §1, VIVOS và Bud500 phi thương mại | `2d6a8556…` |
 
 ## 3. Đặc trưng qua đường mô phỏng board
 
