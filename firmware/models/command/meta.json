@@ -47,6 +47,48 @@
         "file": "train_vlsp.txt",
         "sha256": "0a6a8226698d806e6233413b260a002f65f750f6c20b515f5d26c62128fe70b3"
       }
+    ],
+    "board": [
+      {
+        "session": "20261004_home_001",
+        "sha256": "589072f254b29137aaa112369f942c88266e16480dbcfd00a7176586244e2671"
+      },
+      {
+        "session": "20261004_home_002",
+        "sha256": "bee9f1b0e5e20e085168cf7bf49e38b9b607ec74305bf2a7803d9c27720b645f"
+      },
+      {
+        "session": "20261004_home_003",
+        "sha256": "920d14baeb5ac5ee386529387c807a97b8cd462fbfc7fb091bfa6c056e4f3d0d"
+      },
+      {
+        "session": "20261004_home_004",
+        "sha256": "b72e65ed90b811f7731cbbfb5c48548f18be6a5e797679d4f3d65e92a959f6d3"
+      },
+      {
+        "session": "20261004_home_005",
+        "sha256": "8ba5de2ee803f361f57d30a426b33239b22be9c6b371d3f662befc293c33c658"
+      },
+      {
+        "session": "20261004_home_006",
+        "sha256": "7921c62706f86adf2ba85f9e1dd39082f688fab821b01ff13d9b889c3b72e1da"
+      },
+      {
+        "session": "20261004_home_007",
+        "sha256": "25bcc31065fe708322722fb59d1734f5693a1bd2fa1d1da94e9b72b95e6cc54f"
+      },
+      {
+        "session": "20261004_home_008",
+        "sha256": "74c73ad4817187008ab843da122c3e3b9b1465af0e0674f01da6272c5ef27cfd"
+      },
+      {
+        "session": "20261004_home_009",
+        "sha256": "ac6887c33b76846e224479910cf3557b6bfc2b051e4a5f2bd968b8e9f735be8d"
+      },
+      {
+        "session": "20261004_home_010",
+        "sha256": "91ccdaf298e7cb7bca8e07b51df541973ba676889ed0f3a1f208e4fca4c98a6d"
+      }
     ]
   },
   "backend": "ctc",
