@@ -52,7 +52,8 @@ enum { CHECK_NONE = 0, CHECK_PASSED, CHECK_STOPPED, CHECK_UNENROLLED, CHECK_ENRO
 #define PERMILLE_MAX 1000  // event.schema's cap of score and margin
 #define SEQ_APART 1000000u // sessions apart in seq: each starts afresh
 
-#define WORK_YIELD_HOPS 16 // work hops a yield: IDLE0 feeds the watchdog
+#define WORK_YIELD_HOPS 16  // work hops a yield: IDLE0 feeds the watchdog
+#define SETTLE_HOPS_MAX 128 // silence a closed window may wait for its pitch
 #define DECIDED_MAX 64
 #define CLICK_HOPS 2          // vad hops of a click, too short to be an utterance
 #define CLICK_SEQ 0xC0000000u // past every round's sessions, so svc_listen starts afresh
@@ -306,6 +307,35 @@ TEST_CASE("svc_listen takes a new set after a click it began working and dropped
     esp_partition_munmap(handle);
 }
 
+// Hops of vad from base + hop on, the first of them after a break when broken is set.
+static uint32_t speak(uint32_t base, uint32_t hop, uint32_t hops, bool broken)
+{
+    for (uint32_t i = 0; i < hops; i++, hop++) {
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, base + hop, true, broken && i == 0));
+    }
+    return hop;
+}
+
+// The silence that closes an utterance, its first hop after a break when broken is set.
+static uint32_t hush(uint32_t base, uint32_t hop, bool broken)
+{
+    for (uint32_t i = 0; i <= GEN_LISTEN_UTTERANCE_GAP_HOPS; i++, hop++) {
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, base + hop, false, broken && i == 0));
+    }
+    return hop;
+}
+
+// Silence until nothing waits: a closed window is decided once its pitch columns are in (KEHOACH 3.11).
+static uint32_t settle(uint32_t base, uint32_t hop, svc_listen_decision_t *decided, size_t *n, tally_t *t)
+{
+    for (uint32_t i = 0; svc_listen_busy() && i < SETTLE_HOPS_MAX; i++, hop++) {
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, base + hop, false, false));
+        *n = drain(decided, *n, t);
+    }
+    TEST_ASSERT_FALSE_MESSAGE(svc_listen_busy(), "a closed window never got its pitch columns");
+    return hop;
+}
+
 TEST_CASE("svc_listen decides the open window FRAME_GAP when the chain breaks", "[svc_listen]")
 {
     listen_head_t head;
@@ -329,6 +359,8 @@ TEST_CASE("svc_listen decides the open window FRAME_GAP when the chain breaks", 
     TEST_ASSERT_EQUAL_STRING(APP_CODE_FRAME_GAP, d.event.code);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(RESET_SEQ + hop - 1, d.event.seq,
                                      "the decision ends on the window's last hop");
+    // The broken utterance lasts until its silence closes it (KEHOACH 5.4).
+    hush(RESET_SEQ, hop + 1, false);
     TEST_ASSERT_FALSE_MESSAGE(svc_listen_busy(), "a window reached across the chain's break");
     esp_partition_munmap(handle);
 }
@@ -367,25 +399,6 @@ TEST_CASE("svc_listen decides a closed window FRAME_GAP when the chain breaks be
     esp_partition_munmap(handle);
 }
 
-// The round's roster, its owner alone, as a host sends it; afresh, everyone and every voiceprint goes first.
-// Hops of vad from base + hop on, the first of them after a break when broken is set.
-static uint32_t speak(uint32_t base, uint32_t hop, uint32_t hops, bool broken)
-{
-    for (uint32_t i = 0; i < hops; i++, hop++) {
-        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, base + hop, true, broken && i == 0));
-    }
-    return hop;
-}
-
-// The silence that closes an utterance, its first hop after a break when broken is set.
-static uint32_t hush(uint32_t base, uint32_t hop, bool broken)
-{
-    for (uint32_t i = 0; i <= GEN_LISTEN_UTTERANCE_GAP_HOPS; i++, hop++) {
-        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, base + hop, false, broken && i == 0));
-    }
-    return hop;
-}
-
 TEST_CASE("svc_listen decides the utterance after a break, never the rest of a broken one", "[svc_listen]")
 {
     listen_head_t head;
@@ -403,18 +416,19 @@ TEST_CASE("svc_listen decides the utterance after a break, never the rest of a b
     TEST_ASSERT_EQUAL_STRING(APP_CODE_FRAME_GAP, decided[0].event.code);
     hop = speak(BROKEN_SEQ, hop, GEN_LISTEN_UTTERANCE_MIN_HOPS + 1, false);
     hop = hush(BROKEN_SEQ, hop, false);
-    n = drain(decided, n, &t);
+    hop = settle(BROKEN_SEQ, hop, decided, &n, &t);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, n, "a break that fell silent swallowed the next utterance");
     TEST_ASSERT_NOT_EQUAL(0, strcmp(APP_CODE_FRAME_GAP, decided[1].event.code));
     hop = speak(BROKEN_SEQ, hop, 1, false);
     hop = speak(BROKEN_SEQ, hop, GEN_LISTEN_UTTERANCE_MIN_HOPS + 1, true);
     hop = hush(BROKEN_SEQ, hop, false);
-    n = drain(decided, n, &t);
+    settle(BROKEN_SEQ, hop, decided, &n, &t);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(3, n, "the rest of a broken utterance got a window");
     TEST_ASSERT_EQUAL_STRING(APP_CODE_FRAME_GAP, decided[2].event.code);
     esp_partition_munmap(handle);
 }
 
+// The round's roster, its owner alone, as a host sends it; afresh, everyone and every voiceprint goes first.
 static void take_roster(const listen_head_t *head)
 {
     static app_speaker_state_t state;
