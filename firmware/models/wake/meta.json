@@ -1,43 +1,173 @@
 {
   "branch": "wake",
-  "run": "20261031_5e5921a-dirty_72c36d",
+  "run": "20261101_528604f-dirty_b4b1a4",
   "grid_hash": "0x9c914b61",
   "files": [
     {
       "file": "wake.espdl",
       "entry": "wake",
       "kind": "espdl",
-      "sha256": "2ca55ba1f65775e47ed413576c22d7a50c418934b5f6988533122c3b2d8b1190"
+      "sha256": "221edb2a5cd9f535215cb7b4fe1b41ab085fb9563e0cd22868f73c759aa0184d"
     },
     {
       "file": "wake.norm.bin",
       "entry": "wake",
       "kind": "norm",
-      "sha256": "ecc93a11963787b9dd342e94f5664e8f8e8fdfca47a972b09577803a4b5b6afe"
+      "sha256": "146e2eb50392e607e67107139bf5dd8a9d2f0ab7a21a5cff11d8972bae9f04d8"
     }
   ],
   "learnt_from": {
-    "split": "happy1",
+    "split": "vung1",
     "train": [
       {
         "file": "train_hard.txt",
-        "sha256": "819c10585941a915db39bce49bd7839fb7fbddf4933fc2b77f9d6715b9768863"
+        "sha256": "6e643e621104ab5d36f7fc1ab629c401b3c78d0dc5c585d1846eaa760aa7e233"
       },
       {
         "file": "train_neg.txt",
-        "sha256": "7a7161770d17f0143f4a06cf03fd7f9a721845e8a438af5aa01eaeb0f589d04a"
+        "sha256": "4087b9d0044f5a8489827fce34b1872402940572ff6e0495fabab6381b22e0f7"
       },
       {
         "file": "train_pos.txt",
-        "sha256": "637c45ad79f46894fe37a0765aa637b83c33fcbf71b5137644ca067cac440bd6"
+        "sha256": "d6eb0dc922f6748cb93e53ac9147e3201a3548de29973c53a922925eb069ecc3"
+      }
+    ],
+    "board": [
+      {
+        "session": "20261101_home_001",
+        "sha256": "46a786effd679d5c14c6bfc971b9bbf338dd7ccded938cfbca400ed5712506e7"
+      },
+      {
+        "session": "20261101_home_002",
+        "sha256": "19be3711db6b41afe13d7cf2bd5ed1f1ea0e3d4d0e3c44916c5dfaa5c2ef8927"
+      },
+      {
+        "session": "20261101_home_005",
+        "sha256": "ec45548ebd771be9d717735d53456e92d31c45d17d81949168236c79f63533e0"
+      },
+      {
+        "session": "20261101_home_006",
+        "sha256": "ec69e81c251d5d7444998b1be428bda21510c9e287d43742801242cb4399c52f"
+      },
+      {
+        "session": "20261101_home_007",
+        "sha256": "f0399146c5f99b47df4a96270628bc99e22ba7f946b2d97c79b15bd9643219a7"
+      },
+      {
+        "session": "20261101_home_009",
+        "sha256": "8b7b50309c3de565789cb59c5e545f7b218e87527a8167c0b4972f9ecdb6a6cd"
+      },
+      {
+        "session": "20261101_home_012",
+        "sha256": "4251ddad39fec67762a879dda7decf868dde8a0df2beac6da1ff9a6cd4612196"
+      },
+      {
+        "session": "20260928_home_012",
+        "sha256": "fb1cbead1f791cc2d7200acdf1cbda36fe9e91067c3e4bf795ef4516cee14234"
+      },
+      {
+        "session": "20260928_home_013",
+        "sha256": "3a28bd37c6a83b61a6cabc40b446a1eeaa3fdf0aba22965b4986513fc0b42ea4"
+      },
+      {
+        "session": "20260928_home_014",
+        "sha256": "1be0bac581bc8eb53f903c58fb2f85fce6fed9cee7fc58819dfc8153b1f7750b"
+      },
+      {
+        "session": "20260928_home_015",
+        "sha256": "e3d36d2b5ade540e18797a67a875cf1340fd5f4a2c7dfd6bc2ad672d639dfc1c"
+      },
+      {
+        "session": "20260928_home_016",
+        "sha256": "bb86be98f0dc08e5d937ea261378ac18cd408cfad0636ce20f24a2751849ad26"
+      },
+      {
+        "session": "20260928_home_017",
+        "sha256": "81e80e13bfea8dc5eaa22808f2d112c4a2860cf2ca151c1ea84994f40da0135e"
+      },
+      {
+        "session": "20260928_home_018",
+        "sha256": "9d600e51a4ed1a5fb20a60ee9c993865044488fa4185575a9e5b44bb05052e0d"
+      },
+      {
+        "session": "20260928_home_019",
+        "sha256": "063af4d9fc91aa557f4a1945379638a5913e9ece1727d3faae353db7a2484737"
+      },
+      {
+        "session": "20260928_home_020",
+        "sha256": "3eca0760b357ff707d92c7bdb45170f2e100fd902f0c11643ed82cf1670a1e6c"
+      },
+      {
+        "session": "20260928_home_021",
+        "sha256": "7f2a41a28a69605fd9b2dbb97c76993b1cd7a4d78548c081fae826054db98b63"
+      },
+      {
+        "session": "20260928_home_032",
+        "sha256": "3b4a5548c04f3950f21d2c32a218a133124965cc926d7b485fb0016b37ddd84a"
+      },
+      {
+        "session": "20261004_home_001",
+        "sha256": "589072f254b29137aaa112369f942c88266e16480dbcfd00a7176586244e2671"
+      },
+      {
+        "session": "20261004_home_002",
+        "sha256": "bee9f1b0e5e20e085168cf7bf49e38b9b607ec74305bf2a7803d9c27720b645f"
+      },
+      {
+        "session": "20261004_home_003",
+        "sha256": "920d14baeb5ac5ee386529387c807a97b8cd462fbfc7fb091bfa6c056e4f3d0d"
+      },
+      {
+        "session": "20261004_home_004",
+        "sha256": "b72e65ed90b811f7731cbbfb5c48548f18be6a5e797679d4f3d65e92a959f6d3"
+      },
+      {
+        "session": "20261004_home_005",
+        "sha256": "8ba5de2ee803f361f57d30a426b33239b22be9c6b371d3f662befc293c33c658"
+      },
+      {
+        "session": "20261004_home_006",
+        "sha256": "7921c62706f86adf2ba85f9e1dd39082f688fab821b01ff13d9b889c3b72e1da"
+      },
+      {
+        "session": "20261004_home_007",
+        "sha256": "25bcc31065fe708322722fb59d1734f5693a1bd2fa1d1da94e9b72b95e6cc54f"
+      },
+      {
+        "session": "20261004_home_008",
+        "sha256": "74c73ad4817187008ab843da122c3e3b9b1465af0e0674f01da6272c5ef27cfd"
+      },
+      {
+        "session": "20261004_home_009",
+        "sha256": "ac6887c33b76846e224479910cf3557b6bfc2b051e4a5f2bd968b8e9f735be8d"
+      },
+      {
+        "session": "20261004_home_010",
+        "sha256": "91ccdaf298e7cb7bca8e07b51df541973ba676889ed0f3a1f208e4fca4c98a6d"
+      },
+      {
+        "session": "20261031_home_001",
+        "sha256": "c29e557a7e6d5bc89f44745345943cbafc87941faf3af47c88a46130279e92eb"
+      },
+      {
+        "session": "20261101_home_003",
+        "sha256": "6a6da1d9338f1af01a8a1acaaf3f7bdf230fe4ee1efd1704b3acd59bb33c1213"
+      },
+      {
+        "session": "20261101_home_004",
+        "sha256": "b99700d35c83fceae2ccde581144a661c5df6e18d79496feb67fa19202941ab1"
+      },
+      {
+        "session": "20261101_home_010",
+        "sha256": "a4683faab6285f3a48625c6c05f35b59123665dc04b195756618f1ef1a31286c"
       }
     ]
   },
-  "row": "minmax",
-  "word": "happy",
+  "row": "percentile",
+  "word": "vừng ơi",
   "step_frames": 8,
   "threshold": {
-    "permille": 925
+    "permille": 800
   },
   "smooth_hops": 5
 }

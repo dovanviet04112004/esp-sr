@@ -1,6 +1,6 @@
 # The wake network of KEHOACH 3.11. E11-T10 exports it with random weights to prove esp-dl streams it one hop at a time.
 features: scenes/device.yaml       # the board simulation; the log-mel the network reads is contracts/listen.yaml's
-word: "vừng ơi"                     # ADR-0040, a trial; the product wakes on "happy" of ADR-0033
+word: "vừng ơi"                     # the product's wake word (ADR-0040, ADR-0043)
 model:
   kernel: 3
   channels: 64                     # with the CTC side task it lifts real speech, 32 does not (wake.md §5)
