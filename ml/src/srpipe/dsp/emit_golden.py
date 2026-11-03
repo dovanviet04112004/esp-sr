@@ -780,15 +780,30 @@ def _vad_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, int]]:
     return [(np.clip(np.rint(x * 32768.0), pcm_min, pcm_max).astype(np.int16), a) for x, a in cases]
 
 
-def vad_case(pcm: np.ndarray, aggressiveness: int, hangover_ms: int = afe.VAD_HANGOVER_MS) -> dict[str, np.ndarray]:
+def vad_case(
+    pcm: np.ndarray,
+    aggressiveness: int,
+    hangover_ms: int = afe.VAD_HANGOVER_MS,
+    switch: tuple[int, int] | None = None,
+    rebuilt: bool = False,
+) -> dict[str, np.ndarray]:
     """int16 hops, the configuration, and per hop the six band levels, the raw decision and speech after the
-    hangover; each hop enters as int16 / 32768, exact in float32 on both sides."""
+    hangover; each hop enters as int16 / 32768, exact in float32 on both sides. switch is (hop, aggressiveness): the
+    mode changes ahead of that hop and the config carries both; rebuilt starts a fresh detector there instead, as a
+    negative control."""
     hops = pcm.reshape(-1, grid.HOP_SAMPLES)
     detector = vad.Vad(aggressiveness, hangover_ms)
-    out = [detector.process(h.astype(np.float32) / np.float32(32768.0)) for h in hops]
+    out = []
+    for k, h in enumerate(hops):
+        if switch is not None and k == switch[0]:
+            if rebuilt:
+                detector = vad.Vad(switch[1], hangover_ms)
+            else:
+                detector.set_aggressiveness(switch[1])
+        out.append(detector.process(h.astype(np.float32) / np.float32(32768.0)))
     return {
         "pcm": hops,
-        "config": np.array([aggressiveness, hangover_ms], dtype=np.int32),
+        "config": np.array([aggressiveness, hangover_ms, *(switch or ())], dtype=np.int32),
         "features": np.stack([o.features for o in out]).astype(np.float32),
         "raw": np.array([o.raw for o in out], dtype=np.uint8),
         "speech": np.array([o.speech for o in out], dtype=np.uint8),
@@ -810,7 +825,24 @@ def emit_vad(root: Path) -> list[Path]:
     path = root / "vad" / "case_neg_000.gold"
     write_gold(path, negative)
     written.append(path)
-    return written
+    return written + _emit_vad_switch(root, np.random.default_rng(SEED + 21))
+
+
+def _emit_vad_switch(root: Path, rng: np.random.Generator) -> list[Path]:
+    """White noise whose mode goes from 3 to 0 halfway, right after a burst of speech (KEHOACH 3.10): the models,
+    the minimum tracks, the filters and the hangover each change what follows. The negative control starts a fresh
+    detector at the change, which a mode change must not do."""
+    n = VAD_HOPS * grid.HOP_SAMPLES
+    switch = (VAD_HOPS // 2, 0)
+    x = 0.03 * rng.standard_normal(n)
+    burst = slice((switch[0] - 8) * grid.HOP_SAMPLES, switch[0] * grid.HOP_SAMPLES)
+    x[burst] += speechlike(rng, burst.stop - burst.start, 0.3)
+    pcm = _pcm(x)
+    path = root / "vad" / "case_004.gold"
+    write_gold(path, vad_case(pcm, 3, switch=switch))
+    negative_path = root / "vad" / "case_neg_001.gold"
+    write_gold(negative_path, vad_case(pcm, 3, switch=switch, rebuilt=True))
+    return [path, negative_path]
 
 
 def _pcm(x: np.ndarray) -> np.ndarray:

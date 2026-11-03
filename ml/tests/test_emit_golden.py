@@ -9,7 +9,7 @@ import numpy as np
 import yaml
 
 from srpipe.dsp import emit_golden
-from srpipe.dsp.afe import balance, bss, chain, doa, gsc, ns_omlsa
+from srpipe.dsp.afe import balance, bss, chain, doa, gsc, ns_omlsa, vad
 from srpipe.dsp.spec import mel, pitch, spk_fbank, stft
 from srpipe.generated import afe, grid
 from srpipe.golden.gold import read_gold
@@ -191,6 +191,41 @@ def test_the_vad_negative_control_has_speech_one_hop_late() -> None:
     right = emit_golden.vad_case(case["pcm"].reshape(-1), int(case["config"][0]))["speech"]
     assert np.array_equal(case["speech"][1:], right[:-1])
     assert not np.array_equal(case["speech"], right)
+
+
+def test_the_vad_switch_case_shows_the_new_mode_and_each_state_the_change_keeps() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "vad" / "case_004.gold")
+    aggressiveness, hangover_ms, hop, mode = (int(v) for v in case["config"])
+
+    def forget_tracker(d: vad.Vad) -> None:
+        d.tracker, d.hops_modelled = vad.Vad(mode).tracker, 0
+
+    mistakes = {
+        "old mode": lambda d: d.set_aggressiveness(aggressiveness),
+        "models": lambda d: setattr(d, "models", vad.Vad(mode).models),
+        "tracker": forget_tracker,
+        "filters": vad.Vad.flush,
+        "hangover": lambda d: setattr(d, "hangover_left", 0),
+    }
+    for name, mistake in mistakes.items():
+        detector = vad.Vad(aggressiveness, hangover_ms)
+        out = []
+        for k, h in enumerate(case["pcm"]):
+            if k == hop:
+                detector.set_aggressiveness(mode)
+                mistake(detector)
+            out.append(detector.process(h.astype(np.float32) / np.float32(32768.0)))
+        same_features = np.array_equal(np.stack([o.features for o in out]), case["features"])
+        assert not (same_features and np.array_equal([o.speech for o in out], case["speech"])), name
+
+
+def test_the_vad_switch_negative_control_agrees_until_the_change_then_forgets() -> None:
+    case = read_gold(emit_golden.GOLDEN_ROOT / "vad" / "case_004.gold")
+    negative = read_gold(emit_golden.GOLDEN_ROOT / "vad" / "case_neg_001.gold")
+    hop = int(case["config"][2])
+    for key in ("features", "raw", "speech"):
+        np.testing.assert_array_equal(negative[key][:hop], case[key][:hop])
+    assert not np.array_equal(negative["raw"][hop:], case["raw"][hop:])
 
 
 def test_committed_agc_cases_match_a_fresh_emit(tmp_path: Path) -> None:
