@@ -338,15 +338,20 @@ class Vad:
         hangover_ms: int = afe.VAD_HANGOVER_MS,
         frame_samples: int = grid.HOP_SAMPLES,
     ) -> None:
-        if not 0 <= aggressiveness <= MAX_AGGRESSIVENESS:
-            raise ValueError(f"aggressiveness {aggressiveness} outside 0 .. {MAX_AGGRESSIVENESS}")
         if frame_samples % FRAME_MULTIPLE_SAMPLES:
             raise ValueError(f"frame of {frame_samples} samples is not a multiple of {FRAME_MULTIPLE_SAMPLES}")
         self.frame_samples = frame_samples
-        self.local_threshold = f32(afe.VAD_LOCAL_THRESHOLD[aggressiveness])
-        self.global_threshold = f32(afe.VAD_GLOBAL_THRESHOLD[aggressiveness])
+        self.set_aggressiveness(aggressiveness)
         self.hangover_hops = hangover_hops(hangover_ms, frame_samples)
         self.reset()
+
+    def set_aggressiveness(self, aggressiveness: int) -> None:
+        """Take that mode's two thresholds and keep everything learnt, as WebRTC's WebRtcVad_set_mode does
+        (KEHOACH 3.10)."""
+        if not 0 <= aggressiveness <= MAX_AGGRESSIVENESS:
+            raise ValueError(f"aggressiveness {aggressiveness} outside 0 .. {MAX_AGGRESSIVENESS}")
+        self.local_threshold = f32(afe.VAD_LOCAL_THRESHOLD[aggressiveness])
+        self.global_threshold = f32(afe.VAD_GLOBAL_THRESHOLD[aggressiveness])
 
     def flush(self) -> None:
         """Clear the band-split filters, the only state that holds samples, as after a short gap; the models, the

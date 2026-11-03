@@ -103,6 +103,22 @@ def test_a_higher_aggressiveness_never_finds_more_speech() -> None:
     assert counts == sorted(counts, reverse=True) and counts[0] > counts[3]
 
 
+def test_a_mode_change_takes_the_new_thresholds_and_keeps_the_learnt_model() -> None:
+    rng = np.random.default_rng(7)
+    x = speechlike(rng, 6.0, 0.2) + coloured(rng, 6 * FS, 0.01, pink=True)
+    half = (len(x) // 2) // FS * FS
+    kept = vad.Vad(0)
+    run(kept, x[:half])
+    learnt = [m.copy() for m in kept.models]
+    kept.set_aggressiveness(3)
+    assert all(np.array_equal(a, b) for a, b in zip(kept.models, learnt, strict=True))
+    fresh = vad.Vad(3)
+    assert (kept.local_threshold, kept.global_threshold) == (fresh.local_threshold, fresh.global_threshold)
+    assert not all(np.array_equal(a, b) for a, b in zip(learnt, fresh.models, strict=True)), "nothing was learnt"
+    with pytest.raises(ValueError):
+        kept.set_aggressiveness(4)
+
+
 @pytest.mark.parametrize(
     ("freq_hz", "band"), [(170.0, 0), (370.0, 1), (750.0, 2), (1500.0, 3), (3500.0, 4), (2500.0, 5)]
 )
