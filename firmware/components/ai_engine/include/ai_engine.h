@@ -227,7 +227,7 @@ typedef struct {
 } ai_engine_box_t;
 
 /** Map label's vision image, check its header and .espdl sha256, build the network over flash (KEHOACH 3.18).
- *  @ctx task | blocking, reads flash and runs the network once | nhin_task; weights stay in flash
+ *  @ctx app_boot, ahead of every task: the build sends all allocations to PSRAM | blocking | flash weights
  *  @ret ESP_OK | ESP_ERR_NOT_FOUND no image | ESP_ERR_INVALID_VERSION | ESP_ERR_INVALID_CRC | ESP_ERR_NO_MEM
  *       | ESP_ERR_INVALID_SIZE classes differ from the network's | ESP_ERR_INVALID_STATE loaded already
  */
@@ -245,8 +245,8 @@ esp_err_t ai_engine_detect_run(const uint8_t *rgb, uint16_t width, uint16_t heig
  */
 const char *ai_engine_detect_name(uint16_t cls);
 
-/** Free the network and the mapping, ahead of the vision slot being written (KEHOACH 3.18).
- *  @ctx nhin_task | non-blocking
+/** Free the network and the mapping; the product keeps them until it restarts (KEHOACH 3.18).
+ *  @ctx test apps, between cases | non-blocking
  */
 void ai_engine_detect_unload(void);
 
