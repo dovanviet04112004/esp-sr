@@ -121,11 +121,12 @@ def with_noise(
 ) -> np.ndarray:
     """A recording (samples, mics) int16 with noise from the room's noise source, through the pair's response, at
     snr_db: the talker's power at ch0 over the speech hops, the floor's power over the others taken out, over the
-    noise's whole at ch0; floored and saturated as drv_audio's shift does (KEHOACH 1.2)."""
+    noise's whole at ch0; floored and saturated as drv_audio's shift does (KEHOACH 1.2). A one-microphone
+    recording (ADR-0042) takes the noise as ch0 hears it."""
     x = pcm.astype(np.float64)
     n = len(x)
     air = np.stack([signal.fftconvolve(noise[:n], rirs[device.NOISE, m])[:n] for m in range(array.N_MICS)])
-    heard = device.respond(air, mics)
+    heard = device.respond(air, mics)[: x.shape[1]]
     power = np.mean(x[: n // HOP * HOP, 0].reshape(-1, HOP) ** 2, axis=1)
     speech = speech[: len(power)]
     if not speech.any() or speech.all():

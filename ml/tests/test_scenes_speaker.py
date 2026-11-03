@@ -96,6 +96,20 @@ def test_noise_lands_at_the_snr_asked_over_the_talker_with_the_floor_taken_out()
     assert np.max(np.abs(added[:, 0] - added[:, 1])) <= 1.0
 
 
+def test_a_one_microphone_recording_keeps_one_channel_and_gets_ch0s_noise() -> None:
+    rng, hops = np.random.default_rng(5), 200
+    talk = np.zeros(hops, dtype=bool)
+    talk[50:120] = True
+    pcm = recording(rng, hops, talk)
+    rirs = np.zeros((2, 2, 4), dtype=np.float32)
+    rirs[device.NOISE, :, 0] = 1.0
+    noise = rng.standard_normal(len(pcm))
+    two = speaker.with_noise(pcm, talk, rirs, noise, 10.0, flat_pair())
+    one = speaker.with_noise(pcm[:, :1], talk, rirs, noise, 10.0, flat_pair())
+    assert one.shape == (len(pcm), 1)
+    assert np.array_equal(one[:, 0], two[:, 0])
+
+
 def test_noise_saturates_as_the_board_does_and_needs_speech_and_silence() -> None:
     rng, hops = np.random.default_rng(4), 100
     talk = np.zeros(hops, dtype=bool)
