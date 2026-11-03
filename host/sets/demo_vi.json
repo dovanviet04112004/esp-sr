@@ -37,6 +37,8 @@
     {"id": "vao_phong_109", "text": "vào phòng một không chín"},
     {"id": "vao_phong_111", "text": "vào phòng một một một"},
     {"id": "vao_phong_1404", "text": "vào phòng một bốn không bốn"},
-    {"id": "phat_co", "text": "phát cỏ"}
+    {"id": "phat_co", "text": "phát cỏ"},
+    {"id": "ghi_nhat_ki", "text": "ghi nhật ký"},
+    {"id": "nhan_dien", "text": "nhận diện"}
   ]
 }
