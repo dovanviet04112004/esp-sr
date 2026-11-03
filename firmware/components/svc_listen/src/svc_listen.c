@@ -151,7 +151,7 @@ static atomic_bool s_diverting;
 // An enrolment running: xac_task writes it, nhan_task reads it to open windows with no wake (KEHOACH 5.4).
 static atomic_bool s_enrolling;
 // A command turned down for its speaker: reject_as sets it, svc_listen_feed takes it (FREERTOS.md 8.16).
-static atomic_bool s_rearm;
+static _Atomic uint32_t s_rearm_gen; // LENH generation a speaker reject reopens, 0 none
 
 static void *take(size_t bytes)
 {
@@ -748,10 +748,10 @@ static void wait_command(uint32_t seq)
     }
 }
 
-// A command turned down for its speaker leaves LENH waiting, one of its tries (ADR-0041).
-static void rearm(uint32_t seq)
+// A command of the current LENH turned down for its speaker leaves LENH waiting, one of its tries (ADR-0041).
+static void rearm(uint32_t seq, uint32_t gen)
 {
-    if (!s.wake || s.commanding || ++s.rejects >= s.tries) { return; }
+    if (!s.wake || s.commanding || gen != s.wakes || ++s.rejects >= s.tries) { return; }
     s.commanding = true;
     s.command_until = seq + s.wait_hops;
 }
@@ -777,7 +777,8 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
     }
     s.started = true;
     s.next_seq = seq + 1;
-    if (atomic_exchange(&s_rearm, false)) { rearm(seq); }
+    const uint32_t rearm_gen = atomic_exchange(&s_rearm_gen, 0);
+    if (rearm_gen != 0) { rearm(seq, rearm_gen); }
     const size_t slot = seq % RING_HOPS;
     if (s.pcm_ring != NULL) { memcpy(s.pcm_ring[slot], pcm, sizeof(s.pcm_ring[slot])); }
     to_float(pcm, s.hop);
@@ -866,6 +867,7 @@ static void decide(const window_t *w, const ai_engine_command_result_t *r, svc_l
         strlcpy(e->code, code, sizeof(e->code));
     }
     out->first_seq = w->first;
+    out->lenh_gen = w->lenh ? w->wake_gen : 0;
     out->speech_seq = w->speech;
     out->fill_first_seq = w->fill_first;
     out->fill_hops = (uint16_t)w->fill_hops;
@@ -1032,7 +1034,9 @@ static void reject_as(svc_listen_decision_t *d, const char *code)
 {
     d->event.kind = APP_EVT_REJECT;
     strlcpy(d->event.code, code, sizeof(d->event.code));
-    if (strcmp(code, APP_CODE_SPEAKER_ENROLLING) != 0) { atomic_store(&s_rearm, true); }
+    if (strcmp(code, APP_CODE_SPEAKER_ENROLLING) != 0 && d->lenh_gen != 0) {
+        atomic_store(&s_rearm_gen, d->lenh_gen);
+    }
 }
 
 void svc_listen_busy_reject(svc_listen_decision_t *decision)

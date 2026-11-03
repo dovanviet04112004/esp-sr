@@ -49,6 +49,7 @@ typedef struct {
     uint32_t verify_us;             // the speaker check, 0 without one
     int16_t speaker_milli_z;        // the best voiceprint's score, with has_speaker
     uint8_t noise_bin;              // of the speaker check, ADR-0024
+    uint32_t lenh_gen;              // the window's LENH wake generation, 0 in NGHE
 } svc_listen_decision_t;
 
 /** Read the commands, prepare ai_engine, take the rings and tables, and with speaker the PCM ring, the verify
