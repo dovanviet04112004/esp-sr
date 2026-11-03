@@ -53,7 +53,7 @@ Bảng này tồn tại cho tới khi TỔNG QUAN được sửa theo (E1-T9). S
 | 6 | "Bù bằng phần mềm chỉ sửa được biên độ", nhưng module `balance` lại "cân độ nhạy và pha" | Pha **tĩnh** bù được nếu đo ở hướng chính diện trong phòng ít vang; phần trôi theo nhiệt và tuổi thì không. Mốc 10° giữ nguyên làm tiêu chí chọn linh kiện | Hai câu trong TỔNG QUAN mâu thuẫn nhau | §2.3, §3.4 |
 | 7 | Thứ tự `AGC → VAD` | **`VAD → AGC`** | AGC chỉ được thích nghi khi có người nói, nên cần cờ VAD; VAD dựa trên năng lượng dải, nên phải đọc mức chưa bị AGC kéo | §3.10 |
 | 8 | DOA GCC-PHAT, không nói độ phân giải | Dò **lưới góc** trên phổ chéo đã làm trơn, không lấy đỉnh trễ nguyên | Micro của board B cách 4,5 cm ở 16 kHz chỉ có ±2,10 mẫu trễ: lấy đỉnh nguyên chỉ ra 5 góc | §3.6 |
-| 9 | `command` so chuỗi âm vị với danh sách | Hai đường sau một hợp đồng (ADR-0012): **chấm CTC có ràng buộc** từng lệnh bằng thuật toán tiến, kèm **biến thể phương ngữ** (`ctc`); và **DS-CNN phân lớp** bộ lệnh cố định (`kws`), đường mặc định tới khi Cửa 3 chọn | Giải tham lam rồi so chuỗi vứt đi xác suất; tập lệnh đóng cho phép chấm thẳng từng lệnh với giá gần bằng không. `kws` chạy được trước khi cao độ, GRU chạy dòng và chấm CTC xong | §3.12 |
+| 9 | `command` so chuỗi âm vị với danh sách | Hai đường sau một hợp đồng (ADR-0012): **chấm CTC có ràng buộc** từng lệnh bằng thuật toán tiến, kèm **biến thể phương ngữ** (`ctc`); và **DS-CNN phân lớp** bộ lệnh cố định (`kws`). Sản phẩm chạy `ctc` (ADR-0015); `kws` chưa có mạng trên chip | Giải tham lam rồi so chuỗi vứt đi xác suất; tập lệnh đóng cho phép chấm thẳng từng lệnh với giá gần bằng không | §3.12 |
 | 10 | Thanh điệu: ba đường | **Nhãn thanh chen trong cùng chuỗi CTC** trên 44 đơn vị, từ **log-mel 80 cộng ba chiều cao độ** (ADR-0010, ADR-0017) | Tài liệu: thanh phải nằm trong đơn vị và cao độ hạ lỗi rõ ở ngôn ngữ có thanh, còn cách đặt thanh không đổi lỗi gộp; một đầu ra, bộ ký hiệu nhỏ nhất | §3.11, §3.12 |
 | 11 | Từ đánh thức 2–3 âm tiết | Đích: **"trợ lý"**, 2 âm tiết, ưu tiên bắt được (ADR-0011); cụm 3–4 âm tiết là hướng khi siết báo nhầm. Tạm: **"happy"** của Speech Commands, tới khi có giọng thật nói "trợ lý" (ADR-0029, ADR-0033) | Cụm hai âm tiết dài chừng nửa giây và trùng lời nói thường nhiều hơn; đổi lại nó tự nhiên và người thật trong kho nói nó 223 lần, nên có mẫu dương giọng thật | §3.11 |
 | 12 | `ns` mạng là RNNoise, không chọn mạng theo vạch vì đắt; ~24% một nhân, ~40 MFLOPS | **Hai ứng viên** cùng dữ liệu, cùng lưới, học trong một lượt, cắm vào cùng khe `ns` (chủ repo chốt 30/09 và 01/10): **RNNoise-16k**, dựng lại dải cho 16 kHz và huấn luyện lại, phần mạng ~11 MFLOP/s ở 62,5 khung/s 🔬; và **NSNet-16k**, mạng theo vạch họ NSNet2, cỡ L chủ repo chọn sau probe trên board B (ADR-0014). Bản hơn sàn bằng thước của §3.15 thì giữ, không bản nào hơn thì giữ sàn; ADR ghi | Bàn so §3.16 thấy mạng dìm nhiễu hạ nhiễu sâu hơn sàn nhiều trên cùng lối vào (`docs/measurements/afe/compare.md`, mục "Dìm nhiễu trên cùng lối vào gsc"). Giá của mạng theo vạch nằm ở bề rộng lớp hồi tiếp, hai lớp dày vào và ra chỉ tăng tuyến tính theo số vạch, nên NSNet-16k L, 5,1 ms mỗi bước trên board B, giữ nhân 1 quanh mục tiêu 50% (§5.6). Số 40 MFLOPS là của bản 48 kHz, 100 khung/s | §3.9 |
@@ -76,8 +76,8 @@ có cột ánh xạ về mã `V5.x.y`.
 
 ### 1.1 Bảng mô hình
 
-Sáu khối dùng mô hình học; khối thứ năm, `speaker`, là khối nghiên cứu của §3.17, khối thứ sáu, `detect`, nhận diện
-vật thể trên ảnh bằng model server học (§3.18). Mọi khối khác là công thức, không cần
+Bảy khối dùng mô hình học; khối thứ năm, `speaker`, là khối nghiên cứu của §3.17, khối thứ sáu, `detect`, nhận diện
+vật thể trên ảnh bằng model server học (§3.18), khối thứ bảy, `pitch`, là bộ dò cao độ SwiftF0 học sẵn (§3.11). Mọi khối khác là công thức, không cần
 dữ liệu huấn luyện.
 
 | Nhánh | Chỗ chạy | Kiến trúc | Vào | Ra | Cỡ mục tiêu | Khởi đầu từ |
@@ -91,6 +91,7 @@ dữ liệu huấn luyện.
 | `synth` | `ai_engine/src/synth/` | chốt ở E12-T1: mạng chưng cất kiểu sanoTTS (trường độ → âm học → iSTFT) | chuỗi đơn vị + trường độ | PCM 16 kHz | ≤ 1 MB | tuỳ phương án; phương án không mạng nằm ở `svc_speak` (§3.13) |
 | `speaker` máy chủ | `host/` (`srhost.speaker`), qua `ml/spk_ref/redimnet` | **ReDimNet M** của IDRnD, `M-vb2+vox2+cnc-ft_mix` (§3.17) | PCM 16 kHz của cửa sổ lệnh | embedding 192 chiều, cosine với mẫu giọng | 4,8 M tham số, float trên máy chủ | học sẵn, không học lại |
 | `speaker` chip | `ai_engine`, thư mục chốt khi cắm (§3.17) | **ReDimNet2 b0** của PalabraAI, `b0-vox2-lm` | PCM 16 kHz của cửa sổ lệnh | embedding 192 chiều, cosine với mẫu giọng | 1,1 M tham số, ~1,1 MB int8 🔬 | học sẵn; học lại trên dữ liệu nhiều ngôn ngữ cộng tiếng Việt nếu int8 kéo chất lượng xuống |
+| `pitch` | `ai_engine/src/pitch/`, front end ở `dsp_spec/swift_front` | CNN 2-D của SwiftF0 với op dải riêng, chạy dòng 16 khung mỗi lượt (§3.11) | 3 × 128 dải log-tần số | 95 bậc cao độ + độ tin | 25 949 tham số, `.espdl` int8 39 KB | học sẵn (`swift-f0` 0.3.0, MIT), không học lại |
 | `detect` | `ai_engine/src/detect/`, khe `vision_0` (§3.18) | **YOLO26n** của Ultralytics, đầu one-to-one không NMS, chạy bằng esp-dl | ảnh RGB letterbox S×S, S bội 32 trong 160–640 | K khung: lớp, điểm, toạ độ | 2,93 MiB int8 + int16 ở bản COCO | server học lớp riêng; bản thử học sẵn trên COCO |
 
 Runtime của mọi khối chạy trên chip là `esp-dl`, ghim bản chính xác (§4.5.1). `esp-dl` có sẵn GRU int8
@@ -538,12 +539,16 @@ vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đ
 |---|---|---|---|---|---|---|
 | `fft` `window` `stft` | thuần | `dsp_spec` | FFT thực viết tay cơ số 4, khớp bản soi gương từng bit; `dl_fft` chọn được bằng Kconfig (ADR-0020); căn Hann, chồng 50% | §3.1 | **442 µs đo** cả chuỗi | E6-T4, E6-T8 |
 | `mel` | thuần | `dsp_spec` | log-mel với log float32 của module, MFCC giữ làm đối chiếu | 80 dải, 20–7 600 Hz | **~230 µs đo** (STFT một kênh 142, log-mel 80 dải 87,5; `budget.md`) | E6-T5, E6-T8 |
-| `pitch` | thuần | `dsp_spec` | bộ dò cao độ của Kaldi chạy dòng: NCCF ở 4 kHz, Viterbi, ra độ hữu thanh + log F0 trừ trung bình + delta (§3.11) | 50–400 Hz | **1,98 ms đo** mỗi bước ở nhân 0, vùng làm việc trong PSRAM (`measurements/pitch.md`); dựng cho `command` (ADR-0010) | E11-T8 |
+| `pitch` | thuần | `dsp_spec` | bộ dò cao độ của Kaldi chạy dòng, ngoài đường nghe từ 29/10 (§3.11 bước 3.5): NCCF ở 4 kHz, Viterbi, ra độ hữu thanh + log F0 trừ trung bình + delta (§3.11) | 50–400 Hz | **1,98 ms đo** mỗi bước ở nhân 0, vùng làm việc trong PSRAM (`measurements/pitch.md`); dựng cho `command` (ADR-0010) | E11-T8 |
+| `swift_front` `swift_dims` | thuần | `dsp_spec` | front end của SwiftF0: ba STFT 512, 1 024, 2 048 bước 256 thành 128 dải theo bảng `FRONT`; ba chiều cao độ thang Kaldi, nhìn sau 0,4 s (§3.11) | `contracts/listen.yaml` mục `pitch` | **2 367 + 44 µs đo** mỗi bước, nhân 0 (`budget.md`) | E11-T37 |
+| `pitch` mạng | **mô hình** | `ai_engine/src/pitch/` | CNN 2-D của SwiftF0 int8, chạy dòng 16 khung mỗi lượt (§3.11) | 25 949 tham số | **1 913 µs đo** mỗi bước (`pitch.md` §7.4) | E11-T37 |
+| `speaker` | **mô hình** + thuần | `ai_engine/src/speaker/` | ReDimNet2 b0, hay b3 đổi bằng `make product SPEAKER=`, int8; AS-norm trên nhóm chuẩn (§3.17) | embedding 192 chiều | **504 ms đo** mỗi lệnh với b0, nhân 0 (`latency.md` §32) | E11-T26 |
+| `detect` | **mô hình** + thuần | `ai_engine/src/detect/` | YOLO26n int8, S 512, 80 lớp, op riêng của §3.18 | | **1 839 ms đo** mỗi ảnh, nhân 0 (`detect.md` §8) | E15-T5 |
 | `hpf` | thuần | `dsp_afe` | IIR bậc hai Butterworth, dạng II chuyển vị viết tay (ADR-0004) | 80 Hz | ~41 µs hai kênh | E7-T1 |
 | `balance` | thuần | `dsp_afe` | nhân hệ số phức hiệu chuẩn mỗi vạch cho `ch1`, vòng viết tay (ADR-0005) | từ NVS `calib/bal` | ~18 µs | E7-T2 |
 | `aec` | thuần | `dsp_afe` | MDF chồng-lưu, bước học tự chỉnh, khử vọng dư | 8 phân đoạn × 256 = 128 ms đuôi | ~1,3 ms hai micro | E10-T4 |
 | `doa` | thuần | `dsp_afe` | GCC-PHAT trên phổ chéo đã làm trơn, dò lưới 2°, xoay pha dồn viết tay (ADR-0008) | dải 2–8 kHz | **641 µs đo** ở bước dò, 22 µs các bước khác | E8-T1 |
-| `gsc` | thuần | `dsp_afe` | chùm trễ và cộng, ma trận chặn, NLMS rò có điều khiển thích nghi, vòng viết tay (ADR-0009) | μ 0,05, rò 1e-4, trần 16 | **141 µs đo**; 485 µs ở bước đổi góc lái | E8-T2 |
+| `gsc` | thuần | `dsp_afe` | chùm trễ và cộng, ma trận chặn, NLMS rò có điều khiển thích nghi, vòng viết tay | μ 0,05, rò 1e-4, trần 16 | **141 µs đo**; 485 µs ở bước đổi góc lái | E8-T2 |
 | `bss` | thuần | `dsp_afe` | cổng hướng theo ghế trên góc của `doa`: FIXED ranh giới 90°, LEARN dò đỉnh của mật độ độ trễ (theo `micarray` của `tinyai-signal`) | độ dốc 20 mỗi mẫu trễ, tối đa 2 ghế | **25 µs đo** chia ở chính diện; LEARN 86 µs, đỉnh 256 µs; `vad` thứ hai thêm 138 µs | E8-T3 |
 | `ns` sàn | thuần | `dsp_afe` | OM-LSA + IMCRA | gain sàn −12 dB | **1,69 ms đo** (đỉnh 1,88); FPU của S3 tốn 4–6 chu kỳ mỗi lệnh float, không chạy chồng | E9-T1 |
 | `ns` mạng `rnnoise` | **mô hình** | `ai_engine/src/ns_rnnoise/` | RNNoise-16k: RNNoise dựng lại cho 16 kHz | 18–22 dải | 4,8 ms int8 đo trên board B (E9-T10) | E9-T12 |
@@ -937,13 +942,16 @@ chiều cao độ, lệch thì từ chối chạy. Chuẩn hoá trung bình và 
 (§6.3) chứ không nằm trong code, nên model và thống kê không thể lệch nhau (TỔNG QUAN V5.5.4).
 
 **Cao độ vào `command`.** Tiếng Việt có thanh là âm vị (TỔNG QUAN §3.2), và dải mel thô ở vùng 100–300 Hz nơi F0
-nằm. `command` `ctc` đọc log-mel 80 cộng ba chiều cao độ của `dsp_spec/pitch` (log F0, delta, độ hữu thanh): mọi số đã
+nằm. `command` `ctc` đọc log-mel 80 cộng ba chiều cao độ (log F0, delta, độ hữu thanh) của SwiftF0 chạy dòng
+(`dsp_spec/swift_front`, nhánh `pitch` của `ai_engine`, `dsp_spec/swift_dims`; bước 3.4 dưới): mọi số đã
 công bố cho ngôn ngữ có thanh đều thấy cao độ hạ lỗi, ở tiếng Việt khoảng 18% tương đối (ADR-0010); 80 dải làm F1, F2
 của các cặp nguyên âm ă/â, ơ/ô/o mịn gấp đôi 40 dải, như fbank 80 chiều của MultiNet7 (ADR-0017). `command` `kws`
 cũng đọc đủ 83 chiều ấy (§3.12). `wake` đọc log-mel 80 không cao độ, vì lỗi của nó nằm ở dữ liệu dương chứ không ở
 thanh. Model khai đặc trưng nó đọc trong `meta.json` (§6.3).
 
-**`pitch`** là bộ dò cao độ của Kaldi (Ghahremani và cộng sự, 2014; `feat/pitch-functions.cc`) ở chế độ chạy dòng
+**Bộ dò Kaldi** (`dsp_spec/pitch`) không còn trên đường nghe từ 29/10 (bước 3.5 dưới): nó còn bộ vàng và bench, tham số ở
+mục `kaldi_pitch` của `contracts/listen.yaml`, giá 1,98 ms mỗi bước (`measurements/pitch.md` §3). Nó là bộ dò cao độ
+của Kaldi (Ghahremani và cộng sự, 2014; `feat/pitch-functions.cc`) ở chế độ chạy dòng
 không trễ của chính Kaldi (`max_frames_latency` 0), giữ mọi hằng số mặc định: hạ về 4 kHz qua lọc sinc cắt 1 kHz; NCCF
 trên cửa sổ 25 ms ở mọi độ trễ nguyên, một bản có "ballast" theo năng lượng trung bình của `ballast_window_s` (2,0 s)
 gần nhất (khung lặng ra gần 0) để dò, một bản không để đo độ hữu thanh; nội suy sinc lên 417 độ trễ cấp số nhân bước 0,5% từ 1/400 đến 1/50 s;
@@ -964,11 +972,10 @@ tiếng Việt từ 71,3% xuống 65,6%, hơn getf0 và SAcC; bản chạy dòng
 mốc (`ml/afe_ref/kaldi_pitch/run.py`, gọi từ `srpipe/metrics/pitch.py`): lượt đầu chạy dòng không trễ phải trùng trong
 `ballast_window_s` đầu của mỗi câu, bản
 đọc cả tệp là đích để đo; `compute_kaldi_pitch` của torchaudio không dùng được, lớp ma trận của nó làm hỏng Viterbi
-(`docs/measurements/pitch.md`). Mọi tham số nằm ở `contracts/listen.yaml`, như của `mel`. `svc_listen` chạy bộ dò mỗi
-bước trên tín hiệu sạch ở mọi trạng thái, liền như log-mel, chỉ đặt lại khi luồng đứt, và giữ ba chiều ra trong vòng
-đệm cùng log-mel: cửa sổ `command` đọc cao độ đã có thay vì tính lại từ đầu cửa sổ, nên mở cửa sổ sớm không làm chậm
-quyết định (§5.4), và nhánh khác như `wake` đọc được khi cần (chủ repo 05/10). Giá: 1,98 ms mỗi bước ở nhân 0,
-khoảng 12% (§5.6).
+(`docs/measurements/pitch.md`). Bộ dò của sản phẩm, nay là SwiftF0, chạy trong `svc_listen` mỗi bước trên tín hiệu sạch
+ở mọi trạng thái, liền như log-mel, chỉ đặt lại khi luồng đứt, và giữ ba chiều ra trong vòng đệm cùng log-mel: cửa sổ
+`command` đọc cao độ đã có thay vì tính lại từ đầu cửa sổ, nên mở cửa sổ sớm không làm chậm quyết định (§5.4), và nhánh
+khác như `wake` đọc được khi cần (chủ repo 05/10).
 
 **Lượt thử bộ dò SwiftF0** (E11-T12, chủ repo duyệt 07/10). Bộ dò trên sai 16–58% khung ở âm tiết đầu của lệnh và 0–16%
 ở âm tiết sau, trên đầu ra của chuỗi như trên micro thô: đường Viterbi chạy dòng nối từ nền trước câu vào âm tiết đầu.
@@ -1101,9 +1108,8 @@ và học một lượt để xác nhận Cửa 3. Không bộ nào hơn cách t
   - trên 209 câu Cửa 3, đúng nhất 196 so với 194;
   - thanh các âm tiết sau 77% so với 66%;
   - lỗi đơn vị `val` 0,343 so với 0,375.
-- **Bỏ Kaldi:** chủ repo nghiêng về bỏ hẳn bộ dò Kaldi (28/10), vì không cao độ đang hơn nó. Bộ dò ấy vẫn chạy mỗi
-  bước, 1,98 ms ở nhân 0, mà `command` đang deploy không đọc đầu ra của nó. Trên chip chỉ còn hai cách nghe: không cao
-  độ, hay SwiftF0. Cách board chọn giữa hai cách bàn ở bước 3.
+- **Bỏ Kaldi:** chủ repo chọn SwiftF0 cho sản phẩm ngày 29/10 (3.5), vì không cao độ đã hơn bộ dò Kaldi. Bộ dò ấy ra
+  khỏi đường nghe; xoá hẳn khỏi repo chờ chủ repo.
 
 Mạng, đo trên `model.onnx` của `swift-f0` 0.3.0 (28/10):
 - 25 949 tham số. Đầu vào là mẫu PCM:
@@ -1193,8 +1199,9 @@ CNN còn 1,675 ms mỗi hop, khớp từng bit (`measurements/pitch.md` §6). Ch
   ở trên, bản soi gương và bộ vàng: để sau 3.5, chỉ khi chủ repo chọn SwiftF0 (29/10).
 
 3.2 **CNN chạy dòng.**
-- `ai_engine` lượng tử khung của front end về int8 theo số mũ đầu vào của CNN, làm tròn về chẵn như ESP-PPQ, như
-  đầu vào của `command` và `speaker`.
+- `ai_engine` lượng tử khung của front end về int8 theo số mũ đầu vào của CNN, làm tròn nửa lên như ESP-PPQ làm cho
+  S3 (`ESPDL_S3_INT8`), như đầu vào của `wake`. Đầu vào của `command` và `speaker` thì làm tròn về chẵn, như bản soi
+  gương của chúng (`to_int8`).
 - Mỗi lượt nhận S khung mới; S = 16, một bước của `command`.
 - Bản vá xuất `band_stream` chỉ chạy ở lối xuất chạy dòng, sau mọi bản vá dải:
   - ghi vào mỗi op riêng thuộc tính `delay`, số khung mà đầu ra của op trễ sau đầu vào của đồ thị;
@@ -1501,10 +1508,9 @@ tiết hợp lệ cộng bộ thử có nhãn gồm số, từ mượn, tên ri�
 `ai_engine_command_{prepare,begin,step,score,abort,features}` (§4.5.5) và trả cùng một khuôn: chỉ số lệnh hoặc −1, kèm ba điểm. **`ctc`** và
 **`rnnt`** dùng chung một encoder, nhận mọi bộ lệnh viết bằng chữ qua `lang_vi`, khác nhau ở cách giải; **`kws`** phân
 lớp một bộ lệnh cố định lúc học. Kconfig `AI_ENGINE_COMMAND_BACKEND` chọn thư mục nguồn nào dựng vào `ai_engine`
-(§4.5.2), và ảnh model khai đường của nó trong `meta.json` (§6.3). Đường mặc định của sản phẩm là **`kws`**, đường duy
-nhất chạy được trong tuần, tới khi Cửa 3 trên tập thu qua board chọn (§8). Xét lại khi `ctc` hay `rnnt` đạt Cửa 3 trong
-ngân sách của §3.3: lúc ấy `kws` chỉ còn là đường dự phòng, hoặc bỏ. Đơn vị và phép chấm dưới đây là của `ctc`, rồi
-`rnnt`; `kws` ở sau.
+(§4.5.2), và ảnh model khai đường của nó trong `meta.json` (§6.3). Sản phẩm chạy **`ctc`** (ADR-0015):
+`sdkconfig.defaults` chọn đường của model đang khoá ở lock. `kws` chưa có mạng trên chip; Kconfig chọn nó thì chỉ dựng vỏ
+`src/command/` (E11-T17). Đơn vị và phép chấm dưới đây là của `ctc`, rồi `rnnt`; `kws` ở sau.
 
 **Đơn vị nhận dạng** của `ctc` là 44 đơn vị ở trên, **thanh chen trong cùng chuỗi CTC**: một đầu ra, CTC tự căn thanh
 vào âm tiết. Chốt theo số đã công bố, không bằng phép so của repo (ADR-0010):
@@ -2218,9 +2224,10 @@ người lạ lọt.
   kém hơn (trên khảo sát, ReDimNet M giữ 98,3% lệnh với 5 câu, 99,4% với 10 câu). Số câu nằm trong `GEN_SPEAKER_HASH`,
   nên đổi nó thì mọi bản deploy của `speaker` phải deploy lại, để ngưỡng tính trên mẫu giọng đúng số câu.
 
-**Đường chip: ReDimNet2 b3 nhiều ngôn ngữ** (ADR-0028, chủ repo 28/10; b0 trước đó, ADR-0021). Trọng số
-`b3-vb2+vox2+cnc2_v0-lm` học sẵn, 4,51 M tham số, ~2,11 tỉ MAC cho 1,5 s lời, embedding 192 chiều như b0; chạy trong
-`ai_engine` (`src/speaker/`), int8 của esp-dl cùng các op riêng của §3.14, ở nhân 0 sau khi `command` nhận lệnh.
+**Đường chip: ReDimNet2, hai biến thể đổi bằng `make product SPEAKER=b0|b3`** (ADR-0021, ADR-0028). Lock mang **b0**
+(`b0-vox2-lm`, 1,1 M tham số). b3 (`b3-vb2+vox2+cnc2_v0-lm`, 4,51 M tham số, ~2,11 tỉ MAC cho 1,5 s lời) giữ được nhiều
+lệnh hơn, nhưng chậm gần ba lần và chiếm gần gấp đôi PSRAM. Cả hai ra embedding 192 chiều, chạy trong `ai_engine`
+(`src/speaker/`), int8 của esp-dl cùng các op riêng của §3.14, ở nhân 0 sau khi `command` nhận lệnh.
 - **Đi đúng đường của `command_ctc`:** b0 nhập thành một run ở `artifacts/speaker/runs/` (`make speaker-import`):
   `model.pt` cùng mã mạng ở bản ghim. Thang int8 vào `<run>/int8/` (`make speaker-ptq`), bản dò board đọc một hàng
   của thang (`make ai-unit-speaker`). Đồ thị chạy từ đặc trưng của chính b0 tới embedding 192 chiều; khâu đặc trưng ở
@@ -2270,8 +2277,8 @@ người lạ lọt.
 | Quyết định | `COMMAND` kèm `speakerPermille` và `speakerId` của người khớp nhất khi qua; `speakerPermille` là cosine của người ấy, phần nghìn, còn quyết định dựa trên điểm AS-norm. `REJECT` mã `SPEAKER` khi dưới ngưỡng, kèm hai trường ấy; `SPEAKER_BUSY` khi cả hai ô đang bận hay đuôi tiếng của cửa sổ đã trôi khỏi vòng PCM; `SPEAKER_UNENROLLED` khi cờ bật mà chưa ai có mẫu giọng của ảnh này; `SPEAKER_ENROLLING` trong lúc đăng ký, kèm `speakerId` và `enrolCount` 1…10. Mọi `REJECT` của khối giữ `commandId` của lệnh đã nhận |
 | Bật tắt | trường `check` của danh sách người nói (dưới), lưu ở NVS `speaker/chip`. Tắt thì `nhan_task` đưa lệnh lên như chưa có khối này: không chép, không chạy mạng |
 | Người nói | tối đa 8 người; thêm, xoá, sửa và đăng ký giọng đi như đổi bộ lệnh (dưới) |
-| Trễ | lệnh rời board sau khi xác minh xong: thêm một lần chạy b3 ~1,4 s cộng khâu đặc trưng và phần nhân 0 nhường cho `nhan_task` 🔬. Vì thế `REJECT` của câu sau có thể rời board trước `COMMAND` của câu trước; `seq` cho thứ tự |
-| Bộ nhớ | ~4,6 MB PSRAM khi ảnh có `speaker` (§6.6), gồm 8 mẫu giọng 6 KB và chỗ chấm trên nhóm chuẩn, 6 B mỗi hàng, cấp lúc boot kể cả khi cờ tắt (§5.5 luật 6). Vừa nhờ tối đa 64 lệnh (§4.5.5), trọng số b3 và `command_ctc` để ở flash (ADR-0028); nhóm chuẩn cũng đọc thẳng từ flash. Mỗi lần chạy mượn thêm 79 680 B RAM nội (§6.5) |
+| Trễ | lệnh rời board sau khi xác minh xong: với b0 thêm 504 ms trung vị trên sản phẩm (`measurements/latency.md` §32), với b3 ~1,4 s 🔬, kể cả khâu đặc trưng và phần nhân 0 nhường cho `nhan_task`. Vì thế `REJECT` của câu sau có thể rời board trước `COMMAND` của câu trước; `seq` cho thứ tự |
+| Bộ nhớ | tensor b0 2 135 KB, b3 4 012 KB (`measurements/ram.md` §4), cộng 8 mẫu giọng 6 KB và chỗ chấm trên nhóm chuẩn, 6 B mỗi hàng, cấp lúc boot kể cả khi cờ tắt (§5.5 luật 6), §6.6. Vừa nhờ tối đa 64 lệnh (§4.5.5), trọng số `speaker` và `command_ctc` để ở flash (ADR-0028); nhóm chuẩn cũng đọc thẳng từ flash. Mỗi lần chạy mượn thêm 79 680 B RAM nội (§6.5) |
 
 **Danh sách người nói** (E11-T31) đi như bộ lệnh (§4.6, §6.4): host giữ danh sách, board giữ mẫu giọng. Mọi lối vào
 gửi cùng hai yêu cầu, nên màn hình của board sau này chỉ là thêm một lối vào.
@@ -2452,9 +2459,7 @@ lệch ngoài ngưỡng:
 (ADR-0031). Conv nào không có bảng theo sau cũng thành ConvLut, không bảng (ADR-0035). Khối C3k2 một bottleneck mà Add
 và Concat cùng số mũ (`model.2`, `model.4`) thành một `C3k2Block`, chạy cả khối theo hàng, mọi map giữa nằm trong cache
 (ADR-0036). Tích chập 1 × 1 của cổ đọc Concat của một map phóng đôi gần nhất và map kia (`model.13/cv1`, `model.16/cv1`)
-thành một `UpsampleConcatConv`, dựng từng hàng của Concat trong cache (ADR-0037). Tích chập 1 × 1 nào khác đọc riêng một
-Concat kênh thành một `ConcatConv`: op đọc thẳng map mà mỗi phần cắt ra, đổi số mũ khi chép vào hàng, nới sang int16 khi
-tích chập int16, và ghi luôn bản int8 của đầu ra khi một RequantizeLinear int8 đọc nó (ADR-0038). Op chạy kernel tích
+thành một `UpsampleConcatConv`, dựng từng hàng của Concat trong cache (ADR-0037). Op chạy kernel tích
 chập của esp-dl theo dải hàng và tra bảng lên dải khi dải còn trong cache. Ba chỗ op không chạy như esp-dl (ADR-0034,
 ADR-0035):
 - trọng số đọc từ vùng RAM nội mượn mỗi lượt (§6.5), theo lát kênh ra khi filter lớn hơn vùng: đọc qua cache từ flash,
@@ -2503,10 +2508,10 @@ esp-sr/
     ├── adr/                             # quyết định có bảng đối chứng
     ├── bao_cao/                         # báo cáo tuần gửi mentor, một file tuan_<nn>.md mỗi tuần
     └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md, tts_engines.md, data_screen.md, wake.md,
-                                  speech_commands.md, command.md, speaker.md}
+                                  speech_commands.md, command.md, speaker.md, pitch.md, detect.md}
                       ├ bench/           # CSV thô của bench_*, commit cùng bảng nó sinh ra
                       ├ calib/           # hệ số hiệu chuẩn từng board (balance), bản đã ghi xuống NVS
-                      └ {afe,kws,tts}/   # số 🔬 theo khối
+                      └ afe/             # số 🔬 của dsp_afe theo module
 ```
 
 | File gốc | Vai trò |
@@ -2602,9 +2607,7 @@ hàm ghi và hàm đọc. `test_apps/parity` nướng cả cây `contracts/golde
 `littlefs_create_partition_image(... FLASH_IN_PROJECT)`, theo **bảng phân vùng riêng** của app ấy
 (`test_apps/parity/partitions.csv`): `nvs` đúng chỗ và đúng cỡ như §6.1 để hiệu chuẩn và khoá trên board còn nguyên, app
 512 KB ở chỗ `ota_0` (ảnh parity dưới 300 KB), `storage` 15,25 MB từ sau app tới 0xFE0000, chỗ `coredump` của §6.1
-bắt đầu. `storage` 1,75 MB của §6.1 đã đầy 91% sau bốn module của E7, 8 MB đầy 95% khi thêm `doa` ở E8, 12 MB không còn
-chứa được bộ vàng 12,3 MB của E11 cộng phần LittleFS giữ cho siêu dữ liệu, và 14 MB không còn chứa bộ vàng 14,3 MB khi
-E11 thêm `speaker_noise`.
+bắt đầu: cả bộ vàng nặng hơn 14,3 MB, còn sản phẩm giữ `storage` 0,5 MiB của §6.1.
 
 **File sinh ra không sửa tay.** CI chạy lại generator rồi `git diff --exit-code`.
 
@@ -2997,7 +3000,8 @@ firmware/
 │   │                            #     espdl_loan.{cpp,hpp} (§6.5), chuỗi vùng nạp trước vào dcache
 │   │                            #     espdl_preload.{cpp,hpp} (§3.14), chia việc của op cho hai nhân
 │   │                            #     espdl_split.hpp cùng espdl_split_{one,two}.cpp (§5.1);
-│   │                            #   src/{ns,ns_rnnoise,ns_nsnet,wake,command_kws,command_ctc,command_rnnt,speaker,synth,detect}/;
+│   │                            #   src/{core,ns,wake,command,command_kws,command_ctc,command_rnnt,pitch,speaker,synth,detect}/;
+│   │                            #   ns_rnnoise/, ns_nsnet/ ở E9-T5, E9-T11; đường kws dựng vỏ src/command/;
 │   │                            #   Kconfig AI_ENGINE_NS_BACKEND chọn một thư mục ns*, AI_ENGINE_COMMAND_BACKEND
 │   │                            #   một thư mục command_*, AI_ENGINE_CORES một espdl_split_* vào danh sách nguồn
 │   ├── net_wifi/      [C]   L3
@@ -3012,8 +3016,8 @@ firmware/
 │
 ├── third_party/README.md
 │   └── webrtc_vad/{LICENSE, UPSTREAM.md}   # nguồn của thuật toán và bảng `vad` (§3.10); không vendor mã
-├── models/                           # ❌ gitignore trừ README.md, models.lock.json, */meta.json
-│   └── {ns,wake,command,speaker,synth,detect}/{*.espdl, meta.json}
+├── models/                           # *.espdl, *.bin gitignore; */meta.json commit; lock ở contracts/
+│   └── {wake,command,pitch,speaker,detect}/{*.espdl, *.bin, meta.json}
 ├── test_apps/                        # test TÍCH HỢP toàn hệ; unit test nằm trong component
 │   ├── components/test_report/       # dòng kết quả có số thứ tự và CRC32, gửi lại khi máy tính xin (§4.5.7)
 │   ├── test_report.py                # phía máy tính của test_report: kiểm CRC, xin lại dòng thiếu
@@ -3202,7 +3206,7 @@ Các component còn lại theo cùng khuôn `workspace_bytes / init / step`:
 |---|---|---|
 | `dsp_spec` | `stft_analyze`, `stft_synthesize`, `mel_frame`, `pitch_frame`, `spk_fbank_run` (khâu đặc trưng của b0, §3.17), `swift_front_push` (front end của SwiftF0, §3.11), `swift_dims_push` (ba chiều cao độ của SwiftF0, §3.11) | any, không chặn, người gọi giữ bộ nhớ |
 | `lang_vi` | `lang_vi_normalize`, `lang_vi_g2p`, `lang_vi_lexicon_entry`, `lang_vi_unit_name` | any, không chặn |
-| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_{step,delay,reset}`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,voiceprint,norm,best,noise_bin,passes,model_id}`, `ai_engine_pitch_{tables,frames,delay,run,reset}` (SwiftF0, §3.11), `ai_engine_detect_{load,run,name,unload}` (§3.18), `ai_engine_ns_ops()`, `ai_engine_synth_render`, `ai_engine_helper_serve` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~1,5 s với b3, chỉ ở `xac_task`; `helper_serve` chặn tới hạn chờ, chỉ ở `phu_task` và chỉ có khi `AI_ENGINE_CORES_TWO` (§5.1); `detect_load` chặn và đọc flash, `detect_run` chặn vài giây, chỉ ở `nhin_task` |
+| `ai_engine` | `ai_engine_load(slot)`, `ai_engine_wake_{step,delay,reset}`, `ai_engine_command_{prepare,begin,step,score,abort,features}`, `ai_engine_speaker_{embed,dims,voiceprint,norm,best,noise_bin,passes,model_id}`, `ai_engine_pitch_{tables,frames,delay,run,reset}` (SwiftF0, §3.11), `ai_engine_detect_{load,run,name,unload}` (§3.18), `ai_engine_ns_ops()`, `ai_engine_synth_render`, `ai_engine_helper_serve` | task; `load` chặn và đọc flash; `prepare` chặn, chỉ khi không có cửa sổ mở; `step` không chặn; `speaker_embed` chặn ~0,5 s với b0, ~1,4 s với b3, chỉ ở `xac_task`; `helper_serve` chặn tới hạn chờ, chỉ ở `phu_task` và chỉ có khi `AI_ENGINE_CORES_TWO` (§5.1); `detect_load` chặn và đọc flash, `detect_run` chặn vài giây, chỉ ở `nhin_task` |
 | `drv_audio` | `drv_audio_read_frame`, `drv_audio_write`, `drv_audio_stats` | task; `read` chặn tối đa một khung cộng biên |
 | `svc_*` | `svc_<x>_init`, `svc_<x>_step` | task, gọi từ đúng task của bảng §5.2 |
 
@@ -3539,9 +3543,9 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 | `thu_task` | `svc_front` | 1 | 17 | 3 KB | chặn trong `drv_audio_read_frame` tới khi DMA đủ một khung | lấy khung `ch0 ch1 [ref]`, gắn `seq`, đẩy chỉ số ô vào `q_frame`; đếm tràn DMA. **Không làm gì khác** |
 | `sach_task` | `svc_front` | 1 | 16 | 6 KB | `q_frame` | `dsp_afe_feed` rồi `fetch`; khung sạch vào `q_clean`; ghi `s_afe_stats`; luồng mở thì chép khung vào `sb_stream` không chờ |
 | `phu_task` | `ai_engine` | 1 | 1 | 4 KB | chỉ khi `AI_ENGINE_CORES_TWO`; `ai_engine_helper_serve` chờ phần việc tới 100 ms | làm phần 1 của op riêng `ai_engine` mà task chạy mạng giao qua `s_split`, rồi báo xong (§5.1, ADR-0027); hết hạn chờ thì nạp watchdog |
-| `nhan_task` | `svc_listen` | 0 | 10; 2 khi chạy việc cửa sổ | 8 KB | `q_clean`, `q_cmdset` | log-mel và front SwiftF0 mỗi bước, CNN cao độ một lượt mỗi 16 bước (~30 ms, `q_clean` đỡ), ba chiều cao độ trễ 35–50 bước (§3.11) → `wake` mỗi khung; ở trạng thái `LENH` thì chạy cửa sổ `command` theo luồng thay `wake`; câu chốt → chấm → `q_dialog`; ảnh không có `wake` thì mở cửa sổ cho mọi câu `vad` tìm ra, cắt như Cửa 3 (§5.4), sự kiện → `q_event_up`; khi khối nhận diện người nói bật, lệnh nhận được đi sang `q_verify` thay vì lên thẳng (§3.17); giữa hai câu nhận bộ lệnh mới từ `q_cmdset`, đổi bảng lệnh, đưa cho `ai_engine_command_prepare`, ghi `set.json` (§5.3, §6.4) |
+| `nhan_task` | `svc_listen` | 0 | 10; 2 khi chạy việc cửa sổ | 8 KB | `q_clean`, `q_cmdset` | log-mel và front SwiftF0 mỗi bước, CNN cao độ một lượt mỗi 16 bước (~30 ms, `q_clean` đỡ), ba chiều cao độ trễ 35–50 bước (§3.11) → `wake` mỗi khung ở mọi trạng thái; trong `LENH` chạy thêm cửa sổ `command` theo luồng; câu chốt → chấm → `q_dialog`; ảnh không có `wake` thì mở cửa sổ cho mọi câu `vad` tìm ra, cắt như Cửa 3 (§5.4), sự kiện → `q_event_up`; khi khối nhận diện người nói bật, lệnh nhận được đi sang `q_verify` thay vì lên thẳng (§3.17); giữa hai câu nhận bộ lệnh mới từ `q_cmdset`, đổi bảng lệnh, đưa cho `ai_engine_command_prepare`, ghi `set.json` (§5.3, §6.4) |
 | `xac_task` | `svc_listen` | 0 | 3 | 8 KB | `q_verify`, `q_spk`, `q_spkset` | xác minh người nói của đường chip (§3.17): đặc trưng b0, mạng, điểm với mọi mẫu giọng → `COMMAND` hay `REJECT` vào `q_event_up`, trả ô qua `q_verify_free`; đổi danh sách người nói và đăng ký theo `q_spkset`, `q_spk`, huỷ lần đăng ký quá hạn mỗi vòng chờ 100 ms, ghi NVS qua `sys_storage`, ghi bản trạng thái vào `q_roster`. Ngăn xếp ở RAM nội vì nó ghi flash |
-| `dieu_task` | `svc_dialog` | 0 | 8 | 4 KB | `q_dialog`, `q_cmd` | máy trạng thái §5.4; ra `q_speak`, `q_event_up`; báo `nhan_task` đổi chế độ; `SPEAKER_ENROL`, `SPEAKER_ENROL_CANCEL` của `q_cmd` thành yêu cầu `ENROL`, `ENROL_CANCEL` vào `q_spk` |
+| `dieu_task` | `svc_dialog` từ E14-T4 | 0 | 8 | 4 KB | `q_dialog`, `q_cmd` | hiện chỉ đổi `SPEAKER_ENROL`, `SPEAKER_ENROL_CANCEL` của `q_cmd` thành yêu cầu `ENROL`, `ENROL_CANCEL` vào `q_spk`; `NGHE` ↔ `LENH` do `svc_listen` quyết trong `nhan_task` (§5.4); trạng thái `DAP`, câu trả lời ra `q_speak` và `q_event_up` có từ E14-T4 |
 | `noi_task` | `svc_speak` | 0 | 5 | 8 KB | `q_speak` | dựng trọn câu vào PSRAM rồi đẩy xuống TX; giương `SPEAKING` suốt lúc phát |
 | `gui_task` | `svc_report` | 0 | 4 | 4 KB | nhịp 100 ms | lấy mẫu `s_afe_stats`, gộp 10 mẫu thành một `telemetry` mỗi giây; phát `q_event_up`; `heartbeat` mỗi 30 s; đăng `up/speakers` khi `q_roster` có bản mới hay khi MQTT nối lại |
 | `luong_task` | `svc_report` | 0 | 3 | 4 KB | `sb_stream` | đẩy khung qua `net_stream`; TCP nghẽn thì bỏ khung, đếm; không bao giờ chặn người ghi |
@@ -3562,7 +3566,7 @@ không theo độ quan trọng: `thu` > `sach` > `phu` (nhân 1); `nhan` > `dieu
 (log-mel, cao độ, mở và cắt câu) phải theo kịp nhịp khung nên chạy ở 10; việc cửa sổ (mạng và phép chấm) đuổi kịp
 liền cả giây mỗi khi câu mở, nên chạy ở 2, ngang console và dưới mọi task ứng dụng khác của nhân 0. Các task ấy chỉ dùng vài phần trăm
 CPU, còn nhịp 100 ms của `gui_task`, keepalive và sự kiện của esp-mqtt không chờ được tới hết một đợt đuổi.
-`xac_task` cũng chạy liền ~1,5 s mỗi lệnh 🔬 với b3, nên đứng dưới mọi task theo nhịp khung hay theo mạng; nó đứng trên việc
+`xac_task` cũng chạy liền mỗi lệnh, 504 ms trung vị với b0 (`latency.md` §32) và ~1,4 s với b3 🔬, nên đứng dưới mọi task theo nhịp khung hay theo mạng; nó đứng trên việc
 cửa sổ vì lệnh nó xác minh đã được nhận và người dùng đang chờ lệnh ấy, còn câu sau chưa xong. `luong_task` và
 `net_task` cùng mức 3 hầu như luôn chặn, nên không tranh lát thời gian với nó. Một lần chạy b3 giữ IDLE0 ~1,5 s, dưới
 5 s của task watchdog. Nó cũng giữ chính `nhan_task`: lệnh tới `xac_task` từ giữa một đợt việc cửa sổ, lúc `nhan_task`
@@ -3581,7 +3585,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `q_clean` | Queue depth **128** (~2 s), `dsp_afe_frame_t` ~530 B, bộ nhớ ở **PSRAM** | ~68 KB | `sach_task` | `nhan_task` | `sach_task` không chờ: bỏ khung, tăng `clean_dropped`; `nhan_task` thấy hở `seq` thì đặt lại STFT và bộ dò cao độ của `svc_listen` (cả trạng thái `wake` khi có), câu đang mở thành `REJECT FRAME_GAP` (§5.4) | đây là chỗ "nạp và lấy không cùng nhịp" của TỔNG QUAN §4.3; điểm cao nhất xuất ra `heartbeat` |
 | `s_afe_stats` | `portMUX_TYPE` + một struct (mức, hướng, cờ, gain, bộ đếm) | ~64 B | `sach_task` | `gui_task` | — ghi đè | số liệu là **mức**, không phải chuỗi sự kiện: `gui_task` chỉ cần giá trị mới nhất mỗi 100 ms. Chép dưới spinlock, vài chục byte, không gọi gì bên trong |
 | `sb_stream` | StreamBuffer ở PSRAM, **chỉ tồn tại khi** `NET_STREAM_ENABLE`; cỡ `SVC_REPORT_STREAM_BUFFER_KB` | 512 KB: ~5 s ở `mode` 5, ~8 s ở `mode` 2 | `sach_task` | `luong_task` | ghi với timeout 0; không đủ chỗ cho **cả khung** thì bỏ cả khung, đếm; không bao giờ ghi nửa khung | một người ghi, một người đọc — đúng hợp đồng của stream buffer. Đường tới máy nhận khựng 0,4–0,8 s vài lần mỗi 10 phút trên board B (`latency.md` §4), quá 64 KB |
-| `q_dialog` | Queue depth 8, `app_event_t`, bộ nhớ ở PSRAM | 8 × 92 B | `nhan_task` | `dieu_task` | chờ 20 ms rồi bỏ, log **một lần** ở cạnh đầy | `nhan_task` không được đứng chờ lâu: sau lưng nó là 1 s đệm đang đầy dần |
+| `q_dialog` | Queue depth 8, `app_event_t`, bộ nhớ ở PSRAM | 8 × 92 B | `nhan_task` từ E14-T4; hiện chưa có người gửi | `dieu_task` | chờ 20 ms rồi bỏ, log **một lần** ở cạnh đầy | `nhan_task` không được đứng chờ lâu: sau lưng nó là 1 s đệm đang đầy dần |
 | `q_cmd` | Queue depth 4, `device_cmd_t` (sinh từ `contracts/`, chở cả chữ 512 B của `SPEAK`), bộ nhớ ở PSRAM | 4 × ~600 B | task của esp-mqtt | `dieu_task` | không chờ: bỏ, tăng `cmd_dropped` của `net_mqtt`, log; bản ngoài `device_cmd.schema.json` cũng vậy | callback esp-mqtt chỉ **phân tích** rồi bỏ vào đây; chờ ở callback là chặn cả đường MQTT |
 | `q_cmdset` | Queue depth 1, con trỏ tới một trong hai ô bộ lệnh của `net_mqtt` ở PSRAM, cấp lúc boot: bộ đã phân tích, kết quả phân tích, payload nguyên văn | 4 B + 2 × ~53 KB | task của esp-mqtt | `nhan_task` | bản mới thay bản chờ: task esp-mqtt rút bản chờ về rồi gửi bản mới; ô `nhan_task` đã nhận giữ nguyên tới lần nhận sau (`FREERTOS.md` 8.10); payload rỗng, tức bản retained bị xoá, không vào hàng | `nhan_task` tự chạy `lang_vi`, đổi bảng lệnh và gọi `ai_engine_command_prepare` **giữa hai câu**: khi không có cửa sổ nào mở hay chờ chấm và không câu nào đang chạy, ở mọi trạng thái; bộ trùng `version` với bộ đang dùng bị bỏ qua |
 | `q_speak` | Queue depth 4, `app_speak_req_t`, bộ nhớ ở PSRAM | 4 × 546 B | `dieu_task` | `noi_task` | bỏ, log | |
@@ -3761,25 +3765,26 @@ kiểm riêng ở E14-T7: ghi NVS liên tục trong lúc nghe, đếm khung mấ
 ### 5.6 Ngân sách thời gian mỗi khung
 
 Hạn chót 16 ms. Mục tiêu: nhân 1 **trung bình ≤ 50%**, **đỉnh một khung ≤ 80%** (12,8 ms); nhân 0
-trung bình ≤ 70%. Mọi ô là ước 🔬 lấy từ §3.3; `docs/measurements/budget.md` thay bằng số đo.
+trung bình ≤ 70%. Ô nhân 1 là ước 🔬 lấy từ §3.3, `docs/measurements/budget.md` thay bằng số đo; ô nhân 0 ghi số đo
+khi đã có.
 
 | Nhân 1, mỗi khung | µs ước | Nhân 0 | Tải ước |
 |---|---|---|---|
 | `thu` | 50 | Wi-Fi + lwIP | 5–15% 🔬 |
-| `hpf` hai kênh | 20 | `wake`, trạng thái `NGHE` | ~22% |
-| `aec` hai micro | 1 300 | mạng `command`, trạng thái `LENH` (bề rộng 160 đo, `latency.md` §18) | ~32% (thay `wake`) |
+| `hpf` hai kênh | 20 | `wake`, mọi trạng thái (288 µs đo, `latency.md` §8) | ~1,8% |
+| `aec` hai micro | 1 300 | mạng `command`, trạng thái `LENH` (bề rộng 160 đo, `latency.md` §18) | ~32%, thêm vào `wake` |
 | `stft` hai kênh | 314 | `synth`, trạng thái `DAP` | < 100% trong thời gian dựng |
-| | | `speaker` b3 sau mỗi lệnh nhận được, khi đường chip bật (§3.17) | 100% trong ~1,5 s mỗi lệnh 🔬 |
+| | | `speaker` sau mỗi lệnh nhận được, khi đường chip bật (§3.17) | 100% trong 504 ms với b0 (`latency.md` §32), ~1,4 s với b3 🔬 |
 | `balance` | 10 | `gui` + `mqtt` + `luong` | 2–5% |
-| `doa` (dò mỗi hai khung khi có tiếng; đo) | 641 | log-mel và cao độ mỗi bước, mọi trạng thái (đo) | ~14% |
+| `doa` (dò mỗi hai khung khi có tiếng; đo) | 641 | log-mel và cao độ SwiftF0 mỗi bước, mọi trạng thái (~4,6 ms đo, `pitch.md` §7.4) | ~29% |
 | `gsc` (đo, ở bước đổi góc lái; `bss` cùng `vad` thứ hai của nó đo 163 µs khi chia ở chính diện, 224 µs với LEARN) | 485 | | |
 | `ns` mạng thay sàn trong khe: RNNoise-16k 4 809, NSNet-16k L 5 054, đo trên board B (§3.9, ADR-0014) | 4 809–5 054 | | |
 | `istft` | 196 | | |
 | `vad` + `agc` | 80 | | |
 | chép vào `sb_stream` | 20 | | |
-| **Cộng, trường hợp nặng nhất** | **~8 200 µs ≈ 51%** | **Cộng, `LENH`** | **~53–66%** |
+| **Cộng, trường hợp nặng nhất** | **~8 200 µs ≈ 51%** | **Cộng, khi có cửa sổ** | **~94% 🔬, quá mục tiêu 70%**: ghép từ ba số đo (`latency.md` §32), đo tải nhân trực tiếp ở E14-T6 |
 
-Với NSNet-16k L, nhân 1 nhỉnh hơn mục tiêu trung bình 50% ở trường hợp nặng nhất, trong đó `aec` còn là ước: E9-T7 đo, vượt thì `ns` lùi về NSNet-16k M hay S, học cùng lượt. Nhân 0 chật ở trạng thái `LENH`. Nếu số đo xác nhận điều đó thì thứ tự cắt là:
+Với NSNet-16k L, nhân 1 nhỉnh hơn mục tiêu trung bình 50% ở trường hợp nặng nhất, trong đó `aec` còn là ước: E9-T7 đo, vượt thì `ns` lùi về NSNet-16k M hay S, học cùng lượt. Nhân 0 quá mục tiêu khi có cửa sổ. Nếu đo trực tiếp xác nhận điều đó thì thứ tự cắt là:
 giảm tần suất `doa` và `telemetry` trong `LENH`, rồi thu nhỏ mạng `command` — không chuyển việc sang
 nhân 1.
 
@@ -3799,7 +3804,7 @@ otadata,    data, ota,      0xF000,    0x2000,
 phy_init,   data, phy,      0x11000,   0x1000,
 nvs_keys,   data, nvs_keys, 0x12000,   0x1000,   encrypted
 ota_0,      app,  ota_0,    0x20000,   0x300000,        # 3 MiB    firmware, khe duy nhất
-models_0,   data, 0x40,     0x320000,  0x900000,        # 9 MiB    ns + wake + command + speaker + synth
+models_0,   data, 0x40,     0x320000,  0x900000,        # 9 MiB    wake + command + pitch + speaker; ns, synth khi tới lượt
 vision_0,   data, 0x43,     0xC20000,  0x340000,        # 3,25 MiB ảnh thị giác của detect (§3.18)
 storage,    data, littlefs, 0xF60000,  0x80000,         # 0,5 MiB  bộ lệnh, câu trả lời
 coredump,   data, coredump, 0xFE0000,  0x10000,
@@ -3892,7 +3897,8 @@ offset 0x400  dữ liệu, mỗi entry căn 64 B
 `dims`), `FRONT` (bảng front end của `pitch`, SwiftF0, §3.11: đầu `storage_model_front_t` 28 B ghi số dải, số điểm và
 số trọng số của mỗi phổ; rồi mỗi phổ theo thứ tự kênh của mạng có cửa sổ float32, bin đầu và số bin uint16 của từng
 dải, trọng số float32 dải nối dải, mỗi mảng đệm tới bội 4 B). `ai_engine` trao con trỏ vào mục ấy cho `dsp_spec`. `flags`: bit 0 `IN_FLASH`, mục đọc tại chỗ qua mmap, không chép lên PSRAM (§6.5); bước đóng gói đặt nó cho đồ
-thị của hàng deploy có `weights_in_flash`, hiện là `speaker` (§3.17), và cho nhóm chuẩn, chỉ đọc lúc tính μ, σ.
+thị của hàng deploy có `weights_in_flash`, hiện là `command_ctc` (ADR-0028) và `speaker` (§3.17), và cho nhóm chuẩn,
+chỉ đọc lúc tính μ, σ.
 
 **`firmware/models/<nhánh>/meta.json`** đi cùng mỗi `.espdl` và được commit (§4.3): `grid_hash`, nguồn dữ liệu đã học
 (CLAUDE.md §4.3), run sinh ra nó. Nguồn đã học gồm các file train của `split.lock` và, khi run học cả phiên thu qua board
@@ -3974,7 +3980,7 @@ từ chối dựng nhánh khi magic hay `format_ver` sai, hay khi `classes` khá
 |---|---|---|
 | `/lfs/cmd/set.json` | bộ lệnh đang dùng, theo `command_set.schema.json` | `down/commands` mang `version` khác bộ đang dùng và `lang_vi` đọc được mọi dòng: `nhan_task` ghi `set.json.tmp` rồi đổi tên — chống mất điện |
 | `/lfs/resp/vi.json` | câu trả lời: id → chữ, id → tên mẩu | nướng lúc dựng; đổi qua OTA |
-| `/lfs/golden/**` | vector vàng | chỉ trong ảnh của `test_apps/parity`, phân vùng `storage` 15,25 MB của bảng riêng app ấy (§4.3) |
+| `/lfs/golden/**` | vector vàng | chỉ trong ảnh của `test_apps/parity`, phân vùng `storage` 15,25 MB của bảng riêng app ấy (§4.2) |
 
 **Không ghi log hay hàng đợi offline xuống flash.** Số liệu mất được: mất mạng thì mất số liệu của
 khoảng ấy, và `heartbeat` kế tiếp khai bộ đếm. Ghi theo nhịp vừa mòn flash vừa đóng băng nhân 1
@@ -3994,12 +4000,12 @@ TỔNG QUAN §7 ước ~97 KB và thiếu bốn khoản. Bảng ước lại �
 | Ngăn xếp task ứng dụng (§5.2, trừ `mqtt_task`) | ~41 KB | |
 | Wi-Fi + lwIP | 50–90 KB | tuỳ số đệm RX/TX trong sdkconfig |
 | **Cộng — không có model nào** | **~240–280 KB** | |
-| RAM nội còn cấp được trên ESP32-S3 sau IDF và Wi-Fi | ~300–340 KB 🔬 | đo ở E5-T11 |
+| RAM nội còn sau IDF, ở bước `storage` của boot | 196 771 B đo | `ram.md` §5: Wi-Fi và MQTT lấy thêm 54 480 B; sản phẩm đang nghe còn 32 495 B, thấp nhất 12 675 B |
 
 **Mọi model nằm ở PSRAM — trọng số lẫn vùng làm việc.** `ai_engine_load` mmap slot model qua
 `sys_storage`, kiểm sha256 và `grid_hash`, **chép trọng số từng model lên PSRAM**, rồi nhả mmap: không model nào giữ
 RAM nội. Hai ngoại lệ:
-- **Mục mang cờ `IN_FLASH`** (§6.3), hiện là `speaker`: `ai_engine_load` kiểm sha256 ngay trên mmap và giữ mmap ấy,
+- **Mục mang cờ `IN_FLASH`** (§6.3), hiện là `command_ctc` và `speaker`: `ai_engine_load` kiểm sha256 ngay trên mmap và giữ mmap ấy,
   mạng đọc trọng số tại chỗ. b0 chậm 3,8% để đổi 1,72 MB PSRAM (`measurements/latency.md` §25, chủ repo 11/10).
 - **Op của `ai_engine` mượn RAM nội cho trọng số trong lúc mạng chạy** (ADR-0025, chủ repo 28/10, `espdl_loan`).
   - `ConvBlock` chạy nhân chung (C khác 24 và 48) xin lúc dựng số byte trọng số nó đọc ở từng điểm ảnh.
@@ -4016,8 +4022,8 @@ RAM nội. Hai ngoại lệ:
     `TimeDepthwise` đặt hàng đệm và hàng ra ở đó.
   - `ConvLut` của `detect`, cả ConvLut không bảng, xin số byte trọng số của nó, tối đa 32 KB (ADR-0034, ADR-0035). Vùng
     chứa cả filter thì op chép cả; không thì op chạy theo lát kênh ra, mỗi lát chép vào vùng trước pass của nó.
-    `C3k2Block` xin tổng trọng số bốn tích chập của khối và chép cả khi vừa (ADR-0036); `UpsampleConcatConv` và
-    `ConcatConv` xin như ConvLut, theo lát khi filter lớn hơn vùng (ADR-0037, ADR-0038).
+    `C3k2Block` xin tổng trọng số bốn tích chập của khối và chép cả khi vừa (ADR-0036); `UpsampleConcatConv`
+    xin như ConvLut, theo lát khi filter lớn hơn vùng (ADR-0037).
   - Ở hai nhân (ADR-0027) mỗi nửa của `ConvBlock` có vòng hàng, đệm dải và hàng vào conv sau riêng, cả hai trong
     vùng; vùng được cấp không đủ cho cả hai thì khối chạy cả hàng ở một nhân.
 
@@ -4040,8 +4046,8 @@ nên lớn hơn; đó là giá của mã đọc được và khớp Python từn
 
 ### 6.6 PSRAM
 
-Board B, profile `bench`, lúc đã nghe (`measurements/ram.md` §4). Số đo lấy với tối đa 301 lệnh rồi trừ phần mà tối
-đa 64 lệnh (§4.5.5) giữ lại; dòng `speaker` cộng số đo của bản dò với số tính từ code.
+Board B, profile `bench`, lúc đã nghe: sản phẩm với b0 ở `measurements/ram.md` §5, với b3 ở §4. Số của §4 lấy với tối
+đa 301 lệnh rồi trừ phần mà tối đa 64 lệnh (§4.5.5) giữ lại; dòng `speaker` cộng số đo với số tính từ code.
 
 | Khoản | PSRAM |
 |---|---|
@@ -4050,9 +4056,11 @@ Board B, profile `bench`, lúc đã nghe (`measurements/ram.md` §4). Số đo l
 | Ảnh model chép vào PSRAM: chỉ bảng chuẩn hoá của `command_ctc`; mạng của nó đọc thẳng từ flash (ADR-0028) | ~1 KB; 3 370 KB khi còn chép (đo) |
 | Tensor `command_ctc`, vùng chấm ctc (cây tiền tố tới 8 192 nút) | ~628 KB đo |
 | `svc_listen`: vòng 512 bước log-mel và cao độ, hai bảng lexicon | ~383 KB, đo 502 KB với 301 lệnh |
-| `speaker` (§3.17): tensor b3 4 122 KB đo ở app thử, vòng PCM 512 bước 256 KB, hai ô xác minh 94 KB, đặc trưng 42 KB, `spk_fbank` 58 KB đo, chỗ chấm trên nhóm chuẩn 2 KB | ~4,6 MB 🔬 |
-| **Còn trống khi nghe** | ~1,2 MB 🔬 với b3 và `command_ctc` ở flash; 538 004 B đo với b0 và `command_ctc` chép vào PSRAM (`measurements/ram.md` §4) |
-| Chưa có trong firmware: `ns` + `wake` | 187 KB (RNNoise-16k) tới 394 KB (NSNet-16k L), đo ở E9-T10, + ~100 KB |
+| `speaker` (§3.17): tensor b0 2 135 KB hay b3 4 012 KB (đo), vòng PCM 512 bước 256 KB, hai ô xác minh 94 KB, đặc trưng 42 KB, `spk_fbank` 58 KB đo, chỗ chấm trên nhóm chuẩn 2 KB | ~2,5 MB với b0, ~4,4 MB với b3 |
+| `pitch` (SwiftF0, §3.11): đồ thị, tensor và cột giữ | 246 632 B đo (`pitch.md` §7.2) |
+| **Còn trống khi nghe** | 4 278 432 B đo với b0, 4 258 212 B khi Wi-Fi và MQTT đã nối (`ram.md` §5); 2 022 720 B với b3, Wi-Fi chưa nối (`ram.md` §4) |
+| `detect` cạnh sản phẩm (§3.18) | đồ thị 2 825 888 B cộng 11 152 B lúc chạy: vừa với b0, không vừa với b3 (`ram.md` §5) |
+| Chưa có trong firmware: `ns` | 187 KB (RNNoise-16k) tới 394 KB (NSNet-16k L), đo ở E9-T10 |
 | Chưa có: đệm dựng câu của `noi_task`, 5 s × 16 kHz × 2 B | 160 KB |
 | Chưa có: `synth` nếu là mạng | ≤ 1 MB + ~0,3 MB |
 | Chưa có: vùng TLS của `prod` | ~50 KB |
@@ -4128,7 +4136,7 @@ Topic, QoS, retained và schema khai ở `contracts/mqtt_topics.yaml`; bảng d�
 
 Tổng ở chế độ thường: ~350 B/s telemetry + ~13 B/s heartbeat + sự kiện thưa → **dưới 1 KB/s**, đạt
 TỔNG QUAN V5.7.4, **không gửi tiếng**. Khi đường máy chủ của §3.17 bật, mỗi lệnh được nhận gửi thêm một lần cửa sổ
-lệnh, ≤ 120 KB, trên `up/voice`.
+lệnh, ≤ 120 KB, trên `up/voice`; topic ấy vào `contracts/mqtt_topics.yaml` ở E13-T12.
 
 Callback của esp-mqtt chỉ phân tích payload rồi bỏ vào `q_cmd`, `q_cmdset` hoặc `q_spkset` (§5.3); không làm việc
 dài, không ghi flash trong callback.
@@ -4247,7 +4255,7 @@ board, kết quả lên server, máy tính hiện ra theo thời gian thực:
 |---|---|
 | Nền, hợp đồng, app khung | Cửa 0 |
 | Tầng một kênh và dìm nhiễu sàn | E7, E9-T1 |
-| `lang_vi`, `wake`, `command` (đường `kws` trước), `svc_listen` | E11-T4, E11-T9 … E11-T14, E11-T17 |
+| `lang_vi`, `wake`, `command` (đường `ctc`), `svc_listen` | E11-T4, E11-T9 … E11-T14, E11-T17 |
 | Broker, kênh sự kiện, màn xem | E13-T1, E13-T2, E13-T5, E5-T9 |
 | Kịch bản demo | E13-T11 |
 
