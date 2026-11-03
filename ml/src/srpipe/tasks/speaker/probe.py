@@ -8,6 +8,7 @@ Run: python -m srpipe.tasks.speaker.probe --run <run> --row <row> [--cut-range <
 from __future__ import annotations
 
 import argparse
+import hashlib
 import itertools
 import json
 import struct
@@ -194,12 +195,17 @@ def chain(cfg: dict, run: Path, row: str, out: Path, workers: int) -> tuple[Path
     member's of their units, each one's mean and deviation over the deployed cohort's top, then every other window of
     chain_windows as the chip should take it, with its best AS-norm score over the roster, the voiceprint giving it,
     the decision at the lock's threshold for a full roster, that voiceprint's cosine and the window's own mean and
-    deviation (ADR-0023). Refused when the lock deploys another row or run."""
+    deviation (ADR-0023). Refused when the lock deploys another row or run, or a locked file differs from its sha256."""
     lock = json.loads(pack_models.LOCK.read_text(encoding="utf-8"))["models"][quant.BRANCH]
     if (lock["run"], lock["row"]) != (run.name, row):
         raise ValueError(f"the lock deploys {lock['run']} row {lock['row']}, not {run.name} row {row}")
+    by_kind = {}
+    for f in lock["files"]:
+        data = (pack_models.MODELS / quant.BRANCH / f["file"]).read_bytes()
+        if hashlib.sha256(data).hexdigest() != f["sha256"]:
+            raise ValueError(f"{quant.BRANCH}/{f['file']} differs from the sha256 {pack_models.LOCK.name} holds")
+        by_kind[f["kind"]] = data
     image, _ = probe(cfg, run, row, out)
-    by_kind = {f["kind"]: (pack_models.MODELS / quant.BRANCH / f["file"]).read_bytes() for f in lock["files"]}
     entries = [
         pack_models.Entry(ENTRY, "espdl", by_kind["espdl"], pack_models.IN_FLASH),
         pack_models.Entry(quant.COHORT_ENTRY, "cohort", by_kind["cohort"], pack_models.IN_FLASH),

@@ -55,3 +55,27 @@ def test_a_roster_with_too_few_impostors_to_enrol_is_refused(monkeypatch) -> Non
     monkeypatch.setattr(probe.quant, "cohort_speakers", lambda windows, cfg: set())
     with pytest.raises(ValueError, match="the roster wants 2"):
         probe.chain_windows(OWNER_CFG, {}, {}, 1, 2)
+
+
+def test_chain_refuses_a_locked_file_that_differs_from_its_sha256_before_any_run(tmp_path, monkeypatch) -> None:
+    import hashlib
+    import json
+
+    from srpipe.export import pack_models
+
+    run = tmp_path / "20261010_abc_123"
+    folder = tmp_path / "models" / probe.quant.BRANCH
+    folder.mkdir(parents=True)
+    (folder / "speaker.espdl").write_bytes(b"graph")
+    (folder / "cohort.bin").write_bytes(b"changed")
+    files = [
+        {"file": "speaker.espdl", "kind": "espdl", "sha256": hashlib.sha256(b"graph").hexdigest()},
+        {"file": "cohort.bin", "kind": "cohort", "sha256": hashlib.sha256(b"cohort").hexdigest()},
+    ]
+    lock = {"version": 1, "models": {probe.quant.BRANCH: {"run": run.name, "row": "kl", "files": files}}}
+    (tmp_path / "models.lock.json").write_text(json.dumps(lock), encoding="utf-8")
+    monkeypatch.setattr(pack_models, "LOCK", tmp_path / "models.lock.json")
+    monkeypatch.setattr(pack_models, "MODELS", tmp_path / "models")
+    monkeypatch.setattr(probe, "probe", lambda *_: pytest.fail("the probe ran on a changed file"))
+    with pytest.raises(ValueError, match=r"cohort\.bin differs from the sha256"):
+        probe.chain({}, run, "kl", tmp_path / "out", 1)
