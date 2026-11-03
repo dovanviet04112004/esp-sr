@@ -14,6 +14,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import datetime, tzinfo
 from pathlib import Path
 
 from srhost.config import ConfigError, mqtt_config
@@ -74,10 +75,15 @@ def describe_speaker(event: dict, names: dict[str, str] | None = None) -> str:
     return f" · speaker {who}{cosine}"
 
 
+def local_clock(rx_utc: str, tz: tzinfo | None = None) -> str:
+    """HH:MM:SS of an ISO receive time on this machine's clock, or on tz."""
+    return datetime.fromisoformat(rx_utc).astimezone(tz).strftime("%H:%M:%S")
+
+
 def describe_event(message: Message, names: dict[str, str] | None = None) -> str:
     event = message.payload or {}
     kind = event.get("kind")
-    clock = message.rx_utc[11:19]
+    clock = local_clock(message.rx_utc)
     if kind == "WAKE":
         text = f"WAKE score {event['scorePermille'] / PERMILLE:.2f}"
     elif kind == "COMMAND":

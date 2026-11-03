@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, timedelta, timezone
 
 from srhost import live, mqtt_rx
 from srhost.speakers import ENROL_COMMANDS
 from test_mqtt_rx import DEVICE, HEARTBEAT, TELEMETRY
 
+RX_UTC = "2026-09-26T11:02:03.000+00:00"
+
 
 def message(kind: str, payload: dict | bytes, device: str = DEVICE) -> mqtt_rx.Message:
     raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
-    return mqtt_rx.parse(f"sr/{device}/up/{kind}", raw, rx_utc="2026-09-26T11:02:03.000+00:00")
+    return mqtt_rx.parse(f"sr/{device}/up/{kind}", raw, rx_utc=RX_UTC)
+
+
+def test_an_event_shows_the_time_it_came_on_the_viewers_clock() -> None:
+    assert live.local_clock(RX_UTC, timezone(timedelta(hours=7))) == "18:02:03"
+    assert live.local_clock(RX_UTC, UTC) == "11:02:03"
 
 
 def test_an_empty_view_says_it_waits() -> None:
@@ -41,7 +49,7 @@ def test_each_kind_lands_on_its_line() -> None:
     assert f"{DEVICE}  ONLINE  fw 0.1.0+8f3fa79" in text
     assert "up 12 s" in text and "dma 0" in text
     assert "LISTEN" in text and "vad ●" in text and "-30 dBFS" in text
-    assert "11:02:03 WAKE score 0.93 at 45°" in text
+    assert f"{live.local_clock(RX_UTC)} WAKE score 0.93 at 45°" in text
     assert text.index("COMMAND bat_den score 0.88 margin 0.30") < text.index("WAKE")
 
 
