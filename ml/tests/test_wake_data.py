@@ -346,7 +346,16 @@ def test_a_board_word_ends_at_its_hangover_and_other_runs_are_left_out_or_masked
     assert data.HANGOVER_HOPS == 15
 
 
-def test_a_masked_run_is_labelled_ignored_and_a_word_round_its_end(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("around", "words", "masked"),
+    [
+        ((2, 3), [38, 39, 40, 41, 42], range(70, 100)),
+        ((2, data.HANGOVER_HOPS + 4), list(range(38, 59)), range(70, 104)),
+    ],
+)
+def test_a_masked_run_is_labelled_ignored_with_the_label_a_word_in_it_would_reach_and_a_word_round_its_end(
+    tmp_path: Path, around: tuple[int, int], words: list[int], masked: range
+) -> None:
     folder = tmp_path / "board"
     folder.mkdir()
     np.save(folder / "shard_00000.features.npy", np.zeros((120, 4), np.float16))
@@ -364,10 +373,10 @@ def test_a_masked_run_is_labelled_ignored_and_a_word_round_its_end(tmp_path: Pat
     (folder / "shard_00000.items.jsonl").write_text("".join(json.dumps(i) + "\n" for i in items), encoding="utf-8")
     listed = {"shard_00000.features.npy": "-", "shard_00000.items.jsonl": "-"}
     (folder / "manifest.yaml").write_text(yaml.safe_dump({"sha256": listed}), encoding="utf-8")
-    (shard,) = data.load_set(folder, True, (2, 3), "float16")
-    assert np.flatnonzero(shard.labels == 1).tolist() == [38, 39, 40, 41, 42]
-    assert np.flatnonzero(shard.labels == data.IGNORED).tolist() == list(range(70, 100))
-    (negative,) = data.load_set(folder, False, (2, 3), "float16")
+    (shard,) = data.load_set(folder, True, around, "float16")
+    assert np.flatnonzero(shard.labels == 1).tolist() == words
+    assert np.flatnonzero(shard.labels == data.IGNORED).tolist() == list(masked)
+    (negative,) = data.load_set(folder, False, around, "float16")
     assert not negative.labels.any()
 
 

@@ -81,7 +81,8 @@ def load_set(folder: Path, positive: bool, around: tuple[int, int], dtype: str, 
         if positive:
             for item in (i for i in items if i.get("ignore")):
                 first, stop = (item["frame_offset"] + f for f in item["speech_frames"])
-                labels[first:stop] = IGNORED
+                # A word in the run ends where its hangover begins, and its label reaches past the run (KEHOACH 3.11).
+                labels[first : stop + max(0, around[1] - HANGOVER_HOPS)] = IGNORED
             for item in (i for i in items if not i.get("ignore")):
                 end = item["frame_offset"] + item["speech_frames"][1]
                 labels[max(0, end - around[0]) : end + around[1]] = 1
