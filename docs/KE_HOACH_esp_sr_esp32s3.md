@@ -2807,7 +2807,8 @@ ml/
 └── tests/                             # pytest; mỗi golden có một phép kiểm đối chứng âm;
                                        #   test_splits.py chạy luật §1.3 trên mọi split đã commit;
                                        #   test_esp_ppq_patches_<module>.py mỗi module của esp_ppq_patches/,
-                                       #   esp_ppq_cases.py các mạng và phép tính kiểu esp-dl chúng dùng chung
+                                       #   esp_ppq_cases.py các mạng và phép tính kiểu esp-dl chúng dùng chung;
+                                       #   conftest.py dời lock và firmware/models sang thư mục tạm cho mọi test
 ```
 
 **`dsp/` và `lang/` là thuật toán thuần, `tasks/` là mô hình học** — đúng đường ranh của firmware
