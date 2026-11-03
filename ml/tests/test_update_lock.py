@@ -145,3 +145,25 @@ def test_the_packer_refuses_rows_of_two_listen_contracts_and_takes_0_from_none(
         pack_models.locked()
     lock.write_text(json.dumps({"version": 1, "models": {"wake": {"files": []}}}), encoding="utf-8")
     assert pack_models.locked() == pack_models.Locked([])
+
+
+def test_a_run_that_learnt_board_sessions_names_each_with_its_manifest_sha256(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = run_dir(tmp_path)
+    board = {"manifest": "device/board_x.csv", "train": ["s2", "s1"]}
+    cfg = {"split": {"version": "v2"}, "eval": {"board": board}}
+    (run / "config.resolved.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    (tmp_path / "device").mkdir()
+    (tmp_path / "device" / "board_x.csv").write_text("session,sha256\ns1,aa\ns2,bb\ns3,cc\n", encoding="utf-8")
+    monkeypatch.setattr(update_lock, "data_paths", lambda: {"manifests": tmp_path})
+    learnt = update_lock.learnt_from(run)
+    assert learnt["board"] == [{"session": "s2", "sha256": "bb"}, {"session": "s1", "sha256": "aa"}]
+    assert [f["file"] for f in learnt["train"]] == ["train_vivos.txt"]
+    cfg["eval"]["board"]["train"] = ["s1", "s9"]
+    (run / "config.resolved.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    with pytest.raises(ValueError, match="s9: learnt by the run"):
+        update_lock.learnt_from(run)
+    del cfg["eval"]
+    (run / "config.resolved.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    assert "board" not in update_lock.learnt_from(run)

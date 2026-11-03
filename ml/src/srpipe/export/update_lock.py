@@ -7,6 +7,7 @@ Run: python -m srpipe.export.update_lock <branch> <run> <entry>:<espdl|norm|unit
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from pathlib import Path
 
 import yaml
 
+from srpipe.core.config import data_paths
 from srpipe.export import pack_models
 from srpipe.generated import grid
 
@@ -35,9 +37,9 @@ def sha256(path: Path) -> str:
 
 
 def learnt_from(run: Path) -> dict:
-    """The run's split and the train files of its split.lock, each with its sha256; for a run imported pretrained,
-    which learnt nothing here, the extractor and the pin of its weights (KEHOACH 4.4); for a server's detect package,
-    the package, its model.pt and the train list calibration drew from (KEHOACH 3.18)."""
+    """The run's split and the train files of its split.lock, each with its sha256, and the board sessions it learnt;
+    for a run imported pretrained, which learnt nothing here, the extractor and the pin of its weights (KEHOACH 4.4);
+    for a server's detect package, the package, its model.pt and the train list calibration drew from (KEHOACH 3.18)."""
     cfg = yaml.safe_load((run / "config.resolved.yaml").read_text(encoding="utf-8"))
     rows = [line.split(maxsplit=1) for line in (run / "split.lock").read_text(encoding="utf-8").splitlines() if line]
     if "package" in cfg:
@@ -55,10 +57,24 @@ def learnt_from(run: Path) -> dict:
         source = cfg["source"]
         weights = source["pins"]["args"][0]
         return {"pretrained": source["extractor"], "weights": {"file": weights} | source["pins"]["files"][weights]}
-    return {
+    learnt = {
         "split": cfg["split"]["version"],
         "train": [{"file": name, "sha256": digest} for digest, name in rows if name.startswith("train")],
     }
+    return learnt | ({"board": board} if (board := board_learnt(cfg)) else {})
+
+
+def board_learnt(cfg: dict) -> list[dict]:
+    """The board sessions a run learnt (eval.board.train, KEHOACH 3.11), each with its sha256 in the board manifest:
+    recordings of a person, so the lock names what the model heard (KEHOACH 1.4, 6.3)."""
+    board = cfg.get("eval", {}).get("board", {})
+    if not board.get("train"):
+        return []
+    manifest = data_paths()["manifests"] / board["manifest"]
+    sha256 = {r["session"]: r["sha256"] for r in csv.DictReader(manifest.open(encoding="utf-8"))}
+    if missing := [s for s in board["train"] if s not in sha256]:
+        raise ValueError(f"{', '.join(missing)}: learnt by the run, not sessions of {manifest.name}")
+    return [{"session": s, "sha256": sha256[s]} for s in board["train"]]
 
 
 def record(branch: str, run: Path, files: list[Deployed], fields: dict, grid_bound: bool = True) -> tuple[Path, Path]:
