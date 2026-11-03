@@ -365,6 +365,7 @@ static esp_err_t check(const ai_engine_lexicon_t *lexicon, size_t n_classes)
         }
         for (size_t v = 0; v < lexicon->n_variants[c]; v++) {
             const ai_engine_seq_t *seq = &lexicon->variants[c][v];
+            if (seq->n_units == 0) { return ESP_ERR_INVALID_ARG; }
             if (seq->n_units > AI_ENGINE_COMMAND_CTC_UNITS_MAX) { return ESP_ERR_INVALID_SIZE; }
             for (size_t k = 0; k < seq->n_units; k++) {
                 if ((size_t)seq->units[k] + 1 >= n_classes) { return ESP_ERR_INVALID_ARG; }

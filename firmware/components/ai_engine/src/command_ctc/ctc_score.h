@@ -48,8 +48,8 @@ size_t ai_engine_command_ctc_work_bytes(size_t n_classes, size_t n_frames);
 /** Lay out every variant's labels in work for the forward passes, as the next windows score them.
  *  @ctx any | non-blocking | caller owns lexicon, read and not kept, and work, 4-byte aligned
  *  @param n_frames the most frames a window holds, as ai_engine_command_ctc_work_bytes sized work
- *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_SIZE a variant longer than the units max, or more
- *       distinct unit prefixes than AI_ENGINE_COMMAND_CTC_NODES_MAX
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG an empty variant, a unit past the classes | ESP_ERR_INVALID_SIZE a
+ *       variant longer than the units max, more unit prefixes than AI_ENGINE_COMMAND_CTC_NODES_MAX
  */
 esp_err_t ai_engine_command_ctc_prepare(const ai_engine_lexicon_t *lexicon, size_t n_classes, size_t n_frames,
                                         void *work);

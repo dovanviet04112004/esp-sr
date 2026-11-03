@@ -157,7 +157,7 @@ esp_err_t ai_engine_command_rnnt_build(const ai_engine_lexicon_t *lexicon, void 
         }
         for (size_t v = 0; v < lexicon->n_variants[c]; v++) {
             const ai_engine_seq_t *seq = &lexicon->variants[c][v];
-            if (seq->n_units > UNITS_MAX) { return ESP_ERR_INVALID_ARG; }
+            if (seq->n_units == 0 || seq->n_units > UNITS_MAX) { return ESP_ERR_INVALID_ARG; }
             if (!insert(f, seq->units, seq->n_units)) { return ESP_ERR_NO_MEM; }
             size_t ends[UNITS_MAX + 1];
             const size_t n = syllable_ends(seq, ends);

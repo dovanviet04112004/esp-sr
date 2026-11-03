@@ -116,3 +116,17 @@ TEST_CASE(
     TEST_ASSERT_EQUAL_UINT16(want.syllable, out.syllable_gap_permille);
     TEST_ASSERT_EQUAL_MEMORY(want_scores, got_scores, head.n_commands * sizeof(float));
 }
+
+TEST_CASE("ctc prepare refuses a variant without units, which would leave its leaf unset", "[ai_engine]")
+{
+    static ai_engine_lexicon_t empty;
+    empty.n_commands = 1;
+    empty.n_variants[0] = 1;
+    empty.variants[0][0] = (ai_engine_seq_t){.n_units = 0, .units = NULL};
+    const size_t n_classes = 8;
+    const size_t n_frames = 4;
+    void *work = heap_caps_malloc(ai_engine_command_ctc_work_bytes(n_classes, n_frames), MALLOC_CAP_SPIRAM);
+    TEST_ASSERT_NOT_NULL(work);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, ai_engine_command_ctc_prepare(&empty, n_classes, n_frames, work));
+    heap_caps_free(work);
+}
