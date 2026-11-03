@@ -7,7 +7,6 @@
 #include "app_config.h"
 #include "driver/i2s_std.h"
 #include "esp_attr.h"
-#include "freertos/FreeRTOS.h"
 #include "gen_grid.h"
 
 #define RX_CHANNELS_MAX 2
@@ -95,7 +94,7 @@ esp_err_t drv_audio_read_frame(int16_t *interleaved, uint32_t *seq, uint32_t tim
         s_overflows_seen = s_overflows_before_read = atomic_load(&s_overflows);
         s_reading = true;
     }
-    esp_err_t err = i2s_channel_read(s_rx, s_slots, bytes, &got, pdMS_TO_TICKS(timeout_ms));
+    esp_err_t err = i2s_channel_read(s_rx, s_slots, bytes, &got, timeout_ms);
     if (err != ESP_OK) { return err; }
     if (got != bytes) { return ESP_ERR_INVALID_SIZE; }
 
