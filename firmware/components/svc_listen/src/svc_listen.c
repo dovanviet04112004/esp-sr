@@ -698,7 +698,7 @@ static esp_err_t hear_wake(uint32_t seq)
     s.wake_run = s.runs;
     s.woke = frame;
     s.wake_score = score;
-    s.woke_pending = !again;
+    s.woke_pending = s.woke_pending || !again;
     if (again) {
         ESP_LOGI(TAG, "woke again, score %u at hop %" PRIu32 " of the utterance from %" PRIu32,
                  (unsigned)score, frame, s.run_first);
