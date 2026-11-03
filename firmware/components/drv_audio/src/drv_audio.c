@@ -60,7 +60,10 @@ esp_err_t drv_audio_init(const drv_audio_config_t *cfg)
                 .din = APP_I2S_DIN_GPIO,
             },
     };
-    if (cfg->mics == DRV_AUDIO_MICS_RIGHT) { std.slot_cfg.slot_mask = I2S_STD_SLOT_RIGHT; }
+    // The S3's mono default enables both slots; enable only the microphone's (IDF i2s_std.h).
+    if (!both) {
+        std.slot_cfg.slot_mask = cfg->mics == DRV_AUDIO_MICS_RIGHT ? I2S_STD_SLOT_RIGHT : I2S_STD_SLOT_LEFT;
+    }
     const i2s_event_callbacks_t callbacks = {.on_recv_q_ovf = on_rx_overflow};
     if ((err = i2s_channel_init_std_mode(s_rx, &std)) != ESP_OK ||
         (err = i2s_channel_register_event_callback(s_rx, &callbacks, NULL)) != ESP_OK ||
