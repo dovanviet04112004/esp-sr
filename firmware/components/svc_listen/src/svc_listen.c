@@ -771,7 +771,8 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
             s.marking = false;
         }
         s.broken = s.in_run;
-        s.in_run = false;
+        // The broken utterance runs on until the usual silence closes it, counted from the gap (ADR-0041).
+        if (s.in_run) { s.run_last = seq - 1; }
         s.after = seq;
     }
     s.started = true;
