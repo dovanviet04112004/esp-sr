@@ -1,6 +1,7 @@
 # ADR-0040 — Từ đánh thức thử "vừng ơi", mẫu dương đọc bằng KhanhTTS-OmniVoice
 
-- **Trạng thái**: Chấp nhận để thử (chủ repo 31/10: "train thử wake vừng ơi", sau khi nghe mẫu OmniVoice: "nghe ok")
+- **Trạng thái**: Chấp nhận để thử (chủ repo 31/10: "train thử wake vừng ơi", sau khi nghe mẫu OmniVoice: "nghe ok").
+  Điểm 3 thay bởi ADR-0043 (chủ repo, 2026-11-03)
 - **Ngày**: 2026-10-31
 - **Liên quan**: KẾ HOẠCH §1.2, §3.11; ADR-0011, ADR-0033; TASKS E11-T41; `docs/measurements/wake.md` §2, §3,
   `docs/measurements/tts_engines.md`

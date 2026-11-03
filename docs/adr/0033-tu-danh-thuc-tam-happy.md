@@ -1,6 +1,6 @@
 # ADR-0033 — Từ đánh thức tạm là "happy" của Speech Commands, thay "on"
 
-- **Trạng thái**: Chấp nhận (chủ repo, 2026-10-31)
+- **Trạng thái**: Thay bởi ADR-0043 (chủ repo, 2026-11-03)
 - **Ngày**: 2026-10-31
 - **Liên quan**: KẾ HOẠCH §1.1, §3.11; ADR-0011, ADR-0029; TASKS E11-T39; `docs/measurements/wake.md` §8, §9
 

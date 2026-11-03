@@ -11,7 +11,7 @@ lệnh, nói lại, và gửi số liệu về máy tính để xem và chấm. 
 | Việc cần làm, điều kiện xong | [docs/TASKS.md](docs/TASKS.md) |
 | Luật chia task và kiểm lỗi đồng thời | [docs/FREERTOS.md](docs/FREERTOS.md) |
 
-Trạng thái: sản phẩm chạy trên board B. Nó thức bằng "happy", nhận lệnh bằng đường `ctc`, kiểm người nói bằng
+Trạng thái: sản phẩm chạy trên board B. Nó thức bằng "vừng ơi", nhận lệnh bằng đường `ctc`, kiểm người nói bằng
 ReDimNet2 b0, và nhận diện vật thể bằng YOLO26n trên ảnh gửi từ máy tính. Kết quả đi lên server qua MQTT. Tiến độ từng
 việc ở [docs/TASKS.md](docs/TASKS.md).
 
