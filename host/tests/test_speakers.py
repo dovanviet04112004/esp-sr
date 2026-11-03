@@ -87,6 +87,13 @@ def test_the_answer_keeps_the_roster_refusals_and_each_enrolled_command() -> Non
     assert [r["code"] for r in answer.refusals] == ["SPEAKER_UNKNOWN"]
 
 
+def test_an_enrolling_reject_without_its_count_counts_none_kept() -> None:
+    """enrolCount is optional in event.schema.json, so a reject without it must not stop the enrolment."""
+    answer = speakers.Answer()
+    answer.take(message("event", {"seq": 3, "kind": "REJECT", "code": "SPEAKER_ENROLLING", "speakerId": "spk_001"}))
+    assert len(answer.enrolled) == 1 and speakers.kept_of(answer) == 0
+
+
 def test_an_enrolment_ends_once_the_roster_shows_the_person_enrolled_and_none_under_way() -> None:
     done = speakers.enrolment_done("spk_001")
     answer = speakers.Answer()

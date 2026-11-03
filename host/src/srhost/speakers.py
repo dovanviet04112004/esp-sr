@@ -295,7 +295,7 @@ def enrolment_done(person: str) -> Callable[[Answer], bool]:
 
 
 def kept_of(answer: Answer) -> int:
-    return max((e["enrolCount"] for e in answer.enrolled), default=0)
+    return max((e.get("enrolCount", 0) for e in answer.enrolled), default=0)
 
 
 def cancel_enrolment(cfg: MqttConfig, device: str) -> None:
