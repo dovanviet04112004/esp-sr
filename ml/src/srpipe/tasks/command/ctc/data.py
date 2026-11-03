@@ -36,6 +36,7 @@ HOURS_STREAM = 4
 BOARD = "board"  # under processed/command/<version>, one shard
 BOARD_CHAIN = "sittings"  # eval.heard_rows: one chain over a sitting
 BOARD_SHARD = "shard_00000"
+BOARD_NOTE = "- Phiên thu qua board vào `train` (KẾ HOẠCH §1.3, `eval.board.train` của `command.yaml`): "
 HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
 
 
@@ -147,9 +148,8 @@ def notes(
     shares = "\n".join(f"  - `{prefix}`: {shares or 'chỉ train'}" for prefix, shares in spec["corpora"].items())
     gone = ", ".join(f'"{text}" {count} mẩu' for text, count in dropped.items())
     on_board = (
-        f"- Phiên thu qua board vào `train` (KẾ HOẠCH §1.3, `eval.board.train` của `command.yaml`): "
-        f"{', '.join(sessions)}; cắt như Cửa 3, giữ câu từ {board['min_s']} đến {board['max_s']} s, shard lặp "
-        f"{board['repeat']} lần trong thứ tự shard.\n"
+        f"{BOARD_NOTE}{', '.join(sessions)}; cắt như Cửa 3, giữ câu từ {board['min_s']} đến {board['max_s']} s, "
+        f"shard lặp {board['repeat']} lần trong thứ tự shard.\n"
         if (board := spec.get("board"))
         else ""
     )
@@ -202,6 +202,15 @@ def built_as(out: Path, device_cfg: dict, split_file: Path, options: dict) -> bo
         and all(body.get(k) == v for k, v in device.cut_marks(options["cut"]).items())
     )
     return body["config"] == device_cfg and same_split and same_options
+
+
+def split_board_sessions(folder: Path) -> list[str]:
+    """The board sessions the SPLIT.md of a split folder says were cut into train, none for a split without them: a
+    run's config does not carry them, its split does (KEHOACH 6.3)."""
+    for line in (folder / "SPLIT.md").read_text(encoding="utf-8").splitlines():
+        if line.startswith(BOARD_NOTE):
+            return line.removeprefix(BOARD_NOTE).split(";", 1)[0].split(", ")
+    return []
 
 
 def board_rows(paths: dict) -> list[dict]:

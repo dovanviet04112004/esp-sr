@@ -20,6 +20,7 @@ from srpipe.compress.quant import esp_ppq_patches, ptq_espdl, qat_espdl  # noqa:
 from srpipe.core import run_dir  # noqa: E402
 from srpipe.core.config import contract_front, load_yaml  # noqa: E402
 from srpipe.generated import listen  # noqa: E402
+from srpipe.tasks import command  # noqa: E402
 from srpipe.tasks.command import ctc  # noqa: E402
 from srpipe.tasks.command import eval as gate  # noqa: E402
 from srpipe.tasks.command.ctc import probe, qat, quant, train  # noqa: E402
@@ -357,6 +358,17 @@ def test_a_deploy_record_names_the_hearing_its_row_was_built_on() -> None:
     assert quant.hearing_of(quant.heard_head(contract)) == contract
     assert quant.heard_head(contract) == {"heard": {"pitch": "contract", "hold": None, "build": "v9"}}
     assert quant.hearing_of({}) == quant.LEARNT == quant.hearing_of(quant.heard_head(quant.LEARNT))
+
+
+def test_a_deploy_names_the_board_sessions_its_runs_split_cut_into_train(tmp_path: Path) -> None:
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "config.resolved.yaml").write_text(yaml.safe_dump({"split": {"version": "v8"}}), encoding="utf-8")
+    board = quant.learnt_board(run)
+    assert board["manifest"] == load_yaml(command.CONFIG)["eval"]["board"]["manifest"]
+    assert board["train"][0] == "20261004_home_001" and len(board["train"]) == 10
+    (run / "config.resolved.yaml").write_text(yaml.safe_dump({"split": {"version": "v3"}}), encoding="utf-8")
+    assert quant.learnt_board(run)["train"] == []
 
 
 def test_the_copied_front_gives_what_the_front_gives() -> None:

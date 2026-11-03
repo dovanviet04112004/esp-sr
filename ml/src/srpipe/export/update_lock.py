@@ -36,10 +36,11 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def learnt_from(run: Path) -> dict:
-    """The run's split and the train files of its split.lock, each with its sha256, and the board sessions it learnt;
-    for a run imported pretrained, which learnt nothing here, the extractor and the pin of its weights (KEHOACH 4.4);
-    for a server's detect package, the package, its model.pt and the train list calibration drew from (KEHOACH 3.18)."""
+def learnt_from(run: Path, board: dict | None = None) -> dict:
+    """The run's split and the train files of its split.lock, each with its sha256, and the board sessions it learnt,
+    its config's eval.board or else board, the same mapping; for a run imported pretrained, which learnt nothing here,
+    the extractor and the pin of its weights (KEHOACH 4.4); for a server's detect package, the package, its model.pt
+    and the train list calibration drew from (KEHOACH 3.18)."""
     cfg = yaml.safe_load((run / "config.resolved.yaml").read_text(encoding="utf-8"))
     rows = [line.split(maxsplit=1) for line in (run / "split.lock").read_text(encoding="utf-8").splitlines() if line]
     if "package" in cfg:
@@ -61,13 +62,13 @@ def learnt_from(run: Path) -> dict:
         "split": cfg["split"]["version"],
         "train": [{"file": name, "sha256": digest} for digest, name in rows if name.startswith("train")],
     }
-    return learnt | ({"board": board} if (board := board_learnt(cfg)) else {})
+    spec = cfg.get("eval", {}).get("board", {}) if board is None else board
+    return learnt | ({"board": named} if (named := board_learnt(spec)) else {})
 
 
-def board_learnt(cfg: dict) -> list[dict]:
-    """The board sessions a run learnt (eval.board.train, KEHOACH 3.11), each with its sha256 in the board manifest:
-    recordings of a person, so the lock names what the model heard (KEHOACH 1.4, 6.3)."""
-    board = cfg.get("eval", {}).get("board", {})
+def board_learnt(board: dict) -> list[dict]:
+    """The board sessions a run learnt, board's train under its manifest (KEHOACH 3.11, 3.12), each with its sha256 in
+    that manifest: recordings of a person, so the lock names what the model heard (KEHOACH 1.4, 6.3)."""
     if not board.get("train"):
         return []
     manifest = data_paths()["manifests"] / board["manifest"]
@@ -77,9 +78,12 @@ def board_learnt(cfg: dict) -> list[dict]:
     return [{"session": s, "sha256": sha256[s]} for s in board["train"]]
 
 
-def record(branch: str, run: Path, files: list[Deployed], fields: dict, grid_bound: bool = True) -> tuple[Path, Path]:
+def record(
+    branch: str, run: Path, files: list[Deployed], fields: dict, grid_bound: bool = True, board: dict | None = None
+) -> tuple[Path, Path]:
     """Write firmware/models/<branch>/meta.json and the branch's row of models.lock.json; files must sit in that
-    folder already, and fields go into both. A model that never saw the time grid, as detect, is not grid_bound."""
+    folder already, and fields go into both. A model that never saw the time grid, as detect, is not grid_bound;
+    board names the board sessions a run learnt when its config does not, as learnt_from reads it."""
     folder = MODELS / branch
     for f in files:
         if f.path.parent.resolve() != folder.resolve() or f.kind not in pack_models.KINDS:
@@ -89,7 +93,7 @@ def record(branch: str, run: Path, files: list[Deployed], fields: dict, grid_bou
         | ({"grid_hash": f"0x{grid.GRID_HASH:08x}"} if grid_bound else {})
         | {
             "files": [{"file": f.path.name, "entry": f.entry, "kind": f.kind, "sha256": sha256(f.path)} for f in files],
-            "learnt_from": learnt_from(run),
+            "learnt_from": learnt_from(run, board),
         }
         | fields
     )

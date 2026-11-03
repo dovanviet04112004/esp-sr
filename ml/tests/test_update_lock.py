@@ -167,3 +167,15 @@ def test_a_run_that_learnt_board_sessions_names_each_with_its_manifest_sha256(
     del cfg["eval"]
     (run / "config.resolved.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
     assert "board" not in update_lock.learnt_from(run)
+
+
+def test_a_run_whose_config_names_no_board_sessions_takes_those_its_deploy_gives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = run_dir(tmp_path)
+    (tmp_path / "device").mkdir()
+    (tmp_path / "device" / "board_x.csv").write_text("session,sha256\ns1,aa\ns2,bb\n", encoding="utf-8")
+    monkeypatch.setattr(update_lock, "data_paths", lambda: {"manifests": tmp_path})
+    board = {"manifest": "device/board_x.csv", "train": ["s2"]}
+    assert update_lock.learnt_from(run, board)["board"] == [{"session": "s2", "sha256": "bb"}]
+    assert "board" not in update_lock.learnt_from(run, board | {"train": []})

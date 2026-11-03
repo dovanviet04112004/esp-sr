@@ -116,6 +116,18 @@ def test_every_file_is_cut_as_simulate_cut_asks_and_another_cut_is_stale(tmp_pat
         assert data.options_of(cfg, paths["splits"] / name)["cut"] == "listen"
 
 
+def test_the_board_sessions_a_split_cut_into_train_come_back_from_its_split_md(tmp_path: Path) -> None:
+    spec = {"version": "v9", "seed": 1, "corpora": {}, "hours": {}, "board": {"min_s": 0.8, "max_s": 2.4, "repeat": 75}}
+    sessions = ["20261004_home_001", "20261004_home_002"]
+    (tmp_path / "SPLIT.md").write_text(data.notes(spec, {}, {}, {}, sessions), encoding="utf-8")
+    assert data.split_board_sessions(tmp_path) == sessions
+    (tmp_path / "SPLIT.md").write_text(data.notes(spec | {"board": None}, {}, {}, {}, []), encoding="utf-8")
+    assert data.split_board_sessions(tmp_path) == []
+    committed = Path(__file__).resolve().parents[1] / "data" / "splits" / "command"
+    assert len(data.split_board_sessions(committed / "v8")) == 10
+    assert data.split_board_sessions(committed / "v3") == []
+
+
 def test_board_units_leave_out_the_runs_named_noise_and_refuse_a_name_no_utterance_holds(tmp_path: Path) -> None:
     rows = [{"item": f"{data.BOARD}/s1#{k}", "text": "bật đèn"} for k in (0, 2, 3)]
     (tmp_path / "shard_00000.items.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))

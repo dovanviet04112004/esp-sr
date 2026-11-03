@@ -22,7 +22,14 @@ from torch.nn import functional
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, ptq_espdl, qat_espdl
 from srpipe.core import corpus, extract, run_dir, screen, splits
-from srpipe.core.config import apply_overrides, data_paths, load_yaml, on_contract_pitch, on_kaldi_pitch
+from srpipe.core.config import (
+    apply_overrides,
+    data_paths,
+    load_run_config,
+    load_yaml,
+    on_contract_pitch,
+    on_kaldi_pitch,
+)
 from srpipe.dsp.spec import pitch
 from srpipe.export import update_lock
 from srpipe.generated import listen
@@ -568,6 +575,14 @@ def step_thresholds(cfg: dict, run: Path, row: str, hearing: Hearing = LEARNT) -
     return out
 
 
+def learnt_board(run: Path) -> dict:
+    """The board manifest of command.yaml's eval.board and the sessions the run's own split cut into train, which
+    update_lock records: the run's config does not name them (KEHOACH 6.3)."""
+    version = load_run_config(run)["split"]["version"]
+    sessions = data.split_board_sessions(data_paths()["splits"] / "command" / version)
+    return {"manifest": load_yaml(command.CONFIG)["eval"]["board"]["manifest"], "train": sessions}
+
+
 def step_deploy(cfg: dict, run: Path, row: str, hearing: Hearing = LEARNT) -> tuple[Path, Path]:
     """The graph of row as firmware/models/command/ holds it: the .espdl streamed the run's chunk_hops at a time with a
     test sentence's first chunk stored for model->test(), as probe.py streams it, and the train statistics as the NORM
@@ -617,7 +632,7 @@ def step_deploy(cfg: dict, run: Path, row: str, hearing: Hearing = LEARNT) -> tu
     }
     if hearing != LEARNT:
         fields |= heard_head(hearing)
-    return update_lock.record(BRANCH, run, files, fields)
+    return update_lock.record(BRANCH, run, files, fields, board=learnt_board(run))
 
 
 def main(argv: list[str] | None = None) -> int:
