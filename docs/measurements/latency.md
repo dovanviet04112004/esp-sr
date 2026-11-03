@@ -1625,3 +1625,23 @@ Mọi phép kiểm chạy trên board B, cùng lệnh và cấu hình với mố
 - Các app thử để lại δ2 50 và kiểm giọng tắt trong NVS. Đặt lại qua console: `nvs set kws cmd_margin 10 -t u16` và
   `spk on`. Board đọc "speaker check on … 1 voiceprints" và "after the wake at 850 permille, delta1 300, delta2 10,
   delta3 65535"; roster còn `spk_001 owner: enrolled`.
+
+## 36. `listen-unit` sau các bản sửa `svc_listen` của bản rà 03/11 (E11-T40)
+
+`make listen-unit` 03/11 10:36–11:04, firmware `svc_listen` của `92b866b6` (gồm `2ca6c207`, `8b6fa38d`, `8abff7dc`),
+ảnh không có `wake`:
+
+| Lượt | Phiên | Cửa sổ | Khác Python | Việc một cửa sổ, trung bình / đỉnh | Câu chốt tới quyết định, trung bình / đỉnh |
+|---|---|---|---|---|---|
+| 1 | 11 | 69 | 0 | 1 297 / 1 878 ms | 352 / 512 ms |
+| 2 | 11 | 70 | 0 | 1 308 / 1 750 ms | 396 / 517 ms |
+| 3 | 10 | 78 | 0 | 1 175 / 1 872 ms | 406 / 2 012 ms |
+| 4 | 6 | 53 | 0 | 1 342 / 1 869 ms | 385 / 2 000 ms |
+| 5 | 4 | 51 | 0 | 1 406 / 1 752 ms | 349 / 512 ms |
+| 6 | 2 | 39 | 0 | 1 263 / 1 501 ms | 377 / 509 ms |
+
+- 44 phiên, 360 cửa sổ trùng Python từng trường; mỗi lượt 5/5 ca thử, gồm ba ca luồng đứt (`FRAME_GAP`).
+- Lần chạy đầu (10:14–10:21) đỏ 4/5 ca. Lỗi nằm ở hai ca thử: câu bị đứt sống tới khi khoảng lặng chốt nó (KẾ HOẠCH
+  §5.4), nên ca "cửa sổ đang mở" phải cho khoảng lặng ấy chạy trước khi đòi hết bận, và ca "câu sau chỗ đứt" phải đệm
+  lặng tới khi cột cao độ về (~35 bước) mới đếm quyết định. Các ca dùng chung một `svc_listen`, nên hai ca ấy kéo đỏ cả
+  ca sau và ca Cửa 3.

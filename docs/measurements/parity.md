@@ -79,12 +79,18 @@ Bốn ca, mỗi ca 16 bước phổ `ch1` do bộ phân tích cho: hệ số dá
 và hệ số dáng board trên phổ gần im lặng. Máy tính và board B ở `-O2` khớp **từng bit** cả bốn ca. Đối chứng âm nhân
 với hệ số liên hợp, lỗi dấu dễ mắc nhất của phép nhân phức: lệch 26,0, −3,5 dB, đỏ. Chạy lại bằng `make parity-board`.
 
-## `vad` (E7-T3)
+## `vad` (E7-T3, E7-T8)
 
 Bốn ca đầu vào `int16` (chia 32 768 ở cả hai phía nên là cùng một số float), mỗi ca 160 bước, dài hơn cửa sổ 100 bước
 của bộ dò tối thiểu: tiếng tổng hợp giống lời nói trên ồn trắng; tiếng nhỏ trên ồn đỏ ở `aggressiveness` 2; 40 bước im
 tuyệt đối, không được mô hình hoá, rồi các đoạn to ở mức 3; nhiễu nhảy mức 28 dB ở mức 1. Máy tính và board B ở `-O2` khớp **từng
 bit** cả ba tensor của cả bốn ca. Đối chứng âm cho `speech` trễ một bước: đỏ.
+
+Ca thứ năm, `case_004` (E7-T8, 03/11): ồn trắng 0,03 đổi mức 3 → 0 ở bước 80, ngay sau tám bước tiếng; cấu hình mang
+thêm bước đổi và mức mới, mô hình đã học giữ qua lần đổi (KẾ HOẠCH §3.10). Đầu vào chọn để mất riêng từng phần trạng
+thái đều làm lệch đầu ra: GMM 9 bước `raw`, bộ dò tối thiểu 15, bộ lọc tách băng ở `features`, hangover 1 bước `speech`.
+Máy tính và board B (bản dựng `modules`) khớp **từng bit** cả ba tensor. Đối chứng âm `case_neg_001` dựng lại bộ dò ở
+bước đổi: `features` lệch 2,41 dB, `raw` SNR 1,0 dB, `speech` 9,2 dB, đỏ ở cả hai nơi.
 
 ## `agc` (E7-T4)
 
