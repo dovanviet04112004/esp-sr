@@ -3894,7 +3894,8 @@ dải, trọng số float32 dải nối dải, mỗi mảng đệm tới bội 4
 thị của hàng deploy có `weights_in_flash`, hiện là `speaker` (§3.17), và cho nhóm chuẩn, chỉ đọc lúc tính μ, σ.
 
 **`firmware/models/<nhánh>/meta.json`** đi cùng mỗi `.espdl` và được commit (§4.3): `grid_hash`, nguồn dữ liệu đã học
-(CLAUDE.md §4.3), run sinh ra nó. Của `command` có thêm ba trường (ADR-0012):
+(CLAUDE.md §4.3), run sinh ra nó. Nguồn đã học gồm các file train của `split.lock` và, khi run học cả phiên thu qua board
+(`eval.board.train`, §3.11), tên từng phiên cùng sha256 của nó trong manifest board. Của `command` có thêm ba trường (ADR-0012):
 
 | Trường | Giá trị | Ai đọc |
 |---|---|---|
