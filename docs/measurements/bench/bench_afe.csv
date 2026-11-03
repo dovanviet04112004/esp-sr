@@ -1,6 +1,6 @@
 module,core,static_bytes,hot_bytes,cold_bytes,us_mean,us_peak,in_total,fw,date
 dsp_afe chuỗi (hpf + stft x2 + balance + doa + trộn + ns + istft + vad + agc),1,0,86464,0,2621.2,3308.0,1,contract-v1-2146-g4f422ade-dirt,2026-11-02
-"dsp_afe chuỗi một micro (hpf + stft + ns + istft + vad + agc)",1,0,75984,0,2353.4,2462.8,0,contract-v1-2146-g4f422ade-dirt,2026-11-02
+dsp_afe chuỗi một micro (hpf + stft + ns + istft + vad + agc),1,0,75984,0,2353.4,2462.8,0,contract-v1-2146-g4f422ade-dirt,2026-11-02
 dsp_spec stft (2 kênh),1,0,18032,0,283.7,287.0,0,contract-v1-2146-g4f422ade-dirt,2026-11-02
 dsp_spec istft,1,0,11856,0,158.0,162.0,0,contract-v1-2146-g4f422ade-dirt,2026-11-02
 dsp_afe hpf (2 kênh),1,0,64,0,41.1,45.3,0,contract-v1-2146-g4f422ade-dirt,2026-11-02
@@ -17,8 +17,8 @@ dsp_afe vad,1,0,2640,0,138.0,175.3,0,contract-v1-2146-g4f422ade-dirt,2026-11-02
 dsp_afe agc,1,0,1216,0,257.2,260.9,0,contract-v1-2146-g4f422ade-dirt,2026-11-02
 dsp_afe agc chặn đỉnh mọi mẫu,1,0,1216,0,340.8,356.6,0,contract-v1-2146-g4f422ade-dirt,2026-11-02
 dsp_spec log-mel (80 dải),0,0,3680,0,87.7,93.3,1,contract-v1-2146-g4f422ade-dirt,2026-11-02
-dsp_spec pitch Kaldi (vùng làm việc PSRAM),0,0,158496,0,2102.1,2203.2,1,contract-v1-2146-g4f422ade-dirt,2026-11-02
-dsp_spec swift_front ba STFT của SwiftF0 (vùng làm việc PSRAM),0,0,60160,0,2374.6,2470.8,0,contract-v1-2146-g4f422ade-dirt,2026-11-02
-dsp_spec swift_dims ba chiều cao độ của SwiftF0,0,0,656,0,44.2,70.9,0,contract-v1-2146-g4f422ade-dirt,2026-11-02
+dsp_spec pitch Kaldi (vùng làm việc PSRAM),0,0,158496,0,2102.1,2203.2,0,contract-v1-2146-g4f422ade-dirt,2026-11-02
+dsp_spec swift_front ba STFT của SwiftF0 (vùng làm việc PSRAM),0,0,60160,0,2374.6,2470.8,1,contract-v1-2146-g4f422ade-dirt,2026-11-02
+dsp_spec swift_dims ba chiều cao độ của SwiftF0,0,0,656,0,44.2,70.9,1,contract-v1-2146-g4f422ade-dirt,2026-11-02
 dsp_spec spk_fbank (72 băng) một cửa sổ speaker,0,0,0,59568,79155.2,79156.1,0,contract-v1-2146-g4f422ade-dirt,2026-11-02
 lang_vi lexicon_entry một lệnh ba vùng lúc nạp bộ lệnh,0,0,0,0,1183.0,1188.1,0,contract-v1-2146-g4f422ade-dirt,2026-11-02

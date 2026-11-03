@@ -545,7 +545,9 @@ static void fill_voice(void)
 static void bench_pitch(void)
 {
     const dsp_spec_pitch_config_t cfg = GEN_LISTEN_KALDI_PITCH_CONFIG;
-    row_t row = {.module = "dsp_spec pitch Kaldi (vùng làm việc PSRAM)", .core = CORE_NHAN, .in_total = true};
+    // Off the listening path since 29/10: SwiftF0 is the product's pitch (KEHOACH 3.11).
+    row_t row = {
+        .module = "dsp_spec pitch Kaldi (vùng làm việc PSRAM)", .core = CORE_NHAN, .in_total = false};
     row.hot_bytes = dsp_spec_pitch_workspace_bytes(&cfg);
     void *mem = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_SPIRAM);
     const size_t before = heap_free();
@@ -598,7 +600,8 @@ static void bench_swift_front(void)
 {
     static const size_t points[DSP_SPEC_SWIFT_FRONT_SPECTRA] = {1024, 2048, 512};
     row_t row = {.module = "dsp_spec swift_front ba STFT của SwiftF0 (vùng làm việc PSRAM)",
-                 .core = CORE_NHAN};
+                 .core = CORE_NHAN,
+                 .in_total = true};
     dsp_spec_swift_front_tables_t tables[DSP_SPEC_SWIFT_FRONT_SPECTRA];
     for (size_t s = 0; s < DSP_SPEC_SWIFT_FRONT_SPECTRA; s++) {
         swift_tables(&tables[s], points[s]);
@@ -636,7 +639,8 @@ static void bench_swift_front(void)
 static void bench_swift_dims(void)
 {
     const dsp_spec_swift_dims_config_t cfg = GEN_LISTEN_SWIFT_DIMS_CONFIG;
-    row_t row = {.module = "dsp_spec swift_dims ba chiều cao độ của SwiftF0", .core = CORE_NHAN};
+    row_t row = {
+        .module = "dsp_spec swift_dims ba chiều cao độ của SwiftF0", .core = CORE_NHAN, .in_total = true};
     row.hot_bytes = dsp_spec_swift_dims_workspace_bytes(&cfg);
     void *mem = malloc(row.hot_bytes);
     const size_t before = heap_free();

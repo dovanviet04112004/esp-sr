@@ -30,7 +30,7 @@ Chỉ số từ profile `bench`; số từ `dev` không vào bảng này.
 | lang_vi lexicon_entry một lệnh ba vùng lúc nạp bộ lệnh | 0 | 0 | 0 | 0 | 1183,0 | 1188,1 | 7,4 | `contract-v1-2146-g4f422ade-dirt` | 2026-11-02 |
 
 Tổng nhân 1: trung bình 16,4%, đỉnh cộng dồn 20,7% một khung (mục tiêu KẾ HOẠCH §5.6: trung bình ≤ 50%, đỉnh một khung ≤ 80%); gồm dsp_afe chuỗi (hpf + stft x2 + balance + doa + trộn + ns + istft + vad + agc).
-Tổng nhân 0: trung bình 13,7%, đỉnh cộng dồn 14,4% một khung (mục tiêu KẾ HOẠCH §5.6: trung bình ≤ 70%); gồm dsp_spec log-mel (80 dải), dsp_spec pitch Kaldi (vùng làm việc PSRAM).
+Tổng nhân 0: trung bình 15,7%, đỉnh cộng dồn 16,5% một khung (mục tiêu KẾ HOẠCH §5.6: trung bình ≤ 70%); gồm dsp_spec log-mel (80 dải), dsp_spec swift_dims ba chiều cao độ của SwiftF0, dsp_spec swift_front ba STFT của SwiftF0 (vùng làm việc PSRAM).
 
 ## Việc theo lệnh, không theo khung
 
