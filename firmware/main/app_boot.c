@@ -60,11 +60,16 @@ static void log_heap(const char *step)
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }
 
+// A value out of range would stop its module's init at every boot, with no console up yet to fix it.
 static uint8_t pcm_shift(void)
 {
     uint8_t shift = 0;
-    if (sys_storage_get_u8(STORAGE_NS_CALIB, STORAGE_KEY_PCM_SHIFT, &shift) == ESP_OK) { return shift; }
-    ESP_LOGW(TAG, "calib/pcm_shift absent, using %d", CONFIG_APP_PCM_SHIFT_FALLBACK);
+    if (sys_storage_get_u8(STORAGE_NS_CALIB, STORAGE_KEY_PCM_SHIFT, &shift) == ESP_OK &&
+        shift >= DRV_AUDIO_PCM_SHIFT_MIN && shift <= DRV_AUDIO_PCM_SHIFT_MAX) {
+        return shift;
+    }
+    ESP_LOGW(TAG, "calib/pcm_shift absent or out of %d..%d, using %d", DRV_AUDIO_PCM_SHIFT_MIN,
+             DRV_AUDIO_PCM_SHIFT_MAX, CONFIG_APP_PCM_SHIFT_FALLBACK);
     return CONFIG_APP_PCM_SHIFT_FALLBACK;
 }
 
@@ -82,18 +87,27 @@ static void seed_operating(void)
     }
 }
 
+// Both dB keys of NVS afe are levels under full scale, as dsp_afe takes them.
 static float afe_i8(const char *key, float fallback)
 {
     int8_t value = 0;
-    return sys_storage_get_i8(STORAGE_NS_AFE, key, &value) == ESP_OK ? (float)value : fallback;
+    if (sys_storage_get_i8(STORAGE_NS_AFE, key, &value) != ESP_OK) { return fallback; }
+    if (value <= 0) { return (float)value; }
+    ESP_LOGW(TAG, "afe/%s %d dB is over full scale, using %.0f", key, value, (double)fallback);
+    return fallback;
 }
 
 static uint8_t vad_mode(void)
 {
+    static const float local_threshold[] = GEN_AFE_VAD_LOCAL_THRESHOLD;
     uint8_t mode = 0;
-    return sys_storage_get_u8(STORAGE_NS_AFE, STORAGE_KEY_VAD_MODE, &mode) == ESP_OK
-               ? mode
-               : GEN_AFE_VAD_AGGRESSIVENESS;
+    if (sys_storage_get_u8(STORAGE_NS_AFE, STORAGE_KEY_VAD_MODE, &mode) != ESP_OK) {
+        return GEN_AFE_VAD_AGGRESSIVENESS;
+    }
+    if (mode < sizeof(local_threshold) / sizeof(local_threshold[0])) { return mode; }
+    ESP_LOGW(TAG, "afe/vad_mode %u has no thresholds in afe.yaml, using %d", (unsigned)mode,
+             GEN_AFE_VAD_AGGRESSIVENESS);
+    return GEN_AFE_VAD_AGGRESSIVENESS;
 }
 
 // Without a balance table of this format the chain runs without balance, which a board never calibrated
