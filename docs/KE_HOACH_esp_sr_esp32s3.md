@@ -2409,15 +2409,17 @@ Nhờ vậy server đổi model mà không đụng các nhánh tiếng nói.
     §2).
   - Hai khe vision thì không vừa: `models_0` còn ~5,3 MiB, b0 dư 0,1 MiB, b3 không vào.
 
-**Đẩy xuống qua Wi-Fi.**
+**Đẩy xuống qua Wi-Fi.** Mạng dựng một lần lúc boot và giữ tới lần khởi động sau; sản phẩm không gỡ rồi dựng lại nó
+lúc chạy (CLAUDE.md §4.1, chủ repo chọn 03/11, E15-T17).
 1. Host phục vụ file ảnh thị giác qua HTTP và đăng tin retained `down/vision`: phiên bản, URL, sha256, cỡ.
-2. Board dừng nhận diện, tải ảnh vào PSRAM (~3 MB, chỗ tensor trung gian vừa trả lại) và kiểm sha256.
-3. Chỉ khi đúng, board xoá rồi ghi `vision_0`, header ghi sau cùng. Ghi flash là việc của `sys_storage`; lúc ghi,
-   chuỗi nghe dừng và `OTA_RUNNING` giương (§7.6).
-4. Board nạp lại mạng, không khởi động lại, và báo `up/vision`.
+2. Board dừng nhận diện, giương `OTA_RUNNING`, dừng chuỗi nghe (§7.6), rồi xoá `vision_0` và ghi ảnh theo từng khúc
+   lúc tải, tính sha256 trên chính phần đã ghi. Ghi flash là việc của `sys_storage`. Không có bộ đệm ở PSRAM: mạng
+   đang giữ ~2,85 MB, phần còn lại không chứa nổi ảnh ~3 MB.
+3. Chỉ khi sha256 và cỡ khớp, board ghi header sau cùng rồi khởi động lại; lần boot ấy dựng mạng mới và báo
+   `up/vision`.
 
-Tải hỏng hay sha256 sai thì model cũ vẫn chạy. Mất điện lúc ghi thì header vắng, nhận diện tắt; lần khởi động sau, tin
-retained kích tải lại. Lúc dựng có thêm đường USB, `make vision-flash`.
+Tải hỏng, sha256 sai hay mất điện lúc ghi thì `vision_0` không có header: nhận diện tắt, và tin retained kích tải lại ở
+lần khởi động sau. Lúc dựng có thêm đường USB, `make vision-flash`.
 
 **Ảnh vào.** Board B không có camera (§2.1). Tới khi gắn camera, host gửi ảnh JPEG xuống `down/image`, board trả
 `up/detections`: mỗi khung gồm lớp, điểm, toạ độ, cùng số ms. Camera là việc sau: chọn module, chân (§2.2), driver.
@@ -2425,7 +2427,13 @@ retained kích tải lại. Lúc dựng có thêm đường USB, `make vision-fl
 **Nhánh `detect` của `ai_engine`** (`src/detect/`, §4.5.5).
 - `ai_engine_detect_load(label)` ánh xạ ảnh thị giác của phân vùng ấy qua `sys_storage` (`vision_0` ở sản phẩm, khe dò
   `models_0` ở app thử), kiểm magic, `format_ver` và sha256 của `.espdl`, rồi dựng mạng với trọng số đọc thẳng từ
-  flash. `top_k`, ngưỡng điểm và tên lớp lấy từ header; `classes` khác số kênh lớp của mạng thì từ chối.
+  flash. `top_k`, ngưỡng điểm và tên lớp lấy từ header; `classes` khác số kênh lớp của mạng thì từ chối. Sản phẩm
+  gọi nó một lần trong `app_boot`, cùng `ai_engine_load` và trước khi task nào chạy: lúc dựng, `ai_engine` đẩy cấp
+  phát của esp-dl sang PSRAM cho mọi task, nên chỉ được dựng khi chưa task nào khác cấp phát. `ai_engine_detect_unload`
+  chỉ app thử gọi.
+- Op riêng của repo trong mạng (`ConvLut`, `C3k2Block`, `UpsampleConcatConv`) không cấp phát mỗi lượt: tham số của
+  lượt nằm ở bộ đệm cấp lúc dựng (E15-T18). `Conv` của chính esp-dl vẫn cấp một vector nhỏ mỗi lượt, như ở mọi model
+  tiếng nói; đó là mã thư viện ngoài.
 - `ai_engine_detect_run` nhận một ảnh RGB888 cỡ bất kỳ, letterbox bằng `ImagePreprocessor` của esp-dl (viền 114, như
   `YOLO26`), chạy mạng, rồi `decode.c` giải theo đúng phép của `YOLO26::postprocess` (MIT): lọc trước bằng ngưỡng
   nguyên rồi mới sigmoid, giải khung quanh tâm ô, giữ K khung điểm cao. Khác component ở ba chỗ:
