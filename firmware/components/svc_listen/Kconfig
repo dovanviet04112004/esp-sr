@@ -50,8 +50,8 @@ menu "svc_listen"
         range 0 2000
         default 500
         help
-            In LENH a command window may not reach back past the hop after the wake's decision. When that
-            leaves it less lead than this ahead of its speech, svc_listen tops the lead up with the hops right
+            In LENH a command window may not reach back past the wake's mark, the hop after the wake word's
+            end (ADR-0039). When that leaves it less lead than this ahead of its speech, svc_listen tops the lead up with the hops right
             ahead of the wake word (KEHOACH 5.4, ADR-0032); 0 never tops up. Each topped-up hop is network
             work the decision waits for. It lives here, not in listen.yaml, whose hash the command model is
             held to.

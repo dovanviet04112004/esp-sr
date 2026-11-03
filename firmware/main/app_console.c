@@ -267,7 +267,7 @@ static int stream_cmd(int argc, char **argv)
     }
     const int seconds = s_stream_args.seconds->count > 0 ? s_stream_args.seconds->ival[0] : 0;
     if (mode < 0 || mode > UINT8_MAX || seconds < 0) {
-        printf("mode is 0..4 and seconds is not negative\n");
+        printf("mode is 0..255 and seconds is not negative\n");
         return 1;
     }
     const esp_err_t err = svc_report_stream_start((uint8_t)mode, host, port, (uint32_t)seconds);
@@ -278,7 +278,8 @@ static int stream_cmd(int argc, char **argv)
 static esp_err_t register_stream(void)
 {
     s_stream_args.mode =
-        arg_int1(NULL, NULL, "<mode>", "0 off, 1 clean, 2 ch0 ch1, 3 +ref, 4 +ref +clean, 5 +clean");
+        arg_int1(NULL, NULL, "<mode>",
+                 "0 off, 1 clean, 2 ch0 ch1, 3 +ref, 4 +ref +clean, 5 +clean, 9 mic, 10 mic +clean");
     s_stream_args.seconds = arg_int0(NULL, NULL, "<seconds>", "how long; the maximum when left out");
     s_stream_args.end = arg_end(2);
     const esp_console_cmd_t stream = {
