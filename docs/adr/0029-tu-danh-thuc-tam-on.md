@@ -1,6 +1,6 @@
 # ADR-0029 — Từ đánh thức tạm là "on" của Speech Commands, tới khi có giọng thật nói "trợ lý"
 
-- **Trạng thái**: Chấp nhận (chủ repo, 2026-10-29)
+- **Trạng thái**: Thay bởi ADR-0033 (chủ repo, 2026-10-31)
 - **Ngày**: 2026-10-29
 - **Liên quan**: KẾ HOẠCH §1.1, §3.11, §5.4; ADR-0011, ADR-0017; TASKS E11-T11;
   `docs/measurements/wake.md`, `docs/measurements/speech_commands.md` §4

@@ -1,8 +1,8 @@
 # esp-sr
 
-Bộ nghe và nói tiếng Việt chạy trọn trên ESP32-S3 hai micro: thu, làm sạch, dò từ đánh thức, nhận lệnh,
-nói lại, và gửi số liệu về máy tính để xem và chấm. Viết lại bằng mã đọc được trên `esp-dsp`, `dl_fft`,
-`esp-dl`; không dùng thư viện nhị phân của ESP-SR.
+Bộ nghe và nói tiếng Việt chạy trọn trên ESP32-S3 với một hoặc hai micro: thu, làm sạch, dò từ đánh thức, nhận
+lệnh, nói lại, và gửi số liệu về máy tính để xem và chấm. Viết lại bằng mã đọc được trên `esp-dl` và FFT viết tay
+(`dl_fft` chọn được bằng Kconfig); không dùng thư viện nhị phân của ESP-SR.
 
 | Đọc gì | Ở đâu |
 |---|---|
@@ -11,7 +11,9 @@ nói lại, và gửi số liệu về máy tính để xem và chấm. Viết l
 | Việc cần làm, điều kiện xong | [docs/TASKS.md](docs/TASKS.md) |
 | Luật chia task và kiểm lỗi đồng thời | [docs/FREERTOS.md](docs/FREERTOS.md) |
 
-Trạng thái: đang lập kế hoạch, chưa mở Cửa 0. Đích trước mắt: demo gửi kết quả nhận dạng lên server qua MQTT.
+Trạng thái: sản phẩm chạy trên board B. Nó thức bằng "happy", nhận lệnh bằng đường `ctc`, kiểm người nói bằng
+ReDimNet2 b0, và nhận diện vật thể bằng YOLO26n trên ảnh gửi từ máy tính. Kết quả đi lên server qua MQTT. Tiến độ từng
+việc ở [docs/TASKS.md](docs/TASKS.md).
 
 ## Khối
 

@@ -8,4 +8,4 @@ Tầng L1: `include/app_config.h` là chỗ **duy nhất** khai chân GPIO của
 | Phụ thuộc | `common`, `esp_driver_gpio` |
 | Chặn lúc biên dịch | bật console USB-Serial-JTAG (kể cả console phụ) trong khi I2S đang ở GPIO 19/20 là lỗi dịch |
 | Đổi chân | sửa `app_config.h` và KẾ HOẠCH §2.2 trong **cùng một commit** (CLAUDE.md §1.3) |
-| Giới hạn | chân ampli (17, 18) và LED (21) là đề xuất, xác nhận ở E2-T2 |
+| Giới hạn | chân ampli (17, 18) và LED (21) là đề xuất, xác nhận ở E2-T8 và E5-T14 |

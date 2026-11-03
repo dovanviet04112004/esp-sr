@@ -1,12 +1,14 @@
 # dsp_spec
 
-Tầng L1, thuật toán thuần: FFT thực, cửa sổ, STFT chạy dòng, log-mel và cao độ trên lưới `contracts/grid.yaml`
+Tầng L1, thuật toán thuần: FFT thực, cửa sổ, STFT chạy dòng, log-mel, front end và ba chiều cao độ của SwiftF0
+(`swift_front`, `swift_dims`), khâu đặc trưng của `speaker` (`spk_fbank`) và bộ dò Kaldi (`pitch`, nay ngoài đường
+nghe, chỉ còn bộ vàng và bench) trên lưới `contracts/grid.yaml`
 (KẾ HOẠCH §3.1, §3.11). Khớp bản tham chiếu Python `ml/src/srpipe/dsp/spec/` từng bit với FFT mặc định (KẾ HOẠCH §3.14,
 ADR-0020); bộ vàng ở E6-T4, E6-T5, E6-T8.
 
 | Mục | Nội dung |
 |---|---|
-| Phụ thuộc | `common`; riêng tư `espressif/dl_fft` `==0.7.0`, luôn khai, chỉ dựng vào khi Kconfig chọn nó |
+| Phụ thuộc | `common`; riêng tư `espressif/dl_fft` `>=0.7.0,<=0.8.0`, luôn khai, chỉ dựng vào khi Kconfig chọn nó |
 | Số học | float32, cả component dựng với `-ffp-contract=off`: mỗi phép làm tròn một lần như bản soi gương |
 | FFT, Kconfig `DSP_SPEC_FFT_BACKEND` | **`DSP_SPEC_FFT_RADIX4`** (mặc định): `src/fft.c` viết tay, n điểm thực gói thành n/2 điểm phức theo thứ tự đảo bit, các lượt DIT cơ số 4 (một tầng cơ số 2 trước khi log2(n/2) lẻ), rồi tách ra n/2 + 1 vạch, vạch k và n/2 − k cùng lúc; chiều nghịch ghép vạch lại, liên hợp, chạy đúng các lượt ấy rồi liên hợp lần nữa. Nhanh ngang `dl_fft`. **`DSP_SPEC_FFT_DL_FFT`**: `src/fft_dl.c` bọc `dl_rfft_f32_run`/`dl_irfft_f32_run` của `dl_fft`, không khớp bản soi gương từng bit; giữ để so |
 | Hợp đồng FFT | thuận không chia, nghịch chia 1/n, n/2 + 1 vạch, bỏ phần ảo của DC và Nyquist; luỹ thừa 2 từ 64 tới 2048 |

@@ -1,7 +1,8 @@
 # drv_audio
 
-Tầng L2: I2S0 thu hai INMP441 chung một dây dữ liệu (KẾ HOẠCH §2.2), giao từng khung trọn 256 mẫu mỗi kênh,
-xen kẽ `ch0 ch1`, mẫu 24 bit dịch về `int16` theo `pcm_shift`.
+Tầng L2: I2S0 thu một hay hai INMP441 chung một dây dữ liệu (KẾ HOẠCH §2.2, §2.3), giao từng khung trọn 256 mẫu mỗi
+kênh: hai micro xen kẽ `ch0 ch1`; một micro đọc mono ở khe `APP_MIC_SLOT` (ADR-0042). Mẫu 24 bit dịch về `int16` theo
+`pcm_shift`.
 
 | Mục | Nội dung |
 |---|---|
