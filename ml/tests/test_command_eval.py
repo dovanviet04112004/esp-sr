@@ -73,6 +73,24 @@ def test_the_sessions_of_a_sitting_run_through_one_chain_and_one_tracker_without
     assert not np.array_equal(together[len(a) :], alone)
 
 
+def test_a_one_microphone_session_starts_its_own_chain_inside_a_sitting(tmp_path) -> None:
+    hop, rng = grid.HOP_SAMPLES, np.random.default_rng(4)
+    two, one = rng.normal(0.0, 800.0, (50 * hop, 2)).astype(np.int16), rng.normal(0.0, 800.0, (40 * hop, 1))
+    one = one.astype(np.int16)
+    (tmp_path / "device" / "board_b" / "s1").mkdir(parents=True)
+    (tmp_path / "device" / "board_b" / "s2").mkdir(parents=True)
+    for m in range(2):
+        sf.write(tmp_path / "device" / "board_b" / "s1" / f"ch{m}.wav", two[:, m], grid.SAMPLE_RATE_HZ)
+    sf.write(tmp_path / "device" / "board_b" / "s2" / "mic.wav", one[:, 0], grid.SAMPLE_RATE_HZ)
+    manifest = [{"session": s, "board": "board_b", "fw": "x", "pcm_shift": "13"} for s in ("s1", "s2")]
+    cfg = {"features": "scenes/device.yaml"}
+    ((_, heard, *_),) = gate.heard_rows(cfg, manifest[1:], {"raw": tmp_path}, manifest)
+    device_cfg = device_of(cfg)
+    chain_cfg = ChainConfig(balance_gains=device.load_microphones(device_cfg["microphone"]).gains)
+    alone = device.listen(one, chain_cfg, Mel(MelConfig(**device_cfg["features"])))[0]
+    np.testing.assert_array_equal(heard[: len(one)], alone)
+
+
 def test_a_command_session_expects_its_command_only_when_the_net_learned_it() -> None:
     command_of = {tuple(corpus.sounds("bật đèn")): "bat_den"}
     assert gate.expected_of("cmd", "bật đèn", command_of) == "bat_den"

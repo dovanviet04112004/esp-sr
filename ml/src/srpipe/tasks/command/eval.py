@@ -285,6 +285,19 @@ def rnnt_heard(net: Ctc, x: np.ndarray) -> Heard:
     return heard_of(net, *rnnt_search.decide(log_probs, frames, tree, ctc_score.CAP, 0, size, pad, per_frames))
 
 
+def mic_runs(sitting: list[dict], pcm: list[np.ndarray]) -> list[tuple[list[dict], list[np.ndarray]]]:
+    """A sitting's rows and recordings cut where the microphone count changes: a one-microphone build and a
+    two-microphone one may share a firmware version, never a run of the chain (ADR-0042)."""
+    runs: list[tuple[list[dict], list[np.ndarray]]] = []
+    for row, recording in zip(sitting, pcm, strict=True):
+        if runs and runs[-1][1][-1].shape[1] == recording.shape[1]:
+            runs[-1][0].append(row)
+            runs[-1][1].append(recording)
+        else:
+            runs.append(([row], [recording]))
+    return runs
+
+
 def heard_rows(
     cfg: dict,
     rows: list[dict],
@@ -315,16 +328,17 @@ def heard_rows(
             raise FileNotFoundError(f"{', '.join(missing)}: in the board manifest, not under {paths['raw'] / 'device'}")
         pcm = [(pcm_of or {}).get(r["session"]) for r in sitting]
         pcm = [device.session_mics(f) if p is None else p for f, p in zip(folders, pcm, strict=True)]
-        clean, figures, features = device.listen(np.concatenate(pcm), chain_cfg, mel)
-        cuts = np.cumsum([len(p) // grid.HOP_SAMPLES for p in pcm])[:-1]
-        samples, vads = np.split(clean, cuts * grid.HOP_SAMPLES), np.split(figures[:, 0].astype(bool), cuts)
-        parts = zip(samples, vads, np.split(features, cuts), strict=True)
-        sessions = [with_silence(c, v, f, mel) for c, v, f in parts]
-        pitch = pitch_of(np.concatenate([s[0] for s in sessions]))
-        pitches = np.split(pitch, np.cumsum([len(s[1]) for s in sessions])[:-1])
-        for r, (c, v, f), p in zip(sitting, sessions, pitches, strict=True):
-            if r["session"] in asked:
-                yield asked[r["session"]], c, v, f, p
+        for run_rows, run_pcm in mic_runs(sitting, pcm):
+            clean, figures, features = device.listen(np.concatenate(run_pcm), chain_cfg, mel)
+            cuts = np.cumsum([len(p) // grid.HOP_SAMPLES for p in run_pcm])[:-1]
+            samples, vads = np.split(clean, cuts * grid.HOP_SAMPLES), np.split(figures[:, 0].astype(bool), cuts)
+            parts = zip(samples, vads, np.split(features, cuts), strict=True)
+            sessions = [with_silence(c, v, f, mel) for c, v, f in parts]
+            pitch = pitch_of(np.concatenate([s[0] for s in sessions]))
+            pitches = np.split(pitch, np.cumsum([len(s[1]) for s in sessions])[:-1])
+            for r, (c, v, f), p in zip(run_rows, sessions, pitches, strict=True):
+                if r["session"] in asked:
+                    yield asked[r["session"]], c, v, f, p
 
 
 def heard_sessions(cfg: dict, spec: dict, paths: dict) -> Iterator[tuple]:
