@@ -77,15 +77,11 @@ struct dsp_afe_s {
 #endif
 #if CONFIG_DSP_AFE_BSS_ENABLE && CONFIG_DSP_AFE_VAD_ENABLE
     dsp_afe_vad_t *vad_in; // on the microphones' mean, for doa under bss
-    void *vad_in_mem;
-    size_t vad_in_bytes;
     float mics_mean[GEN_GRID_HOP_SAMPLES];
     bool heard; // vad_in's raw decision of the last hop
 #endif
 #if CONFIG_DSP_AFE_VAD_ENABLE
     dsp_afe_vad_t *vad;
-    void *vad_mem;
-    size_t vad_bytes;
 #endif
 #if CONFIG_DSP_AFE_AGC_ENABLE
     dsp_afe_agc_t *agc;
@@ -336,19 +332,11 @@ static void walk_vad(walker_t *w, const dsp_afe_config_t *cfg, dsp_afe_t *afe)
     const dsp_afe_vad_config_t vad = vad_config(cfg);
     const size_t bytes = dsp_afe_vad_workspace_bytes(&vad);
     void *mem = region(w, bytes);
-    if (mem != NULL) {
-        afe->vad_mem = mem;
-        afe->vad_bytes = bytes;
-        fail(w, dsp_afe_vad_init(&afe->vad, &vad, mem, bytes));
-    }
+    if (mem != NULL) { fail(w, dsp_afe_vad_init(&afe->vad, &vad, mem, bytes)); }
 #if CONFIG_DSP_AFE_BSS_ENABLE
     if (cfg->spatial != DSP_AFE_SPATIAL_BSS) { return; }
     mem = region(w, bytes);
-    if (mem != NULL) {
-        afe->vad_in_mem = mem;
-        afe->vad_in_bytes = bytes;
-        fail(w, dsp_afe_vad_init(&afe->vad_in, &vad, mem, bytes));
-    }
+    if (mem != NULL) { fail(w, dsp_afe_vad_init(&afe->vad_in, &vad, mem, bytes)); }
 #endif
 #else
     (void)w;
@@ -734,11 +722,10 @@ esp_err_t dsp_afe_set_param(dsp_afe_t *afe, dsp_afe_param_t param, float value)
     case DSP_AFE_PARAM_VAD_AGGRESSIVENESS: {
         afe->cfg.vad_aggressiveness = (uint8_t)value;
 #if CONFIG_DSP_AFE_VAD_ENABLE
-        const dsp_afe_vad_config_t vad = vad_config(&afe->cfg);
-        esp_err_t err = dsp_afe_vad_init(&afe->vad, &vad, afe->vad_mem, afe->vad_bytes);
+        esp_err_t err = dsp_afe_vad_set_aggressiveness(afe->vad, (uint8_t)value);
 #if CONFIG_DSP_AFE_BSS_ENABLE
         if (err == ESP_OK && afe->vad_in != NULL) {
-            err = dsp_afe_vad_init(&afe->vad_in, &vad, afe->vad_in_mem, afe->vad_in_bytes);
+            err = dsp_afe_vad_set_aggressiveness(afe->vad_in, (uint8_t)value);
         }
 #endif
         return err;

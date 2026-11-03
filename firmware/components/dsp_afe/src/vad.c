@@ -146,14 +146,21 @@ size_t dsp_afe_vad_workspace_bytes(const dsp_afe_vad_config_t *cfg)
     return config_ok(cfg) ? afe_region_bytes(sizeof(struct dsp_afe_vad_s)) : 0;
 }
 
+esp_err_t dsp_afe_vad_set_aggressiveness(dsp_afe_vad_t *st, uint8_t aggressiveness)
+{
+    if (st == NULL || aggressiveness >= COUNT(kLocalThreshold)) { return ESP_ERR_INVALID_ARG; }
+    st->local_threshold = kLocalThreshold[aggressiveness];
+    st->global_threshold = kGlobalThreshold[aggressiveness];
+    return ESP_OK;
+}
+
 esp_err_t dsp_afe_vad_init(dsp_afe_vad_t **out, const dsp_afe_vad_config_t *cfg, void *mem, size_t bytes)
 {
     if (out == NULL || mem == NULL || !config_ok(cfg)) { return ESP_ERR_INVALID_ARG; }
     dsp_afe_vad_t *st = afe_state(mem, bytes, sizeof(*st));
     if (st == NULL) { return ESP_ERR_INVALID_SIZE; }
     memset(st, 0, sizeof(*st));
-    st->local_threshold = kLocalThreshold[cfg->aggressiveness];
-    st->global_threshold = kGlobalThreshold[cfg->aggressiveness];
+    dsp_afe_vad_set_aggressiveness(st, cfg->aggressiveness);
     st->hangover_hops =
         ((uint32_t)cfg->hangover_ms * GEN_GRID_SAMPLE_RATE_HZ + MS_PER_S * HOP / 2) / (MS_PER_S * HOP);
     dsp_afe_vad_reset(st);

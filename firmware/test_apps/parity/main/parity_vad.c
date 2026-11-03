@@ -6,6 +6,7 @@
 
 #define PCM_FULL_SCALE 32768.0f
 #define CONFIG_VALUES 2 // aggressiveness, hangover_ms
+#define SWITCH_VALUES 4 // then the hop the mode changes ahead of, and the new mode
 
 typedef struct {
     float *features;
@@ -13,7 +14,7 @@ typedef struct {
     float *speech;
 } vad_out_t;
 
-static bool run_hops(const float *config, const float *pcm, size_t hops, vad_out_t *out)
+static bool run_hops(const float *config, size_t n_config, const float *pcm, size_t hops, vad_out_t *out)
 {
     const dsp_afe_vad_config_t cfg = {.aggressiveness = (uint8_t)config[0],
                                       .hangover_ms = (uint16_t)config[1]};
@@ -23,6 +24,9 @@ static bool run_hops(const float *config, const float *pcm, size_t hops, vad_out
     float hop[GEN_GRID_HOP_SAMPLES];
     bool ok = mem != NULL && dsp_afe_vad_init(&vad, &cfg, mem, bytes) == ESP_OK;
     for (size_t h = 0; ok && h < hops; h++) {
+        if (n_config == SWITCH_VALUES && h == (size_t)config[2]) {
+            ok = dsp_afe_vad_set_aggressiveness(vad, (uint8_t)config[3]) == ESP_OK;
+        }
         for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
             hop[i] = pcm[h * GEN_GRID_HOP_SAMPLES + i] / PCM_FULL_SCALE;
         }
@@ -45,21 +49,23 @@ bool parity_vad(const char *case_name, const void *buf, size_t len)
     gold_tensor_t pcm, config, features, raw, speech;
     if (!parity_tensor(buf, len, "pcm", &pcm) || !parity_tensor(buf, len, "config", &config) ||
         !parity_tensor(buf, len, "features", &features) || !parity_tensor(buf, len, "raw", &raw) ||
-        !parity_tensor(buf, len, "speech", &speech) || pcm.ndim != 2 || pcm.dims[1] != GEN_GRID_HOP_SAMPLES) {
+        !parity_tensor(buf, len, "speech", &speech) || pcm.ndim != 2 || pcm.dims[1] != GEN_GRID_HOP_SAMPLES ||
+        (config.dims[0] != CONFIG_VALUES && config.dims[0] != SWITCH_VALUES)) {
         return false;
     }
     const size_t hops = pcm.dims[0];
     const size_t n_features = hops * GEN_AFE_VAD_BANDS;
-    float cfg[CONFIG_VALUES];
+    float cfg[SWITCH_VALUES];
     float *in = malloc(hops * GEN_GRID_HOP_SAMPLES * sizeof(float));
     float *want = malloc((n_features + 2 * hops) * sizeof(float));
     float *got = malloc((n_features + 2 * hops) * sizeof(float));
     vad_out_t out = {.features = got, .raw = got + n_features, .speech = got + n_features + hops};
-    const bool ok = in != NULL && want != NULL && got != NULL && parity_floats(&config, cfg, CONFIG_VALUES) &&
-                    parity_floats(&pcm, in, hops * GEN_GRID_HOP_SAMPLES) &&
-                    parity_floats(&features, want, n_features) &&
-                    parity_floats(&raw, want + n_features, hops) &&
-                    parity_floats(&speech, want + n_features + hops, hops) && run_hops(cfg, in, hops, &out);
+    const bool ok =
+        in != NULL && want != NULL && got != NULL && parity_floats(&config, cfg, config.dims[0]) &&
+        parity_floats(&pcm, in, hops * GEN_GRID_HOP_SAMPLES) && parity_floats(&features, want, n_features) &&
+        parity_floats(&raw, want + n_features, hops) &&
+        parity_floats(&speech, want + n_features + hops, hops) &&
+        run_hops(cfg, config.dims[0], in, hops, &out);
     if (ok) {
         parity_report("vad", case_name, "features", want, out.features, n_features);
         parity_report("vad", case_name, "raw", want + n_features, out.raw, hops);

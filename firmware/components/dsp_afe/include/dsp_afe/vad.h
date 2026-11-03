@@ -47,6 +47,13 @@ esp_err_t dsp_afe_vad_process(dsp_afe_vad_t *st, const float *hop, bool *speech)
  */
 void dsp_afe_vad_detail(const dsp_afe_vad_t *st, dsp_afe_vad_detail_t *out);
 
+/** Take another aggressiveness's two thresholds; models, minimum tracks, hangover and filters stay, as
+ *  WebRTC's WebRtcVad_set_mode leaves them (KEHOACH 3.10).
+ *  @ctx any | non-blocking | same task as dsp_afe_vad_process
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG an aggressiveness without thresholds in afe.yaml
+ */
+esp_err_t dsp_afe_vad_set_aggressiveness(dsp_afe_vad_t *st, uint8_t aggressiveness);
+
 /** Return the band models, minimum tracks and hangover to where init leaves them; thresholds stay.
  *  @ctx any | non-blocking
  */
