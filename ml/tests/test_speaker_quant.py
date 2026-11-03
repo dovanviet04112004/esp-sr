@@ -634,6 +634,8 @@ def test_use_puts_a_kept_deploy_into_the_firmware_and_the_lock_and_refuses_a_cha
 ) -> None:
     import json
 
+    from srpipe.export import update_lock
+
     run = kept_deploy(tmp_path, "kl")
     quant.use(run, "kl")
     folder = tmp_path / "models" / quant.BRANCH
@@ -647,9 +649,15 @@ def test_use_puts_a_kept_deploy_into_the_firmware_and_the_lock_and_refuses_a_cha
         (quant.BRANCH, "espdl"),
         (quant.COHORT_ENTRY, "cohort"),
     ]
-    (run / quant.INT8_DIR / "kl" / quant.KEPT_DIR / quant.COHORT_FILE).write_bytes(b"other")
+    kept = run / quant.INT8_DIR / "kl" / quant.KEPT_DIR
+    record = json.loads((kept / quant.KEPT_FILE).read_text(encoding="utf-8"))
+    (kept / f"{quant.BRANCH}.espdl").write_bytes(b"new graph")
+    record["files"][f"{quant.BRANCH}.espdl"] = update_lock.sha256(kept / f"{quant.BRANCH}.espdl")
+    (kept / quant.KEPT_FILE).write_text(json.dumps(record), encoding="utf-8")
+    (kept / quant.COHORT_FILE).write_bytes(b"other")
     with pytest.raises(ValueError, match="differs from the sha256"):
         quant.use(run, "kl")
+    assert (folder / f"{quant.BRANCH}.espdl").read_bytes() == b"graph", "a refused deploy copied a file"
     with pytest.raises(FileNotFoundError, match="keeps no deploy"):
         quant.use(run, "timing")
 

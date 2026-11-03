@@ -1007,11 +1007,12 @@ def use(run: Path, row: str) -> tuple[Path, Path]:
             f"{kept} was deployed on speaker hash {made}, contracts/speaker.yaml hashes 0x{speaker.HASH:08x}: "
             f"make speaker-deploy RUN={run} ROW={row}"
         )
-    target = update_lock.MODELS / BRANCH
-    target.mkdir(parents=True, exist_ok=True)
     for name, digest in record["files"].items():
         if update_lock.sha256(kept / name) != digest:
             raise ValueError(f"{kept / name} differs from the sha256 {KEPT_FILE} keeps")
+    target = update_lock.MODELS / BRANCH
+    target.mkdir(parents=True, exist_ok=True)
+    for name in record["files"]:
         shutil.copyfile(kept / name, target / name)
     files = [
         update_lock.Deployed(target / f"{BRANCH}.espdl", BRANCH, "espdl"),
