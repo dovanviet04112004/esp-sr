@@ -44,8 +44,9 @@ cao nhất 293‰; câu gần âm cao nhất 177‰; câu "vừng ơi" giọng c
    mọi câu "vừng ơi" hụt; đổi từ đánh thức hay model thì đo lại.
 2. **Giới hạn từ chối.** Mỗi lần thức cho tối đa `SVC_LISTEN_COMMAND_TRIES` (2) cửa sổ bị từ chối, rồi về `NGHE`. Chỉ
    quyết định của mạng `command` mới tính, `FRAME_GAP` và cửa sổ bỏ vì lỗi thì không. Thức lại đặt lại số đếm.
-3. **Từ chối vì người nói** để máy chờ tiếp và tính là một lần từ chối. `xac_task` bật một cờ `atomic_bool`, và
-   `nhan_task` mở lại `LENH` ở bước kế khi số lần từ chối còn cho phép.
+3. **Từ chối vì người nói** để máy chờ tiếp và tính là một lần từ chối. `xac_task` ghi thế hệ `LENH` của cửa sổ vào
+   một biến atomic, và `nhan_task` mở lại `LENH` ở bước kế khi thế hệ ấy là lần thức hiện tại và số lần từ chối còn
+   cho phép. Cửa sổ mở ở `NGHE`, như lúc đăng ký giọng, không mở `LENH`.
 4. **Đồng hồ chờ** chỉ tính lại khi có cửa sổ đã chốt chờ chấm, hay câu đang mở đã dài tới `utterance.min_s`.
 5. **Sửa cho đúng KẾ HOẠCH:**
    - `COMMAND` chỉ kết thúc `LENH` khi cửa sổ của nó mở sau lần thức gần nhất;
