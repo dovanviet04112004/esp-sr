@@ -20,12 +20,13 @@ endif
 else
 
 # Board B's CH340 stays with Windows, served to WSL over RFC 2217 by make board-attach (KEHOACH 2.1). It holds
-# 921600 baud, as pytest-embedded flashes; esptool left alone writes a partition at 115200, ~11 KB/s.
-BOARD_USB_ID ?= 1a86:7523
+# 921600 baud, as pytest-embedded flashes; esptool left alone writes a partition at 115200, ~11 KB/s. BOARD=C names
+# board C, reached the same way through its separate CP2102, at the baud it has been flashed at.
+BOARD_USB_ID ?= $(if $(filter C,$(BOARD)),10c4:ea60,1a86:7523)
 BRIDGE_HOST ?= $(shell ip route show default 2>/dev/null | awk '{print $$3; exit}')
 BRIDGE_TCP_PORT ?= 4011
 PORT ?= rfc2217://$(BRIDGE_HOST):$(BRIDGE_TCP_PORT)?ign_set_control
-FLASH_BAUD ?= 921600
+FLASH_BAUD ?= $(if $(filter C,$(BOARD)),460800,921600)
 # Every Python a goal on board B starts loads tools/board_link first: RFC 2217 read timeouts stay on this side.
 BOARD_GOALS := $(IDF_GOALS) wifi calib-write calib-shift
 $(BOARD_GOALS): export PYTHONPATH := $(CURDIR)/tools/board_link$(if $(PYTHONPATH),:$(PYTHONPATH))
@@ -42,11 +43,12 @@ ML_CPU := cd ml && CUDA_VISIBLE_DEVICES= uv run
 SDKCONFIG_BASE := sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.afe
 SECRETS := $(if $(wildcard firmware/sdkconfig.secrets),;sdkconfig.secrets)
 IDF_DEV = idf.py -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.dev$(SECRETS)"
-# MICS=1 builds the one-microphone board in a folder of its own, sdkconfig.mic1 last (ADR-0042, KEHOACH 4.5.8).
-BENCH_BUILD := build_bench$(if $(filter 1,$(MICS)),_mic1)
-MIC1 := $(if $(filter 1,$(MICS)),sdkconfig.mic1)
+# MICS=1 builds the one-microphone board in a folder of its own, sdkconfig.mic1 last (ADR-0042, KEHOACH 4.5.8);
+# BOARD=C builds board C the same way, sdkconfig.board_c last (KEHOACH 2.1).
+BENCH_BUILD := build_bench$(if $(filter 1,$(MICS)),_mic1)$(if $(filter C,$(BOARD)),_c)
+BENCH_LAYER := $(if $(filter C,$(BOARD)),sdkconfig.board_c,$(if $(filter 1,$(MICS)),sdkconfig.mic1))
 IDF_BENCH = idf.py -B $(BENCH_BUILD) -D SDKCONFIG=$(BENCH_BUILD)/sdkconfig \
-  -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.bench$(SECRETS)$(if $(MIC1),;$(MIC1))"
+  -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.bench$(SECRETS)$(if $(BENCH_LAYER),;$(BENCH_LAYER))"
 FW_DEFAULTS := firmware/sdkconfig.defaults firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.afe \
                firmware/CMakeLists.txt $(wildcard firmware/sdkconfig.secrets) \
                $(wildcard firmware/components/*/Kconfig) firmware/main/Kconfig.projbuild
@@ -473,9 +475,9 @@ fw-dev: ## Build the dev profile
 	@$(call fresh_sdkconfig,firmware/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.dev)
 	cd firmware && $(IDF_DEV) build
 
-fw-bench: ## Build the bench profile, the only one numbers are reported from [MICS=1: one microphone]
+fw-bench: ## Build the bench profile, the only one numbers are reported from [MICS=1: one microphone] [BOARD=C]
 	@$(call fresh_sdkconfig,firmware/$(BENCH_BUILD)/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.bench \
-	  $(addprefix firmware/,$(MIC1)))
+	  $(addprefix firmware/,$(BENCH_LAYER)))
 	cd firmware && $(IDF_BENCH) build
 
 # A test app leaves its own partition table on the board, so the product's goes back with the app, all in one esptool
@@ -554,11 +556,26 @@ storage-flash: fw-bench ## Write the bench build's LittleFS image, set.json amon
 
 # Models and storage go first, each write leaving the chip in its loader: the product's first boot finds its models and
 # keeps the NVS thresholds, and no test app left in ota_0 boots in between to write its own slots over models_0.
-product: ## Put the product back on board B after test apps: models, storage, then firmware, and show its boot [SPEAKER=b0|b3] [MICS=1]
+# Board C's serial lines reach no reset pin, so esptool waits for the owner to put the chip in its ROM loader. A stub left
+# running keeps the flash baud, so one esptool call writes everything (KEHOACH 2.1).
+LOADER_ATTEMPTS := 120
+product: ## Put the product back on board B after test apps: models, storage, then firmware, and show its boot [SPEAKER=b0|b3] [MICS=1] [BOARD=C]
 	$(if $(SPEAKER),$(MAKE) --no-print-directory speaker-use SPEAKER=$(SPEAKER))
+ifeq ($(BOARD),C)
+	$(MAKE) --no-print-directory fw-bench
+	$(ML) python -m srpipe.export.pack_models artifacts/models.bin --lock
+	@echo "hold the button, power-cycle the board, wait 2 s, release (KEHOACH 2.1)"
+	models=$$($(PRODUCT_PARTS) get_partition_info --partition-name models_0 --info offset); \
+	storage=$$($(PRODUCT_PARTS) get_partition_info --partition-name storage --info offset); \
+	cd firmware/$(BENCH_BUILD) && python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD) \
+	  --before no-reset --after watchdog-reset --connect-attempts $(LOADER_ATTEMPTS) \
+	  write-flash --skip-flashed $$(sed -n 1p flash_args) \
+	  $$(sed 1d flash_args | grep -v -e ota_data -e storage) $$models ../../ml/artifacts/models.bin $$storage storage.bin
+else
 	$(MAKE) --no-print-directory models-flash AFTER=no-reset
 	$(MAKE) --no-print-directory storage-flash AFTER=no-reset
 	$(MAKE) --no-print-directory fw-bench-flash
+endif
 	cd host && uv run python -m srhost.boot --port "$(PORT)"
 
 capture-flash: ## Flash test_apps/capture, the raw-only recorder (E5-T12)
