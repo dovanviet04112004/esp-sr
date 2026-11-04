@@ -442,6 +442,14 @@ esp_err_t net_mqtt_publish_detections(detections_t *found)
     return send_payload(detections_to_json(found), GEN_TOPIC_DETECTIONS, true);
 }
 
+esp_err_t net_mqtt_publish_sensors(sensors_t *report)
+{
+    if (report == NULL) { return ESP_ERR_INVALID_ARG; }
+    if (s_client == NULL || !s_connected) { return ESP_ERR_INVALID_STATE; }
+    strlcpy(report->device_id, s_device_id, sizeof(report->device_id));
+    return send_payload(sensors_to_json(report), GEN_TOPIC_SENSORS, false);
+}
+
 esp_err_t net_mqtt_publish_image(const uint8_t *chunk, size_t bytes)
 {
     if (chunk == NULL || bytes == 0) { return ESP_ERR_INVALID_ARG; }

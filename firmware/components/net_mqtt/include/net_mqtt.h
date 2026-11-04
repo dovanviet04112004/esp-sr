@@ -91,6 +91,12 @@ esp_err_t net_mqtt_publish_roster(speaker_roster_t *roster);
  */
 esp_err_t net_mqtt_publish_detections(detections_t *found);
 
+/** Queue one report of board C's peripherals for mqtt_task; deviceId is filled here.
+ *  @ctx do_task | non-blocking | caller keeps report
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session | ESP_ERR_NO_MEM arena full or the outbox refused it
+ */
+esp_err_t net_mqtt_publish_sensors(sensors_t *report);
+
 /** Queue one chunk of a picture on up/image, a header of contracts/vision.yaml and its data; only a full
  * outbox waits.
  *  @ctx nhin_task | blocking only while the outbox holds more than a picture | caller keeps chunk
