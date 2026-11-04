@@ -1,7 +1,7 @@
 """Watch the boards live: state, health, direction, voice flag, level, the speakers a board keeps, and events as they
 arrive with the speaker each command was checked against (KEHOACH 3.17, 4.6, 7.7).
 
-On a terminal the screen is redrawn several times a second; piped, one line is printed per message.
+On a terminal each frame is written over the last, cropped to the window; piped, one line is printed per message.
 Board C's pictures and detect's boxes land under the data root as they arrive (srhost.vision).
 Run: uv run python -m srhost.live [--device <deviceId>] [--jsonl <file>]
 """
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import sys
 import threading
 import time
@@ -35,6 +36,10 @@ E7 = 1e7
 E1 = 10
 MG_PER_G = 1000
 CLEAR = "\x1b[H\x1b[2J"
+HOME = "\x1b[H"
+ERASE_LINE = "\x1b[K"
+ERASE_BELOW = "\x1b[J"
+OFFLINE = "OFFLINE"
 
 
 @dataclass
@@ -204,6 +209,9 @@ class View:
             lines: list[str] = []
             for device, board in sorted(self._boards.items()):
                 status = board.status or {}
+                if status.get("state") == OFFLINE:
+                    lines.append(f"{device}  {OFFLINE}  fw {status.get('fw', '?')}")
+                    continue
                 lines.append(
                     f"{device}  {status.get('state', '?')}  fw {status.get('fw', '?')}"
                     f"  seen {now_monotonic - board.seen_monotonic:.0f} s ago"
@@ -229,6 +237,12 @@ class View:
         with self._lock:
             board = self._boards.get(device) if device else None
             return roster_names(board.roster if board else None)
+
+
+def frame_of(lines: list[str], columns: int, rows: int) -> str:
+    """One frame to write over the last, cropped so it neither wraps nor scrolls; clearing first would flicker."""
+    body = "".join(f"{line[: columns - 1]}{ERASE_LINE}\n" for line in lines[: rows - 1])
+    return f"{HOME}{body}{ERASE_BELOW}"
 
 
 def one_line(message: Message, names: dict[str, str] | None = None) -> str:
@@ -278,12 +292,19 @@ def main(argv: list[str] | None = None) -> int:
 
     receiver = Receiver(cfg, on_message, args.device)
     receiver.start()
+    shown = ""
+    if redraw:
+        print(CLEAR, end="", flush=True)
     try:
         while True:
             if redraw:
                 link = "connected" if receiver.connected.is_set() else "connecting"
                 header = f"broker {cfg.host}:{cfg.port} {link}  (Ctrl-C quits)"
-                print(CLEAR + "\n".join([header, "", *view.render()]), flush=True)
+                size = shutil.get_terminal_size()
+                frame = frame_of([header, "", *view.render()], size.columns, size.lines)
+                if frame != shown:
+                    print(frame, end="", flush=True)
+                    shown = frame
             time.sleep(REFRESH_S)
     except KeyboardInterrupt:
         pass

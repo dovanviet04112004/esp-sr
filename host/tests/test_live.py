@@ -49,6 +49,20 @@ def test_a_device_left_out_of_the_report_leaves_its_part_out_of_the_line() -> No
     assert live.describe_sensors(report) == "gps 21.02850 105.85420, 7 satellites  ir ON, 4 hits"
 
 
+def test_an_offline_board_takes_one_line_whatever_it_left_behind() -> None:
+    view = live.View()
+    view.update(message("status", {"deviceId": DEVICE, "state": "OFFLINE", "fw": "0.1.0"}))
+    view.update(message("speakers", {"deviceId": DEVICE, "version": 1, "check": False, "speakers": []}))
+    assert view.render() == [f"{DEVICE}  OFFLINE  fw 0.1.0"]
+
+
+def test_a_frame_stays_inside_the_window_and_never_clears_it() -> None:
+    frame = live.frame_of(["a" * 50, "b", "c", "d"], columns=11, rows=4)
+    rows = "".join(f"{row}{live.ERASE_LINE}\n" for row in ("a" * 10, "b", "c"))
+    assert frame == f"{live.HOME}{rows}{live.ERASE_BELOW}"
+    assert live.CLEAR not in frame
+
+
 def test_each_kind_lands_on_its_line() -> None:
     view = live.View()
     view.update(message("status", {"deviceId": DEVICE, "state": "ONLINE", "fw": "0.1.0+8f3fa79"}))
