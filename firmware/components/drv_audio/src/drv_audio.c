@@ -110,8 +110,8 @@ uint8_t drv_audio_channels(void)
     return s_channels;
 }
 
-// One TX hop per RX hop on the shared clock: the delay from here to the microphone stays constant, which
-// is what aec's bulk delay stands on, and the ref channel is exactly what went out (KEHOACH 3.5).
+// One TX hop per RX hop on the shared clock keeps the delay constant. The ref channel carries a hop as it is
+// written, so the reference always comes ahead of its echo: aec's filter can only look back (KEHOACH 3.5).
 static void play_next_hop(int16_t *interleaved)
 {
     const uint32_t out = atomic_load(&s_tx_out);
