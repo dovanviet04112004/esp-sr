@@ -9,19 +9,20 @@ namespace ai {
 
 namespace {
 
-constexpr size_t kLoanAlignBytes = 16; // the ops' vector loads
+constexpr size_t kVectorLoadAlignBytes = 16;
 constexpr uint32_t kLoanCaps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-constexpr size_t kAllocSlackBytes = 64; // aligned_alloc's block header and padding
+constexpr size_t kAlignedAllocSlackBytes = 64;
 
-Loan s_loan = {nullptr, 0};
+// Per task: graphs of different tasks interleave on one core, and a run must see only its own loan.
+thread_local Loan s_loan = {nullptr, 0};
 size_t s_asked = 0;
 
 size_t lendable_bytes(size_t asked)
 {
     // The reserve stays free for the other tasks' allocations while the graph runs (KEHOACH 6.5).
-    const size_t kept = CONFIG_AI_ENGINE_LOAN_RESERVE_BYTES + kAllocSlackBytes;
+    const size_t kept = CONFIG_AI_ENGINE_LOAN_RESERVE_BYTES + kAlignedAllocSlackBytes;
     const size_t largest = heap_caps_get_largest_free_block(kLoanCaps);
-    return largest > kept ? std::min(asked, largest - kept) & ~(kLoanAlignBytes - 1) : 0;
+    return largest > kept ? std::min(asked, largest - kept) & ~(kVectorLoadAlignBytes - 1) : 0;
 }
 
 } // namespace
@@ -50,7 +51,7 @@ WeightLoan::WeightLoan(size_t bytes) noexcept
         return;
     }
     const size_t lent = lendable_bytes(bytes);
-    mem_ = lent > 0 ? heap_caps_aligned_alloc(kLoanAlignBytes, lent, kLoanCaps) : nullptr;
+    mem_ = lent > 0 ? heap_caps_aligned_alloc(kVectorLoadAlignBytes, lent, kLoanCaps) : nullptr;
     lent_ = mem_ != nullptr ? lent : 0;
     granted_ = lent_ == bytes;
     if (mem_ != nullptr) { s_loan = {static_cast<int8_t *>(mem_), lent_}; }

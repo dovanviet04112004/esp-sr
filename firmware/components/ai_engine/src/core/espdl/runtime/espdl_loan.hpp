@@ -1,6 +1,6 @@
 /** Internal RAM ai_engine's own ops borrow for their weights while a graph runs (KEHOACH 6.5, ADR-0025): ops
  * ask as they are built, and EspdlNet lends the largest ask over each run.
- *  @ctx task | the task that builds and runs the graph; one graph runs on a loan at a time
+ *  @ctx task | the task that builds and runs the graph; each task's run has its own loan
  */
 #pragma once
 
@@ -25,14 +25,14 @@ void loan_ask(size_t bytes) noexcept;
  */
 size_t loan_take_asked() noexcept;
 
-/** The internal RAM lent to the run under way.
- *  @ctx task | non-blocking | an op's forward
+/** The internal RAM lent to the calling task's run under way.
+ *  @ctx task | non-blocking | an op's forward, on the task running the graph
  */
 Loan loan_lent() noexcept;
 
 /** Internal RAM lent to the ops while this lives: the largest free block less the reserve, at most the bytes
  * loan_take_asked gave; each op uses what fits and reads the rest in place.
- *  @ctx task | allocates, non-blocking | the task running the graph, around a run; one loan at a time
+ *  @ctx task | allocates, non-blocking | the task running the graph, around a run; one loan per task
  */
 class WeightLoan {
   public:
