@@ -30,6 +30,7 @@
 #include "svc_front.h"
 #include "svc_listen.h"
 #include "svc_report.h"
+#include "svc_sensors.h"
 #include "svc_speak.h"
 #include "svc_vision.h"
 #include "sys_storage.h"
@@ -48,6 +49,7 @@
 #define LUONG_STACK_BYTES 4096
 #define PHU_STACK_BYTES 4096
 #define NHIN_STACK_BYTES 16384
+#define DO_STACK_BYTES 4096
 
 #define THU_PRIORITY 17
 #define SACH_PRIORITY 16
@@ -60,7 +62,8 @@
 #define NET_PRIORITY 3
 #define LUONG_PRIORITY 3
 #define NHIN_PRIORITY 1 // under every speech task: a picture waits (KEHOACH 3.18)
-#define PHU_PRIORITY 1  // core 1's idle time, under thu and sach (KEHOACH 5.1)
+#define DO_PRIORITY 2
+#define PHU_PRIORITY 1 // core 1's idle time, under thu and sach (KEHOACH 5.1)
 _Static_assert(APP_DETECT_PRIORITY > NHAN_PRIORITY, "detect runs above the listener (KEHOACH 3.18)");
 
 #define DMA_WAIT_MS (2 * GEN_GRID_HOP_US / 1000)
@@ -473,6 +476,20 @@ static void nhin_task(void *arg)
 }
 #endif
 
+#if CONFIG_APP_SENSORS_ENABLE
+static void do_task(void *arg)
+{
+    (void)arg;
+    ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
+    TickType_t wake = xTaskGetTickCount();
+    for (;;) {
+        svc_sensors_step();
+        esp_task_wdt_reset();
+        vTaskDelayUntil(&wake, pdMS_TO_TICKS(GEN_VISION_SENSORS_PERIOD_MS));
+    }
+}
+#endif
+
 #if CONFIG_NET_STREAM_ENABLE
 static void luong_task(void *arg)
 {
@@ -652,6 +669,9 @@ static StackType_t s_phu_stack[PHU_STACK_BYTES] __attribute__((aligned(portBYTE_
 static EXT_RAM_BSS_ATTR StackType_t s_nhin_stack[NHIN_STACK_BYTES]
     __attribute__((aligned(portBYTE_ALIGNMENT)));
 #endif
+#if CONFIG_APP_SENSORS_ENABLE
+static EXT_RAM_BSS_ATTR StackType_t s_do_stack[DO_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
+#endif
 
 static const task_spec_t kTasks[] = {
     {thu_task, "thu_task", s_thu_stack, THU_STACK_BYTES, THU_PRIORITY, CORE_FRAME},
@@ -672,6 +692,9 @@ static const task_spec_t kTasks[] = {
     {net_task, "net_task", s_net_stack, NET_STACK_BYTES, NET_PRIORITY, CORE_BUFFERED},
 #if CONFIG_APP_CAMERA_ENABLE
     {nhin_task, "nhin_task", s_nhin_stack, NHIN_STACK_BYTES, NHIN_PRIORITY, CORE_BUFFERED},
+#endif
+#if CONFIG_APP_SENSORS_ENABLE
+    {do_task, "do_task", s_do_stack, DO_STACK_BYTES, DO_PRIORITY, CORE_BUFFERED},
 #endif
 };
 

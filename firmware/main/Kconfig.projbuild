@@ -28,6 +28,15 @@ menu "esp-sr application"
             Board C's image path (KEHOACH 3.19). Off means drv_camera, drv_sd
             and svc_vision build empty and nhin_task is never created.
 
+    config APP_SENSORS_ENABLE
+        bool "GPS, infrared and the I2C devices"
+        depends on APP_BOARD_C
+        default y
+        help
+            Board C's other peripherals (KEHOACH 3.19). Off means drv_gps,
+            drv_ir, drv_i2c and svc_sensors leave the build and do_task is
+            never created.
+
     config APP_SPEAKER_ENABLE
         bool "Speaker fitted: open I2S TX and run noi_task"
         default n

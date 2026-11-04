@@ -11,6 +11,7 @@
 #include "app_wiring.h"
 #include "argtable3/argtable3.h"
 #include "drv_camera.h"
+#include "drv_i2c.h"
 #include "esp_check.h"
 #include "esp_console.h"
 #include "esp_heap_caps.h"
@@ -28,6 +29,9 @@
 #define CMDLINE_BYTES 256
 #define VALUE_BYTES 192
 #define PROMPT "sr> "
+#define I2C_ADDRESS_FIRST 0x08
+#define I2C_ADDRESS_LAST 0x77
+#define I2C_DUMP_BYTES_MAX 64
 #define SSID_MAX_BYTES sizeof(((wifi_sta_config_t *)NULL)->ssid)
 #define PASS_MAX_BYTES (sizeof(((wifi_sta_config_t *)NULL)->password) - 1)
 #define PASS_MIN_BYTES 8 // WPA2 passphrase, IEEE 802.11i
@@ -456,6 +460,70 @@ static esp_err_t register_tone(void)
 }
 #endif
 
+#if CONFIG_APP_SENSORS_ENABLE
+static struct {
+    struct arg_int *address;
+    struct arg_int *reg;
+    struct arg_int *count;
+    struct arg_end *end;
+} s_i2c_args;
+
+static void i2c_scan(void)
+{
+    for (uint8_t address = I2C_ADDRESS_FIRST; address <= I2C_ADDRESS_LAST; address++) {
+        if (drv_i2c_present(address)) { printf("i2c found 0x%02X\n", address); }
+    }
+    printf("i2c scan done\n");
+}
+
+static int i2c_cmd(int argc, char **argv)
+{
+    if (arg_parse(argc, argv, (void **)&s_i2c_args) != 0) {
+        arg_print_errors(stdout, s_i2c_args.end, argv[0]);
+        return 1;
+    }
+    const int address = s_i2c_args.address->ival[0];
+    if (address == 0) {
+        i2c_scan();
+        return 0;
+    }
+    const int reg = s_i2c_args.reg->count > 0 ? s_i2c_args.reg->ival[0] : -1;
+    const int count = s_i2c_args.count->count > 0 ? s_i2c_args.count->ival[0] : 1;
+    if (address > I2C_ADDRESS_LAST || reg > UINT8_MAX || count < 1 || count > I2C_DUMP_BYTES_MAX) {
+        printf("i2c: address 1..0x77, register up to 0xFF or -1 for none, 1..%d bytes\n", I2C_DUMP_BYTES_MAX);
+        return 1;
+    }
+    const uint8_t command = (uint8_t)reg;
+    uint8_t data[I2C_DUMP_BYTES_MAX];
+    const esp_err_t err = drv_i2c_read((uint8_t)address, &command, reg < 0 ? 0 : 1, data, (size_t)count);
+    if (err != ESP_OK) {
+        printf("i2c 0x%02X: %s\n", address, esp_err_to_name(err));
+        return 1;
+    }
+    printf("i2c 0x%02X reg %d:", address, reg);
+    for (int i = 0; i < count; i++) {
+        printf(" %02X", data[i]);
+    }
+    printf("\n");
+    return 0;
+}
+
+static esp_err_t register_i2c(void)
+{
+    s_i2c_args.address = arg_int1(NULL, NULL, "<address>", "7-bit address, 0 scans the bus");
+    s_i2c_args.reg = arg_int0(NULL, NULL, "<register>", "written ahead of the read, -1 sends none");
+    s_i2c_args.count = arg_int0(NULL, NULL, "<bytes>", "how many to read");
+    s_i2c_args.end = arg_end(3);
+    const esp_console_cmd_t i2c = {
+        .command = "i2c",
+        .help = "Scan the I2C bus or read a device's registers (KEHOACH 3.19)",
+        .func = i2c_cmd,
+        .argtable = &s_i2c_args,
+    };
+    return esp_console_cmd_register(&i2c);
+}
+#endif
+
 #if CONFIG_APP_CAMERA_ENABLE
 static struct {
     struct arg_str *action;
@@ -561,6 +629,9 @@ static esp_err_t register_commands(void)
 #endif
 #if CONFIG_APP_SPEAKER_ENABLE
     ESP_RETURN_ON_ERROR(register_tone(), TAG, "tone");
+#endif
+#if CONFIG_APP_SENSORS_ENABLE
+    ESP_RETURN_ON_ERROR(register_i2c(), TAG, "i2c");
 #endif
     return register_stream();
 }

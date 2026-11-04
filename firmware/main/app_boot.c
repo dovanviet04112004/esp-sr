@@ -25,6 +25,7 @@
 #include "storage_format.h"
 #include "svc_listen.h"
 #include "svc_report.h"
+#include "svc_sensors.h"
 #include "svc_speak.h"
 #include "svc_vision.h"
 #include "sys_storage.h"
@@ -333,6 +334,11 @@ esp_err_t app_boot(void)
     log_heap("listen");
 #if CONFIG_APP_CAMERA_ENABLE
     start_vision();
+#endif
+#if CONFIG_APP_SENSORS_ENABLE
+    const svc_sensors_config_t sensors = {.boot = sys_storage_boot_count()};
+    svc_sensors_init(&sensors);
+    log_heap("sensors");
 #endif
 #if CONFIG_NET_STREAM_ENABLE
     const svc_report_stream_config_t stream = {.sb = app_wiring()->stream,
