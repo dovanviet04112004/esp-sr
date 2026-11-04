@@ -836,6 +836,8 @@ def gen_vision_h(v: dict) -> str:
     out.append(f"#define GEN_VISION_STILL_FRAMES {camera['still_frames']}")
     out.append(f"#define GEN_VISION_FOCUS_TIMEOUT_MS {camera['focus_timeout_ms']}")
     out.append(f"#define GEN_VISION_PREVIEW_HOLD_MS {camera['preview_hold_ms']}")
+    out.append(f"#define GEN_VISION_VFLIP {camera['vflip']}")
+    out.append(f"#define GEN_VISION_TURN_DEG {camera['turn_deg']}")
     out.append(f"#define GEN_VISION_DECODE_SCALE {detect['decode_scale']}")
     out.append(f"#define GEN_VISION_BOXES_MAX {detect['boxes_max']}")
     out.append(f'#define GEN_VISION_CHUNK_MAGIC 0x{v["magic_u32"]:08x}u // "{chunk["magic"]}" little-endian')

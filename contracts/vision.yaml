@@ -15,6 +15,8 @@ camera:
   still_frames: 3
   focus_timeout_ms: 3000
   preview_hold_ms: 5000
+  vflip: 1
+  turn_deg: 90
 detect:
   decode_scale: 2
   boxes_max: 32
