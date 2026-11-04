@@ -20,6 +20,10 @@ camera:
 detect:
   decode_scale: 2
   boxes_max: 32
+sensors:
+  period_ms: 1000
+  report_s: 10
+  ir_release_ms: 300 # the output chatters at milliseconds: quiet this long ends a hit
 chunk:
   magic: SRIM
   payload_bytes: 16384

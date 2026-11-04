@@ -1252,6 +1252,338 @@ static inline cJSON *responses_to_json(const responses_t *in)
 }
 
 typedef struct {
+    bool has_fix;
+    int32_t lat_e7;
+    int32_t lon_e7;
+    uint8_t satellites;
+    uint8_t in_view;
+    bool antenna_open;
+} sensors_gps_t;
+
+/** Fill out from a parsed sensors_gps object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool sensors_gps_from_json(const cJSON *root, sensors_gps_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "hasFix");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsBool(item)) { return false; }
+        out->has_fix = cJSON_IsTrue(item);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "latE7");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < -900000000.0 || item->valuedouble > 900000000.0) { return false; }
+        out->lat_e7 = (int32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "lonE7");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < -1800000000.0 || item->valuedouble > 1800000000.0) { return false; }
+        out->lon_e7 = (int32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "satellites");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 255.0) { return false; }
+        out->satellites = (uint8_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "inView");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 255.0) { return false; }
+        out->in_view = (uint8_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "antennaOpen");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsBool(item)) { return false; }
+        out->antenna_open = cJSON_IsTrue(item);
+    }
+    return true;
+}
+
+/** Build the JSON object of one sensors_gps for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *sensors_gps_to_json(const sensors_gps_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddBoolToObject(root, "hasFix", in->has_fix);
+    cJSON_AddNumberToObject(root, "latE7", (double) in->lat_e7);
+    cJSON_AddNumberToObject(root, "lonE7", (double) in->lon_e7);
+    cJSON_AddNumberToObject(root, "satellites", (double) in->satellites);
+    cJSON_AddNumberToObject(root, "inView", (double) in->in_view);
+    cJSON_AddBoolToObject(root, "antennaOpen", in->antenna_open);
+    return root;
+}
+
+typedef struct {
+    bool active;
+    uint32_t hits;
+} sensors_ir_t;
+
+/** Fill out from a parsed sensors_ir object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool sensors_ir_from_json(const cJSON *root, sensors_ir_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "active");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsBool(item)) { return false; }
+        out->active = cJSON_IsTrue(item);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "hits");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->hits = (uint32_t) item->valuedouble;
+    }
+    return true;
+}
+
+/** Build the JSON object of one sensors_ir for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *sensors_ir_to_json(const sensors_ir_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddBoolToObject(root, "active", in->active);
+    cJSON_AddNumberToObject(root, "hits", (double) in->hits);
+    return root;
+}
+
+typedef struct {
+    int16_t accel_mg[3];
+    uint8_t accel_mg_count;
+    int16_t gyro_dps_e1[3];
+    uint8_t gyro_dps_e1_count;
+    int16_t temp_ce1;
+} sensors_motion_t;
+
+/** Fill out from a parsed sensors_motion object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool sensors_motion_from_json(const cJSON *root, sensors_motion_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "accelMg");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > 3) { return false; }
+        if (cJSON_GetArraySize(item) < 3) { return false; }
+        const cJSON *el = NULL;
+        cJSON_ArrayForEach(el, item) {
+            if (!cJSON_IsNumber(el)) { return false; }
+            if (el->valuedouble < -32768.0 || el->valuedouble > 32767.0) { return false; }
+            out->accel_mg[out->accel_mg_count] = (int16_t) el->valuedouble;
+            out->accel_mg_count++;
+        }
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "gyroDpsE1");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > 3) { return false; }
+        if (cJSON_GetArraySize(item) < 3) { return false; }
+        const cJSON *el = NULL;
+        cJSON_ArrayForEach(el, item) {
+            if (!cJSON_IsNumber(el)) { return false; }
+            if (el->valuedouble < -32768.0 || el->valuedouble > 32767.0) { return false; }
+            out->gyro_dps_e1[out->gyro_dps_e1_count] = (int16_t) el->valuedouble;
+            out->gyro_dps_e1_count++;
+        }
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "tempCE1");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < -32768.0 || item->valuedouble > 32767.0) { return false; }
+        out->temp_ce1 = (int16_t) item->valuedouble;
+    }
+    return true;
+}
+
+/** Build the JSON object of one sensors_motion for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *sensors_motion_to_json(const sensors_motion_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON *accel_mg_arr = cJSON_AddArrayToObject(root, "accelMg");
+    for (int i = 0; accel_mg_arr != NULL && i < in->accel_mg_count; i++) {
+        cJSON_AddItemToArray(accel_mg_arr, cJSON_CreateNumber((double) in->accel_mg[i]));
+    }
+    cJSON *gyro_dps_e1_arr = cJSON_AddArrayToObject(root, "gyroDpsE1");
+    for (int i = 0; gyro_dps_e1_arr != NULL && i < in->gyro_dps_e1_count; i++) {
+        cJSON_AddItemToArray(gyro_dps_e1_arr, cJSON_CreateNumber((double) in->gyro_dps_e1[i]));
+    }
+    cJSON_AddNumberToObject(root, "tempCE1", (double) in->temp_ce1);
+    return root;
+}
+
+typedef struct {
+    int16_t channels_mv[4];
+    uint8_t channels_mv_count;
+} sensors_adc_t;
+
+/** Fill out from a parsed sensors_adc object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool sensors_adc_from_json(const cJSON *root, sensors_adc_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "channelsMv");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > 4) { return false; }
+        if (cJSON_GetArraySize(item) < 4) { return false; }
+        const cJSON *el = NULL;
+        cJSON_ArrayForEach(el, item) {
+            if (!cJSON_IsNumber(el)) { return false; }
+            if (el->valuedouble < -32768.0 || el->valuedouble > 32767.0) { return false; }
+            out->channels_mv[out->channels_mv_count] = (int16_t) el->valuedouble;
+            out->channels_mv_count++;
+        }
+    }
+    return true;
+}
+
+/** Build the JSON object of one sensors_adc for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *sensors_adc_to_json(const sensors_adc_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON *channels_mv_arr = cJSON_AddArrayToObject(root, "channelsMv");
+    for (int i = 0; channels_mv_arr != NULL && i < in->channels_mv_count; i++) {
+        cJSON_AddItemToArray(channels_mv_arr, cJSON_CreateNumber((double) in->channels_mv[i]));
+    }
+    return root;
+}
+
+typedef struct {
+    char device_id[33];
+    uint32_t boot;
+    uint32_t uptime_s;
+    sensors_gps_t gps;
+    sensors_ir_t ir;
+    sensors_motion_t motion;
+    sensors_adc_t adc;
+    bool has_motion;
+    bool has_adc;
+} sensors_t;
+
+/** Fill out from a parsed sensors object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool sensors_from_json(const cJSON *root, sensors_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "deviceId");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->device_id)) { return false; }
+        strcpy(out->device_id, item->valuestring);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "boot");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->boot = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "uptimeS");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->uptime_s = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "gps");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!sensors_gps_from_json(item, &out->gps)) { return false; }
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "ir");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!sensors_ir_from_json(item, &out->ir)) { return false; }
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "motion");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!sensors_motion_from_json(item, &out->motion)) { return false; }
+        out->has_motion = true;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "adc");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!sensors_adc_from_json(item, &out->adc)) { return false; }
+        out->has_adc = true;
+    }
+    return true;
+}
+
+/** Build the JSON object of one sensors for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *sensors_to_json(const sensors_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddStringToObject(root, "deviceId", in->device_id);
+    cJSON_AddNumberToObject(root, "boot", (double) in->boot);
+    cJSON_AddNumberToObject(root, "uptimeS", (double) in->uptime_s);
+    cJSON_AddItemToObject(root, "gps", sensors_gps_to_json(&in->gps));
+    cJSON_AddItemToObject(root, "ir", sensors_ir_to_json(&in->ir));
+    if (in->has_motion) {
+        cJSON_AddItemToObject(root, "motion", sensors_motion_to_json(&in->motion));
+    }
+    if (in->has_adc) {
+        cJSON_AddItemToObject(root, "adc", sensors_adc_to_json(&in->adc));
+    }
+    return root;
+}
+
+typedef struct {
     char id[8];
     char name[125];
     bool enrolled;

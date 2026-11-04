@@ -126,6 +126,45 @@ class Responses(TypedDict):
 
 
 
+class SensorsGps(TypedDict):
+    hasFix: bool
+    latE7: int
+    lonE7: int
+    satellites: int
+    inView: int
+    antennaOpen: bool
+
+
+
+class SensorsIr(TypedDict):
+    active: bool
+    hits: int
+
+
+
+class SensorsMotion(TypedDict):
+    accelMg: list[int]
+    gyroDpsE1: list[int]
+    tempCE1: int
+
+
+
+class SensorsAdc(TypedDict):
+    channelsMv: list[int]
+
+
+
+class Sensors(TypedDict):
+    deviceId: str
+    boot: int
+    uptimeS: int
+    gps: SensorsGps
+    ir: SensorsIr
+    motion: NotRequired[SensorsMotion]
+    adc: NotRequired[SensorsAdc]
+
+
+
 class SpeakerRosterSpeakersItem(TypedDict):
     id: str
     name: str
@@ -368,6 +407,59 @@ SCHEMAS: dict[str, dict] = {
                                                            'text': {'type': 'string',
                                                                     'minLength': 1,
                                                                     'maxLength': 128}}}}}},
+    'sensors': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+     '$id': 'sr/sensors',
+     'title': 'sensors',
+     'description': "Board C's peripherals beside the camera. A device that failed at boot leaves its object out.",
+     'type': 'object',
+     'additionalProperties': False,
+     'required': ['deviceId', 'boot', 'uptimeS', 'gps', 'ir'],
+     'properties': {'deviceId': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{4,32}$', 'maxLength': 32},
+                    'boot': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'uptimeS': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'gps': {'type': 'object',
+                            'additionalProperties': False,
+                            'required': ['hasFix', 'latE7', 'lonE7', 'satellites', 'inView', 'antennaOpen'],
+                            'properties': {'hasFix': {'type': 'boolean'},
+                                           'latE7': {'type': 'integer',
+                                                     'minimum': -900000000,
+                                                     'maximum': 900000000},
+                                           'lonE7': {'type': 'integer',
+                                                     'minimum': -1800000000,
+                                                     'maximum': 1800000000},
+                                           'satellites': {'type': 'integer', 'minimum': 0, 'maximum': 255},
+                                           'inView': {'type': 'integer', 'minimum': 0, 'maximum': 255},
+                                           'antennaOpen': {'type': 'boolean'}}},
+                    'ir': {'type': 'object',
+                           'additionalProperties': False,
+                           'required': ['active', 'hits'],
+                           'properties': {'active': {'type': 'boolean'},
+                                          'hits': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295}}},
+                    'motion': {'type': 'object',
+                               'additionalProperties': False,
+                               'required': ['accelMg', 'gyroDpsE1', 'tempCE1'],
+                               'properties': {'accelMg': {'type': 'array',
+                                                          'minItems': 3,
+                                                          'maxItems': 3,
+                                                          'items': {'type': 'integer',
+                                                                    'minimum': -32768,
+                                                                    'maximum': 32767}},
+                                              'gyroDpsE1': {'type': 'array',
+                                                            'minItems': 3,
+                                                            'maxItems': 3,
+                                                            'items': {'type': 'integer',
+                                                                      'minimum': -32768,
+                                                                      'maximum': 32767}},
+                                              'tempCE1': {'type': 'integer', 'minimum': -32768, 'maximum': 32767}}},
+                    'adc': {'type': 'object',
+                            'additionalProperties': False,
+                            'required': ['channelsMv'],
+                            'properties': {'channelsMv': {'type': 'array',
+                                                          'minItems': 4,
+                                                          'maxItems': 4,
+                                                          'items': {'type': 'integer',
+                                                                    'minimum': -32768,
+                                                                    'maximum': 32767}}}}}},
     'speaker_roster': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
      '$id': 'sr/speaker_roster',
      'title': 'speaker_roster',
