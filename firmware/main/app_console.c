@@ -14,6 +14,7 @@
 #include "esp_console.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_wifi_types.h"
 #include "sdkconfig.h"
 #include "svc_report.h"
@@ -414,8 +415,22 @@ static int spk_cmd(int argc, char **argv)
     return sent ? 0 : 1;
 }
 
+// Board C's serial lines reach no reset pin, so this is the PC's only way to restart it (KEHOACH 2.1).
+static int restart_cmd(int argc, char **argv)
+{
+    esp_restart();
+    return 0;
+}
+
 static esp_err_t register_commands(void)
 {
+    const esp_console_cmd_t restart = {
+        .command = "restart",
+        .help = "Restart the chip",
+        .func = restart_cmd,
+    };
+    ESP_RETURN_ON_ERROR(esp_console_cmd_register(&restart), TAG, "restart");
+
     s_wifi_args.action = arg_str1(NULL, NULL, "set", "the only action");
     s_wifi_args.ssid = arg_str1(NULL, NULL, "<ssid>", "network name");
     s_wifi_args.pass = arg_str0(NULL, NULL, "<pass>", "password; leave out for an open network");
