@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import zlib
 from pathlib import Path
 
@@ -106,10 +107,13 @@ def test_boxes_land_beside_their_picture_and_read_as_one_line(tmp_path: Path) ->
 
 def test_the_live_feed_serves_the_newest_picture_and_counts_them() -> None:
     feed = vision.LiveFeed()
-    feed.take(b"first", at_s=10.0)
-    feed.take(b"second one", at_s=10.5)
+    now_s = time.monotonic()
+    feed.take(b"first", at_s=now_s - 3.5)
+    feed.take(b"second one", at_s=now_s - 3.0)
     assert feed.jpeg() == b"second one"
-    assert feed.state() == {"serial": 2, "fps": 2.0}
+    state = feed.state()
+    assert (state["serial"], state["fps"]) == (2, 2.0)
+    assert state["ageS"] >= 3.0
 
 
 def test_a_preview_frame_reaches_the_page_and_no_file(tmp_path: Path) -> None:

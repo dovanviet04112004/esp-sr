@@ -33,6 +33,7 @@ LIVE_PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Board C live</title><style>
 body { margin: 0; background: #111; color: #eee; font: 16px system-ui, sans-serif; text-align: center; }
 #bar { padding: 10px; font-size: 26px; } button { font-size: 16px; margin-left: 16px; padding: 4px 12px; }
+.lost { background: #b00; }
 #view { height: calc(100vh - 66px); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 img { max-width: 100vh; max-height: 100vw; }
 </style></head><body>
@@ -68,6 +69,9 @@ frame.onload = () => {
 };
 setInterval(async () => {
   const state = await (await fetch("/state")).json();
+  const lost = state.ageS > 2;
+  document.getElementById("bar").className = lost ? "lost" : "";
+  if (lost) now.textContent = "NO SIGNAL for " + Math.round(state.ageS) + " s: this picture is old";
   if (state.serial === serial) return;
   serial = state.serial;
   fps = state.fps;
@@ -193,7 +197,8 @@ class LiveFeed:
         with self._lock:
             span_s = self._arrivals[-1] - self._arrivals[0] if len(self._arrivals) > 1 else 0.0
             fps = (len(self._arrivals) - 1) / span_s if span_s > 0 else 0.0
-            return {"serial": self._serial, "fps": fps}
+            age_s = time.monotonic() - self._arrivals[-1] if self._arrivals else 0.0
+            return {"serial": self._serial, "fps": fps, "ageS": age_s}
 
 
 def live_handler(feed: LiveFeed) -> type[BaseHTTPRequestHandler]:
