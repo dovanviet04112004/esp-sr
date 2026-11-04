@@ -27,6 +27,8 @@
 #define RGB_BYTES_PER_PIXEL 3
 #define DECODED_WIDTH (GEN_VISION_WIDTH / GEN_VISION_DECODE_SCALE)
 #define DECODED_HEIGHT (GEN_VISION_HEIGHT / GEN_VISION_DECODE_SCALE)
+#define UPRIGHT_WIDTH DECODED_HEIGHT
+#define UPRIGHT_HEIGHT DECODED_WIDTH
 #define RGB_BYTES (DECODED_WIDTH * DECODED_HEIGHT * RGB_BYTES_PER_PIXEL)
 #define RGB_ALIGN_BYTES 16 // jpeg_dec_process's output
 #define SCALE_STEP_PIXELS 8
@@ -35,6 +37,12 @@
 
 _Static_assert(DECODED_WIDTH % SCALE_STEP_PIXELS == 0 && DECODED_HEIGHT % SCALE_STEP_PIXELS == 0,
                "esp_new_jpeg scales to multiples of 8");
+_Static_assert(GEN_VISION_TURN_DEG == 90, "decode_picture and kExifTurn say a quarter turn clockwise");
+
+// APP1 with one EXIF tag, Orientation 6: viewers stand the file up, no recompression (KEHOACH 3.19).
+static const uint8_t kExifTurn[] = {0xFF, 0xE1, 0x00, 0x22, 'E', 'x', 'i', 'f', 0,    0,    'I', 'I',
+                                    0x2A, 0,    8,    0,    0,   0,   1,   0,   0x12, 0x01, 3,   0,
+                                    1,    0,    0,    0,    6,   0,   0,   0,   0,    0,    0,   0};
 
 static const char *TAG = "svc_vision";
 
@@ -115,6 +123,7 @@ static esp_err_t decode_picture(const drv_camera_frame_t *frame)
     cfg.output_type = JPEG_PIXEL_FORMAT_RGB888;
     cfg.scale.width = DECODED_WIDTH;
     cfg.scale.height = DECODED_HEIGHT;
+    cfg.rotate = JPEG_ROTATE_90D;
     jpeg_dec_handle_t decoder = NULL;
     if (jpeg_dec_open(&cfg, &decoder) != JPEG_ERR_OK) { return ESP_ERR_NO_MEM; }
     jpeg_dec_io_t io = {.inbuf = (uint8_t *)frame->jpeg, .inbuf_len = (int)frame->bytes, .outbuf = s_rgb};
@@ -135,8 +144,8 @@ static esp_err_t report_boxes(uint32_t seq, size_t found, uint32_t detect_ms)
     memset(s_found, 0, sizeof(*s_found));
     s_found->boot = s_cfg.boot;
     s_found->capture_seq = seq;
-    s_found->width = DECODED_WIDTH;
-    s_found->height = DECODED_HEIGHT;
+    s_found->width = UPRIGHT_WIDTH;
+    s_found->height = UPRIGHT_HEIGHT;
     s_found->detect_ms = detect_ms;
     s_found->boxes_count = (uint8_t)found;
     for (size_t i = 0; i < found; ++i) {
@@ -160,7 +169,7 @@ static esp_err_t detect_and_send(uint32_t seq)
     vTaskPrioritySet(NULL, s_cfg.detect_priority);
     const int64_t started_us = esp_timer_get_time();
     esp_err_t err =
-        ai_engine_detect_run(s_rgb, DECODED_WIDTH, DECODED_HEIGHT, s_boxes, GEN_VISION_BOXES_MAX, &found);
+        ai_engine_detect_run(s_rgb, UPRIGHT_WIDTH, UPRIGHT_HEIGHT, s_boxes, GEN_VISION_BOXES_MAX, &found);
     const uint32_t detect_ms = (uint32_t)((esp_timer_get_time() - started_us) / US_PER_MS);
     if (err == ESP_OK) { err = report_boxes(seq, found, detect_ms); }
     vTaskPrioritySet(NULL, own_priority);
@@ -208,6 +217,8 @@ static void carry_out(const app_vision_req_t *request)
         return;
     }
     const int64_t shot_us = esp_timer_get_time();
+    const esp_err_t tagged = drv_camera_insert(&frame, kExifTurn, sizeof(kExifTurn));
+    if (tagged != ESP_OK) { ESP_LOGW(TAG, "orientation not tagged: %s", esp_err_to_name(tagged)); }
     const esp_err_t sent = send_chunks(&frame, seq, 0, net_mqtt_publish_image);
     if (sent != ESP_OK) { ESP_LOGW(TAG, "picture not sent: %s", esp_err_to_name(sent)); }
     const int64_t sent_us = esp_timer_get_time();

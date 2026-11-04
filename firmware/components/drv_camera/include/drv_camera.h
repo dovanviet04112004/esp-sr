@@ -44,6 +44,12 @@ esp_err_t drv_camera_focus(void);
  */
 esp_err_t drv_camera_grab(drv_camera_frame_t *frame);
 
+/** Put a JPEG segment right after the frame's start marker, inside the frame's own buffer.
+ *  @ctx nhin_task | non-blocking | frame held
+ *  @ret ESP_OK | ESP_ERR_NO_MEM no room left, the frame is left alone
+ */
+esp_err_t drv_camera_insert(drv_camera_frame_t *frame, const uint8_t *segment, size_t bytes);
+
 /** Give a frame back; a frame already released or never grabbed is left alone.
  *  @ctx nhin_task | non-blocking
  */

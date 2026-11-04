@@ -2,6 +2,7 @@
 
 #include <inttypes.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "app_config.h"
 #include "esp_camera.h"
@@ -29,6 +30,7 @@
 #define BAND_HALF_PERIOD_US 10000 // 50 Hz mains peaks twice per cycle
 // set_framesize's PLL for a JPEG frame: multiplier 200, dividers 2, 4, 2.5 and 4.
 #define SYSCLK_PER_XCLK_X2 5
+#define JPEG_SOI_BYTES 2
 
 static const char *TAG = "drv_camera";
 
@@ -84,6 +86,7 @@ esp_err_t drv_camera_init(void)
     if (err != ESP_OK) { return err; }
     s_sensor = esp_camera_sensor_get();
     if (s_sensor == NULL) { return ESP_ERR_NOT_FOUND; }
+    if (s_sensor->set_vflip(s_sensor, GEN_VISION_VFLIP) != 0) { return ESP_FAIL; }
     s_can_focus = s_sensor->af_init != NULL && s_sensor->af_init(s_sensor, AF_LOAD_TIMEOUT_MS) == 0;
     ESP_LOGI(TAG, "sensor 0x%04X, %dx%d, autofocus %s", s_sensor->id.PID, GEN_VISION_WIDTH, GEN_VISION_HEIGHT,
              s_can_focus ? "loaded" : "off");
@@ -152,6 +155,17 @@ esp_err_t drv_camera_grab(drv_camera_frame_t *frame)
         .height = (uint16_t)taken->height,
         .held = taken,
     };
+    return ESP_OK;
+}
+
+esp_err_t drv_camera_insert(drv_camera_frame_t *frame, const uint8_t *segment, size_t bytes)
+{
+    camera_fb_t *held = frame->held;
+    if (held == NULL || held->len + bytes > CONFIG_CAMERA_JPEG_MODE_FRAME_SIZE) { return ESP_ERR_NO_MEM; }
+    memmove(held->buf + JPEG_SOI_BYTES + bytes, held->buf + JPEG_SOI_BYTES, held->len - JPEG_SOI_BYTES);
+    memcpy(held->buf + JPEG_SOI_BYTES, segment, bytes);
+    held->len += bytes;
+    frame->bytes = held->len;
     return ESP_OK;
 }
 
