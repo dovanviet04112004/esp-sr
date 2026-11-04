@@ -274,7 +274,8 @@ riêng `ml/detect_ref/ultralytics/` để xuất ONNX, không vào `srpipe` (§3
 
 ### 2.1 Board
 
-Dự án chạy trên **board B** — board duy nhất đã có micro, nên mọi phép đo cần thu âm thật chạy trên nó.
+Dự án chạy trên **board B**, và mọi phép đo thu âm thật tới nay chạy trên nó. **Board C** (cuối mục này) là board của sản
+phẩm kế tiếp: một micro, một camera, chưa có bản dựng.
 
 | | |
 |---|---|
@@ -330,6 +331,26 @@ Mỗi lần nạp chỉ ghi ảnh nào khác bản đang trên flash: esptool `-
 
 `idf.py` nạp ở `FLASH_BAUD` qua `ESPBAUD`, như pytest-embedded.
 
+**Board C** là board của sản phẩm kế tiếp (ADR-0042). Số dưới đây đọc từ chip và eFuse ngày 04/11. Firmware chưa dựng cho
+nó (E2-T12).
+
+| | |
+|---|---|
+| Chip | ESP32-S3 QFN56, revision v0.2, thạch anh 40 MHz; mã nguồn của board gọi nó là `CAMERA_MODEL_ESP32S3_SmartEyesG_V3` |
+| Flash / PSRAM | 16 MB quad, 3,3 V / 8 MB (AP_3v3), như board B, nên bảng phân vùng §6.1 và `sdkconfig.defaults.esp32s3` dùng nguyên |
+| Cầu nạp | mạch USB-TTL CP2102 rời (`10c4:ea60`), console là **UART0**; DTR và RTS không reset được chip |
+| Nguồn | có nguồn riêng, nên rút cáp USB không khởi động lại chip |
+| Nút | một nút, ở GPIO 0 |
+| MAC cơ sở | `30:ed:a0:1e:46:30` → `deviceId` mặc định `sr-30eda01e4630` (§6.2) |
+| Micro | 1 × INMP441, khe L/R chưa đo 🔬 |
+| Loa, ampli | MAX98357A, không có chân tắt ampli; tiếng ra chưa kiểm 🔬 |
+| Camera | có, loại sensor chưa đọc 🔬 |
+| Khác | đèn LED chiếu sáng, GPS, cảm biến hồng ngoại, thẻ SD, một bus I2C |
+
+**Nạp board C bằng tay.** Máy tính không reset được chip, nên esptool chạy với `--before no-reset`. Muốn vào chế độ nạp:
+giữ nút, tắt rồi bật nguồn board, giữ thêm chừng 2 s rồi thả; ROM in `boot:0x3 (DOWNLOAD(USB/UART0))`. Cầu RFC 2217 chạy
+với `make board-attach BOARD_USB_ID=10c4:ea60`; cầu đang phục vụ board B thì `make board-detach` trước.
+
 ### 2.2 Bảng chân
 
 Chân GPIO khai ở **đúng hai chỗ**: bảng này và `firmware/components/bsp_board/include/app_config.h`,
@@ -367,6 +388,35 @@ dừng dịch với một thông báo rõ.
 **Khe I2S của RX là 32 bit × 2**: micro I2S số ra 24 bit trong khe 32 bit và cần 64 BCLK mỗi chu kỳ
 WS. TX dùng chung BCLK và WS nên **cũng phải là khe 32 bit × 2**: `drv_audio` ghi mẫu phát dạng
 `int32` trái phải, MAX98357A nhận được. Đổi một bên là đổi cả hai.
+
+**Bảng chân của board C** (§2.1) do chủ repo đưa ngày 04/11, chép từ mã nguồn của board. Trên board mới kiểm được UART0 và
+nút GPIO 0; các chân còn lại chưa kiểm 🔬. `app_config.h` chỉ có chân của board B: chân dưới đây vào file ấy cùng commit
+với bản dựng đầu tiên cho board C (E2-T12), theo CLAUDE.md §1.3.
+
+| Chức năng | GPIO | Ghi chú |
+|---|---|---|
+| I2S0 BCLK, WS | 9, **3** | chung cho micro và ampli, như board B. 3 là chân strapping: nó chỉ chọn nguồn JTAG khi eFuse `STRAP_JTAG_SEL` bật, mà eFuse này của board đang tắt |
+| I2S0 DIN (INMP441) | 48 | cần mức 3,3 V: eFuse đặt VDD_SPI 3,3 V |
+| I2S0 DOUT (MAX98357A) | 14 | |
+| Camera XCLK, PCLK | 18, 15 | |
+| Camera VSYNC, HREF | 40, 41 | |
+| Camera SCCB: SIOD, SIOC | 38, 39 | bus riêng, không chung với I2C dưới |
+| Camera D0–D7 (`Y2`–`Y9`) | 6, 4, **46**, 5, 7, 16, 17, 8 | 46 là chân strapping, cùng GPIO 0 chọn chế độ khởi động; camera lắp sẵn mà board vẫn vào được chế độ nạp |
+| Camera PWDN, RESET | không nối | không tắt hay reset được sensor bằng chân |
+| Thẻ SD: CLK, MISO, MOSI, CS | 12, 13, 11, 10 | |
+| I2C: SDA, SCL | 1, 2 | chưa biết thiết bị nào trên bus 🔬 |
+| Đèn LED chiếu sáng | 42 | không phải LED trạng thái và riêng tư của bảng trên |
+| GPS | 20 | một chân. **Trùng USB D+** |
+| Cảm biến hồng ngoại, tích cực mức thấp | 19 | **Trùng USB D−** |
+| Nút | 0 | strapping, chỉ đọc sau khi đã khởi động |
+| Console | 43 / 44 | UART0 qua USB-TTL |
+
+Chân 3 và 46 nằm trong bảng chân cấm của board B, nhưng ở board C chúng đã đi dây cố định. Chân còn trống: 21, 45, 47; 45
+là strapping. GPIO 19 và 20 cũng mang tín hiệu khác nên ba hệ quả về USB-Serial-JTAG ở trên giữ nguyên, và
+`sdkconfig.defaults.esp32s3` đã đặt console UART0, tắt console phụ.
+
+Trước khi dựng cho board C phải chốt hai chỗ `bsp_board` đang cần mà board này không có: chân tắt ampli
+(`APP_AMP_SD_GPIO`; GPIO 18 ở đây là XCLK) và LED trạng thái (`APP_LED_GPIO`).
 
 ### 2.3 Dàn micro
 
@@ -418,7 +468,7 @@ tới hai kênh cùng lúc và cùng mức.
 
 `firmware/sdkconfig.mic1` chọn một micro ở khe phải, tức `ch1` của board B. `make product MICS=1` nạp bản ấy để thử trên
 board B. Model không đổi. Trên các phiên của board B, chỉ dùng micro tốt thì `wake` không đổi và lệnh mất 1 điểm
-(`mic_array.md` §5). Micro của board mới phải đo lại 🔬.
+(`mic_array.md` §5). Micro của board C phải đo lại 🔬.
 
 ### 2.4 Đường tham chiếu cho khử vọng
 
