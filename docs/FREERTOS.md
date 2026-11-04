@@ -77,7 +77,7 @@ giữ; cột "Cách kiểm" là thứ chạy để xác nhận.
 | 5.1 | Tràn ngăn xếp im lặng, lần chạy xanh che lần panic | `dev` bật `COMPILER_STACK_CHECK_MODE_NORM` và canary | `bench_mem` in watermark từng task sau 10 phút tải thật | ⏳ |
 | 5.2 | Mảng lớn trên ngăn xếp trong đường xử lý khung | vùng làm việc của `dsp_*` do người gọi cấp từ heap lúc boot, không đặt trên ngăn xếp | `-Wstack-usage=1024` cho `dsp_*`, `lang_*` | ⏳ |
 | 5.3 | Nhầm đơn vị watermark | nhân `sizeof(StackType_t)` | đọc code | ⏳ |
-| 5.4 | Ngăn xếp ở PSRAM bị chạm khi cache tắt | `mqtt_task` có ngăn xếp ở PSRAM; board C thêm `nhin_task`, `gui_task`, `dieu_task`, `luong_task`, `noi_task` bằng `EXT_RAM_BSS_ATTR`, không task nào của nhân 1. Sáu task này không gọi `nvs_*`, `lfs_*`, `esp_partition_*`: thẻ SD ở SPI2, không phải flash. `xac_task`, `nhan_task` ghi flash, `net_task` đọc NVS, nên ngăn xếp của chúng ở RAM nội | đọc `sdkconfig.board_c`, bảng task, thân từng task | ⏳ |
+| 5.4 | Ngăn xếp ở PSRAM bị chạm khi cache tắt | `mqtt_task` có ngăn xếp ở PSRAM; board C thêm `nhin_task`, `gui_task`, `dieu_task`, `luong_task`, `noi_task`, `do_task` bằng `EXT_RAM_BSS_ATTR`, không task nào của nhân 1. Bảy task này không gọi `nvs_*`, `lfs_*`, `esp_partition_*`: thẻ SD ở SPI2, không phải flash. `xac_task`, `nhan_task` ghi flash, `net_task` đọc NVS, nên ngăn xếp của chúng ở RAM nội | đọc `sdkconfig.board_c`, bảng task, thân từng task | ⏳ |
 
 ## 6. Heap
 
@@ -92,7 +92,7 @@ giữ; cột "Cách kiểm" là thứ chạy để xác nhận.
 
 | # | Kiểu hỏng | Luật | Cách kiểm | Trạng thái |
 |---|---|---|---|---|
-| 7.1 | ISR chạm PSRAM hoặc mã trong flash khi cache tắt | ISR của I2S ở IRAM (`I2S_ISR_IRAM_SAFE`), chỉ chạm bộ đếm trong RAM nội | đọc callback trong `drv_audio` | ⏳ |
+| 7.1 | ISR chạm PSRAM hoặc mã trong flash khi cache tắt | ISR của I2S ở IRAM (`I2S_ISR_IRAM_SAFE`), chỉ chạm bộ đếm trong RAM nội; ngắt cạnh của `drv_ir` không mang cờ IRAM nên nghỉ lúc cache tắt, mất vài cạnh của một lần chạm là chấp nhận được | đọc callback trong `drv_audio`, `drv_ir` | ⏳ |
 | 7.2 | **Ghi flash đóng băng `thu_task` quá chiều sâu DMA** | DMA RX 8 × 256 mẫu = 128 ms; chỉ ghi flash khi đổi cấu hình, đổi bộ lệnh, hiệu chuẩn | E14-T7: ghi NVS liên tục 10 phút, đếm khung mất | ⏳ |
 | 7.3 | Đệm DMA ở PSRAM | đệm DMA luôn `MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL`; `CONFIG_CAMERA_PSRAM_DMA` tắt (`measurements/board_c.md` §4.1) | đọc `drv_audio`, `sdkconfig` của board C | ⏳ |
 | 7.4 | Tranh chấp băng thông MSPI giữa flash, PSRAM và Wi-Fi làm chậm `sach_task` | trọng số `command_ctc` đọc thẳng từ flash (ADR-0028), tensor ở PSRAM chỉ trong `LENH`; `speaker` đọc trọng số từ flash và tensor ở PSRAM liền 504 ms với b0 sau mỗi lệnh khi kiểm người nói bật; khi bật hai nhân, `phu_task` đọc ghi PSRAM ngay trên nhân 1 lúc `sach` chạy (KẾ HOẠCH §5.1) | E14-T6 đo µs đỉnh của `sach_task` trong `LENH` so với `NGHE`, và trong một lần chạy b0; với hai nhân, app thử của `ai_engine` chạy chuỗi `dsp_afe` mỗi 16 ms ở nhân 1, ưu tiên của `sach`, trong lúc speaker chạy hai nhân: đỉnh dưới 12,8 ms | ⏳ |

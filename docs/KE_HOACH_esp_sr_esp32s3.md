@@ -346,7 +346,7 @@ và ngoại vi của §3.19.
 | Micro | 1 × INMP441 ở **khe trái**; khe phải để nổi và ra rác, nên phải đọc một khe |
 | Loa, ampli | MAX98357A, không có chân tắt ampli; phát được tiếng, `APP_SPEAKER_ENABLE` vẫn tắt |
 | Camera | OV5640, SCCB ở 0x3C, cùng loại với repo face attendance |
-| Khác | đèn LED chiếu sáng, GPS (NMEA 9600 baud), cảm biến hồng ngoại, thẻ SD, hai thiết bị I2C ở 0x48 và 0x68 |
+| Khác | đèn LED chiếu sáng, GPS (NMEA 9600 baud), cảm biến hồng ngoại, thẻ SD, MPU-6500 ở 0x68, ADC bốn kênh họ ADS1x15 ở 0x48 |
 
 **Nạp board C.** Dây nối không reset được chip. Vào ROM loader phải làm tay: giữ nút, tắt rồi bật nguồn board, giữ thêm chừng
 2 s rồi thả; ROM in `boot:0x3 (DOWNLOAD(USB/UART0))`. Rút cáp USB không có tác dụng, vì board có nguồn riêng. Đặt cờ
@@ -410,7 +410,7 @@ WS. TX dùng chung BCLK và WS nên **cũng phải là khe 32 bit × 2**: `drv_a
 | Camera D0–D7 (`Y2`–`Y9`) | 6, 4, **46**, 5, 7, 16, 17, 8 | 46 là chân strapping, cùng GPIO 0 chọn chế độ khởi động; camera lắp sẵn mà board vẫn vào được chế độ nạp |
 | Camera PWDN, RESET | không nối | không tắt hay reset được sensor bằng chân |
 | Thẻ SD: CLK, MISO, MOSI, CS | 12, 13, 11, 10 | |
-| I2C: SDA, SCL | 1, 2 | có điện trở kéo lên; hai thiết bị ở 0x48 và 0x68, chưa biết là gì 🔬 |
+| I2C: SDA, SCL | 1, 2 | có điện trở kéo lên; MPU-6500 ở 0x68 (`WHO_AM_I` 0x70), ADC bốn kênh họ ADS1x15 ở 0x48 (đúng ba thanh ghi lúc reset) |
 | Đèn LED chiếu sáng | 42 | `APP_LED_GPIO`: board không có LED trạng thái, nên đèn này sáng khi luồng tiếng đang mở |
 | GPS, NMEA 9600 baud | 20 | chân RX của UART. **Trùng USB D+** |
 | Cảm biến hồng ngoại, tích cực mức thấp | 19 | **Trùng USB D−** |
@@ -2556,7 +2556,7 @@ Board C có camera, thẻ SD, loa, GPS, cảm biến hồng ngoại và hai thi�
 board B không có các khối này, Kconfig `APP_CAMERA_ENABLE` và `APP_SENSORS_ENABLE` tắt chúng.
 
 **Hai lệnh nói.** "chụp ảnh" chụp, lưu thẻ, đẩy ảnh về host. "nhận diện" làm như thế rồi chạy `detect` (§3.18) và gửi khung.
-Id của hai lệnh và số của luồng ảnh nằm ở `contracts/vision.yaml`. Host chụp được không cần nói, qua `CAPTURE` của `device_cmd`.
+Id của hai lệnh, số của luồng ảnh và nhịp của ngoại vi nằm ở `contracts/vision.yaml`. Host chụp được không cần nói, qua `CAPTURE` của `device_cmd`.
 
 **Một khung JPEG cho mọi việc.** OV5640 tự nén, nên một khung 1280 × 720 đi vào thẻ, lên MQTT, và giải 1:2 thành RGB888
 640 × 360 cho `detect`. Đường RGB565 cần hơn 1,5 MB PSRAM và CPU để nén, không vừa §6.6.
@@ -2596,13 +2596,16 @@ Host lưu `<stem>.jpg`, `<stem>.json` cùng ảnh đã vẽ khung và tên vật
 Không có thẻ thì vẫn đẩy ảnh, sự kiện ghi `saved: false`. Mất MQTT thì ảnh vẫn ở thẻ; bản đầu chưa gửi lại. Đang chạy mà có
 lệnh mới thì từ chối ngay với mã `VISION_BUSY`, không xếp hàng: `nhin_task` giữ yêu cầu trong `q_vision` tới hết ảnh (§5.3).
 
-**Ngoại vi còn lại** gom ở `svc_sensors`, task `do_task`, đăng `up/sensors` khi đổi và mỗi 10 s:
+**Ngoại vi còn lại** gom ở `svc_sensors`, task `do_task`, đăng `up/sensors` khi đổi và mỗi 10 s. Chúng đã chạy, nhưng `sdkconfig.board_c` đang tắt
+`APP_SENSORS_ENABLE` theo chủ repo: board C chạy chuỗi cơ bản, và RAM nội chúng lấy làm `detect` chậm đi (`measurements/board_c.md` §7).
 
-- GPS: `drv_gps`, UART1 chỉ RX ở GPIO 20, 9600 baud. Phân tích NMEA là phần thuần, có test trên máy tính. Vị trí ghi kèm ảnh khi
-  có; hiện board chưa gắn anten.
-- Hồng ngoại: `drv_ir`, GPIO 19, lọc rung vì đầu ra đổi mức dồn dập ở mili giây (`measurements/board_c.md`). Bản đầu chỉ báo
-  lên host, chưa tự kích chụp.
-- I2C: `drv_i2c`, bus GPIO 1/2, mỗi thiết bị một file. Hai thiết bị ở 0x48 và 0x68 nhận dạng bằng thanh ghi trước khi viết.
+- GPS: `drv_gps`, UART1 chỉ RX ở GPIO 20, 9600 baud. Phân tích NMEA là phần thuần, có test trên máy tính. Có vị trí thì host ghi
+  `<ảnh>_place.json` cạnh ảnh, từ `up/sensors` mới nhất; hiện board chưa gắn anten.
+- Hồng ngoại: `drv_ir`, GPIO 19, lọc rung vì đầu ra đổi mức dồn dập ở mili giây (`measurements/board_c.md`): ngắt đếm từng cạnh,
+  và các cạnh cách nhau dưới `sensors.ir_release_ms` của `contracts/vision.yaml` là một lần chạm. Bản đầu chỉ báo lên host, chưa tự
+  kích chụp.
+- I2C: `drv_i2c`, bus GPIO 1/2, mỗi thiết bị một file, mỗi file nhận dạng chip bằng thanh ghi lúc boot. `mpu6500.h`: gia tốc, con quay,
+  nhiệt độ, lấy mỗi nhịp. `ads1115.h`: bốn đầu vào so với đất, thang 4,096 V, mỗi nhịp đọc một kênh nên một vòng là 4 s.
 - Loa: bật `APP_SPEAKER_ENABLE`, `drv_audio` chạy TX. `svc_speak` phát bíp theo `contracts/tones.yaml`: một tiếng ngắn khi nghe từ
   đánh thức, hai tiếng ngắn khi nhận lệnh, một tiếng dài khi xong ảnh, một tiếng trầm khi không nghe ra lệnh hay ảnh lỗi. `thu_task`
   đẩy mỗi khối TX ngay sau mỗi khối RX, nên trễ TX → RX là hằng số, và khối ấy đi kèm khung như kênh tham chiếu của `aec` (§3.5). Từ lúc
@@ -4294,6 +4297,7 @@ Topic, QoS, retained và schema khai ở `contracts/mqtt_topics.yaml`; bảng d�
 |---|---|---|
 | `heartbeat` | uptime, heap nội và PSRAM còn / thấp nhất, `frames_dropped`, `clean_dropped`, `events_dropped`, điểm cao nhất `q_clean`, điểm cao nhất vùng nhớ JSON của `net_mqtt` (`FREERTOS.md` 6.3), tải từng nhân (ở `bench`), RSSI, phiên bản firmware và model | ~420 B |
 | `telemetry` | 10 × {hướng, độ tin, cờ tiếng nói, mức, gain}, trạng thái hội thoại | ~350 B |
+| `sensors` | `gps`, `ir`, và `motion`, `adc` khi thiết bị ấy chạy; thiết bị hỏng lúc boot thì vắng khối của nó | ~250 B |
 | `event` | loại, `seq` khung, điểm, lệnh, khoảng cách với lệnh thứ hai, lý do từ chối; khi kiểm người nói, `speakerPermille`, `speakerId`, lúc đăng ký `enrolCount`; khi đổi bộ lệnh hỏng, `ERROR` với `COMMANDS_INVALID` (kèm `commandId` của dòng `lang_vi` không đọc được), `COMMANDS_REFUSED` hay `COMMANDS_NOT_SAVED`; khi đổi danh sách người nói hỏng, `ERROR` mã `SPEAKERS_*` hay `SPEAKER_UNKNOWN` (§3.17) | ~180 B |
 | `speaker_roster` | `version`, `check`, tới 8 × {`id`, `name`, có mẫu giọng}, người đang đăng ký và số lệnh đã thu | ~600 B |
 
