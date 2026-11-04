@@ -170,3 +170,21 @@ ghi thẻ. Windows hay tự chuyển PC về mạng nhà, broker mất đường
 
 Ống kính rất nhạy: ren đi ~0,4 mm một vòng 🔬, còn từ vô cực tới 30 cm thấu kính 3,6 mm chỉ dịch ~0,04 mm, nên 1/8 vòng đã qua hẳn vùng
 nét. Độ nét trên trang: bậc thang lớn nhất ở bản thu nhỏ 160 × 90 chia cho độ tương phản. Ảnh nhòe ~7, ảnh đầu ~33, sau khi chỉnh 43.
+
+## 5. Loa và tiếng nói (E2-T14, 04/11)
+
+`drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là 7 bước, 112 ms, hằng số.
+`speaker on`, 1 micro, 2 kênh; RAM nội lúc nghe 54,5 KiB, thấp nhất 23,9 KiB; vùng mượn của `detect` 26 560 / 32 768 B, `detect` vẫn
+1 938–1 947 ms. Chủ repo nghe được bíp.
+
+Micro nghe tiếng bíp sau từ đánh thức thành một câu. Log trước khi sửa, 4/4 lần:
+
+```
+23:37:16 WAKE 0.82
+23:37:18 REJECT LOW_SCORE
+23:37:20 COMMAND nhan_dien 0.97
+```
+
+`svc_front` tắt `vad` từ lúc tham chiếu có tiếng tới 420 ms sau hết tiếng. Sau khi sửa, 2/2 lần `WAKE` đi thẳng tới `COMMAND`. Mới hai lần 🔬.
+
+Bằng giọng: `chup_anh` 0,88–0,90, `nhan_dien` 0,97, `COMMAND` tới `CAPTURE` ~2 s. `aec` vẫn là khung, chưa khử gì.
