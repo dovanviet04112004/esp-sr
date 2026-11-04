@@ -42,7 +42,7 @@ typedef struct {
  */
 esp_err_t drv_audio_init(const drv_audio_config_t *cfg);
 
-/** Channels per hop since init: the microphones, 1 or 2, then the aligned ref once TX adds it.
+/** Channels per hop since init: the microphones, 1 or 2, then the ref, what TX sent in that hop.
  *  @ctx any | non-blocking
  */
 uint8_t drv_audio_channels(void);
@@ -54,8 +54,8 @@ uint8_t drv_audio_channels(void);
  */
 esp_err_t drv_audio_read_frame(int16_t *interleaved, uint32_t *seq, uint32_t timeout_ms);
 
-/** Queue mono samples for the speaker; silence is sent whenever nothing is queued.
- *  @ctx noi_task | blocking up to timeout_ms for DMA space
+/** Queue mono samples for the speaker in whole hops, the last padded with silence; thu_task plays them.
+ *  @ctx noi_task | blocking up to timeout_ms for ring space
  *  @ret ESP_OK | ESP_ERR_NOT_SUPPORTED TX disabled | ESP_ERR_TIMEOUT
  */
 esp_err_t drv_audio_write(const int16_t *mono, size_t n_samples, uint32_t timeout_ms);
