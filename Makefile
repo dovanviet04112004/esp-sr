@@ -114,7 +114,9 @@ ci-status: ## Copy the GitHub Actions results of HEAD onto the same commit in Gi
 
 HOST_BUILD := build/host
 HOST_RUNS := dsp_spec/dsp_spec_host dsp_afe_host_off dsp_afe_host_on dsp_afe_host_product lang_vi/lang_vi_host \
-             ai_engine/ai_engine_parity_host
+             ai_engine/ai_engine_parity_host drv_gps/drv_gps_host drv_ir/drv_ir_host drv_i2c/drv_i2c_host
+# These check with assert, so they build without Release's NDEBUG.
+HOST_DRIVERS := drv_gps drv_ir drv_i2c
 # The judge imports pytest: the ml environment has it here, CI installs it and passes PARITY_PY=python.
 PARITY_PY ?= $(if $(shell command -v uv 2>/dev/null),uv run --project ml python,python3)
 
@@ -130,6 +132,10 @@ parity-host: ## Every golden case through dsp_spec, dsp_afe (off, all on, the pr
 	cd firmware/components/ai_engine/test_apps/host && cmake -S . -B $(CURDIR)/$(HOST_BUILD)/ai_engine \
 	  -DCMAKE_BUILD_TYPE=Release -DAI_ENGINE_HOST_PARITY_ONLY=ON
 	cd $(HOST_BUILD)/ai_engine && cmake --build . -j
+	for driver in $(HOST_DRIVERS); do \
+	  cmake -S firmware/components/$$driver/test_apps/host -B $(HOST_BUILD)/$$driver -DCMAKE_BUILD_TYPE=Debug && \
+	  cmake --build $(HOST_BUILD)/$$driver -j || exit 1; \
+	done
 	@: > $(HOST_BUILD)/parity.log; for run in $(HOST_RUNS); do \
 	  $(HOST_BUILD)/$$run contracts/golden >> $(HOST_BUILD)/parity.log || { tail -n 30 $(HOST_BUILD)/parity.log; exit 1; }; \
 	done; grep -h "^HOST [0-9]* failure" $(HOST_BUILD)/parity.log
