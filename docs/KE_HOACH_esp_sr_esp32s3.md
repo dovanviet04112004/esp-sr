@@ -2567,13 +2567,17 @@ PSRAM của chuỗi nghe (§6.6).
 vì thế tốn 21 764 B RAM nội. Board C lấy lại bằng `sdkconfig.board_c` (§6.5): mã Wi-Fi và PHY chạy từ flash, `.bss` và đệm của Wi-Fi
 và lwIP ở PSRAM, đệm tĩnh RX và TX còn 6, bảng thanh ghi của sensor không lắp bỏ khỏi `.data`.
 
+**Camera gắn xoay 90°.** Khung của sensor nằm ngang và lật gương. Sensor lật dọc (`vflip`, cùng `4514`), bước giải JPEG xoay 90° theo
+chiều kim đồng hồ cho `detect`, vì trên khung nằm ngang model nhận sai: `book` 0,16 thay vì `cup` 0,72 trên cùng ảnh. File JPEG
+không xoay được nếu không nén lại, nên mang cờ EXIF orientation 6 và người xem tự dựng đứng. Số ở `vision.yaml`.
+
 **Một lần chụp:**
 
 1. `dieu_task` thấy `COMMAND` mang id ở `vision.yaml` thì đẩy yêu cầu vào `q_vision`. Lệnh đã qua kiểm người nói nếu kiểm bật.
 2. `nhin_task` đánh thức sensor, bật đèn GPIO 42, chờ phơi sáng và độ lợi đứng yên, chụp một khung, tắt đèn, cho sensor nghỉ
    ngay để chuỗi nghe lấy lại băng thông PSRAM.
-3. Xếp ảnh vào outbox của MQTT theo khúc (§7.3). Outbox ở PSRAM chứa được cả ảnh, nên ảnh đi trong lúc bước 4 chạy.
-4. Với "nhận diện": giải JPEG 1:2 bằng `esp_new_jpeg`, lên trên chuỗi nghe (§3.18), `ai_engine_detect_run`, gửi thẳng
+3. Chèn cờ EXIF vào khung, xếp ảnh vào outbox của MQTT theo khúc (§7.3). Outbox ở PSRAM chứa được cả ảnh, nên ảnh đi trong lúc bước 4 chạy.
+4. Với "nhận diện": giải JPEG 1:2 và xoay bằng `esp_new_jpeg` thành RGB888 360 × 640, lên trên chuỗi nghe (§3.18), `ai_engine_detect_run`, gửi thẳng
    `up/detections`. Khung không chờ `mqtt_task`, nên có thể tới host trước ảnh.
 5. Ghi `/sdcard/IMG/B<boot>/<seq>.JPG`, rồi gửi sự kiện `CAPTURE`. Thẻ đứng cuối vì người dùng đang chờ kết quả, khung JPEG vẫn
    nằm ở PSRAM. Tên dựa vào lượt khởi động vì board chưa có đồng hồ.
