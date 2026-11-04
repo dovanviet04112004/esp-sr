@@ -60,6 +60,7 @@ static uint8_t mics_named(uint8_t mode)
     switch (mode) {
     case GEN_STREAM_MODE_CLEAN: return 0;
     case GEN_STREAM_MODE_MIC:
+    case GEN_STREAM_MODE_MIC_REF:
     case GEN_STREAM_MODE_MIC_CLEAN: return 1;
     default: return GEN_ARRAY_N_MICS;
     }
