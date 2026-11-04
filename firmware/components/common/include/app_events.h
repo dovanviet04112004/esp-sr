@@ -42,7 +42,17 @@ typedef enum {
     APP_EVT_COMMAND,
     APP_EVT_REJECT,
     APP_EVT_ERROR,
+    APP_EVT_CAPTURE,
 } app_event_kind_t;
+
+typedef enum {
+    APP_VISION_PHOTO = 0, // photograph, keep and send
+    APP_VISION_DETECT,    // and run detect on it
+} app_vision_mode_t;
+
+typedef struct {
+    app_vision_mode_t mode;
+} app_vision_req_t;
 
 typedef struct {
     app_event_kind_t kind;
@@ -56,6 +66,10 @@ typedef struct {
     char command_id[APP_EVT_ID_MAX_BYTES];
     char code[APP_EVT_CODE_MAX_BYTES];     // upper-case code, e.g. LOW_MARGIN
     char speaker_id[APP_SPEAKER_ID_BYTES]; // best match or the one enrolling; "" when none
+    uint32_t boot;                         // CAPTURE: the boot and seq name the picture
+    uint32_t capture_seq;
+    uint32_t image_bytes;
+    bool saved; // CAPTURE: the picture reached the SD card
 } app_event_t;
 
 typedef struct {

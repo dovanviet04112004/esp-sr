@@ -36,6 +36,9 @@ extern "C" {
 #define APP_CODE_SPEAKERS_REFUSED "SPEAKERS_REFUSED"     // no speaker in the image, or q_spk full
 #define APP_CODE_SPEAKERS_NOT_SAVED "SPEAKERS_NOT_SAVED" // in use until reboot, NVS old
 #define APP_CODE_SPEAKER_UNKNOWN "SPEAKER_UNKNOWN"       // ENROL of an id not on the roster
+#define APP_CODE_VISION_BUSY "VISION_BUSY"               // a capture is running, this one is refused
+#define APP_CODE_CAMERA_FAIL "CAMERA_FAIL"               // no camera, or it gave no frame
+#define APP_CODE_DETECT_FAIL "DETECT_FAIL"               // the picture left, detect did not run
 
 #ifdef __cplusplus
 }
