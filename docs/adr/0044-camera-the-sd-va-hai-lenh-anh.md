@@ -66,12 +66,12 @@ COMMAND chup_anh | nhan_dien  (sau kiểm người nói, nếu bật)
   dieu_task  -> q_vision
   nhin_task  -> đánh thức sensor, bật đèn, chờ phơi sáng đứng yên, chụp một khung JPEG 1280x720
              -> tắt đèn, sensor nghỉ
-             -> ghi /sdcard/IMG/B<boot>/<seq>.JPG
              -> xếp ảnh vào outbox của up/image theo từng khúc
-             -> nhan_dien: giải JPEG 1:2 thành RGB888 640x360, ai_engine_detect_run, gửi up/detections
+             -> nhan_dien: giải JPEG 1:2 thành RGB888 640x360, lên trên chuỗi nghe, ai_engine_detect_run, gửi up/detections
+             -> ghi /sdcard/IMG/B<boot>/<seq>.JPG, gửi CAPTURE
 ```
 
-- Ảnh đi trước khung, nên host thấy ảnh ngay, không chờ `detect`.
+- Ảnh xếp vào outbox trước, đi trong lúc giải JPEG, nên host thường có ảnh trước khung.
 - Không có thẻ thì vẫn đẩy ảnh, sự kiện ghi `saved: false`. Mất MQTT thì ảnh vẫn ở thẻ, chưa gửi lại ở bản đầu.
 - Đang chạy mà có lệnh mới thì từ chối ngay với mã `VISION_BUSY`, không xếp hàng.
 
@@ -91,7 +91,7 @@ COMMAND chup_anh | nhan_dien  (sau kiểm người nói, nếu bật)
 
 | Đối tượng | Nội dung |
 |---|---|
-| `nhin_task` | `svc_vision`, nhân 0, ưu tiên 1, ngăn xếp ở PSRAM như `mqtt_task` vì task này không ghi flash |
+| `nhin_task` | `svc_vision`, nhân 0, ưu tiên 1, lên 11 trong lượt `detect`, ngăn xếp ở PSRAM như `mqtt_task` vì task này không ghi flash |
 | `do_task` | `svc_sensors`, nhân 0, ưu tiên 2, nhịp 1 s, ngăn xếp ở PSRAM; không chạm nhân 1 |
 | `q_vision` | depth 1, `app_vision_req_t`; yêu cầu nằm trong hàng tới hết ảnh, đầy thì `dieu_task` ra `ERROR VISION_BUSY`, không chờ |
 | `q_dialog` | bắt đầu có người gửi: nơi chốt `COMMAND` gửi với timeout 0, `dieu_task` tra `vision.yaml` rồi đẩy `q_vision` |
@@ -115,8 +115,8 @@ RAM nội thiếu thật: camera ở RAM nội tốn gấp đôi ước tính. �
 của Wi-Fi, lwIP ở PSRAM, ngăn xếp các task không chạm flash ở PSRAM, bỏ bảng thanh ghi sensor không lắp, tổng 64 KB. Lúc nghe còn
 75,6 KiB, thấp nhất 35,2 KiB (`board_c.md` §4.2), vùng mượn của `ConvLut` (§6.5) đủ 32 KB.
 
-Thời gian đo: "chụp ảnh" 1,6 s chụp, 0,15 s ghi thẻ, 0,3–1,5 s đẩy ảnh; "nhận diện" thêm 1,15 s giải JPEG và 3,3 s `detect`, vì
-chuỗi nghe giữ phần nhân 0 của nó (`board_c.md` §4.5).
+Thời gian đo: "chụp ảnh" 0,67 s chụp, đẩy ảnh không chờ, 0,15–0,4 s ghi thẻ; "nhận diện" thêm 0,33 s giải JPEG và 1,92 s `detect`
+(`board_c.md` §4.5).
 
 ### 6. Riêng tư
 
@@ -133,7 +133,7 @@ tiếng người. Ảnh trên thẻ không mã hoá.
 | 4 | `make product BOARD=C` nạp cả `vision_0`; `detect` dựng lúc boot, `nhin_task` (E15-T7) | board nghe như cũ, RAM nội không dưới mức an toàn |
 | 5 | "chụp ảnh" đầu cuối; `host/vision.py` ghi ảnh, `make vision-watch` | nói lệnh, host có ảnh, sha256 khớp file trên thẻ |
 | 6 | "nhận diện" đầu cuối | khung đúng trên ảnh thật, host vẽ được |
-| 7 | Đo: độ trễ, RAM, `COMMAND` khi ảnh đang chạy, chạy dài | `docs/measurements/`; độ trễ lệnh không tăng; không rớt khung |
+| 7 | Đo: độ trễ, RAM, `COMMAND` khi ảnh đang chạy, chạy dài | `docs/measurements/`; ngoài lượt `detect` độ trễ lệnh không tăng; không rớt khung |
 | 8 | Loa bíp khi nhận lệnh và khi chụp | nghe được; `wake` không tự thức vì tiếng bíp |
 | 9 | `drv_gps`, `drv_ir` | NMEA có test máy tính; GPS có vị trí khi có anten; hồng ngoại không rung |
 | 10 | Nhận dạng 0x48, 0x68 bằng thanh ghi, `drv_i2c` | đọc được số thật của cả hai |
@@ -148,6 +148,9 @@ Bước 2 và 3 độc lập, bước 5 cần cả hai. Lệnh đầu tiên ch�
 3. **Bỏ `down/image`** của E15-T7: đã có camera, và `ai-unit-detect` kiểm khớp từng giá trị.
 4. **Hồng ngoại** chưa tự kích chụp: bản đầu chỉ báo lên host.
 5. **Vị trí GPS** ghi kèm ảnh khi có vị trí; cần anten trước.
+6. **`detect` chạy trên chuỗi nghe** (04/11, sau khi đo; thay ràng buộc 4 trong lượt ấy): dưới chuỗi nghe một ảnh ~3,4 s, trên chuỗi
+   nghe 1,92 s. Chuỗi nghe dừng ~1,9 s mỗi lần "nhận diện", khung nằm ở `q_clean`, lệnh nói đúng lúc ấy chậm tới ~3 s. Ngoài lượt ấy
+   không đổi.
 
 ## Hệ quả
 
