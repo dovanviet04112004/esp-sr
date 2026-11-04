@@ -25,5 +25,6 @@ modes:
   - {id: 8, name: raw_seats4, channels: [ch0, ch1, seat0, seat1, seat2, seat3]}
   - {id: 9, name: mic, channels: [mic]}
   - {id: 10, name: mic_clean, channels: [mic, clean]}
+  - {id: 11, name: mic_ref, channels: [mic, ref]}
 formats:
   - {id: 0, name: s16le, bytes: 2}

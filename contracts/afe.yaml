@@ -10,6 +10,25 @@ hpf:
   cutoff_hz: 80.0
 aec:
   partitions: 8
+  bulk_delay_max: 512       # samples; drv_audio already takes out the TX delay
+  spec_average: 0.016       # one hop's weight in the smoothed spectra (Valin 2007)
+  beta0: 0.032
+  beta_max: 0.008
+  power_smooth: 0.35        # of the far-end power, over the partitions
+  min_leak: 0.005           # no better than ~33 dB is hoped for
+  far_share: 0.0001
+  echo_share: 3.0
+  rer_max: 0.5
+  # Speex's floors, in signals of 1.0 full scale and a transform with no 1/n.
+  py_floor: 0.000244
+  e_floor: 0.000244
+  power_floor: 0.00244
+  err_floor: 0.0000238
+  far_min: 0.000238
+  tiny: 1.0e-12
+  erle_keep: 0.98
+  diverge_ratio: 4.0
+  diverge_blocks: 50
 doa:
   # Above the alias frequency the room's diffuse field decorrelates; below it pulls the angle to broadside (KEHOACH 3.6).
   band_min_hz: 2000.0
