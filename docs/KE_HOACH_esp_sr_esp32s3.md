@@ -689,8 +689,13 @@ nếu MDF không vừa ngân sách.
 
 **Chi phí** mỗi micro mỗi khối: một FFT của sai số, một IFFT của đầu ra, 8 × 257 phép nhân phức cho
 lọc, 8 × 257 cho cập nhật, 2 FFT cho ràng buộc luân phiên; FFT của tham chiếu dùng chung hai micro.
-Cỡ ~650 µs mỗi micro 🔬. Trạng thái: trọng số 2 micro × 8 × 257 phức float = **33 KB**, phổ tham chiếu
-8 × 257 phức = 16 KB — bị chạm mỗi khung nên nằm RAM nội (§6.5).
+Đo ở `measurements/budget.md`. Trạng thái: trọng số 2 micro × 8 × 257 phức float = **33 KB**, phổ tham chiếu
+8 × 257 phức = 16 KB. Tất cả ở vùng `cold`, tức PSRAM: khối chỉ chạy khi loa phát hoặc còn dư âm trong đuôi lọc, lúc khác không chạm
+byte nào, và nhân 1 còn dư thời gian. RAM nội không tốn gì (§6.5).
+
+`drv_audio` đưa khối TX vào kênh tham chiếu ngay lúc ghi, nên tham chiếu luôn đi trước tiếng vọng; bộ lọc 128 ms tự học phần trễ TX cộng
+đường âm thanh, `aec_delay` chỉ dùng khi phần ấy quá dài. Bộ lọc cần vài giây để học, nên không giúp gì cho tiếng bíp 0,1 s: phần đó do
+`svc_front` tắt `vad` (§3.19).
 
 **Thước** (TỔNG QUAN V5.4): ERLE **≥ 20 dB** khi chỉ loa nói, đo sau cả khử vọng dư, ở âm lượng tối
 đa đã chốt; lúc hai bên cùng nói **không phân kỳ** và tiếng người gần bị dìm **≤ 3 dB**.
@@ -3381,11 +3386,11 @@ trạng thái GRU nằm sau khe, trong thư mục của ứng viên, nên đổi
 
 **Chỗ hở `seq`: `dsp_afe_resume` hay `dsp_afe_reset`.** `svc_front` gọi một trong hai trên `sach_task` mỗi khi `seq`
 hở, và khung sau cả hai mang `DSP_AFE_FLAG_GAP`. Hở không quá `chain.gap_keep_s` của `contracts/afe.yaml` thì
-`resume`: chỉ xoá những gì giữ mẫu của trước chỗ hở, là bộ đệm STFT và iSTFT, bộ nhớ của `hpf`, các bộ lọc tách dải của
-`vad`, đường nhìn trước và bộ hạn biên của `agc`; mọi ước lượng ở lại: nhiễu và SNR của `ns`, mô hình, vết cực tiểu và
-hangover của `vad`, độ lợi và mức tiếng của `agc`, phổ chéo của `doa`, trọng số của `gsc`. Khe `ns` nhận công suất từng
+`resume`: chỉ xoá những gì giữ mẫu của trước chỗ hở, là bộ đệm STFT và iSTFT, bộ nhớ của `hpf`, tham chiếu của `aec`, các bộ
+lọc tách dải của `vad`, đường nhìn trước và bộ hạn biên của `agc`; mọi ước lượng ở lại: nhiễu và SNR của `ns`, mô hình, vết cực tiểu và
+hangover của `vad`, độ lợi và mức tiếng của `agc`, phổ chéo của `doa`, trọng số của `gsc` và `aec`. Khe `ns` nhận công suất từng
 khung, không giữ mẫu tiếng, nên `resume` không gọi nó; khe mạng giữ cả trạng thái GRU lẫn lịch sử đặc trưng qua chỗ
-hở ngắn. Khi `aec` có bộ lọc thật (E10), lịch sử tham chiếu của nó vào phần `resume` xoá. Nhiễu phòng và mức tiếng không đổi qua chưa tới một giây, còn học lại từ
+hở ngắn. Lịch sử tham chiếu và đuôi tiếng vọng của `aec` giữ mẫu của trước chỗ hở nên `resume` xoá. Nhiễu phòng và mức tiếng không đổi qua chưa tới một giây, còn học lại từ
 đầu thì `ns` mất cỡ một giây ước lượng nhiễu và `agc` về 0 dB. Hở dài hơn thì `reset`: mỗi khâu có hàm `reset` đưa
 trạng thái thích nghi về đúng như sau `init`, giữ cửa sổ, bảng và hệ số `init` đã dựng, khe `ns` cũng vậy, nên chuỗi sau
 `reset` ra từng bit như một chuỗi vừa `init`, trừ nhịp tìm hướng mỗi hai hop của `doa` theo `seq` chạy tiếp. `reset` dựng lại bảng thì lâu hơn 8 ô của `q_free` (§5.3), và một chỗ hở
@@ -3920,7 +3925,7 @@ khi đã có.
 |---|---|---|---|
 | `thu` | 50 | Wi-Fi + lwIP | 5–15% 🔬 |
 | `hpf` hai kênh | 20 | `wake`, mọi trạng thái (288 µs đo, `latency.md` §8) | ~1,8% |
-| `aec` hai micro | 1 300 | mạng `command`, trạng thái `LENH` (bề rộng 160 đo, `latency.md` §18) | ~32%, thêm vào `wake` |
+| `aec` hai micro, chỉ khi loa phát (đo; một micro 2 126) | 4 368 | mạng `command`, trạng thái `LENH` (bề rộng 160 đo, `latency.md` §18) | ~32%, thêm vào `wake` |
 | `stft` hai kênh | 314 | `synth`, trạng thái `DAP` | < 100% trong thời gian dựng |
 | | | `speaker` sau mỗi lệnh nhận được, khi đường chip bật (§3.17) | 100% trong 504 ms với b0 (`latency.md` §32), ~1,4 s với b3 🔬 |
 | `balance` | 10 | `gui` + `mqtt` + `luong` | 2–5% |
@@ -3930,9 +3935,10 @@ khi đã có.
 | `istft` | 196 | | |
 | `vad` + `agc` | 80 | | |
 | chép vào `sb_stream` | 20 | | |
-| **Cộng, trường hợp nặng nhất** | **~8 200 µs ≈ 51%** | **Cộng, khi có cửa sổ** | **~94% 🔬, quá mục tiêu 70%**: ghép từ ba số đo (`latency.md` §32), đo tải nhân trực tiếp ở E14-T6 |
+| **Cộng, trường hợp nặng nhất** | **~11 200 µs ≈ 70%** | **Cộng, khi có cửa sổ** | **~94% 🔬, quá mục tiêu 70%**: ghép từ ba số đo (`latency.md` §32), đo tải nhân trực tiếp ở E14-T6 |
 
-Với NSNet-16k L, nhân 1 nhỉnh hơn mục tiêu trung bình 50% ở trường hợp nặng nhất, trong đó `aec` còn là ước: E9-T7 đo, vượt thì `ns` lùi về NSNet-16k M hay S, học cùng lượt. Nhân 0 quá mục tiêu khi có cửa sổ. Nếu đo trực tiếp xác nhận điều đó thì thứ tự cắt là:
+Trường hợp nặng nhất là hai micro, loa đang phát và `ns` mạng cùng lúc: vượt mục tiêu trung bình 50% nhưng còn dưới trần một khung 80%, và chỉ kéo dài lúc loa
+phát. Board C một micro, khe `ns` chạy sàn, loa phát: 27% (`measurements/budget.md`). E9-T7 đo, vượt thì `ns` lùi về NSNet-16k M hay S, học cùng lượt. Nhân 0 quá mục tiêu khi có cửa sổ. Nếu đo trực tiếp xác nhận điều đó thì thứ tự cắt là:
 giảm tần suất `doa` và `telemetry` trong `LENH`, rồi thu nhỏ mạng `command` — không chuyển việc sang
 nhân 1.
 
@@ -4146,10 +4152,10 @@ TỔNG QUAN §7 ước ~97 KB và thiếu bốn khoản. Bảng ước lại �
 | Đệm DMA I2S TX: cùng khuôn | 16 KB | RX và TX căn theo khối |
 | Pool `q_frame`: 8 × 0,5 KB mỗi kênh, kênh tham chiếu loa chỉ khi có loa | 4–12 KB | |
 | `dsp_spec` + `dsp_afe` trừ `aec`: STFT hai kênh, `doa`, `bss`, `ns` sàn, `vad`, `agc` | ~28 KB | riêng `bss`: vòng đệm góc, histogram 181 ô, bảng trễ và cổng 181 góc, 2 944 B đo; `vad` thứ hai 2 640 B và đệm trung bình hai micro 1 KB |
-| `aec`: trọng số 2 × 8 × 257 phức + phổ tham chiếu 8 × 257 phức + đệm | ~55 KB | §3.5 |
+| `aec` | 0 | cả khối ở vùng `cold`, tức PSRAM (§3.5, §6.6) |
 | Ngăn xếp task ứng dụng (§5.2, trừ `mqtt_task`) | ~41 KB | |
 | Wi-Fi + lwIP | 50–90 KB | tuỳ số đệm RX/TX trong sdkconfig |
-| **Cộng — không có model nào** | **~240–280 KB** | |
+| **Cộng — không có model nào** | **~185–225 KB** | |
 | Board C thêm (§3.19): camera 21 764 B, SDSPI, FAT và `svc_vision` 2 380 B, `detect` 332 B lúc boot, cộng UART1 và I2C ~3 KB 🔬 | ~27 KB | `sdkconfig.board_c` lấy lại 64 KB DIRAM tĩnh: mã Wi-Fi ra khỏi IRAM, `.bss` của Wi-Fi, lwIP và ngăn xếp không chạm flash sang PSRAM, bỏ bảng thanh ghi sensor không lắp. Lúc nghe còn 75,6 KiB, thấp nhất 35,2 KiB, khối lớn nhất 56 KB, đủ vùng mượn 32 KB (`measurements/board_c.md` §4.2) |
 | RAM nội còn sau IDF, ở bước `storage` của boot | 196 771 B đo | `ram.md` §5: Wi-Fi và MQTT lấy thêm 54 480 B; sản phẩm đang nghe còn 32 495 B, thấp nhất 12 675 B |
 
@@ -4191,7 +4197,7 @@ PSRAM octal cũng đọc nhanh hơn flash QIO, nên chép lên là lợi hơn ch
 
 E9-T7 và E11-T15 đo độ trễ đỉnh một khung của `ns` và `wake` với trọng số ở PSRAM, **có Wi-Fi đang
 chạy**. Vượt nhịp thì thu nhỏ mạng hoặc giảm nhịp chạy, ghi ADR; **không tự kéo model về RAM nội**. Nếu
-RAM nội vẫn chật: giảm đệm Wi-Fi, rồi `aec` 8 → 6 phân đoạn (96 ms đuôi), rồi `aec` sang số nguyên.
+RAM nội vẫn chật: giảm đệm Wi-Fi.
 
 Mốc ngoài để so: chuỗi làm sạch của ESP-SR lấy 48,7–91,1 KB RAM nội (TỔNG QUAN §7). Bản ở đây float32
 nên lớn hơn; đó là giá của mã đọc được và khớp Python từng phép tính.
@@ -4210,6 +4216,7 @@ Board B, profile `bench`, lúc đã nghe: sản phẩm với b0 ở `measurement
 | `svc_listen`: vòng 512 bước log-mel và cao độ, hai bảng lexicon | ~383 KB, đo 502 KB với 301 lệnh |
 | `speaker` (§3.17): tensor b0 2 135 KB hay b3 4 012 KB (đo), vòng PCM 512 bước 256 KB, hai ô xác minh 94 KB, đặc trưng 42 KB, `spk_fbank` 58 KB đo, chỗ chấm trên nhóm chuẩn 2 KB | ~2,5 MB với b0, ~4,4 MB với b3 |
 | `pitch` (SwiftF0, §3.11): đồ thị, tensor và cột giữ | 246 632 B đo (`pitch.md` §7.2) |
+| `aec` (§3.5), chỉ khi có loa: phổ tham chiếu 8 × 257 phức, đệm, mỗi micro trọng số 8 × 257 phức và thống kê | ~56 KB một micro, ~75 KB hai micro, tính 🔬 |
 | **Còn trống khi nghe** | 4 278 432 B đo với b0, 4 258 212 B khi Wi-Fi và MQTT đã nối (`ram.md` §5); 2 022 720 B với b3, Wi-Fi chưa nối (`ram.md` §4) |
 | `detect` cạnh sản phẩm (§3.18) | đồ thị 2 825 888 B cộng 11 152 B lúc chạy: vừa với b0, không vừa với b3 (`ram.md` §5) |
 | Ảnh của board C (§3.19): một khung JPEG 1280 × 720 ~184 KB, RGB888 640 × 360 691 200 B, đệm giải JPEG 64 KB, khúc gửi 16 KB, ngăn xếp `nhin_task` và `do_task` 20 KB | ~0,97 MB; board C một micro, b0, `detect`: còn 638 148 B đo sau boot |
