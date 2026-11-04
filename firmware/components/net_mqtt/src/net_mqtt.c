@@ -14,15 +14,18 @@
 #include "sdkconfig.h"
 #include "sys_storage.h"
 
-#define JSON_ARENAS 2
-#define JSON_ALIGN 8     // cJSON nodes hold doubles
-#define PRINT_BYTES 2048 // a roster of 8 names of 31 escaped characters
+#define JSON_ARENAS 3 // gui_task, esp-mqtt and nhin_task can build at once
 #define STATUS_BYTES 160
+#define JSON_ALIGN 8     // cJSON nodes hold doubles
+#define PRINT_BYTES 4096 // detections: GEN_VISION_BOXES_MAX boxes
 #define URI_BYTES 128
 #define USER_BYTES 65
 #define PASS_BYTES 65
 #define TLS_SCHEME "mqtts://"
 #define COMMANDS_SLOTS 2 // the set its receiver reads, and one filling or waiting
+#define IMAGE_OUTBOX_MAX_BYTES (256 * 1024)
+#define IMAGE_DRAIN_POLL_MS 10
+#define IMAGE_DRAIN_TIMEOUT_MS 10000
 
 _Static_assert(sizeof(((speaker_set_t *)0)->speakers) / sizeof(((speaker_set_t *)0)->speakers[0]) ==
                        APP_SPEAKERS_MAX &&
@@ -159,7 +162,7 @@ static esp_err_t status_json(status_state_t state, char *out, size_t cap)
     return printed ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
-static esp_err_t send_payload(cJSON *root, gen_topic_id_t id)
+static esp_err_t send_payload(cJSON *root, gen_topic_id_t id, bool at_once)
 {
     char topic[GEN_TOPIC_MAX_LEN + 1];
     char *text = root != NULL ? json_malloc(PRINT_BYTES) : NULL;
@@ -167,9 +170,10 @@ static esp_err_t send_payload(cJSON *root, gen_topic_id_t id)
     if (text != NULL && cJSON_PrintPreallocated(root, text, PRINT_BYTES, false) &&
         gen_topic_build(id, s_device_id, topic, sizeof(topic))) {
         const gen_topic_info_t *info = &GEN_TOPIC_INFO[id];
-        err = esp_mqtt_client_enqueue(s_client, topic, text, 0, info->qos, info->retain, true) >= 0
-                  ? ESP_OK
-                  : ESP_ERR_NO_MEM;
+        const int sent =
+            at_once ? esp_mqtt_client_publish(s_client, topic, text, 0, info->qos, info->retain)
+                    : esp_mqtt_client_enqueue(s_client, topic, text, 0, info->qos, info->retain, true);
+        err = sent >= 0 ? ESP_OK : ESP_ERR_NO_MEM;
     }
     if (err != ESP_OK) { s_stats.publish_failures++; }
     cJSON_Delete(root);
@@ -397,7 +401,7 @@ esp_err_t net_mqtt_publish_heartbeat(heartbeat_t *hb)
     strlcpy(hb->device_id, s_device_id, sizeof(hb->device_id));
     hb->json_arena_peak = s_arena_peak;
     hb->has_json_arena_peak = true;
-    return send_payload(heartbeat_to_json(hb), GEN_TOPIC_HEARTBEAT);
+    return send_payload(heartbeat_to_json(hb), GEN_TOPIC_HEARTBEAT, false);
 }
 
 esp_err_t net_mqtt_publish_roster(speaker_roster_t *roster)
@@ -405,7 +409,7 @@ esp_err_t net_mqtt_publish_roster(speaker_roster_t *roster)
     if (roster == NULL) { return ESP_ERR_INVALID_ARG; }
     if (s_client == NULL || !s_connected) { return ESP_ERR_INVALID_STATE; }
     strlcpy(roster->device_id, s_device_id, sizeof(roster->device_id));
-    return send_payload(speaker_roster_to_json(roster), GEN_TOPIC_ROSTER);
+    return send_payload(speaker_roster_to_json(roster), GEN_TOPIC_ROSTER, false);
 }
 
 esp_err_t net_mqtt_parse_command_set(const char *text, size_t len, command_set_t *out)
@@ -425,7 +429,38 @@ esp_err_t net_mqtt_publish_event(event_t *ev)
     if (ev == NULL) { return ESP_ERR_INVALID_ARG; }
     if (s_client == NULL || !s_connected) { return ESP_ERR_INVALID_STATE; }
     strlcpy(ev->device_id, s_device_id, sizeof(ev->device_id));
-    return send_payload(event_to_json(ev), GEN_TOPIC_EVENT);
+    return send_payload(event_to_json(ev), GEN_TOPIC_EVENT, false);
+}
+
+esp_err_t net_mqtt_publish_detections(detections_t *found)
+{
+    if (found == NULL) { return ESP_ERR_INVALID_ARG; }
+    if (s_client == NULL || !s_connected) { return ESP_ERR_INVALID_STATE; }
+    strlcpy(found->device_id, s_device_id, sizeof(found->device_id));
+    // At once: mqtt_task sits under nhan_task, which is catching up on the hops detect held back
+    // (KEHOACH 3.18).
+    return send_payload(detections_to_json(found), GEN_TOPIC_DETECTIONS, true);
+}
+
+esp_err_t net_mqtt_publish_image(const uint8_t *chunk, size_t bytes)
+{
+    if (chunk == NULL || bytes == 0) { return ESP_ERR_INVALID_ARG; }
+    if (s_client == NULL || !s_connected) { return ESP_ERR_INVALID_STATE; }
+    char topic[GEN_TOPIC_MAX_LEN + 1];
+    if (!gen_topic_build(GEN_TOPIC_IMAGE, s_device_id, topic, sizeof(topic))) { return ESP_ERR_INVALID_SIZE; }
+    const gen_topic_info_t *info = &GEN_TOPIC_INFO[GEN_TOPIC_IMAGE];
+    if (esp_mqtt_client_enqueue(s_client, topic, (const char *)chunk, (int)bytes, info->qos, info->retain,
+                                true) < 0) {
+        s_stats.publish_failures++;
+        return ESP_ERR_NO_MEM;
+    }
+    // A whole picture may wait in the outbox, in PSRAM: it leaves while decode and detect run (KEHOACH 3.19).
+    const TickType_t started = xTaskGetTickCount();
+    while (esp_mqtt_client_get_outbox_size(s_client) > IMAGE_OUTBOX_MAX_BYTES) {
+        if (xTaskGetTickCount() - started > pdMS_TO_TICKS(IMAGE_DRAIN_TIMEOUT_MS)) { return ESP_ERR_TIMEOUT; }
+        vTaskDelay(pdMS_TO_TICKS(IMAGE_DRAIN_POLL_MS));
+    }
+    return ESP_OK;
 }
 
 void net_mqtt_stats(net_mqtt_stats_t *out)

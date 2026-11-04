@@ -85,6 +85,20 @@ esp_err_t net_mqtt_publish_event(event_t *ev);
  */
 esp_err_t net_mqtt_publish_roster(speaker_roster_t *roster);
 
+/** Send what detect found in one capture now, without waiting for mqtt_task; deviceId is filled here.
+ *  @ctx nhin_task | blocking on the network | caller keeps found
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session | ESP_ERR_NO_MEM arena full or the send failed
+ */
+esp_err_t net_mqtt_publish_detections(detections_t *found);
+
+/** Queue one chunk of a picture on up/image, a header of contracts/vision.yaml and its data; only a full
+ * outbox waits.
+ *  @ctx nhin_task | blocking only while the outbox holds more than a picture | caller keeps chunk
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session | ESP_ERR_NO_MEM outbox full | ESP_ERR_TIMEOUT never
+ * drained
+ */
+esp_err_t net_mqtt_publish_image(const uint8_t *chunk, size_t bytes);
+
 /** Parse a command set laid out as contracts/schema/command_set.schema.json, through the caller's arena.
  *  @ctx task | non-blocking | text need not end in NUL; out belongs to the caller, about 20 KB: not the stack
  *  @ret ESP_OK | APP_ERR_COMMANDS_INVALID not JSON or outside the schema | ESP_ERR_NO_MEM arena full
