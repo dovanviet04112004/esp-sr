@@ -25,7 +25,6 @@ from srhost.mqtt_rx import Message, Receiver
 IMAGES_DIR = Path("raw") / "images"
 PERMILLE = 1000
 CONNECT_TIMEOUT_S = 10.0
-FOCUS_BYTES_PER_MARK = 2048
 FPS_WINDOW_FRAMES = 20
 MS_PER_S = 1000
 KEEP_ALIVES_PER_HOLD = 2
@@ -33,24 +32,46 @@ LIVE_BIND = "127.0.0.1"  # a photo of a room stays on this machine (KEHOACH 7.5)
 LIVE_PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Board C live</title><style>
 body { margin: 0; background: #111; color: #eee; font: 16px system-ui, sans-serif; text-align: center; }
-#bar { padding: 10px; font-size: 22px; } button { font-size: 16px; margin-left: 16px; padding: 4px 12px; }
-#view { height: calc(100vh - 60px); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+#bar { padding: 10px; font-size: 26px; } button { font-size: 16px; margin-left: 16px; padding: 4px 12px; }
+#view { height: calc(100vh - 66px); display: flex; align-items: center; justify-content: center; overflow: hidden; }
 img { max-width: 100vh; max-height: 100vw; }
 </style></head><body>
-<div id="bar"><span id="now">waiting for a picture</span><button id="turn">Rotate</button></div>
+<div id="bar"><span id="now">waiting for a frame</span><button id="turn">Rotate</button></div>
 <div id="view"><img id="frame" alt=""></div>
+<canvas id="probe" width="160" height="90" hidden></canvas>
 <script>
-let serial = 0, turn = 90;
+let serial = 0, turn = 90, fps = 0, best = 0;
 const frame = document.getElementById("frame"), now = document.getElementById("now");
+const probe = document.getElementById("probe").getContext("2d", {willReadFrequently: true});
 const show = () => { frame.style.transform = "rotate(" + turn + "deg)"; };
 document.getElementById("turn").onclick = () => { turn = (turn + 90) % 360; show(); };
 show();
+const level = (counts, total, share) => {
+  let seen = 0;
+  for (let i = 0; i < 256; i++) { seen += counts[i]; if (seen >= total * share) return i; }
+  return 255;
+};
+// Steepest edges over the contrast, on a small copy: noise averages out there, and neither light nor scene size counts.
+frame.onload = () => {
+  const w = 160, h = 90, steps = new Uint32Array(256), values = new Uint32Array(256);
+  probe.drawImage(frame, 0, 0, w, h);
+  const d = probe.getImageData(0, 0, w, h).data;
+  for (let y = 0; y < h - 1; y++) for (let x = 0; x < w - 1; x++) {
+    const i = (y * w + x) * 4 + 1;
+    values[d[i]]++;
+    steps[Math.max(Math.abs(d[i] - d[i + 4]), Math.abs(d[i] - d[i + w * 4]))]++;
+  }
+  const n = (w - 1) * (h - 1);
+  const sharp = Math.round(100 * level(steps, n, 0.995) / (level(values, n, 0.99) - level(values, n, 0.01) + 1));
+  best = Math.max(best, sharp);
+  now.textContent = "Sharpness " + sharp + ", best " + best + ", " + fps.toFixed(1) + " frames/s";
+};
 setInterval(async () => {
   const state = await (await fetch("/state")).json();
   if (state.serial === serial) return;
   serial = state.serial;
+  fps = state.fps;
   frame.src = "/frame.jpg?n=" + serial;
-  now.textContent = state.fps.toFixed(1) + " frames/s, " + state.bytes + " B, sharpest " + state.bestBytes + " B";
 }, 100);
 </script></body></html>
 """
@@ -149,23 +170,10 @@ def describe_boxes(payload: dict) -> str:
     return f"{stem}: {len(payload['boxes'])} found in {payload['detectMs']} ms: {found or 'nothing'}"
 
 
-class FocusMeter:
-    """A hand on the lens reads each picture's size: a sharper frame compresses worse, so bytes rise into focus."""
-
-    def __init__(self) -> None:
-        self.best_bytes = 0
-
-    def line(self, image_bytes: int) -> str:
-        """One line for one picture, against the sharpest so far."""
-        self.best_bytes = max(self.best_bytes, image_bytes)
-        return f"{image_bytes:7d} B  best {self.best_bytes:7d} B  {'#' * (image_bytes // FOCUS_BYTES_PER_MARK)}"
-
-
 class LiveFeed:
     """The newest preview frame for the live page and how fast they come; none reaches the disk."""
 
     def __init__(self) -> None:
-        self.meter = FocusMeter()
         self._lock = threading.Lock()
         self._jpeg = b""
         self._serial = 0
@@ -176,7 +184,6 @@ class LiveFeed:
             self._jpeg = jpeg
             self._serial += 1
             self._arrivals.append(time.monotonic() if at_s is None else at_s)
-        print(self.meter.line(len(jpeg)), flush=True)
 
     def jpeg(self) -> bytes:
         with self._lock:
@@ -186,7 +193,7 @@ class LiveFeed:
         with self._lock:
             span_s = self._arrivals[-1] - self._arrivals[0] if len(self._arrivals) > 1 else 0.0
             fps = (len(self._arrivals) - 1) / span_s if span_s > 0 else 0.0
-            return {"serial": self._serial, "bytes": len(self._jpeg), "bestBytes": self.meter.best_bytes, "fps": fps}
+            return {"serial": self._serial, "fps": fps}
 
 
 def live_handler(feed: LiveFeed) -> type[BaseHTTPRequestHandler]:

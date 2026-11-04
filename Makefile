@@ -823,7 +823,7 @@ host-live: ## Show wake and command events live
 vision-watch: ## Keep board C's pictures under the data root and print what detect found
 	cd host && uv run python -m srhost.vision
 
-vision-live: ## Board C's pictures one after another on a local page; the bytes rise as the lens comes into focus: DEVICE=<deviceId>
+vision-live: ## Board C's preview on a local page, with a sharpness figure for setting the lens by hand: DEVICE=<deviceId>
 	cd host && uv run python -m srhost.vision --device "$(DEVICE)" --live
 
 commands: ## Send a command set to one board, retained, and show its answer: DEVICE=<deviceId> SET=<file.json> [CLEAR=1]

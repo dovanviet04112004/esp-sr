@@ -109,7 +109,7 @@ def test_the_live_feed_serves_the_newest_picture_and_counts_them() -> None:
     feed.take(b"first", at_s=10.0)
     feed.take(b"second one", at_s=10.5)
     assert feed.jpeg() == b"second one"
-    assert feed.state() == {"serial": 2, "bytes": 10, "bestBytes": 10, "fps": 2.0}
+    assert feed.state() == {"serial": 2, "fps": 2.0}
 
 
 def test_a_preview_frame_reaches_the_page_and_no_file(tmp_path: Path) -> None:
@@ -127,11 +127,3 @@ def test_a_picture_lands_in_a_file_beside_a_live_page(tmp_path: Path) -> None:
     vision.on_message(assembler, mqtt_rx.parse(f"sr/{DEVICE}/up/image", chunk(PICTURE, 0, 1), rx_utc="now"), feed)
     assert (tmp_path / DEVICE / "B7_000002.jpg").read_bytes() == PICTURE
     assert feed.state()["serial"] == 0
-
-
-def test_the_focus_meter_keeps_the_sharpest_picture_seen() -> None:
-    meter = vision.FocusMeter()
-    assert "best   40000" in meter.line(40000)
-    assert "best   60000" in meter.line(60000)
-    assert "best   60000" in meter.line(50000)
-    assert meter.line(4096).endswith("##")
