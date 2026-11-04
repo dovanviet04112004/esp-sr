@@ -1,6 +1,6 @@
 # ADR-0044 — Camera, thẻ SD, ngoại vi của board C và hai lệnh "chụp ảnh", "nhận diện"
 
-- **Trạng thái**: Đề xuất (chủ repo 04/11 yêu cầu lên kế hoạch, viết đủ mọi ngoại vi; chờ chốt mục "Cần chủ repo chốt")
+- **Trạng thái**: Chấp nhận (chủ repo 04/11: "Ok", cả năm điểm theo đề xuất)
 - **Ngày**: 2026-11-04
 - **Liên quan**: KẾ HOẠCH §2.1, §2.2, §3.18, §4.5, §5.2, §5.3, §6.5, §6.6, §7.3, §7.5; ADR-0030, ADR-0042; TASKS E2-T13,
   E15-T6, E15-T7, E15-T15; `docs/measurements/board_c.md`, `docs/measurements/ram.md` §5
@@ -38,7 +38,7 @@ Năm ràng buộc quyết định thiết kế:
 | Ảnh lên MQTT | base64 trong JSON | dùng lại `gen_payload` | to thêm 33%, tốn vùng JSON |
 | | **nhị phân theo khúc, topic riêng** | không qua cJSON, bộ nhớ gửi nhỏ | thêm một khuôn ở `contracts/` |
 
-## Quyết định đề xuất
+## Quyết định
 
 ### 1. Component mới
 
@@ -139,13 +139,13 @@ tiếng người. Ảnh trên thẻ không mã hoá.
 
 Bước 2 và 3 độc lập, bước 5 cần cả hai. Lệnh đầu tiên chạy được ở bước 5. Bước 8–10 độc lập với luồng ảnh.
 
-## Cần chủ repo chốt
+## Chủ repo đã chốt
 
-1. **Cỡ ảnh:** đề xuất 1280 × 720, cho cả ảnh lưu lẫn `detect` (giải 1:2). VGA nhẹ hơn; ảnh lớn hơn thì `detect` phải chụp riêng.
-2. **Đèn GPIO 42 khi chụp:** đề xuất bật, vừa làm đèn flash vừa báo đang chụp.
-3. **`down/image`:** E15-T7 định cho host gửi ảnh xuống. Đề xuất bỏ, vì đã có camera và `ai-unit-detect` kiểm khớp từng giá trị.
-4. **Hồng ngoại có tự kích chụp không?** Đề xuất chưa: bản đầu chỉ báo lên host.
-5. **Vị trí GPS có ghi kèm ảnh không?** Đề xuất có, khi GPS có vị trí; cần anten trước.
+1. **Cỡ ảnh** 1280 × 720, cho cả ảnh lưu lẫn `detect` (giải 1:2).
+2. **Đèn GPIO 42** bật khi chụp, vừa làm đèn flash vừa báo đang chụp.
+3. **Bỏ `down/image`** của E15-T7: đã có camera, và `ai-unit-detect` kiểm khớp từng giá trị.
+4. **Hồng ngoại** chưa tự kích chụp: bản đầu chỉ báo lên host.
+5. **Vị trí GPS** ghi kèm ảnh khi có vị trí; cần anten trước.
 
 ## Hệ quả
 

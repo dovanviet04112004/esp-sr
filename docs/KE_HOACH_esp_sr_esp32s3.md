@@ -332,8 +332,8 @@ Mỗi lần nạp chỉ ghi ảnh nào khác bản đang trên flash: esptool `-
 `idf.py` nạp ở `FLASH_BAUD` qua `ESPBAUD`, như pytest-embedded.
 
 **Board C** là board của sản phẩm kế tiếp (ADR-0042). Số dưới đây đọc từ chip và eFuse ngày 04/11; kết quả kiểm từng khối ở
-`measurements/board_c.md`. `make product BOARD=C` dựng và nạp bản của nó: chuỗi nghe của board một micro (§2.3), chưa dùng
-camera, loa, thẻ SD và GPS (E2-T12, E15-T15).
+`measurements/board_c.md`. `make product BOARD=C` dựng và nạp bản của nó: chuỗi nghe của board một micro (§2.3), cộng ảnh
+và ngoại vi của §3.19.
 
 | | |
 |---|---|
@@ -2477,8 +2477,8 @@ lúc chạy (CLAUDE.md §4.1, chủ repo chọn 03/11, E15-T17).
 Tải hỏng, sha256 sai hay mất điện lúc ghi thì `vision_0` không có header: nhận diện tắt, và tin retained kích tải lại ở
 lần khởi động sau. Lúc dựng có thêm đường USB, `make vision-flash`.
 
-**Ảnh vào.** Board B không có camera (§2.1). Tới khi gắn camera, host gửi ảnh JPEG xuống `down/image`, board trả
-`up/detections`: mỗi khung gồm lớp, điểm, toạ độ, cùng số ms. Camera là việc sau: chọn module, chân (§2.2), driver.
+**Ảnh vào.** Camera của board C (§3.19) chụp ảnh, board trả `up/detections`: mỗi khung gồm lớp, điểm, toạ độ, cùng số ms.
+Board B không có camera nên không chạy `detect` trong sản phẩm; phép kiểm khớp mô phỏng chạy ở app thử.
 
 **Nhánh `detect` của `ai_engine`** (`src/detect/`, §4.5.5).
 - `ai_engine_detect_load(label)` ánh xạ ảnh thị giác của phân vùng ấy qua `sys_storage` (`vision_0` ở sản phẩm, khe dò
@@ -2498,14 +2498,14 @@ lần khởi động sau. Lúc dựng có thêm đường USB, `make vision-flas
   - xếp điểm cao trước; component chỉ chia nhóm bằng `nth_element`;
   - đổi khung từ ô S×S về điểm ảnh của ảnh gốc, như các bộ hậu xử lý detect của esp-dl: bỏ viền, nhân nghịch tỉ lệ,
     cắt về số nguyên, kẹp trong ảnh.
-- Giải JPEG là việc của người gọi (`nhin_task`, E15-T7), bằng bộ giải của esp-dl. Phép kiểm chip đưa thẳng RGB888, nên
-  bản mô phỏng thấy đúng những điểm ảnh ấy.
+- Giải JPEG là việc của người gọi (`svc_vision`, §3.19). Phép kiểm chip đưa thẳng RGB888, nên bản mô phỏng thấy đúng
+  những điểm ảnh ấy.
 - Bước 5 của chuỗi, chip khớp mô phỏng, chạy ở app thử của `ai_engine` với profile `detect`. 8 ảnh COCO RGB888, CRC32
   của sáu tensor ra và các khung kỳ vọng do `tasks/detect/probe.py` dựng: ESP-PPQ mô phỏng đồ thị int8 trên letterbox
   của chip, `postproc/decode.py` ★ chép đúng `decode.c`. Ảnh có sha256 sai thì `load` từ chối.
 
-**Chạy trên board.** `nhin_task` ở nhân 0, ưu tiên thấp nhất, dưới mọi task tiếng nói; mỗi lần một ảnh. Tiếng nói
-giành CPU khi cần, ảnh chờ. Không chạy ở nhân 1: hai đồ thị esp-dl song song trên hai nhân từng làm sai kết quả
+**Chạy trên board.** `nhin_task` của `svc_vision` (§3.19) ở nhân 0, ưu tiên thấp nhất, dưới mọi task tiếng nói; mỗi lần
+một ảnh. Tiếng nói giành CPU khi cần, ảnh chờ. Không chạy ở nhân 1: hai đồ thị esp-dl song song trên hai nhân từng làm sai kết quả
 (ADR-0027, `measurements/latency.md` §33). Tensor trung gian ở PSRAM, cỡ đo ở E15-T2 🔬.
 
 **Tối ưu tốc độ,** sau khi đã đúng, như đã làm với speaker b3. Mỗi bước đo trên board và chỉ giữ khi kết quả không
@@ -2540,6 +2540,43 @@ tuỳ RAM nội còn trống lúc chạy 🔬. `nhin_task` giữ nhân 0 nhiều
 **Thời gian mỗi ảnh chốt ở chừng 1,84 s** (S = 512, 80 lớp, khớp mô phỏng từng giá trị; chủ repo 01/11): phần tối ưu tốc
 độ dừng ở đó. Bước nào còn lại mà làm giảm chất lượng thì không làm; `ConcatConv` khớp từng giá trị nhưng chậm hơn 61 ms
 nên không dùng (ADR-0038, `measurements/detect.md` §10). Điều kiện độ trễ lệnh tiếng nói không tăng vẫn giữ, đo ở E15-T7 🔬.
+
+### 3.19 Ảnh và ngoại vi của board C
+
+Board C có camera, thẻ SD, loa, GPS, cảm biến hồng ngoại và hai thiết bị I2C (§2.1). Mọi ngoại vi đều có driver (ADR-0044);
+board B không có các khối này, Kconfig `APP_CAMERA_ENABLE` và `APP_SENSORS_ENABLE` tắt chúng.
+
+**Hai lệnh nói.** "chụp ảnh" chụp, lưu thẻ, đẩy ảnh về host. "nhận diện" làm như thế rồi chạy `detect` (§3.18) và gửi khung.
+Id của hai lệnh và số của luồng ảnh nằm ở `contracts/vision.yaml`. Host chụp được không cần nói, qua `CAPTURE` của `device_cmd`.
+
+**Một khung JPEG cho mọi việc.** OV5640 tự nén, nên một khung 1280 × 720 đi vào thẻ, lên MQTT, và giải 1:2 thành RGB888
+640 × 360 cho `detect`. Đường RGB565 cần hơn 1,5 MB PSRAM và CPU để nén, không vừa §6.6.
+
+**Sensor nghỉ giữa hai lần chụp.** Dựng một lần trong `app_boot`, rồi nghỉ qua SCCB, vì camera chạy liên tục chiếm băng thông
+PSRAM của chuỗi nghe (§6.6). DMA của camera đổ thẳng vào PSRAM (`CONFIG_CAMERA_PSRAM_DMA`): đệm ở RAM nội là 30 KB, không vừa
+§6.5. Camera có tự lấy nét, phần sụn nạp lúc boot, mỗi lần chụp lấy nét một lượt.
+
+**Một lần chụp:**
+
+1. `dieu_task` thấy `COMMAND` mang id ở `vision.yaml` thì đẩy yêu cầu vào `q_vision`. Lệnh đã qua kiểm người nói nếu kiểm bật.
+2. `nhin_task` đánh thức sensor, bật đèn GPIO 42, bỏ vài khung đầu cho sáng ổn định, lấy nét, chụp một khung.
+3. Ghi `/sdcard/IMG/B<boot>_<seq>.JPG`. Tên dựa vào lượt khởi động vì board chưa có đồng hồ.
+4. Đẩy ảnh lên `up/image` theo khúc (§7.3), rồi gửi sự kiện `CAPTURE`.
+5. Với "nhận diện": giải JPEG, `ai_engine_detect_run`, gửi `up/detections`. Ảnh đi trước khung, nên host có ảnh ngay.
+6. Tắt đèn, sensor nghỉ.
+
+Không có thẻ thì vẫn đẩy ảnh, sự kiện ghi `saved: false`. Mất MQTT thì ảnh vẫn ở thẻ; bản đầu chưa gửi lại. Đang chạy mà có
+lệnh mới thì từ chối ngay với mã `VISION_BUSY`, không xếp hàng.
+
+**Ngoại vi còn lại** gom ở `svc_sensors`, task `do_task`, đăng `up/sensors` khi đổi và mỗi 10 s:
+
+- GPS: `drv_gps`, UART1 chỉ RX ở GPIO 20, 9600 baud. Phân tích NMEA là phần thuần, có test trên máy tính. Vị trí ghi kèm ảnh khi
+  có; hiện board chưa gắn anten.
+- Hồng ngoại: `drv_ir`, GPIO 19, lọc rung vì đầu ra đổi mức dồn dập ở mili giây (`measurements/board_c.md`). Bản đầu chỉ báo
+  lên host, chưa tự kích chụp.
+- I2C: `drv_i2c`, bus GPIO 1/2, mỗi thiết bị một file. Hai thiết bị ở 0x48 và 0x68 nhận dạng bằng thanh ghi trước khi viết.
+- Loa: bật `APP_SPEAKER_ENABLE`, `drv_audio` chạy TX, bíp khi nhận lệnh và khi chụp. Từ lúc ấy `bsp_board` không còn phải giữ
+  GPIO 14 (§2.2).
 
 ---
 ## 4. Cấu trúc repo
@@ -2651,6 +2688,7 @@ contracts/
 | `afe.yaml` | `dsp_afe/include/gen_afe.h`, `ml/src/srpipe/generated/afe.py`, `firmware/sdkconfig.afe` | `dsp_afe` và bản soi gương của nó; `sdkconfig.afe` bật đúng các module của `modules:` cho mọi bản dựng sản phẩm, `bench_afe` và profile `modules` của parity, còn `srpipe.dsp.afe.chain` đọc cùng danh sách để dựng bộ vàng `chain_modules` |
 | `lang_vi.yaml` | `lang_vi/priv_include/gen_lang_vi.h`, `ml/src/srpipe/generated/lang_vi.py` | `lang_vi` và bản soi gương `srpipe.lang` |
 | `lang_vi.yaml` | `common/include/gen_units.h`: mã các đơn vị thanh, đơn vị kết mỗi âm tiết | `ai_engine` tách phần của lệnh khi chấm `ctc` (§3.12) |
+| `vision.yaml` | `common/include/gen_vision.h`, `host/src/srhost/generated/vision.py` | `drv_camera`, `svc_vision`, `net_mqtt`, `main`, `host` |
 | `listen.yaml` | `common/include/gen_listen.h`, `ml/src/srpipe/generated/listen.py` | `svc_listen`, `ai_engine` (độ dài cửa sổ `command`), `bench_afe`; đường mô phỏng board, mọi nhánh ml tính đặc trưng, Cửa 3 |
 | `speaker.yaml` | `common/include/gen_speaker.h`, `ml/src/srpipe/generated/speaker.py` | `svc_listen` (cỡ ô xác minh), `ai_engine` (khâu đặc trưng, `speaker_hash`); `srpipe.dsp.spec.spk_fbank`, nhánh `speaker` |
 | `stream/frame.yaml` | `common/include/gen_stream.h`, `host/src/srhost/generated/stream.py` | `net_stream`, `svc_report`, `host` |
@@ -2999,6 +3037,8 @@ chứng âm cố ý vi phạm:
 | `espressif/esp-dl` | `ai_engine` | `==3.3.14` (E15-T1, `measurements/latency.md` §35: mọi model tiếng nói vẫn khớp từng bit), cặp với ESP-PPQ `==1.3.11` ở `ml/pyproject.toml`; chạy dòng khớp mô phỏng từng bit ở E11-T10 |
 | `espressif/mqtt`, `espressif/cjson` | `net_mqtt` | `^`; IDF v6 đã đưa cả hai ra khỏi lõi, `REQUIRES mqtt` trơ fail ở bước giải phụ thuộc |
 | `joltwallet/littlefs` | `sys_storage` | `^` |
+| `espressif/esp32-camera` | `drv_camera` | `==2.1.7`, kéo theo `esp_jpeg` |
+| `espressif/esp_jpeg` | `svc_vision` | `^1.3.1`, bản `esp32-camera` kéo về |
 | `espressif/esp-sr` | **chỉ** `test_apps/espsr_compare/main` | `==2.5.5`, bản mới nhất trên registry ngày 30/09; không dựng được trên IDF v6.0.2 thì ghim bản dựng được và sửa dòng này |
 | `numba`, `llvmlite` | `ml/pyproject.toml` | `==0.68.0`, `==0.50.0`: các vòng lặp nóng của bản soi gương (bộ giới hạn của `agc`, biquad của `hpf`, bộ lọc tách băng và GMM của `vad`, cả bước của `ns_omlsa` cùng các hàm nghịch đảo, căn, log2, exp2 mà `gsc`, `doa`, `bss` dùng chung, vòng dò lưới của `doa`, biến đổi khoảng cách và đặc trưng theo đường Viterbi của `pitch`) biên dịch JIT, cùng thứ tự phép float32 nên ra đúng từng bit như numpy; LLVM khác bản có thể sinh mã khác |
 
@@ -3051,6 +3091,11 @@ firmware/
 │   ├── dsp_afe/       [C]   L2  # hpf balance aec doa gsc bss ns_omlsa vad agc + khe ns
 │   ├── drv_audio/     [C]   L2  # I2S song công, 24→16 bit, đếm khung, bắt tràn DMA, bản sao phát
 │   ├── drv_led/       [C]   L2  # LED trạng thái và riêng tư
+│   ├── drv_camera/    [C]   L2  # OV5640: JPEG, DMA vào PSRAM, nghỉ qua SCCB, tự lấy nét (§3.19)
+│   ├── drv_sd/        [C]   L2  # thẻ SD qua SPI, FAT ở /sdcard
+│   ├── drv_gps/       [C]   L2  # UART1 RX, NMEA thuần có test máy tính
+│   ├── drv_ir/        [C]   L2  # cảm biến hồng ngoại, lọc rung
+│   ├── drv_i2c/       [C]   L2  # bus I2C, mỗi thiết bị một file
 │   ├── sys_storage/   [C]   L2  # NVS + LittleFS + mmap ảnh model; sở hữu storage_format.h
 │   ├── sys_time/      [C]   L2  # SNTP
 │   ├── ai_engine/     [C++] L3  # esp-dl; src/core/ không biết tên model;
@@ -3078,6 +3123,8 @@ firmware/
 │   ├── svc_listen/    [C]   L4  # nhan: mel → wake → command, bảng lệnh qua lang_vi
 │   ├── svc_speak/     [C]   L4  # noi: synth hoặc ghép mẩu → drv_audio TX
 │   ├── svc_report/    [C]   L4  # gui: số liệu → MQTT, khung → net_stream
+│   ├── svc_vision/    [C]   L4  # nhin: chụp, lưu thẻ, đẩy ảnh, detect (§3.19)
+│   ├── svc_sensors/   [C]   L4  # do: GPS, hồng ngoại, I2C → up/sensors
 │   └── svc_dialog/    [C]   L5  # máy trạng thái hội thoại §5.4
 │
 ├── third_party/README.md
@@ -3094,6 +3141,7 @@ firmware/
 │   ├── soak/                         # chạy dài, đếm khung mất, theo dõi heap
 │   ├── capture/                      # ★ app chỉ thu: đẩy thô ch0 ch1 ref về máy để lấy dữ liệu
 │   ├── calib/                        # ★ hiệu chuẩn balance và trễ tham chiếu, ghi NVS
+│   ├── board_c/                      # ★ kiểm từng khối của board C qua UART: make board-c-check
 │   ├── bss_live/                     # tách trực tiếp: chuỗi bss trên tiếng thu, mỗi ghế một kênh về host/ (§3.8, §7.4)
 │   └── espsr_compare/                # chỗ DUY NHẤT link espressif/esp-sr (§3.16, §4.5.1): AFE của ESP-SR và dsp_afe
 │       ├── main/{idf_component.yml, Kconfig.projbuild, job_format.h, *.c}   # esp-sr ghim ở đây; khuôn việc
@@ -3181,6 +3229,8 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | L4 | `svc_listen` | ghép | C | `common`, `dsp_spec`, `lang_vi`, `ai_engine`, `sys_storage` |
 | L4 | `svc_speak` | ghép | C | `common`, `drv_audio`, `lang_vi`, `ai_engine`, `sys_storage` |
 | L4 | `svc_report` | ghép | C | `common`, `net_mqtt`, `net_stream`, `net_wifi` (radio thức khi luồng tiếng mở, §7.2) |
+| L4 | `svc_vision` | ghép | C | `common`, `bsp_board`, `drv_camera`, `drv_sd`, `ai_engine`, `net_mqtt` |
+| L4 | `svc_sensors` | ghép | C | `common`, `drv_gps`, `drv_ir`, `drv_i2c`, `net_mqtt` |
 | L5 | `svc_dialog` | ghép | C | `common`, `sys_storage` |
 | L6 | `main` | nối dây | C | tất cả |
 
@@ -3411,8 +3461,8 @@ host/
 │   ├── live.py                    # xem trực tiếp: hướng, cờ tiếng nói, mức, sự kiện kèm tên người nói
 │   ├── commands.py                # gửi bộ lệnh xuống down/commands của một board, in lỗi COMMANDS_* board báo về
 │   ├── speakers.py                # gửi danh sách người nói xuống down/speakers, đăng ký giọng, in up/speakers
-│   ├── vision.py                  # §3.18: phục vụ ảnh thị giác qua HTTP, báo down/vision, gửi ảnh thử
-│   │                              #   xuống down/image, in up/vision và up/detections
+│   ├── vision.py                  # §3.18, §3.19: ghép ảnh từ up/image, in up/detections và up/vision,
+│   │                              #   phục vụ ảnh thị giác qua HTTP, báo down/vision
 │   ├── session.py                 # phiên thu có nhãn: danh sách câu nhắc, mã người nói, mã phiếu đồng ý
 │   ├── score.py                   # chấm một phiên đã thu theo nhãn, gọi ml/src/srpipe/metrics
 │   ├── calib.py                   # ước balance từ phiên ồn trắng (srpipe), kiểm chéo; ghi calib/bal và calib/pcm_shift
@@ -3550,6 +3600,7 @@ broker khởi động lại là mất `status` `offline` của máy đang tắt.
 | Trường payload MQTT | `contracts/schema/*.json` | `gen_payload.h` · `srhost.generated.payload` |
 | Topic, QoS, retained | `contracts/mqtt_topics.yaml` | `gen_topics.h` · `srhost.generated.topics` |
 | Khuôn luồng tiếng | `contracts/stream/frame.yaml` | `gen_stream.h` · `srhost.generated.stream` |
+| Cỡ ảnh, chất lượng JPEG, số khung ổn định sáng, khuôn khúc ảnh, id của hai lệnh ảnh | `contracts/vision.yaml` | `gen_vision.h` · `srhost.generated.vision` |
 | Model đang deploy, sha256 | `contracts/models.lock.json` | đọc file |
 | Bộ lệnh mặc định, câu trả lời | `contracts/commands/`, `contracts/responses/` | nướng vào LittleFS |
 | Ngưỡng khớp golden | `contracts/golden/<khối>/tolerance.yaml` | đọc file |
@@ -3616,6 +3667,8 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 | `gui_task` | `svc_report` | 0 | 4 | 4 KB | nhịp 100 ms | lấy mẫu `s_afe_stats`, gộp 10 mẫu thành một `telemetry` mỗi giây; phát `q_event_up`; `heartbeat` mỗi 30 s; đăng `up/speakers` khi `q_roster` có bản mới hay khi MQTT nối lại |
 | `luong_task` | `svc_report` | 0 | 3 | 4 KB | `sb_stream` | đẩy khung qua `net_stream`; TCP nghẽn thì bỏ khung, đếm; không bao giờ chặn người ghi |
 | `net_task` | `net_wifi` | 0 | 3 | 4 KB | một lần lúc boot | chờ link **tới khi có**, rồi nối MQTT, mở SNTP; xong thì tự xoá |
+| `nhin_task` | `svc_vision` | 0 | 1 | 8 KB **ở PSRAM** | `q_vision` | chụp, lưu thẻ, đẩy ảnh, `detect` (§3.19); không ghi flash nên ngăn xếp ở PSRAM được; chỉ có ở board C |
+| `do_task` | `svc_sensors` | 0 | 2 | 4 KB **ở PSRAM** | nhịp 1 s | đọc GPS, hồng ngoại, I2C, đăng `up/sensors`; chỉ có ở board C |
 | `mqtt_task` | esp-mqtt | 0 | 5 | 6 KB **ở PSRAM** | esp-mqtt tự tạo | gửi nhận, TLS ở `prod` |
 | `console` | `esp_console` (REPL) | 0 | 2 | 4 KB | `esp_console` tự tạo, **chỉ khi** `APP_CONSOLE` — không có ở `prod` | đọc dòng lệnh trên UART0, ghi NVS qua `sys_storage`; lệnh `spk` đọc `q_roster`, gửi `q_spk`; không lưu lịch sử xuống flash |
 | `wifi`, `tcpip`, `esp_timer`, `sys_evt` | IDF | 0 | 18–23 | — | — | IDF quản lý; ghim nhân 0 bằng Kconfig, `sys_evt` tự ghim nhân 0; `net_wifi` nối lại trong callback của `sys_evt` và `esp_timer`, không có task riêng |
@@ -3651,9 +3704,10 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `q_clean` | Queue depth **128** (~2 s), `dsp_afe_frame_t` ~530 B, bộ nhớ ở **PSRAM** | ~68 KB | `sach_task` | `nhan_task` | `sach_task` không chờ: bỏ khung, tăng `clean_dropped`; `nhan_task` thấy hở `seq` thì đặt lại STFT và bộ dò cao độ của `svc_listen` (cả trạng thái `wake` khi có), câu đang mở thành `REJECT FRAME_GAP` (§5.4) | đây là chỗ "nạp và lấy không cùng nhịp" của TỔNG QUAN §4.3; điểm cao nhất xuất ra `heartbeat` |
 | `s_afe_stats` | `portMUX_TYPE` + một struct (mức, hướng, cờ, gain, bộ đếm) | ~64 B | `sach_task` | `gui_task` | — ghi đè | số liệu là **mức**, không phải chuỗi sự kiện: `gui_task` chỉ cần giá trị mới nhất mỗi 100 ms. Chép dưới spinlock, vài chục byte, không gọi gì bên trong |
 | `sb_stream` | StreamBuffer ở PSRAM, **chỉ tồn tại khi** `NET_STREAM_ENABLE`; cỡ `SVC_REPORT_STREAM_BUFFER_KB` | 512 KB: ~5 s ở `mode` 5, ~8 s ở `mode` 2 | `sach_task` | `luong_task` | ghi với timeout 0; không đủ chỗ cho **cả khung** thì bỏ cả khung, đếm; không bao giờ ghi nửa khung | một người ghi, một người đọc — đúng hợp đồng của stream buffer. Đường tới máy nhận khựng 0,4–0,8 s vài lần mỗi 10 phút trên board B (`latency.md` §4), quá 64 KB |
-| `q_dialog` | Queue depth 8, `app_event_t`, bộ nhớ ở PSRAM | 8 × 92 B | `nhan_task` từ E14-T4; hiện chưa có người gửi | `dieu_task` | chờ 20 ms rồi bỏ, log **một lần** ở cạnh đầy | `nhan_task` không được đứng chờ lâu: sau lưng nó là 1 s đệm đang đầy dần |
+| `q_dialog` | Queue depth 8, `app_event_t`, bộ nhớ ở PSRAM | 8 × 92 B | nơi chốt `COMMAND` (`nhan_task`, `xac_task`), timeout 0 | `dieu_task` | chờ 20 ms rồi bỏ, log **một lần** ở cạnh đầy | `nhan_task` không được đứng chờ lâu: sau lưng nó là 1 s đệm đang đầy dần |
 | `q_cmd` | Queue depth 4, `device_cmd_t` (sinh từ `contracts/`, chở cả chữ 512 B của `SPEAK`), bộ nhớ ở PSRAM | 4 × ~600 B | task của esp-mqtt | `dieu_task` | không chờ: bỏ, tăng `cmd_dropped` của `net_mqtt`, log; bản ngoài `device_cmd.schema.json` cũng vậy | callback esp-mqtt chỉ **phân tích** rồi bỏ vào đây; chờ ở callback là chặn cả đường MQTT |
 | `q_cmdset` | Queue depth 1, con trỏ tới một trong hai ô bộ lệnh của `net_mqtt` ở PSRAM, cấp lúc boot: bộ đã phân tích, kết quả phân tích, payload nguyên văn | 4 B + 2 × ~53 KB | task của esp-mqtt | `nhan_task` | bản mới thay bản chờ: task esp-mqtt rút bản chờ về rồi gửi bản mới; ô `nhan_task` đã nhận giữ nguyên tới lần nhận sau (`FREERTOS.md` 8.10); payload rỗng, tức bản retained bị xoá, không vào hàng | `nhan_task` tự chạy `lang_vi`, đổi bảng lệnh và gọi `ai_engine_command_prepare` **giữa hai câu**: khi không có cửa sổ nào mở hay chờ chấm và không câu nào đang chạy, ở mọi trạng thái; bộ trùng `version` với bộ đang dùng bị bỏ qua |
+| `q_vision` | Queue depth 1, `app_vision_req_t`, bộ nhớ ở PSRAM | 1 × 8 B | `dieu_task` | `nhin_task` | không chờ: từ chối bằng `VISION_BUSY`, tăng `vision_dropped` | lệnh ảnh người dùng vừa nói; xếp hàng thì ảnh chụp trễ, sai cảnh |
 | `q_speak` | Queue depth 4, `app_speak_req_t`, bộ nhớ ở PSRAM | 4 × 546 B | `dieu_task` | `noi_task` | bỏ, log | |
 | `q_event_up` | Queue depth 16, `app_event_t`, bộ nhớ ở PSRAM | 16 × 92 B | `nhan_task`, `xac_task`, `dieu_task` | `gui_task` | bỏ, tăng `events_dropped` | **người phát sự kiện không bao giờ publish**: publish QoS 1 chờ PUBACK, và `nhan_task` đứng chờ mạng là đệm 1 s đầy dần |
 | `q_verify` | Queue depth 2, chỉ số ô `uint8_t`; hai ô của `svc_listen` ở PSRAM, mỗi ô 24 000 mẫu `int16` cùng quyết định `COMMAND`, cấp lúc boot khi ảnh có `speaker` | 2 × ~47 KB | `nhan_task` | `xac_task` | không bao giờ đầy: chỉ ô lấy được từ `q_verify_free` mới được gửi | không chép tiếng hai lần; một ô chỉ có một chủ tại một lúc, như `q_frame` |
@@ -4068,6 +4122,7 @@ TỔNG QUAN §7 ước ~97 KB và thiếu bốn khoản. Bảng ước lại �
 | Ngăn xếp task ứng dụng (§5.2, trừ `mqtt_task`) | ~41 KB | |
 | Wi-Fi + lwIP | 50–90 KB | tuỳ số đệm RX/TX trong sdkconfig |
 | **Cộng — không có model nào** | **~240–280 KB** | |
+| Board C thêm (§3.19): `detect` 6,4 KB, SDSPI và FAT ~6 KB, camera vài KB khi DMA ở PSRAM, UART1 và I2C ~3 KB | ~18 KB 🔬 | board C một micro còn 48,6 KiB, thấp nhất 20,2 KiB (`measurements/board_c.md`): rất sát; thiếu thì giảm đệm Wi-Fi, rồi thu pool `q_frame` theo một micro |
 | RAM nội còn sau IDF, ở bước `storage` của boot | 196 771 B đo | `ram.md` §5: Wi-Fi và MQTT lấy thêm 54 480 B; sản phẩm đang nghe còn 32 495 B, thấp nhất 12 675 B |
 
 **Mọi model nằm ở PSRAM — trọng số lẫn vùng làm việc.** `ai_engine_load` mmap slot model qua
@@ -4128,6 +4183,7 @@ Board B, profile `bench`, lúc đã nghe: sản phẩm với b0 ở `measurement
 | `pitch` (SwiftF0, §3.11): đồ thị, tensor và cột giữ | 246 632 B đo (`pitch.md` §7.2) |
 | **Còn trống khi nghe** | 4 278 432 B đo với b0, 4 258 212 B khi Wi-Fi và MQTT đã nối (`ram.md` §5); 2 022 720 B với b3, Wi-Fi chưa nối (`ram.md` §4) |
 | `detect` cạnh sản phẩm (§3.18) | đồ thị 2 825 888 B cộng 11 152 B lúc chạy: vừa với b0, không vừa với b3 (`ram.md` §5) |
+| Ảnh của board C (§3.19): một khung JPEG 1280 × 720 ~184 KB, RGB888 640 × 360 691 200 B, ngăn xếp `nhin_task` và `do_task` 12 KB | ~0,9 MB 🔬, vừa với b0 cộng `detect` |
 | Chưa có trong firmware: `ns` | 187 KB (RNNoise-16k) tới 394 KB (NSNet-16k L), đo ở E9-T10 |
 | Chưa có: đệm dựng câu của `noi_task`, 5 s × 16 kHz × 2 B | 160 KB |
 | Chưa có: `synth` nếu là mạng | ≤ 1 MB + ~0,3 MB |
@@ -4188,11 +4244,14 @@ Topic, QoS, retained và schema khai ở `contracts/mqtt_topics.yaml`; bảng d�
 | `sr/{deviceId}/up/heartbeat` | lên | 0 | không | `heartbeat` | 30 s |
 | `sr/{deviceId}/up/telemetry` | lên | 0 | không | `telemetry` | 1 s, mỗi bản 10 mẫu 100 ms |
 | `sr/{deviceId}/up/event` | lên | 1 | không | `event` | khi có: thức, lệnh, từ chối, lỗi |
-| `sr/{deviceId}/down/cmd` | xuống | 1 | không | `device_cmd` | khi cần: `SET_CONFIG`, `SET_STREAM`, `SPEAK`, `CALIBRATE`, `REBOOT`, `SPEAKER_ENROL`, `SPEAKER_ENROL_CANCEL` |
+| `sr/{deviceId}/down/cmd` | xuống | 1 | không | `device_cmd` | khi cần: `SET_CONFIG`, `SET_STREAM`, `SPEAK`, `CALIBRATE`, `REBOOT`, `SPEAKER_ENROL`, `SPEAKER_ENROL_CANCEL`, `CAPTURE` |
 | `sr/{deviceId}/down/commands` | xuống | 1 | **có** | `command_set` | khi đổi bộ lệnh; retained nên máy nối lại là có bản mới nhất |
 | `sr/{deviceId}/down/speakers` | xuống | 1 | **có** | `speaker_set` | khi đổi danh sách người nói (§3.17) |
 | `sr/{deviceId}/up/speakers` | lên | 1 | **có** | `speaker_roster` | lúc nối và sau mỗi thay đổi của danh sách hay của một lần đăng ký |
 | `sr/{deviceId}/up/voice` | lên | 1 | không | `voice` | khi cờ `speaker/server` bật: một lần mỗi lệnh `command` nhận (§3.17) |
+| `sr/{deviceId}/up/image` | lên | 1 | không | nhị phân, `contracts/vision.yaml` | mỗi lần chụp, theo khúc (§3.19) |
+| `sr/{deviceId}/up/detections` | lên | 1 | không | `detections` | mỗi lần "nhận diện" |
+| `sr/{deviceId}/up/sensors` | lên | 0 | không | `sensors` | khi đổi và mỗi 10 s |
 | `sr/{deviceId}/down/ota` | xuống | 1 | không | `ota_manifest` | E13 |
 
 | Payload | Nội dung | Cỡ ước |
@@ -4261,6 +4320,7 @@ phiên nền ồn "Wi-Fi tắt" của E2-T4, cùng khuôn và cùng đường ch
 | Bí mật trên máy | NVS; `prod` mã hoá NVS. `sdkconfig.secrets` gitignore |
 | Tiếng người | **không rời máy** ở chế độ thường, trừ cửa sổ của lệnh đã nhận gửi trên `up/voice` khi cờ NVS `speaker/server` bật (§3.17, tắt mặc định); luồng tiếng chỉ mở bằng lệnh có chủ đích, **LED sáng suốt lúc mở**, tự tắt sau 10 phút nếu không gia hạn; `prod` không biên dịch luồng tiếng |
 | Bản thu để huấn luyện | theo §1.4: phiếu đồng ý, mã người nói, lưu ngoài repo, xoá được |
+| Ảnh | chỉ tạo khi có lệnh chụp hay nhận diện; đèn sáng trong lúc chụp; host lưu ở data root, không vào git; ảnh trên thẻ không mã hoá |
 | Console | Kconfig tắt ở `prod`, vì console ghi được mọi khoá NVS |
 | ACL broker | mỗi `deviceId` chỉ ghi `sr/{chính nó}/up/#` và đọc `sr/{chính nó}/down/#` |
 
