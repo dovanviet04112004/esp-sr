@@ -131,7 +131,7 @@ tiếng người. Ảnh trên thẻ không mã hoá.
 | 2 | `drv_camera`, app thử `test_apps/board_c` (E15-T15) | JPEG 1280 × 720, nghỉ và đánh thức; RAM nội đo được |
 | 3 | `drv_sd` | ghi đọc lại khớp sha256; rút thẻ không treo |
 | 4 | `make product BOARD=C` nạp cả `vision_0`; `detect` dựng lúc boot, `nhin_task` (E15-T7) | board nghe như cũ, RAM nội không dưới mức an toàn |
-| 5 | "chụp ảnh" đầu cuối; `host/vision.py` ghi ảnh, `make vision-watch` | nói lệnh, host có ảnh, sha256 khớp file trên thẻ |
+| 5 | "chụp ảnh" đầu cuối; `host/vision.py` ghi ảnh, `make host-live` | nói lệnh, host có ảnh, sha256 khớp file trên thẻ |
 | 6 | "nhận diện" đầu cuối | khung đúng trên ảnh thật, host vẽ được |
 | 7 | Đo: độ trễ, RAM, `COMMAND` khi ảnh đang chạy, chạy dài | `docs/measurements/`; ngoài lượt `detect` độ trễ lệnh không tăng; không rớt khung |
 | 8 | Loa bíp khi nhận lệnh và khi chụp | nghe được; `wake` không tự thức vì tiếng bíp |

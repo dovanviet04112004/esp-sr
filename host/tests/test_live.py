@@ -164,3 +164,10 @@ def test_each_event_names_its_speaker_from_the_boards_roster() -> None:
     assert any(line.endswith("· speaker spk_001 Chủ nhà 0.85") for line in view.render(now_monotonic=0.0))
     assert live.one_line(passed, view.names(DEVICE)).endswith("· speaker spk_001 Chủ nhà 0.85")
     assert view.names("sr-unknown") == {}
+
+
+def test_what_was_kept_shows_on_the_screen() -> None:
+    view = live.View()
+    view.update(message("image", b"\xff\xd8"))
+    view.kept.append("sr-1 image 10 bytes: B7_000002.jpg")
+    assert "kept  sr-1 image 10 bytes: B7_000002.jpg" in view.render()

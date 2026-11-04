@@ -2,6 +2,7 @@
 arrive with the speaker each command was checked against (KEHOACH 3.17, 4.6, 7.7).
 
 On a terminal the screen is redrawn several times a second; piped, one line is printed per message.
+Board C's pictures and detect's boxes land under the data root as they arrive (srhost.vision).
 Run: uv run python -m srhost.live [--device <deviceId>] [--jsonl <file>]
 """
 
@@ -17,13 +18,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, tzinfo
 from pathlib import Path
 
-from srhost.config import ConfigError, mqtt_config
+from srhost.config import ConfigError, mqtt_config, record_config
 from srhost.mqtt_rx import JsonlLog, Message, Receiver
 from srhost.speakers import ENROL_COMMANDS
-from srhost.vision import describe_boxes, stem_of
+from srhost.vision import IMAGES_DIR, Assembler, describe_boxes, keep, stem_of
 
 REFRESH_S = 0.2
 EVENTS_SHOWN = 8
+KEPT_SHOWN = 4
 BAR_WIDTH = 20
 LEVEL_FLOOR_DBFS = -90
 DOA_MAX_DEG = 180
@@ -155,6 +157,7 @@ class View:
         self._boards: dict[str, Board] = {}
         self._lock = threading.Lock()
         self.stray = 0
+        self.kept: deque[str] = deque(maxlen=KEPT_SHOWN)
 
     def update(self, message: Message) -> None:
         with self._lock:
@@ -197,6 +200,7 @@ class View:
                     lines.append(f"  REJECTED {board.rejected} payloads, last: {board.last_error}")
             if self.stray:
                 lines.append(f"{self.stray} messages on topics outside the contract")
+            lines.extend(f"kept  {line}" for line in self.kept)
             return lines
 
     def names(self, device: str | None) -> dict[str, str]:
@@ -230,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.ERROR if redraw else logging.INFO, format="%(asctime)s %(message)s")
     try:
         cfg = mqtt_config()
+        assembler = Assembler(record_config().data_root / IMAGES_DIR)
     except ConfigError as err:
         print(f"live: {err}", file=sys.stderr)
         return 2
@@ -240,8 +245,12 @@ def main(argv: list[str] | None = None) -> int:
         view.update(message)
         if sink:
             sink(message)
+        kept = keep(assembler, message)
+        view.kept.extend(kept)
         if not redraw:
             print(one_line(message, view.names(message.device)), flush=True)
+            for line in kept:
+                print(line, flush=True)
 
     receiver = Receiver(cfg, on_message, args.device)
     receiver.start()

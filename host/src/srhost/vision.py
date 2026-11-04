@@ -271,35 +271,39 @@ def run_live(receiver: Receiver, device: str, feed: LiveFeed, port: int) -> None
         time.sleep(vision.PREVIEW_HOLD_MS / MS_PER_S / KEEP_ALIVES_PER_HOLD)
 
 
-def report_marked(device: str, path: Path | None) -> None:
-    if path is not None:
-        print(f"{device} boxes drawn: {path}", flush=True)
-
-
-def on_message(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -> None:
+def keep(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -> list[str]:
+    """Do what one message asks of the disk or the live page; a line for each thing done."""
     if message.rejected or message.device is None:
-        return
+        return []
+    done: list[str] = []
     if message.kind == "image":
         try:
             header, image = assembler.join(message.device, message.body or b"")
         except ChunkError as err:
-            print(f"{message.device} image refused: {err}", flush=True)
-            return
+            return [f"{message.device} image refused: {err}"]
         if image is None:
-            return
+            return []
         if header["flags"] & vision.CHUNK_FLAG_PREVIEW:
             if feed is not None:
                 feed.take(image)
-            return
+            return []
         path = assembler.keep(message.device, header, image)
-        print(f"{message.device} image {path.stat().st_size} bytes: {path}", flush=True)
-        report_marked(message.device, assembler.mark(message.device, header["boot"], header["seq"]))
+        done.append(f"{message.device} image {path.stat().st_size} bytes: {path}")
+        marked = assembler.mark(message.device, header["boot"], header["seq"])
     elif message.kind == "detections":
         assembler.keep_boxes(message.device, message.payload)
-        print(f"{message.device} {describe_boxes(message.payload)}", flush=True)
-        report_marked(
-            message.device, assembler.mark(message.device, message.payload["boot"], message.payload["captureSeq"])
-        )
+        done.append(f"{message.device} {describe_boxes(message.payload)}")
+        marked = assembler.mark(message.device, message.payload["boot"], message.payload["captureSeq"])
+    else:
+        return []
+    if marked is not None:
+        done.append(f"{message.device} boxes drawn: {marked}")
+    return done
+
+
+def on_message(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -> None:
+    for line in keep(assembler, message, feed):
+        print(line, flush=True)
 
 
 def capture_command(mode: str) -> str:

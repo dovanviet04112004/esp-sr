@@ -817,11 +817,8 @@ broker-up: ## Start the bench MQTT broker (needs deploy/.env and deploy/emqx/use
 broker-down: ## Stop the bench MQTT broker
 	cd deploy && docker compose down
 
-host-live: ## Show wake and command events live
+host-live: ## Show every board live, and keep board C's pictures and detect's result under the data root
 	cd host && uv run python -m srhost.live
-
-vision-watch: ## Keep board C's pictures under the data root and print what detect found
-	cd host && uv run python -m srhost.vision
 
 vision-live: ## Board C's preview on a local page, with a sharpness figure for setting the lens by hand: DEVICE=<deviceId>
 	cd host && uv run python -m srhost.vision --device "$(DEVICE)" --live
