@@ -226,7 +226,34 @@ Trên board, loa phát nhiễu 10 s ở −12 dBFS, số do `aec` tự tính t�
 | Bản cuối, lượt nhiễu đầu sau khởi động | 25,1 dB | 0 |
 
 Bản đầu giả định một khối ghi vào sẽ ra loa sau `dma_desc_num − 1` bước, nên làm trễ tham chiếu 7 bước. Tiếng ra sớm hơn thế, tham chiếu tới sau tiếng
-vọng, và bộ lọc chỉ nhìn được về quá khứ. Trễ thật chưa đo tới từng mẫu 🔬: `stream 11` ghi micro và tham chiếu để đo (E2-T9).
+vọng, và bộ lọc chỉ nhìn được về quá khứ.
+
+Bản thu thật, `stream 11`, hai lượt nhiễu ở phòng yên, không hở khung (`interim/aec/echo1`). Trễ từ kênh tham chiếu tới micro **542 mẫu, 33,9 ms, 2,12 bước**,
+đỉnh tương quan gấp 904 lần trung vị; mới một lần đo, chưa qua các lần khởi động 🔬.
+
+Bản Python chạy trên bản thu ra 25,8 dB, khớp số board tự báo. Theo dải, giây 14–22, công suất dB tương đối:
+
+| Dải | Micro | Sau `aec` | Nền phòng | Giảm |
+|---|---|---|---|---|
+| 60–250 Hz | −12,0 | −11,9 | −11,1 | loa không phát ở dải này |
+| 250–500 Hz | −17,8 | −22,2 | −19,7 | chạm nền |
+| 500 Hz–1 kHz | −5,6 | −27,9 | −29,4 | 22,3 dB, chạm nền |
+| 1–2 kHz | −2,6 | −27,0 | −29,1 | 24,4 dB, chạm nền |
+| 2–4 kHz | 8,5 | −18,7 | −38,4 | 27,3 dB, trên nền 20 dB |
+| 4–8 kHz | 3,4 | −24,1 | −44,3 | 27,5 dB, trên nền 20 dB |
+
+Nền phòng sau `hpf` −51,4 dBFS, micro lúc loa phát −21,1 dBFS, nên phòng này cho tối đa ~30 dB ở mức loa đã thử. SpeexDSP trên cùng bản thu với cùng đuôi
+ra 26,2 dB, từng dải lệch không quá 0,1 dB. Phần còn lại trên 2 kHz là đuôi phòng dài hơn tầm với của bộ lọc, không phải méo loa, vì đuôi dài hơn thì nó giảm:
+
+| Phân đoạn | `aec_delay` mẫu | Tầm với | ERLE | Lúc 4 s |
+|---|---|---|---|---|
+| 8 | 0 | 128 ms | 25,8 dB | 25,2 dB |
+| 8 | 448 | 156 ms | 27,6 dB | 27,2 dB |
+| 12 | 0 | 192 ms | 28,5 dB | 25,2 dB |
+| 16 | 0 | 256 ms | 29,0 dB | 22,1 dB |
+| SpeexDSP 4 096 mẫu | 0 | 256 ms | 29,7 dB | |
+
+Đã qua cửa 20 dB nên giữ 8 phân đoạn và `aec_delay` 0: `aec_delay` lớn hơn trễ thật là về 0 dB như bản đầu, nên chỉ đặt sau khi đo lại qua nhiều lần khởi động.
 
 Bộ lọc cần vài giây để học nên không giúp tiếng bíp 0,1 s; phần đó là `vad` tắt trong lúc loa phát (§5).
 
@@ -242,4 +269,16 @@ Chi phí, `bench_afe` chạy trên board C vì board B không cắm, trạng th�
 Các dòng còn lại trùng số của board B tới 0,1 µs (chuỗi hai micro 2 621,3 so với 2 621,2 µs), nên hai board đổi chỗ được trong `budget.md`. Trên sản phẩm, sau
 hai lượt nhiễu 10 s, `dropped` của `dma`, khung, `clean` và sự kiện đều 0.
 
-Chưa đo: hai bên cùng nói trên board (E10-T6), tiếng nói thật qua loa thay nhiễu, chạy dài 30 phút (E10-T1), parity trên chip 🔬.
+Hai bên cùng nói (E10-T6): chủ repo đọc 45 giây ở chỗ hay ra lệnh, loa im (`interim/aec/talker2`), rồi cộng từ giây 6 vào bản thu chỉ có tiếng loa. Phòng và `hpf`
+tuyến tính nên phép cộng cho đúng tín hiệu hai bên cùng nói, và cho biết phần nào của lối ra là tiếng loa còn sót: lối ra trừ `hpf` của tiếng người.
+
+| Phép thử | Tiếng loa / người lúc vào | Lúc ra | ERLE trước khi nói | ERLE lúc đang nói | Reset |
+|---|---|---|---|---|---|
+| Như đã thu: người −39,0, loa −21,6 dBFS | −17,4 dB | +8,1 dB | 24,1 dB | 25,5 dB | 0 |
+| Người to hơn 15 dB | −2,4 dB | +22,0 dB | 24,1 dB | 24,4 dB | 0 |
+| Đối chứng âm, tắt học | −17,4 dB | −17,4 dB | 0,0 dB | 0,0 dB | 0 |
+
+Tiếng người giữ được, chiếu lối ra lên lối ra của cùng tiếng người không có loa, lúc loa phát: **+0,07 dB qua `aec`, −0,07 dB qua `aec` và `ns`**, cửa là mất không quá
+3 dB. Không khung nào mang `DSP_AFE_FLAG_AEC_DIVERGED`.
+
+Chưa đo: tiếng nói thật qua loa thay nhiễu, chạy dài 30 phút (E10-T1), âm lượng tối đa (E10-T2), parity trên chip 🔬.
