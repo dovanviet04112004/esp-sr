@@ -134,6 +134,31 @@ def test_a_picture_lands_in_a_file_beside_a_live_page(tmp_path: Path) -> None:
     assert feed.state()["serial"] == 0
 
 
+def sensors_report(has_fix: bool) -> bytes:
+    place = {"latE7": 210285000, "lonE7": 1058542000}
+    gps = {"hasFix": has_fix, **place, "satellites": 7, "inView": 9, "antennaOpen": False}
+    report = {"deviceId": DEVICE, "boot": 7, "uptimeS": 40, "gps": gps, "ir": {"active": False, "hits": 0}}
+    return json.dumps(report).encode()
+
+
+def test_a_picture_taken_on_a_fix_gets_the_place_beside_it(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    vision.on_message(assembler, mqtt_rx.parse(f"sr/{DEVICE}/up/sensors", sensors_report(True), rx_utc="now"))
+    vision.on_message(assembler, mqtt_rx.parse(f"sr/{DEVICE}/up/image", chunk(PICTURE, 0, 1), rx_utc="now"))
+    place = json.loads((tmp_path / DEVICE / "B7_000002_place.json").read_text(encoding="utf-8"))
+    assert place == {"latE7": 210285000, "lonE7": 1058542000}
+
+
+def test_a_lost_fix_leaves_the_next_picture_without_a_place(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    for has_fix in (True, False):
+        report = mqtt_rx.parse(f"sr/{DEVICE}/up/sensors", sensors_report(has_fix), rx_utc="now")
+        vision.on_message(assembler, report)
+    vision.on_message(assembler, mqtt_rx.parse(f"sr/{DEVICE}/up/image", chunk(PICTURE, 0, 1), rx_utc="now"))
+    assert (tmp_path / DEVICE / "B7_000002.jpg").exists()
+    assert not (tmp_path / DEVICE / "B7_000002_place.json").exists()
+
+
 def picture_turned_a_quarter(path: Path) -> None:
     """A black 400 x 200 file that viewers show as 200 x 400, as board C's are."""
     image = Image.new("RGB", (400, 200))

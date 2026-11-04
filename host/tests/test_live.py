@@ -26,6 +26,29 @@ def test_an_empty_view_says_it_waits() -> None:
     assert live.View().render() == ["waiting for a board…"]
 
 
+SENSORS = {
+    "deviceId": DEVICE,
+    "boot": 48,
+    "uptimeS": 120,
+    "gps": {"hasFix": False, "latE7": 0, "lonE7": 0, "satellites": 0, "inView": 3, "antennaOpen": True},
+    "ir": {"active": True, "hits": 4},
+    "motion": {"accelMg": [-125, -990, 54], "gyroDpsE1": [28, 30, -9], "tempCE1": 317},
+    "adc": {"channelsMv": [1200, 0, 3, 3300]},
+}
+
+
+def test_the_sensors_line_reads_every_device() -> None:
+    assert live.one_line(message("sensors", SENSORS)) == (
+        f"{DEVICE} sensors gps no antenna  ir ON, 4 hits  accel -0.12 -0.99 +0.05 g  31.7 C  adc 1200 0 3 3300 mV"
+    )
+
+
+def test_a_device_left_out_of_the_report_leaves_its_part_out_of_the_line() -> None:
+    report = {key: SENSORS[key] for key in ("deviceId", "boot", "uptimeS", "ir")}
+    report["gps"] = {**SENSORS["gps"], "hasFix": True, "latE7": 210285000, "lonE7": 1058542000, "satellites": 7}
+    assert live.describe_sensors(report) == "gps 21.02850 105.85420, 7 satellites  ir ON, 4 hits"
+
+
 def test_each_kind_lands_on_its_line() -> None:
     view = live.View()
     view.update(message("status", {"deviceId": DEVICE, "state": "ONLINE", "fw": "0.1.0+8f3fa79"}))

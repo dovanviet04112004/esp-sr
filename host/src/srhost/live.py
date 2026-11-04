@@ -31,6 +31,9 @@ LEVEL_FLOOR_DBFS = -90
 DOA_MAX_DEG = 180
 PERMILLE = 1000
 KIB = 1024
+E7 = 1e7
+E1 = 10
+MG_PER_G = 1000
 CLEAR = "\x1b[H\x1b[2J"
 
 
@@ -41,6 +44,7 @@ class Board:
     status: dict | None = None
     heartbeat: dict | None = None
     telemetry: dict | None = None
+    sensors: dict | None = None
     roster: dict | None = None
     events: deque[Message] = field(default_factory=lambda: deque(maxlen=EVENTS_SHOWN))
     rejected: int = 0
@@ -141,6 +145,22 @@ def describe_heartbeat(hb: dict) -> str:
     return text
 
 
+def describe_sensors(sensors: dict) -> str:
+    gps, ir = sensors["gps"], sensors["ir"]
+    if gps["hasFix"]:
+        place = f"{gps['latE7'] / E7:.5f} {gps['lonE7'] / E7:.5f}, {gps['satellites']} satellites"
+    else:
+        place = "no antenna" if gps["antennaOpen"] else f"no fix, {gps['inView']} in view"
+    text = f"gps {place}  ir {'ON' if ir['active'] else 'off'}, {ir['hits']} hits"
+    if "motion" in sensors:
+        motion = sensors["motion"]
+        accel = " ".join(f"{mg / MG_PER_G:+.2f}" for mg in motion["accelMg"])
+        text += f"  accel {accel} g  {motion['tempCE1'] / E1:.1f} C"
+    if "adc" in sensors:
+        text += "  adc " + " ".join(str(mv) for mv in sensors["adc"]["channelsMv"]) + " mV"
+    return text
+
+
 def describe_sample(telemetry: dict) -> str:
     sample = telemetry["samples"][-1]
     return (
@@ -173,7 +193,7 @@ class View:
                 board.events.append(message)
             elif message.kind == "roster":
                 board.roster = message.payload
-            elif message.kind in ("status", "heartbeat", "telemetry"):
+            elif message.kind in ("status", "heartbeat", "telemetry", "sensors"):
                 setattr(board, message.kind, message.payload)
 
     def render(self, now_monotonic: float | None = None) -> list[str]:
@@ -192,6 +212,8 @@ class View:
                     lines.append(f"  health  {describe_heartbeat(board.heartbeat)}")
                 if board.telemetry:
                     lines.append(f"  front   {describe_sample(board.telemetry)}")
+                if board.sensors:
+                    lines.append(f"  sensors {describe_sensors(board.sensors)}")
                 if board.roster:
                     lines.append(f"  speakers {describe_roster(board.roster)}")
                 names = roster_names(board.roster)
@@ -222,6 +244,8 @@ def one_line(message: Message, names: dict[str, str] | None = None) -> str:
         return f"{message.device} front {describe_sample(message.payload)}"
     if message.kind == "roster":
         return f"{message.device} speakers {describe_roster(message.payload)}"
+    if message.kind == "sensors":
+        return f"{message.device} sensors {describe_sensors(message.payload)}"
     return f"{message.device} {message.kind} {message.payload}"
 
 

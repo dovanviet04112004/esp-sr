@@ -29,6 +29,7 @@ PERMILLE = 1000
 CONNECT_TIMEOUT_S = 10.0
 FPS_WINDOW_FRAMES = 20
 BOXES_SUFFIX = "_boxes"
+PLACE_SUFFIX = "_place"
 BOX_COLOUR = (255, 0, 0)
 BOX_LINE_PX = 4
 BOX_LABEL_PX = 36
@@ -154,6 +155,7 @@ class Assembler:
     def __init__(self, root: Path) -> None:
         self._root = root
         self._open: dict[tuple[str, int, int], Capture] = {}
+        self._fixes: dict[str, dict] = {}
 
     def folder(self, device: str) -> Path:
         return self._root / device
@@ -174,7 +176,18 @@ class Assembler:
         path = self.folder(device) / f"{stem_of(header['boot'], header['seq'])}.jpg"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(image)
+        if device in self._fixes:
+            place = path.with_name(path.stem + PLACE_SUFFIX + ".json")
+            place.write_text(json.dumps(self._fixes[device]), encoding="utf-8")
         return path
+
+    def note_place(self, device: str, sensors: dict) -> None:
+        """Remember where an up/sensors report puts the board, for the pictures that follow."""
+        gps = sensors["gps"]
+        if gps["hasFix"]:
+            self._fixes[device] = {"latE7": gps["latE7"], "lonE7": gps["lonE7"]}
+        else:
+            self._fixes.pop(device, None)
 
     def take(self, device: str, body: bytes) -> Path | None:
         """Add one message; the path of the JPEG when this message finished it."""
@@ -290,6 +303,9 @@ def keep(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -
         path = assembler.keep(message.device, header, image)
         done.append(f"{message.device} image {path.stat().st_size} bytes: {path}")
         marked = assembler.mark(message.device, header["boot"], header["seq"])
+    elif message.kind == "sensors":
+        assembler.note_place(message.device, message.payload)
+        return []
     elif message.kind == "detections":
         assembler.keep_boxes(message.device, message.payload)
         done.append(f"{message.device} {describe_boxes(message.payload)}")
