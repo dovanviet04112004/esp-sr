@@ -14,18 +14,20 @@ camera:
   settle_frames_max: 30
   still_frames: 3
   focus_timeout_ms: 3000
+  preview_hold_ms: 5000
 detect:
   decode_scale: 2
   boxes_max: 32
 chunk:
   magic: SRIM
   payload_bytes: 16384
+  flag_preview: 1
   header:
     - {name: magic, type: u32}
     - {name: version, type: u16}
     - {name: index, type: u16}
     - {name: count, type: u16}
-    - {name: reserved, type: u16}
+    - {name: flags, type: u16}
     - {name: boot, type: u32}
     - {name: seq, type: u32}
     - {name: total_bytes, type: u32}

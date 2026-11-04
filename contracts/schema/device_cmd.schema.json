@@ -78,7 +78,8 @@
     "captureMode": {
       "enum": [
         "PHOTO",
-        "DETECT"
+        "DETECT",
+        "PREVIEW"
       ]
     }
   },

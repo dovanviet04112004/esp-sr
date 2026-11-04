@@ -424,7 +424,8 @@ static inline cJSON *device_cmd_stream_to_json(const device_cmd_stream_t *in)
 typedef enum {
     DEVICE_CMD_CAPTURE_MODE_PHOTO = 0,
     DEVICE_CMD_CAPTURE_MODE_DETECT = 1,
-    DEVICE_CMD_CAPTURE_MODE_COUNT = 2,
+    DEVICE_CMD_CAPTURE_MODE_PREVIEW = 2,
+    DEVICE_CMD_CAPTURE_MODE_COUNT = 3,
 } device_cmd_capture_mode_t;
 
 /** Contract spelling of a value; "" when it is out of range.
@@ -435,6 +436,7 @@ static inline const char *device_cmd_capture_mode_str(device_cmd_capture_mode_t 
     switch (v) {
     case DEVICE_CMD_CAPTURE_MODE_PHOTO: return "PHOTO";
     case DEVICE_CMD_CAPTURE_MODE_DETECT: return "DETECT";
+    case DEVICE_CMD_CAPTURE_MODE_PREVIEW: return "PREVIEW";
     default: return "";
     }
 }
@@ -448,6 +450,7 @@ static inline bool device_cmd_capture_mode_parse(const char *s, device_cmd_captu
     if (s == NULL || out == NULL) { return false; }
     if (strcmp(s, "PHOTO") == 0) { *out = DEVICE_CMD_CAPTURE_MODE_PHOTO; return true; }
     if (strcmp(s, "DETECT") == 0) { *out = DEVICE_CMD_CAPTURE_MODE_DETECT; return true; }
+    if (strcmp(s, "PREVIEW") == 0) { *out = DEVICE_CMD_CAPTURE_MODE_PREVIEW; return true; }
     return false;
 }
 

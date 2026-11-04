@@ -46,7 +46,7 @@ class DeviceCmdStream(TypedDict):
     port: NotRequired[int]
     durationS: NotRequired[int]
 
-DeviceCmdCaptureMode = Literal['PHOTO', 'DETECT']
+DeviceCmdCaptureMode = Literal['PHOTO', 'DETECT', 'PREVIEW']
 
 
 class DeviceCmd(TypedDict):
@@ -265,7 +265,7 @@ SCHEMAS: dict[str, dict] = {
                                               'durationS': {'type': 'integer', 'minimum': 1, 'maximum': 3600}}},
                     'text': {'type': 'string', 'minLength': 1, 'maxLength': 128},
                     'speakerId': {'type': 'string', 'pattern': '^spk_[0-9]{3}$', 'maxLength': 7},
-                    'captureMode': {'enum': ['PHOTO', 'DETECT']}},
+                    'captureMode': {'enum': ['PHOTO', 'DETECT', 'PREVIEW']}},
      'allOf': [{'if': {'properties': {'op': {'const': 'SET_CONFIG'}}}, 'then': {'required': ['key', 'value']}},
                {'if': {'properties': {'op': {'const': 'SET_STREAM'}}}, 'then': {'required': ['stream']}},
                {'if': {'properties': {'op': {'const': 'SPEAK'}}}, 'then': {'required': ['text']}},

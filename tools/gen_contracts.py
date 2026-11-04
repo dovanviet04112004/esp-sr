@@ -835,12 +835,14 @@ def gen_vision_h(v: dict) -> str:
     out.append(f"#define GEN_VISION_SETTLE_FRAMES_MAX {camera['settle_frames_max']}")
     out.append(f"#define GEN_VISION_STILL_FRAMES {camera['still_frames']}")
     out.append(f"#define GEN_VISION_FOCUS_TIMEOUT_MS {camera['focus_timeout_ms']}")
+    out.append(f"#define GEN_VISION_PREVIEW_HOLD_MS {camera['preview_hold_ms']}")
     out.append(f"#define GEN_VISION_DECODE_SCALE {detect['decode_scale']}")
     out.append(f"#define GEN_VISION_BOXES_MAX {detect['boxes_max']}")
     out.append(f'#define GEN_VISION_CHUNK_MAGIC 0x{v["magic_u32"]:08x}u // "{chunk["magic"]}" little-endian')
     out.append(f"#define GEN_VISION_CHUNK_VERSION {v['version']}")
     out.append(f"#define GEN_VISION_CHUNK_HEADER_BYTES {chunk['header_bytes']}")
-    out.append(f"#define GEN_VISION_CHUNK_PAYLOAD_BYTES {chunk['payload_bytes']}\n")
+    out.append(f"#define GEN_VISION_CHUNK_PAYLOAD_BYTES {chunk['payload_bytes']}")
+    out.append(f"#define GEN_VISION_CHUNK_FLAG_PREVIEW {chunk['flag_preview']}\n")
     out.append("typedef struct {")
     out += [f"    {C_FIELD_TYPE[fl['type']]} {fl['name']};" for fl in v["fields"]]
     out.append("} gen_vision_chunk_header_t;\n")
@@ -865,6 +867,8 @@ def gen_vision_py(v: dict) -> str:
         f"CHUNK_VERSION = {v['version']}\n"
         f"CHUNK_HEADER_BYTES = {chunk['header_bytes']}\n"
         f"CHUNK_PAYLOAD_BYTES = {chunk['payload_bytes']}\n"
+        f"CHUNK_FLAG_PREVIEW = {chunk['flag_preview']}\n"
+        f"PREVIEW_HOLD_MS = {v['camera']['preview_hold_ms']}\n"
         f'CHUNK_HEADER = struct.Struct("{fmt}")\n'
         f"CHUNK_HEADER_FIELDS = {tuple(fl['name'] for fl in v['fields'])!r}\n"
     )
