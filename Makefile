@@ -3,7 +3,7 @@
 # idf.py and the python that drives board B come from IDF's export.sh. In a terminal that has not sourced it, a goal
 # that needs them runs make once more under it, about 5 s; IDF_LOADED stops a second round if export.sh fails.
 IDF_EXPORT ?= $(HOME)/esp/esp-idf/export.sh
-IDF_GOALS := ai-unit ai-unit-cores ai-unit-ctc ai-unit-pitch ai-unit-rnnt ai-unit-speaker ai-unit-wake bench-board bss calib-flash \
+IDF_GOALS := ai-unit ai-unit-cores ai-unit-ctc ai-unit-pitch ai-unit-rnnt ai-unit-speaker ai-unit-wake bench-board board-c-check bss calib-flash \
   capture-flash capture-radio-off-flash espsr-compare flash fw-bench fw-bench-flash fw-dev fw-prod listen-unit \
   models-flash monitor nvs-restore nvs-save parity-board product session session-plan storage-flash vision-flash \
   ai-unit-detect
@@ -64,6 +64,7 @@ BENCH_APP := firmware/test_apps/bench_afe
 PARITY_APP := firmware/test_apps/parity
 ESPSR_APP := firmware/test_apps/espsr_compare
 CAPTURE_APP := firmware/test_apps/capture
+BOARD_C_APP := firmware/test_apps/board_c
 CALIB_APP := firmware/test_apps/calib
 BSS_LIVE_APP := firmware/test_apps/bss_live
 UNIT_APP := firmware/components/ai_engine/test_apps/unit
@@ -496,7 +497,7 @@ fw-prod: ## Build the prod profile in build_prod, from its own sdkconfig
 BRIDGE_SESSION := board-bridge
 bridge_up = netstat.exe -an -p TCP | tr -d '\r' | grep -q " $(BRIDGE_HOST):$(BRIDGE_TCP_PORT) .*LISTENING"
 
-.PHONY: board-attach board-detach flash monitor wifi models-flash capture-flash capture-radio-off-flash
+.PHONY: board-attach board-detach board-c-check flash monitor wifi models-flash capture-flash capture-radio-off-flash
 # The bridge runs on Windows' Python from its temp folder, with host/'s pyserial copied beside it.
 board-attach: ## Serve board B's COM port to WSL over RFC 2217, so every target reaches it at PORT (KEHOACH 2.1)
 	@command -v py.exe >/dev/null || { echo "board-attach needs Python on Windows (py.exe)"; exit 1; }
@@ -559,24 +560,38 @@ storage-flash: fw-bench ## Write the bench build's LittleFS image, set.json amon
 # Board C's serial lines reach no reset pin, so esptool waits for the owner to put the chip in its ROM loader. A stub left
 # running keeps the flash baud, so one esptool call writes everything (KEHOACH 2.1).
 LOADER_ATTEMPTS := 120
+# The running app's log ends one esptool's wait as serial noise, so the wait for the button is a loop of them.
+LOADER_TRIES := 300
 product: ## Put the product back on board B after test apps: models, storage, then firmware, and show its boot [SPEAKER=b0|b3] [MICS=1] [BOARD=C]
 	$(if $(SPEAKER),$(MAKE) --no-print-directory speaker-use SPEAKER=$(SPEAKER))
 ifeq ($(BOARD),C)
 	$(MAKE) --no-print-directory fw-bench
 	$(ML) python -m srpipe.export.pack_models artifacts/models.bin --lock
+	$(DETECT).pack $(VISION_DIR)
 	@echo "hold the button, power-cycle the board, wait 2 s, release (KEHOACH 2.1)"
 	models=$$($(PRODUCT_PARTS) get_partition_info --partition-name models_0 --info offset); \
+	vision=$$($(PRODUCT_PARTS) get_partition_info --partition-name vision_0 --info offset); \
 	storage=$$($(PRODUCT_PARTS) get_partition_info --partition-name storage --info offset); \
-	cd firmware/$(BENCH_BUILD) && python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD) \
+	cd firmware/$(BENCH_BUILD) && for try in $$(seq $(LOADER_TRIES)); do \
+	  python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD) \
 	  --before no-reset --after watchdog-reset --connect-attempts $(LOADER_ATTEMPTS) \
 	  write-flash --skip-flashed $$(sed -n 1p flash_args) \
-	  $$(sed 1d flash_args | grep -v -e ota_data -e storage) $$models ../../ml/artifacts/models.bin $$storage storage.bin
+	  $$(sed 1d flash_args | grep -v -e ota_data -e storage) $$models ../../ml/artifacts/models.bin \
+	  $$vision $(VISION_DIR)/vision.bin $$storage storage.bin && exit 0; done; exit 1
 else
 	$(MAKE) --no-print-directory models-flash AFTER=no-reset
 	$(MAKE) --no-print-directory storage-flash AFTER=no-reset
 	$(MAKE) --no-print-directory fw-bench-flash
 endif
 	cd host && uv run python -m srhost.boot --port "$(PORT)"
+
+board-c-check: ## Run every block of board C through test_apps/board_c; the product goes back with make product BOARD=C
+	cd $(BOARD_C_APP) && idf.py build
+	@echo "hold the button, power-cycle the board, wait 2 s, release (KEHOACH 2.1)"
+	cd $(BOARD_C_APP)/build && python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD) \
+	  --before no-reset --after watchdog-reset --connect-attempts $(LOADER_ATTEMPTS) \
+	  write-flash --skip-flashed $$(sed -n 1p flash_args) $$(sed 1d flash_args | grep -v -e ota_data -e storage)
+	cd host && uv run python -m srhost.board_check --port "$(PORT)"
 
 capture-flash: ## Flash test_apps/capture, the raw-only recorder (E5-T12)
 	cd $(CAPTURE_APP) && idf.py -p $(PORT) flash $(ONLY_CHANGED)
@@ -804,6 +819,12 @@ broker-down: ## Stop the bench MQTT broker
 
 host-live: ## Show wake and command events live
 	cd host && uv run python -m srhost.live
+
+vision-watch: ## Keep board C's pictures under the data root and print what detect found
+	cd host && uv run python -m srhost.vision
+
+vision-live: ## Board C's pictures one after another on a local page; the bytes rise as the lens comes into focus: DEVICE=<deviceId>
+	cd host && uv run python -m srhost.vision --device "$(DEVICE)" --live
 
 commands: ## Send a command set to one board, retained, and show its answer: DEVICE=<deviceId> SET=<file.json> [CLEAR=1]
 	cd host && uv run python -m srhost.commands --device "$(DEVICE)" $(if $(CLEAR),--clear,"$(abspath $(SET))")
