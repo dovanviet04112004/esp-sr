@@ -151,4 +151,22 @@ Lúc nghe, sau `esp_new_jpeg` (+6,5 KB DIRAM): RAM nội trống 65,0 KiB, thấ
 0,19 `microwave`, dưới ngưỡng 0,25, khớp board. Xoay ảnh đúng chiều thì `bottle` 0,31: khung xoay 90° làm `detect` kém đi.
 
 Ảnh sau (`jpeg_quality` 6, đèn sáng) board ra `suitcase` 0,57–0,86 trên cái cốc, có lượt ra 0 hộp. Khung ở đúng chỗ, tên sai: cốc nằm
-ngang và nhòe. Chưa có ảnh đúng chiều, nét, nên chưa chấm được độ đúng của `detect` trên board C 🔬.
+ngang và nhòe.
+
+Chỉnh ống kính tay, lật sensor (`vflip`, `4514` = `BB`), xoay 90° lúc giải JPEG, cùng cái cốc ~30 cm:
+
+| Ảnh qua `detect` | Kết quả |
+|---|---|
+| Nằm ngang, float trên PC | `book` 0,16, dưới ngưỡng |
+| Đúng chiều, float trên PC | `cup` 0,72 |
+| Đúng chiều, trên board, 3 lần liên tiếp | **`cup` 0,88–0,91**, khung (0, 122)–(359, 570) trên 360 × 640 bao đúng cốc, 1 921–1 947 ms |
+
+Mới một vật, một cảnh: chưa phải phép chấm độ đúng của `detect` trên board C 🔬. Chữ trên cốc đọc rõ ở ~30 cm. Khung gửi đi 64 KB.
+
+### 4.7 Xem trực tiếp
+
+`make vision-live`, 1280 × 720, `jpeg_quality` 6, 49–64 KB một khung: 3,4–5,4 khung/s, tuổi khung mới nhất ở host dưới 0,2 s, QoS 0, không
+ghi thẻ. Windows hay tự chuyển PC về mạng nhà, broker mất đường tới board, nên trang báo `NO SIGNAL` sau 2 s không có khung.
+
+Ống kính rất nhạy: ren đi ~0,4 mm một vòng 🔬, còn từ vô cực tới 30 cm thấu kính 3,6 mm chỉ dịch ~0,04 mm, nên 1/8 vòng đã qua hẳn vùng
+nét. Độ nét trên trang: bậc thang lớn nhất ở bản thu nhỏ 160 × 90 chia cho độ tương phản. Ảnh nhòe ~7, ảnh đầu ~33, sau khi chỉnh 43.
