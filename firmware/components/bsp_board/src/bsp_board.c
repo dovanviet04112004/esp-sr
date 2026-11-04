@@ -1,5 +1,7 @@
 #include "bsp_board.h"
 
+#include <stdatomic.h>
+
 #include "app_config.h"
 #include "driver/gpio.h"
 
@@ -9,6 +11,18 @@
 // No shutdown pin and the microphone's clocks running: a floating DIN comes out of the speaker as noise.
 #define AMP_QUIET_GPIO APP_I2S_DOUT_GPIO
 #endif
+
+#define LIT_BY_STREAM 1u
+#define LIT_BY_CAMERA 2u
+
+static atomic_uint s_lit_by;
+
+static void light(unsigned reason, bool on)
+{
+    const unsigned lit =
+        on ? atomic_fetch_or(&s_lit_by, reason) | reason : atomic_fetch_and(&s_lit_by, ~reason) & ~reason;
+    gpio_set_level(APP_LED_GPIO, lit != 0);
+}
 
 esp_err_t bsp_board_init(void)
 {
@@ -28,5 +42,10 @@ esp_err_t bsp_board_init(void)
 
 void bsp_board_led(bool on)
 {
-    gpio_set_level(APP_LED_GPIO, on ? 1 : 0);
+    light(LIT_BY_STREAM, on);
+}
+
+void bsp_board_camera_light(bool on)
+{
+    light(LIT_BY_CAMERA, on);
 }

@@ -17,10 +17,15 @@ extern "C" {
  */
 esp_err_t bsp_board_init(void);
 
-/** Set the privacy LED; the only writer is the stream control path (KEHOACH 7.5).
+/** Set the privacy LED for the audio stream; it stays lit while a capture still needs it (KEHOACH 7.5).
  *  @ctx task | non-blocking
  */
 void bsp_board_led(bool on);
+
+/** Light a capture: on board C the same lamp, so it shows a picture is being taken too (KEHOACH 3.19).
+ *  @ctx nhin_task | non-blocking
+ */
+void bsp_board_camera_light(bool on);
 
 #ifdef __cplusplus
 }
