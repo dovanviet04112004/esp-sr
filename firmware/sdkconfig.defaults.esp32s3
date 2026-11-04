@@ -1,4 +1,4 @@
-# Board B: ESP32-S3-WROOM-1 N16R8, microphones on GPIO 19/20 (KEHOACH 2.2, 4.5.8).
+# Boards B and C: 16 MB flash, 8 MB octal PSRAM, signals on GPIO 19/20 (KEHOACH 2.1, 2.2, 4.5.8).
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
@@ -15,7 +15,7 @@ CONFIG_ESP32S3_DATA_CACHE_64KB=y
 CONFIG_ESP32S3_DATA_CACHE_8WAYS=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 
-# GPIO 19/20 carry I2S, so the USB-Serial-JTAG console must stay off, secondary included.
+# GPIO 19/20 carry board signals, so the USB-Serial-JTAG console must stay off, secondary included.
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 

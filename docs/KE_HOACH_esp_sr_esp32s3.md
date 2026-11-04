@@ -275,7 +275,7 @@ riêng `ml/detect_ref/ultralytics/` để xuất ONNX, không vào `srpipe` (§3
 ### 2.1 Board
 
 Dự án chạy trên **board B**, và mọi phép đo thu âm thật tới nay chạy trên nó. **Board C** (cuối mục này) là board của sản
-phẩm kế tiếp: một micro, một camera, chưa có bản dựng.
+phẩm kế tiếp: một micro, một camera.
 
 | | |
 |---|---|
@@ -331,8 +331,9 @@ Mỗi lần nạp chỉ ghi ảnh nào khác bản đang trên flash: esptool `-
 
 `idf.py` nạp ở `FLASH_BAUD` qua `ESPBAUD`, như pytest-embedded.
 
-**Board C** là board của sản phẩm kế tiếp (ADR-0042). Số dưới đây đọc từ chip và eFuse ngày 04/11. Firmware chưa dựng cho
-nó (E2-T12).
+**Board C** là board của sản phẩm kế tiếp (ADR-0042). Số dưới đây đọc từ chip và eFuse ngày 04/11; kết quả kiểm từng khối ở
+`measurements/board_c.md`. `make product BOARD=C` dựng và nạp bản của nó: chuỗi nghe của board một micro (§2.3), chưa dùng
+camera, loa, thẻ SD và GPS (E2-T12, E15-T15).
 
 | | |
 |---|---|
@@ -342,14 +343,20 @@ nó (E2-T12).
 | Nguồn | có nguồn riêng, nên rút cáp USB không khởi động lại chip |
 | Nút | một nút, ở GPIO 0 |
 | MAC cơ sở | `30:ed:a0:1e:46:30` → `deviceId` mặc định `sr-30eda01e4630` (§6.2) |
-| Micro | 1 × INMP441, khe L/R chưa đo 🔬 |
-| Loa, ampli | MAX98357A, không có chân tắt ampli; tiếng ra chưa kiểm 🔬 |
-| Camera | có, loại sensor chưa đọc 🔬 |
-| Khác | đèn LED chiếu sáng, GPS, cảm biến hồng ngoại, thẻ SD, một bus I2C |
+| Micro | 1 × INMP441 ở **khe trái**; khe phải để nổi và ra rác, nên phải đọc một khe |
+| Loa, ampli | MAX98357A, không có chân tắt ampli; phát được tiếng, `APP_SPEAKER_ENABLE` vẫn tắt |
+| Camera | OV5640, SCCB ở 0x3C, cùng loại với repo face attendance |
+| Khác | đèn LED chiếu sáng, GPS (NMEA 9600 baud), cảm biến hồng ngoại, thẻ SD, hai thiết bị I2C ở 0x48 và 0x68 |
 
-**Nạp board C bằng tay.** Máy tính không reset được chip, nên esptool chạy với `--before no-reset`. Muốn vào chế độ nạp:
-giữ nút, tắt rồi bật nguồn board, giữ thêm chừng 2 s rồi thả; ROM in `boot:0x3 (DOWNLOAD(USB/UART0))`. Cầu RFC 2217 chạy
-với `make board-attach BOARD_USB_ID=10c4:ea60`; cầu đang phục vụ board B thì `make board-detach` trước.
+**Nạp board C.** Dây nối không reset được chip. Vào ROM loader phải làm tay: giữ nút, tắt rồi bật nguồn board, giữ thêm chừng
+2 s rồi thả; ROM in `boot:0x3 (DOWNLOAD(USB/UART0))`. Rút cáp USB không có tác dụng, vì board có nguồn riêng. Đặt cờ
+`RTC_CNTL_FORCE_DOWNLOAD_BOOT` rồi `esp_restart` làm ROM báo lỗi và chip treo tới khi tắt nguồn, nên không vào loader bằng
+phần mềm được.
+
+`make product BOARD=C` chờ chip vào ROM loader rồi ghi mọi ảnh trong một lệnh esptool, vì stub để lại giữ baud nạp và lệnh
+sau không nối được; cuối cùng reset bằng watchdog. Khi board đang chạy, lệnh console `restart` khởi động lại, và
+`srhost.wifi.Console` gửi nó mỗi khi mở cổng. Cầu RFC 2217 chạy với `make board-attach BOARD=C`; cầu đang phục vụ board B
+thì `make board-detach` trước.
 
 ### 2.2 Bảng chân
 
@@ -382,16 +389,15 @@ hệ quả, cả ba phải nằm trong cấu hình chứ không nằm trong trí
    trên ESP32-S3; để nguyên thì bộ USB tranh hai chân này với I2S.
 3. Không gỡ lỗi JTAG qua USB được. Gỡ lỗi bằng log UART, core dump và GDB stub qua UART.
 
-`bsp_board` kiểm lúc biên dịch: bật console USB-Serial-JTAG trong khi `APP_I2S_BCLK_GPIO` là 19 thì
-dừng dịch với một thông báo rõ.
+`bsp_board` kiểm lúc biên dịch: bật console USB-Serial-JTAG thì dừng dịch với một thông báo rõ, ở cả hai board.
 
 **Khe I2S của RX là 32 bit × 2**: micro I2S số ra 24 bit trong khe 32 bit và cần 64 BCLK mỗi chu kỳ
 WS. TX dùng chung BCLK và WS nên **cũng phải là khe 32 bit × 2**: `drv_audio` ghi mẫu phát dạng
 `int32` trái phải, MAX98357A nhận được. Đổi một bên là đổi cả hai.
 
-**Bảng chân của board C** (§2.1) do chủ repo đưa ngày 04/11, chép từ mã nguồn của board. Trên board mới kiểm được UART0 và
-nút GPIO 0; các chân còn lại chưa kiểm 🔬. `app_config.h` chỉ có chân của board B: chân dưới đây vào file ấy cùng commit
-với bản dựng đầu tiên cho board C (E2-T12), theo CLAUDE.md §1.3.
+**Bảng chân của board C** (§2.1) do chủ repo đưa ngày 04/11, chép từ mã nguồn của board. `app_config.h` khai nó dưới
+`CONFIG_APP_BOARD_C`, Kconfig chọn trong `firmware/main/Kconfig.projbuild`, và mọi khối đã chạy trên board
+(`measurements/board_c.md`).
 
 | Chức năng | GPIO | Ghi chú |
 |---|---|---|
@@ -404,9 +410,9 @@ với bản dựng đầu tiên cho board C (E2-T12), theo CLAUDE.md §1.3.
 | Camera D0–D7 (`Y2`–`Y9`) | 6, 4, **46**, 5, 7, 16, 17, 8 | 46 là chân strapping, cùng GPIO 0 chọn chế độ khởi động; camera lắp sẵn mà board vẫn vào được chế độ nạp |
 | Camera PWDN, RESET | không nối | không tắt hay reset được sensor bằng chân |
 | Thẻ SD: CLK, MISO, MOSI, CS | 12, 13, 11, 10 | |
-| I2C: SDA, SCL | 1, 2 | chưa biết thiết bị nào trên bus 🔬 |
-| Đèn LED chiếu sáng | 42 | không phải LED trạng thái và riêng tư của bảng trên |
-| GPS | 20 | một chân. **Trùng USB D+** |
+| I2C: SDA, SCL | 1, 2 | có điện trở kéo lên; hai thiết bị ở 0x48 và 0x68, chưa biết là gì 🔬 |
+| Đèn LED chiếu sáng | 42 | `APP_LED_GPIO`: board không có LED trạng thái, nên đèn này sáng khi luồng tiếng đang mở |
+| GPS, NMEA 9600 baud | 20 | chân RX của UART. **Trùng USB D+** |
 | Cảm biến hồng ngoại, tích cực mức thấp | 19 | **Trùng USB D−** |
 | Nút | 0 | strapping, chỉ đọc sau khi đã khởi động |
 | Console | 43 / 44 | UART0 qua USB-TTL |
@@ -415,8 +421,8 @@ Chân 3 và 46 nằm trong bảng chân cấm của board B, nhưng ở board C 
 là strapping. GPIO 19 và 20 cũng mang tín hiệu khác nên ba hệ quả về USB-Serial-JTAG ở trên giữ nguyên, và
 `sdkconfig.defaults.esp32s3` đã đặt console UART0, tắt console phụ.
 
-Trước khi dựng cho board C phải chốt hai chỗ `bsp_board` đang cần mà board này không có: chân tắt ampli
-(`APP_AMP_SD_GPIO`; GPIO 18 ở đây là XCLK) và LED trạng thái (`APP_LED_GPIO`).
+Board C không có chân tắt ampli: `APP_AMP_SD_GPIO` không khai, và GPIO 18 ở đây là XCLK. Ampli luôn thức và nhận BCLK, WS
+của micro, nên `bsp_board` giữ GPIO 14 ở mức thấp khi chưa có đường phát; dây ấy thả nổi thì loa rè.
 
 ### 2.3 Dàn micro
 
@@ -467,7 +473,7 @@ tới hai kênh cùng lúc và cùng mức.
 - luồng tiếng thô dùng mode `mic` và `mic_clean` (§7.4).
 
 `firmware/sdkconfig.mic1` chọn một micro ở khe phải, tức `ch1` của board B. `make product MICS=1` nạp bản ấy để thử trên
-board B. Model không đổi. Trên các phiên của board B, chỉ dùng micro tốt thì `wake` không đổi và lệnh mất 1 điểm
+board B. `firmware/sdkconfig.board_c` chọn khe trái, tức micro của board C. Model không đổi. Trên các phiên của board B, chỉ dùng micro tốt thì `wake` không đổi và lệnh mất 1 điểm
 (`mic_array.md` §5). Micro của board C phải đo lại 🔬.
 
 ### 2.4 Đường tham chiếu cho khử vọng
@@ -2567,7 +2573,7 @@ esp-sr/
     ├── adr/                             # quyết định có bảng đối chứng
     ├── bao_cao/                         # báo cáo tuần gửi mentor, một file tuan_<nn>.md mỗi tuần
     └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md, tts_engines.md, data_screen.md, wake.md,
-                                  speech_commands.md, command.md, speaker.md, pitch.md, detect.md}
+                                  speech_commands.md, command.md, speaker.md, pitch.md, detect.md, board_c.md}
                       ├ bench/           # CSV thô của bench_*, commit cùng bảng nó sinh ra
                       ├ calib/           # hệ số hiệu chuẩn từng board (balance), bản đã ghi xuống NVS
                       └ afe/             # số 🔬 của dsp_afe theo module
@@ -3017,6 +3023,7 @@ firmware/
 ├── sdkconfig.{dev,bench,prod,ci}     # bốn profile
 ├── sdkconfig.afe                     # sinh từ modules: của contracts/afe.yaml — module dsp_afe sản phẩm bật
 ├── sdkconfig.mic1                    # một micro ở khe phải: make product MICS=1 (§2.3, ADR-0042)
+├── sdkconfig.board_c                 # chân và micro khe trái của board C: make product BOARD=C (§2.1, §2.2)
 ├── sdkconfig.secrets                 # ❌ gitignore — mật khẩu broker của bàn thử, nếu có
 ├── partitions.csv                    # §6.1
 ├── dependencies.lock                 # ✅
@@ -3364,7 +3371,7 @@ và `bench_afe` dùng kênh này.
 
 Board một micro (§2.3) là một lớp chồng lên profile, không phải profile thứ năm. `MICS=1` của `fw-bench` và `product`
 thêm `sdkconfig.mic1` vào cuối danh sách defaults và dựng trong `build_bench_mic1`, để hai bản không dùng chung
-`sdkconfig`. `prod` không có luồng tiếng thô: một máy đặt trong phòng không được có đường
+`sdkconfig`. `BOARD=C` làm y như vậy với `sdkconfig.board_c` và `build_bench_c`. `prod` không có luồng tiếng thô: một máy đặt trong phòng không được có đường
 đẩy tiếng người ra ngoài chỉ vì ai đó quên tắt (§7.5).
 
 Chung cả bốn (`sdkconfig.defaults.esp32s3`):

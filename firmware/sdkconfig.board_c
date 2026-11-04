@@ -1,0 +1,4 @@
+# Board C's pins and its one INMP441, on the left slot: make product BOARD=C (KEHOACH 2.1, 2.2).
+CONFIG_APP_BOARD_C=y
+CONFIG_APP_MIC_COUNT=1
+CONFIG_APP_MIC_SLOT_LEFT=y

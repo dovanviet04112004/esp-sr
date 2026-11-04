@@ -7,6 +7,19 @@ menu "esp-sr application"
             On in dev, bench and ci. A shipped build must not carry a console
             that can rewrite every NVS key (KEHOACH 6.2).
 
+    choice APP_BOARD
+        prompt "Board, which picks the pin table of app_config.h"
+        default APP_BOARD_B
+        help
+            Board B has two INMP441 and no camera. Board C has one INMP441,
+            a MAX98357A and an OV5640 (KEHOACH 2.1, 2.2).
+
+        config APP_BOARD_B
+            bool "Board B"
+        config APP_BOARD_C
+            bool "Board C"
+    endchoice
+
     config APP_SPEAKER_ENABLE
         bool "Speaker fitted: open I2S TX and run noi_task"
         default n

@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-/** Drive APP_AMP_SD_GPIO low and APP_LED_GPIO off, so nothing clicks or glows during boot.
+/** Drive the amplifier's shutdown pin, or its data pin on a board without one, low and APP_LED_GPIO off.
  *  @ctx task | non-blocking | once at boot
  *  @ret ESP_OK | an esp_driver_gpio error
  */
