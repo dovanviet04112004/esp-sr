@@ -79,6 +79,7 @@ typedef enum {
     APP_TONE_COMMAND,  // took a command
     APP_TONE_DONE,     // a picture is finished
     APP_TONE_FAIL,     // nothing understood, or a picture failed
+    APP_TONE_TEST,     // noise for measuring aec, from the console
 } app_tone_t;
 
 typedef struct {

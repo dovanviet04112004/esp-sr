@@ -15,6 +15,9 @@
 #define TWO_PI 6.28318530718f
 #define DB_PER_DECADE 20.0f
 #define INT16_FULL_SCALE 32767.0f
+#define NOISE_MULTIPLIER 1664525u // Numerical Recipes' LCG
+#define NOISE_INCREMENT 1013904223u
+#define NOISE_FULL_SCALE 2147483648.0f
 
 typedef struct {
     uint16_t hz;
@@ -25,12 +28,13 @@ typedef struct {
 
 static const tone_t kTones[] = {
     [APP_TONE_NONE] = {0, 0, 0, 0},  [APP_TONE_WAKE] = GEN_TONE_WAKE, [APP_TONE_COMMAND] = GEN_TONE_COMMAND,
-    [APP_TONE_DONE] = GEN_TONE_DONE, [APP_TONE_FAIL] = GEN_TONE_FAIL,
+    [APP_TONE_DONE] = GEN_TONE_DONE, [APP_TONE_FAIL] = GEN_TONE_FAIL, [APP_TONE_TEST] = GEN_TONE_TEST,
 };
 
 static const char *TAG = "svc_speak";
 
 static QueueHandle_t s_requests;
+static uint32_t s_noise = 1;
 
 esp_err_t svc_speak_init(const svc_speak_config_t *cfg)
 {
@@ -42,6 +46,14 @@ esp_err_t svc_speak_init(const svc_speak_config_t *cfg)
 static uint32_t samples_of(uint32_t ms)
 {
     return ms * GEN_GRID_SAMPLE_RATE_HZ / MS_PER_S;
+}
+
+// A tone of 0 Hz is noise: aec learns the whole band from it, and a sine teaches it one bin.
+static float wave(const tone_t *tone, float step, uint32_t at)
+{
+    if (tone->hz != 0) { return sinf(step * (float)at); }
+    s_noise = s_noise * NOISE_MULTIPLIER + NOISE_INCREMENT;
+    return (float)(int32_t)s_noise / NOISE_FULL_SCALE;
 }
 
 static float envelope(uint32_t at, uint32_t total, uint32_t ramp)
@@ -62,7 +74,7 @@ static esp_err_t play_samples(const tone_t *tone, uint32_t total, bool sounding)
         for (uint32_t i = 0; i < take; ++i) {
             const uint32_t at = done + i;
             const float value =
-                sounding ? amplitude * envelope(at, total, ramp) * sinf(step * (float)at) : 0.0f;
+                sounding ? amplitude * envelope(at, total, ramp) * wave(tone, step, at) : 0.0f;
             block[i] = (int16_t)value;
         }
         const esp_err_t err = drv_audio_write(block, take, WRITE_TIMEOUT_MS);
