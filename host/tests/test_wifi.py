@@ -127,3 +127,50 @@ def test_keys_wifi_set_refuses_are_refused_here(key: str) -> None:
 def test_an_open_network_and_a_wpa_key_pass() -> None:
     wifi.check_key("")
     wifi.check_key("eight ch")
+
+
+class ScriptedPort:
+    """A serial port that hands out what the board printed, a byte at a time, and keeps what was written."""
+
+    def __init__(self, printed: bytes) -> None:
+        self.printed = printed
+        self.written = b""
+
+    @property
+    def in_waiting(self) -> int:
+        return 1 if self.printed else 0
+
+    def read(self, size: int) -> bytes:
+        taken, self.printed = self.printed[:size], self.printed[size:]
+        return taken
+
+    def write(self, data: bytes) -> None:
+        self.written += data
+
+
+def console_on(printed: bytes) -> wifi.Console:
+    console = wifi.Console.__new__(wifi.Console)
+    console.port = ScriptedPort(printed)
+    console.seen = b""
+    return console
+
+
+def test_an_answer_behind_a_prompt_in_the_echo_is_still_read() -> None:
+    line = "nvs set device stream_host 10.0.0.2"
+    console = console_on(f"sr> {line}\r\nsr> \r\ndevice/stream_host = 10.0.0.2 (str): ESP_OK\r\nsr> ".encode())
+    assert console.run(line, wifi.NVS_SET) == "ESP_OK"
+
+
+def test_a_line_the_board_never_answers_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(wifi, "REPLY_TIMEOUT_S", 0.01)
+    console = console_on(b"sr> ")
+    with pytest.raises(wifi.BoardError, match="no answer"):
+        console.run("nvs set device stream_host 10.0.0.2", wifi.NVS_SET)
+
+
+def test_opening_the_console_asks_for_a_restart_a_board_without_a_reset_pin_needs() -> None:
+    console = wifi.Console("loop://")
+    try:
+        assert console.port.read(len(wifi.RESTART_LINE)) == wifi.RESTART_LINE
+    finally:
+        console.close()

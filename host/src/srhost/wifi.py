@@ -21,6 +21,7 @@ import serial
 from srhost.config import ConfigError, record_config
 
 PROMPT = b"sr> "
+RESTART_LINE = b"restart\r\n"
 BAUD = 115200
 PROMPT_TIMEOUT_S = 40.0
 REPLY_TIMEOUT_S = 5.0
@@ -116,7 +117,7 @@ def check_key(key: str) -> None:
 
 
 class Console:
-    """main's console over PORT; opening it restarts the board, as the bridge resets the chip on every open."""
+    """main's console over PORT; opening it restarts the board: the bridge resets board B, a console line board C."""
 
     def __init__(self, port_name: str) -> None:
         self.port = serial.serial_for_url(port_name, BAUD, timeout=POLL_S, do_not_open=True)
@@ -124,6 +125,8 @@ class Console:
         self.port.dtr = False
         self.port.rts = False
         self.port.open()
+        # Board C's serial lines reach no reset pin; on board B this line falls into the reset (KEHOACH 2.1).
+        self.port.write(RESTART_LINE)
         self.seen = b""
 
     def close(self) -> None:
@@ -153,16 +156,11 @@ class Console:
     def run(self, line: str, answer: re.Pattern[str], missing: str = "no answer from the board") -> str:
         """Send one console line and return the first group of its answer; the echo of the line is never kept."""
         self.port.write(line.encode() + b"\r\n")
-        reply = self.wait(PROMPT, REPLY_TIMEOUT_S)
-        text = (
-            self.seen.decode(errors="replace")
-            if reply is None
-            else reply.string[: reply.start()].decode(errors="replace")
-        )
-        found = answer.search(text)
+        # Waits for the answer's whole line: the console's echo can carry a prompt, which comes ahead of it.
+        found = self.wait(re.compile(answer.pattern.encode() + rb"\r?\n"), REPLY_TIMEOUT_S)
         if found is None:
             raise BoardError(f"{line.split(' ')[0]}: {missing}")
-        return found.group(1)
+        return found.group(1).decode(errors="replace")
 
 
 def join(port_name: str, ssid: str, key: str) -> str:
