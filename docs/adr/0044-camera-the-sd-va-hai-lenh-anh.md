@@ -33,8 +33,8 @@ Năm ràng buộc quyết định thiết kế:
 | | **JPEG từ OV5640, giải 1:2 khi cần `detect`** | một khung dùng cho thẻ, MQTT, `detect`; ~0,9 MB PSRAM | thêm một bước giải JPEG 🔬 |
 | Sensor giữa hai lần chụp | chạy liên tục | chụp ngay | chiếm PSRAM suốt, nghe chậm đi |
 | | **nghỉ, đánh thức khi có lệnh** | không tốn gì lúc nghe | mỗi lần chụp thêm thời gian ổn định sáng và lấy nét 🔬 |
-| Đệm DMA camera | RAM nội | mặc định, đã chạy | 30 KB: không vừa |
-| | **PSRAM (`CONFIG_CAMERA_PSRAM_DMA`)** | gần như không tốn RAM nội | chưa thử trên board 🔬 |
+| Đệm DMA camera | **đệm 16 KB ở RAM nội, khung ở PSRAM** | dò dấu kết thúc JPEG trên cả khung, mọi khung đều dùng được | 21 764 B RAM nội, lấy lại từ Wi-Fi và lwIP |
+| | PSRAM (`CONFIG_CAMERA_PSRAM_DMA`) | gần như không tốn RAM nội | thử trên board: `esp32-camera` chỉ dò 1 KB cuối, bỏ gần hết khung (`board_c.md` §4.1) |
 | Ảnh lên MQTT | base64 trong JSON | dùng lại `gen_payload` | to thêm 33%, tốn vùng JSON |
 | | **nhị phân theo khúc, topic riêng** | không qua cJSON, bộ nhớ gửi nhỏ | thêm một khuôn ở `contracts/` |
 
@@ -44,7 +44,7 @@ Năm ràng buộc quyết định thiết kế:
 
 | Component | Tầng | Việc | Xuất phát từ |
 |---|---|---|---|
-| `drv_camera` | L2 | bọc `esp32-camera` 2.1.7: dựng lúc boot, JPEG, DMA PSRAM, nghỉ qua SCCB, tự lấy nét | `drv_camera` của repo face attendance, bỏ vòng phơi sáng tay chỉ dùng cho RGB565 |
+| `drv_camera` | L2 | bọc `esp32-camera` 2.1.7: dựng lúc boot, JPEG, khung ở PSRAM, nghỉ qua SCCB | `drv_camera` của repo face attendance, bỏ vòng phơi sáng tay chỉ dùng cho RGB565 |
 | `drv_sd` | L2 | SDSPI, FAT ở `/sdcard`, báo thẻ vắng, đầy | viết mới; `check_sd` của app kiểm phần cứng |
 | `drv_gps` | L2 | UART1 RX GPIO 20, 9600 baud, giữ vị trí mới nhất; phân tích NMEA ở phần thuần, có test máy tính | viết mới |
 | `drv_ir` | L2 | GPIO 19, lọc rung, báo cạnh | viết mới |
@@ -64,14 +64,14 @@ Mọi ngoại vi của board đều có driver. Bản đầu của các khối n
 ```
 COMMAND chup_anh | nhan_dien  (sau kiểm người nói, nếu bật)
   dieu_task  -> q_vision
-  nhin_task  -> đánh thức sensor, bật đèn, ổn định sáng, lấy nét, chụp một khung JPEG 1280x720
-             -> ghi /sdcard/IMG/B<boot>_<seq>.JPG
-             -> đẩy ảnh lên up/image theo từng khúc
-             -> nhan_dien: giải JPEG 1:2 thành RGB888 640x360, ai_engine_detect_run, gửi up/detections
+  nhin_task  -> đánh thức sensor, bật đèn, chờ phơi sáng đứng yên, chụp một khung JPEG 1280x720
              -> tắt đèn, sensor nghỉ
+             -> ghi /sdcard/IMG/B<boot>/<seq>.JPG
+             -> xếp ảnh vào outbox của up/image theo từng khúc
+             -> nhan_dien: giải JPEG 1:2 thành RGB888 640x360, ai_engine_detect_run, gửi up/detections
 ```
 
-- Ảnh đi trước khung, nên host thấy ảnh ngay, không chờ `detect` 1,84 s.
+- Ảnh đi trước khung, nên host thấy ảnh ngay, không chờ `detect`.
 - Không có thẻ thì vẫn đẩy ảnh, sự kiện ghi `saved: false`. Mất MQTT thì ảnh vẫn ở thẻ, chưa gửi lại ở bản đầu.
 - Đang chạy mà có lệnh mới thì từ chối ngay với mã `VISION_BUSY`, không xếp hàng.
 
@@ -82,10 +82,10 @@ COMMAND chup_anh | nhan_dien  (sau kiểm người nói, nếu bật)
 - `contracts/vision.yaml`: id lệnh ứng với việc (`chup_anh`, `nhan_dien`), cỡ ảnh, chất lượng JPEG, cỡ khúc, số khung ổn định sáng.
   Không hằng số nào gõ vào code (KẾ HOẠCH §4.9).
 - Khúc ảnh: đầu cố định gồm mã lần chụp, số khúc, tổng khúc, tổng byte, CRC32, rồi tới dữ liệu; khúc 16 KB 🔬.
-- `up/detections`: mã lần chụp, cỡ ảnh, ms, tới 32 × {lớp, tên, điểm, x, y, w, h}.
+- `up/detections`: mã lần chụp, cỡ ảnh, ms, tới 32 × {tên, điểm, x1, y1, x2, y2}.
 - `device_cmd` thêm `CAPTURE` với `mode`, để host chụp được mà không cần nói.
-- `event` thêm `CAPTURE` và mã lỗi `VISION_BUSY`, `SD_ABSENT`, `CAMERA_FAIL`.
-- `default_vi.json` thêm `nhan_dien`; `chup_anh` đã có.
+- `event` thêm `CAPTURE`, có `saved` báo ảnh đã vào thẻ, và mã lỗi `VISION_BUSY`, `CAMERA_FAIL`, `DETECT_FAIL`.
+- Bộ `host/sets/demo_vi.json` đã có `chup_anh` và `nhan_dien`. `default_vi.json` giữ nguyên 10 lệnh, vì số ấy là số lệnh đăng ký giọng.
 
 ### 4. Task và hàng đợi
 
@@ -93,7 +93,7 @@ COMMAND chup_anh | nhan_dien  (sau kiểm người nói, nếu bật)
 |---|---|
 | `nhin_task` | `svc_vision`, nhân 0, ưu tiên 1, ngăn xếp ở PSRAM như `mqtt_task` vì task này không ghi flash |
 | `do_task` | `svc_sensors`, nhân 0, ưu tiên 2, nhịp 1 s, ngăn xếp ở PSRAM; không chạm nhân 1 |
-| `q_vision` | depth 1, `app_vision_req_t`; đầy thì từ chối và tăng `vision_dropped`, không chờ |
+| `q_vision` | depth 1, `app_vision_req_t`; yêu cầu nằm trong hàng tới hết ảnh, đầy thì `dieu_task` ra `ERROR VISION_BUSY`, không chờ |
 | `q_dialog` | bắt đầu có người gửi: nơi chốt `COMMAND` gửi với timeout 0, `dieu_task` tra `vision.yaml` rồi đẩy `q_vision` |
 | `net_mqtt` | thêm `net_mqtt_publish_image`; chỉ `nhin_task` gọi |
 
@@ -103,18 +103,20 @@ Thêm mạng `detect` vào `app_boot`, trước mọi task, theo E15-T17. `docs/
 
 | Khoản | RAM nội | PSRAM |
 |---|---|---|
-| `detect` | 6,4 KB | 2 837 040 B |
-| Camera, DMA ở PSRAM, một khung JPEG 1280 × 720 | vài KB 🔬 | ~184 KB 🔬 |
-| RGB888 640 × 360 | | 691 200 B |
-| SDSPI, FAT | ~6 KB 🔬 | |
-| `nhin_task`, `do_task` | hai TCB | 12 KB |
+| `detect` | 332 B lúc boot | 2 837 040 B |
+| Camera: đệm DMA 16 KB, `cam_task`; một khung JPEG 1280 × 720 | 21 764 B | ~184 KB |
+| RGB888 640 × 360, đệm giải JPEG, khúc gửi | | 771 KB |
+| SDSPI, FAT, `svc_vision` | 2 380 B | |
+| `nhin_task`, `do_task` | hai TCB | 20 KB |
 | UART1 của GPS, bus I2C | ~3 KB 🔬 | |
-| **Cộng** | **~18 KB của 20,2 KiB thấp nhất** 🔬 | **~3,7 MB của 4,26 MB còn** 🔬 |
+| **Cộng** | **~27 KB** | **~3,8 MB của 4,26 MB còn** |
 
-RAM nội rất sát, và vùng mượn của `ConvLut` (§6.5) co theo nó nên ảnh có thể chậm hơn 1,84 s. Thiếu thì gỡ theo thứ tự: giảm đệm
-Wi-Fi, thu pool `q_frame` theo một micro.
+RAM nội thiếu thật: camera ở RAM nội tốn gấp đôi ước tính. Đã gỡ bằng `sdkconfig.board_c`: mã Wi-Fi ra khỏi IRAM, `.bss` và đệm
+của Wi-Fi, lwIP ở PSRAM, ngăn xếp các task không chạm flash ở PSRAM, bỏ bảng thanh ghi sensor không lắp, tổng 64 KB. Lúc nghe còn
+75,6 KiB, thấp nhất 35,2 KiB (`board_c.md` §4.2), vùng mượn của `ConvLut` (§6.5) đủ 32 KB.
 
-Thời gian ước 🔬: "chụp ảnh" 2–3 s tới lúc host có ảnh; "nhận diện" 5–6 s tới lúc có khung.
+Thời gian đo: "chụp ảnh" 1,6 s chụp, 0,15 s ghi thẻ, 0,3–1,5 s đẩy ảnh; "nhận diện" thêm 1,15 s giải JPEG và 3,3 s `detect`, vì
+chuỗi nghe giữ phần nhân 0 của nó (`board_c.md` §4.5).
 
 ### 6. Riêng tư
 
@@ -126,7 +128,7 @@ tiếng người. Ảnh trên thẻ không mã hoá.
 | Bước | Việc | Xong khi |
 |---|---|---|
 | 1 | Sửa KẾ HOẠCH theo ADR; `contracts/` và `make gen` (E15-T6) | schema có đối chứng âm, host và firmware dùng code sinh |
-| 2 | `drv_camera`, app thử ở `drv_camera/test_apps` (E15-T15) | JPEG 1280 × 720, DMA ở PSRAM, nghỉ và đánh thức, tự lấy nét cho ảnh nét; RAM nội đo được |
+| 2 | `drv_camera`, app thử `test_apps/board_c` (E15-T15) | JPEG 1280 × 720, nghỉ và đánh thức; RAM nội đo được |
 | 3 | `drv_sd` | ghi đọc lại khớp sha256; rút thẻ không treo |
 | 4 | `make product BOARD=C` nạp cả `vision_0`; `detect` dựng lúc boot, `nhin_task` (E15-T7) | board nghe như cũ, RAM nội không dưới mức an toàn |
 | 5 | "chụp ảnh" đầu cuối; `host/vision.py` ghi ảnh, `make vision-watch` | nói lệnh, host có ảnh, sha256 khớp file trên thẻ |
@@ -150,5 +152,7 @@ Bước 2 và 3 độc lập, bước 5 cần cả hai. Lệnh đầu tiên ch�
 ## Hệ quả
 
 - KẾ HOẠCH đổi ở §2.1, §3.18, §4 (cây thư mục, bảng tầng), §5.2, §5.3, §6.5, §6.6, §7.3, §7.5; TASKS thêm các bước trên.
-- Thêm dependency `espressif/esp32-camera` ghim 2.1.7 ở chính `drv_camera` (KẾ HOẠCH §4.5.1).
-- Xét lại khi RAM nội đo ở bước 4 không vừa, hay khi độ trễ lệnh tăng ở bước 7.
+- Thêm dependency `espressif/esp32-camera` ghim 2.1.7 ở chính `drv_camera`, `espressif/esp_new_jpeg` ghim 1.0.2 ở `svc_vision`
+  (KẾ HOẠCH §4.5.1).
+- Ống kính hoá ra nét cố định: phần tự lấy nét không dùng trên board này (KẾ HOẠCH §3.19, `board_c.md` §4.3).
+- Bước 4 đã xét lại đệm DMA (bảng phương án ở trên). Xét lại nữa khi độ trễ lệnh tăng ở bước 7.
