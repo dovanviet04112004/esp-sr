@@ -73,7 +73,16 @@ typedef struct {
     bool saved; // CAPTURE: the picture reached the SD card
 } app_event_t;
 
+typedef enum {
+    APP_TONE_NONE = 0, // speak the response or the text instead
+    APP_TONE_WAKE,     // heard the wake word
+    APP_TONE_COMMAND,  // took a command
+    APP_TONE_DONE,     // a picture is finished
+    APP_TONE_FAIL,     // nothing understood, or a picture failed
+} app_tone_t;
+
 typedef struct {
+    app_tone_t tone;
     char response_id[APP_EVT_ID_MAX_BYTES]; // empty when text is set
     char text[APP_SPEAK_TEXT_MAX_BYTES];    // UTF-8, from SPEAK
 } app_speak_req_t;
