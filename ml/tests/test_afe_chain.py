@@ -75,12 +75,35 @@ def test_to_pcm_rounds_half_to_even_and_saturates() -> None:
     assert chain.to_pcm(hop).tolist() == [0, 2, -2, 32767, -32768]
 
 
-def test_formats_the_default_build_cannot_run_are_refused() -> None:
+def test_a_format_outside_the_four_is_refused() -> None:
     with pytest.raises(ValueError):
         chain.Chain("XY")
-    for with_ref in ("MR", "MMR"):
-        with pytest.raises(NotImplementedError):
-            chain.Chain(with_ref)
+
+
+def test_without_aec_a_silent_reference_only_raises_its_flag() -> None:
+    rng = np.random.default_rng(12)
+    mic = np.rint(32768 * speechlike(rng, HOPS * grid.HOP_SAMPLES, 0.05)).astype(np.int16)
+    alone, with_ref = chain.Chain("M"), chain.Chain("MR")
+    for hop in mic.reshape(HOPS, grid.HOP_SAMPLES):
+        want = alone.process(hop)
+        got = with_ref.process(np.stack([hop, np.zeros_like(hop)], axis=-1).reshape(-1))
+        assert np.array_equal(got.pcm, want.pcm)
+        assert got.flags == want.flags | chain.FLAG_NO_REF
+
+
+def test_aec_takes_the_speaker_off_the_clean_channel() -> None:
+    rng = np.random.default_rng(13)
+    hops = 300
+    far = 0.05 * rng.standard_normal(hops * grid.HOP_SAMPLES)
+    room = 0.25 * rng.standard_normal(400) * np.exp(-np.arange(400) / 80.0)
+    mic = np.convolve(far, room)[: far.size]
+    pcm = np.rint(32768 * np.stack([mic, far], axis=-1)).astype(np.int16).reshape(hops, -1)
+    powers = []
+    for modules in (("hpf",), ("hpf", "aec")):
+        ch = chain.Chain("MR", chain.ChainConfig(modules=modules))
+        clean = np.concatenate([ch.process(hop).pcm for hop in pcm])[-100 * grid.HOP_SAMPLES :]
+        powers.append(float(np.mean(clean.astype(np.float64) ** 2)))
+    assert 10.0 * np.log10(powers[0] / powers[1]) > 20.0
 
 
 def test_one_microphone_gives_what_two_identical_ones_give_but_doa() -> None:

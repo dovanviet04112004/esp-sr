@@ -1,9 +1,9 @@
 """The dsp_afe facade: interleaved int16 hops in, one clean channel and its figures out (KEHOACH 3.2, 4.5.5).
 
-Mirror of dsp_afe.c: hpf and the STFT per microphone, balance on ch1, doa searched every second hop after a speech hop,
-the spatial stage (the plain two-channel mean, or gsc steered by doa), the ns floor's gains, iSTFT, vad on the clean
-hop, its level, agc, back to int16. One microphone ("M") skips balance, doa and the mean (ADR-0042). Modules follow
-ChainConfig.modules, by default contracts/afe.yaml's. Run: python -m srpipe.dsp.afe.chain <in.wav> <out.wav>"""
+Mirror of dsp_afe.c: hpf, aec on a reference ("MR", "MMR"), the STFT per microphone, balance on ch1, doa searched every
+second hop after a speech hop, the spatial stage (the plain mean, or gsc steered by doa), the ns floor's gains with
+aec's residual echo in its noise, iSTFT, vad on the clean hop, its level, agc, back to int16. One microphone skips
+balance, doa and the mean (ADR-0042). Modules follow ChainConfig.modules. Run: python -m srpipe.dsp.afe.chain in out"""
 
 from __future__ import annotations
 
@@ -14,12 +14,12 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from srpipe.dsp.afe import agc, balance, bss, doa, gsc, hpf, ns_omlsa, vad
+from srpipe.dsp.afe import aec, agc, balance, bss, doa, gsc, hpf, ns_omlsa, vad
 from srpipe.dsp.spec.stft import Istft, Stft
 from srpipe.generated import afe, array, grid
 
 FORMATS = {"M": 1, "MR": 2, "MM": array.N_MICS, "MMR": array.N_MICS + 1}
-MODULES_BUILT = ("hpf", "balance", "doa", "ns_omlsa", "vad", "agc")
+MODULES_BUILT = ("hpf", "balance", "aec", "doa", "ns_omlsa", "vad", "agc")
 SPATIALS = ("none", "gsc", "bss")
 BROADSIDE_DEG = np.float32(sum(array.DOA_RANGE_DEG) / 2.0)
 PCM_FULL_SCALE = np.float32(32768.0)
@@ -29,6 +29,8 @@ LEVEL_MIN_DBFS = INT8_MIN
 
 FLAG_GAP = 1 << 0
 FLAG_CLIPPED = 1 << 1
+FLAG_AEC_DIVERGED = 1 << 2
+FLAG_NO_REF = 1 << 3
 
 
 @dataclass(frozen=True)
@@ -38,7 +40,7 @@ class ChainConfig:
     the firmware does. spatial is dsp_afe_config_t.spatial: none for the plain mean, gsc for the canceller steered by
     doa, broadside while doa has no angle, bss for the gate on doa's angle with the settings bss gives, None
     for contracts/afe.yaml's. agc_start_db, for the board simulation only, is the gain the agc starts
-    from (KEHOACH 1.2); None starts as the firmware does."""
+    from (KEHOACH 1.2); None starts as the firmware does. aec_delay_samples is calib/aec_delay."""
 
     modules: tuple[str, ...] = afe.MODULES
     balance_gains: np.ndarray | None = None
@@ -48,6 +50,7 @@ class ChainConfig:
     spatial: str = "none"
     bss: bss.BssConfig | None = None
     agc_start_db: float | None = None
+    aec_delay_samples: int = 0
 
 
 @dataclass(frozen=True)
@@ -96,8 +99,6 @@ class Chain:
         cfg = cfg or ChainConfig()
         if input_format not in FORMATS:
             raise ValueError(f"input format {input_format!r} is not one of {sorted(FORMATS)}")
-        if input_format.endswith("R"):
-            raise NotImplementedError(f"{input_format} needs aec, which lands in E10")
         if missing := sorted(set(cfg.modules) - set(MODULES_BUILT)):
             raise NotImplementedError(f"no Python reference yet for {', '.join(missing)}")
         if cfg.spatial not in SPATIALS:
@@ -121,6 +122,9 @@ class Chain:
     def _start_modules(self) -> None:
         on = self.cfg.modules
         self._hpf = hpf.Hpf() if "hpf" in on else None
+        self._aec = None
+        if "aec" in on and self.n_channels > self.n_mics:
+            self._aec = aec.Aec(aec.AecConfig(self.n_mics, bulk_delay_samples=self.cfg.aec_delay_samples))
         self._doa = doa.Doa() if "doa" in on and self.n_mics == 2 else None
         self._gsc = gsc.Gsc() if self.cfg.spatial == "gsc" else None
         self._bss = bss.Bss(self.cfg.bss) if self.cfg.spatial == "bss" else None
@@ -152,14 +156,16 @@ class Chain:
         self._gap = True
 
     def resume(self) -> None:
-        """Forget only what holds samples from before a short gap, the STFT and iSTFT buffers, hpf's memory, vad's
-        band filters and agc's look-ahead, and keep every estimate; the next frame carries FLAG_GAP and seq runs on
-        (KEHOACH 4.5.5)."""
+        """Forget only what holds samples from before a short gap, the STFT and iSTFT buffers, hpf's memory, aec's
+        reference, vad's band filters and agc's look-ahead, and keep every estimate; the next frame carries FLAG_GAP
+        and seq runs on (KEHOACH 4.5.5)."""
         for st in self._analysis:
             st.reset()
         self._synthesis.reset()
         if self._hpf is not None:
             self._hpf.reset()
+        if self._aec is not None:
+            self._aec.flush()
         if self._vad is not None:
             self._vad.flush()
         if self._vad_in is not None:
@@ -173,9 +179,15 @@ class Chain:
         hop = np.asarray(interleaved, dtype=np.int16).reshape(grid.HOP_SAMPLES, self.n_channels)
         mics = hop[:, : self.n_mics]
         clipped = bool(np.any((mics == PCM_MAX) | (mics == PCM_MIN)))
-        samples = hop.astype(np.float32) / PCM_FULL_SCALE
+        ref_silent = self.n_channels > self.n_mics and not hop[:, self.n_mics :].any()
+        channels = hop.astype(np.float32) / PCM_FULL_SCALE
+        samples = channels[:, : self.n_mics]
         if self._hpf is not None:
             samples = np.stack([self._hpf.process(m, samples[:, m]) for m in range(self.n_mics)], axis=-1)
+        echo_power = None
+        if self._aec is not None:
+            cancelled, echo_power = self._aec.process(samples.T, channels[:, self.n_mics])
+            samples = cancelled.T
         bins = [st.analyze(samples[:, m]) for m, st in enumerate(self._analysis)]
         if self._gains is not None:
             bins[1] = balance.apply(bins[1], self._gains)
@@ -196,7 +208,7 @@ class Chain:
         else:
             mixed = np.float32(0.5) * (bins[0] + bins[1])
         if self._ns is not None:
-            gains = self._ns.process(mixed.real * mixed.real + mixed.imag * mixed.imag).gain
+            gains = self._ns.process(mixed.real * mixed.real + mixed.imag * mixed.imag, echo_power).gain
             mixed = (mixed.real * gains + 1j * (mixed.imag * gains)).astype(np.complex64)
         clean = self._synthesis.synthesize(mixed)
         speech = self._vad.process(clean).speech if self._vad is not None else False
@@ -204,7 +216,8 @@ class Chain:
         gain_db = np.float32(0.0)
         if self._agc is not None:
             clean, gain_db = self._agc.process(clean, speech)
-        flags = (FLAG_GAP if self._gap else 0) | (FLAG_CLIPPED if clipped else 0)
+        flags = (FLAG_GAP if self._gap else 0) | (FLAG_CLIPPED if clipped else 0) | (FLAG_NO_REF if ref_silent else 0)
+        flags |= FLAG_AEC_DIVERGED if self._aec is not None and self._aec.diverged else 0
         frame = Frame(
             pcm=to_pcm(clean),
             seq=self._seq,
