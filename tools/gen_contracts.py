@@ -806,6 +806,70 @@ def gen_stream_py(s: dict) -> str:
     )
 
 
+def vision_values() -> dict:
+    v = load_yaml("vision.yaml")
+    chunk = v["chunk"]
+    offset, fields = 0, []
+    for field in chunk["header"]:
+        size = int(field["type"][1:]) // 8
+        if offset % size:
+            sys.exit(f"vision.yaml: {field['name']} is not aligned")
+        fields.append({**field, "offset": offset})
+        offset += size
+    if offset != chunk["header_bytes"]:
+        sys.exit(f"vision.yaml: header is {offset} bytes, header_bytes says {chunk['header_bytes']}")
+    return {**v, "fields": fields, "magic_u32": int.from_bytes(chunk["magic"].encode("ascii"), "little")}
+
+
+def gen_vision_h(v: dict) -> str:
+    camera, detect, chunk = v["camera"], v["detect"], v["chunk"]
+    out = [banner("contracts/vision.yaml", "//"), "#pragma once\n", "#include <stddef.h>", "#include <stdint.h>\n"]
+    out.append(f'#define GEN_VISION_COMMAND_PHOTO "{v["commands"]["photo"]}"')
+    out.append(f'#define GEN_VISION_COMMAND_DETECT "{v["commands"]["detect"]}"')
+    out.append(f"#define GEN_VISION_WIDTH {camera['width']}")
+    out.append(f"#define GEN_VISION_HEIGHT {camera['height']}")
+    out.append(f"#define GEN_VISION_FRAME_SIZE {camera['frame_size']}")
+    out.append(f"#define GEN_VISION_JPEG_QUALITY {camera['jpeg_quality']}")
+    out.append(f"#define GEN_VISION_XCLK_HZ {camera['xclk_hz']}")
+    out.append(f"#define GEN_VISION_SETTLE_FRAMES_MIN {camera['settle_frames_min']}")
+    out.append(f"#define GEN_VISION_SETTLE_FRAMES_MAX {camera['settle_frames_max']}")
+    out.append(f"#define GEN_VISION_STILL_FRAMES {camera['still_frames']}")
+    out.append(f"#define GEN_VISION_FOCUS_TIMEOUT_MS {camera['focus_timeout_ms']}")
+    out.append(f"#define GEN_VISION_DECODE_SCALE {detect['decode_scale']}")
+    out.append(f"#define GEN_VISION_BOXES_MAX {detect['boxes_max']}")
+    out.append(f'#define GEN_VISION_CHUNK_MAGIC 0x{v["magic_u32"]:08x}u // "{chunk["magic"]}" little-endian')
+    out.append(f"#define GEN_VISION_CHUNK_VERSION {v['version']}")
+    out.append(f"#define GEN_VISION_CHUNK_HEADER_BYTES {chunk['header_bytes']}")
+    out.append(f"#define GEN_VISION_CHUNK_PAYLOAD_BYTES {chunk['payload_bytes']}\n")
+    out.append("typedef struct {")
+    out += [f"    {C_FIELD_TYPE[fl['type']]} {fl['name']};" for fl in v["fields"]]
+    out.append("} gen_vision_chunk_header_t;\n")
+    out.append(
+        '_Static_assert(sizeof(gen_vision_chunk_header_t) == GEN_VISION_CHUNK_HEADER_BYTES, "chunk header size");'
+    )
+    out += [
+        f'_Static_assert(offsetof(gen_vision_chunk_header_t, {fl["name"]}) == {fl["offset"]}, "{fl["name"]} offset");'
+        for fl in v["fields"]
+    ]
+    return "\n".join(out) + "\n"
+
+
+def gen_vision_py(v: dict) -> str:
+    fmt = "<" + "".join(STRUCT_FORMAT[fl["type"]] for fl in v["fields"])
+    chunk = v["chunk"]
+    return banner("contracts/vision.yaml", "#") + (
+        "\nimport struct\n\n"
+        f'COMMAND_PHOTO = "{v["commands"]["photo"]}"\n'
+        f'COMMAND_DETECT = "{v["commands"]["detect"]}"\n'
+        f"CHUNK_MAGIC_U32 = 0x{v['magic_u32']:08x}\n"
+        f"CHUNK_VERSION = {v['version']}\n"
+        f"CHUNK_HEADER_BYTES = {chunk['header_bytes']}\n"
+        f"CHUNK_PAYLOAD_BYTES = {chunk['payload_bytes']}\n"
+        f'CHUNK_HEADER = struct.Struct("{fmt}")\n'
+        f"CHUNK_HEADER_FIELDS = {tuple(fl['name'] for fl in v['fields'])!r}\n"
+    )
+
+
 def topic_values() -> dict:
     t = load_yaml("mqtt_topics.yaml")
     topics = []
@@ -1191,6 +1255,7 @@ def outputs() -> dict[str, str]:
     lang = lang_vi_values()
     listen = listen_values(g)
     speaker = speaker_values(g)
+    vision = vision_values()
     init = banner("contracts/", "#")
     return {
         f"{COMMON_INC}/gen_grid.h": gen_grid_h(g),
@@ -1199,6 +1264,7 @@ def outputs() -> dict[str, str]:
         f"{COMMON_INC}/gen_units.h": gen_units_h(lang),
         f"{COMMON_INC}/gen_listen.h": gen_listen_h(listen),
         f"{COMMON_INC}/gen_speaker.h": gen_speaker_h(speaker),
+        f"{COMMON_INC}/gen_vision.h": gen_vision_h(vision),
         f"{MQTT_INC}/gen_topics.h": gen_topics_h(t),
         f"{MQTT_INC}/gen_payload.h": gen_payload_h(),
         f"{AFE_INC}/gen_afe.h": gen_afe_h(afe),
@@ -1214,6 +1280,7 @@ def outputs() -> dict[str, str]:
         f"{HOST_GEN}/__init__.py": init,
         f"{HOST_GEN}/grid.py": gen_grid_py(g),
         f"{HOST_GEN}/stream.py": gen_stream_py(s),
+        f"{HOST_GEN}/vision.py": gen_vision_py(vision),
         f"{HOST_GEN}/topics.py": gen_topics_py(t),
         f"{HOST_GEN}/payload.py": gen_payload_py(),
     }

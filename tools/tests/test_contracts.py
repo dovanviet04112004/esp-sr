@@ -84,6 +84,10 @@ class DataFileTests(unittest.TestCase):
             with self.subTest(file=path):
                 self.assertEqual(len(ids), len(set(ids)))
 
+    def test_the_image_commands_are_in_the_demo_set(self) -> None:
+        ids = {c["id"] for c in load_json(CONTRACTS.parent / "host" / "sets" / "demo_vi.json")["commands"]}
+        self.assertLessEqual(set(load_yaml(CONTRACTS / "vision.yaml")["commands"].values()), ids)
+
     def test_a_command_without_text_is_rejected(self) -> None:
         validator = Draft202012Validator(schemas()["command_set"])
         self.assertFalse(validator.is_valid({"version": 1, "commands": [{"id": "x"}]}))
@@ -94,7 +98,8 @@ class TopicTests(unittest.TestCase):
         known = schemas().keys()
         for topic in load_yaml(CONTRACTS / "mqtt_topics.yaml")["topics"]:
             with self.subTest(topic=topic["id"]):
-                self.assertIn(topic["schema"], known)
+                if topic["schema"] != "binary":
+                    self.assertIn(topic["schema"], known)
                 self.assertIn("{deviceId}", topic["path"])
                 self.assertIn(topic["direction"], {"up", "down"})
                 self.assertIn(topic["qos"], {0, 1})

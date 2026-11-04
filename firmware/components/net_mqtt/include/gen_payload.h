@@ -122,6 +122,183 @@ static inline cJSON *command_set_to_json(const command_set_t *in)
     return root;
 }
 
+typedef struct {
+    char name[32];
+    uint16_t score_permille;
+    uint16_t x1;
+    uint16_t y1;
+    uint16_t x2;
+    uint16_t y2;
+} detections_boxes_item_t;
+
+/** Fill out from a parsed detections_boxes object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool detections_boxes_item_from_json(const cJSON *root, detections_boxes_item_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "name");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->name)) { return false; }
+        strcpy(out->name, item->valuestring);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "scorePermille");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 1000.0) { return false; }
+        out->score_permille = (uint16_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "x1");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 65535.0) { return false; }
+        out->x1 = (uint16_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "y1");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 65535.0) { return false; }
+        out->y1 = (uint16_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "x2");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 65535.0) { return false; }
+        out->x2 = (uint16_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "y2");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 65535.0) { return false; }
+        out->y2 = (uint16_t) item->valuedouble;
+    }
+    return true;
+}
+
+/** Build the JSON object of one detections_boxes for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *detections_boxes_item_to_json(const detections_boxes_item_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddStringToObject(root, "name", in->name);
+    cJSON_AddNumberToObject(root, "scorePermille", (double) in->score_permille);
+    cJSON_AddNumberToObject(root, "x1", (double) in->x1);
+    cJSON_AddNumberToObject(root, "y1", (double) in->y1);
+    cJSON_AddNumberToObject(root, "x2", (double) in->x2);
+    cJSON_AddNumberToObject(root, "y2", (double) in->y2);
+    return root;
+}
+
+typedef struct {
+    char device_id[33];
+    uint32_t boot;
+    uint32_t capture_seq;
+    uint16_t width;
+    uint16_t height;
+    uint32_t detect_ms;
+    detections_boxes_item_t boxes[32];
+    uint8_t boxes_count;
+} detections_t;
+
+/** Fill out from a parsed detections object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool detections_from_json(const cJSON *root, detections_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "deviceId");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->device_id)) { return false; }
+        strcpy(out->device_id, item->valuestring);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "boot");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->boot = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "captureSeq");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->capture_seq = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "width");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 1.0 || item->valuedouble > 65535.0) { return false; }
+        out->width = (uint16_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "height");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 1.0 || item->valuedouble > 65535.0) { return false; }
+        out->height = (uint16_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "detectMs");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->detect_ms = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "boxes");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > 32) { return false; }
+        if (cJSON_GetArraySize(item) < 0) { return false; }
+        const cJSON *el = NULL;
+        cJSON_ArrayForEach(el, item) {
+            if (!detections_boxes_item_from_json(el, &out->boxes[out->boxes_count])) { return false; }
+            out->boxes_count++;
+        }
+    }
+    return true;
+}
+
+/** Build the JSON object of one detections for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *detections_to_json(const detections_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddStringToObject(root, "deviceId", in->device_id);
+    cJSON_AddNumberToObject(root, "boot", (double) in->boot);
+    cJSON_AddNumberToObject(root, "captureSeq", (double) in->capture_seq);
+    cJSON_AddNumberToObject(root, "width", (double) in->width);
+    cJSON_AddNumberToObject(root, "height", (double) in->height);
+    cJSON_AddNumberToObject(root, "detectMs", (double) in->detect_ms);
+    cJSON *boxes_arr = cJSON_AddArrayToObject(root, "boxes");
+    for (int i = 0; boxes_arr != NULL && i < in->boxes_count; i++) {
+        cJSON_AddItemToArray(boxes_arr, detections_boxes_item_to_json(&in->boxes[i]));
+    }
+    return root;
+}
+
 typedef enum {
     DEVICE_CMD_OP_SET_CONFIG = 0,
     DEVICE_CMD_OP_SET_STREAM = 1,
@@ -130,7 +307,8 @@ typedef enum {
     DEVICE_CMD_OP_REBOOT = 4,
     DEVICE_CMD_OP_SPEAKER_ENROL = 5,
     DEVICE_CMD_OP_SPEAKER_ENROL_CANCEL = 6,
-    DEVICE_CMD_OP_COUNT = 7,
+    DEVICE_CMD_OP_CAPTURE = 7,
+    DEVICE_CMD_OP_COUNT = 8,
 } device_cmd_op_t;
 
 /** Contract spelling of a value; "" when it is out of range.
@@ -146,6 +324,7 @@ static inline const char *device_cmd_op_str(device_cmd_op_t v)
     case DEVICE_CMD_OP_REBOOT: return "REBOOT";
     case DEVICE_CMD_OP_SPEAKER_ENROL: return "SPEAKER_ENROL";
     case DEVICE_CMD_OP_SPEAKER_ENROL_CANCEL: return "SPEAKER_ENROL_CANCEL";
+    case DEVICE_CMD_OP_CAPTURE: return "CAPTURE";
     default: return "";
     }
 }
@@ -164,6 +343,7 @@ static inline bool device_cmd_op_parse(const char *s, device_cmd_op_t *out)
     if (strcmp(s, "REBOOT") == 0) { *out = DEVICE_CMD_OP_REBOOT; return true; }
     if (strcmp(s, "SPEAKER_ENROL") == 0) { *out = DEVICE_CMD_OP_SPEAKER_ENROL; return true; }
     if (strcmp(s, "SPEAKER_ENROL_CANCEL") == 0) { *out = DEVICE_CMD_OP_SPEAKER_ENROL_CANCEL; return true; }
+    if (strcmp(s, "CAPTURE") == 0) { *out = DEVICE_CMD_OP_CAPTURE; return true; }
     return false;
 }
 
@@ -241,6 +421,36 @@ static inline cJSON *device_cmd_stream_to_json(const device_cmd_stream_t *in)
     return root;
 }
 
+typedef enum {
+    DEVICE_CMD_CAPTURE_MODE_PHOTO = 0,
+    DEVICE_CMD_CAPTURE_MODE_DETECT = 1,
+    DEVICE_CMD_CAPTURE_MODE_COUNT = 2,
+} device_cmd_capture_mode_t;
+
+/** Contract spelling of a value; "" when it is out of range.
+ *  @ctx any | non-blocking | returns a static string
+ */
+static inline const char *device_cmd_capture_mode_str(device_cmd_capture_mode_t v)
+{
+    switch (v) {
+    case DEVICE_CMD_CAPTURE_MODE_PHOTO: return "PHOTO";
+    case DEVICE_CMD_CAPTURE_MODE_DETECT: return "DETECT";
+    default: return "";
+    }
+}
+
+/** Value of a contract spelling.
+ *  @ctx any | non-blocking
+ *  @ret false for NULL or a spelling the contract does not list
+ */
+static inline bool device_cmd_capture_mode_parse(const char *s, device_cmd_capture_mode_t *out)
+{
+    if (s == NULL || out == NULL) { return false; }
+    if (strcmp(s, "PHOTO") == 0) { *out = DEVICE_CMD_CAPTURE_MODE_PHOTO; return true; }
+    if (strcmp(s, "DETECT") == 0) { *out = DEVICE_CMD_CAPTURE_MODE_DETECT; return true; }
+    return false;
+}
+
 typedef struct {
     device_cmd_op_t op;
     char request_id[17];
@@ -249,12 +459,14 @@ typedef struct {
     device_cmd_stream_t stream;
     char text[513];
     char speaker_id[8];
+    device_cmd_capture_mode_t capture_mode;
     bool has_request_id;
     bool has_key;
     bool has_value;
     bool has_stream;
     bool has_text;
     bool has_speaker_id;
+    bool has_capture_mode;
 } device_cmd_t;
 
 /** Fill out from a parsed device_cmd object, checking type, range, enum and size.
@@ -313,6 +525,12 @@ static inline bool device_cmd_from_json(const cJSON *root, device_cmd_t *out)
         strcpy(out->speaker_id, item->valuestring);
         out->has_speaker_id = true;
     }
+    item = cJSON_GetObjectItemCaseSensitive(root, "captureMode");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || !device_cmd_capture_mode_parse(item->valuestring, &out->capture_mode)) { return false; }
+        out->has_capture_mode = true;
+    }
     return true;
 }
 
@@ -344,6 +562,9 @@ static inline cJSON *device_cmd_to_json(const device_cmd_t *in)
     if (in->has_speaker_id) {
         cJSON_AddStringToObject(root, "speakerId", in->speaker_id);
     }
+    if (in->has_capture_mode) {
+        cJSON_AddStringToObject(root, "captureMode", device_cmd_capture_mode_str(in->capture_mode));
+    }
     return root;
 }
 
@@ -352,7 +573,8 @@ typedef enum {
     EVENT_KIND_COMMAND = 1,
     EVENT_KIND_REJECT = 2,
     EVENT_KIND_ERROR = 3,
-    EVENT_KIND_COUNT = 4,
+    EVENT_KIND_CAPTURE = 4,
+    EVENT_KIND_COUNT = 5,
 } event_kind_t;
 
 /** Contract spelling of a value; "" when it is out of range.
@@ -365,6 +587,7 @@ static inline const char *event_kind_str(event_kind_t v)
     case EVENT_KIND_COMMAND: return "COMMAND";
     case EVENT_KIND_REJECT: return "REJECT";
     case EVENT_KIND_ERROR: return "ERROR";
+    case EVENT_KIND_CAPTURE: return "CAPTURE";
     default: return "";
     }
 }
@@ -380,6 +603,7 @@ static inline bool event_kind_parse(const char *s, event_kind_t *out)
     if (strcmp(s, "COMMAND") == 0) { *out = EVENT_KIND_COMMAND; return true; }
     if (strcmp(s, "REJECT") == 0) { *out = EVENT_KIND_REJECT; return true; }
     if (strcmp(s, "ERROR") == 0) { *out = EVENT_KIND_ERROR; return true; }
+    if (strcmp(s, "CAPTURE") == 0) { *out = EVENT_KIND_CAPTURE; return true; }
     return false;
 }
 
@@ -395,6 +619,10 @@ typedef struct {
     int16_t speaker_permille;
     char speaker_id[8];
     uint8_t enrol_count;
+    uint32_t boot;
+    uint32_t capture_seq;
+    uint32_t image_bytes;
+    bool saved;
     uint32_t ts;
     bool has_score_permille;
     bool has_margin_permille;
@@ -404,6 +632,10 @@ typedef struct {
     bool has_speaker_permille;
     bool has_speaker_id;
     bool has_enrol_count;
+    bool has_boot;
+    bool has_capture_seq;
+    bool has_image_bytes;
+    bool has_saved;
     bool has_ts;
 } event_t;
 
@@ -495,6 +727,37 @@ static inline bool event_from_json(const cJSON *root, event_t *out)
         out->enrol_count = (uint8_t) item->valuedouble;
         out->has_enrol_count = true;
     }
+    item = cJSON_GetObjectItemCaseSensitive(root, "boot");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->boot = (uint32_t) item->valuedouble;
+        out->has_boot = true;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "captureSeq");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->capture_seq = (uint32_t) item->valuedouble;
+        out->has_capture_seq = true;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "imageBytes");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->image_bytes = (uint32_t) item->valuedouble;
+        out->has_image_bytes = true;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "saved");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsBool(item)) { return false; }
+        out->saved = cJSON_IsTrue(item);
+        out->has_saved = true;
+    }
     item = cJSON_GetObjectItemCaseSensitive(root, "ts");
     if (item == NULL) { item = NULL; }
     if (item != NULL) {
@@ -541,6 +804,18 @@ static inline cJSON *event_to_json(const event_t *in)
     }
     if (in->has_enrol_count) {
         cJSON_AddNumberToObject(root, "enrolCount", (double) in->enrol_count);
+    }
+    if (in->has_boot) {
+        cJSON_AddNumberToObject(root, "boot", (double) in->boot);
+    }
+    if (in->has_capture_seq) {
+        cJSON_AddNumberToObject(root, "captureSeq", (double) in->capture_seq);
+    }
+    if (in->has_image_bytes) {
+        cJSON_AddNumberToObject(root, "imageBytes", (double) in->image_bytes);
+    }
+    if (in->has_saved) {
+        cJSON_AddBoolToObject(root, "saved", in->saved);
     }
     if (in->has_ts) {
         cJSON_AddNumberToObject(root, "ts", (double) in->ts);

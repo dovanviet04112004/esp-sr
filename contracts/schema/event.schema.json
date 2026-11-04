@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "sr/event",
   "title": "event",
-  "description": "Something the listener decided: a wake word, a command, a rejection, or an error code.",
+  "description": "Something the board did: a wake word, a command, a rejection, an error code, or a capture.",
   "type": "object",
   "additionalProperties": false,
   "required": ["deviceId", "seq", "kind"],
   "properties": {
     "deviceId": {"type": "string", "pattern": "^[A-Za-z0-9_-]{4,32}$", "maxLength": 32},
     "seq": {"type": "integer", "minimum": 0, "maximum": 4294967295},
-    "kind": {"enum": ["WAKE", "COMMAND", "REJECT", "ERROR"]},
+    "kind": {"enum": ["WAKE", "COMMAND", "REJECT", "ERROR", "CAPTURE"]},
     "scorePermille": {"type": "integer", "minimum": 0, "maximum": 1000},
     "marginPermille": {"type": "integer", "minimum": 0, "maximum": 1000},
     "commandId": {"type": "string", "pattern": "^[a-z0-9_]{1,32}$", "maxLength": 32},
@@ -18,12 +18,17 @@
     "speakerPermille": {"type": "integer", "minimum": -1000, "maximum": 1000},
     "speakerId": {"type": "string", "pattern": "^spk_[0-9]{3}$", "maxLength": 7},
     "enrolCount": {"type": "integer", "minimum": 1, "maximum": 255},
+    "boot": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "captureSeq": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "imageBytes": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "saved": {"type": "boolean"},
     "ts": {"type": "integer", "minimum": 0, "maximum": 4294967295}
   },
   "allOf": [
     {"if": {"properties": {"kind": {"const": "WAKE"}}}, "then": {"required": ["scorePermille"]}},
     {"if": {"properties": {"kind": {"const": "COMMAND"}}}, "then": {"required": ["commandId", "scorePermille", "marginPermille"]}},
     {"if": {"properties": {"kind": {"const": "REJECT"}}}, "then": {"required": ["code"]}},
-    {"if": {"properties": {"kind": {"const": "ERROR"}}}, "then": {"required": ["code"]}}
+    {"if": {"properties": {"kind": {"const": "ERROR"}}}, "then": {"required": ["code"]}},
+    {"if": {"properties": {"kind": {"const": "CAPTURE"}}}, "then": {"required": ["boot", "captureSeq", "imageBytes", "saved"]}}
   ]
 }

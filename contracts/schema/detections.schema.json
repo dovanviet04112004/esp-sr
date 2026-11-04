@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sr/detections",
+  "title": "detections",
+  "description": "The boxes detect found in one capture, in the pixels of the picture it ran on.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["deviceId", "boot", "captureSeq", "width", "height", "detectMs", "boxes"],
+  "properties": {
+    "deviceId": {"type": "string", "pattern": "^[A-Za-z0-9_-]{4,32}$", "maxLength": 32},
+    "boot": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "captureSeq": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "width": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "height": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "detectMs": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "boxes": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "scorePermille", "x1", "y1", "x2", "y2"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[A-Za-z0-9 _-]{1,31}$", "maxLength": 31},
+          "scorePermille": {"type": "integer", "minimum": 0, "maximum": 1000},
+          "x1": {"type": "integer", "minimum": 0, "maximum": 65535},
+          "y1": {"type": "integer", "minimum": 0, "maximum": 65535},
+          "x2": {"type": "integer", "minimum": 0, "maximum": 65535},
+          "y2": {"type": "integer", "minimum": 0, "maximum": 65535}
+        }
+      }
+    }
+  }
+}

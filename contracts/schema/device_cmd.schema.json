@@ -17,7 +17,8 @@
         "CALIBRATE",
         "REBOOT",
         "SPEAKER_ENROL",
-        "SPEAKER_ENROL_CANCEL"
+        "SPEAKER_ENROL_CANCEL",
+        "CAPTURE"
       ]
     },
     "requestId": {
@@ -73,6 +74,12 @@
       "type": "string",
       "pattern": "^spk_[0-9]{3}$",
       "maxLength": 7
+    },
+    "captureMode": {
+      "enum": [
+        "PHOTO",
+        "DETECT"
+      ]
     }
   },
   "allOf": [
@@ -130,6 +137,20 @@
       "then": {
         "required": [
           "speakerId"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "op": {
+            "const": "CAPTURE"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "captureMode"
         ]
       }
     }

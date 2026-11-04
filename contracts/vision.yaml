@@ -1,0 +1,33 @@
+# Board C's image path (KEHOACH 3.19, ADR-0044): the two spoken commands, the camera, and the frame of an
+# image chunk on up/image. Little-endian; fields sit on their natural alignment and the generator checks offsets.
+version: 1
+commands:
+  photo: chup_anh
+  detect: nhan_dien
+camera:
+  width: 1280
+  height: 720
+  frame_size: FRAMESIZE_HD
+  jpeg_quality: 6
+  xclk_hz: 20000000
+  settle_frames_min: 4
+  settle_frames_max: 30
+  still_frames: 3
+  focus_timeout_ms: 3000
+detect:
+  decode_scale: 2
+  boxes_max: 32
+chunk:
+  magic: SRIM
+  payload_bytes: 16384
+  header:
+    - {name: magic, type: u32}
+    - {name: version, type: u16}
+    - {name: index, type: u16}
+    - {name: count, type: u16}
+    - {name: reserved, type: u16}
+    - {name: boot, type: u32}
+    - {name: seq, type: u32}
+    - {name: total_bytes, type: u32}
+    - {name: crc32, type: u32}
+  header_bytes: 28

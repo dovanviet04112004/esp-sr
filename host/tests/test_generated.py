@@ -35,7 +35,7 @@ def validator(name: str) -> jsonschema.Draft202012Validator:
 
 
 def test_every_topic_has_its_schema() -> None:
-    assert {t.schema for t in topics.TOPICS} <= set(payload.SCHEMAS)
+    assert {t.schema for t in topics.TOPICS} - {"binary"} <= set(payload.SCHEMAS)
 
 
 @pytest.mark.parametrize("name", sorted(payload.SCHEMAS))
@@ -67,6 +67,43 @@ def test_a_tampered_heartbeat_is_refused(field: str, value: object) -> None:
 def test_telemetry_accepts_the_level_of_digital_silence() -> None:
     sample = {"doaDeg": -1, "doaConf": 0, "vad": False, "levelDbfs": -128, "gainDb": 0}
     validator("telemetry").validate({"deviceId": "sr-3485188f7a70", "seq": 0, "state": "LISTEN", "samples": [sample]})
+
+
+DETECTIONS = {
+    "deviceId": "sr-30eda01e4630",
+    "boot": 7,
+    "captureSeq": 2,
+    "width": 640,
+    "height": 360,
+    "detectMs": 1840,
+    "boxes": [{"name": "cell phone", "scorePermille": 812, "x1": 10, "y1": 20, "x2": 110, "y2": 220}],
+}
+
+
+def test_a_detection_from_board_c_validates() -> None:
+    validator("detections").validate(DETECTIONS)
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [({"boot": -1}, "minimum"), ({"boxes": [{"name": "x"}]}, "required"), ({"smuggled": 1}, "additional")],
+)
+def test_a_tampered_detection_is_refused(change: dict, reason: str) -> None:
+    with pytest.raises(jsonschema.ValidationError, match=reason if reason != "minimum" else "less than"):
+        validator("detections").validate({**DETECTIONS, **change})
+
+
+def test_a_capture_event_must_say_what_it_kept() -> None:
+    event = {"deviceId": "sr-30eda01e4630", "seq": 1, "kind": "CAPTURE", "boot": 7, "captureSeq": 2, "imageBytes": 9}
+    with pytest.raises(jsonschema.ValidationError, match="saved"):
+        validator("event").validate(event)
+    validator("event").validate({**event, "saved": True})
+
+
+def test_a_capture_command_must_name_its_mode() -> None:
+    with pytest.raises(jsonschema.ValidationError, match="captureMode"):
+        validator("device_cmd").validate({"op": "CAPTURE"})
+    validator("device_cmd").validate({"op": "CAPTURE", "captureMode": "DETECT"})
 
 
 def test_topics_build_and_match_back() -> None:

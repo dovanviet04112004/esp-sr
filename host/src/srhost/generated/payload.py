@@ -16,7 +16,28 @@ class CommandSet(TypedDict):
     version: int
     commands: list[CommandSetCommandsItem]
 
-DeviceCmdOp = Literal['SET_CONFIG', 'SET_STREAM', 'SPEAK', 'CALIBRATE', 'REBOOT', 'SPEAKER_ENROL', 'SPEAKER_ENROL_CANCEL']
+
+
+class DetectionsBoxesItem(TypedDict):
+    name: str
+    scorePermille: int
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+
+
+
+class Detections(TypedDict):
+    deviceId: str
+    boot: int
+    captureSeq: int
+    width: int
+    height: int
+    detectMs: int
+    boxes: list[DetectionsBoxesItem]
+
+DeviceCmdOp = Literal['SET_CONFIG', 'SET_STREAM', 'SPEAK', 'CALIBRATE', 'REBOOT', 'SPEAKER_ENROL', 'SPEAKER_ENROL_CANCEL', 'CAPTURE']
 
 
 class DeviceCmdStream(TypedDict):
@@ -25,6 +46,7 @@ class DeviceCmdStream(TypedDict):
     port: NotRequired[int]
     durationS: NotRequired[int]
 
+DeviceCmdCaptureMode = Literal['PHOTO', 'DETECT']
 
 
 class DeviceCmd(TypedDict):
@@ -35,8 +57,9 @@ class DeviceCmd(TypedDict):
     stream: NotRequired[DeviceCmdStream]
     text: NotRequired[str]
     speakerId: NotRequired[str]
+    captureMode: NotRequired[DeviceCmdCaptureMode]
 
-EventKind = Literal['WAKE', 'COMMAND', 'REJECT', 'ERROR']
+EventKind = Literal['WAKE', 'COMMAND', 'REJECT', 'ERROR', 'CAPTURE']
 
 
 class Event(TypedDict):
@@ -51,6 +74,10 @@ class Event(TypedDict):
     speakerPermille: NotRequired[int]
     speakerId: NotRequired[str]
     enrolCount: NotRequired[int]
+    boot: NotRequired[int]
+    captureSeq: NotRequired[int]
+    imageBytes: NotRequired[int]
+    saved: NotRequired[bool]
     ts: NotRequired[int]
 
 
@@ -179,6 +206,36 @@ SCHEMAS: dict[str, dict] = {
                                                           'response': {'type': 'string',
                                                                        'pattern': '^[a-z0-9_]{1,32}$',
                                                                        'maxLength': 32}}}}}},
+    'detections': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+     '$id': 'sr/detections',
+     'title': 'detections',
+     'description': 'The boxes detect found in one capture, in the pixels of the picture it ran on.',
+     'type': 'object',
+     'additionalProperties': False,
+     'required': ['deviceId', 'boot', 'captureSeq', 'width', 'height', 'detectMs', 'boxes'],
+     'properties': {'deviceId': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{4,32}$', 'maxLength': 32},
+                    'boot': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'captureSeq': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'width': {'type': 'integer', 'minimum': 1, 'maximum': 65535},
+                    'height': {'type': 'integer', 'minimum': 1, 'maximum': 65535},
+                    'detectMs': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'boxes': {'type': 'array',
+                              'maxItems': 32,
+                              'items': {'type': 'object',
+                                        'additionalProperties': False,
+                                        'required': ['name', 'scorePermille', 'x1', 'y1', 'x2', 'y2'],
+                                        'properties': {'name': {'type': 'string',
+                                                                'pattern': '^[A-Za-z0-9 _-]{1,31}$',
+                                                                'maxLength': 31},
+                                                       'scorePermille': {'type': 'integer',
+                                                                         'minimum': 0,
+                                                                         'maximum': 1000},
+                                                       'x1': {'type': 'integer', 'minimum': 0, 'maximum': 65535},
+                                                       'y1': {'type': 'integer', 'minimum': 0, 'maximum': 65535},
+                                                       'x2': {'type': 'integer', 'minimum': 0, 'maximum': 65535},
+                                                       'y2': {'type': 'integer',
+                                                              'minimum': 0,
+                                                              'maximum': 65535}}}}}},
     'device_cmd': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
      '$id': 'sr/device_cmd',
      'title': 'device_cmd',
@@ -192,7 +249,8 @@ SCHEMAS: dict[str, dict] = {
                                     'CALIBRATE',
                                     'REBOOT',
                                     'SPEAKER_ENROL',
-                                    'SPEAKER_ENROL_CANCEL']},
+                                    'SPEAKER_ENROL_CANCEL',
+                                    'CAPTURE']},
                     'requestId': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{1,16}$', 'maxLength': 16},
                     'key': {'type': 'string', 'pattern': '^[a-z0-9_]{1,15}/[a-z0-9_]{1,15}$', 'maxLength': 31},
                     'value': {'type': 'integer', 'minimum': -2147483648, 'maximum': 2147483647},
@@ -206,21 +264,23 @@ SCHEMAS: dict[str, dict] = {
                                               'port': {'type': 'integer', 'minimum': 1, 'maximum': 65535},
                                               'durationS': {'type': 'integer', 'minimum': 1, 'maximum': 3600}}},
                     'text': {'type': 'string', 'minLength': 1, 'maxLength': 128},
-                    'speakerId': {'type': 'string', 'pattern': '^spk_[0-9]{3}$', 'maxLength': 7}},
+                    'speakerId': {'type': 'string', 'pattern': '^spk_[0-9]{3}$', 'maxLength': 7},
+                    'captureMode': {'enum': ['PHOTO', 'DETECT']}},
      'allOf': [{'if': {'properties': {'op': {'const': 'SET_CONFIG'}}}, 'then': {'required': ['key', 'value']}},
                {'if': {'properties': {'op': {'const': 'SET_STREAM'}}}, 'then': {'required': ['stream']}},
                {'if': {'properties': {'op': {'const': 'SPEAK'}}}, 'then': {'required': ['text']}},
-               {'if': {'properties': {'op': {'const': 'SPEAKER_ENROL'}}}, 'then': {'required': ['speakerId']}}]},
+               {'if': {'properties': {'op': {'const': 'SPEAKER_ENROL'}}}, 'then': {'required': ['speakerId']}},
+               {'if': {'properties': {'op': {'const': 'CAPTURE'}}}, 'then': {'required': ['captureMode']}}]},
     'event': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
      '$id': 'sr/event',
      'title': 'event',
-     'description': 'Something the listener decided: a wake word, a command, a rejection, or an error code.',
+     'description': 'Something the board did: a wake word, a command, a rejection, an error code, or a capture.',
      'type': 'object',
      'additionalProperties': False,
      'required': ['deviceId', 'seq', 'kind'],
      'properties': {'deviceId': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{4,32}$', 'maxLength': 32},
                     'seq': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
-                    'kind': {'enum': ['WAKE', 'COMMAND', 'REJECT', 'ERROR']},
+                    'kind': {'enum': ['WAKE', 'COMMAND', 'REJECT', 'ERROR', 'CAPTURE']},
                     'scorePermille': {'type': 'integer', 'minimum': 0, 'maximum': 1000},
                     'marginPermille': {'type': 'integer', 'minimum': 0, 'maximum': 1000},
                     'commandId': {'type': 'string', 'pattern': '^[a-z0-9_]{1,32}$', 'maxLength': 32},
@@ -229,12 +289,18 @@ SCHEMAS: dict[str, dict] = {
                     'speakerPermille': {'type': 'integer', 'minimum': -1000, 'maximum': 1000},
                     'speakerId': {'type': 'string', 'pattern': '^spk_[0-9]{3}$', 'maxLength': 7},
                     'enrolCount': {'type': 'integer', 'minimum': 1, 'maximum': 255},
+                    'boot': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'captureSeq': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'imageBytes': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'saved': {'type': 'boolean'},
                     'ts': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295}},
      'allOf': [{'if': {'properties': {'kind': {'const': 'WAKE'}}}, 'then': {'required': ['scorePermille']}},
                {'if': {'properties': {'kind': {'const': 'COMMAND'}}},
                 'then': {'required': ['commandId', 'scorePermille', 'marginPermille']}},
                {'if': {'properties': {'kind': {'const': 'REJECT'}}}, 'then': {'required': ['code']}},
-               {'if': {'properties': {'kind': {'const': 'ERROR'}}}, 'then': {'required': ['code']}}]},
+               {'if': {'properties': {'kind': {'const': 'ERROR'}}}, 'then': {'required': ['code']}},
+               {'if': {'properties': {'kind': {'const': 'CAPTURE'}}},
+                'then': {'required': ['boot', 'captureSeq', 'imageBytes', 'saved']}}]},
     'heartbeat': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
      '$id': 'sr/heartbeat',
      'title': 'heartbeat',
