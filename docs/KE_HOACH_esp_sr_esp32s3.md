@@ -2560,8 +2560,7 @@ Id của hai lệnh và số của luồng ảnh nằm ở `contracts/vision.yam
 PSRAM của chuỗi nghe (§6.6).
 
 **Ống kính nét cố định.** Ống ren tròn, không motor: đẩy thanh ghi ống kính từ 0 tới 1000 mà độ nét không đổi
-(`measurements/board_c.md` §4.3). Vì thế không nạp phần sụn tự lấy nét. Điểm nét chỉnh tay một lần, `make vision-live` hiện ảnh và cỡ
-cỡ JPEG. Module có motor thì bật `CONFIG_CAMERA_AF_SUPPORT`, `drv_camera_focus` đã sẵn.
+(`measurements/board_c.md` §4.3). Vì thế không nạp phần sụn tự lấy nét. Điểm nét chỉnh tay một lần, `make vision-live` hiện ảnh và độ nét. Module có motor thì bật `CONFIG_CAMERA_AF_SUPPORT`, `drv_camera_focus` đã sẵn.
 
 **DMA của camera qua đệm 16 KB ở RAM nội, khung JPEG ở PSRAM.** Chế độ DMA thẳng vào PSRAM của `esp32-camera`
 (`CONFIG_CAMERA_PSRAM_DMA`) chỉ dò dấu kết thúc JPEG ở 1 KB cuối, nên bỏ gần hết khung (`measurements/board_c.md` §4.1). Camera

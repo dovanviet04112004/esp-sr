@@ -30,7 +30,7 @@ máy tính gửi một ký tự qua UART0, app chạy một khối rồi in kế
 - **GPS thiếu anten**, nên chưa kiểm được vị trí.
 - **Hồng ngoại rung**, khi dùng phải lọc trong firmware.
 - **Ống kính nét cố định, không có motor** (§4.3). Ảnh của vật gần nhòe vì vật nằm ngoài điểm nét đặt sẵn; đổi điểm nét bằng
-  cách xoay ren ống kính, `make vision-live` hiện ảnh và cỡ JPEG.
+  cách xoay ren ống kính, `make vision-live` hiện ảnh và độ nét. Cỡ JPEG không đo được độ nét: ảnh nhòe hẳn mà nhiễu ở độ lợi cao vẫn 69 KB, ảnh nét hơn 49 KB.
 - **Hai thiết bị I2C** ở 0x48 và 0x68 chưa rõ là gì 🔬.
 - **Micro chưa đo SNR và `pcm_shift`.** Board C tạm dùng `pcm_shift` 13 của board B 🔬.
 
