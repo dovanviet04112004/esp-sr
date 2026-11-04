@@ -202,8 +202,9 @@ mô phỏng, bản Python:
 | Loa méo `tanh` | 12,3 dB, phần còn lại là việc của khe `ns` |
 | Hai bên cùng nói | tiếng người mất 0,01 dB, không phân kỳ, 36,7 dB sau đó |
 
-Bản C so với Python trên máy tính, 5 ca: `out` lệch tối đa ~1e-7, SNR ~118–123 dB. Cả chuỗi `"MR"` và `"MMR"` qua `chain_aec`: `pcm` lệch 1 LSB, SNR ~86 dB,
-`vad`, `flags`, độ lợi khớp tuyệt đối. Hai đối chứng âm đều đỏ: chuỗi bỏ qua tham chiếu, và chuỗi giữ tham chiếu qua chỗ hở ngắn. Chưa chạy trên chip 🔬.
+Bản C so với Python trên máy tính khớp từng bit, cả 5 ca của `aec` lẫn chuỗi `"MR"`, `"MMR"` qua `chain_aec`: phép nhân phức của numpy gộp nhân và cộng trên một số
+CPU, nên bản Python nhân từng phần như `aec.c`, và bộ vàng sinh ra giống nhau dù tắt AVX2, FMA, SSE4. Hai đối chứng âm đều đỏ: chuỗi bỏ qua tham chiếu, và chuỗi giữ
+tham chiếu qua chỗ hở ngắn. Chưa chạy trên chip 🔬.
 
 So với SpeexDSP 1.2.1 (`mdf.c` dựng float, cùng khối 256, đuôi 2 048 mẫu, cùng đầu vào int16, 30 s, phòng 1 200 mẫu), ngưỡng khớp là ERLE sau hội tụ lệch
 không quá 3 dB:
@@ -282,3 +283,20 @@ Tiếng người giữ được, chiếu lối ra lên lối ra của cùng ti�
 3 dB. Không khung nào mang `DSP_AFE_FLAG_AEC_DIVERGED`.
 
 Chưa đo: tiếng nói thật qua loa thay nhiễu, chạy dài 30 phút (E10-T1), âm lượng tối đa (E10-T2), parity trên chip 🔬.
+
+## 7. GPS, hồng ngoại và hai thiết bị I2C (E2-T15, T16, T17, 05/11)
+
+Đã chạy đầu cuối lên `up/sensors` và `make host-live` ở boot 50, rồi **tắt khỏi bản build của board C theo chủ repo** (`APP_SENSORS_ENABLE`, `sdkconfig.board_c`).
+Code và test giữ nguyên.
+
+| Khối | Đo được |
+|---|---|
+| 0x68 | `WHO_AM_I` 0x70: MPU-6500. Nằm yên −0,13 −0,99 +0,05 g, 32 °C; con quay lệch 2,9 3,1 −0,9 °/s chưa hiệu chỉnh |
+| 0x48 | Cấu hình 0x8583, ngưỡng 0x8000, 0x7FFF lúc reset: họ ADS1x15. Kết quả có 0x0001, 0x000A, 4 bit thấp khác 0, nên là ADS1115 16 bit, không phải ADS1015 |
+| Bốn đầu vào ADC | 0 tới 1 mV cả bốn: chưa nối gì, hoặc nối đất 🔬 |
+| GPS | `no antenna`, như §1 |
+| Hồng ngoại | Đổi `ON`, `off` theo tay, 2 lên 15 lần chạm trong ~70 s khi chủ repo được nhờ đưa tay 3 lần. Gia tốc đổi cùng lúc, tới −0,49 −0,62 +0,68 g, nên board bị chạm hoặc nhấc; chưa tách được là tay hay rung 🔬 |
+| `do_task` | ngăn xếp dùng 1 568 / 4 096 B; không rớt khung |
+
+Giá của chúng là `detect`. UART, I2C và ngắt GPIO ăn ~1 KB RAM nội nhưng khối liền lớn nhất mất 2 KB, vùng mượn của `detect` từ 26 560 xuống 24 512 / 32 768 B, và
+một lượt từ 1 921–1 947 ms lên **2 007–2 016 ms**, 5 lần. Tắt đi thì vùng mượn về 26 560 B và một lượt về 1 944 ms. Bật lại thì phải lấy lại chừng ấy RAM nội trước.
