@@ -2586,6 +2586,8 @@ không xoay được nếu không nén lại, nên mang cờ EXIF orientation 6 
 cờ `preview` ở đầu khúc, không ghi thẻ. Không có `PREVIEW` mới trong `preview_hold_ms` thì tự tắt, nên chế độ này không sống lâu hơn
 lệnh của nó. Một lệnh ảnh chen vào thì tắt ngay. Host giữ khung trong bộ nhớ cho trang của `make vision-live`, không ghi đĩa.
 
+Host lưu `<stem>.jpg`, `<stem>.json` cùng ảnh đã vẽ khung và tên vật `<stem>_boxes.jpg` ở data root; ảnh vẽ đúng chiều, không còn cờ EXIF.
+
 Không có thẻ thì vẫn đẩy ảnh, sự kiện ghi `saved: false`. Mất MQTT thì ảnh vẫn ở thẻ; bản đầu chưa gửi lại. Đang chạy mà có
 lệnh mới thì từ chối ngay với mã `VISION_BUSY`, không xếp hàng: `nhin_task` giữ yêu cầu trong `q_vision` tới hết ảnh (§5.3).
 
