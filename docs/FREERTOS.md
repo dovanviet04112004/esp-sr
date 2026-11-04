@@ -31,7 +31,7 @@ giữ; cột "Cách kiểm" là thứ chạy để xác nhận.
 | 1.1 | `vTaskDelete` không trả bộ nhớ ngay — IDLE mới là kẻ dọn | chỉ `net_task` tự xoá, và nó ở nhân 0 nơi IDLE0 chạy được | đọc `app_tasks.c` | ⏳ |
 | 1.2 | Task tự xoá mà chưa dọn tài nguyên của nó | `net_task` không xin heap, không cầm khoá | đọc thân task trước `vTaskDelete(NULL)` | ⏳ |
 | 1.3 | `vTaskSuspend` xoá phần trễ còn lại | không dùng | `grep vTaskSuspend` ra rỗng | ✅ `grep vTaskSuspend` ngoài `managed_components` ra rỗng @ 03/11 |
-| 1.4 | Tạo task động có thể thất bại lúc chạy | **mọi task tạo tĩnh** bằng `xTaskCreateStaticPinnedToCore` | thiếu RAM lộ lúc link | ✅ mọi task của `app_tasks.c` tạo bằng `xTaskCreateStaticPinnedToCore` @ 03/11 |
+| 1.4 | Tạo task động có thể thất bại lúc chạy | **mọi task tạo tĩnh** bằng `xTaskCreateStaticPinnedToCore` | thiếu RAM lộ lúc link | ✅ mọi task của `app_tasks.c` tạo bằng `xTaskCreateStaticPinnedToCore`, kể cả `nhin_task` @ 04/11 |
 
 ## 2. Lập lịch và ưu tiên
 
@@ -39,8 +39,9 @@ giữ; cột "Cách kiểm" là thứ chạy để xác nhận.
 |---|---|---|---|---|
 | 2.1 | Bỏ đói: task không bao giờ Blocked → IDLE đói → watchdog `IDLE1` | mỗi vòng lặp có một chỗ chặn; `sach_task` chặn trên `q_frame` | tìm `for(;;)` không có lời gọi chặn | ⏳ |
 | 2.2 | `vTaskDelay(0)` không đưa vào Blocked | không dùng | `grep "vTaskDelay(0)"` | ✅ `grep "vTaskDelay(0)"` ra rỗng @ 03/11 |
-| 2.3 | Xếp ưu tiên theo độ quan trọng thay vì độ gấp của hạn chót | `thu` 17 > `sach` 16 > `phu` 1; `nhan` 10 > `dieu` 8 > `mqtt` = `noi` 5 > `gui` 4 > `luong` = `net` = `xac` 3 > việc cửa sổ của `nhan` 2, ngang console | đối chiếu KẾ HOẠCH §5.2 | ⏳ |
+| 2.3 | Xếp ưu tiên theo độ quan trọng thay vì độ gấp của hạn chót | `thu` 17 > `sach` 16 > `phu` 1; `nhan` 10 > `dieu` 8 > `mqtt` = `noi` 5 > `gui` 4 > `luong` = `net` = `xac` 3 > việc cửa sổ của `nhan` 2, ngang console > `nhin` 1, riêng lượt `detect` 11 trên `nhan` | đối chiếu KẾ HOẠCH §5.2 | ⏳ |
 | 2.7 | Một đợt dài ở ưu tiên 3 bỏ đói mọi task từ 3 trở xuống | `xac_task` chạy b0 liền 504 ms trung vị mỗi lệnh (`latency.md` §32), b3 ~1,4 s: việc cửa sổ của `nhan`, console và IDLE0 chờ hết đợt. `nhan_task` nhận lệnh từ giữa một đợt việc cửa sổ, ở ưu tiên 2, nên cũng chờ hết lần chạy mới nạp khung tiếp: `q_clean` sâu 2 s chứa trọn lần chạy ấy. `luong` và `net` cùng mức hầu như luôn chặn (KẾ HOẠCH §5.2, §5.3) | log của `raise_decision` in thời gian xác minh; `heartbeat` không thấy `clean_dropped` tăng qua một lệnh được xác minh | ✅ 11/10: 9 lệnh được kiểm trên firmware sản phẩm, `clean_dropped` 0 (`measurements/latency.md` §28) |
+| 2.9 | Lượt `detect` ở ưu tiên 11 bỏ đói `nhan_task` quá chiều sâu `q_clean` | chỉ một lượt ~1,9 s rồi về ưu tiên 1, `q_clean` của board C sâu 3 s; `mqtt_task` cũng đứng nên khung gửi thẳng từ `nhin_task` | `clean_dropped` 0 qua các lượt `detect`, `measurements/board_c.md` §4.5 | ✅ 4 lượt, 0 rớt @ 04/11 |
 | 2.4 | Task ứng dụng chèn Wi-Fi | mọi task ứng dụng dưới 18 | đọc bảng `kTasks[]` | ✅ ưu tiên cao nhất là `thu_task` 17 @ 03/11 |
 | 2.5 | Task IDF không ghim chạy sang nhân 1 | `LWIP_TCPIP_TASK_AFFINITY_CPU0`, `ESP_TIMER_TASK_AFFINITY_CPU0`, `MQTT_USE_CORE_0` | `grep` ba khoá trong `sdkconfig.defaults.esp32s3`; ở `bench` in `vTaskGetInfo` từng task lúc boot | ✅ ba khoá ở `sdkconfig.defaults.esp32s3:24-27` @ 03/11 |
 | 2.6 | Khoá log của IDF lấy bằng `portMAX_DELAY` — một `ESP_LOGx` có thể chặn sau lưng | không log trong vòng khung của nhân 1, không log trong vùng khoá, không log trong ISR | `grep ESP_LOG` trong `svc_front/src` chỉ ra đường khởi tạo và lỗi hiếm | ⏳ |
@@ -76,7 +77,7 @@ giữ; cột "Cách kiểm" là thứ chạy để xác nhận.
 | 5.1 | Tràn ngăn xếp im lặng, lần chạy xanh che lần panic | `dev` bật `COMPILER_STACK_CHECK_MODE_NORM` và canary | `bench_mem` in watermark từng task sau 10 phút tải thật | ⏳ |
 | 5.2 | Mảng lớn trên ngăn xếp trong đường xử lý khung | vùng làm việc của `dsp_*` do người gọi cấp từ heap lúc boot, không đặt trên ngăn xếp | `-Wstack-usage=1024` cho `dsp_*`, `lang_*` | ⏳ |
 | 5.3 | Nhầm đơn vị watermark | nhân `sizeof(StackType_t)` | đọc code | ⏳ |
-| 5.4 | Ngăn xếp ở PSRAM bị chạm khi cache tắt | chỉ `mqtt_task` có ngăn xếp ở PSRAM; không task nào của nhân 1; `xac_task` ghi NVS nên ngăn xếp của nó ở RAM nội | đọc `sdkconfig` và bảng task | ⏳ |
+| 5.4 | Ngăn xếp ở PSRAM bị chạm khi cache tắt | `mqtt_task` có ngăn xếp ở PSRAM; board C thêm `nhin_task`, `gui_task`, `dieu_task`, `luong_task` bằng `EXT_RAM_BSS_ATTR`, không task nào của nhân 1. Năm task này không gọi `nvs_*`, `lfs_*`, `esp_partition_*`: thẻ SD ở SPI2, không phải flash. `xac_task`, `nhan_task` ghi flash, `net_task` đọc NVS, nên ngăn xếp của chúng ở RAM nội | đọc `sdkconfig.board_c`, bảng task, thân từng task | ⏳ |
 
 ## 6. Heap
 
@@ -84,7 +85,7 @@ giữ; cột "Cách kiểm" là thứ chạy để xác nhận.
 |---|---|---|---|---|
 | 6.1 | Rò heap | xin một lần lúc boot, không bao giờ trả | `soak` ghi heap nội và PSRAM mỗi phút, đường phẳng | ⏳ |
 | 6.2 | Phân mảnh: còn trống nhiều mà mảnh liền không đủ | vùng lớn (`aec`, `bss`, pool khung, đệm DMA) xin **trước** Wi-Fi | in `heap_caps_get_largest_free_block` sau mỗi bước của `app_boot` | ⏳ |
-| 6.3 | Cấp phát sau boot | cấm (CLAUDE.md §4.1); `dsp_*` không có `malloc` nào | `check_purity.py`; `grep malloc` trong `svc_*` chỉ ra `*_init` | ✅ `net_mqtt` cấp cJSON trên hai vùng PSRAM lấy lúc boot (`cJSON_InitHooks`, `jsonArenaPeak` trong `heartbeat`); `malloc` của `svc_*` chỉ trong `svc_front_init` và `svc_listen_init` @ 03/11 |
+| 6.3 | Cấp phát sau boot | cấm (CLAUDE.md §4.1); `dsp_*` không có `malloc` nào; đệm của `svc_vision` xin ở `svc_vision_init`, còn `fopen` của `drv_sd` và outbox của esp-mqtt cấp bên trong thư viện | `check_purity.py`; `grep malloc` trong `svc_*` chỉ ra `*_init` | ✅ `net_mqtt` cấp cJSON trên hai vùng PSRAM lấy lúc boot (`cJSON_InitHooks`, `jsonArenaPeak` trong `heartbeat`); `malloc` của `svc_*` chỉ trong `svc_front_init` và `svc_listen_init` @ 03/11 |
 | 6.4 | `prod` tắt poisoning nên hỏng heap ngoài hiện trường vô hình | `soak` chạy với `ci` (poisoning đầy đủ) trước mỗi bản phát hành | — | ⏳ |
 
 ## 7. PSRAM, cache và ghi flash
@@ -93,10 +94,11 @@ giữ; cột "Cách kiểm" là thứ chạy để xác nhận.
 |---|---|---|---|---|
 | 7.1 | ISR chạm PSRAM hoặc mã trong flash khi cache tắt | ISR của I2S ở IRAM (`I2S_ISR_IRAM_SAFE`), chỉ chạm bộ đếm trong RAM nội | đọc callback trong `drv_audio` | ⏳ |
 | 7.2 | **Ghi flash đóng băng `thu_task` quá chiều sâu DMA** | DMA RX 8 × 256 mẫu = 128 ms; chỉ ghi flash khi đổi cấu hình, đổi bộ lệnh, hiệu chuẩn | E14-T7: ghi NVS liên tục 10 phút, đếm khung mất | ⏳ |
-| 7.3 | Đệm DMA ở PSRAM | đệm DMA luôn `MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL` | đọc `drv_audio` | ⏳ |
+| 7.3 | Đệm DMA ở PSRAM | đệm DMA luôn `MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL`; `CONFIG_CAMERA_PSRAM_DMA` tắt (`measurements/board_c.md` §4.1) | đọc `drv_audio`, `sdkconfig` của board C | ⏳ |
 | 7.4 | Tranh chấp băng thông MSPI giữa flash, PSRAM và Wi-Fi làm chậm `sach_task` | trọng số `command_ctc` đọc thẳng từ flash (ADR-0028), tensor ở PSRAM chỉ trong `LENH`; `speaker` đọc trọng số từ flash và tensor ở PSRAM liền 504 ms với b0 sau mỗi lệnh khi kiểm người nói bật; khi bật hai nhân, `phu_task` đọc ghi PSRAM ngay trên nhân 1 lúc `sach` chạy (KẾ HOẠCH §5.1) | E14-T6 đo µs đỉnh của `sach_task` trong `LENH` so với `NGHE`, và trong một lần chạy b0; với hai nhân, app thử của `ai_engine` chạy chuỗi `dsp_afe` mỗi 16 ms ở nhân 1, ưu tiên của `sach`, trong lúc speaker chạy hai nhân: đỉnh dưới 12,8 ms | ⏳ |
 | 7.7 | Hai nhân cùng gọi bộ preload của ROM: một nhân khởi vùng trong lúc vùng của nhân kia chưa kết thúc | phần việc chạy song song giữ bước "xem rảnh rồi khởi vùng" dưới spinlock; mỗi nhân chỉ kết thúc vùng nó khởi (KẾ HOẠCH §3.14, ADR-0027) | đọc `espdl_preload.cpp`; lượt dò hai nhân khớp từng bit, cả khi nhân 1 ghi NVS | ✅ 28/10: b3 hai nhân khớp từng bit ở 10 cửa sổ và 3 cửa sổ dưới 358 lần ghi NVS (`measurements/latency.md` §31) |
 | 7.8 | Phần việc chạy song song đọc lại PSRAM nó vừa ghi | phần ấy chỉ ghi PSRAM; vùng nháp, mảng tham số của nhân và hàng đợi preload ở RAM nội (vùng mượn, ngăn xếp). Trên board B, `ConvBlock` có vòng hàng ở PSRAM ra số sai khi hai nhân chạy cùng lúc (KẾ HOẠCH §3.14, ADR-0027) | bài thử `[psram_lines]` của app thử `ai_engine` (hai nhân ghi xen hai nửa mọi dòng cache); lượt dò hai nhân khớp từng bit | ✅ 28/10: `[psram_lines]` 0 byte mất; b3 khớp từng bit khi nửa `ConvBlock` chỉ chạy trong vùng mượn (`measurements/latency.md` §31) |
+| 7.9 | Hai đồ thị của hai task chen nhau trên một nhân, mạng này xoá hay ghi đè vùng mượn của mạng kia | vùng mượn thuộc từng task (`thread_local` ở `espdl_loan.cpp`): `wake`, `pitch`, `speaker` chen nhau và chen `detect`, lượt của mỗi mạng chỉ thấy vùng của chính nó | đọc `espdl_loan.cpp`; `detect` cạnh chuỗi nghe trên board C | ⏳ |
 | 7.6 | `xac_task` ghi flash giữa chuỗi nghe | chỉ khi danh sách người nói đổi hay một lần đăng ký xong: mẫu giọng 768 B và `roster` 1 128 B khi đăng ký xong; với mỗi `SET` mới hơn bản đang giữ, xoá `tpl<k>` của người bị bỏ, `chip` khi cờ đổi, rồi `roster`; bản trùng `version` (retained gửi lại mỗi lần nối) không ghi; không ghi theo nhịp | đọc `svc_listen_verify` và `svc_listen_speaker_set`; `frames_dropped` không tăng qua một lần đăng ký hay đổi danh sách | ✅ 11/10: 0 qua 10 lệnh đăng ký và 6 lần gửi danh sách (`measurements/latency.md` §28) |
 | 7.5 | `nhan_task` ghi `set.json` hay chạy `ai_engine_command_prepare` lâu quá 2 s đệm của `q_clean` | ghi một lần mỗi bộ lệnh mới, sau khi `lang_vi` đọc được mọi dòng và `prepare` nhận bộ ấy; bộ trùng `version` với bộ đang dùng (bản retained gửi lại mỗi lần nối) không ghi; `ctc` chỉ chép nhãn, còn `rnnt` chạy mạng dự đoán một lần cho mỗi ngữ cảnh chưa gặp, bộ lệnh lớn có thể chạm 1 s 🔬 | log in thời gian `lang_vi` và thời gian ghi; trên board B `clean_dropped` và `frames_dropped` của `heartbeat` không tăng qua một lần đổi bộ lệnh | ⏳ |
 
@@ -119,6 +121,7 @@ giữ; cột "Cách kiểm" là thứ chạy để xác nhận.
 | 8.13 | Danh sách người nói đọc dở trong lúc bị ghi | danh sách, mẫu giọng, cờ và lần đăng ký dở chỉ `xac_task` chạm (KẾ HOẠCH §5.3); `q_spkset`, `q_spk` chở bản chép theo giá trị, không con trỏ chung | đọc `svc_listen.c`, `app_tasks.c`, `net_mqtt.c` | ✅ `svc_listen_speaker_set`, `_enrol`, `_state` và `svc_listen_verify` chỉ được gọi từ `xac_task` (`take_speakers`, `write_roster`, vòng xác minh); console và `dieu_task` chỉ gửi yêu cầu theo giá trị @ `8bcac9e` |
 | 8.14 | Người đọc `q_roster` thấy nửa bản trạng thái | một người ghi (`xac_task`, `xQueueOverwrite`), người đọc (`gui_task`, console) `xQueuePeek` chép cả bản dưới khoá của hàng đợi; `serial` cho biết bản mới | đọc `write_roster`, `send_roster`, `spk_cmd` | ✅ `xQueueOverwrite(w->roster)` chỉ ở `write_roster`; `send_roster` và `spk_cmd` chỉ `xQueuePeek` vào bản của riêng task @ `8bcac9e` |
 | 8.15 | Yêu cầu người nói chờ một lần chạy b0 | console và `dieu_task` gửi `q_spk` với timeout 0: đầy thì console báo bận, `dieu_task` ra `ERROR SPEAKERS_REFUSED` | đọc `spk_cmd`, `enrol_from` | ✅ hai lời gửi duy nhất vào `q_spk` đều timeout 0 và xử lý lúc đầy @ `8bcac9e` |
+| 8.17 | Lệnh ảnh chờ một ảnh đang chạy, chụp trễ, sai cảnh | `dieu_task` gửi `q_vision` với timeout 0; `nhin_task` xem yêu cầu bằng `xQueuePeek` và chỉ xoá khi xong ảnh, nên suốt lần chụp hàng đầy và lệnh thứ hai thành `ERROR VISION_BUSY` | đọc `capture_for`, `svc_vision_step`; gửi hai `CAPTURE` liền nhau trên board C | ✅ lệnh thứ hai ra `VISION_BUSY` @ 04/11 |
 | 8.16 | Cờ mở lại `LENH` sau từ chối vì người nói | `s_rearm_gen` là `_Atomic uint32_t`: `reject_as` ghi vào đó thế hệ `LENH` của cửa sổ khi một lệnh thành `SPEAKER`, `SPEAKER_BUSY` hay `SPEAKER_UNENROLLED` (ở `xac_task`, hay ở `nhan_task` qua `svc_listen_busy_reject`); cửa sổ mở ở `NGHE` mang 0 nên không ghi. `nhan_task` đọc rồi xoá nó trong một `atomic_exchange` ở `svc_listen_feed`, và chỉ mở lại `LENH` khi thế hệ ấy là lần thức hiện tại. Hai lần chặn trước một lần đọc gộp làm một, nên `LENH` mở lại một lần, đúng một lần thử (ADR-0041) | đọc `svc_listen.c` | ✅ chỉ `reject_as` ghi, chỉ `svc_listen_feed` đọc và xoá @ 03/11 |
 
 ## 9. Khoá
@@ -142,7 +145,7 @@ giữ; cột "Cách kiểm" là thứ chạy để xác nhận.
 
 | # | Kiểu hỏng | Luật | Trạng thái |
 |---|---|---|---|
-| 11.1 | Task có vòng lặp mà không đăng ký watchdog | mọi task trong bảng §5.2 đăng ký và nạp mỗi vòng; giữa hai lần nạp của `xac_task` có một lần chạy b0 504 ms trung vị, b3 ~1,4 s, dưới 5 s của task watchdog, và IDLE0 đói đúng chừng ấy | ⏳ |
+| 11.1 | Task có vòng lặp mà không đăng ký watchdog | mọi task trong bảng §5.2 đăng ký và nạp mỗi vòng, trừ `nhin_task`: một ảnh giữ nó nhiều giây ở ưu tiên 1, nên board C đặt hạn 15 s cho IDLE0 (`sdkconfig.board_c`); giữa hai lần nạp của `xac_task` có một lần chạy b0 504 ms trung vị, b3 ~1,4 s, dưới 5 s của task watchdog, và IDLE0 đói đúng chừng ấy | ⏳ |
 | 11.2 | Task có watchdog chặn vô hạn → watchdog kêu nhầm tên | mọi chỗ chờ có hạn (§3), hết hạn thì nạp rồi chờ tiếp | ⏳ |
 | 11.3 | IDLE1 không bao giờ chạy | `sach_task` chặn trên `q_frame` giữa hai khung; ở tải tới ~51% (NSNet-16k L, KẾ HOẠCH §5.6) IDLE1 luôn có lượt. `phu_task` chặn sau mỗi phần việc, nên IDLE1 chạy giữa hai op; một cửa sổ b3 giữ nhân 1 lâu nhất cỡ một op, dưới 5 s của task watchdog | ⏳ |
 
