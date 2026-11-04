@@ -1,0 +1,10 @@
+# C dsp_afe aec against srpipe.dsp.afe.aec (KEHOACH 3.5, E10-T4). Both run float32 in the same order over the same
+# transforms, and sums go in array order; libm's sqrtf and log10f stay out of the mirror's reach only at the last
+# bit, which the filter's feedback carries on. case_neg_* comes from a filter that never learns.
+tensors:
+  out:
+    max_abs: 1.0e-5
+    min_snr_db: 100.0
+  residual:
+    max_abs: 1.0e-3
+    min_snr_db: 100.0

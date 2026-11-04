@@ -397,6 +397,12 @@ def test_the_pitch_tolerance_rejects_the_negative_control() -> None:
     assert np.max(np.abs(wrong - right)) > limits["max_abs"] and snr_db < limits["min_snr_db"]
 
 
+def test_committed_aec_cases_match_a_fresh_emit(tmp_path: Path) -> None:
+    for path in emit_golden.emit_aec(tmp_path) + emit_golden.emit_chain_aec(tmp_path):
+        committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)
+        assert committed.read_bytes() == path.read_bytes(), f"{committed} is stale: rerun emit_golden"
+
+
 def test_committed_chain_bss_cases_match_a_fresh_emit(tmp_path: Path) -> None:
     for path in emit_golden.emit_chain_bss(tmp_path):
         committed = emit_golden.GOLDEN_ROOT / path.relative_to(tmp_path)

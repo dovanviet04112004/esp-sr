@@ -14,7 +14,7 @@ import numpy as np
 import scipy.signal
 
 from srpipe.core.config import CONFIGS, front_of, load_yaml
-from srpipe.dsp.afe import agc, balance, bss, chain, doa, gsc, hpf, ns_omlsa, vad
+from srpipe.dsp.afe import aec, agc, balance, bss, chain, doa, gsc, hpf, ns_omlsa, vad
 from srpipe.dsp.spec import mel, pitch, spk_fbank, stft, swift_dims, swift_front
 from srpipe.generated import afe, array, grid, listen
 from srpipe.golden.gold import write_gold
@@ -450,18 +450,28 @@ def _chain_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray
 
 
 def chain_case(
-    ch0: np.ndarray, ch1: np.ndarray | None, reset: np.ndarray, cfg: chain.ChainConfig, without_vad_in: bool = False
+    ch0: np.ndarray,
+    ch1: np.ndarray | None,
+    reset: np.ndarray,
+    cfg: chain.ChainConfig,
+    without_vad_in: bool = False,
+    ref: np.ndarray | None = None,
+    keep_ref_over_gaps: bool = False,
 ) -> dict[str, np.ndarray]:
     """Interleaved int16 input, per hop CHAIN_RESET or CHAIN_RESUME before it or 0, the afe/* settings (ns floor dB,
     agc target dBFS, vad mode), calib/bal as re, im pairs when the case has one, and every field of the frames the
-    chain gives. ch1 None runs one microphone, "M", whose input is one sample wide per step (ADR-0042).
-    without_vad_in drops bss's second vad, so doa follows the output's, as a negative control."""
+    chain gives. ch1 None runs one microphone, "M", whose input is one sample wide per step (ADR-0042). ref adds the
+    speaker's reference as the last channel, "MR" or "MMR". without_vad_in drops bss's second vad, so doa follows the
+    output's, and keep_ref_over_gaps leaves aec's reference in place at a resume, each as a negative control."""
     pcm_min, pcm_max = np.iinfo(np.int16).min, np.iinfo(np.int16).max
-    mics = np.stack([ch0] if ch1 is None else [ch0, ch1], axis=-1)
+    channels = [ch0] if ch1 is None else [ch0, ch1]
+    mics = np.stack(channels if ref is None else [*channels, ref], axis=-1)
     interleaved = np.clip(np.rint(mics), pcm_min, pcm_max).astype(np.int16).reshape(reset.size, -1)
-    ch = chain.Chain("M" if ch1 is None else "MM", cfg)
+    ch = chain.Chain("M" * len(channels) + ("" if ref is None else "R"), cfg)
     if without_vad_in:
         ch._vad_in = None
+    if keep_ref_over_gaps:
+        ch._aec.flush = lambda: None
     frames = []
     for hop, flag in zip(interleaved, reset, strict=True):
         if flag == CHAIN_RESET:
@@ -650,6 +660,54 @@ def emit_chain_bss(root: Path) -> list[Path]:
     path = root / "chain_bss" / "case_neg_000.gold"
     write_gold(path, chain_case(ch0, ch1, resumes, cfg, without_vad_in=True))
     written.append(path)
+    return written
+
+
+CHAIN_AEC_HOPS = 200
+CHAIN_AEC_RESUME_HOP = 120
+CHAIN_AEC_RESET_HOP = 170
+CHAIN_AEC_MODULES = (*afe.MODULES, "aec")
+
+
+def _chain_aec_input(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """ch0, ch1, the reference and the gap flags of a speaker heard by both microphones in a room: it plays, stops past
+    the filter's tail and plays on, a talker comes in over it, a short gap falls in the talk and a long one after."""
+    n = CHAIN_AEC_HOPS * grid.HOP_SAMPLES
+    playing = np.ones(CHAIN_AEC_HOPS, dtype=bool)
+    playing[60:80] = False
+    far = 0.05 * rng.standard_normal(n) * np.repeat(playing, grid.HOP_SAMPLES)
+    decay = np.exp(-np.arange(600) / 120.0)
+    echoes = [np.convolve(far, 0.2 * rng.standard_normal(600) * decay)[:n] for _ in range(2)]
+    talking = np.zeros(CHAIN_AEC_HOPS, dtype=bool)
+    talking[100:150] = True
+    talker = speechlike(rng, n, 0.05) * np.repeat(talking, grid.HOP_SAMPLES)
+    floor = 3e-4 * rng.standard_normal((2, n))
+    gaps = np.zeros(CHAIN_AEC_HOPS, dtype=np.uint8)
+    gaps[CHAIN_AEC_RESUME_HOP] = CHAIN_RESUME
+    gaps[CHAIN_AEC_RESET_HOP] = CHAIN_RESET
+    return 32768 * (echoes[0] + talker + floor[0]), 32768 * (echoes[1] + talker + floor[1]), 32768 * far, gaps
+
+
+def emit_chain_aec(root: Path) -> list[Path]:
+    """One microphone and two through the facade with aec on the reference, then two negative controls: frames of a
+    chain that ignores the reference, and of one that keeps it over the short gap (KEHOACH 3.5, 4.5.5)."""
+    ch0, ch1, far, gaps = _chain_aec_input(np.random.default_rng(SEED + 45))
+    cfg = chain.ChainConfig(modules=CHAIN_AEC_MODULES)
+    two_mics = chain.ChainConfig(modules=CHAIN_AEC_MODULES, balance_gains=board_like_gains())
+    one_mic = chain_case(ch0, None, gaps, cfg, ref=far)
+    no_aec = chain_case(ch0, None, gaps, chain.ChainConfig(), ref=far)
+    kept_ref = chain_case(ch0, None, gaps, cfg, ref=far, keep_ref_over_gaps=True)
+    cases = {
+        "case_000": one_mic,
+        "case_001": chain_case(ch0, ch1, gaps, two_mics, ref=far),
+        "case_neg_000": {**one_mic, **{name: no_aec[name] for name in CHAIN_FRAME_FIELDS}},
+        "case_neg_001": {**one_mic, **{name: kept_ref[name] for name in CHAIN_FRAME_FIELDS}},
+    }
+    written = []
+    for name, case in cases.items():
+        path = root / "chain_aec" / f"{name}.gold"
+        write_gold(path, case)
+        written.append(path)
     return written
 
 
@@ -1139,6 +1197,64 @@ def emit_gsc(root: Path) -> list[Path]:
     return written
 
 
+AEC_HOPS = 60
+
+
+def aec_case(mic: np.ndarray, ref: np.ndarray, cfg: aec.AecConfig, learn: bool = True) -> dict[str, np.ndarray]:
+    """Microphones and reference a hop at a time; the residual of each microphone and the echo power per bin."""
+    canceller = aec.Aec(cfg, learn)
+    hop = aec.HOP
+    outs, powers = [], []
+    for h in range(ref.size // hop):
+        out, power = canceller.process(mic[:, h * hop : (h + 1) * hop], ref[h * hop : (h + 1) * hop])
+        outs.append(out)
+        powers.append(power)
+    return {
+        "config": np.array([cfg.n_mics, cfg.n_partitions, cfg.bulk_delay_samples], dtype=np.float32),
+        "mic": mic.astype(np.float32),
+        "ref": ref.astype(np.float32),
+        "out": np.concatenate(outs, axis=1),
+        "residual": np.stack(powers),
+    }
+
+
+def _aec_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray, aec.AecConfig]]:
+    """Echo alone, echo over a talker, a bulk delay, two microphones, and a reference that stops and starts."""
+    n = AEC_HOPS * aec.HOP
+    far = (rng.standard_normal(n) * 0.05).astype(np.float32)
+    decay = np.exp(-np.arange(600) / 120.0)
+    rooms = [(rng.standard_normal(600) * decay * 0.2).astype(np.float32) for _ in range(2)]
+    echo = [np.convolve(far, room)[:n].astype(np.float32) for room in rooms]
+    talker = (rng.standard_normal(n) * 0.03).astype(np.float32)
+    talker[: n // 2] = 0.0
+    shifted = np.concatenate([np.zeros(100, dtype=np.float32), echo[0][:-100]])
+    gapped = far.copy()
+    gapped[n // 3 : n // 2] = 0.0
+    return [
+        (echo[0][None], far, aec.AecConfig()),
+        ((echo[0] + talker)[None], far, aec.AecConfig()),
+        (shifted[None], far, aec.AecConfig(bulk_delay_samples=100)),
+        (np.stack(echo), far, aec.AecConfig(n_mics=2)),
+        (np.convolve(gapped, rooms[0])[:n].astype(np.float32)[None], gapped, aec.AecConfig()),
+    ]
+
+
+def emit_aec(root: Path) -> list[Path]:
+    """Five cases, then a negative control whose output comes from a filter that never learns."""
+    rng = np.random.default_rng(SEED + 44)
+    written = []
+    inputs = _aec_inputs(rng)
+    for index, (mic, ref, cfg) in enumerate(inputs):
+        path = root / "aec" / f"case_{index:03d}.gold"
+        write_gold(path, aec_case(mic, ref, cfg))
+        written.append(path)
+    mic, ref, cfg = inputs[0]
+    path = root / "aec" / "case_neg_000.gold"
+    write_gold(path, aec_case(mic, ref, cfg, learn=False))
+    written.append(path)
+    return written
+
+
 BSS_FIELDS = (
     "mode",
     "keep_rule",
@@ -1385,8 +1501,10 @@ def main() -> int:
     emitted = emit_stft(args.out) + emit_mel(args.out) + emit_spk_fbank(args.out) + emit_swift_front(args.out)
     emitted += emit_swift_dims(args.out)
     emitted += emit_chain(args.out) + emit_chain_modules(args.out) + emit_chain_bss(args.out)
+    emitted += emit_chain_aec(args.out)
     emitted += emit_hpf(args.out) + emit_balance(args.out) + emit_vad(args.out) + emit_agc(args.out)
-    emitted += emit_doa(args.out) + emit_gsc(args.out) + emit_bss(args.out) + emit_pitch(args.out, pitch_config())
+    emitted += emit_doa(args.out) + emit_gsc(args.out) + emit_aec(args.out) + emit_bss(args.out)
+    emitted += emit_pitch(args.out, pitch_config())
     for path in emitted + emit_ns_omlsa(args.out):
         print(path.relative_to(args.out) if path.is_relative_to(args.out) else path)
     return 0

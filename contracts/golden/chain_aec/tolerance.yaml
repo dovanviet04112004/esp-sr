@@ -1,0 +1,28 @@
+# C dsp_afe with aec on the reference against srpipe.dsp.afe.chain (KEHOACH 3.5, 4.5.5). The two FFTs differ in float32
+# noise, which moves a rounding of pcm by 1 LSB and nothing else.
+# case_neg_000 ignores the reference, case_neg_001 keeps it over the short gap; both must fall outside these limits.
+tensors:
+  pcm:
+    max_abs: 1.0
+    min_snr_db: 60.0
+  seq:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  doa_deg:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  doa_conf:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  vad:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  level_dbfs:
+    max_abs: 1.0
+    min_snr_db: 0.0
+  gain_db:
+    max_abs: 0.0
+    min_snr_db: 0.0
+  flags:
+    max_abs: 0.0
+    min_snr_db: 0.0
