@@ -71,6 +71,8 @@ UNIT_APP := firmware/components/ai_engine/test_apps/unit
 LISTEN_APP := firmware/components/svc_listen/test_apps/unit
 ON_BOARD = --rootdir . --confcutdir $(CURDIR)/firmware --embedded-services esp,idf --target esp32s3 --port $(PORT) \
   -p no:cacheprovider
+# Board C has no reset line, so esptool cannot reach a running app: pytest only reads its serial port.
+ON_RUNNING_BOARD = --rootdir . --confcutdir . --embedded-services serial --port $(PORT) -p no:cacheprovider
 UNIT_PARTITIONS := $(CURDIR)/firmware/test_apps/partitions_unit.csv
 PARTTOOL = python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --baud $(FLASH_BAUD) \
   --partition-table-file $(UNIT_PARTITIONS)
@@ -623,10 +625,20 @@ COMPARE_ITEMS = $(shell $(ML) --quiet python -c "from srpipe.core.config import 
 
 .PHONY: bench-board bss espsr-compare ai-probe ai-unit ai-unit-rnnt ai-unit-speaker ai-unit-ctc ai-unit-pitch ai-unit-wake ai-unit-cores \
   ai-profile listen-unit
-bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/bench, then rebuild budget.md
+bench-board: ## Run bench_afe on board B, keep its rows in docs/measurements/bench, then rebuild budget.md [BOARD=C]
 	@$(call fresh_sdkconfig,$(BENCH_APP)/sdkconfig,$(call app_defaults,$(BENCH_APP)) firmware/sdkconfig.afe)
 	cd $(BENCH_APP) && idf.py build
+ifeq ($(BOARD),C)
+	@echo "hold the button, power-cycle the board, wait 2 s, release (KEHOACH 2.1)"
+	cd $(BENCH_APP)/build && for try in $$(seq $(LOADER_TRIES)); do \
+	  python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD) \
+	  --before no-reset --after watchdog-reset --connect-attempts $(LOADER_ATTEMPTS) \
+	  write-flash --skip-flashed $$(sed -n 1p flash_args) $$(sed 1d flash_args | grep -v -e ota_data -e storage) \
+	  && exit 0; done; exit 1
+	cd $(BENCH_APP) && pytest pytest_bench_afe.py $(ON_RUNNING_BOARD) -s
+else
 	cd $(BENCH_APP) && pytest pytest_bench_afe.py $(ON_BOARD) -s
+endif
 	python3 -m tools.budget
 
 # The board and this PC share a network (make wifi); Docker Desktop publishes the receiver's port on it.
@@ -850,7 +862,7 @@ DATA_ROOT = $(shell sed -n 's/^SRPIPE_DATA_ROOT=//p' host/.env 2>/dev/null)
 PCM_SHIFT ?= 16
 PLAN_FW ?= capture@$(shell git describe --always --tags)
 
-.PHONY: session session-plan
+.PHONY: session session-plan stream-record
 # The LAN cannot reach WSL in NAT mode; a port Docker Desktop publishes on Windows it can (KEHOACH 4.6).
 # The board waits in its bootloader until the receiver listens, so a session starts at seq 0 of one boot.
 session: ## Record a labelled session: ARGS="--kind probe --room home --fw <ver+sha> --pcm-shift 16"
@@ -863,6 +875,14 @@ session: ## Record a labelled session: ARGS="--kind probe --room home --fw <ver+
 	  -e PYTHONPATH=/repo/host/src -p $(STREAM_PORT):$(STREAM_PORT) \
 	  -v "$(CURDIR)":/repo -v "$(DATA_ROOT)":"$(DATA_ROOT)" \
 	  python:3.12-slim python -m srhost.session $(ARGS)
+
+# A board with no reset line keeps running: start its stream by hand once this listens (KEHOACH 7.4).
+stream-record: ## Record what the board streams into OUT=<dir under the data root> for SECONDS=<n>
+	@test -n "$(OUT)" && test -n "$(SECONDS)" || { echo "usage: make stream-record OUT=<dir> SECONDS=<n>"; exit 1; }
+	docker run --rm --name sr-stream --user $$(id -u):$$(id -g) --env-file host/.env \
+	  -e PYTHONPATH=/repo/host/src -p $(STREAM_PORT):$(STREAM_PORT) \
+	  -v "$(CURDIR)":/repo -v "$(DATA_ROOT)":"$(DATA_ROOT)" \
+	  python:3.12-slim python -m srhost.stream_rx --out "$(DATA_ROOT)/$(OUT)" --duration-s $(SECONDS)
 
 session-plan: ## Record a script of host/plans in turn: PLAN=host/plans/<x>.tsv ROOM=<room> [SPK=spk_001 CONSENT=C001]
 	@test -f "$(PLAN)" && test -n "$(ROOM)" || { echo "usage: make session-plan PLAN=host/plans/<x>.tsv ROOM=<room> [SPK= CONSENT=]"; exit 1; }
