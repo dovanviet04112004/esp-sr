@@ -142,7 +142,7 @@ esp_err_t drv_camera_focus(void)
 esp_err_t drv_camera_grab(drv_camera_frame_t *frame)
 {
     // With one buffer the frame waiting is older than the focus that just ended.
-    esp_camera_fb_return(esp_camera_fb_get());
+    if (s_can_focus) { esp_camera_fb_return(esp_camera_fb_get()); }
     camera_fb_t *taken = esp_camera_fb_get();
     if (taken == NULL) { return ESP_ERR_TIMEOUT; }
     *frame = (drv_camera_frame_t){

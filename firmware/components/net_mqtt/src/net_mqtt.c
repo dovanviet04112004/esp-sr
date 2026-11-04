@@ -463,6 +463,18 @@ esp_err_t net_mqtt_publish_image(const uint8_t *chunk, size_t bytes)
     return ESP_OK;
 }
 
+esp_err_t net_mqtt_publish_preview(const uint8_t *chunk, size_t bytes)
+{
+    if (chunk == NULL || bytes == 0) { return ESP_ERR_INVALID_ARG; }
+    if (s_client == NULL || !s_connected) { return ESP_ERR_INVALID_STATE; }
+    char topic[GEN_TOPIC_MAX_LEN + 1];
+    if (!gen_topic_build(GEN_TOPIC_IMAGE, s_device_id, topic, sizeof(topic))) { return ESP_ERR_INVALID_SIZE; }
+    // QoS 0 from this task: a late preview frame is worth nothing, so none waits in the outbox.
+    return esp_mqtt_client_publish(s_client, topic, (const char *)chunk, (int)bytes, 0, false) >= 0
+               ? ESP_OK
+               : ESP_FAIL;
+}
+
 void net_mqtt_stats(net_mqtt_stats_t *out)
 {
     *out = s_stats;

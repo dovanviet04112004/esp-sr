@@ -408,7 +408,19 @@ static void capture_for(const app_wiring_t *w, app_vision_mode_t mode)
     if (w->vision == NULL) { return; }
     const app_vision_req_t request = {.mode = mode};
     // Zero timeout: a picture taken later shows the wrong scene, so a busy camera refuses (KEHOACH 5.3).
-    if (xQueueSend(w->vision, &request, 0) != pdTRUE) { raise_error(w, 0, APP_CODE_VISION_BUSY, NULL); }
+    if (xQueueSend(w->vision, &request, 0) != pdTRUE && mode != APP_VISION_PREVIEW) {
+        raise_error(w, 0, APP_CODE_VISION_BUSY, NULL);
+    }
+}
+
+static app_vision_mode_t vision_mode(device_cmd_capture_mode_t mode)
+{
+    static const app_vision_mode_t kModes[DEVICE_CMD_CAPTURE_MODE_COUNT] = {
+        [DEVICE_CMD_CAPTURE_MODE_PHOTO] = APP_VISION_PHOTO,
+        [DEVICE_CMD_CAPTURE_MODE_DETECT] = APP_VISION_DETECT,
+        [DEVICE_CMD_CAPTURE_MODE_PREVIEW] = APP_VISION_PREVIEW,
+    };
+    return kModes[mode];
 }
 
 static void act_on(const app_wiring_t *w, const app_event_t *heard)
@@ -429,8 +441,7 @@ static void dieu_task(void *arg)
             if (cmd.op == DEVICE_CMD_OP_SPEAKER_ENROL || cmd.op == DEVICE_CMD_OP_SPEAKER_ENROL_CANCEL) {
                 enrol_from(w, &cmd);
             } else if (cmd.op == DEVICE_CMD_OP_CAPTURE) {
-                capture_for(w, cmd.capture_mode == DEVICE_CMD_CAPTURE_MODE_DETECT ? APP_VISION_DETECT
-                                                                                  : APP_VISION_PHOTO);
+                capture_for(w, vision_mode(cmd.capture_mode));
             }
         }
         esp_task_wdt_reset();

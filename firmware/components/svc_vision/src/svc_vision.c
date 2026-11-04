@@ -43,6 +43,9 @@ static uint8_t *s_rgb, *s_chunk;
 static ai_engine_box_t *s_boxes;
 static detections_t *s_found;
 static uint32_t s_seq;
+static uint32_t s_preview_seq;
+static bool s_previewing;
+static int64_t s_preview_until_us;
 
 esp_err_t svc_vision_init(const svc_vision_config_t *cfg)
 {
@@ -78,7 +81,8 @@ static bool keep_on_card(const drv_camera_frame_t *frame, uint32_t seq)
     return err == ESP_OK;
 }
 
-static esp_err_t send_picture(const drv_camera_frame_t *frame, uint32_t seq)
+static esp_err_t send_chunks(const drv_camera_frame_t *frame, uint32_t seq, uint16_t flags,
+                             esp_err_t (*publish)(const uint8_t *chunk, size_t bytes))
 {
     const uint16_t count =
         (uint16_t)((frame->bytes + GEN_VISION_CHUNK_PAYLOAD_BYTES - 1) / GEN_VISION_CHUNK_PAYLOAD_BYTES);
@@ -91,6 +95,7 @@ static esp_err_t send_picture(const drv_camera_frame_t *frame, uint32_t seq)
             .version = GEN_VISION_CHUNK_VERSION,
             .index = index,
             .count = count,
+            .flags = flags,
             .boot = s_cfg.boot,
             .seq = seq,
             .total_bytes = (uint32_t)frame->bytes,
@@ -98,7 +103,7 @@ static esp_err_t send_picture(const drv_camera_frame_t *frame, uint32_t seq)
         };
         memcpy(s_chunk, &header, sizeof(header));
         memcpy(s_chunk + sizeof(header), frame->jpeg + offset, bytes);
-        const esp_err_t err = net_mqtt_publish_image(s_chunk, sizeof(header) + bytes);
+        const esp_err_t err = publish(s_chunk, sizeof(header) + bytes);
         if (err != ESP_OK) { return err; }
     }
     return ESP_OK;
@@ -203,7 +208,7 @@ static void carry_out(const app_vision_req_t *request)
         return;
     }
     const int64_t shot_us = esp_timer_get_time();
-    const esp_err_t sent = send_picture(&frame, seq);
+    const esp_err_t sent = send_chunks(&frame, seq, 0, net_mqtt_publish_image);
     if (sent != ESP_OK) { ESP_LOGW(TAG, "picture not sent: %s", esp_err_to_name(sent)); }
     const int64_t sent_us = esp_timer_get_time();
     if (request->mode == APP_VISION_DETECT) { detect_picture(&frame, seq); }
@@ -225,12 +230,49 @@ static void carry_out(const app_vision_req_t *request)
              (esp_timer_get_time() - detected_us) / US_PER_MS);
 }
 
+static void hold_preview(void)
+{
+    if (!s_previewing) {
+        bsp_board_camera_light(true);
+        const esp_err_t woken = drv_camera_wake();
+        if (woken != ESP_OK) { ESP_LOGW(TAG, "preview: %s", esp_err_to_name(woken)); }
+        s_previewing = true;
+    }
+    s_preview_until_us = esp_timer_get_time() + (int64_t)GEN_VISION_PREVIEW_HOLD_MS * US_PER_MS;
+}
+
+static void end_preview(void)
+{
+    s_previewing = false;
+    const esp_err_t rested = drv_camera_rest();
+    if (rested != ESP_OK) { ESP_LOGW(TAG, "rest: %s", esp_err_to_name(rested)); }
+    bsp_board_camera_light(false);
+}
+
+static void send_preview_frame(void)
+{
+    drv_camera_frame_t frame = {0};
+    if (drv_camera_grab(&frame) != ESP_OK) { return; }
+    const esp_err_t sent =
+        send_chunks(&frame, ++s_preview_seq, GEN_VISION_CHUNK_FLAG_PREVIEW, net_mqtt_publish_preview);
+    if (sent != ESP_OK) { ESP_LOGD(TAG, "preview frame lost: %s", esp_err_to_name(sent)); }
+    drv_camera_release(&frame);
+}
+
 void svc_vision_step(void)
 {
     app_vision_req_t request;
+    const TickType_t wait = s_previewing ? 0 : pdMS_TO_TICKS(REQUEST_WAIT_MS);
     // Peeked, not taken: the full queue is what refuses a second command during this picture (KEHOACH 5.3).
-    if (xQueuePeek(s_cfg.requests, &request, pdMS_TO_TICKS(REQUEST_WAIT_MS)) == pdTRUE) {
-        carry_out(&request);
+    if (xQueuePeek(s_cfg.requests, &request, wait) == pdTRUE) {
+        if (request.mode == APP_VISION_PREVIEW) {
+            hold_preview();
+        } else {
+            if (s_previewing) { end_preview(); }
+            carry_out(&request);
+        }
         xQueueReset(s_cfg.requests);
     }
+    if (s_previewing && esp_timer_get_time() > s_preview_until_us) { end_preview(); }
+    if (s_previewing) { send_preview_frame(); }
 }

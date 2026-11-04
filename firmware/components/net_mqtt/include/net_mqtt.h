@@ -99,6 +99,12 @@ esp_err_t net_mqtt_publish_detections(detections_t *found);
  */
 esp_err_t net_mqtt_publish_image(const uint8_t *chunk, size_t bytes);
 
+/** Send one chunk of a preview frame now at QoS 0, so the network paces the frames and none waits.
+ *  @ctx nhin_task | blocking on the network | caller keeps chunk
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session | ESP_FAIL the send failed
+ */
+esp_err_t net_mqtt_publish_preview(const uint8_t *chunk, size_t bytes);
+
 /** Parse a command set laid out as contracts/schema/command_set.schema.json, through the caller's arena.
  *  @ctx task | non-blocking | text need not end in NUL; out belongs to the caller, about 20 KB: not the stack
  *  @ret ESP_OK | APP_ERR_COMMANDS_INVALID not JSON or outside the schema | ESP_ERR_NO_MEM arena full

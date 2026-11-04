@@ -48,6 +48,7 @@ typedef enum {
 typedef enum {
     APP_VISION_PHOTO = 0, // photograph, keep and send
     APP_VISION_DETECT,    // and run detect on it
+    APP_VISION_PREVIEW,   // frames to the host until these requests stop
 } app_vision_mode_t;
 
 typedef struct {

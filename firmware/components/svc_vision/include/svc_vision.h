@@ -26,7 +26,7 @@ typedef struct {
  */
 esp_err_t svc_vision_init(const svc_vision_config_t *cfg);
 
-/** Wait a while for one request and carry it out.
+/** Carry out one request, waiting a while for it; during a preview, send one frame and do not wait.
  *  @ctx nhin_task | blocking, seconds with a request | loop on it
  */
 void svc_vision_step(void);
