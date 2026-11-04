@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from PIL import Image, ImageDraw, ImageFont, ImageOps
+
 from srhost.config import ConfigError, live_port, mqtt_config, record_config
 from srhost.generated import topics, vision
 from srhost.mqtt_rx import Message, Receiver
@@ -26,6 +28,11 @@ IMAGES_DIR = Path("raw") / "images"
 PERMILLE = 1000
 CONNECT_TIMEOUT_S = 10.0
 FPS_WINDOW_FRAMES = 20
+BOXES_SUFFIX = "_boxes"
+BOX_COLOUR = (255, 0, 0)
+BOX_LINE_PX = 4
+BOX_LABEL_PX = 36
+BOX_JPEG_QUALITY = 90
 MS_PER_S = 1000
 KEEP_ALIVES_PER_HOLD = 2
 LIVE_BIND = "127.0.0.1"  # a photo of a room stays on this machine (KEHOACH 7.5)
@@ -126,6 +133,21 @@ def stem_of(boot: int, seq: int) -> str:
     return f"B{boot}_{seq:06d}"
 
 
+def draw_boxes(picture: Path, payload: dict, out: Path) -> None:
+    """Write the picture as a viewer shows it, with detect's boxes and names on it; boxes are in the payload's frame."""
+    with Image.open(picture) as image:
+        upright = ImageOps.exif_transpose(image).convert("RGB")
+    scale = upright.width / payload["width"]
+    pen = ImageDraw.Draw(upright)
+    font = ImageFont.load_default(size=BOX_LABEL_PX)
+    for box in payload["boxes"]:
+        corners = [box[side] * scale for side in ("x1", "y1", "x2", "y2")]
+        pen.rectangle(corners, outline=BOX_COLOUR, width=BOX_LINE_PX)
+        label = f"{box['name']} {box['scorePermille'] / PERMILLE:.2f}"
+        pen.text((corners[0] + 2 * BOX_LINE_PX, corners[1] + 2 * BOX_LINE_PX), label, fill=BOX_COLOUR, font=font)
+    upright.save(out, quality=BOX_JPEG_QUALITY)
+
+
 class Assembler:
     """Joins chunks per device and picture; a picture whose chunks never all come stays out of the folder."""
 
@@ -158,6 +180,16 @@ class Assembler:
         """Add one message; the path of the JPEG when this message finished it."""
         header, image = self.join(device, body)
         return None if image is None else self.keep(device, header, image)
+
+    def mark(self, device: str, boot: int, seq: int) -> Path | None:
+        """Draw a capture's boxes on its picture once both are in, whichever came first; the path when it did."""
+        stem = self.folder(device) / stem_of(boot, seq)
+        picture, boxes = stem.with_suffix(".jpg"), stem.with_suffix(".json")
+        if not picture.exists() or not boxes.exists():
+            return None
+        out = stem.with_name(stem.name + BOXES_SUFFIX + ".jpg")
+        draw_boxes(picture, json.loads(boxes.read_text(encoding="utf-8")), out)
+        return out
 
     def keep_boxes(self, device: str, payload: dict) -> Path:
         """Write one up/detections payload beside its picture."""
@@ -239,6 +271,11 @@ def run_live(receiver: Receiver, device: str, feed: LiveFeed, port: int) -> None
         time.sleep(vision.PREVIEW_HOLD_MS / MS_PER_S / KEEP_ALIVES_PER_HOLD)
 
 
+def report_marked(device: str, path: Path | None) -> None:
+    if path is not None:
+        print(f"{device} boxes drawn: {path}", flush=True)
+
+
 def on_message(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -> None:
     if message.rejected or message.device is None:
         return
@@ -256,9 +293,13 @@ def on_message(assembler: Assembler, message: Message, feed: LiveFeed | None = N
             return
         path = assembler.keep(message.device, header, image)
         print(f"{message.device} image {path.stat().st_size} bytes: {path}", flush=True)
+        report_marked(message.device, assembler.mark(message.device, header["boot"], header["seq"]))
     elif message.kind == "detections":
         assembler.keep_boxes(message.device, message.payload)
         print(f"{message.device} {describe_boxes(message.payload)}", flush=True)
+        report_marked(
+            message.device, assembler.mark(message.device, message.payload["boot"], message.payload["captureSeq"])
+        )
 
 
 def capture_command(mode: str) -> str:

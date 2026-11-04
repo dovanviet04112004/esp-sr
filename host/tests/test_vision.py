@@ -8,6 +8,7 @@ import zlib
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from srhost import mqtt_rx, vision
 from srhost.generated import vision as contract
@@ -131,3 +132,52 @@ def test_a_picture_lands_in_a_file_beside_a_live_page(tmp_path: Path) -> None:
     vision.on_message(assembler, mqtt_rx.parse(f"sr/{DEVICE}/up/image", chunk(PICTURE, 0, 1), rx_utc="now"), feed)
     assert (tmp_path / DEVICE / "B7_000002.jpg").read_bytes() == PICTURE
     assert feed.state()["serial"] == 0
+
+
+def picture_turned_a_quarter(path: Path) -> None:
+    """A black 400 x 200 file that viewers show as 200 x 400, as board C's are."""
+    image = Image.new("RGB", (400, 200))
+    exif = image.getexif()
+    exif[0x0112] = 6
+    image.save(path, exif=exif)
+
+
+BOXES = {
+    "deviceId": DEVICE,
+    "boot": 7,
+    "captureSeq": 2,
+    "width": 100,
+    "height": 200,
+    "detectMs": 1920,
+    "boxes": [{"name": "cup", "scorePermille": 880, "x1": 10, "y1": 20, "x2": 60, "y2": 120}],
+}
+
+
+@pytest.mark.parametrize("boxes_first", [True, False])
+def test_the_boxes_land_drawn_on_the_upright_picture_whichever_came_first(tmp_path: Path, boxes_first: bool) -> None:
+    assembler = vision.Assembler(tmp_path)
+    picture = assembler.folder(DEVICE) / "B7_000002.jpg"
+    picture.parent.mkdir(parents=True)
+    if boxes_first:
+        assembler.keep_boxes(DEVICE, BOXES)
+        assert assembler.mark(DEVICE, 7, 2) is None
+        picture_turned_a_quarter(picture)
+    else:
+        picture_turned_a_quarter(picture)
+        assert assembler.mark(DEVICE, 7, 2) is None
+        assembler.keep_boxes(DEVICE, BOXES)
+    drawn = assembler.mark(DEVICE, 7, 2)
+    assert drawn == assembler.folder(DEVICE) / "B7_000002_boxes.jpg"
+    with Image.open(drawn) as image:
+        assert image.size == (200, 400)
+        red, green, _ = image.convert("RGB").getpixel((20 + 1, 150))
+    assert red > 150 > green
+
+
+def test_a_detect_that_found_nothing_still_leaves_its_picture(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    picture = assembler.folder(DEVICE) / "B7_000002.jpg"
+    picture.parent.mkdir(parents=True)
+    picture_turned_a_quarter(picture)
+    assembler.keep_boxes(DEVICE, {**BOXES, "boxes": []})
+    assert assembler.mark(DEVICE, 7, 2).exists()
