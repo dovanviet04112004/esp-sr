@@ -20,6 +20,14 @@ menu "esp-sr application"
             bool "Board C"
     endchoice
 
+    config APP_CAMERA_ENABLE
+        bool "Camera and SD card: photographs and detect on command"
+        depends on APP_BOARD_C
+        default y
+        help
+            Board C's image path (KEHOACH 3.19). Off means drv_camera, drv_sd
+            and svc_vision build empty and nhin_task is never created.
+
     config APP_SPEAKER_ENABLE
         bool "Speaker fitted: open I2S TX and run noi_task"
         default n

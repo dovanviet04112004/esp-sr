@@ -10,7 +10,6 @@
 #include "freertos/event_groups.h"
 #include "freertos/queue.h"
 #include "freertos/stream_buffer.h"
-#include "gen_array.h"
 #include "gen_grid.h"
 #include "sdkconfig.h"
 
@@ -19,7 +18,12 @@ extern "C" {
 #endif
 
 #define APP_FRAME_SLOTS 8
-#define APP_FRAME_MAX_CHANNELS (GEN_ARRAY_N_MICS + 1) // two microphones and the speaker reference
+#define APP_DETECT_PRIORITY 11 // above nhan_task for one detect run (KEHOACH 3.18)
+#if CONFIG_APP_SPEAKER_ENABLE
+#define APP_FRAME_MAX_CHANNELS (CONFIG_APP_MIC_COUNT + 1) // the microphones and the speaker reference
+#else
+#define APP_FRAME_MAX_CHANNELS CONFIG_APP_MIC_COUNT
+#endif
 #define APP_FRAME_MAX_SAMPLES (GEN_GRID_HOP_SAMPLES * APP_FRAME_MAX_CHANNELS)
 
 typedef struct {
@@ -49,6 +53,7 @@ typedef struct {
     QueueHandle_t cmd;              // q_cmd: device_cmd_t, PSRAM
     QueueHandle_t cmdset;           // q_cmdset: const net_mqtt_commands_t *
     QueueHandle_t speak;            // q_speak: app_speak_req_t, PSRAM; NULL without a speaker
+    QueueHandle_t vision;           // q_vision: app_vision_req_t, PSRAM; NULL without a camera
     QueueHandle_t event_up;         // q_event_up: app_event_t, PSRAM
     QueueHandle_t verify;           // q_verify: verify slot index, nhan_task -> xac_task
     QueueHandle_t verify_free;      // q_verify_free: verify slot index, xac_task -> nhan_task

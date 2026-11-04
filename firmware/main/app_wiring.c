@@ -11,11 +11,16 @@
 #include "sdkconfig.h"
 #include "svc_listen.h"
 
+#if CONFIG_APP_CAMERA_ENABLE
+#define CLEAN_DEPTH 192 // ~3 s of hops: one detect run fits (KEHOACH 5.3)
+#else
 #define CLEAN_DEPTH 128 // about 2 s of hops: one speaker run fits (KEHOACH 5.3)
+#endif
 #define DIALOG_DEPTH 8
 #define CMD_DEPTH 4
 #define CMDSET_DEPTH 1
 #define SPEAK_DEPTH 4
+#define VISION_DEPTH 1 // a second request while one runs is refused (KEHOACH 5.3)
 #define EVENT_UP_DEPTH 16
 #define SPEAKER_REQUESTS_DEPTH 2
 #define SPEAKER_SETS_DEPTH 1 // overwritten: a newer roster replaces the one waiting
@@ -38,6 +43,9 @@ static StaticQueue_t s_frame_q, s_free_q, s_clean_q, s_dialog_q, s_cmd_q, s_cmds
 static StaticQueue_t s_verify_q, s_verify_free_q, s_speaker_requests_q, s_speaker_sets_q, s_roster_q;
 #if CONFIG_APP_SPEAKER_ENABLE
 static StaticQueue_t s_speak_q;
+#endif
+#if CONFIG_APP_CAMERA_ENABLE
+static StaticQueue_t s_vision_q;
 #endif
 static StaticEventGroup_t s_system_eg;
 #if CONFIG_NET_STREAM_ENABLE
@@ -81,6 +89,10 @@ esp_err_t app_wiring_init(void)
 #if CONFIG_APP_SPEAKER_ENABLE
     s_wiring.speak = psram_queue(SPEAK_DEPTH, sizeof(app_speak_req_t), &s_speak_q);
     if (s_wiring.speak == NULL) { return ESP_ERR_NO_MEM; }
+#endif
+#if CONFIG_APP_CAMERA_ENABLE
+    s_wiring.vision = psram_queue(VISION_DEPTH, sizeof(app_vision_req_t), &s_vision_q);
+    if (s_wiring.vision == NULL) { return ESP_ERR_NO_MEM; }
 #endif
 #if CONFIG_NET_STREAM_ENABLE
     // A static stream buffer needs one byte more storage than it holds.

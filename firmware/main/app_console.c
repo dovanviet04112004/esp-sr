@@ -10,6 +10,7 @@
 #include "app_events.h"
 #include "app_wiring.h"
 #include "argtable3/argtable3.h"
+#include "drv_camera.h"
 #include "esp_check.h"
 #include "esp_console.h"
 #include "esp_heap_caps.h"
@@ -30,6 +31,7 @@
 #define PASS_MAX_BYTES (sizeof(((wifi_sta_config_t *)NULL)->password) - 1)
 #define PASS_MIN_BYTES 8 // WPA2 passphrase, IEEE 802.11i
 #define STREAM_HOST_BYTES 64
+#define HEX_BASE 16
 
 typedef enum {
     TYPE_STR = 0,
@@ -415,6 +417,49 @@ static int spk_cmd(int argc, char **argv)
     return sent ? 0 : 1;
 }
 
+#if CONFIG_APP_CAMERA_ENABLE
+static struct {
+    struct arg_str *action;
+    struct arg_str *reg;
+    struct arg_str *value;
+    struct arg_end *end;
+} s_cam_args;
+
+static int cam_cmd(int argc, char **argv)
+{
+    if (arg_parse(argc, argv, (void **)&s_cam_args) != 0) {
+        arg_print_errors(stdout, s_cam_args.end, argv[0]);
+        return 1;
+    }
+    const uint16_t reg = (uint16_t)strtoul(s_cam_args.reg->sval[0], NULL, HEX_BASE);
+    if (s_cam_args.value->count > 0) {
+        const uint8_t value = (uint8_t)strtoul(s_cam_args.value->sval[0], NULL, HEX_BASE);
+        const esp_err_t wrote = drv_camera_reg_set(reg, value);
+        printf("cam %04X <- %02X: %s\n", (unsigned)reg, (unsigned)value, esp_err_to_name(wrote));
+        return wrote == ESP_OK ? 0 : 1;
+    }
+    uint8_t value = 0;
+    const esp_err_t read = drv_camera_reg_get(reg, &value);
+    printf("cam %04X = %02X: %s\n", (unsigned)reg, (unsigned)value, esp_err_to_name(read));
+    return read == ESP_OK ? 0 : 1;
+}
+
+static esp_err_t register_cam(void)
+{
+    s_cam_args.action = arg_str1(NULL, NULL, "reg", "the only action");
+    s_cam_args.reg = arg_str1(NULL, NULL, "<reg>", "sensor register in hex");
+    s_cam_args.value = arg_str0(NULL, NULL, "<value>", "byte to write in hex; leave out to read");
+    s_cam_args.end = arg_end(3);
+    const esp_console_cmd_t cam = {
+        .command = "cam",
+        .help = "Read or write one OV5640 register between pictures; a restart forgets it",
+        .func = cam_cmd,
+        .argtable = &s_cam_args,
+    };
+    return esp_console_cmd_register(&cam);
+}
+#endif
+
 // Board C's serial lines reach no reset pin, so this is the PC's only way to restart it (KEHOACH 2.1).
 static int restart_cmd(int argc, char **argv)
 {
@@ -472,6 +517,9 @@ static esp_err_t register_commands(void)
         .argtable = &s_spk_args,
     };
     ESP_RETURN_ON_ERROR(esp_console_cmd_register(&spk), TAG, "spk");
+#if CONFIG_APP_CAMERA_ENABLE
+    ESP_RETURN_ON_ERROR(register_cam(), TAG, "cam");
+#endif
     return register_stream();
 }
 

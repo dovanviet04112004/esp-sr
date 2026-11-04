@@ -13,6 +13,7 @@
 #include "drv_audio.h"
 #include "dsp_afe.h"
 #include "esp_app_desc.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_task_wdt.h"
@@ -22,12 +23,14 @@
 #include "gen_grid.h"
 #include "gen_payload.h"
 #include "gen_topics.h"
+#include "gen_vision.h"
 #include "net_mqtt.h"
 #include "net_wifi.h"
 #include "sdkconfig.h"
 #include "svc_front.h"
 #include "svc_listen.h"
 #include "svc_report.h"
+#include "svc_vision.h"
 #include "sys_storage.h"
 
 #define CORE_FRAME 1    // hard 16 ms deadline; phu_task only below it (KEHOACH 5.1)
@@ -43,6 +46,7 @@
 #define NET_STACK_BYTES 4096
 #define LUONG_STACK_BYTES 4096
 #define PHU_STACK_BYTES 4096
+#define NHIN_STACK_BYTES 16384
 
 #define THU_PRIORITY 17
 #define SACH_PRIORITY 16
@@ -54,7 +58,9 @@
 #define GUI_PRIORITY 4
 #define NET_PRIORITY 3
 #define LUONG_PRIORITY 3
-#define PHU_PRIORITY 1 // core 1's idle time, under thu and sach (KEHOACH 5.1)
+#define NHIN_PRIORITY 1 // under every speech task: a picture waits (KEHOACH 3.18)
+#define PHU_PRIORITY 1  // core 1's idle time, under thu and sach (KEHOACH 5.1)
+_Static_assert(APP_DETECT_PRIORITY > NHAN_PRIORITY, "detect runs above the listener (KEHOACH 3.18)");
 
 #define DMA_WAIT_MS (2 * GEN_GRID_HOP_US / 1000)
 #define FRAME_WAIT_MS 100
@@ -199,6 +205,9 @@ static void raise_decision(const app_wiring_t *w, const svc_listen_decision_t *d
     const app_event_t *e = &d->event;
     // The event leaves first: the log line can wait on a busy UART.
     send_up(w, e);
+    if (e->kind == APP_EVT_COMMAND && xQueueSend(w->dialog, e, 0) != pdTRUE) {
+        count_in_stats(w, &w->afe_stats->events_dropped);
+    }
     if (e->kind == APP_EVT_WAKE) {
         ESP_LOGI(TAG, "WAKE score %u at hop %" PRIu32 " of the utterance from %" PRIu32,
                  (unsigned)e->score_permille, e->seq, d->speech_seq);
@@ -394,22 +403,50 @@ static void enrol_from(const app_wiring_t *w, const device_cmd_t *cmd)
     }
 }
 
+static void capture_for(const app_wiring_t *w, app_vision_mode_t mode)
+{
+    if (w->vision == NULL) { return; }
+    const app_vision_req_t request = {.mode = mode};
+    // Zero timeout: a picture taken later shows the wrong scene, so a busy camera refuses (KEHOACH 5.3).
+    if (xQueueSend(w->vision, &request, 0) != pdTRUE) { raise_error(w, 0, APP_CODE_VISION_BUSY, NULL); }
+}
+
+static void act_on(const app_wiring_t *w, const app_event_t *heard)
+{
+    if (strcmp(heard->command_id, GEN_VISION_COMMAND_PHOTO) == 0) { capture_for(w, APP_VISION_PHOTO); }
+    if (strcmp(heard->command_id, GEN_VISION_COMMAND_DETECT) == 0) { capture_for(w, APP_VISION_DETECT); }
+}
+
 static void dieu_task(void *arg)
 {
     const app_wiring_t *w = arg;
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
     for (;;) {
         app_event_t event;
-        if (xQueueReceive(w->dialog, &event, pdMS_TO_TICKS(DIEU_WAIT_MS)) == pdTRUE) { (void)event; }
+        if (xQueueReceive(w->dialog, &event, pdMS_TO_TICKS(DIEU_WAIT_MS)) == pdTRUE) { act_on(w, &event); }
         device_cmd_t cmd;
         while (xQueueReceive(w->cmd, &cmd, 0) == pdTRUE) {
             if (cmd.op == DEVICE_CMD_OP_SPEAKER_ENROL || cmd.op == DEVICE_CMD_OP_SPEAKER_ENROL_CANCEL) {
                 enrol_from(w, &cmd);
+            } else if (cmd.op == DEVICE_CMD_OP_CAPTURE) {
+                capture_for(w, cmd.capture_mode == DEVICE_CMD_CAPTURE_MODE_DETECT ? APP_VISION_DETECT
+                                                                                  : APP_VISION_PHOTO);
             }
         }
         esp_task_wdt_reset();
     }
 }
+
+#if CONFIG_APP_CAMERA_ENABLE
+// Off the watchdog: one picture holds this task for seconds at the lowest priority (KEHOACH 3.18).
+static void nhin_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        svc_vision_step();
+    }
+}
+#endif
 
 #if CONFIG_NET_STREAM_ENABLE
 static void luong_task(void *arg)
@@ -465,17 +502,17 @@ static void fill_heartbeat(const app_afe_stats_t *afe, heartbeat_t *hb)
 static void event_payload(const app_event_t *e, event_t *out)
 {
     static const event_kind_t kKinds[] = {
-        [APP_EVT_WAKE] = EVENT_KIND_WAKE,
-        [APP_EVT_COMMAND] = EVENT_KIND_COMMAND,
-        [APP_EVT_REJECT] = EVENT_KIND_REJECT,
-        [APP_EVT_ERROR] = EVENT_KIND_ERROR,
+        [APP_EVT_WAKE] = EVENT_KIND_WAKE,       [APP_EVT_COMMAND] = EVENT_KIND_COMMAND,
+        [APP_EVT_REJECT] = EVENT_KIND_REJECT,   [APP_EVT_ERROR] = EVENT_KIND_ERROR,
+        [APP_EVT_CAPTURE] = EVENT_KIND_CAPTURE,
     };
     memset(out, 0, sizeof(*out));
     out->seq = e->seq;
     out->kind = kKinds[e->kind];
     out->score_permille = e->score_permille;
     out->margin_permille = e->margin_permille;
-    out->has_score_permille = out->has_margin_permille = e->kind != APP_EVT_ERROR;
+    out->has_score_permille = out->has_margin_permille =
+        e->kind != APP_EVT_ERROR && e->kind != APP_EVT_CAPTURE;
     strlcpy(out->command_id, e->command_id, sizeof(out->command_id));
     out->has_command_id = e->command_id[0] != '\0';
     strlcpy(out->code, e->code, sizeof(out->code));
@@ -488,6 +525,11 @@ static void event_payload(const app_event_t *e, event_t *out)
     out->has_speaker_id = e->speaker_id[0] != '\0';
     out->enrol_count = e->enrol_count;
     out->has_enrol_count = e->enrol_count > 0;
+    out->has_boot = out->has_capture_seq = out->has_image_bytes = out->has_saved = e->kind == APP_EVT_CAPTURE;
+    out->boot = e->boot;
+    out->capture_seq = e->capture_seq;
+    out->image_bytes = e->image_bytes;
+    out->saved = e->saved;
 }
 
 static void send_events(const app_wiring_t *w, bool online)
@@ -567,17 +609,24 @@ static StackType_t s_thu_stack[THU_STACK_BYTES] __attribute__((aligned(portBYTE_
 static StackType_t s_sach_stack[SACH_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 static StackType_t s_nhan_stack[NHAN_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 static StackType_t s_xac_stack[XAC_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
-static StackType_t s_dieu_stack[DIEU_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
-static StackType_t s_gui_stack[GUI_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
+// EXT_RAM_BSS_ATTR is PSRAM on board C and nothing elsewhere: these tasks never reach flash (KEHOACH 5.2).
+static EXT_RAM_BSS_ATTR StackType_t s_dieu_stack[DIEU_STACK_BYTES]
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
+static EXT_RAM_BSS_ATTR StackType_t s_gui_stack[GUI_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 static StackType_t s_net_stack[NET_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 #if CONFIG_APP_SPEAKER_ENABLE
 static StackType_t s_noi_stack[NOI_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 #endif
 #if CONFIG_NET_STREAM_ENABLE
-static StackType_t s_luong_stack[LUONG_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
+static EXT_RAM_BSS_ATTR StackType_t s_luong_stack[LUONG_STACK_BYTES]
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
 #endif
 #if CONFIG_AI_ENGINE_CORES_TWO
 static StackType_t s_phu_stack[PHU_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
+#endif
+#if CONFIG_APP_CAMERA_ENABLE
+static EXT_RAM_BSS_ATTR StackType_t s_nhin_stack[NHIN_STACK_BYTES]
+    __attribute__((aligned(portBYTE_ALIGNMENT)));
 #endif
 
 static const task_spec_t kTasks[] = {
@@ -597,6 +646,9 @@ static const task_spec_t kTasks[] = {
     {luong_task, "luong_task", s_luong_stack, LUONG_STACK_BYTES, LUONG_PRIORITY, CORE_BUFFERED},
 #endif
     {net_task, "net_task", s_net_stack, NET_STACK_BYTES, NET_PRIORITY, CORE_BUFFERED},
+#if CONFIG_APP_CAMERA_ENABLE
+    {nhin_task, "nhin_task", s_nhin_stack, NHIN_STACK_BYTES, NHIN_PRIORITY, CORE_BUFFERED},
+#endif
 };
 
 #define TASK_COUNT (sizeof(kTasks) / sizeof(kTasks[0]))

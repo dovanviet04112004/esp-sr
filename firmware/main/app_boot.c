@@ -9,6 +9,8 @@
 #include "app_wiring.h"
 #include "bsp_board.h"
 #include "drv_audio.h"
+#include "drv_camera.h"
+#include "drv_sd.h"
 #include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
@@ -23,10 +25,12 @@
 #include "storage_format.h"
 #include "svc_listen.h"
 #include "svc_report.h"
+#include "svc_vision.h"
 #include "sys_storage.h"
 
 #define DMA_DESC_NUM 8 // 128 ms of hops outlasts one flash erase (KEHOACH 5.5)
 #define MODEL_SLOT 0   // models_0, the one model partition (KEHOACH 6.1)
+#define VISION_LABEL "vision_0"
 
 #define APP_SEED_VER GEN_AFE_VERSION // raised in afe.yaml when a seed changes (KEHOACH 6.2)
 
@@ -261,6 +265,32 @@ static void start_listener(void)
     heap_caps_free(set);
 }
 
+#if CONFIG_APP_CAMERA_ENABLE
+// Ahead of every task, as detect's build needs; a piece that fails leaves the listener running
+// (KEHOACH 3.18).
+static void start_vision(void)
+{
+    esp_err_t err = ai_engine_detect_load(VISION_LABEL);
+    if (err != ESP_OK) { ESP_LOGW(TAG, "no detect: %s", esp_err_to_name(err)); }
+    log_heap("detect");
+    err = drv_camera_init();
+    if (err != ESP_OK) { ESP_LOGE(TAG, "no camera: %s", esp_err_to_name(err)); }
+    log_heap("camera");
+    err = drv_sd_init();
+    if (err != ESP_OK) { ESP_LOGW(TAG, "no SD card: %s", esp_err_to_name(err)); }
+    log_heap("sd");
+    const svc_vision_config_t cfg = {
+        .requests = app_wiring()->vision,
+        .events = app_wiring()->event_up,
+        .boot = sys_storage_boot_count(),
+        .detect_priority = APP_DETECT_PRIORITY,
+    };
+    err = svc_vision_init(&cfg);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "no pictures: %s", esp_err_to_name(err)); }
+    log_heap("vision");
+}
+#endif
+
 esp_err_t app_boot(void)
 {
     ESP_RETURN_ON_ERROR(bsp_board_init(), TAG, "board");
@@ -295,6 +325,9 @@ esp_err_t app_boot(void)
     log_heap("front");
     start_listener();
     log_heap("listen");
+#if CONFIG_APP_CAMERA_ENABLE
+    start_vision();
+#endif
 #if CONFIG_NET_STREAM_ENABLE
     const svc_report_stream_config_t stream = {.sb = app_wiring()->stream,
                                                .system = app_wiring()->system,
