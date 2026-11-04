@@ -21,7 +21,7 @@ def chunk(data: bytes, index: int, count: int, total: int = len(PICTURE), **chan
         "version": contract.CHUNK_VERSION,
         "index": index,
         "count": count,
-        "reserved": 0,
+        "flags": 0,
         "boot": 7,
         "seq": 2,
         "total_bytes": total,
@@ -106,11 +106,27 @@ def test_boxes_land_beside_their_picture_and_read_as_one_line(tmp_path: Path) ->
 
 def test_the_live_feed_serves_the_newest_picture_and_counts_them() -> None:
     feed = vision.LiveFeed()
-    feed.take(b"first")
-    feed.take(b"second one")
+    feed.take(b"first", at_s=10.0)
+    feed.take(b"second one", at_s=10.5)
     assert feed.jpeg() == b"second one"
-    assert feed.state() == {"serial": 2, "bytes": 10, "bestBytes": 10}
-    assert feed.landed.is_set()
+    assert feed.state() == {"serial": 2, "bytes": 10, "bestBytes": 10, "fps": 2.0}
+
+
+def test_a_preview_frame_reaches_the_page_and_no_file(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    feed = vision.LiveFeed()
+    body = chunk(PICTURE, 0, 1, flags=contract.CHUNK_FLAG_PREVIEW)
+    vision.on_message(assembler, mqtt_rx.parse(f"sr/{DEVICE}/up/image", body, rx_utc="now"), feed)
+    assert feed.jpeg() == PICTURE
+    assert not list(tmp_path.rglob("*.jpg"))
+
+
+def test_a_picture_lands_in_a_file_beside_a_live_page(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    feed = vision.LiveFeed()
+    vision.on_message(assembler, mqtt_rx.parse(f"sr/{DEVICE}/up/image", chunk(PICTURE, 0, 1), rx_utc="now"), feed)
+    assert (tmp_path / DEVICE / "B7_000002.jpg").read_bytes() == PICTURE
+    assert feed.state()["serial"] == 0
 
 
 def test_the_focus_meter_keeps_the_sharpest_picture_seen() -> None:

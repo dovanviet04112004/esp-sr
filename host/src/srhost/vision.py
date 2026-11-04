@@ -11,7 +11,9 @@ import json
 import logging
 import sys
 import threading
+import time
 import zlib
+from collections import deque
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -23,8 +25,10 @@ from srhost.mqtt_rx import Message, Receiver
 IMAGES_DIR = Path("raw") / "images"
 PERMILLE = 1000
 CONNECT_TIMEOUT_S = 10.0
-FRAME_TIMEOUT_S = 12.0
 FOCUS_BYTES_PER_MARK = 2048
+FPS_WINDOW_FRAMES = 20
+MS_PER_S = 1000
+KEEP_ALIVES_PER_HOLD = 2
 LIVE_BIND = "127.0.0.1"  # a photo of a room stays on this machine (KEHOACH 7.5)
 LIVE_PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Board C live</title><style>
@@ -46,8 +50,8 @@ setInterval(async () => {
   if (state.serial === serial) return;
   serial = state.serial;
   frame.src = "/frame.jpg?n=" + serial;
-  now.textContent = state.bytes + " B, sharpest so far " + state.bestBytes + " B";
-}, 300);
+  now.textContent = state.fps.toFixed(1) + " frames/s, " + state.bytes + " B, sharpest " + state.bestBytes + " B";
+}, 100);
 </script></body></html>
 """
 
@@ -107,20 +111,28 @@ class Assembler:
     def folder(self, device: str) -> Path:
         return self._root / device
 
-    def take(self, device: str, body: bytes) -> Path | None:
-        """Add one message; the path of the JPEG when this message finished it."""
+    def join(self, device: str, body: bytes) -> tuple[dict, bytes | None]:
+        """Add one message; its header, and the JPEG when this message finished it."""
         header, data = parse_chunk(body)
-        key = (device, header["boot"], header["seq"])
+        key = (device, header["boot"], header["seq"], header["flags"])
         capture = self._open.setdefault(key, Capture(header["count"], header["total_bytes"]))
         capture.parts[header["index"]] = data
         image = capture.whole()
-        if image is None:
-            return None
-        del self._open[key]
+        if image is not None:
+            del self._open[key]
+        return header, image
+
+    def keep(self, device: str, header: dict, image: bytes) -> Path:
+        """Write one whole picture under the data root."""
         path = self.folder(device) / f"{stem_of(header['boot'], header['seq'])}.jpg"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(image)
         return path
+
+    def take(self, device: str, body: bytes) -> Path | None:
+        """Add one message; the path of the JPEG when this message finished it."""
+        header, image = self.join(device, body)
+        return None if image is None else self.keep(device, header, image)
 
     def keep_boxes(self, device: str, payload: dict) -> Path:
         """Write one up/detections payload beside its picture."""
@@ -150,21 +162,21 @@ class FocusMeter:
 
 
 class LiveFeed:
-    """The newest picture for the live page, and a flag the capture loop waits on."""
+    """The newest preview frame for the live page and how fast they come; none reaches the disk."""
 
     def __init__(self) -> None:
         self.meter = FocusMeter()
-        self.landed = threading.Event()
         self._lock = threading.Lock()
         self._jpeg = b""
         self._serial = 0
+        self._arrivals: deque[float] = deque(maxlen=FPS_WINDOW_FRAMES)
 
-    def take(self, jpeg: bytes) -> None:
+    def take(self, jpeg: bytes, at_s: float | None = None) -> None:
         with self._lock:
             self._jpeg = jpeg
             self._serial += 1
+            self._arrivals.append(time.monotonic() if at_s is None else at_s)
         print(self.meter.line(len(jpeg)), flush=True)
-        self.landed.set()
 
     def jpeg(self) -> bytes:
         with self._lock:
@@ -172,7 +184,9 @@ class LiveFeed:
 
     def state(self) -> dict:
         with self._lock:
-            return {"serial": self._serial, "bytes": len(self._jpeg), "bestBytes": self.meter.best_bytes}
+            span_s = self._arrivals[-1] - self._arrivals[0] if len(self._arrivals) > 1 else 0.0
+            fps = (len(self._arrivals) - 1) / span_s if span_s > 0 else 0.0
+            return {"serial": self._serial, "bytes": len(self._jpeg), "bestBytes": self.meter.best_bytes, "fps": fps}
 
 
 def live_handler(feed: LiveFeed) -> type[BaseHTTPRequestHandler]:
@@ -203,15 +217,14 @@ def live_handler(feed: LiveFeed) -> type[BaseHTTPRequestHandler]:
 
 
 def run_live(receiver: Receiver, device: str, feed: LiveFeed, port: int) -> None:
-    """Serve the page and ask for the next picture as soon as the last one has landed."""
+    """Serve the page and keep the board's preview alive; it ends by itself when these requests stop."""
     server = ThreadingHTTPServer((LIVE_BIND, port), live_handler(feed))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"open http://localhost:{port}", flush=True)
     cmd = topics.BY_ID["cmd"]
     while receiver.connected.wait(CONNECT_TIMEOUT_S):
-        feed.landed.clear()
-        receiver.publish(cmd.build(device), capture_command("PHOTO"), cmd.qos)
-        feed.landed.wait(FRAME_TIMEOUT_S)
+        receiver.publish(cmd.build(device), capture_command("PREVIEW"), cmd.qos)
+        time.sleep(vision.PREVIEW_HOLD_MS / MS_PER_S / KEEP_ALIVES_PER_HOLD)
 
 
 def on_message(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -> None:
@@ -219,14 +232,18 @@ def on_message(assembler: Assembler, message: Message, feed: LiveFeed | None = N
         return
     if message.kind == "image":
         try:
-            path = assembler.take(message.device, message.body or b"")
+            header, image = assembler.join(message.device, message.body or b"")
         except ChunkError as err:
             print(f"{message.device} image refused: {err}", flush=True)
             return
-        if path is not None and feed is not None:
-            feed.take(path.read_bytes())
-        elif path is not None:
-            print(f"{message.device} image {path.stat().st_size} bytes: {path}", flush=True)
+        if image is None:
+            return
+        if header["flags"] & vision.CHUNK_FLAG_PREVIEW:
+            if feed is not None:
+                feed.take(image)
+            return
+        path = assembler.keep(message.device, header, image)
+        print(f"{message.device} image {path.stat().st_size} bytes: {path}", flush=True)
     elif message.kind == "detections":
         assembler.keep_boxes(message.device, message.payload)
         print(f"{message.device} {describe_boxes(message.payload)}", flush=True)
@@ -241,9 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--device", help="one deviceId; every board otherwise")
     parser.add_argument("--capture", choices=("PHOTO", "DETECT"), help="ask --device for one picture first")
-    parser.add_argument(
-        "--live", action="store_true", help="pictures one after another on a local page, with their size"
-    )
+    parser.add_argument("--live", action="store_true", help="the board's preview frames on a local page")
     args = parser.parse_args(argv)
     if (args.capture or args.live) and not args.device:
         parser.error("--capture and --live need --device")
