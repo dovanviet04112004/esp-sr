@@ -119,6 +119,17 @@ def test_each_checked_command_shows_its_speaker_and_each_refusal_or_enrolment_it
     assert live.describe_event(enrolling, names).endswith(f"· enrolling spk_001 Chủ nhà 3/{ENROL_COMMANDS}")
 
 
+def test_a_capture_and_its_boxes_read_as_events() -> None:
+    capture = {"seq": 1, "kind": "CAPTURE", "boot": 7, "captureSeq": 2, "imageBytes": 90000, "saved": False}
+    assert live.describe_event(event(capture)).endswith("CAPTURE B7_000002 90000 bytes, not saved")
+    box = {"name": "cup", "scorePermille": 812, "x1": 1, "y1": 2, "x2": 3, "y2": 4}
+    found = {"deviceId": DEVICE, "boot": 7, "captureSeq": 2, "width": 640, "height": 360, "detectMs": 1840}
+    view = live.View()
+    view.update(message("detections", {**found, "boxes": [box]}))
+    assert any("DETECT B7_000002: 1 found in 1840 ms: cup 0.81" in line for line in view.render(now_monotonic=0.0))
+    assert live.one_line(message("image", b"\xff\xd8")).endswith("image chunk 2 bytes")
+
+
 def test_the_roster_a_board_keeps_gets_its_own_line() -> None:
     view = live.View()
     people = [

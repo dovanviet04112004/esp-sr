@@ -1,0 +1,276 @@
+"""Keep what board C's camera sends: join up/image chunks into a JPEG and print up/detections (KEHOACH 3.19).
+
+Images land under the data root, never in the repo: a photo of a room is a person's data (KEHOACH 7.5).
+Run: uv run python -m srhost.vision [--device <deviceId>] [--capture PHOTO|DETECT | --live]
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import sys
+import threading
+import zlib
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from srhost.config import ConfigError, live_port, mqtt_config, record_config
+from srhost.generated import topics, vision
+from srhost.mqtt_rx import Message, Receiver
+
+IMAGES_DIR = Path("raw") / "images"
+PERMILLE = 1000
+CONNECT_TIMEOUT_S = 10.0
+FRAME_TIMEOUT_S = 12.0
+FOCUS_BYTES_PER_MARK = 2048
+LIVE_BIND = "127.0.0.1"  # a photo of a room stays on this machine (KEHOACH 7.5)
+LIVE_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Board C live</title><style>
+body { margin: 0; background: #111; color: #eee; font: 16px system-ui, sans-serif; text-align: center; }
+#bar { padding: 10px; font-size: 22px; } button { font-size: 16px; margin-left: 16px; padding: 4px 12px; }
+#view { height: calc(100vh - 60px); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+img { max-width: 100vh; max-height: 100vw; }
+</style></head><body>
+<div id="bar"><span id="now">waiting for a picture</span><button id="turn">Rotate</button></div>
+<div id="view"><img id="frame" alt=""></div>
+<script>
+let serial = 0, turn = 90;
+const frame = document.getElementById("frame"), now = document.getElementById("now");
+const show = () => { frame.style.transform = "rotate(" + turn + "deg)"; };
+document.getElementById("turn").onclick = () => { turn = (turn + 90) % 360; show(); };
+show();
+setInterval(async () => {
+  const state = await (await fetch("/state")).json();
+  if (state.serial === serial) return;
+  serial = state.serial;
+  frame.src = "/frame.jpg?n=" + serial;
+  now.textContent = state.bytes + " B, sharpest so far " + state.bestBytes + " B";
+}, 300);
+</script></body></html>
+"""
+
+log = logging.getLogger(__name__)
+
+
+class ChunkError(ValueError):
+    """A message on up/image is not a chunk of contracts/vision.yaml; the text says why."""
+
+
+def parse_chunk(body: bytes) -> tuple[dict, bytes]:
+    """The header and the data of one message on up/image."""
+    if len(body) < vision.CHUNK_HEADER_BYTES:
+        raise ChunkError(f"{len(body)} bytes is shorter than a header")
+    header = dict(zip(vision.CHUNK_HEADER_FIELDS, vision.CHUNK_HEADER.unpack_from(body), strict=True))
+    data = body[vision.CHUNK_HEADER_BYTES :]
+    if header["magic"] != vision.CHUNK_MAGIC_U32:
+        raise ChunkError(f"magic 0x{header['magic']:08x}")
+    if header["version"] != vision.CHUNK_VERSION:
+        raise ChunkError(f"version {header['version']}")
+    if header["index"] >= header["count"]:
+        raise ChunkError(f"chunk {header['index']} of {header['count']}")
+    if zlib.crc32(data) != header["crc32"]:
+        raise ChunkError(f"chunk {header['index']} fails its crc32")
+    return header, data
+
+
+@dataclass
+class Capture:
+    """The chunks of one picture so far."""
+
+    count: int
+    total_bytes: int
+    parts: dict[int, bytes] = field(default_factory=dict)
+
+    def whole(self) -> bytes | None:
+        """The picture once every chunk is in and they add up; None before."""
+        if len(self.parts) != self.count:
+            return None
+        image = b"".join(self.parts[i] for i in range(self.count))
+        if len(image) != self.total_bytes:
+            raise ChunkError(f"{len(image)} bytes where the header says {self.total_bytes}")
+        return image
+
+
+def stem_of(boot: int, seq: int) -> str:
+    return f"B{boot}_{seq:06d}"
+
+
+class Assembler:
+    """Joins chunks per device and picture; a picture whose chunks never all come stays out of the folder."""
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+        self._open: dict[tuple[str, int, int], Capture] = {}
+
+    def folder(self, device: str) -> Path:
+        return self._root / device
+
+    def take(self, device: str, body: bytes) -> Path | None:
+        """Add one message; the path of the JPEG when this message finished it."""
+        header, data = parse_chunk(body)
+        key = (device, header["boot"], header["seq"])
+        capture = self._open.setdefault(key, Capture(header["count"], header["total_bytes"]))
+        capture.parts[header["index"]] = data
+        image = capture.whole()
+        if image is None:
+            return None
+        del self._open[key]
+        path = self.folder(device) / f"{stem_of(header['boot'], header['seq'])}.jpg"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(image)
+        return path
+
+    def keep_boxes(self, device: str, payload: dict) -> Path:
+        """Write one up/detections payload beside its picture."""
+        path = self.folder(device) / f"{stem_of(payload['boot'], payload['captureSeq'])}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+        return path
+
+
+def describe_boxes(payload: dict) -> str:
+    """One line for one up/detections payload."""
+    found = ", ".join(f"{b['name']} {b['scorePermille'] / PERMILLE:.2f}" for b in payload["boxes"])
+    stem = stem_of(payload["boot"], payload["captureSeq"])
+    return f"{stem}: {len(payload['boxes'])} found in {payload['detectMs']} ms: {found or 'nothing'}"
+
+
+class FocusMeter:
+    """A hand on the lens reads each picture's size: a sharper frame compresses worse, so bytes rise into focus."""
+
+    def __init__(self) -> None:
+        self.best_bytes = 0
+
+    def line(self, image_bytes: int) -> str:
+        """One line for one picture, against the sharpest so far."""
+        self.best_bytes = max(self.best_bytes, image_bytes)
+        return f"{image_bytes:7d} B  best {self.best_bytes:7d} B  {'#' * (image_bytes // FOCUS_BYTES_PER_MARK)}"
+
+
+class LiveFeed:
+    """The newest picture for the live page, and a flag the capture loop waits on."""
+
+    def __init__(self) -> None:
+        self.meter = FocusMeter()
+        self.landed = threading.Event()
+        self._lock = threading.Lock()
+        self._jpeg = b""
+        self._serial = 0
+
+    def take(self, jpeg: bytes) -> None:
+        with self._lock:
+            self._jpeg = jpeg
+            self._serial += 1
+        print(self.meter.line(len(jpeg)), flush=True)
+        self.landed.set()
+
+    def jpeg(self) -> bytes:
+        with self._lock:
+            return self._jpeg
+
+    def state(self) -> dict:
+        with self._lock:
+            return {"serial": self._serial, "bytes": len(self._jpeg), "bestBytes": self.meter.best_bytes}
+
+
+def live_handler(feed: LiveFeed) -> type[BaseHTTPRequestHandler]:
+    """The page, its newest picture and its state, for ThreadingHTTPServer."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            route = self.path.split("?")[0]
+            if route == "/frame.jpg":
+                self.reply(feed.jpeg(), "image/jpeg")
+            elif route == "/state":
+                self.reply(json.dumps(feed.state()).encode(), "application/json")
+            else:
+                self.reply(LIVE_PAGE.encode(), "text/html; charset=utf-8")
+
+        def reply(self, body: bytes, kind: str) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    return Handler
+
+
+def run_live(receiver: Receiver, device: str, feed: LiveFeed, port: int) -> None:
+    """Serve the page and ask for the next picture as soon as the last one has landed."""
+    server = ThreadingHTTPServer((LIVE_BIND, port), live_handler(feed))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    print(f"open http://localhost:{port}", flush=True)
+    cmd = topics.BY_ID["cmd"]
+    while receiver.connected.wait(CONNECT_TIMEOUT_S):
+        feed.landed.clear()
+        receiver.publish(cmd.build(device), capture_command("PHOTO"), cmd.qos)
+        feed.landed.wait(FRAME_TIMEOUT_S)
+
+
+def on_message(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -> None:
+    if message.rejected or message.device is None:
+        return
+    if message.kind == "image":
+        try:
+            path = assembler.take(message.device, message.body or b"")
+        except ChunkError as err:
+            print(f"{message.device} image refused: {err}", flush=True)
+            return
+        if path is not None and feed is not None:
+            feed.take(path.read_bytes())
+        elif path is not None:
+            print(f"{message.device} image {path.stat().st_size} bytes: {path}", flush=True)
+    elif message.kind == "detections":
+        assembler.keep_boxes(message.device, message.payload)
+        print(f"{message.device} {describe_boxes(message.payload)}", flush=True)
+
+
+def capture_command(mode: str) -> str:
+    """The down/cmd payload that takes one picture without a word said."""
+    return json.dumps({"op": "CAPTURE", "captureMode": mode})
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--device", help="one deviceId; every board otherwise")
+    parser.add_argument("--capture", choices=("PHOTO", "DETECT"), help="ask --device for one picture first")
+    parser.add_argument(
+        "--live", action="store_true", help="pictures one after another on a local page, with their size"
+    )
+    args = parser.parse_args(argv)
+    if (args.capture or args.live) and not args.device:
+        parser.error("--capture and --live need --device")
+    logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(message)s")
+    try:
+        cfg = mqtt_config()
+        assembler = Assembler(record_config().data_root / IMAGES_DIR)
+        port = live_port() if args.live else 0
+    except ConfigError as err:
+        print(f"vision: {err}", file=sys.stderr)
+        return 2
+    feed = LiveFeed() if args.live else None
+    receiver = Receiver(cfg, lambda message: on_message(assembler, message, feed), args.device)
+    receiver.start()
+    try:
+        if args.capture and receiver.connected.wait(CONNECT_TIMEOUT_S):
+            cmd = topics.BY_ID["cmd"]
+            receiver.publish(cmd.build(args.device), capture_command(args.capture), cmd.qos)
+        if feed is not None:
+            run_live(receiver, args.device, feed, port)
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        receiver.stop()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

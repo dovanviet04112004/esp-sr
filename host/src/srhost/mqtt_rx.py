@@ -13,7 +13,7 @@ import logging
 import sys
 import threading
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TextIO
@@ -30,6 +30,7 @@ WILDCARD = "+"
 
 log = logging.getLogger(__name__)
 VALIDATORS = {name: Draft202012Validator(schema) for name, schema in SCHEMAS.items()}
+BINARY = "binary"  # frame in contracts/vision.yaml, not a JSON schema
 
 
 @dataclass(frozen=True)
@@ -43,13 +44,15 @@ class Message:
     payload: dict | None
     error: str | None = None
     raw: str | None = None
+    body: bytes | None = field(default=None, repr=False)
 
     @property
     def rejected(self) -> bool:
         return self.error is not None
 
     def to_json(self) -> str:
-        return json.dumps({k: v for k, v in asdict(self).items() if v is not None}, ensure_ascii=False)
+        kept = {k: v for k, v in asdict(self).items() if v is not None and k != "body"}
+        return json.dumps(kept, ensure_ascii=False)
 
 
 def now_utc() -> str:
@@ -67,8 +70,10 @@ def schema_error(schema: str, payload: object) -> str | None:
 def parse(topic: str, body: bytes, rx_utc: str | None = None) -> Message:
     """Match the topic, decode the JSON and validate it; never raises on what a board sends."""
     rx_utc = rx_utc or now_utc()
-    raw = body.decode("utf-8", errors="replace")
     matched = topics.match(topic)
+    if matched is not None and matched[0].schema == BINARY:
+        return Message(rx_utc, topic, matched[0].id, matched[1], None, body=body)
+    raw = body.decode("utf-8", errors="replace")
     if matched is None or matched[0].direction != "up":
         return Message(rx_utc, topic, None, None, None, "not an up topic of contracts/mqtt_topics.yaml", raw)
     spec, device = matched
@@ -150,6 +155,9 @@ class Receiver:
     def start(self) -> None:
         self._client.connect_async(self._cfg.host, self._cfg.port, KEEPALIVE_S)
         self._client.loop_start()
+
+    def publish(self, topic: str, payload: str, qos: int) -> None:
+        self._client.publish(topic, payload, qos)
 
     def stop(self) -> None:
         self._client.disconnect()

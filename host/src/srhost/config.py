@@ -74,6 +74,11 @@ def tcp_port(values: dict[str, str], name: str) -> int:
     return int(port)
 
 
+def live_port(env: dict[str, str] | None = None) -> int:
+    """The port of srhost.vision's local page, or ConfigError."""
+    return tcp_port(require(("SRHOST_LIVE_PORT",), env), "SRHOST_LIVE_PORT")
+
+
 def record_config(env: dict[str, str] | None = None) -> RecordConfig:
     """The recording settings, or ConfigError naming every variable to fix."""
     values = require(RECORD_VARIABLES, env)

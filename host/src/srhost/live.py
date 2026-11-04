@@ -20,6 +20,7 @@ from pathlib import Path
 from srhost.config import ConfigError, mqtt_config
 from srhost.mqtt_rx import JsonlLog, Message, Receiver
 from srhost.speakers import ENROL_COMMANDS
+from srhost.vision import describe_boxes, stem_of
 
 REFRESH_S = 0.2
 EVENTS_SHOWN = 8
@@ -84,6 +85,11 @@ def describe_event(message: Message, names: dict[str, str] | None = None) -> str
     event = message.payload or {}
     kind = event.get("kind")
     clock = local_clock(message.rx_utc)
+    if message.kind == "detections":
+        return f"{clock} DETECT {describe_boxes(event)}"
+    if kind == "CAPTURE":
+        kept = "saved" if event["saved"] else "not saved"
+        return f"{clock} CAPTURE {stem_of(event['boot'], event['captureSeq'])} {event['imageBytes']} bytes, {kept}"
     if kind == "WAKE":
         text = f"WAKE score {event['scorePermille'] / PERMILLE:.2f}"
     elif kind == "COMMAND":
@@ -160,7 +166,7 @@ class View:
             if message.rejected:
                 board.rejected += 1
                 board.last_error = message.error
-            elif message.kind == "event":
+            elif message.kind in ("event", "detections"):
                 board.events.append(message)
             elif message.kind == "roster":
                 board.roster = message.payload
@@ -202,8 +208,10 @@ class View:
 def one_line(message: Message, names: dict[str, str] | None = None) -> str:
     if message.rejected:
         return f"{message.rx_utc} {message.topic} REJECTED {message.error}"
-    if message.kind == "event":
+    if message.kind in ("event", "detections"):
         return f"{message.device} event {describe_event(message, names)}"
+    if message.kind == "image":
+        return f"{message.device} image chunk {len(message.body or b'')} bytes"
     if message.kind == "heartbeat":
         return f"{message.device} health {describe_heartbeat(message.payload)}"
     if message.kind == "telemetry":
