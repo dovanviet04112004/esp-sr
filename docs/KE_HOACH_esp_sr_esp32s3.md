@@ -2579,6 +2579,10 @@ và lwIP ở PSRAM, đệm tĩnh RX và TX còn 6, bảng thanh ghi của sensor
 5. Ghi `/sdcard/IMG/B<boot>/<seq>.JPG`, rồi gửi sự kiện `CAPTURE`. Thẻ đứng cuối vì người dùng đang chờ kết quả, khung JPEG vẫn
    nằm ở PSRAM. Tên dựa vào lượt khởi động vì board chưa có đồng hồ.
 
+**Xem trực tiếp, để chỉnh ống kính.** `CAPTURE` với `PREVIEW` giữ sensor chạy, đèn sáng, và đẩy từng khung lên `up/image` ở QoS 0,
+cờ `preview` ở đầu khúc, không ghi thẻ. Không có `PREVIEW` mới trong `preview_hold_ms` thì tự tắt, nên chế độ này không sống lâu hơn
+lệnh của nó. Một lệnh ảnh chen vào thì tắt ngay. Host giữ khung trong bộ nhớ cho trang của `make vision-live`, không ghi đĩa.
+
 Không có thẻ thì vẫn đẩy ảnh, sự kiện ghi `saved: false`. Mất MQTT thì ảnh vẫn ở thẻ; bản đầu chưa gửi lại. Đang chạy mà có
 lệnh mới thì từ chối ngay với mã `VISION_BUSY`, không xếp hàng: `nhin_task` giữ yêu cầu trong `q_vision` tới hết ảnh (§5.3).
 
