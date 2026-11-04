@@ -65,6 +65,8 @@ typedef struct {
     uint32_t fifo_overflows;
     uint32_t gaps;
     uint32_t clipped_hops;
+    float aec_erle_db; // 0 without a reference
+    uint32_t aec_resets;
 } dsp_afe_stats_t;
 
 typedef enum {

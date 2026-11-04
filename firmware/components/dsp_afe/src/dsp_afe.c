@@ -44,6 +44,7 @@ typedef enum {
 
 typedef struct {
     afe_arena_t *arena;
+    afe_arena_t *cold; // not touched on most hops
     walk_mode_t mode;
     esp_err_t err;
 } walker_t;
@@ -189,7 +190,11 @@ static void walk_aec(walker_t *w, const dsp_afe_config_t *cfg, uint8_t n_mics, u
         .bulk_delay_samples = cfg->calib != NULL ? cfg->calib->aec_delay_samples : 0,
     };
     const size_t bytes = dsp_afe_aec_workspace_bytes(&aec);
+    // In the cold region: it runs only while the speaker plays, and core 1 has the time (KEHOACH 3.5).
+    afe_arena_t *hot = w->arena;
+    w->arena = w->cold;
     void *mem = region(w, bytes);
+    w->arena = hot;
     if (mem != NULL) { fail(w, dsp_afe_aec_init(&afe->aec, &aec, afe->fft, mem, bytes)); }
 #else
     (void)cfg;
@@ -373,9 +378,9 @@ static void walk_agc(walker_t *w, const dsp_afe_config_t *cfg, dsp_afe_t *afe)
 
 // One walk sizes and builds, so the two can never disagree on the layout of hot.
 static esp_err_t walk(const dsp_afe_config_t *cfg, uint8_t n_mics, uint8_t n_channels, dsp_afe_t *afe,
-                      afe_arena_t *arena, walk_mode_t mode)
+                      afe_arena_t *arena, afe_arena_t *cold, walk_mode_t mode)
 {
-    walker_t w = {.arena = arena, .mode = mode, .err = ESP_OK};
+    walker_t w = {.arena = arena, .cold = cold, .mode = mode, .err = ESP_OK};
     walk_spec(&w, n_mics, afe);
     walk_hpf(&w, n_mics, afe);
     walk_aec(&w, cfg, n_mics, n_channels, afe);
@@ -395,11 +400,12 @@ esp_err_t dsp_afe_workspace_bytes(const dsp_afe_config_t *cfg, size_t *hot_bytes
     esp_err_t err = check_config(cfg, &n_mics, &n_channels);
     if (err != ESP_OK) { return err; }
     afe_arena_t sizing = afe_arena(NULL, 0);
+    afe_arena_t cold_sizing = afe_arena(NULL, 0);
     afe_take(&sizing, sizeof(struct dsp_afe_s));
-    err = walk(cfg, n_mics, n_channels, NULL, &sizing, WALK_SIZE);
+    err = walk(cfg, n_mics, n_channels, NULL, &sizing, &cold_sizing, WALK_SIZE);
     if (err != ESP_OK) { return err; }
     *hot_bytes = AFE_ALIGN_BYTES + sizing.used;
-    *cold_bytes = 0;
+    *cold_bytes = cold_sizing.used > 0 ? AFE_ALIGN_BYTES + cold_sizing.used : 0;
     return ESP_OK;
 }
 
@@ -414,6 +420,7 @@ esp_err_t dsp_afe_init(dsp_afe_t **out, const dsp_afe_config_t *cfg, void *hot, 
     if (need_cold > 0 && cold == NULL) { return ESP_ERR_INVALID_ARG; }
     if (hot_bytes < need_hot || cold_bytes < need_cold) { return ESP_ERR_INVALID_SIZE; }
     afe_arena_t arena = afe_arena(hot, hot_bytes);
+    afe_arena_t cold_arena = afe_arena(cold, cold_bytes);
     dsp_afe_t *afe = afe_take(&arena, sizeof(*afe));
     memset(afe, 0, sizeof(*afe));
     afe->cfg = *cfg;
@@ -423,7 +430,7 @@ esp_err_t dsp_afe_init(dsp_afe_t **out, const dsp_afe_config_t *cfg, void *hot, 
         afe->cfg.calib = &afe->calib;
     }
     afe->doa_result.angle_deg = ANGLE_UNKNOWN_DEG;
-    err = walk(&afe->cfg, afe->n_mics, afe->n_channels, afe, &arena, WALK_BUILD);
+    err = walk(&afe->cfg, afe->n_mics, afe->n_channels, afe, &arena, &cold_arena, WALK_BUILD);
     if (err == ESP_OK) { *out = afe; }
     return err;
 }
@@ -695,6 +702,9 @@ void dsp_afe_reset(dsp_afe_t *afe)
 void dsp_afe_resume(dsp_afe_t *afe)
 {
     drop_samples(afe);
+#if CONFIG_DSP_AFE_AEC_ENABLE
+    if (afe->n_channels > afe->n_mics) { dsp_afe_aec_flush(afe->aec); }
+#endif
 #if CONFIG_DSP_AFE_VAD_ENABLE
     dsp_afe_vad_flush(afe->vad);
 #endif
@@ -740,4 +750,12 @@ esp_err_t dsp_afe_set_param(dsp_afe_t *afe, dsp_afe_param_t param, float value)
 void dsp_afe_stats(const dsp_afe_t *afe, dsp_afe_stats_t *out)
 {
     *out = afe->stats;
+#if CONFIG_DSP_AFE_AEC_ENABLE
+    if (afe->n_channels > afe->n_mics) {
+        dsp_afe_aec_stats_t aec;
+        dsp_afe_aec_stats(afe->aec, &aec);
+        out->aec_erle_db = aec.erle_db;
+        out->aec_resets = aec.divergence_resets;
+    }
+#endif
 }

@@ -28,7 +28,8 @@ typedef struct {
 
 typedef struct dsp_afe_aec_s dsp_afe_aec_t;
 
-/** Bytes this configuration needs, excluding the shared FFT; all of it is touched every frame (KEHOACH 6.5).
+/** Bytes this configuration needs, excluding the shared FFT; touched only while the speaker plays
+ * (KEHOACH 6.5).
  *  @ctx any | non-blocking
  */
 size_t dsp_afe_aec_workspace_bytes(const dsp_afe_aec_config_t *cfg);
@@ -50,6 +51,11 @@ esp_err_t dsp_afe_aec_process(dsp_afe_aec_t *st, float *const *mic, const float 
  *  @ctx any | non-blocking
  */
 void dsp_afe_aec_stats(const dsp_afe_aec_t *st, dsp_afe_aec_stats_t *out);
+
+/** Forget the reference older than a short gap; the weights and every estimate stay (KEHOACH 4.5.5).
+ *  @ctx any | non-blocking
+ */
+void dsp_afe_aec_flush(dsp_afe_aec_t *st);
 
 /** Return the weights and figures of merit to where init leaves them.
  *  @ctx any | non-blocking

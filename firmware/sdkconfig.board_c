@@ -3,7 +3,7 @@ CONFIG_APP_BOARD_C=y
 CONFIG_APP_MIC_COUNT=1
 CONFIG_APP_MIC_SLOT_LEFT=y
 CONFIG_APP_SPEAKER_ENABLE=y
-# aec's shell for now: the reference channel needs it, and it passes the microphone through (KEHOACH 3.5).
+# The speaker's sound comes back on the microphone; aec takes it off, its state in PSRAM (KEHOACH 3.5).
 CONFIG_DSP_AFE_AEC_ENABLE=y
 # nhin_task holds core 0 for seconds a picture and sits on a PSRAM stack (KEHOACH 3.18, 5.2).
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
