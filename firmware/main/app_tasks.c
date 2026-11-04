@@ -30,6 +30,7 @@
 #include "svc_front.h"
 #include "svc_listen.h"
 #include "svc_report.h"
+#include "svc_speak.h"
 #include "svc_vision.h"
 #include "sys_storage.h"
 
@@ -68,7 +69,6 @@ _Static_assert(APP_DETECT_PRIORITY > NHAN_PRIORITY, "detect runs above the liste
 #define VERIFY_WAIT_MS 100
 #define PHU_WAIT_MS 100
 #define DIEU_WAIT_MS 100
-#define SPEAK_WAIT_MS 1000
 #define GUI_PERIOD_MS 100
 #define CRED_POLL_MS 2000
 #define LINK_WAIT_MS 1000
@@ -205,9 +205,8 @@ static void raise_decision(const app_wiring_t *w, const svc_listen_decision_t *d
     const app_event_t *e = &d->event;
     // The event leaves first: the log line can wait on a busy UART.
     send_up(w, e);
-    if (e->kind == APP_EVT_COMMAND && xQueueSend(w->dialog, e, 0) != pdTRUE) {
-        count_in_stats(w, &w->afe_stats->events_dropped);
-    }
+    const bool heard = e->kind == APP_EVT_COMMAND || e->kind == APP_EVT_WAKE || e->kind == APP_EVT_REJECT;
+    if (heard && xQueueSend(w->dialog, e, 0) != pdTRUE) { count_in_stats(w, &w->afe_stats->events_dropped); }
     if (e->kind == APP_EVT_WAKE) {
         ESP_LOGI(TAG, "WAKE score %u at hop %" PRIu32 " of the utterance from %" PRIu32,
                  (unsigned)e->score_permille, e->seq, d->speech_seq);
@@ -423,8 +422,23 @@ static app_vision_mode_t vision_mode(device_cmd_capture_mode_t mode)
     return kModes[mode];
 }
 
+static void beep(const app_wiring_t *w, app_tone_t tone)
+{
+    if (w->speak == NULL) { return; }
+    const app_speak_req_t request = {.tone = tone};
+    // Zero timeout: a beep that waits answers the wrong moment, so a full queue drops it (KEHOACH 5.3).
+    if (xQueueSend(w->speak, &request, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "q_speak full, tone %d lost", (int)tone);
+    }
+}
+
 static void act_on(const app_wiring_t *w, const app_event_t *heard)
 {
+    if (heard->kind != APP_EVT_COMMAND) {
+        beep(w, heard->kind == APP_EVT_WAKE ? APP_TONE_WAKE : APP_TONE_FAIL);
+        return;
+    }
+    beep(w, APP_TONE_COMMAND);
     if (strcmp(heard->command_id, GEN_VISION_COMMAND_PHOTO) == 0) { capture_for(w, APP_VISION_PHOTO); }
     if (strcmp(heard->command_id, GEN_VISION_COMMAND_DETECT) == 0) { capture_for(w, APP_VISION_DETECT); }
 }
@@ -474,11 +488,10 @@ static void luong_task(void *arg)
 #if CONFIG_APP_SPEAKER_ENABLE
 static void noi_task(void *arg)
 {
-    const app_wiring_t *w = arg;
+    (void)arg;
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
     for (;;) {
-        app_speak_req_t req;
-        if (xQueueReceive(w->speak, &req, pdMS_TO_TICKS(SPEAK_WAIT_MS)) == pdTRUE) { (void)req; }
+        svc_speak_step();
         esp_task_wdt_reset();
     }
 }
@@ -626,7 +639,7 @@ static EXT_RAM_BSS_ATTR StackType_t s_dieu_stack[DIEU_STACK_BYTES]
 static EXT_RAM_BSS_ATTR StackType_t s_gui_stack[GUI_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 static StackType_t s_net_stack[NET_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 #if CONFIG_APP_SPEAKER_ENABLE
-static StackType_t s_noi_stack[NOI_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
+static EXT_RAM_BSS_ATTR StackType_t s_noi_stack[NOI_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 #endif
 #if CONFIG_NET_STREAM_ENABLE
 static EXT_RAM_BSS_ATTR StackType_t s_luong_stack[LUONG_STACK_BYTES]

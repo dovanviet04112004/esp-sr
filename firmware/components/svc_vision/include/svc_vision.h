@@ -18,6 +18,7 @@ typedef struct {
     QueueHandle_t events;     // q_event_up: app_event_t
     uint32_t boot;            // names the pictures of this run
     uint32_t detect_priority; // the task's for one detect run, above the listener
+    QueueHandle_t speak;      // q_speak: app_speak_req_t; NULL without a speaker
 } svc_vision_config_t;
 
 /** Take the buffers; drv_camera and drv_sd come up first, a card may be missing.

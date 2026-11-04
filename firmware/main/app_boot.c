@@ -25,6 +25,7 @@
 #include "storage_format.h"
 #include "svc_listen.h"
 #include "svc_report.h"
+#include "svc_speak.h"
 #include "svc_vision.h"
 #include "sys_storage.h"
 
@@ -284,6 +285,7 @@ static void start_vision(void)
         .events = app_wiring()->event_up,
         .boot = sys_storage_boot_count(),
         .detect_priority = APP_DETECT_PRIORITY,
+        .speak = app_wiring()->speak,
     };
     err = svc_vision_init(&cfg);
     if (err != ESP_OK) { ESP_LOGE(TAG, "no pictures: %s", esp_err_to_name(err)); }
@@ -307,6 +309,10 @@ esp_err_t app_boot(void)
     };
     ESP_RETURN_ON_ERROR(drv_audio_init(&audio), TAG, "audio");
     log_heap("audio");
+#if CONFIG_APP_SPEAKER_ENABLE
+    const svc_speak_config_t speak = {.requests = app_wiring()->speak};
+    ESP_RETURN_ON_ERROR(svc_speak_init(&speak), TAG, "speak");
+#endif
     seed_operating();
     seed_thresholds();
     load_models();

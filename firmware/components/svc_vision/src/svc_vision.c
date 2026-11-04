@@ -176,7 +176,16 @@ static esp_err_t detect_and_send(uint32_t seq)
     return err;
 }
 
-static void detect_picture(const drv_camera_frame_t *frame, uint32_t seq)
+static void beep(app_tone_t tone)
+{
+    if (s_cfg.speak == NULL) { return; }
+    const app_speak_req_t request = {.tone = tone};
+    if (xQueueSend(s_cfg.speak, &request, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "q_speak full, tone %d lost", (int)tone);
+    }
+}
+
+static bool detect_picture(const drv_camera_frame_t *frame, uint32_t seq)
 {
     esp_err_t err = decode_picture(frame);
     if (err == ESP_OK) { err = detect_and_send(seq); }
@@ -184,6 +193,7 @@ static void detect_picture(const drv_camera_frame_t *frame, uint32_t seq)
         ESP_LOGE(TAG, "detect: %s", esp_err_to_name(err));
         raise_error(APP_CODE_DETECT_FAIL);
     }
+    return err == ESP_OK;
 }
 
 static esp_err_t take_picture(drv_camera_frame_t *frame)
@@ -214,6 +224,7 @@ static void carry_out(const app_vision_req_t *request)
     if (taken != ESP_OK) {
         ESP_LOGE(TAG, "no picture: %s", esp_err_to_name(taken));
         raise_error(APP_CODE_CAMERA_FAIL);
+        beep(APP_TONE_FAIL);
         return;
     }
     const int64_t shot_us = esp_timer_get_time();
@@ -222,7 +233,8 @@ static void carry_out(const app_vision_req_t *request)
     const esp_err_t sent = send_chunks(&frame, seq, 0, net_mqtt_publish_image);
     if (sent != ESP_OK) { ESP_LOGW(TAG, "picture not sent: %s", esp_err_to_name(sent)); }
     const int64_t sent_us = esp_timer_get_time();
-    if (request->mode == APP_VISION_DETECT) { detect_picture(&frame, seq); }
+    const bool answered = request->mode != APP_VISION_DETECT || detect_picture(&frame, seq);
+    beep(answered ? APP_TONE_DONE : APP_TONE_FAIL);
     const int64_t detected_us = esp_timer_get_time();
     app_event_t event = {
         .kind = APP_EVT_CAPTURE,
