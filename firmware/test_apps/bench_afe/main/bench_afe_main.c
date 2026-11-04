@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "dsp_afe.h"
+#include "dsp_afe/aec.h"
 #include "dsp_afe/agc.h"
 #include "dsp_afe/balance.h"
 #include "dsp_afe/bss.h"
@@ -65,6 +66,7 @@
 #define CHAIN_ROW "dsp_afe chuỗi (hpf + stft x2 + balance + trộn + ns + istft + vad + agc)"
 #endif
 #define CHAIN_ONE_MIC_ROW "dsp_afe chuỗi một micro (hpf + stft + ns + istft + vad + agc)"
+#define CHAIN_ECHO_ROW "dsp_afe chuỗi một micro, loa đang phát (hpf + aec + stft + ns + istft + vad + agc)"
 // A command with a number and a symbol: normalize, then g2p in each region, as nhan_task does on a new set.
 #define LANG_LINE "t\xc4\x83ng \xc3\xa2m l\xc6\xb0\xe1\xbb\xa3ng l\xc3\xaan 50%"
 
@@ -95,6 +97,7 @@ static float s_voice[PITCH_VOICE_HOPS][GEN_GRID_HOP_SAMPLES];
 static float s_pitch[DSP_SPEC_PITCH_FEATURES];
 static float s_power[GEN_GRID_N_BINS];
 static float s_gain[GEN_GRID_N_BINS];
+static float s_bench_mic[GEN_ARRAY_N_MICS][GEN_GRID_HOP_SAMPLES]; // aec writes the error over its input
 static uint32_t s_rng = 0x2545F491u;
 
 static float noise(void)
@@ -396,6 +399,32 @@ static void bench_bss(bool learn, bool late)
 }
 #endif
 
+#if CONFIG_DSP_AFE_AEC_ENABLE
+// The speaker plays on every hop, with the state in PSRAM as in the product (KEHOACH 3.5).
+static void bench_aec(uint8_t n_mics)
+{
+    const dsp_afe_aec_config_t cfg = {.n_mics = n_mics, .n_partitions = GEN_AFE_AEC_PARTITIONS};
+    row_t row = {.module = n_mics == 1 ? "dsp_afe aec một micro, loa đang phát"
+                                       : "dsp_afe aec hai micro, loa đang phát",
+                 .core = CORE_SACH};
+    dsp_spec_fft_t *fft = make_fft(&row.static_bytes);
+    row.cold_bytes = dsp_afe_aec_workspace_bytes(&cfg);
+    dsp_afe_aec_t *aec = NULL;
+    void *mem = heap_caps_malloc(row.cold_bytes, MALLOC_CAP_SPIRAM);
+    ESP_ERROR_CHECK(dsp_afe_aec_init(&aec, &cfg, fft, mem, row.cold_bytes));
+    float *const mics[GEN_ARRAY_N_MICS] = {s_bench_mic[0], s_bench_mic[1]};
+    timing_t t = {0};
+    for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
+        memcpy(s_bench_mic, s_hop, sizeof(s_bench_mic));
+        const uint32_t start = esp_cpu_get_cycle_count();
+        ESP_ERROR_CHECK(dsp_afe_aec_process(aec, mics, s_hop[1], s_power));
+        hop_done(&t, h, start);
+    }
+    report(&row, &t);
+    heap_caps_free(mem);
+}
+#endif
+
 static void bench_vad(void)
 {
     const dsp_afe_vad_config_t cfg = {.aggressiveness = 0, .hangover_ms = GEN_AFE_VAD_HANGOVER_MS};
@@ -476,15 +505,15 @@ static void bench_agc(bool limiting)
 }
 
 // The product's chain counts in the total; a one-microphone board's (ADR-0042) replaces it.
-static void bench_chain(bool one_mic)
+static void bench_chain(const char *format, const char *name, const int16_t *hop, bool in_total)
 {
-    const dsp_afe_config_t cfg = {.input_format = one_mic ? "M" : "MM",
+    const dsp_afe_config_t cfg = {.input_format = format,
                                   .spatial = DSP_AFE_SPATIAL_NONE,
                                   .calib = &s_calib,
                                   .ns_floor_db = GEN_AFE_NS_FLOOR_DB,
                                   .agc_target_dbfs = GEN_AFE_AGC_TARGET_DBFS,
                                   .vad_aggressiveness = GEN_AFE_VAD_AGGRESSIVENESS};
-    row_t row = {.module = one_mic ? CHAIN_ONE_MIC_ROW : CHAIN_ROW, .core = CORE_SACH, .in_total = !one_mic};
+    row_t row = {.module = name, .core = CORE_SACH, .in_total = in_total};
     ESP_ERROR_CHECK(dsp_afe_workspace_bytes(&cfg, &row.hot_bytes, &row.cold_bytes));
     void *hot = heap_caps_malloc(row.hot_bytes, MALLOC_CAP_INTERNAL);
     void *cold = row.cold_bytes > 0 ? heap_caps_malloc(row.cold_bytes, MALLOC_CAP_SPIRAM) : NULL;
@@ -496,7 +525,7 @@ static void bench_chain(bool one_mic)
     timing_t t = {0};
     for (int h = 0; h < WARMUP_HOPS + TIMED_HOPS; h++) {
         const uint32_t start = esp_cpu_get_cycle_count();
-        ESP_ERROR_CHECK(dsp_afe_feed(afe, one_mic ? s_one_mic : s_interleaved, 1));
+        ESP_ERROR_CHECK(dsp_afe_feed(afe, hop, 1));
         ESP_ERROR_CHECK(dsp_afe_fetch(afe, &frame));
         hop_done(&t, h, start);
     }
@@ -701,10 +730,18 @@ static void bench_spk_fbank(void)
 // The chain goes first: dl_fft keeps its tables once made, so the first user of them pays their RAM.
 static void core1_benches(void *done)
 {
-    bench_chain(false);
+    bench_chain("MM", CHAIN_ROW, s_interleaved, true);
     vTaskDelay(1);
-    bench_chain(true);
+    bench_chain("M", CHAIN_ONE_MIC_ROW, s_one_mic, false);
     vTaskDelay(1);
+#if CONFIG_DSP_AFE_AEC_ENABLE
+    bench_chain("MR", CHAIN_ECHO_ROW, s_interleaved, false);
+    vTaskDelay(1);
+    bench_aec(1);
+    vTaskDelay(1);
+    bench_aec(GEN_ARRAY_N_MICS);
+    vTaskDelay(1);
+#endif
     bench_stft();
     vTaskDelay(1);
     bench_istft();

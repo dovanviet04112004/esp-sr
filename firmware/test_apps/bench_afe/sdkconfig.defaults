@@ -3,3 +3,5 @@ CONFIG_FREERTOS_HZ=1000
 # Spatial modules outside the product get their own rows; the chain row runs with spatial none.
 CONFIG_DSP_AFE_GSC_ENABLE=y
 CONFIG_DSP_AFE_BSS_ENABLE=y
+# aec runs only on a reference, so it stays out of the chain rows without one.
+CONFIG_DSP_AFE_AEC_ENABLE=y
