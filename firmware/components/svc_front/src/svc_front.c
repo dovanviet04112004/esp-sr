@@ -8,11 +8,17 @@
 #include "gen_afe.h"
 #include "gen_array.h"
 #include "gen_grid.h"
+#include "gen_tones.h"
+
+#define DEAF_TAIL_HOPS (GEN_TONES_DEAF_TAIL_MS * 1000 / GEN_GRID_HOP_US)
 
 static struct {
     dsp_afe_t *afe;
     uint32_t next_seq;
-    uint32_t keep_hops; // longest gap dsp_afe resumes over
+    uint32_t keep_hops;  // longest gap dsp_afe resumes over
+    uint32_t deaf_until; // first seq whose vad counts again
+    uint8_t n_mics;
+    uint8_t n_channels;
     bool started;
 } s_front;
 
@@ -53,7 +59,18 @@ esp_err_t svc_front_init(const svc_front_config_t *cfg)
     }
     const float keep_hops = GEN_AFE_CHAIN_GAP_KEEP_S * GEN_GRID_SAMPLE_RATE_HZ / GEN_GRID_HOP_SAMPLES;
     s_front.keep_hops = (uint32_t)lrintf(keep_hops);
+    s_front.n_mics = cfg->n_mics;
+    s_front.n_channels = cfg->n_channels;
     return err;
+}
+
+static bool speaker_sounds(const int16_t *interleaved)
+{
+    if (s_front.n_channels == s_front.n_mics) { return false; }
+    for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
+        if (interleaved[i * s_front.n_channels + s_front.n_mics] != 0) { return true; }
+    }
+    return false;
 }
 
 esp_err_t svc_front_step(const int16_t *interleaved, uint32_t seq, dsp_afe_frame_t *out)
@@ -74,8 +91,12 @@ esp_err_t svc_front_step(const int16_t *interleaved, uint32_t seq, dsp_afe_frame
     const esp_err_t fed = dsp_afe_feed(s_front.afe, interleaved, 1);
     if (fed != ESP_OK) { return fed; }
     const esp_err_t fetched = dsp_afe_fetch(s_front.afe, out);
-    if (fetched == ESP_OK) { out->seq = seq; }
-    return fetched;
+    if (fetched != ESP_OK) { return fetched; }
+    out->seq = seq;
+    if (speaker_sounds(interleaved)) { s_front.deaf_until = seq + DEAF_TAIL_HOPS; }
+    // The microphone hears the speaker: its own beep is nobody's command (KEHOACH 3.19).
+    if ((int32_t)(s_front.deaf_until - seq) > 0) { out->vad = 0; }
+    return ESP_OK;
 }
 
 void svc_front_stats(dsp_afe_stats_t *out)
