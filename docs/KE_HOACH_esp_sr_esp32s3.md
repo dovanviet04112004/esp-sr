@@ -2598,8 +2598,12 @@ lệnh mới thì từ chối ngay với mã `VISION_BUSY`, không xếp hàng: 
 - Hồng ngoại: `drv_ir`, GPIO 19, lọc rung vì đầu ra đổi mức dồn dập ở mili giây (`measurements/board_c.md`). Bản đầu chỉ báo
   lên host, chưa tự kích chụp.
 - I2C: `drv_i2c`, bus GPIO 1/2, mỗi thiết bị một file. Hai thiết bị ở 0x48 và 0x68 nhận dạng bằng thanh ghi trước khi viết.
-- Loa: bật `APP_SPEAKER_ENABLE`, `drv_audio` chạy TX, bíp khi nhận lệnh và khi chụp. Từ lúc ấy `bsp_board` không còn phải giữ
-  GPIO 14 (§2.2).
+- Loa: bật `APP_SPEAKER_ENABLE`, `drv_audio` chạy TX. `svc_speak` phát bíp theo `contracts/tones.yaml`: một tiếng ngắn khi nghe từ
+  đánh thức, hai tiếng ngắn khi nhận lệnh, một tiếng dài khi xong ảnh, một tiếng trầm khi không nghe ra lệnh hay ảnh lỗi. `thu_task`
+  đẩy mỗi khối TX ngay sau mỗi khối RX, nên trễ TX → RX là hằng số, và khối ấy đi kèm khung như kênh tham chiếu của `aec` (§3.5). Từ lúc
+  có TX, `bsp_board` không còn phải giữ GPIO 14 (§2.2). Micro nghe được tiếng của chính loa, và tiếng bíp sau từ đánh thức từng thành
+  một câu bị `REJECT LOW_SCORE`. Vì thế `svc_front` tắt cờ `vad` từ lúc tham chiếu có tiếng tới `tones.deaf_tail_ms` sau hết tiếng: phần
+  ấy gồm trễ TX, tiếng vọng và hangover của `vad`.
 
 ---
 ## 4. Cấu trúc repo
@@ -3623,6 +3627,7 @@ broker khởi động lại là mất `status` `offline` của máy đang tắt.
 | Trường payload MQTT | `contracts/schema/*.json` | `gen_payload.h` · `srhost.generated.payload` |
 | Topic, QoS, retained | `contracts/mqtt_topics.yaml` | `gen_topics.h` · `srhost.generated.topics` |
 | Khuôn luồng tiếng | `contracts/stream/frame.yaml` | `gen_stream.h` · `srhost.generated.stream` |
+| Tiếng bíp: tần số, số tiếng, độ dài, mức | `contracts/tones.yaml` | `gen_tones.h` |
 | Cỡ ảnh, chất lượng JPEG, số khung chờ phơi sáng, khuôn khúc ảnh, id của hai lệnh ảnh | `contracts/vision.yaml` | `gen_vision.h` · `srhost.generated.vision` |
 | Model đang deploy, sha256 | `contracts/models.lock.json` | đọc file |
 | Bộ lệnh mặc định, câu trả lời | `contracts/commands/`, `contracts/responses/` | nướng vào LittleFS |
@@ -3686,7 +3691,7 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 | `nhan_task` | `svc_listen` | 0 | 10; 2 khi chạy việc cửa sổ | 8 KB | `q_clean`, `q_cmdset` | log-mel và front SwiftF0 mỗi bước, CNN cao độ một lượt mỗi 16 bước (~30 ms, `q_clean` đỡ), ba chiều cao độ trễ 35–50 bước (§3.11) → `wake` mỗi khung ở mọi trạng thái; trong `LENH` chạy thêm cửa sổ `command` theo luồng; câu chốt → chấm → `q_dialog`; ảnh không có `wake` thì mở cửa sổ cho mọi câu `vad` tìm ra, cắt như Cửa 3 (§5.4), sự kiện → `q_event_up`; khi khối nhận diện người nói bật, lệnh nhận được đi sang `q_verify` thay vì lên thẳng (§3.17); giữa hai câu nhận bộ lệnh mới từ `q_cmdset`, đổi bảng lệnh, đưa cho `ai_engine_command_prepare`, ghi `set.json` (§5.3, §6.4) |
 | `xac_task` | `svc_listen` | 0 | 3 | 8 KB | `q_verify`, `q_spk`, `q_spkset` | xác minh người nói của đường chip (§3.17): đặc trưng b0, mạng, điểm với mọi mẫu giọng → `COMMAND` hay `REJECT` vào `q_event_up`, trả ô qua `q_verify_free`; đổi danh sách người nói và đăng ký theo `q_spkset`, `q_spk`, huỷ lần đăng ký quá hạn mỗi vòng chờ 100 ms, ghi NVS qua `sys_storage`, ghi bản trạng thái vào `q_roster`. Ngăn xếp ở RAM nội vì nó ghi flash |
 | `dieu_task` | `svc_dialog` từ E14-T4 | 0 | 8 | 4 KB, ở PSRAM trên board C | `q_dialog`, `q_cmd` | hiện chỉ đổi `SPEAKER_ENROL`, `SPEAKER_ENROL_CANCEL` của `q_cmd` thành yêu cầu `ENROL`, `ENROL_CANCEL` vào `q_spk`; `NGHE` ↔ `LENH` do `svc_listen` quyết trong `nhan_task` (§5.4); trạng thái `DAP`, câu trả lời ra `q_speak` và `q_event_up` có từ E14-T4 |
-| `noi_task` | `svc_speak` | 0 | 5 | 8 KB | `q_speak` | dựng trọn câu vào PSRAM rồi đẩy xuống TX; giương `SPEAKING` suốt lúc phát |
+| `noi_task` | `svc_speak` | 0 | 5 | 8 KB, ở PSRAM trên board C | `q_speak` | dựng trọn câu vào PSRAM rồi đẩy xuống TX; giương `SPEAKING` suốt lúc phát |
 | `gui_task` | `svc_report` | 0 | 4 | 4 KB, ở PSRAM trên board C | nhịp 100 ms | lấy mẫu `s_afe_stats`, gộp 10 mẫu thành một `telemetry` mỗi giây; phát `q_event_up`; `heartbeat` mỗi 30 s; đăng `up/speakers` khi `q_roster` có bản mới hay khi MQTT nối lại |
 | `luong_task` | `svc_report` | 0 | 3 | 4 KB, ở PSRAM trên board C | `sb_stream` | đẩy khung qua `net_stream`; TCP nghẽn thì bỏ khung, đếm; không bao giờ chặn người ghi |
 | `net_task` | `net_wifi` | 0 | 3 | 4 KB | một lần lúc boot | chờ link **tới khi có**, rồi nối MQTT, mở SNTP; xong thì tự xoá |
