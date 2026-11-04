@@ -46,6 +46,13 @@ def power_of(bins: np.ndarray) -> np.ndarray:
     return bins.real * bins.real + bins.imag * bins.imag
 
 
+def complex_of(re: np.ndarray, im: np.ndarray) -> np.ndarray:
+    out = np.empty(re.shape, dtype=np.complex64)
+    out.real = re
+    out.imag = im
+    return out
+
+
 def hann() -> np.ndarray:
     """The window of the residual's spectrum, from double as aec.c builds it."""
     return np.array([0.5 - 0.5 * cos_series(2.0 * PI * i / N_FFT) for i in range(N_FFT)], dtype=f32)
@@ -110,12 +117,16 @@ class Aec:
         return out
 
     def filtered(self, weights: np.ndarray) -> np.ndarray:
-        """Sum of each partition's spectrum times its weights, newest first, in that order."""
+        """Sum of each partition's spectrum times its weights, newest first, in that order. Parts multiply one by
+        one, as aec.c does: numpy's complex product fuses them on some CPUs and rounds differently."""
         n = self.cfg.n_partitions
-        out = np.zeros(N_BINS, dtype=np.complex64)
+        re = np.zeros(N_BINS, dtype=f32)
+        im = np.zeros(N_BINS, dtype=f32)
         for j in range(n):
-            out = out + self.spectra[(self.head + j) % n] * weights[j]
-        return out
+            x, w = self.spectra[(self.head + j) % n], weights[j]
+            re = re + (x.real * w.real - x.imag * w.imag)
+            im = im + (x.real * w.imag + x.imag * w.real)
+        return complex_of(re, im)
 
     def rates(self, c: Canceller, err_bins: np.ndarray, echo_bins: np.ndarray, sums: tuple) -> np.ndarray:
         """Each bin's step for this block (Valin 2007): how much of the error is residual echo."""
@@ -157,9 +168,13 @@ class Aec:
 
     def update(self, c: Canceller, err_bins: np.ndarray, rate: np.ndarray) -> None:
         n = self.cfg.n_partitions
-        shared = err_bins * rate
+        e_re = err_bins.real * rate
+        e_im = err_bins.imag * rate
         for j in range(n):
-            c.weights[j] = c.weights[j] + c.prop[j] * (np.conj(self.spectra[(self.head + j) % n]) * shared)
+            x, w, prop = self.spectra[(self.head + j) % n], c.weights[j], c.prop[j]
+            c.weights[j] = complex_of(
+                w.real + prop * (x.real * e_re + x.imag * e_im), w.imag + prop * (x.real * e_im - x.imag * e_re)
+            )
         # The gradient of one partition a block is held to a block's length: all of them would cost 2 n transforms.
         which = self.blocks % n
         taps = fft.inverse(c.weights[which], N_FFT)

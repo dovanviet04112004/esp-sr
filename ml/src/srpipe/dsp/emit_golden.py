@@ -675,9 +675,9 @@ def _chain_aec_input(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, 
     n = CHAIN_AEC_HOPS * grid.HOP_SAMPLES
     playing = np.ones(CHAIN_AEC_HOPS, dtype=bool)
     playing[60:80] = False
-    far = 0.05 * rng.standard_normal(n) * np.repeat(playing, grid.HOP_SAMPLES)
+    far = (0.05 * rng.standard_normal(n) * np.repeat(playing, grid.HOP_SAMPLES)).astype(np.float32)
     decay = np.exp(-np.arange(600) / 120.0)
-    echoes = [np.convolve(far, 0.2 * rng.standard_normal(600) * decay)[:n] for _ in range(2)]
+    echoes = [room_echo(far, 0.2 * rng.standard_normal(600) * decay) for _ in range(2)]
     talking = np.zeros(CHAIN_AEC_HOPS, dtype=bool)
     talking[100:150] = True
     talker = speechlike(rng, n, 0.05) * np.repeat(talking, grid.HOP_SAMPLES)
@@ -1200,6 +1200,14 @@ def emit_gsc(root: Path) -> list[Path]:
 AEC_HOPS = 60
 
 
+def room_echo(far: np.ndarray, room: np.ndarray) -> np.ndarray:
+    """The room's echo of far in float32, tap by tap: np.convolve's dot sums differently on each CPU."""
+    echo = np.zeros(far.size, dtype=np.float32)
+    for lag, tap in enumerate(np.asarray(room, dtype=np.float32)):
+        echo[lag:] = echo[lag:] + tap * far[: far.size - lag]
+    return echo
+
+
 def aec_case(mic: np.ndarray, ref: np.ndarray, cfg: aec.AecConfig, learn: bool = True) -> dict[str, np.ndarray]:
     """Microphones and reference a hop at a time; the residual of each microphone and the echo power per bin."""
     canceller = aec.Aec(cfg, learn)
@@ -1224,7 +1232,7 @@ def _aec_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray, 
     far = (rng.standard_normal(n) * 0.05).astype(np.float32)
     decay = np.exp(-np.arange(600) / 120.0)
     rooms = [(rng.standard_normal(600) * decay * 0.2).astype(np.float32) for _ in range(2)]
-    echo = [np.convolve(far, room)[:n].astype(np.float32) for room in rooms]
+    echo = [room_echo(far, room) for room in rooms]
     talker = (rng.standard_normal(n) * 0.03).astype(np.float32)
     talker[: n // 2] = 0.0
     shifted = np.concatenate([np.zeros(100, dtype=np.float32), echo[0][:-100]])
@@ -1235,7 +1243,7 @@ def _aec_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray, 
         ((echo[0] + talker)[None], far, aec.AecConfig()),
         (shifted[None], far, aec.AecConfig(bulk_delay_samples=100)),
         (np.stack(echo), far, aec.AecConfig(n_mics=2)),
-        (np.convolve(gapped, rooms[0])[:n].astype(np.float32)[None], gapped, aec.AecConfig()),
+        (room_echo(gapped, rooms[0])[None], gapped, aec.AecConfig()),
     ]
 
 
