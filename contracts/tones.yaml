@@ -1,0 +1,9 @@
+# The speaker's beeps (KEHOACH 3.19): a sine at level_dbfs, ramped at both ends so it does not click.
+level_dbfs: -12
+ramp_ms: 5
+deaf_tail_ms: 420 # vad stays off this long after the last sound: TX delay 112, echo, hangover 240
+tones:
+  wake: {hz: 1500, beeps: 1, beep_ms: 100, gap_ms: 0}
+  command: {hz: 1500, beeps: 2, beep_ms: 70, gap_ms: 70}
+  done: {hz: 1000, beeps: 1, beep_ms: 300, gap_ms: 0}
+  fail: {hz: 400, beeps: 1, beep_ms: 250, gap_ms: 0}

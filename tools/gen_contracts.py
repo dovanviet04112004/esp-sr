@@ -876,6 +876,17 @@ def gen_vision_py(v: dict) -> str:
     )
 
 
+def gen_tones_h(t: dict) -> str:
+    out = [banner("contracts/tones.yaml", "//"), "#pragma once\n"]
+    out.append(f"#define GEN_TONES_LEVEL_DBFS ({float(t['level_dbfs'])}f)")
+    out.append(f"#define GEN_TONES_RAMP_MS {t['ramp_ms']}")
+    out.append(f"#define GEN_TONES_DEAF_TAIL_MS {t['deaf_tail_ms']}")
+    for name, tone in t["tones"].items():
+        fields = f"{tone['hz']}, {tone['beeps']}, {tone['beep_ms']}, {tone['gap_ms']}"
+        out.append(f"#define GEN_TONE_{name.upper()} {{{fields}}} // hz, beeps, beep_ms, gap_ms")
+    return "\n".join(out) + "\n"
+
+
 def topic_values() -> dict:
     t = load_yaml("mqtt_topics.yaml")
     topics = []
@@ -1271,6 +1282,7 @@ def outputs() -> dict[str, str]:
         f"{COMMON_INC}/gen_listen.h": gen_listen_h(listen),
         f"{COMMON_INC}/gen_speaker.h": gen_speaker_h(speaker),
         f"{COMMON_INC}/gen_vision.h": gen_vision_h(vision),
+        f"{COMMON_INC}/gen_tones.h": gen_tones_h(load_yaml("tones.yaml")),
         f"{MQTT_INC}/gen_topics.h": gen_topics_h(t),
         f"{MQTT_INC}/gen_payload.h": gen_payload_h(),
         f"{AFE_INC}/gen_afe.h": gen_afe_h(afe),
