@@ -18,6 +18,7 @@
 #include "esp_system.h"
 #include "esp_wifi_types.h"
 #include "sdkconfig.h"
+#include "svc_front.h"
 #include "svc_report.h"
 #include "sys_storage.h"
 
@@ -417,6 +418,44 @@ static int spk_cmd(int argc, char **argv)
     return sent ? 0 : 1;
 }
 
+#if CONFIG_APP_SPEAKER_ENABLE
+static struct {
+    struct arg_str *action;
+    struct arg_end *end;
+} s_tone_args;
+
+static int tone_cmd(int argc, char **argv)
+{
+    if (arg_parse(argc, argv, (void **)&s_tone_args) != 0) {
+        arg_print_errors(stdout, s_tone_args.end, argv[0]);
+        return 1;
+    }
+    if (strcmp(s_tone_args.action->sval[0], "erle") == 0) {
+        dsp_afe_stats_t stats;
+        svc_front_stats(&stats);
+        printf("tone erle %.1f dB, %" PRIu32 " resets\n", (double)stats.aec_erle_db, stats.aec_resets);
+        return 0;
+    }
+    const app_speak_req_t request = {.tone = APP_TONE_TEST};
+    const bool sent = xQueueSend(app_wiring()->speak, &request, 0) == pdTRUE;
+    printf("tone test: %s\n", sent ? "sent" : "busy");
+    return sent ? 0 : 1;
+}
+
+static esp_err_t register_tone(void)
+{
+    s_tone_args.action = arg_str1(NULL, NULL, "test|erle", "play 10 s of noise, or read what aec cancels");
+    s_tone_args.end = arg_end(2);
+    const esp_console_cmd_t tone = {
+        .command = "tone",
+        .help = "Measure aec: noise out of the speaker, then the echo return loss enhancement",
+        .func = tone_cmd,
+        .argtable = &s_tone_args,
+    };
+    return esp_console_cmd_register(&tone);
+}
+#endif
+
 #if CONFIG_APP_CAMERA_ENABLE
 static struct {
     struct arg_str *action;
@@ -519,6 +558,9 @@ static esp_err_t register_commands(void)
     ESP_RETURN_ON_ERROR(esp_console_cmd_register(&spk), TAG, "spk");
 #if CONFIG_APP_CAMERA_ENABLE
     ESP_RETURN_ON_ERROR(register_cam(), TAG, "cam");
+#endif
+#if CONFIG_APP_SPEAKER_ENABLE
+    ESP_RETURN_ON_ERROR(register_tone(), TAG, "tone");
 #endif
     return register_stream();
 }
