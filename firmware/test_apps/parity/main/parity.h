@@ -84,6 +84,12 @@ bool parity_chain_modules(const char *case_name, const void *buf, size_t len);
  */
 bool parity_chain_bss(const char *case_name, const void *buf, size_t len);
 
+/** parity_chain for contracts/golden/chain_aec: the last channel of each case is the speaker's reference.
+ *  @ctx task | blocking | needs CONFIG_DSP_AFE_AEC_ENABLE, or the chain ignores that channel
+ *  @ret true when the case could run
+ */
+bool parity_chain_aec(const char *case_name, const void *buf, size_t len);
+
 /** Run one hpf case at the cutoff it carries, one hop per call on each channel, as dsp_afe does.
  *  @ctx task | blocking | builds only with CONFIG_DSP_AFE_HPF_ENABLE, where hpf.c is compiled
  *  @ret false when the case lacks a tensor, has the wrong shape or the module refuses it
@@ -109,6 +115,13 @@ bool parity_vad(const char *case_name, const void *buf, size_t len);
  *  @ret false when the case lacks a tensor, has the wrong shape or the module refuses it
  */
 bool parity_doa(const char *case_name, const void *buf, size_t len);
+
+/** Run one aec case with the configuration it carries, a hop at a time; compare the residual and the echo
+ * power.
+ *  @ctx task | blocking | builds only with CONFIG_DSP_AFE_AEC_ENABLE, where aec.c is compiled
+ *  @ret false when the case lacks a tensor, has the wrong shape or the module refuses it
+ */
+bool parity_aec(const char *case_name, const void *buf, size_t len);
 
 /** Run one gsc case with the configuration it carries: both channels' bins one hop at a time, steered and
  * learning where the case says; compare the output bins.

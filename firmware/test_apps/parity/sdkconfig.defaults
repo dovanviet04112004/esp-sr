@@ -6,3 +6,5 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # Spatial modules outside the product run their own cases; bss needs doa and vad, so only the modules build has it.
 CONFIG_DSP_AFE_GSC_ENABLE=y
 CONFIG_DSP_AFE_BSS_ENABLE=y
+# aec runs only on a reference, so the chains of the other sets never reach it.
+CONFIG_DSP_AFE_AEC_ENABLE=y

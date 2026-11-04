@@ -734,9 +734,11 @@ static void run_golden(const char *root)
         parity_run_block(root, "vad", parity_vad, read_case, buf, sizeof(buf), &s_failures) +
         parity_run_block(root, "doa", parity_doa, read_case, buf, sizeof(buf), &s_failures) +
         parity_run_block(root, "gsc", parity_gsc, read_case, buf, sizeof(buf), &s_failures) +
+        parity_run_block(root, "aec", parity_aec, read_case, buf, sizeof(buf), &s_failures) +
         parity_run_block(root, "bss", parity_bss, read_case, buf, sizeof(buf), &s_failures) +
         parity_run_block(root, "agc", parity_agc, read_case, buf, sizeof(buf), &s_failures) +
-        parity_run_block(root, "chain_bss", parity_chain_bss, read_case, buf, sizeof(buf), &s_failures);
+        parity_run_block(root, "chain_bss", parity_chain_bss, read_case, buf, sizeof(buf), &s_failures) +
+        parity_run_block(root, "chain_aec", parity_chain_aec, read_case, buf, sizeof(buf), &s_failures);
 #elif DSP_AFE_HOST_PRODUCT
     const unsigned cases = parity_run_block(root, "chain_modules", parity_chain_modules, read_case, buf,
                                             sizeof(buf), &s_failures);

@@ -89,9 +89,11 @@ static bool run_frames(const dsp_afe_config_t *cfg, const gold_tensor_t *input, 
     size_t hot = 0;
     size_t cold = 0;
     dsp_afe_t *afe = NULL;
-    if (dsp_afe_workspace_bytes(cfg, &hot, &cold) != ESP_OK || cold != 0) { return false; }
+    if (dsp_afe_workspace_bytes(cfg, &hot, &cold) != ESP_OK) { return false; }
     void *mem = malloc(hot);
-    bool ok = mem != NULL && dsp_afe_init(&afe, cfg, mem, hot, NULL, 0) == ESP_OK;
+    void *cold_mem = cold > 0 ? heap_caps_malloc(cold, MALLOC_CAP_SPIRAM) : NULL;
+    bool ok = mem != NULL && (cold == 0 || cold_mem != NULL) &&
+              dsp_afe_init(&afe, cfg, mem, hot, cold_mem, cold) == ESP_OK;
     const int16_t *in = input->data;
     const uint8_t *resets = reset->data;
     for (size_t h = 0; ok && h < input->dims[0]; h++) {
@@ -101,24 +103,33 @@ static bool run_frames(const dsp_afe_config_t *cfg, const gold_tensor_t *input, 
              dsp_afe_fetch(afe, &frames[h]) == ESP_OK;
     }
     free(mem);
+    free(cold_mem);
     return ok;
 }
 
-static bool run_chain(const char *block, dsp_afe_spatial_t spatial, const char *case_name, const void *buf,
-                      size_t len)
+// A one-microphone case is one sample wide per step (ADR-0042), and a reference is one more channel.
+static const char *format_of(size_t hop_width, bool with_ref)
+{
+    const size_t mics = hop_width / GEN_GRID_HOP_SAMPLES - (with_ref ? 1u : 0u);
+    if (hop_width % GEN_GRID_HOP_SAMPLES != 0) { return NULL; }
+    if (mics == 1) { return with_ref ? "MR" : "M"; }
+    return mics == GEN_ARRAY_N_MICS ? (with_ref ? "MMR" : "MM") : NULL;
+}
+
+static bool run_chain(const char *block, dsp_afe_spatial_t spatial, bool with_ref, const char *case_name,
+                      const void *buf, size_t len)
 {
     gold_tensor_t input, reset, want[FIELD_COUNT];
     if (!parity_tensor(buf, len, "input", &input) || !parity_tensor(buf, len, "reset", &reset) ||
         input.dtype != GOLD_I16 || reset.dtype != GOLD_U8 || input.ndim != 2 ||
-        (input.dims[1] != GEN_GRID_HOP_SAMPLES && input.dims[1] != GEN_GRID_HOP_SAMPLES * GEN_ARRAY_N_MICS) ||
         reset.dims[0] != input.dims[0]) {
         return false;
     }
+    const char *format = format_of(input.dims[1], with_ref);
+    if (format == NULL) { return false; }
     for (size_t f = 0; f < FIELD_COUNT; f++) {
         if (!parity_tensor(buf, len, kFields[f], &want[f])) { return false; }
     }
-    // A one-microphone case is one sample wide per step (ADR-0042).
-    const char *format = input.dims[1] == GEN_GRID_HOP_SAMPLES ? "M" : "MM";
     dsp_afe_config_t cfg;
     dsp_afe_calib_t calib = {0};
     if (!read_setup(buf, len, format, spatial, &cfg, &calib)) { return false; }
@@ -141,15 +152,20 @@ static bool run_chain(const char *block, dsp_afe_spatial_t spatial, const char *
 
 bool parity_chain(const char *case_name, const void *buf, size_t len)
 {
-    return run_chain("chain", DSP_AFE_SPATIAL_NONE, case_name, buf, len);
+    return run_chain("chain", DSP_AFE_SPATIAL_NONE, false, case_name, buf, len);
 }
 
 bool parity_chain_modules(const char *case_name, const void *buf, size_t len)
 {
-    return run_chain("chain_modules", DSP_AFE_SPATIAL_NONE, case_name, buf, len);
+    return run_chain("chain_modules", DSP_AFE_SPATIAL_NONE, false, case_name, buf, len);
 }
 
 bool parity_chain_bss(const char *case_name, const void *buf, size_t len)
 {
-    return run_chain("chain_bss", DSP_AFE_SPATIAL_BSS, case_name, buf, len);
+    return run_chain("chain_bss", DSP_AFE_SPATIAL_BSS, false, case_name, buf, len);
+}
+
+bool parity_chain_aec(const char *case_name, const void *buf, size_t len)
+{
+    return run_chain("chain_aec", DSP_AFE_SPATIAL_NONE, true, case_name, buf, len);
 }

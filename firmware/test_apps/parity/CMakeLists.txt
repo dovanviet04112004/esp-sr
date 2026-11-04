@@ -23,7 +23,7 @@ set(IMAGE_ROOT "${CMAKE_BINARY_DIR}/lfs_image")
 file(GLOB_RECURSE GOLDEN_FILES CONFIGURE_DEPENDS "${GOLDEN_DIR}/*")
 file(REMOVE_RECURSE "${IMAGE_ROOT}")
 # The image holds the sets main/parity_main.c runs in this profile: all of them outgrew the 15.25 MB partition.
-set(MODULE_SETS chain_modules chain_bss hpf balance doa gsc bss ns_omlsa vad agc)
+set(MODULE_SETS chain_modules chain_bss chain_aec hpf balance doa aec gsc bss ns_omlsa vad agc)
 file(GLOB GOLDEN_SETS RELATIVE "${GOLDEN_DIR}" "${GOLDEN_DIR}/*")
 foreach(golden_set IN LISTS GOLDEN_SETS)
     list(FIND MODULE_SETS "${golden_set}" at)

@@ -30,6 +30,10 @@ static const struct {
 #if CONFIG_DSP_AFE_DOA_ENABLE
     {"doa", parity_doa},
 #endif
+#if CONFIG_DSP_AFE_AEC_ENABLE
+    {"aec", parity_aec},
+    {"chain_aec", parity_chain_aec},
+#endif
 #if CONFIG_DSP_AFE_GSC_ENABLE
     {"gsc", parity_gsc},
 #endif
