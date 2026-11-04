@@ -1,0 +1,11 @@
+menu "board_c check"
+
+    config APP_BOARD_C
+        bool
+        default y
+
+    config APP_CAMERA_ENABLE
+        bool
+        default y
+
+endmenu
