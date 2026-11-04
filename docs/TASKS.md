@@ -222,8 +222,8 @@ Không chặn module nào khác: không có `ref` thì chuỗi chạy với `"MM
 |---|---|---|---|---|---|
 | E10-T1 | `drv_audio` TX. Đã chạy trên board C 04/11: `thu_task` đẩy một khối TX sau mỗi khối RX, khối ấy là kênh tham chiếu; còn đo 30 phút | TX chung BCLK/WS, khe 32 bit × 2, `auto_clear` phát số 0 khi im, bản sao phát căn theo bộ đếm khối chung với RX | TX chạy liên tục 30 phút, bản sao và khung RX lệch một hằng số | E5-T4 | V5.4.1 |
 | E10-T2 | 🔬 âm lượng tối đa | quét tần ở nhiều mức, đo méo | mức cao nhất loa còn tuyến tính ghi vào `mic_array.md` và Kconfig | E2-T8 | V5.4.1 |
-| E10-T3 | `aec` Python | MDF chồng-lưu, 8 phân đoạn, bước học tự chỉnh, khử vọng dư (§3.5) | khớp SpeexDSP trên cùng đầu vào trong ngưỡng ghi rõ; có đối chứng âm | E6-T1 | V5.4.2 |
-| E10-T4 | `aec` C | bản C + golden, phổ vọng dư chuyển cho khe `ns` | 🔬 ERLE **≥ 20 dB** khi chỉ loa nói ở mức E10-T2; đủ bốn bước | E10-T3, E10-T1, E2-T9 | V5.4.2 |
+| ~~E10-T3~~ | **Xong 05/11** (`board_c.md` §6): ERLE sau hội tụ lệch SpeexDSP 1.2.1 dưới 1 dB trên cùng đầu vào, ngưỡng 3 dB; đối chứng âm đỏ. `aec` Python | MDF chồng-lưu, 8 phân đoạn, bước học tự chỉnh, khử vọng dư (§3.5) | khớp SpeexDSP trên cùng đầu vào trong ngưỡng ghi rõ; có đối chứng âm | E6-T1 | V5.4.2 |
+| E10-T4 | ERLE 26 dB trên board C 05/11 (`board_c.md` §6), toàn bộ ở PSRAM, chi phí đã ở `budget.md`; còn đo ở mức E10-T2 và parity trên chip. `aec` C | bản C + golden, phổ vọng dư chuyển cho khe `ns` | 🔬 ERLE **≥ 20 dB** khi chỉ loa nói ở mức E10-T2; đủ bốn bước | E10-T3, E10-T1, E2-T9 | V5.4.2 |
 | E10-T5 | AECM đối chứng | chỉ khi E10-T4 vượt ngân sách | bảng so ERLE và chi phí; ADR | E10-T4 | V5.4.2 |
 | E10-T6 | hai bên cùng nói | bản thu có nhãn | không phân kỳ; tiếng người gần bị dìm **≤ 3 dB** | E10-T4 | V5.4.3 |
 

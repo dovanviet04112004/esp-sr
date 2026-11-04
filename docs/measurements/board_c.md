@@ -173,7 +173,8 @@ nét. Độ nét trên trang: bậc thang lớn nhất ở bản thu nhỏ 160 �
 
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
-`drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là 7 bước, 112 ms, hằng số.
+`drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là hằng số; bao nhiêu bước
+chưa đo 🔬 (§6).
 `speaker on`, 1 micro, 2 kênh; RAM nội lúc nghe 54,5 KiB, thấp nhất 23,9 KiB; vùng mượn của `detect` 26 560 / 32 768 B, `detect` vẫn
 1 938–1 947 ms. Chủ repo nghe được bíp.
 
@@ -187,4 +188,58 @@ Micro nghe tiếng bíp sau từ đánh thức thành một câu. Log trước k
 
 `svc_front` tắt `vad` từ lúc tham chiếu có tiếng tới 420 ms sau hết tiếng. Sau khi sửa, 2/2 lần `WAKE` đi thẳng tới `COMMAND`. Mới hai lần 🔬.
 
-Bằng giọng: `chup_anh` 0,88–0,90, `nhan_dien` 0,97, `COMMAND` tới `CAPTURE` ~2 s. `aec` vẫn là khung, chưa khử gì.
+Bằng giọng: `chup_anh` 0,88–0,90, `nhan_dien` 0,92–0,97, `COMMAND` tới `CAPTURE` ~2 s.
+
+## 6. Khử vang (E10-T3, T4, 05/11)
+
+`aec` MDF, 8 phân đoạn, 128 ms, một micro, toàn bộ ở PSRAM: RAM nội không đổi, lúc nghe 54,2 KiB, thấp nhất 31,9 KiB sau 14 phút, không rớt khung nào. Phòng
+mô phỏng, bản Python:
+
+| Phép thử | Kết quả |
+|---|---|
+| Chỉ tiếng loa, sau khi hội tụ | 40,5 dB; 14,8 dB trong 2 s đầu |
+| Tắt học, đối chứng âm | 0,0 dB |
+| Loa méo `tanh` | 12,3 dB, phần còn lại là việc của khe `ns` |
+| Hai bên cùng nói | tiếng người mất 0,01 dB, không phân kỳ, 36,7 dB sau đó |
+
+Bản C so với Python trên máy tính, 5 ca: `out` lệch tối đa ~1e-7, SNR ~118–123 dB. Cả chuỗi `"MR"` và `"MMR"` qua `chain_aec`: `pcm` lệch 1 LSB, SNR ~86 dB,
+`vad`, `flags`, độ lợi khớp tuyệt đối. Hai đối chứng âm đều đỏ: chuỗi bỏ qua tham chiếu, và chuỗi giữ tham chiếu qua chỗ hở ngắn. Chưa chạy trên chip 🔬.
+
+So với SpeexDSP 1.2.1 (`mdf.c` dựng float, cùng khối 256, đuôi 2 048 mẫu, cùng đầu vào int16, 30 s, phòng 1 200 mẫu), ngưỡng khớp là ERLE sau hội tụ lệch
+không quá 3 dB:
+
+| Phép thử | `aec` | SpeexDSP |
+|---|---|---|
+| Chỉ tiếng loa, 2 s đầu / 2 s kế / cuối | 13,0 / 31,1 / 73,9 dB | 15,3 / 37,1 / 73,3 dB |
+| Có nền phòng −60 dB, cuối | 41,0 dB | 41,1 dB |
+| Hai bên cùng nói, ERLE lúc có người nói | 10,4 dB | 10,8 dB |
+| Hai bên cùng nói, tiếng người giữ được | 0,00 dB | −0,15 dB |
+
+Hội tụ chậm hơn chút ở 4 s đầu: SpeexDSP có thêm bộ lọc nhấn tần cao trước khi học. Ở đây lệch đó không đổi điểm dừng nên không thêm.
+
+Trên board, loa phát nhiễu 10 s ở −12 dBFS, số do `aec` tự tính từ công suất micro và sai số:
+
+| Lần | ERLE | Reset |
+|---|---|---|
+| Kênh tham chiếu trễ 7 bước | −0,1 dB, 0,0 dB | 0 |
+| Kênh tham chiếu đi ngay lúc ghi | **26,1 / 26,3 / 25,9 dB** | 0 |
+| Bản cuối, lượt nhiễu đầu sau khởi động | 25,1 dB | 0 |
+
+Bản đầu giả định một khối ghi vào sẽ ra loa sau `dma_desc_num − 1` bước, nên làm trễ tham chiếu 7 bước. Tiếng ra sớm hơn thế, tham chiếu tới sau tiếng
+vọng, và bộ lọc chỉ nhìn được về quá khứ. Trễ thật chưa đo tới từng mẫu 🔬: `stream 11` ghi micro và tham chiếu để đo (E2-T9).
+
+Bộ lọc cần vài giây để học nên không giúp tiếng bíp 0,1 s; phần đó là `vad` tắt trong lúc loa phát (§5).
+
+Chi phí, `bench_afe` chạy trên board C vì board B không cắm, trạng thái ở PSRAM như sản phẩm (`budget.md`):
+
+| Dòng | Trung bình | Đỉnh | % khung 16 ms |
+|---|---|---|---|
+| `aec` một micro | 2 126 µs | 2 131 µs | 13,3 |
+| `aec` hai micro | 4 368 µs | 4 378 µs | 27,3 |
+| Chuỗi một micro, loa đang phát | 4 371 µs | 4 554 µs | 27,3 |
+| Chuỗi một micro, loa im | 2 354 µs | 2 463 µs | 14,7 |
+
+Các dòng còn lại trùng số của board B tới 0,1 µs (chuỗi hai micro 2 621,3 so với 2 621,2 µs), nên hai board đổi chỗ được trong `budget.md`. Trên sản phẩm, sau
+hai lượt nhiễu 10 s, `dropped` của `dma`, khung, `clean` và sự kiện đều 0.
+
+Chưa đo: hai bên cùng nói trên board (E10-T6), tiếng nói thật qua loa thay nhiễu, chạy dài 30 phút (E10-T1), parity trên chip 🔬.
