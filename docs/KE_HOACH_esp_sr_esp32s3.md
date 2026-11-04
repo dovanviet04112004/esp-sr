@@ -2504,9 +2504,12 @@ Board B không có camera nên không chạy `detect` trong sản phẩm; phép 
   của sáu tensor ra và các khung kỳ vọng do `tasks/detect/probe.py` dựng: ESP-PPQ mô phỏng đồ thị int8 trên letterbox
   của chip, `postproc/decode.py` ★ chép đúng `decode.c`. Ảnh có sha256 sai thì `load` từ chối.
 
-**Chạy trên board.** `nhin_task` của `svc_vision` (§3.19) ở nhân 0, ưu tiên thấp nhất, dưới mọi task tiếng nói; mỗi lần
-một ảnh. Tiếng nói giành CPU khi cần, ảnh chờ. Không chạy ở nhân 1: hai đồ thị esp-dl song song trên hai nhân từng làm sai kết quả
-(ADR-0027, `measurements/latency.md` §33). Tensor trung gian ở PSRAM, cỡ đo ở E15-T2 🔬.
+**Chạy trên board.** `nhin_task` của `svc_vision` (§3.19) ở nhân 0, ưu tiên 1, dưới mọi task tiếng nói. Riêng lượt
+`ai_engine_detect_run` và lúc gửi khung, nó lên ưu tiên 11, trên `nhan_task` (chủ repo 04/11). Dưới chuỗi nghe một ảnh mất ~3,4 s vì
+`nhan_task` lấy 1,3 s của nhân 0; trên chuỗi nghe 1,92 s (`measurements/board_c.md` §4.5). Trong lượt ấy chuỗi nghe dừng, khung nằm
+lại ở `q_clean`, sâu 3 s trên board C, rồi đuổi kịp trong ~1,1 s: không mất khung, lệnh nói đúng lúc ấy chậm tới ~3 s. Không chạy ở
+nhân 1: hai đồ thị esp-dl song song trên hai nhân từng làm sai kết quả (ADR-0027, `measurements/latency.md` §33). Tensor trung gian ở
+PSRAM, cỡ đo ở E15-T2 🔬.
 
 **Tối ưu tốc độ,** sau khi đã đúng, như đã làm với speaker b3. Mỗi bước đo trên board và chỉ giữ khi kết quả không
 lệch ngoài ngưỡng:
@@ -2535,13 +2538,12 @@ ADR-0035):
 
 Bước xuất vẫn cắt các tích chập mà một nhóm làn đã lớn hơn vùng mượn (`cache_sized_convolutions`). Trên app thử, một ảnh
 512 mất 1 833 ms với vùng 32 KB, khớp mô phỏng từng giá trị (`measurements/detect.md` §8). Trong sản phẩm, vùng được cấp
-tuỳ RAM nội còn trống lúc chạy: board C cấp đủ 32 KB, một ảnh mất ~3,3 s vì chuỗi nghe giữ phần nhân 0 của nó
-(`measurements/board_c.md` §4.5). `nhin_task` giữ nhân 0 nhiều giây mỗi ảnh, nên IDLE0 không kịp nuôi watchdog của task; board
+tuỳ RAM nội còn trống lúc chạy: board C cấp đủ 32 KB (`measurements/board_c.md` §4.2). `nhin_task` giữ nhân 0 nhiều giây mỗi ảnh, nên IDLE0 không kịp nuôi watchdog của task; board
 C đặt hạn watchdog 15 s (`sdkconfig.board_c`).
 
 **Thời gian mỗi ảnh chốt ở chừng 1,84 s** (S = 512, 80 lớp, khớp mô phỏng từng giá trị; chủ repo 01/11): phần tối ưu tốc
 độ dừng ở đó. Bước nào còn lại mà làm giảm chất lượng thì không làm; `ConcatConv` khớp từng giá trị nhưng chậm hơn 61 ms
-nên không dùng (ADR-0038, `measurements/detect.md` §10). Điều kiện độ trễ lệnh tiếng nói không tăng vẫn giữ, đo ở E15-T7 🔬.
+nên không dùng (ADR-0038, `measurements/detect.md` §10). Ngoài lượt `detect`, độ trễ lệnh tiếng nói không đổi, đo ở E15-T22 🔬.
 
 ### 3.19 Ảnh và ngoại vi của board C
 
@@ -2558,7 +2560,7 @@ Id của hai lệnh và số của luồng ảnh nằm ở `contracts/vision.yam
 PSRAM của chuỗi nghe (§6.6).
 
 **Ống kính nét cố định.** Ống ren tròn, không motor: đẩy thanh ghi ống kính từ 0 tới 1000 mà độ nét không đổi
-(`measurements/board_c.md` §4.3). Vì thế không nạp phần sụn tự lấy nét. Điểm nét chỉnh tay một lần, `make vision-focus` đo bằng
+(`measurements/board_c.md` §4.3). Vì thế không nạp phần sụn tự lấy nét. Điểm nét chỉnh tay một lần, `make vision-live` hiện ảnh và cỡ
 cỡ JPEG. Module có motor thì bật `CONFIG_CAMERA_AF_SUPPORT`, `drv_camera_focus` đã sẵn.
 
 **DMA của camera qua đệm 16 KB ở RAM nội, khung JPEG ở PSRAM.** Chế độ DMA thẳng vào PSRAM của `esp32-camera`
@@ -2571,11 +2573,11 @@ và lwIP ở PSRAM, đệm tĩnh RX và TX còn 6, bảng thanh ghi của sensor
 1. `dieu_task` thấy `COMMAND` mang id ở `vision.yaml` thì đẩy yêu cầu vào `q_vision`. Lệnh đã qua kiểm người nói nếu kiểm bật.
 2. `nhin_task` đánh thức sensor, bật đèn GPIO 42, chờ phơi sáng và độ lợi đứng yên, chụp một khung, tắt đèn, cho sensor nghỉ
    ngay để chuỗi nghe lấy lại băng thông PSRAM.
-3. Ghi `/sdcard/IMG/B<boot>/<seq>.JPG`. Tên dựa vào lượt khởi động vì board chưa có đồng hồ.
-4. Xếp ảnh vào outbox của MQTT theo khúc (§7.3), rồi gửi sự kiện `CAPTURE`. Outbox ở PSRAM chứa được cả ảnh, nên ảnh đi trong
-   lúc bước 5 chạy.
-5. Với "nhận diện": giải JPEG 1:2 bằng `esp_new_jpeg`, `ai_engine_detect_run`, gửi `up/detections`. Khung xếp sau ảnh, nên host
-   luôn có ảnh trước.
+3. Xếp ảnh vào outbox của MQTT theo khúc (§7.3). Outbox ở PSRAM chứa được cả ảnh, nên ảnh đi trong lúc bước 4 chạy.
+4. Với "nhận diện": giải JPEG 1:2 bằng `esp_new_jpeg`, lên trên chuỗi nghe (§3.18), `ai_engine_detect_run`, gửi thẳng
+   `up/detections`. Khung không chờ `mqtt_task`, nên có thể tới host trước ảnh.
+5. Ghi `/sdcard/IMG/B<boot>/<seq>.JPG`, rồi gửi sự kiện `CAPTURE`. Thẻ đứng cuối vì người dùng đang chờ kết quả, khung JPEG vẫn
+   nằm ở PSRAM. Tên dựa vào lượt khởi động vì board chưa có đồng hồ.
 
 Không có thẻ thì vẫn đẩy ảnh, sự kiện ghi `saved: false`. Mất MQTT thì ảnh vẫn ở thẻ; bản đầu chưa gửi lại. Đang chạy mà có
 lệnh mới thì từ chối ngay với mã `VISION_BUSY`, không xếp hàng: `nhin_task` giữ yêu cầu trong `q_vision` tới hết ảnh (§5.3).
@@ -3679,7 +3681,7 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 | `gui_task` | `svc_report` | 0 | 4 | 4 KB, ở PSRAM trên board C | nhịp 100 ms | lấy mẫu `s_afe_stats`, gộp 10 mẫu thành một `telemetry` mỗi giây; phát `q_event_up`; `heartbeat` mỗi 30 s; đăng `up/speakers` khi `q_roster` có bản mới hay khi MQTT nối lại |
 | `luong_task` | `svc_report` | 0 | 3 | 4 KB, ở PSRAM trên board C | `sb_stream` | đẩy khung qua `net_stream`; TCP nghẽn thì bỏ khung, đếm; không bao giờ chặn người ghi |
 | `net_task` | `net_wifi` | 0 | 3 | 4 KB | một lần lúc boot | chờ link **tới khi có**, rồi nối MQTT, mở SNTP; xong thì tự xoá |
-| `nhin_task` | `svc_vision` | 0 | 1 | 16 KB **ở PSRAM** | `q_vision` | chụp, lưu thẻ, đẩy ảnh, `detect` (§3.19); không ghi flash nên ngăn xếp ở PSRAM được; chỉ có ở board C |
+| `nhin_task` | `svc_vision` | 0 | 1; 11 trong lượt `detect` | 16 KB **ở PSRAM** | `q_vision` | chụp, lưu thẻ, đẩy ảnh, `detect` (§3.19); không ghi flash nên ngăn xếp ở PSRAM được; chỉ có ở board C |
 | `do_task` | `svc_sensors` | 0 | 2 | 4 KB **ở PSRAM** | nhịp 1 s | đọc GPS, hồng ngoại, I2C, đăng `up/sensors`; chỉ có ở board C |
 | `mqtt_task` | esp-mqtt | 0 | 5 | 6 KB **ở PSRAM** | esp-mqtt tự tạo | gửi nhận, TLS ở `prod` |
 | `console` | `esp_console` (REPL) | 0 | 2 | 4 KB | `esp_console` tự tạo, **chỉ khi** `APP_CONSOLE` — không có ở `prod` | đọc dòng lệnh trên UART0, ghi NVS qua `sys_storage`; lệnh `spk` đọc `q_roster`, gửi `q_spk`; không lưu lịch sử xuống flash |
@@ -3713,7 +3715,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 |---|---|---|---|---|---|---|
 | `q_frame` | Queue depth 8, chỉ số ô `uint8_t` + pool 8 khung `int16` ở **RAM nội** | 8 × 0,5 KB mỗi kênh; kênh tham chiếu loa chỉ khi có loa | `thu_task` | `sach_task` | không bao giờ đầy: chỉ ô lấy được từ `q_free` mới được gửi | không chép dữ liệu hai lần; pool cấp lúc boot |
 | `q_free` | Queue depth 8, chỉ số ô `uint8_t`, nạp sẵn cả 8 ô lúc boot | 8 B | `sach_task` trả ô đã xử lý xong | `thu_task` lấy ô trước khi đọc DMA | `thu_task` **không chờ**: hết ô thì bỏ khung, tăng `frames_dropped` — con số của Cửa 5 | một ô chỉ có một chủ tại một lúc; thiếu hàng này thì `thu_task` ghi đè ô `sach_task` đang đọc ngay khi `q_frame` vừa có chỗ |
-| `q_clean` | Queue depth **128** (~2 s), `dsp_afe_frame_t` ~530 B, bộ nhớ ở **PSRAM** | ~68 KB | `sach_task` | `nhan_task` | `sach_task` không chờ: bỏ khung, tăng `clean_dropped`; `nhan_task` thấy hở `seq` thì đặt lại STFT và bộ dò cao độ của `svc_listen` (cả trạng thái `wake` khi có), câu đang mở thành `REJECT FRAME_GAP` (§5.4) | đây là chỗ "nạp và lấy không cùng nhịp" của TỔNG QUAN §4.3; điểm cao nhất xuất ra `heartbeat` |
+| `q_clean` | Queue depth **128** (~2 s), board C **192** (~3 s, chứa một lượt `detect` ở trên `nhan_task`), `dsp_afe_frame_t` ~530 B, bộ nhớ ở **PSRAM** | ~68 KB, ~102 KB | `sach_task` | `nhan_task` | `sach_task` không chờ: bỏ khung, tăng `clean_dropped`; `nhan_task` thấy hở `seq` thì đặt lại STFT và bộ dò cao độ của `svc_listen` (cả trạng thái `wake` khi có), câu đang mở thành `REJECT FRAME_GAP` (§5.4) | đây là chỗ "nạp và lấy không cùng nhịp" của TỔNG QUAN §4.3; điểm cao nhất xuất ra `heartbeat` |
 | `s_afe_stats` | `portMUX_TYPE` + một struct (mức, hướng, cờ, gain, bộ đếm) | ~64 B | `sach_task` | `gui_task` | — ghi đè | số liệu là **mức**, không phải chuỗi sự kiện: `gui_task` chỉ cần giá trị mới nhất mỗi 100 ms. Chép dưới spinlock, vài chục byte, không gọi gì bên trong |
 | `sb_stream` | StreamBuffer ở PSRAM, **chỉ tồn tại khi** `NET_STREAM_ENABLE`; cỡ `SVC_REPORT_STREAM_BUFFER_KB` | 512 KB: ~5 s ở `mode` 5, ~8 s ở `mode` 2 | `sach_task` | `luong_task` | ghi với timeout 0; không đủ chỗ cho **cả khung** thì bỏ cả khung, đếm; không bao giờ ghi nửa khung | một người ghi, một người đọc — đúng hợp đồng của stream buffer. Đường tới máy nhận khựng 0,4–0,8 s vài lần mỗi 10 phút trên board B (`latency.md` §4), quá 64 KB |
 | `q_dialog` | Queue depth 8, `app_event_t`, bộ nhớ ở PSRAM | 8 × 108 B | nơi chốt `COMMAND` (`nhan_task`, `xac_task`), timeout 0 | `dieu_task` | không chờ: bỏ, tăng `events_dropped` | `nhan_task` không được đứng chờ: sau lưng nó là đệm `q_clean` đang đầy dần |
