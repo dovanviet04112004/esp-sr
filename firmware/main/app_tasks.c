@@ -38,7 +38,7 @@
 #define CORE_FRAME 1    // hard 16 ms deadline; phu_task only below it (KEHOACH 5.1)
 #define CORE_BUFFERED 0 // Wi-Fi, lwIP and every task a queue shields
 
-#define THU_STACK_BYTES 3072
+#define THU_STACK_BYTES 2048
 #define SACH_STACK_BYTES 6144
 #define NHAN_STACK_BYTES 8192
 #define XAC_STACK_BYTES 8192
