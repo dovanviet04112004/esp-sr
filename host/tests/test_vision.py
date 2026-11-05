@@ -206,3 +206,46 @@ def test_a_detect_that_found_nothing_still_leaves_its_picture(tmp_path: Path) ->
     picture_turned_a_quarter(picture)
     assembler.keep_boxes(DEVICE, {**BOXES, "boxes": []})
     assert assembler.mark(DEVICE, 7, 2).exists()
+
+
+def test_a_chunk_of_another_count_is_refused_not_a_crash(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    assembler.take(DEVICE, chunk(PICTURE[:10], 0, 3))
+    with pytest.raises(vision.ChunkError, match="its picture 3"):
+        assembler.take(DEVICE, chunk(PICTURE[10:20], 1, 2))
+
+
+def test_chunks_that_never_finish_are_forgotten(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assembler = vision.Assembler(tmp_path)
+    assembler.take(DEVICE, chunk(PICTURE[:10], 0, 2))
+    later = time.monotonic() + vision.PARTS_KEPT_S + 1
+    monkeypatch.setattr(vision.time, "monotonic", lambda: later)
+    assembler.take(DEVICE, chunk(PICTURE[:10], 0, 2, seq=3))
+    assert list(assembler._open) == [(DEVICE, 7, 3, 0)]
+
+
+def test_a_name_handed_out_again_keeps_the_older_files(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    first = assembler.take(DEVICE, chunk(PICTURE, 0, 1))
+    first.with_suffix(".json").write_text("{}", encoding="utf-8")
+    again = PICTURE[::-1]
+    path = assembler.take(DEVICE, chunk(again, 0, 1, total=len(again)))
+    assert path.read_bytes() == again
+    assert not path.with_suffix(".json").exists()
+    assert (tmp_path / DEVICE / "B7_000002_old1.jpg").read_bytes() == PICTURE
+    assert (tmp_path / DEVICE / "B7_000002_old1.json").exists()
+
+
+def test_the_same_chunks_delivered_twice_move_nothing(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    assembler.take(DEVICE, chunk(PICTURE, 0, 1))
+    assembler.take(DEVICE, chunk(PICTURE, 0, 1))
+    assert [p.name for p in (tmp_path / DEVICE).iterdir()] == ["B7_000002.jpg"]
+
+
+def test_boxes_with_crossed_corners_still_draw(tmp_path: Path) -> None:
+    picture = tmp_path / "p.jpg"
+    Image.new("RGB", (40, 80)).save(picture)
+    box = {"name": "cup", "scorePermille": 500, "x1": 30, "y1": 60, "x2": 10, "y2": 20}
+    vision.draw_boxes(picture, {"width": 40, "boxes": [box]}, tmp_path / "out.jpg")
+    assert (tmp_path / "out.jpg").exists()

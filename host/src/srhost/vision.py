@@ -16,6 +16,7 @@ import zlib
 from collections import deque
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from itertools import count
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -36,6 +37,7 @@ BOX_LABEL_PX = 36
 BOX_JPEG_QUALITY = 90
 MS_PER_S = 1000
 KEEP_ALIVES_PER_HOLD = 2
+PARTS_KEPT_S = 60.0  # past the 30 s esp-mqtt keeps a chunk
 LIVE_BIND = "127.0.0.1"  # a photo of a room stays on this machine (KEHOACH 7.5)
 LIVE_PAGE = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Board C live</title><style>
@@ -119,6 +121,7 @@ class Capture:
     count: int
     total_bytes: int
     parts: dict[int, bytes] = field(default_factory=dict)
+    opened_s: float = field(default_factory=time.monotonic)
 
     def whole(self) -> bytes | None:
         """The picture once every chunk is in and they add up; None before."""
@@ -142,7 +145,10 @@ def draw_boxes(picture: Path, payload: dict, out: Path) -> None:
     pen = ImageDraw.Draw(upright)
     font = ImageFont.load_default(size=BOX_LABEL_PX)
     for box in payload["boxes"]:
-        corners = [box[side] * scale for side in ("x1", "y1", "x2", "y2")]
+        # The board's corners can cross: a side the network gave as negative.
+        left, right = sorted((box["x1"] * scale, box["x2"] * scale))
+        top, bottom = sorted((box["y1"] * scale, box["y2"] * scale))
+        corners = [left, top, right, bottom]
         pen.rectangle(corners, outline=BOX_COLOUR, width=BOX_LINE_PX)
         label = f"{box['name']} {box['scorePermille'] / PERMILLE:.2f}"
         pen.text((corners[0] + 2 * BOX_LINE_PX, corners[1] + 2 * BOX_LINE_PX), label, fill=BOX_COLOUR, font=font)
@@ -163,18 +169,35 @@ class Assembler:
     def join(self, device: str, body: bytes) -> tuple[dict, bytes | None]:
         """Add one message; its header, and the JPEG when this message finished it."""
         header, data = parse_chunk(body)
+        self._drop_stale()
         key = (device, header["boot"], header["seq"], header["flags"])
         capture = self._open.setdefault(key, Capture(header["count"], header["total_bytes"]))
+        if (capture.count, capture.total_bytes) != (header["count"], header["total_bytes"]):
+            raise ChunkError(f"chunk says {header['count']} chunks, its picture {capture.count}")
         capture.parts[header["index"]] = data
         image = capture.whole()
         if image is not None:
             del self._open[key]
         return header, image
 
+    def _drop_stale(self) -> None:
+        now = time.monotonic()
+        for key in [k for k, c in self._open.items() if now - c.opened_s > PARTS_KEPT_S]:
+            del self._open[key]
+
+    def _make_way(self, path: Path, stem: str, content: bytes) -> None:
+        """Set a stem's files aside when other content claims it: a lost NVS hands a board's names out again."""
+        if not path.exists() or path.read_bytes() == content:
+            return
+        older = next(n for n in count(1) if not any(path.parent.glob(f"{stem}_old{n}*")))
+        for file in [f for f in path.parent.glob(f"{stem}*") if not f.name.startswith(f"{stem}_old")]:
+            file.rename(file.with_name(f"{stem}_old{older}{file.name[len(stem) :]}"))
+
     def keep(self, device: str, header: dict, image: bytes) -> Path:
         """Write one whole picture under the data root."""
         path = self.folder(device) / f"{stem_of(header['boot'], header['seq'])}.jpg"
         path.parent.mkdir(parents=True, exist_ok=True)
+        self._make_way(path, path.stem, image)
         path.write_bytes(image)
         if device in self._fixes:
             place = path.with_name(path.stem + PLACE_SUFFIX + ".json")
@@ -208,7 +231,9 @@ class Assembler:
         """Write one up/detections payload beside its picture."""
         path = self.folder(device) / f"{stem_of(payload['boot'], payload['captureSeq'])}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+        text = json.dumps(payload, ensure_ascii=False, indent=1)
+        self._make_way(path, path.stem, text.encode("utf-8"))
+        path.write_text(text, encoding="utf-8")
         return path
 
 
@@ -279,9 +304,10 @@ def run_live(receiver: Receiver, device: str, feed: LiveFeed, port: int) -> None
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"open http://localhost:{port}", flush=True)
     cmd = topics.BY_ID["cmd"]
-    while receiver.connected.wait(CONNECT_TIMEOUT_S):
-        receiver.publish(cmd.build(device), capture_command("PREVIEW"), cmd.qos)
-        time.sleep(vision.PREVIEW_HOLD_MS / MS_PER_S / KEEP_ALIVES_PER_HOLD)
+    while True:
+        if receiver.connected.wait(CONNECT_TIMEOUT_S):
+            receiver.publish(cmd.build(device), capture_command("PREVIEW"), cmd.qos)
+            time.sleep(vision.PREVIEW_HOLD_MS / MS_PER_S / KEEP_ALIVES_PER_HOLD)
 
 
 def keep(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -> list[str]:
