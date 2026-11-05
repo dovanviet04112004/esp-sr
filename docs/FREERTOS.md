@@ -85,7 +85,7 @@ giữ; cột "Cách kiểm" là thứ chạy để xác nhận.
 |---|---|---|---|---|
 | 6.1 | Rò heap | xin một lần lúc boot, không bao giờ trả | `soak` ghi heap nội và PSRAM mỗi phút, đường phẳng | ⏳ |
 | 6.2 | Phân mảnh: còn trống nhiều mà mảnh liền không đủ | vùng lớn (`bss`, pool khung, đệm DMA) xin **trước** Wi-Fi | in `heap_caps_get_largest_free_block` sau mỗi bước của `app_boot` | ⏳ |
-| 6.3 | Cấp phát sau boot | cấm (CLAUDE.md §4.1); `dsp_*` không có `malloc` nào; đệm của `svc_vision` xin ở `svc_vision_init`, còn `fopen` của `drv_sd` và outbox của esp-mqtt cấp bên trong thư viện | `check_purity.py`; `grep malloc` trong `svc_*` chỉ ra `*_init` | ✅ `net_mqtt` cấp cJSON trên hai vùng PSRAM lấy lúc boot (`cJSON_InitHooks`, `jsonArenaPeak` trong `heartbeat`); `malloc` của `svc_*` chỉ trong `svc_front_init` và `svc_listen_init` @ 03/11 |
+| 6.3 | Cấp phát sau boot | cấm (CLAUDE.md §4.1); `dsp_*` không có `malloc` nào; đệm của `svc_vision` xin ở `svc_vision_init`, còn `fopen` của `drv_sd`, outbox của esp-mqtt và `jpeg_dec_open` của `esp_new_jpeg` cấp bên trong thư viện | `check_purity.py`; `grep malloc` trong `svc_*` chỉ ra `*_init` | ✅ `net_mqtt` cấp cJSON trên hai vùng PSRAM lấy lúc boot (`cJSON_InitHooks`, `jsonArenaPeak` trong `heartbeat`); `malloc` của `svc_*` chỉ trong `svc_front_init` và `svc_listen_init` @ 03/11 |
 | 6.4 | `prod` tắt poisoning nên hỏng heap ngoài hiện trường vô hình | `soak` chạy với `ci` (poisoning đầy đủ) trước mỗi bản phát hành | — | ⏳ |
 
 ## 7. PSRAM, cache và ghi flash

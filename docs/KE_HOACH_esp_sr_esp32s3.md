@@ -487,6 +487,11 @@ nhau một **hằng số** — độ sâu hàng DMA cộng trễ của ampli —
 3. **Trễ khối đo một lần** bằng tiếng quét tần lúc hiệu chuẩn (E2-T9), lưu NVS `calib/aec_delay`
    (§6.2). AEC vẫn tự dò phần dư.
 
+Hằng số ấy chỉ giữ được khi mỗi bước ghi đúng một khối TX. `thu_task` đứng quá một bước, như lúc xoá sector khi ghi flash, thì đọc
+dồn các khối RX đã chờ; ghi TX theo từng khối dồn sẽ đẩy trễ lên 16 ms mỗi khối và giữ nguyên tới lần đứng sau
+(`measurements/board_c.md` §6). Vì thế khối RX đọc cách khối trước dưới nửa bước không ghi TX: kênh tham chiếu của khung ấy là 0, mẫu
+chờ phát dời sang bước sau. Hàng TX của driver đầy lại trong lúc đứng, nên bỏ như vậy đưa trễ về đúng mức cũ.
+
 Giới hạn: tham chiếu là **số** gửi đi, không chứa méo phi tuyến của ampli và loa nhỏ khi mở to. Phần
 méo ấy thành vọng dư mà bộ lọc tuyến tính không trừ được; `aec` phải có tầng khử vọng dư (§3.5), và âm
 lượng tối đa đặt ở mức loa còn tuyến tính, đo ở E10.
@@ -690,12 +695,12 @@ nếu MDF không vừa ngân sách.
 **Chi phí** mỗi micro mỗi khối: một FFT của sai số, một IFFT của đầu ra, 8 × 257 phép nhân phức cho
 lọc, 8 × 257 cho cập nhật, 2 FFT cho ràng buộc luân phiên; FFT của tham chiếu dùng chung hai micro.
 Đo ở `measurements/budget.md`. Trạng thái: trọng số 2 micro × 8 × 257 phức float = **33 KB**, phổ tham chiếu
-8 × 257 phức = 16 KB. Tất cả ở vùng `cold`, tức PSRAM: khối chỉ chạy khi loa phát hoặc còn dư âm trong đuôi lọc, lúc khác không chạm
-byte nào, và nhân 1 còn dư thời gian. RAM nội không tốn gì (§6.5).
+8 × 257 phức = 16 KB. Tất cả ở vùng `cold`, tức PSRAM: khối chỉ chạy khi loa phát hoặc còn dư âm trong đuôi lọc, lúc khác chỉ
+chuyển tham chiếu qua đệm trễ, và nhân 1 còn dư thời gian. RAM nội không tốn gì (§6.5).
 
 `drv_audio` đưa khối TX vào kênh tham chiếu ngay lúc ghi, nên tham chiếu luôn đi trước tiếng vọng; bộ lọc 128 ms tự học phần trễ TX cộng
-đường âm thanh, `aec_delay` chỉ dùng khi phần ấy quá dài. Bộ lọc cần vài giây để học, nên không giúp gì cho tiếng bíp 0,1 s: phần đó do
-`svc_front` tắt `vad` (§3.19).
+đường âm thanh, `aec_delay` chỉ dùng khi phần ấy quá dài. Bộ lọc cần vài giây để học, nên không giúp gì cho tiếng bíp 0,1 s: phần đó là
+bước điếc của `svc_front` (§3.19).
 
 **Thước** (TỔNG QUAN V5.4): ERLE **≥ 20 dB** khi chỉ loa nói, đo sau cả khử vọng dư, ở âm lượng tối
 đa đã chốt; lúc hai bên cùng nói **không phân kỳ** và tiếng người gần bị dìm **≤ 3 dB**.
@@ -2585,7 +2590,8 @@ không xoay được nếu không nén lại, nên mang cờ EXIF orientation 6 
 4. Với "nhận diện": giải JPEG 1:2 và xoay bằng `esp_new_jpeg` thành RGB888 360 × 640, lên trên chuỗi nghe (§3.18), `ai_engine_detect_run`, gửi thẳng
    `up/detections`. Khung không chờ `mqtt_task`, nên có thể tới host trước ảnh.
 5. Ghi `/sdcard/IMG/B<boot>/<seq>.JPG`, rồi gửi sự kiện `CAPTURE`. Thẻ đứng cuối vì người dùng đang chờ kết quả, khung JPEG vẫn
-   nằm ở PSRAM. Tên dựa vào lượt khởi động vì board chưa có đồng hồ.
+   nằm ở PSRAM. Tên dựa vào lượt khởi động vì board chưa có đồng hồ. Mất NVS thì `boot` đếm lại, nên `drv_sd` không ghi đè: tên đã có
+   thì ảnh mới lấy hậu tố `_<n>`. Host cũng vậy: bộ file cũ của tên ấy chuyển sang `<stem>_old<n>`, để khung cũ không vẽ lên ảnh mới.
 
 **Xem trực tiếp, để chỉnh ống kính.** `CAPTURE` với `PREVIEW` giữ sensor chạy, đèn sáng, và đẩy từng khung lên `up/image` ở QoS 0,
 cờ `preview` ở đầu khúc, không ghi thẻ. Không có `PREVIEW` mới trong `preview_hold_ms` thì tự tắt, nên chế độ này không sống lâu hơn
@@ -2594,7 +2600,11 @@ lệnh của nó. Một lệnh ảnh chen vào thì tắt ngay. Host giữ khung
 Host lưu `<stem>.jpg`, `<stem>.json` cùng ảnh đã vẽ khung và tên vật `<stem>_boxes.jpg` ở data root; ảnh vẽ đúng chiều, không còn cờ EXIF.
 
 Không có thẻ thì vẫn đẩy ảnh, sự kiện ghi `saved: false`. Mất MQTT thì ảnh vẫn ở thẻ; bản đầu chưa gửi lại. Đang chạy mà có
-lệnh mới thì từ chối ngay với mã `VISION_BUSY`, không xếp hàng: `nhin_task` giữ yêu cầu trong `q_vision` tới hết ảnh (§5.3).
+lệnh mới thì từ chối ngay với mã `VISION_BUSY` và tiếng trầm, không xếp hàng: `nhin_task` giữ yêu cầu trong `q_vision` tới hết ảnh (§5.3).
+
+Tiếng dài báo ảnh đã tới ít nhất một nơi. Ảnh gửi được thì tiếng đi trước lúc ghi thẻ; không gửi được thì ghi thẻ trước rồi mới chọn tiếng,
+cả hai hỏng là tiếng trầm. `DETECT_FAIL` chỉ khi `detect` không chạy; gửi khung hỏng là việc của MQTT, bản QoS 1 còn nằm ở outbox.
+Không có đệm (`svc_vision_init` hỏng) hay không có camera thì `nhin_task` vẫn chạy và từ chối từng yêu cầu bằng `CAMERA_FAIL`, board vẫn nghe.
 
 **Ngoại vi còn lại** gom ở `svc_sensors`, task `do_task`, đăng `up/sensors` khi đổi và mỗi 10 s. Chúng đã chạy, nhưng `sdkconfig.board_c` đang tắt
 `APP_SENSORS_ENABLE` theo chủ repo: board C chạy chuỗi cơ bản, và RAM nội chúng lấy làm `detect` chậm đi (`measurements/board_c.md` §7).
@@ -2610,8 +2620,9 @@ lệnh mới thì từ chối ngay với mã `VISION_BUSY`, không xếp hàng: 
   đánh thức, hai tiếng ngắn khi nhận lệnh, một tiếng dài khi xong ảnh, một tiếng trầm khi không nghe ra lệnh hay ảnh lỗi. `thu_task`
   đẩy mỗi khối TX ngay sau mỗi khối RX, nên trễ TX → RX là hằng số, và khối ấy đi kèm khung như kênh tham chiếu của `aec` (§3.5). Từ lúc
   có TX, `bsp_board` không còn phải giữ GPIO 14 (§2.2). Micro nghe được tiếng của chính loa, và tiếng bíp sau từ đánh thức từng thành
-  một câu bị `REJECT LOW_SCORE`. Vì thế `svc_front` tắt cờ `vad` từ lúc tham chiếu có tiếng tới `tones.deaf_tail_ms` sau hết tiếng: phần
-  ấy gồm trễ TX, tiếng vọng và hangover của `vad`.
+  một câu bị `REJECT LOW_SCORE`. Vì thế từ lúc tham chiếu có tiếng tới `tones.deaf_tail_ms` sau hết tiếng, `svc_front` tắt cờ `vad` và gắn
+  `SVC_FRONT_FLAG_DEAF` lên khung: phần ấy gồm trễ TX, tiếng vọng và hangover của `vad`. Bước điếc là bước `vad` không phán được, không phải
+  bước im lặng: tiếng bíp dài hơn `utterance.gap_s` mà tính là im lặng thì câu đang nói bị chốt ngay giữa chừng (§5.4).
 
 ---
 ## 4. Cấu trúc repo
@@ -3744,7 +3755,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `q_cmd` | Queue depth 4, `device_cmd_t` (sinh từ `contracts/`, chở cả chữ 512 B của `SPEAK`), bộ nhớ ở PSRAM | 4 × ~600 B | task của esp-mqtt | `dieu_task` | không chờ: bỏ, tăng `cmd_dropped` của `net_mqtt`, log; bản ngoài `device_cmd.schema.json` cũng vậy | callback esp-mqtt chỉ **phân tích** rồi bỏ vào đây; chờ ở callback là chặn cả đường MQTT |
 | `q_cmdset` | Queue depth 1, con trỏ tới một trong hai ô bộ lệnh của `net_mqtt` ở PSRAM, cấp lúc boot: bộ đã phân tích, kết quả phân tích, payload nguyên văn | 4 B + 2 × ~53 KB | task của esp-mqtt | `nhan_task` | bản mới thay bản chờ: task esp-mqtt rút bản chờ về rồi gửi bản mới; ô `nhan_task` đã nhận giữ nguyên tới lần nhận sau (`FREERTOS.md` 8.10); payload rỗng, tức bản retained bị xoá, không vào hàng | `nhan_task` tự chạy `lang_vi`, đổi bảng lệnh và gọi `ai_engine_command_prepare` **giữa hai câu**: khi không có cửa sổ nào mở hay chờ chấm và không câu nào đang chạy, ở mọi trạng thái; bộ trùng `version` với bộ đang dùng bị bỏ qua |
 | `q_vision` | Queue depth 1, `app_vision_req_t`, bộ nhớ ở PSRAM | 1 × 4 B | `dieu_task` | `nhin_task`, xem bằng `xQueuePeek`, chỉ xoá khi xong ảnh | không chờ: `dieu_task` ra `ERROR VISION_BUSY`, như `q_spk` | lệnh ảnh người dùng vừa nói; xếp hàng thì ảnh chụp trễ, sai cảnh, nên yêu cầu nằm trong hàng suốt lần chụp và hàng đầy chính là "đang bận" |
-| `q_speak` | Queue depth 4, `app_speak_req_t`, bộ nhớ ở PSRAM | 4 × 546 B | `dieu_task` | `noi_task` | bỏ, log | |
+| `q_speak` | Queue depth 4, `app_speak_req_t`, bộ nhớ ở PSRAM | 4 × 546 B | `dieu_task`, `nhin_task`, console | `noi_task` | bỏ, log | |
 | `q_event_up` | Queue depth 16, `app_event_t`, bộ nhớ ở PSRAM | 16 × 108 B | `nhan_task`, `xac_task`, `dieu_task`, `nhin_task` | `gui_task` | bỏ, tăng `events_dropped` | **người phát sự kiện không bao giờ publish**: publish QoS 1 chờ PUBACK, và `nhan_task` đứng chờ mạng là đệm 1 s đầy dần |
 | `q_verify` | Queue depth 2, chỉ số ô `uint8_t`; hai ô của `svc_listen` ở PSRAM, mỗi ô 24 000 mẫu `int16` cùng quyết định `COMMAND`, cấp lúc boot khi ảnh có `speaker` | 2 × ~47 KB | `nhan_task` | `xac_task` | không bao giờ đầy: chỉ ô lấy được từ `q_verify_free` mới được gửi | không chép tiếng hai lần; một ô chỉ có một chủ tại một lúc, như `q_frame` |
 | `q_verify_free` | Queue depth 2, chỉ số ô, nạp sẵn cả hai lúc boot | 2 B | `xac_task` trả ô đã xác minh xong | `nhan_task` lấy ô trước khi chép, timeout 0 | hết ô thì lệnh thành `REJECT SPEAKER_BUSY` ngay, không chờ | `nhan_task` không bao giờ đứng chờ một lần chạy của `speaker` |
@@ -3816,6 +3827,11 @@ trường nhìn trống sau mỗi lệnh. Nói chen chỉ mở được sau khi 
   lùi từ cuối như dưới đây thì board không quyết định gì tới khi tiếng nền ngừng, `LENH` không nhận `wake` mới, rồi chấm
   3,75 s cuối thay vì lệnh (board B 31/10: 15 s và 28 s, §12.39). Chốt sớm thì quyết định đến chậm nhất `window_s` sau
   mốc. Sau một từ chối máy chờ thêm `SVC_LISTEN_COMMAND_WAIT_MS` kể từ cửa sổ cuối, dù tiếng nền còn giữ `vad` bật;
+- **bước điếc** (§3.19): khung mang `SVC_FRONT_FLAG_DEAF` có tiếng của chính loa, `vad` không phán được. Nó không mở câu, và câu đang chạy
+  đi xuyên qua nó: bước điếc vào cửa sổ, không tính vào `utterance.gap_s`. Bước đầu tiên sau đợt điếc phán cả đợt: `vad` bật nghĩa là tiếng nói đã
+  chạy xuyên qua, đợt ấy tính là lời; `vad` tắt thì đợt ấy không tính vào độ dài câu, nên tiếng bíp một mình không thành câu, còn lệnh nói tiếp
+  trong `gap_s` vẫn cùng cửa sổ và giữ đoạn bù. Lệnh dứt hẳn sớm hơn hangover của `vad` tính ngược từ cuối đợt thì không thấy được, cỡ 0,28 s sau
+  đầu tiếng bíp ngắn 🔬;
 - **cửa sổ chạy theo luồng**: ngay từ bước `vad` đầu của câu, `svc_listen` đưa log-mel và cao độ đã có của từng bước
   của cửa sổ vào `ai_engine_command_step`, đuổi kịp phần trước câu rồi đi cùng các khung mới; mạng chạy mỗi khối và
   phép chấm đi tiếp trên khung mới, theo bộ lệnh `ai_engine_command_prepare` đã nhận. Cuối cửa sổ chỉ dời về sau, nên
@@ -3855,6 +3871,9 @@ trường nhìn trống sau mỗi lệnh. Nói chen chỉ mở được sau khi 
   mã `SPEAKER`, `SPEAKER_BUSY`, `SPEAKER_UNENROLLED` hay `SPEAKER_ENROLLING`, giữ `commandId`, cùng một dòng log có
   điểm người nói và thời gian xác minh. Lệnh bị chặn như thế để máy chờ tiếp ở `LENH`, tính là một lần từ chối: người nói
   nói lại lệnh được ngay, không phải gọi lại từ đánh thức (ADR-0041).
+
+`WAKE` rời `svc_listen` ngay sau bước mang nó, không chờ `q_clean` cạn, để tiếng bíp không trễ theo phần đuổi kịp sau một lượt `detect`; thời gian
+chờ của `LENH` tính từ khung mới nhất đang nằm ở `q_clean`, vì đó là lúc người dùng nghe tiếng bíp.
 
 **Ảnh model không có `wake`** (trước khi `wake` qua Cửa 2, hay khi chỉ demo `command`): không có gì đưa máy vào `LENH`,
 nên `nhan_task` mở cửa sổ cho mọi câu `vad` tìm ra, mốc chặn là bước sau cửa sổ trước.
@@ -4213,7 +4232,8 @@ Board B, profile `bench`, lúc đã nghe: sản phẩm với b0 ở `measurement
 | Khoản | PSRAM |
 |---|---|
 | Hàng đợi (§5.3), `q_clean` 2 s, `sb_stream` 512 KB (chỉ khi `NET_STREAM_ENABLE`, không có ở `prod`) | 603 KB đo |
-| `net_mqtt`: hai vùng JSON 2 × 40 KB, hai ô bộ lệnh của `q_cmdset` 2 × ~53 KB | ~0,19 MB tính 🔬; đo 344 KB khi `command_set.schema.json` còn 301 mục |
+| `net_mqtt`: ba vùng JSON 3 × 40 KB, hai ô bộ lệnh của `q_cmdset` 2 × ~53 KB | ~0,23 MB tính 🔬; đo 344 KB khi `command_set.schema.json` còn 301 mục |
+| Outbox của esp-mqtt trên board C (`MQTT_OUTBOX_DATA_ON_EXTERNAL_MEMORY`, `sdkconfig.board_c`): một ảnh đang gửi, tới `IMAGE_OUTBOX_MAX_BYTES` | ~60 KB lúc gửi, tính 🔬 |
 | Ảnh model chép vào PSRAM: chỉ bảng chuẩn hoá của `command_ctc`; mạng của nó đọc thẳng từ flash (ADR-0028) | ~1 KB; 3 370 KB khi còn chép (đo) |
 | Tensor `command_ctc`, vùng chấm ctc (cây tiền tố tới 8 192 nút) | ~628 KB đo |
 | `svc_listen`: vòng 512 bước log-mel và cao độ, hai bảng lexicon | ~383 KB, đo 502 KB với 301 lệnh |
@@ -4232,6 +4252,9 @@ Board B, profile `bench`, lúc đã nghe: sản phẩm với b0 ở `measurement
 trên board B 🔬 (b0 chậm 3,8% khi để ở flash, `measurements/latency.md` §25). Phần chưa có vẫn chưa chắc vừa phần còn
 lại; khi tới lượt chúng, thứ tự gỡ là bỏ `speaker` khỏi ảnh của bản dựng không cần nó, rồi bỏ `sb_stream` (512 KB),
 vốn không có ở `prod`.
+
+**Không đủ PSRAM lúc dựng một mạng** thì esp-dl chỉ log rồi để tensor NULL, và lượt chạy đầu sẽ panic ngay trong `app_boot`. `EspdlNet::build` kiểm
+mọi tensor vào, ra và trả `ESP_ERR_NO_MEM`: mạng ấy vắng mặt, board vẫn boot và vẫn nghe. `detect` với b3 là trường hợp đã biết (`ram.md` §5).
 
 **PSRAM không miễn phí về băng thông.** Flash và PSRAM chung một bus MSPI và chung cache dữ liệu; repo
 face attendance đo được suy luận chậm đi 16,6% khi nhân kia đẩy ~8,7 MB/s qua PSRAM, kể cả model có
@@ -4333,8 +4356,9 @@ Chỉ để **thu dữ liệu và gỡ lỗi**. Tắt mặc định, không có 
 | 8 | thô `ch0 ch1` + `seat0`…`seat3` | 192 KB/s |
 | 9 | thô `mic` | 32 KB/s |
 | 10 | thô `mic` + sạch | 64 KB/s |
+| 11 | thô `mic ref` | 64 KB/s |
 
-`mode` 9 và 10 là `mode` 2 và 5 của board một micro (§2.3). Mode có `ch0 ch1` chỉ mở khi có hai micro, mode có `mic` chỉ
+`mode` 9 và 10 là `mode` 2 và 5 của board một micro (§2.3), `mode` 11 là `mode` 3 của nó. Mode có `ch0 ch1` chỉ mở khi có hai micro, mode có `mic` chỉ
 mở khi có một, và mode có `ref` chỉ mở khi có loa. `host` ghi `mic.wav`, và mọi chỗ đọc phiên chạy chuỗi `"M"` trên nó.
 
 `mode` 6–8 là lối ra theo ghế của `bss` (§3.8), một kênh cho mỗi số ghế tới `seats_max`, chỉ `test_apps/bss_live` mở.
