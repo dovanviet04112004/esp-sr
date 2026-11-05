@@ -8,6 +8,7 @@
 #include "driver/i2s_std.h"
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "gen_grid.h"
@@ -23,6 +24,7 @@ static int16_t (*s_tx_ring)[GEN_GRID_HOP_SAMPLES]; // noi_task fills, thu_task e
 static _Atomic uint32_t s_tx_in;
 static _Atomic uint32_t s_tx_out;
 static int32_t s_tx_slots[GEN_GRID_HOP_SAMPLES];
+static int64_t s_tx_read_us; // the last hop's read time
 static uint8_t s_mics;
 static uint8_t s_channels;
 static uint8_t s_shift;
@@ -114,13 +116,21 @@ uint8_t drv_audio_channels(void)
 // written, so the reference always comes ahead of its echo: aec's filter can only look back (KEHOACH 3.5).
 static void play_next_hop(int16_t *interleaved)
 {
+    const int64_t read_us = esp_timer_get_time();
+    // A hop right behind the last is a stall's backlog: writing it would delay all later hops (KEHOACH 2.4).
+    const bool backlog = read_us - s_tx_read_us < GEN_GRID_HOP_US / 2;
+    s_tx_read_us = read_us;
     const uint32_t out = atomic_load(&s_tx_out);
-    const bool playing = out != atomic_load(&s_tx_in);
+    const bool playing = !backlog && out != atomic_load(&s_tx_in);
     const int16_t *hop = s_tx_ring[out % TX_RING_HOPS];
     for (size_t i = 0; i < GEN_GRID_HOP_SAMPLES; i++) {
         const int16_t sample = playing ? hop[i] : 0;
         s_tx_slots[i] = (int32_t)sample << TX_SLOT_SHIFT;
         interleaved[i * s_channels + s_mics] = sample;
+    }
+    if (backlog) {
+        s_stats.tx_backlog_hops++;
+        return;
     }
     size_t wrote = 0;
     if (i2s_channel_write(s_tx, s_tx_slots, sizeof(s_tx_slots), &wrote, 0) != ESP_OK) {

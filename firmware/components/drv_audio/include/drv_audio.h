@@ -33,6 +33,7 @@ typedef struct {
     uint32_t hops;
     uint32_t dma_overflows; // hops dropped since the first read
     uint32_t tx_underruns;
+    uint32_t tx_backlog_hops; // read in a burst after a stall, no TX written
     uint32_t clipped_samples;
 } drv_audio_stats_t;
 
