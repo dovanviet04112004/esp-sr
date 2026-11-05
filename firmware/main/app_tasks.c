@@ -410,6 +410,16 @@ static void enrol_from(const app_wiring_t *w, const device_cmd_t *cmd)
     }
 }
 
+static void beep(const app_wiring_t *w, app_tone_t tone)
+{
+    if (w->speak == NULL) { return; }
+    const app_speak_req_t request = {.tone = tone};
+    // Zero timeout: a beep that waits answers the wrong moment, so a full queue drops it (KEHOACH 5.3).
+    if (xQueueSend(w->speak, &request, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "q_speak full, tone %d lost", (int)tone);
+    }
+}
+
 static void capture_for(const app_wiring_t *w, app_vision_mode_t mode)
 {
     if (w->vision == NULL) { return; }
@@ -417,6 +427,7 @@ static void capture_for(const app_wiring_t *w, app_vision_mode_t mode)
     // Zero timeout: a picture taken later shows the wrong scene, so a busy camera refuses (KEHOACH 5.3).
     if (xQueueSend(w->vision, &request, 0) != pdTRUE && mode != APP_VISION_PREVIEW) {
         raise_error(w, 0, APP_CODE_VISION_BUSY, NULL);
+        beep(w, APP_TONE_FAIL);
     }
 }
 
@@ -430,20 +441,16 @@ static app_vision_mode_t vision_mode(device_cmd_capture_mode_t mode)
     return kModes[mode];
 }
 
-static void beep(const app_wiring_t *w, app_tone_t tone)
-{
-    if (w->speak == NULL) { return; }
-    const app_speak_req_t request = {.tone = tone};
-    // Zero timeout: a beep that waits answers the wrong moment, so a full queue drops it (KEHOACH 5.3).
-    if (xQueueSend(w->speak, &request, 0) != pdTRUE) {
-        ESP_LOGW(TAG, "q_speak full, tone %d lost", (int)tone);
-    }
-}
-
 static void act_on(const app_wiring_t *w, const app_event_t *heard)
 {
+    if (heard->kind == APP_EVT_WAKE) {
+        beep(w, APP_TONE_WAKE);
+        return;
+    }
     if (heard->kind != APP_EVT_COMMAND) {
-        beep(w, heard->kind == APP_EVT_WAKE ? APP_TONE_WAKE : APP_TONE_FAIL);
+        // An enrolment takes the command as a sample: heard, and nothing runs (KEHOACH 3.17).
+        const bool sampled = strcmp(heard->code, APP_CODE_SPEAKER_ENROLLING) == 0;
+        beep(w, sampled ? APP_TONE_COMMAND : APP_TONE_FAIL);
         return;
     }
     beep(w, APP_TONE_COMMAND);
