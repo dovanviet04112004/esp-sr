@@ -24,6 +24,7 @@
 
 #define REQUEST_WAIT_MS 1000
 #define PATH_BYTES 32
+#define NAME_COPIES_MAX 16 // pictures of one name a lost NVS can leave
 #define RGB_BYTES_PER_PIXEL 3
 #define DECODED_WIDTH (GEN_VISION_WIDTH / GEN_VISION_DECODE_SCALE)
 #define DECODED_HEIGHT (GEN_VISION_HEIGHT / GEN_VISION_DECODE_SCALE)
@@ -86,6 +87,10 @@ static bool keep_on_card(const drv_camera_frame_t *frame, uint32_t seq)
 {
     char path[PATH_BYTES];
     snprintf(path, sizeof(path), "IMG/B%" PRIu32 "/%06" PRIu32 ".JPG", s_cfg.boot, seq);
+    // A lost NVS counts boots again: a taken name gets a suffix, the older picture stays (KEHOACH 3.19).
+    for (uint32_t copy = 1; copy <= NAME_COPIES_MAX && drv_sd_exists(path); copy++) {
+        snprintf(path, sizeof(path), "IMG/B%" PRIu32 "/%06" PRIu32 "_%" PRIu32 ".JPG", s_cfg.boot, seq, copy);
+    }
     const esp_err_t err = drv_sd_write(path, frame->jpeg, frame->bytes);
     if (err != ESP_OK) { ESP_LOGW(TAG, "%s not kept: %s", path, esp_err_to_name(err)); }
     return err == ESP_OK;
@@ -173,7 +178,11 @@ static esp_err_t detect_and_send(uint32_t seq)
     esp_err_t err =
         ai_engine_detect_run(s_rgb, UPRIGHT_WIDTH, UPRIGHT_HEIGHT, s_boxes, GEN_VISION_BOXES_MAX, &found);
     const uint32_t detect_ms = (uint32_t)((esp_timer_get_time() - started_us) / US_PER_MS);
-    if (err == ESP_OK) { err = report_boxes(seq, found, detect_ms); }
+    if (err == ESP_OK) {
+        // Not detect's failure: a QoS 1 copy stays in the outbox (KEHOACH 3.19).
+        const esp_err_t reported = report_boxes(seq, found, detect_ms);
+        if (reported != ESP_OK) { ESP_LOGW(TAG, "boxes not sent: %s", esp_err_to_name(reported)); }
+    }
     vTaskPrioritySet(NULL, own_priority);
     return err;
 }
@@ -236,15 +245,18 @@ static void carry_out(const app_vision_req_t *request)
     if (sent != ESP_OK) { ESP_LOGW(TAG, "picture not sent: %s", esp_err_to_name(sent)); }
     const int64_t sent_us = esp_timer_get_time();
     const bool answered = request->mode != APP_VISION_DETECT || detect_picture(&frame, seq);
-    beep(answered ? APP_TONE_DONE : APP_TONE_FAIL);
+    // The tone says the picture reached a place: past a failed send only the card can tell (KEHOACH 3.19).
+    if (sent == ESP_OK) { beep(answered ? APP_TONE_DONE : APP_TONE_FAIL); }
     const int64_t detected_us = esp_timer_get_time();
+    const bool saved = keep_on_card(&frame, seq);
+    if (sent != ESP_OK) { beep(answered && saved ? APP_TONE_DONE : APP_TONE_FAIL); }
     app_event_t event = {
         .kind = APP_EVT_CAPTURE,
         .doa_deg = -1,
         .boot = s_cfg.boot,
         .capture_seq = seq,
         .image_bytes = (uint32_t)frame.bytes,
-        .saved = keep_on_card(&frame, seq),
+        .saved = saved,
     };
     raise_event(&event);
     drv_camera_release(&frame);
