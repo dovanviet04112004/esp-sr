@@ -26,6 +26,7 @@ from srhost.vision import IMAGES_DIR, Assembler, describe_boxes, keep, stem_of
 
 REFRESH_S = 0.2
 EVENTS_SHOWN = 8
+REORDER_HOPS = 256  # how far xac_task can hold a COMMAND back
 KEPT_SHOWN = 4
 BAR_WIDTH = 20
 LEVEL_FLOOR_DBFS = -90
@@ -55,6 +56,18 @@ class Board:
     rejected: int = 0
     last_error: str | None = None
     seen_monotonic: float = 0.0
+
+
+def add_event(events: deque[Message], message: Message) -> None:
+    """Keep decisions in seq order: xac_task can let a COMMAND out after the next sentence's REJECT (KEHOACH 3.17)."""
+    seq = message.payload.get("seq", 0)
+    items = list(events)
+    at = len(items)
+    while seq > 0 and at > 0 and 0 < items[at - 1].payload.get("seq", 0) - seq < REORDER_HOPS:
+        at -= 1
+    items.insert(at, message)
+    events.clear()
+    events.extend(items)
 
 
 def bar(value: float, low: float, high: float, width: int = BAR_WIDTH) -> str:
@@ -195,7 +208,7 @@ class View:
                 board.rejected += 1
                 board.last_error = message.error
             elif message.kind in ("event", "detections"):
-                board.events.append(message)
+                add_event(board.events, message)
             elif message.kind == "roster":
                 board.roster = message.payload
             elif message.kind in ("status", "heartbeat", "telemetry", "sensors"):
@@ -299,7 +312,8 @@ def main(argv: list[str] | None = None) -> int:
         while True:
             if redraw:
                 link = "connected" if receiver.connected.is_set() else "connecting"
-                header = f"broker {cfg.host}:{cfg.port} {link}  (Ctrl-C quits)"
+                lost = f"  {receiver.failed} not saved, see the log" if receiver.failed else ""
+                header = f"broker {cfg.host}:{cfg.port} {link}{lost}  (Ctrl-C quits)"
                 size = shutil.get_terminal_size()
                 frame = frame_of([header, "", *view.render()], size.columns, size.lines)
                 if frame != shown:

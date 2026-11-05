@@ -208,3 +208,19 @@ def test_what_was_kept_shows_on_the_screen() -> None:
     view.update(message("image", b"\xff\xd8"))
     view.kept.append("sr-1 image 10 bytes: B7_000002.jpg")
     assert "kept  sr-1 image 10 bytes: B7_000002.jpg" in view.render()
+
+
+def test_a_late_command_takes_its_place_ahead_of_the_next_sentence() -> None:
+    view = live.View()
+    view.update(event({"seq": 200, "kind": "REJECT", "code": "LOW_SCORE"}))
+    view.update(event({"seq": 150, "kind": "WAKE", "scorePermille": 900}))
+    seqs = [m.payload["seq"] for m in view._boards[DEVICE].events]
+    assert seqs == [150, 200]
+
+
+def test_a_board_that_restarted_is_not_sorted_into_its_old_events() -> None:
+    view = live.View()
+    view.update(event({"seq": 90000, "kind": "WAKE", "scorePermille": 900}))
+    view.update(event({"seq": 10, "kind": "WAKE", "scorePermille": 900}))
+    seqs = [m.payload["seq"] for m in view._boards[DEVICE].events]
+    assert seqs == [90000, 10]
