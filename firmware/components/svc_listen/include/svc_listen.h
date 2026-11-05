@@ -81,6 +81,11 @@ uint32_t svc_listen_commands_version(void);
  */
 esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap, bool deaf);
 
+/** Whether a WAKE waits in svc_listen_work; LENH then waits from the newest hop, where its beep sounds.
+ *  @ctx nhan_task | non-blocking | queued_hops: clean hops behind the one just fed (KEHOACH 5.4)
+ */
+bool svc_listen_woke(uint32_t queued_hops);
+
 /** Whether svc_listen_work has a hop to step or a closed window to decide now.
  *  @ctx nhan_task | non-blocking
  */

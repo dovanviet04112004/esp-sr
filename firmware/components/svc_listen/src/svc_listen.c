@@ -828,6 +828,13 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap, 
     return err != ESP_OK ? err : woke;
 }
 
+bool svc_listen_woke(uint32_t queued_hops)
+{
+    if (!s.ready || !s.woke_pending) { return false; }
+    s.command_until = s.next_seq - 1 + queued_hops + s.wait_hops;
+    return true;
+}
+
 // From the first vad hop, even of a click the close then drops: catching up is the costly part (KEHOACH 5.4).
 static bool workable(const window_t *w)
 {

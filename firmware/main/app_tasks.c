@@ -321,6 +321,10 @@ static void nhan_task(void *arg)
                 ESP_LOGW(TAG, "window queue full: the utterance opened at hop %" PRIu32 " gets no window",
                          frame.seq);
             }
+            // A WAKE leaves now: its beep does not wait out the hops a detect run left (KEHOACH 5.4).
+            if (svc_listen_woke(uxQueueMessagesWaiting(w->clean)) && svc_listen_work(&decision)) {
+                hand_over(w, &decision);
+            }
         } else {
             // Back to back while no frame waits, but under core 0's other app tasks (KEHOACH 5.2, 5.4).
             vTaskPrioritySet(NULL, NHAN_WORK_PRIORITY);
