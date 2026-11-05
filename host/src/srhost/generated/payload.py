@@ -264,7 +264,7 @@ SCHEMAS: dict[str, dict] = {
                                         'additionalProperties': False,
                                         'required': ['name', 'scorePermille', 'x1', 'y1', 'x2', 'y2'],
                                         'properties': {'name': {'type': 'string',
-                                                                'pattern': '^[A-Za-z0-9 _-]{1,31}$',
+                                                                'pattern': '^[^\\u0000-\\u001f]{1,31}$',
                                                                 'maxLength': 31},
                                                        'scorePermille': {'type': 'integer',
                                                                          'minimum': 0,
