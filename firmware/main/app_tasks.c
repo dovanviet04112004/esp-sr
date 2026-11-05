@@ -825,4 +825,6 @@ void app_tasks_log_watermarks(void)
         ESP_LOGI(TAG, "%-10s %5u of %5u B never used%s", kTasks[i].name, (unsigned)free_bytes[i],
                  (unsigned)kTasks[i].stack_bytes, finished[i] ? " (finished)" : "");
     }
+    ESP_LOGI(TAG, "%-10s %5u of %5u B never used", "main", (unsigned)uxTaskGetStackHighWaterMark(NULL),
+             (unsigned)CONFIG_ESP_MAIN_TASK_STACK_SIZE);
 }
