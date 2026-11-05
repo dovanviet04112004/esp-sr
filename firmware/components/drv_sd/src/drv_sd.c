@@ -75,6 +75,15 @@ static esp_err_t make_folders(char *full)
     return ESP_OK;
 }
 
+bool drv_sd_exists(const char *path)
+{
+    if (s_card == NULL) { return false; }
+    char full[PATH_MAX_BYTES];
+    const int length = snprintf(full, sizeof(full), DRV_SD_ROOT "/%s", path);
+    struct stat info;
+    return length > 0 && (size_t)length < sizeof(full) && stat(full, &info) == 0;
+}
+
 esp_err_t drv_sd_write(const char *path, const uint8_t *data, size_t bytes)
 {
     if (s_card == NULL) { return ESP_ERR_INVALID_STATE; }
@@ -86,5 +95,7 @@ esp_err_t drv_sd_write(const char *path, const uint8_t *data, size_t bytes)
     if (file == NULL) { return ESP_FAIL; }
     const size_t wrote = fwrite(data, 1, bytes, file);
     const int closed = fclose(file);
-    return wrote == bytes && closed == 0 ? ESP_OK : ESP_FAIL;
+    if (wrote == bytes && closed == 0) { return ESP_OK; }
+    remove(full);
+    return ESP_FAIL;
 }

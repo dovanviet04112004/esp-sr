@@ -26,7 +26,12 @@ esp_err_t drv_sd_init(void);
  */
 bool drv_sd_ready(void);
 
-/** Write one file, its folders made as needed, then close it.
+/** Whether a file is there, so a caller can keep from overwriting it.
+ *  @ctx nhin_task | blocking, a few ms | path is relative to DRV_SD_ROOT
+ */
+bool drv_sd_exists(const char *path);
+
+/** Write one file, its folders made as needed, then close it; a failed write leaves no file.
  *  @ctx nhin_task | blocking, tens of ms | path is relative to DRV_SD_ROOT
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE no card | ESP_ERR_INVALID_SIZE path too long | ESP_FAIL card full or
  * gone
