@@ -133,6 +133,12 @@ static const dsp_afe_calib_t *load_calib(void)
     if (sys_storage_get_u32(STORAGE_NS_CALIB, STORAGE_KEY_AEC_DELAY, &calib.aec_delay_samples) != ESP_OK) {
         calib.aec_delay_samples = 0;
     }
+    // dsp_afe refuses one past its limit, and the front end is what app_boot cannot go on without.
+    if (calib.aec_delay_samples > GEN_AFE_AEC_BULK_DELAY_MAX) {
+        ESP_LOGW(TAG, "calib/aec_delay %" PRIu32 " past %d samples, running at 0", calib.aec_delay_samples,
+                 GEN_AFE_AEC_BULK_DELAY_MAX);
+        calib.aec_delay_samples = 0;
+    }
     (void)sys_storage_get_u32(STORAGE_NS_CALIB, STORAGE_KEY_BAL_AT, &at);
     ESP_LOGI(TAG, "calib/bal version %" PRIu32 ", written at %" PRIu32 ", aec delay %" PRIu32 " samples",
              version, at, calib.aec_delay_samples);
