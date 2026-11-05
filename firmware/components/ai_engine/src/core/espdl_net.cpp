@@ -58,6 +58,15 @@ Int8Tensor named(std::map<std::string, dl::TensorBase *> &tensors, const char *n
     return found != tensors.end() ? view(found->second) : Int8Tensor{nullptr, 0, 0};
 }
 
+// A failed root_alloc only logs and leaves tensors NULL: the first run would panic on them (KEHOACH 6.6).
+bool placed(const std::map<std::string, dl::TensorBase *> &tensors) noexcept
+{
+    for (const auto &tensor : tensors) {
+        if (tensor.second == nullptr) { return false; }
+    }
+    return true;
+}
+
 } // namespace
 
 esp_err_t EspdlNet::build(Blob blob, const char *name) noexcept
@@ -77,7 +86,8 @@ esp_err_t EspdlNet::build(Blob blob, const char *name) noexcept
         model = new (std::nothrow)
             dl::Model(reinterpret_cast<const char *>(blob.data), fbs::MODEL_LOCATION_IN_FLASH_RODATA, 0,
                       dl::MEMORY_MANAGER_GREEDY, nullptr, false);
-        if (model != nullptr && !model->get_inputs().empty() && !model->get_outputs().empty()) {
+        if (model != nullptr && !model->get_inputs().empty() && !model->get_outputs().empty() &&
+            placed(model->get_inputs()) && placed(model->get_outputs())) {
             // StreamingCache allocates its cache on its first run, which must happen at boot (CLAUDE.md 4.1).
             model->run();
             model->reset();
@@ -90,6 +100,11 @@ esp_err_t EspdlNet::build(Blob blob, const char *name) noexcept
                  name_, (unsigned)model->get_inputs().size(), (unsigned)model->get_outputs().size());
         delete model;
         return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (!placed(model->get_inputs()) || !placed(model->get_outputs())) {
+        ESP_LOGE(TAG, "%s: esp-dl could not place its tensors, see its log above", name_);
+        delete model;
+        return ESP_ERR_NO_MEM;
     }
     model_ = model;
     loan_bytes_ = loan_take_asked();
