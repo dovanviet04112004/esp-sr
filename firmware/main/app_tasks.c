@@ -302,6 +302,13 @@ static void take_commands(const app_wiring_t *w, uint32_t seq)
     if (err != ESP_OK) { raise_error(w, seq, APP_CODE_COMMANDS_NOT_SAVED, NULL); }
 }
 
+static void note_clean_depth(const app_wiring_t *w, uint32_t hops)
+{
+    taskENTER_CRITICAL(w->afe_stats_lock);
+    if (hops > w->afe_stats->q_clean_peak) { w->afe_stats->q_clean_peak = (uint16_t)hops; }
+    taskEXIT_CRITICAL(w->afe_stats_lock);
+}
+
 static void nhan_task(void *arg)
 {
     const app_wiring_t *w = arg;
@@ -315,6 +322,8 @@ static void nhan_task(void *arg)
         svc_listen_decision_t decision;
         if (xQueueReceive(w->clean, &frame, wait) == pdTRUE) {
             seq = frame.seq;
+            const uint32_t queued_hops = uxQueueMessagesWaiting(w->clean);
+            note_clean_depth(w, queued_hops + 1);
             const bool gap = (frame.flags & DSP_AFE_FLAG_GAP) != 0;
             const bool deaf = (frame.flags & SVC_FRONT_FLAG_DEAF) != 0;
             if (svc_listen_feed(frame.pcm, frame.seq, frame.vad != 0, gap, deaf) == ESP_ERR_NO_MEM) {
@@ -322,9 +331,7 @@ static void nhan_task(void *arg)
                          frame.seq);
             }
             // A WAKE leaves now: its beep does not wait out the hops a detect run left (KEHOACH 5.4).
-            if (svc_listen_woke(uxQueueMessagesWaiting(w->clean)) && svc_listen_work(&decision)) {
-                hand_over(w, &decision);
-            }
+            if (svc_listen_woke(queued_hops) && svc_listen_work(&decision)) { hand_over(w, &decision); }
         } else {
             // Back to back while no frame waits, but under core 0's other app tasks (KEHOACH 5.2, 5.4).
             vTaskPrioritySet(NULL, NHAN_WORK_PRIORITY);
@@ -547,6 +554,8 @@ static void fill_heartbeat(const app_afe_stats_t *afe, heartbeat_t *hb)
 #if CONFIG_APP_CAMERA_ENABLE
     hb->events_dropped += svc_vision_events_lost();
 #endif
+    hb->q_clean_peak = afe->q_clean_peak;
+    hb->has_q_clean_peak = true;
 #if CONFIG_NET_STREAM_ENABLE
     hb->stream_dropped = svc_report_stream_dropped();
     hb->has_stream_dropped = true;
