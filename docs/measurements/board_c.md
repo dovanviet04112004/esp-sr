@@ -145,6 +145,20 @@ mất vùng ngay sau bước `wake` đầu tiên, và một mạng không xin đ
 
 Lúc nghe, sau `esp_new_jpeg` (+6,5 KB DIRAM): RAM nội trống 65,0 KiB, thấp nhất 35,5 KiB.
 
+Ngăn xếp `main` (E15-T27, 05/11): `app_boot` dựng mọi mạng trên `main`, dùng 3 340 B, ở mặc định 3 584 B chỉ dư 244 B. Heap báo khối lớn nhất theo bậc 2 KB
+(`tlsf_fit_size`), và lỗ `main` để lại sau `app_main` không liền với khối ấy, nên ngăn xếp `main` lớn hơn là khối ấy nhỏ đi:
+
+| `main` / `thu_task` | `main` dư | Vùng mượn | `detect` |
+|---|---|---|---|
+| 3 584 / 3 072 B | 244 B | 26 560 B | 1 950–1 954 ms |
+| 5 120 / 3 072 B | 1 780 B | 24 512 B | 2 020–2 026 ms |
+| 4 608 / 2 048 B, bản chốt | 1 268 B | 26 560 B | 1 951–1 959 ms (3 lần, boot 60) |
+
+`thu_task` dùng 848 B, nên trả 1 KB `.bss` cho heap để bù phần `main` nới thêm.
+
+Outbox của esp-mqtt sang PSRAM (E15-T25): vùng mượn vẫn 26 560 B, `detect` 1 950–1 954 ms, RAM nội thấp nhất 23 955 B, nên outbox không phải lý do vùng hụt. `qCleanPeak` 122–127 / 192 sau mỗi lượt
+`detect`, `clean_dropped` 0.
+
 ### 4.6 `detect` trên ảnh thật
 
 Ảnh đầu (`jpeg_quality` 12, chưa có đèn) board ra 0 hộp. Cùng ảnh, giảm 1:2 trên PC, qua mô phỏng int8 của ESP-PPQ: điểm cao nhất
@@ -298,6 +312,9 @@ Bản Python trên `interim/aec/echo1`, cho tiếng vọng trễ thêm m khối 
 | 6 | 130 ms | −0,1 dB | −1,1 / −0,2 / −0,1 dB |
 
 m ≥ 4 dưới cửa 20 dB, m = 6 quá tầm 128 ms. Lệch giữa hai lượt phát thì bộ lọc học lại gần hết lượt, nên tiếng nói ngắn sau một lần ghi flash gần như không được khử.
+
+Sau khi sửa `drv_audio`, boot 56: `stream 11` trước và sau một lần ghi `set.json` 27 ms cùng ra **546 mẫu** (`interim/aec/txdelay_a`, `txdelay_b`). Chỗ đo mới 34,1 ms thay 33,9 ms, có tiếng cưa nhà bên: nền
+p10 −50 dBFS thay −54, micro lúc loa phát −23,9 thay −21,1 dBFS. ERLE board 19,2 và 19,5 dB, bản Python trên cùng bản thu 19–20 dB, tức chuỗi vẫn khớp, phòng là thứ thấp đi.
 
 Chưa đo: tiếng nói thật qua loa thay nhiễu, chạy dài 30 phút (E10-T1), âm lượng tối đa (E10-T2), parity trên chip 🔬.
 
