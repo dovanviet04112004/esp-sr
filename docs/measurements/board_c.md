@@ -282,6 +282,23 @@ tuyến tính nên phép cộng cho đúng tín hiệu hai bên cùng nói, và 
 Tiếng người giữ được, chiếu lối ra lên lối ra của cùng tiếng người không có loa, lúc loa phát: **+0,07 dB qua `aec`, −0,07 dB qua `aec` và `ns`**, cửa là mất không quá
 3 dB. Không khung nào mang `DSP_AFE_FLAG_AEC_DIVERGED`.
 
+Trễ tham chiếu → micro không còn hằng số sau một lần `thu_task` đứng (bản rà 05/11, E10-T7). Hàng TX của driver sâu `dma_desc_num − 1` ô và thường đầy, nên khối vừa ghi
+phát ngay sau đó. `thu_task` đứng qua một EOF, như lúc xoá sector khi ghi `set.json` (27–168 ms, `latency.md` §20), rồi đọc dồn m + 1 khối RX và ghi m + 1 khối TX một mạch:
+hàng tụt m ô và không đầy lại, trễ tăng 16·m ms tới lần đứng sau, tối đa +6 khối. Cơ chế đọc từ `i2s_common.c` của IDF 6.0.2; độ dài thật của mỗi lần đứng chưa đo trên board 🔬.
+Bản Python trên `interim/aec/echo1`, cho tiếng vọng trễ thêm m khối (mô phỏng trên bản thu thật, chạy lại 05/11):
+
+| m khối | Tham chiếu → micro | ERLE sau hội tụ | Lệch giữa hai lượt phát, giây đầu / giây thứ ba / 2 s cuối |
+|---|---|---|---|
+| 0 | 34 ms | 25,9 dB | 26,0 / 25,9 / 25,9 dB |
+| 1 | 50 ms | 25,0 dB | −0,6 / 1,0 / 24,9 dB |
+| 2 | 66 ms | 23,4 dB | −0,8 / 0,9 / 23,4 dB |
+| 3 | 82 ms | 21,3 dB | −0,8 / 0,9 / 21,2 dB |
+| 4 | 98 ms | 18,1 dB | −0,7 / 0,8 / 18,0 dB |
+| 5 | 114 ms | 16,3 dB | −0,7 / 0,8 / 15,8 dB |
+| 6 | 130 ms | −0,1 dB | −1,1 / −0,2 / −0,1 dB |
+
+m ≥ 4 dưới cửa 20 dB, m = 6 quá tầm 128 ms. Lệch giữa hai lượt phát thì bộ lọc học lại gần hết lượt, nên tiếng nói ngắn sau một lần ghi flash gần như không được khử.
+
 Chưa đo: tiếng nói thật qua loa thay nhiễu, chạy dài 30 phút (E10-T1), âm lượng tối đa (E10-T2), parity trên chip 🔬.
 
 ## 7. GPS, hồng ngoại và hai thiết bị I2C (E2-T15, T16, T17, 05/11)
