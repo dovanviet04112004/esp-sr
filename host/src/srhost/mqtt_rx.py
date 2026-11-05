@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 import threading
 from collections.abc import Callable
@@ -31,6 +32,7 @@ WILDCARD = "+"
 log = logging.getLogger(__name__)
 VALIDATORS = {name: Draft202012Validator(schema) for name, schema in SCHEMAS.items()}
 BINARY = "binary"  # frame in contracts/vision.yaml, not a JSON schema
+DEVICE_ID = re.compile(SCHEMAS["heartbeat"]["properties"]["deviceId"]["pattern"])
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,8 @@ def parse(topic: str, body: bytes, rx_utc: str | None = None) -> Message:
     rx_utc = rx_utc or now_utc()
     matched = topics.match(topic)
     if matched is not None and matched[0].schema == BINARY:
+        if DEVICE_ID.match(matched[1]) is None:
+            return Message(rx_utc, topic, None, None, None, f"device {matched[1]!r} in the topic")
         return Message(rx_utc, topic, matched[0].id, matched[1], None, body=body)
     raw = body.decode("utf-8", errors="replace")
     if matched is None or matched[0].direction != "up":
@@ -128,6 +132,7 @@ class Receiver:
         self._on_message = on_message
         self._filters = up_filters(device)
         self.connected = threading.Event()
+        self.failed = 0
         self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self._client.username_pw_set(cfg.user, cfg.password)
         self._client.on_connect = self._connected
@@ -150,7 +155,12 @@ class Receiver:
         message = parse(msg.topic, msg.payload)
         if message.rejected:
             log.warning("rejected %s: %s", message.topic, message.error)
-        self._on_message(message)
+        # An exception here ends paho's network thread, and with it every message after this one.
+        try:
+            self._on_message(message)
+        except Exception:
+            self.failed += 1
+            log.exception("%s could not be handled", message.topic)
 
     def start(self) -> None:
         self._client.connect_async(self._cfg.host, self._cfg.port, KEEPALIVE_S)

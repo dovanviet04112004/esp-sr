@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import paho.mqtt.client as mqtt
 import pytest
 
 from srhost import mqtt_rx
+from srhost.config import MqttConfig
 
 DEVICE = "sr-b00001"
 HEARTBEAT = {
@@ -95,3 +97,21 @@ def test_filters_cover_every_up_topic_and_no_down_topic() -> None:
         "sr/+/up/sensors",
     ]
     assert all(f.startswith(f"sr/{DEVICE}/up/") for f, _ in mqtt_rx.up_filters(DEVICE))
+
+
+def test_a_binary_topic_must_name_a_device_that_can_be_one() -> None:
+    message = mqtt_rx.parse("sr/../up/image", b"chunk")
+    assert message.rejected and message.device is None
+    assert not mqtt_rx.parse(f"sr/{DEVICE}/up/image", b"chunk").rejected
+
+
+def test_a_handler_that_raises_leaves_the_receiver_running() -> None:
+    def fail(_message: mqtt_rx.Message) -> None:
+        raise OSError("disk full")
+
+    cfg = MqttConfig(host="localhost", port=1883, user="u", password="p")
+    receiver = mqtt_rx.Receiver(cfg, fail)
+    msg = mqtt.MQTTMessage(topic=f"sr/{DEVICE}/up/heartbeat".encode())
+    msg.payload = json.dumps(HEARTBEAT).encode()
+    receiver._received(None, None, msg)
+    assert receiver.failed == 1
