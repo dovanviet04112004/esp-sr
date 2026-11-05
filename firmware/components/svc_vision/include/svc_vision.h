@@ -22,8 +22,9 @@ typedef struct {
 } svc_vision_config_t;
 
 /** Take the buffers; drv_camera and drv_sd come up first, a card may be missing.
- *  @ctx app_boot | blocking | once
- *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_STATE a second call | ESP_ERR_NO_MEM PSRAM refused
+ *  @ctx app_boot | blocking | once; nhin_task runs after any result but the first two errors
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_INVALID_STATE a second call | ESP_ERR_NO_MEM PSRAM refused:
+ *       every request is then answered CAMERA_FAIL
  */
 esp_err_t svc_vision_init(const svc_vision_config_t *cfg);
 

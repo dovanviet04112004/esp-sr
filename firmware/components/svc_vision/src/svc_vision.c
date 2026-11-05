@@ -50,6 +50,7 @@ static svc_vision_config_t s_cfg;
 static uint8_t *s_rgb, *s_chunk;
 static ai_engine_box_t *s_boxes;
 static detections_t *s_found;
+static bool s_ready;
 static uint32_t s_seq;
 static uint32_t s_preview_seq;
 static bool s_previewing;
@@ -58,14 +59,15 @@ static int64_t s_preview_until_us;
 esp_err_t svc_vision_init(const svc_vision_config_t *cfg)
 {
     if (cfg == NULL || cfg->requests == NULL || cfg->events == NULL) { return ESP_ERR_INVALID_ARG; }
-    if (s_rgb != NULL) { return ESP_ERR_INVALID_STATE; }
+    if (s_cfg.requests != NULL) { return ESP_ERR_INVALID_STATE; }
+    // First: nhin_task runs whatever comes of the buffers, and answers requests without them (KEHOACH 3.19).
+    s_cfg = *cfg;
     s_rgb = heap_caps_aligned_alloc(RGB_ALIGN_BYTES, RGB_BYTES, MALLOC_CAP_SPIRAM);
     s_chunk = heap_caps_malloc(CHUNK_BYTES, MALLOC_CAP_SPIRAM);
     s_boxes = heap_caps_malloc(GEN_VISION_BOXES_MAX * sizeof(*s_boxes), MALLOC_CAP_SPIRAM);
     s_found = heap_caps_malloc(sizeof(*s_found), MALLOC_CAP_SPIRAM);
-    if (s_rgb == NULL || s_chunk == NULL || s_boxes == NULL || s_found == NULL) { return ESP_ERR_NO_MEM; }
-    s_cfg = *cfg;
-    return ESP_OK;
+    s_ready = s_rgb != NULL && s_chunk != NULL && s_boxes != NULL && s_found != NULL;
+    return s_ready ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
 static void raise_event(app_event_t *event)
@@ -253,23 +255,28 @@ static void carry_out(const app_vision_req_t *request)
              (esp_timer_get_time() - detected_us) / US_PER_MS);
 }
 
-static void hold_preview(void)
-{
-    if (!s_previewing) {
-        bsp_board_camera_light(true);
-        const esp_err_t woken = drv_camera_wake();
-        if (woken != ESP_OK) { ESP_LOGW(TAG, "preview: %s", esp_err_to_name(woken)); }
-        s_previewing = true;
-    }
-    s_preview_until_us = esp_timer_get_time() + (int64_t)GEN_VISION_PREVIEW_HOLD_MS * US_PER_MS;
-}
-
 static void end_preview(void)
 {
     s_previewing = false;
     const esp_err_t rested = drv_camera_rest();
     if (rested != ESP_OK) { ESP_LOGW(TAG, "rest: %s", esp_err_to_name(rested)); }
     bsp_board_camera_light(false);
+}
+
+static void hold_preview(void)
+{
+    if (!s_previewing) {
+        bsp_board_camera_light(true);
+        const esp_err_t woken = drv_camera_wake();
+        if (woken != ESP_OK) {
+            // No frames will come: a preview would spin this task with the light on.
+            ESP_LOGW(TAG, "preview: %s", esp_err_to_name(woken));
+            end_preview();
+            return;
+        }
+        s_previewing = true;
+    }
+    s_preview_until_us = esp_timer_get_time() + (int64_t)GEN_VISION_PREVIEW_HOLD_MS * US_PER_MS;
 }
 
 static void send_preview_frame(void)
@@ -282,13 +289,22 @@ static void send_preview_frame(void)
     drv_camera_release(&frame);
 }
 
+static void refuse(const app_vision_req_t *request)
+{
+    if (request->mode == APP_VISION_PREVIEW) { return; }
+    raise_error(APP_CODE_CAMERA_FAIL);
+    beep(APP_TONE_FAIL);
+}
+
 void svc_vision_step(void)
 {
     app_vision_req_t request;
     const TickType_t wait = s_previewing ? 0 : pdMS_TO_TICKS(REQUEST_WAIT_MS);
     // Peeked, not taken: the full queue is what refuses a second command during this picture (KEHOACH 5.3).
     if (xQueuePeek(s_cfg.requests, &request, wait) == pdTRUE) {
-        if (request.mode == APP_VISION_PREVIEW) {
+        if (!s_ready) {
+            refuse(&request);
+        } else if (request.mode == APP_VISION_PREVIEW) {
             hold_preview();
         } else {
             if (s_previewing) { end_preview(); }
