@@ -481,12 +481,14 @@ static void fill_lead(window_t *w)
     const int32_t short_hops = (int32_t)(w->first - w->speech) + (int32_t)s.wake_lead;
     if (!s.commanding || w->floor != s.wake_mark || short_hops <= 0) { return; }
     const uint32_t oldest = s.next_seq > RING_HOPS ? s.next_seq - RING_HOPS : 0;
-    uint32_t from = s.wake_from > (uint32_t)short_hops ? s.wake_from - (uint32_t)short_hops : 0;
+    // A wake word vad found late must not put the window's own hops in the fill.
+    const uint32_t end = (int32_t)(s.wake_from - w->first) > 0 ? w->first : s.wake_from;
+    uint32_t from = end > (uint32_t)short_hops ? end - (uint32_t)short_hops : 0;
     if ((int32_t)(s.wake_floor - from) > 0) { from = s.wake_floor; }
     if ((int32_t)(oldest - from) > 0) { from = oldest; }
-    if ((int32_t)(s.wake_from - from) <= 0) { return; }
+    if ((int32_t)(end - from) <= 0) { return; }
     w->fill_first = from;
-    w->fill_hops = s.wake_from - from;
+    w->fill_hops = end - from;
 }
 
 static uint32_t net_first(const window_t *w)
