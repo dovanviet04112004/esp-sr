@@ -33,6 +33,11 @@ esp_err_t svc_vision_init(const svc_vision_config_t *cfg);
  */
 void svc_vision_step(void);
 
+/** Events lost to a full q_event_up, for the heartbeat's eventsDropped.
+ *  @ctx any | non-blocking
+ */
+uint32_t svc_vision_events_lost(void);
+
 #ifdef __cplusplus
 }
 #endif

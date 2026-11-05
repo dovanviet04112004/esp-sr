@@ -537,6 +537,9 @@ static void fill_heartbeat(const app_afe_stats_t *afe, heartbeat_t *hb)
     hb->frames_dropped = afe->frames_dropped;
     hb->clean_dropped = afe->clean_dropped;
     hb->events_dropped = afe->events_dropped;
+#if CONFIG_APP_CAMERA_ENABLE
+    hb->events_dropped += svc_vision_events_lost();
+#endif
 #if CONFIG_NET_STREAM_ENABLE
     hb->stream_dropped = svc_report_stream_dropped();
     hb->has_stream_dropped = true;

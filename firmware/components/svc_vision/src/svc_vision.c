@@ -53,6 +53,7 @@ static ai_engine_box_t *s_boxes;
 static detections_t *s_found;
 static bool s_ready;
 static uint32_t s_seq;
+static uint32_t s_events_lost;
 static uint32_t s_preview_seq;
 static bool s_previewing;
 static int64_t s_preview_until_us;
@@ -73,7 +74,10 @@ esp_err_t svc_vision_init(const svc_vision_config_t *cfg)
 
 static void raise_event(app_event_t *event)
 {
-    if (xQueueSend(s_cfg.events, event, 0) != pdTRUE) { ESP_LOGW(TAG, "q_event_up full, event lost"); }
+    if (xQueueSend(s_cfg.events, event, 0) != pdTRUE) {
+        s_events_lost++;
+        ESP_LOGW(TAG, "q_event_up full, event lost");
+    }
 }
 
 static void raise_error(const char *code)
@@ -326,4 +330,9 @@ void svc_vision_step(void)
     }
     if (s_previewing && esp_timer_get_time() > s_preview_until_us) { end_preview(); }
     if (s_previewing) { send_preview_frame(); }
+}
+
+uint32_t svc_vision_events_lost(void)
+{
+    return s_events_lost;
 }
