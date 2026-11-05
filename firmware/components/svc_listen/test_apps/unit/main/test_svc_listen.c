@@ -60,6 +60,8 @@ enum { CHECK_NONE = 0, CHECK_PASSED, CHECK_STOPPED, CHECK_UNENROLLED, CHECK_ENRO
 #define RESET_SEQ (CLICK_SEQ + SEQ_APART)
 #define CLOSED_SEQ (RESET_SEQ + SEQ_APART)
 #define BROKEN_SEQ (CLOSED_SEQ + SEQ_APART)
+#define DEAF_SEQ (BROKEN_SEQ + SEQ_APART)
+#define DEAF_PAST_GAP_HOPS 8 // a beep's stretch runs this far past gap_s
 
 #define VERIFY_SLOT 0 // one task stands for nhan_task and xac_task here
 #define OWNER_NAME "owner"
@@ -204,7 +206,7 @@ static const uint8_t *run_session(const uint8_t *at, uint32_t base, const named_
             pcm = (const int16_t *)(seg_at + sizeof(seg)) + (hop - seg.first) * GEN_GRID_HOP_SAMPLES;
         }
         const bool on = (vad[hop / 8] >> (hop % 8)) & 1;
-        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(pcm, base + hop, on, false));
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(pcm, base + hop, on, false, false));
         n = drain(decided, n, t);
     }
     TEST_ASSERT_EQUAL_MESSAGE(h.windows, n, "svc_listen cut otherwise than Gate 3");
@@ -290,7 +292,7 @@ TEST_CASE("svc_listen takes a new set after a click it began working and dropped
     size_t n = 0;
     for (uint32_t hop = 0; hop < CLICK_HOPS + GEN_LISTEN_UTTERANCE_GAP_HOPS + 1; hop++) {
         const bool on = hop < CLICK_HOPS;
-        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(on ? click : k_zeros, CLICK_SEQ + hop, on, false));
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(on ? click : k_zeros, CLICK_SEQ + hop, on, false, false));
         n = drain(decided, n, &t);
     }
     TEST_ASSERT_EQUAL_MESSAGE(0, n, "the click was decided, not dropped");
@@ -311,7 +313,7 @@ TEST_CASE("svc_listen takes a new set after a click it began working and dropped
 static uint32_t speak(uint32_t base, uint32_t hop, uint32_t hops, bool broken)
 {
     for (uint32_t i = 0; i < hops; i++, hop++) {
-        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, base + hop, true, broken && i == 0));
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, base + hop, true, broken && i == 0, false));
     }
     return hop;
 }
@@ -320,7 +322,7 @@ static uint32_t speak(uint32_t base, uint32_t hop, uint32_t hops, bool broken)
 static uint32_t hush(uint32_t base, uint32_t hop, bool broken)
 {
     for (uint32_t i = 0; i <= GEN_LISTEN_UTTERANCE_GAP_HOPS; i++, hop++) {
-        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, base + hop, false, broken && i == 0));
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, base + hop, false, broken && i == 0, false));
     }
     return hop;
 }
@@ -329,7 +331,7 @@ static uint32_t hush(uint32_t base, uint32_t hop, bool broken)
 static uint32_t settle(uint32_t base, uint32_t hop, svc_listen_decision_t *decided, size_t *n, tally_t *t)
 {
     for (uint32_t i = 0; svc_listen_busy() && i < SETTLE_HOPS_MAX; i++, hop++) {
-        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, base + hop, false, false));
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, base + hop, false, false, false));
         *n = drain(decided, *n, t);
     }
     TEST_ASSERT_FALSE_MESSAGE(svc_listen_busy(), "a closed window never got its pitch columns");
@@ -345,10 +347,10 @@ TEST_CASE("svc_listen decides the open window FRAME_GAP when the chain breaks", 
     listen_on(&head, &named);
     uint32_t hop = 0;
     for (; hop < GEN_LISTEN_UTTERANCE_MIN_HOPS; hop++) {
-        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, RESET_SEQ + hop, true, false));
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, RESET_SEQ + hop, true, false, false));
     }
     TEST_ASSERT_TRUE(svc_listen_busy());
-    TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, RESET_SEQ + hop, false, true));
+    TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, RESET_SEQ + hop, false, true, false));
     svc_listen_decision_t d;
     bool decided = false;
     while (!decided && svc_listen_pending()) {
@@ -379,13 +381,13 @@ TEST_CASE("svc_listen decides a closed window FRAME_GAP when the chain breaks be
     }
     uint32_t hop = 0;
     for (; hop <= GEN_LISTEN_UTTERANCE_MIN_HOPS; hop++) {
-        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, CLOSED_SEQ + hop, true, false));
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, CLOSED_SEQ + hop, true, false, false));
     }
     const uint32_t last = hop;
     for (uint32_t quiet = 0; quiet <= GEN_LISTEN_UTTERANCE_GAP_HOPS; quiet++, hop++) {
-        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, CLOSED_SEQ + hop, false, false));
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, CLOSED_SEQ + hop, false, false, false));
     }
-    TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, CLOSED_SEQ + hop, false, true));
+    TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, CLOSED_SEQ + hop, false, true, false));
     svc_listen_decision_t d;
     bool decided = false;
     while (!decided && svc_listen_pending()) {
@@ -448,6 +450,58 @@ static void take_roster(const listen_head_t *head)
     TEST_ASSERT_EQUAL(ESP_OK, svc_listen_speaker_state(&state));
     TEST_ASSERT_EQUAL(set.version, state.version);
     TEST_ASSERT_EQUAL(1, state.count);
+}
+
+// Hops the speaker sounds through: vad off, as svc_front hands them.
+static uint32_t deafen(uint32_t base, uint32_t hop, uint32_t hops)
+{
+    for (uint32_t i = 0; i < hops; i++, hop++) {
+        TEST_ASSERT_EQUAL(ESP_OK, svc_listen_feed(k_zeros, base + hop, false, false, true));
+    }
+    return hop;
+}
+
+TEST_CASE("svc_listen carries an utterance across a deaf stretch longer than the gap", "[svc_listen]")
+{
+    listen_head_t head;
+    named_t named;
+    esp_partition_mmap_handle_t handle;
+    read_round(&head, &named, &handle);
+    listen_on(&head, &named);
+    esp_partition_munmap(handle);
+    static svc_listen_decision_t decided[DECIDED_MAX];
+    tally_t t = {0};
+    size_t n = 0;
+    const uint32_t base = DEAF_SEQ;
+    uint32_t hop = speak(base, 0, GEN_LISTEN_UTTERANCE_MIN_HOPS, false);
+    hop = deafen(base, hop, GEN_LISTEN_UTTERANCE_GAP_HOPS + DEAF_PAST_GAP_HOPS);
+    hop = speak(base, hop, GEN_LISTEN_UTTERANCE_MIN_HOPS, false);
+    const uint32_t last = hop - 1;
+    hop = hush(base, hop, false);
+    settle(base, hop, decided, &n, &t);
+    TEST_ASSERT_EQUAL_MESSAGE(1, n, "the deaf stretch split the utterance");
+    TEST_ASSERT_EQUAL_UINT32(base + last + 1, decided[0].event.seq);
+}
+
+TEST_CASE("svc_listen makes no utterance of a beep, alone or behind a click", "[svc_listen]")
+{
+    listen_head_t head;
+    named_t named;
+    esp_partition_mmap_handle_t handle;
+    read_round(&head, &named, &handle);
+    listen_on(&head, &named);
+    esp_partition_munmap(handle);
+    static svc_listen_decision_t decided[DECIDED_MAX];
+    tally_t t = {0};
+    size_t n = 0;
+    const uint32_t base = DEAF_SEQ + SEQ_APART;
+    uint32_t hop = deafen(base, 0, GEN_LISTEN_UTTERANCE_GAP_HOPS + DEAF_PAST_GAP_HOPS);
+    hop = hush(base, hop, false);
+    hop = speak(base, hop, CLICK_HOPS, false);
+    hop = deafen(base, hop, GEN_LISTEN_UTTERANCE_GAP_HOPS + DEAF_PAST_GAP_HOPS);
+    hop = hush(base, hop, false);
+    settle(base, hop, decided, &n, &t);
+    TEST_ASSERT_EQUAL_MESSAGE(0, n, "a beep became a decision");
 }
 
 TEST_CASE("svc_listen decides every Gate 3 session of the round as Python decides it, field by field",

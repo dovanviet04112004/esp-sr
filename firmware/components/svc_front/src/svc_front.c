@@ -15,8 +15,8 @@
 static struct {
     dsp_afe_t *afe;
     uint32_t next_seq;
-    uint32_t keep_hops;  // longest gap dsp_afe resumes over
-    uint32_t deaf_until; // first seq whose vad counts again
+    uint32_t keep_hops; // longest gap dsp_afe resumes over
+    uint32_t deaf_hops; // hops left whose vad says nothing
     uint8_t n_mics;
     uint8_t n_channels;
     bool started;
@@ -93,9 +93,13 @@ esp_err_t svc_front_step(const int16_t *interleaved, uint32_t seq, dsp_afe_frame
     const esp_err_t fetched = dsp_afe_fetch(s_front.afe, out);
     if (fetched != ESP_OK) { return fetched; }
     out->seq = seq;
-    if (speaker_sounds(interleaved)) { s_front.deaf_until = seq + DEAF_TAIL_HOPS; }
+    if (speaker_sounds(interleaved)) { s_front.deaf_hops = DEAF_TAIL_HOPS; }
     // The microphone hears the speaker: its own beep is nobody's command (KEHOACH 3.19).
-    if ((int32_t)(s_front.deaf_until - seq) > 0) { out->vad = 0; }
+    if (s_front.deaf_hops > 0) {
+        s_front.deaf_hops--;
+        out->vad = 0;
+        out->flags |= SVC_FRONT_FLAG_DEAF;
+    }
     return ESP_OK;
 }
 

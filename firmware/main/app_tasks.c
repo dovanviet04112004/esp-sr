@@ -316,7 +316,8 @@ static void nhan_task(void *arg)
         if (xQueueReceive(w->clean, &frame, wait) == pdTRUE) {
             seq = frame.seq;
             const bool gap = (frame.flags & DSP_AFE_FLAG_GAP) != 0;
-            if (svc_listen_feed(frame.pcm, frame.seq, frame.vad != 0, gap) == ESP_ERR_NO_MEM) {
+            const bool deaf = (frame.flags & SVC_FRONT_FLAG_DEAF) != 0;
+            if (svc_listen_feed(frame.pcm, frame.seq, frame.vad != 0, gap, deaf) == ESP_ERR_NO_MEM) {
                 ESP_LOGW(TAG, "window queue full: the utterance opened at hop %" PRIu32 " gets no window",
                          frame.seq);
             }

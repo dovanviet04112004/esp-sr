@@ -13,6 +13,8 @@
 extern "C" {
 #endif
 
+#define SVC_FRONT_FLAG_DEAF (1u << 15) // in frame.flags: vad says nothing on this hop
+
 typedef struct {
     uint8_t n_mics;               // APP_MIC_COUNT: 1 runs dsp_afe as "M" (ADR-0042)
     uint8_t n_channels;           // drv_audio_channels(): n_mics, one more with the ref
@@ -29,10 +31,10 @@ typedef struct {
 esp_err_t svc_front_init(const svc_front_config_t *cfg);
 
 /** Run one hop; a seq jump up to chain.gap_keep_s resumes dsp_afe, a longer one resets it (KEHOACH 4.5.5).
- *  out->seq is the capture seq the raw stream carries, so a logged window cuts out of it again (KEHOACH 5.4).
+ *  out->seq is the capture seq the raw stream carries; vad is off and SVC_FRONT_FLAG_DEAF set from the first
+ *  sound of the reference to tones.deaf_tail_ms past its last (KEHOACH 3.19, 5.4).
  *  @ctx sach_task | non-blocking | interleaved holds GEN_GRID_HOP_SAMPLES samples of n_channels each
- *  @ret ESP_OK with a clean frame in out | ESP_ERR_NOT_FOUND nothing ready | ESP_ERR_INVALID_STATE no init
- * yet
+ *  @ret ESP_OK, a frame in out | ESP_ERR_NOT_FOUND nothing ready | ESP_ERR_INVALID_STATE no init yet
  */
 esp_err_t svc_front_step(const int16_t *interleaved, uint32_t seq, dsp_afe_frame_t *out);
 

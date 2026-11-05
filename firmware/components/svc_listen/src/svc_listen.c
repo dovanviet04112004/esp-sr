@@ -138,6 +138,8 @@ static struct {
     uint32_t mark_by;       // marking stops at this hop
     bool started, in_run, has_open, working;
     uint32_t next_seq, after, run_first, run_last, at;
+    uint32_t deaf_hops; // the run's deaf hops in a row, not judged yet
+    uint32_t run_deaf;  // the run's deaf hops judged no speech
     window_t queue[WINDOWS_MAX];
     size_t head, count;
     int64_t work_us;
@@ -511,6 +513,12 @@ static esp_err_t open_utterance(uint32_t seq)
     return ESP_OK;
 }
 
+// The run's length as speech: its deaf hops count once the hop after them heard it go on (KEHOACH 5.4).
+static int32_t spoken_hops(void)
+{
+    return (int32_t)(s.run_last - s.run_first) - (int32_t)(s.run_deaf + s.deaf_hops);
+}
+
 static void close_utterance(void)
 {
     s.in_run = false;
@@ -519,8 +527,10 @@ static void close_utterance(void)
     window_t *w = open_window();
     // The wake word's own utterance keeps a window only with speech past vad's hangover (KEHOACH 5.4).
     const uint32_t need = GEN_LISTEN_UTTERANCE_MIN_HOPS + (w != NULL && w->wake_tail ? HANGOVER_HOPS : 0);
-    const bool kept = (int32_t)(s.run_last - s.run_first) >= (int32_t)need;
+    const bool kept = spoken_hops() >= (int32_t)need;
     const uint32_t end = s.run_last + 1;
+    s.deaf_hops = 0;
+    s.run_deaf = 0;
     if (w != NULL && !kept) { drop_open(); }
     if (w != NULL && kept) {
         w->open = false;
@@ -734,7 +744,7 @@ static bool awaited(void)
 {
     if (s.count == 0) { return false; }
     if (!s.has_open || s.count > 1) { return true; }
-    return (int32_t)(s.run_last - s.run_first) >= (int32_t)GEN_LISTEN_UTTERANCE_MIN_HOPS;
+    return spoken_hops() >= (int32_t)GEN_LISTEN_UTTERANCE_MIN_HOPS;
 }
 
 // LENH waits from its last window, not from vad: background holding vad on would keep it waiting for good.
@@ -756,7 +766,19 @@ static void rearm(uint32_t seq, uint32_t gen)
     s.command_until = seq + s.wait_hops;
 }
 
-esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
+// A deaf hop stays in the run, no silence against gap_s; the hop after a stretch judges it (KEHOACH 5.4).
+static void note_deaf(uint32_t seq, bool vad, bool deaf)
+{
+    if (s.in_run && deaf) {
+        s.deaf_hops++;
+        s.run_last = seq;
+    } else if (s.deaf_hops > 0) {
+        s.run_deaf += vad ? 0 : s.deaf_hops;
+        s.deaf_hops = 0;
+    }
+}
+
+esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap, bool deaf)
 {
     if (!s.ready) { return ESP_ERR_INVALID_STATE; }
     if (pcm == NULL) { return ESP_ERR_INVALID_ARG; }
@@ -788,6 +810,7 @@ esp_err_t svc_listen_feed(const int16_t *pcm, uint32_t seq, bool vad, bool gap)
     if (err != ESP_OK) { return err; }
     // A wake error still lets the hop close runs and count the wait, so nothing waits on it for good.
     const esp_err_t woke = s.wake ? hear_wake(seq) : ESP_OK;
+    note_deaf(seq, vad, deaf);
     if (s.in_run && seq - s.run_last > GEN_LISTEN_UTTERANCE_GAP_HOPS) { close_utterance(); }
     if (vad) {
         if (!s.in_run) {
