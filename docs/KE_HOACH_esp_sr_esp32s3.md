@@ -2599,6 +2599,8 @@ lệnh của nó. Một lệnh ảnh chen vào thì tắt ngay. Host giữ khung
 
 Host lưu `<stem>.jpg`, `<stem>.json` cùng ảnh đã vẽ khung và tên vật `<stem>_boxes.jpg` ở data root; ảnh vẽ đúng chiều, không còn cờ EXIF.
 
+**Thử nhanh không cần tiếng nói.** `make detect` (`srhost.vision --capture DETECT --once`) gửi `CAPTURE` tới board duy nhất đang `ONLINE` (trạng thái giữ lại của broker), hay tới `DEVICE=<deviceId>` khi có nhiều board, chờ ảnh và khung về, in nơi ảnh đã vẽ khung được lưu rồi thoát, không cần `make host-live`. Board từ chối bằng một sự kiện `ERROR` (`VISION_BUSY`, `CAMERA_FAIL`) thì dừng ngay với mã ấy; quá 30 s chưa đủ thì báo thiếu gì. Cùng cờ `--once` với `PHOTO` chỉ chờ ảnh.
+
 Không có thẻ thì vẫn đẩy ảnh, sự kiện ghi `saved: false`. Mất MQTT thì ảnh vẫn ở thẻ; bản đầu chưa gửi lại. Đang chạy mà có
 lệnh mới thì từ chối ngay với mã `VISION_BUSY` và tiếng trầm, không xếp hàng: `nhin_task` giữ yêu cầu trong `q_vision` tới hết ảnh (§5.3).
 
