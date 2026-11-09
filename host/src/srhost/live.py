@@ -25,6 +25,7 @@ from srhost.speakers import ENROL_COMMANDS
 from srhost.vision import IMAGES_DIR, Assembler, describe_boxes, keep, stem_of
 
 REFRESH_S = 0.2
+BROKER_HINT_S = 5.0  # past this the broker is likely not running
 EVENTS_SHOWN = 8
 REORDER_HOPS = 256  # how far xac_task can hold a COMMAND back
 KEPT_SHOWN = 4
@@ -197,6 +198,10 @@ class View:
         self.stray = 0
         self.kept: deque[str] = deque(maxlen=KEPT_SHOWN)
 
+    def note_kept(self, lines: list[str]) -> None:
+        with self._lock:
+            self.kept.extend(lines)
+
     def update(self, message: Message) -> None:
         with self._lock:
             if message.device is None:
@@ -252,6 +257,13 @@ class View:
             return roster_names(board.roster if board else None)
 
 
+def link_text(connected: bool, waited_s: float) -> str:
+    """The broker link as the header says it; a wait past BROKER_HINT_S names the likely cause."""
+    if connected:
+        return "connected"
+    return f"connecting for {waited_s:.0f} s" + (" - make broker-up?" if waited_s > BROKER_HINT_S else "")
+
+
 def frame_of(lines: list[str], columns: int, rows: int) -> str:
     """One frame to write over the last, cropped so it neither wraps nor scrolls; clearing first would flicker."""
     body = "".join(f"{line[: columns - 1]}{ERASE_LINE}\n" for line in lines[: rows - 1])
@@ -297,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
         if sink:
             sink(message)
         kept = keep(assembler, message)
-        view.kept.extend(kept)
+        view.note_kept(kept)
         if not redraw:
             print(one_line(message, view.names(message.device)), flush=True)
             for line in kept:
@@ -306,12 +318,15 @@ def main(argv: list[str] | None = None) -> int:
     receiver = Receiver(cfg, on_message, args.device)
     receiver.start()
     shown = ""
+    down_since: float | None = None
     if redraw:
         print(CLEAR, end="", flush=True)
     try:
         while True:
             if redraw:
-                link = "connected" if receiver.connected.is_set() else "connecting"
+                up = receiver.connected.is_set()
+                down_since = None if up else (down_since or time.monotonic())
+                link = link_text(up, 0.0 if down_since is None else time.monotonic() - down_since)
                 lost = f"  {receiver.failed} not saved, see the log" if receiver.failed else ""
                 header = f"broker {cfg.host}:{cfg.port} {link}{lost}  (Ctrl-C quits)"
                 size = shutil.get_terminal_size()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import UTC, timedelta, timezone
 
 from srhost import live, mqtt_rx
@@ -224,3 +225,21 @@ def test_a_board_that_restarted_is_not_sorted_into_its_old_events() -> None:
     view.update(event({"seq": 10, "kind": "WAKE", "scorePermille": 900}))
     seqs = [m.payload["seq"] for m in view._boards[DEVICE].events]
     assert seqs == [90000, 10]
+
+
+def test_the_kept_lines_are_written_under_the_lock_render_reads_them_by() -> None:
+    view = live.View()
+    done = threading.Event()
+    with view._lock:
+        writer = threading.Thread(target=lambda: (view.note_kept(["a picture"]), done.set()))
+        writer.start()
+        assert not done.wait(0.2)
+    writer.join(2)
+    assert done.is_set()
+    assert list(view.kept) == ["a picture"]
+
+
+def test_the_header_says_how_long_the_broker_has_not_answered_and_then_what_to_try() -> None:
+    assert live.link_text(True, 0.0) == "connected"
+    assert live.link_text(False, 3.0) == "connecting for 3 s"
+    assert live.link_text(False, 6.0) == "connecting for 6 s - make broker-up?"
