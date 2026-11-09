@@ -4334,6 +4334,8 @@ lệnh, ≤ 120 KB, trên `up/voice`; topic ấy vào `contracts/mqtt_topics.yam
 Callback của esp-mqtt chỉ phân tích payload rồi bỏ vào `q_cmd`, `q_cmdset` hoặc `q_spkset` (§5.3); không làm việc
 dài, không ghi flash trong callback.
 
+**Gửi lại tin QoS 1.** esp-mqtt gửi lại tin chưa được xác nhận sau `session.message_retransmit_timeout`, mặc định của thư viện là 1 s. Chuỗi nghe (ưu tiên 10) giành CPU của `mqtt_task` (ưu tiên 5) ~1,1 s sau mỗi lượt `detect`, tới 3 s ở mức tồi nhất (`q_clean` của board C, §5.3), nên xác nhận đến muộn và `detections`, `event` hay khúc ảnh đi hai lần (đo 09/11: 3 bản trùng trong 5 lượt). `NET_MQTT_RETRANSMIT_MS` đặt 5 000 ms, trên 3 s ấy và dưới 30 s hết hạn của outbox. Máy nhận vẫn phải chịu được bản trùng (§7.7): gửi lại lúc nối lại là việc bình thường.
+
 ### 7.4 Luồng tiếng TCP
 
 Chỉ để **thu dữ liệu và gỡ lỗi**. Tắt mặc định, không có trong `prod` (§4.5.8).
