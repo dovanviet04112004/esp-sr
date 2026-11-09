@@ -28,7 +28,7 @@ BRIDGE_TCP_PORT ?= 4011
 PORT ?= rfc2217://$(BRIDGE_HOST):$(BRIDGE_TCP_PORT)?ign_set_control
 FLASH_BAUD ?= $(if $(filter C,$(BOARD)),460800,921600)
 # Every Python a goal on board B starts loads tools/board_link first: RFC 2217 read timeouts stay on this side.
-BOARD_GOALS := $(IDF_GOALS) wifi calib-write calib-shift
+BOARD_GOALS := $(IDF_GOALS) wifi wifi-point calib-write calib-shift
 $(BOARD_GOALS): export PYTHONPATH := $(CURDIR)/tools/board_link$(if $(PYTHONPATH),:$(PYTHONPATH))
 # idf.py takes its flash baud from here; on its command line -b would set the monitor's baud too.
 $(BOARD_GOALS): export ESPBAUD := $(FLASH_BAUD)
@@ -505,7 +505,7 @@ fw-prod: ## Build the prod profile in build_prod, from its own sdkconfig
 BRIDGE_SESSION := board-bridge
 bridge_up = netstat.exe -an -p TCP | tr -d '\r' | grep -q " $(BRIDGE_HOST):$(BRIDGE_TCP_PORT) .*LISTENING"
 
-.PHONY: board-attach board-detach board-c-check flash monitor wifi models-flash capture-flash capture-radio-off-flash
+.PHONY: board-attach board-detach board-c-check flash monitor wifi wifi-point models-flash capture-flash capture-radio-off-flash
 # The bridge runs on Windows' Python from its temp folder, with host/'s pyserial copied beside it.
 board-attach: ## Serve board B's COM port to WSL over RFC 2217, so every target reaches it at PORT (KEHOACH 2.1)
 	@command -v py.exe >/dev/null || { echo "board-attach needs Python on Windows (py.exe)"; exit 1; }
@@ -538,6 +538,10 @@ monitor: ## Open the serial monitor on the CH340
 
 wifi: ## Put board B on a Wi-Fi network, the PC's by default, and point its broker and stream at this PC (KEHOACH 7.2)
 	cd host && uv run python -m srhost.wifi --port "$(PORT)"
+
+wifi-point: ## After the PC's address changed: keep the board's stored network, point its broker and stream here, start the broker (KEHOACH 7.2)
+	@docker ps --filter name=sr-emqx --filter status=running -q | grep -q . || $(MAKE) --no-print-directory broker-up
+	cd host && uv run python -m srhost.wifi --port "$(PORT)" --point
 
 models-flash: ## Pack every model of contracts/models.lock.json and write models_0 of board B (KEHOACH 4.5.6, 6.1)
 	cd ml && PORT=$(PORT) BAUD=$(FLASH_BAUD) AFTER=$(AFTER) ./scripts/50_pack_and_flash.sh
