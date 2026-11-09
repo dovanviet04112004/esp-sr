@@ -13,6 +13,7 @@ import logging
 import re
 import sys
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -32,6 +33,8 @@ WILDCARD = "+"
 log = logging.getLogger(__name__)
 VALIDATORS = {name: Draft202012Validator(schema) for name, schema in SCHEMAS.items()}
 BINARY = "binary"  # frame in contracts/vision.yaml, not a JSON schema
+REPEAT_WINDOW_S = 5.0  # esp-mqtt resends QoS 1 every second
+REPEATED_KINDS = ("event", "detections")
 DEVICE_ID = re.compile(SCHEMAS["heartbeat"]["properties"]["deviceId"]["pattern"])
 
 
@@ -133,6 +136,8 @@ class Receiver:
         self._filters = up_filters(device)
         self.connected = threading.Event()
         self.failed = 0
+        self.repeated = 0
+        self._recent: dict[tuple[str, bytes], float] = {}
         self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self._client.username_pw_set(cfg.user, cfg.password)
         self._client.on_connect = self._connected
@@ -151,8 +156,19 @@ class Receiver:
         self.connected.clear()
         log.log(logging.WARNING if reason.is_failure else logging.INFO, "broker connection ended: %s", reason)
 
+    def _seen_lately(self, topic: str, payload: bytes) -> bool:
+        now = time.monotonic()
+        self._recent = {key: at for key, at in self._recent.items() if now - at < REPEAT_WINDOW_S}
+        if (topic, payload) in self._recent:
+            return True
+        self._recent[(topic, payload)] = now
+        return False
+
     def _received(self, _client, _userdata, msg: mqtt.MQTTMessage) -> None:
         message = parse(msg.topic, msg.payload)
+        if message.kind in REPEATED_KINDS and self._seen_lately(msg.topic, bytes(msg.payload)):
+            self.repeated += 1
+            return
         if message.rejected:
             log.warning("rejected %s: %s", message.topic, message.error)
         # An exception here ends paho's network thread, and with it every message after this one.
@@ -170,8 +186,10 @@ class Receiver:
         self._client.publish(topic, payload, qos)
 
     def stop(self) -> None:
-        self._client.disconnect()
-        self._client.loop_stop()
+        # Without a session paho's thread may sit in a 5 s connect that loop_stop waits out; it is a daemon.
+        if self.connected.is_set():
+            self._client.disconnect()
+            self._client.loop_stop()
 
 
 def main(argv: list[str] | None = None) -> int:

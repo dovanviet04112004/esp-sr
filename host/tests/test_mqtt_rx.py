@@ -115,3 +115,50 @@ def test_a_handler_that_raises_leaves_the_receiver_running() -> None:
     msg.payload = json.dumps(HEARTBEAT).encode()
     receiver._received(None, None, msg)
     assert receiver.failed == 1
+
+
+def receiver_of(received: list[mqtt_rx.Message]) -> mqtt_rx.Receiver:
+    cfg = MqttConfig(host="localhost", port=1883, user="u", password="p")
+    return mqtt_rx.Receiver(cfg, received.append)
+
+
+def arrive(receiver: mqtt_rx.Receiver, kind: str, payload: dict) -> None:
+    msg = mqtt.MQTTMessage(topic=f"sr/{DEVICE}/up/{kind}".encode())
+    msg.payload = json.dumps(payload).encode()
+    receiver._received(None, None, msg)
+
+
+EVENT = {"deviceId": DEVICE, "seq": 150, "kind": "WAKE", "scorePermille": 900}
+
+
+def test_an_event_resent_within_the_window_is_taken_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    got: list[mqtt_rx.Message] = []
+    receiver = receiver_of(got)
+    now = 1000.0
+    monkeypatch.setattr(mqtt_rx.time, "monotonic", lambda: now)
+    arrive(receiver, "event", EVENT)
+    now += 1.3
+    arrive(receiver, "event", EVENT)
+    now += 1.0
+    arrive(receiver, "event", {**EVENT, "seq": 151})
+    assert [m.payload["seq"] for m in got] == [150, 151]
+    assert receiver.repeated == 1
+    now += mqtt_rx.REPEAT_WINDOW_S
+    arrive(receiver, "event", EVENT)
+    assert len(got) == 3
+
+
+def test_a_status_said_twice_is_two_statuses(monkeypatch: pytest.MonkeyPatch) -> None:
+    got: list[mqtt_rx.Message] = []
+    receiver = receiver_of(got)
+    monkeypatch.setattr(mqtt_rx.time, "monotonic", lambda: 1000.0)
+    status = {"deviceId": DEVICE, "state": "ONLINE", "fw": "0.1.0"}
+    arrive(receiver, "status", status)
+    arrive(receiver, "status", status)
+    assert len(got) == 2
+
+
+def test_stopping_a_receiver_that_never_connected_does_not_wait_for_paho() -> None:
+    receiver = receiver_of([])
+    receiver._client = None  # any call on it would raise
+    receiver.stop()
