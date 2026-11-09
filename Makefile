@@ -830,7 +830,7 @@ listen-unit: ## Run svc_listen on board B over every Gate 3 session, round by ro
 
 ##@ Broker and host
 
-.PHONY: broker-up broker-down host-live commands speakers speaker-enrol speaker-name speaker-forget
+.PHONY: broker-up broker-down host-live detect commands speakers speaker-enrol speaker-name speaker-forget
 broker-up: ## Start the bench MQTT broker (needs deploy/.env and deploy/emqx/users.csv)
 	@test -f deploy/.env || { echo "copy deploy/.env.example to deploy/.env and fill it"; exit 1; }
 	@test -f deploy/emqx/users.csv || { echo "copy deploy/emqx/users.csv.example to deploy/emqx/users.csv and fill it"; exit 1; }
@@ -841,6 +841,9 @@ broker-down: ## Stop the bench MQTT broker
 
 host-live: ## Show every board live, and keep board C's pictures and detect's result under the data root
 	cd host && uv run python -m srhost.live
+
+detect: ## Ask the one board online (or DEVICE=<deviceId>) for a "nhận diện" picture, no voice, and print where the boxes landed (KEHOACH 3.19)
+	cd host && uv run python -m srhost.vision $(if $(DEVICE),--device "$(DEVICE)") --capture DETECT --once
 
 vision-live: ## Board C's preview on a local page, with a sharpness figure for setting the lens by hand: DEVICE=<deviceId>
 	cd host && uv run python -m srhost.vision --device "$(DEVICE)" --live
