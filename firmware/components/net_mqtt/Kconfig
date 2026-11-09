@@ -21,6 +21,15 @@ menu "net_mqtt"
             The broker publishes the offline will about 1.5 keepalives after
             the board goes silent, so this bounds how late a power cut shows.
 
+    config NET_MQTT_RETRANSMIT_MS
+        int "Resend an unacknowledged QoS 1 message after (ms)"
+        range 1000 20000
+        default 5000
+        help
+            esp-mqtt's own 1000 ms is shorter than the CPU mqtt_task loses to
+            the listener after a detect run, so the broker got the message
+            twice (KEHOACH 7.3). The outbox drops a message after 30 s.
+
     config NET_MQTT_JSON_ARENA_BYTES
         int "Bytes of each of the two JSON arenas in PSRAM"
         range 2048 262144

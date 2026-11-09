@@ -375,6 +375,7 @@ esp_err_t net_mqtt_start(const net_mqtt_config_t *cfg)
         .credentials.client_id = s_device_id,
         .credentials.authentication.password = has_pass ? pass : NULL,
         .session.keepalive = CONFIG_NET_MQTT_KEEPALIVE_S,
+        .session.message_retransmit_timeout = CONFIG_NET_MQTT_RETRANSMIT_MS,
         .session.last_will =
             {
                 .topic = s_status_topic,
