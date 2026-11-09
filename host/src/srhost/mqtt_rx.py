@@ -149,7 +149,7 @@ class Receiver:
 
     def _disconnected(self, _client, _userdata, _flags, reason, _properties) -> None:
         self.connected.clear()
-        log.warning("broker connection lost: %s; paho reconnects", reason)
+        log.log(logging.WARNING if reason.is_failure else logging.INFO, "broker connection ended: %s", reason)
 
     def _received(self, _client, _userdata, msg: mqtt.MQTTMessage) -> None:
         message = parse(msg.topic, msg.payload)
