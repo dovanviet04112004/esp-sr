@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import time
 import zlib
@@ -249,3 +250,71 @@ def test_boxes_with_crossed_corners_still_draw(tmp_path: Path) -> None:
     box = {"name": "cup", "scorePermille": 500, "x1": 30, "y1": 60, "x2": 10, "y2": 20}
     vision.draw_boxes(picture, {"width": 40, "boxes": [box]}, tmp_path / "out.jpg")
     assert (tmp_path / "out.jpg").exists()
+
+
+def jpeg_chunk() -> bytes:
+    """One chunk carrying a real JPEG, so boxes can be drawn on it."""
+    buffer = io.BytesIO()
+    Image.new("RGB", (400, 200), "white").save(buffer, "JPEG")
+    return chunk(buffer.getvalue(), 0, 1, total=len(buffer.getvalue()))
+
+
+def up(kind: str, payload: dict | bytes, device: str = DEVICE) -> mqtt_rx.Message:
+    body = payload if isinstance(payload, bytes) else json.dumps({"deviceId": device, **payload}).encode()
+    return mqtt_rx.parse(f"sr/{device}/up/{kind}", body, rx_utc="now")
+
+
+DETECTIONS = {k: v for k, v in BOXES.items() if k != "deviceId"}
+
+
+def test_a_detect_waits_for_the_picture_and_its_boxes_in_either_order(tmp_path: Path) -> None:
+    for first in ("image", "detections"):
+        shot = vision.OneShot(vision.Assembler(tmp_path / first), "DETECT", DEVICE)
+        messages = {"image": up("image", jpeg_chunk()), "detections": up("detections", DETECTIONS)}
+        shot.handle(messages[first])
+        assert not shot.done.is_set()
+        assert shot.missing() == ("detections" if first == "image" else "image")
+        shot.handle(messages["detections" if first == "image" else "image"])
+        assert shot.done.is_set()
+        assert shot.problem is None
+        assert (tmp_path / first / DEVICE / "B7_000002_boxes.jpg").exists()
+
+
+def test_a_photo_needs_the_picture_only(tmp_path: Path) -> None:
+    shot = vision.OneShot(vision.Assembler(tmp_path), "PHOTO", DEVICE)
+    shot.handle(up("image", jpeg_chunk()))
+    assert shot.done.is_set()
+
+
+def test_a_chunk_that_is_refused_is_not_a_picture(tmp_path: Path) -> None:
+    shot = vision.OneShot(vision.Assembler(tmp_path), "PHOTO", DEVICE)
+    shot.handle(up("image", chunk(PICTURE, 0, 1, crc32=1)))
+    assert not shot.done.is_set()
+    assert shot.missing() == "image"
+
+
+def test_a_refusal_ends_the_wait_with_its_code(tmp_path: Path) -> None:
+    shot = vision.OneShot(vision.Assembler(tmp_path), "DETECT", DEVICE)
+    shot.handle(up("event", {"seq": 0, "kind": "ERROR", "code": "VISION_BUSY"}))
+    assert shot.done.is_set()
+    assert shot.problem == "the board answered ERROR VISION_BUSY"
+
+
+def test_what_another_board_sends_is_not_this_ones_capture(tmp_path: Path) -> None:
+    shot = vision.OneShot(vision.Assembler(tmp_path), "PHOTO", DEVICE)
+    shot.handle(up("image", jpeg_chunk(), device="sr-other01"))
+    assert not shot.done.is_set()
+    assert not list(tmp_path.rglob("*.jpg"))
+
+
+def test_the_boards_online_are_those_whose_last_status_says_so(tmp_path: Path) -> None:
+    shot = vision.OneShot(vision.Assembler(tmp_path), "DETECT", None)
+    for device, state in (("sr-aaaa01", "ONLINE"), ("sr-bbbb01", "ONLINE"), ("sr-aaaa01", "OFFLINE")):
+        shot.handle(up("status", {"state": state, "fw": "0.1.0"}, device=device))
+    assert vision.sole_board(shot.online) == "sr-bbbb01"
+
+
+@pytest.mark.parametrize("online", [set(), {"sr-aaaa01", "sr-bbbb01"}])
+def test_no_board_or_several_ask_for_a_device(online: set[str]) -> None:
+    with pytest.raises(ValueError, match="pass DEVICE="):
+        vision.sole_board(online)

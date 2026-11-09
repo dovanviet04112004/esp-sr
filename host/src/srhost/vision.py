@@ -1,7 +1,7 @@
 """Keep what board C's camera sends: join up/image chunks into a JPEG and print up/detections (KEHOACH 3.19).
 
 Images land under the data root, never in the repo: a photo of a room is a person's data (KEHOACH 7.5).
-Run: uv run python -m srhost.vision [--device <deviceId>] [--capture PHOTO|DETECT | --live]
+Run: uv run python -m srhost.vision [--device <deviceId>] [--capture PHOTO|DETECT [--once] | --live]
 """
 
 from __future__ import annotations
@@ -21,13 +21,16 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-from srhost.config import ConfigError, live_port, mqtt_config, record_config
+from srhost.config import ConfigError, MqttConfig, live_port, mqtt_config, record_config
 from srhost.generated import topics, vision
 from srhost.mqtt_rx import Message, Receiver
 
 IMAGES_DIR = Path("raw") / "images"
 PERMILLE = 1000
 CONNECT_TIMEOUT_S = 10.0
+STATUS_WAIT_S = 2.0  # retained statuses come right after subscribing
+ONCE_WAIT_S = 30.0
+REFUSED = "image refused"
 FPS_WINDOW_FRAMES = 20
 BOXES_SUFFIX = "_boxes"
 PLACE_SUFFIX = "_place"
@@ -319,7 +322,7 @@ def keep(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -
         try:
             header, image = assembler.join(message.device, message.body or b"")
         except ChunkError as err:
-            return [f"{message.device} image refused: {err}"]
+            return [f"{message.device} {REFUSED}: {err}"]
         if image is None:
             return []
         if header["flags"] & vision.CHUNK_FLAG_PREVIEW:
@@ -343,6 +346,88 @@ def keep(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -
     return done
 
 
+class OneShot:
+    """One capture asked from the command line: it waits for the picture and, in DETECT, the boxes, or a refusal."""
+
+    def __init__(self, assembler: Assembler, mode: str, device: str | None) -> None:
+        self.assembler = assembler
+        self.mode = mode
+        self.device = device
+        self.online: set[str] = set()
+        self.done = threading.Event()
+        self.problem: str | None = None
+        self._got: set[str] = set()
+
+    def handle(self, message: Message) -> None:
+        if message.kind == "status" and message.payload is not None:
+            (self.online.add if message.payload["state"] == "ONLINE" else self.online.discard)(message.device)
+        if self.device is None or message.device != self.device:
+            return
+        lines = keep(self.assembler, message)
+        for line in lines:
+            print(line, flush=True)
+        self._note(message, lines)
+
+    def _note(self, message: Message, lines: list[str]) -> None:
+        payload = message.payload or {}
+        if message.kind == "event" and payload.get("kind") == "ERROR":
+            self.problem = f"the board answered ERROR {payload.get('code', '?')}"
+            self.done.set()
+        elif message.kind == "image" and lines and REFUSED not in lines[0]:
+            self._got.add("image")
+        elif message.kind == "detections" and not message.rejected:
+            self._got.add("detections")
+        if self._got >= self.needed():
+            self.done.set()
+
+    def needed(self) -> set[str]:
+        return {"image", "detections"} if self.mode == "DETECT" else {"image"}
+
+    def missing(self) -> str:
+        return " and ".join(sorted(self.needed() - self._got)) or "nothing"
+
+
+def sole_board(online: set[str]) -> str:
+    """The one board that is online; ValueError naming the others when there are none or several."""
+    if len(online) == 1:
+        return next(iter(online))
+    raise ValueError(f"{len(online)} boards online ({', '.join(sorted(online)) or 'none'}): pass DEVICE=<deviceId>")
+
+
+def run_once(cfg: MqttConfig, assembler: Assembler, mode: str, device: str | None) -> int:
+    """Ask a board for one capture and wait for all of it; 0 when it came, 1 and the reason when it did not."""
+    shot = OneShot(assembler, mode, device)
+    receiver = Receiver(cfg, shot.handle, device)
+    receiver.start()
+    try:
+        if not receiver.connected.wait(CONNECT_TIMEOUT_S):
+            print(f"no broker at {cfg.host}:{cfg.port} in {CONNECT_TIMEOUT_S:.0f} s: make broker-up")
+            return 1
+        if device is None:
+            time.sleep(STATUS_WAIT_S)
+            try:
+                shot.device = sole_board(set(shot.online))
+            except ValueError as err:
+                print(err)
+                return 1
+        cmd = topics.BY_ID["cmd"]
+        started_s = time.monotonic()
+        receiver.publish(cmd.build(shot.device), capture_command(mode), cmd.qos)
+        shot.done.wait(ONCE_WAIT_S)
+    finally:
+        receiver.stop()
+    if shot.problem:
+        print(shot.problem)
+        return 1
+    if shot.missing() != "nothing":
+        print(
+            f"{shot.device}: no {shot.missing()} in {ONCE_WAIT_S:.0f} s: is it online, and busy with another capture?"
+        )
+        return 1
+    print(f"{shot.device}: {mode} came back in {time.monotonic() - started_s:.1f} s")
+    return 0
+
+
 def on_message(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -> None:
     for line in keep(assembler, message, feed):
         print(line, flush=True)
@@ -355,11 +440,14 @@ def capture_command(mode: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--device", help="one deviceId; every board otherwise")
+    parser.add_argument("--device", help="one deviceId; every board otherwise, or the one online with --once")
     parser.add_argument("--capture", choices=("PHOTO", "DETECT"), help="ask --device for one picture first")
     parser.add_argument("--live", action="store_true", help="the board's preview frames on a local page")
+    parser.add_argument("--once", action="store_true", help="with --capture: wait for what it brings, then exit")
     args = parser.parse_args(argv)
-    if (args.capture or args.live) and not args.device:
+    if args.once and not args.capture:
+        parser.error("--once needs --capture")
+    if (args.capture or args.live) and not args.device and not args.once:
         parser.error("--capture and --live need --device")
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(message)s")
     try:
@@ -369,6 +457,8 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as err:
         print(f"vision: {err}", file=sys.stderr)
         return 2
+    if args.once:
+        return run_once(cfg, assembler, args.capture, args.device)
     feed = LiveFeed() if args.live else None
     receiver = Receiver(cfg, lambda message: on_message(assembler, message, feed), args.device)
     receiver.start()
