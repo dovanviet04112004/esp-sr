@@ -1,4 +1,4 @@
-"""Put board B on a Wi-Fi network and point it at this PC: make wifi (KEHOACH 7.2, 7.4).
+"""Put board B on a Wi-Fi network and point it at this PC: make wifi; --point keeps its network (KEHOACH 7.2).
 
 Asks the network, the one Windows is on by default, and its key without echo, the key Windows saved by default; sends
 them through the console of main, restarts the board until it has an address, then points device/mqtt_uri and
@@ -38,7 +38,7 @@ SCAN_CHANNEL = re.compile(r"^\s*Channel\s*:\s*(\d+)", re.MULTILINE)
 BAND_24, BAND_5 = "2.4 GHz", "5 GHz"
 CHANNEL_24_MAX = 14  # netsh of older Windows prints the channel and no band
 IPV4_LINE = re.compile(r"IPv4[^:\r\n]*:\s*(\d+\.\d+\.\d+\.\d+)")
-STA_IP = re.compile(rb"sta ip: (\d+\.\d+\.\d+\.\d+)")
+STA_IP = re.compile(rb"sta ip: (\d+\.\d+\.\d+\.\d+)(?=\D)")  # the next byte too: a cut line must not match
 SESSION_UP = re.compile(rb"net_mqtt: session up")
 WIFI_SET = re.compile(r"wifi/ssid .*, wifi/pass \d+ chars: (\S+)")
 NVS_STR = re.compile(r'device/mqtt_uri = "([^"]*)" \(str\)')
@@ -184,6 +184,18 @@ def join(port_name: str, ssid: str, key: str) -> str:
     return address.group(1).decode()
 
 
+def board_address(port_name: str) -> str:
+    """Restart the board and return the address it joins its stored network with."""
+    console = Console(port_name)
+    try:
+        address = console.wait(STA_IP, LINK_TIMEOUT_S)
+    finally:
+        console.close()
+    if address is None:
+        raise BoardError(f"the board joined no network in {LINK_TIMEOUT_S:.0f} s: make wifi gives it one")
+    return address.group(1).decode()
+
+
 def point_at(port_name: str, pc_ip: str, stream_port: int) -> str:
     """Point the broker and the stream at pc_ip, keeping the broker's scheme and port; return the new mqtt_uri."""
     console = Console(port_name)
@@ -213,12 +225,36 @@ def broker_reached(port_name: str) -> bool:
         console.close()
 
 
+def point_here(port_name: str, stream_port: int) -> int:
+    """Point the broker and the stream at this PC on the network the board stored; 0 once its session is up."""
+    ssid = current_ssid(windows("netsh.exe", "wlan", "show", "interfaces")) or "no network"
+    board_ip = board_address(port_name)
+    print(f"Windows is on {ssid}, the board joined its stored network as {board_ip}")
+    pc_ip = near(board_ip, windows("ipconfig.exe"))
+    if not pc_ip:
+        print(
+            f"this PC has no address on {board_ip.rsplit('.', 1)[0]}.0/24: the board is on another network than {ssid}"
+        )
+        print("join the board's network here, or make wifi to give the board this one")
+        return 1
+    uri = point_at(port_name, pc_ip, stream_port)
+    print(f"broker {uri}, stream {pc_ip}:{stream_port}")
+    if not broker_reached(port_name):
+        print(f"no MQTT session in {LINK_TIMEOUT_S:.0f} s: is the broker running in Docker Desktop on {pc_ip}?")
+        return 1
+    print("the board is on the broker")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--port", required=True, help="board B's serial port, the bridge's URL by default")
+    parser.add_argument("--point", action="store_true", help="keep the stored network, point the addresses here")
     args = parser.parse_args(argv)
     try:
         stream_port = record_config().stream_port
+        if args.point:
+            return point_here(args.port, stream_port)
         heard = scan_bands(windows("netsh.exe", "wlan", "show", "networks", "mode=bssid"))
         default = current_ssid(windows("netsh.exe", "wlan", "show", "interfaces"))
         if BAND_24 not in heard.get(default, {BAND_24}):

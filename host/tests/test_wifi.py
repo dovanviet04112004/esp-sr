@@ -147,6 +147,9 @@ class ScriptedPort:
     def write(self, data: bytes) -> None:
         self.written += data
 
+    def close(self) -> None:
+        pass
+
 
 def console_on(printed: bytes) -> wifi.Console:
     console = wifi.Console.__new__(wifi.Console)
@@ -174,3 +177,62 @@ def test_opening_the_console_asks_for_a_restart_a_board_without_a_reset_pin_need
         assert console.port.read(len(wifi.RESTART_LINE)) == wifi.RESTART_LINE
     finally:
         console.close()
+
+
+def test_the_board_address_is_the_one_its_boot_log_gives(monkeypatch: pytest.MonkeyPatch) -> None:
+    log = b"I (3412) esp_netif_handlers: sta ip: 192.168.86.74, mask: 255.255.255.0, gw: 192.168.86.232\r\n"
+    console = console_on(log)
+    monkeypatch.setattr(wifi, "Console", lambda _port: console)
+    assert wifi.board_address("loop://") == "192.168.86.74"
+
+
+def test_an_address_the_serial_line_has_cut_short_is_not_taken(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(wifi, "LINK_TIMEOUT_S", 0.01)
+    console = console_on(b"esp_netif_handlers: sta ip: 192.168.86.7")
+    monkeypatch.setattr(wifi, "Console", lambda _port: console)
+    with pytest.raises(wifi.BoardError, match="joined no network"):
+        wifi.board_address("loop://")
+
+
+def test_a_board_that_joins_nothing_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(wifi, "LINK_TIMEOUT_S", 0.01)
+    console = console_on(b"")
+    monkeypatch.setattr(wifi, "Console", lambda _port: console)
+    with pytest.raises(wifi.BoardError, match="joined no network"):
+        wifi.board_address("loop://")
+
+
+def follow_pc(monkeypatch: pytest.MonkeyPatch, board_ip: str, session: bool) -> list[tuple[str, int]]:
+    """Run point_here with the board at board_ip and this PC as IPCONFIG shows it; the points made."""
+    pointed: list[tuple[str, int]] = []
+    monkeypatch.setattr(wifi, "windows", lambda *command: INTERFACES if "interfaces" in command else IPCONFIG)
+    monkeypatch.setattr(wifi, "board_address", lambda _port: board_ip)
+    monkeypatch.setattr(wifi, "point_at", lambda _port, pc, port: pointed.append((pc, port)) or f"mqtt://{pc}:1883")
+    monkeypatch.setattr(wifi, "broker_reached", lambda _port: session)
+    return pointed
+
+
+def test_the_addresses_follow_this_pc_on_the_network_the_board_stored(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pointed = follow_pc(monkeypatch, "192.168.116.74", session=True)
+    assert wifi.point_here("loop://", 7700) == 0
+    assert pointed == [("192.168.116.251", 7700)]
+    assert "the board is on the broker" in capsys.readouterr().out
+
+
+def test_a_board_on_another_network_than_this_pc_is_left_alone(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pointed = follow_pc(monkeypatch, "192.168.40.20", session=True)
+    assert wifi.point_here("loop://", 7700) == 1
+    assert pointed == []
+    assert "no address on 192.168.40.0/24" in capsys.readouterr().out
+
+
+def test_a_session_that_never_comes_up_is_a_failure_that_names_the_broker(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    follow_pc(monkeypatch, "192.168.116.74", session=False)
+    assert wifi.point_here("loop://", 7700) == 1
+    assert "broker running in Docker Desktop" in capsys.readouterr().out
