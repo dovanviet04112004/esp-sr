@@ -4408,6 +4408,15 @@ khe, header sau cùng. Lúc ghi khe, chuỗi nghe cũng dừng và `OTA_RUNNING`
 Ba vai — xem, chấm, thu — ở §4.6. `host/` đọc schema và khuôn khung từ code sinh, nên đổi hợp đồng ở
 `contracts/` là đổi cả hai đầu trong một lần `make gen`.
 
+Ba điều `Receiver` (`srhost.mqtt_rx`) phải chịu được, vì cả `make host-live`, `make detect` và `make vision-live` dựa vào nó:
+
+- **Tin đến hai lần.** QoS 1 là ít nhất một lần: esp-mqtt trên board gửi lại tin chưa được xác nhận sau 1 s, mà chuỗi nghe đuổi kịp sau một lượt
+  `detect` (~1,1 s, §3.18) giành CPU của `mqtt_task`, nên `detections` hay `event` đến hai lần (đo 05/11: cách nhau 1,3 s). `Receiver` bỏ bản giống hệt
+  từng byte của `event` và `detections` đến trong 5 s sau bản đầu. Trạng thái và nhịp tim không qua bộ lọc này: cùng nội dung hai lần là hai việc thật.
+- **Một tin hỏng không được giết luồng.** Mọi tin chạy ở luồng của paho, ngoại lệ ở đó kết thúc luồng và mất mọi tin sau; lỗi chỉ được ghi và đếm.
+- **Thoát nhanh khi chưa có broker.** Luồng paho có thể kẹt trong một lần nối 5 s; `stop` không chờ nó khi chưa có phiên, và màn hình của
+  `make host-live` nói đã chờ bao lâu và gợi ý `make broker-up`.
+
 ---
 
 ## 8. Thứ tự thực hiện
