@@ -156,6 +156,16 @@ Ngăn xếp `main` (E15-T27, 05/11): `app_boot` dựng mọi mạng trên `main`
 
 `thu_task` dùng 848 B, nên trả 1 KB `.bss` cho heap để bù phần `main` nới thêm.
 
+Gửi lại tin QoS 1 (E13-T18, 09/11): esp-mqtt gửi lại tin chưa được xác nhận sau 1 000 ms, mà chuỗi nghe đuổi kịp giành CPU của `mqtt_task` ~1,1 s sau mỗi lượt `detect`,
+nên `up/detections` đến hai lần (cách nhau 1,3 s, cùng `captureSeq`). Đếm số bản `Receiver` bỏ, `make detect` nối tiếp, `make vision-live` của chủ repo chạy cả hai lần:
+
+| `NET_MQTT_RETRANSMIT_MS` | Lượt `detect` | `detections` nhận | Bản trùng |
+|---|---|---|---|
+| 1 000 (thư viện) | 5 | 5 | 3 |
+| 5 000 | 6 | 6 | **0** |
+
+Mẫu nhỏ, nhưng 3 trong 5 mà thành 0 trong 6 không phải ngẫu nhiên. Một lượt `make detect` 3,7–3,8 s, có lần 5,0 s.
+
 Outbox của esp-mqtt sang PSRAM (E15-T25): vùng mượn vẫn 26 560 B, `detect` 1 950–1 954 ms, RAM nội thấp nhất 23 955 B, nên outbox không phải lý do vùng hụt. `qCleanPeak` 122–127 / 192 sau mỗi lượt
 `detect`, `clean_dropped` 0.
 
