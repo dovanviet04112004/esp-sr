@@ -2614,8 +2614,9 @@ không xoay được nếu không nén lại, nên mang cờ EXIF orientation 6 
 Tên trên thẻ dựa vào lượt khởi động vì board chưa có đồng hồ. Mất NVS thì `boot` đếm lại, nên `drv_sd` không ghi đè: tên đã có thì ảnh
 mới lấy hậu tố `_<n>`. Host cũng vậy: bộ file cũ của tên ấy chuyển sang `<stem>_old<n>`, để khung cũ không vẽ lên ảnh mới.
 
-**Xem trực tiếp, để chỉnh ống kính.** `CAPTURE` với `PREVIEW` giữ sensor chạy, đèn sáng, và đẩy từng khung lên `up/image` ở QoS 0,
-cờ `preview` ở đầu khúc, không ghi thẻ. Không có `PREVIEW` mới trong `preview_hold_ms` thì tự tắt, nên chế độ này không sống lâu hơn
+**Xem trực tiếp, để chỉnh ống kính.** `CAPTURE` với `PREVIEW` giữ sensor chạy ở khung đầy đủ, đèn sáng, và đẩy từng khung lên
+`up/image` ở QoS 0, cờ `preview` ở đầu khúc, không ghi thẻ. Khung đầy đủ để nét được chỉnh trên đúng ảnh sẽ gửi về; mỗi khung ~230 KB
+và cảm biến ra khung ấy chậm, nên chỉ vài khung mỗi giây 🔬. Hết xem thì sensor về khung `detect`. Không có `PREVIEW` mới trong `preview_hold_ms` thì tự tắt, nên chế độ này không sống lâu hơn
 lệnh của nó. Một lệnh ảnh chen vào thì tắt ngay. Host giữ khung trong bộ nhớ cho trang của `make vision-live`, không ghi đĩa.
 
 Host lưu ảnh nhỏ của `detect` `<stem>.jpg`, ảnh đầy đủ `<stem>_full.jpg`, khung `<stem>.json`, cùng hai ảnh đã vẽ khung và tên vật
