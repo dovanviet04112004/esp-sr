@@ -513,3 +513,58 @@ Lượt đo từng module (ảnh cuối), cộng theo khối, ms:
 - Không dùng: lock giữ 1 839 ms. Muốn op có lợi thì cần kernel vector cho phép giãn và phép chép, và dựng hàng một lần cho
   mọi lát. Lợi tối đa theo bảng trên chừng 70 ms, khoảng 4% một ảnh 🔬. Code của op giữ ở nhánh
   `feat/firmware-ai-engine-concat-conv`.
+
+## 11. Gói của server: YOLO26n Agri-Det, 3 lớp, S = 512 (10/11)
+
+Model `exp2_yolo26n_imgsz512_best.pt` của gói `E:\Vuong_Yolo26n` (lá, quả bưởi, phân thuốc), học trên Colab bằng Ultralytics
+8.4.208 từ `yolo26n.pt` ở 512 px; repo ghim 8.4.193 và nạp được. Chuỗi §2 chạy nguyên, không sửa code hay cấu hình, chỉ đổi
+`package` qua `SET=`. Mọi số mAP là mô phỏng trên PC, chưa phải số chip.
+
+**Gói** `interim/detect/vuong_yolo26n`, xếp lại từ gói của server cho đúng khuôn của chuỗi (`model.pt`, `data/data.yaml`,
+`data/{images,labels}/{train,val,test}`), copy chứ không đổi tên file:
+- `train` 546 ảnh, 3 631 khung (lá 2 538, quả 682, phân thuốc 411), 25 ảnh nền;
+- `val` 159 ảnh, 1 037 khung (645, 200, 192), 8 ảnh nền; không ảnh nào trùng train theo md5, mọi ảnh có file nhãn;
+- server chưa có `test`: thư mục `test` là bản copy của `val` chỉ để `data.package()` không báo thiếu, nên số trên `test`
+  không độc lập và không dùng làm số cuối. Có `test` thật thì thay thư mục ấy và chạy lại `detect-import`.
+
+**Run** `20261110_481d208-dirty_fda2fe`:
+
+| Bước | Thời gian | Đỉnh RAM | Kết quả |
+|---|---|---|---|
+| `make detect-import SET="package=detect/vuong_yolo26n"` | 7 s | | ONNX lệch `model.pt` tối đa 6,28e-06 trên 8 ảnh `val`; 3 lớp khớp `data.yaml` |
+| `make detect-ptq` | 18 phút 24 | 3,76 GB | `.espdl` 2 937 152 B |
+| `make detect-eval SPLIT=val` | 1 phút 16 | 1,52 GB | bảng dưới |
+
+| `val`, 159 ảnh | mAP50-95 | mAP50 |
+|---|---|---|
+| model.pt lúc server học (`train_metrics`) | 0,5491 | 0,7867 |
+| float (onnxruntime, letterbox của chip) | 0,5255 | 0,7550 |
+| int8 (mô phỏng ESP-PPQ) | **0,5214** | 0,7488 |
+
+Float bằng 0,957 số server ghi; int8 tụt 0,0041 so với float, cửa `eval.gate` 0,02: qua. `make detect-deploy` ghi
+`firmware/models/detect/` và dòng `detect` của lock (sha256 `.espdl` `bfc09ffa…`). Chưa chạy: `make ai-unit-detect` (chip so
+với mô phỏng), `make product BOARD=C` và số thời gian trên board 🔬; ảnh thật qua camera OV5640 chưa thử.
+
+Model COCO cũ (run `20261031_cb3ce8d-dirty_7ec170`, `.espdl` sha256 `1e9e6716…`) còn nguyên trong run của nó; về lại bằng
+`make detect-deploy RUN=ml/artifacts/detect/runs/20261031_cb3ce8d-dirty_7ec170`.
+
+**Board C, 10/11:** `make product BOARD=C` ghi `vision_0` (2 941 248 B, sha256 khớp header) và board lên bình thường. `make detect`
+trả lời, `detectMs` 1 909 ms một lượt, cả lệnh 3,2 s, trong lúc `vision-live` của chủ repo đang chạy. Ảnh lượt ấy gần đen nên
+0 hộp chưa nói gì về chất lượng; chưa thử ảnh có lá, quả hay phân thuốc 🔬.
+
+Cùng board, ngay sau đó quay về COCO (`make detect-deploy` run `20261031_cb3ce8d-dirty_7ec170`, `make product BOARD=C`, `vision_0`
+2 975 888 B). `detectMs` của mỗi `up/detections`, đọc từ `raw/images/sr-30eda01e4630/B<boot>_*.json`, cùng app `esp_sr.bin` dựng
+09/11 và cùng `.espdl` COCO ở các boot COCO:
+
+| Boot | Model | Lượt | `detectMs` |
+|---|---|---|---|
+| 85–89 (09/11 14:05 đến 10/11 11:52) | COCO | 113 | 1 949–1 980, trung vị mỗi boot 1 953–1 960; một lượt 2 231 ở boot 86 |
+| 93 | 3 lớp | 18 | 1 907–1 921, trung vị 1 914 |
+| 94 | COCO | 7 | 2 016–2 041 |
+| 95 | COCO | 3 | 1 950–1 974 |
+
+- Cùng app và cùng `.espdl`, boot 94 chậm hơn boot 95 chừng 65 ms, và boot 83 (09/11 14:02) 2 259–2 266 ms: thời gian `detect` đổi
+  theo vùng RAM nội mượn được của từng boot (`board_c.md` §4.5). Hạ `AI_ENGINE_LOAN_RESERVE_BYTES` của board C từ 8 192 xuống 2 048
+  đưa mọi boot đo được (8 boot, 107–114) về 1 931–1 970 ms, thay cho 1 950–2 031 ms.
+- Ở các boot tốt, 3 lớp nhanh hơn COCO khoảng 41 ms, 2,1% 🔬; ước lượng từ bảng §8 là ~3%.
+- Dòng log khởi động boot 95: `ai_detect: 20261031_cb3ce8d-dirty_7ec170: 80 classes at 512`; có hộp `person` 0,49 (boot 95) và `cell phone` 0,71 (boot 94).

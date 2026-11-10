@@ -169,6 +169,26 @@ Mẫu nhỏ, nhưng 3 trong 5 mà thành 0 trong 6 không phải ngẫu nhiên. 
 Outbox của esp-mqtt sang PSRAM (E15-T25): vùng mượn vẫn 26 560 B, `detect` 1 950–1 954 ms, RAM nội thấp nhất 23 955 B, nên outbox không phải lý do vùng hụt. `qCleanPeak` 122–127 / 192 sau mỗi lượt
 `detect`, `clean_dropped` 0.
 
+**Vùng mượn của `detect` theo từng boot (10/11).** Cùng app, cùng model COCO, khối RAM nội lớn nhất lúc `link up` chỉ có vài mức, mỗi mức chốt cho cả
+boot: 29 696, 34 816, 36 864 hay 38 912 B. Khối lớn nhất lúc chạy nhỏ hơn mức ấy 0–2 KB (MQTT khởi động sau `link up`). Heap
+trước khi bật Wi-Fi giống từng byte (86 016 B liền ở bước `vision`), nên khối nhỏ nằm giữa xuất hiện trong lúc Wi-Fi nối; hai boot liền nhau
+khác `aid` (3 so với 5) và RSSI (−46 so với −32 dBm), chưa chứng minh là nguyên nhân 🔬.
+
+| `AI_ENGINE_LOAN_RESERVE_BYTES` | Boot | Khối lớn nhất lúc `link up` | Vùng mượn | `detect` |
+|---|---|---|---|---|
+| 8 192 | 94, 96, 98, 100, 102 | 29 696 B | 21 440 B | 2 016–2 031 ms |
+| 8 192 | 95 | 34 816 B | 26 560 B | 1 950–1 974 ms |
+| 8 192 | 97, 99, 101, 103–105 | 36 864 B | 28 608 B | 1 951–1 962 ms |
+| 2 048 | 107–110, 113 | 29 696 B | 27 584 B | 1 951–1 970 ms |
+| 2 048 | 111, 112 | 36 864 B | 32 704 B | 1 941–1 956 ms |
+| 2 048 | 114 | 38 912 B | 32 768 B, đủ | 1 931–1 936 ms |
+
+Vùng mượn là khối lớn nhất lúc chạy trừ dự trữ và 64 B đệm, nên dự trữ 8 KB biến bố cục 29 696 B thành vùng 21 440 B, dưới ngưỡng ~25 KB
+mà tốc độ nhảy thêm ~65 ms. Các task khác chỉ cấp thêm khoảng 130 B RAM nội trong lúc `detect` chạy (RAM nội trống thấp nhất 23 955 B
+trong khi vùng mượn 28 608 B đang giữ), nên dự trữ 8 KB không dùng tới. Hạ xuống 2 KB: RAM nội thấp nhất ở boot 114, vùng mượn đủ 32 768 B,
+sau ba lượt `detect` và hai nhịp tim, 23,6 KiB (nhịp tim `heapInternalMin`), không thấp hơn trước; `dropped` dma, frames, clean, events, stream đều 0.
+Chưa chạy dài để thấy đáy RAM nội 🔬.
+
 ### 4.6 `detect` trên ảnh thật
 
 Ảnh đầu (`jpeg_quality` 12, chưa có đèn) board ra 0 hộp. Cùng ảnh, giảm 1:2 trên PC, qua mô phỏng int8 của ESP-PPQ: điểm cao nhất
