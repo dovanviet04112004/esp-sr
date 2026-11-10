@@ -23,13 +23,18 @@
 #define SYSTEM_CTRL0_REG 0x3008
 #define SYSTEM_CTRL0_STANDBY 0x40
 #define WAKE_SETTLE_MS 20
-#define EXPOSURE_REG 0x3500 // 20 bits, what AEC runs at
-#define GAIN_REG 0x350A     // 10 bits, what AGC runs at
+#define EXPOSURE_REG 0x3500 // 20 bits of 1/16 line, what AEC runs at
+#define EXPOSURE_MASK 0xFFFFF
+#define GAIN_REG 0x350A // 10 bits, what AGC runs at
+#define GAIN_MASK 0x3FF
+#define AEC_MANUAL_REG 0x3503
+#define AEC_AGC_MANUAL 0x03 // bit 0 AEC, bit 1 AGC by hand
 #define LINE_TOTAL_REG 0x380C
 #define BAND_50HZ_STEP_REG 0x3A08
 #define BAND_HALF_PERIOD_US 10000 // 50 Hz mains peaks twice per cycle
-// set_framesize's PLL for a JPEG frame: multiplier 200, dividers 2, 4, 2.5 and 4.
-#define SYSCLK_PER_XCLK_X2 5
+#define PLL_MULTIPLIER_REG 0x3036
+// set_framesize's PLL for a JPEG frame divides its multiplier by 2, 4, 2.5 and 4 (esp32-camera ov5640.c).
+#define PLL_DIVIDERS 80
 #define JPEG_SOI_BYTES 2
 
 static const char *TAG = "drv_camera";
@@ -39,18 +44,41 @@ static bool s_can_focus;
 static drv_camera_size_t s_size;
 static bool s_size_known;
 
+typedef struct {
+    int line_total; // points a line takes
+    int multiplier; // of the PLL, which sysclk follows
+} line_t;
+
+static bool read_line(line_t *line)
+{
+    line->line_total = s_sensor->get_reg(s_sensor, LINE_TOTAL_REG, REG_WORD_MASK);
+    line->multiplier = s_sensor->get_reg(s_sensor, PLL_MULTIPLIER_REG, REG_BYTE_MASK);
+    return line->line_total > 0 && line->multiplier > 0;
+}
+
 // An exposure that is a whole number of mains half-periods keeps bands off the frame; the table's step suits
 // 30 fps.
-static esp_err_t fit_band_to_lines(void)
+static esp_err_t fit_band_to_lines(const line_t *line)
 {
-    const int line_total = s_sensor->get_reg(s_sensor, LINE_TOTAL_REG, REG_WORD_MASK);
-    if (line_total <= 0) { return ESP_FAIL; }
-    const int64_t sysclk_hz = (int64_t)GEN_VISION_XCLK_HZ * SYSCLK_PER_XCLK_X2 / 2;
-    const int lines = (int)(sysclk_hz * BAND_HALF_PERIOD_US / 1000000 / line_total);
+    const int64_t sysclk_hz = (int64_t)GEN_VISION_XCLK_HZ * line->multiplier / PLL_DIVIDERS;
+    const int lines = (int)(sysclk_hz * BAND_HALF_PERIOD_US / 1000000 / line->line_total);
     const bool wrote =
         s_sensor->set_reg(s_sensor, BAND_50HZ_STEP_REG, REG_BYTE_MASK, lines >> 8) >= 0 &&
         s_sensor->set_reg(s_sensor, BAND_50HZ_STEP_REG + 1, REG_BYTE_MASK, lines & REG_BYTE_MASK) >= 0;
-    ESP_LOGI(TAG, "line total %d, 10 ms is %d lines", line_total, lines);
+    ESP_LOGI(TAG, "line total %d, PLL x%d, 10 ms is %d lines", line->line_total, line->multiplier, lines);
+    return wrote ? ESP_OK : ESP_FAIL;
+}
+
+// AEC counts exposure in lines: carry the time, not the count, so it starts settled (KEHOACH 3.19).
+static esp_err_t carry_exposure(int exposure, int gain, const line_t *before, const line_t *after)
+{
+    const int64_t carried = (int64_t)exposure * before->line_total * after->multiplier /
+                            ((int64_t)before->multiplier * after->line_total);
+    const bool wrote = s_sensor->set_reg(s_sensor, AEC_MANUAL_REG, AEC_AGC_MANUAL, AEC_AGC_MANUAL) >= 0 &&
+                       s_sensor->set_reg(s_sensor, EXPOSURE_REG, EXPOSURE_MASK, (int)carried) >= 0 &&
+                       s_sensor->set_reg(s_sensor, GAIN_REG, GAIN_MASK, gain) >= 0 &&
+                       s_sensor->set_reg(s_sensor, AEC_MANUAL_REG, AEC_AGC_MANUAL, 0) >= 0;
+    ESP_LOGI(TAG, "exposure %d -> %lld, gain %d", exposure, carried, gain);
     return wrote ? ESP_OK : ESP_FAIL;
 }
 
@@ -92,7 +120,9 @@ esp_err_t drv_camera_init(void)
     s_can_focus = s_sensor->af_init != NULL && s_sensor->af_init(s_sensor, AF_LOAD_TIMEOUT_MS) == 0;
     ESP_LOGI(TAG, "sensor 0x%04X, %dx%d, autofocus %s", s_sensor->id.PID, GEN_VISION_WIDTH, GEN_VISION_HEIGHT,
              s_can_focus ? "loaded" : "off");
-    err = fit_band_to_lines();
+    line_t line;
+    if (!read_line(&line)) { return ESP_FAIL; }
+    err = fit_band_to_lines(&line);
     if (err != ESP_OK) { return err; }
     s_size = DRV_CAMERA_SIZE_DETECT;
     s_size_known = true;
@@ -104,13 +134,19 @@ esp_err_t drv_camera_use(drv_camera_size_t size)
     if (s_sensor == NULL) { return ESP_ERR_INVALID_STATE; }
     if (s_size_known && size == s_size) { return ESP_OK; }
     s_size_known = false;
+    line_t before, after;
+    const int exposure = s_sensor->get_reg(s_sensor, EXPOSURE_REG, EXPOSURE_MASK);
+    const int gain = s_sensor->get_reg(s_sensor, GAIN_REG, GAIN_MASK);
+    if (exposure < 0 || gain < 0 || !read_line(&before)) { return ESP_FAIL; }
     const bool full = size == DRV_CAMERA_SIZE_FULL;
     if (s_sensor->set_framesize(s_sensor, full ? GEN_VISION_FULL_FRAME_SIZE : GEN_VISION_FRAME_SIZE) != 0 ||
-        s_sensor->set_quality(s_sensor, full ? GEN_VISION_FULL_JPEG_QUALITY : GEN_VISION_JPEG_QUALITY) != 0) {
+        s_sensor->set_quality(s_sensor, full ? GEN_VISION_FULL_JPEG_QUALITY : GEN_VISION_JPEG_QUALITY) != 0 ||
+        !read_line(&after)) {
         return ESP_FAIL;
     }
     // Each size has its own line length, so the 50 Hz step moves with it.
-    const esp_err_t err = fit_band_to_lines();
+    esp_err_t err = fit_band_to_lines(&after);
+    if (err == ESP_OK) { err = carry_exposure(exposure, gain, &before, &after); }
     if (err != ESP_OK) { return err; }
     s_size = size;
     s_size_known = true;
