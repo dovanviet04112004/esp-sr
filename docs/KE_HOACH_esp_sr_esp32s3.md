@@ -2580,6 +2580,10 @@ Id của hai lệnh, số của luồng ảnh và nhịp của ngoại vi nằm 
   `esp32-camera`, hàng 0–1951), nên trên ảnh đầy đủ dựng đứng 1920 × 2560 khung ấy là x' = 5x, y' = 5y. Host vẽ khung lên cả hai ảnh.
 - Dưới XGA, `esp32-camera` hạ hệ số PLL của JPEG từ 200 xuống 180, nên bước chống nhấp nháy 50 Hz tính theo hệ số đọc từ cảm biến
   sau mỗi lần đổi cỡ, không theo một hằng số.
+- Đổi cỡ thì giữ thời gian phơi sáng. OV5640 đếm phơi sáng theo 1/16 dòng, và mỗi cỡ có thời gian dòng riêng: 2 060 điểm ở 45 MHz
+  (45,8 µs) với 640 × 480, 2 844 điểm ở 50 MHz (56,9 µs) với khung đầy đủ. Giữ nguyên số dòng thì khung đầy đủ sau 640 × 480 phơi quá 25%
+  và chờ phơi sáng 2,9–8,3 s (`measurements/board_c.md` §4.8). `drv_camera_use` vì thế quy phơi sáng sang dòng của cỡ mới theo tỉ lệ
+  thời gian dòng, giữ độ lợi, ghi lúc AEC và AGC ở chế độ tay rồi trả về tự động, để AEC bắt đầu từ đúng chỗ.
 - Đường RGB565 cần hơn 1,5 MB PSRAM và CPU để nén, không vừa §6.6.
 
 **Sensor nghỉ giữa hai lần chụp.** Dựng một lần trong `app_boot`, rồi nghỉ qua SCCB, vì camera chạy liên tục chiếm băng thông
