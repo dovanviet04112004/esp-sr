@@ -10,9 +10,9 @@ CONFIG_DSP_AFE_AEC_ENABLE=y
 # nhin_task holds core 0 for seconds a picture and sits on a PSRAM stack (KEHOACH 3.18, 5.2).
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=15
 CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y
-# A detailed scene at jpeg_quality 6 runs past the width * height / 5 of the driver's default.
+# One buffer for both frames: 221-310 KB at quality 10, so the full picture's 12 fits with room (KEHOACH 3.19).
 CONFIG_CAMERA_JPEG_MODE_FRAME_SIZE_CUSTOM=y
-CONFIG_CAMERA_JPEG_MODE_FRAME_SIZE=327680
+CONFIG_CAMERA_JPEG_MODE_FRAME_SIZE=393216
 # Internal RAM runs out with the camera's DMA: Wi-Fi and lwIP go to PSRAM, and what ai_engine borrows leaves room for them.
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=23040
