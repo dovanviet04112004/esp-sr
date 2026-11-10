@@ -2655,6 +2655,7 @@ esp-sr/
     ├── TASKS.md                         # backlog
     ├── FREERTOS.md                      # sổ kiểm lỗi đồng thời, soát lại mỗi khi thêm task
     ├── DU_LIEU.md                       # dữ liệu đã tải, giấy phép, số giờ, sha256
+    ├── TRIEN_KHAI_EMQX.md               # đội server dựng broker EMQX, và những gì họ gửi lại (§4.7, §7.5)
     ├── adr/                             # quyết định có bảng đối chứng
     ├── bao_cao/                         # báo cáo tuần gửi mentor, một file tuan_<nn>.md mỗi tuần
     └── measurements/{budget.md, latency.md, ram.md, parity.md, mic_array.md, tts_engines.md, data_screen.md, wake.md,
