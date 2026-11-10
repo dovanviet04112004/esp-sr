@@ -33,6 +33,7 @@ ONCE_WAIT_S = 30.0
 REFUSED = "image refused"
 FPS_WINDOW_FRAMES = 20
 BOXES_SUFFIX = "_boxes"
+FULL_SUFFIX = "_full"
 PLACE_SUFFIX = "_place"
 BOX_COLOUR = (255, 0, 0)
 BOX_LINE_PX = 4
@@ -141,15 +142,20 @@ def stem_of(boot: int, seq: int) -> str:
 
 
 def draw_boxes(picture: Path, payload: dict, out: Path) -> None:
-    """Write the picture as a viewer shows it, with detect's boxes and names on it; boxes are in the payload's frame."""
+    """Write the picture as a viewer shows it, with detect's boxes and names on it; boxes are in the payload's frame.
+
+    The payload's frame spans the picture's height and sits centred across it: the 720p frame is the full picture's
+    middle band (KEHOACH 3.19), and on the 720p picture itself the offset is 0.
+    """
     with Image.open(picture) as image:
         upright = ImageOps.exif_transpose(image).convert("RGB")
-    scale = upright.width / payload["width"]
+    scale = upright.height / payload["height"]
+    offset = (upright.width - payload["width"] * scale) / 2
     pen = ImageDraw.Draw(upright)
     font = ImageFont.load_default(size=BOX_LABEL_PX)
     for box in payload["boxes"]:
         # The board's corners can cross: a side the network gave as negative.
-        left, right = sorted((box["x1"] * scale, box["x2"] * scale))
+        left, right = sorted((offset + box["x1"] * scale, offset + box["x2"] * scale))
         top, bottom = sorted((box["y1"] * scale, box["y2"] * scale))
         corners = [left, top, right, bottom]
         pen.rectangle(corners, outline=BOX_COLOUR, width=BOX_LINE_PX)
@@ -197,13 +203,14 @@ class Assembler:
             file.rename(file.with_name(f"{stem}_old{older}{file.name[len(stem) :]}"))
 
     def keep(self, device: str, header: dict, image: bytes) -> Path:
-        """Write one whole picture under the data root."""
-        path = self.folder(device) / f"{stem_of(header['boot'], header['seq'])}.jpg"
+        """Write one whole picture under the data root, the full one beside the 720p one under the same stem."""
+        stem = stem_of(header["boot"], header["seq"])
+        path = self.folder(device) / f"{stem}{suffix_of(header)}.jpg"
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._make_way(path, path.stem, image)
+        self._make_way(path, stem, image)
         path.write_bytes(image)
         if device in self._fixes:
-            place = path.with_name(path.stem + PLACE_SUFFIX + ".json")
+            place = path.with_name(stem + PLACE_SUFFIX + ".json")
             place.write_text(json.dumps(self._fixes[device]), encoding="utf-8")
         return path
 
@@ -220,13 +227,14 @@ class Assembler:
         header, image = self.join(device, body)
         return None if image is None else self.keep(device, header, image)
 
-    def mark(self, device: str, boot: int, seq: int) -> Path | None:
-        """Draw a capture's boxes on its picture once both are in, whichever came first; the path when it did."""
+    def mark(self, device: str, boot: int, seq: int, suffix: str = "") -> Path | None:
+        """Draw a capture's boxes on its 720p or, with FULL_SUFFIX, full picture once both are in, whichever came
+        first; the path when it did."""
         stem = self.folder(device) / stem_of(boot, seq)
-        picture, boxes = stem.with_suffix(".jpg"), stem.with_suffix(".json")
+        picture, boxes = stem.with_name(stem.name + suffix + ".jpg"), stem.with_suffix(".json")
         if not picture.exists() or not boxes.exists():
             return None
-        out = stem.with_name(stem.name + BOXES_SUFFIX + ".jpg")
+        out = stem.with_name(stem.name + suffix + BOXES_SUFFIX + ".jpg")
         draw_boxes(picture, json.loads(boxes.read_text(encoding="utf-8")), out)
         return out
 
@@ -238,6 +246,11 @@ class Assembler:
         self._make_way(path, path.stem, text.encode("utf-8"))
         path.write_text(text, encoding="utf-8")
         return path
+
+
+def suffix_of(header: dict) -> str:
+    """The file suffix of the picture a chunk belongs to: FULL_SUFFIX for the full picture, none for the 720p one."""
+    return FULL_SUFFIX if header["flags"] & vision.CHUNK_FLAG_FULL else ""
 
 
 def describe_boxes(payload: dict) -> str:
@@ -330,24 +343,26 @@ def keep(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -
                 feed.take(image)
             return []
         path = assembler.keep(message.device, header, image)
-        done.append(f"{message.device} image {path.stat().st_size} bytes: {path}")
-        marked = assembler.mark(message.device, header["boot"], header["seq"])
+        kind = "full image" if suffix_of(header) else "image"
+        done.append(f"{message.device} {kind} {path.stat().st_size} bytes: {path}")
+        marked = [assembler.mark(message.device, header["boot"], header["seq"], suffix_of(header))]
     elif message.kind == "sensors":
         assembler.note_place(message.device, message.payload)
         return []
     elif message.kind == "detections":
         assembler.keep_boxes(message.device, message.payload)
         done.append(f"{message.device} {describe_boxes(message.payload)}")
-        marked = assembler.mark(message.device, message.payload["boot"], message.payload["captureSeq"])
+        boot, seq = message.payload["boot"], message.payload["captureSeq"]
+        marked = [assembler.mark(message.device, boot, seq, suffix) for suffix in ("", FULL_SUFFIX)]
     else:
         return []
-    if marked is not None:
-        done.append(f"{message.device} boxes drawn: {marked}")
+    done += [f"{message.device} boxes drawn: {path}" for path in marked if path is not None]
     return done
 
 
 class OneShot:
-    """One capture asked from the command line: it waits for the picture and, in DETECT, the boxes, or a refusal."""
+    """One capture asked from the command line: it waits for the full picture and, in DETECT, the 720p picture and
+    the boxes too, or a refusal."""
 
     def __init__(self, assembler: Assembler, mode: str, device: str | None) -> None:
         self.assembler = assembler
@@ -374,14 +389,14 @@ class OneShot:
             self.problem = f"the board answered ERROR {payload.get('code', '?')}"
             self.done.set()
         elif message.kind == "image" and lines and REFUSED not in lines[0]:
-            self._got.add("image")
+            self._got.add("full image" if suffix_of(parse_chunk(message.body or b"")[0]) else "image")
         elif message.kind == "detections" and not message.rejected:
             self._got.add("detections")
         if self._got >= self.needed():
             self.done.set()
 
     def needed(self) -> set[str]:
-        return {"image", "detections"} if self.mode == "DETECT" else {"image"}
+        return {"image", "detections", "full image"} if self.mode == "DETECT" else {"full image"}
 
     def missing(self) -> str:
         return " and ".join(sorted(self.needed() - self._got)) or "nothing"

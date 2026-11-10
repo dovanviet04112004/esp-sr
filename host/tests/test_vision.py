@@ -160,9 +160,9 @@ def test_a_lost_fix_leaves_the_next_picture_without_a_place(tmp_path: Path) -> N
     assert not (tmp_path / DEVICE / "B7_000002_place.json").exists()
 
 
-def picture_turned_a_quarter(path: Path) -> None:
-    """A black 400 x 200 file that viewers show as 200 x 400, as board C's are."""
-    image = Image.new("RGB", (400, 200))
+def picture_turned_a_quarter(path: Path, size: tuple[int, int] = (400, 200)) -> None:
+    """A black file that viewers show turned a quarter, 200 x 400 by default, as board C's are."""
+    image = Image.new("RGB", size)
     exif = image.getexif()
     exif[0x0112] = 6
     image.save(path, exif=exif)
@@ -209,6 +209,33 @@ def test_a_detect_that_found_nothing_still_leaves_its_picture(tmp_path: Path) ->
     assert assembler.mark(DEVICE, 7, 2).exists()
 
 
+def test_the_full_picture_lands_beside_the_720p_one(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    small = assembler.take(DEVICE, chunk(PICTURE, 0, 1))
+    full = PICTURE[::-1]
+    big = assembler.take(DEVICE, chunk(full, 0, 1, total=len(full), flags=contract.CHUNK_FLAG_FULL))
+    assert (small.name, big.name) == ("B7_000002.jpg", "B7_000002_full.jpg")
+    assert (small.read_bytes(), big.read_bytes()) == (PICTURE, full)
+    assert not list((tmp_path / DEVICE).glob("*_old*"))
+
+
+def test_the_boxes_land_centred_across_the_full_picture(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    picture = assembler.folder(DEVICE) / "B7_000002_full.jpg"
+    picture.parent.mkdir(parents=True)
+    picture_turned_a_quarter(picture, (400, 300))
+    assembler.keep_boxes(DEVICE, BOXES)
+    drawn = assembler.mark(DEVICE, 7, 2, vision.FULL_SUFFIX)
+    assert drawn == assembler.folder(DEVICE) / "B7_000002_full_boxes.jpg"
+    with Image.open(drawn) as image:
+        upright = image.convert("RGB")
+    assert upright.size == (300, 400)
+    # Twice as tall as the 100 x 200 frame, and the 200 px it then spans sit 50 px in from each side.
+    red, green, _ = upright.getpixel((70 + 1, 150))
+    assert red > 150 > green
+    assert upright.getpixel((20 + 1, 150))[0] < 100
+
+
 def test_a_chunk_of_another_count_is_refused_not_a_crash(tmp_path: Path) -> None:
     assembler = vision.Assembler(tmp_path)
     assembler.take(DEVICE, chunk(PICTURE[:10], 0, 3))
@@ -248,15 +275,15 @@ def test_boxes_with_crossed_corners_still_draw(tmp_path: Path) -> None:
     picture = tmp_path / "p.jpg"
     Image.new("RGB", (40, 80)).save(picture)
     box = {"name": "cup", "scorePermille": 500, "x1": 30, "y1": 60, "x2": 10, "y2": 20}
-    vision.draw_boxes(picture, {"width": 40, "boxes": [box]}, tmp_path / "out.jpg")
+    vision.draw_boxes(picture, {"width": 40, "height": 80, "boxes": [box]}, tmp_path / "out.jpg")
     assert (tmp_path / "out.jpg").exists()
 
 
-def jpeg_chunk() -> bytes:
+def jpeg_chunk(flags: int = 0) -> bytes:
     """One chunk carrying a real JPEG, so boxes can be drawn on it."""
     buffer = io.BytesIO()
     Image.new("RGB", (400, 200), "white").save(buffer, "JPEG")
-    return chunk(buffer.getvalue(), 0, 1, total=len(buffer.getvalue()))
+    return chunk(buffer.getvalue(), 0, 1, total=len(buffer.getvalue()), flags=flags)
 
 
 def up(kind: str, payload: dict | bytes, device: str = DEVICE) -> mqtt_rx.Message:
@@ -267,30 +294,35 @@ def up(kind: str, payload: dict | bytes, device: str = DEVICE) -> mqtt_rx.Messag
 DETECTIONS = {k: v for k, v in BOXES.items() if k != "deviceId"}
 
 
-def test_a_detect_waits_for_the_picture_and_its_boxes_in_either_order(tmp_path: Path) -> None:
+def test_a_detect_waits_for_both_pictures_and_the_boxes_in_any_order(tmp_path: Path) -> None:
     for first in ("image", "detections"):
         shot = vision.OneShot(vision.Assembler(tmp_path / first), "DETECT", DEVICE)
         messages = {"image": up("image", jpeg_chunk()), "detections": up("detections", DETECTIONS)}
         shot.handle(messages[first])
         assert not shot.done.is_set()
-        assert shot.missing() == ("detections" if first == "image" else "image")
         shot.handle(messages["detections" if first == "image" else "image"])
+        assert not shot.done.is_set()
+        assert shot.missing() == "full image"
+        shot.handle(up("image", jpeg_chunk(contract.CHUNK_FLAG_FULL)))
         assert shot.done.is_set()
         assert shot.problem is None
         assert (tmp_path / first / DEVICE / "B7_000002_boxes.jpg").exists()
+        assert (tmp_path / first / DEVICE / "B7_000002_full_boxes.jpg").exists()
 
 
-def test_a_photo_needs_the_picture_only(tmp_path: Path) -> None:
+def test_a_photo_needs_the_full_picture_only(tmp_path: Path) -> None:
     shot = vision.OneShot(vision.Assembler(tmp_path), "PHOTO", DEVICE)
     shot.handle(up("image", jpeg_chunk()))
+    assert not shot.done.is_set()
+    shot.handle(up("image", jpeg_chunk(contract.CHUNK_FLAG_FULL)))
     assert shot.done.is_set()
 
 
 def test_a_chunk_that_is_refused_is_not_a_picture(tmp_path: Path) -> None:
     shot = vision.OneShot(vision.Assembler(tmp_path), "PHOTO", DEVICE)
-    shot.handle(up("image", chunk(PICTURE, 0, 1, crc32=1)))
+    shot.handle(up("image", chunk(PICTURE, 0, 1, crc32=1, flags=contract.CHUNK_FLAG_FULL)))
     assert not shot.done.is_set()
-    assert shot.missing() == "image"
+    assert shot.missing() == "full image"
 
 
 def test_a_refusal_ends_the_wait_with_its_code(tmp_path: Path) -> None:
