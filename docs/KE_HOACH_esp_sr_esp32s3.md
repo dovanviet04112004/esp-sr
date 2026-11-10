@@ -2566,11 +2566,13 @@ Id của hai lệnh, số của luồng ảnh và nhịp của ngoại vi nằm 
 
 **Hai cỡ khung, một bộ đệm.** OV5640 tự nén JPEG; cỡ và chất lượng của hai khung nằm ở `vision.yaml`.
 - `detect` dùng khung 1280 × 720: dải 16:9 ở giữa mảng cảm biến, gộp 2 × 2, 51–81 KB. Giải 1:2 thành RGB888 640 × 360.
-- Ảnh gửi về là khung đầy đủ 2560 × 1920, cả mảng 4:3, chất lượng 10: ~230 KB ở cảnh phòng, 364 KB ở chất lượng 6.
+- Ảnh gửi về là khung đầy đủ 2560 × 1920, cả mảng 4:3, chất lượng 12. Ở chất lượng 10 nó là 221–310 KB tuỳ cảnh, ở 6 là 364 KB;
+  12 nhỏ hơn 10 chừng 10–15% 🔬.
 - Không dùng một khung đầy đủ cho cả hai: lấy nó mất 3,3–5,5 s, giải nó ~2 s, nên "nhận diện" thành 7–11 s thay vì ~3,7 s
   (`measurements/board_c.md` §4.8).
-- Hai cỡ dùng chung một bộ đệm khung 512 KB ở PSRAM (`CAMERA_JPEG_MODE_FRAME_SIZE`). Bộ đệm 700 KB để PSRAM còn 125 KB, và ảnh
-  không gửi hay giải được (§4.8).
+- Hai cỡ dùng chung một bộ đệm khung 384 KB ở PSRAM (`CAMERA_JPEG_MODE_FRAME_SIZE`). PSRAM trống lúc đứng yên là phần còn lại
+  sau Wi-Fi và MQTT, và một lượt "nhận diện" cần ~130 KB tạm, một ảnh đầy đủ tới 144 KB. Bộ đệm 512 KB để lại 122 KB lúc đứng yên, nên
+  giải JPEG và gửi ảnh hỏng; 700 KB để lại 125 KB ngay sau boot (`measurements/board_c.md` §4.8).
 - Khung của `detect` nằm trong ảnh dựng đứng 360 × 640. Bảng cửa sổ của `esp32-camera` đặt dải 16:9 ở hàng 240–1711 của mảng và ảnh
   4:3 ở hàng 0–1951, nên trên ảnh đầy đủ dựng đứng 1920 × 2560 khung ấy là x' = 240 + 4x, y' = 4y. Host vẽ khung lên cả hai ảnh.
 - Đường RGB565 cần hơn 1,5 MB PSRAM và CPU để nén, không vừa §6.6.
@@ -4264,7 +4266,7 @@ Board B, profile `bench`, lúc đã nghe: sản phẩm với b0 ở `measurement
 | `aec` (§3.5), chỉ khi có loa: phổ tham chiếu 8 × 257 phức, đệm, mỗi micro trọng số 8 × 257 phức và thống kê | ~56 KB một micro, ~75 KB hai micro, tính 🔬 |
 | **Còn trống khi nghe** | 4 278 432 B đo với b0, 4 258 212 B khi Wi-Fi và MQTT đã nối (`ram.md` §5); 2 022 720 B với b3, Wi-Fi chưa nối (`ram.md` §4) |
 | `detect` cạnh sản phẩm (§3.18) | đồ thị 2 825 888 B cộng 11 152 B lúc chạy: vừa với b0, không vừa với b3 (`ram.md` §5) |
-| Ảnh của board C (§3.19): bộ đệm khung JPEG 512 KB cho cả khung 720p và khung đầy đủ, RGB888 640 × 360 691 200 B, đệm giải JPEG 64 KB, khúc gửi 16 KB, ngăn xếp `nhin_task` và `do_task` 20 KB | ~1,3 MB; board C một micro, b0, `detect`: còn 412 748 B sau boot với bộ đệm 320 KB (đo 10/11), ~216 KB với 512 KB, tính 🔬 |
+| Ảnh của board C (§3.19): bộ đệm khung JPEG 384 KB cho cả khung 720p và khung đầy đủ, RGB888 640 × 360 691 200 B, đệm giải JPEG 64 KB, khúc gửi 16 KB, ngăn xếp `nhin_task` và `do_task` 20 KB | ~1,2 MB; board C một micro, b0, `detect`: với bộ đệm 320 KB còn 412 748 B ở bước `vision` (đo 10/11); với 512 KB còn 216 140 B ở bước ấy và 122 364 B lúc đứng yên sau Wi-Fi và MQTT (đo); với 384 KB ~250 KB lúc đứng yên, tính 🔬 |
 | Chưa có trong firmware: `ns` | 187 KB (RNNoise-16k) tới 394 KB (NSNet-16k L), đo ở E9-T10 |
 | Chưa có: đệm dựng câu của `noi_task`, 5 s × 16 kHz × 2 B | 160 KB |
 | Chưa có: `synth` nếu là mạng | ≤ 1 MB + ~0,3 MB |
