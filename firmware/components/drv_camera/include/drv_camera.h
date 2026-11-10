@@ -20,11 +20,24 @@ typedef struct {
     void *held; // what drv_camera_release gives back
 } drv_camera_frame_t;
 
+typedef enum {
+    DRV_CAMERA_SIZE_DETECT, // width x height of vision.yaml, detect's frame
+    DRV_CAMERA_SIZE_FULL,   // full_width x full_height, the picture sent home
+} drv_camera_size_t;
+
 /** Bring up the sensor, load autofocus firmware where CAMERA_AF_SUPPORT is on, and leave it resting.
  *  @ctx app_boot | blocking, under a second, ~4 s with autofocus | once
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE a second call | ESP_ERR_NOT_FOUND no sensor | esp32-camera's error
  */
 esp_err_t drv_camera_init(void);
+
+/** Set the frame size and JPEG quality the next wake brings; detect's frame after init, and a same size is a
+ * no-op.
+ *  @ctx nhin_task, sensor resting | blocking, a few SCCB writes | a held frame stays valid
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no init yet | ESP_FAIL SCCB refused, the size is unknown until the
+ * next call
+ */
+esp_err_t drv_camera_use(drv_camera_size_t size);
 
 /** Leave the rest and wait for exposure and gain to hold still, GEN_VISION_SETTLE_FRAMES_MAX frames at most.
  *  @ctx nhin_task | blocking, a second or so

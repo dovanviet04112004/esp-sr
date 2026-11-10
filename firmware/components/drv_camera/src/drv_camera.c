@@ -36,6 +36,8 @@ static const char *TAG = "drv_camera";
 
 static sensor_t *s_sensor;
 static bool s_can_focus;
+static drv_camera_size_t s_size;
+static bool s_size_known;
 
 // An exposure that is a whole number of mains half-periods keeps bands off the frame; the table's step suits
 // 30 fps.
@@ -92,7 +94,27 @@ esp_err_t drv_camera_init(void)
              s_can_focus ? "loaded" : "off");
     err = fit_band_to_lines();
     if (err != ESP_OK) { return err; }
+    s_size = DRV_CAMERA_SIZE_DETECT;
+    s_size_known = true;
     return drv_camera_rest();
+}
+
+esp_err_t drv_camera_use(drv_camera_size_t size)
+{
+    if (s_sensor == NULL) { return ESP_ERR_INVALID_STATE; }
+    if (s_size_known && size == s_size) { return ESP_OK; }
+    s_size_known = false;
+    const bool full = size == DRV_CAMERA_SIZE_FULL;
+    if (s_sensor->set_framesize(s_sensor, full ? GEN_VISION_FULL_FRAME_SIZE : GEN_VISION_FRAME_SIZE) != 0 ||
+        s_sensor->set_quality(s_sensor, full ? GEN_VISION_FULL_JPEG_QUALITY : GEN_VISION_JPEG_QUALITY) != 0) {
+        return ESP_FAIL;
+    }
+    // Each size has its own line length, so the 50 Hz step moves with it.
+    const esp_err_t err = fit_band_to_lines();
+    if (err != ESP_OK) { return err; }
+    s_size = size;
+    s_size_known = true;
+    return ESP_OK;
 }
 
 static uint32_t exposure_and_gain(void)
