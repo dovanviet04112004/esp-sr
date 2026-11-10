@@ -230,6 +230,31 @@ ghi thẻ. Windows hay tự chuyển PC về mạng nhà, broker mất đường
 Ống kính rất nhạy: ren đi ~0,4 mm một vòng 🔬, còn từ vô cực tới 30 cm thấu kính 3,6 mm chỉ dịch ~0,04 mm, nên 1/8 vòng đã qua hẳn vùng
 nét. Độ nét trên trang: bậc thang lớn nhất ở bản thu nhỏ 160 × 90 chia cho độ tương phản. Ảnh nhòe ~7, ảnh đầu ~33, sau khi chỉnh 43.
 
+### 4.8 Khung 5 MP, bước 0 (10/11)
+
+Bản thử, không commit: `contracts/vision.yaml` 2560 × 1920 (`FRAMESIZE_QSXGA`, 4:3), `CAMERA_JPEG_MODE_FRAME_SIZE` 716 800 B, trần hàng đợi gửi ảnh 64 KB,
+chất lượng 6 và 4407 chỉnh qua `cam reg 4407 <giá trị>`. Cảnh phòng tĩnh, cùng chỗ đặt board.
+- Vòng 1, giải mã 1:5 ra 512 × 384 (RGB 590 KB): PSRAM trống sau boot 125 004 B (412 748 B ở 720p), gửi ảnh báo `outbox_enqueue: Memory exhausted`, bộ giải JPEG
+  báo `allocate memory failed`; ảnh vẫn lên thẻ.
+- Vòng 2, giải mã 1:8 ra 320 × 240 (chỉ để nhường PSRAM, `detect` không dùng được): PSRAM trống 484 428 B, gửi và giải mã chạy.
+
+| Chất lượng | JPEG | Từ lệnh tới khung | Gửi | Giải JPEG 1:8 (hiệu `detect` log và `detectMs`) | Thẻ | Cả lệnh từ host |
+|---|---|---|---|---|---|---|
+| 4 | 521 389 B | 3 292 ms | 2 981 ms | ~2 290 ms | 1 376 ms | 9,8 s |
+| 6 | 363 892 B | 3 287 ms | 2 828 ms | ~2 079 ms | 1 203 ms | 9,1 s |
+| 10 | 228 731 B | 3 250 ms | 895 ms | ~2 027 ms | 696 ms | 7,2 s |
+| 16 | 163 787 B | 5 492 ms | 381 ms | ~2 003 ms | 496 ms | 8,8 s |
+| 30 | 125 666 B | 5 272 ms | 2 445 ms | ~1 985 ms | 417 ms | 10,6 s |
+
+720p cùng chất lượng 6 (§4.5): 51–57 KB, từ lệnh tới khung 673–751 ms, gửi 4–39 ms, giải JPEG 1:2 270–389 ms, thẻ 176–308 ms, cả lệnh ~3,7 s.
+- Chờ phơi sáng 5–7 khung mất 2,8 s ở ba lượt đầu và 4,8–5,1 s ở hai lượt sau (cùng phơi sáng 8400, gain 23); chưa rõ vì sao.
+- Gửi 126–521 KB mất 0,4–3,0 s với hàng đợi 64 KB, không đều giữa các lượt.
+- Giải JPEG 5 MP về 320 × 240 mất khoảng 2,0–2,3 s, gấp 5–8 lần 720p.
+- Góc nhìn: ảnh 5 MP là cả mảng 4:3, ảnh 720p là dải 16:9 ở giữa, tức 75% bề ngang của ảnh dựng đứng, cả chiều cao. Quy đổi khung từ ảnh `detect`
+  (360 × 640) sang ảnh 5 MP dựng đứng (1920 × 2560): x' = 240 + x / 360 × 1440, y' = y / 640 × 2560. Kiểm bằng một vật (đầu ghế) lệch ~2% 🔬.
+- Độ nét: trích 720 × 720 điểm ở giữa ảnh 5 MP vẫn mềm (lưới ghế không tách ra, nhiễu): cảnh ở xa ngoài tầm nét cố định 30 cm, nên điểm ảnh nhiều chưa
+  thêm chi tiết. Chưa thử vật ở đúng 30 cm 🔬.
+
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
 `drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là hằng số; bao nhiêu bước
