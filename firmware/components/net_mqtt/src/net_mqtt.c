@@ -23,7 +23,7 @@
 #define PASS_BYTES 65
 #define TLS_SCHEME "mqtts://"
 #define COMMANDS_SLOTS 2 // the set its receiver reads, and one filling or waiting
-#define IMAGE_OUTBOX_MAX_BYTES (256 * 1024)
+#define IMAGE_OUTBOX_MAX_BYTES (128 * 1024)
 #define IMAGE_DRAIN_POLL_MS 10
 #define IMAGE_DRAIN_TIMEOUT_MS 10000
 
@@ -463,7 +463,7 @@ esp_err_t net_mqtt_publish_image(const uint8_t *chunk, size_t bytes)
         s_stats.publish_failures++;
         return ESP_ERR_NO_MEM;
     }
-    // A whole picture may wait in the outbox, in PSRAM: it leaves while decode and detect run (KEHOACH 3.19).
+    // A 720p picture fits the outbox whole and leaves during detect; a full one waits (KEHOACH 3.19).
     const TickType_t started = xTaskGetTickCount();
     while (esp_mqtt_client_get_outbox_size(s_client) > IMAGE_OUTBOX_MAX_BYTES) {
         if (xTaskGetTickCount() - started > pdMS_TO_TICKS(IMAGE_DRAIN_TIMEOUT_MS)) { return ESP_ERR_TIMEOUT; }
