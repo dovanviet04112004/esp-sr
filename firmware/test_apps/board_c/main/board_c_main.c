@@ -28,6 +28,7 @@
 #define QUIET_BLOCKS 62
 #define TONE_BLOCKS 188
 #define FULL_SCALE_24 8388608.0
+#define HALF_DIVISOR 2 // what JPEG_IMAGE_SCALE_1_2 divides by
 #define I2C_FIRST_ADDRESS 0x08
 #define I2C_LAST_ADDRESS 0x77
 #define I2C_PROBE_MS 30
@@ -287,8 +288,7 @@ static void print_base64(const uint8_t *data, size_t bytes)
 
 static void decode_half(const drv_camera_frame_t *frame)
 {
-    const size_t width = frame->width / GEN_VISION_DECODE_SCALE,
-                 height = frame->height / GEN_VISION_DECODE_SCALE;
+    const size_t width = frame->width / HALF_DIVISOR, height = frame->height / HALF_DIVISOR;
     const size_t bytes = width * height * 3;
     uint8_t *rgb = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
     esp_jpeg_image_cfg_t decode = {
