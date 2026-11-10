@@ -255,6 +255,29 @@ chất lượng 6 và 4407 chỉnh qua `cam reg 4407 <giá trị>`. Cảnh phòn
 - Độ nét: trích 720 × 720 điểm ở giữa ảnh 5 MP vẫn mềm (lưới ghế không tách ra, nhiễu): cảnh ở xa ngoài tầm nét cố định 30 cm, nên điểm ảnh nhiều chưa
   thêm chi tiết. Chưa thử vật ở đúng 30 cm 🔬.
 
+**Bản đầu của hai cỡ khung (E15-T29, 10/11), bộ đệm khung 512 KB, ảnh đầy đủ chất lượng 10, trần outbox ảnh 128 KB:** 10 lượt
+`make detect` và 5 lượt `PHOTO`, boot 140.
+- Khung 720p chụp và lên host ở cả 10 lượt (53,8–54,7 KB, chụp 636–1 228 ms). Ảnh đầy đủ chụp và lên thẻ ở cả 15 lượt: 220,9–226,1 KB
+  ở cảnh phòng, 266,9–309,5 KB khi cảnh đổi; chụp 2,9–3,4 s, có lượt 6,3 s và 11,2 s khi phơi sáng chờ 13–14 khung.
+- PSRAM trống: 216 140 B ở bước `vision` lúc boot, nhưng **122 364 B lúc đứng yên** sau khi Wi-Fi và MQTT lên, thấp nhất 9 968 B.
+- Hỏng: giải JPEG 720p báo `JPEG allocate memory failed` ở 9 trên 10 lượt (`DETECT_FAIL`), khúc đầu của ảnh đầy đủ báo
+  `outbox_enqueue: Memory exhausted` ở 14 trên 15 lượt (lượt còn lại MQTT đã rớt); MQTT rớt ba lần `No PING_RESP`. Một lượt `detect` chạy được
+  thì giải JPEG mất ~1,7 s thay vì 270–389 ms.
+- Một lượt "nhận diện" cần ~130 KB PSRAM tạm (ảnh 720p trong outbox, bộ giải JPEG, `detect`), một ảnh đầy đủ tới 144 KB (trần outbox
+  cộng một khúc): cả hai quá 122 KB.
+
+**Bản chốt (E15-T29, 10/11): bộ đệm khung 384 KB, ảnh đầy đủ chất lượng 12, trần outbox ảnh 128 KB.** Boot 142: 10 lượt `make detect`,
+5 lượt `PHOTO`, rồi 3 lượt `--capture DETECT --once` bấm giờ ở host. Cảnh lúc này có người ngồi làm việc.
+- Đủ cả 15 lượt. Ảnh 720p 60,6–70,5 KB; khung ra ở cả 10 lượt (`person`, `tv`, `chair`), `detectMs` 1 935–2 029. Ảnh đầy đủ 226–258 KB;
+  khung trên `_full_boxes.jpg` nằm đúng người, màn hình và ghế.
+- PSRAM trống 347 212 B ở bước `vision`, **253 648 B lúc đứng yên, thấp nhất 84 260 B**; RAM nội thấp nhất 21 767 B. Không còn
+  `Memory exhausted` hay `JPEG allocate memory failed`, MQTT không rớt.
+- Ảnh 720p: chụp 756–888 ms, xếp outbox 4–59 ms, thẻ 250–461 ms. Từ sau lúc gửi tới trước lúc ghi thẻ 3 585–3 707 ms: giải JPEG ~0,4 s,
+  `detect` ~1,94 s, rồi ~1,3 s tới lúc ghi thẻ, nhiều khả năng là `up/detections` chờ `mqtt_task` trong lúc chuỗi nghe đuổi kịp (§4.5) 🔬.
+- Ảnh đầy đủ: chụp 2,9–3,4 s, gửi 0,3–2,0 s (hai lượt 7,3 và 10,1 s), thẻ 0,67–0,83 s.
+- Ở host: khung về 3,4–3,6 s sau lệnh, như trước; ảnh đầy đủ về sau đó 5,2–5,7 s, cả lệnh 8,6–9,3 s. `PHOTO` 3,8–4,3 s, lượt đầu 10,9 s
+  vì gửi mất 7,3 s.
+
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
 `drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là hằng số; bao nhiêu bước
