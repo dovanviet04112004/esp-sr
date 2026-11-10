@@ -87,13 +87,16 @@ static void raise_error(const char *code)
     raise_event(&event);
 }
 
-static bool keep_on_card(const drv_camera_frame_t *frame, uint32_t seq)
+static bool keep_on_card(const drv_camera_frame_t *frame, uint32_t seq, bool full)
 {
+    const char *mark = full ? "F" : "";
+    const char *copy_mark = full ? "F" : "_";
     char path[PATH_BYTES];
-    snprintf(path, sizeof(path), "IMG/B%" PRIu32 "/%06" PRIu32 ".JPG", s_cfg.boot, seq);
+    snprintf(path, sizeof(path), "IMG/B%" PRIu32 "/%06" PRIu32 "%s.JPG", s_cfg.boot, seq, mark);
     // A lost NVS counts boots again: a taken name gets a suffix, the older picture stays (KEHOACH 3.19).
     for (uint32_t copy = 1; copy <= NAME_COPIES_MAX && drv_sd_exists(path); copy++) {
-        snprintf(path, sizeof(path), "IMG/B%" PRIu32 "/%06" PRIu32 "_%" PRIu32 ".JPG", s_cfg.boot, seq, copy);
+        snprintf(path, sizeof(path), "IMG/B%" PRIu32 "/%06" PRIu32 "%s%" PRIu32 ".JPG", s_cfg.boot, seq,
+                 copy_mark, copy);
     }
     const esp_err_t err = drv_sd_write(path, frame->jpeg, frame->bytes);
     if (err != ESP_OK) { ESP_LOGW(TAG, "%s not kept: %s", path, esp_err_to_name(err)); }
@@ -227,33 +230,68 @@ static esp_err_t take_picture(drv_camera_frame_t *frame)
     return err;
 }
 
-static void carry_out(const app_vision_req_t *request)
+static esp_err_t shoot(drv_camera_frame_t *frame, drv_camera_size_t size)
 {
-    const uint32_t seq = ++s_seq;
-    const int64_t started_us = esp_timer_get_time();
-    drv_camera_frame_t frame = {0};
-    const esp_err_t taken = take_picture(&frame);
+    esp_err_t err = drv_camera_use(size);
+    if (err == ESP_OK) { err = take_picture(frame); }
     // The sensor stops first: from here on the listener gets PSRAM's bandwidth back.
     const esp_err_t rested = drv_camera_rest();
     if (rested != ESP_OK) { ESP_LOGW(TAG, "rest: %s", esp_err_to_name(rested)); }
-    if (taken != ESP_OK) {
-        ESP_LOGE(TAG, "no picture: %s", esp_err_to_name(taken));
+    // Previews and the next command start from detect's frame (KEHOACH 3.19).
+    const esp_err_t back = drv_camera_use(DRV_CAMERA_SIZE_DETECT);
+    if (back != ESP_OK) { ESP_LOGW(TAG, "detect's frame: %s", esp_err_to_name(back)); }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "no picture: %s", esp_err_to_name(err));
         raise_error(APP_CODE_CAMERA_FAIL);
+        return err;
+    }
+    const esp_err_t tagged = drv_camera_insert(frame, kExifTurn, sizeof(kExifTurn));
+    if (tagged != ESP_OK) { ESP_LOGW(TAG, "orientation not tagged: %s", esp_err_to_name(tagged)); }
+    return ESP_OK;
+}
+
+static bool answer_detect(uint32_t seq)
+{
+    const int64_t started_us = esp_timer_get_time();
+    drv_camera_frame_t frame = {0};
+    if (shoot(&frame, DRV_CAMERA_SIZE_DETECT) != ESP_OK) {
         beep(APP_TONE_FAIL);
-        return;
+        return false;
     }
     const int64_t shot_us = esp_timer_get_time();
-    const esp_err_t tagged = drv_camera_insert(&frame, kExifTurn, sizeof(kExifTurn));
-    if (tagged != ESP_OK) { ESP_LOGW(TAG, "orientation not tagged: %s", esp_err_to_name(tagged)); }
     const esp_err_t sent = send_chunks(&frame, seq, 0, net_mqtt_publish_image);
     if (sent != ESP_OK) { ESP_LOGW(TAG, "picture not sent: %s", esp_err_to_name(sent)); }
     const int64_t sent_us = esp_timer_get_time();
-    const bool answered = request->mode != APP_VISION_DETECT || detect_picture(&frame, seq);
+    const bool answered = detect_picture(&frame, seq);
     // The tone says the picture reached a place: past a failed send only the card can tell (KEHOACH 3.19).
     if (sent == ESP_OK) { beep(answered ? APP_TONE_DONE : APP_TONE_FAIL); }
     const int64_t detected_us = esp_timer_get_time();
-    const bool saved = keep_on_card(&frame, seq);
+    const bool saved = keep_on_card(&frame, seq, false);
     if (sent != ESP_OK) { beep(answered && saved ? APP_TONE_DONE : APP_TONE_FAIL); }
+    const unsigned bytes = (unsigned)frame.bytes;
+    drv_camera_release(&frame);
+    ESP_LOGI(TAG,
+             "B%" PRIu32 "/%06" PRIu32 ": %u bytes, shot %lld ms, sent %lld ms, detect %lld ms, card %lld ms",
+             s_cfg.boot, seq, bytes, (shot_us - started_us) / US_PER_MS, (sent_us - shot_us) / US_PER_MS,
+             (detected_us - sent_us) / US_PER_MS, (esp_timer_get_time() - detected_us) / US_PER_MS);
+    return true;
+}
+
+static void send_full(uint32_t seq, bool sounds)
+{
+    const int64_t started_us = esp_timer_get_time();
+    drv_camera_frame_t frame = {0};
+    if (shoot(&frame, DRV_CAMERA_SIZE_FULL) != ESP_OK) {
+        if (sounds) { beep(APP_TONE_FAIL); }
+        return;
+    }
+    const int64_t shot_us = esp_timer_get_time();
+    const esp_err_t sent = send_chunks(&frame, seq, GEN_VISION_CHUNK_FLAG_FULL, net_mqtt_publish_image);
+    if (sent != ESP_OK) { ESP_LOGW(TAG, "full picture not sent: %s", esp_err_to_name(sent)); }
+    if (sounds && sent == ESP_OK) { beep(APP_TONE_DONE); }
+    const int64_t sent_us = esp_timer_get_time();
+    const bool saved = keep_on_card(&frame, seq, true);
+    if (sounds && sent != ESP_OK) { beep(saved ? APP_TONE_DONE : APP_TONE_FAIL); }
     app_event_t event = {
         .kind = APP_EVT_CAPTURE,
         .doa_deg = -1,
@@ -264,11 +302,17 @@ static void carry_out(const app_vision_req_t *request)
     };
     raise_event(&event);
     drv_camera_release(&frame);
-    ESP_LOGI(TAG,
-             "B%" PRIu32 "/%06" PRIu32 ": %u bytes, shot %lld ms, sent %lld ms, detect %lld ms, card %lld ms",
+    ESP_LOGI(TAG, "B%" PRIu32 "/%06" PRIu32 " full: %u bytes, shot %lld ms, sent %lld ms, card %lld ms",
              s_cfg.boot, seq, (unsigned)event.image_bytes, (shot_us - started_us) / US_PER_MS,
-             (sent_us - shot_us) / US_PER_MS, (detected_us - sent_us) / US_PER_MS,
-             (esp_timer_get_time() - detected_us) / US_PER_MS);
+             (sent_us - shot_us) / US_PER_MS, (esp_timer_get_time() - sent_us) / US_PER_MS);
+}
+
+static void carry_out(const app_vision_req_t *request)
+{
+    const uint32_t seq = ++s_seq;
+    const bool photo = request->mode != APP_VISION_DETECT;
+    if (!photo && !answer_detect(seq)) { return; }
+    send_full(seq, photo);
 }
 
 static void end_preview(void)
