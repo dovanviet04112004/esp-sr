@@ -830,6 +830,10 @@ def gen_vision_h(v: dict) -> str:
     out.append(f"#define GEN_VISION_HEIGHT {camera['height']}")
     out.append(f"#define GEN_VISION_FRAME_SIZE {camera['frame_size']}")
     out.append(f"#define GEN_VISION_JPEG_QUALITY {camera['jpeg_quality']}")
+    out.append(f"#define GEN_VISION_FULL_WIDTH {camera['full_width']}")
+    out.append(f"#define GEN_VISION_FULL_HEIGHT {camera['full_height']}")
+    out.append(f"#define GEN_VISION_FULL_FRAME_SIZE {camera['full_frame_size']}")
+    out.append(f"#define GEN_VISION_FULL_JPEG_QUALITY {camera['full_jpeg_quality']}")
     out.append(f"#define GEN_VISION_XCLK_HZ {camera['xclk_hz']}")
     out.append(f"#define GEN_VISION_SETTLE_FRAMES_MIN {camera['settle_frames_min']}")
     out.append(f"#define GEN_VISION_SETTLE_FRAMES_MAX {camera['settle_frames_max']}")
@@ -847,7 +851,8 @@ def gen_vision_h(v: dict) -> str:
     out.append(f"#define GEN_VISION_CHUNK_VERSION {v['version']}")
     out.append(f"#define GEN_VISION_CHUNK_HEADER_BYTES {chunk['header_bytes']}")
     out.append(f"#define GEN_VISION_CHUNK_PAYLOAD_BYTES {chunk['payload_bytes']}")
-    out.append(f"#define GEN_VISION_CHUNK_FLAG_PREVIEW {chunk['flag_preview']}\n")
+    out.append(f"#define GEN_VISION_CHUNK_FLAG_PREVIEW {chunk['flag_preview']}")
+    out.append(f"#define GEN_VISION_CHUNK_FLAG_FULL {chunk['flag_full']}\n")
     out.append("typedef struct {")
     out += [f"    {C_FIELD_TYPE[fl['type']]} {fl['name']};" for fl in v["fields"]]
     out.append("} gen_vision_chunk_header_t;\n")
@@ -873,6 +878,7 @@ def gen_vision_py(v: dict) -> str:
         f"CHUNK_HEADER_BYTES = {chunk['header_bytes']}\n"
         f"CHUNK_PAYLOAD_BYTES = {chunk['payload_bytes']}\n"
         f"CHUNK_FLAG_PREVIEW = {chunk['flag_preview']}\n"
+        f"CHUNK_FLAG_FULL = {chunk['flag_full']}\n"
         f"PREVIEW_HOLD_MS = {v['camera']['preview_hold_ms']}\n"
         f'CHUNK_HEADER = struct.Struct("{fmt}")\n'
         f"CHUNK_HEADER_FIELDS = {tuple(fl['name'] for fl in v['fields'])!r}\n"

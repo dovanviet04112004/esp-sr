@@ -9,6 +9,10 @@ camera:
   height: 720
   frame_size: FRAMESIZE_HD
   jpeg_quality: 6
+  full_width: 2560 # the picture sent home: the whole 4:3 array (KEHOACH 3.19)
+  full_height: 1920
+  full_frame_size: FRAMESIZE_QSXGA
+  full_jpeg_quality: 12
   xclk_hz: 20000000
   settle_frames_min: 4
   settle_frames_max: 30
@@ -28,6 +32,7 @@ chunk:
   magic: SRIM
   payload_bytes: 16384
   flag_preview: 1
+  flag_full: 2
   header:
     - {name: magic, type: u32}
     - {name: version, type: u16}
