@@ -182,12 +182,27 @@ khác `aid` (3 so với 5) và RSSI (−46 so với −32 dBm), chưa chứng mi
 | 2 048 | 107–110, 113 | 29 696 B | 27 584 B | 1 951–1 970 ms |
 | 2 048 | 111, 112 | 36 864 B | 32 704 B | 1 941–1 956 ms |
 | 2 048 | 114 | 38 912 B | 32 768 B, đủ | 1 931–1 936 ms |
+| 2 048, giữ 40 960 B | 116–123 | 40 960 B sau `net settled` | đủ 32 768 B; một lượt 25 536 B | 1 930–1 948 ms; một lượt 1 992 |
+| 2 048, giữ 36 864 B | 125–132 | 36 864 B sau `net settled` | đủ 32 768 B | 1 930–1 951 ms |
 
 Vùng mượn là khối lớn nhất lúc chạy trừ dự trữ và 64 B đệm, nên dự trữ 8 KB biến bố cục 29 696 B thành vùng 21 440 B, dưới ngưỡng ~25 KB
 mà tốc độ nhảy thêm ~65 ms. Các task khác chỉ cấp thêm khoảng 130 B RAM nội trong lúc `detect` chạy (RAM nội trống thấp nhất 23 955 B
 trong khi vùng mượn 28 608 B đang giữ), nên dự trữ 8 KB không dùng tới. Hạ xuống 2 KB: RAM nội thấp nhất ở boot 114, vùng mượn đủ 32 768 B,
 sau ba lượt `detect` và hai nhịp tim, 23,6 KiB (nhịp tim `heapInternalMin`), không thấp hơn trước; `dropped` dma, frames, clean, events, stream đều 0.
 Chưa chạy dài để thấy đáy RAM nội 🔬.
+
+**Giữ một khối RAM nội lúc Wi-Fi khởi động.** `net_task` giữ `APP_NET_HEAP_HOLD_BYTES` ngay trước `net_wifi_init` và trả nguyên khối khi MQTT lên (tối đa
+10 s), nên Wi-Fi chia heap quanh khối ấy và khối liền lớn nhất sau `net settled` đúng bằng khối giữ, ở cả 16 boot đo, không còn mức 29 696 B.
+- Giữ 40 960 B: đáy RAM nội 6,7 KiB; 23 trên 24 lượt `detect` 1 930–1 948 ms. Lượt còn lại chạy 1 992 ms vì `pitch` đang giữ vùng mượn
+  14 272 B của nó lúc `detect` xin, nên `detect` chỉ được 25 536 B: hai vùng mượn chồng nhau, không do Wi-Fi.
+- Giữ 36 864 B, đủ cho 32 768 B vùng mượn, 2 048 B dự trữ và 64 B đệm: đáy RAM nội **10,1 KiB** (nhịp tim `heapInternalMin`), 24 lượt `detect` 1 930–1 951 ms,
+  `dropped` dma, frames, clean, events, stream đều 0; Wi-Fi và MQTT lên ở cả 8 boot.
+- Lúc giữ khối, khối lớn nhất chỉ 7 680–8 704 B, nên `pitch` (chạy suốt lúc nghe) mượn 5 568 hay 6 592 B trên 14 272 B xin trong vài giây ấy. Chưa đo
+  `pitch` chậm bao nhiêu 🔬.
+- Đáy RAM nội trước khi giữ là 23,6 KiB; giữ 36 864 B lấy đi ~13,5 KiB lề lúc Wi-Fi khởi động. Mới thử trên mạng `esp` (hotspot điện thoại); nơi nhiều
+  AP hơn thì lượt quét Wi-Fi cần nhiều RAM nội hơn 🔬.
+- Không đưa vào sản phẩm: lợi thêm ~20 ms chênh lệch giữa các boot, đổi lấy ~13,5 KiB lề RAM nội lúc khởi động. Bản chốt chỉ hạ dự trữ xuống 2 KB; boot 133
+  chạy 1 944, 2 029, 1 944 ms, lượt 2 029 ms nhiều khả năng là vùng mượn của `pitch` chồng lên `detect` như ở boot 123 🔬.
 
 ### 4.6 `detect` trên ảnh thật
 
