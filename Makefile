@@ -598,6 +598,7 @@ endif
 	cd host && uv run python -m srhost.boot --port "$(PORT)"
 
 board-c-check: ## Run every block of board C through test_apps/board_c; the product goes back with make product BOARD=C
+	@$(call fresh_sdkconfig,$(BOARD_C_APP)/sdkconfig,$(call app_defaults,$(BOARD_C_APP)) firmware/sdkconfig.board_c)
 	cd $(BOARD_C_APP) && idf.py build
 	@echo "hold the button, power-cycle the board, wait 2 s, release (KEHOACH 2.1)"
 	cd $(BOARD_C_APP)/build && python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD) \

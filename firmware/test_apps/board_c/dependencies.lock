@@ -75,7 +75,7 @@ dependencies:
     component_hash: e1e7e6991193c41ed6c9fc386702aa7821433319e7aa9c3147cd3236310cd69c
     dependencies: []
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     targets:
     - esp32
@@ -120,9 +120,10 @@ direct_dependencies:
 - espressif/esp-dl
 - espressif/esp32-camera
 - espressif/esp_jpeg
+- espressif/esp_new_jpeg
 - espressif/mqtt
 - idf
 - joltwallet/littlefs
-manifest_hash: 560f675b8860c9472be771c01b562b5ca8574afb01c2efddb56c873236d1447a
+manifest_hash: 8c8f2153c2887178ab5086cc7307c053460159331e4efdb23c64c5020f6fa3c5
 target: esp32s3
 version: 3.0.0
