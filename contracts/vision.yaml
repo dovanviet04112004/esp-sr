@@ -4,6 +4,7 @@ version: 1
 commands:
   photo: chup_anh
   detect: nhan_dien
+  journal: ghi_nhat_ki
 camera:
   width: 640 # detect's frame: the whole 4:3 array, binned and scaled (KEHOACH 3.19)
   height: 480
@@ -25,6 +26,12 @@ detect:
   decode_width: 512 # what the JPEG decoder makes of detect's frame, before the quarter turn
   decode_height: 384
   boxes_max: 32
+note: # the voice note of a journal entry (KEHOACH 3.19), cleaned hops as nhan_task gets them
+  start_s: 5.0 # with no speech by then the note ends empty
+  end_silence_s: 1.5 # speech then this long without it ends the note
+  max_s: 30.0
+  buffer_s: 3.0 # sb_note: hops nhan_task may run ahead of the card
+  card_block_bytes: 8192 # PCM written to the card at a time
 sensors:
   period_ms: 1000
   report_s: 10

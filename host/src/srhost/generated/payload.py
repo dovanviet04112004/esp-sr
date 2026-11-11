@@ -46,7 +46,7 @@ class DeviceCmdStream(TypedDict):
     port: NotRequired[int]
     durationS: NotRequired[int]
 
-DeviceCmdCaptureMode = Literal['PHOTO', 'DETECT', 'PREVIEW']
+DeviceCmdCaptureMode = Literal['PHOTO', 'DETECT', 'PREVIEW', 'JOURNAL']
 
 
 class DeviceCmd(TypedDict):
@@ -101,6 +101,19 @@ class Heartbeat(TypedDict):
     rssiDbm: NotRequired[int]
     coreLoadPct: NotRequired[list[int]]
     ts: NotRequired[int]
+
+
+
+class Journal(TypedDict):
+    deviceId: str
+    boot: int
+    captureSeq: int
+    noteMs: int
+    noteBytes: int
+    noteDropped: int
+    noteSaved: bool
+    imageBytes: int
+    saved: bool
 
 OtaManifestKind = Literal['FIRMWARE', 'MODELS']
 
@@ -304,7 +317,7 @@ SCHEMAS: dict[str, dict] = {
                                               'durationS': {'type': 'integer', 'minimum': 1, 'maximum': 3600}}},
                     'text': {'type': 'string', 'minLength': 1, 'maxLength': 128},
                     'speakerId': {'type': 'string', 'pattern': '^spk_[0-9]{3}$', 'maxLength': 7},
-                    'captureMode': {'enum': ['PHOTO', 'DETECT', 'PREVIEW']}},
+                    'captureMode': {'enum': ['PHOTO', 'DETECT', 'PREVIEW', 'JOURNAL']}},
      'allOf': [{'if': {'properties': {'op': {'const': 'SET_CONFIG'}}}, 'then': {'required': ['key', 'value']}},
                {'if': {'properties': {'op': {'const': 'SET_STREAM'}}}, 'then': {'required': ['stream']}},
                {'if': {'properties': {'op': {'const': 'SPEAK'}}}, 'then': {'required': ['text']}},
@@ -375,6 +388,31 @@ SCHEMAS: dict[str, dict] = {
                                     'maxItems': 2,
                                     'items': {'type': 'integer', 'minimum': 0, 'maximum': 100}},
                     'ts': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295}}},
+    'journal': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+     '$id': 'sr/journal',
+     'title': 'journal',
+     'description': "One journal entry of board C: its voice note and its full picture, named by the capture's "
+                    'boot and seq.',
+     'type': 'object',
+     'additionalProperties': False,
+     'required': ['deviceId',
+                  'boot',
+                  'captureSeq',
+                  'noteMs',
+                  'noteBytes',
+                  'noteDropped',
+                  'noteSaved',
+                  'imageBytes',
+                  'saved'],
+     'properties': {'deviceId': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{4,32}$', 'maxLength': 32},
+                    'boot': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'captureSeq': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'noteMs': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'noteBytes': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'noteDropped': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'noteSaved': {'type': 'boolean'},
+                    'imageBytes': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'saved': {'type': 'boolean'}}},
     'ota_manifest': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
      '$id': 'sr/ota_manifest',
      'title': 'ota_manifest',

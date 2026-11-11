@@ -31,8 +31,10 @@ typedef enum {
     GEN_TOPIC_IMAGE = 8,
     GEN_TOPIC_DETECTIONS = 9,
     GEN_TOPIC_SENSORS = 10,
-    GEN_TOPIC_OTA = 11,
-    GEN_TOPIC_COUNT = 12,
+    GEN_TOPIC_NOTE = 11,
+    GEN_TOPIC_JOURNAL = 12,
+    GEN_TOPIC_OTA = 13,
+    GEN_TOPIC_COUNT = 14,
     GEN_TOPIC_NONE = GEN_TOPIC_COUNT,
 } gen_topic_id_t;
 
@@ -57,6 +59,8 @@ static const gen_topic_info_t GEN_TOPIC_INFO[GEN_TOPIC_COUNT] = {
     [GEN_TOPIC_IMAGE] = {"sr/", "/up/image", 1, false, true, false},
     [GEN_TOPIC_DETECTIONS] = {"sr/", "/up/detections", 1, false, true, false},
     [GEN_TOPIC_SENSORS] = {"sr/", "/up/sensors", 0, false, true, false},
+    [GEN_TOPIC_NOTE] = {"sr/", "/up/note", 1, false, true, false},
+    [GEN_TOPIC_JOURNAL] = {"sr/", "/up/journal", 1, false, true, false},
     [GEN_TOPIC_OTA] = {"sr/", "/down/ota", 1, false, false, false},
 };
 
@@ -183,6 +187,22 @@ static inline bool gen_topic_detections(const char *device_id, char *out, size_t
 static inline bool gen_topic_sensors(const char *device_id, char *out, size_t cap)
 {
     return gen_topic_build(GEN_TOPIC_SENSORS, device_id, out, cap);
+}
+
+/** gen_topic_build fixed to GEN_TOPIC_NOTE.
+ *  @ctx any | non-blocking | caller owns out
+ */
+static inline bool gen_topic_note(const char *device_id, char *out, size_t cap)
+{
+    return gen_topic_build(GEN_TOPIC_NOTE, device_id, out, cap);
+}
+
+/** gen_topic_build fixed to GEN_TOPIC_JOURNAL.
+ *  @ctx any | non-blocking | caller owns out
+ */
+static inline bool gen_topic_journal(const char *device_id, char *out, size_t cap)
+{
+    return gen_topic_build(GEN_TOPIC_JOURNAL, device_id, out, cap);
 }
 
 /** gen_topic_build fixed to GEN_TOPIC_OTA.

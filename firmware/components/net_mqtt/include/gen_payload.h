@@ -425,7 +425,8 @@ typedef enum {
     DEVICE_CMD_CAPTURE_MODE_PHOTO = 0,
     DEVICE_CMD_CAPTURE_MODE_DETECT = 1,
     DEVICE_CMD_CAPTURE_MODE_PREVIEW = 2,
-    DEVICE_CMD_CAPTURE_MODE_COUNT = 3,
+    DEVICE_CMD_CAPTURE_MODE_JOURNAL = 3,
+    DEVICE_CMD_CAPTURE_MODE_COUNT = 4,
 } device_cmd_capture_mode_t;
 
 /** Contract spelling of a value; "" when it is out of range.
@@ -437,6 +438,7 @@ static inline const char *device_cmd_capture_mode_str(device_cmd_capture_mode_t 
     case DEVICE_CMD_CAPTURE_MODE_PHOTO: return "PHOTO";
     case DEVICE_CMD_CAPTURE_MODE_DETECT: return "DETECT";
     case DEVICE_CMD_CAPTURE_MODE_PREVIEW: return "PREVIEW";
+    case DEVICE_CMD_CAPTURE_MODE_JOURNAL: return "JOURNAL";
     default: return "";
     }
 }
@@ -451,6 +453,7 @@ static inline bool device_cmd_capture_mode_parse(const char *s, device_cmd_captu
     if (strcmp(s, "PHOTO") == 0) { *out = DEVICE_CMD_CAPTURE_MODE_PHOTO; return true; }
     if (strcmp(s, "DETECT") == 0) { *out = DEVICE_CMD_CAPTURE_MODE_DETECT; return true; }
     if (strcmp(s, "PREVIEW") == 0) { *out = DEVICE_CMD_CAPTURE_MODE_PREVIEW; return true; }
+    if (strcmp(s, "JOURNAL") == 0) { *out = DEVICE_CMD_CAPTURE_MODE_JOURNAL; return true; }
     return false;
 }
 
@@ -1055,6 +1058,111 @@ static inline cJSON *heartbeat_to_json(const heartbeat_t *in)
     if (in->has_ts) {
         cJSON_AddNumberToObject(root, "ts", (double) in->ts);
     }
+    return root;
+}
+
+typedef struct {
+    char device_id[33];
+    uint32_t boot;
+    uint32_t capture_seq;
+    uint32_t note_ms;
+    uint32_t note_bytes;
+    uint32_t note_dropped;
+    bool note_saved;
+    uint32_t image_bytes;
+    bool saved;
+} journal_t;
+
+/** Fill out from a parsed journal object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool journal_from_json(const cJSON *root, journal_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "deviceId");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->device_id)) { return false; }
+        strcpy(out->device_id, item->valuestring);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "boot");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->boot = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "captureSeq");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->capture_seq = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "noteMs");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->note_ms = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "noteBytes");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->note_bytes = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "noteDropped");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->note_dropped = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "noteSaved");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsBool(item)) { return false; }
+        out->note_saved = cJSON_IsTrue(item);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "imageBytes");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->image_bytes = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "saved");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsBool(item)) { return false; }
+        out->saved = cJSON_IsTrue(item);
+    }
+    return true;
+}
+
+/** Build the JSON object of one journal for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *journal_to_json(const journal_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddStringToObject(root, "deviceId", in->device_id);
+    cJSON_AddNumberToObject(root, "boot", (double) in->boot);
+    cJSON_AddNumberToObject(root, "captureSeq", (double) in->capture_seq);
+    cJSON_AddNumberToObject(root, "noteMs", (double) in->note_ms);
+    cJSON_AddNumberToObject(root, "noteBytes", (double) in->note_bytes);
+    cJSON_AddNumberToObject(root, "noteDropped", (double) in->note_dropped);
+    cJSON_AddBoolToObject(root, "noteSaved", in->note_saved);
+    cJSON_AddNumberToObject(root, "imageBytes", (double) in->image_bytes);
+    cJSON_AddBoolToObject(root, "saved", in->saved);
     return root;
 }
 

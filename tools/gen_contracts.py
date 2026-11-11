@@ -826,6 +826,7 @@ def gen_vision_h(v: dict) -> str:
     out = [banner("contracts/vision.yaml", "//"), "#pragma once\n", "#include <stddef.h>", "#include <stdint.h>\n"]
     out.append(f'#define GEN_VISION_COMMAND_PHOTO "{v["commands"]["photo"]}"')
     out.append(f'#define GEN_VISION_COMMAND_DETECT "{v["commands"]["detect"]}"')
+    out.append(f'#define GEN_VISION_COMMAND_JOURNAL "{v["commands"]["journal"]}"')
     out.append(f"#define GEN_VISION_WIDTH {camera['width']}")
     out.append(f"#define GEN_VISION_HEIGHT {camera['height']}")
     out.append(f"#define GEN_VISION_FRAME_SIZE {camera['frame_size']}")
@@ -845,6 +846,12 @@ def gen_vision_h(v: dict) -> str:
     out.append(f"#define GEN_VISION_DECODE_WIDTH {detect['decode_width']}")
     out.append(f"#define GEN_VISION_DECODE_HEIGHT {detect['decode_height']}")
     out.append(f"#define GEN_VISION_BOXES_MAX {detect['boxes_max']}")
+    note = v["note"]
+    out.append(f"#define GEN_VISION_NOTE_START_S {float(note['start_s'])}f")
+    out.append(f"#define GEN_VISION_NOTE_END_SILENCE_S {float(note['end_silence_s'])}f")
+    out.append(f"#define GEN_VISION_NOTE_MAX_S {float(note['max_s'])}f")
+    out.append(f"#define GEN_VISION_NOTE_BUFFER_S {float(note['buffer_s'])}f")
+    out.append(f"#define GEN_VISION_NOTE_CARD_BLOCK_BYTES {note['card_block_bytes']}")
     out.append(f"#define GEN_VISION_SENSORS_PERIOD_MS {v['sensors']['period_ms']}")
     out.append(f"#define GEN_VISION_SENSORS_REPORT_S {v['sensors']['report_s']}")
     out.append(f"#define GEN_VISION_IR_RELEASE_MS {v['sensors']['ir_release_ms']}")
@@ -874,6 +881,8 @@ def gen_vision_py(v: dict) -> str:
         "\nimport struct\n\n"
         f'COMMAND_PHOTO = "{v["commands"]["photo"]}"\n'
         f'COMMAND_DETECT = "{v["commands"]["detect"]}"\n'
+        f'COMMAND_JOURNAL = "{v["commands"]["journal"]}"\n'
+        f"NOTE_MAX_S = {float(v['note']['max_s'])}\n"
         f"CHUNK_MAGIC_U32 = 0x{v['magic_u32']:08x}\n"
         f"CHUNK_VERSION = {v['version']}\n"
         f"CHUNK_HEADER_BYTES = {chunk['header_bytes']}\n"

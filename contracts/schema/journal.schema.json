@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sr/journal",
+  "title": "journal",
+  "description": "One journal entry of board C: its voice note and its full picture, named by the capture's boot and seq.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["deviceId", "boot", "captureSeq", "noteMs", "noteBytes", "noteDropped", "noteSaved", "imageBytes", "saved"],
+  "properties": {
+    "deviceId": {"type": "string", "pattern": "^[A-Za-z0-9_-]{4,32}$", "maxLength": 32},
+    "boot": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "captureSeq": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "noteMs": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "noteBytes": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "noteDropped": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "noteSaved": {"type": "boolean"},
+    "imageBytes": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "saved": {"type": "boolean"}
+  }
+}

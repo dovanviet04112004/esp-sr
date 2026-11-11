@@ -6,6 +6,8 @@ import struct
 
 COMMAND_PHOTO = "chup_anh"
 COMMAND_DETECT = "nhan_dien"
+COMMAND_JOURNAL = "ghi_nhat_ki"
+NOTE_MAX_S = 30.0
 CHUNK_MAGIC_U32 = 0x4d495253
 CHUNK_VERSION = 1
 CHUNK_HEADER_BYTES = 28
