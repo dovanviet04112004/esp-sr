@@ -84,6 +84,21 @@ bool drv_sd_exists(const char *path)
     return length > 0 && (size_t)length < sizeof(full) && stat(full, &info) == 0;
 }
 
+static bool fits(int length, size_t bytes)
+{
+    return length > 0 && (size_t)length < bytes;
+}
+
+esp_err_t drv_sd_name(const char *stem, const char *extension, char *path, size_t path_bytes)
+{
+    int length = snprintf(path, path_bytes, "%s.%s", stem, extension);
+    for (unsigned copy = 1; copy <= DRV_SD_NAME_COPIES_MAX && fits(length, path_bytes) && drv_sd_exists(path);
+         copy++) {
+        length = snprintf(path, path_bytes, "%s_%u.%s", stem, copy, extension);
+    }
+    return fits(length, path_bytes) ? ESP_OK : ESP_ERR_INVALID_SIZE;
+}
+
 esp_err_t drv_sd_write(const char *path, const uint8_t *data, size_t bytes)
 {
     if (s_card == NULL) { return ESP_ERR_INVALID_STATE; }
@@ -98,4 +113,47 @@ esp_err_t drv_sd_write(const char *path, const uint8_t *data, size_t bytes)
     if (wrote == bytes && closed == 0) { return ESP_OK; }
     remove(full);
     return ESP_FAIL;
+}
+
+static esp_err_t open_full(const char *path, const char *mode, FILE **file)
+{
+    if (s_card == NULL) { return ESP_ERR_INVALID_STATE; }
+    char full[PATH_MAX_BYTES];
+    const int length = snprintf(full, sizeof(full), DRV_SD_ROOT "/%s", path);
+    if (length < 0 || (size_t)length >= sizeof(full)) { return ESP_ERR_INVALID_SIZE; }
+    *file = fopen(full, mode);
+    return *file != NULL ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t drv_sd_append(const char *path, const uint8_t *data, size_t bytes)
+{
+    FILE *file = NULL;
+    const esp_err_t err = open_full(path, "ab", &file);
+    if (err != ESP_OK) { return err; }
+    const size_t wrote = fwrite(data, 1, bytes, file);
+    const int closed = fclose(file);
+    return wrote == bytes && closed == 0 ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t drv_sd_patch(const char *path, size_t offset, const uint8_t *data, size_t bytes)
+{
+    FILE *file = NULL;
+    const esp_err_t err = open_full(path, "r+b", &file);
+    if (err != ESP_OK) { return err; }
+    const bool wrote = fseek(file, (long)offset, SEEK_SET) == 0 && fwrite(data, 1, bytes, file) == bytes;
+    const int closed = fclose(file);
+    return wrote && closed == 0 ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t drv_sd_read(const char *path, size_t offset, uint8_t *data, size_t bytes, size_t *got)
+{
+    *got = 0;
+    FILE *file = NULL;
+    const esp_err_t err = open_full(path, "rb", &file);
+    if (err != ESP_OK) { return err; }
+    const bool placed = fseek(file, (long)offset, SEEK_SET) == 0;
+    if (placed) { *got = fread(data, 1, bytes, file); }
+    const bool failed = !placed || ferror(file) != 0;
+    fclose(file);
+    return failed ? ESP_FAIL : ESP_OK;
 }
