@@ -274,20 +274,25 @@ class Assembler:
         names = (".jpg", FULL_SUFFIX + ".jpg", boxes, FULL_SUFFIX + boxes, ".json", ".wav")
         return [stem + name for name in names if (self.folder(device) / (stem + name)).exists()]
 
-    def keep_record(self, device: str, payload: dict, rx_utc: str) -> Path:
-        """Write one up/record as <stem>_record.json with when it was taken and the capture's files; its boxes land
-        beside the picture as up/detections would."""
+    def keep_record(self, device: str, payload: dict, rx_utc: str) -> tuple[Path, bool]:
+        """Write one up/record as <stem>_record.json with when it was taken and the capture's files; boxes that
+        up/detections did not bring land beside the picture as it would. The path, and whether the boxes were new."""
         capture = payload["capture"]
         boot, seq = capture["boot"], capture["captureSeq"]
         stem = stem_of(boot, seq)
         self.folder(device).mkdir(parents=True, exist_ok=True)
-        if "detections" in payload:
-            self.keep_boxes(device, payload["detections"])
+        boxes = self.folder(device) / f"{stem}.json"
+        found = payload.get("detections")
+        new_boxes = found is not None and (
+            not boxes.exists() or boxes.read_text(encoding="utf-8") != json.dumps(found, ensure_ascii=False, indent=1)
+        )
+        if new_boxes:
+            self.keep_boxes(device, found)
         entry = {**payload, "capturedUtc": captured_utc(capture, rx_utc), "files": self.files_of(device, stem)}
         path = self.folder(device) / f"{stem}{RECORD_SUFFIX}.json"
         write_whole(path, json.dumps(entry, ensure_ascii=False, indent=1).encode("utf-8"))
         self._waiting.add((device, boot, seq))
-        return path
+        return path, new_boxes
 
     def _complete(self, device: str, capture: dict) -> bool:
         stem = self.folder(device) / stem_of(capture["boot"], capture["captureSeq"])
@@ -471,13 +476,14 @@ def keep(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -
         done = [f"{message.device} note {path.stat().st_size} bytes: {path}"]
         return done + acked_line(assembler, message.device, header["boot"], header["seq"])
     elif message.kind == "record":
-        path = assembler.keep_record(message.device, message.payload, message.rx_utc)
-        done.append(f"{message.device} record {describe_record(message.payload)}: {path}")
+        path, new_boxes = assembler.keep_record(message.device, message.payload, message.rx_utc)
         boot, seq = message.payload["capture"]["boot"], message.payload["capture"]["captureSeq"]
-        if "detections" in message.payload:
+        acked = ", acked" if assembler.settle(message.device, boot, seq) else ""
+        done.append(f"{message.device} record {describe_record(message.payload)}{acked}: {path}")
+        if new_boxes:
             marked = [assembler.mark(message.device, boot, seq, suffix) for suffix in ("", FULL_SUFFIX)]
             done += [f"{message.device} boxes drawn: {p}" for p in marked if p is not None]
-        return done + acked_line(assembler, message.device, boot, seq)
+        return done
     elif message.kind == "sensors":
         assembler.note_place(message.device, message.payload)
         return []

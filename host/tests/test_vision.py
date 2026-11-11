@@ -381,7 +381,22 @@ def test_a_record_with_all_its_parts_is_kept_and_acked(tmp_path: Path) -> None:
     assert entry["files"] == ["B7_000002_full.jpg", "B7_000002.wav"]
     assert entry["capturedUtc"] == "2026-11-11T12:00:04.000+00:00"
     assert acks == [(DEVICE, 7, 2)]
-    assert lines[-1] == f"{DEVICE} B7_000002 acked"
+    assert lines == [
+        f"{DEVICE} record B7_000002 JOURNAL: picture {len(PICTURE)} bytes, note {len(PICTURE)} bytes, acked: "
+        f"{tmp_path / DEVICE / 'B7_000002_record.json'}"
+    ]
+
+
+def test_a_record_after_its_boxes_draws_nothing_again(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    vision.keep(assembler, up("image", jpeg_chunk(contract.CHUNK_FLAG_FULL)))
+    vision.keep(assembler, up("detections", DETECTIONS))
+    drawn = (tmp_path / DEVICE / "B7_000002_full_boxes.jpg").stat().st_mtime_ns
+    payload = {"capture": {**CAPTURE, "noteBytes": 0}, "detections": BOXES}
+    message = mqtt_rx.parse(f"sr/{DEVICE}/up/record", json.dumps(payload).encode(), rx_utc=RX_UTC)
+    lines = vision.keep(assembler, message)
+    assert not any("boxes drawn" in line for line in lines)
+    assert (tmp_path / DEVICE / "B7_000002_full_boxes.jpg").stat().st_mtime_ns == drawn
 
 
 def test_a_record_before_its_picture_is_acked_once_the_picture_lands(tmp_path: Path) -> None:
