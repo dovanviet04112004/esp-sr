@@ -2589,7 +2589,7 @@ Id của hai lệnh, số của luồng ảnh và nhịp của ngoại vi nằm 
 - Khung của `detect` nằm trong ảnh dựng đứng 384 × 512. Khung `detect` và ảnh đầy đủ cùng là cả mảng 4:3 (bảng cửa sổ của
   `esp32-camera`, hàng 0–1951), nên trên ảnh đầy đủ dựng đứng 1920 × 2560 khung ấy là x' = 5x, y' = 5y. Board không vẽ khung (chủ repo chốt 11/11): vẽ
   lên ảnh 5 MP trên chip là giải nén rồi nén lại theo dải, tốn vài giây và ~150 KB PSRAM, ảnh nén hai lần. Ảnh đầy đủ đi sạch; host và
-  server vẽ từ `up/detections` hay từ `.JSN` trên thẻ. Host vẽ khung lên cả hai ảnh.
+  server vẽ từ `up/detections` hay `up/record`. Host vẽ khung lên cả hai ảnh.
 - Dưới XGA, `esp32-camera` hạ hệ số PLL của JPEG từ 200 xuống 180, nên bước chống nhấp nháy 50 Hz tính theo hệ số đọc từ cảm biến
   sau mỗi lần đổi cỡ, không theo một hằng số.
 - Đổi cỡ thì giữ thời gian phơi sáng. OV5640 đếm phơi sáng theo 1/16 dòng, và mỗi cỡ có thời gian dòng riêng: 2 060 điểm ở 45 MHz
@@ -2643,7 +2643,7 @@ quy tắc: nhân theo tỉ lệ chiều cao, canh giữa theo chiều ngang.
 
 **Thử nhanh không cần tiếng nói.** `make detect` (`srhost.vision --capture DETECT --once`) gửi `CAPTURE` tới board duy nhất đang `ONLINE` (trạng thái giữ lại của broker), hay tới `DEVICE=<deviceId>` khi có nhiều board, chờ ảnh nhỏ, khung và ảnh đầy đủ về, in nơi các ảnh đã vẽ khung được lưu rồi thoát, không cần `make host-live`. Board từ chối bằng một sự kiện `ERROR` (`VISION_BUSY`, `CAMERA_FAIL`) thì dừng ngay với mã ấy; quá 30 s chưa đủ thì báo thiếu gì. Cùng cờ `--once` với `PHOTO` chỉ chờ ảnh đầy đủ.
 
-Không có thẻ thì vẫn đẩy ảnh, sự kiện ghi `saved: false`. Mất MQTT thì ảnh vẫn ở thẻ; bản đầu chưa gửi lại. Đang chạy mà có
+Không có thẻ thì vẫn đẩy ảnh, sự kiện ghi `saved: false`. Mất MQTT thì mục ở lại thẻ và đi sau (bản ghi và gửi bù, dưới). Đang chạy mà có
 lệnh mới thì từ chối ngay với mã `VISION_BUSY` và tiếng trầm, không xếp hàng: `nhin_task` giữ yêu cầu trong `q_vision` tới hết ảnh
 đầy đủ (§5.3), nên "nhận diện" còn bận ~4–8 s sau khi khung đã về.
 
@@ -2653,18 +2653,46 @@ dài nếu `detect` chạy, trầm nếu không; ảnh nhỏ không gửi đư�
 sau khi đã có tiếng thì không thêm tiếng: camera hỏng thì có `CAMERA_FAIL`, gửi hỏng thì ảnh còn ở thẻ. `DETECT_FAIL` chỉ khi `detect` không chạy; gửi khung hỏng là việc của MQTT, bản QoS 1 còn nằm ở outbox.
 Không có đệm (`svc_vision_init` hỏng) hay không có camera thì `nhin_task` vẫn chạy và từ chối từng yêu cầu bằng `CAMERA_FAIL`, board vẫn nghe.
 
+**Bản ghi, thẻ và gửi bù (chủ repo 11/11).** Mỗi lần chụp, ở cả ba lệnh, là một mục trên thẻ và một bản ghi gửi lên: mất mạng
+không mất gì, có mạng lại thì board gửi dần.
+- Mỗi component một việc: `svc_capture` (L5, §4.5.4) nối một lần chụp của "chụp ảnh", "nhận diện" hay "ghi nhật ký"; `svc_vision` chụp,
+  `detect` và gửi; `svc_note` ghi lời ghi chú; `svc_outbox` (L4) giữ mục trên thẻ và gửi bù. `svc_vision_step` trả mọi yêu cầu chụp cho
+  `nhin_task`, task gọi `svc_capture_keep` rồi `svc_vision_done`, nên `q_vision` đầy suốt lần chụp (§5.3). Tiếng báo như ở trên.
+- Bản ghi là một đối tượng JSON ba khoá: `capture` (lệnh, `seq`, cỡ, `sent` và `saved` của ảnh đầy đủ, lời ghi chú khi có, `uptimeMs`
+  lúc chụp, `sentBoot` và `sentUptimeMs` lúc gửi, `late`), `detections` khi `detect` chạy, `sensors` là lần đọc mới nhất của `do_task`
+  khi cảm biến bật (`svc_sensors_latest`, `main` cắm vào). Mỗi khoá đúng schema cùng tên; `record.schema.json` trỏ tới chúng bằng `$ref`, bộ sinh dùng lại
+  struct và hàm JSON của schema được trỏ. `net_mqtt_print_record` in nó vào vùng JSON của `nhin_task`, không có đệm riêng; bản tệ nhất,
+  32 khung, ~4,2 KB.
+- Mục trên thẻ là `/sdcard/IMG/B<boot>/<seq>.*`: `JPG` ảnh đầy đủ, `JSN` bản ghi, `WAV` lời ghi chú khi là nhật ký. Dấu chờ là
+  `/sdcard/IMG/PND/B<boot>_<seq>.PND`, file rỗng nghĩa là server chưa xác nhận; mọi dấu chung một thư mục nên tìm mục chỉ đọc một thư
+  mục. `drv_sd_name` phải đặt tên bản sao cho `JSN` (lượt chạy cũ để lại cùng tên) thì mục ấy không có dấu, chỉ đi trực tiếp. Khung
+  `detect` không lưu: server vẽ khung lên ảnh đầy đủ (x' = 5x).
+- Có mạng: ảnh nhỏ, khung, ảnh đầy đủ, lời ghi chú đi như trên, rồi `up/record`. Server lưu đủ các phần bản ghi khai (ảnh khi `imageBytes`
+  lớn hơn 0, lời ghi chú khi `noteBytes` lớn hơn 0) thì gửi `down/ack` {`boot`, `captureSeq`}; `net_mqtt` đưa nó vào `q_ack`, `svc_outbox`
+  xoá dấu, các file của mục còn lại làm bản lưu. Host của repo làm phần server ấy; server khác phải gửi ack như vậy, không thì mục được gửi lại mãi.
+- Mất mạng hay gửi hỏng giữa chừng: dấu còn. Khi MQTT nối và `nhin_task` rảnh, không lệnh ảnh, không xem trực tiếp, `svc_outbox` gửi từ
+  thẻ mục cũ nhất còn dấu: `JPG` theo khúc cờ `full` và `late`, `WAV` cờ `late`, rồi bản ghi đọc lại từ `JSN` với `late: true`,
+  `sentBoot` và `sentUptimeMs` mới. Phần nào bản ghi khai mà thẻ không còn, hay khác cỡ, thì bản ghi gửi bù khai cỡ 0, để server không
+  chờ mãi; `JSN` hỏng hay mất thì bỏ dấu. Mỗi bước một khúc 16 KB; giữa hai bước `svc_vision_step` chỉ xem `q_vision` `outbox.step_wait_ms`, nên lệnh ảnh mới
+  vẫn được phục vụ ngay, và gửi bù không bao giờ chen giữa một lần chụp vì cả hai cùng ở `nhin_task`. Gửi hết một lượt mà còn mục chưa có
+  ack thì chờ `outbox.retry_s` rồi gửi lại; host nhận trùng thì ghi đè cùng nội dung và ack lại. Hộp thư esp-mqtt quá 128 KB thì khúc
+  gửi bù không vào, bước sau thử lại, không chờ như khúc trực tiếp.
+- Tìm mục: đọc `IMG/PND/` mỗi lần MQTT nối và mỗi lượt gửi lại, giữ trong RAM tối đa `outbox.batch` mục cũ nhất.
+- Giờ chụp: board chưa có đồng hồ, nên `capture` mang `boot` và `uptimeMs` lúc chụp, `sentBoot` và `sentUptimeMs` lúc gửi. Cùng
+  một lượt khởi động thì host suy giờ chụp = giờ nhận − (`sentUptimeMs` − `uptimeMs`); khác lượt thì chỉ biết thứ tự.
+- Không có thẻ: không có mục, chỉ đường trực tiếp. Thẻ đầy: chưa làm, lời ghi hỏng thì mục chỉ đi trực tiếp 🔬.
+- Số ở `vision.yaml` mục `outbox`. Host lưu bản ghi thành `<stem>_record.json` cùng tên các file của mục.
+
 **Ghi nhật ký.** "ghi nhật ký" (id `ghi_nhat_ki` của bộ lệnh, ghi ở `vision.yaml`; host gửi `CAPTURE` với `JOURNAL`) gom một mục nhật ký: lời ghi chú,
 khung `detect`, ảnh đầy đủ và số đo cảm biến. Số của lời ghi chú nằm ở `vision.yaml` mục `note`, khai bằng giây và quy ra hop lúc khởi tạo.
-Mỗi component một việc: `svc_vision` chụp, `detect`, gửi và lưu ảnh; `svc_note` ghi và gửi lời ghi chú; `svc_journal` (L5, §4.5.4) nối
-hai bên thành một mục. Lời ghi chú và ảnh chạy cùng lúc ở hai task của nhân 0 (chủ repo 11/11): `ghi_task` ghi lời ra thẻ trong lúc
-`nhin_task` chụp, nên ảnh là cảnh lúc ra lệnh, không phải lúc nói xong, và cả mục xong sớm hơn chừng thời gian chụp. Hai task theo hai
-nhịp khác nhau, hop của `sb_note` và khung của camera (§5.5 luật 1). Tiếng thì vẫn thu liên tục ở nhân 1 (`thu_task`, `sach_task`); cả hai
-task này chờ thẻ và mạng nên không lên nhân 1 (§5.1). `svc_vision_step` không tự làm yêu cầu `JOURNAL` mà trả nó cho `nhin_task`, task gọi
-`svc_journal_keep` rồi `svc_vision_done`, nên `q_vision` đầy suốt mục nhật ký như suốt một lần chụp (§5.3). Việc hai bên cùng cần nằm ở
+`svc_capture` nối lời ghi chú của `svc_note` với ảnh của `svc_vision` thành một mục. Lời ghi chú và ảnh chạy cùng lúc ở hai task của
+nhân 0 (chủ repo 11/11): `ghi_task` ghi lời ra thẻ trong lúc `nhin_task` chụp, nên ảnh là cảnh lúc ra lệnh, không phải lúc nói xong,
+và cả mục xong sớm hơn chừng thời gian chụp. Hai task theo hai nhịp khác nhau, hop của `sb_note` và khung của camera (§5.5 luật 1). Tiếng thì vẫn thu liên tục ở nhân 1 (`thu_task`, `sach_task`); cả hai
+task này chờ thẻ và mạng nên không lên nhân 1 (§5.1). Việc hai bên cùng cần nằm ở
 tầng dưới: khuôn khúc của `up/image` và `up/note` cùng crc32 ở `net_mqtt_publish_chunks`, với một đệm khúc ở PSRAM chỉ `nhin_task` dùng;
 luật đặt tên file trên thẻ, kể cả hậu tố khi tên đã có, ở `drv_sd_name`; thẻ dùng chung qua khoá `m_sd` của `drv_sd`, giữ trong một lời
 gọi file. Đèn GPIO 42 sáng khi còn một bên giữ: camera lúc chụp, `svc_note` lúc ghi (§7.5).
-1. Sau hai tiếng bíp nhận lệnh, `svc_journal` gửi `seq` vào `q_note` rồi chụp ngay. `ghi_task` nhận, `svc_note` bật cờ `APP_BIT_NOTE_ON`
+1. Sau hai tiếng bíp nhận lệnh, `svc_capture` gửi `seq` vào `q_note` rồi chụp ngay. `ghi_task` nhận, `svc_note` bật cờ `APP_BIT_NOTE_ON`
    và giữ đèn. Chừng nào cờ bật, `nhan_task` chép mỗi hop âm đã lọc cùng cờ `vad` vào `sb_note` với timeout 0 và không đưa hop ấy vào
    `svc_listen`. Bộ nghe thấy một khoảng hở `seq` và đặt lại như mọi khoảng hở (§5.3), nên lời ghi chú không đánh thức hay thành lệnh.
    Báo hop điếc thì không đủ: `wake` vẫn chạy trên hop điếc, và đã thức giữa một lời ghi chú (`measurements/board_c.md` §4.9).
@@ -2672,25 +2700,20 @@ gọi file. Đèn GPIO 42 sáng khi còn một bên giữ: camera lúc chụp, `
    cỡ lúc xong. Đoạn ghi dừng khi người nói im `note.end_silence_s` sau tiếng nói đầu, khi chưa ai nói sau `note.start_s`, hay khi đủ
    `note.max_s`. Hop điếc, tức lúc loa đang phát tiếng bíp của chính nó, không tính là nói hay im. Xong thì `ghi_task` phát một tiếng ngắn,
    lúc ấy, dù ảnh còn đang chụp, và gửi kết quả vào `q_note_done`.
-3. Cùng lúc, `svc_journal` gọi `svc_vision_detect` rồi `svc_vision_full`: khung `detect` và ảnh đầy đủ như "nhận diện", không tiếng giữa
+3. Cùng lúc, `svc_capture` gọi `svc_vision_detect` rồi `svc_vision_full`: khung `detect` và ảnh đầy đủ như "nhận diện", không tiếng giữa
    chừng. Lượt `detect` chạy với ưu tiên trên `nhan_task` ~2 s: `nhan_task` thôi chép, `q_clean` (3 s) giữ hop, rồi chép bù vào `sb_note`. Lượt ghi ảnh
    đầy đủ lên thẻ (~0,8 s) giữ `m_sd`; `ghi_task` chờ, `sb_note` (3 s) đỡ. Đầy thì hop bị bỏ và hiện ở `noteDropped`.
-4. Ảnh xong, `svc_journal` chờ `q_note_done`, tới `note.max_s` cộng 10 s. Rồi `svc_note_send` đọc lại `.WAV` từ thẻ và gửi `up/note` theo
-   khúc của `vision.yaml` cùng `seq`, ở `nhin_task` vì đệm khúc chỉ của task ấy; rồi `svc_journal` gửi `up/journal` mang độ dài, cỡ và
-   `saved` của lời ghi chú và của ảnh đầy đủ.
-5. `svc_journal` ghi `/sdcard/IMG/B<boot>/<seq>.JSN`: một đối tượng JSON ba khoá `journal`, `detections`, `sensors`, mỗi khoá đúng schema
-   của payload cùng tên; khoá nào không có (`detect` không chạy, cảm biến tắt hay chưa đọc lần nào) thì vắng. Mất mạng thì thẻ vẫn giữ đủ
-   một mục: ảnh, lời ghi chú, khung và số đo. `net_mqtt_print_entry` in nó bằng chính bộ mã JSON sinh từ `contracts/` của payload, vào vùng
-   JSON của `nhin_task` rồi đưa chữ cho `svc_journal` ghi thẻ, nên không có đệm riêng; bản tệ nhất, 32 khung, ~4,1 KB. Số đo là bản
-   `svc_sensors_latest`, lần đọc mới nhất của `do_task`; `main` cắm hàm ấy vào `svc_journal` khi cảm biến bật. Rồi tiếng cuối: dài khi lời
-   ghi chú và ảnh đầy đủ tới được ít nhất một nơi, trầm nếu không.
+4. Ảnh xong, `svc_capture` chờ `q_note_done`, tới `note.max_s` cộng 10 s. Rồi `svc_note_send` đọc lại `.WAV` từ thẻ và gửi `up/note` theo
+   khúc của `vision.yaml` cùng `seq`, ở `nhin_task` vì đệm khúc chỉ của task ấy; rồi bản ghi, như mọi lần chụp, mang thêm độ dài, cỡ và
+   `saved` của lời ghi chú.
+5. Tiếng cuối: dài khi lời ghi chú và ảnh đầy đủ tới được ít nhất một nơi, trầm nếu không.
 
-Không có thẻ thì không có lời ghi chú (`noteSaved: false`, cỡ 0) và không có `.JSN`: 30 s là 960 KB, không giữ được trong PSRAM. Host lưu `<stem>.wav`
-và `<stem>_journal.json`, gồm bản `up/journal`, bản `up/sensors` mới nhất của board (vị trí, chuyển động, ADC) và tên các file của mục.
+Không có thẻ thì không có lời ghi chú (`noteSaved: false`, cỡ 0) và không có mục: 30 s là 960 KB, không giữ được trong PSRAM. Host lưu
+`<stem>.wav` và `<stem>_record.json`.
 Lời ghi chú là tiếng người, dữ liệu cá nhân (§1.4): chỉ nằm ở thẻ và data root, không bao giờ vào git. `make journal` gửi `CAPTURE`
-với `JOURNAL` như `make detect`, rồi chờ đủ hai ảnh, khung, lời ghi chú và bản nhật ký, thêm `note.max_s` vào hạn chờ.
+với `JOURNAL` như `make detect`, rồi chờ đủ hai ảnh, khung, lời ghi chú và bản ghi, thêm `note.max_s` vào hạn chờ.
 
-**Đọc thẻ và phát thử qua console.** `sd ls <thư mục>` liệt kê tên và cỡ, `sd cat <file>` in một file, để đọc `.JSN` mà không rút thẻ. `play <file>` phát một WAV PCM 16 kHz, một kênh, 16 bit trên thẻ ra loa qua `q_speak`, để đo khử vang trên tiếng nói (E10-T9). `noi_task` vẫn là người duy nhất ghi TX: `svc_speak` đọc file qua `drv_sd_read` mà `main` cắm vào khi có thẻ, nên không phụ thuộc `drv_sd`. Console và `noi_task` đi qua `m_sd` như hai task của nhật ký (§5.3).
+**Đọc thẻ và phát thử qua console.** `sd ls <thư mục>` liệt kê tên và cỡ, `sd cat <file>` in một file, để đọc `.JSN` mà không rút thẻ. `play <file>` phát một WAV PCM 16 kHz, một kênh, 16 bit trên thẻ ra loa qua `q_speak`, để đo khử vang trên tiếng nói (E10-T9). `noi_task` vẫn là người duy nhất ghi TX: `svc_speak` đọc file qua `drv_sd_read` mà `main` cắm vào khi có thẻ, nên không phụ thuộc `drv_sd`. Console và `noi_task` đi qua `m_sd` như hai task của nhật ký (§5.3). `cam shot PHOTO|DETECT|JOURNAL` đưa một yêu cầu chụp vào `q_vision` như lệnh nói, để thử đường thẻ và gửi bù khi không có broker; nó dùng lại bảng đối số của `cam`, không lấy thêm RAM nội.
 
 **Ngoại vi còn lại** gom ở `svc_sensors`, task `do_task`, đăng `up/sensors` khi đổi và mỗi 10 s. `sdkconfig.board_c` bật
 `APP_SENSORS_ENABLE` để nhật ký có vị trí và chuyển động (chủ repo 11/11). RAM nội chúng lấy từng làm `detect` chậm đi 1,94 → 2,01 s
@@ -2801,7 +2824,9 @@ contracts/
 │   ├── speaker_set.schema.json    #   danh sách người nói gửi xuống board (§3.17)
 │   ├── speaker_roster.schema.json #   danh sách và trạng thái đăng ký board đăng lên
 │   ├── ota_manifest.schema.json
-│   ├── journal.schema.json        #   một mục "ghi nhật ký" của board C (§3.19)
+│   ├── capture.schema.json        #   tóm tắt một lần chụp của board C (§3.19)
+│   ├── record.schema.json         #   bản ghi một lần chụp: capture, detections, sensors qua $ref (§3.19)
+│   ├── ack.schema.json            #   server đã lưu đủ một lần chụp (§3.19)
 │   └── responses.schema.json      #   khuôn của responses/vi.json — không phải payload MQTT
 ├── mqtt_topics.yaml               # topic + QoS + retained + chiều + schema
 ├── stream/frame.yaml              # khuôn nhị phân một khung của luồng tiếng TCP (§7.4)
@@ -3260,8 +3285,9 @@ firmware/
 │   ├── svc_report/    [C]   L4  # gui: số liệu → MQTT, khung → net_stream
 │   ├── svc_vision/    [C]   L4  # nhin: chụp, lưu thẻ, đẩy ảnh, detect (§3.19)
 │   ├── svc_note/      [C]   L4  # nhin: lời ghi chú, sb_note → .WAV trên thẻ → up/note (§3.19)
+│   ├── svc_outbox/    [C]   L4  # nhin: mục trên thẻ, up/record, gửi bù tới down/ack (§3.19)
 │   ├── svc_sensors/   [C]   L4  # do: GPS, hồng ngoại, I2C → up/sensors
-│   ├── svc_journal/   [C]   L5  # nhin: một mục nhật ký, svc_note → svc_vision → up/journal (§3.19)
+│   ├── svc_capture/   [C]   L5  # nhin: một lần chụp của ba lệnh, svc_vision, svc_note → svc_outbox (§3.19)
 │   └── svc_dialog/    [C]   L5  # máy trạng thái hội thoại §5.4
 │
 ├── third_party/README.md
@@ -3369,7 +3395,8 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | L4 | `svc_vision` | ghép | C | `common`, `bsp_board`, `drv_camera`, `drv_sd`, `ai_engine`, `net_mqtt` |
 | L4 | `svc_note` | ghép | C | `common`, `bsp_board`, `drv_sd`, `net_mqtt` |
 | L4 | `svc_sensors` | ghép | C | `common`, `drv_gps`, `drv_ir`, `drv_i2c`, `net_mqtt` |
-| L5 | `svc_journal` | ghép | C | `common`, `drv_sd`, `svc_note`, `svc_vision`, `net_mqtt` |
+| L4 | `svc_outbox` | ghép | C | `common`, `drv_sd`, `net_mqtt` |
+| L5 | `svc_capture` | ghép | C | `common`, `svc_note`, `svc_outbox`, `svc_vision`, `net_mqtt` |
 | L5 | `svc_dialog` | ghép | C | `common`, `sys_storage` |
 | L6 | `main` | nối dây | C | tất cả |
 
@@ -3807,7 +3834,7 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 | `gui_task` | `svc_report` | 0 | 4 | 4 KB, ở PSRAM trên board C | nhịp 100 ms | lấy mẫu `s_afe_stats`, gộp 10 mẫu thành một `telemetry` mỗi giây; phát `q_event_up`; `heartbeat` mỗi 30 s; đăng `up/speakers` khi `q_roster` có bản mới hay khi MQTT nối lại |
 | `luong_task` | `svc_report` | 0 | 3 | 4 KB, ở PSRAM trên board C | `sb_stream` | đẩy khung qua `net_stream`; TCP nghẽn thì bỏ khung, đếm; không bao giờ chặn người ghi |
 | `net_task` | `net_wifi` | 0 | 3 | 4 KB | một lần lúc boot | chờ link **tới khi có**, rồi nối MQTT, mở SNTP; xong thì tự xoá |
-| `nhin_task` | `svc_vision`, `svc_journal`, `svc_note` | 0 | 1; 11 trong lượt `detect` | 16 KB **ở PSRAM** | `q_vision` | chụp, lưu thẻ, đẩy ảnh, `detect` (`svc_vision`); mục nhật ký (`svc_journal`), gửi lời ghi chú đã ghi (`svc_note_send`) (§3.19); không ghi flash nên ngăn xếp ở PSRAM được; chỉ có ở board C |
+| `nhin_task` | `svc_vision`, `svc_capture`, `svc_note`, `svc_outbox` | 0 | 1; 11 trong lượt `detect` | 16 KB **ở PSRAM** | `q_vision` | chụp, lưu thẻ, đẩy ảnh, `detect` (`svc_vision`); nối một lần chụp (`svc_capture`), gửi lời ghi chú đã ghi (`svc_note_send`), giữ mục trên thẻ và gửi bù lúc rảnh (`svc_outbox`) (§3.19); không ghi flash nên ngăn xếp ở PSRAM được; chỉ có ở board C |
 | `ghi_task` | `svc_note` | 0 | 2 | 4 KB **ở PSRAM** | `q_note`, `sb_note` | ghi lời ghi chú của mục nhật ký ra thẻ trong lúc `nhin_task` chụp, kết quả vào `q_note_done` (§3.19); như `nhin_task`, không đăng ký watchdog: một lời ghi chú giữ task tới `note.max_s`; không ghi flash nên ngăn xếp ở PSRAM được; điểm đầy cao nhất của `sb_note` in ở log mỗi lời ghi chú, hop bỏ ở `noteDropped` của `up/journal`; chỉ có ở board C |
 | `do_task` | `svc_sensors` | 0 | 2 | 4 KB **ở PSRAM** | nhịp 1 s | đọc GPS, hồng ngoại, I2C, đăng `up/sensors`; chỉ có ở board C |
 | `mqtt_task` | esp-mqtt | 0 | 5 | 6 KB **ở PSRAM** | esp-mqtt tự tạo | gửi nhận, TLS ở `prod` |
@@ -3852,6 +3879,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `sb_note` | StreamBuffer ở PSRAM, bản ghi `app_note_hop_t`: `seq`, cờ `vad`, cờ điếc, một hop PCM; cỡ `note.buffer_s` của `vision.yaml`, chỉ có ở board C | 3 s, ~97 KB | `nhan_task`, chỉ khi `APP_BIT_NOTE_ON`, timeout 0 | `ghi_task` | không đủ chỗ cho cả bản ghi thì bỏ hop, tăng `note_dropped`; không bao giờ ghi nửa bản ghi | `nhan_task` không bao giờ chờ thẻ; một lượt ghi thẻ thường dưới 1 s, đệm 3 s đỡ được, lượt hiếm 5 s (`measurements/board_c.md` §4.8) làm lời ghi chú hở vài hop |
 | `q_note` | Queue depth 1, `uint32_t` `seq` của mục nhật ký, bộ nhớ ở PSRAM | 4 B | `nhin_task` (`svc_note_start`), timeout 0 | `ghi_task` | không bao giờ đầy: `q_vision` cho một mục mỗi lúc, và `nhin_task` chờ kết quả trước mục sau; đầy thì mục ấy không có lời ghi chú, log | lời ghi chú bắt đầu cùng lúc với lần chụp đầu |
 | `q_note_done` | Queue depth 1, `svc_note_t`, bộ nhớ ở PSRAM | 16 B | `ghi_task`, timeout 0 | `nhin_task` (`svc_note_wait`), chờ tới `note.max_s` cộng 10 s | không bao giờ đầy: một kết quả cho một yêu cầu; quá hạn chờ thì mục đi tiếp với lời ghi chú `saved: false` | kết quả đi theo giá trị; tên file và cỡ `ghi_task` để lại cho `svc_note_send` có thứ tự nhờ hàng này |
+| `q_ack` | Queue depth 8, `ack_t` {`boot`, `captureSeq`} từ `down/ack`, bộ nhớ ở PSRAM | 8 × 8 B | task của esp-mqtt, timeout 0 | `nhin_task` (`svc_outbox`) | bỏ, tăng `ack_dropped` của `net_mqtt`: `PND` còn và mục được gửi lại sau `outbox.retry_s`, tốn băng thông chứ không mất | callback esp-mqtt không chạm thẻ; chỉ `nhin_task` tạo và xoá `PND` |
 | `q_speak` | Queue depth 4, `app_speak_req_t` (tiếng, câu, hoặc đường dẫn một `play`), bộ nhớ ở PSRAM | 4 × ~580 B | `dieu_task`, `nhin_task`, `ghi_task`, console | `noi_task` | bỏ, log | |
 | `q_event_up` | Queue depth 16, `app_event_t`, bộ nhớ ở PSRAM | 16 × 108 B | `nhan_task`, `xac_task`, `dieu_task`, `nhin_task` | `gui_task` | bỏ, tăng `events_dropped` | **người phát sự kiện không bao giờ publish**: publish QoS 1 chờ PUBACK, và `nhan_task` đứng chờ mạng là đệm 1 s đầy dần |
 | `q_verify` | Queue depth 2, chỉ số ô `uint8_t`; hai ô của `svc_listen` ở PSRAM, mỗi ô 24 000 mẫu `int16` cùng quyết định `COMMAND`, cấp lúc boot khi ảnh có `speaker` | 2 × ~47 KB | `nhan_task` | `xac_task` | không bao giờ đầy: chỉ ô lấy được từ `q_verify_free` mới được gửi | không chép tiếng hai lần; một ô chỉ có một chủ tại một lúc, như `q_frame` |
@@ -4415,7 +4443,8 @@ Topic, QoS, retained và schema khai ở `contracts/mqtt_topics.yaml`; bảng d�
 | `sr/{deviceId}/up/detections` | lên | 1 | không | `detections` | mỗi lần "nhận diện" |
 | `sr/{deviceId}/up/sensors` | lên | 0 | không | `sensors` | khi đổi và mỗi 10 s |
 | `sr/{deviceId}/up/note` | lên | 1 | không | nhị phân, `contracts/vision.yaml` | mỗi lần "ghi nhật ký": lời ghi chú `.WAV` theo khúc (§3.19) |
-| `sr/{deviceId}/up/journal` | lên | 1 | không | `journal` | mỗi lần "ghi nhật ký", sau ảnh và lời ghi chú |
+| `sr/{deviceId}/up/record` | lên | 1 | không | `record` | mỗi lần chụp, sau ảnh và lời ghi chú; bản gửi bù mang `late` (§3.19) |
+| `sr/{deviceId}/down/ack` | xuống | 1 | không | `ack` | server đã lưu đủ một lần chụp; board xoá `PND` của nó (§3.19) |
 | `sr/{deviceId}/down/ota` | xuống | 1 | không | `ota_manifest` | E13 |
 
 | Payload | Nội dung | Cỡ ước |
