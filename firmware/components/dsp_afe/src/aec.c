@@ -32,6 +32,8 @@ typedef struct {
     float err_smooth[N_BINS];
     float echo_smooth[N_BINS];
     float echo_tail[HOP];
+    float mic_tail[HOP];
+    float couple[N_BINS]; // speaker-to-mic power ratio, windowed bins
     float cross;
     float autocorr;
     float leak;
@@ -56,6 +58,13 @@ struct dsp_afe_aec_s {
     float delay[DELAY_SAMPLES_MAX];
     float far[HOP];
     float power[N_BINS];
+    float ref_power[N_BINS]; // windowed reference over the echo tail
+    float ref_now[N_BINS];
+    float keep; // the share of ref_power one hop leaves
+    float couple_start;
+    float couple_max;
+    float couple_peak;
+    uint32_t hold_blocks; // silent blocks the coupled residual still decays over
     float window[N_FFT];
     float block[N_FFT];
     float err[HOP];
@@ -87,13 +96,21 @@ size_t dsp_afe_aec_workspace_bytes(const dsp_afe_aec_config_t *cfg)
     return afe_region_bytes(sizeof(struct dsp_afe_aec_s) + cfg->n_mics * sizeof(canceller_t));
 }
 
-static void start_canceller(canceller_t *c, uint8_t n_partitions)
+static void start_canceller(canceller_t *c, uint8_t n_partitions, float couple_start)
 {
     memset(c, 0, sizeof(*c));
     for (uint8_t j = 0; j < n_partitions; j++) {
         c->prop[j] = PROP_SUM / (float)n_partitions;
     }
     c->cross = c->autocorr = GEN_AFE_AEC_PY_FLOOR;
+    for (size_t k = 0; k < N_BINS; k++) {
+        c->couple[k] = couple_start;
+    }
+}
+
+static float db_power(float db)
+{
+    return (float)pow(10.0, (double)db / 10.0);
 }
 
 esp_err_t dsp_afe_aec_init(dsp_afe_aec_t **out, const dsp_afe_aec_config_t *cfg, dsp_spec_fft_t *fft,
@@ -110,6 +127,12 @@ esp_err_t dsp_afe_aec_init(dsp_afe_aec_t **out, const dsp_afe_aec_config_t *cfg,
     for (size_t i = 0; i < N_FFT; i++) {
         st->window[i] = (float)(0.5 - 0.5 * afe_cos_series(2.0 * AFE_PI * (double)i / N_FFT));
     }
+    st->keep =
+        (float)exp(-(double)HOP / ((double)GEN_GRID_SAMPLE_RATE_HZ * (double)GEN_AFE_AEC_COUPLE_TAIL_S));
+    st->couple_start = db_power(GEN_AFE_AEC_COUPLE_START_DB);
+    st->couple_max = db_power(GEN_AFE_AEC_COUPLE_MAX_DB);
+    st->couple_peak = db_power(GEN_AFE_AEC_COUPLE_PEAK_DB);
+    st->hold_blocks = (uint32_t)lround((double)GEN_AFE_AEC_COUPLE_HOLD_S * GEN_GRID_SAMPLE_RATE_HZ / HOP);
     dsp_afe_aec_reset(st);
     *out = st;
     return ESP_OK;
@@ -315,7 +338,37 @@ static esp_err_t residual_echo(dsp_afe_aec_t *st, canceller_t *c, const float *e
     return ESP_OK;
 }
 
-static esp_err_t cancel_mic(dsp_afe_aec_t *st, canceller_t *c, float *mic, float far_energy,
+// Learn the coupling only where the reference is strong this hop: a leaking bin's weak reference over the
+// room's floor reads up to +9 dB (KEHOACH 3.5).
+static esp_err_t learn_coupling(dsp_afe_aec_t *st, canceller_t *c, const float *mic, float peak)
+{
+    for (size_t i = 0; i < HOP; i++) {
+        st->block[i] = c->mic_tail[i] * st->window[i];
+        st->block[HOP + i] = mic[i] * st->window[HOP + i];
+    }
+    memcpy(c->mic_tail, mic, HOP * sizeof(float));
+    const esp_err_t err = dsp_spec_fft_forward(st->fft, st->block, st->err_bins);
+    if (err != ESP_OK) { return err; }
+    power_of(st->err_bins, st->err_bin_power);
+    for (size_t k = 0; k < N_BINS; k++) {
+        if (st->ref_now[k] > GEN_AFE_AEC_COUPLE_REF_MIN && st->ref_now[k] > peak) {
+            const float ratio = fminf(st->err_bin_power[k] / st->ref_power[k], st->couple_max);
+            const float rate = ratio > c->couple[k] ? GEN_AFE_AEC_COUPLE_UP : GEN_AFE_AEC_COUPLE_DOWN;
+            c->couple[k] = c->couple[k] + rate * (ratio - c->couple[k]);
+        }
+    }
+    return ESP_OK;
+}
+
+static void coupled_residual(const dsp_afe_aec_t *st, const canceller_t *c, float *residual_power)
+{
+    if (residual_power == NULL) { return; }
+    for (size_t k = 0; k < N_BINS; k++) {
+        residual_power[k] = fmaxf(residual_power[k], c->couple[k] * st->ref_power[k]);
+    }
+}
+
+static esp_err_t cancel_mic(dsp_afe_aec_t *st, canceller_t *c, float *mic, float far_energy, float peak,
                             float *residual_power)
 {
     filter_far(st, c, st->echo_bins);
@@ -346,8 +399,48 @@ static esp_err_t cancel_mic(dsp_afe_aec_t *st, canceller_t *c, float *mic, float
     err = update_weights(st, c);
     if (err != ESP_OK) { return err; }
     watch(st, c, mic_energy, e.err);
+    err = learn_coupling(st, c, mic, peak);
+    if (err != ESP_OK) { return err; }
     memcpy(mic, st->err, HOP * sizeof(float));
-    return residual_echo(st, c, echo, residual_power);
+    err = residual_echo(st, c, echo, residual_power);
+    coupled_residual(st, c, residual_power);
+    return err;
+}
+
+static esp_err_t take_reference_power(dsp_afe_aec_t *st, float *peak)
+{
+    for (size_t i = 0; i < HOP; i++) {
+        st->block[i] = st->previous[i] * st->window[i];
+        st->block[HOP + i] = st->far[i] * st->window[HOP + i];
+    }
+    const esp_err_t err = dsp_spec_fft_forward(st->fft, st->block, st->echo_bins);
+    if (err != ESP_OK) { return err; }
+    power_of(st->echo_bins, st->ref_now);
+    float strongest = st->ref_now[0];
+    for (size_t k = 0; k < N_BINS; k++) {
+        st->ref_power[k] = st->keep * st->ref_power[k] + st->ref_now[k];
+        strongest = fmaxf(strongest, st->ref_now[k]);
+    }
+    *peak = strongest * st->couple_peak;
+    return ESP_OK;
+}
+
+// The filter rests, but the room's tail outlasts its 128 ms: the coupled residual decays on (KEHOACH 3.5).
+static void rest(dsp_afe_aec_t *st, float *const *mic, float *residual_power)
+{
+    for (uint8_t m = 0; m < st->n_mics; m++) {
+        memcpy(st->mics[m].mic_tail, mic[m], HOP * sizeof(float));
+    }
+    if (st->silent_blocks > st->hold_blocks) {
+        memset(st->ref_power, 0, sizeof(st->ref_power));
+        return;
+    }
+    for (size_t k = 0; k < N_BINS; k++) {
+        st->ref_power[k] = st->keep * st->ref_power[k];
+    }
+    for (uint8_t m = 0; m < st->n_mics; m++) {
+        coupled_residual(st, &st->mics[m], residual_power);
+    }
 }
 
 esp_err_t dsp_afe_aec_process(dsp_afe_aec_t *st, float *const *mic, const float *ref, float *residual_power)
@@ -357,15 +450,21 @@ esp_err_t dsp_afe_aec_process(dsp_afe_aec_t *st, float *const *mic, const float 
     take_delayed(st, ref);
     st->silent_blocks = far_is_silent(st) ? st->silent_blocks + 1 : 0;
     // Nothing played for longer than the filter reaches: no echo is left to cancel, and no time is spent.
-    if (st->silent_blocks > st->n_partitions) { return ESP_OK; }
-    esp_err_t err = push_far(st);
+    if (st->silent_blocks > st->n_partitions) {
+        rest(st, mic, residual_power);
+        return ESP_OK;
+    }
+    float peak = 0.0f;
+    esp_err_t err = take_reference_power(st, &peak);
+    if (err != ESP_OK) { return err; }
+    err = push_far(st);
     if (err != ESP_OK) { return err; }
     st->stats.diverged = false;
     const float far_energy = energy_of(st->far, st->far, HOP);
     float erle_db = 0.0f;
     for (uint8_t m = 0; m < st->n_mics && err == ESP_OK; m++) {
         canceller_t *c = &st->mics[m];
-        err = cancel_mic(st, c, mic[m], far_energy, residual_power);
+        err = cancel_mic(st, c, mic[m], far_energy, peak, residual_power);
         erle_db += DB_PER_DECADE * log10f((c->mic_power + POWER_EPSILON) / (c->err_power + POWER_EPSILON));
     }
     st->stats.erle_db = erle_db / (float)st->n_mics;
@@ -384,8 +483,10 @@ void dsp_afe_aec_flush(dsp_afe_aec_t *st)
     memset(st->previous, 0, sizeof(st->previous));
     memset(st->delay, 0, sizeof(st->delay));
     st->silent_blocks = st->n_partitions + 1u;
+    memset(st->ref_power, 0, sizeof(st->ref_power));
     for (uint8_t m = 0; m < st->n_mics; m++) {
         memset(st->mics[m].echo_tail, 0, sizeof(st->mics[m].echo_tail));
+        memset(st->mics[m].mic_tail, 0, sizeof(st->mics[m].mic_tail));
     }
 }
 
@@ -397,6 +498,6 @@ void dsp_afe_aec_reset(dsp_afe_aec_t *st)
     st->head = 0;
     st->blocks = 0;
     for (uint8_t m = 0; m < st->n_mics; m++) {
-        start_canceller(&st->mics[m], st->n_partitions);
+        start_canceller(&st->mics[m], st->n_partitions, st->couple_start);
     }
 }

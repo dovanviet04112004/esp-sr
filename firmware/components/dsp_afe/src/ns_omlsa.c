@@ -68,6 +68,8 @@ typedef struct {
     float floor_db;
     float log2_gain_min;
     float gain_at_floor; // the gain where speech is surely absent
+    float noise_pow;     // G_min squared
+    float echo_pow;      // ns.echo_floor_db's gain squared
     float alpha_s;
     float alpha_d;
     float alpha_xi;
@@ -273,6 +275,7 @@ static void set_floor(omlsa_state_t *st, float floor_db)
     st->floor_db = floor_db;
     st->log2_gain_min = (float)((double)floor_db / 20.0 * LOG2_10);
     st->gain_at_floor = exp2_f32(st, st->log2_gain_min);
+    st->noise_pow = exp2_f32(st, 2.0f * st->log2_gain_min);
 }
 
 static float exp_f32(const omlsa_state_t *st, float x)
@@ -560,6 +563,8 @@ static esp_err_t init(void *ctx, void *state, size_t bytes)
         st->exp2_coeffs[k] = (float)c;
         c = c * LN_2 / (k + 1);
     }
+    const float log2_echo_min = (float)((double)GEN_AFE_NS_ECHO_FLOOR_DB / 20.0 * LOG2_10);
+    st->echo_pow = exp2_f32(st, 2.0f * log2_echo_min);
     hann_taps(st->freq_taps, FREQ_TAPS);
     hann_taps(st->local_taps, LOCAL_TAPS);
     hann_taps(st->global_taps, GLOBAL_TAPS);
@@ -621,11 +626,21 @@ static esp_err_t process(void *ctx, void *state, const float *power, const float
         const float q = min_f(1.0f - st->p_global[k] * st->p_local[k] * p_frame, GEN_AFE_NS_Q_MAX);
         const float p = q < GEN_AFE_NS_Q_PRESENCE_MAX ? presence(st, q, eta, v) : 0.0f;
         const float g_h1 = lsa_gain(st, wiener, v);
-        // At p = 0 the product vanishes and the exponent is log2 G_min exactly, so the gain is the floor's.
-        const float g = p > 0.0f ? exp2_f32(st, p * log2_f32(st, g_h1) + (1.0f - p) * st->log2_gain_min)
-                                 : st->gain_at_floor;
+        const bool echoed = echo_power != NULL && echo_power[k] > 0.0f;
+        float floor_log = st->log2_gain_min;
+        float floor_gain = st->gain_at_floor;
+        if (echoed) {
+            const float lam = st->lambda_d[k];
+            const float share = (st->noise_pow * lam + st->echo_pow * echo_power[k]) / (lam + echo_power[k]);
+            floor_log = 0.5f * log2_f32(st, share);
+            floor_gain = exp2_f32(st, floor_log);
+        }
+        // At p = 0 the product vanishes and the exponent is the floor's exactly, so the gain is the floor's.
+        const float g = p > 0.0f ? exp2_f32(st, p * log2_f32(st, g_h1) + (1.0f - p) * floor_log) : floor_gain;
         // LSA lifts bins far under the noise to their expected level; the slot promises 0 .. 1 (KEHOACH 3.9).
         gain[k] = min_f(g, 1.0f);
+        // No more power than noise and residual echo: nothing near to keep, and LSA must not lift the echo.
+        if (echoed && power[k] <= st->lambda_d[k] + echo_power[k]) { gain[k] = min_f(gain[k], floor_gain); }
         st->eta_2term[k] = g_h1 * (g_h1 * gamma);
         if (k >= st->frame_bins.first && k <= st->frame_bins.last) { presence_sum += p; }
     }
