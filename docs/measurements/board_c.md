@@ -356,6 +356,10 @@ nói với máy nhưng phòng có người nói chuyện (khung `detect` thấy 
 - Lượt đầu tiên của boot 158 chậm hẳn: ảnh đầy đủ chụp 7,5 s, ghi thẻ 4,6 s. Chưa gặp lại ở 10 lượt sau 🔬.
 - `_journal.json` mang bản `up/sensors` mới nhất: GPS chưa có fix trong nhà (thấy 12 vệ tinh, ăng-ten báo hở), hồng ngoại, gia tốc, con quay,
   nhiệt độ của MPU-6500, ADC 0 mV ở cả bốn kênh vì chưa nối gì (§7). Board C không có cảm biến quang phổ.
+- `.JSN` trên thẻ (boot 162, 164, 3 + 3 lượt): `card kept` cả 6 lượt. Bản đầu in vào đệm 8 KB cố định: PSRAM ở bước `vision` 329 160 B,
+  thấp nhất 68 784 B. Bản in vào vùng JSON của `nhin_task`: 337 356 B ở bước `vision` (kém bản không có `.JSN` 104 B, chỗ cho một lần đọc
+  cảm biến), thấp nhất 79 876 B, `jsonArenaPeak` 7 896 B. Mục thật ~0,8 KB; tệ nhất, 32 khung, ~4,1 KB (tính). Nội dung trên thẻ chưa
+  đọc lại: console chưa có lệnh đọc thẻ 🔬.
 
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
