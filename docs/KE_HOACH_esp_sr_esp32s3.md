@@ -2641,7 +2641,7 @@ dài nếu `detect` chạy, trầm nếu không; ảnh nhỏ không gửi đư�
 sau khi đã có tiếng thì không thêm tiếng: camera hỏng thì có `CAMERA_FAIL`, gửi hỏng thì ảnh còn ở thẻ. `DETECT_FAIL` chỉ khi `detect` không chạy; gửi khung hỏng là việc của MQTT, bản QoS 1 còn nằm ở outbox.
 Không có đệm (`svc_vision_init` hỏng) hay không có camera thì `nhin_task` vẫn chạy và từ chối từng yêu cầu bằng `CAMERA_FAIL`, board vẫn nghe.
 
-**Ghi nhật ký.** "ghi nhật ký" (id `ghi_nhat_ky` ở `vision.yaml`; host gửi `CAPTURE` với `JOURNAL`) gom một mục nhật ký: lời ghi chú,
+**Ghi nhật ký.** "ghi nhật ký" (id `ghi_nhat_ki` của bộ lệnh, ghi ở `vision.yaml`; host gửi `CAPTURE` với `JOURNAL`) gom một mục nhật ký: lời ghi chú,
 khung `detect`, ảnh đầy đủ và số đo cảm biến. Số của lời ghi chú nằm ở `vision.yaml` mục `note`, khai bằng giây và quy ra hop lúc khởi tạo.
 1. Sau hai tiếng bíp nhận lệnh, `nhin_task` bật cờ `APP_BIT_NOTE_ON` và đèn GPIO 42 (§7.5). Chừng nào cờ bật, `nhan_task` chép mỗi hop âm đã
    lọc cùng cờ `vad` vào `sb_note` với timeout 0, và đưa hop ấy vào `svc_listen` như hop điếc, nên lời ghi chú không đánh thức hay thành lệnh.
