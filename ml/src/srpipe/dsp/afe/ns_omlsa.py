@@ -259,6 +259,7 @@ class OmlsaConfig:
     """Every constant of contracts/afe.yaml ns:, and the framing; overridden only to run at the paper's framing."""
 
     floor_db: float = afe.NS_FLOOR_DB
+    echo_floor_db: float = afe.NS_ECHO_FLOOR_DB
     hop_s: float = grid.HOP_SAMPLES / grid.SAMPLE_RATE_HZ
     fs_hz: int = grid.SAMPLE_RATE_HZ
     fft_points: int = grid.FFT_SIZE
@@ -331,8 +332,10 @@ LAMBDA_D, LAMBDA_DAV, ETA_2TERM, XI, S, ST, S_MIN, S_MIN_T, S_ACT, S_ACT_T = ran
     C_LSA_V_MAX,
     C_PEAK_LOW,
     C_PEAK_HIGH,
+    C_NOISE_POW,
+    C_ECHO_POW,
     C_COUNT,
-) = range(24)
+) = range(26)
 B_SUBWINDOW, B_FRAME, B_FRAME_END, B_MEAN, B_MEAN_END, B_RESET, B_RESET_END = range(7)
 STARTED, HOP, IN_SUBWINDOW = range(3)
 XI_FRAME, XI_PEAK_DB = range(2)
@@ -560,6 +563,21 @@ def _lsa_gain(wiener: np.ndarray, v: np.ndarray, v_max: np.float32, table: np.nd
 
 
 @numba.njit
+def _floors(echo: np.ndarray, noise: np.ndarray, c: np.ndarray) -> np.ndarray:
+    """log2 of each bin's G_min: Speex's floor where residual echo shares the bin, sqrt((G2 noise + E2 echo) / sum)."""
+    n = len(echo)
+    ratio = np.ones(n, dtype=np.float32)
+    for k in range(n):
+        if echo[k] > np.float32(0.0):
+            ratio[k] = (c[C_NOISE_POW] * noise[k] + c[C_ECHO_POW] * echo[k]) / (noise[k] + echo[k])
+    logs = _log2(ratio)
+    out = np.empty(n, dtype=np.float32)
+    for k in range(n):
+        out[k] = np.float32(0.5) * logs[k] if echo[k] > np.float32(0.0) else c[C_LOG2_GAIN_MIN]
+    return out
+
+
+@numba.njit
 def _hop(
     power: np.ndarray,
     echo: np.ndarray,
@@ -593,14 +611,19 @@ def _hop(
             p[k] = present[k]
     g_h1 = _lsa_gain(wiener, v, c[C_LSA_V_MAX], table, c[C_TABLE_PER_V])
     log_gain = _log2(g_h1)
+    floor = _floors(echo, state[LAMBDA_D], c)
     blend = np.empty(n, dtype=np.float32)
     for k in range(n):
-        blend[k] = p[k] * log_gain[k] + (one - p[k]) * c[C_LOG2_GAIN_MIN]
+        blend[k] = p[k] * log_gain[k] + (one - p[k]) * floor[k]
     # LSA lifts bins far under the noise towards their expected level, up to gains in the thousands; the slot
     # promises 0 .. 1, so only the applied gain is capped and the decision-directed state keeps G_H1 (KEHOACH 3.9).
     lifted = _exp2(blend)
+    floor_gain = _exp2(floor)
     for k in range(n):
         gain[k] = min(lifted[k], one)
+        # No more power than noise and residual echo: nothing near to keep, and LSA must not lift the echo.
+        if echo[k] > np.float32(0.0) and power[k] <= state[LAMBDA_D, k] + echo[k]:
+            gain[k] = min(gain[k], floor_gain[k])
         state[ETA_2TERM, k] = g_h1[k] * (g_h1[k] * gamma[k])
     counts[HOP] += 1
     return gain, _ordered_sum(p[bounds[B_FRAME] : bounds[B_FRAME_END]]) * c[C_PER_FRAME_BIN]
@@ -611,7 +634,7 @@ class Omlsa:
 
     def __init__(self, cfg: OmlsaConfig | None = None) -> None:
         cfg = cfg or OmlsaConfig()
-        if cfg.floor_db > 0 or cfg.min_subwindows < 1 or cfg.lsa_v_max <= 0:
+        if cfg.floor_db > 0 or cfg.echo_floor_db > 0 or cfg.min_subwindows < 1 or cfg.lsa_v_max <= 0:
             raise ValueError(f"bad ns configuration {cfg}")
         self.cfg = cfg
         self.n_bins = cfg.fft_points // 2 + 1
@@ -681,6 +704,8 @@ class Omlsa:
             ],
             dtype=np.int64,
         )
+        log2_echo_min = f32(float(f32(cfg.echo_floor_db)) / 20.0 * LOG2_10)
+        self.constants[C_ECHO_POW] = _exp2(np.array([f32(2.0) * log2_echo_min], dtype=np.float32))[0]
         self.set_floor(cfg.floor_db)
         self.reset()
 
@@ -688,6 +713,7 @@ class Omlsa:
         """G_min in dB, as NVS afe/ns_floor_db sets it; kept as log2 since the gain is formed in the log domain."""
         self.log2_gain_min = f32(float(f32(floor_db)) / 20.0 * LOG2_10)
         self.constants[C_LOG2_GAIN_MIN] = self.log2_gain_min
+        self.constants[C_NOISE_POW] = _exp2(np.array([f32(2.0) * self.log2_gain_min], dtype=np.float32))[0]
 
     def reset(self) -> None:
         n = self.n_bins

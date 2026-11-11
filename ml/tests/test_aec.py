@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from srpipe.dsp.afe import aec
+from srpipe.generated import afe
 
 HOP = aec.HOP
 HOPS = 500
@@ -95,6 +96,44 @@ def test_a_bulk_delay_keeps_the_filter_for_the_room() -> None:
     mic = np.concatenate([np.zeros(200, dtype=f32), echo[:-200]])
     out = run(aec.Aec(aec.AecConfig(bulk_delay_samples=200)), mic, far)
     assert gain_db(mic[-100 * HOP :], out[-100 * HOP :]) > 20.0
+
+
+def beep(hops: int, start_hop: int) -> np.ndarray:
+    """One 70 ms beep of 1500 Hz from start_hop, as tones.yaml's wake tone, silence elsewhere."""
+    far = np.zeros(hops * HOP, dtype=f32)
+    t = np.arange(int(0.07 * 16000)) / 16000.0
+    far[start_hop * HOP : start_hop * HOP + t.size] = (0.25 * np.sin(2.0 * np.pi * 1500.0 * t)).astype(f32)
+    return far
+
+
+def residuals(canceller: aec.Aec, mic: np.ndarray, far: np.ndarray) -> np.ndarray:
+    out = []
+    for i in range(0, mic.size, HOP):
+        _, residual = canceller.process(mic[None, i : i + HOP], far[i : i + HOP])
+        out.append(residual)
+    return np.stack(out)
+
+
+def test_a_beep_from_a_cold_start_is_covered_by_the_coupled_residual() -> None:
+    far = beep(40, 4)
+    mic = (0.3 * far).astype(f32)
+    canceller = aec.Aec()
+    res = residuals(canceller, mic, far)
+    bin_1500 = round(1500 * 2 * HOP / 16000)
+    echo = aec.power_of(
+        aec.fft.forward(np.concatenate([mic[5 * HOP : 6 * HOP], mic[6 * HOP : 7 * HOP]]) * canceller.window)
+    )
+    assert res[6, bin_1500] >= echo[bin_1500]
+    assert canceller.mics[0].couple[bin_1500] > aec.db_power(afe.AEC_COUPLE_START_DB)
+
+
+def test_the_coupled_residual_decays_past_the_filter_then_stops() -> None:
+    far = beep(60, 4)
+    res = residuals(aec.Aec(), (0.04 * far).astype(f32), far)
+    bin_1500 = round(1500 * 2 * HOP / 16000)
+    rests = 4 + 5 + afe.AEC_PARTITIONS
+    assert 0 < res[rests + 2, bin_1500] < res[rests - 2, bin_1500]
+    assert not res[4 + 5 + aec.Aec().hold_blocks + 2].any()
 
 
 def test_a_bad_configuration_is_refused() -> None:

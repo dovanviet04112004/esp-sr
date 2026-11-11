@@ -153,3 +153,19 @@ def test_the_paper_framing_gives_the_paper_constants() -> None:
 def test_a_positive_floor_is_refused() -> None:
     with pytest.raises(ValueError):
         ns_omlsa.Omlsa(ns_omlsa.OmlsaConfig(floor_db=3.0))
+
+
+def test_a_bin_of_residual_echo_with_no_near_power_stays_at_the_echo_floor() -> None:
+    model = ns_omlsa.Omlsa()
+    noise = np.full(model.n_bins, 1e-4, dtype=np.float32)
+    for _ in range(50):
+        model.process(noise)
+    echo = np.zeros(model.n_bins, dtype=np.float32)
+    echo[48] = 1.0
+    power = noise.copy()
+    power[48] = 0.03
+    gain = model.process(power, echo).gain
+    noise_db = float(afe.NS_FLOOR_DB)
+    echo_db = float(afe.NS_ECHO_FLOOR_DB)
+    assert 20 * math.log10(gain[48]) < 0.5 * (noise_db + echo_db)
+    assert 20 * math.log10(gain[10]) > echo_db

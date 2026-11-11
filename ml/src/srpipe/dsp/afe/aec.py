@@ -2,7 +2,8 @@
 
 Mirror of aec.c in float32. Overlap-save on blocks of one hop with a transform of two, a filter of n_partitions
 blocks per microphone, one partition's gradient constrained per block, and the learning rate of Valin 2007 taken
-from how much of the error the echo estimate explains, so no double-talk detector is needed. Sums run in order.
+from how much of the error the echo estimate explains, so no double-talk detector is needed. The residual echo is
+the larger of the filter's estimate and the learned speaker-to-mic coupling times the reference. Sums run in order.
 """
 
 from __future__ import annotations
@@ -53,6 +54,16 @@ def complex_of(re: np.ndarray, im: np.ndarray) -> np.ndarray:
     return out
 
 
+def db_power(db: float) -> np.float32:
+    """A power ratio of decibels, from double as aec.c takes it."""
+    return f32(10.0 ** (float(f32(db)) / 10.0))
+
+
+def tail_keep() -> np.float32:
+    """Each hop's share of the reference power left in the echo, from double as aec.c takes it."""
+    return f32(np.exp(-float(HOP) / (float(grid.SAMPLE_RATE_HZ) * float(f32(afe.AEC_COUPLE_TAIL_S)))))
+
+
 def hann() -> np.ndarray:
     """The window of the residual's spectrum, from double as aec.c builds it."""
     return np.array([0.5 - 0.5 * cos_series(2.0 * PI * i / N_FFT) for i in range(N_FFT)], dtype=f32)
@@ -72,6 +83,8 @@ class Canceller:
         self.sum_adapt = f32(0.0)
         self.adapted = False
         self.echo_tail = np.zeros(HOP, dtype=f32)
+        self.mic_tail = np.zeros(HOP, dtype=f32)
+        self.couple = np.full(N_BINS, db_power(afe.AEC_COUPLE_START_DB), dtype=f32)
         self.mic_power = f32(0.0)
         self.err_power = f32(0.0)
         self.over = 0
@@ -85,6 +98,10 @@ class Aec:
         check(self.cfg)
         self.learn = learn
         self.window = hann()
+        self.keep = tail_keep()
+        self.couple_max = db_power(afe.AEC_COUPLE_MAX_DB)
+        self.couple_peak = db_power(afe.AEC_COUPLE_PEAK_DB)
+        self.hold_blocks = round(afe.AEC_COUPLE_HOLD_S * grid.SAMPLE_RATE_HZ / HOP)
         self.reset()
 
     def reset(self) -> None:
@@ -94,6 +111,7 @@ class Aec:
         self.previous = np.zeros(HOP, dtype=f32)
         self.delay = np.zeros(self.cfg.bulk_delay_samples + HOP, dtype=f32)
         self.power = np.zeros(N_BINS, dtype=f32)
+        self.ref_power = np.zeros(N_BINS, dtype=f32)
         self.blocks = 0
         self.silent_blocks = n + 1
         self.mics = [Canceller(n) for _ in range(self.cfg.n_mics)]
@@ -106,8 +124,10 @@ class Aec:
         self.previous[:] = 0
         self.delay[:] = 0
         self.silent_blocks = self.cfg.n_partitions + 1
+        self.ref_power[:] = 0
         for c in self.mics:
             c.echo_tail[:] = 0
+            c.mic_tail[:] = 0
 
     def delayed(self, ref: np.ndarray) -> np.ndarray:
         bulk = self.cfg.bulk_delay_samples
@@ -198,6 +218,13 @@ class Aec:
             self.diverged = True
             self.resets += 1
 
+    def couple_step(self, c: Canceller, mic_power: np.ndarray, ref_now: np.ndarray, peak: np.float32) -> None:
+        """Move the coupling of each bin near the reference's peak towards mic / accumulated reference power."""
+        near = (ref_now > f32(afe.AEC_COUPLE_REF_MIN)) & (ref_now > peak)
+        ratio = np.minimum(mic_power / np.where(near, self.ref_power, ONE), self.couple_max)
+        rate = np.where(ratio > c.couple, f32(afe.AEC_COUPLE_UP), f32(afe.AEC_COUPLE_DOWN))
+        c.couple = np.where(near, c.couple + rate * (ratio - c.couple), c.couple).astype(f32)
+
     def process(self, mic: np.ndarray, ref: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """One hop: (n_mics, HOP) and (HOP,) in, the residual of each microphone and the echo power per bin out."""
         far = self.delayed(np.asarray(ref, dtype=f32))
@@ -205,9 +232,20 @@ class Aec:
         out = np.asarray(mic, dtype=f32).copy()
         residual = np.zeros(N_BINS, dtype=f32)
         if self.silent_blocks > self.cfg.n_partitions:
+            for m, c in enumerate(self.mics):
+                c.mic_tail = out[m].copy()
+            if self.silent_blocks > self.hold_blocks:
+                self.ref_power[:] = 0
+                return out, residual
+            self.ref_power = self.keep * self.ref_power
+            for c in self.mics:
+                residual = np.maximum(residual, c.couple * self.ref_power)
             return out, residual
         n = self.cfg.n_partitions
         self.head = (self.head - 1) % n
+        ref_now = power_of(fft.forward(np.concatenate([self.previous, far]) * self.window))
+        self.ref_power = self.keep * self.ref_power + ref_now
+        peak = ref_now.max() * self.couple_peak
         spectrum = fft.forward(np.concatenate([self.previous, far]))
         self.spectra[self.head] = spectrum
         self.previous = far
@@ -233,11 +271,16 @@ class Aec:
                 )
                 self.update(c, err_bins, rate)
             self.watch(c, mic_energy, err_energy)
+            mic_power = power_of(fft.forward(np.concatenate([c.mic_tail, out[m]]) * self.window))
+            c.mic_tail = out[m].copy()
+            if self.learn:
+                self.couple_step(c, mic_power, ref_now, peak)
             out[m] = err
             leak = min(f32(2.0) * c.leak, ONE)
             tail = np.concatenate([c.echo_tail, echo])
             c.echo_tail = echo
             residual = np.maximum(residual, leak * power_of(fft.forward(tail * self.window)))
+            residual = np.maximum(residual, c.couple * self.ref_power)
         self.blocks += 1
         return out, residual
 
