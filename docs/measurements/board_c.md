@@ -278,6 +278,35 @@ chất lượng 6 và 4407 chỉnh qua `cam reg 4407 <giá trị>`. Cảnh phòn
 - Ở host: khung về 3,4–3,6 s sau lệnh, như trước; ảnh đầy đủ về sau đó 5,2–5,7 s, cả lệnh 8,6–9,3 s. `PHOTO` 3,8–4,3 s, lượt đầu 10,9 s
   vì gửi mất 7,3 s.
 
+**Khung `detect` 640 × 480 (E15-T30, 10/11), giải thẳng về 512 × 384, ảnh nhỏ không ghi thẻ, live ở khung đầy đủ.** Boot 145: 10 lượt
+`make detect`, 5 lượt `PHOTO`, rồi 4 lượt bấm giờ ở host; `vision-live` tắt.
+- Đủ cả 15 lượt. Ảnh `detect` 28,9–31,7 KB (60,6–70,5 KB ở 1280 × 720); `detectMs` 1 935–1 939; khung 4:3 thấy rộng hơn, có lượt ra 4 `person`.
+- Bước 50 Hz theo hệ số đọc lại: 640 × 480 `line total 2060, PLL x180, 10 ms is 218 lines`, khung đầy đủ `2844, PLL x200, 175 lines`.
+- PSRAM trống 448 588 B ở bước `vision`, **356 672 B lúc đứng yên, thấp nhất 191 740 B** (253 648 và 84 260 B với RGB 640 × 360).
+- Chụp ảnh `detect` 681–1 266 ms, phần lớn 771 ms: không nhanh hơn 1 280 × 720 (756–888 ms), vì thời gian nằm ở các khung chờ phơi sáng.
+  Từ sau lúc gửi tới hết `detect` 3 427–3 490 ms, nhanh hơn chừng 150 ms nhờ giải JPEG nhỏ; một lượt 5 819 ms.
+- Ở host khung về 3,2–4,4 s sau lệnh, không khác 3,4–3,6 s của 1 280 × 720 trong độ dao động của lượt chụp.
+- Ảnh đầy đủ sau khung 640 × 480: chụp 2,9–8,3 s (sau 1 280 × 720 là 2,9–3,4 s), về host 8,6–11,4 s sau lệnh. `PHOTO` không qua khung nhỏ:
+  3,7–4,2 s. Nguyên nhân: thanh ghi phơi sáng đếm 1/16 dòng, và ba cỡ cùng ổn định ở 30 ms trong phòng này (8 400, 10 464 và 9 072, tức 525,
+  654 và 567 dòng, đúng ba bước 10 ms của mỗi cỡ). Một dòng dài 56,9 µs ở khung đầy đủ (2 844 điểm, 50 MHz), 45,8 µs ở 640 × 480 (2 060,
+  45 MHz), 52,9 µs ở 1 280 × 720 (2 644, 50 MHz). Giữ số dòng khi đổi cỡ thì khung đầy đủ phơi 37 ms sau 640 × 480 (quá 25%), 32 ms sau
+  1 280 × 720 (quá 8%), và AEC dò lại lâu hơn.
+- Live 5 MP: 0,83–1,02 khung/s, khung 2560 × 1920 ~274 KB.
+
+**Quy đổi phơi sáng khi đổi cỡ (E15-T30, 10/11).** `drv_camera_use` quy phơi sáng theo tỉ lệ thời gian dòng, giữ độ lợi, ghi lúc AEC và AGC ở
+chế độ tay rồi trả tự động. Boot 147, cùng bài thử 10 lượt `make detect` và 5 lượt `PHOTO`.
+- Phép quy đổi đúng: `exposure 10464 -> 8421` khi sang khung đầy đủ (AEC ổn định ở 8 400), `8400 -> 10437` khi về 640 × 480 (AEC ở 10 464).
+- Ảnh đầy đủ sau khung `detect`: chờ phơi sáng 6–7 khung, 2,30–2,78 s ở 7 trên 10 lượt, 10–11 khung, 4,1–4,6 s ở 2 lượt, 5 khung 4,5 s ở một lượt
+  độ lợi nhảy 33 → 60; chụp 2,9–5,3 s. Hết các lượt 6–8 s của bản không quy đổi, nhưng chưa xuống dưới 6 khung.
+- `PHOTO` từ trạng thái nghỉ: chờ 4–5 khung, 1,45–1,93 s, chụp 2,1–2,6 s (2,9–3,2 s ở bản không quy đổi).
+- Khung `detect` sau ảnh đầy đủ: 4–7 khung, 0,54–1,07 s ở 8 trên 10 lượt, nhưng **18 khung, ~3 s ở 2 lượt** (chụp 3,2 s): chưa gặp ở bản không quy
+  đổi (4–7 khung). Nghi giá trị quy đổi lệch lưới bước 10 ms của cỡ mới (10 437 so với 3 × 3 488 = 10 464; 8 421 so với 3 × 2 800 = 8 400), làm AEC
+  dò quanh lưới; chưa thử làm tròn 🔬.
+- `detectMs` 1 939–1 947; ảnh `detect` 24,7–30,3 KB; ảnh đầy đủ 195,8–360,6 KB (lượt 360,6 KB độ lợi 60). PSRAM trống lúc đứng yên
+  354 336–358 232 B, thấp nhất 194 680 B; RAM nội thấp nhất 22 119 B.
+- Hai lượt `PHOTO` hỏng vì MQTT rớt (`No PING_RESP`, `session down` hai lần): một ảnh không gửi được (`ESP_ERR_INVALID_STATE`, vẫn lên thẻ),
+  một lệnh không tới board. Một lần ghi thẻ 5 361 ms.
+
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
 `drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là hằng số; bao nhiêu bước
