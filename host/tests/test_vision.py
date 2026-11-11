@@ -310,6 +310,27 @@ def test_a_detect_waits_for_both_pictures_and_the_boxes_in_any_order(tmp_path: P
         assert (tmp_path / first / DEVICE / "B7_000002_full_boxes.jpg").exists()
 
 
+def test_boxes_that_fail_to_draw_still_count_as_come(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    shot = vision.OneShot(vision.Assembler(tmp_path), "DETECT", DEVICE)
+    shot.handle(up("image", jpeg_chunk()))
+
+    def broken(*_args: object) -> None:
+        raise OSError("image file is truncated")
+
+    monkeypatch.setattr(vision, "draw_boxes", broken)
+    with pytest.raises(OSError):
+        shot.handle(up("detections", DETECTIONS))
+    assert shot.missing() == "full image"
+
+
+def test_a_whole_write_leaves_no_part_behind(tmp_path: Path) -> None:
+    path = tmp_path / "B7_000002.jpg"
+    vision.write_whole(path, PICTURE)
+    vision.write_whole(path, PICTURE[::-1])
+    assert path.read_bytes() == PICTURE[::-1]
+    assert [p.name for p in tmp_path.iterdir()] == ["B7_000002.jpg"]
+
+
 def test_a_photo_needs_the_full_picture_only(tmp_path: Path) -> None:
     shot = vision.OneShot(vision.Assembler(tmp_path), "PHOTO", DEVICE)
     shot.handle(up("image", jpeg_chunk()))

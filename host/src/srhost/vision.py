@@ -7,9 +7,12 @@ Run: uv run python -m srhost.vision [--device <deviceId>] [--capture PHOTO|DETEC
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import logging
+import os
 import sys
+import tempfile
 import threading
 import time
 import zlib
@@ -137,6 +140,16 @@ class Capture:
         return image
 
 
+def write_whole(path: Path, data: bytes) -> None:
+    """Write data so a reader in another process sees the old file or the new one, never part of either.
+
+    make host-live and make detect keep the same pictures, and one read half written fails to open.
+    """
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", delete=False) as part:
+        part.write(data)
+    os.replace(part.name, path)
+
+
 def stem_of(boot: int, seq: int) -> str:
     return f"B{boot}_{seq:06d}"
 
@@ -161,7 +174,9 @@ def draw_boxes(picture: Path, payload: dict, out: Path) -> None:
         pen.rectangle(corners, outline=BOX_COLOUR, width=BOX_LINE_PX)
         label = f"{box['name']} {box['scorePermille'] / PERMILLE:.2f}"
         pen.text((corners[0] + 2 * BOX_LINE_PX, corners[1] + 2 * BOX_LINE_PX), label, fill=BOX_COLOUR, font=font)
-    upright.save(out, quality=BOX_JPEG_QUALITY)
+    buffer = io.BytesIO()
+    upright.save(buffer, "JPEG", quality=BOX_JPEG_QUALITY)
+    write_whole(out, buffer.getvalue())
 
 
 class Assembler:
@@ -208,10 +223,10 @@ class Assembler:
         path = self.folder(device) / f"{stem}{suffix_of(header)}.jpg"
         path.parent.mkdir(parents=True, exist_ok=True)
         self._make_way(path, stem, image)
-        path.write_bytes(image)
+        write_whole(path, image)
         if device in self._fixes:
             place = path.with_name(stem + PLACE_SUFFIX + ".json")
-            place.write_text(json.dumps(self._fixes[device]), encoding="utf-8")
+            write_whole(place, json.dumps(self._fixes[device]).encode("utf-8"))
         return path
 
     def note_place(self, device: str, sensors: dict) -> None:
@@ -244,7 +259,7 @@ class Assembler:
         path.parent.mkdir(parents=True, exist_ok=True)
         text = json.dumps(payload, ensure_ascii=False, indent=1)
         self._make_way(path, path.stem, text.encode("utf-8"))
-        path.write_text(text, encoding="utf-8")
+        write_whole(path, text.encode("utf-8"))
         return path
 
 
@@ -378,10 +393,14 @@ class OneShot:
             (self.online.add if message.payload["state"] == "ONLINE" else self.online.discard)(message.device)
         if self.device is None or message.device != self.device:
             return
-        lines = keep(self.assembler, message)
-        for line in lines:
-            print(line, flush=True)
-        self._note(message, lines)
+        lines: list[str] = []
+        # What came counts even when keeping it fails, or a drawing error reads as boxes never sent.
+        try:
+            lines = keep(self.assembler, message)
+        finally:
+            for line in lines:
+                print(line, flush=True)
+            self._note(message, lines)
 
     def _note(self, message: Message, lines: list[str]) -> None:
         payload = message.payload or {}
