@@ -587,12 +587,6 @@ static esp_err_t register_cam(void)
 #define SD_CHUNK_BYTES 256
 #define SD_CAT_MAX_BYTES (64 * 1024) // a .JSN is a few KB; a picture would flood the serial line
 
-static struct {
-    struct arg_str *action;
-    struct arg_str *path;
-    struct arg_end *end;
-} s_sd_args;
-
 static void sd_entry(void *ctx, const char *name, size_t bytes, bool is_dir)
 {
     (void)ctx;
@@ -620,14 +614,11 @@ static int sd_cat(const char *path)
     return err == ESP_OK ? 0 : 1;
 }
 
+// Parsed by hand: an argtable takes internal RAM for good, and 2 KB of it is detect's loan (KEHOACH 3.18).
 static int sd_cmd(int argc, char **argv)
 {
-    if (arg_parse(argc, argv, (void **)&s_sd_args) != 0) {
-        arg_print_errors(stdout, s_sd_args.end, argv[0]);
-        return 1;
-    }
-    const char *action = s_sd_args.action->sval[0];
-    const char *path = s_sd_args.path->count > 0 ? s_sd_args.path->sval[0] : "";
+    const char *action = argc > 1 ? argv[1] : "";
+    const char *path = argc > 2 ? argv[2] : "";
     if (strcmp(action, "ls") == 0) {
         const esp_err_t err = drv_sd_list(path, sd_entry, NULL);
         printf("sd ls %s: %s\n", path, esp_err_to_name(err));
@@ -640,32 +631,24 @@ static int sd_cmd(int argc, char **argv)
 
 static esp_err_t register_sd(void)
 {
-    s_sd_args.action = arg_str1(NULL, NULL, "ls|cat", "list a folder, or print a file");
-    s_sd_args.path = arg_str0(NULL, NULL, "<path>", "relative to the card's root, as IMG/B164/000001.JSN");
-    s_sd_args.end = arg_end(2);
     const esp_console_cmd_t sd = {
         .command = "sd",
         .help = "Read the SD card without taking it out: a folder's entries, or a text file such as a .JSN",
+        .hint = "ls [<folder>] | cat <file>",
         .func = sd_cmd,
-        .argtable = &s_sd_args,
     };
     return esp_console_cmd_register(&sd);
 }
 #endif
 
 #if CONFIG_APP_CAMERA_ENABLE && CONFIG_APP_SPEAKER_ENABLE
-static struct {
-    struct arg_str *path;
-    struct arg_end *end;
-} s_play_args;
-
 static int play_cmd(int argc, char **argv)
 {
-    if (arg_parse(argc, argv, (void **)&s_play_args) != 0) {
-        arg_print_errors(stdout, s_play_args.end, argv[0]);
+    if (argc != 2) {
+        printf("play <file>: a 16 kHz mono 16-bit WAV on the card\n");
         return 1;
     }
-    const char *path = s_play_args.path->sval[0];
+    const char *path = argv[1];
     app_speak_req_t request = {.tone = APP_TONE_NONE};
     if (strlcpy(request.clip, path, sizeof(request.clip)) >= sizeof(request.clip)) {
         printf("play %s: the path is over %u characters\n", path, (unsigned)(sizeof(request.clip) - 1));
@@ -678,14 +661,11 @@ static int play_cmd(int argc, char **argv)
 
 static esp_err_t register_play(void)
 {
-    s_play_args.path =
-        arg_str1(NULL, NULL, "<path>", "a 16 kHz mono 16-bit WAV on the card, as IMG/B164/000009.WAV");
-    s_play_args.end = arg_end(1);
     const esp_console_cmd_t play = {
         .command = "play",
         .help = "Play a WAV from the card through the speaker, to measure aec on speech (E10-T9)",
+        .hint = "<file>, as IMG/B164/000009.WAV",
         .func = play_cmd,
-        .argtable = &s_play_args,
     };
     return esp_console_cmd_register(&play);
 }
