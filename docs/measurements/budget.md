@@ -5,34 +5,34 @@ Chỉ số từ profile `bench`; số từ `dev` không vào bảng này.
 
 | Module | Nhân | RAM tĩnh B | Vùng `hot` B | Vùng `cold` B | µs trung bình | µs đỉnh | % khung 16 ms | Commit | Ngày |
 |---|---|---|---|---|---|---|---|---|---|
-| dsp_afe aec hai micro, loa đang phát | 1 | 0 | 0 | 75168 | 4368,2 | 4378,4 | 27,3 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe aec một micro, loa đang phát | 1 | 0 | 0 | 55584 | 2126,2 | 2130,5 | 13,3 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe agc | 1 | 0 | 1216 | 0 | 257,2 | 262,7 | 1,6 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe agc chặn đỉnh mọi mẫu | 1 | 0 | 1216 | 0 | 340,8 | 356,6 | 2,1 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe balance | 1 | 0 | 2056 | 0 | 18,4 | 22,7 | 0,1 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe bss LEARN và lối ra trễ 4 s của bss_live | 1 | 0 | 5808 | 770000 | 287,0 | 455,8 | 1,8 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe bss LEARN, hai người đổi lượt | 1 | 0 | 5328 | 0 | 86,3 | 254,1 | 0,5 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe bss chia ở chính diện | 1 | 0 | 5328 | 0 | 25,5 | 30,1 | 0,2 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe chuỗi (hpf + stft x2 + balance + doa + trộn + ns + istft + vad + agc) | 1 | 0 | 86464 | 0 | 2621,3 | 3308,3 | 16,4 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe chuỗi một micro (hpf + stft + ns + istft + vad + agc) | 1 | 0 | 75984 | 0 | 2353,5 | 2463,0 | 14,7 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe chuỗi một micro, loa đang phát (hpf + aec + stft + ns + istft + vad + agc) | 1 | 0 | 75984 | 55600 | 4371,1 | 4553,9 | 27,3 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe doa gộp phổ chéo | 1 | 0 | 4304 | 0 | 22,1 | 26,4 | 0,1 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe doa gộp và dò lưới | 1 | 0 | 4304 | 0 | 640,9 | 642,6 | 4,0 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe gsc học | 1 | 0 | 4160 | 0 | 140,5 | 144,2 | 0,9 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe gsc học và đổi góc lái mỗi bước | 1 | 0 | 4160 | 0 | 485,4 | 492,3 | 3,0 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe hpf (2 kênh) | 1 | 0 | 64 | 0 | 41,1 | 45,3 | 0,3 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe ns_omlsa | 1 | 0 | 33280 | 0 | 1687,6 | 1875,4 | 10,5 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_afe vad | 1 | 0 | 2640 | 0 | 138,0 | 175,3 | 0,9 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_spec istft | 1 | 0 | 11856 | 0 | 158,0 | 162,0 | 1,0 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_spec stft (2 kênh) | 1 | 0 | 18032 | 0 | 283,7 | 287,0 | 1,8 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_spec log-mel (80 dải) | 0 | 0 | 3680 | 0 | 87,7 | 93,3 | 0,5 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_spec pitch Kaldi (vùng làm việc PSRAM) | 0 | 0 | 158496 | 0 | 2101,6 | 2202,4 | 13,1 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_spec spk_fbank (72 băng) một cửa sổ speaker | 0 | 0 | 0 | 59568 | 79154,9 | 79156,1 | 494,7 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_spec swift_dims ba chiều cao độ của SwiftF0 | 0 | 0 | 656 | 0 | 44,2 | 71,4 | 0,3 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| dsp_spec swift_front ba STFT của SwiftF0 (vùng làm việc PSRAM) | 0 | 0 | 60160 | 0 | 2375,5 | 2463,4 | 14,8 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
-| lang_vi lexicon_entry một lệnh ba vùng lúc nạp bộ lệnh | 0 | 0 | 0 | 0 | 1183,0 | 1187,9 | 7,4 | `contract-v1-2245-g3e2638f9-dirt` | 2026-11-05 |
+| dsp_afe aec hai micro, loa đang phát | 1 | 0 | 0 | 81360 | 5632,9 | 5705,6 | 35,2 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe aec một micro, loa đang phát | 1 | 0 | 0 | 59712 | 2809,2 | 2810,6 | 17,6 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe agc | 1 | 0 | 1216 | 0 | 257,2 | 260,9 | 1,6 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe agc chặn đỉnh mọi mẫu | 1 | 0 | 1216 | 0 | 340,8 | 356,6 | 2,1 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe balance | 1 | 0 | 2056 | 0 | 18,4 | 22,7 | 0,1 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe bss LEARN và lối ra trễ 4 s của bss_live | 1 | 0 | 5808 | 770000 | 287,0 | 455,6 | 1,8 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe bss LEARN, hai người đổi lượt | 1 | 0 | 5328 | 0 | 86,3 | 255,0 | 0,5 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe bss chia ở chính diện | 1 | 0 | 5328 | 0 | 25,5 | 30,1 | 0,2 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe chuỗi (hpf + stft x2 + balance + doa + trộn + ns + istft + vad + agc) | 1 | 0 | 86480 | 0 | 2633,4 | 3317,7 | 16,5 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe chuỗi một micro (hpf + stft + ns + istft + vad + agc) | 1 | 0 | 76000 | 0 | 2365,6 | 2474,4 | 14,8 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe chuỗi một micro, loa đang phát (hpf + aec + stft + ns + istft + vad + agc) | 1 | 0 | 76000 | 59728 | 5443,8 | 5643,4 | 34,0 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe doa gộp phổ chéo | 1 | 0 | 4304 | 0 | 22,1 | 26,4 | 0,1 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe doa gộp và dò lưới | 1 | 0 | 4304 | 0 | 640,9 | 642,6 | 4,0 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe gsc học | 1 | 0 | 4160 | 0 | 140,5 | 144,2 | 0,9 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe gsc học và đổi góc lái mỗi bước | 1 | 0 | 4160 | 0 | 485,4 | 492,3 | 3,0 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe hpf (2 kênh) | 1 | 0 | 64 | 0 | 41,1 | 45,3 | 0,3 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe ns_omlsa | 1 | 0 | 33288 | 0 | 1704,7 | 1896,0 | 10,7 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_afe vad | 1 | 0 | 2640 | 0 | 138,0 | 175,3 | 0,9 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_spec istft | 1 | 0 | 11856 | 0 | 158,0 | 162,0 | 1,0 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_spec stft (2 kênh) | 1 | 0 | 18032 | 0 | 283,7 | 287,0 | 1,8 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_spec log-mel (80 dải) | 0 | 0 | 3680 | 0 | 87,7 | 93,3 | 0,5 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_spec pitch Kaldi (vùng làm việc PSRAM) | 0 | 0 | 158496 | 0 | 2101,6 | 2202,2 | 13,1 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_spec spk_fbank (72 băng) một cửa sổ speaker | 0 | 0 | 0 | 59568 | 79155,3 | 79157,0 | 494,7 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_spec swift_dims ba chiều cao độ của SwiftF0 | 0 | 0 | 656 | 0 | 44,2 | 68,7 | 0,3 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| dsp_spec swift_front ba STFT của SwiftF0 (vùng làm việc PSRAM) | 0 | 0 | 60160 | 0 | 2375,5 | 2463,5 | 14,8 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
+| lang_vi lexicon_entry một lệnh ba vùng lúc nạp bộ lệnh | 0 | 0 | 0 | 0 | 1183,0 | 1188,0 | 7,4 | `contract-v1-2393-g5fc759f4` | 2026-11-11 |
 
-Tổng nhân 1: trung bình 16,4%, đỉnh cộng dồn 20,7% một khung (mục tiêu KẾ HOẠCH §5.6: trung bình ≤ 50%, đỉnh một khung ≤ 80%); gồm dsp_afe chuỗi (hpf + stft x2 + balance + doa + trộn + ns + istft + vad + agc).
+Tổng nhân 1: trung bình 16,5%, đỉnh cộng dồn 20,7% một khung (mục tiêu KẾ HOẠCH §5.6: trung bình ≤ 50%, đỉnh một khung ≤ 80%); gồm dsp_afe chuỗi (hpf + stft x2 + balance + doa + trộn + ns + istft + vad + agc).
 Tổng nhân 0: trung bình 15,7%, đỉnh cộng dồn 16,4% một khung (mục tiêu KẾ HOẠCH §5.6: trung bình ≤ 70%); gồm dsp_spec log-mel (80 dải), dsp_spec swift_dims ba chiều cao độ của SwiftF0, dsp_spec swift_front ba STFT của SwiftF0 (vùng làm việc PSRAM).
 
 ## Việc theo lệnh, không theo khung
