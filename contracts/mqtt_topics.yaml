@@ -18,5 +18,6 @@ topics:
   - {id: detections, path: "sr/{deviceId}/up/detections", direction: up, qos: 1, retain: false, schema: detections}
   - {id: sensors, path: "sr/{deviceId}/up/sensors", direction: up, qos: 0, retain: false, schema: sensors}
   - {id: note, path: "sr/{deviceId}/up/note", direction: up, qos: 1, retain: false, schema: binary}
-  - {id: journal, path: "sr/{deviceId}/up/journal", direction: up, qos: 1, retain: false, schema: journal}
+  - {id: record, path: "sr/{deviceId}/up/record", direction: up, qos: 1, retain: false, schema: record}
+  - {id: ack, path: "sr/{deviceId}/down/ack", direction: down, qos: 1, retain: false, schema: ack}
   - {id: ota, path: "sr/{deviceId}/down/ota", direction: down, qos: 1, retain: false, schema: ota_manifest}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sr/record",
+  "title": "record",
+  "description": "The record of one capture, live on up/record or late from the card's .JSN: the capture, what detect found, the latest sensor reading.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["capture"],
+  "properties": {
+    "capture": {"$ref": "capture"},
+    "detections": {"$ref": "detections"},
+    "sensors": {"$ref": "sensors"}
+  }
+}

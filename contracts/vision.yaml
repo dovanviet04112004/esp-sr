@@ -36,6 +36,10 @@ note: # the voice note of a journal entry (KEHOACH 3.19), cleaned hops as nhan_t
   max_s: 30.0
   buffer_s: 3.0 # sb_note: hops nhan_task may run ahead of the card
   card_block_bytes: 8192 # PCM written to the card at a time
+outbox: # each capture's entry on the card, sent late until down/ack (KEHOACH 3.19)
+  retry_s: 120 # after a pass with entries still unacknowledged
+  batch: 16 # pending entries held in RAM at once, oldest first
+  step_wait_ms: 20 # how long q_vision is looked at between two late chunks
 sensors:
   period_ms: 1000
   report_s: 10
@@ -45,6 +49,7 @@ chunk:
   payload_bytes: 16384
   flag_preview: 1
   flag_full: 2
+  flag_late: 4 # sent from the card after the capture, not as it happened
   header:
     - {name: magic, type: u32}
     - {name: version, type: u16}

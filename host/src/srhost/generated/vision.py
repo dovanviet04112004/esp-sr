@@ -14,6 +14,7 @@ CHUNK_HEADER_BYTES = 28
 CHUNK_PAYLOAD_BYTES = 16384
 CHUNK_FLAG_PREVIEW = 1
 CHUNK_FLAG_FULL = 2
+CHUNK_FLAG_LATE = 4
 PREVIEW_HOLD_MS = 5000
 CHUNK_HEADER = struct.Struct("<IHHHHIIII")
 CHUNK_HEADER_FIELDS = ('magic', 'version', 'index', 'count', 'flags', 'boot', 'seq', 'total_bytes', 'crc32')

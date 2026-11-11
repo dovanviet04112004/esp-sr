@@ -867,6 +867,10 @@ def gen_vision_h(v: dict) -> str:
     out.append(f"#define GEN_VISION_NOTE_BUFFER_S {float(note['buffer_s'])}f")
     out.append(f"#define GEN_VISION_NOTE_CARD_BLOCK_BYTES {note['card_block_bytes']}")
     out.append(f"#define GEN_VISION_SENSORS_PERIOD_MS {v['sensors']['period_ms']}")
+    outbox = v["outbox"]
+    out.append(f"#define GEN_VISION_OUTBOX_RETRY_S {outbox['retry_s']}")
+    out.append(f"#define GEN_VISION_OUTBOX_BATCH {outbox['batch']}")
+    out.append(f"#define GEN_VISION_OUTBOX_STEP_WAIT_MS {outbox['step_wait_ms']}")
     out.append(f"#define GEN_VISION_SENSORS_REPORT_S {v['sensors']['report_s']}")
     out.append(f"#define GEN_VISION_IR_RELEASE_MS {v['sensors']['ir_release_ms']}")
     out.append(f'#define GEN_VISION_CHUNK_MAGIC 0x{v["magic_u32"]:08x}u // "{chunk["magic"]}" little-endian')
@@ -874,7 +878,8 @@ def gen_vision_h(v: dict) -> str:
     out.append(f"#define GEN_VISION_CHUNK_HEADER_BYTES {chunk['header_bytes']}")
     out.append(f"#define GEN_VISION_CHUNK_PAYLOAD_BYTES {chunk['payload_bytes']}")
     out.append(f"#define GEN_VISION_CHUNK_FLAG_PREVIEW {chunk['flag_preview']}")
-    out.append(f"#define GEN_VISION_CHUNK_FLAG_FULL {chunk['flag_full']}\n")
+    out.append(f"#define GEN_VISION_CHUNK_FLAG_FULL {chunk['flag_full']}")
+    out.append(f"#define GEN_VISION_CHUNK_FLAG_LATE {chunk['flag_late']}\n")
     out.append("typedef struct {")
     out += [f"    {C_FIELD_TYPE[fl['type']]} {fl['name']};" for fl in v["fields"]]
     out.append("} gen_vision_chunk_header_t;\n")
@@ -903,6 +908,7 @@ def gen_vision_py(v: dict) -> str:
         f"CHUNK_PAYLOAD_BYTES = {chunk['payload_bytes']}\n"
         f"CHUNK_FLAG_PREVIEW = {chunk['flag_preview']}\n"
         f"CHUNK_FLAG_FULL = {chunk['flag_full']}\n"
+        f"CHUNK_FLAG_LATE = {chunk['flag_late']}\n"
         f"PREVIEW_HOLD_MS = {v['camera']['preview_hold_ms']}\n"
         f'CHUNK_HEADER = struct.Struct("{fmt}")\n'
         f"CHUNK_HEADER_FIELDS = {tuple(fl['name'] for fl in v['fields'])!r}\n"
@@ -1074,6 +1080,8 @@ class PayloadC:
 
     def ctype(self, owner: str, f: Field) -> tuple[str, str]:
         node = f.node
+        if "$ref" in node:
+            return f"{node['$ref']}_t", ""
         if "enum" in node:
             return f"{owner}_{f.c_name}_t", ""
         kind = node["type"]
@@ -1093,6 +1101,8 @@ class PayloadC:
 
     def declare(self, owner: str, node: dict) -> None:
         for f in fields_of(node):
+            if "$ref" in f.node:
+                continue
             if "enum" in f.node:
                 self.enum(f"{owner}_{f.c_name}_t", f.node["enum"])
             elif f.node.get("type") == "object":
@@ -1117,7 +1127,9 @@ class PayloadC:
 
     def parse_value(self, owner: str, f: Field, src: str, dst: str, indent: str) -> list[str]:
         node, lines = f.node, []
-        if "enum" in node:
+        if "$ref" in node:
+            lines.append(f"{indent}if (!{node['$ref']}_from_json({src}, &{dst})) {{ return false; }}")
+        elif "enum" in node:
             lines.append(
                 f"{indent}if (!cJSON_IsString({src}) || !{owner}_{f.c_name}_parse({src}->valuestring, &{dst})) {{ return false; }}"
             )
@@ -1186,6 +1198,8 @@ class PayloadC:
             if key
             else (lambda kind, val: f"{indent}cJSON_AddItemToArray({parent}, cJSON_Create{kind}({val}));")
         )
+        if "$ref" in node:
+            return [f'{indent}cJSON_AddItemToObject({parent}, "{key}", {node["$ref"]}_to_json(&{src}));']
         if "enum" in node:
             return [add("String", f"{owner}_{f.c_name}_str({src})")]
         kind = node["type"]
@@ -1238,9 +1252,36 @@ class PayloadC:
         self.out += body
 
 
+def refs_of(node: object) -> set[str]:
+    """Names of the schemas a schema tree points at with $ref."""
+    if isinstance(node, dict):
+        found = {node["$ref"]} if "$ref" in node else set()
+        return found.union(*(refs_of(v) for v in node.values()))
+    if isinstance(node, list):
+        return set().union(*(refs_of(v) for v in node))
+    return set()
+
+
 def schemas() -> list[tuple[str, dict]]:
+    """Every schema by name, one that points at others after them, so C declares each type before it is used."""
     paths = sorted((CONTRACTS / "schema").glob("*.schema.json"))
-    return [(p.name.removesuffix(".schema.json"), json.loads(p.read_text(encoding="utf-8"))) for p in paths]
+    loaded = {p.name.removesuffix(".schema.json"): json.loads(p.read_text(encoding="utf-8")) for p in paths}
+    ordered: list[tuple[str, dict]] = []
+    placed: set[str] = set()
+
+    def place(name: str, path: tuple[str, ...]) -> None:
+        if name in placed:
+            return
+        if name in path or name not in loaded:
+            raise SystemExit(f"schema {name}: $ref loop or no such schema, through {' -> '.join(path)}")
+        for ref in sorted(refs_of(loaded[name])):
+            place(ref, (*path, name))
+        placed.add(name)
+        ordered.append((name, loaded[name]))
+
+    for name in loaded:
+        place(name, ())
+    return ordered
 
 
 def gen_payload_h() -> str:
@@ -1254,6 +1295,8 @@ def gen_payload_h() -> str:
 
 
 def py_type(owner: str, name: str, node: dict, extra: list[str]) -> str:
+    if "$ref" in node:
+        return f'"{pascal(node["$ref"])}"'
     if "enum" in node:
         alias = pascal(owner) + pascal(name)
         extra.append(f"{alias} = Literal[{', '.join(repr(v) for v in node['enum'])}]\n")

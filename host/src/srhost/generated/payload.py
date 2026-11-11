@@ -5,6 +5,32 @@
 from typing import Literal, NotRequired, TypedDict
 
 
+class Ack(TypedDict):
+    boot: int
+    captureSeq: int
+
+CaptureMode = Literal['PHOTO', 'DETECT', 'JOURNAL']
+
+
+class Capture(TypedDict):
+    deviceId: str
+    boot: int
+    captureSeq: int
+    mode: CaptureMode
+    uptimeMs: int
+    sentBoot: int
+    sentUptimeMs: int
+    late: bool
+    imageBytes: int
+    sent: bool
+    saved: bool
+    noteMs: int
+    noteBytes: int
+    noteDropped: int
+    noteSaved: bool
+
+
+
 class CommandSetCommandsItem(TypedDict):
     id: str
     text: str
@@ -102,19 +128,6 @@ class Heartbeat(TypedDict):
     coreLoadPct: NotRequired[list[int]]
     ts: NotRequired[int]
 
-
-
-class Journal(TypedDict):
-    deviceId: str
-    boot: int
-    captureSeq: int
-    noteMs: int
-    noteBytes: int
-    noteDropped: int
-    noteSaved: bool
-    imageBytes: int
-    saved: bool
-
 OtaManifestKind = Literal['FIRMWARE', 'MODELS']
 
 
@@ -124,18 +137,6 @@ class OtaManifest(TypedDict):
     url: str
     sha256: str
     sizeBytes: int
-
-
-
-class ResponsesResponsesItem(TypedDict):
-    id: str
-    text: str
-
-
-
-class Responses(TypedDict):
-    version: int
-    responses: list[ResponsesResponsesItem]
 
 
 
@@ -175,6 +176,25 @@ class Sensors(TypedDict):
     ir: SensorsIr
     motion: NotRequired[SensorsMotion]
     adc: NotRequired[SensorsAdc]
+
+
+
+class Record(TypedDict):
+    capture: "Capture"
+    detections: NotRequired["Detections"]
+    sensors: NotRequired["Sensors"]
+
+
+
+class ResponsesResponsesItem(TypedDict):
+    id: str
+    text: str
+
+
+
+class Responses(TypedDict):
+    version: int
+    responses: list[ResponsesResponsesItem]
 
 
 
@@ -235,6 +255,53 @@ class Telemetry(TypedDict):
 
 # Every schema as parsed JSON, for host/ to validate what boards send (KEHOACH 7.7).
 SCHEMAS: dict[str, dict] = {
+    'ack': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+     '$id': 'sr/ack',
+     'title': 'ack',
+     'description': "The server keeps every part one capture's record names: the board may drop that capture's "
+                    'pending mark.',
+     'type': 'object',
+     'additionalProperties': False,
+     'required': ['boot', 'captureSeq'],
+     'properties': {'boot': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'captureSeq': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295}}},
+    'capture': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+     '$id': 'sr/capture',
+     'title': 'capture',
+     'description': 'One capture of board C, any of its commands: its full picture and, for a journal entry, its '
+                    'voice note, named by boot and seq.',
+     'type': 'object',
+     'additionalProperties': False,
+     'required': ['deviceId',
+                  'boot',
+                  'captureSeq',
+                  'mode',
+                  'uptimeMs',
+                  'sentBoot',
+                  'sentUptimeMs',
+                  'late',
+                  'imageBytes',
+                  'sent',
+                  'saved',
+                  'noteMs',
+                  'noteBytes',
+                  'noteDropped',
+                  'noteSaved'],
+     'properties': {'deviceId': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{4,32}$', 'maxLength': 32},
+                    'boot': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'captureSeq': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'mode': {'enum': ['PHOTO', 'DETECT', 'JOURNAL']},
+                    'uptimeMs': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'sentBoot': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'sentUptimeMs': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'late': {'type': 'boolean'},
+                    'imageBytes': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'sent': {'type': 'boolean'},
+                    'saved': {'type': 'boolean'},
+                    'noteMs': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'noteBytes': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'noteDropped': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'noteSaved': {'type': 'boolean'}}},
     'command_set': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
      '$id': 'sr/command_set',
      'title': 'command_set',
@@ -388,31 +455,6 @@ SCHEMAS: dict[str, dict] = {
                                     'maxItems': 2,
                                     'items': {'type': 'integer', 'minimum': 0, 'maximum': 100}},
                     'ts': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295}}},
-    'journal': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
-     '$id': 'sr/journal',
-     'title': 'journal',
-     'description': "One journal entry of board C: its voice note and its full picture, named by the capture's "
-                    'boot and seq.',
-     'type': 'object',
-     'additionalProperties': False,
-     'required': ['deviceId',
-                  'boot',
-                  'captureSeq',
-                  'noteMs',
-                  'noteBytes',
-                  'noteDropped',
-                  'noteSaved',
-                  'imageBytes',
-                  'saved'],
-     'properties': {'deviceId': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{4,32}$', 'maxLength': 32},
-                    'boot': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
-                    'captureSeq': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
-                    'noteMs': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
-                    'noteBytes': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
-                    'noteDropped': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
-                    'noteSaved': {'type': 'boolean'},
-                    'imageBytes': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
-                    'saved': {'type': 'boolean'}}},
     'ota_manifest': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
      '$id': 'sr/ota_manifest',
      'title': 'ota_manifest',
@@ -425,26 +467,6 @@ SCHEMAS: dict[str, dict] = {
                     'url': {'type': 'string', 'pattern': '^https?://[!-~]{1,248}$', 'maxLength': 256},
                     'sha256': {'type': 'string', 'pattern': '^[0-9a-f]{64}$', 'maxLength': 64},
                     'sizeBytes': {'type': 'integer', 'minimum': 1, 'maximum': 4294967295}}},
-    'responses': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
-     '$id': 'sr/responses',
-     'title': 'responses',
-     'description': 'Spoken replies by id; baked into LittleFS, not an MQTT payload.',
-     'type': 'object',
-     'additionalProperties': False,
-     'required': ['version', 'responses'],
-     'properties': {'version': {'type': 'integer', 'minimum': 1, 'maximum': 2147483647},
-                    'responses': {'type': 'array',
-                                  'minItems': 1,
-                                  'maxItems': 64,
-                                  'items': {'type': 'object',
-                                            'additionalProperties': False,
-                                            'required': ['id', 'text'],
-                                            'properties': {'id': {'type': 'string',
-                                                                  'pattern': '^[a-z0-9_]{1,32}$',
-                                                                  'maxLength': 32},
-                                                           'text': {'type': 'string',
-                                                                    'minLength': 1,
-                                                                    'maxLength': 128}}}}}},
     'sensors': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
      '$id': 'sr/sensors',
      'title': 'sensors',
@@ -498,6 +520,37 @@ SCHEMAS: dict[str, dict] = {
                                                           'items': {'type': 'integer',
                                                                     'minimum': -32768,
                                                                     'maximum': 32767}}}}}},
+    'record': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+     '$id': 'sr/record',
+     'title': 'record',
+     'description': "The record of one capture, live on up/record or late from the card's .JSN: the capture, what "
+                    'detect found, the latest sensor reading.',
+     'type': 'object',
+     'additionalProperties': False,
+     'required': ['capture'],
+     'properties': {'capture': {'$ref': 'capture'},
+                    'detections': {'$ref': 'detections'},
+                    'sensors': {'$ref': 'sensors'}}},
+    'responses': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+     '$id': 'sr/responses',
+     'title': 'responses',
+     'description': 'Spoken replies by id; baked into LittleFS, not an MQTT payload.',
+     'type': 'object',
+     'additionalProperties': False,
+     'required': ['version', 'responses'],
+     'properties': {'version': {'type': 'integer', 'minimum': 1, 'maximum': 2147483647},
+                    'responses': {'type': 'array',
+                                  'minItems': 1,
+                                  'maxItems': 64,
+                                  'items': {'type': 'object',
+                                            'additionalProperties': False,
+                                            'required': ['id', 'text'],
+                                            'properties': {'id': {'type': 'string',
+                                                                  'pattern': '^[a-z0-9_]{1,32}$',
+                                                                  'maxLength': 32},
+                                                           'text': {'type': 'string',
+                                                                    'minLength': 1,
+                                                                    'maxLength': 128}}}}}},
     'speaker_roster': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
      '$id': 'sr/speaker_roster',
      'title': 'speaker_roster',

@@ -15,6 +15,239 @@ extern "C" {
 #endif
 
 typedef struct {
+    uint32_t boot;
+    uint32_t capture_seq;
+} ack_t;
+
+/** Fill out from a parsed ack object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool ack_from_json(const cJSON *root, ack_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "boot");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->boot = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "captureSeq");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->capture_seq = (uint32_t) item->valuedouble;
+    }
+    return true;
+}
+
+/** Build the JSON object of one ack for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *ack_to_json(const ack_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddNumberToObject(root, "boot", (double) in->boot);
+    cJSON_AddNumberToObject(root, "captureSeq", (double) in->capture_seq);
+    return root;
+}
+
+typedef enum {
+    CAPTURE_MODE_PHOTO = 0,
+    CAPTURE_MODE_DETECT = 1,
+    CAPTURE_MODE_JOURNAL = 2,
+    CAPTURE_MODE_COUNT = 3,
+} capture_mode_t;
+
+/** Contract spelling of a value; "" when it is out of range.
+ *  @ctx any | non-blocking | returns a static string
+ */
+static inline const char *capture_mode_str(capture_mode_t v)
+{
+    switch (v) {
+    case CAPTURE_MODE_PHOTO: return "PHOTO";
+    case CAPTURE_MODE_DETECT: return "DETECT";
+    case CAPTURE_MODE_JOURNAL: return "JOURNAL";
+    default: return "";
+    }
+}
+
+/** Value of a contract spelling.
+ *  @ctx any | non-blocking
+ *  @ret false for NULL or a spelling the contract does not list
+ */
+static inline bool capture_mode_parse(const char *s, capture_mode_t *out)
+{
+    if (s == NULL || out == NULL) { return false; }
+    if (strcmp(s, "PHOTO") == 0) { *out = CAPTURE_MODE_PHOTO; return true; }
+    if (strcmp(s, "DETECT") == 0) { *out = CAPTURE_MODE_DETECT; return true; }
+    if (strcmp(s, "JOURNAL") == 0) { *out = CAPTURE_MODE_JOURNAL; return true; }
+    return false;
+}
+
+typedef struct {
+    char device_id[33];
+    uint32_t boot;
+    uint32_t capture_seq;
+    capture_mode_t mode;
+    uint32_t uptime_ms;
+    uint32_t sent_boot;
+    uint32_t sent_uptime_ms;
+    bool late;
+    uint32_t image_bytes;
+    bool sent;
+    bool saved;
+    uint32_t note_ms;
+    uint32_t note_bytes;
+    uint32_t note_dropped;
+    bool note_saved;
+} capture_t;
+
+/** Fill out from a parsed capture object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool capture_from_json(const cJSON *root, capture_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "deviceId");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->device_id)) { return false; }
+        strcpy(out->device_id, item->valuestring);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "boot");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->boot = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "captureSeq");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->capture_seq = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "mode");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || !capture_mode_parse(item->valuestring, &out->mode)) { return false; }
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "uptimeMs");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->uptime_ms = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "sentBoot");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->sent_boot = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "sentUptimeMs");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->sent_uptime_ms = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "late");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsBool(item)) { return false; }
+        out->late = cJSON_IsTrue(item);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "imageBytes");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->image_bytes = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "sent");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsBool(item)) { return false; }
+        out->sent = cJSON_IsTrue(item);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "saved");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsBool(item)) { return false; }
+        out->saved = cJSON_IsTrue(item);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "noteMs");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->note_ms = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "noteBytes");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->note_bytes = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "noteDropped");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
+        out->note_dropped = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "noteSaved");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsBool(item)) { return false; }
+        out->note_saved = cJSON_IsTrue(item);
+    }
+    return true;
+}
+
+/** Build the JSON object of one capture for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *capture_to_json(const capture_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddStringToObject(root, "deviceId", in->device_id);
+    cJSON_AddNumberToObject(root, "boot", (double) in->boot);
+    cJSON_AddNumberToObject(root, "captureSeq", (double) in->capture_seq);
+    cJSON_AddStringToObject(root, "mode", capture_mode_str(in->mode));
+    cJSON_AddNumberToObject(root, "uptimeMs", (double) in->uptime_ms);
+    cJSON_AddNumberToObject(root, "sentBoot", (double) in->sent_boot);
+    cJSON_AddNumberToObject(root, "sentUptimeMs", (double) in->sent_uptime_ms);
+    cJSON_AddBoolToObject(root, "late", in->late);
+    cJSON_AddNumberToObject(root, "imageBytes", (double) in->image_bytes);
+    cJSON_AddBoolToObject(root, "sent", in->sent);
+    cJSON_AddBoolToObject(root, "saved", in->saved);
+    cJSON_AddNumberToObject(root, "noteMs", (double) in->note_ms);
+    cJSON_AddNumberToObject(root, "noteBytes", (double) in->note_bytes);
+    cJSON_AddNumberToObject(root, "noteDropped", (double) in->note_dropped);
+    cJSON_AddBoolToObject(root, "noteSaved", in->note_saved);
+    return root;
+}
+
+typedef struct {
     char id[33];
     char text[257];
     char response[33];
@@ -1061,111 +1294,6 @@ static inline cJSON *heartbeat_to_json(const heartbeat_t *in)
     return root;
 }
 
-typedef struct {
-    char device_id[33];
-    uint32_t boot;
-    uint32_t capture_seq;
-    uint32_t note_ms;
-    uint32_t note_bytes;
-    uint32_t note_dropped;
-    bool note_saved;
-    uint32_t image_bytes;
-    bool saved;
-} journal_t;
-
-/** Fill out from a parsed journal object, checking type, range, enum and size.
- *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
- *  @ret false on the first field outside the contract; out is then partly filled
- */
-static inline bool journal_from_json(const cJSON *root, journal_t *out)
-{
-    if (!cJSON_IsObject(root) || out == NULL) { return false; }
-    memset(out, 0, sizeof(*out));
-    const cJSON *item = NULL;
-    item = cJSON_GetObjectItemCaseSensitive(root, "deviceId");
-    if (item == NULL) { return false; }
-    if (item != NULL) {
-        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->device_id)) { return false; }
-        strcpy(out->device_id, item->valuestring);
-    }
-    item = cJSON_GetObjectItemCaseSensitive(root, "boot");
-    if (item == NULL) { return false; }
-    if (item != NULL) {
-        if (!cJSON_IsNumber(item)) { return false; }
-        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
-        out->boot = (uint32_t) item->valuedouble;
-    }
-    item = cJSON_GetObjectItemCaseSensitive(root, "captureSeq");
-    if (item == NULL) { return false; }
-    if (item != NULL) {
-        if (!cJSON_IsNumber(item)) { return false; }
-        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
-        out->capture_seq = (uint32_t) item->valuedouble;
-    }
-    item = cJSON_GetObjectItemCaseSensitive(root, "noteMs");
-    if (item == NULL) { return false; }
-    if (item != NULL) {
-        if (!cJSON_IsNumber(item)) { return false; }
-        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
-        out->note_ms = (uint32_t) item->valuedouble;
-    }
-    item = cJSON_GetObjectItemCaseSensitive(root, "noteBytes");
-    if (item == NULL) { return false; }
-    if (item != NULL) {
-        if (!cJSON_IsNumber(item)) { return false; }
-        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
-        out->note_bytes = (uint32_t) item->valuedouble;
-    }
-    item = cJSON_GetObjectItemCaseSensitive(root, "noteDropped");
-    if (item == NULL) { return false; }
-    if (item != NULL) {
-        if (!cJSON_IsNumber(item)) { return false; }
-        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
-        out->note_dropped = (uint32_t) item->valuedouble;
-    }
-    item = cJSON_GetObjectItemCaseSensitive(root, "noteSaved");
-    if (item == NULL) { return false; }
-    if (item != NULL) {
-        if (!cJSON_IsBool(item)) { return false; }
-        out->note_saved = cJSON_IsTrue(item);
-    }
-    item = cJSON_GetObjectItemCaseSensitive(root, "imageBytes");
-    if (item == NULL) { return false; }
-    if (item != NULL) {
-        if (!cJSON_IsNumber(item)) { return false; }
-        if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
-        out->image_bytes = (uint32_t) item->valuedouble;
-    }
-    item = cJSON_GetObjectItemCaseSensitive(root, "saved");
-    if (item == NULL) { return false; }
-    if (item != NULL) {
-        if (!cJSON_IsBool(item)) { return false; }
-        out->saved = cJSON_IsTrue(item);
-    }
-    return true;
-}
-
-/** Build the JSON object of one journal for publishing.
- *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
- *  @ret NULL when the root object cannot be allocated
- */
-static inline cJSON *journal_to_json(const journal_t *in)
-{
-    if (in == NULL) { return NULL; }
-    cJSON *root = cJSON_CreateObject();
-    if (root == NULL) { return NULL; }
-    cJSON_AddStringToObject(root, "deviceId", in->device_id);
-    cJSON_AddNumberToObject(root, "boot", (double) in->boot);
-    cJSON_AddNumberToObject(root, "captureSeq", (double) in->capture_seq);
-    cJSON_AddNumberToObject(root, "noteMs", (double) in->note_ms);
-    cJSON_AddNumberToObject(root, "noteBytes", (double) in->note_bytes);
-    cJSON_AddNumberToObject(root, "noteDropped", (double) in->note_dropped);
-    cJSON_AddBoolToObject(root, "noteSaved", in->note_saved);
-    cJSON_AddNumberToObject(root, "imageBytes", (double) in->image_bytes);
-    cJSON_AddBoolToObject(root, "saved", in->saved);
-    return root;
-}
-
 typedef enum {
     OTA_MANIFEST_KIND_FIRMWARE = 0,
     OTA_MANIFEST_KIND_MODELS = 1,
@@ -1260,102 +1388,6 @@ static inline cJSON *ota_manifest_to_json(const ota_manifest_t *in)
     cJSON_AddStringToObject(root, "url", in->url);
     cJSON_AddStringToObject(root, "sha256", in->sha256);
     cJSON_AddNumberToObject(root, "sizeBytes", (double) in->size_bytes);
-    return root;
-}
-
-typedef struct {
-    char id[33];
-    char text[513];
-} responses_responses_item_t;
-
-/** Fill out from a parsed responses_responses object, checking type, range, enum and size.
- *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
- *  @ret false on the first field outside the contract; out is then partly filled
- */
-static inline bool responses_responses_item_from_json(const cJSON *root, responses_responses_item_t *out)
-{
-    if (!cJSON_IsObject(root) || out == NULL) { return false; }
-    memset(out, 0, sizeof(*out));
-    const cJSON *item = NULL;
-    item = cJSON_GetObjectItemCaseSensitive(root, "id");
-    if (item == NULL) { return false; }
-    if (item != NULL) {
-        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->id)) { return false; }
-        strcpy(out->id, item->valuestring);
-    }
-    item = cJSON_GetObjectItemCaseSensitive(root, "text");
-    if (item == NULL) { return false; }
-    if (item != NULL) {
-        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->text)) { return false; }
-        strcpy(out->text, item->valuestring);
-    }
-    return true;
-}
-
-/** Build the JSON object of one responses_responses for publishing.
- *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
- *  @ret NULL when the root object cannot be allocated
- */
-static inline cJSON *responses_responses_item_to_json(const responses_responses_item_t *in)
-{
-    if (in == NULL) { return NULL; }
-    cJSON *root = cJSON_CreateObject();
-    if (root == NULL) { return NULL; }
-    cJSON_AddStringToObject(root, "id", in->id);
-    cJSON_AddStringToObject(root, "text", in->text);
-    return root;
-}
-
-typedef struct {
-    uint32_t version;
-    responses_responses_item_t responses[64];
-    uint8_t responses_count;
-} responses_t;
-
-/** Fill out from a parsed responses object, checking type, range, enum and size.
- *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
- *  @ret false on the first field outside the contract; out is then partly filled
- */
-static inline bool responses_from_json(const cJSON *root, responses_t *out)
-{
-    if (!cJSON_IsObject(root) || out == NULL) { return false; }
-    memset(out, 0, sizeof(*out));
-    const cJSON *item = NULL;
-    item = cJSON_GetObjectItemCaseSensitive(root, "version");
-    if (item == NULL) { return false; }
-    if (item != NULL) {
-        if (!cJSON_IsNumber(item)) { return false; }
-        if (item->valuedouble < 1.0 || item->valuedouble > 2147483647.0) { return false; }
-        out->version = (uint32_t) item->valuedouble;
-    }
-    item = cJSON_GetObjectItemCaseSensitive(root, "responses");
-    if (item == NULL) { return false; }
-    if (item != NULL) {
-        if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > 64) { return false; }
-        if (cJSON_GetArraySize(item) < 1) { return false; }
-        const cJSON *el = NULL;
-        cJSON_ArrayForEach(el, item) {
-            if (!responses_responses_item_from_json(el, &out->responses[out->responses_count])) { return false; }
-            out->responses_count++;
-        }
-    }
-    return true;
-}
-
-/** Build the JSON object of one responses for publishing.
- *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
- *  @ret NULL when the root object cannot be allocated
- */
-static inline cJSON *responses_to_json(const responses_t *in)
-{
-    if (in == NULL) { return NULL; }
-    cJSON *root = cJSON_CreateObject();
-    if (root == NULL) { return NULL; }
-    cJSON_AddNumberToObject(root, "version", (double) in->version);
-    cJSON *responses_arr = cJSON_AddArrayToObject(root, "responses");
-    for (int i = 0; responses_arr != NULL && i < in->responses_count; i++) {
-        cJSON_AddItemToArray(responses_arr, responses_responses_item_to_json(&in->responses[i]));
-    }
     return root;
 }
 
@@ -1687,6 +1719,158 @@ static inline cJSON *sensors_to_json(const sensors_t *in)
     }
     if (in->has_adc) {
         cJSON_AddItemToObject(root, "adc", sensors_adc_to_json(&in->adc));
+    }
+    return root;
+}
+
+typedef struct {
+    capture_t capture;
+    detections_t detections;
+    sensors_t sensors;
+    bool has_detections;
+    bool has_sensors;
+} record_t;
+
+/** Fill out from a parsed record object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool record_from_json(const cJSON *root, record_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "capture");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!capture_from_json(item, &out->capture)) { return false; }
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "detections");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!detections_from_json(item, &out->detections)) { return false; }
+        out->has_detections = true;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "sensors");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!sensors_from_json(item, &out->sensors)) { return false; }
+        out->has_sensors = true;
+    }
+    return true;
+}
+
+/** Build the JSON object of one record for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *record_to_json(const record_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddItemToObject(root, "capture", capture_to_json(&in->capture));
+    if (in->has_detections) {
+        cJSON_AddItemToObject(root, "detections", detections_to_json(&in->detections));
+    }
+    if (in->has_sensors) {
+        cJSON_AddItemToObject(root, "sensors", sensors_to_json(&in->sensors));
+    }
+    return root;
+}
+
+typedef struct {
+    char id[33];
+    char text[513];
+} responses_responses_item_t;
+
+/** Fill out from a parsed responses_responses object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool responses_responses_item_from_json(const cJSON *root, responses_responses_item_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "id");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->id)) { return false; }
+        strcpy(out->id, item->valuestring);
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "text");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->text)) { return false; }
+        strcpy(out->text, item->valuestring);
+    }
+    return true;
+}
+
+/** Build the JSON object of one responses_responses for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *responses_responses_item_to_json(const responses_responses_item_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddStringToObject(root, "id", in->id);
+    cJSON_AddStringToObject(root, "text", in->text);
+    return root;
+}
+
+typedef struct {
+    uint32_t version;
+    responses_responses_item_t responses[64];
+    uint8_t responses_count;
+} responses_t;
+
+/** Fill out from a parsed responses object, checking type, range, enum and size.
+ *  @ctx any | non-blocking | out is cleared first; strings are copied, not borrowed
+ *  @ret false on the first field outside the contract; out is then partly filled
+ */
+static inline bool responses_from_json(const cJSON *root, responses_t *out)
+{
+    if (!cJSON_IsObject(root) || out == NULL) { return false; }
+    memset(out, 0, sizeof(*out));
+    const cJSON *item = NULL;
+    item = cJSON_GetObjectItemCaseSensitive(root, "version");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 1.0 || item->valuedouble > 2147483647.0) { return false; }
+        out->version = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "responses");
+    if (item == NULL) { return false; }
+    if (item != NULL) {
+        if (!cJSON_IsArray(item) || cJSON_GetArraySize(item) > 64) { return false; }
+        if (cJSON_GetArraySize(item) < 1) { return false; }
+        const cJSON *el = NULL;
+        cJSON_ArrayForEach(el, item) {
+            if (!responses_responses_item_from_json(el, &out->responses[out->responses_count])) { return false; }
+            out->responses_count++;
+        }
+    }
+    return true;
+}
+
+/** Build the JSON object of one responses for publishing.
+ *  @ctx any | non-blocking | allocates through cJSON: caller frees with cJSON_Delete
+ *  @ret NULL when the root object cannot be allocated
+ */
+static inline cJSON *responses_to_json(const responses_t *in)
+{
+    if (in == NULL) { return NULL; }
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) { return NULL; }
+    cJSON_AddNumberToObject(root, "version", (double) in->version);
+    cJSON *responses_arr = cJSON_AddArrayToObject(root, "responses");
+    for (int i = 0; responses_arr != NULL && i < in->responses_count; i++) {
+        cJSON_AddItemToArray(responses_arr, responses_responses_item_to_json(&in->responses[i]));
     }
     return root;
 }

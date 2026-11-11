@@ -58,6 +58,15 @@ class SchemaTests(unittest.TestCase):
             with self.subTest(schema=name):
                 self.assertEqual(subset_violations(schema, name), [])
 
+    def test_every_ref_names_a_schema_by_its_id(self) -> None:
+        loaded = schemas()
+        for name, schema in loaded.items():
+            with self.subTest(schema=name):
+                self.assertEqual(schema["$id"], f"sr/{name}")
+                for child in schema.get("properties", {}).values():
+                    if "$ref" in child:
+                        self.assertIn(child["$ref"], loaded)
+
     def test_subset_check_catches_an_unbounded_string(self) -> None:
         bad = {"type": "object", "additionalProperties": False, "properties": {"x": {"type": "string"}}}
         self.assertEqual(subset_violations(bad, "bad"), ["bad.x: string without maxLength"])

@@ -32,9 +32,10 @@ typedef enum {
     GEN_TOPIC_DETECTIONS = 9,
     GEN_TOPIC_SENSORS = 10,
     GEN_TOPIC_NOTE = 11,
-    GEN_TOPIC_JOURNAL = 12,
-    GEN_TOPIC_OTA = 13,
-    GEN_TOPIC_COUNT = 14,
+    GEN_TOPIC_RECORD = 12,
+    GEN_TOPIC_ACK = 13,
+    GEN_TOPIC_OTA = 14,
+    GEN_TOPIC_COUNT = 15,
     GEN_TOPIC_NONE = GEN_TOPIC_COUNT,
 } gen_topic_id_t;
 
@@ -60,7 +61,8 @@ static const gen_topic_info_t GEN_TOPIC_INFO[GEN_TOPIC_COUNT] = {
     [GEN_TOPIC_DETECTIONS] = {"sr/", "/up/detections", 1, false, true, false},
     [GEN_TOPIC_SENSORS] = {"sr/", "/up/sensors", 0, false, true, false},
     [GEN_TOPIC_NOTE] = {"sr/", "/up/note", 1, false, true, false},
-    [GEN_TOPIC_JOURNAL] = {"sr/", "/up/journal", 1, false, true, false},
+    [GEN_TOPIC_RECORD] = {"sr/", "/up/record", 1, false, true, false},
+    [GEN_TOPIC_ACK] = {"sr/", "/down/ack", 1, false, false, false},
     [GEN_TOPIC_OTA] = {"sr/", "/down/ota", 1, false, false, false},
 };
 
@@ -197,12 +199,20 @@ static inline bool gen_topic_note(const char *device_id, char *out, size_t cap)
     return gen_topic_build(GEN_TOPIC_NOTE, device_id, out, cap);
 }
 
-/** gen_topic_build fixed to GEN_TOPIC_JOURNAL.
+/** gen_topic_build fixed to GEN_TOPIC_RECORD.
  *  @ctx any | non-blocking | caller owns out
  */
-static inline bool gen_topic_journal(const char *device_id, char *out, size_t cap)
+static inline bool gen_topic_record(const char *device_id, char *out, size_t cap)
 {
-    return gen_topic_build(GEN_TOPIC_JOURNAL, device_id, out, cap);
+    return gen_topic_build(GEN_TOPIC_RECORD, device_id, out, cap);
+}
+
+/** gen_topic_build fixed to GEN_TOPIC_ACK.
+ *  @ctx any | non-blocking | caller owns out
+ */
+static inline bool gen_topic_ack(const char *device_id, char *out, size_t cap)
+{
+    return gen_topic_build(GEN_TOPIC_ACK, device_id, out, cap);
 }
 
 /** gen_topic_build fixed to GEN_TOPIC_OTA.

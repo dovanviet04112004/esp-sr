@@ -37,7 +37,8 @@ TOPICS = (
     Topic("detections", "sr/{deviceId}/up/detections", "up", 1, False, "detections", False),
     Topic("sensors", "sr/{deviceId}/up/sensors", "up", 0, False, "sensors", False),
     Topic("note", "sr/{deviceId}/up/note", "up", 1, False, "binary", False),
-    Topic("journal", "sr/{deviceId}/up/journal", "up", 1, False, "journal", False),
+    Topic("record", "sr/{deviceId}/up/record", "up", 1, False, "record", False),
+    Topic("ack", "sr/{deviceId}/down/ack", "down", 1, False, "ack", False),
     Topic("ota", "sr/{deviceId}/down/ota", "down", 1, False, "ota_manifest", False),
 )
 BY_ID = {t.id: t for t in TOPICS}

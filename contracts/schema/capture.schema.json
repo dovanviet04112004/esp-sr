@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sr/capture",
+  "title": "capture",
+  "description": "One capture of board C, any of its commands: its full picture and, for a journal entry, its voice note, named by boot and seq.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["deviceId", "boot", "captureSeq", "mode", "uptimeMs", "sentBoot", "sentUptimeMs", "late", "imageBytes", "sent", "saved", "noteMs", "noteBytes", "noteDropped", "noteSaved"],
+  "properties": {
+    "deviceId": {"type": "string", "pattern": "^[A-Za-z0-9_-]{4,32}$", "maxLength": 32},
+    "boot": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "captureSeq": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "mode": {"enum": ["PHOTO", "DETECT", "JOURNAL"]},
+    "uptimeMs": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "sentBoot": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "sentUptimeMs": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "late": {"type": "boolean"},
+    "imageBytes": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "sent": {"type": "boolean"},
+    "saved": {"type": "boolean"},
+    "noteMs": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "noteBytes": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "noteDropped": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "noteSaved": {"type": "boolean"}
+  }
+}
