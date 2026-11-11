@@ -529,6 +529,29 @@ dải lúc không bíp. `tone erle` ngay sau loạt bíp: **−0,5 dB**.
 - Bộ lọc học trước bằng bản `echo1` của 04/11 (giả lập lưu trọng số rồi nạp lúc boot) làm tiếng bíp đầu to hơn micro (−39,9 so với −44,4):
   board đã đổi chỗ, đường vọng khác. Lưu trọng số qua boot không dùng được.
 
+**Sau khử vọng dư theo độ ghép (E10-T9, 11/11, boot 167).** Độ ghép loa → micro học lúc chạy, vọng dư giữ thêm 0,4 s sau tham chiếu,
+sàn vọng −40 dB trong `ns` (KẾ HOẠCH §3.5, §3.9). Bản soi gương khớp bản C ở mọi ca golden.
+- Bản soi gương trên `beeps1` (sau `aec` + `ns`): tiếng bíp nhận lệnh, kể cả tiếng đầu sau boot, −82 đến −94 dBFS trong dải, nền dải
+  1500 Hz −80,6; `wake` −88, −89; `done` −72,5, nền 1000 Hz −74,0. Lúc `fail` có người nói trong phòng (toàn dải −28 đến −41 dBFS ở micro),
+  nên số ấy không phải vọng. Người gần cộng từ `talker2` giữ −0,07 dB.
+- Board, `stream 10` (micro và lối ra của chính board, `interim/aec/beeps2_clean`): ba tiếng bíp nhận lệnh −60,1, −58,6, −56,8 dBFS trong
+  dải sau `agc`, `wake` −61,2, nền dải 1500 Hz của lối ra −52,1: dưới nền 5–9 dB. `tone erle` sau 17 s tiếng nói: 15,7 dB.
+- Tiếng nói qua loa: `play IMG/B164/000009.WAV` (lời ghi chú 17,7 s của chủ repo), `stream 11` (`interim/aec/beeps2_ref`), đo phần lối ra
+  một FIR 10 hop của tham chiếu giải thích được ở từng vạch, nên tiếng phòng không tính vào:
+
+| Tầng | Bản cũ: vọng so với cả lối ra | Bản mới |
+|---|---|---|
+| `aec` | −10,7 dB, ERLE 27,7 dB | như cũ |
+| `aec` + `ns` | −11,0 dB | −27,5 dB |
+| Cả chuỗi, như lối ra ghi thẻ | −12,0 dB | −29,4 dB |
+
+  Gain của `ns` đổi theo thời gian làm độ kết hợp giảm, nên phép đo này có thể nhẹ tay với lối ra của `ns`; hai bản đo cùng cách.
+- Người gần nói đè lên tiếng nói của loa (`talker2` cộng vào đoạn phát): người −38,7 dBFS dưới vọng −34,5 thì giữ −2,06 dB (bản cũ
+  −0,12); người −23,7 dBFS thì −0,20 dB (bản cũ 0,00). Trong cửa 3 dB, nhưng khi bộ lọc đã học, độ ghép × tham chiếu ước dư vọng.
+- `make journal` 2 lượt sau bản này: đủ ảnh, lời ghi chú, `.JSN`; `detectMs` 1 963–1 971, vùng mượn 30 656 B như trước: trạng thái thêm
+  của `aec` nằm ở PSRAM. `sd cat` của `IMG/B164/000001.JSN` (649 B) và `000009.JSN` (729 B): đủ ba khoá; `journal` và `detections` trùng từng trường với
+  `_journal.json` và `<stem>.json` của host; `sensors` là lần đọc mới nhất (`uptimeS` 51 so với bản `up/sensors` 47 host giữ).
+
 ## 7. GPS, hồng ngoại và hai thiết bị I2C (E2-T15, T16, T17, 05/11)
 
 Đã chạy đầu cuối lên `up/sensors` và `make host-live` ở boot 50, rồi **tắt khỏi bản build của board C theo chủ repo** (`APP_SENSORS_ENABLE`, `sdkconfig.board_c`).
