@@ -28,6 +28,7 @@
 #include "net_wifi.h"
 #include "sdkconfig.h"
 #include "svc_front.h"
+#include "svc_journal.h"
 #include "svc_listen.h"
 #include "svc_report.h"
 #include "svc_sensors.h"
@@ -102,6 +103,9 @@ static const char *TAG = "app_tasks";
 
 static int16_t s_drain[APP_FRAME_MAX_SAMPLES];
 static roster_copies_t *s_copies;
+#if CONFIG_APP_CAMERA_ENABLE
+static app_note_hop_t *s_note_hop; // nhan_task's, PSRAM
+#endif
 
 static void count_in_stats(const app_wiring_t *w, uint32_t *field)
 {
@@ -309,6 +313,26 @@ static void note_clean_depth(const app_wiring_t *w, uint32_t hops)
     taskEXIT_CRITICAL(w->afe_stats_lock);
 }
 
+// A note's hops go to nhin_task without waiting, whole or not at all (KEHOACH 3.19, 5.3).
+static bool note_hop(const app_wiring_t *w, const dsp_afe_frame_t *frame, bool deaf)
+{
+#if CONFIG_APP_CAMERA_ENABLE
+    if (w->note == NULL || (xEventGroupGetBits(w->system) & APP_BIT_NOTE_ON) == 0) { return false; }
+    s_note_hop->seq = frame->seq;
+    s_note_hop->flags = (uint8_t)((frame->vad != 0 ? APP_NOTE_VAD : 0) | (deaf ? APP_NOTE_DEAF : 0));
+    memcpy(s_note_hop->pcm, frame->pcm, sizeof(s_note_hop->pcm));
+    if (xStreamBufferSpacesAvailable(w->note) >= sizeof(*s_note_hop)) {
+        (void)xStreamBufferSend(w->note, s_note_hop, sizeof(*s_note_hop), 0);
+    }
+    return true;
+#else
+    (void)w;
+    (void)frame;
+    (void)deaf;
+    return false;
+#endif
+}
+
 static void nhan_task(void *arg)
 {
     const app_wiring_t *w = arg;
@@ -326,12 +350,16 @@ static void nhan_task(void *arg)
             note_clean_depth(w, queued_hops + 1);
             const bool gap = (frame.flags & DSP_AFE_FLAG_GAP) != 0;
             const bool deaf = (frame.flags & SVC_FRONT_FLAG_DEAF) != 0;
-            if (svc_listen_feed(frame.pcm, frame.seq, frame.vad != 0, gap, deaf) == ESP_ERR_NO_MEM) {
-                ESP_LOGW(TAG, "window queue full: the utterance opened at hop %" PRIu32 " gets no window",
-                         frame.seq);
+            // A voice note never reaches the listener, which hears a seq gap: no wake, no command
+            // (KEHOACH 3.19).
+            if (!note_hop(w, &frame, deaf)) {
+                if (svc_listen_feed(frame.pcm, frame.seq, frame.vad != 0, gap, deaf) == ESP_ERR_NO_MEM) {
+                    ESP_LOGW(TAG, "window queue full: the utterance opened at hop %" PRIu32 " gets no window",
+                             frame.seq);
+                }
+                // A WAKE leaves now: its beep does not wait out the hops a detect run left (KEHOACH 5.4).
+                if (svc_listen_woke(queued_hops) && svc_listen_work(&decision)) { hand_over(w, &decision); }
             }
-            // A WAKE leaves now: its beep does not wait out the hops a detect run left (KEHOACH 5.4).
-            if (svc_listen_woke(queued_hops) && svc_listen_work(&decision)) { hand_over(w, &decision); }
         } else {
             // Back to back while no frame waits, but under core 0's other app tasks (KEHOACH 5.2, 5.4).
             vTaskPrioritySet(NULL, NHAN_WORK_PRIORITY);
@@ -444,6 +472,7 @@ static app_vision_mode_t vision_mode(device_cmd_capture_mode_t mode)
         [DEVICE_CMD_CAPTURE_MODE_PHOTO] = APP_VISION_PHOTO,
         [DEVICE_CMD_CAPTURE_MODE_DETECT] = APP_VISION_DETECT,
         [DEVICE_CMD_CAPTURE_MODE_PREVIEW] = APP_VISION_PREVIEW,
+        [DEVICE_CMD_CAPTURE_MODE_JOURNAL] = APP_VISION_JOURNAL,
     };
     return kModes[mode];
 }
@@ -463,6 +492,7 @@ static void act_on(const app_wiring_t *w, const app_event_t *heard)
     beep(w, APP_TONE_COMMAND);
     if (strcmp(heard->command_id, GEN_VISION_COMMAND_PHOTO) == 0) { capture_for(w, APP_VISION_PHOTO); }
     if (strcmp(heard->command_id, GEN_VISION_COMMAND_DETECT) == 0) { capture_for(w, APP_VISION_DETECT); }
+    if (strcmp(heard->command_id, GEN_VISION_COMMAND_JOURNAL) == 0) { capture_for(w, APP_VISION_JOURNAL); }
 }
 
 static void dieu_task(void *arg)
@@ -490,7 +520,11 @@ static void nhin_task(void *arg)
 {
     (void)arg;
     for (;;) {
-        svc_vision_step();
+        uint32_t seq = 0;
+        if (svc_vision_step(&seq)) {
+            svc_journal_keep(seq);
+            svc_vision_done();
+        }
     }
 }
 #endif
@@ -796,6 +830,10 @@ esp_err_t app_tasks_start(void)
     if (w == NULL || s_handle[0] != NULL) { return ESP_ERR_INVALID_STATE; }
     s_copies = heap_caps_calloc(1, sizeof(*s_copies), MALLOC_CAP_SPIRAM);
     if (s_copies == NULL) { return ESP_ERR_NO_MEM; }
+#if CONFIG_APP_CAMERA_ENABLE
+    s_note_hop = heap_caps_calloc(1, sizeof(*s_note_hop), MALLOC_CAP_SPIRAM);
+    if (s_note_hop == NULL) { return ESP_ERR_NO_MEM; }
+#endif
     uint32_t total_bytes = 0;
     for (size_t i = 0; i < TASK_COUNT; i++) {
         const task_spec_t *t = &kTasks[i];

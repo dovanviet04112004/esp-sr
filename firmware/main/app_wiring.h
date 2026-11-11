@@ -62,6 +62,7 @@ typedef struct {
     QueueHandle_t speaker_sets;     // q_spkset: net_mqtt_speakers_t, overwritten
     QueueHandle_t roster;           // q_roster: app_speaker_state_t, overwritten
     StreamBufferHandle_t stream;    // sb_stream, PSRAM; NULL without NET_STREAM_ENABLE
+    StreamBufferHandle_t note;      // sb_note: app_note_hop_t, PSRAM; NULL without a camera
     EventGroupHandle_t system;      // eg_system: app_system_bit_t
     app_afe_stats_t *afe_stats;     // s_afe_stats, copied under afe_stats_lock only
     portMUX_TYPE *afe_stats_lock;

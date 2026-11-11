@@ -6,6 +6,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "gen_grid.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -29,6 +31,7 @@ typedef enum {
     APP_BIT_SPEAKING = 1u << 5,
     APP_BIT_CALIBRATING = 1u << 6,
     APP_BIT_OTA_RUNNING = 1u << 7,
+    APP_BIT_NOTE_ON = 1u << 8, // nhan_task copies hops into sb_note
 } app_system_bit_t;
 
 typedef enum {
@@ -49,7 +52,19 @@ typedef enum {
     APP_VISION_PHOTO = 0, // photograph, keep and send
     APP_VISION_DETECT,    // and run detect on it
     APP_VISION_PREVIEW,   // frames to the host until these requests stop
+    APP_VISION_JOURNAL,   // a voice note, then both pictures
 } app_vision_mode_t;
+
+typedef enum {
+    APP_NOTE_VAD = 1u << 0,  // the front end heard speech in this hop
+    APP_NOTE_DEAF = 1u << 1, // the speaker played: neither speech nor quiet
+} app_note_flag_t;
+
+typedef struct {
+    uint32_t seq;
+    uint8_t flags; // app_note_flag_t
+    int16_t pcm[GEN_GRID_HOP_SAMPLES];
+} app_note_hop_t;
 
 typedef struct {
     app_vision_mode_t mode;

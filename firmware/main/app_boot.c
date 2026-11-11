@@ -23,7 +23,9 @@
 #include "sdkconfig.h"
 #include "svc_front.h"
 #include "storage_format.h"
+#include "svc_journal.h"
 #include "svc_listen.h"
+#include "svc_note.h"
 #include "svc_report.h"
 #include "svc_sensors.h"
 #include "svc_speak.h"
@@ -294,8 +296,18 @@ static void start_vision(void)
         .detect_priority = APP_DETECT_PRIORITY,
         .speak = app_wiring()->speak,
     };
-    err = svc_vision_init(&cfg);
+    err = net_mqtt_chunks_init();
+    if (err == ESP_OK) { err = svc_vision_init(&cfg); }
     if (err != ESP_OK) { ESP_LOGE(TAG, "no pictures: %s", esp_err_to_name(err)); }
+    const svc_note_config_t note = {
+        .hops = app_wiring()->note,
+        .system = app_wiring()->system,
+        .boot = cfg.boot,
+    };
+    err = svc_note_init(&note);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "no voice notes: %s", esp_err_to_name(err)); }
+    const svc_journal_config_t journal = {.speak = app_wiring()->speak, .boot = cfg.boot};
+    ESP_ERROR_CHECK(svc_journal_init(&journal));
     log_heap("vision");
 }
 #endif

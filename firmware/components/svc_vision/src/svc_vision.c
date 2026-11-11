@@ -14,7 +14,6 @@
 #include "esp_heap_caps.h"
 #include "esp_jpeg_dec.h"
 #include "esp_log.h"
-#include "esp_rom_crc.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -24,7 +23,6 @@
 
 #define REQUEST_WAIT_MS 1000
 #define PATH_BYTES 32
-#define NAME_COPIES_MAX 16 // pictures of one name a lost NVS can leave
 #define RGB_BYTES_PER_PIXEL 3
 #define DECODED_WIDTH GEN_VISION_DECODE_WIDTH
 #define DECODED_HEIGHT GEN_VISION_DECODE_HEIGHT
@@ -33,7 +31,6 @@
 #define RGB_BYTES (DECODED_WIDTH * DECODED_HEIGHT * RGB_BYTES_PER_PIXEL)
 #define RGB_ALIGN_BYTES 16 // jpeg_dec_process's output
 #define SCALE_STEP_PIXELS 8
-#define CHUNK_BYTES (GEN_VISION_CHUNK_HEADER_BYTES + GEN_VISION_CHUNK_PAYLOAD_BYTES)
 #define US_PER_MS 1000
 
 _Static_assert(DECODED_WIDTH % SCALE_STEP_PIXELS == 0 && DECODED_HEIGHT % SCALE_STEP_PIXELS == 0,
@@ -48,7 +45,7 @@ static const uint8_t kExifTurn[] = {0xFF, 0xE1, 0x00, 0x22, 'E', 'x', 'i', 'f', 
 static const char *TAG = "svc_vision";
 
 static svc_vision_config_t s_cfg;
-static uint8_t *s_rgb, *s_chunk;
+static uint8_t *s_rgb;
 static ai_engine_box_t *s_boxes;
 static detections_t *s_found;
 static bool s_ready;
@@ -65,10 +62,9 @@ esp_err_t svc_vision_init(const svc_vision_config_t *cfg)
     // First: nhin_task runs whatever comes of the buffers, and answers requests without them (KEHOACH 3.19).
     s_cfg = *cfg;
     s_rgb = heap_caps_aligned_alloc(RGB_ALIGN_BYTES, RGB_BYTES, MALLOC_CAP_SPIRAM);
-    s_chunk = heap_caps_malloc(CHUNK_BYTES, MALLOC_CAP_SPIRAM);
     s_boxes = heap_caps_malloc(GEN_VISION_BOXES_MAX * sizeof(*s_boxes), MALLOC_CAP_SPIRAM);
     s_found = heap_caps_malloc(sizeof(*s_found), MALLOC_CAP_SPIRAM);
-    s_ready = s_rgb != NULL && s_chunk != NULL && s_boxes != NULL && s_found != NULL;
+    s_ready = s_rgb != NULL && s_boxes != NULL && s_found != NULL;
     return s_ready ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
@@ -89,43 +85,33 @@ static void raise_error(const char *code)
 
 static bool keep_on_card(const drv_camera_frame_t *frame, uint32_t seq)
 {
-    char path[PATH_BYTES];
-    snprintf(path, sizeof(path), "IMG/B%" PRIu32 "/%06" PRIu32 ".JPG", s_cfg.boot, seq);
-    // A lost NVS counts boots again: a taken name gets a suffix, the older picture stays (KEHOACH 3.19).
-    for (uint32_t copy = 1; copy <= NAME_COPIES_MAX && drv_sd_exists(path); copy++) {
-        snprintf(path, sizeof(path), "IMG/B%" PRIu32 "/%06" PRIu32 "_%" PRIu32 ".JPG", s_cfg.boot, seq, copy);
-    }
-    const esp_err_t err = drv_sd_write(path, frame->jpeg, frame->bytes);
-    if (err != ESP_OK) { ESP_LOGW(TAG, "%s not kept: %s", path, esp_err_to_name(err)); }
+    char stem[PATH_BYTES], path[PATH_BYTES];
+    snprintf(stem, sizeof(stem), "IMG/B%" PRIu32 "/%06" PRIu32, s_cfg.boot, seq);
+    esp_err_t err = drv_sd_name(stem, "JPG", path, sizeof(path));
+    if (err == ESP_OK) { err = drv_sd_write(path, frame->jpeg, frame->bytes); }
+    if (err != ESP_OK) { ESP_LOGW(TAG, "%s not kept: %s", stem, esp_err_to_name(err)); }
     return err == ESP_OK;
 }
 
-static esp_err_t send_chunks(const drv_camera_frame_t *frame, uint32_t seq, uint16_t flags,
-                             esp_err_t (*publish)(const uint8_t *chunk, size_t bytes))
+static esp_err_t fill_from_frame(const void *ctx, size_t offset, uint8_t *data, size_t bytes)
 {
-    const uint16_t count =
-        (uint16_t)((frame->bytes + GEN_VISION_CHUNK_PAYLOAD_BYTES - 1) / GEN_VISION_CHUNK_PAYLOAD_BYTES);
-    for (uint16_t index = 0; index < count; ++index) {
-        const size_t offset = (size_t)index * GEN_VISION_CHUNK_PAYLOAD_BYTES;
-        const size_t left = frame->bytes - offset;
-        const size_t bytes = left < GEN_VISION_CHUNK_PAYLOAD_BYTES ? left : GEN_VISION_CHUNK_PAYLOAD_BYTES;
-        const gen_vision_chunk_header_t header = {
-            .magic = GEN_VISION_CHUNK_MAGIC,
-            .version = GEN_VISION_CHUNK_VERSION,
-            .index = index,
-            .count = count,
-            .flags = flags,
-            .boot = s_cfg.boot,
-            .seq = seq,
-            .total_bytes = (uint32_t)frame->bytes,
-            .crc32 = esp_rom_crc32_le(0, frame->jpeg + offset, bytes),
-        };
-        memcpy(s_chunk, &header, sizeof(header));
-        memcpy(s_chunk + sizeof(header), frame->jpeg + offset, bytes);
-        const esp_err_t err = publish(s_chunk, sizeof(header) + bytes);
-        if (err != ESP_OK) { return err; }
-    }
+    const drv_camera_frame_t *frame = ctx;
+    memcpy(data, frame->jpeg + offset, bytes);
     return ESP_OK;
+}
+
+static esp_err_t send_frame(const drv_camera_frame_t *frame, uint32_t seq, uint16_t flags)
+{
+    const net_mqtt_chunks_t chunks = {
+        .topic = GEN_TOPIC_IMAGE,
+        .flags = flags,
+        .boot = s_cfg.boot,
+        .seq = seq,
+        .total_bytes = frame->bytes,
+        .fill = fill_from_frame,
+        .ctx = frame,
+    };
+    return net_mqtt_publish_chunks(&chunks);
 }
 
 static esp_err_t decode_picture(const drv_camera_frame_t *frame)
@@ -247,22 +233,22 @@ static esp_err_t shoot(drv_camera_frame_t *frame, drv_camera_size_t size)
     return ESP_OK;
 }
 
-static bool answer_detect(uint32_t seq, bool *toned)
+static bool answer_detect(uint32_t seq, bool sounds, bool *toned)
 {
     const int64_t started_us = esp_timer_get_time();
     drv_camera_frame_t frame = {0};
-    *toned = true;
+    *toned = sounds;
     if (shoot(&frame, DRV_CAMERA_SIZE_DETECT) != ESP_OK) {
-        beep(APP_TONE_FAIL);
+        if (sounds) { beep(APP_TONE_FAIL); }
         return false;
     }
     const int64_t shot_us = esp_timer_get_time();
-    const esp_err_t sent = send_chunks(&frame, seq, 0, net_mqtt_publish_image);
+    const esp_err_t sent = send_frame(&frame, seq, 0);
     if (sent != ESP_OK) { ESP_LOGW(TAG, "picture not sent: %s", esp_err_to_name(sent)); }
     const int64_t sent_us = esp_timer_get_time();
     const bool answered = detect_picture(&frame, seq);
     // Unsent but answered, the tone waits to learn whether the full picture reaches a place (KEHOACH 3.19).
-    *toned = sent == ESP_OK || !answered;
+    *toned = sounds && (sent == ESP_OK || !answered);
     if (*toned) { beep(sent == ESP_OK && answered ? APP_TONE_DONE : APP_TONE_FAIL); }
     const unsigned bytes = (unsigned)frame.bytes;
     drv_camera_release(&frame);
@@ -272,42 +258,45 @@ static bool answer_detect(uint32_t seq, bool *toned)
     return true;
 }
 
-static void send_full(uint32_t seq, bool sounds)
+static svc_vision_full_t send_full(uint32_t seq, bool sounds)
 {
     const int64_t started_us = esp_timer_get_time();
     drv_camera_frame_t frame = {0};
+    svc_vision_full_t full = {0};
     if (shoot(&frame, DRV_CAMERA_SIZE_FULL) != ESP_OK) {
         if (sounds) { beep(APP_TONE_FAIL); }
-        return;
+        return full;
     }
     const int64_t shot_us = esp_timer_get_time();
-    const esp_err_t sent = send_chunks(&frame, seq, GEN_VISION_CHUNK_FLAG_FULL, net_mqtt_publish_image);
+    const esp_err_t sent = send_frame(&frame, seq, GEN_VISION_CHUNK_FLAG_FULL);
     if (sent != ESP_OK) { ESP_LOGW(TAG, "full picture not sent: %s", esp_err_to_name(sent)); }
     if (sounds && sent == ESP_OK) { beep(APP_TONE_DONE); }
     const int64_t sent_us = esp_timer_get_time();
-    const bool saved = keep_on_card(&frame, seq);
-    if (sounds && sent != ESP_OK) { beep(saved ? APP_TONE_DONE : APP_TONE_FAIL); }
+    full = (svc_vision_full_t){
+        .bytes = (uint32_t)frame.bytes, .sent = sent == ESP_OK, .saved = keep_on_card(&frame, seq)};
+    if (sounds && sent != ESP_OK) { beep(full.saved ? APP_TONE_DONE : APP_TONE_FAIL); }
     app_event_t event = {
         .kind = APP_EVT_CAPTURE,
         .doa_deg = -1,
         .boot = s_cfg.boot,
         .capture_seq = seq,
-        .image_bytes = (uint32_t)frame.bytes,
-        .saved = saved,
+        .image_bytes = full.bytes,
+        .saved = full.saved,
     };
     raise_event(&event);
     drv_camera_release(&frame);
     ESP_LOGI(TAG, "B%" PRIu32 "/%06" PRIu32 " full: %u bytes, shot %lld ms, sent %lld ms, card %lld ms",
-             s_cfg.boot, seq, (unsigned)event.image_bytes, (shot_us - started_us) / US_PER_MS,
+             s_cfg.boot, seq, (unsigned)full.bytes, (shot_us - started_us) / US_PER_MS,
              (sent_us - shot_us) / US_PER_MS, (esp_timer_get_time() - sent_us) / US_PER_MS);
+    return full;
 }
 
 static void carry_out(const app_vision_req_t *request)
 {
     const uint32_t seq = ++s_seq;
     bool toned = false;
-    if (request->mode == APP_VISION_DETECT && !answer_detect(seq, &toned)) { return; }
-    send_full(seq, !toned);
+    if (request->mode == APP_VISION_DETECT && !answer_detect(seq, true, &toned)) { return; }
+    (void)send_full(seq, !toned);
 }
 
 static void end_preview(void)
@@ -342,8 +331,7 @@ static void send_preview_frame(void)
 {
     drv_camera_frame_t frame = {0};
     if (drv_camera_grab(&frame) != ESP_OK) { return; }
-    const esp_err_t sent =
-        send_chunks(&frame, ++s_preview_seq, GEN_VISION_CHUNK_FLAG_PREVIEW, net_mqtt_publish_preview);
+    const esp_err_t sent = send_frame(&frame, ++s_preview_seq, GEN_VISION_CHUNK_FLAG_PREVIEW);
     if (sent != ESP_OK) { ESP_LOGD(TAG, "preview frame lost: %s", esp_err_to_name(sent)); }
     drv_camera_release(&frame);
 }
@@ -355,7 +343,7 @@ static void refuse(const app_vision_req_t *request)
     beep(APP_TONE_FAIL);
 }
 
-void svc_vision_step(void)
+bool svc_vision_step(uint32_t *journal_seq)
 {
     app_vision_req_t request;
     const TickType_t wait = s_previewing ? 0 : pdMS_TO_TICKS(REQUEST_WAIT_MS);
@@ -367,12 +355,33 @@ void svc_vision_step(void)
             hold_preview();
         } else {
             if (s_previewing) { end_preview(); }
+            if (request.mode == APP_VISION_JOURNAL) {
+                *journal_seq = ++s_seq;
+                return true;
+            }
             carry_out(&request);
         }
         xQueueReset(s_cfg.requests);
     }
     if (s_previewing && esp_timer_get_time() > s_preview_until_us) { end_preview(); }
     if (s_previewing) { send_preview_frame(); }
+    return false;
+}
+
+void svc_vision_detect(uint32_t seq)
+{
+    bool toned = false;
+    (void)answer_detect(seq, false, &toned);
+}
+
+svc_vision_full_t svc_vision_full(uint32_t seq)
+{
+    return send_full(seq, false);
+}
+
+void svc_vision_done(void)
+{
+    xQueueReset(s_cfg.requests);
 }
 
 uint32_t svc_vision_events_lost(void)

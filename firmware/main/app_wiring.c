@@ -6,7 +6,9 @@
 #include "dsp_afe.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "gen_grid.h"
 #include "gen_payload.h"
+#include "gen_vision.h"
 #include "net_mqtt.h"
 #include "sdkconfig.h"
 #include "svc_listen.h"
@@ -26,6 +28,8 @@
 #define SPEAKER_SETS_DEPTH 1 // overwritten: a newer roster replaces the one waiting
 #define ROSTER_DEPTH 1       // overwritten, peeked: the latest state alone
 #define STREAM_BUFFER_BYTES (CONFIG_SVC_REPORT_STREAM_BUFFER_KB * 1024)
+#define NOTE_HOPS ((size_t)(GEN_VISION_NOTE_BUFFER_S * GEN_GRID_FRAMES_PER_S) + 1)
+#define NOTE_BUFFER_BYTES (NOTE_HOPS * sizeof(app_note_hop_t))
 
 static const char *TAG = "app_wiring";
 
@@ -46,6 +50,7 @@ static StaticQueue_t s_speak_q;
 #endif
 #if CONFIG_APP_CAMERA_ENABLE
 static StaticQueue_t s_vision_q;
+static StaticStreamBuffer_t s_note_sb;
 #endif
 static StaticEventGroup_t s_system_eg;
 #if CONFIG_NET_STREAM_ENABLE
@@ -93,6 +98,11 @@ esp_err_t app_wiring_init(void)
 #if CONFIG_APP_CAMERA_ENABLE
     s_wiring.vision = psram_queue(VISION_DEPTH, sizeof(app_vision_req_t), &s_vision_q);
     if (s_wiring.vision == NULL) { return ESP_ERR_NO_MEM; }
+    uint8_t *note_storage = heap_caps_malloc(NOTE_BUFFER_BYTES + 1, MALLOC_CAP_SPIRAM);
+    if (note_storage == NULL) { return ESP_ERR_NO_MEM; }
+    s_psram_bytes += NOTE_BUFFER_BYTES + 1;
+    s_wiring.note =
+        xStreamBufferCreateStatic(NOTE_BUFFER_BYTES, sizeof(app_note_hop_t), note_storage, &s_note_sb);
 #endif
 #if CONFIG_NET_STREAM_ENABLE
     // A static stream buffer needs one byte more storage than it holds.

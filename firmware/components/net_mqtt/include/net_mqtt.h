@@ -14,6 +14,7 @@
 #include "freertos/event_groups.h"
 #include "freertos/queue.h"
 #include "gen_payload.h"
+#include "gen_topics.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,6 +44,18 @@ typedef struct {
     esp_err_t parsed;      // ESP_OK | APP_ERR_SPEAKERS_INVALID | ESP_ERR_NO_MEM
     app_speaker_set_t set; // valid when parsed is ESP_OK
 } net_mqtt_speakers_t;
+
+typedef esp_err_t (*net_mqtt_fill_t)(const void *ctx, size_t offset, uint8_t *data, size_t bytes);
+
+typedef struct {
+    gen_topic_id_t topic; // GEN_TOPIC_IMAGE or GEN_TOPIC_NOTE
+    uint16_t flags;       // GEN_VISION_CHUNK_FLAG_*
+    uint32_t boot;
+    uint32_t seq;
+    size_t total_bytes;
+    net_mqtt_fill_t fill; // the payload's bytes from offset on into data
+    const void *ctx;      // fill's
+} net_mqtt_chunks_t;
 
 typedef struct {
     uint32_t connects;
@@ -97,19 +110,24 @@ esp_err_t net_mqtt_publish_detections(detections_t *found);
  */
 esp_err_t net_mqtt_publish_sensors(sensors_t *report);
 
-/** Queue one chunk of a picture on up/image, a header of contracts/vision.yaml and its data; only a full
- * outbox waits.
- *  @ctx nhin_task | blocking while the outbox holds over 128 KB, past detect's picture | caller keeps chunk
- *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session | ESP_ERR_NO_MEM outbox full | ESP_ERR_TIMEOUT never
- * drained
+/** Take the one chunk buffer of pictures and voice notes from PSRAM, for net_mqtt_publish_chunks.
+ *  @ctx app_boot | blocking briefly | once, only with a camera
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE a second call | ESP_ERR_NO_MEM
  */
-esp_err_t net_mqtt_publish_image(const uint8_t *chunk, size_t bytes);
+esp_err_t net_mqtt_chunks_init(void);
 
-/** Send one chunk of a preview frame now at QoS 0, so the network paces the frames and none waits.
- *  @ctx nhin_task | blocking on the network | caller keeps chunk
- *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session | ESP_FAIL the send failed
+/** Send a picture, preview frame or voice note in chunks of contracts/vision.yaml, headed and checked here.
+ *  @ctx nhin_task alone: one buffer | blocking: a preview now at QoS 0, others on an outbox over 128 KB
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session or buffer | ESP_ERR_NO_MEM outbox full | ESP_ERR_TIMEOUT
+ * never drained | ESP_FAIL a preview chunk lost | the error fill returned
  */
-esp_err_t net_mqtt_publish_preview(const uint8_t *chunk, size_t bytes);
+esp_err_t net_mqtt_publish_chunks(const net_mqtt_chunks_t *chunks);
+
+/** Queue one journal entry for mqtt_task; deviceId is filled here.
+ *  @ctx nhin_task | non-blocking | caller keeps entry
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session | ESP_ERR_NO_MEM arena full or the outbox refused it
+ */
+esp_err_t net_mqtt_publish_journal(journal_t *entry);
 
 /** Parse a command set laid out as contracts/schema/command_set.schema.json, through the caller's arena.
  *  @ctx task | non-blocking | text need not end in NUL; out belongs to the caller, about 20 KB: not the stack

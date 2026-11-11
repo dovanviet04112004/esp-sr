@@ -8,8 +8,10 @@
 #include "cJSON.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_rom_crc.h"
 #include "freertos/task.h"
 #include "gen_topics.h"
+#include "gen_vision.h"
 #include "mqtt_client.h"
 #include "sdkconfig.h"
 #include "sys_storage.h"
@@ -26,6 +28,7 @@
 #define IMAGE_OUTBOX_MAX_BYTES (128 * 1024)
 #define IMAGE_DRAIN_POLL_MS 10
 #define IMAGE_DRAIN_TIMEOUT_MS 10000
+#define CHUNK_BYTES (GEN_VISION_CHUNK_HEADER_BYTES + GEN_VISION_CHUNK_PAYLOAD_BYTES)
 
 _Static_assert(sizeof(((speaker_set_t *)0)->speakers) / sizeof(((speaker_set_t *)0)->speakers[0]) ==
                        APP_SPEAKERS_MAX &&
@@ -68,6 +71,7 @@ static net_mqtt_commands_t *s_sent;        // esp-mqtt task only: the slot queue
 static gen_topic_id_t s_rx;                // esp-mqtt task only: topic of the data events in flight
 static rx_text_t s_rx_text;                // esp-mqtt task only: where their pieces go
 static char *s_cmd_text, *s_speakers_text; // PSRAM, esp-mqtt task only
+static uint8_t *s_chunk;                   // PSRAM, nhin_task only: header, then data
 static device_cmd_t *s_cmd_in;             // PSRAM, esp-mqtt task only
 static speaker_set_t *s_set_in;            // PSRAM, esp-mqtt task only
 static net_mqtt_speakers_t *s_speakers_in; // PSRAM, esp-mqtt task only
@@ -451,14 +455,25 @@ esp_err_t net_mqtt_publish_sensors(sensors_t *report)
     return send_payload(sensors_to_json(report), GEN_TOPIC_SENSORS, false);
 }
 
-esp_err_t net_mqtt_publish_image(const uint8_t *chunk, size_t bytes)
+esp_err_t net_mqtt_publish_journal(journal_t *entry)
 {
-    if (chunk == NULL || bytes == 0) { return ESP_ERR_INVALID_ARG; }
+    if (entry == NULL) { return ESP_ERR_INVALID_ARG; }
     if (s_client == NULL || !s_connected) { return ESP_ERR_INVALID_STATE; }
-    char topic[GEN_TOPIC_MAX_LEN + 1];
-    if (!gen_topic_build(GEN_TOPIC_IMAGE, s_device_id, topic, sizeof(topic))) { return ESP_ERR_INVALID_SIZE; }
-    const gen_topic_info_t *info = &GEN_TOPIC_INFO[GEN_TOPIC_IMAGE];
-    if (esp_mqtt_client_enqueue(s_client, topic, (const char *)chunk, (int)bytes, info->qos, info->retain,
+    strlcpy(entry->device_id, s_device_id, sizeof(entry->device_id));
+    return send_payload(journal_to_json(entry), GEN_TOPIC_JOURNAL, false);
+}
+
+esp_err_t net_mqtt_chunks_init(void)
+{
+    if (s_chunk != NULL) { return ESP_ERR_INVALID_STATE; }
+    s_chunk = heap_caps_malloc(CHUNK_BYTES, MALLOC_CAP_SPIRAM);
+    return s_chunk != NULL ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
+static esp_err_t queue_chunk(const char *topic, gen_topic_id_t id, size_t bytes)
+{
+    const gen_topic_info_t *info = &GEN_TOPIC_INFO[id];
+    if (esp_mqtt_client_enqueue(s_client, topic, (const char *)s_chunk, (int)bytes, info->qos, info->retain,
                                 true) < 0) {
         s_stats.publish_failures++;
         return ESP_ERR_NO_MEM;
@@ -472,16 +487,48 @@ esp_err_t net_mqtt_publish_image(const uint8_t *chunk, size_t bytes)
     return ESP_OK;
 }
 
-esp_err_t net_mqtt_publish_preview(const uint8_t *chunk, size_t bytes)
+static esp_err_t send_chunk(const char *topic, const net_mqtt_chunks_t *chunks, size_t bytes)
 {
-    if (chunk == NULL || bytes == 0) { return ESP_ERR_INVALID_ARG; }
-    if (s_client == NULL || !s_connected) { return ESP_ERR_INVALID_STATE; }
-    char topic[GEN_TOPIC_MAX_LEN + 1];
-    if (!gen_topic_build(GEN_TOPIC_IMAGE, s_device_id, topic, sizeof(topic))) { return ESP_ERR_INVALID_SIZE; }
+    if ((chunks->flags & GEN_VISION_CHUNK_FLAG_PREVIEW) == 0) {
+        return queue_chunk(topic, chunks->topic, bytes);
+    }
     // QoS 0 from this task: a late preview frame is worth nothing, so none waits in the outbox.
-    return esp_mqtt_client_publish(s_client, topic, (const char *)chunk, (int)bytes, 0, false) >= 0
+    return esp_mqtt_client_publish(s_client, topic, (const char *)s_chunk, (int)bytes, 0, false) >= 0
                ? ESP_OK
                : ESP_FAIL;
+}
+
+esp_err_t net_mqtt_publish_chunks(const net_mqtt_chunks_t *chunks)
+{
+    if (chunks == NULL || chunks->fill == NULL || chunks->total_bytes == 0) { return ESP_ERR_INVALID_ARG; }
+    if (s_chunk == NULL || s_client == NULL || !s_connected) { return ESP_ERR_INVALID_STATE; }
+    char topic[GEN_TOPIC_MAX_LEN + 1];
+    if (!gen_topic_build(chunks->topic, s_device_id, topic, sizeof(topic))) { return ESP_ERR_INVALID_SIZE; }
+    uint8_t *data = s_chunk + GEN_VISION_CHUNK_HEADER_BYTES;
+    const size_t count =
+        (chunks->total_bytes + GEN_VISION_CHUNK_PAYLOAD_BYTES - 1) / GEN_VISION_CHUNK_PAYLOAD_BYTES;
+    for (size_t index = 0; index < count; ++index) {
+        const size_t offset = index * GEN_VISION_CHUNK_PAYLOAD_BYTES;
+        const size_t left = chunks->total_bytes - offset;
+        const size_t bytes = left < GEN_VISION_CHUNK_PAYLOAD_BYTES ? left : GEN_VISION_CHUNK_PAYLOAD_BYTES;
+        esp_err_t err = chunks->fill(chunks->ctx, offset, data, bytes);
+        if (err != ESP_OK) { return err; }
+        const gen_vision_chunk_header_t header = {
+            .magic = GEN_VISION_CHUNK_MAGIC,
+            .version = GEN_VISION_CHUNK_VERSION,
+            .index = (uint16_t)index,
+            .count = (uint16_t)count,
+            .flags = chunks->flags,
+            .boot = chunks->boot,
+            .seq = chunks->seq,
+            .total_bytes = (uint32_t)chunks->total_bytes,
+            .crc32 = esp_rom_crc32_le(0, data, bytes),
+        };
+        memcpy(s_chunk, &header, sizeof(header));
+        err = send_chunk(topic, chunks, GEN_VISION_CHUNK_HEADER_BYTES + bytes);
+        if (err != ESP_OK) { return err; }
+    }
+    return ESP_OK;
 }
 
 void net_mqtt_stats(net_mqtt_stats_t *out)
