@@ -17,7 +17,9 @@ import threading
 import time
 import zlib
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import count
 from pathlib import Path
@@ -37,7 +39,7 @@ REFUSED = "image refused"
 FPS_WINDOW_FRAMES = 20
 BOXES_SUFFIX = "_boxes"
 FULL_SUFFIX = "_full"
-JOURNAL_SUFFIX = "_journal"
+RECORD_SUFFIX = "_record"
 PLACE_SUFFIX = "_place"
 BOX_COLOUR = (255, 0, 0)
 BOX_LINE_PX = 4
@@ -180,14 +182,41 @@ def draw_boxes(picture: Path, payload: dict, out: Path) -> None:
     write_whole(out, buffer.getvalue())
 
 
-class Assembler:
-    """Joins chunks per device and picture; a picture whose chunks never all come stays out of the folder."""
+Ack = Callable[[str, int, int], None]
 
-    def __init__(self, root: Path) -> None:
+
+def captured_utc(capture: dict, rx_utc: str) -> str | None:
+    """When the board took a capture, from the time its record came; None when it was sent from another run."""
+    if capture["sentBoot"] != capture["boot"]:
+        return None
+    try:
+        received = datetime.fromisoformat(rx_utc)
+    except ValueError:
+        return None
+    taken = received - timedelta(milliseconds=capture["sentUptimeMs"] - capture["uptimeMs"])
+    return taken.isoformat(timespec="milliseconds")
+
+
+def ack_through(receiver: Receiver) -> Ack:
+    """Send down/ack for one capture through this receiver's session."""
+    spec = topics.BY_ID["ack"]
+    return lambda device, boot, seq: receiver.publish(
+        spec.build(device), json.dumps({"boot": boot, "captureSeq": seq}), spec.qos
+    )
+
+
+class Assembler:
+    """Joins chunks per device and picture; a picture whose chunks never all come stays out of the folder.
+
+    A capture's record is acked through ack once every part it names is on disk (KEHOACH 3.19).
+    """
+
+    def __init__(self, root: Path, ack: Ack | None = None) -> None:
         self._root = root
+        self.ack = ack
         self._open: dict[tuple[str, str, int, int, int], Capture] = {}
         self._fixes: dict[str, dict] = {}
-        self._sensors: dict[str, dict] = {}
+        self._waiting: set[tuple[str, int, int]] = set()
 
     def folder(self, device: str) -> Path:
         return self._root / device
@@ -240,25 +269,53 @@ class Assembler:
         write_whole(path, note)
         return path
 
-    def keep_journal(self, device: str, payload: dict) -> Path:
-        """Write one up/journal entry with the board's newest up/sensors and the entry's files so far."""
-        stem = stem_of(payload["boot"], payload["captureSeq"])
-        folder = self.folder(device)
-        folder.mkdir(parents=True, exist_ok=True)
+    def files_of(self, device: str, stem: str) -> list[str]:
         boxes = BOXES_SUFFIX + ".jpg"
         names = (".jpg", FULL_SUFFIX + ".jpg", boxes, FULL_SUFFIX + boxes, ".json", ".wav")
-        entry = {
-            "journal": payload,
-            "sensors": self._sensors.get(device),
-            "files": [stem + name for name in names if (folder / (stem + name)).exists()],
-        }
-        path = folder / f"{stem}{JOURNAL_SUFFIX}.json"
+        return [stem + name for name in names if (self.folder(device) / (stem + name)).exists()]
+
+    def keep_record(self, device: str, payload: dict, rx_utc: str) -> Path:
+        """Write one up/record as <stem>_record.json with when it was taken and the capture's files; its boxes land
+        beside the picture as up/detections would."""
+        capture = payload["capture"]
+        boot, seq = capture["boot"], capture["captureSeq"]
+        stem = stem_of(boot, seq)
+        self.folder(device).mkdir(parents=True, exist_ok=True)
+        if "detections" in payload:
+            self.keep_boxes(device, payload["detections"])
+        entry = {**payload, "capturedUtc": captured_utc(capture, rx_utc), "files": self.files_of(device, stem)}
+        path = self.folder(device) / f"{stem}{RECORD_SUFFIX}.json"
         write_whole(path, json.dumps(entry, ensure_ascii=False, indent=1).encode("utf-8"))
+        self._waiting.add((device, boot, seq))
         return path
 
+    def _complete(self, device: str, capture: dict) -> bool:
+        stem = self.folder(device) / stem_of(capture["boot"], capture["captureSeq"])
+        parts = ((FULL_SUFFIX + ".jpg", capture["imageBytes"]), (".wav", capture["noteBytes"]))
+        for suffix, size in parts:
+            part = stem.with_name(stem.name + suffix)
+            if size > 0 and (not part.exists() or part.stat().st_size != size):
+                return False
+        return True
+
+    def settle(self, device: str, boot: int, seq: int) -> bool:
+        """Ack a capture whose record came, once every part the record names is here; True when this call did."""
+        if (device, boot, seq) not in self._waiting:
+            return False
+        path = self.folder(device) / f"{stem_of(boot, seq)}{RECORD_SUFFIX}.json"
+        entry = json.loads(path.read_text(encoding="utf-8"))
+        if not self._complete(device, entry["capture"]):
+            return False
+        files = self.files_of(device, stem_of(boot, seq))
+        if entry["files"] != files:
+            write_whole(path, json.dumps({**entry, "files": files}, ensure_ascii=False, indent=1).encode("utf-8"))
+        self._waiting.discard((device, boot, seq))
+        if self.ack is not None:
+            self.ack(device, boot, seq)
+        return True
+
     def note_place(self, device: str, sensors: dict) -> None:
-        """Remember an up/sensors report for the journal entries, and where it puts the board for the pictures."""
-        self._sensors[device] = sensors
+        """Remember where an up/sensors report puts the board, for the pictures that follow."""
         gps = sensors["gps"]
         if gps["hasFix"]:
             self._fixes[device] = {"latE7": gps["latE7"], "lonE7": gps["lonE7"]}
@@ -294,6 +351,18 @@ class Assembler:
 def suffix_of(header: dict) -> str:
     """The file suffix of the picture a chunk belongs to: FULL_SUFFIX for the full picture, none for detect's."""
     return FULL_SUFFIX if header["flags"] & vision.CHUNK_FLAG_FULL else ""
+
+
+def acked_line(assembler: Assembler, device: str, boot: int, seq: int) -> list[str]:
+    return [f"{device} {stem_of(boot, seq)} acked"] if assembler.settle(device, boot, seq) else []
+
+
+def describe_record(payload: dict) -> str:
+    """One line for one up/record payload."""
+    capture = payload["capture"]
+    stem = stem_of(capture["boot"], capture["captureSeq"])
+    late = " late" if capture["late"] else ""
+    return f"{stem}{late} {capture['mode']}: picture {capture['imageBytes']} bytes, note {capture['noteBytes']} bytes"
 
 
 def describe_boxes(payload: dict) -> str:
@@ -389,6 +458,8 @@ def keep(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -
         kind = "full image" if suffix_of(header) else "image"
         done.append(f"{message.device} {kind} {path.stat().st_size} bytes: {path}")
         marked = [assembler.mark(message.device, header["boot"], header["seq"], suffix_of(header))]
+        done += [f"{message.device} boxes drawn: {p}" for p in marked if p is not None]
+        return done + acked_line(assembler, message.device, header["boot"], header["seq"])
     elif message.kind == "note":
         try:
             header, note = assembler.join(message.device, message.body or b"", "note")
@@ -397,11 +468,16 @@ def keep(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -
         if note is None:
             return []
         path = assembler.keep_note(message.device, header, note)
-        return [f"{message.device} note {path.stat().st_size} bytes: {path}"]
-    elif message.kind == "journal":
-        path = assembler.keep_journal(message.device, message.payload)
-        entry = message.payload
-        return [f"{message.device} journal {entry['noteMs']} ms of note, picture {entry['imageBytes']} bytes: {path}"]
+        done = [f"{message.device} note {path.stat().st_size} bytes: {path}"]
+        return done + acked_line(assembler, message.device, header["boot"], header["seq"])
+    elif message.kind == "record":
+        path = assembler.keep_record(message.device, message.payload, message.rx_utc)
+        done.append(f"{message.device} record {describe_record(message.payload)}: {path}")
+        boot, seq = message.payload["capture"]["boot"], message.payload["capture"]["captureSeq"]
+        if "detections" in message.payload:
+            marked = [assembler.mark(message.device, boot, seq, suffix) for suffix in ("", FULL_SUFFIX)]
+            done += [f"{message.device} boxes drawn: {p}" for p in marked if p is not None]
+        return done + acked_line(assembler, message.device, boot, seq)
     elif message.kind == "sensors":
         assembler.note_place(message.device, message.payload)
         return []
@@ -445,6 +521,8 @@ class OneShot:
 
     def _note(self, message: Message, lines: list[str]) -> None:
         payload = message.payload or {}
+        if late(message):
+            return
         if message.kind == "event" and payload.get("kind") == "ERROR":
             self.problem = f"the board answered ERROR {payload.get('code', '?')}"
             self.done.set()
@@ -452,14 +530,14 @@ class OneShot:
             self._got.add("full image" if suffix_of(parse_chunk(message.body or b"")[0]) else "image")
         elif message.kind == "detections" and not message.rejected:
             self._got.add("detections")
-        elif message.kind in ("note", "journal") and lines and REFUSED not in lines[0]:
+        elif message.kind in ("note", "record") and lines and REFUSED not in lines[0]:
             self._got.add(message.kind)
         if self._got >= self.needed():
             self.done.set()
 
     def needed(self) -> set[str]:
         detect = {"image", "detections", "full image"}
-        return {"DETECT": detect, "JOURNAL": detect | {"note", "journal"}}.get(self.mode, {"full image"})
+        return {"DETECT": detect, "JOURNAL": detect | {"note", "record"}}.get(self.mode, {"full image"})
 
     def wait_s(self) -> float:
         """How long the whole capture may take: a journal adds the longest note."""
@@ -467,6 +545,18 @@ class OneShot:
 
     def missing(self) -> str:
         return " and ".join(sorted(self.needed() - self._got)) or "nothing"
+
+
+def late(message: Message) -> bool:
+    """Whether a message is a capture sent again from the card, never the one just asked for."""
+    if message.kind == "record" and message.payload is not None:
+        return bool(message.payload["capture"]["late"])
+    if message.kind not in ("image", "note") or message.rejected:
+        return False
+    try:
+        return bool(parse_chunk(message.body or b"")[0]["flags"] & vision.CHUNK_FLAG_LATE)
+    except ChunkError:
+        return False
 
 
 def sole_board(online: set[str]) -> str:
@@ -480,6 +570,7 @@ def run_once(cfg: MqttConfig, assembler: Assembler, mode: str, device: str | Non
     """Ask a board for one capture and wait for all of it; 0 when it came, 1 and the reason when it did not."""
     shot = OneShot(assembler, mode, device)
     receiver = Receiver(cfg, shot.handle, device)
+    assembler.ack = ack_through(receiver)
     receiver.start()
     try:
         if not receiver.connected.wait(CONNECT_TIMEOUT_S):
@@ -543,6 +634,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_once(cfg, assembler, args.capture, args.device)
     feed = LiveFeed() if args.live else None
     receiver = Receiver(cfg, lambda message: on_message(assembler, message, feed), args.device)
+    assembler.ack = ack_through(receiver)
     receiver.start()
     try:
         if args.capture and receiver.connected.wait(CONNECT_TIMEOUT_S):

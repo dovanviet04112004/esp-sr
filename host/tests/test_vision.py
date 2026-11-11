@@ -331,16 +331,34 @@ def test_a_whole_write_leaves_no_part_behind(tmp_path: Path) -> None:
     assert [p.name for p in tmp_path.iterdir()] == ["B7_000002.jpg"]
 
 
-JOURNAL = {
+RX_UTC = "2026-11-11T12:00:10.000+00:00"
+CAPTURE = {
+    "deviceId": DEVICE,
     "boot": 7,
     "captureSeq": 2,
+    "mode": "JOURNAL",
+    "uptimeMs": 40000,
+    "sentBoot": 7,
+    "sentUptimeMs": 46000,
+    "late": False,
+    "imageBytes": len(PICTURE),
+    "sent": True,
+    "saved": True,
     "noteMs": 4200,
     "noteBytes": len(PICTURE),
     "noteDropped": 0,
     "noteSaved": True,
-    "imageBytes": 1000,
-    "saved": True,
 }
+
+
+def record(rx_utc: str = RX_UTC, **change: object) -> mqtt_rx.Message:
+    payload = {"capture": {**CAPTURE, **change}, "sensors": json.loads(sensors_report(True))}
+    return mqtt_rx.parse(f"sr/{DEVICE}/up/record", json.dumps(payload).encode(), rx_utc=rx_utc)
+
+
+def acking(tmp_path: Path) -> tuple[vision.Assembler, list[tuple[str, int, int]]]:
+    acks: list[tuple[str, int, int]] = []
+    return vision.Assembler(tmp_path, lambda device, boot, seq: acks.append((device, boot, seq))), acks
 
 
 def test_a_note_lands_as_a_wave_beside_the_picture_of_the_same_seq(tmp_path: Path) -> None:
@@ -352,19 +370,71 @@ def test_a_note_lands_as_a_wave_beside_the_picture_of_the_same_seq(tmp_path: Pat
     assert not (tmp_path / DEVICE / "B7_000002.jpg").exists()
 
 
-def test_a_journal_entry_keeps_the_newest_sensors_and_the_files_it_has(tmp_path: Path) -> None:
-    assembler = vision.Assembler(tmp_path)
-    vision.on_message(assembler, mqtt_rx.parse(f"sr/{DEVICE}/up/sensors", sensors_report(True), rx_utc="now"))
+def test_a_record_with_all_its_parts_is_kept_and_acked(tmp_path: Path) -> None:
+    assembler, acks = acking(tmp_path)
     vision.keep(assembler, up("note", chunk(PICTURE, 0, 1)))
-    lines = vision.keep(assembler, up("journal", JOURNAL))
-    entry = json.loads((tmp_path / DEVICE / "B7_000002_journal.json").read_text(encoding="utf-8"))
-    assert entry["journal"]["noteMs"] == 4200
+    vision.keep(assembler, up("image", chunk(PICTURE, 0, 1, flags=contract.CHUNK_FLAG_FULL)))
+    lines = vision.keep(assembler, record())
+    entry = json.loads((tmp_path / DEVICE / "B7_000002_record.json").read_text(encoding="utf-8"))
+    assert entry["capture"]["noteMs"] == 4200
     assert entry["sensors"]["gps"]["hasFix"] is True
-    assert entry["files"] == ["B7_000002.wav"]
-    assert lines[0].endswith("B7_000002_journal.json")
+    assert entry["files"] == ["B7_000002_full.jpg", "B7_000002.wav"]
+    assert entry["capturedUtc"] == "2026-11-11T12:00:04.000+00:00"
+    assert acks == [(DEVICE, 7, 2)]
+    assert lines[-1] == f"{DEVICE} B7_000002 acked"
 
 
-def test_a_journal_waits_for_both_pictures_the_boxes_the_note_and_the_entry(tmp_path: Path) -> None:
+def test_a_record_before_its_picture_is_acked_once_the_picture_lands(tmp_path: Path) -> None:
+    assembler, acks = acking(tmp_path)
+    vision.keep(assembler, up("note", chunk(PICTURE, 0, 1)))
+    vision.keep(assembler, record())
+    assert acks == []
+    vision.keep(assembler, up("image", chunk(PICTURE, 0, 1, flags=contract.CHUNK_FLAG_FULL)))
+    vision.keep(assembler, up("image", chunk(PICTURE, 0, 1, flags=contract.CHUNK_FLAG_FULL)))
+    assert acks == [(DEVICE, 7, 2)]
+    entry = json.loads((tmp_path / DEVICE / "B7_000002_record.json").read_text(encoding="utf-8"))
+    assert entry["files"] == ["B7_000002_full.jpg", "B7_000002.wav"]
+
+
+def test_a_picture_of_another_size_than_the_record_says_is_not_acked(tmp_path: Path) -> None:
+    assembler, acks = acking(tmp_path)
+    vision.keep(assembler, up("image", chunk(PICTURE, 0, 1, flags=contract.CHUNK_FLAG_FULL)))
+    vision.keep(assembler, record(imageBytes=len(PICTURE) + 1, noteBytes=0))
+    assert acks == []
+
+
+def test_a_record_sent_again_is_acked_again(tmp_path: Path) -> None:
+    assembler, acks = acking(tmp_path)
+    for message in (record(imageBytes=0, noteBytes=0), record(imageBytes=0, noteBytes=0, late=True)):
+        vision.keep(assembler, message)
+    assert acks == [(DEVICE, 7, 2), (DEVICE, 7, 2)]
+
+
+def test_a_record_from_an_earlier_run_has_no_capture_time(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    vision.keep(assembler, record(sentBoot=8, imageBytes=0, noteBytes=0))
+    entry = json.loads((tmp_path / DEVICE / "B7_000002_record.json").read_text(encoding="utf-8"))
+    assert entry["capturedUtc"] is None
+
+
+def test_a_late_record_draws_its_boxes_on_the_full_picture(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    vision.keep(assembler, up("image", jpeg_chunk(contract.CHUNK_FLAG_FULL | contract.CHUNK_FLAG_LATE)))
+    payload = {"capture": {**CAPTURE, "late": True, "noteBytes": 0}, "detections": BOXES}
+    message = mqtt_rx.parse(f"sr/{DEVICE}/up/record", json.dumps(payload).encode(), rx_utc=RX_UTC)
+    lines = vision.keep(assembler, message)
+    assert (tmp_path / DEVICE / "B7_000002.json").exists()
+    assert (tmp_path / DEVICE / "B7_000002_full_boxes.jpg").exists()
+    assert any(line.endswith("B7_000002_full_boxes.jpg") for line in lines)
+
+
+def test_a_record_naming_another_device_is_refused() -> None:
+    payload = {"capture": {**CAPTURE, "deviceId": "sr-other01"}}
+    message = mqtt_rx.parse(f"sr/{DEVICE}/up/record", json.dumps(payload).encode(), rx_utc=RX_UTC)
+    assert message.rejected and "sr-other01" in (message.error or "")
+
+
+def test_a_journal_waits_for_both_pictures_the_boxes_the_note_and_the_record(tmp_path: Path) -> None:
     shot = vision.OneShot(vision.Assembler(tmp_path), "JOURNAL", DEVICE)
     assert shot.wait_s() == vision.ONCE_WAIT_S + contract.NOTE_MAX_S
     for message in (
@@ -373,10 +443,18 @@ def test_a_journal_waits_for_both_pictures_the_boxes_the_note_and_the_entry(tmp_
         up("image", jpeg_chunk(contract.CHUNK_FLAG_FULL)),
     ):
         shot.handle(message)
-    assert shot.missing() == "journal and note"
+    assert shot.missing() == "note and record"
     shot.handle(up("note", chunk(PICTURE, 0, 1)))
-    shot.handle(up("journal", JOURNAL))
+    shot.handle(record())
     assert shot.done.is_set()
+
+
+def test_what_the_card_sends_again_is_not_the_capture_asked_for(tmp_path: Path) -> None:
+    shot = vision.OneShot(vision.Assembler(tmp_path), "JOURNAL", DEVICE)
+    shot.handle(up("image", jpeg_chunk(contract.CHUNK_FLAG_FULL | contract.CHUNK_FLAG_LATE)))
+    shot.handle(up("note", chunk(PICTURE, 0, 1, flags=contract.CHUNK_FLAG_LATE)))
+    shot.handle(record(late=True))
+    assert shot.missing() == "detections and full image and image and note and record"
 
 
 def test_a_photo_needs_the_full_picture_only(tmp_path: Path) -> None:

@@ -8,6 +8,7 @@ dependencies = [
     "paho-mqtt>=2.1",
     "pillow==13.0.0",
     "pyserial>=3.5",
+    "referencing>=0.36",
 ]
 
 [tool.uv.sources]

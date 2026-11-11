@@ -22,7 +22,7 @@ from pathlib import Path
 from srhost.config import ConfigError, mqtt_config, record_config
 from srhost.mqtt_rx import JsonlLog, Message, Receiver
 from srhost.speakers import ENROL_COMMANDS
-from srhost.vision import IMAGES_DIR, Assembler, describe_boxes, keep, stem_of
+from srhost.vision import IMAGES_DIR, Assembler, ack_through, describe_boxes, describe_record, keep, stem_of
 
 REFRESH_S = 0.2
 BROKER_HINT_S = 5.0  # past this the broker is likely not running
@@ -285,6 +285,8 @@ def one_line(message: Message, names: dict[str, str] | None = None) -> str:
         return f"{message.device} speakers {describe_roster(message.payload)}"
     if message.kind == "sensors":
         return f"{message.device} sensors {describe_sensors(message.payload)}"
+    if message.kind == "record":
+        return f"{message.device} record {describe_record(message.payload)}"
     return f"{message.device} {message.kind} {message.payload}"
 
 
@@ -316,6 +318,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(line, flush=True)
 
     receiver = Receiver(cfg, on_message, args.device)
+    assembler.ack = ack_through(receiver)
     receiver.start()
     shown = ""
     down_since: float | None = None

@@ -8,6 +8,7 @@ import typing
 import jsonschema
 import pytest
 
+from srhost import mqtt_rx
 from srhost.generated import payload, stream, topics
 
 # Sent by board B on 26/09 over sr-emqx; only the device id identifies it.
@@ -31,7 +32,7 @@ BOARD_HEARTBEAT = {
 def validator(name: str) -> jsonschema.Draft202012Validator:
     schema = payload.SCHEMAS[name]
     jsonschema.Draft202012Validator.check_schema(schema)
-    return jsonschema.Draft202012Validator(schema)
+    return mqtt_rx.VALIDATORS[name]
 
 
 def test_every_topic_has_its_schema() -> None:
@@ -91,6 +92,31 @@ def test_a_detection_from_board_c_validates() -> None:
 def test_a_tampered_detection_is_refused(change: dict, reason: str) -> None:
     with pytest.raises(jsonschema.ValidationError, match=reason if reason != "minimum" else "less than"):
         validator("detections").validate({**DETECTIONS, **change})
+
+
+def test_a_record_carries_its_parts_by_their_own_schemas() -> None:
+    capture = {
+        "deviceId": "sr-30eda01e4630",
+        "boot": 7,
+        "captureSeq": 2,
+        "mode": "DETECT",
+        "uptimeMs": 1,
+        "sentBoot": 7,
+        "sentUptimeMs": 2,
+        "late": False,
+        "imageBytes": 9,
+        "sent": True,
+        "saved": True,
+        "noteMs": 0,
+        "noteBytes": 0,
+        "noteDropped": 0,
+        "noteSaved": False,
+    }
+    validator("record").validate({"capture": capture, "detections": DETECTIONS})
+    with pytest.raises(jsonschema.ValidationError, match="less than"):
+        validator("record").validate({"capture": capture, "detections": {**DETECTIONS, "boot": -1}})
+    with pytest.raises(jsonschema.ValidationError, match="capture"):
+        validator("record").validate({"detections": DETECTIONS})
 
 
 def test_a_capture_event_must_say_what_it_kept() -> None:

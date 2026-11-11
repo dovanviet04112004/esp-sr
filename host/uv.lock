@@ -552,6 +552,7 @@ dependencies = [
     { name = "paho-mqtt" },
     { name = "pillow" },
     { name = "pyserial" },
+    { name = "referencing" },
 ]
 
 [package.dev-dependencies]
@@ -569,6 +570,7 @@ requires-dist = [
     { name = "paho-mqtt", specifier = ">=2.1" },
     { name = "pillow", specifier = "==13.0.0" },
     { name = "pyserial", specifier = ">=3.5" },
+    { name = "referencing", specifier = ">=0.36" },
 ]
 
 [package.metadata.requires-dev]

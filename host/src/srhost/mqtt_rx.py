@@ -22,6 +22,8 @@ from typing import TextIO
 
 import paho.mqtt.client as mqtt
 from jsonschema import Draft202012Validator
+from referencing import Registry
+from referencing.jsonschema import DRAFT202012
 
 from srhost.config import ConfigError, MqttConfig, mqtt_config
 from srhost.generated import topics
@@ -31,10 +33,11 @@ KEEPALIVE_S = 30
 WILDCARD = "+"
 
 log = logging.getLogger(__name__)
-VALIDATORS = {name: Draft202012Validator(schema) for name, schema in SCHEMAS.items()}
+REGISTRY = Registry().with_resources((s["$id"], DRAFT202012.create_resource(s)) for s in SCHEMAS.values())
+VALIDATORS = {name: Draft202012Validator(schema, registry=REGISTRY) for name, schema in SCHEMAS.items()}
 BINARY = "binary"  # frame in contracts/vision.yaml, not a JSON schema
 REPEAT_WINDOW_S = 5.0  # esp-mqtt resends QoS 1 every second
-REPEATED_KINDS = ("event", "detections")
+REPEATED_KINDS = ("event", "detections", "record")
 DEVICE_ID = re.compile(SCHEMAS["heartbeat"]["properties"]["deviceId"]["pattern"])
 
 
@@ -72,6 +75,12 @@ def schema_error(schema: str, payload: object) -> str | None:
     return f"{schema} schema: {where}: {errors[0].message}"
 
 
+def claimed_devices(payload: dict) -> set[str]:
+    """The deviceIds a payload names, at its top and in each part of a record."""
+    parts = [payload, *(v for v in payload.values() if isinstance(v, dict))]
+    return {part["deviceId"] for part in parts if isinstance(part.get("deviceId"), str)}
+
+
 def parse(topic: str, body: bytes, rx_utc: str | None = None) -> Message:
     """Match the topic, decode the JSON and validate it; never raises on what a board sends."""
     rx_utc = rx_utc or now_utc()
@@ -89,8 +98,9 @@ def parse(topic: str, body: bytes, rx_utc: str | None = None) -> Message:
     except (UnicodeDecodeError, json.JSONDecodeError) as err:
         return Message(rx_utc, topic, spec.id, device, None, f"not JSON: {err}", raw)
     error = schema_error(spec.schema, payload)
-    if error is None and payload.get("deviceId", device) != device:
-        error = f"deviceId {payload['deviceId']!r} differs from the topic"
+    others = sorted(claimed_devices(payload) - {device}) if error is None else []
+    if others:
+        error = f"deviceId {others[0]!r} differs from the topic"
     if error is not None:
         return Message(rx_utc, topic, spec.id, device, None, error, raw)
     return Message(rx_utc, topic, spec.id, device, payload)
