@@ -6,6 +6,6 @@ endif()
 idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS "include"
-    REQUIRES common
-    PRIV_REQUIRES net_mqtt svc_note svc_vision
+    REQUIRES common net_mqtt
+    PRIV_REQUIRES drv_sd svc_note svc_vision
 )

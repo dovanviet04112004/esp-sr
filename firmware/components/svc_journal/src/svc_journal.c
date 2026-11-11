@@ -2,23 +2,30 @@
 
 #include <inttypes.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 #include "app_events.h"
+#include "drv_sd.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "gen_payload.h"
 #include "net_mqtt.h"
 #include "svc_note.h"
 #include "svc_vision.h"
 
+#define PATH_BYTES 32
+
 static const char *TAG = "svc_journal";
 
 static svc_journal_config_t s_cfg;
+static sensors_t *s_report;
 
 esp_err_t svc_journal_init(const svc_journal_config_t *cfg)
 {
     if (cfg == NULL) { return ESP_ERR_INVALID_ARG; }
     s_cfg = *cfg;
-    return ESP_OK;
+    s_report = heap_caps_malloc(sizeof(*s_report), MALLOC_CAP_SPIRAM);
+    return s_report != NULL ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
 static void beep(app_tone_t tone)
@@ -30,12 +37,31 @@ static void beep(app_tone_t tone)
     }
 }
 
+static esp_err_t write_card(void *ctx, const char *text, size_t bytes)
+{
+    char path[PATH_BYTES];
+    esp_err_t err = drv_sd_name(ctx, "JSN", path, sizeof(path));
+    if (err == ESP_OK) { err = drv_sd_write(path, (const uint8_t *)text, bytes); }
+    return err;
+}
+
+static bool keep_on_card(uint32_t seq, journal_t *entry, detections_t *found)
+{
+    if (s_report == NULL || !drv_sd_ready()) { return false; }
+    sensors_t *report = s_cfg.sensors != NULL && s_cfg.sensors(s_report) ? s_report : NULL;
+    char stem[PATH_BYTES];
+    snprintf(stem, sizeof(stem), "IMG/B%" PRIu32 "/%06" PRIu32, s_cfg.boot, seq);
+    const esp_err_t err = net_mqtt_print_entry(entry, found, report, write_card, stem);
+    if (err != ESP_OK) { ESP_LOGW(TAG, "%s.JSN not kept: %s", stem, esp_err_to_name(err)); }
+    return err == ESP_OK;
+}
+
 void svc_journal_keep(uint32_t seq)
 {
     svc_note_t note;
     svc_note_record(seq, &note);
     beep(APP_TONE_WAKE);
-    svc_vision_detect(seq);
+    detections_t *found = svc_vision_detect(seq);
     const svc_vision_full_t full = svc_vision_full(seq);
     const bool note_sent = note.saved && svc_note_send() == ESP_OK;
     journal_t entry = {
@@ -50,7 +76,8 @@ void svc_journal_keep(uint32_t seq)
     };
     const esp_err_t told = net_mqtt_publish_journal(&entry);
     if (told != ESP_OK) { ESP_LOGW(TAG, "journal not sent: %s", esp_err_to_name(told)); }
+    const bool carded = keep_on_card(seq, &entry, found);
     beep(note.saved && (full.saved || full.sent) ? APP_TONE_DONE : APP_TONE_FAIL);
-    ESP_LOGI(TAG, "B%" PRIu32 "/%06" PRIu32 ": note %s, picture %s", s_cfg.boot, seq,
-             note_sent ? "sent" : "not sent", full.sent ? "sent" : "not sent");
+    ESP_LOGI(TAG, "B%" PRIu32 "/%06" PRIu32 ": note %s, picture %s, card %s", s_cfg.boot, seq,
+             note_sent ? "sent" : "not sent", full.sent ? "sent" : "not sent", carded ? "kept" : "not kept");
 }

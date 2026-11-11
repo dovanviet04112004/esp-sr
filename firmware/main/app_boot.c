@@ -306,8 +306,15 @@ static void start_vision(void)
     };
     err = svc_note_init(&note);
     if (err != ESP_OK) { ESP_LOGE(TAG, "no voice notes: %s", esp_err_to_name(err)); }
-    const svc_journal_config_t journal = {.speak = app_wiring()->speak, .boot = cfg.boot};
-    ESP_ERROR_CHECK(svc_journal_init(&journal));
+    const svc_journal_config_t journal = {
+        .speak = app_wiring()->speak,
+        .boot = cfg.boot,
+#if CONFIG_APP_SENSORS_ENABLE
+        .sensors = svc_sensors_latest,
+#endif
+    };
+    err = svc_journal_init(&journal);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "no journal on the card: %s", esp_err_to_name(err)); }
     log_heap("vision");
 }
 #endif

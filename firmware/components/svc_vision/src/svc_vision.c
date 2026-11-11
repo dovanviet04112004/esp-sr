@@ -368,10 +368,11 @@ bool svc_vision_step(uint32_t *journal_seq)
     return false;
 }
 
-void svc_vision_detect(uint32_t seq)
+detections_t *svc_vision_detect(uint32_t seq)
 {
     bool toned = false;
     (void)answer_detect(seq, false, &toned);
+    return s_found->capture_seq == seq ? s_found : NULL;
 }
 
 svc_vision_full_t svc_vision_full(uint32_t seq)

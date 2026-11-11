@@ -10,6 +10,7 @@
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "gen_payload.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,8 +45,9 @@ bool svc_vision_step(uint32_t *journal_seq);
 
 /** Shoot detect's frame and send it, then what detect finds in it, with no tone.
  *  @ctx nhin_task, from svc_vision_step to svc_vision_done | blocking, ~3.5 s
+ *  @ret what detect found, svc_vision's until the next request; NULL when detect did not run
  */
-void svc_vision_detect(uint32_t seq);
+detections_t *svc_vision_detect(uint32_t seq);
 
 /** Shoot the full picture, send it and keep it on the card, with no tone.
  *  @ctx nhin_task, from svc_vision_step to svc_vision_done | blocking, ~4 s
