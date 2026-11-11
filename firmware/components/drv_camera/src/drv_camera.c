@@ -25,6 +25,7 @@
 #define WAKE_SETTLE_MS 20
 #define EXPOSURE_REG 0x3500 // 20 bits of 1/16 line, what AEC runs at
 #define EXPOSURE_MASK 0xFFFFF
+#define EXPOSURE_PER_LINE 16
 #define GAIN_REG 0x350A // 10 bits, what AGC runs at
 #define GAIN_MASK 0x3FF
 #define AEC_MANUAL_REG 0x3503
@@ -56,12 +57,17 @@ static bool read_line(line_t *line)
     return line->line_total > 0 && line->multiplier > 0;
 }
 
+static int band_lines(const line_t *line)
+{
+    const int64_t sysclk_hz = (int64_t)GEN_VISION_XCLK_HZ * line->multiplier / PLL_DIVIDERS;
+    return (int)(sysclk_hz * BAND_HALF_PERIOD_US / 1000000 / line->line_total);
+}
+
 // An exposure that is a whole number of mains half-periods keeps bands off the frame; the table's step suits
 // 30 fps.
 static esp_err_t fit_band_to_lines(const line_t *line)
 {
-    const int64_t sysclk_hz = (int64_t)GEN_VISION_XCLK_HZ * line->multiplier / PLL_DIVIDERS;
-    const int lines = (int)(sysclk_hz * BAND_HALF_PERIOD_US / 1000000 / line->line_total);
+    const int lines = band_lines(line);
     const bool wrote =
         s_sensor->set_reg(s_sensor, BAND_50HZ_STEP_REG, REG_BYTE_MASK, lines >> 8) >= 0 &&
         s_sensor->set_reg(s_sensor, BAND_50HZ_STEP_REG + 1, REG_BYTE_MASK, lines & REG_BYTE_MASK) >= 0;
@@ -72,8 +78,11 @@ static esp_err_t fit_band_to_lines(const line_t *line)
 // AEC counts exposure in lines: carry the time, not the count, so it starts settled (KEHOACH 3.19).
 static esp_err_t carry_exposure(int exposure, int gain, const line_t *before, const line_t *after)
 {
-    const int64_t carried = (int64_t)exposure * before->line_total * after->multiplier /
-                            ((int64_t)before->multiplier * after->line_total);
+    int64_t carried = (int64_t)exposure * before->line_total * after->multiplier /
+                      ((int64_t)before->multiplier * after->line_total);
+    const int64_t step = (int64_t)band_lines(after) * EXPOSURE_PER_LINE;
+    // AEC rests only on whole 10 ms steps under the 50 Hz filter; between them it hunts (KEHOACH 3.19).
+    if (step > 0 && carried >= step) { carried = (carried + step / 2) / step * step; }
     const bool wrote = s_sensor->set_reg(s_sensor, AEC_MANUAL_REG, AEC_AGC_MANUAL, AEC_AGC_MANUAL) >= 0 &&
                        s_sensor->set_reg(s_sensor, EXPOSURE_REG, EXPOSURE_MASK, (int)carried) >= 0 &&
                        s_sensor->set_reg(s_sensor, GAIN_REG, GAIN_MASK, gain) >= 0 &&
