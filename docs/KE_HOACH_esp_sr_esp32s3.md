@@ -683,7 +683,9 @@ phát dưới 200 Hz; ở đó nguồn là chính tiếng phòng, vốn kết h�
 | Khung | chồng-lưu, cửa sổ chữ nhật | phép chập tuyến tính cần chồng-lưu; cửa sổ căn Hann của STFT không cho phép chập tuyến tính, nên AEC có phép biến đổi riêng — chạy trên **cùng** bộ FFT 512 điểm của chuỗi mà `dsp_afe_aec_init` nhận vào, để bảng xoay pha chỉ dựng một lần trong `sach_task` |
 | Ràng buộc gradient | luân phiên: mỗi khối ràng buộc **một** phân đoạn | ràng buộc đủ cả 8 là 16 FFT mỗi khối mỗi micro; luân phiên giữ hội tụ với 2 FFT |
 | Bước học | tự chỉnh theo ước lượng vọng dư (Valin, 2007) | cho phép bỏ bộ dò hai bên cùng nói, thứ hay dò sai nhất |
-| Khử vọng dư | ước phổ vọng dư mỗi vạch, **chuyển cho khe `ns`** cộng vào phổ nhiễu | loa nhỏ mở to méo phi tuyến; bộ lọc tuyến tính dừng ở cỡ 15–25 dB 🔬 |
+| Khử vọng dư | ước phổ vọng dư mỗi vạch, **chuyển cho khe `ns`**: lớn hơn của `leak` × phổ vọng bộ lọc đã ước (Valin, 2007) và **độ ghép loa → micro** × công suất tham chiếu tích luỹ trên đuôi `aec.couple_tail_s`, cả hai qua cửa sổ của STFT. `ns` cộng nó vào phổ nhiễu, và ở vạch vọng chiếm thì dìm tới sàn riêng `ns.echo_floor_db` (§3.9) | loa nhỏ mở to méo phi tuyến; bộ lọc tuyến tính dừng ở cỡ 15–25 dB 🔬, và với tiếng bíp 70–300 ms của chính máy chỉ 0–13 dB vì nó học từ 0 sau mỗi boot. Ước theo bộ lọc thì thiếu đúng lúc ấy: tiếng bíp lọt vào âm đã lọc ở −38 đến −49 dBFS (`measurements/board_c.md` §6) |
+| Độ ghép | mỗi micro mỗi vạch, bắt đầu ở `aec.couple_start_db` sau boot; mỗi hop có tham chiếu, ở vạch trong `aec.couple_peak_db` của vạch tham chiếu mạnh nhất hop ấy, tiến về công suất micro / tham chiếu tích luỹ, chặn ở `aec.couple_max_db`: lên với `aec.couple_up`, xuống với `aec.couple_down`; ngoài các vạch ấy giữ nguyên | đường từ loa tới micro trong hộp gần như cố định, khác trọng số của bộ lọc: trọng số học ở chỗ đặt khác làm tiếng bíp đầu to hơn cả micro nghe. Chỉ học gần đỉnh: vạch rò phổ có tham chiếu yếu chia vào nền phòng cho tỉ số sai lên tới +9 dB. Bắt đầu trên độ ghép đo được (−26 đến −31 dB): tiếng bíp đầu sau boot đã có chỗ dìm |
+| Đuôi vọng dư | tham chiếu tắt quá 8 phân đoạn thì bộ lọc nghỉ, nhưng vọng dư theo độ ghép còn tắt dần tới `aec.couple_hold_s` rồi mới về 0 | vang của phòng dài hơn 128 ms của bộ lọc: sau tiếng bíp 1500 Hz micro còn −63 dBFS trong dải suốt ~150 ms, và lối ra bằng đúng mức ấy ngay khi vọng dư về 0. 0,4 s ngang `deaf_tail_ms` của `tones.yaml`, lúc `svc_listen` vốn không nghe |
 | Trễ khối | bù bằng `calib/aec_delay` (§2.4) trước khi vào bộ lọc | 128 ms đuôi phải dành cho đường vọng, không dành cho trễ DMA |
 | Số học | float32 | S3 có FPU đơn chính xác; bản số nguyên chỉ khi đo thấy nhanh hơn rõ |
 
@@ -703,7 +705,7 @@ chuyển tham chiếu qua đệm trễ, và nhân 1 còn dư thời gian. RAM n�
 bước điếc của `svc_front` (§3.19).
 
 **Thước** (TỔNG QUAN V5.4): ERLE **≥ 20 dB** khi chỉ loa nói, đo sau cả khử vọng dư, ở âm lượng tối
-đa đã chốt; lúc hai bên cùng nói **không phân kỳ** và tiếng người gần bị dìm **≤ 3 dB**.
+đa đã chốt; lúc hai bên cùng nói **không phân kỳ** và tiếng người gần bị dìm **≤ 3 dB**. Mọi tiếng bíp của `tones.yaml` và tiếng máy nói, kể cả lần đầu sau boot, xuống tới nền phòng trong dải của nó sau `ns`, trên bản thu `stream 11` của board.
 
 `aec` không chặn module nào: không có `ref` thì chuỗi định dạng là `"MM"` và khối này tự bỏ qua.
 
@@ -882,6 +884,7 @@ bản quyền nên chỉ lấy thuật toán và hằng số, cũng là của ha
 | Phần | Cách làm |
 |---|---|
 | Vào, ra | công suất 257 vạch của lối ra không gian, phổ vọng dư của `aec` (§3.5) cộng thẳng vào ước lượng nhiễu khi có; ra một gain mỗi vạch và xác suất có tiếng nói của khung |
+| Vọng dư trong gain | vạch có vọng dư R lấy sàn √((G²·λ_d + E²·R) / (λ_d + R)) thay G, E là `ns.echo_floor_db`, như sàn vọng của Speex; và vạch có công suất không quá λ_d + R, tức không có dấu hiệu người gần, giữ gain không quá sàn ấy | sàn −12 dB cho mọi vạch chỉ dìm vọng 12 dB; vọng dư ước dư thì LSA nâng vạch lên tới gain 1, nên mấy hop đầu của tiếng bíp không bị dìm. Một sàn cho cả lúc người gần nói: sàn −15 dB lúc có tiếng nói như Speex để lọt tiếng bíp vì `frame_p` cao cả khi phòng có người, mà người gần vẫn giữ −0,07 dB với một sàn (`measurements/board_c.md` §6). Không có loa thì R = 0 và gain như cũ |
 | Bước | hằng số trong bài chuẩn cho **bước 128 mẫu ở 16 kHz**; ở đây bước 256, nên mọi hệ số làm trơn đổi `α → α²`. Cấu hình ghi `tau_s` (§3.1) và code tự quy đổi, không ai phải nhớ việc này |
 | IMCRA | làm trơn tần số bằng cửa sổ Hann 3 vạch, làm trơn thời gian τ 76 ms; hai lượt tìm cực tiểu (thô, rồi chỉ trên vạch được coi là vắng tiếng) trên 8 cửa con 8 bước, tức ~1 s như 8 × 15 khung 8 ms của bài; `B_min` 1,66, `ζ₀` 1,67, `γ₀` 4,6, `γ₁` 3; nhiễu làm trơn τ 49 ms, chậm lại theo xác suất có tiếng, nhân bù 1,4685 |
 | Vắng tiếng | xác suất tiên nghiệm từ `ξ` làm trơn τ 22 ms ở ba mức: cục bộ (Hann 3 vạch), toàn cục (Hann 31 vạch), khung (trung bình 50 Hz – 8 kHz); ngưỡng −10 / −5 dB, `P_min` 0,005, `q` tối đa 0,998; mức cục bộ ép về `P_min` ở 500–3500 Hz khi trung bình của nó dưới 0,25 |
@@ -928,7 +931,7 @@ Chung cho hai ứng viên:
 | Tiền và hậu xử lý | C thuần trong thư mục của ứng viên, soi gương `srpipe.tasks.ns`, bộ vàng có đối chứng âm (§3.14). Mạng ra logit, sigmoid tính ở hậu xử lý bằng float, vì int8 không biểu diễn được gain 1 |
 | Trạng thái | trạng thái GRU và lịch sử đặc trưng nằm trong vùng trạng thái của khe; `reset` của khe xoá chúng và giữ mọi thứ `init` dựng từ cấu hình, nên `dsp_afe_reset` sau một chỗ hở `seq` dài không dựng lại gì, còn chỗ hở ngắn khe giữ nguyên (§4.5.5); trọng số và tensor của esp-dl nằm ở PSRAM của `ai_engine` |
 | Chỗ đặt trọng số | bị chạm **mỗi khung**, nằm ở PSRAM như mọi model (§6.5); E9-T7 đo độ trễ đỉnh một khung của từng ứng viên |
-| Vọng dư | bản đầu không đọc `echo_power`: chưa có loa thì chưa có vọng để học (E10). Sàn cộng vọng dư vào ước lượng nhiễu, nên chuỗi `"MMR"` chạy sàn tới khi bản được giữ học với phổ vọng dư |
+| Vọng dư | bản đầu không đọc `echo_power`: chưa có loa thì chưa có vọng để học (E10). Sàn cộng vọng dư vào ước lượng nhiễu và dìm vạch vọng tới `ns.echo_floor_db`, nên chuỗi `"MMR"` chạy sàn tới khi bản được giữ học với phổ vọng dư |
 | Dựng và cắm | Kconfig `AI_ENGINE_NS_BACKEND` đưa tối đa một ứng viên vào bản dựng (§4.5.2); `meta.json` của ảnh model khai ứng viên (§6.3). `svc_front` cắm `ai_engine_ns_ops()` khi hàm ấy khác `NULL` và luật vọng dư ở trên cho phép, không thì để khe trống và chuỗi chạy sàn |
 
 **Luật chọn**: sàn, và hai ứng viên sau int8, chấm trên cùng vật liệu bằng thước quyết định của §3.15. Bản hơn sàn thì
@@ -2680,6 +2683,8 @@ và `<stem>_journal.json`, gồm bản `up/journal`, bản `up/sensors` mới nh
 Lời ghi chú là tiếng người, dữ liệu cá nhân (§1.4): chỉ nằm ở thẻ và data root, không bao giờ vào git. `make journal` gửi `CAPTURE`
 với `JOURNAL` như `make detect`, rồi chờ đủ hai ảnh, khung, lời ghi chú và bản nhật ký, thêm `note.max_s` vào hạn chờ.
 
+**Đọc thẻ và phát thử qua console.** `sd ls <thư mục>` liệt kê tên và cỡ, `sd cat <file>` in một file, để đọc `.JSN` mà không rút thẻ. `play <file>` phát một WAV PCM 16 kHz, một kênh, 16 bit trên thẻ ra loa qua `q_speak`, để đo khử vang trên tiếng nói (E10-T9). `noi_task` vẫn là người duy nhất ghi TX: `svc_speak` đọc file qua `drv_sd_read` mà `main` cắm vào khi có thẻ, nên không phụ thuộc `drv_sd`. Console và `noi_task` đi qua `m_sd` như hai task của nhật ký (§5.3).
+
 **Ngoại vi còn lại** gom ở `svc_sensors`, task `do_task`, đăng `up/sensors` khi đổi và mỗi 10 s. `sdkconfig.board_c` bật
 `APP_SENSORS_ENABLE` để nhật ký có vị trí và chuyển động (chủ repo 11/11). RAM nội chúng lấy từng làm `detect` chậm đi 1,94 → 2,01 s
 (`measurements/board_c.md` §7), trước khi dự trữ vùng mượn hạ xuống 2 KB; đo lại 🔬.
@@ -3840,7 +3845,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `sb_note` | StreamBuffer ở PSRAM, bản ghi `app_note_hop_t`: `seq`, cờ `vad`, cờ điếc, một hop PCM; cỡ `note.buffer_s` của `vision.yaml`, chỉ có ở board C | 3 s, ~97 KB | `nhan_task`, chỉ khi `APP_BIT_NOTE_ON`, timeout 0 | `ghi_task` | không đủ chỗ cho cả bản ghi thì bỏ hop, tăng `note_dropped`; không bao giờ ghi nửa bản ghi | `nhan_task` không bao giờ chờ thẻ; một lượt ghi thẻ thường dưới 1 s, đệm 3 s đỡ được, lượt hiếm 5 s (`measurements/board_c.md` §4.8) làm lời ghi chú hở vài hop |
 | `q_note` | Queue depth 1, `uint32_t` `seq` của mục nhật ký, bộ nhớ ở PSRAM | 4 B | `nhin_task` (`svc_note_start`), timeout 0 | `ghi_task` | không bao giờ đầy: `q_vision` cho một mục mỗi lúc, và `nhin_task` chờ kết quả trước mục sau; đầy thì mục ấy không có lời ghi chú, log | lời ghi chú bắt đầu cùng lúc với lần chụp đầu |
 | `q_note_done` | Queue depth 1, `svc_note_t`, bộ nhớ ở PSRAM | 16 B | `ghi_task`, timeout 0 | `nhin_task` (`svc_note_wait`), chờ tới `note.max_s` cộng 10 s | không bao giờ đầy: một kết quả cho một yêu cầu; quá hạn chờ thì mục đi tiếp với lời ghi chú `saved: false` | kết quả đi theo giá trị; tên file và cỡ `ghi_task` để lại cho `svc_note_send` có thứ tự nhờ hàng này |
-| `q_speak` | Queue depth 4, `app_speak_req_t`, bộ nhớ ở PSRAM | 4 × 546 B | `dieu_task`, `nhin_task`, `ghi_task`, console | `noi_task` | bỏ, log | |
+| `q_speak` | Queue depth 4, `app_speak_req_t` (tiếng, câu, hoặc đường dẫn một `play`), bộ nhớ ở PSRAM | 4 × ~580 B | `dieu_task`, `nhin_task`, `ghi_task`, console | `noi_task` | bỏ, log | |
 | `q_event_up` | Queue depth 16, `app_event_t`, bộ nhớ ở PSRAM | 16 × 108 B | `nhan_task`, `xac_task`, `dieu_task`, `nhin_task` | `gui_task` | bỏ, tăng `events_dropped` | **người phát sự kiện không bao giờ publish**: publish QoS 1 chờ PUBACK, và `nhan_task` đứng chờ mạng là đệm 1 s đầy dần |
 | `q_verify` | Queue depth 2, chỉ số ô `uint8_t`; hai ô của `svc_listen` ở PSRAM, mỗi ô 24 000 mẫu `int16` cùng quyết định `COMMAND`, cấp lúc boot khi ảnh có `speaker` | 2 × ~47 KB | `nhan_task` | `xac_task` | không bao giờ đầy: chỉ ô lấy được từ `q_verify_free` mới được gửi | không chép tiếng hai lần; một ô chỉ có một chủ tại một lúc, như `q_frame` |
 | `q_verify_free` | Queue depth 2, chỉ số ô, nạp sẵn cả hai lúc boot | 2 B | `xac_task` trả ô đã xác minh xong | `nhan_task` lấy ô trước khi chép, timeout 0 | hết ô thì lệnh thành `REJECT SPEAKER_BUSY` ngay, không chờ | `nhan_task` không bao giờ đứng chờ một lần chạy của `speaker` |
@@ -3854,7 +3859,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `s_latest` | `portMUX_TYPE` + `sensors_t` trong `svc_sensors`, chỉ có khi `APP_SENSORS_ENABLE` | ~100 B | `do_task`, mỗi lần đọc | `nhin_task` qua `svc_sensors_latest` | — ghi đè | số đo là **mức**: mục nhật ký cần lần đọc mới nhất, không cần chuỗi. Chép dưới spinlock, ~100 byte, không gọi gì bên trong |
 | `eg_system` | EventGroup | 4 B | mọi task | mọi task | — | bit `WIFI_OK` `MQTT_OK` `TIME_OK` `MODELS_OK` `STREAM_ON` `SPEAKING` `CALIBRATING` `OTA_RUNNING` |
 | `m_storage` | Mutex, nội bộ `sys_storage` | — | mọi đường ghi NVS và LittleFS | — | chờ có hạn 200 ms | khoá lá, không lấy khoá nào khác bên trong |
-| `m_sd` | Mutex, nội bộ `drv_sd` | — | mọi lời gọi file của `drv_sd` (`nhin_task`, `ghi_task`) | — | chờ có hạn 10 s, quá thì lời gọi ra `ESP_ERR_TIMEOUT` | khoá lá, giữ trong một lần mở, ghi hay đọc, đóng; lần giữ lâu nhất là ghi ảnh đầy đủ, ~0,8 s, một lần 4,6 s (`measurements/board_c.md` §4.9) |
+| `m_sd` | Mutex, nội bộ `drv_sd` | — | mọi lời gọi file của `drv_sd` (`nhin_task`, `ghi_task`; `noi_task` khi `play`, console khi `sd`) | — | chờ có hạn 10 s, quá thì lời gọi ra `ESP_ERR_TIMEOUT` | khoá lá, giữ trong một lần mở, ghi hay đọc, đóng; lần giữ lâu nhất là ghi ảnh đầy đủ, ~0,8 s, một lần 4,6 s (`measurements/board_c.md` §4.9) |
 
 **Task ở nhân 1 không lấy mutex nào.** Thứ duy nhất `thu` và `sach` chạm chung với nhân 0 là `s_afe_stats` dưới
 spinlock (vài chục byte) và hàng đợi với timeout 0. Một mutex dùng chung với nhân 0 là một lần đảo
