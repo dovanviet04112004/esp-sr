@@ -2574,8 +2574,13 @@ Id của hai lệnh, số của luồng ảnh và nhịp của ngoại vi nằm 
   thành 384 × 512, đúng chiều cao ô 512 của mạng nên letterbox không thu thêm. Khung 1280 × 720, dải 16:9 ở giữa, cho mạng cùng cỡ
   vật vì cả hai đặt trọn bề ngang mảng vào 512 điểm, nhưng ít hơn 25% cảnh, mất 756–888 ms để chụp, ~0,4 s để giải, 60–70 KB, và mạng
   chỉ dùng 288 × 512 điểm của nó, 16% số điểm đã chụp (`measurements/board_c.md` §4.8).
-- Ảnh gửi về là khung đầy đủ 2560 × 1920, cả mảng 4:3, chất lượng 12. Ở chất lượng 10 nó là 221–310 KB tuỳ cảnh, ở 6 là 364 KB;
-  12 nhỏ hơn 10 chừng 10–15% 🔬.
+- Ảnh gửi về là khung đầy đủ 2560 × 1920, cả mảng 4:3, chất lượng tốt nhất 12 (`full_jpeg_quality`). Ở chất lượng 10 nó là
+  221–310 KB tuỳ cảnh, ở 6 là 364 KB; 12 nhỏ hơn 10 chừng 10–15% 🔬. Phòng tối, độ lợi 234, ảnh ở 12 vượt bộ đệm 384 KB và không ra khung
+  nào (`measurements/board_c.md` §4.8), nên chất lượng theo cảnh. Các khung chờ phơi sáng ở 5 MP, vốn bị bỏ, chụp ở
+  `full_settle_quality`, thô đến mức không tràn; khung cuối cho cỡ S. Khung giữ lại lấy mức tốt nhất của `full_quality_ladder` mà
+  S × (settle / q)^`full_size_exponent` ≤ `full_fill_max` × bộ đệm. Số mũ 0,9 là đầu dư của bảng §4.8, nơi cỡ đi theo q^−0,54 đến
+  q^−0,9. Vẫn tràn thì lên một bậc và lấy lại một lần: `esp32-camera` chờ một khung tới 4 s, nên không thử dần. Xem trực tiếp chọn mức
+  của khung sau theo cỡ khung trước. Mức đã dùng in ra log.
 - Không dùng một khung đầy đủ cho cả hai: lấy nó mất 3,3–5,5 s, giải nó ~2 s, nên "nhận diện" thành 7–11 s thay vì ~3,7 s
   (`measurements/board_c.md` §4.8).
 - Hai cỡ dùng chung một bộ đệm khung 384 KB ở PSRAM (`CAMERA_JPEG_MODE_FRAME_SIZE`). PSRAM trống lúc đứng yên là phần còn lại
