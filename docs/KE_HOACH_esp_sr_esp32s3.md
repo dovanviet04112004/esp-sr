@@ -2583,7 +2583,9 @@ Id của hai lệnh, số của luồng ảnh và nhịp của ngoại vi nằm 
 - Đổi cỡ thì giữ thời gian phơi sáng. OV5640 đếm phơi sáng theo 1/16 dòng, và mỗi cỡ có thời gian dòng riêng: 2 060 điểm ở 45 MHz
   (45,8 µs) với 640 × 480, 2 844 điểm ở 50 MHz (56,9 µs) với khung đầy đủ. Giữ nguyên số dòng thì khung đầy đủ sau 640 × 480 phơi quá 25%
   và chờ phơi sáng 2,9–8,3 s (`measurements/board_c.md` §4.8). `drv_camera_use` vì thế quy phơi sáng sang dòng của cỡ mới theo tỉ lệ
-  thời gian dòng, giữ độ lợi, ghi lúc AEC và AGC ở chế độ tay rồi trả về tự động, để AEC bắt đầu từ đúng chỗ.
+  thời gian dòng, giữ độ lợi, ghi lúc AEC và AGC ở chế độ tay rồi trả về tự động, để AEC bắt đầu từ đúng chỗ. Giá trị quy đổi làm
+  tròn về bội của bước 10 ms của cỡ mới khi nó từ một bước trở lên: có lọc 50 Hz thì AEC chỉ đứng ở bội ấy (8 400 = 3 × 2 800,
+  10 464 = 3 × 3 488), và giá trị lệch lưới như 10 437 làm khung `detect` sau ảnh đầy đủ chờ 18 khung ở 2 trên 10 lượt (§4.8).
 - Đường RGB565 cần hơn 1,5 MB PSRAM và CPU để nén, không vừa §6.6.
 
 **Sensor nghỉ giữa hai lần chụp.** Dựng một lần trong `app_boot`, rồi nghỉ qua SCCB, vì camera chạy liên tục chiếm băng thông
