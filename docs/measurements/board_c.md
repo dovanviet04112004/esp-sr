@@ -332,6 +332,15 @@ log EMQX mức info, `emqx ctl clients show` mỗi 5 s, và `srhost.live --jsonl
   mở ảnh lúc bên kia đang ghi đè, lỗi của PIL làm `OneShot` bỏ qua tin `detections`. Ghi file nguyên tử và luôn ghi nhận tin đã tới: 46/46 lượt
   sau đó đủ.
 
+**Ảnh đầy đủ hỏng khi phòng tối (11/11, 18:45, boot 173).** `PHOTO` và mọi lượt chụp khung đầy đủ ra `CAMERA_FAIL`: AEC lên độ lợi 234
+(ban ngày 27–32), ảnh 2560 × 1920 ở chất lượng 12 nhiễu nên JPEG vượt bộ đệm khung 384 KB, `cam_hal` báo `FB-OVF` liên tục rồi
+`NO-EOI`, `Failed to get frame: timeout`. Ban ngày cùng chất lượng 220–310 KB. Khung 640 × 480 vẫn chụp được.
+- Chất lượng theo cảnh (E15-T35, boot 175, 176, độ lợi 248): khung chờ ở 50 nặng 229–258 KB; dự đoán ở 40 là 280–316 KB, thật
+  274–299 KB (số mũ đo được ~0,76 giữa 50 và 40, contract dùng 0,9). 8 trên 8 lượt `PHOTO`, `DETECT` ra ảnh đủ, 7 lượt ở 40, một ở 50
+  vì dự đoán ở 40 vượt ngưỡng 80% đúng 1 KB. Chất lượng 12 đặt lúc đổi cỡ từng để vài khung đầu ở 5 MP tràn (`FB-OVF`), đợt chờ
+  1,83–1,93 s; đặt mức thô ngay lúc đổi cỡ: không còn tràn, đợt chờ 4 khung 1,37–1,46 s, chụp 2,51–2,57 s (bản cũ lúc sáng
+  2,94–3,01 s). `PHOTO` về host 3,7–4,1 s. Ở độ lợi ấy mức 40 vỡ hạt: nhiễu chiếm dung lượng; khử nhiễu của OV5640 chưa thử 🔬.
+
 ### 4.9 Ghi nhật ký (E15-T32, 11/11)
 
 Boot 158: bản đầu, mọi việc nằm trong `svc_vision`, hop ghi chú vào `svc_listen` như hop điếc. Boot 160: bản tách `svc_note` và `svc_journal`
