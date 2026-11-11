@@ -321,6 +321,17 @@ chế độ tay rồi trả tự động. Boot 147, cùng bài thử 10 lượt 
   (gửi sau 7,5 s im lặng, chờ tới 15 s với keepalive 15 s) không có trả lời; log EMQX ở mức warning không ghi gì lúc ấy. Ba lần của boot 140
   trùng lúc PSRAM còn ~10 KB, chưa gặp lại từ khi bộ đệm còn 384 KB. Log serial của boot 147 không còn, nên chưa khoanh được chặng nào tắc 🔬.
 
+**Chạy dài 30 phút có log mọi chặng (11/11, boot 156).** `make detect` mỗi 30 s; cùng lúc log serial gắn giờ PC, `ping.exe` tới board mỗi giây,
+log EMQX mức info, `emqx ctl clients show` mỗi 5 s, và `srhost.live --jsonl`. Log ở `interim/net_soak/20261111/` của data root.
+- MQTT không rớt: một phiên suốt 30 phút (`created_at` không đổi qua 328 lần đọc), 64 lần chụp.
+- Ping 1 775 gói: trung vị 140 ms, 90% dưới 241 ms, 99% dưới 537 ms, 6 gói quá 1 s, lâu nhất 3,1 s. Mất 2 gói, mỗi lần một quãng ~4 s không có
+  trả lời, lúc board rảnh, không có `net_wifi: down`. Độ trễ ấy là của modem sleep (`WIFI_PS_MIN_MODEM`): board thức theo nhịp DTIM của hotspot.
+- esp-mqtt cắt phiên khi ping của nó không có trả lời trong 15 s (keepalive 15 s), nên quãng 4 s không đủ. Hai lần rớt của boot 147 cần quãng câm
+  từ 15 s trở lên; chưa gặp lại 🔬.
+- 3 trên 18 lượt đầu báo `no detections in 30 s` dù tin đã tới: `srhost.live` và `make detect` cùng lưu ảnh và vẽ khung vào một thư mục, một bên
+  mở ảnh lúc bên kia đang ghi đè, lỗi của PIL làm `OneShot` bỏ qua tin `detections`. Ghi file nguyên tử và luôn ghi nhận tin đã tới: 46/46 lượt
+  sau đó đủ.
+
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
 `drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là hằng số; bao nhiêu bước
