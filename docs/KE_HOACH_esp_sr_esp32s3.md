@@ -2577,7 +2577,9 @@ Id của hai lệnh, số của luồng ảnh và nhịp của ngoại vi nằm 
   sau Wi-Fi và MQTT, và một lượt "nhận diện" cần ~130 KB tạm, một ảnh đầy đủ tới 144 KB. Bộ đệm 512 KB để lại 122 KB lúc đứng yên, nên
   giải JPEG và gửi ảnh hỏng; 700 KB để lại 125 KB ngay sau boot (`measurements/board_c.md` §4.8).
 - Khung của `detect` nằm trong ảnh dựng đứng 384 × 512. Khung `detect` và ảnh đầy đủ cùng là cả mảng 4:3 (bảng cửa sổ của
-  `esp32-camera`, hàng 0–1951), nên trên ảnh đầy đủ dựng đứng 1920 × 2560 khung ấy là x' = 5x, y' = 5y. Host vẽ khung lên cả hai ảnh.
+  `esp32-camera`, hàng 0–1951), nên trên ảnh đầy đủ dựng đứng 1920 × 2560 khung ấy là x' = 5x, y' = 5y. Board không vẽ khung (chủ repo chốt 11/11): vẽ
+  lên ảnh 5 MP trên chip là giải nén rồi nén lại theo dải, tốn vài giây và ~150 KB PSRAM, ảnh nén hai lần. Ảnh đầy đủ đi sạch; host và
+  server vẽ từ `up/detections` hay từ `.JSN` trên thẻ. Host vẽ khung lên cả hai ảnh.
 - Dưới XGA, `esp32-camera` hạ hệ số PLL của JPEG từ 200 xuống 180, nên bước chống nhấp nháy 50 Hz tính theo hệ số đọc từ cảm biến
   sau mỗi lần đổi cỡ, không theo một hằng số.
 - Đổi cỡ thì giữ thời gian phơi sáng. OV5640 đếm phơi sáng theo 1/16 dòng, và mỗi cỡ có thời gian dòng riêng: 2 060 điểm ở 45 MHz
@@ -2658,9 +2660,15 @@ dùng; luật đặt tên file trên thẻ, kể cả hậu tố khi tên đã c
    xong ghi.
 3. `svc_journal` gọi `svc_vision_detect` rồi `svc_vision_full`: khung `detect` và ảnh đầy đủ như "nhận diện", không tiếng giữa chừng.
 4. `svc_note_send` đọc lại `.WAV` từ thẻ và gửi `up/note` theo khúc của `vision.yaml` cùng `seq`, rồi `svc_journal` gửi `up/journal` mang
-   độ dài, cỡ và `saved` của lời ghi chú và của ảnh đầy đủ. Tiếng cuối dài khi cả hai tới được ít nhất một nơi, trầm nếu không.
+   độ dài, cỡ và `saved` của lời ghi chú và của ảnh đầy đủ.
+5. `svc_journal` ghi `/sdcard/IMG/B<boot>/<seq>.JSN`: một đối tượng JSON ba khoá `journal`, `detections`, `sensors`, mỗi khoá đúng schema
+   của payload cùng tên; khoá nào không có (`detect` không chạy, cảm biến tắt hay chưa đọc lần nào) thì vắng. Mất mạng thì thẻ vẫn giữ đủ
+   một mục: ảnh, lời ghi chú, khung và số đo. `net_mqtt_print_entry` in nó bằng chính bộ mã JSON sinh từ `contracts/` của payload, vào vùng JSON của `nhin_task`
+   rồi đưa chữ cho `svc_journal` ghi thẻ, nên không có đệm riêng; bản tệ nhất, 32 khung, ~4,1 KB. Số đo
+   là bản `svc_sensors_latest`, lần đọc mới nhất của `do_task`; `main` cắm hàm ấy vào `svc_journal` khi cảm biến bật. Rồi tiếng cuối:
+   dài khi lời ghi chú và ảnh đầy đủ tới được ít nhất một nơi, trầm nếu không.
 
-Không có thẻ thì không có lời ghi chú (`noteSaved: false`, cỡ 0): 30 s là 960 KB, không giữ được trong PSRAM. Host lưu `<stem>.wav`
+Không có thẻ thì không có lời ghi chú (`noteSaved: false`, cỡ 0) và không có `.JSN`: 30 s là 960 KB, không giữ được trong PSRAM. Host lưu `<stem>.wav`
 và `<stem>_journal.json`, gồm bản `up/journal`, bản `up/sensors` mới nhất của board (vị trí, chuyển động, ADC) và tên các file của mục.
 Lời ghi chú là tiếng người, dữ liệu cá nhân (§1.4): chỉ nằm ở thẻ và data root, không bao giờ vào git. `make journal` gửi `CAPTURE`
 với `JOURNAL` như `make detect`, rồi chờ đủ hai ảnh, khung, lời ghi chú và bản nhật ký, thêm `note.max_s` vào hạn chờ.
@@ -3342,7 +3350,7 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | L4 | `svc_vision` | ghép | C | `common`, `bsp_board`, `drv_camera`, `drv_sd`, `ai_engine`, `net_mqtt` |
 | L4 | `svc_note` | ghép | C | `common`, `bsp_board`, `drv_sd`, `net_mqtt` |
 | L4 | `svc_sensors` | ghép | C | `common`, `drv_gps`, `drv_ir`, `drv_i2c`, `net_mqtt` |
-| L5 | `svc_journal` | ghép | C | `common`, `svc_note`, `svc_vision`, `net_mqtt` |
+| L5 | `svc_journal` | ghép | C | `common`, `drv_sd`, `svc_note`, `svc_vision`, `net_mqtt` |
 | L5 | `svc_dialog` | ghép | C | `common`, `sys_storage` |
 | L6 | `main` | nối dây | C | tất cả |
 
@@ -3833,6 +3841,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `s_enrolling` | `atomic_bool` trong `svc_listen` | 1 B | `xac_task` | `nhan_task` | — ghi đè | đang đăng ký giọng: ảnh có `wake` thì mọi câu vẫn mở cửa sổ (§5.4); một người ghi, một người đọc, một byte |
 | `s_rearm_gen` | `_Atomic uint32_t` trong `svc_listen` | 4 B | `xac_task` khi lệnh thành `SPEAKER`, `SPEAKER_UNENROLLED`, `SPEAKER_BUSY`; `nhan_task` khi hết ô xác minh (`SPEAKER_BUSY`) | `nhan_task`, `atomic_exchange` trong `svc_listen_feed` | — ghi đè; hai lần ghi trước một lần đọc gộp làm một | thế hệ `LENH` của cửa sổ bị chặn vì người nói, 0 khi cửa sổ mở ở `NGHE`: chỉ cửa sổ của lần thức hiện tại mở lại `LENH`, một lần thử (ADR-0041) |
 | `s_split` | một phần việc trong `ai_engine` (`espdl_split_two.cpp`), chỉ khi `AI_ENGINE_CORES_TWO`: con trỏ hàm, ngữ cảnh, trạng thái nguyên tử; thông báo task tới `phu_task` | ~16 B | task chạy mạng | `phu_task` | không bao giờ đầy, mỗi lần một phần việc. Task khác đang giữ nó thì op chạy cả hai phần ở chỗ. Task giao xong phần 0 mà `phu_task` chưa nhận phần 1 thì tự làm phần ấy | trạng thái nguyên tử thay khoá: task giao không chờ `phu_task` bắt đầu, chỉ chờ phần nó đã nhận, lâu nhất phần ấy cộng một khung của `sach` |
+| `s_latest` | `portMUX_TYPE` + `sensors_t` trong `svc_sensors`, chỉ có khi `APP_SENSORS_ENABLE` | ~100 B | `do_task`, mỗi lần đọc | `nhin_task` qua `svc_sensors_latest` | — ghi đè | số đo là **mức**: mục nhật ký cần lần đọc mới nhất, không cần chuỗi. Chép dưới spinlock, ~100 byte, không gọi gì bên trong |
 | `eg_system` | EventGroup | 4 B | mọi task | mọi task | — | bit `WIFI_OK` `MQTT_OK` `TIME_OK` `MODELS_OK` `STREAM_ON` `SPEAKING` `CALIBRATING` `OTA_RUNNING` |
 | `m_storage` | Mutex, nội bộ `sys_storage` | — | mọi đường ghi NVS và LittleFS | — | chờ có hạn 200 ms | khoá lá, không lấy khoá nào khác bên trong |
 
