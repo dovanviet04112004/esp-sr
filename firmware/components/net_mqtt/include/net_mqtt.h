@@ -47,6 +47,8 @@ typedef struct {
 
 typedef esp_err_t (*net_mqtt_fill_t)(const void *ctx, size_t offset, uint8_t *data, size_t bytes);
 
+typedef esp_err_t (*net_mqtt_take_t)(void *ctx, const char *text, size_t bytes);
+
 typedef struct {
     gen_topic_id_t topic; // GEN_TOPIC_IMAGE or GEN_TOPIC_NOTE
     uint16_t flags;       // GEN_VISION_CHUNK_FLAG_*
@@ -109,6 +111,15 @@ esp_err_t net_mqtt_publish_detections(detections_t *found);
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session | ESP_ERR_NO_MEM arena full or the outbox refused it
  */
 esp_err_t net_mqtt_publish_sensors(sensors_t *report);
+
+/** Print a journal entry as one JSON object of journal, detections and sensors, each as its payload, for
+ * take.
+ *  @ctx nhin_task | blocking as long as take | found and report may be NULL, then left out; deviceId filled
+ * in each; the text lives in the caller's JSON arena until take returns
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_NO_MEM arena full | the error take returned
+ */
+esp_err_t net_mqtt_print_entry(journal_t *entry, detections_t *found, sensors_t *report, net_mqtt_take_t take,
+                               void *ctx);
 
 /** Take the one chunk buffer of pictures and voice notes from PSRAM, for net_mqtt_publish_chunks.
  *  @ctx app_boot | blocking briefly | once, only with a camera

@@ -20,6 +20,7 @@
 #define STATUS_BYTES 160
 #define JSON_ALIGN 8     // cJSON nodes hold doubles
 #define PRINT_BYTES 4096 // detections: GEN_VISION_BOXES_MAX boxes
+#define ENTRY_PRINT_BYTES (PRINT_BYTES + 1024)
 #define URI_BYTES 128
 #define USER_BYTES 65
 #define PASS_BYTES 65
@@ -461,6 +462,29 @@ esp_err_t net_mqtt_publish_journal(journal_t *entry)
     if (s_client == NULL || !s_connected) { return ESP_ERR_INVALID_STATE; }
     strlcpy(entry->device_id, s_device_id, sizeof(entry->device_id));
     return send_payload(journal_to_json(entry), GEN_TOPIC_JOURNAL, false);
+}
+
+esp_err_t net_mqtt_print_entry(journal_t *entry, detections_t *found, sensors_t *report, net_mqtt_take_t take,
+                               void *ctx)
+{
+    if (entry == NULL || take == NULL) { return ESP_ERR_INVALID_ARG; }
+    cJSON *root = cJSON_CreateObject();
+    strlcpy(entry->device_id, s_device_id, sizeof(entry->device_id));
+    bool whole = cJSON_AddItemToObject(root, "journal", journal_to_json(entry));
+    if (found != NULL) {
+        strlcpy(found->device_id, s_device_id, sizeof(found->device_id));
+        whole = cJSON_AddItemToObject(root, "detections", detections_to_json(found)) && whole;
+    }
+    if (report != NULL) {
+        strlcpy(report->device_id, s_device_id, sizeof(report->device_id));
+        whole = cJSON_AddItemToObject(root, "sensors", sensors_to_json(report)) && whole;
+    }
+    char *text = whole ? json_malloc(ENTRY_PRINT_BYTES) : NULL;
+    whole = text != NULL && cJSON_PrintPreallocated(root, text, ENTRY_PRINT_BYTES, false);
+    cJSON_Delete(root);
+    const esp_err_t err = whole ? take(ctx, text, strlen(text)) : ESP_ERR_NO_MEM;
+    json_end();
+    return err;
 }
 
 esp_err_t net_mqtt_chunks_init(void)
