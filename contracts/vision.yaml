@@ -13,7 +13,11 @@ camera:
   full_width: 2560 # the picture sent home: the whole 4:3 array (KEHOACH 3.19)
   full_height: 1920
   full_frame_size: FRAMESIZE_QSXGA
-  full_jpeg_quality: 12
+  full_jpeg_quality: 12          # the best a full picture gets; the scene may need a coarser one
+  full_settle_quality: 50        # settle frames at 5 MP, thrown away: never over the frame buffer
+  full_quality_ladder: [12, 16, 20, 25, 32, 40, 50]
+  full_size_exponent: 0.9        # size ~ quality^-0.9 at most (board_c.md 4.8)
+  full_fill_max: 0.8             # of CAMERA_JPEG_MODE_FRAME_SIZE a predicted picture may take
   xclk_hz: 20000000
   settle_frames_min: 4
   settle_frames_max: 30

@@ -835,6 +835,20 @@ def gen_vision_h(v: dict) -> str:
     out.append(f"#define GEN_VISION_FULL_HEIGHT {camera['full_height']}")
     out.append(f"#define GEN_VISION_FULL_FRAME_SIZE {camera['full_frame_size']}")
     out.append(f"#define GEN_VISION_FULL_JPEG_QUALITY {camera['full_jpeg_quality']}")
+    ladder = camera["full_quality_ladder"]
+    if (
+        ladder != sorted(ladder)
+        or ladder[0] != camera["full_jpeg_quality"]
+        or ladder[-1] > camera["full_settle_quality"]
+    ):
+        raise ValueError(
+            "vision.yaml full_quality_ladder must rise from full_jpeg_quality to at most full_settle_quality"
+        )
+    out.append(f"#define GEN_VISION_FULL_SETTLE_QUALITY {camera['full_settle_quality']}")
+    out.append(f"#define GEN_VISION_FULL_QUALITY_STEPS {len(ladder)}")
+    out.append("#define GEN_VISION_FULL_QUALITY_LADDER {" + ", ".join(str(q) for q in ladder) + "}")
+    out.append(f"#define GEN_VISION_FULL_SIZE_EXPONENT {float(camera['full_size_exponent'])!r}f")
+    out.append(f"#define GEN_VISION_FULL_FILL_MAX {float(camera['full_fill_max'])!r}f")
     out.append(f"#define GEN_VISION_XCLK_HZ {camera['xclk_hz']}")
     out.append(f"#define GEN_VISION_SETTLE_FRAMES_MIN {camera['settle_frames_min']}")
     out.append(f"#define GEN_VISION_SETTLE_FRAMES_MAX {camera['settle_frames_max']}")
