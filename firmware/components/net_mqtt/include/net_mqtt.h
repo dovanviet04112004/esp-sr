@@ -99,7 +99,7 @@ esp_err_t net_mqtt_publish_sensors(sensors_t *report);
 
 /** Queue one chunk of a picture on up/image, a header of contracts/vision.yaml and its data; only a full
  * outbox waits.
- *  @ctx nhin_task | blocking while the outbox holds over 128 KB, past a 720p picture | caller keeps chunk
+ *  @ctx nhin_task | blocking while the outbox holds over 128 KB, past detect's picture | caller keeps chunk
  *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session | ESP_ERR_NO_MEM outbox full | ESP_ERR_TIMEOUT never
  * drained
  */

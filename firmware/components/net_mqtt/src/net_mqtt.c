@@ -463,7 +463,7 @@ esp_err_t net_mqtt_publish_image(const uint8_t *chunk, size_t bytes)
         s_stats.publish_failures++;
         return ESP_ERR_NO_MEM;
     }
-    // A 720p picture fits the outbox whole and leaves during detect; a full one waits (KEHOACH 3.19).
+    // Detect's picture fits the outbox whole and leaves during detect; a full one waits (KEHOACH 3.19).
     const TickType_t started = xTaskGetTickCount();
     while (esp_mqtt_client_get_outbox_size(s_client) > IMAGE_OUTBOX_MAX_BYTES) {
         if (xTaskGetTickCount() - started > pdMS_TO_TICKS(IMAGE_DRAIN_TIMEOUT_MS)) { return ESP_ERR_TIMEOUT; }
