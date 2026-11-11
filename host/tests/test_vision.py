@@ -209,7 +209,7 @@ def test_a_detect_that_found_nothing_still_leaves_its_picture(tmp_path: Path) ->
     assert assembler.mark(DEVICE, 7, 2).exists()
 
 
-def test_the_full_picture_lands_beside_the_720p_one(tmp_path: Path) -> None:
+def test_the_full_picture_lands_beside_detects_one(tmp_path: Path) -> None:
     assembler = vision.Assembler(tmp_path)
     small = assembler.take(DEVICE, chunk(PICTURE, 0, 1))
     full = PICTURE[::-1]

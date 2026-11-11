@@ -144,8 +144,8 @@ def stem_of(boot: int, seq: int) -> str:
 def draw_boxes(picture: Path, payload: dict, out: Path) -> None:
     """Write the picture as a viewer shows it, with detect's boxes and names on it; boxes are in the payload's frame.
 
-    The payload's frame spans the picture's height and sits centred across it: the 720p frame is the full picture's
-    middle band (KEHOACH 3.19), and on the 720p picture itself the offset is 0.
+    The payload's frame spans the picture's height and sits centred across it, which holds for detect's own picture
+    and for the full one, both the sensor's whole 4:3 array (KEHOACH 3.19).
     """
     with Image.open(picture) as image:
         upright = ImageOps.exif_transpose(image).convert("RGB")
@@ -203,7 +203,7 @@ class Assembler:
             file.rename(file.with_name(f"{stem}_old{older}{file.name[len(stem) :]}"))
 
     def keep(self, device: str, header: dict, image: bytes) -> Path:
-        """Write one whole picture under the data root, the full one beside the 720p one under the same stem."""
+        """Write one whole picture under the data root, the full one beside detect's under the same stem."""
         stem = stem_of(header["boot"], header["seq"])
         path = self.folder(device) / f"{stem}{suffix_of(header)}.jpg"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -228,8 +228,8 @@ class Assembler:
         return None if image is None else self.keep(device, header, image)
 
     def mark(self, device: str, boot: int, seq: int, suffix: str = "") -> Path | None:
-        """Draw a capture's boxes on its 720p or, with FULL_SUFFIX, full picture once both are in, whichever came
-        first; the path when it did."""
+        """Draw a capture's boxes on detect's picture or, with FULL_SUFFIX, the full one once both are in, whichever
+        came first; the path when it did."""
         stem = self.folder(device) / stem_of(boot, seq)
         picture, boxes = stem.with_name(stem.name + suffix + ".jpg"), stem.with_suffix(".json")
         if not picture.exists() or not boxes.exists():
@@ -249,7 +249,7 @@ class Assembler:
 
 
 def suffix_of(header: dict) -> str:
-    """The file suffix of the picture a chunk belongs to: FULL_SUFFIX for the full picture, none for the 720p one."""
+    """The file suffix of the picture a chunk belongs to: FULL_SUFFIX for the full picture, none for detect's."""
     return FULL_SUFFIX if header["flags"] & vision.CHUNK_FLAG_FULL else ""
 
 
@@ -361,7 +361,7 @@ def keep(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -
 
 
 class OneShot:
-    """One capture asked from the command line: it waits for the full picture and, in DETECT, the 720p picture and
+    """One capture asked from the command line: it waits for the full picture and, in DETECT, detect's picture and
     the boxes too, or a refusal."""
 
     def __init__(self, assembler: Assembler, mode: str, device: str | None) -> None:
