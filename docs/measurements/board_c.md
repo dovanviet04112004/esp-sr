@@ -360,6 +360,18 @@ nói với máy nhưng phòng có người nói chuyện (khung `detect` thấy 
   thấp nhất 68 784 B. Bản in vào vùng JSON của `nhin_task`: 337 356 B ở bước `vision` (kém bản không có `.JSN` 104 B, chỗ cho một lần đọc
   cảm biến), thấp nhất 79 876 B, `jsonArenaPeak` 7 896 B. Mục thật ~0,8 KB; tệ nhất, 32 khung, ~4,1 KB (tính). Nội dung trên thẻ chưa
   đọc lại: console chưa có lệnh đọc thẻ 🔬.
+- Tiếng bíp nhận lệnh lọt vào đầu lời ghi chú (chủ repo nghe thấy, 11/11). Lời ghi chú bắt đầu lúc lệnh được nhận, khi hai tiếng bíp
+  1500 Hz còn đang phát; khử vang bớt chúng còn −38 đến −49 dBFS. 5 trên 13 lượt nói bằng giọng ở boot 164 (`000008`, `000009`,
+  `000017`–`000019`) có 1500 Hz chiếm 85–97% năng lượng ở 40–140 ms đầu, nền sau đó −29 đến −31 dBFS; các lượt `make journal` không có
+  tiếng bíp nên sạch. Tiếng bíp ra loa ở −12 dBFS: khử vang bớt 26–37 dB, nhưng một tiếng thuần trên nền im vẫn nghe rõ.
+- Lời ghi chú và ảnh cùng lúc (boot 166, 5 lượt `make journal`, `ghi_task` ghi thẻ trong lúc `nhin_task` chụp): đủ cả 5 lượt, `noteDropped`
+  0, `cleanDropped` 0. Khung `detect` chụp ngay sau lệnh, 1,27–1,36 s; ảnh đầy đủ chụp 3,02–3,53 s, ghi thẻ 0,41–0,87 s trong lúc
+  `ghi_task` cùng ghi. Mục về host 9,3–15,1 s sau lệnh với lời ghi chú 5,2–12,2 s; bản nối tiếp cần lời ghi chú cộng ~10 s.
+- `sb_note` đầy nhất 122–125 hop (~2 s, 65% của 3 s): lượt `detect` chạy trên `nhan_task`, `nhan_task` chép bù một lượt khi xong.
+- Chặng `detect` của `svc_vision` (giải JPEG, `detect`, gửi khung) 2,12–2,15 s, so với 3,37–3,46 s khi chụp sau lời ghi chú;
+  `detectMs` 1 945–1 949 không đổi. Trong lúc ghi chú `svc_listen` không chạy, nên nhân 0 rảnh hơn cho phần giải JPEG ở ưu tiên 1.
+- RAM: `ghi_task` dùng 928 của 4 096 B ngăn xếp ở PSRAM; PSRAM ở bước `vision` 333 340 B (kém 4 KB), thấp nhất 76 748 B; RAM nội ở bước
+  `sensors` 101 227 B, khối lớn nhất 81 920 B (kém 4 KB), lúc nối mạng vẫn 34 816 B, vùng mượn vẫn 30 656 B; RAM nội thấp nhất 22 131 B.
 
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
