@@ -20,7 +20,6 @@
 #define STATUS_BYTES 160
 #define JSON_ALIGN 8     // cJSON nodes hold doubles
 #define PRINT_BYTES 4096 // detections: GEN_VISION_BOXES_MAX boxes
-#define ENTRY_PRINT_BYTES (PRINT_BYTES + 1024)
 #define URI_BYTES 128
 #define USER_BYTES 65
 #define PASS_BYTES 65
@@ -65,7 +64,7 @@ static char s_status_topic[GEN_TOPIC_MAX_LEN + 1];
 static char s_will[STATUS_BYTES];
 static net_mqtt_stats_t s_stats;
 
-static QueueHandle_t s_cmdset, s_cmd, s_spkset;
+static QueueHandle_t s_cmdset, s_cmd, s_spkset, s_ack;
 static net_mqtt_commands_t *s_commands;    // COMMANDS_SLOTS in PSRAM
 static net_mqtt_commands_t *s_filling;     // esp-mqtt task only: the slot a payload goes into
 static net_mqtt_commands_t *s_sent;        // esp-mqtt task only: the slot queued last
@@ -167,12 +166,12 @@ static esp_err_t status_json(status_state_t state, char *out, size_t cap)
     return printed ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
-static esp_err_t send_payload(cJSON *root, gen_topic_id_t id, bool at_once)
+static esp_err_t send_text(cJSON *root, gen_topic_id_t id, bool at_once, size_t print_bytes)
 {
     char topic[GEN_TOPIC_MAX_LEN + 1];
-    char *text = root != NULL ? json_malloc(PRINT_BYTES) : NULL;
+    char *text = root != NULL ? json_malloc(print_bytes) : NULL;
     esp_err_t err = ESP_ERR_NO_MEM;
-    if (text != NULL && cJSON_PrintPreallocated(root, text, PRINT_BYTES, false) &&
+    if (text != NULL && cJSON_PrintPreallocated(root, text, (int)print_bytes, false) &&
         gen_topic_build(id, s_device_id, topic, sizeof(topic))) {
         const gen_topic_info_t *info = &GEN_TOPIC_INFO[id];
         const int sent =
@@ -184,6 +183,11 @@ static esp_err_t send_payload(cJSON *root, gen_topic_id_t id, bool at_once)
     cJSON_Delete(root);
     json_end();
     return err;
+}
+
+static esp_err_t send_payload(cJSON *root, gen_topic_id_t id, bool at_once)
+{
+    return send_text(root, id, at_once, PRINT_BYTES);
 }
 
 static void subscribe(gen_topic_id_t id, QueueHandle_t into)
@@ -208,6 +212,7 @@ static void on_connected(void)
     subscribe(GEN_TOPIC_COMMANDS, s_cmdset);
     subscribe(GEN_TOPIC_CMD, s_cmd);
     subscribe(GEN_TOPIC_SPEAKERS, s_spkset);
+    subscribe(GEN_TOPIC_ACK, s_ack);
     xEventGroupSetBits(s_system, APP_BIT_MQTT_OK);
     ESP_LOGI(TAG, "session up, %s ONLINE", s_status_topic);
 }
@@ -217,9 +222,9 @@ static gen_topic_id_t taken_topic(const esp_mqtt_event_handle_t e)
 {
     if (e->topic == NULL || e->total_data_len <= 0) { return GEN_TOPIC_NONE; }
     const gen_topic_id_t id = gen_topic_match(e->topic, (size_t)e->topic_len, s_device_id);
-    const bool wanted = (id == GEN_TOPIC_COMMANDS && s_cmdset != NULL) ||
-                        (id == GEN_TOPIC_CMD && s_cmd != NULL) ||
-                        (id == GEN_TOPIC_SPEAKERS && s_spkset != NULL);
+    const bool wanted =
+        (id == GEN_TOPIC_COMMANDS && s_cmdset != NULL) || (id == GEN_TOPIC_CMD && s_cmd != NULL) ||
+        (id == GEN_TOPIC_SPEAKERS && s_spkset != NULL) || (id == GEN_TOPIC_ACK && s_ack != NULL);
     return wanted ? id : GEN_TOPIC_NONE;
 }
 
@@ -253,6 +258,20 @@ static void take_cmd(void)
     if (!valid || xQueueSend(s_cmd, s_cmd_in, 0) != pdTRUE) {
         s_stats.cmd_dropped++;
         ESP_LOGW(TAG, "down/cmd dropped: %s", valid ? "q_cmd full" : "outside device_cmd.schema.json");
+    }
+}
+
+// A full q_ack drops the ack: the board sends that capture again later (KEHOACH 5.3).
+static void take_ack(void)
+{
+    ack_t ack;
+    cJSON *root = s_rx_text.fits ? cJSON_ParseWithLength(s_rx_text.text, s_rx_text.bytes) : NULL;
+    const bool valid = root != NULL && ack_from_json(root, &ack);
+    cJSON_Delete(root);
+    json_end();
+    if (!valid || xQueueSend(s_ack, &ack, 0) != pdTRUE) {
+        s_stats.ack_dropped++;
+        ESP_LOGW(TAG, "down/ack dropped: %s", valid ? "q_ack full" : "outside ack.schema.json");
     }
 }
 
@@ -290,7 +309,8 @@ static void begin_rx(const esp_mqtt_event_handle_t e)
         s_filling = commands_slot();
         s_rx_text = (rx_text_t){.text = s_filling->text, .cap = NET_MQTT_COMMANDS_TEXT_BYTES};
         break;
-    case GEN_TOPIC_CMD: s_rx_text = (rx_text_t){.text = s_cmd_text, .cap = NET_MQTT_CMD_TEXT_BYTES}; break;
+    case GEN_TOPIC_CMD:
+    case GEN_TOPIC_ACK: s_rx_text = (rx_text_t){.text = s_cmd_text, .cap = NET_MQTT_CMD_TEXT_BYTES}; break;
     case GEN_TOPIC_SPEAKERS:
         s_rx_text = (rx_text_t){.text = s_speakers_text, .cap = NET_MQTT_SPEAKERS_TEXT_BYTES};
         break;
@@ -316,6 +336,7 @@ static void on_data(const esp_mqtt_event_handle_t e)
     switch (s_rx) {
     case GEN_TOPIC_COMMANDS: take_commands(); break;
     case GEN_TOPIC_CMD: take_cmd(); break;
+    case GEN_TOPIC_ACK: take_ack(); break;
     default: take_speakers(); break;
     }
     s_rx = GEN_TOPIC_NONE;
@@ -360,6 +381,7 @@ esp_err_t net_mqtt_start(const net_mqtt_config_t *cfg)
     s_cmdset = cfg->cmdset;
     s_cmd = cfg->cmd;
     s_spkset = cfg->spkset;
+    s_ack = cfg->ack;
     s_rx = GEN_TOPIC_NONE;
     strlcpy(s_device_id, cfg->device_id, sizeof(s_device_id));
     strlcpy(s_fw, cfg->fw_version, sizeof(s_fw));
@@ -456,35 +478,49 @@ esp_err_t net_mqtt_publish_sensors(sensors_t *report)
     return send_payload(sensors_to_json(report), GEN_TOPIC_SENSORS, false);
 }
 
-esp_err_t net_mqtt_publish_journal(journal_t *entry)
+bool net_mqtt_connected(void)
 {
-    if (entry == NULL) { return ESP_ERR_INVALID_ARG; }
-    if (s_client == NULL || !s_connected) { return ESP_ERR_INVALID_STATE; }
-    strlcpy(entry->device_id, s_device_id, sizeof(entry->device_id));
-    return send_payload(journal_to_json(entry), GEN_TOPIC_JOURNAL, false);
+    return s_client != NULL && s_connected;
 }
 
-esp_err_t net_mqtt_print_entry(journal_t *entry, detections_t *found, sensors_t *report, net_mqtt_take_t take,
-                               void *ctx)
+static cJSON *record_json(record_t *rec)
 {
-    if (entry == NULL || take == NULL) { return ESP_ERR_INVALID_ARG; }
-    cJSON *root = cJSON_CreateObject();
-    strlcpy(entry->device_id, s_device_id, sizeof(entry->device_id));
-    bool whole = cJSON_AddItemToObject(root, "journal", journal_to_json(entry));
-    if (found != NULL) {
-        strlcpy(found->device_id, s_device_id, sizeof(found->device_id));
-        whole = cJSON_AddItemToObject(root, "detections", detections_to_json(found)) && whole;
-    }
-    if (report != NULL) {
-        strlcpy(report->device_id, s_device_id, sizeof(report->device_id));
-        whole = cJSON_AddItemToObject(root, "sensors", sensors_to_json(report)) && whole;
-    }
-    char *text = whole ? json_malloc(ENTRY_PRINT_BYTES) : NULL;
-    whole = text != NULL && cJSON_PrintPreallocated(root, text, ENTRY_PRINT_BYTES, false);
+    strlcpy(rec->capture.device_id, s_device_id, sizeof(rec->capture.device_id));
+    strlcpy(rec->detections.device_id, s_device_id, sizeof(rec->detections.device_id));
+    strlcpy(rec->sensors.device_id, s_device_id, sizeof(rec->sensors.device_id));
+    return record_to_json(rec);
+}
+
+esp_err_t net_mqtt_print_record(record_t *rec, net_mqtt_take_t take, void *ctx)
+{
+    if (rec == NULL || take == NULL) { return ESP_ERR_INVALID_ARG; }
+    cJSON *root = record_json(rec);
+    char *text = root != NULL ? json_malloc(NET_MQTT_RECORD_TEXT_BYTES) : NULL;
+    const bool printed =
+        text != NULL && cJSON_PrintPreallocated(root, text, NET_MQTT_RECORD_TEXT_BYTES, false);
     cJSON_Delete(root);
-    const esp_err_t err = whole ? take(ctx, text, strlen(text)) : ESP_ERR_NO_MEM;
+    const esp_err_t err = printed ? take(ctx, text, strlen(text)) : ESP_ERR_NO_MEM;
     json_end();
     return err;
+}
+
+esp_err_t net_mqtt_parse_record(const char *text, size_t len, record_t *out)
+{
+    if (text == NULL || out == NULL) { return ESP_ERR_INVALID_ARG; }
+    const uint32_t failures = s_stats.json_alloc_failures;
+    cJSON *root = cJSON_ParseWithLength(text, len);
+    const bool valid = root != NULL && record_from_json(root, out);
+    cJSON_Delete(root);
+    json_end();
+    if (valid) { return ESP_OK; }
+    return s_stats.json_alloc_failures != failures ? ESP_ERR_NO_MEM : APP_ERR_RECORD_INVALID;
+}
+
+esp_err_t net_mqtt_publish_record(record_t *rec)
+{
+    if (rec == NULL) { return ESP_ERR_INVALID_ARG; }
+    if (s_client == NULL || !s_connected) { return ESP_ERR_INVALID_STATE; }
+    return send_text(record_json(rec), GEN_TOPIC_RECORD, false, NET_MQTT_RECORD_TEXT_BYTES);
 }
 
 esp_err_t net_mqtt_chunks_init(void)
@@ -494,14 +530,19 @@ esp_err_t net_mqtt_chunks_init(void)
     return s_chunk != NULL ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
-static esp_err_t queue_chunk(const char *topic, gen_topic_id_t id, size_t bytes)
+static esp_err_t queue_chunk(const char *topic, gen_topic_id_t id, size_t bytes, bool late)
 {
     const gen_topic_info_t *info = &GEN_TOPIC_INFO[id];
+    // A late chunk leaves the outbox to the captures: nhin_task comes back for it (KEHOACH 3.19).
+    if (late && esp_mqtt_client_get_outbox_size(s_client) > IMAGE_OUTBOX_MAX_BYTES) {
+        return ESP_ERR_NOT_FINISHED;
+    }
     if (esp_mqtt_client_enqueue(s_client, topic, (const char *)s_chunk, (int)bytes, info->qos, info->retain,
                                 true) < 0) {
         s_stats.publish_failures++;
         return ESP_ERR_NO_MEM;
     }
+    if (late) { return ESP_OK; }
     // Detect's picture fits the outbox whole and leaves during detect; a full one waits (KEHOACH 3.19).
     const TickType_t started = xTaskGetTickCount();
     while (esp_mqtt_client_get_outbox_size(s_client) > IMAGE_OUTBOX_MAX_BYTES) {
@@ -514,7 +555,7 @@ static esp_err_t queue_chunk(const char *topic, gen_topic_id_t id, size_t bytes)
 static esp_err_t send_chunk(const char *topic, const net_mqtt_chunks_t *chunks, size_t bytes)
 {
     if ((chunks->flags & GEN_VISION_CHUNK_FLAG_PREVIEW) == 0) {
-        return queue_chunk(topic, chunks->topic, bytes);
+        return queue_chunk(topic, chunks->topic, bytes, (chunks->flags & GEN_VISION_CHUNK_FLAG_LATE) != 0);
     }
     // QoS 0 from this task: a late preview frame is worth nothing, so none waits in the outbox.
     return esp_mqtt_client_publish(s_client, topic, (const char *)s_chunk, (int)bytes, 0, false) >= 0
@@ -531,7 +572,10 @@ esp_err_t net_mqtt_publish_chunks(const net_mqtt_chunks_t *chunks)
     uint8_t *data = s_chunk + GEN_VISION_CHUNK_HEADER_BYTES;
     const size_t count =
         (chunks->total_bytes + GEN_VISION_CHUNK_PAYLOAD_BYTES - 1) / GEN_VISION_CHUNK_PAYLOAD_BYTES;
-    for (size_t index = 0; index < count; ++index) {
+    const size_t end = chunks->chunks_max == 0 || chunks->first_index + chunks->chunks_max > count
+                           ? count
+                           : chunks->first_index + chunks->chunks_max;
+    for (size_t index = chunks->first_index; index < end; ++index) {
         const size_t offset = index * GEN_VISION_CHUNK_PAYLOAD_BYTES;
         const size_t left = chunks->total_bytes - offset;
         const size_t bytes = left < GEN_VISION_CHUNK_PAYLOAD_BYTES ? left : GEN_VISION_CHUNK_PAYLOAD_BYTES;

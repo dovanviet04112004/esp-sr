@@ -17,6 +17,7 @@ extern "C" {
 #define APP_ERR_SPEAKERS_INVALID (APP_ERR_BASE + 5)   // not a roster: an id twice or malformed, a bad name
 #define APP_ERR_SPEAKER_UNKNOWN (APP_ERR_BASE + 6)    // the id is not on the roster
 #define APP_ERR_SPEAKERS_NOT_SAVED (APP_ERR_BASE + 7) // the roster is in use, NVS not written
+#define APP_ERR_RECORD_INVALID (APP_ERR_BASE + 8)     // a card's .JSN is not a record
 
 #define APP_CODE_LOW_SCORE "LOW_SCORE"
 #define APP_CODE_LOW_MARGIN "LOW_MARGIN"

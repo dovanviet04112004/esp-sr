@@ -1,6 +1,6 @@
 /** MQTT to the broker of KEHOACH 7.3: retained status with an offline will, the up payloads, and parsed into
- *  their queues (KEHOACH 5.3) the command sets of down/commands, the instructions of down/cmd and the rosters
- * of down/speakers.
+ *  their queues (KEHOACH 5.3) the command sets of down/commands, the instructions of down/cmd, the rosters
+ * of down/speakers and the acks of down/ack.
  *  @ctx task | non-blocking once started | esp-mqtt owns its task; cJSON allocates from boot arenas
  */
 #pragma once
@@ -23,6 +23,7 @@ extern "C" {
 #define NET_MQTT_COMMANDS_TEXT_BYTES 32768 // command_set JSON: 64 commands of 512 bytes
 #define NET_MQTT_CMD_TEXT_BYTES 1024       // device_cmd JSON: SPEAK's 128 characters, every field
 #define NET_MQTT_SPEAKERS_TEXT_BYTES 2048  // speaker_set JSON: 8 names of 31 escaped characters
+#define NET_MQTT_RECORD_TEXT_BYTES 5120    // record JSON: 32 boxes and every part
 
 typedef struct {
     const char *device_id;     // copied; also the client id and default username
@@ -31,6 +32,7 @@ typedef struct {
     QueueHandle_t cmdset;      // q_cmdset, net_mqtt_commands_t *; NULL: not subscribed
     QueueHandle_t cmd;         // q_cmd, device_cmd_t; NULL: not subscribed
     QueueHandle_t spkset;      // q_spkset, net_mqtt_speakers_t, depth 1, or NULL
+    QueueHandle_t ack;         // q_ack, ack_t; NULL: not subscribed
 } net_mqtt_config_t;
 
 typedef struct {
@@ -57,6 +59,8 @@ typedef struct {
     size_t total_bytes;
     net_mqtt_fill_t fill; // the payload's bytes from offset on into data
     const void *ctx;      // fill's
+    size_t first_index;   // the chunk to start from
+    size_t chunks_max;    // how many to send from it; 0: to the end
 } net_mqtt_chunks_t;
 
 typedef struct {
@@ -64,6 +68,7 @@ typedef struct {
     uint32_t disconnects;
     uint32_t publish_failures; // enqueue refused or payload too large
     uint32_t cmd_dropped;      // q_cmd full, or a down/cmd outside the contract
+    uint32_t ack_dropped;      // q_ack full, or a down/ack outside the contract
     uint32_t json_alloc_failures;
     uint32_t json_arena_peak; // bytes, highest of the two arenas
 } net_mqtt_stats_t;
@@ -112,14 +117,28 @@ esp_err_t net_mqtt_publish_detections(detections_t *found);
  */
 esp_err_t net_mqtt_publish_sensors(sensors_t *report);
 
-/** Print a journal entry as one JSON object of journal, detections and sensors, each as its payload, for
- * take.
- *  @ctx nhin_task | blocking as long as take | found and report may be NULL, then left out; deviceId filled
- * in each; the text lives in the caller's JSON arena until take returns
+/** Whether a session is up, so a caller can leave work that needs one for later.
+ *  @ctx any | non-blocking
+ */
+bool net_mqtt_connected(void);
+
+/** Print one capture's record as up/record carries it, for take; deviceId is filled in each part.
+ *  @ctx nhin_task | blocking as long as take | the text lives in the caller's JSON arena until take returns
  *  @ret ESP_OK | ESP_ERR_INVALID_ARG | ESP_ERR_NO_MEM arena full | the error take returned
  */
-esp_err_t net_mqtt_print_entry(journal_t *entry, detections_t *found, sensors_t *report, net_mqtt_take_t take,
-                               void *ctx);
+esp_err_t net_mqtt_print_record(record_t *rec, net_mqtt_take_t take, void *ctx);
+
+/** Parse a record printed by net_mqtt_print_record, as the card keeps it, through the caller's arena.
+ *  @ctx nhin_task | non-blocking | text need not end in NUL; out is ~2 KB: not the stack
+ *  @ret ESP_OK | ESP_ERR_INVALID_ARG | APP_ERR_RECORD_INVALID not JSON or outside the schema | ESP_ERR_NO_MEM
+ */
+esp_err_t net_mqtt_parse_record(const char *text, size_t len, record_t *out);
+
+/** Queue one capture's record for mqtt_task; deviceId is filled in each part.
+ *  @ctx nhin_task | non-blocking | caller keeps rec
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session | ESP_ERR_NO_MEM arena full or the outbox refused it
+ */
+esp_err_t net_mqtt_publish_record(record_t *rec);
 
 /** Take the one chunk buffer of pictures and voice notes from PSRAM, for net_mqtt_publish_chunks.
  *  @ctx app_boot | blocking briefly | once, only with a camera
@@ -128,17 +147,12 @@ esp_err_t net_mqtt_print_entry(journal_t *entry, detections_t *found, sensors_t 
 esp_err_t net_mqtt_chunks_init(void);
 
 /** Send a picture, preview frame or voice note in chunks of contracts/vision.yaml, headed and checked here.
- *  @ctx nhin_task alone: one buffer | blocking: a preview now at QoS 0, others on an outbox over 128 KB
- *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session or buffer | ESP_ERR_NO_MEM outbox full | ESP_ERR_TIMEOUT
- * never drained | ESP_FAIL a preview chunk lost | the error fill returned
+ *  @ctx nhin_task alone: one buffer | blocking: a preview now at QoS 0, others on an outbox over 128 KB;
+ * a late chunk never waits
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session or buffer | ESP_ERR_NO_MEM | ESP_ERR_TIMEOUT never drained
+ * | ESP_ERR_NOT_FINISHED a late chunk met a full outbox | ESP_FAIL a preview chunk lost | fill's error
  */
 esp_err_t net_mqtt_publish_chunks(const net_mqtt_chunks_t *chunks);
-
-/** Queue one journal entry for mqtt_task; deviceId is filled here.
- *  @ctx nhin_task | non-blocking | caller keeps entry
- *  @ret ESP_OK | ESP_ERR_INVALID_STATE no session | ESP_ERR_NO_MEM arena full or the outbox refused it
- */
-esp_err_t net_mqtt_publish_journal(journal_t *entry);
 
 /** Parse a command set laid out as contracts/schema/command_set.schema.json, through the caller's arena.
  *  @ctx task | non-blocking | text need not end in NUL; out belongs to the caller, about 20 KB: not the stack
