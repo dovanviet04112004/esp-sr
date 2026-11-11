@@ -58,11 +58,16 @@ static bool keep_on_card(uint32_t seq, journal_t *entry, detections_t *found)
 
 void svc_journal_keep(uint32_t seq)
 {
-    svc_note_t note;
-    svc_note_record(seq, &note);
-    beep(APP_TONE_WAKE);
+    // The note and the pictures at once: the picture shows the scene of the command (KEHOACH 3.19).
+    const esp_err_t asked = svc_note_start(seq);
+    if (asked != ESP_OK) {
+        ESP_LOGW(TAG, "B%" PRIu32 "/%06" PRIu32 ": no note: %s", s_cfg.boot, seq, esp_err_to_name(asked));
+    }
     detections_t *found = svc_vision_detect(seq);
     const svc_vision_full_t full = svc_vision_full(seq);
+    svc_note_t note = {.seq = seq};
+    const esp_err_t heard = asked == ESP_OK ? svc_note_wait(seq, &note) : asked;
+    if (heard != ESP_OK && asked == ESP_OK) { ESP_LOGW(TAG, "note: %s", esp_err_to_name(heard)); }
     const bool note_sent = note.saved && svc_note_send() == ESP_OK;
     journal_t entry = {
         .boot = s_cfg.boot,

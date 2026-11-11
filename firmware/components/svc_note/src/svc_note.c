@@ -16,7 +16,9 @@
 
 #define PATH_BYTES 32
 #define HOP_WAIT_MS 100
-#define SLACK_S 5.0f // past note.max_s, no hops: nhan_task stopped
+#define REQUEST_WAIT_MS 1000
+#define WAIT_SLACK_S 10.0f // past note.max_s: the header, the last blocks, a slow card
+#define SLACK_S 5.0f       // past note.max_s, no hops: nhan_task stopped
 #define US_PER_S 1000000
 #define US_PER_MS 1000
 #define MS_PER_S 1000
@@ -41,11 +43,15 @@ typedef struct {
     uint32_t hops;
     uint32_t dropped;
     uint32_t pcm_bytes;
+    uint32_t peak_hops; // most hops waiting in sb_note at once
 } taken_t;
 
 esp_err_t svc_note_init(const svc_note_config_t *cfg)
 {
-    if (cfg == NULL || cfg->hops == NULL || cfg->system == NULL) { return ESP_ERR_INVALID_ARG; }
+    if (cfg == NULL || cfg->hops == NULL || cfg->system == NULL || cfg->requests == NULL ||
+        cfg->results == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
     if (s_cfg.hops != NULL) { return ESP_ERR_INVALID_STATE; }
     s_cfg = *cfg;
     s_block = heap_caps_malloc(GEN_VISION_NOTE_CARD_BLOCK_BYTES, MALLOC_CAP_SPIRAM);
@@ -108,6 +114,8 @@ static bool take_hops(taken_t *taken, bool kept)
         if (taken->hops > 0 && s_hop->seq != next_seq) { taken->dropped += s_hop->seq - next_seq; }
         next_seq = s_hop->seq + 1;
         taken->hops++;
+        const uint32_t waiting = (uint32_t)(xStreamBufferBytesAvailable(s_cfg.hops) / sizeof(*s_hop)) + 1;
+        taken->peak_hops = waiting > taken->peak_hops ? waiting : taken->peak_hops;
         // The speaker's own beep is neither speech nor quiet (KEHOACH 3.19).
         if ((s_hop->flags & APP_NOTE_DEAF) == 0) {
             heard = heard || (s_hop->flags & APP_NOTE_VAD) != 0;
@@ -123,9 +131,9 @@ static bool take_hops(taken_t *taken, bool kept)
     return kept;
 }
 
-void svc_note_record(uint32_t seq, svc_note_t *note)
+static void record(uint32_t seq, svc_note_t *note)
 {
-    *note = (svc_note_t){0};
+    *note = (svc_note_t){.seq = seq};
     s_seq = seq;
     s_saved_bytes = 0;
     char stem[PATH_BYTES];
@@ -141,11 +149,11 @@ void svc_note_record(uint32_t seq, svc_note_t *note)
     const int64_t started_us = esp_timer_get_time();
     taken_t taken = {0};
     xStreamBufferReset(s_cfg.hops);
-    bsp_board_camera_light(true);
+    bsp_board_note_light(true);
     xEventGroupSetBits(s_cfg.system, APP_BIT_NOTE_ON);
     const bool kept = take_hops(&taken, begun);
     xEventGroupClearBits(s_cfg.system, APP_BIT_NOTE_ON);
-    bsp_board_camera_light(false);
+    bsp_board_note_light(false);
     wav_header(header, taken.pcm_bytes);
     note->saved = kept && drv_sd_patch(s_path, 0, header, sizeof(header)) == ESP_OK;
     note->ms = (uint32_t)(taken.hops * MS_PER_S / GEN_GRID_FRAMES_PER_S);
@@ -154,9 +162,54 @@ void svc_note_record(uint32_t seq, svc_note_t *note)
     s_saved_bytes = note->bytes;
     ESP_LOGI(TAG,
              "B%" PRIu32 "/%06" PRIu32 ": %" PRIu32 " hops, %" PRIu32 " missing, %" PRIu32
-             " bytes, %s, %lld ms",
-             s_cfg.boot, seq, taken.hops, taken.dropped, taken.pcm_bytes, note->saved ? "kept" : "not kept",
-             (esp_timer_get_time() - started_us) / US_PER_MS);
+             " at most waiting, %" PRIu32 " bytes, %s, %lld ms",
+             s_cfg.boot, seq, taken.hops, taken.dropped, taken.peak_hops, taken.pcm_bytes,
+             note->saved ? "kept" : "not kept", (esp_timer_get_time() - started_us) / US_PER_MS);
+}
+
+static void beep(app_tone_t tone)
+{
+    if (s_cfg.speak == NULL) { return; }
+    const app_speak_req_t request = {.tone = tone};
+    if (xQueueSend(s_cfg.speak, &request, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "q_speak full, tone %d lost", (int)tone);
+    }
+}
+
+void svc_note_step(void)
+{
+    uint32_t seq = 0;
+    if (xQueueReceive(s_cfg.requests, &seq, pdMS_TO_TICKS(REQUEST_WAIT_MS)) != pdTRUE) { return; }
+    svc_note_t note;
+    record(seq, &note);
+    // At the note's end, though the pictures may still be under way (KEHOACH 3.19).
+    beep(APP_TONE_WAKE);
+    if (xQueueSend(s_cfg.results, &note, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "q_note_done full, note %" PRIu32 " lost", seq);
+    }
+}
+
+esp_err_t svc_note_start(uint32_t seq)
+{
+    if (s_cfg.requests == NULL) { return ESP_ERR_INVALID_STATE; }
+    return xQueueSend(s_cfg.requests, &seq, 0) == pdTRUE ? ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
+esp_err_t svc_note_wait(uint32_t seq, svc_note_t *note)
+{
+    *note = (svc_note_t){.seq = seq};
+    if (s_cfg.results == NULL) { return ESP_ERR_INVALID_STATE; }
+    const int64_t give_up_us =
+        esp_timer_get_time() + (int64_t)((GEN_VISION_NOTE_MAX_S + WAIT_SLACK_S) * US_PER_S);
+    svc_note_t came;
+    while (esp_timer_get_time() < give_up_us) {
+        const TickType_t left = pdMS_TO_TICKS((give_up_us - esp_timer_get_time()) / US_PER_MS) + 1;
+        if (xQueueReceive(s_cfg.results, &came, left) == pdTRUE && came.seq == seq) {
+            *note = came;
+            return ESP_OK;
+        }
+    }
+    return ESP_ERR_TIMEOUT;
 }
 
 static esp_err_t fill_from_card(const void *ctx, size_t offset, uint8_t *data, size_t bytes)

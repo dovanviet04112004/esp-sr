@@ -302,6 +302,9 @@ static void start_vision(void)
     const svc_note_config_t note = {
         .hops = app_wiring()->note,
         .system = app_wiring()->system,
+        .requests = app_wiring()->note_start,
+        .results = app_wiring()->note_done,
+        .speak = app_wiring()->speak,
         .boot = cfg.boot,
     };
     err = svc_note_init(&note);

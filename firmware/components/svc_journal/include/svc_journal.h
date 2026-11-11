@@ -28,7 +28,8 @@ typedef struct {
  */
 esp_err_t svc_journal_init(const svc_journal_config_t *cfg);
 
-/** Keep one entry under the seq svc_vision_step handed out, up/journal and IMG/B<boot>/<seq>.JSN; two tones.
+/** Keep one entry under the seq svc_vision_step handed out: note and pictures at once, then up/journal and
+ * .JSN.
  *  @ctx nhin_task, from svc_vision_step to svc_vision_done | blocking, note.max_s and ~10 s at most
  */
 void svc_journal_keep(uint32_t seq);

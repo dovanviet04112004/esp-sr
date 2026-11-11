@@ -30,6 +30,7 @@
 #include "svc_front.h"
 #include "svc_journal.h"
 #include "svc_listen.h"
+#include "svc_note.h"
 #include "svc_report.h"
 #include "svc_sensors.h"
 #include "svc_speak.h"
@@ -51,6 +52,7 @@
 #define PHU_STACK_BYTES 4096
 #define NHIN_STACK_BYTES 16384
 #define DO_STACK_BYTES 4096
+#define GHI_STACK_BYTES 4096
 
 #define THU_PRIORITY 17
 #define SACH_PRIORITY 16
@@ -64,6 +66,7 @@
 #define LUONG_PRIORITY 3
 #define NHIN_PRIORITY 1 // under every speech task: a picture waits (KEHOACH 3.18)
 #define DO_PRIORITY 2
+#define GHI_PRIORITY 2 // over nhin_task, shooting meanwhile (KEHOACH 5.2)
 #define PHU_PRIORITY 1 // core 1's idle time, under thu and sach (KEHOACH 5.1)
 _Static_assert(APP_DETECT_PRIORITY > NHAN_PRIORITY, "detect runs above the listener (KEHOACH 3.18)");
 
@@ -527,6 +530,15 @@ static void nhin_task(void *arg)
         }
     }
 }
+
+// Off the watchdog like nhin_task: one note holds this task up to note.max_s (KEHOACH 5.2).
+static void ghi_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        svc_note_step();
+    }
+}
 #endif
 
 #if CONFIG_APP_SENSORS_ENABLE
@@ -726,6 +738,7 @@ static StackType_t s_phu_stack[PHU_STACK_BYTES] __attribute__((aligned(portBYTE_
 #if CONFIG_APP_CAMERA_ENABLE
 static EXT_RAM_BSS_ATTR StackType_t s_nhin_stack[NHIN_STACK_BYTES]
     __attribute__((aligned(portBYTE_ALIGNMENT)));
+static EXT_RAM_BSS_ATTR StackType_t s_ghi_stack[GHI_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
 #endif
 #if CONFIG_APP_SENSORS_ENABLE
 static EXT_RAM_BSS_ATTR StackType_t s_do_stack[DO_STACK_BYTES] __attribute__((aligned(portBYTE_ALIGNMENT)));
@@ -750,6 +763,7 @@ static const task_spec_t kTasks[] = {
     {net_task, "net_task", s_net_stack, NET_STACK_BYTES, NET_PRIORITY, CORE_BUFFERED},
 #if CONFIG_APP_CAMERA_ENABLE
     {nhin_task, "nhin_task", s_nhin_stack, NHIN_STACK_BYTES, NHIN_PRIORITY, CORE_BUFFERED},
+    {ghi_task, "ghi_task", s_ghi_stack, GHI_STACK_BYTES, GHI_PRIORITY, CORE_BUFFERED},
 #endif
 #if CONFIG_APP_SENSORS_ENABLE
     {do_task, "do_task", s_do_stack, DO_STACK_BYTES, DO_PRIORITY, CORE_BUFFERED},
