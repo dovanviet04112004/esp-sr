@@ -307,6 +307,16 @@ chế độ tay rồi trả tự động. Boot 147, cùng bài thử 10 lượt 
 - Hai lượt `PHOTO` hỏng vì MQTT rớt (`No PING_RESP`, `session down` hai lần): một ảnh không gửi được (`ESP_ERR_INVALID_STATE`, vẫn lên thẻ),
   một lệnh không tới board. Một lần ghi thẻ 5 361 ms.
 
+**Làm tròn phơi sáng quy đổi về bước 10 ms của cỡ mới (E15-T31, 11/11).** Boot 156, cùng bài thử 10 lượt `make detect` và 5 lượt `PHOTO`.
+- Quy đổi nằm đúng lưới: `exposure 10464 -> 8400` sang khung đầy đủ, `8400 -> 10464` về 640 × 480; AEC dừng ở đúng giá trị ấy cả 15 lượt.
+- Khung `detect`: 6 khung (một lượt 7), 0,84–1,03 s, chụp 0,99–1,22 s; không còn lượt 18 khung.
+- Ảnh đầy đủ sau khung `detect` và `PHOTO`: 6 khung, 2,31–2,37 s ở cả 15 lượt, chụp 2,94–3,01 s (2,9–5,3 s trước khi làm tròn). `PHOTO` về host
+  3,8–4,6 s.
+- `detectMs` 1 936–1 946; đủ ảnh cả 15 lượt; PSRAM trống lúc đứng yên 358 232 B, thấp nhất 193 768 B; RAM nội thấp nhất 22 071 B.
+- Khung `detect` chờ 6 khung thay vì 4–5 của bản không quy đổi: độ lợi mang từ ảnh đầy đủ (30) về 28 ở 640 × 480 trong hai khung đầu, nên
+  phép đếm khung đứng yên bắt đầu lại; chụp lâu hơn bản ấy ~0,3 s nhưng không còn lượt dài.
+- MQTT rớt một lần (`session down`), không lượt nào hỏng.
+
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
 `drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là hằng số; bao nhiêu bước
