@@ -2641,8 +2641,24 @@ dài nếu `detect` chạy, trầm nếu không; ảnh nhỏ không gửi đư�
 sau khi đã có tiếng thì không thêm tiếng: camera hỏng thì có `CAMERA_FAIL`, gửi hỏng thì ảnh còn ở thẻ. `DETECT_FAIL` chỉ khi `detect` không chạy; gửi khung hỏng là việc của MQTT, bản QoS 1 còn nằm ở outbox.
 Không có đệm (`svc_vision_init` hỏng) hay không có camera thì `nhin_task` vẫn chạy và từ chối từng yêu cầu bằng `CAMERA_FAIL`, board vẫn nghe.
 
-**Ngoại vi còn lại** gom ở `svc_sensors`, task `do_task`, đăng `up/sensors` khi đổi và mỗi 10 s. Chúng đã chạy, nhưng `sdkconfig.board_c` đang tắt
-`APP_SENSORS_ENABLE` theo chủ repo: board C chạy chuỗi cơ bản, và RAM nội chúng lấy làm `detect` chậm đi (`measurements/board_c.md` §7).
+**Ghi nhật ký.** "ghi nhật ký" (id `ghi_nhat_ky` ở `vision.yaml`; host gửi `CAPTURE` với `JOURNAL`) gom một mục nhật ký: lời ghi chú,
+khung `detect`, ảnh đầy đủ và số đo cảm biến. Số của lời ghi chú nằm ở `vision.yaml` mục `note`, khai bằng giây và quy ra hop lúc khởi tạo.
+1. Sau hai tiếng bíp nhận lệnh, `nhin_task` bật cờ `APP_BIT_NOTE_ON` và đèn GPIO 42 (§7.5). Chừng nào cờ bật, `nhan_task` chép mỗi hop âm đã
+   lọc cùng cờ `vad` vào `sb_note` với timeout 0, và đưa hop ấy vào `svc_listen` như hop điếc, nên lời ghi chú không đánh thức hay thành lệnh.
+2. `nhin_task` lấy hop từ `sb_note`, ghi thành `/sdcard/IMG/B<boot>/<seq>.WAV` (PCM 16 kHz, một kênh, 16 bit) theo khối 8 KB, header WAV vá
+   cỡ lúc xong. Đoạn ghi dừng khi người nói im `note.end_silence_s` sau tiếng nói đầu, khi chưa ai nói sau `note.start_s`, hay khi đủ
+   `note.max_s`. Hop điếc, tức lúc loa đang phát tiếng bíp của chính nó, không tính là nói hay im. Một tiếng ngắn báo xong ghi.
+3. Khung `detect` và ảnh đầy đủ như "nhận diện", không tiếng giữa chừng.
+4. Đọc lại `.WAV` từ thẻ, gửi `up/note` theo khúc của `vision.yaml` cùng `seq`, rồi `up/journal` mang độ dài, cỡ và `saved` của lời
+   ghi chú và của ảnh đầy đủ. Tiếng cuối dài khi cả hai tới được ít nhất một nơi, trầm nếu không.
+
+Không có thẻ thì không có lời ghi chú (`noteSaved: false`, cỡ 0): 30 s là 960 KB, không giữ được trong PSRAM. Host lưu `<stem>.wav`
+và `<stem>_journal.json`, gồm bản `up/journal`, bản `up/sensors` mới nhất của board (vị trí, chuyển động, ADC) và tên các file của mục.
+Lời ghi chú là tiếng người, dữ liệu cá nhân (§1.4): chỉ nằm ở thẻ và data root, không bao giờ vào git.
+
+**Ngoại vi còn lại** gom ở `svc_sensors`, task `do_task`, đăng `up/sensors` khi đổi và mỗi 10 s. `sdkconfig.board_c` bật
+`APP_SENSORS_ENABLE` để nhật ký có vị trí và chuyển động (chủ repo 11/11). RAM nội chúng lấy từng làm `detect` chậm đi 1,94 → 2,01 s
+(`measurements/board_c.md` §7), trước khi dự trữ vùng mượn hạ xuống 2 KB; đo lại 🔬.
 
 - GPS: `drv_gps`, UART1 chỉ RX ở GPIO 20, 9600 baud. Phân tích NMEA là phần thuần, có test trên máy tính. Có vị trí thì host ghi
   `<ảnh>_place.json` cạnh ảnh, từ `up/sensors` mới nhất; hiện board chưa gắn anten.
@@ -2749,6 +2765,7 @@ contracts/
 │   ├── speaker_set.schema.json    #   danh sách người nói gửi xuống board (§3.17)
 │   ├── speaker_roster.schema.json #   danh sách và trạng thái đăng ký board đăng lên
 │   ├── ota_manifest.schema.json
+│   ├── journal.schema.json        #   một mục "ghi nhật ký" của board C (§3.19)
 │   └── responses.schema.json      #   khuôn của responses/vi.json — không phải payload MQTT
 ├── mqtt_topics.yaml               # topic + QoS + retained + chiều + schema
 ├── stream/frame.yaml              # khuôn nhị phân một khung của luồng tiếng TCP (§7.4)
@@ -3743,14 +3760,14 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 | `thu_task` | `svc_front` | 1 | 17 | 2 KB | chặn trong `drv_audio_read_frame` tới khi DMA đủ một khung | lấy khung `ch0 ch1 [ref]`, gắn `seq`, đẩy chỉ số ô vào `q_frame`; đếm tràn DMA. **Không làm gì khác** |
 | `sach_task` | `svc_front` | 1 | 16 | 6 KB | `q_frame` | `dsp_afe_feed` rồi `fetch`; khung sạch vào `q_clean`; ghi `s_afe_stats`; luồng mở thì chép khung vào `sb_stream` không chờ |
 | `phu_task` | `ai_engine` | 1 | 1 | 4 KB | chỉ khi `AI_ENGINE_CORES_TWO`; `ai_engine_helper_serve` chờ phần việc tới 100 ms | làm phần 1 của op riêng `ai_engine` mà task chạy mạng giao qua `s_split`, rồi báo xong (§5.1, ADR-0027); hết hạn chờ thì nạp watchdog |
-| `nhan_task` | `svc_listen` | 0 | 10; 2 khi chạy việc cửa sổ | 8 KB | `q_clean`, `q_cmdset` | log-mel và front SwiftF0 mỗi bước, CNN cao độ một lượt mỗi 16 bước (~30 ms, `q_clean` đỡ), ba chiều cao độ trễ 35–50 bước (§3.11) → `wake` mỗi khung ở mọi trạng thái; trong `LENH` chạy thêm cửa sổ `command` theo luồng; câu chốt → chấm → `q_dialog`; ảnh không có `wake` thì mở cửa sổ cho mọi câu `vad` tìm ra, cắt như Cửa 3 (§5.4), sự kiện → `q_event_up`; khi khối nhận diện người nói bật, lệnh nhận được đi sang `q_verify` thay vì lên thẳng (§3.17); giữa hai câu nhận bộ lệnh mới từ `q_cmdset`, đổi bảng lệnh, đưa cho `ai_engine_command_prepare`, ghi `set.json` (§5.3, §6.4) |
+| `nhan_task` | `svc_listen` | 0 | 10; 2 khi chạy việc cửa sổ | 8 KB | `q_clean`, `q_cmdset` | log-mel và front SwiftF0 mỗi bước, CNN cao độ một lượt mỗi 16 bước (~30 ms, `q_clean` đỡ), ba chiều cao độ trễ 35–50 bước (§3.11) → `wake` mỗi khung ở mọi trạng thái; trong `LENH` chạy thêm cửa sổ `command` theo luồng; câu chốt → chấm → `q_dialog`; ảnh không có `wake` thì mở cửa sổ cho mọi câu `vad` tìm ra, cắt như Cửa 3 (§5.4), sự kiện → `q_event_up`; khi khối nhận diện người nói bật, lệnh nhận được đi sang `q_verify` thay vì lên thẳng (§3.17); giữa hai câu nhận bộ lệnh mới từ `q_cmdset`, đổi bảng lệnh, đưa cho `ai_engine_command_prepare`, ghi `set.json` (§5.3, §6.4); lúc `APP_BIT_NOTE_ON` bật thì chép mỗi hop vào `sb_note` và đưa nó vào `svc_listen` như hop điếc (§3.19) |
 | `xac_task` | `svc_listen` | 0 | 3 | 8 KB | `q_verify`, `q_spk`, `q_spkset` | xác minh người nói của đường chip (§3.17): đặc trưng b0, mạng, điểm với mọi mẫu giọng → `COMMAND` hay `REJECT` vào `q_event_up`, trả ô qua `q_verify_free`; đổi danh sách người nói và đăng ký theo `q_spkset`, `q_spk`, huỷ lần đăng ký quá hạn mỗi vòng chờ 100 ms, ghi NVS qua `sys_storage`, ghi bản trạng thái vào `q_roster`. Ngăn xếp ở RAM nội vì nó ghi flash |
 | `dieu_task` | `svc_dialog` từ E14-T4 | 0 | 8 | 4 KB, ở PSRAM trên board C | `q_dialog`, `q_cmd` | hiện chỉ đổi `SPEAKER_ENROL`, `SPEAKER_ENROL_CANCEL` của `q_cmd` thành yêu cầu `ENROL`, `ENROL_CANCEL` vào `q_spk`; `NGHE` ↔ `LENH` do `svc_listen` quyết trong `nhan_task` (§5.4); trạng thái `DAP`, câu trả lời ra `q_speak` và `q_event_up` có từ E14-T4 |
 | `noi_task` | `svc_speak` | 0 | 5 | 8 KB, ở PSRAM trên board C | `q_speak` | dựng trọn câu vào PSRAM rồi đẩy xuống TX; giương `SPEAKING` suốt lúc phát |
 | `gui_task` | `svc_report` | 0 | 4 | 4 KB, ở PSRAM trên board C | nhịp 100 ms | lấy mẫu `s_afe_stats`, gộp 10 mẫu thành một `telemetry` mỗi giây; phát `q_event_up`; `heartbeat` mỗi 30 s; đăng `up/speakers` khi `q_roster` có bản mới hay khi MQTT nối lại |
 | `luong_task` | `svc_report` | 0 | 3 | 4 KB, ở PSRAM trên board C | `sb_stream` | đẩy khung qua `net_stream`; TCP nghẽn thì bỏ khung, đếm; không bao giờ chặn người ghi |
 | `net_task` | `net_wifi` | 0 | 3 | 4 KB | một lần lúc boot | chờ link **tới khi có**, rồi nối MQTT, mở SNTP; xong thì tự xoá |
-| `nhin_task` | `svc_vision` | 0 | 1; 11 trong lượt `detect` | 16 KB **ở PSRAM** | `q_vision` | chụp, lưu thẻ, đẩy ảnh, `detect` (§3.19); không ghi flash nên ngăn xếp ở PSRAM được; chỉ có ở board C |
+| `nhin_task` | `svc_vision` | 0 | 1; 11 trong lượt `detect` | 16 KB **ở PSRAM** | `q_vision` | chụp, lưu thẻ, đẩy ảnh, `detect`, ghi và gửi lời ghi chú từ `sb_note` (§3.19); không ghi flash nên ngăn xếp ở PSRAM được; chỉ có ở board C |
 | `do_task` | `svc_sensors` | 0 | 2 | 4 KB **ở PSRAM** | nhịp 1 s | đọc GPS, hồng ngoại, I2C, đăng `up/sensors`; chỉ có ở board C |
 | `mqtt_task` | esp-mqtt | 0 | 5 | 6 KB **ở PSRAM** | esp-mqtt tự tạo | gửi nhận, TLS ở `prod` |
 | `console` | `esp_console` (REPL) | 0 | 2 | 4 KB | `esp_console` tự tạo, **chỉ khi** `APP_CONSOLE` — không có ở `prod` | đọc dòng lệnh trên UART0, ghi NVS qua `sys_storage`; lệnh `spk` đọc `q_roster`, gửi `q_spk`; không lưu lịch sử xuống flash |
@@ -3791,6 +3808,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `q_cmd` | Queue depth 4, `device_cmd_t` (sinh từ `contracts/`, chở cả chữ 512 B của `SPEAK`), bộ nhớ ở PSRAM | 4 × ~600 B | task của esp-mqtt | `dieu_task` | không chờ: bỏ, tăng `cmd_dropped` của `net_mqtt`, log; bản ngoài `device_cmd.schema.json` cũng vậy | callback esp-mqtt chỉ **phân tích** rồi bỏ vào đây; chờ ở callback là chặn cả đường MQTT |
 | `q_cmdset` | Queue depth 1, con trỏ tới một trong hai ô bộ lệnh của `net_mqtt` ở PSRAM, cấp lúc boot: bộ đã phân tích, kết quả phân tích, payload nguyên văn | 4 B + 2 × ~53 KB | task của esp-mqtt | `nhan_task` | bản mới thay bản chờ: task esp-mqtt rút bản chờ về rồi gửi bản mới; ô `nhan_task` đã nhận giữ nguyên tới lần nhận sau (`FREERTOS.md` 8.10); payload rỗng, tức bản retained bị xoá, không vào hàng | `nhan_task` tự chạy `lang_vi`, đổi bảng lệnh và gọi `ai_engine_command_prepare` **giữa hai câu**: khi không có cửa sổ nào mở hay chờ chấm và không câu nào đang chạy, ở mọi trạng thái; bộ trùng `version` với bộ đang dùng bị bỏ qua |
 | `q_vision` | Queue depth 1, `app_vision_req_t`, bộ nhớ ở PSRAM | 1 × 4 B | `dieu_task` | `nhin_task`, xem bằng `xQueuePeek`, chỉ xoá khi xong ảnh | không chờ: `dieu_task` ra `ERROR VISION_BUSY`, như `q_spk` | lệnh ảnh người dùng vừa nói; xếp hàng thì ảnh chụp trễ, sai cảnh, nên yêu cầu nằm trong hàng suốt lần chụp và hàng đầy chính là "đang bận" |
+| `sb_note` | StreamBuffer ở PSRAM, bản ghi `app_note_hop_t`: `seq`, cờ `vad`, cờ điếc, một hop PCM; cỡ `note.buffer_s` của `vision.yaml`, chỉ có ở board C | 3 s, ~97 KB | `nhan_task`, chỉ khi `APP_BIT_NOTE_ON`, timeout 0 | `nhin_task` | không đủ chỗ cho cả bản ghi thì bỏ hop, tăng `note_dropped`; không bao giờ ghi nửa bản ghi | `nhan_task` không bao giờ chờ thẻ; một lượt ghi thẻ thường dưới 1 s, đệm 3 s đỡ được, lượt hiếm 5 s (`measurements/board_c.md` §4.8) làm lời ghi chú hở vài hop |
 | `q_speak` | Queue depth 4, `app_speak_req_t`, bộ nhớ ở PSRAM | 4 × 546 B | `dieu_task`, `nhin_task`, console | `noi_task` | bỏ, log | |
 | `q_event_up` | Queue depth 16, `app_event_t`, bộ nhớ ở PSRAM | 16 × 108 B | `nhan_task`, `xac_task`, `dieu_task`, `nhin_task` | `gui_task` | bỏ, tăng `events_dropped` | **người phát sự kiện không bao giờ publish**: publish QoS 1 chờ PUBACK, và `nhan_task` đứng chờ mạng là đệm 1 s đầy dần |
 | `q_verify` | Queue depth 2, chỉ số ô `uint8_t`; hai ô của `svc_listen` ở PSRAM, mỗi ô 24 000 mẫu `int16` cùng quyết định `COMMAND`, cấp lúc boot khi ảnh có `speaker` | 2 × ~47 KB | `nhan_task` | `xac_task` | không bao giờ đầy: chỉ ô lấy được từ `q_verify_free` mới được gửi | không chép tiếng hai lần; một ô chỉ có một chủ tại một lúc, như `q_frame` |
@@ -4278,7 +4296,7 @@ Board B, profile `bench`, lúc đã nghe: sản phẩm với b0 ở `measurement
 | `aec` (§3.5), chỉ khi có loa: phổ tham chiếu 8 × 257 phức, đệm, mỗi micro trọng số 8 × 257 phức và thống kê | ~56 KB một micro, ~75 KB hai micro, tính 🔬 |
 | **Còn trống khi nghe** | 4 278 432 B đo với b0, 4 258 212 B khi Wi-Fi và MQTT đã nối (`ram.md` §5); 2 022 720 B với b3, Wi-Fi chưa nối (`ram.md` §4) |
 | `detect` cạnh sản phẩm (§3.18) | đồ thị 2 825 888 B cộng 11 152 B lúc chạy: vừa với b0, không vừa với b3 (`ram.md` §5) |
-| Ảnh của board C (§3.19): bộ đệm khung JPEG 384 KB cho cả khung `detect` và khung đầy đủ, RGB888 512 × 384 589 824 B, đệm giải JPEG 64 KB, khúc gửi 16 KB, ngăn xếp `nhin_task` và `do_task` 20 KB | ~1,2 MB; board C một micro, b0, `detect`: với bộ đệm 320 KB còn 412 748 B ở bước `vision` (đo 10/11); với 512 KB còn 216 140 B ở bước ấy và 122 364 B lúc đứng yên sau Wi-Fi và MQTT (đo); với 384 KB và RGB 640 × 360 253 648 B lúc đứng yên, thấp nhất 84 260 B (đo); RGB 512 × 384 thêm 101 376 B |
+| Ảnh của board C (§3.19): bộ đệm khung JPEG 384 KB cho cả khung `detect` và khung đầy đủ, RGB888 512 × 384 589 824 B, đệm giải JPEG 64 KB, khúc gửi 16 KB, `sb_note` 97 KB của nhật ký, ngăn xếp `nhin_task` và `do_task` 20 KB | ~1,3 MB; board C một micro, b0, `detect`: với bộ đệm 320 KB còn 412 748 B ở bước `vision` (đo 10/11); với 512 KB còn 216 140 B ở bước ấy và 122 364 B lúc đứng yên sau Wi-Fi và MQTT (đo); với 384 KB và RGB 640 × 360 253 648 B lúc đứng yên, thấp nhất 84 260 B (đo); RGB 512 × 384 thêm 101 376 B |
 | Chưa có trong firmware: `ns` | 187 KB (RNNoise-16k) tới 394 KB (NSNet-16k L), đo ở E9-T10 |
 | Chưa có: đệm dựng câu của `noi_task`, 5 s × 16 kHz × 2 B | 160 KB |
 | Chưa có: `synth` nếu là mạng | ≤ 1 MB + ~0,3 MB |
@@ -4351,6 +4369,8 @@ Topic, QoS, retained và schema khai ở `contracts/mqtt_topics.yaml`; bảng d�
 | `sr/{deviceId}/up/image` | lên | 1 | không | nhị phân, `contracts/vision.yaml` | mỗi lần chụp, theo khúc (§3.19) |
 | `sr/{deviceId}/up/detections` | lên | 1 | không | `detections` | mỗi lần "nhận diện" |
 | `sr/{deviceId}/up/sensors` | lên | 0 | không | `sensors` | khi đổi và mỗi 10 s |
+| `sr/{deviceId}/up/note` | lên | 1 | không | nhị phân, `contracts/vision.yaml` | mỗi lần "ghi nhật ký": lời ghi chú `.WAV` theo khúc (§3.19) |
+| `sr/{deviceId}/up/journal` | lên | 1 | không | `journal` | mỗi lần "ghi nhật ký", sau ảnh và lời ghi chú |
 | `sr/{deviceId}/down/ota` | xuống | 1 | không | `ota_manifest` | E13 |
 
 | Payload | Nội dung | Cỡ ước |
