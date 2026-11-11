@@ -2654,7 +2654,8 @@ khung `detect`, ảnh đầy đủ và số đo cảm biến. Số của lời g
 
 Không có thẻ thì không có lời ghi chú (`noteSaved: false`, cỡ 0): 30 s là 960 KB, không giữ được trong PSRAM. Host lưu `<stem>.wav`
 và `<stem>_journal.json`, gồm bản `up/journal`, bản `up/sensors` mới nhất của board (vị trí, chuyển động, ADC) và tên các file của mục.
-Lời ghi chú là tiếng người, dữ liệu cá nhân (§1.4): chỉ nằm ở thẻ và data root, không bao giờ vào git.
+Lời ghi chú là tiếng người, dữ liệu cá nhân (§1.4): chỉ nằm ở thẻ và data root, không bao giờ vào git. `make journal` gửi `CAPTURE`
+với `JOURNAL` như `make detect`, rồi chờ đủ hai ảnh, khung, lời ghi chú và bản nhật ký, thêm `note.max_s` vào hạn chờ.
 
 **Ngoại vi còn lại** gom ở `svc_sensors`, task `do_task`, đăng `up/sensors` khi đổi và mỗi 10 s. `sdkconfig.board_c` bật
 `APP_SENSORS_ENABLE` để nhật ký có vị trí và chuyển động (chủ repo 11/11). RAM nội chúng lấy từng làm `detect` chậm đi 1,94 → 2,01 s
