@@ -315,7 +315,11 @@ chế độ tay rồi trả tự động. Boot 147, cùng bài thử 10 lượt 
 - `detectMs` 1 936–1 946; đủ ảnh cả 15 lượt; PSRAM trống lúc đứng yên 358 232 B, thấp nhất 193 768 B; RAM nội thấp nhất 22 071 B.
 - Khung `detect` chờ 6 khung thay vì 4–5 của bản không quy đổi: độ lợi mang từ ảnh đầy đủ (30) về 28 ở 640 × 480 trong hai khung đầu, nên
   phép đếm khung đứng yên bắt đầu lại; chụp lâu hơn bản ấy ~0,3 s nhưng không còn lượt dài.
-- MQTT rớt một lần (`session down`), không lượt nào hỏng.
+- Không lượt nào rớt MQTT. Dòng `session down` ở đầu log là lúc bài thử khởi động lại board (`net_wifi: down, reason 8`, tức
+  `ASSOC_LEAVE`), không phải rớt mạng.
+- Hai lần `No PING_RESP` của boot 147 là rớt thật: board rảnh giữa hai lượt, Wi-Fi vẫn nối (không có `net_wifi: down`), mà ping của esp-mqtt
+  (gửi sau 7,5 s im lặng, chờ tới 15 s với keepalive 15 s) không có trả lời; log EMQX ở mức warning không ghi gì lúc ấy. Ba lần của boot 140
+  trùng lúc PSRAM còn ~10 KB, chưa gặp lại từ khi bộ đệm còn 384 KB. Log serial của boot 147 không còn, nên chưa khoanh được chặng nào tắc 🔬.
 
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
