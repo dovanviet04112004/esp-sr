@@ -1,6 +1,7 @@
 #include "drv_camera.h"
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -44,6 +45,32 @@ static sensor_t *s_sensor;
 static bool s_can_focus;
 static drv_camera_size_t s_size;
 static bool s_size_known;
+static const uint8_t kQualityLadder[] = GEN_VISION_FULL_QUALITY_LADDER;
+static int s_full_quality = GEN_VISION_FULL_JPEG_QUALITY;
+
+// The best rung whose predicted size fits, from one frame's bytes at a known quality (KEHOACH 3.19).
+static int fitting_quality(size_t bytes, int at_quality)
+{
+    const float budget = GEN_VISION_FULL_FILL_MAX * (float)CONFIG_CAMERA_JPEG_MODE_FRAME_SIZE;
+    for (size_t i = 0; i < GEN_VISION_FULL_QUALITY_STEPS; i++) {
+        const float ratio = (float)at_quality / (float)kQualityLadder[i];
+        if ((float)bytes * powf(ratio, GEN_VISION_FULL_SIZE_EXPONENT) <= budget) { return kQualityLadder[i]; }
+    }
+    return kQualityLadder[GEN_VISION_FULL_QUALITY_STEPS - 1];
+}
+
+static int coarser_than(int quality)
+{
+    for (size_t i = 0; i < GEN_VISION_FULL_QUALITY_STEPS; i++) {
+        if (kQualityLadder[i] > quality) { return kQualityLadder[i]; }
+    }
+    return quality;
+}
+
+static bool full_size(void)
+{
+    return s_size_known && s_size == DRV_CAMERA_SIZE_FULL;
+}
 
 typedef struct {
     int line_total; // points a line takes
@@ -149,7 +176,8 @@ esp_err_t drv_camera_use(drv_camera_size_t size)
     if (exposure < 0 || gain < 0 || !read_line(&before)) { return ESP_FAIL; }
     const bool full = size == DRV_CAMERA_SIZE_FULL;
     if (s_sensor->set_framesize(s_sensor, full ? GEN_VISION_FULL_FRAME_SIZE : GEN_VISION_FRAME_SIZE) != 0 ||
-        s_sensor->set_quality(s_sensor, full ? GEN_VISION_FULL_JPEG_QUALITY : GEN_VISION_JPEG_QUALITY) != 0 ||
+        s_sensor->set_quality(s_sensor, full ? GEN_VISION_FULL_SETTLE_QUALITY : GEN_VISION_JPEG_QUALITY) !=
+            0 ||
         !read_line(&after)) {
         return ESP_FAIL;
     }
@@ -174,8 +202,13 @@ esp_err_t drv_camera_wake(void)
     if (s_sensor == NULL) { return ESP_ERR_INVALID_STATE; }
     if (s_sensor->set_reg(s_sensor, SYSTEM_CTRL0_REG, SYSTEM_CTRL0_STANDBY, 0) < 0) { return ESP_FAIL; }
     vTaskDelay(pdMS_TO_TICKS(WAKE_SETTLE_MS));
+    // A dark room's noise takes a 5 MP picture at the best quality past the frame buffer (KEHOACH 3.19).
+    if (full_size() && s_sensor->set_quality(s_sensor, GEN_VISION_FULL_SETTLE_QUALITY) != 0) {
+        return ESP_FAIL;
+    }
     const int64_t started_us = esp_timer_get_time();
     uint32_t last = 0;
+    size_t last_bytes = 0;
     int still = 0;
     int frames = 0;
     // AEC stops inside its stable range, so an exposure that holds says the light has been found.
@@ -183,6 +216,7 @@ esp_err_t drv_camera_wake(void)
            (frames < GEN_VISION_SETTLE_FRAMES_MIN || still < GEN_VISION_STILL_FRAMES)) {
         camera_fb_t *frame = esp_camera_fb_get();
         if (frame == NULL) { return ESP_ERR_TIMEOUT; }
+        last_bytes = frame->len;
         esp_camera_fb_return(frame);
         const uint32_t now = exposure_and_gain();
         still = now == last ? still + 1 : 0;
@@ -191,6 +225,15 @@ esp_err_t drv_camera_wake(void)
     }
     ESP_LOGI(TAG, "settled in %d frames, %lld ms, exposure %" PRIu32 " gain %" PRIu32, frames,
              (esp_timer_get_time() - started_us) / US_PER_MS, last >> 10, last & 0x3FF);
+    if (!full_size()) { return ESP_OK; }
+    s_full_quality = fitting_quality(last_bytes, GEN_VISION_FULL_SETTLE_QUALITY);
+    if (s_sensor->set_quality(s_sensor, s_full_quality) != 0) { return ESP_FAIL; }
+    ESP_LOGI(TAG, "quality %d for %u bytes at %d", s_full_quality, (unsigned)last_bytes,
+             GEN_VISION_FULL_SETTLE_QUALITY);
+    // The frame under way is still at the settle frames' quality.
+    camera_fb_t *stale = esp_camera_fb_get();
+    if (stale == NULL) { return ESP_ERR_TIMEOUT; }
+    esp_camera_fb_return(stale);
     return ESP_OK;
 }
 
@@ -214,12 +257,25 @@ esp_err_t drv_camera_grab(drv_camera_frame_t *frame)
     // With one buffer the frame waiting is older than the focus that just ended.
     if (s_can_focus) { esp_camera_fb_return(esp_camera_fb_get()); }
     camera_fb_t *taken = esp_camera_fb_get();
+    if (taken == NULL && full_size() && coarser_than(s_full_quality) != s_full_quality) {
+        s_full_quality = coarser_than(s_full_quality);
+        ESP_LOGW(TAG, "full frame lost, quality %d", s_full_quality);
+        if (s_sensor->set_quality(s_sensor, s_full_quality) != 0) { return ESP_FAIL; }
+        taken = esp_camera_fb_get();
+    }
     if (taken == NULL) { return ESP_ERR_TIMEOUT; }
+    const int quality = full_size() ? s_full_quality : GEN_VISION_JPEG_QUALITY;
+    // A live view sets the next frame's quality from this one's size.
+    if (full_size()) {
+        const int next = fitting_quality(taken->len, s_full_quality);
+        if (next != s_full_quality && s_sensor->set_quality(s_sensor, next) == 0) { s_full_quality = next; }
+    }
     *frame = (drv_camera_frame_t){
         .jpeg = taken->buf,
         .bytes = taken->len,
         .width = (uint16_t)taken->width,
         .height = (uint16_t)taken->height,
+        .quality = (uint8_t)quality,
         .held = taken,
     };
     return ESP_OK;

@@ -285,9 +285,11 @@ static svc_vision_full_t send_full(uint32_t seq, bool sounds)
     };
     raise_event(&event);
     drv_camera_release(&frame);
-    ESP_LOGI(TAG, "B%" PRIu32 "/%06" PRIu32 " full: %u bytes, shot %lld ms, sent %lld ms, card %lld ms",
-             s_cfg.boot, seq, (unsigned)full.bytes, (shot_us - started_us) / US_PER_MS,
-             (sent_us - shot_us) / US_PER_MS, (esp_timer_get_time() - sent_us) / US_PER_MS);
+    ESP_LOGI(
+        TAG,
+        "B%" PRIu32 "/%06" PRIu32 " full: %u bytes at quality %u, shot %lld ms, sent %lld ms, card %lld ms",
+        s_cfg.boot, seq, (unsigned)full.bytes, (unsigned)frame.quality, (shot_us - started_us) / US_PER_MS,
+        (sent_us - shot_us) / US_PER_MS, (esp_timer_get_time() - sent_us) / US_PER_MS);
     return full;
 }
 

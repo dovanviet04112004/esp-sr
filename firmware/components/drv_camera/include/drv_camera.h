@@ -17,7 +17,8 @@ typedef struct {
     size_t bytes;
     uint16_t width;
     uint16_t height;
-    void *held; // what drv_camera_release gives back
+    uint8_t quality; // its JPEG quality, lower is finer
+    void *held;      // what drv_camera_release gives back
 } drv_camera_frame_t;
 
 typedef enum {
