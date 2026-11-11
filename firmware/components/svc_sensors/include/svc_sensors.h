@@ -3,7 +3,10 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
+
+#include "gen_payload.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,6 +25,12 @@ void svc_sensors_init(const svc_sensors_config_t *cfg);
  *  @ctx do_task | blocks on the I2C bus, never on the network
  */
 void svc_sensors_step(void);
+
+/** Copy the latest reading, reported or not, for a journal entry.
+ *  @ctx any task | non-blocking, a spinlock around one copy
+ *  @ret false until the first svc_sensors_step has read
+ */
+bool svc_sensors_latest(sensors_t *out);
 
 #ifdef __cplusplus
 }

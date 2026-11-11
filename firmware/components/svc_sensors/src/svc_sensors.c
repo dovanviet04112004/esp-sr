@@ -10,6 +10,7 @@
 #include "drv_ir.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 #include "gen_payload.h"
 #include "gen_vision.h"
 #include "net_mqtt.h"
@@ -30,6 +31,10 @@ static struct {
     sensors_gps_t gps;
     sensors_ir_t ir;
 } s_sensors;
+
+static sensors_t s_latest;
+static bool s_read_once;
+static portMUX_TYPE s_latest_lock = portMUX_INITIALIZER_UNLOCKED;
 
 static void log_failure(const char *device, esp_err_t err)
 {
@@ -103,6 +108,10 @@ void svc_sensors_step(void)
     read_gps(&report.gps);
     read_motion(&report);
     read_adc(&report);
+    taskENTER_CRITICAL(&s_latest_lock);
+    s_latest = report;
+    s_read_once = true;
+    taskEXIT_CRITICAL(&s_latest_lock);
     s_sensors.ticks++;
     if (!something_changed(&report) && s_sensors.ticks < TICKS_PER_REPORT) { return; }
     s_sensors.gps = report.gps;
@@ -110,4 +119,13 @@ void svc_sensors_step(void)
     s_sensors.ticks = 0;
     s_sensors.in_view_most = 0;
     net_mqtt_publish_sensors(&report);
+}
+
+bool svc_sensors_latest(sensors_t *out)
+{
+    taskENTER_CRITICAL(&s_latest_lock);
+    const bool any = s_read_once;
+    if (any) { *out = s_latest; }
+    taskEXIT_CRITICAL(&s_latest_lock);
+    return any;
 }
