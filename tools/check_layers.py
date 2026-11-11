@@ -43,7 +43,9 @@ LAYERS: dict[str, int] = {
     "svc_speak": 4,
     "svc_report": 4,
     "svc_vision": 4,
+    "svc_note": 4,
     "svc_sensors": 4,
+    "svc_journal": 5,
     "svc_dialog": 5,
     "main": 6,
 }
