@@ -220,6 +220,33 @@ esp_err_t drv_sd_read(const char *path, size_t offset, uint8_t *data, size_t byt
     return err;
 }
 
+esp_err_t drv_sd_size(const char *path, size_t *bytes)
+{
+    *bytes = 0;
+    char full[PATH_MAX_BYTES];
+    const int length = snprintf(full, sizeof(full), DRV_SD_ROOT "/%s", path);
+    if (!fits(length, sizeof(full))) { return ESP_ERR_INVALID_SIZE; }
+    esp_err_t err = take_card();
+    if (err != ESP_OK) { return err; }
+    struct stat info;
+    err = stat(full, &info) == 0 ? ESP_OK : ESP_ERR_NOT_FOUND;
+    if (err == ESP_OK) { *bytes = (size_t)info.st_size; }
+    give_card();
+    return err;
+}
+
+esp_err_t drv_sd_remove(const char *path)
+{
+    char full[PATH_MAX_BYTES];
+    const int length = snprintf(full, sizeof(full), DRV_SD_ROOT "/%s", path);
+    if (!fits(length, sizeof(full))) { return ESP_ERR_INVALID_SIZE; }
+    esp_err_t err = take_card();
+    if (err != ESP_OK) { return err; }
+    err = remove(full) == 0 ? ESP_OK : ESP_ERR_NOT_FOUND;
+    give_card();
+    return err;
+}
+
 static esp_err_t list_held(const char *path, drv_sd_entry_t each, void *ctx)
 {
     char dir_path[PATH_MAX_BYTES];
