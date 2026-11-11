@@ -506,6 +506,29 @@ p10 −50 dBFS thay −54, micro lúc loa phát −23,9 thay −21,1 dBFS. ERLE 
 
 Chưa đo: tiếng nói thật qua loa thay nhiễu, chạy dài 30 phút (E10-T1), âm lượng tối đa (E10-T2), parity trên chip 🔬.
 
+**Tiếng bíp của chính máy trong âm đã lọc (E10-T9, 11/11).**
+
+Bản thu `stream 11` (micro và tham chiếu) ở boot 166 vừa khởi động, phòng yên: `tone command` × 6, `wake` × 2, `done`, `fail`, cách nhau
+~3 s (`interim/aec/beeps1`, script và phép phân tích ở `interim/aec/beeps1_run/`). Chạy lại offline bằng bản soi gương Python của chuỗi
+board C (`hpf`, `aec`, `ns_omlsa`, `vad`, `agc`). Mức là dBFS của dải ±80 Hz quanh tần số tiếng bíp trong 0,4 s từ lúc bíp; nền là toàn
+dải lúc không bíp. `tone erle` ngay sau loạt bíp: **−0,5 dB**.
+
+| Tầng | Tiếng bíp 1500 Hz | Nền |
+|---|---|---|
+| Micro | −44 đến −46 | −48,9 |
+| `aec`, bộ lọc từ 0 như sau boot | −43 ở tiếng đầu, −55 đến −57 từ tiếng thứ tư | −51,4 |
+| `aec` + `ns` | −44 ở tiếng đầu, −59 đến −60 về sau | −55,0 |
+| Cả chuỗi, sau `agc` | −21 đến −35 | −29,6 |
+
+- `aec` chỉ bớt 0–13 dB trên tiếng bíp 70–300 ms: bộ lọc bắt đầu từ 0 sau mỗi boot và cần vài giây tiếng loa để học (KẾ HOẠCH §3.5).
+- Khử vọng dư thêm 1–4 dB: vọng dư ước bằng `leak × vọng đã ước`, và `ns` dìm mỗi vạch tối đa `ns_floor_db`, −12 dB.
+- `agc` nâng nền và phần vọng dư cùng ~25 dB, nên tiếng bíp nổi trên nền như ở micro. So với thước §3.5, ERLE sau khử vọng dư trên tiếng
+  bíp chỉ ~12 dB, dưới 20 dB.
+- Thử trên bản soi gương: sàn −40 dB và vọng dư × 10 đưa tiếng bíp từ tiếng thứ ba về −68 đến −79; hai tiếng đầu vẫn −47 đến −52 vì
+  bộ lọc chưa ước được vọng. Riêng sàn −40 dB hay riêng × 10 chỉ thêm 0–7 dB.
+- Bộ lọc học trước bằng bản `echo1` của 04/11 (giả lập lưu trọng số rồi nạp lúc boot) làm tiếng bíp đầu to hơn micro (−39,9 so với −44,4):
+  board đã đổi chỗ, đường vọng khác. Lưu trọng số qua boot không dùng được.
+
 ## 7. GPS, hồng ngoại và hai thiết bị I2C (E2-T15, T16, T17, 05/11)
 
 Đã chạy đầu cuối lên `up/sensors` và `make host-live` ở boot 50, rồi **tắt khỏi bản build của board C theo chủ repo** (`APP_SENSORS_ENABLE`, `sdkconfig.board_c`).
