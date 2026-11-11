@@ -21,7 +21,6 @@
 #include "gen_vision.h"
 #include "net_mqtt.h"
 
-#define REQUEST_WAIT_MS 1000
 #define PATH_BYTES 32
 #define RGB_BYTES_PER_PIXEL 3
 #define DECODED_WIDTH GEN_VISION_DECODE_WIDTH
@@ -293,14 +292,6 @@ static svc_vision_full_t send_full(uint32_t seq, bool sounds)
     return full;
 }
 
-static void carry_out(const app_vision_req_t *request)
-{
-    const uint32_t seq = ++s_seq;
-    bool toned = false;
-    if (request->mode == APP_VISION_DETECT && !answer_detect(seq, true, &toned)) { return; }
-    (void)send_full(seq, !toned);
-}
-
 static void end_preview(void)
 {
     s_previewing = false;
@@ -345,10 +336,10 @@ static void refuse(const app_vision_req_t *request)
     beep(APP_TONE_FAIL);
 }
 
-bool svc_vision_step(uint32_t *journal_seq)
+bool svc_vision_step(uint32_t wait_ms, svc_vision_capture_t *capture)
 {
     app_vision_req_t request;
-    const TickType_t wait = s_previewing ? 0 : pdMS_TO_TICKS(REQUEST_WAIT_MS);
+    const TickType_t wait = s_previewing ? 0 : pdMS_TO_TICKS(wait_ms);
     // Peeked, not taken: the full queue is what refuses a second command during this picture (KEHOACH 5.3).
     if (xQueuePeek(s_cfg.requests, &request, wait) == pdTRUE) {
         if (!s_ready) {
@@ -357,11 +348,8 @@ bool svc_vision_step(uint32_t *journal_seq)
             hold_preview();
         } else {
             if (s_previewing) { end_preview(); }
-            if (request.mode == APP_VISION_JOURNAL) {
-                *journal_seq = ++s_seq;
-                return true;
-            }
-            carry_out(&request);
+            *capture = (svc_vision_capture_t){.mode = request.mode, .seq = ++s_seq};
+            return true;
         }
         xQueueReset(s_cfg.requests);
     }
@@ -370,16 +358,22 @@ bool svc_vision_step(uint32_t *journal_seq)
     return false;
 }
 
-detections_t *svc_vision_detect(uint32_t seq)
+bool svc_vision_previewing(void)
 {
-    bool toned = false;
-    (void)answer_detect(seq, false, &toned);
-    return s_found->capture_seq == seq ? s_found : NULL;
+    return s_previewing;
 }
 
-svc_vision_full_t svc_vision_full(uint32_t seq)
+svc_vision_detect_t svc_vision_detect(uint32_t seq, bool sounds)
 {
-    return send_full(seq, false);
+    svc_vision_detect_t shot = {0};
+    shot.shot = answer_detect(seq, sounds, &shot.toned);
+    shot.found = shot.shot && s_found->capture_seq == seq ? s_found : NULL;
+    return shot;
+}
+
+svc_vision_full_t svc_vision_full(uint32_t seq, bool sounds)
+{
+    return send_full(seq, sounds);
 }
 
 void svc_vision_done(void)

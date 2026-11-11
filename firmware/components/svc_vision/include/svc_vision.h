@@ -1,4 +1,4 @@
-/** nhin_task's camera: photograph, keep, send and detect on request; a journal entry is handed back
+/** nhin_task's camera: photograph, keep, send and detect; each capture request is handed back to nhin_task
  * (KEHOACH 3.19).
  *  @ctx nhin_task after init | one request at a time
  */
@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "app_events.h"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -25,9 +26,20 @@ typedef struct {
 } svc_vision_config_t;
 
 typedef struct {
-    uint32_t bytes;
-    bool sent;  // every chunk reached the outbox
-    bool saved; // the card holds it
+    app_vision_mode_t mode; // PHOTO, DETECT or JOURNAL
+    uint32_t seq;           // names its pictures, note and record
+} svc_vision_capture_t;
+
+typedef struct {
+    detections_t *found; // until the next request; NULL: detect did not run
+    bool shot;           // detect's frame came
+    bool toned;          // the answer's tone sounded
+} svc_vision_detect_t;
+
+typedef struct {
+    uint32_t bytes; // 0 when no picture came
+    bool sent;      // every chunk reached the outbox
+    bool saved;     // the card holds it
 } svc_vision_full_t;
 
 /** Take the buffers; drv_camera and drv_sd come up first, a card may be missing.
@@ -37,22 +49,26 @@ typedef struct {
  */
 esp_err_t svc_vision_init(const svc_vision_config_t *cfg);
 
-/** Carry out one request, waiting a while for it; during a preview, send one frame and do not wait.
- *  @ctx nhin_task | blocking, seconds with a request | loop on it
- *  @ret true: a journal request waits in q_vision under *journal_seq; keep it, then call svc_vision_done
+/** Wait up to wait_ms for a request; a preview is held here, one frame a call, without waiting.
+ *  @ctx nhin_task | blocking up to wait_ms | loop on it
+ *  @ret true: a capture waits in q_vision as *capture; carry it out, then call svc_vision_done
  */
-bool svc_vision_step(uint32_t *journal_seq);
+bool svc_vision_step(uint32_t wait_ms, svc_vision_capture_t *capture);
 
-/** Shoot detect's frame and send it, then what detect finds in it, with no tone.
+/** Whether a preview runs, which keeps nhin_task sending its frames.
+ *  @ctx nhin_task | non-blocking
+ */
+bool svc_vision_previewing(void);
+
+/** Shoot detect's frame and send it, then what detect finds in it; with sounds, the answer's tone.
  *  @ctx nhin_task, from svc_vision_step to svc_vision_done | blocking, ~3.5 s
- *  @ret what detect found, svc_vision's until the next request; NULL when detect did not run
  */
-detections_t *svc_vision_detect(uint32_t seq);
+svc_vision_detect_t svc_vision_detect(uint32_t seq, bool sounds);
 
-/** Shoot the full picture, send it and keep it on the card, with no tone.
+/** Shoot the full picture, send it and keep it on the card; with sounds, the tone once it reached one.
  *  @ctx nhin_task, from svc_vision_step to svc_vision_done | blocking, ~4 s
  */
-svc_vision_full_t svc_vision_full(uint32_t seq);
+svc_vision_full_t svc_vision_full(uint32_t seq, bool sounds);
 
 /** Let q_vision take the next request once the handed-back one is done.
  *  @ctx nhin_task | non-blocking
