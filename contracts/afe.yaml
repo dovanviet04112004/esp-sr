@@ -29,6 +29,15 @@ aec:
   erle_keep: 0.98
   diverge_ratio: 4.0
   diverge_blocks: 50
+  # Residual echo the filter has not learned yet: speaker-to-mic coupling times the reference (KEHOACH 3.5).
+  couple_start_db: -23.0    # above the -26 .. -31 dB board C measured: a beep right after boot
+  couple_max_db: -10.0      # a near talker over a beep must not teach more
+  couple_peak_db: -20.0     # learn only within this of the hop's strongest reference bin
+  couple_up: 0.5
+  couple_down: 0.02
+  couple_tail_s: 0.1        # the reference's power the echo still carries
+  couple_hold_s: 0.4        # the room's tail outlasts the filter's 128 ms: decay on this long after the reference
+  couple_ref_min: 0.0001    # windowed power of a bin that carries the reference
 doa:
   # Above the alias frequency the room's diffuse field decorrelates; below it pulls the angle to broadside (KEHOACH 3.6).
   band_min_hz: 2000.0
@@ -68,6 +77,7 @@ bss:                                # direction gate on doa's angle (KEHOACH 3.8
   lookahead_s: 0.1                  # delayed output: an old hop's gate takes the angle held this long after it; 0.15 s and more lose turn ends when talkers answer without a pause
 ns:
   floor_db: -12.0                     # seed of NVS afe/ns_floor_db: G_min of OM-LSA
+  echo_floor_db: -40.0                # where the residual echo of aec rules a bin (KEHOACH 3.9)
   # OM-LSA with IMCRA (KEHOACH 3.9) as the author's omlsa.m of 2003: 'medium' non-stationarity, broadband decision,
   # no tone removal. The paper's smoothing factors at 8 ms are time constants here; at 16 ms they square.
   freq_smooth_bins: 1                 # Hann window of 2w + 1 bins over frequency
