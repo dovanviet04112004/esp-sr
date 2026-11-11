@@ -332,6 +332,31 @@ log EMQX mức info, `emqx ctl clients show` mỗi 5 s, và `srhost.live --jsonl
   mở ảnh lúc bên kia đang ghi đè, lỗi của PIL làm `OneShot` bỏ qua tin `detections`. Ghi file nguyên tử và luôn ghi nhận tin đã tới: 46/46 lượt
   sau đó đủ.
 
+### 4.9 Ghi nhật ký (E15-T32, 11/11)
+
+Boot 158: bản đầu, mọi việc nằm trong `svc_vision`, hop ghi chú vào `svc_listen` như hop điếc. Boot 160: bản tách `svc_note` và `svc_journal`
+(KẾ HOẠCH §3.19), hop ghi chú không vào `svc_listen`. Cả hai bật cảm biến. `make journal` 1 + 5 lượt ở boot 158, 5 lượt ở boot 160, không ai
+nói với máy nhưng phòng có người nói chuyện (khung `detect` thấy 1–4 người). Log ở `interim/journal/20261111/` của data root, bản thu ở
+`raw/images/sr-30eda01e4630/`, không vào git.
+- Đủ cả 11 lượt: ảnh `detect`, khung, ảnh đầy đủ, `.wav`, `_journal.json`; `noteDropped` 0, `noteSaved` và `saved` đúng ở mọi lượt. WAV 16 kHz,
+  một kênh, 16 bit; lượt đầu có tiếng nói −21 đến −25 dBFS từ 0,5 s đến 3,5 s, đuôi im −48 dBFS.
+- Lời ghi chú dài 4,8–16,0 s: tiếng người trong phòng giữ đoạn ghi mở, nên chưa lượt nào dừng ở mốc 5 s "chưa ai nói". `qCleanPeak` 123 hop,
+  `cleanDropped` 0.
+- Hop điếc không giữ được bộ nghe: lượt 4 của boot 158 có `WAKE` 826 giữa lời ghi chú (09:33:05, ghi chú 09:33:01,9–09:33:15,5), rồi
+  `REJECT LOW_MARGIN`, vì `wake` chạy trên mọi hop, kể cả hop điếc. Boot 160 không đưa hop ghi chú vào `svc_listen`: 5 lượt, 46 s ghi chú, không có
+  `WAKE` hay `REJECT` nào suốt bài thử. Điều này đúng do cấu trúc; 5 lượt chỉ xác nhận, không đo được tỉ lệ.
+- `detectMs` 1 946–1 969 khi cảm biến bật (1 936–1 947 khi tắt, §4.8); vùng mượn 30 656 của 32 768 B. Boot 160: RAM nội ở bước `sensors`
+  101 771 B, khối lớn nhất 86 016 B; lúc nối mạng 51 375 B, khối lớn nhất 34 816 B; PSRAM ở bước `vision` 337 460 B, bằng boot 158, vì đệm khúc
+  16 KB chuyển từ `svc_vision` sang `net_mqtt` mà không đổi cỡ.
+- Heartbeat boot 160: RAM nội thấp nhất 22 699 B, PSRAM thấp nhất 78 672 B, PSRAM trống 208 364–246 508 B. Lúc đứng yên thấp hơn §4.8 ~112 KB:
+  `sb_note` 97 KB, khối thẻ 8 KB, cảm biến ~4 KB.
+- Lời ghi chú ghi xong thì khung `detect` chụp 1,09–1,34 s (6–8 khung đứng yên), ảnh đầy đủ chụp 2,94–2,96 s, gửi 0,3–0,9 s (một lượt 6,2 s),
+  ghi thẻ 0,70–0,89 s. Mục nhật ký về host 16,0–29,3 s sau lệnh, phần lớn là lời ghi chú. Khung `detect` của boot 160 chờ 7–8 khung thay vì 6
+  (độ lợi 27 so với 30–32), chưa rõ vì cảnh hay vì gì khác; code camera không đổi giữa hai bản 🔬.
+- Lượt đầu tiên của boot 158 chậm hẳn: ảnh đầy đủ chụp 7,5 s, ghi thẻ 4,6 s. Chưa gặp lại ở 10 lượt sau 🔬.
+- `_journal.json` mang bản `up/sensors` mới nhất: GPS chưa có fix trong nhà (thấy 12 vệ tinh, ăng-ten báo hở), hồng ngoại, gia tốc, con quay,
+  nhiệt độ của MPU-6500, ADC 0 mV ở cả bốn kênh vì chưa nối gì (§7). Board C không có cảm biến quang phổ.
+
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
 `drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là hằng số; bao nhiêu bước
