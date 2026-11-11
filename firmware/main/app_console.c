@@ -440,19 +440,34 @@ static int tone_cmd(int argc, char **argv)
         printf("tone erle %.1f dB, %" PRIu32 " resets\n", (double)stats.aec_erle_db, stats.aec_resets);
         return 0;
     }
-    const app_speak_req_t request = {.tone = APP_TONE_TEST};
-    const bool sent = xQueueSend(app_wiring()->speak, &request, 0) == pdTRUE;
-    printf("tone test: %s\n", sent ? "sent" : "busy");
-    return sent ? 0 : 1;
+    static const struct {
+        const char *name;
+        app_tone_t tone;
+    } kTones[] = {
+        {"test", APP_TONE_TEST}, {"wake", APP_TONE_WAKE}, {"command", APP_TONE_COMMAND},
+        {"done", APP_TONE_DONE}, {"fail", APP_TONE_FAIL},
+    };
+    const char *name = s_tone_args.action->sval[0];
+    for (size_t i = 0; i < sizeof(kTones) / sizeof(kTones[0]); i++) {
+        if (strcmp(name, kTones[i].name) != 0) { continue; }
+        const app_speak_req_t request = {.tone = kTones[i].tone};
+        const bool sent = xQueueSend(app_wiring()->speak, &request, 0) == pdTRUE;
+        printf("tone %s: %s\n", name, sent ? "sent" : "busy");
+        return sent ? 0 : 1;
+    }
+    printf("tone %s: no such tone\n", name);
+    return 1;
 }
 
 static esp_err_t register_tone(void)
 {
-    s_tone_args.action = arg_str1(NULL, NULL, "test|erle", "play 10 s of noise, or read what aec cancels");
+    s_tone_args.action = arg_str1(NULL, NULL, "test|erle|wake|command|done|fail",
+                                  "play noise or a beep, or read what aec cancels");
     s_tone_args.end = arg_end(2);
     const esp_console_cmd_t tone = {
         .command = "tone",
-        .help = "Measure aec: noise out of the speaker, then the echo return loss enhancement",
+        .help = "Measure aec: noise or one of the product's beeps out of the speaker, then the echo return "
+                "loss enhancement",
         .func = tone_cmd,
         .argtable = &s_tone_args,
     };
