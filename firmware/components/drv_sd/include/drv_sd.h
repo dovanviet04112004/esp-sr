@@ -68,6 +68,16 @@ esp_err_t drv_sd_patch(const char *path, size_t offset, const uint8_t *data, siz
  */
 esp_err_t drv_sd_read(const char *path, size_t offset, uint8_t *data, size_t bytes, size_t *got);
 
+typedef void (*drv_sd_entry_t)(void *ctx, const char *name, size_t bytes, bool is_dir);
+
+/** Call each with every entry of a folder, its size, and whether it is a folder itself.
+ *  @ctx console | blocking, a few ms an entry, m_sd held throughout | path is relative to DRV_SD_ROOT, "" its
+ * root
+ *  @ret ESP_OK | ESP_ERR_INVALID_STATE no card | ESP_ERR_INVALID_SIZE path too long | ESP_ERR_NOT_FOUND no
+ * such folder
+ */
+esp_err_t drv_sd_list(const char *path, drv_sd_entry_t each, void *ctx);
+
 #ifdef __cplusplus
 }
 #endif

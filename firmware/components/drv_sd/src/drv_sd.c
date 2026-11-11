@@ -1,5 +1,6 @@
 #include "drv_sd.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -215,6 +216,35 @@ esp_err_t drv_sd_read(const char *path, size_t offset, uint8_t *data, size_t byt
     esp_err_t err = take_card();
     if (err != ESP_OK) { return err; }
     err = read_held(path, offset, data, bytes, got);
+    give_card();
+    return err;
+}
+
+static esp_err_t list_held(const char *path, drv_sd_entry_t each, void *ctx)
+{
+    char dir_path[PATH_MAX_BYTES];
+    const int length = snprintf(dir_path, sizeof(dir_path), DRV_SD_ROOT "/%s", path);
+    if (!fits(length, sizeof(dir_path))) { return ESP_ERR_INVALID_SIZE; }
+    DIR *dir = opendir(dir_path);
+    if (dir == NULL) { return ESP_ERR_NOT_FOUND; }
+    for (struct dirent *entry = readdir(dir); entry != NULL; entry = readdir(dir)) {
+        char full[PATH_MAX_BYTES];
+        struct stat info = {0};
+        const bool known =
+            fits(snprintf(full, sizeof(full), "%s/%s", dir_path, entry->d_name), sizeof(full)) &&
+            stat(full, &info) == 0;
+        each(ctx, entry->d_name, known ? (size_t)info.st_size : 0, entry->d_type == DT_DIR);
+    }
+    closedir(dir);
+    return ESP_OK;
+}
+
+esp_err_t drv_sd_list(const char *path, drv_sd_entry_t each, void *ctx)
+{
+    if (each == NULL) { return ESP_ERR_INVALID_ARG; }
+    esp_err_t err = take_card();
+    if (err != ESP_OK) { return err; }
+    err = list_held(path, each, ctx);
     give_card();
     return err;
 }
