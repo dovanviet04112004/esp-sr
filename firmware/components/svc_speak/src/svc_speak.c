@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "app_events.h"
 #include "drv_audio.h"
@@ -18,6 +19,11 @@
 #define NOISE_MULTIPLIER 1664525u // Numerical Recipes' LCG
 #define NOISE_INCREMENT 1013904223u
 #define NOISE_FULL_SCALE 2147483648.0f
+#define WAV_HEADER_BYTES 44
+#define WAV_FMT_BYTES 16
+#define WAV_PCM 1
+#define WAV_BITS 16
+#define CLIP_HOPS 2 // a card read per two hops: each read opens the file again
 
 typedef struct {
     uint16_t hz;
@@ -34,12 +40,14 @@ static const tone_t kTones[] = {
 static const char *TAG = "svc_speak";
 
 static QueueHandle_t s_requests;
+static svc_speak_read_t s_read;
 static uint32_t s_noise = 1;
 
 esp_err_t svc_speak_init(const svc_speak_config_t *cfg)
 {
     if (cfg == NULL || cfg->requests == NULL) { return ESP_ERR_INVALID_ARG; }
     s_requests = cfg->requests;
+    s_read = cfg->read;
     return ESP_OK;
 }
 
@@ -97,11 +105,52 @@ static void play_tone(app_tone_t id)
     if (err != ESP_OK) { ESP_LOGW(TAG, "tone %d: %s", (int)id, esp_err_to_name(err)); }
 }
 
+static uint32_t le(const uint8_t *p, size_t bytes)
+{
+    uint32_t value = 0;
+    for (size_t i = bytes; i > 0; --i) {
+        value = (value << 8) | p[i - 1];
+    }
+    return value;
+}
+
+// Only the canonical header svc_note writes: RIFF, a 16-byte PCM fmt chunk, then data.
+static bool wav_fits(const uint8_t *h, uint32_t *pcm_bytes)
+{
+    *pcm_bytes = le(h + 40, 4);
+    return memcmp(h, "RIFF", 4) == 0 && memcmp(h + 8, "WAVEfmt ", 8) == 0 && le(h + 16, 4) == WAV_FMT_BYTES &&
+           le(h + 20, 2) == WAV_PCM && le(h + 22, 2) == 1 && le(h + 24, 4) == GEN_GRID_SAMPLE_RATE_HZ &&
+           le(h + 34, 2) == WAV_BITS && memcmp(h + 36, "data", 4) == 0;
+}
+
+static esp_err_t play_clip(const char *path)
+{
+    if (s_read == NULL) { return ESP_ERR_NOT_SUPPORTED; }
+    uint8_t header[WAV_HEADER_BYTES];
+    size_t got = 0;
+    uint32_t pcm_bytes = 0;
+    esp_err_t err = s_read(path, 0, header, sizeof(header), &got);
+    if (err == ESP_OK && (got != sizeof(header) || !wav_fits(header, &pcm_bytes))) {
+        err = ESP_ERR_INVALID_RESPONSE;
+    }
+    int16_t block[CLIP_HOPS * GEN_GRID_HOP_SAMPLES];
+    for (size_t done = 0; err == ESP_OK && done < pcm_bytes; done += got) {
+        const size_t want = pcm_bytes - done < sizeof(block) ? pcm_bytes - done : sizeof(block);
+        err = s_read(path, WAV_HEADER_BYTES + done, (uint8_t *)block, want, &got);
+        if (err != ESP_OK || got < sizeof(int16_t)) { break; }
+        err = drv_audio_write(block, got / sizeof(int16_t), WRITE_TIMEOUT_MS);
+    }
+    return err;
+}
+
 void svc_speak_step(void)
 {
     app_speak_req_t request;
-    if (xQueueReceive(s_requests, &request, pdMS_TO_TICKS(REQUEST_WAIT_MS)) == pdTRUE &&
-        request.tone != APP_TONE_NONE) {
+    if (xQueueReceive(s_requests, &request, pdMS_TO_TICKS(REQUEST_WAIT_MS)) != pdTRUE) { return; }
+    if (request.tone != APP_TONE_NONE) {
         play_tone(request.tone);
+    } else if (request.clip[0] != '\0') {
+        const esp_err_t err = play_clip(request.clip);
+        ESP_LOGI(TAG, "clip %s: %s", request.clip, esp_err_to_name(err));
     }
 }

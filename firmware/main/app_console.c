@@ -12,6 +12,7 @@
 #include "argtable3/argtable3.h"
 #include "drv_camera.h"
 #include "drv_i2c.h"
+#include "drv_sd.h"
 #include "esp_check.h"
 #include "esp_console.h"
 #include "esp_heap_caps.h"
@@ -582,6 +583,114 @@ static esp_err_t register_cam(void)
 }
 #endif
 
+#if CONFIG_APP_CAMERA_ENABLE
+#define SD_CHUNK_BYTES 256
+#define SD_CAT_MAX_BYTES (64 * 1024) // a .JSN is a few KB; a picture would flood the serial line
+
+static struct {
+    struct arg_str *action;
+    struct arg_str *path;
+    struct arg_end *end;
+} s_sd_args;
+
+static void sd_entry(void *ctx, const char *name, size_t bytes, bool is_dir)
+{
+    (void)ctx;
+    if (is_dir) {
+        printf("  %s/\n", name);
+    } else {
+        printf("  %s %u B\n", name, (unsigned)bytes);
+    }
+}
+
+static int sd_cat(const char *path)
+{
+    uint8_t chunk[SD_CHUNK_BYTES];
+    size_t offset = 0;
+    size_t got = 0;
+    esp_err_t err = ESP_OK;
+    do {
+        err = drv_sd_read(path, offset, chunk, sizeof(chunk), &got);
+        if (err == ESP_OK) {
+            fwrite(chunk, 1, got, stdout);
+            offset += got;
+        }
+    } while (err == ESP_OK && got == sizeof(chunk) && offset < SD_CAT_MAX_BYTES);
+    printf("\nsd cat %s: %u bytes, %s\n", path, (unsigned)offset, esp_err_to_name(err));
+    return err == ESP_OK ? 0 : 1;
+}
+
+static int sd_cmd(int argc, char **argv)
+{
+    if (arg_parse(argc, argv, (void **)&s_sd_args) != 0) {
+        arg_print_errors(stdout, s_sd_args.end, argv[0]);
+        return 1;
+    }
+    const char *action = s_sd_args.action->sval[0];
+    const char *path = s_sd_args.path->count > 0 ? s_sd_args.path->sval[0] : "";
+    if (strcmp(action, "ls") == 0) {
+        const esp_err_t err = drv_sd_list(path, sd_entry, NULL);
+        printf("sd ls %s: %s\n", path, esp_err_to_name(err));
+        return err == ESP_OK ? 0 : 1;
+    }
+    if (strcmp(action, "cat") == 0 && path[0] != '\0') { return sd_cat(path); }
+    printf("sd: ls [<folder>] | cat <file>\n");
+    return 1;
+}
+
+static esp_err_t register_sd(void)
+{
+    s_sd_args.action = arg_str1(NULL, NULL, "ls|cat", "list a folder, or print a file");
+    s_sd_args.path = arg_str0(NULL, NULL, "<path>", "relative to the card's root, as IMG/B164/000001.JSN");
+    s_sd_args.end = arg_end(2);
+    const esp_console_cmd_t sd = {
+        .command = "sd",
+        .help = "Read the SD card without taking it out: a folder's entries, or a text file such as a .JSN",
+        .func = sd_cmd,
+        .argtable = &s_sd_args,
+    };
+    return esp_console_cmd_register(&sd);
+}
+#endif
+
+#if CONFIG_APP_CAMERA_ENABLE && CONFIG_APP_SPEAKER_ENABLE
+static struct {
+    struct arg_str *path;
+    struct arg_end *end;
+} s_play_args;
+
+static int play_cmd(int argc, char **argv)
+{
+    if (arg_parse(argc, argv, (void **)&s_play_args) != 0) {
+        arg_print_errors(stdout, s_play_args.end, argv[0]);
+        return 1;
+    }
+    const char *path = s_play_args.path->sval[0];
+    app_speak_req_t request = {.tone = APP_TONE_NONE};
+    if (strlcpy(request.clip, path, sizeof(request.clip)) >= sizeof(request.clip)) {
+        printf("play %s: the path is over %u characters\n", path, (unsigned)(sizeof(request.clip) - 1));
+        return 1;
+    }
+    const bool sent = xQueueSend(app_wiring()->speak, &request, 0) == pdTRUE;
+    printf("play %s: %s\n", path, sent ? "sent" : "busy");
+    return sent ? 0 : 1;
+}
+
+static esp_err_t register_play(void)
+{
+    s_play_args.path =
+        arg_str1(NULL, NULL, "<path>", "a 16 kHz mono 16-bit WAV on the card, as IMG/B164/000009.WAV");
+    s_play_args.end = arg_end(1);
+    const esp_console_cmd_t play = {
+        .command = "play",
+        .help = "Play a WAV from the card through the speaker, to measure aec on speech (E10-T9)",
+        .func = play_cmd,
+        .argtable = &s_play_args,
+    };
+    return esp_console_cmd_register(&play);
+}
+#endif
+
 // Board C's serial lines reach no reset pin, so this is the PC's only way to restart it (KEHOACH 2.1).
 static int restart_cmd(int argc, char **argv)
 {
@@ -641,6 +750,10 @@ static esp_err_t register_commands(void)
     ESP_RETURN_ON_ERROR(esp_console_cmd_register(&spk), TAG, "spk");
 #if CONFIG_APP_CAMERA_ENABLE
     ESP_RETURN_ON_ERROR(register_cam(), TAG, "cam");
+    ESP_RETURN_ON_ERROR(register_sd(), TAG, "sd");
+#endif
+#if CONFIG_APP_CAMERA_ENABLE && CONFIG_APP_SPEAKER_ENABLE
+    ESP_RETURN_ON_ERROR(register_play(), TAG, "play");
 #endif
 #if CONFIG_APP_SPEAKER_ENABLE
     ESP_RETURN_ON_ERROR(register_tone(), TAG, "tone");

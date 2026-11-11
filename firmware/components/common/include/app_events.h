@@ -15,6 +15,7 @@ extern "C" {
 #define APP_EVT_ID_MAX_BYTES 33
 #define APP_EVT_CODE_MAX_BYTES 33
 #define APP_SPEAK_TEXT_MAX_BYTES 513
+#define APP_SPEAK_CLIP_BYTES 33      // a WAV's path on the card, 32 characters
 #define APP_SPEAKERS_MAX 8           // speaker_set.schema.json's maxItems
 #define APP_SPEAKER_ID_PREFIX "spk_" // speaker_set.schema.json's id: this prefix,
 #define APP_SPEAKER_ID_DIGITS 3      // then this many digits
@@ -101,6 +102,7 @@ typedef struct {
     app_tone_t tone;
     char response_id[APP_EVT_ID_MAX_BYTES]; // empty when text is set
     char text[APP_SPEAK_TEXT_MAX_BYTES];    // UTF-8, from SPEAK
+    char clip[APP_SPEAK_CLIP_BYTES];        // a WAV on the card, from the console's play
 } app_speak_req_t;
 
 typedef struct {

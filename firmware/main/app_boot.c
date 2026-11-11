@@ -339,7 +339,12 @@ esp_err_t app_boot(void)
     ESP_RETURN_ON_ERROR(drv_audio_init(&audio), TAG, "audio");
     log_heap("audio");
 #if CONFIG_APP_SPEAKER_ENABLE
-    const svc_speak_config_t speak = {.requests = app_wiring()->speak};
+    const svc_speak_config_t speak = {
+        .requests = app_wiring()->speak,
+#if CONFIG_APP_CAMERA_ENABLE
+        .read = drv_sd_read,
+#endif
+    };
     ESP_RETURN_ON_ERROR(svc_speak_init(&speak), TAG, "speak");
 #endif
     seed_operating();
