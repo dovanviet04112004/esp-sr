@@ -382,6 +382,29 @@ nói với máy nhưng phòng có người nói chuyện (khung `detect` thấy 
 - RAM: `ghi_task` dùng 928 của 4 096 B ngăn xếp ở PSRAM; PSRAM ở bước `vision` 333 340 B (kém 4 KB), thấp nhất 76 748 B; RAM nội ở bước
   `sensors` 101 227 B, khối lớn nhất 81 920 B (kém 4 KB), lúc nối mạng vẫn 34 816 B, vùng mượn vẫn 30 656 B; RAM nội thấp nhất 22 131 B.
 
+### 4.10 Bản ghi, thẻ và gửi bù (E15-T36, 11/11)
+
+Boot 178 và 180, cảm biến bật, chụp bằng `cam shot` trên console, `srhost.live` nhận và gửi ack, broker tắt bằng `docker stop sr-emqx`.
+Log và script ở `interim/outbox/20261111/` của data root, ảnh và lời ghi chú ở `raw/images/sr-30eda01e4630/`, không vào git.
+- Có broker (boot 178, `PHOTO`, `DETECT`; boot 180, 3 × `DETECT`): mỗi lần chụp `record sent, kept`, ack về 0,0–1,0 s sau bản ghi, dấu
+  `IMG/PND/` xoá ngay; host ghi `<stem>_record.json` đủ ba khoá.
+- Tắt broker giữa một lần ghi nhật ký (`000003`) rồi chụp 5 lần (`000004`–`000008`, `PHOTO`, `DETECT`, `JOURNAL`, `PHOTO`, `DETECT`):
+  ảnh, `.JSN`, `.WAV` ghi thẻ như thường, `sd ls IMG/PND` thấy đúng 6 dấu. Lời ghi chú của `000003` không gửi được, mục vẫn đủ trên thẻ.
+- Bật broker: board nối lại sau 13 s, quét thấy 6 mục và gửi bù: `000003` (ảnh 258 KB, lời ghi chú 960 KB) xong trong 5,4 s, cả 6 mục
+  trong 21 s, 2,76 MB, kể cả ~8 s chụp `000009` chen giữa. Lệnh `DETECT` ra giữa lúc gửi bù (`000009`) được chụp ngay, khung về host như lúc
+  không có việc gửi bù.
+- `srhost.live` chỉ đăng ký lại 13 s sau board (paho chờ lùi dần), nên bản ghi `000003`–`000006` và các khúc đầu của ảnh `000007`
+  không tới ai; `000008` và `000009` có ack. Lượt gửi lại sau `outbox.retry_s` (120 s) bù `000003`–`000005` có ack trong 0,2–0,4 s; `000006`
+  có ack ở lượt ấy, `000007` gửi lại ngay khi phiên mới nối sau khởi động lại (boot 180) và có ack. Hết bài thử không còn dấu nào.
+- Giờ chụp host suy ra khớp lúc gõ lệnh trong khoảng 0,4 s ở mọi mục, kể cả mục gửi bù 2–3 phút sau (`000008`: lệnh 20:01:12,2,
+  suy ra 20:01:11,8). Mục gửi bù có khung vẽ trên ảnh đầy đủ (`_full_boxes.jpg`) từ `detections` của bản ghi.
+- `detectMs` 1 994–2 002 ở boot 178, khi trạng thái mới nằm ở RAM nội (~350 B): vùng mượn 25 536 B, dưới ngưỡng ~25 KB của §4.5. Trạng
+  thái của `svc_outbox` và khối điều khiển của `q_ack` sang PSRAM, RAM nội chỉ hơn 32 B: boot 180 vùng mượn 26 560 B, `detectMs`
+  1 961–1 968, trong dải theo boot ở §4.5. Chặng `detect` của `svc_vision` 3,48–3,52 s như ở §4.9; con số ấy gồm giải JPEG và gửi khung.
+- PSRAM lúc đứng yên 224,4–224,8 KB, thấp nhất 61,9 KB, so với 239,6 KB và 75,4 KB ở §4.9: hai bản ghi 1 592 B và chữ `.JSN` 6 KB
+  (đã hạ về 5 KB, bằng phòng in của `net_mqtt`, sau bài thử). `jsonArenaPeak` 9 256 B của 40 960 B. RAM nội thấp nhất 21 327 B.
+- Ghi thẻ ảnh đầy đủ 0,50–0,97 s; lần đầu của boot 178 3,7 s, lúc thư mục `B178` còn chưa có, như lượt đầu của boot 158 ở §4.9 🔬.
+
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
 `drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là hằng số; bao nhiêu bước
