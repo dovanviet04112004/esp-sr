@@ -26,8 +26,8 @@
 #define PATH_BYTES 32
 #define NAME_COPIES_MAX 16 // pictures of one name a lost NVS can leave
 #define RGB_BYTES_PER_PIXEL 3
-#define DECODED_WIDTH (GEN_VISION_WIDTH / GEN_VISION_DECODE_SCALE)
-#define DECODED_HEIGHT (GEN_VISION_HEIGHT / GEN_VISION_DECODE_SCALE)
+#define DECODED_WIDTH GEN_VISION_DECODE_WIDTH
+#define DECODED_HEIGHT GEN_VISION_DECODE_HEIGHT
 #define UPRIGHT_WIDTH DECODED_HEIGHT
 #define UPRIGHT_HEIGHT DECODED_WIDTH
 #define RGB_BYTES (DECODED_WIDTH * DECODED_HEIGHT * RGB_BYTES_PER_PIXEL)
@@ -87,16 +87,13 @@ static void raise_error(const char *code)
     raise_event(&event);
 }
 
-static bool keep_on_card(const drv_camera_frame_t *frame, uint32_t seq, bool full)
+static bool keep_on_card(const drv_camera_frame_t *frame, uint32_t seq)
 {
-    const char *mark = full ? "F" : "";
-    const char *copy_mark = full ? "F" : "_";
     char path[PATH_BYTES];
-    snprintf(path, sizeof(path), "IMG/B%" PRIu32 "/%06" PRIu32 "%s.JPG", s_cfg.boot, seq, mark);
+    snprintf(path, sizeof(path), "IMG/B%" PRIu32 "/%06" PRIu32 ".JPG", s_cfg.boot, seq);
     // A lost NVS counts boots again: a taken name gets a suffix, the older picture stays (KEHOACH 3.19).
     for (uint32_t copy = 1; copy <= NAME_COPIES_MAX && drv_sd_exists(path); copy++) {
-        snprintf(path, sizeof(path), "IMG/B%" PRIu32 "/%06" PRIu32 "%s%" PRIu32 ".JPG", s_cfg.boot, seq,
-                 copy_mark, copy);
+        snprintf(path, sizeof(path), "IMG/B%" PRIu32 "/%06" PRIu32 "_%" PRIu32 ".JPG", s_cfg.boot, seq, copy);
     }
     const esp_err_t err = drv_sd_write(path, frame->jpeg, frame->bytes);
     if (err != ESP_OK) { ESP_LOGW(TAG, "%s not kept: %s", path, esp_err_to_name(err)); }
@@ -250,10 +247,11 @@ static esp_err_t shoot(drv_camera_frame_t *frame, drv_camera_size_t size)
     return ESP_OK;
 }
 
-static bool answer_detect(uint32_t seq)
+static bool answer_detect(uint32_t seq, bool *toned)
 {
     const int64_t started_us = esp_timer_get_time();
     drv_camera_frame_t frame = {0};
+    *toned = true;
     if (shoot(&frame, DRV_CAMERA_SIZE_DETECT) != ESP_OK) {
         beep(APP_TONE_FAIL);
         return false;
@@ -263,17 +261,14 @@ static bool answer_detect(uint32_t seq)
     if (sent != ESP_OK) { ESP_LOGW(TAG, "picture not sent: %s", esp_err_to_name(sent)); }
     const int64_t sent_us = esp_timer_get_time();
     const bool answered = detect_picture(&frame, seq);
-    // The tone says the picture reached a place: past a failed send only the card can tell (KEHOACH 3.19).
-    if (sent == ESP_OK) { beep(answered ? APP_TONE_DONE : APP_TONE_FAIL); }
-    const int64_t detected_us = esp_timer_get_time();
-    const bool saved = keep_on_card(&frame, seq, false);
-    if (sent != ESP_OK) { beep(answered && saved ? APP_TONE_DONE : APP_TONE_FAIL); }
+    // Unsent but answered, the tone waits to learn whether the full picture reaches a place (KEHOACH 3.19).
+    *toned = sent == ESP_OK || !answered;
+    if (*toned) { beep(sent == ESP_OK && answered ? APP_TONE_DONE : APP_TONE_FAIL); }
     const unsigned bytes = (unsigned)frame.bytes;
     drv_camera_release(&frame);
-    ESP_LOGI(TAG,
-             "B%" PRIu32 "/%06" PRIu32 ": %u bytes, shot %lld ms, sent %lld ms, detect %lld ms, card %lld ms",
+    ESP_LOGI(TAG, "B%" PRIu32 "/%06" PRIu32 ": %u bytes, shot %lld ms, sent %lld ms, detect %lld ms",
              s_cfg.boot, seq, bytes, (shot_us - started_us) / US_PER_MS, (sent_us - shot_us) / US_PER_MS,
-             (detected_us - sent_us) / US_PER_MS, (esp_timer_get_time() - detected_us) / US_PER_MS);
+             (esp_timer_get_time() - sent_us) / US_PER_MS);
     return true;
 }
 
@@ -290,7 +285,7 @@ static void send_full(uint32_t seq, bool sounds)
     if (sent != ESP_OK) { ESP_LOGW(TAG, "full picture not sent: %s", esp_err_to_name(sent)); }
     if (sounds && sent == ESP_OK) { beep(APP_TONE_DONE); }
     const int64_t sent_us = esp_timer_get_time();
-    const bool saved = keep_on_card(&frame, seq, true);
+    const bool saved = keep_on_card(&frame, seq);
     if (sounds && sent != ESP_OK) { beep(saved ? APP_TONE_DONE : APP_TONE_FAIL); }
     app_event_t event = {
         .kind = APP_EVT_CAPTURE,
@@ -310,9 +305,9 @@ static void send_full(uint32_t seq, bool sounds)
 static void carry_out(const app_vision_req_t *request)
 {
     const uint32_t seq = ++s_seq;
-    const bool photo = request->mode != APP_VISION_DETECT;
-    if (!photo && !answer_detect(seq)) { return; }
-    send_full(seq, photo);
+    bool toned = false;
+    if (request->mode == APP_VISION_DETECT && !answer_detect(seq, &toned)) { return; }
+    send_full(seq, !toned);
 }
 
 static void end_preview(void)
@@ -320,6 +315,8 @@ static void end_preview(void)
     s_previewing = false;
     const esp_err_t rested = drv_camera_rest();
     if (rested != ESP_OK) { ESP_LOGW(TAG, "rest: %s", esp_err_to_name(rested)); }
+    const esp_err_t back = drv_camera_use(DRV_CAMERA_SIZE_DETECT);
+    if (back != ESP_OK) { ESP_LOGW(TAG, "detect's frame: %s", esp_err_to_name(back)); }
     bsp_board_camera_light(false);
 }
 
@@ -327,7 +324,9 @@ static void hold_preview(void)
 {
     if (!s_previewing) {
         bsp_board_camera_light(true);
-        const esp_err_t woken = drv_camera_wake();
+        // Focus is set on the picture sent home (KEHOACH 3.19).
+        esp_err_t woken = drv_camera_use(DRV_CAMERA_SIZE_FULL);
+        if (woken == ESP_OK) { woken = drv_camera_wake(); }
         if (woken != ESP_OK) {
             // No frames will come: a preview would spin this task with the light on.
             ESP_LOGW(TAG, "preview: %s", esp_err_to_name(woken));
