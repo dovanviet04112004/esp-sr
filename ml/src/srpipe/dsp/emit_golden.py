@@ -1018,11 +1018,22 @@ def _ns_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, float, np.nda
         (ns_power(rise), -12.0, None),
         (ns_power(faint), -18.0, None),
         (ns_power(near + residual), -12.0, ns_power(residual)),
+        _ns_echo_over(np.random.default_rng(SEED + 9)),
     ]
 
 
+def _ns_echo_over(rng: np.random.Generator) -> tuple[np.ndarray, float, np.ndarray]:
+    """A beep's residual over room noise, its estimate 30 dB too high where the beep plays: the gate's case."""
+    m = NS_ECHO_HOPS * grid.HOP_SAMPLES
+    tone = beeps(rng, m) * 0.01
+    noise = 0.001 * rng.standard_normal(m)
+    estimate = ns_power(tone * np.float32(31.6))
+    return ns_power(tone + noise), -12.0, estimate
+
+
 def emit_ns_omlsa(root: Path) -> list[Path]:
-    """Five cases, then a negative control computed with the paper's 8 ms smoothing left unsquared at the 16 ms hop."""
+    """Six cases, then two negative controls: the paper's 8 ms smoothing left unsquared at the 16 ms hop, and the
+    over-estimated echo case with the noise's floor in place of the echo's (KEHOACH 3.9)."""
     rng = np.random.default_rng(SEED + 8)
     written = []
     for index, (power, floor_db, echo) in enumerate(_ns_inputs(rng)):
@@ -1035,6 +1046,14 @@ def emit_ns_omlsa(root: Path) -> list[Path]:
     unsquared = ns_omlsa.OmlsaConfig(hop_s=0.008)
     path = root / "ns_omlsa" / "case_neg_000.gold"
     write_gold(path, {**ns_omlsa_case(power, -12.0, cfg=unsquared), "config": np.array([-12.0], dtype=np.float32)})
+    written.append(path)
+    power, floor_db, echo = _ns_echo_over(np.random.default_rng(SEED + 9))
+    noise_floor = ns_omlsa.OmlsaConfig(echo_floor_db=floor_db)
+    path = root / "ns_omlsa" / "case_neg_001.gold"
+    write_gold(
+        path,
+        {**ns_omlsa_case(power, floor_db, echo, cfg=noise_floor), "config": np.array([floor_db], dtype=np.float32)},
+    )
     written.append(path)
     return written
 
@@ -1198,6 +1217,7 @@ def emit_gsc(root: Path) -> list[Path]:
 
 
 AEC_HOPS = 60
+AEC_BEEP_HOPS = 120  # two tones and their hold, under 512 KB a case
 
 
 def room_echo(far: np.ndarray, room: np.ndarray) -> np.ndarray:
@@ -1208,9 +1228,11 @@ def room_echo(far: np.ndarray, room: np.ndarray) -> np.ndarray:
     return echo
 
 
-def aec_case(mic: np.ndarray, ref: np.ndarray, cfg: aec.AecConfig, learn: bool = True) -> dict[str, np.ndarray]:
+def aec_case(
+    mic: np.ndarray, ref: np.ndarray, cfg: aec.AecConfig, learn: bool = True, kind: type[aec.Aec] = aec.Aec
+) -> dict[str, np.ndarray]:
     """Microphones and reference a hop at a time; the residual of each microphone and the echo power per bin."""
-    canceller = aec.Aec(cfg, learn)
+    canceller = kind(cfg, learn)
     hop = aec.HOP
     outs, powers = [], []
     for h in range(ref.size // hop):
@@ -1226,8 +1248,18 @@ def aec_case(mic: np.ndarray, ref: np.ndarray, cfg: aec.AecConfig, learn: bool =
     }
 
 
+def beeps(rng: np.random.Generator, n: int) -> np.ndarray:
+    """The command tone of tones.yaml, two 70 ms beeps of 1500 Hz 70 ms apart, every 0.8 s after a quiet start."""
+    t = np.arange(n) / grid.SAMPLE_RATE_HZ
+    on = np.zeros(n, dtype=bool)
+    for start in np.arange(0.3, t[-1], 0.8):
+        on |= ((t >= start) & (t < start + 0.07)) | ((t >= start + 0.14) & (t < start + 0.21))
+    return (0.25 * np.sin(2.0 * np.pi * 1500.0 * t) * on).astype(np.float32)
+
+
 def _aec_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray, aec.AecConfig]]:
-    """Echo alone, echo over a talker, a bulk delay, two microphones, and a reference that stops and starts."""
+    """Echo alone, echo over a talker, a bulk delay, two microphones, a reference that stops and starts, and the
+    product's short beeps from a cold start, their room tail past the filter's length."""
     n = AEC_HOPS * aec.HOP
     far = (rng.standard_normal(n) * 0.05).astype(np.float32)
     decay = np.exp(-np.arange(600) / 120.0)
@@ -1244,11 +1276,29 @@ def _aec_inputs(rng: np.random.Generator) -> list[tuple[np.ndarray, np.ndarray, 
         (shifted[None], far, aec.AecConfig(bulk_delay_samples=100)),
         (np.stack(echo), far, aec.AecConfig(n_mics=2)),
         (room_echo(gapped, rooms[0])[None], gapped, aec.AecConfig()),
+        _beep_input(rng),
     ]
 
 
+def _beep_input(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, aec.AecConfig]:
+    n = AEC_BEEP_HOPS * aec.HOP
+    far = beeps(rng, n)
+    long_room = (rng.standard_normal(4000) * np.exp(-np.arange(4000) / 1200.0) * 0.01).astype(np.float32)
+    mic = room_echo(far, long_room) + (rng.standard_normal(n) * 1e-4).astype(np.float32)
+    return mic[None].astype(np.float32), far, aec.AecConfig()
+
+
+class _AecCutAtFilter(aec.Aec):
+    """aec whose coupled residual stops when the filter rests, as before couple_hold_s: a negative control."""
+
+    def __init__(self, cfg: aec.AecConfig, learn: bool = True) -> None:
+        super().__init__(cfg, learn)
+        self.hold_blocks = cfg.n_partitions
+
+
 def emit_aec(root: Path) -> list[Path]:
-    """Five cases, then a negative control whose output comes from a filter that never learns."""
+    """Six cases, then two negative controls: a filter that never learns, and beeps whose coupled residual stops
+    with the filter (KEHOACH 3.5)."""
     rng = np.random.default_rng(SEED + 44)
     written = []
     inputs = _aec_inputs(rng)
@@ -1259,6 +1309,10 @@ def emit_aec(root: Path) -> list[Path]:
     mic, ref, cfg = inputs[0]
     path = root / "aec" / "case_neg_000.gold"
     write_gold(path, aec_case(mic, ref, cfg, learn=False))
+    written.append(path)
+    mic, ref, cfg = inputs[-1]
+    path = root / "aec" / "case_neg_001.gold"
+    write_gold(path, aec_case(mic, ref, cfg, kind=_AecCutAtFilter))
     written.append(path)
     return written
 
