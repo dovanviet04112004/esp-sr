@@ -65,6 +65,7 @@ typedef struct {
     StreamBufferHandle_t note;      // sb_note: app_note_hop_t, PSRAM; NULL without a camera
     QueueHandle_t note_start;       // q_note: uint32_t seq, PSRAM; NULL without a camera
     QueueHandle_t note_done;        // q_note_done: svc_note_t, PSRAM; NULL without a camera
+    QueueHandle_t ack;              // q_ack: ack_t, PSRAM; NULL without a camera
     EventGroupHandle_t system;      // eg_system: app_system_bit_t
     app_afe_stats_t *afe_stats;     // s_afe_stats, copied under afe_stats_lock only
     portMUX_TYPE *afe_stats_lock;

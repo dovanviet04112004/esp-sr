@@ -23,9 +23,10 @@
 #include "sdkconfig.h"
 #include "svc_front.h"
 #include "storage_format.h"
-#include "svc_journal.h"
+#include "svc_capture.h"
 #include "svc_listen.h"
 #include "svc_note.h"
+#include "svc_outbox.h"
 #include "svc_report.h"
 #include "svc_sensors.h"
 #include "svc_speak.h"
@@ -309,15 +310,18 @@ static void start_vision(void)
     };
     err = svc_note_init(&note);
     if (err != ESP_OK) { ESP_LOGE(TAG, "no voice notes: %s", esp_err_to_name(err)); }
-    const svc_journal_config_t journal = {
+    const svc_outbox_config_t outbox = {.acks = app_wiring()->ack, .boot = cfg.boot};
+    err = svc_outbox_init(&outbox);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "nothing sent again from the card: %s", esp_err_to_name(err)); }
+    const svc_capture_config_t capture = {
         .speak = app_wiring()->speak,
         .boot = cfg.boot,
 #if CONFIG_APP_SENSORS_ENABLE
         .sensors = svc_sensors_latest,
 #endif
     };
-    err = svc_journal_init(&journal);
-    if (err != ESP_OK) { ESP_LOGE(TAG, "no journal on the card: %s", esp_err_to_name(err)); }
+    err = svc_capture_init(&capture);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "no capture records: %s", esp_err_to_name(err)); }
     log_heap("vision");
 }
 #endif

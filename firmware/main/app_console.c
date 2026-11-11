@@ -548,12 +548,32 @@ static struct {
     struct arg_end *end;
 } s_cam_args;
 
+static int cam_shot(const char *mode_name)
+{
+    static const char *const kModes[] = {
+        [APP_VISION_PHOTO] = "PHOTO",
+        [APP_VISION_DETECT] = "DETECT",
+        [APP_VISION_PREVIEW] = NULL,
+        [APP_VISION_JOURNAL] = "JOURNAL",
+    };
+    for (size_t mode = 0; mode < sizeof(kModes) / sizeof(kModes[0]); ++mode) {
+        if (kModes[mode] == NULL || strcmp(kModes[mode], mode_name) != 0) { continue; }
+        const app_vision_req_t request = {.mode = (app_vision_mode_t)mode};
+        const bool queued = xQueueSend(app_wiring()->vision, &request, 0) == pdTRUE;
+        printf("cam shot %s: %s\n", mode_name, queued ? "queued" : "busy");
+        return queued ? 0 : 1;
+    }
+    printf("cam shot PHOTO|DETECT|JOURNAL\n");
+    return 1;
+}
+
 static int cam_cmd(int argc, char **argv)
 {
     if (arg_parse(argc, argv, (void **)&s_cam_args) != 0) {
         arg_print_errors(stdout, s_cam_args.end, argv[0]);
         return 1;
     }
+    if (strcmp(s_cam_args.action->sval[0], "shot") == 0) { return cam_shot(s_cam_args.reg->sval[0]); }
     const uint16_t reg = (uint16_t)strtoul(s_cam_args.reg->sval[0], NULL, HEX_BASE);
     if (s_cam_args.value->count > 0) {
         const uint8_t value = (uint8_t)strtoul(s_cam_args.value->sval[0], NULL, HEX_BASE);
@@ -569,13 +589,13 @@ static int cam_cmd(int argc, char **argv)
 
 static esp_err_t register_cam(void)
 {
-    s_cam_args.action = arg_str1(NULL, NULL, "reg", "the only action");
-    s_cam_args.reg = arg_str1(NULL, NULL, "<reg>", "sensor register in hex");
+    s_cam_args.action = arg_str1(NULL, NULL, "reg|shot", "a sensor register, or one capture as by voice");
+    s_cam_args.reg = arg_str1(NULL, NULL, "<reg|mode>", "register in hex, or PHOTO, DETECT, JOURNAL");
     s_cam_args.value = arg_str0(NULL, NULL, "<value>", "byte to write in hex; leave out to read");
     s_cam_args.end = arg_end(3);
     const esp_console_cmd_t cam = {
         .command = "cam",
-        .help = "Read or write one OV5640 register between pictures; a restart forgets it",
+        .help = "Read or write one OV5640 register between pictures, a restart forgets it; or take a capture",
         .func = cam_cmd,
         .argtable = &s_cam_args,
     };

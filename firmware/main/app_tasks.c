@@ -28,9 +28,10 @@
 #include "net_wifi.h"
 #include "sdkconfig.h"
 #include "svc_front.h"
-#include "svc_journal.h"
+#include "svc_capture.h"
 #include "svc_listen.h"
 #include "svc_note.h"
+#include "svc_outbox.h"
 #include "svc_report.h"
 #include "svc_sensors.h"
 #include "svc_speak.h"
@@ -523,9 +524,10 @@ static void nhin_task(void *arg)
 {
     (void)arg;
     for (;;) {
-        uint32_t seq = 0;
-        if (svc_vision_step(&seq)) {
-            svc_journal_keep(seq);
+        svc_vision_capture_t capture;
+        const uint32_t wait_ms = svc_vision_previewing() ? 0 : svc_outbox_step();
+        if (svc_vision_step(wait_ms, &capture)) {
+            svc_capture_keep(&capture);
             svc_vision_done();
         }
     }
@@ -822,7 +824,8 @@ static void net_task(void *arg)
                                     .system = w->system,
                                     .cmdset = w->cmdset,
                                     .cmd = w->cmd,
-                                    .spkset = w->speaker_sets};
+                                    .spkset = w->speaker_sets,
+                                    .ack = w->ack};
     told = false;
     for (err = err == ESP_OK && named ? net_mqtt_start(&mqtt) : ESP_ERR_INVALID_STATE;
          err == ESP_ERR_NOT_FOUND; err = net_mqtt_start(&mqtt)) {

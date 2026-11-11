@@ -4,6 +4,7 @@
 
 #include "app_events.h"
 #include "dsp_afe.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "gen_grid.h"
@@ -25,6 +26,7 @@
 #define SPEAK_DEPTH 4
 #define VISION_DEPTH 1 // a second request while one runs is refused (KEHOACH 5.3)
 #define NOTE_DEPTH 1   // q_vision lets one journal entry run at a time
+#define ACK_DEPTH 8
 #define EVENT_UP_DEPTH 16
 #define SPEAKER_REQUESTS_DEPTH 2
 #define SPEAKER_SETS_DEPTH 1 // overwritten: a newer roster replaces the one waiting
@@ -52,6 +54,8 @@ static StaticQueue_t s_speak_q;
 #endif
 #if CONFIG_APP_CAMERA_ENABLE
 static StaticQueue_t s_vision_q, s_note_q, s_note_done_q;
+// PSRAM on board C: internal RAM moves detect's loan in 2 KB steps (measurements/board_c.md §4).
+static EXT_RAM_BSS_ATTR StaticQueue_t s_ack_q;
 static StaticStreamBuffer_t s_note_sb;
 #endif
 static StaticEventGroup_t s_system_eg;
@@ -107,7 +111,10 @@ esp_err_t app_wiring_init(void)
         xStreamBufferCreateStatic(NOTE_BUFFER_BYTES, sizeof(app_note_hop_t), note_storage, &s_note_sb);
     s_wiring.note_start = psram_queue(NOTE_DEPTH, sizeof(uint32_t), &s_note_q);
     s_wiring.note_done = psram_queue(NOTE_DEPTH, sizeof(svc_note_t), &s_note_done_q);
-    if (s_wiring.note_start == NULL || s_wiring.note_done == NULL) { return ESP_ERR_NO_MEM; }
+    s_wiring.ack = psram_queue(ACK_DEPTH, sizeof(ack_t), &s_ack_q);
+    if (s_wiring.note_start == NULL || s_wiring.note_done == NULL || s_wiring.ack == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
 #endif
 #if CONFIG_NET_STREAM_ENABLE
     // A static stream buffer needs one byte more storage than it holds.
