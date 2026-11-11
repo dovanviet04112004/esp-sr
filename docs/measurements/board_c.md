@@ -551,6 +551,10 @@ sàn vọng −40 dB trong `ns` (KẾ HOẠCH §3.5, §3.9). Bản soi gương k
 - `make journal` 2 lượt sau bản này: đủ ảnh, lời ghi chú, `.JSN`; `detectMs` 1 963–1 971, vùng mượn 30 656 B như trước: trạng thái thêm
   của `aec` nằm ở PSRAM. `sd cat` của `IMG/B164/000001.JSN` (649 B) và `000009.JSN` (729 B): đủ ba khoá; `journal` và `detections` trùng từng trường với
   `_journal.json` và `<stem>.json` của host; `sensors` là lần đọc mới nhất (`uptimeS` 51 so với bản `up/sensors` 47 host giữ).
+- Lệnh console `sd` và `play` với argtable (boot 168, 169): `detectMs` 2 226–2 235 thay 1 958–1 972. Mỗi `arg_str` và `arg_end` xin
+  RAM nội lúc đăng ký và giữ mãi: RAM nội lúc nối mạng 50 363 B thay 50 803, khối lớn nhất 32 768 B thay 34 816, nên vùng mượn của
+  `detect` hụt một bậc 2 KB. Hai lệnh tự đọc `argv` (boot 171): 50 699 B, khối 34 816 B, vùng mượn 30 656 B, `detectMs` 1 958–1 972.
+  Chỉ profile dev và bench có console; `sdkconfig.prod` tắt `APP_CONSOLE`.
 
 ## 7. GPS, hồng ngoại và hai thiết bị I2C (E2-T15, T16, T17, 05/11)
 
