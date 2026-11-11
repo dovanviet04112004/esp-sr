@@ -249,7 +249,7 @@ def test_chunks_that_never_finish_are_forgotten(tmp_path: Path, monkeypatch: pyt
     later = time.monotonic() + vision.PARTS_KEPT_S + 1
     monkeypatch.setattr(vision.time, "monotonic", lambda: later)
     assembler.take(DEVICE, chunk(PICTURE[:10], 0, 2, seq=3))
-    assert list(assembler._open) == [(DEVICE, 7, 3, 0)]
+    assert list(assembler._open) == [(DEVICE, "image", 7, 3, 0)]
 
 
 def test_a_name_handed_out_again_keeps_the_older_files(tmp_path: Path) -> None:
@@ -329,6 +329,54 @@ def test_a_whole_write_leaves_no_part_behind(tmp_path: Path) -> None:
     vision.write_whole(path, PICTURE[::-1])
     assert path.read_bytes() == PICTURE[::-1]
     assert [p.name for p in tmp_path.iterdir()] == ["B7_000002.jpg"]
+
+
+JOURNAL = {
+    "boot": 7,
+    "captureSeq": 2,
+    "noteMs": 4200,
+    "noteBytes": len(PICTURE),
+    "noteDropped": 0,
+    "noteSaved": True,
+    "imageBytes": 1000,
+    "saved": True,
+}
+
+
+def test_a_note_lands_as_a_wave_beside_the_picture_of_the_same_seq(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    vision.keep(assembler, up("image", chunk(PICTURE[:300], 0, 2)))
+    lines = vision.keep(assembler, up("note", chunk(PICTURE, 0, 1)))
+    assert lines == [f"{DEVICE} note {len(PICTURE)} bytes: {tmp_path / DEVICE / 'B7_000002.wav'}"]
+    assert (tmp_path / DEVICE / "B7_000002.wav").read_bytes() == PICTURE
+    assert not (tmp_path / DEVICE / "B7_000002.jpg").exists()
+
+
+def test_a_journal_entry_keeps_the_newest_sensors_and_the_files_it_has(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    vision.on_message(assembler, mqtt_rx.parse(f"sr/{DEVICE}/up/sensors", sensors_report(True), rx_utc="now"))
+    vision.keep(assembler, up("note", chunk(PICTURE, 0, 1)))
+    lines = vision.keep(assembler, up("journal", JOURNAL))
+    entry = json.loads((tmp_path / DEVICE / "B7_000002_journal.json").read_text(encoding="utf-8"))
+    assert entry["journal"]["noteMs"] == 4200
+    assert entry["sensors"]["gps"]["hasFix"] is True
+    assert entry["files"] == ["B7_000002.wav"]
+    assert lines[0].endswith("B7_000002_journal.json")
+
+
+def test_a_journal_waits_for_both_pictures_the_boxes_the_note_and_the_entry(tmp_path: Path) -> None:
+    shot = vision.OneShot(vision.Assembler(tmp_path), "JOURNAL", DEVICE)
+    assert shot.wait_s() == vision.ONCE_WAIT_S + contract.NOTE_MAX_S
+    for message in (
+        up("image", jpeg_chunk()),
+        up("detections", DETECTIONS),
+        up("image", jpeg_chunk(contract.CHUNK_FLAG_FULL)),
+    ):
+        shot.handle(message)
+    assert shot.missing() == "journal and note"
+    shot.handle(up("note", chunk(PICTURE, 0, 1)))
+    shot.handle(up("journal", JOURNAL))
+    assert shot.done.is_set()
 
 
 def test_a_photo_needs_the_full_picture_only(tmp_path: Path) -> None:

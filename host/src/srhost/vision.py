@@ -37,6 +37,7 @@ REFUSED = "image refused"
 FPS_WINDOW_FRAMES = 20
 BOXES_SUFFIX = "_boxes"
 FULL_SUFFIX = "_full"
+JOURNAL_SUFFIX = "_journal"
 PLACE_SUFFIX = "_place"
 BOX_COLOUR = (255, 0, 0)
 BOX_LINE_PX = 4
@@ -184,17 +185,18 @@ class Assembler:
 
     def __init__(self, root: Path) -> None:
         self._root = root
-        self._open: dict[tuple[str, int, int], Capture] = {}
+        self._open: dict[tuple[str, str, int, int, int], Capture] = {}
         self._fixes: dict[str, dict] = {}
+        self._sensors: dict[str, dict] = {}
 
     def folder(self, device: str) -> Path:
         return self._root / device
 
-    def join(self, device: str, body: bytes) -> tuple[dict, bytes | None]:
-        """Add one message; its header, and the JPEG when this message finished it."""
+    def join(self, device: str, body: bytes, kind: str = "image") -> tuple[dict, bytes | None]:
+        """Add one message of up/image or up/note; its header, and the whole file when this message finished it."""
         header, data = parse_chunk(body)
         self._drop_stale()
-        key = (device, header["boot"], header["seq"], header["flags"])
+        key = (device, kind, header["boot"], header["seq"], header["flags"])
         capture = self._open.setdefault(key, Capture(header["count"], header["total_bytes"]))
         if (capture.count, capture.total_bytes) != (header["count"], header["total_bytes"]):
             raise ChunkError(f"chunk says {header['count']} chunks, its picture {capture.count}")
@@ -229,8 +231,34 @@ class Assembler:
             write_whole(place, json.dumps(self._fixes[device]).encode("utf-8"))
         return path
 
+    def keep_note(self, device: str, header: dict, note: bytes) -> Path:
+        """Write one whole voice note of a journal entry as <stem>.wav."""
+        stem = stem_of(header["boot"], header["seq"])
+        path = self.folder(device) / f"{stem}.wav"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._make_way(path, stem, note)
+        write_whole(path, note)
+        return path
+
+    def keep_journal(self, device: str, payload: dict) -> Path:
+        """Write one up/journal entry with the board's newest up/sensors and the entry's files so far."""
+        stem = stem_of(payload["boot"], payload["captureSeq"])
+        folder = self.folder(device)
+        folder.mkdir(parents=True, exist_ok=True)
+        boxes = BOXES_SUFFIX + ".jpg"
+        names = (".jpg", FULL_SUFFIX + ".jpg", boxes, FULL_SUFFIX + boxes, ".json", ".wav")
+        entry = {
+            "journal": payload,
+            "sensors": self._sensors.get(device),
+            "files": [stem + name for name in names if (folder / (stem + name)).exists()],
+        }
+        path = folder / f"{stem}{JOURNAL_SUFFIX}.json"
+        write_whole(path, json.dumps(entry, ensure_ascii=False, indent=1).encode("utf-8"))
+        return path
+
     def note_place(self, device: str, sensors: dict) -> None:
-        """Remember where an up/sensors report puts the board, for the pictures that follow."""
+        """Remember an up/sensors report for the journal entries, and where it puts the board for the pictures."""
+        self._sensors[device] = sensors
         gps = sensors["gps"]
         if gps["hasFix"]:
             self._fixes[device] = {"latE7": gps["latE7"], "lonE7": gps["lonE7"]}
@@ -361,6 +389,19 @@ def keep(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -
         kind = "full image" if suffix_of(header) else "image"
         done.append(f"{message.device} {kind} {path.stat().st_size} bytes: {path}")
         marked = [assembler.mark(message.device, header["boot"], header["seq"], suffix_of(header))]
+    elif message.kind == "note":
+        try:
+            header, note = assembler.join(message.device, message.body or b"", "note")
+        except ChunkError as err:
+            return [f"{message.device} {REFUSED}: {err}"]
+        if note is None:
+            return []
+        path = assembler.keep_note(message.device, header, note)
+        return [f"{message.device} note {path.stat().st_size} bytes: {path}"]
+    elif message.kind == "journal":
+        path = assembler.keep_journal(message.device, message.payload)
+        entry = message.payload
+        return [f"{message.device} journal {entry['noteMs']} ms of note, picture {entry['imageBytes']} bytes: {path}"]
     elif message.kind == "sensors":
         assembler.note_place(message.device, message.payload)
         return []
@@ -411,11 +452,18 @@ class OneShot:
             self._got.add("full image" if suffix_of(parse_chunk(message.body or b"")[0]) else "image")
         elif message.kind == "detections" and not message.rejected:
             self._got.add("detections")
+        elif message.kind in ("note", "journal") and lines and REFUSED not in lines[0]:
+            self._got.add(message.kind)
         if self._got >= self.needed():
             self.done.set()
 
     def needed(self) -> set[str]:
-        return {"image", "detections", "full image"} if self.mode == "DETECT" else {"full image"}
+        detect = {"image", "detections", "full image"}
+        return {"DETECT": detect, "JOURNAL": detect | {"note", "journal"}}.get(self.mode, {"full image"})
+
+    def wait_s(self) -> float:
+        """How long the whole capture may take: a journal adds the longest note."""
+        return ONCE_WAIT_S + (vision.NOTE_MAX_S if self.mode == "JOURNAL" else 0.0)
 
     def missing(self) -> str:
         return " and ".join(sorted(self.needed() - self._got)) or "nothing"
@@ -447,7 +495,7 @@ def run_once(cfg: MqttConfig, assembler: Assembler, mode: str, device: str | Non
         cmd = topics.BY_ID["cmd"]
         started_s = time.monotonic()
         receiver.publish(cmd.build(shot.device), capture_command(mode), cmd.qos)
-        shot.done.wait(ONCE_WAIT_S)
+        shot.done.wait(shot.wait_s())
     finally:
         receiver.stop()
     if shot.problem:
@@ -455,7 +503,7 @@ def run_once(cfg: MqttConfig, assembler: Assembler, mode: str, device: str | Non
         return 1
     if shot.missing() != "nothing":
         print(
-            f"{shot.device}: no {shot.missing()} in {ONCE_WAIT_S:.0f} s: is it online, and busy with another capture?"
+            f"{shot.device}: no {shot.missing()} in {shot.wait_s():.0f} s: is it online, and busy with another capture?"
         )
         return 1
     print(f"{shot.device}: {mode} came back in {time.monotonic() - started_s:.1f} s")
@@ -475,7 +523,7 @@ def capture_command(mode: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--device", help="one deviceId; every board otherwise, or the one online with --once")
-    parser.add_argument("--capture", choices=("PHOTO", "DETECT"), help="ask --device for one picture first")
+    parser.add_argument("--capture", choices=("PHOTO", "DETECT", "JOURNAL"), help="ask --device for one capture first")
     parser.add_argument("--live", action="store_true", help="the board's preview frames on a local page")
     parser.add_argument("--once", action="store_true", help="with --capture: wait for what it brings, then exit")
     args = parser.parse_args(argv)

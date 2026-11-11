@@ -95,6 +95,8 @@ def test_filters_cover_every_up_topic_and_no_down_topic() -> None:
         "sr/+/up/image",
         "sr/+/up/detections",
         "sr/+/up/sensors",
+        "sr/+/up/note",
+        "sr/+/up/journal",
     ]
     assert all(f.startswith(f"sr/{DEVICE}/up/") for f, _ in mqtt_rx.up_filters(DEVICE))
 
