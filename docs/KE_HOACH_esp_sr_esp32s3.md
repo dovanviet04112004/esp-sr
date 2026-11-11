@@ -695,9 +695,11 @@ luôn tiếng người gần — đúng lúc bộ nhận lệnh cần tiếng �
 nếu MDF không vừa ngân sách.
 
 **Chi phí** mỗi micro mỗi khối: một FFT của sai số, một IFFT của đầu ra, 8 × 257 phép nhân phức cho
-lọc, 8 × 257 cho cập nhật, 2 FFT cho ràng buộc luân phiên; FFT của tham chiếu dùng chung hai micro.
+lọc, 8 × 257 cho cập nhật, 2 FFT cho ràng buộc luân phiên; FFT của tham chiếu dùng chung hai micro. Vọng dư theo độ ghép thêm một FFT
+có cửa sổ của tham chiếu, chung các micro, một FFT có cửa sổ của mỗi micro và một vòng 257 vạch; `ns` thêm một log2 và một exp2 ở mỗi
+vạch có vọng dư. Chỉ tốn khi loa phát hoặc trong `aec.couple_hold_s` sau đó.
 Đo ở `measurements/budget.md`. Trạng thái: trọng số 2 micro × 8 × 257 phức float = **33 KB**, phổ tham chiếu
-8 × 257 phức = 16 KB. Tất cả ở vùng `cold`, tức PSRAM: khối chỉ chạy khi loa phát hoặc còn dư âm trong đuôi lọc, lúc khác chỉ
+8 × 257 phức = 16 KB, độ ghép và đuôi micro ~2 KB mỗi micro, tham chiếu tích luỹ 2 KB. Tất cả ở vùng `cold`, tức PSRAM: khối chỉ chạy khi loa phát hoặc còn dư âm trong đuôi lọc, lúc khác chỉ
 chuyển tham chiếu qua đệm trễ, và nhân 1 còn dư thời gian. RAM nội không tốn gì (§6.5).
 
 `drv_audio` đưa khối TX vào kênh tham chiếu ngay lúc ghi, nên tham chiếu luôn đi trước tiếng vọng; bộ lọc 128 ms tự học phần trễ TX cộng
