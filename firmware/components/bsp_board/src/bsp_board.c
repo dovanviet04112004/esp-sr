@@ -14,6 +14,7 @@
 
 #define LIT_BY_STREAM 1u
 #define LIT_BY_CAMERA 2u
+#define LIT_BY_NOTE 4u
 
 static atomic_uint s_lit_by;
 
@@ -48,4 +49,9 @@ void bsp_board_led(bool on)
 void bsp_board_camera_light(bool on)
 {
     light(LIT_BY_CAMERA, on);
+}
+
+void bsp_board_note_light(bool on)
+{
+    light(LIT_BY_NOTE, on);
 }

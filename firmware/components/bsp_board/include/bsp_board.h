@@ -27,6 +27,11 @@ void bsp_board_led(bool on);
  */
 void bsp_board_camera_light(bool on);
 
+/** Light a voice note: the same lamp stays lit while the camera or a note holds it (KEHOACH 7.5).
+ *  @ctx ghi_task | non-blocking
+ */
+void bsp_board_note_light(bool on);
+
 #ifdef __cplusplus
 }
 #endif
