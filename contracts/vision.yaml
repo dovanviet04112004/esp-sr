@@ -18,6 +18,7 @@ camera:
   settle_frames_min: 4
   settle_frames_max: 30
   still_frames: 3
+  still_gain_ratio: 0.15 # gains this close count as still: AGC creeps its last steps (board_c.md 4.12)
   focus_timeout_ms: 3000
   preview_hold_ms: 5000
   vflip: 1

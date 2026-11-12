@@ -849,6 +849,7 @@ def gen_vision_h(v: dict) -> str:
     out.append(f"#define GEN_VISION_SETTLE_FRAMES_MIN {camera['settle_frames_min']}")
     out.append(f"#define GEN_VISION_SETTLE_FRAMES_MAX {camera['settle_frames_max']}")
     out.append(f"#define GEN_VISION_STILL_FRAMES {camera['still_frames']}")
+    out.append(f"#define GEN_VISION_STILL_GAIN_RATIO {float(camera['still_gain_ratio'])!r}f")
     out.append(f"#define GEN_VISION_FOCUS_TIMEOUT_MS {camera['focus_timeout_ms']}")
     out.append(f"#define GEN_VISION_PREVIEW_HOLD_MS {camera['preview_hold_ms']}")
     out.append(f"#define GEN_VISION_VFLIP {camera['vflip']}")
