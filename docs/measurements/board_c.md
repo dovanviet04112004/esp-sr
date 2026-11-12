@@ -405,6 +405,21 @@ Log và script ở `interim/outbox/20261111/` của data root, ảnh và lời g
   (đã hạ về 5 KB, bằng phòng in của `net_mqtt`, sau bài thử). `jsonArenaPeak` 9 256 B của 40 960 B. RAM nội thấp nhất 21 327 B.
 - Ghi thẻ ảnh đầy đủ 0,50–0,97 s; lần đầu của boot 178 3,7 s, lúc thư mục `B178` còn chưa có, như lượt đầu của boot 158 ở §4.9 🔬.
 
+### 4.11 Một khung cho cả ảnh và `detect` (E15-T37, 12/11)
+
+Boot 183, phòng sáng ban ngày (độ lợi 21–22, phơi sáng 8 400), 5 lượt `make detect`, 2 lượt `PHOTO` và 1 lượt `JOURNAL` qua `cam shot`,
+rồi 1 lượt `make detect` kiểm ack. Log ở `interim/camera/20261112/single/` của data root, ảnh ở `raw/images/sr-30eda01e4630/`, không vào git.
+- Đủ cả 9 lượt, không `allocate memory failed`, không mất khung. Ảnh 5 MP ở mức 20, 154–158 KB. `detectMs` 1 963–1 964, vùng mượn
+  26 560 B. Khung nằm đúng người và ghế trên `_full_boxes.jpg`: cùng một khung nên không còn lệch giữa hai lần chụp.
+- Chụp 3,26–3,76 s, trong đó chờ phơi sáng 6–7 khung, 2,33–2,78 s (mỗi khung 5 MP ~0,4 s). Chặng giải JPEG + `detect` + gửi khung
+  3,95–4,05 s, tức giải JPEG 5 MP về 512 × 384 ~2,0 s. Gửi ảnh 0,14–0,77 s, ghi thẻ 0,48–0,66 s.
+- Khung xong trên board ~7,7 s sau lúc nhận lệnh; `make detect` đủ khung và ảnh 8,3–9,2 s sau lệnh. Khung nhỏ của §4.8 về host
+  3,2–4,4 s và ảnh đầy đủ sau đó, nên khung muộn hơn ~4 s, cả lệnh như cũ.
+- PSRAM trống lúc đứng yên 225 464 B, **thấp nhất 38 412 B** (61,9 KB ở §4.10): bộ giải JPEG cho ảnh rộng 2 560 điểm lấy ~187 KB tạm
+  lúc chạy, tính từ hai số này 🔬. RAM nội thấp nhất 22 007 B. `dropped` frames, clean, events đều 0.
+- `make detect` thoát ngay khi có khung và ảnh, trước bản ghi, nên không ack: board gửi bù cả lần chụp sau `outbox.retry_s`
+  (`000004`, `000005`). Nó giờ chờ bản ghi tới 5 s sau khi in thời gian; lượt kiểm `000009` có ack 1,0 s sau bản ghi.
+
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
 `drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là hằng số; bao nhiêu bước
