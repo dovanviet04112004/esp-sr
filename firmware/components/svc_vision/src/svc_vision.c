@@ -157,7 +157,7 @@ static esp_err_t report_boxes(uint32_t seq, size_t found, uint32_t detect_ms)
     return net_mqtt_publish_detections(s_found);
 }
 
-static esp_err_t detect_and_send(uint32_t seq)
+static esp_err_t detect_and_send(uint32_t seq, bool *reported)
 {
     size_t found = 0;
     const UBaseType_t own_priority = uxTaskPriorityGet(NULL);
@@ -168,9 +168,13 @@ static esp_err_t detect_and_send(uint32_t seq)
         ai_engine_detect_run(s_rgb, UPRIGHT_WIDTH, UPRIGHT_HEIGHT, s_boxes, GEN_VISION_BOXES_MAX, &found);
     const uint32_t detect_ms = (uint32_t)((esp_timer_get_time() - started_us) / US_PER_MS);
     if (err == ESP_OK) {
-        // Not detect's failure: a QoS 1 copy stays in the outbox (KEHOACH 3.19).
-        const esp_err_t reported = report_boxes(seq, found, detect_ms);
-        if (reported != ESP_OK) { ESP_LOGW(TAG, "boxes not sent: %s", esp_err_to_name(reported)); }
+        // Not detect's failure: a QoS 1 copy stays in the outbox, and the card keeps the record
+        // (KEHOACH 3.19).
+        const esp_err_t sent = report_boxes(seq, found, detect_ms);
+        if (sent != ESP_OK && sent != ESP_ERR_INVALID_STATE) {
+            ESP_LOGW(TAG, "boxes not sent: %s", esp_err_to_name(sent));
+        }
+        *reported = sent == ESP_OK;
     }
     vTaskPrioritySet(NULL, own_priority);
     return err;
@@ -185,10 +189,11 @@ static void beep(app_tone_t tone)
     }
 }
 
-static bool detect_picture(const drv_camera_frame_t *frame, uint32_t seq)
+static bool detect_picture(const drv_camera_frame_t *frame, uint32_t seq, bool *reported)
 {
+    *reported = false;
     esp_err_t err = decode_picture(frame);
-    if (err == ESP_OK) { err = detect_and_send(seq); }
+    if (err == ESP_OK) { err = detect_and_send(seq, reported); }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "detect: %s", esp_err_to_name(err));
         raise_error(APP_CODE_DETECT_FAIL);
@@ -212,16 +217,12 @@ static esp_err_t take_picture(drv_camera_frame_t *frame)
     return err;
 }
 
-static esp_err_t shoot(drv_camera_frame_t *frame, drv_camera_size_t size)
+static esp_err_t shoot(drv_camera_frame_t *frame)
 {
-    esp_err_t err = drv_camera_use(size);
-    if (err == ESP_OK) { err = take_picture(frame); }
+    const esp_err_t err = take_picture(frame);
     // The sensor stops first: from here on the listener gets PSRAM's bandwidth back.
     const esp_err_t rested = drv_camera_rest();
     if (rested != ESP_OK) { ESP_LOGW(TAG, "rest: %s", esp_err_to_name(rested)); }
-    // Previews and the next command start from detect's frame (KEHOACH 3.19).
-    const esp_err_t back = drv_camera_use(DRV_CAMERA_SIZE_DETECT);
-    if (back != ESP_OK) { ESP_LOGW(TAG, "detect's frame: %s", esp_err_to_name(back)); }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "no picture: %s", esp_err_to_name(err));
         raise_error(APP_CODE_CAMERA_FAIL);
@@ -232,64 +233,57 @@ static esp_err_t shoot(drv_camera_frame_t *frame, drv_camera_size_t size)
     return ESP_OK;
 }
 
-static bool answer_detect(uint32_t seq, bool sounds, bool *toned)
+svc_vision_shot_t svc_vision_shoot(uint32_t seq, bool detect, bool sounds)
 {
     const int64_t started_us = esp_timer_get_time();
     drv_camera_frame_t frame = {0};
-    *toned = sounds;
-    if (shoot(&frame, DRV_CAMERA_SIZE_DETECT) != ESP_OK) {
+    svc_vision_shot_t shot = {0};
+    if (shoot(&frame) != ESP_OK) {
         if (sounds) { beep(APP_TONE_FAIL); }
-        return false;
+        return shot;
     }
     const int64_t shot_us = esp_timer_get_time();
-    const esp_err_t sent = send_frame(&frame, seq, 0);
-    if (sent != ESP_OK) { ESP_LOGW(TAG, "picture not sent: %s", esp_err_to_name(sent)); }
-    const int64_t sent_us = esp_timer_get_time();
-    const bool answered = detect_picture(&frame, seq);
-    // Unsent but answered, the tone waits to learn whether the full picture reaches a place (KEHOACH 3.19).
-    *toned = sounds && (sent == ESP_OK || !answered);
-    if (*toned) { beep(sent == ESP_OK && answered ? APP_TONE_DONE : APP_TONE_FAIL); }
-    const unsigned bytes = (unsigned)frame.bytes;
-    drv_camera_release(&frame);
-    ESP_LOGI(TAG, "B%" PRIu32 "/%06" PRIu32 ": %u bytes, shot %lld ms, sent %lld ms, detect %lld ms",
-             s_cfg.boot, seq, bytes, (shot_us - started_us) / US_PER_MS, (sent_us - shot_us) / US_PER_MS,
-             (esp_timer_get_time() - sent_us) / US_PER_MS);
-    return true;
-}
-
-static svc_vision_full_t send_full(uint32_t seq, bool sounds)
-{
-    const int64_t started_us = esp_timer_get_time();
-    drv_camera_frame_t frame = {0};
-    svc_vision_full_t full = {0};
-    if (shoot(&frame, DRV_CAMERA_SIZE_FULL) != ESP_OK) {
-        if (sounds) { beep(APP_TONE_FAIL); }
-        return full;
+    bool toned = false;
+    if (detect) {
+        bool reported = false;
+        const bool answered = detect_picture(&frame, seq, &reported);
+        shot.found = answered && s_found->capture_seq == seq ? s_found : NULL;
+        // Boxes unsent but found: the tone waits to learn whether the picture reaches a place (KEHOACH 3.19).
+        toned = sounds && (reported || !answered);
+        if (toned) { beep(answered ? APP_TONE_DONE : APP_TONE_FAIL); }
     }
-    const int64_t shot_us = esp_timer_get_time();
+    const int64_t detected_us = esp_timer_get_time();
     const esp_err_t sent = send_frame(&frame, seq, GEN_VISION_CHUNK_FLAG_FULL);
-    if (sent != ESP_OK) { ESP_LOGW(TAG, "full picture not sent: %s", esp_err_to_name(sent)); }
-    if (sounds && sent == ESP_OK) { beep(APP_TONE_DONE); }
+    if (sent != ESP_OK && sent != ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "picture not sent: %s", esp_err_to_name(sent));
+    }
+    if (sounds && !toned && sent == ESP_OK) {
+        beep(APP_TONE_DONE);
+        toned = true;
+    }
     const int64_t sent_us = esp_timer_get_time();
-    full = (svc_vision_full_t){
-        .bytes = (uint32_t)frame.bytes, .sent = sent == ESP_OK, .saved = keep_on_card(&frame, seq)};
-    if (sounds && sent != ESP_OK) { beep(full.saved ? APP_TONE_DONE : APP_TONE_FAIL); }
+    shot.bytes = (uint32_t)frame.bytes;
+    shot.sent = sent == ESP_OK;
+    shot.saved = keep_on_card(&frame, seq);
+    if (sounds && !toned) { beep(shot.saved ? APP_TONE_DONE : APP_TONE_FAIL); }
     app_event_t event = {
         .kind = APP_EVT_CAPTURE,
         .doa_deg = -1,
         .boot = s_cfg.boot,
         .capture_seq = seq,
-        .image_bytes = full.bytes,
-        .saved = full.saved,
+        .image_bytes = shot.bytes,
+        .saved = shot.saved,
     };
     raise_event(&event);
     drv_camera_release(&frame);
-    ESP_LOGI(
-        TAG,
-        "B%" PRIu32 "/%06" PRIu32 " full: %u bytes at quality %u, shot %lld ms, sent %lld ms, card %lld ms",
-        s_cfg.boot, seq, (unsigned)full.bytes, (unsigned)frame.quality, (shot_us - started_us) / US_PER_MS,
-        (sent_us - shot_us) / US_PER_MS, (esp_timer_get_time() - sent_us) / US_PER_MS);
-    return full;
+    ESP_LOGI(TAG,
+             "B%" PRIu32 "/%06" PRIu32
+             ": %u bytes at quality %u, shot %lld ms, detect %lld ms, sent %lld ms, "
+             "card %lld ms",
+             s_cfg.boot, seq, (unsigned)shot.bytes, (unsigned)frame.quality,
+             (shot_us - started_us) / US_PER_MS, (detected_us - shot_us) / US_PER_MS,
+             (sent_us - detected_us) / US_PER_MS, (esp_timer_get_time() - sent_us) / US_PER_MS);
+    return shot;
 }
 
 static void end_preview(void)
@@ -297,8 +291,6 @@ static void end_preview(void)
     s_previewing = false;
     const esp_err_t rested = drv_camera_rest();
     if (rested != ESP_OK) { ESP_LOGW(TAG, "rest: %s", esp_err_to_name(rested)); }
-    const esp_err_t back = drv_camera_use(DRV_CAMERA_SIZE_DETECT);
-    if (back != ESP_OK) { ESP_LOGW(TAG, "detect's frame: %s", esp_err_to_name(back)); }
     bsp_board_camera_light(false);
 }
 
@@ -306,9 +298,7 @@ static void hold_preview(void)
 {
     if (!s_previewing) {
         bsp_board_camera_light(true);
-        // Focus is set on the picture sent home (KEHOACH 3.19).
-        esp_err_t woken = drv_camera_use(DRV_CAMERA_SIZE_FULL);
-        if (woken == ESP_OK) { woken = drv_camera_wake(); }
+        const esp_err_t woken = drv_camera_wake();
         if (woken != ESP_OK) {
             // No frames will come: a preview would spin this task with the light on.
             ESP_LOGW(TAG, "preview: %s", esp_err_to_name(woken));
@@ -361,19 +351,6 @@ bool svc_vision_step(uint32_t wait_ms, svc_vision_capture_t *capture)
 bool svc_vision_previewing(void)
 {
     return s_previewing;
-}
-
-svc_vision_detect_t svc_vision_detect(uint32_t seq, bool sounds)
-{
-    svc_vision_detect_t shot = {0};
-    shot.shot = answer_detect(seq, sounds, &shot.toned);
-    shot.found = shot.shot && s_found->capture_seq == seq ? s_found : NULL;
-    return shot;
-}
-
-svc_vision_full_t svc_vision_full(uint32_t seq, bool sounds)
-{
-    return send_full(seq, sounds);
 }
 
 void svc_vision_done(void)
