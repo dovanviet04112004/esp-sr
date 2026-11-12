@@ -420,6 +420,30 @@ rồi 1 lượt `make detect` kiểm ack. Log ở `interim/camera/20261112/singl
 - `make detect` thoát ngay khi có khung và ảnh, trước bản ghi, nên không ack: board gửi bù cả lần chụp sau `outbox.retry_s`
   (`000004`, `000005`). Nó giờ chờ bản ghi tới 5 s sau khi in thời gian; lượt kiểm `000009` có ack 1,0 s sau bản ghi.
 
+### 4.12 Chờ phơi sáng ở 5 MP (E15-T38, 12/11)
+
+Boot 185, 187, 189, phòng sáng ban ngày, phơi sáng 8 400 suốt. `cam shot PHOTO` và `make detect`; log ghi phơi sáng, độ lợi, mức JPEG đọc từ
+bảng lượng tử (DQT) và cỡ của từng khung chờ. Log ở `interim/camera/20261112/settle*/` của data root.
+- Mỗi khung 5 MP ~0,40 s. Sau khi thức, độ lợi luôn bắt đầu ở trần, 237–248, rồi 40–48, rồi 21–25, đứng ở 19–23 từ khung 3–4. Lượt 7
+  khung là lượt độ lợi còn bò 25 → 22 hay 23 → 22 và bị đếm lại từ đầu.
+- Khung ngay sau lúc đặt mức JPEG đã ở mức mới: 149–152 KB ở mức 20, so với 113–117 KB ở mức 50, cả 10/10 lượt của boot 185. Khung
+  "bỏ vì còn mức cũ" của bản trước là một khung 5 MP ở mức mới, bị bỏ phí. Ô đầu của bảng DQT đúng bằng số mức (12, 20, 25, 32, 40, 50).
+- Ba bản, cùng phòng:
+
+| Bản | Khung | Chụp | `make detect` cả lệnh |
+|---|---|---|---|
+| Kiểm đứng yên xong mới đặt mức, bỏ một khung (§4.11, boot 183) | 8–9 | 3,26–3,76 s | 8,3–9,2 s |
+| Đặt mức sớm một khung, vẫn bỏ khung kế (boot 185) | 7–8 | 2,81–3,26 s | 7,4–8,1 s |
+| Khung kế là ảnh, độ lợi chênh trong 15% coi là đứng yên (boot 187, 189) | 6, lượt đầu sau boot 7 | 2,38–2,43 s, lượt đầu 2,83 s | 6,9–7,2 s |
+
+- Độ sáng trung bình của ảnh 116–122 ở cả boot 185 và 187, cùng mức 20: bớt khung chờ không làm ảnh lệch sáng. Lượt đầu sau boot còn 7
+  khung vì độ lợi đi 25 → 20, chênh 20%.
+- Sensor nghỉ ở mức đặt cuối cùng: sau mỗi ảnh, bước chọn mức cho khung kế (của xem trực tiếp) đặt mức 12, nên khung đầu sau khi thức là
+  q12 (105–110 KB trong phòng sáng). Phòng tối đi giữa hai lần chụp thì khung ấy tràn bộ đệm và lần chụp hỏng sau 4 s chờ. Sensor giờ
+  nghỉ ở mức 50; boot 189 khung đầu q50. Ở mức 50, phòng tối nhất của §4.10 cho khung 266–272 KB, dưới 384 KB. Chưa thử tối thật sau
+  bản sửa 🔬.
+- Ghi thẻ một lượt 2,7 s (bình thường 0,47–0,64 s), chưa rõ vì sao 🔬.
+
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
 `drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là hằng số; bao nhiêu bước
