@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "app_config.h"
@@ -26,6 +27,7 @@
 #define WAKE_SETTLE_MS 20
 #define EXPOSURE_REG 0x3500 // 20 bits of 1/16 line, what AEC runs at
 #define GAIN_REG 0x350A     // 10 bits, what AGC runs at
+#define GAIN_MASK 0x3FF
 #define LINE_TOTAL_REG 0x380C
 #define BAND_50HZ_STEP_REG 0x3A08
 #define BAND_HALF_PERIOD_US 10000 // 50 Hz mains peaks twice per cycle
@@ -33,11 +35,20 @@
 // set_framesize's PLL for a JPEG frame divides its multiplier by 2, 4, 2.5 and 4 (esp32-camera ov5640.c).
 #define PLL_DIVIDERS 80
 #define JPEG_SOI_BYTES 2
+#define SETTLE_LOG_BYTES 512 // GEN_VISION_SETTLE_FRAMES_MAX frames' exposure/gain/q/KB
+#define JPEG_HEADER_SCAN_BYTES 1024
+#define JPEG_MARKER 0xFF
+#define JPEG_DQT 0xDB
+#define JPEG_MARKER_BYTES 2
+#define JPEG_SEGMENT_HEAD_BYTES 4
+#define JPEG_DQT_TABLE 4 // Pq/Tq: 0 is the 8-bit luminance table, values next
+#define BYTES_PER_KB 1024
 
 static const char *TAG = "drv_camera";
 
 static sensor_t *s_sensor;
 static bool s_can_focus;
+static camera_fb_t *s_kept; // the frame wake settled on, for the next grab
 static const uint8_t kQualityLadder[] = GEN_VISION_FULL_QUALITY_LADDER;
 static int s_full_quality = GEN_VISION_FULL_JPEG_QUALITY;
 
@@ -135,47 +146,125 @@ esp_err_t drv_camera_init(void)
     return drv_camera_rest();
 }
 
-static uint32_t exposure_and_gain(void)
+typedef struct {
+    int exposure;
+    int gain;
+} aec_t;
+
+static aec_t read_aec(void)
 {
-    const int exposure = s_sensor->get_reg(s_sensor, EXPOSURE_REG, REG_THREE_BYTES_MASK);
-    const int gain = s_sensor->get_reg(s_sensor, GAIN_REG, REG_WORD_MASK);
-    return ((uint32_t)exposure << 10) ^ (uint32_t)gain;
+    return (aec_t){
+        .exposure = s_sensor->get_reg(s_sensor, EXPOSURE_REG, REG_THREE_BYTES_MASK),
+        .gain = s_sensor->get_reg(s_sensor, GAIN_REG, REG_WORD_MASK) & GAIN_MASK,
+    };
+}
+
+// AGC creeps its last steps: a gain this close is the light found (KEHOACH 3.19).
+static bool holds(aec_t now, aec_t last)
+{
+    const int larger = now.gain > last.gain ? now.gain : last.gain;
+    const int moved = now.gain > last.gain ? now.gain - last.gain : last.gain - now.gain;
+    return now.exposure == last.exposure && (float)moved <= GEN_VISION_STILL_GAIN_RATIO * (float)larger;
+}
+
+// The OV5640 writes its quality as the first entry of the luminance table; -1 when no table is found.
+static int jpeg_quality(const camera_fb_t *frame)
+{
+    const size_t end = frame->len < JPEG_HEADER_SCAN_BYTES ? frame->len : JPEG_HEADER_SCAN_BYTES;
+    for (size_t at = JPEG_SOI_BYTES; at + JPEG_SEGMENT_HEAD_BYTES < end;) {
+        const uint8_t *seg = frame->buf + at;
+        if (seg[0] != JPEG_MARKER) { return -1; }
+        if (seg[1] == JPEG_DQT) { return seg[JPEG_DQT_TABLE] == 0 ? seg[JPEG_DQT_TABLE + 1] : -1; }
+        at += JPEG_MARKER_BYTES + (((size_t)seg[2] << 8) | seg[3]);
+    }
+    return -1;
+}
+
+typedef struct {
+    char text[SETTLE_LOG_BYTES];
+    size_t used;
+} settle_log_t;
+
+static void log_frame(settle_log_t *log, aec_t aec, int quality, size_t bytes)
+{
+    if (log->used >= sizeof(log->text)) { return; }
+    const int wrote = snprintf(log->text + log->used, sizeof(log->text) - log->used, " %d/%d/q%d/%u",
+                               aec.exposure, aec.gain, quality, (unsigned)(bytes / BYTES_PER_KB));
+    log->used += wrote > 0 ? (size_t)wrote : sizeof(log->text);
+}
+
+static esp_err_t ask_quality(int quality, int *asked)
+{
+    if (quality != *asked && s_sensor->set_quality(s_sensor, quality) != 0) { return ESP_FAIL; }
+    *asked = quality;
+    return ESP_OK;
+}
+
+static void keep(camera_fb_t *frame)
+{
+    if (s_kept != NULL) { esp_camera_fb_return(s_kept); }
+    s_kept = frame;
 }
 
 esp_err_t drv_camera_wake(void)
 {
     if (s_sensor == NULL) { return ESP_ERR_INVALID_STATE; }
+    keep(NULL);
     if (s_sensor->set_reg(s_sensor, SYSTEM_CTRL0_REG, SYSTEM_CTRL0_STANDBY, 0) < 0) { return ESP_FAIL; }
     vTaskDelay(pdMS_TO_TICKS(WAKE_SETTLE_MS));
-    // A dark room's noise takes a 5 MP picture at the best quality past the frame buffer (KEHOACH 3.19).
-    if (s_sensor->set_quality(s_sensor, GEN_VISION_FULL_SETTLE_QUALITY) != 0) { return ESP_FAIL; }
     const int64_t started_us = esp_timer_get_time();
-    uint32_t last = 0;
+    settle_log_t log = {0};
+    int asked = GEN_VISION_FULL_SETTLE_QUALITY;
+    int chosen = 0;
+    aec_t last = {.exposure = -1};
     size_t last_bytes = 0;
+    int last_quality = GEN_VISION_FULL_SETTLE_QUALITY;
     int still = 0;
     int frames = 0;
-    // AEC stops inside its stable range, so an exposure that holds says the light has been found.
-    while (frames < GEN_VISION_SETTLE_FRAMES_MAX &&
-           (frames < GEN_VISION_SETTLE_FRAMES_MIN || still < GEN_VISION_STILL_FRAMES)) {
+    while (frames < GEN_VISION_SETTLE_FRAMES_MAX && s_kept == NULL) {
+        const int wanted = asked;
         camera_fb_t *frame = esp_camera_fb_get();
-        if (frame == NULL) { return ESP_ERR_TIMEOUT; }
-        last_bytes = frame->len;
-        esp_camera_fb_return(frame);
-        const uint32_t now = exposure_and_gain();
-        still = now == last ? still + 1 : 0;
-        last = now;
         frames++;
+        if (frame == NULL) {
+            // Only a frame at a finer rung than the settle one can overflow; the light moved under it.
+            if (wanted == GEN_VISION_FULL_SETTLE_QUALITY) { return ESP_ERR_TIMEOUT; }
+            still = 0;
+            chosen = 0;
+            if (ask_quality(GEN_VISION_FULL_SETTLE_QUALITY, &asked) != ESP_OK) { return ESP_FAIL; }
+            continue;
+        }
+        const int found = jpeg_quality(frame);
+        last_quality = found > 0 ? found : wanted;
+        last_bytes = frame->len;
+        const aec_t now = read_aec();
+        still = holds(now, last) ? still + 1 : 0;
+        last = now;
+        log_frame(&log, now, last_quality, last_bytes);
+        if (frames >= GEN_VISION_SETTLE_FRAMES_MIN && still >= GEN_VISION_STILL_FRAMES && chosen != 0 &&
+            last_quality == chosen) {
+            keep(frame);
+            break;
+        }
+        esp_camera_fb_return(frame);
+        esp_err_t err = ESP_OK;
+        if (still == 0 && chosen != 0) {
+            chosen = 0;
+            err = ask_quality(GEN_VISION_FULL_SETTLE_QUALITY, &asked);
+        } else if (chosen == 0 && frames >= GEN_VISION_SETTLE_FRAMES_MIN - 1 &&
+                   still >= GEN_VISION_STILL_FRAMES - 1) {
+            // The next frame comes at the rung set now, so it is both the last check and the picture.
+            chosen = fitting_quality(last_bytes, last_quality);
+            err = ask_quality(chosen, &asked);
+        }
+        if (err != ESP_OK) { return err; }
     }
-    ESP_LOGI(TAG, "settled in %d frames, %lld ms, exposure %" PRIu32 " gain %" PRIu32, frames,
-             (esp_timer_get_time() - started_us) / US_PER_MS, last >> 10, last & 0x3FF);
-    s_full_quality = fitting_quality(last_bytes, GEN_VISION_FULL_SETTLE_QUALITY);
-    if (s_sensor->set_quality(s_sensor, s_full_quality) != 0) { return ESP_FAIL; }
-    ESP_LOGI(TAG, "quality %d for %u bytes at %d", s_full_quality, (unsigned)last_bytes,
-             GEN_VISION_FULL_SETTLE_QUALITY);
-    // The frame under way is still at the settle frames' quality.
-    camera_fb_t *stale = esp_camera_fb_get();
-    if (stale == NULL) { return ESP_ERR_TIMEOUT; }
-    esp_camera_fb_return(stale);
+    if (s_kept == NULL) {
+        chosen = chosen != 0 ? chosen : fitting_quality(last_bytes, last_quality);
+        if (ask_quality(chosen, &asked) != ESP_OK) { return ESP_FAIL; }
+    }
+    s_full_quality = chosen;
+    ESP_LOGI(TAG, "settled in %d frames, %lld ms, quality %d; exposure/gain/quality/KB:%s", frames,
+             (esp_timer_get_time() - started_us) / US_PER_MS, chosen, log.text);
     return ESP_OK;
 }
 
@@ -196,9 +285,14 @@ esp_err_t drv_camera_focus(void)
 
 esp_err_t drv_camera_grab(drv_camera_frame_t *frame)
 {
-    // With one buffer the frame waiting is older than the focus that just ended.
-    if (s_can_focus) { esp_camera_fb_return(esp_camera_fb_get()); }
-    camera_fb_t *taken = esp_camera_fb_get();
+    camera_fb_t *taken = s_kept;
+    s_kept = NULL;
+    // Focus moves the lens after wake's frame: that frame is out of date.
+    if (taken != NULL && s_can_focus) {
+        esp_camera_fb_return(taken);
+        taken = NULL;
+    }
+    if (taken == NULL) { taken = esp_camera_fb_get(); }
     if (taken == NULL && coarser_than(s_full_quality) != s_full_quality) {
         s_full_quality = coarser_than(s_full_quality);
         ESP_LOGW(TAG, "full frame lost, quality %d", s_full_quality);
@@ -206,7 +300,8 @@ esp_err_t drv_camera_grab(drv_camera_frame_t *frame)
         taken = esp_camera_fb_get();
     }
     if (taken == NULL) { return ESP_ERR_TIMEOUT; }
-    const int quality = s_full_quality;
+    const int found = jpeg_quality(taken);
+    const int quality = found > 0 ? found : s_full_quality;
     // A live view sets the next frame's quality from this one's size.
     const int next = fitting_quality(taken->len, s_full_quality);
     if (next != s_full_quality && s_sensor->set_quality(s_sensor, next) == 0) { s_full_quality = next; }
@@ -242,6 +337,9 @@ void drv_camera_release(drv_camera_frame_t *frame)
 esp_err_t drv_camera_rest(void)
 {
     if (s_sensor == NULL) { return ESP_ERR_INVALID_STATE; }
+    keep(NULL);
+    // A wake's first frame comes at this rung, which a dark room's 5 MP noise cannot overflow (KEHOACH 3.19).
+    if (s_sensor->set_quality(s_sensor, GEN_VISION_FULL_SETTLE_QUALITY) != 0) { return ESP_FAIL; }
     const int wrote =
         s_sensor->set_reg(s_sensor, SYSTEM_CTRL0_REG, SYSTEM_CTRL0_STANDBY, SYSTEM_CTRL0_STANDBY);
     return wrote < 0 ? ESP_FAIL : ESP_OK;
