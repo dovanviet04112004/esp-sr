@@ -2584,7 +2584,15 @@ Id của hai lệnh, số của luồng ảnh và nhịp của ngoại vi nằm 
   cỡ S. Khung giữ lại lấy mức tốt nhất của `full_quality_ladder` mà S × (settle / q)^`full_size_exponent` ≤ `full_fill_max` × bộ
   đệm. Số mũ 0,9 là đầu dư của bảng §4.8, nơi cỡ đi theo q^−0,54 đến q^−0,9. Vẫn tràn thì lên một bậc và lấy lại một lần:
   `esp32-camera` chờ một khung tới 4 s, nên không thử dần. Xem trực tiếp chọn mức của khung sau theo cỡ khung trước. Mức đã dùng in
-  ra log.
+  ra log, cùng phơi sáng và độ lợi của từng khung chờ.
+- Mỗi khung 5 MP ~0,4 s, nên từng khung chờ đáng kể. Mức mới có hiệu lực ngay từ khung kế (`measurements/board_c.md` §4.12), vì
+  thế mức đặt khi phơi sáng và độ lợi đã đứng yên `still_frames` − 1 khung, và khung kế vừa là lần kiểm đứng yên cuối vừa là ảnh.
+  Mức của mỗi khung đọc từ bảng lượng tử (DQT) trong đầu JPEG, ô đầu của bảng độ sáng trùng số mức của OV5640, nên khung lỡ mang mức
+  khác thì bị bỏ chứ không bị nhận nhầm. Đổi sáng đúng khung ấy thì về lại mức chờ và chờ tiếp. Sensor nghỉ ở mức chờ: khung đầu
+  sau khi thức mang mức đặt lúc nghỉ, và mức mịn mà xem trực tiếp hay ảnh trước để lại làm khung ấy tràn bộ đệm nếu phòng đã tối.
+- Sau khi thức, độ lợi bắt đầu ở trần, 240–248, rồi về ~22 trong 3 khung ở phòng sáng; mấy bước cuối, như 25 → 22, chỉ là AGC bò
+  tới đích. Vì thế độ lợi chênh nhau trong `still_gain_ratio` của số lớn hơn coi như đứng yên, còn phơi sáng phải đúng bằng: nó đổi
+  theo bước 10 ms, mỗi bước là một bậc sáng rõ. Ảnh lấy sau lần đứng yên ấy một đến hai khung, lúc AGC đã tới đích.
 - Khung ở một bộ đệm 384 KB ở PSRAM (`CAMERA_JPEG_MODE_FRAME_SIZE`). PSRAM trống lúc đứng yên là phần còn lại sau Wi-Fi và MQTT,
   và một ảnh đầy đủ cần tới 144 KB tạm trong outbox. Bộ đệm 512 KB để lại 122 KB lúc đứng yên, nên giải JPEG và gửi ảnh hỏng;
   700 KB để lại 125 KB ngay sau boot (`measurements/board_c.md` §4.8).
