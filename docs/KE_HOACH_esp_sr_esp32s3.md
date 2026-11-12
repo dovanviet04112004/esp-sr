@@ -2565,39 +2565,32 @@ nên không dùng (ADR-0038, `measurements/detect.md` §10). Ngoài lượt `det
 Board C có camera, thẻ SD, loa, GPS, cảm biến hồng ngoại và hai thiết bị I2C (§2.1). Mọi ngoại vi đều có driver (ADR-0044);
 board B không có các khối này, Kconfig `APP_CAMERA_ENABLE` và `APP_SENSORS_ENABLE` tắt chúng.
 
-**Hai lệnh nói.** "chụp ảnh" chụp ảnh đầy đủ, lưu thẻ, đẩy ảnh về host. "nhận diện" chụp một khung nhỏ, chạy `detect` (§3.18), gửi
-khung và ảnh nhỏ ấy, rồi chụp thêm ảnh đầy đủ như "chụp ảnh".
+**Hai lệnh nói.** "chụp ảnh" chụp ảnh đầy đủ, lưu thẻ, đẩy ảnh về host. "nhận diện" chụp đúng một ảnh đầy đủ như thế, chạy `detect`
+(§3.18) trên chính ảnh ấy, gửi khung rồi gửi và lưu ảnh.
 Id của hai lệnh, số của luồng ảnh và nhịp của ngoại vi nằm ở `contracts/vision.yaml`. Host chụp được không cần nói, qua `CAPTURE` của `device_cmd`.
 
-**Hai cỡ khung, một bộ đệm.** OV5640 tự nén JPEG; cỡ và chất lượng của hai khung nằm ở `vision.yaml`.
-- `detect` dùng khung 640 × 480: cả mảng 4:3, gộp 2 × 2 rồi thu nhỏ trong cảm biến. Giải JPEG thẳng về RGB888 512 × 384, xoay
-  thành 384 × 512, đúng chiều cao ô 512 của mạng nên letterbox không thu thêm. Khung 1280 × 720, dải 16:9 ở giữa, cho mạng cùng cỡ
-  vật vì cả hai đặt trọn bề ngang mảng vào 512 điểm, nhưng ít hơn 25% cảnh, mất 756–888 ms để chụp, ~0,4 s để giải, 60–70 KB, và mạng
-  chỉ dùng 288 × 512 điểm của nó, 16% số điểm đã chụp (`measurements/board_c.md` §4.8).
-- Ảnh gửi về là khung đầy đủ 2560 × 1920, cả mảng 4:3, chất lượng tốt nhất 12 (`full_jpeg_quality`). Ở chất lượng 10 nó là
-  221–310 KB tuỳ cảnh, ở 6 là 364 KB; 12 nhỏ hơn 10 chừng 10–15% 🔬. Phòng tối, độ lợi 234, ảnh ở 12 vượt bộ đệm 384 KB và không ra khung
-  nào (`measurements/board_c.md` §4.8), nên chất lượng theo cảnh. Các khung chờ phơi sáng ở 5 MP, vốn bị bỏ, chụp ở
-  `full_settle_quality`, thô đến mức không tràn; khung cuối cho cỡ S. Khung giữ lại lấy mức tốt nhất của `full_quality_ladder` mà
-  S × (settle / q)^`full_size_exponent` ≤ `full_fill_max` × bộ đệm. Số mũ 0,9 là đầu dư của bảng §4.8, nơi cỡ đi theo q^−0,54 đến
-  q^−0,9. Vẫn tràn thì lên một bậc và lấy lại một lần: `esp32-camera` chờ một khung tới 4 s, nên không thử dần. Xem trực tiếp chọn mức
-  của khung sau theo cỡ khung trước. Mức đã dùng in ra log.
-- Không dùng một khung đầy đủ cho cả hai: lấy nó mất 3,3–5,5 s, giải nó ~2 s, nên "nhận diện" thành 7–11 s thay vì ~3,7 s
-  (`measurements/board_c.md` §4.8).
-- Hai cỡ dùng chung một bộ đệm khung 384 KB ở PSRAM (`CAMERA_JPEG_MODE_FRAME_SIZE`). PSRAM trống lúc đứng yên là phần còn lại
-  sau Wi-Fi và MQTT, và một lượt "nhận diện" cần ~130 KB tạm, một ảnh đầy đủ tới 144 KB. Bộ đệm 512 KB để lại 122 KB lúc đứng yên, nên
-  giải JPEG và gửi ảnh hỏng; 700 KB để lại 125 KB ngay sau boot (`measurements/board_c.md` §4.8).
-- Khung của `detect` nằm trong ảnh dựng đứng 384 × 512. Khung `detect` và ảnh đầy đủ cùng là cả mảng 4:3 (bảng cửa sổ của
-  `esp32-camera`, hàng 0–1951), nên trên ảnh đầy đủ dựng đứng 1920 × 2560 khung ấy là x' = 5x, y' = 5y. Board không vẽ khung (chủ repo chốt 11/11): vẽ
-  lên ảnh 5 MP trên chip là giải nén rồi nén lại theo dải, tốn vài giây và ~150 KB PSRAM, ảnh nén hai lần. Ảnh đầy đủ đi sạch; host và
-  server vẽ từ `up/detections` hay `up/record`. Host vẽ khung lên cả hai ảnh.
-- Dưới XGA, `esp32-camera` hạ hệ số PLL của JPEG từ 200 xuống 180, nên bước chống nhấp nháy 50 Hz tính theo hệ số đọc từ cảm biến
-  sau mỗi lần đổi cỡ, không theo một hằng số.
-- Đổi cỡ thì giữ thời gian phơi sáng. OV5640 đếm phơi sáng theo 1/16 dòng, và mỗi cỡ có thời gian dòng riêng: 2 060 điểm ở 45 MHz
-  (45,8 µs) với 640 × 480, 2 844 điểm ở 50 MHz (56,9 µs) với khung đầy đủ. Giữ nguyên số dòng thì khung đầy đủ sau 640 × 480 phơi quá 25%
-  và chờ phơi sáng 2,9–8,3 s (`measurements/board_c.md` §4.8). `drv_camera_use` vì thế quy phơi sáng sang dòng của cỡ mới theo tỉ lệ
-  thời gian dòng, giữ độ lợi, ghi lúc AEC và AGC ở chế độ tay rồi trả về tự động, để AEC bắt đầu từ đúng chỗ. Giá trị quy đổi làm
-  tròn về bội của bước 10 ms của cỡ mới khi nó từ một bước trở lên: có lọc 50 Hz thì AEC chỉ đứng ở bội ấy (8 400 = 3 × 2 800,
-  10 464 = 3 × 3 488), và giá trị lệch lưới như 10 437 làm khung `detect` sau ảnh đầy đủ chờ 18 khung ở 2 trên 10 lượt (§4.8).
+**Một khung cho cả hai việc (chủ repo 12/11).** OV5640 tự nén JPEG; cỡ và chất lượng nằm ở `vision.yaml`.
+- Mọi lần chụp lấy một khung đầy đủ 2560 × 1920, cả mảng 4:3. "nhận diện" giải chính khung ấy về RGB888 512 × 384 (1:5,
+  `esp_new_jpeg`), xoay thành 384 × 512, đúng chiều cao ô 512 của mạng nên letterbox không thu thêm. Khung và ảnh vì thế cùng một
+  lúc: hai khung cách nhau ~2 s thì người hay vật đã dời, khung lệch khỏi ảnh gửi về. Sensor chạy một cỡ, nên không đổi cỡ, không quy
+  đổi phơi sáng giữa hai cỡ, và bước chống nhấp nháy 50 Hz tính một lần lúc dựng, theo hệ số PLL đọc từ cảm biến.
+- Cái giá: giải JPEG 5 MP về 512 × 384 mất ~2,0 s, nên khung xong trên board ~7,7 s sau lệnh thay vì 3,2–4,4 s của khung nhỏ; cả
+  lệnh, khung và ảnh, vẫn 8,3–9,2 s như trước, vì bớt một lần chụp (`measurements/board_c.md` §4.11). Bộ giải cho ảnh rộng 2 560
+  điểm lấy ~187 KB PSRAM tạm, nên PSRAM thấp nhất còn ~38 KB 🔬. Giải JPEG chạy ở ưu tiên của `nhin_task`, dưới chuỗi
+  nghe; chỉ lượt `detect` lên trên nó (§3.18), vì `q_clean` (3 s) không đỡ được cả lượt giải lẫn lượt `detect`.
+- Ảnh gửi về chất lượng tốt nhất 12 (`full_jpeg_quality`). Ở chất lượng 10 nó là 221–310 KB tuỳ cảnh, ở 6 là 364 KB; 12 nhỏ hơn
+  10 chừng 10–15% 🔬. Phòng tối, độ lợi 234, ảnh ở 12 vượt bộ đệm 384 KB và không ra khung nào (`measurements/board_c.md` §4.8),
+  nên chất lượng theo cảnh. Các khung chờ phơi sáng, vốn bị bỏ, chụp ở `full_settle_quality`, thô đến mức không tràn; khung cuối cho
+  cỡ S. Khung giữ lại lấy mức tốt nhất của `full_quality_ladder` mà S × (settle / q)^`full_size_exponent` ≤ `full_fill_max` × bộ
+  đệm. Số mũ 0,9 là đầu dư của bảng §4.8, nơi cỡ đi theo q^−0,54 đến q^−0,9. Vẫn tràn thì lên một bậc và lấy lại một lần:
+  `esp32-camera` chờ một khung tới 4 s, nên không thử dần. Xem trực tiếp chọn mức của khung sau theo cỡ khung trước. Mức đã dùng in
+  ra log.
+- Khung ở một bộ đệm 384 KB ở PSRAM (`CAMERA_JPEG_MODE_FRAME_SIZE`). PSRAM trống lúc đứng yên là phần còn lại sau Wi-Fi và MQTT,
+  và một ảnh đầy đủ cần tới 144 KB tạm trong outbox. Bộ đệm 512 KB để lại 122 KB lúc đứng yên, nên giải JPEG và gửi ảnh hỏng;
+  700 KB để lại 125 KB ngay sau boot (`measurements/board_c.md` §4.8).
+- Khung của `detect` nằm trong ảnh dựng đứng 384 × 512, nên trên ảnh đầy đủ dựng đứng 1920 × 2560 nó là x' = 5x, y' = 5y. Board
+  không vẽ khung (chủ repo chốt 11/11): vẽ lên ảnh 5 MP trên chip là giải nén rồi nén lại theo dải, tốn vài giây và ~150 KB PSRAM,
+  ảnh nén hai lần. Ảnh đầy đủ đi sạch; host và server vẽ từ `up/detections` hay `up/record`.
 - Đường RGB565 cần hơn 1,5 MB PSRAM và CPU để nén, không vừa §6.6.
 
 **Sensor nghỉ giữa hai lần chụp.** Dựng một lần trong `app_boot`, rồi nghỉ qua SCCB, vì camera chạy liên tục chiếm băng thông
@@ -2618,38 +2611,35 @@ không xoay được nếu không nén lại, nên mang cờ EXIF orientation 6 
 **Một lần chụp:**
 
 1. `dieu_task` thấy `COMMAND` mang id ở `vision.yaml` thì đẩy yêu cầu vào `q_vision`. Lệnh đã qua kiểm người nói nếu kiểm bật.
-2. Với "nhận diện", `nhin_task` đặt sensor ở khung `detect`, đánh thức nó, bật đèn GPIO 42, chờ phơi sáng và độ lợi đứng yên, chụp một
-   khung, tắt đèn, cho sensor nghỉ ngay để chuỗi nghe lấy lại băng thông PSRAM.
-3. Chèn cờ EXIF vào khung, xếp ảnh vào outbox của MQTT theo khúc (§7.3). `net_mqtt` chỉ chờ khi outbox quá 128 KB, nên cả ảnh nhỏ
-   nằm ở outbox và đi trong lúc bước 4 chạy.
-4. Giải JPEG về 512 × 384 và xoay bằng `esp_new_jpeg` thành RGB888 384 × 512, lên trên chuỗi nghe (§3.18), `ai_engine_detect_run`,
-   gửi thẳng `up/detections`. Khung không chờ `mqtt_task`, nên có thể tới host trước ảnh. Ảnh nhỏ không ghi thẻ: ảnh đầy đủ ngay sau
-   đó cùng góc nhìn, và lượt ghi 250–461 ms sẽ làm nó về muộn chừng ấy.
-5. Ảnh đầy đủ, ở cả hai lệnh; "chụp ảnh" bắt đầu từ bước này. Đặt sensor ở khung đầy đủ, chụp như bước 2, rồi trả sensor về khung
-   `detect` trong lúc nó nghỉ. Chèn cờ EXIF, gửi theo khúc mang cờ `full` cùng `seq`: ảnh lớn hơn trần outbox nên `nhin_task` chờ từng
-   phần được xác nhận. Ghi `/sdcard/IMG/B<boot>/<seq>.JPG`, rồi gửi sự kiện `CAPTURE` của lần chụp, mang cỡ và `saved` của ảnh đầy đủ.
+2. `nhin_task` đánh thức sensor, bật đèn GPIO 42, chờ phơi sáng và độ lợi đứng yên, chọn chất lượng theo khung chờ cuối, chụp một
+   khung đầy đủ, tắt đèn, cho sensor nghỉ ngay để chuỗi nghe lấy lại băng thông PSRAM. Chèn cờ EXIF vào khung.
+3. Với "nhận diện": giải JPEG về 512 × 384 và xoay bằng `esp_new_jpeg` thành RGB888 384 × 512, `ai_engine_detect_run` lên trên
+   chuỗi nghe (§3.18), gửi thẳng `up/detections`. Khung đi trước ảnh: người dùng chờ khung, và lúc giải JPEG outbox còn trống, nên
+   PSRAM tạm của hai việc không cộng dồn.
+4. Gửi ảnh theo khúc mang cờ `full` cùng `seq` (§7.3): ảnh lớn hơn trần outbox 128 KB nên `nhin_task` chờ từng phần được xác nhận.
+   Ghi `/sdcard/IMG/B<boot>/<seq>.JPG`, rồi gửi sự kiện `CAPTURE` của lần chụp, mang cỡ và `saved` của ảnh.
 
 Tên trên thẻ dựa vào lượt khởi động vì board chưa có đồng hồ. Mất NVS thì `boot` đếm lại, nên `drv_sd` không ghi đè: tên đã có thì ảnh
 mới lấy hậu tố `_<n>`. Host cũng vậy: bộ file cũ của tên ấy chuyển sang `<stem>_old<n>`, để khung cũ không vẽ lên ảnh mới.
 
 **Xem trực tiếp, để chỉnh ống kính.** `CAPTURE` với `PREVIEW` giữ sensor chạy ở khung đầy đủ, đèn sáng, và đẩy từng khung lên
 `up/image` ở QoS 0, cờ `preview` ở đầu khúc, không ghi thẻ. Khung đầy đủ để nét được chỉnh trên đúng ảnh sẽ gửi về; mỗi khung ~230 KB
-và cảm biến ra khung ấy chậm, nên chỉ vài khung mỗi giây 🔬. Hết xem thì sensor về khung `detect`. Không có `PREVIEW` mới trong `preview_hold_ms` thì tự tắt, nên chế độ này không sống lâu hơn
+và cảm biến ra khung ấy chậm, nên chỉ vài khung mỗi giây 🔬. Không có `PREVIEW` mới trong `preview_hold_ms` thì tự tắt, nên chế độ này không sống lâu hơn
 lệnh của nó. Một lệnh ảnh chen vào thì tắt ngay. Host giữ khung trong bộ nhớ cho trang của `make vision-live`, không ghi đĩa.
 
-Host lưu ảnh nhỏ của `detect` `<stem>.jpg`, ảnh đầy đủ `<stem>_full.jpg`, khung `<stem>.json`, cùng hai ảnh đã vẽ khung và tên vật
-`<stem>_boxes.jpg`, `<stem>_full_boxes.jpg` ở data root; ảnh vẽ đúng chiều, không còn cờ EXIF. Khung đặt lên ảnh nào cũng theo cùng một
-quy tắc: nhân theo tỉ lệ chiều cao, canh giữa theo chiều ngang.
+Host lưu ảnh đầy đủ `<stem>_full.jpg`, khung `<stem>.json` và ảnh đã vẽ khung cùng tên vật `<stem>_full_boxes.jpg` ở data root;
+ảnh vẽ đúng chiều, không còn cờ EXIF. Khung đặt lên ảnh theo tỉ lệ chiều cao, canh giữa theo chiều ngang.
 
-**Thử nhanh không cần tiếng nói.** `make detect` (`srhost.vision --capture DETECT --once`) gửi `CAPTURE` tới board duy nhất đang `ONLINE` (trạng thái giữ lại của broker), hay tới `DEVICE=<deviceId>` khi có nhiều board, chờ ảnh nhỏ, khung và ảnh đầy đủ về, in nơi các ảnh đã vẽ khung được lưu rồi thoát, không cần `make host-live`. Board từ chối bằng một sự kiện `ERROR` (`VISION_BUSY`, `CAMERA_FAIL`) thì dừng ngay với mã ấy; quá 30 s chưa đủ thì báo thiếu gì. Cùng cờ `--once` với `PHOTO` chỉ chờ ảnh đầy đủ.
+**Thử nhanh không cần tiếng nói.** `make detect` (`srhost.vision --capture DETECT --once`) gửi `CAPTURE` tới board duy nhất đang `ONLINE` (trạng thái giữ lại của broker), hay tới `DEVICE=<deviceId>` khi có nhiều board, chờ khung và ảnh đầy đủ về, in nơi ảnh đã vẽ khung được lưu rồi thoát, không cần `make host-live`. Board từ chối bằng một sự kiện `ERROR` (`VISION_BUSY`, `CAMERA_FAIL`) thì dừng ngay với mã ấy; quá 30 s chưa đủ thì báo thiếu gì. Cùng cờ `--once` với `PHOTO` chỉ chờ ảnh đầy đủ. In thời gian xong, nó còn chờ bản ghi tới 5 s để
+gửi `down/ack`, không thì board gửi bù cả lần chụp sau `outbox.retry_s`.
 
 Không có thẻ thì vẫn đẩy ảnh, sự kiện ghi `saved: false`. Mất MQTT thì mục ở lại thẻ và đi sau (bản ghi và gửi bù, dưới). Đang chạy mà có
 lệnh mới thì từ chối ngay với mã `VISION_BUSY` và tiếng trầm, không xếp hàng: `nhin_task` giữ yêu cầu trong `q_vision` tới hết ảnh
-đầy đủ (§5.3), nên "nhận diện" còn bận ~4–8 s sau khi khung đã về.
+(§5.3), nên "nhận diện" còn bận lúc gửi và ghi ảnh sau khi khung đã về, 0,6–1,4 s (`measurements/board_c.md` §4.11).
 
 Tiếng dài báo ảnh đã tới ít nhất một nơi. Ảnh gửi được thì tiếng đi trước lúc ghi thẻ; không gửi được thì ghi thẻ trước rồi mới chọn tiếng,
-cả hai hỏng là tiếng trầm. Với "chụp ảnh", tiếng đi theo ảnh đầy đủ. Với "nhận diện", tiếng đi ngay sau `detect` khi ảnh nhỏ gửi được,
-dài nếu `detect` chạy, trầm nếu không; ảnh nhỏ không gửi được mà `detect` chạy thì tiếng chờ ảnh đầy đủ, như "chụp ảnh". Ảnh đầy đủ hỏng
+cả hai hỏng là tiếng trầm. Với "chụp ảnh", tiếng đi theo ảnh. Với "nhận diện", tiếng đi ngay sau `detect` khi khung gửi được,
+dài nếu `detect` chạy, trầm nếu không; khung không gửi được mà `detect` chạy thì tiếng chờ ảnh, như "chụp ảnh". Ảnh hỏng
 sau khi đã có tiếng thì không thêm tiếng: camera hỏng thì có `CAMERA_FAIL`, gửi hỏng thì ảnh còn ở thẻ. `DETECT_FAIL` chỉ khi `detect` không chạy; gửi khung hỏng là việc của MQTT, bản QoS 1 còn nằm ở outbox.
 Không có đệm (`svc_vision_init` hỏng) hay không có camera thì `nhin_task` vẫn chạy và từ chối từng yêu cầu bằng `CAMERA_FAIL`, board vẫn nghe.
 
@@ -2665,9 +2655,9 @@ không mất gì, có mạng lại thì board gửi dần.
   32 khung, ~4,2 KB.
 - Mục trên thẻ là `/sdcard/IMG/B<boot>/<seq>.*`: `JPG` ảnh đầy đủ, `JSN` bản ghi, `WAV` lời ghi chú khi là nhật ký. Dấu chờ là
   `/sdcard/IMG/PND/B<boot>_<seq>.PND`, file rỗng nghĩa là server chưa xác nhận; mọi dấu chung một thư mục nên tìm mục chỉ đọc một thư
-  mục. `drv_sd_name` phải đặt tên bản sao cho `JSN` (lượt chạy cũ để lại cùng tên) thì mục ấy không có dấu, chỉ đi trực tiếp. Khung
-  `detect` không lưu: server vẽ khung lên ảnh đầy đủ (x' = 5x).
-- Có mạng: ảnh nhỏ, khung, ảnh đầy đủ, lời ghi chú đi như trên, rồi `up/record`. Server lưu đủ các phần bản ghi khai (ảnh khi `imageBytes`
+  mục. `drv_sd_name` phải đặt tên bản sao cho `JSN` (lượt chạy cũ để lại cùng tên) thì mục ấy không có dấu, chỉ đi trực tiếp. Server
+  vẽ khung lên ảnh đầy đủ (x' = 5x).
+- Có mạng: khung, ảnh đầy đủ, lời ghi chú đi như trên, rồi `up/record`. Server lưu đủ các phần bản ghi khai (ảnh khi `imageBytes`
   lớn hơn 0, lời ghi chú khi `noteBytes` lớn hơn 0) thì gửi `down/ack` {`boot`, `captureSeq`}; `net_mqtt` đưa nó vào `q_ack`, `svc_outbox`
   xoá dấu, các file của mục còn lại làm bản lưu. Host của repo làm phần server ấy; server khác phải gửi ack như vậy, không thì mục được gửi lại mãi.
 - Mất mạng hay gửi hỏng giữa chừng: dấu còn. Khi MQTT nối và `nhin_task` rảnh, không lệnh ảnh, không xem trực tiếp, `svc_outbox` gửi từ
@@ -2684,7 +2674,7 @@ không mất gì, có mạng lại thì board gửi dần.
 - Số ở `vision.yaml` mục `outbox`. Host lưu bản ghi thành `<stem>_record.json` cùng tên các file của mục.
 
 **Ghi nhật ký.** "ghi nhật ký" (id `ghi_nhat_ki` của bộ lệnh, ghi ở `vision.yaml`; host gửi `CAPTURE` với `JOURNAL`) gom một mục nhật ký: lời ghi chú,
-khung `detect`, ảnh đầy đủ và số đo cảm biến. Số của lời ghi chú nằm ở `vision.yaml` mục `note`, khai bằng giây và quy ra hop lúc khởi tạo.
+ảnh đầy đủ, khung của `detect` và số đo cảm biến. Số của lời ghi chú nằm ở `vision.yaml` mục `note`, khai bằng giây và quy ra hop lúc khởi tạo.
 `svc_capture` nối lời ghi chú của `svc_note` với ảnh của `svc_vision` thành một mục. Lời ghi chú và ảnh chạy cùng lúc ở hai task của
 nhân 0 (chủ repo 11/11): `ghi_task` ghi lời ra thẻ trong lúc `nhin_task` chụp, nên ảnh là cảnh lúc ra lệnh, không phải lúc nói xong,
 và cả mục xong sớm hơn chừng thời gian chụp. Hai task theo hai nhịp khác nhau, hop của `sb_note` và khung của camera (§5.5 luật 1). Tiếng thì vẫn thu liên tục ở nhân 1 (`thu_task`, `sach_task`); cả hai
@@ -2700,8 +2690,8 @@ gọi file. Đèn GPIO 42 sáng khi còn một bên giữ: camera lúc chụp, `
    cỡ lúc xong. Đoạn ghi dừng khi người nói im `note.end_silence_s` sau tiếng nói đầu, khi chưa ai nói sau `note.start_s`, hay khi đủ
    `note.max_s`. Hop điếc, tức lúc loa đang phát tiếng bíp của chính nó, không tính là nói hay im. Xong thì `ghi_task` phát một tiếng ngắn,
    lúc ấy, dù ảnh còn đang chụp, và gửi kết quả vào `q_note_done`.
-3. Cùng lúc, `svc_capture` gọi `svc_vision_detect` rồi `svc_vision_full`: khung `detect` và ảnh đầy đủ như "nhận diện", không tiếng giữa
-   chừng. Lượt `detect` chạy với ưu tiên trên `nhan_task` ~2 s: `nhan_task` thôi chép, `q_clean` (3 s) giữ hop, rồi chép bù vào `sb_note`. Lượt ghi ảnh
+3. Cùng lúc, `svc_capture` gọi `svc_vision_shoot` như "nhận diện": một ảnh đầy đủ và `detect` trên nó, không tiếng giữa chừng.
+   Lượt `detect` chạy với ưu tiên trên `nhan_task` ~2 s: `nhan_task` thôi chép, `q_clean` (3 s) giữ hop, rồi chép bù vào `sb_note`. Lượt ghi ảnh
    đầy đủ lên thẻ (~0,8 s) giữ `m_sd`; `ghi_task` chờ, `sb_note` (3 s) đỡ. Đầy thì hop bị bỏ và hiện ở `noteDropped`.
 4. Ảnh xong, `svc_capture` chờ `q_note_done`, tới `note.max_s` cộng 10 s. Rồi `svc_note_send` đọc lại `.WAV` từ thẻ và gửi `up/note` theo
    khúc của `vision.yaml` cùng `seq`, ở `nhin_task` vì đệm khúc chỉ của task ấy; rồi bản ghi, như mọi lần chụp, mang thêm độ dài, cỡ và
@@ -4360,7 +4350,7 @@ Board B, profile `bench`, lúc đã nghe: sản phẩm với b0 ở `measurement
 |---|---|
 | Hàng đợi (§5.3), `q_clean` 2 s, `sb_stream` 512 KB (chỉ khi `NET_STREAM_ENABLE`, không có ở `prod`) | 603 KB đo |
 | `net_mqtt`: ba vùng JSON 3 × 40 KB, hai ô bộ lệnh của `q_cmdset` 2 × ~53 KB | ~0,23 MB tính 🔬; đo 344 KB khi `command_set.schema.json` còn 301 mục |
-| Outbox của esp-mqtt trên board C (`MQTT_OUTBOX_DATA_ON_EXTERNAL_MEMORY`, `sdkconfig.board_c`): một ảnh đang gửi, tới `IMAGE_OUTBOX_MAX_BYTES` 128 KB cộng một khúc | cả ảnh nhỏ; ảnh đầy đủ tới ~144 KB lúc gửi, tính 🔬 |
+| Outbox của esp-mqtt trên board C (`MQTT_OUTBOX_DATA_ON_EXTERNAL_MEMORY`, `sdkconfig.board_c`): một ảnh đang gửi, tới `IMAGE_OUTBOX_MAX_BYTES` 128 KB cộng một khúc | ảnh đầy đủ tới ~144 KB lúc gửi, tính 🔬 |
 | Ảnh model chép vào PSRAM: chỉ bảng chuẩn hoá của `command_ctc`; mạng của nó đọc thẳng từ flash (ADR-0028) | ~1 KB; 3 370 KB khi còn chép (đo) |
 | Tensor `command_ctc`, vùng chấm ctc (cây tiền tố tới 8 192 nút) | ~628 KB đo |
 | `svc_listen`: vòng 512 bước log-mel và cao độ, hai bảng lexicon | ~383 KB, đo 502 KB với 301 lệnh |
@@ -4369,7 +4359,7 @@ Board B, profile `bench`, lúc đã nghe: sản phẩm với b0 ở `measurement
 | `aec` (§3.5), chỉ khi có loa: phổ tham chiếu 8 × 257 phức, đệm, mỗi micro trọng số 8 × 257 phức và thống kê | ~56 KB một micro, ~75 KB hai micro, tính 🔬 |
 | **Còn trống khi nghe** | 4 278 432 B đo với b0, 4 258 212 B khi Wi-Fi và MQTT đã nối (`ram.md` §5); 2 022 720 B với b3, Wi-Fi chưa nối (`ram.md` §4) |
 | `detect` cạnh sản phẩm (§3.18) | đồ thị 2 825 888 B cộng 11 152 B lúc chạy: vừa với b0, không vừa với b3 (`ram.md` §5) |
-| Ảnh của board C (§3.19): bộ đệm khung JPEG 384 KB cho cả khung `detect` và khung đầy đủ, RGB888 512 × 384 589 824 B, đệm giải JPEG 64 KB, khúc gửi 16 KB, `sb_note` 97 KB của nhật ký, ngăn xếp `nhin_task`, `do_task` và `ghi_task` 24 KB | ~1,3 MB; board C một micro, b0, `detect`: với bộ đệm 320 KB còn 412 748 B ở bước `vision` (đo 10/11); với 512 KB còn 216 140 B ở bước ấy và 122 364 B lúc đứng yên sau Wi-Fi và MQTT (đo); với 384 KB và RGB 640 × 360 253 648 B lúc đứng yên, thấp nhất 84 260 B (đo); RGB 512 × 384 thêm 101 376 B |
+| Ảnh của board C (§3.19): bộ đệm khung JPEG 384 KB cho khung đầy đủ, RGB888 512 × 384 589 824 B, đệm giải JPEG 64 KB, khúc gửi 16 KB, `sb_note` 97 KB của nhật ký, ngăn xếp `nhin_task`, `do_task` và `ghi_task` 24 KB | ~1,3 MB; board C một micro, b0, `detect`: với bộ đệm 320 KB còn 412 748 B ở bước `vision` (đo 10/11); với 512 KB còn 216 140 B ở bước ấy và 122 364 B lúc đứng yên sau Wi-Fi và MQTT (đo); với 384 KB và RGB 640 × 360 253 648 B lúc đứng yên, thấp nhất 84 260 B (đo); RGB 512 × 384 thêm 101 376 B |
 | Chưa có trong firmware: `ns` | 187 KB (RNNoise-16k) tới 394 KB (NSNet-16k L), đo ở E9-T10 |
 | Chưa có: đệm dựng câu của `noi_task`, 5 s × 16 kHz × 2 B | 160 KB |
 | Chưa có: `synth` nếu là mạng | ≤ 1 MB + ~0,3 MB |
