@@ -6,11 +6,7 @@ commands:
   detect: nhan_dien
   journal: ghi_nhat_ki
 camera:
-  width: 640 # detect's frame: the whole 4:3 array, binned and scaled (KEHOACH 3.19)
-  height: 480
-  frame_size: FRAMESIZE_VGA
-  jpeg_quality: 6
-  full_width: 2560 # the picture sent home: the whole 4:3 array (KEHOACH 3.19)
+  full_width: 2560 # every capture's one frame, sent home and fed to detect: the whole 4:3 array (KEHOACH 3.19)
   full_height: 1920
   full_frame_size: FRAMESIZE_QSXGA
   full_jpeg_quality: 12          # the best a full picture gets; the scene may need a coarser one
@@ -27,7 +23,7 @@ camera:
   vflip: 1
   turn_deg: 90
 detect:
-  decode_width: 512 # what the JPEG decoder makes of detect's frame, before the quarter turn
+  decode_width: 512 # what the JPEG decoder makes of the full frame, 1:5, before the quarter turn
   decode_height: 384
   boxes_max: 32
 note: # the voice note of a journal entry (KEHOACH 3.19), cleaned hops as nhan_task gets them
