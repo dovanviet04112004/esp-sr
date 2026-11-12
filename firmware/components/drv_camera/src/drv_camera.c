@@ -25,12 +25,7 @@
 #define SYSTEM_CTRL0_STANDBY 0x40
 #define WAKE_SETTLE_MS 20
 #define EXPOSURE_REG 0x3500 // 20 bits of 1/16 line, what AEC runs at
-#define EXPOSURE_MASK 0xFFFFF
-#define EXPOSURE_PER_LINE 16
-#define GAIN_REG 0x350A // 10 bits, what AGC runs at
-#define GAIN_MASK 0x3FF
-#define AEC_MANUAL_REG 0x3503
-#define AEC_AGC_MANUAL 0x03 // bit 0 AEC, bit 1 AGC by hand
+#define GAIN_REG 0x350A     // 10 bits, what AGC runs at
 #define LINE_TOTAL_REG 0x380C
 #define BAND_50HZ_STEP_REG 0x3A08
 #define BAND_HALF_PERIOD_US 10000 // 50 Hz mains peaks twice per cycle
@@ -43,8 +38,6 @@ static const char *TAG = "drv_camera";
 
 static sensor_t *s_sensor;
 static bool s_can_focus;
-static drv_camera_size_t s_size;
-static bool s_size_known;
 static const uint8_t kQualityLadder[] = GEN_VISION_FULL_QUALITY_LADDER;
 static int s_full_quality = GEN_VISION_FULL_JPEG_QUALITY;
 
@@ -65,11 +58,6 @@ static int coarser_than(int quality)
         if (kQualityLadder[i] > quality) { return kQualityLadder[i]; }
     }
     return quality;
-}
-
-static bool full_size(void)
-{
-    return s_size_known && s_size == DRV_CAMERA_SIZE_FULL;
 }
 
 typedef struct {
@@ -102,22 +90,6 @@ static esp_err_t fit_band_to_lines(const line_t *line)
     return wrote ? ESP_OK : ESP_FAIL;
 }
 
-// AEC counts exposure in lines: carry the time, not the count, so it starts settled (KEHOACH 3.19).
-static esp_err_t carry_exposure(int exposure, int gain, const line_t *before, const line_t *after)
-{
-    int64_t carried = (int64_t)exposure * before->line_total * after->multiplier /
-                      ((int64_t)before->multiplier * after->line_total);
-    const int64_t step = (int64_t)band_lines(after) * EXPOSURE_PER_LINE;
-    // AEC rests only on whole 10 ms steps under the 50 Hz filter; between them it hunts (KEHOACH 3.19).
-    if (step > 0 && carried >= step) { carried = (carried + step / 2) / step * step; }
-    const bool wrote = s_sensor->set_reg(s_sensor, AEC_MANUAL_REG, AEC_AGC_MANUAL, AEC_AGC_MANUAL) >= 0 &&
-                       s_sensor->set_reg(s_sensor, EXPOSURE_REG, EXPOSURE_MASK, (int)carried) >= 0 &&
-                       s_sensor->set_reg(s_sensor, GAIN_REG, GAIN_MASK, gain) >= 0 &&
-                       s_sensor->set_reg(s_sensor, AEC_MANUAL_REG, AEC_AGC_MANUAL, 0) >= 0;
-    ESP_LOGI(TAG, "exposure %d -> %lld, gain %d", exposure, carried, gain);
-    return wrote ? ESP_OK : ESP_FAIL;
-}
-
 esp_err_t drv_camera_init(void)
 {
     if (s_sensor != NULL) { return ESP_ERR_INVALID_STATE; }
@@ -142,8 +114,8 @@ esp_err_t drv_camera_init(void)
         .ledc_timer = LEDC_TIMER_0,
         .ledc_channel = LEDC_CHANNEL_0,
         .pixel_format = PIXFORMAT_JPEG,
-        .frame_size = GEN_VISION_FRAME_SIZE,
-        .jpeg_quality = GEN_VISION_JPEG_QUALITY,
+        .frame_size = GEN_VISION_FULL_FRAME_SIZE,
+        .jpeg_quality = GEN_VISION_FULL_SETTLE_QUALITY,
         .fb_count = FB_COUNT,
         .fb_location = CAMERA_FB_IN_PSRAM,
         .grab_mode = CAMERA_GRAB_WHEN_EMPTY,
@@ -154,40 +126,13 @@ esp_err_t drv_camera_init(void)
     if (s_sensor == NULL) { return ESP_ERR_NOT_FOUND; }
     if (s_sensor->set_vflip(s_sensor, GEN_VISION_VFLIP) != 0) { return ESP_FAIL; }
     s_can_focus = s_sensor->af_init != NULL && s_sensor->af_init(s_sensor, AF_LOAD_TIMEOUT_MS) == 0;
-    ESP_LOGI(TAG, "sensor 0x%04X, %dx%d, autofocus %s", s_sensor->id.PID, GEN_VISION_WIDTH, GEN_VISION_HEIGHT,
-             s_can_focus ? "loaded" : "off");
+    ESP_LOGI(TAG, "sensor 0x%04X, %dx%d, autofocus %s", s_sensor->id.PID, GEN_VISION_FULL_WIDTH,
+             GEN_VISION_FULL_HEIGHT, s_can_focus ? "loaded" : "off");
     line_t line;
     if (!read_line(&line)) { return ESP_FAIL; }
     err = fit_band_to_lines(&line);
     if (err != ESP_OK) { return err; }
-    s_size = DRV_CAMERA_SIZE_DETECT;
-    s_size_known = true;
     return drv_camera_rest();
-}
-
-esp_err_t drv_camera_use(drv_camera_size_t size)
-{
-    if (s_sensor == NULL) { return ESP_ERR_INVALID_STATE; }
-    if (s_size_known && size == s_size) { return ESP_OK; }
-    s_size_known = false;
-    line_t before, after;
-    const int exposure = s_sensor->get_reg(s_sensor, EXPOSURE_REG, EXPOSURE_MASK);
-    const int gain = s_sensor->get_reg(s_sensor, GAIN_REG, GAIN_MASK);
-    if (exposure < 0 || gain < 0 || !read_line(&before)) { return ESP_FAIL; }
-    const bool full = size == DRV_CAMERA_SIZE_FULL;
-    if (s_sensor->set_framesize(s_sensor, full ? GEN_VISION_FULL_FRAME_SIZE : GEN_VISION_FRAME_SIZE) != 0 ||
-        s_sensor->set_quality(s_sensor, full ? GEN_VISION_FULL_SETTLE_QUALITY : GEN_VISION_JPEG_QUALITY) !=
-            0 ||
-        !read_line(&after)) {
-        return ESP_FAIL;
-    }
-    // Each size has its own line length, so the 50 Hz step moves with it.
-    esp_err_t err = fit_band_to_lines(&after);
-    if (err == ESP_OK) { err = carry_exposure(exposure, gain, &before, &after); }
-    if (err != ESP_OK) { return err; }
-    s_size = size;
-    s_size_known = true;
-    return ESP_OK;
 }
 
 static uint32_t exposure_and_gain(void)
@@ -203,9 +148,7 @@ esp_err_t drv_camera_wake(void)
     if (s_sensor->set_reg(s_sensor, SYSTEM_CTRL0_REG, SYSTEM_CTRL0_STANDBY, 0) < 0) { return ESP_FAIL; }
     vTaskDelay(pdMS_TO_TICKS(WAKE_SETTLE_MS));
     // A dark room's noise takes a 5 MP picture at the best quality past the frame buffer (KEHOACH 3.19).
-    if (full_size() && s_sensor->set_quality(s_sensor, GEN_VISION_FULL_SETTLE_QUALITY) != 0) {
-        return ESP_FAIL;
-    }
+    if (s_sensor->set_quality(s_sensor, GEN_VISION_FULL_SETTLE_QUALITY) != 0) { return ESP_FAIL; }
     const int64_t started_us = esp_timer_get_time();
     uint32_t last = 0;
     size_t last_bytes = 0;
@@ -225,7 +168,6 @@ esp_err_t drv_camera_wake(void)
     }
     ESP_LOGI(TAG, "settled in %d frames, %lld ms, exposure %" PRIu32 " gain %" PRIu32, frames,
              (esp_timer_get_time() - started_us) / US_PER_MS, last >> 10, last & 0x3FF);
-    if (!full_size()) { return ESP_OK; }
     s_full_quality = fitting_quality(last_bytes, GEN_VISION_FULL_SETTLE_QUALITY);
     if (s_sensor->set_quality(s_sensor, s_full_quality) != 0) { return ESP_FAIL; }
     ESP_LOGI(TAG, "quality %d for %u bytes at %d", s_full_quality, (unsigned)last_bytes,
@@ -257,19 +199,17 @@ esp_err_t drv_camera_grab(drv_camera_frame_t *frame)
     // With one buffer the frame waiting is older than the focus that just ended.
     if (s_can_focus) { esp_camera_fb_return(esp_camera_fb_get()); }
     camera_fb_t *taken = esp_camera_fb_get();
-    if (taken == NULL && full_size() && coarser_than(s_full_quality) != s_full_quality) {
+    if (taken == NULL && coarser_than(s_full_quality) != s_full_quality) {
         s_full_quality = coarser_than(s_full_quality);
         ESP_LOGW(TAG, "full frame lost, quality %d", s_full_quality);
         if (s_sensor->set_quality(s_sensor, s_full_quality) != 0) { return ESP_FAIL; }
         taken = esp_camera_fb_get();
     }
     if (taken == NULL) { return ESP_ERR_TIMEOUT; }
-    const int quality = full_size() ? s_full_quality : GEN_VISION_JPEG_QUALITY;
+    const int quality = s_full_quality;
     // A live view sets the next frame's quality from this one's size.
-    if (full_size()) {
-        const int next = fitting_quality(taken->len, s_full_quality);
-        if (next != s_full_quality && s_sensor->set_quality(s_sensor, next) == 0) { s_full_quality = next; }
-    }
+    const int next = fitting_quality(taken->len, s_full_quality);
+    if (next != s_full_quality && s_sensor->set_quality(s_sensor, next) == 0) { s_full_quality = next; }
     *frame = (drv_camera_frame_t){
         .jpeg = taken->buf,
         .bytes = taken->len,
