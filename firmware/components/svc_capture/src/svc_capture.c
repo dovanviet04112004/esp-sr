@@ -41,13 +41,12 @@ static capture_mode_t mode_of(app_vision_mode_t mode)
     return mode == APP_VISION_JOURNAL ? CAPTURE_MODE_JOURNAL : CAPTURE_MODE_PHOTO;
 }
 
-static svc_note_t journal(uint32_t seq, svc_vision_detect_t *shot, svc_vision_full_t *full)
+static svc_note_t journal(uint32_t seq, svc_vision_shot_t *shot)
 {
-    // The note and the pictures at once: the picture shows the scene of the command (KEHOACH 3.19).
+    // The note and the picture at once: the picture shows the scene of the command (KEHOACH 3.19).
     const esp_err_t asked = svc_note_start(seq);
     if (asked != ESP_OK) { ESP_LOGW(TAG, "no note: %s", esp_err_to_name(asked)); }
-    *shot = svc_vision_detect(seq, false);
-    *full = svc_vision_full(seq, false);
+    *shot = svc_vision_shoot(seq, true, false);
     svc_note_t note = {.seq = seq};
     const esp_err_t heard = asked == ESP_OK ? svc_note_wait(seq, &note) : asked;
     if (heard != ESP_OK && asked == ESP_OK) { ESP_LOGW(TAG, "note: %s", esp_err_to_name(heard)); }
@@ -60,8 +59,7 @@ static svc_note_t journal(uint32_t seq, svc_vision_detect_t *shot, svc_vision_fu
 }
 
 static void fill_record(const svc_vision_capture_t *capture, uint32_t started_ms,
-                        const svc_vision_detect_t *shot, const svc_vision_full_t *full,
-                        const svc_note_t *note)
+                        const svc_vision_shot_t *shot, const svc_note_t *note)
 {
     memset(s_record, 0, sizeof(*s_record));
     s_record->capture = (capture_t){
@@ -69,9 +67,9 @@ static void fill_record(const svc_vision_capture_t *capture, uint32_t started_ms
         .capture_seq = capture->seq,
         .mode = mode_of(capture->mode),
         .uptime_ms = started_ms,
-        .image_bytes = full->bytes,
-        .sent = full->sent,
-        .saved = full->saved,
+        .image_bytes = shot->bytes,
+        .sent = shot->sent,
+        .saved = shot->saved,
         .note_ms = note->ms,
         .note_bytes = note->bytes,
         .note_dropped = note->dropped,
@@ -87,25 +85,19 @@ static void fill_record(const svc_vision_capture_t *capture, uint32_t started_ms
 void svc_capture_keep(const svc_vision_capture_t *capture)
 {
     const uint32_t started_ms = (uint32_t)(esp_timer_get_time() / US_PER_MS);
-    svc_vision_detect_t shot = {0};
-    svc_vision_full_t full = {0};
+    svc_vision_shot_t shot = {0};
     svc_note_t note = {.seq = capture->seq};
     if (capture->mode == APP_VISION_JOURNAL) {
-        note = journal(capture->seq, &shot, &full);
-    } else if (capture->mode == APP_VISION_DETECT) {
-        shot = svc_vision_detect(capture->seq, true);
-        if (shot.shot) { full = svc_vision_full(capture->seq, !shot.toned); }
+        note = journal(capture->seq, &shot);
+        beep(note.saved && (shot.saved || shot.sent) ? APP_TONE_DONE : APP_TONE_FAIL);
     } else {
-        full = svc_vision_full(capture->seq, true);
-    }
-    if (capture->mode == APP_VISION_JOURNAL) {
-        beep(note.saved && (full.saved || full.sent) ? APP_TONE_DONE : APP_TONE_FAIL);
+        shot = svc_vision_shoot(capture->seq, capture->mode == APP_VISION_DETECT, true);
     }
     // Nothing came of it: no picture, boxes or note to keep or send later.
-    if ((full.bytes == 0 && note.bytes == 0 && shot.found == NULL) || s_record == NULL) { return; }
-    fill_record(capture, started_ms, &shot, &full, &note);
+    if ((shot.bytes == 0 && note.bytes == 0 && shot.found == NULL) || s_record == NULL) { return; }
+    fill_record(capture, started_ms, &shot, &note);
     const svc_outbox_kept_t kept = svc_outbox_keep(s_record);
     ESP_LOGI(TAG, "B%" PRIu32 "/%06" PRIu32 ": picture %s%s, note %" PRIu32 " B, record %s%s", s_cfg.boot,
-             capture->seq, full.sent ? "sent" : "not sent", full.saved ? ", kept" : "", note.bytes,
+             capture->seq, shot.sent ? "sent" : "not sent", shot.saved ? ", kept" : "", note.bytes,
              kept.sent ? "sent" : "not sent", kept.saved ? ", kept" : "");
 }
