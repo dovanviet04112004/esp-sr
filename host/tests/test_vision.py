@@ -182,7 +182,7 @@ BOXES = {
 @pytest.mark.parametrize("boxes_first", [True, False])
 def test_the_boxes_land_drawn_on_the_upright_picture_whichever_came_first(tmp_path: Path, boxes_first: bool) -> None:
     assembler = vision.Assembler(tmp_path)
-    picture = assembler.folder(DEVICE) / "B7_000002.jpg"
+    picture = assembler.folder(DEVICE) / "B7_000002_full.jpg"
     picture.parent.mkdir(parents=True)
     if boxes_first:
         assembler.keep_boxes(DEVICE, BOXES)
@@ -193,7 +193,7 @@ def test_the_boxes_land_drawn_on_the_upright_picture_whichever_came_first(tmp_pa
         assert assembler.mark(DEVICE, 7, 2) is None
         assembler.keep_boxes(DEVICE, BOXES)
     drawn = assembler.mark(DEVICE, 7, 2)
-    assert drawn == assembler.folder(DEVICE) / "B7_000002_boxes.jpg"
+    assert drawn == assembler.folder(DEVICE) / "B7_000002_full_boxes.jpg"
     with Image.open(drawn) as image:
         assert image.size == (200, 400)
         red, green, _ = image.convert("RGB").getpixel((20 + 1, 150))
@@ -202,21 +202,18 @@ def test_the_boxes_land_drawn_on_the_upright_picture_whichever_came_first(tmp_pa
 
 def test_a_detect_that_found_nothing_still_leaves_its_picture(tmp_path: Path) -> None:
     assembler = vision.Assembler(tmp_path)
-    picture = assembler.folder(DEVICE) / "B7_000002.jpg"
+    picture = assembler.folder(DEVICE) / "B7_000002_full.jpg"
     picture.parent.mkdir(parents=True)
     picture_turned_a_quarter(picture)
     assembler.keep_boxes(DEVICE, {**BOXES, "boxes": []})
     assert assembler.mark(DEVICE, 7, 2).exists()
 
 
-def test_the_full_picture_lands_beside_detects_one(tmp_path: Path) -> None:
+def test_the_full_picture_lands_under_its_own_name(tmp_path: Path) -> None:
     assembler = vision.Assembler(tmp_path)
-    small = assembler.take(DEVICE, chunk(PICTURE, 0, 1))
-    full = PICTURE[::-1]
-    big = assembler.take(DEVICE, chunk(full, 0, 1, total=len(full), flags=contract.CHUNK_FLAG_FULL))
-    assert (small.name, big.name) == ("B7_000002.jpg", "B7_000002_full.jpg")
-    assert (small.read_bytes(), big.read_bytes()) == (PICTURE, full)
-    assert not list((tmp_path / DEVICE).glob("*_old*"))
+    big = assembler.take(DEVICE, chunk(PICTURE, 0, 1, flags=contract.CHUNK_FLAG_FULL))
+    assert big.name == "B7_000002_full.jpg"
+    assert big.read_bytes() == PICTURE
 
 
 def test_the_boxes_land_centred_across_the_full_picture(tmp_path: Path) -> None:
@@ -225,7 +222,7 @@ def test_the_boxes_land_centred_across_the_full_picture(tmp_path: Path) -> None:
     picture.parent.mkdir(parents=True)
     picture_turned_a_quarter(picture, (400, 300))
     assembler.keep_boxes(DEVICE, BOXES)
-    drawn = assembler.mark(DEVICE, 7, 2, vision.FULL_SUFFIX)
+    drawn = assembler.mark(DEVICE, 7, 2)
     assert drawn == assembler.folder(DEVICE) / "B7_000002_full_boxes.jpg"
     with Image.open(drawn) as image:
         upright = image.convert("RGB")
@@ -294,25 +291,25 @@ def up(kind: str, payload: dict | bytes, device: str = DEVICE) -> mqtt_rx.Messag
 DETECTIONS = {k: v for k, v in BOXES.items() if k != "deviceId"}
 
 
-def test_a_detect_waits_for_both_pictures_and_the_boxes_in_any_order(tmp_path: Path) -> None:
+def test_a_detect_waits_for_the_picture_and_its_boxes_in_any_order(tmp_path: Path) -> None:
     for first in ("image", "detections"):
         shot = vision.OneShot(vision.Assembler(tmp_path / first), "DETECT", DEVICE)
-        messages = {"image": up("image", jpeg_chunk()), "detections": up("detections", DETECTIONS)}
+        messages = {
+            "image": up("image", jpeg_chunk(contract.CHUNK_FLAG_FULL)),
+            "detections": up("detections", DETECTIONS),
+        }
         shot.handle(messages[first])
         assert not shot.done.is_set()
+        assert shot.missing() == ("detections" if first == "image" else "full image")
         shot.handle(messages["detections" if first == "image" else "image"])
-        assert not shot.done.is_set()
-        assert shot.missing() == "full image"
-        shot.handle(up("image", jpeg_chunk(contract.CHUNK_FLAG_FULL)))
         assert shot.done.is_set()
         assert shot.problem is None
-        assert (tmp_path / first / DEVICE / "B7_000002_boxes.jpg").exists()
         assert (tmp_path / first / DEVICE / "B7_000002_full_boxes.jpg").exists()
 
 
 def test_boxes_that_fail_to_draw_still_count_as_come(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     shot = vision.OneShot(vision.Assembler(tmp_path), "DETECT", DEVICE)
-    shot.handle(up("image", jpeg_chunk()))
+    shot.handle(up("image", jpeg_chunk(contract.CHUNK_FLAG_FULL)))
 
     def broken(*_args: object) -> None:
         raise OSError("image file is truncated")
@@ -320,7 +317,7 @@ def test_boxes_that_fail_to_draw_still_count_as_come(tmp_path: Path, monkeypatch
     monkeypatch.setattr(vision, "draw_boxes", broken)
     with pytest.raises(OSError):
         shot.handle(up("detections", DETECTIONS))
-    assert shot.missing() == "full image"
+    assert shot.missing() == "nothing"
 
 
 def test_a_whole_write_leaves_no_part_behind(tmp_path: Path) -> None:
@@ -452,11 +449,7 @@ def test_a_record_naming_another_device_is_refused() -> None:
 def test_a_journal_waits_for_both_pictures_the_boxes_the_note_and_the_record(tmp_path: Path) -> None:
     shot = vision.OneShot(vision.Assembler(tmp_path), "JOURNAL", DEVICE)
     assert shot.wait_s() == vision.ONCE_WAIT_S + contract.NOTE_MAX_S
-    for message in (
-        up("image", jpeg_chunk()),
-        up("detections", DETECTIONS),
-        up("image", jpeg_chunk(contract.CHUNK_FLAG_FULL)),
-    ):
+    for message in (up("detections", DETECTIONS), up("image", jpeg_chunk(contract.CHUNK_FLAG_FULL))):
         shot.handle(message)
     assert shot.missing() == "note and record"
     shot.handle(up("note", chunk(PICTURE, 0, 1)))
@@ -464,12 +457,20 @@ def test_a_journal_waits_for_both_pictures_the_boxes_the_note_and_the_record(tmp
     assert shot.done.is_set()
 
 
+def test_a_detect_knows_when_its_record_came_so_it_can_ack_it(tmp_path: Path) -> None:
+    shot = vision.OneShot(vision.Assembler(tmp_path), "DETECT", DEVICE)
+    shot.handle(record(late=True, imageBytes=0, noteBytes=0))
+    assert not shot.recorded.is_set()
+    shot.handle(record(imageBytes=0, noteBytes=0))
+    assert shot.recorded.is_set()
+
+
 def test_what_the_card_sends_again_is_not_the_capture_asked_for(tmp_path: Path) -> None:
     shot = vision.OneShot(vision.Assembler(tmp_path), "JOURNAL", DEVICE)
     shot.handle(up("image", jpeg_chunk(contract.CHUNK_FLAG_FULL | contract.CHUNK_FLAG_LATE)))
     shot.handle(up("note", chunk(PICTURE, 0, 1, flags=contract.CHUNK_FLAG_LATE)))
     shot.handle(record(late=True))
-    assert shot.missing() == "detections and full image and image and note and record"
+    assert shot.missing() == "detections and full image and note and record"
 
 
 def test_a_photo_needs_the_full_picture_only(tmp_path: Path) -> None:

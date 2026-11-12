@@ -35,6 +35,7 @@ PERMILLE = 1000
 CONNECT_TIMEOUT_S = 10.0
 STATUS_WAIT_S = 2.0  # retained statuses come right after subscribing
 ONCE_WAIT_S = 30.0
+RECORD_WAIT_S = 5.0  # the record follows the picture by the card write, ~0.5 s
 REFUSED = "image refused"
 FPS_WINDOW_FRAMES = 20
 BOXES_SUFFIX = "_boxes"
@@ -270,8 +271,7 @@ class Assembler:
         return path
 
     def files_of(self, device: str, stem: str) -> list[str]:
-        boxes = BOXES_SUFFIX + ".jpg"
-        names = (".jpg", FULL_SUFFIX + ".jpg", boxes, FULL_SUFFIX + boxes, ".json", ".wav")
+        names = (FULL_SUFFIX + ".jpg", FULL_SUFFIX + BOXES_SUFFIX + ".jpg", ".json", ".wav")
         return [stem + name for name in names if (self.folder(device) / (stem + name)).exists()]
 
     def keep_record(self, device: str, payload: dict, rx_utc: str) -> tuple[Path, bool]:
@@ -332,14 +332,13 @@ class Assembler:
         header, image = self.join(device, body)
         return None if image is None else self.keep(device, header, image)
 
-    def mark(self, device: str, boot: int, seq: int, suffix: str = "") -> Path | None:
-        """Draw a capture's boxes on detect's picture or, with FULL_SUFFIX, the full one once both are in, whichever
-        came first; the path when it did."""
+    def mark(self, device: str, boot: int, seq: int) -> Path | None:
+        """Draw a capture's boxes on its full picture once both are in, whichever came first; the path when it did."""
         stem = self.folder(device) / stem_of(boot, seq)
-        picture, boxes = stem.with_name(stem.name + suffix + ".jpg"), stem.with_suffix(".json")
+        picture, boxes = stem.with_name(stem.name + FULL_SUFFIX + ".jpg"), stem.with_suffix(".json")
         if not picture.exists() or not boxes.exists():
             return None
-        out = stem.with_name(stem.name + suffix + BOXES_SUFFIX + ".jpg")
+        out = stem.with_name(stem.name + FULL_SUFFIX + BOXES_SUFFIX + ".jpg")
         draw_boxes(picture, json.loads(boxes.read_text(encoding="utf-8")), out)
         return out
 
@@ -462,8 +461,8 @@ def keep(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -
         path = assembler.keep(message.device, header, image)
         kind = "full image" if suffix_of(header) else "image"
         done.append(f"{message.device} {kind} {path.stat().st_size} bytes: {path}")
-        marked = [assembler.mark(message.device, header["boot"], header["seq"], suffix_of(header))]
-        done += [f"{message.device} boxes drawn: {p}" for p in marked if p is not None]
+        marked = assembler.mark(message.device, header["boot"], header["seq"]) if suffix_of(header) else None
+        done += [f"{message.device} boxes drawn: {marked}"] if marked is not None else []
         return done + acked_line(assembler, message.device, header["boot"], header["seq"])
     elif message.kind == "note":
         try:
@@ -480,27 +479,22 @@ def keep(assembler: Assembler, message: Message, feed: LiveFeed | None = None) -
         boot, seq = message.payload["capture"]["boot"], message.payload["capture"]["captureSeq"]
         acked = ", acked" if assembler.settle(message.device, boot, seq) else ""
         done.append(f"{message.device} record {describe_record(message.payload)}{acked}: {path}")
-        if new_boxes:
-            marked = [assembler.mark(message.device, boot, seq, suffix) for suffix in ("", FULL_SUFFIX)]
-            done += [f"{message.device} boxes drawn: {p}" for p in marked if p is not None]
-        return done
+        marked = assembler.mark(message.device, boot, seq) if new_boxes else None
+        return done + ([f"{message.device} boxes drawn: {marked}"] if marked is not None else [])
     elif message.kind == "sensors":
         assembler.note_place(message.device, message.payload)
         return []
     elif message.kind == "detections":
         assembler.keep_boxes(message.device, message.payload)
         done.append(f"{message.device} {describe_boxes(message.payload)}")
-        boot, seq = message.payload["boot"], message.payload["captureSeq"]
-        marked = [assembler.mark(message.device, boot, seq, suffix) for suffix in ("", FULL_SUFFIX)]
-    else:
-        return []
-    done += [f"{message.device} boxes drawn: {path}" for path in marked if path is not None]
-    return done
+        marked = assembler.mark(message.device, message.payload["boot"], message.payload["captureSeq"])
+        return done + ([f"{message.device} boxes drawn: {marked}"] if marked is not None else [])
+    return []
 
 
 class OneShot:
-    """One capture asked from the command line: it waits for the full picture and, in DETECT, detect's picture and
-    the boxes too, or a refusal."""
+    """One capture asked from the command line: it waits for the full picture and, in DETECT, the boxes detect found
+    on it too, or a refusal."""
 
     def __init__(self, assembler: Assembler, mode: str, device: str | None) -> None:
         self.assembler = assembler
@@ -510,6 +504,7 @@ class OneShot:
         self.done = threading.Event()
         self.problem: str | None = None
         self._got: set[str] = set()
+        self.recorded = threading.Event()
 
     def handle(self, message: Message) -> None:
         if message.kind == "status" and message.payload is not None:
@@ -529,11 +524,18 @@ class OneShot:
         payload = message.payload or {}
         if late(message):
             return
+        if message.kind == "record" and lines:
+            self.recorded.set()
         if message.kind == "event" and payload.get("kind") == "ERROR":
             self.problem = f"the board answered ERROR {payload.get('code', '?')}"
             self.done.set()
-        elif message.kind == "image" and lines and REFUSED not in lines[0]:
-            self._got.add("full image" if suffix_of(parse_chunk(message.body or b"")[0]) else "image")
+        elif (
+            message.kind == "image"
+            and lines
+            and REFUSED not in lines[0]
+            and suffix_of(parse_chunk(message.body or b"")[0])
+        ):
+            self._got.add("full image")
         elif message.kind == "detections" and not message.rejected:
             self._got.add("detections")
         elif message.kind in ("note", "record") and lines and REFUSED not in lines[0]:
@@ -542,7 +544,7 @@ class OneShot:
             self.done.set()
 
     def needed(self) -> set[str]:
-        detect = {"image", "detections", "full image"}
+        detect = {"detections", "full image"}
         return {"DETECT": detect, "JOURNAL": detect | {"note", "record"}}.get(self.mode, {"full image"})
 
     def wait_s(self) -> float:
@@ -593,6 +595,10 @@ def run_once(cfg: MqttConfig, assembler: Assembler, mode: str, device: str | Non
         started_s = time.monotonic()
         receiver.publish(cmd.build(shot.device), capture_command(mode), cmd.qos)
         shot.done.wait(shot.wait_s())
+        took_s = time.monotonic() - started_s
+        # Unacked, the board sends the whole capture again from its card two minutes on (KEHOACH 3.19).
+        if shot.done.is_set() and shot.problem is None:
+            shot.recorded.wait(RECORD_WAIT_S)
     finally:
         receiver.stop()
     if shot.problem:
@@ -603,7 +609,7 @@ def run_once(cfg: MqttConfig, assembler: Assembler, mode: str, device: str | Non
             f"{shot.device}: no {shot.missing()} in {shot.wait_s():.0f} s: is it online, and busy with another capture?"
         )
         return 1
-    print(f"{shot.device}: {mode} came back in {time.monotonic() - started_s:.1f} s")
+    print(f"{shot.device}: {mode} came back in {took_s:.1f} s")
     return 0
 
 
