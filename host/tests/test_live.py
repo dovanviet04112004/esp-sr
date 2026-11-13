@@ -50,6 +50,22 @@ def test_a_device_left_out_of_the_report_leaves_its_part_out_of_the_line() -> No
     assert live.describe_sensors(report) == "gps 21.02850 105.85420, 7 satellites  ir ON, 4 hits"
 
 
+def test_a_fix_shows_its_hdop_and_an_estimated_one_says_so() -> None:
+    report = {key: SENSORS[key] for key in ("deviceId", "boot", "uptimeS", "ir")}
+    fix = {"hasFix": True, "latE7": 210285000, "lonE7": 1058542000, "satellites": 4, "hdopE1": 255, "mode": "E"}
+    report["gps"] = {**SENSORS["gps"], **fix}
+    assert live.describe_sensors(report) == (
+        "gps 21.02850 105.85420, 4 satellites, hdop 25.5, estimated  ir ON, 4 hits"
+    )
+
+
+def test_a_board_with_the_time_shows_its_clock() -> None:
+    report = {**SENSORS, "utcMs": 1794554866250}
+    line = live.describe_sensors(report, timezone(timedelta(hours=7)))
+    assert line.startswith("gps no antenna  ir ON, 4 hits  clock 14:27:46  accel")
+    assert "clock" not in live.describe_sensors(SENSORS)
+
+
 def test_an_offline_board_takes_one_line_whatever_it_left_behind() -> None:
     view = live.View()
     view.update(message("status", {"deviceId": DEVICE, "state": "OFFLINE", "fw": "0.1.0"}))

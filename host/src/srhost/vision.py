@@ -19,7 +19,7 @@ import zlib
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from itertools import count
 from pathlib import Path
@@ -187,7 +187,9 @@ Ack = Callable[[str, int, int], None]
 
 
 def captured_utc(capture: dict, rx_utc: str) -> str | None:
-    """When the board took a capture, from the time its record came; None when it was sent from another run."""
+    """When the board took a capture: its GPS clock, else the time its record came; None from another run."""
+    if "utcMs" in capture:
+        return datetime.fromtimestamp(capture["utcMs"] / MS_PER_S, UTC).isoformat(timespec="milliseconds")
     if capture["sentBoot"] != capture["boot"]:
         return None
     try:

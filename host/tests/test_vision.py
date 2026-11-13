@@ -422,6 +422,13 @@ def test_a_record_sent_again_is_acked_again(tmp_path: Path) -> None:
     assert acks == [(DEVICE, 7, 2), (DEVICE, 7, 2)]
 
 
+def test_a_record_with_the_board_clock_takes_its_time_from_it(tmp_path: Path) -> None:
+    assembler = vision.Assembler(tmp_path)
+    vision.keep(assembler, record(sentBoot=8, imageBytes=0, noteBytes=0, utcMs=1794554866250))
+    entry = json.loads((tmp_path / DEVICE / "B7_000002_record.json").read_text(encoding="utf-8"))
+    assert entry["capturedUtc"] == "2026-11-13T07:27:46.250+00:00"
+
+
 def test_a_record_from_an_earlier_run_has_no_capture_time(tmp_path: Path) -> None:
     assembler = vision.Assembler(tmp_path)
     vision.keep(assembler, record(sentBoot=8, imageBytes=0, noteBytes=0))

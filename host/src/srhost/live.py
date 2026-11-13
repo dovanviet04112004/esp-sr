@@ -16,7 +16,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, tzinfo
+from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 
 from srhost.config import ConfigError, mqtt_config, record_config
@@ -37,6 +37,7 @@ KIB = 1024
 E7 = 1e7
 E1 = 10
 MG_PER_G = 1000
+MS_PER_S = 1000
 CLEAR = "\x1b[H\x1b[2J"
 HOME = "\x1b[H"
 ERASE_LINE = "\x1b[K"
@@ -164,13 +165,20 @@ def describe_heartbeat(hb: dict) -> str:
     return text
 
 
-def describe_sensors(sensors: dict) -> str:
+def describe_sensors(sensors: dict, tz: tzinfo | None = None) -> str:
     gps, ir = sensors["gps"], sensors["ir"]
     if gps["hasFix"]:
         place = f"{gps['latE7'] / E7:.5f} {gps['lonE7'] / E7:.5f}, {gps['satellites']} satellites"
+        if "hdopE1" in gps:
+            place += f", hdop {gps['hdopE1'] / E1:.1f}"
+        if gps.get("mode") == "E":
+            place += ", estimated"
     else:
         place = "no antenna" if gps["antennaOpen"] else f"no fix, {gps['inView']} in view"
     text = f"gps {place}  ir {'ON' if ir['active'] else 'off'}, {ir['hits']} hits"
+    if "utcMs" in sensors:
+        board_clock = datetime.fromtimestamp(sensors["utcMs"] / MS_PER_S, UTC).astimezone(tz)
+        text += f"  clock {board_clock.strftime('%H:%M:%S')}"
     if "motion" in sensors:
         motion = sensors["motion"]
         accel = " ".join(f"{mg / MG_PER_G:+.2f}" for mg in motion["accelMg"])
