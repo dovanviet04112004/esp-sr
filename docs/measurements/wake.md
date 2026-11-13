@@ -949,3 +949,21 @@ nhóm 12 phiên × 5 phút, mẩu 55–85 dB SPL ở 1 m, lặng 1–5 s giữa 
 - Trước khi học lại: thu qua board 10–15 phút tiếng động thật (đóng cửa, kéo ghế, gõ bàn, tiếng cưa, khoan phát từ loa)
   và chấm cùng đường này. Nếu báo nhầm thật cũng cao, âm bản học cần phiên chỉ có nhiễu, có lúc bắt đầu và dứt, gồm cả
   tiếng động trong nhà (sửa KẾ HOẠCH §3.11 trước).
+
+## 14. Học lại với âm bản chỉ có nhiễu (E11-T56, 13/11)
+
+Run `ml/artifacts/wake/runs/20261113_e550d0a_ff6af0` (`make wake-train` tại `e550d0a4`): split `vung1` như lượt 6, thêm
+`train_noise` 20 giờ và `val_noise` 4 giờ của split `wake/noise1`, `train.noise_share` 0,25, ngưỡng thấp nhất mà báo nhầm
+trên lời nói và trên `val_noise` đều ≤ 3 lần/giờ. 20 000 bước hết khoảng 40 phút trên RTX 3050; tiến trình giữ 7 GB
+RAM, RAM trống thấp nhất 0,7 GB, swap 0,8 GB.
+
+- Bản float ở bước cuối: ngưỡng 0,96, `val` bắt 58,8%, báo nhầm 0,16/giờ trên lời nói, 2,75/giờ trên `val_noise`;
+  `test_neg` 0,62/giờ. Giữa hai lần chấm liền nhau, bắt được nhảy 59–82%: ngưỡng do vài lần báo nhầm của `val_noise`
+  quyết.
+- Ở ngưỡng 0,96, cả 11 lần báo nhầm của `val_noise` đến từ nhóm MUSAN: 9 lần do một mẩu `noise-free-sound-0298`
+  (32 s), 2 lần do `noise-free-sound-0811` (8 s). Bảy nhóm còn lại (cửa, ghế kêu, kéo đồ, cưa, dụng cụ, đập gõ, quạt)
+  0 lần trong 0,5 giờ mỗi nhóm.
+- Bỏ các bước của hai mẩu ấy (cả 2 s sau mỗi mẩu) khỏi `val_noise`: ngưỡng 0,79, `val` bắt **92,6%**, lời nói
+  2,96/giờ, nhiễu 1,25/giờ trên 3,99 giờ. Lượt 6 ở bước cuối: 0,785, 89,7%, 2,96/giờ, và 55/giờ trên nhiễu (§13).
+- PhoWhisper đọc ra câu tiếng Việt ở cả hai mẩu và ở hai mẩu MUSAN không gây báo nhầm: nó bịa chữ trên nhiễu, nên
+  không nói được mẩu nào có tiếng người. Hai mẩu chép ở `interim/wake/noise/culprits/` của data root để nghe.
