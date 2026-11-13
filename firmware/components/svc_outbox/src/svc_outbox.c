@@ -14,6 +14,7 @@
 #include "gen_topics.h"
 #include "gen_vision.h"
 #include "net_mqtt.h"
+#include "sys_time.h"
 
 #define PATH_BYTES 40
 #define MARKS_DIR "IMG/PND"
@@ -255,9 +256,14 @@ static esp_err_t send_chunk(const pending_t *at, gen_topic_id_t topic, uint16_t 
 
 static esp_err_t send_record(void)
 {
-    s->record.capture.late = true;
-    s->record.capture.sent_boot = s_cfg.boot;
-    s->record.capture.sent_uptime_ms = uptime_ms();
+    capture_t *capture = &s->record.capture;
+    capture->late = true;
+    capture->sent_boot = s_cfg.boot;
+    capture->sent_uptime_ms = uptime_ms();
+    // The clock may have come after the capture, but it only knows this run's uptime (KEHOACH 3.19).
+    if (!capture->has_utc_ms && capture->boot == s_cfg.boot) {
+        capture->has_utc_ms = sys_time_utc_ms((int64_t)capture->uptime_ms * US_PER_MS, &capture->utc_ms);
+    }
     return net_mqtt_publish_record(&s->record);
 }
 

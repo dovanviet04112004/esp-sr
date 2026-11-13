@@ -7,5 +7,5 @@ idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS "include"
     REQUIRES common net_mqtt
-    PRIV_REQUIRES drv_sd esp_timer
+    PRIV_REQUIRES drv_sd esp_timer sys_time
 )

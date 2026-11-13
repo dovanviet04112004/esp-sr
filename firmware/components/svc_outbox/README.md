@@ -9,7 +9,8 @@ Mục trên thẻ của mỗi lần chụp và gửi bù khi có mạng lại (K
 - Có phiên và rảnh: đọc thư mục dấu lúc phiên mới nối và sau mỗi lượt `outbox.retry_s`, giữ `outbox.batch` mục cũ nhất; mỗi bước gửi
   một khúc ảnh đầy đủ, một khúc lời ghi chú hay bản ghi của mục cũ nhất, cờ `late`. Hộp thư esp-mqtt đầy thì bước sau gửi lại khúc ấy.
 - Phần nào bản ghi khai mà thẻ không còn, hay khác cỡ, thì bản ghi gửi bù khai cỡ 0, để server không chờ mãi.
+- Bản ghi gửi bù của lượt chạy này mà chưa có `utcMs` thì được điền từ `sys_time` khi board đã có giờ; `.JSN` giữ nguyên.
 - `.JSN` hỏng hay mất thì bỏ dấu.
-- Phụ thuộc: `common`, `drv_sd`, `net_mqtt`.
+- Phụ thuộc: `common`, `drv_sd`, `sys_time`, `net_mqtt`.
 - Một bản ghi và chữ của nó ở PSRAM, cấp lúc khởi tạo.
 - Board không có camera thì `APP_CAMERA_ENABLE` tắt, component rỗng.
