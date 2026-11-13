@@ -7,5 +7,5 @@ idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS "include"
     REQUIRES common net_mqtt svc_vision
-    PRIV_REQUIRES esp_timer svc_note svc_outbox
+    PRIV_REQUIRES esp_timer svc_note svc_outbox sys_time
 )

@@ -10,6 +10,7 @@
 #include "esp_timer.h"
 #include "svc_note.h"
 #include "svc_outbox.h"
+#include "sys_time.h"
 
 #define US_PER_MS 1000
 
@@ -75,6 +76,8 @@ static void fill_record(const svc_vision_capture_t *capture, uint32_t started_ms
         .note_dropped = note->dropped,
         .note_saved = note->saved,
     };
+    s_record->capture.has_utc_ms =
+        sys_time_utc_ms((int64_t)started_ms * US_PER_MS, &s_record->capture.utc_ms);
     if (shot->found != NULL) {
         s_record->detections = *shot->found;
         s_record->has_detections = true;
