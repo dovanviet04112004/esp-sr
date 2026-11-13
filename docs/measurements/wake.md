@@ -914,3 +914,35 @@ nào để chấm.
 - `make listen-unit` (kiểm firmware trước khi nạp) đã xoá ba ngưỡng lệnh trong NVS và đặt danh sách người nói về kiểm
   giọng tắt. Ngưỡng đặt lại bằng console; danh sách bật kiểm giọng gửi lại qua `make speakers`, giữ trên broker cho tới khi
   board vào lại mạng. Lần sau chạy `make nvs-save` trước app thử.
+
+## 13. Báo nhầm trên tiếng động không người nói (E11-T55, 13/11)
+
+`make wake-noise RUN=artifacts/wake/runs/20261101_528604f-dirty_b4b1a4 ROW=percentile` tại `942d304f` cộng hai nhóm đối
+chứng của mục `eval.noise`: hàng `percentile` 800‰ của lượt 6, sản phẩm hiện tại, chấm như chip trên mô phỏng board B. Mỗi
+nhóm 12 phiên × 5 phút, mẩu 55–85 dB SPL ở 1 m, lặng 1–5 s giữa hai mẩu. Log ở `interim/wake/noise/` của data root; chạy
+8 giờ tiếng hết khoảng 5 phút với 6 worker.
+
+| Nhóm | Mẩu | Báo nhầm | Mỗi giờ |
+|---|---|---|---|
+| cửa (DNS `door_`) | 5 692 | 59 | 59 |
+| ghế kêu (`squeak_`) | 967 | 55 | 55 |
+| kéo đồ (`dragging_`) | 74 | 95 | 95 |
+| cưa (AudioSet Sawing, Chainsaw) | 843 | 46 | 46 |
+| dụng cụ (Power tool, Drill, Tools…) | 961 | 61 | 61 |
+| đập gõ (Whack, Knock, Slam…) | 523 | 33 | 33 |
+| đối chứng: quạt (`fan_`) | 1 599 | 45 | 45 |
+| đối chứng: nhiễu MUSAN đã học | 842 | 47 | 47 |
+
+- Ngay cả tiếng quạt đều và nhiễu MUSAN mà dữ liệu học đã trộn cũng báo nhầm 45–47 lần/giờ. Tiếng động trong nhà không tệ
+  hơn bao nhiêu, trừ kéo đồ (95, hai mẩu chiếm 42 lần). Lỗ hổng không riêng ở tiếng va đập: mạng ít nghe những quãng dài
+  chỉ có nhiễu. Trong dữ liệu học, nhiễu chỉ đứng một mình ở 3 s đầu phiên và giữa các câu, ở mức dưới người nói theo SNR
+  0–30 dB, và chạy suốt phiên, không bao giờ dừng giữa chừng.
+- Phiên chỉ có nền micro (không mẩu nào): 0 lần trong 1 giờ. Lặng và `agc` một mình không gây báo nhầm.
+- Báo nhầm rơi trong mẩu hay trong 1 s sau khi mẩu dứt: quạt 30 trong mẩu, 24 sau; MUSAN 36 / 7; cửa 49 / 11. Tiếng dứt
+  rồi lặng giống mẫu dương (từ đánh thức rồi lặng), kiểu mà nhiễu của dữ liệu học chưa bao giờ có.
+- Bản thu thật qua board B chỉ có nền: 23 phiên, 49 phút (quạt 60 s, nhạc 60 s, phòng yên, demo): 1 lần, ở phiên nhạc nền
+  có người nói. Quạt thật đạt điểm cao nhất 0,51, dưới ngưỡng. Chưa có bản thu thật nào của tiếng động trong nhà, nên mô
+  phỏng có phóng đại hay không chưa biết 🔬: mức 55–85 dB rút đều có thể to hơn quạt thật.
+- Trước khi học lại: thu qua board 10–15 phút tiếng động thật (đóng cửa, kéo ghế, gõ bàn, tiếng cưa, khoan phát từ loa)
+  và chấm cùng đường này. Nếu báo nhầm thật cũng cao, âm bản học cần phiên chỉ có nhiễu, có lúc bắt đầu và dứt, gồm cả
+  tiếng động trong nhà (sửa KẾ HOẠCH §3.11 trước).
