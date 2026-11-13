@@ -568,8 +568,8 @@ def build_noise(
     dtype: str = "float32",
 ) -> Path:
     """per_pool sessions of noise alone of each pool's clips, drawn from stream, into out as build writes speech:
-    shards of sessions_per_shard sessions, their log-mel as dtype, figures and items, then manifest.yaml; a finished
-    build of the same draws is left as it is, and a stopped one goes on from its shards (KEHOACH 3.11)."""
+    shards of spec's sessions_per_shard sessions, their log-mel as dtype, figures and items, then manifest.yaml; a
+    finished build of the same draws is left as it is, and a stopped one goes on from its shards (KEHOACH 3.11)."""
     bank = room_bank(cfg, interim, workers)
     listed = "".join(f"{pool}\t{name}\n" for pool, names in pools.items() for name in names)
     head = {
@@ -593,7 +593,7 @@ def build_noise(
         for i, (pool, names) in enumerate(pools.items())
         for j in range(per_pool)
     ]
-    per_shard = cfg["sessions_per_shard"]
+    per_shard = spec["sessions_per_shard"]
     shards = range(math.ceil(len(sessions) / per_shard))
     jobs = [
         (cfg, spec, raw_root, bank, out, j, sessions[j * per_shard : (j + 1) * per_shard], dtype)

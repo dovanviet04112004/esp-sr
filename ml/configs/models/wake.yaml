@@ -91,7 +91,8 @@ noise:                             # sessions of household noise alone, no talke
   session_s: 300.0                 # one room, one agc start drawn as the board simulation draws it
   spl_1m_db: [55.0, 85.0]          # each clip over its loud hops at 1 m from its source, as talker.spl_1m_db
   gap_s: [1.0, 5.0]                # quiet between clips: the agc climbs as in a quiet room
-  workers: 6                       # each holds about 730 MB: more push a 10 GB WSL into swap
+  workers: 10                      # a build worker holds about 520 MB, a scoring one 730 MB: 10 fit a 10 GB WSL
+  sessions_per_shard: 4            # small shards share the work evenly between the workers
   audioset: noise/dns/datasets/noise   # under raw/: DNS's AudioSet clips, each named by its YouTube id
   labels: noise/audioset_labels    # under raw/: AudioSet's segment lists, which give each of them its classes
   exclude: [Speech, "Male speech, man speaking", "Female speech, woman speaking", "Child speech, kid speaking",

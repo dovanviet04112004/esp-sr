@@ -669,7 +669,7 @@ def test_a_louder_noise_session_is_louder_by_its_spl(raw_root: Path, tmp_path: P
 
 
 def test_a_noise_build_holds_its_sessions_and_goes_on_alike(raw_root: Path, tmp_path: Path) -> None:
-    cfg, spec = tiny(), NOISE_SESSION | {"session_s": 3.0}
+    cfg, spec = tiny(), NOISE_SESSION | {"session_s": 3.0, "sessions_per_shard": 2}
     pools = {"hum": ["noise/hum/hum.wav"], "again": ["noise/hum/hum.wav"]}
     interim = tmp_path / "interim"
     manifest = device.build_noise(cfg, spec, pools, 1, 2, raw_root, interim, tmp_path / "a")

@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -37,6 +39,7 @@ from srpipe.tasks.wake.data import (
     label_hops,
     load_set,
     sentence_units,
+    set_folder,
 )
 from srpipe.tasks.wake.eval import Sweep, checkpoint, operating_point, sweep
 from srpipe.tasks.wake.model.tcn import Tcn
@@ -55,6 +58,18 @@ SETS = {
 }
 OPTIONAL = ("train_hard", "val_hard", "train_noise", "val_noise")  # wake/v1 has none
 TILT_PIVOT_HZ = 1000.0  # word_tilt_db turns the spectrum about here
+
+
+def ahead[T](draw: Callable[[], T], count: int) -> Iterator[T]:
+    """count results of draw, in order, each drawn on one other thread while the caller still uses the one before:
+    the GPU steps while the CPU cuts the next batch, and draw's random stream runs as a plain loop would run it."""
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(draw)
+        for k in range(count):
+            result = pending.result()
+            if k + 1 < count:
+                pending = pool.submit(draw)
+            yield result
 
 
 def band_stats(shards: list[Shard]) -> tuple[np.ndarray, np.ndarray]:
@@ -341,8 +356,8 @@ def train(
     for name, p in (("positives", windows.real_p), ("hard words", windows.hard_p)):
         if p is not None:
             print(f"pitch-weighted {name}: {1.0 / np.sum(p * p):.0f} effective of {len(p)}", flush=True)
-    for step in range(1, spec["steps"] + 1):
-        x, y = windows.batch()
+    batches = ahead(lambda: (windows.batch(), sentences.batch() if sentences else None), spec["steps"])
+    for step, ((x, y), side_batch) in enumerate(batches, start=1):
         x = (torch.from_numpy(x.astype(np.float32)).to(device).transpose(1, 2) - mean_t) / std_t
         y = torch.from_numpy(y.astype(np.float32)).to(device)
         logits = model(x)[:, 0, spec["warmup_hops"] :]
@@ -352,7 +367,7 @@ def train(
         bce = functional.binary_cross_entropy_with_logits(logits, target, reduction="none")
         loss = (bce * learnt).sum() / learnt.sum()
         if sentences:
-            heard, lengths, targets, counts = sentences.batch()
+            heard, lengths, targets, counts = side_batch
             heard = (torch.from_numpy(heard.astype(np.float32)).to(device).transpose(1, 2) - mean_t) / std_t
             log_probs = reader(model.trunk(heard))[:, :, spec["warmup_hops"] :].log_softmax(1).permute(2, 0, 1)
             ctc = functional.ctc_loss(
@@ -433,9 +448,9 @@ def main(argv: list[str] | None = None) -> int:
     around = label_hops(cfg["train"]["label_s"])
     # Train's windows are cut anywhere, so its shards sit in memory; val and test are read in order, from the file.
     sets = {
-        name: load_set(root / name, positive, around, dtype, resident=name.startswith("train"))
+        name: load_set(set_folder(paths, cfg, name), positive, around, dtype, resident=name.startswith("train"))
         for name, (positive, dtype) in SETS.items()
-        if name not in OPTIONAL or (root / name).exists()
+        if name not in OPTIONAL or set_folder(paths, cfg, name).exists()
     }
     for name, rows in board_rows(cfg, paths).items():
         board, dtype = root / name, cfg["simulate"]["train_dtype"]

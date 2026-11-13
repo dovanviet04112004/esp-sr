@@ -578,3 +578,11 @@ def test_sets_of_noise_alone_lie_under_the_noise_split_and_the_rest_under_the_sp
     cfg, paths = {"train": {"split": "v9"}, "noise": {"split": "n3"}}, {"processed": Path("/p")}
     assert data.set_folder(paths, cfg, "val_noise") == Path("/p/wake/n3/val_noise")
     assert data.set_folder(paths, cfg, "val_neg") == Path("/p/wake/v9/val_neg")
+
+
+def test_batches_drawn_ahead_come_in_the_order_and_values_a_plain_loop_draws() -> None:
+    plain, early = np.random.default_rng(5), np.random.default_rng(5)
+    expected = [plain.normal(size=3) for _ in range(6)]
+    got = list(train.ahead(lambda: early.normal(size=3), 6))
+    assert len(got) == 6 and all(np.array_equal(a, b) for a, b in zip(got, expected, strict=True))
+    assert not np.array_equal(got[0], np.random.default_rng(6).normal(size=3))
