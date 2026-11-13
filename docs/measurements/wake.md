@@ -943,6 +943,9 @@ nhóm 12 phiên × 5 phút, mẩu 55–85 dB SPL ở 1 m, lặng 1–5 s giữa 
 - Bản thu thật qua board B chỉ có nền: 23 phiên, 49 phút (quạt 60 s, nhạc 60 s, phòng yên, demo): 1 lần, ở phiên nhạc nền
   có người nói. Quạt thật đạt điểm cao nhất 0,51, dưới ngưỡng. Chưa có bản thu thật nào của tiếng động trong nhà, nên mô
   phỏng có phóng đại hay không chưa biết 🔬: mức 55–85 dB rút đều có thể to hơn quạt thật.
+- Nâng ngưỡng của chính hàng ấy (cùng phiên, 8 giờ): 0,85 → 36 lần/giờ, 0,90 → 21, 0,93 → 12, 0,95 → 6,9, 0,97 → 2,9,
+  0,98 → 1,5, 0,99 → 0,9. Phải lên 0,97 mới về mục tiêu, cái giá là bắt hụt từ đánh thức; chủ repo không chọn cách này
+  (13/11), mạng học lại với âm bản chỉ có nhiễu (E11-T56). Bảng này là mốc so cho lượt mới.
 - Trước khi học lại: thu qua board 10–15 phút tiếng động thật (đóng cửa, kéo ghế, gõ bàn, tiếng cưa, khoan phát từ loa)
   và chấm cùng đường này. Nếu báo nhầm thật cũng cao, âm bản học cần phiên chỉ có nhiễu, có lúc bắt đầu và dứt, gồm cả
   tiếng động trong nhà (sửa KẾ HOẠCH §3.11 trước).
