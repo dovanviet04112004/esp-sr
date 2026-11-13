@@ -994,3 +994,19 @@ Lượt 3 với split nhiễu `noise3` (thêm cọ xát, kèn kẹt, bước ch�
 - Ở ngưỡng 0,83, báo nhầm của `val_noise` rải ra: còi cảnh sát MUSAN `sound-bible` "Police" 10, một mẩu MUSAN 4, ghế kêu 3,
   "Missile Alert" 2, cửa 2, dụng cụ, chuông gió, lò vi sóng mỗi thứ 1. Kéo đồ, cọ xát, bước chân, bíp và rung điện thoại,
   quạt: 0.
+
+Int8 của lượt 3 (`make wake-ptq`, `wake-board`, `wake-noise`), chấm như chip; `wake-noise` trên 14 giờ mẩu `test` của
+`noise3`, lượt 6 chấm trên cùng mẩu. `val` bắt 89,7% ở cả bốn hàng.
+
+| Hàng | Ngưỡng | "vừng ơi" của chủ repo | Phiên khác (66, 1,13 giờ) | `test_neg` / giờ | Nhiễu `test` / giờ |
+|---|---|---|---|---|---|
+| Lượt 3 `kl` | 830‰ | 33 / 35 | 0 | 4,14 | 3,7 |
+| Lượt 3 `percentile` | 840‰ | 32 / 35 | 0 | 4,14 | 3,9 |
+| Lượt 3 `minmax` | 785‰ | 33 / 35 | 0 | 5,38 | 5,1 |
+| Lượt 3 `mse` | 835‰ | 32 / 35 | 0 | 4,14 | 5,8 |
+| Lượt 6 `percentile` (sản phẩm) | 800‰ | 32 / 35 | 1 (64 phiên) | 5,69 | 60,6 |
+
+- Hàng `kl` hơn lượt 6 ở mọi cột: bắt thêm một câu, không thức nhầm trên phiên board, lời nói ít hơn 27%, nhiễu ít hơn 16 lần.
+- Ở mọi hàng, phần lớn báo nhầm trên nhiễu `test` đến từ một bản ghi kéo đồ, `dragging_Freesound_validated_221650_0`:
+  35 trong 52 lần của `kl`, 283 trong 848 của lượt 6. Bỏ nó, `kl` còn 17 lần trong 14 giờ. Kéo đồ vẫn là chỗ yếu nhất:
+  `test` của nhóm chỉ có 2 mẩu.
