@@ -147,10 +147,12 @@ def ptq(cfg: dict, run: Path, paths: dict, calibrations: list[str] | None = None
     raw += drawn_windows(root / "train_neg", q["calib_windows"] - half, width, rng)
     calib = [torch.from_numpy(normalised(w, stats["mean"], stats["std"])) for w in raw]
     around = data.label_hops(cfg["train"]["label_s"])
+    trained = load_run_config(run)
+    names = ("val_pos", "val_neg", "val_hard", "test_neg") + (("val_noise",) if "noise" in trained else ())
     sets = {
-        name: data.load_set(root / name, name.endswith("_pos"), around, "float32")
-        for name in ("val_pos", "val_neg", "val_hard", "val_noise", "test_neg")
-        if (root / name).exists()
+        name: data.load_set(data.set_folder(paths, trained, name), name.endswith("_pos"), around, "float32")
+        for name in names
+        if data.set_folder(paths, trained, name).exists()
     }
     spec = used["eval"]
     grid_th = np.round(wake_eval.thresholds(spec["thresholds"]) * PERMILLE).astype(np.int64)

@@ -85,7 +85,7 @@ split:                             # E11-T11: data/splits/wake/<version> by pyth
     below_nat: 3.0                 # a run this far under its session's median loudest log-mel hop is a breath or a noise
                                    #   (wake.md 12)
 noise:                             # sessions of household noise alone, no talker (KEHOACH 3.11)
-  split: noise1                    # data/splits/wake/<split>/ of make wake-noise-split
+  split: noise2                    # data/splits/wake/<split>/ of make wake-noise-split; its sets processed/wake/<split>/
   roles: {val: 0.1, test: 0.1}     # share of the source recordings each role takes by the seed; train the rest
   seed: 20261113
   session_s: 300.0                 # one room, one agc start drawn as the board simulation draws it
@@ -104,8 +104,14 @@ noise:                             # sessions of household noise alone, no talke
     - {name: saw, labels: [Sawing, Chainsaw]}
     - {name: tools, labels: [Power tool, Drill, Hammer, Jackhammer, Tools, "Filing (rasp)"]}
     - {name: knock, labels: ["Whack, thwack", Breaking, "Smash, crash", "Thump, thud", Knock, Slam, Wood]}
+    - {name: beeps, labels: [Telephone, Ringtone, "Telephone bell ringing", "Telephone dialing, DTMF", "Dial tone",
+                             "Busy signal", "Beep, bleep", Buzzer, Alarm, "Alarm clock", "Smoke detector, smoke alarm",
+                             "Sine wave", Vibration]}   # pitched, held, cut off: an "oi" to the net (wake.md 14)
+    - {name: chimes, labels: [Chime, Bell, Ding, Doorbell]}
+    - {name: appliances, labels: [Microwave oven, Vacuum cleaner, "Electric shaver, electric razor"]}
     - {name: fan, prefix: noise/dns/datasets/noise/fan_}   # control: steady noise
     - {name: musan, prefix: noise/musan/musan/noise/free-sound/noise-free-sound-}   # control: noise training heard
+    - {name: musan_bible, prefix: noise/musan/musan/noise/sound-bible/noise-sound-bible-}   # phones, dial tones, alarms
 simulate:                          # make wake-features: python -m srpipe.tasks.wake.data simulate (E4-T8)
   split: vung1
   workers: 12                      # each holds about 450 MB; more push a 10 GB WSL into swap

@@ -572,3 +572,9 @@ def test_noise_windows_come_from_noise_alone_at_their_share(tmp_path: Path) -> N
     assert from_noise.sum() == n_noise and not y[from_noise].any()
     plain = train.Windows(pos, neg, cfg, np.random.default_rng(16))
     assert plain.negative_counts(plain.counts()[2])[1] == 0 and not (plain.batch()[0] == 7.0).all(axis=(1, 2)).any()
+
+
+def test_sets_of_noise_alone_lie_under_the_noise_split_and_the_rest_under_the_speech_split() -> None:
+    cfg, paths = {"train": {"split": "v9"}, "noise": {"split": "n3"}}, {"processed": Path("/p")}
+    assert data.set_folder(paths, cfg, "val_noise") == Path("/p/wake/n3/val_noise")
+    assert data.set_folder(paths, cfg, "val_neg") == Path("/p/wake/v9/val_neg")

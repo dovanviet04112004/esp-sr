@@ -647,18 +647,25 @@ def read_noise_split(paths: dict[str, Path], spec: dict, role: str) -> dict[str,
 
 
 NOISE_STREAMS = {"train": 1, "val": 2, "test": 3}  # each role's sessions draw from a stream of their own
+NOISE_SETS = ("train_noise", "val_noise")
+
+
+def set_folder(paths: dict[str, Path], cfg: dict, name: str) -> Path:
+    """Where a processed set of cfg lies: a set of noise alone under its noise split, any other under train.split."""
+    split = cfg["noise"]["split"] if name in NOISE_SETS else cfg["train"]["split"]
+    return paths["processed"] / "wake" / split / name
 
 
 def simulate_noise(cfg: dict, paths: dict[str, Path], device_cfg: dict) -> None:
     """Each set of simulate.noise_hours as sessions of noise alone of its role's clips, every pool an equal share of
-    the hours, into processed/wake/<split>/<set> (KEHOACH 3.11)."""
+    the hours, into processed/wake/<noise.split>/<set> (KEHOACH 3.11)."""
     spec, sim = cfg["noise"], cfg["simulate"]
     for name, hours in sim.get("noise_hours", {}).items():
         role = name.removesuffix("_noise")
         pools = {pool: items for pool, items in read_noise_split(paths, spec, role).items() if items}
         per_pool = math.ceil(hours * 3600.0 / spec["session_s"] / len(pools))
         dtype = sim.get("train_dtype", "float32") if role == "train" else "float32"
-        out = paths["processed"] / "wake" / sim["split"] / name
+        out = paths["processed"] / "wake" / spec["split"] / name
         stream, workers = NOISE_STREAMS[role], spec["workers"]
         built = device.build_noise(
             device_cfg, spec, pools, stream, per_pool, paths["raw"], paths["interim"], out, workers, dtype
