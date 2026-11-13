@@ -133,8 +133,8 @@ def int8_scores(sim: ptq_espdl.Simulator, io: ptq_espdl.Io, shard: data.Shard, s
 def ptq(cfg: dict, run: Path, paths: dict, calibrations: list[str] | None = None) -> Path:
     """Rung 2 of the TCN: each of calibrations, by default all of quant.calibrations, kept at
     <run>/int8/<calibration>/graph.native and rowed in <run>/int8/ladder.yaml with the lowest permille threshold whose
-    val false accepts stay within eval.false_accepts_per_hour, its val recall and its test false accepts, all scored
-    as the chip scores (KEHOACH 3.11, 3.14)."""
+    val false accepts on speech and, when built, on val_noise stay within eval.false_accepts_per_hour, its val recall
+    and its test false accepts, all scored as the chip scores (KEHOACH 3.11, 3.14)."""
     q = cfg["quant"]
     unknown = sorted(set(calibrations or []) - set(q["calibrations"]))
     if unknown:
@@ -149,7 +149,7 @@ def ptq(cfg: dict, run: Path, paths: dict, calibrations: list[str] | None = None
     around = data.label_hops(cfg["train"]["label_s"])
     sets = {
         name: data.load_set(root / name, name.endswith("_pos"), around, "float32")
-        for name in ("val_pos", "val_neg", "val_hard", "test_neg")
+        for name in ("val_pos", "val_neg", "val_hard", "val_noise", "test_neg")
         if (root / name).exists()
     }
     spec = used["eval"]
@@ -169,7 +169,9 @@ def ptq(cfg: dict, run: Path, paths: dict, calibrations: list[str] | None = None
 
         negatives = sets["val_neg"] + sets.get("val_hard", [])
         val = wake_eval.sweep_scores(score, sets["val_pos"], negatives, used, grid_th)
-        threshold, recall, rate = wake_eval.operating_point(val, spec["false_accepts_per_hour"])
+        noise = wake_eval.sweep_scores(score, [], sets["val_noise"], used, grid_th) if "val_noise" in sets else None
+        others = (noise,) if noise is not None else ()
+        threshold, recall, rate = wake_eval.operating_point(val, spec["false_accepts_per_hour"], others)
         test = wake_eval.sweep_scores(score, [], sets["test_neg"], used, np.array([int(threshold)]))
         ladder["rows"][calibration] = {
             "calibration": calibration,
@@ -178,6 +180,9 @@ def ptq(cfg: dict, run: Path, paths: dict, calibrations: list[str] | None = None
             "val_fa_per_hour": round(rate, 3),
             "test_fa_per_hour": round(float(test.false_accepts_per_hour[0]), 3),
         }
+        if noise is not None:
+            at = int(np.flatnonzero(grid_th == int(threshold))[0])
+            ladder["rows"][calibration]["val_noise_fa_per_hour"] = round(float(noise.false_accepts_per_hour[at]), 3)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(yaml.safe_dump(ladder, sort_keys=False), encoding="utf-8")
         print(calibration, ladder["rows"][calibration], flush=True)

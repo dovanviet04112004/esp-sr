@@ -1,9 +1,8 @@
 """Train the wake TCN on board-simulated log-mel (E11-T11, KEHOACH 3.11) and write a run directory.
 
-Windows around a positive's end, a hard near miss (the end of a TTS phrase or of a word-long clip, anywhere in a corpus
-sentence's speech), the first seconds of a negative sentence, or anywhere in a negative, with fixed shares per batch;
-per-hop BCE past the warm-up, plus a CTC head on the trunk reading the lang_vi units of real sentences of train_neg.
-The last weights are kept, each evaluated one saved beside them. Run: python -m srpipe.tasks.wake.train"""
+Windows around a positive's end, a hard near miss, a negative sentence's onset, noise alone or a negative, at fixed
+shares per batch; per-hop BCE past the warm-up plus a CTC side task; the threshold keeps the false accepts on speech
+and on val_noise within the target; the last weights are kept. Run: python -m srpipe.tasks.wake.train"""
 
 from __future__ import annotations
 
@@ -39,7 +38,7 @@ from srpipe.tasks.wake.data import (
     load_set,
     sentence_units,
 )
-from srpipe.tasks.wake.eval import checkpoint, operating_point, sweep
+from srpipe.tasks.wake.eval import Sweep, checkpoint, operating_point, sweep
 from srpipe.tasks.wake.model.tcn import Tcn
 
 # Per processed file: whether every item says the wake word, and the dtype its features are held in.
@@ -51,8 +50,10 @@ SETS = {
     "val_neg": (False, "float32"),
     "val_hard": (False, "float32"),
     "test_neg": (False, "float32"),
+    "train_noise": (False, "float16"),
+    "val_noise": (False, "float32"),
 }
-OPTIONAL = ("train_hard", "val_hard")  # wake/v1 has none
+OPTIONAL = ("train_hard", "val_hard", "train_noise", "val_noise")  # wake/v1 has none
 TILT_PIVOT_HZ = 1000.0  # word_tilt_db turns the spectrum about here
 
 
@@ -84,10 +85,10 @@ def pitch_weights(f0_hz: list[float | None], spec: dict) -> np.ndarray:
 
 class Windows:
     """Examples of window_hops hops: one that holds a positive's whole label past the warm-up, one over a hard near
-    miss, one ending in the first onset_s of a negative sentence's speech, or one anywhere in a negative. Positive and
-    hard windows alike are changed by each of word_warp, word_gain_db, word_tilt_db and word_tempo that is set, each
-    drawn uniformly per window; with f0_balance and f0_hz, an item's F0, real positives and hard words are drawn by
-    pitch_weights (KEHOACH 3.11)."""
+    miss, one ending in the first onset_s of a negative sentence's speech, one anywhere in noise alone, or one anywhere
+    in a negative. Positive and hard windows alike are changed by each of word_warp, word_gain_db, word_tilt_db and
+    word_tempo that is set, each drawn uniformly per window; with f0_balance and f0_hz, an item's F0, real positives and
+    hard words are drawn by pitch_weights (KEHOACH 3.11)."""
 
     def __init__(
         self,
@@ -97,12 +98,15 @@ class Windows:
         rng: np.random.Generator,
         hard: list[Shard] | None = None,
         f0_hz: dict[str, float | None] | None = None,
+        noise: list[Shard] | None = None,
     ) -> None:
         self.cfg, self.rng = cfg["train"], rng
-        self.positives, self.negatives, self.hard = positives, negatives, hard or []
+        self.positives, self.negatives, self.hard, self.noise = positives, negatives, hard or [], noise or []
         self.before, self.after = label_hops(self.cfg["label_s"])
         width = self.cfg["window_hops"]
-        if short := [len(s.features) for s in positives + negatives + self.hard if len(s.features) < width]:
+        if short := [
+            len(s.features) for s in positives + negatives + self.hard + self.noise if len(s.features) < width
+        ]:
             raise ValueError(f"a shard of {min(short)} hops is shorter than a {width}-hop window")
         words = [(k, i) for k, s in enumerate(positives) for i in s.items if not i.get("ignore")]
         self.ends = [(k, i["frame_offset"] + i["speech_frames"][1]) for k, i in words]
@@ -120,6 +124,8 @@ class Windows:
         self.onset_hops, self.word_hops = round(self.cfg["onset_s"] * rate), round(self.cfg["word_s"] * rate)
         self.weights = np.array([len(s.features) for s in negatives], dtype=np.float64)
         self.weights /= self.weights.sum()
+        self.noise_weights = np.array([len(s.features) for s in self.noise], dtype=np.float64)
+        self.noise_weights /= self.noise_weights.sum() if self.noise else 1.0
         self.slack = width - self.cfg["warmup_hops"] - self.before - self.after
         if self.slack < 1:
             raise ValueError("window_hops leaves no room for a whole label past the warm-up")
@@ -177,6 +183,12 @@ class Windows:
         n_hard = round(n * self.cfg.get("hard_share", 0.0)) if self.hard_items else 0
         return n_pos, n_hard, n - n_pos - n_hard
 
+    def negative_counts(self, n_neg: int) -> tuple[int, int, int]:
+        """Of a batch's other negatives, those ending at a sentence's onset, those from noise alone, and the rest."""
+        n_onset = round(n_neg * self.cfg["onset_share"]) if self.onsets else 0
+        n_noise = round((n_neg - n_onset) * self.cfg.get("noise_share", 0.0)) if self.noise else 0
+        return n_onset, n_noise, n_neg - n_onset - n_noise
+
     def expected_real(self, n_pos: int) -> float:
         """Real positives a batch draws on average: real_share of them while both kinds exist, else all of one."""
         if not self.real or not self.synth:
@@ -227,15 +239,16 @@ class Windows:
             rate = self.rate()
             x, y = self.cut(self.hard[shard_index], self.hard_stop(item, rate), rate)
             xs.append(self.word(x)), ys.append(y)
-        n_onset = round(n_neg * self.cfg["onset_share"]) if self.onsets else 0
+        n_onset, n_noise, n_rest = self.negative_counts(n_neg)
         for k in self.rng.integers(len(self.onsets), size=n_onset) if n_onset else []:
             shard_index, first = self.onsets[k]
             x, y = self.cut(self.negatives[shard_index], first + 1 + int(self.rng.integers(self.onset_hops)))
             xs.append(x), ys.append(y)
-        for k in self.rng.choice(len(self.negatives), size=n_neg - n_onset, p=self.weights):
-            shard = self.negatives[k]
-            x, y = self.cut(shard, int(self.rng.integers(width, len(shard.features) + 1)))
-            xs.append(x), ys.append(y)
+        anywhere = [(self.noise, self.noise_weights, n_noise), (self.negatives, self.weights, n_rest)]
+        for shards, weights, count in anywhere:
+            for k in self.rng.choice(len(shards), size=count, p=weights) if count else []:
+                x, y = self.cut(shards[k], int(self.rng.integers(width, len(shards[k].features) + 1)))
+                xs.append(x), ys.append(y)
         return np.stack(xs), np.stack(ys)
 
 
@@ -277,14 +290,19 @@ def coverage(cfg: dict, windows: Windows) -> str:
     n_pos, n_hard, n_neg = windows.counts()
     n_real = windows.expected_real(n_pos)
     negative_hops = sum(len(s.features) for s in windows.negatives)
-    passes = spec["steps"] * n_neg * spec["window_hops"] / negative_hops
     kinds = [(windows.real, n_real, "real"), (windows.synth, n_pos - n_real, "TTS")]
     line = f"{spec['steps']} steps: " + ", ".join(
         f"each of {len(ends)} {name} positives about {spec['steps'] * n / len(ends):.0f} times"
         for ends, n, name in kinds
         if ends
     )
+    _, n_noise, n_rest = windows.negative_counts(n_neg)
+    passes = spec["steps"] * n_rest * spec["window_hops"] / negative_hops
     line += f", each of {negative_hops} negative hops about {passes:.1f} times"
+    if n_noise:
+        noise_hops = sum(len(s.features) for s in windows.noise)
+        noise_passes = spec["steps"] * n_noise * spec["window_hops"] / noise_hops
+        line += f", each of {noise_hops} hops of noise alone about {noise_passes:.1f} times"
     if n_hard:
         hard_visits = spec["steps"] * n_hard / len(windows.hard_items)
         line += f", each of {len(windows.hard_items)} hard near misses about {hard_visits:.0f} times"
@@ -316,7 +334,7 @@ def train(
     )
     positives = sets["train_pos"] + sets.get(BOARD_SET, [])
     hard = sets.get("train_hard", []) + sets.get(BOARD_HARD_SET, [])
-    windows = Windows(positives, sets["train_neg"], cfg, rng, hard, f0_hz)
+    windows = Windows(positives, sets["train_neg"], cfg, rng, hard, f0_hz, sets.get("train_noise"))
     mean_t, std_t = torch.tensor(mean, device=device)[:, None], torch.tensor(std, device=device)[:, None]
     history, losses, side = [], [], []
     print(coverage(cfg, windows) + (side_coverage(cfg, sentences) if sentences else ""), flush=True)
@@ -354,11 +372,13 @@ def train(
         if step % spec["eval_every"] == 0 or step == spec["steps"]:
             model.eval()
             val = sweep(model, sets["val_pos"], sets["val_neg"] + sets.get("val_hard", []), mean, std, cfg, device)
+            noise = sweep(model, [], sets["val_noise"], mean, std, cfg, device) if "val_noise" in sets else None
             model.train()
-            threshold, recall, rate = operating_point(val, cfg["eval"]["false_accepts_per_hour"])
+            threshold, recall, rate = operating_point(val, cfg["eval"]["false_accepts_per_hour"], noise_sweeps(noise))
             row = {"step": step, "loss": float(np.mean(losses)), "lr": schedule.get_last_lr()[0]}
             row |= {"ctc_loss": float(np.mean(side))} if side else {}
             row |= {"threshold": threshold, "recall": recall, "fa_per_hour": rate}
+            row |= {"noise_fa_per_hour": rate_at(noise, threshold)} if noise else {}
             losses, side = [], []
             history.append(row)
             print(row_line(row), flush=True)
@@ -367,6 +387,16 @@ def train(
                 torch.save(model.state_dict(), checkpoint(run, step))
     model.eval()
     return model, {"mean": mean, "std": std, "kept": history[-1]}, history
+
+
+def noise_sweeps(noise: Sweep | None) -> tuple[Sweep, ...]:
+    """The sweeps besides speech that a threshold must also keep within the target: val_noise's when built."""
+    return (noise,) if noise is not None else ()
+
+
+def rate_at(result: Sweep, threshold: float) -> float:
+    """False accepts per hour of a sweep at the swept threshold nearest threshold."""
+    return float(result.false_accepts_per_hour[int(np.argmin(np.abs(result.thresholds - threshold)))])
 
 
 def side_coverage(cfg: dict, sentences: Sentences) -> str:
@@ -414,6 +444,8 @@ def main(argv: list[str] | None = None) -> int:
         if rows:
             sets[name] = load_set(board, name == BOARD_SET, around, dtype, resident=True)
     split_files = sorted((paths["splits"] / "wake" / cfg["train"]["split"]).glob("*.txt"))
+    if "train_noise" in sets:
+        split_files += sorted((paths["splits"] / "wake" / cfg["noise"]["split"]).glob("*.txt"))
     units = None
     if cfg["train"].get("aux", {}).get("weight", 0) > 0:
         spoken = {i["item"] for s in sets["train_neg"] for i in s.items if i["origin"] == "public"}
@@ -436,6 +468,12 @@ def main(argv: list[str] | None = None) -> int:
             "positives": result.positives,
             "negative_hours": round(result.negative_hours, 2),
         }
+        if f"{name}_noise" in sets:
+            noise = sweep(model, [], sets[f"{name}_noise"], stats["mean"], stats["std"], cfg, device)
+            report[name] |= {
+                "noise_fa_per_hour": rate_at(noise, threshold),
+                "noise_hours": round(noise.negative_hours, 2),
+            }
     torch.save(model.state_dict(), run / "model.pt")
     np.savez(run / "band_stats.npz", mean=stats["mean"], std=stats["std"])
     (run / "metrics.yaml").write_text(yaml.safe_dump(report, sort_keys=False), encoding="utf-8")

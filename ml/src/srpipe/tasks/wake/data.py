@@ -1,10 +1,9 @@
 """Split wake/v<n> (KEHOACH 1.3, 3.11): kept TTS clips of E11-T7 and public speech, by role and label.
 
-split sorts TTS positives and near misses by the role of their voice, takes the extract's clips of the wake word as
-real positives, public negatives from the corpora of the reference voices, test_neg from Common Voice and VIVOS test,
-and near-miss families into hard files when on; simulate runs each file through the board simulation, linking a file
-another version built the same way. Run: python -m srpipe.tasks.wake.data {split,simulate}
-"""
+split sorts TTS positives, near misses, real positives, public negatives and test_neg into files by role and label;
+noise-split gives household noise clips roles by source recording; simulate runs each file through the board
+simulation, linking one another version built the same way, then builds the sets of noise alone.
+Run: python -m srpipe.tasks.wake.data {split,noise-split,simulate}"""
 
 from __future__ import annotations
 
@@ -573,6 +572,98 @@ def simulate(cfg: dict, paths: dict[str, Path]) -> None:
             print(f"{out}: already built", flush=True)
         elif rows:
             print(cut_board(cfg, paths, out, rows, name == BOARD_SET), flush=True)
+    if spec.get("noise_hours"):
+        simulate_noise(cfg, paths, device_cfg)
+
+
+def noise_pools(spec: dict, raw: Path, rejected: set[str]) -> dict[str, list[str]]:
+    """Each pool of the noise block as its clips, names under raw/, sorted: by a file prefix, or DNS's AudioSet clips by
+    their classes; a clip goes to the first pool it matches, and neither screening's rejects nor a clip carrying a
+    class of spec['exclude'] goes anywhere (KEHOACH 3.11)."""
+    folder = raw / spec["audioset"]
+    ids = {p.stem for p in folder.glob("*.wav") if corpus.AUDIOSET_ID.fullmatch(p.stem)}
+    classes = corpus.audioset_classes(raw / spec["labels"], ids)
+    known = set(corpus.audioset_class_names(raw / spec["labels"]).values())
+    named = set(spec["exclude"]).union(*(pool.get("labels", []) for pool in spec["pools"]))
+    if unknown := sorted(named - known):
+        raise ValueError(f"the noise block names classes AudioSet has not: {unknown}")
+    excluded, taken, pools = set(spec["exclude"]), set(rejected), {}
+    for pool in spec["pools"]:
+        if "prefix" in pool:
+            start = raw / pool["prefix"]
+            found = (str(p.relative_to(raw)) for p in start.parent.glob(f"{start.name}*.wav"))
+        else:
+            wanted = set(pool["labels"])
+            found = (f"{spec['audioset']}/{c}.wav" for c, has in classes.items() if has & wanted and not has & excluded)
+        pools[pool["name"]] = sorted(name for name in found if name not in taken)
+        taken.update(pools[pool["name"]])
+    return pools
+
+
+def noise_source(item: str) -> str:
+    """The recording a noise clip was cut from: an AudioSet clip's YouTube id, else the file's stem without the
+    '_<n>' DNS gives each segment of one Freesound recording."""
+    stem = Path(item).stem
+    return stem if corpus.AUDIOSET_ID.fullmatch(stem) else re.sub(r"_\d+$", "", stem)
+
+
+def noise_split(cfg: dict, paths: dict[str, Path]) -> Path:
+    """data/splits/wake/<noise.split>/: each clip of noise_pools as a row of {role}_noise.txt, its source recording as
+    the speaker so one recording keeps one role and its pool as the room; roles drawn by noise.seed (KEHOACH 3.11)."""
+    spec = cfg["noise"]
+    pools = noise_pools(spec, paths["raw"], set(screen.rejected(paths["interim"])))
+    sources = {noise_source(item) for items in pools.values() for item in items}
+    roles = splits.speaker_roles(sources, spec["roles"], "train", spec["seed"])
+    files: dict[str, list[splits.Row]] = {f"{role}_noise.txt": [] for role in ("train", *spec["roles"])}
+    for pool, items in pools.items():
+        for item in items:
+            source = noise_source(item)
+            files[f"{roles[source]}_noise.txt"].append(splits.Row(item, source, pool, PUBLIC))
+    counts = "\n".join(
+        f"- {pool}: "
+        + ", ".join(f"{name.removesuffix('.txt')} {sum(r.room == pool for r in rows)}" for name, rows in files.items())
+        for pool in pools
+    )
+    notes = (
+        f"# wake/{spec['split']}\n\n"
+        "Noise alone for the wake (KEHOACH 3.11): python -m srpipe.tasks.wake.data noise-split.\n"
+        "Each clip's speaker column is the recording it was cut from, its room column its pool.\n"
+        f"Roles {spec['roles']} of the recordings by seed {spec['seed']}, train the rest; screening's rejects\n"
+        "and clips labelled with a class of the noise block's exclude list are left out.\n\n"
+        f"{counts}\n"
+    )
+    out = paths["splits"] / "wake" / spec["split"]
+    splits.write_version(out, files, notes)
+    return out
+
+
+def read_noise_split(paths: dict[str, Path], spec: dict, role: str) -> dict[str, list[str]]:
+    """The clips of one role of the noise split by pool, in the noise block's order of pools."""
+    listing = paths["splits"] / "wake" / spec["split"] / f"{role}_noise.txt"
+    if not listing.exists():
+        raise FileNotFoundError(f"{listing} is missing: run make wake-noise-split")
+    rows = splits.read_split(listing)
+    return {p["name"]: [r.item for r in rows if r.room == p["name"]] for p in spec["pools"]}
+
+
+NOISE_STREAMS = {"train": 1, "val": 2, "test": 3}  # each role's sessions draw from a stream of their own
+
+
+def simulate_noise(cfg: dict, paths: dict[str, Path], device_cfg: dict) -> None:
+    """Each set of simulate.noise_hours as sessions of noise alone of its role's clips, every pool an equal share of
+    the hours, into processed/wake/<split>/<set> (KEHOACH 3.11)."""
+    spec, sim = cfg["noise"], cfg["simulate"]
+    for name, hours in sim.get("noise_hours", {}).items():
+        role = name.removesuffix("_noise")
+        pools = {pool: items for pool, items in read_noise_split(paths, spec, role).items() if items}
+        per_pool = math.ceil(hours * 3600.0 / spec["session_s"] / len(pools))
+        dtype = sim.get("train_dtype", "float32") if role == "train" else "float32"
+        out = paths["processed"] / "wake" / sim["split"] / name
+        stream, workers = NOISE_STREAMS[role], spec["workers"]
+        built = device.build_noise(
+            device_cfg, spec, pools, stream, per_pool, paths["raw"], paths["interim"], out, workers, dtype
+        )
+        print(built, flush=True)
 
 
 def real_positives(cfg: dict, raw: Path) -> dict[str, float]:
@@ -623,13 +714,18 @@ def cut_split(cfg: dict, paths: dict[str, Path]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("step", choices=["split", "simulate"])
+    parser.add_argument("step", choices=["split", "noise-split", "simulate"])
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     args = parser.parse_args(argv)
     cfg, paths = apply_overrides(load_yaml(CONFIG), args.overrides), data_paths()
     if args.step == "simulate":
         simulate(cfg, paths)
         return 0
+    if args.step == "noise-split":
+        out = noise_split(cfg, paths)
+        problems = splits.check_version(out)
+        print("\n".join(problems) or f"{out}: every rule of KEHOACH 1.3 holds")
+        return 1 if problems else 0
     return cut_split(cfg, paths)
 
 

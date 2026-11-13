@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 import yaml
 
-from srpipe.core import corpus
+from srpipe.core import corpus, splits
 from srpipe.core.audio_io import write_wav
 from srpipe.core.config import device_of, load_yaml
 from srpipe.dsp.spec.mel import Mel, MelConfig, mel_to_hz
@@ -482,7 +482,7 @@ def test_household_noise_pools_are_disjoint_and_leave_out_speech_and_rejects(tmp
         "EEEEEEEEEEE": ["Music", "Power tool"],
     }
     audioset_labels(raw / "noise" / "labels", rows)
-    pools = wake_eval.noise_pools(NOISE_SPEC, raw, {"noise/dns/door_2.wav"})
+    pools = data.noise_pools(NOISE_SPEC, raw, {"noise/dns/door_2.wav"})
     assert pools == {
         "door": ["noise/dns/door_1.wav"],
         "saw": ["noise/dns/AAAAAAAAAAA.wav", "noise/dns/BBBBBBBBBBB.wav"],
@@ -495,7 +495,7 @@ def test_a_noise_pool_naming_a_class_audioset_has_not_is_refused(tmp_path: Path)
     audioset_labels(raw / "noise" / "labels", {"AAAAAAAAAAA": ["Sawing"]})
     spec = NOISE_SPEC | {"pools": [{"name": "saw", "labels": ["Sawing", "Hand saw"]}]}
     with pytest.raises(ValueError, match="Hand saw"):
-        wake_eval.noise_pools(spec, raw, set())
+        data.noise_pools(spec, raw, set())
 
 
 def test_a_trigger_is_put_on_the_clip_last_begun_before_it() -> None:
@@ -516,3 +516,59 @@ def test_the_noise_table_counts_each_pool_and_all() -> None:
     assert rows[4] == "| door | 4 | 0.50 | 2 | 4.0 | door_1.wav x2 |"
     assert rows[5] == "| saw | 2 | 1.00 | 0 | 0.0 |  |"
     assert rows[6] == "| all | 6 | 1.50 | 2 | 1.3 | door_1.wav x2 |"
+
+
+def test_a_noise_clip_belongs_to_the_recording_it_was_cut_from() -> None:
+    assert data.noise_source("noise/dns/door_Freesound_validated_182324_3.wav") == "door_Freesound_validated_182324"
+    assert data.noise_source("noise/musan/noise-free-sound-0258.wav") == "noise-free-sound-0258"
+    assert data.noise_source("noise/dns/abcdefgh_12.wav") == "abcdefgh_12"
+
+
+def test_the_noise_split_keeps_each_recording_in_one_role(tmp_path: Path) -> None:
+    raw = noise_raw(tmp_path / "raw", [f"door_Freesound_validated_{n}_{k}.wav" for n in range(40) for k in range(3)])
+    audioset_labels(raw / "noise" / "labels", {})
+    screened = tmp_path / "interim" / "screen"
+    screened.mkdir(parents=True)
+    (screened / "rejects.tsv").write_text("item\tcorpus\treason\tseconds\n")
+    spec = NOISE_SPEC | {"split": "n1", "seed": 4, "roles": {"val": 0.2, "test": 0.2}, "pools": NOISE_SPEC["pools"][:1]}
+    paths = {"raw": raw, "interim": tmp_path / "interim", "splits": tmp_path / "splits"}
+    out = data.noise_split({"noise": spec}, paths)
+    assert splits.check_version(out) == []
+    roles = {}
+    for role in ("train", "val", "test"):
+        for item in data.read_noise_split(paths, spec, role)["door"]:
+            roles.setdefault(data.noise_source(item), set()).add(role)
+    assert len(roles) == 40 and all(len(r) == 1 for r in roles.values())
+    assert {next(iter(r)) for r in roles.values()} == {"train", "val", "test"}
+    test_file = out / "test_noise.txt"
+    row = splits.read_split(out / "train_noise.txt")[0]
+    test_file.write_text(test_file.read_text() + "\t".join((row.item, row.spk, row.room, row.origin)) + "\n")
+    assert any("sits in" in problem for problem in splits.check_version(out))
+
+
+def sweep_of(rates: list[float]) -> wake_eval.Sweep:
+    return wake_eval.Sweep(np.array([0.5, 0.6, 0.7, 0.8]), np.array([0.9, 0.8, 0.7, 0.6]), np.array(rates), 10, 1.0)
+
+
+def test_a_threshold_keeps_both_speech_and_noise_within_the_target() -> None:
+    speech, noise = sweep_of([5.0, 2.0, 1.0, 0.0]), sweep_of([40.0, 20.0, 3.0, 1.0])
+    assert wake_eval.operating_point(speech, 3.0) == (0.6, 0.8, 2.0)
+    assert wake_eval.operating_point(speech, 3.0, (noise,)) == (0.7, 0.7, 1.0)
+
+
+def test_noise_windows_come_from_noise_alone_at_their_share(tmp_path: Path) -> None:
+    rng = np.random.default_rng(15)
+    cfg = tiny_cfg()
+    cfg["train"] |= {"onset_share": 0.0, "noise_share": 0.5}
+    around = data.label_hops(cfg["train"]["label_s"])
+    pos = data.load_set(processed(tmp_path / "p", [(60, 20, 40)] * 3, rng, True), True, around, "float32")
+    neg = data.load_set(processed(tmp_path / "n", [(600, 0, 600)] * 2, rng, False), False, around, "float32")
+    noise = [data.Shard(np.full((600, len(pos[0].features[0])), 7.0, np.float32), np.zeros(600, np.uint8), [], False)]
+    windows = train.Windows(pos, neg, cfg, np.random.default_rng(16), noise=noise)
+    _, n_noise, n_rest = windows.negative_counts(windows.counts()[2])
+    assert n_noise == n_rest
+    x, y = windows.batch()
+    from_noise = (x == 7.0).all(axis=(1, 2))
+    assert from_noise.sum() == n_noise and not y[from_noise].any()
+    plain = train.Windows(pos, neg, cfg, np.random.default_rng(16))
+    assert plain.negative_counts(plain.counts()[2])[1] == 0 and not (plain.batch()[0] == 7.0).all(axis=(1, 2)).any()

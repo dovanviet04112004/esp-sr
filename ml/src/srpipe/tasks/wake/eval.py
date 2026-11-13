@@ -13,7 +13,7 @@ import multiprocessing
 import sys
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -21,15 +21,14 @@ import soundfile as sf
 import torch
 import yaml
 
-from srpipe.core import corpus, screen
-from srpipe.core.audio_io import ItemReader
+from srpipe.core import corpus
 from srpipe.core.config import data_paths, device_of, load_run_config, load_yaml
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
 from srpipe.generated import grid
 from srpipe.scenes import device
 from srpipe.tasks.wake import CONFIG
-from srpipe.tasks.wake.data import Shard, session_chain, session_kind
+from srpipe.tasks.wake.data import NOISE_STREAMS, Shard, read_noise_split, session_chain, session_kind
 from srpipe.tasks.wake.model.tcn import Tcn
 from srpipe.tasks.wake.postproc.smooth import smooth, triggers
 
@@ -102,9 +101,15 @@ def sweep(model, positives: list[Shard], negatives: list[Shard], mean, std, cfg:
     )
 
 
-def operating_point(result: Sweep, target_per_hour: float) -> tuple[float, float, float]:
-    """The lowest threshold whose false accepts stay at or under the target: (threshold, recall, rate)."""
-    ok = np.flatnonzero(result.false_accepts_per_hour <= target_per_hour)
+def operating_point(
+    result: Sweep, target_per_hour: float, others: tuple[Sweep, ...] = ()
+) -> tuple[float, float, float]:
+    """The lowest threshold whose false accepts stay at or under the target on result and on each of others, swept
+    over the same thresholds: (threshold, recall, rate on result)."""
+    within = result.false_accepts_per_hour <= target_per_hour
+    for other in others:
+        within &= other.false_accepts_per_hour <= target_per_hour
+    ok = np.flatnonzero(within)
     k = int(ok[0]) if len(ok) else len(result.thresholds) - 1
     return float(result.thresholds[k]), float(result.recall[k]), float(result.false_accepts_per_hour[k])
 
@@ -236,42 +241,11 @@ class NoiseSession:
     fired: list[str]
 
 
-def noise_pools(spec: dict, raw: Path, rejected: set[str]) -> dict[str, list[str]]:
-    """Each pool of eval.noise as its clips, names under raw/, sorted: by a file prefix, or DNS's AudioSet clips by
-    their classes; a clip goes to the first pool it matches, and neither screening's rejects nor a clip carrying a
-    class of spec['exclude'] goes anywhere (KEHOACH 3.11)."""
-    folder = raw / spec["audioset"]
-    ids = {p.stem for p in folder.glob("*.wav") if corpus.AUDIOSET_ID.fullmatch(p.stem)}
-    classes = corpus.audioset_classes(raw / spec["labels"], ids)
-    known = set(corpus.audioset_class_names(raw / spec["labels"]).values())
-    named = set(spec["exclude"]).union(*(pool.get("labels", []) for pool in spec["pools"]))
-    if unknown := sorted(named - known):
-        raise ValueError(f"eval.noise names classes AudioSet has not: {unknown}")
-    excluded, taken, pools = set(spec["exclude"]), set(rejected), {}
-    for pool in spec["pools"]:
-        if "prefix" in pool:
-            start = raw / pool["prefix"]
-            found = (str(p.relative_to(raw)) for p in start.parent.glob(f"{start.name}*.wav"))
-        else:
-            wanted = set(pool["labels"])
-            found = (f"{spec['audioset']}/{c}.wav" for c, has in classes.items() if has & wanted and not has & excluded)
-        pools[pool["name"]] = sorted(name for name in found if name not in taken)
-        taken.update(pools[pool["name"]])
-    return pools
-
-
 def _noise_session(job: tuple) -> tuple[str, np.ndarray, np.ndarray, list[tuple[int, int, str]]]:
     cfg, raw_root, bank, pool, k, names = job
-    device_cfg = device_of(cfg)
-    mics = device.load_microphones(device_cfg["microphone"])
-    floor_cfg = device_cfg["microphone"].get("floor")
-    floor = device.load_floor(floor_cfg, raw_root, mics.pcm_shift) if floor_cfg else None
-    spec = cfg["eval"]["noise"]
-    captured, spans, draws = device.simulate_noise_session(
-        device_cfg, spec, k, names, bank, mics, ItemReader(raw_root), floor
+    figures, features, spans, _ = device.listen_noise_session(
+        device_of(cfg), cfg["noise"], NOISE_STREAMS["test"], k, names, bank, raw_root
     )
-    chain_cfg = replace(ChainConfig(balance_gains=mics.gains), agc_start_db=draws.get("agc_start_db"))
-    _, figures, features = device.listen(captured, chain_cfg, Mel(MelConfig(**device_cfg["features"])))
     return pool, features, figures[:, 0].astype(bool), spans
 
 
@@ -282,12 +256,13 @@ def begun_before(spans: list[tuple[int, int, str]], hop: int) -> str:
 
 
 def noise(score_of: Scorer, cfg: dict, paths: dict, threshold: float) -> tuple[dict[str, int], list[NoiseSession]]:
-    """Every pool of eval.noise in sessions of noise alone through the board simulation, eval.noise.hours of each,
-    scored by score_of at threshold: the clips each pool holds, and the sessions (KEHOACH 3.11)."""
-    spec, rate = cfg["eval"]["noise"], grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
-    pools = noise_pools(spec, paths["raw"], set(screen.rejected(paths["interim"])))
+    """Every pool of the noise split's test clips in sessions of noise alone through the board simulation,
+    eval.noise.hours of each, scored by score_of at threshold: the clips each pool holds, and the sessions
+    (KEHOACH 3.11)."""
+    spec, rate = cfg["noise"], grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
+    pools = read_noise_split(paths, spec, "test")
     bank = device.room_bank(device_of(cfg), paths["interim"], spec["workers"])
-    per_pool = math.ceil(spec["hours"] * 3600.0 / spec["session_s"])
+    per_pool = math.ceil(cfg["eval"]["noise"]["hours"] * 3600.0 / spec["session_s"])
     jobs = [
         (cfg, paths["raw"], bank, name, i * per_pool + j, names)
         for i, (name, names) in enumerate(pools.items())

@@ -1,10 +1,9 @@
 """The board simulation of KEHOACH 1.2 (E4-T8): clean speech becomes what the recogniser hears on board B.
 
-build runs sessions of split items in rooms of a bank built once, on the microphones and through the chain, log-mel
-and, when asked, pitch of contracts/listen.yaml, into processed/<out>/ with a manifest of sha256s. playback writes
-interim/playback/vivos_test.wav, VIVOS test to play from a loudspeaker at a known place (host/plans/playback.tsv).
-Run: python -m srpipe.scenes.device build <split file> <out> | playback
-"""
+build runs sessions of split items in rooms of a bank built once, on the microphones, the chain, log-mel and, when
+asked, pitch of contracts/listen.yaml into processed/<out>/ with a manifest of sha256s; build_noise does so for noise
+alone (KEHOACH 3.11); playback writes interim/playback/vivos_test.wav to play from a loudspeaker at a known place.
+Run: python -m srpipe.scenes.device build <split file> <out> | playback"""
 
 from __future__ import annotations
 
@@ -486,6 +485,7 @@ def simulate_session(
 def simulate_noise_session(
     cfg: dict,
     spec: dict,
+    stream: int,
     k: int,
     names: list[str],
     bank: Path,
@@ -493,10 +493,10 @@ def simulate_noise_session(
     raw: ItemReader,
     floor: Floor | None = None,
 ) -> tuple[np.ndarray, list[tuple[int, int, str]], dict]:
-    """Session k of noise alone, spec['session_s'] long, from the noise source of a room of the bank: clips of names
-    drawn one after another, each after a quiet of spec['gap_s'] and at spec['spl_1m_db'] over its loud hops; the
-    interleaved int16 frames board B would capture, each clip's [start, end) in samples and name, and the draws."""
-    rng = np.random.default_rng([spec["seed"], k])
+    """Session k of a stream of noise alone, spec['session_s'] long, from the noise source of a room of the bank: clips
+    of names drawn one after another, each after a quiet of spec['gap_s'] and at spec['spl_1m_db'] over its loud hops;
+    the interleaved int16 frames board B would capture, each clip's [start, end) in samples and name, and the draws."""
+    rng = np.random.default_rng([spec["seed"], stream, k])
     entry = int(rng.integers(cfg["rooms"]["count"]))
     rirs = np.load(bank / f"room_{entry:04d}.npy")
     t = cfg["talker"]
@@ -518,6 +518,100 @@ def simulate_noise_session(
     if cfg["session"].get("agc_start_drawn"):
         draws |= {"agc_start_db": round(float(rng.uniform(0.0, afe.AGC_GAIN_MAX_DB)), 3)}
     return hear(air, mics, rng, floor), spans, draws
+
+
+def listen_noise_session(
+    cfg: dict, spec: dict, stream: int, k: int, names: list[str], bank: Path, raw_root: Path
+) -> tuple[np.ndarray, np.ndarray, list[tuple[int, int, str]], dict]:
+    """simulate_noise_session through the product's chain, the agc starting as the session drew: per hop the vad,
+    level_dbfs and gain_db, per hop the log-mel, then each clip's span and name, and the draws."""
+    mics = load_microphones(cfg["microphone"])
+    floor_cfg = cfg["microphone"].get("floor")
+    floor = load_floor(floor_cfg, raw_root, mics.pcm_shift) if floor_cfg else None
+    captured, spans, draws = simulate_noise_session(
+        cfg, spec, stream, k, names, bank, mics, ItemReader(raw_root), floor
+    )
+    chain_cfg = replace(ChainConfig(balance_gains=mics.gains), agc_start_db=draws.get("agc_start_db"))
+    _, figures, features = listen(captured, chain_cfg, Mel(MelConfig(**cfg["features"])))
+    return figures, features, spans, draws
+
+
+def _noise_shard(job: tuple) -> list[Path]:
+    cfg, spec, raw_root, bank, out, shard, sessions, dtype = job
+    features, figures, items, offset = [], [], [], 0
+    for pool, stream, k, names in sessions:
+        figs, feats, spans, draws = listen_noise_session(cfg, spec, stream, k, names, bank, raw_root)
+        features.append(feats)
+        figures.append(figs)
+        clips = [name for _, _, name in spans]
+        items.append({"pool": pool, "clips": clips, "frame_offset": offset, "n_frames": len(feats)} | draws)
+        offset += len(feats)
+    stem = out / f"shard_{shard:05d}"
+    np.save(stem.with_suffix(".features.npy"), joined(features, (0, cfg["features"]["n_bands"])).astype(dtype))
+    np.save(stem.with_suffix(".figures.npy"), joined(figures, (0, 3), np.int8))
+    stem.with_suffix(".items.jsonl").write_text("".join(json.dumps(i) + "\n" for i in items), encoding="utf-8")
+    # Written last: a shard stopped part way has no marker and is built again whole.
+    shard_done(out, shard).write_text("", encoding="utf-8")
+    return shard_files(out, shard, False, False)
+
+
+def build_noise(
+    cfg: dict,
+    spec: dict,
+    pools: dict[str, list[str]],
+    stream: int,
+    per_pool: int,
+    raw_root: Path,
+    interim: Path,
+    out: Path,
+    workers: int = 1,
+    dtype: str = "float32",
+) -> Path:
+    """per_pool sessions of noise alone of each pool's clips, drawn from stream, into out as build writes speech:
+    shards of sessions_per_shard sessions, their log-mel as dtype, figures and items, then manifest.yaml; a finished
+    build of the same draws is left as it is, and a stopped one goes on from its shards (KEHOACH 3.11)."""
+    bank = room_bank(cfg, interim, workers)
+    listed = "".join(f"{pool}\t{name}\n" for pool, names in pools.items() for name in names)
+    head = {
+        "config": cfg,
+        "noise": spec,
+        "stream": stream,
+        "per_pool": per_pool,
+        "clips_sha256": hashlib.sha256(listed.encode("utf-8")).hexdigest(),
+        "dtype": dtype,
+        "rooms_sha256": sha256_of(bank / "rooms.yaml"),
+    }
+    begun, manifest = out / "build.yaml", out / "manifest.yaml"
+    if begun.exists() and yaml.safe_load(begun.read_text(encoding="utf-8")) != head:
+        raise ValueError(f"{out} holds part of a build of other draws or clips: delete it or build elsewhere")
+    if manifest.exists():
+        return manifest
+    out.mkdir(parents=True, exist_ok=True)
+    begun.write_text(yaml.safe_dump(head, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    sessions = [
+        (pool, stream, i * per_pool + j, names)
+        for i, (pool, names) in enumerate(pools.items())
+        for j in range(per_pool)
+    ]
+    per_shard = cfg["sessions_per_shard"]
+    shards = range(math.ceil(len(sessions) / per_shard))
+    jobs = [
+        (cfg, spec, raw_root, bank, out, j, sessions[j * per_shard : (j + 1) * per_shard], dtype)
+        for j in shards
+        if not shard_done(out, j).exists()
+    ]
+    with multiprocessing.get_context("spawn").Pool(workers, initializer=_ignore_interrupt) as pool:
+        for k, _ in enumerate(pool.imap_unordered(_noise_shard, jobs), start=len(shards) - len(jobs) + 1):
+            print(f"{out.name}: shard {k}/{len(shards)}", flush=True)
+    written = [p for j in shards for p in shard_files(out, j, False, False)]
+    frames = sum(len(np.load(p, mmap_mode="r")) for p in written if p.name.endswith(".features.npy"))
+    body = head | {
+        "sessions": len(sessions),
+        "hours": round(frames * HOP / FS / 3600, 3),
+        "sha256": {p.name: sha256_of(p) for p in sorted(written)},
+    }
+    manifest.write_text(yaml.safe_dump(body, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return manifest
 
 
 def item_frames(span: tuple[int, int], pads_s: tuple[float, float], n_hops: int) -> tuple[int, int, int, int]:

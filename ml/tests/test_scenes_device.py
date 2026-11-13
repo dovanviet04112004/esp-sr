@@ -642,7 +642,7 @@ def noise_session(raw: Path, interim: Path, spec: dict, names: list[str]) -> tup
     cfg = tiny()
     mics = dataclasses.replace(device.load_microphones(cfg["microphone"]), self_noise_rms=0.0)
     bank = device.room_bank(cfg, interim, 1)
-    return device.simulate_noise_session(cfg, spec, 3, names, bank, mics, ItemReader(raw))
+    return device.simulate_noise_session(cfg, spec, 1, 3, names, bank, mics, ItemReader(raw))
 
 
 def test_a_noise_session_is_its_clips_apart_by_the_gap_and_the_same_for_its_seed(
@@ -666,3 +666,22 @@ def test_a_louder_noise_session_is_louder_by_its_spl(raw_root: Path, tmp_path: P
     loud, _, _ = noise_session(raw_root, tmp_path / "interim", NOISE_SESSION | {"spl_1m_db": [70.0, 70.0]}, names)
     gain_db = 10 * math.log10(np.mean(loud.astype(np.float64) ** 2) / np.mean(quiet.astype(np.float64) ** 2))
     assert abs(gain_db - 10.0) < 0.2
+
+
+def test_a_noise_build_holds_its_sessions_and_goes_on_alike(raw_root: Path, tmp_path: Path) -> None:
+    cfg, spec = tiny(), NOISE_SESSION | {"session_s": 3.0}
+    pools = {"hum": ["noise/hum/hum.wav"], "again": ["noise/hum/hum.wav"]}
+    interim = tmp_path / "interim"
+    manifest = device.build_noise(cfg, spec, pools, 1, 2, raw_root, interim, tmp_path / "a")
+    built = yaml.safe_load(manifest.read_text())
+    assert built["sessions"] == 4 and abs(built["hours"] - 4 * 3.0 / 3600) < 1e-3
+    items = items_of(tmp_path / "a")
+    assert [i["pool"] for i in items] == ["hum", "hum", "again", "again"]
+    assert sum(i["n_frames"] for i in items) == sum(len(np.load(f)) for f in (tmp_path / "a").glob("*.features.npy"))
+    assert device.build_noise(cfg, spec, pools, 1, 2, raw_root, interim, tmp_path / "a") == manifest
+    device.build_noise(cfg, spec, pools, 1, 2, raw_root, interim, tmp_path / "b")
+    device.build_noise(cfg, spec, pools, 2, 2, raw_root, interim, tmp_path / "c")
+    same, other = (yaml.safe_load((tmp_path / d / "manifest.yaml").read_text())["sha256"] for d in "bc")
+    assert same == built["sha256"] and other != built["sha256"]
+    with pytest.raises(ValueError, match="other draws"):
+        device.build_noise(cfg, spec, pools, 2, 2, raw_root, interim, tmp_path / "a")

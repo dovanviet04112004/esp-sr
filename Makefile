@@ -315,7 +315,7 @@ vision-flash: ## Pack the lock's detect row into the vision image and write it t
 
 ##@ Wake
 
-.PHONY: wake-features wake-train wake-ptq wake-deploy wake-noise eval-tts wake-synth
+.PHONY: wake-features wake-train wake-ptq wake-deploy wake-noise-split wake-noise eval-tts wake-synth
 wake-features: ## Run each file of the wake split through the board simulation into processed/wake (E4-T8)
 	$(ML) --extra praat python -m srpipe.tasks.wake.data simulate
 
@@ -328,6 +328,9 @@ wake-ptq: ## Rung 2 of the wake TCN, each calibration scored as the chip scores,
 
 wake-deploy: ## Lock a ladder row of the wake, its threshold and smoothing, into firmware/models/wake: RUN=<run> ROW=<row> (E11-T11)
 	$(WAKE_QUANT) deploy $(RUN) --row $(ROW)
+
+wake-noise-split: ## Give the household noise clips of wake.yaml's noise block roles by source recording into data/splits/wake (E11-T56)
+	$(ML) python -m srpipe.tasks.wake.data noise-split
 
 wake-noise: ## False accepts of a wake row on household noise alone, as the chip scores: RUN=<run> ROW=<row> (E11-T55)
 	$(WAKE_QUANT) noise $(RUN) --row $(ROW)

@@ -84,11 +84,34 @@ split:                             # E11-T11: data/splits/wake/<version> by pyth
     max_s: 2.0                     # longer may be calls run together: masked from the loss
     below_nat: 3.0                 # a run this far under its session's median loudest log-mel hop is a breath or a noise
                                    #   (wake.md 12)
+noise:                             # sessions of household noise alone, no talker (KEHOACH 3.11)
+  split: noise1                    # data/splits/wake/<split>/ of make wake-noise-split
+  roles: {val: 0.1, test: 0.1}     # share of the source recordings each role takes by the seed; train the rest
+  seed: 20261113
+  session_s: 300.0                 # one room, one agc start drawn as the board simulation draws it
+  spl_1m_db: [55.0, 85.0]          # each clip over its loud hops at 1 m from its source, as talker.spl_1m_db
+  gap_s: [1.0, 5.0]                # quiet between clips: the agc climbs as in a quiet room
+  workers: 6                       # each holds about 730 MB: more push a 10 GB WSL into swap
+  audioset: noise/dns/datasets/noise   # under raw/: DNS's AudioSet clips, each named by its YouTube id
+  labels: noise/audioset_labels    # under raw/: AudioSet's segment lists, which give each of them its classes
+  exclude: [Speech, "Male speech, man speaking", "Female speech, woman speaking", "Child speech, kid speaking",
+            Conversation, "Narration, monologue", Babbling, Shout, Yell, Whispering, Singing, Music, Television,
+            Radio]                 # a clip labelled so is left out: speech is val_neg's
+  pools:                           # a clip goes to the first pool it matches
+    - {name: door, prefix: noise/dns/datasets/noise/door_}
+    - {name: squeak, prefix: noise/dns/datasets/noise/squeak_}
+    - {name: dragging, prefix: noise/dns/datasets/noise/dragging_}
+    - {name: saw, labels: [Sawing, Chainsaw]}
+    - {name: tools, labels: [Power tool, Drill, Hammer, Jackhammer, Tools, "Filing (rasp)"]}
+    - {name: knock, labels: ["Whack, thwack", Breaking, "Smash, crash", "Thump, thud", Knock, Slam, Wood]}
+    - {name: fan, prefix: noise/dns/datasets/noise/fan_}   # control: steady noise
+    - {name: musan, prefix: noise/musan/musan/noise/free-sound/noise-free-sound-}   # control: noise training heard
 simulate:                          # make wake-features: python -m srpipe.tasks.wake.data simulate (E4-T8)
   split: vung1
   workers: 12                      # each holds about 450 MB; more push a 10 GB WSL into swap
   repeats: {train_pos: 8}          # passes over a file, each in other rooms, levels and noise; else 1
   train_dtype: float16             # train's features as stored: the trainer holds them so (KEHOACH 1.2)
+  noise_hours: {train_noise: 20.0, val_noise: 4.0}   # sessions of noise alone, each pool an equal share
   f0:                              # f0_hz.json beside these builds: each clean clip's median F0 by Praat (KEHOACH 3.11)
     sets: [train_pos, train_hard]
     time_step_s: 0.01
@@ -103,6 +126,7 @@ train:                             # E11-T11: python -m srpipe.tasks.wake.train 
   hard_share: 0.25                 # of each batch, from train_hard
   onset_share: 0.25                # of the negative windows, ending within onset_s of a sentence's first speech hop:
   onset_s: 2.0                     #   every positive follows a silence, so a net never shown these fires there
+  noise_share: 0.25                # of the other negative windows, from train_noise: noise alone, clips stopping
   word_s: 1.2                      # a hard negative this short is a word: its window ends where a positive's label does
   word_gain_db: [0.0, 20.0]        # positive and hard windows louder by a gain drawn here: the agc leaves single words
                                    #   ~10 dB under the sentences it lifts (KEHOACH 3.11, wake.md 8)
@@ -169,27 +193,8 @@ eval:
       - 20261101_home_003          # "trợ lý" at 1 m, twice
       - 20261101_home_004
       - 20261101_home_010          # the word's near misses; none of his is left to score (wake.md 12)
-  noise:                           # make wake-noise: false accepts on household noise, no talker (KEHOACH 3.11)
-    seed: 20261113
-    hours: 1.0                     # of each pool, in sessions of session_s
-    session_s: 300.0               # one room, one agc start drawn as the board simulation draws it
-    spl_1m_db: [55.0, 85.0]        # each clip over its loud hops at 1 m from its source, as talker.spl_1m_db
-    gap_s: [1.0, 5.0]              # quiet between clips: the agc climbs as in a quiet room
-    workers: 6                     # each holds about 730 MB: more push a 10 GB WSL into swap
-    audioset: noise/dns/datasets/noise   # under raw/: DNS's AudioSet clips, each named by its YouTube id
-    labels: noise/audioset_labels  # under raw/: AudioSet's segment lists, which give each of them its classes
-    exclude: [Speech, "Male speech, man speaking", "Female speech, woman speaking", "Child speech, kid speaking",
-              Conversation, "Narration, monologue", Babbling, Shout, Yell, Whispering, Singing, Music, Television,
-              Radio]               # a clip labelled so is left out: speech is val_neg's
-    pools:                         # a clip goes to the first pool it matches
-      - {name: door, prefix: noise/dns/datasets/noise/door_}
-      - {name: squeak, prefix: noise/dns/datasets/noise/squeak_}
-      - {name: dragging, prefix: noise/dns/datasets/noise/dragging_}
-      - {name: saw, labels: [Sawing, Chainsaw]}
-      - {name: tools, labels: [Power tool, Drill, Hammer, Jackhammer, Tools, "Filing (rasp)"]}
-      - {name: knock, labels: ["Whack, thwack", Breaking, "Smash, crash", "Thump, thud", Knock, Slam, Wood]}
-      - {name: fan, prefix: noise/dns/datasets/noise/fan_}   # control: steady noise
-      - {name: musan, prefix: noise/musan/musan/noise/free-sound/noise-free-sound-}   # control: noise training heard
+  noise:                           # make wake-noise: false accepts on the noise split's test clips (KEHOACH 3.11)
+    hours: 1.0                     # of each pool, in sessions of noise.session_s
 quant:                             # python -m srpipe.tasks.wake.quant ptq <run>: rung 2 of KEHOACH 3.14 (E11-T11)
   seed: 20261029
   calib_windows: 64                # of train.window_hops hops, half from train_pos, half from train_neg
