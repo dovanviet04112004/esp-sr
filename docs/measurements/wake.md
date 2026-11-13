@@ -967,3 +967,16 @@ RAM, RAM trống thấp nhất 0,7 GB, swap 0,8 GB.
   2,96/giờ, nhiễu 1,25/giờ trên 3,99 giờ. Lượt 6 ở bước cuối: 0,785, 89,7%, 2,96/giờ, và 55/giờ trên nhiễu (§13).
 - PhoWhisper đọc ra câu tiếng Việt ở cả hai mẩu và ở hai mẩu MUSAN không gây báo nhầm: nó bịa chữ trên nhiễu, nên
   không nói được mẩu nào có tiếng người. Hai mẩu chép ở `interim/wake/noise/culprits/` của data root để nghe.
+
+Lượt 2 với split nhiễu `noise2` (thêm bíp, chuông, rung điện thoại, chuông cửa, đồ điện và MUSAN `sound-bible`), run
+`20261113_b63da1b_c28428`: dựng 24 giờ nhiễu hết 6 phút với 10 worker (lượt trước 22 phút với 6), học 20 000 bước hết
+26 phút.
+- Bước cuối: ngưỡng 0,915, `val` bắt 73,5%, lời nói 0,81/giờ, nhiễu 2,75/giờ.
+- Ở ngưỡng ấy, 10 trong 11 lần báo nhầm của `val_noise` do một bản ghi kéo đồ, `dragging_Freesound_validated_50701_0`;
+  lần còn lại do một mẩu AudioSet `Buzzer`. Tiếng rung và tút điện thoại của lượt trước: 0 lần. Mười nhóm kia 0 lần.
+- Bỏ bản ghi kéo đồ ấy: ngưỡng 0,795, bắt 85,3%, lời nói 2,99/giờ, nhiễu 2,81/giờ.
+- Bản ghi 50701 cũng là thủ phạm số một của lượt 6 trên mô phỏng (§13). Nhóm kéo đồ chỉ có 74 mẩu từ 35 bản ghi: 31 để
+  học, 3 cho `val`, 1 cho `test`; bản 50701 nằm ở `val`, mạng chưa nghe nó. AudioSet trên đĩa còn Rub 180, Squeak 21,
+  Walk/footsteps 399 mẩu không lời nói.
+- Hai lượt liền, gần hết báo nhầm của `val_noise` đến từ một bản ghi: 4 giờ `val_noise` với vài bản ghi mỗi nhóm nhỏ
+  để một bản ghi khó quyết ngưỡng.
