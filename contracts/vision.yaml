@@ -41,6 +41,10 @@ sensors:
   period_ms: 1000
   report_s: 10
   ir_release_ms: 300 # the output chatters at milliseconds: quiet this long ends a hit
+clock: # the board's time, from GPS alone (KEHOACH 3.19)
+  year_min: 2026 # an RMC dated earlier is the receiver's own default, not satellite time
+  window_s: 600 # the largest offset of each window is taken: reads lag the RMC by 0..1 s
+  tz: ICT-7 # POSIX TZ of file dates on the card when NVS device/tz is absent
 chunk:
   magic: SRIM
   payload_bytes: 16384

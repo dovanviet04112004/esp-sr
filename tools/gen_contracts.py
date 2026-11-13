@@ -870,6 +870,10 @@ def gen_vision_h(v: dict) -> str:
     out.append(f"#define GEN_VISION_OUTBOX_STEP_WAIT_MS {outbox['step_wait_ms']}")
     out.append(f"#define GEN_VISION_SENSORS_REPORT_S {v['sensors']['report_s']}")
     out.append(f"#define GEN_VISION_IR_RELEASE_MS {v['sensors']['ir_release_ms']}")
+    clock = v["clock"]
+    out.append(f"#define GEN_VISION_CLOCK_YEAR_MIN {clock['year_min']}")
+    out.append(f"#define GEN_VISION_CLOCK_WINDOW_S {clock['window_s']}")
+    out.append(f'#define GEN_VISION_CLOCK_TZ "{clock["tz"]}"')
     out.append(f'#define GEN_VISION_CHUNK_MAGIC 0x{v["magic_u32"]:08x}u // "{chunk["magic"]}" little-endian')
     out.append(f"#define GEN_VISION_CHUNK_VERSION {v['version']}")
     out.append(f"#define GEN_VISION_CHUNK_HEADER_BYTES {chunk['header_bytes']}")

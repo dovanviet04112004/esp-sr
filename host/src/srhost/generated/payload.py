@@ -28,6 +28,7 @@ class Capture(TypedDict):
     noteBytes: int
     noteDropped: int
     noteSaved: bool
+    utcMs: NotRequired[int]
 
 
 
@@ -147,6 +148,9 @@ class SensorsGps(TypedDict):
     satellites: int
     inView: int
     antennaOpen: bool
+    hdopE1: NotRequired[int]
+    fixQuality: NotRequired[int]
+    mode: NotRequired[str]
 
 
 
@@ -172,6 +176,7 @@ class Sensors(TypedDict):
     deviceId: str
     boot: int
     uptimeS: int
+    utcMs: NotRequired[int]
     gps: SensorsGps
     ir: SensorsIr
     motion: NotRequired[SensorsMotion]
@@ -269,7 +274,8 @@ SCHEMAS: dict[str, dict] = {
      '$id': 'sr/capture',
      'title': 'capture',
      'description': 'One capture of board C, any of its commands: its full picture and, for a journal entry, its '
-                    'voice note, named by boot and seq.',
+                    'voice note, named by boot and seq; utcMs is the Unix ms of uptimeMs once the board has GPS '
+                    'time.',
      'type': 'object',
      'additionalProperties': False,
      'required': ['deviceId',
@@ -301,7 +307,8 @@ SCHEMAS: dict[str, dict] = {
                     'noteMs': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
                     'noteBytes': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
                     'noteDropped': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
-                    'noteSaved': {'type': 'boolean'}}},
+                    'noteSaved': {'type': 'boolean'},
+                    'utcMs': {'type': 'integer', 'minimum': 0, 'maximum': 9007199254740991}}},
     'command_set': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
      '$id': 'sr/command_set',
      'title': 'command_set',
@@ -470,13 +477,16 @@ SCHEMAS: dict[str, dict] = {
     'sensors': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
      '$id': 'sr/sensors',
      'title': 'sensors',
-     'description': "Board C's peripherals beside the camera. A device that failed at boot leaves its object out.",
+     'description': "Board C's peripherals beside the camera. A device that failed at boot leaves its object out; "
+                    'utcMs is the Unix ms of the reading once the board has GPS time; gps carries hdopE1 and '
+                    'fixQuality when GGA has them, mode when RMC has it, all unfiltered.',
      'type': 'object',
      'additionalProperties': False,
      'required': ['deviceId', 'boot', 'uptimeS', 'gps', 'ir'],
      'properties': {'deviceId': {'type': 'string', 'pattern': '^[A-Za-z0-9_-]{4,32}$', 'maxLength': 32},
                     'boot': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
                     'uptimeS': {'type': 'integer', 'minimum': 0, 'maximum': 4294967295},
+                    'utcMs': {'type': 'integer', 'minimum': 0, 'maximum': 9007199254740991},
                     'gps': {'type': 'object',
                             'additionalProperties': False,
                             'required': ['hasFix', 'latE7', 'lonE7', 'satellites', 'inView', 'antennaOpen'],
@@ -489,7 +499,10 @@ SCHEMAS: dict[str, dict] = {
                                                      'maximum': 1800000000},
                                            'satellites': {'type': 'integer', 'minimum': 0, 'maximum': 255},
                                            'inView': {'type': 'integer', 'minimum': 0, 'maximum': 255},
-                                           'antennaOpen': {'type': 'boolean'}}},
+                                           'antennaOpen': {'type': 'boolean'},
+                                           'hdopE1': {'type': 'integer', 'minimum': 0, 'maximum': 9999},
+                                           'fixQuality': {'type': 'integer', 'minimum': 0, 'maximum': 9},
+                                           'mode': {'type': 'string', 'pattern': '^[A-Z]$', 'maxLength': 1}}},
                     'ir': {'type': 'object',
                            'additionalProperties': False,
                            'required': ['active', 'hits'],

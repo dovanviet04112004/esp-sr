@@ -108,6 +108,8 @@ typedef struct {
     uint32_t note_bytes;
     uint32_t note_dropped;
     bool note_saved;
+    int64_t utc_ms;
+    bool has_utc_ms;
 } capture_t;
 
 /** Fill out from a parsed capture object, checking type, range, enum and size.
@@ -217,6 +219,14 @@ static inline bool capture_from_json(const cJSON *root, capture_t *out)
         if (!cJSON_IsBool(item)) { return false; }
         out->note_saved = cJSON_IsTrue(item);
     }
+    item = cJSON_GetObjectItemCaseSensitive(root, "utcMs");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 9007199254740991.0) { return false; }
+        out->utc_ms = (int64_t) item->valuedouble;
+        out->has_utc_ms = true;
+    }
     return true;
 }
 
@@ -244,6 +254,9 @@ static inline cJSON *capture_to_json(const capture_t *in)
     cJSON_AddNumberToObject(root, "noteBytes", (double) in->note_bytes);
     cJSON_AddNumberToObject(root, "noteDropped", (double) in->note_dropped);
     cJSON_AddBoolToObject(root, "noteSaved", in->note_saved);
+    if (in->has_utc_ms) {
+        cJSON_AddNumberToObject(root, "utcMs", (double) in->utc_ms);
+    }
     return root;
 }
 
@@ -1398,6 +1411,12 @@ typedef struct {
     uint8_t satellites;
     uint8_t in_view;
     bool antenna_open;
+    uint16_t hdop_e1;
+    uint8_t fix_quality;
+    char mode[2];
+    bool has_hdop_e1;
+    bool has_fix_quality;
+    bool has_mode;
 } sensors_gps_t;
 
 /** Fill out from a parsed sensors_gps object, checking type, range, enum and size.
@@ -1449,6 +1468,29 @@ static inline bool sensors_gps_from_json(const cJSON *root, sensors_gps_t *out)
         if (!cJSON_IsBool(item)) { return false; }
         out->antenna_open = cJSON_IsTrue(item);
     }
+    item = cJSON_GetObjectItemCaseSensitive(root, "hdopE1");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 9999.0) { return false; }
+        out->hdop_e1 = (uint16_t) item->valuedouble;
+        out->has_hdop_e1 = true;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "fixQuality");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 9.0) { return false; }
+        out->fix_quality = (uint8_t) item->valuedouble;
+        out->has_fix_quality = true;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "mode");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsString(item) || strlen(item->valuestring) >= sizeof(out->mode)) { return false; }
+        strcpy(out->mode, item->valuestring);
+        out->has_mode = true;
+    }
     return true;
 }
 
@@ -1467,6 +1509,15 @@ static inline cJSON *sensors_gps_to_json(const sensors_gps_t *in)
     cJSON_AddNumberToObject(root, "satellites", (double) in->satellites);
     cJSON_AddNumberToObject(root, "inView", (double) in->in_view);
     cJSON_AddBoolToObject(root, "antennaOpen", in->antenna_open);
+    if (in->has_hdop_e1) {
+        cJSON_AddNumberToObject(root, "hdopE1", (double) in->hdop_e1);
+    }
+    if (in->has_fix_quality) {
+        cJSON_AddNumberToObject(root, "fixQuality", (double) in->fix_quality);
+    }
+    if (in->has_mode) {
+        cJSON_AddStringToObject(root, "mode", in->mode);
+    }
     return root;
 }
 
@@ -1638,10 +1689,12 @@ typedef struct {
     char device_id[33];
     uint32_t boot;
     uint32_t uptime_s;
+    int64_t utc_ms;
     sensors_gps_t gps;
     sensors_ir_t ir;
     sensors_motion_t motion;
     sensors_adc_t adc;
+    bool has_utc_ms;
     bool has_motion;
     bool has_adc;
 } sensors_t;
@@ -1674,6 +1727,14 @@ static inline bool sensors_from_json(const cJSON *root, sensors_t *out)
         if (!cJSON_IsNumber(item)) { return false; }
         if (item->valuedouble < 0.0 || item->valuedouble > 4294967295.0) { return false; }
         out->uptime_s = (uint32_t) item->valuedouble;
+    }
+    item = cJSON_GetObjectItemCaseSensitive(root, "utcMs");
+    if (item == NULL) { item = NULL; }
+    if (item != NULL) {
+        if (!cJSON_IsNumber(item)) { return false; }
+        if (item->valuedouble < 0.0 || item->valuedouble > 9007199254740991.0) { return false; }
+        out->utc_ms = (int64_t) item->valuedouble;
+        out->has_utc_ms = true;
     }
     item = cJSON_GetObjectItemCaseSensitive(root, "gps");
     if (item == NULL) { return false; }
@@ -1712,6 +1773,9 @@ static inline cJSON *sensors_to_json(const sensors_t *in)
     cJSON_AddStringToObject(root, "deviceId", in->device_id);
     cJSON_AddNumberToObject(root, "boot", (double) in->boot);
     cJSON_AddNumberToObject(root, "uptimeS", (double) in->uptime_s);
+    if (in->has_utc_ms) {
+        cJSON_AddNumberToObject(root, "utcMs", (double) in->utc_ms);
+    }
     cJSON_AddItemToObject(root, "gps", sensors_gps_to_json(&in->gps));
     cJSON_AddItemToObject(root, "ir", sensors_ir_to_json(&in->ir));
     if (in->has_motion) {

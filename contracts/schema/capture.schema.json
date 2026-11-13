@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "sr/capture",
   "title": "capture",
-  "description": "One capture of board C, any of its commands: its full picture and, for a journal entry, its voice note, named by boot and seq.",
+  "description": "One capture of board C, any of its commands: its full picture and, for a journal entry, its voice note, named by boot and seq; utcMs is the Unix ms of uptimeMs once the board has GPS time.",
   "type": "object",
   "additionalProperties": false,
   "required": ["deviceId", "boot", "captureSeq", "mode", "uptimeMs", "sentBoot", "sentUptimeMs", "late", "imageBytes", "sent", "saved", "noteMs", "noteBytes", "noteDropped", "noteSaved"],
@@ -21,6 +21,7 @@
     "noteMs": {"type": "integer", "minimum": 0, "maximum": 4294967295},
     "noteBytes": {"type": "integer", "minimum": 0, "maximum": 4294967295},
     "noteDropped": {"type": "integer", "minimum": 0, "maximum": 4294967295},
-    "noteSaved": {"type": "boolean"}
+    "noteSaved": {"type": "boolean"},
+    "utcMs": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
   }
 }
