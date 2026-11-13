@@ -22,7 +22,9 @@ else
 # Board B's CH340 stays with Windows, served to WSL over RFC 2217 by make board-attach (KEHOACH 2.1). It holds
 # 921600 baud, as pytest-embedded flashes; esptool left alone writes a partition at 115200, ~11 KB/s. BOARD=C names
 # board C, reached the same way through its separate CP2102, at the baud it has been flashed at.
-BOARD_USB_ID ?= $(if $(filter C,$(BOARD)),10c4:ea60,1a86:7523)
+BOARD_B_USB_ID := 1a86:7523
+BOARD_C_USB_ID := 10c4:ea60
+BOARD_USB_ID ?= $(if $(filter C,$(BOARD)),$(BOARD_C_USB_ID),$(BOARD_B_USB_ID))
 BRIDGE_HOST ?= $(shell ip route show default 2>/dev/null | awk '{print $$3; exit}')
 BRIDGE_TCP_PORT ?= 4011
 PORT ?= rfc2217://$(BRIDGE_HOST):$(BRIDGE_TCP_PORT)?ign_set_control
@@ -507,27 +509,39 @@ bridge_up = netstat.exe -an -p TCP | tr -d '\r' | grep -q " $(BRIDGE_HOST):$(BRI
 
 .PHONY: board-attach board-detach board-c-check flash monitor wifi wifi-point models-flash capture-flash capture-radio-off-flash
 # The bridge runs on Windows' Python from its temp folder, with host/'s pyserial copied beside it.
-board-attach: ## Serve board B's COM port to WSL over RFC 2217, so every target reaches it at PORT (KEHOACH 2.1)
+# With no BOARD it serves the board whose serial chip usbipd lists as plugged in, and asks when both are.
+board-attach: ## Serve the plugged-in board's COM port to WSL over RFC 2217, so every target reaches it at PORT [BOARD=B|C when both are plugged in] (KEHOACH 2.1)
 	@command -v py.exe >/dev/null || { echo "board-attach needs Python on Windows (py.exe)"; exit 1; }
-	@if usbipd.exe list 2>/dev/null | tr -d '\r' | grep " $(BOARD_USB_ID) " | grep -q Attached; then \
-	  usbipd.exe detach --hardware-id $(BOARD_USB_ID); fi
-	@if tmux has-session -t $(BRIDGE_SESSION) 2>/dev/null && $(bridge_up); then \
-	  echo "board B is on $(PORT) already"; exit 0; fi; \
+	@board='$(BOARD)'; id='$(BOARD_USB_ID)'; \
+	if [ -z "$$board" ] && [ '$(origin BOARD_USB_ID)' = file ]; then \
+	  plugged=$$(usbipd.exe list 2>/dev/null | tr -d '\r' | sed '/^Persisted/q'); \
+	  if echo "$$plugged" | grep -q " $(BOARD_B_USB_ID) "; then board=B; fi; \
+	  if echo "$$plugged" | grep -q " $(BOARD_C_USB_ID) "; then \
+	    if [ "$$board" = B ]; then echo "boards B and C are both plugged in: name one with BOARD=B or BOARD=C"; exit 1; fi; \
+	    board=C; id=$(BOARD_C_USB_ID); fi; \
+	fi; board=$${board:-B}; \
+	if usbipd.exe list 2>/dev/null | tr -d '\r' | grep " $$id " | grep -q Attached; then \
+	  usbipd.exe detach --hardware-id $$id; fi; \
+	if tmux has-session -t $(BRIDGE_SESSION) 2>/dev/null && $(bridge_up); then \
+	  serving=$$(tmux show-environment -t $(BRIDGE_SESSION) BRIDGE_BOARD 2>/dev/null | cut -d= -f2); \
+	  if [ "$${serving:-$$board}" = "$$board" ]; then echo "board $$board is on $(PORT) already"; exit 0; fi; \
+	  echo "the bridge serves board $$serving: make board-detach, then make board-attach again"; exit 1; fi; \
 	tmux kill-session -t $(BRIDGE_SESSION) 2>/dev/null; set -e; \
 	win=$$(py.exe -3 -c "import sys, tempfile; print(sys.executable); print(tempfile.gettempdir())" | tr -d '\r'); \
 	python=$$(wslpath -u "$$(echo "$$win" | sed -n 1p)"); dir=$$(wslpath -u "$$(echo "$$win" | sed -n 2p)")/esp_sr_bridge; \
 	serial=$$(cd host && uv run python -c "import pathlib, serial; print(pathlib.Path(serial.__file__).parent)"); \
 	mkdir -p "$$dir"; cp -rT "$$serial" "$$dir/serial"; cp host/src/srhost/bridge.py "$$dir/"; \
-	tmux new-session -d -s $(BRIDGE_SESSION) "cd '$$dir' && '$$python' bridge.py --usb-id $(BOARD_USB_ID) \
+	tmux new-session -d -s $(BRIDGE_SESSION) -e BRIDGE_BOARD=$$board "cd '$$dir' && '$$python' bridge.py --usb-id $$id \
 	  --host $(BRIDGE_HOST) --port $(BRIDGE_TCP_PORT) 2>&1 | tee bridge.log"; \
 	for i in $$(seq 40); do \
-	  if $(bridge_up); then echo "board B on $(PORT), bridge in tmux $(BRIDGE_SESSION)"; exit 0; fi; \
+	  if $(bridge_up); then echo "board $$board on $(PORT), bridge in tmux $(BRIDGE_SESSION)"; exit 0; fi; \
 	  tmux has-session -t $(BRIDGE_SESSION) 2>/dev/null || break; sleep 0.5; done; \
-	cat "$$dir/bridge.log"; echo "board B's bridge did not start"; exit 1
+	cat "$$dir/bridge.log"; echo "board $$board's bridge did not start"; exit 1
 
-board-detach: ## Stop board B's bridge, which hands its COM port back to Windows programs
-	@if tmux kill-session -t $(BRIDGE_SESSION) 2>/dev/null; then echo "board B's bridge stopped"; \
-	else echo "board B's bridge was not running"; fi
+board-detach: ## Stop the board's bridge, which hands its COM port back to Windows programs
+	@serving=$$(tmux show-environment -t $(BRIDGE_SESSION) BRIDGE_BOARD 2>/dev/null | cut -d= -f2); \
+	if tmux kill-session -t $(BRIDGE_SESSION) 2>/dev/null; then echo "the bridge$${serving:+ of board $$serving} stopped"; \
+	else echo "no bridge was running"; fi
 
 flash: ## Flash and monitor the dev profile over the CH340
 	@$(call fresh_sdkconfig,firmware/sdkconfig,$(FW_DEFAULTS) firmware/sdkconfig.dev)
