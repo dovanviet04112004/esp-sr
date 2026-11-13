@@ -455,6 +455,15 @@ Boot 194, bản đọc giờ từ `RMC` (KẾ HOẠCH §3.19), board trong phòn
   đo lại.
 - Chưa kiểm được `capture.utcMs`, ngày giờ file trên thẻ và độ lệch của đồng hồ: cả ba cần giờ thật, tức cần anten hay chỗ thấy trời.
 
+Boot 195 (bản cộng các hệ, E15-T41), cùng chỗ, chưa anten, boot lúc 03:01 UTC; xem lúc uptime ~14 600 s. Log từ 07:05 UTC ở
+`interim/camera/20261113/watch/` của data root.
+- Sau ~4 giờ vẫn **không có giờ**: `satellites` 0, `inView` 19–22, `hdopE1` 255, `fixQuality` 0, `mode` `N`, `antennaOpen` suốt.
+- Sáu lần chụp `B195_000001`…`000006`, đều không có `utcMs`; năm bản sau chỉ được xác nhận khi `host-live` mở lúc 07:02 UTC.
+- RAM nội lúc đứng yên 53 975 B, thấp nhất 22 039 B; PSRAM 206 412 B, thấp nhất 61 372 B, sau các lượt `detect`.
+- **`eventsDropped` 52**, các lượt đo trước đều 0. Phiên MQTT trên broker bắt đầu lúc 06:53:07 UTC, 3 giờ 52 phút sau boot: board đã
+  rớt MQTT ít nhất một lần, và sự kiện lúc rớt bị đếm vào đây. 52 lần có phải hết do đó không thì chưa rõ, vì bộ đếm gộp cả hàng đợi
+  `q_event_up` đầy và gửi lỗi (E15-T42). Từ 07:05 UTC con số đứng yên.
+
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
 `drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là hằng số; bao nhiêu bước
