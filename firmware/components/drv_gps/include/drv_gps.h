@@ -1,4 +1,4 @@
-/** The GPS of board C: UART1 receive only, the latest fix on request (KEHOACH 3.19).
+/** The GPS of board C: UART1 receive only, the latest fix and UTC time on request (KEHOACH 3.19).
  *  @ctx do_task after init | never creates a task
  */
 #pragma once
@@ -16,7 +16,8 @@ extern "C" {
  */
 esp_err_t drv_gps_init(void);
 
-/** Read what arrived and give the latest fix; in_view starts over after each call.
+/** Read what arrived and give the latest fix; has_time starts over after each call, so it means an RMC with
+ *  a time came since the last one.
  *  @ctx do_task | non-blocking
  */
 void drv_gps_poll(drv_gps_fix_t *fix);

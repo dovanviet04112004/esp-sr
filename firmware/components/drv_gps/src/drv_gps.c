@@ -46,5 +46,5 @@ void drv_gps_poll(drv_gps_fix_t *fix)
         }
     }
     *fix = s_nmea.fix;
-    s_nmea.fix.in_view = 0;
+    s_nmea.fix.has_time = false;
 }
