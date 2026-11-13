@@ -483,6 +483,43 @@ def simulate_session(
     return hear(air, mics, rng, floor), spans, draws | ({"speeds": said_at} if said_at else {}), heard
 
 
+def simulate_noise_session(
+    cfg: dict,
+    spec: dict,
+    k: int,
+    names: list[str],
+    bank: Path,
+    mics: Microphones,
+    raw: ItemReader,
+    floor: Floor | None = None,
+) -> tuple[np.ndarray, list[tuple[int, int, str]], dict]:
+    """Session k of noise alone, spec['session_s'] long, from the noise source of a room of the bank: clips of names
+    drawn one after another, each after a quiet of spec['gap_s'] and at spec['spl_1m_db'] over its loud hops; the
+    interleaved int16 frames board B would capture, each clip's [start, end) in samples and name, and the draws."""
+    rng = np.random.default_rng([spec["seed"], k])
+    entry = int(rng.integers(cfg["rooms"]["count"]))
+    rirs = np.load(bank / f"room_{entry:04d}.npy")
+    t = cfg["talker"]
+    total = round(spec["session_s"] * FS) // HOP * HOP
+    dry, spans = np.zeros(total), []
+    at = round(float(rng.uniform(*spec["gap_s"])) * FS)
+    while at < total:
+        name = names[int(rng.integers(len(names)))]
+        x = ramped(raw.read(name)[: total - at], t["edge_ramp_s"])
+        if len(x) >= HOP and np.any(x):
+            level = mics.sensitivity_dbfs + float(rng.uniform(*spec["spl_1m_db"])) - SENSITIVITY_SPL_DB
+            dry[at : at + len(x)] = (
+                x * TALKER_REFERENCE_M * 10.0 ** (level / 20.0) / active_rms(x, t["active_below_peak_db"])
+            )
+            spans.append((at, at + len(x), name))
+        at += len(x) + round(float(rng.uniform(*spec["gap_s"])) * FS)
+    air = np.stack([signal.fftconvolve(dry, rirs[NOISE, m])[:total] for m in range(array.N_MICS)])
+    draws = {"session": k, "bank_room": entry}
+    if cfg["session"].get("agc_start_drawn"):
+        draws |= {"agc_start_db": round(float(rng.uniform(0.0, afe.AGC_GAIN_MAX_DB)), 3)}
+    return hear(air, mics, rng, floor), spans, draws
+
+
 def item_frames(span: tuple[int, int], pads_s: tuple[float, float], n_hops: int) -> tuple[int, int, int, int]:
     """Output hops [first, stop) of an utterance with its padding before and after, and the utterance's own hops
     within them."""

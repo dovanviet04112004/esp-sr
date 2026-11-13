@@ -1,0 +1,15 @@
+name: audioset_labels
+source_url: http://storage.googleapis.com/us_audioset/youtube_corpus/v1/csv/
+release: AudioSet v1 segment lists and class index (Gemmeke et al., 2017)
+downloaded: 2026-11-13
+license: CC-BY-4.0   # the labels, as the AudioSet download page states
+files:
+  - {name: class_labels_indices.csv, sha256: cdd1049833c4b86127c2773ac0d14a2754b6a6d0d1798002ed5c66e699708429}
+  - {name: balanced_train_segments.csv, sha256: 3b83e5ff9ed72cfda37d4e36ce08250e107c1ea70f109f6ab6668ac200db5e94}
+  - {name: eval_segments.csv, sha256: f7055f53935f70e74e39494a5c8c4c78f1700fce275028bd36e31186f33d45db}
+  - {name: unbalanced_train_segments.csv, sha256: bb2dfd5e4f1ced39db9480633c510f813d7899f4b7472aa83a411b4a43a12698}
+consumed_by: [wake]
+notes: >-
+  Labels only, no audio: the AudioSet clips of raw/noise/dns are named by their YouTube id, and these lists give each
+  id its classes, which the wake's noise measurement groups by (KEHOACH 3.11). Every one of the 54 698 DNS AudioSet
+  clips appears in them.

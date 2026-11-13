@@ -1,9 +1,8 @@
 """Wake training: the smoothing and lockout the device mirrors, labels around a positive's end, windows that hold
-the whole label past the warm-up, a louder word window equal to the log-mel of louder samples, pitch weights that draw
-words near the target F0, sentences for the CTC side task, a tiny run that keeps its last weights and saves each
-evaluated one, a board table whose rows keep their columns, a board score that leaves out the sessions a run learnt,
-real positives without a pitch drawn evenly, masked hops left out of the loss, word windows warped, tilted and
-stretched as other voices say them, and a run scored with the network it was trained as."""
+the whole label past the warm-up, louder, warped, tilted and stretched word windows, pitch weights, sentences for the
+CTC side task, a tiny run that keeps its last weights and saves each evaluated one, board tables and scores that leave
+out the sessions a run learnt, real positives without a pitch drawn evenly, masked hops left out of the loss, a run
+scored with the network it was trained as, and household noise in disjoint pools without speech, counted per pool."""
 
 from __future__ import annotations
 
@@ -16,6 +15,7 @@ import pytest
 import yaml
 
 from srpipe.core import corpus
+from srpipe.core.audio_io import write_wav
 from srpipe.core.config import device_of, load_yaml
 from srpipe.dsp.spec.mel import Mel, MelConfig, mel_to_hz
 from srpipe.generated import grid
@@ -436,3 +436,83 @@ def test_masked_hops_hold_no_word_and_add_nothing_to_the_loss(tmp_path: Path) ->
     }
     _, _, history = train.train(cfg, sets, "cpu")
     assert all(np.isfinite(row["loss"]) for row in history)
+
+
+def audioset_labels(folder: Path, rows: dict[str, list[str]]) -> Path:
+    """AudioSet's class index and segment lists under folder, each id of rows in one list with its class names."""
+    names = sorted({n for classes in rows.values() for n in classes} | {"Speech", "Music"})
+    mids = {n: f"/m/{k:03d}" for k, n in enumerate(names)}
+    folder.mkdir(parents=True)
+    index = [f'{k},{mids[n]},"{n}"' for k, n in enumerate(names)]
+    (folder / corpus.AUDIOSET_CLASS_INDEX).write_text("index,mid,display_name\n" + "\n".join(index) + "\n")
+    lists = {name: ["# YTID, start_seconds, end_seconds, positive_labels"] for name in corpus.AUDIOSET_SEGMENT_LISTS}
+    for k, (clip, classes) in enumerate(rows.items()):
+        listing = corpus.AUDIOSET_SEGMENT_LISTS[k % len(lists)]
+        lists[listing].append(f'{clip}, 30.000, 40.000, "{",".join(mids[n] for n in classes)}"')
+    for name, lines in lists.items():
+        (folder / name).write_text("\n".join(lines) + "\n")
+    return folder
+
+
+def noise_raw(raw: Path, files: list[str]) -> Path:
+    for name in files:
+        write_wav(raw / "noise" / "dns" / name, np.zeros(grid.HOP_SAMPLES))
+    return raw
+
+
+NOISE_SPEC = {
+    "audioset": "noise/dns",
+    "labels": "noise/labels",
+    "exclude": ["Speech", "Music"],
+    "pools": [
+        {"name": "door", "prefix": "noise/dns/door_"},
+        {"name": "saw", "labels": ["Sawing"]},
+        {"name": "tools", "labels": ["Power tool"]},
+    ],
+}
+
+
+def test_household_noise_pools_are_disjoint_and_leave_out_speech_and_rejects(tmp_path: Path) -> None:
+    raw = noise_raw(tmp_path, ["door_1.wav", "door_2.wav", *(f"{c * 11}.wav" for c in "ABCDE")])
+    rows = {
+        "AAAAAAAAAAA": ["Sawing"],
+        "BBBBBBBBBBB": ["Sawing", "Power tool"],
+        "CCCCCCCCCCC": ["Sawing", "Speech"],
+        "DDDDDDDDDDD": ["Power tool"],
+        "EEEEEEEEEEE": ["Music", "Power tool"],
+    }
+    audioset_labels(raw / "noise" / "labels", rows)
+    pools = wake_eval.noise_pools(NOISE_SPEC, raw, {"noise/dns/door_2.wav"})
+    assert pools == {
+        "door": ["noise/dns/door_1.wav"],
+        "saw": ["noise/dns/AAAAAAAAAAA.wav", "noise/dns/BBBBBBBBBBB.wav"],
+        "tools": ["noise/dns/DDDDDDDDDDD.wav"],
+    }
+
+
+def test_a_noise_pool_naming_a_class_audioset_has_not_is_refused(tmp_path: Path) -> None:
+    raw = noise_raw(tmp_path, ["AAAAAAAAAAA.wav"])
+    audioset_labels(raw / "noise" / "labels", {"AAAAAAAAAAA": ["Sawing"]})
+    spec = NOISE_SPEC | {"pools": [{"name": "saw", "labels": ["Sawing", "Hand saw"]}]}
+    with pytest.raises(ValueError, match="Hand saw"):
+        wake_eval.noise_pools(spec, raw, set())
+
+
+def test_a_trigger_is_put_on_the_clip_last_begun_before_it() -> None:
+    hop = grid.HOP_SAMPLES
+    spans = [(10 * hop, 30 * hop, "a.wav"), (50 * hop, 60 * hop, "b.wav")]
+    lag = device.CHAIN_LAG_HOPS
+    assert wake_eval.begun_before(spans, 5 + lag) == ""
+    assert wake_eval.begun_before(spans, 40 + lag) == "a.wav"
+    assert wake_eval.begun_before(spans, 50 + lag) == "b.wav"
+
+
+def test_the_noise_table_counts_each_pool_and_all() -> None:
+    sessions = [
+        wake_eval.NoiseSession("door", 1800.0, ["x/door_1.wav", "x/door_1.wav"]),
+        wake_eval.NoiseSession("saw", 3600.0, []),
+    ]
+    rows = wake_eval.noise_table({"door": 4, "saw": 2}, sessions, 0.8).splitlines()
+    assert rows[4] == "| door | 4 | 0.50 | 2 | 4.0 | door_1.wav x2 |"
+    assert rows[5] == "| saw | 2 | 1.00 | 0 | 0.0 |  |"
+    assert rows[6] == "| all | 6 | 1.50 | 2 | 1.3 | door_1.wav x2 |"

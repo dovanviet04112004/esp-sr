@@ -1,11 +1,12 @@
 """Every clip of a corpus under raw/, named as a split names it (KEHOACH 4.4.1): a file under raw/, or
 <parquet under raw/>#<row> for a corpus packed as Hugging Face audio parquet. Each corpus declares its layout in
-configs/common/screen.yaml."""
+configs/common/screen.yaml. AudioSet's segment lists give the classes of clips named by their YouTube id."""
 
 from __future__ import annotations
 
 import csv
 import functools
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,9 @@ AUDIO_SUFFIXES = (".wav", ".flac", ".mp3")
 TEXT_COLUMN = "transcription"
 CHUNK_CHARS = 200
 NORTH = lang_vi.DIALECTS.index("north")
+AUDIOSET_ID = re.compile(r"[A-Za-z0-9_-]{11}")  # a YouTube id: AudioSet names its clips so
+AUDIOSET_CLASS_INDEX = "class_labels_indices.csv"
+AUDIOSET_SEGMENT_LISTS = ("balanced_train_segments.csv", "eval_segments.csv", "unbalanced_train_segments.csv")
 
 
 @dataclass(frozen=True)
@@ -80,6 +84,26 @@ LAYOUTS = {"common_voice": common_voice, "vivos": vivos, "parquet": parquet, "fi
 def clips(raw: Path, kind: str, name: str, spec: dict) -> list[Clip]:
     """Every clip of raw/<kind>/<name> in a fixed order, read by the layout spec names."""
     return list(LAYOUTS[spec["layout"]](raw / kind / name, raw, spec))
+
+
+def audioset_class_names(labels: Path) -> dict[str, str]:
+    """AudioSet's class name of each machine id, from the class index under labels."""
+    with (labels / AUDIOSET_CLASS_INDEX).open(encoding="utf-8", newline="") as f:
+        return {row["mid"]: row["display_name"] for row in csv.DictReader(f)}
+
+
+def audioset_classes(labels: Path, ids: set[str]) -> dict[str, frozenset[str]]:
+    """The class names AudioSet's segment lists under labels give each YouTube id of ids they list."""
+    names = audioset_class_names(labels)
+    found: dict[str, set[str]] = {}
+    for listing in AUDIOSET_SEGMENT_LISTS:
+        with (labels / listing).open(encoding="utf-8") as f:
+            for line in f:
+                clip, _, rest = line.partition(",")
+                if clip in ids:
+                    # A row is: id, start, end, "mid,mid,...".
+                    found.setdefault(clip, set()).update(names[mid] for mid in rest.split('"')[1].split(","))
+    return {clip: frozenset(classes) for clip, classes in found.items()}
 
 
 def read_text(text: str) -> tuple[list[str], int]:

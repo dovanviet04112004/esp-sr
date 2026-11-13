@@ -1,15 +1,19 @@
 """Score the wake TCN as the device runs it (KEHOACH 3.11): each shard streamed whole, the probability smoothed,
 positives caught when the smoothed score reaches the threshold before their label ends, false accepts counted on
 negatives with a lockout after each and turned into a rate per hour. python -m srpipe.tasks.wake.eval board <run> scores
-the sessions recorded through board B the same way, each utterance found by the chain's own vad (KEHOACH 4.3)."""
+the sessions recorded through board B the same way, each utterance found by the chain's own vad (KEHOACH 4.3); noise
+counts false accepts on household noise alone, simulated as the board hears it (KEHOACH 3.11)."""
 
 from __future__ import annotations
 
 import argparse
 import csv
+import math
+import multiprocessing
 import sys
+from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -17,7 +21,8 @@ import soundfile as sf
 import torch
 import yaml
 
-from srpipe.core import corpus
+from srpipe.core import corpus, screen
+from srpipe.core.audio_io import ItemReader
 from srpipe.core.config import data_paths, device_of, load_run_config, load_yaml
 from srpipe.dsp.afe.chain import ChainConfig
 from srpipe.dsp.spec.mel import Mel, MelConfig
@@ -219,6 +224,100 @@ def board_table(results: list[BoardSession], threshold: float) -> str:
         "",
         f"false accepts on {len(others)} sessions without the word, {hours:.2f} h: {fired}, {rate:.2f} per hour",
     ]
+    return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class NoiseSession:
+    """One session of a noise pool: its length and, for each trigger, the clip last begun before it."""
+
+    pool: str
+    seconds: float
+    fired: list[str]
+
+
+def noise_pools(spec: dict, raw: Path, rejected: set[str]) -> dict[str, list[str]]:
+    """Each pool of eval.noise as its clips, names under raw/, sorted: by a file prefix, or DNS's AudioSet clips by
+    their classes; a clip goes to the first pool it matches, and neither screening's rejects nor a clip carrying a
+    class of spec['exclude'] goes anywhere (KEHOACH 3.11)."""
+    folder = raw / spec["audioset"]
+    ids = {p.stem for p in folder.glob("*.wav") if corpus.AUDIOSET_ID.fullmatch(p.stem)}
+    classes = corpus.audioset_classes(raw / spec["labels"], ids)
+    known = set(corpus.audioset_class_names(raw / spec["labels"]).values())
+    named = set(spec["exclude"]).union(*(pool.get("labels", []) for pool in spec["pools"]))
+    if unknown := sorted(named - known):
+        raise ValueError(f"eval.noise names classes AudioSet has not: {unknown}")
+    excluded, taken, pools = set(spec["exclude"]), set(rejected), {}
+    for pool in spec["pools"]:
+        if "prefix" in pool:
+            start = raw / pool["prefix"]
+            found = (str(p.relative_to(raw)) for p in start.parent.glob(f"{start.name}*.wav"))
+        else:
+            wanted = set(pool["labels"])
+            found = (f"{spec['audioset']}/{c}.wav" for c, has in classes.items() if has & wanted and not has & excluded)
+        pools[pool["name"]] = sorted(name for name in found if name not in taken)
+        taken.update(pools[pool["name"]])
+    return pools
+
+
+def _noise_session(job: tuple) -> tuple[str, np.ndarray, np.ndarray, list[tuple[int, int, str]]]:
+    cfg, raw_root, bank, pool, k, names = job
+    device_cfg = device_of(cfg)
+    mics = device.load_microphones(device_cfg["microphone"])
+    floor_cfg = device_cfg["microphone"].get("floor")
+    floor = device.load_floor(floor_cfg, raw_root, mics.pcm_shift) if floor_cfg else None
+    spec = cfg["eval"]["noise"]
+    captured, spans, draws = device.simulate_noise_session(
+        device_cfg, spec, k, names, bank, mics, ItemReader(raw_root), floor
+    )
+    chain_cfg = replace(ChainConfig(balance_gains=mics.gains), agc_start_db=draws.get("agc_start_db"))
+    _, figures, features = device.listen(captured, chain_cfg, Mel(MelConfig(**device_cfg["features"])))
+    return pool, features, figures[:, 0].astype(bool), spans
+
+
+def begun_before(spans: list[tuple[int, int, str]], hop: int) -> str:
+    """The clip last begun before an output hop, or an empty name when none had."""
+    sample = (hop - device.CHAIN_LAG_HOPS) * grid.HOP_SAMPLES
+    return max((s for s in spans if s[0] <= sample), default=(0, 0, ""))[2]
+
+
+def noise(score_of: Scorer, cfg: dict, paths: dict, threshold: float) -> tuple[dict[str, int], list[NoiseSession]]:
+    """Every pool of eval.noise in sessions of noise alone through the board simulation, eval.noise.hours of each,
+    scored by score_of at threshold: the clips each pool holds, and the sessions (KEHOACH 3.11)."""
+    spec, rate = cfg["eval"]["noise"], grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
+    pools = noise_pools(spec, paths["raw"], set(screen.rejected(paths["interim"])))
+    bank = device.room_bank(device_of(cfg), paths["interim"], spec["workers"])
+    per_pool = math.ceil(spec["hours"] * 3600.0 / spec["session_s"])
+    jobs = [
+        (cfg, paths["raw"], bank, name, i * per_pool + j, names)
+        for i, (name, names) in enumerate(pools.items())
+        if names
+        for j in range(per_pool)
+    ]
+    lockout = round(cfg["eval"]["lockout_s"] * rate)
+    sessions = []
+    with multiprocessing.get_context("spawn").Pool(spec["workers"]) as workers:
+        for k, (pool, features, vad, spans) in enumerate(workers.imap_unordered(_noise_session, jobs), start=1):
+            fired = triggers(score_of(features, vad), threshold, lockout)
+            sessions.append(NoiseSession(pool, len(vad) / rate, [begun_before(spans, f) for f in fired]))
+            print(f"noise: session {k}/{len(jobs)}, {pool}, {len(fired)} false accepts", flush=True)
+    return {name: len(names) for name, names in pools.items()}, sessions
+
+
+def noise_table(clips: dict[str, int], sessions: list[NoiseSession], threshold: float) -> str:
+    """False accepts per hour of each pool, and the clips that fired most."""
+    lines = [
+        f"threshold {threshold:.3f}",
+        "",
+        "| Pool | Clips | Hours | False accepts | Per hour | Clips that fired most |",
+        "|---|---|---|---|---|---|",
+    ]
+    for pool, held in [*clips.items(), ("all", sum(clips.values()))]:
+        mine = [s for s in sessions if pool in ("all", s.pool)]
+        hours, fired = sum(s.seconds for s in mine) / 3600.0, [c for s in mine for c in s.fired]
+        per_hour = f"{len(fired) / hours:.1f}" if hours else "-"
+        most = ", ".join(f"{Path(c).name} x{n}" for c, n in Counter(fired).most_common(3))
+        lines.append(f"| {pool} | {held} | {hours:.2f} | {len(fired)} | {per_hour} | {most} |")
     return "\n".join(lines)
 
 

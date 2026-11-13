@@ -1,7 +1,9 @@
 """Quantise and export the wake TCN (KEHOACH 3.11, 3.14): probe streams a seeded random network a few hops a call
 for ai_engine/test_apps/unit (E11-T10), every hop's int8 input and output, and as an image's wake for the branch;
-ptq rows each calibration of a trained run, scored as the chip scores; deploy exports a row into firmware/models.
+ptq rows each calibration of a trained run, scored as the chip scores; deploy exports a row into firmware/models; board
+and noise score a row on the board sessions and on household noise alone.
 Run: python -m srpipe.tasks.wake.quant probe [--step <hops a call>] | ptq <run> | deploy <run> --row <row>
+     | board <run> --row <row> | noise <run> --row <row>
 """
 
 from __future__ import annotations
@@ -218,9 +220,9 @@ def deploy(cfg: dict, run: Path, row: str) -> tuple[Path, Path]:
     return update_lock.record(BRANCH, run, files, fields)
 
 
-def board(cfg: dict, run: Path, row: str, threshold_permille: int | None = None) -> str:
-    """The board sessions the run did not learn, scored by the row's int8 net as the chip scores them, at the row's
-    permille threshold or the one given: the table KEHOACH 1.3 picks a row by."""
+def row_scorer(cfg: dict, run: Path, row: str, threshold_permille: int | None) -> tuple[wake_eval.Scorer, dict, int]:
+    """The row's int8 net as the chip scores a stream's log-mel and vad, on 0..1; cfg with the run's own model,
+    features and word; and the row's permille threshold or the one given."""
     rows = yaml.safe_load((run / INT8_DIR / LADDER_FILE).read_text(encoding="utf-8"))["rows"]
     if row not in rows:
         raise ValueError(f"{run}: no row {row!r} in {INT8_DIR}/{LADDER_FILE}, rows {sorted(rows)}")
@@ -233,9 +235,24 @@ def board(cfg: dict, run: Path, row: str, threshold_permille: int | None = None)
         shard = data.Shard(features, vad, [], False)
         return int8_scores(sim, io, shard, stats, used["eval"]["smooth_hops"]).astype(np.float64) / PERMILLE
 
+    return score_of, used, permille
+
+
+def board(cfg: dict, run: Path, row: str, threshold_permille: int | None = None) -> str:
+    """The board sessions the run did not learn, scored by the row's int8 net as the chip scores them, at the row's
+    permille threshold or the one given: the table KEHOACH 1.3 picks a row by."""
+    score_of, used, permille = row_scorer(cfg, run, row, threshold_permille)
     learnt = wake_eval.learnt_sessions(run)
     results = wake_eval.board(score_of, used, data_paths(), permille / PERMILLE, learnt)
     return f"{row}, as the chip scores\n" + wake_eval.board_report(results, permille / PERMILLE, learnt)
+
+
+def noise(cfg: dict, run: Path, row: str, threshold_permille: int | None = None) -> str:
+    """False accepts of the row's int8 net on household noise alone, scored as the chip scores at the row's permille
+    threshold or the one given (KEHOACH 3.11)."""
+    score_of, used, permille = row_scorer(cfg, run, row, threshold_permille)
+    clips, sessions = wake_eval.noise(score_of, used, data_paths(), permille / PERMILLE)
+    return f"{run.name} {row}, as the chip scores\n" + wake_eval.noise_table(clips, sessions, permille / PERMILLE)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -255,6 +272,10 @@ def main(argv: list[str] | None = None) -> int:
     seen.add_argument("run", type=Path)
     seen.add_argument("--row", required=True, help="a row of <run>/int8/ladder.yaml")
     seen.add_argument("--threshold", type=int, help="permille, instead of the row's")
+    heard = sub.add_parser("noise", help="false accepts of a row on household noise alone, as the chip scores")
+    heard.add_argument("run", type=Path)
+    heard.add_argument("--row", required=True, help="a row of <run>/int8/ladder.yaml")
+    heard.add_argument("--threshold", type=int, help="permille, instead of the row's")
     args = parser.parse_args(argv)
     cfg = load_yaml(CONFIG)
     if args.command == "ptq":
@@ -265,6 +286,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "board":
         print(board(cfg, args.run, args.row, args.threshold))
+        return 0
+    if args.command == "noise":
+        print(noise(cfg, args.run, args.row, args.threshold))
         return 0
     for path in probe(cfg, args.out, args.work, args.step):
         print(f"{path}: {path.stat().st_size} bytes")

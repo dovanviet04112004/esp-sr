@@ -5,6 +5,7 @@ same shards for the same seed, pitch and wider pads that leave every other file 
 from __future__ import annotations
 
 import dataclasses
+import itertools
 import json
 import math
 from pathlib import Path
@@ -632,3 +633,36 @@ def test_a_one_microphone_session_is_heard_as_the_same_microphone_twice(tmp_path
     mel = Mel(MelConfig(**tiny()["features"]))
     heard = [device.listen(pcm, ChainConfig(), mel) for pcm in (one, two)]
     assert all(np.array_equal(a, b) for a, b in zip(*heard, strict=True))
+
+
+NOISE_SESSION = {"seed": 5, "session_s": 6.0, "spl_1m_db": [60.0, 60.0], "gap_s": [0.5, 0.5]}
+
+
+def noise_session(raw: Path, interim: Path, spec: dict, names: list[str]) -> tuple:
+    cfg = tiny()
+    mics = dataclasses.replace(device.load_microphones(cfg["microphone"]), self_noise_rms=0.0)
+    bank = device.room_bank(cfg, interim, 1)
+    return device.simulate_noise_session(cfg, spec, 3, names, bank, mics, ItemReader(raw))
+
+
+def test_a_noise_session_is_its_clips_apart_by_the_gap_and_the_same_for_its_seed(
+    raw_root: Path, tmp_path: Path
+) -> None:
+    names = ["noise/hum/hum.wav"]
+    pcm, spans, draws = noise_session(raw_root, tmp_path / "interim", NOISE_SESSION, names)
+    again, _, _ = noise_session(raw_root, tmp_path / "interim", NOISE_SESSION, names)
+    assert np.array_equal(pcm, again) and len(pcm) == round(NOISE_SESSION["session_s"] * FS)
+    gap = round(NOISE_SESSION["gap_s"][0] * FS)
+    assert spans[0][0] == gap and all(b[0] - a[1] == gap for a, b in itertools.pairwise(spans))
+    assert [s[2] for s in spans] == names * len(spans) and spans[-1][1] <= len(pcm)
+    assert set(draws) == {"session", "bank_room"}
+    other, _, _ = noise_session(raw_root, tmp_path / "interim", NOISE_SESSION | {"seed": 6}, names)
+    assert not np.array_equal(pcm, other)
+
+
+def test_a_louder_noise_session_is_louder_by_its_spl(raw_root: Path, tmp_path: Path) -> None:
+    names = ["noise/hum/hum.wav"]
+    quiet, _, _ = noise_session(raw_root, tmp_path / "interim", NOISE_SESSION, names)
+    loud, _, _ = noise_session(raw_root, tmp_path / "interim", NOISE_SESSION | {"spl_1m_db": [70.0, 70.0]}, names)
+    gain_db = 10 * math.log10(np.mean(loud.astype(np.float64) ** 2) / np.mean(quiet.astype(np.float64) ** 2))
+    assert abs(gain_db - 10.0) < 0.2

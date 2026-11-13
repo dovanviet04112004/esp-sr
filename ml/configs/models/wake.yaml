@@ -169,6 +169,25 @@ eval:
       - 20261101_home_003          # "trợ lý" at 1 m, twice
       - 20261101_home_004
       - 20261101_home_010          # the word's near misses; none of his is left to score (wake.md 12)
+  noise:                           # make wake-noise: false accepts on household noise, no talker (KEHOACH 3.11)
+    seed: 20261113
+    hours: 1.0                     # of each pool, in sessions of session_s
+    session_s: 300.0               # one room, one agc start drawn as the board simulation draws it
+    spl_1m_db: [55.0, 85.0]        # each clip over its loud hops at 1 m from its source, as talker.spl_1m_db
+    gap_s: [1.0, 5.0]              # quiet between clips: the agc climbs as in a quiet room
+    workers: 6                     # each holds about 730 MB: more push a 10 GB WSL into swap
+    audioset: noise/dns/datasets/noise   # under raw/: DNS's AudioSet clips, each named by its YouTube id
+    labels: noise/audioset_labels  # under raw/: AudioSet's segment lists, which give each of them its classes
+    exclude: [Speech, "Male speech, man speaking", "Female speech, woman speaking", "Child speech, kid speaking",
+              Conversation, "Narration, monologue", Babbling, Shout, Yell, Whispering, Singing, Music, Television,
+              Radio]               # a clip labelled so is left out: speech is val_neg's
+    pools:                         # a clip goes to the first pool it matches
+      - {name: door, prefix: noise/dns/datasets/noise/door_}
+      - {name: squeak, prefix: noise/dns/datasets/noise/squeak_}
+      - {name: dragging, prefix: noise/dns/datasets/noise/dragging_}
+      - {name: saw, labels: [Sawing, Chainsaw]}
+      - {name: tools, labels: [Power tool, Drill, Hammer, Jackhammer, Tools, "Filing (rasp)"]}
+      - {name: knock, labels: ["Whack, thwack", Breaking, "Smash, crash", "Thump, thud", Knock, Slam, Wood]}
 quant:                             # python -m srpipe.tasks.wake.quant ptq <run>: rung 2 of KEHOACH 3.14 (E11-T11)
   seed: 20261029
   calib_windows: 64                # of train.window_hops hops, half from train_pos, half from train_neg
