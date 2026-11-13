@@ -6,5 +6,5 @@ endif()
 idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS "."
-    REQUIRES common bsp_board sys_storage drv_audio drv_camera drv_i2c drv_sd dsp_afe ai_engine lang_vi svc_capture svc_front svc_listen svc_note svc_outbox svc_report svc_sensors svc_speak svc_vision net_wifi net_mqtt esp_app_format esp_timer log console esp_wifi
+    REQUIRES common bsp_board sys_storage sys_time drv_audio drv_camera drv_i2c drv_sd dsp_afe ai_engine lang_vi svc_capture svc_front svc_listen svc_note svc_outbox svc_report svc_sensors svc_speak svc_vision net_wifi net_mqtt esp_app_format esp_timer log console esp_wifi
 )

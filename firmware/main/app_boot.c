@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "ai_engine.h"
@@ -18,6 +19,7 @@
 #include "gen_afe.h"
 #include "gen_grid.h"
 #include "gen_topics.h"
+#include "gen_vision.h"
 #include "lang_vi.h"
 #include "net_mqtt.h"
 #include "sdkconfig.h"
@@ -32,10 +34,12 @@
 #include "svc_speak.h"
 #include "svc_vision.h"
 #include "sys_storage.h"
+#include "sys_time.h"
 
 #define DMA_DESC_NUM 8 // 128 ms of hops outlasts one flash erase (KEHOACH 5.5)
 #define MODEL_SLOT 0   // models_0, the one model partition (KEHOACH 6.1)
 #define VISION_LABEL "vision_0"
+#define TZ_BYTES 32 // a POSIX TZ such as ICT-7, with room for DST rules
 
 #define APP_SEED_VER GEN_AFE_VERSION // raised in afe.yaml when a seed changes (KEHOACH 6.2)
 
@@ -277,10 +281,21 @@ static void start_listener(void)
 }
 
 #if CONFIG_APP_CAMERA_ENABLE
+static void start_clock(void)
+{
+    char tz[TZ_BYTES];
+    if (sys_storage_get_str(STORAGE_NS_DEVICE, STORAGE_KEY_TZ, tz, sizeof(tz)) != ESP_OK) {
+        snprintf(tz, sizeof(tz), "%s", GEN_VISION_CLOCK_TZ);
+    }
+    const esp_err_t err = sys_time_init(tz);
+    if (err != ESP_OK) { ESP_LOGW(TAG, "card file dates in UTC: %s", esp_err_to_name(err)); }
+}
+
 // Ahead of every task, as detect's build needs; a piece that fails leaves the listener running
 // (KEHOACH 3.18).
 static void start_vision(void)
 {
+    start_clock();
     esp_err_t err = ai_engine_detect_load(VISION_LABEL);
     if (err != ESP_OK) { ESP_LOGW(TAG, "no detect: %s", esp_err_to_name(err)); }
     log_heap("detect");
