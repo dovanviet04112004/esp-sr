@@ -188,6 +188,8 @@ eval:
       - {name: saw, labels: [Sawing, Chainsaw]}
       - {name: tools, labels: [Power tool, Drill, Hammer, Jackhammer, Tools, "Filing (rasp)"]}
       - {name: knock, labels: ["Whack, thwack", Breaking, "Smash, crash", "Thump, thud", Knock, Slam, Wood]}
+      - {name: fan, prefix: noise/dns/datasets/noise/fan_}   # control: steady noise
+      - {name: musan, prefix: noise/musan/musan/noise/free-sound/noise-free-sound-}   # control: noise training heard
 quant:                             # python -m srpipe.tasks.wake.quant ptq <run>: rung 2 of KEHOACH 3.14 (E11-T11)
   seed: 20261029
   calib_windows: 64                # of train.window_hops hops, half from train_pos, half from train_neg
