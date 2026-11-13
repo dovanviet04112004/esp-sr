@@ -1526,6 +1526,18 @@ lại, và phần thiếu so với 24 giờ của Cửa 2 do nền phòng thu qu
 của `val` ở mục `eval` của cấu hình, rộng hơn Cửa 2, để ưu tiên bắt; ngưỡng trên máy chỉnh được qua NVS `kws/wake_th`
 mà không học lại.
 
+**Báo nhầm trên tiếng động** (`make wake-noise RUN= ROW=`, mục `eval.noise` của cấu hình). Âm bản của `val` và `test`
+là lời nói trong nhiễu nền. Tiếng động ngắn và to trong nhà (cửa đóng sầm, ghế kêu, kéo đồ, cưa, dụng cụ điện, đập gõ)
+gần như vắng ở đó, còn sàn OM-LSA của khe `ns` bám nhiễu đều nên để chúng lọt tới `wake`. Phép đo dựng phiên chỉ có
+tiếng động, không người nói. Mỗi phiên dài `session_s`, ở một phòng của kho phòng, nguồn đặt ở chỗ nguồn nhiễu của
+phòng ấy. Các mẩu của một nhóm nối nhau, cách nhau một quãng lặng rút trong `gap_s` để `agc` kịp kéo lên như phòng yên.
+Mỗi mẩu ở một mức rút trong `spl_1m_db`, tính trên các bước to của nó như mức người nói. Sau đó là micro, chuỗi, log-mel
+như đường mô phỏng board, rồi một hàng int8 chấm như chip ở ngưỡng của hàng. Kết quả là số lần báo nhầm mỗi giờ của
+từng nhóm, kèm các mẩu gây ra chúng. Nhóm lấy từ kho DNS: mẩu Freesound theo tên lớp, mẩu AudioSet theo nhãn trong danh
+sách đoạn của AudioSet (`raw/noise/audioset_labels/`). Một mẩu thuộc nhóm đầu tiên khớp nó. Mẩu mang nhãn lời nói hay
+nhạc bị bỏ, vì lời nói đã là âm bản của `val`. Số đo không làm cửa; nó quyết có thêm tiếng động vào âm bản học của
+`wake` hay không (`measurements/wake.md`).
+
 **Thước** (TỔNG QUAN V5.5.7, Cửa 2): bắt **≥ 95%** ở 1 m phòng yên; báo nhầm **≤ 1 lần mỗi giờ** đo
 trên **≥ 24 giờ** âm bản. Ghi thêm, không làm cửa: bắt được ở 3 m, ở SNR 10 dB và 5 dB.
 
