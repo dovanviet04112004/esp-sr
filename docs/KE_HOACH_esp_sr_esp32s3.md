@@ -307,7 +307,7 @@ ES7210 lấy một kênh từ đầu ra DAC) chỉ xét lại nếu E10 chứng 
 vào WSL đều rơi byte ở mọi baud: FIFO 32 byte của CH340 chỉ đỡ 2,8 ms ở 115 200 baud, ngắn hơn một vòng khứ hồi của
 USB/IP, còn đọc thẳng cổng COM trên Windows thì nguyên vẹn (TASKS E11-T30). Vì vậy Windows giữ cổng COM, và
 `host/src/srhost/bridge.py` chạy bằng Python của Windows, chỉ cần pyserial đặt cạnh nó. Mỗi lần có máy nối tới, cầu tìm
-cổng COM theo `1a86:7523` rồi mở, nên cắm board sang cổng USB khác vẫn chạy. RFC 2217 không giữ được nhịp DTR/RTS của
+cổng COM theo mã USB của board (`1a86:7523` của board B) rồi mở, nên cắm board sang cổng USB khác vẫn chạy. RFC 2217 không giữ được nhịp DTR/RTS của
 esptool, nên cầu bắt đầu chuỗi reset ấy rồi tự phát cả chuỗi với đúng nhịp, như `esp_rfc2217_server` của esptool.
 `make board-attach` trả board khỏi usbipd nếu đang gắn, chép script cùng pyserial của `host/` sang thư mục tạm của
 Windows, bật cầu trong phiên tmux `board-bridge` rồi chờ cổng TCP nghe; cầu đang chạy thì lệnh không làm gì. Cầu chỉ
@@ -355,8 +355,10 @@ phần mềm được.
 
 `make product BOARD=C` chờ chip vào ROM loader rồi ghi mọi ảnh trong một lệnh esptool, vì stub để lại giữ baud nạp và lệnh
 sau không nối được; cuối cùng reset bằng watchdog. Khi board đang chạy, lệnh console `restart` khởi động lại, và
-`srhost.wifi.Console` gửi nó mỗi khi mở cổng. Cầu RFC 2217 chạy với `make board-attach BOARD=C`; cầu đang phục vụ board B
-thì `make board-detach` trước.
+`srhost.wifi.Console` gửi nó mỗi khi mở cổng. Cầu RFC 2217 cũng bật bằng `make board-attach`: không có `BOARD`, lệnh đọc
+phần thiết bị đang cắm của `usbipd list` và chọn board có mạch nạp ở đó, CH340 của board B hay CP2102 của board C, rồi in tên
+board ấy. Cắm cả hai thì lệnh dừng và đòi `BOARD=B` hay `BOARD=C`; không thấy cái nào thì chạy như board B, và cầu báo thiếu
+board sau 10 s. Cầu đang phục vụ board kia thì `make board-detach` trước.
 
 ### 2.2 Bảng chân
 
