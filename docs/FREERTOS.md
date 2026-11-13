@@ -140,6 +140,7 @@ giữ; cột "Cách kiểm" là thứ chạy để xác nhận.
 | 9.2 | Deadlock | chỉ một khoá, `m_storage`, là khoá lá | thêm khoá thứ hai phải ghi thứ tự vào KẾ HOẠCH §5.3 trước | ⏳ |
 | 9.3 | Đảo ngược ưu tiên giữa nhân 1 và nhân 0 | task nhân 1 không lấy mutex nào; dữ liệu chung chỉ qua spinlock vài chục byte | `grep xSemaphoreTake` trong `svc_front` ra rỗng | ✅ `svc_front` không lấy khoá nào @ 03/11 |
 | 9.4 | Giữ spinlock quá lâu | vùng `portENTER_CRITICAL` chỉ chép struct, không gọi hàm | đọc code | ⏳ |
+| 9.5 | `nhin_task` đọc độ lệch giờ 64 bit rách giữa hai lần ghi của `do_task` | `s_clock` của `sys_time` chỉ đọc và ghi dưới spinlock; `settimeofday` và log gọi sau khi nhả khoá (KẾ HOẠCH §5.3) | đọc code; chụp lúc giờ vừa được nhận, `capture.utcMs` khớp `capturedUtc` suy từ giờ nhận | ⏳ |
 
 ## 10. ISR
 

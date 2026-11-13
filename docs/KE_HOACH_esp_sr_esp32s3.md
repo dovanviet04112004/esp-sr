@@ -2678,8 +2678,11 @@ không mất gì, có mạng lại thì board gửi dần.
   ack thì chờ `outbox.retry_s` rồi gửi lại; host nhận trùng thì ghi đè cùng nội dung và ack lại. Hộp thư esp-mqtt quá 128 KB thì khúc
   gửi bù không vào, bước sau thử lại, không chờ như khúc trực tiếp.
 - Tìm mục: đọc `IMG/PND/` mỗi lần MQTT nối và mỗi lượt gửi lại, giữ trong RAM tối đa `outbox.batch` mục cũ nhất.
-- Giờ chụp: board chưa có đồng hồ, nên `capture` mang `boot` và `uptimeMs` lúc chụp, `sentBoot` và `sentUptimeMs` lúc gửi. Cùng
-  một lượt khởi động thì host suy giờ chụp = giờ nhận − (`sentUptimeMs` − `uptimeMs`); khác lượt thì chỉ biết thứ tự.
+- Giờ chụp: `capture` mang `boot` và `uptimeMs` lúc chụp, `sentBoot` và `sentUptimeMs` lúc gửi, và `utcMs` khi board đã có giờ
+  thật từ GPS (đoạn "Giờ thật" dưới đây). `svc_capture` đổi `uptimeMs` ra `utcMs` qua `sys_time` lúc chụp. Mục chụp trước lúc có
+  giờ mà gửi bù trong cùng lượt khởi động thì `svc_outbox` điền `utcMs` lúc gửi; `JSN` trên thẻ giữ nguyên. Host lấy giờ chụp từ
+  `utcMs` khi có; không có thì cùng một lượt khởi động host suy giờ chụp = giờ nhận − (`sentUptimeMs` − `uptimeMs`), khác lượt thì
+  chỉ biết thứ tự.
 - Không có thẻ: không có mục, chỉ đường trực tiếp. Thẻ đầy: chưa làm, lời ghi hỏng thì mục chỉ đi trực tiếp 🔬.
 - Số ở `vision.yaml` mục `outbox`. Host lưu bản ghi thành `<stem>_record.json` cùng tên các file của mục.
 
@@ -2719,8 +2722,9 @@ với `JOURNAL` như `make detect`, rồi chờ đủ hai ảnh, khung, lời gh
 `APP_SENSORS_ENABLE` để nhật ký có vị trí và chuyển động (chủ repo 11/11). RAM nội chúng lấy từng làm `detect` chậm đi 1,94 → 2,01 s
 (`measurements/board_c.md` §7), trước khi dự trữ vùng mượn hạ xuống 2 KB; đo lại 🔬.
 
-- GPS: `drv_gps`, UART1 chỉ RX ở GPIO 20, 9600 baud. Phân tích NMEA là phần thuần, có test trên máy tính. Có vị trí thì host ghi
-  `<ảnh>_place.json` cạnh ảnh, từ `up/sensors` mới nhất; hiện board chưa gắn anten.
+- GPS: `drv_gps`, UART1 chỉ RX ở GPIO 20, 9600 baud. Phân tích NMEA là phần thuần, có test trên máy tính: vị trí và số vệ tinh từ
+  `RMC`, `GGA`, `GSV`, giờ và ngày UTC từ `RMC`. Có vị trí thì host ghi `<ảnh>_place.json` cạnh ảnh, từ `up/sensors` mới nhất; hiện
+  board chưa gắn anten.
 - Hồng ngoại: `drv_ir`, GPIO 19, lọc rung vì đầu ra đổi mức dồn dập ở mili giây (`measurements/board_c.md`): ngắt đếm từng cạnh,
   và các cạnh cách nhau dưới `sensors.ir_release_ms` của `contracts/vision.yaml` là một lần chạm. Bản đầu chỉ báo lên host, chưa tự
   kích chụp.
@@ -2733,6 +2737,20 @@ với `JOURNAL` như `make detect`, rồi chờ đủ hai ảnh, khung, lời gh
   một câu bị `REJECT LOW_SCORE`. Vì thế từ lúc tham chiếu có tiếng tới `tones.deaf_tail_ms` sau hết tiếng, `svc_front` tắt cờ `vad` và gắn
   `SVC_FRONT_FLAG_DEAF` lên khung: phần ấy gồm trễ TX, tiếng vọng và hangover của `vad`. Bước điếc là bước `vad` không phán được, không phải
   bước im lặng: tiếng bíp dài hơn `utterance.gap_s` mà tính là im lặng thì câu đang nói bị chốt ngay giữa chừng (§5.4).
+
+**Giờ thật** chỉ lấy từ GPS, không SNTP (chủ repo 13/11), làm trước khi board đủ anten. Board không có pin RTC: mất nguồn là
+mất giờ, bật lại thì chờ GPS; chưa có giờ thì mọi thứ chạy như trước, chỉ thiếu `utcMs`.
+- Một câu `RMC` cho giờ khi ô giờ và ô ngày đủ chữ số, đúng khoảng (giờ dưới 24, ngày có trong tháng), và năm từ `clock.year_min`
+  của `vision.yaml` trở đi: năm sớm hơn là ngày mặc định của module chưa nghe vệ tinh. Không đòi cờ `A`, vì module có thể có giờ
+  trước khi có vị trí 🔬.
+- `do_task` đọc UART mỗi nhịp 1 s, nên câu `RMC` mới nhất đã cũ từ một phần giây tới hơn một giây lúc đọc. Mỗi câu mới cho
+  `sys_time` một ứng viên độ lệch, giờ UTC trừ giờ máy (`esp_timer`), không lớn hơn độ lệch thật; `sys_time` nhận ứng viên đầu
+  ngay, rồi mỗi `clock.window_s` nhận ứng viên lớn nhất của khoảng ấy, nên task bị trễ không kéo giờ lùi, còn thạch anh trôi thì
+  được bám. Câu cũ không được đưa lại: GPS thôi gửi thì độ lệch đứng yên. Không có chân PPS nên giờ board chậm hơn UTC chừng
+  một tới hai giây 🔬, đủ cho giờ chụp.
+- Mỗi lần nhận độ lệch, `sys_time` gọi `settimeofday`, nên FAT ghi ngày giờ file đúng. Ngày giờ file là giờ địa phương theo
+  `device/tz` của NVS, vắng thì `clock.tz` của `vision.yaml`; mọi giờ trong JSON là UTC.
+- `up/sensors` mang `utcMs`, giờ board lúc đọc, khi đã có giờ, và đăng ngay lần đầu có.
 
 ---
 ## 4. Cấu trúc repo
@@ -3257,7 +3275,7 @@ firmware/
 │   ├── drv_ir/        [C]   L2  # cảm biến hồng ngoại, lọc rung
 │   ├── drv_i2c/       [C]   L2  # bus I2C, mỗi thiết bị một file
 │   ├── sys_storage/   [C]   L2  # NVS + LittleFS + mmap ảnh model; sở hữu storage_format.h
-│   ├── sys_time/      [C]   L2  # SNTP
+│   ├── sys_time/      [C]   L2  # giờ thật từ GPS, settimeofday, múi giờ của FAT
 │   ├── ai_engine/     [C++] L3  # esp-dl; src/core/ không biết tên model;
 │   │                            #   src/core/espdl/: espdl_ops.{cpp,hpp} đăng ký op riêng với esp-dl (§3.14);
 │   │                            #     ops/ mỗi op riêng một cặp espdl_<op>.{cpp,hpp}, một-một với
@@ -3385,7 +3403,7 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | L2 | `drv_audio` | driver | C | `common`, `bsp_board`, `esp_driver_i2s` |
 | L2 | `drv_led` | driver | C | `common`, `bsp_board` |
 | L2 | `sys_storage` | hệ thống | C | `common`, `nvs_flash`, `esp_partition`, `littlefs` |
-| L2 | `sys_time` | hệ thống | C | `common`, `lwip` |
+| L2 | `sys_time` | hệ thống | C | `common`, `esp_timer` |
 | L3 | `ai_engine` | mô hình học | C++ | `common`, `dsp_spec`, `dsp_afe` (kiểu của khe `ns`), `sys_storage`, `esp-dl` |
 | L3 | `net_wifi` / `net_mqtt` / `net_stream` / `net_ota` | mạng | C | `common`, `sys_storage`, `esp_wifi` / `mqtt` `cjson` / `lwip` / `esp_https_ota` |
 | L4 | `svc_front` | ghép | C | `common`, `drv_audio`, `dsp_afe`, `ai_engine` |
@@ -3394,9 +3412,9 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | L4 | `svc_report` | ghép | C | `common`, `net_mqtt`, `net_stream`, `net_wifi` (radio thức khi luồng tiếng mở, §7.2) |
 | L4 | `svc_vision` | ghép | C | `common`, `bsp_board`, `drv_camera`, `drv_sd`, `ai_engine`, `net_mqtt` |
 | L4 | `svc_note` | ghép | C | `common`, `bsp_board`, `drv_sd`, `net_mqtt` |
-| L4 | `svc_sensors` | ghép | C | `common`, `drv_gps`, `drv_ir`, `drv_i2c`, `net_mqtt` |
-| L4 | `svc_outbox` | ghép | C | `common`, `drv_sd`, `net_mqtt` |
-| L5 | `svc_capture` | ghép | C | `common`, `svc_note`, `svc_outbox`, `svc_vision`, `net_mqtt` |
+| L4 | `svc_sensors` | ghép | C | `common`, `drv_gps`, `drv_ir`, `drv_i2c`, `sys_time`, `net_mqtt` |
+| L4 | `svc_outbox` | ghép | C | `common`, `drv_sd`, `sys_time`, `net_mqtt` |
+| L5 | `svc_capture` | ghép | C | `common`, `svc_note`, `svc_outbox`, `svc_vision`, `sys_time`, `net_mqtt` |
 | L5 | `svc_dialog` | ghép | C | `common`, `sys_storage` |
 | L6 | `main` | nối dây | C | tất cả |
 
@@ -3767,7 +3785,7 @@ broker khởi động lại là mất `status` `offline` của máy đang tắt.
 | Topic, QoS, retained | `contracts/mqtt_topics.yaml` | `gen_topics.h` · `srhost.generated.topics` |
 | Khuôn luồng tiếng | `contracts/stream/frame.yaml` | `gen_stream.h` · `srhost.generated.stream` |
 | Tiếng bíp: tần số, số tiếng, độ dài, mức | `contracts/tones.yaml` | `gen_tones.h` |
-| Cỡ ảnh, chất lượng JPEG, số khung chờ phơi sáng, khuôn khúc ảnh, id của hai lệnh ảnh | `contracts/vision.yaml` | `gen_vision.h` · `srhost.generated.vision` |
+| Cỡ ảnh, chất lượng JPEG, số khung chờ phơi sáng, khuôn khúc ảnh, id của hai lệnh ảnh, năm sớm nhất và khoảng nhận giờ GPS, múi giờ mặc định | `contracts/vision.yaml` | `gen_vision.h` · `srhost.generated.vision` |
 | Model đang deploy, sha256 | `contracts/models.lock.json` | đọc file |
 | Bộ lệnh mặc định, câu trả lời | `contracts/commands/`, `contracts/responses/` | nướng vào LittleFS |
 | Ngưỡng khớp golden | `contracts/golden/<khối>/tolerance.yaml` | đọc file |
@@ -3833,10 +3851,10 @@ component nào tự tạo task (§4.5.3 luật 11). Cột ngăn xếp là **ư�
 | `noi_task` | `svc_speak` | 0 | 5 | 8 KB, ở PSRAM trên board C | `q_speak` | dựng trọn câu vào PSRAM rồi đẩy xuống TX; giương `SPEAKING` suốt lúc phát |
 | `gui_task` | `svc_report` | 0 | 4 | 4 KB, ở PSRAM trên board C | nhịp 100 ms | lấy mẫu `s_afe_stats`, gộp 10 mẫu thành một `telemetry` mỗi giây; phát `q_event_up`; `heartbeat` mỗi 30 s; đăng `up/speakers` khi `q_roster` có bản mới hay khi MQTT nối lại |
 | `luong_task` | `svc_report` | 0 | 3 | 4 KB, ở PSRAM trên board C | `sb_stream` | đẩy khung qua `net_stream`; TCP nghẽn thì bỏ khung, đếm; không bao giờ chặn người ghi |
-| `net_task` | `net_wifi` | 0 | 3 | 4 KB | một lần lúc boot | chờ link **tới khi có**, rồi nối MQTT, mở SNTP; xong thì tự xoá |
+| `net_task` | `net_wifi` | 0 | 3 | 4 KB | một lần lúc boot | chờ link **tới khi có**, rồi nối MQTT; xong thì tự xoá |
 | `nhin_task` | `svc_vision`, `svc_capture`, `svc_note`, `svc_outbox` | 0 | 1; 11 trong lượt `detect` | 16 KB **ở PSRAM** | `q_vision` | chụp, lưu thẻ, đẩy ảnh, `detect` (`svc_vision`); nối một lần chụp (`svc_capture`), gửi lời ghi chú đã ghi (`svc_note_send`), giữ mục trên thẻ và gửi bù lúc rảnh (`svc_outbox`) (§3.19); không ghi flash nên ngăn xếp ở PSRAM được; chỉ có ở board C |
 | `ghi_task` | `svc_note` | 0 | 2 | 4 KB **ở PSRAM** | `q_note`, `sb_note` | ghi lời ghi chú của mục nhật ký ra thẻ trong lúc `nhin_task` chụp, kết quả vào `q_note_done` (§3.19); như `nhin_task`, không đăng ký watchdog: một lời ghi chú giữ task tới `note.max_s`; không ghi flash nên ngăn xếp ở PSRAM được; điểm đầy cao nhất của `sb_note` in ở log mỗi lời ghi chú, hop bỏ ở `noteDropped` của `up/journal`; chỉ có ở board C |
-| `do_task` | `svc_sensors` | 0 | 2 | 4 KB **ở PSRAM** | nhịp 1 s | đọc GPS, hồng ngoại, I2C, đăng `up/sensors`; chỉ có ở board C |
+| `do_task` | `svc_sensors` | 0 | 2 | 4 KB **ở PSRAM** | nhịp 1 s | đọc GPS, hồng ngoại, I2C, đưa giờ của câu `RMC` mới cho `sys_time` (§3.19), đăng `up/sensors`; chỉ có ở board C |
 | `mqtt_task` | esp-mqtt | 0 | 5 | 6 KB **ở PSRAM** | esp-mqtt tự tạo | gửi nhận, TLS ở `prod` |
 | `console` | `esp_console` (REPL) | 0 | 2 | 4 KB | `esp_console` tự tạo, **chỉ khi** `APP_CONSOLE` — không có ở `prod` | đọc dòng lệnh trên UART0, ghi NVS qua `sys_storage`; lệnh `spk` đọc `q_roster`, gửi `q_spk`; không lưu lịch sử xuống flash |
 | `wifi`, `tcpip`, `esp_timer`, `sys_evt` | IDF | 0 | 18–23 | — | — | IDF quản lý; ghim nhân 0 bằng Kconfig, `sys_evt` tự ghim nhân 0; `net_wifi` nối lại trong callback của `sys_evt` và `esp_timer`, không có task riêng |
@@ -3892,6 +3910,7 @@ Handle nằm ở `main/app_wiring.c` (§4.5.3 luật 12). Mỗi dòng ghi rõ **
 | `s_rearm_gen` | `_Atomic uint32_t` trong `svc_listen` | 4 B | `xac_task` khi lệnh thành `SPEAKER`, `SPEAKER_UNENROLLED`, `SPEAKER_BUSY`; `nhan_task` khi hết ô xác minh (`SPEAKER_BUSY`) | `nhan_task`, `atomic_exchange` trong `svc_listen_feed` | — ghi đè; hai lần ghi trước một lần đọc gộp làm một | thế hệ `LENH` của cửa sổ bị chặn vì người nói, 0 khi cửa sổ mở ở `NGHE`: chỉ cửa sổ của lần thức hiện tại mở lại `LENH`, một lần thử (ADR-0041) |
 | `s_split` | một phần việc trong `ai_engine` (`espdl_split_two.cpp`), chỉ khi `AI_ENGINE_CORES_TWO`: con trỏ hàm, ngữ cảnh, trạng thái nguyên tử; thông báo task tới `phu_task` | ~16 B | task chạy mạng | `phu_task` | không bao giờ đầy, mỗi lần một phần việc. Task khác đang giữ nó thì op chạy cả hai phần ở chỗ. Task giao xong phần 0 mà `phu_task` chưa nhận phần 1 thì tự làm phần ấy | trạng thái nguyên tử thay khoá: task giao không chờ `phu_task` bắt đầu, chỉ chờ phần nó đã nhận, lâu nhất phần ấy cộng một khung của `sach` |
 | `s_latest` | `portMUX_TYPE` + `sensors_t` trong `svc_sensors`, chỉ có khi `APP_SENSORS_ENABLE` | ~100 B | `do_task`, mỗi lần đọc | `nhin_task` qua `svc_sensors_latest` | — ghi đè | số đo là **mức**: mục nhật ký cần lần đọc mới nhất, không cần chuỗi. Chép dưới spinlock, ~100 byte, không gọi gì bên trong |
+| `s_clock` | `portMUX_TYPE` + độ lệch giờ UTC − giờ máy, ứng viên lớn nhất và đầu khoảng của `clock.window_s`, trong `sys_time` | ~40 B | `do_task` qua `sys_time_offer` | `do_task`, `nhin_task` qua `sys_time_utc_ms` | — ghi đè | độ lệch là **mức**: giờ chụp cần độ lệch mới nhất. Vài phép gán dưới spinlock; `settimeofday` gọi sau khi nhả khoá |
 | `eg_system` | EventGroup | 4 B | mọi task | mọi task | — | bit `WIFI_OK` `MQTT_OK` `TIME_OK` `MODELS_OK` `STREAM_ON` `SPEAKING` `CALIBRATING` `OTA_RUNNING` |
 | `m_storage` | Mutex, nội bộ `sys_storage` | — | mọi đường ghi NVS và LittleFS | — | chờ có hạn 200 ms | khoá lá, không lấy khoá nào khác bên trong |
 | `m_sd` | Mutex, nội bộ `drv_sd` | — | mọi lời gọi file của `drv_sd` (`nhin_task`, `ghi_task`; `noi_task` khi `play`, console khi `sd`) | — | chờ có hạn 10 s, quá thì lời gọi ra `ESP_ERR_TIMEOUT` | khoá lá, giữ trong một lần mở, ghi hay đọc, đóng; lần giữ lâu nhất là ghi ảnh đầy đủ, ~0,8 s, một lần 4,6 s (`measurements/board_c.md` §4.9) |
@@ -4149,7 +4168,7 @@ Bảng phân vùng không đi qua OTA được: đổi bảng là nạp lại qu
 | Namespace | Key | Kiểu | Ghi chú |
 |---|---|---|---|
 | `wifi` | `ssid`, `pass` | str | ghi qua console ở `dev`/`bench`, qua SoftAP ở E13 |
-| `device` | `serial`, `mqtt_uri`, `mqtt_user`, `mqtt_pass`, `stream_host`, `stream_port`, `sntp_host`, `tz` | str / u16 | vắng `serial` thì dựng từ eFuse MAC: `sr-` + 12 hex thường (board B: `sr-3485188f7a70`); `mqtt_uri` mang cả scheme; vắng thì lùi về `Kconfig` của `net_mqtt` |
+| `device` | `serial`, `mqtt_uri`, `mqtt_user`, `mqtt_pass`, `stream_host`, `stream_port`, `sntp_host`, `tz` | str / u16 | vắng `serial` thì dựng từ eFuse MAC: `sr-` + 12 hex thường (board B: `sr-3485188f7a70`); `mqtt_uri` mang cả scheme; vắng thì lùi về `Kconfig` của `net_mqtt`; `tz` là múi giờ POSIX của ngày giờ file trên thẻ, vắng thì `clock.tz` của `vision.yaml` (§3.19) |
 | `calib` | `bal` (blob 257 × 2 float), `bal_ver` (u32), `bal_at` (u32 epoch), `aec_delay` (u32, mẫu), `pcm_shift` (u8) | | kết quả của `test_apps/calib`; **đo trên từng board**, không phải hằng số |
 | `afe` | `ns_floor_db` (i8), `agc_target_dbfs` (i8), `vad_mode` (u8) | | gieo từ `contracts/afe.yaml`, đổi bằng `SET_CONFIG` |
 | `kws` | `wake_th` (u16, ‰), `wake_seed` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16), `cmd_syllable` (u16), `cmd_seeds` (blob 3 × u16) | | `wake_th` gieo từ header của ảnh ở `models_0` (§6.3), ảnh không mang thì từ `Kconfig` của `svc_listen`; `wake_seed` giữ ngưỡng đã gieo, cùng luật với `cmd_seeds` dưới đây; ba khoá lệnh mang nghĩa của đường đang dựng (§3.12): `δ₁`, `δ₂`, `δ₃` của `ctc` theo phần nghìn nat mỗi khung, hay xác suất thấp nhất và khoảng nhất–nhì của `kws`, ‰, đường không dùng `δ₃`. Chúng gieo từ header của ảnh ở `models_0` (§6.3), ảnh không mang thì từ `Kconfig` (`δ₃` 65 535 là không trần); `cmd_seeds` giữ bộ ba đã gieo: lúc boot, bộ gợi ý khác nó, hay một trong ba khoá vắng, thì ghi lại cả ba, nên model mới mang ngưỡng chọn cho nó tới board, khoá bị xoá (app thử `svc_listen` xoá chúng) không rơi về `Kconfig`, còn giá trị `SET_CONFIG` ghi giữ tới khi bộ gợi ý đổi |
@@ -4451,7 +4470,7 @@ Topic, QoS, retained và schema khai ở `contracts/mqtt_topics.yaml`; bảng d�
 |---|---|---|
 | `heartbeat` | uptime, heap nội và PSRAM còn / thấp nhất, `frames_dropped`, `clean_dropped`, `events_dropped`, điểm cao nhất `q_clean`, điểm cao nhất vùng nhớ JSON của `net_mqtt` (`FREERTOS.md` 6.3), tải từng nhân (ở `bench`), RSSI, phiên bản firmware và model | ~420 B |
 | `telemetry` | 10 × {hướng, độ tin, cờ tiếng nói, mức, gain}, trạng thái hội thoại | ~350 B |
-| `sensors` | `gps`, `ir`, và `motion`, `adc` khi thiết bị ấy chạy; thiết bị hỏng lúc boot thì vắng khối của nó | ~250 B |
+| `sensors` | `gps`, `ir`, và `motion`, `adc` khi thiết bị ấy chạy; thiết bị hỏng lúc boot thì vắng khối của nó; `utcMs` khi board đã có giờ GPS | ~270 B |
 | `event` | loại, `seq` khung, điểm, lệnh, khoảng cách với lệnh thứ hai, lý do từ chối; khi kiểm người nói, `speakerPermille`, `speakerId`, lúc đăng ký `enrolCount`; khi đổi bộ lệnh hỏng, `ERROR` với `COMMANDS_INVALID` (kèm `commandId` của dòng `lang_vi` không đọc được), `COMMANDS_REFUSED` hay `COMMANDS_NOT_SAVED`; khi đổi danh sách người nói hỏng, `ERROR` mã `SPEAKERS_*` hay `SPEAKER_UNKNOWN` (§3.17) | ~180 B |
 | `speaker_roster` | `version`, `check`, tới 8 × {`id`, `name`, có mẫu giọng}, người đang đăng ký và số lệnh đã thu | ~600 B |
 
