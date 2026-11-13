@@ -444,6 +444,17 @@ bảng lượng tử (DQT) và cỡ của từng khung chờ. Log ở `interim/c
   bản sửa 🔬.
 - Ghi thẻ một lượt 2,7 s (bình thường 0,47–0,64 s), chưa rõ vì sao 🔬.
 
+### 4.13 Giờ GPS khi chưa có anten (E15-T39, 13/11)
+
+Boot 194, bản đọc giờ từ `RMC` (KẾ HOẠCH §3.19), board trong phòng, chưa gắn anten, module vừa được cấp nguồn lại lúc nạp. Log ở
+`interim/camera/20261113/clock/` của data root.
+- 13 phút 28 s (uptime 46 → 854 s, 112 lần `up/sensors`): **không có giờ**, không có `utcMs`, không có vị trí; `antennaOpen` suốt.
+- Số vệ tinh thấy được 0 → 20, hầu hết 9–20, theo cách đếm của bản này (hệ lớn nhất trong 10 s, chưa cộng GPS với BeiDou, E15-T41).
+  Module thấy vệ tinh mà không ra giờ: có lẽ tín hiệu không anten quá yếu để giải bản tin của vệ tinh, chưa kiểm 🔬.
+- RAM nội lúc đứng yên 54 355 B, thấp nhất 33 971 B; PSRAM 229 220 B, thấp nhất 213 440 B; chưa chạy `detect`, nên vùng mượn chưa
+  đo lại.
+- Chưa kiểm được `capture.utcMs`, ngày giờ file trên thẻ và độ lệch của đồng hồ: cả ba cần giờ thật, tức cần anten hay chỗ thấy trời.
+
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
 `drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là hằng số; bao nhiêu bước
