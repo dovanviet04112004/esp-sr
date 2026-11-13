@@ -980,3 +980,17 @@ Lượt 2 với split nhiễu `noise2` (thêm bíp, chuông, rung điện thoạ
   Walk/footsteps 399 mẩu không lời nói.
 - Hai lượt liền, gần hết báo nhầm của `val_noise` đến từ một bản ghi: 4 giờ `val_noise` với vài bản ghi mỗi nhóm nhỏ
   để một bản ghi khó quyết ngưỡng.
+
+Lượt 3 với split nhiễu `noise3` (thêm cọ xát, kèn kẹt, bước chân, chén bát; `val_noise` 8 giờ), run
+`20261113_8ac386e_ffbc12`: dựng 28 giờ nhiễu hết 6,5 phút, học hết 25 phút, RAM trống thấp nhất 1,27 GB.
+
+| Bản float, bước cuối | Lượt 3 | Lượt 6 (sản phẩm) |
+|---|---|---|
+| Ngưỡng | 0,83 | 0,785 |
+| `val` bắt | 89,7% | 89,7% |
+| Lời nói `val` / `test`, lần mỗi giờ | 2,57 / 4,55 | 2,96 / 6,52 |
+| `val_noise`, lần mỗi giờ | 2,94 trên 8,17 giờ | (§13: 33–95 trên mô phỏng, mẩu đã có trong `noise2` trở về trước) |
+
+- Ở ngưỡng 0,83, báo nhầm của `val_noise` rải ra: còi cảnh sát MUSAN `sound-bible` "Police" 10, một mẩu MUSAN 4, ghế kêu 3,
+  "Missile Alert" 2, cửa 2, dụng cụ, chuông gió, lò vi sóng mỗi thứ 1. Kéo đồ, cọ xát, bước chân, bíp và rung điện thoại,
+  quạt: 0.
