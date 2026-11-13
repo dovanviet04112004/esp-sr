@@ -315,7 +315,7 @@ vision-flash: ## Pack the lock's detect row into the vision image and write it t
 
 ##@ Wake
 
-.PHONY: wake-features wake-train wake-ptq wake-deploy wake-noise-split wake-noise eval-tts wake-synth
+.PHONY: wake-features wake-train wake-ptq wake-deploy wake-noise-split wake-noise wake-board eval-tts wake-synth
 wake-features: ## Run each file of the wake split through the board simulation into processed/wake (E4-T8)
 	$(ML) --extra praat python -m srpipe.tasks.wake.data simulate
 
@@ -334,6 +334,9 @@ wake-noise-split: ## Give the household noise clips of wake.yaml's noise block r
 
 wake-noise: ## False accepts of a wake row on household noise alone, as the chip scores: RUN=<run> ROW=<row> (E11-T55)
 	$(WAKE_QUANT) noise $(RUN) --row $(ROW)
+
+wake-board: ## Score a wake row as the chip does on the board sessions the run did not learn: RUN=<run> ROW=<row> [TH=<permille>] (KEHOACH 1.3)
+	$(WAKE_QUANT) board $(RUN) --row $(ROW) $(if $(TH),--threshold $(TH))
 
 eval-tts: screen ## Compare the desktop TTS engines on the wake word, heard back by PhoWhisper (tts_engines.md)
 	$(ML) python -m srpipe.tasks.wake.synth pilot
