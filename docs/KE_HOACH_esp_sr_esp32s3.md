@@ -1526,11 +1526,12 @@ lại, và phần thiếu so với 24 giờ của Cửa 2 do nền phòng thu qu
 của `val` ở mục `eval` của cấu hình, rộng hơn Cửa 2, để ưu tiên bắt; ngưỡng trên máy chỉnh được qua NVS `kws/wake_th`
 mà không học lại.
 
-**Phiên chỉ có nhiễu** (mục `noise` của cấu hình). Tiếng động trong nhà (cửa đóng sầm, ghế kêu, kéo đồ, cưa, dụng cụ
-điện, đập gõ), tiếng có cao độ của máy (bíp, chuông và rung điện thoại, tiếng tút, chuông báo, chuông cửa, đồ điện như lò
+**Phiên chỉ có nhiễu** (mục `noise` của cấu hình). Tiếng động trong nhà (cửa đóng sầm, ghế kêu, kéo đồ, cọ xát và kèn
+kẹt, bước chân, chén bát, cưa, dụng cụ điện, đập gõ), tiếng có cao độ của máy (bíp, chuông và rung điện thoại, tiếng tút, chuông báo, chuông cửa, đồ điện như lò
 vi sóng, máy hút bụi), tiếng quạt đều và nhiễu MUSAN cả hai phần, không người nói. Tiếng có cao độ kéo dài rồi dứt giống
 một nguyên âm ngân rồi lặng, đúng đuôi "ơi" của từ đánh thức: một mẩu rung điện thoại và một mẩu tút tút gây cả 11 lần báo
-nhầm của `val_noise` khi chưa học chúng (`measurements/wake.md` §14). Mỗi phiên dài `session_s`, ở một phòng của kho phòng,
+nhầm của `val_noise` khi chưa học chúng; học chúng rồi thì một bản ghi kéo đồ mạng chưa nghe gây 10 trong 11 lần, vì nhóm
+kéo đồ chỉ có 35 bản ghi (`measurements/wake.md` §14). Mỗi phiên dài `session_s`, ở một phòng của kho phòng,
 nguồn đặt ở chỗ nguồn nhiễu của phòng ấy. Các mẩu của một nhóm nối nhau, cách nhau một quãng lặng rút trong `gap_s` để
 `agc` kịp kéo lên như phòng yên. Mỗi mẩu ở một mức rút trong `spl_1m_db`, tính trên các bước to của nó như mức người
 nói. Sau đó là micro, chuỗi, log-mel như đường mô phỏng board. Nhóm lấy từ kho DNS và MUSAN: mẩu Freesound theo tên lớp,
@@ -1545,7 +1546,8 @@ phỏng, tiếng quạt cũng 45 (`measurements/wake.md` §13). Các mẩu của
 bản ghi gốc, rút bằng seed, mỗi vai một danh sách commit kèm `SPLIT.md`: mẩu Freesound cắt từ một bản ghi đi cùng nhau,
 mẩu AudioSet theo mã YouTube, mẩu MUSAN theo file. `make wake-features` dựng `train_noise` và `val_noise` thành phiên chỉ
 có nhiễu vào `processed/wake/<split nhiễu>/`, tách khỏi split lời nói nên đổi nhóm là một split nhiễu mới, số giờ ở
-`simulate.noise_hours`, mỗi nhóm cùng số phiên. Lúc học, `train.noise_share` của các cửa sổ âm bản
+`simulate.noise_hours`, mỗi nhóm cùng số phiên. `val_noise` đủ giờ để mỗi nhóm có nhiều phiên: với vài giờ, một bản ghi
+khó lặp lại vài lần đã đủ quyết ngưỡng. Lúc học, `train.noise_share` của các cửa sổ âm bản
 không neo đầu câu lấy ở chỗ ngẫu nhiên trong `train_noise`: có cửa sổ nằm giữa tiếng, có cửa sổ chứa lúc tiếng dứt rồi
 lặng, đúng kiểu "có tiếng rồi im" của mẫu dương. Ngưỡng chọn trên `val` là ngưỡng thấp nhất mà báo nhầm trên lời nói
 (`val_neg` cùng `val_hard`) và trên `val_noise` đều không quá mục tiêu; gộp chung thì vài giờ nhiễu chìm trong 30 giờ
