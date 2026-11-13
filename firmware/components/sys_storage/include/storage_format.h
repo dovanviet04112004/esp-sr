@@ -28,7 +28,6 @@
 #define STORAGE_KEY_MQTT_PASS "mqtt_pass"             // str
 #define STORAGE_KEY_STREAM_HOST "stream_host"         // str
 #define STORAGE_KEY_STREAM_PORT "stream_port"         // u16
-#define STORAGE_KEY_SNTP_HOST "sntp_host"             // str
 #define STORAGE_KEY_TZ "tz"                           // str, POSIX TZ
 #define STORAGE_KEY_BAL "bal"                         // blob STORAGE_CALIB_BAL_BYTES
 #define STORAGE_KEY_BAL_VER "bal_ver"                 // u32, STORAGE_CALIB_BAL_VERSION
