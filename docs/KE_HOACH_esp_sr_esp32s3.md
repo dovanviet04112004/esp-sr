@@ -1507,7 +1507,7 @@ nó ở mục `train`; hai lớp cùng chịu phép đổi nên phép đổi kh�
 Ba phép đầu đổi năng lượng dưới log và giữ nguyên sàn log, như phép độ lợi. Mất mát là BCE theo bước. Chấm như trên máy: điểm làm trơn trung bình trượt 5 khung rồi so
 ngưỡng. Bắt được là tỉ lệ mẩu dương có một lần vượt ngưỡng. Báo nhầm là số lần vượt trên âm bản, mỗi lần vượt khoá
 một quãng rồi mới đếm tiếp như máy khoá sau khi thức, quy ra lần mỗi giờ. Ngưỡng chọn trên `val` sao cho báo nhầm
-không quá mục tiêu, rồi ghi vào NVS `kws/wake_th`.
+trên lời nói và trên nhiễu (đoạn **Âm bản chỉ có nhiễu**) đều không quá mục tiêu, rồi ghi vào NVS `kws/wake_th`.
 
 **Việc phụ trên tiếng người thật.** Mẫu dương phần lớn là TTS; với "Chào Mina", thân mạng bám vào từ đánh thức kiểu TTS
 và giọng thật nói đúng từ rơi ra ngoài (`docs/measurements/wake.md` §4). Vì thế cùng một thân mạng học thêm một việc
@@ -1526,19 +1526,31 @@ lại, và phần thiếu so với 24 giờ của Cửa 2 do nền phòng thu qu
 của `val` ở mục `eval` của cấu hình, rộng hơn Cửa 2, để ưu tiên bắt; ngưỡng trên máy chỉnh được qua NVS `kws/wake_th`
 mà không học lại.
 
-**Báo nhầm trên tiếng động** (`make wake-noise RUN= ROW=`, mục `eval.noise` của cấu hình). Âm bản của `val` và `test`
-là lời nói trong nhiễu nền. Tiếng động ngắn và to trong nhà (cửa đóng sầm, ghế kêu, kéo đồ, cưa, dụng cụ điện, đập gõ)
-gần như vắng ở đó, còn sàn OM-LSA của khe `ns` bám nhiễu đều nên để chúng lọt tới `wake`. Phép đo dựng phiên chỉ có
-tiếng động, không người nói. Mỗi phiên dài `session_s`, ở một phòng của kho phòng, nguồn đặt ở chỗ nguồn nhiễu của
-phòng ấy. Các mẩu của một nhóm nối nhau, cách nhau một quãng lặng rút trong `gap_s` để `agc` kịp kéo lên như phòng yên.
-Mỗi mẩu ở một mức rút trong `spl_1m_db`, tính trên các bước to của nó như mức người nói. Sau đó là micro, chuỗi, log-mel
-như đường mô phỏng board, rồi một hàng int8 chấm như chip ở ngưỡng của hàng. Kết quả là số lần báo nhầm mỗi giờ của
-từng nhóm, kèm các mẩu gây ra chúng. Nhóm lấy từ kho DNS: mẩu Freesound theo tên lớp, mẩu AudioSet theo nhãn trong danh
-sách đoạn của AudioSet (`raw/noise/audioset_labels/`). Một mẩu thuộc nhóm đầu tiên khớp nó. Mẩu mang nhãn lời nói hay
-nhạc bị bỏ, vì lời nói đã là âm bản của `val`. Hai nhóm đối chứng chạy cùng: tiếng quạt đều của DNS, và nhiễu MUSAN mà
-đường mô phỏng đã trộn vào dữ liệu học. Báo nhầm của một nhóm tiếng động chỉ do chính tiếng ấy khi nó cao hơn hai nhóm
-này; ngang chúng thì lỗi nằm ở việc mạng ít nghe những quãng dài chỉ có nhiễu. Số đo không làm cửa; nó quyết có thêm tiếng động vào âm bản học của
-`wake` hay không (`measurements/wake.md`).
+**Phiên chỉ có nhiễu** (mục `noise` của cấu hình). Tiếng động trong nhà (cửa đóng sầm, ghế kêu, kéo đồ, cưa, dụng cụ
+điện, đập gõ), tiếng quạt đều và nhiễu MUSAN, không người nói. Mỗi phiên dài `session_s`, ở một phòng của kho phòng,
+nguồn đặt ở chỗ nguồn nhiễu của phòng ấy. Các mẩu của một nhóm nối nhau, cách nhau một quãng lặng rút trong `gap_s` để
+`agc` kịp kéo lên như phòng yên. Mỗi mẩu ở một mức rút trong `spl_1m_db`, tính trên các bước to của nó như mức người
+nói. Sau đó là micro, chuỗi, log-mel như đường mô phỏng board. Nhóm lấy từ kho DNS và MUSAN: mẩu Freesound theo tên lớp,
+mẩu AudioSet theo nhãn trong danh sách đoạn của AudioSet (`raw/noise/audioset_labels/`). Một mẩu thuộc nhóm đầu tiên khớp
+nó. Mẩu mang nhãn lời nói hay nhạc bị bỏ, vì lời nói đã là âm bản. Sàn OM-LSA của khe `ns` bám nhiễu đều nên để tiếng
+động ngắn lọt tới `wake`.
+
+**Âm bản chỉ có nhiễu** (split `wake/noise1`, `make wake-noise-split`). Âm bản lời nói được cắt thành từng câu kèm
+`session.pad_s` mỗi bên rồi nối liền, còn nhiễu của đường mô phỏng chạy suốt phiên và không bao giờ dứt. Mạng vì thế
+chưa từng nghe nhiễu đứng một mình quá chừng 0,6 s, và thức trên mọi quãng dài chỉ có nhiễu: 33–95 lần mỗi giờ trên mô
+phỏng, tiếng quạt cũng 45 (`measurements/wake.md` §13). Các mẩu của mục `noise` chia ba vai `train`, `val`, `test` theo
+bản ghi gốc, rút bằng seed, mỗi vai một danh sách commit kèm `SPLIT.md`: mẩu Freesound cắt từ một bản ghi đi cùng nhau,
+mẩu AudioSet theo mã YouTube, mẩu MUSAN theo file. `make wake-features` dựng `train_noise` và `val_noise` thành phiên chỉ
+có nhiễu, số giờ ở `simulate.noise_hours`, mỗi nhóm cùng số phiên. Lúc học, `train.noise_share` của các cửa sổ âm bản
+không neo đầu câu lấy ở chỗ ngẫu nhiên trong `train_noise`: có cửa sổ nằm giữa tiếng, có cửa sổ chứa lúc tiếng dứt rồi
+lặng, đúng kiểu "có tiếng rồi im" của mẫu dương. Ngưỡng chọn trên `val` là ngưỡng thấp nhất mà báo nhầm trên lời nói
+(`val_neg` cùng `val_hard`) và trên `val_noise` đều không quá mục tiêu; gộp chung thì vài giờ nhiễu chìm trong 30 giờ
+lời nói.
+
+**Báo nhầm trên tiếng động** (`make wake-noise RUN= ROW=`, mục `eval.noise` của cấu hình): phiên chỉ có nhiễu dựng từ
+mẩu vai `test` của `wake/noise1`, mỗi nhóm `eval.noise.hours`, chấm bằng một hàng int8 như chip ở ngưỡng của hàng. Kết
+quả là số lần báo nhầm mỗi giờ của từng nhóm, kèm các mẩu gây ra chúng. Số đo không làm cửa; tiếng quạt và nhiễu MUSAN là
+hai nhóm đối chứng: một nhóm tiếng động cao hơn chúng là do chính tiếng ấy.
 
 **Thước** (TỔNG QUAN V5.5.7, Cửa 2): bắt **≥ 95%** ở 1 m phòng yên; báo nhầm **≤ 1 lần mỗi giờ** đo
 trên **≥ 24 giờ** âm bản. Ghi thêm, không làm cửa: bắt được ở 3 m, ở SNR 10 dB và 5 dB.
