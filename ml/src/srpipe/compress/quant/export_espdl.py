@@ -77,6 +77,8 @@ def export(
     build otherwise (espdl_shapes), is refused (KEHOACH 3.14)."""
     import esp_ppq.lib as ppq_lib
     from esp_ppq.api.espdl_interface import generate_test_value, get_target_platform
+    from esp_ppq.parser.espdl.espdl_streaming import StreamingTable
+    from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
 
     rescaling = rescaling_passive_ops(graph)
     if rescaling:
@@ -86,6 +88,9 @@ def export(
         arrays = test_input if isinstance(test_input, tuple) else (test_input,)
         values = generate_test_value(graph, "cpu", [torch.from_numpy(np.ascontiguousarray(a)) for a in arrays])
     out.parent.mkdir(parents=True, exist_ok=True)
+    # ESP-PPQ clears these only after an export succeeds; a refused one's names would lay out the next graph wrong.
+    ExporterPatternInfo().reset()
+    StreamingTable().reset()
     ppq_lib.Exporter(platform=get_target_platform(TARGET, BITS)).export(
         file_path=str(out),
         graph=graph,

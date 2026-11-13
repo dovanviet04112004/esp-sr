@@ -14,7 +14,7 @@ pytest.importorskip("esp_ppq")
 
 from torch import nn  # noqa: E402
 
-from esp_ppq_cases import RUNGS, espdl_graph, export_info, round_shift  # noqa: E402
+from esp_ppq_cases import RUNGS, Tail, espdl_graph, export_info, round_shift, tail_calib  # noqa: E402
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl  # noqa: E402
 
 BLOCK_HOPS, BLOCK_BANDS = 6, 8
@@ -108,6 +108,23 @@ def test_conv_block_exports_a_block_as_one_op_giving_its_integers(tmp_path: Path
     assert np.array_equal(conv_block_espdl(laid.astype(np.int64), values, shifts), want[0].transpose(1, 2, 0))
     off = [*shifts[:4], shifts[4] + 1, shifts[5]]
     assert not np.array_equal(conv_block_espdl(laid.astype(np.int64), values, off), want[0].transpose(1, 2, 0))
+
+
+def test_a_refused_export_leaves_no_layout_behind_for_the_next(tmp_path: Path) -> None:
+    from esp_ppq.parser.espdl.espdl_typedef import ExporterPatternInfo
+
+    torch.manual_seed(17)
+    calib = tail_calib(np.random.default_rng(43))
+    tail = ptq_espdl.quantize(Tail().eval(), calib, tmp_path / "tail", RUNGS | {"calibration": "minmax"})
+    refusing = esp_ppq_patches.applied(["aligned_channels", "band_head", "band_stream"])
+    with pytest.raises(ValueError, match="cannot stream"), refusing:
+        export_espdl.export(tail, tmp_path / "tail" / "tail.espdl")
+    assert ExporterPatternInfo().var_layout
+    graph, _ = res_block(tmp_path, 24, middle=False)
+    with esp_ppq_patches.applied(["requantise_graph_inputs", "aligned_pointwise", "conv_block"]):
+        path = export_espdl.export(graph, tmp_path / "block.espdl")
+    nodes, _ = espdl_graph(path)
+    assert [op for op, _ in nodes.values()].count("ConvBlock") == 1
 
 
 class StageEnds(nn.Module):
