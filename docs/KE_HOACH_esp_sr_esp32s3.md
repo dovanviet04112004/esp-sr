@@ -2722,9 +2722,13 @@ với `JOURNAL` như `make detect`, rồi chờ đủ hai ảnh, khung, lời gh
 `APP_SENSORS_ENABLE` để nhật ký có vị trí và chuyển động (chủ repo 11/11). RAM nội chúng lấy từng làm `detect` chậm đi 1,94 → 2,01 s
 (`measurements/board_c.md` §7), trước khi dự trữ vùng mượn hạ xuống 2 KB; đo lại 🔬.
 
-- GPS: `drv_gps`, UART1 chỉ RX ở GPIO 20, 9600 baud. Phân tích NMEA là phần thuần, có test trên máy tính: vị trí và số vệ tinh từ
-  `RMC`, `GGA`, `GSV`, giờ và ngày UTC từ `RMC`. Có vị trí thì host ghi `<ảnh>_place.json` cạnh ảnh, từ `up/sensors` mới nhất; hiện
-  board chưa gắn anten.
+- GPS: `drv_gps`, UART1 chỉ RX ở GPIO 20, 9600 baud. Phân tích NMEA là phần thuần, có test trên máy tính: vị trí từ `RMC`, giờ và
+  ngày UTC từ `RMC` (đoạn "Giờ thật" dưới đây), số vệ tinh dùng, HDOP và loại fix từ `GGA`, chế độ (ô 12 của `RMC`: `A` tự định, `D`
+  vi sai, `E` ước đoán, `N` không có). Số vệ tinh thấy được là tổng của mọi hệ: module chạy cả GPS lẫn BeiDou, mỗi hệ một chuỗi `GSV`
+  với tổng riêng, nên `drv_gps` giữ tổng mới nhất của từng hệ và cộng lại. Vị trí **chưa lọc**: mỗi `RMC` có cờ `A` là một vị trí,
+  không chặn cú nhảy, không làm mượt. HDOP, loại fix và chế độ chỉ được báo lên `up/sensors`; cách lọc chọn sau khi đo độ toả của vị
+  trí thô có anten (TASKS E15-T40), vì ngưỡng chọn khi chưa có số đo là đoán. Module chỉ nối RX nên không đặt được chế độ lọc của
+  chính nó. Có vị trí thì host ghi `<ảnh>_place.json` cạnh ảnh, từ `up/sensors` mới nhất; hiện board chưa gắn anten.
 - Hồng ngoại: `drv_ir`, GPIO 19, lọc rung vì đầu ra đổi mức dồn dập ở mili giây (`measurements/board_c.md`): ngắt đếm từng cạnh,
   và các cạnh cách nhau dưới `sensors.ir_release_ms` của `contracts/vision.yaml` là một lần chạm. Bản đầu chỉ báo lên host, chưa tự
   kích chụp.
@@ -4470,7 +4474,7 @@ Topic, QoS, retained và schema khai ở `contracts/mqtt_topics.yaml`; bảng d�
 |---|---|---|
 | `heartbeat` | uptime, heap nội và PSRAM còn / thấp nhất, `frames_dropped`, `clean_dropped`, `events_dropped`, điểm cao nhất `q_clean`, điểm cao nhất vùng nhớ JSON của `net_mqtt` (`FREERTOS.md` 6.3), tải từng nhân (ở `bench`), RSSI, phiên bản firmware và model | ~420 B |
 | `telemetry` | 10 × {hướng, độ tin, cờ tiếng nói, mức, gain}, trạng thái hội thoại | ~350 B |
-| `sensors` | `gps`, `ir`, và `motion`, `adc` khi thiết bị ấy chạy; thiết bị hỏng lúc boot thì vắng khối của nó; `utcMs` khi board đã có giờ GPS | ~270 B |
+| `sensors` | `gps` (có `hdopE1`, `fixQuality` khi `GGA` mang chúng, `mode` khi `RMC` mang nó), `ir`, và `motion`, `adc` khi thiết bị ấy chạy; thiết bị hỏng lúc boot thì vắng khối của nó; `utcMs` khi board đã có giờ GPS | ~310 B |
 | `event` | loại, `seq` khung, điểm, lệnh, khoảng cách với lệnh thứ hai, lý do từ chối; khi kiểm người nói, `speakerPermille`, `speakerId`, lúc đăng ký `enrolCount`; khi đổi bộ lệnh hỏng, `ERROR` với `COMMANDS_INVALID` (kèm `commandId` của dòng `lang_vi` không đọc được), `COMMANDS_REFUSED` hay `COMMANDS_NOT_SAVED`; khi đổi danh sách người nói hỏng, `ERROR` mã `SPEAKERS_*` hay `SPEAKER_UNKNOWN` (§3.17) | ~180 B |
 | `speaker_roster` | `version`, `check`, tới 8 × {`id`, `name`, có mẫu giọng}, người đang đăng ký và số lệnh đã thu | ~600 B |
 
