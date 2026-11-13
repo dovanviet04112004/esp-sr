@@ -21,7 +21,8 @@ typedef struct {
  */
 void svc_sensors_init(const svc_sensors_config_t *cfg);
 
-/** One tick of GEN_VISION_SENSORS_PERIOD_MS: read everything, report on a change or when the report is due.
+/** One tick of GEN_VISION_SENSORS_PERIOD_MS: read everything, hand a new GPS time to sys_time, report on a
+ *  change, the first time included, or when the report is due.
  *  @ctx do_task | blocks on the I2C bus, never on the network
  */
 void svc_sensors_step(void);

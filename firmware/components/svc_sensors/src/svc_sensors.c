@@ -14,6 +14,7 @@
 #include "gen_payload.h"
 #include "gen_vision.h"
 #include "net_mqtt.h"
+#include "sys_time.h"
 
 #define US_PER_S 1000000
 #define MS_PER_S 1000
@@ -24,9 +25,9 @@ static const char *TAG = "svc_sensors";
 static struct {
     uint32_t boot;
     uint32_t ticks;
-    uint8_t in_view_most; // a receiver sends GSV less often than a tick
     bool motion_ready;
     bool adc_ready;
+    bool clock_reported; // the last report carried utcMs
     drv_i2c_ads1115_t adc;
     sensors_gps_t gps;
     sensors_ir_t ir;
@@ -61,14 +62,20 @@ static void read_gps(sensors_gps_t *gps)
 {
     drv_gps_fix_t fix;
     drv_gps_poll(&fix);
-    s_sensors.in_view_most = fix.in_view > s_sensors.in_view_most ? fix.in_view : s_sensors.in_view_most;
+    if (fix.has_time) { sys_time_offer(fix.utc_s, esp_timer_get_time()); }
     *gps = (sensors_gps_t){
         .has_fix = fix.has_fix,
         .lat_e7 = fix.lat_e7,
         .lon_e7 = fix.lon_e7,
         .satellites = fix.satellites,
-        .in_view = s_sensors.in_view_most,
+        .in_view = fix.in_view,
         .antenna_open = fix.antenna_open,
+        .hdop_e1 = fix.hdop_e1,
+        .has_hdop_e1 = fix.has_hdop,
+        .fix_quality = fix.fix_quality,
+        .has_fix_quality = fix.has_quality,
+        .mode = {fix.mode, '\0'},
+        .has_mode = fix.mode != '\0',
     };
 }
 
@@ -96,7 +103,8 @@ static bool something_changed(const sensors_t *report)
 {
     return report->ir.active != s_sensors.ir.active || report->ir.hits != s_sensors.ir.hits ||
            report->gps.has_fix != s_sensors.gps.has_fix ||
-           report->gps.antenna_open != s_sensors.gps.antenna_open;
+           report->gps.antenna_open != s_sensors.gps.antenna_open ||
+           report->has_utc_ms != s_sensors.clock_reported;
 }
 
 void svc_sensors_step(void)
@@ -106,6 +114,7 @@ void svc_sensors_step(void)
     drv_ir_read(&ir);
     report.ir = (sensors_ir_t){.active = ir.active, .hits = ir.hits};
     read_gps(&report.gps);
+    report.has_utc_ms = sys_time_utc_ms(esp_timer_get_time(), &report.utc_ms);
     read_motion(&report);
     read_adc(&report);
     taskENTER_CRITICAL(&s_latest_lock);
@@ -116,8 +125,8 @@ void svc_sensors_step(void)
     if (!something_changed(&report) && s_sensors.ticks < TICKS_PER_REPORT) { return; }
     s_sensors.gps = report.gps;
     s_sensors.ir = report.ir;
+    s_sensors.clock_reported = report.has_utc_ms;
     s_sensors.ticks = 0;
-    s_sensors.in_view_most = 0;
     net_mqtt_publish_sensors(&report);
 }
 

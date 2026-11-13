@@ -5,5 +5,6 @@ component không tự tạo task.
 
 - Một thiết bị hỏng lúc boot thì các thiết bị khác vẫn chạy, và khối của nó vắng khỏi payload.
 - `svc_sensors_latest` chép lần đọc mới nhất, đã gửi hay chưa, dưới spinlock, cho mục nhật ký của `svc_journal` (KẾ HOẠCH §5.3).
-- Phụ thuộc: `common`, `drv_gps`, `drv_ir`, `drv_i2c`, `net_mqtt`.
+- Mỗi câu `RMC` mới có giờ đi vào `sys_time_offer`; báo cáo mang `utcMs` khi board đã có giờ, và đăng ngay lần đầu có.
+- Phụ thuộc: `common`, `drv_gps`, `drv_ir`, `drv_i2c`, `sys_time`, `net_mqtt`.
 - Board không có các khối này thì `APP_SENSORS_ENABLE` tắt, component rỗng.
