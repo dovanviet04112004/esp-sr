@@ -1535,7 +1535,9 @@ Mỗi mẩu ở một mức rút trong `spl_1m_db`, tính trên các bước to 
 như đường mô phỏng board, rồi một hàng int8 chấm như chip ở ngưỡng của hàng. Kết quả là số lần báo nhầm mỗi giờ của
 từng nhóm, kèm các mẩu gây ra chúng. Nhóm lấy từ kho DNS: mẩu Freesound theo tên lớp, mẩu AudioSet theo nhãn trong danh
 sách đoạn của AudioSet (`raw/noise/audioset_labels/`). Một mẩu thuộc nhóm đầu tiên khớp nó. Mẩu mang nhãn lời nói hay
-nhạc bị bỏ, vì lời nói đã là âm bản của `val`. Số đo không làm cửa; nó quyết có thêm tiếng động vào âm bản học của
+nhạc bị bỏ, vì lời nói đã là âm bản của `val`. Hai nhóm đối chứng chạy cùng: tiếng quạt đều của DNS, và nhiễu MUSAN mà
+đường mô phỏng đã trộn vào dữ liệu học. Báo nhầm của một nhóm tiếng động chỉ do chính tiếng ấy khi nó cao hơn hai nhóm
+này; ngang chúng thì lỗi nằm ở việc mạng ít nghe những quãng dài chỉ có nhiễu. Số đo không làm cửa; nó quyết có thêm tiếng động vào âm bản học của
 `wake` hay không (`measurements/wake.md`).
 
 **Thước** (TỔNG QUAN V5.5.7, Cửa 2): bắt **≥ 95%** ở 1 m phòng yên; báo nhầm **≤ 1 lần mỗi giờ** đo
