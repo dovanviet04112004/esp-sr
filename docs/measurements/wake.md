@@ -1017,8 +1017,30 @@ Lượt `20261113_8ac386e_ffbc12` học 20 000 bước hết 1 423 s; theo giờ
 `val`) hết 40–131 s.
 
 - Một lần chấm như `train` chạy, trên `val_pos`, `val_neg`, `val_hard` 30,8 giờ và `val_noise` 8,2 giờ (8,8 triệu bước,
-  float32 đọc từ file trên ổ E:): lạnh 37,7 s, trong đó đọc file 31,1 s (~1,4 GB, ~45 MB/s), GPU 5,6 s, đếm lần kích ở
-  198 ngưỡng 0,9 s. Khi file đã nằm trong page cache: 5,0 s.
+  80 dải float32 đọc từ file trên ổ E:): lạnh 37,7 s, trong đó đọc file 31,1 s (2,8 GB, ~90 MB/s), GPU 5,6 s, đếm lần
+  kích ở 198 ngưỡng 0,9 s. Khi file đã nằm trong page cache: 5,0 s.
 - Khoảng ngắn nhất giữa hai checkpoint là 40 s, tức khoảng 35 s học cộng một lần chấm ấm. Vậy phần học chiếm khoảng
   700 s và 20 lần chấm khoảng 720 s, hơn nửa lượt: tập `train` (~5 GB) nằm trong RAM nên page cache không giữ được tập
   `val` giữa hai lần chấm.
+
+Từ `d74dc94c`, `val_pos`, `val_neg`, `val_hard` và `val_noise` được chuẩn hoá một lần đầu lượt và nằm trên GPU suốt lượt
+(2,62 GiB). Trên cả 20 checkpoint của lượt `20261113_8ac386e_ffbc12`, mọi mảng quét trùng tuyệt đối với cách đọc file, và
+mọi hàng lịch sử trong `metrics.yaml` của lượt ấy ra lại đúng; một lần chấm hết 2,9 s.
+
+Lượt đo `20261116_d74dc94-dirty_ffbc12` (cùng cấu hình và dữ liệu với lượt trên; "dirty" là một sửa tài liệu chưa commit):
+
+| | Lượt `8ac386e`, đọc file | Lượt `d74dc94`, `val` trên GPU |
+|---|---|---|
+| Từ lúc tạo thư mục run tới `model.pt` | 1 423 s | 1 016 s |
+| Mỗi 1 000 bước, từ bước 1 000 | 40–121 s | 39–52 s, trung bình 41,8 s |
+| GPU bận lúc học | ~33% | 72,5% (mẫu 10 s) |
+| VRAM cao nhất | | 3 519 MiB của 4 096 |
+| RAM trống thấp nhất | 1,27 GB | 1,27 GB |
+
+- Đoạn tới bước 1 000 hết 174 s (lượt trước 131 s): gồm thống kê dải, dựng cửa sổ và lần đưa `val` lên GPU (~25 s đọc
+  file lạnh). Trước thư mục run còn ~1 phút nạp tập `train`; cả `make wake-train` hết 17 phút 56 s.
+- Chỗ nghẽn còn lại là chính bước học, ~40 ms mỗi bước với GPU bận ~73%.
+- Hai lượt cùng cấu hình không cho cùng trọng số: bước GPU không lặp lại từng bit. Ở bước cuối, lượt `d74dc94` có ngưỡng
+  0,875, `val` bắt 80,9% (55/68), lời nói 1,33/giờ, nhiễu 2,82/giờ, `test_neg` 3,16/giờ; lượt `8ac386e` có 0,83, 89,7%
+  (61/68), 2,57, 2,94 và 4,55. So hai biến thể bằng `val` bắt ở bước cuối thì chênh vài câu trong 68 nằm trong dao động
+  giữa hai lượt.
