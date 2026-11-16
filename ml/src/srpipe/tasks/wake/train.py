@@ -336,6 +336,8 @@ def train(
     trunk also learns the CTC side task; each evaluated net is saved in the run's checkpoints when run is given; with
     f0_hz, the words are drawn by pitch as f0_balance asks; the val sets stay on device for the whole run."""
     spec, rng = cfg["train"], seed_everything(cfg["train"]["seed"])
+    # Some cuDNN backward kernels differ from run to run of one seed (wake.md 15).
+    torch.backends.cudnn.deterministic = True
     mean, std = band_stats(sets["train_pos"] + sets["train_neg"])
     n_bands = len(mean)
     model = Tcn(n_bands, **cfg["model"]).to(device)
@@ -373,9 +375,10 @@ def train(
             heard, lengths, targets, counts = side_batch
             heard = (torch.from_numpy(heard.astype(np.float32)).to(device).transpose(1, 2) - mean_t) / std_t
             log_probs = reader(model.trunk(heard))[:, :, spec["warmup_hops"] :].log_softmax(1).permute(2, 0, 1)
+            # On the CPU: the CUDA backward of ctc_loss differs from run to run of one seed (wake.md 15).
             ctc = functional.ctc_loss(
-                log_probs,
-                torch.from_numpy(targets).to(device),
+                log_probs.cpu(),
+                torch.from_numpy(targets),
                 torch.from_numpy(lengths),
                 torch.from_numpy(counts),
                 zero_infinity=True,

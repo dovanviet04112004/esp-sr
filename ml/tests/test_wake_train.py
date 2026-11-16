@@ -202,6 +202,29 @@ def test_a_tiny_run_keeps_its_last_weights_saves_each_evaluated_one_and_its_swee
     assert "ctc_loss" not in plain[-1]
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="the run-to-run spread is the GPU's")
+def test_two_runs_of_one_seed_on_the_gpu_end_with_the_same_weights_and_figures(tmp_path: Path) -> None:
+    rng = np.random.default_rng(13)
+    cfg = tiny_cfg()
+    around = data.label_hops(cfg["train"]["label_s"])
+    pos = [(60, 20, 40)] * 6
+    neg = [(60, 0, 60)] * 6
+    sets = {
+        "train_pos": data.load_set(processed(tmp_path / "tp", pos, rng, True), True, around, "float16"),
+        "train_neg": data.load_set(processed(tmp_path / "tn", neg, rng, False), False, around, "float16"),
+        "val_pos": data.load_set(processed(tmp_path / "vp", pos, rng, True), True, around, "float32"),
+        "val_neg": data.load_set(processed(tmp_path / "vn", neg, rng, False), False, around, "float32"),
+    }
+    units = {i["item"]: [3, 7, 3] for s in sets["train_neg"] for i in s.items}
+    runs = [train.train(cfg, sets, "cuda", units) for _ in range(2)]
+    (first, _, history), (second, _, again) = runs
+    assert history == again
+    assert all(torch.equal(v, second.state_dict()[k]) for k, v in first.state_dict().items())
+    cfg["train"]["seed"] += 1
+    other, _, _ = train.train(cfg, sets, "cuda", units)
+    assert not all(torch.equal(v, other.state_dict()[k]) for k, v in first.state_dict().items())
+
+
 def test_a_sweep_of_shards_held_on_the_device_gives_the_figures_of_one_read_from_the_file(tmp_path: Path) -> None:
     rng = np.random.default_rng(12)
     cfg = tiny_cfg()
