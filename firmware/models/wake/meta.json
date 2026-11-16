@@ -1,13 +1,13 @@
 {
   "branch": "wake",
-  "run": "20261101_528604f-dirty_b4b1a4",
+  "run": "20261113_8ac386e_ffbc12",
   "grid_hash": "0x9c914b61",
   "files": [
     {
       "file": "wake.espdl",
       "entry": "wake",
       "kind": "espdl",
-      "sha256": "221edb2a5cd9f535215cb7b4fe1b41ab085fb9563e0cd22868f73c759aa0184d"
+      "sha256": "e7ef3c82bcf81972a815be7c1e92fe44fad5487facb31fe0853fc95e4946845e"
     },
     {
       "file": "wake.norm.bin",
@@ -19,6 +19,10 @@
   "learnt_from": {
     "split": "vung1",
     "train": [
+      {
+        "file": "train_noise.txt",
+        "sha256": "b70ab093b071213c9a59c48430fc7e50c3b85a4550fb6c11809040a553ebe94a"
+      },
       {
         "file": "train_hard.txt",
         "sha256": "6e643e621104ab5d36f7fc1ab629c401b3c78d0dc5c585d1846eaa760aa7e233"
@@ -163,11 +167,11 @@
       }
     ]
   },
-  "row": "percentile",
+  "row": "kl",
   "word": "vừng ơi",
   "step_frames": 8,
   "threshold": {
-    "permille": 800
+    "permille": 830
   },
   "smooth_hops": 5
 }
