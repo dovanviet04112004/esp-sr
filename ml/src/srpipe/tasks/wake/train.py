@@ -41,7 +41,7 @@ from srpipe.tasks.wake.data import (
     sentence_units,
     set_folder,
 )
-from srpipe.tasks.wake.eval import Sweep, checkpoint, operating_point, sweep
+from srpipe.tasks.wake.eval import Sweep, checkpoint, held, held_sweep, operating_point, sweep
 from srpipe.tasks.wake.model.tcn import Tcn
 
 # Per processed file: whether every item says the wake word, and the dtype its features are held in.
@@ -334,7 +334,7 @@ def train(
 ) -> tuple[Tcn, dict, list[dict]]:
     """The weights of the last step, the band statistics and one row of val figures per evaluation; with units, the
     trunk also learns the CTC side task; each evaluated net is saved in the run's checkpoints when run is given; with
-    f0_hz, the words are drawn by pitch as f0_balance asks."""
+    f0_hz, the words are drawn by pitch as f0_balance asks; the val sets stay on device for the whole run."""
     spec, rng = cfg["train"], seed_everything(cfg["train"]["seed"])
     mean, std = band_stats(sets["train_pos"] + sets["train_neg"])
     n_bands = len(mean)
@@ -351,6 +351,9 @@ def train(
     hard = sets.get("train_hard", []) + sets.get(BOARD_HARD_SET, [])
     windows = Windows(positives, sets["train_neg"], cfg, rng, hard, f0_hz, sets.get("train_noise"))
     mean_t, std_t = torch.tensor(mean, device=device)[:, None], torch.tensor(std, device=device)[:, None]
+    val_pos = held(sets["val_pos"], mean, std, device)
+    val_neg = held(sets["val_neg"] + sets.get("val_hard", []), mean, std, device)
+    val_noise = held(sets["val_noise"], mean, std, device) if "val_noise" in sets else None
     history, losses, side = [], [], []
     print(coverage(cfg, windows) + (side_coverage(cfg, sentences) if sentences else ""), flush=True)
     for name, p in (("positives", windows.real_p), ("hard words", windows.hard_p)):
@@ -386,8 +389,8 @@ def train(
         losses.append(loss.item())
         if step % spec["eval_every"] == 0 or step == spec["steps"]:
             model.eval()
-            val = sweep(model, sets["val_pos"], sets["val_neg"] + sets.get("val_hard", []), mean, std, cfg, device)
-            noise = sweep(model, [], sets["val_noise"], mean, std, cfg, device) if "val_noise" in sets else None
+            val = held_sweep(model, val_pos, val_neg, cfg)
+            noise = held_sweep(model, [], val_noise, cfg) if val_noise is not None else None
             model.train()
             threshold, recall, rate = operating_point(val, cfg["eval"]["false_accepts_per_hour"], noise_sweeps(noise))
             row = {"step": step, "loss": float(np.mean(losses)), "lr": schedule.get_last_lr()[0]}

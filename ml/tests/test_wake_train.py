@@ -202,6 +202,25 @@ def test_a_tiny_run_keeps_its_last_weights_saves_each_evaluated_one_and_its_swee
     assert "ctc_loss" not in plain[-1]
 
 
+def test_a_sweep_of_shards_held_on_the_device_gives_the_figures_of_one_read_from_the_file(tmp_path: Path) -> None:
+    rng = np.random.default_rng(12)
+    cfg = tiny_cfg()
+    around = data.label_hops(cfg["train"]["label_s"])
+    pos = data.load_set(processed(tmp_path / "p", [(60, 20, 40)] * 4, rng, True), True, around, "float32")
+    neg = data.load_set(processed(tmp_path / "n", [(60, 0, 60)] * 4, rng, False), False, around, "float32")
+    torch.manual_seed(12)
+    model = Tcn(BANDS, **cfg["model"]).eval()
+    mean, std = train.band_stats(pos + neg)
+    read = wake_eval.sweep(model, pos, neg, mean, std, cfg, "cpu")
+    on_device = [wake_eval.held(s, mean, std, "cpu") for s in (pos, neg)]
+    kept = wake_eval.held_sweep(model, *on_device, cfg)
+    for name, value in vars(read).items():
+        np.testing.assert_array_equal(getattr(kept, name), value)
+    (off,) = wake_eval.held(neg[:1], mean + 1.0, std, "cpu")
+    file_probs = wake_eval.probabilities(model, neg[0], mean, std, "cpu")
+    assert not np.array_equal(wake_eval.net_probabilities(model, off.inputs), file_probs)
+
+
 def test_hard_windows_take_their_share_hold_the_phrase_and_carry_no_label(tmp_path: Path) -> None:
     rng = np.random.default_rng(4)
     cfg = tiny_cfg()

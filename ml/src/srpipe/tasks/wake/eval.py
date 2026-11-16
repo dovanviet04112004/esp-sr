@@ -45,12 +45,35 @@ class Sweep:
     negative_hours: float
 
 
+@dataclass(frozen=True)
+class HeldShard:
+    """A shard as the net reads it, normalised once and kept on the device: (1, bands, hops)."""
+
+    inputs: torch.Tensor
+    items: list[dict]
+
+
+def normalised(features: np.ndarray, mean: np.ndarray, std: np.ndarray, device: str) -> torch.Tensor:
+    """Features of a shard as the net reads them, each band less its mean over its deviation, on device."""
+    x = (features.astype(np.float32) - mean) / std
+    return torch.from_numpy(x.T[None]).to(device)
+
+
+def held(shards: list[Shard], mean: np.ndarray, std: np.ndarray, device: str) -> list[HeldShard]:
+    """shards normalised and moved to device once, for a set scored at every evaluation of a run."""
+    return [HeldShard(normalised(s.features, mean, std, device), s.items) for s in shards]
+
+
+def net_probabilities(model: torch.nn.Module, inputs: torch.Tensor) -> np.ndarray:
+    """Per-hop probability over normalised inputs in one pass, as the device streams them."""
+    with torch.inference_mode():
+        logits = model(inputs)[0, 0]
+    return torch.sigmoid(logits).float().cpu().numpy()
+
+
 def probabilities(model: torch.nn.Module, shard: Shard, mean: np.ndarray, std: np.ndarray, device: str) -> np.ndarray:
     """Per-hop probability over the whole shard in one pass, as the device streams it."""
-    x = (shard.features.astype(np.float32) - mean) / std
-    with torch.inference_mode():
-        logits = model(torch.from_numpy(x.T[None]).to(device))[0, 0]
-    return torch.sigmoid(logits).float().cpu().numpy()
+    return net_probabilities(model, normalised(shard.features, mean, std, device))
 
 
 def thresholds(spec: dict) -> np.ndarray:
@@ -60,8 +83,8 @@ def thresholds(spec: dict) -> np.ndarray:
     return np.concatenate([coarse, fine])
 
 
-def sweep_scores(
-    score_of: Callable[[Shard], np.ndarray], positives: list[Shard], negatives: list[Shard], cfg: dict, grid_th
+def sweep_scores[S: (Shard, HeldShard)](
+    score_of: Callable[[S], np.ndarray], positives: list[S], negatives: list[S], cfg: dict, grid_th
 ) -> Sweep:
     """Recall and false accepts per hour at each threshold of grid_th, every shard scored whole by score_of: its
     smoothed score per hop on the thresholds' scale."""
@@ -94,6 +117,18 @@ def sweep(model, positives: list[Shard], negatives: list[Shard], mean, std, cfg:
     hops = cfg["eval"]["smooth_hops"]
     return sweep_scores(
         lambda shard: smooth(probabilities(model, shard, mean, std, device), hops),
+        positives,
+        negatives,
+        cfg,
+        thresholds(cfg["eval"]["thresholds"]),
+    )
+
+
+def held_sweep(model, positives: list[HeldShard], negatives: list[HeldShard], cfg: dict) -> Sweep:
+    """sweep on shards that held keeps on the device, the same figures without reading them again."""
+    hops = cfg["eval"]["smooth_hops"]
+    return sweep_scores(
+        lambda shard: smooth(net_probabilities(model, shard.inputs), hops),
         positives,
         negatives,
         cfg,
