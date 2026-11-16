@@ -464,6 +464,18 @@ Boot 195 (bản cộng các hệ, E15-T41), cùng chỗ, chưa anten, boot lúc 
   rớt MQTT ít nhất một lần, và sự kiện lúc rớt bị đếm vào đây. 52 lần có phải hết do đó không thì chưa rõ, vì bộ đếm gộp cả hàng đợi
   `q_event_up` đầy và gửi lỗi (E15-T42). Từ 07:05 UTC con số đứng yên.
 
+### 4.14 Hoạ âm của tiếng bíp ở đầu lời ghi chú (E10-T9, 16/11)
+
+25 lời ghi chú gần nhất của board C (`B193_000012` … `B202_000021`, `raw/images/sr-30eda01e4630/` của data root), bản `aec` học độ
+ghép lúc chạy (§6).
+- 4 lời mở đầu bằng một đợt 4–5 kHz cao hơn chính dải ấy lúc 0,3 s 13–38 dB: `B195_000001`, `B202_000004`, `B202_000018`,
+  `B202_000021`. Ở `B202_000021`, đỉnh 4 500 Hz trong ~60 ms đầu, cao hơn nền ~15 dB; 1 500 Hz chỉ còn một đỉnh yếu (~1 625 Hz,
+  −6 dB) ngay sau; tiếng nói bắt đầu ở ~0,95 s.
+- `contracts/tones.yaml` không có tiếng nào 4,5 kHz; 4 500 Hz = 3 × 1 500 Hz của hai tiếng bíp nhận lệnh, nên đây là hoạ âm bậc 3: loa
+  méo tiếng bíp, `aec` chỉ có tham chiếu là sin sạch nên khử được tần số gốc mà không khử được hoạ âm 🔬 (chưa đo méo của loa).
+- `svc_note` ghi cả hop điếc vào `.WAV`: hop điếc chỉ không tính là nói hay im (KẾ HOẠCH §3.19), nên đuôi tiếng bíp lúc lời ghi chú
+  vừa mở nằm ở đầu file.
+
 ## 5. Loa và tiếng nói (E2-T14, 04/11)
 
 `drv_audio` chạy TX cùng BCLK/WS với RX. `thu_task` đẩy một khối TX sau mỗi khối RX, nên trễ từ đó tới DMA là hằng số; bao nhiêu bước
