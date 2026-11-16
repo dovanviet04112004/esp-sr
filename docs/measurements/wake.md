@@ -1044,3 +1044,6 @@ Lượt đo `20261116_d74dc94-dirty_ffbc12` (cùng cấu hình và dữ liệu v
   0,875, `val` bắt 80,9% (55/68), lời nói 1,33/giờ, nhiễu 2,82/giờ, `test_neg` 3,16/giờ; lượt `8ac386e` có 0,83, 89,7%
   (61/68), 2,57, 2,94 và 4,55. So hai biến thể bằng `val` bắt ở bước cuối thì chênh vài câu trong 68 nằm trong dao động
   giữa hai lượt.
+- Chỗ lệch do nhánh CTC phụ: học 200 bước hai lần từ cùng seed, có CTC thì loss lệch từ bước 4 và trọng số lệch tới
+  0,025; bỏ CTC thì hai lần trùng từng bit. Bật `cudnn.deterministic` vẫn lệch (0,0054): `ctc_loss` lan ngược trên CUDA
+  không tất định.
