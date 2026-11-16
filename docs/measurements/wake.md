@@ -1047,3 +1047,9 @@ Lượt đo `20261116_d74dc94-dirty_ffbc12` (cùng cấu hình và dữ liệu v
 - Chỗ lệch do nhánh CTC phụ: học 200 bước hai lần từ cùng seed, có CTC thì loss lệch từ bước 4 và trọng số lệch tới
   0,025; bỏ CTC thì hai lần trùng từng bit. Bật `cudnn.deterministic` vẫn lệch (0,0054): `ctc_loss` lan ngược trên CUDA
   không tất định.
+- Từ `c8c5f6eb`, `ctc_loss` tính trên CPU và cuDNN chỉ dùng kernel tất định; ở mạng tí hon của test, chỉ chuyển CTC thì
+  trọng số còn lệch 1,5e-8, thêm cờ cuDNN thì 0, và `use_deterministic_algorithms` không báo op nào khác. Hai lượt
+  `train()` 1 000 bước trên `vung1` và `noise3` từ cùng seed: trọng số lệch 0, lịch sử trùng.
+- Giá: mỗi 1 000 bước ổn định 54,2–55,6 s, trước đó 41,8 s. CTC trên CPU một mình 52,6 s; một lần `ctc_loss` xuôi và
+  ngược trên batch phụ (32 câu, 500 bước, 45 lớp) hết 12,2 ms trên CPU, 2,2 ms trên GPU. Một lượt 20 000 bước ước
+  ~1 270 s từ thư mục run tới `model.pt`, chưa chạy đủ.
