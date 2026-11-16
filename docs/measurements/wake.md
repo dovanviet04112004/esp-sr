@@ -1010,3 +1010,15 @@ Int8 của lượt 3 (`make wake-ptq`, `wake-board`, `wake-noise`), chấm như 
 - Ở mọi hàng, phần lớn báo nhầm trên nhiễu `test` đến từ một bản ghi kéo đồ, `dragging_Freesound_validated_221650_0`:
   35 trong 52 lần của `kl`, 283 trong 848 của lượt 6. Bỏ nó, `kl` còn 17 lần trong 14 giờ. Kéo đồ vẫn là chỗ yếu nhất:
   `test` của nhóm chỉ có 2 mẩu.
+
+## 15. Thời gian một lượt học (E11-T57, 16/11)
+
+Lượt `20261113_8ac386e_ffbc12` học 20 000 bước hết 1 423 s; theo giờ ghi checkpoint, mỗi 1 000 bước (gồm một lần chấm
+`val`) hết 40–131 s.
+
+- Một lần chấm như `train` chạy, trên `val_pos`, `val_neg`, `val_hard` 30,8 giờ và `val_noise` 8,2 giờ (8,8 triệu bước,
+  float32 đọc từ file trên ổ E:): lạnh 37,7 s, trong đó đọc file 31,1 s (~1,4 GB, ~45 MB/s), GPU 5,6 s, đếm lần kích ở
+  198 ngưỡng 0,9 s. Khi file đã nằm trong page cache: 5,0 s.
+- Khoảng ngắn nhất giữa hai checkpoint là 40 s, tức khoảng 35 s học cộng một lần chấm ấm. Vậy phần học chiếm khoảng
+  700 s và 20 lần chấm khoảng 720 s, hơn nửa lượt: tập `train` (~5 GB) nằm trong RAM nên page cache không giữ được tập
+  `val` giữa hai lần chấm.
