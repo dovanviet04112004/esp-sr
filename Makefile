@@ -316,11 +316,11 @@ vision-flash: ## Pack the lock's detect row into the vision image and write it t
 ##@ Wake
 
 .PHONY: wake-features wake-train wake-ptq wake-deploy wake-noise-split wake-noise wake-board eval-tts wake-synth
-wake-features: ## Run each file of the wake split through the board simulation into processed/wake (E4-T8)
-	$(ML) --extra praat python -m srpipe.tasks.wake.data simulate
+wake-features: ## Run each file of the wake split through the board simulation into processed/wake [SET="key=value ..."] (E4-T8)
+	$(ML) --extra praat python -m srpipe.tasks.wake.data simulate $(foreach s,$(SET),--set $(s))
 
-wake-train: ## Train the wake TCN on processed/wake/<split> on the GPU into ml/artifacts/wake/runs (E11-T11)
-	$(ML) --extra train python -m srpipe.tasks.wake.train
+wake-train: ## Train the wake TCN on processed/wake/<split> on the GPU into ml/artifacts/wake/runs [SET="key=value ..."] (E11-T11)
+	$(ML) --extra train python -m srpipe.tasks.wake.train $(foreach s,$(SET),--set $(s))
 
 WAKE_QUANT = $(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.wake.quant
 wake-ptq: ## Rung 2 of the wake TCN, each calibration scored as the chip scores, into <run>/int8: RUN=<run> [CALIBRATIONS="kl ..."] (E11-T11)
