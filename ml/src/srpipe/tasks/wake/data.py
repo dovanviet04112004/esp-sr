@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
+import inspect
 import json
 import math
 import multiprocessing
@@ -36,6 +38,7 @@ PUBLIC, SYNTH, BOARD = "public", "synth", "board"
 SPEECH_COMMANDS_STREAM = 3
 NEGATIVES = ("train_neg.txt", "val_neg.txt", "test_neg.txt")
 F0_TABLE = "f0_hz.json"  # beside a build: each item's median F0, null if unvoiced
+UNITS_TABLE = "units.json"  # beside train_neg: lang_vi units of its sentences
 BOARD_SET = "train_board"  # eval.board.train's sessions saying the word
 BOARD_HARD_SET = "train_board_hard"  # its other sessions: hard negatives
 BOARD_SHARD = "shard_00000"
@@ -299,6 +302,42 @@ def sentence_units(clips: list[corpus.Clip], items: set[str], dialect: str) -> d
     return units
 
 
+def units_stamp(dialect: str) -> dict[str, str]:
+    """What a units table depends on: the dialect and the sha256 of the lang_vi rules and code that read it."""
+    digest = hashlib.sha256()
+    for source in (lang_vi, g2p, normalize):
+        digest.update(Path(inspect.getfile(source)).read_bytes())
+    return {"dialect": dialect, "lang_vi_sha256": digest.hexdigest()}
+
+
+def units_table(folder: Path, cfg: dict, paths: dict[str, Path]) -> Path:
+    """folder's UNITS_TABLE: sentence_units of the public items of its build in train.aux.dialect, for the CTC side task
+    (KEHOACH 3.11), so training reads no corpus; a table of the same units_stamp is kept."""
+    out = folder / UNITS_TABLE
+    stamp = units_stamp(cfg["train"]["aux"]["dialect"])
+    if out.exists() and json.loads(out.read_text(encoding="utf-8"))["stamp"] == stamp:
+        return out
+    spoken = set()
+    for listing in sorted(folder.glob("shard_*.items.jsonl")):
+        rows = (json.loads(line) for line in listing.read_text(encoding="utf-8").splitlines())
+        spoken |= {r["item"] for r in rows if r["origin"] == "public"}
+    clips = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
+    units = sentence_units(clips, spoken, stamp["dialect"])
+    out.write_text(json.dumps({"stamp": stamp, "units": units}), encoding="utf-8")
+    return out
+
+
+def read_units(folder: Path, dialect: str) -> dict[str, list[int]]:
+    """The units of folder's UNITS_TABLE, refused when the dialect or lang_vi changed since it was written."""
+    table = folder / UNITS_TABLE
+    if not table.exists():
+        raise FileNotFoundError(f"{table} is missing: make wake-features writes it")
+    body = json.loads(table.read_text(encoding="utf-8"))
+    if body["stamp"] != units_stamp(dialect):
+        raise ValueError(f"{table} was read with another dialect or lang_vi: make wake-features writes it again")
+    return body["units"]
+
+
 def negatives_note(spec: dict) -> str:
     """SPLIT.md's line on a Speech Commands pilot's negatives, as speech_commands_files takes them."""
     earlier = f"lời nói công khai của `wake/{spec['speech_commands']['negatives_from']}`, không mẩu TTS nào"
@@ -535,7 +574,8 @@ def simulate(cfg: dict, paths: dict[str, Path]) -> None:
     """Every file of the split through the board simulation into processed/wake/<split>/<file>, smallest first,
     each as many passes as simulate.repeats asks, train's features stored as simulate.train_dtype and the rest in
     float32, no clean samples kept; a file already built the same way is left as it is. Then each file simulate.f0
-    lists gets its F0_TABLE, and eval.board.train's sessions their cuts, as board_rows sorts them."""
+    lists gets its F0_TABLE, train_neg its UNITS_TABLE when the CTC side task is on, and eval.board.train's sessions
+    their cuts, as board_rows sorts them."""
     spec = cfg["simulate"]
     device_cfg = load_device(cfg["features"])
     for split_file in sorted((paths["splits"] / "wake" / spec["split"]).glob("*.txt"), key=lambda f: f.stat().st_size):
@@ -566,6 +606,8 @@ def simulate(cfg: dict, paths: dict[str, Path]) -> None:
     for name in spec.get("f0", {}).get("sets", []):
         folder = paths["processed"] / "wake" / spec["split"] / name
         print(f0_table(folder, roots, spec["f0"], spec["workers"]), flush=True)
+    if cfg["train"].get("aux", {}).get("weight", 0) > 0:
+        print(units_table(set_folder(paths, cfg, "train_neg"), cfg, paths), flush=True)
     for name, rows in board_rows(cfg, paths).items():
         out, dtype = paths["processed"] / "wake" / spec["split"] / name, spec.get("train_dtype", "float32")
         if rows and board_built_as(out, device_cfg, rows, cfg["split"]["board"], dtype):

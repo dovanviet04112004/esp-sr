@@ -19,7 +19,6 @@ import yaml
 from torch import nn
 from torch.nn import functional
 
-from srpipe.core import screen
 from srpipe.core.config import apply_overrides, data_paths, device_of, load_yaml
 from srpipe.core.logger import row_line
 from srpipe.core.run_dir import create_run_dir
@@ -38,7 +37,7 @@ from srpipe.tasks.wake.data import (
     board_rows,
     label_hops,
     load_set,
-    sentence_units,
+    read_units,
     set_folder,
 )
 from srpipe.tasks.wake.eval import Sweep, checkpoint, held, held_sweep, operating_point, sweep
@@ -469,9 +468,7 @@ def main(argv: list[str] | None = None) -> int:
         split_files += sorted((paths["splits"] / "wake" / cfg["noise"]["split"]).glob("*.txt"))
     units = None
     if cfg["train"].get("aux", {}).get("weight", 0) > 0:
-        spoken = {i["item"] for s in sets["train_neg"] for i in s.items if i["origin"] == "public"}
-        clips = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
-        units = sentence_units(clips, spoken, cfg["train"]["aux"]["dialect"])
+        units = read_units(set_folder(paths, cfg, "train_neg"), cfg["train"]["aux"]["dialect"])
     f0_hz = pitch_tables(root, sets) if cfg["train"].get("f0_balance") else None
     run = create_run_dir(paths["artifacts"], "wake", cfg, split_files)
     model, stats, history = train(cfg, sets, device, units, run, f0_hz)

@@ -1,7 +1,8 @@
 """Wake split: voices follow their speaker's role, clones of speakerless corpora train, negatives never say the wake
 word, test_neg comes only from its corpora less the speakers moved whole into val_neg, train_neg stops at its hours,
-and the extract's clips of the word join the train positives; a build's items get their clip's median F0 once; the
-owner's board sessions saying the word are cut into real positives that end where the word does."""
+and the extract's clips of the word join the train positives; a build's items get their clip's median F0 once, and
+train_neg its sentences' units, refused for another dialect; the owner's board sessions saying the word are cut into
+real positives that end where the word does."""
 
 from __future__ import annotations
 
@@ -140,7 +141,9 @@ def test_simulate_links_a_twin_build_instead_of_running_it_again(tmp_path, monke
     monkeypatch.setattr(data.device, "build", lambda *a, **k: (_ for _ in ()).throw(AssertionError("simulated")))
     paths = {"splits": tmp_path / "splits", "processed": tmp_path / "processed", "raw": tmp_path, "interim": tmp_path}
     unboarded = cfg["eval"] | {"board": cfg["eval"]["board"] | {"train": []}}
-    data.simulate(cfg | {"simulate": {"split": "v2", "workers": 1, "repeats": {}}, "eval": unboarded}, paths)
+    no_side_task = cfg["train"] | {"aux": cfg["train"]["aux"] | {"weight": 0}}
+    run = {"simulate": {"split": "v2", "workers": 1, "repeats": {}}, "eval": unboarded, "train": no_side_task}
+    data.simulate(cfg | run, paths)
     linked = tmp_path / "processed" / "wake" / "v2" / "val_pos" / "shard_00000.features.npy"
     assert linked.stat().st_ino == (built / "shard_00000.features.npy").stat().st_ino
 
@@ -195,6 +198,27 @@ def test_each_items_clean_clip_gets_its_median_f0_once(tmp_path: Path) -> None:
     assert hz["speech/x/voice.wav"] == pytest.approx(150.0, rel=0.02)
     (build / data.F0_TABLE).write_text("{}", encoding="utf-8")
     assert data.f0_table(build, roots, spec, 1).read_text(encoding="utf-8") == "{}"
+
+
+def test_the_units_table_holds_the_public_sentences_and_is_refused_for_another_dialect(tmp_path, monkeypatch) -> None:
+    build = tmp_path / "train_neg"
+    build.mkdir()
+    rows = [{"item": "speech/x/a.wav", "origin": "public"}, {"item": "wake/synth_neg/b.wav", "origin": "synth"}]
+    (build / "shard_00000.items.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+    clips = [corpus.Clip("speech/x/a.wav", text="mở cửa"), corpus.Clip("wake/synth_neg/b.wav", text="bật đèn")]
+    listed = []
+    monkeypatch.setattr(data.screen, "kept_clips", lambda *a: listed.append(1) or clips)
+    cfg = {"train": {"aux": {"dialect": "north"}}}
+    data.units_table(build, cfg, {})
+    units = data.read_units(build, "north")
+    assert units == data.sentence_units(clips, {"speech/x/a.wav"}, "north") and set(units) == {"speech/x/a.wav"}
+    data.units_table(build, cfg, {})
+    assert len(listed) == 1
+    with pytest.raises(ValueError, match="another dialect"):
+        data.read_units(build, "south")
+    (build / data.UNITS_TABLE).unlink()
+    with pytest.raises(FileNotFoundError, match="make wake-features"):
+        data.read_units(build, "north")
 
 
 def test_a_build_counts_as_built_only_in_the_dtype_asked(tmp_path: Path) -> None:
