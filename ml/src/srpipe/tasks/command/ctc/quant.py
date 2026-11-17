@@ -21,7 +21,7 @@ from torch import nn
 from torch.nn import functional
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, ptq_espdl, qat_espdl
-from srpipe.core import corpus, extract, run_dir, screen, splits
+from srpipe.core import corpus, extract, run_dir
 from srpipe.core.config import (
     apply_overrides,
     data_paths,
@@ -39,7 +39,7 @@ from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc import data, qat, train
 from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc import ctc_score
-from srpipe.tasks.wake.data import sentence_units
+from srpipe.tasks.wake.data import read_texts, read_units
 
 LADDER = "command_ctc"
 GRAPH_FILE = "graph.native"
@@ -300,9 +300,7 @@ def bench(cfg: dict, run: Path, hearing: Hearing = LEARNT) -> Bench:
     net = hearing.net(run, paths)
     version = net.cfg["split"]["version"]
     root = paths["processed"] / "command" / version
-    listed = {r.item for r in splits.read_split(paths["splits"] / "command" / version / "test.txt")}
-    clips = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
-    units_of = sentence_units(clips, listed, net.cfg["train"]["dialect"])
+    units_of = read_units(root, data.split_items(paths, version), net.cfg["train"]["dialect"])
     test = train.load_role([root / "test"], units_of, spec["hops"], "float32")
     rng = np.random.default_rng(spec["seed"])
     picks = np.sort(rng.choice(len(test.first), min(spec["test_sentences"], len(test.first)), replace=False))
@@ -555,7 +553,8 @@ def step_thresholds(cfg: dict, run: Path, row: str, hearing: Hearing = LEARNT) -
             c, window = id_of[phrase_of[items[0]]], x[-listen.WINDOW_HOPS :]
             said.setdefault(c, []).append(chip_heard(chip, window))
             outside.append(chip_heard(lacking[c], window))
-    text_of = {c.item: corpus.words(c.text or "") for c in screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")}
+    version, dialect = net.cfg["split"]["version"], net.cfg["train"]["dialect"]
+    text_of = {i: corpus.words(t or "") for i, t in read_texts(root, data.split_items(paths, version), dialect).items()}
     texts = {
         c["id"]: corpus.words(c["text"]) for c in json.loads(command.COMMANDS.read_text(encoding="utf-8"))["commands"]
     }

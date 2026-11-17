@@ -26,7 +26,7 @@ from srpipe.generated import grid, listen
 from srpipe.scenes import device
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc
-from srpipe.tasks.wake.data import sentence_units
+from srpipe.tasks.wake.data import sentence_units, write_units
 
 PUBLIC = "public"
 LEARNING = ("train", "val")
@@ -343,7 +343,8 @@ def simulate(cfg: dict, paths: dict) -> None:
     """Every file of the split into processed/command/<version>/<file>, smallest first, with pitch and without the
     clean samples, train's items each spoken at a speed of simulate.speeds and stored as simulate.train_dtype; with
     simulate.mel_from, the log-mel of that version's build of the file linked and only the pitch written anew
-    (KEHOACH 1.2). A file stopped part way goes on from its finished shards."""
+    (KEHOACH 1.2). A file stopped part way goes on from its finished shards. Then the version gets the UNITS_TABLE of
+    all its split's items, so that training and scoring read no corpus."""
     spec, version = cfg["simulate"], cfg["split"]["version"]
     device_cfg = device_of(cfg)
     folder = paths["splits"] / "command" / version
@@ -363,6 +364,13 @@ def simulate(cfg: dict, paths: dict) -> None:
         out = paths["processed"] / "command" / version / BOARD
         built = board_built_as(out, device_cfg, board_rows(paths), board)
         print(f"{out}: already built" if built else cut_board(cfg, paths, out), flush=True)
+    root = paths["processed"] / "command" / version
+    print(write_units(root, split_items(paths, version), cfg["train"]["dialect"], paths), flush=True)
+
+
+def split_items(paths: dict, version: str) -> set[str]:
+    """Every item of the version's split files, each file's role alike."""
+    return {r.item for f in (paths["splits"] / "command" / version).glob("*.txt") for r in splits.read_split(f)}
 
 
 def main(argv: list[str] | None = None) -> int:

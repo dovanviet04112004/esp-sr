@@ -37,6 +37,7 @@ from srpipe.tasks.wake.data import (
     board_rows,
     label_hops,
     load_set,
+    public_items,
     read_units,
     set_folder,
 )
@@ -468,7 +469,8 @@ def main(argv: list[str] | None = None) -> int:
         split_files += sorted((paths["splits"] / "wake" / cfg["noise"]["split"]).glob("*.txt"))
     units = None
     if cfg["train"].get("aux", {}).get("weight", 0) > 0:
-        units = read_units(set_folder(paths, cfg, "train_neg"), cfg["train"]["aux"]["dialect"])
+        folder = set_folder(paths, cfg, "train_neg")
+        units = read_units(folder, public_items(folder), cfg["train"]["aux"]["dialect"])
     f0_hz = pitch_tables(root, sets) if cfg["train"].get("f0_balance") else None
     run = create_run_dir(paths["artifacts"], "wake", cfg, split_files)
     model, stats, history = train(cfg, sets, device, units, run, f0_hz)

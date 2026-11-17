@@ -35,10 +35,11 @@ from srpipe.scenes import device
 from srpipe.tasks import command
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
+from srpipe.tasks.command.ctc import data as ctc_data
 from srpipe.tasks.command.ctc import train
 from srpipe.tasks.command.ctc.postproc.ctc_score import BLANK
 from srpipe.tasks.command.eval import HOLDS, N_PITCH, held
-from srpipe.tasks.wake.data import sentence_units
+from srpipe.tasks.wake.data import read_units
 from srpipe.tts import CONFIG as TTS_CONFIG
 from srpipe.tts import engines
 
@@ -676,8 +677,8 @@ def places_val(cfg: dict, paths: dict, build: str | None = None) -> train.Senten
     """val of a run's split as its training reads it, from processed/command/<build> in place of the run's own
     version's build when given."""
     version, spec = cfg["split"]["version"], cfg["train"]
-    listed = {r.item for r in splits.read_split(paths["splits"] / "command" / version / "val.txt")}
-    units_of = sentence_units(screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech"), listed, spec["dialect"])
+    root = paths["processed"] / "command" / version
+    units_of = read_units(root, ctc_data.split_items(paths, version), spec["dialect"])
     longest = round(spec["max_s"] * train.HOPS_PER_S)
     return train.load_role([paths["processed"] / "command" / (build or version) / "val"], units_of, longest, "float32")
 

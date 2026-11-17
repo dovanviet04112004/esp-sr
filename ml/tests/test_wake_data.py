@@ -200,25 +200,28 @@ def test_each_items_clean_clip_gets_its_median_f0_once(tmp_path: Path) -> None:
     assert data.f0_table(build, roots, spec, 1).read_text(encoding="utf-8") == "{}"
 
 
-def test_the_units_table_holds_the_public_sentences_and_is_refused_for_another_dialect(tmp_path, monkeypatch) -> None:
+def test_the_units_table_holds_its_items_and_is_refused_for_other_items_or_dialect(tmp_path, monkeypatch) -> None:
     build = tmp_path / "train_neg"
     build.mkdir()
     rows = [{"item": "speech/x/a.wav", "origin": "public"}, {"item": "wake/synth_neg/b.wav", "origin": "synth"}]
     (build / "shard_00000.items.jsonl").write_text("\n".join(json.dumps(r) for r in rows), encoding="utf-8")
-    clips = [corpus.Clip("speech/x/a.wav", text="mở cửa"), corpus.Clip("wake/synth_neg/b.wav", text="bật đèn")]
+    clips = [corpus.Clip("speech/x/a.wav", text="mở cửa"), corpus.Clip("speech/x/c.wav", text="bật đèn")]
     listed = []
     monkeypatch.setattr(data.screen, "kept_clips", lambda *a: listed.append(1) or clips)
-    cfg = {"train": {"aux": {"dialect": "north"}}}
-    data.units_table(build, cfg, {})
-    units = data.read_units(build, "north")
-    assert units == data.sentence_units(clips, {"speech/x/a.wav"}, "north") and set(units) == {"speech/x/a.wav"}
-    data.units_table(build, cfg, {})
+    items = data.public_items(build)
+    assert items == {"speech/x/a.wav"}
+    data.write_units(build, items, "north", {})
+    assert data.read_units(build, items, "north") == data.sentence_units(clips, items, "north")
+    assert data.read_texts(build, items, "north") == {"speech/x/a.wav": "mở cửa"}
+    data.write_units(build, items, "north", {})
     assert len(listed) == 1
-    with pytest.raises(ValueError, match="another dialect"):
-        data.read_units(build, "south")
+    with pytest.raises(ValueError, match="other items, dialect"):
+        data.read_units(build, items, "south")
+    with pytest.raises(ValueError, match="other items, dialect"):
+        data.read_units(build, items | {"speech/x/c.wav"}, "north")
     (build / data.UNITS_TABLE).unlink()
-    with pytest.raises(FileNotFoundError, match="make wake-features"):
-        data.read_units(build, "north")
+    with pytest.raises(FileNotFoundError, match="features step"):
+        data.read_units(build, items, "north")
 
 
 def test_a_build_counts_as_built_only_in_the_dtype_asked(tmp_path: Path) -> None:

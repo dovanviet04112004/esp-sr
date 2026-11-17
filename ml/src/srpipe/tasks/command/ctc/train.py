@@ -19,7 +19,7 @@ import torch
 import yaml
 from torch.nn import functional
 
-from srpipe.core import screen, splits
+from srpipe.core import splits
 from srpipe.core.config import apply_overrides, data_paths, front_of, load_run_config, load_yaml
 from srpipe.core.logger import row_line
 from srpipe.core.run_dir import create_run_dir, pause_asked
@@ -33,7 +33,7 @@ from srpipe.tasks.command.ctc import data as built
 from srpipe.tasks.command.ctc.model import encoder
 from srpipe.tasks.command.ctc.postproc.ctc_score import BLANK
 from srpipe.tasks.command.rnnt.model import transducer
-from srpipe.tasks.wake.data import sentence_units
+from srpipe.tasks.wake.data import read_units
 
 BRANCH = "command_ctc"
 HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
@@ -679,9 +679,7 @@ def load_sets(cfg: dict) -> dict:
     split_files = sorted(folder.glob("*.txt"))
     root = paths["processed"] / "command" / version
     roles = {"train": [f for f in split_files if splits.role_of(f.name) == "train"], "val": [folder / "val.txt"]}
-    listed = {r.item for files in roles.values() for f in files for r in splits.read_split(f)}
-    clips = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
-    units_of = sentence_units(clips, listed, spec["dialect"])
+    units_of = read_units(root, built.split_items(paths, version), spec["dialect"])
     longest = round(spec["max_s"] * HOPS_PER_S)
     dims = encoder.n_dims(cfg)
     capacity = int(spec["pool_gb"] * GB // (dims * np.dtype(POOL_DTYPE).itemsize))

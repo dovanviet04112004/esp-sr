@@ -302,40 +302,56 @@ def sentence_units(clips: list[corpus.Clip], items: set[str], dialect: str) -> d
     return units
 
 
-def units_stamp(dialect: str) -> dict[str, str]:
-    """What a units table depends on: the dialect and the sha256 of the lang_vi rules and code that read it."""
-    digest = hashlib.sha256()
+def units_stamp(items: set[str], dialect: str) -> dict[str, str]:
+    """What a units table depends on: its items, the dialect, and the lang_vi rules and code that read them."""
+    rules = hashlib.sha256()
     for source in (lang_vi, g2p, normalize):
-        digest.update(Path(inspect.getfile(source)).read_bytes())
-    return {"dialect": dialect, "lang_vi_sha256": digest.hexdigest()}
+        rules.update(Path(inspect.getfile(source)).read_bytes())
+    listed = hashlib.sha256("\n".join(sorted(items)).encode("utf-8")).hexdigest()
+    return {"items_sha256": listed, "dialect": dialect, "lang_vi_sha256": rules.hexdigest()}
 
 
-def units_table(folder: Path, cfg: dict, paths: dict[str, Path]) -> Path:
-    """folder's UNITS_TABLE: sentence_units of the public items of its build in train.aux.dialect, for the CTC side task
-    (KEHOACH 3.11), so training reads no corpus; a table of the same units_stamp is kept."""
+def write_units(folder: Path, items: set[str], dialect: str, paths: dict[str, Path]) -> Path:
+    """folder's UNITS_TABLE: the text of each of items with one and its sentence_units in dialect, so that training and
+    scoring read no corpus (KEHOACH 3.11, 3.12); a table of the same units_stamp is kept."""
     out = folder / UNITS_TABLE
-    stamp = units_stamp(cfg["train"]["aux"]["dialect"])
+    stamp = units_stamp(items, dialect)
     if out.exists() and json.loads(out.read_text(encoding="utf-8"))["stamp"] == stamp:
         return out
-    spoken = set()
-    for listing in sorted(folder.glob("shard_*.items.jsonl")):
-        rows = (json.loads(line) for line in listing.read_text(encoding="utf-8").splitlines())
-        spoken |= {r["item"] for r in rows if r["origin"] == "public"}
-    clips = screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech")
-    units = sentence_units(clips, spoken, stamp["dialect"])
-    out.write_text(json.dumps({"stamp": stamp, "units": units}), encoding="utf-8")
+    clips = [c for c in screen.kept_clips(load_yaml(screen.CONFIG), paths, "speech") if c.item in items]
+    body = {"stamp": stamp, "units": sentence_units(clips, items, dialect), "text": {c.item: c.text for c in clips}}
+    out.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
     return out
 
 
-def read_units(folder: Path, dialect: str) -> dict[str, list[int]]:
-    """The units of folder's UNITS_TABLE, refused when the dialect or lang_vi changed since it was written."""
+def units_body(folder: Path, items: set[str], dialect: str) -> dict:
+    """folder's UNITS_TABLE, refused when its items, the dialect or lang_vi differ from when it was written."""
     table = folder / UNITS_TABLE
     if not table.exists():
-        raise FileNotFoundError(f"{table} is missing: make wake-features writes it")
+        raise FileNotFoundError(f"{table} is missing: its features step writes it")
     body = json.loads(table.read_text(encoding="utf-8"))
-    if body["stamp"] != units_stamp(dialect):
-        raise ValueError(f"{table} was read with another dialect or lang_vi: make wake-features writes it again")
-    return body["units"]
+    if body["stamp"] != units_stamp(items, dialect):
+        raise ValueError(f"{table} was read from other items, dialect or lang_vi: its features step writes it again")
+    return body
+
+
+def read_units(folder: Path, items: set[str], dialect: str) -> dict[str, list[int]]:
+    """The lang_vi units of folder's UNITS_TABLE by item."""
+    return units_body(folder, items, dialect)["units"]
+
+
+def read_texts(folder: Path, items: set[str], dialect: str) -> dict[str, str | None]:
+    """The corpus text of folder's UNITS_TABLE by item."""
+    return units_body(folder, items, dialect)["text"]
+
+
+def public_items(folder: Path) -> set[str]:
+    """The items of a build that came from a public corpus."""
+    items = set()
+    for listing in sorted(folder.glob("shard_*.items.jsonl")):
+        rows = (json.loads(line) for line in listing.read_text(encoding="utf-8").splitlines())
+        items |= {r["item"] for r in rows if r["origin"] == "public"}
+    return items
 
 
 def negatives_note(spec: dict) -> str:
@@ -607,7 +623,8 @@ def simulate(cfg: dict, paths: dict[str, Path]) -> None:
         folder = paths["processed"] / "wake" / spec["split"] / name
         print(f0_table(folder, roots, spec["f0"], spec["workers"]), flush=True)
     if cfg["train"].get("aux", {}).get("weight", 0) > 0:
-        print(units_table(set_folder(paths, cfg, "train_neg"), cfg, paths), flush=True)
+        folder = set_folder(paths, cfg, "train_neg")
+        print(write_units(folder, public_items(folder), cfg["train"]["aux"]["dialect"], paths), flush=True)
     for name, rows in board_rows(cfg, paths).items():
         out, dtype = paths["processed"] / "wake" / spec["split"] / name, spec.get("train_dtype", "float32")
         if rows and board_built_as(out, device_cfg, rows, cfg["split"]["board"], dtype):
