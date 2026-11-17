@@ -251,16 +251,20 @@ máy khác: đáp ứng của micro là một phần của miền dữ liệu.
 ### 1.4 Giấy phép và dữ liệu cá nhân
 
 Tiếng nói ghi được của một người là **dữ liệu cá nhân** (Nghị định 13/2023/NĐ-CP; Luật Bảo vệ dữ liệu
-cá nhân 2025, hiệu lực 01/01/2026 🔬 kiểm điều khoản áp dụng ở E11-T2). Bốn luật:
+cá nhân 2025, hiệu lực 01/01/2026 🔬 kiểm điều khoản áp dụng ở E11-T2). Năm luật:
 
 1. **Phiếu đồng ý trước khi thu.** Không có phiếu thì không thu, kể cả thu thử.
 2. **Mã hoá người nói.** Tên thật chỉ nằm trong một bảng ngoài repo; mọi file dùng mã `spk_NNN`.
 3. **Bản thu không vào git** (CLAUDE.md §6). Chỉ `ml/data/manifests/` và `ml/data/splits/` vào git (§4.4.1).
 4. **Xoá được theo yêu cầu.** Mã người nói trỏ được tới mọi file của người đó, nên xoá là một lệnh.
+5. **Chỉ hai nơi giữ bản thu và đặc trưng dựng từ chúng:** thư mục dữ liệu của máy phát triển (`SRPIPE_DATA_ROOT`,
+   §4.4.1), và bản sao ở `/data/ext/esp-sr/data` của máy chủ huấn luyện trong công ty (CadPro ML, dự án âm thanh ESP_SR),
+   nơi job chạy lệnh `make` của repo ở một commit đã chọn; chỉ thành viên dự án ấy được đọc (chủ repo 17/11). Dịch vụ
+   ngoài công ty (Colab, Kaggle…) không giữ chúng. Xoá theo luật 4 là xoá ở cả hai nơi.
 
 Embedding giọng và mẫu giọng của một người là **dữ liệu sinh trắc**, loại dữ liệu cá nhân nhạy cảm 🔬 (kiểm ở E11-T2).
-Chỉ tính khi phiếu đồng ý của người ấy ghi mục đích nhận diện người nói; không bao giờ vào git; xoá cùng bản thu theo mã
-người nói. Embedding của khảo sát nằm ở `cache/`; mẫu giọng của đường máy chủ ở thư mục dữ liệu ngoài repo của host, của
+Chỉ tính khi phiếu đồng ý của người ấy ghi mục đích nhận diện người nói; không bao giờ vào git, không lên máy chủ huấn
+luyện; xoá cùng bản thu theo mã người nói. Embedding của khảo sát nằm ở `cache/`; mẫu giọng của đường máy chủ ở thư mục dữ liệu ngoài repo của host, của
 đường chip trên flash của board (§3.17).
 
 Giấy phép **lan sang mô hình**: model huấn luyện trên VIVOS mang ràng buộc phi thương mại của VIVOS.
