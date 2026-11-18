@@ -332,8 +332,8 @@ wake-deploy: ## Lock a ladder row of the wake, its threshold and smoothing, into
 wake-noise-split: ## Give the household noise clips of wake.yaml's noise block roles by source recording into data/splits/wake (E11-T56)
 	$(ML) python -m srpipe.tasks.wake.data noise-split
 
-wake-noise: ## False accepts of a wake row on household noise alone, as the chip scores: RUN=<run> ROW=<row> (E11-T55)
-	$(WAKE_QUANT) noise $(RUN) --row $(ROW)
+wake-noise: ## False accepts of a wake row on household noise alone, as the chip scores: RUN=<run> ROW=<row> [TH=<permille>] (E11-T55)
+	$(WAKE_QUANT) noise $(RUN) --row $(ROW) $(if $(TH),--threshold $(TH))
 
 wake-board: ## Score a wake row as the chip does on the board sessions the run did not learn: RUN=<run> ROW=<row> [TH=<permille>] (KEHOACH 1.3)
 	$(WAKE_QUANT) board $(RUN) --row $(ROW) $(if $(TH),--threshold $(TH))
