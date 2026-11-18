@@ -1010,6 +1010,9 @@ Int8 của lượt 3 (`make wake-ptq`, `wake-board`, `wake-noise`), chấm như 
 - Ở mọi hàng, phần lớn báo nhầm trên nhiễu `test` đến từ một bản ghi kéo đồ, `dragging_Freesound_validated_221650_0`:
   35 trong 52 lần của `kl`, 283 trong 848 của lượt 6. Bỏ nó, `kl` còn 17 lần trong 14 giờ. Kéo đồ vẫn là chỗ yếu nhất:
   `test` của nhóm chỉ có 2 mẩu.
+- 18/11 chủ repo hạ ngưỡng của board C xuống 800‰ (NVS `kws/wake_th`, giữ qua khởi động tới khi ảnh model đề xuất ngưỡng
+  khác). `make wake-board ROW=kl TH=800`: 33/35 câu, 0 lần thức trên 66 phiên khác (1,13 giờ), như ở 830‰; hai câu sót có
+  điểm 0,33 và 0,06, dưới cả hai ngưỡng. Nhiễu `test` ở 800‰ chưa chấm 🔬.
 
 ## 15. Thời gian một lượt học (E11-T57, 16/11)
 
