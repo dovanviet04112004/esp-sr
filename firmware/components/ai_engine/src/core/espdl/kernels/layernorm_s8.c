@@ -1,6 +1,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "espdl_chip_kernels.h"
 #include "espdl_kernels.hpp"
 
 enum { kLanes = 2 };
@@ -89,11 +90,7 @@ void ai_engine_ln_outputs_s8(int8_t *y, const float *dev, const float *scales, c
                 float t = gb[2 * c] * scale;
                 t = t * dev[(p * n + c) * kLanes + k];
                 t = t + gb[2 * c + 1];
-                t = t + 0.5f;
-                const float whole = floorf(t);
-                y[(kLanes * p + k) * n + c] = (int8_t)(whole > 127.0f    ? 127
-                                                       : whole < -128.0f ? -128
-                                                                         : (int)whole);
+                y[(kLanes * p + k) * n + c] = chip_to_s8(t);
             }
         }
     }

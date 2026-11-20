@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include <math.h>
 #include <stdint.h>
 
 #define CHIP_QACC_BITS 20
@@ -55,6 +56,25 @@ static inline int16_t chip_sat16(int32_t v)
 static inline int8_t chip_round(int32_t acc, int less)
 {
     return chip_sat8(chip_qacc((int64_t)(acc >> less) + 1) >> 1);
+}
+
+/** v to int8 as esp-dl's tool::round does on the S3: floor of the float sum v + 0.5, clipped.
+ *  @ctx any | non-blocking
+ */
+static inline int8_t chip_to_s8(float v)
+{
+    const float whole = floorf(v + 0.5f);
+    return (int8_t)(whole > 127.0f ? 127 : whole < -128.0f ? -128 : (int)whole);
+}
+
+/** A probability times its scale, v >= 0, to int8 as softmax_s8_esp32s3.S gives it: v + 0.5 truncated, at
+ * most 127.
+ *  @ctx any | non-blocking
+ */
+static inline int8_t chip_probability_to_s8(float v)
+{
+    const int32_t whole = (int32_t)(v + 0.5f);
+    return (int8_t)(whole < INT8_MAX ? whole : INT8_MAX);
 }
 
 static inline int8_t chip_adds8(int8_t a, int8_t b)

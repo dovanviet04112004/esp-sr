@@ -244,13 +244,13 @@ void LayerNormRows::run_position(const int8_t *x, int8_t *y) const noexcept
         const float r1 = gamma_[j + 1] * scale * d[j + 1] + beta_[j + 1];
         const float r2 = gamma_[j + 2] * scale * d[j + 2] + beta_[j + 2];
         const float r3 = gamma_[j + 3] * scale * d[j + 3] + beta_[j + 3];
-        y[j] = round_half_up(r0 * out_rescale_);
-        y[j + 1] = round_half_up(r1 * out_rescale_);
-        y[j + 2] = round_half_up(r2 * out_rescale_);
-        y[j + 3] = round_half_up(r3 * out_rescale_);
+        y[j] = round_to_s8(r0 * out_rescale_);
+        y[j + 1] = round_to_s8(r1 * out_rescale_);
+        y[j + 2] = round_to_s8(r2 * out_rescale_);
+        y[j + 3] = round_to_s8(r3 * out_rescale_);
     }
     for (; j < n_; j++) {
-        y[j] = round_half_up((gamma_[j] * scale * d[j] + beta_[j]) * out_rescale_);
+        y[j] = round_to_s8((gamma_[j] * scale * d[j] + beta_[j]) * out_rescale_);
     }
 }
 

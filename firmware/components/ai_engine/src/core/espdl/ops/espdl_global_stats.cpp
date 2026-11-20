@@ -45,7 +45,7 @@ int8_t mean_like_espdl(int32_t sum, int count, int in_exponent, int out_exponent
 {
     const float v = static_cast<float>(sum) * DL_SCALE(in_exponent) / static_cast<float>(count) *
                     DL_RESCALE(out_exponent);
-    return round_half_up(v);
+    return round_to_s8(v);
 }
 
 // Input as esp_ppq_patches.global_stats_from writes it: x [1, T, C]; outputs the mean [1, 1, C] and the mean
@@ -93,7 +93,7 @@ class GlobalStats final : public dl::module::Module {
             }
             for (int c = g; c < end; c++) {
                 means[c] = mean_like_espdl(sums_[c], frames_, x->get_exponent(), mean->get_exponent());
-                centre_[c] = clip(shift > 0 ? (means[c] + (1 << (shift - 1))) >> shift : means[c]);
+                centre_[c] = shift > 0 ? shift_round_to_s8(means[c], shift) : clip(means[c]);
                 sums_[c] = 0;
             }
             for (int t = 0; t < frames_; t++) {

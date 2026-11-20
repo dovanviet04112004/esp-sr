@@ -15,6 +15,7 @@
 #include "dl_tool.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "espdl_chip.hpp"
 #include "fbs_model.hpp"
 
 namespace ai {
@@ -30,13 +31,6 @@ constexpr int kTableOffset = 128; // esp-dl's gen_lut_8bit: entry i is exp(s * (
 constexpr int kStrip = 8;         // columns softmax_s8_esp32s3.S takes at once
 constexpr int kGroup = 64;        // columns sharing one 64-byte cache line of a row
 constexpr int kRowLanes = 4;      // rows softmax_row_sums takes at once
-
-// esp-dl's floor(v + 0.5) in double, for the v >= 0 a probability gives, then its int8 clip: below 2^22 the
-// float sum v + 0.5 rounds to no other integer part, so truncating it floors it.
-int8_t round_half_up(float v) noexcept
-{
-    return static_cast<int8_t>(std::min(static_cast<int>(v + 0.5f), static_cast<int>(INT8_MAX)));
-}
 
 // Input esp-dl's int8 Softmax input, or after softmax_scale_from the map it scaled and the int8 products by
 // byte on the Softmax's exponent; output the int8 tensor its QuantizeLinear wrote, on that node's exponent.
@@ -243,7 +237,7 @@ void softmax_block_s8(const int8_t *x, int8_t *y, int len, int inner, const floa
         const uint8_t *row = in + i * inner;
         int8_t *out = y + i * inner;
         for (int k = strips; k < inner; k++) {
-            out[k] = round_half_up(table[row[k]] * scales[k]);
+            out[k] = round_probability_to_s8(table[row[k]] * scales[k]);
         }
     }
 }

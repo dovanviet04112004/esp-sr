@@ -1,3 +1,4 @@
+#include "espdl_chip_kernels.h"
 #include "espdl_kernels.hpp"
 
 enum { kColumns = 8, kRows = 4 };
@@ -18,9 +19,7 @@ void ai_engine_softmax_norm_s8(int8_t *y, const int8_t *x, const float *table, c
 {
     for (int r = 0; r < rows; r++) {
         for (int c = 0; c < kColumns; c++) {
-            const float scaled = table[(uint8_t)x[r * strides[0] + c]] * scales[c];
-            const int32_t whole = (int32_t)(scaled + 0.5f);
-            y[r * strides[1] + c] = (int8_t)(whole < INT8_MAX ? whole : INT8_MAX);
+            y[r * strides[1] + c] = chip_probability_to_s8(table[(uint8_t)x[r * strides[0] + c]] * scales[c]);
         }
     }
 }

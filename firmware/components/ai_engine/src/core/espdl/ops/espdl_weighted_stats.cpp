@@ -16,6 +16,7 @@
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "espdl_chip.hpp"
 #include "fbs_model.hpp"
 
 namespace ai {
@@ -37,14 +38,6 @@ constexpr int kNoSoftmax = INT32_MIN; // prob_exponent when p comes in as it is
 
 enum Input { kWeights = 0, kX, kInputs };
 enum Shift { kShiftSquare = 0, kShiftWeighted, kShiftWeightedSquare, kShiftSum, kShiftSquareSum };
-
-// esp-dl's tool::shift_and_round_half_up then its int8 truncation.
-int8_t shift_round(int32_t value, int shift) noexcept
-{
-    int32_t shifted = shift > 0 ? (value + (1 << (shift - 1))) >> shift : value << -shift;
-    return static_cast<int8_t>(
-        std::max(std::min(shifted, static_cast<int32_t>(INT8_MAX)), static_cast<int32_t>(INT8_MIN)));
-}
 
 // Inputs as esp_ppq_patches.weighted_stats_from writes them: weights p, or the scores softmax_into took them
 // from, and map x, [1, T, C] each; outputs the sums over T of both products, [1, C] each.
@@ -91,8 +84,8 @@ class WeightedStats final : public dl::module::Module {
         int8_t *squared = context->get_tensor(m_outputs_index[1])->get_element_ptr<int8_t>();
         for (int c = 0; c < channels_; c++) {
             const int16_t *group = sums_ + (c / kStep) * kGroupSums + c % kStep;
-            weighted[c] = shift_round(group[0], shifts_[kShiftSum]);
-            squared[c] = shift_round(group[kStep], shifts_[kShiftSquareSum]);
+            weighted[c] = shift_round_to_s8(group[0], shifts_[kShiftSum]);
+            squared[c] = shift_round_to_s8(group[kStep], shifts_[kShiftSquareSum]);
         }
     }
 

@@ -248,7 +248,7 @@ class GroupNormS8 final : public dl::module::Module {
             int8_t *table = tables_ + (g0 + k) * kTableSize;
             for (int v = INT8_MIN; v <= INT8_MAX; v++) {
                 table[static_cast<uint8_t>(v)] =
-                    round_half_up((gs * (static_cast<float>(v) - mean) + beta_) * norm_rescale_);
+                    round_to_s8((gs * (static_cast<float>(v) - mean) + beta_) * norm_rescale_);
             }
         }
     }

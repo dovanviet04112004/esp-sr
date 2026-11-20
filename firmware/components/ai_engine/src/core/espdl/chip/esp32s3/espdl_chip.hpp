@@ -50,16 +50,35 @@ inline float divide(float a, float b) noexcept
     return q;
 }
 
-/** esp-dl's floor(v + 0.5) in double then its int8 clip: below 2^22 the float sum v + 0.5 rounds to no other
- *  integer part, and the FPU's floor saturates beyond int.
+/** v to int8 as esp-dl's tool::round does on the S3, floor(v + 0.5) in double then its int8 clip: below 2^22
+ * the float sum v + 0.5 rounds to no other integer part, and the FPU's floor saturates beyond int.
  *  @ctx any | non-blocking
  */
-inline int8_t round_half_up(float v) noexcept
+inline int8_t round_to_s8(float v) noexcept
 {
     int whole;
     asm("floor.s %0, %1, 0" : "=a"(whole) : "f"(v + 0.5f));
     return static_cast<int8_t>(
         std::max(std::min(whole, static_cast<int>(INT8_MAX)), static_cast<int>(INT8_MIN)));
+}
+
+/** A probability times its scale, v >= 0, to int8 as the S3's QuantizeLinear after a Softmax gives it: below
+ * 2^22 the float sum v + 0.5 rounds to no other integer part, so truncating it floors it.
+ *  @ctx any | non-blocking
+ */
+inline int8_t round_probability_to_s8(float v) noexcept
+{
+    return static_cast<int8_t>(std::min(static_cast<int>(v + 0.5f), static_cast<int>(INT8_MAX)));
+}
+
+/** value * 2^-shift to int8 as esp-dl's tool::shift_and_round does on the S3, half up, then its int8 clip.
+ *  @ctx any | non-blocking
+ */
+inline int8_t shift_round_to_s8(int32_t value, int shift) noexcept
+{
+    int32_t shifted = shift > 0 ? (value + (1 << (shift - 1))) >> shift : value << -shift;
+    return static_cast<int8_t>(
+        std::max(std::min(shifted, static_cast<int32_t>(INT8_MAX)), static_cast<int32_t>(INT8_MIN)));
 }
 
 } // namespace ai
