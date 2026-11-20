@@ -189,7 +189,7 @@ def drawn_cleans(paths: dict, build: str, files: list[str], count: int, rng: np.
     sims, out = {}, []
     for j in sorted(rng.choice(len(sessions), count, replace=False)):
         name, k, rows = sessions[j]
-        sim = sims.setdefault(name, simulation(built_of[name], paths))
+        sim = sims.setdefault(name, simulation(built_of[name], paths, with_pitch=False))
         captured, _, draws, _ = device.simulate_session(
             sim.cfg, k, rows, sim.bank, sim.mics, sim.pools, sim.readers, sim.floor, sim.speeds
         )

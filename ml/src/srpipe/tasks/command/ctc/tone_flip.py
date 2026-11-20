@@ -96,11 +96,11 @@ class Simulation:
     readers: dict[str, ItemReader]
     chain_cfg: ChainConfig
     mel: Mel
-    pitch: Callable[[np.ndarray], np.ndarray]
+    pitch: Callable[[np.ndarray], np.ndarray] | None
 
 
-def simulation(built: dict, paths: dict) -> Simulation:
-    """The simulation of a build by its manifest."""
+def simulation(built: dict, paths: dict, with_pitch: bool = True) -> Simulation:
+    """The simulation of a build by its manifest; without its pitch tracker for a caller that hears no pitch."""
     cfg, interim = built["config"], paths["interim"]
     mics = device.load_microphones(cfg["microphone"])
     floor_cfg = cfg["microphone"].get("floor")
@@ -116,7 +116,7 @@ def simulation(built: dict, paths: dict) -> Simulation:
         {"raw": ItemReader(paths["raw"]), "interim": ItemReader(interim)},
         ChainConfig(balance_gains=mics.gains),
         Mel(MelConfig(**cfg["features"])),
-        device.pitch_of(cfg["pitch"]),
+        device.pitch_of(cfg["pitch"]) if with_pitch else None,
     )
 
 
