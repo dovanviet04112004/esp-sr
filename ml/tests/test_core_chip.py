@@ -52,3 +52,30 @@ def test_a_run_for_another_chip_never_takes_the_s3s_name(tmp_path: Path, monkeyp
     assert s3.name != s31.name
     assert "chip" not in yaml.safe_load((s3 / "config.resolved.yaml").read_text(encoding="utf-8"))
     assert yaml.safe_load((s31 / "config.resolved.yaml").read_text(encoding="utf-8"))["chip"] == "esp32s31"
+
+
+def test_a_build_heard_on_another_chips_pitch_row_records_that_chip(monkeypatch: pytest.MonkeyPatch) -> None:
+    from srpipe.scenes import device
+
+    on_row = {"pitch": {"source": "swiftf0", "int8": {"run": "r", "row": "kl"}}}
+    on_float = {"pitch": {"source": "swiftf0"}}
+    monkeypatch.delenv(config.CHIP_ENV, raising=False)
+    assert device.heard_chip(on_row, pitch=True) == {}
+    monkeypatch.setenv(config.CHIP_ENV, "esp32s31")
+    assert device.heard_chip(on_row, pitch=True) == {"chip": "esp32s31"}
+    assert device.heard_chip(on_float, pitch=True) == {}
+    assert device.heard_chip(on_row, pitch=False) == {}
+
+
+def test_a_rebuild_on_another_chips_row_never_takes_the_s3s_folder(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("esp_ppq")
+    from srpipe.tasks.pitch import quant
+
+    paths = {"processed": Path("p")}
+    monkeypatch.delenv(config.CHIP_ENV, raising=False)
+    s3 = quant.rebuilt_root(paths, "v9", "kl", stream=True)
+    on_float = quant.rebuilt_root(paths, "v9", quant.FLOAT_ROW)
+    monkeypatch.setenv(config.CHIP_ENV, "esp32s31")
+    assert s3 == Path("p/command/v9_resim_kl_stream")
+    assert quant.rebuilt_root(paths, "v9", "kl", stream=True) == Path("p/command/v9_resim_kl_esp32s31_stream")
+    assert quant.rebuilt_root(paths, "v9", quant.FLOAT_ROW) == on_float

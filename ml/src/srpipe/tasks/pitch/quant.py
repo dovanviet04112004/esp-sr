@@ -23,7 +23,16 @@ from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
 from srpipe.compress.quant.espdl_shapes import attribute
 from srpipe.core import run_dir, splits
 from srpipe.core.audio_io import to_float
-from srpipe.core.config import CONFIGS, ML_ROOT, contract_front, data_paths, int8_dir, load_yaml
+from srpipe.core.config import (
+    CONFIGS,
+    ML_ROOT,
+    chip,
+    chip_is_default,
+    contract_front,
+    data_paths,
+    int8_dir,
+    load_yaml,
+)
 from srpipe.dsp.spec import swift_front
 from srpipe.export import update_lock
 from srpipe.generated import grid, listen
@@ -280,8 +289,10 @@ def ptq(cfg: dict, run: Path, paths: dict, calibrations: list[str] | None = None
 
 def rebuilt_root(paths: dict, build: str, row: str, stream: bool = False) -> Path:
     """Where rebuild writes the files of a command build heard on a row of the pitch ladder, or on swift-f0 itself,
-    its pitch dims streaming as the chip computes them when stream."""
-    return paths["processed"] / "command" / f"{build}_resim_{row}{STREAM_SUFFIX if stream else ''}"
+    its pitch dims streaming as the chip computes them when stream; a row of a chip other than chip.yaml's default
+    carries that chip's name (KEHOACH 3.14)."""
+    of_chip = "" if row == FLOAT_ROW or chip_is_default() else f"_{chip()['name']}"
+    return paths["processed"] / "command" / f"{build}_resim_{row}{of_chip}{STREAM_SUFFIX if stream else ''}"
 
 
 def rebuild(

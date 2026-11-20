@@ -28,7 +28,7 @@ from scipy import signal
 
 from srpipe.core import screen, splits
 from srpipe.core.audio_io import ItemReader, ramped, read_wav, to_float, write_wav
-from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, load_device
+from srpipe.core.config import CONFIGS, ML_ROOT, chip, chip_is_default, data_paths, load_device
 from srpipe.dsp.afe import hpf
 from srpipe.dsp.afe.chain import PCM_FULL_SCALE, PCM_MAX, PCM_MIN, Chain, ChainConfig
 from srpipe.dsp.afe.vad import Vad
@@ -752,6 +752,12 @@ def _shard(job: tuple) -> list[Path]:
     return shard_files(out, shard, pitch is not None, keep_pcm)
 
 
+def heard_chip(cfg: dict, pitch: bool) -> dict:
+    """build.yaml's chip: one other than chip.yaml's default when the pitch dims come from its int8 row, so that no
+    build of one chip goes on from another's (KEHOACH 3.14)."""
+    return {"chip": chip()["name"]} if pitch and cfg["pitch"].get("int8") and not chip_is_default() else {}
+
+
 def build(
     cfg: dict,
     split_file: Path,
@@ -802,6 +808,7 @@ def build(
         "repeats": repeats,
         **({"pads_s": list(pads)} if pads_s else {}),
         **({"pitch": True} if pitch else {}),
+        **heard_chip(cfg, pitch),
         **({} if keep_pcm else {"pcm": False}),
         **({"speeds": list(speeds)} if speeds else {}),
         **({"dtype": dtype} if dtype != "float32" else {}),
@@ -811,7 +818,9 @@ def build(
     }
     if mel_from is not None:
         reused = yaml.safe_load((mel_from / "build.yaml").read_text(encoding="utf-8"))
-        unlike = {k for k in head.keys() | reused.keys() if k != "config" and head.get(k) != reused.get(k)}
+        unlike = {
+            k for k in head.keys() | reused.keys() if k not in {"config", "chip"} and head.get(k) != reused.get(k)
+        }
         unlike |= {
             k for k in cfg.keys() | reused["config"].keys() if k != "pitch" and cfg.get(k) != reused["config"].get(k)
         }
