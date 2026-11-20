@@ -153,7 +153,7 @@ int roundings_apart()
     for (int i = 0; i < kFloatCases; i++) {
         const float halves = static_cast<float>(static_cast<int32_t>(next(state) % 1201u) - 600) * 0.5f;
         const float v = i % 2 ? halves : halves + static_cast<float>(next(state) >> 8) * (1.0f / 16777216.0f);
-        apart += ai::round_half_up(v) != ai::ieee::round_half_up(v) ? 1 : 0;
+        apart += ai::round_to_s8(v) != ai::ieee::round_half_up(v) ? 1 : 0;
     }
     return apart;
 }
