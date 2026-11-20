@@ -6,7 +6,7 @@ IDF_EXPORT ?= $(HOME)/esp/esp-idf/export.sh
 IDF_GOALS := ai-unit ai-unit-cores ai-unit-ctc ai-unit-pitch ai-unit-rnnt ai-unit-speaker ai-unit-wake bench-board board-c-check bss calib-flash \
   capture-flash capture-radio-off-flash espsr-compare flash fw-bench fw-bench-flash fw-dev fw-prod listen-unit \
   models-flash monitor nvs-restore nvs-save parity-board product session session-plan storage-flash vision-flash \
-  ai-unit-detect
+  ai-unit-detect ai-kernels
 ifneq ($(and $(filter $(IDF_GOALS),$(MAKECMDGOALS)),$(if $(IDF_LOADED)$(shell command -v idf.py),,no idf.py)),)
 .PHONY: $(MAKECMDGOALS)
 $(firstword $(MAKECMDGOALS)):
@@ -820,6 +820,26 @@ ai-unit-cores: ## Run the product's four graphs on core 0, preempting each other
 	  { pytest pytest_unit.py $(ON_BOARD) --build-dir build_cores -s; echo $$? > build_cores/unit.status; } 2>&1 \
 	    | tee build_cores/unit.log; \
 	  exit $$(cat build_cores/unit.status 2>/dev/null || echo 1)
+
+KERNELS_HOST_BUILD := firmware/components/ai_engine/test_apps/host/build_kernels
+ai-kernels: ## Run the plain C kernels against the PIE ones on board B, and their PC build against the board (ADR-0045) [BOARD=C]
+	cmake -S firmware/components/ai_engine/test_apps/host -B $(KERNELS_HOST_BUILD) -DCMAKE_BUILD_TYPE=Release >/dev/null && \
+	  cmake --build $(KERNELS_HOST_BUILD) --target ai_engine_kernels_host -j
+	@$(call fresh_sdkconfig,$(UNIT_APP)/build_kernels/sdkconfig,$(call app_defaults,$(UNIT_APP)))
+	cd $(UNIT_APP) && idf.py -B build_kernels -D SDKCONFIG=build_kernels/sdkconfig -D UNIT_PROFILE=kernels build
+ifeq ($(BOARD),C)
+	@echo "hold the button, power-cycle the board, wait 2 s, release (KEHOACH 2.1)"
+	cd $(UNIT_APP)/build_kernels && for try in $$(seq $(LOADER_TRIES)); do \
+	  python -m esptool --chip esp32s3 --port "$(PORT)" --baud $(FLASH_BAUD) \
+	  --before no-reset --after watchdog-reset --connect-attempts $(LOADER_ATTEMPTS) \
+	  write-flash --skip-flashed $$(sed -n 1p flash_args) $$(sed 1d flash_args | grep -v -e ota_data -e storage) \
+	  && exit 0; done; exit 1
+	cd $(UNIT_APP) && KERNELS_HOST=$(CURDIR)/$(KERNELS_HOST_BUILD)/ai_engine_kernels_host \
+	  pytest pytest_kernels.py $(ON_RUNNING_BOARD) -s
+else
+	cd $(UNIT_APP) && KERNELS_HOST=$(CURDIR)/$(KERNELS_HOST_BUILD)/ai_engine_kernels_host \
+	  pytest pytest_kernels.py $(ON_BOARD) --build-dir build_kernels -s
+endif
 
 ai-unit-wake: ## Stream the wake TCN of wake.yaml, random weights, on board B: its profile in build_wake/unit.log [STEP=<hops a call>] (E11-T11)
 	$(ML_CPU) --extra train --extra espdl python -m srpipe.tasks.wake.quant probe $(if $(STEP),--step $(STEP))

@@ -44,3 +44,15 @@ set_target_properties(ai_engine_host PROPERTIES C_STANDARD 17 CXX_STANDARD 20 CX
 # The toolchain's C library maps _Static_assert onto static_assert for C++; glibc leaves it to C.
 target_compile_definitions(ai_engine_host PRIVATE $<$<COMPILE_LANGUAGE:CXX>:_Static_assert=static_assert>)
 target_compile_options(ai_engine_host PRIVATE -Wall -Wextra -Werror $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)
+
+# The plain C kernels with the S3's numbers, over the board's cases, for make ai-kernels (ADR-0045).
+set(ESPDL "${ENGINE}/src/core/espdl")
+set(UNIT "${ENGINE}/test_apps/unit/main")
+file(GLOB kernels_c "${ESPDL}/kernels/*.c")
+add_executable(ai_engine_kernels_host main/kernels_host.cpp "${UNIT}/kernel_cases_c.cpp" ${kernels_c})
+target_include_directories(ai_engine_kernels_host PRIVATE
+    "${ENGINE}/src" "${UNIT}" "${ESPDL}/kernels/impl/c" "${ESPDL}/chip/esp32s3")
+target_link_libraries(ai_engine_kernels_host PRIVATE OpenSSL::Crypto)
+set_target_properties(ai_engine_kernels_host PROPERTIES C_STANDARD 17 CXX_STANDARD 20 CXX_EXTENSIONS OFF)
+target_compile_options(ai_engine_kernels_host PRIVATE -Wall -Wextra -Werror -ffp-contract=off
+    $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions -fno-rtti>)

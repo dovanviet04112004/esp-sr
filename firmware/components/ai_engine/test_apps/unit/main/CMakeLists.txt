@@ -20,6 +20,12 @@ elseif(UNIT_PROFILE STREQUAL "cores")
     set(tests "test_cores.cpp")
     set(embedded "")
     set(flashed "")
+elseif(UNIT_PROFILE STREQUAL "kernels")
+    set(espdl "${CMAKE_CURRENT_LIST_DIR}/../../../src/core/espdl")
+    file(GLOB kernels_c "${espdl}/kernels/*.c")
+    set(tests "test_kernels.cpp" "kernel_cases_pie.cpp" "kernel_cases_c.cpp" ${kernels_c})
+    set(embedded "")
+    set(flashed "")
 elseif(UNIT_PROFILE STREQUAL "ctc")
     set(tests "test_ctc_net.cpp" "test_ctc_net_main.c")
     set(embedded "probe/ctc_streams.bin")
@@ -46,10 +52,19 @@ endforeach()
 idf_component_register(
     SRCS ${tests}
     PRIV_INCLUDE_DIRS "../../../src"
-    REQUIRES ai_engine dsp_spec sys_storage unity esp_partition esp_timer mbedtls espressif__esp-dl
+    REQUIRES ai_engine dsp_spec sys_storage unity esp_partition esp_timer mbedtls espressif__esp-dl test_report
     EMBED_FILES ${embedded}
     WHOLE_ARCHIVE
 )
+# The same cases built twice, each against one implementation of the kernels (ADR-0045).
+if(UNIT_PROFILE STREQUAL "kernels")
+    set_source_files_properties("kernel_cases_pie.cpp" PROPERTIES INCLUDE_DIRECTORIES "${espdl}/kernels/impl/pie_esp32s3")
+    set_source_files_properties("test_kernels.cpp" PROPERTIES INCLUDE_DIRECTORIES "${espdl}/chip/esp32s3")
+    set_source_files_properties("kernel_cases_c.cpp" ${kernels_c}
+        PROPERTIES INCLUDE_DIRECTORIES "${espdl}/kernels/impl/c;${espdl}/chip/esp32s3")
+    # The float kernels repeat the PIE's roundings one by one: no multiply-add fused behind their back.
+    set_source_files_properties(${kernels_c} PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+endif()
 # idf.py -D UNIT_LOAN_CAP=<bytes> leaves the speaker's runs no internal block over that, as on the product (KEHOACH 6.5).
 if(NOT UNIT_LOAN_CAP)
     set(UNIT_LOAN_CAP 0)
