@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 import yaml
 
-from srpipe.core import corpus, splits
+from srpipe.core import config, corpus, splits
 from srpipe.core.config import load_device
 from srpipe.scenes import device
 from srpipe.tasks.command.ctc import data
@@ -155,6 +155,28 @@ def test_a_board_cut_of_another_listen_yaml_or_chain_run_is_stale(tmp_path: Path
     per_session = body | {"listen_hash": device.cut_marks("listen")["listen_hash"], "chain": None}
     (tmp_path / "manifest.yaml").write_text(yaml.safe_dump(per_session), encoding="utf-8")
     assert not data.board_built_as(tmp_path, device_cfg, rows, board)
+
+
+def test_a_build_heard_on_an_int8_pitch_row_counts_only_for_its_own_chip(tmp_path: Path, monkeypatch) -> None:
+    device_cfg = load_device("scenes/device.yaml")
+    assert device_cfg["pitch"].get("int8")
+    split_file = tmp_path / "test.txt"
+    split_file.write_text("item\n", encoding="utf-8")
+    options = data.options_of({"simulate": {"cut": "listen"}}, split_file)
+    s3 = {"config": device_cfg, "split": {"sha256": splits.sha256_of(split_file)}, **device.cut_marks("listen")}
+    rows, board = [{"session": "s1"}], {"min_s": 0.8, "max_s": 2.4, "repeat": 75}
+    s3_board = {"config": device_cfg, "sessions": ["s1"], "board": data.board_cut(board), "chain": data.BOARD_CHAIN}
+    s3_board |= {"listen_hash": device.cut_marks("listen")["listen_hash"]}
+    for chip, built_for in ((None, None), ("esp32s31", None), ("esp32s31", "esp32s31"), (None, "esp32s31")):
+        if chip:
+            monkeypatch.setenv(config.CHIP_ENV, chip)
+        else:
+            monkeypatch.delenv(config.CHIP_ENV, raising=False)
+        mark = {"chip": built_for} if built_for else {}
+        (tmp_path / "manifest.yaml").write_text(yaml.safe_dump(s3 | mark), encoding="utf-8")
+        assert data.built_as(tmp_path, device_cfg, split_file, options) is (chip == built_for)
+        (tmp_path / "manifest.yaml").write_text(yaml.safe_dump(s3_board | mark), encoding="utf-8")
+        assert data.board_built_as(tmp_path, device_cfg, rows, board) is (chip == built_for)
 
 
 def test_a_board_session_given_to_train_that_says_an_unseen_command_is_refused(tmp_path: Path, monkeypatch) -> None:
