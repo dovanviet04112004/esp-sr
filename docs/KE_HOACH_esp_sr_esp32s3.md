@@ -2048,9 +2048,12 @@ mỗi bước một commit.
       Mỗi số nguyên ra phải đúng là số mà các op esp-dl kia tính, nên mô phỏng không đổi: qua khi bản dò khớp từng
       bit ở cả đồ thị lẫn mọi bản cắt; giữ khi giờ trên board giảm, khớp mà chậm hơn thì bỏ. Phần float của op riêng
       chép đúng chuỗi phép của bản vá mô phỏng (`layernorm_as_espdl`, `softmax_as_espdl`): dựng không `-ffast-math`,
-      không gộp nhân-cộng ngầm, chỗ chip gộp thì gọi `fmaf` tường minh. Phép chia và làm tròn nửa lên mà chip có lệnh
-      riêng nằm ở `chip/<IDF_TARGET>/espdl_chip.hpp` (S3: chuỗi lệnh của `__divsf3` trong ROM, `floor.s`), cùng cỡ và
-      dòng dcache mà op chia việc theo; chip không có bản riêng dùng bản C chuẩn `ops/espdl_float_ieee.hpp`. Phía
+      không gộp nhân-cộng ngầm, chỗ chip gộp thì gọi `fmaf` tường minh. Phép chia và mọi phép làm tròn về int8 của op
+      riêng nằm ở `chip/<IDF_TARGET>/espdl_chip.hpp`: `divide`, `round_to_s8`, `round_probability_to_s8`,
+      `shift_round_to_s8` (S3: chuỗi lệnh của `__divsf3` trong ROM, `floor.s`, nửa lên như `tool::round` của esp-dl trên
+      S3), cùng cỡ và dòng dcache mà op chia việc theo; bản C của các nhân làm tròn qua `chip_to_s8`,
+      `chip_probability_to_s8` của `espdl_chip_kernels.h`. Chip khác làm tròn như esp-dl của nó; chip không có lệnh chia
+      riêng dùng bản C chuẩn `ops/espdl_float_ieee.hpp`. Phía
       `ml/`, chip chọn một lần cho tiến trình (`configs/common/chip.yaml`, `SRPIPE_CHIP`): đích ESP-PPQ, thư mục int8 của
       run, và phép làm tròn đầu ra của các bản vá mô phỏng theo nền, nửa lên trên S3, nửa về chẵn trên S31 như
       `tool::round` của esp-dl (ADR-0046).
