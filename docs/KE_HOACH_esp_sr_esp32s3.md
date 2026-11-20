@@ -2050,7 +2050,10 @@ mỗi bước một commit.
       chép đúng chuỗi phép của bản vá mô phỏng (`layernorm_as_espdl`, `softmax_as_espdl`): dựng không `-ffast-math`,
       không gộp nhân-cộng ngầm, chỗ chip gộp thì gọi `fmaf` tường minh. Phép chia và làm tròn nửa lên mà chip có lệnh
       riêng nằm ở `chip/<IDF_TARGET>/espdl_chip.hpp` (S3: chuỗi lệnh của `__divsf3` trong ROM, `floor.s`), cùng cỡ và
-      dòng dcache mà op chia việc theo; chip không có bản riêng dùng bản C chuẩn `ops/espdl_float_ieee.hpp`.
+      dòng dcache mà op chia việc theo; chip không có bản riêng dùng bản C chuẩn `ops/espdl_float_ieee.hpp`. Phía
+      `ml/`, chip chọn một lần cho tiến trình (`configs/common/chip.yaml`, `SRPIPE_CHIP`): đích ESP-PPQ, thư mục int8 của
+      run, và phép làm tròn đầu ra của các bản vá mô phỏng theo nền, nửa lên trên S3, nửa về chẵn trên S31 như
+      `tool::round` của esp-dl (ADR-0046).
    6. Dừng khi mọi op còn lại chạy ở trần của chính nó: tích chập ở tốc độ nhân khi dữ liệu nằm trong cache, op chép và
       op từng phần tử ở băng thông PSRAM, và không còn chuỗi nào ghép lại mà bớt được lượt đọc ghi PSRAM.
 
@@ -2963,6 +2966,7 @@ ml/
 ├── .env.example                       # ✅ commit — biến và giá trị giả
 ├── configs/
 │   ├── common/{paths.yaml, hardware.yaml, tts.yaml, screen.yaml, extract.yaml}   # extract.yaml: cụm và kho ghim bản
+│   ├── common/chip.yaml   # chip ESP-PPQ lượng tử cho, mặc định esp32s3, SRPIPE_CHIP chọn khác: đích, thư mục int8, dcache
 │   │                                  #   của từng lần trích; tts.yaml: bộ TTS, bộ nghe kiểm và bộ căn
 │   │                                  #   mốc từng từ, ghim bản; screen.yaml: bố cục từng kho và ngưỡng sàng lọc (§1.2)
 │   ├── afe/{hpf.yaml, aec.yaml, doa.yaml, gsc.yaml, bss.yaml, ns_omlsa.yaml, vad.yaml, agc.yaml}  # chỉ ghi đè cho thí nghiệm; mặc định là contracts/afe.yaml
