@@ -11,13 +11,6 @@ set(srcs "src/core/engine.cpp" "src/core/model_image.cpp" "src/core/espdl_net.cp
          "${espdl}/ops/espdl_pointwise_s8.cpp" "${espdl}/ops/espdl_softmax_quant.cpp" "${espdl}/ops/espdl_stage_sum.cpp"
          "${espdl}/ops/espdl_stem_conv.cpp" "${espdl}/ops/espdl_stride_depthwise.cpp"
          "${espdl}/ops/espdl_time_depthwise.cpp" "${espdl}/ops/espdl_weighted_stats.cpp"
-         "${espdl}/kernels/band_s8_esp32s3.S" "${espdl}/kernels/depthwise_s8_esp32s3.S"
-         "${espdl}/kernels/group_norm_s8_esp32s3.S"
-         "${espdl}/kernels/layernorm_s8_esp32s3.S" "${espdl}/kernels/pointwise_fused_s8_esp32s3.S"
-         "${espdl}/kernels/pointwise_s8_esp32s3.S" "${espdl}/kernels/softmax_s8_esp32s3.S"
-         "${espdl}/kernels/stage_sum_s8_esp32s3.S" "${espdl}/kernels/stats_s8_esp32s3.S"
-         "${espdl}/kernels/lut_s8_esp32s3.S" "${espdl}/kernels/lut_s16_esp32s3.S"
-         "${espdl}/kernels/stem_s8_esp32s3.S"
          "${espdl}/runtime/espdl_loan.cpp" "${espdl}/runtime/espdl_preload_${target}.cpp"
          "src/ns/ns.cpp" "src/wake/wake.cpp" "src/wake/score.c" "src/speaker/speaker.cpp" "src/speaker/score.c" "src/synth/synth.cpp"
          "src/pitch/pitch.cpp" "src/pitch/decode.c" "src/detect/detect.cpp" "src/detect/decode.c")
@@ -33,11 +26,28 @@ if(CONFIG_AI_ENGINE_CORES_TWO)
 else()
     list(APPEND srcs "${espdl}/runtime/espdl_split_one.cpp")
 endif()
+if(CONFIG_AI_ENGINE_KERNELS_PIE)
+    set(kernels "pie_esp32s3")
+    list(APPEND srcs "${espdl}/kernels/band_s8_esp32s3.S" "${espdl}/kernels/depthwise_s8_esp32s3.S"
+         "${espdl}/kernels/group_norm_s8_esp32s3.S"
+         "${espdl}/kernels/layernorm_s8_esp32s3.S" "${espdl}/kernels/pointwise_fused_s8_esp32s3.S"
+         "${espdl}/kernels/pointwise_s8_esp32s3.S" "${espdl}/kernels/softmax_s8_esp32s3.S"
+         "${espdl}/kernels/stage_sum_s8_esp32s3.S" "${espdl}/kernels/stats_s8_esp32s3.S"
+         "${espdl}/kernels/lut_s8_esp32s3.S" "${espdl}/kernels/lut_s16_esp32s3.S"
+         "${espdl}/kernels/stem_s8_esp32s3.S")
+else()
+    set(kernels "c")
+    set(kernels_c "${espdl}/kernels/band_s8.c" "${espdl}/kernels/depthwise_s8.c" "${espdl}/kernels/group_norm_s8.c"
+        "${espdl}/kernels/layernorm_s8.c" "${espdl}/kernels/pointwise_fused_s8.c" "${espdl}/kernels/pointwise_s8.c"
+        "${espdl}/kernels/softmax_s8.c" "${espdl}/kernels/stage_sum_s8.c" "${espdl}/kernels/stats_s8.c"
+        "${espdl}/kernels/lut_s8.c" "${espdl}/kernels/lut_s16.c" "${espdl}/kernels/stem_s8.c")
+    list(APPEND srcs ${kernels_c})
+endif()
 
 idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS "include"
-    PRIV_INCLUDE_DIRS "src" "${espdl}/kernels/impl/pie_esp32s3" "${espdl}/chip/${target}"
+    PRIV_INCLUDE_DIRS "src" "${espdl}/kernels/impl/${kernels}" "${espdl}/chip/${target}"
     REQUIRES common dsp_afe dsp_spec
     PRIV_REQUIRES sys_storage mbedtls log esp_timer espressif__esp-dl
 )
@@ -45,4 +55,4 @@ idf_component_register(
 set_source_files_properties("src/command_ctc/ctc_score.c" "src/command_rnnt/rnnt_search.c" "src/speaker/score.c"
     "src/pitch/decode.c" "src/wake/score.c" "src/detect/decode.c"
     "${espdl}/ops/espdl_softmax_quant.cpp" "${espdl}/ops/espdl_layernorm_s8.cpp" "${espdl}/ops/espdl_group_norm_s8.cpp"
-    PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+    ${kernels_c} PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")

@@ -30,6 +30,22 @@ menu "ai_engine"
             bool "two: each op runs half on the network's task and half on phu_task on core 1"
     endchoice
 
+    choice AI_ENGINE_KERNELS
+        prompt "kernels of ai_engine's own ops (KEHOACH 3.14, ADR-0045)"
+        default AI_ENGINE_KERNELS_PIE if IDF_TARGET_ESP32S3
+        default AI_ENGINE_KERNELS_C
+        help
+            Which kernels build into ai_engine: the hand-written PIE ones of the S3, or their plain C twins, the
+            same bits on any chip that keeps the S3's numbers.
+
+        config AI_ENGINE_KERNELS_PIE
+            bool "pie: kernels/*_esp32s3.S"
+            depends on IDF_TARGET_ESP32S3
+
+        config AI_ENGINE_KERNELS_C
+            bool "c: kernels/<family>_s8.c"
+    endchoice
+
     config AI_ENGINE_LOAN_RESERVE_BYTES
         int "internal RAM the ops' loan leaves free (KEHOACH 6.5, ADR-0025)"
         default 0

@@ -8,6 +8,9 @@
 
 #include "espdl_kernels_impl.hpp"
 
+// A run's slot holds an address in 32 bits, as the ops store it on the chip.
+#define AI_ENGINE_RUN_PTR(type, run, slot) ((type)(intptr_t)(run)[(slot)])
+
 #ifdef __cplusplus
 extern "C" {
 #endif
