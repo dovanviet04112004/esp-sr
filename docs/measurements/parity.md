@@ -185,6 +185,27 @@ của `stft`, `mel`, `chain`, `chain_modules`; PCM của `chain` và `chain_modu
 4,8e-7 vì `log10f`, trong ngưỡng của nó. Chọn Kconfig `DSP_SPEC_FFT_DL_FFT` thì `stft`, `mel` không còn qua ngưỡng
 tuyệt đối.
 
+## Nhân C ↔ PIE của `ai_engine` (S31-T4, ADR-0045)
+
+`make ai-kernels BOARD=C` (20/11, board C, `a8eb7e21` trên `4d203e82`): 584 ca, 8 vòng × 73 nhân phủ đủ 76 hàm, mỗi ca dữ
+liệu xorshift32 hạt cố định, dải đầy int8 và float trong dải thực tế. Board chạy bản `_esp32s3` và bản `_c` trên cùng dữ
+liệu, so SHA-256 từng ca; máy tính dịch các `kernels/*.c` bằng gcc, chạy cùng các ca, so digest với board.
+
+| Lượt | Mô hình QACC của bản C | C khớp PIE trên board | Máy tính khớp board | Đối chứng âm đỏ | `divide` / `round_half_up` lệch |
+|---|---|---|---|---|---|
+| 1 | làn 20 bit quấn vòng khi tràn | 312 / 584 | — | 28 / 32 | 0 / 100 000, 0 / 100 000 |
+| 2 | làn 20 bit bão hoà sau mỗi tích | **584 / 584** | **584 / 584** | 28 / 32 | 0 / 100 000, 0 / 100 000 |
+
+- **QACC của PIE S3 bão hoà ở 20 bit sau từng tích**, không quấn vòng. Phát lại lượt 1 trên máy tính với digest PIE của
+  board: bão hoà một lần ở cuối còn 22 ca lệch, bão hoà sau mỗi tích còn 13; cả 13 là ca của bộ sinh cho hàng ra chỉ thẳng
+  8 byte với khối cuối 16 (`ee.vst.128` làm tròn địa chỉ xuống bội 16), kiểu gọi mà op không bao giờ dùng. Thứ tự cộng của
+  bản C vì thế là thứ tự của nhân PIE.
+- Chuỗi `div0.s`…`divn.s` của `__divsf3` trong ROM S3 cho đúng `a / b` IEEE, và `floor.s` của `v + 0,5` kẹp int8 cho đúng
+  `floorf`, trên 100 000 ca mỗi phép (thương giữ trong dải chuẩn).
+- Digest máy tính giống nhau ở bản dựng Release và Debug có UBSan, UBSan không báo gì.
+- Ảnh sản phẩm board C dựng với `AI_ENGINE_KERNELS_C` link được, nhỏ hơn bản PIE 25 KB (0x25bde0 so với 0x2621e0); chưa
+  chạy cả mạng bằng bản C trên board.
+
 ## Đường nối tiếp
 
 Cầu CH340 sau usbipd có lúc rơi byte: có lượt mất cả dòng, có lượt một dòng cụt đuôi dính vào dòng sau; nhật ký kernel có
