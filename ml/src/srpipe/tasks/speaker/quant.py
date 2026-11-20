@@ -28,7 +28,7 @@ from torch.nn import functional
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, mixed_espdl, ptq_espdl
 from srpipe.core import run_dir
-from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, device_of, load_yaml
+from srpipe.core.config import CONFIGS, ML_ROOT, data_paths, device_of, int8_dir, load_yaml
 from srpipe.dsp.spec import spk_fbank
 from srpipe.export import pack_models, update_lock
 from srpipe.generated import grid, speaker
@@ -40,7 +40,7 @@ CONFIG = CONFIGS / "models" / "speaker.yaml"
 BRANCH = LADDER = "speaker"
 PACKAGE = "redimnet2"
 MODEL_FILE = "model.pt"
-INT8_DIR = "int8"
+INT8_DIR = int8_dir()
 GRAPH_FILE = "graph.native"
 LADDER_FILE = "ladder.yaml"
 WINDOW_FILE = "board_window.npy"  # float log-mel (1, 1, mels, frames) the probe runs

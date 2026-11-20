@@ -27,10 +27,12 @@ def rms_like_espdl(sum_sq, n: int, s_in, s_out, eps: float):
 
 def rmsnorm_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platforms: frozenset, **kwargs):
     """op's output as esp-dl's S3 kernel computes it once op, on one of platforms, has its input and output quantised,
-    each float32 step in the kernel's order; simulate's float output otherwise. The gradient is simulate's."""
+    each float32 step in the kernel's order, rounded onto the output grid as the platform rounds (half up on the S3,
+    half to even on the S31, ADR-0046); simulate's float output otherwise. The gradient is simulate's."""
     import torch
     from esp_ppq.core import QuantizationStates
     from esp_ppq.IR.quantize import QuantableOperation
+    from esp_ppq.utils.round import ppq_tensor_round
 
     floating = simulate(op, values, ctx, **kwargs)
     if not isinstance(op, QuantableOperation) or op.platform not in platforms:
@@ -46,7 +48,7 @@ def rmsnorm_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platfo
         sum_sq = (q.double() ** 2).sum(axes, keepdim=True).float()
         n = math.prod(x.shape[a] for a in axes)
         rms = rms_like_espdl(sum_sq, n, s_in, s_out, op.attributes.get("epsilon", 1e-5))
-        y = torch.clamp(torch.floor(q * rms * weight + 0.5), out.quant_min, out.quant_max) * s_out
+        y = torch.clamp(ppq_tensor_round(q * rms * weight, out.rounding), out.quant_min, out.quant_max) * s_out
     return floating - floating.detach() + y
 
 
@@ -60,9 +62,9 @@ def rmsnorm_as_espdl() -> Iterator[None]:
     from esp_ppq.api.espdl_interface import get_target_platform
     from esp_ppq.executor.base import OPERATION_FORWARD_TABLE
 
-    from srpipe.compress.quant.ptq_espdl import BITS, TARGET, WIDE_BITS
+    from srpipe.compress.quant.ptq_espdl import BITS, WIDE_BITS, target
 
-    platforms = frozenset(get_target_platform(TARGET, bits) for bits in (BITS, WIDE_BITS))
+    platforms = frozenset(get_target_platform(target(), bits) for bits in (BITS, WIDE_BITS))
     # Every esp-dl platform shares one table, so the patched forward checks the platform itself.
     tables = list({id(t): t for t in (OPERATION_FORWARD_TABLE[p] for p in platforms)}.values())
     simulated = [table["RMSNormalization"] for table in tables]
@@ -104,10 +106,12 @@ def fma32(a, b, c):
 def layernorm_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platforms: frozenset, **kwargs):
     """op's output as esp-dl's LayerNormalization computes it once op, on one of platforms, has its input and output
     quantised: each float32 step as GCC builds forward_template for the S3 under esp-dl's -ffast-math -O3, which
-    reorders the source's steps and fuses its multiply-adds into madd.s; simulate's output otherwise."""
+    reorders the source's steps and fuses its multiply-adds into madd.s, rounded onto the output grid as the platform
+    rounds (ADR-0046); simulate's output otherwise."""
     import torch
     from esp_ppq.core import QuantizationStates
     from esp_ppq.IR.quantize import QuantableOperation
+    from esp_ppq.utils.round import ppq_tensor_round
 
     floating = simulate(op, values, ctx, **kwargs)
     if not isinstance(op, QuantableOperation) or op.platform not in platforms:
@@ -130,7 +134,8 @@ def layernorm_like_espdl(op, values: list, ctx=None, *, simulate: Callable, plat
         result = gamma * (inv_std * s_in) * (q - mean)
         if len(values) > 2:
             result = result + values[2].to(floating.device)
-        y = torch.clamp(torch.floor(result * (torch.ones_like(s_out) / s_out) + 0.5), out.quant_min, out.quant_max)
+        scaled = result * (torch.ones_like(s_out) / s_out)
+        y = torch.clamp(ppq_tensor_round(scaled, out.rounding), out.quant_min, out.quant_max)
     return floating - floating.detach() + y * s_out
 
 
@@ -144,9 +149,9 @@ def layernorm_as_espdl() -> Iterator[None]:
     from esp_ppq.api.espdl_interface import get_target_platform
     from esp_ppq.executor.base import OPERATION_FORWARD_TABLE
 
-    from srpipe.compress.quant.ptq_espdl import BITS, TARGET, WIDE_BITS
+    from srpipe.compress.quant.ptq_espdl import BITS, WIDE_BITS, target
 
-    platforms = frozenset(get_target_platform(TARGET, bits) for bits in (BITS, WIDE_BITS))
+    platforms = frozenset(get_target_platform(target(), bits) for bits in (BITS, WIDE_BITS))
     # Every esp-dl platform shares one table, so the patched forward checks the platform itself.
     tables = list({id(t): t for t in (OPERATION_FORWARD_TABLE[p] for p in platforms)}.values())
     simulated = [table["LayerNormalization"] for table in tables]
@@ -181,10 +186,10 @@ EXPF_P1, EXPF_P2, EXPF_P3 = float_of(0x3E2AAAAB), float_of(0x3B360B61), float_of
 EXPF_P4, EXPF_P5 = float_of(0x35DDEA0E), float_of(0x3331BB4C)
 
 
-def expf_s3(x: float) -> np.float32:
-    """expf as the S3 runs it: picolibc's libm/math/sf_exp.c, fdlibm's algorithm, read off its machine code. Every
-    step is one float32 operation rounded once, none fused, the division __divsf3's; it can differ from the correctly
-    rounded exp by an ulp."""
+def expf_picolibc(x: float) -> np.float32:
+    """expf as picolibc's libm/math/sf_exp.c runs it, fdlibm's algorithm read off the S3's machine code, the S31's
+    the same: every step one float32 operation rounded once, none fused, the division IEEE's; it can differ from the
+    correctly rounded exp by an ulp."""
     one, two = np.float32(1.0), np.float32(2.0)
     x = np.float32(x)
     sx = word_of(x)
@@ -220,16 +225,16 @@ def expf_s3(x: float) -> np.float32:
 
 
 @functools.lru_cache(maxsize=64)
-def exp_table_s3(scale: float) -> np.ndarray:
-    """esp-dl's Softmax table at an input scale, as tool::gen_lut_8bit fills it on the S3: entry i is the S3's expf of
-    scale times i - 128, a float32 product that is exact for esp-dl's power-of-two scales."""
+def exp_table(scale: float) -> np.ndarray:
+    """esp-dl's Softmax table at an input scale, as tool::gen_lut_8bit fills it on the S3 and the S31: entry i is
+    picolibc's expf of scale times i - 128, a float32 product that is exact for esp-dl's power-of-two scales."""
     s = np.float32(scale)
-    return np.array([expf_s3(s * np.float32(i - 128)) for i in range(256)], dtype=np.float32)
+    return np.array([expf_picolibc(s * np.float32(i - 128)) for i in range(256)], dtype=np.float32)
 
 
 def softmax_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platforms: frozenset, **kwargs):
     """op's output as esp-dl's Softmax computes it from an int8 input on one of platforms: each step's exp from its
-    256-entry float32 table of the S3's expf, the row summed in float32 one value after another, each multiplied by
+    256-entry float32 table of picolibc's expf, the row summed in float32 one value after another, each multiplied by
     the float32 reciprocal of that sum, as -ffast-math builds the source's division; simulate's output otherwise."""
     import torch
     from esp_ppq.core import QuantizationStates
@@ -245,7 +250,7 @@ def softmax_like_espdl(op, values: list, ctx=None, *, simulate: Callable, platfo
     with torch.no_grad():
         x, s = values[0].to(floating.device), given.scale.to(floating.device)
         q = torch.clamp(torch.round(x / s), -128, 127).long()
-        table = torch.from_numpy(exp_table_s3(float(s.flatten()[0]))).to(floating.device)
+        table = torch.from_numpy(exp_table(float(s.flatten()[0]))).to(floating.device)
         e = table[q + 128].movedim(axis, -1)
         total = torch.zeros_like(e[..., :1])
         for i in range(e.shape[-1]):
@@ -264,9 +269,9 @@ def softmax_as_espdl() -> Iterator[None]:
     from esp_ppq.api.espdl_interface import get_target_platform
     from esp_ppq.executor.base import OPERATION_FORWARD_TABLE
 
-    from srpipe.compress.quant.ptq_espdl import BITS, TARGET, WIDE_BITS
+    from srpipe.compress.quant.ptq_espdl import BITS, WIDE_BITS, target
 
-    platforms = frozenset(get_target_platform(TARGET, bits) for bits in (BITS, WIDE_BITS))
+    platforms = frozenset(get_target_platform(target(), bits) for bits in (BITS, WIDE_BITS))
     # Every esp-dl platform shares one table, so the patched forward checks the platform itself.
     tables = list({id(t): t for t in (OPERATION_FORWARD_TABLE[p] for p in platforms)}.values())
     simulated = [table["Softmax"] for table in tables]
@@ -314,9 +319,9 @@ def conv_s16_as_espdl() -> Iterator[None]:
     from esp_ppq.api.espdl_interface import get_target_platform
     from esp_ppq.executor.base import OPERATION_FORWARD_TABLE
 
-    from srpipe.compress.quant.ptq_espdl import TARGET, WIDE_BITS
+    from srpipe.compress.quant.ptq_espdl import WIDE_BITS, target
 
-    platforms = frozenset({get_target_platform(TARGET, WIDE_BITS)})
+    platforms = frozenset({get_target_platform(target(), WIDE_BITS)})
     # Every esp-dl platform shares one table, so the patched forward checks the platform itself.
     tables = list({id(t): t for t in (OPERATION_FORWARD_TABLE[p] for p in platforms)}.values())
     simulated = [table["Conv"] for table in tables]

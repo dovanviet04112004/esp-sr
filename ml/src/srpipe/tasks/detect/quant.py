@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from srpipe.core.config import ML_ROOT, apply_overrides, data_paths, load_yaml
+from srpipe.core.config import ML_ROOT, apply_overrides, chip, data_paths, int8_dir, load_yaml
 from srpipe.core.run_dir import create_run_dir
 from srpipe.export import update_lock
 from srpipe.scenes import refs
@@ -25,7 +25,6 @@ from srpipe.tasks.detect import CONFIG, data
 BRANCH = "detect"
 SLOT = "vision_0"
 REFS = ML_ROOT / "detect_ref"
-TARGET = "esp32s3"
 ONE_TO_ONE = ("one2one_p3", "one2one_p4", "one2one_p5")
 ONE_TO_MANY = ("one2many_p3", "one2many_p4", "one2many_p5")
 BOX_CHANNELS = 4
@@ -154,7 +153,7 @@ def dispatch(graph, quantizer, cfg: dict) -> None:
     for name, platform in table.items():
         if platform == TargetPlatform.UNSPECIFIED:
             table[name] = TargetPlatform(quantizer.target_platform)
-    wide = get_target_platform(TARGET, 16)
+    wide = get_target_platform(chip()["name"], 16)
     for name in table:
         if any(re.search(p, name) for p in cfg["quant"]["int16"]):
             table[name] = wide
@@ -246,7 +245,7 @@ def ptq(cfg: dict, run: Path, paths: dict) -> Path:
     torch.manual_seed(spec["seed"])
     with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
         graph = load_onnx_graph(onnx_import_file=str(run / "model.onnx"))
-        quantizer = ppq_lib.Quantizer(platform=get_target_platform(TARGET, 8), graph=graph)
+        quantizer = ppq_lib.Quantizer(platform=get_target_platform(chip()["name"], 8), graph=graph)
         dispatch(graph, quantizer, cfg)
         executor = TorchExecutor(graph=graph, device=device)
         executor.tracing_operation_meta(inputs=torch.zeros(1, 3, cfg["size"], cfg["size"], device=device))
@@ -283,7 +282,7 @@ def ptq(cfg: dict, run: Path, paths: dict) -> Path:
             executor=executor,
         )
         split_heads(graph, meta["nc"])
-        out = run / "int8"
+        out = run / int8_dir()
         export_espdl.save_native(graph, out / "graph.native")
         return export_espdl.export(graph, out / "model.espdl", int16_lut_step=spec["lut_step"])
 
@@ -291,14 +290,14 @@ def ptq(cfg: dict, run: Path, paths: dict) -> Path:
 def deploy(cfg: dict, run: Path) -> tuple[Path, Path]:
     """<run>/int8/model.espdl into firmware/models/detect with meta.json and the lock's detect row, slot vision_0 and
     detect.yaml's chip fields, refused unless the run's val score holds int8 and passed KEHOACH 3.18 step 4's gate."""
-    scored = run / "int8" / "map_val.yaml"
+    scored = run / int8_dir() / "map_val.yaml"
     report = load_yaml(scored) if scored.exists() else {}
     if "int8" not in report or not report["passes"]:
         raise ValueError(f"{run}: no int8 score on val that passed the gate, {report or 'none'}")
     meta = json.loads((run / "model.onnx.json").read_text(encoding="utf-8"))
     target = update_lock.MODELS / BRANCH
     target.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(run / "int8" / "model.espdl", target / f"{BRANCH}.espdl")
+    shutil.copyfile(run / int8_dir() / "model.espdl", target / f"{BRANCH}.espdl")
     fields = {
         "slot": SLOT,
         "size": cfg["size"],

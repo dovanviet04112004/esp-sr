@@ -1,0 +1,9 @@
+# The chip ESP-PPQ quantises, simulates and exports for, one a process (KEHOACH 3.14, ADR-0046); SRPIPE_CHIP names another.
+default: esp32s3
+chips:
+  esp32s3:
+    int8_dir: int8                 # <run>/int8*: the S3's quantised rows
+    data_cache_bytes: 65536        # CONFIG_ESP32S3_DATA_CACHE_SIZE of the firmware apps
+  esp32s31:
+    int8_dir: int8_esp32s31        # beside the S3's rows in the same training runs, never over them
+    data_cache_bytes: 65536        # CONFIG_CACHE_L1_DCACHE_SIZE of the S31 fork's firmware

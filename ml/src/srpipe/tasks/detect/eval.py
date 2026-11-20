@@ -16,7 +16,7 @@ import numpy as np
 import yaml
 from scipy.special import expit
 
-from srpipe.core.config import data_paths, load_yaml
+from srpipe.core.config import data_paths, int8_dir, load_yaml
 from srpipe.tasks.detect import data
 
 BOX_CHANNELS = 4
@@ -116,7 +116,7 @@ def int8_net(run: Path) -> Callable:
 
     from srpipe.compress.quant import export_espdl
 
-    graph = export_espdl.load_native(run / "int8" / "graph.native")
+    graph = export_espdl.load_native(run / int8_dir() / "graph.native")
     device = "cuda" if torch.cuda.is_available() else "cpu"
     executor = TorchExecutor(graph=graph, device=device)
     names = list(graph.outputs)
@@ -159,7 +159,7 @@ def evaluate(run: Path, split: str, limit: int | None) -> dict:
     report = {"split": split, "images": len(images)}
     with esp_ppq_patches.applied(cfg["esp_ppq_patches"]):
         for name, make in (("float", float_net), ("int8", int8_net)):
-            if name == "int8" and not (run / "int8" / "graph.native").exists():
+            if name == "int8" and not (run / int8_dir() / "graph.native").exists():
                 continue
             map50_95, map50 = score(images, found, cfg, meta["stride"], make(run))
             report[name] = {"map50_95": round(map50_95, 4), "map50": round(map50, 4)}
@@ -174,8 +174,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     report = evaluate(args.run, args.split, args.limit)
     out = (
-        args.run / "int8" / f"map_{args.split}.yaml"
-        if (args.run / "int8").exists()
+        args.run / int8_dir() / f"map_{args.split}.yaml"
+        if (args.run / int8_dir()).exists()
         else args.run / f"map_{args.split}.yaml"
     )
     out.write_text(yaml.safe_dump(report, sort_keys=False), encoding="utf-8")

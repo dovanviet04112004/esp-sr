@@ -89,10 +89,13 @@ def test_rmsnorm_as_espdl_simulates_each_norm_as_the_chip_rounds_it(tmp_path: Pa
     assert flips > 0
 
 
-def espdl_layernorm(q: np.ndarray, gamma: np.ndarray, beta: np.ndarray, s_in, s_out, eps) -> np.ndarray:
+def espdl_layernorm(
+    q: np.ndarray, gamma: np.ndarray, beta: np.ndarray, s_in, s_out, eps, half_even: bool = False
+) -> np.ndarray:
     """esp-dl's int8 LayerNormalization of q over its last axis as the S3 build runs it (-ffast-math -O3): the mean
     through a double reciprocal, squares summed by madd.s, 1.0f / n times the squared input step fused with eps,
-    sqrt_newton as dl_math.hpp has it, then gamma times the inverse deviation times the centred value, plus beta."""
+    sqrt_newton as dl_math.hpp has it, then gamma times the inverse deviation times the centred value, plus beta,
+    rounded half up as on the S3, or half to even as tool::round does on the S31."""
     f, n = np.float32, q.shape[-1]
     mean = (q.astype(np.float64).sum(-1, keepdims=True) * (1.0 / n)).astype(f)
     squares = np.zeros_like(mean)
@@ -104,7 +107,8 @@ def espdl_layernorm(q: np.ndarray, gamma: np.ndarray, beta: np.ndarray, s_in, s_
         step = (root + x / root) * f(0.5)
         root, moving = np.where(moving, step, root), moving & (np.abs(step - root) > f(1e-5))
     result = gamma * ((f(1.0) / root) * f(s_in)) * (q.astype(f) - mean) + beta
-    return np.clip(np.floor(result * (f(1.0) / f(s_out)) + f(0.5)), -128, 127)
+    scaled = result * (f(1.0) / f(s_out))
+    return np.clip(np.round(scaled) if half_even else np.floor(scaled + f(0.5)), -128, 127)
 
 
 def test_fma32_rounds_a_product_and_its_sum_once() -> None:
@@ -143,6 +147,29 @@ def test_layernorm_as_espdl_simulates_each_norm_as_the_chip_rounds_it(tmp_path: 
     assert flips > 0
 
 
+def test_layernorm_as_espdl_rounds_half_to_even_on_the_s31(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Quantised for the S31, the same float steps land on the output grid half to even, as esp-dl's tool::round
+    does there (ADR-0046); this seed's half steps round apart from the S3's half up."""
+    monkeypatch.setenv("SRPIPE_CHIP", "esp32s31")
+    graph, op = layernorm_graph(tmp_path)
+    s_in, s_out = (float(c.scale) for c in (op.input_quant_config[0], op.output_quant_config[0]))
+    gamma, beta = (op.inputs[i].value.detach().numpy().astype(np.float32) for i in (1, 2))
+    gamma = np.clip(np.round(gamma / float(op.input_quant_config[1].scale)), -128, 127)
+    gamma = (gamma * float(op.input_quant_config[1].scale)).astype(np.float32)
+    beta = np.clip(np.round(beta / float(op.input_quant_config[2].scale)), -128, 127)
+    beta = (beta * float(op.input_quant_config[2].scale)).astype(np.float32)
+    patched = ptq_espdl.Simulator(graph, ["layernorm_as_espdl"])
+    rng, apart = np.random.default_rng(12), 0
+    eps = op.attributes.get("epsilon", 1e-5)
+    for _ in range(4):
+        q = rng.normal(0, 30, (1, LN_HOPS, LN_WIDTH)).round().clip(-128, 127)
+        x = q.astype(np.float32) * np.float32(s_in)
+        got = patched(x) / np.float32(s_out)
+        assert np.array_equal(got, espdl_layernorm(q, gamma, beta, s_in, s_out, eps, half_even=True))
+        apart += np.count_nonzero(got != espdl_layernorm(q, gamma, beta, s_in, s_out, eps))
+    assert apart > 0
+
+
 SOFTMAX_ROWS, SOFTMAX_WIDTH = 512, 148
 
 
@@ -150,7 +177,7 @@ def espdl_softmax(q: np.ndarray, s_in: float) -> np.ndarray:
     """esp-dl's int8 Softmax of q over its last axis as the S3 build runs forward_lut (-ffast-math): exp from the S3's
     table of the input's grid, the row summed one value after another in float32, each value times the sum's
     reciprocal."""
-    table = esp_ppq_patches.exp_table_s3(s_in)
+    table = esp_ppq_patches.exp_table(s_in)
     e = table[q.astype(np.int64) + 128]
     total = np.zeros((*e.shape[:-1], 1), np.float32)
     for i in range(e.shape[-1]):
@@ -158,18 +185,18 @@ def espdl_softmax(q: np.ndarray, s_in: float) -> np.ndarray:
     return e * (np.float32(1) / total)
 
 
-def test_expf_s3_keeps_the_s3s_own_roundings_within_an_ulp_of_exp() -> None:
+def test_expf_picolibc_keeps_its_own_roundings_within_an_ulp_of_exp() -> None:
     """picolibc's float32 expf, which board B's Softmax tables are built with, rounds these grid points the other way
     from the correctly rounded exp (KEHOACH 3.17), and stays within an ulp of it everywhere else."""
     pinned = {-6.375: 0x3ADF4BFE, -5.875: 0x3B3813C0, -5.75: 0x3B509634, -5.1875: 0x3BB70A62}
     for x, word in pinned.items():
-        got = esp_ppq_patches.word_of(esp_ppq_patches.expf_s3(x))
+        got = esp_ppq_patches.word_of(esp_ppq_patches.expf_picolibc(x))
         assert got == word and got != esp_ppq_patches.word_of(np.float32(math.exp(x)))
     xs = np.random.default_rng(3).uniform(-100.0, 88.0, 4000).astype(np.float32)
     exact = np.exp(xs.astype(np.float64)).astype(np.float32)
-    got = np.array([esp_ppq_patches.expf_s3(x) for x in xs], dtype=np.float32)
+    got = np.array([esp_ppq_patches.expf_picolibc(x) for x in xs], dtype=np.float32)
     assert np.abs(got.view(np.int32).astype(np.int64) - exact.view(np.int32).astype(np.int64)).max() <= 1
-    assert esp_ppq_patches.expf_s3(np.inf) == np.inf and esp_ppq_patches.expf_s3(-np.inf) == 0
+    assert esp_ppq_patches.expf_picolibc(np.inf) == np.inf and esp_ppq_patches.expf_picolibc(-np.inf) == 0
 
 
 def test_softmax_as_espdl_simulates_each_row_as_the_chip_sums_it(tmp_path: Path) -> None:
@@ -266,7 +293,7 @@ def test_conv_s16_as_espdl_sums_each_int16_convolution_as_the_chip_does(tmp_path
     from esp_ppq.api.espdl_interface import get_target_platform
 
     graph, op, rng = wide_conv_graph(tmp_path)
-    assert op.platform == get_target_platform(ptq_espdl.TARGET, ptq_espdl.WIDE_BITS)
+    assert op.platform == get_target_platform(ptq_espdl.target(), ptq_espdl.WIDE_BITS)
     given, weight, bias = op.input_quant_config[:3]
     out = op.output_quant_config[0]
     shift = ptq_espdl.exponent_of(out) - ptq_espdl.exponent_of(given) - ptq_espdl.exponent_of(weight)

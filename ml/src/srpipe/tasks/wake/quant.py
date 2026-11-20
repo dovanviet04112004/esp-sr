@@ -18,7 +18,7 @@ import torch
 import yaml
 
 from srpipe.compress.quant import export_espdl, ptq_espdl
-from srpipe.core.config import ML_ROOT, data_paths, device_of, load_run_config, load_yaml
+from srpipe.core.config import ML_ROOT, data_paths, device_of, int8_dir, load_run_config, load_yaml
 from srpipe.export import pack_models, update_lock
 from srpipe.tasks.wake import CONFIG, data
 from srpipe.tasks.wake import eval as wake_eval
@@ -26,7 +26,7 @@ from srpipe.tasks.wake.model.tcn import Tcn
 from srpipe.tasks.wake.postproc.smooth import chip_scores
 
 BRANCH = "wake"
-INT8_DIR, LADDER_FILE, GRAPH_FILE = "int8", "ladder.yaml", "graph.native"
+INT8_DIR, LADDER_FILE, GRAPH_FILE = int8_dir(), "ladder.yaml", "graph.native"
 NORM_FILE = f"{BRANCH}.norm.bin"
 PERMILLE = 1000
 PROBE_DIR = ML_ROOT.parent / "firmware" / "components" / "ai_engine" / "test_apps" / "unit" / "main" / "probe"

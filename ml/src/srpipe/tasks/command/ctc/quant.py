@@ -25,6 +25,7 @@ from srpipe.core import corpus, extract, run_dir
 from srpipe.core.config import (
     apply_overrides,
     data_paths,
+    int8_dir,
     load_run_config,
     load_yaml,
     on_contract_pitch,
@@ -121,7 +122,7 @@ class Hearing:
 
     def folder(self, run: Path) -> Path:
         heard = ["contract", self.contract] if self.contract else ["kaldi"] if self.kaldi else []
-        return run / "_".join(["int8", *heard, *([self.hold] if self.hold else [])])
+        return run / "_".join([int8_dir(), *heard, *([self.hold] if self.hold else [])])
 
     def net(self, run: Path, paths: dict) -> gate.Ctc:
         net = gate.load_ctc(run)

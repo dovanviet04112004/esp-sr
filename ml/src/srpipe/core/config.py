@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import functools
 import os
 from pathlib import Path
 from typing import Any
@@ -14,11 +15,36 @@ from srpipe.generated import listen
 ML_ROOT = Path(__file__).resolve().parents[3]
 CONFIGS = ML_ROOT / "configs"
 DATA_ROOT_ENV = "SRPIPE_DATA_ROOT"
+CHIP_ENV = "SRPIPE_CHIP"
 PITCH_SHARED = ("min_f0_hz", "max_f0_hz", "normalization_left_s", "pov_scale", "pitch_scale", "delta_pitch_scale")
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+@functools.lru_cache(maxsize=1)
+def _chips() -> dict[str, Any]:
+    return load_yaml(CONFIGS / "common" / "chip.yaml")
+
+
+def chip() -> dict[str, Any]:
+    """The chip this process quantises for (ADR-0046): chip.yaml's default, or the one SRPIPE_CHIP of the command's own
+    environment names, never .env's, with its settings and its name under "name"; an unknown name stops the process."""
+    table = _chips()
+    name = os.environ.get(CHIP_ENV) or table["default"]
+    if name not in table["chips"]:
+        raise SystemExit(f"{CHIP_ENV}={name}: configs/common/chip.yaml knows {sorted(table['chips'])}")
+    return {"name": name, **table["chips"][name]}
+
+
+def int8_dir() -> str:
+    """The folder of a run that holds this chip's quantised rows: the S3's int8, another chip's beside it."""
+    return chip()["int8_dir"]
+
+
+def chip_is_default() -> bool:
+    return chip()["name"] == _chips()["default"]
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

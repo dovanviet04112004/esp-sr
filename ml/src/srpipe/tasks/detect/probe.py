@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from srpipe.compress.quant.ptq_espdl import exponent_of
-from srpipe.core.config import ML_ROOT, data_paths, load_yaml
+from srpipe.core.config import ML_ROOT, data_paths, int8_dir, load_yaml
 from srpipe.export import pack_models
 from srpipe.tasks.detect import data, pack
 from srpipe.tasks.detect.postproc import decode
@@ -130,19 +130,19 @@ def build(
         row = json.loads(pack_models.LOCK.read_text(encoding="utf-8"))["models"][pack.BRANCH]
         run = RUNS / row["run"]
         (entry,) = row["files"]
-        if hashlib.sha256((run / "int8" / "model.espdl").read_bytes()).hexdigest() != entry["sha256"]:
+        if hashlib.sha256((run / int8_dir() / "model.espdl").read_bytes()).hexdigest() != entry["sha256"]:
             raise ValueError(f"{run}: int8/model.espdl is not the .espdl the lock holds, so graph.native is not either")
         vision = pack.locked()
     else:
         run, row = unlocked, row_of(unlocked)
         chip = row["chip"]
-        espdl = (run / "int8" / "model.espdl").read_bytes()
+        espdl = (run / int8_dir() / "model.espdl").read_bytes()
         vision = pack.image(espdl, row["run"], row["size"], row["names"], chip["score_permille"], chip["top_k"])
     broken = bytearray(vision)
     broken[pack.HEADER_BYTES + (len(vision) - pack.HEADER_BYTES) // 2] ^= 0xFF
     cfg = load_yaml(run / "config.resolved.yaml")
     found = data.package(data_paths()["interim"] / cfg["package"])
-    graph = export_espdl.load_native(run / "int8" / "graph.native")
+    graph = export_espdl.load_native(run / int8_dir() / "graph.native")
     keep = row["chip"]["top_k"]
     blob, records, tables, shapes = bytearray(), [], [], None
     extra = [p for p in patches if p not in cfg["esp_ppq_patches"]]

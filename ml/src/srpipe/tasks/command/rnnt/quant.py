@@ -17,7 +17,7 @@ import torch
 from torch import Tensor, nn
 
 from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
-from srpipe.core.config import apply_overrides, load_yaml
+from srpipe.core.config import apply_overrides, int8_dir, load_yaml
 from srpipe.tasks.command import ctc
 from srpipe.tasks.command import eval as gate
 from srpipe.tasks.command.ctc import quant as ctc_quant
@@ -255,7 +255,7 @@ def step_ptq(cfg: dict, run: Path) -> Path:
     out = ctc_quant.recorded(run, head, {f"{ROW_PREFIX}float": float_row})
     for name in spec["calibrations"]:
         rungs = ptq_espdl.ladder(ctc_quant.LADDER) | {"calibration": name}
-        folder = run / "int8" / f"{ROW_PREFIX}{name}"
+        folder = run / int8_dir() / f"{ROW_PREFIX}{name}"
         columns = cfg["rnnt"]["joiner_columns"]
         graphs = quantized(
             net.model, b.calib, contexts, folder, rungs, patches, spec["joiner_pairs"], spec["seed"], columns

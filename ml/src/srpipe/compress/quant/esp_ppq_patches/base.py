@@ -1,13 +1,15 @@
-"""The S3's constants and the graph helpers every patch shares: shapes as the export lays them, exponents, configs."""
+"""The chip's constants and the graph helpers every patch shares: shapes as the export lays them, exponents, configs."""
 
 from __future__ import annotations
+
+from srpipe.core.config import chip
 
 # esp-dl runs convolutions channels last, so time, the first spatial axis of every conv streamed here, is axis 1.
 CONV_TIME_AXIS = 1
 
 CHANNEL_STEP = 16  # dl_base_conv2d.cpp: S3 vector path, 16 channels a step
 
-DATA_CACHE_BYTES = 0x10000  # CONFIG_ESP32S3_DATA_CACHE_SIZE of the firmware apps
+DATA_CACHE_BYTES = chip()["data_cache_bytes"]  # the dcache of chip.yaml's chip
 
 ELEMENTWISE_OPS = frozenset(
     {

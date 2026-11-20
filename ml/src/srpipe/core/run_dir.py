@@ -15,6 +15,8 @@ from typing import Any
 
 import yaml
 
+from srpipe.core.config import chip, chip_is_default
+
 TRACKED_PACKAGES = ("numpy", "scipy", "soundfile", "pyroomacoustics", "torch", "esp-ppq")
 
 
@@ -56,7 +58,10 @@ def create_run_dir(
     today: date | None = None,
     repo: Path | None = None,
 ) -> Path:
-    """Make artifacts/<branch>/runs/<date>_<gitsha>_<cfghash>/ holding the resolved config, split lock and env."""
+    """Make artifacts/<branch>/runs/<date>_<gitsha>_<cfghash>/ holding the resolved config, split lock and env; a chip
+    other than chip.yaml's default goes into the config, so its runs never share a name with the S3's."""
+    if not chip_is_default():
+        cfg = {**cfg, "chip": chip()["name"]}
     stamp = (today or date.today()).strftime("%Y%m%d")
     sha = git_sha(repo or Path(__file__).resolve().parents[4])
     run = artifacts / branch / "runs" / f"{stamp}_{sha}_{config_hash(cfg)}"

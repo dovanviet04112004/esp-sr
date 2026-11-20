@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 from srpipe.compress.quant import espdl_shapes
-from srpipe.compress.quant.ptq_espdl import BITS, TARGET
+from srpipe.compress.quant.ptq_espdl import BITS, target
 
 # Of ESP-PPQ's passive ops, esp-dl rescales only in these; the others copy integers whatever the exponents.
 RESCALING_PASSIVE = frozenset({"ReduceMax", "ReduceMin"})
@@ -91,7 +91,7 @@ def export(
     # ESP-PPQ clears these only after an export succeeds; a refused one's names would lay out the next graph wrong.
     ExporterPatternInfo().reset()
     StreamingTable().reset()
-    ppq_lib.Exporter(platform=get_target_platform(TARGET, BITS)).export(
+    ppq_lib.Exporter(platform=get_target_platform(target(), BITS)).export(
         file_path=str(out),
         graph=graph,
         values_for_test=values,

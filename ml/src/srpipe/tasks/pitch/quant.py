@@ -23,7 +23,7 @@ from srpipe.compress.quant import esp_ppq_patches, export_espdl, ptq_espdl
 from srpipe.compress.quant.espdl_shapes import attribute
 from srpipe.core import run_dir, splits
 from srpipe.core.audio_io import to_float
-from srpipe.core.config import CONFIGS, ML_ROOT, contract_front, data_paths, load_yaml
+from srpipe.core.config import CONFIGS, ML_ROOT, contract_front, data_paths, int8_dir, load_yaml
 from srpipe.dsp.spec import swift_front
 from srpipe.export import update_lock
 from srpipe.generated import grid, listen
@@ -34,7 +34,7 @@ from srpipe.tasks.pitch.postproc import decode
 CONFIG = CONFIGS / "models" / "pitch.yaml"
 BRANCH = LADDER = "pitch"
 MODEL_FILE = "model.onnx"
-INT8_DIR, GRAPH_FILE, LADDER_FILE = "int8", "graph.native", "ladder.yaml"
+INT8_DIR, GRAPH_FILE, LADDER_FILE = int8_dir(), "graph.native", "ladder.yaml"
 CHUNK_HOPS = 256  # frames of one calibration or row tensor, 4.1 s
 EDGE_HOPS = 10  # each chunk end's frames that see zero padding
 VOICED = 0.5  # confidence at which swift-f0 calls a frame voiced

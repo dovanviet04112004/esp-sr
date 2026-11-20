@@ -19,14 +19,18 @@ import torch
 from torch import nn
 
 from srpipe.compress.quant import esp_ppq_patches, onnx_export
-from srpipe.core.config import CONFIGS, deep_merge, load_yaml
+from srpipe.core.config import CONFIGS, chip, deep_merge, load_yaml
 
-TARGET = "esp32s3"
 BITS = 8
 WIDE_BITS = 16
 INT8_MIN, INT8_MAX = -128, 127
 LADDER = CONFIGS / "models" / "quant.yaml"
 TIMING_ROW = "timing"  # the row of a branch's ladder that make speed times
+
+
+def target() -> str:
+    """ESP-PPQ's target for this process's chip (ADR-0046)."""
+    return chip()["name"]
 
 
 @dataclass(frozen=True)
@@ -150,7 +154,7 @@ def setting_of(rungs: dict):
     setting.bias_correct = rungs["bias_correction"]
     setting.quantize_activation_setting.calib_algorithm = rungs["calibration"]
     for op in rungs["int16_ops"]:
-        setting.dispatching_table.append(op, get_target_platform(TARGET, WIDE_BITS))
+        setting.dispatching_table.append(op, get_target_platform(target(), WIDE_BITS))
     return setting
 
 
@@ -167,7 +171,7 @@ def quantize(model: nn.Module, calib: list[torch.Tensor], work: Path, rungs: dic
         calib_dataloader=calib,
         calib_steps=len(calib),
         input_shape=[list(first.shape)],
-        target=TARGET,
+        target=target(),
         num_of_bits=BITS,
         collate_fn=lambda batch: batch.to("cpu"),
         setting=setting_of(rungs),
@@ -198,7 +202,7 @@ def quantize_named(
         calib_dataloader=calib,
         calib_steps=len(calib),
         input_shape=[list(t.shape) for t in calib[0]],
-        target=TARGET,
+        target=target(),
         num_of_bits=BITS,
         collate_fn=lambda batch: [t.to("cpu") for t in batch],
         setting=setting_of(rungs),
