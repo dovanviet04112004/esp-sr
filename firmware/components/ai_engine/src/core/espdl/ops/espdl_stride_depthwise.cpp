@@ -1,4 +1,5 @@
 #include "core/espdl/ops/espdl_stride_depthwise.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 
 #include <array>
 #include <cstdint>
@@ -11,12 +12,6 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_dwk_row_s8_esp32s3(int8_t *out, const int8_t *const *rows, const int8_t *taps,
-                                  const int32_t *run);
-void ai_engine_pad_row_s8_esp32s3(int8_t *out, const int8_t *in, const int32_t *run);
-}
 
 namespace ai {
 
@@ -80,12 +75,12 @@ class StrideDepthwise final : public dl::module::Module {
                 if (padded_ == channels_) {
                     rows[i] = in;
                 } else {
-                    ai_engine_pad_row_s8_esp32s3(rows_ + i * width_ * padded_, in, pad_run_.data());
+                    ai_engine_pad_row_s8(rows_ + i * width_ * padded_, in, pad_run_.data());
                     rows[i] = rows_ + i * width_ * padded_;
                 }
             }
             int8_t *out = padded_ == channels_ ? ys + t * row_bytes : out_;
-            ai_engine_dwk_row_s8_esp32s3(out, rows, taps, run_.data());
+            ai_engine_dwk_row_s8(out, rows, taps, run_.data());
             if (out == out_) { compact(ys + t * row_bytes); }
         }
     }

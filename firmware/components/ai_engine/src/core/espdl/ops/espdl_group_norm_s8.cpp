@@ -8,23 +8,13 @@
 #include <utility>
 #include <vector>
 
-#include "core/espdl/ops/espdl_float_s3.hpp"
+#include "core/espdl/ops/espdl_float.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_define.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_gn_sums_s8_esp32s3(int32_t *sums, const int8_t *x, const int32_t *run);
-void ai_engine_gn_squares_s8_esp32s3(float *squares, const int8_t *x, const float *deviations,
-                                     const int32_t *run);
-void ai_engine_gn_squares_x2_s8_esp32s3(float *squares, const int8_t *x, const float *deviations,
-                                        const int32_t *run);
-void ai_engine_gn_squares_x4_s8_esp32s3(float *squares, const int8_t *x, const float *deviations,
-                                        const int32_t *run);
-void ai_engine_gn_outputs_s8_esp32s3(int8_t *y, const int8_t *x, const int8_t *tables, const int32_t *run);
-}
 
 namespace ai {
 
@@ -195,9 +185,9 @@ class GroupNormS8 final : public dl::module::Module {
         squares_run_ = {source_frames_, channels_, width_};
         outputs_run_ = {source_frames_,  kBatch * width_, width_, kBatch, mul_shift_ - 1, 0, 0,
                         word_of(buffer), channels_};
-        squares_kernel_ = repeat_ == 1   ? ai_engine_gn_squares_s8_esp32s3
-                          : repeat_ == 2 ? ai_engine_gn_squares_x2_s8_esp32s3
-                          : repeat_ == 4 ? ai_engine_gn_squares_x4_s8_esp32s3
+        squares_kernel_ = repeat_ == 1   ? ai_engine_gn_squares_s8
+                          : repeat_ == 2 ? ai_engine_gn_squares_x2_s8
+                          : repeat_ == 4 ? ai_engine_gn_squares_x4_s8
                                          : nullptr;
         built_ = true;
         return true;
@@ -208,7 +198,7 @@ class GroupNormS8 final : public dl::module::Module {
     {
         int32_t sums[kBatch] = {};
         if (vector_) {
-            ai_engine_gn_sums_s8_esp32s3(sums, xs + g0 * width_, sums_run_.data());
+            ai_engine_gn_sums_s8(sums, xs + g0 * width_, sums_run_.data());
         } else {
             for (int k = 0; k < count; k++) {
                 for (int t = 0; t < source_frames_; t++) {
@@ -271,7 +261,7 @@ class GroupNormS8 final : public dl::module::Module {
         if (vector_) {
             outputs_run_[kOutWeights] = word_of(w + c0);
             outputs_run_[kOutBias] = word_of(b + c0);
-            ai_engine_gn_outputs_s8_esp32s3(ys + c0, xs + c0, tables_ + g0 * kTableSize, outputs_run_.data());
+            ai_engine_gn_outputs_s8(ys + c0, xs + c0, tables_ + g0 * kTableSize, outputs_run_.data());
             return;
         }
         for (int t = 0; t < source_frames_; t++) {

@@ -9,17 +9,13 @@
 #include <utility>
 #include <vector>
 
+#include "core/espdl/kernels/espdl_kernels.hpp"
+#include "core/espdl/ops/espdl_float.hpp"
 #include "dl_define.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_row_sums_s8_esp32s3(int16_t *sums, const int8_t *x, int groups);
-void ai_engine_centred_squares_row_s8_esp32s3(int16_t *sums, const int8_t *x, const int8_t *mean,
-                                              const int32_t *run);
-}
 
 namespace ai {
 
@@ -44,14 +40,12 @@ int8_t clip(int32_t value) noexcept
 }
 
 // esp-dl's int8 ReduceMean: the int32 sum times the input scale, over the count, times the output's rescale,
-// then tool::round, floor.s of the float plus 0.5, and the int8 truncation.
+// then tool::round, floor of the float plus 0.5, and the int8 truncation.
 int8_t mean_like_espdl(int32_t sum, int count, int in_exponent, int out_exponent) noexcept
 {
     const float v = static_cast<float>(sum) * DL_SCALE(in_exponent) / static_cast<float>(count) *
                     DL_RESCALE(out_exponent);
-    int whole;
-    asm("floor.s %0, %1, 0" : "=a"(whole) : "f"(v + 0.5f));
-    return clip(whole);
+    return round_half_up(v);
 }
 
 // Input as esp_ppq_patches.global_stats_from writes it: x [1, T, C]; outputs the mean [1, 1, C] and the mean
@@ -95,7 +89,7 @@ class GlobalStats final : public dl::module::Module {
             const int end = std::min(g + kGroup, channels_);
             run[0] = (end - g) / kStep;
             for (int t = 0; t < frames_; t++) {
-                ai_engine_row_sums_s8_esp32s3(sums_ + g, xs + t * channels_ + g, run[0]);
+                ai_engine_row_sums_s8(sums_ + g, xs + t * channels_ + g, run[0]);
             }
             for (int c = g; c < end; c++) {
                 means[c] = mean_like_espdl(sums_[c], frames_, x->get_exponent(), mean->get_exponent());
@@ -103,8 +97,7 @@ class GlobalStats final : public dl::module::Module {
                 sums_[c] = 0;
             }
             for (int t = 0; t < frames_; t++) {
-                ai_engine_centred_squares_row_s8_esp32s3(sums_ + g, xs + t * channels_ + g, centre_ + g,
-                                                         run.data());
+                ai_engine_centred_squares_row_s8(sums_ + g, xs + t * channels_ + g, centre_ + g, run.data());
             }
             for (int c = g; c < end; c++) {
                 spreads[c] = mean_like_espdl(sums_[c], frames_, square_exponent_, spread->get_exponent());

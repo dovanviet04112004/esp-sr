@@ -1,4 +1,5 @@
 #include "core/espdl/ops/espdl_matmul_s8.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 
 #include <array>
 #include <cstdint>
@@ -11,12 +12,6 @@
 #include "esp_log.h"
 #include "fbs_model.hpp"
 
-extern "C" {
-void ai_engine_pad_row_s8_esp32s3(int8_t *out, const int8_t *in, const int32_t *run);
-void ai_engine_pw_bias_row_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-}
-
 namespace ai {
 
 namespace {
@@ -28,7 +23,7 @@ constexpr int kHalfStep = 8;
 constexpr size_t kVectorAlignBytes = 16;
 
 enum Input { kRows = 0, kWeights, kBias };
-// Slots of ai_engine_pw_bias_row_s8_esp32s3's run.
+// Slots of ai_engine_pw_bias_row_s8's run.
 enum Run { kRunBias = 6, kRunSize = 9 };
 
 int padded(int channels) noexcept
@@ -68,11 +63,11 @@ class MatMulS8 final : public dl::module::Module {
         if (!built_ && !build(context, x, y)) { return; }
         const int8_t *in = x->get_element_ptr<int8_t>();
         if (rows_ != nullptr) {
-            ai_engine_pad_row_s8_esp32s3(rows_, in, pad_run_.data());
+            ai_engine_pad_row_s8(rows_, in, pad_run_.data());
             in = rows_;
         }
         const int8_t *weights = context->get_tensor(m_inputs_index[kWeights])->get_element_ptr<int8_t>();
-        ai_engine_pw_bias_row_s8_esp32s3(y->get_element_ptr<int8_t>(), in, weights, run_.data());
+        ai_engine_pw_bias_row_s8(y->get_element_ptr<int8_t>(), in, weights, run_.data());
     }
 
     void print() override

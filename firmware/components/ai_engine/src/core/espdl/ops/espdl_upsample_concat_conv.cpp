@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/espdl/runtime/espdl_loan.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_base_conv2d.hpp"
 #include "dl_base_conv_args.hpp"
 #include "dl_base_conv_select.hpp"
@@ -16,10 +17,6 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_lut_s8_esp32s3(int8_t *values, int n, const int8_t *turned);
-}
 
 namespace ai {
 
@@ -160,9 +157,8 @@ class UpsampleConcatConv final : public dl::module::Module {
                 band.output_height = 1;
                 dl::base::conv2d(&band, quant_type, fn_[0], fn_[1], fn_[2]);
                 for (int p = 0; p < (channels == cy ? 1 : w); p++) {
-                    ai_engine_lut_s8_esp32s3(ys + r * y_row + c0 + p * cy,
-                                             channels == cy ? static_cast<int>(y_row) : channels,
-                                             turned_.data());
+                    ai_engine_lut_s8(ys + r * y_row + c0 + p * cy,
+                                     channels == cy ? static_cast<int>(y_row) : channels, turned_.data());
                 }
             }
         }

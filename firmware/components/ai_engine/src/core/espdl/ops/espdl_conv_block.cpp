@@ -11,60 +11,11 @@
 #include "core/espdl/runtime/espdl_loan.hpp"
 #include "core/espdl/runtime/espdl_preload.hpp"
 #include "core/espdl/runtime/espdl_split.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_dw3x3_row_s8_esp32s3(int8_t *out, const int8_t *const *rows, const int8_t *taps,
-                                    const int32_t *run);
-void ai_engine_pad_row_s8_esp32s3(int8_t *out, const int8_t *in, const int32_t *run);
-void ai_engine_pw_norm_row_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_residual_row_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                          const int32_t *run);
-void ai_engine_pw_norm_c24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_norm_c48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_residual_c24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                          const int32_t *run);
-void ai_engine_pw_residual_c48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                          const int32_t *run);
-void ai_engine_pw_residual_x_c24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                            const int32_t *run);
-void ai_engine_pw_residual_x_c48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                            const int32_t *run);
-void ai_engine_pw_norm_c96_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_residual_c96_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                          const int32_t *run);
-void ai_engine_pw_residual_x_c96_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                            const int32_t *run);
-void ai_engine_pw_norm_c144_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                       const int32_t *run);
-void ai_engine_pw_residual_c144_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                           const int32_t *run);
-void ai_engine_pw_residual_x_c144_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                             const int32_t *run);
-void ai_engine_pw_norm_c192_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                       const int32_t *run);
-void ai_engine_pw_residual_c192_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                           const int32_t *run);
-void ai_engine_pw_residual_x_c192_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                             const int32_t *run);
-void ai_engine_pw_conv_k12_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_conv_k24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_conv_k48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_conv_rows_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                       const int32_t *run);
-void ai_engine_pw_conv_k24_n12_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                          const int32_t *run);
-}
 
 namespace ai {
 
@@ -116,16 +67,11 @@ struct Unrolled {
 };
 
 constexpr Unrolled kUnrolled[] = {
-    {24, true, ai_engine_pw_norm_c24_s8_esp32s3, ai_engine_pw_residual_c24_s8_esp32s3,
-     ai_engine_pw_residual_x_c24_s8_esp32s3},
-    {48, true, ai_engine_pw_norm_c48_s8_esp32s3, ai_engine_pw_residual_c48_s8_esp32s3,
-     ai_engine_pw_residual_x_c48_s8_esp32s3},
-    {96, false, ai_engine_pw_norm_c96_s8_esp32s3, ai_engine_pw_residual_c96_s8_esp32s3,
-     ai_engine_pw_residual_x_c96_s8_esp32s3},
-    {144, false, ai_engine_pw_norm_c144_s8_esp32s3, ai_engine_pw_residual_c144_s8_esp32s3,
-     ai_engine_pw_residual_x_c144_s8_esp32s3},
-    {192, false, ai_engine_pw_norm_c192_s8_esp32s3, ai_engine_pw_residual_c192_s8_esp32s3,
-     ai_engine_pw_residual_x_c192_s8_esp32s3},
+    {24, true, ai_engine_pw_norm_c24_s8, ai_engine_pw_residual_c24_s8, ai_engine_pw_residual_x_c24_s8},
+    {48, true, ai_engine_pw_norm_c48_s8, ai_engine_pw_residual_c48_s8, ai_engine_pw_residual_x_c48_s8},
+    {96, false, ai_engine_pw_norm_c96_s8, ai_engine_pw_residual_c96_s8, ai_engine_pw_residual_x_c96_s8},
+    {144, false, ai_engine_pw_norm_c144_s8, ai_engine_pw_residual_c144_s8, ai_engine_pw_residual_x_c144_s8},
+    {192, false, ai_engine_pw_norm_c192_s8, ai_engine_pw_residual_c192_s8, ai_engine_pw_residual_x_c192_s8},
 };
 
 int padded(int channels) noexcept
@@ -419,7 +365,7 @@ class ConvBlock final : public dl::module::Module {
         } else if (channels_ == padded_) {
             memcpy(slot, from, (lane.x_hi - lane.x_lo) * channels_);
         } else {
-            ai_engine_pad_row_s8_esp32s3(slot, from, runs.pad.data());
+            ai_engine_pad_row_s8(slot, from, runs.pad.data());
         }
     }
 
@@ -458,7 +404,7 @@ class ConvBlock final : public dl::module::Module {
                                            column(lane, x_row(lane, t + 1), f0 - 1)};
             runs.dw1[kRunPixels] = std::min(strip_, lane.c_hi - f0);
             runs.norm[kRunPixels] = runs.dw1[kRunPixels];
-            ai_engine_dw3x3_row_s8_esp32s3(lane.a, window, dw1_, runs.dw1.data());
+            ai_engine_dw3x3_row_s8(lane.a, window, dw1_, runs.dw1.data());
             norm_kernel_(column(lane, row, f0), lane.a, pw1_, runs.norm.data());
             preload.pump();
         }
@@ -474,7 +420,7 @@ class ConvBlock final : public dl::module::Module {
                                            column(lane, c_row(lane, t + 1), f0 - 1)};
             runs.dw2[kRunPixels] = std::min(strip_, lane.hi - f0);
             runs.residual[kRunPixels] = runs.dw2[kRunPixels];
-            ai_engine_dw3x3_row_s8_esp32s3(lane.d, window, dw2_, runs.dw2.data());
+            ai_engine_dw3x3_row_s8(lane.d, window, dw2_, runs.dw2.data());
             runs.residual[kResidualX] = word_of(column(lane, x_row(lane, t), f0));
             if (post_.empty()) {
                 residual_kernel_(ys_ + (t * width_ + f0) * channels_, lane.d, pw2_, runs.residual.data());
@@ -612,7 +558,7 @@ class ConvBlock final : public dl::module::Module {
             const int in = pre_[kJoinedValues] / kChannelStep;
             lane.runs.pre = {x_pixels, vectors, in, in - 1, 0, pre_[kJoinedShift], 0, 0, -1, kChannelStep, 0};
         }
-        if (!post_.empty() && post_kernel_ == ai_engine_pw_conv_k24_n12_s8_esp32s3) {
+        if (!post_.empty() && post_kernel_ == ai_engine_pw_conv_k24_n12_s8) {
             lane.runs.post = {x_pixels, 1, 0, 0, 0, post_[kJoinedShift], 0, 0, -1, kChannelStep, 0};
         } else if (!post_.empty()) {
             const int n = post_[kJoinedValues];
@@ -648,14 +594,14 @@ class ConvBlock final : public dl::module::Module {
         }
         if (!pre_.empty()) {
             const int k = pre_[kJoinedValues];
-            pre_kernel_ = k == kPreSmall  ? ai_engine_pw_conv_k12_s8_esp32s3
-                          : k == kPreWide ? ai_engine_pw_conv_k24_s8_esp32s3
-                          : k == kPreHeld ? ai_engine_pw_conv_k48_s8_esp32s3
-                                          : ai_engine_pw_conv_rows_s8_esp32s3;
+            pre_kernel_ = k == kPreSmall  ? ai_engine_pw_conv_k12_s8
+                          : k == kPreWide ? ai_engine_pw_conv_k24_s8
+                          : k == kPreHeld ? ai_engine_pw_conv_k48_s8
+                                          : ai_engine_pw_conv_rows_s8;
         }
         if (!post_.empty()) {
             const bool narrow = channels_ == kPreWide && post_[kJoinedValues] == kPostOutputs;
-            post_kernel_ = narrow ? ai_engine_pw_conv_k24_n12_s8_esp32s3 : ai_engine_pw_conv_rows_s8_esp32s3;
+            post_kernel_ = narrow ? ai_engine_pw_conv_k24_n12_s8 : ai_engine_pw_conv_rows_s8;
         }
         if (!place_lanes()) { return false; }
         for (Lane *lane : {&whole_, &halves_[0], &halves_[1]}) {
@@ -696,8 +642,8 @@ class ConvBlock final : public dl::module::Module {
     const int8_t *pw2_ = nullptr;
     const int8_t *pre_weights_ = nullptr;
     const int8_t *post_weights_ = nullptr;
-    RowKernel norm_kernel_ = ai_engine_pw_norm_row_s8_esp32s3;
-    RowKernel residual_kernel_ = ai_engine_pw_residual_row_s8_esp32s3;
+    RowKernel norm_kernel_ = ai_engine_pw_norm_row_s8;
+    RowKernel residual_kernel_ = ai_engine_pw_residual_row_s8;
     RowKernel pre_kernel_ = nullptr;
     RowKernel post_kernel_ = nullptr;
     bool held_ = false; // inputs held in registers, rows whole: no strips, no loan

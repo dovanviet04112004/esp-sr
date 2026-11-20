@@ -9,15 +9,11 @@
 #include <vector>
 
 #include "core/espdl/runtime/espdl_loan.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_band_k1_s8_esp32s3(int8_t *out, const int32_t *run);
-void ai_engine_band_k1_res_s8_esp32s3(int8_t *out, const int32_t *run);
-}
 
 namespace ai {
 
@@ -155,10 +151,10 @@ class BandChain final : public dl::module::Module {
             }
             for (Block &b : blocks_) {
                 b.first[kFastColumns] = word_of(in);
-                ai_engine_band_k1_s8_esp32s3(middle, b.first.data());
+                ai_engine_band_k1_s8(middle, b.first.data());
                 b.second[kFastColumns] = word_of(middle);
                 b.second[kFastResidualDelta] = word_of(in) - word_of(out);
-                ai_engine_band_k1_res_s8_esp32s3(out, b.second.data());
+                ai_engine_band_k1_res_s8(out, b.second.data());
                 std::swap(in, out);
             }
             for (int band = 0; band < bands_; band++) {

@@ -8,14 +8,11 @@
 #include <vector>
 
 #include "core/espdl/runtime/espdl_loan.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_dw_time_s8_esp32s3(int8_t *out, const int8_t *x, const int8_t *taps, const int32_t *run);
-}
 
 namespace ai {
 
@@ -94,8 +91,8 @@ class TimeDepthwise final : public dl::module::Module {
             memcpy(rows + edge + t * padded_, xs + t * channels_, channels_);
         }
         run_[kRunBias] = word_of(context->get_tensor(m_inputs_index[kBias])->get_element_ptr());
-        ai_engine_dw_time_s8_esp32s3(
-            out, rows, context->get_tensor(m_inputs_index[kTaps])->get_element_ptr<int8_t>(), run_.data());
+        ai_engine_dw_time_s8(out, rows, context->get_tensor(m_inputs_index[kTaps])->get_element_ptr<int8_t>(),
+                             run_.data());
         for (int t = 0; t < frames_; t++) {
             memcpy(ys + t * channels_, out + t * padded_, channels_);
         }

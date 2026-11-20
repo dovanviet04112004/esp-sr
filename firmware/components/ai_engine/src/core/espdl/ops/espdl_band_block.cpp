@@ -9,19 +9,11 @@
 #include <vector>
 
 #include "core/espdl/runtime/espdl_loan.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_band_conv_s8_esp32s3(int8_t *out, const int8_t *const *columns, const int8_t *weights,
-                                    const int32_t *run);
-void ai_engine_band_k1_s8_esp32s3(int8_t *out, const int32_t *run);
-void ai_engine_band_k1_res_s8_esp32s3(int8_t *out, const int32_t *run);
-void ai_engine_band_k3_s8_esp32s3(int8_t *out, const int32_t *run);
-void ai_engine_band_k3_res_s8_esp32s3(int8_t *out, const int32_t *run);
-}
 
 namespace ai {
 
@@ -182,7 +174,7 @@ class BandBlock final : public dl::module::Module {
                 const int at = t - half + c;
                 columns[c] = at >= 0 && at < frames_ ? middle_column(at) : nullptr;
             }
-            ai_engine_band_conv_s8_esp32s3(out, columns, w2, second_.data());
+            ai_engine_band_conv_s8(out, columns, w2, second_.data());
         }
     }
 
@@ -305,7 +297,7 @@ class BandBlock final : public dl::module::Module {
             const int at = t - half + c;
             columns[c] = at >= 0 && at < frames_ ? xs_ + at * kChannels : nullptr;
         }
-        ai_engine_band_conv_s8_esp32s3(middle_column(t), columns, w1, first_.data());
+        ai_engine_band_conv_s8(middle_column(t), columns, w1, first_.data());
     }
 
     // Each band's first tap within the map, as offsets into a column whose bands lie in_stride bytes apart.
@@ -399,8 +391,8 @@ class BandBlock final : public dl::module::Module {
         second_fast_[kFastShift] = shifts_[kShift2] - 1;
         second_fast_[kFastResidual] = shifts_[kShiftResidual] - 1;
         const bool three = time_taps_ == kTimeTapsMax;
-        first_kernel_ = three ? ai_engine_band_k3_s8_esp32s3 : ai_engine_band_k1_s8_esp32s3;
-        second_kernel_ = three ? ai_engine_band_k3_res_s8_esp32s3 : ai_engine_band_k1_res_s8_esp32s3;
+        first_kernel_ = three ? ai_engine_band_k3_s8 : ai_engine_band_k1_s8;
+        second_kernel_ = three ? ai_engine_band_k3_res_s8 : ai_engine_band_k1_res_s8;
         loan_ask(scratch_bytes_);
         built_ = true;
         return true;

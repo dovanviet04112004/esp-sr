@@ -1,6 +1,7 @@
 #include "core/espdl/ops/espdl_layernorm_s8.hpp"
 
-#include "core/espdl/ops/espdl_float_s3.hpp"
+#include "core/espdl/ops/espdl_float.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 
 #include <algorithm>
 #include <array>
@@ -17,14 +18,6 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_ln_deviations_s8_esp32s3(float *dev, float *variances, const int8_t *x, int pairs,
-                                        const int32_t *run);
-void ai_engine_ln_scales_s8_esp32s3(float *scales, const float *variances, const int32_t *run, int pairs);
-void ai_engine_ln_outputs_s8_esp32s3(int8_t *y, const float *dev, const float *scales, const float *gb,
-                                     int pairs, const int32_t *run);
-}
 
 namespace ai {
 
@@ -208,15 +201,15 @@ void LayerNormRows::run_pairs(const int8_t *xs, int8_t *ys, int positions) const
     while (positions - p >= 2) {
         const int count = std::min(kBlock, (positions - p) & ~1);
         const int pairs = count / 2;
-        ai_engine_ln_deviations_s8_esp32s3(deviations_, variances_, xs + p * n_, pairs, run_.data());
-        ai_engine_ln_scales_s8_esp32s3(scales_, variances_, run_.data(), pairs);
+        ai_engine_ln_deviations_s8(deviations_, variances_, xs + p * n_, pairs, run_.data());
+        ai_engine_ln_scales_s8(scales_, variances_, run_.data(), pairs);
         for (int i = 0; i < count; i++) {
             const float v = variances_[i];
             if (scales_[i] == 0.0f || v < kRootLow || v >= kRootHigh) {
                 scales_[i] = divide(1.0f, sqrt_newton(v)) * in_scale_;
             }
         }
-        ai_engine_ln_outputs_s8_esp32s3(ys + p * n_, deviations_, scales_, gb_, pairs, run_.data());
+        ai_engine_ln_outputs_s8(ys + p * n_, deviations_, scales_, gb_, pairs, run_.data());
         p += count;
     }
     if (p < positions) { run_position(xs + p * n_, ys + p * n_); }

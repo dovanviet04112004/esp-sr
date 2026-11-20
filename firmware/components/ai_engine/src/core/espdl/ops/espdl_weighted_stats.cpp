@@ -11,16 +11,12 @@
 
 #include "core/espdl/runtime/espdl_loan.hpp"
 #include "core/espdl/ops/espdl_softmax_quant.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_define.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_weighted_stats_row_s8_esp32s3(int16_t *sums, const int8_t *x, const int8_t *p,
-                                             const int32_t *run);
-}
 
 namespace ai {
 
@@ -88,8 +84,7 @@ class WeightedStats final : public dl::module::Module {
             softmax_groups(ps, xs);
         } else {
             for (int t = 0; t < frames_; t++) {
-                ai_engine_weighted_stats_row_s8_esp32s3(sums_, xs + t * channels_, ps + t * channels_,
-                                                        run_.data());
+                ai_engine_weighted_stats_row_s8(sums_, xs + t * channels_, ps + t * channels_, run_.data());
             }
         }
         int8_t *weighted = context->get_tensor(m_outputs_index[0])->get_element_ptr<int8_t>();
@@ -184,8 +179,8 @@ class WeightedStats final : public dl::module::Module {
                                out_rescale_);
             run[0] = columns / kStep;
             for (int t = 0; t < frames_; t++) {
-                ai_engine_weighted_stats_row_s8_esp32s3(
-                    sums_ + g / kStep * kGroupSums, xs + t * channels_ + g, probs + t * kGroup, run.data());
+                ai_engine_weighted_stats_row_s8(sums_ + g / kStep * kGroupSums, xs + t * channels_ + g,
+                                                probs + t * kGroup, run.data());
             }
         }
     }

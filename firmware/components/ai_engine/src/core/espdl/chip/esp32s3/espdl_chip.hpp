@@ -1,27 +1,17 @@
-/** The float32 steps of esp-dl's S3 build that ai_engine's int8 norms repeat bit for bit (KEHOACH 3.14
- * step 2.5): its division, its Newton square root and its round half up into int8.
+/** What ai_engine's ops take from the S3 (KEHOACH 3.14, ADR-0045): the dcache size they cut work by, and
+ * esp-dl's float division and round half up into int8 as its S3 build runs them.
  *  @ctx any | non-blocking | pure
  */
 #pragma once
 
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
-#include <cstring>
+
+#include "sdkconfig.h"
 
 namespace ai {
 
-constexpr float kNewtonStop = 0.00001f; // EN of esp-dl's dl_math.hpp
-
-/** v's float32 bits.
- *  @ctx any | non-blocking
- */
-inline int32_t bits_of(float v) noexcept
-{
-    int32_t bits;
-    memcpy(&bits, &v, sizeof(bits));
-    return bits;
-}
+constexpr int kDataCacheBytes = CONFIG_ESP32S3_DATA_CACHE_SIZE;
 
 /** a / b by the instructions of the S3 ROM's __divsf3, in their order, without its call.
  *  @ctx any | non-blocking
@@ -58,22 +48,6 @@ inline float divide(float a, float b) noexcept
           [t7] "=&f"(t7), [t8] "=&f"(t8)
         : [a] "f"(a), [b] "f"(b));
     return q;
-}
-
-/** esp-dl's dl::math::sqrt_newton: halving is exact, so its double 0.5 gives what float does, and its first
- * step divides x by itself, 1 exactly.
- *  @ctx any | non-blocking
- */
-inline float sqrt_newton(float x) noexcept
-{
-    if (x == 0.0f) { return 0.0f; }
-    float last = x;
-    float result = (x + 1.0f) * 0.5f;
-    while (fabsf(result - last) > kNewtonStop) {
-        last = result;
-        result = (last + divide(x, last)) * 0.5f;
-    }
-    return result;
 }
 
 /** esp-dl's floor(v + 0.5) in double then its int8 clip: below 2^22 the float sum v + 0.5 rounds to no other

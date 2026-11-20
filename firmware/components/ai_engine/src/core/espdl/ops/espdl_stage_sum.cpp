@@ -9,12 +9,10 @@
 #include <vector>
 
 #include "core/espdl/runtime/espdl_loan.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_module_base.hpp"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" void ai_engine_stage_sum_row_s8_esp32s3(int8_t *row, const int8_t *x, const int8_t *weights,
-                                                   const int32_t *run);
 
 namespace ai {
 
@@ -79,8 +77,7 @@ class StageSum final : public dl::module::Module {
             for (size_t k = 0; k < terms_.size(); k++) {
                 for (int t = t0; t < end; t++) {
                     const int8_t *x = maps_[k] + t / terms_[k].rows * channels;
-                    ai_engine_stage_sum_row_s8_esp32s3(out + t * channels, x, weights_[k],
-                                                       terms_[k].run.data());
+                    ai_engine_stage_sum_row_s8(out + t * channels, x, weights_[k], terms_[k].run.data());
                 }
             }
         }

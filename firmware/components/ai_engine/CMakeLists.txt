@@ -1,4 +1,5 @@
 set(espdl "src/core/espdl")
+idf_build_get_property(target IDF_TARGET)
 set(srcs "src/core/engine.cpp" "src/core/model_image.cpp" "src/core/espdl_net.cpp" "${espdl}/espdl_ops.cpp"
          "${espdl}/ops/espdl_attention.cpp" "${espdl}/ops/espdl_band_block.cpp" "${espdl}/ops/espdl_band_chain.cpp"
          "${espdl}/ops/espdl_band_head.cpp"
@@ -17,7 +18,7 @@ set(srcs "src/core/engine.cpp" "src/core/model_image.cpp" "src/core/espdl_net.cp
          "${espdl}/kernels/stage_sum_s8_esp32s3.S" "${espdl}/kernels/stats_s8_esp32s3.S"
          "${espdl}/kernels/lut_s8_esp32s3.S" "${espdl}/kernels/lut_s16_esp32s3.S"
          "${espdl}/kernels/stem_s8_esp32s3.S"
-         "${espdl}/runtime/espdl_loan.cpp" "${espdl}/runtime/espdl_preload.cpp"
+         "${espdl}/runtime/espdl_loan.cpp" "${espdl}/runtime/espdl_preload_${target}.cpp"
          "src/ns/ns.cpp" "src/wake/wake.cpp" "src/wake/score.c" "src/speaker/speaker.cpp" "src/speaker/score.c" "src/synth/synth.cpp"
          "src/pitch/pitch.cpp" "src/pitch/decode.c" "src/detect/detect.cpp" "src/detect/decode.c")
 if(CONFIG_AI_ENGINE_COMMAND_BACKEND_CTC)
@@ -36,7 +37,7 @@ endif()
 idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS "include"
-    PRIV_INCLUDE_DIRS "src"
+    PRIV_INCLUDE_DIRS "src" "${espdl}/kernels/impl/pie_esp32s3" "${espdl}/chip/${target}"
     REQUIRES common dsp_afe dsp_spec
     PRIV_REQUIRES sys_storage mbedtls log esp_timer espressif__esp-dl
 )

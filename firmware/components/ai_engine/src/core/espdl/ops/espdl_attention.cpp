@@ -7,16 +7,12 @@
 #include <vector>
 
 #include "core/espdl/ops/espdl_softmax_quant.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_define.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_pw_bias_row_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-}
 
 namespace ai {
 
@@ -36,7 +32,7 @@ int round_up(int n, int step) noexcept
     return (n + step - 1) / step * step;
 }
 
-// The run of ai_engine_pw_bias_row_s8_esp32s3 for rows of `inputs` values, a row stride of `stride` bytes,
+// The run of ai_engine_pw_bias_row_s8 for rows of `inputs` values, a row stride of `stride` bytes,
 // one block of 16 outputs and no bias.
 std::array<int32_t, kRunSize> product_run(int rows, int inputs, int stride, int shift) noexcept
 {
@@ -84,10 +80,9 @@ class AttentionCore final : public dl::module::Module {
         for (int h = 0; h < heads_; h++) {
             lay_head(h, k, q, v);
             for (int g = 0; g < groups_; g++) {
-                ai_engine_pw_bias_row_s8_esp32s3(scores_, keys_, queries_ + g * depth_ * kStep,
-                                                 score_run_.data());
+                ai_engine_pw_bias_row_s8(scores_, keys_, queries_ + g * depth_ * kStep, score_run_.data());
                 softmax_block_s8(scores_, probs_, frames_, kStep, table_, scales_, out_rescale_);
-                ai_engine_pw_bias_row_s8_esp32s3(weighted_, values_, probs_, value_run_.data());
+                ai_engine_pw_bias_row_s8(weighted_, values_, probs_, value_run_.data());
                 scatter(h, g, o);
             }
         }

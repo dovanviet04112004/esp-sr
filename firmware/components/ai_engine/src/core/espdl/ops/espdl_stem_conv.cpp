@@ -10,17 +10,12 @@
 
 #include "core/espdl/ops/espdl_layernorm_s8.hpp"
 #include "core/espdl/runtime/espdl_loan.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_define.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_dw3x3_bias_row_s8_esp32s3(int8_t *out, const int8_t *const *rows, const int8_t *taps,
-                                         const int32_t *run);
-void ai_engine_spread_row_s8_esp32s3(int8_t *out, const int8_t *in, int pixels);
-}
 
 namespace ai {
 
@@ -83,8 +78,8 @@ class StemConv final : public dl::module::Module {
             const int8_t *window[kRing] = {row(t - 1), row(t), row(t + 1)};
             for (int v = 0; v < vectors_; v++) {
                 run_[kRunBias] = reinterpret_cast<int32_t>(bias + v * kBiasBytes);
-                ai_engine_dw3x3_bias_row_s8_esp32s3(convolved_ + v * width_ * kStep, window,
-                                                    taps + v * kTaps * kStep, run_.data());
+                ai_engine_dw3x3_bias_row_s8(convolved_ + v * width_ * kStep, window, taps + v * kTaps * kStep,
+                                            run_.data());
             }
             if (!normed_) {
                 interleave(ys + t * width_ * channels_);
@@ -154,7 +149,7 @@ class StemConv final : public dl::module::Module {
         if (t >= frames_) {
             memset(slot, 0, width_ * kStep);
         } else {
-            ai_engine_spread_row_s8_esp32s3(slot, xs + t * width_, width_);
+            ai_engine_spread_row_s8(slot, xs + t * width_, width_);
         }
     }
 

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/espdl/runtime/espdl_loan.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_base_conv2d.hpp"
 #include "dl_base_conv_args.hpp"
 #include "dl_base_conv_select.hpp"
@@ -15,10 +16,6 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_lut_s8_esp32s3(int8_t *values, int n, const int8_t *turned);
-}
 
 namespace ai {
 
@@ -282,7 +279,7 @@ class C3k2Block final : public dl::module::Module {
                 run_pointwise(args[kCv1], kCv1, xs + j * x_row, cat);
                 int8_t *y1 = rows.y1 + (j % kRing) * rows.y1_bytes;
                 for (int p = 0; p < s.w; p++) {
-                    ai_engine_lut_s8_esp32s3(cat + p * s.cat, 2 * s.c, turned_[kCv1].data());
+                    ai_engine_lut_s8(cat + p * s.cat, 2 * s.c, turned_[kCv1].data());
                     memcpy(y1 + p * s.c, cat + p * s.cat + s.c, s.c);
                 }
                 memcpy(y1 + kRing * rows.y1_bytes, y1, rows.y1_bytes);
@@ -291,13 +288,13 @@ class C3k2Block final : public dl::module::Module {
                 const int r = j - 1;
                 int8_t *t = rows.t + (r % kRing) * rows.t_bytes;
                 run_window(args[kM1], kM1, rows.y1, rows.y1_bytes, r, s.h, t);
-                ai_engine_lut_s8_esp32s3(t, static_cast<int>(rows.t_bytes), turned_[kM1].data());
+                ai_engine_lut_s8(t, static_cast<int>(rows.t_bytes), turned_[kM1].data());
                 memcpy(t + kRing * rows.t_bytes, t, rows.t_bytes);
             }
             if (j >= 2) {
                 const int r = j - 2;
                 run_window(args[kM2], kM2, rows.t, rows.t_bytes, r, s.h, rows.u);
-                ai_engine_lut_s8_esp32s3(rows.u, static_cast<int>(rows.y1_bytes), turned_[kM2].data());
+                ai_engine_lut_s8(rows.u, static_cast<int>(rows.y1_bytes), turned_[kM2].data());
                 int8_t *cat = rows.cat + (r % kRing) * rows.cat_bytes;
                 const int8_t *y1 = rows.y1 + (r % kRing) * rows.y1_bytes;
                 for (int p = 0; p < s.w; p++) {
@@ -308,7 +305,7 @@ class C3k2Block final : public dl::module::Module {
                 }
                 int8_t *out = ys + r * y_row;
                 run_pointwise(args[kCv2], kCv2, cat, out);
-                ai_engine_lut_s8_esp32s3(out, static_cast<int>(y_row), turned_[kCv2].data());
+                ai_engine_lut_s8(out, static_cast<int>(y_row), turned_[kCv2].data());
             }
         }
     }

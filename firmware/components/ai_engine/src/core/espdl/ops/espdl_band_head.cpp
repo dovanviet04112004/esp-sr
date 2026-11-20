@@ -9,17 +9,11 @@
 #include <vector>
 
 #include "core/espdl/runtime/espdl_loan.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_band_conv_s8_esp32s3(int8_t *out, const int8_t *const *columns, const int8_t *weights,
-                                    const int32_t *run);
-void ai_engine_band_k1_linear_s8_esp32s3(int8_t *out, const int32_t *run);
-void ai_engine_band_k3_s8_esp32s3(int8_t *out, const int32_t *run);
-}
 
 namespace ai {
 
@@ -200,20 +194,20 @@ class BandHead final : public dl::module::Module {
                 for (int c = 0; c < kHeadTaps; c++) {
                     head_fast_[kFastColumns + c] = word_of(input_column(xs, first + c));
                 }
-                ai_engine_band_k3_s8_esp32s3(head, head_fast_.data());
+                ai_engine_band_k3_s8(head, head_fast_.data());
             } else if (first >= 0 && first + kHeadTaps <= frames_) {
                 for (int c = 0; c < kHeadTaps; c++) {
                     head_fast_[kFastColumns + c] = word_of(xs + (first + c) * kChannels);
                 }
-                ai_engine_band_k3_s8_esp32s3(head, head_fast_.data());
+                ai_engine_band_k3_s8(head, head_fast_.data());
             } else {
                 for (int c = 0; c < kHeadTaps; c++) {
                     const int at = first + c;
                     columns[c] = at >= 0 && at < frames_ ? xs + at * kChannels : nullptr;
                 }
-                ai_engine_band_conv_s8_esp32s3(head, columns, head_w, head_run_.data());
+                ai_engine_band_conv_s8(head, columns, head_w, head_run_.data());
             }
-            ai_engine_band_k1_linear_s8_esp32s3(spread, spread_fast_.data());
+            ai_engine_band_k1_linear_s8(spread, spread_fast_.data());
             for (int c = 0; c < outputs_; c++) {
                 int8_t most = spread[c];
                 for (int b = 1; b < out_bands; b++) {

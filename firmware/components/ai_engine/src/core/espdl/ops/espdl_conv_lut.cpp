@@ -9,20 +9,15 @@
 #include <vector>
 
 #include "core/espdl/runtime/espdl_loan.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_base_conv2d.hpp"
 #include "dl_base_conv_args.hpp"
 #include "dl_base_conv_select.hpp"
 #include "dl_base_depthwise_conv2d.hpp"
 #include "dl_module_base.hpp"
 #include "esp_log.h"
+#include "espdl_chip.hpp"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_stem3_s8_esp32s3(int8_t *out, const int32_t *run);
-void ai_engine_stem3_top_s8_esp32s3(int8_t *out, const int32_t *run);
-void ai_engine_lut_s8_esp32s3(int8_t *values, int n, const int8_t *turned);
-void ai_engine_lut_s16_esp32s3(int16_t *values, int n, const int16_t *middle, int shift);
-}
 
 namespace ai {
 
@@ -33,9 +28,9 @@ const char *TAG = "conv_lut";
 constexpr size_t kRank = 4;
 constexpr size_t kPads = 4;
 constexpr size_t kSpatial = 2;
-constexpr int kBandBytes = CONFIG_ESP32S3_DATA_CACHE_SIZE / 4; // a band's output, as PointwiseS8's chunks
-constexpr int kLoanFilterBytes = 32 * 1024;                    // the most weights a pass copies to the loan
-constexpr int kBandWorkBytes = CONFIG_ESP32S3_DATA_CACHE_SIZE / 2; // a loaned pass's input and output rows
+constexpr int kBandBytes = kDataCacheBytes / 4;     // a band's output, as PointwiseS8's chunks
+constexpr int kLoanFilterBytes = 32 * 1024;         // the most weights a pass copies to the loan
+constexpr int kBandWorkBytes = kDataCacheBytes / 2; // a loaned pass's input and output rows
 constexpr int kVectorBytes = 16;
 constexpr int kTableSpan = 65536; // int16 inputs an int16 table steps over
 constexpr int kTableMiddle = 128; // an int8 table's entry for input 0
@@ -315,9 +310,9 @@ class ConvLut final : public dl::module::Module {
                 run[kStemWeights] = word_of(weights[ox] + (top ? kStemRowBytes : 0));
                 int8_t *out = ys + ox * a.output_x_offset;
                 if (top) {
-                    ai_engine_stem3_top_s8_esp32s3(out, run.data());
+                    ai_engine_stem3_top_s8(out, run.data());
                 } else {
-                    ai_engine_stem3_s8_esp32s3(out, run.data());
+                    ai_engine_stem3_s8(out, run.data());
                 }
             }
         }
@@ -368,10 +363,9 @@ class ConvLut final : public dl::module::Module {
         if (quant_type == dl::QUANT_TYPE_SYMM_8BIT) {
             alignas(kVectorBytes) std::array<int8_t, kTableBytes> turned;
             turn(static_cast<const int8_t *>(table), turned.data());
-            ai_engine_lut_s8_esp32s3(static_cast<int8_t *>(values), n, turned.data());
+            ai_engine_lut_s8(static_cast<int8_t *>(values), n, turned.data());
         } else {
-            ai_engine_lut_s16_esp32s3(static_cast<int16_t *>(values), n, middle16(table, step),
-                                      shift_of(step));
+            ai_engine_lut_s16(static_cast<int16_t *>(values), n, middle16(table, step), shift_of(step));
         }
     }
 
@@ -383,14 +377,14 @@ class ConvLut final : public dl::module::Module {
             turn(static_cast<const int8_t *>(table), turned.data());
             int8_t *v = static_cast<int8_t *>(values);
             for (int p = 0; p < pixels; p++, v += stride) {
-                ai_engine_lut_s8_esp32s3(v, n, turned.data());
+                ai_engine_lut_s8(v, n, turned.data());
             }
             return;
         }
         const int16_t *middle = middle16(table, step);
         int16_t *v = static_cast<int16_t *>(values);
         for (int p = 0; p < pixels; p++, v += stride) {
-            ai_engine_lut_s16_esp32s3(v, n, middle, shift_of(step));
+            ai_engine_lut_s16(v, n, middle, shift_of(step));
         }
     }
 

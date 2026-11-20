@@ -9,14 +9,11 @@
 #include <vector>
 
 #include "core/espdl/runtime/espdl_loan.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_module_base.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_band_k3_l3_s8_esp32s3(int8_t *out, const int32_t *run);
-}
 
 namespace ai {
 
@@ -26,7 +23,7 @@ const char *TAG = "band_stem";
 
 constexpr size_t kRank = 4;
 constexpr int kChannels = 16;    // an output pixel's values, one vector
-constexpr int kLanes = 3;        // inputs a pixel of ai_engine_band_k3_l3_s8_esp32s3
+constexpr int kLanes = 3;        // inputs a pixel of ai_engine_band_k3_l3_s8
 constexpr int kTaps = 3;         // bands and frames
 constexpr int kKept = kTaps - 1; // laid columns a streaming call takes from the last
 constexpr size_t kVectorAlignBytes = 16;
@@ -141,7 +138,7 @@ class BandStem final : public dl::module::Module {
                 const int8_t *column = at >= 0 && at < frames_ ? ring + at % kTaps * column_bytes_ : zeros;
                 fast_[kFastColumns + c] = word_of(column);
             }
-            ai_engine_band_k3_l3_s8_esp32s3(ys + t * kChannels, fast_.data());
+            ai_engine_band_k3_l3_s8(ys + t * kChannels, fast_.data());
         }
     }
 
@@ -195,7 +192,7 @@ class BandStem final : public dl::module::Module {
             for (int c = 0; c < kTaps; c++) {
                 fast_[kFastColumns + c] = word_of(slot(ring, t - kKept + c));
             }
-            ai_engine_band_k3_l3_s8_esp32s3(ys + t * kChannels, fast_.data());
+            ai_engine_band_k3_l3_s8(ys + t * kChannels, fast_.data());
         }
         for (int k = 0; k < kKept; k++) {
             memcpy(kept_ + k * column_bytes_, slot(ring, frames_ - kKept + k), column_bytes_);

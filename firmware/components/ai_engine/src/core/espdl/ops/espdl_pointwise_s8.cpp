@@ -11,58 +11,13 @@
 #include "core/espdl/runtime/espdl_loan.hpp"
 #include "core/espdl/runtime/espdl_preload.hpp"
 #include "core/espdl/runtime/espdl_split.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 #include "dl_module_base.hpp"
+#include "espdl_chip.hpp"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
 #include "sdkconfig.h"
-
-extern "C" {
-void ai_engine_pw_conv_rows_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                       const int32_t *run);
-void ai_engine_pw_add_rows_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_add_x_rows_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                        const int32_t *run);
-void ai_engine_pw_conv_k24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_conv_k48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_add_k24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
-void ai_engine_pw_add_k48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
-void ai_engine_pw_add_x_k24_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                       const int32_t *run);
-void ai_engine_pw_add_x_k48_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                       const int32_t *run);
-void ai_engine_pw_conv_k72_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_add_k72_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
-void ai_engine_pw_add_x_k72_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                       const int32_t *run);
-void ai_engine_pw_conv_k96_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_add_k96_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
-void ai_engine_pw_add_x_k96_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                       const int32_t *run);
-void ai_engine_pw_conv_k128_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                       const int32_t *run);
-void ai_engine_pw_add_k128_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_add_x_k128_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                        const int32_t *run);
-void ai_engine_pw_conv_k144_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                       const int32_t *run);
-void ai_engine_pw_add_k144_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_add_x_k144_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                        const int32_t *run);
-void ai_engine_pw_conv_k192_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                       const int32_t *run);
-void ai_engine_pw_add_k192_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                      const int32_t *run);
-void ai_engine_pw_add_x_k192_s8_esp32s3(int8_t *out, const int8_t *in, const int8_t *filter,
-                                        const int32_t *run);
-}
 
 namespace ai {
 
@@ -76,8 +31,7 @@ constexpr int kAllHalves = 0; // the run's last width: every block stored as two
 constexpr size_t kVectorAlignBytes = 16;
 constexpr size_t kBiasBlockBytes = 64; // one block's bias in esp-dl's QACC layout
 constexpr size_t kPatchRank = 4;
-constexpr size_t kRank1d = 3; // [1, T, K], the only map whose rows may be a multiple of 8
-constexpr int kDataCacheBytes = CONFIG_ESP32S3_DATA_CACHE_SIZE;
+constexpr size_t kRank1d = 3;                    // [1, T, K], the only map whose rows may be a multiple of 8
 constexpr int kChunkBytes = kDataCacheBytes / 4; // a loan slice's rows a kernel call, as Preload takes them
 
 using RowKernel = void (*)(int8_t *out, const int8_t *in, const int8_t *filter, const int32_t *run);
@@ -92,24 +46,17 @@ struct Kernels {
 
 // Inputs held in registers.
 constexpr Kernels kHeld[] = {
-    {24, ai_engine_pw_conv_k24_s8_esp32s3, ai_engine_pw_add_k24_s8_esp32s3,
-     ai_engine_pw_add_x_k24_s8_esp32s3},
-    {48, ai_engine_pw_conv_k48_s8_esp32s3, ai_engine_pw_add_k48_s8_esp32s3,
-     ai_engine_pw_add_x_k48_s8_esp32s3},
+    {24, ai_engine_pw_conv_k24_s8, ai_engine_pw_add_k24_s8, ai_engine_pw_add_x_k24_s8},
+    {48, ai_engine_pw_conv_k48_s8, ai_engine_pw_add_k48_s8, ai_engine_pw_add_x_k48_s8},
 };
 
 // Inputs read a vector at a time, the products unrolled; slices and the loan as the looped kernel takes them.
 constexpr Kernels kUnrolled[] = {
-    {72, ai_engine_pw_conv_k72_s8_esp32s3, ai_engine_pw_add_k72_s8_esp32s3,
-     ai_engine_pw_add_x_k72_s8_esp32s3},
-    {96, ai_engine_pw_conv_k96_s8_esp32s3, ai_engine_pw_add_k96_s8_esp32s3,
-     ai_engine_pw_add_x_k96_s8_esp32s3},
-    {128, ai_engine_pw_conv_k128_s8_esp32s3, ai_engine_pw_add_k128_s8_esp32s3,
-     ai_engine_pw_add_x_k128_s8_esp32s3},
-    {144, ai_engine_pw_conv_k144_s8_esp32s3, ai_engine_pw_add_k144_s8_esp32s3,
-     ai_engine_pw_add_x_k144_s8_esp32s3},
-    {192, ai_engine_pw_conv_k192_s8_esp32s3, ai_engine_pw_add_k192_s8_esp32s3,
-     ai_engine_pw_add_x_k192_s8_esp32s3},
+    {72, ai_engine_pw_conv_k72_s8, ai_engine_pw_add_k72_s8, ai_engine_pw_add_x_k72_s8},
+    {96, ai_engine_pw_conv_k96_s8, ai_engine_pw_add_k96_s8, ai_engine_pw_add_x_k96_s8},
+    {128, ai_engine_pw_conv_k128_s8, ai_engine_pw_add_k128_s8, ai_engine_pw_add_x_k128_s8},
+    {144, ai_engine_pw_conv_k144_s8, ai_engine_pw_add_k144_s8, ai_engine_pw_add_x_k144_s8},
+    {192, ai_engine_pw_conv_k192_s8, ai_engine_pw_add_k192_s8, ai_engine_pw_add_x_k192_s8},
 };
 
 const Kernels *kernels_for(const Kernels *table, size_t count, int k) noexcept
@@ -436,8 +383,8 @@ class PointwiseS8 final : public dl::module::Module {
         looped_ = h == nullptr;
         if (looped_) {
             const Kernels *u = kernels_for(kUnrolled, std::size(kUnrolled), k);
-            const Kernels looped = {k, ai_engine_pw_conv_rows_s8_esp32s3, ai_engine_pw_add_rows_s8_esp32s3,
-                                    ai_engine_pw_add_x_rows_s8_esp32s3};
+            const Kernels looped = {k, ai_engine_pw_conv_rows_s8, ai_engine_pw_add_rows_s8,
+                                    ai_engine_pw_add_x_rows_s8};
             const Kernels &f = u != nullptr ? *u : looped;
             kernel_ = residual == nullptr ? f.conv : residual_shift_ > 0 ? f.add_x : f.add;
             slice_blocks_ = slice_blocks(k);

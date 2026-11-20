@@ -1,4 +1,5 @@
 #include "core/espdl/ops/espdl_softmax_quant.hpp"
+#include "core/espdl/kernels/espdl_kernels.hpp"
 
 #include <algorithm>
 #include <array>
@@ -15,15 +16,6 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fbs_model.hpp"
-
-extern "C" {
-void ai_engine_softmax_row_sums_s8_esp32s3(float *sums, const int8_t *x, const float *table, int len,
-                                           int stride);
-void ai_engine_softmax_sums_s8_esp32s3(float *sums, const int8_t *x, const float *table, int rows,
-                                       int stride);
-void ai_engine_softmax_norm_s8_esp32s3(int8_t *y, const int8_t *x, const float *table, const float *scales,
-                                       int rows, const int32_t *strides);
-}
 
 namespace ai {
 
@@ -184,14 +176,14 @@ void softmax_columns_s8(int8_t *y, int y_stride, const int8_t *x, int len, int s
                         const float *table, float *scales, float out_rescale) noexcept
 {
     for (int k = 0; k < columns; k += kStrip) {
-        ai_engine_softmax_sums_s8_esp32s3(scales + k, x + k, table, len, stride);
+        ai_engine_softmax_sums_s8(scales + k, x + k, table, len, stride);
     }
     for (int k = 0; k < columns; k++) {
         scales[k] = 1.0f / scales[k] * out_rescale;
     }
     const int32_t strides[] = {stride, y_stride};
     for (int k = 0; k < columns; k += kStrip) {
-        ai_engine_softmax_norm_s8_esp32s3(y + k, x + k, table, scales + k, len, strides);
+        ai_engine_softmax_norm_s8(y + k, x + k, table, scales + k, len, strides);
     }
 }
 
@@ -206,7 +198,7 @@ void softmax_rows_s8(const int8_t *x, int8_t *y, int rows, int len, const float 
     for (int r = 0; r < rows; r += kRowLanes) {
         const int lanes = std::min(kRowLanes, rows - r);
         if (lanes == kRowLanes) {
-            ai_engine_softmax_row_sums_s8_esp32s3(sums.data(), x + r * len, table, len, len);
+            ai_engine_softmax_row_sums_s8(sums.data(), x + r * len, table, len, len);
         } else {
             for (int k = 0; k < lanes; k++) {
                 float s = 0.0f;
@@ -220,7 +212,7 @@ void softmax_rows_s8(const int8_t *x, int8_t *y, int rows, int len, const float 
         for (int k = 0; k < lanes; k++) {
             scales.fill(1.0f / sums[k] * out_rescale);
             const int at = (r + k) * len;
-            ai_engine_softmax_norm_s8_esp32s3(y + at, x + at, table, scales.data(), len / kStrip, strides);
+            ai_engine_softmax_norm_s8(y + at, x + at, table, scales.data(), len / kStrip, strides);
         }
     }
 }
