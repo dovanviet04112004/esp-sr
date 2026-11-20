@@ -2056,7 +2056,9 @@ mỗi bước một commit.
       riêng dùng bản C chuẩn `ops/espdl_float_ieee.hpp`. Phía
       `ml/`, chip chọn một lần cho tiến trình (`configs/common/chip.yaml`, `SRPIPE_CHIP`): đích ESP-PPQ, thư mục int8 của
       run, và phép làm tròn đầu ra của các bản vá mô phỏng theo nền, nửa lên trên S3, nửa về chẵn trên S31 như
-      `tool::round` của esp-dl (ADR-0046).
+      `tool::round` của esp-dl (ADR-0046). Bản dựng ở `processed/` mà chiều cao độ lấy từ một hàng int8 ghi chip khác
+      mặc định vào `build.yaml`, và thư mục `pitch-rebuild` của hàng int8 mang tên chip đó, nên bản dựng của chip này
+      không bao giờ chạy tiếp hay ghi đè bản của chip kia.
    6. Dừng khi mọi op còn lại chạy ở trần của chính nó: tích chập ở tốc độ nhân khi dữ liệu nằm trong cache, op chép và
       op từng phần tử ở băng thông PSRAM, và không còn chuỗi nào ghép lại mà bớt được lượt đọc ghi PSRAM.
 
