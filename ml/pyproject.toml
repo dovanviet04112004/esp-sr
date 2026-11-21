@@ -23,6 +23,7 @@ dependencies = [
 train = [
     "torch>=2.4",
     "torchaudio>=2.4",
+    "einops==0.8.1",   # GTCRN's model code, run in the chain's ns slot (KEHOACH 3.9)
 ]
 # ESP-PPQ quantises and exports .espdl for esp-dl; pinned like esp-dl in ai_engine, since model->test()
 # on the board proves one exporter and runtime pair (KEHOACH 4.5.1).
