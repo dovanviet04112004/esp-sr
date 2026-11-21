@@ -4,8 +4,8 @@ release: QUT-NOISE (Dean, Sridharan, Vogt, Mason, Interspeech 2010), the HOME sc
 downloaded: 2026-11-21
 license: CC-BY-SA   # the data; the QUT-NOISE-TIMIT code is BSD (the source page)
 files:
-  - {name: QUT_NOISE.zip, url: 'https://data.researchdatafinder.qut.edu.au/dataset/a0eed5af-abd8-441b-b14a-8e064bc3d732/resource/8342a090-89e7-4402-961e-1851da11e1aa/download/qutnoise.zip'}
-  - {name: QUT_NOISE_HOME.zip, url: 'https://data.researchdatafinder.qut.edu.au/dataset/a0eed5af-abd8-441b-b14a-8e064bc3d732/resource/35cd737a-e6ad-4173-9aee-a1768e864532/download/qutnoisehome.zip'}
+  - {name: qutnoise.zip, url: 'https://data.researchdatafinder.qut.edu.au/dataset/a0eed5af-abd8-441b-b14a-8e064bc3d732/resource/8342a090-89e7-4402-961e-1851da11e1aa/download/qutnoise.zip'}
+  - {name: qutnoisehome.zip, url: 'https://data.researchdatafinder.qut.edu.au/dataset/a0eed5af-abd8-441b-b14a-8e064bc3d732/resource/35cd737a-e6ad-4173-9aee-a1768e864532/download/qutnoisehome.zip'}
 consumed_by: [wake]
 notes: >-
   HOME-KITCHEN and HOME-LIVINGB, long recordings of a kitchen and a living room with children, TV and music, as
