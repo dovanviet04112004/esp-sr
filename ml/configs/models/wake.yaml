@@ -178,7 +178,7 @@ simulate:                          # make wake-features: python -m srpipe.tasks.
   workers: 12                      # each holds about 450 MB; more push a 10 GB WSL into swap
   repeats: {train_pos: 8}          # passes over a file, each in other rooms, levels and noise; else 1
   train_dtype: float16             # train's features as stored: the trainer holds them so (KEHOACH 1.2)
-  noise_hours: {train_noise: 20.0, val_noise: 8.0}   # sessions of noise alone, each pool an equal share
+  noise_hours: {train_noise: 40.0, val_noise: 8.0}   # sessions of noise alone, each pool an equal share
   f0:                              # f0_hz.json beside these builds: each clean clip's median F0 by Praat (KEHOACH 3.11)
     sets: [train_pos, train_hard]
     time_step_s: 0.01
