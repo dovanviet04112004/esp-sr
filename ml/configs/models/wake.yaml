@@ -164,7 +164,7 @@ noise:                             # sessions of household noise alone, no talke
     - {name: music, dir: noise/musan/musan/music, cut: long, max_hours: 8.0}   # sung words are negatives as any speech
     - {name: tv, dir: noise/qut_noise, glob: "**/HOME-LIVINGB-*.wav", cut: long}   # a living room with TV, children
     - {name: qut_kitchen, dir: noise/qut_noise, glob: "**/HOME-KITCHEN-*.wav", cut: long}
-    - {name: home, dir: noise/sounds_of_home, glob: "**/*.WAV", cut: long, max_hours: 8.0}   # a day of one home
+    - {name: home, dir: noise/sounds_of_home, glob: "**/*.WAV", cut: long, max_hours: 8.0}   # 114 h of one home
     - {name: fan, prefix: noise/dns/datasets/noise/fan_, cut: trim}   # control: steady noise
     - {name: musan, prefix: noise/musan/musan/noise/free-sound/noise-free-sound-, cut: trim}   # control: heard in training
     - {name: musan_bible, prefix: noise/musan/musan/noise/sound-bible/noise-sound-bible-, cut: trim}   # phones, alarms
