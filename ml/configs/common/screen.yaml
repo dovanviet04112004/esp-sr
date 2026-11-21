@@ -22,6 +22,7 @@ corpora:                           # raw/<kind>/<name>, in this order: a duplica
     musan: {layout: files}
     dns: {layout: files}
     speech_commands: {layout: files}
+    fsd50k: {layout: files}        # QUT and The Sounds of Home are hour-long files: the cuts of wake.yaml judge them
   rir:
     openslr28: {layout: files}
 measure:
