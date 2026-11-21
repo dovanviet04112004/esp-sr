@@ -82,10 +82,11 @@ câm. PhoWhisper-large nghe lại. Một mẩu **không dùng được** khi Pho
 | MUSAN | 2 016 | 109,29 | 1 | | | 109,29 |
 | DNS Challenge | 65 302 | 180,45 | 109 (0,30 h) | | 23 (0,06 h) | 180,09 |
 | Speech Commands, nền | 6 | 0,11 | | | | 0,11 |
+| FSD50K, dev và eval (21/11) | 51 197 | 108,59 | 9 (0,02 h) | | 26 (0,07 h) | 108,50 |
 | OpenSLR 28 | 61 260 | 26,25 | 1 | | 842 (5,91 h) | 20,34 |
 
-Không mẩu nào hỏng giải mã hay có lời mà `normalize` từ chối. Tổng cộng loại 2 322 mẩu: tiếng nói 1 346 mẩu (1,36 trên
-631,7 giờ), nhiễu và RIR 976 mẩu.
+Không mẩu nào hỏng giải mã hay có lời mà `normalize` từ chối. Tổng cộng loại 2 357 mẩu: tiếng nói 1 346 mẩu (1,36 trên
+631,7 giờ), nhiễu và RIR 1 011 mẩu.
 
 - **FPT**: 437 mẩu của Set002 giải mã ra toàn số 0 dù vẫn có lời, soundfile và ffmpeg cho cùng kết quả. Đây là lỗi của
   chính bản dữ liệu. Ba trong số đó từng là giọng mẫu cho F5, và F5 nhân bản chúng thành tiếng rác bão hoà, giống hệt
@@ -96,3 +97,5 @@ Không mẩu nào hỏng giải mã hay có lời mà `normalize` từ chối. T
 - **Nhiễu và RIR**: sàn câm là một bước lượng tử 16 bit (−90,3 dBFS). Sàn −55 dBFS của tiếng nói sẽ loại nhầm: DEMAND có
   phòng khách yên tĩnh ở −57 dBFS, và RIR mô phỏng chỉ là một xung ngắn trong 2 s, RMS xuống tới −80 dBFS. 109 mẩu DNS
   câm, phần lớn toàn số 0.
+- **FSD50K**: sàng cả 51 197 mẩu, kể cả mẩu mà giấy phép hay nhãn sẽ loại khỏi `wake/noise4`. 9 mẩu câm. 26 mẩu
+  trùng một mẩu đã giữ trước nó trong thứ tự các kho.
