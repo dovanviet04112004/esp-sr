@@ -191,10 +191,11 @@ tuyệt đối.
 liệu xorshift32 hạt cố định, dải đầy int8 và float trong dải thực tế. Board chạy bản `_esp32s3` và bản `_c` trên cùng dữ
 liệu, so SHA-256 từng ca; máy tính dịch các `kernels/*.c` bằng gcc, chạy cùng các ca, so digest với board.
 
-| Lượt | Mô hình QACC của bản C | C khớp PIE trên board | Máy tính khớp board | Đối chứng âm đỏ | `divide` / `round_half_up` lệch |
+| Lượt | Mô hình QACC của bản C | C khớp PIE trên board | Máy tính khớp board | Đối chứng âm đỏ | `divide` / `round_to_s8` lệch |
 |---|---|---|---|---|---|
 | 1 | làn 20 bit quấn vòng khi tràn | 312 / 584 | — | 28 / 32 | 0 / 100 000, 0 / 100 000 |
 | 2 | làn 20 bit bão hoà sau mỗi tích | **584 / 584** | **584 / 584** | 28 / 32 | 0 / 100 000, 0 / 100 000 |
+| 3 (21/11, `cddafc68`) | như lượt 2; mọi phép làm tròn về int8 qua header chip | **584 / 584** | **584 / 584** | 28 / 32 | 0 / 100 000, 0 / 100 000 |
 
 - **QACC của PIE S3 bão hoà ở 20 bit sau từng tích**, không quấn vòng. Phát lại lượt 1 trên máy tính với digest PIE của
   board: bão hoà một lần ở cuối còn 22 ca lệch, bão hoà sau mỗi tích còn 13; cả 13 là ca của bộ sinh cho hàng ra chỉ thẳng
@@ -205,6 +206,8 @@ liệu, so SHA-256 từng ca; máy tính dịch các `kernels/*.c` bằng gcc, c
 - Digest máy tính giống nhau ở bản dựng Release và Debug có UBSan, UBSan không báo gì.
 - Ảnh sản phẩm board C dựng với `AI_ENGINE_KERNELS_C` link được, nhỏ hơn bản PIE 25 KB (0x25bde0 so với 0x2621e0); chưa
   chạy cả mạng bằng bản C trên board.
+- Lượt 3 chạy sau khi mọi phép làm tròn về int8 của op riêng và của bản C đi qua `chip/<IDF_TARGET>/` (`42090284`): S3
+  không đổi trên board. Sản phẩm board C dựng từ cùng commit khởi động với ngưỡng NVS cũ, lên broker và gửi heartbeat.
 
 ## Đường nối tiếp
 
