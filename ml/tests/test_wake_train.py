@@ -564,6 +564,132 @@ def test_a_noise_clip_belongs_to_the_recording_it_was_cut_from() -> None:
     assert data.noise_source("noise/dns/door_Freesound_validated_182324_3.wav") == "door_Freesound_validated_182324"
     assert data.noise_source("noise/musan/noise-free-sound-0258.wav") == "noise-free-sound-0258"
     assert data.noise_source("noise/dns/abcdefgh_12.wav") == "abcdefgh_12"
+    assert data.noise_source("noise/fsd50k/FSD50K.dev_audio/64760.wav@0.100-2.300") == "64760"
+    assert data.noise_source("noise/qut_noise/HOME-KITCHEN-1.wav@30.000-60.000") == "HOME-KITCHEN-1"
+
+
+CC0, CC_BY, CC_BY_NC = (
+    "http://creativecommons.org/publicdomain/zero/1.0/",
+    "http://creativecommons.org/licenses/by/3.0/",
+    "http://creativecommons.org/licenses/by-nc/3.0/",
+)
+
+
+def fsd50k_tree(raw: Path, parts: dict[str, dict[str, tuple[list[str], str]]]) -> None:
+    """FSD50K's vocabulary, ground truth and clips_info under raw/noise/fsd50k: per part, fname -> (labels, licence)."""
+    root = raw / "noise" / "fsd50k"
+    (root / "FSD50K.ground_truth").mkdir(parents=True)
+    (root / "FSD50K.metadata").mkdir(parents=True)
+    names = sorted({n for clips in parts.values() for labels, _ in clips.values() for n in labels} | {"Speech"})
+    (root / "FSD50K.ground_truth" / "vocabulary.csv").write_text(
+        "".join(f"{k},{n},/m/{k}\n" for k, n in enumerate(names))
+    )
+    for part, clips in parts.items():
+        lines = ["fname,labels,mids"] + [f'{f},"{",".join(labels)}",/m/0' for f, (labels, _) in clips.items()]
+        (root / "FSD50K.ground_truth" / f"{part}.csv").write_text("\n".join(lines) + "\n")
+        info = {f: {"license": licence} for f, (_, licence) in clips.items()}
+        (root / "FSD50K.metadata" / f"{part}_clips_info_FSD50K.json").write_text(json.dumps(info))
+
+
+FSD_SPEC = NOISE_SPEC | {
+    "fsd50k": "noise/fsd50k",
+    "licences": [CC0, CC_BY],
+    "fsd_exclude": ["Speech"],
+    "pools": [{"name": "desk", "fsd50k": ["Typing"]}, {"name": "furniture", "fsd50k": ["Door"]}],
+}
+
+
+def test_fsd50k_pools_take_open_licences_and_leave_out_speech_and_what_dns_holds(tmp_path: Path) -> None:
+    raw = noise_raw(tmp_path, ["door_Freesound_validated_222_0.wav"])
+    audioset_labels(raw / "noise" / "labels", {})
+    dev = {
+        "111": (["Typing"], CC0),
+        "222": (["Typing"], CC_BY),
+        "333": (["Typing", "Speech"], CC0),
+        "444": (["Typing"], CC_BY_NC),
+    }
+    fsd50k_tree(raw, {"dev": dev, "eval": {"555": (["Door"], CC_BY)}})
+    pools = data.noise_pools(FSD_SPEC, raw, set())
+    assert pools == {
+        "desk": ["noise/fsd50k/FSD50K.dev_audio/111.wav"],
+        "furniture": ["noise/fsd50k/FSD50K.eval_audio/555.wav"],
+    }
+    with pytest.raises(ValueError, match="Drawer"):
+        data.noise_pools(FSD_SPEC | {"pools": [{"name": "drawers", "fsd50k": ["Drawer"]}]}, raw, set())
+
+
+def test_a_folder_pool_takes_every_file_its_glob_finds_below_it(tmp_path: Path) -> None:
+    raw = noise_raw(tmp_path, [])
+    audioset_labels(raw / "noise" / "labels", {})
+    for name in ("music/fma/a.wav", "music/jamendo/b.wav", "speech/c.wav"):
+        write_wav(raw / "noise" / "musan" / name, np.zeros(grid.HOP_SAMPLES))
+    spec = NOISE_SPEC | {"pools": [{"name": "music", "dir": "noise/musan/music"}]}
+    assert data.noise_pools(spec, raw, set()) == {
+        "music": ["noise/musan/music/fma/a.wav", "noise/musan/music/jamendo/b.wav"]
+    }
+
+
+CUT = {"frame_s": 0.1, "pad_s": 0.1, "min_s": 0.5, "silent_dbfs": -70.0, "rail_share": 0.01, "full_scale": 0.999}
+TRIM = CUT | {"kind": "trim", "below_peak_db": 40.0}
+LONG = CUT | {"kind": "long", "floor_percentile": 10, "above_floor_db": 10.0, "gap_s": 0.3, "span_s": 2.0}
+
+
+def test_a_trim_keeps_one_padded_span_from_the_first_to_the_last_sound() -> None:
+    levels, rails = np.full(50, -90.0), np.zeros(50)
+    levels[10:20], levels[30] = -20.0, -25.0
+    assert data.sound_spans(levels, rails, 0.1, TRIM) == [pytest.approx((0.9, 3.2))]
+    assert data.sound_spans(np.full(50, -80.0), rails, 0.1, TRIM) == []
+    clipped = rails.copy()
+    clipped[12:20] = 0.5
+    assert data.sound_spans(levels, clipped, 0.1, TRIM) == []
+
+
+def test_a_long_cut_joins_near_runs_splits_long_ones_and_drops_short_ones() -> None:
+    levels, rails = np.full(100, -60.0), np.zeros(100)
+    levels[10:15], levels[17:20] = -30.0, -30.0
+    levels[40:41] = -30.0
+    levels[60:90] = -30.0
+    spans = data.sound_spans(levels, rails, 0.1, LONG)
+    assert [(round(a, 1), round(b, 1)) for a, b in spans] == [(0.9, 2.1), (5.9, 7.9), (7.9, 9.1)]
+
+
+def test_frame_levels_read_block_by_block_match_the_whole_file(tmp_path: Path, monkeypatch) -> None:
+    rate, frame_s = 16000, 0.01
+    x = np.concatenate([np.full(1600, 0.1), np.full(1600, 1.0), np.full(1650, 0.01)])
+    path = tmp_path / "a.wav"
+    import soundfile as sf
+
+    sf.write(path, np.stack([x, x], axis=1), rate, subtype="FLOAT")
+    monkeypatch.setattr(data, "FRAMES_A_BLOCK", 7)
+    levels, rails = data.frame_levels(path, frame_s, 0.999)
+    assert len(levels) == len(rails) == 30
+    assert np.allclose(levels[:10], -20.0) and np.allclose(levels[10:20], 0.0) and np.allclose(levels[20:], -40.0)
+    assert rails[:10].max() == 0.0 and rails[10:20].min() == 1.0
+
+
+def test_cut_pools_give_spans_of_sound_and_cap_a_pool_at_its_hours(tmp_path: Path) -> None:
+    import soundfile as sf
+
+    raw, rate = tmp_path, 16000
+    x = np.zeros(10 * rate)
+    x[rate : 5 * rate] = 0.2 * np.sin(np.arange(4 * rate) * 0.3)
+    for k in range(3):
+        (raw / "noise" / "long").mkdir(parents=True, exist_ok=True)
+        sf.write(raw / "noise" / "long" / f"r{k}.wav", x, rate)
+    pools = {"long": [f"noise/long/r{k}.wav" for k in range(3)], "whole": ["noise/dns/x.wav"]}
+    spec = {
+        "seed": 1,
+        "workers": 1,
+        "cuts": {"long": LONG | {"pad_s": 0.0}},
+        "pools": [{"name": "long", "cut": "long", "max_hours": 4.0 / 3600.0}, {"name": "whole"}],
+    }
+    out = data.cut_pools(pools, spec, raw)
+    assert out["whole"] == ["noise/dns/x.wav"]
+    assert len(out["long"]) == 2 and all("@" in s and data.span_seconds(s) == pytest.approx(2.0) for s in out["long"])
+    with pytest.raises(ValueError, match="whole"):
+        data.cut_pools(
+            pools, spec | {"pools": [{"name": "long", "cut": "long"}, {"name": "whole", "max_hours": 1.0}]}, raw
+        )
 
 
 def test_the_noise_split_keeps_each_recording_in_one_role(tmp_path: Path) -> None:

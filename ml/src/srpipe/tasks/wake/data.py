@@ -1,9 +1,9 @@
 """Split wake/v<n> (KEHOACH 1.3, 3.11): kept TTS clips of E11-T7 and public speech, by role and label.
 
 split sorts TTS positives, near misses, real positives, public negatives and test_neg into files by role and label;
-noise-split gives household noise clips roles by source recording; simulate runs each file through the board
-simulation, linking one another version built the same way, then builds the sets of noise alone.
-Run: python -m srpipe.tasks.wake.data {split,noise-split,simulate}"""
+noise-split gives household noise clips, or spans of sound, roles by source recording; noise-pilot writes clips of
+new pools to hear; simulate runs each file through the board simulation, then builds the sets of noise alone.
+Run: python -m srpipe.tasks.wake.data {split,noise-split,noise-pilot,simulate}"""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import soundfile as sf
 import yaml
 
 from srpipe.core import corpus, extract, screen, splits
@@ -46,6 +47,9 @@ BOARD_CHAIN = "warm"  # chain run over a session twice, second pass kept
 IGNORED = 2  # a label no loss reads: the hop may hold the word
 HANGOVER_HOPS = hangover_hops(afe.VAD_HANGOVER_MS)
 HOPS_PER_S = grid.SAMPLE_RATE_HZ / grid.HOP_SAMPLES
+FSD_PARTS = {"dev": "FSD50K.dev_audio", "eval": "FSD50K.eval_audio"}  # ground-truth part, audio folder
+FREESOUND_ID = re.compile(r"Freesound_(?:validated_)?(\d+)")  # in DNS's names of Freesound clips
+FRAMES_A_BLOCK = 4096  # frames of a long recording read at once
 
 
 @dataclass
@@ -635,10 +639,32 @@ def simulate(cfg: dict, paths: dict[str, Path]) -> None:
         simulate_noise(cfg, paths, device_cfg)
 
 
+def fsd50k_clips(spec: dict, raw: Path) -> dict[str, set[str]]:
+    """FSD50K's clips under a Freesound licence of spec['licences'], each its name under raw/ with its classes; a clip
+    carrying a class of spec['fsd_exclude'], or whose Freesound id a DNS clip holds, is left out (KEHOACH 3.11)."""
+    root = raw / spec["fsd50k"]
+    with (root / "FSD50K.ground_truth" / "vocabulary.csv").open(encoding="utf-8") as f:
+        vocabulary = {row[1] for row in csv.reader(f)}
+    named = set(spec["fsd_exclude"]).union(*(pool.get("fsd50k", []) for pool in spec["pools"]))
+    if unknown := sorted(named - vocabulary):
+        raise ValueError(f"the noise block names classes FSD50K has not: {unknown}")
+    in_dns = {m.group(1) for p in (raw / spec["audioset"]).glob("*.wav") if (m := FREESOUND_ID.search(p.stem))}
+    excluded, licences, clips = set(spec["fsd_exclude"]), set(spec["licences"]), {}
+    for part, audio in FSD_PARTS.items():
+        info = json.loads((root / "FSD50K.metadata" / f"{part}_clips_info_FSD50K.json").read_text(encoding="utf-8"))
+        with (root / "FSD50K.ground_truth" / f"{part}.csv").open(encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                has = set(row["labels"].split(","))
+                if info[row["fname"]]["license"] in licences and not has & excluded and row["fname"] not in in_dns:
+                    clips[f"{spec['fsd50k']}/{audio}/{row['fname']}.wav"] = has
+    return clips
+
+
 def noise_pools(spec: dict, raw: Path, rejected: set[str]) -> dict[str, list[str]]:
-    """Each pool of the noise block as its clips, names under raw/, sorted: by a file prefix, or DNS's AudioSet clips by
-    their classes; a clip goes to the first pool it matches, and neither screening's rejects nor a clip carrying a
-    class of spec['exclude'] goes anywhere (KEHOACH 3.11)."""
+    """Each pool of the noise block as its clips, names under raw/, sorted: by a file prefix, every file a glob finds
+    under a folder, DNS's AudioSet clips by their classes, or FSD50K's clips by theirs (fsd50k_clips); a clip goes to
+    the first pool it matches, and neither screening's rejects nor a clip carrying a class of spec['exclude'] goes
+    anywhere (KEHOACH 3.11)."""
     folder = raw / spec["audioset"]
     ids = {p.stem for p in folder.glob("*.wav") if corpus.AUDIOSET_ID.fullmatch(p.stem)}
     classes = corpus.audioset_classes(raw / spec["labels"], ids)
@@ -646,11 +672,17 @@ def noise_pools(spec: dict, raw: Path, rejected: set[str]) -> dict[str, list[str
     named = set(spec["exclude"]).union(*(pool.get("labels", []) for pool in spec["pools"]))
     if unknown := sorted(named - known):
         raise ValueError(f"the noise block names classes AudioSet has not: {unknown}")
+    fsd = fsd50k_clips(spec, raw) if any("fsd50k" in pool for pool in spec["pools"]) else {}
     excluded, taken, pools = set(spec["exclude"]), set(rejected), {}
     for pool in spec["pools"]:
         if "prefix" in pool:
             start = raw / pool["prefix"]
             found = (str(p.relative_to(raw)) for p in start.parent.glob(f"{start.name}*.wav"))
+        elif "dir" in pool:
+            found = (str(p.relative_to(raw)) for p in (raw / pool["dir"]).glob(pool.get("glob", "**/*.wav")))
+        elif "fsd50k" in pool:
+            wanted = set(pool["fsd50k"])
+            found = (name for name, has in fsd.items() if has & wanted)
         else:
             wanted = set(pool["labels"])
             found = (f"{spec['audioset']}/{c}.wav" for c, has in classes.items() if has & wanted and not has & excluded)
@@ -659,10 +691,95 @@ def noise_pools(spec: dict, raw: Path, rejected: set[str]) -> dict[str, list[str
     return pools
 
 
+def frame_levels(path: Path, frame_s: float, full_scale: float) -> tuple[np.ndarray, np.ndarray]:
+    """Each whole frame of a recording read a block at a time, its channels averaged: its RMS in dBFS, and the share
+    of its samples on the rail in any channel."""
+    frame = max(1, round(frame_s * sf.info(path).samplerate))
+    levels, rails = [], []
+    for block in sf.blocks(path, blocksize=frame * FRAMES_A_BLOCK, dtype="float64", always_2d=True):
+        n = len(block) // frame * frame
+        mono = block[:n].mean(axis=1).reshape(-1, frame)
+        levels.append(10.0 * np.log10(np.mean(mono**2, axis=1) + 1e-20))
+        rails.append(np.mean((np.abs(block[:n]) >= full_scale).any(axis=1).reshape(-1, frame), axis=1))
+    return (np.concatenate(levels), np.concatenate(rails)) if levels else (np.zeros(0), np.zeros(0))
+
+
+def sound_spans(levels: np.ndarray, rails: np.ndarray, frame_s: float, cut: dict) -> list[tuple[float, float]]:
+    """Seconds of a recording's stretches of sound from its frame levels: a trim keeps one span from its first to its
+    last frame within cut['below_peak_db'] of its loudest; a long cut keeps every run of frames above its quiet
+    percentile by cut['above_floor_db'], runs closer than cut['gap_s'] joined, in pieces of at most cut['span_s'].
+    Each span is padded by cut['pad_s'], and one shorter than cut['min_s'], quieter than cut['silent_dbfs'] at its
+    loudest frame, or with more than cut['rail_share'] of its samples on the rail is left out."""
+    if not len(levels):
+        return []
+    if cut["kind"] == "trim":
+        loud = np.flatnonzero(levels >= levels.max() - cut["below_peak_db"])
+        runs = [(loud[0], loud[-1] + 1)]
+    else:
+        loud = levels > np.percentile(levels, cut["floor_percentile"]) + cut["above_floor_db"]
+        edges = np.flatnonzero(np.diff(np.concatenate([[0], loud.astype(np.int8), [0]])))
+        runs, gap = [], round(cut["gap_s"] / frame_s)
+        for start, stop in zip(edges[::2], edges[1::2], strict=True):
+            if runs and start - runs[-1][1] <= gap:
+                runs[-1] = (runs[-1][0], stop)
+            else:
+                runs.append((start, stop))
+    pad, spans = round(cut["pad_s"] / frame_s), []
+    for start, stop in runs:
+        start, stop = max(0, start - pad), min(len(levels), stop + pad)
+        step = round(cut["span_s"] / frame_s) if "span_s" in cut else stop - start
+        for first in range(start, stop, step):
+            last = min(stop, first + step)
+            quiet = levels[first:last].max() < cut["silent_dbfs"]
+            if (last - first) * frame_s >= cut["min_s"] and not quiet and rails[first:last].mean() <= cut["rail_share"]:
+                spans.append((first * frame_s, last * frame_s))
+    return spans
+
+
+def item_spans(task: tuple[Path, str, dict]) -> list[str]:
+    """The items of one recording's sound_spans, <name>@<start>-<end> in seconds."""
+    raw, name, cut = task
+    levels, rails = frame_levels(raw / name, cut["frame_s"], cut["full_scale"])
+    return [f"{name}@{a:.3f}-{b:.3f}" for a, b in sound_spans(levels, rails, cut["frame_s"], cut)]
+
+
+def span_seconds(item: str) -> float:
+    start, _, end = item.partition("@")[2].partition("-")
+    return float(end) - float(start)
+
+
+def cut_pools(pools: dict[str, list[str]], spec: dict, raw: Path) -> dict[str, list[str]]:
+    """Each pool whose entry names a cut of spec['cuts'] as the spans of its clips, kept whole otherwise; a pool with
+    max_hours keeps its spans in an order drawn by spec['seed'] up to that many hours (KEHOACH 3.11)."""
+    entries, tasks = {p["name"]: p for p in spec["pools"]}, []
+    if whole := sorted(n for n, e in entries.items() if "max_hours" in e and "cut" not in e):
+        raise ValueError(f"pools {whole} cap their hours but keep whole clips: give them a cut")
+    for name, items in pools.items():
+        if "cut" in entries[name]:
+            tasks += [(raw, item, spec["cuts"][entries[name]["cut"]]) for item in items]
+    spans = {}
+    if tasks:
+        with multiprocessing.get_context("spawn").Pool(spec["workers"]) as pool:
+            spans = dict(zip((t[1] for t in tasks), pool.map(item_spans, tasks, chunksize=16), strict=True))
+    out, rng = {}, np.random.default_rng(spec["seed"])
+    for name, items in pools.items():
+        kept = [s for item in items for s in spans[item]] if "cut" in entries[name] else list(items)
+        if hours := entries[name].get("max_hours"):
+            drawn, total = [], 0.0
+            for k in rng.permutation(len(kept)):
+                if total >= hours * 3600.0:
+                    break
+                drawn.append(kept[k])
+                total += span_seconds(kept[k])
+            kept = sorted(drawn)
+        out[name] = kept
+    return out
+
+
 def noise_source(item: str) -> str:
-    """The recording a noise clip was cut from: an AudioSet clip's YouTube id, else the file's stem without the
-    '_<n>' DNS gives each segment of one Freesound recording."""
-    stem = Path(item).stem
+    """The recording a noise clip was cut from, a span of it or whole: an AudioSet clip's YouTube id, else the file's
+    stem without the '_<n>' DNS gives each segment of one Freesound recording."""
+    stem = Path(item.partition("@")[0]).stem
     return stem if corpus.AUDIOSET_ID.fullmatch(stem) else re.sub(r"_\d+$", "", stem)
 
 
@@ -670,7 +787,7 @@ def noise_split(cfg: dict, paths: dict[str, Path]) -> Path:
     """data/splits/wake/<noise.split>/: each clip of noise_pools as a row of {role}_noise.txt, its source recording as
     the speaker so one recording keeps one role and its pool as the room; roles drawn by noise.seed (KEHOACH 3.11)."""
     spec = cfg["noise"]
-    pools = noise_pools(spec, paths["raw"], set(screen.rejected(paths["interim"])))
+    pools = cut_pools(noise_pools(spec, paths["raw"], set(screen.rejected(paths["interim"]))), spec, paths["raw"])
     sources = {noise_source(item) for items in pools.values() for item in items}
     roles = splits.speaker_roles(sources, spec["roles"], "train", spec["seed"])
     files: dict[str, list[splits.Row]] = {f"{role}_noise.txt": [] for role in ("train", *spec["roles"])}
@@ -688,8 +805,20 @@ def noise_split(cfg: dict, paths: dict[str, Path]) -> Path:
         "Noise alone for the wake (KEHOACH 3.11): python -m srpipe.tasks.wake.data noise-split.\n"
         "Each clip's speaker column is the recording it was cut from, its room column its pool.\n"
         f"Roles {spec['roles']} of the recordings by seed {spec['seed']}, train the rest; screening's rejects\n"
-        "and clips labelled with a class of the noise block's exclude list are left out.\n\n"
-        f"{counts}\n"
+        "and clips labelled with a class of the noise block's exclude list are left out.\n"
+        + (
+            "FSD50K clips only under the licences of the noise block, none labelled with a class of its fsd_exclude,\n"
+            "none whose Freesound id a DNS clip holds.\n"
+            if "fsd50k" in spec
+            else ""
+        )
+        + (
+            "A pool with a cut lists <item>@<start>-<end> spans of its recordings by the noise block's cuts;\n"
+            "a pool with max_hours keeps that many hours of them, drawn by the seed.\n"
+            if "cuts" in spec
+            else ""
+        )
+        + f"\n{counts}\n"
     )
     out = paths["splits"] / "wake" / spec["split"]
     splits.write_version(out, files, notes)
@@ -703,6 +832,27 @@ def read_noise_split(paths: dict[str, Path], spec: dict, role: str) -> dict[str,
         raise FileNotFoundError(f"{listing} is missing: run make wake-noise-split")
     rows = splits.read_split(listing)
     return {p["name"]: [r.item for r in rows if r.room == p["name"]] for p in spec["pools"]}
+
+
+def noise_pilot(cfg: dict, paths: dict[str, Path]) -> Path:
+    """cache/listen/wake_<split>/<pool>/: noise.pilot.clips items of train of each pool noise.pilot.pools names, drawn
+    by the seed and read as the board simulation reads them, at the grid's rate, each brought to noise.pilot.peak, with
+    items.tsv naming them: the owner hears a pool before its split is built on (KEHOACH 3.11)."""
+    spec = cfg["noise"]
+    pilot, pools = spec["pilot"], read_noise_split(paths, spec, "train")
+    reader, rng = ItemReader(paths["raw"]), np.random.default_rng(spec["seed"])
+    out = paths["cache"] / "listen" / f"wake_{spec['split']}"
+    for name in pilot["pools"]:
+        items, folder = pools[name], out / name
+        folder.mkdir(parents=True, exist_ok=True)
+        lines = []
+        for k, i in enumerate(sorted(rng.choice(len(items), min(pilot["clips"], len(items)), replace=False))):
+            x = reader.read(items[i])
+            x = x * (pilot["peak"] / max(float(np.abs(x).max()), 1e-9))
+            sf.write(folder / f"{k:02d}.wav", x.astype(np.float32), grid.SAMPLE_RATE_HZ, subtype="PCM_16")
+            lines.append(f"{k:02d}.wav\t{items[i]}\t{len(x) / grid.SAMPLE_RATE_HZ:.2f}")
+        (folder / "items.tsv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out
 
 
 NOISE_STREAMS = {"train": 1, "val": 2, "test": 3}  # each role's sessions draw from a stream of their own
@@ -780,12 +930,15 @@ def cut_split(cfg: dict, paths: dict[str, Path]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("step", choices=["split", "noise-split", "simulate"])
+    parser.add_argument("step", choices=["split", "noise-split", "noise-pilot", "simulate"])
     parser.add_argument("--set", dest="overrides", action="append", default=[], metavar="KEY=VALUE")
     args = parser.parse_args(argv)
     cfg, paths = apply_overrides(load_yaml(CONFIG), args.overrides), data_paths()
     if args.step == "simulate":
         simulate(cfg, paths)
+        return 0
+    if args.step == "noise-pilot":
+        print(noise_pilot(cfg, paths))
         return 0
     if args.step == "noise-split":
         out = noise_split(cfg, paths)
