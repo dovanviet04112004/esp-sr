@@ -412,3 +412,26 @@ Vì sao GTCRN thua, đo trên lối ra của chuỗi ở ba phiên ấy:
   không nằm ở mức vào.
 
 Bản ghi lối ra của hai khe ở `cache/listen/ns_gtcrn/<phiên>_{omlsa,gtcrn}.wav`.
+
+### 10.2 Sửa không học lại: không bản nào tới sàn (21/11)
+
+Chủ repo không cho học lại: dữ liệu tự dựng chưa đủ tốt. Thử hai cách không học, cùng ba phiên và cùng hàng `kl` 800‰ như
+§10.1, bằng script một lần:
+- checkpoint VCTK-DEMAND của cùng commit: bộ ấy chỉ cộng nhiễu vào tiếng phòng thu, không có vang;
+- checkpoint DNS3 với gain mỗi vạch không tụt nhanh hơn 1 hay 2 dB một bước so với bước trước, để quãng vang tắt dần, và
+  không dưới sàn −12 dB.
+
+| Khe `ns` | "vừng ơi" | 004 | 005 | 008 | Lời, trung vị |
+|---|---|---|---|---|---|
+| OM-LSA (sàn, §10.1) | **33/35** | 9/11 | 12/12 | 12/12 | −47 / −44 / −54 dBFS |
+| GTCRN VCTK-DEMAND | 0/15 | 0/6 | 0/9 | 0/0 | −71 / −73 / — dBFS |
+| GTCRN VCTK-DEMAND, gain ≥ −12 dB | 23/32 | 8/11 | 12/12 | 3/9 | −55 / −54 / −62 dBFS |
+| GTCRN DNS3, tụt ≤ 1 dB một bước, gain ≥ −12 dB | 30/35 | 6/11 | 12/12 | 12/12 | −47 / −46 / −54 dBFS |
+| GTCRN DNS3, tụt ≤ 2 dB một bước, gain ≥ −12 dB | 30/35 | 6/11 | 12/12 | 12/12 | −46 / −46 / −54 dBFS |
+
+- Bản VCTK-DEMAND coi tiếng xa micro có vang của board là nhiễu: lời xuống tới mức quãng lặng, không còn gì để bắt.
+- Giới hạn tốc độ tụt gain chỉ gỡ thêm một lần so với chỉ đặt sàn (30/35 so với 29/35). Phiên 004 vẫn hụt ở lần nói thứ 5 và
+  thứ 8: OM-LSA cho 0,89 / 0,88, GTCRN cho 0,44 / 0,44.
+- Kết luận cho E9-T15: GTCRN học sẵn không hơn sàn, kể cả có sửa ở gain. Giữ OM-LSA ở khe `ns`, firmware không đổi.
+- Ba phiên "vừng ơi" này thu trong phòng yên. Phiên board không có lời "vừng ơi" nói giữa nhiễu, nên thước chưa thấy được
+  chỗ một mạng có thể hơn sàn. Trên 66 phiên không có từ ấy, cả hai khe đều không báo nhầm lần nào.
