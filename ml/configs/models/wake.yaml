@@ -193,7 +193,7 @@ train:                             # E11-T11: python -m srpipe.tasks.wake.train 
   hard_share: 0.25                 # of each batch, from train_hard
   onset_share: 0.25                # of the negative windows, ending within onset_s of a sentence's first speech hop:
   onset_s: 2.0                     #   every positive follows a silence, so a net never shown these fires there
-  noise_share: 0.25                # of the other negative windows, from train_noise: noise alone, clips stopping
+  noise_share: 0.5                 # of the other negative windows, from train_noise: noise alone, clips stopping
   word_s: 1.2                      # a hard negative this short is a word: its window ends where a positive's label does
   word_gain_db: [0.0, 20.0]        # positive and hard windows louder by a gain drawn here: the agc leaves single words
                                    #   ~10 dB under the sentences it lifts (KEHOACH 3.11, wake.md 8)
