@@ -1,0 +1,24 @@
+name: fsd50k
+source_url: https://zenodo.org/records/4060432
+release: FSD50K 1.0, 51 197 Freesound clips of 200 AudioSet classes, 44.1 kHz 16-bit mono PCM
+downloaded: 2026-11-21
+license: >-
+  CC-BY-4.0 for the dataset (LICENSE-DATASET in FSD50K.doc.zip); each clip keeps its Freesound licence, listed in
+  {dev,eval}_clips_info_FSD50K.json: only CC0 and CC-BY clips are taken (KEHOACH 1.2)
+files:
+  - {name: FSD50K.dev_audio.z01, md5: faa7cf4cc076fc34a44a479a5ed862a3, url: 'https://zenodo.org/api/records/4060432/files/FSD50K.dev_audio.z01/content'}
+  - {name: FSD50K.dev_audio.z02, md5: 8f9b66153e68571164fb1315d00bc7bc, url: 'https://zenodo.org/api/records/4060432/files/FSD50K.dev_audio.z02/content'}
+  - {name: FSD50K.dev_audio.z03, md5: 1196ef47d267a993d30fa98af54b7159, url: 'https://zenodo.org/api/records/4060432/files/FSD50K.dev_audio.z03/content'}
+  - {name: FSD50K.dev_audio.z04, md5: d088ac4e11ba53daf9f7574c11cccac9, url: 'https://zenodo.org/api/records/4060432/files/FSD50K.dev_audio.z04/content'}
+  - {name: FSD50K.dev_audio.z05, md5: 81356521aa159accd3c35de22da28c7f, url: 'https://zenodo.org/api/records/4060432/files/FSD50K.dev_audio.z05/content'}
+  - {name: FSD50K.dev_audio.zip, md5: c480d119b8f7a7e32fdb58f3ea4d6c5a, url: 'https://zenodo.org/api/records/4060432/files/FSD50K.dev_audio.zip/content'}
+  - {name: FSD50K.eval_audio.z01, md5: 3090670eaeecc013ca1ff84fe4442aeb, url: 'https://zenodo.org/api/records/4060432/files/FSD50K.eval_audio.z01/content'}
+  - {name: FSD50K.eval_audio.zip, md5: 6fa47636c3a3ad5c7dfeba99f2637982, url: 'https://zenodo.org/api/records/4060432/files/FSD50K.eval_audio.zip/content'}
+  - {name: FSD50K.ground_truth.zip, md5: ca27382c195e37d2269c4c866dd73485, url: 'https://zenodo.org/api/records/4060432/files/FSD50K.ground_truth.zip/content'}
+  - {name: FSD50K.metadata.zip, md5: b9ea0c829a411c1d42adb9da539ed237, url: 'https://zenodo.org/api/records/4060432/files/FSD50K.metadata.zip/content'}
+  - {name: FSD50K.doc.zip, md5: 3516162b82dc2945d3e7feba0904e800, url: 'https://zenodo.org/api/records/4060432/files/FSD50K.doc.zip/content'}
+consumed_by: [wake]
+notes: >-
+  Household classes as noise-alone negatives of wake/noise4 (KEHOACH 3.11): each clip's classes come from
+  FSD50K.ground_truth/{dev,eval}.csv, its licence from the clips_info JSON of FSD50K.metadata. Clips share Freesound
+  with DNS's Freesound noise: a clip whose Freesound id DNS already holds is left out.

@@ -1,0 +1,13 @@
+name: sounds_of_home
+source_url: https://doi.org/10.5281/zenodo.12802716
+release: >-
+  The Sounds of Home (CVSSP, University of Surrey; VITALISE data light), part 2.3: one-hour AudioMoth recordings of a
+  Belgian home's living room or kitchen, speech removed
+downloaded: 2026-11-21
+license: CC-BY-4.0   # as the Zenodo record states
+files:
+  - {name: VITALISE data light 2.3.zip, md5: 2808f7cac58e757a79fd47dd9831102c, url: 'https://zenodo.org/api/records/12802716/files/VITALISE%20data%20light%202.3.zip/content'}
+consumed_by: [wake]
+notes: >-
+  Real hours of a home as noise-alone negatives of wake/noise4 (KEHOACH 3.11), cut into spans around sound. The whole
+  dataset is 197 GB in four Zenodo parts (12737915, 12800789, 12802632, 12802716); this part is 13.3 GB.
