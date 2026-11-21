@@ -1056,3 +1056,42 @@ Lượt đo `20261116_d74dc94-dirty_ffbc12` (cùng cấu hình và dữ liệu v
 - Giá: mỗi 1 000 bước ổn định 54,2–55,6 s, trước đó 41,8 s. CTC trên CPU một mình 52,6 s; một lần `ctc_loss` xuôi và
   ngược trên batch phụ (32 câu, 500 bước, 45 lớp) hết 12,2 ms trên CPU, 2,2 ms trên GPU. Một lượt 20 000 bước ước
   ~1 270 s từ thư mục run tới `model.pt`, chưa chạy đủ.
+
+## 16. Học lại trên âm bản nhiễu `noise4` (E11-T60, 21/11)
+
+Split `wake/noise4` (`ml/data/splits/wake/noise4/`): 32 nhóm, gồm 16 nhóm của `noise3` và 16 nhóm mới từ DNS, FSD50K (chỉ
+CC0, CC-BY), nhạc MUSAN, QUT-NOISE HOME, The Sounds of Home. Mọi mẩu đã cắt về chỗ có tiếng. Có 75,6 / 10,8 / 9,5 giờ cho
+`train` / `val` / `test`. Chủ repo giữ cả 32 nhóm, không nghe thử. Run `ml/artifacts/wake/runs/20261121_8837ff2_cfdb67`
+(`make wake-features`, rồi `make wake-train` tại `8837ff29`): split `vung1` như lượt 3, `train_noise` 40 giờ (1,25 giờ
+mỗi nhóm như lượt 3), `val_noise` 8 giờ, `train.noise_share` 0,25. Dựng nhiễu hết 12 phút, học 20 000 bước hết 23 phút.
+
+- Bản float ở bước cuối: ngưỡng 0,835, `val` bắt 89,7%, lời nói 2,60 lần/giờ, `val_noise` của `noise4` 3,0 lần/giờ.
+  Lượt 3 ở bước cuối: 0,83, 89,7%, 2,57 lần/giờ.
+
+Int8 chấm như chip ở ngưỡng sản phẩm 800‰. Cột nhiễu tính trên 30 giờ mẩu `test` của `noise4`, 1 giờ mỗi nhóm có mẩu
+(30 nhóm; cả 4 bản ghi QUT rơi vào `train`). Lượt 3 chấm trên cùng mẩu.
+
+| Hàng | "vừng ơi" của chủ repo | Phiên khác (66, 1,13 giờ) | Nhiễu `test`, số lần (lần/giờ) |
+|---|---|---|---|
+| Lượt 3 `kl` (sản phẩm, §14) | **33 / 35** | 0 | **104 (3,5)** |
+| `noise4` `kl` | 32 / 35 | 0 | 119 (4,0) |
+| `noise4` `percentile` | 32 / 35 | 0 | 105 (3,5) |
+| `noise4` `minmax` | 32 / 35 | 0 | 109 (3,6) |
+| `noise4` `mse` | 32 / 35 | 0 | 121 (4,0) |
+
+So từng nhóm, lượt 3 `kl` rồi `noise4` `kl`:
+
+| Thay đổi | Nhóm |
+|---|---|
+| Ít báo nhầm hơn | đập gõ 12 → 6, thú nuôi 18 → 13, chuông FSD50K 11 → 7, cửa 4 → 1, tiếng cười 2 → 0 |
+| Nhiều hơn | kéo đồ 2 → 29, bước chân 1 → 4, nhạc 5 → 7 |
+| Như nhau hoặc lệch một | cọ xát 10, chuông AudioSet 8, hơi thở 7, tiếng cơ thể 4, mặt bàn 4 → 5 |
+
+- Học trên 32 nhóm **không làm báo nhầm ít đi**. Run mới không hơn lượt 3 ở hàng nào: cùng lắm ngang trên nhiễu
+  (`percentile` 3,5/giờ) và kém một câu "vừng ơi". Lượt 3 vẫn là sản phẩm.
+- 29 lần kéo đồ của `kl` mới đều do một bản ghi, `dragging_Freesound_validated_50701_0`, cùng bản ghi gây 10 trong 11 lần
+  báo nhầm của `noise2` (§14). Cả hai run chưa từng nghe nó: `noise4` xếp nó vào `test`. Lượt 3 chỉ báo nhầm 2 lần trên nó.
+  Bỏ nó ra thì `kl` mới còn 90 lần, lượt 3 còn 102.
+- Nhóm mới vẫn báo nhầm trên mẩu `test`, dù nhóm đã có trong lúc học: thú nuôi 13, chuông 7, mặt bàn 5, đồ gỗ 5. Với
+  `noise_share` 0,25, mỗi batch có 25% cửa sổ nhiễu trong số cửa sổ âm bản không neo đầu câu, chia cho 32 nhóm. Chưa thử
+  tăng tỉ lệ ấy.
