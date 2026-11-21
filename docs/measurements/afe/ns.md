@@ -370,3 +370,7 @@ Trên bàn so (`compare.md`, mục GTCRN), GTCRN học sẵn trên DNS3 hơn OM-
 mức hạ đoạn có lời (2,2 dB so với 1,3 dB của OM-LSA trên lối vào của khe), và chỉ lấy độ lớn mặt nạ làm gain không mất gì
 đo được. Đi tiếp bước 2 của E9-T15: cắm GTCRN vào khe `ns` của chuỗi Python, chạy dòng từng bước như chip, và chấm `wake`,
 `command` trên phiên board có nhiễu theo thước của KẾ HOẠCH §3.15, cạnh OM-LSA. Firmware chỉ bàn sau bước ấy.
+
+Khe chạy GTCRN dòng từng bước trên CPU máy tính, 1 500 bước, mỗi bước 16 ms tiếng: 5,8 ms một bước ở một luồng torch,
+9,3 ms ở mười luồng mặc định khi máy chạy song song một job lượng tử hoá (21/11). Tensor của một bước quá nhỏ để chia cho
+nhiều luồng, nên khe chạy một luồng. Dựng model mất 0,6 s, và mỗi tiến trình chỉ dựng một lần.

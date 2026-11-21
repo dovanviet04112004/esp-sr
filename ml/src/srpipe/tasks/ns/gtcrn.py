@@ -4,6 +4,7 @@ of its output to them, at most 1, is the slot's gain. SRPIPE_NS=gtcrn puts it in
 
 from __future__ import annotations
 
+import functools
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -47,11 +48,14 @@ def stream_model(folder: Path, checkpoint: str) -> torch.nn.Module:
     return model
 
 
+@functools.cache
 def slot_factory(name: str) -> Callable[[], GtcrnSlot]:
-    """A maker of ns slots of engine name: its files fetched once into cache/afe_ref/gtcrn/ by URL and sha256 (ns.yaml's
-    gtcrn), its model built once for every chain; an unknown name stops the process."""
+    """The maker of ns slots of engine name, one per process: its files fetched once into cache/afe_ref/gtcrn/ by URL
+    and sha256 (ns.yaml's gtcrn), its model built once and shared by every chain, torch on one thread (ns.md 10); an
+    unknown name stops the process."""
     if name not in ENGINES:
         raise SystemExit(f"{NS_ENV}={name}: the Python chain's ns slot knows {list(ENGINES)}")
+    torch.set_num_threads(1)
     spec = load_yaml(CONFIGS / "models" / "ns.yaml")["gtcrn"]
     folder = data_paths()["cache"] / "afe_ref" / "gtcrn"
     for path, pin in spec["files"].items():
