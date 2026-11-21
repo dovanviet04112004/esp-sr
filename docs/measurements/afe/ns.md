@@ -363,3 +363,10 @@ Gain của L trên bước có lời của 640 ví dụ `val`, nhóm theo chính
 - Một phần ba loss của L, trên `val` lẫn ví dụ học, nằm ở vạch có gain lý tưởng dưới −30 dB mà mạng chưa đủ sâu, dù trung
   vị gain của mạng ở đó đã là −64 dB. Hàm nén công suất mũ 0,15 vẫn trả công cho việc dìm thêm dưới mức mà sàn của E9-T12
   (−12 … −30 dB) sẽ cắt đi.
+
+## 10. GTCRN học sẵn: đi tiếp (21/11, E9-T15)
+
+Trên bàn so (`compare.md`, mục GTCRN), GTCRN học sẵn trên DNS3 hơn OM-LSA và cả NSNet2, RNNoise công bố ở mọi thước trừ
+mức hạ đoạn có lời (2,2 dB so với 1,3 dB của OM-LSA trên lối vào của khe), và chỉ lấy độ lớn mặt nạ làm gain không mất gì
+đo được. Đi tiếp bước 2 của E9-T15: cắm GTCRN vào khe `ns` của chuỗi Python, chạy dòng từng bước như chip, và chấm `wake`,
+`command` trên phiên board có nhiễu theo thước của KẾ HOẠCH §3.15, cạnh OM-LSA. Firmware chỉ bàn sau bước ấy.

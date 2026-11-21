@@ -94,3 +94,34 @@ sau `hpf`, `balance`), không qua `gsc`. Đo một lần bằng script gọi `sc
   có lời ít hơn (1,8–6,3 dB); RNNoise-16k còn lấy cả tiếng ở nhạc SNR 0 (13 dB).
 - `board_gsc_espsr_nsnet3` ra tín hiệu hỏng ở cả bốn mục (STOI 0,10, đoạn có lời giảm 43–45 dB): không đưa vào bảng, chưa
   rõ vì sao.
+
+## GTCRN trên bàn so (21/11, E9-T15)
+
+GTCRN học sẵn trên DNS3 (`Xiaobin-Rong/gtcrn`, mã MIT, commit `502ebfab`), bộ tham chiếu `gtcrn` của KẾ HOẠCH §3.16,
+chạy trên máy tính bằng PyTorch CPU với STFT 512 điểm bước 256 như lưới. `gtcrn_gain` chỉ giữ tỉ số biên độ ≤ 1 của mỗi
+vạch trên phổ có nhiễu, đúng thứ gain mà khe `ns` trả. Hai lối vào: `pc_mean` (trung bình hai micro sau `hpf`, `balance`,
+lối vào của khe `ns`) và `pc_gsc`. Cả 15 mục của bàn so, chạy bằng `python -m srpipe.scenes.compare refs` rồi `score` (chưa có lệnh `make` riêng)
+tại `esp-sr` `162ceb86`; mỗi ô là trung bình 15 mục.
+
+| Biến thể | Nhiễu giảm dB | Đoạn có lời giảm dB | SNR tăng dB | SI-SDR dB | STOI | SIG | BAK | OVRL |
+|---|---|---|---|---|---|---|---|---|
+| `pc_mean` | 4,2 | 0,8 | +3,7 | −0,2 | 0,494 | 2,21 | 2,63 | 1,71 |
+| `pc_mean_omlsa` (sản phẩm) | 11,7 | 1,3 | +11,4 | 2,3 | 0,517 | 2,55 | 3,22 | 1,98 |
+| **`pc_mean_gtcrn`** | **25,4** | 2,2 | **+24,1** | **4,5** | **0,520** | **2,68** | **3,93** | **2,25** |
+| `pc_mean_gtcrn_gain` | 25,4 | 2,2 | +24,1 | 4,5 | 0,521 | 2,68 | 3,93 | 2,25 |
+| `pc_gsc` | 8,0 | 1,4 | +7,1 | −1,1 | 0,480 | 2,25 | 2,67 | 1,70 |
+| `pc_gsc_omlsa` | 10,8 | 1,4 | +10,2 | −1,4 | 0,487 | 2,51 | 3,23 | 1,95 |
+| `pc_gsc_nsnet2` | 33,5 | 5,7 | +27,6 | 1,8 | 0,509 | 2,51 | 3,95 | 2,09 |
+| `pc_gsc_rnnoise` | 44,6 | 4,7 | +38,6 | 0,5 | 0,492 | 2,51 | 3,90 | 2,10 |
+| `pc_gsc_gtcrn` | 21,2 | 2,5 | +19,5 | 1,5 | 0,511 | 2,64 | 3,90 | 2,20 |
+| `pc_gsc_gtcrn_gain` | 21,2 | 2,5 | +19,5 | 1,5 | 0,511 | 2,63 | 3,90 | 2,20 |
+
+- Trên lối vào của khe, GTCRN dìm nhiễu gấp đôi OM-LSA và có SI-SDR, STOI, SIG, BAK, OVRL cao nhất bảng. Đoạn có lời hạ
+  2,2 dB so với 1,3 dB của OM-LSA, gồm cả phần nhiễu lẫn trong đoạn ấy.
+- So với NSNet2 và RNNoise công bố trên `pc_gsc`, GTCRN dìm ít hơn nhưng hạ đoạn có lời chỉ 2,5 dB thay vì 4,7–5,7 dB,
+  và OVRL, SIG, STOI cao hơn.
+- Nhạc là chỗ OM-LSA yếu nhất: bản thu nhạc qua board `board_read_music` dìm 17,7 dB với GTCRN, 1,8 dB với OM-LSA (lối vào
+  `pc_mean`); các mục trộn nhạc SNR 0 và 5: 17,8 và 22,2 dB, so với 3,4 và 5,0 dB.
+- `gtcrn_gain` trùng `gtcrn` tới số lẻ thứ hai ở mọi cột: chỉ lấy độ lớn mặt nạ, như gain của khe `ns`, không mất gì đo
+  được. Lối vào của khe vẫn phải mang phổ phức thay cho công suất, vì mạng đọc phần thực và phần ảo.
+- Đây là thước của bàn so; thước quyết định là của bộ nhận dạng (KẾ HOẠCH §3.15), chưa đo.
