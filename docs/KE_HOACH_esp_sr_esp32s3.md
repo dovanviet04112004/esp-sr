@@ -126,9 +126,12 @@ Bảng dưới là **ứng viên**. Danh sách chốt, số giờ thật và sha
 | Speech Commands v0.02 (Google) | `wake/happy1` (ADR-0033): dương "happy", âm bản khó là các từ khác, kể cả "on"; split ấy là mốc báo nhầm của "vừng ơi" (ADR-0043) | 105 829 mẩu ≤ 1 s, 35 từ tiếng Anh, 2 618 người nói | CC BY 4.0 | người thật nhiều giọng; `val` theo `testing_list.txt` của bộ |
 | COCO 2017 | `detect` bản thử (§3.18), không học: mẫu train2017 làm `train` để hiệu chuẩn, val2017 chia đôi làm `val` và `test` | val2017 5 000 ảnh, 80 lớp | nhãn CC BY 4.0, ảnh theo giấy phép Flickr của từng ảnh | chỉ hiệu chuẩn và chấm bản thử |
 | Lệnh điều khiển nhà tự thu (repo `edge-ai-voice-control-esp32`) | `command` | ~1 300 lệnh 1 s: bật/tắt đèn, bật/tắt quạt, bật/tắt hết; nhiễu phòng | MIT | người thật nói đúng lệnh của bộ lệnh; không có mã người nói, chỉ vào tập học |
-| MUSAN | `ns`, tăng cường | ~100 giờ nhiễu, nhạc, lời nói | CC BY 4.0 phần lớn 🔬 | |
+| MUSAN | `ns`, tăng cường; nhóm nhạc của âm bản `wake` | ~100 giờ nhiễu, nhạc, lời nói | CC BY 4.0 phần lớn 🔬 | |
 | DEMAND | `ns` | 15 môi trường, 16 kênh | CC BY-SA 3.0 🔬 | |
-| DNS Challenge (Microsoft) | `ns` | hàng trăm giờ | CC BY 4.0 phần nhiễu 🔬 | |
+| DNS Challenge (Microsoft) | `ns`; âm bản chỉ có nhiễu của `wake` | hàng trăm giờ | CC BY 4.0 phần nhiễu 🔬 | |
+| FSD50K (MTG, Zenodo 4060432) | âm bản chỉ có nhiễu của `wake`: đồ gia dụng, bàn làm việc, bếp, cửa, cọ xát | 108 giờ, 51 197 mẩu, 200 lớp AudioSet, 44,1 kHz | CC BY cả bộ; mỗi mẩu một giấy phép, **chỉ lấy CC0 và CC-BY**, bỏ CC-BY-NC và Sampling+ | cùng gốc Freesound với DNS: bỏ mẩu trùng mã |
+| QUT-NOISE, phần HOME | âm bản chỉ có nhiễu của `wake`: bếp và phòng khách thật, trẻ con, TV, nhạc | 1,4 GB, bản ghi dài | CC BY-SA | trang chặn công cụ tải, chủ repo tải bằng trình duyệt |
+| The Sounds of Home, phần 2.3 (CVSSP, Zenodo 12802716) | âm bản chỉ có nhiễu của `wake`: giờ thu thật trong nhà | 13,3 GB của 197 GB; bản ghi một giờ | CC BY 4.0 | đã lọc tiếng người |
 | OpenSLR 28 | tăng cường vang | RIR thật và mô phỏng | Apache 2.0 | |
 | Cảnh dựng bằng `pyroomacoustics` | `doa` `gsc` `bss` `ns`, đường mô phỏng board | không giới hạn | của dự án | vật liệu **có nhãn** cho mọi khối không gian (§4.4) |
 | Tiếng tổng hợp bằng TTS trên máy tính (`srpipe/tts/`, §4.4) | **`wake` dương — nguồn chính**, cụm gần âm cho âm bản; dương, cụm gần âm và nửa lệnh của `command` (§3.12); **tiếng nguồn của `synth`** (§3.13) | không giới hạn, nhiều giọng | theo giấy phép mô hình TTS dùng, ghi ở `DU_LIEU.md` | **không bao giờ** vào tập thử |
@@ -1556,6 +1559,19 @@ không neo đầu câu lấy ở chỗ ngẫu nhiên trong `train_noise`: có c�
 lặng, đúng kiểu "có tiếng rồi im" của mẫu dương. Ngưỡng chọn trên `val` là ngưỡng thấp nhất mà báo nhầm trên lời nói
 (`val_neg` cùng `val_hard`) và trên `val_noise` đều không quá mục tiêu; gộp chung thì vài giờ nhiễu chìm trong 30 giờ
 lời nói.
+
+**Nguồn và làm sạch nhiễu** (split `wake/noise4`, chủ repo 21/11). Các nhóm lấy từ:
+- mẩu AudioSet và Freesound của DNS như `noise3`, thêm các nhóm Freesound `typing`, `munching`, `breath`, `copy-machine`;
+- mẩu FSD50K theo nhãn của chính bộ ấy, chỉ mẩu CC0 và CC-BY; bỏ mẩu cũng mang nhãn tiếng nói hay nhạc, và mẩu trùng mã
+  Freesound với một mẩu của DNS;
+- bản ghi dài của QUT-NOISE HOME và của The Sounds of Home, cắt thành đoạn có tiếng;
+- hai nhóm nhạc và TV: nhạc của MUSAN và phòng khách có TV của QUT. Lời của TV là âm bản như mọi lời không chứa từ đánh
+  thức.
+
+Làm sạch không ghi lại âm thanh. Sàng lọc (§1.2) loại mẩu hỏng, cắt đỉnh hay gần như câm. Mỗi mẩu giữ lại là một mục
+`<mục>@<đầu>-<cuối>` đã bỏ lặng đầu cuối; bản ghi dài cắt thành đoạn ≤ 30 s quanh chỗ có tiếng theo mức năng lượng; bộ đọc
+mục đổi về 16 kHz một kênh. Mỗi nhóm có trần số giờ để các nhóm cân nhau, và vai chia theo bản ghi gốc: mã Freesound,
+file QUT, giờ thu của The Sounds of Home. Trước khi dựng cả split, chủ repo nghe ~20 đoạn của mỗi nhóm mới.
 
 **Báo nhầm trên tiếng động** (`make wake-noise RUN= ROW=`, mục `eval.noise` của cấu hình): phiên chỉ có nhiễu dựng từ
 mẩu vai `test` của `wake/noise1`, mỗi nhóm `eval.noise.hours`, chấm bằng một hàng int8 như chip ở ngưỡng của hàng. Kết
@@ -3174,7 +3190,7 @@ ml/data/                                   # trong repo — chỉ siêu dữ li�
 ├── README.md                              # cái gì nằm ở đâu, lệnh nào sinh ra
 ├── manifests/                             # một file cho một kho, cùng bố cục với raw/
 │   ├── speech/{common_voice_vi, vivos, fpt_open, vlsp, bud500, lsvsc, speech_massive_vi, vimd}.yaml
-│   ├── noise/{musan, demand, dns, speech_commands}.yaml
+│   ├── noise/{musan, demand, dns, speech_commands, fsd50k, qut_noise, sounds_of_home}.yaml
 │   ├── rir/openslr28.yaml
 │   ├── device/board_b.csv                 # ★ mỗi phiên thu qua board một dòng
 │   └── device/tinyai.yaml                 # bản thu của tinyai-signal chép tay vào raw/: nguồn, sha256, kênh, nội dung
