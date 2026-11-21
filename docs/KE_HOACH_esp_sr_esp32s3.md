@@ -2265,9 +2265,10 @@ thuộc của chúng đá nhau và đá `srpipe`. `srpipe.scenes.refs` gọi `ru
 | `nsnet2` | NSNet2, mốc của DNS Challenge (Microsoft), `nsnet2-20ms-baseline.onnx` | ONNX, 16 kHz |
 | `rnnoise` | RNNoise gốc qua `pyrnnoise` | 48 kHz: lấy mẫu lên rồi xuống |
 | `dnsmos` | DNSMOS P.835: thước không cần tiếng sạch, ra SIG, BAK, OVRL | ONNX, 16 kHz |
+| `gtcrn` | GTCRN (Rong và cộng sự, ICASSP 2024; mã MIT), checkpoint học trên DNS3: 48 nghìn tham số, ~33 triệu phép nhân-cộng mỗi giây, STFT 512 điểm bước 256 cửa sổ căn Hann như lưới §3.1. Hai biến thể: mặt nạ phức của nó, và `gtcrn_gain` chỉ giữ tỉ số biên độ ≤ 1 trên phổ có nhiễu, như gain của khe `ns` | PyTorch trên CPU, 16 kHz |
 
-Trọng số tải vào `cache/` theo commit ghim và sha256, không commit (CLAUDE.md §6); giấy phép của từng bộ ghi ở
-`DU_LIEU.md` khi đã kiểm.
+Trọng số, và file mã mô hình của bộ cần nó (`gtcrn`, như `ml/spk_ref/`), tải vào `cache/` theo commit ghim và sha256,
+không commit (CLAUDE.md §6); giấy phép của từng bộ ghi ở `DU_LIEU.md` khi đã kiểm.
 
 **Thước** (`srpipe.scenes.compare score`, bảng ở `docs/measurements/afe/compare.md`), một thước cho mọi biến thể:
 
@@ -3146,7 +3147,7 @@ ml/
 │
 ├── tts/<bộ>/{pyproject.toml, uv.lock, run.py}  # mỗi bộ TTS và bộ nghe kiểm (asr) một dự án uv riêng, ghim bản:
 │                                      #   phụ thuộc của chúng đá nhau và đá torch của srpipe; srpipe/tts gọi qua uv run
-├── afe_ref/<bộ>/{pyproject.toml, uv.lock, run.py}   # nsnet2, rnnoise, dnsmos (§3.16), kaldi_pitch (§3.11,
+├── afe_ref/<bộ>/{pyproject.toml, uv.lock, run.py}   # nsnet2, rnnoise, gtcrn, dnsmos (§3.16), kaldi_pitch (§3.11,
 │                                      #   chỉ run.py, chạy trong image của bộ căn mốc vì cần Kaldi gốc): như
 │                                      #   tts/; trọng số tải vào cache/ theo commit ghim và sha256
 ├── spk_ref/<họ>/{pyproject.toml, uv.lock, run.py}   # ecapa, speakerlab, redimnet: bộ trích embedding người
