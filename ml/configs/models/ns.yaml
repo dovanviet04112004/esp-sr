@@ -140,3 +140,25 @@ probe:                             # make ai-probe: every candidate's step graph
   esp_ppq_patches:                 # compress/quant/esp_ppq_patches.py, per candidate
     rnnoise16k: [requantise_graph_inputs]   # x feeds dense and two Concats, each at its own exponent
     nsnet16k: []
+gtcrn:                             # SRPIPE_NS=gtcrn: GTCRN (Xiaobin-Rong/gtcrn, MIT) in the Python chain's ns slot (E9-T15)
+  checkpoint: checkpoints/model_trained_on_dns3.tar   # the official DNS3 weights, as the comparison set's engine
+  files:                           # the streaming model of the pinned commit, under cache/afe_ref/gtcrn/
+    stream/gtcrn.py:
+      url: https://raw.githubusercontent.com/Xiaobin-Rong/gtcrn/502ebfab64da7c4a9af78dcb9c6ceef1ebb01c73/stream/gtcrn.py
+      sha256: 20bf0610702506fa45cd543454b84bbeb862d73c7c20a3f8d820fdc04da6099b
+    stream/gtcrn_stream.py:
+      url: https://raw.githubusercontent.com/Xiaobin-Rong/gtcrn/502ebfab64da7c4a9af78dcb9c6ceef1ebb01c73/stream/gtcrn_stream.py
+      sha256: 850cb413b4355c0df65113d1f0a623fc813940a8f14578fdd39a1c20ded2d951
+    stream/modules/__init__.py:
+      url: https://raw.githubusercontent.com/Xiaobin-Rong/gtcrn/502ebfab64da7c4a9af78dcb9c6ceef1ebb01c73/stream/modules/__init__.py
+      sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    stream/modules/convert.py:
+      url: https://raw.githubusercontent.com/Xiaobin-Rong/gtcrn/502ebfab64da7c4a9af78dcb9c6ceef1ebb01c73/stream/modules/convert.py
+      sha256: dbff3a360a720f11fca0b4a4f8bc6bdb3ebb712fa617dfe37df8b31a9c5a586e
+    stream/modules/convolution.py:
+      url: https://raw.githubusercontent.com/Xiaobin-Rong/gtcrn/502ebfab64da7c4a9af78dcb9c6ceef1ebb01c73/stream/modules/convolution.py
+      sha256: 28465f8a160b8484548ec2e2d8319d5b0650f45079f5abf9d41a8cb15ce2fdf4
+    checkpoints/model_trained_on_dns3.tar:
+      url: https://raw.githubusercontent.com/Xiaobin-Rong/gtcrn/502ebfab64da7c4a9af78dcb9c6ceef1ebb01c73/checkpoints/model_trained_on_dns3.tar
+      sha256: a630d992cf792daf4ce2bb5bcf9c4d389f740a8f09c6e0971184697fe6371b79
+  caches: {conv: [2, 1, 16, 16, 33], tra: [2, 3, 1, 1, 16], inter: [2, 1, 33, 16]}   # its streaming state, zero at start

@@ -40,6 +40,36 @@ def test_identical_microphones_come_back_one_hop_late() -> None:
     assert all(f.flags == 0 and f.doa_deg == -1 and f.vad == 0 and f.gain_db == 0 for f in frames)
 
 
+class Halving:
+    """An ns slot from outside that halves every bin and keeps the bins it is given."""
+
+    def __init__(self) -> None:
+        self.seen: list[np.ndarray] = []
+
+    def gains(self, bins: np.ndarray, echo_power: np.ndarray | None) -> np.ndarray:
+        self.seen.append(bins)
+        return np.full(grid.N_BINS, 0.5, dtype=np.float32)
+
+
+def test_an_ns_slot_from_outside_takes_complex_bins_in_place_of_the_floor_and_restarts_at_reset() -> None:
+    slots: list[Halving] = []
+
+    def make() -> Halving:
+        slots.append(Halving())
+        return slots[-1]
+
+    x = tone(HOPS * grid.HOP_SAMPLES)
+    hops = interleave(x)
+    plain = np.concatenate([f.pcm for f in run(chain.Chain("M", PLAIN), hops)]).astype(int)
+    slotted = chain.Chain("M", chain.ChainConfig(modules=("ns_omlsa",), ns_slot=make))
+    halved = np.concatenate([f.pcm for f in run(slotted, hops)]).astype(int)
+    assert np.max(np.abs(halved - np.rint(plain / 2))) <= MAX_ERROR_LSB
+    assert len(slots) == 1 and len(slots[0].seen) == HOPS
+    assert slots[0].seen[0].dtype == np.complex64 and slots[0].seen[0].shape == (grid.N_BINS,)
+    slotted.reset()
+    assert len(slots) == 2
+
+
 def test_opposite_microphones_cancel_in_the_mean() -> None:
     x = tone(HOPS * grid.HOP_SAMPLES)
     frames = run(chain.Chain("MM", PLAIN), interleave(x, -x))

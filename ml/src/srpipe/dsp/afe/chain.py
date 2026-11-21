@@ -8,8 +8,10 @@ balance, doa and the mean (ADR-0042). Modules follow ChainConfig.modules. Run: p
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 import numpy as np
 import soundfile as sf
@@ -33,14 +35,21 @@ FLAG_AEC_DIVERGED = 1 << 2
 FLAG_NO_REF = 1 << 3
 
 
+class NsSlot(Protocol):
+    """An ns slot from outside the chain: a hop's complex bins of the spatial stage, and the aec's residual echo power
+    or None, to one gain a bin in 0..1 (KEHOACH 3.9)."""
+
+    def gains(self, bins: np.ndarray, echo_power: np.ndarray | None) -> np.ndarray: ...
+
+
 @dataclass(frozen=True)
 class ChainConfig:
-    """What app_boot gives dsp_afe_init: the modules built, calib/bal, and the afe/* settings. balance_gains is
-    calib/bal, one complex gain per bin on ch1, or None for a board never calibrated, which runs without balance as
-    the firmware does. spatial is dsp_afe_config_t.spatial: none for the plain mean, gsc for the canceller steered by
-    doa, broadside while doa has no angle, bss for the gate on doa's angle with the settings bss gives, None
-    for contracts/afe.yaml's. agc_start_db, for the board simulation only, is the gain the agc starts
-    from (KEHOACH 1.2); None starts as the firmware does. aec_delay_samples is calib/aec_delay."""
+    """What app_boot gives dsp_afe_init: the modules built, calib/bal, the afe/* settings. balance_gains is calib/bal,
+    one complex gain per bin on ch1, or None for an uncalibrated board, run without balance as the firmware does.
+    spatial is dsp_afe_config_t.spatial: none for the mean, gsc steered by doa (broadside while it has no angle), bss
+    gated on doa's angle with bss's settings, None for contracts/afe.yaml's. agc_start_db, simulation only, is the
+    agc's first gain (KEHOACH 1.2), None as the firmware; aec_delay_samples is calib/aec_delay; ns_slot makes the ns
+    slot in place of the floor at start and at every reset (KEHOACH 3.9)."""
 
     modules: tuple[str, ...] = afe.MODULES
     balance_gains: np.ndarray | None = None
@@ -51,6 +60,7 @@ class ChainConfig:
     bss: bss.BssConfig | None = None
     agc_start_db: float | None = None
     aec_delay_samples: int = 0
+    ns_slot: Callable[[], NsSlot] | None = None
 
 
 @dataclass(frozen=True)
@@ -133,7 +143,8 @@ class Chain:
         self._last_heard = False
         self._last_vad = False
         self._ns = None
-        if "ns_omlsa" in on:
+        self._ns_slot = self.cfg.ns_slot() if self.cfg.ns_slot is not None else None
+        if "ns_omlsa" in on and self._ns_slot is None:
             self._ns = ns_omlsa.Omlsa()
             self._ns.set_floor(self.cfg.ns_floor_db)
         self._vad = vad.Vad(self.cfg.vad_aggressiveness) if "vad" in on else None
@@ -207,8 +218,12 @@ class Chain:
             mixed = bins[0]
         else:
             mixed = np.float32(0.5) * (bins[0] + bins[1])
-        if self._ns is not None:
+        gains = None
+        if self._ns_slot is not None:
+            gains = np.asarray(self._ns_slot.gains(mixed, echo_power), dtype=np.float32)
+        elif self._ns is not None:
             gains = self._ns.process(mixed.real * mixed.real + mixed.imag * mixed.imag, echo_power).gain
+        if gains is not None:
             mixed = (mixed.real * gains + 1j * (mixed.imag * gains)).astype(np.complex64)
         clean = self._synthesis.synthesize(mixed)
         speech = self._vad.process(clean).speech if self._vad is not None else False

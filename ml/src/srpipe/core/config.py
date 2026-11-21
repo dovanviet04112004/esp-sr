@@ -16,6 +16,7 @@ ML_ROOT = Path(__file__).resolve().parents[3]
 CONFIGS = ML_ROOT / "configs"
 DATA_ROOT_ENV = "SRPIPE_DATA_ROOT"
 CHIP_ENV = "SRPIPE_CHIP"
+NS_ENV = "SRPIPE_NS"
 PITCH_SHARED = ("min_f0_hz", "max_f0_hz", "normalization_left_s", "pov_scale", "pitch_scale", "delta_pitch_scale")
 
 
@@ -45,6 +46,12 @@ def int8_dir() -> str:
 
 def chip_is_default() -> bool:
     return chip()["name"] == _chips()["default"]
+
+
+def ns_engine() -> str | None:
+    """The ns engine SRPIPE_NS of the command's own environment names, never .env's, for the chains device.listen
+    builds in place of the floor; None runs the product's chain (KEHOACH 3.9)."""
+    return os.environ.get(NS_ENV) or None
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

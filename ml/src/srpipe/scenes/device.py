@@ -28,7 +28,7 @@ from scipy import signal
 
 from srpipe.core import screen, splits
 from srpipe.core.audio_io import ItemReader, ramped, read_wav, to_float, write_wav
-from srpipe.core.config import CONFIGS, ML_ROOT, chip, chip_is_default, data_paths, load_device
+from srpipe.core.config import CONFIGS, ML_ROOT, chip, chip_is_default, data_paths, load_device, ns_engine
 from srpipe.dsp.afe import hpf
 from srpipe.dsp.afe.chain import PCM_FULL_SCALE, PCM_MAX, PCM_MIN, Chain, ChainConfig
 from srpipe.dsp.afe.vad import Vad
@@ -215,14 +215,27 @@ def diffuse_pair(u: np.ndarray, v: np.ndarray) -> np.ndarray:
     return np.stack([np.asarray(u, dtype=np.float64), sfft.irfft(mixed, size)[:n]])
 
 
+def with_ns_engine(chain_cfg: ChainConfig) -> ChainConfig:
+    """chain_cfg with the ns slot of the engine SRPIPE_NS names in place of the floor, unchanged without one or with a
+    slot of its own (KEHOACH 3.9)."""
+    name = ns_engine()
+    if name is None or chain_cfg.ns_slot is not None:
+        return chain_cfg
+    # Imported here: tasks.ns builds on the board simulation that imports this module.
+    from srpipe.tasks.ns import gtcrn
+
+    return replace(chain_cfg, ns_slot=gtcrn.slot_factory(name))
+
+
 def listen(
     pcm: np.ndarray, chain_cfg: ChainConfig, mel: Mel, warm: np.ndarray | None = None
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """The chain over interleaved int16 frames (samples, mics), one microphone as "M": clean int16 samples, per hop its
     vad, level_dbfs and gain_db as int8, and per hop the log-mel of the clean samples (KEHOACH 3.11). With warm, the
-    chain first runs over those frames and drops what they give, so it meets pcm settled, as a long-running board."""
+    chain first runs over those frames and drops what they give, so it meets pcm settled, as a long-running board.
+    SRPIPE_NS puts its engine in the ns slot (with_ns_engine)."""
     n_mics = pcm.shape[1]
-    chain, stft = Chain("M" if n_mics == 1 else "MM", chain_cfg), Stft()
+    chain, stft = Chain("M" if n_mics == 1 else "MM", with_ns_engine(chain_cfg)), Stft()
     for hop in warm.reshape(-1, HOP * n_mics) if warm is not None else []:
         chain.process(hop)
     hops = pcm.reshape(-1, HOP * n_mics)

@@ -685,3 +685,17 @@ def test_a_noise_build_holds_its_sessions_and_goes_on_alike(raw_root: Path, tmp_
     assert same == built["sha256"] and other != built["sha256"]
     with pytest.raises(ValueError, match="other draws"):
         device.build_noise(cfg, spec, pools, 2, 2, raw_root, interim, tmp_path / "a")
+
+
+def test_srpipe_ns_puts_its_engine_in_the_slot_and_an_unknown_engine_stops(monkeypatch) -> None:
+    cfg = ChainConfig()
+    monkeypatch.delenv("SRPIPE_NS", raising=False)
+    assert device.with_ns_engine(cfg) is cfg
+    own = dataclasses.replace(cfg, ns_slot=lambda: None)
+    monkeypatch.setenv("SRPIPE_NS", "gtcrn")
+    assert device.with_ns_engine(own) is own
+    pytest.importorskip("torch")
+    pytest.importorskip("einops")
+    monkeypatch.setenv("SRPIPE_NS", "nsnet9")
+    with pytest.raises(SystemExit, match="nsnet9"):
+        device.with_ns_engine(cfg)
