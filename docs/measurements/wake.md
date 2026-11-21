@@ -1095,3 +1095,37 @@ So từng nhóm, lượt 3 `kl` rồi `noise4` `kl`:
 - Nhóm mới vẫn báo nhầm trên mẩu `test`, dù nhóm đã có trong lúc học: thú nuôi 13, chuông 7, mặt bàn 5, đồ gỗ 5. Với
   `noise_share` 0,25, mỗi batch có 25% cửa sổ nhiễu trong số cửa sổ âm bản không neo đầu câu, chia cho 32 nhóm. Chưa thử
   tăng tỉ lệ ấy.
+
+Lượt 2 (22/11): `train.noise_share` 0,5, chủ repo chọn. Run `ml/artifacts/wake/runs/20261122_fe06352_c4755b` (`make
+wake-train` tại `fe063527`, cùng đặc trưng như lượt 1), học hết 24 phút. Bản float ở bước cuối: ngưỡng 0,835, `val` bắt
+85,3%, lời nói 2,93 lần/giờ, `val_noise` 1,55 lần/giờ.
+
+| Hàng, 800‰ | "vừng ơi" của chủ repo | Phiên khác (66, 1,13 giờ) | Nhiễu `test` `noise4`, số lần (lần/giờ) |
+|---|---|---|---|
+| Lượt 3 `kl` (sản phẩm) | **33 / 35** | 0 | 104 (3,5) |
+| Lượt 2 `kl` | 30 / 35 | 0 | 55 (1,8) |
+| Lượt 2 `percentile` | 30 / 35 | 0 | 58 (1,9) |
+| Lượt 2 `minmax` | 30 / 35 | 0 | 49 (1,6) |
+| Lượt 2 `mse` | 30 / 35 | 0 | **44 (1,5)** |
+
+- Báo nhầm trên nhiễu `test` giảm còn 42–56% của sản phẩm. Ở `mse`: kéo đồ 2 → 0, chuông 11 → 1, thú nuôi 18 → 5, đập gõ
+  12 → 5, nhạc 5 → 1, hơi thở 7 → 3. Cọ xát 10 → 12 và chuông AudioSet 8 → 5 vẫn là hai nhóm báo nhầm nhiều nhất.
+- Cả bốn hàng đều hụt ở cùng một phiên, `20261031_home_004`: 6 / 11, sản phẩm 9 / 11. Hai phiên kia 12 / 12. Ở hàng `kl`,
+  bốn câu hụt có điểm 0,67, 0,78, 0,42, 0,55.
+
+Cùng cách chấm như `make wake-ptq`, quét ngưỡng trên `val` và `test_neg` (lời nói, lần/giờ). `val_noise` của mỗi run là
+của split nó học, nên cột ấy không so được giữa hai run:
+
+| Hàng | Ngưỡng | `val` bắt | Lời nói `val` | `test_neg` | `val_noise` |
+|---|---|---|---|---|---|
+| Lượt 3 `kl` (sản phẩm) | 800‰ | 89,7% | 3,09 | 4,97 | 3,92 (`noise3`) |
+| Lượt 3 `kl` (sản phẩm) | 600‰ | 94,1% | 8,77 | 14,69 | 11,76 (`noise3`) |
+| Lượt 2 `kl` | 800‰ | 92,6% | 3,64 | 5,17 | 2,17 (`noise4`) |
+| Lượt 2 `minmax` | 800‰ | 92,6% | 3,83 | 4,76 | 1,86 (`noise4`) |
+| Lượt 2 `mse` | 800‰ | 89,7% | 3,51 | 4,60 | 1,76 (`noise4`) |
+| Lượt 2 `mse` | 600‰ | 94,1% | 9,29 | 13,86 | 4,76 (`noise4`) |
+
+- Ở 800‰, lượt 2 bắt trên `val` ngang hoặc hơn sản phẩm, báo nhầm trên lời nói ngang sản phẩm (`test_neg` 4,60–5,17 so với
+  4,97). Lượt 2 chỉ kém ở giọng chủ repo, phiên 004.
+- Hạ ngưỡng của lượt 2 xuống 550–600‰ thì bắt lại 33 / 35 câu trên board, nhưng báo nhầm trên lời nói `test_neg` tăng lên
+  gần gấp ba (13,9–19,3 lần/giờ). Cách ấy không dùng được.
