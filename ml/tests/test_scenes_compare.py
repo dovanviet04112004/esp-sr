@@ -37,6 +37,10 @@ FIXED_VARIANTS = {
     "pc_gsc_omlsa20",
     "pc_gsc_nsnet2",
     "pc_gsc_rnnoise",
+    "pc_gsc_gtcrn",
+    "pc_gsc_gtcrn_gain",
+    "pc_mean_gtcrn",
+    "pc_mean_gtcrn_gain",
     "tinyai",
     "board_mean",
     "board_gsc",
@@ -276,10 +280,23 @@ def test_refs_runs_each_engine_once_over_every_item_from_the_variant_it_follows(
     monkeypatch.setattr(compare.refs, "enhance", lambda name, pairs, spec, *a: calls.append((name, pairs, spec)))
     done = compare.run_refs(cfg, tmp_path, tmp_path / "cache")
     names = [item["name"] for item in cfg["items"]]
-    assert [c[0] for c in calls] == ["nsnet2", "rnnoise"]
-    assert done == [f"nsnet2: {len(names)} clips", f"rnnoise: {len(names)} clips"]
+    count = len(names)
+    assert [c[0] for c in calls] == ["nsnet2", "rnnoise", "gtcrn", "gtcrn_gain"]
+    assert done == [
+        f"nsnet2: {count} clips",
+        f"rnnoise: {count} clips",
+        f"gtcrn: {2 * count} clips",
+        f"gtcrn_gain: {2 * count} clips",
+    ]
     assert calls[0][1] == [(tmp_path / n / "pc_gsc.wav", tmp_path / n / "pc_gsc_nsnet2.wav") for n in names]
     assert calls[0][2] == cfg["refs"]["nsnet2"] and calls[1][2] is None
+    gtcrn = [
+        (tmp_path / n / f"{after}.wav", tmp_path / n / f"{after}_gtcrn.wav")
+        for n in names
+        for after in ("pc_gsc", "pc_mean")
+    ]
+    assert calls[2][1] == gtcrn and calls[2][2] == cfg["refs"]["gtcrn"]
+    assert calls[3][2]["project"] == "gtcrn" and calls[3][2]["args"] == ["gain"]
 
 
 def test_tables_average_each_measure_where_it_exists_and_leave_pc_costs_empty() -> None:

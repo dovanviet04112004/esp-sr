@@ -84,14 +84,25 @@ def dnsmos(clips: dict[str, Path], spec: dict, cache: Path, work: Path) -> dict[
 
 
 def enhance(name: str, jobs: list[tuple[Path, Path]], spec: dict | None, cache: Path, work: Path) -> None:
-    """Clean every (in, out) pair of mono wavs with the engine name, its weights from spec when it takes any."""
+    """Clean every (in, out) pair of mono wavs with the engine name: run.py of ml/afe_ref/<spec's project, else name>/,
+    given its weights when spec pins any (a url, or files fetched into cache/afe_ref/<project>/ at their paths and
+    that folder passed), the job list, then spec's args."""
     missing = [str(src) for src, _ in jobs if not src.exists()]
     if missing:
         raise FileNotFoundError(f"{name}: {len(missing)} inputs missing, e.g. {missing[0]}")
     work.mkdir(parents=True, exist_ok=True)
     listing = work / f"{name}_jobs.jsonl"
     listing.write_text("".join(json.dumps({"in": str(a), "out": str(b)}) + "\n" for a, b in jobs), "utf-8")
-    run(name, *([str(weights(name, spec, cache))] if spec else []), str(listing))
+    spec = spec or {}
+    project = spec.get("project", name)
+    if "files" in spec:
+        folder = cache / "afe_ref" / project
+        for path, pin in spec["files"].items():
+            fetch(pin, folder / path)
+        pinned = [str(folder)]
+    else:
+        pinned = [str(weights(name, spec, cache))] if "url" in spec else []
+    run(project, *pinned, str(listing), *spec.get("args", []))
 
 
 def embedding_key(audio: np.ndarray, bounds: np.ndarray, spec: dict) -> str:

@@ -22,6 +22,8 @@ score:                             # python -m srpipe.scenes.compare score: tabl
                 pc_gsc_rnnoise]
     chains: [raw_ch0, board_mean_omlsa, board_gsc_omlsa, board_gsc_omlsa20, espsr_bss_webrtc_mild,
              espsr_bss_webrtc_medium, espsr_bss_webrtc_aggressive, espsr_bss_nsnet1, espsr_bss_nsnet2, espsr_bss_nsnet3]
+    gtcrn: [pc_mean, pc_mean_omlsa, pc_mean_gtcrn, pc_mean_gtcrn_gain, pc_gsc, pc_gsc_omlsa, pc_gsc_nsnet2,
+            pc_gsc_rnnoise, pc_gsc_gtcrn, pc_gsc_gtcrn_gain]   # E9-T15
   by_item: [noise_db, ovrl]        # measures also printed item by item, over every variant of the tables
 workers: 8                         # items rendered at once on the PC
 refs:                              # the reference engines of ml/afe_ref (KEHOACH 3.16): weights pinned by URL and sha256
@@ -31,6 +33,15 @@ refs:                              # the reference engines of ml/afe_ref (KEHOAC
   nsnet2:                          # the DNS Challenge baseline of microsoft/DNS-Challenge, same licences
     url: https://raw.githubusercontent.com/microsoft/DNS-Challenge/a2c7487e12d06d709aeebe5659c21bbf6e1a47aa/NSNet2-baseline/nsnet2-20ms-baseline.onnx
     sha256: 88429b6253600be840ab816f46f466811d20078142fb12bff8cafe2b27bd4ca9
+  gtcrn:                           # GTCRN of Xiaobin-Rong/gtcrn (MIT), its model code and DNS3 checkpoint at one commit
+    files: &gtcrn_files
+      gtcrn.py:
+        url: https://raw.githubusercontent.com/Xiaobin-Rong/gtcrn/502ebfab64da7c4a9af78dcb9c6ceef1ebb01c73/gtcrn.py
+        sha256: 20bf0610702506fa45cd543454b84bbeb862d73c7c20a3f8d820fdc04da6099b
+      checkpoints/model_trained_on_dns3.tar:
+        url: https://raw.githubusercontent.com/Xiaobin-Rong/gtcrn/502ebfab64da7c4a9af78dcb9c6ceef1ebb01c73/checkpoints/model_trained_on_dns3.tar
+        sha256: a630d992cf792daf4ce2bb5bcf9c4d389f740a8f09c6e0971184697fe6371b79
+  gtcrn_gain: {project: gtcrn, files: *gtcrn_files, args: [gain]}   # its magnitude ratio only, as an ns slot gain
 chain:                             # every variant of ours runs these modules; agc stays off so levels compare
   modules: [hpf, balance, doa, vad]
 variants:                          # by: who writes <variant>.wav, mono int16 at the grid's rate (KEHOACH 3.16)
@@ -42,6 +53,10 @@ variants:                          # by: who writes <variant>.wav, mono int16 at
   pc_gsc_omlsa20: {by: pc, spatial: gsc, ns: omlsa, ns_floor_db: -20.0}
   pc_gsc_nsnet2: {by: refs, after: pc_gsc, ns: nsnet2}       # a reference engine of ml/afe_ref on pc_gsc
   pc_gsc_rnnoise: {by: refs, after: pc_gsc, ns: rnnoise}
+  pc_gsc_gtcrn: {by: refs, after: pc_gsc, ns: gtcrn}
+  pc_gsc_gtcrn_gain: {by: refs, after: pc_gsc, ns: gtcrn_gain}
+  pc_mean_gtcrn: {by: refs, after: pc_mean, ns: gtcrn}        # on the ns slot's input: two mics averaged, no gsc
+  pc_mean_gtcrn_gain: {by: refs, after: pc_mean, ns: gtcrn_gain}
   tinyai: {by: outside}                                      # copied by prepare where an item names a file
   board_mean: {by: board, spatial: none, ns: "off"}          # dsp_afe in C on board B, test_apps/espsr_compare
   board_gsc: {by: board, spatial: gsc, ns: "off"}

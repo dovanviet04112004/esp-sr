@@ -60,6 +60,35 @@ def test_enhance_lists_every_pair_once_and_passes_weights_only_when_pinned(tmp_p
         refs.enhance("rnnoise", [*pairs, (tmp_path / "gone.wav", tmp_path / "x.wav")], None, cache, tmp_path / "w")
 
 
+def test_enhance_fetches_an_engines_files_into_its_projects_folder_and_passes_its_args(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache = tmp_path / "cache"
+    folder = cache / "afe_ref" / "gtcrn"
+    for path, body in (("gtcrn.py", b"code"), ("checkpoints/m.tar", b"net")):
+        (folder / path).parent.mkdir(parents=True, exist_ok=True)
+        (folder / path).write_bytes(body)
+    files = {
+        "gtcrn.py": {"url": "https://example.org/gtcrn.py", "sha256": hashlib.sha256(b"code").hexdigest()},
+        "checkpoints/m.tar": {"url": "https://example.org/m.tar", "sha256": hashlib.sha256(b"net").hexdigest()},
+    }
+    calls = []
+    monkeypatch.setattr(refs, "run", lambda name, *args: calls.append((name, args)))
+    src = tmp_path / "a.wav"
+    src.write_bytes(b"clip")
+    refs.enhance(
+        "gtcrn_gain",
+        [(src, tmp_path / "b.wav")],
+        {"project": "gtcrn", "files": files, "args": ["gain"]},
+        cache,
+        tmp_path / "work",
+    )
+    assert calls == [("gtcrn", (str(folder), str(tmp_path / "work" / "gtcrn_gain_jobs.jsonl"), "gain"))]
+    files["gtcrn.py"]["sha256"] = "0" * 64
+    with pytest.raises(ValueError):
+        refs.enhance("gtcrn", [(src, tmp_path / "b.wav")], {"files": files}, cache, tmp_path / "work")
+
+
 def test_embed_fetches_every_file_and_hands_the_windows_over_in_one_npz(tmp_path: Path, monkeypatch) -> None:
     cache = tmp_path / "cache"
     files = {"w.bin": b"weights", "pkg/mod.py": b"code"}
