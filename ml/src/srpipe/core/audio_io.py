@@ -18,6 +18,7 @@ from srpipe.generated import grid
 INT16_SCALE = 32768.0
 PARQUET_AUDIO_COLUMN = "audio"
 SPANS_DIR = Path("interim") / "spans"  # under the data root: spans decoded once (KEHOACH 1.2)
+EXACT_SEEK_SUFFIXES = (".wav", ".flac")  # a seek lands on the sample; MP3's may not
 
 
 def to_float(pcm: np.ndarray) -> np.ndarray:
@@ -104,18 +105,23 @@ class ItemReader:
         return self._last[1]
 
     def native(self, item: str) -> tuple[np.ndarray, int]:
-        """Mono float64 at the item's own rate, and that rate."""
+        """Mono float64 at the item's own rate, and that rate; a span of a WAV or FLAC file reads its frames alone."""
         whole, _, span = item.partition("@")
         name, _, row = whole.partition("#")
         path = self.raw_root / name
         if not row and not path.exists() and (self.raw_root.parent / SPANS_DIR / name).exists():
             path = self.raw_root.parent / SPANS_DIR / name
+        bounds_s = [float(v) for v in span.split("-")] if span else []
+        if bounds_s and not row and path.suffix.lower() in EXACT_SEEK_SUFFIXES:
+            with sf.SoundFile(path) as f:
+                first, last = (min(round(s * f.samplerate), f.frames) for s in bounds_s)
+                f.seek(first)
+                return f.read(max(last - first, 0), dtype="float64", always_2d=True).mean(axis=1), f.samplerate
         source = io.BytesIO(self._row_bytes(path, int(row))) if row else path
         x, rate = sf.read(source, dtype="float64", always_2d=True)
         x = x.mean(axis=1)
-        if span:
-            start_s, end_s = (float(v) for v in span.split("-"))
-            x = x[round(start_s * rate) : round(end_s * rate)]
+        if bounds_s:
+            x = x[round(bounds_s[0] * rate) : round(bounds_s[1] * rate)]
         return x, rate
 
     def read(self, item: str) -> np.ndarray:

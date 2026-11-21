@@ -138,6 +138,19 @@ def test_items_come_from_files_and_parquet_rows_at_the_grid_rate_whole_or_a_span
     assert reader.read("one.wav@0-0.005").shape == (80,)
 
 
+@pytest.mark.parametrize("suffix", [".wav", ".flac", ".WAV"])
+def test_a_span_of_a_file_is_the_same_samples_as_the_whole_file_cut(tmp_path: Path, suffix: str) -> None:
+    rng = np.random.default_rng(0)
+    sf.write(tmp_path / f"long{suffix}", 0.3 * rng.standard_normal((4800, 2)), 48000, subtype="PCM_16")
+    reader = audio_io.ItemReader(tmp_path)
+    whole, rate = reader.native(f"long{suffix}")
+    for start_s, end_s in ((0.0123, 0.0456), (0.09, 0.2), (0.15, 0.12)):
+        got, got_rate = reader.native(f"long{suffix}@{start_s}-{end_s}")
+        assert got_rate == rate == 48000
+        np.testing.assert_array_equal(got, whole[round(start_s * rate) : round(end_s * rate)])
+    assert not np.array_equal(reader.native(f"long{suffix}@0.0124-0.0457")[0], whole[590:2189])
+
+
 def test_a_ramp_fades_both_edges_and_leaves_the_middle() -> None:
     x = np.ones(1000)
     y = audio_io.ramped(x, 0.005)
