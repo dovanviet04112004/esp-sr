@@ -951,6 +951,14 @@ giữ; cả hai hơn sàn thì giữ bản cao hơn, còn khi hai bản ngang nh
 chuỗi có sàn, trên phiên thu qua board có nhiễu, cho cả ba biến thể; chỉ bản thắng được học lại `wake` và `command` để
 xác nhận. ADR ghi bảng ba cột, và bản được giữ thành mặc định của `AI_ENGINE_NS_BACKEND`.
 
+**Ứng viên học sẵn chấm trên máy tính trước** (E9-T15, GTCRN của §3.16). Chuỗi Python nhận một khe `ns` từ ngoài
+(`ChainConfig.ns_slot`): mỗi bước khe nhận phổ phức 257 vạch của lối ra không gian và trả một gain ≤ 1 mỗi vạch, thay
+sàn như khe của firmware. `SRPIPE_NS=gtcrn` trên môi trường của lệnh, không ở `.env`, như `SRPIPE_CHIP`, cắm GTCRN chạy
+dòng vào mọi chuỗi mà `device.listen` dựng (`tasks/ns/gtcrn.py`): các file chạy dòng ở commit ghim, nạp checkpoint DNS3
+chính thức; gain là tỉ số biên độ giữa lối ra của mạng và vạch vào. `wake-board` và `command-eval` nhờ thế chấm cùng phiên
+board, một lần với sàn và một lần với GTCRN, bằng thước của §3.15. Khe của firmware hôm nay chỉ nhận công suất: một mạng
+cần phổ phức chỉ lên chip sau khi thắng ở thước ấy, qua ADR và §4.5.5.
+
 ### 3.10 `vad` và `agc`
 
 **`vad` đứng trước `agc`**, cả hai sau `istft`, cùng một khung.
@@ -3070,7 +3078,7 @@ ml/
 │   ├── tasks/                         # ── MÔ HÌNH HỌC, mỗi nhánh một thư mục độc lập ──
 │   │   │   Cùng khuôn: README · model/ · data.py · train.py · eval.py · quant.py · postproc/
 │   │   │   ★ postproc/ là phần phải khớp 1:1 với ai_engine/src/<nhánh>/, kiểm bằng golden
-│   │   ├── ns/{README.md, data.py, gpu_mix.py, model/{rnnoise.py, nsnet.py}, postproc/{bands.py ★, bins.py ★},
+│   │   ├── ns/{README.md, data.py, gpu_mix.py, model/{rnnoise.py, nsnet.py}, postproc/{bands.py ★, bins.py ★}, gtcrn.py,
 │   │   │    train.py, eval.py, quant.py}   # hai ứng viên học trong một lượt trên cùng batch (§3.9); data.py
 │   │   │                              #   dựng split ns/v<n>, kho giải mã sẵn và bộ trộn lúc học: công thức
 │   │   │                              #   từng ví dụ (rút, đọc) và phép lọc numpy float64 của tập giữ lại;
