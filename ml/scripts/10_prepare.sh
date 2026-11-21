@@ -19,18 +19,31 @@ fetch() {
   local done_marker="$dir/.done/$file"
   if [ -e "$done_marker" ]; then return; fi
   mkdir -p "$(dirname "$dir/$file")"
-  # Sixteen connections: Azure and some mirrors cap each connection far below the line's speed.
-  aria2c -c -x 16 -s 16 --max-tries=5 --file-allocation=none --console-log-level=warn --summary-interval=60 \
-    ${header:+--header="$header"} -d "$(dirname "$dir/$file")" -o "$(basename "$file")" "$url"
+  local split="${file%.zip}.z01"
+  # A file there without aria2's control file was put there by hand from a site that refuses scripts (QUT).
+  if [ ! -e "$dir/$file" ] || [ -e "$dir/$file.aria2" ]; then
+    # Sixteen connections: Azure and some mirrors cap each connection far below the line's speed.
+    aria2c -c -x 16 -s 16 --max-tries=5 --file-allocation=none --console-log-level=warn --summary-interval=60 \
+      ${header:+--header="$header"} -d "$(dirname "$dir/$file")" -o "$(basename "$file")" "$url"
+  fi
   if [ "$algo" != "-" ]; then echo "$sum  $dir/$file" | "${algo}sum" -c -; fi
   echo "sha256 $(sha256sum "$dir/$file" | cut -d' ' -f1)  $file"
   case "$file" in
-    *.zip) unzip -q -o "$dir/$file" -d "$dir" ;;
+    *.zip)
+      if [ -e "$dir/$split" ]; then
+        # A split archive is joined before unzip, as FSD50K's README does; its parts come first in the manifest.
+        rm -f "$dir/${file%.zip}.joined.zip"
+        zip -q -s 0 "$dir/$file" --out "$dir/${file%.zip}.joined.zip"
+        unzip -q -o "$dir/${file%.zip}.joined.zip" -d "$dir" && rm "$dir/${file%.zip}.joined.zip"
+      else
+        unzip -q -o "$dir/$file" -d "$dir"
+      fi ;;
     *.tar.gz | *.tgz) tar -xzf "$dir/$file" -C "$dir" ;;
     *.tar.bz2) tar -xjf "$dir/$file" -C "$dir" ;;
   esac
   if [ "${KEEP_ARCHIVES:-0}" != 1 ] && [[ "$file" =~ \.(zip|tar\.gz|tgz|tar\.bz2)$ ]]; then
     rm "$dir/$file"
+    if [ -e "$dir/$split" ]; then rm "$dir/${file%.zip}".z[0-9][0-9]; fi
   fi
   mkdir -p "$(dirname "$done_marker")" && touch "$done_marker"
 }
