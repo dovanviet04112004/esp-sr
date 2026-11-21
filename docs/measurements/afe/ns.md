@@ -374,3 +374,41 @@ mức hạ đoạn có lời (2,2 dB so với 1,3 dB của OM-LSA trên lối v�
 Khe chạy GTCRN dòng từng bước trên CPU máy tính, 1 500 bước, mỗi bước 16 ms tiếng: 5,8 ms một bước ở một luồng torch,
 9,3 ms ở mười luồng mặc định khi máy chạy song song một job lượng tử hoá (21/11). Tensor của một bước quá nhỏ để chia cho
 nhiều luồng, nên khe chạy một luồng. Dựng model mất 0,6 s, và mỗi tiến trình chỉ dựng một lần.
+
+### 10.1 Thước của bộ nhận dạng: GTCRN thua sàn (21/11)
+
+Chấm theo KẾ HOẠCH §3.9 và §3.15: `wake` và `command` đã học trên chuỗi có sàn, phiên thu qua board B mà run chưa học, một
+lần với OM-LSA, một lần với `SRPIPE_NS=gtcrn` (`esp-sr` `075b29b9`). Log ở `cache/logs/e9t15_*`.
+
+`make wake-board RUN=artifacts/wake/runs/20261113_8ac386e_ffbc12 ROW=kl TH=800`:
+
+| Khe `ns` | "vừng ơi" | 004 | 005 | 008 | Báo nhầm, 66 phiên 1,13 h |
+|---|---|---|---|---|---|
+| OM-LSA (sàn) | **33/35** | 9/11 | 12/12 | 12/12 | 0 |
+| GTCRN | 26/37 | 3/12 | 11/12 | 12/13 | 0 |
+| GTCRN, gain ≥ −12 dB | 29/35 | 5/11 | 12/12 | 12/12 | — |
+| GTCRN, gain ≥ −20 dB | 30/38 | 6/12 | 12/12 | 12/14 | — |
+
+`make command-eval TRACK=ctc RUN=artifacts/command_ctc/runs/20261007_439d763-dirty_f438bd CONTRACT=1`:
+
+| Khe `ns` | Đúng ở lần đoán tốt nhất | Lệnh kém nhất, δ₁ 200–1000 ‰ | Mọi lệnh | Lời không phải lệnh bị từ chối |
+|---|---|---|---|---|
+| OM-LSA (sàn) | 192/215 | **60%** | 76% | 143–147/150 |
+| GTCRN | 194/216 | 18% | 73% | 116–121/125 |
+
+Lệnh của GTCRN lệch từng phiên: "tắt quạt" ở 3 m từ 1/6 lên 5/6, "đóng cửa" ở 3 m từ 4/5 xuống 1/5. Vậy GTCRN không hơn sàn
+ở thước nào, và theo luật chọn của §3.9 thì giữ sàn. Hai dòng có sàn gain chạy bằng script một lần trên ba phiên "vừng ơi",
+không có lệnh `make`.
+
+Vì sao GTCRN thua, đo trên lối ra của chuỗi ở ba phiên ấy:
+- Giữa lời, mức của hai bản ngang nhau: GTCRN kém −0,4 / −0,1 / +0,3 dB so với OM-LSA ở phiên 004 / 005 / 008.
+- Ngay sau khi lời dứt, GTCRN thấp hơn hẳn. Ở phiên 004 và 005, 0–100 ms sau lời thấp hơn 9 dB, 100–200 ms thấp hơn
+  14–15 dB, 200–400 ms thấp hơn 20–24 dB. Phiên 008 chỉ thấp hơn 2–3 dB ở 200 ms đầu.
+- Nghĩa là checkpoint DNS3 vừa khử nhiễu vừa khử vang: nó học để ra tiếng khô. Nhãn dương của `wake` phủ từ 0,2 s trước
+  đến 0,3 s sau khi lời dứt (`train.label_s`), đúng quãng vang ấy.
+- Quãng lặng xuống −88 … −92 dBFS, so với −69 … −73 dBFS của OM-LSA. Sàn gain −12 dB đưa quãng lặng về −70 … −73 dBFS và
+  gỡ được một phần (29/35). Phần còn lại là quãng vang bị cắt.
+- Nâng lối vào của mạng 12 hay 24 dB, giữ gain là tỉ số với vạch vào, không giúp: 004 vẫn 3/11, 008 tụt xuống 7/12. Lỗi
+  không nằm ở mức vào.
+
+Bản ghi lối ra của hai khe ở `cache/listen/ns_gtcrn/<phiên>_{omlsa,gtcrn}.wav`.
