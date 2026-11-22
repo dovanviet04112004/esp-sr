@@ -84,6 +84,7 @@ dữ liệu huấn luyện.
 |---|---|---|---|---|---|---|
 | `ns` `rnnoise` | `ai_engine/src/ns_rnnoise/`, cắm vào khe `ns` của `dsp_afe` | **RNNoise-16k**: RNNoise dựng lại cho 16 kHz, dày 24 → GRU 24 / 48 / 96 → gain 18–22 dải + xác suất tiếng nói (§3.9) | đặc trưng dải tính từ 257 vạch | gain từng dải, nội suy ra 257 vạch | 82 603 tham số, 104 KB `.espdl` int8 (probe E9-T10) | kiến trúc RNNoise; **huấn luyện mới hoàn toàn** vì dải và tần số lấy mẫu khác bản gốc |
 | `ns` `nsnet` | `ai_engine/src/ns_nsnet/`, cắm vào cùng khe | **NSNet-16k**: mạng theo vạch họ NSNet2, dày 256 → H → GRU H → GRU H → dày H → 256, một sigmoid mỗi vạch, vạch 256 lấy gain vạch 255; cỡ **L**, H = 144, chủ repo chọn; S (96) và M (128) học cùng lượt làm đường lùi (§3.9) | log công suất 256 vạch đầu | gain 257 vạch | L: 324 688 tham số, 337 KB `.espdl` int8, 5,1 ms mỗi bước trên board B (probe E9-T10, ADR-0014) | kiến trúc NSNet2; **huấn luyện mới hoàn toàn** vì NSNet2 công bố chạy khung 20 ms, 161 vạch |
+| `ns` `gtcrn` | `ai_engine/src/ns_gtcrn/`, cắm vào cùng khe | **GTCRN** (Rong và cộng sự, 2024; mã MIT, commit ghim `502ebfab`): ERB, SFE, bộ mã hoá tích chập nhóm có chú ý theo thời gian, hai khối GRU hai đường, bộ giải mã, mặt nạ phức (§3.9) | độ lớn, phần thực, phần ảo của 257 vạch | gain 257 vạch: độ lớn mặt nạ chặn ở 1 | 50 054 tham số, 196 KB float32; C float32 viết tay, không qua esp-dl (ADR-0047) | **học sẵn**: checkpoint DNS3 chính thức, không học lại |
 | `wake` | `ai_engine/src/wake/` | TCN tích chập giãn nở nhân quả, 6 tầng, bước giãn 1 → 32, 64 kênh | log-mel 80 dải × khung 16 ms | xác suất từ đánh thức mỗi khung | ~100 KB int8 🔬 | tự huấn luyện |
 | `command` `kws` | `ai_engine/src/command_kws/` | DS-CNN (Zhang và cộng sự, 2017): một tích chập rồi bốn tầng tách chiều sâu, trung bình gộp, phân lớp một cửa sổ mỗi câu (ADR-0012) | log-mel 80 cộng ba chiều cao độ trên cửa sổ 94 bước tính ngược từ lúc `vad` tắt | xác suất của từng lệnh học được, `other`, `silence` | cỡ S của bài: `.espdl` 40,6 KB; M, L (156, 438 KB) quá ngân sách thời gian (§3.12) | tự huấn luyện trên mẩu lệnh người thật, TTS và âm bản |
 | `command` `ctc` | `ai_engine/src/command_ctc/` | encoder chạy dòng theo bộ khung MultiNet7 của Espressif (ADR-0013): ba tích chập 2D giảm khung, 6 lớp chia 4 tầng tốc độ khung, mỗi lớp khối feedforward, khối tích chập có cổng và khối trộn thay attention; đầu CTC trên đơn vị của §3.12; lùi về TCN nếu một lớp của nó qua esp-dl không đạt trên board | log-mel 80 + ba chiều cao độ | xác suất đơn vị mỗi khung | **theo chất lượng**, từ cỡ MultiNet7 ~2,1 MB int8 🔬 trở lên; trần là µs trên board (§3.3), bộ nhớ nới theo §6.1, §6.6 (ADR-0013) | tự huấn luyện trên kho tiếng Việt |
@@ -597,10 +598,11 @@ micro đi thẳng vào khe `ns`. Nếu hai micro thu cùng một tín hiệu và
 sạch, từng bit.
 
 **Khe `ns` là cách giữ `dsp_afe` không biết mô hình học tồn tại.** `dsp_afe` khai một bảng hàm
-`dsp_afe_ns_ops_t` (cỡ trạng thái, khởi tạo, đặt lại, xử lý một khung phổ công suất ra gain 257 vạch). Bản
-OM-LSA nằm ngay trong `dsp_afe`; hai ứng viên mạng, RNNoise-16k ở `ai_engine/src/ns_rnnoise/` và NSNet-16k ở
-`ai_engine/src/ns_nsnet/`, mỗi bản phơi ra đúng bảng hàm ấy qua `ai_engine_ns_ops()`; `svc_front` chọn bản nào và cắm
-vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đi xuống, và `dsp_afe` vẫn dịch
+`dsp_afe_ns_ops_t` (cỡ trạng thái, khởi tạo, đặt lại, xử lý một khung phổ phức ra gain 257 vạch). Bản OM-LSA nằm
+ngay trong `dsp_afe` và tự tính công suất từ phổ; các mạng, RNNoise-16k ở `ai_engine/src/ns_rnnoise/`, NSNet-16k ở
+`ai_engine/src/ns_nsnet/` và GTCRN ở `ai_engine/src/ns_gtcrn/`, mỗi bản phơi ra đúng bảng hàm ấy qua
+`ai_engine_ns_ops()`; `svc_front` cắm sàn hay mạng đã dựng theo NVS `afe/ns_engine`, lúc khởi tạo và khi giá trị ấy
+đổi, theo luật của §3.9. Hướng phụ thuộc vẫn đi xuống, và `dsp_afe` vẫn dịch
 được trên máy tính mà không kéo theo esp-dl.
 
 ### 3.3 Bảng chốt từng khối
@@ -623,6 +625,7 @@ vào lúc khởi tạo, theo luật của §3.9. Hướng phụ thuộc vẫn đ
 | `ns` sàn | thuần | `dsp_afe` | OM-LSA + IMCRA | gain sàn −12 dB | **1,69 ms đo** (đỉnh 1,88); FPU của S3 tốn 4–6 chu kỳ mỗi lệnh float, không chạy chồng | E9-T1 |
 | `ns` mạng `rnnoise` | **mô hình** | `ai_engine/src/ns_rnnoise/` | RNNoise-16k: RNNoise dựng lại cho 16 kHz | 18–22 dải | 4,8 ms int8 đo trên board B (E9-T10) | E9-T12 |
 | `ns` mạng `nsnet` | **mô hình** | `ai_engine/src/ns_nsnet/` | NSNet-16k: mạng theo vạch họ NSNet2, một gain sigmoid mỗi vạch | 256 vạch, GRU 2 × 144 (cỡ L) | 5,1 ms int8 đo trên board B (E9-T10), hơn `nsnet2` của ESP-SR 21%; chủ repo chọn L (ADR-0014) | E9-T12 |
+| `ns` mạng `gtcrn` | **mô hình** | `ai_engine/src/ns_gtcrn/` | GTCRN học sẵn trên DNS3, C float32 viết tay (ADR-0047) | 257 vạch phức, 33 dải trong mạng | bản thử có dáng GTCRN 28–29 ms float32 trên board C (`measurements/afe/ns.md` §10.3), chưa vừa nhịp S3 | E9-T16 |
 | `vad` | thuần | `dsp_afe` | GMM sáu dải kiểu WebRTC, kéo dài 240 ms | bảng WebRTC ở `contracts/afe.yaml` | ~140 µs | E7-T3 |
 | `agc` | thuần | `dsp_afe` | hai tầng: chậm theo mức nói, nhanh chặn đỉnh nhìn trước 4 ms | đích −26 dBFS | ~260 µs, ~340 µs khi chặn mọi mẫu | E7-T4 |
 | `wake` | **mô hình** | `ai_engine/src/wake/` | TCN giãn nở nhân quả int8, chạy dòng 8 khung mỗi lượt | trường nhìn ~2 s | **288 µs đo** mỗi khung, 80 dải, 64 kênh, trọng số ngẫu nhiên (`measurements/latency.md` §8) | E11-T11 |
@@ -943,7 +946,7 @@ Chung cho hai ứng viên:
 | Trạng thái | trạng thái GRU và lịch sử đặc trưng nằm trong vùng trạng thái của khe; `reset` của khe xoá chúng và giữ mọi thứ `init` dựng từ cấu hình, nên `dsp_afe_reset` sau một chỗ hở `seq` dài không dựng lại gì, còn chỗ hở ngắn khe giữ nguyên (§4.5.5); trọng số và tensor của esp-dl nằm ở PSRAM của `ai_engine` |
 | Chỗ đặt trọng số | bị chạm **mỗi khung**, nằm ở PSRAM như mọi model (§6.5); E9-T7 đo độ trễ đỉnh một khung của từng ứng viên |
 | Vọng dư | bản đầu không đọc `echo_power`: chưa có loa thì chưa có vọng để học (E10). Sàn cộng vọng dư vào ước lượng nhiễu và dìm vạch vọng tới `ns.echo_floor_db`, nên chuỗi `"MMR"` chạy sàn tới khi bản được giữ học với phổ vọng dư |
-| Dựng và cắm | Kconfig `AI_ENGINE_NS_BACKEND` đưa tối đa một ứng viên vào bản dựng (§4.5.2); `meta.json` của ảnh model khai ứng viên (§6.3). `svc_front` cắm `ai_engine_ns_ops()` khi hàm ấy khác `NULL` và luật vọng dư ở trên cho phép, không thì để khe trống và chuỗi chạy sàn |
+| Dựng và cắm | Kconfig `AI_ENGINE_NS_BACKEND` đưa tối đa một mạng vào bản dựng (§4.5.2); `meta.json` của ảnh model khai mạng (§6.3). `svc_front` cấp vùng trạng thái của khe đủ cho sàn và cho mạng đã dựng, rồi cắm theo NVS `afe/ns_engine` (0 là sàn, 1 là mạng; gieo 0, đổi bằng `SET_CONFIG`, §6.2): mạng chỉ khi `ai_engine_ns_ops()` khác `NULL` và luật vọng dư ở trên cho phép, không thì sàn. Giá trị đổi lúc chạy thì `sach_task` đổi bản giữa hai khung bằng `dsp_afe_set_ns`, hàm ấy dựng lại trạng thái của bản mới |
 
 **Luật chọn**: sàn, và hai ứng viên sau int8, chấm trên cùng vật liệu bằng thước quyết định của §3.15. Bản hơn sàn thì
 giữ; cả hai hơn sàn thì giữ bản cao hơn, còn khi hai bản ngang nhau trong sai số của tập thử thì giữ bản rẻ hơn về µs
@@ -951,13 +954,20 @@ giữ; cả hai hơn sàn thì giữ bản cao hơn, còn khi hai bản ngang nh
 chuỗi có sàn, trên phiên thu qua board có nhiễu, cho cả ba biến thể; chỉ bản thắng được học lại `wake` và `command` để
 xác nhận. ADR ghi bảng ba cột, và bản được giữ thành mặc định của `AI_ENGINE_NS_BACKEND`.
 
-**Ứng viên học sẵn chấm trên máy tính trước** (E9-T15, GTCRN của §3.16). Chuỗi Python nhận một khe `ns` từ ngoài
+**Ứng viên học sẵn: GTCRN** (E9-T15, E9-T16, §3.16, ADR-0047). Chuỗi Python nhận một khe `ns` từ ngoài
 (`ChainConfig.ns_slot`): mỗi bước khe nhận phổ phức 257 vạch của lối ra không gian và trả một gain ≤ 1 mỗi vạch, thay
 sàn như khe của firmware. `SRPIPE_NS=gtcrn` trên môi trường của lệnh, không ở `.env`, như `SRPIPE_CHIP`, cắm GTCRN chạy
 dòng vào mọi chuỗi mà `device.listen` dựng (`tasks/ns/gtcrn.py`): các file chạy dòng ở commit ghim, nạp checkpoint DNS3
 chính thức; gain là tỉ số biên độ giữa lối ra của mạng và vạch vào. `wake-board` và `command-eval` nhờ thế chấm cùng phiên
-board, một lần với sàn và một lần với GTCRN, bằng thước của §3.15. Khe của firmware hôm nay chỉ nhận công suất: một mạng
-cần phổ phức chỉ lên chip sau khi thắng ở thước ấy, qua ADR và §4.5.5.
+board, một lần với sàn và một lần với GTCRN, bằng thước của §3.15. Trên các phiên yên hiện có GTCRN thua sàn, vì
+checkpoint khử cả vang (`measurements/afe/ns.md` §10).
+
+Chủ repo vẫn đưa GTCRN lên chip (22/11). Không bản lượng tử nào của esp-dl giữ được gain khi không học lại: lệch
+7,6–47 dB (`ns.md` §10.3). Vì vậy `ai_engine/src/ns_gtcrn/` là GTCRN chạy dòng viết tay bằng C float32, trọng số float32
+của checkpoint ghim là một mục của ảnh model, và `tasks/ns/gtcrn_mirror.py` là bản soi gương float32 bằng vòng lặp numba
+theo đúng thứ tự cộng của C. Gain của khe là độ lớn của mặt nạ phức, chặn ở 1. Mặc định là sàn; NVS `afe/ns_engine` đổi
+giữa sàn và GTCRN lúc chạy (bảng trên). Bản thử có dáng GTCRN tốn 28–29 ms mỗi bước 16 ms trên S3, nên bản dựng S3 để
+`AI_ENGINE_NS_BACKEND` khác `gtcrn` tới khi kernel tối ưu vừa nhịp; fork S31 mang GTCRN (KẾ HOẠCH S31).
 
 ### 3.10 `vad` và `agc`
 
@@ -3079,6 +3089,7 @@ ml/
 │   │   │   Cùng khuôn: README · model/ · data.py · train.py · eval.py · quant.py · postproc/
 │   │   │   ★ postproc/ là phần phải khớp 1:1 với ai_engine/src/<nhánh>/, kiểm bằng golden
 │   │   ├── ns/{README.md, data.py, gpu_mix.py, model/{rnnoise.py, nsnet.py}, postproc/{bands.py ★, bins.py ★}, gtcrn.py,
+│   │   │    gtcrn_mirror.py ★,
 │   │   │    train.py, eval.py, quant.py}   # hai ứng viên học trong một lượt trên cùng batch (§3.9); data.py
 │   │   │                              #   dựng split ns/v<n>, kho giải mã sẵn và bộ trộn lúc học: công thức
 │   │   │                              #   từng ví dụ (rút, đọc) và phép lọc numpy float64 của tập giữ lại;
@@ -3376,7 +3387,7 @@ firmware/
 │   │                            #     espdl_preload.hpp cùng espdl_preload_<IDF_TARGET>.cpp (§3.14), chia việc của op
 │   │                            #     cho hai nhân espdl_split.hpp cùng espdl_split_{one,two}.cpp (§5.1);
 │   │                            #   src/{core,ns,wake,command,command_kws,command_ctc,command_rnnt,pitch,speaker,synth,detect}/;
-│   │                            #   ns_rnnoise/, ns_nsnet/ ở E9-T5, E9-T11; đường kws dựng vỏ src/command/;
+│   │                            #   ns_rnnoise/, ns_nsnet/ ở E9-T5, E9-T11, ns_gtcrn/ ở E9-T16; đường kws dựng vỏ src/command/;
 │   │                            #   Kconfig AI_ENGINE_NS_BACKEND chọn một thư mục ns*, AI_ENGINE_COMMAND_BACKEND
 │   │                            #   một thư mục command_*, AI_ENGINE_CORES một espdl_split_*, AI_ENGINE_KERNELS các
 │   │                            #   .S hay các .c cùng thư mục impl/ của chúng vào danh sách nguồn
@@ -3428,11 +3439,12 @@ khoá ở `contracts/models.lock.json`, hiện là `ctc` (ADR-0015). Độ dài 
 không biết đường nào đang chạy ngoài mã lỗi khi đổi bộ lệnh. `command_rnnt` dùng lại log-softmax của
 `command_ctc/ctc_score.c`.
 
-**Ứng viên của `ns` chọn lúc dựng** (§3.9). Kconfig `AI_ENGINE_NS_BACKEND` của `ai_engine` (`none` | `rnnoise` |
-`nsnet`, mặc định `none` tới khi ADR của E9-T12 chọn) đưa đúng một trong `src/ns/`, `src/ns_rnnoise/`, `src/ns_nsnet/`
-vào danh sách nguồn theo luật 5 của §4.5.3; `REQUIRES` không đổi. `src/ns/` là vỏ trung tính của `none`:
-`ai_engine_ns_ops()` trả `NULL`, và bản dựng không mang mã hay bộ nhớ của mạng nào. Hai thư mục ứng viên cài cùng hàm
-ấy; ảnh model không có mục của ứng viên đã dựng thì hàm cũng trả `NULL`, và `svc_front` để khe trống cho chuỗi chạy sàn.
+**Mạng của `ns` chọn lúc dựng, sàn hay mạng chọn lúc chạy** (§3.9). Kconfig `AI_ENGINE_NS_BACKEND` của `ai_engine`
+(`none` | `rnnoise` | `nsnet` | `gtcrn`, mặc định `none`) đưa đúng một trong `src/ns/`, `src/ns_rnnoise/`,
+`src/ns_nsnet/`, `src/ns_gtcrn/` vào danh sách nguồn theo luật 5 của §4.5.3; `REQUIRES` không đổi. `src/ns/` là vỏ trung
+tính của `none`: `ai_engine_ns_ops()` trả `NULL`, và bản dựng không mang mã hay bộ nhớ của mạng nào. Các thư mục mạng cài
+cùng hàm ấy; ảnh model không có mục của mạng đã dựng thì hàm cũng trả `NULL`, và chuỗi chạy sàn bất kể NVS
+`afe/ns_engine`.
 
 **App khung rỗng của TỔNG QUAN V5.0.9 không phải app thứ hai.** Nó là `main` khi mọi module của
 `dsp_afe` còn tắt trong Kconfig: thu → STFT → iSTFT → gửi ra. Một app khung riêng sẽ trôi khỏi `main`
@@ -3525,7 +3537,7 @@ Mười hai luật. Luật 1–6 áp cho mọi component; 7–10 riêng cho tầ
 | `mica_spec/{fft, window, stft, mel}` | `dsp_spec/{fft, window, stft, mel}` |
 | `mica_afe/{hpf, balance, aec, doa, gsc, agc, vad}` | `dsp_afe/{hpf, balance, aec, doa, gsc, agc, vad}` |
 | `mica_afe/mase` | `dsp_afe/bss` |
-| `mica_afe/ns` | sàn `dsp_afe/ns_omlsa` + mạng `ai_engine/src/ns_rnnoise/` hoặc `ai_engine/src/ns_nsnet/`, cùng khe `ns` |
+| `mica_afe/ns` | sàn `dsp_afe/ns_omlsa` + mạng `ai_engine/src/ns_rnnoise/`, `ai_engine/src/ns_nsnet/` hoặc `ai_engine/src/ns_gtcrn/`, cùng khe `ns` |
 | `mica_kws/feature` | `dsp_spec/mel`, cộng `dsp_spec/pitch` cho `command` (ADR-0010); chuẩn hoá đi theo model trong `ai_engine` |
 | `mica_kws/g2p` | `lang_vi/{normalize, g2p, lexicon}` |
 | `mica_kws/wake` | `ai_engine/src/wake/` |
@@ -3565,6 +3577,7 @@ esp_err_t dsp_afe_feed(dsp_afe_t *afe, const int16_t *interleaved, size_t frames
 esp_err_t dsp_afe_fetch(dsp_afe_t *afe, dsp_afe_frame_t *out);   // ESP_ERR_NOT_FOUND khi chưa đủ
 void      dsp_afe_resume(dsp_afe_t *afe);                        // sau chỗ hở ngắn: xoá mẫu cũ, giữ ước lượng
 void      dsp_afe_reset(dsp_afe_t *afe);                         // sau chỗ hở dài: xoá trạng thái, giữ bảng
+esp_err_t dsp_afe_set_ns(dsp_afe_t *afe, const dsp_afe_ns_ops_t *ns, void *ns_ctx);  // giữa hai khung
 
 typedef struct {
     int16_t  pcm[GEN_GRID_HOP_SAMPLES];    // một kênh đã làm sạch
@@ -3618,10 +3631,12 @@ phương mẫu int16 của cửa sổ lệnh, một trên đoạn trước lời
 0…`AI_ENGINE_SPEAKER_NOISE_BINS` − 1 theo biên của ảnh (§3.17). `passes(milli_z, prints, noise_bin)` so điểm với ngưỡng
 của số người ấy ở dải ấy. Ảnh không mang biên thì mọi cửa sổ vào dải yên nhất, nên chấm như ADR-0023.
 
-**`ai_engine_ns_ops()` và khe `dsp_afe_ns_ops_t` giữ nguyên cho cả hai ứng viên của `ns`** (§3.9): khe nhận công suất
-257 vạch cùng phổ vọng dư khi có, trả 257 gain trong 0..1 và `speech_prob`. Khe có bốn hàm: cỡ trạng thái, `init` dựng
-mọi thứ suy từ cấu hình rồi xoá trạng thái, `reset` chỉ xoá trạng thái, và xử lý một khung. Đặc trưng, dải, chuẩn hoá và
-trạng thái GRU nằm sau khe, trong thư mục của ứng viên, nên đổi ứng viên không chạm `dsp_afe` hay `svc_front`.
+**`ai_engine_ns_ops()` và khe `dsp_afe_ns_ops_t` giữ nguyên cho sàn và mọi mạng của `ns`** (§3.9): khe nhận phổ phức
+257 vạch, thực và ảo xen nhau, cùng phổ vọng dư khi có, trả 257 gain trong 0..1 và `speech_prob` (ADR-0047). Khe có bốn
+hàm: cỡ trạng thái, `init` dựng mọi thứ suy từ cấu hình rồi xoá trạng thái, `reset` chỉ xoá trạng thái, và xử lý một
+khung. Công suất, đặc trưng, dải, chuẩn hoá và trạng thái của mạng nằm sau khe, trong thư mục của bản ấy, nên đổi bản
+không chạm `dsp_afe` hay `svc_front`. `dsp_afe_set_ns` thay bản đang cắm giữa hai khung, cùng task với `feed`: nó gọi
+`init` của bản mới trên vùng trạng thái mà `dsp_afe_workspace_bytes` đã tính cho bản lớn nhất của cấu hình.
 
 **Chỗ hở `seq`: `dsp_afe_resume` hay `dsp_afe_reset`.** `svc_front` gọi một trong hai trên `sach_task` mỗi khi `seq`
 hở, và khung sau cả hai mang `DSP_AFE_FLAG_GAP`. Hở không quá `chain.gap_keep_s` của `contracts/afe.yaml` thì
@@ -4258,7 +4273,7 @@ Bảng phân vùng không đi qua OTA được: đổi bảng là nạp lại qu
 | `wifi` | `ssid`, `pass` | str | ghi qua console ở `dev`/`bench`, qua SoftAP ở E13 |
 | `device` | `serial`, `mqtt_uri`, `mqtt_user`, `mqtt_pass`, `stream_host`, `stream_port`, `tz` | str / u16 | vắng `serial` thì dựng từ eFuse MAC: `sr-` + 12 hex thường (board B: `sr-3485188f7a70`); `mqtt_uri` mang cả scheme; vắng thì lùi về `Kconfig` của `net_mqtt`; `tz` là múi giờ POSIX của ngày giờ file trên thẻ, vắng thì `clock.tz` của `vision.yaml` (§3.19) |
 | `calib` | `bal` (blob 257 × 2 float), `bal_ver` (u32), `bal_at` (u32 epoch), `aec_delay` (u32, mẫu), `pcm_shift` (u8) | | kết quả của `test_apps/calib`; **đo trên từng board**, không phải hằng số |
-| `afe` | `ns_floor_db` (i8), `agc_target_dbfs` (i8), `vad_mode` (u8) | | gieo từ `contracts/afe.yaml`, đổi bằng `SET_CONFIG` |
+| `afe` | `ns_floor_db` (i8), `agc_target_dbfs` (i8), `vad_mode` (u8), `ns_engine` (u8: 0 sàn, 1 mạng đã dựng, §3.9) | | gieo từ `contracts/afe.yaml`, đổi bằng `SET_CONFIG` |
 | `kws` | `wake_th` (u16, ‰), `wake_seed` (u16, ‰), `cmd_reject` (u16), `cmd_margin` (u16), `cmd_syllable` (u16), `cmd_seeds` (blob 3 × u16) | | `wake_th` gieo từ header của ảnh ở `models_0` (§6.3), ảnh không mang thì từ `Kconfig` của `svc_listen`; `wake_seed` giữ ngưỡng đã gieo, cùng luật với `cmd_seeds` dưới đây; ba khoá lệnh mang nghĩa của đường đang dựng (§3.12): `δ₁`, `δ₂`, `δ₃` của `ctc` theo phần nghìn nat mỗi khung, hay xác suất thấp nhất và khoảng nhất–nhì của `kws`, ‰, đường không dùng `δ₃`. Chúng gieo từ header của ảnh ở `models_0` (§6.3), ảnh không mang thì từ `Kconfig` (`δ₃` 65 535 là không trần); `cmd_seeds` giữ bộ ba đã gieo: lúc boot, bộ gợi ý khác nó, hay một trong ba khoá vắng, thì ghi lại cả ba, nên model mới mang ngưỡng chọn cho nó tới board, khoá bị xoá (app thử `svc_listen` xoá chúng) không rơi về `Kconfig`, còn giá trị `SET_CONFIG` ghi giữ tới khi bộ gợi ý đổi |
 | `model` | `version` (str), `sha256` (blob 32 B) | | ảnh đang nằm ở `models_0` (§6.1) |
 | `speaker` | `chip`, `server` (u8), `roster` (blob `storage_speaker_roster_t`, 1 128 B), `tpl0` … `tpl7` (blob, 4 B một chiều của embedding) | | `chip`, `server`: cờ kiểm người nói của hai đường (§3.17), vắng là tắt; `roster`: danh sách người nói của đường chip, khuôn số `format` 1 (khuôn khác thì như chưa có danh sách), `version` của nó, mỗi ô `id`, `name` và 4 byte đầu sha256 của mục `speaker` lúc người ấy đăng ký (0 khi chưa có mẫu; khác mục đang nạp thì mẫu không dùng); `tpl<k>`: mẫu giọng của người ở ô `k`, độ dài 1; xoá người là xoá luôn `tpl<k>` của họ (§1.4). Đổi danh sách ghi theo thứ tự: xoá `tpl<k>` của người bị bỏ, ghi `chip`, rồi `roster` sau cùng, nên mất điện giữa chừng thì `version` cũ còn đó và bản retained được áp lại; lúc khởi động, ô trống thì `tpl<k>` của nó bị xoá, nên mẫu của người đã xoá không sót lại. Khoá `tpl`, `tpl_model` của khuôn một người bị xoá lúc khởi động |
@@ -4344,8 +4359,9 @@ Của `wake` có `threshold.permille`, ngưỡng chọn trên `val` cho đúng d
 trơn như chip chấm (§3.11), và `smooth_hops`, số khung làm trơn từ mục `eval` của `wake.yaml`; deploy từ chối dòng
 chưa chọn ngưỡng, bước đóng gói ghi cả hai vào header, và lúc boot board gieo NVS `kws/wake_th` từ ngưỡng ấy (§6.2).
 
-Của `ns` có thêm trường `backend` (`rnnoise` | `nsnet`, §3.9): bước đóng gói đặt tên mục trong ảnh theo nó (`ns_rnnoise`
-hay `ns_nsnet`), nên bản dựng của ứng viên kia không tìm thấy model, `ai_engine_ns_ops()` trả `NULL` và chuỗi chạy sàn.
+Của `ns` có thêm trường `backend` (`rnnoise` | `nsnet` | `gtcrn`, §3.9): bước đóng gói đặt tên mục trong ảnh theo nó
+(`ns_rnnoise`, `ns_nsnet` hay `ns_gtcrn`), nên bản dựng của mạng khác không tìm thấy model, `ai_engine_ns_ops()` trả
+`NULL` và chuỗi chạy sàn. Mục `ns_gtcrn` là trọng số float32 của checkpoint ghim, không phải `.espdl` (ADR-0047).
 
 **`grid_hash` chặn lệch lúc huấn luyện và lúc chạy.** Firmware biên dịch với băm của `grid.yaml`
 trong `gen_grid.h`; ảnh model mang băm của lưới nó được huấn luyện. Khác nhau thì `ai_engine_load`
