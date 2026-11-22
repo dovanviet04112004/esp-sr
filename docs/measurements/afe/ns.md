@@ -435,3 +435,36 @@ Chủ repo không cho học lại: dữ liệu tự dựng chưa đủ tốt. Th
 - Kết luận cho E9-T15: GTCRN học sẵn không hơn sàn, kể cả có sửa ở gain. Giữ OM-LSA ở khe `ns`, firmware không đổi.
 - Ba phiên "vừng ơi" này thu trong phòng yên. Phiên board không có lời "vừng ơi" nói giữa nhiễu, nên thước chưa thấy được
   chỗ một mạng có thể hơn sàn. Trên 66 phiên không có từ ấy, cả hai khe đều không báo nhầm lần nào.
+
+### 10.3 GTCRN lên chip: lượng tử không được, C float32 chậm trên S3 (22/11, ADR-0047)
+
+Chủ repo quyết đưa GTCRN DNS3 lên chip, đổi được lúc chạy với OM-LSA. Bản thử là một bước chạy dòng viết lại bằng các
+op esp-dl có sẵn, khớp `StreamGTCRN` tới 7,4e-6 so với đỉnh qua 400 bước của phiên `20261031_home_004`. ESP-PPQ nhận cả
+đồ thị: 332 op ONNX, 14 tensor trạng thái, mỗi trạng thái vào và ra cùng số mũ. Gain lệch so với bản float, trên 600 bước
+của phiên ấy, các trạng thái int8 đưa ngược lại mỗi bước:
+
+| Cách lượng tử | Gain lệch, trung vị | p90 | Ở vạch có gain float > 0,1 |
+|---|---|---|---|
+| int8 `minmax` | 22,4 dB | 41,1 dB | 46,5 dB |
+| int8 thang `ns` (`kl`, cân bằng trọng số, sửa bias) | 22,9 dB | 34,7 dB | 9,5 dB |
+| lớp đầu và lớp ra mặt nạ int16 (14 op) | 5,6 dB | 23,0 dB | 27,7 dB |
+| mọi op int16 trừ 14 GRU (318 op) | 11,9 dB | 14,8 dB | 7,6 dB |
+
+- Cả GRU int16 thì không chạy: `GRU_quant_forward` của ESP-PPQ không có đường int16.
+- Phân tích theo từng op ở thang `ns`: nhiễu lượng tử đã bằng 31% tín hiệu sau conv đầu của bộ mã hoá, rồi lên 1–24 lần
+  tín hiệu qua bộ mã hoá. GTCRN nhận phổ tuyến tính, không có bước chuẩn hoá ở lối vào. Không học lại có lượng tử thì
+  int8 hay int16 đều không dùng được.
+
+Thời gian một bước C float32 có dáng GTCRN, trọng số ngẫu nhiên, trên board C (ESP32-S3, 240 MHz, `-O2`), `make
+ai-unit-gtcrn BOARD=C`, 200 bước sau 20 bước khởi động:
+
+| Vòng lặp | Trọng số ở | Trung bình | Đỉnh |
+|---|---|---|---|
+| viết thẳng, kiểm biên trong vòng trong | PSRAM | 52 127 µs | 52 127 µs |
+| mỗi hàng vào đệm sẵn, một trọng số chạy qua mọi vị trí ra, exp xấp xỉ | PSRAM | 29 482 µs | 29 482 µs |
+| như trên | RAM trong | 28 194 µs | 28 195 µs |
+
+- Bản thử có 23 364 trọng số. Các bộ lọc ERB và SFE không có trọng số học nên không tính.
+- Đổi chỗ trọng số chỉ được 4%: chỗ nghẽn là phép tính, không phải PSRAM. Bản thứ hai tốn khoảng 17 chu kỳ cho mỗi phép
+  nhân-cộng.
+- Mỗi bước dài 16 ms, nên bản C float32 hiện tại chưa vừa nhịp của S3.
