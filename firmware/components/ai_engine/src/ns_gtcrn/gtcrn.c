@@ -16,7 +16,7 @@
 #define HIGH_BINS (BINS - LOW)
 #define BLOB_MAGIC 0x31435447u // "GTC1"
 #define BLOB_VERSION 1u
-#define SQRT_STEPS 6
+#define NEWTON_STEPS 3
 
 // The mirror's float32 constants, bit for bit (gtcrn_mirror.py).
 static const float kLog2e = 0x1.715476p+0f;
@@ -25,12 +25,21 @@ static const float kLn2Lo = 0x1.7f7d1cp-20f;
 static const float kExpLimit = 80.0f;
 static const float kMagEps = 0x1.197998p-40f;
 static const float kLnEps = 0x1.5798eep-27f;
+static const float kRecipC0 = 0x1.69696ap+1f;
+static const float kRecipC1 = 0x1.e1e1e2p+0f;
+static const float kRsqrtLow0 = 0x1.d413ccp+0f;
+static const float kRsqrtLow1 = 0x1.a82798p-1f;
+static const float kRsqrtHigh0 = 0x1.4afb0cp+0f;
+static const float kRsqrtHigh1 = 0x1.2bec32p-2f;
+static const float kTinySquare = 0x1p-100f;
 static const float kExpPoly[] = {
     0x1.6c16c2p-10f, 0x1.111112p-7f, 0x1.555556p-5f, 0x1.555556p-3f, 0.5f, 1.0f, 1.0f};
 
 typedef enum { ACT_NONE, ACT_PRELU, ACT_TANH } act_t;
 
-static float pow2i(int n)
+// Every small numeric step below is inlined: called at each gate, a call costs as much as the step.
+
+static inline __attribute__((always_inline)) float pow2i(int n)
 {
     const union {
         uint32_t u;
@@ -39,7 +48,7 @@ static float pow2i(int n)
     return v.f;
 }
 
-static float exp32(float x)
+static inline __attribute__((always_inline)) float exp32(float x)
 {
     x = x < -kExpLimit ? -kExpLimit : (x > kExpLimit ? kExpLimit : x);
     const float t = x * kLog2e + 0.5f;
@@ -54,34 +63,62 @@ static float exp32(float x)
     return p * pow2i(i);
 }
 
-static float sqrt32(float v)
+// A normal v > 0 as m 2^e with m in [0.5, 1), as frexpf gives it.
+static inline __attribute__((always_inline)) float split(float v, int *e)
 {
-    if (v <= 0.0f) { return 0.0f; }
-    const union {
+    union {
         float f;
         uint32_t u;
     } bits = {.f = v};
-    int e = (int)((bits.u >> 23) & 0xffu) - 126;
-    if (e == -126) { (void)frexpf(v, &e); }
-    // The mirror halves the exponent by floor division.
-    float y = pow2i(e >= 0 ? e / 2 : -((1 - e) / 2));
-    for (int i = 0; i < SQRT_STEPS; i++) {
-        y = 0.5f * (y + v / y);
+    *e = (int)((bits.u >> 23) & 0xffu) - 126;
+    bits.u = (bits.u & 0x807fffffu) | (126u << 23);
+    return bits.f;
+}
+
+static inline __attribute__((always_inline)) float recip32(float d)
+{
+    int e = 0;
+    const float m = split(d, &e);
+    float y = fmaf(-kRecipC1, m, kRecipC0);
+    for (int i = 0; i < NEWTON_STEPS; i++) {
+        y = fmaf(y, fmaf(-m, y, 1.0f), y);
     }
-    return y;
+    return y * pow2i(-e);
 }
 
-static float sigmoid32(float v)
+static inline __attribute__((always_inline)) float rsqrt32(float v)
 {
-    return 1.0f / (1.0f + exp32(-v));
+    int e = 0;
+    float m = split(v, &e);
+    if (e % 2 != 0) {
+        m = m * 2.0f;
+        e -= 1;
+    }
+    const bool low = m < 1.0f;
+    float y = fmaf(-(low ? kRsqrtLow1 : kRsqrtHigh1), m, low ? kRsqrtLow0 : kRsqrtHigh0);
+    const float h = 0.5f * m;
+    for (int i = 0; i < NEWTON_STEPS; i++) {
+        y = y * fmaf(-h, y * y, 1.5f);
+    }
+    return y * pow2i(-(e / 2));
 }
 
-static float tanh32(float v)
+static inline __attribute__((always_inline)) float sqrt32(float v)
 {
-    return 1.0f - 2.0f / (exp32(2.0f * v) + 1.0f);
+    return v <= kTinySquare ? 0.0f : v * rsqrt32(v);
 }
 
-static float act_of(float acc, act_t act, float slope)
+static inline __attribute__((always_inline)) float sigmoid32(float v)
+{
+    return recip32(1.0f + exp32(-v));
+}
+
+static inline __attribute__((always_inline)) float tanh32(float v)
+{
+    return 1.0f - 2.0f * recip32(exp32(2.0f * v) + 1.0f);
+}
+
+static inline __attribute__((always_inline)) float act_of(float acc, act_t act, float slope)
 {
     if (act == ACT_PRELU) { return acc > 0.0f ? acc : slope * acc; }
     return act == ACT_TANH ? tanh32(acc) : acc;
@@ -170,74 +207,132 @@ static void conv_k5s2(const float *x, int fin, const ai_engine_gtcrn_conv_t *c, 
 
 // The depthwise 3x3 over a block's cache (CH, span, F2), dilated in time; the edge taps are zeros, kept in
 // order.
+static float dw_one(const float *w, float b, const float *const r[3], int fo)
+{
+    float a = b;
+    for (int t = 0; t < 3; t++) {
+        a = fmaf(w[3 * t], fo > 0 ? r[t][fo - 1] : 0.0f, a);
+        a = fmaf(w[3 * t + 1], r[t][fo], a);
+        a = fmaf(w[3 * t + 2], fo < F2 - 1 ? r[t][fo + 1] : 0.0f, a);
+    }
+    return a;
+}
+
 static void depthwise(const float *cache, int span, int dil, const ai_engine_gtcrn_conv_t *c, float *out)
 {
     for (int ch = 0; ch < CH; ch++) {
         const float *w = c->w + ch * 9;
-        const float *r0 = cache + ch * span * F2;
-        const float *r1 = r0 + dil * F2;
-        const float *r2 = r1 + dil * F2;
-        for (int fo = 0; fo < F2; fo++) {
-            const float l0 = fo > 0 ? r0[fo - 1] : 0.0f;
-            const float l1 = fo > 0 ? r1[fo - 1] : 0.0f;
-            const float l2 = fo > 0 ? r2[fo - 1] : 0.0f;
-            const float h0 = fo < F2 - 1 ? r0[fo + 1] : 0.0f;
-            const float h1 = fo < F2 - 1 ? r1[fo + 1] : 0.0f;
-            const float h2 = fo < F2 - 1 ? r2[fo + 1] : 0.0f;
-            float a = c->b[ch];
-            a = fmaf(w[0], l0, a);
-            a = fmaf(w[1], r0[fo], a);
-            a = fmaf(w[2], h0, a);
-            a = fmaf(w[3], l1, a);
-            a = fmaf(w[4], r1[fo], a);
-            a = fmaf(w[5], h1, a);
-            a = fmaf(w[6], l2, a);
-            a = fmaf(w[7], r2[fo], a);
-            a = fmaf(w[8], h2, a);
-            out[ch * F2 + fo] = act_of(a, ACT_PRELU, c->slope);
+        const float *const r[3] = {cache + ch * span * F2, cache + (ch * span + dil) * F2,
+                                   cache + (ch * span + 2 * dil) * F2};
+        float *o = out + ch * F2;
+        o[0] = act_of(dw_one(w, c->b[ch], r, 0), ACT_PRELU, c->slope);
+        int fo = 1;
+        for (; fo + 4 <= F2 - 1; fo += 4) {
+            float a0 = c->b[ch];
+            float a1 = a0;
+            float a2 = a0;
+            float a3 = a0;
+            for (int t = 0; t < 3; t++) {
+                for (int k = 0; k < 3; k++) {
+                    const float wv = w[3 * t + k];
+                    const float *v = r[t] + fo - 1 + k;
+                    a0 = fmaf(wv, v[0], a0);
+                    a1 = fmaf(wv, v[1], a1);
+                    a2 = fmaf(wv, v[2], a2);
+                    a3 = fmaf(wv, v[3], a3);
+                }
+            }
+            o[fo] = act_of(a0, ACT_PRELU, c->slope);
+            o[fo + 1] = act_of(a1, ACT_PRELU, c->slope);
+            o[fo + 2] = act_of(a2, ACT_PRELU, c->slope);
+            o[fo + 3] = act_of(a3, ACT_PRELU, c->slope);
+        }
+        for (; fo < F2; fo++) {
+            o[fo] = act_of(dw_one(w, c->b[ch], r, fo), ACT_PRELU, c->slope);
         }
     }
 }
 
-// A ConvTranspose2d along frequency: w is (cin, per_out, 1, kf); only the taps on real input positions count.
-static void deconv(const float *x, int cin, int fin, const ai_engine_gtcrn_conv_t *c, int per_out, int kf,
-                   int stride, int pad, int groups, int fout, act_t act, float *out)
+// ConvTranspose2d, kernel 5, stride 2, padding 2, w (cin, per_out, 1, 5): even outputs take taps 0, 2, 4 of
+// inputs half + 1, half, half - 1, odd ones taps 1, 3 of half + 1, half, those in range only.
+static void deconv(const float *x, int cin, int fin, const ai_engine_gtcrn_conv_t *c, int per_out, int groups,
+                   int fout, act_t act, float *out)
 {
     const int per_in = cin / groups;
-    for (int co = 0; co < per_out * groups; co++) {
+    for (int co = 0; co < per_out * groups; co += 2) {
         const int g = co / per_out;
         const int local = co % per_out;
         for (int fo = 0; fo < fout; fo++) {
-            float acc = c->b[co];
-            const int first = (fo + pad) % stride;
+            const int half = fo >> 1;
+            float a0 = c->b[co];
+            float a1 = c->b[co + 1];
             for (int ci = g * per_in; ci < (g + 1) * per_in; ci++) {
-                const float *wk = c->w + (ci * per_out + local) * kf;
-                for (int k = first; k < kf; k += stride) {
-                    const int fi = (fo + pad - k) / stride;
-                    if (fi >= 0 && fi < fin) { acc = fmaf(x[ci * fin + fi], wk[k], acc); }
+                const float *xr = x + ci * fin;
+                const float *w0 = c->w + (ci * per_out + local) * 5;
+                const float *w1 = w0 + 5;
+                if ((fo & 1) == 0) {
+                    if (half + 1 < fin) {
+                        a0 = fmaf(xr[half + 1], w0[0], a0);
+                        a1 = fmaf(xr[half + 1], w1[0], a1);
+                    }
+                    a0 = fmaf(xr[half], w0[2], a0);
+                    a1 = fmaf(xr[half], w1[2], a1);
+                    if (half >= 1) {
+                        a0 = fmaf(xr[half - 1], w0[4], a0);
+                        a1 = fmaf(xr[half - 1], w1[4], a1);
+                    }
+                } else {
+                    a0 = fmaf(xr[half + 1], w0[1], a0);
+                    a1 = fmaf(xr[half + 1], w1[1], a1);
+                    a0 = fmaf(xr[half], w0[3], a0);
+                    a1 = fmaf(xr[half], w1[3], a1);
                 }
             }
-            out[co * fout + fo] = act_of(acc, act, c->slope);
+            out[co * fout + fo] = act_of(a0, act, c->slope);
+            out[(co + 1) * fout + fo] = act_of(a1, act, c->slope);
         }
     }
 }
 
-static void gru_step(const ai_engine_gtcrn_gru_t *g, int in, int hid, const float *x, const float *h,
-                     float *out)
+// Inlined at every call, whose sizes are constants, so its loops unroll.
+static inline __attribute__((always_inline)) void gru_step(const ai_engine_gtcrn_gru_t *g, int in, int hid,
+                                                           const float *x, const float *h, float *out)
 {
     float gi[3 * 2 * HALF];
     float gh[3 * 2 * HALF];
-    for (int r = 0; r < 3 * hid; r++) {
-        float a = g->bih[r];
-        float c = g->bhh[r];
+    for (int r = 0; r < 3 * hid; r += 4) {
+        const float *w0 = g->wih + r * in;
+        float a0 = g->bih[r];
+        float a1 = g->bih[r + 1];
+        float a2 = g->bih[r + 2];
+        float a3 = g->bih[r + 3];
         for (int i = 0; i < in; i++) {
-            a = fmaf(g->wih[r * in + i], x[i], a);
+            const float v = x[i];
+            a0 = fmaf(w0[i], v, a0);
+            a1 = fmaf(w0[in + i], v, a1);
+            a2 = fmaf(w0[2 * in + i], v, a2);
+            a3 = fmaf(w0[3 * in + i], v, a3);
         }
+        gi[r] = a0;
+        gi[r + 1] = a1;
+        gi[r + 2] = a2;
+        gi[r + 3] = a3;
+        const float *u0 = g->whh + r * hid;
+        float c0 = g->bhh[r];
+        float c1 = g->bhh[r + 1];
+        float c2 = g->bhh[r + 2];
+        float c3 = g->bhh[r + 3];
         for (int j = 0; j < hid; j++) {
-            c = fmaf(g->whh[r * hid + j], h[j], c);
+            const float v = h[j];
+            c0 = fmaf(u0[j], v, c0);
+            c1 = fmaf(u0[hid + j], v, c1);
+            c2 = fmaf(u0[2 * hid + j], v, c2);
+            c3 = fmaf(u0[3 * hid + j], v, c3);
         }
-        gi[r] = a;
-        gh[r] = c;
+        gh[r] = c0;
+        gh[r + 1] = c1;
+        gh[r + 2] = c2;
+        gh[r + 3] = c3;
     }
     for (int j = 0; j < hid; j++) {
         const float rg = sigmoid32(gi[j] + gh[j]);
@@ -247,14 +342,26 @@ static void gru_step(const ai_engine_gtcrn_gru_t *g, int in, int hid, const floa
     }
 }
 
+// out_n is a multiple of 4: four outputs at a time, each summed over the inputs in order.
 static void dense(const float *w, const float *b, int in, int out_n, const float *x, float *out)
 {
-    for (int o = 0; o < out_n; o++) {
-        float a = b[o];
+    for (int o = 0; o < out_n; o += 4) {
+        const float *w0 = w + o * in;
+        float a0 = b[o];
+        float a1 = b[o + 1];
+        float a2 = b[o + 2];
+        float a3 = b[o + 3];
         for (int i = 0; i < in; i++) {
-            a = fmaf(w[o * in + i], x[i], a);
+            const float v = x[i];
+            a0 = fmaf(w0[i], v, a0);
+            a1 = fmaf(w0[in + i], v, a1);
+            a2 = fmaf(w0[2 * in + i], v, a2);
+            a3 = fmaf(w0[3 * in + i], v, a3);
         }
-        out[o] = a;
+        out[o] = a0;
+        out[o + 1] = a1;
+        out[o + 2] = a2;
+        out[o + 3] = a3;
     }
 }
 
@@ -270,7 +377,7 @@ static void layer_norm(float *x, const float *w, const float *b, int n)
         const float d = x[i] - mean;
         v = fmaf(d, d, v);
     }
-    const float inv = 1.0f / sqrt32(v / (float)n + kLnEps);
+    const float inv = rsqrt32(v / (float)n + kLnEps);
     for (int i = 0; i < n; i++) {
         x[i] = fmaf((x[i] - mean) * inv, w[i], b[i]);
     }
@@ -437,9 +544,9 @@ void ai_engine_gtcrn_step(const ai_engine_gtcrn_weights_t *w, ai_engine_gtcrn_st
                   st->in, st->y);
     }
     add(st->y, st->o1, st->in, PLANE);
-    deconv(st->in, CH, F2, &w->de3, HALF, 5, 2, 2, 2, F1, ACT_PRELU, st->m1);
+    deconv(st->in, CH, F2, &w->de3, HALF, 2, F1, ACT_PRELU, st->m1);
     add(st->m1, st->o0, st->m1, CH * F1);
-    deconv(st->m1, CH, F1, &w->de4, 2, 5, 2, 2, 1, ERB, ACT_TANH, st->m2);
+    deconv(st->m1, CH, F1, &w->de4, 2, 1, ERB, ACT_TANH, st->m2);
     banded(st->m2, 2, ERB, w->ierb_ptr, w->ierb_idx, w->ierb_coef, HIGH_BINS, BINS, st->mask);
     for (int i = 0; i < BINS; i++) {
         const float mr = st->mask[i];
