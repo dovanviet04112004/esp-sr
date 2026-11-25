@@ -11,6 +11,7 @@
 #define NS_FLOAT_HALF 8
 #define NS_FLOAT_PLANE (NS_FLOAT_F2 * NS_FLOAT_CH)
 #define NS_FLOAT_NEWTON_STEPS 3
+#define NS_FLOAT_SEED_STEPS 2 // Newton steps after the quadratic seed of recip12
 
 typedef struct {
     const float *wih; // 3 hidden rows of gates r, z, n by inputs

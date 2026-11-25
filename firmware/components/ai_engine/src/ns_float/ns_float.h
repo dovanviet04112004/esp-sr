@@ -18,7 +18,8 @@
 static const float kNsfLog2e = 0x1.715476p+0f;
 static const float kNsfLn2Hi = 0x1.62e4p-1f;
 static const float kNsfLn2Lo = 0x1.7f7d1cp-20f;
-static const float kNsfExpLimit = 80.0f;
+static const float kNsfActLimit = 87.0f;
+static const float kNsfRoundShift = 0x1.8p23f;
 static const float kNsfLnEps = 0x1.5798eep-27f;
 static const float kNsfRecipC0 = 0x1.69696ap+1f;
 static const float kNsfRecipC1 = 0x1.e1e1e2p+0f;
@@ -27,8 +28,9 @@ static const float kNsfRsqrtLow1 = 0x1.a82798p-1f;
 static const float kNsfRsqrtHigh0 = 0x1.4afb0cp+0f;
 static const float kNsfRsqrtHigh1 = 0x1.2bec32p-2f;
 static const float kNsfTinySquare = 0x1p-100f;
-static const float kNsfExpPoly[] = {
-    0x1.6c16c2p-10f, 0x1.111112p-7f, 0x1.555556p-5f, 0x1.555556p-3f, 0.5f, 1.0f, 1.0f};
+static const float kNsfExpPoly[] = {0x1.0fe5bep-7f, 0x1.575eeep-5f, 0x1.555a18p-3f,
+                                    0x1.fffd1ap-2f, 0x1.fffff6p-1f, 0x1.000002p+0f};
+static const float kNsfSeed[] = {0x1.0f836ap+1f, -0x1.745c28p+0f, 0x1.4afc94p-2f};
 
 // Every small numeric step below is inlined: called at each gate, a call costs as much as the step.
 
@@ -41,20 +43,28 @@ static inline __attribute__((always_inline)) float pow2i(int n)
     return v.f;
 }
 
-static inline __attribute__((always_inline)) float exp32(float x)
+// e^-a for 0 <= a <= kNsfActLimit, as gtcrn_mirror.exp_neg32 takes it.
+static inline __attribute__((always_inline)) float exp_neg32(float a)
 {
-    x = x < -kNsfExpLimit ? -kNsfExpLimit : (x > kNsfExpLimit ? kNsfExpLimit : x);
-    const float t = x * kNsfLog2e + 0.5f;
-    int i = (int)t;
-    if ((float)i > t) { i--; }
-    const float n = (float)i;
-    const float r = fmaf(-n, kNsfLn2Lo, fmaf(-n, kNsfLn2Hi, x));
+    const float n = (a * kNsfLog2e + kNsfRoundShift) - kNsfRoundShift;
+    const float s = -fmaf(-n, kNsfLn2Lo, fmaf(-n, kNsfLn2Hi, a));
     float p = kNsfExpPoly[0];
 #pragma GCC unroll 8
-    for (size_t k = 1; k < sizeof(kNsfExpPoly) / sizeof(kNsfExpPoly[0]); k++) {
-        p = fmaf(p, r, kNsfExpPoly[k]);
+    for (size_t j = 1; j < sizeof(kNsfExpPoly) / sizeof(kNsfExpPoly[0]); j++) {
+        p = fmaf(p, s, kNsfExpPoly[j]);
     }
-    return p * pow2i(i);
+    return p * pow2i(-(int)n);
+}
+
+// 1 / d for d in (1, 2], as gtcrn_mirror.recip12 takes it.
+static inline __attribute__((always_inline)) float recip12(float d)
+{
+    float y = fmaf(fmaf(kNsfSeed[2], d, kNsfSeed[1]), d, kNsfSeed[0]);
+#pragma GCC unroll 4
+    for (int i = 0; i < NS_FLOAT_SEED_STEPS; i++) {
+        y = fmaf(y, fmaf(-d, y, 1.0f), y);
+    }
+    return y;
 }
 
 // A normal v > 0 as m 2^e with m in [0.5, 1), as frexpf gives it.
@@ -106,62 +116,64 @@ static inline __attribute__((always_inline)) float sqrt32(float v)
 
 static inline __attribute__((always_inline)) float sigmoid32(float v)
 {
-    return recip32(1.0f + exp32(-v));
+    const float a = fabsf(v);
+    const float u = exp_neg32(a < kNsfActLimit ? a : kNsfActLimit);
+    const float y = recip12(1.0f + u);
+    return v >= 0.0f ? y : u * y;
 }
 
 static inline __attribute__((always_inline)) float tanh32(float v)
 {
-    return 1.0f - 2.0f * recip32(exp32(2.0f * v) + 1.0f);
+    const float a = fabsf(v) * 2.0f;
+    const float u = exp_neg32(a < kNsfActLimit ? a : kNsfActLimit);
+    const float t = (1.0f - u) * recip12(1.0f + u);
+    return v < 0.0f ? -t : t;
 }
 
-// Four lanes of exp32 then recip32, step by step: GCC keeps this order, and only interleaved lanes hide the
-// FPU's 4-cycle latency (afe/ns.md 10.8). v[k] becomes sigmoid32(v[k]), or tanh32(v[k]) with tanh_form.
+// sigmoid32 or tanh32 on four lanes, step by step: GCC keeps this order, and only interleaved lanes hide the
+// FPU's 4-cycle latency (afe/ns.md 10.8). Each lane runs the scalar steps unchanged.
 #define NSF_LANES(step) step(0) step(1) step(2) step(3)
-#define NSF_EXP_ARG(k) float x##k = tanh_form ? 2.0f * v[k] : -v[k];
-#define NSF_EXP_CLAMP(k)                                                                                     \
-    x##k = x##k < -kNsfExpLimit ? -kNsfExpLimit : (x##k > kNsfExpLimit ? kNsfExpLimit : x##k);
-#define NSF_EXP_SPLIT(k) const float t##k = x##k * kNsfLog2e + 0.5f;
-#define NSF_EXP_FLOOR(k) int i##k = (int)t##k - ((float)(int)t##k > t##k);
-#define NSF_EXP_REDUCE(k)                                                                                    \
-    const float r##k = fmaf(-(float)i##k, kNsfLn2Lo, fmaf(-(float)i##k, kNsfLn2Hi, x##k));
-#define NSF_EXP_START(k) float p##k = kNsfExpPoly[0];
-#define NSF_EXP_POLY(k) p##k = fmaf(p##k, r##k, kNsfExpPoly[j]);
-#define NSF_RECIP_SPLIT(k)                                                                                   \
-    int s##k = 0;                                                                                            \
-    const float m##k = split(1.0f + p##k * pow2i(i##k), &s##k);
-#define NSF_RECIP_SEED(k) float y##k = fmaf(-kNsfRecipC1, m##k, kNsfRecipC0);
-#define NSF_RECIP_NEWTON(k) y##k = fmaf(y##k, fmaf(-m##k, y##k, 1.0f), y##k);
-#define NSF_RECIP_OUT(k) v[k] = tanh_form ? 1.0f - 2.0f * (y##k * pow2i(-s##k)) : y##k * pow2i(-s##k);
+#define NSF_ARG(k)                                                                                           \
+    float a##k = tanh_form ? fabsf(v[k]) * 2.0f : fabsf(v[k]);                                               \
+    a##k = a##k < kNsfActLimit ? a##k : kNsfActLimit;
+#define NSF_ROUND(k) const float n##k = (a##k * kNsfLog2e + kNsfRoundShift) - kNsfRoundShift;
+#define NSF_REDUCE(k) const float s##k = -fmaf(-n##k, kNsfLn2Lo, fmaf(-n##k, kNsfLn2Hi, a##k));
+#define NSF_POLY_START(k) float p##k = kNsfExpPoly[0];
+#define NSF_POLY(k) p##k = fmaf(p##k, s##k, kNsfExpPoly[j]);
+#define NSF_SCALE(k) const float u##k = p##k * pow2i(-(int)n##k);
+#define NSF_SEED(k) float y##k = fmaf(fmaf(kNsfSeed[2], 1.0f + u##k, kNsfSeed[1]), 1.0f + u##k, kNsfSeed[0]);
+#define NSF_NEWTON(k) y##k = fmaf(y##k, fmaf(-(1.0f + u##k), y##k, 1.0f), y##k);
+#define NSF_OUT(k)                                                                                           \
+    v[k] = tanh_form ? (v[k] < 0.0f ? -((1.0f - u##k) * y##k) : (1.0f - u##k) * y##k)                        \
+                     : (v[k] >= 0.0f ? y##k : u##k * y##k);
 
-static inline __attribute__((always_inline)) void exp_recip4(float *v, bool tanh_form)
+static inline __attribute__((always_inline)) void act4(float *v, bool tanh_form)
 {
-    NSF_LANES(NSF_EXP_ARG);
-    NSF_LANES(NSF_EXP_CLAMP);
-    NSF_LANES(NSF_EXP_SPLIT);
-    NSF_LANES(NSF_EXP_FLOOR);
-    NSF_LANES(NSF_EXP_REDUCE);
-    NSF_LANES(NSF_EXP_START);
+    NSF_LANES(NSF_ARG);
+    NSF_LANES(NSF_ROUND);
+    NSF_LANES(NSF_REDUCE);
+    NSF_LANES(NSF_POLY_START);
 #pragma GCC unroll 8
     for (size_t j = 1; j < sizeof(kNsfExpPoly) / sizeof(kNsfExpPoly[0]); j++) {
-        NSF_LANES(NSF_EXP_POLY);
+        NSF_LANES(NSF_POLY);
     }
-    NSF_LANES(NSF_RECIP_SPLIT);
-    NSF_LANES(NSF_RECIP_SEED);
+    NSF_LANES(NSF_SCALE);
+    NSF_LANES(NSF_SEED);
 #pragma GCC unroll 4
-    for (int step = 0; step < NS_FLOAT_NEWTON_STEPS; step++) {
-        NSF_LANES(NSF_RECIP_NEWTON);
+    for (int step = 0; step < NS_FLOAT_SEED_STEPS; step++) {
+        NSF_LANES(NSF_NEWTON);
     }
-    NSF_LANES(NSF_RECIP_OUT);
+    NSF_LANES(NSF_OUT);
 }
 
 static inline __attribute__((always_inline)) void sigmoid4(float *v)
 {
-    exp_recip4(v, false);
+    act4(v, false);
 }
 
 static inline __attribute__((always_inline)) void tanh4(float *v)
 {
-    exp_recip4(v, true);
+    act4(v, true);
 }
 
 // v[i] = sigmoid32(v[i]) for n values, bit for bit.
