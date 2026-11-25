@@ -468,3 +468,30 @@ ai-unit-gtcrn BOARD=C`, 200 bước sau 20 bước khởi động:
 - Đổi chỗ trọng số chỉ được 4%: chỗ nghẽn là phép tính, không phải PSRAM. Bản thứ hai tốn khoảng 17 chu kỳ cho mỗi phép
   nhân-cộng.
 - Mỗi bước dài 16 ms, nên bản C float32 hiện tại chưa vừa nhịp của S3.
+
+### 10.4 GTCRN bằng C float32 trên S3 (25/11, E9-T16)
+
+`ai_engine/src/ns_gtcrn/gtcrn.c` khớp bản soi gương `tasks/ns/gtcrn_mirror.py` từng bit: trên máy tính, ở cả hai ca của
+golden và 60 bước phiên `20261031_home_004` với checkpoint thật; trên board C, 40/40 bước của `case_000`. Mỗi `fmaf` dịch
+thành một lệnh `madd.s`. `make ai-unit-gtcrn BOARD=C`, 200 bước sau 20 bước khởi động, trọng số ở PSRAM:
+
+| Bản | Trạng thái ở RAM trong | Trạng thái ở PSRAM |
+|---|---|---|
+| vòng lặp chung cho mọi conv | 48 680 µs | 50 205 µs |
+| conv 1×1 bốn kênh ra một lượt, conv bước 2 trên hàng đệm sẵn, depthwise viết riêng, exp không gọi libm | 23 147 µs | 24 839 µs |
+
+Chu kỳ mỗi bước của bản thứ hai, đếm tạm bằng `esp_cpu_get_cycle_count` theo khâu, trạng thái ở RAM trong:
+
+| Khâu | Chu kỳ | Ghi chú |
+|---|---|---|
+| độ lớn, ERB, SFE | 152 475 | 257 căn bậc hai, mỗi căn 6 phép chia |
+| `en0`, `en1` | 321 243 | 67 800 phép nhân-cộng: 4,7 chu kỳ mỗi phép |
+| 3 khối mã hoá | 880 713 | |
+| 2 khối GRU hai đường | 2 307 439 | 264 bước GRU 4 chiều và 66 bước GRU 8 chiều, mỗi cổng một exp và một phép chia |
+| 3 khối giải mã | 892 694 | |
+| 2 ConvTranspose | 857 895 | phép chia và phép dư nguyên theo bước trong vòng trong |
+| gain | 142 989 | 257 căn bậc hai |
+
+- Một phép chia float32 trên S3 tốn khoảng 90 chu kỳ: 257 căn bậc hai, mỗi căn 6 phép chia, hết 152 475 chu kỳ.
+- Bản này vẫn gấp 1,4 lần nhịp 16 ms, mà nhân 1 còn chạy cả chuỗi. Các chỗ còn lấy được là sigmoid, tanh và căn bậc hai
+  bỏ phép chia, ConvTranspose bỏ phép chia nguyên, và GRU duỗi vòng theo cỡ cố định.
