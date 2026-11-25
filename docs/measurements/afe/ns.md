@@ -599,3 +599,15 @@ Chu kỳ mỗi bước của vòng 1 theo khâu, đếm tạm bằng `esp_cpu_ge
 - Vòng 1 vẫn gấp 1,5 lần nhịp 16 ms. Cache dữ liệu của S3 đã ở mức lớn nhất (64 KB, 8 đường, dòng 64 B), PSRAM octal
   80 MHz, nên GRU thời gian bị chặn bởi tốc độ đọc PSRAM: mỗi trọng số chỉ dùng một lần mỗi bước.
 - Gần 11 500 sigmoid và tanh mỗi bước, mỗi cái ~200 chu kỳ, là phần lớn còn lại.
+
+Hai phép thử sau vòng 1, cùng phép đo, bản đếm chu kỳ dựng riêng:
+
+| Thử | Trạng thái ở RAM trong | Khâu đổi | Kết luận |
+|---|---|---|---|
+| sigmoid và tanh bốn giá trị một lượt qua mảng trên stack, cùng phép tính từng giá trị, vẫn khớp từng bit | 29 789 µs | GRU hai đường 1,61 → 2,66 M; GRU tần số 0,82 → 1,41 M | chậm hơn: các làn nằm trong bộ nhớ thay vì thanh ghi; bỏ |
+| cùng lượt ấy, thêm ROM dcache preload các trọng số GRU thời gian của mỗi khối từ đầu khối, 16 KB một vùng | (gộp ở trên) | GRU thời gian 1,58 → 1,12 M dù gánh sigmoid chậm hơn | preload có lợi, ~0,5 M chu kỳ mỗi bước 🔬 |
+
+- Một bước của UL-UNAS chạm ~590 KB trọng số và ~120 KB trạng thái. Ở ~59 MB/s mà PSRAM của S3 đọc theo từng lần trượt cache,
+  chỉ riêng phần đọc ấy đã cỡ 10 ms 🔬; tham số AffinePReLU theo từng kênh và từng vạch thêm ~96 KB mỗi bước.
+- ROM preload là một bộ duy nhất cho dcache chung của hai nhân, nên `ns` trên nhân 1 dùng nó phải tránh các op esp-dl trên
+  nhân 0 đang dùng (ADR-0026).
