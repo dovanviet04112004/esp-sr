@@ -527,3 +527,75 @@ Các vòng tối ưu sau đó, cùng phép đo, bản nào cũng khớp golden t
   thanh ghi nguyên. Gom chúng thành vòng dài ở vòng 7 chỉ lấy được 0,3 ms.
 - Một bước 13,8 ms với trạng thái ở PSRAM, như sản phẩm sẽ đặt, cộng phần còn lại của chuỗi trên board C (5,4 ms có
   `aec`, bỏ 1,7 ms của OM-LSA), vượt nhịp 16 ms của nhân 1.
+
+### 10.5 UL-UNAS học sẵn: gần sàn khi có sàn gain (25/11, E9-T19, ADR-0048)
+
+UL-UNAS (Xiaobin-Rong/ul-unas, MIT, commit `00f7c700`), checkpoint DNS3 chính thức, chạy dòng từng bước trong khe `ns`
+của chuỗi Python, như GTCRN ở §10.1. Nó học với cửa sổ Hann thường, nên vạch căn Hann của khe nhân 0,785, tỉ số tổng hai
+cửa sổ, trước khi vào mạng. Bản chạy dòng của họ khớp bản offline tới 7,9e-7 so với đỉnh, bỏ 512 mẫu cuối, nơi bản offline
+đệm số 0. Bản soi gương `tasks/ns/ulunas_mirror.py` khớp StreamULUNAS tới 2,7e-6 trên gain, qua 300 bước vạch ngẫu nhiên ở
+−60 … 20 dB. Mục trọng số là 590 324 B.
+
+`wake`, run `20261113_8ac386e_ffbc12`, hàng `kl`, 800‰, ba phiên "vừng ơi" của §10.1, script một lần
+(`cache/scripts/ns_ulunas_wake.py`):
+
+| Khe `ns` | 004 | 005 | 008 | Tổng | Lời, trung vị | Quãng lặng, trung vị |
+|---|---|---|---|---|---|---|
+| OM-LSA (sàn) | 9/11 | 12/12 | 12/12 | **33/35** | −47 / −44 / −54 dBFS | −70 / −69 / −73 dBFS |
+| UL-UNAS, gain ≥ −12 dB | 8/11 | 12/12 | 12/12 | **32/35** | −47 / −46 / −53 dBFS | −71 / −70 / −73 dBFS |
+| UL-UNAS | 6/10 | 12/12 | 12/12 | 30/34 | −49 / −50 / −55 dBFS | −94 / −91 / −99 dBFS |
+| UL-UNAS, vạch không nhân 0,785 | 6/10 | 12/12 | 12/12 | 30/34 | −49 / −50 / −55 dBFS | −94 / −91 / −100 dBFS |
+| GTCRN, gain ≥ −12 dB (§10.1) | 5/11 | 12/12 | 12/12 | 29/35 | — | −70 … −73 dBFS |
+| GTCRN | 3/12 | 11/12 | 12/13 | 26/37 | −51 / −46 / −64 dBFS | −92 / −91 / −88 dBFS |
+
+- Hai dòng OM-LSA và GTCRN chạy lại cùng script, ra đúng số của §10.1: script chấm như `wake-board`.
+- Mẫu số đổi theo cách `vad` cắt lời trên mỗi lối ra: ở phiên 004 UL-UNAS không sàn chỉ cắt ra 10 lời.
+- Không sàn, UL-UNAS dìm quãng lặng xuống −91 … −100 dBFS như GTCRN và hạ lời phiên 005 thêm 6 dB: nó vẫn khử vang muộn,
+  đích học giữ 100 ms phản xạ đầu.
+- Sàn −12 dB, đúng `G_min` của OM-LSA, đưa cả mức lời lẫn quãng lặng về ngang sàn; UL-UNAS kém sàn đúng một lần bắt, ở
+  phiên 004, và hơn GTCRN cùng sàn 3 lần.
+- Bỏ hệ số cửa sổ không đổi lần bắt nào: vào là log10 độ lớn, mức chỉ dời cả lối vào một hằng số.
+- Khe `SRPIPE_NS=ulunas` của repo, với sàn chung của chuỗi (ADR-0048), ra lại đúng dòng có sàn, từng điểm đỉnh.
+
+`command`, run `20261007_439d763-dirty_f438bd`, đường `ctc`, `--contract-pitch`, như §10.1, chạy CPU một luồng: dòng có sàn
+bằng `SRPIPE_NS=ulunas` của repo, dòng không sàn bằng `cache/scripts/ns_ulunas_command.py`. Log ở
+`cache/logs/ns_ulunas_{floor_,}command_20261125.log`:
+
+| Khe `ns` | Đúng ở lần đoán tốt nhất | Lệnh kém nhất, δ₁ 200–1000 ‰ | Mọi lệnh | Lời không phải lệnh bị từ chối |
+|---|---|---|---|---|
+| OM-LSA (sàn, §10.1) | 192/215 | **60%** | 76% | 143–147/150 |
+| UL-UNAS, gain ≥ −12 dB | **197/205** | 45% | 76% | 115–120/124 |
+| UL-UNAS | 200/206 | 18% | 75% | 121–125/128 |
+| GTCRN (§10.1) | 194/216 | 18% | 73% | 116–121/125 |
+
+- Sàn đưa lệnh kém nhất từ 18% lên 45% và mọi lệnh lên ngang OM-LSA; lệnh kém nhất vẫn dưới sàn 15 điểm.
+- Lời không phải lệnh bị từ chối 93–97%, so với 95–98% của OM-LSA.
+- `command` học trên chuỗi có sàn: mạng nào cũng bị chấm bằng bộ nhận dạng đã quen OM-LSA.
+
+### 10.6 UL-UNAS bằng C float32 trên S3 (25/11, E9-T20)
+
+`ai_engine/src/ns_ulunas/ulunas.c`, trên phần float32 chung `ai_engine/src/ns_float/ns_float.h`, khớp bản soi gương từng bit:
+trên máy tính ở cả hai ca của golden, trên board C ở 40/40 bước của `case_000`. Tách phần chung ra khỏi `gtcrn.c` không đổi
+một bit nào của GTCRN: hai ca golden và ca checkpoint thật vẫn khớp trên máy tính. `make ai-unit-ulunas BOARD=C`, 200 bước
+sau 20 bước khởi động, trọng số ở PSRAM, trạng thái 119 392 B:
+
+| Bản | Trạng thái ở RAM trong | Trạng thái ở PSRAM |
+|---|---|---|
+| vòng lặp thẳng cho mọi conv, cache dịch bằng `memcpy` | 30 709 µs | 33 754 µs |
+| 1: conv 1×1 bốn kênh × hai vị trí, AffinePReLU và xáo kênh lúc ghi; conv nhân quả trên hàng đệm sẵn số 0; ConvTranspose bước 1 chỉ kiểm biên ở mép, bước 2 nhân 3 lấy thẳng hai nhịp; GRU tần số của cTFA chạy xuôi và ngược cùng lúc | 24 180 µs | 27 447 µs |
+
+Chu kỳ mỗi bước của vòng 1 theo khâu, đếm tạm bằng `esp_cpu_get_cycle_count`, trạng thái ở RAM trong:
+
+| Khâu | Chu kỳ | Ghi chú |
+|---|---|---|
+| 2 khối GRU hai đường | 1 607 633 | như GTCRN, 6 336 sigmoid và tanh |
+| GRU thời gian của cTFA, 10 khối | 1 581 871 | 353 KB trọng số GRU cộng 39 KB lớp dày, đọc một lần mỗi bước từ PSRAM: ~59 MB/s |
+| conv 1×1 | 936 059 | 116 nghìn phép nhân-cộng, cùng hai tham số AffinePReLU mỗi lối ra |
+| conv nhân quả và ConvTranspose | 836 121 | 48 nghìn phép nhân-cộng, cùng chép hàng đệm và cache |
+| GRU tần số của cTFA | 819 735 | 3 120 sigmoid và tanh |
+| attend, đặc trưng, mặt nạ | 231 622 | |
+
+- Bản đầu của GTCRN cùng kiểu vòng lặp là 48 680 µs (§10.4), dù UL-UNAS đọc trọng số gấp 6 lần.
+- Vòng 1 vẫn gấp 1,5 lần nhịp 16 ms. Cache dữ liệu của S3 đã ở mức lớn nhất (64 KB, 8 đường, dòng 64 B), PSRAM octal
+  80 MHz, nên GRU thời gian bị chặn bởi tốc độ đọc PSRAM: mỗi trọng số chỉ dùng một lần mỗi bước.
+- Gần 11 500 sigmoid và tanh mỗi bước, mỗi cái ~200 chu kỳ, là phần lớn còn lại.
