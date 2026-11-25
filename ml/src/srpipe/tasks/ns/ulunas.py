@@ -107,7 +107,7 @@ def deploy(spec: dict) -> tuple[Path, Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("deploy", help="the checkpoint's weights into firmware/models/ns and models.lock.json")
+    sub.add_parser("deploy", help="the checkpoint's weights into firmware/models/ns_ulunas and models.lock.json")
     parser.parse_args(argv)
     for path in deploy(load_yaml(CONFIGS / "models" / "ns.yaml")["ulunas"]):
         print(path)

@@ -91,20 +91,21 @@ def mirror_gap(
 
 def deploy_entry(spec: dict, backend: str, folder: Path, blob: bytes, gap: float) -> tuple[Path, Path]:
     """A pretrained net of the ns slot deployed: artifacts/ns/runs/<run>/ holding the checkpoint, its source every
-    file's pin, its mirror's pack as firmware/models/ns/ns_<backend>.bin, a WEIGHTS entry, and the branch's meta.json
-    and lock row with backend (KEHOACH 6.3); refused when the mirror strays from the net by over deploy.gain_atol."""
+    file's pin, its mirror's pack as firmware/models/ns_<backend>/ns_<backend>.bin, a WEIGHTS entry, and that folder's
+    meta.json and lock row ns_<backend> with backend (KEHOACH 6.3, ADR-0049); refused when the mirror strays from the
+    net by over deploy.gain_atol."""
     if gap > spec["deploy"]["gain_atol"]:
         raise ValueError(f"{backend}'s mirror strays {gap:.3g} from the net, over {spec['deploy']['gain_atol']}")
     source = {"extractor": backend, "pins": {"args": [spec["checkpoint"]], "files": spec["files"]}}
     run = run_dir.create_run_dir(ML_ROOT / "artifacts", BRANCH, {"source": source, "deploy": spec["deploy"]})
     shutil.copyfile(folder / spec["checkpoint"], run / Path(spec["checkpoint"]).name)
-    target = update_lock.MODELS / BRANCH
-    target.mkdir(parents=True, exist_ok=True)
     entry = f"{BRANCH}_{backend}"
+    target = update_lock.MODELS / entry
+    target.mkdir(parents=True, exist_ok=True)
     path = target / f"{entry}.bin"
     path.write_bytes(blob)
     print(f"{run.name}: {backend}'s mirror within {gap:.3g} of the net, {len(blob)} bytes of weights")
-    return update_lock.record(BRANCH, run, [update_lock.Deployed(path, entry, "weights")], {"backend": backend})
+    return update_lock.record(entry, run, [update_lock.Deployed(path, entry, "weights")], {"backend": backend})
 
 
 def deploy(spec: dict) -> tuple[Path, Path]:
@@ -121,7 +122,7 @@ def deploy(spec: dict) -> tuple[Path, Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("deploy", help="the checkpoint's weights into firmware/models/ns and models.lock.json")
+    sub.add_parser("deploy", help="the checkpoint's weights into firmware/models/ns_gtcrn and models.lock.json")
     parser.parse_args(argv)
     for path in deploy(load_yaml(CONFIGS / "models" / "ns.yaml")["gtcrn"]):
         print(path)

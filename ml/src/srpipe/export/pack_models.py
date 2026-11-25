@@ -47,7 +47,7 @@ MAX_ENTRIES = storage_define("STORAGE_MODEL_MAX_ENTRIES")
 NAME_BYTES = storage_define("STORAGE_MODEL_NAME_BYTES")
 HEADER_BYTES = storage_define("STORAGE_MODEL_HEADER_BYTES")
 ALIGN_BYTES = storage_define("STORAGE_MODEL_ALIGN_BYTES")
-NS_BRANCH = "ns"  # its row goes in only for the net the build carries
+NS_PREFIX = "ns_"  # a row per net; only the carried one goes in
 SHA256_BYTES = storage_define("STORAGE_MODEL_SHA256_BYTES")
 KINDS = {
     kind: storage_define(f"STORAGE_MODEL_KIND_{kind.upper()}")
@@ -183,20 +183,20 @@ def pack(
 
 
 def locked(skip: tuple[str, ...] = (), ns: str | None = None) -> Locked:
-    """Every file models.lock.json lists for models_0 but skip's branches, and the ns row only when ns names its net
-    (KEHOACH 6.3), as image entries, graphs flagged to stay in flash when deployed so; the listen hash, delta1..3, the
-    speaker's hash, thresholds, cohort top and noise fields, the wake's threshold and hops, each 0 without its row.
-    Refused when a file differs from its sha256, rows learned on two listen.yaml, two record thresholds, a speaker or a
-    wake, the speaker's row lacks SPEAKERS thresholds or a cohort top or holds noise fields checked_noise refuses, the
-    wake's lacks its threshold or hops, or the ns row locks another net than ns."""
+    """Every file models.lock.json lists for models_0 but skip's branches, of the ns rows only ns_<ns> (KEHOACH 6.3),
+    as image entries, graphs flagged to stay in flash when deployed so; the listen hash, delta1..3, the speaker's
+    hash, thresholds, cohort top and noise fields, the wake's threshold and hops, each 0 without its row. Refused when
+    a file differs from its sha256, rows learned on two listen.yaml, two record thresholds, a speaker or a wake, the
+    speaker's row lacks SPEAKERS thresholds or a cohort top or holds noise fields checked_noise refuses, the wake's
+    lacks its threshold or hops, or ns names a net the lock has no row of."""
+    carried = None if ns is None else f"{NS_PREFIX}{ns}"
     rows = {
         b: r
         for b, r in json.loads(LOCK.read_text(encoding="utf-8"))["models"].items()
-        if b not in skip and r.get("slot", SLOT) == SLOT and (b != NS_BRANCH or ns is not None)
+        if b not in skip and r.get("slot", SLOT) == SLOT and (not b.startswith(NS_PREFIX) or b == carried)
     }
-    if ns is not None and rows.get(NS_BRANCH, {}).get("backend") != ns:
-        held = rows.get(NS_BRANCH, {}).get("backend", "no net")
-        raise ValueError(f"the build carries the ns net {ns}, {LOCK.name} locks {held}")
+    if carried is not None and rows.get(carried, {}).get("backend") != ns:
+        raise ValueError(f"the build carries the ns net {ns}, {LOCK.name} has no {carried} row of it")
     entries = []
     for branch, row in rows.items():
         for f in row["files"]:

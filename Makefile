@@ -54,6 +54,9 @@ BENCH_BUILD := build_bench$(if $(filter 1,$(MICS)),_mic1)$(if $(filter C,$(BOARD
 BENCH_LAYER := $(if $(filter C,$(BOARD)),sdkconfig.board_c,$(if $(filter 1,$(MICS)),sdkconfig.mic1))
 NS_LAYER := $(if $(NS),$(BENCH_BUILD)/sdkconfig.ns)
 NS_LINE := $(if $(NS),CONFIG_AI_ENGINE_NS_BACKEND_$(shell echo $(NS) | tr a-z A-Z)=y)
+# The ns net the build carries, NS= or else the chip defaults' choice: its lock row goes in the image (KEHOACH 6.3).
+CARRIED_NS := $(or $(NS),$(shell sed -n 's/^CONFIG_AI_ENGINE_NS_BACKEND_\([A-Z]*\)=y$$/\1/p' \
+  firmware/sdkconfig.defaults.esp32s3 | tr A-Z a-z))
 IDF_BENCH = idf.py -B $(BENCH_BUILD) -D SDKCONFIG=$(BENCH_BUILD)/sdkconfig \
   -D SDKCONFIG_DEFAULTS="$(SDKCONFIG_BASE);sdkconfig.bench$(SECRETS)$(if $(BENCH_LAYER),;$(BENCH_LAYER))$(if $(NS),;$(NS_LAYER))"
 FW_DEFAULTS := firmware/sdkconfig.defaults firmware/sdkconfig.defaults.esp32s3 firmware/sdkconfig.afe \
@@ -583,7 +586,7 @@ wifi-point: ## After the PC's address changed: keep the board's stored network, 
 	cd host && uv run python -m srhost.wifi --port "$(PORT)" --point
 
 models-flash: ## Pack every model of contracts/models.lock.json and write models_0 of board B (KEHOACH 4.5.6, 6.1) [NS=gtcrn|ulunas]
-	cd ml && PORT=$(PORT) BAUD=$(FLASH_BAUD) AFTER=$(AFTER) NS=$(NS) ./scripts/50_pack_and_flash.sh
+	cd ml && PORT=$(PORT) BAUD=$(FLASH_BAUD) AFTER=$(AFTER) NS=$(CARRIED_NS) ./scripts/50_pack_and_flash.sh
 
 PRODUCT_PARTS = python $$IDF_PATH/components/partition_table/parttool.py --port $(PORT) --baud $(FLASH_BAUD) \
   --partition-table-file firmware/partitions.csv
@@ -618,7 +621,7 @@ product: ## Put the product back on board B after test apps: models, storage, th
 	$(if $(SPEAKER),$(MAKE) --no-print-directory speaker-use SPEAKER=$(SPEAKER))
 ifeq ($(BOARD),C)
 	$(MAKE) --no-print-directory fw-bench
-	$(ML) python -m srpipe.export.pack_models artifacts/models.bin --lock $(if $(NS),--ns $(NS))
+	$(ML) python -m srpipe.export.pack_models artifacts/models.bin --lock $(if $(CARRIED_NS),--ns $(CARRIED_NS))
 	$(DETECT).pack $(VISION_DIR)
 	@echo "hold the button, power-cycle the board, wait 2 s, release (KEHOACH 2.1)"
 	models=$$($(PRODUCT_PARTS) get_partition_info --partition-name models_0 --info offset); \

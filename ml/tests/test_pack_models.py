@@ -220,17 +220,20 @@ def test_bad_entries_are_refused(entries) -> None:
         pack_models.pack(entries)
 
 
-def test_the_ns_row_goes_in_only_for_the_net_the_build_carries(tmp_path, monkeypatch) -> None:
-    (tmp_path / "ns").mkdir()
-    (tmp_path / "ns" / "ns_ulunas.bin").write_bytes(b"w")
-    files = [
-        {"file": "ns_ulunas.bin", "entry": "ns_ulunas", "kind": "weights", "sha256": hashlib.sha256(b"w").hexdigest()}
-    ]
+def test_only_the_ns_row_of_the_net_the_build_carries_goes_in(tmp_path, monkeypatch) -> None:
+    rows = {}
+    for net, blob in (("gtcrn", b"g"), ("ulunas", b"u")):
+        (tmp_path / f"ns_{net}").mkdir()
+        (tmp_path / f"ns_{net}" / f"ns_{net}.bin").write_bytes(blob)
+        sha = hashlib.sha256(blob).hexdigest()
+        files = [{"file": f"ns_{net}.bin", "entry": f"ns_{net}", "kind": "weights", "sha256": sha}]
+        rows[f"ns_{net}"] = {"files": files, "backend": net}
     lock = tmp_path / "models.lock.json"
     monkeypatch.setattr(pack_models, "LOCK", lock)
     monkeypatch.setattr(pack_models, "MODELS", tmp_path)
-    lock.write_text(json.dumps({"models": {"ns": {"files": files, "backend": "ulunas"}}}), encoding="utf-8")
+    lock.write_text(json.dumps({"models": rows}), encoding="utf-8")
     assert pack_models.locked().entries == []
+    assert [(e.name, e.kind) for e in pack_models.locked(ns="gtcrn").entries] == [("ns_gtcrn", "weights")]
     assert [(e.name, e.kind) for e in pack_models.locked(ns="ulunas").entries] == [("ns_ulunas", "weights")]
-    with pytest.raises(ValueError, match="carries the ns net gtcrn"):
-        pack_models.locked(ns="gtcrn")
+    with pytest.raises(ValueError, match="no ns_nsnet row"):
+        pack_models.locked(ns="nsnet")
