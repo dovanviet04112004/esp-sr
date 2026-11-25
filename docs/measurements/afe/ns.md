@@ -615,8 +615,8 @@ Hai phép thử sau vòng 1, cùng phép đo, bản đếm chu kỳ dựng riên
 ### 10.7 Hai mạng trong chuỗi thật trên board B (25/11, E9-T18)
 
 Bản `bench` của sản phẩm, board B hai micro không loa (chuỗi `MM`), dựng bằng `make product NS=ulunas` rồi `NS=gtcrn`. NVS
-`afe/ns_engine` đặt qua console (`nvs set afe ns_engine 1 -t u8`), vì máy tính và board ở hai mạng Wi-Fi khác nhau nên
-`SET_CONFIG` chưa đi tới board. Log serial 45–50 s sau mỗi lần khởi động:
+`afe/ns_engine` đặt qua console (`nvs set afe ns_engine 1 -t u8`) cho bảng này; đổi lúc chạy bằng `SET_CONFIG` ở §10.7.1.
+Log serial 45–50 s sau mỗi lần khởi động:
 
 | Bản dựng | Dòng khởi động | Stack `sach_task` còn (của 6 144 B) | Watchdog |
 |---|---|---|---|
@@ -629,3 +629,31 @@ Bản `bench` của sản phẩm, board B hai micro không loa (chuỗi `MM`), d
 - Cả hai mạng chiếm trọn nhân 1: UL-UNAS 24,2–27,4 ms (§10.6), GTCRN 12,4–13,8 ms (§10.4) cộng phần còn lại của chuỗi hai
   micro đã quá nhịp 16 ms. Watchdog của bản dựng chỉ cảnh báo, không khởi động lại, nên board không kẹt; chuỗi bỏ khung.
 - Bản dựng S3 vì thế để `none`, như KẾ HOẠCH §3.9; board B trả về bản ấy. UL-UNAS dùng ~4,7 KB stack của `sach_task`.
+
+#### 10.7.1 Đổi lúc chạy bằng `SET_CONFIG` (25/11)
+
+Board B trên cùng mạng Wi-Fi với máy tính (`make wifi`), `make settings DEVICE=sr-3485188f7a70 KEY=afe/ns_engine VALUE=<v>`.
+
+Từ chối, trên bản không `NS` (mạng vắng): `1` → `CONFIG_REFUSED`, `2` → `CONFIG_REFUSED`, `0` → nhận, không lỗi.
+
+Đổi qua lại trên bản `NS=ulunas`, không khởi động lại giữa chừng; mỗi heartbeat phủ 30 s, tức 1 875 bước 16 ms. Giờ UTC:
+
+| Heartbeat lúc | `ns` trong 30 s ấy | `framesDropped` tăng |
+|---|---|---|
+| 12:59:23, 12:59:54 | sàn | 0, 0 |
+| 13:00:24 | sàn, UL-UNAS từ ~13:00:06 | 523 |
+| 13:00:52, 13:01:22 | UL-UNAS | 923, 925 |
+| 13:01:52 | UL-UNAS, sàn từ ~13:01:48 | 721 |
+| 13:02:22, 13:02:53, 13:03:23 | sàn | 0, 0, 0 |
+| 13:03:53 | sàn, UL-UNAS từ ~13:03:28 | 797 |
+| 13:04:23 | UL-UNAS, sàn từ ~13:04:13 | 615 |
+| 13:04:54 | sàn | 0 |
+
+- Công tắc chạy đúng hai chiều: bật mạng thì bỏ khung ngay trong heartbeat ấy, về sàn thì heartbeat trọn kế tiếp bỏ 0.
+- UL-UNAS trong chuỗi bỏ 49% số bước (923/1 875): `sach_task` xong một bước mất khoảng hai nhịp 16 ms, khớp 24,2–27,4 ms
+  của mạng (§10.6) cộng phần còn lại của chuỗi.
+- `cleanDropped`, `eventsDropped`, `streamDropped`, `dmaOverflows` giữ 0 suốt lượt; `uptimeS` đi liền 6 → 366 s; PSRAM
+  trống giữ 3 505 840 B qua bốn lần đổi: đổi không cấp phát gì.
+- `SET_CONFIG` ghi NVS: gửi `1` rồi reset board, dòng khởi động là `afe: ns net (afe/ns_engine 1, net built)`; gửi lại `0`.
+- "Đổi không mất khung" chưa kiểm được trên S3: mạng tự bỏ khung vì quá nhịp, che mất phần do đổi gây ra. Kiểm ở board có
+  mạng vừa nhịp (S31-T9 của fork `esp-sr-s31`).
