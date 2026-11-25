@@ -626,8 +626,8 @@ ngay trong `dsp_afe` và tự tính công suất từ phổ; các mạng, RNNois
 | `ns` sàn | thuần | `dsp_afe` | OM-LSA + IMCRA | gain sàn −12 dB | **1,69 ms đo** (đỉnh 1,88); FPU của S3 tốn 4–6 chu kỳ mỗi lệnh float, không chạy chồng | E9-T1 |
 | `ns` mạng `rnnoise` | **mô hình** | `ai_engine/src/ns_rnnoise/` | RNNoise-16k: RNNoise dựng lại cho 16 kHz | 18–22 dải | 4,8 ms int8 đo trên board B (E9-T10) | E9-T12 |
 | `ns` mạng `nsnet` | **mô hình** | `ai_engine/src/ns_nsnet/` | NSNet-16k: mạng theo vạch họ NSNet2, một gain sigmoid mỗi vạch | 256 vạch, GRU 2 × 144 (cỡ L) | 5,1 ms int8 đo trên board B (E9-T10), hơn `nsnet2` của ESP-SR 21%; chủ repo chọn L (ADR-0014) | E9-T12 |
-| `ns` mạng `gtcrn` | **mô hình** | `ai_engine/src/ns_gtcrn/` | GTCRN học sẵn trên DNS3, C float32 viết tay (ADR-0047) | 257 vạch phức, 33 dải trong mạng | **12,4 ms đo** mỗi bước trên board C, trạng thái ở RAM trong, 13,8 ms ở PSRAM (`measurements/afe/ns.md` §10.4); chưa vừa nhịp S3 cạnh chuỗi | E9-T16 |
-| `ns` mạng `ulunas` | **mô hình** | `ai_engine/src/ns_ulunas/` | UL-UNAS học sẵn trên DNS3, C float32 viết tay (ADR-0048) | 257 vạch, 33 dải trong mạng | **30,7 ms đo** mỗi bước ở bản C đầu chưa tối ưu trên board C, trạng thái ở RAM trong, 33,8 ms ở PSRAM (`measurements/afe/ns.md` §10.6) | E9-T20 |
+| `ns` mạng `gtcrn` | **mô hình** | `ai_engine/src/ns_gtcrn/` | GTCRN học sẵn trên DNS3, C float32 viết tay (ADR-0047) | 257 vạch phức, 33 dải trong mạng | **9,9 ms đo** mỗi bước trên board B, trạng thái ở RAM trong, 11,4 ms ở PSRAM (`measurements/afe/ns.md` §10.9); vừa nhịp chuỗi thật của board B (§10.10); bản dựng S3 mang nó (ADR-0049) | E9-T16 |
+| `ns` mạng `ulunas` | **mô hình** | `ai_engine/src/ns_ulunas/` | UL-UNAS học sẵn trên DNS3, C float32 viết tay (ADR-0048) | 257 vạch, 33 dải trong mạng | **19,9 ms đo** mỗi bước trên board B, trạng thái ở RAM trong, 23,2 ms ở PSRAM (`measurements/afe/ns.md` §10.9); không vừa nhịp S3, mạng của S31 (ADR-0049) | E9-T20 |
 | `vad` | thuần | `dsp_afe` | GMM sáu dải kiểu WebRTC, kéo dài 240 ms | bảng WebRTC ở `contracts/afe.yaml` | ~140 µs | E7-T3 |
 | `agc` | thuần | `dsp_afe` | hai tầng: chậm theo mức nói, nhanh chặn đỉnh nhìn trước 4 ms | đích −26 dBFS | ~260 µs, ~340 µs khi chặn mọi mẫu | E7-T4 |
 | `wake` | **mô hình** | `ai_engine/src/wake/` | TCN giãn nở nhân quả int8, chạy dòng 8 khung mỗi lượt | trường nhìn ~2 s | **288 µs đo** mỗi khung, 80 dải, 64 kênh, trọng số ngẫu nhiên (`measurements/latency.md` §8) | E11-T11 |
@@ -971,13 +971,16 @@ Chủ repo vẫn đưa GTCRN lên chip (22/11). Không bản lượng tử nào 
 7,6–47 dB (`ns.md` §10.3). Vì vậy `ai_engine/src/ns_gtcrn/` là GTCRN chạy dòng viết tay bằng C float32, trọng số float32
 của checkpoint ghim là một mục của ảnh model, và `tasks/ns/gtcrn_mirror.py` là bản soi gương float32 bằng vòng lặp numba
 theo đúng thứ tự cộng của C. Gain của khe là độ lớn của mặt nạ phức, chặn ở 1. Mặc định là sàn; NVS `afe/ns_engine` đổi
-giữa sàn và GTCRN lúc chạy (bảng trên). Bản thử có dáng GTCRN tốn 28–29 ms mỗi bước 16 ms trên S3, nên bản dựng S3 để
-`AI_ENGINE_NS_BACKEND` khác `gtcrn` tới khi kernel tối ưu vừa nhịp.
+giữa sàn và GTCRN lúc chạy (bảng trên). Sau hai vòng tối ưu, sigmoid và tanh bốn làn rồi dạng ngắn hơn ở cả bản soi
+gương (`ns.md` §10.8, §10.9), GTCRN tốn 11,4 ms một bước với trạng thái ở PSRAM và chạy kịp trong chuỗi thật của board B
+(§10.10), nên bản dựng S3 mang GTCRN (`sdkconfig.defaults.esp32s3`, ADR-0049). `afe/ns_engine` gieo 0 tới khi `wake` học
+lại trên chuỗi có GTCRN (split `wake/vung1_gtcrn`) thắng bản đang dùng trên phiên board; khi ấy `ns.engine` của
+`contracts/afe.yaml` thành 1 cùng lúc với deploy bản ấy, sau khi `command` được chấm trên cùng chuỗi.
 
 UL-UNAS (ADR-0048) là mạng kế tiếp của cùng tác giả, cùng lưới 512 điểm bước 256, cùng ERB và hai khối DPGRNN; vào là
 log10 độ lớn, ra là mặt nạ thực. Chấm như trên, gain chặn dưới ở sàn chung, nó bắt 32/35 "vừng ơi" so với 33/35 của
-sàn và 29/35 của GTCRN cùng sàn (`ns.md` §10.5), nên là mạng chính của khe; GTCRN giữ lại cho bản dựng cần nhỏ, 99,5 KB
-trọng số. `tasks/ns/ulunas.py` (`SRPIPE_NS=ulunas`) chạy nó trong chuỗi Python, `tasks/ns/ulunas_mirror.py` là bản soi
+sàn và 29/35 của GTCRN cùng sàn (`ns.md` §10.5). Nó đọc ~590 KB trọng số mỗi bước, mà bus PSRAM của S3 chỉ đọc ~90 MB/s,
+nên không vừa nhịp S3 (23,2 ms, §10.9): UL-UNAS là mạng của S31, GTCRN của S3 (ADR-0049). `tasks/ns/ulunas.py` (`SRPIPE_NS=ulunas`) chạy nó trong chuỗi Python, `tasks/ns/ulunas_mirror.py` là bản soi
 gương float32 của `ai_engine/src/ns_ulunas/`, mục trọng số là `ns_ulunas`. UL-UNAS học với cửa sổ Hann thường, nên vạch
 căn Hann của khe nhân với tỉ số tổng hai cửa sổ trước khi vào mạng; bỏ hệ số ấy không đổi điểm nào. Không lượng tử: chỉ xét
 lại int8 khi bản int8 cho cùng điểm và gain lệch bản float dưới 1 dB. Fork S31 dựng `ulunas` (KẾ HOẠCH S31).
@@ -3423,7 +3426,7 @@ firmware/
 ├── third_party/README.md
 │   └── webrtc_vad/{LICENSE, UPSTREAM.md}   # nguồn của thuật toán và bảng `vad` (§3.10); không vendor mã
 ├── models/                           # *.espdl, *.bin gitignore; */meta.json commit; lock ở contracts/
-│   └── {wake,command,pitch,speaker,detect}/{*.espdl, *.bin, meta.json}
+│   └── {wake,command,pitch,speaker,detect,ns_gtcrn,ns_ulunas}/{*.espdl, *.bin, meta.json}
 ├── test_apps/                        # test TÍCH HỢP toàn hệ; unit test nằm trong component
 │   ├── components/test_report/       # dòng kết quả có số thứ tự và CRC32, gửi lại khi máy tính xin (§4.5.7)
 │   ├── test_report.py                # phía máy tính của test_report: kiểm CRC, xin lại dòng thiếu
@@ -3725,8 +3728,9 @@ và `bench_afe` dùng kênh này.
 Board một micro (§2.3) là một lớp chồng lên profile, không phải profile thứ năm. `MICS=1` của `fw-bench` và `product`
 thêm `sdkconfig.mic1` vào cuối danh sách defaults và dựng trong `build_bench_mic1`, để hai bản không dùng chung
 `sdkconfig`. `BOARD=C` làm y như vậy với `sdkconfig.board_c` và `build_bench_c`. `NS=gtcrn` hay `NS=ulunas` của `fw-bench` và `product`
-đặt `AI_ENGINE_NS_BACKEND` bằng một lớp `make` viết vào thư mục dựng riêng của nó (`…_ns<mạng>`), và chỉ khi ấy ảnh model mang
-mục `ns` (§6.3); không có `NS`, bản dựng S3 để `none` (§3.9). `prod` không có luồng tiếng thô: một máy đặt trong phòng không được có đường
+đặt `AI_ENGINE_NS_BACKEND` bằng một lớp `make` viết vào thư mục dựng riêng của nó (`…_ns<mạng>`). Không có `NS`, bản dựng mang
+mạng mà `sdkconfig.defaults.<chip>` chọn, `gtcrn` ở S3 (§3.9); `make` đọc tên mạng từ chính dòng ấy, và ảnh model mang hàng
+`ns_<mạng>` của khoá (§6.3). `prod` không có luồng tiếng thô: một máy đặt trong phòng không được có đường
 đẩy tiếng người ra ngoài chỉ vì ai đó quên tắt (§7.5).
 
 Chung cả bốn (`sdkconfig.defaults.esp32s3`):
@@ -4383,9 +4387,10 @@ chưa chọn ngưỡng, bước đóng gói ghi cả hai vào header, và lúc b
 Của `ns` có thêm trường `backend` (`rnnoise` | `nsnet` | `gtcrn` | `ulunas`, §3.9): bước đóng gói đặt tên mục trong ảnh theo nó
 (`ns_rnnoise`, `ns_nsnet`, `ns_gtcrn` hay `ns_ulunas`), nên bản dựng của mạng khác không tìm thấy model, `ai_engine_ns_ops()` trả
 `NULL` và chuỗi chạy sàn. Mục `ns_gtcrn` và `ns_ulunas` là trọng số float32 của checkpoint ghim, không phải `.espdl` (ADR-0047, ADR-0048).
-Khoá model giữ một hàng `ns`, của mạng chính (`ulunas`); bước đóng gói chỉ đưa hàng ấy vào ảnh khi được gọi với đúng mạng
-ấy (`pack_models --ns <mạng>`, `make product NS=<mạng>`), và từ chối khi hàng khoá mạng khác. Mặc định bỏ hàng `ns`, nên bản
-dựng không mang mạng không giữ trọng số vô ích trong PSRAM.
+Khoá model giữ một hàng mỗi mạng, `ns_gtcrn` và `ns_ulunas`, trọng số và `meta.json` của mỗi mạng ở
+`firmware/models/ns_<mạng>/` (ADR-0049). Bước đóng gói chỉ đưa vào ảnh hàng của mạng mà bản dựng mang (`pack_models --ns
+<mạng>`); `make` đọc mạng ấy từ `sdkconfig.defaults.<chip>`, hoặc lấy từ `NS=` (§4.5.8). Bản dựng không mang mạng không có
+hàng `ns_*` nào, nên không giữ trọng số vô ích trong PSRAM.
 
 **`grid_hash` chặn lệch lúc huấn luyện và lúc chạy.** Firmware biên dịch với băm của `grid.yaml`
 trong `gen_grid.h`; ảnh model mang băm của lưới nó được huấn luyện. Khác nhau thì `ai_engine_load`
